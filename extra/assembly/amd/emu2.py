@@ -278,19 +278,19 @@ def _collect_data_slices(assigns: list, data_prefix: str, pcode_vars: dict = Non
     elif dest.startswith(data_prefix): slices[0] = _to_u32(val)
   return slices
 
-def _scalar_stores(assigns: list, wsgpr, sdst_reg: int, sdst_size: int = 1) -> list[UOp]:
-  """Generate stores for scalar assigns (D0, SCC, EXEC, VCC)."""
-  def w64(reg, val):
+def _scalar_stores_dyn(assigns: list, wsgpr_dyn, wsgpr_static, sdst_reg: UOp, sdst_size: int = 1) -> list[UOp]:
+  """Generate stores for scalar assigns with dynamic destination register (D0, SCC, EXEC, VCC)."""
+  def w64_dyn(reg: UOp, val):
     if val.dtype in (dtypes.uint64, dtypes.int64):
       lo, hi = _split64(val)
-      return [wsgpr(reg, lo), wsgpr(reg + 1, hi)]
-    return [wsgpr(reg, _to_u32(val))]
+      return [wsgpr_dyn(reg, lo), wsgpr_dyn(reg + U32_1, hi)]
+    return [wsgpr_dyn(reg, _to_u32(val))]
   stores = []
   for dest, val in assigns:
-    if dest.startswith('D0'): stores.extend(w64(sdst_reg, val) if sdst_size == 2 else [wsgpr(sdst_reg, _to_u32(val))])
-    elif dest.startswith('SCC'): stores.append(wsgpr(SCC_IDX, _to_u32(val)))
-    elif dest.startswith('EXEC'): stores.extend(w64(EXEC_LO.offset, val))
-    elif dest.startswith('VCC'): stores.extend(w64(VCC_LO.offset, val))
+    if dest.startswith('D0'): stores.extend(w64_dyn(sdst_reg, val) if sdst_size == 2 else [wsgpr_dyn(sdst_reg, _to_u32(val))])
+    elif dest.startswith('SCC'): stores.append(wsgpr_static(SCC_IDX, _to_u32(val)))
+    elif dest.startswith('EXEC'): stores.extend([wsgpr_static(EXEC_LO.offset, _split64(val)[0]), wsgpr_static(EXEC_LO.offset + 1, _split64(val)[1])] if val.dtype in (dtypes.uint64, dtypes.int64) else [wsgpr_static(EXEC_LO.offset, _to_u32(val))])
+    elif dest.startswith('VCC'): stores.extend([wsgpr_static(VCC_LO.offset, _split64(val)[0]), wsgpr_static(VCC_LO.offset + 1, _split64(val)[1])] if val.dtype in (dtypes.uint64, dtypes.int64) else [wsgpr_static(VCC_LO.offset, _to_u32(val))])
   return stores
 
 # Counter for unique axis IDs to avoid UOp caching issues
@@ -300,13 +300,17 @@ def _next_axis_id() -> int:
   _axis_id_counter += 1
   return _axis_id_counter
 
-def compile_sop_pcode(op, srcs: dict[str, UOp], wsgpr_fn, rsgpr_fn, sdst_reg: int, sdst_size: int, inc_pc_fn, name: str):
-  """Compile a scalar instruction using pcode parser. Returns (name, sink) or None."""
+def compile_sop_pcode_dyn(op, srcs: dict[str, UOp], wsgpr_dyn_fn, rsgpr_dyn_fn, sdst_reg: UOp, sdst_size: int, inc_pc_fn, name: str, wsgpr_fn=None):
+  """Compile a scalar instruction with dynamic destination register. Returns (name, sink) or None."""
   pcode = PCODE.get(op)
   if pcode is None: return None
-  srcs.update({'VCC': rsgpr_fn(VCC_LO.offset), 'EXEC': rsgpr_fn(EXEC_LO.offset), 'SCC': rsgpr_fn(SCC_IDX), 'D0': rsgpr_fn(sdst_reg)})
+  # For D0 read, use dynamic rsgpr; for VCC/EXEC/SCC use static offsets
+  srcs.update({'VCC': rsgpr_dyn_fn(_c(VCC_LO.offset)), 'EXEC': rsgpr_dyn_fn(_c(EXEC_LO.offset)), 'SCC': rsgpr_dyn_fn(_c(SCC_IDX))})
+  # D0 is the current value of destination register (for read-modify-write ops like S_ADDK)
+  if 'D0' not in srcs: srcs['D0'] = rsgpr_dyn_fn(sdst_reg)
   _, assigns = parse_pcode(pcode, srcs, lane=None)
-  stores = _scalar_stores(assigns, wsgpr_fn, sdst_reg, sdst_size)
+  # Use wsgpr_fn for static registers (SCC, EXEC, VCC), wsgpr_dyn_fn for dynamic D0
+  stores = _scalar_stores_dyn(assigns, wsgpr_dyn_fn, wsgpr_fn, sdst_reg, sdst_size)
   if not stores: return None
   return name, UOp.sink(*stores, *inc_pc_fn(), arg=KernelInfo(name=name))
 
@@ -536,21 +540,28 @@ class _Ctx:
     """Read source operand with dynamic offset. Handles SGPR/inline constants (<256), VGPR (>=256).
     Inline constants 128-255 are pre-populated in SGPR buffer (integers, negatives, F32 floats).
     If literal is provided, it's used when off==255."""
+    is_vgpr = off >= _c(256)
+    is_in_sgpr = off < _c(256)  # guard for SGPR buffer access (size 260, but only 0-255 used for src)
     if bits == 64:
-      is_vgpr, is_sgpr = off >= _c(256), off < _c(128)
-      sgpr_val = _u64(self.rsgpr_dyn(off), self.rsgpr_dyn(off + U32_1))
+      is_sgpr = off < _c(128)
+      # Guard SGPR reads with .valid() to prevent out-of-bounds access when off >= 256
+      sgpr_idx0 = off.cast(dtypes.index).valid(is_in_sgpr)
+      sgpr_idx1 = (off + U32_1).cast(dtypes.index).valid(is_in_sgpr)
+      sgpr_val = _u64(self.sgpr.index(sgpr_idx0, ptr=True).load(), self.sgpr.index(sgpr_idx1, ptr=True).load())
       # Use .valid() for VGPR reads to avoid invalid memory access when off < 256
       vgpr_reg = off - _c(256)
       vgpr_idx0 = (vgpr_reg.cast(dtypes.index) * UOp.const(dtypes.index, 32) + lane.cast(dtypes.index)).valid(is_vgpr)
       vgpr_idx1 = ((vgpr_reg + U32_1).cast(dtypes.index) * UOp.const(dtypes.index, 32) + lane.cast(dtypes.index)).valid(is_vgpr)
       vgpr_val = _u64(self.vgpr.index(vgpr_idx0, ptr=True).load(), self.vgpr.index(vgpr_idx1, ptr=True).load())
       # 64-bit inline constants need special handling (different from 32-bit values in SGPR buffer)
-      inline = _u64(self.rsgpr_dyn(off), self.rsgpr_dyn(off))  # integers: just extend
+      inline_idx = off.cast(dtypes.index).valid(is_in_sgpr)
+      inline = _u64(self.sgpr.index(inline_idx, ptr=True).load(), self.sgpr.index(inline_idx, ptr=True).load())  # integers: just extend
       if literal is not None: inline = off.eq(_c(255)).where(literal.cast(dtypes.uint64) << UOp.const(dtypes.uint64, 32), inline)
       for off_val, val in F64_INLINE.items(): inline = off.eq(_c(off_val)).where(UOp.const(dtypes.uint64, val), inline)
       return is_vgpr.where(vgpr_val, is_sgpr.where(sgpr_val, inline))
-    is_vgpr = off >= _c(256)
-    sgpr_val = self.rsgpr_dyn(off)
+    # Guard SGPR read with .valid() to prevent out-of-bounds access when off >= 256
+    sgpr_idx = off.cast(dtypes.index).valid(is_in_sgpr)
+    sgpr_val = self.sgpr.index(sgpr_idx, ptr=True).load()
     if literal is not None: sgpr_val = off.eq(_c(255)).where(literal, sgpr_val)
     if bits == 16:  # F16 constants differ from pre-populated F32 constants
       for off_val, val in F16_INLINE.items(): sgpr_val = off.eq(_c(off_val)).where(UOp.const(dtypes.uint32, val), sgpr_val)
@@ -607,18 +618,66 @@ def _compile_smem(inst: SMEM, ctx: _Ctx, name: str) -> tuple[str, UOp]:
 
 def _compile_sop(inst, ctx: _Ctx, name: str) -> tuple[str, UOp]:
   sizes = getattr(inst, 'op_regs', {})
-  def rsrc_sz(off, key): return ctx.rsgpr64(off) if sizes.get(key, 1) == 2 else ctx.rsrc(off, IDX_0)
+  literal = ctx.inst_field(type(inst).literal) if hasattr(type(inst), 'literal') else None
+
+  # Read source operands dynamically
+  def rsrc_dyn_scalar(off: UOp, is_64bit: bool) -> UOp:
+    """Read scalar source with dynamic offset (SGPR or inline constant).
+    For SOP, off is always 0-255 (SGPR or inline constant, never VGPR).
+    SGPR buffer has 260 entries: 0-127=SGPRs, 128-255=inline constants, 256-259=special."""
+    is_sgpr = off < _c(128)
+    # For 64-bit: read SGPR pair if off < 128, else compute inline constant as 64-bit
+    # (can't just read from buffer since buffer has 32-bit values)
+    if is_64bit:
+      sgpr_val = _u64(ctx.rsgpr_dyn(off), ctx.rsgpr_dyn(off + U32_1))
+      # Build inline constant: 128-192 = 0-64, 193-208 = -1 to -16
+      inline_val = (off - _c(128)).cast(dtypes.uint64)  # positive inline 0-64
+      neg_val = (_c(192) - off).cast(dtypes.int64).cast(dtypes.uint64)  # negative -1 to -16
+      lit_val = literal.cast(dtypes.uint64) if literal is not None else UOp.const(dtypes.uint64, 0)
+      # Select between sgpr, positive inline, negative inline, or literal
+      is_neg_inline = (off >= _c(193)) & (off < _c(209))
+      is_literal = off.eq(_c(255)) if literal is not None else UOp.const(dtypes.bool, False)
+      val = is_sgpr.where(sgpr_val, is_neg_inline.where(neg_val, is_literal.where(lit_val, inline_val)))
+      return val
+    # 32-bit: read from SGPR buffer (inline constants 128-255 are pre-populated)
+    # off is always 0-255 for SOP, all valid SGPR indices
+    sgpr_val = ctx.rsgpr_dyn(off)
+    # Handle literal (255) - literal value overrides the pre-populated 0
+    if literal is not None:
+      sgpr_val = off.eq(_c(255)).where(literal, sgpr_val)
+    return sgpr_val
+
   if isinstance(inst, SOPK):
-    simm16_sext = inst.simm16 if inst.simm16 < 0x8000 else inst.simm16 - 0x10000
-    srcs = {'S0': ctx.rsgpr(inst.sdst.offset), 'SIMM16': UOp.const(dtypes.int32, simm16_sext), 'D0': ctx.rsgpr(inst.sdst.offset)}
-    dst_reg, dst_size = inst.sdst.offset, 1
+    sdst_off = ctx.inst_field(SOPK.sdst)
+    simm16 = ctx.inst_field(SOPK.simm16)
+    # Sign-extend simm16
+    simm16_sext = simm16.cast(dtypes.int16).cast(dtypes.int32)
+    srcs = {'S0': ctx.rsgpr_dyn(sdst_off), 'SIMM16': simm16_sext, 'D0': ctx.rsgpr_dyn(sdst_off)}
+    dst_off, dst_size = sdst_off, 1
+  elif isinstance(inst, SOP1):
+    sdst_off = ctx.inst_field(SOP1.sdst)
+    ssrc0_off = ctx.inst_field(SOP1.ssrc0)
+    srcs = {'S0': rsrc_dyn_scalar(ssrc0_off, sizes.get('ssrc0', 1) == 2)}
+    dst_off, dst_size = sdst_off, sizes.get('sdst', 1)
+  elif isinstance(inst, SOP2):
+    sdst_off = ctx.inst_field(SOP2.sdst)
+    ssrc0_off = ctx.inst_field(SOP2.ssrc0)
+    ssrc1_off = ctx.inst_field(SOP2.ssrc1)
+    srcs = {'S0': rsrc_dyn_scalar(ssrc0_off, sizes.get('ssrc0', 1) == 2),
+            'S1': rsrc_dyn_scalar(ssrc1_off, sizes.get('ssrc1', 1) == 2)}
+    if literal is not None: srcs['SIMM32'] = literal
+    dst_off, dst_size = sdst_off, sizes.get('sdst', 1)
+  elif isinstance(inst, SOPC):
+    ssrc0_off = ctx.inst_field(SOPC.ssrc0)
+    ssrc1_off = ctx.inst_field(SOPC.ssrc1)
+    srcs = {'S0': rsrc_dyn_scalar(ssrc0_off, sizes.get('ssrc0', 1) == 2),
+            'S1': rsrc_dyn_scalar(ssrc1_off, sizes.get('ssrc1', 1) == 2)}
+    dst_off, dst_size = _c(0), 0  # SOPC writes to SCC, not sdst
   else:
-    srcs = {'S0': rsrc_sz(inst.ssrc0.offset, 'ssrc0')}
-    if hasattr(inst, 'ssrc1'): srcs['S1'] = rsrc_sz(inst.ssrc1.offset, 'ssrc1')
-    # SOP2 instructions like s_fmamk_f32 use SIMM32 literal
-    if ctx.literal: srcs['SIMM32'] = UOp.const(dtypes.uint32, ctx.literal)
-    dst_reg, dst_size = (0, 0) if isinstance(inst, SOPC) else (inst.sdst.offset, sizes.get('sdst', 1))
-  pcode_result = compile_sop_pcode(inst.op, srcs, ctx.wsgpr, ctx.rsgpr, dst_reg, dst_size, ctx.inc_pc, name)
+    raise RuntimeError(f"unknown SOP type: {type(inst).__name__}")
+
+  # Use dynamic pcode compilation with dynamic destination
+  pcode_result = compile_sop_pcode_dyn(inst.op, srcs, ctx.wsgpr_dyn, ctx.rsgpr_dyn, dst_off, dst_size, ctx.inc_pc, name, wsgpr_fn=ctx.wsgpr)
   assert pcode_result is not None, f"no pcode for {type(inst).__name__}: {inst.op.name}"
   return pcode_result
 
@@ -641,7 +700,8 @@ def _compile_vop12(inst, ctx: _Ctx, name: str) -> tuple[str, UOp]:
     s0 = ctx.rsrc_dyn_sized(src0_off, lane, sizes, 'src0', f16=is_16bit, literal=literal)
     if is_16bit:
       src0_hi = src0_off >= _c(384)
-      src0_reg = src0_off - _c(384)
+      # Only compute hi-half when src0_off >= 384, use guarded index to prevent OOB access
+      src0_reg = src0_hi.where(src0_off - _c(384), U32_0)
       s0_hi = (ctx.rvgpr_dyn(src0_reg, lane) >> U32_16) & _c(0xFFFF)
       if isinstance(src0_hi, UOp): s0 = src0_hi.where(s0_hi, s0)
       elif src0_hi: s0 = s0_hi
@@ -662,7 +722,8 @@ def _compile_vop12(inst, ctx: _Ctx, name: str) -> tuple[str, UOp]:
     s0 = ctx.rsrc_dyn(src0_off, lane, bits=16 if is_16bit else 32, literal=literal)
     if is_16bit:
       src0_hi = src0_off >= _c(384)
-      src0_reg = src0_off - _c(384)
+      # Only compute hi-half when src0_off >= 384, use guarded index to prevent OOB access
+      src0_reg = src0_hi.where(src0_off - _c(384), U32_0)
       s0_hi = (ctx.rvgpr_dyn(src0_reg, lane) >> U32_16) & _c(0xFFFF)
       if isinstance(src0_hi, UOp): s0 = src0_hi.where(s0_hi, s0)
       elif src0_hi: s0 = s0_hi
