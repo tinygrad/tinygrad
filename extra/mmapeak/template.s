@@ -16,7 +16,7 @@ matmul:
 .p2align 6
 .amdhsa_kernel matmul
   .amdhsa_next_free_vgpr VGPR_COUNT
-  .amdhsa_next_free_sgpr 2
+  .amdhsa_next_free_sgpr 3
   DIRECTIVE
 .end_amdhsa_kernel
 
