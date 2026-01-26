@@ -1,10 +1,11 @@
 from typing import Callable, cast, Any
-from tinygrad.dtype import AddrSpace, DType, PtrDType, ImageDType, dtypes
-from tinygrad.helpers import DEBUG, OSX, unwrap, charptr, fromimport
+from tinygrad.dtype import AddrSpace, DType, PtrDType, ImageDType, dtypes, truncate
+from tinygrad.helpers import DEBUG, OSX, unwrap, fromimport
 from tinygrad.renderer import Renderer
 from tinygrad.renderer.cstyle import CUDARenderer
 from tinygrad.uop.ops import GroupOp, Ops, UOp, PatternMatcher, UPat, range_str
 from tinygrad.runtime.autogen import mesa
+from tinygrad.runtime.support.c import POINTER
 import base64, ctypes, ctypes.util, struct, functools, inspect, contextlib, itertools
 
 def g(s:str): return getattr(mesa, s)
@@ -46,16 +47,16 @@ def nir_instr(nc=1, bs=lambda: None, intrins=None, srcs=None, has_def=True, df=N
       def go(g): return g(**{nm: ba.arguments[nm] for nm in inspect.signature(g).parameters}) if callable(g) else g
 
       instr = f(*args, **kwargs)
-      if has_def: mesa.nir_def_init(instr.contents.instr, getattr(instr.contents, "def"), go(nc), go(bs))
+      if has_def: mesa.nir_def_init(instr.contents.instr, instr.contents._def, go(nc), go(bs))
       for k, v in go(intrins or {}).items():
-        idx = mesa.nir_intrinsic_infos[instr.contents.intrinsic.value].index_map[g(f"NIR_INTRINSIC_{k}")]
+        idx = mesa.nir_intrinsic_infos[instr.contents.intrinsic].index_map[g(f"NIR_INTRINSIC_{k}")]
         assert idx > 0, "invalid intrinsic. mesa version mismatch?"
         instr.contents.const_index[idx - 1] = go(v)
       for i, src in enumerate(go(srcs or [])): ctypes.cast(instr.contents.src, ctypes.POINTER(mesa.nir_src))[i] = go(src)
       for k,v in {k:vcomp for k,v in contents.items() if (vcomp:=go(v)) is not None}.items(): setattr(instr.contents, k, go(v))
       mesa.nir_builder_instr_insert(ba.arguments['b'], instr.contents.instr)
       go(also)
-      return getattr(instr.contents, "def") if has_def else (mesa.nir_def() if df is None else go(df))
+      return instr.contents._def if has_def else (mesa.nir_def() if df is None else go(df))
     return wrapper
   return dec
 
@@ -69,11 +70,11 @@ def nchannel(b:mesa.nir_builder, src:mesa.nir_def, c:int):
 
 def nimm_set(imm:mesa.nir_def, x, dtype:DType):
   instr = ctypes.cast(imm.parent_instr, ctypes.POINTER(mesa.nir_load_const_instr))
-  struct.pack_into(unwrap(dtype.fmt), (ctypes.c_ubyte * dtype.itemsize).from_address(ctypes.addressof(instr.contents.value)), 0, x)
+  struct.pack_into(unwrap(dtype.fmt), (ctypes.c_ubyte * dtype.itemsize).from_address(ctypes.addressof(instr.contents.value)), 0, truncate[dtype](x))
 
 @nir_instr(nc=1, bs=lambda dtype: dtype.bitsize)
 def nimm(b:mesa.nir_builder, x, dtype:DType) -> mesa.nir_def:
-  nimm_set(getattr((instr:=mesa.nir_load_const_instr_create(b.shader, 1, dtype.bitsize)).contents, "def"), x, dtype)
+  nimm_set((instr:=mesa.nir_load_const_instr_create(b.shader, 1, dtype.bitsize)).contents._def, x, dtype)
   return instr
 @nir_instr(nc=1, bs=lambda dtype: dtype.bitsize)
 def nundef(b, dtype): return mesa.nir_undef_instr_create(b.shader, 1, dtype.bitsize)
@@ -187,7 +188,8 @@ class NIRRenderer(Renderer):
       elif u.op is Ops.AFTER:
         self.r[u] = self.r[u.src[0]]
       elif u.op == Ops.SINK:
-        if u.arg is not None: self.b.shader.contents.info.name = charptr(u.arg.function_name.encode())
+        if u.arg is not None:
+          self.b.shader.contents.info.name = ctypes.cast(ctypes.create_string_buffer(u.arg.function_name.encode()), POINTER[ctypes.c_char])
       elif u.op == Ops.DEFINE_LOCAL:
         self.r[u] = nimm(self.b, self.b.shader.contents.info.shared_size, dtypes.long)
         self.b.shader.contents.info.shared_size += u.dtype.nbytes()

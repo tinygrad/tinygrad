@@ -2,7 +2,7 @@
 # a python uops emulator
 # works to test the tensor cores, and all the uops in general
 # this is the (living) definition of uops
-from typing import Any, TYPE_CHECKING, cast
+from typing import Any, TYPE_CHECKING
 import pickle, base64, itertools, time, struct, sys, functools
 from tinygrad.dtype import DType, dtypes, ImageDType, PtrDType, truncate, float_to_fp16, float_to_bf16, float_to_fp8, fp8_to_float
 from tinygrad.helpers import all_same, getenv, flatten, get_single_element, EMULATE
@@ -52,7 +52,7 @@ def generic_wmma_helper(inp, warp_size, WARP_THREADS, K, NUM_A, NUM_B, NUM_C, a_
   return out
 
 class PythonProgram:
-  def __init__(self, name:str, lib:bytes):
+  def __init__(self, name:str, lib:bytes, **kwargs):
     self.uops: list[tuple[Ops, DType, list[int], Any]] = pickle.loads(lib)
   def __call__(self, *bufs, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), vals:tuple[int, ...]=(), wait=False):
     st = time.perf_counter()
@@ -218,7 +218,7 @@ class PythonRenderer(Renderer):
   device = "PYTHON"
   code_for_op = python_alu
   def __init__(self):
-    match cast(str, EMULATE.value):
+    match EMULATE.value:
       case "METAL": self.device, self.tensor_cores = "METAL", tc.metal
       case "AMD": self.device, self.tensor_cores = "AMD", tc.amd_rdna3
       case "AMD_MFMA": self.device, self.tensor_cores = "AMD", tc.amd_cdna4

@@ -20,7 +20,7 @@ class TestDS2Addr(unittest.TestCase):
       v_mov_b32_e32(v[1], s[0]),
       DS(DSOp.DS_STORE_2ADDR_B32, addr=v[10], data0=v[0], data1=v[1], vdst=v[0], offset0=0, offset1=1),
       s_waitcnt(lgkmcnt=0),
-      DS(DSOp.DS_LOAD_2ADDR_B32, addr=v[10], vdst=v[2], offset0=0, offset1=1),
+      DS(DSOp.DS_LOAD_2ADDR_B32, addr=v[10], vdst=v[2:3], offset0=0, offset1=1),
       s_waitcnt(lgkmcnt=0),
     ]
     st = run_program(instructions, n_lanes=1)
@@ -39,9 +39,9 @@ class TestDS2Addr(unittest.TestCase):
       v_mov_b32_e32(v[2], s[0]),
       s_mov_b32(s[0], 0x9ABCDEF0),
       v_mov_b32_e32(v[3], s[0]),
-      DS(DSOp.DS_STORE_2ADDR_B64, addr=v[10], data0=v[0], data1=v[2], vdst=v[0], offset0=0, offset1=2),
+      DS(DSOp.DS_STORE_2ADDR_B64, addr=v[10], data0=v[0:1], data1=v[2:3], vdst=v[0], offset0=0, offset1=2),
       s_waitcnt(lgkmcnt=0),
-      DS(DSOp.DS_LOAD_2ADDR_B64, addr=v[10], vdst=v[4], offset0=0, offset1=2),
+      DS(DSOp.DS_LOAD_2ADDR_B64, addr=v[10], vdst=v[4:7], offset0=0, offset1=2),
       s_waitcnt(lgkmcnt=0),
     ]
     st = run_program(instructions, n_lanes=1)
@@ -64,7 +64,7 @@ class TestDS2AddrMore(unittest.TestCase):
       v_mov_b32_e32(v[1], s[2]),
       DS(DSOp.DS_STORE_2ADDR_B32, addr=v[10], data0=v[0], data1=v[1], vdst=v[0], offset0=2, offset1=5),
       s_waitcnt(lgkmcnt=0),
-      DS(DSOp.DS_LOAD_2ADDR_B32, addr=v[10], vdst=v[2], offset0=2, offset1=5),
+      DS(DSOp.DS_LOAD_2ADDR_B32, addr=v[10], vdst=v[2:3], offset0=2, offset1=5),
       s_waitcnt(lgkmcnt=0),
     ]
     st = run_program(instructions, n_lanes=1)
@@ -88,7 +88,7 @@ class TestDS2AddrMore(unittest.TestCase):
       v_mov_b32_e32(v[0], s[2]),
       ds_store_b32(addr=v[10], data0=v[0], offset0=12),
       s_waitcnt(lgkmcnt=0),
-      DS(DSOp.DS_LOAD_2ADDR_B64, addr=v[10], vdst=v[4], offset0=0, offset1=1),
+      DS(DSOp.DS_LOAD_2ADDR_B64, addr=v[10], vdst=v[4:7], offset0=0, offset1=1),
       s_waitcnt(lgkmcnt=0),
     ]
     st = run_program(instructions, n_lanes=1)
@@ -109,7 +109,7 @@ class TestDS2AddrMore(unittest.TestCase):
       s_waitcnt(lgkmcnt=0),
       s_mov_b32(s[2], 0xDEADBEEF),
       v_mov_b32_e32(v[4], s[2]),  # Sentinel
-      DS(DSOp.DS_LOAD_2ADDR_B32, addr=v[10], vdst=v[2], offset0=0, offset1=1),
+      DS(DSOp.DS_LOAD_2ADDR_B32, addr=v[10], vdst=v[2:3], offset0=0, offset1=1),
       s_waitcnt(lgkmcnt=0),
     ]
     st = run_program(instructions, n_lanes=1)
@@ -125,17 +125,67 @@ class TestDS2AddrMore(unittest.TestCase):
       v_mov_b32_e32(v[0], s[2]),
       s_mov_b32(s[2], 0xCAFEBABE),
       v_mov_b32_e32(v[1], s[2]),
-      ds_store_b64(addr=v[10], data0=v[0], offset0=0),
+      ds_store_b64(addr=v[10], data0=v[0:1], offset0=0),
       s_waitcnt(lgkmcnt=0),
       s_mov_b32(s[2], 0x12345678),
       v_mov_b32_e32(v[4], s[2]),  # Sentinel
-      ds_load_b64(addr=v[10], vdst=v[2], offset0=0),
+      ds_load_b64(addr=v[10], vdst=v[2:3], offset0=0),
       s_waitcnt(lgkmcnt=0),
     ]
     st = run_program(instructions, n_lanes=1)
     self.assertEqual(st.vgpr[0][2], 0xDEADBEEF)
     self.assertEqual(st.vgpr[0][3], 0xCAFEBABE)
     self.assertEqual(st.vgpr[0][4], 0x12345678, "v4 should be untouched")
+
+
+class TestDSB128(unittest.TestCase):
+  """Tests for DS_STORE_B128 and DS_LOAD_B128 (128-bit / 4 dwords)."""
+
+  def test_ds_store_load_b128(self):
+    """DS_STORE_B128 stores 4 VGPRs, DS_LOAD_B128 loads them back."""
+    instructions = [
+      v_mov_b32_e32(v[10], 0),
+      s_mov_b32(s[0], 0x11111111),
+      v_mov_b32_e32(v[0], s[0]),
+      s_mov_b32(s[0], 0x22222222),
+      v_mov_b32_e32(v[1], s[0]),
+      s_mov_b32(s[0], 0x33333333),
+      v_mov_b32_e32(v[2], s[0]),
+      s_mov_b32(s[0], 0x44444444),
+      v_mov_b32_e32(v[3], s[0]),
+      ds_store_b128(addr=v[10], data0=v[0:3]),
+      s_waitcnt(lgkmcnt=0),
+      ds_load_b128(addr=v[10], vdst=v[4:7]),
+      s_waitcnt(lgkmcnt=0),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][4], 0x11111111, "v4 should have first dword")
+    self.assertEqual(st.vgpr[0][5], 0x22222222, "v5 should have second dword")
+    self.assertEqual(st.vgpr[0][6], 0x33333333, "v6 should have third dword")
+    self.assertEqual(st.vgpr[0][7], 0x44444444, "v7 should have fourth dword")
+
+  def test_ds_store_b128_with_offset(self):
+    """DS_STORE_B128 with non-zero offset."""
+    instructions = [
+      v_mov_b32_e32(v[10], 0),
+      s_mov_b32(s[0], 0xAAAAAAAA),
+      v_mov_b32_e32(v[0], s[0]),
+      s_mov_b32(s[0], 0xBBBBBBBB),
+      v_mov_b32_e32(v[1], s[0]),
+      s_mov_b32(s[0], 0xCCCCCCCC),
+      v_mov_b32_e32(v[2], s[0]),
+      s_mov_b32(s[0], 0xDDDDDDDD),
+      v_mov_b32_e32(v[3], s[0]),
+      DS(DSOp.DS_STORE_B128, addr=v[10], data0=v[0:3], offset0=16),
+      s_waitcnt(lgkmcnt=0),
+      DS(DSOp.DS_LOAD_B128, addr=v[10], vdst=v[4:7], offset0=16),
+      s_waitcnt(lgkmcnt=0),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][4], 0xAAAAAAAA)
+    self.assertEqual(st.vgpr[0][5], 0xBBBBBBBB)
+    self.assertEqual(st.vgpr[0][6], 0xCCCCCCCC)
+    self.assertEqual(st.vgpr[0][7], 0xDDDDDDDD)
 
 
 class TestDSAtomic(unittest.TestCase):
@@ -452,7 +502,7 @@ class TestDS2AddrStride64(unittest.TestCase):
       v_mov_b32_e32(v[1], s[0]),
       DS(DSOp.DS_STORE_2ADDR_STRIDE64_B32, addr=v[10], data0=v[0], data1=v[1], vdst=v[0], offset0=1, offset1=2),
       s_waitcnt(lgkmcnt=0),
-      DS(DSOp.DS_LOAD_2ADDR_STRIDE64_B32, addr=v[10], vdst=v[2], offset0=1, offset1=2),
+      DS(DSOp.DS_LOAD_2ADDR_STRIDE64_B32, addr=v[10], vdst=v[2:3], offset0=1, offset1=2),
       s_waitcnt(lgkmcnt=0),
     ]
     st = run_program(instructions, n_lanes=1)
@@ -471,9 +521,9 @@ class TestDS2AddrStride64(unittest.TestCase):
       v_mov_b32_e32(v[2], s[0]),
       s_mov_b32(s[0], 0x9ABCDEF0),
       v_mov_b32_e32(v[3], s[0]),
-      DS(DSOp.DS_STORE_2ADDR_STRIDE64_B64, addr=v[10], data0=v[0], data1=v[2], vdst=v[0], offset0=1, offset1=2),
+      DS(DSOp.DS_STORE_2ADDR_STRIDE64_B64, addr=v[10], data0=v[0:1], data1=v[2:3], vdst=v[0], offset0=1, offset1=2),
       s_waitcnt(lgkmcnt=0),
-      DS(DSOp.DS_LOAD_2ADDR_STRIDE64_B64, addr=v[10], vdst=v[4], offset0=1, offset1=2),
+      DS(DSOp.DS_LOAD_2ADDR_STRIDE64_B64, addr=v[10], vdst=v[4:7], offset0=1, offset1=2),
       s_waitcnt(lgkmcnt=0),
     ]
     st = run_program(instructions, n_lanes=1)
@@ -496,9 +546,9 @@ class TestDS2AddrStride64(unittest.TestCase):
       v_mov_b32_e32(v[2], s[0]),
       s_mov_b32(s[0], 0xBBBBBBBB),
       v_mov_b32_e32(v[3], s[0]),
-      DS(DSOp.DS_STOREXCHG_2ADDR_RTN_B32, addr=v[10], data0=v[2], data1=v[3], vdst=v[4], offset0=0, offset1=1),
+      DS(DSOp.DS_STOREXCHG_2ADDR_RTN_B32, addr=v[10], data0=v[2], data1=v[3], vdst=v[4:5], offset0=0, offset1=1),
       s_waitcnt(lgkmcnt=0),
-      DS(DSOp.DS_LOAD_2ADDR_B32, addr=v[10], vdst=v[6], offset0=0, offset1=1),
+      DS(DSOp.DS_LOAD_2ADDR_B32, addr=v[10], vdst=v[6:7], offset0=0, offset1=1),
       s_waitcnt(lgkmcnt=0),
     ]
     st = run_program(instructions, n_lanes=1)
@@ -516,15 +566,15 @@ class TestDS2AddrStride64(unittest.TestCase):
       v_mov_b32_e32(v[0], s[0]),   # initial low
       s_mov_b32(s[0], 0xCAFEBABE),
       v_mov_b32_e32(v[1], s[0]),   # initial high
-      DS(DSOp.DS_STORE_B64, addr=v[10], data0=v[0], vdst=v[0], offset0=0),
+      DS(DSOp.DS_STORE_B64, addr=v[10], data0=v[0:1], vdst=v[0], offset0=0),
       s_waitcnt(lgkmcnt=0),
       s_mov_b32(s[0], 0x12345678),
       v_mov_b32_e32(v[2], s[0]),   # new low
       s_mov_b32(s[0], 0x9ABCDEF0),
       v_mov_b32_e32(v[3], s[0]),   # new high
-      DS(DSOp.DS_STOREXCHG_RTN_B64, addr=v[10], data0=v[2], vdst=v[4], offset0=0),
+      DS(DSOp.DS_STOREXCHG_RTN_B64, addr=v[10], data0=v[2:3], vdst=v[4:5], offset0=0),
       s_waitcnt(lgkmcnt=0),
-      DS(DSOp.DS_LOAD_B64, addr=v[10], vdst=v[6], offset0=0),
+      DS(DSOp.DS_LOAD_B64, addr=v[10], vdst=v[6:7], offset0=0),
       s_waitcnt(lgkmcnt=0),
     ]
     st = run_program(instructions, n_lanes=1)
@@ -541,9 +591,9 @@ class TestDS2AddrStride64(unittest.TestCase):
       v_mov_b32_e32(v[0], s[0]),
       s_mov_b32(s[0], 0x22222222),
       v_mov_b32_e32(v[1], s[0]),
-      DS(DSOp.DS_STORE_2ADDR_STRIDE64_B64, addr=v[10], data0=v[0], data1=v[0], vdst=v[0], offset0=1, offset1=2),
+      DS(DSOp.DS_STORE_2ADDR_STRIDE64_B64, addr=v[10], data0=v[0:1], data1=v[0:1], vdst=v[0], offset0=1, offset1=2),
       s_waitcnt(lgkmcnt=0),
-      DS(DSOp.DS_LOAD_2ADDR_STRIDE64_B64, addr=v[10], vdst=v[2], offset0=1, offset1=2),
+      DS(DSOp.DS_LOAD_2ADDR_STRIDE64_B64, addr=v[10], vdst=v[2:5], offset0=1, offset1=2),
       s_waitcnt(lgkmcnt=0),
     ]
     st = run_program(instructions, n_lanes=1)
@@ -566,9 +616,9 @@ class TestDS2AddrStride64(unittest.TestCase):
       v_mov_b32_e32(v[2], s[0]),
       s_mov_b32(s[0], 0xBBBBBBBB),
       v_mov_b32_e32(v[3], s[0]),
-      DS(DSOp.DS_STOREXCHG_2ADDR_STRIDE64_RTN_B32, addr=v[10], data0=v[2], data1=v[3], vdst=v[4], offset0=1, offset1=2),
+      DS(DSOp.DS_STOREXCHG_2ADDR_STRIDE64_RTN_B32, addr=v[10], data0=v[2], data1=v[3], vdst=v[4:5], offset0=1, offset1=2),
       s_waitcnt(lgkmcnt=0),
-      DS(DSOp.DS_LOAD_2ADDR_STRIDE64_B32, addr=v[10], vdst=v[6], offset0=1, offset1=2),
+      DS(DSOp.DS_LOAD_2ADDR_STRIDE64_B32, addr=v[10], vdst=v[6:7], offset0=1, offset1=2),
       s_waitcnt(lgkmcnt=0),
     ]
     st = run_program(instructions, n_lanes=1)
@@ -585,13 +635,13 @@ class TestDS2AddrStride64(unittest.TestCase):
       v_mov_b32_e32(v[0], s[0]),
       s_mov_b32(s[0], 0x22222222),
       v_mov_b32_e32(v[1], s[0]),
-      DS(DSOp.DS_STORE_2ADDR_STRIDE64_B64, addr=v[10], data0=v[0], data1=v[0], vdst=v[0], offset0=1, offset1=2),
+      DS(DSOp.DS_STORE_2ADDR_STRIDE64_B64, addr=v[10], data0=v[0:1], data1=v[0:1], vdst=v[0], offset0=1, offset1=2),
       s_waitcnt(lgkmcnt=0),
       s_mov_b32(s[0], 0xAAAAAAAA),
       v_mov_b32_e32(v[6], s[0]),
       s_mov_b32(s[0], 0xBBBBBBBB),
       v_mov_b32_e32(v[7], s[0]),
-      DS(DSOp.DS_STOREXCHG_2ADDR_STRIDE64_RTN_B64, addr=v[10], data0=v[6], data1=v[6], vdst=v[8], offset0=1, offset1=2),
+      DS(DSOp.DS_STOREXCHG_2ADDR_STRIDE64_RTN_B64, addr=v[10], data0=v[6:7], data1=v[6:7], vdst=v[8:11], offset0=1, offset1=2),
       s_waitcnt(lgkmcnt=0),
     ]
     st = run_program(instructions, n_lanes=1)

@@ -258,12 +258,12 @@ def xlog2(d:UOp) -> UOp:
 def xpow(base:UOp, exponent:UOp) -> UOp:
   # start with b ** e = exp2(e * log2(b))
   ret = (base < 0).where(-base, base).log2().mul(exponent).exp2()
-  # negative base adjustment: nan for non-integer exponent and -1 for odd exponent
+  # negative base: nan for non-integer exponent, negate for odd integer exponent
   non_int = exponent != exponent.cast(dtypes.int32).cast(exponent.dtype)
-  adj = non_int.where(ret.const_like(math.nan),
-    (exponent < 0).where(-exponent, exponent).cast(dtypes.int32).mod(2).cast(dtypes.bool).where(ret.const_like(-1), ret.const_like(1)))
+  is_odd = (exponent < 0).where(-exponent, exponent).cast(dtypes.int32).mod(2).cast(dtypes.bool)
+  neg_base = non_int.where(ret.const_like(math.nan), is_odd.where(-ret, ret))
   # fix 0 ** 0 = 1
-  return (base.eq(0) & exponent.eq(0)).where(ret.const_like(1), ret * (base < 0).where(adj, ret.const_like(1)))
+  return (base.eq(0) & exponent.eq(0)).where(ret.const_like(1), (base < 0).where(neg_base, ret))
 
 # *** integer division ***
 
@@ -279,6 +279,8 @@ def magicgu(vmax:int, d:int) -> tuple[int,int]:
   assert False
 
 def fast_idiv(device: str, x: UOp, d: int, dont_cast=False) -> UOp|None:
+  # NOTE: disable for METAL due to compiler bug. keccak with -O0 works but not with optimization
+  if device.startswith("METAL"): return None
   # If d is a power of two this is not valid for signed ints!
   is_unsigned = x.vmin>=0 or x.dtype in dtypes.uints
   assert d>0, "Sign should have been taken out of divisor"

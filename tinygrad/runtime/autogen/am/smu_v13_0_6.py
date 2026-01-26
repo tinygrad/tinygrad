@@ -1,9 +1,12 @@
-# mypy: ignore-errors
+# mypy: disable-error-code="empty-body"
+from __future__ import annotations
 import ctypes
-from tinygrad.runtime.support.c import DLL, Struct, CEnum, _IO, _IOW, _IOR, _IOWR
-PPSMC_Result = ctypes.c_uint32
-PPSMC_MSG = ctypes.c_uint32
-FEATURE_LIST_e = CEnum(ctypes.c_uint32)
+from typing import Annotated, Literal, TypeAlias
+from tinygrad.runtime.support.c import _IO, _IOW, _IOR, _IOWR
+from tinygrad.runtime.support import c
+PPSMC_Result: TypeAlias = Annotated[int, ctypes.c_uint32]
+PPSMC_MSG: TypeAlias = Annotated[int, ctypes.c_uint32]
+class FEATURE_LIST_e(Annotated[int, ctypes.c_uint32], c.Enum): pass
 FEATURE_DATA_CALCULATION = FEATURE_LIST_e.define('FEATURE_DATA_CALCULATION', 0)
 FEATURE_DPM_CCLK = FEATURE_LIST_e.define('FEATURE_DPM_CCLK', 1)
 FEATURE_DPM_FCLK = FEATURE_LIST_e.define('FEATURE_DPM_FCLK', 2)
@@ -50,7 +53,7 @@ FEATURE_SOC_DC_RTC = FEATURE_LIST_e.define('FEATURE_SOC_DC_RTC', 42)
 FEATURE_GFX_DC_RTC = FEATURE_LIST_e.define('FEATURE_GFX_DC_RTC', 43)
 NUM_FEATURES = FEATURE_LIST_e.define('NUM_FEATURES', 44)
 
-PCIE_LINK_SPEED_INDEX_TABLE_e = CEnum(ctypes.c_uint32)
+class PCIE_LINK_SPEED_INDEX_TABLE_e(Annotated[int, ctypes.c_uint32], c.Enum): pass
 PCIE_LINK_SPEED_INDEX_TABLE_GEN1 = PCIE_LINK_SPEED_INDEX_TABLE_e.define('PCIE_LINK_SPEED_INDEX_TABLE_GEN1', 0)
 PCIE_LINK_SPEED_INDEX_TABLE_GEN2 = PCIE_LINK_SPEED_INDEX_TABLE_e.define('PCIE_LINK_SPEED_INDEX_TABLE_GEN2', 1)
 PCIE_LINK_SPEED_INDEX_TABLE_GEN3 = PCIE_LINK_SPEED_INDEX_TABLE_e.define('PCIE_LINK_SPEED_INDEX_TABLE_GEN3', 2)
@@ -59,7 +62,7 @@ PCIE_LINK_SPEED_INDEX_TABLE_GEN4_ESM = PCIE_LINK_SPEED_INDEX_TABLE_e.define('PCI
 PCIE_LINK_SPEED_INDEX_TABLE_GEN5 = PCIE_LINK_SPEED_INDEX_TABLE_e.define('PCIE_LINK_SPEED_INDEX_TABLE_GEN5', 5)
 PCIE_LINK_SPEED_INDEX_TABLE_COUNT = PCIE_LINK_SPEED_INDEX_TABLE_e.define('PCIE_LINK_SPEED_INDEX_TABLE_COUNT', 6)
 
-GFX_GUARDBAND_e = CEnum(ctypes.c_uint32)
+class GFX_GUARDBAND_e(Annotated[int, ctypes.c_uint32], c.Enum): pass
 VOLTAGE_COLD_0 = GFX_GUARDBAND_e.define('VOLTAGE_COLD_0', 0)
 VOLTAGE_COLD_1 = GFX_GUARDBAND_e.define('VOLTAGE_COLD_1', 1)
 VOLTAGE_COLD_2 = GFX_GUARDBAND_e.define('VOLTAGE_COLD_2', 2)
@@ -86,167 +89,167 @@ VOLTAGE_HOT_6 = GFX_GUARDBAND_e.define('VOLTAGE_HOT_6', 22)
 VOLTAGE_HOT_7 = GFX_GUARDBAND_e.define('VOLTAGE_HOT_7', 23)
 VOLTAGE_GUARDBAND_COUNT = GFX_GUARDBAND_e.define('VOLTAGE_GUARDBAND_COUNT', 24)
 
-class MetricsTableX_t(Struct): pass
-uint32_t = ctypes.c_uint32
-uint64_t = ctypes.c_uint64
-MetricsTableX_t._fields_ = [
-  ('AccumulationCounter', uint32_t),
-  ('MaxSocketTemperature', uint32_t),
-  ('MaxVrTemperature', uint32_t),
-  ('MaxHbmTemperature', uint32_t),
-  ('MaxSocketTemperatureAcc', uint64_t),
-  ('MaxVrTemperatureAcc', uint64_t),
-  ('MaxHbmTemperatureAcc', uint64_t),
-  ('SocketPowerLimit', uint32_t),
-  ('MaxSocketPowerLimit', uint32_t),
-  ('SocketPower', uint32_t),
-  ('Timestamp', uint64_t),
-  ('SocketEnergyAcc', uint64_t),
-  ('CcdEnergyAcc', uint64_t),
-  ('XcdEnergyAcc', uint64_t),
-  ('AidEnergyAcc', uint64_t),
-  ('HbmEnergyAcc', uint64_t),
-  ('CclkFrequencyLimit', uint32_t),
-  ('GfxclkFrequencyLimit', uint32_t),
-  ('FclkFrequency', uint32_t),
-  ('UclkFrequency', uint32_t),
-  ('SocclkFrequency', (uint32_t * 4)),
-  ('VclkFrequency', (uint32_t * 4)),
-  ('DclkFrequency', (uint32_t * 4)),
-  ('LclkFrequency', (uint32_t * 4)),
-  ('GfxclkFrequencyAcc', (uint64_t * 8)),
-  ('CclkFrequencyAcc', (uint64_t * 96)),
-  ('MaxCclkFrequency', uint32_t),
-  ('MinCclkFrequency', uint32_t),
-  ('MaxGfxclkFrequency', uint32_t),
-  ('MinGfxclkFrequency', uint32_t),
-  ('FclkFrequencyTable', (uint32_t * 4)),
-  ('UclkFrequencyTable', (uint32_t * 4)),
-  ('SocclkFrequencyTable', (uint32_t * 4)),
-  ('VclkFrequencyTable', (uint32_t * 4)),
-  ('DclkFrequencyTable', (uint32_t * 4)),
-  ('LclkFrequencyTable', (uint32_t * 4)),
-  ('MaxLclkDpmRange', uint32_t),
-  ('MinLclkDpmRange', uint32_t),
-  ('XgmiWidth', uint32_t),
-  ('XgmiBitrate', uint32_t),
-  ('XgmiReadBandwidthAcc', (uint64_t * 8)),
-  ('XgmiWriteBandwidthAcc', (uint64_t * 8)),
-  ('SocketC0Residency', uint32_t),
-  ('SocketGfxBusy', uint32_t),
-  ('DramBandwidthUtilization', uint32_t),
-  ('SocketC0ResidencyAcc', uint64_t),
-  ('SocketGfxBusyAcc', uint64_t),
-  ('DramBandwidthAcc', uint64_t),
-  ('MaxDramBandwidth', uint32_t),
-  ('DramBandwidthUtilizationAcc', uint64_t),
-  ('PcieBandwidthAcc', (uint64_t * 4)),
-  ('ProchotResidencyAcc', uint32_t),
-  ('PptResidencyAcc', uint32_t),
-  ('SocketThmResidencyAcc', uint32_t),
-  ('VrThmResidencyAcc', uint32_t),
-  ('HbmThmResidencyAcc', uint32_t),
-  ('GfxLockXCDMak', uint32_t),
-  ('GfxclkFrequency', (uint32_t * 8)),
-  ('PublicSerialNumber_AID', (uint64_t * 4)),
-  ('PublicSerialNumber_XCD', (uint64_t * 8)),
-  ('PublicSerialNumber_CCD', (uint64_t * 12)),
-  ('XgmiReadDataSizeAcc', (uint64_t * 8)),
-  ('XgmiWriteDataSizeAcc', (uint64_t * 8)),
-  ('PcieBandwidth', (uint32_t * 4)),
-  ('PCIeL0ToRecoveryCountAcc', uint32_t),
-  ('PCIenReplayAAcc', uint32_t),
-  ('PCIenReplayARolloverCountAcc', uint32_t),
-  ('PCIeNAKSentCountAcc', uint32_t),
-  ('PCIeNAKReceivedCountAcc', uint32_t),
-  ('VcnBusy', (uint32_t * 4)),
-  ('JpegBusy', (uint32_t * 32)),
-  ('PCIeLinkSpeed', uint32_t),
-  ('PCIeLinkWidth', uint32_t),
-  ('GfxBusy', (uint32_t * 8)),
-  ('GfxBusyAcc', (uint64_t * 8)),
-]
-class MetricsTableA_t(Struct): pass
-MetricsTableA_t._fields_ = [
-  ('AccumulationCounter', uint32_t),
-  ('MaxSocketTemperature', uint32_t),
-  ('MaxVrTemperature', uint32_t),
-  ('MaxHbmTemperature', uint32_t),
-  ('MaxSocketTemperatureAcc', uint64_t),
-  ('MaxVrTemperatureAcc', uint64_t),
-  ('MaxHbmTemperatureAcc', uint64_t),
-  ('SocketPowerLimit', uint32_t),
-  ('MaxSocketPowerLimit', uint32_t),
-  ('SocketPower', uint32_t),
-  ('Timestamp', uint64_t),
-  ('SocketEnergyAcc', uint64_t),
-  ('CcdEnergyAcc', uint64_t),
-  ('XcdEnergyAcc', uint64_t),
-  ('AidEnergyAcc', uint64_t),
-  ('HbmEnergyAcc', uint64_t),
-  ('CclkFrequencyLimit', uint32_t),
-  ('GfxclkFrequencyLimit', uint32_t),
-  ('FclkFrequency', uint32_t),
-  ('UclkFrequency', uint32_t),
-  ('SocclkFrequency', (uint32_t * 4)),
-  ('VclkFrequency', (uint32_t * 4)),
-  ('DclkFrequency', (uint32_t * 4)),
-  ('LclkFrequency', (uint32_t * 4)),
-  ('GfxclkFrequencyAcc', (uint64_t * 8)),
-  ('CclkFrequencyAcc', (uint64_t * 96)),
-  ('MaxCclkFrequency', uint32_t),
-  ('MinCclkFrequency', uint32_t),
-  ('MaxGfxclkFrequency', uint32_t),
-  ('MinGfxclkFrequency', uint32_t),
-  ('FclkFrequencyTable', (uint32_t * 4)),
-  ('UclkFrequencyTable', (uint32_t * 4)),
-  ('SocclkFrequencyTable', (uint32_t * 4)),
-  ('VclkFrequencyTable', (uint32_t * 4)),
-  ('DclkFrequencyTable', (uint32_t * 4)),
-  ('LclkFrequencyTable', (uint32_t * 4)),
-  ('MaxLclkDpmRange', uint32_t),
-  ('MinLclkDpmRange', uint32_t),
-  ('XgmiWidth', uint32_t),
-  ('XgmiBitrate', uint32_t),
-  ('XgmiReadBandwidthAcc', (uint64_t * 8)),
-  ('XgmiWriteBandwidthAcc', (uint64_t * 8)),
-  ('SocketC0Residency', uint32_t),
-  ('SocketGfxBusy', uint32_t),
-  ('DramBandwidthUtilization', uint32_t),
-  ('SocketC0ResidencyAcc', uint64_t),
-  ('SocketGfxBusyAcc', uint64_t),
-  ('DramBandwidthAcc', uint64_t),
-  ('MaxDramBandwidth', uint32_t),
-  ('DramBandwidthUtilizationAcc', uint64_t),
-  ('PcieBandwidthAcc', (uint64_t * 4)),
-  ('ProchotResidencyAcc', uint32_t),
-  ('PptResidencyAcc', uint32_t),
-  ('SocketThmResidencyAcc', uint32_t),
-  ('VrThmResidencyAcc', uint32_t),
-  ('HbmThmResidencyAcc', uint32_t),
-  ('GfxLockXCDMak', uint32_t),
-  ('GfxclkFrequency', (uint32_t * 8)),
-  ('PublicSerialNumber_AID', (uint64_t * 4)),
-  ('PublicSerialNumber_XCD', (uint64_t * 8)),
-  ('PublicSerialNumber_CCD', (uint64_t * 12)),
-  ('XgmiReadDataSizeAcc', (uint64_t * 8)),
-  ('XgmiWriteDataSizeAcc', (uint64_t * 8)),
-  ('VcnBusy', (uint32_t * 4)),
-  ('JpegBusy', (uint32_t * 32)),
-]
-class VfMetricsTable_t(Struct): pass
-VfMetricsTable_t._fields_ = [
-  ('AccumulationCounter', uint32_t),
-  ('InstGfxclk_TargFreq', uint32_t),
-  ('AccGfxclk_TargFreq', uint64_t),
-  ('AccGfxRsmuDpm_Busy', uint64_t),
-]
-I2cControllerPort_e = CEnum(ctypes.c_uint32)
+@c.record
+class MetricsTableX_t(c.Struct):
+  SIZE = 2008
+  AccumulationCounter: Annotated[uint32_t, 0]
+  MaxSocketTemperature: Annotated[uint32_t, 4]
+  MaxVrTemperature: Annotated[uint32_t, 8]
+  MaxHbmTemperature: Annotated[uint32_t, 12]
+  MaxSocketTemperatureAcc: Annotated[uint64_t, 16]
+  MaxVrTemperatureAcc: Annotated[uint64_t, 24]
+  MaxHbmTemperatureAcc: Annotated[uint64_t, 32]
+  SocketPowerLimit: Annotated[uint32_t, 40]
+  MaxSocketPowerLimit: Annotated[uint32_t, 44]
+  SocketPower: Annotated[uint32_t, 48]
+  Timestamp: Annotated[uint64_t, 52]
+  SocketEnergyAcc: Annotated[uint64_t, 60]
+  CcdEnergyAcc: Annotated[uint64_t, 68]
+  XcdEnergyAcc: Annotated[uint64_t, 76]
+  AidEnergyAcc: Annotated[uint64_t, 84]
+  HbmEnergyAcc: Annotated[uint64_t, 92]
+  CclkFrequencyLimit: Annotated[uint32_t, 100]
+  GfxclkFrequencyLimit: Annotated[uint32_t, 104]
+  FclkFrequency: Annotated[uint32_t, 108]
+  UclkFrequency: Annotated[uint32_t, 112]
+  SocclkFrequency: Annotated[c.Array[uint32_t, Literal[4]], 116]
+  VclkFrequency: Annotated[c.Array[uint32_t, Literal[4]], 132]
+  DclkFrequency: Annotated[c.Array[uint32_t, Literal[4]], 148]
+  LclkFrequency: Annotated[c.Array[uint32_t, Literal[4]], 164]
+  GfxclkFrequencyAcc: Annotated[c.Array[uint64_t, Literal[8]], 180]
+  CclkFrequencyAcc: Annotated[c.Array[uint64_t, Literal[96]], 244]
+  MaxCclkFrequency: Annotated[uint32_t, 1012]
+  MinCclkFrequency: Annotated[uint32_t, 1016]
+  MaxGfxclkFrequency: Annotated[uint32_t, 1020]
+  MinGfxclkFrequency: Annotated[uint32_t, 1024]
+  FclkFrequencyTable: Annotated[c.Array[uint32_t, Literal[4]], 1028]
+  UclkFrequencyTable: Annotated[c.Array[uint32_t, Literal[4]], 1044]
+  SocclkFrequencyTable: Annotated[c.Array[uint32_t, Literal[4]], 1060]
+  VclkFrequencyTable: Annotated[c.Array[uint32_t, Literal[4]], 1076]
+  DclkFrequencyTable: Annotated[c.Array[uint32_t, Literal[4]], 1092]
+  LclkFrequencyTable: Annotated[c.Array[uint32_t, Literal[4]], 1108]
+  MaxLclkDpmRange: Annotated[uint32_t, 1124]
+  MinLclkDpmRange: Annotated[uint32_t, 1128]
+  XgmiWidth: Annotated[uint32_t, 1132]
+  XgmiBitrate: Annotated[uint32_t, 1136]
+  XgmiReadBandwidthAcc: Annotated[c.Array[uint64_t, Literal[8]], 1140]
+  XgmiWriteBandwidthAcc: Annotated[c.Array[uint64_t, Literal[8]], 1204]
+  SocketC0Residency: Annotated[uint32_t, 1268]
+  SocketGfxBusy: Annotated[uint32_t, 1272]
+  DramBandwidthUtilization: Annotated[uint32_t, 1276]
+  SocketC0ResidencyAcc: Annotated[uint64_t, 1280]
+  SocketGfxBusyAcc: Annotated[uint64_t, 1288]
+  DramBandwidthAcc: Annotated[uint64_t, 1296]
+  MaxDramBandwidth: Annotated[uint32_t, 1304]
+  DramBandwidthUtilizationAcc: Annotated[uint64_t, 1308]
+  PcieBandwidthAcc: Annotated[c.Array[uint64_t, Literal[4]], 1316]
+  ProchotResidencyAcc: Annotated[uint32_t, 1348]
+  PptResidencyAcc: Annotated[uint32_t, 1352]
+  SocketThmResidencyAcc: Annotated[uint32_t, 1356]
+  VrThmResidencyAcc: Annotated[uint32_t, 1360]
+  HbmThmResidencyAcc: Annotated[uint32_t, 1364]
+  GfxLockXCDMak: Annotated[uint32_t, 1368]
+  GfxclkFrequency: Annotated[c.Array[uint32_t, Literal[8]], 1372]
+  PublicSerialNumber_AID: Annotated[c.Array[uint64_t, Literal[4]], 1404]
+  PublicSerialNumber_XCD: Annotated[c.Array[uint64_t, Literal[8]], 1436]
+  PublicSerialNumber_CCD: Annotated[c.Array[uint64_t, Literal[12]], 1500]
+  XgmiReadDataSizeAcc: Annotated[c.Array[uint64_t, Literal[8]], 1596]
+  XgmiWriteDataSizeAcc: Annotated[c.Array[uint64_t, Literal[8]], 1660]
+  PcieBandwidth: Annotated[c.Array[uint32_t, Literal[4]], 1724]
+  PCIeL0ToRecoveryCountAcc: Annotated[uint32_t, 1740]
+  PCIenReplayAAcc: Annotated[uint32_t, 1744]
+  PCIenReplayARolloverCountAcc: Annotated[uint32_t, 1748]
+  PCIeNAKSentCountAcc: Annotated[uint32_t, 1752]
+  PCIeNAKReceivedCountAcc: Annotated[uint32_t, 1756]
+  VcnBusy: Annotated[c.Array[uint32_t, Literal[4]], 1760]
+  JpegBusy: Annotated[c.Array[uint32_t, Literal[32]], 1776]
+  PCIeLinkSpeed: Annotated[uint32_t, 1904]
+  PCIeLinkWidth: Annotated[uint32_t, 1908]
+  GfxBusy: Annotated[c.Array[uint32_t, Literal[8]], 1912]
+  GfxBusyAcc: Annotated[c.Array[uint64_t, Literal[8]], 1944]
+uint32_t: TypeAlias = Annotated[int, ctypes.c_uint32]
+uint64_t: TypeAlias = Annotated[int, ctypes.c_uint64]
+@c.record
+class MetricsTableA_t(c.Struct):
+  SIZE = 1868
+  AccumulationCounter: Annotated[uint32_t, 0]
+  MaxSocketTemperature: Annotated[uint32_t, 4]
+  MaxVrTemperature: Annotated[uint32_t, 8]
+  MaxHbmTemperature: Annotated[uint32_t, 12]
+  MaxSocketTemperatureAcc: Annotated[uint64_t, 16]
+  MaxVrTemperatureAcc: Annotated[uint64_t, 24]
+  MaxHbmTemperatureAcc: Annotated[uint64_t, 32]
+  SocketPowerLimit: Annotated[uint32_t, 40]
+  MaxSocketPowerLimit: Annotated[uint32_t, 44]
+  SocketPower: Annotated[uint32_t, 48]
+  Timestamp: Annotated[uint64_t, 52]
+  SocketEnergyAcc: Annotated[uint64_t, 60]
+  CcdEnergyAcc: Annotated[uint64_t, 68]
+  XcdEnergyAcc: Annotated[uint64_t, 76]
+  AidEnergyAcc: Annotated[uint64_t, 84]
+  HbmEnergyAcc: Annotated[uint64_t, 92]
+  CclkFrequencyLimit: Annotated[uint32_t, 100]
+  GfxclkFrequencyLimit: Annotated[uint32_t, 104]
+  FclkFrequency: Annotated[uint32_t, 108]
+  UclkFrequency: Annotated[uint32_t, 112]
+  SocclkFrequency: Annotated[c.Array[uint32_t, Literal[4]], 116]
+  VclkFrequency: Annotated[c.Array[uint32_t, Literal[4]], 132]
+  DclkFrequency: Annotated[c.Array[uint32_t, Literal[4]], 148]
+  LclkFrequency: Annotated[c.Array[uint32_t, Literal[4]], 164]
+  GfxclkFrequencyAcc: Annotated[c.Array[uint64_t, Literal[8]], 180]
+  CclkFrequencyAcc: Annotated[c.Array[uint64_t, Literal[96]], 244]
+  MaxCclkFrequency: Annotated[uint32_t, 1012]
+  MinCclkFrequency: Annotated[uint32_t, 1016]
+  MaxGfxclkFrequency: Annotated[uint32_t, 1020]
+  MinGfxclkFrequency: Annotated[uint32_t, 1024]
+  FclkFrequencyTable: Annotated[c.Array[uint32_t, Literal[4]], 1028]
+  UclkFrequencyTable: Annotated[c.Array[uint32_t, Literal[4]], 1044]
+  SocclkFrequencyTable: Annotated[c.Array[uint32_t, Literal[4]], 1060]
+  VclkFrequencyTable: Annotated[c.Array[uint32_t, Literal[4]], 1076]
+  DclkFrequencyTable: Annotated[c.Array[uint32_t, Literal[4]], 1092]
+  LclkFrequencyTable: Annotated[c.Array[uint32_t, Literal[4]], 1108]
+  MaxLclkDpmRange: Annotated[uint32_t, 1124]
+  MinLclkDpmRange: Annotated[uint32_t, 1128]
+  XgmiWidth: Annotated[uint32_t, 1132]
+  XgmiBitrate: Annotated[uint32_t, 1136]
+  XgmiReadBandwidthAcc: Annotated[c.Array[uint64_t, Literal[8]], 1140]
+  XgmiWriteBandwidthAcc: Annotated[c.Array[uint64_t, Literal[8]], 1204]
+  SocketC0Residency: Annotated[uint32_t, 1268]
+  SocketGfxBusy: Annotated[uint32_t, 1272]
+  DramBandwidthUtilization: Annotated[uint32_t, 1276]
+  SocketC0ResidencyAcc: Annotated[uint64_t, 1280]
+  SocketGfxBusyAcc: Annotated[uint64_t, 1288]
+  DramBandwidthAcc: Annotated[uint64_t, 1296]
+  MaxDramBandwidth: Annotated[uint32_t, 1304]
+  DramBandwidthUtilizationAcc: Annotated[uint64_t, 1308]
+  PcieBandwidthAcc: Annotated[c.Array[uint64_t, Literal[4]], 1316]
+  ProchotResidencyAcc: Annotated[uint32_t, 1348]
+  PptResidencyAcc: Annotated[uint32_t, 1352]
+  SocketThmResidencyAcc: Annotated[uint32_t, 1356]
+  VrThmResidencyAcc: Annotated[uint32_t, 1360]
+  HbmThmResidencyAcc: Annotated[uint32_t, 1364]
+  GfxLockXCDMak: Annotated[uint32_t, 1368]
+  GfxclkFrequency: Annotated[c.Array[uint32_t, Literal[8]], 1372]
+  PublicSerialNumber_AID: Annotated[c.Array[uint64_t, Literal[4]], 1404]
+  PublicSerialNumber_XCD: Annotated[c.Array[uint64_t, Literal[8]], 1436]
+  PublicSerialNumber_CCD: Annotated[c.Array[uint64_t, Literal[12]], 1500]
+  XgmiReadDataSizeAcc: Annotated[c.Array[uint64_t, Literal[8]], 1596]
+  XgmiWriteDataSizeAcc: Annotated[c.Array[uint64_t, Literal[8]], 1660]
+  VcnBusy: Annotated[c.Array[uint32_t, Literal[4]], 1724]
+  JpegBusy: Annotated[c.Array[uint32_t, Literal[32]], 1740]
+@c.record
+class VfMetricsTable_t(c.Struct):
+  SIZE = 24
+  AccumulationCounter: Annotated[uint32_t, 0]
+  InstGfxclk_TargFreq: Annotated[uint32_t, 4]
+  AccGfxclk_TargFreq: Annotated[uint64_t, 8]
+  AccGfxRsmuDpm_Busy: Annotated[uint64_t, 16]
+class I2cControllerPort_e(Annotated[int, ctypes.c_uint32], c.Enum): pass
 I2C_CONTROLLER_PORT_0 = I2cControllerPort_e.define('I2C_CONTROLLER_PORT_0', 0)
 I2C_CONTROLLER_PORT_1 = I2cControllerPort_e.define('I2C_CONTROLLER_PORT_1', 1)
 I2C_CONTROLLER_PORT_COUNT = I2cControllerPort_e.define('I2C_CONTROLLER_PORT_COUNT', 2)
 
-I2cSpeed_e = CEnum(ctypes.c_uint32)
+class I2cSpeed_e(Annotated[int, ctypes.c_uint32], c.Enum): pass
 UNSUPPORTED_1 = I2cSpeed_e.define('UNSUPPORTED_1', 0)
 I2C_SPEED_STANDARD_100K = I2cSpeed_e.define('I2C_SPEED_STANDARD_100K', 1)
 I2C_SPEED_FAST_400K = I2cSpeed_e.define('I2C_SPEED_FAST_400K', 2)
@@ -255,12 +258,12 @@ UNSUPPORTED_2 = I2cSpeed_e.define('UNSUPPORTED_2', 4)
 UNSUPPORTED_3 = I2cSpeed_e.define('UNSUPPORTED_3', 5)
 I2C_SPEED_COUNT = I2cSpeed_e.define('I2C_SPEED_COUNT', 6)
 
-I2cCmdType_e = CEnum(ctypes.c_uint32)
+class I2cCmdType_e(Annotated[int, ctypes.c_uint32], c.Enum): pass
 I2C_CMD_READ = I2cCmdType_e.define('I2C_CMD_READ', 0)
 I2C_CMD_WRITE = I2cCmdType_e.define('I2C_CMD_WRITE', 1)
 I2C_CMD_COUNT = I2cCmdType_e.define('I2C_CMD_COUNT', 2)
 
-ERR_CODE_e = CEnum(ctypes.c_uint32)
+class ERR_CODE_e(Annotated[int, ctypes.c_uint32], c.Enum): pass
 CODE_DAGB0 = ERR_CODE_e.define('CODE_DAGB0', 0)
 CODE_EA0 = ERR_CODE_e.define('CODE_EA0', 5)
 CODE_UTCL2_ROUTER = ERR_CODE_e.define('CODE_UTCL2_ROUTER', 10)
@@ -299,7 +302,7 @@ CODE_WDT = ERR_CODE_e.define('CODE_WDT', 41)
 CODE_UNKNOWN = ERR_CODE_e.define('CODE_UNKNOWN', 42)
 CODE_COUNT = ERR_CODE_e.define('CODE_COUNT', 43)
 
-GC_ERROR_CODE_e = CEnum(ctypes.c_uint32)
+class GC_ERROR_CODE_e(Annotated[int, ctypes.c_uint32], c.Enum): pass
 SH_FED_CODE = GC_ERROR_CODE_e.define('SH_FED_CODE', 0)
 GCEA_CODE = GC_ERROR_CODE_e.define('GCEA_CODE', 1)
 SQ_CODE = GC_ERROR_CODE_e.define('SQ_CODE', 2)
@@ -328,27 +331,27 @@ GC_CANE_CODE = GC_ERROR_CODE_e.define('GC_CANE_CODE', 24)
 MP5_CODE_SMN_SLVERR = GC_ERROR_CODE_e.define('MP5_CODE_SMN_SLVERR', 40)
 MP5_CODE_UNKNOWN = GC_ERROR_CODE_e.define('MP5_CODE_UNKNOWN', 42)
 
-class SwI2cCmd_t(Struct): pass
-uint8_t = ctypes.c_ubyte
-SwI2cCmd_t._fields_ = [
-  ('ReadWriteData', uint8_t),
-  ('CmdConfig', uint8_t),
-]
-class SwI2cRequest_t(Struct): pass
-SwI2cRequest_t._fields_ = [
-  ('I2CcontrollerPort', uint8_t),
-  ('I2CSpeed', uint8_t),
-  ('SlaveAddress', uint8_t),
-  ('NumCmds', uint8_t),
-  ('SwI2cCmds', (SwI2cCmd_t * 24)),
-]
-class SwI2cRequestExternal_t(Struct): pass
-SwI2cRequestExternal_t._fields_ = [
-  ('SwI2cRequest', SwI2cRequest_t),
-  ('Spare', (uint32_t * 8)),
-  ('MmHubPadding', (uint32_t * 8)),
-]
-PPCLK_e = CEnum(ctypes.c_uint32)
+@c.record
+class SwI2cCmd_t(c.Struct):
+  SIZE = 2
+  ReadWriteData: Annotated[uint8_t, 0]
+  CmdConfig: Annotated[uint8_t, 1]
+uint8_t: TypeAlias = Annotated[int, ctypes.c_ubyte]
+@c.record
+class SwI2cRequest_t(c.Struct):
+  SIZE = 52
+  I2CcontrollerPort: Annotated[uint8_t, 0]
+  I2CSpeed: Annotated[uint8_t, 1]
+  SlaveAddress: Annotated[uint8_t, 2]
+  NumCmds: Annotated[uint8_t, 3]
+  SwI2cCmds: Annotated[c.Array[SwI2cCmd_t, Literal[24]], 4]
+@c.record
+class SwI2cRequestExternal_t(c.Struct):
+  SIZE = 116
+  SwI2cRequest: Annotated[SwI2cRequest_t, 0]
+  Spare: Annotated[c.Array[uint32_t, Literal[8]], 52]
+  MmHubPadding: Annotated[c.Array[uint32_t, Literal[8]], 84]
+class PPCLK_e(Annotated[int, ctypes.c_uint32], c.Enum): pass
 PPCLK_VCLK = PPCLK_e.define('PPCLK_VCLK', 0)
 PPCLK_DCLK = PPCLK_e.define('PPCLK_DCLK', 1)
 PPCLK_SOCCLK = PPCLK_e.define('PPCLK_SOCCLK', 2)
@@ -357,35 +360,35 @@ PPCLK_FCLK = PPCLK_e.define('PPCLK_FCLK', 4)
 PPCLK_LCLK = PPCLK_e.define('PPCLK_LCLK', 5)
 PPCLK_COUNT = PPCLK_e.define('PPCLK_COUNT', 6)
 
-GpioIntPolarity_e = CEnum(ctypes.c_uint32)
+class GpioIntPolarity_e(Annotated[int, ctypes.c_uint32], c.Enum): pass
 GPIO_INT_POLARITY_ACTIVE_LOW = GpioIntPolarity_e.define('GPIO_INT_POLARITY_ACTIVE_LOW', 0)
 GPIO_INT_POLARITY_ACTIVE_HIGH = GpioIntPolarity_e.define('GPIO_INT_POLARITY_ACTIVE_HIGH', 1)
 
-UCLK_DPM_MODE_e = CEnum(ctypes.c_uint32)
+class UCLK_DPM_MODE_e(Annotated[int, ctypes.c_uint32], c.Enum): pass
 UCLK_DPM_MODE_BANDWIDTH = UCLK_DPM_MODE_e.define('UCLK_DPM_MODE_BANDWIDTH', 0)
 UCLK_DPM_MODE_LATENCY = UCLK_DPM_MODE_e.define('UCLK_DPM_MODE_LATENCY', 1)
 
-class AvfsDebugTableAid_t(Struct): pass
-uint16_t = ctypes.c_uint16
-AvfsDebugTableAid_t._fields_ = [
-  ('avgPsmCount', (uint16_t * 30)),
-  ('minPsmCount', (uint16_t * 30)),
-  ('avgPsmVoltage', (ctypes.c_float * 30)),
-  ('minPsmVoltage', (ctypes.c_float * 30)),
-]
-class AvfsDebugTableXcd_t(Struct): pass
-AvfsDebugTableXcd_t._fields_ = [
-  ('avgPsmCount', (uint16_t * 30)),
-  ('minPsmCount', (uint16_t * 30)),
-  ('avgPsmVoltage', (ctypes.c_float * 30)),
-  ('minPsmVoltage', (ctypes.c_float * 30)),
-]
-class struct_smu_hw_power_state(Struct): pass
-struct_smu_hw_power_state._fields_ = [
-  ('magic', ctypes.c_uint32),
-]
-class struct_smu_power_state(Struct): pass
-enum_smu_state_ui_label = CEnum(ctypes.c_uint32)
+@c.record
+class AvfsDebugTableAid_t(c.Struct):
+  SIZE = 360
+  avgPsmCount: Annotated[c.Array[uint16_t, Literal[30]], 0]
+  minPsmCount: Annotated[c.Array[uint16_t, Literal[30]], 60]
+  avgPsmVoltage: Annotated[c.Array[Annotated[float, ctypes.c_float], Literal[30]], 120]
+  minPsmVoltage: Annotated[c.Array[Annotated[float, ctypes.c_float], Literal[30]], 240]
+uint16_t: TypeAlias = Annotated[int, ctypes.c_uint16]
+@c.record
+class AvfsDebugTableXcd_t(c.Struct):
+  SIZE = 360
+  avgPsmCount: Annotated[c.Array[uint16_t, Literal[30]], 0]
+  minPsmCount: Annotated[c.Array[uint16_t, Literal[30]], 60]
+  avgPsmVoltage: Annotated[c.Array[Annotated[float, ctypes.c_float], Literal[30]], 120]
+  minPsmVoltage: Annotated[c.Array[Annotated[float, ctypes.c_float], Literal[30]], 240]
+@c.record
+class struct_smu_hw_power_state(c.Struct):
+  SIZE = 4
+  magic: Annotated[Annotated[int, ctypes.c_uint32], 0]
+class struct_smu_power_state(ctypes.Structure): pass
+class enum_smu_state_ui_label(Annotated[int, ctypes.c_uint32], c.Enum): pass
 SMU_STATE_UI_LABEL_NONE = enum_smu_state_ui_label.define('SMU_STATE_UI_LABEL_NONE', 0)
 SMU_STATE_UI_LABEL_BATTERY = enum_smu_state_ui_label.define('SMU_STATE_UI_LABEL_BATTERY', 1)
 SMU_STATE_UI_TABEL_MIDDLE_LOW = enum_smu_state_ui_label.define('SMU_STATE_UI_TABEL_MIDDLE_LOW', 2)
@@ -394,7 +397,7 @@ SMU_STATE_UI_LABEL_MIDDLE_HIGHT = enum_smu_state_ui_label.define('SMU_STATE_UI_L
 SMU_STATE_UI_LABEL_PERFORMANCE = enum_smu_state_ui_label.define('SMU_STATE_UI_LABEL_PERFORMANCE', 5)
 SMU_STATE_UI_LABEL_BACO = enum_smu_state_ui_label.define('SMU_STATE_UI_LABEL_BACO', 6)
 
-enum_smu_state_classification_flag = CEnum(ctypes.c_uint32)
+class enum_smu_state_classification_flag(Annotated[int, ctypes.c_uint32], c.Enum): pass
 SMU_STATE_CLASSIFICATION_FLAG_BOOT = enum_smu_state_classification_flag.define('SMU_STATE_CLASSIFICATION_FLAG_BOOT', 1)
 SMU_STATE_CLASSIFICATION_FLAG_THERMAL = enum_smu_state_classification_flag.define('SMU_STATE_CLASSIFICATION_FLAG_THERMAL', 2)
 SMU_STATE_CLASSIFICATIN_FLAG_LIMITED_POWER_SOURCE = enum_smu_state_classification_flag.define('SMU_STATE_CLASSIFICATIN_FLAG_LIMITED_POWER_SOURCE', 4)
@@ -417,90 +420,90 @@ SMU_STATE_CLASSIFICATIN_FLAG_LIMITED_POWER_SOURCE2 = enum_smu_state_classificati
 SMU_STATE_CLASSIFICATION_FLAG_ULV = enum_smu_state_classification_flag.define('SMU_STATE_CLASSIFICATION_FLAG_ULV', 524288)
 SMU_STATE_CLASSIFICATION_FLAG_UVD_MVC = enum_smu_state_classification_flag.define('SMU_STATE_CLASSIFICATION_FLAG_UVD_MVC', 1048576)
 
-class struct_smu_state_classification_block(Struct): pass
-struct_smu_state_classification_block._fields_ = [
-  ('ui_label', enum_smu_state_ui_label),
-  ('flags', enum_smu_state_classification_flag),
-  ('bios_index', ctypes.c_int32),
-  ('temporary_state', ctypes.c_bool),
-  ('to_be_deleted', ctypes.c_bool),
-]
-class struct_smu_state_pcie_block(Struct): pass
-struct_smu_state_pcie_block._fields_ = [
-  ('lanes', ctypes.c_uint32),
-]
-enum_smu_refreshrate_source = CEnum(ctypes.c_uint32)
+@c.record
+class struct_smu_state_classification_block(c.Struct):
+  SIZE = 16
+  ui_label: Annotated[enum_smu_state_ui_label, 0]
+  flags: Annotated[enum_smu_state_classification_flag, 4]
+  bios_index: Annotated[Annotated[int, ctypes.c_int32], 8]
+  temporary_state: Annotated[Annotated[bool, ctypes.c_bool], 12]
+  to_be_deleted: Annotated[Annotated[bool, ctypes.c_bool], 13]
+@c.record
+class struct_smu_state_pcie_block(c.Struct):
+  SIZE = 4
+  lanes: Annotated[Annotated[int, ctypes.c_uint32], 0]
+class enum_smu_refreshrate_source(Annotated[int, ctypes.c_uint32], c.Enum): pass
 SMU_REFRESHRATE_SOURCE_EDID = enum_smu_refreshrate_source.define('SMU_REFRESHRATE_SOURCE_EDID', 0)
 SMU_REFRESHRATE_SOURCE_EXPLICIT = enum_smu_refreshrate_source.define('SMU_REFRESHRATE_SOURCE_EXPLICIT', 1)
 
-class struct_smu_state_display_block(Struct): pass
-struct_smu_state_display_block._fields_ = [
-  ('disable_frame_modulation', ctypes.c_bool),
-  ('limit_refreshrate', ctypes.c_bool),
-  ('refreshrate_source', enum_smu_refreshrate_source),
-  ('explicit_refreshrate', ctypes.c_int32),
-  ('edid_refreshrate_index', ctypes.c_int32),
-  ('enable_vari_bright', ctypes.c_bool),
-]
-class struct_smu_state_memory_block(Struct): pass
-struct_smu_state_memory_block._fields_ = [
-  ('dll_off', ctypes.c_bool),
-  ('m3arb', ctypes.c_ubyte),
-  ('unused', (ctypes.c_ubyte * 3)),
-]
-class struct_smu_state_software_algorithm_block(Struct): pass
-struct_smu_state_software_algorithm_block._fields_ = [
-  ('disable_load_balancing', ctypes.c_bool),
-  ('enable_sleep_for_timestamps', ctypes.c_bool),
-]
-class struct_smu_temperature_range(Struct): pass
-struct_smu_temperature_range._fields_ = [
-  ('min', ctypes.c_int32),
-  ('max', ctypes.c_int32),
-  ('edge_emergency_max', ctypes.c_int32),
-  ('hotspot_min', ctypes.c_int32),
-  ('hotspot_crit_max', ctypes.c_int32),
-  ('hotspot_emergency_max', ctypes.c_int32),
-  ('mem_min', ctypes.c_int32),
-  ('mem_crit_max', ctypes.c_int32),
-  ('mem_emergency_max', ctypes.c_int32),
-  ('software_shutdown_temp', ctypes.c_int32),
-  ('software_shutdown_temp_offset', ctypes.c_int32),
-]
-class struct_smu_state_validation_block(Struct): pass
-struct_smu_state_validation_block._fields_ = [
-  ('single_display_only', ctypes.c_bool),
-  ('disallow_on_dc', ctypes.c_bool),
-  ('supported_power_levels', ctypes.c_ubyte),
-]
-class struct_smu_uvd_clocks(Struct): pass
-struct_smu_uvd_clocks._fields_ = [
-  ('vclk', ctypes.c_uint32),
-  ('dclk', ctypes.c_uint32),
-]
-enum_smu_power_src_type = CEnum(ctypes.c_uint32)
+@c.record
+class struct_smu_state_display_block(c.Struct):
+  SIZE = 20
+  disable_frame_modulation: Annotated[Annotated[bool, ctypes.c_bool], 0]
+  limit_refreshrate: Annotated[Annotated[bool, ctypes.c_bool], 1]
+  refreshrate_source: Annotated[enum_smu_refreshrate_source, 4]
+  explicit_refreshrate: Annotated[Annotated[int, ctypes.c_int32], 8]
+  edid_refreshrate_index: Annotated[Annotated[int, ctypes.c_int32], 12]
+  enable_vari_bright: Annotated[Annotated[bool, ctypes.c_bool], 16]
+@c.record
+class struct_smu_state_memory_block(c.Struct):
+  SIZE = 5
+  dll_off: Annotated[Annotated[bool, ctypes.c_bool], 0]
+  m3arb: Annotated[Annotated[int, ctypes.c_ubyte], 1]
+  unused: Annotated[c.Array[Annotated[int, ctypes.c_ubyte], Literal[3]], 2]
+@c.record
+class struct_smu_state_software_algorithm_block(c.Struct):
+  SIZE = 2
+  disable_load_balancing: Annotated[Annotated[bool, ctypes.c_bool], 0]
+  enable_sleep_for_timestamps: Annotated[Annotated[bool, ctypes.c_bool], 1]
+@c.record
+class struct_smu_temperature_range(c.Struct):
+  SIZE = 44
+  min: Annotated[Annotated[int, ctypes.c_int32], 0]
+  max: Annotated[Annotated[int, ctypes.c_int32], 4]
+  edge_emergency_max: Annotated[Annotated[int, ctypes.c_int32], 8]
+  hotspot_min: Annotated[Annotated[int, ctypes.c_int32], 12]
+  hotspot_crit_max: Annotated[Annotated[int, ctypes.c_int32], 16]
+  hotspot_emergency_max: Annotated[Annotated[int, ctypes.c_int32], 20]
+  mem_min: Annotated[Annotated[int, ctypes.c_int32], 24]
+  mem_crit_max: Annotated[Annotated[int, ctypes.c_int32], 28]
+  mem_emergency_max: Annotated[Annotated[int, ctypes.c_int32], 32]
+  software_shutdown_temp: Annotated[Annotated[int, ctypes.c_int32], 36]
+  software_shutdown_temp_offset: Annotated[Annotated[int, ctypes.c_int32], 40]
+@c.record
+class struct_smu_state_validation_block(c.Struct):
+  SIZE = 3
+  single_display_only: Annotated[Annotated[bool, ctypes.c_bool], 0]
+  disallow_on_dc: Annotated[Annotated[bool, ctypes.c_bool], 1]
+  supported_power_levels: Annotated[Annotated[int, ctypes.c_ubyte], 2]
+@c.record
+class struct_smu_uvd_clocks(c.Struct):
+  SIZE = 8
+  vclk: Annotated[Annotated[int, ctypes.c_uint32], 0]
+  dclk: Annotated[Annotated[int, ctypes.c_uint32], 4]
+class enum_smu_power_src_type(Annotated[int, ctypes.c_uint32], c.Enum): pass
 SMU_POWER_SOURCE_AC = enum_smu_power_src_type.define('SMU_POWER_SOURCE_AC', 0)
 SMU_POWER_SOURCE_DC = enum_smu_power_src_type.define('SMU_POWER_SOURCE_DC', 1)
 SMU_POWER_SOURCE_COUNT = enum_smu_power_src_type.define('SMU_POWER_SOURCE_COUNT', 2)
 
-enum_smu_ppt_limit_type = CEnum(ctypes.c_uint32)
+class enum_smu_ppt_limit_type(Annotated[int, ctypes.c_uint32], c.Enum): pass
 SMU_DEFAULT_PPT_LIMIT = enum_smu_ppt_limit_type.define('SMU_DEFAULT_PPT_LIMIT', 0)
 SMU_FAST_PPT_LIMIT = enum_smu_ppt_limit_type.define('SMU_FAST_PPT_LIMIT', 1)
 
-enum_smu_ppt_limit_level = CEnum(ctypes.c_int32)
+class enum_smu_ppt_limit_level(Annotated[int, ctypes.c_int32], c.Enum): pass
 SMU_PPT_LIMIT_MIN = enum_smu_ppt_limit_level.define('SMU_PPT_LIMIT_MIN', -1)
 SMU_PPT_LIMIT_CURRENT = enum_smu_ppt_limit_level.define('SMU_PPT_LIMIT_CURRENT', 0)
 SMU_PPT_LIMIT_DEFAULT = enum_smu_ppt_limit_level.define('SMU_PPT_LIMIT_DEFAULT', 1)
 SMU_PPT_LIMIT_MAX = enum_smu_ppt_limit_level.define('SMU_PPT_LIMIT_MAX', 2)
 
-enum_smu_memory_pool_size = CEnum(ctypes.c_uint32)
+class enum_smu_memory_pool_size(Annotated[int, ctypes.c_uint32], c.Enum): pass
 SMU_MEMORY_POOL_SIZE_ZERO = enum_smu_memory_pool_size.define('SMU_MEMORY_POOL_SIZE_ZERO', 0)
 SMU_MEMORY_POOL_SIZE_256_MB = enum_smu_memory_pool_size.define('SMU_MEMORY_POOL_SIZE_256_MB', 268435456)
 SMU_MEMORY_POOL_SIZE_512_MB = enum_smu_memory_pool_size.define('SMU_MEMORY_POOL_SIZE_512_MB', 536870912)
 SMU_MEMORY_POOL_SIZE_1_GB = enum_smu_memory_pool_size.define('SMU_MEMORY_POOL_SIZE_1_GB', 1073741824)
 SMU_MEMORY_POOL_SIZE_2_GB = enum_smu_memory_pool_size.define('SMU_MEMORY_POOL_SIZE_2_GB', 2147483648)
 
-enum_smu_clk_type = CEnum(ctypes.c_uint32)
+class enum_smu_clk_type(Annotated[int, ctypes.c_uint32], c.Enum): pass
 SMU_GFXCLK = enum_smu_clk_type.define('SMU_GFXCLK', 0)
 SMU_VCLK = enum_smu_clk_type.define('SMU_VCLK', 1)
 SMU_DCLK = enum_smu_clk_type.define('SMU_DCLK', 2)
@@ -531,73 +534,73 @@ SMU_OD_FAN_TARGET_TEMPERATURE = enum_smu_clk_type.define('SMU_OD_FAN_TARGET_TEMP
 SMU_OD_FAN_MINIMUM_PWM = enum_smu_clk_type.define('SMU_OD_FAN_MINIMUM_PWM', 27)
 SMU_CLK_COUNT = enum_smu_clk_type.define('SMU_CLK_COUNT', 28)
 
-class struct_smu_user_dpm_profile(Struct): pass
-struct_smu_user_dpm_profile._fields_ = [
-  ('fan_mode', ctypes.c_uint32),
-  ('power_limit', ctypes.c_uint32),
-  ('fan_speed_pwm', ctypes.c_uint32),
-  ('fan_speed_rpm', ctypes.c_uint32),
-  ('flags', ctypes.c_uint32),
-  ('user_od', ctypes.c_uint32),
-  ('clk_mask', (ctypes.c_uint32 * 28)),
-  ('clk_dependency', ctypes.c_uint32),
-]
-class struct_smu_table(Struct): pass
-class struct_amdgpu_bo(Struct): pass
-struct_smu_table._fields_ = [
-  ('size', ctypes.c_uint64),
-  ('align', ctypes.c_uint32),
-  ('domain', ctypes.c_ubyte),
-  ('mc_address', ctypes.c_uint64),
-  ('cpu_addr', ctypes.c_void_p),
-  ('bo', ctypes.POINTER(struct_amdgpu_bo)),
-  ('version', ctypes.c_uint32),
-]
-enum_smu_perf_level_designation = CEnum(ctypes.c_uint32)
+@c.record
+class struct_smu_user_dpm_profile(c.Struct):
+  SIZE = 140
+  fan_mode: Annotated[Annotated[int, ctypes.c_uint32], 0]
+  power_limit: Annotated[Annotated[int, ctypes.c_uint32], 4]
+  fan_speed_pwm: Annotated[Annotated[int, ctypes.c_uint32], 8]
+  fan_speed_rpm: Annotated[Annotated[int, ctypes.c_uint32], 12]
+  flags: Annotated[Annotated[int, ctypes.c_uint32], 16]
+  user_od: Annotated[Annotated[int, ctypes.c_uint32], 20]
+  clk_mask: Annotated[c.Array[Annotated[int, ctypes.c_uint32], Literal[28]], 24]
+  clk_dependency: Annotated[Annotated[int, ctypes.c_uint32], 136]
+@c.record
+class struct_smu_table(c.Struct):
+  SIZE = 48
+  size: Annotated[Annotated[int, ctypes.c_uint64], 0]
+  align: Annotated[Annotated[int, ctypes.c_uint32], 8]
+  domain: Annotated[Annotated[int, ctypes.c_ubyte], 12]
+  mc_address: Annotated[Annotated[int, ctypes.c_uint64], 16]
+  cpu_addr: Annotated[ctypes.c_void_p, 24]
+  bo: Annotated[c.POINTER[struct_amdgpu_bo], 32]
+  version: Annotated[Annotated[int, ctypes.c_uint32], 40]
+class struct_amdgpu_bo(ctypes.Structure): pass
+class enum_smu_perf_level_designation(Annotated[int, ctypes.c_uint32], c.Enum): pass
 PERF_LEVEL_ACTIVITY = enum_smu_perf_level_designation.define('PERF_LEVEL_ACTIVITY', 0)
 PERF_LEVEL_POWER_CONTAINMENT = enum_smu_perf_level_designation.define('PERF_LEVEL_POWER_CONTAINMENT', 1)
 
-class struct_smu_performance_level(Struct): pass
-struct_smu_performance_level._fields_ = [
-  ('core_clock', ctypes.c_uint32),
-  ('memory_clock', ctypes.c_uint32),
-  ('vddc', ctypes.c_uint32),
-  ('vddci', ctypes.c_uint32),
-  ('non_local_mem_freq', ctypes.c_uint32),
-  ('non_local_mem_width', ctypes.c_uint32),
-]
-class struct_smu_clock_info(Struct): pass
-struct_smu_clock_info._fields_ = [
-  ('min_mem_clk', ctypes.c_uint32),
-  ('max_mem_clk', ctypes.c_uint32),
-  ('min_eng_clk', ctypes.c_uint32),
-  ('max_eng_clk', ctypes.c_uint32),
-  ('min_bus_bandwidth', ctypes.c_uint32),
-  ('max_bus_bandwidth', ctypes.c_uint32),
-]
-class struct_smu_bios_boot_up_values(Struct): pass
-struct_smu_bios_boot_up_values._fields_ = [
-  ('revision', ctypes.c_uint32),
-  ('gfxclk', ctypes.c_uint32),
-  ('uclk', ctypes.c_uint32),
-  ('socclk', ctypes.c_uint32),
-  ('dcefclk', ctypes.c_uint32),
-  ('eclk', ctypes.c_uint32),
-  ('vclk', ctypes.c_uint32),
-  ('dclk', ctypes.c_uint32),
-  ('vddc', ctypes.c_uint16),
-  ('vddci', ctypes.c_uint16),
-  ('mvddc', ctypes.c_uint16),
-  ('vdd_gfx', ctypes.c_uint16),
-  ('cooling_id', ctypes.c_ubyte),
-  ('pp_table_id', ctypes.c_uint32),
-  ('format_revision', ctypes.c_uint32),
-  ('content_revision', ctypes.c_uint32),
-  ('fclk', ctypes.c_uint32),
-  ('lclk', ctypes.c_uint32),
-  ('firmware_caps', ctypes.c_uint32),
-]
-enum_smu_table_id = CEnum(ctypes.c_uint32)
+@c.record
+class struct_smu_performance_level(c.Struct):
+  SIZE = 24
+  core_clock: Annotated[Annotated[int, ctypes.c_uint32], 0]
+  memory_clock: Annotated[Annotated[int, ctypes.c_uint32], 4]
+  vddc: Annotated[Annotated[int, ctypes.c_uint32], 8]
+  vddci: Annotated[Annotated[int, ctypes.c_uint32], 12]
+  non_local_mem_freq: Annotated[Annotated[int, ctypes.c_uint32], 16]
+  non_local_mem_width: Annotated[Annotated[int, ctypes.c_uint32], 20]
+@c.record
+class struct_smu_clock_info(c.Struct):
+  SIZE = 24
+  min_mem_clk: Annotated[Annotated[int, ctypes.c_uint32], 0]
+  max_mem_clk: Annotated[Annotated[int, ctypes.c_uint32], 4]
+  min_eng_clk: Annotated[Annotated[int, ctypes.c_uint32], 8]
+  max_eng_clk: Annotated[Annotated[int, ctypes.c_uint32], 12]
+  min_bus_bandwidth: Annotated[Annotated[int, ctypes.c_uint32], 16]
+  max_bus_bandwidth: Annotated[Annotated[int, ctypes.c_uint32], 20]
+@c.record
+class struct_smu_bios_boot_up_values(c.Struct):
+  SIZE = 68
+  revision: Annotated[Annotated[int, ctypes.c_uint32], 0]
+  gfxclk: Annotated[Annotated[int, ctypes.c_uint32], 4]
+  uclk: Annotated[Annotated[int, ctypes.c_uint32], 8]
+  socclk: Annotated[Annotated[int, ctypes.c_uint32], 12]
+  dcefclk: Annotated[Annotated[int, ctypes.c_uint32], 16]
+  eclk: Annotated[Annotated[int, ctypes.c_uint32], 20]
+  vclk: Annotated[Annotated[int, ctypes.c_uint32], 24]
+  dclk: Annotated[Annotated[int, ctypes.c_uint32], 28]
+  vddc: Annotated[Annotated[int, ctypes.c_uint16], 32]
+  vddci: Annotated[Annotated[int, ctypes.c_uint16], 34]
+  mvddc: Annotated[Annotated[int, ctypes.c_uint16], 36]
+  vdd_gfx: Annotated[Annotated[int, ctypes.c_uint16], 38]
+  cooling_id: Annotated[Annotated[int, ctypes.c_ubyte], 40]
+  pp_table_id: Annotated[Annotated[int, ctypes.c_uint32], 44]
+  format_revision: Annotated[Annotated[int, ctypes.c_uint32], 48]
+  content_revision: Annotated[Annotated[int, ctypes.c_uint32], 52]
+  fclk: Annotated[Annotated[int, ctypes.c_uint32], 56]
+  lclk: Annotated[Annotated[int, ctypes.c_uint32], 60]
+  firmware_caps: Annotated[Annotated[int, ctypes.c_uint32], 64]
+class enum_smu_table_id(Annotated[int, ctypes.c_uint32], c.Enum): pass
 SMU_TABLE_PPTABLE = enum_smu_table_id.define('SMU_TABLE_PPTABLE', 0)
 SMU_TABLE_WATERMARKS = enum_smu_table_id.define('SMU_TABLE_WATERMARKS', 1)
 SMU_TABLE_CUSTOM_DPM = enum_smu_table_id.define('SMU_TABLE_CUSTOM_DPM', 2)
@@ -617,164 +620,165 @@ SMU_TABLE_COMBO_PPTABLE = enum_smu_table_id.define('SMU_TABLE_COMBO_PPTABLE', 15
 SMU_TABLE_WIFIBAND = enum_smu_table_id.define('SMU_TABLE_WIFIBAND', 16)
 SMU_TABLE_COUNT = enum_smu_table_id.define('SMU_TABLE_COUNT', 17)
 
-PPSMC_Result_OK = 0x1
-PPSMC_Result_Failed = 0xFF
-PPSMC_Result_UnknownCmd = 0xFE
-PPSMC_Result_CmdRejectedPrereq = 0xFD
-PPSMC_Result_CmdRejectedBusy = 0xFC
-PPSMC_MSG_TestMessage = 0x1
-PPSMC_MSG_GetSmuVersion = 0x2
-PPSMC_MSG_GfxDriverReset = 0x3
-PPSMC_MSG_GetDriverIfVersion = 0x4
-PPSMC_MSG_EnableAllSmuFeatures = 0x5
-PPSMC_MSG_DisableAllSmuFeatures = 0x6
-PPSMC_MSG_RequestI2cTransaction = 0x7
-PPSMC_MSG_GetMetricsVersion = 0x8
-PPSMC_MSG_GetMetricsTable = 0x9
-PPSMC_MSG_GetEccInfoTable = 0xA
-PPSMC_MSG_GetEnabledSmuFeaturesLow = 0xB
-PPSMC_MSG_GetEnabledSmuFeaturesHigh = 0xC
-PPSMC_MSG_SetDriverDramAddrHigh = 0xD
-PPSMC_MSG_SetDriverDramAddrLow = 0xE
-PPSMC_MSG_SetToolsDramAddrHigh = 0xF
-PPSMC_MSG_SetToolsDramAddrLow = 0x10
-PPSMC_MSG_SetSystemVirtualDramAddrHigh = 0x11
-PPSMC_MSG_SetSystemVirtualDramAddrLow = 0x12
-PPSMC_MSG_SetSoftMinByFreq = 0x13
-PPSMC_MSG_SetSoftMaxByFreq = 0x14
-PPSMC_MSG_GetMinDpmFreq = 0x15
-PPSMC_MSG_GetMaxDpmFreq = 0x16
-PPSMC_MSG_GetDpmFreqByIndex = 0x17
-PPSMC_MSG_SetPptLimit = 0x18
-PPSMC_MSG_GetPptLimit = 0x19
-PPSMC_MSG_DramLogSetDramAddrHigh = 0x1A
-PPSMC_MSG_DramLogSetDramAddrLow = 0x1B
-PPSMC_MSG_DramLogSetDramSize = 0x1C
-PPSMC_MSG_GetDebugData = 0x1D
-PPSMC_MSG_HeavySBR = 0x1E
-PPSMC_MSG_SetNumBadHbmPagesRetired = 0x1F
-PPSMC_MSG_DFCstateControl = 0x20
-PPSMC_MSG_GetGmiPwrDnHyst = 0x21
-PPSMC_MSG_SetGmiPwrDnHyst = 0x22
-PPSMC_MSG_GmiPwrDnControl = 0x23
-PPSMC_MSG_EnterGfxoff = 0x24
-PPSMC_MSG_ExitGfxoff = 0x25
-PPSMC_MSG_EnableDeterminism = 0x26
-PPSMC_MSG_DisableDeterminism = 0x27
-PPSMC_MSG_DumpSTBtoDram = 0x28
-PPSMC_MSG_STBtoDramLogSetDramAddrHigh = 0x29
-PPSMC_MSG_STBtoDramLogSetDramAddrLow = 0x2A
-PPSMC_MSG_STBtoDramLogSetDramSize = 0x2B
-PPSMC_MSG_SetSystemVirtualSTBtoDramAddrHigh = 0x2C
-PPSMC_MSG_SetSystemVirtualSTBtoDramAddrLow = 0x2D
-PPSMC_MSG_GfxDriverResetRecovery = 0x2E
-PPSMC_MSG_TriggerVFFLR = 0x2F
-PPSMC_MSG_SetSoftMinGfxClk = 0x30
-PPSMC_MSG_SetSoftMaxGfxClk = 0x31
-PPSMC_MSG_GetMinGfxDpmFreq = 0x32
-PPSMC_MSG_GetMaxGfxDpmFreq = 0x33
-PPSMC_MSG_PrepareForDriverUnload = 0x34
-PPSMC_MSG_ReadThrottlerLimit = 0x35
-PPSMC_MSG_QueryValidMcaCount = 0x36
-PPSMC_MSG_McaBankDumpDW = 0x37
-PPSMC_MSG_GetCTFLimit = 0x38
-PPSMC_MSG_ClearMcaOnRead = 0x39
-PPSMC_MSG_QueryValidMcaCeCount = 0x3A
-PPSMC_MSG_McaBankCeDumpDW = 0x3B
-PPSMC_MSG_SelectPLPDMode = 0x40
-PPSMC_MSG_RmaDueToBadPageThreshold = 0x43
-PPSMC_MSG_SelectPstatePolicy = 0x44
-PPSMC_MSG_SetPhsDetWRbwThreshold = 0x45
-PPSMC_MSG_SetPhsDetWRbwFreqHigh = 0x46
-PPSMC_MSG_SetPhsDetWRbwFreqLow = 0x47
-PPSMC_MSG_SetPhsDetWRbwHystDown = 0x48
-PPSMC_MSG_SetPhsDetWRbwAlpha = 0x49
-PPSMC_MSG_SetPhsDetOnOff = 0x4A
-PPSMC_MSG_GetPhsDetResidency = 0x4B
-PPSMC_Message_Count = 0x4C
-PPSMC_RESET_TYPE_DRIVER_MODE_1_RESET = 0x1
-PPSMC_RESET_TYPE_DRIVER_MODE_2_RESET = 0x2
-PPSMC_RESET_TYPE_DRIVER_MODE_3_RESET = 0x3
-PPSMC_THROTTLING_LIMIT_TYPE_SOCKET = 0x1
-PPSMC_THROTTLING_LIMIT_TYPE_HBM = 0x2
-PPSMC_AID_THM_TYPE = 0x1
-PPSMC_CCD_THM_TYPE = 0x2
-PPSMC_XCD_THM_TYPE = 0x3
-PPSMC_HBM_THM_TYPE = 0x4
-PPSMC_PLPD_MODE_DEFAULT = 0x1
-PPSMC_PLPD_MODE_OPTIMIZED = 0x2
-NUM_VCLK_DPM_LEVELS = 4
-NUM_DCLK_DPM_LEVELS = 4
-NUM_SOCCLK_DPM_LEVELS = 4
-NUM_LCLK_DPM_LEVELS = 4
-NUM_UCLK_DPM_LEVELS = 4
-NUM_FCLK_DPM_LEVELS = 4
-NUM_XGMI_DPM_LEVELS = 2
-NUM_CXL_BITRATES = 4
-NUM_PCIE_BITRATES = 4
-NUM_XGMI_BITRATES = 4
-NUM_XGMI_WIDTHS = 3
-SMU_METRICS_TABLE_VERSION = 0xD
-SMU_VF_METRICS_TABLE_VERSION = 0x3
-SMU13_0_6_DRIVER_IF_VERSION = 0x08042024
-NUM_I2C_CONTROLLERS = 8
-I2C_CONTROLLER_ENABLED = 1
-I2C_CONTROLLER_DISABLED = 0
-MAX_SW_I2C_COMMANDS = 24
-CMDCONFIG_STOP_BIT = 0
-CMDCONFIG_RESTART_BIT = 1
-CMDCONFIG_READWRITE_BIT = 2
-CMDCONFIG_STOP_MASK = (1 << CMDCONFIG_STOP_BIT)
-CMDCONFIG_RESTART_MASK = (1 << CMDCONFIG_RESTART_BIT)
-CMDCONFIG_READWRITE_MASK = (1 << CMDCONFIG_READWRITE_BIT)
-IH_INTERRUPT_ID_TO_DRIVER = 0xFE
-IH_INTERRUPT_CONTEXT_ID_THERMAL_THROTTLING = 0x7
-THROTTLER_PROCHOT_BIT = 0
-THROTTLER_PPT_BIT = 1
-THROTTLER_THERMAL_SOCKET_BIT = 2
-THROTTLER_THERMAL_VR_BIT = 3
-THROTTLER_THERMAL_HBM_BIT = 4
-ClearMcaOnRead_UE_FLAG_MASK = 0x1
-ClearMcaOnRead_CE_POLL_MASK = 0x2
-int32_t = int
-SMU_THERMAL_MINIMUM_ALERT_TEMP = 0
-SMU_THERMAL_MAXIMUM_ALERT_TEMP = 255
-SMU_TEMPERATURE_UNITS_PER_CENTIGRADES = 1000
-SMU_FW_NAME_LEN = 0x24
-SMU_DPM_USER_PROFILE_RESTORE = (1 << 0)
-SMU_CUSTOM_FAN_SPEED_RPM = (1 << 1)
-SMU_CUSTOM_FAN_SPEED_PWM = (1 << 2)
-SMU_THROTTLER_PPT0_BIT = 0
-SMU_THROTTLER_PPT1_BIT = 1
-SMU_THROTTLER_PPT2_BIT = 2
-SMU_THROTTLER_PPT3_BIT = 3
-SMU_THROTTLER_SPL_BIT = 4
-SMU_THROTTLER_FPPT_BIT = 5
-SMU_THROTTLER_SPPT_BIT = 6
-SMU_THROTTLER_SPPT_APU_BIT = 7
-SMU_THROTTLER_TDC_GFX_BIT = 16
-SMU_THROTTLER_TDC_SOC_BIT = 17
-SMU_THROTTLER_TDC_MEM_BIT = 18
-SMU_THROTTLER_TDC_VDD_BIT = 19
-SMU_THROTTLER_TDC_CVIP_BIT = 20
-SMU_THROTTLER_EDC_CPU_BIT = 21
-SMU_THROTTLER_EDC_GFX_BIT = 22
-SMU_THROTTLER_APCC_BIT = 23
-SMU_THROTTLER_TEMP_GPU_BIT = 32
-SMU_THROTTLER_TEMP_CORE_BIT = 33
-SMU_THROTTLER_TEMP_MEM_BIT = 34
-SMU_THROTTLER_TEMP_EDGE_BIT = 35
-SMU_THROTTLER_TEMP_HOTSPOT_BIT = 36
-SMU_THROTTLER_TEMP_SOC_BIT = 37
-SMU_THROTTLER_TEMP_VR_GFX_BIT = 38
-SMU_THROTTLER_TEMP_VR_SOC_BIT = 39
-SMU_THROTTLER_TEMP_VR_MEM0_BIT = 40
-SMU_THROTTLER_TEMP_VR_MEM1_BIT = 41
-SMU_THROTTLER_TEMP_LIQUID0_BIT = 42
-SMU_THROTTLER_TEMP_LIQUID1_BIT = 43
-SMU_THROTTLER_VRHOT0_BIT = 44
-SMU_THROTTLER_VRHOT1_BIT = 45
-SMU_THROTTLER_PROCHOT_CPU_BIT = 46
-SMU_THROTTLER_PROCHOT_GFX_BIT = 47
-SMU_THROTTLER_PPM_BIT = 56
-SMU_THROTTLER_FIT_BIT = 57
+c.init_records()
+PPSMC_Result_OK = 0x1 # type: ignore
+PPSMC_Result_Failed = 0xFF # type: ignore
+PPSMC_Result_UnknownCmd = 0xFE # type: ignore
+PPSMC_Result_CmdRejectedPrereq = 0xFD # type: ignore
+PPSMC_Result_CmdRejectedBusy = 0xFC # type: ignore
+PPSMC_MSG_TestMessage = 0x1 # type: ignore
+PPSMC_MSG_GetSmuVersion = 0x2 # type: ignore
+PPSMC_MSG_GfxDriverReset = 0x3 # type: ignore
+PPSMC_MSG_GetDriverIfVersion = 0x4 # type: ignore
+PPSMC_MSG_EnableAllSmuFeatures = 0x5 # type: ignore
+PPSMC_MSG_DisableAllSmuFeatures = 0x6 # type: ignore
+PPSMC_MSG_RequestI2cTransaction = 0x7 # type: ignore
+PPSMC_MSG_GetMetricsVersion = 0x8 # type: ignore
+PPSMC_MSG_GetMetricsTable = 0x9 # type: ignore
+PPSMC_MSG_GetEccInfoTable = 0xA # type: ignore
+PPSMC_MSG_GetEnabledSmuFeaturesLow = 0xB # type: ignore
+PPSMC_MSG_GetEnabledSmuFeaturesHigh = 0xC # type: ignore
+PPSMC_MSG_SetDriverDramAddrHigh = 0xD # type: ignore
+PPSMC_MSG_SetDriverDramAddrLow = 0xE # type: ignore
+PPSMC_MSG_SetToolsDramAddrHigh = 0xF # type: ignore
+PPSMC_MSG_SetToolsDramAddrLow = 0x10 # type: ignore
+PPSMC_MSG_SetSystemVirtualDramAddrHigh = 0x11 # type: ignore
+PPSMC_MSG_SetSystemVirtualDramAddrLow = 0x12 # type: ignore
+PPSMC_MSG_SetSoftMinByFreq = 0x13 # type: ignore
+PPSMC_MSG_SetSoftMaxByFreq = 0x14 # type: ignore
+PPSMC_MSG_GetMinDpmFreq = 0x15 # type: ignore
+PPSMC_MSG_GetMaxDpmFreq = 0x16 # type: ignore
+PPSMC_MSG_GetDpmFreqByIndex = 0x17 # type: ignore
+PPSMC_MSG_SetPptLimit = 0x18 # type: ignore
+PPSMC_MSG_GetPptLimit = 0x19 # type: ignore
+PPSMC_MSG_DramLogSetDramAddrHigh = 0x1A # type: ignore
+PPSMC_MSG_DramLogSetDramAddrLow = 0x1B # type: ignore
+PPSMC_MSG_DramLogSetDramSize = 0x1C # type: ignore
+PPSMC_MSG_GetDebugData = 0x1D # type: ignore
+PPSMC_MSG_HeavySBR = 0x1E # type: ignore
+PPSMC_MSG_SetNumBadHbmPagesRetired = 0x1F # type: ignore
+PPSMC_MSG_DFCstateControl = 0x20 # type: ignore
+PPSMC_MSG_GetGmiPwrDnHyst = 0x21 # type: ignore
+PPSMC_MSG_SetGmiPwrDnHyst = 0x22 # type: ignore
+PPSMC_MSG_GmiPwrDnControl = 0x23 # type: ignore
+PPSMC_MSG_EnterGfxoff = 0x24 # type: ignore
+PPSMC_MSG_ExitGfxoff = 0x25 # type: ignore
+PPSMC_MSG_EnableDeterminism = 0x26 # type: ignore
+PPSMC_MSG_DisableDeterminism = 0x27 # type: ignore
+PPSMC_MSG_DumpSTBtoDram = 0x28 # type: ignore
+PPSMC_MSG_STBtoDramLogSetDramAddrHigh = 0x29 # type: ignore
+PPSMC_MSG_STBtoDramLogSetDramAddrLow = 0x2A # type: ignore
+PPSMC_MSG_STBtoDramLogSetDramSize = 0x2B # type: ignore
+PPSMC_MSG_SetSystemVirtualSTBtoDramAddrHigh = 0x2C # type: ignore
+PPSMC_MSG_SetSystemVirtualSTBtoDramAddrLow = 0x2D # type: ignore
+PPSMC_MSG_GfxDriverResetRecovery = 0x2E # type: ignore
+PPSMC_MSG_TriggerVFFLR = 0x2F # type: ignore
+PPSMC_MSG_SetSoftMinGfxClk = 0x30 # type: ignore
+PPSMC_MSG_SetSoftMaxGfxClk = 0x31 # type: ignore
+PPSMC_MSG_GetMinGfxDpmFreq = 0x32 # type: ignore
+PPSMC_MSG_GetMaxGfxDpmFreq = 0x33 # type: ignore
+PPSMC_MSG_PrepareForDriverUnload = 0x34 # type: ignore
+PPSMC_MSG_ReadThrottlerLimit = 0x35 # type: ignore
+PPSMC_MSG_QueryValidMcaCount = 0x36 # type: ignore
+PPSMC_MSG_McaBankDumpDW = 0x37 # type: ignore
+PPSMC_MSG_GetCTFLimit = 0x38 # type: ignore
+PPSMC_MSG_ClearMcaOnRead = 0x39 # type: ignore
+PPSMC_MSG_QueryValidMcaCeCount = 0x3A # type: ignore
+PPSMC_MSG_McaBankCeDumpDW = 0x3B # type: ignore
+PPSMC_MSG_SelectPLPDMode = 0x40 # type: ignore
+PPSMC_MSG_RmaDueToBadPageThreshold = 0x43 # type: ignore
+PPSMC_MSG_SelectPstatePolicy = 0x44 # type: ignore
+PPSMC_MSG_SetPhsDetWRbwThreshold = 0x45 # type: ignore
+PPSMC_MSG_SetPhsDetWRbwFreqHigh = 0x46 # type: ignore
+PPSMC_MSG_SetPhsDetWRbwFreqLow = 0x47 # type: ignore
+PPSMC_MSG_SetPhsDetWRbwHystDown = 0x48 # type: ignore
+PPSMC_MSG_SetPhsDetWRbwAlpha = 0x49 # type: ignore
+PPSMC_MSG_SetPhsDetOnOff = 0x4A # type: ignore
+PPSMC_MSG_GetPhsDetResidency = 0x4B # type: ignore
+PPSMC_Message_Count = 0x4C # type: ignore
+PPSMC_RESET_TYPE_DRIVER_MODE_1_RESET = 0x1 # type: ignore
+PPSMC_RESET_TYPE_DRIVER_MODE_2_RESET = 0x2 # type: ignore
+PPSMC_RESET_TYPE_DRIVER_MODE_3_RESET = 0x3 # type: ignore
+PPSMC_THROTTLING_LIMIT_TYPE_SOCKET = 0x1 # type: ignore
+PPSMC_THROTTLING_LIMIT_TYPE_HBM = 0x2 # type: ignore
+PPSMC_AID_THM_TYPE = 0x1 # type: ignore
+PPSMC_CCD_THM_TYPE = 0x2 # type: ignore
+PPSMC_XCD_THM_TYPE = 0x3 # type: ignore
+PPSMC_HBM_THM_TYPE = 0x4 # type: ignore
+PPSMC_PLPD_MODE_DEFAULT = 0x1 # type: ignore
+PPSMC_PLPD_MODE_OPTIMIZED = 0x2 # type: ignore
+NUM_VCLK_DPM_LEVELS = 4 # type: ignore
+NUM_DCLK_DPM_LEVELS = 4 # type: ignore
+NUM_SOCCLK_DPM_LEVELS = 4 # type: ignore
+NUM_LCLK_DPM_LEVELS = 4 # type: ignore
+NUM_UCLK_DPM_LEVELS = 4 # type: ignore
+NUM_FCLK_DPM_LEVELS = 4 # type: ignore
+NUM_XGMI_DPM_LEVELS = 2 # type: ignore
+NUM_CXL_BITRATES = 4 # type: ignore
+NUM_PCIE_BITRATES = 4 # type: ignore
+NUM_XGMI_BITRATES = 4 # type: ignore
+NUM_XGMI_WIDTHS = 3 # type: ignore
+SMU_METRICS_TABLE_VERSION = 0xD # type: ignore
+SMU_VF_METRICS_TABLE_VERSION = 0x3 # type: ignore
+SMU13_0_6_DRIVER_IF_VERSION = 0x08042024 # type: ignore
+NUM_I2C_CONTROLLERS = 8 # type: ignore
+I2C_CONTROLLER_ENABLED = 1 # type: ignore
+I2C_CONTROLLER_DISABLED = 0 # type: ignore
+MAX_SW_I2C_COMMANDS = 24 # type: ignore
+CMDCONFIG_STOP_BIT = 0 # type: ignore
+CMDCONFIG_RESTART_BIT = 1 # type: ignore
+CMDCONFIG_READWRITE_BIT = 2 # type: ignore
+CMDCONFIG_STOP_MASK = (1 << CMDCONFIG_STOP_BIT) # type: ignore
+CMDCONFIG_RESTART_MASK = (1 << CMDCONFIG_RESTART_BIT) # type: ignore
+CMDCONFIG_READWRITE_MASK = (1 << CMDCONFIG_READWRITE_BIT) # type: ignore
+IH_INTERRUPT_ID_TO_DRIVER = 0xFE # type: ignore
+IH_INTERRUPT_CONTEXT_ID_THERMAL_THROTTLING = 0x7 # type: ignore
+THROTTLER_PROCHOT_BIT = 0 # type: ignore
+THROTTLER_PPT_BIT = 1 # type: ignore
+THROTTLER_THERMAL_SOCKET_BIT = 2 # type: ignore
+THROTTLER_THERMAL_VR_BIT = 3 # type: ignore
+THROTTLER_THERMAL_HBM_BIT = 4 # type: ignore
+ClearMcaOnRead_UE_FLAG_MASK = 0x1 # type: ignore
+ClearMcaOnRead_CE_POLL_MASK = 0x2 # type: ignore
+int32_t = int # type: ignore
+SMU_THERMAL_MINIMUM_ALERT_TEMP = 0 # type: ignore
+SMU_THERMAL_MAXIMUM_ALERT_TEMP = 255 # type: ignore
+SMU_TEMPERATURE_UNITS_PER_CENTIGRADES = 1000 # type: ignore
+SMU_FW_NAME_LEN = 0x24 # type: ignore
+SMU_DPM_USER_PROFILE_RESTORE = (1 << 0) # type: ignore
+SMU_CUSTOM_FAN_SPEED_RPM = (1 << 1) # type: ignore
+SMU_CUSTOM_FAN_SPEED_PWM = (1 << 2) # type: ignore
+SMU_THROTTLER_PPT0_BIT = 0 # type: ignore
+SMU_THROTTLER_PPT1_BIT = 1 # type: ignore
+SMU_THROTTLER_PPT2_BIT = 2 # type: ignore
+SMU_THROTTLER_PPT3_BIT = 3 # type: ignore
+SMU_THROTTLER_SPL_BIT = 4 # type: ignore
+SMU_THROTTLER_FPPT_BIT = 5 # type: ignore
+SMU_THROTTLER_SPPT_BIT = 6 # type: ignore
+SMU_THROTTLER_SPPT_APU_BIT = 7 # type: ignore
+SMU_THROTTLER_TDC_GFX_BIT = 16 # type: ignore
+SMU_THROTTLER_TDC_SOC_BIT = 17 # type: ignore
+SMU_THROTTLER_TDC_MEM_BIT = 18 # type: ignore
+SMU_THROTTLER_TDC_VDD_BIT = 19 # type: ignore
+SMU_THROTTLER_TDC_CVIP_BIT = 20 # type: ignore
+SMU_THROTTLER_EDC_CPU_BIT = 21 # type: ignore
+SMU_THROTTLER_EDC_GFX_BIT = 22 # type: ignore
+SMU_THROTTLER_APCC_BIT = 23 # type: ignore
+SMU_THROTTLER_TEMP_GPU_BIT = 32 # type: ignore
+SMU_THROTTLER_TEMP_CORE_BIT = 33 # type: ignore
+SMU_THROTTLER_TEMP_MEM_BIT = 34 # type: ignore
+SMU_THROTTLER_TEMP_EDGE_BIT = 35 # type: ignore
+SMU_THROTTLER_TEMP_HOTSPOT_BIT = 36 # type: ignore
+SMU_THROTTLER_TEMP_SOC_BIT = 37 # type: ignore
+SMU_THROTTLER_TEMP_VR_GFX_BIT = 38 # type: ignore
+SMU_THROTTLER_TEMP_VR_SOC_BIT = 39 # type: ignore
+SMU_THROTTLER_TEMP_VR_MEM0_BIT = 40 # type: ignore
+SMU_THROTTLER_TEMP_VR_MEM1_BIT = 41 # type: ignore
+SMU_THROTTLER_TEMP_LIQUID0_BIT = 42 # type: ignore
+SMU_THROTTLER_TEMP_LIQUID1_BIT = 43 # type: ignore
+SMU_THROTTLER_VRHOT0_BIT = 44 # type: ignore
+SMU_THROTTLER_VRHOT1_BIT = 45 # type: ignore
+SMU_THROTTLER_PROCHOT_CPU_BIT = 46 # type: ignore
+SMU_THROTTLER_PROCHOT_GFX_BIT = 47 # type: ignore
+SMU_THROTTLER_PPM_BIT = 56 # type: ignore
+SMU_THROTTLER_FIT_BIT = 57 # type: ignore

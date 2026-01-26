@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Any, Callable, cast, TYPE_CHECKING, Type, Sequence, Iterable, Final
+from typing import Any, Callable, cast, TYPE_CHECKING, Type, Sequence, Iterable, Final, Iterator
 import sys, time, functools, itertools, math, operator, hashlib, os, types, pickle, pathlib, inspect, weakref, collections
 from dataclasses import dataclass
 from enum import Enum, auto
@@ -10,6 +10,7 @@ from tinygrad.helpers import PROFILE, dedup, cdiv, cmod, diskcache_put, to_funct
 from tinygrad.helpers import strip_parens, colored, ansilen, printable, panic
 if TYPE_CHECKING:
   from tinygrad.device import Buffer, MultiBuffer
+  from tinygrad.renderer import Estimates
 
 class AxisType(Enum):
   def __repr__(self): return str(self)
@@ -311,12 +312,11 @@ class UOp(OpMixin, Generic[OpT], metaclass=UOpMetaClass):
     for er in self.ended_ranges:
       if er.op is Ops.RANGE:
         # if it's a single RANGE, we don't flow through it.
-        if er in ret: del ret[er]
+        ret.pop(er, None)
       else:
         # if it's not a RANGE, we include all ranges in srcs.
         # technically we shouldn't flow through these ranges either, but this is pre pm_add_control_flow so it's the same.
-        for s in er.ranges:
-          if s in ret: del ret[s]
+        for s in er.ranges: ret.pop(s, None)
     return ret
 
   @property
@@ -348,6 +348,8 @@ class UOp(OpMixin, Generic[OpT], metaclass=UOpMetaClass):
     if len(dvars) == 0: return self
     with Context(TRACK_MATCH_STATS=(0 if name is None else TRACK_MATCH_STATS.value)):
       return graph_rewrite(self, (extra_pm+_substitute) if extra_pm is not None else _substitute, dvars, bottom_up=True, name=name)
+  # NOTE: this is not called by Tensor slice (Tensor handles UOps directly), but satisfies SupportsIndex for type checking
+  def __index__(self): return self.__int__()
 
   # *** uop tracing stuff ***
 
@@ -469,7 +471,7 @@ class UOp(OpMixin, Generic[OpT], metaclass=UOpMetaClass):
     return UOp(Ops.ALLREDUCE, self.dtype, (self, UOp(Ops.DEVICE, arg=device) if not isinstance(device, UOp) else device), op)
   def overflows(self, dtype:DType) -> bool: return self.vmin < dtype.min or dtype.max < self.vmax
 
-  def split_uop(self:UOp, sep:Ops):
+  def split_uop(self:UOp, sep:Ops) -> Iterator[UOp]:
     if self.op is sep:
       for s in self.src: yield from s.split_uop(sep)
     else: yield self
@@ -736,7 +738,7 @@ class UOp(OpMixin, Generic[OpT], metaclass=UOpMetaClass):
       (fac, const), (div_fac, div_const) = self.pop_const(Ops.MUL), v.pop_const(Ops.MUL)
       new_count = collections.Counter(fac.split_uop(Ops.MUL))
       new_count.subtract(div_fac.split_uop(Ops.MUL))
-      if const%div_const==0 and all(v>=0 for v in new_count.values()): return math.prod([*new_count.elements(), self.const_like(const//div_const)])
+      if const%div_const==0 and all(v>=0 for v in new_count.values()): return math.prod(new_count.elements(), start=self.const_like(const//div_const))
     return None # generic None if we aren't sure
   def sum(self:UOp, *uops:UOp) -> UOp: return functools.reduce(operator.or_ if self.dtype is dtypes.bool else operator.add, uops, self)
   def prod(self:UOp, *uops:UOp) -> UOp: return functools.reduce(operator.and_ if self.dtype is dtypes.bool else operator.mul, uops, self)
@@ -832,6 +834,7 @@ class KernelInfo:
   dont_use_locals: bool = False # don't use local indexing
   applied_opts: tuple = tuple()
   opts_to_apply: tuple|None = None
+  estimates: Estimates|None = None
   @property
   def function_name(self): return to_function_name(self.name)
 
@@ -841,7 +844,7 @@ class CustomKernel:
   grad_fxn: Callable|None = None
   # sadly CustomKernel can't be pickled or reconstructed as a str
   def __reduce__(self): return (CustomKernel, (panic,))
-  def __repr__(self): return "CustomKernel(panic)"
+  def __repr__(self): return f"CustomKernel({id(self.fxn)})"
 
 @dataclass(frozen=True)
 class Kernel:
@@ -888,8 +891,9 @@ def print_uops(uops:list[UOp]):
 def get_location() -> tuple[str, int]:
   frm = sys._getframe(1)
   # skip over ops.py and anything in mixin
-  while ((codepath:=pathlib.Path(frm.f_code.co_filename)).name == "ops.py" or codepath.parent.name == "mixin") and frm.f_back is not None and \
-      not frm.f_back.f_code.co_filename.startswith("<frozen"):
+  while frm.f_back is not None and not frm.f_back.f_code.co_filename.startswith("<frozen"):
+    fn = frm.f_code.co_filename.replace("\\", "/")
+    if not (fn.endswith("/ops.py") or "/mixin/" in fn): break
     frm = frm.f_back
   return frm.f_code.co_filename, frm.f_lineno
 
@@ -1013,19 +1017,25 @@ def upat_interpret(p:UPat, fxn:Callable) -> Callable:
       return None
   return universal_match
 
+def upat_deferred_compile(p:UPat, fxn:Callable, entry:list) -> Callable:
+  def lazy_compile(uop, ctx):
+    from tinygrad.uop.upat import upat_compile
+    entry[1] = upat_compile(p, fxn) or upat_interpret(p, fxn)
+    return entry[1](uop, ctx)
+  return lazy_compile
+
 class PatternMatcher:
   def __init__(self, patterns:Sequence[tuple[UPat, Callable|tuple]], compiled=bool(getenv("UPAT_COMPILE", 1))):
-    if compiled: from tinygrad.uop.upat import upat_compile
     # if this comes from a pickle, we reconstruct the lambda functions here
     self.patterns:list[tuple[UPat, Callable]] = [(p,types.FunctionType(*fxn) if isinstance(fxn, tuple) else fxn) for p,fxn in patterns]
     # NOTE: use of DefaultDict here is very dangerous! all keys will live for the lifetime of the PatternMatcher!
-    self.pdict: dict[AllOps, list[tuple[UPat, Callable, set]]] = {}
+    self.pdict: dict[Ops, list[list]] = {}
     # uop is required, arg is optional
     for p,fxn in self.patterns:
       assert p.op is not None
-      if compiled and (match:=upat_compile(p, fxn)) is not None: pass # pylint: disable=E0606
-      else: match = upat_interpret(p, fxn)
-      for uop in p.op: self.pdict.setdefault(uop, []).append((p, match, p.early_reject))
+      entry: list = [p, None, p.early_reject]
+      entry[1] = upat_deferred_compile(p, fxn, entry) if compiled else upat_interpret(p, fxn)
+      for uop in p.op: self.pdict.setdefault(uop, []).append(entry)
 
   def __reduce__(self): return PatternMatcher, ([(x,deconstruct_function(fxn) if fxn.__name__ == "<lambda>" else fxn) for x,fxn in self.patterns],)
 
@@ -1298,7 +1308,7 @@ pm_lower_index_dtype = PatternMatcher([
   (UPat((Ops.SINK, Ops.NOOP, Ops.END), name="n"),
    lambda n: n.replace(src=tuple(s.src[0] if s.op is Ops.CAST and s.dtype == dtypes.index else s for s in n.src))),
 ])
-def _index_to_concrete_int(u:UOp): return graph_rewrite(u.sink(), pm_lower_index_dtype).src[0]
+def _index_to_concrete_int(u:UOp) -> UOp: return graph_rewrite(u.sink(), pm_lower_index_dtype).src[0]
 
 _substitute = PatternMatcher([(UPat(tuple(Ops), name="x"), lambda ctx,x: ctx.get(x,None))])
 _remove_all_tags = PatternMatcher([(UPat(GroupOp.All, name="x"), lambda x: x.replace(tag=None) if x.tag is not None else None)])

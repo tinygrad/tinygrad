@@ -6,7 +6,7 @@ from tinygrad.device import BufferSpec, DMACPURef, CompilerSet, CompilerPair
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, HWQueue, HCQArgsState, HCQSignal, HCQProgram, MMIOInterface
 from tinygrad.runtime.support.hcq import CLikeArgsState
 from tinygrad.renderer.cstyle import ClangJITRenderer
-from tinygrad.renderer.llvmir import LLVMRenderer
+from tinygrad.renderer.llvmir import CPULLVMRenderer
 from tinygrad.renderer.nir import LVPRenderer
 from tinygrad.renderer.x86 import X86Renderer
 from tinygrad.runtime.support.compiler_cpu import CPULLVMCompiler, X86Compiler
@@ -42,7 +42,9 @@ class CPUWorker(threading.Thread):
 
 class CPUComputeQueue(HWQueue):
   def _exec(self, tid, prg, bufs, *args):
-    prg.fxn(*map(ctypes.c_uint64, args[:bufs]), *map(ctypes.c_int64 if platform.machine() == "arm64" else ctypes.c_int32, args[bufs:]), tid)
+    vals = list(args[bufs:])
+    if 'core_id' in prg.runtimevars: vals[prg.runtimevars['core_id']] = tid
+    prg.fxn(*map(ctypes.c_uint64, args[:bufs]), *map(ctypes.c_int64 if platform.machine() == "arm64" else ctypes.c_int32, vals))
   def _signal(self, tid, signal_addr, value): to_mv(signal_addr, 4).cast('I')[0] = value
   def _wait(self, tid, signal_addr, value): wait_cond(lambda: to_mv(signal_addr, 4).cast('I')[0] >= value, timeout_ms=60000)
   def _timestamp(self, tid, timestamp_addr): to_mv(timestamp_addr, 8).cast('Q')[0] = time.perf_counter_ns()
@@ -72,7 +74,9 @@ class CPUProgram(HCQProgram):
   try: rt_lib = ctypes.CDLL(ctypes.util.find_library('System' if OSX else 'kernel32') if OSX or WIN else 'libgcc_s.so.1')
   except OSError: pass
 
-  def __init__(self, dev, name:str, lib:bytes):
+  def __init__(self, dev, name:str, lib:bytes, runtimevars:dict[str, tuple[int, int]]|None=None, **kwargs):
+    self.runtimevars = runtimevars or {}
+
     LVP = isinstance(dev.renderer, LVPRenderer)
     if sys.platform == "win32": # mypy doesn't understand when WIN is used here
       PAGE_EXECUTE_READWRITE, MEM_COMMIT, MEM_RESERVE = 0x40, 0x1000, 0x2000
@@ -115,7 +119,7 @@ class CPUProgram(HCQProgram):
 class CPUAllocator(HCQAllocator):
   def __init__(self, dev:CPUDevice): super().__init__(dev, supports_copy_from_disk=False, supports_transfer=False)
   def _alloc(self, size:int, options:BufferSpec) -> HCQBuffer:
-    if options.external_ptr: addr, buf = options.external_ptr, None
+    if options.external_ptr is not None: addr, buf = options.external_ptr, None
     elif WIN: addr = mv_address(buf:=mmap.mmap(-1, size, access=mmap.ACCESS_WRITE))
     else: addr = mv_address(buf:=mmap.mmap(-1, size, mmap.MAP_ANON | mmap.MAP_SHARED, mmap.PROT_READ | mmap.PROT_WRITE))
     return HCQBuffer(va:=addr, sz:=size, meta=buf, view=MMIOInterface(va, sz, fmt='B'), owner=self.dev)
@@ -132,7 +136,7 @@ class CPUDevice(HCQCompiled):
   def __init__(self, device:str=""):
     self.tasks:queue.Queue = queue.Queue()
     CPUWorker(self, self.tasks, thread_id=0).start()
-    compilers = CompilerSet([CompilerPair(ClangJITRenderer, None), CompilerPair(LLVMRenderer, CPULLVMCompiler, ctrl_var=CPU_LLVM),
+    compilers = CompilerSet([CompilerPair(ClangJITRenderer, None), CompilerPair(CPULLVMRenderer, CPULLVMCompiler, ctrl_var=CPU_LLVM),
                              CompilerPair(LVPRenderer, None, ctrl_var=CPU_LVP), CompilerPair(X86Renderer, X86Compiler, ctrl_var=CPU_X86)],
                              ctrl_var=CPU_CC)
     super().__init__(device, CPUAllocator(self), compilers, functools.partial(CPUProgram, self), CPUSignal, CPUComputeQueue)

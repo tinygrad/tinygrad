@@ -12,7 +12,7 @@ llvm_lib = (r"'C:\\Program Files\\LLVM\\bin\\LLVM-C.dll' if WIN else '/opt/homeb
             repr(['LLVM'] + [f'LLVM-{i}' for i in reversed(range(14, 21+1))]))
 
 webgpu_lib = "os.path.join(sysconfig.get_paths()['purelib'], 'pydawn', 'lib', 'libwebgpu_dawn.dll') if WIN else 'webgpu_dawn'"
-nv_lib_path = "f'/usr/local/cuda/targets/{sysconfig.get_config_vars().get(\"MULTIARCH\", \"\").rsplit(\"-\", 1)[0]}/lib'"
+nv_lib_path = "[f'/{pre}/cuda/targets/{sysconfig.get_config_vars().get(\"MULTIARCH\", \"\").rsplit(\"-\", 1)[0]}/lib' for pre in ['opt', 'usr/local']]"
 
 def load(name, dll, files, **kwargs):
   if not (f:=(root/(path:=kwargs.pop("path", __name__)).replace('.','/')/f"{name}.py")).exists() or getenv('REGEN'):
@@ -45,13 +45,13 @@ def __getattr__(nm):
       return load(nm, None, [
         *[root/"extra/nv_gpu_driver"/s for s in ["clc9b0.h", "clc6c0qmd.h","clcec0qmd.h", "nvdec_drv.h"]], "{}/kernel-open/common/inc/nvmisc.h",
         *[f"{{}}/src/common/sdk/nvidia/inc/class/cl{s}.h" for s in ["0000", "0070", "0080", "2080", "2080_notification", "c56f", "c86f", "c96f", "c761",
-                                                                    "83de", "c6c0", "cdc0"]],
+                                                                    "83de", "b2cc", "c6c0", "cdc0"]],
         *[f"{{}}/kernel-open/nvidia-uvm/{s}.h" for s in ["clc6b5", "clc9b5", "clcfb0", "uvm_ioctl", "uvm_linux_ioctl", "hwref/ampere/ga100/dev_fault"]],
         *[f"{{}}/src/nvidia/arch/nvalloc/unix/include/nv{s}.h" for s in ["_escape", "-ioctl", "-ioctl-numbers",
                                                                          "-ioctl-numa", "-unix-nvos-params-wrappers"]],
         *[f"{{}}/src/common/sdk/nvidia/inc/{s}.h" for s in ["alloc/alloc_channel", "nvos", "ctrl/ctrlc36f", "ctrl/ctrlcb33",
                                                             "ctrl/ctrla06c", "ctrl/ctrl90f1", "ctrl/ctrla06f/ctrla06fgpfifo"]],
-        *[f"{{}}/src/common/sdk/nvidia/inc/ctrl/ctrl{s}/*.h" for s in ["0000", "0080", "2080", "83de"]],
+        *[f"{{}}/src/common/sdk/nvidia/inc/ctrl/ctrl{s}/*.h" for s in ["0000", "0080", "2080", "83de", "b0cc"]],
         "{}/kernel-open/common/inc/nvstatus.h", "{}/src/nvidia/generated/g_allclasses.h"
       ], args=[
         "-include", "{}/src/common/sdk/nvidia/inc/nvtypes.h", "-I{}/src/common/inc", "-I{}/kernel-open/nvidia-uvm", "-I{}/kernel-open/common/inc",
@@ -100,9 +100,12 @@ def __getattr__(nm):
                                                                               "amd_hsa_kernel_code", "hsa_ext_finalize",
                                                                               "hsa_ext_image", "hsa_ven_amd_aqlprofile"]]],
       tarball=rocr_src, args=["-DLITTLEENDIAN_CPU"], prolog=["import os"])
+    case "amdgpu_kd": return load("amdgpu_kd", None, lambda: [f"{system('llvm-config-20 --includedir')}/llvm/Support/AMDHSAKernelDescriptor.h"],
+                                  args=lambda: system("llvm-config-20 --cflags").split() + ["-x", "c++"], recsym=True, parse_macros=False)
     case "amd_gpu": return load("amd_gpu", None, [root/f"extra/hip_gpu_driver/{s}.h" for s in ["sdma_registers", "nvd", "gc_11_0_0_offset",
                                                                                                "sienna_cichlid_ip_offset"]],
                                 args=["-I/opt/rocm/include", "-x", "c++"])
+    case "amdgpu_drm": return load("amdgpu_drm", None, [ "/usr/include/drm/drm.h", *[root/f"extra/hip_gpu_driver/{s}.h" for s in ["amdgpu_drm"]]])
     case "kgsl": return load("kgsl", None, [root/"extra/qcom_gpu_driver/msm_kgsl.h"], args=["-D__user="])
     case "qcom_dsp":
       return load("qcom_dsp", None, [root/f"extra/dsp/include/{s}.h" for s in ["ion", "msm_ion", "adsprpc_shared", "remote_default", "apps_std"]])
@@ -139,4 +142,9 @@ def __getattr__(nm):
       return load("metal", "'Metal'", [f"{macossdk}/System/Library/Frameworks/Metal.framework/Headers/MTL{s}.h" for s in
                   ["ComputeCommandEncoder", "ComputePipeline", "CommandQueue", "Device", "IndirectCommandBuffer", "Resource", "CommandEncoder"]],
                   args=["-xobjective-c","-isysroot",macossdk], types={"dispatch_data_t":"objc.id_"})
+    case "iokit": return load("iokit", "'IOKit'", [f"{macossdk}/System/Library/Frameworks/IOKit.framework/Headers/IOKitLib.h"],
+                              args=["-isysroot", macossdk])
+    case "corefoundation": return load("corefoundation", "'CoreFoundation'",
+                                       [f"{macossdk}/System/Library/Frameworks/CoreFoundation.framework/Headers/CF{s}.h" for s in ["String", "Data"]],
+                                       args=["-isysroot", macossdk])
     case _: raise AttributeError(f"no such autogen: {nm}")

@@ -22,9 +22,7 @@ class WaveSlot:
   @property
   def cu_loc(self) -> str: return f"SE:{self.se} CU:{self.cu}"
   @property
-  def simd_loc(self) -> str: return f"{self.cu_loc} SIMD:{self.simd}"
-  @property
-  def wave_loc(self) -> str: return f"{self.simd_loc} W:{self.wave_id}"
+  def wave_loc(self) -> str: return f"{self.cu_loc} SIMD:{self.simd} W:{self.wave_id}"
 
 @dataclasses.dataclass(frozen=True)
 class WaveExec(WaveSlot):
@@ -161,6 +159,7 @@ def main() -> None:
   if not trace: raise RuntimeError(f"no matching trace for {args.kernel}")
   n = 0
   for s in trace["steps"]:
+    if "PKTS" in s["name"]: continue
     print(s["name"])
     data = viz.get_render(s["query"])
     print_data(data)

@@ -1,5 +1,5 @@
 import ctypes, time, contextlib, functools
-from typing import Literal
+from typing import cast, Literal
 from tinygrad.helpers import to_mv, data64, lo32, hi32, DEBUG, wait_cond, pad_bytes
 from tinygrad.runtime.autogen.am import am
 from tinygrad.runtime.support.amd import import_soc
@@ -280,7 +280,6 @@ class AM_GFX(AM_IP):
         self._grbm_select(me=1, pipe=0, queue=q, inst=xcc)
         if self.adev.regCP_HQD_ACTIVE.read(inst=xcc) & 1: self.adev.regCP_HQD_DEQUEUE_REQUEST.write(0x2, inst=xcc) # 1 - DRAIN_PIPE; 2 - RESET_WAVES
         self._grbm_select(inst=xcc)
-    for xcc in range(self.xccs): self.adev.regGCVM_CONTEXT0_CNTL.write(0, inst=xcc)
 
   def setup_ring(self, ring_addr:int, ring_size:int, rptr_addr:int, wptr_addr:int, eop_addr:int, eop_size:int, idx:int, aql:bool) -> tuple[int, int]:
     pipe, queue, doorbell = idx // 4, idx % 4, am.AMDGPU_NAVI10_DOORBELL_MEC_RING0
@@ -591,7 +590,7 @@ class AM_PSP(AM_IP):
       cmd = am.struct_psp_gfx_cmd_resp(cmd_id=am.GFX_CMD_ID_LOAD_IP_FW)
       cmd.cmd.cmd_load_ip_fw.fw_phy_addr_hi, cmd.cmd.cmd_load_ip_fw.fw_phy_addr_lo = data64(self.msg1_addr)
       cmd.cmd.cmd_load_ip_fw.fw_size = len(fw_bytes)
-      cmd.cmd.cmd_load_ip_fw.fw_type = fw_type
+      cmd.cmd.cmd_load_ip_fw.fw_type = cast(am.enum_psp_gfx_fw_type, fw_type)
       self._ring_submit(cmd)
 
   def _tmr_load_cmd(self) -> am.struct_psp_gfx_cmd_resp:

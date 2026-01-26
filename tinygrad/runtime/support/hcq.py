@@ -426,10 +426,10 @@ class HCQCompiled(Compiled, Generic[SignalType]):
       et = time.perf_counter_ns()
       return (decimal.Decimal(et+st) / 2000) - d.timeline_signal.timestamp
 
-    gpu2cpu_compute_time_diff = statistics.median([_sync(self, self.hw_compute_queue_t) for _ in range(40)])
+    self.gpu2cpu_compute_time_diff = statistics.median([_sync(self, self.hw_compute_queue_t) for _ in range(40)])
     if self.hw_copy_queue_t is None: gpu2cpu_copy_time_diff = decimal.Decimal(0)
     else: gpu2cpu_copy_time_diff = statistics.median([_sync(self, self.hw_copy_queue_t) for _ in range(40)])
-    Compiled.profile_events += [ProfileDeviceEvent(self.device, gpu2cpu_compute_time_diff, gpu2cpu_copy_time_diff, props=self.device_props())]
+    Compiled.profile_events += [ProfileDeviceEvent(self.device, self.gpu2cpu_compute_time_diff, gpu2cpu_copy_time_diff, props=self.device_props())]
 
   def _wrap_timeline_signal(self):
     self.timeline_signal, self._shadow_timeline_signal, self.timeline_value = self._shadow_timeline_signal, self.timeline_signal, 1
@@ -512,7 +512,7 @@ class HCQAllocator(HCQAllocatorBase, Generic[HCQDeviceType]):
   def _copyin(self, dest:HCQBuffer, src:memoryview):
     if self.dev.hw_copy_queue_t is None:
       self.dev.synchronize()
-      with cpu_profile(f'TINY -> {self.dev.device}', self.dev.device, is_copy=True): ctypes.memmove(cast(int, dest.va_addr), from_mv(src), len(src))
+      with cpu_profile(f'TINY -> {self.dev.device}', self.dev.device, is_copy=True): ctypes.memmove(int(dest.va_addr), from_mv(src), len(src))
       return
 
     with hcq_profile(self.dev, queue_type=self.dev.hw_copy_queue_t, desc=f"TINY -> {self.dev.device}", enabled=PROFILE):
@@ -546,7 +546,7 @@ class HCQAllocator(HCQAllocatorBase, Generic[HCQDeviceType]):
   def _copyout(self, dest:memoryview, src:HCQBuffer):
     self.dev.synchronize()
     if self.dev.hw_copy_queue_t is None:
-      with cpu_profile(f'{self.dev.device} -> TINY', self.dev.device, is_copy=True): ctypes.memmove(from_mv(dest), cast(int, src.va_addr), len(dest))
+      with cpu_profile(f'{self.dev.device} -> TINY', self.dev.device, is_copy=True): ctypes.memmove(from_mv(dest), int(src.va_addr), len(dest))
       return
 
     with hcq_profile(self.dev, queue_type=self.dev.hw_copy_queue_t, desc=f"{self.dev.device} -> TINY", enabled=PROFILE):

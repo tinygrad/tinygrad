@@ -1,15 +1,17 @@
 import ctypes
 from typing import Any, cast
 import tinygrad.runtime.autogen.cuda as cuda
-from tinygrad.helpers import init_c_var, dedup
+from tinygrad.helpers import dedup
+from tinygrad.runtime.support.c import init_c_var
 from tinygrad.device import Buffer, Device
 from tinygrad.runtime.ops_cuda import CUDADevice, check, encode_args, cu_time_execution
 from tinygrad.engine.realize import ExecItem, BufferXfer, CompiledRunner
 from tinygrad.engine.jit import MultiGraphRunner, GraphException
 
 class CUDAGraph(MultiGraphRunner):
-  def __init__(self, jit_cache: list[ExecItem], input_buffers: list[Buffer], var_vals: dict[str, int]):
-    super().__init__(jit_cache, input_buffers, var_vals)
+  def __init__(self, jit_cache: list[ExecItem], input_buffers: list[Buffer], var_vals: dict[str, int],
+               orig_valid_positions: dict[int, set[int]]|None = None):
+    super().__init__(jit_cache, input_buffers, var_vals, orig_valid_positions)
 
     # Check all jit items are compatible.
     if not all(isinstance(ji.prg, (CompiledRunner, BufferXfer)) for ji in jit_cache): raise GraphException
@@ -17,7 +19,7 @@ class CUDAGraph(MultiGraphRunner):
     self.jc_idx_with_updatable_bufs = dedup([x[0] for x in self.input_replace.keys()])
     self.updatable_nodes: dict[int, tuple[Any, Any, Any, bool]] = {} # dict[jc index] = tuple(graph node, node params, input kernel params, is memcpy)
 
-    self.graph = init_c_var(cuda.CUgraph(), lambda x: check(cuda.cuGraphCreate(ctypes.byref(x), 0)))
+    self.graph = init_c_var(cuda.CUgraph, lambda x: check(cuda.cuGraphCreate(ctypes.byref(x), 0)))
 
     for j,ji in enumerate(jit_cache):
       if isinstance(ji.prg, CompiledRunner):
@@ -28,7 +30,8 @@ class CUDAGraph(MultiGraphRunner):
         c_deps = (cuda.CUgraphNode*len(deps))(*deps) if deps else None
 
         c_args, vargs = encode_args([cast(Buffer, x)._buf for x in ji.bufs], [var_vals.get(x.expr, ji.fixedvars.get(x.expr)) for x in ji.prg.p.vars])
-        kern_params = cuda.CUDA_KERNEL_NODE_PARAMS_v1(ji.prg._prg.prg, *global_size, *local_size, 0, None, vargs)
+        kern_params = cuda.CUDA_KERNEL_NODE_PARAMS_v1(ji.prg._prg.prg, *global_size, *local_size, 0, ctypes.cast(0, ctypes.POINTER(ctypes.c_void_p)),
+                                                      vargs)
         check(cuda.cuGraphAddKernelNode(ctypes.byref(new_node), self.graph, c_deps, len(deps), ctypes.byref(kern_params)))
 
         if j in self.launch_dims_replace or j in self.var_vals_replace or j in self.jc_idx_with_updatable_bufs:
@@ -45,7 +48,7 @@ class CUDAGraph(MultiGraphRunner):
         check(cuda.cuGraphAddMemcpyNode(ctypes.byref(node_from), self.graph, c_deps, len(deps), ctypes.byref(cp_params), src_dev.context))
         if j in self.jc_idx_with_updatable_bufs: self.updatable_nodes[j] = (node_from, cp_params, src_dev.context, True)
 
-    self.instance = init_c_var(cuda.CUgraphExec(), lambda x: check(cuda.cuGraphInstantiate_v2(ctypes.byref(x), self.graph, None, None, 0)))
+    self.instance = init_c_var(cuda.CUgraphExec, lambda x: check(cuda.cuGraphInstantiate_v2(ctypes.byref(x), self.graph, None, None, 0)))
 
   def __call__(self, input_buffers: list[Buffer], var_vals: dict[str, int], wait=False) -> float|None:
     # Update buffers in the c_args struct.

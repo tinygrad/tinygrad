@@ -110,7 +110,7 @@ jobs:
     - name: Test ResNet-18
       run: DEBUG=2 python3 extra/torch_backend/example.py
     - name: custom tests
-      run: python3 extra/torch_backend/test.py
+      run: python3 -m pytest -n auto extra/torch_backend/test.py --durations=20
     - name: Test one op in torch tests
       run: DEBUG=2 python3 extra/torch_backend/torch_tests.py TestTinyBackendPRIVATEUSE1.test_unary_log_tiny_float32
     - name: Test Ops with TINY_BACKEND
@@ -229,14 +229,14 @@ jobs:
         deps: linting
     - name: Lint bad-indentation and trailing-whitespace with pylint
       run: python -m pylint --disable=all -e W0311 -e C0303 --jobs=0 --indent-string='  ' --recursive=y .
-    - name: Lint with ruff
+    - name: Run pre-commit linting hooks
+      run: SKIP=tiny,tests,example pre-commit run --all-files
+    - name: Lint additional files with ruff
       run: |
-        pip3 install --upgrade --force-reinstall ruff==0.14.10
-        pre-commit run ruff --all-files
         python3 -m ruff check examples/mlperf/ --ignore E501
         python3 -m ruff check extra/thunder/tiny/ --ignore E501 --ignore F841 --ignore E722
         python3 -m ruff check extra/torch_backend/backend.py
-    - name: Run mypy
+    - name: Run mypy with lineprecision report
       run: |
         python -m mypy --lineprecision-report .
         cat lineprecision.txt
@@ -254,10 +254,12 @@ jobs:
     - name: Setup Environment
       uses: ./.github/actions/setup-tinygrad
       with:
-        key: unittest-12
-        pydeps: "pillow numpy ftfy regex"
+        key: unittest-13
+        pydeps: "pillow numpy ftfy regex pre-commit"
         deps: testing_unit
         llvm: 'true'
+    - name: Run pre-commit test hooks
+      run: SKIP=ruff,mypy pre-commit run --all-files
     - name: Check Device.DEFAULT
       run: python -c "from tinygrad import Device; assert Device.DEFAULT == 'CPU', Device.DEFAULT"
     - name: Run unit tests
@@ -365,7 +367,7 @@ jobs:
         uses: ./.github/actions/setup-tinygrad
         with:
           key: gen-dataset
-          deps: testing_minimal
+          deps: testing
           opencl: 'true'
       - name: Generate Dataset
         run: CL=1 extra/optimization/generate_dataset.sh
@@ -670,7 +672,7 @@ jobs:
           python-version: '3.13'
       - name: Verify AMD autogen is up to date
         run: |
-          python -m extra.assembly.amd.pdf
+          python -m extra.assembly.amd.amdxml
           git diff --exit-code extra/assembly/amd/autogen/
       - name: Install LLVM 21
         run: |
@@ -680,6 +682,8 @@ jobs:
           sudo apt-get install llvm-21 llvm-21-tools cloc
       - name: RDNA3 Line Count
         run: cloc --by-file extra/assembly/amd/*.py
+      - name: Install rocprof-trace-decoder
+        run: sudo PYTHONPATH="." ./extra/sqtt/install_sqtt_decoder.py
       - name: Run RDNA3 emulator tests
         run: python -m pytest -n=auto extra/assembly/amd/ --durations 20
       - name: Run RDNA3 emulator tests (AMD_LLVM=1)
@@ -723,6 +727,8 @@ jobs:
       - name: Run pytest (cuda)
         # skip multitensor because it's slow
         run: python -m pytest -n=auto test/ --ignore=test/models --ignore=test/unit --ignore test/test_gc.py --ignore test/test_multitensor.py --durations=20
+      - name: Run TestOps.test_add with PMA
+        run: VIZ=1 PMA=1 DEBUG=5 python3 test/test_ops.py TestOps.test_add
       - name: Run process replay tests
         uses: ./.github/actions/process-replay
 

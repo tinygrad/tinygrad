@@ -2,10 +2,10 @@ import functools
 from tinygrad.device import Compiled, Compiler, Allocator, CompilerSet, CompilerPair
 from tinygrad.engine.jit import MultiGraphRunner
 from tinygrad.renderer.cstyle import Renderer, CStyleLanguage
-from tinygrad.renderer.llvmir import AMDLLVMRenderer
 from tinygrad.uop.ops import Ops
 from tinygrad.helpers import cpu_profile, EMULATE, NULL_IR3, NULL_NAK
 from tinygrad.renderer.nir import IR3Renderer, NAKRenderer
+from tinygrad.renderer.llvmir import AMDLLVMRenderer
 
 class NullRenderer(CStyleLanguage):
   device = "NULL"
@@ -15,7 +15,7 @@ class NullRenderer(CStyleLanguage):
   code_for_op = {**CStyleLanguage.code_for_op, Ops.THREEFRY: lambda a,b,dtype: f"threefry({a},{b})", Ops.MAX: lambda a,b,dtype: f"max({a},{b})"}
 
 class NullProgram:
-  def __init__(self, device:str, name:str, lib:bytes): self.device, self.name = device, name
+  def __init__(self, device:str, name:str, lib:bytes, **kwargs): self.device, self.name = device, name
   def __call__(self, *bufs, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), vals:tuple[int, ...]=(), wait=False):
     with cpu_profile(self.name, self.device): return 1e-3
 
@@ -36,6 +36,7 @@ class NullDevice(Compiled):
     match str(EMULATE.value):
       case "AMD": renderer = functools.partial(AMDLLVMRenderer, "gfx1100")
       case "AMD_RDNA4": renderer = functools.partial(AMDLLVMRenderer, "gfx1201")
+      case "AMD_CDNA4": renderer = functools.partial(AMDLLVMRenderer, "gfx950")
       case "": renderer = NullRenderer
       case _: raise RuntimeError(f"can't EMULATE device: {EMULATE.value}")
     compilers = CompilerSet([CompilerPair(renderer, Compiler), CompilerPair(functools.partial(IR3Renderer, 0x6030001), None, NULL_IR3), # adreno 630
