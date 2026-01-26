@@ -1041,7 +1041,10 @@ def _compile_mem_op(inst, ctx: _Ctx, name: str) -> tuple[str, UOp]:
     if is_scratch:
       scratch_stride = ctx.rsgpr_dyn(_c(SCRATCH_STRIDE_IDX)).cast(dtypes.uint64)
       base = lane.cast(dtypes.uint64) * scratch_stride
-      addr_offset = ctx.rvgpr_dyn(addr_reg, lane).cast(dtypes.uint64)
+      # SVE (Scratch VGPR Enable): when SVE=1, VADDR is used as offset; when SVE=0, VADDR is ignored
+      sve = getattr(inst, 'sve', 0)
+      vaddr = ctx.rvgpr_dyn(addr_reg, lane).cast(dtypes.uint64)
+      addr_offset = vaddr if sve == 1 else UOp.const(dtypes.uint64, 0)
       # Add saddr value only if use_saddr is true (saddr < 124)
       saddr_contrib = use_saddr.where(ctx.rsgpr_dyn(saddr_reg).cast(dtypes.uint64), UOp.const(dtypes.uint64, 0)) if saddr_reg is not None else UOp.const(dtypes.uint64, 0)
       return base + addr_offset + saddr_contrib + offset64
