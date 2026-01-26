@@ -94,31 +94,35 @@ def profile_instructions(kernel: bytes):
     i += inst.size()
 
   # Profile each instruction
+  from extra.assembly.amd.emu2 import _match_canonical
   results = []
   for inst_bytes, inst_str, inst_type in inst_data:
-    # Build sink and get canonical key
-    build_start = time.perf_counter()
-    sink, ctx = _get_inst_sink(inst_bytes)
-    build_time = time.perf_counter() - build_start
+    # Check canonical cache BEFORE building sink (matches real behavior)
+    inst_size = decode_inst(inst_bytes).size()
+    inst_int = int.from_bytes(inst_bytes[:inst_size], 'little')
+    is_cache_hit = _match_canonical(inst_int, inst_size) is not None
 
-    # Count UOps in sink
-    uop_count = len(sink.toposort())
-
-    # Check canonical cache
-    canonical = ctx.canonical_key(inst_bytes)
-    is_cache_hit = canonical is not None and canonical in _canonical_prg_cache
-
-    # Render (skip if cache hit - would be instant)
     if is_cache_hit:
-      render_time = 0
+      # Skip build and render entirely for cache hits
+      build_time, render_time, uop_count = 0, 0, 0
     else:
+      # Build sink
+      build_start = time.perf_counter()
+      sink, ctx = _get_inst_sink(inst_bytes)
+      build_time = time.perf_counter() - build_start
+
+      # Count UOps in sink
+      uop_count = len(sink.toposort())
+
+      # Render
       render_start = time.perf_counter()
       with Context(NOOPT=1, IGNORE_OOB=1, TUPLE_ORDER=0):
         prg = get_program(sink, _emu_renderer)
       render_time = time.perf_counter() - render_start
-      # Update canonical cache if applicable
-      if canonical is not None:
-        _canonical_prg_cache[canonical] = prg
+
+      # Update canonical cache
+      base, mask, size = ctx.canonical_mask(inst_bytes)
+      _canonical_prg_cache.append((base, mask, size, prg))
 
     results.append({
       'inst_str': inst_str + (' [HIT]' if is_cache_hit else ''),

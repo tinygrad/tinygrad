@@ -455,15 +455,19 @@ class _Ctx:
       hi_part = self.inst_word(dword_idx + 1) & UOp.const(dtypes.uint32, hi_mask)
       return lo_part | (hi_part << UOp.const(dtypes.uint32, lo_bits))
 
-  def canonical_key(self, inst_bytes: bytes) -> bytes | None:
-    """Compute canonical cache key by zeroing dynamically-read fields. Returns None if no dynamic fields."""
-    if not self.dyn_fields: return None
-    size = self.inst_size  # use full instruction size
-    result = int.from_bytes(inst_bytes[:size], 'little')
+  def canonical_mask(self, inst_bytes: bytes) -> tuple[int, int, int]:
+    """Compute canonical (base, mask, size) for cache lookup.
+    base = instruction bits with dynamic fields zeroed
+    mask = bitmask with 1s for static bits, 0s for dynamic bits
+    size = instruction size in bytes"""
+    size = self.inst_size
+    base = int.from_bytes(inst_bytes[:size], 'little')
+    mask = (1 << (size * 8)) - 1  # all 1s initially
     for lo, hi in self.dyn_fields:
-      mask = ((1 << (hi - lo + 1)) - 1) << lo
-      result &= ~mask
-    return result.to_bytes(size, 'little')
+      field_mask = ((1 << (hi - lo + 1)) - 1) << lo
+      base &= ~field_mask  # zero dynamic bits in base
+      mask &= ~field_mask  # zero dynamic bits in mask
+    return base, mask, size
 
   # Dynamic register access (takes UOp index instead of int)
   def rsgpr_dyn(self, reg: UOp) -> UOp:
@@ -1130,19 +1134,28 @@ def _get_inst_sink(inst_bytes: bytes) -> tuple[UOp, _Ctx]:
   _, sink = handler(inst, ctx, name)
   return sink.rtag(1), ctx  # tag skips optimizations in get_program
 
-_canonical_prg_cache: dict[bytes, ProgramSpec] = {}  # global cache for canonical instructions
+_canonical_prg_cache: list[tuple[int, int, int, ProgramSpec]] = []  # [(base, mask, size, prg), ...]
+
+def _match_canonical(inst_int: int, inst_size: int) -> ProgramSpec | None:
+  """Check if instruction matches any cached (base, mask, size) pattern."""
+  for base, mask, size, prg in _canonical_prg_cache:
+    if inst_size != size: continue  # must match instruction size exactly
+    if (inst_int & mask) == base: return prg
+  return None
 
 @functools.cache
 def _get_inst_prg(inst_bytes: bytes) -> ProgramSpec:
   """Compile instruction bytes to ProgramSpec. Cached by instruction bytes, with canonical dedup."""
+  # Decode instruction to get size for canonical matching
+  inst = decode_inst(inst_bytes)
+  inst_size = inst.size()
+  inst_int = int.from_bytes(inst_bytes[:inst_size], 'little')
+  # Check canonical cache BEFORE building sink (avoids expensive UOp construction)
+  if (prg := _match_canonical(inst_int, inst_size)) is not None: return prg
   sink, ctx = _get_inst_sink(inst_bytes)
-  canonical = ctx.canonical_key(inst_bytes)
-  if canonical is not None and canonical in _canonical_prg_cache:
-    return _canonical_prg_cache[canonical]
   with Context(NOOPT=1, IGNORE_OOB=1, TUPLE_ORDER=0):
     prg = get_program(sink, _emu_renderer)
-  if canonical is not None:
-    _canonical_prg_cache[canonical] = prg
+  _canonical_prg_cache.append((*ctx.canonical_mask(inst_bytes), prg))
   return prg
 
 @functools.cache
