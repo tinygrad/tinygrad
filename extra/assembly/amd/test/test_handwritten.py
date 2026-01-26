@@ -6,7 +6,7 @@ from extra.assembly.amd.autogen.rdna3.ins import *
 from extra.assembly.amd.dsl import Inst
 from extra.assembly.amd.test.test_roundtrip import compile_asm
 
-class _TestIntegration(unittest.TestCase):
+class IntegrationTestBase(unittest.TestCase):
   inst: Inst
   arch: str
   def tearDown(self):
@@ -18,7 +18,7 @@ class _TestIntegration(unittest.TestCase):
     self.assertEqual(b, compile_asm(st, arch=self.arch), desc)
     print(desc)
 
-class TestIntegration(_TestIntegration):
+class TestIntegration(IntegrationTestBase):
   arch: str = "rdna3"
 
   def test_wmma(self):
@@ -128,7 +128,7 @@ class TestIntegration(_TestIntegration):
     int_inst = s_mov_b32(s[0], struct.unpack("I", struct.pack("f", 1337.0))[0])
     self.assertEqual(self.inst, int_inst)
 
-class TestIntegrationCDNA(_TestIntegration):
+class TestIntegrationCDNA(IntegrationTestBase):
   arch = "cdna"
 
   def test_mfma(self):
