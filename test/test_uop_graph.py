@@ -530,7 +530,7 @@ class TestUOpGraph(unittest.TestCase):
     c = r + 1
     self.assertIn(r, c.ranges)
 
-    e = UOp.const(dtypes.void, None).end(r)
+    e = UOp.const(dtypes.int, 1).end(r)
     self.assertNotIn(r, e.ranges)
 
     a = c.after(e)
