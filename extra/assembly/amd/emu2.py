@@ -573,7 +573,7 @@ def _compile_smem(inst: SMEM, ctx: _Ctx, name: str) -> tuple[str, UOp]:
   sdata_reg = ctx.inst_field(SMEM.sdata)
   # Dynamic offset field (bits 52:32) - 21-bit signed immediate
   offset_raw = ctx.inst_field(SMEM.offset)
-  offset = (offset_raw ^ _c(0x100000)) - _c(0x100000)  # sign-extend 21-bit
+  offset = (offset_raw.cast(dtypes.int) ^ _c(0x100000, dtypes.int)) - _c(0x100000, dtypes.int)  # sign-extend 21-bit
   # Dynamic soffset field (bits 63:57) - SGPR for additional offset (NULL=124 reads as 0)
   soffset = ctx.inst_field(SMEM.soffset)
   addr = _u64(ctx.rsgpr_dyn(sbase), ctx.rsgpr_dyn(sbase + _c(1))) + offset.cast(dtypes.uint64) + ctx.rsgpr_dyn(soffset).cast(dtypes.uint64)
@@ -997,7 +997,9 @@ def _compile_mem_op(inst, ctx: _Ctx, name: str) -> tuple[str, UOp]:
     addr_reg = ctx.inst_field(type(inst).addr)
     vdata_reg = ctx.inst_field(type(inst).data)
     vdst_reg = ctx.inst_field(type(inst).vdst)
-    offset = _c(_sext(getattr(inst, 'offset', 0), 13))
+    # Dynamic 13-bit signed offset: cast to int, then (val ^ 0x1000) - 0x1000 for sign extension
+    raw_offset = ctx.inst_field(type(inst).offset).cast(dtypes.int)
+    offset = (raw_offset ^ _c(0x1000, dtypes.int)) - _c(0x1000, dtypes.int)
     offset0, offset1 = 0, 0
     # Dynamic saddr - read field, NULL (124) or >= 128 means no saddr
     saddr_reg = ctx.inst_field(type(inst).saddr) if hasattr(inst, 'saddr') else None

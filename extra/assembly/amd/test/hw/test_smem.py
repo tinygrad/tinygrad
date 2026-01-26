@@ -265,5 +265,77 @@ class TestSLoadMultiDword(unittest.TestCase):
     self.assertEqual(st.sgpr[5], st.sgpr[9])
 
 
+class TestSLoadOffset(unittest.TestCase):
+  """Tests for s_load with different immediate offsets.
+
+  These tests verify that instruction deduplication correctly handles different offset values.
+  If offset is made dynamic incorrectly, instructions with different offsets may load wrong data.
+  """
+
+  def test_s_load_different_offsets(self):
+    """Load from two different offsets and verify correct values."""
+    instructions = [
+      s_load_b64(s[2:3], s[80:81], 0, soffset=NULL),
+      s_waitcnt(lgkmcnt=0),
+      v_mov_b32_e32(v[0], 0),
+      # Store 0xAAAAAAAA at offset 100
+      s_mov_b32(s[4], 0xAAAAAAAA),
+      v_mov_b32_e32(v[2], s[4]),
+      global_store_b32(addr=v[0], data=v[2], saddr=s[2:3], offset=100),
+      # Store 0xBBBBBBBB at offset 200
+      s_mov_b32(s[4], 0xBBBBBBBB),
+      v_mov_b32_e32(v[2], s[4]),
+      global_store_b32(addr=v[0], data=v[2], saddr=s[2:3], offset=200),
+      s_waitcnt(vmcnt=0),
+      *CACHE_INV,
+      # Load from offset 100 -> should get 0xAAAAAAAA
+      s_load_b32(s[4], s[2:3], NULL, offset=100),
+      # Load from offset 200 -> should get 0xBBBBBBBB
+      s_load_b32(s[5], s[2:3], NULL, offset=200),
+      s_waitcnt(lgkmcnt=0),
+      s_mov_b32(s[2], 0), s_mov_b32(s[3], 0),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.sgpr[4], 0xAAAAAAAA, f"offset 100: expected 0xAAAAAAAA, got 0x{st.sgpr[4]:08x}")
+    self.assertEqual(st.sgpr[5], 0xBBBBBBBB, f"offset 200: expected 0xBBBBBBBB, got 0x{st.sgpr[5]:08x}")
+
+  def test_s_load_negative_offset(self):
+    """Test negative offset (21-bit signed).
+    Store 0xAAAA at offset 100, 0xBBBB at offset 200.
+    Load with offset -100 from base+200 -> should get 0xAAAA.
+    Load with offset -100 from base+300 -> should get 0xBBBB."""
+    instructions = [
+      s_load_b64(s[2:3], s[80:81], 0, soffset=NULL),
+      s_waitcnt(lgkmcnt=0),
+      v_mov_b32_e32(v[0], 0),
+      # Store 0xAAAAAAAA at offset 100, 0xBBBBBBBB at offset 200
+      s_mov_b32(s[8], 0xAAAAAAAA),
+      v_mov_b32_e32(v[2], s[8]),
+      global_store_b32(addr=v[0], data=v[2], saddr=s[2:3], offset=100),
+      s_mov_b32(s[8], 0xBBBBBBBB),
+      v_mov_b32_e32(v[2], s[8]),
+      global_store_b32(addr=v[0], data=v[2], saddr=s[2:3], offset=200),
+      s_waitcnt(vmcnt=0),
+      *CACHE_INV,
+      # base+200, load with offset -100 -> should get value at 100
+      s_add_u32(s[6], s[2], 200),
+      s_addc_u32(s[7], s[3], 0),
+      s_load_b32(s[4], s[6:7], NULL, offset=-100),
+      # base+300, load with offset -100 -> should get value at 200
+      s_add_u32(s[6], s[2], 300),
+      s_addc_u32(s[7], s[3], 0),
+      s_load_b32(s[5], s[6:7], NULL, offset=-100),
+      s_waitcnt(lgkmcnt=0),
+      s_mov_b32(s[2], 0),
+      s_mov_b32(s[3], 0),
+      s_mov_b32(s[6], 0),
+      s_mov_b32(s[7], 0),
+      s_mov_b32(s[8], 0),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.sgpr[4], 0xAAAAAAAA, f"offset 200-100=100: expected 0xAAAAAAAA, got 0x{st.sgpr[4]:08x}")
+    self.assertEqual(st.sgpr[5], 0xBBBBBBBB, f"offset 300-100=200: expected 0xBBBBBBBB, got 0x{st.sgpr[5]:08x}")
+
+
 if __name__ == '__main__':
   unittest.main()
