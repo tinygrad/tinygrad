@@ -57,10 +57,7 @@ from extra.assembly.amd.expr_parser import parse_block
 
 MASK32 = 0xFFFFFFFF
 
-# Common UOp constants (avoid repeated allocation)
 def _c(val, dtype=dtypes.uint32): return UOp.const(dtype, val)
-U32_0, U32_1, U32_16, U32_MASK = _c(0), _c(1), _c(16), _c(MASK32)
-IDX_0, IDX_32 = _c(0, dtypes.index), _c(32, dtypes.index)
 
 # Inline float constants (as bit patterns) for GPU instructions
 F32_INLINE = {240: 0x3f000000, 241: 0xbf000000, 242: 0x3f800000, 243: 0xbf800000,  # 0.5, -0.5, 1.0, -1.0
@@ -121,9 +118,9 @@ def _to_u32(val: UOp) -> UOp:
   if val.dtype == dtypes.uint32: return val
   if val.dtype.itemsize == 4: return val.bitcast(dtypes.uint32)  # same size: bitcast (float32->uint32)
   return val.cast(dtypes.uint32)  # different size: cast (bool, int16, etc)
-def _lane_active(exec_mask: UOp, lane: UOp) -> UOp: return ((exec_mask >> lane.cast(dtypes.uint32)) & U32_1).ne(U32_0)
+def _lane_active(exec_mask: UOp, lane: UOp) -> UOp: return ((exec_mask >> lane.cast(dtypes.uint32)) & _c(1)).ne(_c(0))
 def _apply_opsel(val: UOp, sel_bit: int, opsel: int) -> UOp:
-  return (val >> U32_16) & _c(0xFFFF) if opsel & (1 << sel_bit) else val
+  return (val >> _c(16)) & _c(0xFFFF) if opsel & (1 << sel_bit) else val
 
 def _unroll_lanes(get_lane_bit, exec_mask: UOp, apply_exec: bool = True) -> UOp:
   """Combine 32 lane bits into a 32-bit mask using RANGE+REDUCE. Optionally apply EXEC mask."""
@@ -134,9 +131,9 @@ def _unroll_lanes(get_lane_bit, exec_mask: UOp, apply_exec: bool = True) -> UOp:
 
 def _set_lane_bit(old: UOp, lane: UOp, val: UOp, exec_mask: UOp) -> UOp:
   """Set/clear a single bit in a 32-bit mask based on lane index, respecting exec mask."""
-  mask = U32_1 << lane.cast(dtypes.uint32)
+  mask = _c(1) << lane.cast(dtypes.uint32)
   new_bit = _to_u32(val) << lane.cast(dtypes.uint32)
-  cleared = old & (mask ^ U32_MASK)
+  cleared = old & (mask ^ _c(MASK32))
   return _lane_active(exec_mask, lane).where(cleared | new_bit, old)
 
 def _val_to_u32(val: UOp) -> UOp:
@@ -182,9 +179,9 @@ def _apply_pseudocode_fixes(op_name: str, pcode: str) -> str:
 
 def parse_pcode(pcode: str, srcs: dict[str, UOp] | None = None, lane: UOp | None = None, op_name: str | None = None) -> tuple[dict[str, UOp], list[tuple[str, UOp]]]:
   if op_name: pcode = _apply_pseudocode_fixes(op_name, pcode)
-  vars: dict[str, UOp] = {n: UOp(Ops.DEFINE_VAR, dtypes.uint32, (), (n, U32_0, U32_MASK)) for n in ['S0', 'S1', 'S2', 'D0', 'VCC', 'EXEC', 'SCC', 'SIMM32']}
+  vars: dict[str, UOp] = {n: UOp(Ops.DEFINE_VAR, dtypes.uint32, (), (n, _c(0), _c(MASK32))) for n in ['S0', 'S1', 'S2', 'D0', 'VCC', 'EXEC', 'SCC', 'SIMM32']}
   if srcs: vars.update(srcs)
-  vars.update({'laneId': lane if lane is not None else U32_0, 'WAVE_MODE': {'IEEE': U32_1}, 'WAVE32': _c(True, dtypes.bool), 'WAVE64': _c(False, dtypes.bool)})
+  vars.update({'laneId': lane if lane is not None else _c(0), 'WAVE_MODE': {'IEEE': _c(1)}, 'WAVE32': _c(True, dtypes.bool), 'WAVE64': _c(False, dtypes.bool)})
   assigns: list[tuple[str, UOp]] = []
   lines = [l.strip().rstrip(';') for l in pcode.split('\n') if l.strip() and not l.strip().startswith('//')]
   _, final, _ = parse_block(lines, 0, vars, assigns=assigns)
@@ -283,7 +280,7 @@ def _scalar_stores_dyn(assigns: list, wsgpr_dyn, sdst_reg: UOp, sdst_size: int =
   def w64_dyn(reg: UOp, val):
     if val.dtype in (dtypes.uint64, dtypes.int64):
       lo, hi = _split64(val)
-      return [wsgpr_dyn(reg, lo), wsgpr_dyn(reg + U32_1, hi)]
+      return [wsgpr_dyn(reg, lo), wsgpr_dyn(reg + _c(1), hi)]
     return [wsgpr_dyn(reg, _to_u32(val))]
   stores = []
   for dest, val in assigns:
@@ -324,14 +321,14 @@ def compile_lane_pcode(op, inst, ctx: '_Ctx', inc_pc_fn, name: str):
   vdst_off = ctx.inst_field(type(inst).vdst)
   # src0_reg = VGPR index (src0 - 256 if VGPR, else 0 for inline/SGPR)
   is_vgpr = src0_off >= _c(256)
-  src0_reg = is_vgpr.where(src0_off - _c(256), U32_0)
+  src0_reg = is_vgpr.where(src0_off - _c(256), _c(0))
   # vdst for VOP1 is VGPRField but READFIRSTLANE writes to SGPR with same encoding; VOP3 vdst is direct SGPR offset
   # S0 = scalar value for WRITELANE, register index for others; S1 = lane select for READLANE/WRITELANE
   src1_off = ctx.inst_field(type(inst).src1) if hasattr(type(inst), 'src1') else None
   srcs = {
     'SRC0': src0_reg, 'VDST': vdst_off, 'EXEC_LO': ctx.rsgpr_dyn(_c(EXEC_LO.offset)), '_vgpr': ctx.vgpr,
-    'S0': ctx.rsrc_dyn(src0_off, IDX_0) if 'WRITELANE' in op_name else src0_reg,
-    'S1': ctx.rsrc_dyn(src1_off, IDX_0) if src1_off is not None else U32_0,
+    'S0': ctx.rsrc_dyn(src0_off, _c(0, dtypes.index)) if 'WRITELANE' in op_name else src0_reg,
+    'S1': ctx.rsrc_dyn(src1_off, _c(0, dtypes.index)) if src1_off is not None else _c(0),
   }
   _, assigns = parse_pcode(pcode, srcs, lane=None)
 
@@ -374,7 +371,7 @@ def compile_vop_pcode(op, srcs: dict[str, UOp], lane: UOp, wvgpr_fn, wsgpr_fn, r
           continue
       if val.dtype in (dtypes.uint64, dtypes.int64, dtypes.float64):
         lo, hi = _split64(val)
-        raw_stores.extend([('vgpr', wvgpr(vdst_reg, lane, lo, exec_mask)), ('vgpr', wvgpr(vdst_reg + U32_1, lane, hi, exec_mask))])
+        raw_stores.extend([('vgpr', wvgpr(vdst_reg, lane, lo, exec_mask)), ('vgpr', wvgpr(vdst_reg + _c(1), lane, hi, exec_mask))])
       elif val.dtype in (dtypes.half, dtypes.uint16, dtypes.int16) and rvgpr_fn is not None:
         result, old_val = _val_to_u32(val), rvgpr(vdst_reg, lane)
         hi_result = (old_val & UOp.const(dtypes.uint32, 0xFFFF)) | (result << UOp.const(dtypes.uint32, 16))
@@ -402,10 +399,10 @@ def compile_vop_pcode(op, srcs: dict[str, UOp], lane: UOp, wvgpr_fn, wsgpr_fn, r
   # Must use _unroll_lanes pattern with fresh lambda to avoid graph issues with the main lane range
   # VOP2 carry instructions write ALL 32 VCC bits (hardware verified), not just active lane bits
   if vcc_val is not None:
-    def get_vcc_bit(l): return (_to_u32(vcc_val.substitute({lane: l})) & U32_1).cast(dtypes.uint32)
+    def get_vcc_bit(l): return (_to_u32(vcc_val.substitute({lane: l})) & _c(1)).cast(dtypes.uint32)
     stores.append(wsgpr_fn(_c(vcc_reg), _unroll_lanes(get_vcc_bit, exec_mask, apply_exec=False)))
   if exec_val is not None:
-    def get_exec_bit(l): return (_to_u32(exec_val.substitute({lane: l})) & U32_1).cast(dtypes.uint32)
+    def get_exec_bit(l): return (_to_u32(exec_val.substitute({lane: l})) & _c(1)).cast(dtypes.uint32)
     stores.append(wsgpr_fn(_c(EXEC_LO.offset), _unroll_lanes(get_exec_bit, exec_mask, apply_exec=False)))
   stores.extend(scalar_stores)
   if not stores: return None
@@ -439,8 +436,8 @@ class _Ctx:
   def inst_word(self, dword_idx: int) -> UOp:
     """Read instruction dword from vmem at PC + dword_idx*4."""
     pc = self.rpc()
-    addr = (pc + UOp.const(dtypes.uint64, dword_idx * 4)) >> UOp.const(dtypes.uint64, 2)
-    return self.vmem.index(addr.cast(dtypes.index), ptr=True).load()
+    addr = pc if dword_idx == 0 else pc + UOp.const(dtypes.uint64, dword_idx * 4)
+    return self.vmem.index((addr >> UOp.const(dtypes.uint64, 2)).cast(dtypes.index), ptr=True).load()
 
   def inst_field(self, field) -> UOp:
     """Extract field bits from instruction encoding. Tracks field for canonical key computation."""
@@ -452,7 +449,8 @@ class _Ctx:
     word = self.inst_word(dword_idx)
     if lo // 32 == hi // 32:  # Same dword
       mask = (1 << (hi - lo + 1)) - 1
-      return (word >> UOp.const(dtypes.uint32, lo_in_dword)) & UOp.const(dtypes.uint32, mask)
+      shifted = word if lo_in_dword == 0 else word >> UOp.const(dtypes.uint32, lo_in_dword)
+      return shifted & UOp.const(dtypes.uint32, mask)
     else:  # Spans two dwords
       lo_bits = 32 - lo_in_dword
       lo_mask = (1 << lo_bits) - 1
@@ -486,12 +484,12 @@ class _Ctx:
 
   def rvgpr_dyn(self, reg: UOp, lane: UOp) -> UOp:
     """Read VGPR with dynamic register index."""
-    return self.vgpr.index(reg.cast(dtypes.index) * IDX_32 + lane.cast(dtypes.index), ptr=True).load()
+    return self.vgpr.index(reg.cast(dtypes.index) * _c(32, dtypes.index) + lane.cast(dtypes.index), ptr=True).load()
 
   def wvgpr_dyn(self, reg: UOp, lane: UOp, val: UOp, exec_mask: UOp, after: UOp | None = None) -> UOp:
     """Write VGPR with dynamic register index."""
     buf = self.vgpr.after(after) if after is not None else self.vgpr
-    offset = (reg.cast(dtypes.index) * IDX_32 + lane.cast(dtypes.index)).valid(_lane_active(exec_mask, lane))
+    offset = (reg.cast(dtypes.index) * _c(32, dtypes.index) + lane.cast(dtypes.index)).valid(_lane_active(exec_mask, lane))
     return buf.index(offset).store(val.cast(dtypes.uint32))
 
   def rsrc_dyn(self, off: UOp, lane: UOp, bits: int = 32, literal: UOp | None = None) -> UOp:
@@ -503,14 +501,16 @@ class _Ctx:
       is_sgpr = off < _c(128)
       # SGPR buffer (size 260) can hold any off 0-255, no guard needed
       sgpr_idx = off.cast(dtypes.index)
-      sgpr_val = _u64(self.sgpr.index(sgpr_idx, ptr=True).load(), self.sgpr.index(sgpr_idx + _c(1, dtypes.index), ptr=True).load())
+      sgpr_lo = self.sgpr.index(sgpr_idx, ptr=True).load()
+      sgpr_hi = self.sgpr.index(sgpr_idx + _c(1, dtypes.index), ptr=True).load()
+      sgpr_val = _u64(sgpr_lo, sgpr_hi)
       # Use .valid() for VGPR reads to avoid invalid memory access when off < 256
       vgpr_reg = off - _c(256)
-      vgpr_idx0 = (vgpr_reg.cast(dtypes.index) * IDX_32 + lane.cast(dtypes.index)).valid(is_vgpr)
-      vgpr_idx1 = ((vgpr_reg + U32_1).cast(dtypes.index) * IDX_32 + lane.cast(dtypes.index)).valid(is_vgpr)
+      vgpr_idx0 = (vgpr_reg.cast(dtypes.index) * _c(32, dtypes.index) + lane.cast(dtypes.index)).valid(is_vgpr)
+      vgpr_idx1 = ((vgpr_reg + _c(1)).cast(dtypes.index) * _c(32, dtypes.index) + lane.cast(dtypes.index)).valid(is_vgpr)
       vgpr_val = _u64(self.vgpr.index(vgpr_idx0, ptr=True).load(), self.vgpr.index(vgpr_idx1, ptr=True).load())
-      # 64-bit inline constants need special handling (different from 32-bit values in SGPR buffer)
-      inline = _u64(self.sgpr.index(sgpr_idx, ptr=True).load(), self.sgpr.index(sgpr_idx, ptr=True).load())  # integers: just extend
+      # 64-bit inline constants: extend 32-bit value (reuse sgpr_lo)
+      inline = _u64(sgpr_lo, sgpr_lo)
       if literal is not None: inline = off.eq(_c(255)).where(literal.cast(dtypes.uint64) << UOp.const(dtypes.uint64, 32), inline)
       for off_val, val in F64_INLINE.items(): inline = off.eq(_c(off_val)).where(UOp.const(dtypes.uint64, val), inline)
       return is_vgpr.where(vgpr_val, is_sgpr.where(sgpr_val, inline))
@@ -519,7 +519,7 @@ class _Ctx:
     if literal is not None: sgpr_val = off.eq(_c(255)).where(literal, sgpr_val)
     if bits == 16:  # F16 constants differ from pre-populated F32 constants
       for off_val, val in F16_INLINE.items(): sgpr_val = off.eq(_c(off_val)).where(UOp.const(dtypes.uint32, val), sgpr_val)
-    vgpr_idx = (off - _c(256)).cast(dtypes.index) * IDX_32 + lane.cast(dtypes.index)
+    vgpr_idx = (off - _c(256)).cast(dtypes.index) * _c(32, dtypes.index) + lane.cast(dtypes.index)
     vgpr_val = self.vgpr.index(vgpr_idx.valid(is_vgpr), ptr=True).load()
     return is_vgpr.where(vgpr_val, sgpr_val)
 
@@ -591,7 +591,7 @@ def _compile_sop(inst, ctx: _Ctx, name: str) -> tuple[str, UOp]:
     # For 64-bit: read SGPR pair if off < 128, else compute inline constant as 64-bit
     # (can't just read from buffer since buffer has 32-bit values)
     if is_64bit:
-      sgpr_val = _u64(ctx.rsgpr_dyn(off), ctx.rsgpr_dyn(off + U32_1))
+      sgpr_val = _u64(ctx.rsgpr_dyn(off), ctx.rsgpr_dyn(off + _c(1)))
       # Build inline constant: 128-192 = 0-64, 193-208 = -1 to -16
       inline_val = (off - _c(128)).cast(dtypes.uint64)  # positive inline 0-64
       neg_val = (_c(192) - off).cast(dtypes.int64).cast(dtypes.uint64)  # negative -1 to -16
@@ -663,8 +663,8 @@ def _compile_vop12(inst, ctx: _Ctx, name: str) -> tuple[str, UOp]:
     if is_16bit:
       src0_hi = src0_off >= _c(384)
       # Only compute hi-half when src0_off >= 384, use guarded index to prevent OOB access
-      src0_reg = src0_hi.where(src0_off - _c(384), U32_0)
-      s0_hi = (ctx.rvgpr_dyn(src0_reg, lane) >> U32_16) & _c(0xFFFF)
+      src0_reg = src0_hi.where(src0_off - _c(384), _c(0))
+      s0_hi = (ctx.rvgpr_dyn(src0_reg, lane) >> _c(16)) & _c(0xFFFF)
       if isinstance(src0_hi, UOp): s0 = src0_hi.where(s0_hi, s0)
       elif src0_hi: s0 = s0_hi
     srcs = {'S0': s0}
@@ -673,20 +673,20 @@ def _compile_vop12(inst, ctx: _Ctx, name: str) -> tuple[str, UOp]:
     vsrc1_hi = is_16bit and (vsrc1_reg >= _c(128))
     vsrc1_actual = vsrc1_hi.where(vsrc1_reg - _c(128), vsrc1_reg) if isinstance(vsrc1_hi, UOp) else vsrc1_reg - _c(128) if vsrc1_hi else vsrc1_reg
     s1 = ctx.rvgpr_dyn(vsrc1_actual, lane)
-    if isinstance(vsrc1_hi, UOp): s1 = vsrc1_hi.where((s1 >> U32_16) & _c(0xFFFF), s1)
-    elif vsrc1_hi: s1 = (s1 >> U32_16) & _c(0xFFFF)
+    if isinstance(vsrc1_hi, UOp): s1 = vsrc1_hi.where((s1 >> _c(16)) & _c(0xFFFF), s1)
+    elif vsrc1_hi: s1 = (s1 >> _c(16)) & _c(0xFFFF)
     # For FMAC/FMAMK hi-half dest, D0 must also read from hi-half (accumulator is in same half as dest)
     d0 = ctx.rvgpr_dyn(vdst_reg, lane)
-    if isinstance(write_hi_half, UOp): d0 = write_hi_half.where((d0 >> U32_16) & _c(0xFFFF), d0)
-    elif write_hi_half: d0 = (d0 >> U32_16) & _c(0xFFFF)  # extract hi 16 bits for accumulator
+    if isinstance(write_hi_half, UOp): d0 = write_hi_half.where((d0 >> _c(16)) & _c(0xFFFF), d0)
+    elif write_hi_half: d0 = (d0 >> _c(16)) & _c(0xFFFF)  # extract hi 16 bits for accumulator
     # Handle VOP2 hi-half src0 operand (src0 >= v[128] for 16-bit ops)
     src0_off = ctx.inst_field(VOP2.src0)
     s0 = ctx.rsrc_dyn(src0_off, lane, bits=16 if is_16bit else 32, literal=literal)
     if is_16bit:
       src0_hi = src0_off >= _c(384)
       # Only compute hi-half when src0_off >= 384, use guarded index to prevent OOB access
-      src0_reg = src0_hi.where(src0_off - _c(384), U32_0)
-      s0_hi = (ctx.rvgpr_dyn(src0_reg, lane) >> U32_16) & _c(0xFFFF)
+      src0_reg = src0_hi.where(src0_off - _c(384), _c(0))
+      s0_hi = (ctx.rvgpr_dyn(src0_reg, lane) >> _c(16)) & _c(0xFFFF)
       if isinstance(src0_hi, UOp): s0 = src0_hi.where(s0_hi, s0)
       elif src0_hi: s0 = s0_hi
     srcs = {'S0': s0, 'S1': s1, 'D0': d0}
@@ -730,16 +730,16 @@ def _compile_vopc(inst, ctx: _Ctx, name: str, opsel: int = 0, abs_bits: int = 0,
     s0 = ctx.rsrc_dyn(src0_off, lc, src0_bits, literal)
     s1 = ctx.rsrc_dyn(src1_off, lc, src1_bits, literal)
     if is_16bit:
-      if isinstance(vsrc1_hi, UOp): s1 = vsrc1_hi.where((s1 >> U32_16) & _c(0xFFFF), s1)
-      elif vsrc1_hi: s1 = (s1 >> U32_16) & _c(0xFFFF)
+      if isinstance(vsrc1_hi, UOp): s1 = vsrc1_hi.where((s1 >> _c(16)) & _c(0xFFFF), s1)
+      elif vsrc1_hi: s1 = (s1 >> _c(16)) & _c(0xFFFF)
       if opsel: s0, s1 = _apply_opsel(s0, 0, opsel), _apply_opsel(s1, 1, opsel)
     if is_float and (abs_bits or neg_bits):
       s0 = _apply_src_mods(s0, 0, abs_bits, neg_bits, is_16bit, src0_bits == 64)
       s1 = _apply_src_mods(s1, 1, abs_bits, neg_bits, is_16bit, src1_bits == 64)
-    if pcode is None: return U32_0
+    if pcode is None: return _c(0)
     for dest, val in parse_pcode(pcode, {'S0': s0, 'S1': s1}, lane=lc)[1]:
       if '[laneId]' in dest and ('D0' in dest or 'EXEC' in dest): return val.cast(dtypes.uint32)
-    return U32_0
+    return _c(0)
 
   new_bits = _unroll_lanes(get_cmp_bit, exec_mask, apply_exec=False)
   # Both VOPC and VOP3 clear inactive lane bits (hardware verified)
@@ -837,7 +837,7 @@ def _compile_vop3sd(inst: VOP3SD, ctx: _Ctx, name: str) -> tuple[str, UOp]:
       s2 = ctx.rsrc_dyn_sized(src2_off, lane_uop, sizes, 'src2', literal=literal) if src2_off is not None else None
       lane_srcs = {'S0': s0, 'S1': s1, 'VCC': ctx.rsgpr_dyn(vcc_in_off), 'EXEC': exec_mask, 'SCC': ctx.rsgpr_dyn(_c(SCC_IDX))}
       if s2 is not None: lane_srcs['S2'] = s2
-      vcc_bit = U32_0
+      vcc_bit = _c(0)
       for dest, val in parse_pcode(pcode, lane_srcs, lane_uop, op_name=op_name)[1]:
         if dest.startswith('VCC') or (dest.startswith('D0.u64') and '[laneId]' in dest): vcc_bit = val.cast(dtypes.uint32)
       return vcc_bit
@@ -855,7 +855,7 @@ def _compile_vop3sd(inst: VOP3SD, ctx: _Ctx, name: str) -> tuple[str, UOp]:
     if d0_val is not None:
       if d0_val.dtype in (dtypes.uint64, dtypes.int64, dtypes.float64):
         lo, hi = _split64(d0_val)
-        vgpr_stores.extend([ctx.wvgpr_dyn(vdst_reg, lane3, lo, exec_mask), ctx.wvgpr_dyn(vdst_reg + U32_1, lane3, hi, exec_mask)])
+        vgpr_stores.extend([ctx.wvgpr_dyn(vdst_reg, lane3, lo, exec_mask), ctx.wvgpr_dyn(vdst_reg + _c(1), lane3, hi, exec_mask)])
       else:
         d0_u32 = d0_val.bitcast(dtypes.uint32) if d0_val.dtype in (dtypes.float32, dtypes.half) else d0_val.cast(dtypes.uint32)
         vgpr_stores.append(ctx.wvgpr_dyn(vdst_reg, lane3, d0_u32, exec_mask))
@@ -966,7 +966,7 @@ def _compile_vopd(inst: VOPD, ctx: _Ctx, name: str) -> tuple[str, UOp]:
   vdstx_reg = ctx.inst_field(VOPD.vdstx)
   # vdsty has complex encoding: actual = (raw << 1) | ((vdstx & 1) ^ 1)
   vdsty_raw = ctx.inst_field(VOPD.vdsty)
-  vdsty_reg = (vdsty_raw << U32_1) | ((vdstx_reg & U32_1) ^ U32_1)
+  vdsty_reg = (vdsty_raw << _c(1)) | ((vdstx_reg & _c(1)) ^ _c(1))
   srcx0_off = ctx.inst_field(VOPD.srcx0)
   srcy0_off = ctx.inst_field(VOPD.srcy0)
   vsrcx1_reg = ctx.inst_field(VOPD.vsrcx1)
@@ -1042,7 +1042,7 @@ def _compile_mem_op(inst, ctx: _Ctx, name: str) -> tuple[str, UOp]:
       saddr_contrib = use_saddr.where(ctx.rsgpr_dyn(saddr_reg).cast(dtypes.uint64), UOp.const(dtypes.uint64, 0)) if saddr_reg is not None else UOp.const(dtypes.uint64, 0)
       return base + addr_offset + saddr_contrib + offset64
     # FLAT/GLOBAL: choose between SGPR base (saddr) or VGPR pair (addr) based on saddr validity
-    saddr_base = _u64(ctx.rsgpr_dyn(saddr_reg), ctx.rsgpr_dyn(saddr_reg + U32_1)) if saddr_reg is not None else UOp.const(dtypes.uint64, 0)
+    saddr_base = _u64(ctx.rsgpr_dyn(saddr_reg), ctx.rsgpr_dyn(saddr_reg + _c(1))) if saddr_reg is not None else UOp.const(dtypes.uint64, 0)
     vaddr_base = _u64(ctx.rvgpr_dyn(addr_reg, lane), ctx.rvgpr_dyn(addr_reg + _c(1), lane))
     # When saddr is valid: base = saddr pair, vaddr is 32-bit offset; otherwise: base = 0, vaddr is 64-bit address
     base_addr = use_saddr.where(saddr_base + ctx.rvgpr_dyn(addr_reg, lane).cast(dtypes.uint64), vaddr_base)
