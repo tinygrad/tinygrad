@@ -6,12 +6,16 @@ from tinygrad.helpers import getenv, prod, round_up, next_power2, OSX
 from enum import Enum, auto
 
 class ConstFloat(float):
-  """Float subclass that compares by bits (distinguishes -0.0 from 0.0)."""
+  """Float subclass that compares by bits (distinguishes -0.0 from 0.0, and nan == nan)."""
   __slots__ = ('bits',)
   def __new__(cls, v:float):
     obj = super().__new__(cls, v)
     obj.bits = struct.unpack('<Q', struct.pack('<d', v))[0]
     return obj
+  def __eq__(self, other):
+    if self is other: return True
+    if isinstance(other, float) and math.isnan(self) and math.isnan(other): return True
+    return float.__eq__(self, other)
   def __hash__(self): return hash(self.bits)
 
 class InvalidType:
