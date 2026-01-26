@@ -504,10 +504,10 @@ class _Ctx:
       sgpr_lo = self.sgpr.index(sgpr_idx, ptr=True).load()
       sgpr_hi = self.sgpr.index(sgpr_idx + _c(1, dtypes.index), ptr=True).load()
       sgpr_val = _u64(sgpr_lo, sgpr_hi)
-      # Use .valid() for VGPR reads to avoid invalid memory access when off < 256
-      vgpr_reg = off - _c(256)
-      vgpr_idx0 = (vgpr_reg.cast(dtypes.index) * _c(32, dtypes.index) + lane.cast(dtypes.index)).valid(is_vgpr)
-      vgpr_idx1 = ((vgpr_reg + _c(1)).cast(dtypes.index) * _c(32, dtypes.index) + lane.cast(dtypes.index)).valid(is_vgpr)
+      # Use WHERE on register instead of .valid() on index - avoids expensive valid gate pattern matching
+      vgpr_reg = is_vgpr.where(off - _c(256), _c(0))
+      vgpr_idx0 = vgpr_reg.cast(dtypes.index) * _c(32, dtypes.index) + lane.cast(dtypes.index)
+      vgpr_idx1 = (vgpr_reg + _c(1)).cast(dtypes.index) * _c(32, dtypes.index) + lane.cast(dtypes.index)
       vgpr_val = _u64(self.vgpr.index(vgpr_idx0, ptr=True).load(), self.vgpr.index(vgpr_idx1, ptr=True).load())
       # 64-bit inline constants: extend 32-bit value (reuse sgpr_lo)
       inline = _u64(sgpr_lo, sgpr_lo)
@@ -519,8 +519,10 @@ class _Ctx:
     if literal is not None: sgpr_val = off.eq(_c(255)).where(literal, sgpr_val)
     if bits == 16:  # F16 constants differ from pre-populated F32 constants
       for off_val, val in F16_INLINE.items(): sgpr_val = off.eq(_c(off_val)).where(UOp.const(dtypes.uint32, val), sgpr_val)
-    vgpr_idx = (off - _c(256)).cast(dtypes.index) * _c(32, dtypes.index) + lane.cast(dtypes.index)
-    vgpr_val = self.vgpr.index(vgpr_idx.valid(is_vgpr), ptr=True).load()
+    # Use WHERE on register instead of .valid() on index - avoids expensive valid gate pattern matching
+    vgpr_reg = is_vgpr.where(off - _c(256), _c(0))
+    vgpr_idx = vgpr_reg.cast(dtypes.index) * _c(32, dtypes.index) + lane.cast(dtypes.index)
+    vgpr_val = self.vgpr.index(vgpr_idx, ptr=True).load()
     return is_vgpr.where(vgpr_val, sgpr_val)
 
   def rsrc_dyn_sized(self, off: UOp, lane: UOp, sizes: dict, key: str, f16: bool = False, literal: UOp | None = None) -> UOp:
