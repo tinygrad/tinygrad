@@ -347,20 +347,19 @@ def write_ins(encodings, enums, suffix_only_ops, types, arch, path):
     if base not in base_encodings: continue  # skip if no base class
     base_fields = {f[0] for f in base_encodings[base][0]}
     extra_fields = [(fn, hi, lo) for fn, hi, lo in fields if fn not in base_fields]
-    all_ops = set(enums.get(base, {}).keys())
     # Check if this is a suffix-only variant
     variant_suffix = next((sfx for sfx in _VARIANT_SUFFIXES if enc_name.endswith(sfx)), None)
-    variant_only_ops = suffix_only_ops.get(variant_suffix, {}).get(base, set()) if variant_suffix else set()
-    has_suffix_only_ops = variant_suffix in suffix_only_ops  # any format has suffix-only ops for this suffix
-    is_lit = enc_name.endswith("_LIT")
-    if extra_fields or has_suffix_only_ops:
+    is_suffix_variant = variant_suffix in suffix_only_ops
+    all_ops = set(enums.get(base, {}).keys())
+    if extra_fields or is_suffix_variant:
       lines.append(f"class {enc_name}({base}):")
       op_field = next((f for f in base_encodings[base][0] if f[0] == "op"), None)
       # _LIT classes: override op to allow all opcodes (base excludes lit-only ops)
       # other suffix-only ops: only allow the suffix-only ops
-      if op_field and has_suffix_only_ops:
+      if op_field and is_suffix_variant:
         _, hi, lo = op_field
-        lines.append(f"  op = EnumBitField({hi}, {lo}, {base}Op, {fmt_allowed(f'{base}Op', all_ops if is_lit else variant_only_ops)})")
+        allowed_ops = all_ops if variant_suffix == "_LIT" else suffix_only_ops[variant_suffix][base]
+        lines.append(f"  op = EnumBitField({hi}, {lo}, {base}Op, {fmt_allowed(f'{base}Op', allowed_ops)})")
       for fn, hi, lo in sort_fields(extra_fields):
         lines.append(f"  {fn} = {field_def(fn, hi, lo, enc_name)}")
       lines.append("")
