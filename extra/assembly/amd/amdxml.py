@@ -355,7 +355,7 @@ def write_ins(encodings, enums, suffix_only_ops, types, arch, path):
       lines.append(f"class {enc_name}({base}):")
       op_field = next((f for f in base_encodings[base][0] if f[0] == "op"), None)
       # _LIT classes: override op to allow all opcodes (base excludes lit-only ops)
-      # other suffix-only ops: only allow the suffix-only ops
+      # other classes override op to only suffix-only opcodes
       if op_field and is_suffix_variant:
         _, hi, lo = op_field
         allowed_ops = all_ops if variant_suffix == "_LIT" else suffix_only_ops[variant_suffix][base]
