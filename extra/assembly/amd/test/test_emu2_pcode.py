@@ -90,11 +90,11 @@ class TestParseExpr(unittest.TestCase):
   def test_binary_ops(self):
     """Test parsing binary operations."""
     vars = {'a': UOp.const(dtypes.uint32, 10), 'b': UOp.const(dtypes.uint32, 5)}
-    
+
     # Addition
     result = parse_expr('a + b', vars)
     self.assertEqual(result.op, Ops.ADD)
-    
+
     # Subtraction with constant folding
     result = parse_expr('10 - 5', {})
     self.assertEqual(result.op, Ops.CONST)
@@ -120,7 +120,7 @@ class TestForLoopParsing(unittest.TestCase):
     pcode = PCODE[VOP1Op.V_CLZ_I32_U32_E32]
     S0 = UOp.const(dtypes.uint32, 0xFFFFFFFF)  # All ones - CLZ should be 0
     vars, assigns = parse_pcode(pcode, {'S0': S0})
-    
+
     self.assertEqual(len(assigns), 1)
     dest, val = assigns[0]
     self.assertTrue(dest.startswith('D0'))
@@ -148,7 +148,7 @@ class TestForLoopParsing(unittest.TestCase):
     pcode = PCODE.get(VOP1Op.V_CTZ_I32_B32_E32)
     if pcode is None:
       self.skipTest("V_CTZ_I32_B32_E32 pcode not available")
-    
+
     S0 = UOp.const(dtypes.uint32, 1)  # LSB set - CTZ should be 0
     vars, assigns = parse_pcode(pcode, {'S0': S0})
     self.assertEqual(len(assigns), 1)
