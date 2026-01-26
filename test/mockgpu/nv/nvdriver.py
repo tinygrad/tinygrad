@@ -19,6 +19,7 @@ NVAllocation = collections.namedtuple('NVAllocation', ['device', 'size', 'is_sig
 NVChannelGroup = collections.namedtuple('NVChannelGroup', ['device'])
 NVContextShare = collections.namedtuple('NVContextShare', ['channel_group'])
 NVGPFIFO = collections.namedtuple('NVGPFIFO', ['device', 'token'])
+NVProfiler = collections.namedtuple('NVProfiler', ['subdevice'])
 
 class NVCtlFileDesc(VirtFileDesc):
   def __init__(self, fd, driver):
@@ -140,6 +141,10 @@ class NVDriver(VirtDriver):
       struct.hObjectNew = self._alloc_handle()
     elif struct.hClass == nv_gpu.GT200_DEBUGGER:
       struct.hObjectNew = self._alloc_handle()
+    elif struct.hClass == nv_gpu.MAXWELL_PROFILER_DEVICE:
+      assert struct.hObjectParent in self.object_by_handle and isinstance(self.object_by_handle[struct.hObjectParent], NVSubDevice)
+      struct.hObjectNew = self._alloc_handle()
+      self.object_by_handle[struct.hObjectNew] = NVProfiler(self.object_by_handle[struct.hObjectParent])
     else: raise RuntimeError(f"Unknown {struct.hClass} to rm_alloc")
     return 0
 
@@ -204,6 +209,14 @@ class NVDriver(VirtDriver):
     elif struct.cmd == nv_gpu.NV0000_CTRL_CMD_SYSTEM_GET_BUILD_VERSION_V2:
       params = nv_gpu.NV0000_CTRL_SYSTEM_GET_BUILD_VERSION_V2_PARAMS.from_address(params_ptr)
       params.driverVersionBuffer = b"570.00.00\0"
+    elif struct.cmd == nv_gpu.NV2080_CTRL_CMD_GR_GET_TPC_MASK:
+      params = nv_gpu.NV2080_CTRL_GR_GET_TPC_MASK_PARAMS.from_address(params_ptr)
+      params.tpcMask = 0x1  # one TPC
+    # Profiler commands - just pass through for mockgpu
+    elif struct.cmd in (nv_gpu.NVB0CC_CTRL_CMD_POWER_REQUEST_FEATURES, nv_gpu.NVB0CC_CTRL_CMD_ALLOC_PMA_STREAM,
+                        nv_gpu.NVB0CC_CTRL_CMD_RESERVE_HWPM_LEGACY, nv_gpu.NVB0CC_CTRL_CMD_RESERVE_PM_AREA_PC_SAMPLER,
+                        nv_gpu.NVB0CC_CTRL_CMD_BIND_PM_RESOURCES, nv_gpu.NVB0CC_CTRL_CMD_SET_HS_CREDITS,
+                        nv_gpu.NVB0CC_CTRL_CMD_EXEC_REG_OPS, nv_gpu.NVB0CC_CTRL_CMD_PMA_STREAM_UPDATE_GET_PUT): pass
     else: raise RuntimeError(f"Unknown {struct.cmd} to rm_control")
     return 0
 
@@ -213,14 +226,11 @@ class NVDriver(VirtDriver):
     elif nr == nv_gpu.NV_ESC_RM_CONTROL: return self.rm_control(argp)
     elif nr == nv_gpu.NV_ESC_RM_MAP_MEMORY:
       st:Any = nv_gpu.nv_ioctl_nvos33_parameters_with_fd.from_address(argp)
-      obj = self.object_by_handle[st.params.hMemory]
-      if isinstance(obj, NVUserMode):
-        file = self.opened_fds[st.fd]
-        assert isinstance(file, NVDevFileDesc)
+      obj = self.object_by_handle.get(st.params.hMemory)
+      file = self.opened_fds.get(st.fd)
+      if isinstance(obj, NVUserMode) and isinstance(file, NVDevFileDesc):
         file._mapping_userland = True
-      elif isinstance(obj, NVAllocation) and obj.is_signal:
-        file = self.opened_fds[st.fd]
-        assert isinstance(file, NVDevFileDesc)
+      elif isinstance(obj, NVAllocation) and obj.is_signal and isinstance(file, NVDevFileDesc):
         file._mapping_signal = True
     elif nr == nv_gpu.NV_ESC_RM_FREE:
       st = nv_gpu.NVOS00_PARAMETERS.from_address(argp)

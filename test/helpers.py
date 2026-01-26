@@ -69,7 +69,7 @@ def eval_uop(uop:UOp, inputs:list[tuple[DType, list[Any]]]|None=None):
 
 def not_support_multi_device():
   # CL and CUDA don't support multi device if in CI
-  return CI and REAL_DEV in ("CL", "CUDA")
+  return CI and Device.DEFAULT in ("CL", "CUDA")
 
 def needs_second_gpu(fn):
   @functools.wraps(fn)
@@ -79,5 +79,3 @@ def needs_second_gpu(fn):
     except Exception as e: self.skipTest(f"second device not available: {e}")
     return fn(self, *args, **kwargs)
   return wrapper
-
-REAL_DEV = Device.DEFAULT

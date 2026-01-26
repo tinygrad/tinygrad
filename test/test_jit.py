@@ -3,7 +3,7 @@ import unittest, functools
 import numpy as np
 
 from hypothesis import given, settings, strategies as strat
-from test.helpers import assert_jit_cache_len, not_support_multi_device, REAL_DEV, needs_second_gpu
+from test.helpers import assert_jit_cache_len, not_support_multi_device, needs_second_gpu
 from tinygrad.tensor import Tensor
 from tinygrad.engine.jit import TinyJit, JitError, GraphRunner, MultiGraphRunner, graph_class
 from tinygrad.engine.realize import CompiledRunner, BufferCopy, BufferXfer
@@ -23,7 +23,7 @@ def _simple_test(add, extract=lambda x: x, N=10):
 class TestJit(unittest.TestCase):
 
   @settings(deadline=2e4)
-  @unittest.skipUnless(REAL_DEV in ["CPU"], f"no support on {REAL_DEV}")
+  @unittest.skipUnless(Device.DEFAULT in ["CPU"], f"no support on {Device.DEFAULT}")
   @given(strat.sampled_from([Tensor.exp2, Tensor.log2, Tensor.sin]))
   def test_approx_jit_timeout(self, op):
     with Context(TRANSCENDENTAL=2):
@@ -783,7 +783,7 @@ class TestJitGraphSplit(unittest.TestCase):
 
   def test_jit_multidev_xfer(self):
     if Device.DEFAULT in {"CPU"}: raise unittest.SkipTest("CPU is not a valid default device for this test (zero-copies)")
-    if Device.DEFAULT == "METAL" or REAL_DEV == "METAL": raise unittest.SkipTest("Metal is flaky, with multidevice (same as metal llama 4gpu?)")
+    if Device.DEFAULT == "METAL": raise unittest.SkipTest("Metal is flaky, with multidevice (same as metal llama 4gpu?)")
 
     try: Device[f"{Device.DEFAULT}:1"]
     except Exception: raise unittest.SkipTest("no multidevice")

@@ -189,13 +189,11 @@ class Group:
     self.ker.push_store(c_store, c)
     return c.after(c_store).reshape(c.shape)
 
-  map_rid = 400
   def map(self, a:ALL_TILES, op:Callable[[UOp], UOp]|Callable[[UOp, tuple], UOp]):
     a = cast(UOp, a)
     assert self.warps == 1
 
-    rngs_for_shape = tuple(UOp.range(dim, Group.map_rid + i) for i, dim in enumerate(a.shape))
-    Group.map_rid += len(a.shape)
+    rngs_for_shape = tuple(self.ker.raw_range(dim) for dim in a.shape)
 
     if op.__code__.co_argcount == 1:
       to_store = op(a[*rngs_for_shape]) # type: ignore

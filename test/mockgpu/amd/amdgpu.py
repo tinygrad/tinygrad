@@ -9,6 +9,7 @@ SDMA_MAX_COPY_SIZE = 0x400000
 
 regCOMPUTE_PGM_LO = 0x1bac + amd_gpu.GC_BASE__INST0_SEG0
 regCOMPUTE_PGM_RSRC2 = 0x1bb3 + amd_gpu.GC_BASE__INST0_SEG0
+regCOMPUTE_TMPRING_SIZE = 0x1bb8 + amd_gpu.GC_BASE__INST0_SEG0
 regCOMPUTE_USER_DATA_0 = 0x1be0 + amd_gpu.GC_BASE__INST0_SEG0
 regCOMPUTE_NUM_THREAD_X = 0x1ba7 + amd_gpu.GC_BASE__INST0_SEG0
 regGRBM_GFX_INDEX = 0x2200 + amd_gpu.GC_BASE__INST0_SEG1
@@ -185,10 +186,18 @@ class PM4Executor(AMDQueue):
     for st,sz in self.gpu.mapped_ranges:
       if st <= prg_addr < st+sz: prg_sz = sz - (prg_addr - st)
 
+    # Get scratch size from COMPUTE_TMPRING_SIZE register
+    # For gfx11: WAVESIZE = ceildiv(64 * size_per_thread, 256), so size_per_thread ≈ WAVESIZE * 256 / 64 = WAVESIZE * 4
+    try: tmpring_size = self.gpu.regs[regCOMPUTE_TMPRING_SIZE]
+    except KeyError: tmpring_size = 0
+    wavesize = (tmpring_size >> 12) & 0x3FFF  # WAVESIZE field is bits 12:25 for gfx11
+    scratch_size = wavesize * 4  # This gives the scratch size per thread (lane)
+
     assert prg_sz > 0, "Invalid prg ptr (not found in mapped ranges)"
-    # Pass valid memory ranges and rsrc2 to Python emulator for bounds checking and SGPR/VGPR layout
+    # Pass valid memory ranges, rsrc2, and scratch_size to Python emulator
     if hasattr(remu, 'valid_mem_ranges'): remu.valid_mem_ranges = self.gpu.mapped_ranges
     if hasattr(remu, 'rsrc2'): remu.rsrc2 = rsrc2
+    if hasattr(remu, 'scratch_size'): remu.scratch_size = scratch_size
     err = remu.run_asm(prg_addr, prg_sz, *gl, *lc, args_addr)
     if err != 0: raise RuntimeError("remu does not support the new instruction introduced in this kernel")
 

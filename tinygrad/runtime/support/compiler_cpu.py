@@ -67,7 +67,7 @@ class LLVMCompiler(Compiler):
     llvm.LLVMDisposePassBuilderOptions(self.pbo)
     llvm.LLVMContextDispose(self.context)
 
-  def compile(self, src:str) -> bytes:
+  def compile_to_obj(self, src:str) -> bytes:
     self.diag_msgs.clear()
     src_buf = llvm.LLVMCreateMemoryBufferWithMemoryRangeCopy(ctypes.create_string_buffer(src_bytes:=src.encode()), len(src_bytes), b'src')
     mod = expect(llvm.LLVMParseIRInContext(self.context, src_buf, ctypes.pointer(m:=llvm.LLVMModuleRef()), err:=cerr()), err, m)
@@ -80,7 +80,9 @@ class LLVMCompiler(Compiler):
     obj = ctypes.string_at(llvm.LLVMGetBufferStart(obj_buf), llvm.LLVMGetBufferSize(obj_buf))
     llvm.LLVMDisposeMemoryBuffer(obj_buf)
     if self.diag_msgs: raise RuntimeError("llvm diagnostic: " + "\n".join(self.diag_msgs))
-    return jit_loader(obj) if self.jit else obj
+    return obj
+
+  def compile(self, src:str) -> bytes: return jit_loader(self.compile_to_obj(src)) if self.jit else self.compile_to_obj(src)
 
   def disassemble(self, lib:bytes): capstone_flatdump(lib)
 

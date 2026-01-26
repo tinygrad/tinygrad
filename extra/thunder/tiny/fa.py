@@ -1,6 +1,7 @@
 import math
 
 from tinygrad import Tensor, dtypes
+from tinygrad.helpers import DEBUG
 from tinygrad.uop.ops import UOp
 
 from extra.thunder.tiny.tk import WARP_THREADS
@@ -12,10 +13,10 @@ Q_BLOCK_SIZE = 16
 KV_BLOCK_SIZE = 16
 
 def _sharded_empty(shape:Tensor, ref:Tensor, axis:int|None) -> Tensor:
-  if not isinstance(ref.device, tuple): return Tensor.empty(*shape, device=ref.device)
+  if not isinstance(ref.device, tuple): return Tensor.empty(*shape, dtype=ref.dtype, device=ref.device)
   shape = tuple(s // len(ref.device) if i == ref.uop.axis else s for i, s in enumerate(shape))
   axis = ref.uop.axis if axis is None else axis
-  return Tensor(Tensor.empty(*shape, device=ref.device).uop.multi(axis), device=ref.device)
+  return Tensor(Tensor.empty(*shape, dtype=ref.dtype, device=ref.device).uop.multi(axis), dtype=ref.dtype, device=ref.device)
 
 def _sharded_empty_like(ref:Tensor, axis:int|None=None) -> Tensor:
   return _sharded_empty(ref.shape, ref, axis)
@@ -38,10 +39,12 @@ def flash_attention(xq, xk, xv, attn_mask:Tensor|None=None, is_causal:bool=False
   B, N, H, D = xq.shape
   H_KV = xk.shape[2]
   GROUP_SIZE = H // H_KV
-  print(f"Flash Attention {B=} {N=} {H=} {D=} {H_KV=} {GROUP_SIZE=}")
+  num_devices = len(xq.device) if isinstance(xq.device, tuple) else 1
+  B_local = B // num_devices
+  if DEBUG >= 2: print(f"Flash Attention {B=} {B_local=} {N=} {H=} {D=} {H_KV=} {GROUP_SIZE=}")
 
   def custom_forward(ou:UOp, l_vecu:UOp, qu:UOp, ku:UOp, vu:UOp, masku:UOp) -> UOp:
-    with Kernel("fa_custom_forward", (H, N // (Q_BLOCK_SIZE*NUM_WORKERS), B), NUM_WORKERS * WARP_THREADS) as ker:
+    with Kernel("fa_custom_forward", (H, N // (Q_BLOCK_SIZE*NUM_WORKERS), B_local), NUM_WORKERS * WARP_THREADS) as ker:
       warp = ker.warp
 
       o, q, k, v, mask, l_vec = GL(ou, ker), GL(qu, ker), GL(ku, ker), GL(vu, ker), GL(masku, ker), GL(l_vecu, ker)
@@ -139,7 +142,7 @@ def flash_attention(xq, xk, xv, attn_mask:Tensor|None=None, is_causal:bool=False
       return ker.finish()
 
   def custom_backward_q(dqu:UOp, dou:UOp, qu:UOp, ku:UOp, vu:UOp, masku:UOp, l_vecu:UOp, delta_vecu:UOp) -> UOp:
-    with Kernel("fa_custom_backward_q", (H, N // (Q_BLOCK_SIZE*NUM_WORKERS), B), NUM_WORKERS * WARP_THREADS) as ker:
+    with Kernel("fa_custom_backward_q", (H, N // (Q_BLOCK_SIZE*NUM_WORKERS), B_local), NUM_WORKERS * WARP_THREADS) as ker:
       warp = ker.warp
 
       dq, do, q, k, v, mask = GL(dqu, ker), GL(dou, ker), GL(qu, ker), GL(ku, ker), GL(vu, ker), GL(masku, ker)
@@ -229,7 +232,7 @@ def flash_attention(xq, xk, xv, attn_mask:Tensor|None=None, is_causal:bool=False
       return ker.finish()
 
   def custom_backward_kv(dku:UOp, dvu:UOp, dou:UOp, qu:UOp, ku:UOp, vu:UOp, masku:UOp, l_vecu:UOp, delta_vecu:UOp):
-    with Kernel("fa_custom_backward_kv", (H_KV, N // (KV_BLOCK_SIZE*NUM_WORKERS), B), NUM_WORKERS * WARP_THREADS) as ker:
+    with Kernel("fa_custom_backward_kv", (H_KV, N // (KV_BLOCK_SIZE*NUM_WORKERS), B_local), NUM_WORKERS * WARP_THREADS) as ker:
       warp = ker.warp
 
       dk, dv, do, q, k, v, mask = GL(dku, ker), GL(dvu, ker), GL(dou, ker), GL(qu, ker), GL(ku, ker), GL(vu, ker), GL(masku, ker)

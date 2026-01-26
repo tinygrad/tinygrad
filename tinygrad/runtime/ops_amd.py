@@ -480,7 +480,6 @@ class AMDCopyQueue(HWQueue):
     if (dev:=signal.owner) is not None and signal.is_timeline and not dev.is_am():
       self.q(self.sdma.SDMA_OP_FENCE | fence_flags, *data64_le(dev.queue_event_mailbox_ptr), dev.queue_event.event_id)
       self.q(self.sdma.SDMA_OP_TRAP, self.sdma.SDMA_PKT_TRAP_INT_CONTEXT_INT_CONTEXT(dev.queue_event.event_id))
-    elif dev is not None and dev.is_am(): self.q(self.sdma.SDMA_OP_TRAP, self.sdma.SDMA_PKT_TRAP_INT_CONTEXT_INT_CONTEXT(0))
 
     return self
 
@@ -863,7 +862,7 @@ class PCIIface(PCIIfaceBase):
   def sleep(self, timeout) -> bool:
     if hasattr(self.pci_dev, 'irq_poller') and self.pci_dev.irq_poller is not None and (events_cnt:=len(self.pci_dev.irq_poller.poll(timeout))):
       self.pci_dev.irq_fd.read(8 * events_cnt)
-      self.dev_impl.ih.interrupt_handler()
+    self.dev_impl.ih.interrupt_handler()
     return self.dev_impl.gmc.check_fault() is not None
 
   def on_device_hang(self):

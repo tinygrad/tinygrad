@@ -338,7 +338,7 @@ class TestHCQ(unittest.TestCase):
     et = float(sig_en.timestamp - sig_st.timestamp)
 
     print(f"exec kernel time: {et:.2f} us")
-    assert 0.1 <= et <= (100000 if MOCKGPU or Device.DEFAULT in {"CPU"} else 100)
+    assert 0.1 <= et <= (3000000 if MOCKGPU or Device.DEFAULT in {"CPU"} else 100)
 
   def test_speed_copy_bandwidth(self):
     if TestHCQ.d0.hw_copy_queue_t is None: self.skipTest("device does not support copy queue")

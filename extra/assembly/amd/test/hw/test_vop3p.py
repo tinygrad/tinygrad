@@ -404,8 +404,99 @@ class TestVOP3P(unittest.TestCase):
     self.assertAlmostEqual(hi, 0.0, places=1)
 
 
+class TestWMMAF16(unittest.TestCase):
+  """Tests for WMMA F16 output variant (V_WMMA_F16_16X16X16_F16).
+
+  Note: RDNA3 WMMA F16 uses 8 VGPRs for accumulator/output (same as F32 variant),
+  but values are packed as f16. This differs from RDNA4 which uses 4 VGPRs.
+  """
+
+  def test_v_wmma_f16_16x16x16_f16_all_ones(self):
+    """V_WMMA_F16_16X16X16_F16 with all ones produces 16.0 in f16."""
+    from extra.assembly.amd.test.hw.helpers import _f16
+    instructions = []
+    instructions.append(s_mov_b32(s[0], 0x3c003c00))  # packed f16 1.0
+    # Initialize A matrix in v[16:23] (8 regs)
+    for i in range(16, 24):
+      instructions.append(v_mov_b32_e32(v[i], s[0]))
+    # Initialize B matrix in v[24:31] (8 regs)
+    for i in range(24, 32):
+      instructions.append(v_mov_b32_e32(v[i], s[0]))
+    # Initialize C (accumulator) in v[0:7] to zero (8 regs for RDNA3 WMMA F16)
+    for i in range(8):
+      instructions.append(v_mov_b32_e32(v[i], 0))
+    # WMMA F16: D = A @ B + C
+    instructions.append(v_wmma_f16_16x16x16_f16(v[0:7], v[16:23], v[24:31], v[0:7]))
+    st = run_program(instructions, n_lanes=32)
+    # Result should be 16.0 in f16, stored in lo 16 bits of each VGPR (hi bits are 0)
+    for lane in range(32):
+      for reg in range(8):
+        result = st.vgpr[lane][reg]
+        lo = _f16(result & 0xffff)
+        self.assertAlmostEqual(lo, 16.0, places=1, msg=f"v[{reg}] lane {lane}: expected 16.0, got {lo}")
+        self.assertEqual(result >> 16, 0, msg=f"v[{reg}] lane {lane}: hi bits should be 0")
+
+  def test_v_wmma_f16_16x16x16_f16_with_accumulator(self):
+    """V_WMMA_F16_16X16X16_F16 with non-zero accumulator."""
+    from extra.assembly.amd.test.hw.helpers import _f16
+    instructions = []
+    instructions.append(s_mov_b32(s[0], 0x3c003c00))  # packed f16 1.0
+    instructions.append(s_mov_b32(s[1], 0x4500))  # f16 5.0 in lo bits only
+    # Initialize A matrix in v[16:23] (8 regs)
+    for i in range(16, 24):
+      instructions.append(v_mov_b32_e32(v[i], s[0]))
+    # Initialize B matrix in v[24:31] (8 regs)
+    for i in range(24, 32):
+      instructions.append(v_mov_b32_e32(v[i], s[0]))
+    # Initialize C (accumulator) in v[0:7] to 5.0 in lo bits (8 regs for RDNA3 WMMA F16)
+    for i in range(8):
+      instructions.append(v_mov_b32_e32(v[i], s[1]))
+    # WMMA F16: D = A @ B + C
+    instructions.append(v_wmma_f16_16x16x16_f16(v[0:7], v[16:23], v[24:31], v[0:7]))
+    st = run_program(instructions, n_lanes=32)
+    # Result should be 16.0 + 5.0 = 21.0 in f16, stored in lo 16 bits (hi bits are 0)
+    for lane in range(32):
+      for reg in range(8):
+        result = st.vgpr[lane][reg]
+        lo = _f16(result & 0xffff)
+        self.assertAlmostEqual(lo, 21.0, places=0, msg=f"v[{reg}] lane {lane}: expected 21.0, got {lo}")
+        self.assertEqual(result >> 16, 0, msg=f"v[{reg}] lane {lane}: hi bits should be 0")
+
+  def test_v_wmma_f16_16x16x16_f16_high_registers(self):
+    """V_WMMA_F16_16X16X16_F16 with high register indices.
+
+    Regression test: WMMA was using static register indices instead of dynamic.
+    This test uses v[64:71] for A, v[80:87] for B, v[96:103] for C/D.
+    """
+    from extra.assembly.amd.test.hw.helpers import _f16
+    instructions = []
+    instructions.append(s_mov_b32(s[0], 0x3c003c00))  # packed f16 1.0
+    # Initialize A matrix in v[64:71] (8 regs)
+    for i in range(64, 72):
+      instructions.append(v_mov_b32_e32(v[i], s[0]))
+    # Initialize B matrix in v[80:87] (8 regs)
+    for i in range(80, 88):
+      instructions.append(v_mov_b32_e32(v[i], s[0]))
+    # Initialize C (accumulator) in v[96:103] to zero (8 regs for RDNA3 WMMA F16)
+    for i in range(96, 104):
+      instructions.append(v_mov_b32_e32(v[i], 0))
+    # WMMA F16: D = A @ B + C, result in v[96:103]
+    instructions.append(v_wmma_f16_16x16x16_f16(v[96:103], v[64:71], v[80:87], v[96:103]))
+    # Copy results to v[0:7] for checking
+    for i in range(8):
+      instructions.append(v_mov_b32_e32(v[i], v[96+i]))
+    st = run_program(instructions, n_lanes=32)
+    # Result should be 16.0 in f16, stored in lo 16 bits (hi bits are 0)
+    for lane in range(32):
+      for reg in range(8):
+        result = st.vgpr[lane][reg]
+        lo = _f16(result & 0xffff)
+        self.assertAlmostEqual(lo, 16.0, places=1, msg=f"v[{reg}] lane {lane}: expected 16.0, got {lo}")
+        self.assertEqual(result >> 16, 0, msg=f"v[{reg}] lane {lane}: hi bits should be 0")
+
+
 class TestWMMA(unittest.TestCase):
-  """Tests for WMMA (Wave Matrix Multiply-Accumulate) instructions."""
+  """Tests for WMMA (Wave Matrix Multiply-Accumulate) instructions with F32 output."""
 
   def test_v_wmma_f32_16x16x16_f16_all_ones(self):
     """V_WMMA_F32_16X16X16_F16 with all ones produces 16.0."""
@@ -433,6 +524,75 @@ class TestWMMA(unittest.TestCase):
     for i in range(8):
       instructions.append(v_mov_b32_e32(v[i], s[1]))
     instructions.append(v_wmma_f32_16x16x16_f16(v[0:7], v[16:23], v[24:31], v[0:7]))
+    st = run_program(instructions, n_lanes=32)
+    expected = f2i(21.0)  # 16 + 5
+    for lane in range(32):
+      for reg in range(8):
+        result = st.vgpr[lane][reg]
+        self.assertEqual(result, expected, f"v[{reg}] lane {lane}: expected 21.0, got {i2f(result)}")
+
+  def test_v_wmma_f32_16x16x16_f16_high_registers(self):
+    """V_WMMA_F32_16X16X16_F16 with high register indices.
+
+    Regression test: WMMA was using static register indices instead of dynamic,
+    causing incorrect results when registers weren't at the default positions.
+    This test uses v[64:71] for A, v[80:87] for B, v[96:103] for C/D.
+    """
+    instructions = []
+    instructions.append(s_mov_b32(s[0], 0x3c003c00))  # packed f16 1.0
+    # Initialize A matrix in v[64:71]
+    for i in range(64, 72):
+      instructions.append(v_mov_b32_e32(v[i], s[0]))
+    # Initialize B matrix in v[80:87]
+    for i in range(80, 88):
+      instructions.append(v_mov_b32_e32(v[i], s[0]))
+    # Initialize C (accumulator) in v[96:103] to zero
+    for i in range(96, 104):
+      instructions.append(v_mov_b32_e32(v[i], 0))
+    # WMMA: D = A @ B + C, result in v[96:103]
+    instructions.append(v_wmma_f32_16x16x16_f16(v[96:103], v[64:71], v[80:87], v[96:103]))
+    # Copy results to v[0:7] for checking
+    for i in range(8):
+      instructions.append(v_mov_b32_e32(v[i], v[96+i]))
+    st = run_program(instructions, n_lanes=32)
+    expected = f2i(16.0)
+    for lane in range(32):
+      for reg in range(8):
+        result = st.vgpr[lane][reg]
+        self.assertEqual(result, expected, f"v[{reg}] lane {lane}: expected 16.0, got {i2f(result)}")
+
+
+class TestWMMABF16(unittest.TestCase):
+  """Tests for WMMA BF16 instructions."""
+
+  def test_v_wmma_f32_16x16x16_bf16_all_ones(self):
+    """V_WMMA_F32_16X16X16_BF16 with all ones produces 16.0."""
+    instructions = []
+    # BF16 1.0 = 0x3f80, packed = 0x3f803f80
+    instructions.append(s_mov_b32(s[0], 0x3f803f80))
+    for i in range(16, 32):
+      instructions.append(v_mov_b32_e32(v[i], s[0]))
+    for i in range(8):
+      instructions.append(v_mov_b32_e32(v[i], 0))
+    instructions.append(v_wmma_f32_16x16x16_bf16(v[0:7], v[16:23], v[24:31], v[0:7]))
+    st = run_program(instructions, n_lanes=32)
+    expected = f2i(16.0)
+    for lane in range(32):
+      for reg in range(8):
+        result = st.vgpr[lane][reg]
+        self.assertEqual(result, expected, f"v[{reg}] lane {lane}: expected 16.0, got {i2f(result)}")
+
+  def test_v_wmma_f32_16x16x16_bf16_with_accumulator(self):
+    """V_WMMA_F32_16X16X16_BF16 with non-zero accumulator."""
+    instructions = []
+    # BF16 1.0 = 0x3f80, packed = 0x3f803f80
+    instructions.append(s_mov_b32(s[0], 0x3f803f80))
+    instructions.append(s_mov_b32(s[1], f2i(5.0)))
+    for i in range(16, 32):
+      instructions.append(v_mov_b32_e32(v[i], s[0]))
+    for i in range(8):
+      instructions.append(v_mov_b32_e32(v[i], s[1]))
+    instructions.append(v_wmma_f32_16x16x16_bf16(v[0:7], v[16:23], v[24:31], v[0:7]))
     st = run_program(instructions, n_lanes=32)
     expected = f2i(21.0)  # 16 + 5
     for lane in range(32):
