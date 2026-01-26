@@ -317,7 +317,7 @@ def threefry2x32(x: UOp, key: UOp):
 
 # ***** long as 2 ints *****
 
-def unpack32(v): return v & 0xFFFF, v >> 16
+def unpack32(v): return v.bitcast(dtypes.uint) & 0xFFFF, v.bitcast(dtypes.uint) >> 16
 
 # 4.3.1 is the relevant section in TAOCP
 def l2i(op: Ops, dt: DType, *uops:UOp):
@@ -349,7 +349,9 @@ def l2i(op: Ops, dt: DType, *uops:UOp):
       return l2i(Ops.ADD, dt, *mid, (a00*b00).bitcast(dt), (a01*b01).bitcast(dt) + a0*b1 + a1*b0)
     case Ops.IDIV | Ops.MOD:
       # TAOCP Algorithm 4.3.1D could be faster here, but must be parameterized over the width of b
-      a0, a1, b0, b1 = [a.bitcast(dtypes.uint) for a in uops]
+      if dt == dtypes.int:
+        a0, a1 = (a_neg:=a1 < zero).where((n:=l2i(Ops.NEG, dt, a0, a1))[0], a0).bitcast(dtypes.uint), a_neg.where(n[1], a1).bitcast(dtypes.uint)
+        b0, b1 = (b_neg:=b1 < zero).where((n:=l2i(Ops.NEG, dt, b0, b1))[0], b0).bitcast(dtypes.uint), b_neg.where(n[1], b1).bitcast(dtypes.uint)
       q, r = (z:=UOp.const(dtypes.uint, 0), z), (z, z)
       for i in range(63, -1, -1):
         r = l2i(Ops.SHL, dtypes.uint, *r, UOp.const(dtypes.uint, 1), z)
@@ -358,6 +360,9 @@ def l2i(op: Ops, dt: DType, *uops:UOp):
         diff = l2i(Ops.SUB, dtypes.uint, *r, b0, b1)
         q = ((q[0] | cond.cast(dtypes.uint) << (i % 32), q[1]) if i < 32 else (q[0], q[1] | cond.cast(dtypes.uint) << (i % 32)))
         r = l2i(Ops.WHERE, dtypes.uint, cond, *diff, *r)
+      if dt == dtypes.int:
+        nq, nr = l2i(Ops.NEG, dt, q0:=q[0].bitcast(dt), q1:=q[1].bitcast(dt)), l2i(Ops.NEG, dt, r0:=r[0].bitcast(dt), r1:=r[1].bitcast(dt))
+        return (a_neg.where(nr[0], r0), a_neg.where(nr[1], r1)) if op == Ops.MOD else ((a_neg^b_neg).where(nq[0], q0), (a_neg^b_neg).where(nq[1], q1))
       return (r[0].bitcast(dt), r[1].bitcast(dt)) if op == Ops.MOD else (q[0].bitcast(dt), q[1].bitcast(dt))
     case Ops.CMPLT: return (a1 < b1) | ((a1.eq(b1)) & (a0.bitcast(dtypes.uint) < b0.bitcast(dtypes.uint)))
     case Ops.CMPEQ: return a0.eq(b0) & a1.eq(b1)
@@ -400,8 +405,7 @@ def get_late_rewrite_patterns(ops:tuple[Ops, ...], device, force_transcendental)
       c-1, 0)) >> v if (v:=powers_of_two.get(c.arg, 0)) else None)]  # (x+(x<0).where(c-1, 0)) >> v
     if not DISABLE_FAST_IDIV:
       pat += [(UPat.var("x", dtypes.ints)//UPat.cvar("d", vec=False), lambda ctx, x, d: fast_idiv(ctx, x, d.arg))]
-      # exclude long/ulong - those are handled by l2i decomposition
-      pat += [(UPat.var("x", tuple(dt for dt in dtypes.ints if dt not in (dtypes.long, dtypes.ulong)))%UPat.var("d"), lambda x, d: x-d*(x//d))]
+      pat += [(UPat.var("x", dtypes.ints)%UPat.var("d"), lambda x, d: x-d*(x//d))]
   if Ops.NEG in ops:
     pat += [(UPat.var('x')*-1, lambda ctx,x: x.alu(Ops.NEG))]
     if Ops.SUB in ops: pat += [(UPat.var('x')+UPat.var('y').alu(Ops.NEG), lambda ctx,x,y: x.alu(Ops.SUB, y))]
