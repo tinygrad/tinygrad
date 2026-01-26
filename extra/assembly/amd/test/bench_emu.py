@@ -108,7 +108,7 @@ def profile_instructions(kernel: bytes):
     else:
       # Build sink
       build_start = time.perf_counter()
-      sink, ctx = _get_inst_sink(inst_bytes)
+      sink, (base, mask, size) = _get_inst_sink(inst_bytes)
       build_time = time.perf_counter() - build_start
 
       # Count UOps in sink
@@ -121,7 +121,6 @@ def profile_instructions(kernel: bytes):
       render_time = time.perf_counter() - render_start
 
       # Update canonical cache
-      base, mask, size = ctx.canonical_mask(inst_bytes)
       _canonical_prg_cache.append((base, mask, size, prg))
 
     results.append({

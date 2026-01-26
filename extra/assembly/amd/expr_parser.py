@@ -247,7 +247,7 @@ class Parser:
         self.eat('RBRACKET')
         vgpr = self.vars.get('_vgpr')
         if vgpr is None: return _u32(0)
-        return vgpr.index((_to_u32(reg) * _u32(32) + _to_u32(lane)).cast(dtypes.index), ptr=True).load()
+        return vgpr.index(_to_u32(reg) * _u32(32) + _to_u32(lane), ptr=True).load()
       if self.try_eat('LPAREN'):
         args = self._parse_args()
         self.eat('RPAREN')
@@ -488,28 +488,26 @@ class Parser:
     if mem is None: return _const(dt, 0)
     adt = dtypes.uint64 if addr.dtype == dtypes.uint64 else dtypes.uint32
     active = self.vars.get('_active')
+    gate = (active,) if active is not None else ()
     byte_mem = mem.dtype.base == dtypes.uint8
     if byte_mem:
-      idx = addr.cast(dtypes.index)
-      idx = idx.valid(active) if active is not None else idx
+      idx = addr.cast(dtypes.int)
       if dt in (dtypes.uint64, dtypes.int64, dtypes.float64):
         val = _u32(0).cast(dtypes.uint64)
-        for i in range(8): val = val | (mem.index(idx + _const(dtypes.index, i), ptr=True).load().cast(dtypes.uint64) << _u64(i * 8))
+        for i in range(8): val = val | (mem.index(idx + _const(dtypes.int, i), *gate, ptr=True).load().cast(dtypes.uint64) << _u64(i * 8))
       elif dt in (dtypes.uint8, dtypes.int8):
-        val = mem.index(idx, ptr=True).load().cast(dt)
+        val = mem.index(idx, *gate, ptr=True).load().cast(dt)
       elif dt in (dtypes.uint16, dtypes.int16, dtypes.short):
-        val = (mem.index(idx, ptr=True).load().cast(dtypes.uint32) | (mem.index(idx + _const(dtypes.index, 1), ptr=True).load().cast(dtypes.uint32) << _u32(8))).cast(dt)
+        val = (mem.index(idx, *gate, ptr=True).load().cast(dtypes.uint32) | (mem.index(idx + _const(dtypes.int, 1), *gate, ptr=True).load().cast(dtypes.uint32) << _u32(8))).cast(dt)
       else:
         val = _u32(0)
-        for i in range(4): val = val | (mem.index(idx + _const(dtypes.index, i), ptr=True).load().cast(dtypes.uint32) << _u32(i * 8))
+        for i in range(4): val = val | (mem.index(idx + _const(dtypes.int, i), *gate, ptr=True).load().cast(dtypes.uint32) << _u32(i * 8))
     else:
-      idx = (addr >> _const(addr.dtype, 2)).cast(dtypes.index)
-      idx = idx.valid(active) if active is not None else idx
-      val = mem.index(idx)
+      idx = (addr >> _const(addr.dtype, 2)).cast(dtypes.int)
+      val = mem.index(idx, *gate)
       if dt in (dtypes.uint64, dtypes.int64, dtypes.float64):
-        idx2 = ((addr + _const(adt, 4)) >> _const(adt, 2)).cast(dtypes.index)
-        idx2 = idx2.valid(active) if active is not None else idx2
-        val = val.cast(dtypes.uint64) | (mem.index(idx2).cast(dtypes.uint64) << _u64(32))
+        idx2 = ((addr + _const(adt, 4)) >> _const(adt, 2)).cast(dtypes.int)
+        val = val.cast(dtypes.uint64) | (mem.index(idx2, *gate).cast(dtypes.uint64) << _u64(32))
       elif dt in (dtypes.uint8, dtypes.int8): val = (val >> ((addr & _const(adt, 3)).cast(dtypes.uint32) * _u32(8))) & _u32(0xFF)
       elif dt in (dtypes.uint16, dtypes.int16): val = (val >> (((addr >> _const(adt, 1)) & _const(adt, 1)).cast(dtypes.uint32) * _u32(16))) & _u32(0xFFFF)
     return val
@@ -704,10 +702,10 @@ def parse_block(lines: list[str], start: int, vars: dict[str, UOp], funcs: dict 
         mem = vars.get('_vmem') if '_vmem' in vars else vars.get('_lds')
         if mem is not None:
           adt = dtypes.uint64 if addr.dtype == dtypes.uint64 else dtypes.uint32
-          idx = (addr >> _const(adt, 2)).cast(dtypes.index)
+          idx = (addr >> _const(adt, 2)).cast(dtypes.int)
           old = mem.index(idx)
           if dt in (dtypes.uint64, dtypes.int64, dtypes.float64):
-            old = old.cast(dtypes.uint64) | (mem.index(((addr + _const(adt, 4)) >> _const(adt, 2)).cast(dtypes.index)).cast(dtypes.uint64) << _u64(32))
+            old = old.cast(dtypes.uint64) | (mem.index(((addr + _const(adt, 4)) >> _const(adt, 2)).cast(dtypes.int)).cast(dtypes.uint64) << _u64(32))
           rhs = (old + rhs) if compound_op == '+=' else (old - rhs)
       if assigns is not None: assigns.append((f'MEM[{_tok_str(addr_toks)}].{dt_name}', (addr, rhs)))
       i += 1; continue
