@@ -415,8 +415,6 @@ def _define_bufs():
   scratch = UOp(Ops.DEFINE_GLOBAL, dtypes.uint8.ptr(1 << 30), arg=4)
   return sgpr, vgpr, vmem, lds, scratch
 
-
-
 def _sext(v, bits): return v - (1 << bits) if v & (1 << (bits - 1)) else v
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -473,8 +471,8 @@ class _Ctx:
     return self.sgpr.index(reg.cast(dtypes.index), ptr=True).load()
 
   def wsgpr_dyn(self, reg: UOp, val: UOp) -> UOp:
-    """Write SGPR with dynamic register index."""
-    return self.sgpr.index(reg.cast(dtypes.index)).store(val.cast(dtypes.uint32))
+    """Write SGPR with dynamic register index. Writes to NULL (124) are discarded."""
+    return self.sgpr.index(reg.cast(dtypes.index).valid(reg.ne(_c(124)))).store(val.cast(dtypes.uint32))
 
   def rvgpr_dyn(self, reg: UOp, lane: UOp) -> UOp:
     """Read VGPR with dynamic register index."""
@@ -485,12 +483,6 @@ class _Ctx:
     buf = self.vgpr.after(after) if after is not None else self.vgpr
     offset = (reg.cast(dtypes.index) * UOp.const(dtypes.index, 32) + lane.cast(dtypes.index)).valid(_lane_active(exec_mask, lane))
     return buf.index(offset).store(val.cast(dtypes.uint32))
-
-
-
-
-
-
 
   def rsrc_dyn(self, off: UOp, lane: UOp, bits: int = 32, literal: UOp | None = None) -> UOp:
     """Read source operand with dynamic offset. Handles SGPR/inline constants (<256), VGPR (>=256).
@@ -854,10 +846,8 @@ def _compile_vop3sd(inst: VOP3SD, ctx: _Ctx, name: str) -> tuple[str, UOp]:
       else:
         d0_u32 = d0_val.bitcast(dtypes.uint32) if d0_val.dtype in (dtypes.float32, dtypes.half) else d0_val.cast(dtypes.uint32)
         vgpr_stores.append(ctx.wvgpr_dyn(vdst_reg, lane3, d0_u32, exec_mask))
-    # Write carry output (skip write if sdst is NULL register 124)
-    is_not_null = sdst_off.ne(_c(124))
-    vcc_idx = ctx.sgpr.index(sdst_off.cast(dtypes.index).valid(is_not_null))
-    vcc_write = vcc_idx.store(final_vcc)
+    # Write carry output (wsgpr_dyn handles NULL register 124)
+    vcc_write = ctx.wsgpr_dyn(sdst_off, final_vcc)
     if vgpr_stores:
       # VCC write must come first in sink to ensure VCC loop runs before VGPR loop
       return name, UOp.sink(vcc_write, UOp.sink(*vgpr_stores).end(lane3), *ctx.inc_pc(), arg=KernelInfo(name=name))
