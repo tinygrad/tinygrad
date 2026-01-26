@@ -225,3 +225,68 @@ VIZ=-1 python test/test_tiny.py TestTiny.test_gemm
 Set VIZ to `-2` to save performance counters traces for the AMD backend.
 
 Use the CLI in `./extra/sqtt/roc.py` to explore the trace.
+
+---
+
+## BR-C Meta-Fork
+
+This fork applies BR-C eliminative reasoning to tinygrad development.
+
+### Core Principle
+
+Improvement comes from removing, not adding. tinygrad already embodies this.
+
+```
+Ω = all tinygrad code
+C = tests pass, SPEC=2 passes, benchmarks don't regress
+R = minimal tinygrad that satisfies C
+```
+
+### Forbidden Patterns (FP)
+
+```python
+# FP:MAGIC - no magic numbers without derivation
+stride = 64  # BAD: why 64?
+stride = warp_size * 2  # GOOD: derived
+
+# FP:HEURISTIC - no ranking without elimination
+best = max(options, key=score)  # BAD
+survivors = [o for o in options if valid(o)]  # GOOD
+
+# FP:BRANCH-EXPLOSION - no accumulating if/else
+if a: ...
+elif b: ...
+elif c: ...  # BAD: grows forever
+```
+
+### Budget Invariants (EB)
+
+```
+EB:LOC     - changes trend toward fewer lines
+EB:BRANCH  - changes trend toward fewer branches
+EB:SPECIAL - changes trend toward fewer special cases
+```
+
+### Targets
+
+1. **PatternMatcher cleanup** - `TRACK_MATCH_STATS=2` shows 0% hit patterns
+2. **Schedule passes** - which are redundant?
+3. **Codegen paths** - what's common across devices?
+4. **Runtime methods** - which are identical?
+
+### Workflow
+
+```bash
+# EXPLORE
+DEBUG=2 python -m pytest test/test_something.py -xvs
+
+# ENUMERATE (find elimination targets)
+TRACK_MATCH_STATS=2 python3 test/external/external_benchmark_schedule.py
+
+# CONSOLIDATE
+SPEC=2 python -m pytest test/ -x --timeout=60
+pre-commit run --all-files
+
+# COMMIT (only when single survivor)
+# show diff, get approval
+```
