@@ -162,7 +162,9 @@ def benchmark_python_split(kernel: bytes, global_size, local_size, args_ptr, rsr
 
   # Measure render time (uses cached sinks, handles canonical dedup)
   render_start = time.perf_counter()
+  cache_before = len(_canonical_prg_cache)
   prgs = [_get_inst_prg(inst_bytes) for inst_bytes in inst_bytes_list]
+  render_count = len(_canonical_prg_cache) - cache_before  # number of unique renders
   render_time = time.perf_counter() - render_start
 
   # Measure compile time (clang/llvm compile C to native)
@@ -187,7 +189,7 @@ def benchmark_python_split(kernel: bytes, global_size, local_size, args_ptr, rsr
   # Execution time (need to populate cache first)
   decode_program(kernel)
   exec_time = benchmark_emulator("Python", python_run_asm, kernel, global_size, local_size, args_ptr, rsrc2, iterations)
-  return build_time, render_time, compile_time, exec_time
+  return build_time, render_time, render_count, compile_time, exec_time
 
 def get_tinygrad_kernel(op_name: str) -> tuple[bytes, tuple, tuple, list[int], dict[int, bytes], int] | None:
   """Get a real tinygrad kernel by operation name. Returns (code, global_size, local_size, buf_sizes, buf_data, rsrc2)."""
@@ -270,7 +272,8 @@ def main():
     print(f"{'Instruction':<90} {'UOps':>6}  {'Build(ms)':>10}  {'Render(ms)':>10}")
     print("-" * 140)
     for r in results[:args.top]:
-      print(f"{r['inst_str']:<90} {r['uop_count']:>6}  {r['build_ms']:>10.3f}  {r['render_ms']:>10.3f}")
+      inst = r['inst_str'][:87] + "..." if len(r['inst_str']) > 90 else r['inst_str']
+      print(f"{inst:<90} {r['uop_count']:>6}  {r['build_ms']:>10.3f}  {r['render_ms']:>10.3f}")
     print("-" * 140)
     total_build = sum(r['build_ms'] for r in results)
     total_render = sum(r['render_ms'] for r in results)
@@ -302,7 +305,7 @@ def main():
     buffers, args_arr, args_ptr, ranges = setup_buffers(buf_sizes, buf_data)
 
     # Benchmark Python emulator (must be first to measure compile time before cache is populated)
-    py_build, py_render, py_compile, py_exec = benchmark_python_split(kernel, global_size, local_size, args_ptr, rsrc2, args.iterations)
+    py_build, py_render, render_count, py_compile, py_exec = benchmark_python_split(kernel, global_size, local_size, args_ptr, rsrc2, args.iterations)
 
     n_insts = count_instructions(kernel)  # uses cached decode_program
     n_workgroups = global_size[0] * global_size[1] * global_size[2]
@@ -315,7 +318,7 @@ def main():
     if py_build is not None:
       py_exec_rate = total_work / py_exec / 1e6
       print(f"  Build:          {py_build*1000:8.3f} ms")
-      print(f"  Render:         {py_render*1000:8.3f} ms")
+      print(f"  Render:         {py_render*1000:8.3f} ms  ({render_count} unique)")
       print(f"  Compile:        {py_compile*1000:8.3f} ms")
       print(f"  Exec:           {py_exec*1000:8.3f} ms  ({py_exec_rate:7.2f} M ops/s)")
     if rust_time:
@@ -323,18 +326,18 @@ def main():
       speedup = py_exec / rust_time if py_exec else 0
       print(f"  Rust:           {rust_time*1000:8.3f} ms  ({rust_rate:7.2f} M ops/s)  [{speedup:.1f}x faster]")
 
-    results.append((op_name, n_insts, n_workgroups, py_build, py_render, py_compile, py_exec, rust_time))
+    results.append((op_name, n_insts, n_workgroups, py_build, py_render, render_count, py_compile, py_exec, rust_time))
 
   # Summary table
-  print("\n" + "=" * 130)
+  print("\n" + "=" * 140)
   print("SUMMARY")
-  print("=" * 130)
-  print(f"{'Name':<16} {'Insts':<6} {'WGs':<5} {'Build (ms)':<12} {'Render (ms)':<12} {'Compile (ms)':<14} {'Exec (ms)':<12} {'Rust (ms)':<12} {'Speedup':<10}")
-  print("-" * 130)
+  print("=" * 140)
+  print(f"{'Name':<16} {'Insts':<6} {'WGs':<5} {'Build (ms)':<12} {'Render (ms)':<16} {'Compile (ms)':<14} {'Exec (ms)':<12} {'Rust (ms)':<12} {'Speedup':<10}")
+  print("-" * 140)
 
-  for name, n_insts, n_wgs, py_build, py_render, py_compile, py_exec, rust_time in results:
+  for name, n_insts, n_wgs, py_build, py_render, render_count, py_compile, py_exec, rust_time in results:
     build_ms = f"{py_build*1000:.3f}" if py_build else "error"
-    render_ms = f"{py_render*1000:.3f}" if py_render else "error"
+    render_ms = f"{py_render*1000:.3f} ({render_count})" if py_render else "error"
     compile_ms = f"{py_compile*1000:.3f}" if py_compile else "error"
     exec_ms = f"{py_exec*1000:.3f}" if py_exec else "error"
     if rust_time:
@@ -342,7 +345,7 @@ def main():
       speedup = f"{py_exec/rust_time:.1f}x" if py_exec else "N/A"
     else:
       rust_ms, speedup = "N/A", "N/A"
-    print(f"{name:<16} {n_insts:<6} {n_wgs:<5} {build_ms:<12} {render_ms:<12} {compile_ms:<14} {exec_ms:<12} {rust_ms:<12} {speedup:<10}")
+    print(f"{name:<16} {n_insts:<6} {n_wgs:<5} {build_ms:<12} {render_ms:<16} {compile_ms:<14} {exec_ms:<12} {rust_ms:<12} {speedup:<10}")
 
 if __name__ == "__main__":
   main()

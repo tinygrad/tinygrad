@@ -423,11 +423,11 @@ def _sext(v, bits): return v - (1 << bits) if v & (1 << (bits - 1)) else v
 
 class _Ctx:
   """Context for instruction compilation - holds buffers and helpers."""
-  __slots__ = ('sgpr', 'vgpr', 'vmem', 'lds', 'scratch', 'literal', 'inst_size', 'dyn_fields')
+  __slots__ = ('sgpr', 'vgpr', 'vmem', 'lds', 'scratch', 'inst_size', 'dyn_fields')
 
-  def __init__(self, sgpr, vgpr, vmem, lds, scratch, literal, inst_size):
+  def __init__(self, sgpr, vgpr, vmem, lds, scratch, inst_size):
     self.sgpr, self.vgpr, self.vmem, self.lds, self.scratch = sgpr, vgpr, vmem, lds, scratch
-    self.literal, self.inst_size = literal, inst_size
+    self.inst_size = inst_size
     self.dyn_fields: list[tuple[int, int]] = []  # (lo, hi) of fields read dynamically
 
   def inst_word(self, dword_idx: int) -> UOp:
@@ -940,7 +940,7 @@ def _compile_vopd(inst: VOPD, ctx: _Ctx, name: str) -> tuple[str, UOp]:
     assert vop is not None, f"no VOP mapping for VOPD {label}: {op}"
     if label == 'Y': srcs = {'S0': srcy0, 'S1': srcy1, 'D0': ctx.rvgpr_dyn(vdst_reg, lane)}
     else: srcs = {'S0': ctx.rsrc_dyn(src0_off, lane, literal=literal), 'S1': ctx.rvgpr_dyn(vsrc1_reg, lane), 'D0': ctx.rvgpr_dyn(vdst_reg, lane)}
-    if op in (VOPDOp.V_DUAL_FMAAK_F32, VOPDOp.V_DUAL_FMAMK_F32): srcs['SIMM32'] = literal if literal is not None else _c(ctx.literal)
+    if op in (VOPDOp.V_DUAL_FMAAK_F32, VOPDOp.V_DUAL_FMAMK_F32): srcs['SIMM32'] = literal
     if op == VOPDOp.V_DUAL_CNDMASK_B32: srcs['VCC'] = ctx.rsgpr_dyn(_c(VCC_LO.offset))
     pcode = PCODE.get(vop)
     assert pcode is not None, f"no pcode for VOPD {label}: {vop}"
@@ -1117,10 +1117,7 @@ def _get_inst_sink(inst_bytes: bytes) -> tuple[UOp, _Ctx]:
 
   name = f"{_op_name(inst).lower()}_{inst_bytes[:inst.size()].hex()}"
   sgpr, vgpr, vmem, lds, scratch = _define_bufs()
-  is_8byte_base = isinstance(inst, (VOP3, VOP3SD, VOP3P, SMEM, DS, FLAT, GLOBAL, VOPD, SCRATCH))
-  lit_off = 8 if is_8byte_base else 4
-  literal = int.from_bytes(inst_bytes[lit_off:lit_off+4], 'little') if len(inst_bytes) >= lit_off + 4 else 0
-  ctx = _Ctx(sgpr, vgpr, vmem, lds, scratch, literal, inst_size)
+  ctx = _Ctx(sgpr, vgpr, vmem, lds, scratch, inst_size)
 
   # Look up handler by type, falling back to base classes for _LIT variants
   handler = _INST_HANDLERS.get(type(inst))
