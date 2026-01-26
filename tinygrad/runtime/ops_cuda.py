@@ -92,6 +92,7 @@ class CUDAAllocator(LRUAllocator['CUDADevice']):
     check(cuda.cuCtxSetCurrent(dest_dev.context))
     check(cuda.cuStreamWaitEvent(None, sync_event, 0)) # sync the default stream on the dest dev
   def _offset(self, buf, size:int, offset:int): return cuda.CUdeviceptr_v2(buf.value + offset)
+  def _device_ptr(self, opaque) -> int: return opaque.value
 
 class CUDADevice(Compiled):
   devices: list[CUDADevice] = []

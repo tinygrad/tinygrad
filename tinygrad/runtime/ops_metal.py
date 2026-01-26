@@ -196,3 +196,4 @@ class MetalAllocator(LRUAllocator[MetalDevice]):
   def _copyin(self, dest:MetalBuffer, src:memoryview): self._cp_mv(self._as_buffer(dest), src, "TINY -> METAL")
   def _copyout(self, dest:memoryview, src:MetalBuffer): self._cp_mv(dest, self._as_buffer(src), "METAL -> TINY")
   def _offset(self, buf:MetalBuffer, size:int, offset:int): return MetalBuffer(buf.buf, size, offset)
+  def _device_ptr(self, opaque: MetalBuffer) -> int: return opaque.buf.contents()
