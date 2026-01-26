@@ -1018,12 +1018,11 @@ def _compile_mem_op(inst, ctx: _Ctx, name: str) -> tuple[str, UOp]:
   # RDNA3: addr, data, offset; RDNA4: vaddr, vsrc, ioffset
   inst_cls = type(inst)
   if is_lds:
-    ds_cls = R4_DS if isinstance(inst, R4_DS) else DS
-    addr_reg = ctx.inst_field(ds_cls.addr)
-    vdata_reg = ctx.inst_field(ds_cls.data0)
-    vdst_reg = ctx.inst_field(ds_cls.vdst)
-    offset0 = ctx.inst_field(ds_cls.offset0)
-    offset1 = ctx.inst_field(ds_cls.offset1)
+    addr_reg = ctx.inst_field(inst_cls.addr)
+    vdata_reg = ctx.inst_field(inst_cls.data0)
+    vdst_reg = ctx.inst_field(inst_cls.vdst)
+    offset0 = ctx.inst_field(inst_cls.offset0)
+    offset1 = ctx.inst_field(inst_cls.offset1)
     offset = offset0  # DS uses offset0 as primary offset
     saddr_reg = None
   else:
@@ -1046,7 +1045,7 @@ def _compile_mem_op(inst, ctx: _Ctx, name: str) -> tuple[str, UOp]:
   is_64bit = ndwords >= 2 or '_U64' in op_name or '_I64' in op_name or '_F64' in op_name
   is_atomic, glc = 'ATOMIC' in op_name, getattr(inst, 'glc', 0)
   has_data1 = is_lds and hasattr(inst, 'data1') and inst.data1 is not None
-  data1_reg = ctx.inst_field(ds_cls.data1) if is_lds else _c(0)
+  data1_reg = ctx.inst_field(inst_cls.data1) if is_lds else _c(0)
 
   def make_addr(lane: UOp) -> UOp:
     if is_lds: return ctx.rvgpr_dyn(addr_reg, lane)
@@ -1368,7 +1367,7 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
               assert fxn is not None, f"[emu2] No fxn for {name} at PC={pc}"
               assert 4 not in globals_list or scratch_buf, f"SCRATCH instruction {name} but scratch_size=0"
               if DEBUG >= 5:
-                inst = decode_inst(bytes((ctypes.c_char * 12).from_address(pc).raw))
+                inst = decode_inst(bytes((ctypes.c_char * 12).from_address(pc).raw), arch)
                 print(f"[emu2] exec PC={pc:X}: {inst!r}")
               fxn(*[c_bufs[g] for g in globals_list], c_lane)
             else: raise RuntimeError("exceeded 1M instructions, likely infinite loop")
