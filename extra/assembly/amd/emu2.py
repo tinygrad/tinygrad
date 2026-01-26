@@ -539,6 +539,9 @@ class _Ctx:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def _compile_sopp(inst: SOPP, ctx: _Ctx, name: str) -> tuple[str, UOp]:
+  # Read simm16 dynamically and sign-extend: (val ^ 0x8000) - 0x8000
+  simm16_raw = ctx.inst_field(SOPP.simm16)
+  simm16 = ((simm16_raw ^ _c(0x8000)) - _c(0x8000)).cast(dtypes.int16)
   if inst.op == SOPPOp.S_ENDPGM:
     return name, UOp.sink(ctx.wsgpr_dyn(_c(PC_LO_IDX), UOp.const(dtypes.uint32, 0xFFFFFFFF)),
                           ctx.wsgpr_dyn(_c(PC_HI_IDX), UOp.const(dtypes.uint32, 0xFFFFFFFF)), arg=KernelInfo(name=name))
@@ -546,7 +549,7 @@ def _compile_sopp(inst: SOPP, ctx: _Ctx, name: str) -> tuple[str, UOp]:
   if pcode is not None:
     pc_bytes = ctx.rpc()  # PC is already 64-bit byte address
     vcc, exec_lo = ctx.rsgpr_dyn(_c(VCC_LO.offset)), ctx.rsgpr_dyn(_c(EXEC_LO.offset))
-    srcs = {'PC': pc_bytes.cast(dtypes.int64), 'SIMM16': UOp.const(dtypes.int16, _sext(inst.simm16, 16)), 'SCC': ctx.rsgpr_dyn(_c(SCC_IDX)), 'VCC': vcc,
+    srcs = {'PC': pc_bytes.cast(dtypes.int64), 'SIMM16': simm16, 'SCC': ctx.rsgpr_dyn(_c(SCC_IDX)), 'VCC': vcc,
             'VCCZ': vcc.eq(UOp.const(dtypes.uint32, 0)).cast(dtypes.uint32), 'EXECZ': exec_lo.eq(UOp.const(dtypes.uint32, 0)).cast(dtypes.uint32)}
     for dest, val in parse_pcode(pcode, srcs, op_name=inst.op.name)[1]:
       if dest == 'PC' or dest.startswith('PC.'):
@@ -972,7 +975,6 @@ def _compile_mem_op(inst, ctx: _Ctx, name: str) -> tuple[str, UOp]:
     offset0, offset1 = getattr(inst, 'offset0', 0) or 0, getattr(inst, 'offset1', 0) or 0
     offset = getattr(inst, 'offset', offset0) or offset0
   else:
-    # Dynamic register fields for canonical deduplication
     addr_reg = ctx.inst_field(type(inst).addr)
     vdata_reg = ctx.inst_field(type(inst).data)
     vdst_reg = ctx.inst_field(type(inst).vdst)
