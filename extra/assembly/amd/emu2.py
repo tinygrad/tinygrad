@@ -313,29 +313,35 @@ def compile_sop_pcode_dyn(op, srcs: dict[str, UOp], wsgpr_dyn_fn, rsgpr_dyn_fn, 
   if not stores: return None
   return name, UOp.sink(*stores, *inc_pc_fn(), arg=KernelInfo(name=name))
 
-def compile_lane_pcode(op, inst, vgpr, wsgpr_dyn_fn, rsgpr_dyn_fn, rsrc_dyn_fn, inc_pc_fn, name: str):
+def compile_lane_pcode(op, inst, ctx: '_Ctx', inc_pc_fn, name: str):
   """Compile READLANE/READFIRSTLANE/WRITELANE using pcode parser."""
   pcode = PCODE.get(op)
   if pcode is None: return None
 
   op_name = op.name if hasattr(op, 'name') else str(op)
-  src0_reg = (inst.src0.offset - 256) if inst.src0.offset >= 256 else 0
-  vdst_reg = (inst.vdst.offset - 256) if inst.vdst.offset >= 256 else inst.vdst.offset
+  # Dynamic field reads
+  src0_off = ctx.inst_field(type(inst).src0)
+  vdst_off = ctx.inst_field(type(inst).vdst)
+  # src0_reg = VGPR index (src0 - 256 if VGPR, else 0 for inline/SGPR)
+  is_vgpr = src0_off >= _c(256)
+  src0_reg = is_vgpr.where(src0_off - _c(256), U32_0)
+  # vdst for VOP1 is VGPRField but READFIRSTLANE writes to SGPR with same encoding; VOP3 vdst is direct SGPR offset
   # S0 = scalar value for WRITELANE, register index for others; S1 = lane select for READLANE/WRITELANE
+  src1_off = ctx.inst_field(type(inst).src1) if hasattr(type(inst), 'src1') else None
   srcs = {
-    'SRC0': _c(src0_reg), 'VDST': _c(vdst_reg), 'EXEC_LO': rsgpr_dyn_fn(_c(EXEC_LO.offset)), '_vgpr': vgpr,
-    'S0': rsrc_dyn_fn(_c(inst.src0.offset), IDX_0) if 'WRITELANE' in op_name else _c(src0_reg),
-    'S1': rsrc_dyn_fn(_c(inst.src1.offset), IDX_0) if hasattr(inst, 'src1') and inst.src1 is not None else U32_0,
+    'SRC0': src0_reg, 'VDST': vdst_off, 'EXEC_LO': ctx.rsgpr_dyn(_c(EXEC_LO.offset)), '_vgpr': ctx.vgpr,
+    'S0': ctx.rsrc_dyn(src0_off, IDX_0) if 'WRITELANE' in op_name else src0_reg,
+    'S1': ctx.rsrc_dyn(src1_off, IDX_0) if src1_off is not None else U32_0,
   }
   _, assigns = parse_pcode(pcode, srcs, lane=None)
 
   stores = []
   for dest, val in assigns:
     if dest.startswith('D0'):
-      stores.append(wsgpr_dyn_fn(_c(inst.vdst.offset), val.cast(dtypes.uint32)))
+      stores.append(ctx.wsgpr_dyn(vdst_off, val.cast(dtypes.uint32)))
     elif dest.startswith('VGPR['):
       idx, write_val = val
-      stores.append(vgpr.index(idx.cast(dtypes.index)).store(write_val.cast(dtypes.uint32)))
+      stores.append(ctx.vgpr.index(idx.cast(dtypes.index)).store(write_val.cast(dtypes.uint32)))
 
   if not stores: return None
   return name, UOp.sink(*stores, *inc_pc_fn(), arg=KernelInfo(name=name))
@@ -644,7 +650,7 @@ def _compile_sop(inst, ctx: _Ctx, name: str) -> tuple[str, UOp]:
 def _compile_vop12(inst, ctx: _Ctx, name: str) -> tuple[str, UOp]:
   op_name = _op_name(inst)
   if op_name == 'V_READFIRSTLANE_B32_E32':
-    pcode_result = compile_lane_pcode(inst.op, inst, ctx.vgpr, ctx.wsgpr_dyn, ctx.rsgpr_dyn, ctx.rsrc_dyn, ctx.inc_pc, name)
+    pcode_result = compile_lane_pcode(inst.op, inst, ctx, ctx.inc_pc, name)
     assert pcode_result is not None, f"no pcode for VOP1: {op_name}"
     return pcode_result
   lane, exec_mask, sizes = UOp.range(32, _next_axis_id(), AxisType.LOOP), ctx.rsgpr_dyn(_c(EXEC_LO.offset)), getattr(inst, 'op_regs', {})
@@ -758,7 +764,7 @@ def _compile_vop3(inst: VOP3, ctx: _Ctx, name: str) -> tuple[str, UOp]:
 
   # Lane operations
   if op_name in ('V_READLANE_B32', 'V_READFIRSTLANE_B32', 'V_READFIRSTLANE_B32_E64', 'V_WRITELANE_B32'):
-    pcode_result = compile_lane_pcode(inst.op, inst, ctx.vgpr, ctx.wsgpr_dyn, ctx.rsgpr_dyn, ctx.rsrc_dyn, ctx.inc_pc, name)
+    pcode_result = compile_lane_pcode(inst.op, inst, ctx, ctx.inc_pc, name)
     assert pcode_result is not None, f"no pcode for VOP3: {op_name}"
     return pcode_result
 
