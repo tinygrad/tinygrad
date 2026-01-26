@@ -275,6 +275,8 @@ jobs:
       run: NULL=1 python -m pytest -n=auto test/external/mlperf_stable_diffusion/external_test_models.py::TestOpenClip --durations=20
     - name: Run AMD emulated BERT training on NULL backend
       run: EMULATE=AMD_RDNA4 NULL=1 CAPTURE_PROCESS_REPLAY=0 DEFAULT_FLOAT=HALF BENCHMARK=10 BS=66 GPUS=1 BERT_LAYERS=2 MODEL=bert python3 examples/mlperf/model_train.py
+    - name: Run AMD emulated mmapeak on NULL backend
+      run: PYTHONPATH=. DEV=NULL EMULATE=AMD_CDNA4 python extra/mmapeak/mmapeak.py
     # TODO: support fake weights
     #- name: Run LLaMA 7B on 4 fake devices
     #  run: NULL=1 python3 examples/llama.py --gen 1 --size 7B --shard 4 --prompt "Hello." --count 3 --temperature 0 --timing

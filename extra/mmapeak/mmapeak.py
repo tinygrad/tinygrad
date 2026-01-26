@@ -32,11 +32,6 @@ def launchBenchmark(instruction, vgprIndices, dense=True, accum=False, **kwargs)
   src = assemblyTemplate.replace("INTERNAL_LOOP", str(INTERNAL_LOOP)).replace("INSTRUCTION", inst_hex).replace("VGPRS", str(len(vgprs)))
   src = src.replace("DIRECTIVE", DIRECTIVE)
   lib = COMPILER.compile(src)
-  instructions = inst.disasm()+"\n"
-  src_old = assemblyTemplate.replace("INTERNAL_LOOP", str(INTERNAL_LOOP)).replace("INSTRUCTION", instructions*INSTRUCTIONS_PER_LOOP)
-  src_old = src.replace("DIRECTIVE", DIRECTIVE)
-  lib_old = COMPILER.compile(src_old)
-  assert lib_old == lib
   fxn = DEV.runtime("matmul", lib)
   elapsed = min([fxn(global_size=(NUM_WORKGROUPS,1,1), local_size=(WAVE_SIZE*NUM_WAVES,1,1), wait=True) for _ in range(2)])
   FLOPs = FLOPS_PER_MATMUL * NUM_WAVES * NUM_WORKGROUPS * INTERNAL_LOOP * INSTRUCTIONS_PER_LOOP
