@@ -18,7 +18,7 @@ settings.register_profile("my_profile", max_examples=200, deadline=None, derando
 settings.load_profile("my_profile")
 
 def get_available_cast_dtypes(dtype: DType) -> List[DType]:
-  if not is_dtype_supported(dtype): return []
+  if not is_dtype_supported(dtype) and dtype not in (dtypes.long, dtypes.ulong): return []
   # dont cast internal dtypes
   return [v for k, v in DTYPES_DICT.items() if v != dtype and is_dtype_supported(v) and not k.startswith("_")]
 
