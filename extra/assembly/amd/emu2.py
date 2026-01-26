@@ -983,7 +983,8 @@ def _compile_mem_op(inst, ctx: _Ctx, name: str) -> tuple[str, UOp]:
   mem = ctx.lds if is_lds else ctx.scratch if is_scratch else ctx.vmem
   addr_shift = UOp.const(dtypes.uint32 if is_lds else dtypes.uint64, 2)
 
-  # Extract register info - all dynamic for deduplication
+  # Extract register info - dynamic for DS, static for FLAT/GLOBAL/SCRATCH
+  def vreg(attr): return (getattr(inst, attr).offset - 256) if hasattr(inst, attr) and getattr(inst, attr).offset >= 256 else (getattr(inst, attr).offset if hasattr(inst, attr) else 0)
   has_saddr = not is_lds and hasattr(inst, 'saddr') and inst.saddr != NULL and inst.saddr.offset < 128
   if is_lds:
     addr_reg = ctx.inst_field(DS.addr)
@@ -992,17 +993,13 @@ def _compile_mem_op(inst, ctx: _Ctx, name: str) -> tuple[str, UOp]:
     offset0 = ctx.inst_field(DS.offset0)
     offset1 = ctx.inst_field(DS.offset1)
     offset = offset0  # DS uses offset0 as primary offset
-    saddr_reg = None
   else:
+    # Dynamic registers for FLAT/GLOBAL/SCRATCH
     addr_reg = ctx.inst_field(type(inst).addr)
     vdata_reg = ctx.inst_field(type(inst).data)
     vdst_reg = ctx.inst_field(type(inst).vdst)
-    # Dynamic 13-bit signed offset: (val ^ 0x1000) - 0x1000 for sign extension
-    raw_offset = ctx.inst_field(type(inst).offset)
-    offset = (raw_offset ^ _c(0x1000)) - _c(0x1000)
+    offset = _c(_sext(getattr(inst, 'offset', 0), 13))
     offset0, offset1 = 0, 0
-    # Dynamic saddr - read field, NULL (124) or >= 128 means no saddr
-    saddr_reg = ctx.inst_field(type(inst).saddr) if hasattr(inst, 'saddr') else None
 
   # Data width
   ndwords = 4 if '_B128' in op_name or 'B128' in op_name else 3 if '_B96' in op_name or 'B96' in op_name else 2 if '_B64' in op_name or 'B64' in op_name else 1
@@ -1013,22 +1010,17 @@ def _compile_mem_op(inst, ctx: _Ctx, name: str) -> tuple[str, UOp]:
 
   def make_addr(lane: UOp) -> UOp:
     if is_lds: return ctx.rvgpr_dyn(addr_reg, lane)
-    offset64 = offset.cast(dtypes.uint64)  # dynamic signed offset
-    # Dynamic saddr check: saddr < 124 means valid SGPR, otherwise use VGPR pair for address
-    use_saddr = (saddr_reg < _c(124)) if saddr_reg is not None else UOp.const(dtypes.bool, False)
+    offset64 = offset.cast(dtypes.uint64)
     if is_scratch:
       scratch_stride = ctx.rsgpr_dyn(_c(SCRATCH_STRIDE_IDX)).cast(dtypes.uint64)
       base = lane.cast(dtypes.uint64) * scratch_stride
       addr_offset = ctx.rvgpr_dyn(addr_reg, lane).cast(dtypes.uint64)
-      # Add saddr value only if use_saddr is true (saddr < 124)
-      saddr_contrib = use_saddr.where(ctx.rsgpr_dyn(saddr_reg).cast(dtypes.uint64), UOp.const(dtypes.uint64, 0)) if saddr_reg is not None else UOp.const(dtypes.uint64, 0)
-      return base + addr_offset + saddr_contrib + offset64
-    # FLAT/GLOBAL: choose between SGPR base (saddr) or VGPR pair (addr) based on saddr validity
-    saddr_base = _u64(ctx.rsgpr_dyn(saddr_reg), ctx.rsgpr_dyn(saddr_reg + U32_1)) if saddr_reg is not None else UOp.const(dtypes.uint64, 0)
-    vaddr_base = _u64(ctx.rvgpr_dyn(addr_reg, lane), ctx.rvgpr_dyn(addr_reg + _c(1), lane))
-    # When saddr is valid: base = saddr pair, vaddr is 32-bit offset; otherwise: base = 0, vaddr is 64-bit address
-    base_addr = use_saddr.where(saddr_base + ctx.rvgpr_dyn(addr_reg, lane).cast(dtypes.uint64), vaddr_base)
-    return base_addr + offset64
+      if has_saddr: addr_offset = addr_offset + ctx.rsgpr_dyn(_c(inst.saddr.offset)).cast(dtypes.uint64)
+      return base + addr_offset + offset64
+    if has_saddr:
+      saddr = inst.saddr.offset
+      return _u64(ctx.rsgpr_dyn(_c(saddr)), ctx.rsgpr_dyn(_c(saddr + 1))) + ctx.rvgpr_dyn(addr_reg, lane).cast(dtypes.uint64) + offset64
+    return _u64(ctx.rvgpr_dyn(addr_reg, lane), ctx.rvgpr_dyn(addr_reg + _c(1), lane)) + offset64
 
   def wmem(addr: UOp, val: UOp, active: UOp) -> UOp:
     idx = mem.index((addr >> addr_shift).cast(dtypes.index))
