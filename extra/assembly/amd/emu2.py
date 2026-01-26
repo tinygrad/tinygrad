@@ -41,11 +41,9 @@ class _MXCSRContext:
     lib.set_mxcsr(self._saved)
 from tinygrad.uop.ops import UOp, Ops, KernelInfo, AxisType
 from tinygrad.dtype import dtypes
-from tinygrad.codegen import get_program
 from tinygrad.device import Device, Buffer, BufferSpec
 from tinygrad.runtime.autogen import hsa
-from tinygrad.helpers import Context, DEBUG, colored, TUPLE_ORDER, getenv
-from tinygrad.renderer import ProgramSpec
+from tinygrad.helpers import Context, DEBUG, colored
 
 from extra.assembly.amd.decode import decode_inst
 from extra.assembly.amd.autogen.rdna3.str_pcode import PCODE
@@ -143,6 +141,27 @@ def _val_to_u32(val: UOp) -> UOp:
   if val.dtype == dtypes.half: return val.bitcast(dtypes.uint16).cast(dtypes.uint32)
   if val.dtype in (dtypes.uint16, dtypes.int16): return val.cast(dtypes.uint32)
   return val.cast(dtypes.uint32)
+
+def _apply_clamp(val: UOp, clmp: int | UOp) -> UOp:
+  """Apply VOP3 clamp modifier: clamp float results to [0.0, 1.0] range."""
+  if isinstance(clmp, int) and clmp == 0: return val
+  # Only clamp float types
+  if val.dtype == dtypes.float32:
+    zero, one = UOp.const(dtypes.float32, 0.0), UOp.const(dtypes.float32, 1.0)
+    clamped = val.maximum(zero).minimum(one)
+    if isinstance(clmp, UOp): return clmp.ne(_c(0)).where(clamped, val)
+    return clamped
+  if val.dtype == dtypes.half:
+    zero, one = UOp.const(dtypes.half, 0.0), UOp.const(dtypes.half, 1.0)
+    clamped = val.maximum(zero).minimum(one)
+    if isinstance(clmp, UOp): return clmp.ne(_c(0)).where(clamped, val)
+    return clamped
+  if val.dtype == dtypes.float64:
+    zero, one = UOp.const(dtypes.float64, 0.0), UOp.const(dtypes.float64, 1.0)
+    clamped = val.maximum(zero).minimum(one)
+    if isinstance(clmp, UOp): return clmp.ne(_c(0)).where(clamped, val)
+    return clamped
+  return val
 
 # Pcode parser
 def _apply_pseudocode_fixes(op_name: str, pcode: str) -> str:
@@ -330,7 +349,8 @@ def compile_lane_pcode(op, inst, ctx: '_Ctx', inc_pc_fn, name: str):
   return name, UOp.sink(*stores, *inc_pc_fn(), arg=KernelInfo(name=name))
 
 def compile_vop_pcode(op, srcs: dict[str, UOp], lane: UOp, wvgpr_fn, wsgpr_fn, rsgpr_fn, vdst_reg: UOp, exec_mask: UOp,
-                      inc_pc_fn=None, name: str = None, opsel_dst_hi: bool | UOp = False, rvgpr_fn=None, sdst_reg: int | None = None):
+                      inc_pc_fn=None, name: str = None, opsel_dst_hi: bool | UOp = False, rvgpr_fn=None, sdst_reg: int | None = None,
+                      clmp: int | UOp = 0):
   """Compile a VOP instruction using pcode parser. Returns (name, sink) if inc_pc_fn/name provided, else list of store UOps, or None."""
   pcode = PCODE.get(op)
   if pcode is None: return None
@@ -355,6 +375,8 @@ def compile_vop_pcode(op, srcs: dict[str, UOp], lane: UOp, wvgpr_fn, wsgpr_fn, r
                      val.cast(dtypes.uint32) if val.dtype in (dtypes.uint16, dtypes.int16) else val.cast(dtypes.uint32) & UOp.const(dtypes.uint32, slice_mask)
           raw_stores.append(('vgpr_slice', (lo_bit, width, val_bits)))
           continue
+      # Apply clamp modifier for float types
+      val = _apply_clamp(val, clmp)
       if val.dtype in (dtypes.uint64, dtypes.int64, dtypes.float64):
         lo, hi = _split64(val)
         raw_stores.extend([('vgpr', wvgpr(vdst_reg, lane, lo, exec_mask)), ('vgpr', wvgpr(vdst_reg + _c(1), lane, hi, exec_mask))])
@@ -777,13 +799,14 @@ def _compile_vop3(inst: VOP3, ctx: _Ctx, name: str) -> tuple[str, UOp]:
   # FMAC instructions need D0 (accumulator) from destination register
   if 'FMAC' in op_name: srcs['D0'] = ctx.rvgpr_dyn(vdst_reg, lane)
   opsel_dst_hi = bool(opsel & 0b1000) and _is_16bit_op(op_name)
+  clmp = getattr(inst, 'clmp', 0) or 0
   if opsel_dst_hi:
     stores = compile_vop_pcode(inst.op, srcs, lane, ctx.wvgpr_dyn, ctx.wsgpr_dyn, ctx.rsgpr_dyn, vdst_reg, exec_mask, opsel_dst_hi=True,
-                               rvgpr_fn=ctx.rvgpr_dyn)
+                               rvgpr_fn=ctx.rvgpr_dyn, clmp=clmp)
     if stores is not None:
       return name, UOp.sink(*stores, *ctx.inc_pc(), arg=KernelInfo(name=name))
   pcode_result = compile_vop_pcode(inst.op, srcs, lane, ctx.wvgpr_dyn, ctx.wsgpr_dyn, ctx.rsgpr_dyn, vdst_reg, exec_mask, ctx.inc_pc, name,
-                                   rvgpr_fn=ctx.rvgpr_dyn)
+                                   rvgpr_fn=ctx.rvgpr_dyn, clmp=clmp)
   assert pcode_result is not None, f"no pcode for VOP3: {inst.op.name}"
   return pcode_result
 
@@ -1117,37 +1140,6 @@ _INST_HANDLERS: dict[type, callable] = {
 # PROGRAM DECODE AND COMPILATION
 # ═══════════════════════════════════════════════════════════════════════════════
 
-# Backend selection: EMU2_BACKEND=clang (default) or llvm
-EMU2_BACKEND = getenv("EMU2_BACKEND", "clang")
-
-def _get_backend():
-  """Get renderer, compiler, and program class based on EMU2_BACKEND."""
-  if EMU2_BACKEND == "llvm":
-    from tinygrad.renderer.llvmir import CPULLVMRenderer
-    from tinygrad.runtime.support.compiler_cpu import CPULLVMCompiler
-    from tinygrad.runtime.ops_cpu import CPUProgram
-    return CPULLVMRenderer(), CPULLVMCompiler(), CPUProgram
-  else:  # clang (default)
-    from tinygrad.renderer.cstyle import ClangRenderer
-    from tinygrad.runtime.support.compiler_cpu import ClangJITCompiler
-    from tinygrad.runtime.ops_cpu import CPUProgram
-    return ClangRenderer(), ClangJITCompiler(), CPUProgram
-
-_emu_renderer, _emu_compiler, _ProgramClass = _get_backend()
-
-def _elf_symbol_offsets(obj: bytes) -> dict[str, int]:
-  """Parse ELF object file and return {symbol_name: offset} for all defined symbols."""
-  from tinygrad.runtime.support.elf import elf_loader, libc
-  def _strtab(blob: bytes, idx: int) -> str: return blob[idx:blob.find(b'\x00', idx)].decode('utf-8')
-  _, sections, _ = elf_loader(obj)
-  symtab_sec = next((s for s in sections if s.header.sh_type == libc.SHT_SYMTAB), None)
-  if symtab_sec is None: return {}
-  strtab_sec = sections[symtab_sec.header.sh_link] if symtab_sec.header.sh_link < len(sections) else None
-  if strtab_sec is None: return {}
-  symbols = (libc.Elf64_Sym * (symtab_sec.header.sh_size // symtab_sec.header.sh_entsize)).from_buffer_copy(symtab_sec.content)
-  return {name: sections[sym.st_shndx].header.sh_addr + sym.st_value
-          for sym in symbols if 0 < sym.st_shndx < len(sections) and (name := _strtab(strtab_sec.content, sym.st_name))}
-
 @functools.cache
 def _get_inst_sink(inst_bytes: bytes) -> tuple[UOp, tuple[int, int, int]]:
   """Build UOp sink for instruction bytes. Returns (sink, (base, mask, size)) with canonical name."""
@@ -1171,76 +1163,51 @@ def _get_inst_sink(inst_bytes: bytes) -> tuple[UOp, tuple[int, int, int]]:
   canonical_name = f"{_op_name(inst).lower()}_{base.to_bytes(size, 'little').hex()}"
   return sink.replace(arg=KernelInfo(name=canonical_name)).rtag(1), (base, mask, size)
 
-_canonical_prg_cache: list[tuple[int, int, int, ProgramSpec]] = []  # [(base, mask, size, prg), ...]
-_last_compiled_new: bool = False  # set by _get_inst_prg when compiling new instruction
+_canonical_runner_cache: list[tuple[int, int, int, object]] = []  # [(base, mask, size, runner), ...]
 
-def _match_canonical(inst_int: int, inst_size: int) -> ProgramSpec | None:
+def _match_canonical(inst_int: int, inst_size: int) -> object | None:
   """Check if instruction matches any cached (base, mask, size) pattern."""
-  for base, mask, size, prg in _canonical_prg_cache:
-    if inst_size != size: continue  # must match instruction size exactly
-    if (inst_int & mask) == base: return prg
+  for base, mask, size, runner in _canonical_runner_cache:
+    if inst_size == size and (inst_int & mask) == base: return runner
   return None
 
 @functools.cache
-def _get_inst_prg(inst_bytes: bytes) -> ProgramSpec:
-  """Compile instruction bytes to ProgramSpec. Cached by instruction bytes, with canonical dedup."""
-  global _last_compiled_new
-  # Decode instruction to get size for canonical matching
+def _get_runner(inst_bytes: bytes):
+  """Build and compile instruction to CompiledRunner. Cached by instruction bytes, with canonical dedup."""
+  from tinygrad.engine.realize import get_runner
   inst = decode_inst(inst_bytes)
   inst_size = inst.size()
   inst_int = int.from_bytes(inst_bytes[:inst_size], 'little')
-  # Check canonical cache BEFORE building sink (avoids expensive UOp construction)
-  if (prg := _match_canonical(inst_int, inst_size)) is not None:
-    _last_compiled_new = False
-    return prg
+  if (runner := _match_canonical(inst_int, inst_size)) is not None: return runner, False
   sink, (base, mask, size) = _get_inst_sink(inst_bytes)
   with Context(NOOPT=1, IGNORE_OOB=1, TUPLE_ORDER=0):
-    prg = get_program(sink, _emu_renderer)
-  _canonical_prg_cache.append((base, mask, size, prg))
-  _last_compiled_new = True
-  return prg
+    runner = get_runner('CPU', sink)
+  _canonical_runner_cache.append((base, mask, size, runner))
+  return runner, True
 
 @functools.cache
 def decode_program(data: bytes) -> dict[int, tuple[str, object, list[int], object]]:
-  """Decode program to {pc: (name, program, globals, holder)}."""
-
-  # Collect all instruction programs
-  inst_info: list[tuple[int, ProgramSpec]] = []  # (pc_bytes, prg)
+  """Decode program to {pc: (name, fxn, globals, runner)}."""
+  result: dict[int, tuple[str, object, list[int], object]] = {}
   i = 0
   while i < len(data):
     inst = decode_inst(data[i:])
     if isinstance(inst, SOPP) and inst.op == SOPPOp.S_CODE_END: break
     try:
-      prg = _get_inst_prg(bytes(data[i:i + inst.size() + 4]))
-      inst_info.append((i, prg))  # PC is now byte offset
+      runner, is_new = _get_runner(bytes(data[i:i + inst.size() + 4]))
       if DEBUG >= 3:
         try: inst_str = repr(inst)
         except Exception: inst_str = f"<{type(inst).__name__} at PC={i}>"
         msg = f"[emu2] PC={i}: {inst_str}"
-        print(colored(msg, 'green') if _last_compiled_new else msg)
-        if DEBUG >= 4: print(f"{colored(prg.src, 'BLACK')}")
+        print(colored(msg, 'green') if is_new else msg)
+        if DEBUG >= 4: print(f"{colored(runner.p.src, 'BLACK')}")
+      result[i] = (runner.p.function_name, runner._prg.fxn, runner.p.globals, runner)
     except Exception as e:
       try: inst_str = repr(inst)
       except Exception: inst_str = f"<{type(inst).__name__}>"
       raise RuntimeError(f"[emu2] Failed to compile PC={i} {inst_str}: {type(e).__name__}: {e}") from e
     i += inst.size()
-
-  if not inst_info: return {}
-
-  # Batch compile and create function pointers
-  from tinygrad.runtime.support.elf import jit_loader
-  seen_funcs: set[str] = set()
-  combined_src_parts: list[str] = []
-  for pc, prg in inst_info:
-    if prg.function_name not in seen_funcs:
-      seen_funcs.add(prg.function_name)
-      combined_src_parts.append(prg.src)
-  obj = _emu_compiler.compile_to_obj("\n".join(combined_src_parts))
-  sym_offsets = _elf_symbol_offsets(obj)
-  cpu_prg = _ProgramClass(Device['CPU'], "emu2_batch", jit_loader(obj))
-  base_addr = ctypes.cast(cpu_prg.fxn, ctypes.c_void_p).value
-  return {pc: (prg.function_name, ctypes.CFUNCTYPE(None)(base_addr + sym_offsets.get(prg.function_name, 0)), prg.globals, cpu_prg)
-          for pc, prg in inst_info}
+  return result
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # WAVE STATE

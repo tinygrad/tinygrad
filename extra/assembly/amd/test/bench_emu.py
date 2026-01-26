@@ -6,7 +6,7 @@ from pathlib import Path
 # Set AMD=1 before importing tinygrad
 os.environ["AMD"] = "1"
 
-from extra.assembly.amd.emu2 import run_asm as python_run_asm, decode_program, _get_inst_sink, _get_inst_prg
+from extra.assembly.amd.emu2 import run_asm as python_run_asm, decode_program
 from extra.assembly.amd.decode import decode_inst
 from extra.assembly.amd.autogen.rdna3.ins import SOPP, SOPPOp
 
@@ -67,128 +67,55 @@ def benchmark_emulator(name: str, run_fn, kernel: bytes, global_size, local_size
   return sum(times) / len(times)
 
 def profile_instructions(kernel: bytes):
-  """Profile individual instructions and return sorted by render time."""
-  from extra.assembly.amd.emu2 import _get_inst_prg, _get_inst_sink, _canonical_prg_cache
-  from tinygrad.codegen import get_program
-  from extra.assembly.amd.emu2 import _emu_renderer
+  """Profile individual instruction compile times."""
+  from extra.assembly.amd.emu2 import _get_inst_sink, _get_runner, _canonical_runner_cache
   from tinygrad.helpers import Context
-
-  # Clear caches to measure fresh
   _get_inst_sink.cache_clear()
-  _get_inst_prg.cache_clear()
-  _canonical_prg_cache.clear()
-  decode_program.cache_clear()
+  _get_runner.cache_clear()
+  _canonical_runner_cache.clear()
 
-  # Collect instruction bytes and names
-  inst_data = []
+  results = []
   i = 0
   while i < len(kernel):
     inst = decode_inst(kernel[i:])
     if isinstance(inst, SOPP) and inst.op == SOPPOp.S_CODE_END: break
     inst_bytes = bytes(kernel[i:i + inst.size() + 4])
-    try:
-      inst_str = repr(inst)
-    except Exception:
-      inst_str = f"<{type(inst).__name__}>"
-    inst_data.append((inst_bytes, inst_str, type(inst).__name__))
-    i += inst.size()
+    try: inst_str = repr(inst)
+    except Exception: inst_str = f"<{type(inst).__name__}>"
 
-  # Profile each instruction
-  from extra.assembly.amd.emu2 import _match_canonical
-  results = []
-  for inst_bytes, inst_str, inst_type in inst_data:
-    # Check canonical cache BEFORE building sink (matches real behavior)
-    inst_size = decode_inst(inst_bytes).size()
-    inst_int = int.from_bytes(inst_bytes[:inst_size], 'little')
-    is_cache_hit = _match_canonical(inst_int, inst_size) is not None
-
-    if is_cache_hit:
-      # Skip build and render entirely for cache hits
-      build_time, render_time, uop_count = 0, 0, 0
-    else:
-      # Build sink
-      build_start = time.perf_counter()
-      sink, (base, mask, size) = _get_inst_sink(inst_bytes)
-      build_time = time.perf_counter() - build_start
-
-      # Count UOps in sink
-      uop_count = len(sink.toposort())
-
-      # Render
-      render_start = time.perf_counter()
-      with Context(NOOPT=1, IGNORE_OOB=1, TUPLE_ORDER=0):
-        prg = get_program(sink, _emu_renderer)
-      render_time = time.perf_counter() - render_start
-
-      # Update canonical cache
-      _canonical_prg_cache.append((base, mask, size, prg))
+    # Time the full compile (sink + render + compile)
+    start = time.perf_counter()
+    with Context(CCACHE=0):
+      runner, is_new = _get_runner(inst_bytes)
+    compile_time = time.perf_counter() - start
 
     results.append({
-      'inst_str': inst_str + (' [HIT]' if is_cache_hit else ''),
-      'inst_type': inst_type,
-      'uop_count': uop_count,
-      'build_ms': build_time * 1000,
-      'render_ms': render_time * 1000,
+      'inst_str': inst_str + ('' if is_new else ' [CACHED]'),
+      'compile_ms': compile_time * 1000 if is_new else 0,
     })
-
-  # Sort by render time descending
-  return sorted(results, key=lambda x: x['render_ms'], reverse=True)
-
-def benchmark_python_split(kernel: bytes, global_size, local_size, args_ptr, rsrc2: int, iterations: int = 5):
-  """Benchmark Python emulator with build/render/compile/execution times separated."""
-  from extra.assembly.amd.emu2 import _emu_renderer, _emu_compiler, _elf_symbol_offsets
-  from extra.assembly.amd.emu2 import _get_inst_prg, _get_inst_sink, _canonical_prg_cache
-  from tinygrad.codegen import get_program
-  from tinygrad.helpers import Context
-  from tinygrad.runtime.support.elf import jit_loader
-
-  # Clear caches to measure fresh
-  _get_inst_sink.cache_clear()
-  _get_inst_prg.cache_clear()
-  _canonical_prg_cache.clear()
-  decode_program.cache_clear()
-
-  # Collect instruction bytes
-  inst_bytes_list = []
-  i = 0
-  while i < len(kernel):
-    inst = decode_inst(kernel[i:])
-    if isinstance(inst, SOPP) and inst.op == SOPPOp.S_CODE_END: break
-    inst_bytes_list.append(bytes(kernel[i:i + inst.size() + 4]))
     i += inst.size()
 
-  # Measure build time (UOp sink generation, cached)
-  build_start = time.perf_counter()
-  for inst_bytes in inst_bytes_list:
-    _get_inst_sink(inst_bytes)
-  build_time = time.perf_counter() - build_start
+  return sorted(results, key=lambda x: x['compile_ms'], reverse=True)
 
-  # Measure render time (uses cached sinks, handles canonical dedup)
-  render_start = time.perf_counter()
-  cache_before = len(_canonical_prg_cache)
-  prgs = [_get_inst_prg(inst_bytes) for inst_bytes in inst_bytes_list]
-  render_count = len(_canonical_prg_cache) - cache_before  # number of unique renders
-  render_time = time.perf_counter() - render_start
+def benchmark_python_split(kernel: bytes, global_size, local_size, args_ptr, rsrc2: int, iterations: int = 5):
+  """Benchmark Python emulator with compile and execution times."""
+  from extra.assembly.amd.emu2 import _get_inst_sink, _get_runner, _canonical_runner_cache
+  from tinygrad.helpers import Context
+  _get_inst_sink.cache_clear()
+  _get_runner.cache_clear()
+  _canonical_runner_cache.clear()
+  decode_program.cache_clear()
 
-  # Measure compile time (clang/llvm compile C to native)
+  # Measure compile time (decode_program builds sinks, renders, and compiles)
   compile_start = time.perf_counter()
-  # Deduplicate by function name (same as decode_program does)
-  seen = set()
-  unique_srcs = []
-  for prg in prgs:
-    if prg.function_name not in seen:
-      seen.add(prg.function_name)
-      unique_srcs.append(prg.src)
-  combined_src = "\n".join(unique_srcs)
-  obj = _emu_compiler.compile_to_obj(combined_src)
-  _elf_symbol_offsets(obj)
-  jit_loader(obj)
+  with Context(CCACHE=0):
+    program = decode_program(kernel)
   compile_time = time.perf_counter() - compile_start
+  n_compiled = len(_canonical_runner_cache)
 
-  # Execution time (need to populate cache first)
-  decode_program(kernel)
+  # Execution time
   exec_time = benchmark_emulator("Python", python_run_asm, kernel, global_size, local_size, args_ptr, rsrc2, iterations)
-  return build_time, render_time, render_count, compile_time, exec_time
+  return compile_time, exec_time, len(program), n_compiled
 
 def get_tinygrad_kernel(op_name: str) -> tuple[bytes, tuple, tuple, list[int], dict[int, bytes], int] | None:
   """Get a real tinygrad kernel by operation name. Returns (code, global_size, local_size, buf_sizes, buf_data, rsrc2)."""
@@ -253,7 +180,6 @@ def main():
   parser.add_argument("--iterations", type=int, default=3, help="Number of iterations per benchmark")
   parser.add_argument("--profile", type=str, default=None, help="Profile instructions for a specific kernel (e.g. 'sin')")
   parser.add_argument("--top", type=int, default=20, help="Number of top instructions to show in profile")
-  parser.add_argument("--sort-build", action="store_true", help="Sort profile by build time instead of render time")
   args = parser.parse_args()
 
   # Profile mode: show individual instruction timing
@@ -264,19 +190,16 @@ def main():
       return
     kernel = kernel_info[0]
     print(f"Profiling instructions for '{args.profile}' kernel...")
-    print("=" * 140)
+    print("=" * 110)
     results = profile_instructions(kernel)
-    if args.sort_build:
-      results = sorted(results, key=lambda x: x['build_ms'], reverse=True)
-    print(f"{'Instruction':<90} {'UOps':>6}  {'Build(ms)':>10}  {'Render(ms)':>10}")
-    print("-" * 140)
+    print(f"{'Instruction':<90} {'Compile(ms)':>12}")
+    print("-" * 110)
     for r in results[:args.top]:
       inst = r['inst_str'][:87] + "..." if len(r['inst_str']) > 90 else r['inst_str']
-      print(f"{inst:<90} {r['uop_count']:>6}  {r['build_ms']:>10.3f}  {r['render_ms']:>10.3f}")
-    print("-" * 140)
-    total_build = sum(r['build_ms'] for r in results)
-    total_render = sum(r['render_ms'] for r in results)
-    print(f"{'TOTAL':<90} {'':>6}  {total_build:>10.3f}  {total_render:>10.3f}")
+      print(f"{inst:<90} {r['compile_ms']:>12.3f}")
+    print("-" * 110)
+    total = sum(r['compile_ms'] for r in results)
+    print(f"{'TOTAL':<90} {total:>12.3f}")
     return
 
   rust_remu = get_rust_remu()
@@ -304,39 +227,34 @@ def main():
     buffers, args_arr, args_ptr, ranges = setup_buffers(buf_sizes, buf_data)
 
     # Benchmark Python emulator (must be first to measure compile time before cache is populated)
-    py_build, py_render, render_count, py_compile, py_exec = benchmark_python_split(kernel, global_size, local_size, args_ptr, rsrc2, args.iterations)
+    py_compile, py_exec, n_insts, n_compiled = benchmark_python_split(kernel, global_size, local_size, args_ptr, rsrc2, args.iterations)
 
-    n_insts = count_instructions(kernel)  # uses cached decode_program
     n_workgroups = global_size[0] * global_size[1] * global_size[2]
     n_threads = local_size[0] * local_size[1] * local_size[2]
     total_work = n_insts * n_workgroups * n_threads
 
-    print(f"{n_insts} insts × {n_workgroups} WGs × {n_threads} threads = {total_work:,} ops")
+    print(f"{n_insts} insts ({n_compiled} unique) × {n_workgroups} WGs × {n_threads} threads = {total_work:,} ops")
     rust_time = benchmark_emulator("Rust", rust_remu.run_asm, kernel, global_size, local_size, args_ptr, rsrc2, args.iterations) if rust_remu else None
 
-    if py_build is not None:
+    if py_compile is not None:
       py_exec_rate = total_work / py_exec / 1e6
-      print(f"  Build:          {py_build*1000:8.3f} ms")
-      print(f"  Render:         {py_render*1000:8.3f} ms  ({render_count} unique)")
-      print(f"  Compile:        {py_compile*1000:8.3f} ms")
+      print(f"  Compile:        {py_compile*1000:8.3f} ms  ({n_compiled} unique)")
       print(f"  Exec:           {py_exec*1000:8.3f} ms  ({py_exec_rate:7.2f} M ops/s)")
     if rust_time:
       rust_rate = total_work / rust_time / 1e6
       speedup = py_exec / rust_time if py_exec else 0
       print(f"  Rust:           {rust_time*1000:8.3f} ms  ({rust_rate:7.2f} M ops/s)  [{speedup:.1f}x faster]")
 
-    results.append((op_name, n_insts, n_workgroups, py_build, py_render, render_count, py_compile, py_exec, rust_time))
+    results.append((op_name, n_insts, n_compiled, n_workgroups, py_compile, py_exec, rust_time))
 
   # Summary table
-  print("\n" + "=" * 140)
+  print("\n" + "=" * 110)
   print("SUMMARY")
-  print("=" * 140)
-  print(f"{'Name':<16} {'Insts':<6} {'WGs':<5} {'Build (ms)':<12} {'Render (ms)':<16} {'Compile (ms)':<14} {'Exec (ms)':<12} {'Rust (ms)':<12} {'Speedup':<10}")
-  print("-" * 140)
+  print("=" * 110)
+  print(f"{'Name':<16} {'Insts':<6} {'Unique':<6} {'WGs':<5} {'Compile (ms)':<14} {'Exec (ms)':<12} {'Rust (ms)':<12} {'Speedup':<10}")
+  print("-" * 110)
 
-  for name, n_insts, n_wgs, py_build, py_render, render_count, py_compile, py_exec, rust_time in results:
-    build_ms = f"{py_build*1000:.3f}" if py_build else "error"
-    render_ms = f"{py_render*1000:.3f} ({render_count})" if py_render else "error"
+  for name, n_insts, n_compiled, n_wgs, py_compile, py_exec, rust_time in results:
     compile_ms = f"{py_compile*1000:.3f}" if py_compile else "error"
     exec_ms = f"{py_exec*1000:.3f}" if py_exec else "error"
     if rust_time:
@@ -344,7 +262,7 @@ def main():
       speedup = f"{py_exec/rust_time:.1f}x" if py_exec else "N/A"
     else:
       rust_ms, speedup = "N/A", "N/A"
-    print(f"{name:<16} {n_insts:<6} {n_wgs:<5} {build_ms:<12} {render_ms:<16} {compile_ms:<14} {exec_ms:<12} {rust_ms:<12} {speedup:<10}")
+    print(f"{name:<16} {n_insts:<6} {n_compiled:<6} {n_wgs:<5} {compile_ms:<14} {exec_ms:<12} {rust_ms:<12} {speedup:<10}")
 
 if __name__ == "__main__":
   main()

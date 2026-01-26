@@ -466,6 +466,13 @@ class TestTinygradKernels(unittest.TestCase):
     # This tests the integer multiply-high instructions used in range reduction
     self._test_kernel(lambda T: T([859240.0, 1000000.0, 100594688.0]).sin())
 
+  def test_clip_zero_one(self):
+    """Test clip(0, 1) - regression for binary_crossentropy failure."""
+    import numpy as np
+    np.random.seed(0)
+    x_np = np.random.uniform(-2, 2, (32, 10)).astype(np.float32).tolist()
+    self._test_kernel(lambda T: T(x_np).clip(0, 1))
+
   def test_mod_int64(self):
     """Test int64 modulo, especially edge cases like 1 % -1."""
     from tinygrad import dtypes
