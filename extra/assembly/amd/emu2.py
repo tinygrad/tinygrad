@@ -497,29 +497,25 @@ class _Ctx:
   def rsrc_dyn(self, off: UOp, lane: UOp, bits: int = 32, literal: UOp | None = None) -> UOp:
     """Read source operand with dynamic offset. Handles SGPR/inline constants (<256), VGPR (>=256).
     Inline constants 128-255 are pre-populated in SGPR buffer (integers, negatives, F32 floats).
-    If literal is provided, it's used when off==255."""
+    SGPR buffer is 260 entries so off 0-255 is always valid. If literal is provided, it's used when off==255."""
     is_vgpr = off >= _c(256)
-    is_in_sgpr = off < _c(256)  # guard for SGPR buffer access (size 260, but only 0-255 used for src)
     if bits == 64:
       is_sgpr = off < _c(128)
-      # Guard SGPR reads with .valid() to prevent out-of-bounds access when off >= 256
-      sgpr_idx0 = off.cast(dtypes.index).valid(is_in_sgpr)
-      sgpr_idx1 = (off + U32_1).cast(dtypes.index).valid(is_in_sgpr)
-      sgpr_val = _u64(self.sgpr.index(sgpr_idx0, ptr=True).load(), self.sgpr.index(sgpr_idx1, ptr=True).load())
+      # SGPR buffer (size 260) can hold any off 0-255, no guard needed
+      sgpr_idx = off.cast(dtypes.index)
+      sgpr_val = _u64(self.sgpr.index(sgpr_idx, ptr=True).load(), self.sgpr.index(sgpr_idx + _c(1, dtypes.index), ptr=True).load())
       # Use .valid() for VGPR reads to avoid invalid memory access when off < 256
       vgpr_reg = off - _c(256)
       vgpr_idx0 = (vgpr_reg.cast(dtypes.index) * IDX_32 + lane.cast(dtypes.index)).valid(is_vgpr)
       vgpr_idx1 = ((vgpr_reg + U32_1).cast(dtypes.index) * IDX_32 + lane.cast(dtypes.index)).valid(is_vgpr)
       vgpr_val = _u64(self.vgpr.index(vgpr_idx0, ptr=True).load(), self.vgpr.index(vgpr_idx1, ptr=True).load())
       # 64-bit inline constants need special handling (different from 32-bit values in SGPR buffer)
-      inline_idx = off.cast(dtypes.index).valid(is_in_sgpr)
-      inline = _u64(self.sgpr.index(inline_idx, ptr=True).load(), self.sgpr.index(inline_idx, ptr=True).load())  # integers: just extend
+      inline = _u64(self.sgpr.index(sgpr_idx, ptr=True).load(), self.sgpr.index(sgpr_idx, ptr=True).load())  # integers: just extend
       if literal is not None: inline = off.eq(_c(255)).where(literal.cast(dtypes.uint64) << UOp.const(dtypes.uint64, 32), inline)
       for off_val, val in F64_INLINE.items(): inline = off.eq(_c(off_val)).where(UOp.const(dtypes.uint64, val), inline)
       return is_vgpr.where(vgpr_val, is_sgpr.where(sgpr_val, inline))
-    # Guard SGPR read with .valid() to prevent out-of-bounds access when off >= 256
-    sgpr_idx = off.cast(dtypes.index).valid(is_in_sgpr)
-    sgpr_val = self.sgpr.index(sgpr_idx, ptr=True).load()
+    # SGPR buffer (size 260) can hold any off 0-255, no guard needed
+    sgpr_val = self.sgpr.index(off.cast(dtypes.index), ptr=True).load()
     if literal is not None: sgpr_val = off.eq(_c(255)).where(literal, sgpr_val)
     if bits == 16:  # F16 constants differ from pre-populated F32 constants
       for off_val, val in F16_INLINE.items(): sgpr_val = off.eq(_c(off_val)).where(UOp.const(dtypes.uint32, val), sgpr_val)
