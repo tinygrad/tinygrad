@@ -8,6 +8,7 @@ from enum import Enum, auto
 class ConstFloat(float):
   """Float subclass that compares by bits (distinguishes -0.0 from 0.0, and nan == nan)."""
   __slots__ = ('bits',)
+  bits: int
   def __new__(cls, v:float):
     obj = super().__new__(cls, v)
     obj.bits = struct.unpack('<Q', struct.pack('<d', v))[0]
