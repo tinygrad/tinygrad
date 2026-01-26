@@ -383,7 +383,7 @@ class AM_GFX(AM_IP):
 
 class AM_IH(AM_IP):
   def init_sw(self):
-    self.ring_size = 128 << 10
+    self.ring_size = 256 << 10
     def _alloc_ring(size): return (self.adev.mm.palloc(size, zero=False, boot=True), self.adev.mm.palloc(0x1000, zero=False, boot=True))
     self.rings = [(*_alloc_ring(self.ring_size), "", 0), (*_alloc_ring(self.ring_size), "_RING1", 1)]
     self.ring_view = self.adev.vram.view(offset=self.rings[0][0], size=self.ring_size, fmt='I')
@@ -392,7 +392,7 @@ class AM_IH(AM_IP):
     for ring_vm, rwptr_vm, suf, ring_id in self.rings:
       self.adev.wreg_pair("regIH_RB_BASE", suf, f"_HI{suf}", self.adev.paddr2mc(ring_vm) >> 8)
 
-      self.adev.reg(f"regIH_RB_CNTL{suf}").write(mc_space=4, wptr_overflow_clear=1, rb_size=(self.ring_size//4).bit_length(),
+      self.adev.reg(f"regIH_RB_CNTL{suf}").write(mc_space=4, wptr_overflow_clear=1, rb_size=((self.ring_size//4)-1).bit_length(),
         mc_snoop=1, mc_ro=0, mc_vmid=0, **({'wptr_overflow_enable': 1, 'rptr_rearm': 1} if ring_id == 0 else {'rb_full_drain_enable': 1}))
 
       if ring_id == 0: self.adev.wreg_pair("regIH_RB_WPTR_ADDR", "_LO", "_HI", self.adev.paddr2mc(rwptr_vm))
@@ -429,14 +429,14 @@ class AM_IH(AM_IP):
       print(f"am {self.adev.devfmt}: IH ({rptr:#x}/{wptr['offset']:#x}) client={self.adev.soc.ih_clients.get(client)} src={src_name}({src}) "
             f"ring={ring_id} vmid={vmid}({vmid_type}) pasid={pasid} node={node} ctx=[{ctx[0]:#x}, {ctx[1]:#x}, {ctx[2]:#x}, {ctx[3]:#x}]")
 
-      rptr = (rptr + 8) % self.ring_size
+      rptr = (rptr + 8) % (self.ring_size // 4)
 
     if wptr['rb_overflow']:
       self.adev.reg(f"regIH_RB_WPTR{suf}").update(rb_overflow=0)
       self.adev.reg(f"regIH_RB_CNTL{suf}").update(wptr_overflow_clear=1)
       self.adev.reg(f"regIH_RB_CNTL{suf}").update(wptr_overflow_clear=0)
 
-    self.adev.regIH_RB_RPTR.write(wptr['offset'] % self.ring_size)
+    self.adev.regIH_RB_RPTR.write(wptr['offset'] % (self.ring_size // 4))
 
 class AM_SDMA(AM_IP):
   def init_sw(self): self.sdma_reginst, self.sdma_name = [], "F32" if self.adev.ip_ver[am.SDMA0_HWIP] < (7,0,0) else "MCU"
