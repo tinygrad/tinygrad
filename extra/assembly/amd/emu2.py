@@ -1121,12 +1121,11 @@ def _elf_symbol_offsets(obj: bytes) -> dict[str, int]:
           for sym in symbols if 0 < sym.st_shndx < len(sections) and (name := _strtab(strtab_sec.content, sym.st_name))}
 
 @functools.cache
-def _get_inst_sink(inst_bytes: bytes) -> tuple[UOp, _Ctx]:
-  """Build UOp sink for instruction bytes. Returns (sink, ctx) where ctx tracks dynamic fields."""
+def _get_inst_sink(inst_bytes: bytes) -> tuple[UOp, tuple[int, int, int]]:
+  """Build UOp sink for instruction bytes. Returns (sink, (base, mask, size)) with canonical name."""
   inst = decode_inst(inst_bytes)
   inst_size = inst.size()  # bytes
 
-  name = f"{_op_name(inst).lower()}_{inst_bytes[:inst.size()].hex()}"
   sgpr, vgpr, vmem, lds, scratch = _define_bufs()
   ctx = _Ctx(sgpr, vgpr, vmem, lds, scratch, inst_size)
 
@@ -1138,8 +1137,11 @@ def _get_inst_sink(inst_bytes: bytes) -> tuple[UOp, _Ctx]:
         handler = _INST_HANDLERS[base]
         break
   if handler is None: raise RuntimeError(f"[emu2] unimplemented instruction type: {type(inst).__name__} {_op_name(inst)}")
-  _, sink = handler(inst, ctx, name)
-  return sink.rtag(1), ctx  # tag skips optimizations in get_program
+  _, sink = handler(inst, ctx, "")  # name replaced below
+  # Compute canonical mask and name after handler populates dyn_fields
+  base, mask, size = ctx.canonical_mask(inst_bytes)
+  canonical_name = f"{_op_name(inst).lower()}_{base.to_bytes(size, 'little').hex()}"
+  return sink.replace(arg=KernelInfo(name=canonical_name)).rtag(1), (base, mask, size)
 
 _canonical_prg_cache: list[tuple[int, int, int, ProgramSpec]] = []  # [(base, mask, size, prg), ...]
 _last_compiled_new: bool = False  # set by _get_inst_prg when compiling new instruction
@@ -1163,10 +1165,10 @@ def _get_inst_prg(inst_bytes: bytes) -> ProgramSpec:
   if (prg := _match_canonical(inst_int, inst_size)) is not None:
     _last_compiled_new = False
     return prg
-  sink, ctx = _get_inst_sink(inst_bytes)
+  sink, (base, mask, size) = _get_inst_sink(inst_bytes)
   with Context(NOOPT=1, IGNORE_OOB=1, TUPLE_ORDER=0):
     prg = get_program(sink, _emu_renderer)
-  _canonical_prg_cache.append((*ctx.canonical_mask(inst_bytes), prg))
+  _canonical_prg_cache.append((base, mask, size, prg))
   _last_compiled_new = True
   return prg
 
