@@ -50,10 +50,10 @@ class Transformer:
     self.h = [TransformerBlock(dim, n_heads, norm_eps) for _ in range(n_layers)]
     self.ln_f = LayerNorm(dim, norm_eps)
     self.lm_head = Linear(dim, vocab_size, bias=False)
-    
+
     for name, p in get_state_dict(self).items():
       p.requires_grad = True
-      if "weight" in name and len(p.shape) >= 2: 
+      if "weight" in name and len(p.shape) >= 2:
         p.assign(Tensor.normal(p.shape, mean=0, std=0.02, device=p.device))
       elif "bias" in name:
         p.assign(Tensor.zeros(p.shape, device=p.device))
@@ -64,7 +64,7 @@ class Transformer:
     bsz, seqlen = tokens.shape
     mask = self.mask[:seqlen, :seqlen].to(tokens.device[0]).shard(tokens.device, axis=None)
     pos = Tensor.arange(seqlen, device=tokens.device[0]).reshape(1, seqlen).shard(tokens.device, axis=None)
-    
+
     x = self.wte(tokens) + self.wpe(pos)
     for block in self.h: x = block(x, mask)
     return self.lm_head(self.ln_f(x))
@@ -87,7 +87,7 @@ if __name__ == "__main__":
   print(f"Running on {len(DEVICES)} devices: {DEVICES}")
 
   base_model = Transformer(DIM, N_HEADS, N_LAYERS, 1e-5, VOCAB_SIZE, max_seq_len=SEQ_LEN)
-  
+
   if len(DEVICES) > 1:
     model = FSDP(base_model, DEVICES, axis=0)
   else:
@@ -107,7 +107,7 @@ if __name__ == "__main__":
 
     logits = model(x)
     loss = logits.sparse_categorical_crossentropy(y)
-    
+
     loss.backward()
 
     if hasattr(model, "sync_grad"): model.sync_grad()
@@ -123,17 +123,17 @@ if __name__ == "__main__":
     return loss.realize()
 
   print(colored("Starting Training...", "green"))
-  
+
   with Tensor.train():
     for i in range(NUM_ITERS):
       GlobalCounters.reset()
       st = time.perf_counter()
-      
+
       x, y = get_batch(data, BATCH_SIZE, SEQ_LEN, DEVICES)
       loss = train_step(x, y)
-      
+
       et = time.perf_counter()
       eff_toks = (BATCH_SIZE * SEQ_LEN) / (et - st)
-  
+
       print(f"iteration {i}, loss: {loss.item():.6f}, time: {1000*(et - st):.3f}ms, {eff_toks:.0f} tok/s")
 
