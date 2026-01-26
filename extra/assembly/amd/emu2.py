@@ -561,14 +561,18 @@ def _compile_smem(inst: SMEM, ctx: _Ctx, name: str) -> tuple[str, UOp]:
   # Cache invalidation instructions are no-ops in the emulator (we don't model caches)
   if inst.op in (SMEMOp.S_GL1_INV, SMEMOp.S_DCACHE_INV):
     return name, UOp.sink(*ctx.inc_pc(), arg=KernelInfo(name=name))
-  sbase = inst.sbase.offset
-  addr = _u64(ctx.rsgpr_dyn(_c(sbase)), ctx.rsgpr_dyn(_c(sbase + 1))) + UOp.const(dtypes.uint64, _sext(inst.offset, 21))
-  # Add register offset (soffset) if not NULL (offset 124)
-  if inst.soffset.offset != 124:
-    addr = addr + ctx.rsgpr_dyn(_c(inst.soffset.offset)).cast(dtypes.uint64)
-  sdata_reg = inst.sdata.offset
+  # Dynamic sbase field (bits 5:0) - SGPR pair, field value * 2 = register offset
+  sbase = ctx.inst_field(SMEM.sbase) * _c(2)
+  # Dynamic sdata field (bits 12:6) - destination SGPR
+  sdata_reg = ctx.inst_field(SMEM.sdata)
+  # Dynamic offset field (bits 52:32) - 21-bit signed immediate
+  offset_raw = ctx.inst_field(SMEM.offset)
+  offset = (offset_raw ^ _c(0x100000)) - _c(0x100000)  # sign-extend 21-bit
+  # Dynamic soffset field (bits 63:57) - SGPR for additional offset (NULL=124 reads as 0)
+  soffset = ctx.inst_field(SMEM.soffset)
+  addr = _u64(ctx.rsgpr_dyn(sbase), ctx.rsgpr_dyn(sbase + _c(1))) + offset.cast(dtypes.uint64) + ctx.rsgpr_dyn(soffset).cast(dtypes.uint64)
   ndwords = {SMEMOp.S_LOAD_B32: 1, SMEMOp.S_LOAD_B64: 2, SMEMOp.S_LOAD_B128: 4, SMEMOp.S_LOAD_B256: 8, SMEMOp.S_LOAD_B512: 16}.get(inst.op, 1)
-  stores = [ctx.wsgpr_dyn(_c(sdata_reg + i), ctx.vmem.index((addr + UOp.const(dtypes.uint64, i * 4) >> UOp.const(dtypes.uint64, 2)).cast(dtypes.index)))
+  stores = [ctx.wsgpr_dyn(sdata_reg + _c(i), ctx.vmem.index((addr + UOp.const(dtypes.uint64, i * 4) >> UOp.const(dtypes.uint64, 2)).cast(dtypes.index)))
             for i in range(ndwords)]
   return name, UOp.sink(*stores, *ctx.inc_pc(), arg=KernelInfo(name=name))
 
@@ -967,13 +971,15 @@ def _compile_mem_op(inst, ctx: _Ctx, name: str) -> tuple[str, UOp]:
   mem = ctx.lds if is_lds else ctx.scratch if is_scratch else ctx.vmem
   addr_shift = UOp.const(dtypes.uint32 if is_lds else dtypes.uint64, 2)
 
-  # Extract register info - dynamic for FLAT/GLOBAL/SCRATCH to enable deduplication
-  def vreg(attr): return (getattr(inst, attr).offset - 256) if hasattr(inst, attr) and getattr(inst, attr).offset >= 256 else (getattr(inst, attr).offset if hasattr(inst, attr) else 0)
+  # Extract register info - all dynamic for deduplication
   has_saddr = not is_lds and hasattr(inst, 'saddr') and inst.saddr != NULL and inst.saddr.offset < 128
   if is_lds:
-    addr_reg, vdata_reg, vdst_reg = _c(vreg('addr')), _c(vreg('data0')), _c(vreg('vdst'))
-    offset0, offset1 = getattr(inst, 'offset0', 0) or 0, getattr(inst, 'offset1', 0) or 0
-    offset = getattr(inst, 'offset', offset0) or offset0
+    addr_reg = ctx.inst_field(DS.addr)
+    vdata_reg = ctx.inst_field(DS.data0)
+    vdst_reg = ctx.inst_field(DS.vdst)
+    offset0 = ctx.inst_field(DS.offset0)
+    offset1 = ctx.inst_field(DS.offset1)
+    offset = offset0  # DS uses offset0 as primary offset
   else:
     addr_reg = ctx.inst_field(type(inst).addr)
     vdata_reg = ctx.inst_field(type(inst).data)
@@ -988,7 +994,7 @@ def _compile_mem_op(inst, ctx: _Ctx, name: str) -> tuple[str, UOp]:
   is_64bit = ndwords >= 2 or '_U64' in op_name or '_I64' in op_name or '_F64' in op_name
   is_atomic, glc = 'ATOMIC' in op_name, getattr(inst, 'glc', 0)
   has_data1 = is_lds and hasattr(inst, 'data1') and inst.data1 is not None
-  data1_reg = _c(vreg('data1')) if is_lds else _c(0)
+  data1_reg = ctx.inst_field(DS.data1) if is_lds else _c(0)
 
   def make_addr(lane: UOp) -> UOp:
     if is_lds: return ctx.rvgpr_dyn(addr_reg, lane)
@@ -1019,8 +1025,7 @@ def _compile_mem_op(inst, ctx: _Ctx, name: str) -> tuple[str, UOp]:
       else:
         data = {'DATA': _u64(ctx.rvgpr_dyn(vdata_reg, lane), ctx.rvgpr_dyn(vdata_reg + _c(1), lane)),
                 'DATA2': _u64(ctx.rvgpr_dyn(data1_reg, lane), ctx.rvgpr_dyn(data1_reg + _c(1), lane)) if has_data1 else UOp.const(dtypes.uint64, 0)}
-      return {'ADDR': addr, 'ADDR_BASE': addr, 'OFFSET': UOp.const(dtypes.uint32, offset),
-              'OFFSET0': UOp.const(dtypes.uint32, offset0), 'OFFSET1': UOp.const(dtypes.uint32, offset1), '_lds': mem, **data}
+      return {'ADDR': addr, 'ADDR_BASE': addr, 'OFFSET': offset, 'OFFSET0': offset0, 'OFFSET1': offset1, '_lds': mem, **data}
     active = _lane_active(exec_mask, lane)
     if is_atomic:
       return {'ADDR': addr, 'DATA': _u64(ctx.rvgpr_dyn(vdata_reg, lane), ctx.rvgpr_dyn(vdata_reg + _c(1), lane)) if is_64bit else ctx.rvgpr_dyn(vdata_reg, lane),
