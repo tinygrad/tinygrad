@@ -5,7 +5,27 @@ from tinygrad.uop import Ops, X86Ops, GroupOp, X86GroupOp
 from tinygrad.uop.ops import UOp, UPat, PatternMatcher
 from tinygrad.renderer.isa import Register, ISARenderer, IselContext
 from tinygrad.codegen.late.regalloc import assign
+from tinygrad.codegen.late.schedule import OpInfo, Resource, Unit
 from tinygrad.helpers import getenv, CPU_COUNT
+
+# ***** X86 scheduling info, specific to a processor generation *****
+# zen 4, this is the default scheduling model
+zen4_agu0, zen4_agu1, zen4_agu2 = Unit(), Unit(), Unit()
+zen4_lsu0, zen4_lsu1, zen4_lsu2 = Unit(), Unit(), Unit()
+zen4_flp0, zen4_flp1, zen4_flp2 = Unit(), Unit(), Unit()
+zen4_flp3, zen4_flp4, zen4_flp5 = Unit(), Unit(), Unit()
+zen4_agus = Resource((zen4_agu0, zen4_agu1, zen4_agu2))
+zen4_load = Resource((zen4_lsu0, zen4_lsu1, zen4_lsu2))
+zen4_store = Resource((zen4_lsu0, zen4_lsu1))
+zen4_add = Resource((zen4_flp2, zen4_flp3))
+load_lat = 4 # assumes an l1 cache
+# TODO: spends 3 cycles in agu if dtype <= 16
+zen4_op_info = {
+X86Ops.MOV: OpInfo(load_lat+1, ((zen4_agus, 0, 1), (zen4_load, 1, 2))),
+X86Ops.MOVm: OpInfo(1, ((zen4_agus, 0, 1), (zen4_store, 1, 3))),
+**{x: OpInfo(3, ((zen4_add, 0, 1),)) for x in (X86Ops.VADDSS, X86Ops.VADDPS, X86Ops.VSUBSS, X86Ops.VSUBPS)},
+**{x: OpInfo(3, ((zen4_add, 0, 1),)) for x in (X86Ops.VADDSD, X86Ops.VADDPD, X86Ops.VSUBSD, X86Ops.VSUBPD)},
+}
 
 # ***** X86 legalization *****
 

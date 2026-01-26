@@ -3,7 +3,9 @@ from tinygrad.renderer.x86 import X86Renderer, RBP, RDI, RSP, RSI, RAX, RDX, XMM
 from tinygrad.uop import X86Ops, Ops
 from tinygrad.uop.ops import UOp
 from tinygrad.dtype import dtypes, DType
+from tinygrad.helpers import SPEC
 
+@unittest.skipIf(SPEC > 1, "x86 spec not supported in full_spec")
 class TestEncodingsX86(unittest.TestCase):
   # NOTE: x86 supports a single displacement as memory address and index without base memory address
   # these have no use cases so they aren't supported
