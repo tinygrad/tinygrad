@@ -491,7 +491,9 @@ class _Ctx:
       sgpr_val = _u64(sgpr_lo, sgpr_hi)
       vgpr_idx0 = (off - _c(256)).cast(dtypes.int) * _c(32, dtypes.int) + lane.cast(dtypes.int)
       vgpr_idx1 = (off - _c(255)).cast(dtypes.int) * _c(32, dtypes.int) + lane.cast(dtypes.int)
-      vgpr_val = _u64(self.vgpr.index(vgpr_idx0, is_vgpr, ptr=True).load(), self.vgpr.index(vgpr_idx1, is_vgpr, ptr=True).load())
+      vgpr_lo = self.vgpr.index(vgpr_idx0, is_vgpr, ptr=True).load()
+      vgpr_hi = self.vgpr.index(vgpr_idx1, is_vgpr, ptr=True).load()
+      vgpr_val = _u64(vgpr_lo, vgpr_hi)
       inline = _u64(sgpr_lo, sgpr_lo)
       if literal is not None: inline = off.eq(_c(255)).where(literal.cast(dtypes.uint64) << UOp.const(dtypes.uint64, 32), inline)
       for off_val, val in F64_INLINE.items(): inline = off.eq(_c(off_val)).where(UOp.const(dtypes.uint64, val), inline)
@@ -1192,7 +1194,7 @@ def _get_inst_prg(inst_bytes: bytes) -> ProgramSpec:
     _last_compiled_new = False
     return prg
   sink, (base, mask, size) = _get_inst_sink(inst_bytes)
-  with Context(NOOPT=1, IGNORE_OOB=1, TUPLE_ORDER=0, SPEC=0):
+  with Context(NOOPT=1, IGNORE_OOB=1, TUPLE_ORDER=0):
     prg = get_program(sink, _emu_renderer)
   _canonical_prg_cache.append((base, mask, size, prg))
   _last_compiled_new = True

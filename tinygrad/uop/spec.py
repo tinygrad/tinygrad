@@ -164,16 +164,17 @@ shared_codegen_spec = PatternMatcher([
   (UPat(Ops.VECTORIZE, name="x"), lambda x: len(x.src)>1 and len(x.src) == x.dtype.vcount and all(x.dtype == y.dtype.vec(len(x.src)) for y in x.src)),
   (UPat(Ops.GEP, src=(UPat.var("src"),), name="gep"), lambda gep,src: gep.dtype == src.dtype.scalar()),
 
-  # LOAD(idx) / STORE(idx, val) / LOAD with alt value only exists in program_spec
-  # TODO: move LOAD to the program_spec
+  # LOAD(idx) / STORE(idx, val)
   (UPat().index(UPat()).or_casted().load(), lambda: True),
+  (UPat().index(UPat(), UPat(dtype=dtypes.bool)).or_casted().load(), lambda: True),  # gated load (alt added in program_spec)
   (UPat(Ops.INDEX).or_casted().store(UPat()), lambda: True),
 
   # CUSTOM (inline and non inline)
   (UPat((Ops.CUSTOMI, Ops.CUSTOM)), lambda: True),
 
-  # INDEX
+  # INDEX (2-arg and 3-arg with bool gate)
   (UPat(GroupOp.Defines|{Ops.AFTER}, name="buf").index(UPat.var("idx")), validate_index),
+  (UPat(Ops.INDEX, src=(UPat(GroupOp.Defines|{Ops.AFTER}, name="buf"), UPat.var("idx"), UPat.var("gate", dtype=dtypes.bool))), validate_index),
 
   # SPECIAL
   (UPat(Ops.SPECIAL, src=(UPat.var("x", (dtypes.index, dtypes.int32)),), name="s"), lambda s,x: s.dtype == x.dtype and isinstance(s.arg, str)),
@@ -205,9 +206,6 @@ kernel_spec = PatternMatcher([
 # ***** UOp spec in linearized programs *****
 
 program_spec = PatternMatcher([
-  # INDEX with a gate as third src
-  (UPat(Ops.INDEX, src=(UPat(GroupOp.Defines|{Ops.AFTER}, name="buf"), UPat.var("idx"), UPat.var("gate", dtype=dtypes.bool))), validate_index),
-
   # LOAD (idx, alt_value), LOAD can have an alt value, but only if the index has a gate
   (UPat().index(UPat(), UPat(dtype=dtypes.bool)).or_casted().load(UPat()), lambda: True),
 

@@ -116,7 +116,7 @@ def profile_instructions(kernel: bytes):
 
       # Render
       render_start = time.perf_counter()
-      with Context(NOOPT=1, IGNORE_OOB=1, TUPLE_ORDER=0, SPEC=0):
+      with Context(NOOPT=1, IGNORE_OOB=1, TUPLE_ORDER=0):
         prg = get_program(sink, _emu_renderer)
       render_time = time.perf_counter() - render_start
 
