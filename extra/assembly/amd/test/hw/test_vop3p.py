@@ -440,6 +440,36 @@ class TestWMMA(unittest.TestCase):
         result = st.vgpr[lane][reg]
         self.assertEqual(result, expected, f"v[{reg}] lane {lane}: expected 21.0, got {i2f(result)}")
 
+  def test_v_wmma_f32_16x16x16_f16_high_registers(self):
+    """V_WMMA_F32_16X16X16_F16 with high register indices.
+
+    Regression test: WMMA was using static register indices instead of dynamic,
+    causing incorrect results when registers weren't at the default positions.
+    This test uses v[64:71] for A, v[80:87] for B, v[96:103] for C/D.
+    """
+    instructions = []
+    instructions.append(s_mov_b32(s[0], 0x3c003c00))  # packed f16 1.0
+    # Initialize A matrix in v[64:71]
+    for i in range(64, 72):
+      instructions.append(v_mov_b32_e32(v[i], s[0]))
+    # Initialize B matrix in v[80:87]
+    for i in range(80, 88):
+      instructions.append(v_mov_b32_e32(v[i], s[0]))
+    # Initialize C (accumulator) in v[96:103] to zero
+    for i in range(96, 104):
+      instructions.append(v_mov_b32_e32(v[i], 0))
+    # WMMA: D = A @ B + C, result in v[96:103]
+    instructions.append(v_wmma_f32_16x16x16_f16(v[96:103], v[64:71], v[80:87], v[96:103]))
+    # Copy results to v[0:7] for checking
+    for i in range(8):
+      instructions.append(v_mov_b32_e32(v[i], v[96+i]))
+    st = run_program(instructions, n_lanes=32)
+    expected = f2i(16.0)
+    for lane in range(32):
+      for reg in range(8):
+        result = st.vgpr[lane][reg]
+        self.assertEqual(result, expected, f"v[{reg}] lane {lane}: expected 16.0, got {i2f(result)}")
+
 
 class TestSpecialOps(unittest.TestCase):
   """Tests for special operations (SAD, PERM, DOT2)."""

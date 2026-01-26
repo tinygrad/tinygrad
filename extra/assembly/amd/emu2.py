@@ -901,13 +901,16 @@ def _compile_vop3p(inst: VOP3P, ctx: _Ctx, name: str) -> tuple[str, UOp]:
 
   # WMMA: Wave Matrix Multiply-Accumulate
   if 'WMMA' in op_name and 'F32_16X16X16_F16' in op_name:
-    src0_r, src1_r, src2_r = inst.src0.offset - 256, inst.src1.offset - 256, inst.src2.offset - 256
+    # Dynamic register fields for deduplication
+    src0_r = ctx.inst_field(VOP3P.src0) - _c(256)
+    src1_r = ctx.inst_field(VOP3P.src1) - _c(256)
+    src2_r = ctx.inst_field(VOP3P.src2) - _c(256)
     def f16_to_f32(bits: UOp) -> UOp: return bits.cast(dtypes.uint16).bitcast(dtypes.half).cast(dtypes.float32)
     def read_f16_mat(src):
-      return [f for l in range(16) for r in range(8) for v in [ctx.rvgpr_dyn(_c(src + r), UOp.const(dtypes.index, l))]
+      return [f for l in range(16) for r in range(8) for v in [ctx.rvgpr_dyn(src + _c(r), UOp.const(dtypes.index, l))]
               for f in [f16_to_f32(v & UOp.const(dtypes.uint32, 0xFFFF)), f16_to_f32(v >> UOp.const(dtypes.uint32, 16))]]
     mat_a, mat_b = read_f16_mat(src0_r), read_f16_mat(src1_r)
-    mat_c = [ctx.rvgpr_dyn(_c(src2_r + i // 32), UOp.const(dtypes.index, i % 32)).bitcast(dtypes.float32) for i in range(256)]
+    mat_c = [ctx.rvgpr_dyn(src2_r + _c(i // 32), UOp.const(dtypes.index, i % 32)).bitcast(dtypes.float32) for i in range(256)]
     mat_d = [sum(mat_a[row*16+k] * mat_b[col*16+k] for k in range(16)) + mat_c[row*16+col] for row in range(16) for col in range(16)]
     stores = [ctx.wvgpr_dyn(vdst_reg + _c(i // 32), UOp.const(dtypes.index, i % 32), mat_d[i].bitcast(dtypes.uint32), exec_mask) for i in range(256)]
     return name, UOp.sink(*stores, *ctx.inc_pc(), arg=KernelInfo(name=name))
