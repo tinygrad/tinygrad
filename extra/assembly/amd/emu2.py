@@ -870,9 +870,15 @@ def _compile_vop3sd(inst: VOP3SD, ctx: _Ctx, name: str) -> tuple[str, UOp]:
     return pcode_result
 
 def _compile_vop3p(inst: VOP3P, ctx: _Ctx, name: str) -> tuple[str, UOp]:
-  lane, exec_mask, vdst_reg = UOp.range(32, _next_axis_id(), AxisType.LOOP), ctx.rsgpr_dyn(_c(EXEC_LO.offset)), _c(inst.vdst.offset - 256)
-  src0, src1 = ctx.rsrc_dyn(_c(inst.src0.offset), lane, 16), ctx.rsrc_dyn(_c(inst.src1.offset), lane, 16)
-  src2 = ctx.rsrc_dyn(_c(inst.src2.offset), lane, 16) if hasattr(inst, 'src2') and inst.src2 is not None else None
+  lane, exec_mask = UOp.range(32, _next_axis_id(), AxisType.LOOP), ctx.rsgpr_dyn(_c(EXEC_LO.offset))
+  # Read register fields dynamically for deduplication
+  vdst_reg = ctx.inst_field(VOP3P.vdst)
+  src0_off = ctx.inst_field(VOP3P.src0)
+  src1_off = ctx.inst_field(VOP3P.src1)
+  src2_off = ctx.inst_field(VOP3P.src2) if hasattr(inst, 'src2') and inst.src2 is not None else None
+  src0 = ctx.rsrc_dyn(src0_off, lane, 16)
+  src1 = ctx.rsrc_dyn(src1_off, lane, 16)
+  src2 = ctx.rsrc_dyn(src2_off, lane, 16) if src2_off is not None else None
   opsel, opsel_hi = getattr(inst, 'opsel', 0) or 0, getattr(inst, 'opsel_hi', 3) if getattr(inst, 'opsel_hi', 3) is not None else 3
   opsel_hi2 = getattr(inst, 'opsel_hi2', 1) if getattr(inst, 'opsel_hi2', 1) is not None else 1
   neg, neg_hi = getattr(inst, 'neg', 0) or 0, getattr(inst, 'neg_hi', 0) or 0
@@ -980,6 +986,7 @@ def _compile_mem_op(inst, ctx: _Ctx, name: str) -> tuple[str, UOp]:
     offset0 = ctx.inst_field(DS.offset0)
     offset1 = ctx.inst_field(DS.offset1)
     offset = offset0  # DS uses offset0 as primary offset
+    saddr_reg = None
   else:
     addr_reg = ctx.inst_field(type(inst).addr)
     vdata_reg = ctx.inst_field(type(inst).data)
@@ -988,6 +995,8 @@ def _compile_mem_op(inst, ctx: _Ctx, name: str) -> tuple[str, UOp]:
     raw_offset = ctx.inst_field(type(inst).offset)
     offset = (raw_offset ^ _c(0x1000)) - _c(0x1000)
     offset0, offset1 = 0, 0
+    # saddr kept static for now (dynamic causes issues)
+    saddr_reg = _c(inst.saddr.offset) if has_saddr else None
 
   # Data width
   ndwords = 4 if '_B128' in op_name or 'B128' in op_name else 3 if '_B96' in op_name or 'B96' in op_name else 2 if '_B64' in op_name or 'B64' in op_name else 1
@@ -1003,11 +1012,10 @@ def _compile_mem_op(inst, ctx: _Ctx, name: str) -> tuple[str, UOp]:
       scratch_stride = ctx.rsgpr_dyn(_c(SCRATCH_STRIDE_IDX)).cast(dtypes.uint64)
       base = lane.cast(dtypes.uint64) * scratch_stride
       addr_offset = ctx.rvgpr_dyn(addr_reg, lane).cast(dtypes.uint64)
-      if has_saddr: addr_offset = addr_offset + ctx.rsgpr_dyn(_c(inst.saddr.offset)).cast(dtypes.uint64)
+      if has_saddr: addr_offset = addr_offset + ctx.rsgpr_dyn(saddr_reg).cast(dtypes.uint64)
       return base + addr_offset + offset64
     if has_saddr:
-      saddr = inst.saddr.offset
-      return _u64(ctx.rsgpr_dyn(_c(saddr)), ctx.rsgpr_dyn(_c(saddr + 1))) + ctx.rvgpr_dyn(addr_reg, lane).cast(dtypes.uint64) + offset64
+      return _u64(ctx.rsgpr_dyn(saddr_reg), ctx.rsgpr_dyn(saddr_reg + U32_1)) + ctx.rvgpr_dyn(addr_reg, lane).cast(dtypes.uint64) + offset64
     return _u64(ctx.rvgpr_dyn(addr_reg, lane), ctx.rvgpr_dyn(addr_reg + _c(1), lane)) + offset64
 
   def wmem(addr: UOp, val: UOp, active: UOp) -> UOp:
