@@ -650,9 +650,12 @@ jobs:
         run: TRANSCENDENTAL=2 python -m pytest -n=auto test/test_ops.py::TestOps::test_sin test/test_ops.py::TestOps::test_cos test/test_ops.py::TestOps::test_tan test/test_ops.py::TestOps::test_exp test/test_ops.py::TestOps::test_log --durations=20
       - name: Run TestOps.test_add with SQTT
         run: |
-          VIZ=1 PMC=1 DEBUG=5 python3 test/test_ops.py TestOps.test_add
-          VIZ=1 SQTT=1 DEBUG=5 python3 test/test_ops.py TestOps.test_add
+          VIZ=-2 DEBUG=5 python3 test/test_ops.py TestOps.test_add
           extra/sqtt/rgptool.py create "/tmp/profile.pkl.$USER" -o /tmp/gpu0.rgp
+      - name: Run AMD emulated mmapeak on NULL backend
+        env:
+          AMD: 0
+        run: PYTHONPATH=. NULL=1 EMULATE=AMD python extra/mmapeak/mmapeak.py
       - name: Run process replay tests
         uses: ./.github/actions/process-replay
 
@@ -732,7 +735,7 @@ jobs:
         # skip multitensor because it's slow
         run: python -m pytest -n=auto test/ --ignore=test/models --ignore=test/unit --ignore test/test_gc.py --ignore test/test_multitensor.py --durations=20
       - name: Run TestOps.test_add with PMA
-        run: VIZ=1 PMA=1 DEBUG=5 python3 test/test_ops.py TestOps.test_add
+        run: VIZ=-1 PMA=1 DEBUG=5 python3 test/test_ops.py TestOps.test_add
       - name: Run process replay tests
         uses: ./.github/actions/process-replay
 
