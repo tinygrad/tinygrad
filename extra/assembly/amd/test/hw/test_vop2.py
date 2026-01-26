@@ -237,6 +237,32 @@ class TestF16Ops(unittest.TestCase):
     # 2.0 * 3.0 + 1.0 = 7.0, f16 7.0 = 0x4700
     self.assertEqual(result, 0x4700, f"Expected 0x4700 (f16 7.0), got 0x{result:04x}")
 
+  def test_v_max_f16_basic(self):
+    """V_MAX_F16 returns the maximum of two f16 values."""
+    instructions = [
+      s_mov_b32(s[0], 0x3c00),  # f16 1.0
+      s_mov_b32(s[1], 0x4000),  # f16 2.0
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[1]),
+      v_max_f16_e32(v[2], v[0], v[1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = st.vgpr[0][2] & 0xffff
+    self.assertEqual(result, 0x4000, f"Expected 0x4000 (f16 2.0), got 0x{result:04x}")
+
+  def test_v_min_f16_basic(self):
+    """V_MIN_F16 returns the minimum of two f16 values."""
+    instructions = [
+      s_mov_b32(s[0], 0x3c00),  # f16 1.0
+      s_mov_b32(s[1], 0x4000),  # f16 2.0
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[1]),
+      v_min_f16_e32(v[2], v[0], v[1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = st.vgpr[0][2] & 0xffff
+    self.assertEqual(result, 0x3c00, f"Expected 0x3c00 (f16 1.0), got 0x{result:04x}")
+
   def test_v_fmaak_f16_basic(self):
     """V_FMAAK_F16: d = a * b + K."""
     instructions = [
