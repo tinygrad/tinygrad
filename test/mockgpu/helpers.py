@@ -27,7 +27,7 @@ class PythonRemu:
 
 def _try_dlopen_remu():
   # Use Python emulator only if PYTHON_REMU=1
-  if getenv("PYTHON_REMU"):
+  if getenv("PYTHON_REMU", "1"):
     return PythonRemu()
   REMU_PATHS = ["extra/remu/target/release/libremu.so", "libremu.so", "/usr/local/lib/libremu.so",
                "extra/remu/target/release/libremu.dylib", "libremu.dylib", "/usr/local/lib/libremu.dylib", "/opt/homebrew/lib/libremu.dylib"]
