@@ -5,6 +5,7 @@ os.environ["AMD_AQL"] = "1"
 
 from tinygrad.device import Device
 from tinygrad.runtime.support.compiler_amd import HIPCompiler
+from extra.assembly.amd.dsl import Reg
 
 NUM_WORKGROUPS = 96
 WAVE_SIZE = 32
@@ -23,15 +24,18 @@ def launchBenchmark(instruction, vgprIndices, dense=True, accum=False, **kwargs)
     inst = instruction(v[0:vgprIndices[0]], v[vgprIndices[1]:vgprIndices[2]], v[vgprIndices[1]:vgprIndices[2]], 1)
   else:
     inst = instruction(v[0:vgprIndices[0]], v[vgprIndices[1]:vgprIndices[2]], v[vgprIndices[3]:vgprIndices[4]], v[vgprIndices[5]])
+  vgprs:set = set()
+  for n,_ in inst._fields:
+    if isinstance(val:=getattr(inst, n), Reg): vgprs |= {val.offset+i for i in range(val.sz)}
   inst_bytes = b"".join([inst.to_bytes() for _ in range(INSTRUCTIONS_PER_LOOP)])
   inst_hex = "\n".join("  .byte " + ",".join(f"0x{b:02x}" for b in inst_bytes[i:i+16]) for i in range(0, len(inst_bytes), 16)) + "\n"
-  src = assemblyTemplate.replace("INTERNAL_LOOP", str(INTERNAL_LOOP)).replace("INSTRUCTION", inst_hex)
+  src = assemblyTemplate.replace("INTERNAL_LOOP", str(INTERNAL_LOOP)).replace("INSTRUCTION", inst_hex).replace("VGPRS", str(len(vgprs)))
   src = src.replace("DIRECTIVE", DIRECTIVE)
   lib = COMPILER.compile(src)
   fxn = DEV.runtime("matmul", lib)
   elapsed = min([fxn(global_size=(NUM_WORKGROUPS,1,1), local_size=(WAVE_SIZE*NUM_WAVES,1,1), wait=True) for _ in range(2)])
   FLOPs = FLOPS_PER_MATMUL * NUM_WAVES * NUM_WORKGROUPS * INTERNAL_LOOP * INSTRUCTIONS_PER_LOOP
-  print(f"{inst.op_name:<29} : {FLOPs/elapsed/10**12:.2f} T(FL)OPS")
+  print(f"{inst.op_name.lower():<29} : {FLOPs/elapsed/10**12:.2f} T(FL)OPS")
 
 if __name__=="__main__":
   DEV = Device[Device.DEFAULT]
