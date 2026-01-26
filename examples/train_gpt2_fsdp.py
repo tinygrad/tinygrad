@@ -1,12 +1,10 @@
 #!/usr/bin/env/ python3
-import os, argparse, contextlib, time
-from typing import Optional, Union
+import contextlib, time
 with contextlib.suppress(ImportError): import tiktoken
-from tinygrad import Tensor, Context, TinyJit, Device, GlobalCounters, Variable, dtypes
-from tinygrad.uop.ops import UOp
-from tinygrad.helpers import Timing, DEBUG, JIT, getenv, fetch, colored, trange
+from tinygrad import Tensor, TinyJit, Device, GlobalCounters
+from tinygrad.helpers import fetch, colored
 from tinygrad.nn import Embedding, Linear, LayerNorm
-from tinygrad.nn.state import torch_load, load_state_dict, get_state_dict, get_parameters
+from tinygrad.nn.state import get_state_dict, get_parameters
 from tinygrad.nn.distributed import FSDP
 from tinygrad.nn.optim import AdamW
 import numpy as np

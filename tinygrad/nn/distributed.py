@@ -1,4 +1,5 @@
 from tinygrad import Tensor
+from tinygrad.uop.ops import UOp
 from tinygrad import nn
 from typing import Any
 
@@ -6,14 +7,14 @@ class FSDP:
   def __init__(self, module:Any, devices:tuple[str, ...], axis:int=0):
     self.module, self.devices, self.axis, self.ndev = module, devices, axis, len(devices)
     params = nn.state.get_state_dict(self.module)
-    self.logical_shapes:dict[str, tuple[int, ...]] = {}
+    self.logical_shapes:dict[str, tuple[int|UOp, ...]] = {}
     self.sharded_params:dict[str, Tensor] = {}
     for name, param in params.items():
       # save the original shapes of the params before padding and sharding for the all-gather step
       self.logical_shapes[name] = param.shape
       # NOTE: we do padding before sharding to make sure that the shape of the parameter is appropriate for the sharding
       rem = param.shape[axis] % self.ndev
-      pad_width = (self.ndev - rem) % self.ndev
+      pad_width = int((self.ndev - rem) % self.ndev)
       padding = tuple((0, pad_width) if i == axis else (0, 0) for i in range(param.ndim))
       padded_param = param.pad(padding).contiguous().to(self.devices[0]).realize()
       sharded_param = padded_param.shard(self.devices, self.axis).realize()
