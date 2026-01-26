@@ -435,6 +435,16 @@ class TestAssign(unittest.TestCase):
     with Context(NOOPT=1): a[shift:N].assign(a[0:N-shift]).realize()
     np.testing.assert_allclose(a.numpy(), expected)
 
+  def test_nonoverlapping_shrink_assignment(self):
+    # TODO: non-overlapping shrinks don't actually need contiguous, could be 1 kernel with smarter range analysis
+    a = Tensor.arange(100).float().contiguous().realize()
+    expected = np.arange(100, dtype=np.float32)
+    expected[0:10] = expected[50:60].copy()
+    kc = GlobalCounters.kernel_count
+    a[0:10].assign(a[50:60]).realize()
+    assert GlobalCounters.kernel_count - kc == 2, "currently conservative, forces contiguous"
+    np.testing.assert_allclose(a.numpy(), expected)
+
   @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
   def test_setitem_half(self):
     a = Tensor.full((8,), 1.0, dtype=dtypes.half).contiguous().realize()
