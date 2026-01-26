@@ -900,19 +900,33 @@ def _compile_vop3p(inst: VOP3P, ctx: _Ctx, name: str) -> tuple[str, UOp]:
   op_name = _op_name(inst)
 
   # WMMA: Wave Matrix Multiply-Accumulate
-  if 'WMMA' in op_name and 'F32_16X16X16_F16' in op_name:
+  if 'WMMA' in op_name and '16X16X16_F16' in op_name:
     # Dynamic register fields for deduplication
     src0_r = ctx.inst_field(VOP3P.src0) - _c(256)
     src1_r = ctx.inst_field(VOP3P.src1) - _c(256)
     src2_r = ctx.inst_field(VOP3P.src2) - _c(256)
+    is_f16_output = 'F16_16X16X16_F16' in op_name  # F16 output vs F32 output
     def f16_to_f32(bits: UOp) -> UOp: return bits.cast(dtypes.uint16).bitcast(dtypes.half).cast(dtypes.float32)
     def read_f16_mat(src):
       return [f for l in range(16) for r in range(8) for v in [ctx.rvgpr_dyn(src + _c(r), UOp.const(dtypes.index, l))]
               for f in [f16_to_f32(v & UOp.const(dtypes.uint32, 0xFFFF)), f16_to_f32(v >> UOp.const(dtypes.uint32, 16))]]
     mat_a, mat_b = read_f16_mat(src0_r), read_f16_mat(src1_r)
-    mat_c = [ctx.rvgpr_dyn(src2_r + _c(i // 32), UOp.const(dtypes.index, i % 32)).bitcast(dtypes.float32) for i in range(256)]
-    mat_d = [sum(mat_a[row*16+k] * mat_b[col*16+k] for k in range(16)) + mat_c[row*16+col] for row in range(16) for col in range(16)]
-    stores = [ctx.wvgpr_dyn(vdst_reg + _c(i // 32), UOp.const(dtypes.index, i % 32), mat_d[i].bitcast(dtypes.uint32), exec_mask) for i in range(256)]
+    if is_f16_output:
+      # RDNA3 F16 output: uses 8 VGPRs (same as F32), f16 values in lo 16 bits of each VGPR
+      # Layout: half16 per lane where even indices (0,2,4,...,14) = lo halves of VGPRs 0-7
+      # Read accumulator: 8 regs × 32 lanes, each VGPR's lo 16 bits holds one f16
+      mat_c = [f16_to_f32(ctx.rvgpr_dyn(src2_r + _c(i // 32), UOp.const(dtypes.index, i % 32)) & UOp.const(dtypes.uint32, 0xFFFF))
+               for i in range(256)]
+      mat_d = [sum(mat_a[row*16+k] * mat_b[col*16+k] for k in range(16)) + mat_c[row*16+col] for row in range(16) for col in range(16)]
+      # Write f16 results to lo 16 bits of each VGPR
+      def f32_to_f16_bits(v: UOp) -> UOp: return v.cast(dtypes.half).bitcast(dtypes.uint16).cast(dtypes.uint32)
+      stores = [ctx.wvgpr_dyn(vdst_reg + _c(i // 32), UOp.const(dtypes.index, i % 32),
+                f32_to_f16_bits(mat_d[i]), exec_mask) for i in range(256)]
+    else:
+      # F32 output: accumulator and output are f32
+      mat_c = [ctx.rvgpr_dyn(src2_r + _c(i // 32), UOp.const(dtypes.index, i % 32)).bitcast(dtypes.float32) for i in range(256)]
+      mat_d = [sum(mat_a[row*16+k] * mat_b[col*16+k] for k in range(16)) + mat_c[row*16+col] for row in range(16) for col in range(16)]
+      stores = [ctx.wvgpr_dyn(vdst_reg + _c(i // 32), UOp.const(dtypes.index, i % 32), mat_d[i].bitcast(dtypes.uint32), exec_mask) for i in range(256)]
     return name, UOp.sink(*stores, *ctx.inc_pc(), arg=KernelInfo(name=name))
 
   pcode = PCODE.get(inst.op)
