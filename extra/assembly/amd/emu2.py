@@ -1007,7 +1007,6 @@ def _compile_mem_op(inst, ctx: _Ctx, name: str) -> tuple[str, UOp]:
   addr_shift = UOp.const(dtypes.uint32 if is_lds else dtypes.uint64, 2)
 
   # Extract register info - all dynamic for deduplication
-  has_saddr = not is_lds and hasattr(inst, 'saddr') and inst.saddr != NULL and inst.saddr.offset < 128
   if is_lds:
     addr_reg = ctx.inst_field(DS.addr)
     vdata_reg = ctx.inst_field(DS.data0)
@@ -1136,15 +1135,12 @@ _INST_HANDLERS: dict[type, callable] = {
 # PROGRAM DECODE AND COMPILATION
 # ═══════════════════════════════════════════════════════════════════════════════
 
-# Backend selection: EMU2_BACKEND=python, clang (default), or llvm
+# Backend selection: EMU2_BACKEND=clang (default) or llvm
 EMU2_BACKEND = getenv("EMU2_BACKEND", "clang")
 
 def _get_backend():
   """Get renderer, compiler, and program class based on EMU2_BACKEND."""
-  if EMU2_BACKEND == "python":
-    from tinygrad.runtime.ops_python import PythonRenderer, PythonCompiler, PythonProgram
-    return PythonRenderer(), PythonCompiler(), PythonProgram
-  elif EMU2_BACKEND == "llvm":
+  if EMU2_BACKEND == "llvm":
     from tinygrad.renderer.llvmir import LLVMRenderer
     from tinygrad.runtime.support.compiler_cpu import CPULLVMCompiler
     from tinygrad.runtime.ops_cpu import CPUProgram
@@ -1249,25 +1245,20 @@ def decode_program(data: bytes) -> dict[int, tuple[str, object, list[int], objec
 
   if not inst_info: return {}
 
-  if EMU2_BACKEND == "python":
-    # Python backend: create PythonProgram instances directly
-    return {pc: (prg.function_name, _ProgramClass(prg.function_name, _emu_compiler.compile(prg.src)), prg.globals, None)
-            for pc, prg in inst_info}
-  else:
-    # Clang/LLVM backend: batch compile and create function pointers
-    from tinygrad.runtime.support.elf import jit_loader
-    seen_funcs: set[str] = set()
-    combined_src_parts: list[str] = []
-    for pc, prg in inst_info:
-      if prg.function_name not in seen_funcs:
-        seen_funcs.add(prg.function_name)
-        combined_src_parts.append(prg.src)
-    obj = _emu_compiler.compile_to_obj("\n".join(combined_src_parts))
-    sym_offsets = _elf_symbol_offsets(obj)
-    cpu_prg = _ProgramClass(Device['CPU'], "emu2_batch", jit_loader(obj))
-    base_addr = ctypes.cast(cpu_prg.fxn, ctypes.c_void_p).value
-    return {pc: (prg.function_name, ctypes.CFUNCTYPE(None)(base_addr + sym_offsets.get(prg.function_name, 0)), prg.globals, cpu_prg)
-            for pc, prg in inst_info}
+  # Batch compile and create function pointers
+  from tinygrad.runtime.support.elf import jit_loader
+  seen_funcs: set[str] = set()
+  combined_src_parts: list[str] = []
+  for pc, prg in inst_info:
+    if prg.function_name not in seen_funcs:
+      seen_funcs.add(prg.function_name)
+      combined_src_parts.append(prg.src)
+  obj = _emu_compiler.compile_to_obj("\n".join(combined_src_parts))
+  sym_offsets = _elf_symbol_offsets(obj)
+  cpu_prg = _ProgramClass(Device['CPU'], "emu2_batch", jit_loader(obj))
+  base_addr = ctypes.cast(cpu_prg.fxn, ctypes.c_void_p).value
+  return {pc: (prg.function_name, ctypes.CFUNCTYPE(None)(base_addr + sym_offsets.get(prg.function_name, 0)), prg.globals, cpu_prg)
+          for pc, prg in inst_info}
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # WAVE STATE
@@ -1317,16 +1308,10 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
   lds_size = ((rsrc2 & hsa.AMD_COMPUTE_PGM_RSRC_TWO_GRANULATED_LDS_SIZE) >> hsa.AMD_COMPUTE_PGM_RSRC_TWO_GRANULATED_LDS_SIZE_SHIFT) * 512
   total_threads = lx * ly * lz
 
-  if EMU2_BACKEND == "python":
-    # Python backend: use memoryview buffers with address-0 trick for vmem
-    vmem_mv = memoryview((ctypes.c_char * (1 << 47)).from_address(0)).cast('B')  # 128TB at address 0
-    lds_mv = memoryview(bytearray(max(lds_size, 4)))
-    scratch_mv = memoryview(bytearray(scratch_size * WAVE_SIZE)) if scratch_size else None
-  else:
-    # Clang backend: use Buffer objects with external_ptr=0 for vmem
-    vmem_buf = Buffer('CPU', 1 << 40, dtypes.uint32, options=BufferSpec(external_ptr=0)).ensure_allocated()
-    lds_buf = Buffer('CPU', max(lds_size // 4, 1), dtypes.uint32).ensure_allocated()
-    scratch_buf = Buffer('CPU', scratch_size * WAVE_SIZE, dtypes.uint8).ensure_allocated() if scratch_size else None
+  # Use Buffer objects with external_ptr=0 for vmem
+  vmem_buf = Buffer('CPU', 1 << 40, dtypes.uint32, options=BufferSpec(external_ptr=0)).ensure_allocated()
+  lds_buf = Buffer('CPU', max(lds_size // 4, 1), dtypes.uint32).ensure_allocated()
+  scratch_buf = Buffer('CPU', scratch_size * WAVE_SIZE, dtypes.uint8).ensure_allocated() if scratch_size else None
 
   # Set DAZ+FTZ during emulator execution, restore afterward to avoid breaking hypothesis tests
   with _MXCSRContext():
@@ -1352,33 +1337,19 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
               st._write_vgpr(0, lane, ((tid // (lx * ly)) << 20) | (((tid // lx) % ly) << 10) | (tid % lx))
             st._write_sgpr(SCRATCH_STRIDE_IDX, scratch_size)
 
-            if EMU2_BACKEND == "python":
-              # Python backend: pass raw byte memoryviews
-              sgpr_raw = st.sgpr_buf.as_buffer(force_zero_copy=True)
-              vgpr_raw = st.vgpr_buf.as_buffer(force_zero_copy=True)
-              all_bufs = [sgpr_raw, vgpr_raw, vmem_mv, lds_mv, scratch_mv]
-              for inst_count in range(1_000_000):
-                if (pc := st.pc) == 0xFFFFFFFFFFFFFFFF or pc not in program: break
-                name, prg, globals_list, _ = program[pc]
-                assert prg is not None, f"[emu2] No program for {name} at PC={pc}"
-                assert 4 not in globals_list or scratch_mv, f"SCRATCH instruction {name} but scratch_size=0"
-                bufs = [all_bufs[g] for g in globals_list]
-                prg(*bufs, global_size=(1,1,1), local_size=(1,1,1))
-              else: raise RuntimeError("exceeded 1M instructions, likely infinite loop")
-            else:
-              # Clang/LLVM backend: pass buffer addresses via ctypes (pre-create to avoid allocation in loop)
-              c_bufs = [ctypes.c_uint64(st.sgpr_buf._buf.va_addr), ctypes.c_uint64(st.vgpr_buf._buf.va_addr),
-                        ctypes.c_uint64(vmem_buf._buf.va_addr), ctypes.c_uint64(lds_buf._buf.va_addr),
-                        ctypes.c_uint64(scratch_buf._buf.va_addr if scratch_buf else 0)]
-              c_lane = ctypes.c_int32(0)
-              for inst_count in range(1_000_000):
-                if (pc := st.pc) == 0xFFFFFFFFFFFFFFFF or pc not in program: break
-                name, fxn, globals_list, _ = program[pc]
-                assert fxn is not None, f"[emu2] No fxn for {name} at PC={pc}"
-                assert 4 not in globals_list or scratch_buf, f"SCRATCH instruction {name} but scratch_size=0"
-                if DEBUG >= 5:
-                  inst = decode_inst(bytes((ctypes.c_char * 12).from_address(pc).raw))
-                  print(f"[emu2] exec PC={pc:X}: {inst!r}")
-                fxn(*[c_bufs[g] for g in globals_list], c_lane)
-              else: raise RuntimeError("exceeded 1M instructions, likely infinite loop")
+            # Pass buffer addresses via ctypes (pre-create to avoid allocation in loop)
+            c_bufs = [ctypes.c_uint64(st.sgpr_buf._buf.va_addr), ctypes.c_uint64(st.vgpr_buf._buf.va_addr),
+                      ctypes.c_uint64(vmem_buf._buf.va_addr), ctypes.c_uint64(lds_buf._buf.va_addr),
+                      ctypes.c_uint64(scratch_buf._buf.va_addr if scratch_buf else 0)]
+            c_lane = ctypes.c_int32(0)
+            for inst_count in range(1_000_000):
+              if (pc := st.pc) == 0xFFFFFFFFFFFFFFFF or pc not in program: break
+              name, fxn, globals_list, _ = program[pc]
+              assert fxn is not None, f"[emu2] No fxn for {name} at PC={pc}"
+              assert 4 not in globals_list or scratch_buf, f"SCRATCH instruction {name} but scratch_size=0"
+              if DEBUG >= 5:
+                inst = decode_inst(bytes((ctypes.c_char * 12).from_address(pc).raw))
+                print(f"[emu2] exec PC={pc:X}: {inst!r}")
+              fxn(*[c_bufs[g] for g in globals_list], c_lane)
+            else: raise RuntimeError("exceeded 1M instructions, likely infinite loop")
   return 0

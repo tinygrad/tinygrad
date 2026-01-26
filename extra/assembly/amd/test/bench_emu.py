@@ -137,7 +137,7 @@ def profile_instructions(kernel: bytes):
 
 def benchmark_python_split(kernel: bytes, global_size, local_size, args_ptr, rsrc2: int, iterations: int = 5):
   """Benchmark Python emulator with build/render/compile/execution times separated."""
-  from extra.assembly.amd.emu2 import _emu_renderer, _emu_compiler, _elf_symbol_offsets, EMU2_BACKEND
+  from extra.assembly.amd.emu2 import _emu_renderer, _emu_compiler, _elf_symbol_offsets
   from extra.assembly.amd.emu2 import _get_inst_prg, _get_inst_sink, _canonical_prg_cache
   from tinygrad.codegen import get_program
   from tinygrad.helpers import Context
@@ -173,21 +173,17 @@ def benchmark_python_split(kernel: bytes, global_size, local_size, args_ptr, rsr
 
   # Measure compile time (clang/llvm compile C to native)
   compile_start = time.perf_counter()
-  if EMU2_BACKEND == "python":
-    for prg in prgs:
-      _emu_compiler.compile(prg.src)
-  else:
-    # Deduplicate by function name (same as decode_program does)
-    seen = set()
-    unique_srcs = []
-    for prg in prgs:
-      if prg.function_name not in seen:
-        seen.add(prg.function_name)
-        unique_srcs.append(prg.src)
-    combined_src = "\n".join(unique_srcs)
-    obj = _emu_compiler.compile_to_obj(combined_src)
-    _elf_symbol_offsets(obj)
-    jit_loader(obj)
+  # Deduplicate by function name (same as decode_program does)
+  seen = set()
+  unique_srcs = []
+  for prg in prgs:
+    if prg.function_name not in seen:
+      seen.add(prg.function_name)
+      unique_srcs.append(prg.src)
+  combined_src = "\n".join(unique_srcs)
+  obj = _emu_compiler.compile_to_obj(combined_src)
+  _elf_symbol_offsets(obj)
+  jit_loader(obj)
   compile_time = time.perf_counter() - compile_start
 
   # Execution time (need to populate cache first)
