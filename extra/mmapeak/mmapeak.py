@@ -29,7 +29,7 @@ def launchBenchmark(instruction, vgprIndices, dense=True, accum=False, **kwargs)
     if isinstance(val:=getattr(inst, n), Reg): vgprs |= {val.offset+i for i in range(val.sz)}
   inst_bytes = b"".join([inst.to_bytes() for _ in range(INSTRUCTIONS_PER_LOOP)])
   inst_hex = "\n".join("  .byte " + ",".join(f"0x{b:02x}" for b in inst_bytes[i:i+16]) for i in range(0, len(inst_bytes), 16)) + "\n"
-  src = assemblyTemplate.replace("INTERNAL_LOOP", str(INTERNAL_LOOP)).replace("INSTRUCTION", inst_hex).replace("VGPRS", str(len(vgprs)))
+  src = assemblyTemplate.replace("INTERNAL_LOOP", str(INTERNAL_LOOP)).replace("INSTRUCTION", inst_hex).replace("VGPR_COUNT", str(len(vgprs)))
   src = src.replace("DIRECTIVE", DIRECTIVE)
   lib = COMPILER.compile(src)
   fxn = DEV.runtime("matmul", lib)
