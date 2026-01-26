@@ -15,10 +15,19 @@ class AM_IP:
 class AM_SOC(AM_IP):
   def init_sw(self):
     self.module = import_soc(self.adev.ip_ver[am.GC_HWIP])
-    soc21 = self.adev.ip_ver[am.GC_HWIP] >= (11,0,0)
-    self.ih_clients = am.enum_soc21_ih_clientid if soc21 else am.enum_soc15_ih_clientid
-    srcid_prefix = 'GFX_11_0_0__SRCID__' if soc21 else 'GFX_9_0__SRCID__'
-    self.ih_srcs = {getattr(am, k): k[len(srcid_prefix):] for k in dir(am) if k.startswith(srcid_prefix)}
+    self.ih_clients = am.enum_soc21_ih_clientid if self.adev.ip_ver[am.GC_HWIP][0] >= 11 else am.enum_soc15_ih_clientid
+
+    def _ih_srcs(pref, hwip):
+      return {getattr(am, k): k[off+9:] for k in dir(am) if k.startswith(f'{pref}_{self.adev.ip_ver[hwip][0]}') and (off:=k.find('__SRCID__')) != -1}
+
+    gfx_srcs, sdma_srcs = _ih_srcs('GFX', am.GC_HWIP), _ih_srcs('SDMA0', am.SDMA0_HWIP)
+
+    self.ih_scrs_names:dict[int, dict[int, str]] = {}
+    if self.adev.ip_ver[am.GC_HWIP][0] >= 11: self.ih_scrs_names |= {k: gfx_srcs for k in [am.SOC21_IH_CLIENTID_GRBM_CP, am.SOC21_IH_CLIENTID_GFX]}
+    else: self.ih_scrs_names |= {k: gfx_srcs for k in [am.SOC15_IH_CLIENTID_GRBM_CP] + [getattr(am, f'SOC15_IH_CLIENTID_SE{i}SH') for i in range(4)]}
+
+    if self.adev.ip_ver[am.SDMA0_HWIP][0] in {4, 5}:
+      self.ih_scrs_names |= {k: sdma_srcs for k in [getattr(am, f'SOC15_IH_CLIENTID_SDMA{i}') for i in range(8)]}
 
   def init_hw(self):
     if self.adev.ip_ver[am.NBIO_HWIP] in {(7,9,0), (7,9,1)}:
@@ -331,7 +340,7 @@ class AM_GFX(AM_IP):
       self.adev.gmc.flush_hdp()
       self._grbm_select(inst=xcc)
 
-      self.adev.reg(f"regCP_ME1_PIPE{pipe}_INT_CNTL").update(time_stamp_int_enable=1, generic0_int_enable=1, inst=xcc)
+      self.adev.reg(f"regCP_ME1_PIPE{pipe}_INT_CNTL").update(time_stamp_int_enable=0, generic0_int_enable=0, inst=xcc)
     return restore_ptr // 16, doorbell
 
   def set_clockgating_state(self):
@@ -381,6 +390,7 @@ class AM_IH(AM_IP):
     self.ring_size = 128 << 10
     def _alloc_ring(size): return (self.adev.mm.palloc(size, zero=False, boot=True), self.adev.mm.palloc(0x1000, zero=True, boot=True))
     self.rings = [(*_alloc_ring(self.ring_size), "", 0), (*_alloc_ring(self.ring_size), "_RING1", 1)]
+    self.ring_view = self.adev.vram.view(offset=self.rings[0][0], size=self.ring_size, fmt='I')
 
   def init_hw(self):
     for ring_vm, rwptr_vm, suf, ring_id in self.rings:
@@ -409,31 +419,26 @@ class AM_IH(AM_IP):
       self.adev.soc.doorbell_enable(port=1, awid=0x0, awaddr_31_28_value=0x0, offset=am.AMDGPU_NAVI10_DOORBELL_IH*2, size=2)
 
   def interrupt_handler(self):
-    ring_vm, _, suf, _ = self.rings[0]
-    wptr_bits = self.adev.reg(f"regIH_RB_WPTR{suf}").read_bitfields()
-    wptr = wptr_bits['offset']
+    _, _, suf, _ = self.rings[0]
+    wptr = self.adev.reg(f"regIH_RB_WPTR{suf}").read_bitfields()
     rptr = self.adev.regIH_RB_RPTR.read()
 
-    # print(wptr, rptr)
-
-    if wptr_bits['rb_overflow']:
-      self.adev.reg(f"regIH_RB_WPTR{suf}").update(rb_overflow=0)
-      self.adev.reg(f"regIH_RB_CNTL{suf}").update(wptr_overflow_clear=1)
-      self.adev.reg(f"regIH_RB_CNTL{suf}").update(wptr_overflow_clear=0)
-
-    # Read and print events (each entry is 8 dwords = 32 bytes)
-    ih_ring, ring_szd = self.adev.vram.view(offset=ring_vm, size=self.ring_size, fmt='I'), self.ring_size // 4
-    while rptr != wptr:
-      entry = [ih_ring[(rptr + i) % ring_szd] for i in range(8)]
+    while rptr != wptr['offset']:
+      entry = [self.ring_view[(rptr + i) % (self.ring_size // 4)] for i in range(8)]
       client, src, ring_id, vmid, vmid_type, pasid, node = \
         [getattr(am, f'SOC15_{n}_FROM_IH_ENTRY')(entry) for n in ['CLIENT_ID', 'SOURCE_ID', 'RING_ID', 'VMID', 'VMID_TYPE', 'PASID', 'NODEID']]
       ctx = [getattr(am, f'SOC15_CONTEXT_ID{i}_FROM_IH_ENTRY')(entry) for i in range(4)]
 
-      print(f"IH: client={self.adev.soc.ih_clients.get(client)} src={self.adev.soc.ih_srcs.get(src, src)}|{src} ring={ring_id} vmid={vmid}({vmid_type}) "
-            f"pasid={pasid} node={node} ctx=[{ctx[0]:#x}, {ctx[1]:#x}, {ctx[2]:#x}, {ctx[3]:#x}]")
-      rptr = (rptr + 8) % ring_szd
+      print(f"am {self.adev.devfmt}: IH client={self.adev.soc.ih_clients.get(client)} src={self.adev.soc.ih_scrs_names.get(client, {}).get(src, '')}({src}) "
+            f"ring={ring_id} vmid={vmid}({vmid_type}) pasid={pasid} node={node} ctx=[{ctx[0]:#x}, {ctx[1]:#x}, {ctx[2]:#x}, {ctx[3]:#x}]")
+      rptr = (rptr + 8) % (self.ring_size // 4)
 
-    self.adev.regIH_RB_RPTR.write(wptr)
+    if wptr['rb_overflow']:
+      self.adev.reg(f"regIH_RB_WPTR{suf}").update(rb_overflow=0)
+      self.adev.reg(f"regIH_RB_CNTL{suf}").update(wptr_overflow_clear=1)
+      self.adev.reg(f"regIH_RB_CNTL{suf}").update(wptr_overflow_clear=0)
+
+    self.adev.regIH_RB_RPTR.write(wptr['offset'])
 
 class AM_SDMA(AM_IP):
   def init_sw(self): self.sdma_reginst, self.sdma_name = [], "F32" if self.adev.ip_ver[am.SDMA0_HWIP] < (7,0,0) else "MCU"
