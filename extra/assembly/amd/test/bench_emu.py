@@ -99,7 +99,11 @@ def profile_instructions(kernel: bytes):
 
 def benchmark_python_split(kernel: bytes, global_size, local_size, args_ptr, rsrc2: int, iterations: int = 5):
   """Benchmark Python emulator with compile and execution times."""
+  from extra.assembly.amd.emu2 import _get_inst_sink, _get_runner, _canonical_runner_cache
   from tinygrad.helpers import Context
+  _get_inst_sink.cache_clear()
+  _get_runner.cache_clear()
+  _canonical_runner_cache.clear()
   decode_program.cache_clear()
 
   # Measure compile time (decode_program builds sinks, renders, and compiles)
@@ -107,10 +111,11 @@ def benchmark_python_split(kernel: bytes, global_size, local_size, args_ptr, rsr
   with Context(CCACHE=0):
     program = decode_program(kernel)
   compile_time = time.perf_counter() - compile_start
+  n_compiled = len(_canonical_runner_cache)
 
   # Execution time
   exec_time = benchmark_emulator("Python", python_run_asm, kernel, global_size, local_size, args_ptr, rsrc2, iterations)
-  return compile_time, exec_time, len(program)
+  return compile_time, exec_time, len(program), n_compiled
 
 def get_tinygrad_kernel(op_name: str) -> tuple[bytes, tuple, tuple, list[int], dict[int, bytes], int] | None:
   """Get a real tinygrad kernel by operation name. Returns (code, global_size, local_size, buf_sizes, buf_data, rsrc2)."""
@@ -222,34 +227,34 @@ def main():
     buffers, args_arr, args_ptr, ranges = setup_buffers(buf_sizes, buf_data)
 
     # Benchmark Python emulator (must be first to measure compile time before cache is populated)
-    py_compile, py_exec, n_insts = benchmark_python_split(kernel, global_size, local_size, args_ptr, rsrc2, args.iterations)
+    py_compile, py_exec, n_insts, n_compiled = benchmark_python_split(kernel, global_size, local_size, args_ptr, rsrc2, args.iterations)
 
     n_workgroups = global_size[0] * global_size[1] * global_size[2]
     n_threads = local_size[0] * local_size[1] * local_size[2]
     total_work = n_insts * n_workgroups * n_threads
 
-    print(f"{n_insts} insts × {n_workgroups} WGs × {n_threads} threads = {total_work:,} ops")
+    print(f"{n_insts} insts ({n_compiled} unique) × {n_workgroups} WGs × {n_threads} threads = {total_work:,} ops")
     rust_time = benchmark_emulator("Rust", rust_remu.run_asm, kernel, global_size, local_size, args_ptr, rsrc2, args.iterations) if rust_remu else None
 
     if py_compile is not None:
       py_exec_rate = total_work / py_exec / 1e6
-      print(f"  Compile:        {py_compile*1000:8.3f} ms")
+      print(f"  Compile:        {py_compile*1000:8.3f} ms  ({n_compiled} unique)")
       print(f"  Exec:           {py_exec*1000:8.3f} ms  ({py_exec_rate:7.2f} M ops/s)")
     if rust_time:
       rust_rate = total_work / rust_time / 1e6
       speedup = py_exec / rust_time if py_exec else 0
       print(f"  Rust:           {rust_time*1000:8.3f} ms  ({rust_rate:7.2f} M ops/s)  [{speedup:.1f}x faster]")
 
-    results.append((op_name, n_insts, n_workgroups, py_compile, py_exec, rust_time))
+    results.append((op_name, n_insts, n_compiled, n_workgroups, py_compile, py_exec, rust_time))
 
   # Summary table
-  print("\n" + "=" * 100)
+  print("\n" + "=" * 110)
   print("SUMMARY")
-  print("=" * 100)
-  print(f"{'Name':<16} {'Insts':<6} {'WGs':<5} {'Compile (ms)':<14} {'Exec (ms)':<12} {'Rust (ms)':<12} {'Speedup':<10}")
-  print("-" * 100)
+  print("=" * 110)
+  print(f"{'Name':<16} {'Insts':<6} {'Unique':<6} {'WGs':<5} {'Compile (ms)':<14} {'Exec (ms)':<12} {'Rust (ms)':<12} {'Speedup':<10}")
+  print("-" * 110)
 
-  for name, n_insts, n_wgs, py_compile, py_exec, rust_time in results:
+  for name, n_insts, n_compiled, n_wgs, py_compile, py_exec, rust_time in results:
     compile_ms = f"{py_compile*1000:.3f}" if py_compile else "error"
     exec_ms = f"{py_exec*1000:.3f}" if py_exec else "error"
     if rust_time:
@@ -257,7 +262,7 @@ def main():
       speedup = f"{py_exec/rust_time:.1f}x" if py_exec else "N/A"
     else:
       rust_ms, speedup = "N/A", "N/A"
-    print(f"{name:<16} {n_insts:<6} {n_wgs:<5} {compile_ms:<14} {exec_ms:<12} {rust_ms:<12} {speedup:<10}")
+    print(f"{name:<16} {n_insts:<6} {n_compiled:<6} {n_wgs:<5} {compile_ms:<14} {exec_ms:<12} {rust_ms:<12} {speedup:<10}")
 
 if __name__ == "__main__":
   main()
