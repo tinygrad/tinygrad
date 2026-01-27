@@ -1,6 +1,10 @@
 # Tokenizer-based expression parser for AMD pcode
+from typing import Any, Callable
 from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import Ops, UOp
+
+# Type alias for vars dict: stores UOps for variables and tuples for lambda definitions
+VarVal = UOp | tuple[str, list[str], str]
 
 DTYPES = {'u32': dtypes.uint32, 'i32': dtypes.int, 'f32': dtypes.float32, 'b32': dtypes.uint32, 'u64': dtypes.uint64, 'i64': dtypes.int64,
           'f64': dtypes.float64, 'b64': dtypes.uint64, 'u16': dtypes.uint16, 'i16': dtypes.short, 'f16': dtypes.half, 'b16': dtypes.uint16,
@@ -273,11 +277,11 @@ class Parser:
       if self.at('LBRACKET') and name not in self.vars:
         self.eat('LBRACKET')
         if self.at('NUM'):
-          idx = int(self.peek().val)
-          if f'{name}{idx}' in self.vars:
+          idx_num = int(self.peek().val)
+          if f'{name}{idx_num}' in self.vars:
             self.eat('NUM')
             self.eat('RBRACKET')
-            elem = self.vars[f'{name}{idx}']
+            elem = self.vars[f'{name}{idx_num}']
             if self.try_eat('DOT'):
               dt_name = self.eat('IDENT').val
               return _cast_to(elem, DTYPES.get(dt_name, dtypes.uint32))
@@ -438,9 +442,9 @@ class Parser:
         val = int(num, 16)
         if neg: val = -val
       elif '.' in num:
-        val = float(num)
-        if neg: val = -val
-        return _const({16: dtypes.half, 32: dtypes.float32, 64: dtypes.float64}.get(bits, dtypes.float32), val)
+        fval = float(num)
+        if neg: fval = -fval
+        return _const({16: dtypes.half, 32: dtypes.float32, 64: dtypes.float64}.get(bits, dtypes.float32), fval)
       else:
         val = int(num)
         if neg: val = -val
@@ -549,7 +553,8 @@ def _subst_loop_var(line: str, loop_var: str, val: int) -> str:
   Converts var[loop_var] to var{val} for array element access (like the old regex parser)."""
   toks = tokenize(line)
   # First pass: convert var[loop_var] to var{loop_var} to mark for array element assignment
-  result_toks, j = [], 0
+  result_toks: list[Token] = []
+  j = 0
   while j < len(toks):
     t = toks[j]
     # Check for pattern: IDENT[loop_var] where it's not preceded by a dot (not .type[...])
@@ -568,12 +573,12 @@ def _subst_loop_var(line: str, loop_var: str, val: int) -> str:
   subst_parts = [str(val) if t.type == 'IDENT' and t.val == loop_var else t.val for t in result_toks if t.type != 'EOF']
   return ' '.join(subst_parts)
 
-def parse_block(lines: list[str], start: int, vars: dict[str, UOp], funcs: dict | None = None,
-                assigns: list | None = None) -> tuple[int, dict[str, UOp], UOp | None]:
+def parse_block(lines: list[str], start: int, vars: dict[str, VarVal], funcs: dict | None = None,
+                assigns: list | None = None) -> tuple[int, dict[str, VarVal], UOp | None]:
   """Parse a block of pcode. Returns (next_line, block_assigns, return_value).
   If assigns list is provided, side effects (MEM/VGPR writes) are appended to it."""
   if funcs is None: funcs = _FUNCS
-  block_assigns: dict[str, UOp] = {}
+  block_assigns: dict[str, VarVal] = {}
   i = start
   def ctx(): return {**vars, **block_assigns}
 
@@ -628,12 +633,15 @@ def parse_block(lines: list[str], start: int, vars: dict[str, UOp], funcs: dict 
         subst_lines = [_subst_loop_var(bl, loop_var, loop_i) for bl in body_lines if not (has_break and bl.strip().lower() == 'break')]
         _, iter_assigns, _ = parse_block(subst_lines, 0, {**vars, **block_assigns}, funcs, assigns)
         if has_break:
+          assert found_var is not None
           found = block_assigns.get(found_var, vars.get(found_var))
+          assert isinstance(found, UOp)
           not_found = found.eq(_const(dtypes.bool, False))
           for var, val in iter_assigns.items():
-            if var != found_var:
+            if var != found_var and isinstance(val, UOp):
               old = block_assigns.get(var, vars.get(var, _u32(0)))
-              block_assigns[var] = vars[var] = not_found.where(val, old.cast(val.dtype) if val.dtype != old.dtype and val.dtype.itemsize == old.dtype.itemsize else old)
+              if isinstance(old, UOp):
+                block_assigns[var] = vars[var] = not_found.where(val, old.cast(val.dtype) if val.dtype != old.dtype and val.dtype.itemsize == old.dtype.itemsize else old)
           for j, bl in enumerate(body_lines):
             bl_l = bl.strip().lower()
             if bl_l.startswith('if ') and bl_l.endswith(' then'):
@@ -700,7 +708,7 @@ def parse_block(lines: list[str], start: int, vars: dict[str, UOp], funcs: dict 
       rhs = parse_expr(_tok_str(toks[j:]), ctx(), funcs)
       if compound_op:
         mem = vars.get('_vmem') if '_vmem' in vars else vars.get('_lds')
-        if mem is not None:
+        if isinstance(mem, UOp):
           adt = dtypes.uint64 if addr.dtype == dtypes.uint64 else dtypes.uint32
           idx = (addr >> _const(adt, 2)).cast(dtypes.int)
           old = mem.index(idx)
@@ -854,7 +862,9 @@ def parse_block(lines: list[str], start: int, vars: dict[str, UOp], funcs: dict 
           return _to_bool(parse_expr(s[ll.find(kw) + len(kw):ll.rfind('then')].strip(), ctx(), funcs))
         def not_static_false(c): return c.op != Ops.CONST or c.arg is not False
         cond = parse_cond(line, 'if')
-        conditions, else_branch, vars_snap = ([(cond, None)] if not_static_false(cond) else []), (None, {}), dict(vars)
+        conditions: list[tuple[UOp, UOp | dict[str, VarVal] | None]] = [(cond, None)] if not_static_false(cond) else []
+        else_branch: tuple[UOp | None, dict[str, VarVal]] = (None, {})
+        vars_snap = dict(vars)
         i += 1
         i, branch, ret = parse_block(lines, i, vars, funcs, assigns)
         if conditions: conditions[0] = (cond, ret if ret is not None else branch)
@@ -878,20 +888,21 @@ def parse_block(lines: list[str], start: int, vars: dict[str, UOp], funcs: dict 
         if any(isinstance(br, UOp) for _, br in conditions):
           result = else_branch[0]
           for c, rv in reversed(conditions):
-            if rv is not None:
+            if isinstance(rv, UOp) and isinstance(result, UOp):
               if rv.dtype != result.dtype and rv.dtype.itemsize == result.dtype.itemsize: result = result.cast(rv.dtype)
               result = c.where(rv, result)
           return i, block_assigns, result
         # Main style: merge variable assignments with WHERE
         else_assigns = else_branch[1]
-        all_vars = set().union(*[ba.keys() for _, ba in conditions], else_assigns.keys())
+        all_vars = set().union(*[ba.keys() for _, ba in conditions if isinstance(ba, dict)], else_assigns.keys())
         for var in all_vars:
-          result = else_assigns.get(var, block_assigns.get(var, vars.get(var, _u32(0))))
+          res: Any = else_assigns.get(var, block_assigns.get(var, vars.get(var, _u32(0))))
           for cond, ba in reversed(conditions):
-            if var in ba:
+            if isinstance(ba, dict) and var in ba:
               tv = ba[var]
-              result = cond.where(tv, result.cast(tv.dtype) if tv.dtype != result.dtype and tv.dtype.itemsize == result.dtype.itemsize else result)
-          block_assigns[var] = vars[var] = result
+              if isinstance(tv, UOp) and isinstance(res, UOp):
+                res = cond.where(tv, res.cast(tv.dtype) if tv.dtype != res.dtype and tv.dtype.itemsize == res.dtype.itemsize else res)
+          block_assigns[var] = vars[var] = res
         continue
 
       # Regular assignment: var = value
@@ -907,13 +918,13 @@ def parse_block(lines: list[str], start: int, vars: dict[str, UOp], funcs: dict 
     continue
   return i, block_assigns, None
 
-def _parse_lambda_body(body: str, vars: dict[str, UOp], funcs: dict) -> UOp:
+def _parse_lambda_body(body: str, vars: dict[str, VarVal], funcs: dict) -> UOp:
   lines = [l.strip() for l in body.replace(';', '\n').split('\n') if l.strip() and not l.strip().startswith('//')]
   _, _, result = parse_block(lines, 0, vars, funcs)
   return result if result is not None else _u32(0)
 
 # Built-in function registry
-_FUNCS: dict[str, callable] = {}
+_FUNCS: dict[str, Callable[..., UOp]] = {}
 
 def _register_funcs():
   def _find_two_pi_mul(x):
