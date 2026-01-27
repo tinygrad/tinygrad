@@ -3375,7 +3375,7 @@ class Tensor(OpMixin):
     # NOTE: torch always return in float, we return based on the broadcasting rule.
     other = self._broadcasted(other)[1]
     # TODO: remove other*0?
-    return (other < 0).where(-self.abs(), self.abs()) + other*0
+    return ((other < 0) | (other.reciprocal() < 0)).where(-self.abs(), self.abs()) + other*0
 
   def logaddexp(self, other) -> Tensor:
     """
