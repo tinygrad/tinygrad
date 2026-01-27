@@ -76,7 +76,7 @@ class NVRpcQueue:
   def wait_resp(self, cmd:int, timeout:int=10000) -> memoryview:
     start_time = int(time.perf_counter() * 1000)
     while (int(time.perf_counter() * 1000) - start_time) < timeout:
-      if (msg := next((message for func, message in self.read_resp() if func == cmd), None)) is not None: return msg
+      if (msg:=next((message for func, message in self.read_resp() if func == cmd), None)) is not None: return msg
     raise RuntimeError(f"Timeout waiting for RPC response for command {cmd}")
 
 class NV_FLCN(NV_IP):
