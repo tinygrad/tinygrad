@@ -15,6 +15,7 @@ FLOPS_PER_MATMUL = 16*16*16*2
 INTERNAL_LOOP = 1_000_00
 INSTRUCTIONS_PER_LOOP = 200
 DIRECTIVE = ".amdhsa_wavefront_size32 1"
+KD_OPTS:dict = {}  # arch-specific kernel descriptor options
 
 assemblyTemplate = (pathlib.Path(__file__).parent / "template.s").read_text()
 
@@ -54,7 +55,7 @@ def launchBenchmark(instruction, vgprIndices, dense=True, accum=False, **kwargs)
   src = assemblyTemplate.replace("INSTRUCTION", inst_hex).replace("VGPR_COUNT", str(len(vgprs))).replace("DIRECTIVE", DIRECTIVE)
   lib = COMPILER.compile(src)
   # new elf packer
-  lib2 = pack_hsaco(inst_bytes, {"next_free_vgpr":len(vgprs)})
+  lib2 = pack_hsaco(inst_bytes, {"next_free_vgpr":len(vgprs), **KD_OPTS})
   verify_elf_match(lib, lib2, inst.op_name.lower())
   fxn = DEV.runtime("matmul", lib)
   elapsed = min([fxn(global_size=(NUM_WORKGROUPS,1,1), local_size=(WAVE_SIZE*NUM_WAVES,1,1), wait=True) for _ in range(2)])
@@ -69,6 +70,7 @@ if __name__=="__main__":
   COMPILER = HIPCompiler(arch)
   if arch in {'gfx1100', 'gfx1103', 'gfx1151'}:
     from extra.assembly.amd.autogen.rdna3.ins import *
+    KD_OPTS = {'wavefront_size32': 1, 'workgroup_processor_mode': 1, 'memory_ordered': 1}
     if arch == 'gfx1103': NUM_WORKGROUPS = 8
     if arch == 'gfx1151': NUM_WORKGROUPS = 32
     launchBenchmark(v_wmma_bf16_16x16x16_bf16, (7,8,15))
@@ -81,6 +83,7 @@ if __name__=="__main__":
     from extra.assembly.amd.autogen.rdna4.ins import *
     # this instruction does not exist in the rdna4 isa, use the co version
     s_sub_u32 = s_sub_co_u32
+    KD_OPTS = {'wavefront_size32': 1, 'workgroup_processor_mode': 1, 'memory_ordered': 1}
     NUM_WORKGROUPS = 64
     launchBenchmark(v_wmma_bf16_16x16x16_bf16, (3,4,7))
     launchBenchmark(v_wmma_f16_16x16x16_f16, (3,4,7))
@@ -109,6 +112,7 @@ if __name__=="__main__":
   elif arch == 'gfx950':
     from extra.assembly.amd.autogen.cdna.ins import *
     DIRECTIVE = ".amdhsa_accum_offset 4"
+    KD_OPTS = {'sgpr_granule': 1, 'wavefront_size32': 0}  # CDNA: wave64, no WGP/MEM_ORDERED
     NUM_WORKGROUPS = 256
     WAVE_SIZE = 64
     NUM_WAVES = 4

@@ -23,8 +23,10 @@ def pack_hsaco(prg:bytes, kd:dict) -> bytes:
   desc.kernel_code_entry_byte_offset = text_vaddr - rodata_offset
   # rsrc1
   vgpr_granule = max(0, (kd['next_free_vgpr'] + 7) // 8 - 1)
-  reserved1 = (kd.get('workgroup_processor_mode', 1) << 3) | (kd.get('memory_ordered', 1) << 4)
+  sgpr_granule = kd.get('sgpr_granule', 0)  # GFX9: 2*max(0,ceil(sgprs/16)-1), GFX10+: reserved=0
+  reserved1 = (kd.get('workgroup_processor_mode', 0) << 3) | (kd.get('memory_ordered', 0) << 4)  # GFX10+ only
   desc.compute_pgm_rsrc1 = (vgpr_granule << hsa.AMD_COMPUTE_PGM_RSRC_ONE_GRANULATED_WORKITEM_VGPR_COUNT_SHIFT |
+                            sgpr_granule << hsa.AMD_COMPUTE_PGM_RSRC_ONE_GRANULATED_WAVEFRONT_SGPR_COUNT_SHIFT |
                             3 << hsa.AMD_COMPUTE_PGM_RSRC_ONE_FLOAT_DENORM_MODE_16_64_SHIFT |
                             kd.get('enable_dx10_clamp', 1) << hsa.AMD_COMPUTE_PGM_RSRC_ONE_ENABLE_DX10_CLAMP_SHIFT |
                             kd.get('enable_ieee_mode', 1) << hsa.AMD_COMPUTE_PGM_RSRC_ONE_ENABLE_IEEE_MODE_SHIFT |
@@ -40,13 +42,13 @@ def pack_hsaco(prg:bytes, kd:dict) -> bytes:
   # code properties, different for every arch
   desc.kernel_code_properties = (kd.get('user_sgpr_kernarg_segment_ptr', 0) << hsa.AMD_KERNEL_CODE_PROPERTIES_ENABLE_SGPR_KERNARG_SEGMENT_PTR_SHIFT |
                                  kd.get('uses_dynamic_stack', 0) << hsa.AMD_KERNEL_CODE_PROPERTIES_IS_DYNAMIC_CALLSTACK_SHIFT |
-                                 kd.get('wavefront_size32', 1) << hsa.AMD_KERNEL_CODE_PROPERTIES_ENABLE_WAVEFRONT_SIZE32_SHIFT)
+                                 kd.get('wavefront_size32', 0) << hsa.AMD_KERNEL_CODE_PROPERTIES_ENABLE_WAVEFRONT_SIZE32_SHIFT)
   rodata = bytes(desc)
 
   # ** pack elf sections
   sh_names:list[int] = []
   strtab = bytearray(b"\x00")
-  for name in [".rodata", ".text", ".strtab"]:
+  for name in [".rodata", ".text", ".shstrtab"]:
     sh_names.append(len(strtab))
     strtab += name.encode("ascii") + b"\x00"
 
