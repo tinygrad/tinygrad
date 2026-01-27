@@ -2,7 +2,7 @@ from typing import Callable
 import math, functools
 from tinygrad.dtype import dtypes, DType, promo_lattice
 from tinygrad.device import is_dtype_supported
-from tinygrad.helpers import polyN, DISABLE_FAST_IDIV
+from tinygrad.helpers import polyN
 from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher
 
 TRANSCENDENTAL_DTYPES = (dtypes.float16, dtypes.float32, dtypes.float64)
@@ -318,7 +318,7 @@ def threefry2x32(x: UOp, key: UOp):
 
 powers_of_two = {2**i:i for i in range(64)}
 @functools.cache
-def get_late_rewrite_patterns(ops:tuple[Ops, ...], force_transcendental):
+def get_late_rewrite_patterns(ops:tuple[Ops, ...], force_transcendental, disable_fast_idiv):
   pat: list[tuple[UPat, Callable]] = []
   for op,f in ((Ops.EXP2, xexp2), (Ops.LOG2, xlog2), (Ops.SIN, xsin)):
     if op not in ops or force_transcendental:
@@ -342,7 +342,7 @@ def get_late_rewrite_patterns(ops:tuple[Ops, ...], force_transcendental):
     pat += [(UPat.var("x", dtypes.uints)//UPat.cvar("c"), lambda x,c: x >> v if (v:=powers_of_two.get(c.arg, 0)) else None)]
     pat += [(UPat.var("x", dtypes.ints)//UPat.cvar("c"), lambda x,c: (x+(l.const_like(l.vmin) if (l:=(x<0)).vmin==l.vmax else l).where(
       c-1, 0)) >> v if (v:=powers_of_two.get(c.arg, 0)) else None)]  # (x+(x<0).where(c-1, 0)) >> v
-    if not DISABLE_FAST_IDIV:
+    if not disable_fast_idiv:
       pat += [(UPat.var("x", dtypes.ints)//UPat.cvar("d", vec=False), lambda ctx, x, d: fast_idiv(ctx, x, d.arg))]
       pat += [(UPat.var("x", dtypes.ints)%UPat.var("d"), lambda x, d: x-d*(x//d))]
   if Ops.NEG in ops:
