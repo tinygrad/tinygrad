@@ -36,7 +36,7 @@ def optimize_local_size(_prg:Callable, global_size:list[int], rawbufs:list[Buffe
 
 class CompiledRunner(Runner):
   def __init__(self, p:ProgramSpec, prg=None):
-    if DEBUG >= 3: print(p.applied_opts)
+    if DEBUG >= 3 and p.applied_opts: print(p.applied_opts)
     if DEBUG >= 4: print(p.src)
     if p.lib is None:
       with cpu_profile(TracingKey(f"compile {p.name}", (p.function_name,)), "TINY"):

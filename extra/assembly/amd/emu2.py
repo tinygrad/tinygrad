@@ -7,6 +7,7 @@
 #   arg=4: scratch - per-lane scratch memory
 from __future__ import annotations
 import ctypes, functools, re, platform, subprocess, tempfile
+from typing import Any, Callable
 
 # Set/restore DAZ+FTZ (denormals-are-zero + flush-to-zero) in MXCSR to match RDNA3 default float mode
 # Only applied during emulator execution, restored afterward to avoid breaking hypothesis tests
@@ -168,9 +169,9 @@ def _apply_pseudocode_fixes(op_name: str, pcode: str) -> str:
     pcode = pcode.replace('VCC = 0x0LL', 'VCC.u64[laneId] = 0').replace('VCC = 0x1LL', 'VCC.u64[laneId] = 1')
   return pcode
 
-def parse_pcode(pcode: str, srcs: dict[str, UOp] | None = None, lane: UOp | None = None, op_name: str | None = None) -> tuple[dict[str, UOp], list[tuple[str, UOp]]]:
+def parse_pcode(pcode: str, srcs: dict[str, UOp] | None = None, lane: UOp | None = None, op_name: str | None = None) -> tuple[dict, list[tuple[str, UOp]]]:
   if op_name: pcode = _apply_pseudocode_fixes(op_name, pcode)
-  vars: dict[str, UOp] = {n: UOp(Ops.DEFINE_VAR, dtypes.uint32, (), (n, _c(0), _c(MASK32))) for n in ['S0', 'S1', 'S2', 'D0', 'VCC', 'EXEC', 'SCC', 'SIMM32']}
+  vars: dict = {n: UOp(Ops.DEFINE_VAR, dtypes.uint32, (), (n, _c(0), _c(MASK32))) for n in ['S0', 'S1', 'S2', 'D0', 'VCC', 'EXEC', 'SCC', 'SIMM32']}
   if srcs: vars.update(srcs)
   vars.update({'laneId': lane if lane is not None else _c(0), 'WAVE_MODE': {'IEEE': _c(1)}, 'WAVE32': _c(True, dtypes.bool), 'WAVE64': _c(False, dtypes.bool)})
   assigns: list[tuple[str, UOp]] = []
@@ -225,7 +226,7 @@ def _mem_store_bytes(mem: UOp, addr: UOp, val: UOp, active: UOp, data_bits: int 
     stores.append(mem.index((addr + UOp.const(dtypes.uint64, i)).cast(dtypes.int), active).store(byte_val.cast(dtypes.uint8)))
   return stores
 
-def _collect_data_slices(assigns: list[tuple[str, UOp]], data_prefix: str, pcode_vars: dict = None, op_name: str = "") -> dict[int, UOp]:
+def _collect_data_slices(assigns: list[tuple[str, UOp]], data_prefix: str, pcode_vars: dict | None = None, op_name: str = "") -> dict[int, UOp]:
   """Collect bit slices from assigns into {dword_idx: value} dict."""
   slices = {}
   for dest, val in assigns:
@@ -427,7 +428,8 @@ class _Ctx:
     srcs['EXEC'], srcs['SCC'] = exec_mask, self.rsgpr_dyn(_c(SCC_IDX))
     _, assigns = parse_pcode(pcode, srcs, lane, op_name=op.name)
 
-    raw_stores, vcc_val, exec_val = [], None, None
+    raw_stores: list = []
+    vcc_val, exec_val = None, None
     for dest, val in assigns:
       if 'D0' in dest and '[laneId]' in dest:
         raw_stores.append(('vcc', self.wsgpr_dyn(_c(VCC_LO.offset), _set_lane_bit(self.rsgpr_dyn(_c(VCC_LO.offset)), lane, val, exec_mask))))
@@ -615,6 +617,7 @@ def _compile_vop12(inst: VOP1 | VOP1_SDST | VOP2, ctx: _Ctx) -> UOp:
       s0 = src0_hi.where(_hi16(ctx.rvgpr_dyn(src0_reg, lane)), s0)
     srcs = {'S0': s0, 'S1': s1, 'D0': d0}
     if inst.op in (VOP2Op.V_FMAAK_F32_E32, VOP2Op.V_FMAMK_F32_E32, VOP2Op.V_FMAAK_F16_E32, VOP2Op.V_FMAMK_F16_E32):
+      assert literal is not None
       srcs['SIMM32'] = literal
   pcode_result = ctx.compile_vop_pcode(inst.op, srcs, lane, vdst_reg, exec_mask, opsel_dst_hi=write_hi_half, wrap=True)
   assert pcode_result is not None, f"no pcode for {type(inst).__name__}: {inst.op.name}"
@@ -900,7 +903,9 @@ def _compile_vopd(inst: VOPD, ctx: _Ctx) -> UOp:
     assert vop is not None, f"no VOP mapping for VOPD {label}: {op}"
     if label == 'Y': srcs = {'S0': srcy0, 'S1': srcy1, 'D0': ctx.rvgpr_dyn(vdst_reg, lane)}
     else: srcs = {'S0': ctx.rsrc_dyn(src0_off, lane, literal=literal), 'S1': ctx.rvgpr_dyn(vsrc1_reg, lane), 'D0': ctx.rvgpr_dyn(vdst_reg, lane)}
-    if op in (VOPDOp.V_DUAL_FMAAK_F32, VOPDOp.V_DUAL_FMAMK_F32): srcs['SIMM32'] = literal
+    if op in (VOPDOp.V_DUAL_FMAAK_F32, VOPDOp.V_DUAL_FMAMK_F32):
+      assert literal is not None
+      srcs['SIMM32'] = literal
     if op == VOPDOp.V_DUAL_CNDMASK_B32: srcs['VCC'] = ctx.rsgpr_dyn(_c(VCC_LO.offset))
     pcode = PCODE.get(vop)
     assert pcode is not None, f"no pcode for VOPD {label}: {vop}"
@@ -934,7 +939,7 @@ def _compile_mem_op(inst: DS | FLAT | GLOBAL | SCRATCH, ctx: _Ctx) -> UOp:
     vdata_reg = ctx.inst_field(type(inst).data)
     vdst_reg = ctx.inst_field(type(inst).vdst)
     offset = ctx.inst_field_signed(type(inst).offset)
-    offset0, offset1 = 0, 0
+    offset0, offset1 = _c(0), _c(0)
     # Dynamic saddr - read field, NULL (124) or >= 128 means no saddr
     saddr_reg = ctx.inst_field(type(inst).saddr) if hasattr(inst, 'saddr') else None
 
@@ -1012,10 +1017,10 @@ def _compile_mem_op(inst: DS | FLAT | GLOBAL | SCRATCH, ctx: _Ctx) -> UOp:
     dummy_lane = ctx.range()
     _, assigns = parse_pcode(pcode, make_srcs(dummy_lane), lane=dummy_lane, op_name=op_name)
     mem_assigns = [d for d, _ in assigns if d.startswith('MEM[')]
-    mem_addrs = set(re.match(r'MEM\[([^\]]+)\]', d).group(1) if re.match(r'MEM\[([^\]]+)\]', d) else d for d in mem_assigns)
+    mem_addrs = set(m.group(1) if (m := re.match(r'MEM\[([^\]]+)\]', d)) else d for d in mem_assigns)
     use_separate_ranges = (len(mem_addrs) > 1 or '2ADDR' in op_name) and 'STOREXCHG' not in op_name
     if use_separate_ranges:
-      ended = []
+      ended: list[UOp] = []
       for i, (dest, _) in enumerate(assigns):
         lane = ctx.range()
         active = _lane_active(exec_mask, lane)
@@ -1024,7 +1029,7 @@ def _compile_mem_op(inst: DS | FLAT | GLOBAL | SCRATCH, ctx: _Ctx) -> UOp:
       return UOp.sink(*ended, *ctx.inc_pc()) if ended else UOp.sink(*ctx.inc_pc())
 
   # Standard path: single lane range
-  writes_return_data = '_RTN' in op_name or (is_lds and op_name.startswith('DS_LOAD')) or (is_atomic and glc)
+  writes_return_data = '_RTN' in op_name or (is_lds and op_name.startswith('DS_LOAD')) or bool(is_atomic and glc)
   lane = ctx.range()
   active = _lane_active(exec_mask, lane)
   pcode_vars, assigns = parse_pcode(pcode, make_srcs(lane), lane=lane, op_name=op_name)
@@ -1039,7 +1044,7 @@ def _compile_mem_op(inst: DS | FLAT | GLOBAL | SCRATCH, ctx: _Ctx) -> UOp:
   return UOp.sink(*ctx.inc_pc())
 
 # Dispatch table: instruction type -> handler function
-_INST_HANDLERS: dict[type, callable] = {
+_INST_HANDLERS: dict[type, Callable[..., UOp]] = {
   SOPP: _compile_sopp, SMEM: _compile_smem, SOP1: _compile_sop, SOP2: _compile_sop, SOPC: _compile_sop, SOPK: _compile_sop,
   VOP1: _compile_vop12, VOP1_SDST: _compile_vop12, VOP2: _compile_vop12, VOPC: _compile_vopc, VOP3: _compile_vop3, VOP3_SDST: _compile_vop3,
   VOP3SD: _compile_vop3sd, VOP3P: _compile_vop3p, VOPD: _compile_vopd,
@@ -1066,9 +1071,9 @@ def _get_runner(inst_bytes: bytes):
   # Look up handler by type, falling back to base classes for _LIT variants
   handler = _INST_HANDLERS.get(type(inst))
   if handler is None:
-    for base in type(inst).__mro__:
-      if base in _INST_HANDLERS:
-        handler = _INST_HANDLERS[base]
+    for cls in type(inst).__mro__:
+      if cls in _INST_HANDLERS:
+        handler = _INST_HANDLERS[cls]
         break
   if handler is None: raise RuntimeError(f"[emu2] unimplemented instruction type: {type(inst).__name__} {_op_name(inst)}")
 
@@ -1084,9 +1089,9 @@ def _get_runner(inst_bytes: bytes):
   return runner, True
 
 @functools.cache
-def decode_program(data: bytes) -> dict[int, tuple[str, object, list[int], object]]:
+def decode_program(data: bytes) -> dict[int, tuple[str, Callable, list[int], Any]]:
   """Decode program to {pc: (name, fxn, globals, runner)}."""
-  result: dict[int, tuple[str, object, list[int], object]] = {}
+  result: dict[int, tuple[str, Callable, list[int], Any]] = {}
   i = 0
   while i < len(data):
     inst = decode_inst(data[i:])
