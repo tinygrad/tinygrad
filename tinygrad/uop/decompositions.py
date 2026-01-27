@@ -2,7 +2,7 @@ from typing import Callable
 import math, functools
 from tinygrad.dtype import dtypes, DType, promo_lattice
 from tinygrad.device import is_dtype_supported
-from tinygrad.helpers import polyN, DISABLE_FAST_IDIV
+from tinygrad.helpers import cv_cache, polyN, DISABLE_FAST_IDIV
 from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher
 
 TRANSCENDENTAL_DTYPES = (dtypes.float16, dtypes.float32, dtypes.float64)
@@ -317,7 +317,7 @@ def threefry2x32(x: UOp, key: UOp):
 # ***** decomposition patterns *****
 
 powers_of_two = {2**i:i for i in range(64)}
-@functools.cache
+@cv_cache
 def get_late_rewrite_patterns(ops:tuple[Ops, ...], force_transcendental):
   pat: list[tuple[UPat, Callable]] = []
   for op,f in ((Ops.EXP2, xexp2), (Ops.LOG2, xlog2), (Ops.SIN, xsin)):

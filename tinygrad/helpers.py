@@ -166,6 +166,12 @@ class ContextVar(Generic[T]):
   def __gt__(self, x): return self.value > x
   def __lt__(self, x): return self.value < x
 
+# ContextVar-aware functools.cache
+def cv_cache(f):
+  cvs = [ContextVar._cache[nm] for nm in inspect.unwrap(f).__code__.co_names if nm in ContextVar._cache]
+  _f = functools.cache(lambda *args, cv_state, **kwargs: f(*args, **kwargs))
+  return functools.wraps(f)(lambda *args, **kwargs: _f(*args, cv_state=tuple(cv.value for cv in cvs), **kwargs))
+
 DEBUG, IMAGE, BEAM, NOOPT = ContextVar("DEBUG", 0), ContextVar("IMAGE", 0), ContextVar("BEAM", 0), ContextVar("NOOPT", 0)
 JIT, JIT_BATCH_SIZE = ContextVar("JIT", 2 if OSX and ARCH_X86 else 1), ContextVar("JIT_BATCH_SIZE", 32)
 WINO, CAPTURING, TRACEMETA = ContextVar("WINO", 0), ContextVar("CAPTURING", 1), ContextVar("TRACEMETA", 1)
