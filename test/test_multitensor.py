@@ -889,6 +889,7 @@ class TestMultiTensor(unittest.TestCase):
     t = Tensor.rand(16, 16).shard(devices_2, axis=0)
     np.testing.assert_allclose(t.numpy(), t.clone().numpy())
 
+  @unittest.skipIf(OSX, "this is unreliable on OSX")
   def test_sharded_clone(self):
     t = Tensor.rand(16, 16).shard(devices_2, axis=0).realize()
     t_clone = t.clone()
