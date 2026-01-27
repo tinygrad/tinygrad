@@ -3,7 +3,7 @@
     .p2align 8
     .type matmul,@function
 matmul:
-INSTRUCTION
+    INSTRUCTION
 
 .rodata
 .p2align 6
