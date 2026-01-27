@@ -406,6 +406,7 @@ def fetch(url:str, name:pathlib.Path|str|None=None, subdir:str|None=None, gunzip
       except Exception as e:
         if retry+1 == retries: raise e
         if DEBUG >= 2: print(f'Request {retry+1} failed: {e}. Retrying...')
+        time.sleep(0.1 * 2**retry) # exponential backoff
   return fp
 
 # *** Exec helpers
