@@ -4,7 +4,7 @@ from collections import deque
 from tinygrad.uop.ops import UOp, Ops, buffers, UOpMetaClass, track_rewrites, PatternMatcher, UPat, graph_rewrite, graph_rewrite_map
 from tinygrad.uop.spec import type_verify, tensor_spec
 from tinygrad.device import Buffer, MultiBuffer
-from tinygrad.helpers import DEBUG, cpu_profile, TracingKey, SPEC, flatten, pluralize
+from tinygrad.helpers import DEBUG, cpu_profile, TracingKey, SPEC, flatten, pluralize, SCACHE
 from tinygrad.engine.realize import ExecItem
 
 # **** schedule linearizer
@@ -144,7 +144,7 @@ def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[dict[UOp, UOp], li
   big_sink_cache = graph_rewrite(big_sink, pm_pre_sched_cache, ctx=(input_buffers, var_vals), name="rewrite for sched cache")
   sched_cache_key = big_sink_cache.key
 
-  if (sc_ret:=schedule_cache.get(sched_cache_key, None)) is None:
+  if not SCACHE or (sc_ret:=schedule_cache.get(sched_cache_key, None)) is None:
     # verify Tensors match the spec (on big_sink, we only need to do this if cache misses)
     if SPEC: type_verify(big_sink, tensor_spec)
 
@@ -168,7 +168,7 @@ def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[dict[UOp, UOp], li
     after_map = [(u, u.buf_uop) for u in big_sink.toposort() if u.op is Ops.AFTER]
     tensor_map_sink = UOp.sink(*flatten([(k,v) for k,v in tensor_map.items()]), *flatten(after_map))
     combined_sink = UOp.sink(tensor_map_sink, buf_uops_sink)
-    schedule_cache[sched_cache_key] = (pre_schedule, combined_sink)
+    if SCACHE: schedule_cache[sched_cache_key] = (pre_schedule, combined_sink)
   else:
     # schedule cache hit
     del big_sink_cache
