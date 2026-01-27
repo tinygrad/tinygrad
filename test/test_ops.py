@@ -951,6 +951,10 @@ class TestOps(unittest.TestCase):
     for i in [-1.,0.,1.]:
       for j in [-1., 0., 1.]:
         helper_test_op(None, torch.copysign, Tensor.copysign, vals=[[i], [j]])
+  # TODO: fix copysign to distinguish between -0.0 and 0.0
+  @unittest.expectedFailure
+  def test_copysign_signed_zero(self):
+    helper_test_op(None, torch.copysign, Tensor.copysign, vals=[[1.0, 1.0], [-0.0, 0.0]])
 
   def test_logaddexp(self):
     helper_test_op([(45,65), (45,65)], torch.logaddexp, Tensor.logaddexp)
