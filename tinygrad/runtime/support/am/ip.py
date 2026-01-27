@@ -174,6 +174,7 @@ class AM_GMC(AM_IP):
     va = (self.adev.reg('regGCVM_L2_PROTECTION_FAULT_ADDR_HI32').read()<<32) | self.adev.reg('regGCVM_L2_PROTECTION_FAULT_ADDR_LO32').read()
     if self.adev.reg(self.pf_status_reg("GC")).read():
       return f"GCVM_L2_PROTECTION_FAULT_STATUS: {self.adev.reg(self.pf_status_reg('GC')).read_bitfields()} {va<<12:#x}"
+    return None
 
 class AM_SMU(AM_IP):
   def init_sw(self):
