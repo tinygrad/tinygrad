@@ -237,6 +237,32 @@ class TestF16Ops(unittest.TestCase):
     # 2.0 * 3.0 + 1.0 = 7.0, f16 7.0 = 0x4700
     self.assertEqual(result, 0x4700, f"Expected 0x4700 (f16 7.0), got 0x{result:04x}")
 
+  def test_v_max_f16_basic(self):
+    """V_MAX_F16 returns the maximum of two f16 values."""
+    instructions = [
+      s_mov_b32(s[0], 0x3c00),  # f16 1.0
+      s_mov_b32(s[1], 0x4000),  # f16 2.0
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[1]),
+      v_max_f16_e32(v[2], v[0], v[1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = st.vgpr[0][2] & 0xffff
+    self.assertEqual(result, 0x4000, f"Expected 0x4000 (f16 2.0), got 0x{result:04x}")
+
+  def test_v_min_f16_basic(self):
+    """V_MIN_F16 returns the minimum of two f16 values."""
+    instructions = [
+      s_mov_b32(s[0], 0x3c00),  # f16 1.0
+      s_mov_b32(s[1], 0x4000),  # f16 2.0
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[1]),
+      v_min_f16_e32(v[2], v[0], v[1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = st.vgpr[0][2] & 0xffff
+    self.assertEqual(result, 0x3c00, f"Expected 0x3c00 (f16 1.0), got 0x{result:04x}")
+
   def test_v_fmaak_f16_basic(self):
     """V_FMAAK_F16: d = a * b + K."""
     instructions = [
@@ -810,6 +836,81 @@ class TestCarryOps(unittest.TestCase):
     self.assertEqual(st.vgpr[0][2], 0)  # Overflowed to 0
     self.assertEqual(st.vcc, 1)  # Carry out
 
+  def test_v_add_co_ci_u32_clears_carry(self):
+    """V_ADD_CO_CI_U32: VCC must be updated even when no carry is generated.
+
+    This tests the case where VCC=1 going in (carry-in consumed) but the addition
+    does not overflow, so VCC must be cleared to 0.
+
+    Regression test for: VCC not being written by v_add_co_ci_u32_e32.
+    """
+    instructions = [
+      s_mov_b32(VCC_LO, 1),  # VCC = 1 (carry in)
+      v_mov_b32_e32(v[0], 1),  # S0 = 1
+      v_mov_b32_e32(v[1], 1),  # S1 = 1
+      v_add_co_ci_u32_e32(v[2], v[0], v[1]),  # D0 = 1 + 1 + 1 = 3 (no overflow)
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][2], 3)  # 1 + 1 + 1 = 3
+    self.assertEqual(st.vcc, 0)  # No carry out - VCC must be cleared
+
+  def test_v_add_co_ci_u32_multilane_clears_vcc(self):
+    """V_ADD_CO_CI_U32 with multiple lanes: VCC bits must be updated per-lane.
+
+    When VCC has multiple bits set (one per active lane), and the addition doesn't
+    overflow for any lane, all VCC bits must be cleared.
+
+    Regression test for: VCC not being written by v_add_co_ci_u32_e32 in multi-lane case.
+    """
+    instructions = [
+      s_mov_b32(VCC_LO, 0b11),  # VCC = 0b11 (lanes 0,1 have carry-in)
+      v_mov_b32_e32(v[0], 1),  # S0 = 1 for all lanes
+      v_mov_b32_e32(v[1], 1),  # S1 = 1 for all lanes
+      v_add_co_ci_u32_e32(v[2], v[0], v[1]),  # D0 = 1 + 1 + 1 = 3 (no overflow)
+    ]
+    st = run_program(instructions, n_lanes=2)
+    self.assertEqual(st.vgpr[0][2], 3)  # lane 0: 1 + 1 + 1 = 3
+    self.assertEqual(st.vgpr[1][2], 3)  # lane 1: 1 + 1 + 1 = 3
+    self.assertEqual(st.vcc, 0)  # No carry out for any lane - all VCC bits must be cleared
+
+  def test_v_add_co_ci_u32_preserves_inactive_vcc_bits(self):
+    """V_ADD_CO_CI_U32: VCC carry-out overwrites entire VCC register.
+
+    VOP2 carry instructions write ALL VCC bits based on carry-out, clearing
+    bits for lanes that don't overflow regardless of EXEC mask.
+
+    Note: This differs from VOPC which only writes active lane bits.
+    """
+    instructions = [
+      s_mov_b32(VCC_LO, 0x00010000),  # VCC bit 16 set
+      v_mov_b32_e32(v[0], 1),  # S0 = 1
+      v_mov_b32_e32(v[1], 1),  # S1 = 1
+      v_add_co_ci_u32_e32(v[2], v[0], v[1]),  # D0 = 1 + 1 + 0 = 2 (no carry)
+    ]
+    st = run_program(instructions, n_lanes=4)
+    self.assertEqual(st.vgpr[0][2], 2)  # lane 0: 1 + 1 + 0 = 2
+    # VCC should be completely cleared (all lanes have no carry-out)
+    self.assertEqual(st.vcc, 0)
+
+  def test_v_add_co_ci_u32_all_lanes_same_result(self):
+    """V_ADD_CO_CI_U32: all active lanes should produce the same result.
+
+    When the same constant inputs are used across all lanes, each lane should
+    compute the same result and write to its own VGPR slot.
+
+    Regression test for: VGPR writes not happening for all lanes.
+    """
+    instructions = [
+      s_mov_b32(VCC_LO, 0),  # No carry-in
+      v_mov_b32_e32(v[0], 3),  # inline constant 3
+      v_mov_b32_e32(v[1], 5),  # value 5
+      v_add_co_ci_u32_e32(v[1], 3, v[1]),  # v[1] = 3 + v[1] + 0 = 3 + 5 = 8
+    ]
+    st = run_program(instructions, n_lanes=4)
+    # All 4 lanes should have v[1] = 8
+    for lane in range(4):
+      self.assertEqual(st.vgpr[lane][1], 8, f"lane {lane} should have v[1]=8")
+
   def test_v_sub_co_ci_u32_no_borrow(self):
     """V_SUB_CO_CI_U32: D0 = S0 - S1 - VCC_IN, when VCC_IN=0."""
     instructions = [
@@ -859,6 +960,23 @@ class TestCarryOps(unittest.TestCase):
     st = run_program(instructions, n_lanes=1)
     self.assertEqual(st.vgpr[0][0], 16)
     self.assertEqual(st.sgpr[10], 0)  # No carry out
+
+  def test_v_add_co_ci_u32_vop3sd_null_sdst(self):
+    """VOP3SD V_ADD_CO_CI_U32 with sdst=NULL: carry output is discarded.
+
+    When sdst=NULL (register 124), the carry-out should NOT be written anywhere.
+    We verify this by checking that VCC (which we set to a sentinel value) is unchanged.
+    """
+    instructions = [
+      s_mov_b32(VCC_LO, 0xDEADBEEF),  # Sentinel value in VCC
+      s_mov_b32(s[6], 0),  # carry-in = 0
+      # VOP3SD with NULL sdst: carry-out should be discarded
+      # Uses 0xFFFFFFFF + 1 + 0 = 0 with carry-out=1, but carry should not be written
+      v_add_co_ci_u32(v[0], NULL, 0xFFFFFFFF, 1, s[6]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][0], 0)  # 0xFFFFFFFF + 1 + 0 = 0 (overflow)
+    self.assertEqual(st.vcc, 0xDEADBEEF)  # VCC unchanged - carry was discarded
 
 
 if __name__ == '__main__':

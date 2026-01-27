@@ -1418,7 +1418,7 @@ class Tensor(OpMixin):
     perm_to_last = tuple(i for i in range(self.ndim) if i != dim) + (dim,)
     return self.permute(perm_to_last)._pool((size,), step).permute(argsort(perm_to_last) + (self.ndim,))
 
-  def meshgrid(self:Tensor, *args:Tensor, indexing:Literal["ij", "xy"]="ij") -> tuple[Tensor, ...]:
+  def meshgrid(self:Tensor, *args:Tensor, indexing:str="ij") -> tuple[Tensor, ...]:
     """
     Generates coordinate matrices from coordinate vectors.
     Input tensors can be scalars or 1D tensors.
