@@ -54,7 +54,7 @@ from extra.assembly.amd.autogen.rdna3.ins import (SOP1, SOP2, SOPC, SOPK, SOPP, 
   DS, FLAT, GLOBAL, SCRATCH, VOPD, SOPPOp, SMEMOp, VOP1Op, VOP2Op, VOP3Op, VOPDOp)
 from extra.assembly.amd.dsl import VCC_LO, EXEC_LO, SCC
 from extra.assembly.amd.autogen.common import OpType
-from extra.assembly.amd.expr_parser import parse_block
+from extra.assembly.amd.expr_parser import parse_block, _FUNCS
 
 MASK32 = 0xFFFFFFFF
 
@@ -793,19 +793,16 @@ def _compile_vop3p(inst: VOP3P, ctx: _Ctx) -> UOp:
     src2_r = ctx.inst_field(VOP3P.src2) - _c(256)
     is_f16_output = 'F16_16X16X16_F16' in op_name or 'BF16_16X16X16_BF16' in op_name  # F16/BF16 output vs F32 output
     is_bf16 = 'BF16' in op_name
-    def f16_to_f32(bits: UOp) -> UOp: return bits.cast(dtypes.uint16).bitcast(dtypes.half).cast(dtypes.float32)
-    def bf16_to_f32(bits: UOp) -> UOp: return (bits.cast(dtypes.uint32) << UOp.const(dtypes.uint32, 16)).bitcast(dtypes.float32)
+    cvt = _FUNCS['bf16_to_f32'] if is_bf16 else _FUNCS['f16_to_f32']
     def read_f16_mat(src):
-      cvt = bf16_to_f32 if is_bf16 else f16_to_f32
       return [f for l in range(16) for r in range(8) for v in [ctx.rvgpr_dyn(src + _c(r), UOp.const(dtypes.int, l))]
               for f in [cvt(v & UOp.const(dtypes.uint32, 0xFFFF)), cvt(v >> UOp.const(dtypes.uint32, 16))]]
     mat_a, mat_b = read_f16_mat(src0_r), read_f16_mat(src1_r)
-    acc_cvt = bf16_to_f32 if is_bf16 else f16_to_f32
     if is_f16_output:
       # RDNA3 F16/BF16 output: uses 8 VGPRs (same as F32), f16/bf16 values in lo 16 bits of each VGPR
       # Layout: half16 per lane where even indices (0,2,4,...,14) = lo halves of VGPRs 0-7
       # Read accumulator: 8 regs × 32 lanes, each VGPR's lo 16 bits holds one f16/bf16
-      mat_c = [acc_cvt(ctx.rvgpr_dyn(src2_r + _c(i // 32), UOp.const(dtypes.int, i % 32)) & UOp.const(dtypes.uint32, 0xFFFF))
+      mat_c = [cvt(ctx.rvgpr_dyn(src2_r + _c(i // 32), UOp.const(dtypes.int, i % 32)) & UOp.const(dtypes.uint32, 0xFFFF))
                for i in range(256)]
       mat_d = [sum(mat_a[row*16+k] * mat_b[col*16+k] for k in range(16)) + mat_c[row*16+col] for row in range(16) for col in range(16)]
       # Write f16/bf16 results to lo 16 bits of each VGPR
