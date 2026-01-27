@@ -292,7 +292,9 @@ runs:
     - name: Install LLVM (macOS)
       if: inputs.llvm == 'true' && runner.os == 'macOS'
       shell: bash
-      run: brew install llvm@20
+      run: |
+        brew install llvm@20
+        echo "$(brew --prefix llvm@20)/bin" >> "$GITHUB_PATH"
 
     # **** mesa ****
     - name: Install mesa (linux)
