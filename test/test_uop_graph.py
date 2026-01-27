@@ -194,8 +194,8 @@ class TestGraphRewrite(unittest.TestCase):
 
 class TestUOpGraph(unittest.TestCase):
   def test_add_constant_fold(self):
-    c1 = UOp(Ops.CONST, dtypes.float, arg=1.0)
-    c2 = UOp(Ops.CONST, dtypes.float, arg=2.0)
+    c1 = UOp.const(dtypes.float, 1.0)
+    c2 = UOp.const(dtypes.float, 2.0)
     out = UOp(Ops.ADD, dtypes.float, (c1, c2))
     uops = to_uops_list([out])
     self.assertEqual(len(uops), 2)  # +1 for SINK
@@ -205,9 +205,9 @@ class TestUOpGraph(unittest.TestCase):
 
   def test_where_same_fold(self):
     v = UOp.variable('tmp', 0, 1)
-    c0 = UOp(Ops.CONST, dtypes.index, arg=0)
+    c0 = UOp.const(dtypes.index, 0)
     vc = UOp(Ops.CMPNE, dtypes.bool, (v, c0))
-    c1 = UOp(Ops.CONST, dtypes.float, arg=1.0)
+    c1 = UOp.const(dtypes.float, 1.0)
     out = UOp(Ops.WHERE, dtypes.float, (vc, c1, c1))
     uops = to_uops_list([out])
     self.assertEqual(len(uops), 2)  # +1 for SINK
@@ -216,9 +216,9 @@ class TestUOpGraph(unittest.TestCase):
     self.assertEqual(out.arg, 1.0)
 
   def test_where_const_fold(self):
-    bf = UOp(Ops.CONST, dtypes.bool, arg=False)
-    c1 = UOp(Ops.CONST, dtypes.float, arg=1.0)
-    c2 = UOp(Ops.CONST, dtypes.float, arg=2.0)
+    bf = UOp.const(dtypes.bool, False)
+    c1 = UOp.const(dtypes.float, 1.0)
+    c2 = UOp.const(dtypes.float, 2.0)
     out = UOp(Ops.WHERE, dtypes.float, (bf, c1, c2))
     uops = to_uops_list([out])
     self.assertEqual(len(uops), 2)  # +1 for SINK
@@ -227,7 +227,7 @@ class TestUOpGraph(unittest.TestCase):
     self.assertEqual(out.arg, 2.0)
 
   def test_const_cast(self):
-    bf = UOp(Ops.CONST, dtypes.bool, arg=False)
+    bf = UOp.const(dtypes.bool, False)
     out = UOp(Ops.CAST, dtypes.int, (bf,))
     uops = to_uops_list([out])
     self.assertEqual(len(uops), 2)  # +1 for SINK
@@ -236,7 +236,7 @@ class TestUOpGraph(unittest.TestCase):
     self.assertEqual(out.arg, 0)
 
   def test_const_bitcast(self):
-    bf = UOp(Ops.CONST, dtypes.float, arg=1.0)
+    bf = UOp.const(dtypes.float, 1.0)
     out = UOp(Ops.BITCAST, dtypes.uint32, (bf,))
     uops = to_uops_list([out])
     self.assertEqual(len(uops), 2)  # +1 for SINK
@@ -246,7 +246,7 @@ class TestUOpGraph(unittest.TestCase):
 
   @unittest.expectedFailure
   def test_const_shape_change_bitcast(self):
-    bf = UOp(Ops.CONST, dtypes.uint8, arg=0x3F)
+    bf = UOp.const(dtypes.uint8, 0x3F)
     out = UOp(Ops.BITCAST, dtypes.half, (bf,))
     uops = to_uops_list([out])
     self.assertEqual(len(uops), 2)  # +1 for SINK
@@ -394,8 +394,8 @@ class TestUOpGraph(unittest.TestCase):
 
   def test_depth_2_const_fold(self):
     v = UOp.variable("tmp", 0, 1, dtypes.int)
-    c2 = UOp(Ops.CONST, dtypes.int, arg=2)
-    c4 = UOp(Ops.CONST, dtypes.int, arg=4)
+    c2 = UOp.const(dtypes.int, 2)
+    c4 = UOp.const(dtypes.int, 4)
     vc = UOp(Ops.ADD, dtypes.int, (v, c2))
     out = UOp(Ops.ADD, dtypes.int, (vc, c4))
     uops = to_uops_list([out])
@@ -530,7 +530,7 @@ class TestUOpGraph(unittest.TestCase):
     c = r + 1
     self.assertIn(r, c.ranges)
 
-    e = UOp.const(dtypes.void, None).end(r)
+    e = UOp.const(dtypes.int, 1).end(r)
     self.assertNotIn(r, e.ranges)
 
     a = c.after(e)
