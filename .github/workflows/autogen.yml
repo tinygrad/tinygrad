@@ -84,7 +84,7 @@ jobs:
     - name: Regenerate autogen files
       run: |
         rm tinygrad/runtime/autogen/metal.py tinygrad/runtime/autogen/iokit.py tinygrad/runtime/autogen/corefoundation.py
-        LIBCLANG_PATH=/opt/homebrew/opt/llvm@20/lib/libclang.dylib python3 -c "from tinygrad.runtime.autogen import metal, iokit, corefoundation"
+        python3 -c "from tinygrad.runtime.autogen import metal, iokit, corefoundation"
     - name: Check for differences
       run: |
         if ! git diff --quiet; then
