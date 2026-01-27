@@ -2,7 +2,7 @@ import unittest, functools, random
 from tinygrad import Tensor, Device, nn, GlobalCounters, TinyJit, dtypes, Variable
 from tinygrad.device import is_dtype_supported
 from tinygrad.uop.ops import Ops, UOp
-from tinygrad.helpers import getenv, prod, Context, OSX, all_same
+from tinygrad.helpers import getenv, prod, Context, OSX
 from tinygrad.nn.state import get_parameters, get_state_dict
 from tinygrad.engine.realize import BufferCopy, CompiledRunner, run_schedule
 import numpy as np
