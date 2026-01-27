@@ -525,6 +525,8 @@ class NVKIface:
   def _alloc_gpu_vaddr(self, size, alignment=(4 << 10), force_low=False):
     return NVKIface.low_uvm_vaddr_allocator.alloc(size, alignment) if force_low else NVKIface.uvm_vaddr_allocator.alloc(size, alignment)
 
+  def sleep(self, tm:int) -> bool: return False
+
 class PCIIface(PCIIfaceBase):
   gpus:ClassVar[list[str]] = []
 
