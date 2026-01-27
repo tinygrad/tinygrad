@@ -1,7 +1,6 @@
 """Test elimination-based kernel optimization."""
 import unittest
 from tinygrad import Tensor, Device
-from tinygrad.helpers import getenv
 
 class TestEliminate(unittest.TestCase):
   def test_solver_produces_single_survivor(self):
