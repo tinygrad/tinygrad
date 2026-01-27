@@ -73,10 +73,11 @@ def _split64(val: UOp) -> tuple[UOp, UOp]:
   v64 = val.bitcast(dtypes.uint64) if val.dtype == dtypes.float64 else val.cast(dtypes.uint64) if val.dtype != dtypes.uint64 else val
   return v64.cast(dtypes.uint32), (v64 >> UOp.const(dtypes.uint64, 32)).cast(dtypes.uint32)
 
+_SRC_MOD_TYPES = {16: (dtypes.uint16, dtypes.half, 0x7FFF), 64: (dtypes.uint64, dtypes.float64, 0x7FFFFFFFFFFFFFFF), 32: (dtypes.uint32, dtypes.float32, 0x7FFFFFFF)}
 def _apply_src_mods(val: UOp, mod_bit: int, abs_bits: int, neg_bits: int, is_16bit: bool = False, is_64bit: bool = False) -> UOp:
   """Apply abs/neg modifiers to source value based on operation type."""
   if not (abs_bits & (1 << mod_bit)) and not (neg_bits & (1 << mod_bit)): return val
-  ut, ft, mask = (dtypes.uint16, dtypes.half, 0x7FFF) if is_16bit else (dtypes.uint64, dtypes.float64, 0x7FFFFFFFFFFFFFFF) if is_64bit else (dtypes.uint32, dtypes.float32, 0x7FFFFFFF)
+  ut, ft, mask = _SRC_MOD_TYPES[16 if is_16bit else 64 if is_64bit else 32]
   fv = val.cast(ut).bitcast(ft) if is_16bit else val.bitcast(ft) if val.dtype == ut else val
   if abs_bits & (1 << mod_bit): fv = (fv.bitcast(ut) & UOp.const(ut, mask)).bitcast(ft)
   if neg_bits & (1 << mod_bit): fv = fv.neg()
@@ -109,9 +110,10 @@ def _to_u32(val: UOp) -> UOp:
   return val.cast(dtypes.uint32)  # different size: cast (bool, int16, etc)
 def _lane_active(exec_mask: UOp, lane: UOp) -> UOp: return ((exec_mask >> lane.cast(dtypes.uint32)) & _c(1)).ne(_c(0))
 def _hi16(v: UOp) -> UOp: return (v >> _c(16)) & _c(0xFFFF)
-def _cond_hi16(cond, val: UOp) -> UOp:
-  """Apply hi-half extraction conditionally: if cond is UOp, use where; if bool True, extract; else return val unchanged."""
-  return cond.where(_hi16(val), val) if isinstance(cond, UOp) else _hi16(val) if cond else val
+def _cond(cond, if_true, if_false):
+  """Select between values based on condition (works with UOp or bool)."""
+  return cond.where(if_true, if_false) if isinstance(cond, UOp) else if_true if cond else if_false
+def _cond_hi16(cond, val: UOp) -> UOp: return _cond(cond, _hi16(val), val)
 def _apply_opsel(val: UOp, sel_bit: int, opsel: int) -> UOp: return _hi16(val) if opsel & (1 << sel_bit) else val
 
 def _unroll_lanes(get_lane_bit, exec_mask: UOp, apply_exec: bool = True) -> UOp:
@@ -261,38 +263,12 @@ def _collect_data_slices(assigns: list, data_prefix: str, pcode_vars: dict = Non
     elif dest.startswith(data_prefix): slices[0] = _to_u32(val)
   return slices
 
-def _scalar_stores_dyn(assigns: list, wsgpr_dyn, sdst_reg: UOp, sdst_size: int = 1) -> list[UOp]:
-  """Generate stores for scalar assigns with dynamic destination register (D0, SCC, EXEC, VCC)."""
-  def w64_dyn(reg: UOp, val):
-    if val.dtype in (dtypes.uint64, dtypes.int64): lo, hi = _split64(val); return [wsgpr_dyn(reg, lo), wsgpr_dyn(reg + _c(1), hi)]
-    return [wsgpr_dyn(reg, _to_u32(val))]
-  stores = []
-  for dest, val in assigns:
-    if dest.startswith('D0'): stores.extend(w64_dyn(sdst_reg, val) if sdst_size == 2 else [wsgpr_dyn(sdst_reg, _to_u32(val))])
-    elif dest.startswith('SCC'): stores.append(wsgpr_dyn(_c(SCC_IDX), _to_u32(val)))
-    elif dest.startswith('EXEC'): stores.extend(w64_dyn(_c(EXEC_LO.offset), val))
-    elif dest.startswith('VCC'): stores.extend(w64_dyn(_c(VCC_LO.offset), val))
-  return stores
-
 # Counter for unique axis IDs to avoid UOp caching issues
 _axis_id_counter = 0
 def _next_axis_id() -> int:
   global _axis_id_counter
   _axis_id_counter += 1
   return _axis_id_counter
-
-def compile_sop_pcode_dyn(op, srcs: dict[str, UOp], wsgpr_dyn_fn, rsgpr_dyn_fn, sdst_reg: UOp, sdst_size: int, inc_pc_fn, name: str):
-  """Compile a scalar instruction with dynamic destination register. Returns (name, sink) or None."""
-  pcode = PCODE.get(op)
-  if pcode is None: return None
-  # For D0 read, use dynamic rsgpr; for VCC/EXEC/SCC use static offsets
-  srcs.update({'VCC': rsgpr_dyn_fn(_c(VCC_LO.offset)), 'EXEC': rsgpr_dyn_fn(_c(EXEC_LO.offset)), 'SCC': rsgpr_dyn_fn(_c(SCC_IDX))})
-  # D0 is the current value of destination register (for read-modify-write ops like S_ADDK)
-  if 'D0' not in srcs: srcs['D0'] = rsgpr_dyn_fn(sdst_reg)
-  _, assigns = parse_pcode(pcode, srcs, lane=None)
-  stores = _scalar_stores_dyn(assigns, wsgpr_dyn_fn, sdst_reg, sdst_size)
-  if not stores: return None
-  return name, UOp.sink(*stores, *inc_pc_fn(), arg=KernelInfo(name=name))
 
 def compile_lane_pcode(op, inst, ctx: '_Ctx', inc_pc_fn, name: str):
   """Compile READLANE/READFIRSTLANE/WRITELANE using pcode parser."""
@@ -405,8 +381,6 @@ def _define_bufs():
   scratch = UOp(Ops.DEFINE_GLOBAL, dtypes.uint8.ptr(1 << 30), arg=4)
   return sgpr, vgpr, vmem, lds, scratch
 
-def _sext(v, bits): return v - (1 << bits) if v & (1 << (bits - 1)) else v
-
 # ═══════════════════════════════════════════════════════════════════════════════
 # INSTRUCTION COMPILER - converts decoded instruction to UOp SINK
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -445,6 +419,13 @@ class _Ctx:
       lo_part = (word >> UOp.const(dtypes.uint32, lo_in_dword)) & UOp.const(dtypes.uint32, lo_mask)
       hi_part = self.inst_word(dword_idx + 1) & UOp.const(dtypes.uint32, hi_mask)
       return lo_part | (hi_part << UOp.const(dtypes.uint32, lo_bits))
+
+  def inst_field_signed(self, field) -> UOp:
+    """Extract field and sign-extend based on field width."""
+    val = self.inst_field(field)
+    width = field.hi - field.lo + 1
+    sign_bit = 1 << (width - 1)
+    return (val.cast(dtypes.int) ^ _c(sign_bit, dtypes.int)) - _c(sign_bit, dtypes.int)
 
   def canonical_mask(self, inst_bytes: bytes) -> tuple[int, int, int]:
     """Compute canonical (base, mask, size) for cache lookup.
@@ -520,14 +501,36 @@ class _Ctx:
     new_pc = self.rpc() + UOp.const(dtypes.uint64, self.inst_size)
     return [self.sgpr.index(_c(PC_LO_IDX, dtypes.int), ptr=True).cast(dtypes.uint64.ptr(SGPR_COUNT // 2)).store(new_pc)]
 
+  def scalar_stores(self, assigns: list[tuple[str, UOp]], sdst_reg: UOp, sdst_size: int = 1) -> list[UOp]:
+    """Generate stores for scalar assigns with dynamic destination register (D0, SCC, EXEC, VCC)."""
+    def w64(reg: UOp, val: UOp) -> list[UOp]:
+      if val.dtype in (dtypes.uint64, dtypes.int64): lo, hi = _split64(val); return [self.wsgpr_dyn(reg, lo), self.wsgpr_dyn(reg + _c(1), hi)]
+      return [self.wsgpr_dyn(reg, _to_u32(val))]
+    stores: list[UOp] = []
+    for dest, val in assigns:
+      if dest.startswith('D0'): stores.extend(w64(sdst_reg, val) if sdst_size == 2 else [self.wsgpr_dyn(sdst_reg, _to_u32(val))])
+      elif dest.startswith('SCC'): stores.append(self.wsgpr_dyn(_c(SCC_IDX), _to_u32(val)))
+      elif dest.startswith('EXEC'): stores.extend(w64(_c(EXEC_LO.offset), val))
+      elif dest.startswith('VCC'): stores.extend(w64(_c(VCC_LO.offset), val))
+    return stores
+
+  def compile_sop_pcode(self, op, srcs: dict[str, UOp], sdst_reg: UOp, sdst_size: int, name: str):
+    """Compile a scalar instruction with dynamic destination register. Returns (name, sink) or None."""
+    pcode = PCODE.get(op)
+    if pcode is None: return None
+    srcs.update({'VCC': self.rsgpr_dyn(_c(VCC_LO.offset)), 'EXEC': self.rsgpr_dyn(_c(EXEC_LO.offset)), 'SCC': self.rsgpr_dyn(_c(SCC_IDX))})
+    if 'D0' not in srcs: srcs['D0'] = self.rsgpr_dyn(sdst_reg)  # D0 is current dest value for read-modify-write ops
+    _, assigns = parse_pcode(pcode, srcs, lane=None)
+    stores = self.scalar_stores(assigns, sdst_reg, sdst_size)
+    if not stores: return None
+    return name, UOp.sink(*stores, *self.inc_pc(), arg=KernelInfo(name=name))
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # INSTRUCTION HANDLERS
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def _compile_sopp(inst: SOPP, ctx: _Ctx, name: str) -> tuple[str, UOp]:
-  # Read simm16 dynamically and sign-extend: (val ^ 0x8000) - 0x8000
-  simm16_raw = ctx.inst_field(SOPP.simm16)
-  simm16 = ((simm16_raw ^ _c(0x8000)) - _c(0x8000)).cast(dtypes.int16)
+  simm16 = ctx.inst_field_signed(SOPP.simm16).cast(dtypes.int16)
   if inst.op == SOPPOp.S_ENDPGM:
     return name, UOp.sink(ctx.wsgpr_dyn(_c(PC_LO_IDX), UOp.const(dtypes.uint32, 0xFFFFFFFF)),
                           ctx.wsgpr_dyn(_c(PC_HI_IDX), UOp.const(dtypes.uint32, 0xFFFFFFFF)), arg=KernelInfo(name=name))
@@ -551,9 +554,7 @@ def _compile_smem(inst: SMEM, ctx: _Ctx, name: str) -> tuple[str, UOp]:
   sbase = ctx.inst_field(SMEM.sbase) * _c(2)
   # Dynamic sdata field (bits 12:6) - destination SGPR
   sdata_reg = ctx.inst_field(SMEM.sdata)
-  # Dynamic offset field (bits 52:32) - 21-bit signed immediate
-  offset_raw = ctx.inst_field(SMEM.offset)
-  offset = (offset_raw.cast(dtypes.int) ^ _c(0x100000, dtypes.int)) - _c(0x100000, dtypes.int)  # sign-extend 21-bit
+  offset = ctx.inst_field_signed(SMEM.offset)  # 21-bit signed immediate
   # Dynamic soffset field (bits 63:57) - SGPR for additional offset (NULL=124 reads as 0)
   soffset = ctx.inst_field(SMEM.soffset)
   addr = _u64(ctx.rsgpr_dyn(sbase), ctx.rsgpr_dyn(sbase + _c(1))) + offset.cast(dtypes.uint64) + ctx.rsgpr_dyn(soffset).cast(dtypes.uint64)
@@ -622,8 +623,7 @@ def _compile_sop(inst, ctx: _Ctx, name: str) -> tuple[str, UOp]:
   else:
     raise RuntimeError(f"unknown SOP type: {type(inst).__name__}")
 
-  # Use dynamic pcode compilation with dynamic destination
-  pcode_result = compile_sop_pcode_dyn(inst.op, srcs, ctx.wsgpr_dyn, ctx.rsgpr_dyn, dst_off, dst_size, ctx.inc_pc, name)
+  pcode_result = ctx.compile_sop_pcode(inst.op, srcs, dst_off, dst_size, name)
   assert pcode_result is not None, f"no pcode for {type(inst).__name__}: {inst.op.name}"
   return pcode_result
 
@@ -653,7 +653,7 @@ def _compile_vop12(inst, ctx: _Ctx, name: str) -> tuple[str, UOp]:
   else:
     vsrc1_reg = ctx.inst_field(VOP2.vsrc1)
     vsrc1_hi = is_16bit and (vsrc1_reg >= _c(128))
-    vsrc1_actual = vsrc1_hi.where(vsrc1_reg - _c(128), vsrc1_reg) if isinstance(vsrc1_hi, UOp) else vsrc1_reg - _c(128) if vsrc1_hi else vsrc1_reg
+    vsrc1_actual = _cond(vsrc1_hi, vsrc1_reg - _c(128), vsrc1_reg)
     s1 = _cond_hi16(vsrc1_hi, ctx.rvgpr_dyn(vsrc1_actual, lane))
     d0 = _cond_hi16(write_hi_half, ctx.rvgpr_dyn(vdst_reg, lane))  # FMAC/FMAMK hi-half dest needs hi-half accumulator
     # Handle VOP2 hi-half src0 operand (src0 >= v[128] for 16-bit ops)
