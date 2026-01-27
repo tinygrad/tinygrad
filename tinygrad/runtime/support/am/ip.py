@@ -430,12 +430,10 @@ class AM_IH(AM_IP):
             f"ring={ring_id} vmid={vmid}({vmid_type}) pasid={pasid} node={node} ctx=[{ctx[0]:#x}, {ctx[1]:#x}, {ctx[2]:#x}, {ctx[3]:#x}]")
 
       if src_name == "SQ_INTERRUPT_ID":
-        enc_word, enc_bit, err_word, err_bit = (1, 6, ctx[0], 21) if self.adev.ip_ver[am.GC_HWIP][0] >= 11 \
-          else (0, 26, (ctx[0] & 0xfff) | ((ctx[0] >> 16) & 0xf000) | ((ctx[1] << 16) & 0xff0000), 20)
-        if (encoding:=getbits(ctx[enc_word], enc_bit, enc_bit + 1)) == 2:
-          err_type = getbits(err_word, err_bit, err_bit + 3)
-          print(f"am {self.adev.devfmt}: sq_intr: error ({['EDC_FUE', 'ILLEGAL_INST', 'MEMVIOL', 'EDC_FED'][err_type] if err_type < 4 else 'UNK'})")
-        else: print(f"am {self.adev.devfmt}: sq_intr: {['auto', 'wave'][encoding]}")
+        enc_type = getbits(ctx[1], 6, 7) if (is_soc21:=self.adev.ip_ver[am.GC_HWIP][0] >= 11) else getbits(ctx[0], 26, 27)
+        err_type = getbits(ctx[0], 21, 24) if is_soc21 else getbits((ctx[0] & 0xfff) | ((ctx[0]>>16) & 0xf000) | ((ctx[1]<<16) & 0xff0000), 20, 23)
+        err_info = f" ({['EDC_FUE', 'ILLEGAL_INST', 'MEMVIOL', 'EDC_FED'][err_type]})" if enc_type == 2 else ""
+        print(f"am {self.adev.devfmt}: sq_intr: {['auto', 'wave', 'error'][enc_type]}{err_info}")
 
       rptr = (rptr + 8) % (self.ring_size // 4)
 
