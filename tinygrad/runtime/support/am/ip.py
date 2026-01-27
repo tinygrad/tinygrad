@@ -174,7 +174,6 @@ class AM_GMC(AM_IP):
     va = (self.adev.reg('regGCVM_L2_PROTECTION_FAULT_ADDR_HI32').read()<<32) | self.adev.reg('regGCVM_L2_PROTECTION_FAULT_ADDR_LO32').read()
     if self.adev.reg(self.pf_status_reg("GC")).read():
       return f"GCVM_L2_PROTECTION_FAULT_STATUS: {self.adev.reg(self.pf_status_reg('GC')).read_bitfields()} {va<<12:#x}"
-    return None
 
 class AM_SMU(AM_IP):
   def init_sw(self):
@@ -434,6 +433,8 @@ class AM_IH(AM_IP):
         err_type = getbits(ctx[0], 21, 24) if is_soc21 else getbits((ctx[0] & 0xfff) | ((ctx[0]>>16) & 0xf000) | ((ctx[1]<<16) & 0xff0000), 20, 23)
         err_info = f" ({['EDC_FUE', 'ILLEGAL_INST', 'MEMVIOL', 'EDC_FED'][err_type]})" if enc_type == 2 else ""
         print(f"am {self.adev.devfmt}: sq_intr: {['auto', 'wave', 'error'][enc_type]}{err_info}")
+        self.adev.is_err_state |= enc_type == 2
+      else: self.adev.is_err_state = True
 
       rptr = (rptr + 8) % (self.ring_size // 4)
 
