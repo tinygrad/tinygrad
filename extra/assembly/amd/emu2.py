@@ -57,13 +57,6 @@ MASK32 = 0xFFFFFFFF
 
 def _c(val, dtype=dtypes.uint32): return UOp.const(dtype, val)
 
-# Inline float constants (as bit patterns) for GPU instructions
-F32_INLINE = {240: 0x3f000000, 241: 0xbf000000, 242: 0x3f800000, 243: 0xbf800000,  # 0.5, -0.5, 1.0, -1.0
-              244: 0x40000000, 245: 0xc0000000, 246: 0x40800000, 247: 0xc0800000, 248: 0x3e22f983}  # 2.0, -2.0, 4.0, -4.0, 1/(2*pi)
-F64_INLINE = {240: 0x3fe0000000000000, 241: 0xbfe0000000000000, 242: 0x3ff0000000000000, 243: 0xbff0000000000000,
-              244: 0x4000000000000000, 245: 0xc000000000000000, 246: 0x4010000000000000, 247: 0xc010000000000000, 248: 0x3fc45f306dc9c883}
-F16_INLINE = {240: 0x3800, 241: 0xb800, 242: 0x3c00, 243: 0xbc00, 244: 0x4000, 245: 0xc000, 246: 0x4400, 247: 0xc400, 248: 0x3118}
-
 def _u64(lo: UOp, hi: UOp) -> UOp:
   """Combine two 32-bit UOps into a 64-bit UOp."""
   return lo.cast(dtypes.uint64) | (hi.cast(dtypes.uint64) << UOp.const(dtypes.uint64, 32))
@@ -207,37 +200,25 @@ def _write_val(dest: str, val: UOp, wfn, reg_or_addr, *args, is_mem: bool = Fals
   return _write_64bit(val, wfn, reg_or_addr, is_mem, *args) if _is_64bit_dest(dest) else [wfn(reg_or_addr, _to_u32(val), *args)]
 
 def _mem_store(mem: UOp, addr: UOp, val: UOp, active: UOp, addr_bits: int = 32, data_bits: int = 32) -> list[UOp]:
-  """Conditional memory store: write val to mem[addr] if active, else keep old value. Handles sub-word stores. Returns list of store UOps."""
+  """Conditional memory store with sub-word support. Returns list of store UOps."""
   adt = dtypes.uint64 if addr_bits == 64 else dtypes.uint32
-  shift = UOp.const(adt, 2)
-  word_addr = addr >> shift
+  word_addr = addr >> UOp.const(adt, 2)
   idx = mem.index(word_addr.cast(dtypes.int), active)
-  val_u32 = val.cast(dtypes.uint32) if val.dtype != dtypes.uint32 else val
-  if data_bits == 8:
-    byte_pos = (addr.cast(dtypes.uint32) & UOp.const(dtypes.uint32, 3))  # 0-3
-    byte_shift = byte_pos << UOp.const(dtypes.uint32, 3)  # *8
-    mask = UOp.const(dtypes.uint32, 0xFF) << byte_shift
-    new_word = (idx & (mask ^ UOp.const(dtypes.uint32, 0xFFFFFFFF))) | ((val_u32 & UOp.const(dtypes.uint32, 0xFF)) << byte_shift)
-    return [idx.store(active.where(new_word, idx))]
-  elif data_bits == 16:
-    byte_pos = addr.cast(dtypes.uint32) & UOp.const(dtypes.uint32, 3)
-    byte_shift = byte_pos << UOp.const(dtypes.uint32, 3)  # *8
-    low_byte = val_u32 & UOp.const(dtypes.uint32, 0xFF)
-    high_byte = (val_u32 >> UOp.const(dtypes.uint32, 8)) & UOp.const(dtypes.uint32, 0xFF)
-    mask_16 = UOp.const(dtypes.uint32, 0xFFFF) << byte_shift
-    same_word = (idx & (mask_16 ^ UOp.const(dtypes.uint32, 0xFFFFFFFF))) | ((val_u32 & UOp.const(dtypes.uint32, 0xFFFF)) << byte_shift)
-    cross_word0 = (idx & UOp.const(dtypes.uint32, 0x00FFFFFF)) | (low_byte << UOp.const(dtypes.uint32, 24))
-    is_cross = ((byte_pos >> UOp.const(dtypes.uint32, 1)) & byte_pos & UOp.const(dtypes.uint32, 1)).cast(dtypes.bool)
-    new_word = is_cross.where(cross_word0, same_word)
-    store0 = idx.store(active.where(new_word, idx))
-    active_cross = active & is_cross
-    next_idx = mem.index((word_addr + UOp.const(adt, 1)).cast(dtypes.int), active_cross)
-    cross_word1 = (next_idx & UOp.const(dtypes.uint32, 0xFFFFFF00)) | high_byte
-    store1 = next_idx.store(active_cross.where(cross_word1, next_idx))
-    return [store0, store1]
-  else:
-    new_word = _to_u32(val)
-    return [idx.store(active.where(new_word, idx))]
+  if data_bits == 32: return [idx.store(active.where(_to_u32(val), idx))]
+  # Sub-word store: read-modify-write with mask
+  byte_pos = addr.cast(dtypes.uint32) & _c(3)
+  byte_shift = byte_pos * _c(8)
+  val_u32, size_mask = val.cast(dtypes.uint32), _c(0xFF if data_bits == 8 else 0xFFFF)
+  mask = size_mask << byte_shift
+  new_word = (idx & (mask ^ _c(0xFFFFFFFF))) | ((val_u32 & size_mask) << byte_shift)
+  if data_bits == 8: return [idx.store(active.where(new_word, idx))]
+  # 16-bit cross-word case: byte_pos == 3 means value spans two words
+  is_cross = byte_pos.eq(_c(3))
+  cross_word0 = (idx & _c(0x00FFFFFF)) | ((val_u32 & _c(0xFF)) << _c(24))
+  store0 = idx.store(active.where(is_cross.where(cross_word0, new_word), idx))
+  next_idx = mem.index((word_addr + UOp.const(adt, 1)).cast(dtypes.int), active & is_cross)
+  cross_word1 = (next_idx & _c(0xFFFFFF00)) | ((val_u32 >> _c(8)) & _c(0xFF))
+  return [store0, next_idx.store((active & is_cross).where(cross_word1, next_idx))]
 
 def _mem_store_bytes(mem: UOp, addr: UOp, val: UOp, active: UOp, data_bits: int = 32) -> list[UOp]:
   """Store to byte-addressable memory (scratch). addr is byte offset, mem is uint8 buffer."""
@@ -360,6 +341,7 @@ class _Ctx:
     Inline constants 128-255 are pre-populated in SGPR buffer (integers, negatives, F32 floats).
     SGPR buffer is 260 entries so off 0-255 is always valid. If literal is provided, it's used when off==255."""
     is_vgpr = off >= _c(256)
+    is_float_const = (off >= _c(240)) & (off <= _c(248))
     if bits == 64:
       is_sgpr = off < _c(128)
       sgpr_idx = off.cast(dtypes.int)
@@ -371,14 +353,18 @@ class _Ctx:
       vgpr_lo = self.vgpr.index(vgpr_idx0, is_vgpr, ptr=True).load()
       vgpr_hi = self.vgpr.index(vgpr_idx1, is_vgpr, ptr=True).load()
       vgpr_val = _u64(vgpr_lo, vgpr_hi)
-      inline = _u64(sgpr_lo, sgpr_lo)
+      # Float constants 240-248: cast F32 from buffer to F64
+      inline_f64 = sgpr_lo.bitcast(dtypes.float32).cast(dtypes.float64).bitcast(dtypes.uint64)
+      inline = _u64(sgpr_lo, sgpr_lo)  # Integer inline constants (value duplicated)
       if literal is not None: inline = off.eq(_c(255)).where(literal.cast(dtypes.uint64) << UOp.const(dtypes.uint64, 32), inline)
-      for off_val, val in F64_INLINE.items(): inline = off.eq(_c(off_val)).where(UOp.const(dtypes.uint64, val), inline)
+      inline = is_float_const.where(inline_f64, inline)
       return is_vgpr.where(vgpr_val, is_sgpr.where(sgpr_val, inline))
     sgpr_val = self.sgpr.index(off.cast(dtypes.int), ptr=True).load()
     if literal is not None: sgpr_val = off.eq(_c(255)).where(literal, sgpr_val)
     if bits == 16:
-      for off_val, val in F16_INLINE.items(): sgpr_val = off.eq(_c(off_val)).where(UOp.const(dtypes.uint32, val), sgpr_val)
+      # Float constants 240-248: cast F32 from buffer to F16
+      sgpr_f16 = sgpr_val.bitcast(dtypes.float32).cast(dtypes.half).bitcast(dtypes.uint16).cast(dtypes.uint32)
+      sgpr_val = is_float_const.where(sgpr_f16, sgpr_val)
     vgpr_idx = (off - _c(256)).cast(dtypes.int) * _c(32, dtypes.int) + lane.cast(dtypes.int)
     vgpr_val = self.vgpr.index(vgpr_idx, is_vgpr, ptr=True).load()
     return is_vgpr.where(vgpr_val, sgpr_val)
@@ -1147,6 +1133,10 @@ def decode_program(data: bytes) -> dict[int, tuple[str, object, list[int], objec
 # ═══════════════════════════════════════════════════════════════════════════════
 # WAVE STATE
 # ═══════════════════════════════════════════════════════════════════════════════
+
+# Inline float constants (as bit patterns) for GPU instructions
+F32_INLINE = {240: 0x3f000000, 241: 0xbf000000, 242: 0x3f800000, 243: 0xbf800000,  # 0.5, -0.5, 1.0, -1.0
+              244: 0x40000000, 245: 0xc0000000, 246: 0x40800000, 247: 0xc0800000, 248: 0x3e22f983}  # 2.0, -2.0, 4.0, -4.0, 1/(2*pi)
 
 class WaveState:
   __slots__ = ('vgpr_buf', 'sgpr_buf', '_vgpr_mv', '_sgpr_mv', 'n_lanes')
