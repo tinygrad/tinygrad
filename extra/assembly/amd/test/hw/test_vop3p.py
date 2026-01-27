@@ -149,7 +149,6 @@ class TestFmaMix(unittest.TestCase):
 
   def test_v_fma_mix_f32_src2_f16_lo(self):
     """V_FMA_MIX_F32 with src2 as f16 from lo bits."""
-    from extra.assembly.amd.test.hw.helpers import f32_to_f16
     f16_2 = f32_to_f16(2.0)
     instructions = [
       s_mov_b32(s[0], f2i(1.0)),
@@ -166,7 +165,6 @@ class TestFmaMix(unittest.TestCase):
 
   def test_v_fma_mix_f32_src2_f16_hi(self):
     """V_FMA_MIX_F32 with src2 as f16 from hi bits."""
-    from extra.assembly.amd.test.hw.helpers import f32_to_f16
     f16_2 = f32_to_f16(2.0)
     val = (f16_2 << 16) | 0
     instructions = [
@@ -199,7 +197,6 @@ class TestFmaMix(unittest.TestCase):
 
   def test_v_fma_mix_f32_with_abs_f16_src2_lo(self):
     """V_FMA_MIX_F32 with abs modifier on f16 src2 (lo half). Regression test for sin(1.0) bug."""
-    from extra.assembly.amd.test.hw.helpers import f32_to_f16
     f16_neg1 = f32_to_f16(-1.0)  # 0xbc00
     instructions = [
       s_mov_b32(s[0], f2i(0.0)),  # src0 = 0.0 (f32)
@@ -217,7 +214,6 @@ class TestFmaMix(unittest.TestCase):
 
   def test_v_fma_mix_f32_with_neg_f16_src2_lo(self):
     """V_FMA_MIX_F32 with neg modifier on f16 src2 (lo half)."""
-    from extra.assembly.amd.test.hw.helpers import f32_to_f16
     f16_1 = f32_to_f16(1.0)  # 0x3c00
     instructions = [
       s_mov_b32(s[0], f2i(0.0)),  # src0 = 0.0 (f32)
@@ -235,7 +231,6 @@ class TestFmaMix(unittest.TestCase):
 
   def test_v_fma_mix_f32_with_abs_f16_src2_hi(self):
     """V_FMA_MIX_F32 with abs modifier on f16 src2 (hi half)."""
-    from extra.assembly.amd.test.hw.helpers import f32_to_f16
     f16_neg1 = f32_to_f16(-1.0)  # 0xbc00
     val = (f16_neg1 << 16) | 0  # -1.0 in hi, 0 in lo
     instructions = [
@@ -254,7 +249,6 @@ class TestFmaMix(unittest.TestCase):
 
   def test_v_fma_mixlo_f16(self):
     """V_FMA_MIXLO_F16 writes to low 16 bits of destination."""
-    from extra.assembly.amd.test.hw.helpers import _f16
     instructions = [
       s_mov_b32(s[0], f2i(2.0)),
       v_mov_b32_e32(v[0], s[0]),
@@ -267,14 +261,13 @@ class TestFmaMix(unittest.TestCase):
       VOP3P(VOP3POp.V_FMA_MIXLO_F16, vdst=v[3], src0=v[0], src1=v[1], src2=v[2], opsel=0, opsel_hi=0, opsel_hi2=0),
     ]
     st = run_program(instructions, n_lanes=1)
-    lo = _f16(st.vgpr[0][3] & 0xffff)
+    lo = f16(st.vgpr[0][3] & 0xffff)
     hi = (st.vgpr[0][3] >> 16) & 0xffff
     self.assertAlmostEqual(lo, 7.0, places=1)
     self.assertEqual(hi, 0xdead, f"hi should be preserved, got 0x{hi:04x}")
 
   def test_v_fma_mixlo_f16_all_f32_sources(self):
     """V_FMA_MIXLO_F16 with all f32 sources."""
-    from extra.assembly.amd.test.hw.helpers import _f16
     instructions = [
       s_mov_b32(s[0], f2i(1.0)),
       v_mov_b32_e32(v[0], s[0]),
@@ -286,13 +279,12 @@ class TestFmaMix(unittest.TestCase):
       VOP3P(VOP3POp.V_FMA_MIXLO_F16, vdst=v[3], src0=v[0], src1=v[1], src2=v[2], opsel=0, opsel_hi=0, opsel_hi2=0),
     ]
     st = run_program(instructions, n_lanes=1)
-    lo = _f16(st.vgpr[0][3] & 0xffff)
+    lo = f16(st.vgpr[0][3] & 0xffff)
     # 1*2+3 = 5
     self.assertAlmostEqual(lo, 5.0, places=1)
 
   def test_v_fma_mixlo_f16_sin_case(self):
     """V_FMA_MIXLO_F16 case from sin kernel."""
-    from extra.assembly.amd.test.hw.helpers import _f16
     instructions = [
       s_mov_b32(s[0], 0x3f800000),  # f32 1.0
       v_mov_b32_e32(v[3], s[0]),
@@ -305,7 +297,7 @@ class TestFmaMix(unittest.TestCase):
       VOP3P(VOP3POp.V_FMA_MIXLO_F16, vdst=v[3], src0=v[3], src1=s[6], src2=v[5], opsel=0, opsel_hi=0, opsel_hi2=0),
     ]
     st = run_program(instructions, n_lanes=1)
-    lo = _f16(st.vgpr[0][3] & 0xffff)
+    lo = f16(st.vgpr[0][3] & 0xffff)
     self.assertAlmostEqual(lo, -3.14159, delta=0.01)
 
 
@@ -314,7 +306,6 @@ class TestVOP3P(unittest.TestCase):
 
   def test_v_pk_add_f16_basic(self):
     """V_PK_ADD_F16 adds two packed f16 values."""
-    from extra.assembly.amd.test.hw.helpers import _f16
     instructions = [
       s_mov_b32(s[0], 0x40003c00),  # hi=2.0, lo=1.0
       s_mov_b32(s[1], 0x44004200),  # hi=4.0, lo=3.0
@@ -324,14 +315,13 @@ class TestVOP3P(unittest.TestCase):
     ]
     st = run_program(instructions, n_lanes=1)
     result = st.vgpr[0][2]
-    lo = _f16(result & 0xffff)
-    hi = _f16((result >> 16) & 0xffff)
+    lo = f16(result & 0xffff)
+    hi = f16((result >> 16) & 0xffff)
     self.assertAlmostEqual(lo, 4.0, places=2)
     self.assertAlmostEqual(hi, 6.0, places=2)
 
   def test_v_pk_mul_f16_basic(self):
     """V_PK_MUL_F16 multiplies two packed f16 values."""
-    from extra.assembly.amd.test.hw.helpers import _f16
     instructions = [
       s_mov_b32(s[0], 0x42004000),  # hi=3.0, lo=2.0
       s_mov_b32(s[1], 0x45004400),  # hi=5.0, lo=4.0
@@ -341,14 +331,13 @@ class TestVOP3P(unittest.TestCase):
     ]
     st = run_program(instructions, n_lanes=1)
     result = st.vgpr[0][2]
-    lo = _f16(result & 0xffff)
-    hi = _f16((result >> 16) & 0xffff)
+    lo = f16(result & 0xffff)
+    hi = f16((result >> 16) & 0xffff)
     self.assertAlmostEqual(lo, 8.0, places=1)
     self.assertAlmostEqual(hi, 15.0, places=1)
 
   def test_v_pk_fma_f16_basic(self):
     """V_PK_FMA_F16: D = A * B + C for packed f16."""
-    from extra.assembly.amd.test.hw.helpers import _f16
     instructions = [
       s_mov_b32(s[0], 0x42004000),  # A: hi=3.0, lo=2.0
       s_mov_b32(s[1], 0x45004400),  # B: hi=5.0, lo=4.0
@@ -360,8 +349,8 @@ class TestVOP3P(unittest.TestCase):
     ]
     st = run_program(instructions, n_lanes=1)
     result = st.vgpr[0][3]
-    lo = _f16(result & 0xffff)
-    hi = _f16((result >> 16) & 0xffff)
+    lo = f16(result & 0xffff)
+    hi = f16((result >> 16) & 0xffff)
     self.assertAlmostEqual(lo, 9.0, places=1)   # 2*4+1
     self.assertAlmostEqual(hi, 16.0, places=0)  # 3*5+1
 
@@ -370,7 +359,6 @@ class TestVOP3P(unittest.TestCase):
     Inline constants for VOP3P are f16 values in the low 16 bits only.
     hi half of inline constant is 0, so hi result = v0.hi + 0 = 1.0.
     """
-    from extra.assembly.amd.test.hw.helpers import _f16
     instructions = [
       s_mov_b32(s[0], 0x3c003c00),  # packed f16: hi=1.0, lo=1.0
       v_mov_b32_e32(v[0], s[0]),
@@ -378,8 +366,8 @@ class TestVOP3P(unittest.TestCase):
     ]
     st = run_program(instructions, n_lanes=1)
     result = st.vgpr[0][1]
-    lo = _f16(result & 0xffff)
-    hi = _f16((result >> 16) & 0xffff)
+    lo = f16(result & 0xffff)
+    hi = f16((result >> 16) & 0xffff)
     # lo = 1.0 + 1.0 = 2.0, hi = 1.0 + 0.0 = 1.0 (inline const hi half is 0)
     self.assertAlmostEqual(lo, 2.0, places=2)
     self.assertAlmostEqual(hi, 1.0, places=2)
@@ -388,7 +376,6 @@ class TestVOP3P(unittest.TestCase):
     """V_PK_MUL_F16 with inline constant POS_TWO (2.0).
     Inline constant has value only in low 16 bits, hi is 0.
     """
-    from extra.assembly.amd.test.hw.helpers import _f16
     # v0 = packed (3.0, 4.0), multiply by POS_TWO
     # lo = 3.0 * 2.0 = 6.0, hi = 4.0 * 0.0 = 0.0 (inline const hi is 0)
     instructions = [
@@ -398,8 +385,8 @@ class TestVOP3P(unittest.TestCase):
     ]
     st = run_program(instructions, n_lanes=1)
     result = st.vgpr[0][1]
-    lo = _f16(result & 0xffff)
-    hi = _f16((result >> 16) & 0xffff)
+    lo = f16(result & 0xffff)
+    hi = f16((result >> 16) & 0xffff)
     self.assertAlmostEqual(lo, 6.0, places=1)
     self.assertAlmostEqual(hi, 0.0, places=1)
 
@@ -413,7 +400,6 @@ class TestWMMAF16(unittest.TestCase):
 
   def test_v_wmma_f16_16x16x16_f16_all_ones(self):
     """V_WMMA_F16_16X16X16_F16 with all ones produces 16.0 in f16."""
-    from extra.assembly.amd.test.hw.helpers import _f16
     instructions = []
     instructions.append(s_mov_b32(s[0], 0x3c003c00))  # packed f16 1.0
     # Initialize A matrix in v[16:23] (8 regs)
@@ -432,13 +418,12 @@ class TestWMMAF16(unittest.TestCase):
     for lane in range(32):
       for reg in range(8):
         result = st.vgpr[lane][reg]
-        lo = _f16(result & 0xffff)
+        lo = f16(result & 0xffff)
         self.assertAlmostEqual(lo, 16.0, places=1, msg=f"v[{reg}] lane {lane}: expected 16.0, got {lo}")
         self.assertEqual(result >> 16, 0, msg=f"v[{reg}] lane {lane}: hi bits should be 0")
 
   def test_v_wmma_f16_16x16x16_f16_with_accumulator(self):
     """V_WMMA_F16_16X16X16_F16 with non-zero accumulator."""
-    from extra.assembly.amd.test.hw.helpers import _f16
     instructions = []
     instructions.append(s_mov_b32(s[0], 0x3c003c00))  # packed f16 1.0
     instructions.append(s_mov_b32(s[1], 0x4500))  # f16 5.0 in lo bits only
@@ -458,7 +443,7 @@ class TestWMMAF16(unittest.TestCase):
     for lane in range(32):
       for reg in range(8):
         result = st.vgpr[lane][reg]
-        lo = _f16(result & 0xffff)
+        lo = f16(result & 0xffff)
         self.assertAlmostEqual(lo, 21.0, places=0, msg=f"v[{reg}] lane {lane}: expected 21.0, got {lo}")
         self.assertEqual(result >> 16, 0, msg=f"v[{reg}] lane {lane}: hi bits should be 0")
 
@@ -468,7 +453,6 @@ class TestWMMAF16(unittest.TestCase):
     Regression test: WMMA was using static register indices instead of dynamic.
     This test uses v[64:71] for A, v[80:87] for B, v[96:103] for C/D.
     """
-    from extra.assembly.amd.test.hw.helpers import _f16
     instructions = []
     instructions.append(s_mov_b32(s[0], 0x3c003c00))  # packed f16 1.0
     # Initialize A matrix in v[64:71] (8 regs)
@@ -490,7 +474,7 @@ class TestWMMAF16(unittest.TestCase):
     for lane in range(32):
       for reg in range(8):
         result = st.vgpr[lane][reg]
-        lo = _f16(result & 0xffff)
+        lo = f16(result & 0xffff)
         self.assertAlmostEqual(lo, 16.0, places=1, msg=f"v[{reg}] lane {lane}: expected 16.0, got {lo}")
         self.assertEqual(result >> 16, 0, msg=f"v[{reg}] lane {lane}: hi bits should be 0")
 
@@ -713,7 +697,6 @@ class TestPackedMixedSigns(unittest.TestCase):
 
   def test_pk_add_f16_mixed_signs(self):
     """V_PK_ADD_F16 with mixed positive/negative values."""
-    from extra.assembly.amd.test.hw.helpers import _f16
     instructions = [
       s_mov_b32(s[0], 0xc0003c00),  # packed: hi=-2.0, lo=1.0
       s_mov_b32(s[1], 0x3c003c00),  # packed: hi=1.0, lo=1.0
@@ -723,14 +706,13 @@ class TestPackedMixedSigns(unittest.TestCase):
     ]
     st = run_program(instructions, n_lanes=1)
     result = st.vgpr[0][2]
-    lo = _f16(result & 0xffff)
-    hi = _f16((result >> 16) & 0xffff)
+    lo = f16(result & 0xffff)
+    hi = f16((result >> 16) & 0xffff)
     self.assertAlmostEqual(lo, 2.0, places=2)   # 1.0 + 1.0
     self.assertAlmostEqual(hi, -1.0, places=2)  # -2.0 + 1.0
 
   def test_pk_mul_f16_zero(self):
     """V_PK_MUL_F16 with zero."""
-    from extra.assembly.amd.test.hw.helpers import _f16
     instructions = [
       s_mov_b32(s[0], 0x40004000),  # packed: 2.0, 2.0
       s_mov_b32(s[1], 0x00000000),  # packed: 0.0, 0.0
@@ -741,6 +723,50 @@ class TestPackedMixedSigns(unittest.TestCase):
     st = run_program(instructions, n_lanes=1)
     result = st.vgpr[0][2]
     self.assertEqual(result, 0x00000000, "2.0 * 0.0 should be 0.0")
+
+
+class TestPkMinMaxF16(unittest.TestCase):
+  """Tests for V_PK_MIN_F16 and V_PK_MAX_F16."""
+
+  def test_v_pk_min_f16_basic(self):
+    """V_PK_MIN_F16: packed min of two f16 pairs."""
+    # src0 = {hi=3.0, lo=1.0}, src1 = {hi=2.0, lo=4.0}
+    # result = {min(3,2)=2, min(1,4)=1}
+    src0 = (f32_to_f16(3.0) << 16) | f32_to_f16(1.0)
+    src1 = (f32_to_f16(2.0) << 16) | f32_to_f16(4.0)
+    instructions = [
+      s_mov_b32(s[0], src0),
+      s_mov_b32(s[1], src1),
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[1]),
+      v_pk_min_f16(v[2], v[0], v[1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = st.vgpr[0][2]
+    lo = f16(result & 0xffff)
+    hi = f16((result >> 16) & 0xffff)
+    self.assertAlmostEqual(lo, 1.0, delta=0.01)
+    self.assertAlmostEqual(hi, 2.0, delta=0.01)
+
+  def test_v_pk_max_f16_basic(self):
+    """V_PK_MAX_F16: packed max of two f16 pairs."""
+    # src0 = {hi=3.0, lo=1.0}, src1 = {hi=2.0, lo=4.0}
+    # result = {max(3,2)=3, max(1,4)=4}
+    src0 = (f32_to_f16(3.0) << 16) | f32_to_f16(1.0)
+    src1 = (f32_to_f16(2.0) << 16) | f32_to_f16(4.0)
+    instructions = [
+      s_mov_b32(s[0], src0),
+      s_mov_b32(s[1], src1),
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[1]),
+      v_pk_max_f16(v[2], v[0], v[1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = st.vgpr[0][2]
+    lo = f16(result & 0xffff)
+    hi = f16((result >> 16) & 0xffff)
+    self.assertAlmostEqual(lo, 4.0, delta=0.01)
+    self.assertAlmostEqual(hi, 3.0, delta=0.01)
 
 
 if __name__ == '__main__':
