@@ -725,6 +725,233 @@ class TestPackedMixedSigns(unittest.TestCase):
     self.assertEqual(result, 0x00000000, "2.0 * 0.0 should be 0.0")
 
 
+class TestDot2F32F16(unittest.TestCase):
+  """Tests for V_DOT2_F32_F16 - dot product of f16 pairs producing f32."""
+
+  def test_v_dot2_f32_f16_basic(self):
+    """V_DOT2_F32_F16: dot product of two packed f16 pairs -> f32."""
+    # src0 = {hi=2.0, lo=1.0}, src1 = {hi=4.0, lo=3.0}
+    # result = 1.0*3.0 + 2.0*4.0 + 0 = 3 + 8 = 11.0
+    src0 = (f32_to_f16(2.0) << 16) | f32_to_f16(1.0)
+    src1 = (f32_to_f16(4.0) << 16) | f32_to_f16(3.0)
+    instructions = [
+      s_mov_b32(s[0], src0),
+      s_mov_b32(s[1], src1),
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[1]),
+      v_mov_b32_e32(v[2], 0),
+      v_dot2_f32_f16(v[3], v[0], v[1], v[2], opsel_hi=3, opsel_hi2=1),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = i2f(st.vgpr[0][3])
+    self.assertAlmostEqual(result, 11.0, places=2)
+
+  def test_v_dot2_f32_f16_with_accumulator(self):
+    """V_DOT2_F32_F16 with non-zero f32 accumulator."""
+    # src0 = {hi=1.0, lo=1.0}, src1 = {hi=1.0, lo=1.0}, acc = 5.0
+    # result = 1.0*1.0 + 1.0*1.0 + 5.0 = 7.0
+    src0 = (f32_to_f16(1.0) << 16) | f32_to_f16(1.0)
+    instructions = [
+      s_mov_b32(s[0], src0),
+      s_mov_b32(s[1], f2i(5.0)),
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[0]),  # same as src0
+      v_mov_b32_e32(v[2], s[1]),
+      v_dot2_f32_f16(v[3], v[0], v[1], v[2], opsel_hi=3, opsel_hi2=1),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = i2f(st.vgpr[0][3])
+    self.assertAlmostEqual(result, 7.0, places=2)
+
+  def test_v_dot2_f32_f16_negative_values(self):
+    """V_DOT2_F32_F16 with negative f16 values."""
+    # src0 = {hi=-2.0, lo=3.0}, src1 = {hi=1.0, lo=2.0}
+    # result = 3.0*2.0 + (-2.0)*1.0 + 0 = 6 - 2 = 4.0
+    src0 = (f32_to_f16(-2.0) << 16) | f32_to_f16(3.0)
+    src1 = (f32_to_f16(1.0) << 16) | f32_to_f16(2.0)
+    instructions = [
+      s_mov_b32(s[0], src0),
+      s_mov_b32(s[1], src1),
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[1]),
+      v_mov_b32_e32(v[2], 0),
+      v_dot2_f32_f16(v[3], v[0], v[1], v[2], opsel_hi=3, opsel_hi2=1),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = i2f(st.vgpr[0][3])
+    self.assertAlmostEqual(result, 4.0, places=2)
+
+
+class TestDot2F16F16(unittest.TestCase):
+  """Tests for V_DOT2_F16_F16 - dot product of f16 pairs producing f16."""
+
+  def test_v_dot2_f16_f16_basic(self):
+    """V_DOT2_F16_F16: dot product of two packed f16 pairs -> f16."""
+    # src0 = {hi=2.0, lo=1.0}, src1 = {hi=3.0, lo=2.0}
+    # result = 1.0*2.0 + 2.0*3.0 + 0 = 2 + 6 = 8.0 (f16)
+    src0 = (f32_to_f16(2.0) << 16) | f32_to_f16(1.0)
+    src1 = (f32_to_f16(3.0) << 16) | f32_to_f16(2.0)
+    instructions = [
+      s_mov_b32(s[0], src0),
+      s_mov_b32(s[1], src1),
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[1]),
+      v_mov_b32_e32(v[2], 0),
+      v_dot2_f16_f16(v[3], v[0], v[1], v[2]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = f16(st.vgpr[0][3] & 0xffff)
+    self.assertAlmostEqual(result, 8.0, places=1)
+
+  def test_v_dot2_f16_f16_with_accumulator(self):
+    """V_DOT2_F16_F16 with non-zero f16 accumulator."""
+    # src0 = {hi=1.0, lo=1.0}, src1 = {hi=1.0, lo=1.0}, acc = 3.0 (f16)
+    # result = 1.0*1.0 + 1.0*1.0 + 3.0 = 5.0 (f16)
+    src0 = (f32_to_f16(1.0) << 16) | f32_to_f16(1.0)
+    acc = f32_to_f16(3.0)
+    instructions = [
+      s_mov_b32(s[0], src0),
+      s_mov_b32(s[2], acc),
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[0]),  # same as src0
+      v_mov_b32_e32(v[2], s[2]),
+      v_dot2_f16_f16(v[3], v[0], v[1], v[2]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = f16(st.vgpr[0][3] & 0xffff)
+    self.assertAlmostEqual(result, 5.0, places=1)
+
+
+class TestSignedDotProducts(unittest.TestCase):
+  """Tests for V_DOT4_I32_IU8 and V_DOT8_I32_IU4 with signed inputs."""
+
+  def test_v_dot4_i32_iu8_signed_both(self):
+    """V_DOT4_I32_IU8 with both inputs signed (neg=0b011)."""
+    # src0 = {-1, -2, 3, 4} as i8 = {0xff, 0xfe, 0x03, 0x04}
+    # src1 = {1, 1, 1, 1} as i8
+    # result = (-1)*1 + (-2)*1 + 3*1 + 4*1 = -1 - 2 + 3 + 4 = 4
+    src0 = (0xff << 24) | (0xfe << 16) | (0x03 << 8) | 0x04  # -1, -2, 3, 4
+    src1 = 0x01010101  # 1, 1, 1, 1
+    instructions = [
+      s_mov_b32(s[0], src0),
+      s_mov_b32(s[1], src1),
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[1]),
+      v_mov_b32_e32(v[2], 0),
+      v_dot4_i32_iu8(v[3], v[0], v[1], v[2], neg=0b011),  # both signed
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = st.vgpr[0][3]
+    # Result is i32, interpret as signed
+    if result >= 0x80000000:
+      result = result - 0x100000000
+    self.assertEqual(result, 4)
+
+  def test_v_dot4_i32_iu8_src0_signed(self):
+    """V_DOT4_I32_IU8 with only src0 signed (neg=0b001)."""
+    # src0 = {-1, -1, -1, -1} as i8 = {0xff, 0xff, 0xff, 0xff}
+    # src1 = {2, 2, 2, 2} as u8
+    # result = (-1)*2 + (-1)*2 + (-1)*2 + (-1)*2 = -8
+    src0 = 0xffffffff  # -1, -1, -1, -1 (as i8)
+    src1 = 0x02020202  # 2, 2, 2, 2 (as u8)
+    instructions = [
+      s_mov_b32(s[0], src0),
+      s_mov_b32(s[1], src1),
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[1]),
+      v_mov_b32_e32(v[2], 0),
+      v_dot4_i32_iu8(v[3], v[0], v[1], v[2], neg=0b001),  # src0 signed
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = st.vgpr[0][3]
+    if result >= 0x80000000:
+      result = result - 0x100000000
+    self.assertEqual(result, -8)
+
+  def test_v_dot4_i32_iu8_src1_signed(self):
+    """V_DOT4_I32_IU8 with only src1 signed (neg=0b010)."""
+    # src0 = {2, 2, 2, 2} as u8
+    # src1 = {-1, -1, -1, -1} as i8 = {0xff, 0xff, 0xff, 0xff}
+    # result = 2*(-1) + 2*(-1) + 2*(-1) + 2*(-1) = -8
+    src0 = 0x02020202  # 2, 2, 2, 2 (as u8)
+    src1 = 0xffffffff  # -1, -1, -1, -1 (as i8)
+    instructions = [
+      s_mov_b32(s[0], src0),
+      s_mov_b32(s[1], src1),
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[1]),
+      v_mov_b32_e32(v[2], 0),
+      v_dot4_i32_iu8(v[3], v[0], v[1], v[2], neg=0b010),  # src1 signed
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = st.vgpr[0][3]
+    if result >= 0x80000000:
+      result = result - 0x100000000
+    self.assertEqual(result, -8)
+
+  def test_v_dot4_i32_iu8_unsigned_as_reference(self):
+    """V_DOT4_I32_IU8 with both unsigned (neg=0) - same as V_DOT4_U32_U8."""
+    # src0 = {0xff, 0xff, 0xff, 0xff} = 255 each as u8
+    # src1 = {1, 1, 1, 1}
+    # result = 255*1 + 255*1 + 255*1 + 255*1 = 1020
+    src0 = 0xffffffff
+    src1 = 0x01010101
+    instructions = [
+      s_mov_b32(s[0], src0),
+      s_mov_b32(s[1], src1),
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[1]),
+      v_mov_b32_e32(v[2], 0),
+      v_dot4_i32_iu8(v[3], v[0], v[1], v[2], neg=0),  # both unsigned
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][3], 1020)
+
+  def test_v_dot8_i32_iu4_signed_both(self):
+    """V_DOT8_I32_IU4 with both inputs signed (neg=0b011)."""
+    # src0 = 8 nibbles: {-1, -2, 3, 4, -1, -2, 3, 4} as i4
+    # i4 -1 = 0xf, -2 = 0xe, 3 = 0x3, 4 = 0x4
+    # src0 = 0xfe34fe34
+    # src1 = {1, 1, 1, 1, 1, 1, 1, 1} as i4 = 0x11111111
+    # result = 2 * ((-1)*1 + (-2)*1 + 3*1 + 4*1) = 2 * 4 = 8
+    src0 = 0xfe34fe34
+    src1 = 0x11111111
+    instructions = [
+      s_mov_b32(s[0], src0),
+      s_mov_b32(s[1], src1),
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[1]),
+      v_mov_b32_e32(v[2], 0),
+      v_dot8_i32_iu4(v[3], v[0], v[1], v[2], neg=0b011),  # both signed
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = st.vgpr[0][3]
+    if result >= 0x80000000:
+      result = result - 0x100000000
+    self.assertEqual(result, 8)
+
+  def test_v_dot8_i32_iu4_all_negative(self):
+    """V_DOT8_I32_IU4 with all negative signed values."""
+    # src0 = 8 nibbles all -1 (0xf) = 0xffffffff
+    # src1 = 8 nibbles all 1 = 0x11111111
+    # result = 8 * ((-1)*1) = -8
+    src0 = 0xffffffff  # all -1 as i4
+    src1 = 0x11111111  # all 1
+    instructions = [
+      s_mov_b32(s[0], src0),
+      s_mov_b32(s[1], src1),
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[1]),
+      v_mov_b32_e32(v[2], 0),
+      v_dot8_i32_iu4(v[3], v[0], v[1], v[2], neg=0b011),  # both signed
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = st.vgpr[0][3]
+    if result >= 0x80000000:
+      result = result - 0x100000000
+    self.assertEqual(result, -8)
+
+
 class TestPkMinMaxF16(unittest.TestCase):
   """Tests for V_PK_MIN_F16 and V_PK_MAX_F16."""
 
