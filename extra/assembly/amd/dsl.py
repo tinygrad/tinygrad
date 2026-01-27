@@ -1,26 +1,23 @@
 # dsl.py - clean DSL for AMD assembly
+from typing import Any
 
 # ══════════════════════════════════════════════════════════════
 # Registers - unified src encoding space (0-511)
 # ══════════════════════════════════════════════════════════════
 
-def _reg_size(t: str | None) -> int: return {'b64': 2, 'f64': 2, 'u64': 2, 'i64': 2, 'b128': 4}.get(t, 1)
-
 class Reg:
-  _NAMES = {106: "VCC_LO", 107: "VCC_HI", 124: "NULL", 125: "M0", 126: "EXEC_LO", 127: "EXEC_HI",
+  # Register names vary by arch: RDNA has NULL@124/M0@125, CDNA has M0@124/reserved@125
+  # RDNA4 has DPP8@233, CDNA has SDWA@249/DPP@250/VCCZ@251/EXECZ@252
+  _NAMES = {102: "FLAT_SCRATCH_LO", 103: "FLAT_SCRATCH_HI", 104: "XNACK_MASK_LO", 105: "XNACK_MASK_HI",
+            106: "VCC_LO", 107: "VCC_HI", 124: "NULL", 125: "M0", 126: "EXEC_LO", 127: "EXEC_HI",
+            233: "DPP8", 234: "DPP8FI", 235: "SHARED_BASE", 236: "SHARED_LIMIT", 237: "PRIVATE_BASE", 238: "PRIVATE_LIMIT",
             240: "0.5", 241: "-0.5", 242: "1.0", 243: "-1.0", 244: "2.0", 245: "-2.0", 246: "4.0", 247: "-4.0",
-            248: "INV_2PI", 250: "DPP16", 253: "SCC", 255: "LIT"}
+            248: "INV_2PI", 249: "SDWA", 250: "DPP", 251: "VCCZ", 252: "EXECZ", 253: "SCC", 254: "SRC_LDS_DIRECT", 255: "LIT"}
   _PAIRS = {106: "VCC", 126: "EXEC"}
 
   def __init__(self, offset: int = 0, sz: int = 512, *, neg: bool = False, abs_: bool = False, hi: bool = False):
     self.offset, self.sz = offset, sz
     self.neg, self.abs_, self.hi = neg, abs_, hi
-
-  # TODO: remove these legacy aliases
-  @property
-  def count(self): return self.sz
-  @property
-  def idx(self): return self.offset
 
   def __hash__(self): return hash((self.offset, self.sz, self.neg, self.abs_, self.hi))
   def __getitem__(self, key):
@@ -78,9 +75,13 @@ EXEC = src[126:127]
 # 128: 0, 129-192: integers 1-64, 193-208: integers -1 to -16
 # 240-248: float constants (0.5, -0.5, 1.0, -1.0, 2.0, -2.0, 4.0, -4.0, 1/(2*PI))
 INV_2PI = src[248]
-DPP16 = src[250]
+SDWA = src[249]
+DPP = DPP16 = src[250]
+VCCZ = src[251]
+EXECZ = src[252]
 SCC = src[253]
-# 255: literal constant
+SRC_LDS_DIRECT = src[254]
+LIT = src[255]           # literal constant marker
 v = src[256:511]         # VGPR0-255
 
 # ══════════════════════════════════════════════════════════════
@@ -93,12 +94,13 @@ class _Bits:
 bits = _Bits()
 
 class BitField:
+  name: str | None
   def __init__(self, hi: int, lo: int, default: int = 0):
     self.hi, self.lo, self.default, self.name, self.mask = hi, lo, default, None, (1 << (hi - lo + 1)) - 1
-  def __set_name__(self, owner, name): self.name = name
-  def __eq__(self, other) -> 'FixedBitField':
+  def __set_name__(self, owner, name: str): self.name = name
+  def __eq__(self, other) -> 'FixedBitField':  # type: ignore[override]
     if isinstance(other, int): return FixedBitField(self.hi, self.lo, other)
-    return NotImplemented
+    raise TypeError(f"BitField.__eq__ expects int, got {type(other).__name__}")
   def enum(self, enum_cls) -> 'EnumBitField': return EnumBitField(self.hi, self.lo, enum_cls)
   def encode(self, val) -> int:
     assert isinstance(val, int), f"BitField.encode expects int, got {type(val).__name__}"
@@ -107,11 +109,14 @@ class BitField:
   def set(self, raw: int, val) -> int:
     if val is None: val = self.default
     encoded = self.encode(val)
+    # Handle signed values: convert negative to 2's complement
+    if encoded < 0: encoded = encoded & self.mask
     if encoded < 0 or encoded > self.mask: raise RuntimeError(f"field '{self.name}': value {encoded} doesn't fit in {self.hi - self.lo + 1} bits")
     return (raw & ~(self.mask << self.lo)) | (encoded << self.lo)
   def __get__(self, obj, objtype=None):
     if obj is None: return self
     return self.decode((obj._raw >> self.lo) & self.mask)
+  def __set__(self, obj, val): obj._raw = self.set(obj._raw, val)
 
 class FixedBitField(BitField):
   def set(self, raw: int, val=None) -> int:
@@ -119,11 +124,14 @@ class FixedBitField(BitField):
     return super().set(raw, self.default)
 
 class EnumBitField(BitField):
-  def __init__(self, hi: int, lo: int, enum_cls):
+  def __init__(self, hi: int, lo: int, enum_cls, allowed: set | None = None):
     super().__init__(hi, lo)
     self._enum = enum_cls
+    self.allowed = allowed  # if set, only these enum values are valid for this encoding
   def encode(self, val) -> int:
     if not isinstance(val, self._enum): raise RuntimeError(f"expected {self._enum.__name__}, got {type(val).__name__}")
+    if self.allowed is not None and val not in self.allowed:
+      raise RuntimeError(f"opcode {val.name} not allowed in this encoding")
     return val.value
   def decode(self, raw): return self._enum(raw)
 
@@ -165,7 +173,10 @@ class SrcField(BitField):
     # Resize register based on operand info (skip non-resizable special registers)
     # VCC/EXEC pairs (106, 126), NULL (124), M0 (125), float constants (240-255)
     if reg.offset not in (124, 125) and not 240 <= reg.offset <= 255:
-      if sz := obj.op_regs.get(self.name, 1): reg = Reg(reg.offset, sz, neg=reg.neg, abs_=reg.abs_, hi=reg.hi)
+      # Map variant field names (vsrc0->src0, vsrc1->src1, etc.) for DPP/SDWA classes
+      assert self.name is not None
+      name = self.name[1:] if self.name.startswith('v') and self.name[1:] in obj.op_regs else self.name
+      if sz := obj.op_regs.get(name, 1): reg = Reg(reg.offset, sz, neg=reg.neg, abs_=reg.abs_, hi=reg.hi)
     return reg
 
 class VGPRField(SrcField):
@@ -208,7 +219,12 @@ class VDSTYField(BitField):
     if not isinstance(val, Reg): raise TypeError(f"VDSTYField requires Reg, got {type(val).__name__}")
     if not (256 <= val.offset < 512): raise ValueError(f"VDSTYField requires VGPR, got offset {val.offset}")
     return (val.offset - 256) >> 1
-  def decode(self, raw): return raw  # raw value, actual vdsty = (raw << 1) | ((vdstx & 1) ^ 1)
+  def __get__(self, obj, objtype=None):
+    if obj is None: return self
+    raw = (obj._raw >> self.lo) & self.mask
+    vdstx_bit0 = (obj.vdstx.offset - 256) & 1
+    vgpr_idx = (raw << 1) | (vdstx_bit0 ^ 1)
+    return Reg(256 + vgpr_idx, 1)
 
 # ══════════════════════════════════════════════════════════════
 # Operand info from XML
@@ -224,6 +240,19 @@ OPERANDS = {**OPERANDS_CDNA, **OPERANDS_RDNA3, **OPERANDS_RDNA4}
 # Inst base class
 # ══════════════════════════════════════════════════════════════
 
+def _needs_literal(val) -> bool:
+  """Check if a value needs a literal constant (can't be encoded inline)."""
+  if val is None or isinstance(val, Reg): return False
+  if isinstance(val, float): return val not in SrcField._FLOAT_ENC
+  if isinstance(val, int): return not (0 <= val <= 64 or -16 <= val < 0)
+  return False
+
+def _get_variant(cls, suffix: str):
+  """Get a variant class by suffix (e.g., '_LIT') via module lookup."""
+  import sys
+  module = sys.modules.get(cls.__module__)
+  return getattr(module, f"{cls.__name__}{suffix}", None) if module else None
+
 class Inst:
   _fields: list[tuple[str, BitField]]
   _base_size: int
@@ -238,18 +267,31 @@ class Inst:
     cls._fields = list(inherited.items())
     cls._base_size = (max(f.hi for _, f in cls._fields) + 8) // 8
 
+  def __new__(cls, *args, **kwargs):
+    # Auto-upgrade to variant if needed (only for base classes, not variants)
+    if not any(cls.__name__.endswith(sfx) for sfx in ('_LIT', '_DPP16', '_DPP8', '_SDWA', '_SDWA_SDST', '_MFMA')):
+      args_iter = iter(args)
+      for name, field in cls._fields:
+        if isinstance(field, FixedBitField): continue
+        val = kwargs.get(name) if name in kwargs else next(args_iter, None)
+        if not isinstance(field, SrcField): continue
+        if isinstance(val, Reg) and val.offset == 255 and (lit_cls := _get_variant(cls, '_LIT')): return lit_cls(*args, **kwargs)
+        if isinstance(val, Reg) and val.offset == 249:
+          if (sdwa_cls := _get_variant(cls, '_SDWA') or _get_variant(cls, '_SDWA_SDST')): return sdwa_cls(*args, **kwargs)
+        if isinstance(val, Reg) and val.offset == 250 and (dpp_cls := _get_variant(cls, '_DPP16')): return dpp_cls(*args, **kwargs)
+        if _needs_literal(val) and (lit_cls := _get_variant(cls, '_LIT')): return lit_cls(*args, **kwargs)
+    return object.__new__(cls)
+
   def __init__(self, *args, **kwargs):
     self._raw = 0
-    self._literal: int | None = kwargs.pop('literal', None)
     # Map positional args to field names (skip FixedBitFields)
     args_iter = iter(args)
-    vals = {}
+    vals: dict[str, Any] = {}
     for name, field in self._fields:
       if isinstance(field, FixedBitField): vals[name] = None
       elif name in kwargs: vals[name] = kwargs[name]
       else: vals[name] = next(args_iter, None)
-    remaining = list(args_iter)
-    assert not remaining, f"too many positional args: {remaining}"
+    assert not (remaining := list(args_iter)), f"too many positional args: {remaining}"
     # Extract modifiers from Reg objects and merge into neg/abs/opsel
     neg_bits, abs_bits, opsel_bits = 0, 0, 0
     for name, bit in [('src0', 0), ('src1', 1), ('src2', 2)]:
@@ -263,23 +305,27 @@ class Inst:
     if neg_bits: vals['neg'] = (vals.get('neg') or 0) | neg_bits
     if abs_bits: vals['abs'] = (vals.get('abs') or 0) | abs_bits
     if opsel_bits: vals['opsel'] = (vals.get('opsel') or 0) | opsel_bits
-    # Set all field values
+    # For _LIT classes, capture literal value from SrcFields that encode to 255
+    literal_val = None
     for name, field in self._fields:
       val = vals[name]
-      self._raw = field.set(self._raw, val)
-      # Capture literal for SrcFields that encoded to 255
-      if isinstance(field, SrcField) and val is not None and field.encode(val) + field._valid_range[0] == 255 and self._literal is None:
-        self._literal = _f32(val) if isinstance(val, float) else val & 0xFFFFFFFF
-    # Validate register sizes against operand info (skip special registers like NULL, VCC, EXEC)
+      if isinstance(field, SrcField) and val is not None and _needs_literal(val):
+        literal_val = _f32(val) if isinstance(val, float) else val & 0xFFFFFFFF
+    if literal_val is not None and 'literal' in vals:
+      vals['literal'] = literal_val
+    # Set all field values
+    for name, field in self._fields:
+      self._raw = field.set(self._raw, vals[name])
+    # Validate register sizes against operand info (skip special registers like NULL, VCC, EXEC, SDWA/DPP markers)
     for name, expected in self.op_regs.items():
       if (val := vals.get(name)) is None: continue
-      if isinstance(val, Reg) and val.sz != expected and not (106 <= val.offset <= 127 or val.offset == 253):
+      if isinstance(val, Reg) and val.sz != expected and not (106 <= val.offset <= 127 or 249 <= val.offset <= 255):
         raise TypeError(f"{name} expects {expected} register(s), got {val.sz}")
 
   @property
-  def op_name(self) -> str: return self.op.name
+  def op_name(self) -> str: return getattr(self, 'op').name
   @property
-  def operands(self) -> dict: return OPERANDS.get(self.op, {}) if hasattr(self, 'op') else {}
+  def operands(self) -> dict: return OPERANDS.get(getattr(self, 'op'), {}) if hasattr(self, 'op') else {}
   def _is_cdna(self) -> bool: return 'cdna' in type(self).__module__
 
   @functools.cached_property
@@ -291,17 +337,26 @@ class Inst:
     if not self._is_cdna():
       name = self.op_name.lower()
       if 'cndmask' in name and 'src2' in bits: bits['src2'] = 32
-      if '_co_ci_' in name:
-        if 'src2' in bits: bits['src2'] = 32
-        if 'sdst' in bits: bits['sdst'] = 32
+      if '_co_ci_' in name and 'src2' in bits: bits['src2'] = 32  # carry-in source
+      # VOP3SD: sdst is always wavefront-size dependent (carry-out or condition mask)
+      if 'VOP3SD' in type(self).__name__ and 'sdst' in bits: bits['sdst'] = 32
       if 'cmp' in name and 'vdst' in bits: bits['vdst'] = 32
     # GLOBAL/FLAT: addr is 32-bit if saddr is valid SGPR, 64-bit if saddr is NULL
-    if 'addr' in bits and (saddr_field := getattr(type(self), 'saddr', None)):
+    # SCRATCH: addr is always 32-bit (offset from scratch base, not absolute address)
+    if 'addr' in bits and (saddr_field := getattr(type(self), 'saddr', None)) and type(self).__name__ not in ('SCRATCH', 'VSCRATCH'):
       saddr_val = (self._raw >> saddr_field.lo) & saddr_field.mask  # access _raw directly to avoid recursion
       bits['addr'] = 64 if saddr_val in (124, 125) else 32  # 124=NULL, 125=M0
     # MUBUF/MTBUF: vaddr size depends on offen/idxen (1 or 2 regs)
     if 'vaddr' in bits and hasattr(self, 'offen') and hasattr(self, 'idxen'):
       bits['vaddr'] = max(1, self.offen + self.idxen) * 32
+    # F8F6F4 MFMA: CBSZ selects matrix A format, BLGP selects matrix B format
+    # VGPRs: FP8/BF8(0,1)=8, FP6/BF6(2,3)=6, FP4(4)=4
+    if 'f8f6f4' in getattr(self, 'op_name', '').lower():
+      # Use explicit fields if available (VOP3PX2), else extract from VOP3P-MAI bit positions
+      cbsz = getattr(self, 'cbsz') if hasattr(type(self), 'cbsz') else (self._raw >> 8) & 0x7
+      blgp = getattr(self, 'blgp') if hasattr(type(self), 'blgp') else (self._raw >> 61) & 0x7
+      vgprs = {0: 8, 1: 8, 2: 6, 3: 6, 4: 4}
+      bits['src0'], bits['src1'] = vgprs.get(cbsz, 8) * 32, vgprs.get(blgp, 8) * 32
     return bits
   @property
   def op_regs(self) -> dict[str, int]:
@@ -317,7 +372,7 @@ class Inst:
       elif name in ('src1', 'vsrc1', 'ssrc1'): bits['s1'] = val
       elif name == 'src2': bits['s2'] = val
       elif name in ('vdst', 'sdst', 'sdata'): bits['d'] = val
-      elif name in ('data', 'vdata', 'data0'): bits['data'] = val
+      elif name in ('data', 'vdata', 'data0', 'vsrc'): bits['data'] = val
     return bits
   @property
   def canonical_op_regs(self) -> dict[str, int]:
@@ -333,37 +388,45 @@ class Inst:
     return 0
   @classmethod
   def _size(cls) -> int: return cls._base_size
-  def size(self) -> int: return self._base_size + (4 if self._literal is not None else 0)
+  def size(self) -> int: return self._base_size
   def disasm(self) -> str:
-    from extra.assembly.amd.asm import disasm
+    from extra.assembly.amd.disasm import disasm
     return disasm(self)
 
-  def to_bytes(self) -> bytes:
-    result = self._raw.to_bytes(self._base_size, 'little')
-    if self._literal is not None:
-      result += (self._literal & 0xFFFFFFFF).to_bytes(4, 'little')
-    return result
+  def to_bytes(self) -> bytes: return self._raw.to_bytes(self._base_size, 'little')
 
-  def has_literal(self) -> bool:
-    """Check if instruction has a 32-bit literal constant."""
+  @property
+  def _literal(self) -> int | None:
+    """Get the literal value if this instruction has one."""
+    return getattr(self, 'literal', None)
+
+  def _variant_suffix(self) -> str | None:
+    """Check if instruction needs a variant class (_LIT, _DPP8, _DPP16, _SDWA). Returns suffix or None."""
+    cls_name = type(self).__name__
+    # Don't check for variants if we're already a variant class
+    if any(s in cls_name for s in ('_LIT', '_DPP8', '_DPP16', '_SDWA')): return None
+    # VOPD: FMAMK/FMAAK opcodes always require literal (check by name since enum may differ across archs)
+    for name in ('opx', 'opy'):
+      if hasattr(self, name) and any(x in getattr(self, name).name for x in ('FMAMK', 'FMAAK')): return '_LIT'
     for name, field in self._fields:
-      if isinstance(field, SrcField) and getattr(self, name).offset == 255:
-        return True
-    # Check op, opx, opy for instructions that always have literals
-    for attr in ('op', 'opx', 'opy'):
-      if hasattr(self, attr) and any(x in getattr(self, attr).name for x in ('FMAMK', 'FMAAK', 'MADMK', 'MADAK', 'SETREG_IMM32')):
-        return True
-    return False
+      if isinstance(field, SrcField):
+        off = getattr(self, name).offset
+        if off == 255: return '_LIT'
+        if off == 249: return '_SDWA' if self._is_cdna() else '_DPP8'
+        if off == 250: return '_DPP16'
+    return None
 
   @classmethod
   def from_bytes(cls, data: bytes):
     inst = object.__new__(cls)
     inst._raw = int.from_bytes(data[:cls._base_size], 'little')
-    inst._literal = int.from_bytes(data[cls._base_size:cls._base_size + 4], 'little') if inst.has_literal() else None
+    # Upgrade to variant class if needed (_LIT, _DPP8, _DPP16, _SDWA)
+    if (suffix := inst._variant_suffix()) and (var_cls := _get_variant(cls, suffix)) is not None:
+      return var_cls.from_bytes(data)
     return inst
 
-  def __eq__(self, other): return type(self) is type(other) and self._raw == other._raw and self._literal == other._literal
-  def __hash__(self): return hash((type(self), self._raw, self._literal))
+  def __eq__(self, other): return type(self) is type(other) and self._raw == other._raw
+  def __hash__(self): return hash((type(self), self._raw))
 
   def __repr__(self):
     # collect (repr, is_default) pairs, strip trailing defaults so repr roundtrips with eval

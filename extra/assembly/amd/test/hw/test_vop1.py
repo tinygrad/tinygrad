@@ -255,7 +255,7 @@ class TestF16Conversions(unittest.TestCase):
 
   def test_v_cvt_f16_f32_small(self):
     """V_CVT_F16_F32 converts small f32 value."""
-    from extra.assembly.amd.pcode import f32_to_f16
+    from extra.assembly.amd.test.hw.helpers import f32_to_f16
     instructions = [
       v_mov_b32_e32(v[0], 0.5),
       v_cvt_f16_f32_e32(v[1], v[0]),
@@ -293,7 +293,7 @@ class TestF16Conversions(unittest.TestCase):
 
   def test_v_cvt_f16_f32_reads_full_32bit_source(self):
     """V_CVT_F16_F32 must read full 32-bit f32 source."""
-    from extra.assembly.amd.pcode import _f16
+    from extra.assembly.amd.test.hw.helpers import _f16
     instructions = [
       s_mov_b32(s[0], 0x3fc00000),  # f32 1.5
       v_mov_b32_e32(v[0], s[0]),
@@ -346,6 +346,142 @@ class TestF16Conversions(unittest.TestCase):
     st = run_program(instructions, n_lanes=1)
     result = st.vgpr[0][1] & 0xffff
     self.assertEqual(result, 1, f"Expected 1 from high bits, got {result}")
+
+
+class TestF64Conversions(unittest.TestCase):
+  """Tests for f64 conversion instructions. Regression tests for f32_to_f64/f64_to_f32."""
+
+  def test_v_cvt_f64_f32_one(self):
+    """V_CVT_F64_F32 converts f32 1.0 to f64."""
+    instructions = [
+      s_mov_b32(s[0], f2i(1.0)),
+      v_mov_b32_e32(v[0], s[0]),
+      v_cvt_f64_f32_e32(v[2:3], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = i642f((st.vgpr[0][3] << 32) | st.vgpr[0][2])
+    self.assertAlmostEqual(result, 1.0, places=10)
+
+  def test_v_cvt_f64_f32_negative(self):
+    """V_CVT_F64_F32 converts f32 -2.5 to f64."""
+    instructions = [
+      s_mov_b32(s[0], f2i(-2.5)),
+      v_mov_b32_e32(v[0], s[0]),
+      v_cvt_f64_f32_e32(v[2:3], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = i642f((st.vgpr[0][3] << 32) | st.vgpr[0][2])
+    self.assertAlmostEqual(result, -2.5, places=10)
+
+  def test_v_cvt_f64_f32_pi(self):
+    """V_CVT_F64_F32 converts f32 pi to f64."""
+    import math
+    instructions = [
+      s_mov_b32(s[0], f2i(3.14159265)),
+      v_mov_b32_e32(v[0], s[0]),
+      v_cvt_f64_f32_e32(v[2:3], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = i642f((st.vgpr[0][3] << 32) | st.vgpr[0][2])
+    self.assertAlmostEqual(result, 3.14159265, places=5)
+
+  def test_v_cvt_f64_f32_zero(self):
+    """V_CVT_F64_F32 converts f32 0.0 to f64."""
+    instructions = [
+      v_mov_b32_e32(v[0], 0),
+      v_cvt_f64_f32_e32(v[2:3], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = i642f((st.vgpr[0][3] << 32) | st.vgpr[0][2])
+    self.assertEqual(result, 0.0)
+
+  def test_v_cvt_f32_f64_one(self):
+    """V_CVT_F32_F64 converts f64 1.0 to f32."""
+    f64_bits = f2i64(1.0)
+    lo, hi = f64_bits & 0xFFFFFFFF, (f64_bits >> 32) & 0xFFFFFFFF
+    instructions = [
+      s_mov_b32(s[0], lo),
+      s_mov_b32(s[1], hi),
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[1]),
+      v_cvt_f32_f64_e32(v[2], v[0:1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = i2f(st.vgpr[0][2])
+    self.assertAlmostEqual(result, 1.0, places=5)
+
+  def test_v_cvt_f32_f64_negative(self):
+    """V_CVT_F32_F64 converts f64 -3.5 to f32."""
+    f64_bits = f2i64(-3.5)
+    lo, hi = f64_bits & 0xFFFFFFFF, (f64_bits >> 32) & 0xFFFFFFFF
+    instructions = [
+      s_mov_b32(s[0], lo),
+      s_mov_b32(s[1], hi),
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[1]),
+      v_cvt_f32_f64_e32(v[2], v[0:1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = i2f(st.vgpr[0][2])
+    self.assertAlmostEqual(result, -3.5, places=5)
+
+  def test_v_cvt_f32_f64_large(self):
+    """V_CVT_F32_F64 converts large f64 to f32."""
+    f64_bits = f2i64(123456.789)
+    lo, hi = f64_bits & 0xFFFFFFFF, (f64_bits >> 32) & 0xFFFFFFFF
+    instructions = [
+      s_mov_b32(s[0], lo),
+      s_mov_b32(s[1], hi),
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[1]),
+      v_cvt_f32_f64_e32(v[2], v[0:1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = i2f(st.vgpr[0][2])
+    self.assertAlmostEqual(result, 123456.789, places=0)
+
+  def test_v_cvt_f64_i32_positive(self):
+    """V_CVT_F64_I32 converts positive i32 to f64."""
+    instructions = [
+      s_mov_b32(s[0], 42),
+      v_mov_b32_e32(v[0], s[0]),
+      v_cvt_f64_i32_e32(v[2:3], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = i642f((st.vgpr[0][3] << 32) | st.vgpr[0][2])
+    self.assertAlmostEqual(result, 42.0, places=10)
+
+  def test_v_cvt_f64_i32_negative(self):
+    """V_CVT_F64_I32 converts negative i32 to f64."""
+    instructions = [
+      s_mov_b32(s[0], 0xFFFFFFFF),  # -1 as i32
+      v_mov_b32_e32(v[0], s[0]),
+      v_cvt_f64_i32_e32(v[2:3], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = i642f((st.vgpr[0][3] << 32) | st.vgpr[0][2])
+    self.assertAlmostEqual(result, -1.0, places=10)
+
+  def test_v_cvt_f64_u32_large(self):
+    """V_CVT_F64_U32 converts large u32 to f64."""
+    instructions = [
+      s_mov_b32(s[0], 0xFFFFFFFF),  # max u32
+      v_mov_b32_e32(v[0], s[0]),
+      v_cvt_f64_u32_e32(v[2:3], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = i642f((st.vgpr[0][3] << 32) | st.vgpr[0][2])
+    self.assertAlmostEqual(result, 4294967295.0, places=0)
+
+  def test_v_cvt_f64_u32_zero(self):
+    """V_CVT_F64_U32 converts 0 to f64."""
+    instructions = [
+      v_mov_b32_e32(v[0], 0),
+      v_cvt_f64_u32_e32(v[2:3], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = i642f((st.vgpr[0][3] << 32) | st.vgpr[0][2])
+    self.assertEqual(result, 0.0)
 
 
 class TestClz(unittest.TestCase):
@@ -560,7 +696,7 @@ class TestCvtF16Modifiers(unittest.TestCase):
 
   def test_v_cvt_f32_f16_abs_negative(self):
     """V_CVT_F32_F16 with |abs| on negative value."""
-    from extra.assembly.amd.pcode import f32_to_f16
+    from extra.assembly.amd.test.hw.helpers import f32_to_f16
     f16_neg1 = f32_to_f16(-1.0)  # 0xbc00
     instructions = [
       s_mov_b32(s[0], f16_neg1),
@@ -573,7 +709,7 @@ class TestCvtF16Modifiers(unittest.TestCase):
 
   def test_v_cvt_f32_f16_abs_positive(self):
     """V_CVT_F32_F16 with |abs| on positive value (should stay positive)."""
-    from extra.assembly.amd.pcode import f32_to_f16
+    from extra.assembly.amd.test.hw.helpers import f32_to_f16
     f16_2 = f32_to_f16(2.0)  # 0x4000
     instructions = [
       s_mov_b32(s[0], f16_2),
@@ -586,7 +722,7 @@ class TestCvtF16Modifiers(unittest.TestCase):
 
   def test_v_cvt_f32_f16_neg_positive(self):
     """V_CVT_F32_F16 with neg on positive value."""
-    from extra.assembly.amd.pcode import f32_to_f16
+    from extra.assembly.amd.test.hw.helpers import f32_to_f16
     f16_2 = f32_to_f16(2.0)  # 0x4000
     instructions = [
       s_mov_b32(s[0], f16_2),
@@ -599,7 +735,7 @@ class TestCvtF16Modifiers(unittest.TestCase):
 
   def test_v_cvt_f32_f16_neg_negative(self):
     """V_CVT_F32_F16 with neg on negative value (double negative)."""
-    from extra.assembly.amd.pcode import f32_to_f16
+    from extra.assembly.amd.test.hw.helpers import f32_to_f16
     f16_neg2 = f32_to_f16(-2.0)  # 0xc000
     instructions = [
       s_mov_b32(s[0], f16_neg2),
@@ -612,7 +748,7 @@ class TestCvtF16Modifiers(unittest.TestCase):
 
   def test_v_cvt_f16_f32_then_pack_for_wmma(self):
     """CVT F32->F16 followed by pack (common WMMA pattern)."""
-    from extra.assembly.amd.pcode import _f16
+    from extra.assembly.amd.test.hw.helpers import _f16
     f32_val = 3.5
     instructions = [
       s_mov_b32(s[0], f2i(f32_val)),
@@ -668,7 +804,7 @@ class TestConversionRounding(unittest.TestCase):
 
   def test_f16_to_f32_precision(self):
     """F16 to F32 conversion precision."""
-    from extra.assembly.amd.pcode import f32_to_f16
+    from extra.assembly.amd.test.hw.helpers import f32_to_f16
     f16_val = f32_to_f16(1.5)
     instructions = [
       s_mov_b32(s[0], f16_val),
@@ -680,7 +816,7 @@ class TestConversionRounding(unittest.TestCase):
 
   def test_f16_denormal_to_f32(self):
     """F16 denormal converts to small positive f32."""
-    from extra.assembly.amd.pcode import _f16
+    from extra.assembly.amd.test.hw.helpers import _f16
     f16_denorm = 0x0001  # Smallest positive f16 denormal
     instructions = [
       v_mov_b32_e32(v[0], f16_denorm),
@@ -1236,6 +1372,144 @@ class TestFloorEdgeCases(unittest.TestCase):
     ]
     st = run_program(instructions, n_lanes=1)
     self.assertAlmostEqual(i2f(st.vgpr[0][1]), -1.0, places=5)
+
+
+class TestVop1F16HiHalf(unittest.TestCase):
+  """Regression tests for VOP1 f16 hi-half source operand handling.
+
+  For 16-bit VOP1 operations, when src0 is in the range v[128]+ (offset >= 384),
+  the hardware reads from the high 16 bits of v[src0-128]. The emulator must
+  extract bits [31:16] from the actual VGPR.
+  """
+
+  def test_v_cvt_f32_f16_src_hi_half(self):
+    """V_CVT_F32_F16 with source from hi-half (v[128]+).
+
+    When src0 >= v[128], it reads from the high 16 bits of v[src0-128].
+    This is critical for global_load_d16_hi_b16 + v_cvt_f32_f16 patterns.
+
+    Regression test for: VOP1 f16 src0 hi-half extraction bug.
+    """
+    instructions = [
+      # v[0] = 0x4000_3c00: hi=f16(2.0), lo=f16(1.0)
+      s_mov_b32(s[0], 0x40003c00),
+      v_mov_b32_e32(v[0], s[0]),
+      # v_cvt_f32_f16 v[1], v[128] (reads hi half of v[0])
+      # Should convert f16(2.0) to f32(2.0)
+      v_cvt_f32_f16_e32(v[1], v[128]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = i2f(st.vgpr[0][1])
+    self.assertAlmostEqual(result, 2.0, places=5, msg=f"Expected f32(2.0), got {result}")
+
+  def test_v_cvt_f32_f16_src_lo_vs_hi(self):
+    """V_CVT_F32_F16 comparing lo and hi half reads.
+
+    v[0] has different values in lo and hi halves.
+    v_cvt_f32_f16 v[1], v[0] should read lo (1.0)
+    v_cvt_f32_f16 v[2], v[128] should read hi (2.0)
+
+    Regression test for: VOP1 f16 src0 hi-half extraction bug.
+    """
+    instructions = [
+      # v[0] = 0x4000_3c00: hi=f16(2.0), lo=f16(1.0)
+      s_mov_b32(s[0], 0x40003c00),
+      v_mov_b32_e32(v[0], s[0]),
+      # Read from lo half
+      v_cvt_f32_f16_e32(v[1], v[0]),
+      # Read from hi half
+      v_cvt_f32_f16_e32(v[2], v[128]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result_lo = i2f(st.vgpr[0][1])
+    result_hi = i2f(st.vgpr[0][2])
+    self.assertAlmostEqual(result_lo, 1.0, places=5, msg=f"Expected f32(1.0) from lo, got {result_lo}")
+    self.assertAlmostEqual(result_hi, 2.0, places=5, msg=f"Expected f32(2.0) from hi, got {result_hi}")
+
+  def test_v_cvt_i16_f16_src_hi_half(self):
+    """V_CVT_I16_F16 with source from hi-half.
+
+    Regression test for: VOP1 f16 src0 hi-half extraction bug.
+    """
+    instructions = [
+      # v[0] = 0xc000_3c00: hi=f16(-2.0), lo=f16(1.0)
+      s_mov_b32(s[0], 0xc0003c00),
+      v_mov_b32_e32(v[0], s[0]),
+      # v_cvt_i16_f16 v[1], v[128] (reads hi half of v[0])
+      # Should convert f16(-2.0) to i16(-2)
+      v_cvt_i16_f16_e32(v[1], v[128]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = st.vgpr[0][1] & 0xffff
+    expected = (-2) & 0xffff
+    self.assertEqual(result, expected, f"Expected i16(-2)=0x{expected:04x}, got 0x{result:04x}")
+
+  def test_v_mov_b16_src_hi_half(self):
+    """V_MOV_B16 with source from hi-half.
+
+    Regression test for: VOP1 f16 src0 hi-half extraction bug.
+    """
+    instructions = [
+      # v[0] = 0xBEEF_DEAD: hi=0xBEEF, lo=0xDEAD
+      s_mov_b32(s[0], 0xBEEFDEAD),
+      v_mov_b32_e32(v[0], s[0]),
+      # v[1] = 0x0000_0000 initially
+      v_mov_b32_e32(v[1], 0),
+      # v_mov_b16 v[1], v[128] (reads hi half of v[0])
+      # Should move 0xBEEF to v[1].lo
+      v_mov_b16_e32(v[1], v[128]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = st.vgpr[0][1] & 0xffff
+    self.assertEqual(result, 0xBEEF, f"Expected 0xBEEF from hi half, got 0x{result:04x}")
+
+
+class TestReciprocalF16(unittest.TestCase):
+  """Tests for V_RCP_F16 - reciprocal in half precision.
+
+  The pcode uses a 16-bit float literal: D0.f16 = 16'1.0 / S0.f16
+  This tests that the sized float literal (16'1.0) is correctly parsed.
+  """
+
+  def test_v_rcp_f16_one(self):
+    """V_RCP_F16: 1/1.0 = 1.0"""
+    import struct
+    def f16_to_bits(f): return struct.unpack('<H', struct.pack('<e', f))[0]
+    def bits_to_f16(b): return struct.unpack('<e', struct.pack('<H', b))[0]
+    instructions = [
+      # Load f16 1.0 into low 16 bits of v[0]
+      v_mov_b32_e32(v[0], f16_to_bits(1.0)),
+      v_rcp_f16_e32(v[1], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = bits_to_f16(st.vgpr[0][1] & 0xFFFF)
+    self.assertAlmostEqual(result, 1.0, places=2, msg="1/1.0 should be 1.0")
+
+  def test_v_rcp_f16_two(self):
+    """V_RCP_F16: 1/2.0 = 0.5"""
+    import struct
+    def f16_to_bits(f): return struct.unpack('<H', struct.pack('<e', f))[0]
+    def bits_to_f16(b): return struct.unpack('<e', struct.pack('<H', b))[0]
+    instructions = [
+      v_mov_b32_e32(v[0], f16_to_bits(2.0)),
+      v_rcp_f16_e32(v[1], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = bits_to_f16(st.vgpr[0][1] & 0xFFFF)
+    self.assertAlmostEqual(result, 0.5, places=2, msg="1/2.0 should be 0.5")
+
+  def test_v_rcp_f16_four(self):
+    """V_RCP_F16: 1/4.0 = 0.25"""
+    import struct
+    def f16_to_bits(f): return struct.unpack('<H', struct.pack('<e', f))[0]
+    def bits_to_f16(b): return struct.unpack('<e', struct.pack('<H', b))[0]
+    instructions = [
+      v_mov_b32_e32(v[0], f16_to_bits(4.0)),
+      v_rcp_f16_e32(v[1], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = bits_to_f16(st.vgpr[0][1] & 0xFFFF)
+    self.assertAlmostEqual(result, 0.25, places=2, msg="1/4.0 should be 0.25")
 
 
 if __name__ == '__main__':

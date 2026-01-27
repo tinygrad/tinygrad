@@ -2,8 +2,22 @@ from __future__ import annotations
 from typing import Final, ClassVar, Callable, Literal
 import math, struct, ctypes, functools
 from dataclasses import dataclass, fields
-from tinygrad.helpers import getenv, prod, round_up, next_power2
+from tinygrad.helpers import getenv, prod, round_up, next_power2, OSX
 from enum import Enum, auto
+
+class ConstFloat(float):
+  """Float subclass that distinguishes -0.0 from 0.0 and where nan == nan."""
+  __slots__ = ('bits',)
+  bits: int
+  def __new__(cls, v:float):
+    obj = super().__new__(cls, v)
+    obj.bits = struct.unpack('<Q', struct.pack('<d', v))[0]
+    return obj
+  def __eq__(self, other):
+    if self is other: return True
+    if isinstance(other, float) and math.isnan(self) and math.isnan(other): return True
+    return float.__eq__(self, other)
+  def __hash__(self): return hash(self.bits)
 
 class InvalidType:
   _instance: ClassVar[InvalidType|None] = None
@@ -105,6 +119,7 @@ class ImageDType(PtrDType):
   def pitch(self):
     if self._pitch != -1: return self._pitch
     imgw, imgh, itemsize_log = self.shape[1], self.shape[0], int(math.log2(self.itemsize))
+    if OSX: return round_up(imgw, 256) * 4 * self.itemsize
     pitchalign = max(6, 11 - int(math.log2(imgh))) if imgh > 1 else 6
     align_up = max(1, (8 // itemsize_log + 1) - imgh // 32) if pitchalign == 6 else (2 ** (pitchalign - itemsize_log - 2))
 
@@ -118,7 +133,7 @@ class dtypes:
   def is_float(x: DType) -> bool: return x.scalar() in dtypes.floats or isinstance(x, ImageDType)
   @staticmethod # static methods on top, or bool in the type info will refer to dtypes.bool
   @functools.cache
-  def is_int(x: DType) -> bool: return x.scalar() in dtypes.index_like
+  def is_int(x: DType) -> bool: return x.scalar() in (dtypes.ints + (dtypes.index,))
   @staticmethod
   @functools.cache
   def is_unsigned(x: DType) -> bool: return x.scalar() in dtypes.uints
@@ -140,7 +155,8 @@ class dtypes:
     if isinstance(val, InvalidType): return val
     # NOTE: float('nan') != float('nan'), so we canonicalize here
     if isinstance(val, float) and math.isnan(val): val = math.nan
-    return int(val) if dtypes.is_int(dtype) else float(val) if dtypes.is_float(dtype) else bool(val)
+    # int is the default. wrap floats in ConstFloat to distinguish -0.0 from 0.0 in cache
+    return ConstFloat(float(val)) if dtypes.is_float(dtype) else bool(val) if dtypes.is_bool(dtype) else int(val)
   @staticmethod
   @functools.cache
   def min(dtype:DType):
@@ -157,8 +173,6 @@ class dtypes:
     if not dtypes.is_float(dtype): raise ValueError(f"{dtype} is not a floating point type")
     return {dtypes.float16: (5, 10), dtypes.bfloat16: (8, 7), dtypes.float32: (8, 23), dtypes.float64: (11, 52),
             dtypes.fp8e5m2: (5, 2), dtypes.fp8e4m3: (4, 3)}[dtype]
-  @staticmethod
-  def fields() -> dict[str, DType]: return DTYPES_DICT
   void: Final[DType] = DType.new(-1, 0, "void", None)
   index: Final[DType] = DType.new(-1, 800, "index", None)
   bool: Final[DType] = DType.new(0, 1, "bool", '?')
@@ -170,6 +184,8 @@ class dtypes:
   uint32: Final[DType] = DType.new(6, 32, "unsigned int", 'I')
   int64: Final[DType] = DType.new(7, 64, "long", 'q')
   uint64: Final[DType] = DType.new(8, 64, "unsigned long", 'Q')
+  _uint128: Final[DType] = DType.new(8, 128, "uint128", None)
+  _uint256: Final[DType] = DType.new(8, 256, "uint256", None)
   fp8e4m3: Final[DType] = DType.new(9, 8, "float8_e4m3", None)
   fp8e5m2: Final[DType] = DType.new(10, 8, "float8_e5m2", None)
   float16: Final[DType] = DType.new(11, 16, "half", 'e')
@@ -197,7 +213,6 @@ class dtypes:
   uints = (uint8, uint16, uint32, uint64)
   sints = (int8, int16, int32, int64)
   ints = uints + sints
-  index_like = ints + (index,)
   all = floats + ints + (bool, index) # noqa: A003
 
 if (env_default_float := getenv("DEFAULT_FLOAT", "")):
@@ -210,7 +225,7 @@ def to_dtype(dtype:DTypeLike) -> DType: return dtype if isinstance(dtype, DType)
 # https://jax.readthedocs.io/en/latest/jep/9407-type-promotion.html
 # we don't support weak type and complex type
 promo_lattice = { dtypes.bool: [dtypes.int8, dtypes.uint8], dtypes.int8: [dtypes.int16], dtypes.int16: [dtypes.int32], dtypes.int32: [dtypes.int64],
-  dtypes.int64: [dtypes.fp8e4m3, dtypes.fp8e5m2], dtypes.uint8: [dtypes.int16, dtypes.uint16], dtypes.uint16: [dtypes.int32, dtypes.uint32],
+  dtypes.int64: [dtypes.uint64], dtypes.uint8: [dtypes.int16, dtypes.uint16], dtypes.uint16: [dtypes.int32, dtypes.uint32],
   dtypes.uint32: [dtypes.int64, dtypes.uint64], dtypes.uint64: [dtypes.fp8e4m3, dtypes.fp8e5m2],
   dtypes.fp8e5m2: [dtypes.float16, dtypes.bfloat16], dtypes.fp8e4m3: [dtypes.float16, dtypes.bfloat16],
   dtypes.float16: [dtypes.float32], dtypes.bfloat16: [dtypes.float32], dtypes.float32: [dtypes.float64], }
@@ -224,7 +239,7 @@ def least_upper_dtype(*ds:DType) -> DType:
       if not (images:=[d for d in ds if isinstance(d, ImageDType)]) else images[0]
 def least_upper_float(dt:DType) -> DType: return dt if dtypes.is_float(dt) else least_upper_dtype(dt, dtypes.default_float)
 
-DTYPES_DICT = {k: v for k, v in dtypes.__dict__.items() if isinstance(v, DType) and not k.startswith(("default", "void", "index"))}
+DTYPES_DICT = {k: v for k, v in dtypes.__dict__.items() if isinstance(v, DType) and not k.startswith(("default", "void", "index", "_"))}
 INVERSE_DTYPES_DICT = {**{v.name:k for k,v in DTYPES_DICT.items()}, "void": "void", "index":"index"}
 
 @functools.cache
@@ -342,7 +357,7 @@ def _to_np_dtype(dtype:DType) -> type|None:
   return np.dtype(dtype.fmt).type if dtype.fmt is not None else None
 def _from_np_dtype(npdtype:'np.dtype') -> DType: # type: ignore [name-defined] # noqa: F821
   import numpy as np
-  return dtypes.fields()[np.dtype(npdtype).name]
+  return DTYPES_DICT[np.dtype(npdtype).name]
 
 @functools.cache
 def _to_torch_dtype(dtype:DType) -> 'torch.dtype'|None:  # type: ignore [name-defined] # noqa: F821

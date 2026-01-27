@@ -145,7 +145,7 @@ OPNAME = {
 ALUSRC = {
   1: "SALU",
   2: "VALU",
-  3: "VALU_ALT",
+  3: "VALU_SALU",
 }
 
 MEMSRC = {

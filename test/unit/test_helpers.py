@@ -1,6 +1,6 @@
 import ctypes, gzip, unittest, timeit, pickle
 from tinygrad import Variable
-from tinygrad.helpers import Context, ContextVar, argfix, colored, word_wrap, is_numpy_ndarray, mv_address, get_contraction, count
+from tinygrad.helpers import Context, ContextVar, argfix, colored, word_wrap, is_numpy_ndarray, mv_address, get_contraction, count, all_same
 from tinygrad.helpers import merge_dicts, strip_parens, prod, round_up, fetch, fully_flatten, from_mv, to_mv, polyN, time_to_str, cdiv, cmod, getbits
 from tinygrad.helpers import ceildiv
 from tinygrad.tensor import Tensor, get_shape
@@ -83,6 +83,12 @@ class TestContextVars(unittest.TestCase):
     with Context(D=3):
       ...
     assert D.value == 2, f"Expected D to be 2, but was {D.value}. Indicates that Context.__exit__ did not restore to the correct value."
+
+class TestAllSame(unittest.TestCase):
+  def test_empty(self): self.assertTrue(all_same([]))
+  def test_single(self): self.assertTrue(all_same([1]))
+  def test_same(self): self.assertTrue(all_same([1, 1, 1]))
+  def test_different(self): self.assertFalse(all_same([1, 2, 1]))
 
 class TestMergeDicts(unittest.TestCase):
   def test_merge_dicts(self):

@@ -1,4 +1,4 @@
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 import itertools
 from tinygrad.dtype import dtypes, PtrDType, ImageDType, AddrSpace
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, _substitute, KernelInfo
@@ -27,12 +27,13 @@ pm_mops = PatternMatcher([
 # *****************
 # 0. do some cleanup rewrites, mostly copied from the old stuff
 
-def find_permutes(a:UOp, b:UOp, assign:UOp):
-  if not (permutes:=[s for s in b.toposort(gate=lambda s:s.op not in ALWAYS_CONTIGUOUS)
-                     if s.op in GroupOp.Movement and s.op not in {Ops.RESHAPE, Ops.EXPAND, Ops.PAD, Ops.SHRINK}]): return
-  target = a.base
-  for p in permutes:
-    if any(s is target for s in p.toposort(gate=lambda s:s.op not in ALWAYS_CONTIGUOUS-{Ops.BUFFER})): return assign.replace(src=(a, b.contiguous()))
+def fix_assign_hazard(dest:UOp, src:UOp, assign:UOp):
+  # PERMUTE and FLIP reorder indices, SHRINK can have overlapping regions when dest is also shrunk
+  unsafe = {Ops.PERMUTE, Ops.FLIP} | ({Ops.SHRINK} if dest.op_in_backward_slice_with_self(Ops.SHRINK) else set())
+  if not (hazards:=[s for s in src.toposort(gate=lambda s:s.op not in ALWAYS_CONTIGUOUS) if s.op in unsafe]): return
+  for h in hazards:
+    if any(s is dest.base for s in h.toposort(gate=lambda s:s.op not in ALWAYS_CONTIGUOUS-{Ops.BUFFER})):
+      return assign.replace(src=(dest, src.contiguous()))
 
 def split_reduceop(reduce:UOp, x:UOp):
   if prod(reduce.shape) == 0: return None
@@ -116,8 +117,8 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
    lambda x,target,assign: x.f(Ops.CONTIGUOUS, tag=assign.tag) if ((t:=target.base).op is not Ops.BUFFER and \
        not (t.op is Ops.MSTACK and all(s.op is Ops.BUFFER for s in t.src))) else None),
 
-   # realize before assign if input permutes the target buffer
-   (UPat(Ops.ASSIGN, src=(UPat.var("a"), UPat.var("b")), name="assign"), find_permutes),
+   # make source contiguous if it has hazardous movement ops on the dest buffer
+   (UPat(Ops.ASSIGN, src=(UPat.var("dest"), UPat.var("src")), name="assign"), fix_assign_hazard),
 ])
 
 # *****************
@@ -429,6 +430,9 @@ to_define_global = PatternMatcher([
   (UPat(Ops.BIND, name="b"), unbind_kernel),
   (UPat((Ops.MSTACK, Ops.MSELECT, Ops.AFTER), name="after"), handle_after),
 
+  # remove device from local BUFFERIZE
+  (UPat(Ops.BUFFERIZE, name="b"), lambda b: b.replace(arg=replace(b.arg, device=None))),
+
   # HACK in case any CONSTs were replaced
   # this is only needed if you are using symbolic
   (UPat((Ops.CONST, Ops.DEFINE_VAR), name="c"), lambda c: c.replace(src=()) if len(c.src) else None),
@@ -485,8 +489,8 @@ pm_add_range_tags = PatternMatcher([
 ])
 
 def split_store(ctx:list[UOp], x:UOp) -> UOp|None:
-  # if we have any outer ranges open here, we don't split
-  if len([r for r in x.ranges if r.arg[-1] != AxisType.OUTER]): return None
+  # if we have any non-outer ranges open here, we don't split
+  if any(r.arg[-1] != AxisType.OUTER for r in x.ranges): return None
 
   # ends of outer range don't go in kernels
   if x.op is Ops.END and x.src[1].op is Ops.RANGE and x.src[1].arg[-1] == AxisType.OUTER: return None

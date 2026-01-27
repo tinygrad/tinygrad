@@ -2,7 +2,7 @@
 from __future__ import annotations
 import time, math, itertools, functools, struct, sys, inspect, pathlib, string, hashlib, weakref
 from contextlib import ContextDecorator
-from typing import Callable, ClassVar, Sequence, cast, get_args, Literal, SupportsIndex, ParamSpec, TypeVar, Generic, TYPE_CHECKING
+from typing import Any, Callable, ClassVar, Sequence, cast, get_args, Literal, SupportsIndex, ParamSpec, TypeVar, Generic, TYPE_CHECKING
 if TYPE_CHECKING: import numpy
 from tinygrad.dtype import DType, DTypeLike, dtypes, ImageDType, ConstType, least_upper_float, least_upper_dtype, sum_acc_dtype, to_dtype, truncate
 from tinygrad.dtype import _from_np_dtype, _to_np_dtype
@@ -131,11 +131,11 @@ class Tensor(OpMixin):
       assert _dtype is None or _dtype==data.dtype or data.dtype==dtypes.index, f"dtype mismatch: {_dtype} vs {data.dtype}"
       # if data is dtype.index that means that this is a symbolic int and we need to lower it to something we can make a Tensor out of
       if data.dtype==dtypes.index: data = _index_to_concrete_int(data)
-      if data.op is Ops.BIND:  # type: ignore  # mypy type narrowing is bugged here
-        var, val = data.unbind()  # type: ignore
+      if data.op is Ops.BIND:
+        var, val = data.unbind()
         # give the bound constant a device
         const = UOp.const(var.dtype, val, _device, ())
-        data = data.replace(src=(var.replace(src=const.src), const))  # type: ignore
+        data = data.replace(src=(var.replace(src=const.src), const))
     elif data is None:
       data = Tensor(0, device=_device, dtype=_dtype or dtypes.default_float, requires_grad=requires_grad).uop
     elif isinstance(data, get_args(ConstType)):
@@ -175,15 +175,15 @@ class Tensor(OpMixin):
   @suppress_finalizing
   def __del__(self): all_tensors.pop(weakref.ref(self), None)
 
-  def _apply_uop(self, fxn:Callable, *x:Tensor, extra_args=(), **kwargs) -> Tensor:
-    new_uop: UOp = fxn(*[t.uop for t in (self,)+x], *extra_args, **kwargs)
-    if (metadata:=_METADATA.get()) is not None and TRACEMETA >= 1: all_metadata[new_uop] = (metadata,)
-    needs_input_grad = [t.requires_grad for t in (self,)+x]
+  def _apply_uop(self, fxn:Callable[..., UOp], *x:Tensor, extra_args=(), **kwargs) -> Tensor:
+    srcs = (self,)+x
+    new_uop: UOp = fxn(*[t.uop for t in srcs], *extra_args, **kwargs)
+    if TRACEMETA >= 1 and (metadata:=_METADATA.get()) is not None: all_metadata[new_uop] = (metadata,)
+    needs_input_grad = [t.requires_grad for t in srcs]
     # directly create the Tensor
     ret = Tensor.__new__(Tensor)
-    ret.uop = new_uop
+    ret.uop, ret.grad = new_uop, None
     ret.requires_grad = True if any(needs_input_grad) else None if None in needs_input_grad else False
-    ret.grad = None
     # add to all_tensors after construction succeeds
     all_tensors[weakref.ref(ret)] = None
     return ret
@@ -299,6 +299,10 @@ class Tensor(OpMixin):
     return Tensor(self.uop.detach(), device=self.device, requires_grad=False)
 
   def _buffer(self) -> Buffer:
+    from tinygrad.engine.realize import capturing
+    if capturing and not getenv("UNSAFE_ALLOW_JIT_BUFFER"):
+      from tinygrad.engine.jit import JitError
+      raise JitError("cannot access tensor data during JIT capture, the value will be baked in")
     x = self.cast(self.dtype.base).contiguous()
     if isinstance(self.device, tuple): x = x.to("CPU")
     return cast(Buffer, x.realize().uop.base.buffer).ensure_allocated()
@@ -329,9 +333,8 @@ class Tensor(OpMixin):
     assert self.numel() == 1, "must have one element for item"
     return self.data()[(0,) * len(self.shape)]
 
-  # TODO: should be Tensor.tolist() -> Union[list[ConstType], ConstType]. The list is Sequence because mypy expects memoryview.tolist() -> list[int]
-  # src: https://github.com/python/mypy/blob/release-1.6/mypy/typeshed/stdlib/builtins.pyi#L803
-  def tolist(self) -> Sequence[ConstType]|ConstType:
+  # NOTE: list[Any] because return type is recursive (list[list[...]] for higher dimensions)
+  def tolist(self) -> ConstType|list[Any]:
     """
     Returns the value of this tensor as a nested list.
     Returns single value for const tensor.
@@ -1185,7 +1188,20 @@ class Tensor(OpMixin):
     if tops := [(d,i) for d,i in enumerate(i_ for i_ in indices_parsed if not isinstance(i_['index'], int)) if isinstance(i['index'], Tensor)]:
       # unload the tensor object into actual tensors
       dims, tensors, masks = [d for d,_ in tops], cast(list[Tensor], [i['index'] for _,i in tops]), []
-      pre_reduce_shape = x.shape[:dims[0]] + (big_shape := _broadcast_shape(*(t.shape for t in tensors))) + x.shape[dims[0]:]
+      big_shape = _broadcast_shape(*(t.shape for t in tensors))
+
+      # consecutive tensor indices with int shapes: use linear indexing instead of one-hot masks
+      consecutive = dims == list(range(dims[0], dims[0] + len(dims)))
+      if v is None and len(dims) > 1 and consecutive and all_int(ishp := tuple(x.shape[d] for d in dims)):
+        strides = tuple(prod(ishp[i+1:]) for i in range(len(dims)))
+        try: linear_idx = functools.reduce(Tensor.add, (t._broadcast_to(big_shape) * s for t, s in zip(tensors, strides)))
+        except ValueError as e: raise IndexError(f"cannot broadcast indices: {e}") from e
+        valid = functools.reduce(Tensor.__and__, ((t >= 0) & (t < s) for t, s in zip(tensors, ishp)))
+        pre, post = x.shape[:dims[0]], x.shape[dims[-1]+1:]
+        x = x.reshape(pre + (prod(ishp),) + post)[tuple([slice(None)] * len(pre)) + (valid.where(linear_idx, 0),)]
+        return valid.reshape((1,) * len(pre) + big_shape + (1,) * len(post)).where(x, 0)
+
+      pre_reduce_shape = x.shape[:dims[0]] + big_shape + x.shape[dims[0]:]
 
       # create index masks
       for dim, tensor in zip(dims, tensors):
@@ -1405,7 +1421,7 @@ class Tensor(OpMixin):
     perm_to_last = tuple(i for i in range(self.ndim) if i != dim) + (dim,)
     return self.permute(perm_to_last)._pool((size,), step).permute(argsort(perm_to_last) + (self.ndim,))
 
-  def meshgrid(self:Tensor, *args:Tensor, indexing:Literal["ij", "xy"]="ij") -> tuple[Tensor, ...]:
+  def meshgrid(self:Tensor, *args:Tensor, indexing:str="ij") -> tuple[Tensor, ...]:
     """
     Generates coordinate matrices from coordinate vectors.
     Input tensors can be scalars or 1D tensors.
@@ -2002,7 +2018,7 @@ class Tensor(OpMixin):
     ```
     """
     m = self.max(axis=axis, keepdim=True)
-    return (self - m).exp().sum(axis=axis, keepdim=keepdim).log() + m.squeeze(axis)
+    return (self - m).exp().sum(axis=axis, keepdim=keepdim).log() + (m if keepdim else m.squeeze(axis))
 
   def logcumsumexp(self, axis=0) -> Tensor:
     """
@@ -2324,7 +2340,7 @@ class Tensor(OpMixin):
     # TODO: stride == dilation
     # use padding to round up to 4x4 output tiles
     # (bs, cin_, tyx, HWI)
-    pads = [[padding_[i*2], padding_[i*2+1] + (-(dim + sum(padding_[i * 2:(i + 1) * 2]) - 2) % 4)] for i, dim in enumerate(self.shape[-len(HW):])]
+    pads = [[padding_[i*2], padding_[i*2+1] + (-(dim+sum(padding_[i*2:(i+1)*2])-2) % 4)] for i, dim in enumerate(reversed(self.shape[-len(HW):]))]
     d = self.pad(sum(pads, []))._pool(HWI, HWO)
     # move HW to the front: # (HWI, bs, cin_, tyx)
     d = d.permute(*range(len(d.shape)-len(HW),len(d.shape)), *range(len(d.shape)-len(HW)))
