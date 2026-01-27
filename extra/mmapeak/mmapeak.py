@@ -58,7 +58,7 @@ def launchBenchmark(instruction, vgprIndices, dense=True, accum=False, **kwargs)
   # new elf packer
   lib2 = pack_hsaco(inst_bytes, {"next_free_vgpr":len(vgprs), **KD_OPTS})
   verify_elf_match(lib, lib2, inst.op_name.lower())
-  fxn = DEV.runtime("matmul", lib)
+  fxn = DEV.runtime("matmul", lib2)
   elapsed = min([fxn(global_size=(NUM_WORKGROUPS,1,1), local_size=(WAVE_SIZE*NUM_WAVES,1,1), wait=True) for _ in range(2)])
   FLOPs = FLOPS_PER_MATMUL * NUM_WAVES * NUM_WORKGROUPS * INTERNAL_LOOP * INSTRUCTIONS_PER_LOOP
   print(f"{inst.op_name.lower():<29} : {FLOPs/elapsed/10**12:.2f} T(FL)OPS")
