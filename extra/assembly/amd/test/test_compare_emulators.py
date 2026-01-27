@@ -1,15 +1,8 @@
 # Test to compare Python and Rust RDNA3 emulators by running real tinygrad kernels
-import unittest, ctypes, os
+import unittest, ctypes
 from dataclasses import dataclass
-from pathlib import Path
 
-# Set environment before any tinygrad imports to use MOCKGPU
-# This allows generating AMD GPU kernels without requiring real hardware
-os.environ["AMD"] = "1"
-os.environ["MOCKGPU"] = "1"
-os.environ["PYTHON_REMU"] = "1"
-
-from extra.assembly.amd.emu2 import WaveState, decode_program, WAVE_SIZE, MASK32, PC_LO_IDX, PC_HI_IDX, VCC_LO, EXEC_LO, SCC
+from extra.assembly.amd.emu2 import WaveState, decode_program, WAVE_SIZE, VCC_LO, EXEC_LO, SCC
 from extra.assembly.amd.decode import decode_inst
 from extra.assembly.amd.test.helpers import KernelInfo
 from extra.assembly.amd.test.bench_emu import REMU_PATH

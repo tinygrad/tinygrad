@@ -1002,8 +1002,7 @@ def _compile_mem_op(inst: DS | FLAT | GLOBAL | SCRATCH, ctx: _Ctx) -> UOp:
     for dword_idx, val in sorted(_collect_data_slices(assigns, 'VDATA', pcode_vars, op_name).items()):
       stores.append(ctx.wvgpr_dyn(vdst_reg + _c(dword_idx), lane, val, exec_mask))
 
-  if stores: return UOp.sink(UOp.group(*stores).end(lane), *ctx.inc_pc())
-  return UOp.sink(*ctx.inc_pc())
+  return UOp.sink(UOp.group(*stores).end(lane), *ctx.inc_pc())
 
 # Dispatch table: instruction type -> handler function
 _INST_HANDLERS: dict[type, Callable[..., UOp]] = {
