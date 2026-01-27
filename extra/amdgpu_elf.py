@@ -11,6 +11,7 @@ def put(dst:bytearray, off:int, data:bytes) -> None:
 
 def pack_hsaco(prg:bytes, kd:dict) -> bytes:
   # match LLVM's layout: rodata at 0x3c0, text at 0x400, text_vaddr at 0x1400
+  # note: don't need this, just keep it for the rodata byte to byte compare with llvm for now, test_vaddr is in rodata
   rodata_offset = 0x3c0
   text_offset = 0x400
   text_vaddr = 0x1400  # gives kernel_code_entry_byte_offset = 0x1040

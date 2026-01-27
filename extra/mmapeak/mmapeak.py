@@ -24,6 +24,7 @@ def verify_elf_match(lib_old: bytes, lib_new: bytes, inst_name: str):
   from tinygrad.runtime.support.elf import elf_loader
   _, secs_old, _ = elf_loader(lib_old)
   _, secs_new, _ = elf_loader(lib_new)
+  # these sections exist for legacy reasons, hw / disasm doesn't need them
   skip = {'.symtab', '.strtab', '.shstrtab', '.relro_padding', '', '.note', '.dynsym', '.gnu.hash', '.hash', '.dynstr', '.dynamic', '.comment'}
   for sec in secs_old:
     if sec.name in skip: continue
@@ -83,7 +84,8 @@ if __name__=="__main__":
     from extra.assembly.amd.autogen.rdna4.ins import *
     # this instruction does not exist in the rdna4 isa, use the co version
     s_sub_u32 = s_sub_co_u32
-    KD_OPTS = {'wavefront_size32': 1, 'workgroup_processor_mode': 1, 'memory_ordered': 1}
+    # GFX12: enable_ieee_mode is reserved (must be 0), and enable_dx10_clamp became WG_RR_EN
+    KD_OPTS = {'wavefront_size32': 1, 'workgroup_processor_mode': 1, 'memory_ordered': 1, 'enable_dx10_clamp': 0, 'enable_ieee_mode': 0}
     NUM_WORKGROUPS = 64
     launchBenchmark(v_wmma_bf16_16x16x16_bf16, (3,4,7))
     launchBenchmark(v_wmma_f16_16x16x16_f16, (3,4,7))
