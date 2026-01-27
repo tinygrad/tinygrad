@@ -39,11 +39,13 @@ class _MXCSRContext:
     lib = _get_mxcsr_lib()
     if lib is None or not hasattr(self, '_saved'): return
     lib.set_mxcsr(self._saved)
+
 from tinygrad.uop.ops import UOp, Ops, KernelInfo, AxisType
 from tinygrad.dtype import dtypes
 from tinygrad.device import Buffer, BufferSpec
 from tinygrad.runtime.autogen import hsa
 from tinygrad.helpers import Context, DEBUG, colored
+from tinygrad.engine.realize import get_runner
 
 from extra.assembly.amd.decode import decode_inst
 from extra.assembly.amd.autogen.rdna3.str_pcode import PCODE
@@ -1048,11 +1050,18 @@ _INST_HANDLERS: dict[type, callable] = {
 # PROGRAM DECODE AND COMPILATION
 # ═══════════════════════════════════════════════════════════════════════════════
 
+_canonical_runner_cache: list[tuple[int, int, int, object]] = []  # [(base, mask, size, runner), ...]
+
 @functools.cache
-def _get_inst_sink(inst_bytes: bytes) -> tuple[UOp, tuple[int, int, int]]:
-  """Build UOp sink for instruction bytes. Returns (sink, (base, mask, size)) with canonical name."""
+def _get_runner(inst_bytes: bytes):
+  """Build and compile instruction to CompiledRunner. Cached by instruction bytes, with canonical dedup."""
   inst = decode_inst(inst_bytes)
-  inst_size = inst.size()  # bytes
+  inst_size = inst.size()
+  inst_int = int.from_bytes(inst_bytes[:inst_size], 'little')
+
+  # Check if instruction matches any cached canonical pattern
+  for base, mask, size, runner in _canonical_runner_cache:
+    if inst_size == size and (inst_int & mask) == base: return runner, False
 
   # Look up handler by type, falling back to base classes for _LIT variants
   handler = _INST_HANDLERS.get(type(inst))
@@ -1065,28 +1074,10 @@ def _get_inst_sink(inst_bytes: bytes) -> tuple[UOp, tuple[int, int, int]]:
 
   ctx = _Ctx(inst_size)
   _, sink = handler(inst, ctx, "")  # name replaced below
-  # Compute canonical mask and name after handler populates dyn_fields
   base, mask, size = ctx.canonical_mask(inst_bytes)
   canonical_name = f"{_op_name(inst).lower()}_{base.to_bytes(size, 'little').hex()}"
-  return sink.replace(arg=KernelInfo(name=canonical_name)).rtag(1), (base, mask, size)
+  sink = sink.replace(arg=KernelInfo(name=canonical_name)).rtag(1)
 
-_canonical_runner_cache: list[tuple[int, int, int, object]] = []  # [(base, mask, size, runner), ...]
-
-def _match_canonical(inst_int: int, inst_size: int) -> object | None:
-  """Check if instruction matches any cached (base, mask, size) pattern."""
-  for base, mask, size, runner in _canonical_runner_cache:
-    if inst_size == size and (inst_int & mask) == base: return runner
-  return None
-
-@functools.cache
-def _get_runner(inst_bytes: bytes):
-  """Build and compile instruction to CompiledRunner. Cached by instruction bytes, with canonical dedup."""
-  from tinygrad.engine.realize import get_runner
-  inst = decode_inst(inst_bytes)
-  inst_size = inst.size()
-  inst_int = int.from_bytes(inst_bytes[:inst_size], 'little')
-  if (runner := _match_canonical(inst_int, inst_size)) is not None: return runner, False
-  sink, (base, mask, size) = _get_inst_sink(inst_bytes)
   with Context(NOOPT=1, IGNORE_OOB=1, TUPLE_ORDER=0):
     runner = get_runner('CPU', sink)
   _canonical_runner_cache.append((base, mask, size, runner))
