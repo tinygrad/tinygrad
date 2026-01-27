@@ -1,5 +1,7 @@
 """Tests for the pcode parser."""
 import unittest
+from collections import defaultdict
+from tinygrad.helpers import DEBUG
 from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import UOp, Ops
 from extra.assembly.amd.emu2 import parse_pcode
@@ -299,16 +301,19 @@ class TestAllPcode(unittest.TestCase):
   def _parse_all_pcode(self, pcode_dict, arch: str, min_pct: float):
     """Parse all pcode. RuntimeError = parser limitation (ok), other exceptions = real bugs."""
     srcs = self._make_srcs()
-    passed, skipped = 0, 0
+    passed, skipped, errors = 0, 0, defaultdict(list)
     for op, pcode in pcode_dict.items():
       try:
         parse_pcode(pcode, srcs)
         passed += 1
-      except RuntimeError: skipped += 1  # parser limitations (unknown func, unsupported syntax)
+      except RuntimeError as e: skipped += 1; errors[str(e)].append(op.name)
       except Exception as e: self.fail(f"[{arch}] {op.name}: {e}\nPcode: {pcode[:200]}")
     total = len(pcode_dict)
     pct = 100 * passed / total
     print(f"{arch}: {passed}/{total} ({pct:.1f}%) parsed, {skipped} skipped")
+    if DEBUG >= 2:
+      for err, ops in sorted(errors.items(), key=lambda x: -len(x[1])):
+        print(f"  {err}: {', '.join(ops[:5])}{'...' if len(ops) > 5 else ''} ({len(ops)})")
     self.assertGreaterEqual(pct, min_pct, f"[{arch}] {pct:.1f}% < {min_pct}% threshold")
 
   def test_parse_all_cdna_pcode(self):
