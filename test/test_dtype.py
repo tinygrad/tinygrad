@@ -20,7 +20,7 @@ settings.load_profile("my_profile")
 def get_available_cast_dtypes(dtype: DType) -> List[DType]:
   # dont cast internal dtypes
   dts = [v for k, v in DTYPES_DICT.items() if v != dtype and is_dtype_supported(v) and not k.startswith("_")]
-  if not is_dtype_supported(dtype) or dtypes.long in EMULATED_VALUES.tolist(dtypes):
+  if not is_dtype_supported(dtype) or dtypes.long in EMULATED_DTYPES.tolist(dtypes):
     if dtype in (dtypes.long, dtypes.ulong): return [dt for dt in dts if dt != dtypes.double] # can't bitcast with no 64-bit support
     else: return []
   return dts
