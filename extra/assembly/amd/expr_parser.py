@@ -61,11 +61,10 @@ def _check_nan(v: UOp, quiet: bool) -> UOp:
   is_nan_exp, has_mant, is_q = (bits & exp_m).eq(exp_m), (bits & mant_m).ne(_const(bits.dtype, 0)), (bits & qb).ne(_const(bits.dtype, 0))
   return (is_nan_exp & is_q) if quiet else (is_nan_exp & has_mant & is_q.logical_not())
 
-def _minmax_reduce(is_max, dt, args):
-  def cast(v): return v.bitcast(dt) if dt == dtypes.float32 and v.dtype == dtypes.uint32 else v.cast(dt)
-  def minmax(a, b):
-    if dt in (dtypes.uint8, dtypes.uint16, dtypes.uint32, dtypes.uint64):
-      return (a > b).where(a, b) if is_max else (a < b).where(a, b)
+def _minmax_reduce(is_max: bool, dt, *args: UOp) -> UOp:
+  def cast(v: UOp) -> UOp: return v.bitcast(dt) if dt == dtypes.float32 and v.dtype == dtypes.uint32 else v.cast(dt)
+  def minmax(a: UOp, b: UOp) -> UOp:
+    if dt in (dtypes.uint8, dtypes.uint16, dtypes.uint32, dtypes.uint64): return (a > b).where(a, b) if is_max else (a < b).where(a, b)
     return a.maximum(b) if is_max else a.minimum(b)
   result = cast(args[0])
   for a in args[1:]:
@@ -94,8 +93,7 @@ def _trig_reduce(x, phase=0.0):
   n = _floor(x * _const(x.dtype, 0.15915494309189535) + _const(x.dtype, 0.5))
   return UOp(Ops.SIN, x.dtype, (x - n * _const(x.dtype, 6.283185307179586),))
 
-def _signext(a):
-  val = a[0]
+def _signext(val: UOp) -> UOp:
   for bits, mask, ext in [(8, 0xFF, 0xFFFFFF00), (16, 0xFFFF, 0xFFFF0000)]:
     if (val.op == Ops.AND and len(val.src) == 2 and val.src[1].op == Ops.CONST and val.src[1].arg == mask) or val.dtype.itemsize == bits // 8:
       v32 = val.cast(dtypes.uint32) if val.dtype != dtypes.uint32 else val
@@ -103,44 +101,43 @@ def _signext(a):
       return sb.ne(_u32(0)).where(v32 | _u32(ext), v32).cast(dtypes.int)
   return val.cast(dtypes.int64) if val.dtype in (dtypes.int, dtypes.int32) else val
 
-def _abs(a):
-  if a[0].dtype not in (dtypes.float32, dtypes.float64, dtypes.half): return a[0]
-  _, _, _, _, shift = _float_info(a[0])
+def _abs(val: UOp) -> UOp:
+  if val.dtype not in (dtypes.float32, dtypes.float64, dtypes.half): return val
+  _, _, _, _, shift = _float_info(val)
   sign_mask = {10: 0x7FFF, 23: 0x7FFFFFFF, 52: 0x7FFFFFFFFFFFFFFF}[shift]
   bt, ft = {10: (dtypes.uint16, dtypes.half), 23: (dtypes.uint32, dtypes.float32), 52: (dtypes.uint64, dtypes.float64)}[shift]
-  return (a[0].bitcast(bt) & _const(bt, sign_mask)).bitcast(ft)
+  return (val.bitcast(bt) & _const(bt, sign_mask)).bitcast(ft)
 
 def _f_to_u(f, dt): return UOp(Ops.TRUNC, f.dtype, ((f < _const(f.dtype, 0.0)).where(_const(f.dtype, 0.0), f),)).cast(dt)
 
-def _cvt_quiet(a):
-  bits, _, _, qb, _ = _float_info(a[0])
-  bt, ft = (dtypes.uint64, dtypes.float64) if a[0].dtype == dtypes.float64 else (dtypes.uint16, dtypes.half) if a[0].dtype == dtypes.half else (dtypes.uint32, dtypes.float32)
-  return (a[0].bitcast(bt) | qb).bitcast(ft)
+def _cvt_quiet(val: UOp) -> UOp:
+  bits, _, _, qb, _ = _float_info(val)
+  bt, ft = (dtypes.uint64, dtypes.float64) if val.dtype == dtypes.float64 else (dtypes.uint16, dtypes.half) if val.dtype == dtypes.half else (dtypes.uint32, dtypes.float32)
+  return (val.bitcast(bt) | qb).bitcast(ft)
 
-def _is_denorm(a):
-  bits, exp_m, mant_m, _, _ = _float_info(a[0])
+def _is_denorm(val: UOp) -> UOp:
+  bits, exp_m, mant_m, _, _ = _float_info(val)
   return (bits & exp_m).eq(_const(bits.dtype, 0)) & (bits & mant_m).ne(_const(bits.dtype, 0))
 
 _EXP_BITS = {10: 0x1F, 23: 0xFF, 52: 0x7FF}
-def _get_exp(bits, shift): return ((bits >> _const(bits.dtype, shift)) & _const(bits.dtype, _EXP_BITS[shift])).cast(dtypes.int)
+def _get_exp(bits: UOp, shift: int) -> UOp: return ((bits >> _const(bits.dtype, shift)) & _const(bits.dtype, _EXP_BITS[shift])).cast(dtypes.int)
 
-def _exponent(a):
-  bits, _, _, _, shift = _float_info(a[0])
+def _exponent(val: UOp) -> UOp:
+  bits, _, _, _, shift = _float_info(val)
   return _get_exp(bits, shift)
 
-def _div_would_be_denorm(a):
-  bits_n, _, _, _, shift = _float_info(a[0])
-  bits_d, _, _, _, _ = _float_info(a[1])
+def _div_would_be_denorm(a: UOp, b: UOp) -> UOp:
+  bits_n, _, _, _, shift = _float_info(a)
+  bits_d, _, _, _, _ = _float_info(b)
   min_exp = {10: -14, 23: -126, 52: -1022}[shift]
   return (_get_exp(bits_n, shift) - _get_exp(bits_d, shift)) < _const(dtypes.int, min_exp)
 
-def _sign(a):
-  bits, _, _, _, shift = _float_info(a[0])
+def _sign(val: UOp) -> UOp:
+  bits, _, _, _, shift = _float_info(val)
   sign_shift = {10: 15, 23: 31, 52: 63}[shift]
   return ((bits >> _const(bits.dtype, sign_shift)) & _const(bits.dtype, 1)).cast(dtypes.uint32)
 
-def _signext_from_bit(a):
-  val, w = a[0], a[1]
+def _signext_from_bit(val: UOp, w: UOp) -> UOp:
   is_64bit = val.dtype in (dtypes.uint64, dtypes.int64)
   dt = dtypes.uint64 if is_64bit else dtypes.uint32
   mask_all = _const(dt, 0xFFFFFFFFFFFFFFFF if is_64bit else 0xFFFFFFFF)
@@ -151,30 +148,29 @@ def _signext_from_bit(a):
   ext_mask = ((one << w_val) - one) ^ mask_all
   return sign_bit.ne(_const(dt, 0)).where(val_u | ext_mask, val_u)
 
-def _ldexp(a):
-  val, exp = a[0], a[1]
+def _ldexp(val: UOp, exp: UOp) -> UOp:
   if val.dtype == dtypes.uint32: val = val.bitcast(dtypes.float32)
   elif val.dtype == dtypes.uint64: val = val.bitcast(dtypes.float64)
   if exp.dtype in (dtypes.uint32, dtypes.uint64): exp = exp.cast(dtypes.int if exp.dtype == dtypes.uint32 else dtypes.int64)
   return val * UOp(Ops.EXP2, val.dtype, (exp.cast(val.dtype),))
 
-def _frexp_mant(a):
-  val = a[0].bitcast(dtypes.float32) if a[0].dtype == dtypes.uint32 else a[0].bitcast(dtypes.float64) if a[0].dtype == dtypes.uint64 else a[0]
+def _frexp_mant(val: UOp) -> UOp:
+  val = val.bitcast(dtypes.float32) if val.dtype == dtypes.uint32 else val.bitcast(dtypes.float64) if val.dtype == dtypes.uint64 else val
   if val.dtype == dtypes.float32: return ((val.bitcast(dtypes.uint32) & _u32(0x807FFFFF)) | _u32(0x3f000000)).bitcast(dtypes.float32)
   return ((val.bitcast(dtypes.uint64) & _const(dtypes.uint64, 0x800FFFFFFFFFFFFF)) | _const(dtypes.uint64, 0x3fe0000000000000)).bitcast(dtypes.float64)
 
-def _frexp_exp(a):
-  val = a[0].bitcast(dtypes.float32) if a[0].dtype == dtypes.uint32 else a[0].bitcast(dtypes.float64) if a[0].dtype == dtypes.uint64 else a[0]
+def _frexp_exp(val: UOp) -> UOp:
+  val = val.bitcast(dtypes.float32) if val.dtype == dtypes.uint32 else val.bitcast(dtypes.float64) if val.dtype == dtypes.uint64 else val
   if val.dtype == dtypes.float32: return ((val.bitcast(dtypes.uint32) >> _u32(23)) & _u32(0xFF)).cast(dtypes.int) - _const(dtypes.int, 126)
   return ((val.bitcast(dtypes.uint64) >> _const(dtypes.uint64, 52)) & _const(dtypes.uint64, 0x7FF)).cast(dtypes.int) - _const(dtypes.int, 1022)
 
 TWO_OVER_PI = 0x0145f306dc9c882a53f84eafa3ea69bb81b6c52b3278872083fca2c757bd778ac36e48dc74849ba5c00c925dd413a32439fc3bd63962534e7dd1046bea5d768909d338e04d68befc827323ac7306a673e93908bf177bf250763ff12fffbc0b301fde5e2316b414da3eda6cfd9e4f96136e9e8c7ecd3cbfd45aea4f758fd7cbe2f67a0e73ef14a525d4d7f6bf623f1aba10ac06608df8f6
 # TWO_OVER_PI as 19 u64 words for trig_preop_result (word[0] = bits 0-63, word[18] = bits 1152-1200)
 _PREOP_WORDS = tuple((TWO_OVER_PI >> (64 * i)) & 0xFFFFFFFFFFFFFFFF for i in range(19))
-def _trig_preop(a):
+def _trig_preop(val: UOp) -> UOp:
   # Extract 53 bits from position (1148 - shift) in the 1201-bit 2/PI constant
   # Using word-based selection: 19 conditions instead of 1149
-  shift = a[0].cast(dtypes.uint32)
+  shift = val.cast(dtypes.uint32)
   bit_pos = _u32(1148) - shift  # starting bit position from LSB
   word_idx = bit_pos >> _u32(6)  # // 64
   bit_off = bit_pos & _u32(63)   # % 64
@@ -189,9 +185,9 @@ def _trig_preop(a):
   result = ((lo_word >> bit_off_64) | (hi_word << (_u64(64) - bit_off_64))) & _u64(0x1fffffffffffff)
   return result.cast(dtypes.float64)
 
-def _ff1(a, bits):
+def _ff1(val: UOp, bits: int) -> UOp:
   dt = dtypes.uint64 if bits == 64 else dtypes.uint32
-  val = a[0].cast(dt) if a[0].dtype != dt else a[0]
+  val = val.cast(dt) if val.dtype != dt else val
   result = _const(dtypes.int, -1)
   for i in range(bits):
     cond = ((val >> _const(dt, i)) & _const(dt, 1)).ne(_const(dt, 0)) & result.eq(_const(dtypes.int, -1))
@@ -199,34 +195,34 @@ def _ff1(a, bits):
   return result
 
 _FUNCS: dict[str, Callable[..., UOp]] = {
-  'sqrt': lambda a: UOp(Ops.SQRT, a[0].dtype, (a[0],)), 'trunc': lambda a: UOp(Ops.TRUNC, a[0].dtype, (a[0],)),
-  'log2': lambda a: UOp(Ops.LOG2, a[0].dtype, (a[0],)), 'sin': lambda a: _trig_reduce(a[0]),
-  'cos': lambda a: _trig_reduce(a[0], 0.25), 'floor': lambda a: _floor(a[0]), 'fract': lambda a: a[0] - _floor(a[0]),
+  'sqrt': lambda a: UOp(Ops.SQRT, a.dtype, (a,)), 'trunc': lambda a: UOp(Ops.TRUNC, a.dtype, (a,)),
+  'log2': lambda a: UOp(Ops.LOG2, a.dtype, (a,)), 'sin': lambda a: _trig_reduce(a),
+  'cos': lambda a: _trig_reduce(a, 0.25), 'floor': _floor, 'fract': lambda a: a - _floor(a),
   'signext': _signext, 'abs': _abs,
-  'isEven': lambda a: (UOp(Ops.TRUNC, a[0].dtype, (a[0],)).cast(dtypes.int) & _const(dtypes.int, 1)).eq(_const(dtypes.int, 0)),
-  'max': lambda a: UOp(Ops.MAX, a[0].dtype, (a[0], a[1])),
-  'min': lambda a: UOp(Ops.MAX, a[0].dtype, (a[0].neg(), a[1].neg())).neg(),
-  'pow': lambda a: UOp(Ops.EXP2, dtypes.float32, (a[1].bitcast(dtypes.float32),)),
-  'fma': lambda a: a[0] * a[1] + a[2],
-  'i32_to_f32': lambda a: a[0].cast(dtypes.int).cast(dtypes.float32),
-  'u32_to_f32': lambda a: a[0].cast(dtypes.uint32).cast(dtypes.float32),
-  'f32_to_i32': lambda a: UOp(Ops.TRUNC, dtypes.float32, (a[0].bitcast(dtypes.float32),)).cast(dtypes.int),
-  'f32_to_u32': lambda a: _f_to_u(a[0].bitcast(dtypes.float32), dtypes.uint32),
-  'f64_to_i32': lambda a: UOp(Ops.TRUNC, dtypes.float64, (a[0].bitcast(dtypes.float64),)).cast(dtypes.int),
-  'f64_to_u32': lambda a: _f_to_u(a[0].bitcast(dtypes.float64), dtypes.uint32),
-  'f16_to_f32': lambda a: _f16_extract(a[0]).cast(dtypes.float32),
-  'f32_to_f16': lambda a: a[0].cast(dtypes.half),
-  'f32_to_f64': lambda a: a[0].bitcast(dtypes.float32).cast(dtypes.float64),
-  'f64_to_f32': lambda a: a[0].bitcast(dtypes.float64).cast(dtypes.float32),
-  'i32_to_f64': lambda a: a[0].cast(dtypes.int).cast(dtypes.float64),
-  'u32_to_f64': lambda a: a[0].cast(dtypes.uint32).cast(dtypes.float64),
-  'f16_to_i16': lambda a: UOp(Ops.TRUNC, dtypes.half, (_f16_extract(a[0]),)).cast(dtypes.int16),
-  'f16_to_u16': lambda a: UOp(Ops.TRUNC, dtypes.half, (_f16_extract(a[0]),)).cast(dtypes.uint16),
-  'i16_to_f16': lambda a: a[0].cast(dtypes.int16).cast(dtypes.half),
-  'u16_to_f16': lambda a: a[0].cast(dtypes.uint16).cast(dtypes.half),
-  'bf16_to_f32': lambda a: (((a[0].cast(dtypes.uint32) if a[0].dtype != dtypes.uint32 else a[0]) & _u32(0xFFFF)) << _u32(16)).bitcast(dtypes.float32),
-  'isNAN': lambda a: _isnan(a[0]), 'isSignalNAN': lambda a: _check_nan(a[0], False),
-  'isQuietNAN': lambda a: _check_nan(a[0], True), 'cvtToQuietNAN': _cvt_quiet,
+  'isEven': lambda a: (UOp(Ops.TRUNC, a.dtype, (a,)).cast(dtypes.int) & _const(dtypes.int, 1)).eq(_const(dtypes.int, 0)),
+  'max': lambda a, b: UOp(Ops.MAX, a.dtype, (a, b)),
+  'min': lambda a, b: UOp(Ops.MAX, a.dtype, (a.neg(), b.neg())).neg(),
+  'pow': lambda a, b: UOp(Ops.EXP2, dtypes.float32, (b.bitcast(dtypes.float32),)),
+  'fma': lambda a, b, c: a * b + c,
+  'i32_to_f32': lambda a: a.cast(dtypes.int).cast(dtypes.float32),
+  'u32_to_f32': lambda a: a.cast(dtypes.uint32).cast(dtypes.float32),
+  'f32_to_i32': lambda a: UOp(Ops.TRUNC, dtypes.float32, (a.bitcast(dtypes.float32),)).cast(dtypes.int),
+  'f32_to_u32': lambda a: _f_to_u(a.bitcast(dtypes.float32), dtypes.uint32),
+  'f64_to_i32': lambda a: UOp(Ops.TRUNC, dtypes.float64, (a.bitcast(dtypes.float64),)).cast(dtypes.int),
+  'f64_to_u32': lambda a: _f_to_u(a.bitcast(dtypes.float64), dtypes.uint32),
+  'f16_to_f32': lambda a: _f16_extract(a).cast(dtypes.float32),
+  'f32_to_f16': lambda a: a.cast(dtypes.half),
+  'f32_to_f64': lambda a: a.bitcast(dtypes.float32).cast(dtypes.float64),
+  'f64_to_f32': lambda a: a.bitcast(dtypes.float64).cast(dtypes.float32),
+  'i32_to_f64': lambda a: a.cast(dtypes.int).cast(dtypes.float64),
+  'u32_to_f64': lambda a: a.cast(dtypes.uint32).cast(dtypes.float64),
+  'f16_to_i16': lambda a: UOp(Ops.TRUNC, dtypes.half, (_f16_extract(a),)).cast(dtypes.int16),
+  'f16_to_u16': lambda a: UOp(Ops.TRUNC, dtypes.half, (_f16_extract(a),)).cast(dtypes.uint16),
+  'i16_to_f16': lambda a: a.cast(dtypes.int16).cast(dtypes.half),
+  'u16_to_f16': lambda a: a.cast(dtypes.uint16).cast(dtypes.half),
+  'bf16_to_f32': lambda a: (((a.cast(dtypes.uint32) if a.dtype != dtypes.uint32 else a) & _u32(0xFFFF)) << _u32(16)).bitcast(dtypes.float32),
+  'isNAN': _isnan, 'isSignalNAN': lambda a: _check_nan(a, False),
+  'isQuietNAN': lambda a: _check_nan(a, True), 'cvtToQuietNAN': _cvt_quiet,
   'isDENORM': _is_denorm, 'exponent': _exponent, 'divWouldBeDenorm': _div_would_be_denorm, 'sign': _sign,
   'signext_from_bit': _signext_from_bit, 'ldexp': _ldexp, 'frexp_mant': _frexp_mant, 'mantissa': _frexp_mant,
   'frexp_exp': _frexp_exp, 'trig_preop_result': _trig_preop,
@@ -234,8 +230,8 @@ _FUNCS: dict[str, Callable[..., UOp]] = {
 }
 for is_max, name in [(False, 'min'), (True, 'max')]:
   for dt, sfx in [(dtypes.float32, 'f32'), (dtypes.int, 'i32'), (dtypes.uint32, 'u32'), (dtypes.int16, 'i16'), (dtypes.uint16, 'u16')]:
-    _FUNCS[f'v_{name}_{sfx}'] = lambda a, im=is_max, d=dt: _minmax_reduce(im, d, a)
-    _FUNCS[f'v_{name}3_{sfx}'] = lambda a, im=is_max, d=dt: _minmax_reduce(im, d, a)
+    _FUNCS[f'v_{name}_{sfx}'] = lambda *a, im=is_max, d=dt: _minmax_reduce(im, d, *a)
+    _FUNCS[f'v_{name}3_{sfx}'] = lambda *a, im=is_max, d=dt: _minmax_reduce(im, d, *a)
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # TOKENIZER
@@ -635,7 +631,7 @@ class Parser:
         return result if result is not None else _u32(0)
       return parse_expr(body, lv, self.funcs)
     if name in self.funcs:
-      return self.funcs[name](args)
+      return self.funcs[name](*args)
     raise RuntimeError(f"unknown function: {name}")
 
   def _handle_mem_load(self, addr: UOp, dt) -> UOp:
