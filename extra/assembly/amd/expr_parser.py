@@ -10,6 +10,13 @@ DTYPES = {'u32': dtypes.uint32, 'i32': dtypes.int, 'f32': dtypes.float32, 'b32':
           'f64': dtypes.float64, 'b64': dtypes.uint64, 'u16': dtypes.uint16, 'i16': dtypes.short, 'f16': dtypes.half, 'b16': dtypes.uint16,
           'u8': dtypes.uint8, 'i8': dtypes.int8, 'b8': dtypes.uint8, 'u1': dtypes.uint32}
 _BITS_DT = {8: dtypes.uint8, 16: dtypes.uint16, 32: dtypes.uint32, 64: dtypes.uint64}
+_NUM_SUFFIXES = ('ULL', 'LL', 'UL', 'U', 'L', 'F', 'f')
+def _strip_suffix(num: str) -> tuple[str, str]:
+  for sfx in _NUM_SUFFIXES:
+    if num.endswith(sfx): return sfx, num[:-len(sfx)]
+  return '', num
+_SINGLE_CHAR = {'(': 'LPAREN', ')': 'RPAREN', '[': 'LBRACKET', ']': 'RBRACKET', '{': 'LBRACE', '}': 'RBRACE',
+                ':': 'COLON', ',': 'COMMA', '?': 'QUESTION', '.': 'DOT', '=': 'EQUALS', "'": 'QUOTE'}
 
 def _const(dt, v): return UOp.const(dt, v)
 def _u32(v): return _const(dtypes.uint32, v)
@@ -95,18 +102,7 @@ def tokenize(s: str) -> list[Token]:
     if i + 1 < n and s[i:i+2] in ('||', '&&', '>=', '<=', '==', '!=', '<>', '>>', '<<', '**', '+:', '-:'):
       tokens.append(Token('OP', s[i:i+2])); i += 2; continue
     if c in '|^&><+-*/~!%': tokens.append(Token('OP', c)); i += 1; continue
-    if c == '(': tokens.append(Token('LPAREN', c)); i += 1; continue
-    if c == ')': tokens.append(Token('RPAREN', c)); i += 1; continue
-    if c == '[': tokens.append(Token('LBRACKET', c)); i += 1; continue
-    if c == ']': tokens.append(Token('RBRACKET', c)); i += 1; continue
-    if c == '{': tokens.append(Token('LBRACE', c)); i += 1; continue
-    if c == '}': tokens.append(Token('RBRACE', c)); i += 1; continue
-    if c == ':': tokens.append(Token('COLON', c)); i += 1; continue
-    if c == ',': tokens.append(Token('COMMA', c)); i += 1; continue
-    if c == '?': tokens.append(Token('QUESTION', c)); i += 1; continue
-    if c == '.': tokens.append(Token('DOT', c)); i += 1; continue
-    if c == '=': tokens.append(Token('EQUALS', c)); i += 1; continue
-    if c == "'": tokens.append(Token('QUOTE', c)); i += 1; continue
+    if (t := _SINGLE_CHAR.get(c)): tokens.append(Token(t, c)); i += 1; continue
     if c == ';': i += 1; continue
     if c.isdigit() or (c == '-' and i + 1 < n and s[i+1].isdigit()):
       start = i
@@ -272,7 +268,7 @@ class Parser:
           dt_name = self.eat('IDENT').val
           return _cast_to(elem, DTYPES.get(dt_name, dtypes.uint32))
         if self.at('LBRACKET'):
-          return self._handle_bracket_with_name(elem, name + idx)
+          return self._handle_bracket(elem, name + idx)
         return elem
       if self.at('LBRACKET') and name not in self.vars:
         self.eat('LBRACKET')
@@ -282,9 +278,7 @@ class Parser:
             self.eat('NUM')
             self.eat('RBRACKET')
             elem = self.vars[f'{name}{idx_num}']
-            if self.try_eat('DOT'):
-              dt_name = self.eat('IDENT').val
-              return _cast_to(elem, DTYPES.get(dt_name, dtypes.uint32))
+            if self.try_eat('DOT'): return _cast_to(elem, DTYPES.get(self.eat('IDENT').val, dtypes.uint32))
             return elem
         first = self.expr_top()
         return self._handle_bracket_rest(first, _u32(0), name)
@@ -317,13 +311,7 @@ class Parser:
 
   def _handle_bracket(self, base, var_name: str | None = None) -> UOp:
     self.eat('LBRACKET')
-    first = self.expr_top()
-    return self._handle_bracket_rest(first, base, var_name)
-
-  def _handle_bracket_with_name(self, base, var_name: str) -> UOp:
-    self.eat('LBRACKET')
-    first = self.expr_top()
-    return self._handle_bracket_rest(first, base, var_name)
+    return self._handle_bracket_rest(self.expr_top(), base, var_name)
 
   def _handle_bracket_rest(self, first: UOp, base: UOp, var_name: str | None = None) -> UOp:
     if self.at('OP') and self.peek().val in ('+:', '-:'):
@@ -434,10 +422,7 @@ class Parser:
       return _const(_BITS_DT.get(bits, dtypes.uint32), int(num, 16))
     if self.at('NUM') or (self.at('OP') and self.peek().val == '-'):
       neg = self.try_eat_val('-') is not None
-      num = self.eat('NUM').val
-      suffix = ''
-      for sfx in ('ULL', 'LL', 'UL', 'U', 'L', 'F', 'f'):
-        if num.endswith(sfx): suffix, num = sfx, num[:-len(sfx)]; break
+      suffix, num = _strip_suffix(self.eat('NUM').val)
       if num.startswith('0x'):
         val = int(num, 16)
         if neg: val = -val
@@ -454,13 +439,8 @@ class Parser:
     raise RuntimeError(f"unexpected token after {bits}': {self.peek()}")
 
   def _parse_number(self, num: str) -> UOp:
-    suffix = ''
-    if num.startswith('0x') or num.startswith('0X'):
-      for sfx in ('ULL', 'LL', 'UL', 'U', 'L'):
-        if num.endswith(sfx): suffix, num = sfx, num[:-len(sfx)]; break
-      return _const(dtypes.uint64, int(num, 16))
-    for sfx in ('ULL', 'LL', 'UL', 'U', 'L', 'F', 'f'):
-      if num.endswith(sfx): suffix, num = sfx, num[:-len(sfx)]; break
+    if num.startswith('0x') or num.startswith('0X'): return _const(dtypes.uint64, int(num.rstrip('ULul'), 16))
+    suffix, num = _strip_suffix(num)
     if '.' in num or suffix in ('F', 'f'):
       return _const(dtypes.float32 if suffix in ('F', 'f') else dtypes.float64, float(num))
     val = int(num)
