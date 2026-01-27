@@ -373,24 +373,20 @@ def compile_vop_pcode(op, srcs: dict[str, UOp], lane: UOp, wvgpr_fn, wsgpr_fn, r
 
 # Buffers: sgpr=0, vgpr=1, vmem=2, lds=3, scratch=4
 
-def _define_bufs():
-  sgpr = UOp(Ops.DEFINE_GLOBAL, dtypes.uint32.ptr(SGPR_COUNT), arg=0)
-  vgpr = UOp(Ops.DEFINE_GLOBAL, dtypes.uint32.ptr(VGPR_SIZE), arg=1)
-  vmem = UOp(Ops.DEFINE_GLOBAL, dtypes.uint32.ptr(1 << 46), arg=2)
-  lds = UOp(Ops.DEFINE_GLOBAL, dtypes.uint32.ptr(16384), arg=3)
-  scratch = UOp(Ops.DEFINE_GLOBAL, dtypes.uint8.ptr(1 << 30), arg=4)
-  return sgpr, vgpr, vmem, lds, scratch
-
 # ═══════════════════════════════════════════════════════════════════════════════
 # INSTRUCTION COMPILER - converts decoded instruction to UOp SINK
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class _Ctx:
   """Context for instruction compilation - holds buffers and helpers."""
-  __slots__ = ('sgpr', 'vgpr', 'vmem', 'lds', 'scratch', 'inst_size', 'dyn_fields')
+  __slots__ = ('inst_size', 'dyn_fields')
+  sgpr = UOp(Ops.DEFINE_GLOBAL, dtypes.uint32.ptr(SGPR_COUNT), arg=0)
+  vgpr = UOp(Ops.DEFINE_GLOBAL, dtypes.uint32.ptr(VGPR_SIZE), arg=1)
+  vmem = UOp(Ops.DEFINE_GLOBAL, dtypes.uint32.ptr(1 << 46), arg=2)
+  lds = UOp(Ops.DEFINE_GLOBAL, dtypes.uint32.ptr(16384), arg=3)
+  scratch = UOp(Ops.DEFINE_GLOBAL, dtypes.uint8.ptr(1 << 30), arg=4)
 
-  def __init__(self, sgpr, vgpr, vmem, lds, scratch, inst_size):
-    self.sgpr, self.vgpr, self.vmem, self.lds, self.scratch = sgpr, vgpr, vmem, lds, scratch
+  def __init__(self, inst_size: int):
     self.inst_size = inst_size
     self.dyn_fields: list[tuple[int, int]] = []  # (lo, hi) of fields read dynamically
 
@@ -1113,9 +1109,6 @@ def _get_inst_sink(inst_bytes: bytes) -> tuple[UOp, tuple[int, int, int]]:
   inst = decode_inst(inst_bytes)
   inst_size = inst.size()  # bytes
 
-  sgpr, vgpr, vmem, lds, scratch = _define_bufs()
-  ctx = _Ctx(sgpr, vgpr, vmem, lds, scratch, inst_size)
-
   # Look up handler by type, falling back to base classes for _LIT variants
   handler = _INST_HANDLERS.get(type(inst))
   if handler is None:
@@ -1124,6 +1117,8 @@ def _get_inst_sink(inst_bytes: bytes) -> tuple[UOp, tuple[int, int, int]]:
         handler = _INST_HANDLERS[base]
         break
   if handler is None: raise RuntimeError(f"[emu2] unimplemented instruction type: {type(inst).__name__} {_op_name(inst)}")
+
+  ctx = _Ctx(inst_size)
   _, sink = handler(inst, ctx, "")  # name replaced below
   # Compute canonical mask and name after handler populates dyn_fields
   base, mask, size = ctx.canonical_mask(inst_bytes)
