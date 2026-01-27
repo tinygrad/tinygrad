@@ -376,6 +376,7 @@ class TestLocalAccess(unittest.TestCase):
     self.assertEqual(_test_uops_result(dtypes.int32, uops, sres), 42)
 
 @unittest.skipIf(Device.DEFAULT == "METAL", "fast_idiv disabled on METAL due to compiler bug")
+@unittest.skipUnless(Ops.SHR in Device[Device.DEFAULT].renderer.code_for_op, "fast_idiv requires SHR")
 class TestFastIdiv(unittest.TestCase):
   def test_division_power_of_two(self):
     for dt in (dtypes.int32, dtypes.uint32):
