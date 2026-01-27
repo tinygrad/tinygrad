@@ -912,7 +912,9 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45,65)], torch.abs, Tensor.abs)
     helper_test_op([()], torch.abs, Tensor.abs)
   def test_abs_exact(self):
-    helper_test_op(None, torch.abs, Tensor.abs, vals=[[-1.,0,1]])
+    for v in [-1., -0., 0., 1., math.inf, -math.inf, math.nan, -math.nan]:
+      # abs(nan) gradient is undefined: torch=0, tinygrad=1, jax=-1
+      helper_test_op(None, torch.abs, Tensor.abs, vals=[[v]], forward_only=math.isnan(v))
 
   def test_log(self):
     helper_test_op([(45,65)], torch.log, Tensor.log)
@@ -948,10 +950,12 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45,1), (1,65)], torch.copysign, Tensor.copysign)
     helper_test_op([(), ()], torch.copysign, Tensor.copysign)
   def test_copysign_exact(self):
-    v = [-1., -0., 0., 1.]#, math.inf, -math.inf] # TODO: * 0 hack does not work with inf
+    # NOTE: -nan (negative nan) is not tested because we can't detect its sign bit without bitcast
+    v = [-1., -0., 0., 1., math.inf, -math.inf, math.nan]
     for i in v:
       for j in v:
-        helper_test_op(None, torch.copysign, Tensor.copysign, vals=[[i], [j]])
+        # torch returns nan gradient for copysign at inf, but mathematically (and per jax) it's ±1
+        helper_test_op(None, torch.copysign, Tensor.copysign, vals=[[i], [j]], forward_only=math.isinf(i) or math.isnan(i))
 
   def test_logaddexp(self):
     helper_test_op([(45,65), (45,65)], torch.logaddexp, Tensor.logaddexp)

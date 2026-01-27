@@ -3374,8 +3374,9 @@ class Tensor(OpMixin):
     """
     # NOTE: torch always return in float, we return based on the broadcasting rule.
     other = self._broadcasted(other)[1]
-    # TODO: remove other*0?
-    return ((other < 0) | (other.reciprocal() < 0)).where(-self.abs(), self.abs()) + other*0
+    # TODO: remove other.sign()*0?
+    # other.sign()*0 keeps other in the gradient graph (gradient=0) without affecting forward (works for inf unlike other*0)
+    return self.abs() * ((other < 0) | (other.reciprocal() < 0)).where(-1, 1) + other.sign()*0
 
   def logaddexp(self, other) -> Tensor:
     """
