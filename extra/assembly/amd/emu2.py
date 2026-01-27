@@ -76,20 +76,11 @@ def _split64(val: UOp) -> tuple[UOp, UOp]:
 def _apply_src_mods(val: UOp, mod_bit: int, abs_bits: int, neg_bits: int, is_16bit: bool = False, is_64bit: bool = False) -> UOp:
   """Apply abs/neg modifiers to source value based on operation type."""
   if not (abs_bits & (1 << mod_bit)) and not (neg_bits & (1 << mod_bit)): return val
-  if is_16bit:
-    f16_val = val.cast(dtypes.uint16).bitcast(dtypes.half)
-    if abs_bits & (1 << mod_bit): f16_val = (f16_val.bitcast(dtypes.uint16) & UOp.const(dtypes.uint16, 0x7FFF)).bitcast(dtypes.half)
-    if neg_bits & (1 << mod_bit): f16_val = f16_val.neg()
-    return f16_val.bitcast(dtypes.uint16).cast(dtypes.uint32)
-  if is_64bit:
-    if val.dtype == dtypes.uint64: val = val.bitcast(dtypes.float64)
-    if abs_bits & (1 << mod_bit): val = (val.bitcast(dtypes.uint64) & UOp.const(dtypes.uint64, 0x7FFFFFFFFFFFFFFF)).bitcast(dtypes.float64)
-    if neg_bits & (1 << mod_bit): val = val.neg()
-    return val.bitcast(dtypes.uint64)
-  if val.dtype == dtypes.uint32: val = val.bitcast(dtypes.float32)
-  if abs_bits & (1 << mod_bit): val = (val.bitcast(dtypes.uint32) & UOp.const(dtypes.uint32, 0x7FFFFFFF)).bitcast(dtypes.float32)
-  if neg_bits & (1 << mod_bit): val = val.neg()
-  return val.bitcast(dtypes.uint32)
+  ut, ft, mask = (dtypes.uint16, dtypes.half, 0x7FFF) if is_16bit else (dtypes.uint64, dtypes.float64, 0x7FFFFFFFFFFFFFFF) if is_64bit else (dtypes.uint32, dtypes.float32, 0x7FFFFFFF)
+  fv = val.cast(ut).bitcast(ft) if is_16bit else val.bitcast(ft) if val.dtype == ut else val
+  if abs_bits & (1 << mod_bit): fv = (fv.bitcast(ut) & UOp.const(ut, mask)).bitcast(ft)
+  if neg_bits & (1 << mod_bit): fv = fv.neg()
+  return fv.bitcast(ut).cast(dtypes.uint32) if is_16bit else fv.bitcast(ut)
 
 # Map VOPD ops to VOP2 ops for pcode lookup
 VOPD_TO_VOP2 = {
@@ -117,8 +108,11 @@ def _to_u32(val: UOp) -> UOp:
   if val.dtype.itemsize == 4: return val.bitcast(dtypes.uint32)  # same size: bitcast (float32->uint32)
   return val.cast(dtypes.uint32)  # different size: cast (bool, int16, etc)
 def _lane_active(exec_mask: UOp, lane: UOp) -> UOp: return ((exec_mask >> lane.cast(dtypes.uint32)) & _c(1)).ne(_c(0))
-def _apply_opsel(val: UOp, sel_bit: int, opsel: int) -> UOp:
-  return (val >> _c(16)) & _c(0xFFFF) if opsel & (1 << sel_bit) else val
+def _hi16(v: UOp) -> UOp: return (v >> _c(16)) & _c(0xFFFF)
+def _cond_hi16(cond, val: UOp) -> UOp:
+  """Apply hi-half extraction conditionally: if cond is UOp, use where; if bool True, extract; else return val unchanged."""
+  return cond.where(_hi16(val), val) if isinstance(cond, UOp) else _hi16(val) if cond else val
+def _apply_opsel(val: UOp, sel_bit: int, opsel: int) -> UOp: return _hi16(val) if opsel & (1 << sel_bit) else val
 
 def _unroll_lanes(get_lane_bit, exec_mask: UOp, apply_exec: bool = True) -> UOp:
   """Combine 32 lane bits into a 32-bit mask using RANGE+REDUCE. Optionally apply EXEC mask."""
@@ -145,23 +139,10 @@ def _val_to_u32(val: UOp) -> UOp:
 def _apply_clamp(val: UOp, clmp: int | UOp) -> UOp:
   """Apply VOP3 clamp modifier: clamp float results to [0.0, 1.0] range."""
   if isinstance(clmp, int) and clmp == 0: return val
-  # Only clamp float types
-  if val.dtype == dtypes.float32:
-    zero, one = UOp.const(dtypes.float32, 0.0), UOp.const(dtypes.float32, 1.0)
-    clamped = val.maximum(zero).minimum(one)
-    if isinstance(clmp, UOp): return clmp.ne(_c(0)).where(clamped, val)
-    return clamped
-  if val.dtype == dtypes.half:
-    zero, one = UOp.const(dtypes.half, 0.0), UOp.const(dtypes.half, 1.0)
-    clamped = val.maximum(zero).minimum(one)
-    if isinstance(clmp, UOp): return clmp.ne(_c(0)).where(clamped, val)
-    return clamped
-  if val.dtype == dtypes.float64:
-    zero, one = UOp.const(dtypes.float64, 0.0), UOp.const(dtypes.float64, 1.0)
-    clamped = val.maximum(zero).minimum(one)
-    if isinstance(clmp, UOp): return clmp.ne(_c(0)).where(clamped, val)
-    return clamped
-  return val
+  if val.dtype not in (dtypes.float32, dtypes.half, dtypes.float64): return val
+  zero, one = UOp.const(val.dtype, 0.0), UOp.const(val.dtype, 1.0)
+  clamped = val.maximum(zero).minimum(one)
+  return clmp.ne(_c(0)).where(clamped, val) if isinstance(clmp, UOp) else clamped
 
 # Pcode parser
 def _apply_pseudocode_fixes(op_name: str, pcode: str) -> str:
@@ -283,16 +264,14 @@ def _collect_data_slices(assigns: list, data_prefix: str, pcode_vars: dict = Non
 def _scalar_stores_dyn(assigns: list, wsgpr_dyn, sdst_reg: UOp, sdst_size: int = 1) -> list[UOp]:
   """Generate stores for scalar assigns with dynamic destination register (D0, SCC, EXEC, VCC)."""
   def w64_dyn(reg: UOp, val):
-    if val.dtype in (dtypes.uint64, dtypes.int64):
-      lo, hi = _split64(val)
-      return [wsgpr_dyn(reg, lo), wsgpr_dyn(reg + _c(1), hi)]
+    if val.dtype in (dtypes.uint64, dtypes.int64): lo, hi = _split64(val); return [wsgpr_dyn(reg, lo), wsgpr_dyn(reg + _c(1), hi)]
     return [wsgpr_dyn(reg, _to_u32(val))]
   stores = []
   for dest, val in assigns:
     if dest.startswith('D0'): stores.extend(w64_dyn(sdst_reg, val) if sdst_size == 2 else [wsgpr_dyn(sdst_reg, _to_u32(val))])
     elif dest.startswith('SCC'): stores.append(wsgpr_dyn(_c(SCC_IDX), _to_u32(val)))
-    elif dest.startswith('EXEC'): stores.extend([wsgpr_dyn(_c(EXEC_LO.offset), _split64(val)[0]), wsgpr_dyn(_c(EXEC_LO.offset + 1), _split64(val)[1])] if val.dtype in (dtypes.uint64, dtypes.int64) else [wsgpr_dyn(_c(EXEC_LO.offset), _to_u32(val))])
-    elif dest.startswith('VCC'): stores.extend([wsgpr_dyn(_c(VCC_LO.offset), _split64(val)[0]), wsgpr_dyn(_c(VCC_LO.offset + 1), _split64(val)[1])] if val.dtype in (dtypes.uint64, dtypes.int64) else [wsgpr_dyn(_c(VCC_LO.offset), _to_u32(val))])
+    elif dest.startswith('EXEC'): stores.extend(w64_dyn(_c(EXEC_LO.offset), val))
+    elif dest.startswith('VCC'): stores.extend(w64_dyn(_c(VCC_LO.offset), val))
   return stores
 
 # Counter for unique axis IDs to avoid UOp caching issues
@@ -669,21 +648,14 @@ def _compile_vop12(inst, ctx: _Ctx, name: str) -> tuple[str, UOp]:
       src0_hi = src0_off >= _c(384)
       # Only compute hi-half when src0_off >= 384, use guarded index to prevent OOB access
       src0_reg = src0_hi.where(src0_off - _c(384), _c(0))
-      s0_hi = (ctx.rvgpr_dyn(src0_reg, lane) >> _c(16)) & _c(0xFFFF)
-      if isinstance(src0_hi, UOp): s0 = src0_hi.where(s0_hi, s0)
-      elif src0_hi: s0 = s0_hi
+      s0 = src0_hi.where(_hi16(ctx.rvgpr_dyn(src0_reg, lane)), s0)
     srcs = {'S0': s0}
   else:
     vsrc1_reg = ctx.inst_field(VOP2.vsrc1)
     vsrc1_hi = is_16bit and (vsrc1_reg >= _c(128))
     vsrc1_actual = vsrc1_hi.where(vsrc1_reg - _c(128), vsrc1_reg) if isinstance(vsrc1_hi, UOp) else vsrc1_reg - _c(128) if vsrc1_hi else vsrc1_reg
-    s1 = ctx.rvgpr_dyn(vsrc1_actual, lane)
-    if isinstance(vsrc1_hi, UOp): s1 = vsrc1_hi.where((s1 >> _c(16)) & _c(0xFFFF), s1)
-    elif vsrc1_hi: s1 = (s1 >> _c(16)) & _c(0xFFFF)
-    # For FMAC/FMAMK hi-half dest, D0 must also read from hi-half (accumulator is in same half as dest)
-    d0 = ctx.rvgpr_dyn(vdst_reg, lane)
-    if isinstance(write_hi_half, UOp): d0 = write_hi_half.where((d0 >> _c(16)) & _c(0xFFFF), d0)
-    elif write_hi_half: d0 = (d0 >> _c(16)) & _c(0xFFFF)  # extract hi 16 bits for accumulator
+    s1 = _cond_hi16(vsrc1_hi, ctx.rvgpr_dyn(vsrc1_actual, lane))
+    d0 = _cond_hi16(write_hi_half, ctx.rvgpr_dyn(vdst_reg, lane))  # FMAC/FMAMK hi-half dest needs hi-half accumulator
     # Handle VOP2 hi-half src0 operand (src0 >= v[128] for 16-bit ops)
     src0_off = ctx.inst_field(VOP2.src0)
     s0 = ctx.rsrc_dyn(src0_off, lane, bits=16 if is_16bit else 32, literal=literal)
@@ -691,9 +663,7 @@ def _compile_vop12(inst, ctx: _Ctx, name: str) -> tuple[str, UOp]:
       src0_hi = src0_off >= _c(384)
       # Only compute hi-half when src0_off >= 384, use guarded index to prevent OOB access
       src0_reg = src0_hi.where(src0_off - _c(384), _c(0))
-      s0_hi = (ctx.rvgpr_dyn(src0_reg, lane) >> _c(16)) & _c(0xFFFF)
-      if isinstance(src0_hi, UOp): s0 = src0_hi.where(s0_hi, s0)
-      elif src0_hi: s0 = s0_hi
+      s0 = src0_hi.where(_hi16(ctx.rvgpr_dyn(src0_reg, lane)), s0)
     srcs = {'S0': s0, 'S1': s1, 'D0': d0}
     if inst.op in (VOP2Op.V_FMAAK_F32_E32, VOP2Op.V_FMAMK_F32_E32, VOP2Op.V_FMAAK_F16_E32, VOP2Op.V_FMAMK_F16_E32):
       srcs['SIMM32'] = literal
@@ -733,11 +703,8 @@ def _compile_vopc(inst, ctx: _Ctx, name: str, opsel: int = 0, abs_bits: int = 0,
   def get_cmp_bit(lane) -> UOp:
     lc = lane.cast(dtypes.int) if isinstance(lane, UOp) else _c(lane, dtypes.int)
     s0 = ctx.rsrc_dyn(src0_off, lc, src0_bits, literal)
-    s1 = ctx.rsrc_dyn(src1_off, lc, src1_bits, literal)
-    if is_16bit:
-      if isinstance(vsrc1_hi, UOp): s1 = vsrc1_hi.where((s1 >> _c(16)) & _c(0xFFFF), s1)
-      elif vsrc1_hi: s1 = (s1 >> _c(16)) & _c(0xFFFF)
-      if opsel: s0, s1 = _apply_opsel(s0, 0, opsel), _apply_opsel(s1, 1, opsel)
+    s1 = _cond_hi16(vsrc1_hi, ctx.rsrc_dyn(src1_off, lc, src1_bits, literal)) if is_16bit else ctx.rsrc_dyn(src1_off, lc, src1_bits, literal)
+    if is_16bit and opsel: s0, s1 = _apply_opsel(s0, 0, opsel), _apply_opsel(s1, 1, opsel)
     if is_float and (abs_bits or neg_bits):
       s0 = _apply_src_mods(s0, 0, abs_bits, neg_bits, is_16bit, src0_bits == 64)
       s1 = _apply_src_mods(s1, 1, abs_bits, neg_bits, is_16bit, src1_bits == 64)
