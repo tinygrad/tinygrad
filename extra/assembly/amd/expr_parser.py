@@ -101,6 +101,12 @@ def _signext(val: UOp) -> UOp:
       return sb.ne(_u32(0)).where(v32 | _u32(ext), v32).cast(dtypes.int)
   return val.cast(dtypes.int64) if val.dtype in (dtypes.int, dtypes.int32) else val
 
+def _signext_4bit(val: UOp) -> UOp:
+  """Sign extend a 4-bit value to 32-bit signed integer."""
+  v32 = val.cast(dtypes.uint32) if val.dtype != dtypes.uint32 else val
+  sb = (v32 >> _u32(3)) & _u32(1)  # sign bit at position 3
+  return sb.ne(_u32(0)).where(v32 | _u32(0xFFFFFFF0), v32).cast(dtypes.int)
+
 def _abs(val: UOp) -> UOp:
   if val.dtype not in (dtypes.float32, dtypes.float64, dtypes.half): return val
   _, _, _, _, shift = _float_info(val)
@@ -242,9 +248,9 @@ _FUNCS: dict[str, Callable[..., UOp]] = {
   'u8_to_u32': lambda a: (a.cast(dtypes.uint32) & _u32(0xFF)),
   'u4_to_u32': lambda a: (a.cast(dtypes.uint32) & _u32(0xF)),
   # Signed extraction with sign extension for dot products
-  'i16_to_i32': lambda a: _signext(a.cast(dtypes.uint32) & _u32(0xFFFF), 16),
-  'i8_to_i32': lambda a: _signext(a.cast(dtypes.uint32) & _u32(0xFF), 8),
-  'i4_to_i32': lambda a: _signext(a.cast(dtypes.uint32) & _u32(0xF), 4),
+  'i16_to_i32': lambda a: _signext(a.cast(dtypes.uint32) & _u32(0xFFFF)),
+  'i8_to_i32': lambda a: _signext(a.cast(dtypes.uint32) & _u32(0xFF)),
+  'i4_to_i32': lambda a: _signext_4bit(a.cast(dtypes.uint32) & _u32(0xF)),
   # Float to int16 conversions
   'v_cvt_i16_f32': lambda a: UOp(Ops.TRUNC, dtypes.float32, (a.bitcast(dtypes.float32),)).cast(dtypes.int16),
   'v_cvt_u16_f32': lambda a: _f_to_u(a.bitcast(dtypes.float32), dtypes.uint16),

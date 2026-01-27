@@ -843,6 +843,8 @@ def _compile_vop3p(inst: VOP3P, ctx: _Ctx) -> UOp:
   else:
     srcs = {'S0': s0_new, 'S1': s1_new}
     if s2_new is not None: srcs['S2'] = s2_new
+    # Pass NEG bits for DOT instructions that use NEG[i].u1 to select signed/unsigned
+    if neg: srcs['NEG'] = UOp.const(dtypes.uint32, neg)
   return ctx.compile_vop_pcode(inst.op, srcs, lane, vdst_reg, exec_mask)
 
 def _compile_vopd(inst: VOPD, ctx: _Ctx) -> UOp:
