@@ -718,7 +718,8 @@ def _compile_vop3sd(inst: VOP3SD, ctx: _Ctx) -> UOp:
   vcc_in_off = src2_off if has_carry_in and src2_off is not None else sdst_off
 
   lane = ctx.range()
-  src0, src1 = ctx.rsrc_dyn_sized(src0_off, lane, sizes, 'src0', literal=literal), ctx.rsrc_dyn_sized(src1_off, lane, sizes, 'src1', literal=literal)
+  src0 = ctx.rsrc_dyn_sized(src0_off, lane, sizes, 'src0', literal=literal)
+  src1 = ctx.rsrc_dyn_sized(src1_off, lane, sizes, 'src1', literal=literal)
   src2 = ctx.rsrc_dyn_sized(src2_off, lane, sizes, 'src2', literal=literal) if src2_off is not None else None
   srcs = {'S0': src0, 'S1': src1, 'VCC': ctx.rsgpr_dyn(vcc_in_off), 'EXEC': exec_mask, 'SCC': ctx.rsgpr_dyn(_c(SCC.offset)), 'laneId': lane}
   if src2 is not None: srcs['S2'] = src2
@@ -1129,9 +1130,9 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
 
   # Set DAZ+FTZ during emulator execution, restore afterward to avoid breaking hypothesis tests
   with _MXCSRContext():
-    for gidx in range(gx):
+    for gidz in range(gz):
       for gidy in range(gy):
-        for gidz in range(gz):
+        for gidx in range(gx):
           for wave_start in range(0, total_threads, WAVE_SIZE):
             n_lanes, st = min(WAVE_SIZE, total_threads - wave_start), WaveState(min(WAVE_SIZE, total_threads - wave_start))
             st.pc = lib  # Set PC to code base address
