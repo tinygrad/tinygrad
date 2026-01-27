@@ -41,15 +41,15 @@ class _MXCSRContext:
     lib.set_mxcsr(self._saved)
 from tinygrad.uop.ops import UOp, Ops, KernelInfo, AxisType
 from tinygrad.dtype import dtypes
-from tinygrad.device import Device, Buffer, BufferSpec
+from tinygrad.device import Buffer, BufferSpec
 from tinygrad.runtime.autogen import hsa
 from tinygrad.helpers import Context, DEBUG, colored
 
 from extra.assembly.amd.decode import decode_inst
 from extra.assembly.amd.autogen.rdna3.str_pcode import PCODE
 from extra.assembly.amd.autogen.rdna3.ins import (SOP1, SOP2, SOPC, SOPK, SOPP, SMEM, VOP1, VOP1_SDST, VOP2, VOP3, VOP3_SDST, VOP3SD, VOP3P, VOPC,
-  DS, FLAT, GLOBAL, SCRATCH, VOPD, SOPPOp, SMEMOp, VOP1Op, VOP2Op, VOP3Op, VOP3SDOp, VOPDOp)
-from extra.assembly.amd.dsl import NULL, VCC_LO, EXEC_LO
+  DS, FLAT, GLOBAL, SCRATCH, VOPD, SOPPOp, SMEMOp, VOP1Op, VOP2Op, VOP3Op, VOPDOp)
+from extra.assembly.amd.dsl import VCC_LO, EXEC_LO
 from extra.assembly.amd.autogen.common import OpType
 from extra.assembly.amd.expr_parser import parse_block
 
@@ -222,7 +222,7 @@ def _mem_store_bytes(mem: UOp, addr: UOp, val: UOp, active: UOp, data_bits: int 
     stores.append(mem.index((addr + UOp.const(dtypes.uint64, i)).cast(dtypes.int), active).store(byte_val.cast(dtypes.uint8)))
   return stores
 
-def _collect_data_slices(assigns: list, data_prefix: str, pcode_vars: dict = None, op_name: str = "") -> dict[int, UOp]:
+def _collect_data_slices(assigns: list[tuple[str, UOp]], data_prefix: str, pcode_vars: dict = None, op_name: str = "") -> dict[int, UOp]:
   """Collect bit slices from assigns into {dword_idx: value} dict."""
   slices = {}
   for dest, val in assigns:
@@ -518,7 +518,7 @@ def _compile_smem(inst: SMEM, ctx: _Ctx, name: str) -> tuple[str, UOp]:
             for i in range(ndwords)]
   return name, UOp.sink(*stores, *ctx.inc_pc(), arg=KernelInfo(name=name))
 
-def _compile_sop(inst, ctx: _Ctx, name: str) -> tuple[str, UOp]:
+def _compile_sop(inst: SOP1 | SOP2 | SOPC | SOPK, ctx: _Ctx, name: str) -> tuple[str, UOp]:
   sizes = getattr(inst, 'op_regs', {})
   literal = ctx.inst_field(type(inst).literal) if hasattr(type(inst), 'literal') else None
 
@@ -582,7 +582,7 @@ def _compile_sop(inst, ctx: _Ctx, name: str) -> tuple[str, UOp]:
   assert pcode_result is not None, f"no pcode for {type(inst).__name__}: {inst.op.name}"
   return pcode_result
 
-def _compile_vop12(inst, ctx: _Ctx, name: str) -> tuple[str, UOp]:
+def _compile_vop12(inst: VOP1 | VOP1_SDST | VOP2, ctx: _Ctx, name: str) -> tuple[str, UOp]:
   op_name = _op_name(inst)
   if op_name == 'V_READFIRSTLANE_B32_E32':
     pcode_result = ctx.compile_lane_pcode(inst.op, inst, name)
@@ -626,7 +626,7 @@ def _compile_vop12(inst, ctx: _Ctx, name: str) -> tuple[str, UOp]:
   assert pcode_result is not None, f"no pcode for {type(inst).__name__}: {inst.op.name}"
   return pcode_result
 
-def _compile_vopc(inst, ctx: _Ctx, name: str, opsel: int = 0, abs_bits: int = 0, neg_bits: int = 0) -> tuple[str, UOp]:
+def _compile_vopc(inst: VOPC | VOP3, ctx: _Ctx, name: str, opsel: int = 0, abs_bits: int = 0, neg_bits: int = 0) -> tuple[str, UOp]:
   exec_mask, op_name = ctx.rsgpr_dyn(_c(EXEC_LO.offset)), _op_name(inst)
   is_cmpx, is_16bit, is_64bit = 'CMPX' in op_name, _is_16bit_op(op_name), 'F64' in op_name
   is_vopc = hasattr(inst, 'vsrc1')  # VOPC (e32) vs VOP3 (e64) format
@@ -915,7 +915,7 @@ def _compile_vopd(inst: VOPD, ctx: _Ctx, name: str) -> tuple[str, UOp]:
       if dest.startswith('D0'): all_stores.append(ctx.wvgpr_dyn(vdst_reg, lane, _val_to_u32(val), exec_mask, after=srcy1))
   return name, UOp.sink(UOp.group(*all_stores).end(lane), *ctx.inc_pc(), arg=KernelInfo(name=name))
 
-def _compile_mem_op(inst, ctx: _Ctx, name: str) -> tuple[str, UOp]:
+def _compile_mem_op(inst: DS | FLAT | GLOBAL | SCRATCH, ctx: _Ctx, name: str) -> tuple[str, UOp]:
   """Unified memory operation compiler for DS, FLAT, GLOBAL, SCRATCH."""
   exec_mask, op_name = ctx.rsgpr_dyn(_c(EXEC_LO.offset)), _op_name(inst)
   pcode = PCODE.get(inst.op)
