@@ -14,7 +14,7 @@ class KernelInfo:
 # LLVM tool detection (shared across test files)
 def get_llvm_mc():
   """Find llvm-mc executable, preferring newer versions."""
-  for p in ['llvm-mc', 'llvm-mc-21', 'llvm-mc-20']:
+  for p in ['/opt/homebrew/bin/llvm-mc', 'llvm-mc', 'llvm-mc-21', 'llvm-mc-20']:
     if shutil.which(p): return p
   raise FileNotFoundError("llvm-mc not found")
 
