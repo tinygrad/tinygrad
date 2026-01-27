@@ -380,7 +380,7 @@ def _ensure_downloads_dir() -> pathlib.Path:
   return pathlib.Path(cache_dir) / "downloads"
 
 def fetch(url:str, name:pathlib.Path|str|None=None, subdir:str|None=None, gunzip:bool=False,
-          allow_caching=not getenv("DISABLE_HTTP_CACHE"), headers:dict[str, str]={}, retries:int=1) -> pathlib.Path:
+          allow_caching=not getenv("DISABLE_HTTP_CACHE"), headers:dict[str, str]={}, retries:int=3) -> pathlib.Path:
   import urllib.request
   if url.startswith(("/", ".")): return pathlib.Path(url)
   if name is not None and (isinstance(name, pathlib.Path) or '/' in name): fp = pathlib.Path(name)
@@ -389,6 +389,7 @@ def fetch(url:str, name:pathlib.Path|str|None=None, subdir:str|None=None, gunzip
     fp = _ensure_downloads_dir() / (subdir or "") / ((name or hashlib.md5(url.encode('utf-8')).hexdigest()) + hh + (".gunzip" if gunzip else ""))
   if not fp.is_file() or not allow_caching:
     (_dir := fp.parent).mkdir(parents=True, exist_ok=True)
+    assert retries > 0
     for retry in range(retries):
       try:
         with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "tinygrad 0.12.0", **headers}), timeout=10) as r:
