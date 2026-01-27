@@ -109,13 +109,6 @@ def _cond(cond, if_true, if_false):
 def _cond_hi16(cond, val: UOp) -> UOp: return _cond(cond, _hi16(val), val)
 def _apply_opsel(val: UOp, sel_bit: int, opsel: int) -> UOp: return _hi16(val) if opsel & (1 << sel_bit) else val
 
-def _unroll_lanes(get_lane_bit, exec_mask: UOp, apply_exec: bool = True) -> UOp:
-  """Combine 32 lane bits into a 32-bit mask using RANGE+REDUCE. Optionally apply EXEC mask."""
-  lane = UOp.range(32, _next_axis_id(), AxisType.LOOP, dtype=dtypes.int)
-  bit = get_lane_bit(lane).cast(dtypes.uint32) << lane.cast(dtypes.uint32)
-  result = bit.reduce(lane, arg=Ops.ADD)
-  return result & exec_mask if apply_exec else result
-
 def _set_lane_bit(old: UOp, lane: UOp, val: UOp, exec_mask: UOp) -> UOp:
   """Set/clear a single bit in a 32-bit mask based on lane index, respecting exec mask."""
   mask = _c(1) << lane.cast(dtypes.uint32)
@@ -244,22 +237,13 @@ def _collect_data_slices(assigns: list, data_prefix: str, pcode_vars: dict = Non
     elif dest.startswith(data_prefix): slices[0] = _to_u32(val)
   return slices
 
-# Counter for unique axis IDs to avoid UOp caching issues
-_axis_id_counter = 0
-def _next_axis_id() -> int:
-  global _axis_id_counter
-  _axis_id_counter += 1
-  return _axis_id_counter
-
-# Buffers: sgpr=0, vgpr=1, vmem=2, lds=3, scratch=4
-
 # ═══════════════════════════════════════════════════════════════════════════════
 # INSTRUCTION COMPILER - converts decoded instruction to UOp SINK
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class _Ctx:
   """Context for instruction compilation - holds buffers and helpers."""
-  __slots__ = ('inst_size', 'dyn_fields')
+  __slots__ = ('inst_size', 'dyn_fields', '_axis_id')
   sgpr = UOp(Ops.DEFINE_GLOBAL, dtypes.uint32.ptr(SGPR_COUNT), arg=0)
   vgpr = UOp(Ops.DEFINE_GLOBAL, dtypes.uint32.ptr(VGPR_SIZE), arg=1)
   vmem = UOp(Ops.DEFINE_GLOBAL, dtypes.uint32.ptr(1 << 46), arg=2)
@@ -267,8 +251,20 @@ class _Ctx:
   scratch = UOp(Ops.DEFINE_GLOBAL, dtypes.uint8.ptr(1 << 30), arg=4)
 
   def __init__(self, inst_size: int):
-    self.inst_size = inst_size
+    self.inst_size, self._axis_id = inst_size, 0
     self.dyn_fields: list[tuple[int, int]] = []  # (lo, hi) of fields read dynamically
+
+  def range(self, n: int = 32) -> UOp:
+    """Create a lane range UOp with unique axis ID."""
+    self._axis_id += 1
+    return UOp.range(n, self._axis_id, AxisType.LOOP, dtype=dtypes.int)
+
+  def unroll_lanes(self, get_lane_bit, exec_mask: UOp, apply_exec: bool = True) -> UOp:
+    """Combine 32 lane bits into a 32-bit mask using RANGE+REDUCE."""
+    lane = self.range()
+    bit = get_lane_bit(lane).cast(dtypes.uint32) << lane.cast(dtypes.uint32)
+    result = bit.reduce(lane, arg=Ops.ADD)
+    return result & exec_mask if apply_exec else result
 
   def inst_word(self, dword_idx: int) -> UOp:
     """Read instruction dword from vmem at PC + dword_idx*4."""
@@ -476,10 +472,10 @@ class _Ctx:
     if lane_stores: stores.append(UOp.sink(*lane_stores).end(lane))
     if vcc_val is not None:
       def get_vcc_bit(l): return (_to_u32(vcc_val.substitute({lane: l})) & _c(1)).cast(dtypes.uint32)
-      stores.append(self.wsgpr_dyn(_c(vcc_reg), _unroll_lanes(get_vcc_bit, exec_mask, apply_exec=False)))
+      stores.append(self.wsgpr_dyn(_c(vcc_reg), self.unroll_lanes(get_vcc_bit, exec_mask, apply_exec=False)))
     if exec_val is not None:
       def get_exec_bit(l): return (_to_u32(exec_val.substitute({lane: l})) & _c(1)).cast(dtypes.uint32)
-      stores.append(self.wsgpr_dyn(_c(EXEC_LO.offset), _unroll_lanes(get_exec_bit, exec_mask, apply_exec=False)))
+      stores.append(self.wsgpr_dyn(_c(EXEC_LO.offset), self.unroll_lanes(get_exec_bit, exec_mask, apply_exec=False)))
     stores.extend(scalar_stores)
     if not stores: return None
     return (name, UOp.sink(*stores, *self.inc_pc(), arg=KernelInfo(name=name))) if name is not None else stores
@@ -592,7 +588,7 @@ def _compile_vop12(inst, ctx: _Ctx, name: str) -> tuple[str, UOp]:
     pcode_result = ctx.compile_lane_pcode(inst.op, inst, name)
     assert pcode_result is not None, f"no pcode for VOP1: {op_name}"
     return pcode_result
-  lane, exec_mask, sizes = UOp.range(32, _next_axis_id(), AxisType.LOOP, dtype=dtypes.int), ctx.rsgpr_dyn(_c(EXEC_LO.offset)), getattr(inst, 'op_regs', {})
+  lane, exec_mask, sizes = ctx.range(), ctx.rsgpr_dyn(_c(EXEC_LO.offset)), getattr(inst, 'op_regs', {})
   is_16bit = _is_16bit_op(op_name)
   literal = ctx.inst_field(type(inst).literal) if hasattr(type(inst), 'literal') else None
   vdst_reg = ctx.inst_field(VOP1.vdst)
@@ -671,7 +667,7 @@ def _compile_vopc(inst, ctx: _Ctx, name: str, opsel: int = 0, abs_bits: int = 0,
       if '[laneId]' in dest and ('D0' in dest or 'EXEC' in dest): return val.cast(dtypes.uint32)
     return _c(0)
 
-  new_bits = _unroll_lanes(get_cmp_bit, exec_mask, apply_exec=False)
+  new_bits = ctx.unroll_lanes(get_cmp_bit, exec_mask, apply_exec=False)
   # Both VOPC and VOP3 clear inactive lane bits (hardware verified)
   new_result = new_bits & exec_mask
 
@@ -699,7 +695,7 @@ def _compile_vop3(inst: VOP3, ctx: _Ctx, name: str) -> tuple[str, UOp]:
     return _compile_vopc(inst, ctx, name, opsel=opsel, abs_bits=getattr(inst, 'abs', 0) or 0, neg_bits=getattr(inst, 'neg', 0) or 0)
 
   # Regular VOP3 - read operands dynamically
-  lane = UOp.range(32, _next_axis_id(), AxisType.LOOP, dtype=dtypes.int)
+  lane = ctx.range()
   is_f16_op = 'F16' in op_name
   vdst_reg = ctx.inst_field(VOP3.vdst)
   src0_off = ctx.inst_field(VOP3.src0)
@@ -750,7 +746,7 @@ def _compile_vop3sd(inst: VOP3SD, ctx: _Ctx, name: str) -> tuple[str, UOp]:
   has_carry_in = 'src2' in inst.operands and inst.operands['src2'][2] == OpType.OPR_SREG
   vcc_in_off = src2_off if has_carry_in and src2_off is not None else sdst_off
 
-  lane = UOp.range(32, _next_axis_id(), AxisType.LOOP, dtype=dtypes.int)
+  lane = ctx.range()
   src0, src1 = ctx.rsrc_dyn_sized(src0_off, lane, sizes, 'src0', literal=literal), ctx.rsrc_dyn_sized(src1_off, lane, sizes, 'src1', literal=literal)
   src2 = ctx.rsrc_dyn_sized(src2_off, lane, sizes, 'src2', literal=literal) if src2_off is not None else None
   srcs = {'S0': src0, 'S1': src1, 'VCC': ctx.rsgpr_dyn(vcc_in_off), 'EXEC': exec_mask, 'SCC': ctx.rsgpr_dyn(_c(SCC_IDX))}
@@ -770,9 +766,9 @@ def _compile_vop3sd(inst: VOP3SD, ctx: _Ctx, name: str) -> tuple[str, UOp]:
       for dest, val in parse_pcode(pcode, lane_srcs, lane_uop, op_name=op_name)[1]:
         if dest.startswith('VCC') or (dest.startswith('D0.u64') and '[laneId]' in dest): vcc_bit = val.cast(dtypes.uint32)
       return vcc_bit
-    final_vcc = _unroll_lanes(get_vcc_bit, exec_mask)
+    final_vcc = ctx.unroll_lanes(get_vcc_bit, exec_mask)
     # VGPR stores: RANGE gets axis ID second (higher ID = runs after VCC loop)
-    lane3 = UOp.range(32, _next_axis_id(), AxisType.LOOP, dtype=dtypes.int)
+    lane3 = ctx.range()
     s0, s1 = ctx.rsrc_dyn_sized(src0_off, lane3, sizes, 'src0', literal=literal), ctx.rsrc_dyn_sized(src1_off, lane3, sizes, 'src1', literal=literal)
     s2 = ctx.rsrc_dyn_sized(src2_off, lane3, sizes, 'src2', literal=literal) if src2_off is not None else None
     lane_srcs = {'S0': s0, 'S1': s1, 'VCC': ctx.rsgpr_dyn(vcc_in_off), 'EXEC': exec_mask, 'SCC': ctx.rsgpr_dyn(_c(SCC_IDX))}
@@ -800,7 +796,7 @@ def _compile_vop3sd(inst: VOP3SD, ctx: _Ctx, name: str) -> tuple[str, UOp]:
     return pcode_result
 
 def _compile_vop3p(inst: VOP3P, ctx: _Ctx, name: str) -> tuple[str, UOp]:
-  lane, exec_mask = UOp.range(32, _next_axis_id(), AxisType.LOOP, dtype=dtypes.int), ctx.rsgpr_dyn(_c(EXEC_LO.offset))
+  lane, exec_mask = ctx.range(), ctx.rsgpr_dyn(_c(EXEC_LO.offset))
   # Read register fields dynamically for deduplication
   vdst_reg = ctx.inst_field(VOP3P.vdst)
   src0_off = ctx.inst_field(VOP3P.src0)
@@ -901,7 +897,7 @@ def _compile_vopd(inst: VOPD, ctx: _Ctx, name: str) -> tuple[str, UOp]:
   vsrcy1_reg = ctx.inst_field(VOPD.vsrcy1)
   literal = ctx.inst_field(type(inst).literal) if hasattr(type(inst), 'literal') else None
 
-  lane = UOp.range(32, _next_axis_id(), AxisType.LOOP, dtype=dtypes.int)
+  lane = ctx.range()
   srcy0, srcy1 = ctx.rsrc_dyn(srcy0_off, lane, literal=literal), ctx.rvgpr_dyn(vsrcy1_reg, lane)
   all_stores = []
   for op, src0_off, vsrc1_reg, vdst_reg, label in [(inst.opx, srcx0_off, vsrcx1_reg, vdstx_reg, 'X'),
@@ -1021,7 +1017,7 @@ def _compile_mem_op(inst, ctx: _Ctx, name: str) -> tuple[str, UOp]:
 
   # DS-specific: check for 2ADDR pattern needing separate ranges
   if is_lds:
-    dummy_lane = UOp.range(32, _next_axis_id(), AxisType.LOOP, dtype=dtypes.int)
+    dummy_lane = ctx.range()
     _, assigns = parse_pcode(pcode, make_srcs(dummy_lane), lane=dummy_lane, op_name=op_name)
     mem_assigns = [d for d, _ in assigns if d.startswith('MEM[')]
     mem_addrs = set(re.match(r'MEM\[([^\]]+)\]', d).group(1) if re.match(r'MEM\[([^\]]+)\]', d) else d for d in mem_assigns)
@@ -1029,7 +1025,7 @@ def _compile_mem_op(inst, ctx: _Ctx, name: str) -> tuple[str, UOp]:
     if use_separate_ranges:
       ended = []
       for i, (dest, _) in enumerate(assigns):
-        lane = UOp.range(32, _next_axis_id(), AxisType.LOOP, dtype=dtypes.int)
+        lane = ctx.range()
         active = _lane_active(exec_mask, lane)
         _, lane_assigns = parse_pcode(pcode, make_srcs(lane), lane=lane, op_name=op_name)
         ended.extend(s.end(lane) for s in make_stores(dest, lane_assigns[i][1], lane, active, True, {}))
@@ -1037,7 +1033,7 @@ def _compile_mem_op(inst, ctx: _Ctx, name: str) -> tuple[str, UOp]:
 
   # Standard path: single lane range
   writes_return_data = '_RTN' in op_name or (is_lds and op_name.startswith('DS_LOAD')) or (is_atomic and glc)
-  lane = UOp.range(32, _next_axis_id(), AxisType.LOOP, dtype=dtypes.int)
+  lane = ctx.range()
   active = _lane_active(exec_mask, lane)
   pcode_vars, assigns = parse_pcode(pcode, make_srcs(lane), lane=lane, op_name=op_name)
   stores = [s for dest, val in assigns for s in make_stores(dest, val, lane, active, writes_return_data, pcode_vars)]
