@@ -26,6 +26,12 @@ PMA = ContextVar("PMA", abs(VIZ.value)>=2)
 @dataclass(frozen=True)
 class ProfilePMAEvent(ProfileEvent): device:str; kern:str; blob:bytes # noqa: E702
 
+class NVSignal(HCQSignal):
+  def _sleep(self, time_spent_waiting_ms:int) -> bool:
+    # Resonable to sleep for long workloads (which take more than 2s) and only timeline signals.
+    if time_spent_waiting_ms > 2000 and self.is_timeline and self.owner is not None: return self.owner.iface.sleep(200)
+    return False
+
 def get_error_str(status): return f"{status}: {nv_gpu.nv_status_codes.get(status, 'Unknown error')}"
 
 NV_PFAULT_FAULT_TYPE = {dt:name for name,dt in nv_gpu.__dict__.items() if name.startswith("NV_PFAULT_FAULT_TYPE_")}
@@ -553,7 +559,11 @@ class PCIIface(PCIIfaceBase):
 
   def device_fini(self): self.dev_impl.fini()
 
-class NVDevice(HCQCompiled[HCQSignal]):
+  def sleep(self, timeout) -> bool:
+    for _ in self.dev_impl.gsp.stat_q.read_resp(): pass
+    return self.dev_impl.is_err_state
+
+class NVDevice(HCQCompiled[NVSignal]):
   def is_nvd(self) -> bool: return isinstance(self.iface, PCIIface)
 
   def __init__(self, device:str=""):
@@ -605,7 +615,7 @@ class NVDevice(HCQCompiled[HCQSignal]):
     compilers = CompilerSet(ctrl_var=NV_CC, cset=[CompilerPair(functools.partial(NVRenderer, self.arch),functools.partial(cucc, self.arch)),
        CompilerPair(functools.partial(PTXRenderer, self.arch, device="NV"), functools.partial(ptxcc, self.arch), NV_PTX),
        CompilerPair(functools.partial(NAKRenderer, self.arch, self.max_warps_per_sm), None, NV_NAK)])
-    super().__init__(device, NVAllocator(self), compilers, functools.partial(NVProgram, self), HCQSignal, NVComputeQueue, NVCopyQueue)
+    super().__init__(device, NVAllocator(self), compilers, functools.partial(NVProgram, self), NVSignal, NVComputeQueue, NVCopyQueue)
 
     self.pma_enabled = PMA.value > 0 and PROFILE >= 1
     if self.pma_enabled: self._prof_init()
