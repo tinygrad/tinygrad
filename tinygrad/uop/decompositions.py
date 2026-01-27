@@ -424,7 +424,7 @@ def get_late_rewrite_patterns(ops:tuple[Ops, ...], device, force_transcendental)
   if Ops.FDIV in ops:
     pat += [(UPat.var("x").reciprocal(), lambda x: x.const_like(1).alu(Ops.FDIV, x))]
     pat += [(UPat.var("a", dtypes.floats) * UPat.const(dtypes.floats, 1).alu(Ops.FDIV, UPat.var("b")), lambda a,b: a.alu(Ops.FDIV, b))]
-  if not is_dtype_supported(dtypes.long, device) or dtypes.long in (getattr(dtypes, x.lower(), None) for x in EMULATED_DTYPES.value.split(',')):
+  if not is_dtype_supported(dtypes.long, device) or dtypes.long in EMULATED_DTYPES.tolist(dtypes):
     pat += [(UPat((*GroupOp.Defines, Ops.INDEX), name="x"), lambda x:
              x.replace(dtype=l2i_dt[x.dtype.base].ptr(x.dtype.size * 2)) if hasattr(x.dtype, 'size') and x.dtype.base in l2i_dt else None)]
     pat += [(UPat(Ops.INDEX, tuple(l2i_dt.keys()), name='x'), lambda x:
