@@ -192,7 +192,8 @@ class TestDSPcodePatterns(unittest.TestCase):
       'DATA': UOp.const(dtypes.uint32, 0xAAAAAAAA),
       'DATA2': UOp.const(dtypes.uint32, 0xBBBBBBBB),
     }
-    _, assigns = parse_pcode(pcode, srcs, lane=UOp.const(dtypes.uint32, 0))
+    srcs['laneId'] = UOp.const(dtypes.uint32, 0)
+    _, assigns = parse_pcode(pcode, srcs)
     # Should have 2 MEM write assignments
     self.assertEqual(len(assigns), 2)
     for dest, val in assigns:
@@ -212,7 +213,8 @@ class TestDSPcodePatterns(unittest.TestCase):
       'OFFSET1': UOp.const(dtypes.uint32, 1),
       '_lds': lds,
     }
-    _, assigns = parse_pcode(pcode, srcs, lane=UOp.const(dtypes.uint32, 0))
+    srcs['laneId'] = UOp.const(dtypes.uint32, 0)
+    _, assigns = parse_pcode(pcode, srcs)
     # Should have 2 RETURN_DATA assignments
     self.assertEqual(len(assigns), 2)
     self.assertEqual(assigns[0][0], 'RETURN_DATA[31:0]')
@@ -228,7 +230,8 @@ class TestDSPcodePatterns(unittest.TestCase):
       'DATA': UOp.const(dtypes.uint32, 0xAAAAAAAA),
       'DATA2': UOp.const(dtypes.uint32, 0xBBBBBBBB),
     }
-    _, assigns = parse_pcode(pcode, srcs, lane=UOp.const(dtypes.uint32, 0))
+    srcs['laneId'] = UOp.const(dtypes.uint32, 0)
+    _, assigns = parse_pcode(pcode, srcs)
     # Check addresses: 100 + 2*4 = 108, 100 + 5*4 = 120
     addr0, _ = assigns[0][1]
     addr1, _ = assigns[1][1]
@@ -245,7 +248,8 @@ class TestDSPcodePatterns(unittest.TestCase):
       'DATA': UOp.const(dtypes.uint32, 0xAAAAAAAA),
       'DATA2': UOp.const(dtypes.uint32, 0xBBBBBBBB),
     }
-    _, assigns = parse_pcode(pcode, srcs, lane=UOp.const(dtypes.uint32, 0))
+    srcs['laneId'] = UOp.const(dtypes.uint32, 0)
+    _, assigns = parse_pcode(pcode, srcs)
     _, val0 = assigns[0][1]
     _, val1 = assigns[1][1]
     # DATA[31:0] should preserve the value

@@ -178,10 +178,10 @@ def get_pcode(op) -> str:
   assert pcode is not None
   return pcode
 
-def parse_pcode(pcode: str, srcs: dict[str, UOp] | None = None, lane: UOp | None = None) -> tuple[dict, list[tuple[str, UOp]]]:
+def parse_pcode(pcode: str, srcs: dict[str, UOp] | None = None) -> tuple[dict, list[tuple[str, UOp]]]:
   vars: dict = {n: UOp(Ops.DEFINE_VAR, dtypes.uint32, (), (n, _c(0), _c(MASK32))) for n in ['S0', 'S1', 'S2', 'D0', 'VCC', 'EXEC', 'SCC', 'SIMM32']}
+  vars.update({'laneId': _c(0), 'WAVE_MODE': {'IEEE': _c(1)}, 'WAVE32': _c(True, dtypes.bool), 'WAVE64': _c(False, dtypes.bool)})
   if srcs: vars.update(srcs)
-  vars.update({'laneId': lane if lane is not None else _c(0), 'WAVE_MODE': {'IEEE': _c(1)}, 'WAVE32': _c(True, dtypes.bool), 'WAVE64': _c(False, dtypes.bool)})
   assigns: list[tuple[str, UOp]] = []
   lines = [l.strip().rstrip(';') for l in pcode.split('\n') if l.strip() and not l.strip().startswith('//')]
   _, final, _ = parse_block(lines, 0, vars, assigns=assigns)
@@ -400,7 +400,7 @@ class _Ctx:
     pcode = get_pcode(op)
     srcs.update({'VCC': self.rsgpr_dyn(_c(VCC_LO.offset)), 'EXEC': self.rsgpr_dyn(_c(EXEC_LO.offset)), 'SCC': self.rsgpr_dyn(_c(SCC.offset))})
     if 'D0' not in srcs: srcs['D0'] = self.rsgpr_dyn(sdst_reg)  # D0 is current dest value for read-modify-write ops
-    _, assigns = parse_pcode(pcode, srcs, lane=None)
+    _, assigns = parse_pcode(pcode, srcs)
     return UOp.sink(*self.scalar_stores(assigns, sdst_reg, sdst_size), *self.inc_pc())
 
   def compile_lane_pcode(self, op, inst) -> UOp:
@@ -415,7 +415,7 @@ class _Ctx:
       'S0': self.rsrc_dyn(src0_off, _c(0, dtypes.int)) if 'WRITELANE' in op_name else src0_reg,
       'S1': self.rsrc_dyn(src1_off, _c(0, dtypes.int)) if src1_off is not None else _c(0),
     }
-    _, assigns = parse_pcode(pcode, srcs, lane=None)
+    _, assigns = parse_pcode(pcode, srcs)
     stores = []
     for dest, val in assigns:
       if dest.startswith('D0'): stores.append(self.wsgpr_dyn(vdst_off, val.cast(dtypes.uint32)))
@@ -428,8 +428,8 @@ class _Ctx:
     pcode = get_pcode(op)
     vcc_reg = sdst_reg if sdst_reg is not None else VCC_LO.offset
     if 'VCC' not in srcs: srcs['VCC'] = self.rsgpr_dyn(_c(vcc_reg))
-    srcs['EXEC'], srcs['SCC'] = exec_mask, self.rsgpr_dyn(_c(SCC.offset))
-    _, assigns = parse_pcode(pcode, srcs, lane)
+    srcs.update({'EXEC': exec_mask, 'SCC': self.rsgpr_dyn(_c(SCC.offset)), 'laneId': lane})
+    _, assigns = parse_pcode(pcode, srcs)
 
     raw_stores: list = []
     vcc_val, exec_val = None, None
@@ -653,7 +653,7 @@ def _compile_vopc(inst: VOPC | VOP3, ctx: _Ctx, opsel: int = 0, abs_bits: int = 
       s0 = _apply_src_mods(s0, 0, abs_bits, neg_bits, is_16bit, src0_bits == 64)
       s1 = _apply_src_mods(s1, 1, abs_bits, neg_bits, is_16bit, src1_bits == 64)
     if pcode is None: return _c(0)
-    for dest, val in parse_pcode(pcode, {'S0': s0, 'S1': s1}, lane=lc)[1]:
+    for dest, val in parse_pcode(pcode, {'S0': s0, 'S1': s1, 'laneId': lc})[1]:
       if '[laneId]' in dest and ('D0' in dest or 'EXEC' in dest): return val.cast(dtypes.uint32)
     return _c(0)
 
@@ -728,9 +728,9 @@ def _compile_vop3sd(inst: VOP3SD, ctx: _Ctx) -> UOp:
   lane = ctx.range()
   src0, src1 = ctx.rsrc_dyn_sized(src0_off, lane, sizes, 'src0', literal=literal), ctx.rsrc_dyn_sized(src1_off, lane, sizes, 'src1', literal=literal)
   src2 = ctx.rsrc_dyn_sized(src2_off, lane, sizes, 'src2', literal=literal) if src2_off is not None else None
-  srcs = {'S0': src0, 'S1': src1, 'VCC': ctx.rsgpr_dyn(vcc_in_off), 'EXEC': exec_mask, 'SCC': ctx.rsgpr_dyn(_c(SCC.offset))}
+  srcs = {'S0': src0, 'S1': src1, 'VCC': ctx.rsgpr_dyn(vcc_in_off), 'EXEC': exec_mask, 'SCC': ctx.rsgpr_dyn(_c(SCC.offset)), 'laneId': lane}
   if src2 is not None: srcs['S2'] = src2
-  _, assigns = parse_pcode(pcode, srcs, lane)
+  _, assigns = parse_pcode(pcode, srcs)
 
   has_per_lane_vcc = any('[laneId]' in dest for dest, _ in assigns if dest.startswith('VCC') or dest.startswith('D0.u64'))
   if has_per_lane_vcc:
@@ -739,10 +739,10 @@ def _compile_vop3sd(inst: VOP3SD, ctx: _Ctx) -> UOp:
     def get_vcc_bit(lane_uop) -> UOp:
       s0, s1 = ctx.rsrc_dyn_sized(src0_off, lane_uop, sizes, 'src0', literal=literal), ctx.rsrc_dyn_sized(src1_off, lane_uop, sizes, 'src1', literal=literal)
       s2 = ctx.rsrc_dyn_sized(src2_off, lane_uop, sizes, 'src2', literal=literal) if src2_off is not None else None
-      lane_srcs = {'S0': s0, 'S1': s1, 'VCC': ctx.rsgpr_dyn(vcc_in_off), 'EXEC': exec_mask, 'SCC': ctx.rsgpr_dyn(_c(SCC.offset))}
+      lane_srcs = {'S0': s0, 'S1': s1, 'VCC': ctx.rsgpr_dyn(vcc_in_off), 'EXEC': exec_mask, 'SCC': ctx.rsgpr_dyn(_c(SCC.offset)), 'laneId': lane_uop}
       if s2 is not None: lane_srcs['S2'] = s2
       vcc_bit = _c(0)
-      for dest, val in parse_pcode(pcode, lane_srcs, lane_uop)[1]:
+      for dest, val in parse_pcode(pcode, lane_srcs)[1]:
         if dest.startswith('VCC') or (dest.startswith('D0.u64') and '[laneId]' in dest): vcc_bit = val.cast(dtypes.uint32)
       return vcc_bit
     final_vcc = ctx.unroll_lanes(get_vcc_bit, exec_mask)
@@ -750,10 +750,10 @@ def _compile_vop3sd(inst: VOP3SD, ctx: _Ctx) -> UOp:
     lane3 = ctx.range()
     s0, s1 = ctx.rsrc_dyn_sized(src0_off, lane3, sizes, 'src0', literal=literal), ctx.rsrc_dyn_sized(src1_off, lane3, sizes, 'src1', literal=literal)
     s2 = ctx.rsrc_dyn_sized(src2_off, lane3, sizes, 'src2', literal=literal) if src2_off is not None else None
-    lane_srcs = {'S0': s0, 'S1': s1, 'VCC': ctx.rsgpr_dyn(vcc_in_off), 'EXEC': exec_mask, 'SCC': ctx.rsgpr_dyn(_c(SCC.offset))}
+    lane_srcs = {'S0': s0, 'S1': s1, 'VCC': ctx.rsgpr_dyn(vcc_in_off), 'EXEC': exec_mask, 'SCC': ctx.rsgpr_dyn(_c(SCC.offset)), 'laneId': lane3}
     if s2 is not None: lane_srcs['S2'] = s2
     d0_val = None
-    for dest, val in parse_pcode(pcode, lane_srcs, lane3)[1]:
+    for dest, val in parse_pcode(pcode, lane_srcs)[1]:
       if dest.startswith('D0') and '[laneId]' not in dest: d0_val = val
     vgpr_stores = []
     if d0_val is not None:
@@ -880,8 +880,8 @@ def _compile_vopd(inst: VOPD, ctx: _Ctx) -> UOp:
       srcs['SIMM32'] = literal
     if op == VOPDOp.V_DUAL_CNDMASK_B32: srcs['VCC'] = ctx.rsgpr_dyn(_c(VCC_LO.offset))
     pcode = get_pcode(vop)
-    srcs.update({'VCC': ctx.rsgpr_dyn(_c(VCC_LO.offset)), 'EXEC': exec_mask, 'SCC': ctx.rsgpr_dyn(_c(SCC.offset))})
-    for dest, val in parse_pcode(pcode, srcs, lane)[1]:
+    srcs.update({'VCC': ctx.rsgpr_dyn(_c(VCC_LO.offset)), 'EXEC': exec_mask, 'SCC': ctx.rsgpr_dyn(_c(SCC.offset)), 'laneId': lane})
+    for dest, val in parse_pcode(pcode, srcs)[1]:
       if dest.startswith('D0'): all_stores.append(ctx.wvgpr_dyn(vdst_reg, lane, _val_to_u32(val), exec_mask, after=srcy1))
   return UOp.sink(UOp.group(*all_stores).end(lane), *ctx.inc_pc())
 
@@ -958,14 +958,14 @@ def _compile_mem_op(inst: DS | FLAT | GLOBAL | SCRATCH, ctx: _Ctx) -> UOp:
       else:
         data = {'DATA': _u64(ctx.rvgpr_dyn(vdata_reg, lane), ctx.rvgpr_dyn(vdata_reg + _c(1), lane)),
                 'DATA2': _u64(ctx.rvgpr_dyn(data1_reg, lane), ctx.rvgpr_dyn(data1_reg + _c(1), lane)) if has_data1 else UOp.const(dtypes.uint64, 0)}
-      return {'ADDR': addr, 'ADDR_BASE': addr, 'OFFSET': offset, 'OFFSET0': offset0, 'OFFSET1': offset1, '_lds': mem, **data}
+      return {'ADDR': addr, 'ADDR_BASE': addr, 'OFFSET': offset, 'OFFSET0': offset0, 'OFFSET1': offset1, '_lds': mem, 'laneId': lane, **data}
     active = _lane_active(exec_mask, lane)
     if is_atomic:
       return {'ADDR': addr, 'DATA': _u64(ctx.rvgpr_dyn(vdata_reg, lane), ctx.rvgpr_dyn(vdata_reg + _c(1), lane)) if is_64bit else ctx.rvgpr_dyn(vdata_reg, lane),
-              '_vmem': mem, '_active': active}
+              '_vmem': mem, '_active': active, 'laneId': lane}
     vdata = ctx.rvgpr_dyn(vdata_reg, lane).cast(dtypes.uint64) if 'STORE' in op_name else ctx.rvgpr_dyn(vdst_reg, lane) if 'D16' in op_name else UOp.const(dtypes.uint32, 0)
     if 'STORE' in op_name and ndwords >= 2: vdata = vdata | (ctx.rvgpr_dyn(vdata_reg + _c(1), lane).cast(dtypes.uint64) << UOp.const(dtypes.uint64, 32))
-    srcs = {'ADDR': addr, 'VDATA': vdata, '_vmem': mem, '_active': active}
+    srcs = {'ADDR': addr, 'VDATA': vdata, '_vmem': mem, '_active': active, 'laneId': lane}
     for i in range(ndwords): srcs[f'VDATA{i}'] = ctx.rvgpr_dyn(vdata_reg + _c(i), lane) if 'STORE' in op_name else UOp.const(dtypes.uint32, 0)
     return srcs
 
@@ -986,7 +986,7 @@ def _compile_mem_op(inst: DS | FLAT | GLOBAL | SCRATCH, ctx: _Ctx) -> UOp:
   # DS-specific: check for 2ADDR pattern needing separate ranges
   if is_lds:
     dummy_lane = ctx.range()
-    _, assigns = parse_pcode(pcode, make_srcs(dummy_lane), lane=dummy_lane)
+    _, assigns = parse_pcode(pcode, make_srcs(dummy_lane))
     mem_assigns = [d for d, _ in assigns if d.startswith('MEM[')]
     mem_addrs = set(m.group(1) if (m := re.match(r'MEM\[([^\]]+)\]', d)) else d for d in mem_assigns)
     use_separate_ranges = (len(mem_addrs) > 1 or '2ADDR' in op_name) and 'STOREXCHG' not in op_name
@@ -995,7 +995,7 @@ def _compile_mem_op(inst: DS | FLAT | GLOBAL | SCRATCH, ctx: _Ctx) -> UOp:
       for i, (dest, _) in enumerate(assigns):
         lane = ctx.range()
         active = _lane_active(exec_mask, lane)
-        _, lane_assigns = parse_pcode(pcode, make_srcs(lane), lane=lane)
+        _, lane_assigns = parse_pcode(pcode, make_srcs(lane))
         ended.extend(s.end(lane) for s in make_stores(dest, lane_assigns[i][1], lane, active, True))
       return UOp.sink(*ended, *ctx.inc_pc())
 
@@ -1003,7 +1003,7 @@ def _compile_mem_op(inst: DS | FLAT | GLOBAL | SCRATCH, ctx: _Ctx) -> UOp:
   writes_return_data = '_RTN' in op_name or (is_lds and op_name.startswith('DS_LOAD')) or bool(is_atomic and glc)
   lane = ctx.range()
   active = _lane_active(exec_mask, lane)
-  pcode_vars, assigns = parse_pcode(pcode, make_srcs(lane), lane=lane)
+  pcode_vars, assigns = parse_pcode(pcode, make_srcs(lane))
   stores = [s for dest, val in assigns for s in make_stores(dest, val, lane, active, writes_return_data)]
 
   # FLAT/GLOBAL/SCRATCH: collect VDATA slices for loads
