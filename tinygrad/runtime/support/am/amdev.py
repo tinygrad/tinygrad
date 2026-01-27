@@ -223,7 +223,7 @@ class AMDev(PCIDevImplBase):
     for ip in [self.sdma, self.gfx]: ip.fini_hw()
     self.smu.set_clocks(level=0)
     self.ih.interrupt_handler()
-    self.reg("regSCRATCH_REG6").write(0) # set finalized state.
+    self.reg("regSCRATCH_REG6").write(self.is_err_state) # set finalized state.
 
   def is_hive(self) -> bool: return self.gmc.xgmi_seg_sz > 0
 
