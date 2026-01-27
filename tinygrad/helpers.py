@@ -190,7 +190,7 @@ VIZ = ContextVar("VIZ", 0)
 PROFILE = ContextVar("PROFILE", abs(VIZ.value))
 SPEC = ContextVar("SPEC", 1)
 # TODO: disable by default due to speed
-IGNORE_OOB = ContextVar("IGNORE_OOB", 1)
+CHECK_OOB = ContextVar("CHECK_OOB", 0)
 PCONTIG = ContextVar("PCONTIG", 0)  # partial contiguous in rangeify
 DEBUG_RANGEIFY = ContextVar("DEBUG_RANGEIFY", 0)
 # set to 1, this uses tuplize in the linearizer sort order
@@ -199,6 +199,8 @@ TUPLE_ORDER = ContextVar("TUPLE_ORDER", 1)
 CCACHE = ContextVar("CCACHE", 1)
 # allow tf32 to be used on NVIDIA GPUs
 ALLOW_TF32 = ContextVar("ALLOW_TF32", 0)
+# set to 0 to disable the scheduler cache
+SCACHE = ContextVar("SCACHE", 1)
 
 @dataclass(frozen=True)
 class Metadata:

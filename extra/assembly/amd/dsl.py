@@ -1,10 +1,9 @@
 # dsl.py - clean DSL for AMD assembly
+from typing import Any
 
 # ══════════════════════════════════════════════════════════════
 # Registers - unified src encoding space (0-511)
 # ══════════════════════════════════════════════════════════════
-
-def _reg_size(t: str | None) -> int: return {'b64': 2, 'f64': 2, 'u64': 2, 'i64': 2, 'b128': 4}.get(t, 1)
 
 class Reg:
   # Register names vary by arch: RDNA has NULL@124/M0@125, CDNA has M0@124/reserved@125
@@ -95,12 +94,13 @@ class _Bits:
 bits = _Bits()
 
 class BitField:
+  name: str | None
   def __init__(self, hi: int, lo: int, default: int = 0):
     self.hi, self.lo, self.default, self.name, self.mask = hi, lo, default, None, (1 << (hi - lo + 1)) - 1
-  def __set_name__(self, owner, name): self.name = name
-  def __eq__(self, other) -> 'FixedBitField':
+  def __set_name__(self, owner, name: str): self.name = name
+  def __eq__(self, other) -> 'FixedBitField':  # type: ignore[override]
     if isinstance(other, int): return FixedBitField(self.hi, self.lo, other)
-    return NotImplemented
+    raise TypeError(f"BitField.__eq__ expects int, got {type(other).__name__}")
   def enum(self, enum_cls) -> 'EnumBitField': return EnumBitField(self.hi, self.lo, enum_cls)
   def encode(self, val) -> int:
     assert isinstance(val, int), f"BitField.encode expects int, got {type(val).__name__}"
@@ -116,6 +116,7 @@ class BitField:
   def __get__(self, obj, objtype=None):
     if obj is None: return self
     return self.decode((obj._raw >> self.lo) & self.mask)
+  def __set__(self, obj, val): obj._raw = self.set(obj._raw, val)
 
 class FixedBitField(BitField):
   def set(self, raw: int, val=None) -> int:
@@ -173,6 +174,7 @@ class SrcField(BitField):
     # VCC/EXEC pairs (106, 126), NULL (124), M0 (125), float constants (240-255)
     if reg.offset not in (124, 125) and not 240 <= reg.offset <= 255:
       # Map variant field names (vsrc0->src0, vsrc1->src1, etc.) for DPP/SDWA classes
+      assert self.name is not None
       name = self.name[1:] if self.name.startswith('v') and self.name[1:] in obj.op_regs else self.name
       if sz := obj.op_regs.get(name, 1): reg = Reg(reg.offset, sz, neg=reg.neg, abs_=reg.abs_, hi=reg.hi)
     return reg
@@ -284,7 +286,7 @@ class Inst:
     self._raw = 0
     # Map positional args to field names (skip FixedBitFields)
     args_iter = iter(args)
-    vals = {}
+    vals: dict[str, Any] = {}
     for name, field in self._fields:
       if isinstance(field, FixedBitField): vals[name] = None
       elif name in kwargs: vals[name] = kwargs[name]
@@ -321,9 +323,9 @@ class Inst:
         raise TypeError(f"{name} expects {expected} register(s), got {val.sz}")
 
   @property
-  def op_name(self) -> str: return self.op.name
+  def op_name(self) -> str: return getattr(self, 'op').name
   @property
-  def operands(self) -> dict: return OPERANDS.get(self.op, {}) if hasattr(self, 'op') else {}
+  def operands(self) -> dict: return OPERANDS.get(getattr(self, 'op'), {}) if hasattr(self, 'op') else {}
   def _is_cdna(self) -> bool: return 'cdna' in type(self).__module__
 
   @functools.cached_property
@@ -351,8 +353,8 @@ class Inst:
     # VGPRs: FP8/BF8(0,1)=8, FP6/BF6(2,3)=6, FP4(4)=4
     if 'f8f6f4' in getattr(self, 'op_name', '').lower():
       # Use explicit fields if available (VOP3PX2), else extract from VOP3P-MAI bit positions
-      cbsz = self.cbsz if hasattr(type(self), 'cbsz') else (self._raw >> 8) & 0x7
-      blgp = self.blgp if hasattr(type(self), 'blgp') else (self._raw >> 61) & 0x7
+      cbsz = getattr(self, 'cbsz') if hasattr(type(self), 'cbsz') else (self._raw >> 8) & 0x7
+      blgp = getattr(self, 'blgp') if hasattr(type(self), 'blgp') else (self._raw >> 61) & 0x7
       vgprs = {0: 8, 1: 8, 2: 6, 3: 6, 4: 4}
       bits['src0'], bits['src1'] = vgprs.get(cbsz, 8) * 32, vgprs.get(blgp, 8) * 32
     return bits

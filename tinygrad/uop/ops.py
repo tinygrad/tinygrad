@@ -89,7 +89,7 @@ class UOpMetaClass(type):
     if SPEC > 1:
       from tinygrad.uop.spec import full_spec, test_pyrender
       if SPEC > 2: test_pyrender(created)
-      with Context(IGNORE_OOB=1): fret = cast(bool|None, full_spec.rewrite(created))
+      with Context(CHECK_OOB=0): fret = cast(bool|None, full_spec.rewrite(created))
       if fret is not True: raise RuntimeError(f"SPEC ISSUE {fret}: {created}")
     return created
 
