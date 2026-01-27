@@ -169,8 +169,16 @@ def _apply_pseudocode_fixes(op_name: str, pcode: str) -> str:
     pcode = pcode.replace('VCC = 0x0LL', 'VCC.u64[laneId] = 0').replace('VCC = 0x1LL', 'VCC.u64[laneId] = 1')
   return pcode
 
-def parse_pcode(pcode: str, srcs: dict[str, UOp] | None = None, lane: UOp | None = None, op_name: str | None = None) -> tuple[dict, list[tuple[str, UOp]]]:
-  if op_name: pcode = _apply_pseudocode_fixes(op_name, pcode)
+def get_pcode_optional(op) -> str | None:
+  pcode = PCODE.get(op)
+  return _apply_pseudocode_fixes(op.name, pcode) if pcode else None
+
+def get_pcode(op) -> str:
+  pcode = get_pcode_optional(op)
+  assert pcode is not None
+  return pcode
+
+def parse_pcode(pcode: str, srcs: dict[str, UOp] | None = None, lane: UOp | None = None) -> tuple[dict, list[tuple[str, UOp]]]:
   vars: dict = {n: UOp(Ops.DEFINE_VAR, dtypes.uint32, (), (n, _c(0), _c(MASK32))) for n in ['S0', 'S1', 'S2', 'D0', 'VCC', 'EXEC', 'SCC', 'SIMM32']}
   if srcs: vars.update(srcs)
   vars.update({'laneId': lane if lane is not None else _c(0), 'WAVE_MODE': {'IEEE': _c(1)}, 'WAVE32': _c(True, dtypes.bool), 'WAVE64': _c(False, dtypes.bool)})
@@ -389,7 +397,7 @@ class _Ctx:
 
   def compile_sop_pcode(self, op, srcs: dict[str, UOp], sdst_reg: UOp, sdst_size: int) -> UOp:
     """Compile a scalar instruction with dynamic destination register."""
-    pcode = PCODE[op]
+    pcode = get_pcode(op)
     srcs.update({'VCC': self.rsgpr_dyn(_c(VCC_LO.offset)), 'EXEC': self.rsgpr_dyn(_c(EXEC_LO.offset)), 'SCC': self.rsgpr_dyn(_c(SCC.offset))})
     if 'D0' not in srcs: srcs['D0'] = self.rsgpr_dyn(sdst_reg)  # D0 is current dest value for read-modify-write ops
     _, assigns = parse_pcode(pcode, srcs, lane=None)
@@ -397,7 +405,7 @@ class _Ctx:
 
   def compile_lane_pcode(self, op, inst) -> UOp:
     """Compile READLANE/READFIRSTLANE/WRITELANE using pcode parser."""
-    pcode = PCODE[op]
+    pcode = get_pcode(op)
     op_name = op.name if hasattr(op, 'name') else str(op)
     src0_off, vdst_off = self.inst_field(type(inst).src0), self.inst_field(type(inst).vdst)
     src0_reg = (src0_off >= _c(256)).where(src0_off - _c(256), _c(0))  # VGPR index or 0
@@ -417,11 +425,11 @@ class _Ctx:
   def compile_vop_pcode(self, op, srcs: dict[str, UOp], lane: UOp, vdst_reg: UOp, exec_mask: UOp,
                         opsel_dst_hi: bool | UOp = False, sdst_reg: int | None = None, clmp: int | UOp = 0) -> UOp:
     """Compile VOP instruction. Returns sink with stores and inc_pc."""
-    pcode = PCODE[op]
+    pcode = get_pcode(op)
     vcc_reg = sdst_reg if sdst_reg is not None else VCC_LO.offset
     if 'VCC' not in srcs: srcs['VCC'] = self.rsgpr_dyn(_c(vcc_reg))
     srcs['EXEC'], srcs['SCC'] = exec_mask, self.rsgpr_dyn(_c(SCC.offset))
-    _, assigns = parse_pcode(pcode, srcs, lane, op_name=op.name)
+    _, assigns = parse_pcode(pcode, srcs, lane)
 
     raw_stores: list = []
     vcc_val, exec_val = None, None
@@ -477,13 +485,13 @@ def _compile_sopp(inst: SOPP, ctx: _Ctx) -> UOp:
   if inst.op == SOPPOp.S_ENDPGM:
     return UOp.sink(ctx.wsgpr_dyn(_c(PC_LO_IDX), UOp.const(dtypes.uint32, 0xFFFFFFFF)),
                           ctx.wsgpr_dyn(_c(PC_HI_IDX), UOp.const(dtypes.uint32, 0xFFFFFFFF)))
-  pcode = PCODE.get(inst.op)
+  pcode = get_pcode_optional(inst.op)
   if pcode is not None:
     pc_bytes = ctx.rpc()  # PC is already 64-bit byte address
     vcc, exec_lo = ctx.rsgpr_dyn(_c(VCC_LO.offset)), ctx.rsgpr_dyn(_c(EXEC_LO.offset))
     srcs = {'PC': pc_bytes.cast(dtypes.int64), 'SIMM16': simm16, 'SCC': ctx.rsgpr_dyn(_c(SCC.offset)), 'VCC': vcc,
             'VCCZ': vcc.eq(UOp.const(dtypes.uint32, 0)).cast(dtypes.uint32), 'EXECZ': exec_lo.eq(UOp.const(dtypes.uint32, 0)).cast(dtypes.uint32)}
-    for dest, val in parse_pcode(pcode, srcs, op_name=inst.op.name)[1]:
+    for dest, val in parse_pcode(pcode, srcs)[1]:
       if dest == 'PC' or dest.startswith('PC.'):
         lo, hi = _split64(val.cast(dtypes.uint64))
         return UOp.sink(ctx.wsgpr_dyn(_c(PC_LO_IDX), lo), ctx.wsgpr_dyn(_c(PC_HI_IDX), hi))
@@ -635,7 +643,7 @@ def _compile_vopc(inst: VOPC | VOP3, ctx: _Ctx, opsel: int = 0, abs_bits: int = 
     is_16bit = src0_bits == 16 or src1_bits == 16
   literal = ctx.inst_field(type(inst).literal) if hasattr(type(inst), 'literal') else None
 
-  is_float, pcode = any(x in op_name for x in ('_F32', '_F64', '_F16')), PCODE.get(inst.op)
+  is_float, pcode = any(x in op_name for x in ('_F32', '_F64', '_F16')), get_pcode_optional(inst.op)
   def get_cmp_bit(lane) -> UOp:
     lc = lane.cast(dtypes.int) if isinstance(lane, UOp) else _c(lane, dtypes.int)
     s0 = ctx.rsrc_dyn(src0_off, lc, src0_bits, literal)
@@ -704,8 +712,7 @@ def _compile_vop3(inst: VOP3, ctx: _Ctx) -> UOp:
 
 def _compile_vop3sd(inst: VOP3SD, ctx: _Ctx) -> UOp:
   exec_mask = ctx.rsgpr_dyn(_c(EXEC_LO.offset))
-  sizes, op_name = getattr(inst, 'op_regs', {}), _op_name(inst)
-  pcode = PCODE[inst.op]
+  sizes, pcode = getattr(inst, 'op_regs', {}), get_pcode(inst.op)
 
   # Read operands dynamically from instruction encoding
   vdst_reg = ctx.inst_field(VOP3SD.vdst)
@@ -723,7 +730,7 @@ def _compile_vop3sd(inst: VOP3SD, ctx: _Ctx) -> UOp:
   src2 = ctx.rsrc_dyn_sized(src2_off, lane, sizes, 'src2', literal=literal) if src2_off is not None else None
   srcs = {'S0': src0, 'S1': src1, 'VCC': ctx.rsgpr_dyn(vcc_in_off), 'EXEC': exec_mask, 'SCC': ctx.rsgpr_dyn(_c(SCC.offset))}
   if src2 is not None: srcs['S2'] = src2
-  _, assigns = parse_pcode(pcode, srcs, lane, op_name=op_name)
+  _, assigns = parse_pcode(pcode, srcs, lane)
 
   has_per_lane_vcc = any('[laneId]' in dest for dest, _ in assigns if dest.startswith('VCC') or dest.startswith('D0.u64'))
   if has_per_lane_vcc:
@@ -735,7 +742,7 @@ def _compile_vop3sd(inst: VOP3SD, ctx: _Ctx) -> UOp:
       lane_srcs = {'S0': s0, 'S1': s1, 'VCC': ctx.rsgpr_dyn(vcc_in_off), 'EXEC': exec_mask, 'SCC': ctx.rsgpr_dyn(_c(SCC.offset))}
       if s2 is not None: lane_srcs['S2'] = s2
       vcc_bit = _c(0)
-      for dest, val in parse_pcode(pcode, lane_srcs, lane_uop, op_name=op_name)[1]:
+      for dest, val in parse_pcode(pcode, lane_srcs, lane_uop)[1]:
         if dest.startswith('VCC') or (dest.startswith('D0.u64') and '[laneId]' in dest): vcc_bit = val.cast(dtypes.uint32)
       return vcc_bit
     final_vcc = ctx.unroll_lanes(get_vcc_bit, exec_mask)
@@ -746,7 +753,7 @@ def _compile_vop3sd(inst: VOP3SD, ctx: _Ctx) -> UOp:
     lane_srcs = {'S0': s0, 'S1': s1, 'VCC': ctx.rsgpr_dyn(vcc_in_off), 'EXEC': exec_mask, 'SCC': ctx.rsgpr_dyn(_c(SCC.offset))}
     if s2 is not None: lane_srcs['S2'] = s2
     d0_val = None
-    for dest, val in parse_pcode(pcode, lane_srcs, lane3, op_name=op_name)[1]:
+    for dest, val in parse_pcode(pcode, lane_srcs, lane3)[1]:
       if dest.startswith('D0') and '[laneId]' not in dest: d0_val = val
     vgpr_stores = []
     if d0_val is not None:
@@ -872,16 +879,16 @@ def _compile_vopd(inst: VOPD, ctx: _Ctx) -> UOp:
       assert literal is not None
       srcs['SIMM32'] = literal
     if op == VOPDOp.V_DUAL_CNDMASK_B32: srcs['VCC'] = ctx.rsgpr_dyn(_c(VCC_LO.offset))
-    pcode = PCODE[vop]
+    pcode = get_pcode(vop)
     srcs.update({'VCC': ctx.rsgpr_dyn(_c(VCC_LO.offset)), 'EXEC': exec_mask, 'SCC': ctx.rsgpr_dyn(_c(SCC.offset))})
-    for dest, val in parse_pcode(pcode, srcs, lane, op_name=vop.name)[1]:
+    for dest, val in parse_pcode(pcode, srcs, lane)[1]:
       if dest.startswith('D0'): all_stores.append(ctx.wvgpr_dyn(vdst_reg, lane, _val_to_u32(val), exec_mask, after=srcy1))
   return UOp.sink(UOp.group(*all_stores).end(lane), *ctx.inc_pc())
 
 def _compile_mem_op(inst: DS | FLAT | GLOBAL | SCRATCH, ctx: _Ctx) -> UOp:
   """Unified memory operation compiler for DS, FLAT, GLOBAL, SCRATCH."""
   exec_mask, op_name = ctx.rsgpr_dyn(_c(EXEC_LO.offset)), _op_name(inst)
-  pcode = PCODE.get(inst.op)
+  pcode = get_pcode_optional(inst.op)
   if pcode is None: return UOp.sink(*ctx.inc_pc())
 
   is_lds = isinstance(inst, DS)
@@ -979,7 +986,7 @@ def _compile_mem_op(inst: DS | FLAT | GLOBAL | SCRATCH, ctx: _Ctx) -> UOp:
   # DS-specific: check for 2ADDR pattern needing separate ranges
   if is_lds:
     dummy_lane = ctx.range()
-    _, assigns = parse_pcode(pcode, make_srcs(dummy_lane), lane=dummy_lane, op_name=op_name)
+    _, assigns = parse_pcode(pcode, make_srcs(dummy_lane), lane=dummy_lane)
     mem_assigns = [d for d, _ in assigns if d.startswith('MEM[')]
     mem_addrs = set(m.group(1) if (m := re.match(r'MEM\[([^\]]+)\]', d)) else d for d in mem_assigns)
     use_separate_ranges = (len(mem_addrs) > 1 or '2ADDR' in op_name) and 'STOREXCHG' not in op_name
@@ -988,7 +995,7 @@ def _compile_mem_op(inst: DS | FLAT | GLOBAL | SCRATCH, ctx: _Ctx) -> UOp:
       for i, (dest, _) in enumerate(assigns):
         lane = ctx.range()
         active = _lane_active(exec_mask, lane)
-        _, lane_assigns = parse_pcode(pcode, make_srcs(lane), lane=lane, op_name=op_name)
+        _, lane_assigns = parse_pcode(pcode, make_srcs(lane), lane=lane)
         ended.extend(s.end(lane) for s in make_stores(dest, lane_assigns[i][1], lane, active, True))
       return UOp.sink(*ended, *ctx.inc_pc())
 
@@ -996,7 +1003,7 @@ def _compile_mem_op(inst: DS | FLAT | GLOBAL | SCRATCH, ctx: _Ctx) -> UOp:
   writes_return_data = '_RTN' in op_name or (is_lds and op_name.startswith('DS_LOAD')) or bool(is_atomic and glc)
   lane = ctx.range()
   active = _lane_active(exec_mask, lane)
-  pcode_vars, assigns = parse_pcode(pcode, make_srcs(lane), lane=lane, op_name=op_name)
+  pcode_vars, assigns = parse_pcode(pcode, make_srcs(lane), lane=lane)
   stores = [s for dest, val in assigns for s in make_stores(dest, val, lane, active, writes_return_data)]
 
   # FLAT/GLOBAL/SCRATCH: collect VDATA slices for loads
