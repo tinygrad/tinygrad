@@ -387,21 +387,17 @@ class _Ctx:
       elif dest.startswith('VCC'): stores.append(self.wsgpr_dyn(_c(VCC_LO.offset), _to_u32(val)))
     return stores
 
-  def compile_sop_pcode(self, op, srcs: dict[str, UOp], sdst_reg: UOp, sdst_size: int):
-    """Compile a scalar instruction with dynamic destination register. Returns sink or None."""
-    pcode = PCODE.get(op)
-    if pcode is None: return None
+  def compile_sop_pcode(self, op, srcs: dict[str, UOp], sdst_reg: UOp, sdst_size: int) -> UOp:
+    """Compile a scalar instruction with dynamic destination register."""
+    pcode = PCODE[op]
     srcs.update({'VCC': self.rsgpr_dyn(_c(VCC_LO.offset)), 'EXEC': self.rsgpr_dyn(_c(EXEC_LO.offset)), 'SCC': self.rsgpr_dyn(_c(SCC.offset))})
     if 'D0' not in srcs: srcs['D0'] = self.rsgpr_dyn(sdst_reg)  # D0 is current dest value for read-modify-write ops
     _, assigns = parse_pcode(pcode, srcs, lane=None)
-    stores = self.scalar_stores(assigns, sdst_reg, sdst_size)
-    if not stores: return None
-    return UOp.sink(*stores, *self.inc_pc())
+    return UOp.sink(*self.scalar_stores(assigns, sdst_reg, sdst_size), *self.inc_pc())
 
-  def compile_lane_pcode(self, op, inst):
+  def compile_lane_pcode(self, op, inst) -> UOp:
     """Compile READLANE/READFIRSTLANE/WRITELANE using pcode parser."""
-    pcode = PCODE.get(op)
-    if pcode is None: return None
+    pcode = PCODE[op]
     op_name = op.name if hasattr(op, 'name') else str(op)
     src0_off, vdst_off = self.inst_field(type(inst).src0), self.inst_field(type(inst).vdst)
     src0_reg = (src0_off >= _c(256)).where(src0_off - _c(256), _c(0))  # VGPR index or 0
@@ -416,14 +412,12 @@ class _Ctx:
     for dest, val in assigns:
       if dest.startswith('D0'): stores.append(self.wsgpr_dyn(vdst_off, val.cast(dtypes.uint32)))
       elif dest.startswith('VGPR['): stores.append(self.vgpr.index(val[0].cast(dtypes.int)).store(val[1].cast(dtypes.uint32)))
-    if not stores: return None
     return UOp.sink(*stores, *self.inc_pc())
 
   def compile_vop_pcode(self, op, srcs: dict[str, UOp], lane: UOp, vdst_reg: UOp, exec_mask: UOp,
                         opsel_dst_hi: bool | UOp = False, sdst_reg: int | None = None, clmp: int | UOp = 0) -> UOp:
     """Compile VOP instruction. Returns sink with stores and inc_pc."""
-    pcode = PCODE.get(op)
-    assert pcode is not None, f"no pcode for {op}"
+    pcode = PCODE[op]
     vcc_reg = sdst_reg if sdst_reg is not None else VCC_LO.offset
     if 'VCC' not in srcs: srcs['VCC'] = self.rsgpr_dyn(_c(vcc_reg))
     srcs['EXEC'], srcs['SCC'] = exec_mask, self.rsgpr_dyn(_c(SCC.offset))
@@ -572,16 +566,11 @@ def _compile_sop(inst: SOP1 | SOP2 | SOPC | SOPK, ctx: _Ctx) -> UOp:
   else:
     raise RuntimeError(f"unknown SOP type: {type(inst).__name__}")
 
-  pcode_result = ctx.compile_sop_pcode(inst.op, srcs, dst_off, dst_size)
-  assert pcode_result is not None, f"no pcode for {type(inst).__name__}: {inst.op.name}"
-  return pcode_result
+  return ctx.compile_sop_pcode(inst.op, srcs, dst_off, dst_size)
 
 def _compile_vop12(inst: VOP1 | VOP1_SDST | VOP2, ctx: _Ctx) -> UOp:
   op_name = _op_name(inst)
-  if op_name == 'V_READFIRSTLANE_B32_E32':
-    pcode_result = ctx.compile_lane_pcode(inst.op, inst)
-    assert pcode_result is not None, f"no pcode for VOP1: {op_name}"
-    return pcode_result
+  if op_name == 'V_READFIRSTLANE_B32_E32': return ctx.compile_lane_pcode(inst.op, inst)
   lane, exec_mask, sizes = ctx.range(), ctx.rsgpr_dyn(_c(EXEC_LO.offset)), getattr(inst, 'op_regs', {})
   is_16bit = _is_16bit_op(op_name)
   literal = ctx.inst_field(type(inst).literal) if hasattr(type(inst), 'literal') else None
@@ -679,9 +668,7 @@ def _compile_vop3(inst: VOP3, ctx: _Ctx) -> UOp:
 
   # Lane operations
   if op_name in ('V_READLANE_B32', 'V_READFIRSTLANE_B32', 'V_READFIRSTLANE_B32_E64', 'V_WRITELANE_B32'):
-    pcode_result = ctx.compile_lane_pcode(inst.op, inst)
-    assert pcode_result is not None, f"no pcode for VOP3: {op_name}"
-    return pcode_result
+    return ctx.compile_lane_pcode(inst.op, inst)
 
   # VOP3 VOPC (v_cmp_*_e64) - delegate to unified VOPC handler
   if 'V_CMP' in op_name or 'V_CMPX' in op_name:
@@ -718,8 +705,7 @@ def _compile_vop3(inst: VOP3, ctx: _Ctx) -> UOp:
 def _compile_vop3sd(inst: VOP3SD, ctx: _Ctx) -> UOp:
   exec_mask = ctx.rsgpr_dyn(_c(EXEC_LO.offset))
   sizes, op_name = getattr(inst, 'op_regs', {}), _op_name(inst)
-  pcode = PCODE.get(inst.op)
-  assert pcode is not None, f"no pcode for VOP3SD: {op_name}"
+  pcode = PCODE[inst.op]
 
   # Read operands dynamically from instruction encoding
   vdst_reg = ctx.inst_field(VOP3SD.vdst)
@@ -772,10 +758,7 @@ def _compile_vop3sd(inst: VOP3SD, ctx: _Ctx) -> UOp:
         vgpr_stores.append(ctx.wvgpr_dyn(vdst_reg, lane3, d0_u32, exec_mask))
     # Write carry output (wsgpr_dyn handles NULL register 124)
     vcc_write = ctx.wsgpr_dyn(sdst_off, final_vcc)
-    if vgpr_stores:
-      # VCC write must come first in sink to ensure VCC loop runs before VGPR loop
-      return UOp.sink(vcc_write, UOp.sink(*vgpr_stores).end(lane3), *ctx.inc_pc())
-    return UOp.sink(vcc_write, *ctx.inc_pc())
+    return UOp.sink(vcc_write, UOp.group(*vgpr_stores).end(lane3), *ctx.inc_pc())
   else:
     return ctx.compile_vop_pcode(inst.op, srcs, lane, vdst_reg, exec_mask, sdst_reg=inst.sdst.offset)
 
@@ -889,8 +872,7 @@ def _compile_vopd(inst: VOPD, ctx: _Ctx) -> UOp:
       assert literal is not None
       srcs['SIMM32'] = literal
     if op == VOPDOp.V_DUAL_CNDMASK_B32: srcs['VCC'] = ctx.rsgpr_dyn(_c(VCC_LO.offset))
-    pcode = PCODE.get(vop)
-    assert pcode is not None, f"no pcode for VOPD {label}: {vop}"
+    pcode = PCODE[vop]
     srcs.update({'VCC': ctx.rsgpr_dyn(_c(VCC_LO.offset)), 'EXEC': exec_mask, 'SCC': ctx.rsgpr_dyn(_c(SCC.offset))})
     for dest, val in parse_pcode(pcode, srcs, lane, op_name=vop.name)[1]:
       if dest.startswith('D0'): all_stores.append(ctx.wvgpr_dyn(vdst_reg, lane, _val_to_u32(val), exec_mask, after=srcy1))
@@ -1008,7 +990,7 @@ def _compile_mem_op(inst: DS | FLAT | GLOBAL | SCRATCH, ctx: _Ctx) -> UOp:
         active = _lane_active(exec_mask, lane)
         _, lane_assigns = parse_pcode(pcode, make_srcs(lane), lane=lane, op_name=op_name)
         ended.extend(s.end(lane) for s in make_stores(dest, lane_assigns[i][1], lane, active, True))
-      return UOp.sink(*ended, *ctx.inc_pc()) if ended else UOp.sink(*ctx.inc_pc())
+      return UOp.sink(*ended, *ctx.inc_pc())
 
   # Standard path: single lane range
   writes_return_data = '_RTN' in op_name or (is_lds and op_name.startswith('DS_LOAD')) or bool(is_atomic and glc)
@@ -1022,7 +1004,7 @@ def _compile_mem_op(inst: DS | FLAT | GLOBAL | SCRATCH, ctx: _Ctx) -> UOp:
     for dword_idx, val in sorted(_collect_data_slices(assigns, 'VDATA', pcode_vars, op_name).items()):
       stores.append(ctx.wvgpr_dyn(vdst_reg + _c(dword_idx), lane, val, exec_mask))
 
-  if stores: return UOp.sink(UOp.sink(*stores).end(lane), *ctx.inc_pc())
+  if stores: return UOp.sink(UOp.group(*stores).end(lane), *ctx.inc_pc())
   return UOp.sink(*ctx.inc_pc())
 
 # Dispatch table: instruction type -> handler function
