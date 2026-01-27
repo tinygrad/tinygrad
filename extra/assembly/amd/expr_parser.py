@@ -259,6 +259,9 @@ class Parser:
       if name == 'OVERFLOW_F32': return _const(dtypes.uint32, 0x7F7FFFFF).bitcast(dtypes.float32)
       if name == 'UNDERFLOW_F64': return _const(dtypes.uint64, 1).bitcast(dtypes.float64)
       if name == 'OVERFLOW_F64': return _const(dtypes.uint64, 0x7FEFFFFFFFFFFFFF).bitcast(dtypes.float64)
+      if name == 'WAVE32': return _const(dtypes.bool, True)
+      if name == 'WAVE64': return _const(dtypes.bool, False)
+      if name == 'WAVE_MODE' and self.try_eat('DOT') and self.peek().val == 'IEEE': self.eat('IDENT'); return _u32(1)
       if self.at('LBRACE'):
         self.eat('LBRACE')
         idx = self.eat('NUM').val

@@ -179,9 +179,7 @@ def get_pcode(op) -> str:
   return pcode
 
 def parse_pcode(pcode: str, srcs: dict[str, UOp] | None = None) -> tuple[dict, list[tuple[str, UOp]]]:
-  vars: dict = {n: UOp(Ops.DEFINE_VAR, dtypes.uint32, (), (n, _c(0), _c(MASK32))) for n in ['S0', 'S1', 'S2', 'D0', 'VCC', 'EXEC', 'SCC', 'SIMM32']}
-  vars.update({'laneId': _c(0), 'WAVE_MODE': {'IEEE': _c(1)}, 'WAVE32': _c(True, dtypes.bool), 'WAVE64': _c(False, dtypes.bool)})
-  if srcs: vars.update(srcs)
+  vars: dict = srcs.copy() if srcs else {}
   assigns: list[tuple[str, UOp]] = []
   lines = [l.strip().rstrip(';') for l in pcode.split('\n') if l.strip() and not l.strip().startswith('//')]
   _, final, _ = parse_block(lines, 0, vars, assigns=assigns)

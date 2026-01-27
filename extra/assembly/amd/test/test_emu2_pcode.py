@@ -29,7 +29,7 @@ class TestBasicParsing(unittest.TestCase):
 
   def test_v_add_co_ci_u32(self):
     """Test parsing V_ADD_CO_CI_U32 with carry."""
-    _, assigns = parse_pcode(PCODE[VOP2Op.V_ADD_CO_CI_U32_E32])
+    _, assigns = parse_pcode(PCODE[VOP2Op.V_ADD_CO_CI_U32_E32], {'laneId': UOp.const(dtypes.uint32, 0)})
     self.assertGreaterEqual(len(assigns), 1)
 
 class TestWithSources(unittest.TestCase):
