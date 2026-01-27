@@ -294,29 +294,23 @@ class Parser:
 
   def peek(self, offset=0) -> Token: return self.tokens[min(self.pos + offset, len(self.tokens) - 1)]
   def at(self, *types) -> bool: return self.peek().type in types
-  def at_val(self, *vals) -> bool: return self.peek().val in vals
+  def _advance(self) -> Token: tok = self.tokens[self.pos]; self.pos += 1; return tok
   def eat(self, type: str) -> Token:
     if self.peek().type != type: raise RuntimeError(f"expected {type}, got {self.peek()}")
-    tok = self.tokens[self.pos]; self.pos += 1; return tok
-  def try_eat(self, type: str) -> Token | None:
-    if self.peek().type == type: return self.eat(type)
-    return None
+    return self._advance()
+  def try_eat(self, type: str) -> Token | None: return self._advance() if self.peek().type == type else None
   def try_eat_val(self, val: str, type: str) -> Token | None:
-    if self.peek().type == type and self.peek().val == val:
-      tok = self.tokens[self.pos]; self.pos += 1; return tok
-    return None
+    return self._advance() if self.peek().type == type and self.peek().val == val else None
   def eat_val(self, val: str, type: str) -> Token:
     if self.peek().type != type or self.peek().val != val: raise RuntimeError(f"expected {type}:{val}, got {self.peek()}")
-    tok = self.tokens[self.pos]; self.pos += 1; return tok
+    return self._advance()
 
-  def parse(self) -> UOp: return self.ternary()
-  def expr_top(self) -> UOp: return self.ternary()
-
-  def ternary(self) -> UOp:
+  def parse(self) -> UOp:
     cond = self.binop(0)
     if self.try_eat('QUESTION'):
-      then_val, else_val = self.ternary(), (self.eat('COLON'), self.ternary())[1]
-      return _to_bool(cond).where(then_val, else_val)
+      then_val = self.parse()
+      self.eat('COLON')
+      return _to_bool(cond).where(then_val, self.parse())
     return cond
 
   def _apply_binop(self, left, right, op):
@@ -379,13 +373,13 @@ class Parser:
 
   def primary(self) -> UOp:
     if self.try_eat('LPAREN'):
-      e = self.expr_top()
+      e = self.parse()
       self.eat('RPAREN')
       return e
     if self.try_eat('LBRACE'):
-      hi = self.expr_top()
+      hi = self.parse()
       self.eat('COMMA')
-      lo = self.expr_top()
+      lo = self.parse()
       self.eat('RBRACE')
       return (hi.cast(dtypes.uint64) << _u64(32)) | lo.cast(dtypes.uint64)
     if self.at('NUM'):
@@ -397,17 +391,17 @@ class Parser:
       name = self.eat('IDENT').val
       if name == 'MEM':
         self.eat('LBRACKET')
-        addr = self.expr_top()
+        addr = self.parse()
         self.eat('RBRACKET')
         self.eat('DOT')
         dt_name = self.eat('IDENT').val
         return self._handle_mem_load(addr, DTYPES.get(dt_name, dtypes.uint32))
       if name == 'VGPR':
         self.eat('LBRACKET')
-        lane = self.expr_top()
+        lane = self.parse()
         self.eat('RBRACKET')
         self.eat('LBRACKET')
-        reg = self.expr_top()
+        reg = self.parse()
         self.eat('RBRACKET')
         vgpr = self.vars.get('_vgpr')
         if vgpr is None: return _u32(0)
@@ -446,7 +440,7 @@ class Parser:
             elem = self.vars[f'{name}{idx_num}']
             if self.try_eat('DOT'): return _cast_to(elem, DTYPES.get(self.eat('IDENT').val, dtypes.uint32))
             return elem
-        first = self.expr_top()
+        first = self.parse()
         return self._handle_bracket_rest(first, _u32(0), name)
       if name in self.vars:
         v = self.vars[name]
@@ -477,19 +471,19 @@ class Parser:
 
   def _handle_bracket(self, base, var_name: str | None = None) -> UOp:
     self.eat('LBRACKET')
-    return self._handle_bracket_rest(self.expr_top(), base, var_name)
+    return self._handle_bracket_rest(self.parse(), base, var_name)
 
   def _handle_bracket_rest(self, first: UOp, base: UOp, var_name: str | None = None) -> UOp:
     if self.at('OP') and self.peek().val in ('+:', '-:'):
       op = self.eat('OP').val
-      width = self.expr_top()
+      width = self.parse()
       self.eat('RBRACKET')
       if width.op == Ops.CONST:
         w = int(width.arg)
         return (base >> _to_u32(first)) & _const(base.dtype, (1 << w) - 1)
       return base
     if self.try_eat('COLON'):
-      second = self.expr_top()
+      second = self.parse()
       self.eat('RBRACKET')
       if first.op == Ops.CONST and second.op == Ops.CONST:
         a, b = int(first.arg), int(second.arg)
@@ -562,7 +556,7 @@ class Parser:
     if self.at('IDENT') and self.peek().val in ('U', 'I', 'F', 'B'):
       type_char = self.eat('IDENT').val
       self.eat('LPAREN')
-      inner = self.expr_top()
+      inner = self.parse()
       self.eat('RPAREN')
       dt = {('U',32): dtypes.uint32, ('U',64): dtypes.uint64, ('I',32): dtypes.int, ('I',64): dtypes.int64,
             ('F',16): dtypes.half, ('F',32): dtypes.float32, ('F',64): dtypes.float64, ('B',32): dtypes.uint32, ('B',64): dtypes.uint64}.get((type_char, bits), dtypes.uint64 if bits > 32 else dtypes.uint32)
@@ -617,9 +611,9 @@ class Parser:
 
   def _parse_args(self) -> list[UOp]:
     if self.at('RPAREN'): return []
-    args = [self.expr_top()]
+    args = [self.parse()]
     while self.try_eat('COMMA'):
-      args.append(self.expr_top())
+      args.append(self.parse())
     return args
 
   def _call_func(self, name: str, args: list[UOp]) -> UOp:
@@ -757,14 +751,14 @@ def parse_block(lines: list[str], start: int, vars: dict[str, VarVal], funcs: di
       if p.at('NUM'):
         start_val = int(p.eat('NUM').val.rstrip('UuLl'))
       else:
-        start_expr = p.expr_top()
+        start_expr = p.parse()
         start_val = int(start_expr.arg) if start_expr.op == Ops.CONST else 0
       p.eat('COLON')
       if p.at('NUM') and p.peek(1).type == 'QUOTE': p.eat('NUM'); p.eat('QUOTE')
       if p.at('NUM'):
         end_val = int(p.eat('NUM').val.rstrip('UuLl'))
       else:
-        end_expr = p.expr_top()
+        end_expr = p.parse()
         end_val = int(end_expr.arg) if end_expr.op == Ops.CONST else 0
       # Collect body
       i += 1; body_lines, depth = [], 1
