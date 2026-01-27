@@ -375,15 +375,16 @@ class _Ctx:
 
   def scalar_stores(self, assigns: list[tuple[str, UOp]], sdst_reg: UOp, sdst_size: int = 1) -> list[UOp]:
     """Generate stores for scalar assigns with dynamic destination register (D0, SCC, EXEC, VCC)."""
-    def w64(reg: UOp, val: UOp) -> list[UOp]:
-      if val.dtype in (dtypes.uint64, dtypes.int64): lo, hi = _split64(val); return [self.wsgpr_dyn(reg, lo), self.wsgpr_dyn(reg + _c(1), hi)]
-      return [self.wsgpr_dyn(reg, _to_u32(val))]
     stores: list[UOp] = []
     for dest, val in assigns:
-      if dest.startswith('D0'): stores.extend(w64(sdst_reg, val) if sdst_size == 2 else [self.wsgpr_dyn(sdst_reg, _to_u32(val))])
+      if dest.startswith('D0'):
+        if sdst_size == 2:
+          lo, hi = _split64(val)
+          stores.extend([self.wsgpr_dyn(sdst_reg, lo), self.wsgpr_dyn(sdst_reg + _c(1), hi)])
+        else: stores.append(self.wsgpr_dyn(sdst_reg, _to_u32(val)))
       elif dest.startswith('SCC'): stores.append(self.wsgpr_dyn(_c(SCC.offset), _to_u32(val)))
-      elif dest.startswith('EXEC'): stores.extend(w64(_c(EXEC_LO.offset), val))
-      elif dest.startswith('VCC'): stores.extend(w64(_c(VCC_LO.offset), val))
+      elif dest.startswith('EXEC'): stores.append(self.wsgpr_dyn(_c(EXEC_LO.offset), _to_u32(val)))
+      elif dest.startswith('VCC'): stores.append(self.wsgpr_dyn(_c(VCC_LO.offset), _to_u32(val)))
     return stores
 
   def compile_sop_pcode(self, op, srcs: dict[str, UOp], sdst_reg: UOp, sdst_size: int):
@@ -419,10 +420,10 @@ class _Ctx:
     return UOp.sink(*stores, *self.inc_pc())
 
   def compile_vop_pcode(self, op, srcs: dict[str, UOp], lane: UOp, vdst_reg: UOp, exec_mask: UOp,
-                        opsel_dst_hi: bool | UOp = False, sdst_reg: int | None = None, clmp: int | UOp = 0, wrap: bool = False):
-    """Compile VOP instruction. Returns sink if wrap=True, else list of store UOps, or None."""
+                        opsel_dst_hi: bool | UOp = False, sdst_reg: int | None = None, clmp: int | UOp = 0) -> UOp:
+    """Compile VOP instruction. Returns sink with stores and inc_pc."""
     pcode = PCODE.get(op)
-    if pcode is None: return None
+    assert pcode is not None, f"no pcode for {op}"
     vcc_reg = sdst_reg if sdst_reg is not None else VCC_LO.offset
     if 'VCC' not in srcs: srcs['VCC'] = self.rsgpr_dyn(_c(vcc_reg))
     srcs['EXEC'], srcs['SCC'] = exec_mask, self.rsgpr_dyn(_c(SCC.offset))
@@ -466,15 +467,12 @@ class _Ctx:
         result = (result & (mask ^ UOp.const(dtypes.uint32, 0xFFFFFFFF))) | (val_bits << UOp.const(dtypes.uint32, lo_bit))
       lane_stores.append(self.wvgpr_dyn(vdst_reg, lane, result, exec_mask))
     if lane_stores: stores.append(UOp.sink(*lane_stores).end(lane))
-    if vcc_val is not None:
-      def get_vcc_bit(l): return (_to_u32(vcc_val.substitute({lane: l})) & _c(1)).cast(dtypes.uint32)
-      stores.append(self.wsgpr_dyn(_c(vcc_reg), self.unroll_lanes(get_vcc_bit, exec_mask, apply_exec=False)))
-    if exec_val is not None:
-      def get_exec_bit(l): return (_to_u32(exec_val.substitute({lane: l})) & _c(1)).cast(dtypes.uint32)
-      stores.append(self.wsgpr_dyn(_c(EXEC_LO.offset), self.unroll_lanes(get_exec_bit, exec_mask, apply_exec=False)))
+    for mask_val, reg in [(vcc_val, vcc_reg), (exec_val, EXEC_LO.offset)]:
+      if mask_val is None: continue
+      get_bit = lambda l, v=mask_val: (_to_u32(v.substitute({lane: l})) & _c(1)).cast(dtypes.uint32)
+      stores.append(self.wsgpr_dyn(_c(reg), self.unroll_lanes(get_bit, exec_mask, apply_exec=False)))
     stores.extend(scalar_stores)
-    if not stores: return None
-    return UOp.sink(*stores, *self.inc_pc()) if wrap else stores
+    return UOp.sink(*stores, *self.inc_pc())
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # INSTRUCTION HANDLERS
@@ -619,9 +617,7 @@ def _compile_vop12(inst: VOP1 | VOP1_SDST | VOP2, ctx: _Ctx) -> UOp:
     if inst.op in (VOP2Op.V_FMAAK_F32_E32, VOP2Op.V_FMAMK_F32_E32, VOP2Op.V_FMAAK_F16_E32, VOP2Op.V_FMAMK_F16_E32):
       assert literal is not None
       srcs['SIMM32'] = literal
-  pcode_result = ctx.compile_vop_pcode(inst.op, srcs, lane, vdst_reg, exec_mask, opsel_dst_hi=write_hi_half, wrap=True)
-  assert pcode_result is not None, f"no pcode for {type(inst).__name__}: {inst.op.name}"
-  return pcode_result
+  return ctx.compile_vop_pcode(inst.op, srcs, lane, vdst_reg, exec_mask, opsel_dst_hi=write_hi_half)
 
 def _compile_vopc(inst: VOPC | VOP3, ctx: _Ctx, opsel: int = 0, abs_bits: int = 0, neg_bits: int = 0) -> UOp:
   exec_mask, op_name = ctx.rsgpr_dyn(_c(EXEC_LO.offset)), _op_name(inst)
@@ -717,14 +713,7 @@ def _compile_vop3(inst: VOP3, ctx: _Ctx) -> UOp:
   # FMAC instructions need D0 (accumulator) from destination register
   if 'FMAC' in op_name: srcs['D0'] = ctx.rvgpr_dyn(vdst_reg, lane)
   opsel_dst_hi = bool(opsel & 0b1000) and _is_16bit_op(op_name)
-  clmp = getattr(inst, 'clmp', 0) or 0
-  if opsel_dst_hi:
-    stores = ctx.compile_vop_pcode(inst.op, srcs, lane, vdst_reg, exec_mask, opsel_dst_hi=True, clmp=clmp)
-    if stores is not None:
-      return UOp.sink(*stores, *ctx.inc_pc())
-  pcode_result = ctx.compile_vop_pcode(inst.op, srcs, lane, vdst_reg, exec_mask, clmp=clmp, wrap=True)
-  assert pcode_result is not None, f"no pcode for VOP3: {inst.op.name}"
-  return pcode_result
+  return ctx.compile_vop_pcode(inst.op, srcs, lane, vdst_reg, exec_mask, opsel_dst_hi=opsel_dst_hi, clmp=getattr(inst, 'clmp', 0))
 
 def _compile_vop3sd(inst: VOP3SD, ctx: _Ctx) -> UOp:
   exec_mask = ctx.rsgpr_dyn(_c(EXEC_LO.offset))
@@ -788,9 +777,7 @@ def _compile_vop3sd(inst: VOP3SD, ctx: _Ctx) -> UOp:
       return UOp.sink(vcc_write, UOp.sink(*vgpr_stores).end(lane3), *ctx.inc_pc())
     return UOp.sink(vcc_write, *ctx.inc_pc())
   else:
-    pcode_result = ctx.compile_vop_pcode(inst.op, srcs, lane, vdst_reg, exec_mask, sdst_reg=inst.sdst.offset, wrap=True)
-    assert pcode_result is not None, f"no pcode for VOP3SD: {op_name}"
-    return pcode_result
+    return ctx.compile_vop_pcode(inst.op, srcs, lane, vdst_reg, exec_mask, sdst_reg=inst.sdst.offset)
 
 def _compile_vop3p(inst: VOP3P, ctx: _Ctx) -> UOp:
   lane, exec_mask = ctx.range(), ctx.rsgpr_dyn(_c(EXEC_LO.offset))
@@ -852,34 +839,29 @@ def _compile_vop3p(inst: VOP3P, ctx: _Ctx) -> UOp:
       stores = [ctx.wvgpr_dyn(vdst_reg + _c(i // 32), UOp.const(dtypes.int, i % 32), mat_d[i].bitcast(dtypes.uint32), exec_mask) for i in range(256)]
     return UOp.sink(*stores, *ctx.inc_pc())
 
-  pcode = PCODE.get(inst.op)
-  if pcode is not None:
-    if 'FMA_MIX' in op_name:
-      combined_opsel_hi = (opsel_hi & 0x3) | ((opsel_hi2 & 0x1) << 2)
-      # For FMA_MIX: neg_hi is ABS (not neg!), neg is actual negation
-      def apply_abs(v, bit, opsel_hi_bit, opsel_bit):
-        if not (neg_hi & bit): return v
-        # Apply abs based on whether source is f32 or f16
-        if not (combined_opsel_hi & opsel_hi_bit): return v & UOp.const(dtypes.uint32, 0x7FFFFFFF)  # f32 abs
-        if opsel & opsel_bit: return v & UOp.const(dtypes.uint32, 0x7FFF0000)  # f16 hi abs (preserve lo)
-        return v & UOp.const(dtypes.uint32, 0xFFFF7FFF)  # f16 lo abs (preserve hi)
-      def apply_neg_mix(v, bit, opsel_hi_bit, opsel_bit):
-        if not (neg & bit): return v
-        if not (combined_opsel_hi & opsel_hi_bit): return v ^ UOp.const(dtypes.uint32, 0x80000000)  # f32 neg
-        if opsel & opsel_bit: return v ^ UOp.const(dtypes.uint32, 0x80000000)  # f16 hi neg
-        return v ^ UOp.const(dtypes.uint32, 0x00008000)  # f16 lo neg
-      s0_mod = apply_neg_mix(apply_abs(src0, 1, 1, 1), 1, 1, 1)
-      s1_mod = apply_neg_mix(apply_abs(src1, 2, 2, 2), 2, 2, 2)
-      s2_mod = apply_neg_mix(apply_abs(src2, 4, 4, 4), 4, 4, 4) if src2 is not None else UOp.const(dtypes.uint32, 0)
-      srcs = {'S0': s0_mod, 'S1': s1_mod, 'S2': s2_mod,
-              'OPSEL_HI': UOp.const(dtypes.uint32, combined_opsel_hi), 'OPSEL': UOp.const(dtypes.uint32, opsel)}
-    else:
-      srcs = {'S0': s0_new, 'S1': s1_new}
-      if s2_new is not None: srcs['S2'] = s2_new
-    stores = ctx.compile_vop_pcode(inst.op, srcs, lane, vdst_reg, exec_mask)
-    if stores is not None:
-      return UOp.sink(*stores, *ctx.inc_pc())
-  return UOp.sink(*ctx.inc_pc())
+  if 'FMA_MIX' in op_name:
+    combined_opsel_hi = (opsel_hi & 0x3) | ((opsel_hi2 & 0x1) << 2)
+    # For FMA_MIX: neg_hi is ABS (not neg!), neg is actual negation
+    def apply_abs(v, bit, opsel_hi_bit, opsel_bit):
+      if not (neg_hi & bit): return v
+      # Apply abs based on whether source is f32 or f16
+      if not (combined_opsel_hi & opsel_hi_bit): return v & UOp.const(dtypes.uint32, 0x7FFFFFFF)  # f32 abs
+      if opsel & opsel_bit: return v & UOp.const(dtypes.uint32, 0x7FFF0000)  # f16 hi abs (preserve lo)
+      return v & UOp.const(dtypes.uint32, 0xFFFF7FFF)  # f16 lo abs (preserve hi)
+    def apply_neg_mix(v, bit, opsel_hi_bit, opsel_bit):
+      if not (neg & bit): return v
+      if not (combined_opsel_hi & opsel_hi_bit): return v ^ UOp.const(dtypes.uint32, 0x80000000)  # f32 neg
+      if opsel & opsel_bit: return v ^ UOp.const(dtypes.uint32, 0x80000000)  # f16 hi neg
+      return v ^ UOp.const(dtypes.uint32, 0x00008000)  # f16 lo neg
+    s0_mod = apply_neg_mix(apply_abs(src0, 1, 1, 1), 1, 1, 1)
+    s1_mod = apply_neg_mix(apply_abs(src1, 2, 2, 2), 2, 2, 2)
+    s2_mod = apply_neg_mix(apply_abs(src2, 4, 4, 4), 4, 4, 4) if src2 is not None else UOp.const(dtypes.uint32, 0)
+    srcs = {'S0': s0_mod, 'S1': s1_mod, 'S2': s2_mod,
+            'OPSEL_HI': UOp.const(dtypes.uint32, combined_opsel_hi), 'OPSEL': UOp.const(dtypes.uint32, opsel)}
+  else:
+    srcs = {'S0': s0_new, 'S1': s1_new}
+    if s2_new is not None: srcs['S2'] = s2_new
+  return ctx.compile_vop_pcode(inst.op, srcs, lane, vdst_reg, exec_mask)
 
 def _compile_vopd(inst: VOPD, ctx: _Ctx) -> UOp:
   exec_mask = ctx.rsgpr_dyn(_c(EXEC_LO.offset))
