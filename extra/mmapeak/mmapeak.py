@@ -1,4 +1,4 @@
-import os, pathlib
+import os
 
 # TODO: there is a timing bug without this
 os.environ["AMD_AQL"] = "1"
@@ -16,21 +16,6 @@ INTERNAL_LOOP = 1_000_00
 INSTRUCTIONS_PER_LOOP = 200
 DIRECTIVE = ".amdhsa_wavefront_size32 1"
 KD_OPTS:dict = {}  # arch-specific kernel descriptor options
-
-assemblyTemplate = (pathlib.Path(__file__).parent / "template.s").read_text()
-
-def verify_elf_match(lib_old: bytes, lib_new: bytes, inst_name: str):
-  """Verify ELF sections match, excluding symbol/string tables (label names can differ)."""
-  from tinygrad.runtime.support.elf import elf_loader
-  _, secs_old, _ = elf_loader(lib_old)
-  _, secs_new, _ = elf_loader(lib_new)
-  # these sections exist for legacy reasons, hw / disasm doesn't need them
-  skip = {'.symtab', '.strtab', '.shstrtab', '.relro_padding', '', '.note', '.dynsym', '.gnu.hash', '.hash', '.dynstr', '.dynamic', '.comment'}
-  for sec in secs_old:
-    if sec.name in skip: continue
-    sec_new = next((s for s in secs_new if s.name == sec.name), None)
-    assert sec_new is not None, f"{inst_name}: section {sec.name} missing in new"
-    assert sec.content == sec_new.content, f"{inst_name}: section {sec.name} mismatch"
 
 def repeat(insts:list[Inst], n:int, counter_sreg:Reg) -> bytes:
   preamble = s_mov_b32(counter_sreg, n).to_bytes()
@@ -51,14 +36,9 @@ def launchBenchmark(instruction, vgprIndices, dense=True, accum=False, **kwargs)
   for n,_ in inst._fields:
     if isinstance(val:=getattr(inst, n), Reg) and val.offset >= v.offset: vgprs |= {val.offset+i for i in range(val.sz)}
   inst_bytes = repeat([inst for _ in range(INSTRUCTIONS_PER_LOOP)], n=INTERNAL_LOOP, counter_sreg=s[1])
-  # old llvm stuff
-  inst_hex = "\n".join("  .byte " + ",".join(f"0x{b:02x}" for b in inst_bytes[i:i+16]) for i in range(0, len(inst_bytes), 16)) + "\n"
-  src = assemblyTemplate.replace("INSTRUCTION", inst_hex).replace("VGPR_COUNT", str(len(vgprs))).replace("DIRECTIVE", DIRECTIVE)
-  lib = COMPILER.compile(src)
   # new elf packer
-  lib2 = pack_hsaco(inst_bytes, {"next_free_vgpr":len(vgprs), **KD_OPTS})
-  verify_elf_match(lib, lib2, inst.op_name.lower())
-  fxn = DEV.runtime("matmul", lib2)
+  lib = pack_hsaco(inst_bytes, {"next_free_vgpr":len(vgprs), **KD_OPTS})
+  fxn = DEV.runtime("matmul", lib)
   elapsed = min([fxn(global_size=(NUM_WORKGROUPS,1,1), local_size=(WAVE_SIZE*NUM_WAVES,1,1), wait=True) for _ in range(2)])
   FLOPs = FLOPS_PER_MATMUL * NUM_WAVES * NUM_WORKGROUPS * INTERNAL_LOOP * INSTRUCTIONS_PER_LOOP
   print(f"{inst.op_name.lower():<29} : {FLOPs/elapsed/10**12:.2f} T(FL)OPS")
