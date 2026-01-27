@@ -692,7 +692,9 @@ def _match_bracket(toks: list[Token], start: int) -> tuple[int, list[Token]]:
     j += 1
   return j, [t for t in toks[start+1:j-1] if t.type != 'EOF']
 
-def _tok_str(toks: list[Token]) -> str: return ' '.join(t.val for t in toks)
+def _tok_str(toks: list[Token]) -> str: return ' '.join(t.val for t in toks if t.type != 'EOF')
+def parse_tokens(toks: list[Token], vars: dict[str, VarVal], funcs: dict | None = None) -> UOp:
+  return Parser(toks, vars, funcs).parse()
 
 # Unified block parser for pcode
 def _subst_loop_var(line: str, loop_var: str, val: int) -> str:
@@ -845,14 +847,14 @@ def parse_block(lines: list[str], start: int, vars: dict[str, VarVal], funcs: di
     # MEM assignment: MEM[addr].type (+|-)?= value
     if first == 'mem' and toks[1].type == 'LBRACKET':
       j, addr_toks = _match_bracket(toks, 1)
-      addr = parse_expr(_tok_str(addr_toks), ctx(), funcs)
+      addr = parse_tokens(addr_toks, ctx(), funcs)
       if j < len(toks) and toks[j].type == 'DOT': j += 1
       dt_name = toks[j].val if j < len(toks) and toks[j].type == 'IDENT' else 'u32'
       dt, j = DTYPES.get(dt_name, dtypes.uint32), j + 1
       compound_op = None
       if j < len(toks) and toks[j].type == 'ASSIGN_OP': compound_op = toks[j].val; j += 1
       elif j < len(toks) and toks[j].type == 'EQUALS': j += 1
-      rhs = parse_expr(_tok_str(toks[j:]), ctx(), funcs)
+      rhs = parse_tokens(toks[j:], ctx(), funcs)
       if compound_op:
         mem = vars.get('_vmem') if '_vmem' in vars else vars.get('_lds')
         if isinstance(mem, UOp):
@@ -871,7 +873,7 @@ def parse_block(lines: list[str], start: int, vars: dict[str, VarVal], funcs: di
       if j < len(toks) and toks[j].type == 'LBRACKET':
         j, reg_toks = _match_bracket(toks, j)
         if j < len(toks) and toks[j].type == 'EQUALS': j += 1
-        ln, rg, val = parse_expr(_tok_str(lane_toks), ctx(), funcs), parse_expr(_tok_str(reg_toks), ctx(), funcs), parse_expr(_tok_str(toks[j:]), ctx(), funcs)
+        ln, rg, val = parse_tokens(lane_toks, ctx(), funcs), parse_tokens(reg_toks, ctx(), funcs), parse_tokens(toks[j:], ctx(), funcs)
         if assigns is not None: assigns.append((f'VGPR[{_tok_str(lane_toks)}][{_tok_str(reg_toks)}]', (_to_u32(rg) * _u32(32) + _to_u32(ln), val)))
         i += 1; continue
 
@@ -887,8 +889,7 @@ def parse_block(lines: list[str], start: int, vars: dict[str, VarVal], funcs: di
           j += 3
           if j < len(toks) and toks[j].type == 'RBRACE': j += 1
           if j < len(toks) and toks[j].type == 'EQUALS': j += 1
-          val_str = ' '.join(t.val for t in toks[j:] if t.type != 'EOF')
-          val = parse_expr(val_str, ctx(), funcs)
+          val = parse_tokens(toks[j:], ctx(), funcs)
           lo_dt, hi_dt = DTYPES.get(lo_type, dtypes.uint64), DTYPES.get(hi_type, dtypes.uint32)
           lo_bits = 64 if lo_dt in (dtypes.uint64, dtypes.int64) else 32
           lo_val = val.cast(lo_dt) if val.dtype.itemsize * 8 <= lo_bits else (val & _const(val.dtype, (1 << lo_bits) - 1)).cast(lo_dt)
@@ -915,8 +916,7 @@ def parse_block(lines: list[str], start: int, vars: dict[str, VarVal], funcs: di
           j += 1
           if j < len(toks) and toks[j].type == 'DOT': j += 2
           if j < len(toks) and toks[j].type == 'EQUALS': j += 1
-          val_str = ' '.join(t.val for t in toks[j:] if t.type != 'EOF')
-          val = parse_expr(val_str, ctx(), funcs)
+          val = parse_tokens(toks[j:], ctx(), funcs)
           dt_suffix = toks[2].val if toks[1].type == 'DOT' else None
           if assigns is not None: assigns.append((f'{var}[{hi}:{lo}]' + (f'.{dt_suffix}' if dt_suffix else ''), val))
           if var not in vars: vars[var] = _const(dtypes.uint64 if hi >= 32 else dtypes.uint32, 0)
@@ -932,8 +932,7 @@ def parse_block(lines: list[str], start: int, vars: dict[str, VarVal], funcs: di
       j = 4
       while j < len(toks) and toks[j].type != 'EQUALS': j += 1
       if j < len(toks):
-        val_str = ' '.join(t.val for t in toks[j+1:] if t.type != 'EOF')
-        val = parse_expr(val_str, ctx(), funcs)
+        val = parse_tokens(toks[j+1:], ctx(), funcs)
         existing = block_assigns.get(var, vars.get(var))
         if existing is not None and isinstance(existing, UOp):
           block_assigns[var] = vars[var] = _set_bit(existing, _u32(idx), val)
@@ -946,8 +945,7 @@ def parse_block(lines: list[str], start: int, vars: dict[str, VarVal], funcs: di
       if t.type == 'ASSIGN_OP':
         var = toks[0].val
         old = block_assigns.get(var, vars.get(var, _u32(0)))
-        rhs_str = ' '.join(tk.val for tk in toks[j+1:] if tk.type != 'EOF')
-        rhs = parse_expr(rhs_str, ctx(), funcs)
+        rhs = parse_tokens(toks[j+1:], ctx(), funcs)
         if rhs.dtype != old.dtype: rhs = rhs.cast(old.dtype)
         block_assigns[var] = vars[var] = (old + rhs) if t.val == '+=' else (old - rhs)
         i += 1; break
@@ -959,8 +957,7 @@ def parse_block(lines: list[str], start: int, vars: dict[str, VarVal], funcs: di
         j = 6
         while j < len(toks) and toks[j].type != 'EQUALS': j += 1
         if j < len(toks):
-          val_str = ' '.join(t.val for t in toks[j+1:] if t.type != 'EOF')
-          val, old = parse_expr(val_str, ctx(), funcs), block_assigns.get(var, vars.get(var, _u32(0)))
+          val, old = parse_tokens(toks[j+1:], ctx(), funcs), block_assigns.get(var, vars.get(var, _u32(0)))
           bw, lo_bit = dt.itemsize * 8, idx * dt.itemsize * 8
           mask = _u32(((1 << bw) - 1) << lo_bit)
           block_assigns[var] = vars[var] = (old & (mask ^ _u32(0xFFFFFFFF))) | (((val.cast(dtypes.uint32) if val.dtype != dtypes.uint32 else val) & _u32((1 << bw) - 1)) << _u32(lo_bit))
@@ -976,12 +973,10 @@ def parse_block(lines: list[str], start: int, vars: dict[str, VarVal], funcs: di
           j += 1
         if has_inner:
           var = toks[0].val
-          bit_expr_str = ' '.join(t.val for t in toks[4:j-1] if t.type != 'EOF')
-          bit_pos = _to_u32(parse_expr(bit_expr_str, ctx(), funcs))
+          bit_pos = _to_u32(parse_tokens(toks[4:j-1], ctx(), funcs))
           while j < len(toks) and toks[j].type != 'EQUALS': j += 1
           if j < len(toks):
-            val_str = ' '.join(t.val for t in toks[j+1:] if t.type != 'EOF')
-            val = parse_expr(val_str, ctx(), funcs)
+            val = parse_tokens(toks[j+1:], ctx(), funcs)
             old, mask = block_assigns.get(var, vars.get(var, _u32(0))), _u32(1) << bit_pos
             block_assigns[var] = vars[var] = (old | mask) if val.op == Ops.CONST and val.arg == 1 else \
                                               (old & (mask ^ _u32(0xFFFFFFFF))) if val.op == Ops.CONST and val.arg == 0 else _set_bit(old, bit_pos, val)
@@ -994,12 +989,11 @@ def parse_block(lines: list[str], start: int, vars: dict[str, VarVal], funcs: di
         if existing is not None and isinstance(existing, UOp) and not any(f'{var}{k}' in vars or f'{var}{k}' in block_assigns for k in range(8)):
           j = 2
           while j < len(toks) and toks[j].type != 'RBRACKET': j += 1
-          bit_str = ' '.join(t.val for t in toks[2:j] if t.type != 'EOF')
+          bit_toks = toks[2:j]
           j += 1
           while j < len(toks) and toks[j].type != 'EQUALS': j += 1
           if j < len(toks):
-            val_str = ' '.join(t.val for t in toks[j+1:] if t.type != 'EOF')
-            block_assigns[var] = vars[var] = _set_bit(existing, _to_u32(parse_expr(bit_str, ctx(), funcs)), parse_expr(val_str, ctx(), funcs))
+            block_assigns[var] = vars[var] = _set_bit(existing, _to_u32(parse_tokens(bit_toks, ctx(), funcs)), parse_tokens(toks[j+1:], ctx(), funcs))
             i += 1; continue
 
       # If/elsif/else - skip branches with statically false conditions (WAVE32/WAVE64)
@@ -1057,8 +1051,7 @@ def parse_block(lines: list[str], start: int, vars: dict[str, VarVal], funcs: di
         if t.type == 'EQUALS':
           if any(toks[k].type == 'OP' and toks[k].val in ('<', '>', '!', '=') for k in range(j)): break
           base_var = toks[0].val
-          rhs_str = ' '.join(tk.val for tk in toks[j+1:] if tk.type != 'EOF')
-          block_assigns[base_var] = vars[base_var] = parse_expr(rhs_str, ctx(), funcs)
+          block_assigns[base_var] = vars[base_var] = parse_tokens(toks[j+1:], ctx(), funcs)
           i += 1; break
       else: i += 1
       continue
@@ -1066,5 +1059,5 @@ def parse_block(lines: list[str], start: int, vars: dict[str, VarVal], funcs: di
   return i, block_assigns, None
 
 def parse_expr(expr: str, vars: dict[str, VarVal], funcs: dict | None = None) -> UOp:
-  return Parser(tokenize(expr.strip().rstrip(';')), vars, funcs).parse()
+  return parse_tokens(tokenize(expr.strip().rstrip(';')), vars, funcs)
 
