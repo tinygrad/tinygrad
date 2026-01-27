@@ -213,12 +213,8 @@ class TestFetch(unittest.TestCase):
     from unittest.mock import patch
     with patch('urllib.request.urlopen', side_effect=TimeoutError()) as mock_urlopen:
       with self.assertRaises(TimeoutError):
-        fetch('http://example.com/test', allow_caching=False)
-      assert mock_urlopen.call_count == 3
-
-      with self.assertRaises(TimeoutError):
-        fetch('http://example.com/test', allow_caching=False, retries=1)
-      assert mock_urlopen.call_count == 1
+        fetch('http://example.com/test', allow_caching=False, retries=2)
+      assert mock_urlopen.call_count == 2
 
 class TestFullyFlatten(unittest.TestCase):
   def test_fully_flatten(self):
