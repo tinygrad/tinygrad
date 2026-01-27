@@ -23,7 +23,7 @@ def verify_elf_match(lib_old: bytes, lib_new: bytes, inst_name: str):
   from tinygrad.runtime.support.elf import elf_loader
   _, secs_old, _ = elf_loader(lib_old)
   _, secs_new, _ = elf_loader(lib_new)
-  skip = {'.symtab', '.strtab', '.relro_padding', '', '.note', '.dynsym', '.gnu.hash', '.hash', '.dynstr', '.dynamic', '.comment'}
+  skip = {'.symtab', '.strtab', '.shstrtab', '.relro_padding', '', '.note', '.dynsym', '.gnu.hash', '.hash', '.dynstr', '.dynamic', '.comment'}
   for sec in secs_old:
     if sec.name in skip: continue
     sec_new = next((s for s in secs_new if s.name == sec.name), None)
@@ -51,8 +51,7 @@ def launchBenchmark(instruction, vgprIndices, dense=True, accum=False, **kwargs)
   inst_bytes = repeat([inst for _ in range(INSTRUCTIONS_PER_LOOP)], n=INTERNAL_LOOP, counter_sreg=s[1])
   # old llvm stuff
   inst_hex = "\n".join("  .byte " + ",".join(f"0x{b:02x}" for b in inst_bytes[i:i+16]) for i in range(0, len(inst_bytes), 16)) + "\n"
-  src = assemblyTemplate.replace("INTERNAL_LOOP", str(INTERNAL_LOOP)).replace("INSTRUCTION", inst_hex).replace("VGPR_COUNT", str(len(vgprs)))
-  src = src.replace("DIRECTIVE", DIRECTIVE)
+  src = assemblyTemplate.replace("INSTRUCTION", inst_hex).replace("VGPR_COUNT", str(len(vgprs))).replace("DIRECTIVE", DIRECTIVE)
   lib = COMPILER.compile(src)
   # new elf packer
   lib2 = pack_hsaco(inst_bytes, {"next_free_vgpr":len(vgprs)})
