@@ -133,6 +133,7 @@ def _apply_clamp(val: UOp, clmp: int | UOp) -> UOp:
   return clmp.ne(_c(0)).where(clamped, val) if isinstance(clmp, UOp) else clamped
 
 # Pcode parser
+@functools.cache
 def _apply_pseudocode_fixes(op_name: str, pcode: str) -> str:
   fixes = {
     'V_DIV_FMAS_F32': ('D0.f32 = 2.0F ** 32 * fma(S0.f32, S1.f32, S2.f32)',
@@ -322,9 +323,10 @@ class _Ctx:
     """Write SGPR with dynamic register index. Writes to NULL (124) are discarded."""
     return self.sgpr.index(reg.cast(dtypes.int), reg.ne(_c(124))).store(val.cast(dtypes.uint32))
 
-  def rvgpr_dyn(self, reg: UOp, lane: UOp) -> UOp:
+  def rvgpr_dyn(self, reg: UOp, lane: UOp, valid: UOp | None = None) -> UOp:
     """Read VGPR with dynamic register index."""
-    return self.vgpr.index(reg.cast(dtypes.int) * _c(32, dtypes.int) + lane.cast(dtypes.int), ptr=True).load()
+    idx = reg.cast(dtypes.int) * _c(32, dtypes.int) + lane.cast(dtypes.int)
+    return self.vgpr.index(idx, valid, ptr=True).load() if valid is not None else self.vgpr.index(idx, ptr=True).load()
 
   def wvgpr_dyn(self, reg: UOp, lane: UOp, val: UOp, exec_mask: UOp, after: UOp | None = None) -> UOp:
     """Write VGPR with dynamic register index."""
@@ -333,37 +335,27 @@ class _Ctx:
     return buf.index(offset, _lane_active(exec_mask, lane)).store(val.cast(dtypes.uint32))
 
   def rsrc_dyn(self, off: UOp, lane: UOp, bits: int = 32, literal: UOp | None = None) -> UOp:
-    """Read source operand with dynamic offset. Handles SGPR/inline constants (<256), VGPR (>=256).
-    Inline constants 128-255 are pre-populated in SGPR buffer (integers, negatives, F32 floats).
-    SGPR buffer is 260 entries so off 0-255 is always valid. If literal is provided, it's used when off==255."""
-    is_vgpr = off >= _c(256)
+    """Read source operand with dynamic offset. Handles SGPR/inline constants (<256), VGPR (>=256)."""
+    is_vgpr, vgpr_reg = off >= _c(256), off - _c(256)
     is_float_const = (off >= _c(240)) & (off <= _c(248))
+    sgpr_lo = self.rsgpr_dyn(off)
+    vgpr_lo = self.rvgpr_dyn(vgpr_reg, lane, is_vgpr)
+
     if bits == 64:
-      is_sgpr = off < _c(128)
-      sgpr_idx = off.cast(dtypes.int)
-      sgpr_lo = self.sgpr.index(sgpr_idx, ptr=True).load()
-      sgpr_hi = self.sgpr.index(sgpr_idx + _c(1, dtypes.int), ptr=True).load()
-      sgpr_val = _u64(sgpr_lo, sgpr_hi)
-      vgpr_idx0 = (off - _c(256)).cast(dtypes.int) * _c(32, dtypes.int) + lane.cast(dtypes.int)
-      vgpr_idx1 = (off - _c(255)).cast(dtypes.int) * _c(32, dtypes.int) + lane.cast(dtypes.int)
-      vgpr_lo = self.vgpr.index(vgpr_idx0, is_vgpr, ptr=True).load()
-      vgpr_hi = self.vgpr.index(vgpr_idx1, is_vgpr, ptr=True).load()
-      vgpr_val = _u64(vgpr_lo, vgpr_hi)
-      # Float constants 240-248: cast F32 from buffer to F64
-      inline_f64 = sgpr_lo.bitcast(dtypes.float32).cast(dtypes.float64).bitcast(dtypes.uint64)
-      inline = _u64(sgpr_lo, sgpr_lo)  # Integer inline constants (value duplicated)
+      vgpr_val = _u64(vgpr_lo, self.rvgpr_dyn(vgpr_reg + _c(1), lane, is_vgpr))
+      sgpr_val = _u64(sgpr_lo, self.rsgpr_dyn(off + _c(1)))
+      # Float constants: cast F32 to F64; integer inline: duplicate lo
+      inline = is_float_const.where(sgpr_lo.bitcast(dtypes.float32).cast(dtypes.float64).bitcast(dtypes.uint64), _u64(sgpr_lo, sgpr_lo))
       if literal is not None: inline = off.eq(_c(255)).where(literal.cast(dtypes.uint64) << UOp.const(dtypes.uint64, 32), inline)
-      inline = is_float_const.where(inline_f64, inline)
-      return is_vgpr.where(vgpr_val, is_sgpr.where(sgpr_val, inline))
-    sgpr_val = self.sgpr.index(off.cast(dtypes.int), ptr=True).load()
-    if literal is not None: sgpr_val = off.eq(_c(255)).where(literal, sgpr_val)
-    if bits == 16:
-      # Float constants 240-248: cast F32 from buffer to F16
-      sgpr_f16 = sgpr_val.bitcast(dtypes.float32).cast(dtypes.half).bitcast(dtypes.uint16).cast(dtypes.uint32)
-      sgpr_val = is_float_const.where(sgpr_f16, sgpr_val)
-    vgpr_idx = (off - _c(256)).cast(dtypes.int) * _c(32, dtypes.int) + lane.cast(dtypes.int)
-    vgpr_val = self.vgpr.index(vgpr_idx, is_vgpr, ptr=True).load()
-    return is_vgpr.where(vgpr_val, sgpr_val)
+      scalar_val = (off < _c(128)).where(sgpr_val, inline)
+    else:
+      vgpr_val = vgpr_lo
+      scalar_val = sgpr_lo
+      if literal is not None: scalar_val = off.eq(_c(255)).where(literal, scalar_val)
+      if bits == 16:  # Float constants: cast F32 to F16
+        scalar_val = is_float_const.where(scalar_val.bitcast(dtypes.float32).cast(dtypes.half).bitcast(dtypes.uint16).cast(dtypes.uint32), scalar_val)
+
+    return is_vgpr.where(vgpr_val, scalar_val)
 
   def rsrc_dyn_sized(self, off: UOp, lane: UOp, sizes: dict, key: str, f16: bool = False, literal: UOp | None = None) -> UOp:
     return self.rsrc_dyn(off, lane, 64, literal) if sizes.get(key, 1) == 2 else self.rsrc_dyn(off, lane, 16 if f16 else 32, literal)
@@ -939,9 +931,7 @@ def _compile_mem_op(inst: DS | FLAT | GLOBAL | SCRATCH, ctx: _Ctx, name: str) ->
     addr_reg = ctx.inst_field(type(inst).addr)
     vdata_reg = ctx.inst_field(type(inst).data)
     vdst_reg = ctx.inst_field(type(inst).vdst)
-    # Dynamic 13-bit signed offset: cast to int, then (val ^ 0x1000) - 0x1000 for sign extension
-    raw_offset = ctx.inst_field(type(inst).offset).cast(dtypes.int)
-    offset = (raw_offset ^ _c(0x1000, dtypes.int)) - _c(0x1000, dtypes.int)
+    offset = ctx.inst_field_signed(type(inst).offset)
     offset0, offset1 = 0, 0
     # Dynamic saddr - read field, NULL (124) or >= 128 means no saddr
     saddr_reg = ctx.inst_field(type(inst).saddr) if hasattr(inst, 'saddr') else None
@@ -1001,7 +991,7 @@ def _compile_mem_op(inst: DS | FLAT | GLOBAL | SCRATCH, ctx: _Ctx, name: str) ->
     for i in range(ndwords): srcs[f'VDATA{i}'] = ctx.rvgpr_dyn(vdata_reg + _c(i), lane) if 'STORE' in op_name else UOp.const(dtypes.uint32, 0)
     return srcs
 
-  def make_stores(dest: str, val: UOp, lane: UOp, active: UOp, writes_return_data: bool, pcode_vars: dict) -> list[UOp]:
+  def make_stores(dest: str, val: UOp, lane: UOp, active: UOp, writes_return_data: bool) -> list[UOp]:
     if dest.startswith('MEM['):
       if is_lds or is_atomic: return _write_val(dest, val[1], wmem, val[0], active, is_mem=True)
       data_bits = 8 if '.b8' in dest else 16 if '.b16' in dest else 64 if '.b64' in dest else 32
@@ -1028,7 +1018,7 @@ def _compile_mem_op(inst: DS | FLAT | GLOBAL | SCRATCH, ctx: _Ctx, name: str) ->
         lane = ctx.range()
         active = _lane_active(exec_mask, lane)
         _, lane_assigns = parse_pcode(pcode, make_srcs(lane), lane=lane, op_name=op_name)
-        ended.extend(s.end(lane) for s in make_stores(dest, lane_assigns[i][1], lane, active, True, {}))
+        ended.extend(s.end(lane) for s in make_stores(dest, lane_assigns[i][1], lane, active, True))
       return (name, UOp.sink(*ended, *ctx.inc_pc(), arg=KernelInfo(name=name))) if ended else (name, UOp.sink(*ctx.inc_pc(), arg=KernelInfo(name=name)))
 
   # Standard path: single lane range
@@ -1036,7 +1026,7 @@ def _compile_mem_op(inst: DS | FLAT | GLOBAL | SCRATCH, ctx: _Ctx, name: str) ->
   lane = ctx.range()
   active = _lane_active(exec_mask, lane)
   pcode_vars, assigns = parse_pcode(pcode, make_srcs(lane), lane=lane, op_name=op_name)
-  stores = [s for dest, val in assigns for s in make_stores(dest, val, lane, active, writes_return_data, pcode_vars)]
+  stores = [s for dest, val in assigns for s in make_stores(dest, val, lane, active, writes_return_data)]
 
   # FLAT/GLOBAL/SCRATCH: collect VDATA slices for loads
   if not is_lds and not is_atomic:
