@@ -283,20 +283,20 @@ def unpack_pmc(e) -> dict:
 
 def load_counters(profile:list[ProfileEvent]) -> None:
   from tinygrad.runtime.ops_amd import ProfileSQTTEvent, ProfilePMCEvent
-  counter_events:dict[tuple[str, int], dict] = {}
+  counter_events:dict[tuple[int, int], dict] = {}
   durations:dict[str, list[float]] = {}
-  prg_events:dict[str, ProfileProgramEvent] = {}
+  prg_events:dict[int, ProfileProgramEvent] = {}
   for e in profile:
     if isinstance(e, (ProfilePMCEvent, ProfileSQTTEvent)): counter_events.setdefault((e.kern, e.exec_tag), {}).setdefault(type(e), []).append(e)
     if isinstance(e, ProfileRangeEvent) and e.device.startswith("AMD") and e.en is not None:
       durations.setdefault(str(e.name), []).append(float(e.en-e.st))
-    if isinstance(e, ProfileProgramEvent): prg_events[str(e.name)] = e
+    if isinstance(e, ProfileProgramEvent) and e.tag is not None: prg_events[e.tag] = e
   if len(counter_events) == 0: return None
   ctxs.append({"name":"All Counters", "steps":[create_step("PMC", ("/all-pmc", len(ctxs), 0), (durations, all_counters:={}))]})
   run_number = {n:0 for n,_ in counter_events}
   for (k, tag),v in counter_events.items():
     # use the colored name if it exists
-    name = trace.keys[r].ret.name if (r:=ref_map.get(k)) is not None else k
+    name = trace.keys[r].ret.name if (r:=ref_map.get(pname:=prg_events[k].name)) is not None else pname
     run_number[k] += 1
     steps:list[dict] = []
     if (pmc:=v.get(ProfilePMCEvent)):
