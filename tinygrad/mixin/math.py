@@ -136,7 +136,7 @@ class MathMixin:
     return self._binop(Ops.MOD, x, reverse)
 
   def sub(self, x: Self | ConstType, reverse: bool = False):
-    return self.ufix(x).alu(Ops.ADD, -self) if reverse else self.alu(Ops.ADD, self.ufix(-x))
+    return self.ufix(x).alu(Ops.ADD, -self) if reverse else self.alu(Ops.ADD, -self.ufix(x))
 
   def div(self, x: Self | ConstType, reverse: bool = False):
     return (self.ufix(x) * self.alu(Ops.RECIPROCAL)) if reverse else (self * self.ufix(x).alu(Ops.RECIPROCAL))
@@ -243,7 +243,7 @@ class MathMixin:
     return self.alu(Ops.MAX, self.ufix(x))
 
   def minimum(self, x: Self | ConstType):
-    return -(-self).maximum(-x)
+    return -(-self).maximum(-self.ufix(x))
 
   def where(self, x: Self | ConstType, y: Self | ConstType):
     if isinstance(x, type(self)):

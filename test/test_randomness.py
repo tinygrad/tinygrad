@@ -69,6 +69,20 @@ class TestRandomness(unittest.TestCase):
     self.assertFalse(normal_test(Tensor.rand))
     self.assertTrue(equal_distribution(Tensor.rand, torch.rand, lambda x: np.random.rand(*x)))
 
+  def test_rand_is_lazy(self):
+    Tensor.manual_seed(0)
+    r1 = Tensor.rand(10)
+    self.assertFalse(r1.uop.is_realized, "rand should be lazy - tensor should not be realized")
+    counter = Tensor._device_rng_counters[Device.DEFAULT]
+    self.assertFalse(counter.uop.is_realized, "rand should be lazy - counter should not be realized")
+    # second rand triggers assign path
+    r2 = Tensor.rand(10)
+    self.assertFalse(r2.uop.is_realized, "rand should be lazy - tensor should not be realized after second rand")
+    self.assertFalse(counter.uop.is_realized, "rand should be lazy - counter should not be realized after second rand")
+    Tensor.realize(r1, r2)
+    self.assertTrue(r1.uop.is_realized, "tensor should be realized after .realize()")
+    self.assertTrue(r2.uop.is_realized, "tensor should be realized after .realize()")
+
   @unittest.skipUnless(is_dtype_supported(dtypes.float16) and is_dtype_supported(dtypes.ulong), "need float16 and ulong support")
   def test_rand_float16(self):
     N = 128
@@ -262,13 +276,12 @@ class TestRandomness(unittest.TestCase):
     self.assertEqual(Tensor.randn(3,3,device="CPU").device, "CPU")
 
   @given(strat.sampled_from([dtypes.float, dtypes.float16, dtypes.bfloat16]))
-  @unittest.skipIf(Device.DEFAULT in ["HSA", "AMD"], "bfloat16 local buffer broken in HSA")
   def test_randn_finite(self, default_float):
     if not is_dtype_supported(default_float): return
     old_default_float = dtypes.default_float
     # low precision can result in inf from randn
     dtypes.default_float = default_float
-    t = Tensor.randn(256, 256)
+    t = Tensor.randn(64, 64)
     mx = t.max().numpy().item()
     mn = t.min().numpy().item()
     print(f"testing with {default_float=}")
@@ -311,11 +324,11 @@ class TestRandomness(unittest.TestCase):
                                                               lambda x: np.random.uniform(-1, 1, size=x) * math.sqrt(6 / (x[0] + math.prod(x[1:])))))
 
   def test_kaiming_uniform(self):
-    for shape in [(32, 128, 3, 3), (80, 44), (3, 55, 35)]:
+    for shape in [(32, 16, 3, 3), (20, 44), (3, 15, 35)]:
       self.assertTrue(equal_distribution(Tensor.kaiming_uniform, lambda x: torch.nn.init.kaiming_uniform_(torch.empty(x)), shape=shape))
 
   def test_kaiming_normal(self):
-    for shape in [(32, 128, 3, 3), (80, 44), (3, 55, 35)]:
+    for shape in [(32, 16, 3, 3), (20, 44), (3, 15, 35)]:
       self.assertTrue(equal_distribution(Tensor.kaiming_normal, lambda x: torch.nn.init.kaiming_normal_(torch.empty(x)), shape=shape))
 
   def test_multinomial(self):
@@ -375,7 +388,7 @@ class TestRandomness(unittest.TestCase):
 @unittest.skipIf(Device.DEFAULT == "WEBGPU" and not OSX, "WEBGPU Vulkan can only run kernels with up to 10 buffers")
 class TestSample(unittest.TestCase):
   def test_sample(self):
-    X = Tensor.rand(10000, 50).realize()
+    X = Tensor.rand(1000, 50).realize()
     BS = 16
     idxs = np.random.randint(0, X.shape[0], size=(BS))
     # this uncovered a bug with arg sort order

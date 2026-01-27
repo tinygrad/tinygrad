@@ -1465,6 +1465,7 @@ def train_llama3():
     from examples.mlperf.dataloader import iterate_llama3_dataset
     return iterate_llama3_dataset(eval_dataset, EVAL_BS)
 
+  num_params = sum(p.numel() for p in params) - model_params["vocab_size"]*model_params["dim"]
   train_iter = get_train_iter()
   i, sequences_seen = resume_ckpt, 0
   step_times = []
@@ -1474,7 +1475,9 @@ def train_llama3():
       st = time.perf_counter()
       for _ in range(grad_acc if i >= 3 else 1):
         ist = time.perf_counter()
-        tokens = next(train_iter)
+        try: tokens = next(train_iter)
+        except StopIteration:
+          break
         dt = time.perf_counter()
         loss = minibatch(tokens)
       gt = time.perf_counter()
@@ -1488,6 +1491,7 @@ def train_llama3():
       step_time = et - st
       gbs_time = gt - st
       optim_time = ot - gt
+      dev_time = ot - st
       data_time = dt - ist
       if BENCHMARK: step_times.append(step_time)
 
@@ -1495,9 +1499,11 @@ def train_llama3():
       sequences_seen += GBS
 
       mem_gb = GlobalCounters.mem_used / 1e9
-      gflops = GlobalCounters.global_ops / 1e9 / step_time
+      gflops = GlobalCounters.global_ops / 1e9 / dev_time
+      mfu = ((6 * num_params * SEQLEN * BS) / (dev_time * max(getenv("DP", 1), getenv("MP", 1)) * 2.3e15)) * 100
       tqdm.write(
-          f"{i:5} {step_time:.3f} s step, {gbs_time:.3f} s gbs, {optim_time:.3f} s optim, {data_time:.3f} s data, {loss:.4f} loss, {lr:.12f} LR, {mem_gb:.2f} GB used, {gflops:9.2f} GFLOPS")
+          f"{i:5} {step_time:.3f} s step, {gbs_time:.3f} s gbs, {optim_time:.3f} s optim, {data_time:.3f} s data, {loss:.4f} loss," \
+           "{lr:.12f} LR, {mem_gb:.2f} GB used, {gflops:9.2f} GFLOPS, {mfu:5.2f}% MFU")
 
       if WANDB:
         wandb.log({
@@ -1505,8 +1511,10 @@ def train_llama3():
           "train/step_time": step_time,
           "train/gbs_time": gbs_time,
           "train/optim_time": optim_time,
+          "train/dev_time": dev_time,
           "train/data_time": data_time,
           "train/GFLOPS": gflops,
+          "train/MFU": mfu,
           "train/sequences_seen": sequences_seen
         })
 
@@ -1537,7 +1545,6 @@ def train_llama3():
 
       for j,tokens in tqdm(enumerate(eval_iter), total=EVAL_SAMPLES//EVAL_BS):
         eval_losses += eval_step(model, tokens).tolist()
-
         if BENCHMARK and (j+1) == min(BENCHMARK, EVAL_SAMPLES//EVAL_BS):
           return
 

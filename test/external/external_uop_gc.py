@@ -74,7 +74,6 @@ if __name__ == "__main__":
     apply_movement_op.cache_clear()
     _apply_reshape.cache_clear()
     fold_divmod_general.cache_clear()
-    UOp.const.cache_clear()
     Tensor._device_seeds.clear()
     Tensor._device_rng_counters.clear()
 

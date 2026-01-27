@@ -11,7 +11,7 @@ from tinygrad import Tensor
 from tinygrad.helpers import system, OSX
 from tinygrad.runtime.ops_amd import AMDProgram
 from extra.sqtt.roc import decode, WaveExec, ProfileSQTTEvent
-from tinygrad.device import Device, ProfileDeviceEvent
+from tinygrad.device import Device
 
 from extra.sqtt.attempt_sqtt_parse import parse_sqtt_print_packets
 
@@ -23,7 +23,7 @@ def save_sqtt():
   dev.profile_events.clear()
   sqtt:dict[str, list[WaveExec]] = {}
   yield sqtt
-  events = dev.profile_events+[ProfileDeviceEvent("AMD", props=dev.device_props())]
+  events = dev.profile_events
 
   #rctx = decode(events)
   #assert len(rctx.inst_execs) > 0, "empty sqtt output"
@@ -45,6 +45,7 @@ matmul:
 .rodata
 .p2align 6
 .amdhsa_kernel matmul
+  .amdhsa_kernarg_size 8
   .amdhsa_user_sgpr_kernarg_segment_ptr 1
   .amdhsa_next_free_vgpr .amdgcn.next_free_vgpr
   .amdhsa_next_free_sgpr .amdgcn.next_free_sgpr

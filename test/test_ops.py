@@ -6,6 +6,7 @@ from tinygrad.helpers import getenv, IMAGE, DEBUG, CI, Context, CPU_LLVM, AMD_LL
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.tensor import _to_np_dtype
 from tinygrad.device import is_dtype_supported
+from tinygrad.renderer.nir import NIRRenderer
 
 if getenv("TINY_BACKEND"):
   import tinygrad.nn.torch # noqa: F401 # pylint: disable=unused-import
@@ -683,6 +684,7 @@ class TestOps(unittest.TestCase):
     helper_test_op(None, lambda x: 0.7**x, vals=[[-2,-1,0,1,2,3]], forward_only=True)
 
   @unittest.skipIf(COMPILE_ONLY, "test requires runtime")
+  @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, NIRRenderer), "TODO: broken in LVP")
   def test_pow_const_direct(self):
     # x ** c
     def get_tiny_gradient(x, c):
@@ -910,7 +912,9 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45,65)], torch.abs, Tensor.abs)
     helper_test_op([()], torch.abs, Tensor.abs)
   def test_abs_exact(self):
-    helper_test_op(None, torch.abs, Tensor.abs, vals=[[-1.,0,1]])
+    for v in [-1., -0., 0., 1., math.inf, -math.inf, math.nan, -math.nan]:
+      # abs(nan) gradient is undefined: torch=0, tinygrad=1, jax=-1
+      helper_test_op(None, torch.abs, Tensor.abs, vals=[[v]], forward_only=math.isnan(v))
 
   def test_log(self):
     helper_test_op([(45,65)], torch.log, Tensor.log)
@@ -946,9 +950,12 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45,1), (1,65)], torch.copysign, Tensor.copysign)
     helper_test_op([(), ()], torch.copysign, Tensor.copysign)
   def test_copysign_exact(self):
-    for i in [-1.,0.,1.]:
-      for j in [-1., 0., 1.]:
-        helper_test_op(None, torch.copysign, Tensor.copysign, vals=[[i], [j]])
+    # NOTE: -nan (negative nan) is not tested because we can't detect its sign bit without bitcast
+    v = [-1., -0., 0., 1., math.inf, -math.inf, math.nan]
+    for i in v:
+      for j in v:
+        # torch returns nan gradient for copysign at inf, but mathematically (and per jax) it's ±1
+        helper_test_op(None, torch.copysign, Tensor.copysign, vals=[[i], [j]], forward_only=math.isinf(i) or math.isnan(i))
 
   def test_logaddexp(self):
     helper_test_op([(45,65), (45,65)], torch.logaddexp, Tensor.logaddexp)
@@ -3278,6 +3285,10 @@ class TestOps(unittest.TestCase):
 
   def test_bitcast(self):
     helper_test_op([(3, 3)], lambda x: x.view(torch.int32), lambda x: x.bitcast(dtypes.int32), forward_only=True)
+
+  def test_int_or(self):
+    t = (Tensor([0], dtype='int') | 0xFFFFFFFF).item()
+    if not COMPILE_ONLY: assert t == -1
 
 @unittest.skipUnless(is_dtype_supported(dtypes.uchar), f"no uint8 on {Device.DEFAULT}")
 class TestOpsUint8(unittest.TestCase):

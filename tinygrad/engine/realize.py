@@ -36,7 +36,7 @@ def optimize_local_size(_prg:Callable, global_size:list[int], rawbufs:list[Buffe
 
 class CompiledRunner(Runner):
   def __init__(self, p:ProgramSpec, prg=None):
-    if DEBUG >= 3: print(p.applied_opts)
+    if DEBUG >= 3 and p.applied_opts: print(p.applied_opts)
     if DEBUG >= 4: print(p.src)
     if p.lib is None:
       with cpu_profile(TracingKey(f"compile {p.name}", (p.function_name,)), "TINY"):
@@ -44,7 +44,7 @@ class CompiledRunner(Runner):
     self.p:ProgramSpec = p
     assert self.p.lib is not None
     if DEBUG >= 7: Device[p.device].compiler.disassemble(self.p.lib)
-    self._prg = Device[p.device].runtime(p.function_name, self.p.lib, *p.aux) if prg is None else prg
+    self._prg = Device[p.device].runtime(p.function_name, self.p.lib, *p.aux, runtimevars=p.runtimevars) if prg is None else prg
     super().__init__(p.name, p.device, p.estimates)
 
   def __reduce__(self): return self.__class__, (self.p,)
@@ -57,7 +57,7 @@ class CompiledRunner(Runner):
       global_size = [g//l if g%l == 0 else g/l for g,l in zip(global_size, local_size)]
       self.p = replace(self.p, global_size=global_size, local_size=local_size)
     return self._prg(*[x._buf for x in rawbufs], global_size=tuple(global_size), local_size=tuple(local_size) if local_size else None,
-                     vals=tuple(var_vals[k.expr] for k in self.p.vars), wait=wait)
+                     vals=tuple(var_vals[k.expr] if k.expr not in self.p.runtimevars else None for k in self.p.vars), wait=wait)
 
 class ViewOp(Runner):
   def __init__(self, buf:Buffer): super().__init__(colored(f"view {buf.nbytes:8d} @ {buf.offset:<10d}", "yellow"), buf.device)

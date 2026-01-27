@@ -73,5 +73,12 @@ class TestWinograd(unittest.TestCase):
     x,w = Tensor.empty(1,IC,Y,X,dtype=dtypes.half), Tensor.empty(OC,IC,3,3,dtype=dtypes.half)
     self.assertEqual(Tensor.conv2d(x,w).dtype, dtypes.half)
 
+  def test_padded_conv2d(self):
+    # tests padding order in winograd
+    x,w = Tensor.rand(1,3,11,28).realize(), Tensor.rand(4,3,3,3).realize()
+    with Context(WINO=0): expected = Tensor.conv2d(x,w,padding=1).realize()
+    with Context(WINO=1): result = Tensor.conv2d(x,w,padding=1).realize()
+    np.testing.assert_allclose(result.numpy(), expected.numpy(), atol=1e-4)
+
 if __name__ == '__main__':
   unittest.main(verbosity=2)

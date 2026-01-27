@@ -4,7 +4,8 @@ import ctypes
 from typing import Annotated, Literal, TypeAlias
 from tinygrad.runtime.support.c import _IO, _IOW, _IOR, _IOWR
 from tinygrad.runtime.support import c
-dll = c.DLL('libclang', ['clang-20', 'clang'])
+from tinygrad.helpers import OSX
+dll = c.DLL('libclang', '/opt/homebrew/opt/llvm@20/lib/libclang.dylib' if OSX else ['clang-20', 'clang'])
 CXIndex: TypeAlias = ctypes.c_void_p
 class struct_CXTargetInfoImpl(ctypes.Structure): pass
 CXTargetInfo: TypeAlias = c.POINTER[struct_CXTargetInfoImpl]

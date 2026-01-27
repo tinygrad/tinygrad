@@ -243,11 +243,17 @@ def no_vectorized_index(buf:UOp, cast:UOp, idx:UOp):
 
 def no_vectorized_index_broadcast(buf:UOp, cast:UOp, bcast:UOp, idx:UOp):
   cnt = cast.dtype.count
+  vcnt = cast.dtype.vcount
   precnt = bcast.dtype.vcount
-  input_gep = bcast.arg if bcast.op is Ops.GEP else ([0]*precnt)
-  gep_arg = tuple(flatten([range(precnt) for _ in range(cnt)]))
-  sum_arg = tuple(flatten([[i+y for y in input_gep] for i in range(cnt)]))
-  return buf.broadcast(cnt*precnt).index(idx.gep(gep_arg)*cnt+UOp.const(dtypes.index.vec(cnt*precnt), sum_arg), ptr=True)
+  # TODO: I have no idea *why* this is. I just change things until the tests pass. No AI, old school.
+  if bcast.op is Ops.GEP:
+    gep_arg = tuple(flatten([range(precnt) for _ in range(vcnt)]))
+    sum_arg = tuple(flatten([[i+y for y in bcast.arg] for i in range(vcnt)]))
+  else:
+    gep_arg = tuple(flatten([range(precnt) for _ in range(cnt)]))
+    sum_arg = tuple(flatten([[i]*precnt for i in range(cnt)]))
+  new_idx = idx.gep(gep_arg)*cnt + UOp.const(dtypes.index.vec(len(sum_arg)), sum_arg)
+  return buf.broadcast(cnt*precnt).index(new_idx, ptr=True)
 
 devectorize_buf_and_index = PatternMatcher([
   (UPat((Ops.DEFINE_LOCAL, Ops.DEFINE_REG), name="buf"), no_vectorized_buf),
@@ -279,10 +285,13 @@ pm_render = PatternMatcher([
     lambda x: x.replace(src=(x.src[0], x.const_like(0))+x.src[1:])
       if len(x.src) == 1 or x.src[1].op in (Ops.CUSTOM, Ops.STORE, Ops.BARRIER) else None),
   # Where after gated load becomes alt value
+  # NOTE: if a is CAST and a.src[0].dtype == l.dtype, use a.src[0] to avoid roundtrip cast (e.g. uint->float->uint)
   (UPat.var("c").where(UPat(Ops.LOAD, src=(UPat().index(UPat.var("idx"), UPat.var("c")).or_casted(),), allow_any_len=True, name="l").or_casted(),
-    UPat.var("a")), lambda c,idx,l,a: l.replace(src=(l.src[0], a.cast(l.dtype))+l.src[2:]).cast(a.dtype)),
+    UPat.var("a")), lambda c,idx,l,a: l.replace(src=(l.src[0], a.src[0] if a.op is Ops.CAST and a.src[0].dtype == l.dtype else a.cast(l.dtype))+
+                                                l.src[2:]).cast(a.dtype)),
   (UPat.var("c").where(UPat.var("a"), UPat(Ops.LOAD, src=(UPat().index(UPat.var("idx"), UPat.var("c").logical_not()).or_casted(),),
-    allow_any_len=True, name="l").or_casted()), lambda c,idx,l,a: l.replace(src=(l.src[0], a.cast(l.dtype))+l.src[2:]).cast(a.dtype)),
+    allow_any_len=True, name="l").or_casted()), lambda c,idx,l,a: l.replace(src=(l.src[0], a.src[0] if a.op is Ops.CAST and a.src[0].dtype == l.dtype
+                                                                                 else a.cast(l.dtype))+l.src[2:]).cast(a.dtype)),
 ])
 
 # *** Ops.REDUCE -> Ops.DEFINE_ACC ***

@@ -6,7 +6,7 @@ import z3
 
 # older versions of z3 dont have some operators like & overloaded
 if z3.get_version() < (4, 12, 4, 0):
-  raise ImportError("bounds checking requires z3 >= 4.12.4, use IGNORE_OOB=1 to disable, or \"pip install 'z3-solver>=4.12.4\"")
+  raise ImportError("bounds checking requires z3 >= 4.12.4, use CHECK_OOB=0 to disable, or \"pip install 'z3-solver>=4.12.4\"")
 
 # IDIV is truncated division but z3 does euclidian division (floor if b>0 ceil otherwise); mod by power of two sometimes uses Ops.AND
 def z3_cdiv(a, b):return z3.If((a<0), z3.If(0<b, (a+(b-1))/b, (a-(b+1))/b), a/b)
@@ -48,7 +48,9 @@ def uops_to_z3(solver, *uops: UOp) -> list[z3.ExprRef]:
   lst = list(UOp.sink(*uops).toposort(gate=lambda x: x.dtype.scalar() in dtypes.ints+(dtypes.bool, dtypes.index) or x.op is Ops.SINK))[:-1]
   z3map: dict[UOp, z3.ExprRef] = {}
   for i,u in enumerate(lst):
-    new_u, constraint = cast(tuple[z3.ArithRef, z3.BoolRef|None], z3_renderer.rewrite(u, ctx=(solver, z3map)))
+    z3_rewritten = z3_renderer.rewrite(u, ctx=(solver, z3map))
+    if z3_rewritten is None: raise NotImplementedError(f"{u.op} is not supported by z3")
+    new_u, constraint = cast(tuple[z3.ArithRef, z3.BoolRef|None], z3_rewritten)
     if constraint is not None: solver.add(constraint)
     z3map[u] = new_u
   assert all(u in z3map for u in uops), "UOp failed to rewrite to z3!"

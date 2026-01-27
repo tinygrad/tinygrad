@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 import multiprocessing, pickle, difflib, os, threading, json, time, sys, webbrowser, socket, argparse, functools, codecs, io, struct
-import ctypes, pathlib, traceback, itertools, socketserver
+import pathlib, traceback, itertools, socketserver
 from contextlib import redirect_stdout, redirect_stderr, contextmanager
 from decimal import Decimal
 from urllib.parse import parse_qs, urlparse
@@ -283,20 +283,20 @@ def unpack_pmc(e) -> dict:
 
 def load_counters(profile:list[ProfileEvent]) -> None:
   from tinygrad.runtime.ops_amd import ProfileSQTTEvent, ProfilePMCEvent
-  counter_events:dict[tuple[str, int], dict] = {}
+  counter_events:dict[tuple[int, int], dict] = {}
   durations:dict[str, list[float]] = {}
-  prg_events:dict[str, ProfileProgramEvent] = {}
+  prg_events:dict[int, ProfileProgramEvent] = {}
   for e in profile:
     if isinstance(e, (ProfilePMCEvent, ProfileSQTTEvent)): counter_events.setdefault((e.kern, e.exec_tag), {}).setdefault(type(e), []).append(e)
     if isinstance(e, ProfileRangeEvent) and e.device.startswith("AMD") and e.en is not None:
       durations.setdefault(str(e.name), []).append(float(e.en-e.st))
-    if isinstance(e, ProfileProgramEvent): prg_events[str(e.name)] = e
+    if isinstance(e, ProfileProgramEvent) and e.tag is not None: prg_events[e.tag] = e
   if len(counter_events) == 0: return None
   ctxs.append({"name":"All Counters", "steps":[create_step("PMC", ("/all-pmc", len(ctxs), 0), (durations, all_counters:={}))]})
   run_number = {n:0 for n,_ in counter_events}
   for (k, tag),v in counter_events.items():
     # use the colored name if it exists
-    name = trace.keys[r].ret.name if (r:=ref_map.get(k)) is not None else k
+    name = trace.keys[r].ret.name if (r:=ref_map.get(pname:=prg_events[k].name)) is not None else pname
     run_number[k] += 1
     steps:list[dict] = []
     if (pmc:=v.get(ProfilePMCEvent)):
@@ -345,7 +345,8 @@ def unpack_sqtt(key:tuple[str, int], data:list, p:ProfileProgramEvent) -> tuple[
   # * init decoder
   from extra.sqtt.roc import decode
   base = unwrap(p.base)
-  disasm = {addr+base:inst_disasm for addr,inst_disasm in llvm_disasm(device_props[p.device]["gfx_target_version"], unwrap(p.lib)).items()}
+  addr_table = amd_decode(device_props[p.device]["gfx_target_version"], unwrap(p.lib))
+  disasm:dict[int, tuple[str, int]] = {addr+base:(inst.disasm(), inst.size()) for addr, inst in addr_table.items()}
   rctx = decode(data, {p.name:disasm})
   cu_events:dict[str, list[ProfileEvent]] = {}
   # * INST waves
@@ -431,77 +432,49 @@ def amd_readelf(lib:bytes) -> list[dict]:
           ".group_segment_fixed_size":"LDS size", ".private_segment_fixed_size":"Scratch size"}
   return [{"label":label, "value":v} for k,label in keys.items() if (v:=notes["amdhsa.kernels"][0][k]) > 0]
 
-def llvm_disasm(target:int, lib:bytes) -> dict[int, tuple[str, int]]:
-  from tinygrad.runtime.autogen import llvm
+def amd_decode(target:int, lib:bytes) -> dict[int, Any]: # Any is the Inst class from extra.assembly.amd.dsl
   from tinygrad.runtime.support.elf import elf_loader
-  llvm.LLVMInitializeAMDGPUTargetInfo()
-  llvm.LLVMInitializeAMDGPUTargetMC()
-  llvm.LLVMInitializeAMDGPUAsmParser()
-  llvm.LLVMInitializeAMDGPUDisassembler()
-  arch = "gfx%d%x%x" % (target // 10000, (target // 100) % 100, target % 100)
-  # pass NULL to callbacks
-  ctx = llvm.LLVMCreateDisasmCPUFeatures("amdgcn-amd-amdhsa".encode(), arch.encode(), "".encode(), None, 0, ctypes.cast(0, llvm.LLVMOpInfoCallback),
-                                         ctypes.cast(0, llvm.LLVMSymbolLookupCallback))
+  from extra.assembly.amd.decode import detect_format
+  from extra.assembly.amd.dsl import Inst
   image, sections, _ = elf_loader(lib)
-  text = next((sh.header for sh in sections if sh.name == ".text"), None)
+  text = next((sh for sh in sections if sh.name == ".text"), None)
   assert text is not None, "no .text section found in ELF"
-  off, sz = text.sh_addr, text.sh_size
-  addr_table:dict[int, tuple[str, int]] = {}
-  out = ctypes.create_string_buffer(128)
-  cur_off = off
-  while cur_off < sz + off:
-    view = (ctypes.c_ubyte * ((sz + off) - cur_off)).from_buffer_copy(memoryview(image)[cur_off:])
-    instr_sz = llvm.LLVMDisasmInstruction(ctx, view, ctypes.c_uint64(len(view)), ctypes.c_uint64(0), out, ctypes.c_size_t(128))
-    addr_table[cur_off] = (out.value.decode("utf-8", "replace").strip(), instr_sz)
-    cur_off += instr_sz
+  off, buf = text.header.sh_addr, text.content
+  arch = {11:"rdna3", 12:"rdna4"}.get(target//10000, "cdna")
+  addr_table:dict[int, Inst] = {}
+  offset = 0
+  while offset < len(buf):
+    remaining = buf[offset:]
+    fmt = detect_format(remaining, arch)
+    decoded = fmt.from_bytes(remaining)
+    addr_table[off+offset] = decoded
+    offset += decoded.size()
   return addr_table
 
-SOPP_INSTS = {"s_branch", "s_cbranch_scc0", "s_cbranch_scc1", "s_cbranch_vccz", "s_cbranch_vccnz", "s_cbranch_execz", "s_cbranch_execnz"}
-def parse_branch(asm:str) -> int|None:
-  inst, *operands = asm.split(" ")
-  if inst in SOPP_INSTS:
-    x = int(operands[0]) & 0xffff
+def parse_branch(inst) -> int|None:
+  if "branch" in getattr(inst, "op_name", "").lower():
+    x = inst.simm16 & 0xffff
     return (x - 0x10000 if x & 0x8000 else x)*4
   return None
 
-def _op2dsl(op: str) -> str:
-  """Convert LLVM asm operand (s0, s[0:1], v0) to DSL format (s[0], s[0:1], v[0])."""
-  import re
-  op = op.strip()
-  lo = op.lower()
-  SPEC_DSL = {'vcc_lo': 'VCC_LO', 'vcc_hi': 'VCC_HI', 'vcc': 'VCC', 'exec_lo': 'EXEC_LO', 'exec_hi': 'EXEC_HI', 'exec': 'EXEC',
-              'scc': 'SCC', 'm0': 'M0', 'null': 'NULL', 'off': 'OFF'}
-  if lo in SPEC_DSL: return SPEC_DSL[lo]
-  rp = {'s': 's', 'v': 'v', 't': 'ttmp', 'ttmp': 'ttmp'}
-  if m := re.match(r'^([svt](?:tmp)?)\[(\d+):(\d+)\]$', lo): return f"{rp[m.group(1)]}[{m.group(2)}:{m.group(3)}]"
-  if m := re.match(r'^([svt](?:tmp)?)(\d+)$', lo): return f"{rp[m.group(1)]}[{m.group(2)}]"
-  return op
-
-def amdgpu_tokenize(st:str) -> list[str]:
-  try:
-    from extra.assembly.amd.dsl import s, v, Reg, VCC_LO, VCC_HI, VCC, EXEC_LO, EXEC_HI, EXEC, SCC, M0, NULL, OFF
-    dsl = eval(_op2dsl(st), {'s':s, 'v':v, 'VCC_LO':VCC_LO, 'VCC_HI':VCC_HI, 'VCC':VCC, 'EXEC_LO':EXEC_LO, 'EXEC_HI':EXEC_HI, 'EXEC':EXEC,
-                             'SCC':SCC, 'M0':M0, 'NULL':NULL, 'OFF':OFF})
-    return [f"{type(dsl).__name__[0].lower()}{dsl.offset + i}" for i in range(dsl.sz)] if isinstance(dsl, Reg) else [st]
-  except (ImportError, NameError, SyntaxError, TypeError): return []
-
 COND_TAKEN, COND_NOT_TAKEN, UNCOND = range(3)
 def amdgpu_cfg(lib:bytes, target:int) -> dict:
-  # disassemble
-  pc_table = llvm_disasm(target, lib)
+  # decode
+  pc_table = amd_decode(target, lib)
   # get leaders
   leaders:set[int] = {next(iter(pc_table))}
-  for pc, (asm, sz) in pc_table.items():
-    if (offset:=parse_branch(asm)) is not None: leaders.update((pc+sz+offset, pc+sz))
+  for pc, inst in pc_table.items():
+    if (offset:=parse_branch(inst)) is not None: leaders.update((pc+inst.size()+offset, pc+inst.size()))
   # build the cfg
   curr:int|None = None
   blocks:dict[int, list[int]] = {}
   paths:dict[int, dict[int, int]] = {}
   lines:list[str] = []
-  asm_width = max(len(asm) for asm, _ in pc_table.values())
-  for pc, (asm, sz) in pc_table.items():
+  disasm = {pc:inst.disasm() for pc,inst in pc_table.items()}
+  asm_width = max(len(asm) for asm in disasm.values())
+  for pc, inst in pc_table.items():
     # skip instructions only used for padding
-    if asm == "s_code_end": continue
+    if (asm:=disasm[pc]) == "s_code_end": continue
     lines.append(f"  {asm:<{asm_width}}  // {pc:012X}")
     if pc in leaders:
       paths[curr:=pc] = {}
@@ -509,14 +482,19 @@ def amdgpu_cfg(lib:bytes, target:int) -> dict:
     else: assert curr is not None, f"no basic block found for {pc}"
     blocks[curr].append(pc)
     # otherwise a basic block can have exactly one or two paths
-    nx = pc+sz
-    if (offset:=parse_branch(asm)) is not None:
-      if asm.startswith("s_branch"): paths[curr][nx+offset] = UNCOND
+    nx = pc+inst.size()
+    if (offset:=parse_branch(inst)) is not None:
+      if inst.op_name == "S_BRANCH": paths[curr][nx+offset] = UNCOND
       else: paths[curr].update([(nx+offset, COND_TAKEN), (nx, COND_NOT_TAKEN)])
     elif nx in leaders: paths[curr][nx] = UNCOND
   pc_tokens:dict[int, list[dict]] = {}
-  for pc, (text, _) in pc_table.items():
-    pc_tokens[pc] = [{"st":s, "keys":amdgpu_tokenize(s) if i>0 else [s], "kind":int(i>0)} for i,s in enumerate(text.replace(",", " , ").split(" "))]
+  from extra.assembly.amd.dsl import Reg
+  for pc, inst in pc_table.items():
+    pc_tokens[pc] = tokens = []
+    for name, field in inst._fields:
+      if isinstance(val:=getattr(inst, name), Reg): tokens.append({"st":val.fmt(), "keys":[f"r{val.offset+i}" for i in range(val.sz)], "kind":1})
+      elif name in {"op","opx","opy"}: tokens.append({"st":(op_name:=val.name.lower()), "keys":[op_name], "kind":0})
+      elif name != "encoding" and val != field.default: tokens.append({"st":(s:=repr(val)), "keys":[s], "kind":1})
   return {"data":{"blocks":blocks, "paths":paths, "pc_tokens":pc_tokens}, "src":"\n".join(lines)}
 
 # ** Main render function to get the complete details about a trace event
