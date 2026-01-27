@@ -402,8 +402,9 @@ class _Ctx:
     src0_off, vdst_off = self.inst_field(type(inst).src0), self.inst_field(type(inst).vdst)
     src0_reg = (src0_off >= _c(256)).where(src0_off - _c(256), _c(0))  # VGPR index or 0
     src1_off = self.inst_field(type(inst).src1) if hasattr(type(inst), 'src1') else None
+    exec_lo = self.rsgpr_dyn(_c(EXEC_LO.offset))
     srcs = {
-      'SRC0': src0_reg, 'VDST': vdst_off, 'EXEC_LO': self.rsgpr_dyn(_c(EXEC_LO.offset)), '_vgpr': self.vgpr,
+      'SRC0': src0_reg, 'VDST': vdst_off, 'EXEC_LO': exec_lo, 'EXEC': exec_lo.cast(dtypes.uint64), '_vgpr': self.vgpr,
       'S0': self.rsrc_dyn(src0_off, _c(0, dtypes.int)) if 'WRITELANE' in op_name else src0_reg,
       'S1': self.rsrc_dyn(src1_off, _c(0, dtypes.int)) if src1_off is not None else _c(0),
     }

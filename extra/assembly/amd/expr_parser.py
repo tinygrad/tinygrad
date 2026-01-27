@@ -445,7 +445,7 @@ class Parser:
       if name in self.vars:
         v = self.vars[name]
         return v if isinstance(v, UOp) else _u32(0) if isinstance(v, dict) else _u32(0)
-      return _u32(0)
+      raise RuntimeError(f"unknown variable: {name}")
     raise RuntimeError(f"unexpected token in primary: {self.peek()}")
 
   def _handle_dot(self, base, field: str) -> UOp:
