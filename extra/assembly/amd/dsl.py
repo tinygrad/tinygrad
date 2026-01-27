@@ -109,6 +109,8 @@ class BitField:
   def set(self, raw: int, val) -> int:
     if val is None: val = self.default
     encoded = self.encode(val)
+    # Handle signed values: convert negative to 2's complement
+    if encoded < 0: encoded = encoded & self.mask
     if encoded < 0 or encoded > self.mask: raise RuntimeError(f"field '{self.name}': value {encoded} doesn't fit in {self.hi - self.lo + 1} bits")
     return (raw & ~(self.mask << self.lo)) | (encoded << self.lo)
   def __get__(self, obj, objtype=None):

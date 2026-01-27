@@ -144,7 +144,7 @@ class AMMemoryManager(MemoryManager):
     self.dev.gmc.flush_tlb(ip='MM', vmid=0)
 
 class AMDev(PCIDevImplBase):
-  Version = 0xA0000007
+  Version = 0xA0000008
 
   def __init__(self, pci_dev:PCIDevice, dma_regions:list[tuple[int, MMIOInterface]]|None=None, reset_mode=False):
     self.pci_dev, self.devfmt, self.dma_regions = pci_dev, pci_dev.pcibus, dma_regions

@@ -49,6 +49,24 @@ class TestVminVmaxProperties(unittest.TestCase):
     self.assertEqual(uop.vmin, 0)
     self.assertEqual(uop.vmax, 20) # shoud be 0
 
+  def test_vmin_vmax_and_with_negative_variable(self):
+    # when mask doesn't have sign bit set, result is always non-negative
+    x = UOp.variable('x', -100, 100, dtypes.int32)
+    # 511 = 0x1FF, doesn't have sign bit set for int32
+    uop = x & 511
+    self.assertEqual(uop.vmin, 0)
+    self.assertEqual(uop.vmax, 511)
+
+    # 0x7FFFFFFF is max positive int32, doesn't have sign bit
+    uop = x & 0x7FFFFFFF
+    self.assertEqual(uop.vmin, 0)
+    self.assertEqual(uop.vmax, 0x7FFFFFFF)
+
+    # negative mask: x & -1 could be anything since -1 has all bits set
+    uop = x & -1
+    self.assertEqual(uop.vmin, dtypes.min(dtypes.int32))
+    self.assertEqual(uop.vmax, dtypes.max(dtypes.int32))
+
   def test_vmin_vmax_multiplication_with_variable(self):
     # vmin and vmax for multiplication with a variable
     x = UOp.variable('x', -3, 4)
