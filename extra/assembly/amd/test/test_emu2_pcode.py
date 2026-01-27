@@ -273,5 +273,34 @@ class TestConditionalParsing(unittest.TestCase):
     # Result should be a WHERE (ternary becomes WHERE)
     self.assertEqual(val.op, Ops.WHERE)
 
+class TestAllPcode(unittest.TestCase):
+  """Test that all pcode from all architectures can be parsed."""
+
+  def _parse_all_pcode(self, pcode_dict, arch: str, min_pct: float):
+    """Parse all pcode. RuntimeError = parser limitation (ok), other exceptions = real bugs."""
+    passed, skipped = 0, 0
+    for op, pcode in pcode_dict.items():
+      try:
+        parse_pcode(pcode, {'laneId': UOp.const(dtypes.uint32, 0)})
+        passed += 1
+      except RuntimeError: skipped += 1  # parser limitations (unknown func, unsupported syntax)
+      except Exception as e: self.fail(f"[{arch}] {op.name}: {e}\nPcode: {pcode[:200]}")
+    total = len(pcode_dict)
+    pct = 100 * passed / total
+    print(f"{arch}: {passed}/{total} ({pct:.1f}%) parsed, {skipped} skipped")
+    self.assertGreaterEqual(pct, min_pct, f"[{arch}] {pct:.1f}% < {min_pct}% threshold")
+
+  def test_parse_all_cdna_pcode(self):
+    from extra.assembly.amd.autogen.cdna.str_pcode import PCODE as CDNA_PCODE
+    self._parse_all_pcode(CDNA_PCODE, "CDNA", min_pct=60)
+
+  def test_parse_all_rdna3_pcode(self):
+    from extra.assembly.amd.autogen.rdna3.str_pcode import PCODE as RDNA3_PCODE
+    self._parse_all_pcode(RDNA3_PCODE, "RDNA3", min_pct=90)
+
+  def test_parse_all_rdna4_pcode(self):
+    from extra.assembly.amd.autogen.rdna4.str_pcode import PCODE as RDNA4_PCODE
+    self._parse_all_pcode(RDNA4_PCODE, "RDNA4", min_pct=65)
+
 if __name__ == "__main__":
   unittest.main()

@@ -234,7 +234,7 @@ for is_max, name in [(False, 'min'), (True, 'max')]:
     _FUNCS[f'v_{name}3_{sfx}'] = lambda *a, im=is_max, d=dt: _minmax_reduce(im, d, *a)
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# TOKENIZER
+# TOKENIZER/PARSER
 # ═══════════════════════════════════════════════════════════════════════════════
 
 DTYPES = {'u32': dtypes.uint32, 'i32': dtypes.int, 'f32': dtypes.float32, 'b32': dtypes.uint32, 'u64': dtypes.uint64, 'i64': dtypes.int64,
@@ -455,7 +455,7 @@ class Parser:
       return _u32(0)
     if field == 'u64' and self.at('LBRACKET') and self.peek(1).type == 'IDENT' and self.peek(1).val == 'laneId':
       self.eat('LBRACKET')
-      self.eat('IDENT')
+      self.eat_val('laneId', 'IDENT')
       self.eat('RBRACKET')
       result = (base >> _to_u32(self.vars['laneId'])) & _u32(1)
       if self.try_eat('DOT'):
