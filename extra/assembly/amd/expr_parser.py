@@ -301,9 +301,13 @@ class Parser:
   def try_eat(self, type: str) -> Token | None:
     if self.peek().type == type: return self.eat(type)
     return None
-  def try_eat_val(self, val: str) -> Token | None:
-    if self.peek().val == val: tok = self.tokens[self.pos]; self.pos += 1; return tok
+  def try_eat_val(self, val: str, type: str) -> Token | None:
+    if self.peek().type == type and self.peek().val == val:
+      tok = self.tokens[self.pos]; self.pos += 1; return tok
     return None
+  def eat_val(self, val: str, type: str) -> Token:
+    if self.peek().type != type or self.peek().val != val: raise RuntimeError(f"expected {type}:{val}, got {self.peek()}")
+    tok = self.tokens[self.pos]; self.pos += 1; return tok
 
   def parse(self) -> UOp: return self.ternary()
   def expr_top(self) -> UOp: return self.ternary()
@@ -345,20 +349,18 @@ class Parser:
     return left
 
   def unary(self) -> UOp:
-    if self.at('OP') and self.peek().val == '~':
-      self.eat('OP'); inner = self.unary()
+    if self.try_eat_val('~', 'OP'):
+      inner = self.unary()
       return inner ^ _const(inner.dtype, (1 << (inner.dtype.itemsize * 8)) - 1)
-    if self.at('OP') and self.peek().val == '!':
-      self.eat('OP'); inner = self.unary()
+    if self.try_eat_val('!', 'OP'):
+      inner = self.unary()
       return inner.eq(_const(inner.dtype, 0))
-    if self.at('OP') and self.peek().val == '-':
-      self.eat('OP'); inner = self.unary()
+    if self.try_eat_val('-', 'OP'):
+      inner = self.unary()
       if inner.op == Ops.CONST:
         return _const(dtypes.int if inner.dtype == dtypes.uint32 else inner.dtype, -inner.arg)
       return inner.neg()
-    if self.at('OP') and self.peek().val == '+':
-      self.eat('OP')
-      return self.unary()
+    if self.try_eat_val('+', 'OP'): return self.unary()
     return self.postfix()
 
   def postfix(self) -> UOp:
@@ -423,9 +425,8 @@ class Parser:
       if name == 'OVERFLOW_F64': return _const(dtypes.uint64, 0x7FEFFFFFFFFFFFFF).bitcast(dtypes.float64)
       if name == 'WAVE32': return _const(dtypes.bool, True)
       if name == 'WAVE64': return _const(dtypes.bool, False)
-      if name == 'WAVE_MODE' and self.try_eat('DOT') and self.peek().val == 'IEEE': self.eat('IDENT'); return _u32(1)
-      if self.at('LBRACE'):
-        self.eat('LBRACE')
+      if name == 'WAVE_MODE' and self.try_eat('DOT') and self.try_eat_val('IEEE', 'IDENT'): return _u32(1)
+      if self.try_eat('LBRACE'):
         idx = self.eat('NUM').val
         self.eat('RBRACE')
         elem = self.vars.get(f'{name}{idx}', _u32(0))
@@ -586,7 +587,7 @@ class Parser:
       num = self.eat('NUM').val
       return _const(_BITS_DT.get(bits, dtypes.uint32), int(num, 16))
     if self.at('NUM') or (self.at('OP') and self.peek().val == '-'):
-      neg = self.try_eat_val('-') is not None
+      neg = self.try_eat_val('-', 'OP') is not None
       suffix, num = _strip_suffix(self.eat('NUM').val)
       if num.startswith('0x'):
         val = int(num, 16)
@@ -749,9 +750,9 @@ def parse_block(lines: list[str], start: int, vars: dict[str, VarVal], funcs: di
     if first == 'for':
       # Parse: for VAR in [SIZE']START : [SIZE']END do
       p = Parser(toks, vars, funcs)
-      p.eat('IDENT')  # for
+      p.eat_val('for', 'IDENT')
       loop_var = p.eat('IDENT').val
-      p.eat('IDENT')  # in
+      p.eat_val('in', 'IDENT')
       if p.at('NUM') and p.peek(1).type == 'QUOTE': p.eat('NUM'); p.eat('QUOTE')
       if p.at('NUM'):
         start_val = int(p.eat('NUM').val.rstrip('UuLl'))
