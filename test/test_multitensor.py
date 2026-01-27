@@ -891,12 +891,24 @@ class TestMultiTensor(unittest.TestCase):
 
   def test_sharded_clone(self):
     t = Tensor.rand(16, 16).shard(devices_2, axis=0).realize()
-
     t_clone = t.clone()
-    for ei in t_clone.schedule():
-      ei.lower()
+    sched = t_clone.schedule()
+
+    # a runner per shard
+    self.assertEqual(len(sched), len(t.device))
+
+    for ei in sched:
+      # a buf per shard 
+      self.assertEqual(len(ei.bufs), len(t.device))
+
+      # all bufs exist
+      self.assertTrue(all([buf is not None for buf in ei.bufs]))
+
       # no cross device runners
-      self.assertTrue(all_same(devs:=[buf.device for buf in ei.bufs if buf]), msg=f"{devs=}")
+      self.assertTrue(all_same(devs:=[buf.device for buf in ei.bufs]), msg=f"{devs=}")
+
+      # a buf should only fit a single device's shard
+      self.assertTrue(all([buf.size == (t.numel()/len(t.device)) for buf in ei.bufs]))
 
     # both should be multi buffers
     og_bufs, new_bufs = set(t.uop.base.buffer.bufs), set(t_clone.uop.base.buffer.bufs)
