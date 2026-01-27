@@ -948,14 +948,10 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45,1), (1,65)], torch.copysign, Tensor.copysign)
     helper_test_op([(), ()], torch.copysign, Tensor.copysign)
   def test_copysign_exact(self):
-    for i in [-1.,0.,1.]:
-      for j in [-1., 0., 1.]:
+    v = [-1., -0., 0., 1.]#, math.inf, -math.inf] # TODO: * 0 hack does not work with inf
+    for i in v:
+      for j in v:
         helper_test_op(None, torch.copysign, Tensor.copysign, vals=[[i], [j]])
-  # TODO: fix copysign to distinguish between -0.0 and 0.0
-  @unittest.skipIf(COMPILE_ONLY or getenv("TINY_BACKEND"), "test requires runtime")
-  @unittest.expectedFailure
-  def test_copysign_signed_zero(self):
-    helper_test_op(None, torch.copysign, Tensor.copysign, vals=[[1.0, 1.0], [-0.0, 0.0]])
 
   def test_logaddexp(self):
     helper_test_op([(45,65), (45,65)], torch.logaddexp, Tensor.logaddexp)
