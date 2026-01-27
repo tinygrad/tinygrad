@@ -116,6 +116,7 @@ class BitField:
   def __get__(self, obj, objtype=None):
     if obj is None: return self
     return self.decode((obj._raw >> self.lo) & self.mask)
+  def __set__(self, obj, val): obj._raw = self.set(obj._raw, val)
 
 class FixedBitField(BitField):
   def set(self, raw: int, val=None) -> int:
