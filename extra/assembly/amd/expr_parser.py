@@ -227,11 +227,44 @@ _FUNCS: dict[str, Callable[..., UOp]] = {
   'signext_from_bit': _signext_from_bit, 'ldexp': _ldexp, 'frexp_mant': _frexp_mant, 'mantissa': _frexp_mant,
   'frexp_exp': _frexp_exp, 'trig_preop_result': _trig_preop,
   's_ff1_i32_b32': lambda a: _ff1(a, 32), 's_ff1_i32_b64': lambda a: _ff1(a, 64),
+  # Normalization conversions: map [-1,1] or [0,1] to integer range
+  # Use floor(x + 0.5) for round-to-nearest
+  # SNORM: round(value * 32767), range is [-32767, 32767] (hardware behavior)
+  'f16_to_snorm': lambda a: _floor(_f16_extract(a).cast(dtypes.float32) * _const(dtypes.float32, 32767) + _const(dtypes.float32, 0.5)).cast(dtypes.int).cast(dtypes.int16),
+  'f16_to_unorm': lambda a: _floor(_f16_extract(a).cast(dtypes.float32) * _const(dtypes.float32, 65535) + _const(dtypes.float32, 0.5)).cast(dtypes.uint16),
+  'f32_to_snorm': lambda a: _floor(a.bitcast(dtypes.float32) * _const(dtypes.float32, 32767) + _const(dtypes.float32, 0.5)).cast(dtypes.int).cast(dtypes.int16),
+  'f32_to_unorm': lambda a: _floor(a.bitcast(dtypes.float32) * _const(dtypes.float32, 65535) + _const(dtypes.float32, 0.5)).cast(dtypes.uint16),
+  'f32_to_u8': lambda a: _f_to_u(a.bitcast(dtypes.float32), dtypes.uint8),
+  # Integer truncation conversions
+  'i32_to_i16': lambda a: a.cast(dtypes.int).cast(dtypes.int16),
+  'u32_to_u16': lambda a: a.cast(dtypes.uint32).cast(dtypes.uint16),
+  'u16_to_u32': lambda a: (a.cast(dtypes.uint32) & _u32(0xFFFF)),
+  'u8_to_u32': lambda a: (a.cast(dtypes.uint32) & _u32(0xFF)),
+  'u4_to_u32': lambda a: (a.cast(dtypes.uint32) & _u32(0xF)),
+  # Signed extraction with sign extension for dot products
+  'i16_to_i32': lambda a: _signext(a.cast(dtypes.uint32) & _u32(0xFFFF), 16),
+  'i8_to_i32': lambda a: _signext(a.cast(dtypes.uint32) & _u32(0xFF), 8),
+  'i4_to_i32': lambda a: _signext(a.cast(dtypes.uint32) & _u32(0xF), 4),
+  # Float to int16 conversions
+  'v_cvt_i16_f32': lambda a: UOp(Ops.TRUNC, dtypes.float32, (a.bitcast(dtypes.float32),)).cast(dtypes.int16),
+  'v_cvt_u16_f32': lambda a: _f_to_u(a.bitcast(dtypes.float32), dtypes.uint16),
 }
 for is_max, name in [(False, 'min'), (True, 'max')]:
   for dt, sfx in [(dtypes.float32, 'f32'), (dtypes.int, 'i32'), (dtypes.uint32, 'u32'), (dtypes.int16, 'i16'), (dtypes.uint16, 'u16')]:
     _FUNCS[f'v_{name}_{sfx}'] = lambda *a, im=is_max, d=dt: _minmax_reduce(im, d, *a)
     _FUNCS[f'v_{name}3_{sfx}'] = lambda *a, im=is_max, d=dt: _minmax_reduce(im, d, *a)
+# f16 min/max/min3/max3/med3
+for is_max, name in [(False, 'min'), (True, 'max')]:
+  _FUNCS[f'v_{name}_f16'] = lambda *a, im=is_max: _minmax_reduce(im, dtypes.half, *[_f16_extract(x) for x in a])
+  _FUNCS[f'v_{name}3_f16'] = lambda *a, im=is_max: _minmax_reduce(im, dtypes.half, *[_f16_extract(x) for x in a])
+  _FUNCS[f'v_{name}_num_f16'] = lambda *a, im=is_max: _minmax_reduce(im, dtypes.half, *[_f16_extract(x) for x in a])
+  _FUNCS[f'v_{name}_num_f32'] = lambda *a, im=is_max: _minmax_reduce(im, dtypes.float32, *a)
+  _FUNCS[f'v_{name}3_num_f16'] = lambda *a, im=is_max: _minmax_reduce(im, dtypes.half, *[_f16_extract(x) for x in a])
+  _FUNCS[f'v_{name}3_num_f32'] = lambda *a, im=is_max: _minmax_reduce(im, dtypes.float32, *a)
+  _FUNCS[f'v_{name}imum_f16'] = lambda *a, im=is_max: _minmax_reduce(im, dtypes.half, *[_f16_extract(x) for x in a])
+  _FUNCS[f'v_{name}imum_f32'] = lambda *a, im=is_max: _minmax_reduce(im, dtypes.float32, *a)
+  _FUNCS[f'v_{name}imum3_f16'] = lambda *a, im=is_max: _minmax_reduce(im, dtypes.half, *[_f16_extract(x) for x in a])
+  _FUNCS[f'v_{name}imum3_f32'] = lambda *a, im=is_max: _minmax_reduce(im, dtypes.float32, *a)
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # TOKENIZER/PARSER
