@@ -301,7 +301,7 @@ def load_counters(profile:list[ProfileEvent]) -> None:
     steps:list[dict] = []
     if (pmc:=v.get(ProfilePMCEvent)):
       steps.append(create_step("PMC", ("/prg-pmc", len(ctxs), len(steps)), pmc))
-      all_counters[(name, run_number[k], k)] = pmc[0]
+      all_counters[(name, run_number[k], pname)] = pmc[0]
     # to decode a SQTT trace, we need the raw stream, program binary and device properties
     if (sqtt:=v.get(ProfileSQTTEvent)):
       for e in sqtt:
@@ -516,7 +516,7 @@ def get_render(query:str) -> dict:
   if fmt == "all-pmc":
     durations, pmc = data
     ret = {"cols":{}, "rows":[]}
-    for (name, n, k),events in data[1].items():
+    for (name, n, k),events in pmc.items():
       pmc_table = unpack_pmc(events)
       ret["cols"].update([(r[0], None) for r in pmc_table["rows"]])
       ret["rows"].append((name, durations[k][n-1], *[r[1] for r in pmc_table["rows"]]))
