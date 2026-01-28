@@ -159,6 +159,7 @@ def test_matmul(sink:UOp, dtype=dtypes.float32, N=N):
     GlobalCounters.reset()
     with Context(DEBUG=2):
       tc = (a @ b).realize()
+    np.testing.assert_allclose(hc.numpy(), tc.numpy(), atol=1e-3, rtol=1e-3)
     with Context(DEBUG=0):
       err = (hc - tc).square().mean().item()
     print(f"mean squared error {err}")

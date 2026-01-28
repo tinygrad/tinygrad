@@ -1,0 +1,863 @@
+# ruff: noqa: F405, F403
+# allow define from star imports
+
+from tinygrad import Device, dtypes
+from tinygrad.uop.ops import UOp, Ops, KernelInfo
+
+from extra.assembly.amd.autogen.rdna4.ins import *
+from extra.gemm.amd_uop_matmul import N, test_matmul
+
+# tiny hsaco packer
+import tempfile, subprocess, os
+def pack_hsaco(src:str, arch:str) -> bytes:
+  with tempfile.TemporaryDirectory() as d:
+    s,o,h = [os.path.join(d,x) for x in ("k.s","k.o","k.hsaco")]
+    open(s,"w").write(src)
+    subprocess.check_call(["llvm-mc","-triple=amdgcn-amd-amdhsa",f"-mcpu={arch}","-mattr=+real-true16","-filetype=obj",s,"-o",o])
+    subprocess.check_call(["ld.lld","-shared","-m","elf64_amdgpu",o,"-o",h])
+    return open(h,"rb").read()
+
+# 2×2 wave-level tiling of a 128×128 workgroup C tile, where each wave computes a 64×64 sub-tile using WMMA
+WAVE_BLOCK = 2         # 2 wave ping pong
+WAVE_TILE = 64         # each wave computes 64×64 tile
+K_TILE = 32            # K dimension tile size (2 WMMA iterations of 16)
+TILE_GROUP_HEIGHT = 8  # rows of tiles processed together for better cache locality
+C_TILE = WAVE_TILE * WAVE_BLOCK
+TN = (N + C_TILE - 1) // C_TILE
+NUM_WG = TN * TN
+THREADS_PER_WG = 128
+assert N % THREADS_PER_WG == 0, "N must be divisible by THREADS_PER_WG"
+assert N % C_TILE == 0, "N must be divisible by C_TILE for shift-based division"
+assert (TN & (TN - 1)) == 0, "TN must be a power of 2 for shift-based division"
+
+# Shift constants for power-of-2 divisions
+C_TILE_SHIFT = C_TILE.bit_length() - 1  # 7 for C_TILE=128
+TN_SHIFT = TN.bit_length() - 1          # log2(TN)
+TN_MASK = TN - 1
+TN_SQ_SHIFT = 2 * TN_SHIFT              # log2(TN*TN)
+TN_SQ_MASK = TN * TN - 1
+TILE_GROUP_SHIFT = TILE_GROUP_HEIGHT.bit_length() - 1  # 3 for TILE_GROUP_HEIGHT=8
+TILE_GROUP_MASK = TILE_GROUP_HEIGHT - 1
+
+kd = {"group_segment_fixed_size":50176, "private_segment_fixed_size":0, "kernarg_size":32, "next_free_vgpr":256, "next_free_sgpr":16,
+      "system_sgpr_workgroup_id_x":1, "system_sgpr_workgroup_id_y":0, "system_sgpr_workgroup_id_z":0, "wavefront_size32":1, "forward_progress":0,
+      "user_sgpr_kernarg_segment_ptr":1, "user_sgpr_count":2, "workgroup_processor_mode":1, "uses_dynamic_stack":0, "memory_ordered":1}
+template = ".text\n.section\t.text.\n.global\ttest\n.p2align\t8\n.type\tgemm,@function\ntest:\nINSTRUCTIONS\n.section .rodata,\"a\",@progbits\n"+\
+    ".p2align 6, 0x0\n.amdhsa_kernel test\n" + "".join(f"  .amdhsa_{k} {v}\n" for k,v in kd.items()) + ".end_amdhsa_kernel\n"
+
+# --------------------------------------------------------------------
+# Register map
+# --------------------------------------------------------------------
+
+# Special registers
+v_tid = v[254]
+
+# SGPRs
+s_tid_like = s[2]          # loaded from ttmp[9]
+s_N = s[27]                # problem size N
+
+# Loop / tiling
+s_k_iters = s[12]          # N // K_TILE
+s_iter = s[47]             # software iteration counter
+s_stride_A = s[64]         # WAVE_TILE * N
+s_stride_B = s[65]         # WAVE_TILE
+
+# Wrap deltas for pointer updates (lo/hi pairs)
+s_wrapA = s[60:61]
+s_wrapB = s[62:63]
+s_wrapA_lo = s[60]
+s_wrapA_hi = s[61]
+s_wrapB_lo = s[62]
+s_wrapB_hi = s[63]
+
+# Buffer resources (rsrc)
+s_rsrc_A = s[48:51]
+s_rsrc_B = s[52:55]
+s_rsrc_A_idx = 48  # starting SGPR index for buffer_load rsrc param
+s_rsrc_B_idx = 52  # starting SGPR index for buffer_load rsrc param
+s_rsrc_A_lo = s[48]
+s_rsrc_A_hi = s[49]
+s_rsrc_A_fmt = s[51]
+s_rsrc_B_lo = s[52]
+s_rsrc_B_hi = s[53]
+s_rsrc_B_fmt = s[55]
+
+# Remaining counters + masks
+s_remA = s[56:57]
+s_remB = s[58:59]
+s_remA_lo = s[56]
+s_remA_hi = s[57]
+s_remB_lo = s[58]
+s_remB_hi = s[59]
+s_remA_mask = s[50]
+s_remB_mask = s[54]
+
+# VGPRs: LDS addresses
+v_lds_A_base = v[136]
+v_lds_B_base = v[137]
+v_lds_A_rd = v[138]
+v_lds_B_rd = v[139]
+
+# VGPRs: global offsets for prefetch (offen)
+v_A_off = v[128:131]
+v_B_off = v[132:135]
+
+# Prefetch payload regs (4 b128 groups each)
+v_A_pf = v[222:237]
+v_A_pf0 = v[222:225]
+v_A_pf1 = v[226:229]
+v_A_pf2 = v[230:233]
+v_A_pf3 = v[234:237]
+v_B_pf = v[238:253]
+v_B_pf0 = v[238:241]
+v_B_pf1 = v[242:245]
+v_B_pf2 = v[246:249]
+v_B_pf3 = v[250:253]
+
+# WMMA staging and accumulators
+v_acc = v[0:127]
+# Accumulator sub-tiles (16 groups of 8 regs each for 4x4 output tiles)
+v_acc0 = v[0:7]
+v_acc1 = v[8:15]
+v_acc2 = v[16:23]
+v_acc3 = v[24:31]
+v_acc4 = v[32:39]
+v_acc5 = v[40:47]
+v_acc6 = v[48:55]
+v_acc7 = v[56:63]
+v_acc8 = v[64:71]
+v_acc9 = v[72:79]
+v_acc10 = v[80:87]
+v_acc11 = v[88:95]
+v_acc12 = v[96:103]
+v_acc13 = v[104:111]
+v_acc14 = v[112:119]
+v_acc15 = v[120:127]
+
+# A matrix WMMA staging (permuted from LDS loads)
+v_A_wmma = v[140:155]
+v_A_wmma0 = v[140:143]
+v_A_wmma1 = v[144:147]
+v_A_wmma2 = v[148:151]
+v_A_wmma3 = v[152:155]
+
+# B matrix fragments for WMMA
+v_B_frag0 = v[189:192]
+v_B_frag1 = v[193:196]
+v_B_frag2 = v[197:200]
+v_B_frag3 = v[201:204]
+# Secondary B fragments for double-buffered WMMA (loaded from LDS)
+v_B_frag4 = v[205:208]
+v_B_frag5 = v[209:212]
+v_B_frag6 = v[213:216]
+v_B_frag7 = v[217:220]
+
+# LDS staging for A matrix (double-buffered, 16 regs each)
+v_A_lds0 = v[156:171]
+v_A_lds1 = v[172:187]
+
+# Scratch regs (convention only)
+v_tmp0 = v[6]
+v_tmp1 = v[7]
+v_tmp2 = v[8]
+v_tmp3 = v[9]
+v_tmp4 = v[10]
+
+def custom_gemm(N:int, dev:str) -> UOp:
+  lidx = UOp.special(THREADS_PER_WG, "lidx0")
+  gidx = UOp.special(NUM_WG, "gidx0")
+
+  A = UOp.placeholder((N*N,), dtypes.half, slot=1)
+  B = UOp.placeholder((N*N,), dtypes.half, slot=2)
+  C = UOp.placeholder((N*N,), dtypes.half, slot=0)
+
+  insts = [
+  "kernel_entry:",
+  s_load_b64(sdata=s[28:29], sbase=s[0:1], ioffset=0x0, soffset=NULL),
+  s_load_b64(sdata=s[32:33], sbase=s[0:1], ioffset=0x10, soffset=NULL),
+  s_load_b64(sdata=s[34:35], sbase=s[0:1], ioffset=0x8, soffset=NULL),
+  s_waitcnt(simm16=64519),
+  s_mov_b32(s[2], ttmp[9]),
+  s_mov_b32(s_N, N),
+  s_mov_b32(M0, 0x4400),
+  v_mov_b32_e32(v_tid, v[0]),
+  v_and_b32_e32(v[1], 31, v_tid),
+  v_and_b32_e32(v[0], 15, v[1]),
+  v_lshlrev_b32_e32(v[0], 2, v[0]),
+  v_lshrrev_b32_e32(v[1], 4, v[1]),
+  v_lshl_add_u32(v[0], v[1], 10, v[0]),
+  v_lshrrev_b32_e32(v[4], 5, v_tid),
+  v_and_b32_e32(v[4], 1, v[4]),
+  v_lshl_add_u32(v[0], v[4], 6, v[0]),
+  v_and_b32_e32(v[2], 31, v_tid),
+  v_and_b32_e32(v[1], 15, v[2]),
+  v_lshlrev_b32_e32(v[1], 5, v[1]),
+  v_lshlrev_b32_e32(v[1], 2, v[1]),
+  v_lshrrev_b32_e32(v[2], 4, v[2]),
+  v_lshl_add_u32(v[1], v[2], 3, v[1]),
+  v_lshrrev_b32_e32(v[3], 6, v_tid),
+  v_and_b32_e32(v[3], 1, v[3]),
+  v_lshl_add_u32(v[1], v[3], 11, v[1]),
+  v_lshrrev_b32_e32(v[2], 5, v_tid),
+  v_lshrrev_b32_e32(v[2], 2, v[2]),
+  s_mov_b32(s[16], 0x1000),
+  v_mul_lo_u32(v[2], s[16], v[2]),
+  v_add_lshl_u32(v_lds_A_rd, v[2], v[0], 1),
+  v_lshrrev_b32_e32(v[0], 5, v_tid),
+  v_lshrrev_b32_e32(v[0], 2, v[0]),
+  s_mov_b32(s[16], 32),
+  v_mul_lo_u32(v[0], s[16], v[0]),
+  v_add_lshl_u32(v_lds_B_rd, v[0], v[1], 1),
+  v_lshrrev_b32_e32(v[2], 8, v_lds_B_rd),
+  v_lshl_add_u32(v_lds_B_rd, v[2], 5, v_lds_B_rd),
+  v_add_co_u32(v_lds_B_rd, VCC_LO, 0x2000, v_lds_B_rd),
+  v_lshrrev_b32_e32(v[1], 4, v_tid),
+  v_and_b32_e32(v[0], 15, v_tid),
+  v_lshlrev_b32_e32(v[0], 3, v[0]),
+  v_mov_b32_e32(v[4], v[1]),
+  v_lshrrev_b32_e32(v[2], 2, v_tid),
+  v_and_b32_e32(v[3], 3, v_tid),
+  v_lshlrev_b32_e32(v[3], 3, v[3]),
+  v_mov_b32_e32(v[5], v[3]),
+  v_mul_u32_u24_e32(v_lds_A_base, C_TILE, v[4]),
+  v_add_lshl_u32(v_lds_A_base, v[0], v_lds_A_base, 1),
+  v_mul_u32_u24_e32(v_lds_B_base, 32, v[2]),
+  v_add_lshl_u32(v_lds_B_base, v[5], v_lds_B_base, 1),
+  v_lshrrev_b32_e32(v[6], 8, v_lds_B_base),
+  v_lshl_add_u32(v_lds_B_base, v[6], 5, v_lds_B_base),
+  v_add_co_u32(v_lds_B_base, VCC_LO, 0x2000, v_lds_B_base),
+  s_wait_kmcnt(0x0),
+  # TN = N / C_TILE (N is divisible by C_TILE, so ceil = floor)
+  s_lshr_b32(s[14], s_N, C_TILE_SHIFT),  # s[14] = TN
+  s_mov_b32(s[15], s[14]),               # s[15] = TN (same value)
+  # q = floor(s[2] / (TN*TN)), r = s[2] % (TN*TN) - all scalar ops
+  s_lshr_b32(s[17], s[2], TN_SQ_SHIFT),        # s[17] = q = s[2] >> log2(TN*TN)
+  s_and_b32(s[16], s[2], TN_SQ_MASK),          # s[16] = r = s[2] & (TN*TN - 1)
+  s_mov_b32(s[2], s[16]),                      # s[2] = remainder
+  # q = floor(s[2] / TN), r = s[2] % TN - all scalar ops
+  s_lshr_b32(s[3], s[2], TN_SHIFT),            # s[3] = q = s[2] >> log2(TN)
+  s_and_b32(s[2], s[2], TN_MASK),              # s[2] = r = s[2] & (TN - 1)
+  s_mov_b32(s[66], 0x5040100),
+  s_mov_b32(s[67], 0x7060302),
+  s_sub_co_u32(s[32], s[32], 16),
+  s_sub_co_ci_u32(s[33], s[33], 0),
+  s_sub_co_u32(s[34], s[34], 16),
+  s_sub_co_ci_u32(s[35], s[35], 0),
+  s_mov_b32(s[8], 1),
+  s_mov_b32(s[9], 1),
+  s_mov_b32(s[16], TILE_GROUP_HEIGHT),
+  # s[17] = s[3] / TILE_GROUP_HEIGHT using shift (TILE_GROUP_HEIGHT = 8 = 2^3)
+  s_lshr_b32(s[17], s[3], TILE_GROUP_SHIFT),
+  s_mul_i32(s[20], s[17], s[16]),
+  s_sub_co_u32(s[20], s[3], s[20]),
+  s_mul_i32(s[20], s[20], s[14]),
+  s_add_co_u32(s[20], s[20], s[2]),
+  # s[18] = s[15] / TILE_GROUP_HEIGHT using shift
+  s_lshr_b32(s[18], s[15], TILE_GROUP_SHIFT),
+  s_mul_i32(s[19], s[16], s[18]),
+  s_sub_co_u32(s[19], s[15], s[19]),
+  s_cmp_eq_u32(s[19], 0),
+  s_cmov_b32(s[19], s[16]),
+  s_cmp_ge_u32(s[17], s[18]),
+  s_cselect_b32(s[18], s[19], s[16]),
+  # For power-of-2 sizes, s[18] = TILE_GROUP_HEIGHT = 8, so we use shift
+  # s[2] = s[20] / s[18], s[3] = s[20] % s[18]
+  s_lshr_b32(s[2], s[20], TILE_GROUP_SHIFT),   # quotient
+  s_and_b32(s[3], s[20], TILE_GROUP_MASK),     # remainder
+  s_mul_i32(s[17], s[17], s[16]),
+  s_add_co_u32(s[3], s[3], s[17]),
+  v_dual_mov_b32(VOPDOp.V_DUAL_MOV_B32, v[6], v[7], v[0], v[2]),
+  v_add_co_u32(v[8], VCC_LO, 32, v[7]),
+  v_add_co_u32(v[9], VCC_LO, 32, v[8]),
+  v_add_co_u32(v[10], VCC_LO, 32, v[9]),
+  v_mov_b32_e32(v[11], v[1]),
+  v_add_co_u32(v[12], VCC_LO, 8, v[11]),
+  v_add_co_u32(v[13], VCC_LO, 8, v[12]),
+  v_add_co_u32(v[14], VCC_LO, 8, v[13]),
+  v_mov_b32_e32(v[15], v[3]),
+  s_mul_i32(s[16], s[2], C_TILE),
+  s_sub_co_u32(s[16], s_N, s[16]),
+  s_sub_co_u32(s[16], s[16], 8),
+  v_mov_b32_e32(v[16], s[16]),
+  v_min_i32_e32(v[6], v[16], v[6]),
+  s_mul_hi_u32(s[19], s[2], C_TILE),
+  s_mul_i32(s[18], s[2], C_TILE),
+  s_mov_b64(s_remA, 1),
+  s_sub_co_u32(s[16], s_N, 1),
+  s_mul_hi_u32(s[17], 1, s[16]),
+  s_mul_i32(s[16], 1, s[16]),
+  s_add_co_u32(s_remA_lo, s_remA_lo, s[16]),
+  s_add_co_ci_u32(s_remA_hi, s_remA_hi, s[17]),
+  s_sub_co_u32(s[16], s_N, 1),
+  s_mul_hi_u32(s[17], s_N, s[16]),
+  s_mul_i32(s[16], s_N, s[16]),
+  s_add_co_u32(s_remA_lo, s_remA_lo, s[16]),
+  s_add_co_ci_u32(s_remA_hi, s_remA_hi, s[17]),
+  s_sub_co_u32(s_remA_lo, s_remA_lo, s[18]),
+  s_sub_co_ci_u32(s_remA_hi, s_remA_hi, s[19]),
+  s_lshl_b64(s_remA, s_remA, 1),
+  s_add_co_u32(s_remA_lo, s_remA_lo, 16),
+  s_add_co_ci_u32(s_remA_hi, s_remA_hi, 0),
+  s_cmp_eq_u32(s_remA_hi, 0),
+  s_cselect_b32(s_remA_mask, s_remA_lo, -1),
+  s_lshl_b64(s[18:19], s[18:19], 1),
+  s_add_co_u32(s_rsrc_A_lo, s[32], s[18]),
+  s_add_co_ci_u32(s_rsrc_A_hi, s[33], s[19]),
+  s_mov_b32(s_rsrc_A_fmt, 0x30020000),
+  s_mul_hi_u32(s[19], s[3], C_TILE),
+  s_mul_i32(s[18], s[3], C_TILE),
+  s_mul_hi_u32(s[19], s[18], s_N),
+  s_mul_i32(s[18], s[18], s_N),
+  s_mov_b64(s_remB, 1),
+  s_sub_co_u32(s[16], s_N, 1),
+  s_mul_hi_u32(s[17], 1, s[16]),
+  s_mul_i32(s[16], 1, s[16]),
+  s_add_co_u32(s_remB_lo, s_remB_lo, s[16]),
+  s_add_co_ci_u32(s_remB_hi, s_remB_hi, s[17]),
+  s_sub_co_u32(s[16], s_N, 1),
+  s_mul_hi_u32(s[17], s_N, s[16]),
+  s_mul_i32(s[16], s_N, s[16]),
+  s_add_co_u32(s_remB_lo, s_remB_lo, s[16]),
+  s_add_co_ci_u32(s_remB_hi, s_remB_hi, s[17]),
+  s_sub_co_u32(s_remB_lo, s_remB_lo, s[18]),
+  s_sub_co_ci_u32(s_remB_hi, s_remB_hi, s[19]),
+  s_lshl_b64(s_remB, s_remB, 1),
+  s_add_co_u32(s_remB_lo, s_remB_lo, 16),
+  s_add_co_ci_u32(s_remB_hi, s_remB_hi, 0),
+  s_cmp_eq_u32(s_remB_hi, 0),
+  s_cselect_b32(s_remB_mask, s_remB_lo, -1),
+  s_lshl_b64(s[18:19], s[18:19], 1),
+  s_add_co_u32(s_rsrc_B_lo, s[34], s[18]),
+  s_add_co_ci_u32(s_rsrc_B_hi, s[35], s[19]),
+  s_mov_b32(s_rsrc_B_fmt, 0x30020000),
+  v_mul_lo_u32(v[16], s_N, v[11]),
+  v_add_co_u32(v[128], VCC_LO, v[6], v[16]),
+  v_add_nc_u32_e32(v[128], 8, v[128]),
+  v_lshlrev_b32_e32(v[128], 1, v[128]),
+  v_mul_lo_u32(v[16], s_N, v[12]),
+  v_add_co_u32(v[129], VCC_LO, v[6], v[16]),
+  v_add_nc_u32_e32(v[129], 8, v[129]),
+  v_lshlrev_b32_e32(v[129], 1, v[129]),
+  v_mul_lo_u32(v[16], s_N, v[13]),
+  v_add_co_u32(v[130], VCC_LO, v[6], v[16]),
+  v_add_nc_u32_e32(v[130], 8, v[130]),
+  v_lshlrev_b32_e32(v[130], 1, v[130]),
+  v_mul_lo_u32(v[16], s_N, v[14]),
+  v_add_co_u32(v[131], VCC_LO, v[6], v[16]),
+  v_add_nc_u32_e32(v[131], 8, v[131]),
+  v_lshlrev_b32_e32(v[131], 1, v[131]),
+  v_mul_lo_u32(v[11], s_N, v[7]),
+  v_add_co_u32(v[132], VCC_LO, v[15], v[11]),
+  v_add_nc_u32_e32(v[132], 8, v[132]),
+  v_lshlrev_b32_e32(v[132], 1, v[132]),
+  v_mul_lo_u32(v[11], s_N, v[8]),
+  v_add_co_u32(v[133], VCC_LO, v[15], v[11]),
+  v_add_nc_u32_e32(v[133], 8, v[133]),
+  v_lshlrev_b32_e32(v[133], 1, v[133]),
+  v_mul_lo_u32(v[11], s_N, v[9]),
+  v_add_co_u32(v[134], VCC_LO, v[15], v[11]),
+  v_add_nc_u32_e32(v[134], 8, v[134]),
+  v_lshlrev_b32_e32(v[134], 1, v[134]),
+  v_mul_lo_u32(v[11], s_N, v[10]),
+  v_add_co_u32(v[135], VCC_LO, v[15], v[11]),
+  v_add_nc_u32_e32(v[135], 8, v[135]),
+  v_lshlrev_b32_e32(v[135], 1, v[135]),
+  # tile strides: s_stride_A = WAVE_TILE*N (A), s_stride_B = WAVE_TILE (B)
+  s_mul_i32(s_stride_A, WAVE_TILE, s_N),
+  s_mov_b32(s_stride_B, WAVE_TILE),
+  s_lshr_b32(s_k_iters, s_N, K_TILE.bit_length() - 1),  # N // K_TILE
+  s_mov_b32(s_iter, 0),
+  # wrap values for prefetch pointer updates
+  s_mul_hi_i32(s_wrapA_hi, s_k_iters, s_stride_A),
+  s_mul_i32(s_wrapA_lo, s_k_iters, s_stride_A),
+  s_sub_co_u32(s_wrapA_lo, s_stride_A, s_wrapA_lo),
+  s_sub_co_ci_u32(s_wrapA_hi, 0, s_wrapA_hi),
+  s_cmp_eq_u32(s_remA_hi, 0),
+  s_cselect_b32(s_remA_mask, s_remA_lo, -1),
+  s_mul_hi_i32(s_wrapB_hi, s_k_iters, s_stride_B),
+  s_mul_i32(s_wrapB_lo, s_k_iters, s_stride_B),
+  s_sub_co_u32(s_wrapB_lo, s_stride_B, s_wrapB_lo),
+  s_sub_co_ci_u32(s_wrapB_hi, 0, s_wrapB_hi),
+  s_cmp_eq_u32(s_remB_hi, 0),
+  s_cselect_b32(s_remB_mask, s_remB_lo, -1),
+  s_add_co_u32(s_iter, s_iter, 2),
+  s_cmp_eq_u32(s_k_iters, 0),
+  s_cbranch_scc1("skip_first_prefetch"),
+  # **** GLOBAL -> VGPR
+  # Prefetch A matrix tiles (4 loads from rsrc=s_rsrc_A_idx)
+  *[buffer_load_b128(v[222+i*4:226+i*4], v[128+i], soffset=NULL, format=1, offen=1, rsrc=s_rsrc_A_idx) for i in range(4)],
+  # Prefetch B matrix tiles (4 loads from rsrc=s_rsrc_B_idx)
+  *[buffer_load_b128(v[238+i*4:242+i*4], v[132+i], soffset=NULL, format=1, offen=1, rsrc=s_rsrc_B_idx) for i in range(4)],
+  s_add_co_u32(s[18], s_k_iters, 1),
+  s_cmp_eq_u32(s_iter, s[18]),
+  s_cselect_b32(s[16], s_wrapA_lo, s_stride_A),
+  s_cselect_b32(s[17], s_wrapA_hi, 0),
+  s_add_co_u32(s_rsrc_A_lo, s_rsrc_A_lo, s[16]),
+  s_add_co_ci_u32(s_rsrc_A_hi, s_rsrc_A_hi, s[17]),
+  s_sub_co_u32(s_remA_lo, s_remA_lo, s[16]),
+  s_sub_co_ci_u32(s_remA_hi, s_remA_hi, s[17]),
+  s_cmp_eq_u32(s_remA_hi, 0),
+  s_cselect_b32(s_remA_mask, s_remA_lo, -1),
+  s_add_co_u32(s[18], s_k_iters, 1),
+  s_cmp_eq_u32(s_iter, s[18]),
+  s_cselect_b32(s[16], s_wrapB_lo, s_stride_B),
+  s_cselect_b32(s[17], s_wrapB_hi, 0),
+  s_add_co_u32(s_rsrc_B_lo, s_rsrc_B_lo, s[16]),
+  s_add_co_ci_u32(s_rsrc_B_hi, s_rsrc_B_hi, s[17]),
+  s_sub_co_u32(s_remB_lo, s_remB_lo, s[16]),
+  s_sub_co_ci_u32(s_remB_hi, s_remB_hi, s[17]),
+  s_cmp_eq_u32(s_remB_hi, 0),
+  s_cselect_b32(s_remB_mask, s_remB_lo, -1),
+  "skip_first_prefetch:",
+  s_mov_b64(s[16:17], s[28:29]),
+  s_mov_b32(s[18], 0x80000000),
+  s_mov_b32(s[19], 0x30020000),
+  s_mov_b64(s[20:21], s[30:31]),
+  s_mov_b32(s[22], 0x80000000),
+  s_mov_b32(s[23], 0x30020000),
+  s_mul_i32(s[70], C_TILE, s[3]),
+  s_mul_hi_u32(s[69], s[70], s_N),
+  s_mul_i32(s[68], s[70], s_N),
+  s_lshl_b64(s[68:69], s[68:69], s[8]),
+  s_add_co_u32(s[20], s[30], s[68]),
+  s_add_co_ci_u32(s[21], s[31], s[69]),
+  s_mul_hi_u32(s[69], s[70], s_N),
+  s_mul_i32(s[68], s[70], s_N),
+  s_lshl_b64(s[68:69], s[68:69], s[9]),
+  s_add_co_u32(s[16], s[28], s[68]),
+  s_add_co_ci_u32(s[17], s[29], s[69]),
+  # **** VGPR -> LDS
+  # Zero initialize accumulators v[0:127]
+  *[v_dual_mov_b32(VOPDOp.V_DUAL_MOV_B32, v[i], v[i+1], 0, 0) for i in range(0, 128, 2)],
+  s_wait_loadcnt(0x0),
+  ds_store_b128(addr=v_lds_A_base, data0=v_A_pf0, offset1=0),
+  ds_store_b128(addr=v_lds_A_base, data0=v_A_pf1, offset1=8),
+  ds_store_b128(addr=v_lds_A_base, data0=v_A_pf2, offset1=16),
+  ds_store_b128(addr=v_lds_A_base, data0=v_A_pf3, offset1=24),
+  ds_store_b128(addr=v_lds_B_base, data0=v_B_pf0, offset1=0),
+  ds_store_b128(addr=v_lds_B_base, data0=v_B_pf1, offset1=9),
+  ds_store_b128(addr=v_lds_B_base, data0=v_B_pf2, offset1=18),
+  ds_store_b128(addr=v_lds_B_base, data0=v_B_pf3, offset1=27),
+  s_cmp_eq_u32(s_k_iters, 1),
+  s_cbranch_scc1("skip_prefetch_2"),
+  # Prefetch A matrix tiles (4 loads from rsrc=s_rsrc_A_idx)
+  *[buffer_load_b128(v[222+i*4:226+i*4], v[128+i], soffset=NULL, format=1, offen=1, rsrc=s_rsrc_A_idx) for i in range(4)],
+  # Prefetch B matrix tiles (4 loads from rsrc=s_rsrc_B_idx)
+  *[buffer_load_b128(v[238+i*4:242+i*4], v[132+i], soffset=NULL, format=1, offen=1, rsrc=s_rsrc_B_idx) for i in range(4)],
+  "skip_prefetch_2:",
+  s_wait_dscnt(0x0),
+  s_barrier_signal(ssrc0=RawImm(193)),
+  s_barrier_wait(0xffff),
+  # **** LDS -> VGPR
+  # Load A tile from LDS: 8x b64 loads
+  *[ds_load_b64(v[156+i*2:158+i*2], v_lds_A_rd, offset1=i) for i in range(8)],
+  # Load B tile from LDS: 4x b128 loads
+  *[ds_load_b128(v[189+i*4:193+i*4], v_lds_B_rd, offset0=i*64) for i in range(4)],
+  s_cmp_eq_u32(s_k_iters, 1),
+  s_cbranch_scc1("final_wmma"),
+  s_cmp_le_u32(s_k_iters, 2),
+  s_cbranch_scc1("loop_epilogue"),
+  s_nop(0),
+  "main_loop:",
+  s_wait_dscnt(0x3),
+  # **** VPGR -> WMMA layout
+  v_perm_b32(v[140], v[158], v[156], s[66]),
+  v_perm_b32(v[141], v[162], v[160], s[66]),
+  v_perm_b32(v[142], v[166], v[164], s[66]),
+  v_perm_b32(v[143], v[170], v[168], s[66]),
+  v_perm_b32(v[144], v[158], v[156], s[67]),
+  v_perm_b32(v[145], v[162], v[160], s[67]),
+  v_wmma_f32_16x16x16_f16(v_acc0, v_B_frag0, v_A_wmma0, v_acc0),
+  ds_load_b64(v[172:173], v_lds_A_rd, offset1=16),
+  ds_load_b64(v[174:175], v_lds_A_rd, offset1=17),
+  s_cmp_eq_u32(s_k_iters, s_iter),
+  s_cselect_b32(s[68], s_wrapA_lo, s_stride_A),
+  s_cselect_b32(s[69], s_wrapA_hi, 0),
+  v_perm_b32(v[146], v[166], v[164], s[67]),
+  v_perm_b32(v[147], v[170], v[168], s[67]),
+  v_perm_b32(v[148], v[159], v[157], s[66]),
+  v_perm_b32(v[149], v[163], v[161], s[66]),
+  v_wmma_f32_16x16x16_f16(v_acc1, v_B_frag0, v_A_wmma1, v_acc1),
+  ds_load_b64(v[176:177], v_lds_A_rd, offset1=18),
+  ds_load_b64(v[178:179], v_lds_A_rd, offset1=19),
+  s_add_co_u32(s_rsrc_A_lo, s_rsrc_A_lo, s[68]),
+  s_add_co_ci_u32(s_rsrc_A_hi, s_rsrc_A_hi, s[69]),
+  s_sub_co_u32(s_remA_lo, s_remA_lo, s[68]),
+  v_perm_b32(v[150], v[167], v[165], s[66]),
+  v_perm_b32(v[151], v[171], v[169], s[66]),
+  v_perm_b32(v[152], v[159], v[157], s[67]),
+  v_perm_b32(v[153], v[163], v[161], s[67]),
+  v_wmma_f32_16x16x16_f16(v_acc2, v_B_frag0, v_A_wmma2, v_acc2),
+  ds_load_b64(v[180:181], v_lds_A_rd, offset1=20),
+  ds_load_b64(v[182:183], v_lds_A_rd, offset1=21),
+  s_sub_co_ci_u32(s_remA_hi, s_remA_hi, s[69]),
+  s_cmp_eq_u32(s_remA_hi, 0),
+  s_cselect_b32(s_remA_mask, s_remA_lo, -1),
+  v_perm_b32(v[154], v[167], v[165], s[67]),
+  v_perm_b32(v[155], v[171], v[169], s[67]),
+  s_nop(1),
+  v_wmma_f32_16x16x16_f16(v_acc3, v_B_frag0, v_A_wmma3, v_acc3),
+  ds_load_b64(v[184:185], v_lds_A_rd, offset1=22),
+  ds_load_b64(v[186:187], v_lds_A_rd, offset1=23),
+  s_cmp_eq_u32(s_k_iters, s_iter),
+  s_cselect_b32(s[68], s_wrapB_lo, s_stride_B),
+  s_cselect_b32(s[69], s_wrapB_hi, 0),
+  s_wait_dscnt(0x8),
+  v_wmma_f32_16x16x16_f16(v_acc4, v_B_frag1, v_A_wmma0, v_acc4),
+  ds_load_b128(v_B_frag4, v_lds_B_rd, offset0=32),
+  s_add_co_u32(s_rsrc_B_lo, s_rsrc_B_lo, s[68]),
+  s_add_co_ci_u32(s_rsrc_B_hi, s_rsrc_B_hi, s[69]),
+  s_sub_co_u32(s_remB_lo, s_remB_lo, s[68]),
+  v_wmma_f32_16x16x16_f16(v_acc5, v_B_frag1, v_A_wmma1, v_acc5),
+  ds_load_b128(v_B_frag5, v_lds_B_rd, offset0=96),
+  s_sub_co_ci_u32(s_remB_hi, s_remB_hi, s[69]),
+  s_cmp_eq_u32(s_remB_hi, 0),
+  s_cselect_b32(s_remB_mask, s_remB_lo, -1),
+  v_wmma_f32_16x16x16_f16(v_acc6, v_B_frag1, v_A_wmma2, v_acc6),
+  ds_load_b128(v_B_frag6, v_lds_B_rd, offset0=160),
+  v_wmma_f32_16x16x16_f16(v_acc7, v_B_frag1, v_A_wmma3, v_acc7),
+  ds_load_b128(v_B_frag7, v_lds_B_rd, offset0=224),
+  v_wmma_f32_16x16x16_f16(v_acc8, v_B_frag2, v_A_wmma0, v_acc8),
+  v_wmma_f32_16x16x16_f16(v_acc9, v_B_frag2, v_A_wmma1, v_acc9),
+  v_wmma_f32_16x16x16_f16(v_acc10, v_B_frag2, v_A_wmma2, v_acc10),
+  v_wmma_f32_16x16x16_f16(v_acc11, v_B_frag2, v_A_wmma3, v_acc11),
+  v_wmma_f32_16x16x16_f16(v_acc12, v_B_frag3, v_A_wmma0, v_acc12),
+  s_wait_dscnt(0x0),
+  s_barrier_signal(ssrc0=RawImm(193)),
+  s_barrier_wait(0xffff),
+  v_wmma_f32_16x16x16_f16(v_acc13, v_B_frag3, v_A_wmma1, v_acc13),
+  s_wait_loadcnt(0x7),
+  ds_store_b128(addr=v_lds_A_base, data0=v_A_pf0, offset1=0),
+  buffer_load_b128(v_A_pf0, v[128], soffset=NULL, format=1, offen=1, rsrc=s_rsrc_A_idx),
+  s_wait_loadcnt(0x7),
+  ds_store_b128(addr=v_lds_A_base, data0=v_A_pf1, offset1=8),
+  v_wmma_f32_16x16x16_f16(v_acc14, v_B_frag3, v_A_wmma2, v_acc14),
+  buffer_load_b128(v_A_pf1, v[129], soffset=NULL, format=1, offen=1, rsrc=s_rsrc_A_idx),
+  s_wait_loadcnt(0x7),
+  ds_store_b128(addr=v_lds_A_base, data0=v_A_pf2, offset1=16),
+  buffer_load_b128(v_A_pf2, v[130], soffset=NULL, format=1, offen=1, rsrc=s_rsrc_A_idx),
+  v_wmma_f32_16x16x16_f16(v_acc15, v_B_frag3, v_A_wmma3, v_acc15),
+  s_wait_loadcnt(0x7),
+  ds_store_b128(addr=v_lds_A_base, data0=v_A_pf3, offset1=24),
+  buffer_load_b128(v_A_pf3, v[131], soffset=NULL, format=1, offen=1, rsrc=s_rsrc_A_idx),
+  s_wait_loadcnt(0x7),
+  ds_store_b128(addr=v_lds_B_base, data0=v_B_pf0, offset1=0),
+  s_wait_dscnt(0x5),
+  v_perm_b32(v[140], v[174], v[172], s[66]),
+  v_perm_b32(v[141], v[178], v[176], s[66]),
+  v_perm_b32(v[142], v[182], v[180], s[66]),
+  v_perm_b32(v[143], v[186], v[184], s[66]),
+  v_perm_b32(v[144], v[174], v[172], s[67]),
+  v_perm_b32(v[145], v[178], v[176], s[67]),
+  v_wmma_f32_16x16x16_f16(v_acc0, v_B_frag4, v_A_wmma0, v_acc0),
+  buffer_load_b128(v_B_pf0, v[132], soffset=NULL, format=1, offen=1, rsrc=s_rsrc_B_idx),
+  s_wait_loadcnt(0x7),
+  ds_store_b128(addr=v_lds_B_base, data0=v_B_pf1, offset1=9),
+  buffer_load_b128(v_B_pf1, v[133], soffset=NULL, format=1, offen=1, rsrc=s_rsrc_B_idx),
+  v_perm_b32(v[146], v[182], v[180], s[67]),
+  v_perm_b32(v[147], v[186], v[184], s[67]),
+  v_perm_b32(v[148], v[175], v[173], s[66]),
+  v_perm_b32(v[149], v[179], v[177], s[66]),
+  v_wmma_f32_16x16x16_f16(v_acc1, v_B_frag4, v_A_wmma1, v_acc1),
+  s_wait_loadcnt(0x7),
+  ds_store_b128(addr=v_lds_B_base, data0=v_B_pf2, offset1=18),
+  buffer_load_b128(v_B_pf2, v[134], soffset=NULL, format=1, offen=1, rsrc=s_rsrc_B_idx),
+  s_wait_loadcnt(0x7),
+  ds_store_b128(addr=v_lds_B_base, data0=v_B_pf3, offset1=27),
+  v_perm_b32(v[150], v[183], v[181], s[66]),
+  v_perm_b32(v[151], v[187], v[185], s[66]),
+  v_perm_b32(v[152], v[175], v[173], s[67]),
+  v_perm_b32(v[153], v[179], v[177], s[67]),
+  v_wmma_f32_16x16x16_f16(v_acc2, v_B_frag4, v_A_wmma2, v_acc2),
+  buffer_load_b128(v_B_pf3, v[135], soffset=NULL, format=1, offen=1, rsrc=s_rsrc_B_idx),
+  v_perm_b32(v[154], v[183], v[181], s[67]),
+  v_perm_b32(v[155], v[187], v[185], s[67]),
+  s_nop(1),
+  v_wmma_f32_16x16x16_f16(v_acc3, v_B_frag4, v_A_wmma3, v_acc3),
+  v_wmma_f32_16x16x16_f16(v_acc4, v_B_frag5, v_A_wmma0, v_acc4),
+  s_wait_dscnt(0x0),
+  s_barrier_signal(ssrc0=RawImm(193)),
+  s_barrier_wait(0xffff),
+  v_wmma_f32_16x16x16_f16(v_acc5, v_B_frag5, v_A_wmma1, v_acc5),
+  ds_load_b64(v[156:157], v_lds_A_rd, offset1=0),
+  ds_load_b64(v[158:159], v_lds_A_rd, offset1=1),
+  v_wmma_f32_16x16x16_f16(v_acc6, v_B_frag5, v_A_wmma2, v_acc6),
+  ds_load_b64(v[160:161], v_lds_A_rd, offset1=2),
+  ds_load_b64(v[162:163], v_lds_A_rd, offset1=3),
+  v_wmma_f32_16x16x16_f16(v_acc7, v_B_frag5, v_A_wmma3, v_acc7),
+  ds_load_b64(v[164:165], v_lds_A_rd, offset1=4),
+  ds_load_b64(v[166:167], v_lds_A_rd, offset1=5),
+  v_wmma_f32_16x16x16_f16(v_acc8, v_B_frag6, v_A_wmma0, v_acc8),
+  ds_load_b64(v[168:169], v_lds_A_rd, offset1=6),
+  ds_load_b64(v[170:171], v_lds_A_rd, offset1=7),
+  v_wmma_f32_16x16x16_f16(v_acc9, v_B_frag6, v_A_wmma1, v_acc9),
+  ds_load_b128(v_B_frag0, v_lds_B_rd, offset0=0),
+  v_wmma_f32_16x16x16_f16(v_acc10, v_B_frag6, v_A_wmma2, v_acc10),
+  ds_load_b128(v_B_frag1, v_lds_B_rd, offset0=64),
+  v_wmma_f32_16x16x16_f16(v_acc11, v_B_frag6, v_A_wmma3, v_acc11),
+  ds_load_b128(v_B_frag2, v_lds_B_rd, offset0=128),
+  v_wmma_f32_16x16x16_f16(v_acc12, v_B_frag7, v_A_wmma0, v_acc12),
+  ds_load_b128(v_B_frag3, v_lds_B_rd, offset0=192),
+  v_wmma_f32_16x16x16_f16(v_acc13, v_B_frag7, v_A_wmma1, v_acc13),
+  v_wmma_f32_16x16x16_f16(v_acc14, v_B_frag7, v_A_wmma2, v_acc14),
+  v_wmma_f32_16x16x16_f16(v_acc15, v_B_frag7, v_A_wmma3, v_acc15),
+  s_sub_co_u32(s_k_iters, s_k_iters, 1),
+  s_cmp_eq_i32(s_k_iters, 2),
+  s_cbranch_scc0("main_loop"),
+  "loop_epilogue:",
+  s_wait_dscnt(0x3),
+  v_perm_b32(v[140], v[158], v[156], s[66]),
+  v_perm_b32(v[141], v[162], v[160], s[66]),
+  v_perm_b32(v[142], v[166], v[164], s[66]),
+  v_perm_b32(v[143], v[170], v[168], s[66]),
+  v_perm_b32(v[144], v[158], v[156], s[67]),
+  v_perm_b32(v[145], v[162], v[160], s[67]),
+  v_wmma_f32_16x16x16_f16(v_acc0, v_B_frag0, v_A_wmma0, v_acc0),
+  ds_load_b64(v[172:173], v_lds_A_rd, offset1=16),
+  ds_load_b64(v[174:175], v_lds_A_rd, offset1=17),
+  s_cmp_eq_u32(s_k_iters, s_iter),
+  s_cselect_b32(s[68], s_wrapA_lo, s_stride_A),
+  s_cselect_b32(s[69], s_wrapA_hi, 0),
+  v_perm_b32(v[146], v[166], v[164], s[67]),
+  v_perm_b32(v[147], v[170], v[168], s[67]),
+  v_perm_b32(v[148], v[159], v[157], s[66]),
+  v_perm_b32(v[149], v[163], v[161], s[66]),
+  v_wmma_f32_16x16x16_f16(v_acc1, v_B_frag0, v_A_wmma1, v_acc1),
+  ds_load_b64(v[176:177], v_lds_A_rd, offset1=18),
+  ds_load_b64(v[178:179], v_lds_A_rd, offset1=19),
+  s_add_co_u32(s_rsrc_A_lo, s_rsrc_A_lo, s[68]),
+  s_add_co_ci_u32(s_rsrc_A_hi, s_rsrc_A_hi, s[69]),
+  s_sub_co_u32(s_remA_lo, s_remA_lo, s[68]),
+  v_perm_b32(v[150], v[167], v[165], s[66]),
+  v_perm_b32(v[151], v[171], v[169], s[66]),
+  v_perm_b32(v[152], v[159], v[157], s[67]),
+  v_perm_b32(v[153], v[163], v[161], s[67]),
+  v_wmma_f32_16x16x16_f16(v_acc2, v_B_frag0, v_A_wmma2, v_acc2),
+  ds_load_b64(v[180:181], v_lds_A_rd, offset1=20),
+  ds_load_b64(v[182:183], v_lds_A_rd, offset1=21),
+  s_sub_co_ci_u32(s_remA_hi, s_remA_hi, s[69]),
+  s_cmp_eq_u32(s_remA_hi, 0),
+  s_cselect_b32(s_remA_mask, s_remA_lo, -1),
+  v_perm_b32(v[154], v[167], v[165], s[67]),
+  v_perm_b32(v[155], v[171], v[169], s[67]),
+  s_nop(1),
+  v_wmma_f32_16x16x16_f16(v_acc3, v_B_frag0, v_A_wmma3, v_acc3),
+  ds_load_b64(v[184:185], v_lds_A_rd, offset1=22),
+  ds_load_b64(v[186:187], v_lds_A_rd, offset1=23),
+  s_cmp_eq_u32(s_k_iters, s_iter),
+  s_cselect_b32(s[68], s_wrapB_lo, s_stride_B),
+  s_cselect_b32(s[69], s_wrapB_hi, 0),
+  s_wait_dscnt(0x8),
+  v_wmma_f32_16x16x16_f16(v_acc4, v_B_frag1, v_A_wmma0, v_acc4),
+  ds_load_b128(v_B_frag4, v_lds_B_rd, offset0=32),
+  s_add_co_u32(s_rsrc_B_lo, s_rsrc_B_lo, s[68]),
+  s_add_co_ci_u32(s_rsrc_B_hi, s_rsrc_B_hi, s[69]),
+  s_sub_co_u32(s_remB_lo, s_remB_lo, s[68]),
+  v_wmma_f32_16x16x16_f16(v_acc5, v_B_frag1, v_A_wmma1, v_acc5),
+  ds_load_b128(v_B_frag5, v_lds_B_rd, offset0=96),
+  s_sub_co_ci_u32(s_remB_hi, s_remB_hi, s[69]),
+  s_cmp_eq_u32(s_remB_hi, 0),
+  s_cselect_b32(s_remB_mask, s_remB_lo, -1),
+  v_wmma_f32_16x16x16_f16(v_acc6, v_B_frag1, v_A_wmma2, v_acc6),
+  ds_load_b128(v_B_frag6, v_lds_B_rd, offset0=160),
+  v_wmma_f32_16x16x16_f16(v_acc7, v_B_frag1, v_A_wmma3, v_acc7),
+  ds_load_b128(v_B_frag7, v_lds_B_rd, offset0=224),
+  v_wmma_f32_16x16x16_f16(v_acc8, v_B_frag2, v_A_wmma0, v_acc8),
+  v_wmma_f32_16x16x16_f16(v_acc9, v_B_frag2, v_A_wmma1, v_acc9),
+  v_wmma_f32_16x16x16_f16(v_acc10, v_B_frag2, v_A_wmma2, v_acc10),
+  v_wmma_f32_16x16x16_f16(v_acc11, v_B_frag2, v_A_wmma3, v_acc11),
+  v_wmma_f32_16x16x16_f16(v_acc12, v_B_frag3, v_A_wmma0, v_acc12),
+  s_wait_dscnt(0x0),
+  s_barrier_signal(ssrc0=RawImm(193)),
+  s_barrier_wait(0xffff),
+  v_wmma_f32_16x16x16_f16(v_acc13, v_B_frag3, v_A_wmma1, v_acc13),
+  s_wait_loadcnt(0x7),
+  ds_store_b128(addr=v_lds_A_base, data0=v_A_pf0, offset1=0),
+  s_wait_loadcnt(0x6),
+  ds_store_b128(addr=v_lds_A_base, data0=v_A_pf1, offset1=8),
+  v_wmma_f32_16x16x16_f16(v_acc14, v_B_frag3, v_A_wmma2, v_acc14),
+  s_wait_loadcnt(0x5),
+  ds_store_b128(addr=v_lds_A_base, data0=v_A_pf2, offset1=16),
+  v_wmma_f32_16x16x16_f16(v_acc15, v_B_frag3, v_A_wmma3, v_acc15),
+  s_wait_loadcnt(0x4),
+  ds_store_b128(addr=v_lds_A_base, data0=v_A_pf3, offset1=24),
+  s_wait_loadcnt(0x3),
+  ds_store_b128(addr=v_lds_B_base, data0=v_B_pf0, offset1=0),
+  s_wait_dscnt(0x5),
+  v_perm_b32(v[140], v[174], v[172], s[66]),
+  v_perm_b32(v[141], v[178], v[176], s[66]),
+  v_perm_b32(v[142], v[182], v[180], s[66]),
+  v_perm_b32(v[143], v[186], v[184], s[66]),
+  v_perm_b32(v[144], v[174], v[172], s[67]),
+  v_perm_b32(v[145], v[178], v[176], s[67]),
+  v_wmma_f32_16x16x16_f16(v_acc0, v_B_frag4, v_A_wmma0, v_acc0),
+  s_wait_loadcnt(0x2),
+  ds_store_b128(addr=v_lds_B_base, data0=v_B_pf1, offset1=9),
+  v_perm_b32(v[146], v[182], v[180], s[67]),
+  v_perm_b32(v[147], v[186], v[184], s[67]),
+  v_perm_b32(v[148], v[175], v[173], s[66]),
+  v_perm_b32(v[149], v[179], v[177], s[66]),
+  v_wmma_f32_16x16x16_f16(v_acc1, v_B_frag4, v_A_wmma1, v_acc1),
+  s_wait_loadcnt(0x1),
+  ds_store_b128(addr=v_lds_B_base, data0=v_B_pf2, offset1=18),
+  s_wait_loadcnt(0x0),
+  ds_store_b128(addr=v_lds_B_base, data0=v_B_pf3, offset1=27),
+  v_perm_b32(v[150], v[183], v[181], s[66]),
+  v_perm_b32(v[151], v[187], v[185], s[66]),
+  v_perm_b32(v[152], v[175], v[173], s[67]),
+  v_perm_b32(v[153], v[179], v[177], s[67]),
+  v_wmma_f32_16x16x16_f16(v_acc2, v_B_frag4, v_A_wmma2, v_acc2),
+  v_perm_b32(v[154], v[183], v[181], s[67]),
+  v_perm_b32(v[155], v[187], v[185], s[67]),
+  s_nop(1),
+  v_wmma_f32_16x16x16_f16(v_acc3, v_B_frag4, v_A_wmma3, v_acc3),
+  v_wmma_f32_16x16x16_f16(v_acc4, v_B_frag5, v_A_wmma0, v_acc4),
+  s_wait_dscnt(0x0),
+  s_barrier_signal(ssrc0=RawImm(193)),
+  s_barrier_wait(0xffff),
+  v_wmma_f32_16x16x16_f16(v_acc5, v_B_frag5, v_A_wmma1, v_acc5),
+  ds_load_b64(v[156:157], v_lds_A_rd, offset1=0),
+  ds_load_b64(v[158:159], v_lds_A_rd, offset1=1),
+  v_wmma_f32_16x16x16_f16(v_acc6, v_B_frag5, v_A_wmma2, v_acc6),
+  ds_load_b64(v[160:161], v_lds_A_rd, offset1=2),
+  ds_load_b64(v[162:163], v_lds_A_rd, offset1=3),
+  v_wmma_f32_16x16x16_f16(v_acc7, v_B_frag5, v_A_wmma3, v_acc7),
+  ds_load_b64(v[164:165], v_lds_A_rd, offset1=4),
+  ds_load_b64(v[166:167], v_lds_A_rd, offset1=5),
+  v_wmma_f32_16x16x16_f16(v_acc8, v_B_frag6, v_A_wmma0, v_acc8),
+  ds_load_b64(v[168:169], v_lds_A_rd, offset1=6),
+  ds_load_b64(v[170:171], v_lds_A_rd, offset1=7),
+  v_wmma_f32_16x16x16_f16(v_acc9, v_B_frag6, v_A_wmma1, v_acc9),
+  ds_load_b128(v_B_frag0, v_lds_B_rd, offset0=0),
+  v_wmma_f32_16x16x16_f16(v_acc10, v_B_frag6, v_A_wmma2, v_acc10),
+  ds_load_b128(v_B_frag1, v_lds_B_rd, offset0=64),
+  v_wmma_f32_16x16x16_f16(v_acc11, v_B_frag6, v_A_wmma3, v_acc11),
+  ds_load_b128(v_B_frag2, v_lds_B_rd, offset0=128),
+  v_wmma_f32_16x16x16_f16(v_acc12, v_B_frag7, v_A_wmma0, v_acc12),
+  ds_load_b128(v_B_frag3, v_lds_B_rd, offset0=192),
+  v_wmma_f32_16x16x16_f16(v_acc13, v_B_frag7, v_A_wmma1, v_acc13),
+  v_wmma_f32_16x16x16_f16(v_acc14, v_B_frag7, v_A_wmma2, v_acc14),
+  v_wmma_f32_16x16x16_f16(v_acc15, v_B_frag7, v_A_wmma3, v_acc15),
+  "final_wmma:",
+  s_wait_dscnt(0x3),
+  v_perm_b32(v[140], v[158], v[156], s[66]),
+  v_perm_b32(v[141], v[162], v[160], s[66]),
+  v_perm_b32(v[142], v[166], v[164], s[66]),
+  v_perm_b32(v[143], v[170], v[168], s[66]),
+  v_perm_b32(v[144], v[158], v[156], s[67]),
+  v_perm_b32(v[145], v[162], v[160], s[67]),
+  v_wmma_f32_16x16x16_f16(v_acc0, v_B_frag0, v_A_wmma0, v_acc0),
+  ds_load_b64(v[172:173], v_lds_A_rd, offset1=16),
+  ds_load_b64(v[174:175], v_lds_A_rd, offset1=17),
+  v_perm_b32(v[146], v[166], v[164], s[67]),
+  v_perm_b32(v[147], v[170], v[168], s[67]),
+  v_perm_b32(v[148], v[159], v[157], s[66]),
+  v_perm_b32(v[149], v[163], v[161], s[66]),
+  v_wmma_f32_16x16x16_f16(v_acc1, v_B_frag0, v_A_wmma1, v_acc1),
+  ds_load_b64(v[176:177], v_lds_A_rd, offset1=18),
+  ds_load_b64(v[178:179], v_lds_A_rd, offset1=19),
+  v_perm_b32(v[150], v[167], v[165], s[66]),
+  v_perm_b32(v[151], v[171], v[169], s[66]),
+  v_perm_b32(v[152], v[159], v[157], s[67]),
+  v_perm_b32(v[153], v[163], v[161], s[67]),
+  v_wmma_f32_16x16x16_f16(v_acc2, v_B_frag0, v_A_wmma2, v_acc2),
+  ds_load_b64(v[180:181], v_lds_A_rd, offset1=20),
+  ds_load_b64(v[182:183], v_lds_A_rd, offset1=21),
+  v_perm_b32(v[154], v[167], v[165], s[67]),
+  v_perm_b32(v[155], v[171], v[169], s[67]),
+  s_nop(1),
+  v_wmma_f32_16x16x16_f16(v_acc3, v_B_frag0, v_A_wmma3, v_acc3),
+  ds_load_b64(v[184:185], v_lds_A_rd, offset1=22),
+  ds_load_b64(v[186:187], v_lds_A_rd, offset1=23),
+  s_wait_dscnt(0x8),
+  v_wmma_f32_16x16x16_f16(v_acc4, v_B_frag1, v_A_wmma0, v_acc4),
+  ds_load_b128(v_B_frag4, v_lds_B_rd, offset0=32),
+  v_wmma_f32_16x16x16_f16(v_acc5, v_B_frag1, v_A_wmma1, v_acc5),
+  ds_load_b128(v_B_frag5, v_lds_B_rd, offset0=96),
+  v_wmma_f32_16x16x16_f16(v_acc6, v_B_frag1, v_A_wmma2, v_acc6),
+  ds_load_b128(v_B_frag6, v_lds_B_rd, offset0=160),
+  v_wmma_f32_16x16x16_f16(v_acc7, v_B_frag1, v_A_wmma3, v_acc7),
+  ds_load_b128(v_B_frag7, v_lds_B_rd, offset0=224),
+  v_wmma_f32_16x16x16_f16(v_acc8, v_B_frag2, v_A_wmma0, v_acc8),
+  v_wmma_f32_16x16x16_f16(v_acc9, v_B_frag2, v_A_wmma1, v_acc9),
+  v_wmma_f32_16x16x16_f16(v_acc10, v_B_frag2, v_A_wmma2, v_acc10),
+  v_wmma_f32_16x16x16_f16(v_acc11, v_B_frag2, v_A_wmma3, v_acc11),
+  v_wmma_f32_16x16x16_f16(v_acc12, v_B_frag3, v_A_wmma0, v_acc12),
+  v_wmma_f32_16x16x16_f16(v_acc13, v_B_frag3, v_A_wmma1, v_acc13),
+  s_wait_dscnt(0x0),
+  s_barrier_signal(ssrc0=RawImm(193)),
+  s_barrier_wait(0xffff),
+  v_wmma_f32_16x16x16_f16(v_acc14, v_B_frag3, v_A_wmma2, v_acc14),
+  v_wmma_f32_16x16x16_f16(v_acc15, v_B_frag3, v_A_wmma3, v_acc15),
+  s_wait_dscnt(0x0),
+  v_perm_b32(v[140], v[174], v[172], s[66]),
+  v_perm_b32(v[141], v[178], v[176], s[66]),
+  v_perm_b32(v[142], v[182], v[180], s[66]),
+  v_perm_b32(v[143], v[186], v[184], s[66]),
+  v_perm_b32(v[144], v[174], v[172], s[67]),
+  v_perm_b32(v[145], v[178], v[176], s[67]),
+  v_wmma_f32_16x16x16_f16(v_acc0, v_B_frag4, v_A_wmma0, v_acc0),
+  v_perm_b32(v[146], v[182], v[180], s[67]),
+  v_perm_b32(v[147], v[186], v[184], s[67]),
+  v_perm_b32(v[148], v[175], v[173], s[66]),
+  v_perm_b32(v[149], v[179], v[177], s[66]),
+  v_wmma_f32_16x16x16_f16(v_acc1, v_B_frag4, v_A_wmma1, v_acc1),
+  v_perm_b32(v[150], v[183], v[181], s[66]),
+  v_perm_b32(v[151], v[187], v[185], s[66]),
+  v_perm_b32(v[152], v[175], v[173], s[67]),
+  v_perm_b32(v[153], v[179], v[177], s[67]),
+  v_wmma_f32_16x16x16_f16(v_acc2, v_B_frag4, v_A_wmma2, v_acc2),
+  v_perm_b32(v[154], v[183], v[181], s[67]),
+  v_perm_b32(v[155], v[187], v[185], s[67]),
+  s_nop(1),
+  v_wmma_f32_16x16x16_f16(v_acc3, v_B_frag4, v_A_wmma3, v_acc3),
+  v_wmma_f32_16x16x16_f16(v_acc4, v_B_frag5, v_A_wmma0, v_acc4),
+  v_wmma_f32_16x16x16_f16(v_acc5, v_B_frag5, v_A_wmma1, v_acc5),
+  v_wmma_f32_16x16x16_f16(v_acc6, v_B_frag5, v_A_wmma2, v_acc6),
+  v_wmma_f32_16x16x16_f16(v_acc7, v_B_frag5, v_A_wmma3, v_acc7),
+  v_wmma_f32_16x16x16_f16(v_acc8, v_B_frag6, v_A_wmma0, v_acc8),
+  v_wmma_f32_16x16x16_f16(v_acc9, v_B_frag6, v_A_wmma1, v_acc9),
+  v_wmma_f32_16x16x16_f16(v_acc10, v_B_frag6, v_A_wmma2, v_acc10),
+  v_wmma_f32_16x16x16_f16(v_acc11, v_B_frag6, v_A_wmma3, v_acc11),
+  v_wmma_f32_16x16x16_f16(v_acc12, v_B_frag7, v_A_wmma0, v_acc12),
+  v_wmma_f32_16x16x16_f16(v_acc13, v_B_frag7, v_A_wmma1, v_acc13),
+  v_wmma_f32_16x16x16_f16(v_acc14, v_B_frag7, v_A_wmma2, v_acc14),
+  v_wmma_f32_16x16x16_f16(v_acc15, v_B_frag7, v_A_wmma3, v_acc15),
+  v_lshrrev_b32_e32(v[132], 5, v_tid),
+  v_lshrrev_b32_e32(v[133], 1, v[132]),
+  v_mul_lo_u32(v[133], 16, v[133]),
+  v_and_b32_e32(v[129], 31, v_tid),
+  v_lshrrev_b32_e32(v[129], 4, v[129]),
+  v_lshlrev_b32_e32(v[129], 3, v[129]),
+  v_add_lshl_u32(v[129], v[133], v[129], 2),
+  v_mul_lo_u32(v[130], v[129], s_N),
+  v_mul_lo_u32(v[131], v[129], s_N),
+  v_and_b32_e32(v[128], 1, v[132]),
+  v_mul_lo_u32(v[128], 16, v[128]),
+  v_and_b32_e32(v[133], 15, v_tid),
+  s_mul_i32(s[8], C_TILE, s[2]),
+  v_add_lshl_u32(v[128], v[133], v[128], 2),
+  v_add_nc_u32_e32(v[128], s[8], v[128]),
+  v_add_lshl_u32(v_lds_B_base, v[131], v[128], 1),
+  ]
+  # VGPR -> GLOBAL store
+  insts += [s_wait_dscnt(0x0)]
+  saddr, tmpv, vaddr = 16, 140, v_lds_B_base
+  bases = (0, 32, 64, 96)
+  row_pairs = ((0, 1), (2, 3), (4, 5), (6, 7))
+  store_seq = [base+r for a, b in row_pairs for r in (a, b) for base in bases]
+  def pack_f16(vdst, a, b): return [v_cvt_f16_f32_e64(a, a), v_cvt_f16_f32_e64(b, b), v_pack_b32_f16(vdst, a, b)]
+  for i,base in enumerate(store_seq):
+    if i > 0: insts += [s_add_co_u32(s[saddr], s[saddr], N << 1), s_add_co_ci_u32(s[saddr+1], s[saddr+1], 0)]
+    insts += pack_f16(v[tmpv], v[base], v[base+8])
+    insts += pack_f16(v[tmpv+1], v[base+16], v[base+24])
+    insts += [buffer_store_b64(v[tmpv:tmpv+1], vaddr, soffset=NULL, format=1, offen=1, rsrc=saddr)]
+  insts += [s_endpgm()]
+  src = "\n".join([i if isinstance(i, str) else f"\t{i.disasm()}" for i in insts])
+  lib = pack_hsaco(template.replace("INSTRUCTIONS", src), "gfx1200")
+  sink = UOp.sink(A, B, C, lidx, gidx, arg=KernelInfo(name="gemm"))
+  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg=dev), UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=src),
+                               UOp(Ops.BINARY, arg=lib)), arg=())
+
+if __name__ == "__main__":
+  test_matmul(custom_gemm(N, Device.DEFAULT), dtype=dtypes.half, N=N)
