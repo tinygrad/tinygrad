@@ -53,7 +53,7 @@ class CLProgram:
     try: check(cl.clReleaseProgram(self.program))
     except (TypeError, AttributeError): pass
 
-  def __call__(self, *bufs:tuple[ctypes._CData, BufferSpec], global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]|None=None,
+  def __call__(self, *bufs:tuple[cl.cl_mem, BufferSpec], global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]|None=None,
                vals:tuple[int, ...]=(), wait=False) -> float|None:
     for i,(b,_) in enumerate(bufs):
       if isinstance(dt:=self.buf_dtypes[i], ImageDType):
@@ -75,13 +75,13 @@ class CLProgram:
     return None
 
 class CLAllocator(LRUAllocator['CLDevice']):
-  def _alloc(self, size:int, options:BufferSpec) -> tuple[ctypes._CData, BufferSpec]:
+  def _alloc(self, size:int, options:BufferSpec) -> tuple[cl.cl_mem, BufferSpec]:
     # Recalculate real size for texture
     if options.image is not None: size = options.image.pitch * options.image.shape[0]
     return (checked(cl.clCreateBuffer(self.dev.context, cl.CL_MEM_READ_WRITE, size, None, status := ctypes.c_int32()), status), options)
   @suppress_finalizing
-  def _free(self, opaque:tuple[ctypes._CData, BufferSpec], options:BufferSpec): check(cl.clReleaseMemObject(opaque[0]))
-  def _copyin(self, dest:tuple[ctypes._CData, BufferSpec], src:memoryview):
+  def _free(self, opaque:tuple[cl.cl_mem, BufferSpec], options:BufferSpec): check(cl.clReleaseMemObject(opaque[0]))
+  def _copyin(self, dest:tuple[cl.cl_mem, BufferSpec], src:memoryview):
     if mv_address(src) % 16: src = memoryview(bytearray(src))
     if (img:=dest[1].image):
       stride = img.shape[1]*img.itemsize*4
@@ -89,7 +89,7 @@ class CLAllocator(LRUAllocator['CLDevice']):
         check(cl.clEnqueueWriteBuffer(self.dev.queue, dest[0], False, i*img.pitch, stride, mv_address(src)+(i*stride), 0, None, None))
     else: check(cl.clEnqueueWriteBuffer(self.dev.queue, dest[0], False, 0, len(src)*src.itemsize, from_mv(src), 0, None, None))
     self.dev.pending_copyin.append(src)    # NOTE: these can't be freed until the GPU actually executes this command
-  def _copyout(self, dest:memoryview, src:tuple[ctypes._CData, BufferSpec]):
+  def _copyout(self, dest:memoryview, src:tuple[cl.cl_mem, BufferSpec]):
     if (img:=src[1].image):
       stride = img.shape[1]*img.itemsize*4
       for i in range(img.shape[0]):
