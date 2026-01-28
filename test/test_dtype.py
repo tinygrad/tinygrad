@@ -3,7 +3,7 @@ import numpy as np
 import torch
 from typing import Any, List
 from tinygrad.device import is_dtype_supported
-from tinygrad.helpers import getenv, DEBUG, CI
+from tinygrad.helpers import getenv, DEBUG, CI, EMULATED_DTYPES
 from tinygrad.dtype import DType, DTYPES_DICT, least_upper_dtype, fp8_to_float, float_to_fp8, _to_np_dtype, _to_torch_dtype, truncate
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.nir import NIRRenderer
@@ -18,9 +18,12 @@ settings.register_profile("my_profile", max_examples=200, deadline=None, derando
 settings.load_profile("my_profile")
 
 def get_available_cast_dtypes(dtype: DType) -> List[DType]:
-  if not is_dtype_supported(dtype): return []
   # dont cast internal dtypes
-  return [v for k, v in DTYPES_DICT.items() if v != dtype and is_dtype_supported(v) and not k.startswith("_")]
+  dts = [v for k, v in DTYPES_DICT.items() if v != dtype and is_dtype_supported(v) and not k.startswith("_")]
+  if not is_dtype_supported(dtype) or dtypes.long in EMULATED_DTYPES.tolist(dtypes):
+    if dtype in (dtypes.long, dtypes.ulong): return [dt for dt in dts if dt != dtypes.double] # can't bitcast with no 64-bit support
+    else: return []
+  return dts
 
 def _to_torch_storage_type(dtype:DType):
   if dtype == dtypes.bfloat16: return torch.float32
@@ -333,8 +336,14 @@ class TestUint16DType(TestDType):
 class TestInt32DType(TestDType): DTYPE = dtypes.int32
 class TestUint32DType(TestDType): DTYPE = dtypes.uint32
 
-class TestInt64DType(TestDType): DTYPE = dtypes.int64
+class TestInt64DType(TestDType):
+  DTYPE = dtypes.int64
+  @classmethod
+  def setUpClass(cls): cls.DATA = rand_for_dtype(cls.DTYPE, 10)
+
 class TestUint64DType(TestDType):
+  @classmethod
+  def setUpClass(cls): cls.DATA = rand_for_dtype(cls.DTYPE, 10)
   DTYPE = dtypes.uint64
   def test_uint64_load(self):
     assert Tensor(2**64 - 1, dtype=dtypes.uint64).numpy() == 2**64 - 1
