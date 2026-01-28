@@ -167,19 +167,19 @@ class TestIndexing(unittest.TestCase):
     # LLaMA 8B training config from model_train.py
     # vocab_size=32000 (overridden from 128256), dim=4096, BS=16, SEQLEN=8192
     vocab_size, embed_size = 32000, 4096
-    bs, seqlen = 16, 8191  # tokens[:, :-1] in train_step
-    tokens = Tensor.randint(bs, seqlen, high=vocab_size)
+    bs, seqlen = 8, 8192  # tokens[:, :-1] in train_step
+    tokens = Tensor.empty(bs, seqlen, dtype=dtypes.int, device="NULL")
     # forward
     emb = nn.Embedding(vocab_size, embed_size)
-    emb.weight = Tensor.empty(vocab_size, embed_size, dtype=dtypes.float).realize()
+    emb.weight = Tensor.empty(vocab_size, embed_size, dtype=dtypes.float, device="NULL").realize()
     GlobalCounters.reset()
     emb(tokens).realize()
     fwd_ops = GlobalCounters.global_ops
     print(f"embedding fwd: {GlobalCounters.kernel_count} kernels, {fwd_ops:,} ops")
     # backward
-    emb.weight = Tensor.empty(vocab_size, embed_size, dtype=dtypes.float, requires_grad=True).realize()
+    emb.weight = Tensor.empty(vocab_size, embed_size, dtype=dtypes.float, requires_grad=True, device="NULL").realize()
     GlobalCounters.reset()
-    emb(tokens).sum().backward()
+    emb(tokens).contiguous().contiguous_backward().sum().backward()
     emb.weight.grad.realize()
     bwd_ops = GlobalCounters.global_ops
     print(f"embedding bwd: {GlobalCounters.kernel_count} kernels, {bwd_ops:,} ops")
