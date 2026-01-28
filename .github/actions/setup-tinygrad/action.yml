@@ -58,18 +58,24 @@ runs:
 
     - name: Cache Python packages
       id: restore-venv
-      uses: ./.github/actions/cache
+      uses: actions/cache@v4
       with:
         path: ${{ github.workspace }}/.venv
         key: venv-${{ runner.os }}-python-${{ steps.setup-python.outputs.python-version }}-${{ inputs.deps }}-${{ inputs.pydeps }}-${{ env.CACHE_VERSION }}
 
     # **** Caching downloads ****
 
-    - name: Cache downloads
-      if: inputs.key != ''
-      uses: ./.github/actions/cache
+    - name: Cache downloads (Linux)
+      if: inputs.key != '' && runner.os == 'Linux'
+      uses: actions/cache@v4
       with:
-        path: ${{ runner.os == 'Linux' && '~/.cache/tinygrad/downloads/' || '~/Library/Caches/tinygrad/downloads/' }}
+        path: ~/.cache/tinygrad/downloads/
+        key: downloads-${{ github.job }}-${{ inputs.key }}-${{ env.CACHE_VERSION }}
+    - name: Cache downloads (macOS)
+      if: inputs.key != '' && runner.os == 'macOS'
+      uses: actions/cache@v4
+      with:
+        path: ~/Library/Caches/tinygrad/downloads/
         key: downloads-${{ github.job }}-${{ inputs.key }}-${{ env.CACHE_VERSION }}
 
     # **** Python deps ****
@@ -178,7 +184,7 @@ runs:
 
     - name: Cache apt
       if: runner.os == 'Linux' && (inputs.opencl == 'true' || inputs.amd == 'true' || inputs.cuda == 'true' || inputs.webgpu == 'true' || inputs.llvm == 'true')
-      uses: ./.github/actions/cache
+      uses: actions/cache@v4
       with:
         path: /var/cache/apt/archives/
         key: ${{ runner.os }}-apt-${{ steps.apt-pkgs.outputs.hash }}-${{ env.CACHE_VERSION }}
@@ -236,7 +242,7 @@ runs:
     - name: Cache gpuocelot
       if: inputs.ocelot == 'true'
       id: cache-build
-      uses: ./.github/actions/cache
+      uses: actions/cache@v4
       env:
         cache-name: cache-gpuocelot-build-1
       with:
