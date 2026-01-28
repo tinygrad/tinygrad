@@ -1517,7 +1517,7 @@ def train_llama3():
 
       for j,tokens in tqdm(enumerate(eval_iter), total=EVAL_SAMPLES//EVAL_BS):
         eval_losses += eval_step(model, tokens).tolist()
-        
+
         if BENCHMARK and (j+1) == min(BENCHMARK, EVAL_SAMPLES//EVAL_BS):
           return
 
