@@ -1263,7 +1263,6 @@ class TestMultiRamUsage(unittest.TestCase):
     self.assertEqual(total_mem[dtypes.half], total_mem[dtypes.float] // 2)
 
   def test_matmul_half(self): self._test_matmul_half(devices_2)
-  @unittest.expectedFailure
   def test_matmul_half_alt(self): self._test_matmul_half(devices_4)
 
 @unittest.skipIf(not_support_multi_device(), "need multi")

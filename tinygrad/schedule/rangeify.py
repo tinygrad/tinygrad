@@ -171,7 +171,7 @@ def remove_bufferize(src:UOp, buf:UOp, idx:UOp):
     indexes: list[UOp] = []
     reduces: list[UOp] = []
     def red_gate(x:UOp):
-      if x.op is Ops.BUFFERIZE and x.arg.addrspace == AddrSpace.GLOBAL:
+      if (x.op is Ops.BUFFERIZE and x.arg.addrspace == AddrSpace.GLOBAL) or x.op is Ops.MSTACK:
         accessed_buffers.append(x)
         return False
       if x.op is Ops.BUFFER:
