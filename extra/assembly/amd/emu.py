@@ -337,28 +337,33 @@ class _Ctx:
     offset = reg.cast(dtypes.int) * _c(32, dtypes.int) + lane.cast(dtypes.int)
     return buf.index(offset, _lane_active(exec_mask, lane)).store(val.cast(dtypes.uint32))
 
-  def rsrc_dyn(self, off: UOp, lane: UOp, bits: int = 32, literal: UOp | None = None) -> UOp:
-    """Read source operand with dynamic offset. Handles SGPR/inline constants (<256), VGPR (>=256)."""
-    is_vgpr, vgpr_reg = off >= _c(256), off - _c(256)
+  def rsrc_dyn(self, off: UOp, lane: UOp | None, bits: int = 32, literal: UOp | None = None) -> UOp:
+    """Read source operand with dynamic offset. Handles SGPR/inline constants (<256), VGPR (>=256).
+    If lane is None, only scalar access is supported (off must be < 256)."""
     is_float_const = (off >= _c(240)) & (off <= _c(248))
     sgpr_lo = self.rsgpr_dyn(off)
-    vgpr_lo = self.rvgpr_dyn(vgpr_reg, lane, is_vgpr)
+
+    if lane is not None:
+      is_vgpr, vgpr_reg = off >= _c(256), off - _c(256)
+      vgpr_lo = self.rvgpr_dyn(vgpr_reg, lane, is_vgpr)
 
     if bits == 64:
-      vgpr_val = _u64(vgpr_lo, self.rvgpr_dyn(vgpr_reg + _c(1), lane, is_vgpr))
+      if lane is not None:
+        vgpr_val = _u64(vgpr_lo, self.rvgpr_dyn(vgpr_reg + _c(1), lane, is_vgpr))
       sgpr_val = _u64(sgpr_lo, self.rsgpr_dyn(off + _c(1)))
       # Float constants: cast F32 to F64; integer inline: duplicate lo
       inline = is_float_const.where(sgpr_lo.bitcast(dtypes.float32).cast(dtypes.float64).bitcast(dtypes.uint64), _u64(sgpr_lo, sgpr_lo))
       if literal is not None: inline = off.eq(_c(255)).where(literal.cast(dtypes.uint64) << UOp.const(dtypes.uint64, 32), inline)
       scalar_val = (off < _c(128)).where(sgpr_val, inline)
     else:
-      vgpr_val = vgpr_lo
+      if lane is not None:
+        vgpr_val = vgpr_lo
       scalar_val = sgpr_lo
       if literal is not None: scalar_val = off.eq(_c(255)).where(literal, scalar_val)
       if bits == 16:  # Float constants: cast F32 to F16
         scalar_val = is_float_const.where(scalar_val.bitcast(dtypes.float32).cast(dtypes.half).bitcast(dtypes.uint16).cast(dtypes.uint32), scalar_val)
 
-    return is_vgpr.where(vgpr_val, scalar_val)
+    return is_vgpr.where(vgpr_val, scalar_val) if lane is not None else scalar_val
 
   def rpc(self) -> UOp:
     """Read PC as 64-bit byte address."""
@@ -506,35 +511,8 @@ def _compile_smem(inst: SMEM, ctx: _Ctx) -> UOp:
   return UOp.sink(*stores, *ctx.inc_pc())
 
 def _compile_sop(inst: SOP1 | SOP2 | SOPC | SOPK, ctx: _Ctx) -> UOp:
-  sizes = getattr(inst, 'op_regs', {})
+  bits = inst.canonical_op_bits
   literal = ctx.inst_field(type(inst).literal) if hasattr(type(inst), 'literal') else None
-
-  # Read source operands dynamically
-  def rsrc_dyn_scalar(off: UOp, is_64bit: bool) -> UOp:
-    """Read scalar source with dynamic offset (SGPR or inline constant).
-    For SOP, off is always 0-255 (SGPR or inline constant, never VGPR).
-    SGPR buffer has 260 entries: 0-127=SGPRs, 128-255=inline constants, 256-259=special."""
-    is_sgpr = off < _c(128)
-    # For 64-bit: read SGPR pair if off < 128, else compute inline constant as 64-bit
-    # (can't just read from buffer since buffer has 32-bit values)
-    if is_64bit:
-      sgpr_val = _u64(ctx.rsgpr_dyn(off), ctx.rsgpr_dyn(off + _c(1)))
-      # Build inline constant: 128-192 = 0-64, 193-208 = -1 to -16
-      inline_val = (off - _c(128)).cast(dtypes.uint64)  # positive inline 0-64
-      neg_val = (_c(192) - off).cast(dtypes.int64).cast(dtypes.uint64)  # negative -1 to -16
-      lit_val = literal.cast(dtypes.uint64) if literal is not None else UOp.const(dtypes.uint64, 0)
-      # Select between sgpr, positive inline, negative inline, or literal
-      is_neg_inline = (off >= _c(193)) & (off < _c(209))
-      is_literal = off.eq(_c(255)) if literal is not None else UOp.const(dtypes.bool, False)
-      val = is_sgpr.where(sgpr_val, is_neg_inline.where(neg_val, is_literal.where(lit_val, inline_val)))
-      return val
-    # 32-bit: read from SGPR buffer (inline constants 128-255 are pre-populated)
-    # off is always 0-255 for SOP, all valid SGPR indices
-    sgpr_val = ctx.rsgpr_dyn(off)
-    # Handle literal (255) - literal value overrides the pre-populated 0
-    if literal is not None:
-      sgpr_val = off.eq(_c(255)).where(literal, sgpr_val)
-    return sgpr_val
 
   if isinstance(inst, SOPK):
     sdst_off = ctx.inst_field(SOPK.sdst)
@@ -546,21 +524,21 @@ def _compile_sop(inst: SOP1 | SOP2 | SOPC | SOPK, ctx: _Ctx) -> UOp:
   elif isinstance(inst, SOP1):
     sdst_off = ctx.inst_field(SOP1.sdst)
     ssrc0_off = ctx.inst_field(SOP1.ssrc0)
-    srcs = {'S0': rsrc_dyn_scalar(ssrc0_off, sizes.get('ssrc0', 1) == 2)}
-    dst_off, dst_size = sdst_off, sizes.get('sdst', 1)
+    srcs = {'S0': ctx.rsrc_dyn(ssrc0_off, None, bits['s0'], literal)}
+    dst_off, dst_size = sdst_off, bits['d'] // 32
   elif isinstance(inst, SOP2):
     sdst_off = ctx.inst_field(SOP2.sdst)
     ssrc0_off = ctx.inst_field(SOP2.ssrc0)
     ssrc1_off = ctx.inst_field(SOP2.ssrc1)
-    srcs = {'S0': rsrc_dyn_scalar(ssrc0_off, sizes.get('ssrc0', 1) == 2),
-            'S1': rsrc_dyn_scalar(ssrc1_off, sizes.get('ssrc1', 1) == 2)}
+    srcs = {'S0': ctx.rsrc_dyn(ssrc0_off, None, bits['s0'], literal),
+            'S1': ctx.rsrc_dyn(ssrc1_off, None, bits['s1'], literal)}
     if literal is not None: srcs['SIMM32'] = literal
-    dst_off, dst_size = sdst_off, sizes.get('sdst', 1)
+    dst_off, dst_size = sdst_off, bits['d'] // 32
   elif isinstance(inst, SOPC):
     ssrc0_off = ctx.inst_field(SOPC.ssrc0)
     ssrc1_off = ctx.inst_field(SOPC.ssrc1)
-    srcs = {'S0': rsrc_dyn_scalar(ssrc0_off, sizes.get('ssrc0', 1) == 2),
-            'S1': rsrc_dyn_scalar(ssrc1_off, sizes.get('ssrc1', 1) == 2)}
+    srcs = {'S0': ctx.rsrc_dyn(ssrc0_off, None, bits['s0'], literal),
+            'S1': ctx.rsrc_dyn(ssrc1_off, None, bits['s1'], literal)}
     dst_off, dst_size = _c(0), 0  # SOPC writes to SCC, not sdst
   else:
     raise RuntimeError(f"unknown SOP type: {type(inst).__name__}")
