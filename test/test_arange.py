@@ -163,5 +163,24 @@ class TestIndexing(unittest.TestCase):
   # at least the arange is being fused
   def test_llama_embedding_opt(self): self.test_llama_embedding(0, 1_736_704_000)
 
+  def test_llama_8b_embedding_backward(self):
+    # LLaMA 8B training config from model_train.py
+    # vocab_size=32000 (overridden from 128256), dim=4096, BS=16, SEQLEN=8192
+    vocab_size, embed_size = 32000, 4096
+    bs, seqlen = 16, 8191  # tokens[:, :-1] in train_step
+    tokens = Tensor.randint(bs, seqlen, high=vocab_size)
+    # forward
+    emb = nn.Embedding(vocab_size, embed_size)
+    emb.weight = Tensor.empty(vocab_size, embed_size, dtype=dtypes.bfloat16).realize()
+    GlobalCounters.reset()
+    emb(tokens).realize()
+    print(f"embedding fwd: {GlobalCounters.kernel_count} kernels, {GlobalCounters.global_ops:,} ops")
+    # backward
+    emb.weight = Tensor.empty(vocab_size, embed_size, dtype=dtypes.bfloat16, requires_grad=True).realize()
+    GlobalCounters.reset()
+    emb(tokens).sum().backward()
+    emb.weight.grad.realize()
+    print(f"embedding bwd: {GlobalCounters.kernel_count} kernels, {GlobalCounters.global_ops:,} ops")
+
 if __name__ == "__main__":
   unittest.main()
