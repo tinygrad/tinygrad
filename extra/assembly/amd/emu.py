@@ -53,7 +53,7 @@ from extra.assembly.amd.autogen.rdna3.str_pcode import PCODE
 from extra.assembly.amd.autogen.rdna3.ins import (SOP1, SOP2, SOPC, SOPK, SOPP, SMEM, VOP1, VOP1_SDST, VOP2, VOP3, VOP3_SDST, VOP3SD, VOP3P, VOPC,
   DS, FLAT, GLOBAL, SCRATCH, VOPD, SOPPOp, SMEMOp, VOP1Op, VOP2Op, VOP3Op, VOPDOp)
 from extra.assembly.amd.dsl import VCC_LO, EXEC_LO, SCC
-from extra.assembly.amd.autogen.common import OpType
+from extra.assembly.amd.autogen.common import Fmt, OpType
 from extra.assembly.amd.pcode import parse_block, _FUNCS
 
 MASK32 = 0xFFFFFFFF
@@ -336,9 +336,10 @@ class _Ctx:
     offset = reg.cast(dtypes.int) * _c(32, dtypes.int) + lane.cast(dtypes.int)
     return buf.index(offset, _lane_active(exec_mask, lane)).store(val.cast(dtypes.uint32))
 
-  def rsrc_dyn(self, off: UOp, lane: UOp | None, bits: int = 32, literal: UOp | None = None) -> UOp:
+  def rsrc_dyn(self, off: UOp, lane: UOp | None, bits: int = 32, literal: UOp | None = None, is_f64: bool = False) -> UOp:
     """Read source operand with dynamic offset. Handles SGPR/inline constants (<256), VGPR (>=256).
-    If lane is None, only scalar access is supported (off must be < 256)."""
+    If lane is None, only scalar access is supported (off must be < 256).
+    is_f64: True for F64 operations where 64-bit literals go in high 32 bits."""
     is_float_const = (off >= _c(240)) & (off <= _c(248))
     sgpr_lo = self.rsgpr_dyn(off)
 
@@ -355,7 +356,10 @@ class _Ctx:
       float_inline = sgpr_lo.bitcast(dtypes.float32).cast(dtypes.float64)
       # compute inline
       inline = is_float_const.where(float_inline.bitcast(dtypes.uint64), int_inline.bitcast(dtypes.uint64))
-      if literal is not None: inline = off.eq(_c(255)).where(literal.cast(dtypes.uint64) << UOp.const(dtypes.uint64, 32), inline)
+      # Literal handling: F64 VOP puts literal in high 32 bits; B64/I64/U64 VOP and SOP zero-extend
+      if literal is not None:
+        lit_val = literal.cast(dtypes.uint64) << UOp.const(dtypes.uint64, 32) if is_f64 else literal.cast(dtypes.uint64)
+        inline = off.eq(_c(255)).where(lit_val, inline)
       scalar_val = (off < _c(128)).where(sgpr_val, inline)
     else:
       scalar_val = sgpr_lo
@@ -606,11 +610,11 @@ def _compile_vopc(inst: VOPC | VOP3, ctx: _Ctx, opsel: int = 0, abs_bits: int = 
     vsrc1_hi = False
   literal = ctx.inst_field(type(inst).literal) if hasattr(type(inst), 'literal') else None
 
-  is_float, pcode = any(x in op_name for x in ('_F32', '_F64', '_F16')), get_pcode(inst.op)
+  is_float, is_f64, pcode = any(x in op_name for x in ('_F32', '_F64', '_F16')), '_F64' in op_name, get_pcode(inst.op)
   def get_cmp_bit(lane) -> UOp:
     lc = lane.cast(dtypes.int) if isinstance(lane, UOp) else _c(lane, dtypes.int)
-    s0 = ctx.rsrc_dyn(src0_off, lc, bits['s0'], literal)
-    s1 = _cond_hi16(vsrc1_hi, ctx.rsrc_dyn(src1_off, lc, bits['s1'], literal)) if bits['s0'] == 16 else ctx.rsrc_dyn(src1_off, lc, bits['s1'], literal)
+    s0 = ctx.rsrc_dyn(src0_off, lc, bits['s0'], literal, is_f64)
+    s1 = _cond_hi16(vsrc1_hi, ctx.rsrc_dyn(src1_off, lc, bits['s1'], literal, is_f64)) if bits['s0'] == 16 else ctx.rsrc_dyn(src1_off, lc, bits['s1'], literal, is_f64)
     if bits['s0'] == 16 and opsel: s0, s1 = _apply_opsel(s0, 0, opsel), _apply_opsel(s1, 1, opsel)
     if is_float and (abs_bits or neg_bits):
       s0 = _apply_src_mods(s0, 0, abs_bits, neg_bits, bits['s0'])
@@ -651,9 +655,10 @@ def _compile_vop3(inst: VOP3, ctx: _Ctx) -> UOp:
   src1_off = ctx.inst_field(VOP3.src1)
   src2_off = ctx.inst_field(VOP3.src2) if inst.src2 is not None else None
   literal = ctx.inst_field(type(inst).literal) if hasattr(type(inst), 'literal') else None
-  src0 = ctx.rsrc_dyn(src0_off, lane, bits['s0'], literal)
-  src1 = ctx.rsrc_dyn(src1_off, lane, bits['s1'], literal)
-  src2 = ctx.rsrc_dyn(src2_off, lane, bits['s2'], literal) if src2_off is not None else None
+  ops = inst.canonical_operands
+  src0 = ctx.rsrc_dyn(src0_off, lane, bits['s0'], literal, 's0' in ops and ops['s0'][0] == Fmt.FMT_NUM_F64)
+  src1 = ctx.rsrc_dyn(src1_off, lane, bits['s1'], literal, 's1' in ops and ops['s1'][0] == Fmt.FMT_NUM_F64)
+  src2 = ctx.rsrc_dyn(src2_off, lane, bits['s2'], literal, 's2' in ops and ops['s2'][0] == Fmt.FMT_NUM_F64) if src2_off is not None else None
   if bits['s0'] == 16:
     src0, src1 = _apply_opsel(src0, 0, opsel), _apply_opsel(src1, 1, opsel)
     if src2 is not None: src2 = _apply_opsel(src2, 2, opsel)
@@ -673,6 +678,7 @@ def _compile_vop3(inst: VOP3, ctx: _Ctx) -> UOp:
 def _compile_vop3sd(inst: VOP3SD, ctx: _Ctx) -> UOp:
   exec_mask = ctx.rsgpr_dyn(_c(EXEC_LO.offset))
   bits, pcode = inst.canonical_op_bits, get_pcode(inst.op)
+  ops = inst.canonical_operands
 
   # Read operands dynamically from instruction encoding
   vdst_reg = ctx.inst_field(VOP3SD.vdst)
@@ -682,13 +688,13 @@ def _compile_vop3sd(inst: VOP3SD, ctx: _Ctx) -> UOp:
   src2_off = ctx.inst_field(VOP3SD.src2) if inst.src2 is not None else None
   literal = ctx.inst_field(type(inst).literal) if hasattr(type(inst), 'literal') else None
 
-  has_carry_in = 'src2' in inst.operands and inst.operands['src2'][2] == OpType.OPR_SREG
+  has_carry_in = 's2' in ops and ops['s2'][2] == OpType.OPR_SREG
   vcc_in_off = src2_off if has_carry_in and src2_off is not None else sdst_off
 
   lane = ctx.range()
-  src0 = ctx.rsrc_dyn(src0_off, lane, bits['s0'], literal)
-  src1 = ctx.rsrc_dyn(src1_off, lane, bits['s1'], literal)
-  src2 = ctx.rsrc_dyn(src2_off, lane, bits['s2'], literal) if src2_off is not None else None
+  src0 = ctx.rsrc_dyn(src0_off, lane, bits['s0'], literal, 's0' in ops and ops['s0'][0] == Fmt.FMT_NUM_F64)
+  src1 = ctx.rsrc_dyn(src1_off, lane, bits['s1'], literal, 's1' in ops and ops['s1'][0] == Fmt.FMT_NUM_F64)
+  src2 = ctx.rsrc_dyn(src2_off, lane, bits['s2'], literal, 's2' in ops and ops['s2'][0] == Fmt.FMT_NUM_F64) if src2_off is not None else None
   srcs = {'S0': src0, 'S1': src1, 'VCC': ctx.rsgpr_dyn(vcc_in_off), 'EXEC': exec_mask, 'SCC': ctx.rsgpr_dyn(_c(SCC.offset)), 'laneId': lane}
   if src2 is not None: srcs['S2'] = src2
   _, assigns = parse_pcode(pcode, srcs)
@@ -698,9 +704,9 @@ def _compile_vop3sd(inst: VOP3SD, ctx: _Ctx) -> UOp:
     # VCC computation: RANGE+REDUCE gets axis ID first (lower ID = runs first)
     # This ensures VCC reads source values BEFORE VGPR stores modify them
     def get_vcc_bit(lane_uop) -> UOp:
-      s0 = ctx.rsrc_dyn(src0_off, lane_uop, bits['s0'], literal)
-      s1 = ctx.rsrc_dyn(src1_off, lane_uop, bits['s1'], literal)
-      s2 = ctx.rsrc_dyn(src2_off, lane_uop, bits['s2'], literal) if src2_off is not None else None
+      s0 = ctx.rsrc_dyn(src0_off, lane_uop, bits['s0'], literal, 's0' in ops and ops['s0'][0] == Fmt.FMT_NUM_F64)
+      s1 = ctx.rsrc_dyn(src1_off, lane_uop, bits['s1'], literal, 's1' in ops and ops['s1'][0] == Fmt.FMT_NUM_F64)
+      s2 = ctx.rsrc_dyn(src2_off, lane_uop, bits['s2'], literal, 's2' in ops and ops['s2'][0] == Fmt.FMT_NUM_F64) if src2_off is not None else None
       lane_srcs = {'S0': s0, 'S1': s1, 'VCC': ctx.rsgpr_dyn(vcc_in_off), 'EXEC': exec_mask, 'SCC': ctx.rsgpr_dyn(_c(SCC.offset)), 'laneId': lane_uop}
       if s2 is not None: lane_srcs['S2'] = s2
       vcc_bit = _c(0)
@@ -710,9 +716,9 @@ def _compile_vop3sd(inst: VOP3SD, ctx: _Ctx) -> UOp:
     final_vcc = ctx.unroll_lanes(get_vcc_bit, exec_mask)
     # VGPR stores: RANGE gets axis ID second (higher ID = runs after VCC loop)
     lane3 = ctx.range()
-    s0 = ctx.rsrc_dyn(src0_off, lane3, bits['s0'], literal)
-    s1 = ctx.rsrc_dyn(src1_off, lane3, bits['s1'], literal)
-    s2 = ctx.rsrc_dyn(src2_off, lane3, bits['s2'], literal) if src2_off is not None else None
+    s0 = ctx.rsrc_dyn(src0_off, lane3, bits['s0'], literal, 's0' in ops and ops['s0'][0] == Fmt.FMT_NUM_F64)
+    s1 = ctx.rsrc_dyn(src1_off, lane3, bits['s1'], literal, 's1' in ops and ops['s1'][0] == Fmt.FMT_NUM_F64)
+    s2 = ctx.rsrc_dyn(src2_off, lane3, bits['s2'], literal, 's2' in ops and ops['s2'][0] == Fmt.FMT_NUM_F64) if src2_off is not None else None
     lane_srcs = {'S0': s0, 'S1': s1, 'VCC': ctx.rsgpr_dyn(vcc_in_off), 'EXEC': exec_mask, 'SCC': ctx.rsgpr_dyn(_c(SCC.offset)), 'laneId': lane3}
     if s2 is not None: lane_srcs['S2'] = s2
     d0_val = None

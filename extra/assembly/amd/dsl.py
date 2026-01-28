@@ -253,6 +253,15 @@ def _get_variant(cls, suffix: str):
   module = sys.modules.get(cls.__module__)
   return getattr(module, f"{cls.__name__}{suffix}", None) if module else None
 
+def _canonical_name(name: str) -> str | None:
+  """Map operand name to canonical name."""
+  if name in ('src0', 'vsrc0', 'ssrc0'): return 's0'
+  if name in ('src1', 'vsrc1', 'ssrc1'): return 's1'
+  if name == 'src2': return 's2'
+  if name in ('vdst', 'sdst', 'sdata'): return 'd'
+  if name in ('data', 'vdata', 'data0', 'vsrc'): return 'data'
+  return None
+
 class Inst:
   _fields: list[tuple[str, BitField]]
   _base_size: int
@@ -368,12 +377,17 @@ class Inst:
     """Get bit widths with canonical names: {'s0', 's1', 's2', 'd', 'data'}."""
     bits = {'d': 32, 's0': 32, 's1': 32, 's2': 32, 'data': 32}
     for name, val in self.op_bits.items():
-      if name in ('src0', 'vsrc0', 'ssrc0'): bits['s0'] = val
-      elif name in ('src1', 'vsrc1', 'ssrc1'): bits['s1'] = val
-      elif name == 'src2': bits['s2'] = val
-      elif name in ('vdst', 'sdst', 'sdata'): bits['d'] = val
-      elif name in ('data', 'vdata', 'data0', 'vsrc'): bits['data'] = val
+      if (cn := _canonical_name(name)): bits[cn] = val
     return bits
+
+  @functools.cached_property
+  def canonical_operands(self) -> dict:
+    """Get operands with canonical names: {'s0', 's1', 's2', 'd', 'data'}."""
+    result = {}
+    for name, val in self.operands.items():
+      if (cn := _canonical_name(name)): result[cn] = val
+    return result
+
   @property
   def canonical_op_regs(self) -> dict[str, int]:
     """Get register counts with canonical names: {'s0', 's1', 's2', 'd', 'data'}."""
