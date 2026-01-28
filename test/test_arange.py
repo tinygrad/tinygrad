@@ -174,13 +174,16 @@ class TestIndexing(unittest.TestCase):
     emb.weight = Tensor.empty(vocab_size, embed_size, dtype=dtypes.bfloat16).realize()
     GlobalCounters.reset()
     emb(tokens).realize()
-    print(f"embedding fwd: {GlobalCounters.kernel_count} kernels, {GlobalCounters.global_ops:,} ops")
+    fwd_ops = GlobalCounters.global_ops
+    print(f"embedding fwd: {GlobalCounters.kernel_count} kernels, {fwd_ops:,} ops")
     # backward
     emb.weight = Tensor.empty(vocab_size, embed_size, dtype=dtypes.bfloat16, requires_grad=True).realize()
     GlobalCounters.reset()
     emb(tokens).sum().backward()
     emb.weight.grad.realize()
-    print(f"embedding bwd: {GlobalCounters.kernel_count} kernels, {GlobalCounters.global_ops:,} ops")
+    bwd_ops = GlobalCounters.global_ops
+    print(f"embedding bwd: {GlobalCounters.kernel_count} kernels, {bwd_ops:,} ops")
+    self.assertLess(bwd_ops, fwd_ops * 10, f"backward ops {bwd_ops:,} should be within 10x of forward ops {fwd_ops:,}")
 
 if __name__ == "__main__":
   unittest.main()
