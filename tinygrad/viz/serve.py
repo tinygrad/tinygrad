@@ -301,7 +301,7 @@ def load_counters(profile:list[ProfileEvent]) -> None:
     steps:list[dict] = []
     if (pmc:=v.get(ProfilePMCEvent)):
       steps.append(create_step("PMC", ("/prg-pmc", len(ctxs), len(steps)), pmc))
-      all_counters[(name, run_number[k], k)] = pmc[0]
+      all_counters[(name, run_number[k], pname)] = pmc[0]
     # to decode a SQTT trace, we need the raw stream, program binary and device properties
     if (sqtt:=v.get(ProfileSQTTEvent)):
       for e in sqtt:
@@ -345,7 +345,7 @@ def unpack_sqtt(key:tuple[str, int], data:list, p:ProfileProgramEvent) -> tuple[
   # * init decoder
   from extra.sqtt.roc import decode
   base = unwrap(p.base)
-  addr_table = amd_decode(device_props[p.device]["gfx_target_version"], unwrap(p.lib))
+  addr_table = amd_decode(unwrap(p.lib), device_props[p.device]["gfx_target_version"], )
   disasm:dict[int, tuple[str, int]] = {addr+base:(inst.disasm(), inst.size()) for addr, inst in addr_table.items()}
   rctx = decode(data, {p.name:disasm})
   cu_events:dict[str, list[ProfileEvent]] = {}
@@ -432,7 +432,7 @@ def amd_readelf(lib:bytes) -> list[dict]:
           ".group_segment_fixed_size":"LDS size", ".private_segment_fixed_size":"Scratch size"}
   return [{"label":label, "value":v} for k,label in keys.items() if (v:=notes["amdhsa.kernels"][0][k]) > 0]
 
-def amd_decode(target:int, lib:bytes) -> dict[int, Any]: # Any is the Inst class from extra.assembly.amd.dsl
+def amd_decode(lib:bytes, target:int) -> dict[int, Any]: # Any is the Inst class from extra.assembly.amd.dsl
   from tinygrad.runtime.support.elf import elf_loader
   from extra.assembly.amd import detect_format
   from extra.assembly.amd.dsl import Inst
@@ -460,7 +460,7 @@ def parse_branch(inst) -> int|None:
 COND_TAKEN, COND_NOT_TAKEN, UNCOND = range(3)
 def amdgpu_cfg(lib:bytes, target:int) -> dict:
   # decode
-  pc_table = amd_decode(target, lib)
+  pc_table = amd_decode(lib, target)
   # get leaders
   leaders:set[int] = {next(iter(pc_table))}
   for pc, inst in pc_table.items():
@@ -509,15 +509,14 @@ def get_render(query:str) -> dict:
   if fmt == "asm":
     ret:dict = {"metadata":[]}
     if data.device.startswith("AMD") and data.lib is not None:
-      with soft_err(lambda err: ret.update(err)):
-        ret.update(amdgpu_cfg(lib:=data.lib, device_props[data.device]["gfx_target_version"]))
-        with soft_err(lambda err: ret["metadata"].append(err)): ret["metadata"].append(amd_readelf(lib))
+      with soft_err(lambda err: ret.update(err)): ret.update(amdgpu_cfg(data.lib, device_props[data.device]["gfx_target_version"]))
+      with soft_err(lambda err: ret["metadata"].append(err)): ret["metadata"].append(amd_readelf(data.lib))
     else: ret["src"] = get_stdout(lambda: (compiler:=Device[data.device].compiler).disassemble(compiler.compile(data.src)))
     return ret
   if fmt == "all-pmc":
     durations, pmc = data
     ret = {"cols":{}, "rows":[]}
-    for (name, n, k),events in data[1].items():
+    for (name, n, k),events in pmc.items():
       pmc_table = unpack_pmc(events)
       ret["cols"].update([(r[0], None) for r in pmc_table["rows"]])
       ret["rows"].append((name, durations[k][n-1], *[r[1] for r in pmc_table["rows"]]))
