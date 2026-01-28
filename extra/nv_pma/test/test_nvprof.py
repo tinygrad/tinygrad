@@ -3,12 +3,13 @@ from collections import Counter
 from pathlib import Path
 
 from extra.nv_pma.decode import decode
+from tinygrad.helpers import DEBUG
 
 EXAMPLES_DIR = Path(__file__).parent.parent / "examples"
 
 def decode_and_aggregate(raw_dumps: list[bytes]) -> Counter[tuple[int, int]]:
   """Decode all PMA buffers and aggregate by (relative_pc, stall_reason)."""
-  all_samples = [s for raw in raw_dumps for s in decode(raw)]
+  all_samples = [s for raw in raw_dumps for s, _ in decode(raw)]
   if not all_samples: return Counter()
   base_pc = min(s.pc_offset for s in all_samples)
   return Counter((s.pc_offset - base_pc, int(s.stall_reason)) for s in all_samples)
@@ -33,13 +34,14 @@ class TestNVProf(unittest.TestCase):
     pma_agg = decode_and_aggregate(data["pma_raw_dumps"])
     cupti_agg = cupti_to_counter(data["cupti_pc_samples"])
 
-    total = sum(cupti_agg.values())
-    mismatched = sum(abs(pma_agg.get(k, 0) - v) for k, v in cupti_agg.items())
-    mismatched += sum(v for k, v in pma_agg.items() if k not in cupti_agg)
-    mismatched //= 2
+    if DEBUG >= 2:
+      total = sum(cupti_agg.values())
+      mismatched = sum(abs(pma_agg.get(k, 0) - v) for k, v in cupti_agg.items())
+      mismatched += sum(v for k, v in pma_agg.items() if k not in cupti_agg)
+      mismatched //= 2
 
-    print(f"\n=== Test: {name} ===")
-    print(f"Total samples: {total}, Mismatched: {mismatched} ({mismatched/total*100 if total else 0:.1f}%)")
+      print(f"\n=== Test: {name} ===")
+      print(f"Total samples: {total}, Mismatched: {mismatched} ({mismatched/total*100 if total else 0:.1f}%)")
 
     self.assertEqual(pma_agg, cupti_agg, f"PMA: {dict(pma_agg)}\nCUPTI: {dict(cupti_agg)}")
 
