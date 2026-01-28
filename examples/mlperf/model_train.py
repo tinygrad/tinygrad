@@ -1519,6 +1519,7 @@ def train_llama3():
           "train/optim_time": optim_time,
           "train/dev_time": dev_time,
           "train/data_time": data_time,
+          "train/mem": mem_gb,
           "train/GFLOPS": gflops,
           "train/MFU": mfu,
           "train/sequences_seen": sequences_seen
