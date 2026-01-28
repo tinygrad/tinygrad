@@ -48,13 +48,13 @@ from tinygrad.runtime.autogen import hsa
 from tinygrad.helpers import Context, DEBUG, colored
 from tinygrad.engine.realize import get_runner
 
-from extra.assembly.amd.decode import decode_inst
+from extra.assembly.amd import decode_inst
 from extra.assembly.amd.autogen.rdna3.str_pcode import PCODE
 from extra.assembly.amd.autogen.rdna3.ins import (SOP1, SOP2, SOPC, SOPK, SOPP, SMEM, VOP1, VOP1_SDST, VOP2, VOP3, VOP3_SDST, VOP3SD, VOP3P, VOPC,
   DS, FLAT, GLOBAL, SCRATCH, VOPD, SOPPOp, SMEMOp, VOP1Op, VOP2Op, VOP3Op, VOPDOp)
 from extra.assembly.amd.dsl import VCC_LO, EXEC_LO, SCC
 from extra.assembly.amd.autogen.common import OpType
-from extra.assembly.amd.expr_parser import parse_block, _FUNCS
+from extra.assembly.amd.pcode import parse_block, _FUNCS
 
 MASK32 = 0xFFFFFFFF
 

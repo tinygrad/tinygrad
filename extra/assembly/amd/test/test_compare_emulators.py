@@ -2,8 +2,8 @@
 import unittest, ctypes
 from dataclasses import dataclass
 
-from extra.assembly.amd.emu2 import WaveState, decode_program, WAVE_SIZE, VCC_LO, EXEC_LO, SCC
-from extra.assembly.amd.decode import decode_inst
+from extra.assembly.amd.emu import WaveState, decode_program, WAVE_SIZE, VCC_LO, EXEC_LO, SCC
+from extra.assembly.amd import decode_inst
 from extra.assembly.amd.test.helpers import KernelInfo
 from extra.assembly.amd.test.bench_emu import REMU_PATH
 
