@@ -283,5 +283,122 @@ class TestSpeed(unittest.TestCase):
         for out_chans in [32]:
           helper_test_conv(bs, in_chans, out_chans, 3, 34, 34)
 
+  @unittest.skipUnless(getenv("CPU"), "CPU only")
+  def test_llama_1b_decode(self):
+    # Llama 3.2 1B config - tests decode speed (single token generation)
+    from extra.models.llama import Transformer
+    DIM, HIDDEN, HEADS, N_KV_HEADS, LAYERS = 2048, 8192, 32, 8, 16
+    VOCAB_SIZE, MAX_CONTEXT = 128256, 512
+
+    # --- Tinygrad model ---
+    tiny_model = Transformer(DIM, HIDDEN, HEADS, LAYERS, norm_eps=1e-5, vocab_size=VOCAB_SIZE,
+                             n_kv_heads=N_KV_HEADS, rope_theta=500000, max_context=MAX_CONTEXT, jit=True)
+
+    # --- Torch model (matching tinygrad's llama implementation) ---
+    class RMSNorm(torch.nn.Module):
+      def __init__(self, dim, eps=1e-5):
+        super().__init__()
+        self.weight = torch.nn.Parameter(torch.ones(dim))
+        self.eps = eps
+      def forward(self, x):
+        return x * torch.rsqrt(x.pow(2).mean(-1, keepdim=True) + self.eps) * self.weight
+
+    class TorchAttention(torch.nn.Module):
+      def __init__(self, dim, n_heads, n_kv_heads, max_context):
+        super().__init__()
+        self.n_heads, self.n_kv_heads = n_heads, n_kv_heads
+        self.head_dim = dim // n_heads
+        self.wq = torch.nn.Linear(dim, n_heads * self.head_dim, bias=False)
+        self.wk = torch.nn.Linear(dim, n_kv_heads * self.head_dim, bias=False)
+        self.wv = torch.nn.Linear(dim, n_kv_heads * self.head_dim, bias=False)
+        self.wo = torch.nn.Linear(n_heads * self.head_dim, dim, bias=False)
+        self.max_context, self.cache_k = max_context, None
+      def forward(self, x, start_pos, freqs_cis):
+        bsz, seqlen, _ = x.shape
+        xq, xk, xv = self.wq(x), self.wk(x), self.wv(x)
+        xq = xq.reshape(bsz, seqlen, self.n_heads, self.head_dim)
+        xk = xk.reshape(bsz, seqlen, self.n_kv_heads, self.head_dim)
+        xv = xv.reshape(bsz, seqlen, self.n_kv_heads, self.head_dim)
+        xq, xk = self._apply_rotary(xq, xk, freqs_cis[start_pos:start_pos+seqlen])
+        if self.cache_k is None:
+          self.cache_k = torch.zeros(bsz, self.max_context, self.n_kv_heads, self.head_dim)
+          self.cache_v = torch.zeros(bsz, self.max_context, self.n_kv_heads, self.head_dim)
+        self.cache_k[:, start_pos:start_pos+seqlen] = xk
+        self.cache_v[:, start_pos:start_pos+seqlen] = xv
+        keys = self.cache_k[:, :start_pos+seqlen].repeat_interleave(self.n_heads // self.n_kv_heads, dim=2)
+        values = self.cache_v[:, :start_pos+seqlen].repeat_interleave(self.n_heads // self.n_kv_heads, dim=2)
+        attn = torch.nn.functional.scaled_dot_product_attention(
+          xq.transpose(1,2), keys.transpose(1,2), values.transpose(1,2),
+          attn_mask=torch.triu(torch.full((seqlen, start_pos+seqlen), float("-inf")), diagonal=start_pos+1) if seqlen > 1 else None)
+        return self.wo(attn.transpose(1,2).reshape(bsz, seqlen, -1))
+      def _apply_rotary(self, xq, xk, freqs_cis):
+        xq_ = torch.view_as_complex(xq.float().reshape(*xq.shape[:-1], -1, 2))
+        xk_ = torch.view_as_complex(xk.float().reshape(*xk.shape[:-1], -1, 2))
+        freqs_cis = freqs_cis.unsqueeze(0).unsqueeze(2)
+        return (torch.view_as_real(xq_ * freqs_cis).flatten(3).type_as(xq),
+                torch.view_as_real(xk_ * freqs_cis).flatten(3).type_as(xk))
+
+    class TorchTransformerBlock(torch.nn.Module):
+      def __init__(self, dim, hidden, n_heads, n_kv_heads, eps, max_context):
+        super().__init__()
+        self.attention = TorchAttention(dim, n_heads, n_kv_heads, max_context)
+        self.w1 = torch.nn.Linear(dim, hidden, bias=False)
+        self.w2 = torch.nn.Linear(hidden, dim, bias=False)
+        self.w3 = torch.nn.Linear(dim, hidden, bias=False)
+        self.attention_norm, self.ffn_norm = RMSNorm(dim, eps), RMSNorm(dim, eps)
+      def forward(self, x, start_pos, freqs_cis):
+        h = x + self.attention(self.attention_norm(x), start_pos, freqs_cis)
+        return h + self.w2(torch.nn.functional.silu(self.w1(self.ffn_norm(h))) * self.w3(self.ffn_norm(h)))
+
+    class TorchTransformer(torch.nn.Module):
+      def __init__(self, dim, hidden, n_heads, n_layers, eps, vocab_size, n_kv_heads, rope_theta, max_context):
+        super().__init__()
+        self.tok_embeddings = torch.nn.Embedding(vocab_size, dim)
+        self.layers = torch.nn.ModuleList([TorchTransformerBlock(dim, hidden, n_heads, n_kv_heads, eps, max_context) for _ in range(n_layers)])
+        self.norm = RMSNorm(dim, eps)
+        self.output = torch.nn.Linear(dim, vocab_size, bias=False)
+        freqs = 1.0 / (rope_theta ** (torch.arange(0, dim//n_heads, 2).float() / (dim//n_heads)))
+        t = torch.arange(max_context * 2)
+        self.freqs_cis = torch.polar(torch.ones_like(torch.outer(t, freqs)), torch.outer(t, freqs))
+      def forward(self, tokens, start_pos):
+        h = self.tok_embeddings(tokens)
+        for layer in self.layers: h = layer(h, start_pos, self.freqs_cis)
+        return self.output(self.norm(h))
+
+    torch_model = TorchTransformer(DIM, HIDDEN, HEADS, LAYERS, 1e-5, VOCAB_SIZE, N_KV_HEADS, 500000, MAX_CONTEXT).eval()
+
+    # Warmup: prefill + decode
+    with torch.no_grad():
+      torch_model(torch.tensor([[1, 2, 3, 4, 5]]), start_pos=0)
+      for i in range(3): torch_model(torch.tensor([[1]]), start_pos=5+i)
+
+    tiny_model(Tensor([[1, 2, 3, 4, 5]]), start_pos=0, temperature=0.0)
+    Device[Device.DEFAULT].synchronize()
+    for i in range(3):
+      tiny_model(Tensor([[1]]), start_pos=5+i, temperature=0.0)
+      Device[Device.DEFAULT].synchronize()
+
+    # Benchmark decode
+    N = getenv("CNT", 8)
+    torch_times, tiny_times = [], []
+    for i in range(N):
+      with torch.no_grad():
+        st = time.perf_counter()
+        torch_model(torch.tensor([[1]]), start_pos=8+i)
+        torch_times.append(time.perf_counter() - st)
+
+    for i in range(N):
+      Device[Device.DEFAULT].synchronize()
+      st = time.perf_counter()
+      tiny_model(Tensor([[1]]), start_pos=8+i, temperature=0.0)
+      Device[Device.DEFAULT].synchronize()
+      tiny_times.append(time.perf_counter() - st)
+
+    et_torch, et_tiny = min(torch_times) * 1000, min(tiny_times) * 1000
+    print(f"llama 1B decode: torch {et_torch:.2f}ms ({1000/et_torch:.2f} tok/s), tinygrad {et_tiny:.2f}ms ({1000/et_tiny:.2f} tok/s), " +
+          f"{colorize_float(et_tiny/et_torch)} {'faster' if et_torch > et_tiny else 'slower'}")
+    # Assert tinygrad is at least as fast as torch (with 5% tolerance for variance)
+    assert et_tiny <= et_torch * 1.05, f"tinygrad {et_tiny:.2f}ms slower than torch {et_torch:.2f}ms"
+
 if __name__ == '__main__':
   unittest.main()
