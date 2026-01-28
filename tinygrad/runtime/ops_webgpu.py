@@ -8,8 +8,8 @@ from typing import cast, List, Any, TypeAlias
 import ctypes
 import os
 
-WGPUDevPtr: TypeAlias = webgpu.WGPUDevice # type: ignore
-WGPUBufPtr: TypeAlias = webgpu.WGPUBuffer # type: ignore
+WGPUDevPtr: TypeAlias = webgpu.WGPUDevice
+WGPUBufPtr: TypeAlias = webgpu.WGPUBuffer
 
 backend_types = {v: k for k, v in webgpu.enum_WGPUBackendType.items() }
 
@@ -176,18 +176,18 @@ class WebGPUProgram:
       return time
     return None
 
-class WebGpuAllocator(Allocator['WGPUDevPtr']): # type: ignore
+class WebGpuAllocator(Allocator['WebGpuDevice']):
   def _alloc(self, size:int, options:BufferSpec) -> WGPUBufPtr:
     # WebGPU buffers have to be 4-byte aligned
-    return webgpu.wgpuDeviceCreateBuffer(self.dev, webgpu.WGPUBufferDescriptor(size=round_up(size, 4),
+    return webgpu.wgpuDeviceCreateBuffer(self.dev.device_res, webgpu.WGPUBufferDescriptor(size=round_up(size, 4),
       usage=webgpu.WGPUBufferUsage_Storage | webgpu.WGPUBufferUsage_CopyDst | webgpu.WGPUBufferUsage_CopySrc))
   def _copyin(self, dest:WGPUBufPtr, src:memoryview):
     if src.nbytes % 4:
       padded_src = bytearray(round_up(src.nbytes, 4))
       padded_src[:src.nbytes] = src
-    write_buffer(self.dev, dest, 0, padded_src if src.nbytes % 4 else src)
+    write_buffer(self.dev.device_res, dest, 0, padded_src if src.nbytes % 4 else src)
   def _copyout(self, dest:memoryview, src:WGPUBufPtr):
-    buffer_data = read_buffer(self.dev, src)
+    buffer_data = read_buffer(self.dev.device_res, src)
     dest[:] = buffer_data[:dest.nbytes] if webgpu.wgpuBufferGetSize(src)  > dest.nbytes else buffer_data
   @suppress_finalizing
   def _free(self, opaque:WGPUBufPtr, options:BufferSpec): webgpu.wgpuBufferDestroy(opaque)
@@ -214,12 +214,12 @@ class WebGpuDevice(Compiled):
     dev_desc.requiredLimits = c.pointer(limits)
 
     # Requesting a device
-    device_res = _run(webgpu.wgpuAdapterRequestDeviceF, webgpu.WGPURequestDeviceCallbackInfo, webgpu.WGPURequestDeviceCallback,
+    self.device_res = _run(webgpu.wgpuAdapterRequestDeviceF, webgpu.WGPURequestDeviceCallbackInfo, webgpu.WGPURequestDeviceCallback,
       webgpu.WGPURequestDeviceStatus, 1, 2, adapter_res, dev_desc)
 
-    super().__init__(device, WebGpuAllocator(device_res), CompilerSet([CompilerPair(WGSLRenderer, Compiler)]),
-      functools.partial(WebGPUProgram, (device_res, webgpu.WGPUFeatureName_TimestampQuery in supported)))
+    super().__init__(device, WebGpuAllocator(self), CompilerSet([CompilerPair(WGSLRenderer, Compiler)]),
+      functools.partial(WebGPUProgram, (self.device_res, webgpu.WGPUFeatureName_TimestampQuery in supported)))
 
   def synchronize(self):
     _run(webgpu.wgpuQueueOnSubmittedWorkDone2, webgpu.WGPUQueueWorkDoneCallbackInfo2, webgpu.WGPUQueueWorkDoneCallback2,
-    webgpu.WGPUQueueWorkDoneStatus, None, None, webgpu.wgpuDeviceGetQueue(self.runtime.args[0][0]))
+    webgpu.WGPUQueueWorkDoneStatus, None, None, webgpu.wgpuDeviceGetQueue(self.device_res))
