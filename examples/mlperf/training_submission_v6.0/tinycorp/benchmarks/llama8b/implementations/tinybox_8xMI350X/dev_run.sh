@@ -24,7 +24,7 @@ export SAMPLES=$((MAX_STEPS * GBS))
 
 export SEED=5760
 
-export JITBEAM=3
+export JITBEAM=${JITBEAM:-3}
 export BEAM_UOPS_MAX=6000 BEAM_UPCAST_MAX=256 BEAM_LOCAL_MAX=1024 BEAM_MIN_PROGRESS=5
 
 python3 examples/mlperf/model_train.py
