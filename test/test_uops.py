@@ -375,21 +375,9 @@ class TestLocalAccess(unittest.TestCase):
     sres = uop(uops, Ops.LOAD, dtypes.int32, (smem.index(ofs),))
     self.assertEqual(_test_uops_result(dtypes.int32, uops, sres), 42)
 
-@unittest.skipUnless(isinstance(Device[Device.DEFAULT].renderer, PTXRenderer), "This only tests assembly backends")
-class TestAssembly(unittest.TestCase):
-  def test_bitshift_left(self):
-    g1 = UOp(Ops.DEFINE_GLOBAL, dtypes.int32.ptr(), (), 0)
-    c1 = UOp.const(dtypes.int, 2)
-    c2 = UOp.const(dtypes.int, 3)
-    l1 = g1.index(c1)
-    a1 = UOp(Ops.MUL, dtypes.int, (l1, c1))
-    a2 = UOp(Ops.MUL, dtypes.int, (l1, c2))
-    uops = to_uops_list([a1,a2], ren=Device[Device.DEFAULT].renderer)
-    Device[Device.DEFAULT].renderer.render(uops)
-    ops = [x.op for x in uops]
-    self.assertIn(Ops.SHL, ops)
-    self.assertIn(Ops.MUL, ops)
-
+@unittest.skipIf(Device.DEFAULT == "METAL", "compiler bug")
+@unittest.skipUnless(Ops.SHR in Device[Device.DEFAULT].renderer.code_for_op, "fast_idiv requires SHR")
+class TestFastIdiv(unittest.TestCase):
   def test_division_power_of_two(self):
     for dt in (dtypes.int32, dtypes.uint32):
       g = UOp(Ops.DEFINE_GLOBAL, dt.ptr(), (), 0)
@@ -402,6 +390,7 @@ class TestAssembly(unittest.TestCase):
       self.assertIn(Ops.SHR, ops, f"For dtype={dt} divison by power of two did not simplify to shift")
       self.assertNotIn(Ops.IDIV, ops, f"For dtype={dt} divison by power of two did not simplify to shift")
 
+  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "WEBGPU doesn't support long")
   def test_fast_idiv_and_mod(self):
     g = UOp(Ops.DEFINE_GLOBAL, dtypes.uint32.ptr(), (), 0)
     c = UOp.const(dtypes.uint, 3)
@@ -420,6 +409,14 @@ class TestAssembly(unittest.TestCase):
     self.assertIn(Ops.SHR, ops)
     self.assertNotIn(Ops.MOD, ops)
 
+  def test_fast_idiv_remove_powers_of_two(self):
+    ridx = UOp.range(2**20, 0)
+    uops = to_uops_list([ridx//(7*64)], ren=Device[Device.DEFAULT].renderer)
+    ops = [x.op for x in uops]
+    # this requires shifting out the powers of two before doing fast_idiv
+    # (((ridx0>>6)*18725)>>17) instead of (int)((((long)(ridx0)*1198373)>>29))
+    self.assertNotIn(Ops.CAST, ops)
+
   @unittest.expectedFailure
   def test_fast_idiv_overflow(self):
     # This will be possible with a slightly different method for fast_idiv
@@ -433,13 +430,32 @@ class TestAssembly(unittest.TestCase):
     self.assertIn(Ops.SHR, ops)
     self.assertNotIn(Ops.IDIV, ops)
 
-  def test_fast_idiv_remove_powers_of_two(self):
-    ridx = UOp.range(2**20, 0)
-    uops = to_uops_list([ridx//(7*64)], ren=Device[Device.DEFAULT].renderer)
+  def test_disable_fast_idiv(self):
+    g = UOp(Ops.DEFINE_GLOBAL, dtypes.uint32.ptr(), (), 0)
+    c = UOp.const(dtypes.uint, 3)
+    l = g.index(c)
+    a = UOp(Ops.IDIV, dtypes.uint, (l, c))
+    with Context(DISABLE_FAST_IDIV=1):
+      uops = to_uops_list([a], ren=Device[Device.DEFAULT].renderer)
     ops = [x.op for x in uops]
-    # this requires shifting out the powers of two before doing fast_idiv
-    # (((ridx0>>6)*18725)>>17) instead of (int)((((long)(ridx0)*1198373)>>29))
-    self.assertNotIn(Ops.CAST, ops)
+    self.assertNotIn(Ops.SHR, ops)
+    self.assertIn(Ops.IDIV, ops)
+
+
+@unittest.skipUnless(isinstance(Device[Device.DEFAULT].renderer, PTXRenderer), "This only tests assembly backends")
+class TestAssembly(unittest.TestCase):
+  def test_bitshift_left(self):
+    g1 = UOp(Ops.DEFINE_GLOBAL, dtypes.int32.ptr(), (), 0)
+    c1 = UOp.const(dtypes.int, 2)
+    c2 = UOp.const(dtypes.int, 3)
+    l1 = g1.index(c1)
+    a1 = UOp(Ops.MUL, dtypes.int, (l1, c1))
+    a2 = UOp(Ops.MUL, dtypes.int, (l1, c2))
+    uops = to_uops_list([a1,a2], ren=Device[Device.DEFAULT].renderer)
+    Device[Device.DEFAULT].renderer.render(uops)
+    ops = [x.op for x in uops]
+    self.assertIn(Ops.SHL, ops)
+    self.assertIn(Ops.MUL, ops)
 
   def test_mulacc_unrolled(self):
     # test that     acc = acc + a0*b0 + a1*b1 + a2*b2 + a3*b3
