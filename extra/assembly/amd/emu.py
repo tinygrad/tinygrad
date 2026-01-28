@@ -732,12 +732,9 @@ def _compile_vop3p(inst: VOP3P, ctx: _Ctx) -> UOp:
   lane, exec_mask = ctx.range(), ctx.rsgpr_dyn(_c(EXEC_LO.offset))
   # Read register fields dynamically for deduplication
   vdst_reg = ctx.inst_field(VOP3P.vdst)
-  src0_off = ctx.inst_field(VOP3P.src0)
-  src1_off = ctx.inst_field(VOP3P.src1)
-  src2_off = ctx.inst_field(VOP3P.src2) if hasattr(inst, 'src2') and inst.src2 is not None else None
-  src0 = ctx.rsrc_dyn(src0_off, lane, 16)
-  src1 = ctx.rsrc_dyn(src1_off, lane, 16)
-  src2 = ctx.rsrc_dyn(src2_off, lane, 16) if src2_off is not None else None
+  src0 = ctx.rsrc_dyn(ctx.inst_field(VOP3P.src0), lane, 16)
+  src1 = ctx.rsrc_dyn(ctx.inst_field(VOP3P.src1), lane, 16)
+  src2 = ctx.rsrc_dyn(ctx.inst_field(VOP3P.src2), lane, 16)
   opsel, opsel_hi = getattr(inst, 'opsel', 0) or 0, getattr(inst, 'opsel_hi', 3) if getattr(inst, 'opsel_hi', 3) is not None else 3
   opsel_hi2 = getattr(inst, 'opsel_hi2', 1) if getattr(inst, 'opsel_hi2', 1) is not None else 1
   neg, neg_hi = getattr(inst, 'neg', 0) or 0, getattr(inst, 'neg_hi', 0) or 0
@@ -749,7 +746,7 @@ def _compile_vop3p(inst: VOP3P, ctx: _Ctx) -> UOp:
     return get_half_bits(src, bool(opsel_lo_bit), bool(neg_lo_bit)) | (get_half_bits(src, bool(opsel_hi_bit), bool(neg_hi_bit)) << UOp.const(dtypes.uint32, 16))
   s0_new = build_remapped_src(src0, opsel & 1, opsel_hi & 1, neg & 1, neg_hi & 1)
   s1_new = build_remapped_src(src1, opsel & 2, opsel_hi & 2, neg & 2, neg_hi & 2)
-  s2_new = build_remapped_src(src2, opsel & 4, 1 if opsel_hi2 else 0, neg & 4, neg_hi & 4) if src2 is not None else None
+  s2_new = build_remapped_src(src2, opsel & 4, 1 if opsel_hi2 else 0, neg & 4, neg_hi & 4)
   op_name = _op_name(inst)
 
   # WMMA: Wave Matrix Multiply-Accumulate
@@ -801,12 +798,11 @@ def _compile_vop3p(inst: VOP3P, ctx: _Ctx) -> UOp:
       return v ^ UOp.const(dtypes.uint32, 0x00008000)  # f16 lo neg
     s0_mod = apply_neg_mix(apply_abs(src0, 1, 1, 1), 1, 1, 1)
     s1_mod = apply_neg_mix(apply_abs(src1, 2, 2, 2), 2, 2, 2)
-    s2_mod = apply_neg_mix(apply_abs(src2, 4, 4, 4), 4, 4, 4) if src2 is not None else UOp.const(dtypes.uint32, 0)
+    s2_mod = apply_neg_mix(apply_abs(src2, 4, 4, 4), 4, 4, 4)
     srcs = {'S0': s0_mod, 'S1': s1_mod, 'S2': s2_mod,
             'OPSEL_HI': UOp.const(dtypes.uint32, combined_opsel_hi), 'OPSEL': UOp.const(dtypes.uint32, opsel)}
   else:
-    srcs = {'S0': s0_new, 'S1': s1_new}
-    if s2_new is not None: srcs['S2'] = s2_new
+    srcs = {'S0': s0_new, 'S1': s1_new, 'S2': s2_new}
   return ctx.compile_vop_pcode(inst.op, srcs, lane, vdst_reg, exec_mask)
 
 def _compile_vopd(inst: VOPD, ctx: _Ctx) -> UOp:
