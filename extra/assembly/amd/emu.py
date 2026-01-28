@@ -677,26 +677,25 @@ def _compile_vop3(inst: VOP3, ctx: _Ctx) -> UOp:
 
 def _compile_vop3sd(inst: VOP3SD, ctx: _Ctx) -> UOp:
   exec_mask = ctx.rsgpr_dyn(_c(EXEC_LO.offset))
-  bits, pcode = inst.canonical_op_bits, get_pcode(inst.op)
-  ops = inst.canonical_operands
+  bits, pcode, ops = inst.canonical_op_bits, get_pcode(inst.op), inst.canonical_operands
 
   # Read operands dynamically from instruction encoding
-  vdst_reg = ctx.inst_field(VOP3SD.vdst)
-  sdst_off = ctx.inst_field(VOP3SD.sdst)
-  src0_off = ctx.inst_field(VOP3SD.src0)
-  src1_off = ctx.inst_field(VOP3SD.src1)
-  src2_off = ctx.inst_field(VOP3SD.src2) if inst.src2 is not None else None
+  vdst_reg, sdst_off = ctx.inst_field(VOP3SD.vdst), ctx.inst_field(VOP3SD.sdst)
+  src0_off, src1_off, src2_off = ctx.inst_field(VOP3SD.src0), ctx.inst_field(VOP3SD.src1), ctx.inst_field(VOP3SD.src2)
   literal = ctx.inst_field(type(inst).literal) if hasattr(type(inst), 'literal') else None
 
   has_carry_in = 's2' in ops and ops['s2'][2] == OpType.OPR_SREG
-  vcc_in_off = src2_off if has_carry_in and src2_off is not None else sdst_off
+  vcc_in_off = src2_off if has_carry_in else sdst_off
+
+  def load_srcs(lane_uop):
+    ret = {'VCC': ctx.rsgpr_dyn(vcc_in_off), 'EXEC': exec_mask, 'SCC': ctx.rsgpr_dyn(_c(SCC.offset)), 'laneId': lane_uop}
+    ret['S0'] = ctx.rsrc_dyn(src0_off, lane_uop, bits['s0'], literal, ops['s0'][0] == Fmt.FMT_NUM_F64)
+    ret['S1'] = ctx.rsrc_dyn(src1_off, lane_uop, bits['s1'], literal, ops['s1'][0] == Fmt.FMT_NUM_F64)
+    if 's2' in ops: ret['S2'] = ctx.rsrc_dyn(src2_off, lane_uop, bits['s2'], literal, ops['s2'][0] == Fmt.FMT_NUM_F64)
+    return ret
 
   lane = ctx.range()
-  src0 = ctx.rsrc_dyn(src0_off, lane, bits['s0'], literal, 's0' in ops and ops['s0'][0] == Fmt.FMT_NUM_F64)
-  src1 = ctx.rsrc_dyn(src1_off, lane, bits['s1'], literal, 's1' in ops and ops['s1'][0] == Fmt.FMT_NUM_F64)
-  src2 = ctx.rsrc_dyn(src2_off, lane, bits['s2'], literal, 's2' in ops and ops['s2'][0] == Fmt.FMT_NUM_F64) if src2_off is not None else None
-  srcs = {'S0': src0, 'S1': src1, 'VCC': ctx.rsgpr_dyn(vcc_in_off), 'EXEC': exec_mask, 'SCC': ctx.rsgpr_dyn(_c(SCC.offset)), 'laneId': lane}
-  if src2 is not None: srcs['S2'] = src2
+  srcs = load_srcs(lane)
   _, assigns = parse_pcode(pcode, srcs)
 
   has_per_lane_vcc = any('[laneId]' in dest for dest, _ in assigns if dest.startswith('VCC') or dest.startswith('D0.u64'))
@@ -704,25 +703,15 @@ def _compile_vop3sd(inst: VOP3SD, ctx: _Ctx) -> UOp:
     # VCC computation: RANGE+REDUCE gets axis ID first (lower ID = runs first)
     # This ensures VCC reads source values BEFORE VGPR stores modify them
     def get_vcc_bit(lane_uop) -> UOp:
-      s0 = ctx.rsrc_dyn(src0_off, lane_uop, bits['s0'], literal, 's0' in ops and ops['s0'][0] == Fmt.FMT_NUM_F64)
-      s1 = ctx.rsrc_dyn(src1_off, lane_uop, bits['s1'], literal, 's1' in ops and ops['s1'][0] == Fmt.FMT_NUM_F64)
-      s2 = ctx.rsrc_dyn(src2_off, lane_uop, bits['s2'], literal, 's2' in ops and ops['s2'][0] == Fmt.FMT_NUM_F64) if src2_off is not None else None
-      lane_srcs = {'S0': s0, 'S1': s1, 'VCC': ctx.rsgpr_dyn(vcc_in_off), 'EXEC': exec_mask, 'SCC': ctx.rsgpr_dyn(_c(SCC.offset)), 'laneId': lane_uop}
-      if s2 is not None: lane_srcs['S2'] = s2
       vcc_bit = _c(0)
-      for dest, val in parse_pcode(pcode, lane_srcs)[1]:
+      for dest, val in parse_pcode(pcode, load_srcs(lane_uop))[1]:
         if dest.startswith('VCC') or (dest.startswith('D0.u64') and '[laneId]' in dest): vcc_bit = val.cast(dtypes.uint32)
       return vcc_bit
     final_vcc = ctx.unroll_lanes(get_vcc_bit, exec_mask)
     # VGPR stores: RANGE gets axis ID second (higher ID = runs after VCC loop)
     lane3 = ctx.range()
-    s0 = ctx.rsrc_dyn(src0_off, lane3, bits['s0'], literal, 's0' in ops and ops['s0'][0] == Fmt.FMT_NUM_F64)
-    s1 = ctx.rsrc_dyn(src1_off, lane3, bits['s1'], literal, 's1' in ops and ops['s1'][0] == Fmt.FMT_NUM_F64)
-    s2 = ctx.rsrc_dyn(src2_off, lane3, bits['s2'], literal, 's2' in ops and ops['s2'][0] == Fmt.FMT_NUM_F64) if src2_off is not None else None
-    lane_srcs = {'S0': s0, 'S1': s1, 'VCC': ctx.rsgpr_dyn(vcc_in_off), 'EXEC': exec_mask, 'SCC': ctx.rsgpr_dyn(_c(SCC.offset)), 'laneId': lane3}
-    if s2 is not None: lane_srcs['S2'] = s2
     d0_val = None
-    for dest, val in parse_pcode(pcode, lane_srcs)[1]:
+    for dest, val in parse_pcode(pcode, load_srcs(lane3))[1]:
       if dest.startswith('D0') and '[laneId]' not in dest: d0_val = val
     vgpr_stores = []
     if d0_val is not None:
@@ -738,9 +727,45 @@ def _compile_vop3sd(inst: VOP3SD, ctx: _Ctx) -> UOp:
   else:
     return ctx.compile_vop_pcode(inst.op, srcs, lane, vdst_reg, exec_mask, sdst_reg=inst.sdst.offset)
 
+def _compile_wmma(inst: VOP3P, ctx: _Ctx) -> UOp:
+  op_name = _op_name(inst)
+  exec_mask = ctx.rsgpr_dyn(_c(EXEC_LO.offset))
+  vdst_reg = ctx.inst_field(VOP3P.vdst)
+  src0_r = ctx.inst_field(VOP3P.src0) - _c(256)
+  src1_r = ctx.inst_field(VOP3P.src1) - _c(256)
+  src2_r = ctx.inst_field(VOP3P.src2) - _c(256)
+  is_f16_output = 'F16_16X16X16_F16' in op_name or 'BF16_16X16X16_BF16' in op_name  # F16/BF16 output vs F32 output
+  is_bf16 = 'BF16' in op_name
+  cvt = _FUNCS['bf16_to_f32'] if is_bf16 else _FUNCS['f16_to_f32']
+  def read_f16_mat(src):
+    return [f for l in range(16) for r in range(8) for v in [ctx.rvgpr_dyn(src + _c(r), UOp.const(dtypes.int, l))]
+            for f in [cvt(v & UOp.const(dtypes.uint32, 0xFFFF)), cvt(v >> UOp.const(dtypes.uint32, 16))]]
+  mat_a, mat_b = read_f16_mat(src0_r), read_f16_mat(src1_r)
+  if is_f16_output:
+    # RDNA3 F16/BF16 output: uses 8 VGPRs (same as F32), f16/bf16 values in lo 16 bits of each VGPR
+    # Layout: half16 per lane where even indices (0,2,4,...,14) = lo halves of VGPRs 0-7
+    # Read accumulator: 8 regs × 32 lanes, each VGPR's lo 16 bits holds one f16/bf16
+    mat_c = [cvt(ctx.rvgpr_dyn(src2_r + _c(i // 32), UOp.const(dtypes.int, i % 32)) & UOp.const(dtypes.uint32, 0xFFFF))
+              for i in range(256)]
+    mat_d = [sum(mat_a[row*16+k] * mat_b[col*16+k] for k in range(16)) + mat_c[row*16+col] for row in range(16) for col in range(16)]
+    # Write f16/bf16 results to lo 16 bits of each VGPR
+    def f32_to_f16_bits(v: UOp) -> UOp: return v.cast(dtypes.half).bitcast(dtypes.uint16).cast(dtypes.uint32)
+    def f32_to_bf16_bits(v: UOp) -> UOp: return (v.bitcast(dtypes.uint32) >> UOp.const(dtypes.uint32, 16)) & UOp.const(dtypes.uint32, 0xFFFF)
+    out_cvt = f32_to_bf16_bits if is_bf16 else f32_to_f16_bits
+    stores = [ctx.wvgpr_dyn(vdst_reg + _c(i // 32), UOp.const(dtypes.int, i % 32), out_cvt(mat_d[i]), exec_mask) for i in range(256)]
+  else:
+    # F32 output: accumulator and output are f32
+    mat_c = [ctx.rvgpr_dyn(src2_r + _c(i // 32), UOp.const(dtypes.int, i % 32)).bitcast(dtypes.float32) for i in range(256)]
+    mat_d = [sum(mat_a[row*16+k] * mat_b[col*16+k] for k in range(16)) + mat_c[row*16+col] for row in range(16) for col in range(16)]
+    stores = [ctx.wvgpr_dyn(vdst_reg + _c(i // 32), UOp.const(dtypes.int, i % 32), mat_d[i].bitcast(dtypes.uint32), exec_mask) for i in range(256)]
+  return UOp.sink(*stores, *ctx.inc_pc())
+
 def _compile_vop3p(inst: VOP3P, ctx: _Ctx) -> UOp:
-  lane, exec_mask = ctx.range(), ctx.rsgpr_dyn(_c(EXEC_LO.offset))
-  # Read register fields dynamically for deduplication
+  op_name = _op_name(inst)
+  if 'WMMA' in op_name and ('16X16X16_F16' in op_name or '16X16X16_BF16' in op_name): return _compile_wmma(inst, ctx)
+
+  lane = ctx.range()
+  exec_mask = ctx.rsgpr_dyn(_c(EXEC_LO.offset))
   vdst_reg = ctx.inst_field(VOP3P.vdst)
   src0 = ctx.rsrc_dyn(ctx.inst_field(VOP3P.src0), lane, 16)
   src1 = ctx.rsrc_dyn(ctx.inst_field(VOP3P.src1), lane, 16)
@@ -748,49 +773,6 @@ def _compile_vop3p(inst: VOP3P, ctx: _Ctx) -> UOp:
   opsel, opsel_hi = getattr(inst, 'opsel', 0) or 0, getattr(inst, 'opsel_hi', 3) if getattr(inst, 'opsel_hi', 3) is not None else 3
   opsel_hi2 = getattr(inst, 'opsel_hi2', 1) if getattr(inst, 'opsel_hi2', 1) is not None else 1
   neg, neg_hi = getattr(inst, 'neg', 0) or 0, getattr(inst, 'neg_hi', 0) or 0
-  def get_half_bits(val: UOp, use_hi: bool, apply_neg: bool = False) -> UOp:
-    bits = ((val >> UOp.const(dtypes.uint32, 16)) if use_hi else val) & UOp.const(dtypes.uint32, 0xFFFF)
-    if apply_neg: bits = bits.cast(dtypes.uint16).bitcast(dtypes.half).neg().bitcast(dtypes.uint16).cast(dtypes.uint32)
-    return bits
-  def build_remapped_src(src: UOp, opsel_lo_bit: int, opsel_hi_bit: int, neg_lo_bit: int, neg_hi_bit: int) -> UOp:
-    return get_half_bits(src, bool(opsel_lo_bit), bool(neg_lo_bit)) | (get_half_bits(src, bool(opsel_hi_bit), bool(neg_hi_bit)) << UOp.const(dtypes.uint32, 16))
-  s0_new = build_remapped_src(src0, opsel & 1, opsel_hi & 1, neg & 1, neg_hi & 1)
-  s1_new = build_remapped_src(src1, opsel & 2, opsel_hi & 2, neg & 2, neg_hi & 2)
-  s2_new = build_remapped_src(src2, opsel & 4, 1 if opsel_hi2 else 0, neg & 4, neg_hi & 4)
-  op_name = _op_name(inst)
-
-  # WMMA: Wave Matrix Multiply-Accumulate
-  if 'WMMA' in op_name and ('16X16X16_F16' in op_name or '16X16X16_BF16' in op_name):
-    # Dynamic register fields for deduplication
-    src0_r = ctx.inst_field(VOP3P.src0) - _c(256)
-    src1_r = ctx.inst_field(VOP3P.src1) - _c(256)
-    src2_r = ctx.inst_field(VOP3P.src2) - _c(256)
-    is_f16_output = 'F16_16X16X16_F16' in op_name or 'BF16_16X16X16_BF16' in op_name  # F16/BF16 output vs F32 output
-    is_bf16 = 'BF16' in op_name
-    cvt = _FUNCS['bf16_to_f32'] if is_bf16 else _FUNCS['f16_to_f32']
-    def read_f16_mat(src):
-      return [f for l in range(16) for r in range(8) for v in [ctx.rvgpr_dyn(src + _c(r), UOp.const(dtypes.int, l))]
-              for f in [cvt(v & UOp.const(dtypes.uint32, 0xFFFF)), cvt(v >> UOp.const(dtypes.uint32, 16))]]
-    mat_a, mat_b = read_f16_mat(src0_r), read_f16_mat(src1_r)
-    if is_f16_output:
-      # RDNA3 F16/BF16 output: uses 8 VGPRs (same as F32), f16/bf16 values in lo 16 bits of each VGPR
-      # Layout: half16 per lane where even indices (0,2,4,...,14) = lo halves of VGPRs 0-7
-      # Read accumulator: 8 regs × 32 lanes, each VGPR's lo 16 bits holds one f16/bf16
-      mat_c = [cvt(ctx.rvgpr_dyn(src2_r + _c(i // 32), UOp.const(dtypes.int, i % 32)) & UOp.const(dtypes.uint32, 0xFFFF))
-               for i in range(256)]
-      mat_d = [sum(mat_a[row*16+k] * mat_b[col*16+k] for k in range(16)) + mat_c[row*16+col] for row in range(16) for col in range(16)]
-      # Write f16/bf16 results to lo 16 bits of each VGPR
-      def f32_to_f16_bits(v: UOp) -> UOp: return v.cast(dtypes.half).bitcast(dtypes.uint16).cast(dtypes.uint32)
-      def f32_to_bf16_bits(v: UOp) -> UOp: return (v.bitcast(dtypes.uint32) >> UOp.const(dtypes.uint32, 16)) & UOp.const(dtypes.uint32, 0xFFFF)
-      out_cvt = f32_to_bf16_bits if is_bf16 else f32_to_f16_bits
-      stores = [ctx.wvgpr_dyn(vdst_reg + _c(i // 32), UOp.const(dtypes.int, i % 32),
-                out_cvt(mat_d[i]), exec_mask) for i in range(256)]
-    else:
-      # F32 output: accumulator and output are f32
-      mat_c = [ctx.rvgpr_dyn(src2_r + _c(i // 32), UOp.const(dtypes.int, i % 32)).bitcast(dtypes.float32) for i in range(256)]
-      mat_d = [sum(mat_a[row*16+k] * mat_b[col*16+k] for k in range(16)) + mat_c[row*16+col] for row in range(16) for col in range(16)]
-      stores = [ctx.wvgpr_dyn(vdst_reg + _c(i // 32), UOp.const(dtypes.int, i % 32), mat_d[i].bitcast(dtypes.uint32), exec_mask) for i in range(256)]
-    return UOp.sink(*stores, *ctx.inc_pc())
 
   if 'FMA_MIX' in op_name:
     combined_opsel_hi = (opsel_hi & 0x3) | ((opsel_hi2 & 0x1) << 2)
@@ -812,6 +794,15 @@ def _compile_vop3p(inst: VOP3P, ctx: _Ctx) -> UOp:
     srcs = {'S0': s0_mod, 'S1': s1_mod, 'S2': s2_mod,
             'OPSEL_HI': UOp.const(dtypes.uint32, combined_opsel_hi), 'OPSEL': UOp.const(dtypes.uint32, opsel)}
   else:
+    def get_half_bits(val: UOp, use_hi: bool, apply_neg: bool = False) -> UOp:
+      bits = ((val >> UOp.const(dtypes.uint32, 16)) if use_hi else val) & UOp.const(dtypes.uint32, 0xFFFF)
+      if apply_neg: bits = bits.cast(dtypes.uint16).bitcast(dtypes.half).neg().bitcast(dtypes.uint16).cast(dtypes.uint32)
+      return bits
+    def build_remapped_src(src: UOp, opsel_lo_bit: int, opsel_hi_bit: int, neg_lo_bit: int, neg_hi_bit: int) -> UOp:
+      return get_half_bits(src, bool(opsel_lo_bit), bool(neg_lo_bit)) | (get_half_bits(src, bool(opsel_hi_bit), bool(neg_hi_bit)) << UOp.const(dtypes.uint32, 16))
+    s0_new = build_remapped_src(src0, opsel & 1, opsel_hi & 1, neg & 1, neg_hi & 1)
+    s1_new = build_remapped_src(src1, opsel & 2, opsel_hi & 2, neg & 2, neg_hi & 2)
+    s2_new = build_remapped_src(src2, opsel & 4, 1 if opsel_hi2 else 0, neg & 4, neg_hi & 4)
     srcs = {'S0': s0_new, 'S1': s1_new, 'S2': s2_new}
   return ctx.compile_vop_pcode(inst.op, srcs, lane, vdst_reg, exec_mask)
 
