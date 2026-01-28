@@ -719,5 +719,24 @@ class TestNullRegister(unittest.TestCase):
     self.assertEqual(st.scc, 0)
 
 
+class Test64BitSOP1InlineConstants(unittest.TestCase):
+  """Tests for 64-bit SOP1 instructions with inline constants.
+
+  Regression tests for bug where rsrc_dyn with lane=None didn't properly
+  handle 64-bit inline constants, causing incorrect values to be read.
+  """
+
+  def test_s_mov_b64_inline_16(self):
+    """S_MOV_B64 with inline constant 16 should set lo=16, hi=0."""
+    instructions = [
+      s_mov_b64(s[0:1], 16),  # inline constant 16
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][0], 16, "lo should be 16")
+    self.assertEqual(st.vgpr[0][1], 0, "hi should be 0")
+
+
 if __name__ == '__main__':
   unittest.main()
