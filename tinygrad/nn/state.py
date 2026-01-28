@@ -308,7 +308,7 @@ def ggml_data_to_tensor(t: Tensor, n: int, ggml_type: int) -> Tensor:
   Converts ggml tensor data to a tinygrad tensor.
 
   Supported native types: float32 (id: 0), float16 (id: 1), int8 (id: 16), int16 (id: 17), int32 (id: 18)
-  Supported quantized types: Q4_0 (id: 2), Q4_1 (id: 3), Q8_0 (id: 8), Q4_K (id: 12), Q6_K (id: 14), MXFP4 (id: 39)
+  Supported quantized types: Q4_0 (id: 2), Q4_1 (id: 3), Q8_0 (id: 8), Q4_K (id: 12), Q5_K (id: 13), Q6_K (id: 14), MXFP4 (id: 39)
   """
   # https://github.com/ggerganov/ggml/blob/323951f1bdcdfbd5b5ff3a9a7c3770e63b1a560e/include/ggml.h#L356
 
@@ -322,7 +322,7 @@ def ggml_data_to_tensor(t: Tensor, n: int, ggml_type: int) -> Tensor:
     return t.unsqueeze(-1).expand((*t.shape,8//b)).idiv(shift_tensor).bitwise_and(bitmask).transpose(-1, -2).flatten(-2)
 
   # map to (number of elements, number of bytes)
-  if (nelements_nbytes := { 2: (32, 18), 3: (32, 20), 8: (32, 34), 12: (256, 144), 14: (256, 210), 39: (32, 17) }.get(ggml_type)) is not None:
+  if (nelements_nbytes := { 2: (32, 18), 3: (32, 20), 8: (32, 34), 12: (256, 144), 13: (256, 176), 14: (256, 210), 39: (32, 17) }.get(ggml_type)) is not None:
     blocks = t[:(n//nelements_nbytes[0])*nelements_nbytes[1]].reshape((-1, nelements_nbytes[1]))
     if ggml_type == 2: return (q_to_uint8(blocks[:,2:], 4).bitcast(dtypes.int8) - 8) * blocks[:,:2].bitcast(dtypes.float16).cast(dtypes.float32)
     if ggml_type == 3:
@@ -335,6 +335,28 @@ def ggml_data_to_tensor(t: Tensor, n: int, ggml_type: int) -> Tensor:
       sc = s[:,0:4].bitwise_and(63).cat(s[:,8:12].bitwise_and(0xF).bitwise_or(s[:,0:4].rshift(6).lshift(4)), dim=-1)
       mn = s[:,4:8].bitwise_and(63).cat(s[:,8:12].rshift(4).bitwise_or(s[:,4:8].rshift(6).lshift(4)), dim=-1)
       q = Tensor.stack((qs:=blocks[:,16:144].reshape(-1,4,32)).bitwise_and(0xF), qs.rshift(4), dim=2).reshape(-1,8,32).cast(dtypes.float32)
+      return (d * sc.unsqueeze(-1) * q - dmin * mn.unsqueeze(-1)).flatten(-2)
+    if ggml_type == 13:  # Q5_K: 256 elements per 176-byte block (d:2, dmin:2, scales:12, qh:32, qs:128)
+      d, dmin = (blocks[:,i:i+2].bitcast(dtypes.float16).cast(dtypes.float32).unsqueeze(-1) for i in [0, 2])
+      s = blocks[:,4:16]  # 12 bytes: 6-bit scales[0-3], 6-bit mins[0-3], high bits[4-7]
+      sc = s[:,0:4].bitwise_and(63).cat(s[:,8:12].bitwise_and(0xF).bitwise_or(s[:,0:4].rshift(6).lshift(4)), dim=-1)
+      mn = s[:,4:8].bitwise_and(63).cat(s[:,8:12].rshift(4).bitwise_or(s[:,4:8].rshift(6).lshift(4)), dim=-1)
+      qh = blocks[:,16:48]  # 32 bytes: high bits for 256 elements
+      qs = blocks[:,48:176].reshape(-1, 4, 32)  # 128 bytes: 4 groups of 32 bytes
+      ql = Tensor.stack(qs.bitwise_and(0xF), qs.rshift(4), dim=2).reshape(-1, 4, 64)
+      qh_bits = Tensor.stack(*[qh.bitwise_and(1 << i).rshift(i) for i in range(8)], dim=-1).reshape(-1, 32, 8).transpose(-2, -1).reshape(-1, 8, 32)
+      # qh_bits[:,i,:] contains the i-th bit of all 32 qh bytes = high bits for 32 elements across all groups
+      # Group 0 uses bits 0,1; Group 1 uses bits 2,3; Group 2 uses bits 4,5; Group 3 uses bits 6,7
+      # Within each group: first 32 elements use even bit, second 32 use odd bit
+      # Stack and reshape to get elements 0-31 followed by 32-63 for each group
+      qh_combined = Tensor.stack(
+        qh_bits[:,0].cat(qh_bits[:,1], dim=-1).reshape(-1, 64),
+        qh_bits[:,2].cat(qh_bits[:,3], dim=-1).reshape(-1, 64),
+        qh_bits[:,4].cat(qh_bits[:,5], dim=-1).reshape(-1, 64),
+        qh_bits[:,6].cat(qh_bits[:,7], dim=-1).reshape(-1, 64),
+        dim=1
+      ).lshift(4)
+      q = (ql + qh_combined.cast(dtypes.float32)).reshape(-1, 8, 32)
       return (d * sc.unsqueeze(-1) * q - dmin * mn.unsqueeze(-1)).flatten(-2)
     if ggml_type == 14:
       xl, xh = q_to_uint8(blocks[:,:128].reshape((-1, 2, 64)), 4), q_to_uint8(blocks[:,128:192].reshape((-1, 2, 32)), 2).lshift(4)
