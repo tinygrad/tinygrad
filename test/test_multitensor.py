@@ -889,7 +889,7 @@ class TestMultiTensor(unittest.TestCase):
     t = Tensor.rand(16, 16).shard(devices_2, axis=0)
     np.testing.assert_allclose(t.numpy(), t.clone().numpy())
 
-  @unittest.skipIf(OSX, "this is unreliable on OSX")
+  # NOTE: test_clone is "unreliable on OSX". This could be too.
   def test_sharded_clone(self):
     t = Tensor.rand(16, 16).shard(devices_2, axis=0).realize()
     t_clone = t.clone()
@@ -921,6 +921,9 @@ class TestMultiTensor(unittest.TestCase):
     # all new buffers
     self.assertEqual(len(og_bufs), len(new_bufs))
     self.assertTrue(og_bufs.isdisjoint(new_bufs), msg=f"{og_bufs=} - {new_bufs=}")
+
+    # schedule() is not reentrant...
+    run_schedule(sched)
 
     # equal data
     np.testing.assert_allclose(t.numpy(), t_clone.numpy())
