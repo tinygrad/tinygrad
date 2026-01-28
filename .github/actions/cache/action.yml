@@ -26,5 +26,5 @@ runs:
       id: restore-save
       uses: actions/cache@v4
       with:
-        path: ${{ input.path }}
-        key: ${{ input.key }}
+        path: ${{ inputs.path }}
+        key: ${{ inputs.key }}
