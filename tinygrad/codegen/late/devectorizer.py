@@ -201,7 +201,7 @@ def image_fixup(ls:UOp):
     x_mod_4 = x % 4
     def sel(ret, i): return x_mod_4.ne(i).where(ret, vec_load.gep(i))
     # if x is non-negative, x % 4 is in [0, 3] and we can skip NAN fallback
-    if x_mod_4.vmin >= 0: return functools.reduce(sel, range(x_mod_4.vmin+1, x_mod_4.vmax+1), vec_load.gep(x_mod_4.vmin))
+    if x_mod_4.vmin >= 0: return functools.reduce(sel, range(int(x_mod_4.vmin)+1, int(x_mod_4.vmax)+1), vec_load.gep(int(x_mod_4.vmin)))
     return functools.reduce(sel, range(4), ls.const_like(float('nan')))
 
   return None
