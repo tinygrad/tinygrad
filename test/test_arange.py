@@ -171,13 +171,13 @@ class TestIndexing(unittest.TestCase):
     tokens = Tensor.randint(bs, seqlen, high=vocab_size)
     # forward
     emb = nn.Embedding(vocab_size, embed_size)
-    emb.weight = Tensor.empty(vocab_size, embed_size, dtype=dtypes.bfloat16).realize()
+    emb.weight = Tensor.empty(vocab_size, embed_size, dtype=dtypes.float).realize()
     GlobalCounters.reset()
     emb(tokens).realize()
     fwd_ops = GlobalCounters.global_ops
     print(f"embedding fwd: {GlobalCounters.kernel_count} kernels, {fwd_ops:,} ops")
     # backward
-    emb.weight = Tensor.empty(vocab_size, embed_size, dtype=dtypes.bfloat16, requires_grad=True).realize()
+    emb.weight = Tensor.empty(vocab_size, embed_size, dtype=dtypes.float, requires_grad=True).realize()
     GlobalCounters.reset()
     emb(tokens).sum().backward()
     emb.weight.grad.realize()
