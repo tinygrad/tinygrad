@@ -717,6 +717,22 @@ def _subst_loop_var(line: str, loop_var: str, val: int) -> str:
   subst_parts = [str(val) if t.type == 'IDENT' and t.val == loop_var else t.val for t in result_toks if t.type != 'EOF']
   return ' '.join(subst_parts)
 
+def _set_bits(old: UOp, val: UOp, width: int, offset: int) -> UOp:
+  """Set bits [offset:offset+width) in old to val, masking and shifting appropriately."""
+  mask = _u32(((1 << width) - 1) << offset)
+  v = (val.cast(dtypes.uint32) if val.dtype != dtypes.uint32 else val) & _u32((1 << width) - 1)
+  return (old & (mask ^ _u32(0xFFFFFFFF))) | (v << _u32(offset))
+
+def _find_paren_end(s: str, start: int = 0, open_ch: str = '(', close_ch: str = ')') -> int:
+  """Find index of matching close paren, starting after the open paren at start."""
+  depth = 0
+  for j, ch in enumerate(s[start:], start):
+    if ch == open_ch: depth += 1
+    elif ch == close_ch:
+      depth -= 1
+      if depth == 0: return j
+  return len(s)
+
 def parse_block(lines: list[str], start: int, vars: dict[str, VarVal], funcs: dict | None = None,
                 assigns: list | None = None) -> tuple[int, dict[str, VarVal], UOp | None]:
   """Parse a block of pcode. Returns (next_line, block_assigns, return_value).
@@ -747,19 +763,14 @@ def parse_block(lines: list[str], start: int, vars: dict[str, VarVal], funcs: di
       p.eat_val('for', 'IDENT')
       loop_var = p.eat('IDENT').val
       p.eat_val('in', 'IDENT')
-      if p.at('NUM') and p.peek(1).type == 'QUOTE': p.eat('NUM'); p.eat('QUOTE')
-      if p.at('NUM'):
-        start_val = int(p.eat('NUM').val.rstrip('UuLl'))
-      else:
-        start_expr = p.parse()
-        start_val = int(start_expr.arg) if start_expr.op == Ops.CONST else 0
+      def parse_bound():
+        if p.at('NUM') and p.peek(1).type == 'QUOTE': p.eat('NUM'); p.eat('QUOTE')
+        if p.at('NUM'): return int(p.eat('NUM').val.rstrip('UuLl'))
+        expr = p.parse()
+        return int(expr.arg) if expr.op == Ops.CONST else 0
+      start_val = parse_bound()
       p.eat('COLON')
-      if p.at('NUM') and p.peek(1).type == 'QUOTE': p.eat('NUM'); p.eat('QUOTE')
-      if p.at('NUM'):
-        end_val = int(p.eat('NUM').val.rstrip('UuLl'))
-      else:
-        end_expr = p.parse()
-        end_val = int(end_expr.arg) if end_expr.op == Ops.CONST else 0
+      end_val = parse_bound()
       # Collect body
       i += 1; body_lines, depth = [], 1
       while i < len(lines) and depth > 0:
@@ -806,25 +817,17 @@ def parse_block(lines: list[str], start: int, vars: dict[str, VarVal], funcs: di
     # lambda definition
     if first != '{' and '=' in line and 'lambda' in line and any(t.type == 'IDENT' and t.val == 'lambda' for t in toks):
       name = toks[0].val
-      body_start, depth = line[line.find('(', line.find('lambda')):], 0
-      params_end = 0
-      for j, ch in enumerate(body_start):
-        if ch == '(': depth += 1
-        elif ch == ')':
-          depth -= 1
-          if depth == 0: params_end = j + 1; break
+      body_start = line[line.find('(', line.find('lambda')):]
+      params_end = _find_paren_end(body_start) + 1
       params = [p.strip() for p in body_start[1:params_end-1].split(',') if p.strip()]
       rest = body_start[params_end:].strip()
       if rest.startswith('('):
-        depth, body_end = 1, 1
-        for j, ch in enumerate(rest[1:], 1):
-          if ch == '(': depth += 1
-          elif ch == ')':
-            depth -= 1
-            if depth == 0: body_end = j; break
-        body = rest[1:body_end].strip()
-        if depth > 0:
-          body_lines_lst = [rest[1:]]
+        body_end = _find_paren_end(rest)
+        if body_end < len(rest):  # found matching paren on same line
+          body = rest[1:body_end].strip()
+          i += 1
+        else:  # multiline body
+          body_lines_lst, depth = [rest[1:]], 1
           i += 1
           while i < len(lines) and depth > 0:
             for j, ch in enumerate(lines[i]):
@@ -835,7 +838,6 @@ def parse_block(lines: list[str], start: int, vars: dict[str, VarVal], funcs: di
             else: body_lines_lst.append(lines[i])
             i += 1
           body = '\n'.join(body_lines_lst).strip()
-        else: i += 1
         vars[name] = ('lambda', params, body)
         continue
 
@@ -916,8 +918,7 @@ def parse_block(lines: list[str], start: int, vars: dict[str, VarVal], funcs: di
           if assigns is not None: assigns.append((f'{var}[{hi}:{lo}]' + (f'.{dt_suffix}' if dt_suffix else ''), val))
           if var not in vars: vars[var] = _const(dtypes.uint64 if hi >= 32 else dtypes.uint32, 0)
           old = block_assigns.get(var, vars.get(var))
-          mask = _u32(((1 << (hi - lo + 1)) - 1) << lo)
-          block_assigns[var] = vars[var] = (old & (mask ^ _u32(0xFFFFFFFF))) | (_val_to_bits(val) << _u32(lo))
+          block_assigns[var] = vars[var] = _set_bits(old, _val_to_bits(val), hi - lo + 1, lo)
           i += 1; continue
         except: pass
 
@@ -953,9 +954,8 @@ def parse_block(lines: list[str], start: int, vars: dict[str, VarVal], funcs: di
         while j < len(toks) and toks[j].type != 'EQUALS': j += 1
         if j < len(toks):
           val, old = parse_tokens(toks[j+1:], ctx(), funcs), block_assigns.get(var, vars.get(var, _u32(0)))
-          bw, lo_bit = dt.itemsize * 8, idx * dt.itemsize * 8
-          mask = _u32(((1 << bw) - 1) << lo_bit)
-          block_assigns[var] = vars[var] = (old & (mask ^ _u32(0xFFFFFFFF))) | (((val.cast(dtypes.uint32) if val.dtype != dtypes.uint32 else val) & _u32((1 << bw) - 1)) << _u32(lo_bit))
+          bw = dt.itemsize * 8
+          block_assigns[var] = vars[var] = _set_bits(old, val, bw, idx * bw)
           if assigns is not None: assigns.append((f'{var}.{dt_name}[{idx}]', val))
           i += 1; continue
 
@@ -972,9 +972,8 @@ def parse_block(lines: list[str], start: int, vars: dict[str, VarVal], funcs: di
           while j < len(toks) and toks[j].type != 'EQUALS': j += 1
           if j < len(toks):
             val = parse_tokens(toks[j+1:], ctx(), funcs)
-            old, mask = block_assigns.get(var, vars.get(var, _u32(0))), _u32(1) << bit_pos
-            block_assigns[var] = vars[var] = (old | mask) if val.op == Ops.CONST and val.arg == 1 else \
-                                              (old & (mask ^ _u32(0xFFFFFFFF))) if val.op == Ops.CONST and val.arg == 0 else _set_bit(old, bit_pos, val)
+            old = block_assigns.get(var, vars.get(var, _u32(0)))
+            block_assigns[var] = vars[var] = _set_bit(old, bit_pos, val)
             i += 1; continue
 
       # Bit index: var[expr] = value (bit assignment to existing scalar)

@@ -731,7 +731,8 @@ def _compile_vop3sd(inst: VOP3SD, ctx: _Ctx) -> UOp:
     # VCC computation: RANGE+REDUCE gets axis ID first (lower ID = runs first)
     # This ensures VCC reads source values BEFORE VGPR stores modify them
     def get_vcc_bit(lane_uop) -> UOp:
-      s0, s1 = ctx.rsrc_dyn_sized(src0_off, lane_uop, sizes, 'src0', literal=literal), ctx.rsrc_dyn_sized(src1_off, lane_uop, sizes, 'src1', literal=literal)
+      s0 = ctx.rsrc_dyn_sized(src0_off, lane_uop, sizes, 'src0', literal=literal)
+      s1 = ctx.rsrc_dyn_sized(src1_off, lane_uop, sizes, 'src1', literal=literal)
       s2 = ctx.rsrc_dyn_sized(src2_off, lane_uop, sizes, 'src2', literal=literal) if src2_off is not None else None
       lane_srcs = {'S0': s0, 'S1': s1, 'VCC': ctx.rsgpr_dyn(vcc_in_off), 'EXEC': exec_mask, 'SCC': ctx.rsgpr_dyn(_c(SCC.offset)), 'laneId': lane_uop}
       if s2 is not None: lane_srcs['S2'] = s2
@@ -742,7 +743,8 @@ def _compile_vop3sd(inst: VOP3SD, ctx: _Ctx) -> UOp:
     final_vcc = ctx.unroll_lanes(get_vcc_bit, exec_mask)
     # VGPR stores: RANGE gets axis ID second (higher ID = runs after VCC loop)
     lane3 = ctx.range()
-    s0, s1 = ctx.rsrc_dyn_sized(src0_off, lane3, sizes, 'src0', literal=literal), ctx.rsrc_dyn_sized(src1_off, lane3, sizes, 'src1', literal=literal)
+    s0 = ctx.rsrc_dyn_sized(src0_off, lane3, sizes, 'src0', literal=literal)
+    s1 = ctx.rsrc_dyn_sized(src1_off, lane3, sizes, 'src1', literal=literal)
     s2 = ctx.rsrc_dyn_sized(src2_off, lane3, sizes, 'src2', literal=literal) if src2_off is not None else None
     lane_srcs = {'S0': s0, 'S1': s1, 'VCC': ctx.rsgpr_dyn(vcc_in_off), 'EXEC': exec_mask, 'SCC': ctx.rsgpr_dyn(_c(SCC.offset)), 'laneId': lane3}
     if s2 is not None: lane_srcs['S2'] = s2
