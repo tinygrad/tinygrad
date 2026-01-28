@@ -19,16 +19,15 @@ class PythonRemu:
   """Python RDNA3 emulator wrapper that matches the libremu.so interface."""
   valid_mem_ranges: set[tuple[int, int]] = set()
   rsrc2: int = 0x19c  # Default: USER_SGPR_COUNT=14, enable X and Y workgroup IDs
+  scratch_size: int = 0  # private_segment_fixed_size from kernel descriptor
 
   def run_asm(self, lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, lz: int, args_ptr: int) -> int:
-    from extra.assembly.amd.emu import run_asm, set_valid_mem_ranges
-    # Pad ranges to handle GPU loads that may read past small buffers (e.g. s_load_b128 on 12-byte buffer)
-    set_valid_mem_ranges({(start, size + 4096) for start, size in self.valid_mem_ranges})
-    return run_asm(lib, lib_sz, gx, gy, gz, lx, ly, lz, args_ptr, self.rsrc2)
+    from extra.assembly.amd.emu import run_asm
+    return run_asm(lib, lib_sz, gx, gy, gz, lx, ly, lz, args_ptr, self.rsrc2, self.scratch_size)
 
 def _try_dlopen_remu():
   # Use Python emulator only if PYTHON_REMU=1
-  if getenv("PYTHON_REMU"):
+  if int(getenv("PYTHON_REMU", "1")):
     return PythonRemu()
   REMU_PATHS = ["extra/remu/target/release/libremu.so", "libremu.so", "/usr/local/lib/libremu.so",
                "extra/remu/target/release/libremu.dylib", "libremu.dylib", "/usr/local/lib/libremu.dylib", "/opt/homebrew/lib/libremu.dylib"]

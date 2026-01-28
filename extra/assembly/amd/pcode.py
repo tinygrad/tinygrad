@@ -1,822 +1,1052 @@
-# DSL for RDNA3 pseudocode - makes pseudocode expressions work directly as Python
-import struct, math, re, functools
+# Tokenizer-based expression parser for AMD pcode
+from typing import Any, Callable
+from tinygrad.dtype import dtypes
+from tinygrad.uop.ops import Ops, UOp
 
-MASK32, MASK64 = 0xFFFFFFFF, 0xFFFFFFFFFFFFFFFF
+# Type alias for vars dict: stores UOps for variables and tuples for lambda definitions
+VarVal = UOp | tuple[str, list[str], str]
 
-# Float/int bit conversion functions
-_struct_f, _struct_I = struct.Struct("<f"), struct.Struct("<I")
-_struct_e, _struct_H = struct.Struct("<e"), struct.Struct("<H")
-_struct_d, _struct_Q = struct.Struct("<d"), struct.Struct("<Q")
-def _f32(i):
-  i = i & MASK32
-  # RDNA3 default mode: flush f32 denormals to zero (FTZ)
-  # Denormal: exponent=0 (bits 23-30) and mantissa!=0 (bits 0-22)
-  if (i & 0x7f800000) == 0 and (i & 0x007fffff) != 0: return 0.0
-  return _struct_f.unpack(_struct_I.pack(i))[0]
-def _i32(f):
-  if isinstance(f, int): f = float(f)
-  if math.isnan(f): return 0xffc00000 if math.copysign(1.0, f) < 0 else 0x7fc00000
-  if math.isinf(f): return 0x7f800000 if f > 0 else 0xff800000
-  try:
-    bits = _struct_I.unpack(_struct_f.pack(f))[0]
-    # RDNA3 default mode: flush f32 denormals to zero (FTZ)
-    if (bits & 0x7f800000) == 0 and (bits & 0x007fffff) != 0: return 0x80000000 if bits & 0x80000000 else 0
-    return bits
-  except (OverflowError, struct.error): return 0x7f800000 if f > 0 else 0xff800000
-def _sext(v, b): return v - (1 << b) if v & (1 << (b - 1)) else v
-def _f16(i): return _struct_e.unpack(_struct_H.pack(i & 0xffff))[0]
-def _i16(f):
-  if math.isnan(f): return 0x7e00
-  if math.isinf(f): return 0x7c00 if f > 0 else 0xfc00
-  try: return _struct_H.unpack(_struct_e.pack(f))[0]
-  except (OverflowError, struct.error): return 0x7c00 if f > 0 else 0xfc00
-def _f64(i): return _struct_d.unpack(_struct_Q.pack(i & MASK64))[0]
-def _i64(f):
-  if math.isnan(f): return 0x7ff8000000000000
-  if math.isinf(f): return 0x7ff0000000000000 if f > 0 else 0xfff0000000000000
-  try: return _struct_Q.unpack(_struct_d.pack(f))[0]
-  except (OverflowError, struct.error): return 0x7ff0000000000000 if f > 0 else 0xfff0000000000000
+def _const(dt, v): return UOp.const(dt, v)
+def _u32(v): return _const(dtypes.uint32, v)
+def _u64(v): return _const(dtypes.uint64, v)
+def _to_u32(v): return v if v.dtype == dtypes.uint32 else v.bitcast(dtypes.uint32) if v.dtype.itemsize == 4 else v.cast(dtypes.uint32)
+def _to_bool(v): return v if v.dtype == dtypes.bool else v.ne(_const(v.dtype, 0))
+def _cast_to(v, dt):
+  if v.dtype == dt: return v
+  if dt == dtypes.half: return v.cast(dtypes.uint16).bitcast(dtypes.half)
+  return v.cast(dt) if dt.itemsize != v.dtype.itemsize else v.bitcast(dt)
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# INTERNAL HELPERS
-# ═══════════════════════════════════════════════════════════════════════════════
+# Float bit extraction - returns (bits, exp_mask, mant_mask, quiet_bit, exp_shift) based on float type
+def _float_info(v: UOp) -> tuple[UOp, UOp, UOp, UOp, int]:
+  if v.dtype in (dtypes.float64, dtypes.uint64):
+    bits = v.bitcast(dtypes.uint64) if v.dtype == dtypes.float64 else v.cast(dtypes.uint64)
+    return bits, _u64(0x7FF0000000000000), _u64(0x000FFFFFFFFFFFFF), _u64(0x0008000000000000), 52
+  if v.dtype in (dtypes.half, dtypes.uint16):
+    bits = (v.bitcast(dtypes.uint16) if v.dtype == dtypes.half else (v & _u32(0xFFFF)).cast(dtypes.uint16)).cast(dtypes.uint32)
+    return bits, _u32(0x7C00), _u32(0x03FF), _u32(0x0200), 10
+  bits = v.bitcast(dtypes.uint32) if v.dtype == dtypes.float32 else v.cast(dtypes.uint32)
+  return bits, _u32(0x7F800000), _u32(0x007FFFFF), _u32(0x00400000), 23
 
-def _div(a, b):
-  try: return a / b
-  except ZeroDivisionError:
-    if a == 0.0 or math.isnan(a): return float("nan")
-    return math.copysign(float("inf"), a * b) if b == 0.0 else float("inf") if a > 0 else float("-inf")
-def _check_nan_type(x, quiet_bit_expected, default):
-  try:
-    if not math.isnan(float(x)): return False
-    if hasattr(x, '_reg') and hasattr(x, '_bits'):
-      bits = x._reg._val & ((1 << x._bits) - 1)
-      exp_bits, quiet_pos, mant_mask = {16: (0x1f, 9, 0x3ff), 32: (0xff, 22, 0x7fffff), 64: (0x7ff, 51, 0xfffffffffffff)}.get(x._bits, (0,0,0))
-      exp_shift = {16: 10, 32: 23, 64: 52}.get(x._bits, 0)
-      if exp_bits and ((bits >> exp_shift) & exp_bits) == exp_bits and (bits & mant_mask) != 0:
-        return ((bits >> quiet_pos) & 1) == quiet_bit_expected
-    return default
-  except (TypeError, ValueError): return False
-def _gt_neg_zero(a, b): return (a > b) or (a == 0 and b == 0 and not math.copysign(1, a) < 0 and math.copysign(1, b) < 0)
-def _lt_neg_zero(a, b): return (a < b) or (a == 0 and b == 0 and math.copysign(1, a) < 0 and not math.copysign(1, b) < 0)
-def _fpop(fn):
-  def wrapper(x):
-    x = float(x)
-    if math.isnan(x) or math.isinf(x): return x
-    result = float(fn(x))
-    return math.copysign(0.0, x) if result == 0.0 else result
-  return wrapper
-def _f_to_int(f, lo, hi): f = float(f); return 0 if math.isnan(f) else (hi if f >= hi else lo if f <= lo else int(f))
-def _f16_to_f32_bits(bits): return struct.unpack("<e", struct.pack("<H", int(bits) & 0xffff))[0]
-def _brev(v, bits): return int(bin(v & ((1 << bits) - 1))[2:].zfill(bits)[::-1], 2)
-def _ctz(v, bits):
-  v, n = int(v) & ((1 << bits) - 1), 0
-  if v == 0: return bits
-  while (v & 1) == 0: v >>= 1; n += 1
-  return n
+def _isnan(v: UOp) -> UOp:
+  bits, exp_m, mant_m, _, _ = _float_info(v.cast(dtypes.float32) if v.dtype == dtypes.half else v)
+  return (bits & exp_m).eq(exp_m) & (bits & mant_m).ne(_const(bits.dtype, 0))
 
-def _bf16(i):
-  """Convert bf16 bits to float. BF16 is just the top 16 bits of f32."""
-  return struct.unpack("<f", struct.pack("<I", (i & 0xffff) << 16))[0]
-def _ibf16(f):
-  """Convert float to bf16 bits (truncate to top 16 bits of f32)."""
-  if math.isnan(f): return 0x7fc0  # bf16 quiet NaN
-  if math.isinf(f): return 0x7f80 if f > 0 else 0xff80  # bf16 ±infinity
-  try: return (struct.unpack("<I", struct.pack("<f", float(f)))[0] >> 16) & 0xffff
-  except (OverflowError, struct.error): return 0x7f80 if f > 0 else 0xff80
-def _trig(fn, x):
-  # V_SIN/COS_F32: hardware does frac on input cycles before computing
-  if math.isinf(x) or math.isnan(x): return float("nan")
-  frac_cycles = fract(x / (2 * math.pi))
-  result = fn(frac_cycles * 2 * math.pi)
-  # Hardware returns exactly 0 for cos(π/2), sin(π), etc. due to lookup table
-  # Round very small results (below f32 precision) to exactly 0
-  if abs(result) < 1e-7: return 0.0
+def _bitreverse(v: UOp, bits: int) -> UOp:
+  dt, masks = (dtypes.uint64, [(0x5555555555555555,1),(0x3333333333333333,2),(0x0F0F0F0F0F0F0F0F,4),(0x00FF00FF00FF00FF,8),(0x0000FFFF0000FFFF,16)]) \
+    if bits == 64 else (dtypes.uint32, [(0x55555555,1),(0x33333333,2),(0x0F0F0F0F,4),(0x00FF00FF,8)])
+  v = v.cast(dt) if v.dtype != dt else v
+  for m, s in masks: v = ((v >> _const(dt, s)) & _const(dt, m)) | ((v & _const(dt, m)) << _const(dt, s))
+  return (v >> _const(dt, 32 if bits == 64 else 16)) | (v << _const(dt, 32 if bits == 64 else 16))
+
+def _extract_bits(val: UOp, hi: int, lo: int) -> UOp:
+  dt = dtypes.uint64 if val.dtype in (dtypes.uint64, dtypes.int64) else dtypes.uint32
+  return ((val >> _const(dt, lo)) if lo > 0 else val) & _const(val.dtype, (1 << (hi - lo + 1)) - 1)
+
+def _set_bit(old, pos, val):
+  mask = _u32(1) << pos
+  return (old & (mask ^ _u32(0xFFFFFFFF))) | ((val.cast(dtypes.uint32) & _u32(1)) << pos)
+
+def _val_to_bits(val):
+  if val.dtype == dtypes.half: return val.bitcast(dtypes.uint16).cast(dtypes.uint32)
+  if val.dtype == dtypes.float32: return val.bitcast(dtypes.uint32)
+  if val.dtype == dtypes.float64: return val.bitcast(dtypes.uint64)
+  return val if val.dtype == dtypes.uint32 else val.cast(dtypes.uint32)
+
+def _floor(x): t = UOp(Ops.TRUNC, x.dtype, (x,)); return ((x < _const(x.dtype, 0)) & x.ne(t)).where(t - _const(x.dtype, 1), t)
+def _f16_extract(v): return (v & _u32(0xFFFF)).cast(dtypes.uint16).bitcast(dtypes.half) if v.dtype == dtypes.uint32 else v
+
+def _check_nan(v: UOp, quiet: bool) -> UOp:
+  if v.op == Ops.CAST and v.dtype == dtypes.float64: v = v.src[0]
+  bits, exp_m, mant_m, qb, _ = _float_info(v)
+  is_nan_exp, has_mant, is_q = (bits & exp_m).eq(exp_m), (bits & mant_m).ne(_const(bits.dtype, 0)), (bits & qb).ne(_const(bits.dtype, 0))
+  return (is_nan_exp & is_q) if quiet else (is_nan_exp & has_mant & is_q.logical_not())
+
+def _minmax_reduce(is_max: bool, dt, *args: UOp) -> UOp:
+  def cast(v: UOp) -> UOp: return v.bitcast(dt) if dt == dtypes.float32 and v.dtype == dtypes.uint32 else v.cast(dt)
+  def minmax(a: UOp, b: UOp) -> UOp:
+    if dt in (dtypes.uint8, dtypes.uint16, dtypes.uint32, dtypes.uint64): return (a > b).where(a, b) if is_max else (a < b).where(a, b)
+    return a.maximum(b) if is_max else a.minimum(b)
+  result = cast(args[0])
+  for a in args[1:]:
+    b = cast(a)
+    if dt == dtypes.float32: result = _isnan(result).where(b, _isnan(b).where(result, minmax(result, b)))
+    else: result = minmax(result, b)
   return result
 
-class _SafeFloat(float):
-  """Float subclass that uses _div for division to handle 0/inf correctly."""
-  def __truediv__(self, o): return _div(float(self), float(o))
-  def __rtruediv__(self, o): return _div(float(o), float(self))
+def _find_two_pi_mul(x):
+  if x.op != Ops.MUL or len(x.src) != 2: return None
+  for i, s in enumerate(x.src):
+    if s.op == Ops.CONST and abs(s.arg - 6.283185307179586) < 1e-5: return (x.src[1-i], 6.283185307179586)
+    if s.op == Ops.MUL and len(s.src) == 2:
+      vals = [ss.arg for ss in s.src if ss.op == Ops.CONST] + [ss.src[0].arg for ss in s.src if ss.op == Ops.CAST and ss.src[0].op == Ops.CONST]
+      if len(vals) == 2 and abs(vals[0] * vals[1] - 6.283185307179586) < 1e-5: return (x.src[1-i], vals[0] * vals[1])
+  return None
 
-class _Inf:
-  f16 = f32 = f64 = float('inf')
-  def __neg__(self): return _NegInf()
-  def __pos__(self): return self
-  def __float__(self): return float('inf')
-  def __eq__(self, other): return float(other) == float('inf') if not isinstance(other, _NegInf) else False
-  def __req__(self, other): return self.__eq__(other)
-class _NegInf:
-  f16 = f32 = f64 = float('-inf')
-  def __neg__(self): return _Inf()
-  def __pos__(self): return self
-  def __float__(self): return float('-inf')
-  def __eq__(self, other): return float(other) == float('-inf') if not isinstance(other, _Inf) else False
-  def __req__(self, other): return self.__eq__(other)
+def _trig_reduce(x, phase=0.0):
+  match = _find_two_pi_mul(x)
+  if match is not None:
+    turns, two_pi = match
+    if phase: turns = turns + _const(turns.dtype, phase)
+    n = _floor(turns + _const(turns.dtype, 0.5))
+    return UOp(Ops.SIN, turns.dtype, ((turns - n) * _const(turns.dtype, two_pi),))
+  if phase: x = x + _const(x.dtype, phase * 6.283185307179586)
+  n = _floor(x * _const(x.dtype, 0.15915494309189535) + _const(x.dtype, 0.5))
+  return UOp(Ops.SIN, x.dtype, (x - n * _const(x.dtype, 6.283185307179586),))
 
-class _RoundMode:
-  NEAREST_EVEN = 0
+def _signext(val: UOp) -> UOp:
+  for bits, mask, ext in [(8, 0xFF, 0xFFFFFF00), (16, 0xFFFF, 0xFFFF0000)]:
+    if (val.op == Ops.AND and len(val.src) == 2 and val.src[1].op == Ops.CONST and val.src[1].arg == mask) or val.dtype.itemsize == bits // 8:
+      v32 = val.cast(dtypes.uint32) if val.dtype != dtypes.uint32 else val
+      sb = (v32 >> _u32(bits - 1)) & _u32(1)
+      return sb.ne(_u32(0)).where(v32 | _u32(ext), v32).cast(dtypes.int)
+  return val.cast(dtypes.int64) if val.dtype in (dtypes.int, dtypes.int32) else val
 
-class _WaveMode:
-  IEEE = False
+def _abs(val: UOp) -> UOp:
+  if val.dtype not in (dtypes.float32, dtypes.float64, dtypes.half): return val
+  _, _, _, _, shift = _float_info(val)
+  sign_mask = {10: 0x7FFF, 23: 0x7FFFFFFF, 52: 0x7FFFFFFFFFFFFFFF}[shift]
+  bt, ft = {10: (dtypes.uint16, dtypes.half), 23: (dtypes.uint32, dtypes.float32), 52: (dtypes.uint64, dtypes.float64)}[shift]
+  return (val.bitcast(bt) & _const(bt, sign_mask)).bitcast(ft)
 
-class _DenormChecker:
-  """Comparator for denormalized floats. x == DENORM.f32 checks if x is denormalized."""
-  def __init__(self, bits): self._bits = bits
-  def _check(self, other):
-    f = float(other)
-    if math.isinf(f) or math.isnan(f) or f == 0.0: return False
-    if self._bits == 64:
-      bits = struct.unpack("<Q", struct.pack("<d", f))[0]
-      return (bits >> 52) & 0x7ff == 0
-    bits = struct.unpack("<I", struct.pack("<f", f))[0]
-    return (bits >> 23) & 0xff == 0
-  def __eq__(self, other): return self._check(other)
-  def __req__(self, other): return self._check(other)
-  def __ne__(self, other): return not self._check(other)
+def _f_to_u(f, dt): return UOp(Ops.TRUNC, f.dtype, ((f < _const(f.dtype, 0.0)).where(_const(f.dtype, 0.0), f),)).cast(dt)
 
-class _Denorm:
-  f32 = _DenormChecker(32)
-  f64 = _DenormChecker(64)
+def _cvt_quiet(val: UOp) -> UOp:
+  bits, _, _, qb, _ = _float_info(val)
+  bt, ft = (dtypes.uint64, dtypes.float64) if val.dtype == dtypes.float64 else (dtypes.uint16, dtypes.half) if val.dtype == dtypes.half else (dtypes.uint32, dtypes.float32)
+  return (val.bitcast(bt) | qb).bitcast(ft)
 
-_pack = lambda hi, lo: ((int(hi) & 0xffff) << 16) | (int(lo) & 0xffff)
-_pack32 = lambda hi, lo: ((int(hi) & 0xffffffff) << 32) | (int(lo) & 0xffffffff)
+def _is_denorm(val: UOp) -> UOp:
+  bits, exp_m, mant_m, _, _ = _float_info(val)
+  return (bits & exp_m).eq(_const(bits.dtype, 0)) & (bits & mant_m).ne(_const(bits.dtype, 0))
 
-class TypedView:
-  """View into a Reg with typed access. Used for both full-width (Reg.u32) and slices (Reg[31:16])."""
-  __slots__ = ('_reg', '_high', '_low', '_signed', '_float', '_bf16', '_reversed')
-  def __init__(self, reg, high, low=0, signed=False, is_float=False, is_bf16=False):
-    # Handle reversed slices like [0:31] which means bit-reverse
-    if high < low: high, low, reversed = low, high, True
-    else: reversed = False
-    self._reg, self._high, self._low, self._reversed = reg, high, low, reversed
-    self._signed, self._float, self._bf16 = signed, is_float, is_bf16
+_EXP_BITS = {10: 0x1F, 23: 0xFF, 52: 0x7FF}
+def _get_exp(bits: UOp, shift: int) -> UOp: return ((bits >> _const(bits.dtype, shift)) & _const(bits.dtype, _EXP_BITS[shift])).cast(dtypes.int)
 
-  def _nbits(self): return self._high - self._low + 1
-  def _mask(self): return (1 << self._nbits()) - 1
-  def _get(self):
-    v = (self._reg._val >> self._low) & self._mask()
-    return _brev(v, self._nbits()) if self._reversed else v
-  def _set(self, v):
-    v = int(v)
-    if self._reversed: v = _brev(v, self._nbits())
-    self._reg._val = (self._reg._val & ~(self._mask() << self._low)) | ((v & self._mask()) << self._low)
+def _exponent(val: UOp) -> UOp:
+  bits, _, _, _, shift = _float_info(val)
+  return _get_exp(bits, shift)
 
-  @property
-  def _val(self): return self._get()
-  @property
-  def _bits(self): return self._nbits()
+def _div_would_be_denorm(a: UOp, b: UOp) -> UOp:
+  bits_n, _, _, _, shift = _float_info(a)
+  bits_d, _, _, _, _ = _float_info(b)
+  min_exp = {10: -14, 23: -126, 52: -1022}[shift]
+  return (_get_exp(bits_n, shift) - _get_exp(bits_d, shift)) < _const(dtypes.int, min_exp)
 
-  # Type accessors for slices (e.g., D0[31:16].f16)
-  u8 = property(lambda s: s._get() & 0xff)
-  u16 = property(lambda s: s._get() & 0xffff, lambda s, v: s._set(v))
-  u32 = property(lambda s: s._get() & MASK32, lambda s, v: s._set(v))
-  i16 = property(lambda s: _sext(s._get() & 0xffff, 16), lambda s, v: s._set(v))
-  i32 = property(lambda s: _sext(s._get() & MASK32, 32), lambda s, v: s._set(v))
-  f16 = property(lambda s: _f16(s._get()), lambda s, v: s._set(v if isinstance(v, int) else _i16(float(v))))
-  f32 = property(lambda s: _f32(s._get()), lambda s, v: s._set(_i32(float(v))))
-  bf16 = property(lambda s: _bf16(s._get()), lambda s, v: s._set(v if isinstance(v, int) else _ibf16(float(v))))
-  b16, b32 = u16, u32
+def _sign(val: UOp) -> UOp:
+  bits, _, _, _, shift = _float_info(val)
+  sign_shift = {10: 15, 23: 31, 52: 63}[shift]
+  return ((bits >> _const(bits.dtype, sign_shift)) & _const(bits.dtype, 1)).cast(dtypes.uint32)
 
-  # Chained type access (e.g., jump_addr.i64 when jump_addr is already TypedView)
-  @property
-  def i64(s): return s if s._nbits() == 64 and s._signed else int(s)
-  @property
-  def u64(s): return s if s._nbits() == 64 and not s._signed else int(s) & MASK64
+def _signext_from_bit(val: UOp, w: UOp) -> UOp:
+  is_64bit = val.dtype in (dtypes.uint64, dtypes.int64)
+  dt = dtypes.uint64 if is_64bit else dtypes.uint32
+  mask_all = _const(dt, 0xFFFFFFFFFFFFFFFF if is_64bit else 0xFFFFFFFF)
+  one = _const(dt, 1)
+  val_u = val.cast(dt) if val.dtype != dt else val
+  w_val = w.cast(dt) if w.dtype != dt else w
+  sign_bit = (val_u >> (w_val - one)) & one
+  ext_mask = ((one << w_val) - one) ^ mask_all
+  return sign_bit.ne(_const(dt, 0)).where(val_u | ext_mask, val_u)
 
-  def __getitem__(self, key):
-    if isinstance(key, slice):
-      high, low = int(key.start), int(key.stop)
-      return TypedView(self._reg, high, low)
-    return (self._get() >> int(key)) & 1
+def _ldexp(val: UOp, exp: UOp) -> UOp:
+  if val.dtype == dtypes.uint32: val = val.bitcast(dtypes.float32)
+  elif val.dtype == dtypes.uint64: val = val.bitcast(dtypes.float64)
+  if exp.dtype in (dtypes.uint32, dtypes.uint64): exp = exp.cast(dtypes.int if exp.dtype == dtypes.uint32 else dtypes.int64)
+  return val * UOp(Ops.EXP2, val.dtype, (exp.cast(val.dtype),))
 
-  def __setitem__(self, key, value):
-    if isinstance(key, slice):
-      high, low = int(key.start), int(key.stop)
-      if high < low: high, low, value = low, high, _brev(int(value), low - high + 1)
-      mask = (1 << (high - low + 1)) - 1
-      self._reg._val = (self._reg._val & ~(mask << low)) | ((int(value) & mask) << low)
-    elif value: self._reg._val |= (1 << int(key))
-    else: self._reg._val &= ~(1 << int(key))
+def _frexp_mant(val: UOp) -> UOp:
+  val = val.bitcast(dtypes.float32) if val.dtype == dtypes.uint32 else val.bitcast(dtypes.float64) if val.dtype == dtypes.uint64 else val
+  if val.dtype == dtypes.float32: return ((val.bitcast(dtypes.uint32) & _u32(0x807FFFFF)) | _u32(0x3f000000)).bitcast(dtypes.float32)
+  return ((val.bitcast(dtypes.uint64) & _const(dtypes.uint64, 0x800FFFFFFFFFFFFF)) | _const(dtypes.uint64, 0x3fe0000000000000)).bitcast(dtypes.float64)
 
-  def __int__(self): return _sext(self._get(), self._nbits()) if self._signed else self._get()
-  def __index__(self): return int(self)
-  def __trunc__(self): return int(float(self)) if self._float else int(self)
-  def __float__(self):
-    if self._float:
-      if self._bf16: return _bf16(self._get())
-      bits = self._nbits()
-      return _f16(self._get()) if bits == 16 else _f32(self._get()) if bits == 32 else _f64(self._get())
-    return float(int(self))
-  def __bool__(s): return bool(int(s))
+def _frexp_exp(val: UOp) -> UOp:
+  val = val.bitcast(dtypes.float32) if val.dtype == dtypes.uint32 else val.bitcast(dtypes.float64) if val.dtype == dtypes.uint64 else val
+  if val.dtype == dtypes.float32: return ((val.bitcast(dtypes.uint32) >> _u32(23)) & _u32(0xFF)).cast(dtypes.int) - _const(dtypes.int, 126)
+  return ((val.bitcast(dtypes.uint64) >> _const(dtypes.uint64, 52)) & _const(dtypes.uint64, 0x7FF)).cast(dtypes.int) - _const(dtypes.int, 1022)
 
-  # Arithmetic - floats use float(), ints use int()
-  def __add__(s, o): return float(s) + float(o) if s._float else int(s) + int(o)
-  def __radd__(s, o): return float(o) + float(s) if s._float else int(o) + int(s)
-  def __sub__(s, o): return float(s) - float(o) if s._float else int(s) - int(o)
-  def __rsub__(s, o): return float(o) - float(s) if s._float else int(o) - int(s)
-  def __mul__(s, o): return float(s) * float(o) if s._float else int(s) * int(o)
-  def __rmul__(s, o): return float(o) * float(s) if s._float else int(o) * int(s)
-  def __truediv__(s, o): return _div(float(s), float(o)) if s._float else _div(int(s), int(o))
-  def __rtruediv__(s, o): return _div(float(o), float(s)) if s._float else _div(int(o), int(s))
-  def __pow__(s, o): return float(s) ** float(o) if s._float else int(s) ** int(o)
-  def __rpow__(s, o): return float(o) ** float(s) if s._float else int(o) ** int(s)
-  def __neg__(s): return -float(s) if s._float else -int(s)
-  def __abs__(s): return abs(float(s)) if s._float else abs(int(s))
+TWO_OVER_PI = 0x0145f306dc9c882a53f84eafa3ea69bb81b6c52b3278872083fca2c757bd778ac36e48dc74849ba5c00c925dd413a32439fc3bd63962534e7dd1046bea5d768909d338e04d68befc827323ac7306a673e93908bf177bf250763ff12fffbc0b301fde5e2316b414da3eda6cfd9e4f96136e9e8c7ecd3cbfd45aea4f758fd7cbe2f67a0e73ef14a525d4d7f6bf623f1aba10ac06608df8f6
+# TWO_OVER_PI as 19 u64 words for trig_preop_result (word[0] = bits 0-63, word[18] = bits 1152-1200)
+_PREOP_WORDS = tuple((TWO_OVER_PI >> (64 * i)) & 0xFFFFFFFFFFFFFFFF for i in range(19))
+def _trig_preop(val: UOp) -> UOp:
+  # Extract 53 bits from position (1148 - shift) in the 1201-bit 2/PI constant
+  # Using word-based selection: 19 conditions instead of 1149
+  shift = val.cast(dtypes.uint32)
+  bit_pos = _u32(1148) - shift  # starting bit position from LSB
+  word_idx = bit_pos >> _u32(6)  # // 64
+  bit_off = bit_pos & _u32(63)   # % 64
+  # Select lo_word and hi_word using shared conditions
+  lo_word, hi_word = _u64(_PREOP_WORDS[18]), _u64(0)
+  for i in range(17, -1, -1):
+    cond = word_idx.eq(_u32(i))
+    lo_word = cond.where(_u64(_PREOP_WORDS[i]), lo_word)
+    hi_word = cond.where(_u64(_PREOP_WORDS[i + 1]), hi_word)
+  # Combine and extract 53 bits: ((lo >> bit_off) | (hi << (64 - bit_off))) & mask
+  bit_off_64 = bit_off.cast(dtypes.uint64)
+  result = ((lo_word >> bit_off_64) | (hi_word << (_u64(64) - bit_off_64))) & _u64(0x1fffffffffffff)
+  return result.cast(dtypes.float64)
 
-  # Bitwise - GPU shifts mask the shift amount to valid range
-  def __and__(s, o): return int(s) & int(o)
-  def __or__(s, o): return int(s) | int(o)
-  def __xor__(s, o): return int(s) ^ int(o)
-  def __invert__(s): return ~int(s)
-  def __lshift__(s, o): n = int(o); return int(s) << n if 0 <= n < 64 or s._nbits() > 64 else 0
-  def __rshift__(s, o): n = int(o); return int(s) >> n if 0 <= n < 64 or s._nbits() > 64 else 0
-  def __rand__(s, o): return int(o) & int(s)
-  def __ror__(s, o): return int(o) | int(s)
-  def __rxor__(s, o): return int(o) ^ int(s)
-  def __rlshift__(s, o): n = int(s); return int(o) << n if 0 <= n < 64 else 0
-  def __rrshift__(s, o): n = int(s); return int(o) >> n if 0 <= n < 64 else 0
+def _ff1(val: UOp, bits: int) -> UOp:
+  dt = dtypes.uint64 if bits == 64 else dtypes.uint32
+  val = val.cast(dt) if val.dtype != dt else val
+  result = _const(dtypes.int, -1)
+  for i in range(bits):
+    cond = ((val >> _const(dt, i)) & _const(dt, 1)).ne(_const(dt, 0)) & result.eq(_const(dtypes.int, -1))
+    result = cond.where(_const(dtypes.int, i), result)
+  return result
 
-  # Comparison - handle _DenormChecker specially
-  def __eq__(s, o):
-    if isinstance(o, _DenormChecker): return o._check(s)
-    return float(s) == float(o) if s._float else int(s) == int(o)
-  def __ne__(s, o):
-    if isinstance(o, _DenormChecker): return not o._check(s)
-    return float(s) != float(o) if s._float else int(s) != int(o)
-  def __lt__(s, o): return float(s) < float(o) if s._float else int(s) < int(o)
-  def __le__(s, o): return float(s) <= float(o) if s._float else int(s) <= int(o)
-  def __gt__(s, o): return float(s) > float(o) if s._float else int(s) > int(o)
-  def __ge__(s, o): return float(s) >= float(o) if s._float else int(s) >= int(o)
-
-class Reg:
-  """GPU register: D0.f32 = S0.f32 + S1.f32 just works. Supports up to 128 bits for DS_LOAD_B128."""
-  __slots__ = ('_val',)
-  def __init__(self, val=0): self._val = int(val)
-
-  # Typed views - TypedView(reg, high, signed, is_float, is_bf16)
-  u64 = property(lambda s: TypedView(s, 63), lambda s, v: setattr(s, '_val', int(v) & MASK64))
-  i64 = property(lambda s: TypedView(s, 63, signed=True), lambda s, v: setattr(s, '_val', int(v) & MASK64))
-  b64 = property(lambda s: TypedView(s, 63), lambda s, v: setattr(s, '_val', int(v) & MASK64))
-  f64 = property(lambda s: TypedView(s, 63, is_float=True), lambda s, v: setattr(s, '_val', v if isinstance(v, int) else _i64(float(v))))
-  u32 = property(lambda s: TypedView(s, 31), lambda s, v: setattr(s, '_val', int(v) & MASK32))
-  i32 = property(lambda s: TypedView(s, 31, signed=True), lambda s, v: setattr(s, '_val', int(v) & MASK32))
-  b32 = property(lambda s: TypedView(s, 31), lambda s, v: setattr(s, '_val', int(v) & MASK32))
-  f32 = property(lambda s: TypedView(s, 31, is_float=True), lambda s, v: setattr(s, '_val', _i32(float(v))))
-  u24 = property(lambda s: TypedView(s, 23))
-  i24 = property(lambda s: TypedView(s, 23, signed=True))
-  u16 = property(lambda s: TypedView(s, 15), lambda s, v: setattr(s, '_val', (s._val & 0xffff0000) | (int(v) & 0xffff)))
-  i16 = property(lambda s: TypedView(s, 15, signed=True), lambda s, v: setattr(s, '_val', (s._val & 0xffff0000) | (int(v) & 0xffff)))
-  b16 = property(lambda s: TypedView(s, 15), lambda s, v: setattr(s, '_val', (s._val & 0xffff0000) | (int(v) & 0xffff)))
-  f16 = property(lambda s: TypedView(s, 15, is_float=True), lambda s, v: setattr(s, '_val', (s._val & 0xffff0000) | ((v if isinstance(v, int) else _i16(float(v))) & 0xffff)))
-  bf16 = property(lambda s: TypedView(s, 15, is_float=True, is_bf16=True), lambda s, v: setattr(s, '_val', (s._val & 0xffff0000) | ((v if isinstance(v, int) else _ibf16(float(v))) & 0xffff)))
-  u8 = property(lambda s: TypedView(s, 7))
-  i8 = property(lambda s: TypedView(s, 7, signed=True))
-  u3 = property(lambda s: TypedView(s, 2))  # 3-bit for opsel fields
-  u1 = property(lambda s: TypedView(s, 0))  # single bit
-
-  def __getitem__(s, key):
-    if isinstance(key, slice): return TypedView(s, int(key.start), int(key.stop))
-    return (s._val >> int(key)) & 1
-
-  def __setitem__(s, key, value):
-    if isinstance(key, slice):
-      high, low = int(key.start), int(key.stop)
-      if high < low: high, low = low, high
-      mask = (1 << (high - low + 1)) - 1
-      s._val = (s._val & ~(mask << low)) | ((int(value) & mask) << low)
-    elif value: s._val |= (1 << int(key))
-    else: s._val &= ~(1 << int(key))
-
-  def __int__(s): return s._val
-  def __index__(s): return s._val
-  def __bool__(s): return bool(s._val)
-
-  # Arithmetic (for tmp = tmp + 1 patterns). Float operands trigger f32 interpretation.
-  def __add__(s, o): return (_f32(s._val) + float(o)) if isinstance(o, float) else s._val + int(o)
-  def __radd__(s, o): return (float(o) + _f32(s._val)) if isinstance(o, float) else int(o) + s._val
-  def __sub__(s, o): return (_f32(s._val) - float(o)) if isinstance(o, float) else s._val - int(o)
-  def __rsub__(s, o): return (float(o) - _f32(s._val)) if isinstance(o, float) else int(o) - s._val
-  def __mul__(s, o): return (_f32(s._val) * float(o)) if isinstance(o, float) else s._val * int(o)
-  def __rmul__(s, o): return (float(o) * _f32(s._val)) if isinstance(o, float) else int(o) * s._val
-  def __and__(s, o): return s._val & int(o)
-  def __rand__(s, o): return int(o) & s._val
-  def __or__(s, o): return s._val | int(o)
-  def __ror__(s, o): return int(o) | s._val
-  def __xor__(s, o): return s._val ^ int(o)
-  def __rxor__(s, o): return int(o) ^ s._val
-  def __lshift__(s, o): n = int(o); return s._val << n if 0 <= n < 64 else 0
-  def __rshift__(s, o): n = int(o); return s._val >> n if 0 <= n < 64 else 0
-  def __invert__(s): return ~s._val
-
-  # Comparison (for tmp >= 0x100000000 patterns)
-  def __lt__(s, o): return s._val < int(o)
-  def __le__(s, o): return s._val <= int(o)
-  def __gt__(s, o): return s._val > int(o)
-  def __ge__(s, o): return s._val >= int(o)
-  def __eq__(s, o): return s._val == int(o)
-  def __ne__(s, o): return s._val != int(o)
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# PSEUDOCODE API - Functions and constants from AMD ISA pseudocode
-# ═══════════════════════════════════════════════════════════════════════════════
-
-# Rounding and float operations
-trunc, floor, ceil = _fpop(math.trunc), _fpop(math.floor), _fpop(math.ceil)
-def sqrt(x): return _SafeFloat(math.sqrt(x)) if x >= 0 else _SafeFloat(float("nan"))
-def log2(x): return math.log2(x) if x > 0 else (float("-inf") if x == 0 else float("nan"))
-def fract(x): return x - math.floor(x)
-def sin(x): return _trig(math.sin, x)
-def cos(x): return _trig(math.cos, x)
-def pow(a, b):
-  try: return a ** b
-  except OverflowError: return float("inf") if b > 0 else 0.0
-def isEven(x):
-  x = float(x)
-  if math.isinf(x) or math.isnan(x): return False
-  return int(x) % 2 == 0
-def mantissa(f):
-  if f == 0.0 or math.isinf(f) or math.isnan(f): return f
-  m, _ = math.frexp(f)
-  return m  # AMD V_FREXP_MANT returns mantissa in [0.5, 1.0) range
-def signext_from_bit(val, bit):
-  bit = int(bit)
-  if bit == 0: return 0
-  mask = (1 << bit) - 1
-  val = int(val) & mask
-  if val & (1 << (bit - 1)): return val - (1 << bit)
-  return val
-
-# Type conversions
-i32_to_f32 = u32_to_f32 = i32_to_f64 = u32_to_f64 = f32_to_f64 = f64_to_f32 = float
-def f32_to_i32(f): return _f_to_int(f, -2147483648, 2147483647)
-def f32_to_u32(f): return _f_to_int(f, 0, 4294967295)
-f64_to_i32, f64_to_u32 = f32_to_i32, f32_to_u32
-def f32_to_f16(f):
-  f = float(f)
-  if math.isnan(f): return 0x7e00  # f16 NaN
-  if math.isinf(f): return 0x7c00 if f > 0 else 0xfc00  # f16 ±infinity
-  try: return struct.unpack("<H", struct.pack("<e", f))[0]
-  except OverflowError: return 0x7c00 if f > 0 else 0xfc00  # overflow -> ±infinity
-def f16_to_f32(v): return v if isinstance(v, float) else _f16_to_f32_bits(v)
-def i16_to_f16(v): return f32_to_f16(float(_sext(int(v) & 0xffff, 16)))
-def u16_to_f16(v): return f32_to_f16(float(int(v) & 0xffff))
-def f16_to_i16(bits): f = _f16_to_f32_bits(bits); return max(-32768, min(32767, int(f))) if not math.isnan(f) else 0
-def f16_to_u16(bits): f = _f16_to_f32_bits(bits); return max(0, min(65535, int(f))) if not math.isnan(f) else 0
-def bf16_to_f32(v): return _bf16(v) if isinstance(v, int) else float(v)
-def f32_to_bf16(f): return _ibf16(f)
-def u8_to_u32(v): return int(v) & 0xff
-def u4_to_u32(v): return int(v) & 0xf
-def u32_to_u16(u): return int(u) & 0xffff
-def i32_to_i16(i): return ((int(i) + 32768) & 0xffff) - 32768
-def f16_to_snorm(f): return max(-32768, min(32767, int(round(max(-1.0, min(1.0, f)) * 32767))))
-def f16_to_unorm(f): return max(0, min(65535, int(round(max(0.0, min(1.0, f)) * 65535))))
-def f32_to_snorm(f): return max(-32768, min(32767, int(round(max(-1.0, min(1.0, f)) * 32767))))
-def f32_to_unorm(f): return max(0, min(65535, int(round(max(0.0, min(1.0, f)) * 65535))))
-def v_cvt_i16_f32(f): return max(-32768, min(32767, int(f))) if not math.isnan(f) else 0
-def v_cvt_u16_f32(f): return max(0, min(65535, int(f))) if not math.isnan(f) else 0
-def SAT8(v): return max(0, min(255, int(v)))
-def f32_to_u8(f): return max(0, min(255, int(f))) if not math.isnan(f) else 0
-
-# Min/max operations
-def v_min_f32(a, b): return a if math.isnan(b) else b if math.isnan(a) else (a if _lt_neg_zero(a, b) else b)
-def v_max_f32(a, b): return a if math.isnan(b) else b if math.isnan(a) else (a if _gt_neg_zero(a, b) else b)
-v_min_f16, v_max_f16 = v_min_f32, v_max_f32
-v_min_i32, v_max_i32 = min, max
-v_min_i16, v_max_i16 = min, max
-def v_min_u32(a, b): return min(a & MASK32, b & MASK32)
-def v_max_u32(a, b): return max(a & MASK32, b & MASK32)
-def v_min_u16(a, b): return min(a & 0xffff, b & 0xffff)
-def v_max_u16(a, b): return max(a & 0xffff, b & 0xffff)
-def v_min3_f32(a, b, c): return v_min_f32(v_min_f32(a, b), c)
-def v_max3_f32(a, b, c): return v_max_f32(v_max_f32(a, b), c)
-v_min3_f16, v_max3_f16 = v_min3_f32, v_max3_f32
-v_min3_i32, v_max3_i32, v_min3_i16, v_max3_i16 = min, max, min, max
-def v_min3_u32(a, b, c): return min(a & MASK32, b & MASK32, c & MASK32)
-def v_max3_u32(a, b, c): return max(a & MASK32, b & MASK32, c & MASK32)
-def v_min3_u16(a, b, c): return min(a & 0xffff, b & 0xffff, c & 0xffff)
-def v_max3_u16(a, b, c): return max(a & 0xffff, b & 0xffff, c & 0xffff)
-
-# SAD/MSAD operations
-def ABSDIFF(a, b): return abs(int(a) - int(b))
-def v_sad_u8(s0, s1, s2):
-  """V_SAD_U8: Sum of absolute differences of 4 byte pairs plus accumulator."""
-  s0, s1, s2 = int(s0), int(s1), int(s2)
-  result = s2
-  for i in range(4):
-    a = (s0 >> (i * 8)) & 0xff
-    b = (s1 >> (i * 8)) & 0xff
-    result += abs(a - b)
-  return result & 0xffffffff
-def v_msad_u8(s0, s1, s2):
-  """V_MSAD_U8: Masked sum of absolute differences (skip if reference byte is 0)."""
-  s0, s1, s2 = int(s0), int(s1), int(s2)
-  result = s2
-  for i in range(4):
-    a = (s0 >> (i * 8)) & 0xff
-    b = (s1 >> (i * 8)) & 0xff
-    if b != 0:  # Only add diff if reference (s1) byte is non-zero
-      result += abs(a - b)
-  return result & 0xffffffff
-
-def BYTE_PERMUTE(data, sel):
-  """Select a byte from 64-bit data based on selector value."""
-  sel = int(sel) & 0xff
-  if sel <= 7: return (int(data) >> (sel * 8)) & 0xff
-  if sel == 8: return 0xff if ((int(data) >> 15) & 1) else 0x00
-  if sel == 9: return 0xff if ((int(data) >> 31) & 1) else 0x00
-  if sel == 10: return 0xff if ((int(data) >> 47) & 1) else 0x00
-  if sel == 11: return 0xff if ((int(data) >> 63) & 1) else 0x00
-  if sel == 12: return 0x00
-  return 0xff
-
-# Pseudocode functions
-def s_ff1_i32_b32(v): return _ctz(v, 32)
-def s_ff1_i32_b64(v): return _ctz(v, 64)
-GT_NEG_ZERO, LT_NEG_ZERO = _gt_neg_zero, _lt_neg_zero
-def isNAN(x):
-  try: return math.isnan(float(x))
-  except (TypeError, ValueError): return False
-def isQuietNAN(x): return _check_nan_type(x, 1, True)
-def isSignalNAN(x): return _check_nan_type(x, 0, False)
-def fma(a, b, c):
-  try: return math.fma(a, b, c)
-  except ValueError: return float('nan')
-def ldexp(m, e): return math.ldexp(m, e)
-def sign(f): return 1 if math.copysign(1.0, f) < 0 else 0
-def exponent(f):
-  if hasattr(f, '_bits') and hasattr(f, '_float') and f._float:
-    raw = f._val
-    if f._bits == 16: return (raw >> 10) & 0x1f
-    if f._bits == 32: return (raw >> 23) & 0xff
-    if f._bits == 64: return (raw >> 52) & 0x7ff
-  f = float(f)
-  if math.isinf(f) or math.isnan(f): return 255
-  if f == 0.0: return 0
-  try: bits = struct.unpack("<I", struct.pack("<f", f))[0]; return (bits >> 23) & 0xff
-  except: return 0
-def signext(x): return int(x)
-def cvtToQuietNAN(x): return float('nan')
-
-def F(x):
-  """32'F(x) or 64'F(x) - interpret x as float. If x is int, treat as bit pattern."""
-  if isinstance(x, int): return _f32(x)
-  if isinstance(x, TypedView): return x
-  return float(x)
-
-# Constants
-PI = math.pi
-WAVE32, WAVE64 = True, False
-OVERFLOW_F32, UNDERFLOW_F32 = float('inf'), 0.0
-OVERFLOW_F64, UNDERFLOW_F64 = float('inf'), 0.0
-MAX_FLOAT_F32 = 3.4028235e+38
-INF = _Inf()
-ROUND_MODE = _RoundMode()
-WAVE_MODE = _WaveMode()
-DENORM = _Denorm()
-
-# 2/PI with 1201 bits of precision for V_TRIG_PREOP_F64
-TWO_OVER_PI_1201 = Reg(0x0145f306dc9c882a53f84eafa3ea69bb81b6c52b3278872083fca2c757bd778ac36e48dc74849ba5c00c925dd413a32439fc3bd63962534e7dd1046bea5d768909d338e04d68befc827323ac7306a673e93908bf177bf250763ff12fffbc0b301fde5e2316b414da3eda6cfd9e4f96136e9e8c7ecd3cbfd45aea4f758fd7cbe2f67a0e73ef14a525d4d7f6bf623f1aba10ac06608df8f6)
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# COMPILER: pseudocode -> Python (minimal transforms)
-# ═══════════════════════════════════════════════════════════════════════════════
-
-def _filter_pseudocode(pseudocode: str) -> str:
-  """Filter raw PDF pseudocode to only include actual code lines."""
-  pcode_lines, in_lambda, depth = [], 0, 0
-  for line in pseudocode.split('\n'):
-    s = line.strip()
-    if not s: continue
-    if '=>' in s or re.match(r'^[A-Z_]+\(', s): continue  # Skip example lines
-    if '= lambda(' in s: in_lambda += 1; continue  # Skip lambda definitions
-    if in_lambda > 0:
-      if s.endswith(');'): in_lambda -= 1
-      continue
-    # Only include lines that look like pseudocode
-    is_code = (any(p in s for p in ['D0.', 'D1.', 'S0.', 'S1.', 'S2.', 'SCC =', 'SCC ?', 'VCC', 'EXEC', 'tmp =', 'tmp[', 'lane =', 'PC =',
-                                    'D0[', 'D1[', 'S0[', 'S1[', 'S2[', 'MEM[', 'RETURN_DATA', 'VADDR', 'VDATA', 'VDST', 'SADDR', 'OFFSET']) or
-               s.startswith(('if ', 'else', 'elsif', 'endif', 'declare ', 'for ', 'endfor', '//')) or
-               re.match(r'^[a-z_]+\s*=', s) or re.match(r'^[a-z_]+\[', s) or (depth > 0 and '=' in s))
-    if s.startswith('if '): depth += 1
-    elif s.startswith('endif'): depth = max(0, depth - 1)
-    if is_code: pcode_lines.append(s)
-  return '\n'.join(pcode_lines)
-
-def _compile_pseudocode(pseudocode: str) -> str:
-  """Compile pseudocode to Python. Transforms are minimal - most syntax just works."""
-  pseudocode = re.sub(r'\bpass\b', 'pass_', pseudocode)  # 'pass' is Python keyword
-  raw_lines = pseudocode.strip().split('\n')
-  joined_lines: list[str] = []
-  for line in raw_lines:
-    line = line.strip()
-    if joined_lines and (joined_lines[-1].rstrip().endswith(('||', '&&', '(', ',')) or
-                         (joined_lines[-1].count('(') > joined_lines[-1].count(')'))):
-      joined_lines[-1] = joined_lines[-1].rstrip() + ' ' + line
-    else:
-      joined_lines.append(line)
-
-  lines = []
-  indent, need_pass, in_first_match_loop = 0, False, False
-  for line in joined_lines:
-    line = line.split('//')[0].strip()  # Strip C-style comments
-    if not line: continue
-    if line.startswith('if '):
-      lines.append('  ' * indent + f"if {_expr(line[3:].rstrip(' then'))}:")
-      indent += 1
-      need_pass = True
-    elif line.startswith('elsif '):
-      if need_pass: lines.append('  ' * indent + "pass")
-      indent -= 1
-      lines.append('  ' * indent + f"elif {_expr(line[6:].rstrip(' then'))}:")
-      indent += 1
-      need_pass = True
-    elif line == 'else':
-      if need_pass: lines.append('  ' * indent + "pass")
-      indent -= 1
-      lines.append('  ' * indent + "else:")
-      indent += 1
-      need_pass = True
-    elif line.startswith('endif'):
-      if need_pass: lines.append('  ' * indent + "pass")
-      indent -= 1
-      need_pass = False
-    elif line.startswith('endfor'):
-      if need_pass: lines.append('  ' * indent + "pass")
-      indent -= 1
-      need_pass, in_first_match_loop = False, False
-    elif line.startswith('declare '):
-      pass
-    elif m := re.match(r'for (\w+) in (.+?)\s*:\s*(.+?) do', line):
-      start, end = _expr(m[2].strip()), _expr(m[3].strip())
-      lines.append('  ' * indent + f"for {m[1]} in range({start}, int({end})+1):")
-      indent += 1
-      need_pass, in_first_match_loop = True, True
-    elif '=' in line and not line.startswith('=='):
-      need_pass = False
-      line = line.rstrip(';')
-      if m := re.match(r'\{\s*D1\.[ui]1\s*,\s*D0\.[ui]64\s*\}\s*=\s*(.+)', line):
-        rhs = _expr(m[1])
-        lines.append('  ' * indent + f"_full = {rhs}")
-        lines.append('  ' * indent + f"D0.u64 = int(_full) & 0xffffffffffffffff")
-        lines.append('  ' * indent + f"D1 = Reg((int(_full) >> 64) & 1)")
-      elif any(op in line for op in ('+=', '-=', '*=', '/=', '|=', '&=', '^=')):
-        for op in ('+=', '-=', '*=', '/=', '|=', '&=', '^='):
-          if op in line:
-            lhs, rhs = line.split(op, 1)
-            lines.append('  ' * indent + f"{lhs.strip()} {op} {_expr(rhs.strip())}")
-            break
-      else:
-        lhs, rhs = line.split('=', 1)
-        lhs_s, rhs_s = _expr(lhs.strip()), rhs.strip()
-        stmt = _assign(lhs_s, _expr(rhs_s))
-        if in_first_match_loop and rhs_s == 'i' and (lhs_s == 'tmp' or lhs_s == 'D0.i32'):
-          stmt += "; break"
-        lines.append('  ' * indent + stmt)
-  if need_pass: lines.append('  ' * indent + "pass")
-  return '\n'.join(lines)
-
-def _assign(lhs: str, rhs: str) -> str:
-  if lhs in ('tmp', 'SCC', 'VCC', 'EXEC', 'D0', 'D1', 'saveexec', 'PC'):
-    return f"{lhs} = Reg({rhs})"
-  return f"{lhs} = {rhs}"
-
-def _expr(e: str) -> str:
-  e = e.strip()
-  e = e.replace('&&', ' and ').replace('||', ' or ').replace('<>', ' != ')
-  e = re.sub(r'!([^=])', r' not \1', e)
-  e = re.sub(r'\{\s*(\w+\.u32)\s*,\s*(\w+\.u32)\s*\}', r'_pack32(\1, \2)', e)
-  def pack(m):
-    hi, lo = _expr(m[1].strip()), _expr(m[2].strip())
-    return f'_pack({hi}, {lo})'
-  e = re.sub(r'\{\s*([^,{}]+)\s*,\s*([^,{}]+)\s*\}', pack, e)
-  e = re.sub(r"1201'B\(2\.0\s*/\s*PI\)", "TWO_OVER_PI_1201", e)
-  e = re.sub(r"\d+'([0-9a-fA-Fx]+)[UuFf]*", r'\1', e)
-  e = re.sub(r"\d+'[FIBU]\(", "(", e)
-  e = re.sub(r'\bB\(', '(', e)
-  e = re.sub(r'([0-9a-fA-Fx])ULL\b', r'\1', e)
-  e = re.sub(r'([0-9a-fA-Fx])LL\b', r'\1', e)
-  e = re.sub(r'([0-9a-fA-Fx])U\b', r'\1', e)
-  e = re.sub(r'(\d\.?\d*)F\b', r'\1', e)
-  e = re.sub(r'(\[laneId\])\.[uib]\d+', r'\1', e)
-  e = e.replace('+INF', 'INF').replace('-INF', '(-INF)')
-  e = re.sub(r'NAN\.f\d+', 'float("nan")', e)
-  def convert_verilog_slice(m):
-    start, width = m.group(1).strip(), m.group(2).strip()
-    return f'[({start}) + ({width}) - 1 : ({start})]'
-  e = re.sub(r'\[([^:\[\]]+)\s*\+:\s*([^:\[\]]+)\]', convert_verilog_slice, e)
-  def process_brackets(s):
-    result, i = [], 0
-    while i < len(s):
-      if s[i] == '[':
-        depth, start = 1, i + 1
-        j = start
-        while j < len(s) and depth > 0:
-          if s[j] == '[': depth += 1
-          elif s[j] == ']': depth -= 1
-          j += 1
-        inner = _expr(s[start:j-1])
-        result.append('[' + inner + ']')
-        i = j
-      else:
-        result.append(s[i])
-        i += 1
-    return ''.join(result)
-  e = process_brackets(e)
-  while '?' in e:
-    depth, bracket, q = 0, 0, -1
-    for i, c in enumerate(e):
-      if c == '(': depth += 1
-      elif c == ')': depth -= 1
-      elif c == '[': bracket += 1
-      elif c == ']': bracket -= 1
-      elif c == '?' and depth == 0 and bracket == 0: q = i; break
-    if q < 0: break
-    depth, bracket, col = 0, 0, -1
-    for i in range(q + 1, len(e)):
-      if e[i] == '(': depth += 1
-      elif e[i] == ')': depth -= 1
-      elif e[i] == '[': bracket += 1
-      elif e[i] == ']': bracket -= 1
-      elif e[i] == ':' and depth == 0 and bracket == 0: col = i; break
-    if col < 0: break
-    cond, t, f = e[:q].strip(), e[q+1:col].strip(), e[col+1:].strip()
-    e = f'(({t}) if ({cond}) else ({f}))'
-  return e
-
-def _apply_pseudocode_fixes(op_name: str, code: str) -> str:
-  """Apply known fixes for PDF pseudocode bugs."""
-  if op_name == 'V_DIV_FMAS_F32':
-    code = code.replace('D0.f32 = 2.0 ** 32 * fma(S0.f32, S1.f32, S2.f32)',
-                        'D0.f32 = (2.0 ** 64 if exponent(S2.f32) > 127 else 2.0 ** -64) * fma(S0.f32, S1.f32, S2.f32)')
-  if op_name == 'V_DIV_FMAS_F64':
-    code = code.replace('D0.f64 = 2.0 ** 64 * fma(S0.f64, S1.f64, S2.f64)',
-                        'D0.f64 = (2.0 ** 128 if exponent(S2.f64) > 1023 else 2.0 ** -128) * fma(S0.f64, S1.f64, S2.f64)')
-  if op_name == 'V_DIV_SCALE_F32':
-    code = code.replace('D0.f32 = float("nan")', 'VCC = Reg(1 << laneId); D0.f32 = float("nan")')
-    code = code.replace('elif S1.f32 == DENORM.f32:\n  D0.f32 = ldexp(S0.f32, 64)', 'elif False:\n  pass')
-    code += '\nif S1.f32 == DENORM.f32:\n  D0.f32 = float("nan")'
-    code = code.replace('elif exponent(S2.f32) <= 23:\n  D0.f32 = ldexp(S0.f32, 64)', 'elif exponent(S2.f32) <= 23:\n  VCC = Reg(1 << laneId); D0.f32 = ldexp(S0.f32, 64)')
-    code = code.replace('elif S2.f32 / S1.f32 == DENORM.f32:\n  VCC = Reg(0x1)\n  if S0.f32 == S2.f32:\n    D0.f32 = ldexp(S0.f32, 64)', 'elif S2.f32 / S1.f32 == DENORM.f32:\n  VCC = Reg(1 << laneId)')
-  if op_name == 'V_DIV_SCALE_F64':
-    code = code.replace('D0.f64 = float("nan")', 'VCC = Reg(1 << laneId); D0.f64 = float("nan")')
-    code = code.replace('elif S1.f64 == DENORM.f64:\n  D0.f64 = ldexp(S0.f64, 128)', 'elif False:\n  pass')
-    code += '\nif S1.f64 == DENORM.f64:\n  D0.f64 = float("nan")'
-    code = code.replace('elif exponent(S2.f64) <= 52:\n  D0.f64 = ldexp(S0.f64, 128)', 'elif exponent(S2.f64) <= 52:\n  VCC = Reg(1 << laneId); D0.f64 = ldexp(S0.f64, 128)')
-    code = code.replace('elif S2.f64 / S1.f64 == DENORM.f64:\n  VCC = Reg(0x1)\n  if S0.f64 == S2.f64:\n    D0.f64 = ldexp(S0.f64, 128)', 'elif S2.f64 / S1.f64 == DENORM.f64:\n  VCC = Reg(1 << laneId)')
-  if op_name == 'V_DIV_FIXUP_F32':
-    code = code.replace('D0.f32 = ((-abs(S0.f32)) if (sign_out) else (abs(S0.f32)))',
-                        'D0.f32 = ((-OVERFLOW_F32) if (sign_out) else (OVERFLOW_F32)) if isNAN(S0.f32) else ((-abs(S0.f32)) if (sign_out) else (abs(S0.f32)))')
-  if op_name == 'V_DIV_FIXUP_F64':
-    code = code.replace('D0.f64 = ((-abs(S0.f64)) if (sign_out) else (abs(S0.f64)))',
-                        'D0.f64 = ((-OVERFLOW_F64) if (sign_out) else (OVERFLOW_F64)) if isNAN(S0.f64) else ((-abs(S0.f64)) if (sign_out) else (abs(S0.f64)))')
-  if op_name == 'V_TRIG_PREOP_F64':
-    code = code.replace('result = F((TWO_OVER_PI_1201[1200 : 0] << shift.u32) & 0x1fffffffffffff)',
-                        'result = float(((TWO_OVER_PI_1201[1200 : 0] << int(shift)) >> (1201 - 53)) & 0x1fffffffffffff)')
-  return code
-
-def _generate_function(cls_name: str, op_name: str, pc: str, code: str) -> str:
-  """Generate a single compiled pseudocode function.
-  Functions take int parameters and return dict of int values.
-  Reg wrapping happens inside the function, only for registers actually used."""
-  has_d1 = '{ D1' in pc
-  is_cmpx = (cls_name in ('VOPCOp', 'VOP3Op')) and 'EXEC.u64[laneId]' in pc
-  is_div_scale = 'DIV_SCALE' in op_name
-  has_sdst = cls_name == 'VOP3SDOp' and ('VCC.u64[laneId]' in pc or is_div_scale)
-  is_ds = cls_name == 'DSOp'
-  is_flat = cls_name in ('FLATOp', 'GLOBALOp', 'SCRATCHOp')
-  is_smem = cls_name == 'SMEMOp'
-  has_s_array = 'S[i]' in pc  # FMA_MIX style: S[0], S[1], S[2] array access
-  combined = code + pc
-
-  fn_name = f"_{cls_name}_{op_name}"
-
-  # Detect which registers are used/modified
-  def needs_init(name): return name in combined and not re.search(rf'^\s*{name}\s*=\s*Reg\(', code, re.MULTILINE)
-  modifies_d0 = is_div_scale or bool(re.search(r'\bD0\b[.\[]', combined))
-  modifies_exec = is_cmpx or bool(re.search(r'EXEC\.(u32|u64|b32|b64)\s*=', combined))
-  modifies_vcc = has_sdst or bool(re.search(r'VCC\.(u32|u64|b32|b64)\s*=|VCC\.u64\[laneId\]\s*=', combined))
-  modifies_scc = bool(re.search(r'\bSCC\s*=', combined))
-  modifies_pc = bool(re.search(r'\bPC\s*=', combined))
-
-  # Build function signature and Reg init lines
-  if is_smem:
-    lines = [f"def {fn_name}(MEM, addr):"]
-    reg_inits = ["ADDR=Reg(addr)", "SDATA=Reg(0)"]
-    special_regs = []
-  elif is_ds:
-    lines = [f"def {fn_name}(MEM, addr, data0, data1, offset0, offset1):"]
-    reg_inits = ["ADDR=Reg(addr)", "DATA0=Reg(data0)", "DATA1=Reg(data1)", "OFFSET0=Reg(offset0)", "OFFSET1=Reg(offset1)", "RETURN_DATA=Reg(0)"]
-    special_regs = [('DATA', 'DATA0'), ('DATA2', 'DATA1'), ('OFFSET', 'OFFSET0'), ('ADDR_BASE', 'ADDR')]
-  elif is_flat:
-    lines = [f"def {fn_name}(MEM, addr, vdata, vdst):"]
-    reg_inits = ["ADDR=addr", "VDATA=Reg(vdata)", "VDST=Reg(vdst)", "RETURN_DATA=Reg(0)"]
-    special_regs = [('DATA', 'VDATA')]
-  elif has_s_array:
-    # FMA_MIX style: needs S[i] array, opsel, opsel_hi for source selection (neg/neg_hi applied in emu.py before call)
-    lines = [f"def {fn_name}(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None, opsel=0, opsel_hi=0):"]
-    reg_inits = ["S0=Reg(s0)", "S1=Reg(s1)", "S2=Reg(s2)", "S=[S0,S1,S2]", "D0=Reg(d0)", "OPSEL=Reg(opsel)", "OPSEL_HI=Reg(opsel_hi)"]
-    special_regs = []
-    # Detect array declarations like "declare in : 32'F[3]" and create them (rename 'in' to 'ins' since 'in' is a keyword)
-    if "in[" in combined:
-      reg_inits.append("ins=[Reg(0),Reg(0),Reg(0)]")
-      code = code.replace("in[", "ins[")
-  else:
-    lines = [f"def {fn_name}(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):"]
-    # Only create Regs for registers actually used in the pseudocode
-    reg_inits = []
-    if 'S0' in combined: reg_inits.append("S0=Reg(s0)")
-    if 'S1' in combined: reg_inits.append("S1=Reg(s1)")
-    if 'S2' in combined: reg_inits.append("S2=Reg(s2)")
-    if modifies_d0 or 'D0' in combined: reg_inits.append("D0=Reg(s0)" if is_div_scale else "D0=Reg(d0)")
-    if modifies_scc or 'SCC' in combined: reg_inits.append("SCC=Reg(scc)")
-    if modifies_vcc or 'VCC' in combined: reg_inits.append("VCC=Reg(vcc)")
-    if modifies_exec or 'EXEC' in combined: reg_inits.append("EXEC=Reg(exec_mask)")
-    if modifies_pc or 'PC' in combined: reg_inits.append("PC=Reg(pc) if pc is not None else None")
-    special_regs = [('D1', 'Reg(0)'), ('SIMM16', 'Reg(literal)'), ('SIMM32', 'Reg(literal)'),
-                    ('SRC0', 'Reg(src0_idx)'), ('VDST', 'Reg(vdst_idx)')]
-    if needs_init('tmp'): special_regs.insert(0, ('tmp', 'Reg(0)'))
-    if needs_init('saveexec'): special_regs.insert(0, ('saveexec', 'Reg(EXEC._val)'))
-
-  # Build init code
-  init_parts = reg_inits.copy()
-  for name, init in special_regs:
-    if name in combined: init_parts.append(f"{name}={init}")
-  if 'EXEC_LO' in code: init_parts.append("EXEC_LO=TypedView(EXEC, 31, 0)")
-  if 'EXEC_HI' in code: init_parts.append("EXEC_HI=TypedView(EXEC, 63, 32)")
-  if 'VCCZ' in code and not re.search(r'^\s*VCCZ\s*=', code, re.MULTILINE): init_parts.append("VCCZ=Reg(1 if VCC._val == 0 else 0)")
-  if 'EXECZ' in code and not re.search(r'^\s*EXECZ\s*=', code, re.MULTILINE): init_parts.append("EXECZ=Reg(1 if EXEC._val == 0 else 0)")
-
-  # Add init line and separator
-  if init_parts: lines.append(f"  {'; '.join(init_parts)}")
-
-  # Add compiled pseudocode
-  for line in code.split('\n'):
-    if line.strip(): lines.append(f"  {line}")
-
-  # Build result dict
-  result_items = []
-  if modifies_d0: result_items.append("'D0': D0._val")
-  if modifies_scc: result_items.append("'SCC': SCC._val")
-  if modifies_vcc: result_items.append("'VCC': VCC._val")
-  if modifies_exec: result_items.append("'EXEC': EXEC._val")
-  if has_d1: result_items.append("'D1': D1._val")
-  if modifies_pc: result_items.append("'PC': PC._val")
-  if is_smem and 'SDATA' in combined and re.search(r'^\s*SDATA[\.\[].*=', code, re.MULTILINE):
-    result_items.append("'SDATA': SDATA._val")
-  if is_ds and 'RETURN_DATA' in combined and re.search(r'^\s*RETURN_DATA[\.\[].*=', code, re.MULTILINE):
-    result_items.append("'RETURN_DATA': RETURN_DATA._val")
-  if is_flat:
-    if 'RETURN_DATA' in combined and re.search(r'^\s*RETURN_DATA[\.\[].*=', code, re.MULTILINE):
-      result_items.append("'RETURN_DATA': RETURN_DATA._val")
-    if re.search(r'^\s*VDATA[\.\[].*=', code, re.MULTILINE):
-      result_items.append("'VDATA': VDATA._val")
-  lines.append(f"  return {{{', '.join(result_items)}}}")
-  return '\n'.join(lines)
-
-# Build the globals dict for exec() - includes all pcode symbols
-_PCODE_GLOBALS = {
-  'Reg': Reg, 'TypedView': TypedView, '_pack': _pack, '_pack32': _pack32,
-  'ABSDIFF': ABSDIFF, 'BYTE_PERMUTE': BYTE_PERMUTE, 'DENORM': DENORM, 'F': F,
-  'GT_NEG_ZERO': GT_NEG_ZERO, 'LT_NEG_ZERO': LT_NEG_ZERO, 'INF': INF,
-  'MAX_FLOAT_F32': MAX_FLOAT_F32, 'OVERFLOW_F32': OVERFLOW_F32, 'OVERFLOW_F64': OVERFLOW_F64,
-  'UNDERFLOW_F32': UNDERFLOW_F32, 'UNDERFLOW_F64': UNDERFLOW_F64,
-  'PI': PI, 'ROUND_MODE': ROUND_MODE, 'WAVE_MODE': WAVE_MODE,
-  'WAVE32': WAVE32, 'WAVE64': WAVE64, 'TWO_OVER_PI_1201': TWO_OVER_PI_1201,
-  'SAT8': SAT8, 'trunc': trunc, 'floor': floor, 'ceil': ceil, 'sqrt': sqrt,
-  'log2': log2, 'fract': fract, 'sin': sin, 'cos': cos, 'pow': pow,
-  'isEven': isEven, 'mantissa': mantissa, 'signext_from_bit': signext_from_bit,
-  'i32_to_f32': i32_to_f32, 'u32_to_f32': u32_to_f32, 'i32_to_f64': i32_to_f64,
-  'u32_to_f64': u32_to_f64, 'f32_to_f64': f32_to_f64, 'f64_to_f32': f64_to_f32,
-  'f32_to_i32': f32_to_i32, 'f32_to_u32': f32_to_u32, 'f64_to_i32': f64_to_i32,
-  'f64_to_u32': f64_to_u32, 'f32_to_f16': f32_to_f16, 'f16_to_f32': f16_to_f32,
-  'i16_to_f16': i16_to_f16, 'u16_to_f16': u16_to_f16, 'f16_to_i16': f16_to_i16,
-  'f16_to_u16': f16_to_u16, 'bf16_to_f32': bf16_to_f32, 'f32_to_bf16': f32_to_bf16,
-  'u8_to_u32': u8_to_u32, 'u4_to_u32': u4_to_u32, 'u32_to_u16': u32_to_u16,
-  'i32_to_i16': i32_to_i16, 'f16_to_snorm': f16_to_snorm, 'f16_to_unorm': f16_to_unorm,
-  'f32_to_snorm': f32_to_snorm, 'f32_to_unorm': f32_to_unorm,
-  'v_cvt_i16_f32': v_cvt_i16_f32, 'v_cvt_u16_f32': v_cvt_u16_f32, 'f32_to_u8': f32_to_u8,
-  'v_min_f32': v_min_f32, 'v_max_f32': v_max_f32, 'v_min_f16': v_min_f16, 'v_max_f16': v_max_f16,
-  'v_min_i32': v_min_i32, 'v_max_i32': v_max_i32, 'v_min_i16': v_min_i16, 'v_max_i16': v_max_i16,
-  'v_min_u32': v_min_u32, 'v_max_u32': v_max_u32, 'v_min_u16': v_min_u16, 'v_max_u16': v_max_u16,
-  'v_min3_f32': v_min3_f32, 'v_max3_f32': v_max3_f32, 'v_min3_f16': v_min3_f16, 'v_max3_f16': v_max3_f16,
-  'v_min3_i32': v_min3_i32, 'v_max3_i32': v_max3_i32, 'v_min3_i16': v_min3_i16, 'v_max3_i16': v_max3_i16,
-  'v_min3_u32': v_min3_u32, 'v_max3_u32': v_max3_u32, 'v_min3_u16': v_min3_u16, 'v_max3_u16': v_max3_u16,
-  'v_sad_u8': v_sad_u8, 'v_msad_u8': v_msad_u8,
-  's_ff1_i32_b32': s_ff1_i32_b32, 's_ff1_i32_b64': s_ff1_i32_b64,
-  'isNAN': isNAN, 'isQuietNAN': isQuietNAN, 'isSignalNAN': isSignalNAN,
-  'fma': fma, 'ldexp': ldexp, 'sign': sign, 'exponent': exponent,
-  'signext': signext, 'cvtToQuietNAN': cvtToQuietNAN,
+_FUNCS: dict[str, Callable[..., UOp]] = {
+  'sqrt': lambda a: UOp(Ops.SQRT, a.dtype, (a,)), 'trunc': lambda a: UOp(Ops.TRUNC, a.dtype, (a,)),
+  'log2': lambda a: UOp(Ops.LOG2, a.dtype, (a,)), 'sin': lambda a: _trig_reduce(a),
+  'cos': lambda a: _trig_reduce(a, 0.25), 'floor': _floor, 'fract': lambda a: a - _floor(a),
+  'signext': _signext, 'abs': _abs,
+  'isEven': lambda a: (UOp(Ops.TRUNC, a.dtype, (a,)).cast(dtypes.int) & _const(dtypes.int, 1)).eq(_const(dtypes.int, 0)),
+  'max': lambda a, b: UOp(Ops.MAX, a.dtype, (a, b)),
+  'min': lambda a, b: UOp(Ops.MAX, a.dtype, (a.neg(), b.neg())).neg(),
+  'pow': lambda a, b: UOp(Ops.EXP2, dtypes.float32, (b.bitcast(dtypes.float32),)),
+  'fma': lambda a, b, c: a * b + c,
+  'i32_to_f32': lambda a: a.cast(dtypes.int).cast(dtypes.float32),
+  'u32_to_f32': lambda a: a.cast(dtypes.uint32).cast(dtypes.float32),
+  'f32_to_i32': lambda a: UOp(Ops.TRUNC, dtypes.float32, (a.bitcast(dtypes.float32),)).cast(dtypes.int),
+  'f32_to_u32': lambda a: _f_to_u(a.bitcast(dtypes.float32), dtypes.uint32),
+  'f64_to_i32': lambda a: UOp(Ops.TRUNC, dtypes.float64, (a.bitcast(dtypes.float64),)).cast(dtypes.int),
+  'f64_to_u32': lambda a: _f_to_u(a.bitcast(dtypes.float64), dtypes.uint32),
+  'f16_to_f32': lambda a: _f16_extract(a).cast(dtypes.float32),
+  'f32_to_f16': lambda a: a.cast(dtypes.half),
+  'f32_to_f64': lambda a: a.bitcast(dtypes.float32).cast(dtypes.float64),
+  'f64_to_f32': lambda a: a.bitcast(dtypes.float64).cast(dtypes.float32),
+  'i32_to_f64': lambda a: a.cast(dtypes.int).cast(dtypes.float64),
+  'u32_to_f64': lambda a: a.cast(dtypes.uint32).cast(dtypes.float64),
+  'f16_to_i16': lambda a: UOp(Ops.TRUNC, dtypes.half, (_f16_extract(a),)).cast(dtypes.int16),
+  'f16_to_u16': lambda a: UOp(Ops.TRUNC, dtypes.half, (_f16_extract(a),)).cast(dtypes.uint16),
+  'i16_to_f16': lambda a: a.cast(dtypes.int16).cast(dtypes.half),
+  'u16_to_f16': lambda a: a.cast(dtypes.uint16).cast(dtypes.half),
+  'bf16_to_f32': lambda a: (((a.cast(dtypes.uint32) if a.dtype != dtypes.uint32 else a) & _u32(0xFFFF)) << _u32(16)).bitcast(dtypes.float32),
+  'isNAN': _isnan, 'isSignalNAN': lambda a: _check_nan(a, False),
+  'isQuietNAN': lambda a: _check_nan(a, True), 'cvtToQuietNAN': _cvt_quiet,
+  'isDENORM': _is_denorm, 'exponent': _exponent, 'divWouldBeDenorm': _div_would_be_denorm, 'sign': _sign,
+  'signext_from_bit': _signext_from_bit, 'ldexp': _ldexp, 'frexp_mant': _frexp_mant, 'mantissa': _frexp_mant,
+  'frexp_exp': _frexp_exp, 'trig_preop_result': _trig_preop,
+  's_ff1_i32_b32': lambda a: _ff1(a, 32), 's_ff1_i32_b64': lambda a: _ff1(a, 64),
 }
+for is_max, name in [(False, 'min'), (True, 'max')]:
+  for dt, sfx in [(dtypes.float32, 'f32'), (dtypes.int, 'i32'), (dtypes.uint32, 'u32'), (dtypes.int16, 'i16'), (dtypes.uint16, 'u16')]:
+    _FUNCS[f'v_{name}_{sfx}'] = lambda *a, im=is_max, d=dt: _minmax_reduce(im, d, *a)
+    _FUNCS[f'v_{name}3_{sfx}'] = lambda *a, im=is_max, d=dt: _minmax_reduce(im, d, *a)
 
-@functools.cache
-def compile_pseudocode(cls_name: str, op_name: str, pseudocode: str):
-  """Compile pseudocode string to executable function. Cached for performance."""
-  filtered = _filter_pseudocode(pseudocode)
-  code = _compile_pseudocode(filtered)
-  code = _apply_pseudocode_fixes(op_name, code)
-  fn_code = _generate_function(cls_name, op_name, filtered, code)
-  fn_name = f"_{cls_name}_{op_name}"
-  local_ns = {}
-  exec(fn_code, _PCODE_GLOBALS, local_ns)
-  return local_ns[fn_name]
+# ═══════════════════════════════════════════════════════════════════════════════
+# TOKENIZER/PARSER
+# ═══════════════════════════════════════════════════════════════════════════════
+
+DTYPES = {'u32': dtypes.uint32, 'i32': dtypes.int, 'f32': dtypes.float32, 'b32': dtypes.uint32, 'u64': dtypes.uint64, 'i64': dtypes.int64,
+          'f64': dtypes.float64, 'b64': dtypes.uint64, 'u16': dtypes.uint16, 'i16': dtypes.short, 'f16': dtypes.half, 'b16': dtypes.uint16,
+          'u8': dtypes.uint8, 'i8': dtypes.int8, 'b8': dtypes.uint8, 'u1': dtypes.uint32}
+_BITS_DT = {8: dtypes.uint8, 16: dtypes.uint16, 32: dtypes.uint32, 64: dtypes.uint64}
+_NUM_SUFFIXES = ('ULL', 'LL', 'UL', 'U', 'L', 'F', 'f')
+def _strip_suffix(num: str) -> tuple[str, str]:
+  for sfx in _NUM_SUFFIXES:
+    if num.endswith(sfx): return sfx, num[:-len(sfx)]
+  return '', num
+_SINGLE_CHAR = {'(': 'LPAREN', ')': 'RPAREN', '[': 'LBRACKET', ']': 'RBRACKET', '{': 'LBRACE', '}': 'RBRACE',
+                ':': 'COLON', ',': 'COMMA', '?': 'QUESTION', '.': 'DOT', '=': 'EQUALS', "'": 'QUOTE'}
+
+class Token:
+  __slots__ = ('type', 'val')
+  def __init__(self, type: str, val: str): self.type, self.val = type, val
+  def __repr__(self): return f'{self.type}:{self.val}'
+
+def tokenize(s: str) -> list[Token]:
+  tokens, i, n = [], 0, len(s)
+  while i < n:
+    c = s[i]
+    if c.isspace(): i += 1; continue
+    if i + 1 < n and s[i:i+2] in ('+=', '-='):
+      tokens.append(Token('ASSIGN_OP', s[i:i+2])); i += 2; continue
+    if i + 1 < n and s[i:i+2] in ('||', '&&', '>=', '<=', '==', '!=', '<>', '>>', '<<', '**', '+:', '-:'):
+      tokens.append(Token('OP', s[i:i+2])); i += 2; continue
+    if c in '|^&><+-*/~!%': tokens.append(Token('OP', c)); i += 1; continue
+    if (t := _SINGLE_CHAR.get(c)): tokens.append(Token(t, c)); i += 1; continue
+    if c == ';': i += 1; continue
+    if c.isdigit() or (c == '-' and i + 1 < n and s[i+1].isdigit()):
+      start = i
+      if c == '-': i += 1
+      if i + 1 < n and s[i] == '0' and s[i+1] in 'xX':
+        i += 2
+        while i < n and s[i] in '0123456789abcdefABCDEF': i += 1
+      else:
+        while i < n and s[i].isdigit(): i += 1
+        if i < n and s[i] == '.' and i + 1 < n and s[i+1].isdigit():
+          i += 1
+          while i < n and s[i].isdigit(): i += 1
+      for sfx in ('ULL', 'LL', 'UL', 'U', 'L', 'F', 'f'):
+        if s[i:i+len(sfx)] == sfx: i += len(sfx); break
+      tokens.append(Token('NUM', s[start:i])); continue
+    if c.isalpha() or c == '_':
+      start = i
+      while i < n and (s[i].isalnum() or s[i] == '_'): i += 1
+      tokens.append(Token('IDENT', s[start:i])); continue
+    raise RuntimeError(f"unexpected char '{c}' at pos {i} in: {s}")
+  tokens.append(Token('EOF', ''))
+  return tokens
+
+class Parser:
+  def __init__(self, tokens: list[Token], vars: dict, funcs: dict | None = None):
+    self.tokens, self.vars, self.funcs, self.pos = tokens, vars, funcs if funcs is not None else _FUNCS, 0
+
+  def peek(self, offset=0) -> Token: return self.tokens[min(self.pos + offset, len(self.tokens) - 1)]
+  def at(self, *types) -> bool: return self.peek().type in types
+  def _advance(self) -> Token: tok = self.tokens[self.pos]; self.pos += 1; return tok
+  def eat(self, type: str) -> Token:
+    if self.peek().type != type: raise RuntimeError(f"expected {type}, got {self.peek()}")
+    return self._advance()
+  def try_eat(self, type: str) -> Token | None: return self._advance() if self.peek().type == type else None
+  def try_eat_val(self, val: str, type: str) -> Token | None:
+    return self._advance() if self.peek().type == type and self.peek().val == val else None
+  def eat_val(self, val: str, type: str) -> Token:
+    if self.peek().type != type or self.peek().val != val: raise RuntimeError(f"expected {type}:{val}, got {self.peek()}")
+    return self._advance()
+
+  def parse(self) -> UOp:
+    cond = self.binop(0)
+    if self.try_eat('QUESTION'):
+      then_val = self.parse()
+      self.eat('COLON')
+      return _to_bool(cond).where(then_val, self.parse())
+    return cond
+
+  def _apply_binop(self, left, right, op):
+    if op in ('||', '&&', '|', '^', '&'): left, right = self._coerce_bitwise(left, right)
+    elif op in ('>=', '<=', '>', '<', '==', '!=', '<>', '>>', '<<'): left, right = self._coerce_cmp(left, right)
+    elif left.dtype != right.dtype: right = right.cast(left.dtype)
+    match op:
+      case '||' | '|': return left | right
+      case '&&' | '&': return left & right
+      case '^': return left ^ right
+      case '==' | '<>': return left.eq(right) if op == '==' else left.ne(right)
+      case '!=' : return left.ne(right)
+      case '>=' | '<=' | '>' | '<': return self._cmp_nan(left, right, {'>=':(lambda a,b:a>=b),'<=':(lambda a,b:a<=b),'>':(lambda a,b:a>b),'<':(lambda a,b:a<b)}[op])
+      case '>>' | '<<': return (left >> right) if op == '>>' else (left << right)
+      case '+' | '-':
+        if op == '-' and left.op == Ops.CONST and right.op == Ops.CONST: return _const(left.dtype, left.arg - right.arg)
+        return (left + right) if op == '+' else (left - right)
+      case '*' | '/': return (left * right) if op == '*' else (left / right)
+      case '**': return UOp(Ops.EXP2, left.dtype, (right.cast(left.dtype),)) if left.op == Ops.CONST and left.arg == 2.0 else left
+
+  _PREC = [('||',), ('&&',), ('|',), ('^',), ('&',), ('==', '!=', '<>'), ('>=', '<=', '>', '<'), ('>>', '<<'), ('+', '-'), ('*', '/'), ('**',)]
+
+  def binop(self, prec: int) -> UOp:
+    if prec >= len(self._PREC): return self.unary()
+    left = self.binop(prec + 1)
+    ops = self._PREC[prec]
+    while self.at('OP') and self.peek().val in ops:
+      op = self.eat('OP').val
+      left = self._apply_binop(left, self.binop(prec + 1), op)
+    return left
+
+  def unary(self) -> UOp:
+    if self.try_eat_val('~', 'OP'):
+      inner = self.unary()
+      return inner ^ _const(inner.dtype, (1 << (inner.dtype.itemsize * 8)) - 1)
+    if self.try_eat_val('!', 'OP'):
+      inner = self.unary()
+      return inner.eq(_const(inner.dtype, 0))
+    if self.try_eat_val('-', 'OP'):
+      inner = self.unary()
+      if inner.op == Ops.CONST:
+        return _const(dtypes.int if inner.dtype == dtypes.uint32 else inner.dtype, -inner.arg)
+      return inner.neg()
+    if self.try_eat_val('+', 'OP'): return self.unary()
+    return self.postfix()
+
+  def postfix(self) -> UOp:
+    base = self.primary()
+    while True:
+      if self.try_eat('DOT'):
+        field = self.eat('IDENT').val
+        base = self._handle_dot(base, field)
+      elif self.at('LBRACKET'):
+        base = self._handle_bracket(base)
+      elif self.at('LBRACE'):
+        base = self._handle_brace_index(base)
+      else:
+        break
+    return base
+
+  def primary(self) -> UOp:
+    if self.try_eat('LPAREN'):
+      e = self.parse()
+      self.eat('RPAREN')
+      return e
+    if self.try_eat('LBRACE'):
+      hi = self.parse()
+      self.eat('COMMA')
+      lo = self.parse()
+      self.eat('RBRACE')
+      return (hi.cast(dtypes.uint64) << _u64(32)) | lo.cast(dtypes.uint64)
+    if self.at('NUM'):
+      num = self.eat('NUM').val
+      if self.try_eat('QUOTE'):
+        return self._sized_literal(int(num.rstrip('ULlf')))
+      return self._parse_number(num)
+    if self.at('IDENT'):
+      name = self.eat('IDENT').val
+      if name == 'MEM':
+        self.eat('LBRACKET')
+        addr = self.parse()
+        self.eat('RBRACKET')
+        self.eat('DOT')
+        dt_name = self.eat('IDENT').val
+        return self._handle_mem_load(addr, DTYPES.get(dt_name, dtypes.uint32))
+      if name == 'VGPR':
+        self.eat('LBRACKET')
+        lane = self.parse()
+        self.eat('RBRACKET')
+        self.eat('LBRACKET')
+        reg = self.parse()
+        self.eat('RBRACKET')
+        vgpr = self.vars.get('_vgpr')
+        if vgpr is None: return _u32(0)
+        return vgpr.index(_to_u32(reg) * _u32(32) + _to_u32(lane), ptr=True).load()
+      if self.try_eat('LPAREN'):
+        args = self._parse_args()
+        self.eat('RPAREN')
+        return self._call_func(name, args)
+      if name == 'PI': return _const(dtypes.float32, 3.141592653589793)
+      if name == 'INF': return _const(dtypes.float64, float('inf'))
+      if name == 'NAN': return _const(dtypes.uint32, 0x7FC00000).bitcast(dtypes.float32)
+      if name == 'UNDERFLOW_F32': return _const(dtypes.uint32, 1).bitcast(dtypes.float32)
+      if name == 'OVERFLOW_F32': return _const(dtypes.uint32, 0x7F7FFFFF).bitcast(dtypes.float32)
+      if name == 'UNDERFLOW_F64': return _const(dtypes.uint64, 1).bitcast(dtypes.float64)
+      if name == 'OVERFLOW_F64': return _const(dtypes.uint64, 0x7FEFFFFFFFFFFFFF).bitcast(dtypes.float64)
+      if name == 'WAVE32': return _const(dtypes.bool, True)
+      if name == 'WAVE64': return _const(dtypes.bool, False)
+      if name == 'WAVE_MODE' and self.try_eat('DOT') and self.try_eat_val('IEEE', 'IDENT'): return _u32(1)
+      if self.try_eat('LBRACE'):
+        idx = self.eat('NUM').val
+        self.eat('RBRACE')
+        elem = self.vars.get(f'{name}{idx}', _u32(0))
+        if self.try_eat('DOT'):
+          dt_name = self.eat('IDENT').val
+          return _cast_to(elem, DTYPES.get(dt_name, dtypes.uint32))
+        if self.at('LBRACKET'):
+          return self._handle_bracket(elem, name + idx)
+        return elem
+      if self.at('LBRACKET') and name not in self.vars:
+        self.eat('LBRACKET')
+        if self.at('NUM'):
+          idx_num = int(self.peek().val)
+          if f'{name}{idx_num}' in self.vars:
+            self.eat('NUM')
+            self.eat('RBRACKET')
+            elem = self.vars[f'{name}{idx_num}']
+            if self.try_eat('DOT'): return _cast_to(elem, DTYPES.get(self.eat('IDENT').val, dtypes.uint32))
+            return elem
+        first = self.parse()
+        return self._handle_bracket_rest(first, _u32(0), name)
+      if name in self.vars:
+        v = self.vars[name]
+        return v if isinstance(v, UOp) else _u32(0) if isinstance(v, dict) else _u32(0)
+      raise RuntimeError(f"unknown variable: {name}")
+    raise RuntimeError(f"unexpected token in primary: {self.peek()}")
+
+  def _handle_dot(self, base, field: str) -> UOp:
+    if isinstance(base, str): return _u32(0)
+    if not isinstance(base, UOp):
+      if isinstance(base, dict): return base.get(field, _u32(0))
+      return _u32(0)
+    if field == 'u64' and self.at('LBRACKET') and self.peek(1).type == 'IDENT' and self.peek(1).val == 'laneId':
+      self.eat('LBRACKET')
+      self.eat_val('laneId', 'IDENT')
+      self.eat('RBRACKET')
+      result = (base >> _to_u32(self.vars['laneId'])) & _u32(1)
+      if self.try_eat('DOT'):
+        dt_name = self.eat('IDENT').val
+        return result.cast(DTYPES.get(dt_name, dtypes.uint32))
+      return result
+    dt = DTYPES.get(field)
+    if dt is None: return base
+    if dt == base.dtype: return base
+    if dt.itemsize == 2 and base.dtype.itemsize == 4:
+      return (base & _const(base.dtype, 0xFFFF)).cast(dtypes.uint16) if dt == dtypes.uint16 else (base & _const(base.dtype, 0xFFFF)).cast(dtypes.uint16).bitcast(dt)
+    return _cast_to(base, dt)
+
+  def _handle_bracket(self, base, var_name: str | None = None) -> UOp:
+    self.eat('LBRACKET')
+    return self._handle_bracket_rest(self.parse(), base, var_name)
+
+  def _handle_bracket_rest(self, first: UOp, base: UOp, var_name: str | None = None) -> UOp:
+    if self.at('OP') and self.peek().val in ('+:', '-:'):
+      op = self.eat('OP').val
+      width = self.parse()
+      self.eat('RBRACKET')
+      if width.op == Ops.CONST:
+        w = int(width.arg)
+        return (base >> _to_u32(first)) & _const(base.dtype, (1 << w) - 1)
+      return base
+    if self.try_eat('COLON'):
+      second = self.parse()
+      self.eat('RBRACKET')
+      if first.op == Ops.CONST and second.op == Ops.CONST:
+        a, b = int(first.arg), int(second.arg)
+        if a < b: return _bitreverse(base, b - a + 1)
+        hi, lo = a, b
+        if lo >= base.dtype.itemsize * 8:
+          vn = var_name or self._find_var_name(base)
+          if vn and f'{vn}{lo // 32}' in self.vars:
+            base = self.vars[f'{vn}{lo // 32}']
+            lo, hi = lo % 32, (hi % 32) + (lo % 32)
+        return _extract_bits(base, hi, lo)
+      # Dynamic bit slice: (base >> lo) & ((1 << (hi - lo + 1)) - 1)
+      dt = dtypes.uint64 if base.dtype in (dtypes.uint64, dtypes.int64) else dtypes.uint32
+      hi, lo = first.cast(dt), second.cast(dt)
+      width = hi - lo + _const(dt, 1)
+      mask = (_const(dt, 1) << width) - _const(dt, 1)
+      return (base.cast(dt) >> lo) & mask
+    self.eat('RBRACKET')
+    dt_suffix = None
+    if self.try_eat('DOT'):
+      dt_suffix = DTYPES.get(self.eat('IDENT').val, dtypes.uint32)
+    if var_name is None:
+      var_name = self._find_var_name(base)
+    if first.op == Ops.CONST:
+      idx = int(first.arg)
+      if var_name and f'{var_name}{idx}' in self.vars:
+        v = self.vars[f'{var_name}{idx}']
+        return _cast_to(v, dt_suffix) if dt_suffix else v
+      dt = dtypes.uint64 if base.dtype in (dtypes.uint64, dtypes.int64) else dtypes.uint32
+      base_cast = base.cast(dt) if base.dtype != dt else base
+      result = ((base_cast >> _const(dt, idx)) & _const(dt, 1))
+      return _cast_to(result, dt_suffix) if dt_suffix else result
+    if var_name:
+      idx_u32 = _to_u32(first)
+      elems = [(i, self.vars[f'{var_name}{i}']) for i in range(256) if f'{var_name}{i}' in self.vars]
+      if elems:
+        result = elems[-1][1]
+        for ei, ev in reversed(elems[:-1]):
+          if ev.dtype != result.dtype and ev.dtype.itemsize == result.dtype.itemsize: result = result.cast(ev.dtype)
+          elif ev.dtype != result.dtype: ev = ev.cast(result.dtype)
+          result = idx_u32.eq(_u32(ei)).where(ev, result)
+        return result
+    dt = dtypes.uint64 if base.dtype in (dtypes.uint64, dtypes.int64) else dtypes.uint32
+    base_cast = base.cast(dt) if base.dtype != dt else base
+    result = (base_cast >> first.cast(dt)) & _const(dt, 1)
+    return _cast_to(result, dt_suffix) if dt_suffix else result
+
+  def _handle_brace_index(self, base) -> UOp:
+    self.eat('LBRACE')
+    idx = self.eat('NUM').val
+    self.eat('RBRACE')
+    var_name = self._find_var_name(base)
+    if var_name:
+      elem = self.vars.get(f'{var_name}{idx}', _u32(0))
+      if self.try_eat('DOT'):
+        dt_name = self.eat('IDENT').val
+        return _cast_to(elem, DTYPES.get(dt_name, dtypes.uint32))
+      if self.at('LBRACKET'):
+        return self._handle_bracket(elem)
+      return elem
+    return _u32(0)
+
+  def _find_var_name(self, base: UOp) -> str | None:
+    if base.op == Ops.DEFINE_VAR and base.arg: return base.arg[0]
+    for name, v in self.vars.items():
+      if isinstance(v, UOp) and v is base: return name
+    return None
+
+  def _sized_literal(self, bits: int) -> UOp:
+    if self.at('IDENT') and self.peek().val in ('U', 'I', 'F', 'B'):
+      type_char = self.eat('IDENT').val
+      self.eat('LPAREN')
+      inner = self.parse()
+      self.eat('RPAREN')
+      dt = {('U',32): dtypes.uint32, ('U',64): dtypes.uint64, ('I',32): dtypes.int, ('I',64): dtypes.int64,
+            ('F',16): dtypes.half, ('F',32): dtypes.float32, ('F',64): dtypes.float64, ('B',32): dtypes.uint32, ('B',64): dtypes.uint64}.get((type_char, bits), dtypes.uint64 if bits > 32 else dtypes.uint32)
+      if type_char == 'F' and inner.dtype in (dtypes.uint32, dtypes.uint64, dtypes.ulong, dtypes.int, dtypes.int64):
+        if inner.dtype.itemsize != dt.itemsize: inner = inner.cast(dtypes.uint32 if dt.itemsize == 4 else dtypes.uint64)
+        return inner.bitcast(dt)
+      return inner.cast(dt)
+    if self.at('IDENT'):
+      ident = self.peek().val
+      fmt = ident[0].lower()
+      if fmt in ('h', 'b', 'd'):
+        self.eat('IDENT')
+        if len(ident) > 1: num = ident[1:]
+        elif self.at('NUM'): num = self.eat('NUM').val
+        elif self.at('IDENT'): num = self.eat('IDENT').val
+        else: raise RuntimeError(f"expected number after {bits}'{fmt}")
+        if fmt == 'h': val = int(num, 16)
+        elif fmt == 'b': val = int(num, 2)
+        else: val = int(num)
+        return _const(_BITS_DT.get(bits, dtypes.uint32), val)
+    if self.at('NUM') and self.peek().val.startswith('0x'):
+      num = self.eat('NUM').val
+      return _const(_BITS_DT.get(bits, dtypes.uint32), int(num, 16))
+    if self.at('NUM') or (self.at('OP') and self.peek().val == '-'):
+      neg = self.try_eat_val('-', 'OP') is not None
+      suffix, num = _strip_suffix(self.eat('NUM').val)
+      if num.startswith('0x'):
+        val = int(num, 16)
+        if neg: val = -val
+      elif '.' in num:
+        fval = float(num)
+        if neg: fval = -fval
+        return _const({16: dtypes.half, 32: dtypes.float32, 64: dtypes.float64}.get(bits, dtypes.float32), fval)
+      else:
+        val = int(num)
+        if neg: val = -val
+      dt = {1: dtypes.uint32, 8: dtypes.uint8, 16: dtypes.int16 if 'U' not in suffix else dtypes.uint16,
+            32: dtypes.int if 'U' not in suffix else dtypes.uint32, 64: dtypes.int64 if 'U' not in suffix else dtypes.uint64}.get(bits, dtypes.uint32)
+      return _const(dt, val)
+    raise RuntimeError(f"unexpected token after {bits}': {self.peek()}")
+
+  def _parse_number(self, num: str) -> UOp:
+    if num.startswith('0x') or num.startswith('0X'): return _const(dtypes.uint64, int(num.rstrip('ULul'), 16))
+    suffix, num = _strip_suffix(num)
+    if '.' in num or suffix in ('F', 'f'):
+      return _const(dtypes.float32 if suffix in ('F', 'f') else dtypes.float64, float(num))
+    val = int(num)
+    if 'ULL' in suffix: return _const(dtypes.uint64, val)
+    if 'LL' in suffix or 'L' in suffix: return _const(dtypes.uint64, val)
+    if 'U' in suffix: return _const(dtypes.uint32, val)
+    return _const(dtypes.int if val < 0 else dtypes.uint32, val)
+
+  def _parse_args(self) -> list[UOp]:
+    if self.at('RPAREN'): return []
+    args = [self.parse()]
+    while self.try_eat('COMMA'):
+      args.append(self.parse())
+    return args
+
+  def _call_func(self, name: str, args: list[UOp]) -> UOp:
+    if name in self.vars and isinstance(self.vars[name], tuple) and self.vars[name][0] == 'lambda':
+      _, params, body = self.vars[name]
+      lv = {**self.vars, **{p: a for p, a in zip(params, args)}}
+      if ';' in body or '\n' in body or 'return' in body.lower():
+        lines = [l.strip() for l in body.replace(';', '\n').split('\n') if l.strip() and not l.strip().startswith('//')]
+        _, _, result = parse_block(lines, 0, lv, self.funcs)
+        return result if result is not None else _u32(0)
+      return parse_expr(body, lv, self.funcs)
+    if name in self.funcs:
+      return self.funcs[name](*args)
+    raise RuntimeError(f"unknown function: {name}")
+
+  def _handle_mem_load(self, addr: UOp, dt) -> UOp:
+    mem = self.vars.get('_vmem') if '_vmem' in self.vars else self.vars.get('_lds')
+    if mem is None: return _const(dt, 0)
+    adt = dtypes.uint64 if addr.dtype == dtypes.uint64 else dtypes.uint32
+    active = self.vars.get('_active')
+    gate = (active,) if active is not None else ()
+    byte_mem = mem.dtype.base == dtypes.uint8
+    if byte_mem:
+      idx = addr.cast(dtypes.int)
+      if dt in (dtypes.uint64, dtypes.int64, dtypes.float64):
+        val = _u32(0).cast(dtypes.uint64)
+        for i in range(8): val = val | (mem.index(idx + _const(dtypes.int, i), *gate, ptr=True).load().cast(dtypes.uint64) << _u64(i * 8))
+      elif dt in (dtypes.uint8, dtypes.int8):
+        val = mem.index(idx, *gate, ptr=True).load().cast(dt)
+      elif dt in (dtypes.uint16, dtypes.int16, dtypes.short):
+        val = (mem.index(idx, *gate, ptr=True).load().cast(dtypes.uint32) | (mem.index(idx + _const(dtypes.int, 1), *gate, ptr=True).load().cast(dtypes.uint32) << _u32(8))).cast(dt)
+      else:
+        val = _u32(0)
+        for i in range(4): val = val | (mem.index(idx + _const(dtypes.int, i), *gate, ptr=True).load().cast(dtypes.uint32) << _u32(i * 8))
+    else:
+      idx = (addr >> _const(addr.dtype, 2)).cast(dtypes.int)
+      val = mem.index(idx, *gate)
+      if dt in (dtypes.uint64, dtypes.int64, dtypes.float64):
+        idx2 = ((addr + _const(adt, 4)) >> _const(adt, 2)).cast(dtypes.int)
+        val = val.cast(dtypes.uint64) | (mem.index(idx2, *gate).cast(dtypes.uint64) << _u64(32))
+      elif dt in (dtypes.uint8, dtypes.int8): val = (val >> ((addr & _const(adt, 3)).cast(dtypes.uint32) * _u32(8))) & _u32(0xFF)
+      elif dt in (dtypes.uint16, dtypes.int16): val = (val >> (((addr >> _const(adt, 1)) & _const(adt, 1)).cast(dtypes.uint32) * _u32(16))) & _u32(0xFFFF)
+    return val
+
+  def _coerce_cmp(self, l: UOp, r: UOp) -> tuple[UOp, UOp]:
+    if l.dtype != r.dtype:
+      if r.dtype == dtypes.int and r.op == Ops.CONST and r.arg < 0: l = l.cast(dtypes.int)
+      else: r = r.cast(l.dtype)
+    return l, r
+
+  def _coerce_bitwise(self, l: UOp, r: UOp) -> tuple[UOp, UOp]:
+    if l.dtype != r.dtype:
+      if l.dtype.itemsize == r.dtype.itemsize:
+        t = dtypes.uint32 if l.dtype.itemsize == 4 else dtypes.uint64 if l.dtype.itemsize == 8 else l.dtype
+        l, r = l.bitcast(t), r.bitcast(t)
+      else: r = r.cast(l.dtype)
+    return l, r
+
+  def _cmp_nan(self, l: UOp, r: UOp, fn) -> UOp:
+    result = fn(l, r)
+    if l.dtype in (dtypes.float32, dtypes.float64, dtypes.half):
+      return result & _isnan(l).logical_not() & _isnan(r).logical_not()
+    return result
+
+def _match_bracket(toks: list[Token], start: int) -> tuple[int, list[Token]]:
+  """Match brackets from start, return (end_idx, inner_tokens)."""
+  j, depth = start + 1, 1
+  while j < len(toks) and depth > 0:
+    if toks[j].type == 'LBRACKET': depth += 1
+    elif toks[j].type == 'RBRACKET': depth -= 1
+    j += 1
+  return j, [t for t in toks[start+1:j-1] if t.type != 'EOF']
+
+def _tok_str(toks: list[Token]) -> str: return ' '.join(t.val for t in toks if t.type != 'EOF')
+def parse_tokens(toks: list[Token], vars: dict[str, VarVal], funcs: dict | None = None) -> UOp:
+  return Parser(toks, vars, funcs).parse()
+
+# Unified block parser for pcode
+def _subst_loop_var(line: str, loop_var: str, val: int) -> str:
+  """Substitute loop variable and evaluate bracket expressions.
+  Converts var[loop_var] to var{val} for array element access (like the old regex parser)."""
+  toks = tokenize(line)
+  # First pass: convert var[loop_var] to var{loop_var} to mark for array element assignment
+  result_toks: list[Token] = []
+  j = 0
+  while j < len(toks):
+    t = toks[j]
+    # Check for pattern: IDENT[loop_var] where it's not preceded by a dot (not .type[...])
+    if t.type == 'IDENT' and j+3 < len(toks) and toks[j+1].type == 'LBRACKET' and toks[j+2].type == 'IDENT' and toks[j+2].val == loop_var and toks[j+3].type == 'RBRACKET':
+      # Check that it's not .type[loop_var]
+      if not result_toks or result_toks[-1].type != 'DOT':
+        result_toks.append(t)
+        result_toks.append(Token('LBRACE', '{'))
+        result_toks.append(Token('NUM', str(val)))
+        result_toks.append(Token('RBRACE', '}'))
+        j += 4
+        continue
+    result_toks.append(t)
+    j += 1
+  # Second pass: substitute loop variable in remaining positions
+  subst_parts = [str(val) if t.type == 'IDENT' and t.val == loop_var else t.val for t in result_toks if t.type != 'EOF']
+  return ' '.join(subst_parts)
+
+def _set_bits(old: UOp, val: UOp, width: int, offset: int) -> UOp:
+  """Set bits [offset:offset+width) in old to val, masking and shifting appropriately."""
+  mask = _u32(((1 << width) - 1) << offset)
+  v = (val.cast(dtypes.uint32) if val.dtype != dtypes.uint32 else val) & _u32((1 << width) - 1)
+  return (old & (mask ^ _u32(0xFFFFFFFF))) | (v << _u32(offset))
+
+def _find_paren_end(s: str, start: int = 0, open_ch: str = '(', close_ch: str = ')') -> int:
+  """Find index of matching close paren, starting after the open paren at start."""
+  depth = 0
+  for j, ch in enumerate(s[start:], start):
+    if ch == open_ch: depth += 1
+    elif ch == close_ch:
+      depth -= 1
+      if depth == 0: return j
+  return len(s)
+
+def parse_block(lines: list[str], start: int, vars: dict[str, VarVal], funcs: dict | None = None,
+                assigns: list | None = None) -> tuple[int, dict[str, VarVal], UOp | None]:
+  """Parse a block of pcode. Returns (next_line, block_assigns, return_value).
+  If assigns list is provided, side effects (MEM/VGPR writes) are appended to it."""
+  if funcs is None: funcs = _FUNCS
+  block_assigns: dict[str, VarVal] = {}
+  i = start
+
+  while i < len(lines):
+    line = lines[i]
+    toks = tokenize(line)
+    if toks[0].type != 'IDENT' and toks[0].type != 'LBRACE': i += 1; continue
+    first = toks[0].val.lower() if toks[0].type == 'IDENT' else '{'
+
+    # Block terminators
+    if first in ('elsif', 'else', 'endif', 'endfor'): break
+
+    # return expr (lambda bodies)
+    if first == 'return':
+      rest = line[line.lower().find('return') + 6:].strip()
+      return i + 1, block_assigns, parse_expr(rest, vars, funcs)
+
+    # for loop
+    if first == 'for':
+      # Parse: for VAR in [SIZE']START : [SIZE']END do
+      p = Parser(toks, vars, funcs)
+      p.eat_val('for', 'IDENT')
+      loop_var = p.eat('IDENT').val
+      p.eat_val('in', 'IDENT')
+      def parse_bound():
+        if p.at('NUM') and p.peek(1).type == 'QUOTE': p.eat('NUM'); p.eat('QUOTE')
+        if p.at('NUM'): return int(p.eat('NUM').val.rstrip('UuLl'))
+        expr = p.parse()
+        return int(expr.arg) if expr.op == Ops.CONST else 0
+      start_val = parse_bound()
+      p.eat('COLON')
+      end_val = parse_bound()
+      # Collect body
+      i += 1
+      body_lines: list[str] = []
+      depth = 1
+      while i < len(lines) and depth > 0:
+        btoks = tokenize(lines[i])
+        if btoks[0].type == 'IDENT':
+          if btoks[0].val.lower() == 'for': depth += 1
+          elif btoks[0].val.lower() == 'endfor': depth -= 1
+        if depth > 0: body_lines.append(lines[i])
+        i += 1
+      # Execute loop with break support
+      has_break = any('break' in bl.lower() for bl in body_lines)
+      found_var = f'_found_{id(body_lines)}' if has_break else None
+      if found_var: vars[found_var] = block_assigns[found_var] = _const(dtypes.bool, False)
+      for loop_i in range(start_val, end_val + 1):
+        subst_lines = [_subst_loop_var(bl, loop_var, loop_i) for bl in body_lines if not (has_break and bl.strip().lower() == 'break')]
+        _, iter_assigns, _ = parse_block(subst_lines, 0, vars, funcs, assigns)
+        if has_break:
+          assert found_var is not None
+          found = block_assigns.get(found_var, vars.get(found_var))
+          assert isinstance(found, UOp)
+          not_found = found.eq(_const(dtypes.bool, False))
+          for var, val in iter_assigns.items():
+            if var != found_var and isinstance(val, UOp):
+              old = block_assigns.get(var, vars.get(var, _u32(0)))
+              if isinstance(old, UOp):
+                block_assigns[var] = vars[var] = not_found.where(val, old.cast(val.dtype) if val.dtype != old.dtype and val.dtype.itemsize == old.dtype.itemsize else old)
+          for j, bl in enumerate(body_lines):
+            bl_l = bl.strip().lower()
+            if bl_l.startswith('if ') and bl_l.endswith(' then'):
+              if any(body_lines[k].strip().lower() == 'break' for k in range(j+1, len(body_lines))):
+                cond_str = _subst_loop_var(bl.strip()[3:-5].strip(), loop_var, loop_i)
+                cond = _to_bool(parse_expr(cond_str, vars, funcs))
+                block_assigns[found_var] = vars[found_var] = not_found.where(cond, found)
+                break
+        else:
+          block_assigns.update(iter_assigns); vars.update(iter_assigns)
+      continue
+
+    # declare
+    if first == 'declare':
+      if '[' not in line and len(toks) >= 2 and toks[1].type == 'IDENT': vars[toks[1].val] = _u32(0)
+      i += 1; continue
+
+    # lambda definition
+    if first != '{' and '=' in line and 'lambda' in line and any(t.type == 'IDENT' and t.val == 'lambda' for t in toks):
+      name = toks[0].val
+      body_start = line[line.find('(', line.find('lambda')):]
+      params_end = _find_paren_end(body_start) + 1
+      params = [p.strip() for p in body_start[1:params_end-1].split(',') if p.strip()]
+      rest = body_start[params_end:].strip()
+      if rest.startswith('('):
+        body_end = _find_paren_end(rest)
+        if body_end < len(rest):  # found matching paren on same line
+          body = rest[1:body_end].strip()
+          i += 1
+        else:  # multiline body
+          body_lines_lst, depth = [rest[1:]], 1
+          i += 1
+          while i < len(lines) and depth > 0:
+            for j, ch in enumerate(lines[i]):
+              if ch == '(': depth += 1
+              elif ch == ')':
+                depth -= 1
+                if depth == 0: body_lines_lst.append(lines[i][:j]); break
+            else: body_lines_lst.append(lines[i])
+            i += 1
+          body = '\n'.join(body_lines_lst).strip()
+        vars[name] = ('lambda', params, body)
+        continue
+
+    # MEM assignment: MEM[addr].type (+|-)?= value
+    if first == 'mem' and toks[1].type == 'LBRACKET':
+      j, addr_toks = _match_bracket(toks, 1)
+      addr = parse_tokens(addr_toks, vars, funcs)
+      if j < len(toks) and toks[j].type == 'DOT': j += 1
+      dt_name = toks[j].val if j < len(toks) and toks[j].type == 'IDENT' else 'u32'
+      dt, j = DTYPES.get(dt_name, dtypes.uint32), j + 1
+      compound_op = None
+      if j < len(toks) and toks[j].type == 'ASSIGN_OP': compound_op = toks[j].val; j += 1
+      elif j < len(toks) and toks[j].type == 'EQUALS': j += 1
+      rhs = parse_tokens(toks[j:], vars, funcs)
+      if compound_op:
+        mem = vars.get('_vmem') if '_vmem' in vars else vars.get('_lds')
+        if isinstance(mem, UOp):
+          adt = dtypes.uint64 if addr.dtype == dtypes.uint64 else dtypes.uint32
+          idx = (addr >> _const(adt, 2)).cast(dtypes.int)
+          old = mem.index(idx)
+          if dt in (dtypes.uint64, dtypes.int64, dtypes.float64):
+            old = old.cast(dtypes.uint64) | (mem.index(((addr + _const(adt, 4)) >> _const(adt, 2)).cast(dtypes.int)).cast(dtypes.uint64) << _u64(32))
+          rhs = (old + rhs) if compound_op == '+=' else (old - rhs)
+      if assigns is not None: assigns.append((f'MEM[{_tok_str(addr_toks)}].{dt_name}', (addr, rhs)))
+      i += 1; continue
+
+    # VGPR assignment: VGPR[lane][reg] = value
+    if first == 'vgpr' and toks[1].type == 'LBRACKET':
+      j, lane_toks = _match_bracket(toks, 1)
+      if j < len(toks) and toks[j].type == 'LBRACKET':
+        j, reg_toks = _match_bracket(toks, j)
+        if j < len(toks) and toks[j].type == 'EQUALS': j += 1
+        ln, rg, val = parse_tokens(lane_toks, vars, funcs), parse_tokens(reg_toks, vars, funcs), parse_tokens(toks[j:], vars, funcs)
+        if assigns is not None: assigns.append((f'VGPR[{_tok_str(lane_toks)}][{_tok_str(reg_toks)}]', (_to_u32(rg) * _u32(32) + _to_u32(ln), val)))
+        i += 1; continue
+
+    # Compound destination: {hi.type, lo.type} = value
+    if first == '{':
+      j = 1
+      if j+2 < len(toks) and toks[j].type == 'IDENT' and toks[j+1].type == 'DOT':
+        hi_var, hi_type = toks[j].val, toks[j+2].val
+        j += 3
+        if j < len(toks) and toks[j].type == 'COMMA': j += 1
+        if j+2 < len(toks) and toks[j].type == 'IDENT' and toks[j+1].type == 'DOT':
+          lo_var, lo_type = toks[j].val, toks[j+2].val
+          j += 3
+          if j < len(toks) and toks[j].type == 'RBRACE': j += 1
+          if j < len(toks) and toks[j].type == 'EQUALS': j += 1
+          val = parse_tokens(toks[j:], vars, funcs)
+          lo_dt, hi_dt = DTYPES.get(lo_type, dtypes.uint64), DTYPES.get(hi_type, dtypes.uint32)
+          lo_bits = 64 if lo_dt in (dtypes.uint64, dtypes.int64) else 32
+          lo_val = val.cast(lo_dt) if val.dtype.itemsize * 8 <= lo_bits else (val & _const(val.dtype, (1 << lo_bits) - 1)).cast(lo_dt)
+          hi_val = (val >> _const(val.dtype, lo_bits)).cast(hi_dt)
+          block_assigns[lo_var] = vars[lo_var] = lo_val
+          block_assigns[hi_var] = vars[hi_var] = hi_val
+          if assigns is not None: assigns.extend([(f'{lo_var}.{lo_type}', lo_val), (f'{hi_var}.{hi_type}', hi_val)])
+          i += 1; continue
+
+    # Bit slice/index: var[hi:lo] = value, var.type[hi:lo] = value, or var[expr] = value
+    if len(toks) >= 5 and toks[0].type == 'IDENT' and (toks[1].type == 'LBRACKET' or (toks[1].type == 'DOT' and toks[3].type == 'LBRACKET')):
+      bracket_start = 2 if toks[1].type == 'LBRACKET' else 4
+      j = bracket_start
+      colon_pos = None
+      while j < len(toks) and toks[j].type != 'RBRACKET':
+        if toks[j].type == 'COLON': colon_pos = j
+        j += 1
+      var = toks[0].val
+      if colon_pos is not None:  # bit slice: var[hi:lo]
+        hi_str = ' '.join(t.val for t in toks[bracket_start:colon_pos] if t.type != 'EOF')
+        lo_str = ' '.join(t.val for t in toks[colon_pos+1:j] if t.type != 'EOF')
+        try:
+          hi_val, lo_val = int(eval(hi_str)), int(eval(lo_str))
+          hi, lo = max(hi_val, lo_val), min(hi_val, lo_val)
+          j += 1
+          if j < len(toks) and toks[j].type == 'DOT': j += 2
+          if j < len(toks) and toks[j].type == 'EQUALS': j += 1
+          val = parse_tokens(toks[j:], vars, funcs)
+          dt_suffix = toks[2].val if toks[1].type == 'DOT' else None
+          if assigns is not None: assigns.append((f'{var}[{hi}:{lo}]' + (f'.{dt_suffix}' if dt_suffix else ''), val))
+          if var not in vars: vars[var] = _const(dtypes.uint64 if hi >= 32 else dtypes.uint32, 0)
+          old = block_assigns.get(var, vars.get(var))
+          block_assigns[var] = vars[var] = _set_bits(old, _val_to_bits(val), hi - lo + 1, lo)
+          i += 1; continue
+        except: pass
+      elif toks[1].type == 'LBRACKET':  # bit index: var[expr] (only for var[...], not var.type[...])
+        existing = block_assigns.get(var, vars.get(var))
+        if existing is not None and isinstance(existing, UOp) and not any(f'{var}{k}' in vars or f'{var}{k}' in block_assigns for k in range(8)):
+          bit_toks = toks[2:j]
+          j += 1
+          while j < len(toks) and toks[j].type != 'EQUALS': j += 1
+          if j < len(toks):
+            block_assigns[var] = vars[var] = _set_bit(existing, _to_u32(parse_tokens(bit_toks, vars, funcs)), parse_tokens(toks[j+1:], vars, funcs))
+            i += 1; continue
+
+    # Array element: var{idx} = value
+    if len(toks) >= 5 and toks[0].type == 'IDENT' and toks[1].type == 'LBRACE' and toks[2].type == 'NUM':
+      var, idx = toks[0].val, int(toks[2].val)
+      j = 4
+      while j < len(toks) and toks[j].type != 'EQUALS': j += 1
+      if j < len(toks):
+        val = parse_tokens(toks[j+1:], vars, funcs)
+        existing = block_assigns.get(var, vars.get(var))
+        if existing is not None and isinstance(existing, UOp):
+          block_assigns[var] = vars[var] = _set_bit(existing, _u32(idx), val)
+        else:
+          block_assigns[f'{var}{idx}'] = vars[f'{var}{idx}'] = val
+        i += 1; continue
+
+    # Compound assignment: var += or var -=
+    assign_op = next((j for j, t in enumerate(toks) if t.type == 'ASSIGN_OP'), None)
+    if assign_op is not None:
+      var = toks[0].val
+      old = block_assigns.get(var, vars.get(var, _u32(0)))
+      rhs = parse_tokens(toks[assign_op+1:], vars, funcs)
+      if rhs.dtype != old.dtype: rhs = rhs.cast(old.dtype)
+      block_assigns[var] = vars[var] = (old + rhs) if toks[assign_op].val == '+=' else (old - rhs)
+      i += 1; continue
+
+    # Typed element: var.type[idx] = value
+    if len(toks) >= 7 and toks[0].type == 'IDENT' and toks[1].type == 'DOT' and toks[2].type == 'IDENT' and toks[3].type == 'LBRACKET' and toks[4].type == 'NUM':
+      var, dt_name, idx = toks[0].val, toks[2].val, int(toks[4].val)
+      dt = DTYPES.get(dt_name, dtypes.uint32)
+      j = 6
+      while j < len(toks) and toks[j].type != 'EQUALS': j += 1
+      if j < len(toks):
+        val, old = parse_tokens(toks[j+1:], vars, funcs), block_assigns.get(var, vars.get(var, _u32(0)))
+        bw = dt.itemsize * 8
+        block_assigns[var] = vars[var] = _set_bits(old, val, bw, idx * bw)
+        if assigns is not None: assigns.append((f'{var}.{dt_name}[{idx}]', val))
+        i += 1; continue
+
+    # Dynamic bit: var.type[expr_with_brackets] = value
+    if len(toks) >= 5 and toks[0].type == 'IDENT' and toks[1].type == 'DOT' and toks[2].type == 'IDENT' and toks[3].type == 'LBRACKET':
+      j, depth, has_inner = 4, 1, False
+      while j < len(toks) and depth > 0:
+        if toks[j].type == 'LBRACKET': depth += 1; has_inner = True
+        elif toks[j].type == 'RBRACKET': depth -= 1
+        j += 1
+      if has_inner:
+        var = toks[0].val
+        bit_pos = _to_u32(parse_tokens(toks[4:j-1], vars, funcs))
+        while j < len(toks) and toks[j].type != 'EQUALS': j += 1
+        if j < len(toks):
+          val = parse_tokens(toks[j+1:], vars, funcs)
+          old = block_assigns.get(var, vars.get(var, _u32(0)))
+          block_assigns[var] = vars[var] = _set_bit(old, bit_pos, val)
+          i += 1; continue
+
+    # If/elsif/else - skip branches with statically false conditions (WAVE32/WAVE64)
+    if first == 'if':
+      def parse_cond(s, kw):
+        ll = s.lower()
+        return _to_bool(parse_expr(s[ll.find(kw) + len(kw):ll.rfind('then')].strip(), vars, funcs))
+      def not_static_false(c): return c.op != Ops.CONST or c.arg is not False
+      cond = parse_cond(line, 'if')
+      conditions: list[tuple[UOp, UOp | dict[str, VarVal] | None]] = [(cond, None)] if not_static_false(cond) else []
+      else_branch: tuple[UOp | None, dict[str, VarVal]] = (None, {})
+      vars_snap = dict(vars)
+      i += 1
+      i, branch, ret = parse_block(lines, i, vars, funcs, assigns)
+      if conditions: conditions[0] = (cond, ret if ret is not None else branch)
+      vars.clear(); vars.update(vars_snap)
+      while i < len(lines):
+        ltoks = tokenize(lines[i])
+        if ltoks[0].type != 'IDENT': break
+        lf = ltoks[0].val.lower()
+        if lf == 'elsif':
+          c = parse_cond(lines[i], 'elsif')
+          i += 1; i, branch, ret = parse_block(lines, i, vars, funcs, assigns)
+          if not_static_false(c): conditions.append((c, ret if ret is not None else branch))
+          vars.clear(); vars.update(vars_snap)
+        elif lf == 'else':
+          i += 1; i, branch, ret = parse_block(lines, i, vars, funcs, assigns)
+          else_branch = (ret, branch)
+          vars.clear(); vars.update(vars_snap)
+        elif lf == 'endif': i += 1; break
+        else: break
+      # Check if any branch returned a value (lambda-style)
+      if any(isinstance(br, UOp) for _, br in conditions):
+        result = else_branch[0]
+        for c, rv in reversed(conditions):
+          if isinstance(rv, UOp) and isinstance(result, UOp):
+            if rv.dtype != result.dtype and rv.dtype.itemsize == result.dtype.itemsize: result = result.cast(rv.dtype)
+            result = c.where(rv, result)
+        return i, block_assigns, result
+      # Main style: merge variable assignments with WHERE
+      else_assigns = else_branch[1]
+      all_vars = set().union(*[ba.keys() for _, ba in conditions if isinstance(ba, dict)], else_assigns.keys())
+      for var in all_vars:
+        res: Any = else_assigns.get(var, block_assigns.get(var, vars.get(var, _u32(0))))
+        for cond, ba in reversed(conditions):
+          if isinstance(ba, dict) and var in ba:
+            tv = ba[var]
+            if isinstance(tv, UOp) and isinstance(res, UOp):
+              res = cond.where(tv, res.cast(tv.dtype) if tv.dtype != res.dtype and tv.dtype.itemsize == res.dtype.itemsize else res)
+        block_assigns[var] = vars[var] = res
+      continue
+
+    # Regular assignment: var = value
+    for j, t in enumerate(toks):
+      if t.type == 'EQUALS':
+        if any(toks[k].type == 'OP' and toks[k].val in ('<', '>', '!', '=') for k in range(j)): break
+        base_var = toks[0].val
+        block_assigns[base_var] = vars[base_var] = parse_tokens(toks[j+1:], vars, funcs)
+        i += 1; break
+    else: i += 1
+  return i, block_assigns, None
+
+def parse_expr(expr: str, vars: dict[str, VarVal], funcs: dict | None = None) -> UOp:
+  return parse_tokens(tokenize(expr.strip().rstrip(';')), vars, funcs)
+

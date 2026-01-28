@@ -5,7 +5,7 @@ from contextlib import ContextDecorator
 from typing import Any, Callable, ClassVar, Sequence, cast, get_args, Literal, SupportsIndex, ParamSpec, TypeVar, Generic, TYPE_CHECKING
 if TYPE_CHECKING: import numpy
 from tinygrad.dtype import DType, DTypeLike, dtypes, ImageDType, ConstType, least_upper_float, least_upper_dtype, sum_acc_dtype, to_dtype, truncate
-from tinygrad.dtype import _from_np_dtype, _to_np_dtype
+from tinygrad.dtype import _from_np_dtype, _to_np_dtype, PyConst
 from tinygrad.helpers import argfix, make_tuple, flatten, prod, all_int, round_up, merge_dicts, argsort, getenv, all_same, fully_flatten
 from tinygrad.helpers import IMAGE, WINO, Metadata, TRACEMETA, ceildiv, fetch, polyN, is_numpy_ndarray, TracingKey, cpu_profile
 from tinygrad.helpers import suppress_finalizing, disable_gc
@@ -112,7 +112,7 @@ class Tensor(OpMixin):
   __slots__ = "uop", "requires_grad", "grad"
   training: ClassVar[bool] = False
 
-  def __init__(self, data:ConstType|bytes|list|tuple|UOp|'numpy.ndarray'|pathlib.Path|None,
+  def __init__(self, data:PyConst|bytes|list|tuple|UOp|'numpy.ndarray'|pathlib.Path|None,
                device:str|tuple|list|None=None, dtype:DTypeLike|None=None, requires_grad:bool|None=None, _force_unique:bool=False):
     if device is None and isinstance(data, pathlib.Path): device = f"DISK:{data.resolve()}"  # keep it on the disk if device is None
     _dtype:DType|None = to_dtype(dtype) if dtype is not None else None
@@ -138,7 +138,7 @@ class Tensor(OpMixin):
         data = data.replace(src=(var.replace(src=const.src), const))
     elif data is None:
       data = Tensor(0, device=_device, dtype=_dtype or dtypes.default_float, requires_grad=requires_grad).uop
-    elif isinstance(data, get_args(ConstType)):
+    elif isinstance(data, get_args(PyConst)):
       data = (UOp.unique_const if _force_unique or requires_grad else UOp.const)(_dtype or dtypes.from_py(data), data, _device)
     elif isinstance(data, bytes): data = _frompy(data, dtypes.uint8 if _dtype is None else _dtype)
     elif isinstance(data, (list, tuple)):
@@ -321,7 +321,7 @@ class Tensor(OpMixin):
     assert all_int(self.shape), f"no data if shape is symbolic, {self.shape=}"
     return self._buffer().as_typed_buffer(self.shape)
 
-  def item(self) -> ConstType:
+  def item(self) -> PyConst:
     """
     Returns the value of this tensor as a standard Python number.
 
@@ -334,7 +334,7 @@ class Tensor(OpMixin):
     return self.data()[(0,) * len(self.shape)]
 
   # NOTE: list[Any] because return type is recursive (list[list[...]] for higher dimensions)
-  def tolist(self) -> ConstType|list[Any]:
+  def tolist(self) -> PyConst|list[Any]:
     """
     Returns the value of this tensor as a nested list.
     Returns single value for const tensor.
@@ -618,7 +618,7 @@ class Tensor(OpMixin):
   # ***** creation helper functions *****
 
   @staticmethod
-  def full(shape:tuple[sint, ...], fill_value:ConstType, **kwargs) -> Tensor:
+  def full(shape:tuple[sint, ...], fill_value:PyConst, **kwargs) -> Tensor:
     """
     Creates a tensor with the given shape, filled with the given value.
 
@@ -748,7 +748,7 @@ class Tensor(OpMixin):
     stacked = UOp(Ops.MSTACK, dtype=dtype, src=tuple([fxn(sharded_shape, *args, device=d, dtype=dtype, **kwargs).uop for d in self.device]))
     return Tensor(UOp.multi(stacked, axis=self.uop.axis), device=self.device, dtype=dtype)
 
-  def full_like(self, fill_value:ConstType, **kwargs) -> Tensor:
+  def full_like(self, fill_value:PyConst, **kwargs) -> Tensor:
     """
     Creates a tensor with the same shape as `self`, filled with the given value.
     If `dtype` is not specified, the dtype of `self` is used.
@@ -1268,12 +1268,12 @@ class Tensor(OpMixin):
     """
     return self._getitem(indices)
 
-  def __setitem__(self, indices, v:Tensor|ConstType) -> None:
+  def __setitem__(self, indices, v:Tensor|PyConst) -> None:
     if isinstance(self.device, str) and self.device.startswith("DISK"):
       self.realize()._getitem(indices).assign(v)
       return
     # NOTE: check that setitem target is valid first
-    if isinstance(v, get_args(ConstType)): v = Tensor(v, device=self.device, dtype=self.dtype)
+    if isinstance(v, get_args(PyConst)): v = Tensor(v, device=self.device, dtype=self.dtype)
     if not isinstance(v, Tensor): raise TypeError(f"can't set a {type(v).__name__} to a Tensor")
     if self.requires_grad or v.requires_grad: raise NotImplementedError("setitem with requires_grad is not supported")
     self.realize()
@@ -1418,7 +1418,7 @@ class Tensor(OpMixin):
     perm_to_last = tuple(i for i in range(self.ndim) if i != dim) + (dim,)
     return self.permute(perm_to_last)._pool((size,), step).permute(argsort(perm_to_last) + (self.ndim,))
 
-  def meshgrid(self:Tensor, *args:Tensor, indexing:Literal["ij", "xy"]="ij") -> tuple[Tensor, ...]:
+  def meshgrid(self:Tensor, *args:Tensor, indexing:str="ij") -> tuple[Tensor, ...]:
     """
     Generates coordinate matrices from coordinate vectors.
     Input tensors can be scalars or 1D tensors.
@@ -1544,7 +1544,7 @@ class Tensor(OpMixin):
                              for i, s in enumerate(self.shape)], dim=-1)
     return indices.masked_select(mask.unsqueeze(-1).expand(*mask.shape, self.ndim)).reshape(-1, self.ndim)
 
-  def masked_fill(self:Tensor, mask:Tensor, value:Tensor|ConstType) -> Tensor:
+  def masked_fill(self:Tensor, mask:Tensor, value:Tensor|PyConst) -> Tensor:
     """
     Replaces `self` with `value` wherever the elements of `mask` are True.
 
@@ -1864,7 +1864,7 @@ class Tensor(OpMixin):
 
     # https://keccak.team/keccak_specs_summary.html
 
-    def ctensor(l: Sequence[ConstType], dtype: DType = dtypes.uint64):
+    def ctensor(l: Sequence[PyConst], dtype: DType = dtypes.uint64):
       # TODO: contiguous is here for compile speed
       return Tensor.stack(*(Tensor(v, dtype=dtype, device=self.device) for v in l)).contiguous()
     rot_offsets = [44, 43, 21, 14, 28, 20, 3, 45, 61, 1, 6, 25, 8, 18, 27, 36, 10, 15, 56, 62, 55, 39, 41, 2]
@@ -2621,7 +2621,7 @@ class Tensor(OpMixin):
     src, mask = (x.pad(tuple((0, self.shape[i] - x.shape[i]) if i != dim else None for i in range(self.ndim)) + (None,)) for x in (src, mask))
     return src, mask
 
-  def scatter(self, dim:int, index:Tensor, src:Tensor|ConstType, reduce:Literal['multiply', 'add']|None=None) -> Tensor:
+  def scatter(self, dim:int, index:Tensor, src:Tensor|PyConst, reduce:Literal['multiply', 'add']|None=None) -> Tensor:
     """
     Scatters `src` values along an axis specified by `dim`.
     Apply `add` or `multiply` reduction operation with `reduce`.
@@ -2686,7 +2686,7 @@ class Tensor(OpMixin):
     ```
     """
     src, mask = self._pre_scatter(dim, index, src)
-    def _inv_mask(a:Tensor|ConstType, b:Tensor|ConstType) -> Tensor: return mask.any(-1).logical_not().where(a, b)
+    def _inv_mask(a:Tensor|PyConst, b:Tensor|PyConst) -> Tensor: return mask.any(-1).logical_not().where(a, b)
     if reduce == "sum": return mask.where(src, 0).sum(-1).add(self if include_self else _inv_mask(self, 0))
     if reduce == "prod": return mask.where(src, 1).prod(-1).mul(self if include_self else _inv_mask(self, 1))
     if reduce == "amax": return mask.where(src, m := dtypes.min(src.dtype)).max(-1).maximum(self if include_self else _inv_mask(self, m))
@@ -3374,8 +3374,9 @@ class Tensor(OpMixin):
     """
     # NOTE: torch always return in float, we return based on the broadcasting rule.
     other = self._broadcasted(other)[1]
-    # TODO: remove other*0?
-    return (other < 0).where(-self.abs(), self.abs()) + other*0
+    # TODO: remove other.sign()*0?
+    # other.sign()*0 keeps other in the gradient graph (gradient=0) without affecting forward (works for inf unlike other*0)
+    return self.abs() * ((other < 0) | (other.reciprocal() < 0)).where(-1, 1) + other.sign()*0
 
   def logaddexp(self, other) -> Tensor:
     """

@@ -2,7 +2,7 @@
 """Roundtrip tests: generate tinygrad kernels, decode instructions, re-encode, verify match."""
 import unittest, io, sys, re, subprocess, os
 from extra.assembly.amd.dsl import Inst
-from extra.assembly.amd.decode import decode_inst, detect_format
+from extra.assembly.amd import decode_inst, detect_format
 from extra.assembly.amd.test.helpers import get_llvm_mc, get_llvm_objdump, get_target, get_mattr
 
 def disassemble_lib(lib: bytes, compiler) -> list[tuple[str, bytes]]:

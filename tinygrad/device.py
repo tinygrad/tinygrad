@@ -6,6 +6,7 @@ import importlib, inspect, functools, pathlib, os, platform, contextlib, sys, re
 from tinygrad.helpers import CI, OSX, LRU, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, flat_mv, PROFILE, temp, colored
 from tinygrad.helpers import Context, CCACHE, ALLOW_DEVICE_USAGE, MAX_BUFFER_SIZE, cpu_events, ProfileEvent, ProfilePointEvent, dedup, ContextVar
 from tinygrad.helpers import unwrap_class_type, suppress_finalizing, select_first_inited, VIZ, CPU_LLVM, CPU_LVP, NV_PTX, CUDA_PTX, NV_NAK
+from tinygrad.helpers import EMULATED_DTYPES
 from tinygrad.dtype import DType, ImageDType, PtrDType, dtypes, _to_np_dtype
 from tinygrad.renderer import Renderer
 
@@ -59,7 +60,7 @@ class ProfileDeviceEvent(ProfileEvent):
   device:str; comp_tdiff:decimal.Decimal=decimal.Decimal(0); copy_tdiff:decimal.Decimal=decimal.Decimal(0); props:dict[str,Any]|None=None # noqa: E702
 
 @dataclass(frozen=True)
-class ProfileProgramEvent(ProfileEvent): device:str; name:str; lib:bytes|None; base:int|None # noqa: E702
+class ProfileProgramEvent(ProfileEvent): device:str; name:str; lib:bytes|None; base:int|None; tag:int|None=None # noqa: E702
 
 @dataclass(frozen=True)
 class ProfileGraphEntry: device:str; name:str; st_id:int; en_id:int; is_copy:bool # noqa: E702
@@ -139,7 +140,8 @@ class Buffer:
       self._buf: Any = self.allocator._offset(self.base._buf, self.nbytes, self.offset)
     else:
       self._buf = opaque if opaque is not None else self.allocator.alloc(self.nbytes, self.options)
-      if not self.device.startswith("DISK"): GlobalCounters.mem_used += self.nbytes
+      if not self.device.startswith("DISK") and (self.options is None or self.options.external_ptr is None):
+        GlobalCounters.mem_used += self.nbytes
       if PROFILE: Buffer.profile_events.append(ProfilePointEvent(self.device, "alloc", self.trace_num, {"dtype":self.dtype, "sz":self.size}))
     return self
   def deallocate(self):
@@ -366,13 +368,15 @@ def is_dtype_supported(dtype:DType, device:str|None=None) -> bool:
   # for CI LLVM, it segfaults because it can't link to the casting function
   # CI CUDA architecture is sm_35 but we need at least sm_70 to run fp16 ALUs
   # PYTHON supports half memoryview in 3.12+ https://github.com/python/cpython/issues/90751
+  # double can't be bitcast to anything without long support
   if dtype == dtypes.half:
     if device == "CL": return not CI and not OSX
     if device == "QCOM": return False # QCOM compiler is flaky with half
     if device in ["CUDA", "NV"]: return not CI
     if device == "CPU" and CPU_LLVM: return OSX
     if device == "PYTHON": return sys.version_info >= (3, 12)
-  if dtype == dtypes.float64: return device not in {"METAL", "QCOM"} and not (OSX and device == "CL") and not getenv("NULL_IR3")
+  if dtype == dtypes.float64: return (device not in {"METAL", "QCOM"} and not (OSX and device == "CL") and not getenv("NULL_IR3")
+                                      and dtypes.long not in EMULATED_DTYPES.tolist(dtypes))
   return True
 
 if PROFILE:
