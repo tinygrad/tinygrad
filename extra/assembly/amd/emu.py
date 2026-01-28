@@ -360,9 +360,6 @@ class _Ctx:
 
     return is_vgpr.where(vgpr_val, scalar_val)
 
-  def rsrc_dyn_sized(self, off: UOp, lane: UOp, sizes: dict, key: str, f16: bool = False, literal: UOp | None = None) -> UOp:
-    return self.rsrc_dyn(off, lane, 64, literal) if sizes.get(key, 1) == 2 else self.rsrc_dyn(off, lane, 16 if f16 else 32, literal)
-
   def rpc(self) -> UOp:
     """Read PC as 64-bit byte address."""
     # Index at PC_LO, then cast to uint64 ptr and load
@@ -573,7 +570,7 @@ def _compile_sop(inst: SOP1 | SOP2 | SOPC | SOPK, ctx: _Ctx) -> UOp:
 def _compile_vop12(inst: VOP1 | VOP1_SDST | VOP2, ctx: _Ctx) -> UOp:
   op_name = _op_name(inst)
   if op_name == 'V_READFIRSTLANE_B32_E32': return ctx.compile_lane_pcode(inst.op, inst)
-  lane, exec_mask, sizes = ctx.range(), ctx.rsgpr_dyn(_c(EXEC_LO.offset)), getattr(inst, 'op_regs', {})
+  lane, exec_mask, bits = ctx.range(), ctx.rsgpr_dyn(_c(EXEC_LO.offset)), inst.canonical_op_bits
   is_16bit = _is_16bit_op(op_name)
   literal = ctx.inst_field(type(inst).literal) if hasattr(type(inst), 'literal') else None
   vdst_reg = ctx.inst_field(VOP1.vdst)
@@ -583,7 +580,7 @@ def _compile_vop12(inst: VOP1 | VOP1_SDST | VOP2, ctx: _Ctx) -> UOp:
   if isinstance(inst, VOP1):
     # Handle VOP1 hi-half source operand (src0 >= v[128] for 16-bit ops)
     src0_off = ctx.inst_field(VOP1.src0)
-    s0 = ctx.rsrc_dyn_sized(src0_off, lane, sizes, 'src0', f16=is_16bit, literal=literal)
+    s0 = ctx.rsrc_dyn(src0_off, lane, bits['s0'], literal)
     if is_16bit:
       src0_hi = src0_off >= _c(384)
       # Only compute hi-half when src0_off >= 384, use guarded index to prevent OOB access
@@ -598,7 +595,7 @@ def _compile_vop12(inst: VOP1 | VOP1_SDST | VOP2, ctx: _Ctx) -> UOp:
     d0 = _cond_hi16(write_hi_half, ctx.rvgpr_dyn(vdst_reg, lane))  # FMAC/FMAMK hi-half dest needs hi-half accumulator
     # Handle VOP2 hi-half src0 operand (src0 >= v[128] for 16-bit ops)
     src0_off = ctx.inst_field(VOP2.src0)
-    s0 = ctx.rsrc_dyn(src0_off, lane, bits=16 if is_16bit else 32, literal=literal)
+    s0 = ctx.rsrc_dyn(src0_off, lane, bits['s0'], literal)
     if is_16bit:
       src0_hi = src0_off >= _c(384)
       # Only compute hi-half when src0_off >= 384, use guarded index to prevent OOB access
@@ -664,7 +661,7 @@ def _compile_vopc(inst: VOPC | VOP3, ctx: _Ctx, opsel: int = 0, abs_bits: int = 
 
 def _compile_vop3(inst: VOP3, ctx: _Ctx) -> UOp:
   exec_mask = ctx.rsgpr_dyn(_c(EXEC_LO.offset))
-  sizes = getattr(inst, 'op_regs', {})
+  bits = inst.canonical_op_bits
   opsel, op_name = getattr(inst, 'opsel', 0) or 0, _op_name(inst)
 
   # Lane operations
@@ -677,24 +674,23 @@ def _compile_vop3(inst: VOP3, ctx: _Ctx) -> UOp:
 
   # Regular VOP3 - read operands dynamically
   lane = ctx.range()
-  is_f16_op = 'F16' in op_name
   vdst_reg = ctx.inst_field(VOP3.vdst)
   src0_off = ctx.inst_field(VOP3.src0)
   src1_off = ctx.inst_field(VOP3.src1)
   src2_off = ctx.inst_field(VOP3.src2) if inst.src2 is not None else None
   literal = ctx.inst_field(type(inst).literal) if hasattr(type(inst), 'literal') else None
-  src0 = ctx.rsrc_dyn_sized(src0_off, lane, sizes, 'src0', f16=is_f16_op, literal=literal)
-  src1 = ctx.rsrc_dyn_sized(src1_off, lane, sizes, 'src1', f16=is_f16_op, literal=literal)
-  src2 = ctx.rsrc_dyn_sized(src2_off, lane, sizes, 'src2', f16=is_f16_op, literal=literal) if src2_off is not None else None
+  src0 = ctx.rsrc_dyn(src0_off, lane, bits['s0'], literal)
+  src1 = ctx.rsrc_dyn(src1_off, lane, bits['s1'], literal)
+  src2 = ctx.rsrc_dyn(src2_off, lane, bits['s2'], literal) if src2_off is not None else None
   if _is_16bit_op(op_name):
     src0, src1 = _apply_opsel(src0, 0, opsel), _apply_opsel(src1, 1, opsel)
     if src2 is not None: src2 = _apply_opsel(src2, 2, opsel)
   abs_bits, neg_bits = getattr(inst, 'abs', 0) or 0, getattr(inst, 'neg', 0) or 0
   is_16bit_op = _is_16bit_op(op_name)
   if abs_bits or neg_bits:
-    src0 = _apply_src_mods(src0, 0, abs_bits, neg_bits, is_16bit_op, sizes.get('src0', 1) == 2)
-    if src1 is not None: src1 = _apply_src_mods(src1, 1, abs_bits, neg_bits, is_16bit_op, sizes.get('src1', 1) == 2)
-    if src2 is not None: src2 = _apply_src_mods(src2, 2, abs_bits, neg_bits, is_16bit_op, sizes.get('src2', 1) == 2)
+    src0 = _apply_src_mods(src0, 0, abs_bits, neg_bits, is_16bit_op, bits['s0'] == 64)
+    if src1 is not None: src1 = _apply_src_mods(src1, 1, abs_bits, neg_bits, is_16bit_op, bits['s1'] == 64)
+    if src2 is not None: src2 = _apply_src_mods(src2, 2, abs_bits, neg_bits, is_16bit_op, bits['s2'] == 64)
   srcs = {'S0': src0, 'S1': src1}
   if src2 is not None: srcs['S2'] = src2
   if inst.op in (VOP3Op.V_CNDMASK_B32_E64, VOP3Op.V_CNDMASK_B16) and src2 is not None: srcs['VCC'] = src2
@@ -705,7 +701,7 @@ def _compile_vop3(inst: VOP3, ctx: _Ctx) -> UOp:
 
 def _compile_vop3sd(inst: VOP3SD, ctx: _Ctx) -> UOp:
   exec_mask = ctx.rsgpr_dyn(_c(EXEC_LO.offset))
-  sizes, pcode = getattr(inst, 'op_regs', {}), get_pcode(inst.op)
+  bits, pcode = inst.canonical_op_bits, get_pcode(inst.op)
 
   # Read operands dynamically from instruction encoding
   vdst_reg = ctx.inst_field(VOP3SD.vdst)
@@ -719,9 +715,9 @@ def _compile_vop3sd(inst: VOP3SD, ctx: _Ctx) -> UOp:
   vcc_in_off = src2_off if has_carry_in and src2_off is not None else sdst_off
 
   lane = ctx.range()
-  src0 = ctx.rsrc_dyn_sized(src0_off, lane, sizes, 'src0', literal=literal)
-  src1 = ctx.rsrc_dyn_sized(src1_off, lane, sizes, 'src1', literal=literal)
-  src2 = ctx.rsrc_dyn_sized(src2_off, lane, sizes, 'src2', literal=literal) if src2_off is not None else None
+  src0 = ctx.rsrc_dyn(src0_off, lane, bits['s0'], literal)
+  src1 = ctx.rsrc_dyn(src1_off, lane, bits['s1'], literal)
+  src2 = ctx.rsrc_dyn(src2_off, lane, bits['s2'], literal) if src2_off is not None else None
   srcs = {'S0': src0, 'S1': src1, 'VCC': ctx.rsgpr_dyn(vcc_in_off), 'EXEC': exec_mask, 'SCC': ctx.rsgpr_dyn(_c(SCC.offset)), 'laneId': lane}
   if src2 is not None: srcs['S2'] = src2
   _, assigns = parse_pcode(pcode, srcs)
@@ -731,9 +727,9 @@ def _compile_vop3sd(inst: VOP3SD, ctx: _Ctx) -> UOp:
     # VCC computation: RANGE+REDUCE gets axis ID first (lower ID = runs first)
     # This ensures VCC reads source values BEFORE VGPR stores modify them
     def get_vcc_bit(lane_uop) -> UOp:
-      s0 = ctx.rsrc_dyn_sized(src0_off, lane_uop, sizes, 'src0', literal=literal)
-      s1 = ctx.rsrc_dyn_sized(src1_off, lane_uop, sizes, 'src1', literal=literal)
-      s2 = ctx.rsrc_dyn_sized(src2_off, lane_uop, sizes, 'src2', literal=literal) if src2_off is not None else None
+      s0 = ctx.rsrc_dyn(src0_off, lane_uop, bits['s0'], literal)
+      s1 = ctx.rsrc_dyn(src1_off, lane_uop, bits['s1'], literal)
+      s2 = ctx.rsrc_dyn(src2_off, lane_uop, bits['s2'], literal) if src2_off is not None else None
       lane_srcs = {'S0': s0, 'S1': s1, 'VCC': ctx.rsgpr_dyn(vcc_in_off), 'EXEC': exec_mask, 'SCC': ctx.rsgpr_dyn(_c(SCC.offset)), 'laneId': lane_uop}
       if s2 is not None: lane_srcs['S2'] = s2
       vcc_bit = _c(0)
@@ -743,9 +739,9 @@ def _compile_vop3sd(inst: VOP3SD, ctx: _Ctx) -> UOp:
     final_vcc = ctx.unroll_lanes(get_vcc_bit, exec_mask)
     # VGPR stores: RANGE gets axis ID second (higher ID = runs after VCC loop)
     lane3 = ctx.range()
-    s0 = ctx.rsrc_dyn_sized(src0_off, lane3, sizes, 'src0', literal=literal)
-    s1 = ctx.rsrc_dyn_sized(src1_off, lane3, sizes, 'src1', literal=literal)
-    s2 = ctx.rsrc_dyn_sized(src2_off, lane3, sizes, 'src2', literal=literal) if src2_off is not None else None
+    s0 = ctx.rsrc_dyn(src0_off, lane3, bits['s0'], literal)
+    s1 = ctx.rsrc_dyn(src1_off, lane3, bits['s1'], literal)
+    s2 = ctx.rsrc_dyn(src2_off, lane3, bits['s2'], literal) if src2_off is not None else None
     lane_srcs = {'S0': s0, 'S1': s1, 'VCC': ctx.rsgpr_dyn(vcc_in_off), 'EXEC': exec_mask, 'SCC': ctx.rsgpr_dyn(_c(SCC.offset)), 'laneId': lane3}
     if s2 is not None: lane_srcs['S2'] = s2
     d0_val = None

@@ -787,7 +787,7 @@ def parse_block(lines: list[str], start: int, vars: dict[str, VarVal], funcs: di
       if found_var: vars[found_var] = block_assigns[found_var] = _const(dtypes.bool, False)
       for loop_i in range(start_val, end_val + 1):
         subst_lines = [_subst_loop_var(bl, loop_var, loop_i) for bl in body_lines if not (has_break and bl.strip().lower() == 'break')]
-        _, iter_assigns, _ = parse_block(subst_lines, 0, {**vars, **block_assigns}, funcs, assigns)
+        _, iter_assigns, _ = parse_block(subst_lines, 0, vars, funcs, assigns)
         if has_break:
           assert found_var is not None
           found = block_assigns.get(found_var, vars.get(found_var))
@@ -803,7 +803,7 @@ def parse_block(lines: list[str], start: int, vars: dict[str, VarVal], funcs: di
             if bl_l.startswith('if ') and bl_l.endswith(' then'):
               if any(body_lines[k].strip().lower() == 'break' for k in range(j+1, len(body_lines))):
                 cond_str = _subst_loop_var(bl.strip()[3:-5].strip(), loop_var, loop_i)
-                cond = _to_bool(parse_expr(cond_str, {**vars, **block_assigns}, funcs))
+                cond = _to_bool(parse_expr(cond_str, vars, funcs))
                 block_assigns[found_var] = vars[found_var] = not_found.where(cond, found)
                 break
         else:
