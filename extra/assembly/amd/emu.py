@@ -616,7 +616,7 @@ def _compile_vopc(inst: VOPC | VOP3, ctx: _Ctx, opsel: int = 0, abs_bits: int = 
     s0 = ctx.rsrc_dyn(src0_off, lc, bits['s0'], literal, is_f64)
     s1 = _cond_hi16(vsrc1_hi, ctx.rsrc_dyn(src1_off, lc, bits['s1'], literal, is_f64)) if bits['s0'] == 16 else ctx.rsrc_dyn(src1_off, lc, bits['s1'], literal, is_f64)
     if bits['s0'] == 16 and opsel: s0, s1 = _apply_opsel(s0, 0, opsel), _apply_opsel(s1, 1, opsel)
-    if is_float and (abs_bits or neg_bits):
+    if is_float:
       s0 = _apply_src_mods(s0, 0, abs_bits, neg_bits, bits['s0'])
       s1 = _apply_src_mods(s1, 1, abs_bits, neg_bits, bits['s1'])
     for dest, val in parse_pcode(pcode, {'S0': s0, 'S1': s1, 'laneId': lc})[1]:
@@ -651,24 +651,20 @@ def _compile_vop3(inst: VOP3, ctx: _Ctx) -> UOp:
   # Regular VOP3 - read operands dynamically
   lane = ctx.range()
   vdst_reg = ctx.inst_field(VOP3.vdst)
-  src0_off = ctx.inst_field(VOP3.src0)
-  src1_off = ctx.inst_field(VOP3.src1)
-  src2_off = ctx.inst_field(VOP3.src2) if inst.src2 is not None else None
   literal = ctx.inst_field(type(inst).literal) if hasattr(type(inst), 'literal') else None
   ops = inst.canonical_operands
-  src0 = ctx.rsrc_dyn(src0_off, lane, bits['s0'], literal, 's0' in ops and ops['s0'][0] == Fmt.FMT_NUM_F64)
-  src1 = ctx.rsrc_dyn(src1_off, lane, bits['s1'], literal, 's1' in ops and ops['s1'][0] == Fmt.FMT_NUM_F64)
-  src2 = ctx.rsrc_dyn(src2_off, lane, bits['s2'], literal, 's2' in ops and ops['s2'][0] == Fmt.FMT_NUM_F64) if src2_off is not None else None
+  src0 = ctx.rsrc_dyn(ctx.inst_field(VOP3.src0), lane, bits['s0'], literal, 's0' in ops and ops['s0'][0] == Fmt.FMT_NUM_F64)
+  src1 = ctx.rsrc_dyn(ctx.inst_field(VOP3.src1), lane, bits['s1'], literal, 's1' in ops and ops['s1'][0] == Fmt.FMT_NUM_F64)
+  src2 = ctx.rsrc_dyn(ctx.inst_field(VOP3.src2), lane, bits['s2'], literal, 's2' in ops and ops['s2'][0] == Fmt.FMT_NUM_F64)
   if bits['s0'] == 16:
-    src0, src1 = _apply_opsel(src0, 0, opsel), _apply_opsel(src1, 1, opsel)
-    if src2 is not None: src2 = _apply_opsel(src2, 2, opsel)
+    src0 = _apply_opsel(src0, 0, opsel)
+    src1 = _apply_opsel(src1, 1, opsel)
+    src2 = _apply_opsel(src2, 2, opsel)
   abs_bits, neg_bits = getattr(inst, 'abs', 0) or 0, getattr(inst, 'neg', 0) or 0
-  if abs_bits or neg_bits:
-    src0 = _apply_src_mods(src0, 0, abs_bits, neg_bits, bits['s0'])
-    if src1 is not None: src1 = _apply_src_mods(src1, 1, abs_bits, neg_bits, bits['s1'])
-    if src2 is not None: src2 = _apply_src_mods(src2, 2, abs_bits, neg_bits, bits['s2'])
-  srcs = {'S0': src0, 'S1': src1}
-  if src2 is not None: srcs['S2'] = src2
+  src0 = _apply_src_mods(src0, 0, abs_bits, neg_bits, bits['s0'])
+  src1 = _apply_src_mods(src1, 1, abs_bits, neg_bits, bits['s1'])
+  src2 = _apply_src_mods(src2, 2, abs_bits, neg_bits, bits['s2'])
+  srcs = {'S0': src0, 'S1': src1, 'S2': src2}
   if inst.op in (VOP3Op.V_CNDMASK_B32_E64, VOP3Op.V_CNDMASK_B16) and src2 is not None: srcs['VCC'] = src2
   # FMAC instructions need D0 (accumulator) from destination register
   if 'FMAC' in op_name: srcs['D0'] = ctx.rvgpr_dyn(vdst_reg, lane)
