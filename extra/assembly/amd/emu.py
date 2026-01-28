@@ -545,17 +545,16 @@ def _compile_vop12(inst: VOP1 | VOP1_SDST | VOP2, ctx: _Ctx) -> UOp:
   op_name = _op_name(inst)
   if op_name == 'V_READFIRSTLANE_B32_E32': return ctx.compile_lane_pcode(inst.op, inst)
   lane, exec_mask, bits = ctx.range(), ctx.rsgpr_dyn(_c(EXEC_LO.offset)), inst.canonical_op_bits
-  src_16bit, dst_16bit = bits['s0'] == 16, bits['d'] == 16
   literal = ctx.inst_field(type(inst).literal) if hasattr(type(inst), 'literal') else None
   vdst_reg = ctx.inst_field(VOP1.vdst)
-  write_hi_half = dst_16bit and (vdst_reg >= _c(128))
+  write_hi_half = bits['d'] == 16 and (vdst_reg >= _c(128))
   if isinstance(write_hi_half, UOp): vdst_reg = write_hi_half.where(vdst_reg - _c(128), vdst_reg)
   elif write_hi_half: vdst_reg -= 128
   if isinstance(inst, VOP1):
     # Handle VOP1 hi-half source operand (src0 >= v[128] for 16-bit ops)
     src0_off = ctx.inst_field(VOP1.src0)
     s0 = ctx.rsrc_dyn(src0_off, lane, bits['s0'], literal)
-    if src_16bit:
+    if bits['s0'] == 16:
       src0_hi = src0_off >= _c(384)
       # Only compute hi-half when src0_off >= 384, use guarded index to prevent OOB access
       src0_reg = src0_hi.where(src0_off - _c(384), _c(0))
@@ -563,14 +562,14 @@ def _compile_vop12(inst: VOP1 | VOP1_SDST | VOP2, ctx: _Ctx) -> UOp:
     srcs = {'S0': s0}
   else:
     vsrc1_reg = ctx.inst_field(VOP2.vsrc1)
-    vsrc1_hi = src_16bit and (vsrc1_reg >= _c(128))
+    vsrc1_hi = bits['s0'] == 16 and (vsrc1_reg >= _c(128))
     vsrc1_actual = _cond(vsrc1_hi, vsrc1_reg - _c(128), vsrc1_reg)
     s1 = _cond_hi16(vsrc1_hi, ctx.rvgpr_dyn(vsrc1_actual, lane))
     d0 = _cond_hi16(write_hi_half, ctx.rvgpr_dyn(vdst_reg, lane))  # FMAC/FMAMK hi-half dest needs hi-half accumulator
     # Handle VOP2 hi-half src0 operand (src0 >= v[128] for 16-bit ops)
     src0_off = ctx.inst_field(VOP2.src0)
     s0 = ctx.rsrc_dyn(src0_off, lane, bits['s0'], literal)
-    if src_16bit:
+    if bits['s0'] == 16:
       src0_hi = src0_off >= _c(384)
       # Only compute hi-half when src0_off >= 384, use guarded index to prevent OOB access
       src0_reg = src0_hi.where(src0_off - _c(384), _c(0))
@@ -583,40 +582,35 @@ def _compile_vop12(inst: VOP1 | VOP1_SDST | VOP2, ctx: _Ctx) -> UOp:
 
 def _compile_vopc(inst: VOPC | VOP3, ctx: _Ctx, opsel: int = 0, abs_bits: int = 0, neg_bits: int = 0) -> UOp:
   exec_mask, op_name, bits = ctx.rsgpr_dyn(_c(EXEC_LO.offset)), _op_name(inst), inst.canonical_op_bits
-  is_cmpx, is_16bit, is_64bit = 'CMPX' in op_name, bits['s0'] == 16, bits['s0'] == 64
-  is_vopc = hasattr(inst, 'vsrc1')  # VOPC (e32) vs VOP3 (e64) format
+  is_cmpx, is_vopc = 'CMPX' in op_name, hasattr(inst, 'vsrc1')  # is_vopc: e32 vs e64
 
   # Handle both VOPC (vsrc1) and VOP3 (src1) instruction formats - read operands dynamically
   if is_vopc:
     src0_off = ctx.inst_field(VOPC.src0)
     vsrc1_off = ctx.inst_field(VOPC.vsrc1)
     # For 16-bit ops, vsrc1 >= 128 means hi-half of v[vsrc1-128]
-    if is_16bit:
+    if bits['s0'] == 16:
       vsrc1_hi = vsrc1_off >= _c(128)
       src1_off = _c(256) + vsrc1_hi.where(vsrc1_off - _c(128), vsrc1_off)
     else:
       vsrc1_hi = False
       src1_off = _c(256) + vsrc1_off
-    src0_bits, src1_bits = (64, 64) if is_64bit else (32, 32)
   else:
     src0_off = ctx.inst_field(VOP3.src0)
     src1_off = ctx.inst_field(VOP3.src1)
     dst_off = ctx.inst_field(VOP3.vdst)
     vsrc1_hi = False
-    _, src0_bits, _ = inst.operands.get('src0', (None, 32, None))
-    _, src1_bits, _ = inst.operands.get('src1', (None, 32, None))
-    is_16bit = src0_bits == 16 or src1_bits == 16
   literal = ctx.inst_field(type(inst).literal) if hasattr(type(inst), 'literal') else None
 
   is_float, pcode = any(x in op_name for x in ('_F32', '_F64', '_F16')), get_pcode(inst.op)
   def get_cmp_bit(lane) -> UOp:
     lc = lane.cast(dtypes.int) if isinstance(lane, UOp) else _c(lane, dtypes.int)
-    s0 = ctx.rsrc_dyn(src0_off, lc, src0_bits, literal)
-    s1 = _cond_hi16(vsrc1_hi, ctx.rsrc_dyn(src1_off, lc, src1_bits, literal)) if is_16bit else ctx.rsrc_dyn(src1_off, lc, src1_bits, literal)
-    if is_16bit and opsel: s0, s1 = _apply_opsel(s0, 0, opsel), _apply_opsel(s1, 1, opsel)
+    s0 = ctx.rsrc_dyn(src0_off, lc, bits['s0'], literal)
+    s1 = _cond_hi16(vsrc1_hi, ctx.rsrc_dyn(src1_off, lc, bits['s1'], literal)) if bits['s0'] == 16 else ctx.rsrc_dyn(src1_off, lc, bits['s1'], literal)
+    if bits['s0'] == 16 and opsel: s0, s1 = _apply_opsel(s0, 0, opsel), _apply_opsel(s1, 1, opsel)
     if is_float and (abs_bits or neg_bits):
-      s0 = _apply_src_mods(s0, 0, abs_bits, neg_bits, src0_bits)
-      s1 = _apply_src_mods(s1, 1, abs_bits, neg_bits, src1_bits)
+      s0 = _apply_src_mods(s0, 0, abs_bits, neg_bits, bits['s0'])
+      s1 = _apply_src_mods(s1, 1, abs_bits, neg_bits, bits['s1'])
     for dest, val in parse_pcode(pcode, {'S0': s0, 'S1': s1, 'laneId': lc})[1]:
       if '[laneId]' in dest and ('D0' in dest or 'EXEC' in dest): return val.cast(dtypes.uint32)
     return _c(0)
