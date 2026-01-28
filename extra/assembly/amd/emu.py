@@ -346,18 +346,15 @@ class _Ctx:
     if lane is not None:
       is_vgpr, vgpr_reg = off >= _c(256), off - _c(256)
       vgpr_lo = self.rvgpr_dyn(vgpr_reg, lane, is_vgpr)
+      vgpr_val = _u64(vgpr_lo, self.rvgpr_dyn(vgpr_reg + _c(1), lane, is_vgpr)) if bits == 64 else vgpr_lo
 
     if bits == 64:
-      if lane is not None:
-        vgpr_val = _u64(vgpr_lo, self.rvgpr_dyn(vgpr_reg + _c(1), lane, is_vgpr))
       sgpr_val = _u64(sgpr_lo, self.rsgpr_dyn(off + _c(1)))
       # Float constants: cast F32 to F64; integer inline: duplicate lo
       inline = is_float_const.where(sgpr_lo.bitcast(dtypes.float32).cast(dtypes.float64).bitcast(dtypes.uint64), _u64(sgpr_lo, sgpr_lo))
       if literal is not None: inline = off.eq(_c(255)).where(literal.cast(dtypes.uint64) << UOp.const(dtypes.uint64, 32), inline)
       scalar_val = (off < _c(128)).where(sgpr_val, inline)
     else:
-      if lane is not None:
-        vgpr_val = vgpr_lo
       scalar_val = sgpr_lo
       if literal is not None: scalar_val = off.eq(_c(255)).where(literal, scalar_val)
       if bits == 16:  # Float constants: cast F32 to F16
