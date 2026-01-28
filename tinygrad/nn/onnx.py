@@ -1,7 +1,6 @@
 # pylint: disable=possibly-unused-variable
 from typing import Any, Sequence, cast, Literal, NamedTuple, Generator
 import dataclasses, functools, io, math, types, warnings, pathlib, sys, os, struct, enum
-from io import BufferedReader
 from tinygrad.nn.state import TensorIO
 from tinygrad.tensor import Tensor, _broadcast_shape, ReductionStr
 from tinygrad.helpers import getenv, all_same, prod, flatten, make_tuple, argsort, is_numpy_ndarray, get_single_element, polyN
@@ -75,7 +74,7 @@ class OnnxNode:
   opts: dict[str, Any]
 
 # ***** protobuf parsing ******
-class PBBufferedReader(BufferedReader):
+class PBBufferedReader(io.BufferedReader):
   def __init__(self, tensor: Tensor):
     assert tensor.dtype == dtypes.uint8, tensor
     super().__init__(TensorIO(tensor))

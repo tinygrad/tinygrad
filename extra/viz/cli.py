@@ -10,7 +10,11 @@ def optional_eq(val:dict, arg:str|None) -> bool: return arg is None or ansistrip
 def print_data(data:dict) -> None:
   if isinstance(data.get("value"), Iterator):
     for m in data["value"]:
+      if m.get("uop"):
+        print("Input UOp:")
+        print(m["uop"])
       if not m["diff"]: continue
+      print("Rewrites:")
       fp = pathlib.Path(m["upat"][0][0])
       print(f"{fp.parent.name}/{fp.name}:{m['upat'][0][1]}")
       print(m["upat"][1])

@@ -1,12 +1,12 @@
 # mixins add syntactic sugar to Tensor and UOp
-from typing import TypeAlias, TYPE_CHECKING, Self
+from __future__ import annotations
+from typing import TYPE_CHECKING, Self
 from tinygrad.uop import Ops
 from tinygrad.helpers import prod, argfix, flatten, dedup, make_tuple, ceildiv
 from tinygrad.uop.ops import resolve, smax
 
 if TYPE_CHECKING:
-  from tinygrad.uop.ops import UOp
-sint: TypeAlias = "UOp | int"
+  from tinygrad.uop.ops import sint
 
 
 def _align_left(*shapes: tuple[sint, ...]) -> tuple[tuple[sint, ...], ...]:

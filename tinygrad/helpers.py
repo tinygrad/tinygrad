@@ -165,6 +165,9 @@ class ContextVar(Generic[T]):
   def __ge__(self, x): return self.value >= x
   def __gt__(self, x): return self.value > x
   def __lt__(self, x): return self.value < x
+  def tolist(self, obj=None):
+    assert isinstance(self.value, str)
+    return [getattr(obj, x) if obj else x for x in self.value.split(',') if x]
 
 DEBUG, IMAGE, BEAM, NOOPT = ContextVar("DEBUG", 0), ContextVar("IMAGE", 0), ContextVar("BEAM", 0), ContextVar("NOOPT", 0)
 JIT, JIT_BATCH_SIZE = ContextVar("JIT", 2 if OSX and ARCH_X86 else 1), ContextVar("JIT_BATCH_SIZE", 32)
@@ -177,7 +180,7 @@ CACHELEVEL, IGNORE_BEAM_CACHE, DEVECTORIZE = ContextVar("CACHELEVEL", 2), Contex
 VALIDATE_WITH_CPU, DISABLE_FAST_IDIV = ContextVar("VALIDATE_WITH_CPU", 0), ContextVar("DISABLE_FAST_IDIV", 0)
 CORRECT_DIVMOD_FOLDING, FUSE_OPTIM = ContextVar("CORRECT_DIVMOD_FOLDING", 0), ContextVar("FUSE_OPTIM", 0)
 ALLOW_DEVICE_USAGE, MAX_BUFFER_SIZE = ContextVar("ALLOW_DEVICE_USAGE", 1), ContextVar("MAX_BUFFER_SIZE", 0)
-EMULATE = ContextVar("EMULATE", "")
+EMULATE, EMULATED_DTYPES = ContextVar("EMULATE", ""), ContextVar("EMULATED_DTYPES", "")
 CPU_COUNT = ContextVar("CPU_COUNT", max(1, len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else (os.cpu_count() or 1)))
 # Compilers
 CPU_LLVM, CPU_LVP, AMD_LLVM = ContextVar("CPU_LLVM", 0), ContextVar("CPU_LVP", 0), ContextVar("AMD_LLVM", 0)
@@ -380,7 +383,7 @@ def _ensure_downloads_dir() -> pathlib.Path:
   return pathlib.Path(cache_dir) / "downloads"
 
 def fetch(url:str, name:pathlib.Path|str|None=None, subdir:str|None=None, gunzip:bool=False,
-          allow_caching=not getenv("DISABLE_HTTP_CACHE"), headers:dict[str, str]={}, retries:int=3) -> pathlib.Path:
+          allow_caching=not getenv("DISABLE_HTTP_CACHE"), headers:dict[str, str]={}) -> pathlib.Path:
   import urllib.request
   if url.startswith(("/", ".")): return pathlib.Path(url)
   if name is not None and (isinstance(name, pathlib.Path) or '/' in name): fp = pathlib.Path(name)
@@ -389,25 +392,17 @@ def fetch(url:str, name:pathlib.Path|str|None=None, subdir:str|None=None, gunzip
     fp = _ensure_downloads_dir() / (subdir or "") / ((name or hashlib.md5(url.encode('utf-8')).hexdigest()) + hh + (".gunzip" if gunzip else ""))
   if not fp.is_file() or not allow_caching:
     (_dir := fp.parent).mkdir(parents=True, exist_ok=True)
-    assert retries > 0
-    for retry in range(retries):
-      try:
-        with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "tinygrad 0.12.0", **headers}), timeout=10) as r:
-          assert r.status in {200, 206}, r.status
-          length = int(r.headers.get('content-length', 0)) if not gunzip else None
-          readfile = gzip.GzipFile(fileobj=r) if gunzip else r
-          progress_bar:tqdm = tqdm(total=length, unit='B', unit_scale=True, desc=f"{url}", disable=CI)
-          with tempfile.NamedTemporaryFile(dir=_dir, delete=False) as f:
-            while chunk := readfile.read(16384): progress_bar.update(f.write(chunk))
-            f.close()
-            pathlib.Path(f.name).rename(fp)
-          progress_bar.update(close=True)
-          if length and (file_size:=os.stat(fp).st_size) < length: raise RuntimeError(f"fetch size incomplete, {file_size} < {length}")
-        break # success so don't retry
-      except Exception as e:
-        if retry+1 == retries: raise e
-        if DEBUG >= 2: print(f'Request {retry+1} failed: {e}. Retrying...')
-        time.sleep(0.1 * 2**retry) # exponential backoff
+    with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "tinygrad 0.12.0", **headers}), timeout=10) as r:
+      assert r.status in {200, 206}, r.status
+      length = int(r.headers.get('content-length', 0)) if not gunzip else None
+      readfile = gzip.GzipFile(fileobj=r) if gunzip else r
+      progress_bar:tqdm = tqdm(total=length, unit='B', unit_scale=True, desc=f"{url}", disable=CI)
+      with tempfile.NamedTemporaryFile(dir=_dir, delete=False) as f:
+        while chunk := readfile.read(16384): progress_bar.update(f.write(chunk))
+        f.close()
+        pathlib.Path(f.name).rename(fp)
+      progress_bar.update(close=True)
+      if length and (file_size:=os.stat(fp).st_size) < length: raise RuntimeError(f"fetch size incomplete, {file_size} < {length}")
   return fp
 
 # *** Exec helpers

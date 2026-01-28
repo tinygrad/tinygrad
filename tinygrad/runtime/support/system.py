@@ -131,7 +131,7 @@ class _System:
     else: self.lock_fd = os.open(lock_name, os.O_RDWR | os.O_CREAT | os.O_CLOEXEC, 0o666)
 
     try: fcntl.flock(self.lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except OSError: raise RuntimeError(f"Failed to take lock file {name}. It's already in use.")
+    except OSError: raise RuntimeError(f"Failed to acquire lock file {name}. `sudo lsof {lock_name}` may help identify the process holding the lock.")
 
     return self.lock_fd
 

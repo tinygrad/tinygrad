@@ -153,7 +153,7 @@ class Tensor(OpMixin):
       if data.shape == ():
         data = Tensor(data.item(), device=_device, dtype=_dtype or _from_np_dtype(data.dtype), requires_grad=requires_grad).uop
       else:
-        data = _fromnp(data.astype(npdtype) if _dtype is not None and (npdtype:=_to_np_dtype(_dtype)) is not None else data)  # type: ignore [name-defined]
+        data = _fromnp(data.astype(npdtype) if _dtype is not None and (npdtype:=_to_np_dtype(_dtype)) is not None else data)
     elif isinstance(data, pathlib.Path):
       _dtype = _dtype or dtypes.uint8
       data = UOp.new_buffer(f"DISK:{data.resolve()}", data.stat().st_size // _dtype.itemsize, _dtype)
@@ -1765,8 +1765,8 @@ class Tensor(OpMixin):
     """
     output_dtype = self.dtype if dtypes.is_float(self.dtype) else dtypes.float32
     numerator = self.cast(sum_acc_dtype(self.dtype)).sum(axis=axis, keepdim=keepdim)
-    return numerator.div(prod([cast(int, si) for si, so in zip(self.shape, self.sum(axis=axis, keepdim=True).shape) if resolve(si != so)])) \
-      .cast(output_dtype)
+    denominator = prod([si for si, so in zip(self.shape, self.sum(axis=axis, keepdim=True).shape) if resolve(si != so)])
+    return numerator.div(Tensor.from_uop(denominator, device=numerator.device) if isinstance(denominator, UOp) else denominator).cast(output_dtype)
 
   def var(self, axis:int|Sequence[int]|None=None, keepdim=False, correction=1) -> Tensor:
     """
@@ -1792,7 +1792,8 @@ class Tensor(OpMixin):
     """
     squares = (self - self.mean(axis=axis, keepdim=True)).square()
     n = prod([si for si, so in zip(self.shape, squares.sum(axis=axis, keepdim=True).shape) if resolve(si != so)])
-    return squares.sum(axis=axis, keepdim=keepdim).div(smax([0, n-correction]))
+    denominator = (Tensor.from_uop(n, device=self.device) if isinstance(n, UOp) else Tensor(n, device=self.device)) - correction
+    return squares.sum(axis=axis, keepdim=keepdim).div(denominator.relu())
 
   def var_mean(self, axis:int|Sequence[int]|None=None, keepdim=False, correction=1) -> tuple[Tensor, Tensor]:
     """

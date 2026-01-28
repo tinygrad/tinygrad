@@ -258,6 +258,7 @@ jobs:
         pydeps: "pillow numpy ftfy regex pre-commit"
         deps: testing_unit
         llvm: 'true'
+        amd: 'true'
     - name: Run pre-commit test hooks
       run: SKIP=ruff,mypy pre-commit run --all-files
     - name: Check Device.DEFAULT
@@ -679,7 +680,7 @@ jobs:
           python-version: '3.13'
       - name: Verify AMD autogen is up to date
         run: |
-          python -m extra.assembly.amd.amdxml
+          python -m extra.assembly.amd.generate
           git diff --exit-code extra/assembly/amd/autogen/
       - name: Install LLVM 21
         run: |
@@ -769,6 +770,9 @@ jobs:
         run: python -m pytest -n=auto test/ --ignore=test/models --ignore=test/unit --durations=20
       - name: Run TRANSCENDENTAL math
         run: TRANSCENDENTAL=2 python -m pytest -n=auto test/test_ops.py::TestOps::test_sin test/test_ops.py::TestOps::test_cos test/test_ops.py::TestOps::test_tan test/test_ops.py::TestOps::test_exp test/test_ops.py::TestOps::test_log --durations=20
+      - name: Test dtype with emulated long
+        if: matrix.backend != 'lvp' && matrix.backend != 'llvm'
+        run: EMULATED_DTYPES=long python3 -m pytest -n=auto test/test_dtype.py test/test_dtype_alu.py
       - name: Run process replay tests
         uses: ./.github/actions/process-replay
 
