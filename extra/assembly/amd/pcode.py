@@ -896,7 +896,7 @@ def parse_block(lines: list[str], start: int, vars: dict[str, VarVal], funcs: di
           if assigns is not None: assigns.extend([(f'{lo_var}.{lo_type}', lo_val), (f'{hi_var}.{hi_type}', hi_val)])
           i += 1; continue
 
-    # Bit slice: var[hi:lo] = value or var.type[hi:lo] = value
+    # Bit slice/index: var[hi:lo] = value, var.type[hi:lo] = value, or var[expr] = value
     if len(toks) >= 5 and toks[0].type == 'IDENT' and (toks[1].type == 'LBRACKET' or (toks[1].type == 'DOT' and toks[3].type == 'LBRACKET')):
       bracket_start = 2 if toks[1].type == 'LBRACKET' else 4
       j = bracket_start
@@ -904,12 +904,12 @@ def parse_block(lines: list[str], start: int, vars: dict[str, VarVal], funcs: di
       while j < len(toks) and toks[j].type != 'RBRACKET':
         if toks[j].type == 'COLON': colon_pos = j
         j += 1
-      if colon_pos is not None:
+      var = toks[0].val
+      if colon_pos is not None:  # bit slice: var[hi:lo]
         hi_str = ' '.join(t.val for t in toks[bracket_start:colon_pos] if t.type != 'EOF')
         lo_str = ' '.join(t.val for t in toks[colon_pos+1:j] if t.type != 'EOF')
         try:
           hi, lo = max(int(eval(hi_str)), int(eval(lo_str))), min(int(eval(hi_str)), int(eval(lo_str)))
-          var = toks[0].val
           j += 1
           if j < len(toks) and toks[j].type == 'DOT': j += 2
           if j < len(toks) and toks[j].type == 'EQUALS': j += 1
@@ -921,6 +921,15 @@ def parse_block(lines: list[str], start: int, vars: dict[str, VarVal], funcs: di
           block_assigns[var] = vars[var] = _set_bits(old, _val_to_bits(val), hi - lo + 1, lo)
           i += 1; continue
         except: pass
+      elif toks[1].type == 'LBRACKET':  # bit index: var[expr] (only for var[...], not var.type[...])
+        existing = block_assigns.get(var, vars.get(var))
+        if existing is not None and isinstance(existing, UOp) and not any(f'{var}{k}' in vars or f'{var}{k}' in block_assigns for k in range(8)):
+          bit_toks = toks[2:j]
+          j += 1
+          while j < len(toks) and toks[j].type != 'EQUALS': j += 1
+          if j < len(toks):
+            block_assigns[var] = vars[var] = _set_bit(existing, _to_u32(parse_tokens(bit_toks, ctx(), funcs)), parse_tokens(toks[j+1:], ctx(), funcs))
+            i += 1; continue
 
     # Array element: var{idx} = value
     if len(toks) >= 5 and toks[0].type == 'IDENT' and toks[1].type == 'LBRACE' and toks[2].type == 'NUM':
@@ -974,20 +983,6 @@ def parse_block(lines: list[str], start: int, vars: dict[str, VarVal], funcs: di
             val = parse_tokens(toks[j+1:], ctx(), funcs)
             old = block_assigns.get(var, vars.get(var, _u32(0)))
             block_assigns[var] = vars[var] = _set_bit(old, bit_pos, val)
-            i += 1; continue
-
-      # Bit index: var[expr] = value (bit assignment to existing scalar)
-      if len(toks) >= 5 and toks[0].type == 'IDENT' and toks[1].type == 'LBRACKET':
-        var = toks[0].val
-        existing = block_assigns.get(var, vars.get(var))
-        if existing is not None and isinstance(existing, UOp) and not any(f'{var}{k}' in vars or f'{var}{k}' in block_assigns for k in range(8)):
-          j = 2
-          while j < len(toks) and toks[j].type != 'RBRACKET': j += 1
-          bit_toks = toks[2:j]
-          j += 1
-          while j < len(toks) and toks[j].type != 'EQUALS': j += 1
-          if j < len(toks):
-            block_assigns[var] = vars[var] = _set_bit(existing, _to_u32(parse_tokens(bit_toks, ctx(), funcs)), parse_tokens(toks[j+1:], ctx(), funcs))
             i += 1; continue
 
       # If/elsif/else - skip branches with statically false conditions (WAVE32/WAVE64)
