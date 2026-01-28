@@ -257,6 +257,7 @@ jobs:
         key: unittest-13
         pydeps: "pillow numpy ftfy regex pre-commit"
         deps: testing_unit
+        llvm: 'true'
         amd: 'true'
     - name: Run pre-commit test hooks
       run: SKIP=ruff,mypy pre-commit run --all-files
