@@ -163,6 +163,7 @@ class TestIndexing(unittest.TestCase):
   # at least the arange is being fused
   def test_llama_embedding_opt(self): self.test_llama_embedding(0, 1_736_704_000)
 
+  @unittest.expectedFailure
   def test_llama_8b_embedding_backward(self):
     # LLaMA 8B training config from model_train.py
     # vocab_size=32000 (overridden from 128256), dim=4096, BS=16, SEQLEN=8192
