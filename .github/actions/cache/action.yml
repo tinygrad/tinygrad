@@ -17,7 +17,7 @@ runs:
     - name: Restore Cache (PR)
       if: github.event_name == 'pull_request'
       id: restore-only
-      uses: actions/cache@v4
+      uses: actions/cache/restore@v4
       with:
         path: ${{ inputs.path }}
         key: ${{ inputs.key }}
