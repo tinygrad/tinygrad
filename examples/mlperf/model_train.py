@@ -1475,7 +1475,8 @@ def train_llama3():
       st = time.perf_counter()
 
       stopped = False
-      for _ in range(grad_acc if i >= 3 else 1):
+      minibatches = grad_acc if i >= 3 else 1
+      for _ in range(minibatches):
         ist = time.perf_counter()
         try: tokens = next(train_iter)
         except StopIteration:
@@ -1496,8 +1497,8 @@ def train_llama3():
       step_time = et - st
       gbs_time = gt - st
       optim_time = ot - gt
-      dev_time = ot - st
       data_time = dt - ist
+      dev_time = step_time - data_time * minibatches
       if BENCHMARK: step_times.append(step_time)
 
       i += 1
