@@ -8,7 +8,7 @@ from tinygrad.uop.ops import UOp, Ops, GroupOp, AxisType, PatternMatcher, graph_
 from tinygrad.device import Device, Buffer, is_dtype_supported
 from tinygrad.tensor import Tensor, _to_np_dtype
 from tinygrad.engine.realize import run_schedule, CompiledRunner, get_program
-from tinygrad.helpers import Context, flatten, dedup, TC_SELECT, TC_OPT, getenv
+from tinygrad.helpers import Context, flatten, dedup, TC_SELECT, TC_OPT, getenv, AVX512
 from tinygrad.dtype import DType, dtypes, PtrDType, AddrSpace
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.cstyle import CUDARenderer
@@ -410,6 +410,7 @@ class TestLinearizer(unittest.TestCase):
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "test requires float4")
   @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, PTXRenderer), "broken on ptx for some reason")
+  @unittest.skipIf(Device.DEFAULT == "CPU" and AVX512, "CPU with AVX512 upcasts wider")
   def test_grouped_store_phis(self):
     """
     float4 acc0 = float4(0.0,0.0,0.0,0.0);

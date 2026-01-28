@@ -12,7 +12,22 @@ def prod(x:Iterable[T]) -> T|int: return functools.reduce(operator.mul, x, 1)
 # NOTE: helpers is not allowed to import from anything else in tinygrad
 OSX, WIN = platform.system() == "Darwin", sys.platform == "win32"
 CI = os.getenv("CI", "") != ""
-ARCH_X86 = any(x in platform.processor() for x in ("Intel", "i386", "x86_64"))
+ARCH_X86 = platform.machine() in ("x86_64", "AMD64", "i386", "i686") or any(x in platform.processor() for x in ("Intel", "i386", "x86_64"))
+
+def _detect_avx512() -> bool:
+  """Detect AVX-512 support on the host CPU."""
+  if not ARCH_X86: return False
+  try:
+    if not WIN and not OSX:  # Linux
+      with open("/proc/cpuinfo") as f:
+        return "avx512f" in f.read()
+    elif OSX:
+      return b"AVX512F" in subprocess.check_output(["sysctl", "-a", "machdep.cpu.leaf7_features"], stderr=subprocess.DEVNULL)
+    else:  # Windows
+      # Windows doesn't have a simple way to check, rely on env var
+      return os.getenv("CPU_AVX512", "") != ""
+  except Exception: return False
+AVX512 = _detect_avx512()
 
 # fix colors on Windows, https://stackoverflow.com/questions/12492810/python-how-can-i-make-the-ansi-escape-codes-to-work-also-in-windows
 if WIN: os.system("")

@@ -1,6 +1,6 @@
 import itertools
 from tinygrad.codegen.opt import Opt, OptOps, KernelOptError
-from tinygrad.helpers import getenv, DEBUG, prod, NOLOCALS, TC_OPT, TC_SELECT, USE_TC, AMX
+from tinygrad.helpers import getenv, DEBUG, prod, NOLOCALS, TC_OPT, TC_SELECT, USE_TC, AMX, AVX512
 from tinygrad.dtype import ImageDType
 from tinygrad.uop.ops import Ops, resolve, AxisType
 from tinygrad.codegen.opt.postrange import Scheduler
@@ -93,6 +93,16 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
 
   # **** below this line need to be optional and benchmarked ****
 
+  # CPU-specific: larger upcast tiles are better than K-unrolling for cache efficiency
+  # BEAM search found that 64 accumulators (e.g., 4x16 tile) beats 16 accumulators + UNROLL=4
+  is_cpu_with_threads = k.ren.has_threads and not k.ren.has_local
+  cpu_matmul = is_cpu_with_threads and k.reduceop is not None  # scope CPU opts to matmul only
+  # CPU matvec: when output is essentially 1D (only one non-trivial dim), it's memory-bound
+  # Upcasting output causes strided reads across matrix rows which kills cache performance
+  # Note: output_shape may have trailing 1s (batch dims), so count non-one dimensions
+  cpu_matvec = cpu_matmul and sum(s != 1 for s in k.output_shape) == 1
+  cpu_upcast_limit = 4 if cpu_matvec else (64 if cpu_matmul else 32)
+
   # if there are small dims with lots of valid masks, upcast them (they might be from Tensor.stack)
   to_upcast: list[int] = []
   # upcast leading axes first (hack-ish for winograd; we actually want to upcast masked axes with low stride first)
@@ -107,11 +117,17 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
   # potentially do more upcasts of non reduce axes based on a heuristic
   is_dsp = k.ren is not None and k.ren.device == "DSP"
   upcasted_axis: set[int] = set()
-  while resolve(prod(k.output_shape[i] for i in k.upcastable_dims) >= 1024) and (k.upcast_size() < 32):
+  # CPU: try larger upcast amounts first (8,4) to create bigger tiles for better cache efficiency
+  # BEAM search found that 4x16 tiles beat 4x4 tiles + UNROLL for CPU matmul
+  # CPU matvec: limit to 4 accumulators for ILP while reducing cache thrashing from strided reads
+  # CPU matvec: lower threshold (16) to ensure small outputs still get ILP - memory-bound ops need latency hiding
+  upcast_amounts = ([128] if not len(upcasted_axis) else []) if is_dsp else ([4,3] if cpu_matvec else ([8,4,3] if cpu_matmul else [3,4]))
+  upcast_threshold = 16 if cpu_matvec else 1024
+  while resolve(prod(k.output_shape[i] for i in k.upcastable_dims) >= upcast_threshold) and (k.upcast_size() < cpu_upcast_limit):
     xb_choices = []
-    # consider all upcastable axes with 3 or 4 upcast (128 on the DSP)
-    for axis, upcast_amount in itertools.product(k.upcastable_dims, ([128] if not len(upcasted_axis) else []) if is_dsp else [3,4]):
-      # if we haven't upcasted it, it mods, and buffer has stride 0 on axis while having no stride 0 in the upcasted axis already
+    # consider all upcastable axes with given upcast amounts
+    for axis, upcast_amount in itertools.product(k.upcastable_dims, upcast_amounts):
+      # check if axis can be upcasted (mods evenly)
       if axis in upcasted_axis or k.full_shape[axis]%upcast_amount != 0: continue
       rng = k.rngs[axis]
       if any(rng not in b.src[1].get_idx().backward_slice and all(r2 in b.src[1].get_idx().backward_slice
@@ -124,25 +140,31 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
             if c is rng: sum_strides += 1
             if c.op is Ops.MUL and c.src[0] is rng and c.src[1].op is Ops.CONST: sum_strides += c.src[1].arg
             if c.op is Ops.MUL and c.src[1] is rng and c.src[0].op is Ops.CONST: sum_strides += c.src[0].arg
-        xb_choices.append((num_strides, sum_strides, axis, upcast_amount))
+        # For CPU matmul, negate upcast_amount to prefer larger tiles
+        sort_key = (num_strides, sum_strides, axis, -upcast_amount if cpu_matmul else upcast_amount)
+        xb_choices.append((sort_key, axis, upcast_amount))
     if xb_choices:
-      xb_choices = sorted(xb_choices)
+      xb_choices = sorted(xb_choices, key=lambda x: x[0])
       if DEBUG >= 4: print(f"more upcast axis : {xb_choices}")
-      k.apply_opt(Opt(OptOps.UPCAST, xb_choices[0][2], xb_choices[0][3]))
-      upcasted_axis.add(xb_choices[0][2])
+      k.apply_opt(Opt(OptOps.UPCAST, xb_choices[0][1], xb_choices[0][2]))
+      upcasted_axis.add(xb_choices[0][1])
     else: break
 
   # if last reduce dim is small(ish), loop unroll the reduce
   # NOTE: this can fail on multireduce with mismatching dimensions, this is okay
+  # CPU with large upcast tiles: skip UNROLL as it doesn't help with cache efficiency
   try:
-    if k.unrollable_dims and (k.upcast_size() <= 4 or not k.axes_of(AxisType.UNROLL)) and (k.upcast_size() < 64):
+    skip_unroll = cpu_matmul and k.upcast_size() >= 32
+    if not skip_unroll and k.unrollable_dims and (k.upcast_size() <= 4 or not k.axes_of(AxisType.UNROLL)) and (k.upcast_size() < 64):
       if (s:=k.full_shape[k.unrollable_dims[-1]]) <= 32:
         k.apply_opt(Opt(OptOps.UNROLL, len(k.unrollable_dims)-1, 0))
         # if it's small, upcast a second reduce dimension too
         if k.unrollable_dims and s <= 3 and k.full_shape[k.unrollable_dims[-1]] <= 3:
           k.apply_opt(Opt(OptOps.UNROLL, len(k.unrollable_dims)-1, 0))
       else:
-        for splits in [4]:
+        # CPU matvec with AVX-512: try larger UNROLL (16) for 512-bit SIMD, fallback to 8, then 4
+        unroll_splits = [16, 8, 4] if cpu_matvec and AVX512 else [4]
+        for splits in unroll_splits:
           if k.full_shape[axis:=k.unrollable_dims[-1]]%splits == 0:
             k.apply_opt(Opt(OptOps.UNROLL, len(k.unrollable_dims)-1, splits))
             break
@@ -180,7 +202,9 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
     for threads in [32,16,12,8,6,5,4,3,2]:
       # Skip if too many threads. Heuristic: use about 128K ops per thread
       if threads > k.ren.global_max[0] or resolve(prod(k.full_shape) // (128 << 10) < threads): continue
-      for axis in k.axes_of(AxisType.LOOP):
+      # For CPU matmul, try higher axes first for better cache locality
+      loop_axes = list(reversed(k.axes_of(AxisType.LOOP))) if cpu_matmul else k.axes_of(AxisType.LOOP)
+      for axis in loop_axes:
         if k.full_shape[axis] % threads == 0:
           try: k.apply_opt(Opt(OptOps.THREAD, axis, threads))
           except KernelOptError: pass

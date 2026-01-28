@@ -3,7 +3,7 @@ from tinygrad import Device, Tensor, dtypes
 from tinygrad.uop.ops import UOp, Ops
 from tinygrad.codegen.opt import Opt, OptOps
 from tinygrad.engine.realize import get_program
-from tinygrad.helpers import AMX
+from tinygrad.helpers import AMX, AVX512
 
 @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "need backends that support float4")
 class TestFloat4(unittest.TestCase):
@@ -28,7 +28,7 @@ class TestFloat4(unittest.TestCase):
 
     assert TestFloat4.count_float4(program.uops) == (2, 1)
 
-  @unittest.skipIf(Device.DEFAULT in {"CPU"} and AMX, "CPU with AMX upcasts float up to size 16")
+  @unittest.skipIf(Device.DEFAULT in {"CPU"} and (AMX or AVX512), "CPU with AMX/AVX512 upcasts wider")
   def test_float4_multidim(self):
     a = Tensor.empty(2, 8).realize()
     b = Tensor.empty(2, 8).realize()
@@ -70,7 +70,7 @@ class TestFloat4(unittest.TestCase):
 
     assert TestFloat4.count_float4(program.uops) == (0, 1)
 
-  @unittest.skipIf(Device.DEFAULT in {"CPU"} and AMX, "CPU with AMX upcasts float up to size 16")
+  @unittest.skipIf(Device.DEFAULT in {"CPU"} and (AMX or AVX512), "CPU with AMX/AVX512 upcasts wider")
   def test_float4_multidim_unaligned_load(self):
     a = Tensor.empty(2, 9).realize().shrink(((0, 2), (1, 9),))
     b = Tensor.empty(2, 9).realize().shrink(((0, 2), (1, 9),))
