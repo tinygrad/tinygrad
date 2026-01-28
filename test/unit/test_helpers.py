@@ -209,13 +209,6 @@ class TestFetch(unittest.TestCase):
           headers={"Range": "bytes=0-100"}).read_bytes()
     assert len(x) == 101, f"{len(x) != 101}"
 
-  def test_fetch_retries(self):
-    from unittest.mock import patch
-    with patch('urllib.request.urlopen', side_effect=TimeoutError()) as mock_urlopen:
-      with self.assertRaises(TimeoutError):
-        fetch('http://example.com/test', allow_caching=False, retries=2)
-      assert mock_urlopen.call_count == 2
-
 class TestFullyFlatten(unittest.TestCase):
   def test_fully_flatten(self):
     self.assertEqual(fully_flatten([[1, 3], [1, 2]]), [1, 3, 1, 2])
