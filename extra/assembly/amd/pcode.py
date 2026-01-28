@@ -909,7 +909,8 @@ def parse_block(lines: list[str], start: int, vars: dict[str, VarVal], funcs: di
         hi_str = ' '.join(t.val for t in toks[bracket_start:colon_pos] if t.type != 'EOF')
         lo_str = ' '.join(t.val for t in toks[colon_pos+1:j] if t.type != 'EOF')
         try:
-          hi, lo = max(int(eval(hi_str)), int(eval(lo_str))), min(int(eval(hi_str)), int(eval(lo_str)))
+          hi_val, lo_val = int(eval(hi_str)), int(eval(lo_str))
+          hi, lo = max(hi_val, lo_val), min(hi_val, lo_val)
           j += 1
           if j < len(toks) and toks[j].type == 'DOT': j += 2
           if j < len(toks) and toks[j].type == 'EQUALS': j += 1
@@ -946,105 +947,103 @@ def parse_block(lines: list[str], start: int, vars: dict[str, VarVal], funcs: di
         i += 1; continue
 
     # Compound assignment: var += or var -=
-    for j, t in enumerate(toks):
-      if t.type == 'ASSIGN_OP':
+    assign_op = next((j for j, t in enumerate(toks) if t.type == 'ASSIGN_OP'), None)
+    if assign_op is not None:
+      var = toks[0].val
+      old = block_assigns.get(var, vars.get(var, _u32(0)))
+      rhs = parse_tokens(toks[assign_op+1:], ctx(), funcs)
+      if rhs.dtype != old.dtype: rhs = rhs.cast(old.dtype)
+      block_assigns[var] = vars[var] = (old + rhs) if toks[assign_op].val == '+=' else (old - rhs)
+      i += 1; continue
+
+    # Typed element: var.type[idx] = value
+    if len(toks) >= 7 and toks[0].type == 'IDENT' and toks[1].type == 'DOT' and toks[2].type == 'IDENT' and toks[3].type == 'LBRACKET' and toks[4].type == 'NUM':
+      var, dt_name, idx = toks[0].val, toks[2].val, int(toks[4].val)
+      dt = DTYPES.get(dt_name, dtypes.uint32)
+      j = 6
+      while j < len(toks) and toks[j].type != 'EQUALS': j += 1
+      if j < len(toks):
+        val, old = parse_tokens(toks[j+1:], ctx(), funcs), block_assigns.get(var, vars.get(var, _u32(0)))
+        bw = dt.itemsize * 8
+        block_assigns[var] = vars[var] = _set_bits(old, val, bw, idx * bw)
+        if assigns is not None: assigns.append((f'{var}.{dt_name}[{idx}]', val))
+        i += 1; continue
+
+    # Dynamic bit: var.type[expr_with_brackets] = value
+    if len(toks) >= 5 and toks[0].type == 'IDENT' and toks[1].type == 'DOT' and toks[2].type == 'IDENT' and toks[3].type == 'LBRACKET':
+      j, depth, has_inner = 4, 1, False
+      while j < len(toks) and depth > 0:
+        if toks[j].type == 'LBRACKET': depth += 1; has_inner = True
+        elif toks[j].type == 'RBRACKET': depth -= 1
+        j += 1
+      if has_inner:
         var = toks[0].val
-        old = block_assigns.get(var, vars.get(var, _u32(0)))
-        rhs = parse_tokens(toks[j+1:], ctx(), funcs)
-        if rhs.dtype != old.dtype: rhs = rhs.cast(old.dtype)
-        block_assigns[var] = vars[var] = (old + rhs) if t.val == '+=' else (old - rhs)
-        i += 1; break
-    else:
-      # Typed element: var.type[idx] = value
-      if len(toks) >= 7 and toks[0].type == 'IDENT' and toks[1].type == 'DOT' and toks[2].type == 'IDENT' and toks[3].type == 'LBRACKET' and toks[4].type == 'NUM':
-        var, dt_name, idx = toks[0].val, toks[2].val, int(toks[4].val)
-        dt = DTYPES.get(dt_name, dtypes.uint32)
-        j = 6
+        bit_pos = _to_u32(parse_tokens(toks[4:j-1], ctx(), funcs))
         while j < len(toks) and toks[j].type != 'EQUALS': j += 1
         if j < len(toks):
-          val, old = parse_tokens(toks[j+1:], ctx(), funcs), block_assigns.get(var, vars.get(var, _u32(0)))
-          bw = dt.itemsize * 8
-          block_assigns[var] = vars[var] = _set_bits(old, val, bw, idx * bw)
-          if assigns is not None: assigns.append((f'{var}.{dt_name}[{idx}]', val))
+          val = parse_tokens(toks[j+1:], ctx(), funcs)
+          old = block_assigns.get(var, vars.get(var, _u32(0)))
+          block_assigns[var] = vars[var] = _set_bit(old, bit_pos, val)
           i += 1; continue
 
-      # Dynamic bit: var.type[expr_with_brackets] = value
-      if len(toks) >= 5 and toks[0].type == 'IDENT' and toks[1].type == 'DOT' and toks[2].type == 'IDENT' and toks[3].type == 'LBRACKET':
-        j, depth, has_inner = 4, 1, False
-        while j < len(toks) and depth > 0:
-          if toks[j].type == 'LBRACKET': depth += 1; has_inner = True
-          elif toks[j].type == 'RBRACKET': depth -= 1
-          j += 1
-        if has_inner:
-          var = toks[0].val
-          bit_pos = _to_u32(parse_tokens(toks[4:j-1], ctx(), funcs))
-          while j < len(toks) and toks[j].type != 'EQUALS': j += 1
-          if j < len(toks):
-            val = parse_tokens(toks[j+1:], ctx(), funcs)
-            old = block_assigns.get(var, vars.get(var, _u32(0)))
-            block_assigns[var] = vars[var] = _set_bit(old, bit_pos, val)
-            i += 1; continue
-
-      # If/elsif/else - skip branches with statically false conditions (WAVE32/WAVE64)
-      if first == 'if':
-        def parse_cond(s, kw):
-          ll = s.lower()
-          return _to_bool(parse_expr(s[ll.find(kw) + len(kw):ll.rfind('then')].strip(), ctx(), funcs))
-        def not_static_false(c): return c.op != Ops.CONST or c.arg is not False
-        cond = parse_cond(line, 'if')
-        conditions: list[tuple[UOp, UOp | dict[str, VarVal] | None]] = [(cond, None)] if not_static_false(cond) else []
-        else_branch: tuple[UOp | None, dict[str, VarVal]] = (None, {})
-        vars_snap = dict(vars)
-        i += 1
-        i, branch, ret = parse_block(lines, i, vars, funcs, assigns)
-        if conditions: conditions[0] = (cond, ret if ret is not None else branch)
-        vars.clear(); vars.update(vars_snap)
-        while i < len(lines):
-          ltoks = tokenize(lines[i])
-          if ltoks[0].type != 'IDENT': break
-          lf = ltoks[0].val.lower()
-          if lf == 'elsif':
-            c = parse_cond(lines[i], 'elsif')
-            i += 1; i, branch, ret = parse_block(lines, i, vars, funcs, assigns)
-            if not_static_false(c): conditions.append((c, ret if ret is not None else branch))
-            vars.clear(); vars.update(vars_snap)
-          elif lf == 'else':
-            i += 1; i, branch, ret = parse_block(lines, i, vars, funcs, assigns)
-            else_branch = (ret, branch)
-            vars.clear(); vars.update(vars_snap)
-          elif lf == 'endif': i += 1; break
-          else: break
-        # Check if any branch returned a value (lambda-style)
-        if any(isinstance(br, UOp) for _, br in conditions):
-          result = else_branch[0]
-          for c, rv in reversed(conditions):
-            if isinstance(rv, UOp) and isinstance(result, UOp):
-              if rv.dtype != result.dtype and rv.dtype.itemsize == result.dtype.itemsize: result = result.cast(rv.dtype)
-              result = c.where(rv, result)
-          return i, block_assigns, result
-        # Main style: merge variable assignments with WHERE
-        else_assigns = else_branch[1]
-        all_vars = set().union(*[ba.keys() for _, ba in conditions if isinstance(ba, dict)], else_assigns.keys())
-        for var in all_vars:
-          res: Any = else_assigns.get(var, block_assigns.get(var, vars.get(var, _u32(0))))
-          for cond, ba in reversed(conditions):
-            if isinstance(ba, dict) and var in ba:
-              tv = ba[var]
-              if isinstance(tv, UOp) and isinstance(res, UOp):
-                res = cond.where(tv, res.cast(tv.dtype) if tv.dtype != res.dtype and tv.dtype.itemsize == res.dtype.itemsize else res)
-          block_assigns[var] = vars[var] = res
-        continue
-
-      # Regular assignment: var = value
-      for j, t in enumerate(toks):
-        if t.type == 'EQUALS':
-          if any(toks[k].type == 'OP' and toks[k].val in ('<', '>', '!', '=') for k in range(j)): break
-          base_var = toks[0].val
-          block_assigns[base_var] = vars[base_var] = parse_tokens(toks[j+1:], ctx(), funcs)
-          i += 1; break
-      else: i += 1
+    # If/elsif/else - skip branches with statically false conditions (WAVE32/WAVE64)
+    if first == 'if':
+      def parse_cond(s, kw):
+        ll = s.lower()
+        return _to_bool(parse_expr(s[ll.find(kw) + len(kw):ll.rfind('then')].strip(), ctx(), funcs))
+      def not_static_false(c): return c.op != Ops.CONST or c.arg is not False
+      cond = parse_cond(line, 'if')
+      conditions: list[tuple[UOp, UOp | dict[str, VarVal] | None]] = [(cond, None)] if not_static_false(cond) else []
+      else_branch: tuple[UOp | None, dict[str, VarVal]] = (None, {})
+      vars_snap = dict(vars)
+      i += 1
+      i, branch, ret = parse_block(lines, i, vars, funcs, assigns)
+      if conditions: conditions[0] = (cond, ret if ret is not None else branch)
+      vars.clear(); vars.update(vars_snap)
+      while i < len(lines):
+        ltoks = tokenize(lines[i])
+        if ltoks[0].type != 'IDENT': break
+        lf = ltoks[0].val.lower()
+        if lf == 'elsif':
+          c = parse_cond(lines[i], 'elsif')
+          i += 1; i, branch, ret = parse_block(lines, i, vars, funcs, assigns)
+          if not_static_false(c): conditions.append((c, ret if ret is not None else branch))
+          vars.clear(); vars.update(vars_snap)
+        elif lf == 'else':
+          i += 1; i, branch, ret = parse_block(lines, i, vars, funcs, assigns)
+          else_branch = (ret, branch)
+          vars.clear(); vars.update(vars_snap)
+        elif lf == 'endif': i += 1; break
+        else: break
+      # Check if any branch returned a value (lambda-style)
+      if any(isinstance(br, UOp) for _, br in conditions):
+        result = else_branch[0]
+        for c, rv in reversed(conditions):
+          if isinstance(rv, UOp) and isinstance(result, UOp):
+            if rv.dtype != result.dtype and rv.dtype.itemsize == result.dtype.itemsize: result = result.cast(rv.dtype)
+            result = c.where(rv, result)
+        return i, block_assigns, result
+      # Main style: merge variable assignments with WHERE
+      else_assigns = else_branch[1]
+      all_vars = set().union(*[ba.keys() for _, ba in conditions if isinstance(ba, dict)], else_assigns.keys())
+      for var in all_vars:
+        res: Any = else_assigns.get(var, block_assigns.get(var, vars.get(var, _u32(0))))
+        for cond, ba in reversed(conditions):
+          if isinstance(ba, dict) and var in ba:
+            tv = ba[var]
+            if isinstance(tv, UOp) and isinstance(res, UOp):
+              res = cond.where(tv, res.cast(tv.dtype) if tv.dtype != res.dtype and tv.dtype.itemsize == res.dtype.itemsize else res)
+        block_assigns[var] = vars[var] = res
       continue
-    continue
+
+    # Regular assignment: var = value
+    for j, t in enumerate(toks):
+      if t.type == 'EQUALS':
+        if any(toks[k].type == 'OP' and toks[k].val in ('<', '>', '!', '=') for k in range(j)): break
+        base_var = toks[0].val
+        block_assigns[base_var] = vars[base_var] = parse_tokens(toks[j+1:], ctx(), funcs)
+        i += 1; break
+    else: i += 1
   return i, block_assigns, None
 
 def parse_expr(expr: str, vars: dict[str, VarVal], funcs: dict | None = None) -> UOp:
