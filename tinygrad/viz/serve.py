@@ -345,7 +345,7 @@ def unpack_sqtt(key:tuple[str, int], data:list, p:ProfileProgramEvent) -> tuple[
   # * init decoder
   from extra.sqtt.roc import decode
   base = unwrap(p.base)
-  addr_table = amd_decode(device_props[p.device]["gfx_target_version"], unwrap(p.lib))
+  addr_table = amd_decode(unwrap(p.lib), device_props[p.device]["gfx_target_version"], )
   disasm:dict[int, tuple[str, int]] = {addr+base:(inst.disasm(), inst.size()) for addr, inst in addr_table.items()}
   rctx = decode(data, {p.name:disasm})
   cu_events:dict[str, list[ProfileEvent]] = {}
@@ -432,7 +432,7 @@ def amd_readelf(lib:bytes) -> list[dict]:
           ".group_segment_fixed_size":"LDS size", ".private_segment_fixed_size":"Scratch size"}
   return [{"label":label, "value":v} for k,label in keys.items() if (v:=notes["amdhsa.kernels"][0][k]) > 0]
 
-def amd_decode(target:int, lib:bytes) -> dict[int, Any]: # Any is the Inst class from extra.assembly.amd.dsl
+def amd_decode(lib:bytes, target:int) -> dict[int, Any]: # Any is the Inst class from extra.assembly.amd.dsl
   from tinygrad.runtime.support.elf import elf_loader
   from extra.assembly.amd import detect_format
   from extra.assembly.amd.dsl import Inst
@@ -460,7 +460,7 @@ def parse_branch(inst) -> int|None:
 COND_TAKEN, COND_NOT_TAKEN, UNCOND = range(3)
 def amdgpu_cfg(lib:bytes, target:int) -> dict:
   # decode
-  pc_table = amd_decode(target, lib)
+  pc_table = amd_decode(lib, target)
   # get leaders
   leaders:set[int] = {next(iter(pc_table))}
   for pc, inst in pc_table.items():
