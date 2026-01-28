@@ -1473,13 +1473,18 @@ def train_llama3():
     GlobalCounters.reset()
     if getenv("TRAIN", 1):
       st = time.perf_counter()
+
+      stopped = False
       for _ in range(grad_acc if i >= 3 else 1):
         ist = time.perf_counter()
         try: tokens = next(train_iter)
         except StopIteration:
+          stopped = True
           break
         dt = time.perf_counter()
         loss = minibatch(tokens)
+      if stopped: break
+
       gt = time.perf_counter()
       lr = optim_step()
       ot = time.perf_counter()
