@@ -349,8 +349,12 @@ class _Ctx:
 
     if bits == 64:
       sgpr_val = _u64(sgpr_lo, self.rsgpr_dyn(off + _c(1)))
-      # Float constants: cast F32 to F64; integer inline: duplicate lo
-      inline = is_float_const.where(sgpr_lo.bitcast(dtypes.float32).cast(dtypes.float64).bitcast(dtypes.uint64), _u64(sgpr_lo, sgpr_lo))
+      # Integer inline constants: sign-extend 32-bit value from buffer to 64-bit
+      # Float constants: cast F32 to F64
+      int_inline = sgpr_lo.cast(dtypes.int32).cast(dtypes.int64)
+      float_inline = sgpr_lo.bitcast(dtypes.float32).cast(dtypes.float64)
+      # compute inline
+      inline = is_float_const.where(float_inline.bitcast(dtypes.uint64), int_inline.bitcast(dtypes.uint64))
       if literal is not None: inline = off.eq(_c(255)).where(literal.cast(dtypes.uint64) << UOp.const(dtypes.uint64, 32), inline)
       scalar_val = (off < _c(128)).where(sgpr_val, inline)
     else:
@@ -510,32 +514,6 @@ def _compile_sop(inst: SOP1 | SOP2 | SOPC | SOPK, ctx: _Ctx) -> UOp:
   bits = inst.canonical_op_bits
   literal = ctx.inst_field(type(inst).literal) if hasattr(type(inst), 'literal') else None
 
-  def rsrc_dyn_scalar(off: UOp, is_64bit: bool) -> UOp:
-    """Read scalar source with dynamic offset (SGPR or inline constant).
-    For SOP, off is always 0-255 (SGPR or inline constant, never VGPR).
-    SGPR buffer has 260 entries: 0-127=SGPRs, 128-255=inline constants, 256-259=special."""
-    is_sgpr = off < _c(128)
-    # For 64-bit: read SGPR pair if off < 128, else compute inline constant as 64-bit
-    # (can't just read from buffer since buffer has 32-bit values)
-    if is_64bit:
-      sgpr_val = _u64(ctx.rsgpr_dyn(off), ctx.rsgpr_dyn(off + _c(1)))
-      # Build inline constant: 128-192 = 0-64, 193-208 = -1 to -16
-      inline_val = (off - _c(128)).cast(dtypes.uint64)  # positive inline 0-64
-      neg_val = (_c(192) - off).cast(dtypes.int64).cast(dtypes.uint64)  # negative -1 to -16
-      lit_val = literal.cast(dtypes.uint64) if literal is not None else UOp.const(dtypes.uint64, 0)
-      # Select between sgpr, positive inline, negative inline, or literal
-      is_neg_inline = (off >= _c(193)) & (off < _c(209))
-      is_literal = off.eq(_c(255)) if literal is not None else UOp.const(dtypes.bool, False)
-      val = is_sgpr.where(sgpr_val, is_neg_inline.where(neg_val, is_literal.where(lit_val, inline_val)))
-      return val
-    # 32-bit: read from SGPR buffer (inline constants 128-255 are pre-populated)
-    # off is always 0-255 for SOP, all valid SGPR indices
-    sgpr_val = ctx.rsgpr_dyn(off)
-    # Handle literal (255) - literal value overrides the pre-populated 0
-    if literal is not None:
-      sgpr_val = off.eq(_c(255)).where(literal, sgpr_val)
-    return sgpr_val
-
   if isinstance(inst, SOPK):
     sdst_off = ctx.inst_field(SOPK.sdst)
     simm16 = ctx.inst_field(SOPK.simm16)
@@ -546,9 +524,7 @@ def _compile_sop(inst: SOP1 | SOP2 | SOPC | SOPK, ctx: _Ctx) -> UOp:
   elif isinstance(inst, SOP1):
     sdst_off = ctx.inst_field(SOP1.sdst)
     ssrc0_off = ctx.inst_field(SOP1.ssrc0)
-    srcs = {'S0': rsrc_dyn_scalar(ssrc0_off, bits['s0'] == 64)}
-    # TODO: this is broken
-    #srcs = {'S0': ctx.rsrc_dyn(ssrc0_off, None, bits['s0'], literal)}
+    srcs = {'S0': ctx.rsrc_dyn(ssrc0_off, None, bits['s0'], literal)}
     dst_off, dst_size = sdst_off, bits['d'] // 32
   elif isinstance(inst, SOP2):
     sdst_off = ctx.inst_field(SOP2.sdst)
