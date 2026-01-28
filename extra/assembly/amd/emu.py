@@ -48,13 +48,13 @@ from tinygrad.runtime.autogen import hsa
 from tinygrad.helpers import Context, DEBUG, colored
 from tinygrad.engine.realize import get_runner
 
-from extra.assembly.amd.decode import decode_inst
+from extra.assembly.amd import decode_inst
 from extra.assembly.amd.autogen.rdna3.str_pcode import PCODE
 from extra.assembly.amd.autogen.rdna3.ins import (SOP1, SOP2, SOPC, SOPK, SOPP, SMEM, VOP1, VOP1_SDST, VOP2, VOP3, VOP3_SDST, VOP3SD, VOP3P, VOPC,
   DS, FLAT, GLOBAL, SCRATCH, VOPD, SOPPOp, SMEMOp, VOP1Op, VOP2Op, VOP3Op, VOPDOp)
 from extra.assembly.amd.dsl import VCC_LO, EXEC_LO, SCC
 from extra.assembly.amd.autogen.common import OpType
-from extra.assembly.amd.expr_parser import parse_block, _FUNCS
+from extra.assembly.amd.pcode import parse_block, _FUNCS
 
 MASK32 = 0xFFFFFFFF
 
@@ -1035,7 +1035,7 @@ def _get_runner(inst_bytes: bytes):
       if cls in _INST_HANDLERS:
         handler = _INST_HANDLERS[cls]
         break
-  if handler is None: raise RuntimeError(f"[emu2] unimplemented instruction type: {type(inst).__name__} {_op_name(inst)}")
+  if handler is None: raise RuntimeError(f"[emu] unimplemented instruction type: {type(inst).__name__} {_op_name(inst)}")
 
   ctx = _Ctx(inst_size)
   sink = handler(inst, ctx)
@@ -1061,14 +1061,13 @@ def decode_program(data: bytes) -> dict[int, tuple[str, Callable, list[int], Any
       if DEBUG >= 3:
         try: inst_str = repr(inst)
         except Exception: inst_str = f"<{type(inst).__name__} at PC={i}>"
-        msg = f"[emu2] PC={i}: {inst_str}"
+        msg = f"[emu] PC={i}: {inst_str}"
         print(colored(msg, 'green') if is_new else msg)
-        if DEBUG >= 4: print(f"{colored(runner.p.src, 'BLACK')}")
       result[i] = (runner.p.function_name, runner._prg.fxn, runner.p.globals, runner)
     except Exception as e:
       try: inst_str = repr(inst)
       except Exception: inst_str = f"<{type(inst).__name__}>"
-      raise RuntimeError(f"[emu2] Failed to compile PC={i} {inst_str}: {type(e).__name__}: {e}") from e
+      raise RuntimeError(f"[emu] Failed to compile PC={i} {inst_str}: {type(e).__name__}: {e}") from e
     i += inst.size()
   return result
 
@@ -1160,11 +1159,11 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
             for inst_count in range(1_000_000):
               if (pc := st.pc) == 0xFFFFFFFFFFFFFFFF or pc not in program: break
               name, fxn, globals_list, _ = program[pc]
-              assert fxn is not None, f"[emu2] No fxn for {name} at PC={pc}"
+              assert fxn is not None, f"[emu] No fxn for {name} at PC={pc}"
               assert 4 not in globals_list or scratch_buf, f"SCRATCH instruction {name} but scratch_size=0"
-              if DEBUG >= 5:
+              if DEBUG >= 6:
                 inst = decode_inst(bytes((ctypes.c_char * 12).from_address(pc).raw))
-                print(f"[emu2] exec PC={pc:X}: {inst!r}")
+                print(f"[emu] exec PC={pc:X}: {inst!r}")
               fxn(*[c_bufs[g] for g in globals_list])
             else: raise RuntimeError("exceeded 1M instructions, likely infinite loop")
   return 0

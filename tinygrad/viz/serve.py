@@ -434,7 +434,7 @@ def amd_readelf(lib:bytes) -> list[dict]:
 
 def amd_decode(target:int, lib:bytes) -> dict[int, Any]: # Any is the Inst class from extra.assembly.amd.dsl
   from tinygrad.runtime.support.elf import elf_loader
-  from extra.assembly.amd.decode import detect_format
+  from extra.assembly.amd import detect_format
   from extra.assembly.amd.dsl import Inst
   image, sections, _ = elf_loader(lib)
   text = next((sh for sh in sections if sh.name == ".text"), None)

@@ -6,7 +6,7 @@ Set USE_HW=1 to run on both emulator and hardware, comparing results.
 import ctypes, math, os, struct
 from extra.assembly.amd.autogen.rdna3.ins import *
 
-from extra.assembly.amd.emu2 import run_asm
+from extra.assembly.amd.emu import run_asm
 from extra.assembly.amd.dsl import NULL, SCC, VCC_LO, VCC_HI, EXEC_LO, EXEC_HI, M0
 
 def _i32(f: float) -> int: return struct.unpack('<I', struct.pack('<f', f))[0]
