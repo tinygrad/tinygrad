@@ -2422,6 +2422,9 @@ class Tensor(OpMixin):
     ```
     """
     if IMAGE: return self.image_dot(w, dtype)
+    if getenv("ASM_GEMM"):
+      from extra.gemm.asm.cdna.asm_gemm import can_use_asm_gemm, asm_gemm
+      if can_use_asm_gemm(self, w): return asm_gemm(self, w)
     x, dx, dw = self, self.ndim, w.ndim
     if not (dx > 0 and dw > 0): raise RuntimeError(f"both tensors need to be at least 1D, got {dx}D and {dw}D")
     if x.shape[-1] != w.shape[axis_w:=-min(w.ndim,2)]: raise RuntimeError(f"cannot dot {x.shape} and {w.shape}")

@@ -13,7 +13,7 @@ INSTRUCTIONS
   # basic memory requirements
   .amdhsa_group_segment_fixed_size 133120
   .amdhsa_private_segment_fixed_size 0
-  .amdhsa_kernarg_size 28
+  .amdhsa_kernarg_size 24
   # register usage (RSRC1)
   .amdhsa_next_free_vgpr 504
   .amdhsa_next_free_sgpr 96
@@ -57,14 +57,15 @@ amdhsa.kernels:
         .value_kind: global_buffer
         .value_type: bf16
       - .name: sz
+        .address_space: global
         .offset: 24
-        .size: 4
-        .value_kind: by_value
+        .size: 8
+        .value_kind: global_buffer
         .value_type: u32
     .group_segment_fixed_size: 133120
     .private_segment_fixed_size: 0
     .kernarg_segment_align: 8
-    .kernarg_segment_size: 28
+    .kernarg_segment_size: 24
     .max_flat_workgroup_size: 256
     .sgpr_count: 88
     .sgpr_spill_count: 0
