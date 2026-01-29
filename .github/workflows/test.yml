@@ -99,7 +99,7 @@ jobs:
       with:
         key: torch-backend-pillow-torchvision-et-pt
         deps: testing_minimal
-        pydeps: "pillow torchvision expecttest"
+        pydeps: "pillow torchvision"
         llvm: 'true'
     - name: Install ninja
       run: |
@@ -567,7 +567,7 @@ jobs:
       with:
         key: dsp-minimal
         deps: testing_minimal
-        pydeps: "onnx==1.18.0 onnxruntime pillow"
+        pydeps: "onnx==1.18.0 onnxruntime"
         llvm: "true"
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
@@ -890,7 +890,6 @@ jobs:
         with:
           key: macos-${{ matrix.backend }}-minimal
           deps: testing_minimal
-          pydeps: "capstone"
           llvm: ${{ matrix.backend == 'llvm' || matrix.backend == 'lvp' }}
           mesa: ${{ matrix.backend == 'lvp' && 'true' }}
       - name: Set env
