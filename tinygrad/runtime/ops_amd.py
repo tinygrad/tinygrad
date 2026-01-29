@@ -753,7 +753,7 @@ class KFDIface:
 
   def as_dmaref(self, mem:HCQBuffer) -> DMAFdRef:
     base = mem._base if mem._base is not None else mem
-    dmaref = DMAFdRef(kfd.AMDKFD_IOC_EXPORT_DMABUF(KFDIface.kfd, handle=base.meta.handle, flags=0).dmabuf_fd, mem.va_addr-base.va_addr, mem.size)
+    dmaref = DMAFdRef(kfd.AMDKFD_IOC_EXPORT_DMABUF(KFDIface.kfd, handle=base.meta.handle, flags=0).dmabuf_fd, int(mem.va_addr-base.va_addr), mem.size)
     weakref.finalize(dmaref, os.close, dmaref.fd)
     return dmaref
 

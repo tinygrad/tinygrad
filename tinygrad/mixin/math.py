@@ -27,7 +27,7 @@ class MathMixin:
       raise TypeError(f"MathTraits __neg__ requires a dtype, {self=}")
     return self.logical_not() if dtype.scalar() == dtypes.bool else self * (-1)
 
-  def _check_dtype(self):
+  def _check_dtype(self) -> None:
     if (dtype := getattr(self, "dtype")) is not None:
       if isinstance(dtype, tuple):
         dtype = dtype[0]
@@ -144,25 +144,25 @@ class MathMixin:
   def __neg__(self) -> Self:
     return self.neg()
 
-  def __add__(self, x: Self | ConstType):
+  def __add__(self, x: Self | ConstType) -> Self:
     return self.add(x)
 
-  def __sub__(self, x: Self | ConstType):
+  def __sub__(self, x: Self | ConstType) -> Self:
     return self.sub(x)
 
-  def __mul__(self, x: Self | ConstType):
+  def __mul__(self, x: Self | ConstType) -> Self:
     return self.mul(x)
 
   def __truediv__(self, x: Self | ConstType) -> Self:
     return self.div(x)
 
-  def __floordiv__(self, x: Self | ConstType):
+  def __floordiv__(self, x: Self | ConstType) -> Self:
     return self.idiv(x)  # TODO: idiv is trunc div, not floordiv
 
-  def __mod__(self, x: Self | ConstType):
+  def __mod__(self, x: Self | ConstType) -> Self:
     return self.mod(x)
 
-  def __and__(self, x: Self | ConstType):
+  def __and__(self, x: Self | ConstType) -> Self:
     return self.bitwise_and(x)
 
   def __or__(self, x: Self | ConstType) -> Self:
@@ -174,16 +174,16 @@ class MathMixin:
   def __radd__(self, x: Self | ConstType) -> Self:
     return self.add(x, True)
 
-  def __rsub__(self, x: Self | ConstType):
+  def __rsub__(self, x: Self | ConstType) -> Self:
     return self.sub(x, True)
 
-  def __rmul__(self, x: Self | ConstType):
+  def __rmul__(self, x: Self | ConstType) -> Self:
     return self.mul(x, True)
 
   def __rtruediv__(self, x: Self | ConstType) -> Self:
     return self.div(x, True)
 
-  def __rfloordiv__(self, x: Self | ConstType):
+  def __rfloordiv__(self, x: Self | ConstType) -> Self:
     return self.idiv(x, True)
 
   def __rand__(self, x: Self | ConstType) -> Self:

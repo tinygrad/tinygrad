@@ -122,7 +122,7 @@ pm_apply_rangeify = PatternMatcher([
 
 @functools.cache
 def _apply_reshape(in_shape:tuple[sint,...], out_shape:tuple[sint, ...], urngs:UOp) -> UOp:
-  acc = 1
+  acc:sint = 1
   axes_in:list[UOp] = []
   for s,src in list(zip(out_shape, urngs.src))[::-1]:
     axes_in.append(acc*src)
