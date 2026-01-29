@@ -101,6 +101,8 @@ docs = [
   "markdown-exec[ansi]",
   "black",
   "numpy",
+  "capstone",
+  "torch",
 ]
 
 
