@@ -172,13 +172,15 @@ class TestIndexing(unittest.TestCase):
     idx = Tensor.randint(vocab_size, bs, seqlen, device=device)
     emb = nn.Embedding(vocab_size, embed_size)
     emb.weight = Tensor.randn(vocab_size, embed_size, device=device, requires_grad=True)
-    Tensor.realize(idx, emb.weight)
+    gt = Tensor.randn(bs, seqlen, embed_size, device=device)
+    Tensor.realize(idx, emb.weight, gt)
     GlobalCounters.reset()
-    emb(idx).contiguous().contiguous_backward().sum().backward()
+    loss = (emb(idx)-gt).square().mean()
+    loss.backward()
     emb.weight.grad.realize()
     bwd_ops = GlobalCounters.global_ops
     print(f"embedding bwd: {GlobalCounters.kernel_count} kernels, {bwd_ops:,} ops")
-    self.assertLess(bwd_ops, 100_000_000, f"backward ops {bwd_ops:,} should be <100M with atomic scatter-add")
+    self.assertLess(bwd_ops, bs*seqlen*embed_size*10, f"backward ops {bwd_ops:,} should be <100M with atomic scatter-add")
     # correctness check only on real device
     if device != "NULL":
       expected_grad = np.zeros((vocab_size, embed_size), dtype=np.float32)
