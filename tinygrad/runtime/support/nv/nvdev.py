@@ -73,7 +73,7 @@ class NVDev(PCIDevImplBase):
   def __init__(self, pci_dev:PCIDevice):
     self.pci_dev, self.devfmt, self.mmio = pci_dev, pci_dev.pcibus, pci_dev.map_bar(0, fmt='I')
 
-    self.smi_dev, self.is_booting = False, True
+    self.smi_dev, self.is_booting, self.is_err_state = False, True, False
     self._early_ip_init()
     self._early_mmu_init()
 

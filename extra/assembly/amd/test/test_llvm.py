@@ -11,7 +11,7 @@ Only compute-relevant instruction formats are tested. Graphics-only formats not 
 import unittest, re, subprocess, functools
 from tinygrad.helpers import fetch
 from extra.assembly.amd.disasm import disasm
-from extra.assembly.amd.decode import decode_inst, detect_format
+from extra.assembly.amd import decode_inst, detect_format
 from extra.assembly.amd.test.helpers import get_llvm_mc, get_target, get_mattr
 
 LLVM_BASE = "https://raw.githubusercontent.com/llvm/llvm-project/llvmorg-21.1.0/llvm/test/MC/AMDGPU"

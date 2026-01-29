@@ -1359,6 +1359,43 @@ class TestF64ToI64Conversion(unittest.TestCase):
     self.assertEqual(result, 5000000000)
 
 
+class TestB64VOPLiteral(unittest.TestCase):
+  """Tests for B64 VOP operations with literal encoding.
+
+  B64 operations (like V_LSHLREV_B64) should zero-extend the literal to 64 bits,
+  NOT put it in the high 32 bits like F64 operations do.
+  """
+
+  def test_v_lshlrev_b64_literal_shift_amount(self):
+    """V_LSHLREV_B64 with literal shift amount (src0 is 32-bit)."""
+    # Shift 1 left by 100 (0x64) - uses literal encoding for src0
+    # Shift amount is 100 & 63 = 36, so 1 << 36 = 0x1000000000
+    instructions = [
+      s_mov_b32(s[0], 1),
+      s_mov_b32(s[1], 0),
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[1]),
+      v_lshlrev_b64(v[2:3], 100, v[0:1]),  # 100 > 64, uses literal encoding
+    ]
+    st = run_program(instructions, n_lanes=1)
+    # lo = 0x00000000, hi = 0x00000010 = 1 << (36-32)
+    self.assertEqual(st.vgpr[0][2], 0x00000000)
+    self.assertEqual(st.vgpr[0][3], 0x00000010)
+
+  def test_v_lshlrev_b64_literal_value(self):
+    """V_LSHLREV_B64 with literal as the 64-bit value being shifted (src1).
+
+    B64 literals are zero-extended (not shifted to high bits like F64).
+    0xDEADBEEF << 4 = 0xDEADBEEF0 = lo=0xEADBEEF0, hi=0x0000000D
+    """
+    instructions = [
+      v_lshlrev_b64(v[0:1], 4, 0xDEADBEEF),  # shift literal left by 4
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][0], 0xEADBEEF0)  # lo
+    self.assertEqual(st.vgpr[0][1], 0x0000000D)  # hi
+
+
 class TestWMMAMore(unittest.TestCase):
   """More WMMA tests."""
 
@@ -2809,6 +2846,113 @@ class TestMin3Max3Unsigned(unittest.TestCase):
     ]
     st = run_program(instructions, n_lanes=1)
     self.assertEqual(st.vgpr[0][1] & 0xFFFF, 0)
+
+
+class TestVOP3Clamp(unittest.TestCase):
+  """Tests for VOP3 clamp modifier (clmp=1).
+
+  The clamp modifier restricts float outputs to [0.0, 1.0] range.
+  This is used by operations like clip(0, 1) which AMD LLVM compiles to
+  v_max_f32_e64 with clmp=1.
+
+  Regression test for: clip(0, 1) bug where emulator ignored clmp field.
+  """
+
+  def test_v_max_f32_e64_clamp_positive(self):
+    """V_MAX_F32_E64 with clamp: value > 1.0 should be clamped to 1.0."""
+    instructions = [
+      v_mov_b32_e32(v[0], 2.5),
+      VOP3(VOP3Op.V_MAX_F32_E64, vdst=v[1], src0=v[0], src1=v[0], clmp=1),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertAlmostEqual(i2f(st.vgpr[0][1]), 1.0, places=5)
+
+  def test_v_max_f32_e64_clamp_negative(self):
+    """V_MAX_F32_E64 with clamp: value < 0.0 should be clamped to 0.0."""
+    instructions = [
+      v_mov_b32_e32(v[0], -1.5),
+      VOP3(VOP3Op.V_MAX_F32_E64, vdst=v[1], src0=v[0], src1=v[0], clmp=1),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertAlmostEqual(i2f(st.vgpr[0][1]), 0.0, places=5)
+
+  def test_v_max_f32_e64_clamp_in_range(self):
+    """V_MAX_F32_E64 with clamp: value in [0,1] should pass through."""
+    instructions = [
+      v_mov_b32_e32(v[0], 0.5),
+      VOP3(VOP3Op.V_MAX_F32_E64, vdst=v[1], src0=v[0], src1=v[0], clmp=1),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertAlmostEqual(i2f(st.vgpr[0][1]), 0.5, places=5)
+
+  def test_v_max_f32_e64_no_clamp(self):
+    """V_MAX_F32_E64 without clamp: value > 1.0 should pass through."""
+    instructions = [
+      v_mov_b32_e32(v[0], 2.5),
+      VOP3(VOP3Op.V_MAX_F32_E64, vdst=v[1], src0=v[0], src1=v[0], clmp=0),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertAlmostEqual(i2f(st.vgpr[0][1]), 2.5, places=5)
+
+  def test_v_min_f32_e64_clamp_negative(self):
+    """V_MIN_F32_E64 with clamp: value < 0.0 should be clamped to 0.0."""
+    instructions = [
+      v_mov_b32_e32(v[0], -2.0),
+      VOP3(VOP3Op.V_MIN_F32_E64, vdst=v[1], src0=v[0], src1=v[0], clmp=1),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertAlmostEqual(i2f(st.vgpr[0][1]), 0.0, places=5)
+
+  def test_v_add_f32_e64_clamp(self):
+    """V_ADD_F32_E64 with clamp: 0.7 + 0.8 = 1.5 -> 1.0."""
+    instructions = [
+      v_mov_b32_e32(v[0], 0.7),
+      v_mov_b32_e32(v[1], 0.8),
+      VOP3(VOP3Op.V_ADD_F32_E64, vdst=v[2], src0=v[0], src1=v[1], clmp=1),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertAlmostEqual(i2f(st.vgpr[0][2]), 1.0, places=5)
+
+  def test_v_mul_f32_e64_clamp_underflow(self):
+    """V_MUL_F32_E64 with clamp: 0.5 * -2.0 = -1.0 -> 0.0."""
+    instructions = [
+      v_mov_b32_e32(v[0], 0.5),
+      v_mov_b32_e32(v[1], -2.0),
+      VOP3(VOP3Op.V_MUL_F32_E64, vdst=v[2], src0=v[0], src1=v[1], clmp=1),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertAlmostEqual(i2f(st.vgpr[0][2]), 0.0, places=5)
+
+  def test_v_fma_f32_clamp(self):
+    """V_FMA_F32 with clamp: 2*2+1 = 5 -> 1.0."""
+    instructions = [
+      v_mov_b32_e32(v[0], 2.0),
+      v_mov_b32_e32(v[1], 2.0),
+      v_mov_b32_e32(v[2], 1.0),
+      VOP3(VOP3Op.V_FMA_F32, vdst=v[3], src0=v[0], src1=v[1], src2=v[2], clmp=1),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertAlmostEqual(i2f(st.vgpr[0][3]), 1.0, places=5)
+
+  def test_v_max_f32_e64_clamp_multilane(self):
+    """V_MAX_F32_E64 with clamp: test multiple lanes with different values."""
+    # lane 0: -0.5 -> 0.0
+    # lane 1: 0.5 -> 0.5
+    # lane 2: 1.5 -> 1.0
+    # lane 3: 2.5 -> 1.0
+    instructions = [
+      # Setup different values per lane using lane_id
+      s_mov_b32(s[0], f2i(0.5)),
+      v_cvt_f32_i32_e32(v[0], v[255]),  # Convert lane_id to float
+      v_mov_b32_e32(v[2], s[0]),        # v2 = 0.5
+      v_sub_f32_e32(v[0], v[0], v[2]),  # Subtract 0.5: lane0=-0.5, lane1=0.5, lane2=1.5, lane3=2.5
+      VOP3(VOP3Op.V_MAX_F32_E64, vdst=v[1], src0=v[0], src1=v[0], clmp=1),
+    ]
+    st = run_program(instructions, n_lanes=4)
+    self.assertAlmostEqual(i2f(st.vgpr[0][1]), 0.0, places=5, msg="lane 0: -0.5 should clamp to 0.0")
+    self.assertAlmostEqual(i2f(st.vgpr[1][1]), 0.5, places=5, msg="lane 1: 0.5 should pass through")
+    self.assertAlmostEqual(i2f(st.vgpr[2][1]), 1.0, places=5, msg="lane 2: 1.5 should clamp to 1.0")
+    self.assertAlmostEqual(i2f(st.vgpr[3][1]), 1.0, places=5, msg="lane 3: 2.5 should clamp to 1.0")
 
 
 if __name__ == '__main__':

@@ -145,6 +145,10 @@ jobs:
       run: |
         echo "CACHEDB=/tmp/staging.db" >> $GITHUB_ENV
         rm -f /tmp/staging.db /tmp/staging.db-shm /tmp/staging.db-wal
+    - name: Kill stale pids
+      run: |
+        PYTHONPATH=. ./extra/hcq/hcq_smi.py amd kill_pids
+        PYTHONPATH=. ./extra/hcq/hcq_smi.py nv kill_pids
     - name: UsbGPU boot time
       run: sudo -E PYTHONPATH=. DEBUG=2 AM_RESET=1 AMD=1 AMD_IFACE=USB time python3.11 test/test_tiny.py TestTiny.test_plus
     - name: UsbGPU tiny tests
@@ -332,9 +336,9 @@ jobs:
     - name: Setcap to python
       run: ./extra/amdpci/setup_python_cap.sh
     - name: Remove amd modules
-      run: ./extra/hcq/hcq_smi.py amd rmmod
+      run: PYTHONPATH=. ./extra/hcq/hcq_smi.py amd rmmod
     - name: Kill stale pids
-      run: ./extra/hcq/hcq_smi.py amd kill_pids
+      run: PYTHONPATH=. ./extra/hcq/hcq_smi.py amd kill_pids
     #- name: Insert amdgpu
     #  run: sudo modprobe amdgpu
     - name: Symlink models and datasets
@@ -444,9 +448,9 @@ jobs:
     - name: Setcap to python
       run: ./extra/amdpci/setup_python_cap.sh
     - name: Remove amd modules
-      run: ./extra/hcq/hcq_smi.py amd rmmod
+      run: PYTHONPATH=. ./extra/hcq/hcq_smi.py amd rmmod
     - name: Kill stale pids
-      run: ./extra/hcq/hcq_smi.py amd kill_pids
+      run: PYTHONPATH=. ./extra/hcq/hcq_smi.py amd kill_pids
     - name: Symlink models and datasets
       run: |
         mkdir -p weights
@@ -496,9 +500,9 @@ jobs:
     - name: Setcap to python
       run: ./extra/amdpci/setup_python_cap.sh
     - name: Remove amd modules
-      run: ./extra/hcq/hcq_smi.py amd rmmod
+      run: PYTHONPATH=. ./extra/hcq/hcq_smi.py amd rmmod
     - name: Kill stale pids
-      run: ./extra/hcq/hcq_smi.py amd kill_pids
+      run: PYTHONPATH=. ./extra/hcq/hcq_smi.py amd kill_pids
     - name: Symlink models and datasets
       run: |
         mkdir -p weights
@@ -587,9 +591,9 @@ jobs:
     - name: Setcap to python
       run: ./extra/amdpci/setup_python_cap.sh
     - name: Remove amd modules
-      run: ./extra/hcq/hcq_smi.py amd rmmod
+      run: PYTHONPATH=. ./extra/hcq/hcq_smi.py amd rmmod
     - name: Kill stale pids
-      run: ./extra/hcq/hcq_smi.py amd kill_pids
+      run: PYTHONPATH=. ./extra/hcq/hcq_smi.py amd kill_pids
     - name: Symlink models and datasets
       run: |
         mkdir -p weights
@@ -651,9 +655,9 @@ jobs:
     - name: Setcap to python
       run: ./extra/amdpci/setup_python_cap.sh
     - name: Remove nv modules
-      run: ./extra/hcq/hcq_smi.py nv rmmod
+      run: PYTHONPATH=. ./extra/hcq/hcq_smi.py nv rmmod
     - name: Kill stale pids
-      run: ./extra/hcq/hcq_smi.py nv kill_pids
+      run: PYTHONPATH=. ./extra/hcq/hcq_smi.py nv kill_pids
     - name: Symlink models and datasets
       run: |
         mkdir -p weights
