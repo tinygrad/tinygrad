@@ -782,9 +782,8 @@ class NVDevice(HCQCompiled[NVSignal]):
       # enables pma on gpcs
       self.reg_ops(*[op for i in range(3) for op in [(PMASYS_BASE + 0x128 + i*8, 480), (PMASYS_BASE + 0x12c + i*8, 0x80000000)]])
       self.reg_ops((PMAGPC_BASE + 0xa24, 0x04000001), (PMAGPC_BASE + 0xa10, 0x80000002))
-
-      def TPC_REG(gpc, tpc, reg): return GPC_BASE + gpc * 0x4000 + 0x200 + tpc * 0x200 + reg
-      self.reg_ops(*[(TPC_REG(gpc, tpc, reg), 0) for gpc in range(len(tpc_masks)) for tpc in range(tpc_cnt[gpc]) for reg in [0x100, 0x108, 0x110, 0x120]])
+      self.reg_ops(*[(GPC_BASE + gpc * 0x4000 + 0x200 + tpc * 0x200 + reg, 0)
+                     for gpc in range(len(tpc_masks)) for tpc in range(tpc_cnt[gpc]) for reg in [0x100, 0x108, 0x110, 0x120]])
 
       def SM_REG(gpc, tpc, sm, reg): return GPC_BASE + gpc * 0x4000 + 0x800 + (tpc * self.num_sm_per_tpc + sm) * 0x200 + reg
     else:
