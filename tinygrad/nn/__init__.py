@@ -317,11 +317,6 @@ def embedding_fwd_kernel(out:UOp, weight:UOp, idx:UOp) -> UOp:
   token_id = idx_flat[i].cast(dtypes.index)
   return out_flat[i, j].store(weight[token_id, j]).end(i, j).sink(arg=KernelInfo(name="embedding_fwd"))
 
-# how can we use Tensor.zeros instead of this?
-def zero_kernel(out:UOp) -> UOp:
-  i = UOp.range(out.size, 0)
-  return out.flatten()[i].store(0).end(i).sink(arg=KernelInfo(name="zero"))
-
 def embedding_bwd_kernel(grad_weight:UOp, gradient:UOp, idx:UOp) -> UOp:
   idx_flat = idx.flatten()
   embed_size = grad_weight.shape[-1]
@@ -337,13 +332,10 @@ def embedding_bwd_kernel(grad_weight:UOp, gradient:UOp, idx:UOp) -> UOp:
 
 def embedding_bwd(gradient:UOp, kernel:UOp) -> tuple:
   out, weight, idx = kernel.src
-  grad_weight_uop = Tensor.empty(weight.shape, dtype=weight.dtype, device=weight.device).uop
-  # zero kernel
-  zero_k = UOp(Ops.CUSTOM_KERNEL, src=(grad_weight_uop,), arg=CustomKernel(fxn=zero_kernel, grad_fxn=None))
-  grad_weight_uop = grad_weight_uop.after(zero_k)
-  # atomic add kernel
-  bwd_k = UOp(Ops.CUSTOM_KERNEL, src=(grad_weight_uop, gradient.contiguous(), idx.contiguous()), arg=CustomKernel(fxn=embedding_bwd_kernel, grad_fxn=None))
-  grad_weight_uop = grad_weight_uop.after(bwd_k)
+  # TODO: this is terrible and needs to be cleaned up
+  grad_weight = Tensor.empty(weight.shape, dtype=weight.dtype, device=weight.device)
+  grad_weight_uop = grad_weight.uop.after(grad_weight.assign(Tensor.zeros_like(grad_weight)).uop)
+  grad_weight_uop = grad_weight_uop.custom_kernel(gradient.contiguous(), idx.contiguous(), fxn=embedding_bwd_kernel)[0]
   return (None, grad_weight_uop, None)
 
 class Embedding:

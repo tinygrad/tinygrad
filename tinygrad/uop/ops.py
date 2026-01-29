@@ -821,7 +821,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     return self.src[0].after(self.store(val).end(*argfix(end)))
 
   def custom_kernel(*srcs:UOp, fxn:Callable, grad_fxn:Callable|None=None) -> list[UOp]:
-    contig_srcs = tuple(x.contiguous() for x in srcs)
+    contig_srcs = tuple(x.contiguous() if x.op is not Ops.AFTER else x for x in srcs)
     kernel = UOp(Ops.CUSTOM_KERNEL, src=contig_srcs, arg=CustomKernel(fxn=fxn, grad_fxn=grad_fxn))
     return [s.after(kernel) for s in contig_srcs]
 
