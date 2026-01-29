@@ -51,7 +51,9 @@ FEATURE_XGMI_PER_LINK_PWR_DOWN = FEATURE_LIST_e.define('FEATURE_XGMI_PER_LINK_PW
 FEATURE_CXL_QOS = FEATURE_LIST_e.define('FEATURE_CXL_QOS', 41)
 FEATURE_SOC_DC_RTC = FEATURE_LIST_e.define('FEATURE_SOC_DC_RTC', 42)
 FEATURE_GFX_DC_RTC = FEATURE_LIST_e.define('FEATURE_GFX_DC_RTC', 43)
-NUM_FEATURES = FEATURE_LIST_e.define('NUM_FEATURES', 44)
+FEATURE_DVM_MIN_PSM = FEATURE_LIST_e.define('FEATURE_DVM_MIN_PSM', 44)
+FEATURE_PRC = FEATURE_LIST_e.define('FEATURE_PRC', 45)
+NUM_FEATURES = FEATURE_LIST_e.define('NUM_FEATURES', 46)
 
 class PCIE_LINK_SPEED_INDEX_TABLE_e(Annotated[int, ctypes.c_uint32], c.Enum): pass
 PCIE_LINK_SPEED_INDEX_TABLE_GEN1 = PCIE_LINK_SPEED_INDEX_TABLE_e.define('PCIE_LINK_SPEED_INDEX_TABLE_GEN1', 0)
@@ -90,8 +92,8 @@ VOLTAGE_HOT_7 = GFX_GUARDBAND_e.define('VOLTAGE_HOT_7', 23)
 VOLTAGE_GUARDBAND_COUNT = GFX_GUARDBAND_e.define('VOLTAGE_GUARDBAND_COUNT', 24)
 
 @c.record
-class MetricsTableX_t(c.Struct):
-  SIZE = 2008
+class MetricsTableV0_t(c.Struct):
+  SIZE = 2268
   AccumulationCounter: Annotated[uint32_t, 0]
   MaxSocketTemperature: Annotated[uint32_t, 4]
   MaxVrTemperature: Annotated[uint32_t, 8]
@@ -167,10 +169,15 @@ class MetricsTableX_t(c.Struct):
   PCIeLinkWidth: Annotated[uint32_t, 1908]
   GfxBusy: Annotated[c.Array[uint32_t, Literal[8]], 1912]
   GfxBusyAcc: Annotated[c.Array[uint64_t, Literal[8]], 1944]
+  PCIeOtherEndRecoveryAcc: Annotated[uint32_t, 2008]
+  GfxclkBelowHostLimitPptAcc: Annotated[c.Array[uint64_t, Literal[8]], 2012]
+  GfxclkBelowHostLimitThmAcc: Annotated[c.Array[uint64_t, Literal[8]], 2076]
+  GfxclkBelowHostLimitTotalAcc: Annotated[c.Array[uint64_t, Literal[8]], 2140]
+  GfxclkLowUtilizationAcc: Annotated[c.Array[uint64_t, Literal[8]], 2204]
 uint32_t: TypeAlias = Annotated[int, ctypes.c_uint32]
 uint64_t: TypeAlias = Annotated[int, ctypes.c_uint64]
 @c.record
-class MetricsTableA_t(c.Struct):
+class MetricsTableV1_t(c.Struct):
   SIZE = 1868
   AccumulationCounter: Annotated[uint32_t, 0]
   MaxSocketTemperature: Annotated[uint32_t, 4]
@@ -238,12 +245,92 @@ class MetricsTableA_t(c.Struct):
   VcnBusy: Annotated[c.Array[uint32_t, Literal[4]], 1724]
   JpegBusy: Annotated[c.Array[uint32_t, Literal[32]], 1740]
 @c.record
+class MetricsTableV2_t(c.Struct):
+  SIZE = 1200
+  AccumulationCounter: Annotated[uint64_t, 0]
+  MaxSocketTemperature: Annotated[uint32_t, 8]
+  MaxVrTemperature: Annotated[uint32_t, 12]
+  MaxHbmTemperature: Annotated[uint32_t, 16]
+  MaxSocketTemperatureAcc: Annotated[uint64_t, 20]
+  MaxVrTemperatureAcc: Annotated[uint64_t, 28]
+  MaxHbmTemperatureAcc: Annotated[uint64_t, 36]
+  SocketPowerLimit: Annotated[uint32_t, 44]
+  MaxSocketPowerLimit: Annotated[uint32_t, 48]
+  SocketPower: Annotated[uint32_t, 52]
+  Timestamp: Annotated[uint64_t, 56]
+  SocketEnergyAcc: Annotated[uint64_t, 64]
+  CcdEnergyAcc: Annotated[uint64_t, 72]
+  XcdEnergyAcc: Annotated[uint64_t, 80]
+  AidEnergyAcc: Annotated[uint64_t, 88]
+  HbmEnergyAcc: Annotated[uint64_t, 96]
+  GfxclkFrequencyLimit: Annotated[uint32_t, 104]
+  FclkFrequency: Annotated[uint32_t, 108]
+  UclkFrequency: Annotated[uint32_t, 112]
+  SocclkFrequency: Annotated[c.Array[uint32_t, Literal[4]], 116]
+  VclkFrequency: Annotated[c.Array[uint32_t, Literal[4]], 132]
+  DclkFrequency: Annotated[c.Array[uint32_t, Literal[4]], 148]
+  LclkFrequency: Annotated[c.Array[uint32_t, Literal[4]], 164]
+  GfxclkFrequencyAcc: Annotated[c.Array[uint64_t, Literal[8]], 180]
+  MaxGfxclkFrequency: Annotated[uint32_t, 244]
+  MinGfxclkFrequency: Annotated[uint32_t, 248]
+  FclkFrequencyTable: Annotated[c.Array[uint32_t, Literal[4]], 252]
+  UclkFrequencyTable: Annotated[c.Array[uint32_t, Literal[4]], 268]
+  SocclkFrequencyTable: Annotated[c.Array[uint32_t, Literal[4]], 284]
+  VclkFrequencyTable: Annotated[c.Array[uint32_t, Literal[4]], 300]
+  DclkFrequencyTable: Annotated[c.Array[uint32_t, Literal[4]], 316]
+  LclkFrequencyTable: Annotated[c.Array[uint32_t, Literal[4]], 332]
+  MaxLclkDpmRange: Annotated[uint32_t, 348]
+  MinLclkDpmRange: Annotated[uint32_t, 352]
+  XgmiWidth: Annotated[uint32_t, 356]
+  XgmiBitrate: Annotated[uint32_t, 360]
+  XgmiReadBandwidthAcc: Annotated[c.Array[uint64_t, Literal[8]], 364]
+  XgmiWriteBandwidthAcc: Annotated[c.Array[uint64_t, Literal[8]], 428]
+  SocketGfxBusy: Annotated[uint32_t, 492]
+  DramBandwidthUtilization: Annotated[uint32_t, 496]
+  SocketC0ResidencyAcc: Annotated[uint64_t, 500]
+  SocketGfxBusyAcc: Annotated[uint64_t, 508]
+  DramBandwidthAcc: Annotated[uint64_t, 516]
+  MaxDramBandwidth: Annotated[uint32_t, 524]
+  DramBandwidthUtilizationAcc: Annotated[uint64_t, 528]
+  PcieBandwidthAcc: Annotated[c.Array[uint64_t, Literal[4]], 536]
+  ProchotResidencyAcc: Annotated[uint32_t, 568]
+  PptResidencyAcc: Annotated[uint32_t, 572]
+  SocketThmResidencyAcc: Annotated[uint32_t, 576]
+  VrThmResidencyAcc: Annotated[uint32_t, 580]
+  HbmThmResidencyAcc: Annotated[uint32_t, 584]
+  GfxLockXCDMak: Annotated[uint32_t, 588]
+  GfxclkFrequency: Annotated[c.Array[uint32_t, Literal[8]], 592]
+  PublicSerialNumber_AID: Annotated[c.Array[uint64_t, Literal[4]], 624]
+  PublicSerialNumber_XCD: Annotated[c.Array[uint64_t, Literal[8]], 656]
+  XgmiReadDataSizeAcc: Annotated[c.Array[uint64_t, Literal[8]], 720]
+  XgmiWriteDataSizeAcc: Annotated[c.Array[uint64_t, Literal[8]], 784]
+  PcieBandwidth: Annotated[c.Array[uint32_t, Literal[4]], 848]
+  PCIeL0ToRecoveryCountAcc: Annotated[uint32_t, 864]
+  PCIenReplayAAcc: Annotated[uint32_t, 868]
+  PCIenReplayARolloverCountAcc: Annotated[uint32_t, 872]
+  PCIeNAKSentCountAcc: Annotated[uint32_t, 876]
+  PCIeNAKReceivedCountAcc: Annotated[uint32_t, 880]
+  VcnBusy: Annotated[c.Array[uint32_t, Literal[4]], 884]
+  JpegBusy: Annotated[c.Array[uint32_t, Literal[32]], 900]
+  PCIeLinkSpeed: Annotated[uint32_t, 1028]
+  PCIeLinkWidth: Annotated[uint32_t, 1032]
+  GfxBusy: Annotated[c.Array[uint32_t, Literal[8]], 1036]
+  GfxBusyAcc: Annotated[c.Array[uint64_t, Literal[8]], 1068]
+  PCIeOtherEndRecoveryAcc: Annotated[uint32_t, 1132]
+  GfxclkBelowHostLimitAcc: Annotated[c.Array[uint64_t, Literal[8]], 1136]
+@c.record
 class VfMetricsTable_t(c.Struct):
-  SIZE = 24
+  SIZE = 32
   AccumulationCounter: Annotated[uint32_t, 0]
   InstGfxclk_TargFreq: Annotated[uint32_t, 4]
   AccGfxclk_TargFreq: Annotated[uint64_t, 8]
   AccGfxRsmuDpm_Busy: Annotated[uint64_t, 16]
+  AccGfxclkBelowHostLimit: Annotated[uint64_t, 24]
+@c.record
+class StaticMetricsTable_t(c.Struct):
+  SIZE = 12
+  InputTelemetryVoltageInmV: Annotated[uint32_t, 0]
+  pldmVersion: Annotated[c.Array[uint32_t, Literal[2]], 4]
 class I2cControllerPort_e(Annotated[int, ctypes.c_uint32], c.Enum): pass
 I2C_CONTROLLER_PORT_0 = I2cControllerPort_e.define('I2C_CONTROLLER_PORT_0', 0)
 I2C_CONTROLLER_PORT_1 = I2cControllerPort_e.define('I2C_CONTROLLER_PORT_1', 1)
@@ -687,7 +774,7 @@ PPSMC_MSG_QueryValidMcaCeCount = 0x3A # type: ignore
 PPSMC_MSG_McaBankCeDumpDW = 0x3B # type: ignore
 PPSMC_MSG_SelectPLPDMode = 0x40 # type: ignore
 PPSMC_MSG_RmaDueToBadPageThreshold = 0x43 # type: ignore
-PPSMC_MSG_SelectPstatePolicy = 0x44 # type: ignore
+PPSMC_MSG_SetThrottlingPolicy = 0x44 # type: ignore
 PPSMC_MSG_SetPhsDetWRbwThreshold = 0x45 # type: ignore
 PPSMC_MSG_SetPhsDetWRbwFreqHigh = 0x46 # type: ignore
 PPSMC_MSG_SetPhsDetWRbwFreqLow = 0x47 # type: ignore
@@ -695,7 +782,10 @@ PPSMC_MSG_SetPhsDetWRbwHystDown = 0x48 # type: ignore
 PPSMC_MSG_SetPhsDetWRbwAlpha = 0x49 # type: ignore
 PPSMC_MSG_SetPhsDetOnOff = 0x4A # type: ignore
 PPSMC_MSG_GetPhsDetResidency = 0x4B # type: ignore
-PPSMC_Message_Count = 0x4C # type: ignore
+PPSMC_MSG_ResetSDMA = 0x4D # type: ignore
+PPSMC_MSG_GetStaticMetricsTable = 0x59 # type: ignore
+PPSMC_MSG_ResetVCN = 0x5B # type: ignore
+PPSMC_Message_Count = 0x5C # type: ignore
 PPSMC_RESET_TYPE_DRIVER_MODE_1_RESET = 0x1 # type: ignore
 PPSMC_RESET_TYPE_DRIVER_MODE_2_RESET = 0x2 # type: ignore
 PPSMC_RESET_TYPE_DRIVER_MODE_3_RESET = 0x3 # type: ignore
@@ -718,8 +808,10 @@ NUM_CXL_BITRATES = 4 # type: ignore
 NUM_PCIE_BITRATES = 4 # type: ignore
 NUM_XGMI_BITRATES = 4 # type: ignore
 NUM_XGMI_WIDTHS = 3 # type: ignore
-SMU_METRICS_TABLE_VERSION = 0xD # type: ignore
-SMU_VF_METRICS_TABLE_VERSION = 0x3 # type: ignore
+NUM_SOC_P2S_TABLES = 3 # type: ignore
+NUM_TDP_GROUPS = 4 # type: ignore
+SMU_METRICS_TABLE_VERSION = 0x11 # type: ignore
+SMU_VF_METRICS_TABLE_VERSION = 0x5 # type: ignore
 SMU13_0_6_DRIVER_IF_VERSION = 0x08042024 # type: ignore
 NUM_I2C_CONTROLLERS = 8 # type: ignore
 I2C_CONTROLLER_ENABLED = 1 # type: ignore

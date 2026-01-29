@@ -619,5 +619,272 @@ class Test64BitCompare(unittest.TestCase):
     self.assertEqual(st.sgpr[4], 1)
 
 
+class TestSOPPNop(unittest.TestCase):
+  """Tests for S_NOP and other SOPP instructions with expression-based for loops.
+
+  S_NOP's pcode uses 'for i in 0U : SIMM16.u16[3 : 0].u32 do' which requires
+  the parser to handle non-constant loop bounds.
+  """
+
+  def test_s_nop_basic(self):
+    """S_NOP executes without side effects."""
+    # S_NOP with immediate 0 should just do nothing
+    instructions = [
+      s_mov_b32(s[0], 42),
+      s_nop(0),  # nop with simm16=0
+      s_mov_b32(s[1], 100),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.sgpr[0], 42)
+    self.assertEqual(st.sgpr[1], 100)
+
+  def test_s_nop_with_count(self):
+    """S_NOP with count parameter executes multiple nops."""
+    # S_NOP with immediate 3 should execute 4 nops (0:3 inclusive)
+    instructions = [
+      s_mov_b32(s[0], 1),
+      s_nop(3),  # nop with simm16=3 -> 4 iterations
+      s_add_u32(s[0], s[0], 1),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.sgpr[0], 2)
+
+
+class TestNullRegister(unittest.TestCase):
+  """Tests for NULL register (124) behavior - writes should be discarded, reads return 0."""
+
+  def test_s_mov_b32_from_null(self):
+    """S_MOV_B32 from NULL should read as 0."""
+    instructions = [
+      s_mov_b32(s[0], 0xDEADBEEF),  # Set s[0] to sentinel
+      s_mov_b32(s[0], NULL),  # Read from NULL - should be 0
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.sgpr[0], 0)
+
+  def test_s_add_u32_with_null_src(self):
+    """S_ADD_U32 with NULL as source should use 0."""
+    instructions = [
+      s_mov_b32(s[0], 100),
+      s_add_u32(s[1], s[0], NULL),  # 100 + 0 = 100
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.sgpr[1], 100)
+
+  def test_s_mov_b32_to_null(self):
+    """S_MOV_B32 to NULL (sdst=124) should discard the write."""
+    instructions = [
+      s_mov_b32(s[0], 0xDEADBEEF),  # Set s[0] to sentinel
+      s_mov_b32(NULL, 42),  # Write to NULL - should be discarded
+      # s[0] should still be 0xDEADBEEF since NULL write doesn't affect it
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.sgpr[0], 0xDEADBEEF)
+
+  def test_s_add_u32_to_null(self):
+    """S_ADD_U32 with sdst=NULL should discard result but still set SCC."""
+    instructions = [
+      s_mov_b32(s[0], 0xFFFFFFFF),
+      s_mov_b32(s[1], 1),
+      s_add_u32(NULL, s[0], s[1]),  # overflow, write to NULL
+      s_cselect_b32(s[2], 1, 0),  # capture SCC
+    ]
+    st = run_program(instructions, n_lanes=1)
+    # SCC should still be set from overflow even though result was discarded
+    self.assertEqual(st.sgpr[2], 1)
+    self.assertEqual(st.scc, 1)
+
+  def test_s_and_b32_to_null(self):
+    """S_AND_B32 with sdst=NULL should discard result but still set SCC."""
+    instructions = [
+      s_mov_b32(s[0], 0xFF00FF00),
+      s_mov_b32(s[1], 0x0F0F0F0F),
+      s_and_b32(NULL, s[0], s[1]),  # result=0x0F000F00, non-zero so SCC=1
+      s_cselect_b32(s[2], 1, 0),  # capture SCC
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.sgpr[2], 1)  # SCC=1 because result was non-zero
+    self.assertEqual(st.scc, 1)
+
+  def test_s_or_b32_to_null_zero_result(self):
+    """S_OR_B32 with sdst=NULL and zero result should set SCC=0."""
+    instructions = [
+      s_mov_b32(s[0], 0),
+      s_mov_b32(s[1], 0),
+      s_or_b32(NULL, s[0], s[1]),  # result=0, so SCC=0
+      s_cselect_b32(s[2], 1, 0),  # capture SCC
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.sgpr[2], 0)  # SCC=0 because result was zero
+    self.assertEqual(st.scc, 0)
+
+
+class Test64BitSOP1InlineConstants(unittest.TestCase):
+  """Tests for 64-bit SOP1 instructions with inline constants.
+
+  Regression tests for bug where rsrc_dyn didn't properly handle 64-bit
+  inline constants, incorrectly duplicating lo bits to hi instead of
+  zero/sign-extending.
+  """
+
+  def test_s_mov_b64_inline_0(self):
+    """S_MOV_B64 with inline constant 0."""
+    instructions = [
+      s_mov_b64(s[0:1], 0),
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][0], 0)
+    self.assertEqual(st.vgpr[0][1], 0)
+
+  def test_s_mov_b64_inline_16(self):
+    """S_MOV_B64 with inline constant 16 should set lo=16, hi=0."""
+    instructions = [
+      s_mov_b64(s[0:1], 16),
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][0], 16)
+    self.assertEqual(st.vgpr[0][1], 0)
+
+  def test_s_mov_b64_inline_64(self):
+    """S_MOV_B64 with inline constant 64 (max positive)."""
+    instructions = [
+      s_mov_b64(s[0:1], 64),
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][0], 64)
+    self.assertEqual(st.vgpr[0][1], 0)
+
+  def test_s_mov_b64_inline_neg1(self):
+    """S_MOV_B64 with inline constant -1 should sign-extend."""
+    instructions = [
+      s_mov_b64(s[0:1], -1),
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][0], 0xFFFFFFFF)
+    self.assertEqual(st.vgpr[0][1], 0xFFFFFFFF)
+
+  def test_s_mov_b64_inline_neg16(self):
+    """S_MOV_B64 with inline constant -16 should sign-extend."""
+    instructions = [
+      s_mov_b64(s[0:1], -16),
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][0], 0xFFFFFFF0)
+    self.assertEqual(st.vgpr[0][1], 0xFFFFFFFF)
+
+  def test_s_mov_b64_float_const_1_0(self):
+    """S_MOV_B64 with float inline constant 1.0 - casts F32 to F64."""
+    instructions = [
+      s_mov_b64(s[0:1], 1.0),  # inline constant 242 (1.0f)
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    # Hardware casts F32 to F64: 1.0f64 = 0x3FF0000000000000
+    self.assertEqual(st.vgpr[0][0], 0x00000000)  # lo
+    self.assertEqual(st.vgpr[0][1], 0x3FF00000)  # hi
+
+  def test_s_or_b64_inline_constant(self):
+    """S_OR_B64 with 64-bit inline constant."""
+    instructions = [
+      s_mov_b64(s[0:1], 0),
+      s_or_b64(s[2:3], s[0:1], 16),
+      v_mov_b32_e32(v[0], s[2]),
+      v_mov_b32_e32(v[1], s[3]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][0], 16)
+    self.assertEqual(st.vgpr[0][1], 0)
+
+  def test_s_and_b64_inline_constant(self):
+    """S_AND_B64 with 64-bit inline constant."""
+    instructions = [
+      s_mov_b32(s[0], 0xFFFFFFFF),
+      s_mov_b32(s[1], 0xFFFFFFFF),
+      s_and_b64(s[2:3], s[0:1], 16),
+      v_mov_b32_e32(v[0], s[2]),
+      v_mov_b32_e32(v[1], s[3]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][0], 16)
+    self.assertEqual(st.vgpr[0][1], 0)
+
+
+class Test64BitSOPLiterals(unittest.TestCase):
+  """Tests for 64-bit SOP instructions with 32-bit literals.
+
+  Tests the behavior when a 64-bit SOP instruction uses a 32-bit literal
+  (offset 255 in instruction encoding). The literal is zero-extended to 64 bits.
+  """
+
+  def test_s_mov_b64_literal(self):
+    """S_MOV_B64 with 32-bit literal value - zero-extended to 64 bits."""
+    instructions = [
+      s_mov_b64(s[0:1], 0x12345678),  # literal > 64, uses literal encoding
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][0], 0x12345678)
+    self.assertEqual(st.vgpr[0][1], 0)
+
+  def test_s_or_b64_literal(self):
+    """S_OR_B64 with 32-bit literal value - zero-extended to 64 bits."""
+    instructions = [
+      s_mov_b64(s[0:1], 0),
+      s_or_b64(s[2:3], s[0:1], 0x12345678),  # literal
+      v_mov_b32_e32(v[0], s[2]),
+      v_mov_b32_e32(v[1], s[3]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][0], 0x12345678)
+    self.assertEqual(st.vgpr[0][1], 0)
+
+  def test_s_and_b64_literal(self):
+    """S_AND_B64 with 32-bit literal value - zero-extended to 64 bits."""
+    instructions = [
+      s_mov_b32(s[0], 0xFFFFFFFF),
+      s_mov_b32(s[1], 0xFFFFFFFF),
+      s_and_b64(s[2:3], s[0:1], 0x12345678),  # literal
+      v_mov_b32_e32(v[0], s[2]),
+      v_mov_b32_e32(v[1], s[3]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][0], 0x12345678)
+    self.assertEqual(st.vgpr[0][1], 0)
+
+  def test_s_mov_b64_literal_negative(self):
+    """S_MOV_B64 with 0xFFFFFFFF literal - zero-extended (not sign-extended)."""
+    instructions = [
+      s_mov_b64(s[0:1], 0xFFFFFFFF),  # -1 as 32-bit, but zero-extended to 64-bit
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][0], 0xFFFFFFFF)
+    self.assertEqual(st.vgpr[0][1], 0)  # zero-extended, not sign-extended
+
+  def test_s_mov_b64_literal_high_bit(self):
+    """S_MOV_B64 with 0x80000000 literal - zero-extended (not sign-extended)."""
+    instructions = [
+      s_mov_b64(s[0:1], 0x80000000),  # high bit set, but zero-extended
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][0], 0x80000000)
+    self.assertEqual(st.vgpr[0][1], 0)  # zero-extended, not sign-extended
+
+
 if __name__ == '__main__':
   unittest.main()

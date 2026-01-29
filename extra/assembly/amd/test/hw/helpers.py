@@ -141,7 +141,7 @@ def run_program_emu(instructions: list, n_lanes: int = 1) -> WaveState:
   # rsrc2: USER_SGPR_COUNT=2, ENABLE_SGPR_WORKGROUP_ID_X/Y/Z=1, LDS_SIZE=128 (64KB)
   rsrc2 = 0x19c | (128 << 15)
   scratch_size = 0x10000  # 64KB per lane, matches .amdhsa_private_segment_fixed_size in run_program_hw
-  result = run_asm(lib_ptr, len(code), 1, 1, 1, n_lanes, 1, 1, args_ptr, rsrc2)
+  result = run_asm(lib_ptr, len(code), 1, 1, 1, n_lanes, 1, 1, args_ptr, rsrc2, scratch_size)
   assert result == 0, f"run_asm failed with {result}"
 
   return parse_output(bytes(out_buf), n_lanes)
@@ -204,6 +204,7 @@ amdhsa.kernels:
   prg = AMDProgram(dev, "test", lib)
 
   out_gpu = dev.allocator.alloc(OUT_BYTES)
+  assert out_gpu.va_addr % 16 == 0, f"buffer not 16-byte aligned: 0x{out_gpu.va_addr:x}"
   prg(out_gpu, global_size=(1, 1, 1), local_size=(n_lanes, 1, 1), wait=True)
 
   out_buf = bytearray(OUT_BYTES)

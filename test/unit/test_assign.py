@@ -3,7 +3,7 @@ import unittest
 import numpy as np
 from tinygrad import dtypes, Tensor, TinyJit, GlobalCounters, Variable
 from tinygrad.device import is_dtype_supported
-from tinygrad.helpers import temp, CI, CPU_LVP
+from tinygrad.helpers import temp, CI, CPU_LVP, Context
 
 N = 200  # has to be bigger than the cache to fail
 
@@ -309,6 +309,20 @@ class TestAssign(unittest.TestCase):
     a.assign(a.T+b)
     np.testing.assert_allclose(a.numpy(), new_a)
 
+  def test_post_flipped_assignment(self):
+    a = Tensor.arange(N*N).reshape(N,N).contiguous().realize()
+    b = Tensor.arange(N*N).reshape(N,N).contiguous().realize()
+    new_a = (a.flip(0)+b).numpy()
+    a.assign(a.flip(0)+b)
+    np.testing.assert_allclose(a.numpy(), new_a)
+
+  def test_post_flipped_assignment_axis1(self):
+    a = Tensor.arange(N*N).reshape(N,N).contiguous().realize()
+    b = Tensor.arange(N*N).reshape(N,N).contiguous().realize()
+    new_a = (a.flip(1)+b).numpy()
+    a.assign(a.flip(1)+b)
+    np.testing.assert_allclose(a.numpy(), new_a)
+
   def test_post_reshape_assignment_fine(self):
     a = Tensor.arange(N*N).reshape(N, N).contiguous().realize()
     b = Tensor.arange(N*N).reshape(N, N).contiguous().realize()
@@ -400,6 +414,39 @@ class TestAssign(unittest.TestCase):
     self.assertListEqual(a.tolist(), [[2.,2.,2.,2.],[2.,2.,2.,2.],[3.,3.,3.,3.], [3.,3.,3.,3.]])
 
   # TODO: is there a way to sneak in a permute such that it returns the wrong answer?
+
+  @unittest.skip("this test is crashing!")
+  def test_overlapping_shrink_assignment_forward(self):
+    # Forward shift: read index > write index in overlap
+    N = 100000
+    shift = 1000
+    a = Tensor.arange(N).float().contiguous().realize()
+    expected = np.arange(N, dtype=np.float32)
+    expected[:N-shift] = expected[shift:].copy()
+    with Context(NOOPT=1): a[0:N-shift].assign(a[shift:N]).realize()
+    np.testing.assert_allclose(a.numpy(), expected)
+
+  @unittest.skip("this test is crashing!")
+  def test_overlapping_shrink_assignment_reverse(self):
+    # Reverse shift: write index > read index in overlap
+    N = 100000
+    shift = 1000
+    a = Tensor.arange(N).float().contiguous().realize()
+    expected = np.arange(N, dtype=np.float32)
+    expected[shift:] = expected[:N-shift].copy()
+    with Context(NOOPT=1): a[shift:N].assign(a[0:N-shift]).realize()
+    np.testing.assert_allclose(a.numpy(), expected)
+
+  @unittest.skip("this test is crashing!")
+  def test_nonoverlapping_shrink_assignment(self):
+    # TODO: non-overlapping shrinks don't actually need contiguous, could be 1 kernel with smarter range analysis
+    a = Tensor.arange(100).float().contiguous().realize()
+    expected = np.arange(100, dtype=np.float32)
+    expected[0:10] = expected[50:60].copy()
+    kc = GlobalCounters.kernel_count
+    a[0:10].assign(a[50:60]).realize()
+    assert GlobalCounters.kernel_count - kc == 2, "currently conservative, forces contiguous"
+    np.testing.assert_allclose(a.numpy(), expected)
 
   @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
   def test_setitem_half(self):

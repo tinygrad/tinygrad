@@ -319,11 +319,9 @@ class Embedding:
     self.vocab_sz, self.embed_sz, self.weight = vocab_size, embed_size, Tensor.glorot_uniform(vocab_size, embed_size)
 
   def __call__(self, idx:Tensor) -> Tensor:
-    if not hasattr(self, 'arange'): self.arange = Tensor.arange(self.vocab_sz, requires_grad=False, device=self.weight.device).unsqueeze(-1)
     if not dtypes.is_int(idx.dtype): raise TypeError(f"Expected integer dtype for index in embedding, got {idx.dtype}")
-    big_shp = idx.shape+(self.vocab_sz, self.embed_sz)
-    arange, idx, vals = self.arange.expand(big_shp), idx.reshape(idx.shape+(1, 1)).expand(big_shp), self.weight.expand(big_shp)
-    return (arange == idx).where(vals, 0).sum(-2, dtype=vals.dtype)
+    arange = Tensor.arange(self.weight.shape[0], requires_grad=False, device=self.weight.device)
+    return (arange == idx.unsqueeze(-1)).unsqueeze(-1).where(self.weight, 0).sum(-2, dtype=self.weight.dtype)
 
 class LSTMCell:
   """

@@ -3,7 +3,7 @@ import unittest, math
 import numpy as np
 from tinygrad.tensor import Tensor, _to_np_dtype
 from tinygrad.helpers import CI, DEBUG, getenv, Timing, Context
-from tinygrad.dtype import dtypes, DType, AddrSpace
+from tinygrad.dtype import dtypes, DType, AddrSpace, ConstFloat  # noqa: F401
 from tinygrad.device import Buffer, Device
 from tinygrad.uop.ops import Ops, UOp, UPat, KernelInfo, exec_alu, AxisType
 from tinygrad.uop.spec import shared_spec
@@ -28,8 +28,9 @@ def _uops_to_prg(uops_list):
   prg = get_program(UOp.sink(*uops_list), Device[Device.DEFAULT].renderer)
   return CompiledRunner(replace(prg, device=Device.DEFAULT))
 
-def uop(uops:list[UOp], uop:Ops, dtype:Optional[DType], src:tuple[UOp, ...], arg:Any=None) -> UOp:
-  uops.append(UOp(uop, dtype, tuple(src), arg))
+def uop(uops:list[UOp], op:Ops, dtype:Optional[DType], src:tuple[UOp, ...], arg:Any=None) -> UOp:
+  if op is Ops.CONST: uops.append(UOp.const(dtype, arg))
+  else: uops.append(UOp(op, dtype, tuple(src), arg))
   return uops[-1]
 
 def _test_single_value(vals, op, dts):
@@ -374,25 +375,13 @@ class TestLocalAccess(unittest.TestCase):
     sres = uop(uops, Ops.LOAD, dtypes.int32, (smem.index(ofs),))
     self.assertEqual(_test_uops_result(dtypes.int32, uops, sres), 42)
 
-@unittest.skipUnless(isinstance(Device[Device.DEFAULT].renderer, PTXRenderer), "This only tests assembly backends")
-class TestAssembly(unittest.TestCase):
-  def test_bitshift_left(self):
-    g1 = UOp(Ops.DEFINE_GLOBAL, dtypes.int32.ptr(), (), 0)
-    c1 = UOp(Ops.CONST, dtypes.int, (), 2)
-    c2 = UOp(Ops.CONST, dtypes.int, (), 3)
-    l1 = g1.index(c1)
-    a1 = UOp(Ops.MUL, dtypes.int, (l1, c1))
-    a2 = UOp(Ops.MUL, dtypes.int, (l1, c2))
-    uops = to_uops_list([a1,a2], ren=Device[Device.DEFAULT].renderer)
-    Device[Device.DEFAULT].renderer.render(uops)
-    ops = [x.op for x in uops]
-    self.assertIn(Ops.SHL, ops)
-    self.assertIn(Ops.MUL, ops)
-
+@unittest.skipIf(Device.DEFAULT == "METAL", "compiler bug")
+@unittest.skipUnless(Ops.SHR in Device[Device.DEFAULT].renderer.code_for_op, "fast_idiv requires SHR")
+class TestFastIdiv(unittest.TestCase):
   def test_division_power_of_two(self):
     for dt in (dtypes.int32, dtypes.uint32):
       g = UOp(Ops.DEFINE_GLOBAL, dt.ptr(), (), 0)
-      c = UOp(Ops.CONST, dt, (), 2)
+      c = UOp.const(dt, 2)
       l = g.index(c)
       a = UOp(Ops.IDIV, dt, (l, c))
       uops = to_uops_list([a], ren=Device[Device.DEFAULT].renderer)
@@ -401,9 +390,10 @@ class TestAssembly(unittest.TestCase):
       self.assertIn(Ops.SHR, ops, f"For dtype={dt} divison by power of two did not simplify to shift")
       self.assertNotIn(Ops.IDIV, ops, f"For dtype={dt} divison by power of two did not simplify to shift")
 
+  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "WEBGPU doesn't support long")
   def test_fast_idiv_and_mod(self):
     g = UOp(Ops.DEFINE_GLOBAL, dtypes.uint32.ptr(), (), 0)
-    c = UOp(Ops.CONST, dtypes.uint, (), 3)
+    c = UOp.const(dtypes.uint, 3)
     l = g.index(c)
     a = UOp(Ops.IDIV, dtypes.uint, (l, c))
     uops = to_uops_list([a], ren=Device[Device.DEFAULT].renderer)
@@ -419,11 +409,19 @@ class TestAssembly(unittest.TestCase):
     self.assertIn(Ops.SHR, ops)
     self.assertNotIn(Ops.MOD, ops)
 
+  def test_fast_idiv_remove_powers_of_two(self):
+    ridx = UOp.range(2**20, 0)
+    uops = to_uops_list([ridx//(7*64)], ren=Device[Device.DEFAULT].renderer)
+    ops = [x.op for x in uops]
+    # this requires shifting out the powers of two before doing fast_idiv
+    # (((ridx0>>6)*18725)>>17) instead of (int)((((long)(ridx0)*1198373)>>29))
+    self.assertNotIn(Ops.CAST, ops)
+
   @unittest.expectedFailure
   def test_fast_idiv_overflow(self):
     # This will be possible with a slightly different method for fast_idiv
     g = UOp(Ops.DEFINE_GLOBAL, dtypes.uint32.ptr(), (), 0)
-    c = UOp(Ops.CONST, dtypes.uint, (), 7)
+    c = UOp.const(dtypes.uint, 7)
     l = UOp(Ops.LOAD, dtypes.uint, (g.index(c),))
     a = UOp(Ops.IDIV, dtypes.uint, (l, c))
     uops = to_uops_list([a], ren=Device[Device.DEFAULT].renderer)
@@ -432,13 +430,32 @@ class TestAssembly(unittest.TestCase):
     self.assertIn(Ops.SHR, ops)
     self.assertNotIn(Ops.IDIV, ops)
 
-  def test_fast_idiv_remove_powers_of_two(self):
-    ridx = UOp.range(2**20, 0)
-    uops = to_uops_list([ridx//(7*64)], ren=Device[Device.DEFAULT].renderer)
+  def test_disable_fast_idiv(self):
+    g = UOp(Ops.DEFINE_GLOBAL, dtypes.uint32.ptr(), (), 0)
+    c = UOp.const(dtypes.uint, 3)
+    l = g.index(c)
+    a = UOp(Ops.IDIV, dtypes.uint, (l, c))
+    with Context(DISABLE_FAST_IDIV=1):
+      uops = to_uops_list([a], ren=Device[Device.DEFAULT].renderer)
     ops = [x.op for x in uops]
-    # this requires shifting out the powers of two before doing fast_idiv
-    # (((ridx0>>6)*18725)>>17) instead of (int)((((long)(ridx0)*1198373)>>29))
-    self.assertNotIn(Ops.CAST, ops)
+    self.assertNotIn(Ops.SHR, ops)
+    self.assertIn(Ops.IDIV, ops)
+
+
+@unittest.skipUnless(isinstance(Device[Device.DEFAULT].renderer, PTXRenderer), "This only tests assembly backends")
+class TestAssembly(unittest.TestCase):
+  def test_bitshift_left(self):
+    g1 = UOp(Ops.DEFINE_GLOBAL, dtypes.int32.ptr(), (), 0)
+    c1 = UOp.const(dtypes.int, 2)
+    c2 = UOp.const(dtypes.int, 3)
+    l1 = g1.index(c1)
+    a1 = UOp(Ops.MUL, dtypes.int, (l1, c1))
+    a2 = UOp(Ops.MUL, dtypes.int, (l1, c2))
+    uops = to_uops_list([a1,a2], ren=Device[Device.DEFAULT].renderer)
+    Device[Device.DEFAULT].renderer.render(uops)
+    ops = [x.op for x in uops]
+    self.assertIn(Ops.SHL, ops)
+    self.assertIn(Ops.MUL, ops)
 
   def test_mulacc_unrolled(self):
     # test that     acc = acc + a0*b0 + a1*b1 + a2*b2 + a3*b3
@@ -455,7 +472,7 @@ class TestAssembly(unittest.TestCase):
 
   def test_use_cmpeq(self):
     g = UOp(Ops.DEFINE_GLOBAL, dtypes.uint32.ptr(), (), 0)
-    c = UOp(Ops.CONST, dtypes.uint, (), 7)
+    c = UOp.const(dtypes.uint, 7)
     comp = g.index(c).ne(c).ne(True)
     uops = to_uops_list([comp], ren=Device[Device.DEFAULT].renderer)
     Device[Device.DEFAULT].renderer.render(uops)
@@ -466,8 +483,8 @@ class TestAssembly(unittest.TestCase):
 class TestUOpMethod(unittest.TestCase):
   @unittest.skip("uops lt no longer ordered")
   def test_compare_alu_same_src_different_arg(self):
-    a = UOp(Ops.CONST, dtypes.float, (), 2.0)
-    b = UOp(Ops.CONST, dtypes.float, (), 3.0)
+    a = UOp.const(dtypes.float, 2.0)
+    b = UOp.const(dtypes.float, 3.0)
 
     add = UOp(Ops.ADD, dtypes.float, (a, b))
     mul = UOp(Ops.MUL, dtypes.float, (a, b))
@@ -483,7 +500,7 @@ class TestUOpMethod(unittest.TestCase):
 
   def test_const_factor(self):
     gidx0 = UOp(Ops.SPECIAL, dtypes.int, (UOp.const(dtypes.int, 8),), 'gidx0')
-    self.assertEqual(UOp(Ops.CONST, dtypes.int, (), 17).const_factor(), 17)
+    self.assertEqual(UOp.const(dtypes.int, 17).const_factor(), 17)
     self.assertEqual(gidx0.const_factor(), 1)
     self.assertEqual((gidx0*3).const_factor(), 3)
     self.assertEqual((gidx0*3+6).const_factor(), 3)
@@ -494,9 +511,22 @@ class TestUOpMethod(unittest.TestCase):
     self.assertIs(x.replace(arg=None).arg, None)
     with self.assertRaises(AssertionError): x.replace(field="a")
 
+  def test_const_zero_neg_zero_different(self):
+    # -0.0 and 0.0 must be different UOps (for IEEE754 correctness, e.g. 1/-0.0 = -inf)
+    pos_zero = UOp.const(dtypes.float, 0.0)
+    neg_zero = UOp.const(dtypes.float, -0.0)
+    self.assertIsNot(pos_zero, neg_zero)
+    self.assertNotEqual(hash(pos_zero.arg), hash(neg_zero.arg))
+
+  def test_const_nan_same(self):
+    # nan constants should be deduplicated
+    nan1 = UOp.const(dtypes.float, float('nan'))
+    nan2 = UOp.const(dtypes.float, float('nan'))
+    self.assertIs(nan1, nan2)
+
 class TestUOpStr(unittest.TestCase):
   def test_uop_str(self):
-    a = UOp(Ops.CONST, dtypes.float, (), 2.0) + UOp(Ops.CONST, dtypes.float, (), 3.0)
+    a = UOp.const(dtypes.float, 2.0) + UOp.const(dtypes.float, 3.0)
     for _ in range(20): a = a + a
     assert len(str(a)) < 10_000, "exponential string growth"
     assert str(eval(str(a))) == str(a)
