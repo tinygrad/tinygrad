@@ -318,7 +318,7 @@ def _zero_kernel(out:UOp) -> UOp:
   i = UOp.range(out.size, 0)
   return out.flatten()[i].store(0).end(i).sink(arg=KernelInfo(name="zero"))
 
-def _embedding_bwd_kernel(grad_emb:UOp, grad_weight:UOp, idx:UOp) -> UOp:
+def _embedding_bwd_kernel(grad_weight:UOp, grad_emb:UOp, idx:UOp) -> UOp:
   idx_flat, grad_emb_flat = idx.flatten(), grad_emb.reshape((idx.size, grad_weight.shape[-1]))
   i = UOp.range(grad_emb_flat.shape[0], 0)  # batch_size * sequence_length
   j = UOp.range(grad_emb_flat.shape[1], 1)  # embed_size
@@ -328,16 +328,23 @@ def _embedding_bwd_kernel(grad_emb:UOp, grad_weight:UOp, idx:UOp) -> UOp:
                arg="__hip_atomic_fetch_add({0}, {1}, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);")
   return atomic.end(i, j).sink(arg=KernelInfo(name="embedding_bwd", opts_to_apply=()))
 
-def _embedding_bwd(gradient:UOp, kernel:UOp) -> tuple:
+def _embedding_bwd(grad_emb:UOp, kernel:UOp) -> tuple:
   _, weight, idx = kernel.src
+  # weight is sharded on axis 0 (vocab_size), but NOT for grad since all devices need full grad
   grad_weight = Tensor.empty(weight.shape, dtype=weight.dtype, device=weight.device)
   # TODO: how do we remove this dumb kernel?
   grad_weight_uop = grad_weight.custom_kernel(fxn=_zero_kernel)[0].uop
-  grad_weight_uop = gradient.custom_kernel(grad_weight_uop, idx, fxn=_embedding_bwd_kernel)[1]
+  grad_weight_uop = grad_weight_uop.custom_kernel(grad_emb, idx, fxn=_embedding_bwd_kernel)[0]
   return (None, grad_weight_uop, None)
 
 def embedding_atomic(weight:Tensor, idx:Tensor) -> Tensor:
-  out = Tensor.empty(idx.shape + (weight.shape[-1],), dtype=weight.dtype, device=weight.device)
+  # output is sharded like idx (batch dimension) but has weight's dtype
+  out_shape = idx.shape + (weight.shape[-1],)
+  if not isinstance(idx.device, tuple):
+    out = Tensor.empty(out_shape, dtype=weight.dtype, device=idx.device)
+  else:
+    local_shape = tuple(s // len(idx.device) if i == idx.uop.axis else s for i, s in enumerate(out_shape))
+    out = Tensor(Tensor.empty(local_shape, dtype=weight.dtype, device=idx.device).uop.multi(idx.uop.axis), dtype=weight.dtype, device=idx.device)
   return Tensor.custom_kernel(out, weight, idx, fxn=_embedding_fwd_kernel, grad_fxn=_embedding_bwd)[0]
 
 class Embedding:
