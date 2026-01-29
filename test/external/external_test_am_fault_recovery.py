@@ -1,5 +1,6 @@
-import unittest, subprocess, os, time
-from extra.assembly.amd.autogen.rdna3.ins import *
+# ruff: noqa: F405
+import unittest, subprocess, os
+from extra.assembly.amd.autogen.rdna3.ins import *  # noqa: F403
 from extra.assembly.amd.dsl import s, v, Inst, NULL
 
 def assemble_kernel(insts:list[Inst], name:str="test") -> str:
