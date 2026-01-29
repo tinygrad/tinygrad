@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 import enum, collections
-from typing import Iterator, Union
+from typing import Iterator
 from tinygrad.helpers import colored
 from extra.assembly.amd.sqtt import PacketType, bits
 
@@ -64,15 +64,15 @@ class PMAHeader(PacketType):
   def tpc_id(self) -> int: return self.tpc_id_lo | (self.tpc_id_hi << 8)
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# 8-BYTE SAMPLE FORMAT (Ampere/Hopper, SM 8.x/9.0)
+# 8-BYTE SAMPLE FORMAT (Ampere/Ada/Hopper)
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class PMASampleAmpere8B(PacketType):
-  pc_raw     = bits[44:0]   # raw PC value (actual PC = pc_raw << 4)
-  stall_lo   = bits[47:45]  # stall key low 3 bits (byte5 >> 5)
-  stall_hi   = bits[49:48]  # stall key high 2 bits (byte6 & 3)
-  wave_id    = bits[55:50]  # warp/wave identifier (byte6 >> 2)
-  active     = bits[62:62]  # active flag (byte7 >> 6 & 1)
+  pc_raw     = bits[44:0]   # raw PC value (pc_offset = pc_raw << 4)
+  stall_lo   = bits[47:45]  # stall key low 3 bits
+  stall_hi   = bits[49:48]  # stall key high 2 bits
+  wave_id    = bits[55:50]  # warp/wave identifier
+  active     = bits[62:62]  # 1 if warp was executing, 0 if scheduled but not issued
   @property
   def pc_offset(self) -> int: return self.pc_raw << 4
   @property
@@ -81,22 +81,26 @@ class PMASampleAmpere8B(PacketType):
   def stall_reason(self) -> StallReason: return STALL_KEY_MAP_AMPERE.get(self.stall_key, StallReason.OTHER)
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# 9-BYTE SAMPLE FORMAT (Blackwell, SM 10.x)
+# 9-BYTE SAMPLE FORMAT (Blackwell+)
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class PMASampleBlackwell9B(PacketType):
-  stall_key  = bits[5:0]    # stall key (byte0 & 0x3f)
-  pc_lo      = bits[15:8]   # PC low byte (byte1)
-  pc_hi      = bits[23:16]  # PC high byte (byte2)
-  active     = bits[67:67]  # active flag ((byte8 >> 3) & 1)
+  stall_key  = bits[5:0]    # stall reason key
+  pc_1_4     = bits[39:8]   # PC bytes 1-4
+  pc_5       = bits[47:40]  # PC byte 5
+  pc_6       = bits[55:48]  # PC byte 6
+  pc_7_lo    = bits[60:56]  # PC byte 7 low 5 bits
+  wave_lo    = bits[7:6]    # wave_id low 2 bits
+  wave_hi    = bits[71:68]  # wave_id high 4 bits
+  active     = bits[67:67]  # 1 if warp was executing, 0 if scheduled but not issued
   @property
-  def pc_offset(self) -> int: return (self.pc_hi << 12) | (self.pc_lo << 4)
+  def pc_offset(self) -> int: return (self.pc_1_4 | self.pc_5 << 32 | self.pc_6 << 40 | self.pc_7_lo << 48) << 4
   @property
   def stall_reason(self) -> StallReason: return STALL_KEY_MAP_BLACKWELL.get(self.stall_key, StallReason.OTHER)
   @property
-  def wave_id(self) -> None: return None  # TODO: find correct 6-bit wave_id location for Blackwell
+  def wave_id(self) -> int: return (self.wave_hi << 2) | self.wave_lo
 
-PMASample = Union[PMASampleAmpere8B, PMASampleBlackwell9B]
+PMASample = PMASampleAmpere8B|PMASampleBlackwell9B
 
 def decode(data: bytes, sm_version: int = 0x800) -> Iterator[tuple[PMASample, int]]:
   use_9byte = sm_version >= 0xa04
@@ -137,8 +141,7 @@ def print_samples(samples:list[tuple[PMASample, int]]) -> None:
   for s, tpc_id in samples:
     gpc, tpc, sm = decode_tpc_id(tpc_id)
     stall_str = colored(f"{s.stall_reason.name:17}", STALL_COLORS.get(s.stall_reason, "white"))
-    wave_str = f"{s.wave_id:2d}" if s.wave_id is not None else "??"
-    print(f"pc=0x{s.pc_offset - base_pc:06x} {stall_str} ev={s.stall_key:2d} active={s.active} wave={wave_str} gpc={gpc} tpc={tpc} sm={sm}")
+    print(f"pc=0x{s.pc_offset - base_pc:06x} {stall_str} ev={s.stall_key:2d} active={s.active} wave={s.wave_id:2d} gpc={gpc} tpc={tpc} sm={sm}")
 
 def print_packets(data:bytes, sm_version:int=0x800) -> None:
   record_size = 9 if sm_version >= 0x890 else 8
