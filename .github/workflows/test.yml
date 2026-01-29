@@ -256,7 +256,7 @@ jobs:
       uses: ./.github/actions/setup-tinygrad
       with:
         key: unittest-13
-        pydeps: "pillow numpy ftfy regex pre-commit"
+        pydeps: "pillow ftfy regex pre-commit"
         deps: testing_unit
         llvm: 'true'
         amd: 'true'
