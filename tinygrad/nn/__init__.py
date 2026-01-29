@@ -330,13 +330,9 @@ def _embedding_bwd_kernel(grad_weight:UOp, grad_emb:UOp, idx:UOp) -> UOp:
 
 def _embedding_bwd(grad_emb:UOp, kernel:UOp) -> tuple:
   _, weight, idx = kernel.src
-  # grad_weight must match weight's sharding
-  if not isinstance(weight.device, tuple):
-    grad_weight = Tensor.empty(weight.shape, dtype=weight.dtype, device=weight.device)
-  else:
-    local_shape = list(weight.shape)
-    local_shape[weight.axis] //= len(weight.device)
-    grad_weight = Tensor(Tensor.empty(local_shape, dtype=weight.dtype, device=weight.device).uop.multi(weight.axis), dtype=weight.dtype, device=weight.device)
+  assert weight.axis == None
+  # weight is replicated, grad_weight should match
+  grad_weight = Tensor.empty(weight.shape, dtype=weight.dtype, device=weight.device)
   # TODO: how do we remove this dumb kernel?
   grad_weight_uop = grad_weight.custom_kernel(fxn=_zero_kernel)[0].uop
   grad_weight_uop = grad_weight_uop.custom_kernel(grad_emb, idx, fxn=_embedding_bwd_kernel)[0]
