@@ -98,10 +98,9 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
   is_cpu_with_threads = k.ren.has_threads and not k.ren.has_local
   cpu_matmul = is_cpu_with_threads and k.reduceop is not None  # scope CPU opts to matmul only
   # CPU matvec: when output is essentially 1D (only one non-trivial dim), it's memory-bound
-  # ILP from multiple accumulators is critical for hiding memory latency - more important than
-  # sequential access patterns. BLAS uses 12-16 accumulators for matvec.
   # Note: output_shape may have trailing 1s (batch dims), so count non-one dimensions
   cpu_matvec = cpu_matmul and sum(s != 1 for s in k.output_shape) == 1
+
   cpu_upcast_limit = 8 if cpu_matvec else (64 if cpu_matmul else 32)
 
   # if there are small dims with lots of valid masks, upcast them (they might be from Tensor.stack)
@@ -163,8 +162,8 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
         if k.unrollable_dims and s <= 3 and k.full_shape[k.unrollable_dims[-1]] <= 3:
           k.apply_opt(Opt(OptOps.UNROLL, len(k.unrollable_dims)-1, 0))
       else:
-        # CPU matvec with AVX-512: try larger UNROLL (16) for 512-bit SIMD, fallback to 8, then 4
-        unroll_splits = [16, 8, 4] if cpu_matvec and AVX512 else [4]
+        # CPU matvec: try larger UNROLL for more ILP in the reduce loop
+        unroll_splits = [16, 8, 4] if cpu_matvec else [4]
         for splits in unroll_splits:
           if k.full_shape[axis:=k.unrollable_dims[-1]]%splits == 0:
             k.apply_opt(Opt(OptOps.UNROLL, len(k.unrollable_dims)-1, splits))
