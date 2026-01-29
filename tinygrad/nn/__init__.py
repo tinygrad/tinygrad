@@ -314,21 +314,25 @@ def _embedding_fwd_kernel(emb:UOp, weight:UOp, idx:UOp) -> UOp:
   token_id = idx_flat[i].cast(dtypes.index)
   return emb_flat[i, j].store(weight[token_id, j]).end(i, j).sink(arg=KernelInfo(name="embedding_fwd"))
 
+def _zero_kernel(out:UOp) -> UOp:
+  i = UOp.range(out.size, 0)
+  return out.flatten()[i].store(0).end(i).sink(arg=KernelInfo(name="zero"))
+
 def _embedding_bwd_kernel(grad_emb:UOp, grad_weight:UOp, idx:UOp) -> UOp:
   idx_flat, grad_emb_flat = idx.flatten(), grad_emb.reshape((idx.size, grad_weight.shape[-1]))
   i = UOp.range(grad_emb_flat.shape[0], 0)  # batch_size * sequence_length
   j = UOp.range(grad_emb_flat.shape[1], 1)  # embed_size
   token_id = idx_flat[i].cast(dtypes.index)
-  # atomic scatter-add: grad_weight[token_id, j] += grad_flat[i, j]
+  # atomic scatter-add: grad_weight[token_id, j] += grad_emb_flat[i, j]
   atomic = UOp(Ops.CUSTOM, dtypes.void, (grad_weight.index(token_id, j, ptr=True), grad_emb_flat[i, j]),
                arg="__hip_atomic_fetch_add({0}, {1}, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);")
   return atomic.end(i, j).sink(arg=KernelInfo(name="embedding_bwd", opts_to_apply=()))
 
 def _embedding_bwd(gradient:UOp, kernel:UOp) -> tuple:
-  out, weight, idx = kernel.src
-  # TODO: this is terrible and needs to be cleaned up
+  _, weight, idx = kernel.src
   grad_weight = Tensor.empty(weight.shape, dtype=weight.dtype, device=weight.device)
-  grad_weight_uop = grad_weight.uop.after(grad_weight.assign(Tensor.zeros_like(grad_weight)).uop)
+  # TODO: how do we remove this dumb kernel?
+  grad_weight_uop = grad_weight.custom_kernel(fxn=_zero_kernel)[0].uop
   grad_weight_uop = gradient.custom_kernel(grad_weight_uop, idx, fxn=_embedding_bwd_kernel)[1]
   return (None, grad_weight_uop, None)
 
