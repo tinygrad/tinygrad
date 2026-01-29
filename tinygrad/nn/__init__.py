@@ -3,7 +3,7 @@ import math
 from tinygrad.tensor import Tensor
 from tinygrad.dtype import dtypes
 from tinygrad.device import is_dtype_supported
-from tinygrad.helpers import prod, make_tuple, flatten
+from tinygrad.helpers import prod, make_tuple, flatten, USE_ATOMICS
 from tinygrad.nn import optim, state, datasets  # noqa: F401
 
 class BatchNorm:
@@ -304,6 +304,40 @@ class RMSNorm:
     x = self._norm(x.float()).cast(x.dtype)
     return x if self.weight is None else x * self.weight
 
+from tinygrad.uop.ops import UOp, KernelInfo, CustomKernel
+from tinygrad.uop import Ops
+
+# how can we use the normal forward pass instead of this?
+def embedding_fwd_kernel(out:UOp, weight:UOp, idx:UOp) -> UOp:
+  idx_flat = idx.flatten()
+  embed_size = weight.shape[-1]
+  out_flat = out.reshape((idx_flat.shape[0], embed_size))
+  i = UOp.range(idx_flat.shape[0], 0)
+  j = UOp.range(embed_size, 1)
+  token_id = idx_flat[i].cast(dtypes.index)
+  return out_flat[i, j].store(weight[token_id, j]).end(i, j).sink(arg=KernelInfo(name="embedding_fwd"))
+
+def embedding_bwd_kernel(grad_weight:UOp, gradient:UOp, idx:UOp) -> UOp:
+  idx_flat = idx.flatten()
+  embed_size = grad_weight.shape[-1]
+  grad_flat = gradient.reshape((idx_flat.shape[0], embed_size))
+  i = UOp.range(idx_flat.shape[0], 0)
+  j = UOp.range(embed_size, 1)
+  token_id = idx_flat[i].cast(dtypes.index)
+  # atomic scatter-add: grad_weight[token_id, j] += grad_flat[i, j]
+  ptr = grad_weight.index(token_id, j, ptr=True)
+  val = grad_flat[i, j]
+  atomic = UOp(Ops.CUSTOM, dtypes.void, (ptr, val), arg="__hip_atomic_fetch_add({0}, {1}, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);")
+  return atomic.end(i, j).sink(arg=KernelInfo(name="embedding_bwd", opts_to_apply=()))
+
+def embedding_bwd(gradient:UOp, kernel:UOp) -> tuple:
+  out, weight, idx = kernel.src
+  # TODO: this is terrible and needs to be cleaned up
+  grad_weight = Tensor.empty(weight.shape, dtype=weight.dtype, device=weight.device)
+  grad_weight_uop = grad_weight.uop.after(grad_weight.assign(Tensor.zeros_like(grad_weight)).uop)
+  grad_weight_uop = grad_weight_uop.custom_kernel(gradient.contiguous(), idx.contiguous(), fxn=embedding_bwd_kernel)[0]
+  return (None, grad_weight_uop, None)
+
 class Embedding:
   """
   A simple lookup table that stores embeddings of a fixed dictionary and size.
@@ -316,14 +350,15 @@ class Embedding:
   ```
   """
   def __init__(self, vocab_size:int, embed_size:int):
-    self.vocab_sz, self.embed_sz, self.weight = vocab_size, embed_size, Tensor.glorot_uniform(vocab_size, embed_size)
+    self.weight = Tensor.glorot_uniform(vocab_size, embed_size)
 
   def __call__(self, idx:Tensor) -> Tensor:
-    if not hasattr(self, 'arange'): self.arange = Tensor.arange(self.vocab_sz, requires_grad=False, device=self.weight.device).unsqueeze(-1)
     if not dtypes.is_int(idx.dtype): raise TypeError(f"Expected integer dtype for index in embedding, got {idx.dtype}")
-    big_shp = idx.shape+(self.vocab_sz, self.embed_sz)
-    arange, idx, vals = self.arange.expand(big_shp), idx.reshape(idx.shape+(1, 1)).expand(big_shp), self.weight.expand(big_shp)
-    return (arange == idx).where(vals, 0).sum(-2, dtype=vals.dtype)
+    if USE_ATOMICS:
+      out = Tensor.empty(idx.shape + (self.weight.shape[-1],), dtype=self.weight.dtype, device=self.weight.device)
+      return Tensor.custom_kernel(out, self.weight, idx, fxn=embedding_fwd_kernel, grad_fxn=embedding_bwd)[0]
+    arange = Tensor.arange(self.weight.shape[0], requires_grad=False, device=self.weight.device)
+    return (arange == idx.unsqueeze(-1)).unsqueeze(-1).where(self.weight, 0).sum(-2, dtype=self.weight.dtype)
 
 class LSTMCell:
   """
