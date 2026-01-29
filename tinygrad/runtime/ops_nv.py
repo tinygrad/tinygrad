@@ -765,11 +765,14 @@ class NVDevice(HCQCompiled[NVSignal]):
 
   def _prof_setup_pc_sampling(self):
     is_bw = self.iface.compute_class >= nv_gpu.BLACKWELL_COMPUTE_A
-    PMASYS_BASE, PMAGPC_BASE, GR_GPC_BASE, GPC_BASE = (0x2b1000, 0x2b0000, 0x424000, 0x200000) if is_bw else (0x24a000, 0x244000, 0x419000, 0x180000)
+    PMASYS_BASE, PMAGPC_BASE, GR_GPC_BASE, GPC_BASE = (0x2b1000, 0x2b0000, 0x424000, 0x200000) if is_bw else (0x24a000, 0x244000, 0x419800, 0x180000)
 
     tpc_masks = [m for i in range(self.num_gpcs) if (m:=self.iface.rm_control(self.subdevice, nv_gpu.NV2080_CTRL_CMD_GR_GET_TPC_MASK,
       nv_gpu.NV2080_CTRL_GR_GET_TPC_MASK_PARAMS(gpcId=i)).tpcMask) > 0]
     tpc_cnt = [bin(mask).count('1') for mask in tpc_masks]
+
+    # enables pma on gpc
+    if not is_bw: self.reg_ops(*[(PMAGPC_BASE + gpc * 0x200, 0x100, 0x100) for gpc in range(len(tpc_masks))])
 
     # sets streaming bw for each gpc
     hs = nv_gpu.struct_NVB0CC_CTRL_HS_CREDITS_PARAMS(pmaChannelIdx=0, numEntries=len(tpc_masks))
@@ -787,12 +790,13 @@ class NVDevice(HCQCompiled[NVSignal]):
 
       def SM_REG(gpc, tpc, sm, reg): return GPC_BASE + gpc * 0x4000 + 0x800 + (tpc * self.num_sm_per_tpc + sm) * 0x200 + reg
     else:
-      # enables pma on gpc
-      self.reg_ops(*[(PMAGPC_BASE + gpc * 0x200, 0x100, 0x100) for gpc in range(len(tpc_masks))])
       self.reg_ops(*[(PMASYS_BASE + 0x65c + off * 4, 0xffffffff) for off in range(self.num_gpcs * 2)])
       self.reg_ops((PMASYS_BASE + 0x620, 0x2000007))
 
       def SM_REG(gpc, tpc, sm, reg): return GPC_BASE + gpc * 0x4000 + (self.num_tpc_per_gpc - tpc_cnt[gpc] + tpc) * 0x200 + [0x400, 0x1000][sm] + reg
+
+    # enable pc sampling for the context
+    self.reg_ops((GR_GPC_BASE + 0x304, 0x80808a))
 
     # sm config and enable
     self.reg_ops(*[op for gpc in range(len(tpc_masks)) for tpc in range(tpc_cnt[gpc]) for sm in range(self.num_sm_per_tpc) for op in [
@@ -800,10 +804,7 @@ class NVDevice(HCQCompiled[NVSignal]):
       (SM_REG(gpc, tpc, sm, 0x40), 0x19181716), (SM_REG(gpc, tpc, sm, 0x48), 0x1d1c1b1a), (SM_REG(gpc, tpc, sm, 0x50), 0x1e201f), # unk, counters?
       (SM_REG(gpc, tpc, sm, 0xec), 0x1), (SM_REG(gpc, tpc, sm, 0x6c), 0x2), (SM_REG(gpc, tpc, sm, 0x9c), 0x5),
       (SM_REG(gpc, tpc, sm, 0x108), 0xa0 if is_bw else 0x20), *([(SM_REG(gpc, tpc, sm, 0x120), 0x100000)] if is_bw else [])]])
-
-    # enable pc sampling for the context
-    self.reg_ops((GR_GPC_BASE + 0x304, 0x80808a))
-    self.reg_ops((GR_GPC_BASE + (0x3dc if is_bw else 0xbdc), 0x1), reg_type=1)
+    self.reg_ops((GR_GPC_BASE + 0x3dc, 0x1), reg_type=1)
 
   def reg_ops(self, *ops, reg_type=0, op=nv_gpu.NV2080_CTRL_GPU_REG_OP_WRITE_32):
     for i in range(0, len(ops), 124):
