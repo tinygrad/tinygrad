@@ -252,22 +252,22 @@ pm_remove_bufferize = PatternMatcher([
 ])
 
 def late_buffer_view(t:UOp, b:UOp):
-  if isinstance(b.device, str) and (b.device.startswith("DISK") or b.device.startswith("TINYFS")):
-    shape = b.shape
-    size = prod(shape)
+  if not (isinstance(b.device, str) and b.device.startswith(("DISK", "TINYFS"))): return b
+  shape = b.shape
+  size = prod(shape)
 
-    # walk up for the INDEX
-    x = t
-    while not any(u.op is Ops.INDEX for u in x.src):
-      assert x.op not in GroupOp.Elementwise, "can't buffer view elementwise"
-      x = x.src[0]
-    x = next(u for u in x.src if u.op is Ops.INDEX)
+  # walk up for the INDEX
+  x = t
+  while not any(u.op is Ops.INDEX for u in x.src):
+    assert x.op not in GroupOp.Elementwise, "can't buffer view elementwise"
+    x = x.src[0]
+  x = next(u for u in x.src if u.op is Ops.INDEX)
 
-    if len(shape) == 0: offset = x.src[1].arg
-    else: offset = max(sum(idx.vmin for idx in x.src[1:]), 0)
+  if len(shape) == 0: offset = x.src[1].arg
+  else: offset = max(sum(idx.vmin for idx in x.src[1:]), 0)
 
-    return b.replace(src=(UOp(Ops.BUFFER_VIEW, t.dtype, (x.base,), (size, offset), tag=t.tag),) + b.src[1:])
-  return b
+  return b.replace(src=(UOp(Ops.BUFFER_VIEW, t.dtype, (x.base,), (size, offset), tag=t.tag),) + b.src[1:])
+
 to_bufferview = PatternMatcher([
   (UPat((Ops.BITCAST, Ops.CONTIGUOUS), name="t").f(Ops.BUFFERIZE, allow_any_len=True, name="b"), late_buffer_view),
   (UPat((Ops.BITCAST, Ops.CONTIGUOUS)).f(Ops.BUFFER_VIEW, name="b"), lambda b: b.replace(src=b.src[0].src)),
