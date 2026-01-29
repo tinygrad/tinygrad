@@ -113,6 +113,7 @@ class CStyleLanguage(Renderer):
   smem_prefix_for_cast: bool = True
   arg_int_prefix: str = "const int"
   barrier: str = ""
+  image_sampler: str = ""
   code_for_workitem: dict[Literal["g", "l", "i"], Callable] = {}
   extra_args: list[str] = []
   float4: str|None = None
@@ -135,9 +136,7 @@ class CStyleLanguage(Renderer):
   extra_matcher = extra_pm
 
   def render_kernel(self, function_name:str, kernel:list[str], bufs:list[tuple[str,tuple[DType,bool]]], uops:list[UOp], prefix=None) -> str:
-    tmp = ""
-    if any(isinstance(dtype, ImageDType) for _,(dtype,_) in bufs):
-      tmp = "const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n"
+    tmp = self.image_sampler if any(isinstance(dtype, ImageDType) for _,(dtype,_) in bufs) else ""
     buftypes = [(name, self.render_dtype(dtype, mutable)+self.buffer_suffix if isinstance(dtype, (ImageDType, PtrDType)) else
                 self.arg_int_prefix if dtype == dtypes.int else None) for name,(dtype,mutable) in bufs]
     local_dims = [u.src[0] for u in uops if u.op is Ops.SPECIAL and u.arg[0] == "l"]
@@ -286,6 +285,7 @@ class ClangJITRenderer(ClangRenderer):
 class OpenCLRenderer(CStyleLanguage):
   device = "CL"
   has_aux = True
+  image_sampler = "const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n"
 
   # language options
   kernel_typedef = "__kernel void"
@@ -341,6 +341,7 @@ class MetalRenderer(CStyleLanguage):
   device = "METAL"
   shared_max = 32768
   def __init__(self): self.tensor_cores = tc.metal if hasattr(os, 'uname') and os.uname().machine == "arm64" else []
+  has_aux = True
 
   # language options
   kernel_typedef = "kernel void"
@@ -366,7 +367,22 @@ class MetalRenderer(CStyleLanguage):
 
   string_rewrite = PatternMatcher([
     (UPat(Ops.BITCAST, name="x"), lambda ctx,x: f"as_type<{ctx.render_dtype(x.dtype)}>(({ctx.render_dtype(x.src[0].dtype)})({ctx[x.src[0]]}))"),
+    (UPat(Ops.LOAD, dtype=dtypes.float.vec(4),
+          src=(UPat.var('buf').index(UPat.var('idx', dtypes.int.vec(2)), UPat.var("gate")), UPat.var("var"))),
+      lambda ctx,buf,idx,var,gate: (f"({ctx[gate]}?" +
+        (f"float4({ctx[buf]}.read(uint2({ctx[idx]})))" if buf.dtype.itemsize == 2 else f"{ctx[buf]}.read(uint2({ctx[idx]}))") +
+        f":{ctx[var]})")),
+    (UPat(Ops.LOAD, dtype=dtypes.float.vec(4), src=(UPat.var('buf').index(UPat.var('idx', dtypes.int.vec(2))),)),
+      lambda ctx,buf,idx: (f"float4({ctx[buf]}.read(uint2({ctx[idx]})))" if buf.dtype.itemsize == 2 else
+                           f"{ctx[buf]}.read(uint2({ctx[idx]}))")),
+    (UPat(Ops.STORE, src=(UPat.var('buf').index(UPat.var('idx', dtypes.int.vec(2)), allow_any_len=True),
+                          UPat.var("var", dtypes.float.vec(4))), allow_any_len=True),
+      lambda ctx,buf,idx,var: f"{ctx[buf]}.write({f'half4({ctx[var]})' if buf.dtype.itemsize == 2 else ctx[var]}, uint2({ctx[idx]}));"),
   ]) + base_rewrite
+
+  def render_dtype(self, dt:DType, mutable=True) -> str:
+    if isinstance(dt, ImageDType): return f"texture2d<{'half' if dt.itemsize == 2 else 'float'}, access::{'read_write' if mutable else 'read'}>"
+    return super().render_dtype(dt, mutable)
 
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None):
     prefix = ["#include <metal_stdlib>","using namespace metal;"]
@@ -378,6 +394,8 @@ class MetalRenderer(CStyleLanguage):
   mat_a.thread_elements()[1] = a[1]; mat_b.thread_elements()[1] = b[1]; mat_c.thread_elements()[1] = c[1];
   simdgroup_multiply_accumulate(mat_c, mat_a, mat_b, mat_c);\n  return {dstr_out}(mat_c.thread_elements()[0], mat_c.thread_elements()[1]);\n}}""")
     return super().render_kernel(function_name, kernel, bufs, uops, prefix)
+
+  def aux(self, uops:list[UOp]): return (tuple(u.dtype for u in uops if u.op == Ops.DEFINE_GLOBAL),)
 
 _nms = list("xyzwabcdefghijkl") + [f'v{i}' for i in range(16, 32)]
 
