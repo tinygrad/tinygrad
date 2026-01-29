@@ -304,30 +304,24 @@ class RMSNorm:
     x = self._norm(x.float()).cast(x.dtype)
     return x if self.weight is None else x * self.weight
 
-from tinygrad.uop.ops import UOp, KernelInfo, CustomKernel
-from tinygrad.uop import Ops
+from tinygrad.uop.ops import UOp, KernelInfo, Ops
 
 # how can we use the normal forward pass instead of this?
-def embedding_fwd_kernel(out:UOp, weight:UOp, idx:UOp) -> UOp:
-  idx_flat = idx.flatten()
-  embed_size = weight.shape[-1]
-  out_flat = out.reshape((idx_flat.shape[0], embed_size))
-  i = UOp.range(idx_flat.shape[0], 0)
-  j = UOp.range(embed_size, 1)
+def embedding_fwd_kernel(emb:UOp, weight:UOp, idx:UOp) -> UOp:
+  idx_flat, emb_flat = idx.flatten(), emb.reshape((idx.size, weight.shape[-1]))
+  i = UOp.range(emb_flat.shape[0], 0)  # batch_size * sequence_length
+  j = UOp.range(emb_flat.shape[1], 1)  # embed_size
   token_id = idx_flat[i].cast(dtypes.index)
-  return out_flat[i, j].store(weight[token_id, j]).end(i, j).sink(arg=KernelInfo(name="embedding_fwd"))
+  return emb_flat[i, j].store(weight[token_id, j]).end(i, j).sink(arg=KernelInfo(name="embedding_fwd"))
 
-def embedding_bwd_kernel(grad_weight:UOp, gradient:UOp, idx:UOp) -> UOp:
-  idx_flat = idx.flatten()
-  embed_size = grad_weight.shape[-1]
-  grad_flat = gradient.reshape((idx_flat.shape[0], embed_size))
-  i = UOp.range(idx_flat.shape[0], 0)
-  j = UOp.range(embed_size, 1)
+def embedding_bwd_kernel(grad_emb:UOp, grad_weight:UOp, idx:UOp) -> UOp:
+  idx_flat, grad_emb_flat = idx.flatten(), grad_emb.reshape((idx.size, grad_weight.shape[-1]))
+  i = UOp.range(grad_emb_flat.shape[0], 0)  # batch_size * sequence_length
+  j = UOp.range(grad_emb_flat.shape[1], 1)  # embed_size
   token_id = idx_flat[i].cast(dtypes.index)
   # atomic scatter-add: grad_weight[token_id, j] += grad_flat[i, j]
-  ptr = grad_weight.index(token_id, j, ptr=True)
-  val = grad_flat[i, j]
-  atomic = UOp(Ops.CUSTOM, dtypes.void, (ptr, val), arg="__hip_atomic_fetch_add({0}, {1}, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);")
+  atomic = UOp(Ops.CUSTOM, dtypes.void, (grad_weight.index(token_id, j, ptr=True), grad_emb_flat[i, j]),
+               arg="__hip_atomic_fetch_add({0}, {1}, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);")
   return atomic.end(i, j).sink(arg=KernelInfo(name="embedding_bwd", opts_to_apply=()))
 
 def embedding_bwd(gradient:UOp, kernel:UOp) -> tuple:
@@ -335,8 +329,12 @@ def embedding_bwd(gradient:UOp, kernel:UOp) -> tuple:
   # TODO: this is terrible and needs to be cleaned up
   grad_weight = Tensor.empty(weight.shape, dtype=weight.dtype, device=weight.device)
   grad_weight_uop = grad_weight.uop.after(grad_weight.assign(Tensor.zeros_like(grad_weight)).uop)
-  grad_weight_uop = grad_weight_uop.custom_kernel(gradient.contiguous(), idx.contiguous(), fxn=embedding_bwd_kernel)[0]
+  grad_weight_uop = gradient.custom_kernel(grad_weight_uop, idx, fxn=embedding_bwd_kernel)[1]
   return (None, grad_weight_uop, None)
+
+def embedding_atomic(weight:Tensor, idx:Tensor):
+  out = Tensor.empty(idx.shape + (weight.shape[-1],), dtype=weight.dtype, device=weight.device)
+  return Tensor.custom_kernel(out, weight, idx, fxn=embedding_fwd_kernel, grad_fxn=embedding_bwd)[0]
 
 class Embedding:
   """
@@ -354,9 +352,7 @@ class Embedding:
 
   def __call__(self, idx:Tensor) -> Tensor:
     if not dtypes.is_int(idx.dtype): raise TypeError(f"Expected integer dtype for index in embedding, got {idx.dtype}")
-    if USE_ATOMICS:
-      out = Tensor.empty(idx.shape + (self.weight.shape[-1],), dtype=self.weight.dtype, device=self.weight.device)
-      return Tensor.custom_kernel(out, self.weight, idx, fxn=embedding_fwd_kernel, grad_fxn=embedding_bwd)[0]
+    if USE_ATOMICS: return embedding_atomic(self.weight, idx)
     arange = Tensor.arange(self.weight.shape[0], requires_grad=False, device=self.weight.device)
     return (arange == idx.unsqueeze(-1)).unsqueeze(-1).where(self.weight, 0).sum(-2, dtype=self.weight.dtype)
 
