@@ -204,6 +204,7 @@ CCACHE = ContextVar("CCACHE", 1)
 ALLOW_TF32 = ContextVar("ALLOW_TF32", 0)
 # set to 0 to disable the scheduler cache
 SCACHE = ContextVar("SCACHE", 1)
+ASM_GEMM = ContextVar("ASM_GEMM", 0)
 
 @dataclass(frozen=True)
 class Metadata:
