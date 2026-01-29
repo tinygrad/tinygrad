@@ -169,25 +169,21 @@ class TestIndexing(unittest.TestCase):
     device = Device.DEFAULT if Device.DEFAULT == "AMD" else "NULL"
     vocab_size, embed_size = 1000, 128
     bs, seqlen = 4, 256
-    # correctness test (only on real device)
-    if device != "NULL":
-      idx = Tensor.randint(vocab_size, bs, seqlen, device=device)
-      emb = nn.Embedding(vocab_size, embed_size)
-      emb.weight = Tensor.randn(vocab_size, embed_size, device=device, requires_grad=True)
-      emb(idx).sum().backward()
-      expected_grad = np.zeros((vocab_size, embed_size), dtype=np.float32)
-      for i in idx.flatten().numpy(): expected_grad[i] += 1
-      np.testing.assert_allclose(emb.weight.grad.numpy(), expected_grad, rtol=1e-5, atol=1e-5)
-    # performance test
-    tokens = Tensor.empty(bs, seqlen, dtype=dtypes.int, device=device)
+    idx = Tensor.randint(vocab_size, bs, seqlen, device=device)
     emb = nn.Embedding(vocab_size, embed_size)
-    emb.weight = Tensor.empty(vocab_size, embed_size, dtype=dtypes.float, requires_grad=True, device=device).realize()
+    emb.weight = Tensor.randn(vocab_size, embed_size, device=device, requires_grad=True)
+    Tensor.realize(idx, emb.weight)
     GlobalCounters.reset()
-    emb(tokens).contiguous().contiguous_backward().sum().backward()
+    emb(idx).contiguous().contiguous_backward().sum().backward()
     emb.weight.grad.realize()
     bwd_ops = GlobalCounters.global_ops
     print(f"embedding bwd: {GlobalCounters.kernel_count} kernels, {bwd_ops:,} ops")
     self.assertLess(bwd_ops, 100_000_000, f"backward ops {bwd_ops:,} should be <100M with atomic scatter-add")
+    # correctness check only on real device
+    if device != "NULL":
+      expected_grad = np.zeros((vocab_size, embed_size), dtype=np.float32)
+      for i in idx.flatten().numpy(): expected_grad[i] += 1
+      np.testing.assert_allclose(emb.weight.grad.numpy(), expected_grad, rtol=1e-5, atol=1e-5)
 
 if __name__ == "__main__":
   unittest.main()
