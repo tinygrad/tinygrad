@@ -424,7 +424,7 @@ jobs:
         with:
           key: onnxoptc
           deps: testing
-          python-version: '3.11'
+          python-version: '3.12'
           llvm: 'true'
       - name: Test ONNX (CPU)
         run: CPU=1 CPU_LLVM=0 python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
@@ -452,7 +452,7 @@ jobs:
           key: onnxoptl
           deps: testing
           pydeps: "tensorflow==2.19"
-          python-version: '3.11'
+          python-version: '3.12'
           opencl: 'true'
       - name: Test ONNX (CL)
         run: CL=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
@@ -526,7 +526,7 @@ jobs:
       with:
         key: metal
         deps: testing
-        python-version: '3.11'
+        python-version: '3.12'
     - name: Test models (Metal)
       run: METAL=1 python -m pytest -n=auto test/models --durations=20
     - name: Test LLaMA compile speed
@@ -601,7 +601,7 @@ jobs:
       with:
         key: webgpu-minimal
         deps: testing_unit
-        python-version: '3.11'
+        python-version: '3.12'
         webgpu: 'true'
     - name: Check Device.DEFAULT (WEBGPU) and print some source
       run: |
@@ -678,7 +678,7 @@ jobs:
           key: rdna3-emu
           deps: testing_unit
           amd: 'true'
-          python-version: '3.13'
+          python-version: '3.14'
       - name: Verify AMD autogen is up to date
         run: |
           python -m extra.assembly.amd.generate
@@ -791,7 +791,7 @@ jobs:
       with:
         key: metal
         deps: testing
-        python-version: '3.11'
+        python-version: '3.12'
         amd: 'true'
         cuda: 'true'
         ocelot: 'true'
