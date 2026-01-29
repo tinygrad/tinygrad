@@ -1321,6 +1321,8 @@ def train_llama3():
   opt_base_learning_rate = LR
   opt_end_learning_rate = END_LR
 
+  Tensor.manual_seed(SEED)  # seed for weight initialization
+
   # ** init wandb **
   WANDB = getenv("WANDB")
   if WANDB:
