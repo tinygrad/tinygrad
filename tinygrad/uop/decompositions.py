@@ -377,6 +377,28 @@ def l2i(op: Ops, dt: DType, *uops:UOp):
     case Ops.MAX: return l2i(Ops.WHERE, dt, l2i(Ops.CMPLT, dt, *uops), b0, b1, a0, a1)
     case _: raise NotImplementedError(f"long decomposition of {op} unsupported")
 
+# ***** floats *****
+f2f_dt = { dtypes.half: dtypes.ushort, dtypes.float: dtypes.uint }
+
+def f2f(v, fr:DType, to:DType):
+  fs, fb, (fe, fm), ts, tb, (te, tm) = fr.bitsize, exponent_bias(fr), dtypes.finfo(fr), to.bitsize, exponent_bias(to), dtypes.finfo(to)
+  if fs < ts:
+    sign, nosign = (v & (1 << (fs-1))).cast(f2f_dt[to]) << (ts - fs), (v & ((1 << (fs-1)) - 1)).cast(f2f_dt[to])
+    norm = (nosign << (tm - fm)) + ((tb - fb) << tm)
+    exp = nosign >> fm
+    # TODO: subnormals
+    inf_or_nan = (nosign << (tm - fm)) | (((1 << te) - 1) << tm)
+    return (sign | exp.eq(0).where(nosign, exp.eq((1 << fe) - 1).where(inf_or_nan, norm))).bitcast(to)
+  else:
+    sign, nosign = (v >> (fs - ts)) & (1 << (ts - 1)), v & ((1 << (fs - 1)) - 1)
+    exp = (v >> fm) & ((1 << fe) - 1)
+    nosign_rounded = nosign + (1 << (fm - tm - 1))  # round to nearest
+    norm = ((nosign_rounded >> (fm - tm)) - ((fb - tb) << tm)).cast(f2f_dt[to])
+    inf_or_nan = (sign | ((nosign >> (fm - tm)) & ((1 << tm) - 1)) | (((1 << te) - 1) << tm)).cast(f2f_dt[to])
+    underflow, overflow = exp < (1 + (fb - tb)), exp > ((1 << te) - 2 + (fb - tb))
+    sign = sign.cast(f2f_dt[to])
+    return exp.eq((1 << fe) - 1).where(inf_or_nan, sign | underflow.where(UOp.const(f2f_dt[to], 0), overflow.where(UOp.const(f2f_dt[to], ((1 << te) - 1) << tm), norm)))
+
 # ***** decomposition patterns *****
 
 powers_of_two: dict[int, int] = {2**i:i for i in range(64)}
@@ -428,6 +450,12 @@ def get_late_rewrite_patterns(ops:tuple[Ops, ...], device:str, force_transcenden
   if Ops.FDIV in ops:
     pat += [(UPat.var("x").reciprocal(), lambda x: x.const_like(1).alu(Ops.FDIV, x))]
     pat += [(UPat.var("a", dtypes.floats) * UPat.const(dtypes.floats, 1).alu(Ops.FDIV, UPat.var("b")), lambda a,b: a.alu(Ops.FDIV, b))]
+  if not is_dtype_supported(dtypes.half, device) or dtypes.half in emulated_dtypes:
+    pat += [(UPat((*GroupOp.Defines, Ops.INDEX), name="x"), lambda x:
+             x.replace(dtype=dtypes.uint16.ptr(x.dtype.size)) if x.dtype.base == dtypes.half else None)]
+    pat += [(UPat(Ops.LOAD, dtypes.half, name="x"), lambda x: f2f(x.replace(dtype=dtypes.ushort), dtypes.half, dtypes.float))]
+    pat += [(UPat(GroupOp.ALU, dtypes.half, name="x"), lambda x: x.replace(dtype=dtypes.float))]
+    pat += [(UPat(Ops.STORE, src=(UPat.var("idx"), UPat.var("val", dtypes.float)), name='st'), lambda st,idx,val: st.replace(src=(idx,f2f(val.bitcast(dtypes.uint), dtypes.float, dtypes.half).bitcast(dtypes.ushort))))]
   if not is_dtype_supported(dtypes.long, device) or dtypes.long in emulated_dtypes:
     pat += [(UPat((*GroupOp.Defines, Ops.INDEX), name="x"), lambda x:
              x.replace(dtype=l2i_dt[x.dtype.base].ptr(x.dtype.size * 2)) if hasattr(x.dtype, 'size') and x.dtype.base in l2i_dt else None)]
