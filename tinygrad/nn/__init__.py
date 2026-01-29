@@ -307,14 +307,14 @@ class RMSNorm:
 from tinygrad.uop.ops import UOp, KernelInfo, Ops
 
 # how can we use the normal forward pass instead of this?
-def embedding_fwd_kernel(emb:UOp, weight:UOp, idx:UOp) -> UOp:
+def _embedding_fwd_kernel(emb:UOp, weight:UOp, idx:UOp) -> UOp:
   idx_flat, emb_flat = idx.flatten(), emb.reshape((idx.size, weight.shape[-1]))
   i = UOp.range(emb_flat.shape[0], 0)  # batch_size * sequence_length
   j = UOp.range(emb_flat.shape[1], 1)  # embed_size
   token_id = idx_flat[i].cast(dtypes.index)
   return emb_flat[i, j].store(weight[token_id, j]).end(i, j).sink(arg=KernelInfo(name="embedding_fwd"))
 
-def embedding_bwd_kernel(grad_emb:UOp, grad_weight:UOp, idx:UOp) -> UOp:
+def _embedding_bwd_kernel(grad_emb:UOp, grad_weight:UOp, idx:UOp) -> UOp:
   idx_flat, grad_emb_flat = idx.flatten(), grad_emb.reshape((idx.size, grad_weight.shape[-1]))
   i = UOp.range(grad_emb_flat.shape[0], 0)  # batch_size * sequence_length
   j = UOp.range(grad_emb_flat.shape[1], 1)  # embed_size
@@ -324,17 +324,17 @@ def embedding_bwd_kernel(grad_emb:UOp, grad_weight:UOp, idx:UOp) -> UOp:
                arg="__hip_atomic_fetch_add({0}, {1}, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);")
   return atomic.end(i, j).sink(arg=KernelInfo(name="embedding_bwd", opts_to_apply=()))
 
-def embedding_bwd(gradient:UOp, kernel:UOp) -> tuple:
+def _embedding_bwd(gradient:UOp, kernel:UOp) -> tuple:
   out, weight, idx = kernel.src
   # TODO: this is terrible and needs to be cleaned up
   grad_weight = Tensor.empty(weight.shape, dtype=weight.dtype, device=weight.device)
   grad_weight_uop = grad_weight.uop.after(grad_weight.assign(Tensor.zeros_like(grad_weight)).uop)
-  grad_weight_uop = gradient.custom_kernel(grad_weight_uop, idx, fxn=embedding_bwd_kernel)[1]
+  grad_weight_uop = gradient.custom_kernel(grad_weight_uop, idx, fxn=_embedding_bwd_kernel)[1]
   return (None, grad_weight_uop, None)
 
-def embedding_atomic(weight:Tensor, idx:Tensor):
+def embedding_atomic(weight:Tensor, idx:Tensor) -> Tensor:
   out = Tensor.empty(idx.shape + (weight.shape[-1],), dtype=weight.dtype, device=weight.device)
-  return Tensor.custom_kernel(out, weight, idx, fxn=embedding_fwd_kernel, grad_fxn=embedding_bwd)[0]
+  return Tensor.custom_kernel(out, weight, idx, fxn=_embedding_fwd_kernel, grad_fxn=_embedding_bwd)[0]
 
 class Embedding:
   """
