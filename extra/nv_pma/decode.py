@@ -69,14 +69,11 @@ class PMAHeader(PacketType):
 
 class PMASampleAmpere8B(PacketType):
   pc_raw     = bits[44:0]   # raw PC value (pc_offset = pc_raw << 4)
-  stall_lo   = bits[47:45]  # stall key low 3 bits
-  stall_hi   = bits[49:48]  # stall key high 2 bits
+  stall_key  = bits[49:45]  # stall reason key
   wave_id    = bits[55:50]  # warp/wave identifier
   active     = bits[62:62]  # 1 if warp was executing, 0 if scheduled but not issued
   @property
   def pc_offset(self) -> int: return self.pc_raw << 4
-  @property
-  def stall_key(self) -> int: return self.stall_lo | (self.stall_hi << 3)
   @property
   def stall_reason(self) -> StallReason: return STALL_KEY_MAP_AMPERE.get(self.stall_key, StallReason.OTHER)
 
@@ -86,19 +83,16 @@ class PMASampleAmpere8B(PacketType):
 
 class PMASampleBlackwell9B(PacketType):
   stall_key  = bits[5:0]    # stall reason key
-  pc_1_4     = bits[39:8]   # PC bytes 1-4
-  pc_5       = bits[47:40]  # PC byte 5
-  pc_6       = bits[55:48]  # PC byte 6
-  pc_7_lo    = bits[60:56]  # PC byte 7 low 5 bits
-  wave_lo    = bits[7:6]    # wave_id low 2 bits
-  wave_hi    = bits[71:68]  # wave_id high 4 bits
+  pc_raw     = bits[60:8]   # raw PC value (pc_offset = pc_raw << 4)
+  wave_hi    = bits[7:6]    # wave_id high 2 bits
+  wave_lo    = bits[71:68]  # wave_id low 4 bits
   active     = bits[67:67]  # 1 if warp was executing, 0 if scheduled but not issued
   @property
-  def pc_offset(self) -> int: return (self.pc_1_4 | self.pc_5 << 32 | self.pc_6 << 40 | self.pc_7_lo << 48) << 4
+  def pc_offset(self) -> int: return self.pc_raw << 4
   @property
   def stall_reason(self) -> StallReason: return STALL_KEY_MAP_BLACKWELL.get(self.stall_key, StallReason.OTHER)
   @property
-  def wave_id(self) -> int: return (self.wave_hi << 2) | self.wave_lo
+  def wave_id(self) -> int: return (self.wave_hi << 4) | self.wave_lo
 
 PMASample = PMASampleAmpere8B|PMASampleBlackwell9B
 
