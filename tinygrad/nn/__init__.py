@@ -330,8 +330,13 @@ def _embedding_bwd_kernel(grad_weight:UOp, grad_emb:UOp, idx:UOp) -> UOp:
 
 def _embedding_bwd(grad_emb:UOp, kernel:UOp) -> tuple:
   _, weight, idx = kernel.src
-  # weight is sharded on axis 0 (vocab_size), but NOT for grad since all devices need full grad
-  grad_weight = Tensor.empty(weight.shape, dtype=weight.dtype, device=weight.device)
+  # grad_weight must match weight's sharding
+  if not isinstance(weight.device, tuple):
+    grad_weight = Tensor.empty(weight.shape, dtype=weight.dtype, device=weight.device)
+  else:
+    local_shape = list(weight.shape)
+    local_shape[weight.axis] //= len(weight.device)
+    grad_weight = Tensor(Tensor.empty(local_shape, dtype=weight.dtype, device=weight.device).uop.multi(weight.axis), dtype=weight.dtype, device=weight.device)
   # TODO: how do we remove this dumb kernel?
   grad_weight_uop = grad_weight.custom_kernel(fxn=_zero_kernel)[0].uop
   grad_weight_uop = grad_weight_uop.custom_kernel(grad_emb, idx, fxn=_embedding_bwd_kernel)[0]
@@ -343,7 +348,8 @@ def embedding_atomic(weight:Tensor, idx:Tensor) -> Tensor:
   if not isinstance(idx.device, tuple):
     out = Tensor.empty(out_shape, dtype=weight.dtype, device=idx.device)
   else:
-    local_shape = tuple(s // len(idx.device) if i == idx.uop.axis else s for i, s in enumerate(out_shape))
+    local_shape = list(out_shape)
+    local_shape[idx.uop.axis] //= len(idx.device)
     out = Tensor(Tensor.empty(local_shape, dtype=weight.dtype, device=idx.device).uop.multi(idx.uop.axis), dtype=weight.dtype, device=idx.device)
   return Tensor.custom_kernel(out, weight, idx, fxn=_embedding_fwd_kernel, grad_fxn=_embedding_bwd)[0]
 
