@@ -344,6 +344,9 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
   def substitute(self, dvars:dict[UOp, UOp], name:str|None=None, extra_pm:PatternMatcher|None=None):
     dvars = {k:v for k,v in dvars.items() if k is not v}
     if len(dvars) == 0: return self
+    # check for infinite recursion: key appearing in value's transitive sources
+    for k,v in dvars.items():
+      if k in v.backward_slice: raise RuntimeError("infinite recursion in substitute")
     with Context(TRACK_MATCH_STATS=(0 if name is None else TRACK_MATCH_STATS.value)):
       return graph_rewrite(self, (extra_pm+_substitute) if extra_pm is not None else _substitute, dvars, bottom_up=True, name=name)
   # NOTE: this is not called by Tensor slice (Tensor handles UOps directly), but satisfies SupportsIndex for type checking
