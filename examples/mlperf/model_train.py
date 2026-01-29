@@ -1411,17 +1411,17 @@ def train_llama3():
     # https://docs.pytorch.org/docs/stable/generated/torch.nn.utils.clip_grad_norm_.html
     if not getenv("DISABLE_GRAD_CLIP_NORM"):
       total_norm = Tensor(0.0, dtype=dtypes.float32, device=optim.params[0].device)
-      for p in optim.params:
-        total_norm += p.grad.float().square().sum()
-      total_norm = total_norm.sqrt().contiguous()
-      for p in optim.params:
-        p.grad.assign((p.grad * (opt_gradient_clip_norm / (total_norm + 1e-6)).clamp(max_=1.0)).cast(p.dtype))
+      for g in grads:
+        total_norm += g.float().square().sum()
+      total_norm = total_norm.sqrt().contiguous().realize()
+      for g in grads:
+        g.assign((g * (opt_gradient_clip_norm / (total_norm + 1e-6)).clamp(max_=1.0)).cast(g.dtype)).realize()
 
     optim.step()
     scheduler.step()
 
-    for p in optim.params:
-      p.grad.assign(p.grad.zeros_like().contiguous())
+    for g in grads:
+      g.assign(g.zeros_like().contiguous()).realize()
 
     lr = optim.lr
     Tensor.realize(lr, *grads)
@@ -1430,7 +1430,7 @@ def train_llama3():
 
   @TinyJit
   @Tensor.train(False)
-  def eval_step(model, tokens:Tensor):
+  def eval_step(tokens:Tensor):
     if (DP := getenv("DP", 1)) > 1:
       device = tuple(f"{Device.DEFAULT}:{i}" for i in range(DP))
       tokens = tokens.shard(device, 0)
@@ -1476,8 +1476,7 @@ def train_llama3():
       st = time.perf_counter()
 
       stopped = False
-      minibatches = grad_acc if i >= 3 else 1
-      for _ in range(minibatches):
+      for _ in range(grad_acc):
         ist = time.perf_counter()
         try: tokens = next(train_iter)
         except StopIteration:
@@ -1499,7 +1498,7 @@ def train_llama3():
       gbs_time = gt - st
       optim_time = ot - gt
       data_time = dt - ist
-      dev_time = step_time - data_time * minibatches
+      dev_time = step_time - data_time * grad_acc
       if BENCHMARK: step_times.append(step_time)
 
       i += 1
@@ -1554,7 +1553,7 @@ def train_llama3():
       tqdm.write(f"evaluating {5760//EVAL_BS} batches of {EVAL_BS} sequences")
 
       for j,tokens in tqdm(enumerate(eval_iter), total=EVAL_SAMPLES//EVAL_BS):
-        eval_losses += eval_step(model, tokens).tolist()
+        eval_losses += eval_step(tokens).tolist()
 
         if BENCHMARK and (j+1) == min(BENCHMARK, EVAL_SAMPLES//EVAL_BS):
           return
