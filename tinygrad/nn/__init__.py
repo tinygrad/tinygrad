@@ -330,7 +330,11 @@ def _embedding_bwd_kernel(grad_weight:UOp, grad_emb:UOp, idx:UOp) -> UOp:
 
 def _embedding_bwd(grad_emb:UOp, kernel:UOp) -> tuple:
   _, weight, idx = kernel.src
-  assert weight.axis == None
+  # for multi-device: unshard inputs to one device
+  if isinstance(weight.device, tuple):
+    assert weight.axis == None
+    grad_emb = grad_emb.copy_to_device(weight.device)
+    idx = idx.copy_to_device(weight.device)
   # weight is replicated, grad_weight should match
   grad_weight = Tensor.empty(weight.shape, dtype=weight.dtype, device=weight.device)
   # TODO: how do we remove this dumb kernel?
