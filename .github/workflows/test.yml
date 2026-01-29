@@ -239,6 +239,7 @@ jobs:
     - name: Run mypy with lineprecision report
       run: |
         python -m mypy --lineprecision-report .
+        grep -v autogen lineprecision.txt | awk 'NR>2 {lines+=$2; precise+=$3; imprecise+=$4; any+=$5; empty+=$6} END {t=lines-empty; printf "TOTAL: %d lines, %d precise (%.1f%%), %d imprecise (%.1f%%), %d any (%.1f%%)\n", t, precise, 100*precise/t, imprecise, 100*imprecise/t, any, 100*any/t}'
         cat lineprecision.txt
     - name: Run TYPED=1
       run: CHECK_OOB=0 DEV=CPU TYPED=1 python test/test_tiny.py
