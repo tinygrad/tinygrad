@@ -171,11 +171,11 @@ class TestIndexing(unittest.TestCase):
     bs, seqlen = 4, 256
     idx = Tensor.randint(bs, seqlen, high=vocab_size, device=device)
     emb = nn.Embedding(vocab_size, embed_size)
-    emb.weight = Tensor.randn(vocab_size, embed_size, device=device, requires_grad=True)
-    gt = Tensor.randn(bs, seqlen, embed_size, device=device)
+    emb.weight = Tensor.ones(vocab_size, embed_size, device=device, requires_grad=True)
+    gt = Tensor.zeros(bs, seqlen, embed_size, device=device)
     Tensor.realize(idx, emb.weight, gt)
     GlobalCounters.reset()
-    loss = (emb(idx)-gt).square().mean()
+    loss = (emb(idx)-gt).square().sum()
     loss.backward()
     emb.weight.grad.realize()
     bwd_ops = GlobalCounters.global_ops
@@ -184,7 +184,7 @@ class TestIndexing(unittest.TestCase):
     # correctness check only on real device
     if device != "NULL":
       expected_grad = np.zeros((vocab_size, embed_size), dtype=np.float32)
-      for i in idx.flatten().numpy(): expected_grad[i] += 1
+      for i in idx.flatten().numpy(): expected_grad[i] += 2
       np.testing.assert_allclose(emb.weight.grad.numpy(), expected_grad, rtol=1e-5, atol=1e-5)
 
 if __name__ == "__main__":
