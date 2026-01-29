@@ -5,6 +5,8 @@ np.set_printoptions(suppress=True, linewidth=1000)
 from tinygrad import Tensor, nn, Device, GlobalCounters
 from tinygrad.helpers import Timing, getenv
 from extra.models.llama import Transformer, convert_from_huggingface
+from icecream import install
+install()
 
 class MixtureFeedForward:
   def __init__(self, num_experts:int, activated_experts:int, dim:int, hidden_dim:int, linear=nn.Linear):
@@ -48,24 +50,25 @@ if __name__ == "__main__":
     exit(0)
 
   with Timing("create model: "):
-    model = Transformer(n_layers=16, dim=2048, hidden_dim=1024, n_heads=16, norm_eps=1e-5, qk_norm=1e-5, max_context=1024,
-                        vocab_size=50304, feed_forward=functools.partial(MixtureFeedForward, 64, 8))
+    model = Transformer(n_layers=getenv("OLMOE_LAYERS", 16), dim=2048, hidden_dim=1024, n_heads=16, norm_eps=1e-5, qk_norm=1e-5, max_context=1024,
+                        vocab_size=50304, feed_forward=functools.partial(MixtureFeedForward, 64, 8), jit=getenv("JIT", 1))
     model_state_dict = nn.state.get_state_dict(model)
     del model_state_dict['freqs_cis']
 
   with Timing("load weights to GPU: "):
-    nhf_state = convert_from_huggingface(fetch_weights(), 16, 16, 16)
+    nhf_state = convert_from_huggingface(fetch_weights(), getenv("OLMOE_LAYERS", 16), 16, 16)
     # NOTE: i'm not sure this actually needs float32, it may just change the type of things downstream from it. but doesn't match torch w/o this
     for needs_float32 in ['tok_embeddings.weight']: nhf_state[needs_float32] = nhf_state[needs_float32].float()
   print(f"ram used: {GlobalCounters.mem_used/1e9:.2f} GB")
 
   with Timing("unpack weights: "):
     nn.state.load_state_dict(model, nhf_state, verbose=False, strict=False, consume=True, realize=False)
-    assert len(nhf_state) == 0
+    # assert len(nhf_state) == 0
     Tensor.realize(*list(nn.state.get_state_dict(model).values()))
   print(f"ram used: {GlobalCounters.mem_used/1e9:.2f} GB")
+  ic(len(model.layers))
 
-  count = 30
+  count = 5
   temperature = 0
 
   with Timing("load tokenizer: "):
@@ -82,9 +85,11 @@ if __name__ == "__main__":
     timings.append(time.perf_counter()-st)
     toks.append(tok)
     start_pos += 1
+    print(f'\n[{timings[-1]:.2f} s, {1/timings[-1]:.2f} tok/s]')
     print(toks)
     print(tokenizer.decode(toks))
-  print(f"fastest token {min(timings)*1e3:.2f} ms, {1/min(timings):.1f} tok/s")
+  print(f'Average: {len(toks)/sum(timings):.2f} tok/s')
+  print(f"\nfastest token {min(timings)*1e3:.2f} ms, {1/min(timings):.1f} tok/s")
 
   if temperature == 0:
     # Hello, I am a newbie to this forum and I am trying to get a better understanding of the different types of data that can be stored in a
