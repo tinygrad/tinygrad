@@ -46,6 +46,7 @@ jobs:
       uses: ./.github/actions/setup-tinygrad
       with:
         deps: docs
+        pydeps: "capstone torch"
     - name: Build wheel and show size
       run: |
         pip install build
