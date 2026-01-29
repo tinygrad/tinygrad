@@ -98,7 +98,7 @@ jobs:
       with:
         key: torch-backend-pillow-torchvision-et-pt
         deps: testing_minimal
-        pydeps: "pillow torchvision"
+        pydeps: "pillow torchvision expecttest"
         llvm: 'true'
     - name: Install ninja
       run: |
