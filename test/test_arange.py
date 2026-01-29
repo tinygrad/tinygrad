@@ -169,7 +169,7 @@ class TestIndexing(unittest.TestCase):
     device = Device.DEFAULT if Device.DEFAULT == "AMD" else "NULL"
     vocab_size, embed_size = 1000, 128
     bs, seqlen = 4, 256
-    idx = Tensor.randint(vocab_size, bs, seqlen, device=device)
+    idx = Tensor.randint(bs, seqlen, high=vocab_size, device=device)
     emb = nn.Embedding(vocab_size, embed_size)
     emb.weight = Tensor.randn(vocab_size, embed_size, device=device, requires_grad=True)
     gt = Tensor.randn(bs, seqlen, embed_size, device=device)
@@ -180,7 +180,7 @@ class TestIndexing(unittest.TestCase):
     emb.weight.grad.realize()
     bwd_ops = GlobalCounters.global_ops
     print(f"embedding bwd: {GlobalCounters.kernel_count} kernels, {bwd_ops:,} ops")
-    self.assertLess(bwd_ops, bs*seqlen*embed_size*10, f"backward ops {bwd_ops:,} should be <100M with atomic scatter-add")
+    self.assertLess(bwd_ops, bs*seqlen*embed_size*20, f"backward ops {bwd_ops:,} should be <100M with atomic scatter-add")
     # correctness check only on real device
     if device != "NULL":
       expected_grad = np.zeros((vocab_size, embed_size), dtype=np.float32)

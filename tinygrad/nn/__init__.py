@@ -337,12 +337,11 @@ def embedding_bwd_kernel(grad_weight:UOp, gradient:UOp, idx:UOp) -> UOp:
 
 def embedding_bwd(gradient:UOp, kernel:UOp) -> tuple:
   out, weight, idx = kernel.src
-  device = Tensor(weight).device
-  grad_weight_uop = Tensor.empty(weight.shape, dtype=weight.dtype, device=device).uop
+  grad_weight_uop = Tensor.empty(weight.shape, dtype=weight.dtype, device=weight.device).uop
   # zero kernel
   zero_k = UOp(Ops.CUSTOM_KERNEL, src=(grad_weight_uop,), arg=CustomKernel(fxn=zero_kernel, grad_fxn=None))
   grad_weight_uop = grad_weight_uop.after(zero_k)
-  # atomic add kernel (gradient and idx are already contiguous from forward)
+  # atomic add kernel
   bwd_k = UOp(Ops.CUSTOM_KERNEL, src=(grad_weight_uop, gradient.contiguous(), idx.contiguous()), arg=CustomKernel(fxn=embedding_bwd_kernel, grad_fxn=None))
   grad_weight_uop = grad_weight_uop.after(bwd_k)
   return (None, grad_weight_uop, None)
