@@ -1,12 +1,22 @@
+from __future__ import annotations
 import itertools
 from tinygrad.uop.ops import UOp, Ops, PatternMatcher, UPat
 from tinygrad.uop import X86GroupOp
-from tinygrad.renderer.x86 import ISARenderer, Register
 from tinygrad.dtype import dtypes, DType, PtrDType
+from dataclasses import dataclass, field
+
+@dataclass(frozen=True)
+class Register:
+  name: str
+  index: int
+  cons: tuple[Register, ...] = field(default_factory=tuple)
+
+  def __str__(self): return self.name
+  def __lt__(self, other): return self.index < other.index if other is not None else False
 
 # loosely based on: https://bernsteinbear.com/assets/img/register-spilling-range-splitting-ssa.pdf
 class RegallocContext:
-  def __init__(self, uops:list[UOp], ren:ISARenderer, stack_size:int=0):
+  def __init__(self, uops:list[UOp], isel:PatternMatcher, stack_ptr:UOp, stack_size:int=0):
     self.live_range: dict[Register, list[int]] = {}
     self.live: dict[Register, Register] = {}
     self.spills: dict[Register, UOp] = {}
@@ -14,8 +24,9 @@ class RegallocContext:
     self.vreg_to_rewrite: dict[Register, UOp] = {}
     self.live_ins: list[dict[Register, Register]] = []
     self.idx = itertools.count()
-    self.stack_size: int = stack_size
-    self.ren = ren
+    self.isel = isel
+    self.stack_ptr = stack_ptr
+    self.stack_size = stack_size
     # live ranges, first pass builds ranges
     for i,u in enumerate(uops):
       if u.op in (Ops.NOOP, Ops.AFTER): continue
@@ -34,17 +45,17 @@ class RegallocContext:
 # nasty hacks to deal with pointers
 def assign(ctx:RegallocContext, x:UOp, reg:Register):
   dt = dtypes.uint64 if isinstance(x.dtype, PtrDType) else x.dtype
-  ret = ctx.ren.isel_matcher.rewrite(UOp(Ops.ASSIGN, dt, (x,), reg))
+  ret = ctx.isel.rewrite(UOp(Ops.ASSIGN, dt, (x,), reg))
   assert ret is not None
   return ret.replace(dtype=x.dtype)
 def load(ctx:RegallocContext, dt:DType, disp:UOp, reg:Register):
   ndt = dtypes.uint64 if isinstance(dt, PtrDType) else dt
-  ret = ctx.ren.isel_matcher.rewrite(ctx.ren.stack_pointer().index(disp).load(dtype=ndt, arg=reg))
+  ret = ctx.isel.rewrite(ctx.stack_ptr.index(disp).load(dtype=ndt, arg=reg))
   assert ret is not None
   return ret.replace(dtype=dt)
 def store(ctx:RegallocContext, disp:UOp, x:UOp):
   nx = x.replace(dtype=dtypes.uint64 if isinstance(x.dtype, PtrDType) else x.dtype)
-  ret = ctx.ren.isel_matcher.rewrite(ctx.ren.stack_pointer().index(disp).store(nx))
+  ret = ctx.isel.rewrite(ctx.stack_ptr.index(disp).store(nx))
   assert ret is not None
   return ret.replace(src=(s if s is not nx else x for s in ret.src))
 
@@ -81,8 +92,9 @@ def regalloc(ctx:RegallocContext, x:UOp, i:int) -> tuple[UOp, list[UOp]]:
     # if no cons it's a real register, so it can only be assigned to itself
     cons = v.cons or (v,)
     # two address instructions (src is used in dest) can only coalesce reused src. reused src goes first to get priority in case of a tiebreak
-    if (j:=ctx.ren.two_address(x)) is not None:
-      cons = (ctx.live[ctx.rewrite_to_vreg[x.src[j]]],) + \
+    # TODO: make this backend independent
+    if x.op in X86GroupOp.TwoAddress1st:
+      cons = (ctx.live[ctx.rewrite_to_vreg[x.src[0]]],) + \
         tuple(r for r in cons if r not in tuple(ctx.live.get(ctx.rewrite_to_vreg[s]) for s in x.src))
     ctx.live[v] = alloc(ctx, cons, i+1)
 

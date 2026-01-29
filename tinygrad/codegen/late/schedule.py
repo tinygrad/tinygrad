@@ -1,6 +1,7 @@
 from tinygrad.uop.ops import UOp, AllOps
-from tinygrad.renderer.isa import Register
+from tinygrad.codegen.late.regalloc import Register
 from dataclasses import dataclass
+from typing import Callable
 import math
 
 # this is an execution unit
@@ -31,19 +32,21 @@ class MachineInfo:
   issue_width: int # number of micro-ops that can be issued per cycle
   mop_buffer_size: int # number of micro-ops that can be buffered (this is the minimum between the size of the reorder buffer,
                        # entries in register file and size of the unified reservation station), for an in-order core this number is 0
+  op_info: dict[AllOps, Callable] # op scheduling info
 
 class MachineScheduler:
-  def __init__(self, sink:UOp, mach_info: MachineInfo, op_info: dict[AllOps, OpInfo]):
-    self.op_info, self.mach_info = op_info, mach_info
+  def __init__(self, sink:UOp, mach_info: MachineInfo):
     self.consumers = sink.get_consumer_map()
+    self.mach_info = mach_info
+    self.info: dict[UOp, OpInfo] = {x: mach_info.op_info[x.op](x) for x in self.consumers if x.op in mach_info.op_info}
     # path from all dependencies of x to x (exclusive) with longest latency
     self.depth: dict[UOp, int] = {}
-    for x in self.consumers: self.depth[x] = max([self.depth[s] + op_info[s.op].latency for s in x.src], default=0)
+    for x in self.consumers: self.depth[x] = max([self.depth[s] + self.info[s].latency for s in x.src], default=0)
     # path from all dependents of x to x (exclusive) with longest latency
     self.height: dict[UOp, int] = {}
-    for x,y in reversed(self.consumers.items()): self.height[x] = max([self.height[c] + op_info[c.op].latency for c in y], default=0)
+    for x,y in reversed(self.consumers.items()): self.height[x] = max([self.height[c] + self.info[c].latency for c in y], default=0)
     # map from resource to total count
-    self.res_count = {res:0 for info in op_info.values() for res,_,_ in info.resources}
+    self.res_count = {res:0 for info in self.info.values() for res,_,_ in info.resources}
     # map from unit to next cycle when it's free, used for hazard check
     self.unit_ready = {unit:0 for res in self.res_count for unit in res.units}
 
@@ -82,24 +85,24 @@ class MachineScheduler:
     # difference in pressure above limit, any reduction or increase below limit is ignored
     return sum(max(new_reg_set[r], len(r)) - max(self.reg_set[r], len(r)) for r in new_reg_set)
   # avoid x if it uses an oversubscribed resource TODO: why does llvm accumulate this?
-  def check_res_pressure(self, x:UOp) -> int: return next((end for res,_,end in self.op_info[x.op].resources if res is self.crit_res), 0)
+  def check_res_pressure(self, x:UOp) -> int: return next((end for res,_,end in self.info[x].resources if res is self.crit_res), 0)
   # avoid x if it's in the critical path and a predecessor was issued recently, only relevant for out-of-order as otherwise x isn't ready
   def check_lower_bound_latency(self, x:UOp) -> int: return max(self.depth[x] - self.sched_latency, 0)
   # favor x according to its remaining latency chain
   def check_height(self, x:UOp) -> int: return -self.height[x]
 
   def pick(self) -> UOp|None:
-    # check whether this op can be issued this cycle
+    # check whether x can be issued this cycle
     def _is_ready(x:UOp) -> bool:
       # check issue width can fit new micro ops unless nothing has been issued this cycle
       # in that case an expensive op with micro ops > issue width can be issued, but in multiple cycles
-      if self.cycle_mops > 0 and self.cycle_mops + self.op_info[x.op].micro_ops > self.mach_info.issue_width: return False
+      if self.cycle_mops > 0 and self.cycle_mops + self.info[x].micro_ops > self.mach_info.issue_width: return False
       # these checks are skipped for out-of-order cores as then x can still be dispatched this cycle regardless of hazards
       if self.mach_info.mop_buffer_size == 0:
         # data hazard (operands not ready) check
         if self.pending[x] < self.cycle: return False
         # structural hazard (resources not available) check
-        if any(self.cycle < min(self.unit_ready[u] for u in res.units) for res,_,_ in self.op_info[x.op].resources): return False
+        if any(self.cycle < min(self.unit_ready[u] for u in res.units) for res,_,_ in self.info[x].resources): return False
       return True
     # pick the best according to heuristics
     return min([x for x in self.pending if _is_ready(x)], key=lambda k: (self.check_reg_pressure(k), self.check_res_pressure(k),
@@ -118,26 +121,26 @@ class MachineScheduler:
       self.sched[x] = max(self.pending.pop(x), self.cycle)
       # add consumers whose dependencies have all been scheduled to pending, and the first cycle when all its operands are ready
       for v in self.consumers[x]:
-        if set(v.src).issubset(self.sched): self.pending[v] = max(self.sched[s] + self.op_info[s.op].latency for s in v.src)
+        if set(v.src).issubset(self.sched): self.pending[v] = max(self.sched[s] + self.info[s].latency for s in v.src)
 
       if self.mach_info.mop_buffer_size == 0: assert self.pending[x] <= next_cycle
       # when is mop_buffer_size == 1?
       elif self.mach_info.mop_buffer_size == 1: next_cycle = max(next_cycle, self.pending[x])
       # if this is an in-order resource in out-of-order core account for likely stall cycles
-      elif any(res.buffer_size == 1 for res,_,_ in self.op_info[x.op].resources): next_cycle = max(next_cycle, self.pending[x])
+      elif any(res.buffer_size == 1 for res,_,_ in self.info[x].resources): next_cycle = max(next_cycle, self.pending[x])
 
-      self.total_mops += self.op_info[x.op].micro_ops
+      self.total_mops += self.info[x].micro_ops
       # if this threshold is hit the resource is less critical than mop issue
       if self.crit_res is not None and self.total_mops * self.mop_factor - self.res_count[self.crit_res] >= self.latency_factor: self.crit_res = None
       # update resources
-      for res,start,end in self.op_info[x.op].resources:
+      for res,start,end in self.info[x].resources:
         self.res_count[res] += self.latency_factor // len(res.units) * (end - start)
         if self.res_count[res] > self.crit_count: self.crit_res = res
 
       # update the cycle when unit in resource is released by x, only relevant for in-order
       if self.mach_info.mop_buffer_size == 0:
-        #next_cycle = max(next_cycle, min(self.unit_ready[u] for res,_,_ in self.op_info[x.op].resources for u in res.units))
-        for res,_,end in self.op_info[x.op].resources:
+        #next_cycle = max(next_cycle, min(self.unit_ready[u] for res,_,_ in self.info[x].resources for u in res.units))
+        for res,_,end in self.info[x].resources:
           unit = min([u for u in res.units], key=lambda k: self.unit_ready[k])
           # TODO: when is unit_ready ever greater for in-order?
           self.unit_ready[unit] = max(self.unit_ready[unit], next_cycle + end)
@@ -146,7 +149,7 @@ class MachineScheduler:
       # if a stall occured, bump until stall clears
       if next_cycle > self.cycle: self.bump_cycle(next_cycle)
 
-    self.cycle_mops += self.op_info[x.op].micro_ops
+    self.cycle_mops += self.info[x].micro_ops
     while self.cycle_mops >= self.mach_info.issue_width:
       next_cycle += 1
       self.bump_cycle(next_cycle)
