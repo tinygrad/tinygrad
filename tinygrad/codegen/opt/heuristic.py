@@ -98,10 +98,11 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
   is_cpu_with_threads = k.ren.has_threads and not k.ren.has_local
   cpu_matmul = is_cpu_with_threads and k.reduceop is not None  # scope CPU opts to matmul only
   # CPU matvec: when output is essentially 1D (only one non-trivial dim), it's memory-bound
-  # Upcasting output causes strided reads across matrix rows which kills cache performance
+  # ILP from multiple accumulators is critical for hiding memory latency - more important than
+  # sequential access patterns. BLAS uses 12-16 accumulators for matvec.
   # Note: output_shape may have trailing 1s (batch dims), so count non-one dimensions
   cpu_matvec = cpu_matmul and sum(s != 1 for s in k.output_shape) == 1
-  cpu_upcast_limit = 4 if cpu_matvec else (64 if cpu_matmul else 32)
+  cpu_upcast_limit = 8 if cpu_matvec else (64 if cpu_matmul else 32)
 
   # if there are small dims with lots of valid masks, upcast them (they might be from Tensor.stack)
   to_upcast: list[int] = []
@@ -119,9 +120,9 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
   upcasted_axis: set[int] = set()
   # CPU: try larger upcast amounts first (8,4) to create bigger tiles for better cache efficiency
   # BEAM search found that 4x16 tiles beat 4x4 tiles + UNROLL for CPU matmul
-  # CPU matvec: limit to 4 accumulators for ILP while reducing cache thrashing from strided reads
+  # CPU matvec: use more accumulators [16,12,8] for ILP to hide memory latency (like BLAS/MKL)
   # CPU matvec: lower threshold (16) to ensure small outputs still get ILP - memory-bound ops need latency hiding
-  upcast_amounts = ([128] if not len(upcasted_axis) else []) if is_dsp else ([4,3] if cpu_matvec else ([8,4,3] if cpu_matmul else [3,4]))
+  upcast_amounts = ([128] if not len(upcasted_axis) else []) if is_dsp else ([8,4] if cpu_matvec else ([8,4,3] if cpu_matmul else [3,4]))
   upcast_threshold = 16 if cpu_matvec else 1024
   while resolve(prod(k.output_shape[i] for i in k.upcastable_dims) >= upcast_threshold) and (k.upcast_size() < cpu_upcast_limit):
     xb_choices = []
