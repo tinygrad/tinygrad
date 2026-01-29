@@ -199,6 +199,8 @@ TUPLE_ORDER = ContextVar("TUPLE_ORDER", 1)
 CCACHE = ContextVar("CCACHE", 1)
 # allow tf32 to be used on NVIDIA GPUs
 ALLOW_TF32 = ContextVar("ALLOW_TF32", 0)
+# allow use of atomics for embedding backward
+USE_ATOMICS = ContextVar("USE_ATOMICS", 0)
 
 @dataclass(frozen=True)
 class Metadata:
