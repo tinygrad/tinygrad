@@ -344,19 +344,9 @@ def ggml_data_to_tensor(t: Tensor, n: int, ggml_type: int) -> Tensor:
       qh = blocks[:,16:48]  # 32 bytes: high bits for 256 elements
       qs = blocks[:,48:176].reshape(-1, 4, 32)  # 128 bytes: 4 groups of 32 bytes
       ql = Tensor.stack(qs.bitwise_and(0xF), qs.rshift(4), dim=2).reshape(-1, 4, 64)
-      qh_bits = Tensor.stack(*[qh.bitwise_and(1 << i).rshift(i) for i in range(8)], dim=-1).reshape(-1, 32, 8).transpose(-2, -1).reshape(-1, 8, 32)
-      # qh_bits[:,i,:] contains the i-th bit of all 32 qh bytes = high bits for 32 elements across all groups
-      # Group 0 uses bits 0,1; Group 1 uses bits 2,3; Group 2 uses bits 4,5; Group 3 uses bits 6,7
-      # Within each group: first 32 elements use even bit, second 32 use odd bit
-      # Stack and reshape to get elements 0-31 followed by 32-63 for each group
-      qh_combined = Tensor.stack(
-        qh_bits[:,0].cat(qh_bits[:,1], dim=-1).reshape(-1, 64),
-        qh_bits[:,2].cat(qh_bits[:,3], dim=-1).reshape(-1, 64),
-        qh_bits[:,4].cat(qh_bits[:,5], dim=-1).reshape(-1, 64),
-        qh_bits[:,6].cat(qh_bits[:,7], dim=-1).reshape(-1, 64),
-        dim=1
-      ).lshift(4)
-      q = (ql + qh_combined.cast(dtypes.float32)).reshape(-1, 8, 32)
+      qh_bits = Tensor.stack(*[qh.bitwise_and(1 << i).rshift(i) for i in range(8)], dim=-1).reshape(-1, 32, 8).transpose(-2, -1).reshape(-1, 4, 2, 32)
+      # qh_bits is (blocks, 4, 2, 32) where dim 2 holds bit pairs for each group
+      q = (ql + qh_bits.reshape(-1, 4, 64).lshift(4).cast(dtypes.float32)).reshape(-1, 8, 32)
       return (d * sc.unsqueeze(-1) * q - dmin * mn.unsqueeze(-1)).flatten(-2)
     if ggml_type == 14:
       xl, xh = q_to_uint8(blocks[:,:128].reshape((-1, 2, 64)), 4), q_to_uint8(blocks[:,128:192].reshape((-1, 2, 32)), 2).lshift(4)
