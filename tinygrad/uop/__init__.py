@@ -44,7 +44,7 @@ class Ops(FastEnum):
   INDEX = auto()
 
   # load/store before math
-  LOAD = auto(); STORE = auto(); ATOMIC_ADD = auto()
+  LOAD = auto(); STORE = auto()
 
   # ** 4 -- math **
 

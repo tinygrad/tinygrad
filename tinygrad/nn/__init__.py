@@ -307,7 +307,7 @@ class RMSNorm:
 from tinygrad.uop.ops import UOp, KernelInfo, CustomKernel
 from tinygrad.uop import Ops
 
-# how can we just use the normal forward pass instead of this?
+# how can we use the normal forward pass instead of this?
 def embedding_fwd_kernel(out:UOp, weight:UOp, idx:UOp) -> UOp:
   idx_flat = idx.flatten()
   embed_size = weight.shape[-1]
@@ -317,6 +317,7 @@ def embedding_fwd_kernel(out:UOp, weight:UOp, idx:UOp) -> UOp:
   token_id = idx_flat[i].cast(dtypes.index)
   return out_flat[i, j].store(weight[token_id, j]).end(i, j).sink(arg=KernelInfo(name="embedding_fwd"))
 
+# how can we use Tensor.zeros instead of this?
 def zero_kernel(out:UOp) -> UOp:
   i = UOp.range(out.size, 0)
   return out.flatten()[i].store(0).end(i).sink(arg=KernelInfo(name="zero"))
@@ -329,19 +330,20 @@ def embedding_bwd_kernel(grad_weight:UOp, gradient:UOp, idx:UOp) -> UOp:
   j = UOp.range(embed_size, 1)
   token_id = idx_flat[i].cast(dtypes.index)
   # atomic scatter-add: grad_weight[token_id, j] += grad_flat[i, j]
-  ptr = grad_weight[token_id, j]
+  ptr = grad_weight.index(token_id, j, ptr=True)
   val = grad_flat[i, j]
-  atomic = UOp(Ops.ATOMIC_ADD, dtypes.void, (ptr, val))
-  return atomic.end(i, j).sink(arg=KernelInfo(name="embedding_bwd"))
+  atomic = UOp(Ops.CUSTOM, dtypes.void, (ptr, val), arg="__hip_atomic_fetch_add({0}, {1}, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);")
+  return atomic.end(i, j).sink(arg=KernelInfo(name="embedding_bwd", opts_to_apply=()))
 
 def embedding_bwd(gradient:UOp, kernel:UOp) -> tuple:
   out, weight, idx = kernel.src
-  grad_weight_uop = Tensor.empty(weight.shape, dtype=weight.dtype, device=weight.device).uop
+  device = Tensor(weight).device
+  grad_weight_uop = Tensor.empty(weight.shape, dtype=weight.dtype, device=device).uop
   # zero kernel
   zero_k = UOp(Ops.CUSTOM_KERNEL, src=(grad_weight_uop,), arg=CustomKernel(fxn=zero_kernel, grad_fxn=None))
   grad_weight_uop = grad_weight_uop.after(zero_k)
   # atomic add kernel (gradient and idx are already contiguous from forward)
-  bwd_k = UOp(Ops.CUSTOM_KERNEL, src=(grad_weight_uop, gradient, idx), arg=CustomKernel(fxn=embedding_bwd_kernel, grad_fxn=None))
+  bwd_k = UOp(Ops.CUSTOM_KERNEL, src=(grad_weight_uop, gradient.contiguous(), idx.contiguous()), arg=CustomKernel(fxn=embedding_bwd_kernel, grad_fxn=None))
   grad_weight_uop = grad_weight_uop.after(bwd_k)
   return (None, grad_weight_uop, None)
 

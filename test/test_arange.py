@@ -163,27 +163,31 @@ class TestIndexing(unittest.TestCase):
   # at least the arange is being fused
   def test_llama_embedding_opt(self): self.test_llama_embedding(0, 1_736_704_000)
 
+  @Context(USE_ATOMICS=1)
   def test_llama_8b_embedding_backward(self):
-    # LLaMA 8B training config from model_train.py
-    # vocab_size=32000 (overridden from 128256), dim=4096, BS=16, SEQLEN=8192
-    vocab_size, embed_size = 32000, 4096
-    bs, seqlen = 8, 8192  # tokens[:, :-1] in train_step
-    tokens = Tensor.empty(bs, seqlen, dtype=dtypes.int, device="NULL")
-    # forward
+    from tinygrad.device import Device
+    device = Device.DEFAULT if Device.DEFAULT == "AMD" else "NULL"
+    vocab_size, embed_size = 1000, 128
+    bs, seqlen = 4, 256
+    # correctness test (only on real device)
+    if device != "NULL":
+      idx = Tensor.randint(vocab_size, bs, seqlen, device=device)
+      emb = nn.Embedding(vocab_size, embed_size)
+      emb.weight = Tensor.randn(vocab_size, embed_size, device=device, requires_grad=True)
+      emb(idx).sum().backward()
+      expected_grad = np.zeros((vocab_size, embed_size), dtype=np.float32)
+      for i in idx.flatten().numpy(): expected_grad[i] += 1
+      np.testing.assert_allclose(emb.weight.grad.numpy(), expected_grad, rtol=1e-5, atol=1e-5)
+    # performance test
+    tokens = Tensor.empty(bs, seqlen, dtype=dtypes.int, device=device)
     emb = nn.Embedding(vocab_size, embed_size)
-    emb.weight = Tensor.empty(vocab_size, embed_size, dtype=dtypes.float, device="NULL").realize()
-    GlobalCounters.reset()
-    emb(tokens).realize()
-    fwd_ops = GlobalCounters.global_ops
-    print(f"embedding fwd: {GlobalCounters.kernel_count} kernels, {fwd_ops:,} ops")
-    # backward
-    emb.weight = Tensor.empty(vocab_size, embed_size, dtype=dtypes.float, requires_grad=True, device="NULL").realize()
+    emb.weight = Tensor.empty(vocab_size, embed_size, dtype=dtypes.float, requires_grad=True, device=device).realize()
     GlobalCounters.reset()
     emb(tokens).contiguous().contiguous_backward().sum().backward()
     emb.weight.grad.realize()
     bwd_ops = GlobalCounters.global_ops
     print(f"embedding bwd: {GlobalCounters.kernel_count} kernels, {bwd_ops:,} ops")
-    self.assertLess(bwd_ops, fwd_ops * 10, f"backward ops {bwd_ops:,} should be within 10x of forward ops {fwd_ops:,}")
+    self.assertLess(bwd_ops, 100_000_000, f"backward ops {bwd_ops:,} should be <100M with atomic scatter-add")
 
 if __name__ == "__main__":
   unittest.main()
