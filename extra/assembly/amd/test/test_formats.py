@@ -7,7 +7,7 @@ import unittest
 from extra.assembly.amd.autogen.rdna3.ins import *
 from extra.assembly.amd.dsl import VCC_HI, EXEC_LO, NULL
 OFF = NULL  # OFF is alias for NULL
-from extra.assembly.amd.decode import detect_format
+from extra.assembly.amd import detect_format
 
 
 class TestDS(unittest.TestCase):

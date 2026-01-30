@@ -1,6 +1,6 @@
 from tinygrad.runtime.autogen import load, root
 
-am_src="https://github.com/ROCm/ROCK-Kernel-Driver/archive/ceb12c04e2b5b53ec0779362831f5ee40c4921e4.tar.gz"
+am_src="https://github.com/ROCm/ROCK-Kernel-Driver/archive/33970e1351f5e511029602454979f3de7e22260f.tar.gz"
 AMD, AMDINC = "{}/drivers/gpu/drm/amd", "{}/drivers/gpu/drm/amd/include"
 inc, kern_rules = ["-include", "stdint.h"], [(r'le32_to_cpu', ''),]
 

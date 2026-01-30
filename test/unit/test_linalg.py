@@ -27,7 +27,7 @@ class TestLinAlg(unittest.TestCase):
       reconstruction_helper([U,s_diag,V],a)
 
   def _test_svd_nonfull(self, size):
-    with Context(IGNORE_OOB=1):  # sometimes this is slow in CI
+    with Context(CHECK_OOB=0):  # sometimes this is slow in CI
       a = Tensor.randn(size).realize()
       U,S,V = a.svd(full_matrices=False)
       b_shape,m,n = size[0:-2],size[-2],size[-1]

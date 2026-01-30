@@ -6,8 +6,8 @@ from pathlib import Path
 # Set AMD=1 before importing tinygrad
 os.environ["AMD"] = "1"
 
-from extra.assembly.amd.emu2 import run_asm as python_run_asm, decode_program
-from extra.assembly.amd.decode import decode_inst
+from extra.assembly.amd.emu import run_asm as python_run_asm, decode_program
+from extra.assembly.amd import decode_inst
 from extra.assembly.amd.autogen.rdna3.ins import SOPP, SOPPOp
 
 REMU_PATH = Path(__file__).parents[3] / "remu/target/release/libremu.so"
@@ -68,9 +68,8 @@ def benchmark_emulator(name: str, run_fn, kernel: bytes, global_size, local_size
 
 def profile_instructions(kernel: bytes):
   """Profile individual instruction compile times."""
-  from extra.assembly.amd.emu2 import _get_inst_sink, _get_runner, _canonical_runner_cache
+  from extra.assembly.amd.emu import _get_runner, _canonical_runner_cache
   from tinygrad.helpers import Context
-  _get_inst_sink.cache_clear()
   _get_runner.cache_clear()
   _canonical_runner_cache.clear()
 
@@ -99,9 +98,8 @@ def profile_instructions(kernel: bytes):
 
 def benchmark_python_split(kernel: bytes, global_size, local_size, args_ptr, rsrc2: int, iterations: int = 5):
   """Benchmark Python emulator with compile and execution times."""
-  from extra.assembly.amd.emu2 import _get_inst_sink, _get_runner, _canonical_runner_cache
+  from extra.assembly.amd.emu import _get_runner, _canonical_runner_cache
   from tinygrad.helpers import Context
-  _get_inst_sink.cache_clear()
   _get_runner.cache_clear()
   _canonical_runner_cache.clear()
   decode_program.cache_clear()

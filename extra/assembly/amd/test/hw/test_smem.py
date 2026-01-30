@@ -265,6 +265,113 @@ class TestSLoadMultiDword(unittest.TestCase):
     self.assertEqual(st.sgpr[5], st.sgpr[9])
 
 
+class TestSLoadLarge(unittest.TestCase):
+  """Tests for large s_load operations (s_load_b256, s_load_b512)."""
+
+  def test_s_load_b256_basic(self):
+    """s_load_b256 loads 8 consecutive dwords."""
+    instructions = [
+      s_load_b64(s[2:3], s[80:81], 0, soffset=NULL),
+      s_waitcnt(lgkmcnt=0),
+      v_mov_b32_e32(v[0], 0),
+      # Store 8 test values
+      s_mov_b32(s[20], 0x11111111),
+      v_mov_b32_e32(v[2], s[20]),
+      global_store_b32(addr=v[0], data=v[2], saddr=s[2:3], offset=TEST_OFFSET),
+      s_mov_b32(s[20], 0x22222222),
+      v_mov_b32_e32(v[2], s[20]),
+      global_store_b32(addr=v[0], data=v[2], saddr=s[2:3], offset=TEST_OFFSET+4),
+      s_mov_b32(s[20], 0x33333333),
+      v_mov_b32_e32(v[2], s[20]),
+      global_store_b32(addr=v[0], data=v[2], saddr=s[2:3], offset=TEST_OFFSET+8),
+      s_mov_b32(s[20], 0x44444444),
+      v_mov_b32_e32(v[2], s[20]),
+      global_store_b32(addr=v[0], data=v[2], saddr=s[2:3], offset=TEST_OFFSET+12),
+      s_mov_b32(s[20], 0x55555555),
+      v_mov_b32_e32(v[2], s[20]),
+      global_store_b32(addr=v[0], data=v[2], saddr=s[2:3], offset=TEST_OFFSET+16),
+      s_mov_b32(s[20], 0x66666666),
+      v_mov_b32_e32(v[2], s[20]),
+      global_store_b32(addr=v[0], data=v[2], saddr=s[2:3], offset=TEST_OFFSET+20),
+      s_mov_b32(s[20], 0x77777777),
+      v_mov_b32_e32(v[2], s[20]),
+      global_store_b32(addr=v[0], data=v[2], saddr=s[2:3], offset=TEST_OFFSET+24),
+      s_mov_b32(s[20], 0x88888888),
+      v_mov_b32_e32(v[2], s[20]),
+      global_store_b32(addr=v[0], data=v[2], saddr=s[2:3], offset=TEST_OFFSET+28),
+      s_waitcnt(vmcnt=0),
+      *CACHE_INV,
+      # Load all 8 dwords with s_load_b256
+      s_load_b256(s[4:11], s[2:3], NULL, offset=TEST_OFFSET),
+      s_waitcnt(lgkmcnt=0),
+      s_mov_b32(s[2], 0), s_mov_b32(s[3], 0),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.sgpr[4], 0x11111111)
+    self.assertEqual(st.sgpr[5], 0x22222222)
+    self.assertEqual(st.sgpr[6], 0x33333333)
+    self.assertEqual(st.sgpr[7], 0x44444444)
+    self.assertEqual(st.sgpr[8], 0x55555555)
+    self.assertEqual(st.sgpr[9], 0x66666666)
+    self.assertEqual(st.sgpr[10], 0x77777777)
+    self.assertEqual(st.sgpr[11], 0x88888888)
+
+  def test_s_load_b512_basic(self):
+    """s_load_b512 loads 16 consecutive dwords."""
+    instructions = [
+      s_load_b64(s[2:3], s[80:81], 0, soffset=NULL),
+      s_waitcnt(lgkmcnt=0),
+      v_mov_b32_e32(v[0], 0),
+      # Store 16 test values (use a pattern: 0x10, 0x20, ..., 0x100)
+      *[instr for i in range(16) for instr in [
+        s_mov_b32(s[20], (i + 1) * 0x11111111),
+        v_mov_b32_e32(v[2], s[20]),
+        global_store_b32(addr=v[0], data=v[2], saddr=s[2:3], offset=TEST_OFFSET + i * 4),
+      ]],
+      s_waitcnt(vmcnt=0),
+      *CACHE_INV,
+      # Load all 16 dwords with s_load_b512
+      s_load_b512(s[64:79], s[2:3], NULL, offset=TEST_OFFSET),
+      s_waitcnt(lgkmcnt=0),
+      # Copy results to lower regs for verification (since st.sgpr only has 16 regs in test)
+      s_mov_b32(s[4], s[64]),
+      s_mov_b32(s[5], s[65]),
+      s_mov_b32(s[6], s[78]),
+      s_mov_b32(s[7], s[79]),
+      s_mov_b32(s[2], 0), s_mov_b32(s[3], 0),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.sgpr[4], 0x11111111, "first dword")
+    self.assertEqual(st.sgpr[5], 0x22222222, "second dword")
+    self.assertEqual(st.sgpr[6], 0xFFFFFFFF & (15 * 0x11111111), "15th dword")
+    self.assertEqual(st.sgpr[7], 0xFFFFFFFF & (16 * 0x11111111), "16th dword")
+
+  def test_s_load_b256_with_register_offset(self):
+    """s_load_b256 with register offset should add reg offset to address."""
+    instructions = [
+      s_load_b64(s[2:3], s[80:81], 0, soffset=NULL),
+      s_waitcnt(lgkmcnt=0),
+      v_mov_b32_e32(v[0], 0),
+      # Store pattern at TEST_OFFSET+8: skip first 2 dwords
+      *[instr for i in range(8) for instr in [
+        s_mov_b32(s[20], (i + 1) * 0x11111111),
+        v_mov_b32_e32(v[2], s[20]),
+        global_store_b32(addr=v[0], data=v[2], saddr=s[2:3], offset=TEST_OFFSET + 8 + i * 4),
+      ]],
+      s_waitcnt(vmcnt=0),
+      *CACHE_INV,
+      # Load with register offset 8
+      s_mov_b32(s[20], 8),
+      s_load_b256(s[4:11], s[2:3], s[20], offset=TEST_OFFSET),
+      s_waitcnt(lgkmcnt=0),
+      s_mov_b32(s[2], 0), s_mov_b32(s[3], 0),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.sgpr[4], 0x11111111, "first dword at offset+8")
+    self.assertEqual(st.sgpr[5], 0x22222222, "second dword at offset+8")
+    self.assertEqual(st.sgpr[11], 0x88888888, "last dword at offset+8")
+
+
 class TestSLoadOffset(unittest.TestCase):
   """Tests for s_load with different immediate offsets.
 

@@ -168,12 +168,14 @@ PREFETCH_LOADS = [(V_LDS_A_DATA[4+2*i], V_LDS_A_DATA[4+2*i+1], V_GLOBAL_B_ADDR, 
 # =============================================================================
 
 class Kernel:
-  def __init__(self, arch='gfx1100'):
-    self.instructions, self.labels, self.branch_targets, self.arch = [], {}, {}, arch
+  def __init__(self, arch='gfx1100'): self.instructions, self.labels, self.pos, self.arch = [], {}, 0, arch
+  def label(self, name): self.labels[name] = self.pos
 
-  def emit(self, inst): self.instructions.append(inst); return inst
-  def label(self, name): self.labels[name] = len(self.instructions)
-  def branch_to(self, label): self.branch_targets[len(self.instructions) - 1] = label
+  def emit(self, inst, target=None):
+    self.instructions.append(inst)
+    inst._target, inst._pos = target, self.pos
+    self.pos += inst.size()
+    return inst
 
   def waitcnt(self, lgkm=None, vm=None):
     """Wait for memory operations. lgkm=N waits until N lgkm ops remain, vm=N waits until N vmem ops remain."""
@@ -182,16 +184,15 @@ class Kernel:
     self.emit(s_waitcnt(simm16=waitcnt))
 
   def to_asm(self):
-    import re
-    # Instruction stream with labels
-    label_at = {pos: name for name, pos in self.labels.items()}
-    body = []
-    for i, inst in enumerate(self.instructions):
-      if i in label_at: body.append(f'.{label_at[i]}:')
-      asm = inst.disasm()
-      if i in self.branch_targets:
-        asm = re.sub(r'(s_cbranch_\w+|s_branch)\s+\S+', rf'\1 .{self.branch_targets[i]}', asm)
-      body.append('\t' + asm)
+    # Patch branch offsets: simm16 = (target_pos - branch_end_pos) / 4
+    for inst in self.instructions:
+      if inst._target is None: continue
+      offset_dwords = (self.labels[inst._target] - inst._pos - inst.size()) // 4
+      if not -32768 <= offset_dwords <= 32767: raise ValueError(f"branch to '{inst._target}' offset {offset_dwords} exceeds simm16 range")
+      inst.simm16 = offset_dwords
+
+    # TODO: replace this with direct ELF
+    body = ['\t' + inst.disasm() for inst in self.instructions]
 
     # limit wave occupancy by using more LDS
     lds_size = max(LDS_SIZE, 65536//getenv("LIMIT_OCC", 65536))
@@ -315,7 +316,7 @@ def build_kernel(arch='gfx1100'):
   k.emit(s_add_i32(s[S_LOOP_BOUND], s[S_DIM_N], -8))
 
   # S_LOOP_CTR is already 0 from prologue initialization
-  k.emit(s_branch(simm16=0)); k.branch_to('LOOP_ENTRY')
+  k.emit(s_branch(), target='LOOP_ENTRY')
 
   # ===========================================================================
   # MAIN GEMM LOOP
@@ -326,12 +327,12 @@ def build_kernel(arch='gfx1100'):
   k.label('LOOP_INC')
   k.emit(s_add_i32(s[S_LOOP_CTR], s[S_LOOP_CTR], 8))
   k.emit(s_cmp_ge_i32(s[S_LOOP_CTR], s[S_DIM_N]))
-  k.emit(s_cbranch_scc1(simm16=0)); k.branch_to('EPILOGUE')
+  k.emit(s_cbranch_scc1(), target='EPILOGUE')
 
   k.label('LOOP_ENTRY')
   k.emit(s_cmp_lt_i32(s[S_LOOP_CTR], s[S_LOOP_BOUND]))
   k.emit(s_cselect_b32(s[S_PREFETCH_FLAG], -1, 0))  # s_cselect doesn't modify SCC
-  k.emit(s_cbranch_scc0(simm16=0)); k.branch_to('SKIP_PREFETCH')  # branch if loop_ctr >= loop_bound
+  k.emit(s_cbranch_scc0(), target='SKIP_PREFETCH')  # branch if loop_ctr >= loop_bound
 
   if not NO_GLOBAL:
     # Advance prefetch pointers (VGPR)
@@ -402,7 +403,7 @@ def build_kernel(arch='gfx1100'):
       offset = i * 64
       k.emit(ds_store_b32(addr=v[V_LDS_B_ADDR], data0=v[V_LDS_B_DATA[i]], offset0=offset & 0xFF, offset1=offset >> 8))
 
-  k.emit(s_branch(simm16=0)); k.branch_to('LOOP_INC')
+  k.emit(s_branch(), target='LOOP_INC')
 
   # ===========================================================================
   # EPILOGUE: Permute and store results

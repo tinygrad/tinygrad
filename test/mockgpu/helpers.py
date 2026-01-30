@@ -22,12 +22,12 @@ class PythonRemu:
   scratch_size: int = 0  # private_segment_fixed_size from kernel descriptor
 
   def run_asm(self, lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, lz: int, args_ptr: int) -> int:
-    from extra.assembly.amd.emu2 import run_asm
+    from extra.assembly.amd.emu import run_asm
     return run_asm(lib, lib_sz, gx, gy, gz, lx, ly, lz, args_ptr, self.rsrc2, self.scratch_size)
 
 def _try_dlopen_remu():
   # Use Python emulator only if PYTHON_REMU=1
-  if int(getenv("PYTHON_REMU", "0")):
+  if int(getenv("PYTHON_REMU", "1")):
     return PythonRemu()
   REMU_PATHS = ["extra/remu/target/release/libremu.so", "libremu.so", "/usr/local/lib/libremu.so",
                "extra/remu/target/release/libremu.dylib", "libremu.dylib", "/usr/local/lib/libremu.dylib", "/opt/homebrew/lib/libremu.dylib"]

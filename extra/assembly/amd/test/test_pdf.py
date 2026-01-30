@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Test PDF pseudocode extraction from amdxml.py."""
+"""Test PDF pseudocode extraction from generate.py."""
 import unittest
-from extra.assembly.amd.amdxml import extract_pdf_text, extract_pcode, parse_xml, ARCHS, FIXES
+from extra.assembly.amd.generate import extract_pdf_text, extract_pcode, parse_xml, ARCHS, FIXES
 
 EXPECTED_PAGES = {"rdna3": 655, "rdna4": 711, "cdna": 610}
 
