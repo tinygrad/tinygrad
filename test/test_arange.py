@@ -166,7 +166,7 @@ class TestIndexing(unittest.TestCase):
   @Context(USE_ATOMICS=1)
   def test_llama_8b_embedding_backward(self):
     from tinygrad.device import Device
-    device = Device.DEFAULT if Device.DEFAULT == "AMD" else "NULL"
+    device = Device.DEFAULT if Device.DEFAULT in ("CPU", "AMD") else "NULL"
     vocab_size, embed_size = 1000, 128
     bs, seqlen = 4, 256
     idx = Tensor.randint(bs, seqlen, high=vocab_size, device=device)
