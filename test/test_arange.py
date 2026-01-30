@@ -1,7 +1,7 @@
 import unittest
 import numpy as np
 from tinygrad import Tensor, GlobalCounters, dtypes, nn, Device, Variable
-from tinygrad.helpers import Context, getenv
+from tinygrad.helpers import Context, getenv, CPU_LLVM
 from tinygrad.engine.realize import run_schedule
 from tinygrad.engine.realize import CompiledRunner, get_program
 from tinygrad.engine.schedule import ExecItem
@@ -163,16 +163,15 @@ class TestIndexing(unittest.TestCase):
   # at least the arange is being fused
   def test_llama_embedding_opt(self): self.test_llama_embedding(0, 1_736_704_000)
 
+  @unittest.skipIf(Device.DEFAULT not in ("CPU", "AMD") and not CPU_LLVM, "atomics only on AMD/CPU")
   @Context(USE_ATOMICS=1)
   def test_llama_8b_embedding_backward(self):
-    from tinygrad.device import Device
-    device = Device.DEFAULT if Device.DEFAULT in ("CPU", "AMD") else "NULL"
     vocab_size, embed_size = 1000, 128
     bs, seqlen = 4, 256
-    idx = Tensor.randint(bs, seqlen, high=vocab_size, device=device)
+    idx = Tensor.randint(bs, seqlen, high=vocab_size)
     emb = nn.Embedding(vocab_size, embed_size)
-    emb.weight = Tensor.ones(vocab_size, embed_size, device=device, requires_grad=True)
-    gt = Tensor.zeros(bs, seqlen, embed_size, device=device)
+    emb.weight = Tensor.ones(vocab_size, embed_size, requires_grad=True)
+    gt = Tensor.zeros(bs, seqlen, embed_size)
     Tensor.realize(idx, emb.weight, gt)
     GlobalCounters.reset()
     loss = (emb(idx)-gt).square().sum()
@@ -180,12 +179,11 @@ class TestIndexing(unittest.TestCase):
     emb.weight.grad.realize()
     bwd_ops = GlobalCounters.global_ops
     print(f"embedding bwd: {GlobalCounters.kernel_count} kernels, {bwd_ops:,} ops")
-    self.assertLess(bwd_ops, bs*seqlen*embed_size*20, f"backward ops {bwd_ops:,} should be <100M with atomic scatter-add")
-    # correctness check only on real device
-    if device != "NULL":
-      expected_grad = np.zeros((vocab_size, embed_size), dtype=np.float32)
-      for i in idx.flatten().numpy(): expected_grad[i] += 2
-      np.testing.assert_allclose(emb.weight.grad.numpy(), expected_grad, rtol=1e-5, atol=1e-5)
+    self.assertLess(bwd_ops, bs*seqlen*embed_size*20, f"backward ops {bwd_ops:,} should be less than 20 per with atomic scatter-add")
+    # correctness check
+    expected_grad = np.zeros((vocab_size, embed_size), dtype=np.float32)
+    for i in idx.flatten().numpy(): expected_grad[i] += 2
+    np.testing.assert_allclose(emb.weight.grad.numpy(), expected_grad, rtol=1e-5, atol=1e-5)
 
 if __name__ == "__main__":
   unittest.main()

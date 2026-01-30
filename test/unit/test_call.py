@@ -30,7 +30,7 @@ class TestCall(unittest.TestCase):
 
     # we define a plus function
     plus_fxn = UOp.param(0, dtypes.float, (10,10)) + UOp.param(1, dtypes.float, (10,10))
-    c = Tensor.call(a, b, fxn=plus_fxn, arg=grad_fxn)
+    c = Tensor.call(a, b, fxn=plus_fxn, grad_fxn=grad_fxn)
     c.mean().backward()
 
     np.testing.assert_allclose(a.grad.numpy(), gt_a_grad, rtol=1e-5)

@@ -329,7 +329,7 @@ def _embedding_bwd(grad_emb:UOp, call:UOp) -> tuple:
     idx_flat, grad_emb_flat = idx.flatten(), grad_emb.reshape((idx.size, grad_weight.shape[-1]))
     i = UOp.range(grad_emb_flat.shape[0], 0)  # batch_size * sequence_length
     j = UOp.range(grad_emb_flat.shape[1], 1)  # embed_size
-    token_id = idx_flat[i].cast(dtypes.index)
+    token_id = idx_flat[i].cast(dtypes.index).clip(0, grad_weight.shape[0]-1)
     # atomic scatter-add: grad_weight[token_id, j] += grad_emb_flat[i, j]
     if device in ("CPU", "NULL"): atomic_arg = "__atomic_fetch_add({0}, {1}, __ATOMIC_RELAXED);"
     elif device == "AMD": atomic_arg = "__hip_atomic_fetch_add({0}, {1}, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);"
