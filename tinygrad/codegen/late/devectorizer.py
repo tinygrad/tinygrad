@@ -229,9 +229,13 @@ def no_vectorized_wmma(wmma:UOp):
   wmma_ex = flatten([[e.gep(i) for i in range(out_sz)] for e in wmmas])
   return UOp(Ops.VECTORIZE, wmma.dtype, tuple(wmma_ex))
 
-def no_vectorized_alu(alu:UOp):
+def no_vectorized_alu(ctx:Renderer|str|None, alu:UOp):
   if alu.dtype.vcount == 1: return None
   if alu.op is Ops.WHERE and alu.src[2].arg is Invalid: return None  # image load/store has cond.where(idx.vec(2), Invalid) as the index
+  # CPU: preserve small vector arithmetic (float4 ADD/MUL) for packed FMA - they fit in SSE/AVX registers
+  # Don't preserve WHERE/comparisons which have bool4 vs float4 mismatch issues in C
+  device = ctx.device if isinstance(ctx, Renderer) else ctx
+  if device == "CPU" and alu.dtype.vcount <= 4 and alu.dtype.scalar() == dtypes.float and alu.op in (Ops.ADD, Ops.MUL): return None
   alus = tuple(UOp(alu.op, alu.dtype.scalar(), tuple(s.gep(i) for s in alu.src), alu.arg) for i in range(alu.dtype.vcount))
   return UOp(Ops.VECTORIZE, alu.dtype, alus)
 
@@ -301,6 +305,7 @@ pm_render = PatternMatcher([
 @dataclass
 class ReduceContext:
   acc_num: int = 0
+  ren: Renderer|None = None
 
 def horizontal_reduce(inp:UOp, out_dtype:DType) -> list[UOp]:
   # if this has a horizontal reduction component, do that first
@@ -312,6 +317,82 @@ def horizontal_reduce(inp:UOp, out_dtype:DType) -> list[UOp]:
 
 def reduce_to_acc(ctx:ReduceContext, red:UOp):
   inp, reduce_range = red.src[0], red.src[1:]
+
+  # Detect CPU matvec pattern for vector FMA optimization
+  horizontal_amount = inp.dtype.count // red.dtype.count if inp.dtype.count > red.dtype.count else 1
+  num_outputs = red.dtype.count  # e.g., 8 rows
+  use_vec_fma = (ctx.ren is not None and ctx.ren.device == "CPU" and
+                 len(reduce_range) > 0 and horizontal_amount > 1 and red.arg is Ops.ADD and
+                 red.dtype.scalar() == dtypes.float)
+
+  if use_vec_fma:
+    # Choose vector width for packed FMA (4 for SSE/AVX float4)
+    vec_width = min(4, horizontal_amount)
+    if horizontal_amount % vec_width != 0:
+      vec_width = 1  # fall back to scalar if not divisible
+
+    if vec_width > 1:
+      chunks_per_row = horizontal_amount // vec_width
+
+      topo = inp.toposort()
+      ended_ranges = flatten([x.ended_ranges for x in topo if x.op is Ops.END])
+      input_ranges = tuple([x for x in topo if x.op is Ops.RANGE and x not in reduce_range and x not in ended_ranges])
+
+      # Create vector accumulator for each output row (float4 per row)
+      vec_dtype = red.dtype.scalar().vec(vec_width)  # float.vec(4)
+      identity = UOp(Ops.VCONST, vec_dtype, arg=tuple([0.0]*vec_width))
+
+      # Phase 1: Create all accumulators and their initializations
+      accs = []
+      acc_inits = []
+      for row in range(num_outputs):
+        acc = UOp(Ops.DEFINE_REG, vec_dtype.ptr(size=1, addrspace=AddrSpace.REG), arg=ctx.acc_num)
+        ctx.acc_num += 1
+        acc_init = acc.after(*input_ranges).index(UOp.const(dtypes.int, 0)).store(identity) if input_ranges else \
+                   acc.index(UOp.const(dtypes.int, 0)).store(identity)
+        accs.append(acc)
+        acc_inits.append(acc_init)
+
+      # Phase 2: Build loop body - all accumulator updates
+      # Each update depends on all previous inits and the reduce_range
+      all_stores = []
+      for row in range(num_outputs):
+        acc = accs[row]
+        # Inside loop: read current acc value (depends on init and loop range)
+        acc_idx = acc.after(*acc_inits, *reduce_range).index(UOp.const(dtypes.int, 0))
+
+        row_start = row * horizontal_amount
+        # Accumulate all chunks for this row
+        first_chunk_indices = tuple(range(row_start, row_start + vec_width))
+        acc_val = acc_idx.alu(Ops.ADD, inp.gep(first_chunk_indices))
+
+        for chunk in range(1, chunks_per_row):
+          chunk_start = row_start + chunk * vec_width
+          chunk_indices = tuple(range(chunk_start, chunk_start + vec_width))
+          inp_chunk = inp.gep(chunk_indices)
+          acc_val = acc_val.alu(Ops.ADD, inp_chunk)
+
+        # Store updated value (inside loop, no END yet)
+        loop_store = acc.index(UOp.const(dtypes.int, 0)).store(acc_val)
+        all_stores.append(loop_store)
+
+      # Phase 3: End the loop once, depending on all stores
+      # Use a GROUP to combine all stores, then end
+      loop_end = UOp.group(*all_stores).end(*reduce_range)
+
+      # Phase 4: Read final values and hsum
+      results = []
+      for row in range(num_outputs):
+        acc = accs[row]
+        final_acc = acc.after(loop_end).index(UOp.const(dtypes.int, 0))
+        row_result = final_acc.gep(0)
+        for i in range(1, vec_width):
+          row_result = row_result.alu(Ops.ADD, final_acc.gep(i))
+        results.append(row_result)
+
+      return UOp(Ops.VECTORIZE, red.dtype, tuple(results))
+
+  # Original scalar path
   lst = horizontal_reduce(inp, red.dtype)
   assert all(x.dtype == red.dtype for x in lst), f"horizontal reduction mismatch {lst[0].dtype} != {red.dtype}"
   # if we have a range
