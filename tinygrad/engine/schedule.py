@@ -110,10 +110,8 @@ def strip_bind(ctx:tuple[dict[UOp, UOp], dict[str, int]], b:UOp):
   return ctx[0].setdefault(b, b.replace(src=(b.src[0],)))
 
 pm_pre_sched_cache = PatternMatcher([
-  # replace input buffers
-  (UPat(Ops.BUFFER, src=(UPat(Ops.UNIQUE), UPat(Ops.DEVICE)), name="b"), replace_input_buffer),
-  # remove unique consts
-  (UPat(Ops.CONST, src=(UPat(Ops.UNIQUE), UPat(Ops.DEVICE)), name="b"), replace_input_buffer),
+  # replace UNIQUE with LUNIQUE for cache key normalization
+  (UPat((Ops.BUFFER, Ops.CONST), src=(UPat(Ops.UNIQUE), UPat(Ops.DEVICE)), name="b"), replace_input_buffer),
   # strip value from BIND for cache key normalization, so different values hit same cache
   (UPat(Ops.BIND, src=(UPat(Ops.DEFINE_VAR), UPat(Ops.CONST)), name="b"), strip_bind),
 ])
@@ -126,8 +124,8 @@ def replace_input_buffer_back(ctx:dict[UOp, UOp], b:UOp):
   return ret
 
 pm_post_sched_cache = PatternMatcher([
-  (UPat(Ops.BUFFER, src=(UPat(Ops.LUNIQUE), UPat(Ops.DEVICE)), name="b"), replace_input_buffer_back),
-  (UPat(Ops.CONST, src=(UPat(Ops.LUNIQUE), UPat(Ops.DEVICE)), name="b"), replace_input_buffer_back),
+  # restore LUNIQUE back to UNIQUE
+  (UPat((Ops.BUFFER, Ops.CONST), src=(UPat(Ops.LUNIQUE), UPat(Ops.DEVICE)), name="b"), replace_input_buffer_back),
   # restore BIND value stripped in pm_pre_sched_cache
   (UPat(Ops.BIND, src=(UPat(Ops.DEFINE_VAR),), name="b"), lambda ctx,b: ctx.get(b)),
 ])
