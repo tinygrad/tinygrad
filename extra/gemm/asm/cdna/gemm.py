@@ -54,6 +54,7 @@ def can_use_asm_gemm(a:Tensor, b:Tensor) -> bool:
   return True
 
 # ** UOp gemm to test custom_kernel multi and backward correctness on non cdna4
+# note: this can be removed once gemm is in mixins
 
 def custom_uop_gemm(C:UOp, A:UOp, B:UOp) -> UOp:
   M, K = A.shape[0]*A.shape[1], A.shape[2]
