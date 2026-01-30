@@ -557,7 +557,7 @@ def get_render(query:str) -> dict:
     rows:dict[int, dict] = {}
     for pc, (inst,_) in pc_to_inst.items():
       if start_pc is None: start_pc = pc
-      rows[pc] = {"pc":pc-start_pc, "inst":pc_to_inst[pc][0], "hit_count":0, "dur":0, "stall":0, "hits":{"cols":inst_columns, "rows":[]}, "type":""}
+      rows[pc] = {"pc":pc-start_pc, "inst":inst, "hit_count":0, "dur":0, "stall":0, "hits":{"cols":inst_columns, "rows":[]}, "type":""}
     for e in w.unpack_insts():
       if not (inst:=rows[e.pc]).get("type"): inst["type"] = str(e.typ).split("_")[-1]
       inst["hit_count"] += 1
