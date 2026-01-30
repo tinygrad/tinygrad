@@ -27,24 +27,26 @@ def custom_asm_gemm(C:UOp, A:UOp, B:UOp, params:UOp, dname:str, wg:int) -> UOp:
   gidx = UOp.special(wg, "gidx0")
   rodata = (pathlib.Path(__file__).parent/"rodata.s").read_text()
   src = rodata.replace("INSTRUCTIONS", (pathlib.Path(__file__).parent/"kernel.s").read_text())
-  sink = UOp.sink(C.base, A.base, B.base, params.base,
-                  lidx, gidx, arg=KernelInfo(name="gemm", estimates=Estimates(ops=2*M*N*K, mem=(M*K + K*N + M*N)*2)))
+  sink = UOp.sink(C.base, A.base, B.base, params.base, lidx, gidx,
+                  arg=KernelInfo(name="gemm", estimates=Estimates(ops=2*M*N*K, mem=(M*K + K*N + M*N)*2)))
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg=dname), UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=src)))
 
-# todo: make this a proper function?
-def get_sizes(batch, M, N, K): return [N, M, 1, K, N, 0, N, 0, K, 0]
-# numWG SizesFree0(N) SizesFree1(M) SizesFree2(batch) SizesSum0(K) strideD0 strideD1 strideA0 strideA1 strideB0 strideB1 ItersPerTile
-# MagicNumberItersPerTile MagicShiftItersPerTile TotalIters
-CDNA_GEMM_ARGS = {
-  (1, 8192, 4096, 4096): [256, *get_sizes(1, 8192, 4096, 4096), 64, 67108864, 0, 32768],
-  (1, 8192, 1024, 4096): [256, *get_sizes(1, 8192, 1024, 4096), 64, 67108864, 0, 32768],
-  (1, 8192, 14336, 4096): [256, *get_sizes(1, 8192, 14336, 4096), 64, 67108864, 0, 114688],
-  (1, 8192, 4096, 14336): [256, *get_sizes(1, 8192, 4096, 14336), 224, 613566757, 2147483656, 114688],
-  (1, 8192, 128256, 4096): [16032, *get_sizes(1, 8192, 128256, 4096), 64, 67108864, 0, 1026048],
-  (8, 8192, 1024, 4096): [256, *get_sizes(8, 65536,  1024, 4096), 64, 67108864, 0, 65536],
-  (1, 8192, 8192, 8192): [256, *get_sizes(1, 8192, 8192, 8192), 128, 33554432, 0, 131072],
-  (1, 4096, 4096, 4096): [256, *get_sizes(1, 4096, 4096, 4096), 64, 67108864, 0, 16384],
+# (batch, M, N, K) -> (numWG, iters, total)
+GEMM_CONFIGS = {
+  (1, 8192, 4096, 4096): (256, 64, 32768),
+  (1, 8192, 1024, 4096): (256, 64, 32768),
+  (1, 8192, 14336, 4096): (256, 64, 114688),
+  (1, 8192, 4096, 14336): (256, 224, 114688),
+  (1, 8192, 128256, 4096): (16032, 64, 1026048),
+  (8, 8192, 1024, 4096): (256, 64, 65536),
+  (1, 8192, 8192, 8192): (256, 128, 131072),
+  (1, 4096, 4096, 4096): (256, 64, 16384),
 }
+ITERS_CONFIG = {64: (67108864, 0), 128: (33554432, 0), 224: (613566757, 2147483656)}
+def get_gemm_args(batch, M, N, K):
+  numWG, iters, total = GEMM_CONFIGS[(batch, M, N, K)]
+  magic, shift = ITERS_CONFIG[iters]
+  return [numWG, N, batch * M, 1, K, N, 0, N, 0, K, 0, iters, magic, shift, total]
 
 # ** UOp gemm to test custom_kernel multi and backward correctness on non cdna4
 
@@ -80,9 +82,9 @@ def asm_gemm(a:Tensor, b:Tensor) -> Tensor:
   dname = a.device[0] if isinstance(a.device, tuple) else a.device
   arch = getattr(Device[dname].renderer, "arch", None)
   if arch.startswith("gfx950") and getenv("USE_ASM", 1):
-    params = Tensor(p:=CDNA_GEMM_ARGS[(batch//len(a.device), M, N, K) if is_multi else (batch, M, N, K)])
+    params = Tensor(p:=get_gemm_args(batch//len(a.device) if is_multi else batch, M, N, K))
     if is_multi: params.to_(a.device)
-    # todo: remove this...
+    # todo: remove this by converting the gemm to python dsl, these should be python constants
     with Context(DEBUG=0): params.realize()
     out = Tensor.custom_kernel(out, a, b, params, fxn=functools.partial(custom_asm_gemm, dname=dname, wg=p[0]), grad_fxn=fake_grad_fxn)[0]
   else:
