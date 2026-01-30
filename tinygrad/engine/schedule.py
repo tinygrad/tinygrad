@@ -173,8 +173,8 @@ def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[dict[UOp, UOp], li
     pre_schedule, combined_sink = sc_ret
 
   # replace all the LUNIQUEs with UNIQUEs (single graph_rewrite for everything)
-  input_buffers_reverse = {v:k for k,v in input_buffers.items()}
-  combined = graph_rewrite(combined_sink, pm_post_sched_cache, ctx=input_buffers_reverse, name="unrewrite combined")
+  input_buffers_inverse = {v:k for k,v in input_buffers.items()}
+  combined = graph_rewrite(combined_sink, pm_post_sched_cache, ctx=input_buffers_inverse, name="unrewrite combined")
   tensor_map_sink, buf_uops_sink = combined.src
   tm_src = tensor_map_sink.src
   tensor_map = {tm_src[i]:tm_src[i+1] for i in range(0, len(tm_src), 2)}
@@ -203,4 +203,4 @@ def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[dict[UOp, UOp], li
     print(f"scheduled {len(schedule):4d} kernels in {(time.perf_counter()-st)*1000:8.2f} ms"+\
           f" | {' cache hit' if SCACHE and sc_ret is not None else 'CACHE MISS'} {sched_cache_key.hex()[:8]}"+\
           f" | {len(UOpMetaClass.ucache)} uops in cache")
-  return tensor_map, schedule, var_vals if schedule else {}
+  return tensor_map, schedule, var_vals
