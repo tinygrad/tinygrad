@@ -1,4 +1,4 @@
-import subprocess, pathlib, struct, ctypes, tempfile, functools, contextlib, decimal, platform, sys
+import subprocess, pathlib, struct, ctypes, tempfile, functools, contextlib, decimal, platform
 from tinygrad.helpers import prod, to_mv, getenv, round_up, cache_dir, PROFILE, ProfileRangeEvent, cpu_profile, unwrap, suppress_finalizing
 import tinygrad.runtime.support.objc as objc
 from tinygrad.device import Compiled, Compiler, CompileError, LRUAllocator, ProfileDeviceEvent, CompilerSet, CompilerPair
