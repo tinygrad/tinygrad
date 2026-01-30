@@ -1,6 +1,6 @@
 from typing import Callable
 import math, functools
-from tinygrad.dtype import dtypes, DType, promo_lattice
+from tinygrad.dtype import dtypes, DType, promo_lattice, truncate
 from tinygrad.device import is_dtype_supported
 from tinygrad.helpers import flatten, polyN
 from tinygrad.uop import GroupOp
@@ -447,5 +447,5 @@ def get_late_rewrite_patterns(ops:tuple[Ops, ...], device:str, force_transcenden
     pat += [(UPat(Ops.LOAD, tuple(l2i_dt.keys()), src=(UPat.var('idx'),), name='x'), lambda x,idx:
              None if x.tag is None else x.replace(dtype=l2i_dt[x.dtype], src=(l2i_idx(idx, x.tag),)))]
     pat += [(UPat(Ops.CONST, tuple(l2i_dt.keys()), name='x'), lambda x:
-             None if x.tag is None else UOp.const(l2i_dt[x.dtype], (x.arg >> 32) if x.tag == 1 else (x.arg & 0xFFFFFFFF)))]
+             None if x.tag is None else UOp.const(dt:=l2i_dt[x.dtype], truncate[dt]((x.arg >> 32) if x.tag == 1 else (x.arg & 0xFFFFFFFF))))]
   return PatternMatcher(pat)
