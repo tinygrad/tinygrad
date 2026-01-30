@@ -14,6 +14,8 @@ class MetalGraph(GraphRunner):
                orig_valid_positions: dict[int, set[int]]|None = None):
     super().__init__(jit_cache, input_buffers, var_vals, orig_valid_positions)
     if not all(isinstance(ji.prg, CompiledRunner) for ji in jit_cache): raise GraphException
+    # NOTE: Metal ICB doesn't support texture arguments, so any non-ICB program disables graph execution.
+    if not all(getattr(cast(CompiledRunner, ji.prg)._prg, "supports_icb", True) for ji in jit_cache): raise GraphException
 
     # create metal batch exec
     icb_descriptor = metal.MTLIndirectCommandBufferDescriptor.new()
@@ -34,15 +36,22 @@ class MetalGraph(GraphRunner):
     if len(self.varlist): self.int_buf = self.dev.allocator.alloc(len(self.varlist)*dtypes.int32.itemsize)
 
     all_pipelines, all_resources = [], [self.int_buf.buf] if len(self.varlist) else []
+    self.arg_slots: list[list[int|None]] = []
     for j,ji in enumerate(jit_cache):
       prg: CompiledRunner = cast(CompiledRunner, ji.prg)
       icb_command = self.icb.indirectComputeCommandAtIndex(j).retained()
       all_pipelines.append(prg._prg.pipeline_state)
       icb_command.setComputePipelineState(prg._prg.pipeline_state)
+      arg_slots: list[int|None] = []
       for i,b in enumerate(ji.bufs):
-        if b is not None and (j,i) not in self.input_replace:
-          icb_command.setKernelBuffer_offset_atIndex(b._buf.buf, b._buf.offset, i)
-          all_resources.append(b._buf.buf)
+        if b is None or (j,i) in self.input_replace:
+          arg_slots.append(None)
+          continue
+        slot = i
+        icb_command.setKernelBuffer_offset_atIndex(b._buf.buf, b._buf.offset, slot)
+        all_resources.append(b._buf.buf)
+        arg_slots.append(slot)
+      self.arg_slots.append(arg_slots)
       for i,v in enumerate(prg.p.vars): icb_command.setKernelBuffer_offset_atIndex(self.int_buf.buf, self.varlist.index(v.expr)*4, len(ji.bufs)+i)
 
       global_size, local_size = prg.p.launch_dims(var_vals)
@@ -64,7 +73,8 @@ class MetalGraph(GraphRunner):
     all_resources = dedup(self.all_resources + [input_buffers[input_idx]._buf.buf for input_idx in self.input_replace.values()])
     for (j,i),input_idx in self.input_replace.items():
       computeCommand = self.icb.indirectComputeCommandAtIndex(j)
-      computeCommand.setKernelBuffer_offset_atIndex(input_buffers[input_idx]._buf.buf, input_buffers[input_idx]._buf.offset, i)
+      if self.arg_slots[j][i] is None: continue
+      computeCommand.setKernelBuffer_offset_atIndex(input_buffers[input_idx]._buf.buf, input_buffers[input_idx]._buf.offset, self.arg_slots[j][i])
 
     for j, global_dims, local_dims in self.updated_launch_dims(var_vals):
       computeCommand = self.icb.indirectComputeCommandAtIndex(j)
@@ -73,8 +83,12 @@ class MetalGraph(GraphRunner):
 
     command_buffer = self.dev.mtl_queue.commandBuffer().retained()
     encoder = command_buffer.computeCommandEncoder().retained()
-    encoder.useResources_count_usage(ctypes.cast((metal.MTLBuffer * len(all_resources))(*all_resources), ctypes.POINTER(metal.MTLResource)),
-                                     len(all_resources), metal.MTLResourceUsageRead | metal.MTLResourceUsageWrite)
+    usage = metal.MTLResourceUsageRead | metal.MTLResourceUsageWrite
+    for restype in (metal.MTLBuffer, metal.MTLTexture):
+      resources = [r for r in all_resources if isinstance(r, restype)]
+      if not resources: continue
+      res_resources = (restype * len(resources))(*resources)
+      encoder.useResources_count_usage(ctypes.cast(res_resources, ctypes.POINTER(metal.MTLResource)), len(resources), usage)
 
     # NOTE: the pipelines likely need to be added to the used resources to fix the crash on M1/M2, but I haven't figured out how
     # this is a O(n) hack to get them used. what should work is:
