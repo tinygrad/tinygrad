@@ -58,6 +58,11 @@ def multirange_str(rngs:Iterable[UOp], color=False, pad=None) -> str:
   if pad is not None: ret += " " * (pad-ansilen(ret))
   return ret
 
+def shape_to_shape_arg(arg:tuple[sint, ...]) -> UOp:
+  if len(arg) == 0: return UOp(Ops.VECTORIZE, dtypes.index.vec(0))
+  elif all(isinstance(x, int) for x in arg): return UOp.const(dtypes.index.vec(len(arg)), cast(tuple[int, ...], arg))
+  else: return UOp(Ops.VECTORIZE, dtypes.index.vec(len(arg)), tuple(UOp.const(dtypes.index, x) if isinstance(x, int) else x for x in arg))
+
 def consumer_map_from_toposort(lst:Iterable[UOp]):
   ret: dict[UOp, dict[UOp, None]] = {}
   for u in lst:
@@ -558,11 +563,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
       case Ops.PAD | Ops.SHRINK: src_args = list(zip(*arg))
       case Ops.PERMUTE | Ops.FLIP: src_args = []
       case _: raise RuntimeError(f"{op} is not a MovementOp")
-    usrcs = []
-    for arg in src_args:
-      if len(arg) == 0: usrcs.append(UOp(Ops.VECTORIZE, dtypes.index.vec(0)))
-      elif all(isinstance(x, int) for x in arg): usrcs.append(UOp.const(dtypes.index.vec(len(arg)), arg))
-      else: usrcs.append(UOp(Ops.VECTORIZE, dtypes.index.vec(len(arg)), tuple(UOp.const(dtypes.index, x) if isinstance(x, int) else x for x in arg)))
+    usrcs = [shape_to_shape_arg(arg) for arg in src_args]
     if len(usrcs) == 0: ret = UOp(op, self.dtype, (self,), arg)
     else: ret = UOp(op, self.dtype, (self,)+UOp.sink(*usrcs).simplify().src)
     # for all movement ops, we check shape property to validity check the movement op
@@ -826,9 +827,8 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
 
   # TODO: this should replace placeholder
   @staticmethod
-  def param(slot:int, dtype:DType, shape:tuple[int, ...]|None=None, device=None):
-    src = (UOp(Ops.NOOP),) if shape is None else (UOp.const(dtypes.index.vec(len(shape)), shape),)
-    if device is not None: src += (UOp(Ops.DEVICE, arg=device),)
+  def param(slot:int, dtype:DType, shape:tuple[sint, ...]|None=None, device=None):
+    src = (UOp(Ops.NOOP) if shape is None else shape_to_shape_arg(shape),) + (() if device is None else (UOp(Ops.DEVICE, arg=device),))
     return UOp(Ops.PARAM, dtype, src, arg=slot)
 
   def call(*srcs:UOp, fxn:UOp, arg:Any|None) -> UOp: return UOp(Ops.CALL, fxn.dtype, (fxn,)+srcs, arg)

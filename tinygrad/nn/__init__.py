@@ -309,7 +309,7 @@ def _embedding_bwd(grad_emb:UOp, call:UOp) -> tuple:
   weight, idx = call.src[1:]
   # for multi-device: unshard inputs to one device
   if isinstance(weight.device, tuple):
-    assert weight.axis == None
+    assert weight.axis is None, "sharded weights on Embedding not supported with USE_ATOMICS"
     grad_emb = grad_emb.copy_to_device(weight.device)
     idx = idx.copy_to_device(weight.device)
   # weight is replicated, grad_weight should match
