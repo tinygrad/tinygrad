@@ -306,14 +306,6 @@ class RMSNorm:
 
 from tinygrad.uop.ops import UOp, KernelInfo, Ops
 
-# how can we use the normal forward pass instead of this?
-def _embedding_fwd_kernel(emb:UOp, weight:UOp, idx:UOp) -> UOp:
-  idx_flat, emb_flat = idx.flatten(), emb.reshape((idx.size, weight.shape[-1]))
-  i = UOp.range(emb_flat.shape[0], 0)  # batch_size * sequence_length
-  j = UOp.range(emb_flat.shape[1], 1)  # embed_size
-  token_id = idx_flat[i].cast(dtypes.index)
-  return emb_flat[i, j].store(weight[token_id, j]).end(i, j).sink(arg=KernelInfo(name="embedding_fwd"))
-
 def _zero_kernel(out:UOp) -> UOp:
   i = UOp.range(out.size, 0)
   return out.flatten()[i].store(0).end(i).sink(arg=KernelInfo(name="zero"))
@@ -328,8 +320,8 @@ def _embedding_bwd_kernel(grad_weight:UOp, grad_emb:UOp, idx:UOp) -> UOp:
                arg="__hip_atomic_fetch_add({0}, {1}, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);")
   return atomic.end(i, j).sink(arg=KernelInfo(name="embedding_bwd", opts_to_apply=()))
 
-def _embedding_bwd(grad_emb:UOp, kernel:UOp) -> tuple:
-  _, weight, idx = kernel.src
+def _embedding_bwd(grad_emb:UOp, call:UOp) -> tuple:
+  weight, idx = call.src[1:]
   # for multi-device: unshard inputs to one device
   if isinstance(weight.device, tuple):
     assert weight.axis == None
@@ -340,18 +332,11 @@ def _embedding_bwd(grad_emb:UOp, kernel:UOp) -> tuple:
   # TODO: how do we remove this dumb kernel?
   grad_weight_uop = grad_weight.custom_kernel(fxn=_zero_kernel)[0].uop
   grad_weight_uop = grad_weight_uop.custom_kernel(grad_emb, idx, fxn=_embedding_bwd_kernel)[0]
-  return (None, grad_weight_uop, None)
+  return (grad_weight_uop, None)
 
-def embedding_atomic(weight:Tensor, idx:Tensor) -> Tensor:
-  # output is sharded like idx (batch dimension) but has weight's dtype
-  out_shape = idx.shape + (weight.shape[-1],)
-  if not isinstance(idx.device, tuple):
-    out = Tensor.empty(out_shape, dtype=weight.dtype, device=idx.device)
-  else:
-    local_shape = list(out_shape)
-    local_shape[idx.uop.axis] //= len(idx.device)
-    out = Tensor(Tensor.empty(local_shape, dtype=weight.dtype, device=idx.device).uop.multi(idx.uop.axis), dtype=weight.dtype, device=idx.device)
-  return Tensor.custom_kernel(out, weight, idx, fxn=_embedding_fwd_kernel, grad_fxn=_embedding_bwd)[0]
+def _embedding_fwd(weight:Tensor, idx:Tensor) -> Tensor:
+  arange = Tensor.arange(weight.shape[0], requires_grad=False, device=weight.device)
+  return (arange == idx.unsqueeze(-1)).unsqueeze(-1).where(weight, 0).sum(-2, dtype=weight.dtype)
 
 class Embedding:
   """
@@ -369,9 +354,11 @@ class Embedding:
 
   def __call__(self, idx:Tensor) -> Tensor:
     if not dtypes.is_int(idx.dtype): raise TypeError(f"Expected integer dtype for index in embedding, got {idx.dtype}")
-    if USE_ATOMICS: return embedding_atomic(self.weight, idx)
-    arange = Tensor.arange(self.weight.shape[0], requires_grad=False, device=self.weight.device)
-    return (arange == idx.unsqueeze(-1)).unsqueeze(-1).where(self.weight, 0).sum(-2, dtype=self.weight.dtype)
+    if USE_ATOMICS:
+      return Tensor.call(self.weight, idx,
+                         fxn=_embedding_fwd(self.weight.as_param(0), idx.as_param(1)),
+                         grad_fxn=_embedding_bwd)
+    return _embedding_fwd(self.weight, idx)
 
 class LSTMCell:
   """

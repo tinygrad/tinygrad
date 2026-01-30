@@ -222,7 +222,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
       case Ops.DEFINE_GLOBAL | Ops.DEFINE_LOCAL | Ops.DEFINE_REG: return (self.ptrdtype.size,)
       case Ops.PARAM:
         # NOTE: copied from marg
-        if len(self.src) == 1: return tuple(self.src[0].sgep(i) for i in range(self.src[0].dtype.count))
+        if len(self.src) >= 1: return tuple(self.src[0].sgep(i) for i in range(self.src[0].dtype.count))
         return None
 
       # passthrough ops
@@ -826,8 +826,9 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
 
   # TODO: this should replace placeholder
   @staticmethod
-  def param(slot:int, dtype:DType, shape:tuple[int, ...]|None=None):
+  def param(slot:int, dtype:DType, shape:tuple[int, ...]|None=None, device=None):
     src = () if shape is None else (UOp.const(dtypes.index.vec(len(shape)), shape),)
+    if device is not None: src += (UOp(Ops.DEVICE, arg=device),)
     return UOp(Ops.PARAM, dtype, src, arg=slot)
 
   def call(*srcs:UOp, fxn:UOp, arg:Any|None) -> UOp: return UOp(Ops.CALL, fxn.dtype, (fxn,)+srcs, arg)
