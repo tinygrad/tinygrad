@@ -1,12 +1,8 @@
-import atexit, functools, pathlib
+import atexit, functools, pathlib, atexit
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.uop.ops import UOp, Ops, KernelInfo, AxisType
 from tinygrad.renderer import Estimates
 from tinygrad.helpers import getenv, Context, all_same
-
-counters = {"used":0}
-@atexit.register
-def print_counters(): print("ASM gemm", counters)
 
 # ** CDNA4 assembly gemm
 
@@ -42,17 +38,20 @@ def get_gemm_args(batch, M, N, K):
   magic, shift = ITERS_ARGS[iters]
   return [numWG, N, batch * M, 1, K, N, 0, N, 0, K, 0, iters, magic, shift, total]
 
+counters = {"used":0, "todos":[]}
+def todo(msg:str) -> bool: counters["todos"].append(msg); return False
+atexit.register(lambda: print("\n".join([f'asm_gemm: {counters["used"]} used, {len(counters["todos"])} not used', *counters["todos"]])))
 
 def can_use_asm_gemm(a:Tensor, b:Tensor) -> bool:
-  if a.dtype != b.dtype: return False
-  if a.dtype not in {dtypes.bfloat16}: return False
+  if a.dtype != b.dtype: return todo(f"dtype mismatch {a.dtype} != {b.dtype}")
+  if a.dtype not in {dtypes.bfloat16}: return todo(f"dtype {a.dtype}")
   # only sharding on the batch is tested
-  if isinstance(a.device, tuple) and not (a.ndim == 3 and a.uop.axis == 0 and b.uop.axis is None): return False
+  if isinstance(a.device, tuple) and not (a.ndim == 3 and a.uop.axis == 0 and b.uop.axis is None):
+    return todo(f"sharding mismatch a.ndim={a.ndim} a.uop.axis={a.uop.axis} b.uop.axis={b.uop.axis}")
   batch, M, K = (1, *a.shape) if a.ndim == 2 else a.shape
   N = b.shape[1]
   if isinstance(a.device, tuple): batch //= len(a.device)
-  if (batch, M, N, K) not in GEMM_ARGS:
-    return False
+  if (key:=(batch, M, N, K)) not in GEMM_ARGS: return todo(f"{key} not in GEMM_ARGS")
   return True
 
 # ** UOp gemm to test custom_kernel multi and backward correctness on non cdna4
@@ -70,6 +69,8 @@ def custom_uop_gemm(C:UOp, A:UOp, B:UOp) -> UOp:
   store = C.index((m*UOp.const(dtypes.index, N)+n), ptr=True).store(red).end(m, n)
   return store.sink(arg=KernelInfo(name=f'uop_gemm_{M}_{N}_{K}'))
 
+# ** backward gemm, might use the asm gemm
+
 def custom_gemm_bw(gradient:UOp, kernel:UOp):
   out, a, b, _ = kernel.src
   assert all_same([gradient.device, a.device, b.device, out.device])
@@ -80,6 +81,8 @@ def custom_gemm_bw(gradient:UOp, kernel:UOp):
   g_r = g_t.reshape(*g_t.shape[:-2], 1, *g_t.shape[-2:]).transpose(-1, -2)
   grad_b = (a_T * g_r).sum((-1, 0)).uop
   return (None, grad_a, grad_b, None)
+
+# ** main gemm function
 
 def asm_gemm(a:Tensor, b:Tensor) -> Tensor:
   assert can_use_asm_gemm(a, b)
@@ -96,7 +99,7 @@ def asm_gemm(a:Tensor, b:Tensor) -> Tensor:
   else:
     out = Tensor.empty(batch, M, N, dtype=a.dtype, device=a.device)
 
-  dname = a.device[0] if isinstance(a.device, tuple) else a.device
+  dname = a.device[0] if is_multi else a.device
   arch = getattr(Device[dname].renderer, "arch", None)
   if arch.startswith("gfx950") and getenv("USE_ASM", 1):
     params = Tensor(p:=get_gemm_args(batch//len(a.device) if is_multi else batch, M, N, K))
