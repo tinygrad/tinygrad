@@ -68,9 +68,22 @@ def resolve_custom_kernel(ck:UOp) -> UOp:
   placeholders = [UOp.placeholder_like(s, slot=i) for i,s in enumerate(ck.src)]
   return UOp(Ops.KERNEL, src=ck.src, arg=Kernel(ck.arg.fxn(*placeholders)))
 
+def resolve_call(c:UOp) -> UOp:
+  params = sorted([x for x in c.src[0].toposort() if x.op == Ops.PARAM], key=lambda x: x.arg)
+  args = c.src[1:]
+  if [x.arg for x in params] != list(range(len(params))): raise RuntimeError(f"params not in order: {[x.arg for x in params]}")
+  if len(params) != len(args): raise TypeError(f"expected {len(params)} args, got {len(args)}")
+  for i, (p, a) in enumerate(zip(params, args)):
+    if p.shape != a.shape: raise TypeError(f"arg {i} shape mismatch: expected {p.shape}, got {a.shape}")
+    if p.dtype != a.dtype: raise TypeError(f"arg {i} dtype mismatch: expected {p.dtype}, got {a.dtype}")
+  return c.src[0].substitute(dict(zip(params, args)))
+
 earliest_rewrites = mop_cleanup+PatternMatcher([
   # just removing it works...
   (UPat((Ops.DETACH, Ops.CONTIGUOUS_BACKWARD), name="x"), lambda x: x.src[0]),
+
+  # resolve calls
+  (UPat(Ops.CALL, name="c"), resolve_call),
 
   # resolve custom kernels
   (UPat(Ops.CUSTOM_KERNEL, name="ck"), resolve_custom_kernel),
@@ -252,22 +265,22 @@ pm_remove_bufferize = PatternMatcher([
 ])
 
 def late_buffer_view(t:UOp, b:UOp):
-  if isinstance(b.device, str) and (b.device.startswith("DISK") or b.device.startswith("TINYFS")):
-    shape = b.shape
-    size = prod(shape)
+  if not (isinstance(b.device, str) and b.device.startswith(("DISK", "TINYFS"))): return b
+  shape = b.shape
+  size = prod(shape)
 
-    # walk up for the INDEX
-    x = t
-    while not any(u.op is Ops.INDEX for u in x.src):
-      assert x.op not in GroupOp.Elementwise, "can't buffer view elementwise"
-      x = x.src[0]
-    x = next(u for u in x.src if u.op is Ops.INDEX)
+  # walk up for the INDEX
+  x = t
+  while not any(u.op is Ops.INDEX for u in x.src):
+    assert x.op not in GroupOp.Elementwise, "can't buffer view elementwise"
+    x = x.src[0]
+  x = next(u for u in x.src if u.op is Ops.INDEX)
 
-    if len(shape) == 0: offset = x.src[1].arg
-    else: offset = max(sum(idx.vmin for idx in x.src[1:]), 0)
+  if len(shape) == 0: offset = x.src[1].arg
+  else: offset = max(sum(idx.vmin for idx in x.src[1:]), 0)
 
-    return b.replace(src=(UOp(Ops.BUFFER_VIEW, t.dtype, (x.base,), (size, offset), tag=t.tag),) + b.src[1:])
-  return b
+  return b.replace(src=(UOp(Ops.BUFFER_VIEW, t.dtype, (x.base,), (size, offset), tag=t.tag),) + b.src[1:])
+
 to_bufferview = PatternMatcher([
   (UPat((Ops.BITCAST, Ops.CONTIGUOUS), name="t").f(Ops.BUFFERIZE, allow_any_len=True, name="b"), late_buffer_view),
   (UPat((Ops.BITCAST, Ops.CONTIGUOUS)).f(Ops.BUFFER_VIEW, name="b"), lambda b: b.replace(src=b.src[0].src)),
@@ -502,12 +515,11 @@ def split_store(ctx:list[UOp], x:UOp) -> UOp|None:
   # gather the metadata
   metadatas = [ctx[y].metadata for y in lctx.parent_tags]
 
-  # NOTE: the hack for COPY is here
-  for u in ret.toposort():
-    # TODO: this can be wrong if there's multiple of these
-    if u.op in {Ops.COPY, Ops.BUFFER_VIEW, Ops.ENCDEC}:
-      ret = u
-      break
+  # SINK requires all buffers on the same device, but COPY/BUFFER_VIEW/ENCDEC are cross-device or special hardware ops
+  if ret.op is Ops.STORE: stored = ret.src[1]
+  elif ret.op is Ops.END and ret.src[0].op is Ops.STORE: stored = ret.src[0].src[1]
+  else: raise RuntimeError(f"unknown kernel type {ret.op}")
+  if stored.op in {Ops.COPY, Ops.BUFFER_VIEW, Ops.ENCDEC}: ret = stored
   else:
     ret = ret.sink(arg=KernelInfo(opts_to_apply=lctx.opts) if lctx.opts is not None else None)
 

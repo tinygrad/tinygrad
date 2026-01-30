@@ -318,8 +318,8 @@ def threefry2x32(x: UOp, key: UOp):
 # ***** long as 2 ints *****
 
 l2i_dt = {dtypes.long: dtypes.int, dtypes.ulong: dtypes.uint}
-def unpack32(v): return v.bitcast(dtypes.uint) & 0xFFFF, v.bitcast(dtypes.uint) >> 16
-def l2i_idx(idx,off): return idx.replace(src=(idx.src[0], idx.src[1]*2+off))
+def unpack32(v:UOp) -> tuple[UOp, UOp]: return v.bitcast(dtypes.uint) & 0xFFFF, v.bitcast(dtypes.uint) >> 16
+def l2i_idx(idx:UOp, off:int) -> UOp: return idx.replace(src=(idx.src[0], idx.src[1]*2+off))
 
 # 4.3.1 is the relevant section in TAOCP
 def l2i(op: Ops, dt: DType, *uops:UOp):
@@ -377,9 +377,10 @@ def l2i(op: Ops, dt: DType, *uops:UOp):
 
 # ***** decomposition patterns *****
 
-powers_of_two = {2**i:i for i in range(64)}
+powers_of_two: dict[int, int] = {2**i:i for i in range(64)}
 @functools.cache
-def get_late_rewrite_patterns(ops:tuple[Ops, ...], device, force_transcendental, disable_fast_idiv, emulated_dtypes):
+def get_late_rewrite_patterns(ops:tuple[Ops, ...], device:str, force_transcendental:bool, disable_fast_idiv:bool,
+                              emulated_dtypes:tuple[DType, ...]) -> PatternMatcher:
   pat: list[tuple[UPat, Callable]] = []
   for op,f in ((Ops.EXP2, xexp2), (Ops.LOG2, xlog2), (Ops.SIN, xsin)):
     if op not in ops or force_transcendental:
