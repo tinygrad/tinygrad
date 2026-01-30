@@ -169,6 +169,7 @@ class TestDTypeALU(unittest.TestCase):
   @given(ht.uint64, ht.uint64, strat.sampled_from(integer_binary_operations))
   def test_uint64(self, a, b, op): universal_test(a, b, dtypes.uint64, op)
 
+  @unittest.skipUnless(Ops.SHL in Device[Device.DEFAULT].renderer.code_for_op, f"long decomp requires bitshift")
   @given(ht.uint64, ht.uint64, strat.sampled_from(integer_binary_operations))
   @Context(EMULATED_DTYPES="long")
   def test_emulated_uint64(self, a, b, op): universal_test(a, b, dtypes.uint64, op)
@@ -186,6 +187,7 @@ class TestDTypeALU(unittest.TestCase):
   @given(ht.int64, ht.int64, strat.sampled_from(integer_binary_operations))
   def test_int64(self, a, b, op): universal_test(a, b, dtypes.int64, op)
 
+  @unittest.skipUnless(Ops.SHL in Device[Device.DEFAULT].renderer.code_for_op, f"long decomp requires bitshift")
   @given(ht.int64, ht.int64, strat.sampled_from(integer_binary_operations))
   @Context(EMULATED_DTYPES="long")
   def test_emulated_int64(self, a, b, op): universal_test(a, b, dtypes.int64, op)
@@ -205,6 +207,7 @@ class TestDTypeALU(unittest.TestCase):
   @given(ht.uint64, strat.sampled_from(integer_unary_operations))
   def test_uint64_unary(self, a, op): universal_test_unary(a, dtypes.uint64, op)
 
+  @unittest.skipUnless(Ops.SHL in Device[Device.DEFAULT].renderer.code_for_op, f"long decomp requires bitshift")
   @given(ht.uint64, strat.sampled_from(integer_unary_operations))
   @Context(EMULATED_DTYPES="long")
   def test_emulated_uint64_unary(self, a, op): universal_test_unary(a, dtypes.uint64, op)
@@ -222,6 +225,7 @@ class TestDTypeALU(unittest.TestCase):
   @given(ht.int64, strat.sampled_from(integer_unary_operations))
   def test_int64_unary(self, a, op): universal_test_unary(a, dtypes.int64, op)
 
+  @unittest.skipUnless(Ops.SHL in Device[Device.DEFAULT].renderer.code_for_op, f"long decomp requires bitshift")
   @given(ht.int64, strat.sampled_from(integer_unary_operations))
   @Context(EMULATED_DTYPES="long")
   def test_emulated_int64_unary(self, a, op): universal_test_unary(a, dtypes.int64, op)
