@@ -1,42 +1,27 @@
-import atexit, functools, pathlib, atexit
+import atexit, functools
+from tinygrad.runtime.support.compiler_amd import HIPCompiler
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.uop.ops import UOp, Ops, KernelInfo, AxisType
 from tinygrad.renderer import Estimates
-from tinygrad.helpers import getenv, Context, all_same, dedup
+from tinygrad.helpers import getenv, all_same, dedup
+from extra.gemm.asm.cdna.asm import build_kernel, GEMM_ARGS
 
 # ** CDNA4 assembly gemm
 
 WORKGROUP_SIZE = 256
 
-def custom_asm_gemm(C:UOp, A:UOp, B:UOp, params:UOp, dname:str, wg:int) -> UOp:
-  M, K = A.shape[0]*A.shape[1], A.shape[2]
+def custom_asm_gemm(C:UOp, A:UOp, B:UOp, dname:str, arch:str, wg:int) -> UOp:
+  batch, M, K = A.shape
   K2, N = B.shape[(1 if B.ndim == 3 else 0):]
   assert K == K2
   lidx = UOp.special(WORKGROUP_SIZE, "lidx0")
   gidx = UOp.special(wg, "gidx0")
-  rodata = (pathlib.Path(__file__).parent/"rodata.s").read_text()
-  src = rodata.replace("INSTRUCTIONS", (pathlib.Path(__file__).parent/"kernel.s").read_text())
-  sink = UOp.sink(C.base, A.base, B.base, params.base, lidx, gidx,
-                  arg=KernelInfo(name="gemm", estimates=Estimates(ops=2*M*N*K, mem=(M*K + K*N + M*N)*2)))
-  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg=dname), UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=src)))
-
-# gemm kernel arguments, mapped exactly to the dims, this should be removed the gemm is generic
-# (batch, M, N, K) -> (numWG, iters, total)
-GEMM_ARGS = {
-  (1, 8192, 4096, 4096): (256, 64, 32768),
-  (1, 8192, 1024, 4096): (256, 64, 32768),
-  (1, 8192, 14336, 4096): (256, 64, 114688),
-  (1, 8192, 4096, 14336): (256, 224, 114688),
-  (1, 8192, 128256, 4096): (16032, 64, 1026048),
-  (8, 8192, 1024, 4096): (256, 64, 65536),
-  (1, 8192, 8192, 8192): (256, 128, 131072),
-  (1, 4096, 4096, 4096): (256, 64, 16384),
-}
-ITERS_ARGS = {64: (67108864, 0), 128: (33554432, 0), 224: (613566757, 2147483656)}
-def get_gemm_args(batch, M, N, K):
-  numWG, iters, total = GEMM_ARGS[(batch, M, N, K)]
-  magic, shift = ITERS_ARGS[iters]
-  return [numWG, N, batch * M, 1, K, N, 0, N, 0, K, 0, iters, magic, shift, total]
+  sink = UOp.sink(C.base, A.base, B.base, lidx, gidx,
+                  arg=KernelInfo(name="gemm", estimates=Estimates(ops=2*batch*M*N*K, mem=(batch*M*K + K*N + batch*M*N)*2)))
+  k = build_kernel(batch, M, N, K)
+  binary = HIPCompiler(arch).compile(k.to_asm())
+  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg=dname), UOp(Ops.LINEAR, src=(*sink.src, sink)),
+                               UOp(Ops.SOURCE, arg=k.to_text()), UOp(Ops.BINARY, arg=binary)))
 
 counters = {"used":0, "todos":[]}
 def todo(msg:str) -> bool: counters["todos"].append(msg); return False
@@ -72,7 +57,7 @@ def custom_uop_gemm(C:UOp, A:UOp, B:UOp) -> UOp:
 # ** backward gemm, might use the asm gemm
 
 def custom_gemm_bw(gradient:UOp, kernel:UOp):
-  out, a, b, _ = kernel.src
+  out, a, b = kernel.src
   assert all_same([gradient.device, a.device, b.device, out.device])
   a_t, b_t, g_t = Tensor(a, device=a.device), Tensor(b, device=a.device), Tensor(gradient, device=a.device)
   grad_a = (g_t @ b_t.T).uop
@@ -80,7 +65,7 @@ def custom_gemm_bw(gradient:UOp, kernel:UOp):
   a_T = a_T.reshape(*a_T.shape[:-1], 1, a_T.shape[-1])
   g_r = g_t.reshape(*g_t.shape[:-2], 1, *g_t.shape[-2:]).transpose(-1, -2)
   grad_b = (a_T * g_r).sum((-1, 0)).uop
-  return (None, grad_a, grad_b, None)
+  return (None, grad_a, grad_b)
 
 # ** main gemm function
 
@@ -102,11 +87,8 @@ def asm_gemm(a:Tensor, b:Tensor) -> Tensor:
   dname = a.device[0] if is_multi else a.device
   arch = getattr(Device[dname].renderer, "arch", None)
   if arch.startswith("gfx950") and getenv("USE_ASM", 1):
-    params = Tensor(p:=get_gemm_args(batch//len(a.device) if is_multi else batch, M, N, K))
-    if is_multi: params.to_(a.device)
-    # todo: won't need this after python dsl, these should be python constants
-    #with Context(DEBUG=0): params.realize()
-    out = Tensor.custom_kernel(out, a, b, params, fxn=functools.partial(custom_asm_gemm, dname=dname, wg=p[0]), grad_fxn=custom_gemm_bw)[0]
+    numWG = GEMM_ARGS[(batch//len(a.device) if is_multi else batch, M, N, K)][0]
+    out = Tensor.custom_kernel(out, a, b, fxn=functools.partial(custom_asm_gemm, dname=dname, wg=numWG, arch=arch), grad_fxn=custom_gemm_bw)[0]
   else:
     out = Tensor.custom_kernel(out, a, b, fxn=custom_uop_gemm, grad_fxn=custom_gemm_bw)[0]
   return out.squeeze(0) if squeeze else out
