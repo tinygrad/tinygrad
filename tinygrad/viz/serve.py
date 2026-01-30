@@ -555,11 +555,11 @@ def get_render(query:str) -> dict:
     pc_to_inst = data["disasm"]
     start_pc = None
     rows:dict[int, dict] = {}
+    for pc, (inst,_) in pc_to_inst.items():
+      if start_pc is None: start_pc = pc
+      rows[pc] = {"pc":pc-start_pc, "inst":pc_to_inst[pc][0], "hit_count":0, "dur":0, "stall":0, "hits":{"cols":inst_columns, "rows":[]}, "type":""}
     for e in w.unpack_insts():
-      if start_pc is None: start_pc = e.pc
-      if (inst:=rows.get(e.pc)) is None:
-        rows[e.pc] = inst = {"pc":e.pc-start_pc, "inst":pc_to_inst[e.pc][0], "hit_count":0, "dur":0, "stall":0, "type":str(e.typ).split("_")[-1],
-                             "hits":{"cols":inst_columns, "rows":[]}}
+      if not (inst:=rows[e.pc]).get("type"): inst["type"] = str(e.typ).split("_")[-1]
       inst["hit_count"] += 1
       inst["dur"] += e.dur
       inst["stall"] += e.stall

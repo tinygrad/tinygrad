@@ -238,5 +238,18 @@ class TestCfg(unittest.TestCase):
         s_code_end(),
     ])
 
+  def test_hit_count(self):
+    run_asm("test_hit_count", [
+      "entry:",
+        s_mov_b32(s[1], 1),
+        "s_branch alt",
+      "continue:",
+        s_mov_b32(s[2], 2),
+        s_add_u32(s[1], s[1], s[2]),
+      "alt:",
+        s_add_u32(s[1], s[1], -1),
+        s_endpgm(),
+    ])
+
 if __name__ == "__main__":
   unittest.main()
