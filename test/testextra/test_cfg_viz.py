@@ -249,6 +249,7 @@ class TestCfg(unittest.TestCase):
       "alt:",
         s_add_u32(s[1], s[1], -1),
         s_endpgm(),
+        s_code_end(),
     ])
 
 if __name__ == "__main__":
