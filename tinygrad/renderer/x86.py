@@ -1,4 +1,4 @@
-import sys, struct
+import sys, struct, functools
 from typing import cast
 from tinygrad.dtype import dtypes, PtrDType, DType, truncate
 from tinygrad.uop import Ops, X86Ops, GroupOp, X86GroupOp
@@ -207,40 +207,36 @@ def to_imm(c:UOp) -> UOp|None:
   if c.dtype is dtypes.uint64: return imm(dtypes.uint32, c.arg) if not c.overflows(dtypes.uint32) else None
   if c.dtype in dtypes.ints+(dtypes.bool,): return imm(c.dtype, c.arg)
   return None
-def cmp(x:UOp):
+def cmp(x:UOp) -> UOp:
   if x.src[0].dtype is dtypes.float32: return UOp(X86Ops.VUCOMISS, src=x.src)
   if x.src[0].dtype is dtypes.float64: return UOp(X86Ops.VUCOMISD, src=x.src)
   return UOp(X86Ops.CMP, src=x.src) if (i:=to_imm(x.src[1])) is None else UOp(X86Ops.CMPi, src=(x.src[0], i))
-def def_reg(dt:DType, reg:Register|None=None): return UOp(X86Ops.DEFINE_REG, dt, arg=reg)
+def def_reg(dt:DType, reg:Register|None=None) -> UOp: return UOp(X86Ops.DEFINE_REG, dt, arg=reg)
 
-# vshufps takes 2 registers, it gets its lower 64 bits from the first register and its upper 64 bits from the second
-# used for all shuffles with 1 or 2 src registers that are not broadcasts
+# vshufps xmm2, xmm0, xmm1
+# xmm2 selects its lower 2 32 bits from xmm0 and its upper 2 32 bits from xmm1
 def vshufps(x:UOp) -> UOp:
-  def _imm(src:tuple[UOp, ...]) -> UOp: return imm(dtypes.uint8, sum((s.arg[0] if s.op is Ops.GEP else 0) << (2*i) for i,s in enumerate(src)))
-  rsrc = tuple(s.src[0] if s.op is Ops.GEP else s for s in x.src)
-  nsrc = ()
-  if all(s == rsrc[0] for s in rsrc): nsrc = (rsrc[0], rsrc[0])
-  elif len(rsrc) == 4 and rsrc[0] == rsrc[1] and rsrc[2] == rsrc[3]: nsrc = (rsrc[0], rsrc[2])
-  return UOp(X86Ops.VSHUFPS, x.dtype, nsrc + (_imm(x.src),)) if nsrc else None
+  def _in(i:int) -> UOp: return s.src[0] if (s:=x.src[i]).op is Ops.GEP else s
+  if len(x.src) != 4 or not (_in(0) is _in(1) and _in(2) is _in(3)): return None
+  return UOp(X86Ops.VSHUFPS, x.dtype, (_in(0), _in(2),
+    imm(dtypes.uint8, sum((s.arg[0] if s.op is Ops.GEP else 0) << (2*i) for i,s in enumerate(x.src)))))
 
-# vinsertps inserts from any element in the 2nd src register into any element in the destination register
-# the rest of the elements are taken from the 1st src register
-# this results in multiple instructions and is the fallback case for when you can't match more powerful shuffles
+# vinsertps xmm2, xmm0, xmm1
+# inserts any 32 bit element in xmm1 into any position in xmm0, result is written to xmm2
+# this is the fallback slow case for when you can't match more a powerful shuffle
 def vinsertps(x:UOp) -> UOp:
-  def _imm(x:UOp,i:int) -> UOp: return imm(dtypes.uint8, ((x.arg[0] if x.op is Ops.GEP else 0) << 6) | (i << 4))
-  rsrc = tuple(s.src[0] if s.op is Ops.GEP else s for s in x.src)
-  # if first src is not a gep or gep[0] it's just moving the 0th element from a reg to another without shuffling which does nothing
-  shuf = UOp(X86Ops.VINSERTPS, x.dtype, (rsrc[0], rsrc[0], _imm(x.src[0], 0))) if x.src[0].op is Ops.GEP and x.src[0].arg[0] > 0 else rsrc[0]
-  for i,s in enumerate(x.src[1:], 1): shuf = UOp(X86Ops.VINSERTPS, x.dtype, (shuf, rsrc[i], _imm(s, i)))
-  return shuf
+  def _insert(ret:UOp, i:int) -> UOp:
+    s, v = x.src[i], 0
+    if s.op is Ops.GEP: s, v = s.src[0], s.arg[0]
+    # if first src is not a gep or gep[0] it's just moving the 0th element from an xmm reg to another without shuffling which does nothing
+    return s if i == v == 0 else UOp(X86Ops.VINSERTPS, x.dtype, (ret, s, imm(dtypes.uint8, v << 6 | i << 4)))
+  return functools.reduce(_insert, range(len(x.src)), def_reg(x.dtype))
 
-# vpins inserts from 2nd src gpr register into any element in the destination xmm register
-# the rest of the elements are taken from the 1st src xmm register
+# vpinsq xmm2, xmm0, rax
+# inserts element in rax into any position in xmm0, result is written to xmm2
 def vpins(x:UOp) -> UOp:
   op = {1: X86Ops.VPINSRB, 2: X86Ops.VPINSRW, 4: X86Ops.VPINSRD, 8: X86Ops.VPINSRQ}[x.dtype.scalar().itemsize]
-  shuf = UOp(op, x.dtype, (def_reg(x.dtype), x.src[0], imm(dtypes.uint8, 0)))
-  for i,s in enumerate(x.src[1:], 1): shuf = UOp(op, x.dtype, (shuf, s, imm(dtypes.uint8, i)))
-  return shuf
+  return functools.reduce(lambda ret,i: UOp(op, x.dtype, (ret, x.src[i], imm(dtypes.uint8, i))), range(len(x.src)), def_reg(x.dtype))
 
 def div(ctx:IselContext, x:UOp):
   # zero extend or move src[0] to x
