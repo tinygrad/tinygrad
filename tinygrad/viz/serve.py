@@ -347,7 +347,7 @@ def unpack_sqtt(key:tuple[str, int], data:list, p:ProfileProgramEvent) -> tuple[
   base = unwrap(p.base)
   addr_table = amd_decode(unwrap(p.lib), device_props[p.device]["gfx_target_version"], )
   disasm:dict[int, tuple[str, int]] = {addr+base:(inst.disasm(), inst.size()) for addr, inst in addr_table.items()}
-  rctx = decode(data, {p.name:disasm})
+  rctx = decode(data, {p.tag:disasm})
   cu_events:dict[str, list[ProfileEvent]] = {}
   # * INST waves
   wave_insts:dict[str, dict[str, dict]] = {}
