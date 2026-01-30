@@ -772,7 +772,7 @@ jobs:
       - name: Run TRANSCENDENTAL math
         run: TRANSCENDENTAL=2 python -m pytest -n=auto test/test_ops.py::TestOps::test_sin test/test_ops.py::TestOps::test_cos test/test_ops.py::TestOps::test_tan test/test_ops.py::TestOps::test_exp test/test_ops.py::TestOps::test_log --durations=20
       - name: Test dtype with emulated long
-        if: matrix.backend != 'lvp' && matrix.backend != 'llvm'
+        if: matrix.backend != 'lvp'
         run: EMULATED_DTYPES=long python3 -m pytest -n=auto test/test_dtype.py test/test_dtype_alu.py
       - name: Run process replay tests
         uses: ./.github/actions/process-replay
