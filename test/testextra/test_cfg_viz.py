@@ -6,8 +6,8 @@ import textwrap, functools
 
 from tinygrad import Device, Tensor
 from tinygrad.uop.ops import UOp, Ops, KernelInfo
-from tinygrad.helpers import getenv
 from tinygrad.device import Compiler
+from tinygrad.runtime.support.compiler_amd import HIPCompiler
 from tinygrad.viz.serve import amdgpu_cfg
 
 from extra.assembly.amd.autogen.rdna3.ins import *
@@ -73,11 +73,11 @@ def asm_kernel(out:UOp, insts:list[str|Inst], name:str, device:str, compiler:Com
                                UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=lib)))
 
 def run_asm(name:str, insts:list) -> None:
-  fxn = functools.partial(asm_kernel, insts=insts, name=name, device=Device.DEFAULT, compiler=Device[Device.DEFAULT].compiler)
+  fxn = functools.partial(asm_kernel, insts=insts, name=name, device=Device.DEFAULT, compiler=HIPCompiler(Device[Device.DEFAULT].renderer.arch))
   out = Tensor.custom_kernel(Tensor.empty(1), fxn=fxn)[0]
   out.realize()
 
-@unittest.skipUnless(Device.DEFAULT == "AMD" and not getenv("AMD_LLVM"), "only on AMD with comgr")
+@unittest.skipUnless(Device.DEFAULT == "AMD", "only on AMD")
 class TestCfg(unittest.TestCase):
   def setUp(self):
     arch = Device["AMD"].arch
