@@ -25,8 +25,8 @@ def custom_asm_gemm(C:UOp, A:UOp, B:UOp, ws:UOp, flags:UOp, params:UOp, dname:st
   assert K == K2
   lidx = UOp.special(WORKGROUP_SIZE, "lidx0")
   gidx = UOp.special(wg, "gidx0")
-  template = (pathlib.Path(__file__).parent/"template2.s").read_text()
-  src = template.replace("INSTRUCTIONS", (pathlib.Path(__file__).parent/"kernel.s").read_text())
+  rodata = (pathlib.Path(__file__).parent/"rodata.s").read_text()
+  src = rodata.replace("INSTRUCTIONS", (pathlib.Path(__file__).parent/"kernel.s").read_text())
   sink = UOp.sink(C.base, A.base, B.base, ws.base, flags.base, params.base,
                   lidx, gidx, arg=KernelInfo(name="gemm", estimates=Estimates(ops=2*M*N*K, mem=(M*K + K*N + M*N)*2)))
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg=dname), UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=src)))
