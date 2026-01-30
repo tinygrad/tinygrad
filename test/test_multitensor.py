@@ -409,7 +409,7 @@ class TestMultiTensor(unittest.TestCase):
 
     np.testing.assert_allclose(z.numpy(), z_shard.numpy(), atol=1e-6, rtol=1e-6)
 
-  def test_embedding_backward(self, shard_axis=None):
+  def test_embedding_backward(self, shard_weight_axis=None):
     B, T, embed_size, vocab_size = 4, 10, 20, 28
 
     layer = nn.Embedding(vocab_size, embed_size)
@@ -420,7 +420,7 @@ class TestMultiTensor(unittest.TestCase):
     grad = layer.weight.grad.numpy()
 
     layer_sharded = nn.Embedding(vocab_size, embed_size)
-    layer_sharded.weight.replace(layer.weight.shard(devices_2, axis=shard_axis)).realize()
+    layer_sharded.weight.replace(layer.weight.shard(devices_2, axis=shard_weight_axis)).realize()
     layer_sharded.weight.requires_grad = True
     x_sharded = x.shard(devices_2, axis=None)
     z_shard = layer_sharded(x_sharded)
@@ -429,7 +429,7 @@ class TestMultiTensor(unittest.TestCase):
 
     np.testing.assert_allclose(grad, grad_shard, atol=1e-6, rtol=1e-6)
 
-  def test_embedding_backward_shard_weight(self): self.test_embedding_backward(shard_axis=1)
+  def test_embedding_backward_shard_weight(self): self.test_embedding_backward(shard_weight_axis=1)
 
   def test_rmsnorm(self):
     B, T, embed_size = 4, 10, 20

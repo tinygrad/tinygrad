@@ -321,8 +321,10 @@ def _embedding_bwd(grad_emb:UOp, call:UOp) -> tuple:
     return out.flatten()[i].store(0).end(i).sink(arg=KernelInfo(name="zero"))
   grad_weight_uop = grad_weight_uop.custom_kernel(fxn=_zero_kernel)[0]
 
+  # TODO: do we have a universal helper for this?
+  device = call.device.split(":")[0] if not isinstance(call.device, tuple) else call.device[0].split(":")[0]
+
   # this is the real atomic kernel
-  device = call.device
   def _embedding_bwd_kernel(grad_weight:UOp, grad_emb:UOp, idx:UOp) -> UOp:
     idx_flat, grad_emb_flat = idx.flatten(), grad_emb.reshape((idx.size, grad_weight.shape[-1]))
     i = UOp.range(grad_emb_flat.shape[0], 0)  # batch_size * sequence_length
