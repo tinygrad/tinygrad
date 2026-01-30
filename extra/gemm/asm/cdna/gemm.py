@@ -104,8 +104,8 @@ def asm_gemm(a:Tensor, b:Tensor) -> Tensor:
   if arch.startswith("gfx950") and getenv("USE_ASM", 1):
     params = Tensor(p:=get_gemm_args(batch//len(a.device) if is_multi else batch, M, N, K))
     if is_multi: params.to_(a.device)
-    # todo: remove this by converting the gemm to python dsl, these should be python constants
-    with Context(DEBUG=0): params.realize()
+    # todo: won't need this after python dsl, these should be python constants
+    #with Context(DEBUG=0): params.realize()
     out = Tensor.custom_kernel(out, a, b, params, fxn=functools.partial(custom_asm_gemm, dname=dname, wg=p[0]), grad_fxn=custom_gemm_bw)[0]
   else:
     out = Tensor.custom_kernel(out, a, b, fxn=custom_uop_gemm, grad_fxn=custom_gemm_bw)[0]
