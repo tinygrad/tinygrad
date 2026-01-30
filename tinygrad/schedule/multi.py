@@ -203,13 +203,17 @@ def assign_multi(dest:UOp, src:UOp):
 
 def call_multi(c:UOp):
   params = sorted([x for x in c.src[0].toposort() if x.op == Ops.PARAM], key=lambda x: x.arg)
-  args = c.src[1:]
-  # 1. extract the multis from arg, replace the c.srcs to not have them
-  # 2. add them to the params and substitute them in c.src[0]
-  # 3. run multi_pm on c.src[0]
-  # 4. if there's a multi at the end of the c.src[0], put it after the call
-  # 5. return the call
-  raise NotImplementedError("write this")
+  assert len(params) == len(c.src[1:]), "len mismatch"
+  params_replace = {}
+  new_srcs = list(c.src)
+  for i,src in enumerate(c.src[1:]):
+    if src.op is Ops.MULTI:
+      new_srcs[i+1] = src.src[0]
+      params_replace[params[i]] = UOp.param(params[i].arg, params[i].dtype, src.src[0].shape, params[i].device).multi(src.axis)
+  assert len(params_replace)
+  new_fxn = graph_rewrite(c.src[0].substitute(params_replace), multi_pm, name="call_multi_pm")
+  if new_fxn.op is Ops.MULTI: return c.replace(src=(new_fxn.src[0], *new_srcs[1:])).multi(new_fxn.axis)
+  else: return c.replace(src=(new_fxn, *new_srcs[1:]))
 
 def passthrough_multi(root:UOp, multi:UOp):
   return UOp(root.op, root.dtype, (multi.src[0],), root.arg).multi(multi.axis)

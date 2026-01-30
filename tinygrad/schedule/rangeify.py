@@ -71,6 +71,7 @@ def resolve_custom_kernel(ck:UOp) -> UOp:
 def resolve_call(c:UOp) -> UOp:
   params = sorted([x for x in c.src[0].toposort() if x.op == Ops.PARAM], key=lambda x: x.arg)
   args = c.src[1:]
+  # TODO: this check belongs in spec, not here
   if [x.arg for x in params] != list(range(len(params))): raise RuntimeError(f"params not in order: {[x.arg for x in params]}")
   if len(params) != len(args): raise TypeError(f"expected {len(params)} args, got {len(args)}")
   for i, (p, a) in enumerate(zip(params, args)):
