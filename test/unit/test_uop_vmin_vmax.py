@@ -292,6 +292,12 @@ class TestConstFactor(unittest.TestCase):
     uop = UOp.const(dtypes.int32, 42)
     self.assertEqual(uop.const_factor(), 42)
 
+  def test_const_factor_negative(self):
+    self.assertEqual(UOp.const(dtypes.int32, -6).const_factor(), 6)
+    x = UOp.variable('x', 0, 10)
+    self.assertEqual((x * -6).const_factor(), 6)
+    self.assertEqual((UOp.const(dtypes.int32, -6) * x).const_factor(), 6)
+
   def test_const_factor_addition(self):
     # const_factor for an addition of constants
     uop = UOp.const(dtypes.int32, 30) + UOp.const(dtypes.int32, 12)
