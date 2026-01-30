@@ -2,7 +2,7 @@ import atexit, functools, pathlib
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.uop.ops import UOp, Ops, KernelInfo, AxisType
 from tinygrad.renderer import Estimates
-from tinygrad.helpers import getenv, Context
+from tinygrad.helpers import getenv, Context, all_same
 
 counters = {"used":0}
 @atexit.register
@@ -42,6 +42,7 @@ def get_gemm_args(batch, M, N, K):
   magic, shift = ITERS_ARGS[iters]
   return [numWG, N, batch * M, 1, K, N, 0, N, 0, K, 0, iters, magic, shift, total]
 
+
 def can_use_asm_gemm(a:Tensor, b:Tensor) -> bool:
   if a.dtype != b.dtype: return False
   if a.dtype not in {dtypes.bfloat16}: return False
@@ -50,7 +51,8 @@ def can_use_asm_gemm(a:Tensor, b:Tensor) -> bool:
   batch, M, K = (1, *a.shape) if a.ndim == 2 else a.shape
   N = b.shape[1]
   if isinstance(a.device, tuple): batch //= len(a.device)
-  if (batch, M, N, K) not in GEMM_ARGS: return False
+  if (batch, M, N, K) not in GEMM_ARGS:
+    return False
   return True
 
 # ** UOp gemm to test custom_kernel multi and backward correctness on non cdna4
@@ -68,7 +70,16 @@ def custom_uop_gemm(C:UOp, A:UOp, B:UOp) -> UOp:
   store = C.index((m*UOp.const(dtypes.index, N)+n), ptr=True).store(red).end(m, n)
   return store.sink(arg=KernelInfo(name=f'uop_gemm_{M}_{N}_{K}'))
 
-def fake_grad_fxn(_:UOp, kernel:UOp): return (None,)*len(kernel.src)
+def custom_gemm_bw(gradient:UOp, kernel:UOp):
+  out, a, b, _ = kernel.src
+  assert all_same([gradient.device, a.device, b.device, out.device])
+  a_t, b_t, g_t = Tensor(a, device=a.device), Tensor(b, device=a.device), Tensor(gradient, device=a.device)
+  grad_a = (g_t @ b_t.T).uop
+  a_T = a_t.transpose(-2, -1)
+  a_T = a_T.reshape(*a_T.shape[:-1], 1, a_T.shape[-1])
+  g_r = g_t.reshape(*g_t.shape[:-2], 1, *g_t.shape[-2:]).transpose(-1, -2)
+  grad_b = (a_T * g_r).sum((-1, 0)).uop
+  return (None, grad_a, grad_b, None)
 
 def asm_gemm(a:Tensor, b:Tensor) -> Tensor:
   assert can_use_asm_gemm(a, b)
@@ -92,7 +103,7 @@ def asm_gemm(a:Tensor, b:Tensor) -> Tensor:
     if is_multi: params.to_(a.device)
     # todo: remove this by converting the gemm to python dsl, these should be python constants
     with Context(DEBUG=0): params.realize()
-    out = Tensor.custom_kernel(out, a, b, params, fxn=functools.partial(custom_asm_gemm, dname=dname, wg=p[0]), grad_fxn=fake_grad_fxn)[0]
+    out = Tensor.custom_kernel(out, a, b, params, fxn=functools.partial(custom_asm_gemm, dname=dname, wg=p[0]), grad_fxn=custom_gemm_bw)[0]
   else:
-    out = Tensor.custom_kernel(out, a, b, fxn=custom_uop_gemm, grad_fxn=fake_grad_fxn)[0]
+    out = Tensor.custom_kernel(out, a, b, fxn=custom_uop_gemm, grad_fxn=custom_gemm_bw)[0]
   return out.squeeze(0) if squeeze else out

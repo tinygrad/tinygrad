@@ -4,26 +4,29 @@ from tinygrad.helpers import getenv
 from extra.gemm.asm.cdna.gemm import asm_gemm
 
 def verify_asm_gemm(batch:int, M:int, K:int, N:int, dtype=dtypes.bfloat16, multi=False) -> None:
-  a = Tensor.randn((batch, M, K), dtype=dtypes.float).sub(0.5).cast(dtype)
-  b = Tensor.randn((K, N), dtype=dtypes.float).sub(0.5).cast(dtype)
+  a_rand = Tensor.randn((batch, M, K), dtype=dtypes.float).sub(0.5).cast(dtype)
+  b_rand = Tensor.randn((K, N), dtype=dtypes.float).sub(0.5).cast(dtype)
   with Context(DEBUG=0):
-    Tensor.realize(a, b)
+    Tensor.realize(a_rand, b_rand)
 
-  if multi:
-    devs = tuple(f"{Device.DEFAULT}:{i}" for i in range(8))
-    a = a.shard(devs, axis=0)
-    b = b.shard(devs, axis=None)
+  devs = tuple(f"{Device.DEFAULT}:{i}" for i in range(8)) if multi else None
 
-  asm = asm_gemm(a, b)
-  Tensor.realize(asm)
+  a, b = Tensor(a_rand.numpy(), requires_grad=True).cast(dtype), Tensor(b_rand.numpy(), requires_grad=True).cast(dtype)
+  if multi: a, b = a.shard(devs, axis=0), b.shard(devs, axis=None)
+  tst = asm_gemm(a, b)
+  tst.sum().backward()
+  Tensor.realize(tst, a.grad, b.grad)
 
-  with Context(ASM_GEMM=0):
-    ref = a @ b
-  Tensor.realize(ref)
+  a_ref, b_ref = Tensor(a_rand.numpy(), requires_grad=True).cast(dtype), Tensor(b_rand.numpy(), requires_grad=True).cast(dtype)
+  if multi: a_ref, b_ref = a_ref.shard(devs, axis=0), b_ref.shard(devs, axis=None)
+  with Context(ASM_GEMM=0): ref = a_ref @ b_ref
+  ref.sum().backward()
+  Tensor.realize(ref, a_ref.grad, b_ref.grad)
 
-  err = (asm - ref).square().max().float()
   with Context(DEBUG=0):
-    assert err.item() < 1e-6
+    assert (tst - ref).square().max().float().item() < 1e-6, "forward mismatch"
+    assert (a.grad - a_ref.grad).square().max().float().item() < 1e-3, "grad_a mismatch"
+    assert (b.grad - b_ref.grad).square().max().float().item() < 1e-3, "grad_b mismatch"
 
 class TestGemm(unittest.TestCase):
   def test_simple(self): verify_asm_gemm(8, 8192, 4096, 1024)
