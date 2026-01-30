@@ -202,7 +202,7 @@ def ioctl(fd, request, argp):
         if s.hClass == nv_gpu.NV1_MEMORY_SYSTEM: dump_struct(get_struct(s.pAllocParms, nv_gpu.NV_MEMORY_ALLOCATION_PARAMS))
         if s.hClass == nv_gpu.GT200_DEBUGGER: dump_struct(get_struct(s.pAllocParms, nv_gpu.NV83DE_ALLOC_PARAMETERS))
         if s.hClass == nv_gpu.MAXWELL_PROFILER_DEVICE: dump_struct(get_struct(s.pAllocParms, nv_gpu.NVB2CC_ALLOC_PARAMETERS))
-        if s.hClass == nv_gpu.AMPERE_CHANNEL_GPFIFO_A:
+        if s.hClass in {nv_gpu.AMPERE_CHANNEL_GPFIFO_A, nv_gpu.BLACKWELL_CHANNEL_GPFIFO_A}:
           sx = get_struct(s.pAllocParms, nv_gpu.NV_CHANNELGPFIFO_ALLOCATION_PARAMETERS)
           dump_struct(sx)
           gpus_fifo.append((sx.gpFifoOffset, sx.gpFifoEntries))

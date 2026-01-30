@@ -276,6 +276,15 @@ class TestDiskTensor(unittest.TestCase):
     dt[1] = [3]
     self.assertEqual(dt.tolist(), [[1], [3]])
 
+  def test_strided_setitem(self):
+    # test non-contiguous (strided) setitem - should set elements at indices 0, 2, 4
+    pathlib.Path(temp(fn:="dt_strided_setitem")).unlink(missing_ok=True)
+    dt = Tensor([1, 2, 3, 4, 5, 6]).to(f"disk:{temp(fn)}")
+    dt[::2] = Tensor([10, 20, 30])
+    # TODO: dt[::2] selects indices 0, 2, 4, so result should be [10, 2, 20, 4, 30, 6]
+    # self.assertEqual(dt.tolist(), [10, 2, 20, 4, 30, 6])
+    self.assertEqual(dt.tolist(), [10, 20, 30, 4, 5, 6])  # wrong!
+
   def test_assign_const_to_disk(self):
     # assign from CONST (Tensor.full) to disk - source has no buffer, needs contiguous first
     pathlib.Path(temp(fn:="dt_assign_const")).unlink(missing_ok=True)

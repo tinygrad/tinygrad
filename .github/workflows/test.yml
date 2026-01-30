@@ -26,7 +26,7 @@ jobs:
       uses: ./.github/actions/setup-tinygrad
       with:
         key: llvm-speed
-        deps: testing_minimal
+        deps: testing_unit
         llvm: 'true'
     - name: Speed Test
       run: CPU=1 CPU_LLVM=1 python3 test/speed/external_test_speed_v_torch.py
@@ -98,7 +98,7 @@ jobs:
       uses: ./.github/actions/setup-tinygrad
       with:
         key: torch-backend-pillow-torchvision-et-pt
-        deps: testing_minimal
+        deps: testing_unit
         pydeps: "pillow torchvision expecttest"
         llvm: 'true'
     - name: Install ninja
@@ -134,7 +134,7 @@ jobs:
       uses: ./.github/actions/setup-tinygrad
       with:
         key: torch-backend-pillow-torchvision-et-pt
-        deps: testing_minimal
+        deps: testing_unit
         llvm: 'true'
     - name: Install ninja
       run: |
@@ -156,7 +156,7 @@ jobs:
       uses: ./.github/actions/setup-tinygrad
       with:
         key: be-minimal
-        deps: testing_minimal
+        deps: testing_unit
     - name: Test dtype with Python emulator
       run: DEBUG=1 PYTHON=1 python3 -m pytest -n=auto test/test_dtype.py test/test_dtype_alu.py
     - name: Test ops with Python emulator
@@ -348,7 +348,7 @@ jobs:
         uses: ./.github/actions/setup-tinygrad
         with:
           key: gpu-image
-          deps: testing_minimal
+          deps: testing_unit
           opencl: 'true'
       - name: Test CL IMAGE=2 ops
         run: |
@@ -424,7 +424,7 @@ jobs:
         with:
           key: onnxoptc
           deps: testing
-          python-version: '3.11'
+          python-version: '3.12'
           llvm: 'true'
       - name: Test ONNX (CPU)
         run: CPU=1 CPU_LLVM=0 python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
@@ -452,7 +452,7 @@ jobs:
           key: onnxoptl
           deps: testing
           pydeps: "tensorflow==2.19"
-          python-version: '3.11'
+          python-version: '3.12'
           opencl: 'true'
       - name: Test ONNX (CL)
         run: CL=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
@@ -526,7 +526,7 @@ jobs:
       with:
         key: metal
         deps: testing
-        python-version: '3.11'
+        python-version: '3.12'
     - name: Test models (Metal)
       run: METAL=1 python -m pytest -n=auto test/models --durations=20
     - name: Test LLaMA compile speed
@@ -545,7 +545,7 @@ jobs:
       uses: ./.github/actions/setup-tinygrad
       with:
         key: devectorize-minimal
-        deps: testing_minimal
+        deps: testing_unit
         pydeps: "pillow"
         llvm: "true"
     - name: Test LLVM=1 DEVECTORIZE=0
@@ -566,7 +566,7 @@ jobs:
       uses: ./.github/actions/setup-tinygrad
       with:
         key: dsp-minimal
-        deps: testing_minimal
+        deps: testing_unit
         pydeps: "onnx==1.18.0 onnxruntime"
         llvm: "true"
     - name: Set up Docker Buildx
@@ -600,8 +600,8 @@ jobs:
       uses: ./.github/actions/setup-tinygrad
       with:
         key: webgpu-minimal
-        deps: testing_minimal
-        python-version: '3.11'
+        deps: testing_unit
+        python-version: '3.12'
         webgpu: 'true'
     - name: Check Device.DEFAULT (WEBGPU) and print some source
       run: |
@@ -634,7 +634,7 @@ jobs:
         uses: ./.github/actions/setup-tinygrad
         with:
           key: ${{ matrix.backend }}-minimal
-          deps: testing_minimal
+          deps: testing_unit
           amd: 'true'
           llvm: ${{ matrix.backend == 'amdllvm' && 'true' }}
       - name: Check Device.DEFAULT and print some source
@@ -676,9 +676,9 @@ jobs:
         uses: ./.github/actions/setup-tinygrad
         with:
           key: rdna3-emu
-          deps: testing_minimal
+          deps: testing_unit
           amd: 'true'
-          python-version: '3.13'
+          python-version: '3.14'
       - name: Verify AMD autogen is up to date
         run: |
           python -m extra.assembly.amd.generate
@@ -724,7 +724,7 @@ jobs:
         uses: ./.github/actions/setup-tinygrad
         with:
           key: ${{ matrix.backend }}-minimal
-          deps: testing_minimal
+          deps: testing_unit
           cuda: 'true'
           ocelot: 'true'
       - name: Set env
@@ -757,7 +757,7 @@ jobs:
         uses: ./.github/actions/setup-tinygrad
         with:
           key: ${{ matrix.backend }}-minimal
-          deps: testing_minimal
+          deps: testing_unit
           opencl: ${{ matrix.backend == 'opencl' && 'true' }}
           llvm: ${{ matrix.backend == 'llvm' || matrix.backend == 'lvp' }}
           mesa: ${{ matrix.backend == 'lvp' && 'true' }}
@@ -791,7 +791,7 @@ jobs:
       with:
         key: metal
         deps: testing
-        python-version: '3.11'
+        python-version: '3.12'
         amd: 'true'
         cuda: 'true'
         ocelot: 'true'
@@ -889,7 +889,7 @@ jobs:
         uses: ./.github/actions/setup-tinygrad
         with:
           key: macos-${{ matrix.backend }}-minimal
-          deps: testing_minimal
+          deps: testing_unit
           llvm: ${{ matrix.backend == 'llvm' || matrix.backend == 'lvp' }}
           mesa: ${{ matrix.backend == 'lvp' && 'true' }}
       - name: Set env
@@ -956,7 +956,7 @@ jobs:
         uses: ./.github/actions/setup-tinygrad
         with:
           key: compile-${{ matrix.backend }}
-          deps: testing_minimal
+          deps: testing_unit
           mesa: ${{ (matrix.backend == 'ir3' || matrix.backend == 'nak') && 'true' }}
           python-version: '3.14'
       - name: Set env

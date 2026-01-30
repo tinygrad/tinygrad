@@ -19,7 +19,7 @@ def simplify_pow(x:UOp, c:UOp) -> UOp|None:
 def fold_bitcast(root:UOp, c:UOp) -> UOp|None:
   if (from_fmt:=c.dtype.scalar().fmt) is None or (to_fmt:=root.dtype.scalar().fmt) is None: return None
   if c.dtype.itemsize != root.dtype.itemsize: return None
-  def convert(v:ConstType): return struct.unpack(to_fmt, struct.pack(from_fmt, v))[0]
+  def convert(v:ConstType) -> ConstType: return struct.unpack(to_fmt, struct.pack(from_fmt, v))[0]
   return root.const_like(convert(c.arg) if root.dtype.count == 1 else tuple(map(convert, c.arg)))
 
 invalid_pat = UPat(Ops.CONST, arg=Invalid, name="i")
@@ -138,7 +138,7 @@ def canonicalize_simplex(X:UOp) -> UOp|None:
     ret.append(u)
   return UOp.sum(*ret) if changed else None
 
-def gep_through_wmma(gep:UOp, wmma:UOp):
+def gep_through_wmma(gep:UOp, wmma:UOp) -> UOp|None:
   out_sz = prod(x[1] for x in wmma.arg[6][-1])
   wmma_idxs = gep.arg[::out_sz]
   for i in range(out_sz):
@@ -313,7 +313,7 @@ def uop_given_valid(valid:UOp, uop:UOp, try_simplex=True) -> UOp:
     uop = s_uop.simplify().substitute({newX:X for X,newX in sub_dict.items()}).simplify()
   return uop
 
-def _valid_priority(v: UOp, valids:list[UOp]):
+def _valid_priority(v: UOp, valids:list[UOp]) -> int:
   # we want valid that's in other valids' parents to be first, so it's more likely the other valids get simplified
   return sum(-1 if (res:=parse_valid(v)) is not None and res[0] in other.toposort() else 0 for other in valids)
 
@@ -329,7 +329,7 @@ def simplify_valid(valid:UOp) -> UOp|None:
 
 # ******** phase 3 is the complete symbolic ********
 
-def reduce_mul_chain(r:UOp):
+def reduce_mul_chain(r:UOp) -> UOp|None:
   if r.arg not in {Ops.ADD, Ops.MAX}: return None
   if r.dtype != r.src[0].dtype: return None
   inside, outside = [], []

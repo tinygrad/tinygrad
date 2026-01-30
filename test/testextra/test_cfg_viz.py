@@ -6,8 +6,8 @@ import textwrap, functools
 
 from tinygrad import Device, Tensor
 from tinygrad.uop.ops import UOp, Ops, KernelInfo
-from tinygrad.helpers import getenv
 from tinygrad.device import Compiler
+from tinygrad.runtime.support.compiler_amd import HIPCompiler
 from tinygrad.viz.serve import amdgpu_cfg
 
 from extra.assembly.amd.autogen.rdna3.ins import *
@@ -73,11 +73,11 @@ def asm_kernel(out:UOp, insts:list[str|Inst], name:str, device:str, compiler:Com
                                UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=lib)))
 
 def run_asm(name:str, insts:list) -> None:
-  fxn = functools.partial(asm_kernel, insts=insts, name=name, device=Device.DEFAULT, compiler=Device[Device.DEFAULT].compiler)
+  fxn = functools.partial(asm_kernel, insts=insts, name=name, device=Device.DEFAULT, compiler=HIPCompiler(Device[Device.DEFAULT].renderer.arch))
   out = Tensor.custom_kernel(Tensor.empty(1), fxn=fxn)[0]
   out.realize()
 
-@unittest.skipUnless(Device.DEFAULT == "AMD" and not getenv("AMD_LLVM"), "only on AMD with comgr")
+@unittest.skipUnless(Device.DEFAULT == "AMD", "only on AMD")
 class TestCfg(unittest.TestCase):
   def setUp(self):
     arch = Device["AMD"].arch
@@ -110,7 +110,7 @@ class TestCfg(unittest.TestCase):
         s_endpgm(),
         s_code_end(),
     ])
-    _, lib = assemble("diamond", insts, Device[Device.DEFAULT].compiler)
+    _, lib = assemble("diamond", insts, HIPCompiler(Device[Device.DEFAULT].arch))
     cfg = amdgpu_cfg(lib, Device[Device.DEFAULT].device_props()["gfx_target_version"])["data"]
     self.assertEqual(len(cfg["blocks"]), 5)
     edge_count = sum(len(v) for v in cfg["paths"].values())
@@ -235,6 +235,20 @@ class TestCfg(unittest.TestCase):
         s_add_u32(s[1], s[1], -1),
         s_cmp_eq_i32(s[1], 0),
         "s_branch end",
+        s_code_end(),
+    ])
+
+  def test_hit_count(self):
+    run_asm("test_hit_count", [
+      "entry:",
+        s_mov_b32(s[1], 1),
+        "s_branch alt",
+      "continue:",
+        s_mov_b32(s[2], 2),
+        s_add_u32(s[1], s[1], s[2]),
+      "alt:",
+        s_add_u32(s[1], s[1], -1),
+        s_endpgm(),
         s_code_end(),
     ])
 

@@ -275,13 +275,13 @@ class Tensor(OpMixin):
     self.uop = x.uop
     return self
 
-  def assign(self, x) -> Tensor:
+  def assign(self, x:Tensor|PyConst|list|tuple) -> Tensor:
     # TODO: this is a hack for writing to DISK. remove with working assign
     if isinstance(self.device, str) and self.device.startswith("DISK"):
-      if x.__class__ is not Tensor: x = Tensor(x, device="CPU", dtype=self.dtype)
+      if not isinstance(x, Tensor): x = Tensor(x, device="CPU", dtype=self.dtype)
       self._buffer().copyin(x._data())
       return self
-    if x.__class__ is not Tensor: x = Tensor(x, device=self.device, dtype=self.dtype)
+    if not isinstance(x, Tensor): x = Tensor(x, device=self.device, dtype=self.dtype)
     if self.uop is x.uop: return self  # a self assign is a NOOP
     # NOTE: we allow cross device assign
     # broadcast x
@@ -1268,13 +1268,12 @@ class Tensor(OpMixin):
     """
     return self._getitem(indices)
 
-  def __setitem__(self, indices, v:Tensor|PyConst) -> None:
+  def __setitem__(self, indices, v:Tensor|PyConst|list|tuple) -> None:
     if isinstance(self.device, str) and self.device.startswith("DISK"):
       self.realize()._getitem(indices).assign(v)
       return
     # NOTE: check that setitem target is valid first
-    if isinstance(v, get_args(PyConst)): v = Tensor(v, device=self.device, dtype=self.dtype)
-    if not isinstance(v, Tensor): raise TypeError(f"can't set a {type(v).__name__} to a Tensor")
+    if not isinstance(v, Tensor): v = Tensor(v, device=self.device, dtype=self.dtype)
     if self.requires_grad or v.requires_grad: raise NotImplementedError("setitem with requires_grad is not supported")
     self.realize()
     if not self.uop.is_contiguous(): raise RuntimeError("setitem target needs to be contiguous")

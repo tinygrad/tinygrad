@@ -456,6 +456,11 @@ class TestAssign(unittest.TestCase):
     assign.realize()
     np.testing.assert_allclose(a.numpy(), [2., 2., 2., 2., 1., 1., 1., 1.])
 
+  def test_setitem_list(self):
+    a = Tensor.zeros(8).contiguous().realize()
+    a[2:5] = [1, 2, 3]
+    np.testing.assert_allclose(a.numpy(), [0., 0., 1., 2., 3., 0., 0., 0.])
+
   @unittest.skip("don't use output buffer, and mismatch dtype no longer supported")
   def test_cast_assignment(self):
     a = Tensor(np.arange(N*N, dtype=np.float32)).reshape(N,N)
