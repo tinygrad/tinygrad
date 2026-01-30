@@ -220,9 +220,13 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
       case Ops.ENCDEC: return self.arg[0]
       case Ops.BUFFERIZE: return tuple([int(r.vmax+1) for r in self.src[1:]])
       case Ops.DEFINE_GLOBAL | Ops.DEFINE_LOCAL | Ops.DEFINE_REG: return (self.ptrdtype.size,)
+      case Ops.PARAM:
+        # NOTE: copied from marg
+        if len(self.src) == 1: return tuple(self.src[0].sgep(i) for i in range(self.src[0].dtype.count))
+        return None
 
       # passthrough ops
-      case Ops.REDUCE | Ops.MSTACK | Ops.MSELECT | Ops.DETACH | Ops.CONTIGUOUS | Ops.CONTIGUOUS_BACKWARD | Ops.AFTER | Ops.END:
+      case Ops.REDUCE | Ops.MSTACK | Ops.MSELECT | Ops.DETACH | Ops.CONTIGUOUS | Ops.CONTIGUOUS_BACKWARD | Ops.AFTER | Ops.END | Ops.CALL:
         return self.src[0]._shape
 
       # ops with custom handling
@@ -820,6 +824,13 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
   def set(self:UOp, val:UOp|ConstType, end:UOp|tuple[UOp, ...]|list[UOp]=()) -> UOp:
     return self.src[0].after(self.store(val).end(*argfix(end)))
 
+  # TODO: this should replace placeholder
+  @staticmethod
+  def param(slot:int, dtype:DType, shape:tuple[int, ...]|None=None):
+    src = () if shape is None else (UOp.const(dtypes.index.vec(len(shape)), shape),)
+    return UOp(Ops.PARAM, dtype, src, arg=slot)
+
+  def call(*srcs:UOp, fxn:UOp, arg:Any|None) -> UOp: return UOp(Ops.CALL, fxn.dtype, (fxn,)+srcs, arg)
   def custom_kernel(*srcs:UOp, fxn:Callable, grad_fxn:Callable|None=None) -> list[UOp]:
     contig_srcs = tuple(x.contiguous() if x.op is not Ops.AFTER else x for x in srcs)
     kernel = UOp(Ops.CUSTOM_KERNEL, src=contig_srcs, arg=CustomKernel(fxn=fxn, grad_fxn=grad_fxn))

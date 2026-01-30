@@ -137,7 +137,11 @@ _tensor_spec = PatternMatcher([
 
   # Tensor range bind / store
   (UPat(Ops.BIND, (dtypes.int,dtypes.index,), (UPat(Ops.DEFINE_VAR), UPat(Ops.RANGE)), arg=None), lambda: True),
-  (UPat(Ops.STORE, src=(UPat(), UPat())), lambda: True)
+  (UPat(Ops.STORE, src=(UPat(), UPat())), lambda: True),
+
+  # allow any CALL/PARAM for now
+  (UPat(Ops.CALL), lambda: True),
+  (UPat(Ops.PARAM), lambda: True),
 ])+movement_ops+shared_spec
 
 tensor_spec = PatternMatcher([
