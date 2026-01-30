@@ -169,26 +169,25 @@ if __name__ == "__main__":
     print("Usage: python decode.py <pkl_file> [--raw] [--sm=0xNNN]")
     sys.exit(1)
 
-  # Parse --sm=0xNNN argument
-  sm_version = 0x800  # default to Ampere
-  for arg in sys.argv:
-    if arg.startswith("--sm="):
-      sm_version = int(arg[5:], 0)
-
   with open(sys.argv[1], "rb") as f:
     data = pickle.load(f)
 
-  if isinstance(data, dict): dumps = list(enumerate(data["pma_raw_dumps"]))
-  else: dumps = [(i, e.blob) for i, e in enumerate(e for e in data if type(e).__name__ == "ProfilePMAEvent")]
+  if isinstance(data, dict):
+    sm_version = 0x800  # default to Ampere
+    for arg in sys.argv:
+      if arg.startswith("--sm="): sm_version = int(arg[5:], 0)
+    dumps = [(i, x, sm_version) for i, x in enumerate(data["pma_raw_dumps"])]
+  else:
+    devs = {e.device: e for e in data if type(e).__name__ == "ProfileDeviceEvent"}
+    dumps = []
+    for i, e in enumerate(e for e in data if type(e).__name__ == "ProfilePMAEvent"):
+      dumps.append((i, e.blob, devs[e.device].props.get('sm_version', 0x800)))
 
-  record_size = 9 if sm_version >= 0x890 else 8
-  print(f"SM version: 0x{sm_version:x}, using {record_size}-byte records")
-
-  for dump_idx, raw in dumps:
+  for dump_idx, raw, sm_ver in dumps:
     print(f"\n{'='*60}\nDump {dump_idx} ({len(raw)} bytes, {len(raw)//32} packets)\n{'='*60}")
-    if "--raw" in sys.argv: print_packets(raw, sm_version)
+    if "--raw" in sys.argv: print_packets(raw, sm_ver)
     else:
-      samples = list(decode(raw, sm_version))
+      samples = list(decode(raw, sm_ver))
       print(f"\nDecoded {len(samples)} samples:")
       print_samples(samples)
       print_aggregated(samples)
