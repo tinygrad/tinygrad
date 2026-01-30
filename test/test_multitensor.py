@@ -464,7 +464,7 @@ class TestMultiTensor(unittest.TestCase):
           loss.backward()
           ref_grads.append(emb_ref.weight.grad.numpy().copy())
 
-      # test: sharded with gradient accumulation over accum_steps
+      # test: sharded with gradient accumulation over accum_steps (like LLaMA training)
       emb = nn.Embedding(vocab_size, embed_size)
       proj = nn.Linear(embed_size, vocab_size, bias=False)
       emb.weight.replace(Tensor(emb_init).shard(devices_2, axis=None)).realize()
@@ -472,14 +472,22 @@ class TestMultiTensor(unittest.TestCase):
       emb.weight.requires_grad = True
       proj.weight.requires_grad = True
 
+      # pre-initialize gradients (like LLaMA training does)
+      emb.weight.grad = emb.weight.zeros_like().contiguous().realize()
+
+      @TinyJit
+      def train_step(x:Tensor):
+        loss = proj(emb(x)).sum()
+        loss.backward()
+        emb.weight.grad.realize()
+
       for step in range(num_steps):
-        emb.weight.grad = None
+        # zero gradients at start of each step (outside JIT)
+        emb.weight.grad.assign(emb.weight.grad.zeros_like().contiguous()).realize()
         for accum in range(accum_steps):
           x = Tensor(indices_list[step][accum * B:(accum + 1) * B]).shard(devices_2, axis=0)
-          loss = proj(emb(x)).sum()
-          loss.backward()
-        grad = emb.weight.grad.numpy()
-        np.testing.assert_allclose(grad, ref_grads[step], atol=1e-5, rtol=1e-5, err_msg=f"grad mismatch at step {step}")
+          train_step(x)
+        np.testing.assert_allclose(emb.weight.grad.numpy(), ref_grads[step], atol=1e-5, rtol=1e-5, err_msg=f"grad mismatch at step {step}")
 
   def test_rmsnorm(self):
     B, T, embed_size = 4, 10, 20
