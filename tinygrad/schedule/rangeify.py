@@ -68,9 +68,22 @@ def resolve_custom_kernel(ck:UOp) -> UOp:
   placeholders = [UOp.placeholder_like(s, slot=i) for i,s in enumerate(ck.src)]
   return UOp(Ops.KERNEL, src=ck.src, arg=Kernel(ck.arg.fxn(*placeholders)))
 
+def resolve_call(c:UOp) -> UOp:
+  params = sorted([x for x in c.src[0].toposort() if x.op == Ops.PARAM], key=lambda x: x.arg)
+  args = c.src[1:]
+  if [x.arg for x in params] != list(range(len(params))): raise RuntimeError(f"params not in order: {[x.arg for x in params]}")
+  if len(params) != len(args): raise TypeError(f"expected {len(params)} args, got {len(args)}")
+  for i, (p, a) in enumerate(zip(params, args)):
+    if p.shape != a.shape: raise TypeError(f"arg {i} shape mismatch: expected {p.shape}, got {a.shape}")
+    if p.dtype != a.dtype: raise TypeError(f"arg {i} dtype mismatch: expected {p.dtype}, got {a.dtype}")
+  return c.src[0].substitute(dict(zip(params, args)))
+
 earliest_rewrites = mop_cleanup+PatternMatcher([
   # just removing it works...
   (UPat((Ops.DETACH, Ops.CONTIGUOUS_BACKWARD), name="x"), lambda x: x.src[0]),
+
+  # resolve calls
+  (UPat(Ops.CALL, name="c"), resolve_call),
 
   # resolve custom kernels
   (UPat(Ops.CUSTOM_KERNEL, name="ck"), resolve_custom_kernel),

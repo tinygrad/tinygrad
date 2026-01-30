@@ -232,6 +232,9 @@ class Tensor(OpMixin):
 
   # ***** data handlers ****
 
+  def call(self, *lst:Tensor, fxn:UOp, arg:Any=None) -> Tensor:
+    return Tensor(UOp.call(*[t.uop for t in (self,)+lst], fxn=fxn, arg=arg))
+
   def custom_kernel(self, *lst:Tensor, fxn:Callable, grad_fxn:Callable|None=None) -> list[Tensor]:
     """
     Call into a custom kernel written in UOps. Returns the Tensors after the Kernel has been applied.
