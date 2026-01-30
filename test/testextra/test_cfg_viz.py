@@ -110,7 +110,7 @@ class TestCfg(unittest.TestCase):
         s_endpgm(),
         s_code_end(),
     ])
-    _, lib = assemble("diamond", insts, Device[Device.DEFAULT].compiler)
+    _, lib = assemble("diamond", insts, HIPCompiler(Device[Device.DEFAULT].arch))
     cfg = amdgpu_cfg(lib, Device[Device.DEFAULT].device_props()["gfx_target_version"])["data"]
     self.assertEqual(len(cfg["blocks"]), 5)
     edge_count = sum(len(v) for v in cfg["paths"].values())
