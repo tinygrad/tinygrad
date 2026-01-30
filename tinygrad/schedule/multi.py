@@ -201,12 +201,23 @@ def assign_multi(dest:UOp, src:UOp):
   if dest.axis != src.axis: raise RuntimeError(f"axis must match in assign {dest.axis} != {src.axis}")
   return dest.src[0].assign(src.src[0]).multi(src.axis)
 
+def call_multi(c:UOp):
+  params = sorted([x for x in c.src[0].toposort() if x.op == Ops.PARAM], key=lambda x: x.arg)
+  args = c.src[1:]
+  # 1. extract the multis from arg, replace the c.srcs to not have them
+  # 2. add them to the params and substitute them in c.src[0]
+  # 3. run multi_pm on c.src[0]
+  # 4. if there's a multi at the end of the c.src[0], put it after the call
+  # 5. return the call
+  raise NotImplementedError("write this")
+
 def passthrough_multi(root:UOp, multi:UOp):
   return UOp(root.op, root.dtype, (multi.src[0],), root.arg).multi(multi.axis)
 
 # NOTE: this is the same pattern as Ops.UNROLL
 multi_pm = PatternMatcher([
   (UPat(GroupOp.ALU, name="root", custom_early_reject=set([Ops.MULTI])), alu_multi),
+  (UPat(Ops.CALL, name="c", custom_early_reject=set([Ops.MULTI])), call_multi),
   (UPat(Ops.REDUCE_AXIS, src=(UPat(Ops.MULTI, name="multi"), ), name="root"), reduce_multi),
   (UPat(Ops.RESHAPE, src=(UPat(Ops.MULTI, name="multi"), UPat()), name="root"), reshape_multi),
   (UPat(Ops.EXPAND, src=(UPat(Ops.MULTI, name="multi"), UPat()), name="root"), expand_multi),
