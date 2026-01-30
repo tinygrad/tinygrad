@@ -340,6 +340,7 @@ class TestUint32DType(TestDType): DTYPE = dtypes.uint32
 class TestInt64DType(TestDType): DTYPE = dtypes.int64
 
 @unittest.skipUnless(Ops.SHL in Device[Device.DEFAULT].renderer.code_for_op, "long decomp requires bitshift")
+@unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, PTXRenderer), "PTX does indexing math with longs")
 class TestEmulatedInt64DType(TestInt64DType):
   @classmethod
   def setUpClass(cls):
@@ -356,6 +357,7 @@ class TestUint64DType(TestDType):
     assert Tensor(2**64 - 1, dtype=dtypes.uint64).numpy() == 2**64 - 1
 
 @unittest.skipUnless(Ops.SHL in Device[Device.DEFAULT].renderer.code_for_op, "long decomp requires bitshift")
+@unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, PTXRenderer), "PTX does indexing math with longs")
 class TestEmulatedUInt64DType(TestUint64DType):
   @classmethod
   def setUpClass(cls):
