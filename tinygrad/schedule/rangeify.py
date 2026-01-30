@@ -76,7 +76,7 @@ def resolve_call(c:UOp) -> UOp:
   for i, (p, a) in enumerate(zip(params, args)):
     if p.shape != a.shape: raise TypeError(f"arg {i} shape mismatch: expected {p.shape}, got {a.shape}")
     if p.dtype != a.dtype: raise TypeError(f"arg {i} dtype mismatch: expected {p.dtype}, got {a.dtype}")
-  return c.src[0].substitute(dict(zip(params, args)))
+  return c.src[0].substitute(dict(zip(params, args))).rtag(c.tag)
 
 earliest_rewrites = mop_cleanup+PatternMatcher([
   # just removing it works...
@@ -533,11 +533,14 @@ split_kernels = PatternMatcher([
   (UPat((Ops.STORE, Ops.END), name="x"), split_store),
 ])
 
-def tag_uop(ctx:list[UOp], x:UOp):
-  if x.tag is not None: return None
+def tag_uop(ctx:tuple[list[UOp], set[UOp]], x:UOp):
+  if x.tag is not None or x in ctx[1]: return None
+  if x.tag is None and x.op is Ops.CALL:
+    # don't tag anything in a CALL
+    for u in x.src[0].toposort(): ctx[1].add(u)
   if x.dtype.scalar() == dtypes.index: return None
-  ctx.append(x)
-  return x.replace(tag=(len(ctx)-1,))
+  ctx[0].append(x)
+  return x.replace(tag=(len(ctx[0])-1,))
 add_tags = PatternMatcher([
   # don't tag BUFFERs, they are global
   (UPat(GroupOp.All-{Ops.BUFFER, Ops.CONST, Ops.DEVICE, Ops.UNIQUE, Ops.LUNIQUE, Ops.DEFINE_VAR, Ops.BIND, Ops.KERNEL, Ops.END,
@@ -563,7 +566,7 @@ replace_contiguous = PatternMatcher([
 def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
   if getenv("VIZ"): graph_rewrite(sink, PatternMatcher([]), name="View Input Graph")
   uop_list: list[UOp] = []
-  tsink = graph_rewrite(sink, add_tags, ctx=uop_list, bottom_up=True, name="number the uops")
+  tsink = graph_rewrite(sink, add_tags, ctx=(uop_list, set()), bottom_up=True, name="number the uops")
 
   tsink = graph_rewrite(tsink, pm_mops+earliest_rewrites+replace_contiguous, ctx={}, name="earliest rewrites")
 

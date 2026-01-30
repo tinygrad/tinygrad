@@ -827,7 +827,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
   # TODO: this should replace placeholder
   @staticmethod
   def param(slot:int, dtype:DType, shape:tuple[int, ...]|None=None, device=None):
-    src = () if shape is None else (UOp.const(dtypes.index.vec(len(shape)), shape),)
+    src = (UOp(Ops.NOOP),) if shape is None else (UOp.const(dtypes.index.vec(len(shape)), shape),)
     if device is not None: src += (UOp(Ops.DEVICE, arg=device),)
     return UOp(Ops.PARAM, dtype, src, arg=slot)
 
