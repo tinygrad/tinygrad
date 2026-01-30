@@ -14,7 +14,7 @@ GEMM_ARGS = {
 ITERS_ARGS = {64: (67108864, 0), 128: (33554432, 0), 224: (613566757, 2147483656)}
 
 class Kernel:
-  def __init__(self): self.instructions, self.labels, self.labels_at_pos, self.pos, self._patched = [], {}, {}, 0, False
+  def __init__(self, name="gemm"): self.name, self.instructions, self.labels, self.labels_at_pos, self.pos, self._patched = name, [], {}, {}, 0, False
 
   def label(self, name):
     self.labels[name] = self.pos
@@ -47,12 +47,13 @@ class Kernel:
     args = '\n'.join(f'      - .address_space: generic\n        .name: {n}\n        .offset: {i*8}\n'
                      f'        .size: 8\n        .value_kind: global_buffer\n        .value_type: {t}'
                      for i, (n, t) in enumerate([('D', 'bf16'), ('A', 'bf16'), ('B', 'bf16')]))
-    return '\n'.join(['.text', '.section\t.text.', '.global\tgemm', '.p2align\t8', '.type\tgemm,@function', '', 'gemm:',
-      body, '', '.section .rodata,"a",@progbits', '.p2align 6, 0x0', '.amdhsa_kernel gemm',
+    n = self.name
+    return '\n'.join(['.text', '.section\t.text.', f'.global\t{n}', '.p2align\t8', f'.type\t{n},@function', '', f'{n}:',
+      body, '', '.section .rodata,"a",@progbits', '.p2align 6, 0x0', f'.amdhsa_kernel {n}',
       *[f'  .amdhsa_{k} {v}' for k, v in hsa], '.end_amdhsa_kernel', '', '.amdgpu_metadata', '---', 'amdhsa.kernels:',
       '  - .args:', args, '    .group_segment_fixed_size: 133120', '    .kernarg_segment_align: 8',
-      '    .kernarg_segment_size: 24', '    .max_flat_workgroup_size: 256', '    .name: gemm',
-      '    .private_segment_fixed_size: 0', '    .sgpr_count: 95', '    .sgpr_spill_count: 0', '    .symbol: gemm.kd',
+      '    .kernarg_segment_size: 24', '    .max_flat_workgroup_size: 256', f'    .name: {n}',
+      '    .private_segment_fixed_size: 0', '    .sgpr_count: 95', '    .sgpr_spill_count: 0', f'    .symbol: {n}.kd',
       '    .vgpr_count: 249', '    .vgpr_spill_count: 0', '    .wavefront_size: 64', 'amdhsa.version:', '  - 1',
       '  - 1', '...', '.end_amdgpu_metadata', ''])
 
@@ -70,7 +71,7 @@ class Kernel:
 def build_kernel(batch, M, N, K):
   numWG, iters, total = GEMM_ARGS[(batch, M, N, K)]
   magic, shift = ITERS_ARGS[iters]
-  k = Kernel()
+  k = Kernel(f"gemm_{batch}_{M}_{N}_{K}")
   # load D, A, B pointers
   k.emit(s_load_dwordx2(s[24:25], s[0:1], s[0], 0, 0, 0, 0, 1))
   k.emit(s_load_dwordx2(s[30:31], s[0:1], s[0], 8, 0, 0, 0, 1))
