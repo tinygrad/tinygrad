@@ -2184,6 +2184,14 @@ class TestBufferUOp(unittest.TestCase):
     run_schedule(check_schedule(a, 0))
     self.assertIsNone(a.uop.base.realized)
 
+  def test_unused_var_not_in_var_vals(self):
+    # unused variable should not appear in var_vals even when there's other work
+    a = Tensor(UOp.variable("unused", 0, 10).bind(1))
+    b = Tensor.empty(3) + 1
+    _, var_vals = Tensor.schedule_with_vars(a, b)
+    self.assertEqual(var_vals, {})
+    self.assertIsNone(a.uop.base.realized)
+
   def test_view_does_not_realize(self):
     a = Tensor.randn(1, 4).expand(4, 4)
     a.realize()
