@@ -232,7 +232,13 @@ class Tensor(OpMixin):
 
   # ***** data handlers ****
 
-  def as_param(self, slot:int): return Tensor(UOp.param(slot, self.dtype, self.shape, self.device), device=self.device)
+  def as_param(self, slot:int):
+    if self.uop.axis is not None:
+      multi_shape = tuple([s//len(self.device) if i==self.uop.axis else s for i,s in enumerate(self.shape)])
+      param = UOp.param(slot, self.dtype, multi_shape, self.device).multi(self.uop.axis)
+    else:
+      param = UOp.param(slot, self.dtype, self.shape, self.device)
+    return Tensor(param, device=self.device)
   def call(self, *lst:Tensor, fxn:Tensor|UOp, grad_fxn:Callable|None=None) -> Tensor:
     return Tensor(UOp.call(*[t.uop for t in (self,)+lst], fxn=fxn.uop if isinstance(fxn, Tensor) else fxn, arg=grad_fxn), device=self.device)
 

@@ -201,27 +201,12 @@ def assign_multi(dest:UOp, src:UOp):
   if dest.axis != src.axis: raise RuntimeError(f"axis must match in assign {dest.axis} != {src.axis}")
   return dest.src[0].assign(src.src[0]).multi(src.axis)
 
-def call_multi(c:UOp):
-  params = sorted([x for x in c.src[0].toposort() if x.op == Ops.PARAM], key=lambda x: x.arg)
-  assert len(params) == len(c.src[1:]), "len mismatch"
-  params_replace = {}
-  new_srcs = list(c.src)
-  for i,src in enumerate(c.src[1:]):
-    if src.op is Ops.MULTI:
-      new_srcs[i+1] = src.src[0]
-      params_replace[params[i]] = UOp.param(params[i].arg, params[i].dtype, src.src[0].shape, params[i].device).multi(src.axis)
-  assert len(params_replace)
-  new_fxn = graph_rewrite(c.src[0].substitute(params_replace), multi_pm, name="call_multi_pm")
-  if new_fxn.op is Ops.MULTI: return c.replace(src=(new_fxn.src[0], *new_srcs[1:])).multi(new_fxn.axis)
-  else: return c.replace(src=(new_fxn, *new_srcs[1:]))
-
 def passthrough_multi(root:UOp, multi:UOp):
-  return UOp(root.op, root.dtype, (multi.src[0],), root.arg).multi(multi.axis)
+  return UOp(root.op, root.dtype, (multi.src[0],)+tuple(x.src[0] if x.op is Ops.MULTI else x for x in root.src[1:]), root.arg).multi(multi.axis)
 
 # NOTE: this is the same pattern as Ops.UNROLL
 multi_pm = PatternMatcher([
   (UPat(GroupOp.ALU, name="root", custom_early_reject=set([Ops.MULTI])), alu_multi),
-  (UPat(Ops.CALL, name="c", custom_early_reject=set([Ops.MULTI])), call_multi),
   (UPat(Ops.REDUCE_AXIS, src=(UPat(Ops.MULTI, name="multi"), ), name="root"), reduce_multi),
   (UPat(Ops.RESHAPE, src=(UPat(Ops.MULTI, name="multi"), UPat()), name="root"), reshape_multi),
   (UPat(Ops.EXPAND, src=(UPat(Ops.MULTI, name="multi"), UPat()), name="root"), expand_multi),
@@ -233,6 +218,7 @@ multi_pm = PatternMatcher([
   (UPat(Ops.COPY, src=(UPat(Ops.MULTI, name="multi"), UPat(Ops.DEVICE, name="device"))), copy_multi),
   (UPat(Ops.ALLREDUCE, src=(UPat(Ops.MULTI, name="multi"), UPat(Ops.DEVICE, name="device")), name="red"),
     lambda multi,device,red: multi.src[0].allreduce(red.arg, device).multi(axis=multi.axis)),
+  (UPat(Ops.CALL, src=(UPat(Ops.MULTI, name="multi"), ), name="root", allow_any_len=True), passthrough_multi),
   (UPat((Ops.CAST, Ops.BITCAST, Ops.CONTIGUOUS, Ops.DETACH, Ops.CONTIGUOUS_BACKWARD),
         src=(UPat(Ops.MULTI, name="multi"), ), name="root"), passthrough_multi),
   # multi supports custom kernels with CUSTOM_KERNEL + AFTER
