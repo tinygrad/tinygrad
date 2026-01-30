@@ -528,7 +528,7 @@ class AMDCopyQueue(HWQueue):
     # USB devices run in single-step mode, so they can't overrun the queue.
     total_bytes = (tail_blit_dword * 4 if rem_packet_cnt == 0 else -sdma_queue.put_value % sdma_queue.ring.nbytes) + rem_packet_cnt * 4
     assert total_bytes < sdma_queue.ring.nbytes, "SDMA queue overrun"
-    while not dev.is_usb() and sdma_queue.put_value + total_bytes - sdma_queue.read_ptr > sdma_queue.ring.nbytes: pass
+    while not dev.is_usb() and sdma_queue.put_value + total_bytes - sdma_queue.read_ptr[0] > sdma_queue.ring.nbytes: pass
 
     start_idx = (sdma_queue.put_value % sdma_queue.ring.nbytes) // 4
     sdma_queue.ring[start_idx : start_idx + tail_blit_dword] = array.array('I', cmds[:tail_blit_dword])
@@ -640,24 +640,21 @@ class AMDAllocator(HCQAllocator['AMDDevice']):
 @dataclass
 class AMDQueueDesc:
   ring: MMIOInterface
-  read_ptrs: list[MMIOInterface]
-  write_ptrs: list[MMIOInterface]
-  doorbells: list[MMIOInterface]
+  read_ptr: MMIOInterface
+  write_ptr: MMIOInterface
+  doorbell: MMIOInterface
   put_value: int = 0
-
-  @property
-  def read_ptr(self): return min(p[0] for p in self.read_ptrs)
 
   def signal_doorbell(self, dev, doorbell_value:int|None=None):
     try:
-      for write_ptr in self.write_ptrs: write_ptr[0] = self.put_value
+      self.write_ptr[0] = self.put_value
 
       # Ensure all prior writes are visible to the GPU.
       System.memory_barrier()
 
       # Flush hdp if queue is in dev mem.
       if dev.is_am() and not dev.is_usb(): dev.iface.dev_impl.gmc.flush_hdp()
-      for doorbell in self.doorbells: doorbell[0] = self.put_value if doorbell_value is None else doorbell_value
+      self.doorbell[0] = self.put_value if doorbell_value is None else doorbell_value
     except Exception as e:
       dev.error_state = e
       raise
@@ -776,9 +773,9 @@ class KFDIface:
       self.doorbells_base = queue.doorbell_offset & (~0x1fff) # doorbell is two pages
       self.doorbells = cast(FileIOInterface, KFDIface.kfd).mmap(0, 0x2000, mmap.PROT_READ|mmap.PROT_WRITE, mmap.MAP_SHARED, self.doorbells_base)
 
-    return AMDQueueDesc(ring=MMIOInterface(ring.va_addr, ring.size, fmt='I'), read_ptrs=[MMIOInterface(queue.read_pointer_address, 8, fmt='Q')],
-                        write_ptrs=[MMIOInterface(queue.write_pointer_address, 8, fmt='Q')],
-                        doorbells=[MMIOInterface(self.doorbells + queue.doorbell_offset - self.doorbells_base, 8, fmt='Q')])
+    return AMDQueueDesc(ring=MMIOInterface(ring.va_addr, ring.size, fmt='I'), read_ptr=MMIOInterface(queue.read_pointer_address, 8, fmt='Q'),
+                        write_ptr=MMIOInterface(queue.write_pointer_address, 8, fmt='Q'),
+                        doorbell=MMIOInterface(self.doorbells + queue.doorbell_offset - self.doorbells_base, 8, fmt='Q'))
 
   def sleep(self, tm:int) -> bool:
     kfd.AMDKFD_IOC_WAIT_EVENTS(KFDIface.kfd, events_ptr=self.queue_event_arr_ptr, num_events=1, wait_for_all=1, timeout=tm)
@@ -857,8 +854,8 @@ class PCIIface(PCIIfaceBase):
         wptr_addr=gart.va_addr+wptr, eop_addr=eop_buffer.va_addr, eop_size=eop_buffer.size,
         idx=int(is_aql:=(queue_type==kfd.KFD_IOC_QUEUE_TYPE_COMPUTE_AQL)), aql=is_aql)
 
-    return AMDQueueDesc(ring=ring.cpu_view().view(fmt='I'), doorbells=[self.dev_impl.doorbell64.view(doorbell_index * 8, 8, fmt='Q')],
-      read_ptrs=[gart.cpu_view().view(offset=rptr, size=8, fmt='Q')], write_ptrs=[gart.cpu_view().view(offset=wptr, size=8, fmt='Q')], put_value=pv)
+    return AMDQueueDesc(ring=ring.cpu_view().view(fmt='I'), doorbell=self.dev_impl.doorbell64.view(doorbell_index * 8, 8, fmt='Q'),
+      read_ptr=gart.cpu_view().view(offset=rptr, size=8, fmt='Q'), write_ptr=gart.cpu_view().view(offset=wptr, size=8, fmt='Q'), put_value=pv)
 
   def sleep(self, timeout) -> bool:
     if hasattr(self.pci_dev, 'irq_poller') and self.pci_dev.irq_poller is not None and (events_cnt:=len(self.pci_dev.irq_poller.poll(timeout))):
