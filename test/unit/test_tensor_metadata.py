@@ -11,14 +11,14 @@ class TestTensorMetadata(unittest.TestCase):
   def tearDown(self) -> None:
     self._ctx.__exit__(None, None, None)
 
-  @unittest.skip("why would this be true?")
   def test_exclude_noop_metadata(self):
+    # multiplying by 1 is a NOOP that gets optimized away, so only rand appears in kernel metadata
     a = Tensor.rand(4, 4)*1
     self.assertEqual(a.uop.metadata[0].name, "__mul__")
     k = a.schedule()[-1]
     self.assertEqual([m.name for m in k.metadata], ["rand"])
 
-  @unittest.skip("metadata not reaching kernel schedule")
+  @unittest.skip("arange ops get simplified away, contiguous is a wrapper op that doesn't go in kernel")
   def test_exclude_const_metadata(self):
     a = Tensor.arange(4)
     b = Tensor.full((4,), -1, dtype=dtypes.int).contiguous()
@@ -43,7 +43,7 @@ class TestTensorMetadata(unittest.TestCase):
     self.assertEqual(len(si.metadata), 1)
     self.assertEqual(si.metadata[0].name, "relu")
 
-  @unittest.skip("assign metadata no longer captured")
+  @unittest.skip("assign is a wrapper op that controls destination, doesn't go in kernel")
   def test_assign(self):
     x = Tensor.empty(10, 10).realize()
     x.assign(Tensor.ones(10, 10).contiguous())
@@ -69,13 +69,12 @@ class TestTensorMetadata(unittest.TestCase):
     self.assertEqual(out.uop.metadata[0].name, "sum")
     out.backward()
     self.assertEqual(x.grad.uop.metadata[0].name, "relu")
-    #self.assertTrue(x.grad.uop.metadata[0].backward)  # TODO: backward flag is False
+    self.assertTrue(x.grad.uop.metadata[0].backward)
     self.assertEqual(y.grad.uop.metadata[0].name, "sigmoid")
-    #self.assertTrue(y.grad.uop.metadata[0].backward)  # TODO: backward flag is False
+    self.assertTrue(y.grad.uop.metadata[0].backward)
     si = Tensor.schedule(out, x.grad, y.grad)[-1]
-    #self.assertEqual(len(si.metadata), 3, f"failed with {si.metadata}")
-    # skip numpy, this is schedule cache
-    self.assertSetEqual(set(m.name for m in si.metadata if m.name != "numpy"), {"sigmoid", "relu"})
+    self.assertSetEqual(set(m.name for m in si.metadata), {"sigmoid", "relu"})
+    # NOTE: backward flag is lost in schedule
     #bw = [m for m in si.metadata if m.backward]
     #self.assertEqual(len(bw), 1)
     #self.assertEqual(bw[0].name, "sigmoid")
