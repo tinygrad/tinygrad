@@ -2,7 +2,7 @@ import atexit, functools, pathlib, atexit
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.uop.ops import UOp, Ops, KernelInfo, AxisType
 from tinygrad.renderer import Estimates
-from tinygrad.helpers import getenv, Context, all_same
+from tinygrad.helpers import getenv, Context, all_same, dedup
 
 # ** CDNA4 assembly gemm
 
@@ -40,7 +40,7 @@ def get_gemm_args(batch, M, N, K):
 
 counters = {"used":0, "todos":[]}
 def todo(msg:str) -> bool: counters["todos"].append(msg); return False
-atexit.register(lambda: print("\n".join([f'asm_gemm: {counters["used"]} used, {len(counters["todos"])} not used', *counters["todos"]])))
+atexit.register(lambda: print("\n".join([f'asm_gemm: {counters["used"]} used, {len(counters["todos"])} not used', *dedup(counters["todos"][:3])])))
 
 def can_use_asm_gemm(a:Tensor, b:Tensor) -> bool:
   if a.dtype != b.dtype: return todo(f"dtype mismatch {a.dtype} != {b.dtype}")
