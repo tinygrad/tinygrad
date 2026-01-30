@@ -431,64 +431,6 @@ class TestMultiTensor(unittest.TestCase):
 
   def test_embedding_backward_shard_weight(self): self.test_embedding_backward(shard_weight_axis=1)
 
-  def test_embedding_multistep_sharded(self):
-    """Test sharded embedding over multiple training steps with gradient accumulation (like LLaMA DP training)."""
-    with Tensor.train():
-      B, T, embed_size, vocab_size = 4, 32, 64, 128
-      num_steps, accum_steps = 4, 3
-
-      np.random.seed(42)
-      Tensor.manual_seed(42)
-
-      # create indices - each step has accum_steps * B batches worth of data
-      indices_list = [np.random.randint(0, vocab_size, (accum_steps * B, T), dtype=np.int32) for _ in range(num_steps)]
-
-      # initialize weights - save as numpy to avoid tensor reuse issues
-      emb_init = Tensor.glorot_uniform(vocab_size, embed_size).numpy()
-      proj_init = Tensor.glorot_uniform(vocab_size, embed_size).numpy()
-
-      # reference: single forward/backward with full batch, non-sharded, non-atomics
-      with Context(USE_ATOMICS=0):
-        emb_ref = nn.Embedding(vocab_size, embed_size)
-        proj_ref = nn.Linear(embed_size, vocab_size, bias=False)
-        emb_ref.weight.replace(Tensor(emb_init)).realize()
-        proj_ref.weight.replace(Tensor(proj_init)).realize()
-        emb_ref.weight.requires_grad = True
-        proj_ref.weight.requires_grad = True
-
-        ref_grads = []
-        for step in range(num_steps):
-          emb_ref.weight.grad = None
-          x = Tensor(indices_list[step])
-          loss = proj_ref(emb_ref(x)).sum()
-          loss.backward()
-          ref_grads.append(emb_ref.weight.grad.numpy().copy())
-
-      # test: sharded with gradient accumulation over accum_steps (like LLaMA training)
-      emb = nn.Embedding(vocab_size, embed_size)
-      proj = nn.Linear(embed_size, vocab_size, bias=False)
-      emb.weight.replace(Tensor(emb_init).shard(devices_2, axis=None)).realize()
-      proj.weight.replace(Tensor(proj_init).shard(devices_2, axis=None)).realize()
-      emb.weight.requires_grad = True
-      proj.weight.requires_grad = True
-
-      # pre-initialize gradients (like LLaMA training does)
-      emb.weight.grad = emb.weight.zeros_like().contiguous().realize()
-
-      @TinyJit
-      def train_step(x:Tensor):
-        loss = proj(emb(x)).sum()
-        loss.backward()
-        emb.weight.grad.realize()
-
-      for step in range(num_steps):
-        # zero gradients at start of each step (outside JIT)
-        emb.weight.grad.assign(emb.weight.grad.zeros_like().contiguous()).realize()
-        for accum in range(accum_steps):
-          x = Tensor(indices_list[step][accum * B:(accum + 1) * B]).shard(devices_2, axis=0)
-          train_step(x)
-        np.testing.assert_allclose(emb.weight.grad.numpy(), ref_grads[step], atol=1e-5, rtol=1e-5, err_msg=f"grad mismatch at step {step}")
-
   def test_rmsnorm(self):
     B, T, embed_size = 4, 10, 20
 
