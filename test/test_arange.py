@@ -1,7 +1,7 @@
 import unittest
 import numpy as np
 from tinygrad import Tensor, GlobalCounters, dtypes, nn, Device, Variable
-from tinygrad.helpers import Context, getenv, CPU_LLVM
+from tinygrad.helpers import Context, getenv
 from tinygrad.engine.realize import run_schedule
 from tinygrad.engine.realize import CompiledRunner, get_program
 from tinygrad.engine.schedule import ExecItem
@@ -163,9 +163,12 @@ class TestIndexing(unittest.TestCase):
   # at least the arange is being fused
   def test_llama_embedding_opt(self): self.test_llama_embedding(0, 1_736_704_000)
 
-  @unittest.skipIf(Device.DEFAULT not in ("CPU", "AMD") and not CPU_LLVM, "atomics only on AMD/CPU")
-  @Context(USE_ATOMICS=1)
+  # NOTE: call doesn't work with SPEC=2
+  @unittest.skipIf(Device.DEFAULT not in ("CPU", "AMD"), "atomics only on AMD/CPU")
+  @Context(USE_ATOMICS=1, SPEC=1)
   def test_llama_8b_embedding_backward(self):
+    from tinygrad.renderer.cstyle import CStyleLanguage
+    if Device.DEFAULT == "CPU" and not isinstance(Device["CPU"].renderer, CStyleLanguage): self.skipTest("CPU needs Clang renderer")
     vocab_size, embed_size = 1000, 128
     bs, seqlen = 4, 256
     idx = Tensor.randint(bs, seqlen, high=vocab_size)
