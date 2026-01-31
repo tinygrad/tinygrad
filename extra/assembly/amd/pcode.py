@@ -38,6 +38,15 @@ def _bitreverse(v: UOp, bits: int) -> UOp:
   for m, s in masks: v = ((v >> _const(dt, s)) & _const(dt, m)) | ((v & _const(dt, m)) << _const(dt, s))
   return (v >> _const(dt, 32 if bits == 64 else 16)) | (v << _const(dt, 32 if bits == 64 else 16))
 
+def _try_const_fold(v: UOp) -> UOp:
+  """Try to constant-fold a UOp tree of arithmetic on constants."""
+  if v.op == Ops.CONST: return v
+  if v.op in (Ops.ADD, Ops.MUL) and all(s.op == Ops.CONST or _try_const_fold(s).op == Ops.CONST for s in v.src):
+    vals = [int(_try_const_fold(s).arg) for s in v.src]
+    result = (vals[0] + vals[1]) if v.op == Ops.ADD else (vals[0] * vals[1])
+    return UOp.const(v.dtype, result)
+  return v
+
 def _extract_bits(val: UOp, hi: int, lo: int) -> UOp:
   dt = dtypes.uint64 if val.dtype in (dtypes.uint64, dtypes.int64) else dtypes.uint32
   return ((val >> _const(dt, lo)) if lo > 0 else val) & _const(val.dtype, (1 << (hi - lo + 1)) - 1)
@@ -94,7 +103,7 @@ def _trig_reduce(x, phase=0.0):
   return UOp(Ops.SIN, x.dtype, (x - n * _const(x.dtype, 6.283185307179586),))
 
 def _signext(val: UOp) -> UOp:
-  for bits, mask, ext in [(8, 0xFF, 0xFFFFFF00), (16, 0xFFFF, 0xFFFF0000)]:
+  for bits, mask, ext in [(4, 0xF, 0xFFFFFFF0), (8, 0xFF, 0xFFFFFF00), (16, 0xFFFF, 0xFFFF0000)]:
     if (val.op == Ops.AND and len(val.src) == 2 and val.src[1].op == Ops.CONST and val.src[1].arg == mask) or val.dtype.itemsize == bits // 8:
       v32 = val.cast(dtypes.uint32) if val.dtype != dtypes.uint32 else val
       sb = (v32 >> _u32(bits - 1)) & _u32(1)
@@ -278,7 +287,7 @@ for is_max, name in [(False, 'min'), (True, 'max')]:
 
 DTYPES = {'u32': dtypes.uint32, 'i32': dtypes.int, 'f32': dtypes.float32, 'b32': dtypes.uint32, 'u64': dtypes.uint64, 'i64': dtypes.int64,
           'f64': dtypes.float64, 'b64': dtypes.uint64, 'u16': dtypes.uint16, 'i16': dtypes.short, 'f16': dtypes.half, 'b16': dtypes.uint16,
-          'u8': dtypes.uint8, 'i8': dtypes.int8, 'b8': dtypes.uint8, 'u1': dtypes.uint32}
+           'u8': dtypes.uint8, 'i8': dtypes.int8, 'b8': dtypes.uint8, 'u1': dtypes.uint32}
 _BITS_DT = {8: dtypes.uint8, 16: dtypes.uint16, 32: dtypes.uint32, 64: dtypes.uint64}
 _NUM_SUFFIXES = ('ULL', 'LL', 'UL', 'U', 'L', 'F', 'f')
 def _strip_suffix(num: str) -> tuple[str, str]:
@@ -524,6 +533,7 @@ class Parser:
     if self.try_eat('COLON'):
       second = self.parse()
       self.eat('RBRACKET')
+      first, second = _try_const_fold(first), _try_const_fold(second)
       if first.op == Ops.CONST and second.op == Ops.CONST:
         a, b = int(first.arg), int(second.arg)
         if a < b: return _bitreverse(base, b - a + 1)
@@ -824,9 +834,16 @@ def parse_block(lines: list[str], start: int, vars: dict[str, VarVal], funcs: di
       has_break = any('break' in bl.lower() for bl in body_lines)
       found_var = f'_found_{id(body_lines)}' if has_break else None
       if found_var: vars[found_var] = block_assigns[found_var] = _const(dtypes.bool, False)
+      _arr_elems: dict[str, UOp] = {}  # protected array element assignments
       for loop_i in range(start_val, end_val + 1):
         subst_lines = [_subst_loop_var(bl, loop_var, loop_i) for bl in body_lines if not (has_break and bl.strip().lower() == 'break')]
-        _, iter_assigns, _ = parse_block(subst_lines, 0, vars, funcs, assigns)
+        _, iter_assigns, _ = parse_block(subst_lines, 0, {**vars, **block_assigns, **_arr_elems}, funcs, assigns)
+        # Detect brace assignments (array elements) and protect them from being overwritten by temps
+        for sl in subst_lines:
+          stoks = tokenize(sl)
+          if len(stoks) >= 5 and stoks[0].type == 'IDENT' and stoks[1].type == 'LBRACE' and stoks[2].type == 'NUM':
+            key = f'{stoks[0].val}{stoks[2].val}'
+            if key in iter_assigns: _arr_elems[key] = iter_assigns[key]
         if has_break:
           assert found_var is not None
           found = block_assigns.get(found_var, vars.get(found_var))
@@ -847,6 +864,8 @@ def parse_block(lines: list[str], start: int, vars: dict[str, VarVal], funcs: di
                 break
         else:
           block_assigns.update(iter_assigns); vars.update(iter_assigns)
+      # Restore protected array elements that may have been overwritten by temps with same name
+      block_assigns.update(_arr_elems); vars.update(_arr_elems)
       continue
 
     # declare
