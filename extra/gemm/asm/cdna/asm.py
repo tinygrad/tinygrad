@@ -19,7 +19,7 @@ GEMM_ARGS = {
 ITERS_ARGS = {64: (67108864, 0), 128: (33554432, 0), 224: (613566757, 2147483656)}
 
 class Kernel:
-  def __init__(self, name="gemm"): self.name, self.instructions, self.labels, self.labels_at_pos, self.pos, self._patched = name, [], {}, {}, 0, False
+  def __init__(self, name="gemm"): self.name, self.instructions, self.labels, self.labels_at_pos, self.pos = name, [], {}, {}, 0
 
   def label(self, name):
     self.labels[name] = self.pos
@@ -31,15 +31,12 @@ class Kernel:
     self.pos += inst.size()
     return inst
 
-  def _patch(self):
-    if self._patched: return None
+  def to_asm(self):
+    # patch branches
     for inst in self.instructions:
       if inst._target is None: continue
       inst.simm16 = (self.labels[inst._target] - inst._pos - inst.size()) // 4
-    self._patched = True
-
-  def to_asm(self):
-    self._patch()
+    # convert instructions to bytes, pack hsa
     inst_bytes = b"".join(inst.to_bytes() for inst in self.instructions)
     body = "\n".join("  .byte " + ",".join(f"0x{b:02x}" for b in inst_bytes[i:i+16]) for i in range(0, len(inst_bytes), 16))
     hsa = [('group_segment_fixed_size', 133120), ('private_segment_fixed_size', 0), ('kernarg_size', 24),
@@ -50,8 +47,7 @@ class Kernel:
            ('float_round_mode_16_64', 0), ('float_denorm_mode_32', 3), ('float_denorm_mode_16_64', 3),
            ('ieee_mode', 1), ('fp16_overflow', 0), ('dx10_clamp', 1)]
     args = '\n'.join(f'      - .address_space: generic\n        .name: {n}\n        .offset: {i*8}\n'
-                     f'        .size: 8\n        .value_kind: global_buffer\n        .value_type: {t}'
-                     for i, (n, t) in enumerate([('D', 'bf16'), ('A', 'bf16'), ('B', 'bf16')]))
+                     f'        .size: 8\n        .value_kind: global_buffer' for i,n in enumerate(['C', 'A', 'B']))
     n = self.name
     return '\n'.join(['.text', '.section\t.text.', f'.global\t{n}', '.p2align\t8', f'.type\t{n},@function', '', f'{n}:',
       body, '', '.section .rodata,"a",@progbits', '.p2align 6, 0x0', f'.amdhsa_kernel {n}',
@@ -64,12 +60,10 @@ class Kernel:
 
   # outputs readable source code for this kernel
   def to_text(self) -> str:
-    self._patch()
     lines, pos = [], 0
     for inst in self.instructions:
       for label in self.labels_at_pos.get(pos, []): lines.append(f"{label}:")
-      target = f"  // -> {inst._target}" if inst._target else ""
-      lines.append(f"  {inst.disasm()}{target}")
+      lines.append(f"  {inst.disasm()}" if inst._target is None else f" {inst.op_name.lower()} {inst._target}")
       pos += inst.size()
     return "\n".join(lines)
 
