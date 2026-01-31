@@ -96,6 +96,8 @@ class UOpMetaClass(type):
       if SPEC > 2: test_pyrender(created)
       with Context(CHECK_OOB=0): fret = cast(bool|None, full_spec.rewrite(created))
       if fret is not True: raise RuntimeError(f"SPEC ISSUE {fret}: {created}")
+      # Validate computed dtype matches passed dtype
+      if created._dtype != dtype: raise RuntimeError(f"{op}: dtype mismatch, passed {dtype} but computed {created._dtype}")
     return created
 
 # some uops map to other stuff
@@ -296,6 +298,39 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
 
     # all Ops must be explicitly handled
     raise NotImplementedError(f"no shape handling for {self.op} with {self.dtype}")
+
+  # *** uop dtype stuff ***
+
+  @recursive_property
+  def _dtype(self) -> DType:
+    """Compute dtype from (op, src, arg). Used to validate dtype is consistent."""
+    match self.op:
+      # fixed void
+      case Ops.SINK | Ops.STORE | Ops.BARRIER | Ops.END | Ops.ENDIF | Ops.GROUP | Ops.UNIQUE | Ops.LUNIQUE | Ops.DEVICE | \
+           Ops.REWRITE_ERROR | Ops.PROGRAM | Ops.LINEAR | Ops.SOURCE | Ops.BINARY | Ops.KERNEL | Ops.IF:
+        return dtypes.void
+
+      # from sources
+      case Ops.RANGE | Ops.SPECIAL: return self.src[0]._dtype
+      case Ops.WMMA: return self.src[2]._dtype
+      case Ops.GEP:
+        scalar = self.src[0]._dtype.scalar()
+        return scalar.vec(len(self.arg)) if len(self.arg) > 1 else scalar
+      case Ops.CMPLT | Ops.CMPNE | Ops.CMPEQ:
+        dt = self.src[-1]._dtype
+        return dtypes.bool.vec(dt.count) if dt.count > 1 else dtypes.bool
+      case Ops.DETACH | Ops.CONTIGUOUS | Ops.CONTIGUOUS_BACKWARD | Ops.COPY | Ops.AFTER | Ops.REDUCE_AXIS | Ops.ALLREDUCE | \
+           Ops.MULTI | Ops.MSELECT | Ops.MSTACK | Ops.ASSIGN | Ops.ENCDEC | Ops.BUFFERIZE | Ops.CALL | \
+           Ops.EXPAND | Ops.PERMUTE | Ops.PAD | Ops.SHRINK | Ops.FLIP:
+        return self.src[0]._dtype
+      case Ops.BIND: return self.src[0]._dtype if self.src else dtypes.void
+
+      # ALU ops use last source's dtype (except comparisons handled above)
+      case _ if self.op in GroupOp.ALU: return self.src[-1]._dtype if self.src else self.dtype
+
+    # dtype is explicit for: CONST, VCONST, BUFFER, BUFFER_VIEW, CAST, BITCAST, DEFINE_VAR, DEFINE_GLOBAL, DEFINE_LOCAL, DEFINE_REG,
+    # RESHAPE, VECTORIZE, UNROLL, CAT, PTRCAT, REDUCE, INDEX, LOAD, CUSTOM, CUSTOMI, CUSTOM_KERNEL, PARAM, NOOP, CONTRACT
+    return self.dtype
 
   @property
   def shape(self) -> tuple[sint, ...]:
