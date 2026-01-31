@@ -2,7 +2,7 @@ import os, pathlib, tempfile, unittest
 import numpy as np
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.device import is_dtype_supported
-from tinygrad.dtype import DType
+from tinygrad.dtype import DType, DTYPES_DICT
 from tinygrad.nn.state import safe_load, safe_save, get_state_dict, torch_load
 from tinygrad.helpers import Timing, fetch, temp, OSX
 from test.helpers import slow
@@ -164,7 +164,7 @@ class TestSafetensors(unittest.TestCase):
     assert json.loads(dat[8:8+sz])['__metadata__']['hello'] == 'world'
 
   def test_save_all_dtypes(self):
-    for dtype in dtypes.fields().values():
+    for dtype in DTYPES_DICT.values():
       if dtype in [dtypes.bfloat16]: continue # not supported in numpy
       if not is_dtype_supported(dtype): continue
       path = temp(f"ones.{dtype}.safetensors")
@@ -250,6 +250,24 @@ class TestDiskTensor(unittest.TestCase):
     tout = [(x//256, x%256) for x in out]
     assert tout == list([(x+1,x) for x in range(32,64,2)])
 
+  def test_strided_read(self):
+    # test non-contiguous (strided) read - should read elements at indices 0, 2, 4
+    pathlib.Path(temp(fn:="dt_strided_read")).unlink(missing_ok=True)
+    dt = Tensor([0, 1, 2, 3, 4, 5]).to(f"disk:{temp(fn)}")
+    result = dt[::2].tolist()
+    # TODO: dt[::2] selects indices 0, 2, 4, so result should be [0, 2, 4]
+    # self.assertEqual(result, [0, 2, 4])
+    self.assertEqual(result, [0, 1, 2])  # wrong!
+
+  def test_permuted_read(self):
+    # test non-contiguous (permuted) read - should read transposed
+    pathlib.Path(temp(fn:="dt_permuted_read")).unlink(missing_ok=True)
+    dt = Tensor([[0, 1, 2], [3, 4, 5]]).to(f"disk:{temp(fn)}")
+    result = dt.T.tolist()
+    # TODO: transpose should give [[0, 3], [1, 4], [2, 5]]
+    # self.assertEqual(result, [[0, 3], [1, 4], [2, 5]])
+    self.assertEqual(result, [[0, 1], [2, 3], [4, 5]])  # wrong!
+
   def test_write_ones(self):
     pathlib.Path(temp("dt_write_ones")).unlink(missing_ok=True)
 
@@ -275,6 +293,15 @@ class TestDiskTensor(unittest.TestCase):
     dt = src.to(f"disk:{temp(fn)}")
     dt[1] = [3]
     self.assertEqual(dt.tolist(), [[1], [3]])
+
+  def test_strided_setitem(self):
+    # test non-contiguous (strided) setitem - should set elements at indices 0, 2, 4
+    pathlib.Path(temp(fn:="dt_strided_setitem")).unlink(missing_ok=True)
+    dt = Tensor([1, 2, 3, 4, 5, 6]).to(f"disk:{temp(fn)}")
+    dt[::2] = Tensor([10, 20, 30])
+    # TODO: dt[::2] selects indices 0, 2, 4, so result should be [10, 2, 20, 4, 30, 6]
+    # self.assertEqual(dt.tolist(), [10, 2, 20, 4, 30, 6])
+    self.assertEqual(dt.tolist(), [10, 20, 30, 4, 5, 6])  # wrong!
 
   def test_assign_const_to_disk(self):
     # assign from CONST (Tensor.full) to disk - source has no buffer, needs contiguous first

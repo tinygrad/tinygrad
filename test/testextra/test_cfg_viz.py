@@ -6,8 +6,8 @@ import textwrap, functools
 
 from tinygrad import Device, Tensor
 from tinygrad.uop.ops import UOp, Ops, KernelInfo
-from tinygrad.helpers import getenv
 from tinygrad.device import Compiler
+from tinygrad.runtime.support.compiler_amd import HIPCompiler
 from tinygrad.viz.serve import amdgpu_cfg
 
 from extra.assembly.amd.autogen.rdna3.ins import *
@@ -73,11 +73,11 @@ def asm_kernel(out:UOp, insts:list[str|Inst], name:str, device:str, compiler:Com
                                UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=lib)))
 
 def run_asm(name:str, insts:list) -> None:
-  fxn = functools.partial(asm_kernel, insts=insts, name=name, device=Device.DEFAULT, compiler=Device[Device.DEFAULT].compiler)
+  fxn = functools.partial(asm_kernel, insts=insts, name=name, device=Device.DEFAULT, compiler=HIPCompiler(Device[Device.DEFAULT].renderer.arch))
   out = Tensor.custom_kernel(Tensor.empty(1), fxn=fxn)[0]
   out.realize()
 
-@unittest.skipUnless(Device.DEFAULT == "AMD" and not getenv("AMD_LLVM"), "only on AMD with comgr")
+@unittest.skipUnless(Device.DEFAULT == "AMD", "only on AMD")
 class TestCfg(unittest.TestCase):
   def setUp(self):
     arch = Device["AMD"].arch
@@ -90,6 +90,7 @@ class TestCfg(unittest.TestCase):
         "s_branch bb1",
       "bb1:",
         s_endpgm(),
+        s_code_end(),
     ])
 
   def test_diamond(self):
@@ -107,10 +108,13 @@ class TestCfg(unittest.TestCase):
         s_nop(0),
       "end:",
         s_endpgm(),
+        s_code_end(),
     ])
-    _, lib = assemble("diamond", insts, Device[Device.DEFAULT].compiler)
+    _, lib = assemble("diamond", insts, HIPCompiler(Device[Device.DEFAULT].arch))
     cfg = amdgpu_cfg(lib, Device[Device.DEFAULT].device_props()["gfx_target_version"])["data"]
     self.assertEqual(len(cfg["blocks"]), 5)
+    edge_count = sum(len(v) for v in cfg["paths"].values())
+    self.assertEqual(edge_count, 5)
     references:dict[str, list[str]] = {}
     for pc, tokens in cfg["pc_tokens"].items():
       for t in tokens:
@@ -128,6 +132,7 @@ class TestCfg(unittest.TestCase):
         s_cmp_eq_i32(s[1], 0),
         "s_cbranch_scc0 loop",
         s_endpgm(),
+        s_code_end(),
     ])
 
   def test_loop_branch(self):
@@ -145,6 +150,7 @@ class TestCfg(unittest.TestCase):
         s_cmp_eq_i32(s[1], 0),
         "s_cbranch_scc0 loop",
         s_endpgm(),
+        s_code_end(),
     ])
 
   def test_loop_break(self):
@@ -159,6 +165,7 @@ class TestCfg(unittest.TestCase):
         "s_cbranch_scc0 loop",
       "break:",
         s_endpgm(),
+        s_code_end(),
     ])
 
   def test_switch(self):
@@ -180,6 +187,7 @@ class TestCfg(unittest.TestCase):
         "s_branch join",
       "join:",
         s_endpgm(),
+        s_code_end(),
     ])
 
   def test_ping_pong(self):
@@ -197,6 +205,7 @@ class TestCfg(unittest.TestCase):
         "s_cbranch_scc1 ping",
       "end:",
         s_endpgm(),
+        s_code_end(),
     ])
 
   def test_colored_blocks(self):
@@ -212,7 +221,7 @@ class TestCfg(unittest.TestCase):
           f"s_cbranch_scc0 {loop}",
           f"s_branch {'init' + str(i+1) if i + 1 < N else 'end'}",
       ]
-    asm += ["end:", s_endpgm()]
+    asm += ["end:", s_endpgm(), s_code_end()]
     run_asm("test_colored_blocks", asm)
 
   def test_jump_back_to_end(self):
@@ -226,6 +235,21 @@ class TestCfg(unittest.TestCase):
         s_add_u32(s[1], s[1], -1),
         s_cmp_eq_i32(s[1], 0),
         "s_branch end",
+        s_code_end(),
+    ])
+
+  def test_hit_count(self):
+    run_asm("test_hit_count", [
+      "entry:",
+        s_mov_b32(s[1], 1),
+        "s_branch alt",
+      "continue:",
+        s_mov_b32(s[2], 2),
+        s_add_u32(s[1], s[1], s[2]),
+      "alt:",
+        s_add_u32(s[1], s[1], -1),
+        s_endpgm(),
+        s_code_end(),
     ])
 
 if __name__ == "__main__":

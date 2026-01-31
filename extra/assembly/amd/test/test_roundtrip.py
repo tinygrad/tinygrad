@@ -2,15 +2,8 @@
 """Roundtrip tests: generate tinygrad kernels, decode instructions, re-encode, verify match."""
 import unittest, io, sys, re, subprocess, os
 from extra.assembly.amd.dsl import Inst
-from extra.assembly.amd.decode import decode_inst, detect_format
-from extra.assembly.amd.test.helpers import get_llvm_mc, get_llvm_objdump
-
-# arch: (mcpu, mattr)
-ARCH_CONFIG = {
-  'rdna3': ('gfx1100', '+real-true16,+wavefrontsize32'),
-  'rdna4': ('gfx1200', '+real-true16,+wavefrontsize32'),
-  'cdna': ('gfx942', '+wavefrontsize64'),
-}
+from extra.assembly.amd import decode_inst, detect_format
+from extra.assembly.amd.test.helpers import get_llvm_mc, get_llvm_objdump, get_target, get_mattr
 
 def disassemble_lib(lib: bytes, compiler) -> list[tuple[str, bytes]]:
   """Disassemble ELF binary and return list of (instruction_text, machine_code_bytes)."""
@@ -42,8 +35,7 @@ def compile_asm(instr: str, arch: str = 'rdna3') -> bytes:
 def compile_asm_batch(instrs: list[str], arch: str = 'rdna3') -> list[bytes]:
   """Compile multiple instructions with a single llvm-mc call."""
   if not instrs: return []
-  mcpu, mattr = ARCH_CONFIG[arch]
-  result = subprocess.run([get_llvm_mc(), '-triple=amdgcn', f'-mcpu={mcpu}', f'-mattr={mattr}', '-show-encoding'],
+  result = subprocess.run([get_llvm_mc(), '-triple=amdgcn', f'-mcpu={get_target(arch)}', f'-mattr={get_mattr(arch)}', '-show-encoding'],
                           input=".text\n" + "\n".join(instrs) + "\n", capture_output=True, text=True)
   if result.returncode != 0: raise RuntimeError(f"llvm-mc batch failed: {result.stderr.strip()}")
   encodings = []
@@ -59,7 +51,7 @@ def compile_and_disasm_batch(instrs: list[str], arch: str = 'rdna3') -> list[str
   """Compile instructions with LLVM and get LLVM's disassembly."""
   import tempfile
   if not instrs: return []
-  mcpu, mattr = ARCH_CONFIG[arch]
+  mcpu, mattr = get_target(arch), get_mattr(arch)
   src = ".text\n.globl test\n.p2align 8\n.type test,@function\ntest:\n" + "\n".join(f"  {instr}" for instr in instrs) + "\n"
   with tempfile.NamedTemporaryFile(suffix='.o', delete=False) as f:
     obj_path = f.name
@@ -89,20 +81,23 @@ class TestTinygradKernelRoundtrip(unittest.TestCase):
     3. our disasm() matches LLVM's disassembly string (informational)
     """
     arch = self.arch
-    mcpu, mattr = ARCH_CONFIG[arch]
 
     from extra.assembly.amd.test.test_compare_emulators import get_kernels_from_tinygrad
-    from tinygrad.runtime.support.compiler_amd import HIPCompiler
+    from tinygrad.runtime.support.elf import elf_loader
+    from tinygrad.runtime.support.compiler_amd import HIPCompiler, AMDLLVMCompiler
+    from tinygrad.helpers import AMD_LLVM
 
     kernels, _, _ = get_kernels_from_tinygrad(op_fn)
-    compiler = HIPCompiler(mcpu)
+    # rendered source can be C or llvmir
+    compiler = (AMDLLVMCompiler if AMD_LLVM else HIPCompiler)(get_target(arch))
 
     # First pass: decode all instructions and collect info
     decoded_instrs: list[tuple] = []  # list of (ki, offset, orig_bytes, decoded, our_disasm, decode_ok, decode_err)
     for ki, kernel in enumerate(kernels):
       offset = 0
-      while offset < len(kernel.code):
-        remaining = kernel.code[offset:]
+      code = next((s.content for s in elf_loader(compiler.compile(kernel.src))[1] if s.name == ".text"))
+      while offset < len(code):
+        remaining = code[offset:]
         fmt = detect_format(remaining, arch)
         if fmt is None:
           decoded_instrs.append((ki, offset, None, None, None, False, "no format"))
@@ -243,7 +238,6 @@ class TestTinygradKernelRoundtrip(unittest.TestCase):
   # Fused ops
   def test_fma(self): self._test_kernel_roundtrip(lambda T: (T([1.0, 2.0]) * T([3.0, 4.0]) + T([5.0, 6.0])))
 
-@unittest.skip("RDNA4 decode roundtrip not yet supported")
 class TestTinygradKernelRoundtripRDNA4(TestTinygradKernelRoundtrip): arch = 'rdna4'
 
 @unittest.skip("CDNA decode roundtrip not yet supported")

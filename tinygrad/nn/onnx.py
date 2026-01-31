@@ -1,12 +1,12 @@
 # pylint: disable=possibly-unused-variable
 from typing import Any, Sequence, cast, Literal, NamedTuple, Generator
 import dataclasses, functools, io, math, types, warnings, pathlib, sys, os, struct, enum
-from io import BufferedReader
 from tinygrad.nn.state import TensorIO
 from tinygrad.tensor import Tensor, _broadcast_shape, ReductionStr
-from tinygrad.helpers import getenv, DEBUG, all_same, prod, flatten, make_tuple, argsort, is_numpy_ndarray, get_single_element, polyN
-from tinygrad.dtype import DType, ConstType, dtypes, _from_np_dtype, truncate, least_upper_dtype
+from tinygrad.helpers import getenv, all_same, prod, flatten, make_tuple, argsort, is_numpy_ndarray, get_single_element, polyN
+from tinygrad.dtype import DType, ConstType, dtypes, _from_np_dtype, truncate, least_upper_dtype, DTYPES_DICT
 from tinygrad.device import is_dtype_supported, Device
+from tinygrad.uop.ops import sint
 
 # ***** protobuf definitions ******
 class WireType(enum.IntEnum):
@@ -33,7 +33,7 @@ class OnnxDataType(enum.IntEnum):
   FLOAT = 1; UINT8 = 2; INT8 = 3; UINT16 = 4; INT16 = 5; INT32 = 6; INT64 = 7; BOOL = 9; FLOAT16 = 10; DOUBLE = 11; UINT32 = 12 # noqa: E702
   UINT64 = 13; BFLOAT16 = 16 # noqa: E702
 
-  def to_dtype(self) -> DType: return dtypes.fields()[self.name.lower()]
+  def to_dtype(self) -> DType: return DTYPES_DICT[self.name.lower()]
 
 def dtype_fallback(dtype: DType, fallback_context: str) -> DType:
   if is_dtype_supported(dtype): return dtype
@@ -75,7 +75,7 @@ class OnnxNode:
   opts: dict[str, Any]
 
 # ***** protobuf parsing ******
-class PBBufferedReader(BufferedReader):
+class PBBufferedReader(io.BufferedReader):
   def __init__(self, tensor: Tensor):
     assert tensor.dtype == dtypes.uint8, tensor
     super().__init__(TensorIO(tensor))
@@ -366,22 +366,8 @@ required_input_python_consts: dict[str, tuple[int, ...]] = {
   **{optim: (1,) for optim in ("Adam", "Adagrad", "Momentum")}
 }
 
-cache_misses = 0
-@functools.cache
-def _cached_to_python_const(t:Tensor):
-  if t.dtype == dtypes.uint8: return t.data().tobytes()
-  if 0 in t.shape: return []
-  return t.tolist()
-
-# Tensor -> python value cache for parameters
-def to_python_const(t:Any, op:str, idx:int) -> list[ConstType]|ConstType|bytes:
-  if idx not in required_input_python_consts.get(op, ()) or not isinstance(t, Tensor): return t
-  global cache_misses
-  ret = _cached_to_python_const(t)
-  if (info := _cached_to_python_const.cache_info()).misses > cache_misses and DEBUG >= 3:
-    print(f"Cache miss for {t}")
-    cache_misses = info.misses
-  return ret
+def _to_python_const(t:Tensor) -> list[ConstType]|ConstType|bytes:
+  return t.data().tobytes() if t.dtype == dtypes.uint8 else cast(list[ConstType]|ConstType, t.tolist())
 
 # ***** runner ******
 debug = int(getenv("DEBUGONNX", "0"))
@@ -404,12 +390,15 @@ class OnnxRunner:
     self.graph_inputs = {i["name"]: i["parsed_type"] for i in graph["input"] if i["name"] not in self.graph_values}
     self.graph_outputs = tuple(o["name"] for o in graph["output"])
     self.graph_nodes = tuple(n["parsed_node"] for n in graph["node"])
+    # track names from initializers and Constant nodes for fast path optimizations
+    self.const_names: set[str] = set(self.graph_values.keys()) | {o for n in self.graph_nodes if n.op == "Constant" for o in n.outputs}
 
     self.old_training = Tensor.training
     Tensor.training = self.is_training
 
     self.variable_dims: dict[str, int] = {}
     self.onnx_ops = onnx_ops
+    self._python_const_cache: dict[str, list[ConstType]|ConstType|bytes] = {}  # cache by name for JIT stability
 
   @classmethod
   def _from_subgraph(cls, graph: dict) -> "OnnxRunner":
@@ -454,18 +443,32 @@ class OnnxRunner:
                                       for n in self.graph_nodes)
     return self
 
+  def _get_python_const(self, name:str, op:str, idx:int) -> list[ConstType]|ConstType|bytes|Any:
+    """Convert tensor to python const with name-based caching for JIT stability."""
+    t = self.graph_values[name]
+    if idx not in required_input_python_consts.get(op, ()) or not isinstance(t, Tensor): return t
+    # cache by name - safe because JIT requires fixed input shapes, so computed values (Shape ops) are deterministic
+    # true graph inputs that are python consts are rare; if they change across runs, cached value will be wrong
+    if (cached := self._python_const_cache.get(name)) is None: cached = self._python_const_cache[name] = _to_python_const(t)
+    return cached
+
   def __call__(self, inputs:dict[str, Any], debug=debug):
     for name, input_spec in self.graph_inputs.items():
       if name not in inputs: raise RuntimeError(f"Please provide input data for {name}")
       self.graph_values[name] = self._parse_input(name, inputs[name], input_spec)
 
     for num, node in enumerate(self.graph_nodes):
-      inps = [to_python_const(self.graph_values[name], node.op, i) for i,name in enumerate(node.inputs)]
+      inps = [self._get_python_const(name, node.op, i) for i,name in enumerate(node.inputs)]
       opts = node.opts
 
       # provide additional opts
       if node.op == "Split" and 'num_outputs' not in opts: opts['num_outputs'] = len(node.outputs)
       if node.op in {"Gradient", "If"}: opts['intermediate_tensors'] = self.graph_values
+      # for Gather, convert indices to python const if from Constant/initializer for shrink fast path
+      if node.op == "Gather" and len(node.inputs) > 1 and node.inputs[1] in self.const_names:
+        idx_name, cache = node.inputs[1], self._python_const_cache
+        if (cached := cache.get(idx_name)) is None: cached = cache[idx_name] = _to_python_const(self.graph_values[idx_name])
+        inps[1] = cached
 
       if debug >= 1: print((f"[{self.graph_name}] " if self.graph_name else "") + f"{num}: op '{node.op}' opt {opts}")
       if debug >= 2 and node.inputs: print("\tinputs:\n" + "\n".join(f"\t\t{x} - {i!r}" for x,i in zip(node.inputs, inps)))
@@ -505,7 +508,7 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
     if auto_pad == "VALID": return [0]*(len(k_)*2)
     i_, (s_,d_,p_) = x.shape[-len(k_):], (make_tuple(x, len(k_)*2) for x in (s_, d_, p_))
     if auto_pad == "NOTSET": return _onnx_pads_to_tiny_pads(p_ if len(p_)==len(k_)*2 else p_*2)
-    o_ = [((i - (1 if auto_pad in ("SAME_UPPER", "SAME_LOWER") else k)) // s + 1) for i,k,s in zip(i_, k_, s_)]
+    o_ = [((i - 1) // s + 1) for i,s in zip(i_, s_)]
     return _onnx_pads_to_tiny_pads(_auto_pad([(o-1)*s+k-i for o,i,k,s in zip(o_, i_, k_, s_)], auto_pad))
 
   def _clamp_cast(x:Tensor, dtype:DType): return x.clamp(dtypes.min(dtype), dtypes.max(dtype)).cast(dtype)
@@ -563,7 +566,7 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
     if all(t.shape == e.shape for t,e in zip(then_out.values(), else_out.values())):
       return tuple(condition.where(t,e) for t,e in zip(then_out.values(), else_out.values()))
     # otherwise, use condition to select the output in python
-    cond = _resolve_const(_cached_to_python_const(condition))
+    cond = _resolve_const(_to_python_const(condition))
     return tuple(t if cond else e for t,e in zip(then_out.values(), else_out.values()))
 
   def Identity(x:Tensor): return x
@@ -674,7 +677,7 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
   def ReduceLogSumExp(data:Tensor, axes:list[int]|None=None, keepdims:int=1, noop_with_empty_axes:int=0):
     return ReduceSum(data.exp(), axes, keepdims, noop_with_empty_axes).log()
   def ArgMax(x:Tensor, axis:int=0, keepdims:int=1, select_last_index:int=0):
-    if select_last_index: return ((x.shape[axis]-1) - x.flip(axis).argmax(axis, keepdim=keepdims)).cast(dtypes.int64)
+    if select_last_index: return ((int(x.shape[axis])-1) - x.flip(axis).argmax(axis, keepdim=keepdims)).cast(dtypes.int64)
     return x.argmax(axis, keepdim=keepdims).cast(dtypes.int64)
   def ArgMin(x, axis:int=0, keepdims:int=1, select_last_index:int=0):
     return ArgMax(-x, axis=axis, keepdims=keepdims, select_last_index=select_last_index)
@@ -701,21 +704,21 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
     return data[tuple(slices)]
 
   def Split(data:Tensor, split:list[int]|None=None, num_outputs:int=0, axis:int=0):
-    sz = data.shape[axis]
+    sz = int(data.shape[axis])
     if split is None: split = [sz // num_outputs + (1 if i < sz % num_outputs else 0) for i in range(num_outputs)]
     return data.split(split, axis)
 
   def Pad(x:Tensor, pads:list[int], constant_value:ConstType|None=None, axes:list[int]|None=None,
           mode:Literal["constant", "reflect", "edge", "wrap"]="constant", value=0):
-    value = _resolve_const(constant_value or value)
+    value = _resolve_const(value if constant_value is None else constant_value)
     axes = axes or list(range(x.ndim))
     real_pads = [0] * (x.ndim*2)
     for i,axis in enumerate(axes): real_pads[axis%x.ndim], real_pads[axis%x.ndim+x.ndim] = pads[i], pads[i+len(axes)]
     return x.pad(padding=_onnx_pads_to_tiny_pads(real_pads), mode={"edge":"replicate", "wrap":"circular"}.get(mode, mode), value=value)
 
   def CenterCropPad(t:Tensor, shape:list[int], axes:list[int]|None=None):
-    shrink_arg:list[None|tuple[int,int]] = [None] * t.ndim
-    pad_arg:list[None|tuple[int,int]] = [None] * t.ndim
+    shrink_arg:list[None|tuple[sint,sint]] = [None] * t.ndim
+    pad_arg:list[None|tuple[sint,sint]] = [None] * t.ndim
     for s, x in zip(shape, axes or range(t.ndim)):
       tx = t.shape[x]
       if s < tx: shrink_arg[x] = (tx//2 - (s+1)//2, tx//2 + s//2)
@@ -749,8 +752,8 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
       pads = _auto_pad([s_*(i-1) + op_ + ((k_-1)*d_+1) - os for s_,i,op_,k_,d_,os in
                         zip(strides_, input_shape_, output_padding_, kernel_shape_, dilations_, output_shape)], auto_pad)
     if pads is None: # we generate pads
-      output_shape = output_shape or [X.shape[i+2] * strides_[i] for i in range(len(strides_))]
-      pads = [strides_[i]*(input_shape_[i]-1)+output_padding_[i]+((kernel_shape_[i]-1)*dilations_[i]+1)-output_shape[i]
+      output_shape = output_shape or [int(X.shape[i+2]) * strides_[i] for i in range(len(strides_))]
+      pads = [int(strides_[i]*(input_shape_[i]-1)+output_padding_[i]+((kernel_shape_[i]-1)*dilations_[i]+1)-output_shape[i])
               for i in range(len(input_shape_))]
       pads = _auto_pad(pads, auto_pad) if auto_pad != "NOTSET" else [0] * len(input_shape_) * 2
     pads = _onnx_pads_to_tiny_pads(pads)
@@ -1012,7 +1015,7 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
                         num_heads:int|None=None, past_present_share_buffer:int|None=None, qkv_hidden_sizes:list[int]|None=None,
                         rotary_embedding_dim:int|None=None, scale:float|None=None, unidirectional:int=0):
     assert not do_rotary and not attention_bias, "TODO"
-    if qkv_hidden_sizes is None: qkv_hidden_sizes = [weights.shape[1] // 3] * 3
+    if qkv_hidden_sizes is None: qkv_hidden_sizes = [int(weights.shape[1] // 3)] * 3
     qkv = x.linear(weights, bias)
     q, k, v = qkv.split(qkv_hidden_sizes, dim=2)
 
@@ -1110,7 +1113,7 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
     if X.ndim == 4: X = X.permute(0, 2, 1, 3)
     elif X.ndim == 3:
       assert num_heads is not None, "num_heads must be provided for 3D input"
-      X = X.unflatten(-1, (num_heads, X.shape[-1] // num_heads))
+      X = X.unflatten(-1, (num_heads, int(X.shape[-1]) // num_heads))
 
     head_size = cast(int, X.shape[-1])
     rot_dim = rotary_embedding_dim or head_size
@@ -1142,15 +1145,16 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
 
   def ArrayFeatureExtractor(x:Tensor, indices:Tensor): return x[..., indices]
 
-  def Gather(x:Tensor, indices:Tensor, axis:int=0):
-    if indices.numel() < 9: # NOTE lessor kernels for smaller indices but kernel number increases depending on size of indices
-      ret_shape = x.shape[:axis] + indices.shape + x.shape[axis+1:]
-      if indices.ndim > 1: indices = indices.flatten()
-      index_consts = [_cached_to_python_const(indices)] if indices.shape == () else _cached_to_python_const(indices)
-      index_consts = [x.shape[axis]+i if i<0 else i for i in index_consts]
-      args = [[(0,x) if j != axis else (i,i+1) for j, x in enumerate(x.shape)] for i in index_consts]
+  def Gather(x:Tensor, indices:Tensor|list[int]|int, axis:int=0):
+    axis = x._resolve_dim(axis)
+    # fast path for constant indices (passed as python list/int from to_python_const)
+    if not isinstance(indices, Tensor):
+      indices_list = [indices] if isinstance(indices, int) else list(indices)
+      indices_shape = () if isinstance(indices, int) else (len(indices_list),)
+      ret_shape = x.shape[:axis] + indices_shape + x.shape[axis+1:]
+      index_consts = [x.shape[axis]+i if i<0 else i for i in indices_list]
+      args = [[(0,s) if j != axis else (i,i+1) for j, s in enumerate(x.shape)] for i in index_consts]
       return x.shrink(arg=tuple(args[0])).cat(*[x.shrink(arg=tuple(arg)) for arg in args[1:]], dim=axis).reshape(ret_shape)
-    # NOTE faster gather, fixed number of kernels, but exceeds limited kernels for openpilot
     return x[tuple([slice(None) if i != axis else indices for i in range(x.ndim)])]
   def Scatter(*args, **kwargs): return ScatterElements(*args, **kwargs) # deprecated
 
@@ -1179,7 +1183,7 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
 
   def TensorScatter(data: Tensor, updates: Tensor, indices: Tensor, mode: str = 'default'):
     # scatter updates along axis -2 at positions given by indices, for each batch
-    B, U, D = indices.shape[0], updates.shape[-2], data.shape[-2]
+    B, U, D = indices.shape[0], updates.shape[-2], int(data.shape[-2])
     orig_shape, data_flat, updates_flat = data.shape, data.reshape(-1, D, data.shape[-1]), updates.reshape(-1, U, updates.shape[-1])
     B_total = data_flat.shape[0]
     batch_idx = Tensor.arange(B_total, device=data.device).reshape(B_total, 1).expand(B_total, U)

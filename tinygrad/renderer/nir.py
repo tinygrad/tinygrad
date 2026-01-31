@@ -1,10 +1,11 @@
 from typing import Callable, cast, Any
-from tinygrad.dtype import AddrSpace, DType, PtrDType, ImageDType, dtypes
-from tinygrad.helpers import DEBUG, OSX, unwrap, charptr, fromimport
+from tinygrad.dtype import AddrSpace, DType, PtrDType, ImageDType, dtypes, truncate
+from tinygrad.helpers import DEBUG, OSX, unwrap, fromimport
 from tinygrad.renderer import Renderer
 from tinygrad.renderer.cstyle import CUDARenderer
 from tinygrad.uop.ops import GroupOp, Ops, UOp, PatternMatcher, UPat, range_str
 from tinygrad.runtime.autogen import mesa
+from tinygrad.runtime.support.c import POINTER
 import base64, ctypes, ctypes.util, struct, functools, inspect, contextlib, itertools
 
 def g(s:str): return getattr(mesa, s)
@@ -69,7 +70,7 @@ def nchannel(b:mesa.nir_builder, src:mesa.nir_def, c:int):
 
 def nimm_set(imm:mesa.nir_def, x, dtype:DType):
   instr = ctypes.cast(imm.parent_instr, ctypes.POINTER(mesa.nir_load_const_instr))
-  struct.pack_into(unwrap(dtype.fmt), (ctypes.c_ubyte * dtype.itemsize).from_address(ctypes.addressof(instr.contents.value)), 0, x)
+  struct.pack_into(unwrap(dtype.fmt), (ctypes.c_ubyte * dtype.itemsize).from_address(ctypes.addressof(instr.contents.value)), 0, truncate[dtype](x))
 
 @nir_instr(nc=1, bs=lambda dtype: dtype.bitsize)
 def nimm(b:mesa.nir_builder, x, dtype:DType) -> mesa.nir_def:
@@ -187,7 +188,8 @@ class NIRRenderer(Renderer):
       elif u.op is Ops.AFTER:
         self.r[u] = self.r[u.src[0]]
       elif u.op == Ops.SINK:
-        if u.arg is not None: self.b.shader.contents.info.name = charptr(u.arg.function_name.encode())
+        if u.arg is not None:
+          self.b.shader.contents.info.name = ctypes.cast(ctypes.create_string_buffer(u.arg.function_name.encode()), POINTER[ctypes.c_char])
       elif u.op == Ops.DEFINE_LOCAL:
         self.r[u] = nimm(self.b, self.b.shader.contents.info.shared_size, dtypes.long)
         self.b.shader.contents.info.shared_size += u.dtype.nbytes()

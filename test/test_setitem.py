@@ -131,7 +131,7 @@ class TestSetitem(unittest.TestCase):
       np.testing.assert_allclose(t.numpy(), n)
 
   def test_jit_setitem_variable_offset(self):
-    with Context(IGNORE_OOB=1):
+    with Context(CHECK_OOB=0):
       @TinyJit
       def f(t:Tensor, a:Tensor, v:Variable):
         t.shrink(((v,v+1), None)).assign(a).realize()

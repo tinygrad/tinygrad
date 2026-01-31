@@ -163,19 +163,6 @@ def isin_tensor_tensor_out(x, y, *, assume_unique=False, invert=False, out=None)
 def randperm_generator(n, generator=None, out=None):
   return out.copy_(wrap(Tensor.randperm(n, generator=generator, device=unwrap(out).device)))
 
-@torch.library.impl("aten::cummax", "privateuseone")
-def cummax(self, dim):
-  values, indices = unwrap(self).cummax(dim)
-  return (wrap(values), wrap(indices.cast(dtypes.int64)))
-
-@torch.library.impl("aten::cummin", "privateuseone")
-def cummin(self, dim):
-  values, indices = unwrap(self).cummin(dim)
-  return (wrap(values), wrap(indices.cast(dtypes.int64)))
-
-@torch.library.impl("aten::nonzero", "privateuseone")
-def nonzero(self): return wrap(unwrap(self).nonzero())
-
 @torch.library.impl("aten::_linalg_eigh", "privateuseone")
 # TODO: move to tinygrad
 def _linalg_eigh(self, UPLO: str = 'U'):
@@ -640,6 +627,9 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
     self.ones_like(**{k: v for k, v in {"dtype": _from_torch_dtype(dtype) if dtype else None,
                                         "device": _from_torch_device(device) if device else None}.items() if v is not None}),
   "aten.max.dim": lambda self, dim, keepdim=False: (self.max(dim, keepdim), self.argmax(dim, keepdim).cast(dtype=dtypes.int64)),
+  "aten.cummax": lambda self, dim: ((r := self.cummax(dim))[0], r[1].cast(dtypes.int64)),
+  "aten.cummin": lambda self, dim: ((r := self.cummin(dim))[0], r[1].cast(dtypes.int64)),
+  "aten.nonzero": Tensor.nonzero,
   "aten.unfold": Tensor.unfold,
 }}
 

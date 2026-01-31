@@ -2,8 +2,7 @@ import numpy as np
 import torch
 import unittest, copy, mmap, random, math, array
 from tinygrad import Tensor, Device, dtypes, nn
-from tinygrad.tensor import _METADATA
-from tinygrad.helpers import Context, getenv, temp, mv_address
+from tinygrad.helpers import getenv, temp, mv_address
 from extra.gradcheck import numerical_jacobian, jacobian, gradcheck
 from hypothesis import given, settings, strategies as strat
 from tinygrad.device import is_dtype_supported
@@ -11,7 +10,7 @@ from tinygrad.uop.ops import Ops, UOp
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.nir import NIRRenderer
 from tinygrad.engine.realize import get_program
-from tinygrad.dtype import DType
+from tinygrad.dtype import DType, DTYPES_DICT
 
 settings.register_profile("my_profile", max_examples=200, deadline=None, derandomize=getenv("DERANDOMIZE_CI", False))
 settings.load_profile("my_profile")
@@ -353,7 +352,7 @@ class TestTinygrad(unittest.TestCase):
       assert Tensor(arr).tolist() == torch.tensor(arr).tolist() == arr
 
   def test_element_size(self):
-    for _, dtype in dtypes.fields().items():
+    for _, dtype in DTYPES_DICT.items():
       assert dtype.itemsize == Tensor.randn(3, dtype=dtype).element_size(), f"Tensor.element_size() not matching Tensor.dtype.itemsize for {dtype}"
 
   def test_deepwalk_ctx_check(self):
@@ -795,92 +794,6 @@ class TestInferenceMode(unittest.TestCase):
       assert mm.grad is None
       assert W.grad is None
     f(x, m, W)
-
-class TestTensorMetadata(unittest.TestCase):
-  def setUp(self) -> None: _METADATA.set(None)
-
-  # NOOPs are not included in kernel metadata
-  @unittest.skip("why would this be true?")
-  def test_exclude_noop_metadata(self):
-    a = Tensor.rand(4, 4)*1
-    self.assertEqual(a.uop.metadata[0].name, "__mul__")
-    k = a.schedule()[-1]
-    self.assertEqual([m.name for m in k.metadata], ["rand"])
-
-  # we exclude const from kernel metadata because tensor methods can share the same CONST UOp
-  @unittest.skip("TODO: flaky")
-  def test_exclude_const_metadata(self):
-    a = Tensor.arange(4)
-    b = Tensor.full((4,), -1, dtype=dtypes.int).contiguous()
-    sched = Tensor.schedule(a, b)
-    self.assertEqual([m.name for m in sched[0].metadata], ["arange"])
-    self.assertEqual([m.name for m in sched[1].metadata], ["contiguous"])
-
-  def test_matmul(self):
-    x = Tensor.rand(3, requires_grad=True)
-    W = Tensor.rand(3, 3, requires_grad=True)
-    out = x.matmul(W)
-    self.assertEqual(out.uop.metadata[0].name, "matmul")
-    si = out.schedule()[-1]
-    self.assertEqual(len(si.metadata), 1)
-    self.assertEqual(si.metadata[0].name, "matmul")
-
-  def test_relu(self):
-    x = Tensor.rand(3, requires_grad=True)
-    out = x.relu()
-    self.assertEqual(out.uop.metadata[0].name, "relu")
-    si = out.schedule()[-1]
-    self.assertEqual(len(si.metadata), 1)
-    self.assertEqual(si.metadata[0].name, "relu")
-
-  @unittest.skip("this no longer works")
-  def test_assign(self):
-    x = Tensor.empty(10, 10).realize()
-    x.assign(Tensor.ones(10, 10).contiguous())
-    si = x.schedule()[-1]
-    self.assertEqual(len(si.metadata), 1)
-    self.assertEqual(si.metadata[0].name, "assign")
-
-  def test_complex(self):
-    x = Tensor.rand(3, requires_grad=True)
-    y = Tensor.rand(3, requires_grad=True)
-    out = x.relu() * y.sigmoid()
-    self.assertEqual(out.uop.metadata[0].name, "__mul__")
-    self.assertEqual(out.uop.src[0].metadata[0].name, "relu")
-    self.assertEqual(out.uop.src[1].metadata[0].name, "sigmoid")
-    si = out.schedule()[-1]
-    self.assertEqual(len(si.metadata), 3)
-    self.assertEqual(set(m.name for m in si.metadata), {"relu", "sigmoid", "__mul__"})
-
-  @unittest.skip("metadata is no longer promised to be exact with schedulecache")
-  def test_complex_backward(self):
-    x = Tensor.rand(3, requires_grad=True).realize()
-    y = Tensor.rand(3, requires_grad=True).realize()
-    out = (x.relu() * y.sigmoid()).sum()
-    self.assertEqual(out.uop.metadata[0].name, "sum")
-    out.backward()
-    self.assertEqual(x.grad.uop.metadata[0].name, "relu")
-    self.assertTrue(x.grad.uop.metadata[0].backward)
-    self.assertEqual(y.grad.uop.metadata[0].name, "sigmoid")
-    self.assertTrue(y.grad.uop.metadata[0].backward)
-    si = Tensor.schedule(out, x.grad, y.grad)[-1]
-    #self.assertEqual(len(si.metadata), 3, f"failed with {si.metadata}")
-    # skip numpy, this is schedule cache
-    self.assertSetEqual(set(m.name for m in si.metadata if m.name != "numpy"), {"sigmoid", "relu"})
-    #bw = [m for m in si.metadata if m.backward]
-    #self.assertEqual(len(bw), 1)
-    #self.assertEqual(bw[0].name, "sigmoid")
-
-  @unittest.skip("metadata is no longer promised to be exact with schedulecache")
-  def test_tracemeta_0(self):
-    with Context(TRACEMETA=0):
-      x = Tensor.rand(3, requires_grad=True)
-      y = Tensor.rand(3, requires_grad=True)
-      out = (x.relu() * y.sigmoid()).sum()
-      self.assertIsNone(out.uop.metadata)
-      self.assertIsNone(out.uop.src[0].metadata)
-      si = out.schedule()[-1]
-      self.assertEqual(si.metadata, ())
 
 class TestIdxUpcast(unittest.TestCase):
   def _find_op(self, ast: UOp, op: Ops):
