@@ -29,20 +29,25 @@ class AMFirmware:
     # Load SOS firmware
     self.sos_fw = {}
 
-    blob, sos_hdr = self.load_fw(f"psp_{fmt_ver(am.MP0_HWIP)}_sos.bin", versioned_header='struct_psp_firmware_header')
-    fw_bin = sos_hdr.psp_fw_bin
+    if adev.ip_ver[am.MP0_HWIP] == (14,0,1):
+      blob, toc_hdr = self.load_fw(f"psp_{fmt_ver(am.MP0_HWIP)}_toc.bin", versioned_header='struct_psp_firmware_header')
+      self.sos_fw[am.PSP_FW_TYPE_PSP_TOC] = blob[(st:=toc_hdr.header.ucode_array_offset_bytes):st+toc_hdr.header.ucode_size_bytes]
+    else:
+      blob, sos_hdr = self.load_fw(f"psp_{fmt_ver(am.MP0_HWIP)}_sos.bin", versioned_header='struct_psp_firmware_header')
+      fw_bin = sos_hdr.psp_fw_bin
 
-    for fw_i in range(sos_hdr.psp_fw_bin_count):
-      fw_bin_desc = am.struct_psp_fw_bin_desc.from_address(ctypes.addressof(fw_bin) + fw_i * ctypes.sizeof(am.struct_psp_fw_bin_desc))
-      ucode_start_offset = fw_bin_desc.offset_bytes + sos_hdr.header.ucode_array_offset_bytes
-      self.sos_fw[fw_bin_desc.fw_type] = blob[ucode_start_offset:ucode_start_offset+fw_bin_desc.size_bytes]
+      for fw_i in range(sos_hdr.psp_fw_bin_count):
+        fw_bin_desc = am.struct_psp_fw_bin_desc.from_address(ctypes.addressof(fw_bin) + fw_i * ctypes.sizeof(am.struct_psp_fw_bin_desc))
+        ucode_start_offset = fw_bin_desc.offset_bytes + sos_hdr.header.ucode_array_offset_bytes
+        self.sos_fw[fw_bin_desc.fw_type] = blob[ucode_start_offset:ucode_start_offset+fw_bin_desc.size_bytes]
 
     # Load other fw
     self.ucode_start: dict[str, int] = {}
     self.descs: list[tuple[list[int], memoryview]] = []
 
     # SMU firmware
-    if adev.ip_ver[am.MP1_HWIP] != (13,0,12):
+    print(adev.ip_ver[am.MP1_HWIP])
+    if adev.ip_ver[am.MP1_HWIP] not in {(13,0,12), (14,0,1)}:
       blob, hdr = self.load_fw(f"smu_{fmt_ver(am.MP1_HWIP)}.bin", versioned_header="struct_smc_firmware_header")
       if self.adev.ip_ver[am.GC_HWIP] >= (11,0,0):
         self.smu_psp_desc = self.desc(blob, hdr.v1_0.header.ucode_array_offset_bytes, hdr.v1_0.header.ucode_size_bytes, am.GFX_FW_TYPE_SMU)
@@ -241,7 +246,9 @@ class AMDev(PCIDevImplBase):
 
   def wreg(self, reg:int, val:int):
     if AM_DEBUG >= 4: print(f"am {self.devfmt}: Writing register {reg:#x} with value {val:#x}")
-    if reg > len(self.mmio): self.indirect_wreg(reg, val)
+    if reg > len(self.mmio):
+      assert False
+      self.indirect_wreg(reg, val)
     else: self.mmio[reg] = val
 
   def wreg_pair(self, reg_base:str, lo_suffix:str, hi_suffix:str, val:int, inst:int=0):
