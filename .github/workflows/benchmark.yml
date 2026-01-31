@@ -16,6 +16,21 @@ on:
   workflow_dispatch:
 
 jobs:
+  # the goal of this test is to replicate a normal person on a laptop running the test
+  testmacpytest:
+    name: Mac pytest
+    runs-on: [self-hosted, macOS]
+    timeout-minutes: 10
+    defaults:
+      run:
+        shell: bash -e -o pipefail {0}
+    if: github.repository_owner == 'tinygrad'
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+    - name: Run pytest -nauto
+      run: pytest -nauto
+
   testmacbenchmark:
     name: Mac Benchmark
     env:
