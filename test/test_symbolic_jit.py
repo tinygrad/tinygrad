@@ -2,6 +2,7 @@ import unittest
 
 from test.helpers import assert_jit_cache_len
 from tinygrad import Variable, Tensor, TinyJit
+from tinygrad.engine.jit import JitError
 import numpy as np
 
 class TestSymbolicJit(unittest.TestCase):
@@ -172,7 +173,7 @@ class TestSymbolicJit(unittest.TestCase):
     vi2 = Variable("i", 1, 10).bind(7)
     a = Tensor.rand(3, 7)[:, :vi2]
     bad = Tensor.rand(4, 7)[:, :vi2]
-    with self.assertRaises(AssertionError):
+    with self.assertRaises(JitError):
       add(a, bad)
 
   def test_shrink(self):
@@ -216,7 +217,7 @@ class TestSymbolicJit(unittest.TestCase):
   def test_ones_sum(self):
     def f(a): return a.sum().realize()
     jf = TinyJit(f)
-    t = Tensor.ones(10)
+    t = Tensor.ones(10).contiguous()
     for i in range(1, 5):
       vi = Variable("i", 1, 10).bind(i)
       symbolic = jf(t[:vi]).item()

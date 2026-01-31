@@ -3,9 +3,9 @@ An integrated environment for AMD GPU assembly and emulation
 Test with `PYTHONPATH="." pytest -n12 extra/assembly/amd/`
 `AMD_LLVM=1 PYTHONPATH="." pytest -n12 extra/assembly/amd/`
 
-* pdf.py -- extract assembly format + instruction psuedocode from AMD PDF
+* pdf.py -- extract assembly format + instruction pseudocode from AMD PDF
 * dsl.py -- helpers for the autogen instruction classes in `__init__.py`. should be standalone with init
-* pcode.py -- psuedocode execution environment. psuedocode should be transformed as little as possible.
+* pcode.py -- pseudocode execution environment. pseudocode should be transformed as little as possible.
 * asm.py -- an asm/disasm function to transform to and from AMD assembly syntax
 * emu.py -- an emulator for RDNA that runs in tinygrad with `AMD=1 MOCKGPU=1 PYTHON_REMU=1`
 

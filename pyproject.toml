@@ -1,6 +1,6 @@
 [project]
 name = "tinygrad"
-version = "0.11.0"
+version = "0.12.0"
 description = "You like pytorch? You like micrograd? You love tinygrad! <3"
 authors = [{ name = "George Hotz" }]
 
@@ -52,7 +52,7 @@ linting = [
   "mypy==1.19.1",
   "typing-extensions",
   "pre-commit",
-  "ruff",
+  "ruff==0.14.10",
   "numpy",
   "typeguard",
 ]
@@ -66,10 +66,10 @@ testing_minimal = [
   "pytest-xdist",
   "pytest-timeout",
   "pytest-split",
-  "hypothesis",
+  "hypothesis>=6.148.9",
   "z3-solver",
 ]
-testing_unit = ["tinygrad[testing_minimal]", "tqdm", "safetensors", "tabulate", "openai"]
+testing_unit = ["tinygrad[testing_minimal]", "tqdm", "safetensors", "tabulate", "openai", "ggml-python"]
 testing = [
   "tinygrad[testing_unit]",
   "pillow",
@@ -87,7 +87,6 @@ testing = [
   "networkx",
   "nibabel",
   "bottle",
-  "ggml-python",
   "capstone",
   "pycocotools",
   "boto3",
@@ -245,7 +244,7 @@ select = [
   "F541",
   "F841",
 ]
-"tinygrad/runtime/autogen/**/*.py" = ["E501", "F401", "E722", "E731", "F821", "A006"]
+"tinygrad/runtime/autogen/**/*.py" = ["E501", "F401", "E722", "E731", "F821", "A006", "A002", "F811"]
 
 [tool.ruff.format]
 exclude = ["*"]

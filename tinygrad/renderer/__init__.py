@@ -3,7 +3,7 @@ from typing import Callable, cast, TYPE_CHECKING
 import functools
 from dataclasses import dataclass, field
 from tinygrad.helpers import to_function_name, dedup, prod, DEBUG
-from tinygrad.uop.ops import Ops, UOp, sym_infer, sint, Variable, ssimplify, GroupOp, PatternMatcher, print_uops
+from tinygrad.uop.ops import Ops, UOp, sym_infer, sint, Variable, ssimplify, GroupOp, PatternMatcher, print_uops, KernelInfo
 from tinygrad.dtype import AddrSpace, PtrDType
 from tinygrad.codegen.opt.tc import TensorCore
 from tinygrad.codegen.opt import Opt
@@ -38,6 +38,7 @@ class Estimates:
         elif u.op is Ops.IF:
           dont_count = dont_count.union(u.src[0].toposort())
     for u in uops:
+      if u.op is Ops.SINK and isinstance(u.arg, KernelInfo) and u.arg.estimates is not None: return u.arg.estimates
       if u.op in {Ops.LOAD, Ops.STORE}:
         buf = u
         while len(buf.src): buf = buf.src[0]
@@ -50,6 +51,7 @@ class Estimates:
         mults = mults.substitute({x:x.const_like(0) for x in mults.toposort() if x.op is Ops.SPECIAL}) if isinstance(mults, UOp) else mults
       elif u.op is Ops.END: mults = mult_stack.pop(-1)
       elif u.op is Ops.SPECIAL: mults *= cast(sint, u.src[0].ssimplify()) # NOTE: we don't push to the mult_stack here, you can't end these
+      elif u.op is Ops.DEFINE_VAR and u.arg[0] == 'core_id': mults *= u.arg[2] + 1
       elif u.op is Ops.LOAD and (not isinstance(u.src[0].dtype, PtrDType) or u.src[0].dtype.addrspace != AddrSpace.REG):
         lds += u.dtype.itemsize * mults
       elif u.op is Ops.STORE and (not isinstance(u.src[0].dtype, PtrDType) or u.src[0].dtype.addrspace != AddrSpace.REG):
@@ -66,6 +68,7 @@ class ProgramSpec:
   ast:UOp  # save the base ast (this is method cache key)
   uops:list[UOp]|None=None
   lib:bytes|None=None
+  aux:list=field(default_factory=list)
 
   # filled in from uops (via from_uop)
   global_size:list[int]=field(default_factory=lambda: [1,1,1])
@@ -81,6 +84,9 @@ class ProgramSpec:
 
   @functools.cached_property
   def function_name(self) -> str: return to_function_name(self.name)
+
+  @functools.cached_property
+  def runtimevars(self) -> dict[str, int]: return {v.arg[0]: i for i, v in enumerate(self.vars) if v.arg[0] == 'core_id'}
 
   @property
   def applied_opts(self) -> tuple[Opt, ...]|None:
@@ -122,8 +128,9 @@ class ProgramSpec:
         special_size = local_size if u.arg[0] == 'l' else global_size
         # TODO: this cast is wrong, u.src[0].ssimplify() can be sint
         if special_size is not None: special_size[int(u.arg[-1])] = cast(int, u.src[0].ssimplify())
+      if u.op is Ops.DEFINE_VAR and u.arg[0] == 'core_id': global_size[0] = u.arg[2] + 1
 
-    return ProgramSpec(sink.arg.name, source.arg, device.arg, sink, uops, lib, global_size, local_size,
+    return ProgramSpec(sink.arg.name, source.arg, device.arg, sink, uops, lib, list(prg.arg) if prg.arg else [], global_size, local_size,
                        sorted(_vars, key=lambda v: v.arg), sorted(dedup(_globals)), sorted(dedup(outs)), sorted(dedup(ins)))
 
 class Renderer:
@@ -134,6 +141,7 @@ class Renderer:
   has_local: bool = True
   has_threads: bool = False
   has_shared: bool = True
+  has_aux: bool = False # additional program info, eg. image shapes
   # NOTE: these two should be in (x,y,z) order to match the max_sizes argument in get_grouped_dims
   global_max: tuple[int, ...]|None = (0x8FFFFFFF,) * (3) # TODO: Ops.SPECIAL int32 indexes right now
   local_max: tuple[int, ...]|None = (0x8FFFFFFF,) * (3) # TODO: Ops.SPECIAL int32 indexes right now
@@ -146,3 +154,4 @@ class Renderer:
 
   def __reduce__(self): return self.__class__, ()
   def render(self, uops:list[UOp]) -> str: raise NotImplementedError("needs a renderer")
+  def aux(self, uops:list[UOp]) -> dict: raise NotImplementedError("needs aux")

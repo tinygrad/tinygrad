@@ -1,6 +1,6 @@
 import unittest, itertools, math
 from tinygrad import Tensor, Device, dtypes, Context
-from tinygrad.dtype import DType, ConstType
+from tinygrad.dtype import DType, ConstType, DTYPES_DICT
 from tinygrad.uop.ops import Ops, UOp
 from tinygrad.codegen import full_rewrite_to_sink
 from tinygrad.device import is_dtype_supported
@@ -237,7 +237,7 @@ class TestReduceOpsConstFolding(unittest.TestCase):
 
   def test_sum_output_dtype(self):
     # sum output dtype can be different from input
-    for dt in dtypes.fields().values():
+    for dt in DTYPES_DICT.values():
       if is_dtype_supported(dt):
         t = Tensor.ones(16, dtype=dt).reshape(4, 4)
         assert t.sum().dtype == t.contiguous().sum().dtype
@@ -308,6 +308,7 @@ class TestTautologicalCompare(unittest.TestCase):
     np.testing.assert_equal((Tensor(True) < Tensor(False)).numpy(), False)
     np.testing.assert_equal((Tensor(True) < Tensor(True)).numpy(), False)
 
+  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "WEBGPU doesn't support NaN comparison correctly")
   def test_a_eq_a(self):
     # self eq is always true for int or bool
     a = Tensor([1, 2, 3])

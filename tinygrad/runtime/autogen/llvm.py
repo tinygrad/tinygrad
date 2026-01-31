@@ -1,315 +1,130 @@
-# mypy: ignore-errors
+# mypy: disable-error-code="empty-body"
+from __future__ import annotations
 import ctypes
-from tinygrad.runtime.support.c import DLL, Struct, CEnum, _IO, _IOW, _IOR, _IOWR
+from typing import Annotated, Literal, TypeAlias
+from tinygrad.runtime.support.c import _IO, _IOW, _IOR, _IOWR
+from tinygrad.runtime.support import c
 from tinygrad.helpers import WIN, OSX
-dll = DLL('llvm', 'C:\\Program Files\\LLVM\\bin\\LLVM-C.dll' if WIN else '/opt/homebrew/opt/llvm@20/lib/libLLVM.dylib' if OSX else ['LLVM', 'LLVM-21', 'LLVM-20', 'LLVM-19', 'LLVM-18', 'LLVM-17', 'LLVM-16', 'LLVM-15', 'LLVM-14'])
-intmax_t = ctypes.c_int64
-try: (imaxabs:=dll.imaxabs).restype, imaxabs.argtypes = intmax_t, [intmax_t]
-except AttributeError: pass
-
-class imaxdiv_t(Struct): pass
-imaxdiv_t._fields_ = [
-  ('quot', ctypes.c_int64),
-  ('rem', ctypes.c_int64),
-]
-try: (imaxdiv:=dll.imaxdiv).restype, imaxdiv.argtypes = imaxdiv_t, [intmax_t, intmax_t]
-except AttributeError: pass
-
-try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
-except AttributeError: pass
-
-uintmax_t = ctypes.c_uint64
-try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
-except AttributeError: pass
-
-__gwchar_t = ctypes.c_int32
-try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
-except AttributeError: pass
-
-class fd_set(Struct): pass
-__fd_mask = ctypes.c_int64
-fd_set._fields_ = [
-  ('fds_bits', (ctypes.c_int64 * 16)),
-]
-class struct_timeval(Struct): pass
-__time_t = ctypes.c_int64
-__suseconds_t = ctypes.c_int64
-struct_timeval._fields_ = [
-  ('tv_sec', ctypes.c_int64),
-  ('tv_usec', ctypes.c_int64),
-]
-try: (select:=dll.select).restype, select.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timeval)]
-except AttributeError: pass
-
-class struct_timespec(Struct): pass
-__syscall_slong_t = ctypes.c_int64
-struct_timespec._fields_ = [
-  ('tv_sec', ctypes.c_int64),
-  ('tv_nsec', ctypes.c_int64),
-]
-class __sigset_t(Struct): pass
-__sigset_t._fields_ = [
-  ('__val', (ctypes.c_uint64 * 16)),
-]
-try: (pselect:=dll.pselect).restype, pselect.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timespec), ctypes.POINTER(__sigset_t)]
-except AttributeError: pass
-
-LLVMVerifierFailureAction = CEnum(ctypes.c_uint32)
+dll = c.DLL('llvm', 'C:\\Program Files\\LLVM\\bin\\LLVM-C.dll' if WIN else '/opt/homebrew/opt/llvm@20/lib/libLLVM.dylib' if OSX else ['LLVM', 'LLVM-21', 'LLVM-20', 'LLVM-19', 'LLVM-18', 'LLVM-17', 'LLVM-16', 'LLVM-15', 'LLVM-14'])
+intmax_t: TypeAlias = Annotated[int, ctypes.c_int64]
+@dll.bind
+def imaxabs(__n:intmax_t) -> intmax_t: ...
+@c.record
+class imaxdiv_t(c.Struct):
+  SIZE = 16
+  quot: Annotated[Annotated[int, ctypes.c_int64], 0]
+  rem: Annotated[Annotated[int, ctypes.c_int64], 8]
+@dll.bind
+def imaxdiv(__numer:intmax_t, __denom:intmax_t) -> imaxdiv_t: ...
+@dll.bind
+def strtoimax(__nptr:c.POINTER[Annotated[bytes, ctypes.c_char]], __endptr:c.POINTER[c.POINTER[Annotated[bytes, ctypes.c_char]]], __base:Annotated[int, ctypes.c_int32]) -> intmax_t: ...
+uintmax_t: TypeAlias = Annotated[int, ctypes.c_uint64]
+@dll.bind
+def strtoumax(__nptr:c.POINTER[Annotated[bytes, ctypes.c_char]], __endptr:c.POINTER[c.POINTER[Annotated[bytes, ctypes.c_char]]], __base:Annotated[int, ctypes.c_int32]) -> uintmax_t: ...
+__gwchar_t: TypeAlias = Annotated[int, ctypes.c_int32]
+@dll.bind
+def wcstoimax(__nptr:c.POINTER[Annotated[int, ctypes.c_int32]], __endptr:c.POINTER[c.POINTER[Annotated[int, ctypes.c_int32]]], __base:Annotated[int, ctypes.c_int32]) -> intmax_t: ...
+@dll.bind
+def wcstoumax(__nptr:c.POINTER[Annotated[int, ctypes.c_int32]], __endptr:c.POINTER[c.POINTER[Annotated[int, ctypes.c_int32]]], __base:Annotated[int, ctypes.c_int32]) -> uintmax_t: ...
+@c.record
+class fd_set(c.Struct):
+  SIZE = 128
+  fds_bits: Annotated[c.Array[Annotated[int, ctypes.c_int64], Literal[16]], 0]
+__fd_mask: TypeAlias = Annotated[int, ctypes.c_int64]
+@c.record
+class struct_timeval(c.Struct):
+  SIZE = 16
+  tv_sec: Annotated[Annotated[int, ctypes.c_int64], 0]
+  tv_usec: Annotated[Annotated[int, ctypes.c_int64], 8]
+__time_t: TypeAlias = Annotated[int, ctypes.c_int64]
+__suseconds_t: TypeAlias = Annotated[int, ctypes.c_int64]
+@dll.bind
+def select(__nfds:Annotated[int, ctypes.c_int32], __readfds:c.POINTER[fd_set], __writefds:c.POINTER[fd_set], __exceptfds:c.POINTER[fd_set], __timeout:c.POINTER[struct_timeval]) -> Annotated[int, ctypes.c_int32]: ...
+@c.record
+class struct_timespec(c.Struct):
+  SIZE = 16
+  tv_sec: Annotated[Annotated[int, ctypes.c_int64], 0]
+  tv_nsec: Annotated[Annotated[int, ctypes.c_int64], 8]
+__syscall_slong_t: TypeAlias = Annotated[int, ctypes.c_int64]
+@c.record
+class __sigset_t(c.Struct):
+  SIZE = 128
+  __val: Annotated[c.Array[Annotated[int, ctypes.c_uint64], Literal[16]], 0]
+@dll.bind
+def pselect(__nfds:Annotated[int, ctypes.c_int32], __readfds:c.POINTER[fd_set], __writefds:c.POINTER[fd_set], __exceptfds:c.POINTER[fd_set], __timeout:c.POINTER[struct_timespec], __sigmask:c.POINTER[__sigset_t]) -> Annotated[int, ctypes.c_int32]: ...
+class LLVMVerifierFailureAction(Annotated[int, ctypes.c_uint32], c.Enum): pass
 LLVMAbortProcessAction = LLVMVerifierFailureAction.define('LLVMAbortProcessAction', 0)
 LLVMPrintMessageAction = LLVMVerifierFailureAction.define('LLVMPrintMessageAction', 1)
 LLVMReturnStatusAction = LLVMVerifierFailureAction.define('LLVMReturnStatusAction', 2)
 
-LLVMBool = ctypes.c_int32
-class struct_LLVMOpaqueModule(Struct): pass
-LLVMModuleRef = ctypes.POINTER(struct_LLVMOpaqueModule)
-try: (LLVMVerifyModule:=dll.LLVMVerifyModule).restype, LLVMVerifyModule.argtypes = LLVMBool, [LLVMModuleRef, LLVMVerifierFailureAction, ctypes.POINTER(ctypes.POINTER(ctypes.c_char))]
-except AttributeError: pass
-
-class struct_LLVMOpaqueValue(Struct): pass
-LLVMValueRef = ctypes.POINTER(struct_LLVMOpaqueValue)
-try: (LLVMVerifyFunction:=dll.LLVMVerifyFunction).restype, LLVMVerifyFunction.argtypes = LLVMBool, [LLVMValueRef, LLVMVerifierFailureAction]
-except AttributeError: pass
-
-try: (LLVMViewFunctionCFG:=dll.LLVMViewFunctionCFG).restype, LLVMViewFunctionCFG.argtypes = None, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMViewFunctionCFGOnly:=dll.LLVMViewFunctionCFGOnly).restype, LLVMViewFunctionCFGOnly.argtypes = None, [LLVMValueRef]
-except AttributeError: pass
-
-try: (imaxabs:=dll.imaxabs).restype, imaxabs.argtypes = intmax_t, [intmax_t]
-except AttributeError: pass
-
-try: (imaxdiv:=dll.imaxdiv).restype, imaxdiv.argtypes = imaxdiv_t, [intmax_t, intmax_t]
-except AttributeError: pass
-
-try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (select:=dll.select).restype, select.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timeval)]
-except AttributeError: pass
-
-try: (pselect:=dll.pselect).restype, pselect.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timespec), ctypes.POINTER(__sigset_t)]
-except AttributeError: pass
-
-class struct_LLVMOpaqueMemoryBuffer(Struct): pass
-LLVMMemoryBufferRef = ctypes.POINTER(struct_LLVMOpaqueMemoryBuffer)
-try: (LLVMParseBitcode:=dll.LLVMParseBitcode).restype, LLVMParseBitcode.argtypes = LLVMBool, [LLVMMemoryBufferRef, ctypes.POINTER(LLVMModuleRef), ctypes.POINTER(ctypes.POINTER(ctypes.c_char))]
-except AttributeError: pass
-
-try: (LLVMParseBitcode2:=dll.LLVMParseBitcode2).restype, LLVMParseBitcode2.argtypes = LLVMBool, [LLVMMemoryBufferRef, ctypes.POINTER(LLVMModuleRef)]
-except AttributeError: pass
-
-class struct_LLVMOpaqueContext(Struct): pass
-LLVMContextRef = ctypes.POINTER(struct_LLVMOpaqueContext)
-try: (LLVMParseBitcodeInContext:=dll.LLVMParseBitcodeInContext).restype, LLVMParseBitcodeInContext.argtypes = LLVMBool, [LLVMContextRef, LLVMMemoryBufferRef, ctypes.POINTER(LLVMModuleRef), ctypes.POINTER(ctypes.POINTER(ctypes.c_char))]
-except AttributeError: pass
-
-try: (LLVMParseBitcodeInContext2:=dll.LLVMParseBitcodeInContext2).restype, LLVMParseBitcodeInContext2.argtypes = LLVMBool, [LLVMContextRef, LLVMMemoryBufferRef, ctypes.POINTER(LLVMModuleRef)]
-except AttributeError: pass
-
-try: (LLVMGetBitcodeModuleInContext:=dll.LLVMGetBitcodeModuleInContext).restype, LLVMGetBitcodeModuleInContext.argtypes = LLVMBool, [LLVMContextRef, LLVMMemoryBufferRef, ctypes.POINTER(LLVMModuleRef), ctypes.POINTER(ctypes.POINTER(ctypes.c_char))]
-except AttributeError: pass
-
-try: (LLVMGetBitcodeModuleInContext2:=dll.LLVMGetBitcodeModuleInContext2).restype, LLVMGetBitcodeModuleInContext2.argtypes = LLVMBool, [LLVMContextRef, LLVMMemoryBufferRef, ctypes.POINTER(LLVMModuleRef)]
-except AttributeError: pass
-
-try: (LLVMGetBitcodeModule:=dll.LLVMGetBitcodeModule).restype, LLVMGetBitcodeModule.argtypes = LLVMBool, [LLVMMemoryBufferRef, ctypes.POINTER(LLVMModuleRef), ctypes.POINTER(ctypes.POINTER(ctypes.c_char))]
-except AttributeError: pass
-
-try: (LLVMGetBitcodeModule2:=dll.LLVMGetBitcodeModule2).restype, LLVMGetBitcodeModule2.argtypes = LLVMBool, [LLVMMemoryBufferRef, ctypes.POINTER(LLVMModuleRef)]
-except AttributeError: pass
-
-try: (imaxabs:=dll.imaxabs).restype, imaxabs.argtypes = intmax_t, [intmax_t]
-except AttributeError: pass
-
-try: (imaxdiv:=dll.imaxdiv).restype, imaxdiv.argtypes = imaxdiv_t, [intmax_t, intmax_t]
-except AttributeError: pass
-
-try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (select:=dll.select).restype, select.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timeval)]
-except AttributeError: pass
-
-try: (pselect:=dll.pselect).restype, pselect.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timespec), ctypes.POINTER(__sigset_t)]
-except AttributeError: pass
-
-try: (LLVMWriteBitcodeToFile:=dll.LLVMWriteBitcodeToFile).restype, LLVMWriteBitcodeToFile.argtypes = ctypes.c_int32, [LLVMModuleRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMWriteBitcodeToFD:=dll.LLVMWriteBitcodeToFD).restype, LLVMWriteBitcodeToFD.argtypes = ctypes.c_int32, [LLVMModuleRef, ctypes.c_int32, ctypes.c_int32, ctypes.c_int32]
-except AttributeError: pass
-
-try: (LLVMWriteBitcodeToFileHandle:=dll.LLVMWriteBitcodeToFileHandle).restype, LLVMWriteBitcodeToFileHandle.argtypes = ctypes.c_int32, [LLVMModuleRef, ctypes.c_int32]
-except AttributeError: pass
-
-try: (LLVMWriteBitcodeToMemoryBuffer:=dll.LLVMWriteBitcodeToMemoryBuffer).restype, LLVMWriteBitcodeToMemoryBuffer.argtypes = LLVMMemoryBufferRef, [LLVMModuleRef]
-except AttributeError: pass
-
-try: (imaxabs:=dll.imaxabs).restype, imaxabs.argtypes = intmax_t, [intmax_t]
-except AttributeError: pass
-
-try: (imaxdiv:=dll.imaxdiv).restype, imaxdiv.argtypes = imaxdiv_t, [intmax_t, intmax_t]
-except AttributeError: pass
-
-try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (select:=dll.select).restype, select.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timeval)]
-except AttributeError: pass
-
-try: (pselect:=dll.pselect).restype, pselect.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timespec), ctypes.POINTER(__sigset_t)]
-except AttributeError: pass
-
-LLVMComdatSelectionKind = CEnum(ctypes.c_uint32)
+class struct_LLVMOpaqueModule(ctypes.Structure): pass
+LLVMModuleRef: TypeAlias = c.POINTER[struct_LLVMOpaqueModule]
+LLVMBool: TypeAlias = Annotated[int, ctypes.c_int32]
+@dll.bind
+def LLVMVerifyModule(M:LLVMModuleRef, Action:LLVMVerifierFailureAction, OutMessage:c.POINTER[c.POINTER[Annotated[bytes, ctypes.c_char]]]) -> LLVMBool: ...
+class struct_LLVMOpaqueValue(ctypes.Structure): pass
+LLVMValueRef: TypeAlias = c.POINTER[struct_LLVMOpaqueValue]
+@dll.bind
+def LLVMVerifyFunction(Fn:LLVMValueRef, Action:LLVMVerifierFailureAction) -> LLVMBool: ...
+@dll.bind
+def LLVMViewFunctionCFG(Fn:LLVMValueRef) -> None: ...
+@dll.bind
+def LLVMViewFunctionCFGOnly(Fn:LLVMValueRef) -> None: ...
+class struct_LLVMOpaqueMemoryBuffer(ctypes.Structure): pass
+LLVMMemoryBufferRef: TypeAlias = c.POINTER[struct_LLVMOpaqueMemoryBuffer]
+@dll.bind
+def LLVMParseBitcode(MemBuf:LLVMMemoryBufferRef, OutModule:c.POINTER[LLVMModuleRef], OutMessage:c.POINTER[c.POINTER[Annotated[bytes, ctypes.c_char]]]) -> LLVMBool: ...
+@dll.bind
+def LLVMParseBitcode2(MemBuf:LLVMMemoryBufferRef, OutModule:c.POINTER[LLVMModuleRef]) -> LLVMBool: ...
+class struct_LLVMOpaqueContext(ctypes.Structure): pass
+LLVMContextRef: TypeAlias = c.POINTER[struct_LLVMOpaqueContext]
+@dll.bind
+def LLVMParseBitcodeInContext(ContextRef:LLVMContextRef, MemBuf:LLVMMemoryBufferRef, OutModule:c.POINTER[LLVMModuleRef], OutMessage:c.POINTER[c.POINTER[Annotated[bytes, ctypes.c_char]]]) -> LLVMBool: ...
+@dll.bind
+def LLVMParseBitcodeInContext2(ContextRef:LLVMContextRef, MemBuf:LLVMMemoryBufferRef, OutModule:c.POINTER[LLVMModuleRef]) -> LLVMBool: ...
+@dll.bind
+def LLVMGetBitcodeModuleInContext(ContextRef:LLVMContextRef, MemBuf:LLVMMemoryBufferRef, OutM:c.POINTER[LLVMModuleRef], OutMessage:c.POINTER[c.POINTER[Annotated[bytes, ctypes.c_char]]]) -> LLVMBool: ...
+@dll.bind
+def LLVMGetBitcodeModuleInContext2(ContextRef:LLVMContextRef, MemBuf:LLVMMemoryBufferRef, OutM:c.POINTER[LLVMModuleRef]) -> LLVMBool: ...
+@dll.bind
+def LLVMGetBitcodeModule(MemBuf:LLVMMemoryBufferRef, OutM:c.POINTER[LLVMModuleRef], OutMessage:c.POINTER[c.POINTER[Annotated[bytes, ctypes.c_char]]]) -> LLVMBool: ...
+@dll.bind
+def LLVMGetBitcodeModule2(MemBuf:LLVMMemoryBufferRef, OutM:c.POINTER[LLVMModuleRef]) -> LLVMBool: ...
+@dll.bind
+def LLVMWriteBitcodeToFile(M:LLVMModuleRef, Path:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> Annotated[int, ctypes.c_int32]: ...
+@dll.bind
+def LLVMWriteBitcodeToFD(M:LLVMModuleRef, FD:Annotated[int, ctypes.c_int32], ShouldClose:Annotated[int, ctypes.c_int32], Unbuffered:Annotated[int, ctypes.c_int32]) -> Annotated[int, ctypes.c_int32]: ...
+@dll.bind
+def LLVMWriteBitcodeToFileHandle(M:LLVMModuleRef, Handle:Annotated[int, ctypes.c_int32]) -> Annotated[int, ctypes.c_int32]: ...
+@dll.bind
+def LLVMWriteBitcodeToMemoryBuffer(M:LLVMModuleRef) -> LLVMMemoryBufferRef: ...
+class LLVMComdatSelectionKind(Annotated[int, ctypes.c_uint32], c.Enum): pass
 LLVMAnyComdatSelectionKind = LLVMComdatSelectionKind.define('LLVMAnyComdatSelectionKind', 0)
 LLVMExactMatchComdatSelectionKind = LLVMComdatSelectionKind.define('LLVMExactMatchComdatSelectionKind', 1)
 LLVMLargestComdatSelectionKind = LLVMComdatSelectionKind.define('LLVMLargestComdatSelectionKind', 2)
 LLVMNoDeduplicateComdatSelectionKind = LLVMComdatSelectionKind.define('LLVMNoDeduplicateComdatSelectionKind', 3)
 LLVMSameSizeComdatSelectionKind = LLVMComdatSelectionKind.define('LLVMSameSizeComdatSelectionKind', 4)
 
-class struct_LLVMComdat(Struct): pass
-LLVMComdatRef = ctypes.POINTER(struct_LLVMComdat)
-try: (LLVMGetOrInsertComdat:=dll.LLVMGetOrInsertComdat).restype, LLVMGetOrInsertComdat.argtypes = LLVMComdatRef, [LLVMModuleRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMGetComdat:=dll.LLVMGetComdat).restype, LLVMGetComdat.argtypes = LLVMComdatRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMSetComdat:=dll.LLVMSetComdat).restype, LLVMSetComdat.argtypes = None, [LLVMValueRef, LLVMComdatRef]
-except AttributeError: pass
-
-try: (LLVMGetComdatSelectionKind:=dll.LLVMGetComdatSelectionKind).restype, LLVMGetComdatSelectionKind.argtypes = LLVMComdatSelectionKind, [LLVMComdatRef]
-except AttributeError: pass
-
-try: (LLVMSetComdatSelectionKind:=dll.LLVMSetComdatSelectionKind).restype, LLVMSetComdatSelectionKind.argtypes = None, [LLVMComdatRef, LLVMComdatSelectionKind]
-except AttributeError: pass
-
-LLVMFatalErrorHandler = ctypes.CFUNCTYPE(None, ctypes.POINTER(ctypes.c_char))
-try: (LLVMInstallFatalErrorHandler:=dll.LLVMInstallFatalErrorHandler).restype, LLVMInstallFatalErrorHandler.argtypes = None, [LLVMFatalErrorHandler]
-except AttributeError: pass
-
-try: (LLVMResetFatalErrorHandler:=dll.LLVMResetFatalErrorHandler).restype, LLVMResetFatalErrorHandler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMEnablePrettyStackTrace:=dll.LLVMEnablePrettyStackTrace).restype, LLVMEnablePrettyStackTrace.argtypes = None, []
-except AttributeError: pass
-
-try: (imaxabs:=dll.imaxabs).restype, imaxabs.argtypes = intmax_t, [intmax_t]
-except AttributeError: pass
-
-try: (imaxdiv:=dll.imaxdiv).restype, imaxdiv.argtypes = imaxdiv_t, [intmax_t, intmax_t]
-except AttributeError: pass
-
-try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (select:=dll.select).restype, select.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timeval)]
-except AttributeError: pass
-
-try: (pselect:=dll.pselect).restype, pselect.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timespec), ctypes.POINTER(__sigset_t)]
-except AttributeError: pass
-
-LLVMOpcode = CEnum(ctypes.c_uint32)
+class struct_LLVMComdat(ctypes.Structure): pass
+LLVMComdatRef: TypeAlias = c.POINTER[struct_LLVMComdat]
+@dll.bind
+def LLVMGetOrInsertComdat(M:LLVMModuleRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMComdatRef: ...
+@dll.bind
+def LLVMGetComdat(V:LLVMValueRef) -> LLVMComdatRef: ...
+@dll.bind
+def LLVMSetComdat(V:LLVMValueRef, C:LLVMComdatRef) -> None: ...
+@dll.bind
+def LLVMGetComdatSelectionKind(C:LLVMComdatRef) -> LLVMComdatSelectionKind: ...
+@dll.bind
+def LLVMSetComdatSelectionKind(C:LLVMComdatRef, Kind:LLVMComdatSelectionKind) -> None: ...
+LLVMFatalErrorHandler: TypeAlias = c.CFUNCTYPE[None, [c.POINTER[Annotated[bytes, ctypes.c_char]]]]
+@dll.bind
+def LLVMInstallFatalErrorHandler(Handler:LLVMFatalErrorHandler) -> None: ...
+@dll.bind
+def LLVMResetFatalErrorHandler() -> None: ...
+@dll.bind
+def LLVMEnablePrettyStackTrace() -> None: ...
+class LLVMOpcode(Annotated[int, ctypes.c_uint32], c.Enum): pass
 LLVMRet = LLVMOpcode.define('LLVMRet', 1)
 LLVMBr = LLVMOpcode.define('LLVMBr', 2)
 LLVMSwitch = LLVMOpcode.define('LLVMSwitch', 3)
@@ -378,7 +193,7 @@ LLVMCatchPad = LLVMOpcode.define('LLVMCatchPad', 63)
 LLVMCleanupPad = LLVMOpcode.define('LLVMCleanupPad', 64)
 LLVMCatchSwitch = LLVMOpcode.define('LLVMCatchSwitch', 65)
 
-LLVMTypeKind = CEnum(ctypes.c_uint32)
+class LLVMTypeKind(Annotated[int, ctypes.c_uint32], c.Enum): pass
 LLVMVoidTypeKind = LLVMTypeKind.define('LLVMVoidTypeKind', 0)
 LLVMHalfTypeKind = LLVMTypeKind.define('LLVMHalfTypeKind', 1)
 LLVMFloatTypeKind = LLVMTypeKind.define('LLVMFloatTypeKind', 2)
@@ -400,7 +215,7 @@ LLVMBFloatTypeKind = LLVMTypeKind.define('LLVMBFloatTypeKind', 18)
 LLVMX86_AMXTypeKind = LLVMTypeKind.define('LLVMX86_AMXTypeKind', 19)
 LLVMTargetExtTypeKind = LLVMTypeKind.define('LLVMTargetExtTypeKind', 20)
 
-LLVMLinkage = CEnum(ctypes.c_uint32)
+class LLVMLinkage(Annotated[int, ctypes.c_uint32], c.Enum): pass
 LLVMExternalLinkage = LLVMLinkage.define('LLVMExternalLinkage', 0)
 LLVMAvailableExternallyLinkage = LLVMLinkage.define('LLVMAvailableExternallyLinkage', 1)
 LLVMLinkOnceAnyLinkage = LLVMLinkage.define('LLVMLinkOnceAnyLinkage', 2)
@@ -419,22 +234,22 @@ LLVMCommonLinkage = LLVMLinkage.define('LLVMCommonLinkage', 14)
 LLVMLinkerPrivateLinkage = LLVMLinkage.define('LLVMLinkerPrivateLinkage', 15)
 LLVMLinkerPrivateWeakLinkage = LLVMLinkage.define('LLVMLinkerPrivateWeakLinkage', 16)
 
-LLVMVisibility = CEnum(ctypes.c_uint32)
+class LLVMVisibility(Annotated[int, ctypes.c_uint32], c.Enum): pass
 LLVMDefaultVisibility = LLVMVisibility.define('LLVMDefaultVisibility', 0)
 LLVMHiddenVisibility = LLVMVisibility.define('LLVMHiddenVisibility', 1)
 LLVMProtectedVisibility = LLVMVisibility.define('LLVMProtectedVisibility', 2)
 
-LLVMUnnamedAddr = CEnum(ctypes.c_uint32)
+class LLVMUnnamedAddr(Annotated[int, ctypes.c_uint32], c.Enum): pass
 LLVMNoUnnamedAddr = LLVMUnnamedAddr.define('LLVMNoUnnamedAddr', 0)
 LLVMLocalUnnamedAddr = LLVMUnnamedAddr.define('LLVMLocalUnnamedAddr', 1)
 LLVMGlobalUnnamedAddr = LLVMUnnamedAddr.define('LLVMGlobalUnnamedAddr', 2)
 
-LLVMDLLStorageClass = CEnum(ctypes.c_uint32)
+class LLVMDLLStorageClass(Annotated[int, ctypes.c_uint32], c.Enum): pass
 LLVMDefaultStorageClass = LLVMDLLStorageClass.define('LLVMDefaultStorageClass', 0)
 LLVMDLLImportStorageClass = LLVMDLLStorageClass.define('LLVMDLLImportStorageClass', 1)
 LLVMDLLExportStorageClass = LLVMDLLStorageClass.define('LLVMDLLExportStorageClass', 2)
 
-LLVMCallConv = CEnum(ctypes.c_uint32)
+class LLVMCallConv(Annotated[int, ctypes.c_uint32], c.Enum): pass
 LLVMCCallConv = LLVMCallConv.define('LLVMCCallConv', 0)
 LLVMFastCallConv = LLVMCallConv.define('LLVMFastCallConv', 8)
 LLVMColdCallConv = LLVMCallConv.define('LLVMColdCallConv', 9)
@@ -477,7 +292,7 @@ LLVMMSP430BUILTINCallConv = LLVMCallConv.define('LLVMMSP430BUILTINCallConv', 94)
 LLVMAMDGPULSCallConv = LLVMCallConv.define('LLVMAMDGPULSCallConv', 95)
 LLVMAMDGPUESCallConv = LLVMCallConv.define('LLVMAMDGPUESCallConv', 96)
 
-LLVMValueKind = CEnum(ctypes.c_uint32)
+class LLVMValueKind(Annotated[int, ctypes.c_uint32], c.Enum): pass
 LLVMArgumentValueKind = LLVMValueKind.define('LLVMArgumentValueKind', 0)
 LLVMBasicBlockValueKind = LLVMValueKind.define('LLVMBasicBlockValueKind', 1)
 LLVMMemoryUseValueKind = LLVMValueKind.define('LLVMMemoryUseValueKind', 2)
@@ -507,7 +322,7 @@ LLVMPoisonValueValueKind = LLVMValueKind.define('LLVMPoisonValueValueKind', 25)
 LLVMConstantTargetNoneValueKind = LLVMValueKind.define('LLVMConstantTargetNoneValueKind', 26)
 LLVMConstantPtrAuthValueKind = LLVMValueKind.define('LLVMConstantPtrAuthValueKind', 27)
 
-LLVMIntPredicate = CEnum(ctypes.c_uint32)
+class LLVMIntPredicate(Annotated[int, ctypes.c_uint32], c.Enum): pass
 LLVMIntEQ = LLVMIntPredicate.define('LLVMIntEQ', 32)
 LLVMIntNE = LLVMIntPredicate.define('LLVMIntNE', 33)
 LLVMIntUGT = LLVMIntPredicate.define('LLVMIntUGT', 34)
@@ -519,7 +334,7 @@ LLVMIntSGE = LLVMIntPredicate.define('LLVMIntSGE', 39)
 LLVMIntSLT = LLVMIntPredicate.define('LLVMIntSLT', 40)
 LLVMIntSLE = LLVMIntPredicate.define('LLVMIntSLE', 41)
 
-LLVMRealPredicate = CEnum(ctypes.c_uint32)
+class LLVMRealPredicate(Annotated[int, ctypes.c_uint32], c.Enum): pass
 LLVMRealPredicateFalse = LLVMRealPredicate.define('LLVMRealPredicateFalse', 0)
 LLVMRealOEQ = LLVMRealPredicate.define('LLVMRealOEQ', 1)
 LLVMRealOGT = LLVMRealPredicate.define('LLVMRealOGT', 2)
@@ -537,18 +352,18 @@ LLVMRealULE = LLVMRealPredicate.define('LLVMRealULE', 13)
 LLVMRealUNE = LLVMRealPredicate.define('LLVMRealUNE', 14)
 LLVMRealPredicateTrue = LLVMRealPredicate.define('LLVMRealPredicateTrue', 15)
 
-LLVMLandingPadClauseTy = CEnum(ctypes.c_uint32)
+class LLVMLandingPadClauseTy(Annotated[int, ctypes.c_uint32], c.Enum): pass
 LLVMLandingPadCatch = LLVMLandingPadClauseTy.define('LLVMLandingPadCatch', 0)
 LLVMLandingPadFilter = LLVMLandingPadClauseTy.define('LLVMLandingPadFilter', 1)
 
-LLVMThreadLocalMode = CEnum(ctypes.c_uint32)
+class LLVMThreadLocalMode(Annotated[int, ctypes.c_uint32], c.Enum): pass
 LLVMNotThreadLocal = LLVMThreadLocalMode.define('LLVMNotThreadLocal', 0)
 LLVMGeneralDynamicTLSModel = LLVMThreadLocalMode.define('LLVMGeneralDynamicTLSModel', 1)
 LLVMLocalDynamicTLSModel = LLVMThreadLocalMode.define('LLVMLocalDynamicTLSModel', 2)
 LLVMInitialExecTLSModel = LLVMThreadLocalMode.define('LLVMInitialExecTLSModel', 3)
 LLVMLocalExecTLSModel = LLVMThreadLocalMode.define('LLVMLocalExecTLSModel', 4)
 
-LLVMAtomicOrdering = CEnum(ctypes.c_uint32)
+class LLVMAtomicOrdering(Annotated[int, ctypes.c_uint32], c.Enum): pass
 LLVMAtomicOrderingNotAtomic = LLVMAtomicOrdering.define('LLVMAtomicOrderingNotAtomic', 0)
 LLVMAtomicOrderingUnordered = LLVMAtomicOrdering.define('LLVMAtomicOrderingUnordered', 1)
 LLVMAtomicOrderingMonotonic = LLVMAtomicOrdering.define('LLVMAtomicOrderingMonotonic', 2)
@@ -557,7 +372,7 @@ LLVMAtomicOrderingRelease = LLVMAtomicOrdering.define('LLVMAtomicOrderingRelease
 LLVMAtomicOrderingAcquireRelease = LLVMAtomicOrdering.define('LLVMAtomicOrderingAcquireRelease', 6)
 LLVMAtomicOrderingSequentiallyConsistent = LLVMAtomicOrdering.define('LLVMAtomicOrderingSequentiallyConsistent', 7)
 
-LLVMAtomicRMWBinOp = CEnum(ctypes.c_uint32)
+class LLVMAtomicRMWBinOp(Annotated[int, ctypes.c_uint32], c.Enum): pass
 LLVMAtomicRMWBinOpXchg = LLVMAtomicRMWBinOp.define('LLVMAtomicRMWBinOpXchg', 0)
 LLVMAtomicRMWBinOpAdd = LLVMAtomicRMWBinOp.define('LLVMAtomicRMWBinOpAdd', 1)
 LLVMAtomicRMWBinOpSub = LLVMAtomicRMWBinOp.define('LLVMAtomicRMWBinOpSub', 2)
@@ -578,17 +393,17 @@ LLVMAtomicRMWBinOpUDecWrap = LLVMAtomicRMWBinOp.define('LLVMAtomicRMWBinOpUDecWr
 LLVMAtomicRMWBinOpUSubCond = LLVMAtomicRMWBinOp.define('LLVMAtomicRMWBinOpUSubCond', 17)
 LLVMAtomicRMWBinOpUSubSat = LLVMAtomicRMWBinOp.define('LLVMAtomicRMWBinOpUSubSat', 18)
 
-LLVMDiagnosticSeverity = CEnum(ctypes.c_uint32)
+class LLVMDiagnosticSeverity(Annotated[int, ctypes.c_uint32], c.Enum): pass
 LLVMDSError = LLVMDiagnosticSeverity.define('LLVMDSError', 0)
 LLVMDSWarning = LLVMDiagnosticSeverity.define('LLVMDSWarning', 1)
 LLVMDSRemark = LLVMDiagnosticSeverity.define('LLVMDSRemark', 2)
 LLVMDSNote = LLVMDiagnosticSeverity.define('LLVMDSNote', 3)
 
-LLVMInlineAsmDialect = CEnum(ctypes.c_uint32)
+class LLVMInlineAsmDialect(Annotated[int, ctypes.c_uint32], c.Enum): pass
 LLVMInlineAsmDialectATT = LLVMInlineAsmDialect.define('LLVMInlineAsmDialectATT', 0)
 LLVMInlineAsmDialectIntel = LLVMInlineAsmDialect.define('LLVMInlineAsmDialectIntel', 1)
 
-LLVMModuleFlagBehavior = CEnum(ctypes.c_uint32)
+class LLVMModuleFlagBehavior(Annotated[int, ctypes.c_uint32], c.Enum): pass
 LLVMModuleFlagBehaviorError = LLVMModuleFlagBehavior.define('LLVMModuleFlagBehaviorError', 0)
 LLVMModuleFlagBehaviorWarning = LLVMModuleFlagBehavior.define('LLVMModuleFlagBehaviorWarning', 1)
 LLVMModuleFlagBehaviorRequire = LLVMModuleFlagBehavior.define('LLVMModuleFlagBehaviorRequire', 2)
@@ -596,18 +411,18 @@ LLVMModuleFlagBehaviorOverride = LLVMModuleFlagBehavior.define('LLVMModuleFlagBe
 LLVMModuleFlagBehaviorAppend = LLVMModuleFlagBehavior.define('LLVMModuleFlagBehaviorAppend', 4)
 LLVMModuleFlagBehaviorAppendUnique = LLVMModuleFlagBehavior.define('LLVMModuleFlagBehaviorAppendUnique', 5)
 
-_anonenum0 = CEnum(ctypes.c_int32)
+class _anonenum0(Annotated[int, ctypes.c_int32], c.Enum): pass
 LLVMAttributeReturnIndex = _anonenum0.define('LLVMAttributeReturnIndex', 0)
 LLVMAttributeFunctionIndex = _anonenum0.define('LLVMAttributeFunctionIndex', -1)
 
-LLVMAttributeIndex = ctypes.c_uint32
-LLVMTailCallKind = CEnum(ctypes.c_uint32)
+LLVMAttributeIndex: TypeAlias = Annotated[int, ctypes.c_uint32]
+class LLVMTailCallKind(Annotated[int, ctypes.c_uint32], c.Enum): pass
 LLVMTailCallKindNone = LLVMTailCallKind.define('LLVMTailCallKindNone', 0)
 LLVMTailCallKindTail = LLVMTailCallKind.define('LLVMTailCallKindTail', 1)
 LLVMTailCallKindMustTail = LLVMTailCallKind.define('LLVMTailCallKindMustTail', 2)
 LLVMTailCallKindNoTail = LLVMTailCallKind.define('LLVMTailCallKindNoTail', 3)
 
-_anonenum1 = CEnum(ctypes.c_uint32)
+class _anonenum1(Annotated[int, ctypes.c_uint32], c.Enum): pass
 LLVMFastMathAllowReassoc = _anonenum1.define('LLVMFastMathAllowReassoc', 1)
 LLVMFastMathNoNaNs = _anonenum1.define('LLVMFastMathNoNaNs', 2)
 LLVMFastMathNoInfs = _anonenum1.define('LLVMFastMathNoInfs', 4)
@@ -618,2393 +433,1563 @@ LLVMFastMathApproxFunc = _anonenum1.define('LLVMFastMathApproxFunc', 64)
 LLVMFastMathNone = _anonenum1.define('LLVMFastMathNone', 0)
 LLVMFastMathAll = _anonenum1.define('LLVMFastMathAll', 127)
 
-LLVMFastMathFlags = ctypes.c_uint32
-_anonenum2 = CEnum(ctypes.c_uint32)
+LLVMFastMathFlags: TypeAlias = Annotated[int, ctypes.c_uint32]
+class _anonenum2(Annotated[int, ctypes.c_uint32], c.Enum): pass
 LLVMGEPFlagInBounds = _anonenum2.define('LLVMGEPFlagInBounds', 1)
 LLVMGEPFlagNUSW = _anonenum2.define('LLVMGEPFlagNUSW', 2)
 LLVMGEPFlagNUW = _anonenum2.define('LLVMGEPFlagNUW', 4)
 
-LLVMGEPNoWrapFlags = ctypes.c_uint32
-try: (LLVMShutdown:=dll.LLVMShutdown).restype, LLVMShutdown.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMGetVersion:=dll.LLVMGetVersion).restype, LLVMGetVersion.argtypes = None, [ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32)]
-except AttributeError: pass
-
-try: (LLVMCreateMessage:=dll.LLVMCreateMessage).restype, LLVMCreateMessage.argtypes = ctypes.POINTER(ctypes.c_char), [ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMDisposeMessage:=dll.LLVMDisposeMessage).restype, LLVMDisposeMessage.argtypes = None, [ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-class struct_LLVMOpaqueDiagnosticInfo(Struct): pass
-LLVMDiagnosticHandler = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_LLVMOpaqueDiagnosticInfo), ctypes.c_void_p)
-LLVMYieldCallback = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_LLVMOpaqueContext), ctypes.c_void_p)
-try: (LLVMContextCreate:=dll.LLVMContextCreate).restype, LLVMContextCreate.argtypes = LLVMContextRef, []
-except AttributeError: pass
-
-try: (LLVMGetGlobalContext:=dll.LLVMGetGlobalContext).restype, LLVMGetGlobalContext.argtypes = LLVMContextRef, []
-except AttributeError: pass
-
-try: (LLVMContextSetDiagnosticHandler:=dll.LLVMContextSetDiagnosticHandler).restype, LLVMContextSetDiagnosticHandler.argtypes = None, [LLVMContextRef, LLVMDiagnosticHandler, ctypes.c_void_p]
-except AttributeError: pass
-
-try: (LLVMContextGetDiagnosticHandler:=dll.LLVMContextGetDiagnosticHandler).restype, LLVMContextGetDiagnosticHandler.argtypes = LLVMDiagnosticHandler, [LLVMContextRef]
-except AttributeError: pass
-
-try: (LLVMContextGetDiagnosticContext:=dll.LLVMContextGetDiagnosticContext).restype, LLVMContextGetDiagnosticContext.argtypes = ctypes.c_void_p, [LLVMContextRef]
-except AttributeError: pass
-
-try: (LLVMContextSetYieldCallback:=dll.LLVMContextSetYieldCallback).restype, LLVMContextSetYieldCallback.argtypes = None, [LLVMContextRef, LLVMYieldCallback, ctypes.c_void_p]
-except AttributeError: pass
-
-try: (LLVMContextShouldDiscardValueNames:=dll.LLVMContextShouldDiscardValueNames).restype, LLVMContextShouldDiscardValueNames.argtypes = LLVMBool, [LLVMContextRef]
-except AttributeError: pass
-
-try: (LLVMContextSetDiscardValueNames:=dll.LLVMContextSetDiscardValueNames).restype, LLVMContextSetDiscardValueNames.argtypes = None, [LLVMContextRef, LLVMBool]
-except AttributeError: pass
-
-try: (LLVMContextDispose:=dll.LLVMContextDispose).restype, LLVMContextDispose.argtypes = None, [LLVMContextRef]
-except AttributeError: pass
-
-LLVMDiagnosticInfoRef = ctypes.POINTER(struct_LLVMOpaqueDiagnosticInfo)
-try: (LLVMGetDiagInfoDescription:=dll.LLVMGetDiagInfoDescription).restype, LLVMGetDiagInfoDescription.argtypes = ctypes.POINTER(ctypes.c_char), [LLVMDiagnosticInfoRef]
-except AttributeError: pass
-
-try: (LLVMGetDiagInfoSeverity:=dll.LLVMGetDiagInfoSeverity).restype, LLVMGetDiagInfoSeverity.argtypes = LLVMDiagnosticSeverity, [LLVMDiagnosticInfoRef]
-except AttributeError: pass
-
-try: (LLVMGetMDKindIDInContext:=dll.LLVMGetMDKindIDInContext).restype, LLVMGetMDKindIDInContext.argtypes = ctypes.c_uint32, [LLVMContextRef, ctypes.POINTER(ctypes.c_char), ctypes.c_uint32]
-except AttributeError: pass
-
-try: (LLVMGetMDKindID:=dll.LLVMGetMDKindID).restype, LLVMGetMDKindID.argtypes = ctypes.c_uint32, [ctypes.POINTER(ctypes.c_char), ctypes.c_uint32]
-except AttributeError: pass
-
-size_t = ctypes.c_uint64
-try: (LLVMGetSyncScopeID:=dll.LLVMGetSyncScopeID).restype, LLVMGetSyncScopeID.argtypes = ctypes.c_uint32, [LLVMContextRef, ctypes.POINTER(ctypes.c_char), size_t]
-except AttributeError: pass
-
-try: (LLVMGetEnumAttributeKindForName:=dll.LLVMGetEnumAttributeKindForName).restype, LLVMGetEnumAttributeKindForName.argtypes = ctypes.c_uint32, [ctypes.POINTER(ctypes.c_char), size_t]
-except AttributeError: pass
-
-try: (LLVMGetLastEnumAttributeKind:=dll.LLVMGetLastEnumAttributeKind).restype, LLVMGetLastEnumAttributeKind.argtypes = ctypes.c_uint32, []
-except AttributeError: pass
-
-class struct_LLVMOpaqueAttributeRef(Struct): pass
-LLVMAttributeRef = ctypes.POINTER(struct_LLVMOpaqueAttributeRef)
-uint64_t = ctypes.c_uint64
-try: (LLVMCreateEnumAttribute:=dll.LLVMCreateEnumAttribute).restype, LLVMCreateEnumAttribute.argtypes = LLVMAttributeRef, [LLVMContextRef, ctypes.c_uint32, uint64_t]
-except AttributeError: pass
-
-try: (LLVMGetEnumAttributeKind:=dll.LLVMGetEnumAttributeKind).restype, LLVMGetEnumAttributeKind.argtypes = ctypes.c_uint32, [LLVMAttributeRef]
-except AttributeError: pass
-
-try: (LLVMGetEnumAttributeValue:=dll.LLVMGetEnumAttributeValue).restype, LLVMGetEnumAttributeValue.argtypes = uint64_t, [LLVMAttributeRef]
-except AttributeError: pass
-
-class struct_LLVMOpaqueType(Struct): pass
-LLVMTypeRef = ctypes.POINTER(struct_LLVMOpaqueType)
-try: (LLVMCreateTypeAttribute:=dll.LLVMCreateTypeAttribute).restype, LLVMCreateTypeAttribute.argtypes = LLVMAttributeRef, [LLVMContextRef, ctypes.c_uint32, LLVMTypeRef]
-except AttributeError: pass
-
-try: (LLVMGetTypeAttributeValue:=dll.LLVMGetTypeAttributeValue).restype, LLVMGetTypeAttributeValue.argtypes = LLVMTypeRef, [LLVMAttributeRef]
-except AttributeError: pass
-
-try: (LLVMCreateConstantRangeAttribute:=dll.LLVMCreateConstantRangeAttribute).restype, LLVMCreateConstantRangeAttribute.argtypes = LLVMAttributeRef, [LLVMContextRef, ctypes.c_uint32, ctypes.c_uint32, (uint64_t * 0), (uint64_t * 0)]
-except AttributeError: pass
-
-try: (LLVMCreateStringAttribute:=dll.LLVMCreateStringAttribute).restype, LLVMCreateStringAttribute.argtypes = LLVMAttributeRef, [LLVMContextRef, ctypes.POINTER(ctypes.c_char), ctypes.c_uint32, ctypes.POINTER(ctypes.c_char), ctypes.c_uint32]
-except AttributeError: pass
-
-try: (LLVMGetStringAttributeKind:=dll.LLVMGetStringAttributeKind).restype, LLVMGetStringAttributeKind.argtypes = ctypes.POINTER(ctypes.c_char), [LLVMAttributeRef, ctypes.POINTER(ctypes.c_uint32)]
-except AttributeError: pass
-
-try: (LLVMGetStringAttributeValue:=dll.LLVMGetStringAttributeValue).restype, LLVMGetStringAttributeValue.argtypes = ctypes.POINTER(ctypes.c_char), [LLVMAttributeRef, ctypes.POINTER(ctypes.c_uint32)]
-except AttributeError: pass
-
-try: (LLVMIsEnumAttribute:=dll.LLVMIsEnumAttribute).restype, LLVMIsEnumAttribute.argtypes = LLVMBool, [LLVMAttributeRef]
-except AttributeError: pass
-
-try: (LLVMIsStringAttribute:=dll.LLVMIsStringAttribute).restype, LLVMIsStringAttribute.argtypes = LLVMBool, [LLVMAttributeRef]
-except AttributeError: pass
-
-try: (LLVMIsTypeAttribute:=dll.LLVMIsTypeAttribute).restype, LLVMIsTypeAttribute.argtypes = LLVMBool, [LLVMAttributeRef]
-except AttributeError: pass
-
-try: (LLVMGetTypeByName2:=dll.LLVMGetTypeByName2).restype, LLVMGetTypeByName2.argtypes = LLVMTypeRef, [LLVMContextRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMModuleCreateWithName:=dll.LLVMModuleCreateWithName).restype, LLVMModuleCreateWithName.argtypes = LLVMModuleRef, [ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMModuleCreateWithNameInContext:=dll.LLVMModuleCreateWithNameInContext).restype, LLVMModuleCreateWithNameInContext.argtypes = LLVMModuleRef, [ctypes.POINTER(ctypes.c_char), LLVMContextRef]
-except AttributeError: pass
-
-try: (LLVMCloneModule:=dll.LLVMCloneModule).restype, LLVMCloneModule.argtypes = LLVMModuleRef, [LLVMModuleRef]
-except AttributeError: pass
-
-try: (LLVMDisposeModule:=dll.LLVMDisposeModule).restype, LLVMDisposeModule.argtypes = None, [LLVMModuleRef]
-except AttributeError: pass
-
-try: (LLVMIsNewDbgInfoFormat:=dll.LLVMIsNewDbgInfoFormat).restype, LLVMIsNewDbgInfoFormat.argtypes = LLVMBool, [LLVMModuleRef]
-except AttributeError: pass
-
-try: (LLVMSetIsNewDbgInfoFormat:=dll.LLVMSetIsNewDbgInfoFormat).restype, LLVMSetIsNewDbgInfoFormat.argtypes = None, [LLVMModuleRef, LLVMBool]
-except AttributeError: pass
-
-try: (LLVMGetModuleIdentifier:=dll.LLVMGetModuleIdentifier).restype, LLVMGetModuleIdentifier.argtypes = ctypes.POINTER(ctypes.c_char), [LLVMModuleRef, ctypes.POINTER(size_t)]
-except AttributeError: pass
-
-try: (LLVMSetModuleIdentifier:=dll.LLVMSetModuleIdentifier).restype, LLVMSetModuleIdentifier.argtypes = None, [LLVMModuleRef, ctypes.POINTER(ctypes.c_char), size_t]
-except AttributeError: pass
-
-try: (LLVMGetSourceFileName:=dll.LLVMGetSourceFileName).restype, LLVMGetSourceFileName.argtypes = ctypes.POINTER(ctypes.c_char), [LLVMModuleRef, ctypes.POINTER(size_t)]
-except AttributeError: pass
-
-try: (LLVMSetSourceFileName:=dll.LLVMSetSourceFileName).restype, LLVMSetSourceFileName.argtypes = None, [LLVMModuleRef, ctypes.POINTER(ctypes.c_char), size_t]
-except AttributeError: pass
-
-try: (LLVMGetDataLayoutStr:=dll.LLVMGetDataLayoutStr).restype, LLVMGetDataLayoutStr.argtypes = ctypes.POINTER(ctypes.c_char), [LLVMModuleRef]
-except AttributeError: pass
-
-try: (LLVMGetDataLayout:=dll.LLVMGetDataLayout).restype, LLVMGetDataLayout.argtypes = ctypes.POINTER(ctypes.c_char), [LLVMModuleRef]
-except AttributeError: pass
-
-try: (LLVMSetDataLayout:=dll.LLVMSetDataLayout).restype, LLVMSetDataLayout.argtypes = None, [LLVMModuleRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMGetTarget:=dll.LLVMGetTarget).restype, LLVMGetTarget.argtypes = ctypes.POINTER(ctypes.c_char), [LLVMModuleRef]
-except AttributeError: pass
-
-try: (LLVMSetTarget:=dll.LLVMSetTarget).restype, LLVMSetTarget.argtypes = None, [LLVMModuleRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-class struct_LLVMOpaqueModuleFlagEntry(Struct): pass
-LLVMModuleFlagEntry = struct_LLVMOpaqueModuleFlagEntry
-try: (LLVMCopyModuleFlagsMetadata:=dll.LLVMCopyModuleFlagsMetadata).restype, LLVMCopyModuleFlagsMetadata.argtypes = ctypes.POINTER(LLVMModuleFlagEntry), [LLVMModuleRef, ctypes.POINTER(size_t)]
-except AttributeError: pass
-
-try: (LLVMDisposeModuleFlagsMetadata:=dll.LLVMDisposeModuleFlagsMetadata).restype, LLVMDisposeModuleFlagsMetadata.argtypes = None, [ctypes.POINTER(LLVMModuleFlagEntry)]
-except AttributeError: pass
-
-try: (LLVMModuleFlagEntriesGetFlagBehavior:=dll.LLVMModuleFlagEntriesGetFlagBehavior).restype, LLVMModuleFlagEntriesGetFlagBehavior.argtypes = LLVMModuleFlagBehavior, [ctypes.POINTER(LLVMModuleFlagEntry), ctypes.c_uint32]
-except AttributeError: pass
-
-try: (LLVMModuleFlagEntriesGetKey:=dll.LLVMModuleFlagEntriesGetKey).restype, LLVMModuleFlagEntriesGetKey.argtypes = ctypes.POINTER(ctypes.c_char), [ctypes.POINTER(LLVMModuleFlagEntry), ctypes.c_uint32, ctypes.POINTER(size_t)]
-except AttributeError: pass
-
-class struct_LLVMOpaqueMetadata(Struct): pass
-LLVMMetadataRef = ctypes.POINTER(struct_LLVMOpaqueMetadata)
-try: (LLVMModuleFlagEntriesGetMetadata:=dll.LLVMModuleFlagEntriesGetMetadata).restype, LLVMModuleFlagEntriesGetMetadata.argtypes = LLVMMetadataRef, [ctypes.POINTER(LLVMModuleFlagEntry), ctypes.c_uint32]
-except AttributeError: pass
-
-try: (LLVMGetModuleFlag:=dll.LLVMGetModuleFlag).restype, LLVMGetModuleFlag.argtypes = LLVMMetadataRef, [LLVMModuleRef, ctypes.POINTER(ctypes.c_char), size_t]
-except AttributeError: pass
-
-try: (LLVMAddModuleFlag:=dll.LLVMAddModuleFlag).restype, LLVMAddModuleFlag.argtypes = None, [LLVMModuleRef, LLVMModuleFlagBehavior, ctypes.POINTER(ctypes.c_char), size_t, LLVMMetadataRef]
-except AttributeError: pass
-
-try: (LLVMDumpModule:=dll.LLVMDumpModule).restype, LLVMDumpModule.argtypes = None, [LLVMModuleRef]
-except AttributeError: pass
-
-try: (LLVMPrintModuleToFile:=dll.LLVMPrintModuleToFile).restype, LLVMPrintModuleToFile.argtypes = LLVMBool, [LLVMModuleRef, ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char))]
-except AttributeError: pass
-
-try: (LLVMPrintModuleToString:=dll.LLVMPrintModuleToString).restype, LLVMPrintModuleToString.argtypes = ctypes.POINTER(ctypes.c_char), [LLVMModuleRef]
-except AttributeError: pass
-
-try: (LLVMGetModuleInlineAsm:=dll.LLVMGetModuleInlineAsm).restype, LLVMGetModuleInlineAsm.argtypes = ctypes.POINTER(ctypes.c_char), [LLVMModuleRef, ctypes.POINTER(size_t)]
-except AttributeError: pass
-
-try: (LLVMSetModuleInlineAsm2:=dll.LLVMSetModuleInlineAsm2).restype, LLVMSetModuleInlineAsm2.argtypes = None, [LLVMModuleRef, ctypes.POINTER(ctypes.c_char), size_t]
-except AttributeError: pass
-
-try: (LLVMAppendModuleInlineAsm:=dll.LLVMAppendModuleInlineAsm).restype, LLVMAppendModuleInlineAsm.argtypes = None, [LLVMModuleRef, ctypes.POINTER(ctypes.c_char), size_t]
-except AttributeError: pass
-
-try: (LLVMGetInlineAsm:=dll.LLVMGetInlineAsm).restype, LLVMGetInlineAsm.argtypes = LLVMValueRef, [LLVMTypeRef, ctypes.POINTER(ctypes.c_char), size_t, ctypes.POINTER(ctypes.c_char), size_t, LLVMBool, LLVMBool, LLVMInlineAsmDialect, LLVMBool]
-except AttributeError: pass
-
-try: (LLVMGetInlineAsmAsmString:=dll.LLVMGetInlineAsmAsmString).restype, LLVMGetInlineAsmAsmString.argtypes = ctypes.POINTER(ctypes.c_char), [LLVMValueRef, ctypes.POINTER(size_t)]
-except AttributeError: pass
-
-try: (LLVMGetInlineAsmConstraintString:=dll.LLVMGetInlineAsmConstraintString).restype, LLVMGetInlineAsmConstraintString.argtypes = ctypes.POINTER(ctypes.c_char), [LLVMValueRef, ctypes.POINTER(size_t)]
-except AttributeError: pass
-
-try: (LLVMGetInlineAsmDialect:=dll.LLVMGetInlineAsmDialect).restype, LLVMGetInlineAsmDialect.argtypes = LLVMInlineAsmDialect, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMGetInlineAsmFunctionType:=dll.LLVMGetInlineAsmFunctionType).restype, LLVMGetInlineAsmFunctionType.argtypes = LLVMTypeRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMGetInlineAsmHasSideEffects:=dll.LLVMGetInlineAsmHasSideEffects).restype, LLVMGetInlineAsmHasSideEffects.argtypes = LLVMBool, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMGetInlineAsmNeedsAlignedStack:=dll.LLVMGetInlineAsmNeedsAlignedStack).restype, LLVMGetInlineAsmNeedsAlignedStack.argtypes = LLVMBool, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMGetInlineAsmCanUnwind:=dll.LLVMGetInlineAsmCanUnwind).restype, LLVMGetInlineAsmCanUnwind.argtypes = LLVMBool, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMGetModuleContext:=dll.LLVMGetModuleContext).restype, LLVMGetModuleContext.argtypes = LLVMContextRef, [LLVMModuleRef]
-except AttributeError: pass
-
-try: (LLVMGetTypeByName:=dll.LLVMGetTypeByName).restype, LLVMGetTypeByName.argtypes = LLVMTypeRef, [LLVMModuleRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-class struct_LLVMOpaqueNamedMDNode(Struct): pass
-LLVMNamedMDNodeRef = ctypes.POINTER(struct_LLVMOpaqueNamedMDNode)
-try: (LLVMGetFirstNamedMetadata:=dll.LLVMGetFirstNamedMetadata).restype, LLVMGetFirstNamedMetadata.argtypes = LLVMNamedMDNodeRef, [LLVMModuleRef]
-except AttributeError: pass
-
-try: (LLVMGetLastNamedMetadata:=dll.LLVMGetLastNamedMetadata).restype, LLVMGetLastNamedMetadata.argtypes = LLVMNamedMDNodeRef, [LLVMModuleRef]
-except AttributeError: pass
-
-try: (LLVMGetNextNamedMetadata:=dll.LLVMGetNextNamedMetadata).restype, LLVMGetNextNamedMetadata.argtypes = LLVMNamedMDNodeRef, [LLVMNamedMDNodeRef]
-except AttributeError: pass
-
-try: (LLVMGetPreviousNamedMetadata:=dll.LLVMGetPreviousNamedMetadata).restype, LLVMGetPreviousNamedMetadata.argtypes = LLVMNamedMDNodeRef, [LLVMNamedMDNodeRef]
-except AttributeError: pass
-
-try: (LLVMGetNamedMetadata:=dll.LLVMGetNamedMetadata).restype, LLVMGetNamedMetadata.argtypes = LLVMNamedMDNodeRef, [LLVMModuleRef, ctypes.POINTER(ctypes.c_char), size_t]
-except AttributeError: pass
-
-try: (LLVMGetOrInsertNamedMetadata:=dll.LLVMGetOrInsertNamedMetadata).restype, LLVMGetOrInsertNamedMetadata.argtypes = LLVMNamedMDNodeRef, [LLVMModuleRef, ctypes.POINTER(ctypes.c_char), size_t]
-except AttributeError: pass
-
-try: (LLVMGetNamedMetadataName:=dll.LLVMGetNamedMetadataName).restype, LLVMGetNamedMetadataName.argtypes = ctypes.POINTER(ctypes.c_char), [LLVMNamedMDNodeRef, ctypes.POINTER(size_t)]
-except AttributeError: pass
-
-try: (LLVMGetNamedMetadataNumOperands:=dll.LLVMGetNamedMetadataNumOperands).restype, LLVMGetNamedMetadataNumOperands.argtypes = ctypes.c_uint32, [LLVMModuleRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMGetNamedMetadataOperands:=dll.LLVMGetNamedMetadataOperands).restype, LLVMGetNamedMetadataOperands.argtypes = None, [LLVMModuleRef, ctypes.POINTER(ctypes.c_char), ctypes.POINTER(LLVMValueRef)]
-except AttributeError: pass
-
-try: (LLVMAddNamedMetadataOperand:=dll.LLVMAddNamedMetadataOperand).restype, LLVMAddNamedMetadataOperand.argtypes = None, [LLVMModuleRef, ctypes.POINTER(ctypes.c_char), LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMGetDebugLocDirectory:=dll.LLVMGetDebugLocDirectory).restype, LLVMGetDebugLocDirectory.argtypes = ctypes.POINTER(ctypes.c_char), [LLVMValueRef, ctypes.POINTER(ctypes.c_uint32)]
-except AttributeError: pass
-
-try: (LLVMGetDebugLocFilename:=dll.LLVMGetDebugLocFilename).restype, LLVMGetDebugLocFilename.argtypes = ctypes.POINTER(ctypes.c_char), [LLVMValueRef, ctypes.POINTER(ctypes.c_uint32)]
-except AttributeError: pass
-
-try: (LLVMGetDebugLocLine:=dll.LLVMGetDebugLocLine).restype, LLVMGetDebugLocLine.argtypes = ctypes.c_uint32, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMGetDebugLocColumn:=dll.LLVMGetDebugLocColumn).restype, LLVMGetDebugLocColumn.argtypes = ctypes.c_uint32, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMAddFunction:=dll.LLVMAddFunction).restype, LLVMAddFunction.argtypes = LLVMValueRef, [LLVMModuleRef, ctypes.POINTER(ctypes.c_char), LLVMTypeRef]
-except AttributeError: pass
-
-try: (LLVMGetNamedFunction:=dll.LLVMGetNamedFunction).restype, LLVMGetNamedFunction.argtypes = LLVMValueRef, [LLVMModuleRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMGetNamedFunctionWithLength:=dll.LLVMGetNamedFunctionWithLength).restype, LLVMGetNamedFunctionWithLength.argtypes = LLVMValueRef, [LLVMModuleRef, ctypes.POINTER(ctypes.c_char), size_t]
-except AttributeError: pass
-
-try: (LLVMGetFirstFunction:=dll.LLVMGetFirstFunction).restype, LLVMGetFirstFunction.argtypes = LLVMValueRef, [LLVMModuleRef]
-except AttributeError: pass
-
-try: (LLVMGetLastFunction:=dll.LLVMGetLastFunction).restype, LLVMGetLastFunction.argtypes = LLVMValueRef, [LLVMModuleRef]
-except AttributeError: pass
-
-try: (LLVMGetNextFunction:=dll.LLVMGetNextFunction).restype, LLVMGetNextFunction.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMGetPreviousFunction:=dll.LLVMGetPreviousFunction).restype, LLVMGetPreviousFunction.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMSetModuleInlineAsm:=dll.LLVMSetModuleInlineAsm).restype, LLVMSetModuleInlineAsm.argtypes = None, [LLVMModuleRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMGetTypeKind:=dll.LLVMGetTypeKind).restype, LLVMGetTypeKind.argtypes = LLVMTypeKind, [LLVMTypeRef]
-except AttributeError: pass
-
-try: (LLVMTypeIsSized:=dll.LLVMTypeIsSized).restype, LLVMTypeIsSized.argtypes = LLVMBool, [LLVMTypeRef]
-except AttributeError: pass
-
-try: (LLVMGetTypeContext:=dll.LLVMGetTypeContext).restype, LLVMGetTypeContext.argtypes = LLVMContextRef, [LLVMTypeRef]
-except AttributeError: pass
-
-try: (LLVMDumpType:=dll.LLVMDumpType).restype, LLVMDumpType.argtypes = None, [LLVMTypeRef]
-except AttributeError: pass
-
-try: (LLVMPrintTypeToString:=dll.LLVMPrintTypeToString).restype, LLVMPrintTypeToString.argtypes = ctypes.POINTER(ctypes.c_char), [LLVMTypeRef]
-except AttributeError: pass
-
-try: (LLVMInt1TypeInContext:=dll.LLVMInt1TypeInContext).restype, LLVMInt1TypeInContext.argtypes = LLVMTypeRef, [LLVMContextRef]
-except AttributeError: pass
-
-try: (LLVMInt8TypeInContext:=dll.LLVMInt8TypeInContext).restype, LLVMInt8TypeInContext.argtypes = LLVMTypeRef, [LLVMContextRef]
-except AttributeError: pass
-
-try: (LLVMInt16TypeInContext:=dll.LLVMInt16TypeInContext).restype, LLVMInt16TypeInContext.argtypes = LLVMTypeRef, [LLVMContextRef]
-except AttributeError: pass
-
-try: (LLVMInt32TypeInContext:=dll.LLVMInt32TypeInContext).restype, LLVMInt32TypeInContext.argtypes = LLVMTypeRef, [LLVMContextRef]
-except AttributeError: pass
-
-try: (LLVMInt64TypeInContext:=dll.LLVMInt64TypeInContext).restype, LLVMInt64TypeInContext.argtypes = LLVMTypeRef, [LLVMContextRef]
-except AttributeError: pass
-
-try: (LLVMInt128TypeInContext:=dll.LLVMInt128TypeInContext).restype, LLVMInt128TypeInContext.argtypes = LLVMTypeRef, [LLVMContextRef]
-except AttributeError: pass
-
-try: (LLVMIntTypeInContext:=dll.LLVMIntTypeInContext).restype, LLVMIntTypeInContext.argtypes = LLVMTypeRef, [LLVMContextRef, ctypes.c_uint32]
-except AttributeError: pass
-
-try: (LLVMInt1Type:=dll.LLVMInt1Type).restype, LLVMInt1Type.argtypes = LLVMTypeRef, []
-except AttributeError: pass
-
-try: (LLVMInt8Type:=dll.LLVMInt8Type).restype, LLVMInt8Type.argtypes = LLVMTypeRef, []
-except AttributeError: pass
-
-try: (LLVMInt16Type:=dll.LLVMInt16Type).restype, LLVMInt16Type.argtypes = LLVMTypeRef, []
-except AttributeError: pass
-
-try: (LLVMInt32Type:=dll.LLVMInt32Type).restype, LLVMInt32Type.argtypes = LLVMTypeRef, []
-except AttributeError: pass
-
-try: (LLVMInt64Type:=dll.LLVMInt64Type).restype, LLVMInt64Type.argtypes = LLVMTypeRef, []
-except AttributeError: pass
-
-try: (LLVMInt128Type:=dll.LLVMInt128Type).restype, LLVMInt128Type.argtypes = LLVMTypeRef, []
-except AttributeError: pass
-
-try: (LLVMIntType:=dll.LLVMIntType).restype, LLVMIntType.argtypes = LLVMTypeRef, [ctypes.c_uint32]
-except AttributeError: pass
-
-try: (LLVMGetIntTypeWidth:=dll.LLVMGetIntTypeWidth).restype, LLVMGetIntTypeWidth.argtypes = ctypes.c_uint32, [LLVMTypeRef]
-except AttributeError: pass
-
-try: (LLVMHalfTypeInContext:=dll.LLVMHalfTypeInContext).restype, LLVMHalfTypeInContext.argtypes = LLVMTypeRef, [LLVMContextRef]
-except AttributeError: pass
-
-try: (LLVMBFloatTypeInContext:=dll.LLVMBFloatTypeInContext).restype, LLVMBFloatTypeInContext.argtypes = LLVMTypeRef, [LLVMContextRef]
-except AttributeError: pass
-
-try: (LLVMFloatTypeInContext:=dll.LLVMFloatTypeInContext).restype, LLVMFloatTypeInContext.argtypes = LLVMTypeRef, [LLVMContextRef]
-except AttributeError: pass
-
-try: (LLVMDoubleTypeInContext:=dll.LLVMDoubleTypeInContext).restype, LLVMDoubleTypeInContext.argtypes = LLVMTypeRef, [LLVMContextRef]
-except AttributeError: pass
-
-try: (LLVMX86FP80TypeInContext:=dll.LLVMX86FP80TypeInContext).restype, LLVMX86FP80TypeInContext.argtypes = LLVMTypeRef, [LLVMContextRef]
-except AttributeError: pass
-
-try: (LLVMFP128TypeInContext:=dll.LLVMFP128TypeInContext).restype, LLVMFP128TypeInContext.argtypes = LLVMTypeRef, [LLVMContextRef]
-except AttributeError: pass
-
-try: (LLVMPPCFP128TypeInContext:=dll.LLVMPPCFP128TypeInContext).restype, LLVMPPCFP128TypeInContext.argtypes = LLVMTypeRef, [LLVMContextRef]
-except AttributeError: pass
-
-try: (LLVMHalfType:=dll.LLVMHalfType).restype, LLVMHalfType.argtypes = LLVMTypeRef, []
-except AttributeError: pass
-
-try: (LLVMBFloatType:=dll.LLVMBFloatType).restype, LLVMBFloatType.argtypes = LLVMTypeRef, []
-except AttributeError: pass
-
-try: (LLVMFloatType:=dll.LLVMFloatType).restype, LLVMFloatType.argtypes = LLVMTypeRef, []
-except AttributeError: pass
-
-try: (LLVMDoubleType:=dll.LLVMDoubleType).restype, LLVMDoubleType.argtypes = LLVMTypeRef, []
-except AttributeError: pass
-
-try: (LLVMX86FP80Type:=dll.LLVMX86FP80Type).restype, LLVMX86FP80Type.argtypes = LLVMTypeRef, []
-except AttributeError: pass
-
-try: (LLVMFP128Type:=dll.LLVMFP128Type).restype, LLVMFP128Type.argtypes = LLVMTypeRef, []
-except AttributeError: pass
-
-try: (LLVMPPCFP128Type:=dll.LLVMPPCFP128Type).restype, LLVMPPCFP128Type.argtypes = LLVMTypeRef, []
-except AttributeError: pass
-
-try: (LLVMFunctionType:=dll.LLVMFunctionType).restype, LLVMFunctionType.argtypes = LLVMTypeRef, [LLVMTypeRef, ctypes.POINTER(LLVMTypeRef), ctypes.c_uint32, LLVMBool]
-except AttributeError: pass
-
-try: (LLVMIsFunctionVarArg:=dll.LLVMIsFunctionVarArg).restype, LLVMIsFunctionVarArg.argtypes = LLVMBool, [LLVMTypeRef]
-except AttributeError: pass
-
-try: (LLVMGetReturnType:=dll.LLVMGetReturnType).restype, LLVMGetReturnType.argtypes = LLVMTypeRef, [LLVMTypeRef]
-except AttributeError: pass
-
-try: (LLVMCountParamTypes:=dll.LLVMCountParamTypes).restype, LLVMCountParamTypes.argtypes = ctypes.c_uint32, [LLVMTypeRef]
-except AttributeError: pass
-
-try: (LLVMGetParamTypes:=dll.LLVMGetParamTypes).restype, LLVMGetParamTypes.argtypes = None, [LLVMTypeRef, ctypes.POINTER(LLVMTypeRef)]
-except AttributeError: pass
-
-try: (LLVMStructTypeInContext:=dll.LLVMStructTypeInContext).restype, LLVMStructTypeInContext.argtypes = LLVMTypeRef, [LLVMContextRef, ctypes.POINTER(LLVMTypeRef), ctypes.c_uint32, LLVMBool]
-except AttributeError: pass
-
-try: (LLVMStructType:=dll.LLVMStructType).restype, LLVMStructType.argtypes = LLVMTypeRef, [ctypes.POINTER(LLVMTypeRef), ctypes.c_uint32, LLVMBool]
-except AttributeError: pass
-
-try: (LLVMStructCreateNamed:=dll.LLVMStructCreateNamed).restype, LLVMStructCreateNamed.argtypes = LLVMTypeRef, [LLVMContextRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMGetStructName:=dll.LLVMGetStructName).restype, LLVMGetStructName.argtypes = ctypes.POINTER(ctypes.c_char), [LLVMTypeRef]
-except AttributeError: pass
-
-try: (LLVMStructSetBody:=dll.LLVMStructSetBody).restype, LLVMStructSetBody.argtypes = None, [LLVMTypeRef, ctypes.POINTER(LLVMTypeRef), ctypes.c_uint32, LLVMBool]
-except AttributeError: pass
-
-try: (LLVMCountStructElementTypes:=dll.LLVMCountStructElementTypes).restype, LLVMCountStructElementTypes.argtypes = ctypes.c_uint32, [LLVMTypeRef]
-except AttributeError: pass
-
-try: (LLVMGetStructElementTypes:=dll.LLVMGetStructElementTypes).restype, LLVMGetStructElementTypes.argtypes = None, [LLVMTypeRef, ctypes.POINTER(LLVMTypeRef)]
-except AttributeError: pass
-
-try: (LLVMStructGetTypeAtIndex:=dll.LLVMStructGetTypeAtIndex).restype, LLVMStructGetTypeAtIndex.argtypes = LLVMTypeRef, [LLVMTypeRef, ctypes.c_uint32]
-except AttributeError: pass
-
-try: (LLVMIsPackedStruct:=dll.LLVMIsPackedStruct).restype, LLVMIsPackedStruct.argtypes = LLVMBool, [LLVMTypeRef]
-except AttributeError: pass
-
-try: (LLVMIsOpaqueStruct:=dll.LLVMIsOpaqueStruct).restype, LLVMIsOpaqueStruct.argtypes = LLVMBool, [LLVMTypeRef]
-except AttributeError: pass
-
-try: (LLVMIsLiteralStruct:=dll.LLVMIsLiteralStruct).restype, LLVMIsLiteralStruct.argtypes = LLVMBool, [LLVMTypeRef]
-except AttributeError: pass
-
-try: (LLVMGetElementType:=dll.LLVMGetElementType).restype, LLVMGetElementType.argtypes = LLVMTypeRef, [LLVMTypeRef]
-except AttributeError: pass
-
-try: (LLVMGetSubtypes:=dll.LLVMGetSubtypes).restype, LLVMGetSubtypes.argtypes = None, [LLVMTypeRef, ctypes.POINTER(LLVMTypeRef)]
-except AttributeError: pass
-
-try: (LLVMGetNumContainedTypes:=dll.LLVMGetNumContainedTypes).restype, LLVMGetNumContainedTypes.argtypes = ctypes.c_uint32, [LLVMTypeRef]
-except AttributeError: pass
-
-try: (LLVMArrayType:=dll.LLVMArrayType).restype, LLVMArrayType.argtypes = LLVMTypeRef, [LLVMTypeRef, ctypes.c_uint32]
-except AttributeError: pass
-
-try: (LLVMArrayType2:=dll.LLVMArrayType2).restype, LLVMArrayType2.argtypes = LLVMTypeRef, [LLVMTypeRef, uint64_t]
-except AttributeError: pass
-
-try: (LLVMGetArrayLength:=dll.LLVMGetArrayLength).restype, LLVMGetArrayLength.argtypes = ctypes.c_uint32, [LLVMTypeRef]
-except AttributeError: pass
-
-try: (LLVMGetArrayLength2:=dll.LLVMGetArrayLength2).restype, LLVMGetArrayLength2.argtypes = uint64_t, [LLVMTypeRef]
-except AttributeError: pass
-
-try: (LLVMPointerType:=dll.LLVMPointerType).restype, LLVMPointerType.argtypes = LLVMTypeRef, [LLVMTypeRef, ctypes.c_uint32]
-except AttributeError: pass
-
-try: (LLVMPointerTypeIsOpaque:=dll.LLVMPointerTypeIsOpaque).restype, LLVMPointerTypeIsOpaque.argtypes = LLVMBool, [LLVMTypeRef]
-except AttributeError: pass
-
-try: (LLVMPointerTypeInContext:=dll.LLVMPointerTypeInContext).restype, LLVMPointerTypeInContext.argtypes = LLVMTypeRef, [LLVMContextRef, ctypes.c_uint32]
-except AttributeError: pass
-
-try: (LLVMGetPointerAddressSpace:=dll.LLVMGetPointerAddressSpace).restype, LLVMGetPointerAddressSpace.argtypes = ctypes.c_uint32, [LLVMTypeRef]
-except AttributeError: pass
-
-try: (LLVMVectorType:=dll.LLVMVectorType).restype, LLVMVectorType.argtypes = LLVMTypeRef, [LLVMTypeRef, ctypes.c_uint32]
-except AttributeError: pass
-
-try: (LLVMScalableVectorType:=dll.LLVMScalableVectorType).restype, LLVMScalableVectorType.argtypes = LLVMTypeRef, [LLVMTypeRef, ctypes.c_uint32]
-except AttributeError: pass
-
-try: (LLVMGetVectorSize:=dll.LLVMGetVectorSize).restype, LLVMGetVectorSize.argtypes = ctypes.c_uint32, [LLVMTypeRef]
-except AttributeError: pass
-
-try: (LLVMGetConstantPtrAuthPointer:=dll.LLVMGetConstantPtrAuthPointer).restype, LLVMGetConstantPtrAuthPointer.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMGetConstantPtrAuthKey:=dll.LLVMGetConstantPtrAuthKey).restype, LLVMGetConstantPtrAuthKey.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMGetConstantPtrAuthDiscriminator:=dll.LLVMGetConstantPtrAuthDiscriminator).restype, LLVMGetConstantPtrAuthDiscriminator.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMGetConstantPtrAuthAddrDiscriminator:=dll.LLVMGetConstantPtrAuthAddrDiscriminator).restype, LLVMGetConstantPtrAuthAddrDiscriminator.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMVoidTypeInContext:=dll.LLVMVoidTypeInContext).restype, LLVMVoidTypeInContext.argtypes = LLVMTypeRef, [LLVMContextRef]
-except AttributeError: pass
-
-try: (LLVMLabelTypeInContext:=dll.LLVMLabelTypeInContext).restype, LLVMLabelTypeInContext.argtypes = LLVMTypeRef, [LLVMContextRef]
-except AttributeError: pass
-
-try: (LLVMX86AMXTypeInContext:=dll.LLVMX86AMXTypeInContext).restype, LLVMX86AMXTypeInContext.argtypes = LLVMTypeRef, [LLVMContextRef]
-except AttributeError: pass
-
-try: (LLVMTokenTypeInContext:=dll.LLVMTokenTypeInContext).restype, LLVMTokenTypeInContext.argtypes = LLVMTypeRef, [LLVMContextRef]
-except AttributeError: pass
-
-try: (LLVMMetadataTypeInContext:=dll.LLVMMetadataTypeInContext).restype, LLVMMetadataTypeInContext.argtypes = LLVMTypeRef, [LLVMContextRef]
-except AttributeError: pass
-
-try: (LLVMVoidType:=dll.LLVMVoidType).restype, LLVMVoidType.argtypes = LLVMTypeRef, []
-except AttributeError: pass
-
-try: (LLVMLabelType:=dll.LLVMLabelType).restype, LLVMLabelType.argtypes = LLVMTypeRef, []
-except AttributeError: pass
-
-try: (LLVMX86AMXType:=dll.LLVMX86AMXType).restype, LLVMX86AMXType.argtypes = LLVMTypeRef, []
-except AttributeError: pass
-
-try: (LLVMTargetExtTypeInContext:=dll.LLVMTargetExtTypeInContext).restype, LLVMTargetExtTypeInContext.argtypes = LLVMTypeRef, [LLVMContextRef, ctypes.POINTER(ctypes.c_char), ctypes.POINTER(LLVMTypeRef), ctypes.c_uint32, ctypes.POINTER(ctypes.c_uint32), ctypes.c_uint32]
-except AttributeError: pass
-
-try: (LLVMGetTargetExtTypeName:=dll.LLVMGetTargetExtTypeName).restype, LLVMGetTargetExtTypeName.argtypes = ctypes.POINTER(ctypes.c_char), [LLVMTypeRef]
-except AttributeError: pass
-
-try: (LLVMGetTargetExtTypeNumTypeParams:=dll.LLVMGetTargetExtTypeNumTypeParams).restype, LLVMGetTargetExtTypeNumTypeParams.argtypes = ctypes.c_uint32, [LLVMTypeRef]
-except AttributeError: pass
-
-try: (LLVMGetTargetExtTypeTypeParam:=dll.LLVMGetTargetExtTypeTypeParam).restype, LLVMGetTargetExtTypeTypeParam.argtypes = LLVMTypeRef, [LLVMTypeRef, ctypes.c_uint32]
-except AttributeError: pass
-
-try: (LLVMGetTargetExtTypeNumIntParams:=dll.LLVMGetTargetExtTypeNumIntParams).restype, LLVMGetTargetExtTypeNumIntParams.argtypes = ctypes.c_uint32, [LLVMTypeRef]
-except AttributeError: pass
-
-try: (LLVMGetTargetExtTypeIntParam:=dll.LLVMGetTargetExtTypeIntParam).restype, LLVMGetTargetExtTypeIntParam.argtypes = ctypes.c_uint32, [LLVMTypeRef, ctypes.c_uint32]
-except AttributeError: pass
-
-try: (LLVMTypeOf:=dll.LLVMTypeOf).restype, LLVMTypeOf.argtypes = LLVMTypeRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMGetValueKind:=dll.LLVMGetValueKind).restype, LLVMGetValueKind.argtypes = LLVMValueKind, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMGetValueName2:=dll.LLVMGetValueName2).restype, LLVMGetValueName2.argtypes = ctypes.POINTER(ctypes.c_char), [LLVMValueRef, ctypes.POINTER(size_t)]
-except AttributeError: pass
-
-try: (LLVMSetValueName2:=dll.LLVMSetValueName2).restype, LLVMSetValueName2.argtypes = None, [LLVMValueRef, ctypes.POINTER(ctypes.c_char), size_t]
-except AttributeError: pass
-
-try: (LLVMDumpValue:=dll.LLVMDumpValue).restype, LLVMDumpValue.argtypes = None, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMPrintValueToString:=dll.LLVMPrintValueToString).restype, LLVMPrintValueToString.argtypes = ctypes.POINTER(ctypes.c_char), [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMGetValueContext:=dll.LLVMGetValueContext).restype, LLVMGetValueContext.argtypes = LLVMContextRef, [LLVMValueRef]
-except AttributeError: pass
-
-class struct_LLVMOpaqueDbgRecord(Struct): pass
-LLVMDbgRecordRef = ctypes.POINTER(struct_LLVMOpaqueDbgRecord)
-try: (LLVMPrintDbgRecordToString:=dll.LLVMPrintDbgRecordToString).restype, LLVMPrintDbgRecordToString.argtypes = ctypes.POINTER(ctypes.c_char), [LLVMDbgRecordRef]
-except AttributeError: pass
-
-try: (LLVMReplaceAllUsesWith:=dll.LLVMReplaceAllUsesWith).restype, LLVMReplaceAllUsesWith.argtypes = None, [LLVMValueRef, LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMIsConstant:=dll.LLVMIsConstant).restype, LLVMIsConstant.argtypes = LLVMBool, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMIsUndef:=dll.LLVMIsUndef).restype, LLVMIsUndef.argtypes = LLVMBool, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMIsPoison:=dll.LLVMIsPoison).restype, LLVMIsPoison.argtypes = LLVMBool, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMIsAArgument:=dll.LLVMIsAArgument).restype, LLVMIsAArgument.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMIsABasicBlock:=dll.LLVMIsABasicBlock).restype, LLVMIsABasicBlock.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMIsAInlineAsm:=dll.LLVMIsAInlineAsm).restype, LLVMIsAInlineAsm.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMIsAUser:=dll.LLVMIsAUser).restype, LLVMIsAUser.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMIsAConstant:=dll.LLVMIsAConstant).restype, LLVMIsAConstant.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMIsABlockAddress:=dll.LLVMIsABlockAddress).restype, LLVMIsABlockAddress.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMIsAConstantAggregateZero:=dll.LLVMIsAConstantAggregateZero).restype, LLVMIsAConstantAggregateZero.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMIsAConstantArray:=dll.LLVMIsAConstantArray).restype, LLVMIsAConstantArray.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMIsAConstantDataSequential:=dll.LLVMIsAConstantDataSequential).restype, LLVMIsAConstantDataSequential.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMIsAConstantDataArray:=dll.LLVMIsAConstantDataArray).restype, LLVMIsAConstantDataArray.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMIsAConstantDataVector:=dll.LLVMIsAConstantDataVector).restype, LLVMIsAConstantDataVector.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMIsAConstantExpr:=dll.LLVMIsAConstantExpr).restype, LLVMIsAConstantExpr.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMIsAConstantFP:=dll.LLVMIsAConstantFP).restype, LLVMIsAConstantFP.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMIsAConstantInt:=dll.LLVMIsAConstantInt).restype, LLVMIsAConstantInt.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMIsAConstantPointerNull:=dll.LLVMIsAConstantPointerNull).restype, LLVMIsAConstantPointerNull.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMIsAConstantStruct:=dll.LLVMIsAConstantStruct).restype, LLVMIsAConstantStruct.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMIsAConstantTokenNone:=dll.LLVMIsAConstantTokenNone).restype, LLVMIsAConstantTokenNone.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMIsAConstantVector:=dll.LLVMIsAConstantVector).restype, LLVMIsAConstantVector.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMIsAConstantPtrAuth:=dll.LLVMIsAConstantPtrAuth).restype, LLVMIsAConstantPtrAuth.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMIsAGlobalValue:=dll.LLVMIsAGlobalValue).restype, LLVMIsAGlobalValue.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMIsAGlobalAlias:=dll.LLVMIsAGlobalAlias).restype, LLVMIsAGlobalAlias.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMIsAGlobalObject:=dll.LLVMIsAGlobalObject).restype, LLVMIsAGlobalObject.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMIsAFunction:=dll.LLVMIsAFunction).restype, LLVMIsAFunction.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMIsAGlobalVariable:=dll.LLVMIsAGlobalVariable).restype, LLVMIsAGlobalVariable.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMIsAGlobalIFunc:=dll.LLVMIsAGlobalIFunc).restype, LLVMIsAGlobalIFunc.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMIsAUndefValue:=dll.LLVMIsAUndefValue).restype, LLVMIsAUndefValue.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMIsAPoisonValue:=dll.LLVMIsAPoisonValue).restype, LLVMIsAPoisonValue.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMIsAInstruction:=dll.LLVMIsAInstruction).restype, LLVMIsAInstruction.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMIsAUnaryOperator:=dll.LLVMIsAUnaryOperator).restype, LLVMIsAUnaryOperator.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMIsABinaryOperator:=dll.LLVMIsABinaryOperator).restype, LLVMIsABinaryOperator.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMIsACallInst:=dll.LLVMIsACallInst).restype, LLVMIsACallInst.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMIsAIntrinsicInst:=dll.LLVMIsAIntrinsicInst).restype, LLVMIsAIntrinsicInst.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMIsADbgInfoIntrinsic:=dll.LLVMIsADbgInfoIntrinsic).restype, LLVMIsADbgInfoIntrinsic.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMIsADbgVariableIntrinsic:=dll.LLVMIsADbgVariableIntrinsic).restype, LLVMIsADbgVariableIntrinsic.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMIsADbgDeclareInst:=dll.LLVMIsADbgDeclareInst).restype, LLVMIsADbgDeclareInst.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMIsADbgLabelInst:=dll.LLVMIsADbgLabelInst).restype, LLVMIsADbgLabelInst.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMIsAMemIntrinsic:=dll.LLVMIsAMemIntrinsic).restype, LLVMIsAMemIntrinsic.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMIsAMemCpyInst:=dll.LLVMIsAMemCpyInst).restype, LLVMIsAMemCpyInst.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMIsAMemMoveInst:=dll.LLVMIsAMemMoveInst).restype, LLVMIsAMemMoveInst.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMIsAMemSetInst:=dll.LLVMIsAMemSetInst).restype, LLVMIsAMemSetInst.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMIsACmpInst:=dll.LLVMIsACmpInst).restype, LLVMIsACmpInst.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMIsAFCmpInst:=dll.LLVMIsAFCmpInst).restype, LLVMIsAFCmpInst.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMIsAICmpInst:=dll.LLVMIsAICmpInst).restype, LLVMIsAICmpInst.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMIsAExtractElementInst:=dll.LLVMIsAExtractElementInst).restype, LLVMIsAExtractElementInst.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMIsAGetElementPtrInst:=dll.LLVMIsAGetElementPtrInst).restype, LLVMIsAGetElementPtrInst.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMIsAInsertElementInst:=dll.LLVMIsAInsertElementInst).restype, LLVMIsAInsertElementInst.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMIsAInsertValueInst:=dll.LLVMIsAInsertValueInst).restype, LLVMIsAInsertValueInst.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMIsALandingPadInst:=dll.LLVMIsALandingPadInst).restype, LLVMIsALandingPadInst.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMIsAPHINode:=dll.LLVMIsAPHINode).restype, LLVMIsAPHINode.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMIsASelectInst:=dll.LLVMIsASelectInst).restype, LLVMIsASelectInst.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMIsAShuffleVectorInst:=dll.LLVMIsAShuffleVectorInst).restype, LLVMIsAShuffleVectorInst.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMIsAStoreInst:=dll.LLVMIsAStoreInst).restype, LLVMIsAStoreInst.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMIsABranchInst:=dll.LLVMIsABranchInst).restype, LLVMIsABranchInst.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMIsAIndirectBrInst:=dll.LLVMIsAIndirectBrInst).restype, LLVMIsAIndirectBrInst.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMIsAInvokeInst:=dll.LLVMIsAInvokeInst).restype, LLVMIsAInvokeInst.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMIsAReturnInst:=dll.LLVMIsAReturnInst).restype, LLVMIsAReturnInst.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMIsASwitchInst:=dll.LLVMIsASwitchInst).restype, LLVMIsASwitchInst.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMIsAUnreachableInst:=dll.LLVMIsAUnreachableInst).restype, LLVMIsAUnreachableInst.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMIsAResumeInst:=dll.LLVMIsAResumeInst).restype, LLVMIsAResumeInst.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMIsACleanupReturnInst:=dll.LLVMIsACleanupReturnInst).restype, LLVMIsACleanupReturnInst.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMIsACatchReturnInst:=dll.LLVMIsACatchReturnInst).restype, LLVMIsACatchReturnInst.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMIsACatchSwitchInst:=dll.LLVMIsACatchSwitchInst).restype, LLVMIsACatchSwitchInst.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMIsACallBrInst:=dll.LLVMIsACallBrInst).restype, LLVMIsACallBrInst.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMIsAFuncletPadInst:=dll.LLVMIsAFuncletPadInst).restype, LLVMIsAFuncletPadInst.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMIsACatchPadInst:=dll.LLVMIsACatchPadInst).restype, LLVMIsACatchPadInst.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMIsACleanupPadInst:=dll.LLVMIsACleanupPadInst).restype, LLVMIsACleanupPadInst.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMIsAUnaryInstruction:=dll.LLVMIsAUnaryInstruction).restype, LLVMIsAUnaryInstruction.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMIsAAllocaInst:=dll.LLVMIsAAllocaInst).restype, LLVMIsAAllocaInst.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMIsACastInst:=dll.LLVMIsACastInst).restype, LLVMIsACastInst.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMIsAAddrSpaceCastInst:=dll.LLVMIsAAddrSpaceCastInst).restype, LLVMIsAAddrSpaceCastInst.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMIsABitCastInst:=dll.LLVMIsABitCastInst).restype, LLVMIsABitCastInst.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMIsAFPExtInst:=dll.LLVMIsAFPExtInst).restype, LLVMIsAFPExtInst.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMIsAFPToSIInst:=dll.LLVMIsAFPToSIInst).restype, LLVMIsAFPToSIInst.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMIsAFPToUIInst:=dll.LLVMIsAFPToUIInst).restype, LLVMIsAFPToUIInst.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMIsAFPTruncInst:=dll.LLVMIsAFPTruncInst).restype, LLVMIsAFPTruncInst.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMIsAIntToPtrInst:=dll.LLVMIsAIntToPtrInst).restype, LLVMIsAIntToPtrInst.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMIsAPtrToIntInst:=dll.LLVMIsAPtrToIntInst).restype, LLVMIsAPtrToIntInst.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMIsASExtInst:=dll.LLVMIsASExtInst).restype, LLVMIsASExtInst.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMIsASIToFPInst:=dll.LLVMIsASIToFPInst).restype, LLVMIsASIToFPInst.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMIsATruncInst:=dll.LLVMIsATruncInst).restype, LLVMIsATruncInst.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMIsAUIToFPInst:=dll.LLVMIsAUIToFPInst).restype, LLVMIsAUIToFPInst.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMIsAZExtInst:=dll.LLVMIsAZExtInst).restype, LLVMIsAZExtInst.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMIsAExtractValueInst:=dll.LLVMIsAExtractValueInst).restype, LLVMIsAExtractValueInst.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMIsALoadInst:=dll.LLVMIsALoadInst).restype, LLVMIsALoadInst.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMIsAVAArgInst:=dll.LLVMIsAVAArgInst).restype, LLVMIsAVAArgInst.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMIsAFreezeInst:=dll.LLVMIsAFreezeInst).restype, LLVMIsAFreezeInst.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMIsAAtomicCmpXchgInst:=dll.LLVMIsAAtomicCmpXchgInst).restype, LLVMIsAAtomicCmpXchgInst.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMIsAAtomicRMWInst:=dll.LLVMIsAAtomicRMWInst).restype, LLVMIsAAtomicRMWInst.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMIsAFenceInst:=dll.LLVMIsAFenceInst).restype, LLVMIsAFenceInst.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMIsAMDNode:=dll.LLVMIsAMDNode).restype, LLVMIsAMDNode.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMIsAValueAsMetadata:=dll.LLVMIsAValueAsMetadata).restype, LLVMIsAValueAsMetadata.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMIsAMDString:=dll.LLVMIsAMDString).restype, LLVMIsAMDString.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMGetValueName:=dll.LLVMGetValueName).restype, LLVMGetValueName.argtypes = ctypes.POINTER(ctypes.c_char), [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMSetValueName:=dll.LLVMSetValueName).restype, LLVMSetValueName.argtypes = None, [LLVMValueRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-class struct_LLVMOpaqueUse(Struct): pass
-LLVMUseRef = ctypes.POINTER(struct_LLVMOpaqueUse)
-try: (LLVMGetFirstUse:=dll.LLVMGetFirstUse).restype, LLVMGetFirstUse.argtypes = LLVMUseRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMGetNextUse:=dll.LLVMGetNextUse).restype, LLVMGetNextUse.argtypes = LLVMUseRef, [LLVMUseRef]
-except AttributeError: pass
-
-try: (LLVMGetUser:=dll.LLVMGetUser).restype, LLVMGetUser.argtypes = LLVMValueRef, [LLVMUseRef]
-except AttributeError: pass
-
-try: (LLVMGetUsedValue:=dll.LLVMGetUsedValue).restype, LLVMGetUsedValue.argtypes = LLVMValueRef, [LLVMUseRef]
-except AttributeError: pass
-
-try: (LLVMGetOperand:=dll.LLVMGetOperand).restype, LLVMGetOperand.argtypes = LLVMValueRef, [LLVMValueRef, ctypes.c_uint32]
-except AttributeError: pass
-
-try: (LLVMGetOperandUse:=dll.LLVMGetOperandUse).restype, LLVMGetOperandUse.argtypes = LLVMUseRef, [LLVMValueRef, ctypes.c_uint32]
-except AttributeError: pass
-
-try: (LLVMSetOperand:=dll.LLVMSetOperand).restype, LLVMSetOperand.argtypes = None, [LLVMValueRef, ctypes.c_uint32, LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMGetNumOperands:=dll.LLVMGetNumOperands).restype, LLVMGetNumOperands.argtypes = ctypes.c_int32, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMConstNull:=dll.LLVMConstNull).restype, LLVMConstNull.argtypes = LLVMValueRef, [LLVMTypeRef]
-except AttributeError: pass
-
-try: (LLVMConstAllOnes:=dll.LLVMConstAllOnes).restype, LLVMConstAllOnes.argtypes = LLVMValueRef, [LLVMTypeRef]
-except AttributeError: pass
-
-try: (LLVMGetUndef:=dll.LLVMGetUndef).restype, LLVMGetUndef.argtypes = LLVMValueRef, [LLVMTypeRef]
-except AttributeError: pass
-
-try: (LLVMGetPoison:=dll.LLVMGetPoison).restype, LLVMGetPoison.argtypes = LLVMValueRef, [LLVMTypeRef]
-except AttributeError: pass
-
-try: (LLVMIsNull:=dll.LLVMIsNull).restype, LLVMIsNull.argtypes = LLVMBool, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMConstPointerNull:=dll.LLVMConstPointerNull).restype, LLVMConstPointerNull.argtypes = LLVMValueRef, [LLVMTypeRef]
-except AttributeError: pass
-
-try: (LLVMConstInt:=dll.LLVMConstInt).restype, LLVMConstInt.argtypes = LLVMValueRef, [LLVMTypeRef, ctypes.c_uint64, LLVMBool]
-except AttributeError: pass
-
-try: (LLVMConstIntOfArbitraryPrecision:=dll.LLVMConstIntOfArbitraryPrecision).restype, LLVMConstIntOfArbitraryPrecision.argtypes = LLVMValueRef, [LLVMTypeRef, ctypes.c_uint32, (uint64_t * 0)]
-except AttributeError: pass
-
-uint8_t = ctypes.c_ubyte
-try: (LLVMConstIntOfString:=dll.LLVMConstIntOfString).restype, LLVMConstIntOfString.argtypes = LLVMValueRef, [LLVMTypeRef, ctypes.POINTER(ctypes.c_char), uint8_t]
-except AttributeError: pass
-
-try: (LLVMConstIntOfStringAndSize:=dll.LLVMConstIntOfStringAndSize).restype, LLVMConstIntOfStringAndSize.argtypes = LLVMValueRef, [LLVMTypeRef, ctypes.POINTER(ctypes.c_char), ctypes.c_uint32, uint8_t]
-except AttributeError: pass
-
-try: (LLVMConstReal:=dll.LLVMConstReal).restype, LLVMConstReal.argtypes = LLVMValueRef, [LLVMTypeRef, ctypes.c_double]
-except AttributeError: pass
-
-try: (LLVMConstRealOfString:=dll.LLVMConstRealOfString).restype, LLVMConstRealOfString.argtypes = LLVMValueRef, [LLVMTypeRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMConstRealOfStringAndSize:=dll.LLVMConstRealOfStringAndSize).restype, LLVMConstRealOfStringAndSize.argtypes = LLVMValueRef, [LLVMTypeRef, ctypes.POINTER(ctypes.c_char), ctypes.c_uint32]
-except AttributeError: pass
-
-try: (LLVMConstIntGetZExtValue:=dll.LLVMConstIntGetZExtValue).restype, LLVMConstIntGetZExtValue.argtypes = ctypes.c_uint64, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMConstIntGetSExtValue:=dll.LLVMConstIntGetSExtValue).restype, LLVMConstIntGetSExtValue.argtypes = ctypes.c_int64, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMConstRealGetDouble:=dll.LLVMConstRealGetDouble).restype, LLVMConstRealGetDouble.argtypes = ctypes.c_double, [LLVMValueRef, ctypes.POINTER(LLVMBool)]
-except AttributeError: pass
-
-try: (LLVMConstStringInContext:=dll.LLVMConstStringInContext).restype, LLVMConstStringInContext.argtypes = LLVMValueRef, [LLVMContextRef, ctypes.POINTER(ctypes.c_char), ctypes.c_uint32, LLVMBool]
-except AttributeError: pass
-
-try: (LLVMConstStringInContext2:=dll.LLVMConstStringInContext2).restype, LLVMConstStringInContext2.argtypes = LLVMValueRef, [LLVMContextRef, ctypes.POINTER(ctypes.c_char), size_t, LLVMBool]
-except AttributeError: pass
-
-try: (LLVMConstString:=dll.LLVMConstString).restype, LLVMConstString.argtypes = LLVMValueRef, [ctypes.POINTER(ctypes.c_char), ctypes.c_uint32, LLVMBool]
-except AttributeError: pass
-
-try: (LLVMIsConstantString:=dll.LLVMIsConstantString).restype, LLVMIsConstantString.argtypes = LLVMBool, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMGetAsString:=dll.LLVMGetAsString).restype, LLVMGetAsString.argtypes = ctypes.POINTER(ctypes.c_char), [LLVMValueRef, ctypes.POINTER(size_t)]
-except AttributeError: pass
-
-try: (LLVMConstStructInContext:=dll.LLVMConstStructInContext).restype, LLVMConstStructInContext.argtypes = LLVMValueRef, [LLVMContextRef, ctypes.POINTER(LLVMValueRef), ctypes.c_uint32, LLVMBool]
-except AttributeError: pass
-
-try: (LLVMConstStruct:=dll.LLVMConstStruct).restype, LLVMConstStruct.argtypes = LLVMValueRef, [ctypes.POINTER(LLVMValueRef), ctypes.c_uint32, LLVMBool]
-except AttributeError: pass
-
-try: (LLVMConstArray:=dll.LLVMConstArray).restype, LLVMConstArray.argtypes = LLVMValueRef, [LLVMTypeRef, ctypes.POINTER(LLVMValueRef), ctypes.c_uint32]
-except AttributeError: pass
-
-try: (LLVMConstArray2:=dll.LLVMConstArray2).restype, LLVMConstArray2.argtypes = LLVMValueRef, [LLVMTypeRef, ctypes.POINTER(LLVMValueRef), uint64_t]
-except AttributeError: pass
-
-try: (LLVMConstNamedStruct:=dll.LLVMConstNamedStruct).restype, LLVMConstNamedStruct.argtypes = LLVMValueRef, [LLVMTypeRef, ctypes.POINTER(LLVMValueRef), ctypes.c_uint32]
-except AttributeError: pass
-
-try: (LLVMGetAggregateElement:=dll.LLVMGetAggregateElement).restype, LLVMGetAggregateElement.argtypes = LLVMValueRef, [LLVMValueRef, ctypes.c_uint32]
-except AttributeError: pass
-
-try: (LLVMGetElementAsConstant:=dll.LLVMGetElementAsConstant).restype, LLVMGetElementAsConstant.argtypes = LLVMValueRef, [LLVMValueRef, ctypes.c_uint32]
-except AttributeError: pass
-
-try: (LLVMConstVector:=dll.LLVMConstVector).restype, LLVMConstVector.argtypes = LLVMValueRef, [ctypes.POINTER(LLVMValueRef), ctypes.c_uint32]
-except AttributeError: pass
-
-try: (LLVMConstantPtrAuth:=dll.LLVMConstantPtrAuth).restype, LLVMConstantPtrAuth.argtypes = LLVMValueRef, [LLVMValueRef, LLVMValueRef, LLVMValueRef, LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMGetConstOpcode:=dll.LLVMGetConstOpcode).restype, LLVMGetConstOpcode.argtypes = LLVMOpcode, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMAlignOf:=dll.LLVMAlignOf).restype, LLVMAlignOf.argtypes = LLVMValueRef, [LLVMTypeRef]
-except AttributeError: pass
-
-try: (LLVMSizeOf:=dll.LLVMSizeOf).restype, LLVMSizeOf.argtypes = LLVMValueRef, [LLVMTypeRef]
-except AttributeError: pass
-
-try: (LLVMConstNeg:=dll.LLVMConstNeg).restype, LLVMConstNeg.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMConstNSWNeg:=dll.LLVMConstNSWNeg).restype, LLVMConstNSWNeg.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMConstNUWNeg:=dll.LLVMConstNUWNeg).restype, LLVMConstNUWNeg.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMConstNot:=dll.LLVMConstNot).restype, LLVMConstNot.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMConstAdd:=dll.LLVMConstAdd).restype, LLVMConstAdd.argtypes = LLVMValueRef, [LLVMValueRef, LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMConstNSWAdd:=dll.LLVMConstNSWAdd).restype, LLVMConstNSWAdd.argtypes = LLVMValueRef, [LLVMValueRef, LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMConstNUWAdd:=dll.LLVMConstNUWAdd).restype, LLVMConstNUWAdd.argtypes = LLVMValueRef, [LLVMValueRef, LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMConstSub:=dll.LLVMConstSub).restype, LLVMConstSub.argtypes = LLVMValueRef, [LLVMValueRef, LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMConstNSWSub:=dll.LLVMConstNSWSub).restype, LLVMConstNSWSub.argtypes = LLVMValueRef, [LLVMValueRef, LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMConstNUWSub:=dll.LLVMConstNUWSub).restype, LLVMConstNUWSub.argtypes = LLVMValueRef, [LLVMValueRef, LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMConstMul:=dll.LLVMConstMul).restype, LLVMConstMul.argtypes = LLVMValueRef, [LLVMValueRef, LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMConstNSWMul:=dll.LLVMConstNSWMul).restype, LLVMConstNSWMul.argtypes = LLVMValueRef, [LLVMValueRef, LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMConstNUWMul:=dll.LLVMConstNUWMul).restype, LLVMConstNUWMul.argtypes = LLVMValueRef, [LLVMValueRef, LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMConstXor:=dll.LLVMConstXor).restype, LLVMConstXor.argtypes = LLVMValueRef, [LLVMValueRef, LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMConstGEP2:=dll.LLVMConstGEP2).restype, LLVMConstGEP2.argtypes = LLVMValueRef, [LLVMTypeRef, LLVMValueRef, ctypes.POINTER(LLVMValueRef), ctypes.c_uint32]
-except AttributeError: pass
-
-try: (LLVMConstInBoundsGEP2:=dll.LLVMConstInBoundsGEP2).restype, LLVMConstInBoundsGEP2.argtypes = LLVMValueRef, [LLVMTypeRef, LLVMValueRef, ctypes.POINTER(LLVMValueRef), ctypes.c_uint32]
-except AttributeError: pass
-
-try: (LLVMConstGEPWithNoWrapFlags:=dll.LLVMConstGEPWithNoWrapFlags).restype, LLVMConstGEPWithNoWrapFlags.argtypes = LLVMValueRef, [LLVMTypeRef, LLVMValueRef, ctypes.POINTER(LLVMValueRef), ctypes.c_uint32, LLVMGEPNoWrapFlags]
-except AttributeError: pass
-
-try: (LLVMConstTrunc:=dll.LLVMConstTrunc).restype, LLVMConstTrunc.argtypes = LLVMValueRef, [LLVMValueRef, LLVMTypeRef]
-except AttributeError: pass
-
-try: (LLVMConstPtrToInt:=dll.LLVMConstPtrToInt).restype, LLVMConstPtrToInt.argtypes = LLVMValueRef, [LLVMValueRef, LLVMTypeRef]
-except AttributeError: pass
-
-try: (LLVMConstIntToPtr:=dll.LLVMConstIntToPtr).restype, LLVMConstIntToPtr.argtypes = LLVMValueRef, [LLVMValueRef, LLVMTypeRef]
-except AttributeError: pass
-
-try: (LLVMConstBitCast:=dll.LLVMConstBitCast).restype, LLVMConstBitCast.argtypes = LLVMValueRef, [LLVMValueRef, LLVMTypeRef]
-except AttributeError: pass
-
-try: (LLVMConstAddrSpaceCast:=dll.LLVMConstAddrSpaceCast).restype, LLVMConstAddrSpaceCast.argtypes = LLVMValueRef, [LLVMValueRef, LLVMTypeRef]
-except AttributeError: pass
-
-try: (LLVMConstTruncOrBitCast:=dll.LLVMConstTruncOrBitCast).restype, LLVMConstTruncOrBitCast.argtypes = LLVMValueRef, [LLVMValueRef, LLVMTypeRef]
-except AttributeError: pass
-
-try: (LLVMConstPointerCast:=dll.LLVMConstPointerCast).restype, LLVMConstPointerCast.argtypes = LLVMValueRef, [LLVMValueRef, LLVMTypeRef]
-except AttributeError: pass
-
-try: (LLVMConstExtractElement:=dll.LLVMConstExtractElement).restype, LLVMConstExtractElement.argtypes = LLVMValueRef, [LLVMValueRef, LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMConstInsertElement:=dll.LLVMConstInsertElement).restype, LLVMConstInsertElement.argtypes = LLVMValueRef, [LLVMValueRef, LLVMValueRef, LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMConstShuffleVector:=dll.LLVMConstShuffleVector).restype, LLVMConstShuffleVector.argtypes = LLVMValueRef, [LLVMValueRef, LLVMValueRef, LLVMValueRef]
-except AttributeError: pass
-
-class struct_LLVMOpaqueBasicBlock(Struct): pass
-LLVMBasicBlockRef = ctypes.POINTER(struct_LLVMOpaqueBasicBlock)
-try: (LLVMBlockAddress:=dll.LLVMBlockAddress).restype, LLVMBlockAddress.argtypes = LLVMValueRef, [LLVMValueRef, LLVMBasicBlockRef]
-except AttributeError: pass
-
-try: (LLVMGetBlockAddressFunction:=dll.LLVMGetBlockAddressFunction).restype, LLVMGetBlockAddressFunction.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMGetBlockAddressBasicBlock:=dll.LLVMGetBlockAddressBasicBlock).restype, LLVMGetBlockAddressBasicBlock.argtypes = LLVMBasicBlockRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMConstInlineAsm:=dll.LLVMConstInlineAsm).restype, LLVMConstInlineAsm.argtypes = LLVMValueRef, [LLVMTypeRef, ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char), LLVMBool, LLVMBool]
-except AttributeError: pass
-
-try: (LLVMGetGlobalParent:=dll.LLVMGetGlobalParent).restype, LLVMGetGlobalParent.argtypes = LLVMModuleRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMIsDeclaration:=dll.LLVMIsDeclaration).restype, LLVMIsDeclaration.argtypes = LLVMBool, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMGetLinkage:=dll.LLVMGetLinkage).restype, LLVMGetLinkage.argtypes = LLVMLinkage, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMSetLinkage:=dll.LLVMSetLinkage).restype, LLVMSetLinkage.argtypes = None, [LLVMValueRef, LLVMLinkage]
-except AttributeError: pass
-
-try: (LLVMGetSection:=dll.LLVMGetSection).restype, LLVMGetSection.argtypes = ctypes.POINTER(ctypes.c_char), [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMSetSection:=dll.LLVMSetSection).restype, LLVMSetSection.argtypes = None, [LLVMValueRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMGetVisibility:=dll.LLVMGetVisibility).restype, LLVMGetVisibility.argtypes = LLVMVisibility, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMSetVisibility:=dll.LLVMSetVisibility).restype, LLVMSetVisibility.argtypes = None, [LLVMValueRef, LLVMVisibility]
-except AttributeError: pass
-
-try: (LLVMGetDLLStorageClass:=dll.LLVMGetDLLStorageClass).restype, LLVMGetDLLStorageClass.argtypes = LLVMDLLStorageClass, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMSetDLLStorageClass:=dll.LLVMSetDLLStorageClass).restype, LLVMSetDLLStorageClass.argtypes = None, [LLVMValueRef, LLVMDLLStorageClass]
-except AttributeError: pass
-
-try: (LLVMGetUnnamedAddress:=dll.LLVMGetUnnamedAddress).restype, LLVMGetUnnamedAddress.argtypes = LLVMUnnamedAddr, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMSetUnnamedAddress:=dll.LLVMSetUnnamedAddress).restype, LLVMSetUnnamedAddress.argtypes = None, [LLVMValueRef, LLVMUnnamedAddr]
-except AttributeError: pass
-
-try: (LLVMGlobalGetValueType:=dll.LLVMGlobalGetValueType).restype, LLVMGlobalGetValueType.argtypes = LLVMTypeRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMHasUnnamedAddr:=dll.LLVMHasUnnamedAddr).restype, LLVMHasUnnamedAddr.argtypes = LLVMBool, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMSetUnnamedAddr:=dll.LLVMSetUnnamedAddr).restype, LLVMSetUnnamedAddr.argtypes = None, [LLVMValueRef, LLVMBool]
-except AttributeError: pass
-
-try: (LLVMGetAlignment:=dll.LLVMGetAlignment).restype, LLVMGetAlignment.argtypes = ctypes.c_uint32, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMSetAlignment:=dll.LLVMSetAlignment).restype, LLVMSetAlignment.argtypes = None, [LLVMValueRef, ctypes.c_uint32]
-except AttributeError: pass
-
-try: (LLVMGlobalSetMetadata:=dll.LLVMGlobalSetMetadata).restype, LLVMGlobalSetMetadata.argtypes = None, [LLVMValueRef, ctypes.c_uint32, LLVMMetadataRef]
-except AttributeError: pass
-
-try: (LLVMGlobalEraseMetadata:=dll.LLVMGlobalEraseMetadata).restype, LLVMGlobalEraseMetadata.argtypes = None, [LLVMValueRef, ctypes.c_uint32]
-except AttributeError: pass
-
-try: (LLVMGlobalClearMetadata:=dll.LLVMGlobalClearMetadata).restype, LLVMGlobalClearMetadata.argtypes = None, [LLVMValueRef]
-except AttributeError: pass
-
-class struct_LLVMOpaqueValueMetadataEntry(Struct): pass
-LLVMValueMetadataEntry = struct_LLVMOpaqueValueMetadataEntry
-try: (LLVMGlobalCopyAllMetadata:=dll.LLVMGlobalCopyAllMetadata).restype, LLVMGlobalCopyAllMetadata.argtypes = ctypes.POINTER(LLVMValueMetadataEntry), [LLVMValueRef, ctypes.POINTER(size_t)]
-except AttributeError: pass
-
-try: (LLVMDisposeValueMetadataEntries:=dll.LLVMDisposeValueMetadataEntries).restype, LLVMDisposeValueMetadataEntries.argtypes = None, [ctypes.POINTER(LLVMValueMetadataEntry)]
-except AttributeError: pass
-
-try: (LLVMValueMetadataEntriesGetKind:=dll.LLVMValueMetadataEntriesGetKind).restype, LLVMValueMetadataEntriesGetKind.argtypes = ctypes.c_uint32, [ctypes.POINTER(LLVMValueMetadataEntry), ctypes.c_uint32]
-except AttributeError: pass
-
-try: (LLVMValueMetadataEntriesGetMetadata:=dll.LLVMValueMetadataEntriesGetMetadata).restype, LLVMValueMetadataEntriesGetMetadata.argtypes = LLVMMetadataRef, [ctypes.POINTER(LLVMValueMetadataEntry), ctypes.c_uint32]
-except AttributeError: pass
-
-try: (LLVMAddGlobal:=dll.LLVMAddGlobal).restype, LLVMAddGlobal.argtypes = LLVMValueRef, [LLVMModuleRef, LLVMTypeRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMAddGlobalInAddressSpace:=dll.LLVMAddGlobalInAddressSpace).restype, LLVMAddGlobalInAddressSpace.argtypes = LLVMValueRef, [LLVMModuleRef, LLVMTypeRef, ctypes.POINTER(ctypes.c_char), ctypes.c_uint32]
-except AttributeError: pass
-
-try: (LLVMGetNamedGlobal:=dll.LLVMGetNamedGlobal).restype, LLVMGetNamedGlobal.argtypes = LLVMValueRef, [LLVMModuleRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMGetNamedGlobalWithLength:=dll.LLVMGetNamedGlobalWithLength).restype, LLVMGetNamedGlobalWithLength.argtypes = LLVMValueRef, [LLVMModuleRef, ctypes.POINTER(ctypes.c_char), size_t]
-except AttributeError: pass
-
-try: (LLVMGetFirstGlobal:=dll.LLVMGetFirstGlobal).restype, LLVMGetFirstGlobal.argtypes = LLVMValueRef, [LLVMModuleRef]
-except AttributeError: pass
-
-try: (LLVMGetLastGlobal:=dll.LLVMGetLastGlobal).restype, LLVMGetLastGlobal.argtypes = LLVMValueRef, [LLVMModuleRef]
-except AttributeError: pass
-
-try: (LLVMGetNextGlobal:=dll.LLVMGetNextGlobal).restype, LLVMGetNextGlobal.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMGetPreviousGlobal:=dll.LLVMGetPreviousGlobal).restype, LLVMGetPreviousGlobal.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMDeleteGlobal:=dll.LLVMDeleteGlobal).restype, LLVMDeleteGlobal.argtypes = None, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMGetInitializer:=dll.LLVMGetInitializer).restype, LLVMGetInitializer.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMSetInitializer:=dll.LLVMSetInitializer).restype, LLVMSetInitializer.argtypes = None, [LLVMValueRef, LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMIsThreadLocal:=dll.LLVMIsThreadLocal).restype, LLVMIsThreadLocal.argtypes = LLVMBool, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMSetThreadLocal:=dll.LLVMSetThreadLocal).restype, LLVMSetThreadLocal.argtypes = None, [LLVMValueRef, LLVMBool]
-except AttributeError: pass
-
-try: (LLVMIsGlobalConstant:=dll.LLVMIsGlobalConstant).restype, LLVMIsGlobalConstant.argtypes = LLVMBool, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMSetGlobalConstant:=dll.LLVMSetGlobalConstant).restype, LLVMSetGlobalConstant.argtypes = None, [LLVMValueRef, LLVMBool]
-except AttributeError: pass
-
-try: (LLVMGetThreadLocalMode:=dll.LLVMGetThreadLocalMode).restype, LLVMGetThreadLocalMode.argtypes = LLVMThreadLocalMode, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMSetThreadLocalMode:=dll.LLVMSetThreadLocalMode).restype, LLVMSetThreadLocalMode.argtypes = None, [LLVMValueRef, LLVMThreadLocalMode]
-except AttributeError: pass
-
-try: (LLVMIsExternallyInitialized:=dll.LLVMIsExternallyInitialized).restype, LLVMIsExternallyInitialized.argtypes = LLVMBool, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMSetExternallyInitialized:=dll.LLVMSetExternallyInitialized).restype, LLVMSetExternallyInitialized.argtypes = None, [LLVMValueRef, LLVMBool]
-except AttributeError: pass
-
-try: (LLVMAddAlias2:=dll.LLVMAddAlias2).restype, LLVMAddAlias2.argtypes = LLVMValueRef, [LLVMModuleRef, LLVMTypeRef, ctypes.c_uint32, LLVMValueRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMGetNamedGlobalAlias:=dll.LLVMGetNamedGlobalAlias).restype, LLVMGetNamedGlobalAlias.argtypes = LLVMValueRef, [LLVMModuleRef, ctypes.POINTER(ctypes.c_char), size_t]
-except AttributeError: pass
-
-try: (LLVMGetFirstGlobalAlias:=dll.LLVMGetFirstGlobalAlias).restype, LLVMGetFirstGlobalAlias.argtypes = LLVMValueRef, [LLVMModuleRef]
-except AttributeError: pass
-
-try: (LLVMGetLastGlobalAlias:=dll.LLVMGetLastGlobalAlias).restype, LLVMGetLastGlobalAlias.argtypes = LLVMValueRef, [LLVMModuleRef]
-except AttributeError: pass
-
-try: (LLVMGetNextGlobalAlias:=dll.LLVMGetNextGlobalAlias).restype, LLVMGetNextGlobalAlias.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMGetPreviousGlobalAlias:=dll.LLVMGetPreviousGlobalAlias).restype, LLVMGetPreviousGlobalAlias.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMAliasGetAliasee:=dll.LLVMAliasGetAliasee).restype, LLVMAliasGetAliasee.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMAliasSetAliasee:=dll.LLVMAliasSetAliasee).restype, LLVMAliasSetAliasee.argtypes = None, [LLVMValueRef, LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMDeleteFunction:=dll.LLVMDeleteFunction).restype, LLVMDeleteFunction.argtypes = None, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMHasPersonalityFn:=dll.LLVMHasPersonalityFn).restype, LLVMHasPersonalityFn.argtypes = LLVMBool, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMGetPersonalityFn:=dll.LLVMGetPersonalityFn).restype, LLVMGetPersonalityFn.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMSetPersonalityFn:=dll.LLVMSetPersonalityFn).restype, LLVMSetPersonalityFn.argtypes = None, [LLVMValueRef, LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMLookupIntrinsicID:=dll.LLVMLookupIntrinsicID).restype, LLVMLookupIntrinsicID.argtypes = ctypes.c_uint32, [ctypes.POINTER(ctypes.c_char), size_t]
-except AttributeError: pass
-
-try: (LLVMGetIntrinsicID:=dll.LLVMGetIntrinsicID).restype, LLVMGetIntrinsicID.argtypes = ctypes.c_uint32, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMGetIntrinsicDeclaration:=dll.LLVMGetIntrinsicDeclaration).restype, LLVMGetIntrinsicDeclaration.argtypes = LLVMValueRef, [LLVMModuleRef, ctypes.c_uint32, ctypes.POINTER(LLVMTypeRef), size_t]
-except AttributeError: pass
-
-try: (LLVMIntrinsicGetType:=dll.LLVMIntrinsicGetType).restype, LLVMIntrinsicGetType.argtypes = LLVMTypeRef, [LLVMContextRef, ctypes.c_uint32, ctypes.POINTER(LLVMTypeRef), size_t]
-except AttributeError: pass
-
-try: (LLVMIntrinsicGetName:=dll.LLVMIntrinsicGetName).restype, LLVMIntrinsicGetName.argtypes = ctypes.POINTER(ctypes.c_char), [ctypes.c_uint32, ctypes.POINTER(size_t)]
-except AttributeError: pass
-
-try: (LLVMIntrinsicCopyOverloadedName:=dll.LLVMIntrinsicCopyOverloadedName).restype, LLVMIntrinsicCopyOverloadedName.argtypes = ctypes.POINTER(ctypes.c_char), [ctypes.c_uint32, ctypes.POINTER(LLVMTypeRef), size_t, ctypes.POINTER(size_t)]
-except AttributeError: pass
-
-try: (LLVMIntrinsicCopyOverloadedName2:=dll.LLVMIntrinsicCopyOverloadedName2).restype, LLVMIntrinsicCopyOverloadedName2.argtypes = ctypes.POINTER(ctypes.c_char), [LLVMModuleRef, ctypes.c_uint32, ctypes.POINTER(LLVMTypeRef), size_t, ctypes.POINTER(size_t)]
-except AttributeError: pass
-
-try: (LLVMIntrinsicIsOverloaded:=dll.LLVMIntrinsicIsOverloaded).restype, LLVMIntrinsicIsOverloaded.argtypes = LLVMBool, [ctypes.c_uint32]
-except AttributeError: pass
-
-try: (LLVMGetFunctionCallConv:=dll.LLVMGetFunctionCallConv).restype, LLVMGetFunctionCallConv.argtypes = ctypes.c_uint32, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMSetFunctionCallConv:=dll.LLVMSetFunctionCallConv).restype, LLVMSetFunctionCallConv.argtypes = None, [LLVMValueRef, ctypes.c_uint32]
-except AttributeError: pass
-
-try: (LLVMGetGC:=dll.LLVMGetGC).restype, LLVMGetGC.argtypes = ctypes.POINTER(ctypes.c_char), [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMSetGC:=dll.LLVMSetGC).restype, LLVMSetGC.argtypes = None, [LLVMValueRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMGetPrefixData:=dll.LLVMGetPrefixData).restype, LLVMGetPrefixData.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMHasPrefixData:=dll.LLVMHasPrefixData).restype, LLVMHasPrefixData.argtypes = LLVMBool, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMSetPrefixData:=dll.LLVMSetPrefixData).restype, LLVMSetPrefixData.argtypes = None, [LLVMValueRef, LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMGetPrologueData:=dll.LLVMGetPrologueData).restype, LLVMGetPrologueData.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMHasPrologueData:=dll.LLVMHasPrologueData).restype, LLVMHasPrologueData.argtypes = LLVMBool, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMSetPrologueData:=dll.LLVMSetPrologueData).restype, LLVMSetPrologueData.argtypes = None, [LLVMValueRef, LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMAddAttributeAtIndex:=dll.LLVMAddAttributeAtIndex).restype, LLVMAddAttributeAtIndex.argtypes = None, [LLVMValueRef, LLVMAttributeIndex, LLVMAttributeRef]
-except AttributeError: pass
-
-try: (LLVMGetAttributeCountAtIndex:=dll.LLVMGetAttributeCountAtIndex).restype, LLVMGetAttributeCountAtIndex.argtypes = ctypes.c_uint32, [LLVMValueRef, LLVMAttributeIndex]
-except AttributeError: pass
-
-try: (LLVMGetAttributesAtIndex:=dll.LLVMGetAttributesAtIndex).restype, LLVMGetAttributesAtIndex.argtypes = None, [LLVMValueRef, LLVMAttributeIndex, ctypes.POINTER(LLVMAttributeRef)]
-except AttributeError: pass
-
-try: (LLVMGetEnumAttributeAtIndex:=dll.LLVMGetEnumAttributeAtIndex).restype, LLVMGetEnumAttributeAtIndex.argtypes = LLVMAttributeRef, [LLVMValueRef, LLVMAttributeIndex, ctypes.c_uint32]
-except AttributeError: pass
-
-try: (LLVMGetStringAttributeAtIndex:=dll.LLVMGetStringAttributeAtIndex).restype, LLVMGetStringAttributeAtIndex.argtypes = LLVMAttributeRef, [LLVMValueRef, LLVMAttributeIndex, ctypes.POINTER(ctypes.c_char), ctypes.c_uint32]
-except AttributeError: pass
-
-try: (LLVMRemoveEnumAttributeAtIndex:=dll.LLVMRemoveEnumAttributeAtIndex).restype, LLVMRemoveEnumAttributeAtIndex.argtypes = None, [LLVMValueRef, LLVMAttributeIndex, ctypes.c_uint32]
-except AttributeError: pass
-
-try: (LLVMRemoveStringAttributeAtIndex:=dll.LLVMRemoveStringAttributeAtIndex).restype, LLVMRemoveStringAttributeAtIndex.argtypes = None, [LLVMValueRef, LLVMAttributeIndex, ctypes.POINTER(ctypes.c_char), ctypes.c_uint32]
-except AttributeError: pass
-
-try: (LLVMAddTargetDependentFunctionAttr:=dll.LLVMAddTargetDependentFunctionAttr).restype, LLVMAddTargetDependentFunctionAttr.argtypes = None, [LLVMValueRef, ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMCountParams:=dll.LLVMCountParams).restype, LLVMCountParams.argtypes = ctypes.c_uint32, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMGetParams:=dll.LLVMGetParams).restype, LLVMGetParams.argtypes = None, [LLVMValueRef, ctypes.POINTER(LLVMValueRef)]
-except AttributeError: pass
-
-try: (LLVMGetParam:=dll.LLVMGetParam).restype, LLVMGetParam.argtypes = LLVMValueRef, [LLVMValueRef, ctypes.c_uint32]
-except AttributeError: pass
-
-try: (LLVMGetParamParent:=dll.LLVMGetParamParent).restype, LLVMGetParamParent.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMGetFirstParam:=dll.LLVMGetFirstParam).restype, LLVMGetFirstParam.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMGetLastParam:=dll.LLVMGetLastParam).restype, LLVMGetLastParam.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMGetNextParam:=dll.LLVMGetNextParam).restype, LLVMGetNextParam.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMGetPreviousParam:=dll.LLVMGetPreviousParam).restype, LLVMGetPreviousParam.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMSetParamAlignment:=dll.LLVMSetParamAlignment).restype, LLVMSetParamAlignment.argtypes = None, [LLVMValueRef, ctypes.c_uint32]
-except AttributeError: pass
-
-try: (LLVMAddGlobalIFunc:=dll.LLVMAddGlobalIFunc).restype, LLVMAddGlobalIFunc.argtypes = LLVMValueRef, [LLVMModuleRef, ctypes.POINTER(ctypes.c_char), size_t, LLVMTypeRef, ctypes.c_uint32, LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMGetNamedGlobalIFunc:=dll.LLVMGetNamedGlobalIFunc).restype, LLVMGetNamedGlobalIFunc.argtypes = LLVMValueRef, [LLVMModuleRef, ctypes.POINTER(ctypes.c_char), size_t]
-except AttributeError: pass
-
-try: (LLVMGetFirstGlobalIFunc:=dll.LLVMGetFirstGlobalIFunc).restype, LLVMGetFirstGlobalIFunc.argtypes = LLVMValueRef, [LLVMModuleRef]
-except AttributeError: pass
-
-try: (LLVMGetLastGlobalIFunc:=dll.LLVMGetLastGlobalIFunc).restype, LLVMGetLastGlobalIFunc.argtypes = LLVMValueRef, [LLVMModuleRef]
-except AttributeError: pass
-
-try: (LLVMGetNextGlobalIFunc:=dll.LLVMGetNextGlobalIFunc).restype, LLVMGetNextGlobalIFunc.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMGetPreviousGlobalIFunc:=dll.LLVMGetPreviousGlobalIFunc).restype, LLVMGetPreviousGlobalIFunc.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMGetGlobalIFuncResolver:=dll.LLVMGetGlobalIFuncResolver).restype, LLVMGetGlobalIFuncResolver.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMSetGlobalIFuncResolver:=dll.LLVMSetGlobalIFuncResolver).restype, LLVMSetGlobalIFuncResolver.argtypes = None, [LLVMValueRef, LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMEraseGlobalIFunc:=dll.LLVMEraseGlobalIFunc).restype, LLVMEraseGlobalIFunc.argtypes = None, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMRemoveGlobalIFunc:=dll.LLVMRemoveGlobalIFunc).restype, LLVMRemoveGlobalIFunc.argtypes = None, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMMDStringInContext2:=dll.LLVMMDStringInContext2).restype, LLVMMDStringInContext2.argtypes = LLVMMetadataRef, [LLVMContextRef, ctypes.POINTER(ctypes.c_char), size_t]
-except AttributeError: pass
-
-try: (LLVMMDNodeInContext2:=dll.LLVMMDNodeInContext2).restype, LLVMMDNodeInContext2.argtypes = LLVMMetadataRef, [LLVMContextRef, ctypes.POINTER(LLVMMetadataRef), size_t]
-except AttributeError: pass
-
-try: (LLVMMetadataAsValue:=dll.LLVMMetadataAsValue).restype, LLVMMetadataAsValue.argtypes = LLVMValueRef, [LLVMContextRef, LLVMMetadataRef]
-except AttributeError: pass
-
-try: (LLVMValueAsMetadata:=dll.LLVMValueAsMetadata).restype, LLVMValueAsMetadata.argtypes = LLVMMetadataRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMGetMDString:=dll.LLVMGetMDString).restype, LLVMGetMDString.argtypes = ctypes.POINTER(ctypes.c_char), [LLVMValueRef, ctypes.POINTER(ctypes.c_uint32)]
-except AttributeError: pass
-
-try: (LLVMGetMDNodeNumOperands:=dll.LLVMGetMDNodeNumOperands).restype, LLVMGetMDNodeNumOperands.argtypes = ctypes.c_uint32, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMGetMDNodeOperands:=dll.LLVMGetMDNodeOperands).restype, LLVMGetMDNodeOperands.argtypes = None, [LLVMValueRef, ctypes.POINTER(LLVMValueRef)]
-except AttributeError: pass
-
-try: (LLVMReplaceMDNodeOperandWith:=dll.LLVMReplaceMDNodeOperandWith).restype, LLVMReplaceMDNodeOperandWith.argtypes = None, [LLVMValueRef, ctypes.c_uint32, LLVMMetadataRef]
-except AttributeError: pass
-
-try: (LLVMMDStringInContext:=dll.LLVMMDStringInContext).restype, LLVMMDStringInContext.argtypes = LLVMValueRef, [LLVMContextRef, ctypes.POINTER(ctypes.c_char), ctypes.c_uint32]
-except AttributeError: pass
-
-try: (LLVMMDString:=dll.LLVMMDString).restype, LLVMMDString.argtypes = LLVMValueRef, [ctypes.POINTER(ctypes.c_char), ctypes.c_uint32]
-except AttributeError: pass
-
-try: (LLVMMDNodeInContext:=dll.LLVMMDNodeInContext).restype, LLVMMDNodeInContext.argtypes = LLVMValueRef, [LLVMContextRef, ctypes.POINTER(LLVMValueRef), ctypes.c_uint32]
-except AttributeError: pass
-
-try: (LLVMMDNode:=dll.LLVMMDNode).restype, LLVMMDNode.argtypes = LLVMValueRef, [ctypes.POINTER(LLVMValueRef), ctypes.c_uint32]
-except AttributeError: pass
-
-class struct_LLVMOpaqueOperandBundle(Struct): pass
-LLVMOperandBundleRef = ctypes.POINTER(struct_LLVMOpaqueOperandBundle)
-try: (LLVMCreateOperandBundle:=dll.LLVMCreateOperandBundle).restype, LLVMCreateOperandBundle.argtypes = LLVMOperandBundleRef, [ctypes.POINTER(ctypes.c_char), size_t, ctypes.POINTER(LLVMValueRef), ctypes.c_uint32]
-except AttributeError: pass
-
-try: (LLVMDisposeOperandBundle:=dll.LLVMDisposeOperandBundle).restype, LLVMDisposeOperandBundle.argtypes = None, [LLVMOperandBundleRef]
-except AttributeError: pass
-
-try: (LLVMGetOperandBundleTag:=dll.LLVMGetOperandBundleTag).restype, LLVMGetOperandBundleTag.argtypes = ctypes.POINTER(ctypes.c_char), [LLVMOperandBundleRef, ctypes.POINTER(size_t)]
-except AttributeError: pass
-
-try: (LLVMGetNumOperandBundleArgs:=dll.LLVMGetNumOperandBundleArgs).restype, LLVMGetNumOperandBundleArgs.argtypes = ctypes.c_uint32, [LLVMOperandBundleRef]
-except AttributeError: pass
-
-try: (LLVMGetOperandBundleArgAtIndex:=dll.LLVMGetOperandBundleArgAtIndex).restype, LLVMGetOperandBundleArgAtIndex.argtypes = LLVMValueRef, [LLVMOperandBundleRef, ctypes.c_uint32]
-except AttributeError: pass
-
-try: (LLVMBasicBlockAsValue:=dll.LLVMBasicBlockAsValue).restype, LLVMBasicBlockAsValue.argtypes = LLVMValueRef, [LLVMBasicBlockRef]
-except AttributeError: pass
-
-try: (LLVMValueIsBasicBlock:=dll.LLVMValueIsBasicBlock).restype, LLVMValueIsBasicBlock.argtypes = LLVMBool, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMValueAsBasicBlock:=dll.LLVMValueAsBasicBlock).restype, LLVMValueAsBasicBlock.argtypes = LLVMBasicBlockRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMGetBasicBlockName:=dll.LLVMGetBasicBlockName).restype, LLVMGetBasicBlockName.argtypes = ctypes.POINTER(ctypes.c_char), [LLVMBasicBlockRef]
-except AttributeError: pass
-
-try: (LLVMGetBasicBlockParent:=dll.LLVMGetBasicBlockParent).restype, LLVMGetBasicBlockParent.argtypes = LLVMValueRef, [LLVMBasicBlockRef]
-except AttributeError: pass
-
-try: (LLVMGetBasicBlockTerminator:=dll.LLVMGetBasicBlockTerminator).restype, LLVMGetBasicBlockTerminator.argtypes = LLVMValueRef, [LLVMBasicBlockRef]
-except AttributeError: pass
-
-try: (LLVMCountBasicBlocks:=dll.LLVMCountBasicBlocks).restype, LLVMCountBasicBlocks.argtypes = ctypes.c_uint32, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMGetBasicBlocks:=dll.LLVMGetBasicBlocks).restype, LLVMGetBasicBlocks.argtypes = None, [LLVMValueRef, ctypes.POINTER(LLVMBasicBlockRef)]
-except AttributeError: pass
-
-try: (LLVMGetFirstBasicBlock:=dll.LLVMGetFirstBasicBlock).restype, LLVMGetFirstBasicBlock.argtypes = LLVMBasicBlockRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMGetLastBasicBlock:=dll.LLVMGetLastBasicBlock).restype, LLVMGetLastBasicBlock.argtypes = LLVMBasicBlockRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMGetNextBasicBlock:=dll.LLVMGetNextBasicBlock).restype, LLVMGetNextBasicBlock.argtypes = LLVMBasicBlockRef, [LLVMBasicBlockRef]
-except AttributeError: pass
-
-try: (LLVMGetPreviousBasicBlock:=dll.LLVMGetPreviousBasicBlock).restype, LLVMGetPreviousBasicBlock.argtypes = LLVMBasicBlockRef, [LLVMBasicBlockRef]
-except AttributeError: pass
-
-try: (LLVMGetEntryBasicBlock:=dll.LLVMGetEntryBasicBlock).restype, LLVMGetEntryBasicBlock.argtypes = LLVMBasicBlockRef, [LLVMValueRef]
-except AttributeError: pass
-
-class struct_LLVMOpaqueBuilder(Struct): pass
-LLVMBuilderRef = ctypes.POINTER(struct_LLVMOpaqueBuilder)
-try: (LLVMInsertExistingBasicBlockAfterInsertBlock:=dll.LLVMInsertExistingBasicBlockAfterInsertBlock).restype, LLVMInsertExistingBasicBlockAfterInsertBlock.argtypes = None, [LLVMBuilderRef, LLVMBasicBlockRef]
-except AttributeError: pass
-
-try: (LLVMAppendExistingBasicBlock:=dll.LLVMAppendExistingBasicBlock).restype, LLVMAppendExistingBasicBlock.argtypes = None, [LLVMValueRef, LLVMBasicBlockRef]
-except AttributeError: pass
-
-try: (LLVMCreateBasicBlockInContext:=dll.LLVMCreateBasicBlockInContext).restype, LLVMCreateBasicBlockInContext.argtypes = LLVMBasicBlockRef, [LLVMContextRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMAppendBasicBlockInContext:=dll.LLVMAppendBasicBlockInContext).restype, LLVMAppendBasicBlockInContext.argtypes = LLVMBasicBlockRef, [LLVMContextRef, LLVMValueRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMAppendBasicBlock:=dll.LLVMAppendBasicBlock).restype, LLVMAppendBasicBlock.argtypes = LLVMBasicBlockRef, [LLVMValueRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMInsertBasicBlockInContext:=dll.LLVMInsertBasicBlockInContext).restype, LLVMInsertBasicBlockInContext.argtypes = LLVMBasicBlockRef, [LLVMContextRef, LLVMBasicBlockRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMInsertBasicBlock:=dll.LLVMInsertBasicBlock).restype, LLVMInsertBasicBlock.argtypes = LLVMBasicBlockRef, [LLVMBasicBlockRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMDeleteBasicBlock:=dll.LLVMDeleteBasicBlock).restype, LLVMDeleteBasicBlock.argtypes = None, [LLVMBasicBlockRef]
-except AttributeError: pass
-
-try: (LLVMRemoveBasicBlockFromParent:=dll.LLVMRemoveBasicBlockFromParent).restype, LLVMRemoveBasicBlockFromParent.argtypes = None, [LLVMBasicBlockRef]
-except AttributeError: pass
-
-try: (LLVMMoveBasicBlockBefore:=dll.LLVMMoveBasicBlockBefore).restype, LLVMMoveBasicBlockBefore.argtypes = None, [LLVMBasicBlockRef, LLVMBasicBlockRef]
-except AttributeError: pass
-
-try: (LLVMMoveBasicBlockAfter:=dll.LLVMMoveBasicBlockAfter).restype, LLVMMoveBasicBlockAfter.argtypes = None, [LLVMBasicBlockRef, LLVMBasicBlockRef]
-except AttributeError: pass
-
-try: (LLVMGetFirstInstruction:=dll.LLVMGetFirstInstruction).restype, LLVMGetFirstInstruction.argtypes = LLVMValueRef, [LLVMBasicBlockRef]
-except AttributeError: pass
-
-try: (LLVMGetLastInstruction:=dll.LLVMGetLastInstruction).restype, LLVMGetLastInstruction.argtypes = LLVMValueRef, [LLVMBasicBlockRef]
-except AttributeError: pass
-
-try: (LLVMHasMetadata:=dll.LLVMHasMetadata).restype, LLVMHasMetadata.argtypes = ctypes.c_int32, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMGetMetadata:=dll.LLVMGetMetadata).restype, LLVMGetMetadata.argtypes = LLVMValueRef, [LLVMValueRef, ctypes.c_uint32]
-except AttributeError: pass
-
-try: (LLVMSetMetadata:=dll.LLVMSetMetadata).restype, LLVMSetMetadata.argtypes = None, [LLVMValueRef, ctypes.c_uint32, LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMInstructionGetAllMetadataOtherThanDebugLoc:=dll.LLVMInstructionGetAllMetadataOtherThanDebugLoc).restype, LLVMInstructionGetAllMetadataOtherThanDebugLoc.argtypes = ctypes.POINTER(LLVMValueMetadataEntry), [LLVMValueRef, ctypes.POINTER(size_t)]
-except AttributeError: pass
-
-try: (LLVMGetInstructionParent:=dll.LLVMGetInstructionParent).restype, LLVMGetInstructionParent.argtypes = LLVMBasicBlockRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMGetNextInstruction:=dll.LLVMGetNextInstruction).restype, LLVMGetNextInstruction.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMGetPreviousInstruction:=dll.LLVMGetPreviousInstruction).restype, LLVMGetPreviousInstruction.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMInstructionRemoveFromParent:=dll.LLVMInstructionRemoveFromParent).restype, LLVMInstructionRemoveFromParent.argtypes = None, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMInstructionEraseFromParent:=dll.LLVMInstructionEraseFromParent).restype, LLVMInstructionEraseFromParent.argtypes = None, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMDeleteInstruction:=dll.LLVMDeleteInstruction).restype, LLVMDeleteInstruction.argtypes = None, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMGetInstructionOpcode:=dll.LLVMGetInstructionOpcode).restype, LLVMGetInstructionOpcode.argtypes = LLVMOpcode, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMGetICmpPredicate:=dll.LLVMGetICmpPredicate).restype, LLVMGetICmpPredicate.argtypes = LLVMIntPredicate, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMGetFCmpPredicate:=dll.LLVMGetFCmpPredicate).restype, LLVMGetFCmpPredicate.argtypes = LLVMRealPredicate, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMInstructionClone:=dll.LLVMInstructionClone).restype, LLVMInstructionClone.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMIsATerminatorInst:=dll.LLVMIsATerminatorInst).restype, LLVMIsATerminatorInst.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMGetFirstDbgRecord:=dll.LLVMGetFirstDbgRecord).restype, LLVMGetFirstDbgRecord.argtypes = LLVMDbgRecordRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMGetLastDbgRecord:=dll.LLVMGetLastDbgRecord).restype, LLVMGetLastDbgRecord.argtypes = LLVMDbgRecordRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMGetNextDbgRecord:=dll.LLVMGetNextDbgRecord).restype, LLVMGetNextDbgRecord.argtypes = LLVMDbgRecordRef, [LLVMDbgRecordRef]
-except AttributeError: pass
-
-try: (LLVMGetPreviousDbgRecord:=dll.LLVMGetPreviousDbgRecord).restype, LLVMGetPreviousDbgRecord.argtypes = LLVMDbgRecordRef, [LLVMDbgRecordRef]
-except AttributeError: pass
-
-try: (LLVMGetNumArgOperands:=dll.LLVMGetNumArgOperands).restype, LLVMGetNumArgOperands.argtypes = ctypes.c_uint32, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMSetInstructionCallConv:=dll.LLVMSetInstructionCallConv).restype, LLVMSetInstructionCallConv.argtypes = None, [LLVMValueRef, ctypes.c_uint32]
-except AttributeError: pass
-
-try: (LLVMGetInstructionCallConv:=dll.LLVMGetInstructionCallConv).restype, LLVMGetInstructionCallConv.argtypes = ctypes.c_uint32, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMSetInstrParamAlignment:=dll.LLVMSetInstrParamAlignment).restype, LLVMSetInstrParamAlignment.argtypes = None, [LLVMValueRef, LLVMAttributeIndex, ctypes.c_uint32]
-except AttributeError: pass
-
-try: (LLVMAddCallSiteAttribute:=dll.LLVMAddCallSiteAttribute).restype, LLVMAddCallSiteAttribute.argtypes = None, [LLVMValueRef, LLVMAttributeIndex, LLVMAttributeRef]
-except AttributeError: pass
-
-try: (LLVMGetCallSiteAttributeCount:=dll.LLVMGetCallSiteAttributeCount).restype, LLVMGetCallSiteAttributeCount.argtypes = ctypes.c_uint32, [LLVMValueRef, LLVMAttributeIndex]
-except AttributeError: pass
-
-try: (LLVMGetCallSiteAttributes:=dll.LLVMGetCallSiteAttributes).restype, LLVMGetCallSiteAttributes.argtypes = None, [LLVMValueRef, LLVMAttributeIndex, ctypes.POINTER(LLVMAttributeRef)]
-except AttributeError: pass
-
-try: (LLVMGetCallSiteEnumAttribute:=dll.LLVMGetCallSiteEnumAttribute).restype, LLVMGetCallSiteEnumAttribute.argtypes = LLVMAttributeRef, [LLVMValueRef, LLVMAttributeIndex, ctypes.c_uint32]
-except AttributeError: pass
-
-try: (LLVMGetCallSiteStringAttribute:=dll.LLVMGetCallSiteStringAttribute).restype, LLVMGetCallSiteStringAttribute.argtypes = LLVMAttributeRef, [LLVMValueRef, LLVMAttributeIndex, ctypes.POINTER(ctypes.c_char), ctypes.c_uint32]
-except AttributeError: pass
-
-try: (LLVMRemoveCallSiteEnumAttribute:=dll.LLVMRemoveCallSiteEnumAttribute).restype, LLVMRemoveCallSiteEnumAttribute.argtypes = None, [LLVMValueRef, LLVMAttributeIndex, ctypes.c_uint32]
-except AttributeError: pass
-
-try: (LLVMRemoveCallSiteStringAttribute:=dll.LLVMRemoveCallSiteStringAttribute).restype, LLVMRemoveCallSiteStringAttribute.argtypes = None, [LLVMValueRef, LLVMAttributeIndex, ctypes.POINTER(ctypes.c_char), ctypes.c_uint32]
-except AttributeError: pass
-
-try: (LLVMGetCalledFunctionType:=dll.LLVMGetCalledFunctionType).restype, LLVMGetCalledFunctionType.argtypes = LLVMTypeRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMGetCalledValue:=dll.LLVMGetCalledValue).restype, LLVMGetCalledValue.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMGetNumOperandBundles:=dll.LLVMGetNumOperandBundles).restype, LLVMGetNumOperandBundles.argtypes = ctypes.c_uint32, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMGetOperandBundleAtIndex:=dll.LLVMGetOperandBundleAtIndex).restype, LLVMGetOperandBundleAtIndex.argtypes = LLVMOperandBundleRef, [LLVMValueRef, ctypes.c_uint32]
-except AttributeError: pass
-
-try: (LLVMIsTailCall:=dll.LLVMIsTailCall).restype, LLVMIsTailCall.argtypes = LLVMBool, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMSetTailCall:=dll.LLVMSetTailCall).restype, LLVMSetTailCall.argtypes = None, [LLVMValueRef, LLVMBool]
-except AttributeError: pass
-
-try: (LLVMGetTailCallKind:=dll.LLVMGetTailCallKind).restype, LLVMGetTailCallKind.argtypes = LLVMTailCallKind, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMSetTailCallKind:=dll.LLVMSetTailCallKind).restype, LLVMSetTailCallKind.argtypes = None, [LLVMValueRef, LLVMTailCallKind]
-except AttributeError: pass
-
-try: (LLVMGetNormalDest:=dll.LLVMGetNormalDest).restype, LLVMGetNormalDest.argtypes = LLVMBasicBlockRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMGetUnwindDest:=dll.LLVMGetUnwindDest).restype, LLVMGetUnwindDest.argtypes = LLVMBasicBlockRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMSetNormalDest:=dll.LLVMSetNormalDest).restype, LLVMSetNormalDest.argtypes = None, [LLVMValueRef, LLVMBasicBlockRef]
-except AttributeError: pass
-
-try: (LLVMSetUnwindDest:=dll.LLVMSetUnwindDest).restype, LLVMSetUnwindDest.argtypes = None, [LLVMValueRef, LLVMBasicBlockRef]
-except AttributeError: pass
-
-try: (LLVMGetCallBrDefaultDest:=dll.LLVMGetCallBrDefaultDest).restype, LLVMGetCallBrDefaultDest.argtypes = LLVMBasicBlockRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMGetCallBrNumIndirectDests:=dll.LLVMGetCallBrNumIndirectDests).restype, LLVMGetCallBrNumIndirectDests.argtypes = ctypes.c_uint32, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMGetCallBrIndirectDest:=dll.LLVMGetCallBrIndirectDest).restype, LLVMGetCallBrIndirectDest.argtypes = LLVMBasicBlockRef, [LLVMValueRef, ctypes.c_uint32]
-except AttributeError: pass
-
-try: (LLVMGetNumSuccessors:=dll.LLVMGetNumSuccessors).restype, LLVMGetNumSuccessors.argtypes = ctypes.c_uint32, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMGetSuccessor:=dll.LLVMGetSuccessor).restype, LLVMGetSuccessor.argtypes = LLVMBasicBlockRef, [LLVMValueRef, ctypes.c_uint32]
-except AttributeError: pass
-
-try: (LLVMSetSuccessor:=dll.LLVMSetSuccessor).restype, LLVMSetSuccessor.argtypes = None, [LLVMValueRef, ctypes.c_uint32, LLVMBasicBlockRef]
-except AttributeError: pass
-
-try: (LLVMIsConditional:=dll.LLVMIsConditional).restype, LLVMIsConditional.argtypes = LLVMBool, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMGetCondition:=dll.LLVMGetCondition).restype, LLVMGetCondition.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMSetCondition:=dll.LLVMSetCondition).restype, LLVMSetCondition.argtypes = None, [LLVMValueRef, LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMGetSwitchDefaultDest:=dll.LLVMGetSwitchDefaultDest).restype, LLVMGetSwitchDefaultDest.argtypes = LLVMBasicBlockRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMGetAllocatedType:=dll.LLVMGetAllocatedType).restype, LLVMGetAllocatedType.argtypes = LLVMTypeRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMIsInBounds:=dll.LLVMIsInBounds).restype, LLVMIsInBounds.argtypes = LLVMBool, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMSetIsInBounds:=dll.LLVMSetIsInBounds).restype, LLVMSetIsInBounds.argtypes = None, [LLVMValueRef, LLVMBool]
-except AttributeError: pass
-
-try: (LLVMGetGEPSourceElementType:=dll.LLVMGetGEPSourceElementType).restype, LLVMGetGEPSourceElementType.argtypes = LLVMTypeRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMGEPGetNoWrapFlags:=dll.LLVMGEPGetNoWrapFlags).restype, LLVMGEPGetNoWrapFlags.argtypes = LLVMGEPNoWrapFlags, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMGEPSetNoWrapFlags:=dll.LLVMGEPSetNoWrapFlags).restype, LLVMGEPSetNoWrapFlags.argtypes = None, [LLVMValueRef, LLVMGEPNoWrapFlags]
-except AttributeError: pass
-
-try: (LLVMAddIncoming:=dll.LLVMAddIncoming).restype, LLVMAddIncoming.argtypes = None, [LLVMValueRef, ctypes.POINTER(LLVMValueRef), ctypes.POINTER(LLVMBasicBlockRef), ctypes.c_uint32]
-except AttributeError: pass
-
-try: (LLVMCountIncoming:=dll.LLVMCountIncoming).restype, LLVMCountIncoming.argtypes = ctypes.c_uint32, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMGetIncomingValue:=dll.LLVMGetIncomingValue).restype, LLVMGetIncomingValue.argtypes = LLVMValueRef, [LLVMValueRef, ctypes.c_uint32]
-except AttributeError: pass
-
-try: (LLVMGetIncomingBlock:=dll.LLVMGetIncomingBlock).restype, LLVMGetIncomingBlock.argtypes = LLVMBasicBlockRef, [LLVMValueRef, ctypes.c_uint32]
-except AttributeError: pass
-
-try: (LLVMGetNumIndices:=dll.LLVMGetNumIndices).restype, LLVMGetNumIndices.argtypes = ctypes.c_uint32, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMGetIndices:=dll.LLVMGetIndices).restype, LLVMGetIndices.argtypes = ctypes.POINTER(ctypes.c_uint32), [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMCreateBuilderInContext:=dll.LLVMCreateBuilderInContext).restype, LLVMCreateBuilderInContext.argtypes = LLVMBuilderRef, [LLVMContextRef]
-except AttributeError: pass
-
-try: (LLVMCreateBuilder:=dll.LLVMCreateBuilder).restype, LLVMCreateBuilder.argtypes = LLVMBuilderRef, []
-except AttributeError: pass
-
-try: (LLVMPositionBuilder:=dll.LLVMPositionBuilder).restype, LLVMPositionBuilder.argtypes = None, [LLVMBuilderRef, LLVMBasicBlockRef, LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMPositionBuilderBeforeDbgRecords:=dll.LLVMPositionBuilderBeforeDbgRecords).restype, LLVMPositionBuilderBeforeDbgRecords.argtypes = None, [LLVMBuilderRef, LLVMBasicBlockRef, LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMPositionBuilderBefore:=dll.LLVMPositionBuilderBefore).restype, LLVMPositionBuilderBefore.argtypes = None, [LLVMBuilderRef, LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMPositionBuilderBeforeInstrAndDbgRecords:=dll.LLVMPositionBuilderBeforeInstrAndDbgRecords).restype, LLVMPositionBuilderBeforeInstrAndDbgRecords.argtypes = None, [LLVMBuilderRef, LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMPositionBuilderAtEnd:=dll.LLVMPositionBuilderAtEnd).restype, LLVMPositionBuilderAtEnd.argtypes = None, [LLVMBuilderRef, LLVMBasicBlockRef]
-except AttributeError: pass
-
-try: (LLVMGetInsertBlock:=dll.LLVMGetInsertBlock).restype, LLVMGetInsertBlock.argtypes = LLVMBasicBlockRef, [LLVMBuilderRef]
-except AttributeError: pass
-
-try: (LLVMClearInsertionPosition:=dll.LLVMClearInsertionPosition).restype, LLVMClearInsertionPosition.argtypes = None, [LLVMBuilderRef]
-except AttributeError: pass
-
-try: (LLVMInsertIntoBuilder:=dll.LLVMInsertIntoBuilder).restype, LLVMInsertIntoBuilder.argtypes = None, [LLVMBuilderRef, LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMInsertIntoBuilderWithName:=dll.LLVMInsertIntoBuilderWithName).restype, LLVMInsertIntoBuilderWithName.argtypes = None, [LLVMBuilderRef, LLVMValueRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMDisposeBuilder:=dll.LLVMDisposeBuilder).restype, LLVMDisposeBuilder.argtypes = None, [LLVMBuilderRef]
-except AttributeError: pass
-
-try: (LLVMGetCurrentDebugLocation2:=dll.LLVMGetCurrentDebugLocation2).restype, LLVMGetCurrentDebugLocation2.argtypes = LLVMMetadataRef, [LLVMBuilderRef]
-except AttributeError: pass
-
-try: (LLVMSetCurrentDebugLocation2:=dll.LLVMSetCurrentDebugLocation2).restype, LLVMSetCurrentDebugLocation2.argtypes = None, [LLVMBuilderRef, LLVMMetadataRef]
-except AttributeError: pass
-
-try: (LLVMSetInstDebugLocation:=dll.LLVMSetInstDebugLocation).restype, LLVMSetInstDebugLocation.argtypes = None, [LLVMBuilderRef, LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMAddMetadataToInst:=dll.LLVMAddMetadataToInst).restype, LLVMAddMetadataToInst.argtypes = None, [LLVMBuilderRef, LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMBuilderGetDefaultFPMathTag:=dll.LLVMBuilderGetDefaultFPMathTag).restype, LLVMBuilderGetDefaultFPMathTag.argtypes = LLVMMetadataRef, [LLVMBuilderRef]
-except AttributeError: pass
-
-try: (LLVMBuilderSetDefaultFPMathTag:=dll.LLVMBuilderSetDefaultFPMathTag).restype, LLVMBuilderSetDefaultFPMathTag.argtypes = None, [LLVMBuilderRef, LLVMMetadataRef]
-except AttributeError: pass
-
-try: (LLVMGetBuilderContext:=dll.LLVMGetBuilderContext).restype, LLVMGetBuilderContext.argtypes = LLVMContextRef, [LLVMBuilderRef]
-except AttributeError: pass
-
-try: (LLVMSetCurrentDebugLocation:=dll.LLVMSetCurrentDebugLocation).restype, LLVMSetCurrentDebugLocation.argtypes = None, [LLVMBuilderRef, LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMGetCurrentDebugLocation:=dll.LLVMGetCurrentDebugLocation).restype, LLVMGetCurrentDebugLocation.argtypes = LLVMValueRef, [LLVMBuilderRef]
-except AttributeError: pass
-
-try: (LLVMBuildRetVoid:=dll.LLVMBuildRetVoid).restype, LLVMBuildRetVoid.argtypes = LLVMValueRef, [LLVMBuilderRef]
-except AttributeError: pass
-
-try: (LLVMBuildRet:=dll.LLVMBuildRet).restype, LLVMBuildRet.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMBuildAggregateRet:=dll.LLVMBuildAggregateRet).restype, LLVMBuildAggregateRet.argtypes = LLVMValueRef, [LLVMBuilderRef, ctypes.POINTER(LLVMValueRef), ctypes.c_uint32]
-except AttributeError: pass
-
-try: (LLVMBuildBr:=dll.LLVMBuildBr).restype, LLVMBuildBr.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMBasicBlockRef]
-except AttributeError: pass
-
-try: (LLVMBuildCondBr:=dll.LLVMBuildCondBr).restype, LLVMBuildCondBr.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMValueRef, LLVMBasicBlockRef, LLVMBasicBlockRef]
-except AttributeError: pass
-
-try: (LLVMBuildSwitch:=dll.LLVMBuildSwitch).restype, LLVMBuildSwitch.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMValueRef, LLVMBasicBlockRef, ctypes.c_uint32]
-except AttributeError: pass
-
-try: (LLVMBuildIndirectBr:=dll.LLVMBuildIndirectBr).restype, LLVMBuildIndirectBr.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMValueRef, ctypes.c_uint32]
-except AttributeError: pass
-
-try: (LLVMBuildCallBr:=dll.LLVMBuildCallBr).restype, LLVMBuildCallBr.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMTypeRef, LLVMValueRef, LLVMBasicBlockRef, ctypes.POINTER(LLVMBasicBlockRef), ctypes.c_uint32, ctypes.POINTER(LLVMValueRef), ctypes.c_uint32, ctypes.POINTER(LLVMOperandBundleRef), ctypes.c_uint32, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMBuildInvoke2:=dll.LLVMBuildInvoke2).restype, LLVMBuildInvoke2.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMTypeRef, LLVMValueRef, ctypes.POINTER(LLVMValueRef), ctypes.c_uint32, LLVMBasicBlockRef, LLVMBasicBlockRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMBuildInvokeWithOperandBundles:=dll.LLVMBuildInvokeWithOperandBundles).restype, LLVMBuildInvokeWithOperandBundles.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMTypeRef, LLVMValueRef, ctypes.POINTER(LLVMValueRef), ctypes.c_uint32, LLVMBasicBlockRef, LLVMBasicBlockRef, ctypes.POINTER(LLVMOperandBundleRef), ctypes.c_uint32, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMBuildUnreachable:=dll.LLVMBuildUnreachable).restype, LLVMBuildUnreachable.argtypes = LLVMValueRef, [LLVMBuilderRef]
-except AttributeError: pass
-
-try: (LLVMBuildResume:=dll.LLVMBuildResume).restype, LLVMBuildResume.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMBuildLandingPad:=dll.LLVMBuildLandingPad).restype, LLVMBuildLandingPad.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMTypeRef, LLVMValueRef, ctypes.c_uint32, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMBuildCleanupRet:=dll.LLVMBuildCleanupRet).restype, LLVMBuildCleanupRet.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMValueRef, LLVMBasicBlockRef]
-except AttributeError: pass
-
-try: (LLVMBuildCatchRet:=dll.LLVMBuildCatchRet).restype, LLVMBuildCatchRet.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMValueRef, LLVMBasicBlockRef]
-except AttributeError: pass
-
-try: (LLVMBuildCatchPad:=dll.LLVMBuildCatchPad).restype, LLVMBuildCatchPad.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMValueRef, ctypes.POINTER(LLVMValueRef), ctypes.c_uint32, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMBuildCleanupPad:=dll.LLVMBuildCleanupPad).restype, LLVMBuildCleanupPad.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMValueRef, ctypes.POINTER(LLVMValueRef), ctypes.c_uint32, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMBuildCatchSwitch:=dll.LLVMBuildCatchSwitch).restype, LLVMBuildCatchSwitch.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMValueRef, LLVMBasicBlockRef, ctypes.c_uint32, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMAddCase:=dll.LLVMAddCase).restype, LLVMAddCase.argtypes = None, [LLVMValueRef, LLVMValueRef, LLVMBasicBlockRef]
-except AttributeError: pass
-
-try: (LLVMAddDestination:=dll.LLVMAddDestination).restype, LLVMAddDestination.argtypes = None, [LLVMValueRef, LLVMBasicBlockRef]
-except AttributeError: pass
-
-try: (LLVMGetNumClauses:=dll.LLVMGetNumClauses).restype, LLVMGetNumClauses.argtypes = ctypes.c_uint32, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMGetClause:=dll.LLVMGetClause).restype, LLVMGetClause.argtypes = LLVMValueRef, [LLVMValueRef, ctypes.c_uint32]
-except AttributeError: pass
-
-try: (LLVMAddClause:=dll.LLVMAddClause).restype, LLVMAddClause.argtypes = None, [LLVMValueRef, LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMIsCleanup:=dll.LLVMIsCleanup).restype, LLVMIsCleanup.argtypes = LLVMBool, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMSetCleanup:=dll.LLVMSetCleanup).restype, LLVMSetCleanup.argtypes = None, [LLVMValueRef, LLVMBool]
-except AttributeError: pass
-
-try: (LLVMAddHandler:=dll.LLVMAddHandler).restype, LLVMAddHandler.argtypes = None, [LLVMValueRef, LLVMBasicBlockRef]
-except AttributeError: pass
-
-try: (LLVMGetNumHandlers:=dll.LLVMGetNumHandlers).restype, LLVMGetNumHandlers.argtypes = ctypes.c_uint32, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMGetHandlers:=dll.LLVMGetHandlers).restype, LLVMGetHandlers.argtypes = None, [LLVMValueRef, ctypes.POINTER(LLVMBasicBlockRef)]
-except AttributeError: pass
-
-try: (LLVMGetArgOperand:=dll.LLVMGetArgOperand).restype, LLVMGetArgOperand.argtypes = LLVMValueRef, [LLVMValueRef, ctypes.c_uint32]
-except AttributeError: pass
-
-try: (LLVMSetArgOperand:=dll.LLVMSetArgOperand).restype, LLVMSetArgOperand.argtypes = None, [LLVMValueRef, ctypes.c_uint32, LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMGetParentCatchSwitch:=dll.LLVMGetParentCatchSwitch).restype, LLVMGetParentCatchSwitch.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMSetParentCatchSwitch:=dll.LLVMSetParentCatchSwitch).restype, LLVMSetParentCatchSwitch.argtypes = None, [LLVMValueRef, LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMBuildAdd:=dll.LLVMBuildAdd).restype, LLVMBuildAdd.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMValueRef, LLVMValueRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMBuildNSWAdd:=dll.LLVMBuildNSWAdd).restype, LLVMBuildNSWAdd.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMValueRef, LLVMValueRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMBuildNUWAdd:=dll.LLVMBuildNUWAdd).restype, LLVMBuildNUWAdd.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMValueRef, LLVMValueRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMBuildFAdd:=dll.LLVMBuildFAdd).restype, LLVMBuildFAdd.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMValueRef, LLVMValueRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMBuildSub:=dll.LLVMBuildSub).restype, LLVMBuildSub.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMValueRef, LLVMValueRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMBuildNSWSub:=dll.LLVMBuildNSWSub).restype, LLVMBuildNSWSub.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMValueRef, LLVMValueRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMBuildNUWSub:=dll.LLVMBuildNUWSub).restype, LLVMBuildNUWSub.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMValueRef, LLVMValueRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMBuildFSub:=dll.LLVMBuildFSub).restype, LLVMBuildFSub.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMValueRef, LLVMValueRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMBuildMul:=dll.LLVMBuildMul).restype, LLVMBuildMul.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMValueRef, LLVMValueRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMBuildNSWMul:=dll.LLVMBuildNSWMul).restype, LLVMBuildNSWMul.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMValueRef, LLVMValueRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMBuildNUWMul:=dll.LLVMBuildNUWMul).restype, LLVMBuildNUWMul.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMValueRef, LLVMValueRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMBuildFMul:=dll.LLVMBuildFMul).restype, LLVMBuildFMul.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMValueRef, LLVMValueRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMBuildUDiv:=dll.LLVMBuildUDiv).restype, LLVMBuildUDiv.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMValueRef, LLVMValueRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMBuildExactUDiv:=dll.LLVMBuildExactUDiv).restype, LLVMBuildExactUDiv.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMValueRef, LLVMValueRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMBuildSDiv:=dll.LLVMBuildSDiv).restype, LLVMBuildSDiv.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMValueRef, LLVMValueRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMBuildExactSDiv:=dll.LLVMBuildExactSDiv).restype, LLVMBuildExactSDiv.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMValueRef, LLVMValueRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMBuildFDiv:=dll.LLVMBuildFDiv).restype, LLVMBuildFDiv.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMValueRef, LLVMValueRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMBuildURem:=dll.LLVMBuildURem).restype, LLVMBuildURem.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMValueRef, LLVMValueRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMBuildSRem:=dll.LLVMBuildSRem).restype, LLVMBuildSRem.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMValueRef, LLVMValueRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMBuildFRem:=dll.LLVMBuildFRem).restype, LLVMBuildFRem.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMValueRef, LLVMValueRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMBuildShl:=dll.LLVMBuildShl).restype, LLVMBuildShl.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMValueRef, LLVMValueRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMBuildLShr:=dll.LLVMBuildLShr).restype, LLVMBuildLShr.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMValueRef, LLVMValueRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMBuildAShr:=dll.LLVMBuildAShr).restype, LLVMBuildAShr.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMValueRef, LLVMValueRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMBuildAnd:=dll.LLVMBuildAnd).restype, LLVMBuildAnd.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMValueRef, LLVMValueRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMBuildOr:=dll.LLVMBuildOr).restype, LLVMBuildOr.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMValueRef, LLVMValueRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMBuildXor:=dll.LLVMBuildXor).restype, LLVMBuildXor.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMValueRef, LLVMValueRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMBuildBinOp:=dll.LLVMBuildBinOp).restype, LLVMBuildBinOp.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMOpcode, LLVMValueRef, LLVMValueRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMBuildNeg:=dll.LLVMBuildNeg).restype, LLVMBuildNeg.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMValueRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMBuildNSWNeg:=dll.LLVMBuildNSWNeg).restype, LLVMBuildNSWNeg.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMValueRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMBuildNUWNeg:=dll.LLVMBuildNUWNeg).restype, LLVMBuildNUWNeg.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMValueRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMBuildFNeg:=dll.LLVMBuildFNeg).restype, LLVMBuildFNeg.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMValueRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMBuildNot:=dll.LLVMBuildNot).restype, LLVMBuildNot.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMValueRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMGetNUW:=dll.LLVMGetNUW).restype, LLVMGetNUW.argtypes = LLVMBool, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMSetNUW:=dll.LLVMSetNUW).restype, LLVMSetNUW.argtypes = None, [LLVMValueRef, LLVMBool]
-except AttributeError: pass
-
-try: (LLVMGetNSW:=dll.LLVMGetNSW).restype, LLVMGetNSW.argtypes = LLVMBool, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMSetNSW:=dll.LLVMSetNSW).restype, LLVMSetNSW.argtypes = None, [LLVMValueRef, LLVMBool]
-except AttributeError: pass
-
-try: (LLVMGetExact:=dll.LLVMGetExact).restype, LLVMGetExact.argtypes = LLVMBool, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMSetExact:=dll.LLVMSetExact).restype, LLVMSetExact.argtypes = None, [LLVMValueRef, LLVMBool]
-except AttributeError: pass
-
-try: (LLVMGetNNeg:=dll.LLVMGetNNeg).restype, LLVMGetNNeg.argtypes = LLVMBool, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMSetNNeg:=dll.LLVMSetNNeg).restype, LLVMSetNNeg.argtypes = None, [LLVMValueRef, LLVMBool]
-except AttributeError: pass
-
-try: (LLVMGetFastMathFlags:=dll.LLVMGetFastMathFlags).restype, LLVMGetFastMathFlags.argtypes = LLVMFastMathFlags, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMSetFastMathFlags:=dll.LLVMSetFastMathFlags).restype, LLVMSetFastMathFlags.argtypes = None, [LLVMValueRef, LLVMFastMathFlags]
-except AttributeError: pass
-
-try: (LLVMCanValueUseFastMathFlags:=dll.LLVMCanValueUseFastMathFlags).restype, LLVMCanValueUseFastMathFlags.argtypes = LLVMBool, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMGetIsDisjoint:=dll.LLVMGetIsDisjoint).restype, LLVMGetIsDisjoint.argtypes = LLVMBool, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMSetIsDisjoint:=dll.LLVMSetIsDisjoint).restype, LLVMSetIsDisjoint.argtypes = None, [LLVMValueRef, LLVMBool]
-except AttributeError: pass
-
-try: (LLVMBuildMalloc:=dll.LLVMBuildMalloc).restype, LLVMBuildMalloc.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMTypeRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMBuildArrayMalloc:=dll.LLVMBuildArrayMalloc).restype, LLVMBuildArrayMalloc.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMTypeRef, LLVMValueRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMBuildMemSet:=dll.LLVMBuildMemSet).restype, LLVMBuildMemSet.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMValueRef, LLVMValueRef, LLVMValueRef, ctypes.c_uint32]
-except AttributeError: pass
-
-try: (LLVMBuildMemCpy:=dll.LLVMBuildMemCpy).restype, LLVMBuildMemCpy.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMValueRef, ctypes.c_uint32, LLVMValueRef, ctypes.c_uint32, LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMBuildMemMove:=dll.LLVMBuildMemMove).restype, LLVMBuildMemMove.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMValueRef, ctypes.c_uint32, LLVMValueRef, ctypes.c_uint32, LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMBuildAlloca:=dll.LLVMBuildAlloca).restype, LLVMBuildAlloca.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMTypeRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMBuildArrayAlloca:=dll.LLVMBuildArrayAlloca).restype, LLVMBuildArrayAlloca.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMTypeRef, LLVMValueRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMBuildFree:=dll.LLVMBuildFree).restype, LLVMBuildFree.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMBuildLoad2:=dll.LLVMBuildLoad2).restype, LLVMBuildLoad2.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMTypeRef, LLVMValueRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMBuildStore:=dll.LLVMBuildStore).restype, LLVMBuildStore.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMValueRef, LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMBuildGEP2:=dll.LLVMBuildGEP2).restype, LLVMBuildGEP2.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMTypeRef, LLVMValueRef, ctypes.POINTER(LLVMValueRef), ctypes.c_uint32, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMBuildInBoundsGEP2:=dll.LLVMBuildInBoundsGEP2).restype, LLVMBuildInBoundsGEP2.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMTypeRef, LLVMValueRef, ctypes.POINTER(LLVMValueRef), ctypes.c_uint32, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMBuildGEPWithNoWrapFlags:=dll.LLVMBuildGEPWithNoWrapFlags).restype, LLVMBuildGEPWithNoWrapFlags.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMTypeRef, LLVMValueRef, ctypes.POINTER(LLVMValueRef), ctypes.c_uint32, ctypes.POINTER(ctypes.c_char), LLVMGEPNoWrapFlags]
-except AttributeError: pass
-
-try: (LLVMBuildStructGEP2:=dll.LLVMBuildStructGEP2).restype, LLVMBuildStructGEP2.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMTypeRef, LLVMValueRef, ctypes.c_uint32, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMBuildGlobalString:=dll.LLVMBuildGlobalString).restype, LLVMBuildGlobalString.argtypes = LLVMValueRef, [LLVMBuilderRef, ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMBuildGlobalStringPtr:=dll.LLVMBuildGlobalStringPtr).restype, LLVMBuildGlobalStringPtr.argtypes = LLVMValueRef, [LLVMBuilderRef, ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMGetVolatile:=dll.LLVMGetVolatile).restype, LLVMGetVolatile.argtypes = LLVMBool, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMSetVolatile:=dll.LLVMSetVolatile).restype, LLVMSetVolatile.argtypes = None, [LLVMValueRef, LLVMBool]
-except AttributeError: pass
-
-try: (LLVMGetWeak:=dll.LLVMGetWeak).restype, LLVMGetWeak.argtypes = LLVMBool, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMSetWeak:=dll.LLVMSetWeak).restype, LLVMSetWeak.argtypes = None, [LLVMValueRef, LLVMBool]
-except AttributeError: pass
-
-try: (LLVMGetOrdering:=dll.LLVMGetOrdering).restype, LLVMGetOrdering.argtypes = LLVMAtomicOrdering, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMSetOrdering:=dll.LLVMSetOrdering).restype, LLVMSetOrdering.argtypes = None, [LLVMValueRef, LLVMAtomicOrdering]
-except AttributeError: pass
-
-try: (LLVMGetAtomicRMWBinOp:=dll.LLVMGetAtomicRMWBinOp).restype, LLVMGetAtomicRMWBinOp.argtypes = LLVMAtomicRMWBinOp, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMSetAtomicRMWBinOp:=dll.LLVMSetAtomicRMWBinOp).restype, LLVMSetAtomicRMWBinOp.argtypes = None, [LLVMValueRef, LLVMAtomicRMWBinOp]
-except AttributeError: pass
-
-try: (LLVMBuildTrunc:=dll.LLVMBuildTrunc).restype, LLVMBuildTrunc.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMValueRef, LLVMTypeRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMBuildZExt:=dll.LLVMBuildZExt).restype, LLVMBuildZExt.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMValueRef, LLVMTypeRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMBuildSExt:=dll.LLVMBuildSExt).restype, LLVMBuildSExt.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMValueRef, LLVMTypeRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMBuildFPToUI:=dll.LLVMBuildFPToUI).restype, LLVMBuildFPToUI.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMValueRef, LLVMTypeRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMBuildFPToSI:=dll.LLVMBuildFPToSI).restype, LLVMBuildFPToSI.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMValueRef, LLVMTypeRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMBuildUIToFP:=dll.LLVMBuildUIToFP).restype, LLVMBuildUIToFP.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMValueRef, LLVMTypeRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMBuildSIToFP:=dll.LLVMBuildSIToFP).restype, LLVMBuildSIToFP.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMValueRef, LLVMTypeRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMBuildFPTrunc:=dll.LLVMBuildFPTrunc).restype, LLVMBuildFPTrunc.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMValueRef, LLVMTypeRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMBuildFPExt:=dll.LLVMBuildFPExt).restype, LLVMBuildFPExt.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMValueRef, LLVMTypeRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMBuildPtrToInt:=dll.LLVMBuildPtrToInt).restype, LLVMBuildPtrToInt.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMValueRef, LLVMTypeRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMBuildIntToPtr:=dll.LLVMBuildIntToPtr).restype, LLVMBuildIntToPtr.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMValueRef, LLVMTypeRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMBuildBitCast:=dll.LLVMBuildBitCast).restype, LLVMBuildBitCast.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMValueRef, LLVMTypeRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMBuildAddrSpaceCast:=dll.LLVMBuildAddrSpaceCast).restype, LLVMBuildAddrSpaceCast.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMValueRef, LLVMTypeRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMBuildZExtOrBitCast:=dll.LLVMBuildZExtOrBitCast).restype, LLVMBuildZExtOrBitCast.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMValueRef, LLVMTypeRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMBuildSExtOrBitCast:=dll.LLVMBuildSExtOrBitCast).restype, LLVMBuildSExtOrBitCast.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMValueRef, LLVMTypeRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMBuildTruncOrBitCast:=dll.LLVMBuildTruncOrBitCast).restype, LLVMBuildTruncOrBitCast.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMValueRef, LLVMTypeRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMBuildCast:=dll.LLVMBuildCast).restype, LLVMBuildCast.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMOpcode, LLVMValueRef, LLVMTypeRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMBuildPointerCast:=dll.LLVMBuildPointerCast).restype, LLVMBuildPointerCast.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMValueRef, LLVMTypeRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMBuildIntCast2:=dll.LLVMBuildIntCast2).restype, LLVMBuildIntCast2.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMValueRef, LLVMTypeRef, LLVMBool, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMBuildFPCast:=dll.LLVMBuildFPCast).restype, LLVMBuildFPCast.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMValueRef, LLVMTypeRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMBuildIntCast:=dll.LLVMBuildIntCast).restype, LLVMBuildIntCast.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMValueRef, LLVMTypeRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMGetCastOpcode:=dll.LLVMGetCastOpcode).restype, LLVMGetCastOpcode.argtypes = LLVMOpcode, [LLVMValueRef, LLVMBool, LLVMTypeRef, LLVMBool]
-except AttributeError: pass
-
-try: (LLVMBuildICmp:=dll.LLVMBuildICmp).restype, LLVMBuildICmp.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMIntPredicate, LLVMValueRef, LLVMValueRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMBuildFCmp:=dll.LLVMBuildFCmp).restype, LLVMBuildFCmp.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMRealPredicate, LLVMValueRef, LLVMValueRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMBuildPhi:=dll.LLVMBuildPhi).restype, LLVMBuildPhi.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMTypeRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMBuildCall2:=dll.LLVMBuildCall2).restype, LLVMBuildCall2.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMTypeRef, LLVMValueRef, ctypes.POINTER(LLVMValueRef), ctypes.c_uint32, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMBuildCallWithOperandBundles:=dll.LLVMBuildCallWithOperandBundles).restype, LLVMBuildCallWithOperandBundles.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMTypeRef, LLVMValueRef, ctypes.POINTER(LLVMValueRef), ctypes.c_uint32, ctypes.POINTER(LLVMOperandBundleRef), ctypes.c_uint32, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMBuildSelect:=dll.LLVMBuildSelect).restype, LLVMBuildSelect.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMValueRef, LLVMValueRef, LLVMValueRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMBuildVAArg:=dll.LLVMBuildVAArg).restype, LLVMBuildVAArg.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMValueRef, LLVMTypeRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMBuildExtractElement:=dll.LLVMBuildExtractElement).restype, LLVMBuildExtractElement.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMValueRef, LLVMValueRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMBuildInsertElement:=dll.LLVMBuildInsertElement).restype, LLVMBuildInsertElement.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMValueRef, LLVMValueRef, LLVMValueRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMBuildShuffleVector:=dll.LLVMBuildShuffleVector).restype, LLVMBuildShuffleVector.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMValueRef, LLVMValueRef, LLVMValueRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMBuildExtractValue:=dll.LLVMBuildExtractValue).restype, LLVMBuildExtractValue.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMValueRef, ctypes.c_uint32, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMBuildInsertValue:=dll.LLVMBuildInsertValue).restype, LLVMBuildInsertValue.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMValueRef, LLVMValueRef, ctypes.c_uint32, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMBuildFreeze:=dll.LLVMBuildFreeze).restype, LLVMBuildFreeze.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMValueRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMBuildIsNull:=dll.LLVMBuildIsNull).restype, LLVMBuildIsNull.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMValueRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMBuildIsNotNull:=dll.LLVMBuildIsNotNull).restype, LLVMBuildIsNotNull.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMValueRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMBuildPtrDiff2:=dll.LLVMBuildPtrDiff2).restype, LLVMBuildPtrDiff2.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMTypeRef, LLVMValueRef, LLVMValueRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMBuildFence:=dll.LLVMBuildFence).restype, LLVMBuildFence.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMAtomicOrdering, LLVMBool, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMBuildFenceSyncScope:=dll.LLVMBuildFenceSyncScope).restype, LLVMBuildFenceSyncScope.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMAtomicOrdering, ctypes.c_uint32, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMBuildAtomicRMW:=dll.LLVMBuildAtomicRMW).restype, LLVMBuildAtomicRMW.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMAtomicRMWBinOp, LLVMValueRef, LLVMValueRef, LLVMAtomicOrdering, LLVMBool]
-except AttributeError: pass
-
-try: (LLVMBuildAtomicRMWSyncScope:=dll.LLVMBuildAtomicRMWSyncScope).restype, LLVMBuildAtomicRMWSyncScope.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMAtomicRMWBinOp, LLVMValueRef, LLVMValueRef, LLVMAtomicOrdering, ctypes.c_uint32]
-except AttributeError: pass
-
-try: (LLVMBuildAtomicCmpXchg:=dll.LLVMBuildAtomicCmpXchg).restype, LLVMBuildAtomicCmpXchg.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMValueRef, LLVMValueRef, LLVMValueRef, LLVMAtomicOrdering, LLVMAtomicOrdering, LLVMBool]
-except AttributeError: pass
-
-try: (LLVMBuildAtomicCmpXchgSyncScope:=dll.LLVMBuildAtomicCmpXchgSyncScope).restype, LLVMBuildAtomicCmpXchgSyncScope.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMValueRef, LLVMValueRef, LLVMValueRef, LLVMAtomicOrdering, LLVMAtomicOrdering, ctypes.c_uint32]
-except AttributeError: pass
-
-try: (LLVMGetNumMaskElements:=dll.LLVMGetNumMaskElements).restype, LLVMGetNumMaskElements.argtypes = ctypes.c_uint32, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMGetUndefMaskElem:=dll.LLVMGetUndefMaskElem).restype, LLVMGetUndefMaskElem.argtypes = ctypes.c_int32, []
-except AttributeError: pass
-
-try: (LLVMGetMaskValue:=dll.LLVMGetMaskValue).restype, LLVMGetMaskValue.argtypes = ctypes.c_int32, [LLVMValueRef, ctypes.c_uint32]
-except AttributeError: pass
-
-try: (LLVMIsAtomicSingleThread:=dll.LLVMIsAtomicSingleThread).restype, LLVMIsAtomicSingleThread.argtypes = LLVMBool, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMSetAtomicSingleThread:=dll.LLVMSetAtomicSingleThread).restype, LLVMSetAtomicSingleThread.argtypes = None, [LLVMValueRef, LLVMBool]
-except AttributeError: pass
-
-try: (LLVMIsAtomic:=dll.LLVMIsAtomic).restype, LLVMIsAtomic.argtypes = LLVMBool, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMGetAtomicSyncScopeID:=dll.LLVMGetAtomicSyncScopeID).restype, LLVMGetAtomicSyncScopeID.argtypes = ctypes.c_uint32, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMSetAtomicSyncScopeID:=dll.LLVMSetAtomicSyncScopeID).restype, LLVMSetAtomicSyncScopeID.argtypes = None, [LLVMValueRef, ctypes.c_uint32]
-except AttributeError: pass
-
-try: (LLVMGetCmpXchgSuccessOrdering:=dll.LLVMGetCmpXchgSuccessOrdering).restype, LLVMGetCmpXchgSuccessOrdering.argtypes = LLVMAtomicOrdering, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMSetCmpXchgSuccessOrdering:=dll.LLVMSetCmpXchgSuccessOrdering).restype, LLVMSetCmpXchgSuccessOrdering.argtypes = None, [LLVMValueRef, LLVMAtomicOrdering]
-except AttributeError: pass
-
-try: (LLVMGetCmpXchgFailureOrdering:=dll.LLVMGetCmpXchgFailureOrdering).restype, LLVMGetCmpXchgFailureOrdering.argtypes = LLVMAtomicOrdering, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMSetCmpXchgFailureOrdering:=dll.LLVMSetCmpXchgFailureOrdering).restype, LLVMSetCmpXchgFailureOrdering.argtypes = None, [LLVMValueRef, LLVMAtomicOrdering]
-except AttributeError: pass
-
-class struct_LLVMOpaqueModuleProvider(Struct): pass
-LLVMModuleProviderRef = ctypes.POINTER(struct_LLVMOpaqueModuleProvider)
-try: (LLVMCreateModuleProviderForExistingModule:=dll.LLVMCreateModuleProviderForExistingModule).restype, LLVMCreateModuleProviderForExistingModule.argtypes = LLVMModuleProviderRef, [LLVMModuleRef]
-except AttributeError: pass
-
-try: (LLVMDisposeModuleProvider:=dll.LLVMDisposeModuleProvider).restype, LLVMDisposeModuleProvider.argtypes = None, [LLVMModuleProviderRef]
-except AttributeError: pass
-
-try: (LLVMCreateMemoryBufferWithContentsOfFile:=dll.LLVMCreateMemoryBufferWithContentsOfFile).restype, LLVMCreateMemoryBufferWithContentsOfFile.argtypes = LLVMBool, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(LLVMMemoryBufferRef), ctypes.POINTER(ctypes.POINTER(ctypes.c_char))]
-except AttributeError: pass
-
-try: (LLVMCreateMemoryBufferWithSTDIN:=dll.LLVMCreateMemoryBufferWithSTDIN).restype, LLVMCreateMemoryBufferWithSTDIN.argtypes = LLVMBool, [ctypes.POINTER(LLVMMemoryBufferRef), ctypes.POINTER(ctypes.POINTER(ctypes.c_char))]
-except AttributeError: pass
-
-try: (LLVMCreateMemoryBufferWithMemoryRange:=dll.LLVMCreateMemoryBufferWithMemoryRange).restype, LLVMCreateMemoryBufferWithMemoryRange.argtypes = LLVMMemoryBufferRef, [ctypes.POINTER(ctypes.c_char), size_t, ctypes.POINTER(ctypes.c_char), LLVMBool]
-except AttributeError: pass
-
-try: (LLVMCreateMemoryBufferWithMemoryRangeCopy:=dll.LLVMCreateMemoryBufferWithMemoryRangeCopy).restype, LLVMCreateMemoryBufferWithMemoryRangeCopy.argtypes = LLVMMemoryBufferRef, [ctypes.POINTER(ctypes.c_char), size_t, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMGetBufferStart:=dll.LLVMGetBufferStart).restype, LLVMGetBufferStart.argtypes = ctypes.POINTER(ctypes.c_char), [LLVMMemoryBufferRef]
-except AttributeError: pass
-
-try: (LLVMGetBufferSize:=dll.LLVMGetBufferSize).restype, LLVMGetBufferSize.argtypes = size_t, [LLVMMemoryBufferRef]
-except AttributeError: pass
-
-try: (LLVMDisposeMemoryBuffer:=dll.LLVMDisposeMemoryBuffer).restype, LLVMDisposeMemoryBuffer.argtypes = None, [LLVMMemoryBufferRef]
-except AttributeError: pass
-
-class struct_LLVMOpaquePassManager(Struct): pass
-LLVMPassManagerRef = ctypes.POINTER(struct_LLVMOpaquePassManager)
-try: (LLVMCreatePassManager:=dll.LLVMCreatePassManager).restype, LLVMCreatePassManager.argtypes = LLVMPassManagerRef, []
-except AttributeError: pass
-
-try: (LLVMCreateFunctionPassManagerForModule:=dll.LLVMCreateFunctionPassManagerForModule).restype, LLVMCreateFunctionPassManagerForModule.argtypes = LLVMPassManagerRef, [LLVMModuleRef]
-except AttributeError: pass
-
-try: (LLVMCreateFunctionPassManager:=dll.LLVMCreateFunctionPassManager).restype, LLVMCreateFunctionPassManager.argtypes = LLVMPassManagerRef, [LLVMModuleProviderRef]
-except AttributeError: pass
-
-try: (LLVMRunPassManager:=dll.LLVMRunPassManager).restype, LLVMRunPassManager.argtypes = LLVMBool, [LLVMPassManagerRef, LLVMModuleRef]
-except AttributeError: pass
-
-try: (LLVMInitializeFunctionPassManager:=dll.LLVMInitializeFunctionPassManager).restype, LLVMInitializeFunctionPassManager.argtypes = LLVMBool, [LLVMPassManagerRef]
-except AttributeError: pass
-
-try: (LLVMRunFunctionPassManager:=dll.LLVMRunFunctionPassManager).restype, LLVMRunFunctionPassManager.argtypes = LLVMBool, [LLVMPassManagerRef, LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMFinalizeFunctionPassManager:=dll.LLVMFinalizeFunctionPassManager).restype, LLVMFinalizeFunctionPassManager.argtypes = LLVMBool, [LLVMPassManagerRef]
-except AttributeError: pass
-
-try: (LLVMDisposePassManager:=dll.LLVMDisposePassManager).restype, LLVMDisposePassManager.argtypes = None, [LLVMPassManagerRef]
-except AttributeError: pass
-
-try: (LLVMStartMultithreaded:=dll.LLVMStartMultithreaded).restype, LLVMStartMultithreaded.argtypes = LLVMBool, []
-except AttributeError: pass
-
-try: (LLVMStopMultithreaded:=dll.LLVMStopMultithreaded).restype, LLVMStopMultithreaded.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMIsMultithreaded:=dll.LLVMIsMultithreaded).restype, LLVMIsMultithreaded.argtypes = LLVMBool, []
-except AttributeError: pass
-
-try: (imaxabs:=dll.imaxabs).restype, imaxabs.argtypes = intmax_t, [intmax_t]
-except AttributeError: pass
-
-try: (imaxdiv:=dll.imaxdiv).restype, imaxdiv.argtypes = imaxdiv_t, [intmax_t, intmax_t]
-except AttributeError: pass
-
-try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (select:=dll.select).restype, select.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timeval)]
-except AttributeError: pass
-
-try: (pselect:=dll.pselect).restype, pselect.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timespec), ctypes.POINTER(__sigset_t)]
-except AttributeError: pass
-
-try: (imaxabs:=dll.imaxabs).restype, imaxabs.argtypes = intmax_t, [intmax_t]
-except AttributeError: pass
-
-try: (imaxdiv:=dll.imaxdiv).restype, imaxdiv.argtypes = imaxdiv_t, [intmax_t, intmax_t]
-except AttributeError: pass
-
-try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (select:=dll.select).restype, select.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timeval)]
-except AttributeError: pass
-
-try: (pselect:=dll.pselect).restype, pselect.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timespec), ctypes.POINTER(__sigset_t)]
-except AttributeError: pass
-
-LLVMDIFlags = CEnum(ctypes.c_uint32)
+LLVMGEPNoWrapFlags: TypeAlias = Annotated[int, ctypes.c_uint32]
+@dll.bind
+def LLVMShutdown() -> None: ...
+@dll.bind
+def LLVMGetVersion(Major:c.POINTER[Annotated[int, ctypes.c_uint32]], Minor:c.POINTER[Annotated[int, ctypes.c_uint32]], Patch:c.POINTER[Annotated[int, ctypes.c_uint32]]) -> None: ...
+@dll.bind
+def LLVMCreateMessage(Message:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
+@dll.bind
+def LLVMDisposeMessage(Message:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> None: ...
+class struct_LLVMOpaqueDiagnosticInfo(ctypes.Structure): pass
+LLVMDiagnosticHandler: TypeAlias = c.CFUNCTYPE[None, [c.POINTER[struct_LLVMOpaqueDiagnosticInfo], ctypes.c_void_p]]
+LLVMYieldCallback: TypeAlias = c.CFUNCTYPE[None, [c.POINTER[struct_LLVMOpaqueContext], ctypes.c_void_p]]
+@dll.bind
+def LLVMContextCreate() -> LLVMContextRef: ...
+@dll.bind
+def LLVMGetGlobalContext() -> LLVMContextRef: ...
+@dll.bind
+def LLVMContextSetDiagnosticHandler(C:LLVMContextRef, Handler:LLVMDiagnosticHandler, DiagnosticContext:ctypes.c_void_p) -> None: ...
+@dll.bind
+def LLVMContextGetDiagnosticHandler(C:LLVMContextRef) -> LLVMDiagnosticHandler: ...
+@dll.bind
+def LLVMContextGetDiagnosticContext(C:LLVMContextRef) -> ctypes.c_void_p: ...
+@dll.bind
+def LLVMContextSetYieldCallback(C:LLVMContextRef, Callback:LLVMYieldCallback, OpaqueHandle:ctypes.c_void_p) -> None: ...
+@dll.bind
+def LLVMContextShouldDiscardValueNames(C:LLVMContextRef) -> LLVMBool: ...
+@dll.bind
+def LLVMContextSetDiscardValueNames(C:LLVMContextRef, Discard:LLVMBool) -> None: ...
+@dll.bind
+def LLVMContextDispose(C:LLVMContextRef) -> None: ...
+LLVMDiagnosticInfoRef: TypeAlias = c.POINTER[struct_LLVMOpaqueDiagnosticInfo]
+@dll.bind
+def LLVMGetDiagInfoDescription(DI:LLVMDiagnosticInfoRef) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
+@dll.bind
+def LLVMGetDiagInfoSeverity(DI:LLVMDiagnosticInfoRef) -> LLVMDiagnosticSeverity: ...
+@dll.bind
+def LLVMGetMDKindIDInContext(C:LLVMContextRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]], SLen:Annotated[int, ctypes.c_uint32]) -> Annotated[int, ctypes.c_uint32]: ...
+@dll.bind
+def LLVMGetMDKindID(Name:c.POINTER[Annotated[bytes, ctypes.c_char]], SLen:Annotated[int, ctypes.c_uint32]) -> Annotated[int, ctypes.c_uint32]: ...
+size_t: TypeAlias = Annotated[int, ctypes.c_uint64]
+@dll.bind
+def LLVMGetSyncScopeID(C:LLVMContextRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]], SLen:size_t) -> Annotated[int, ctypes.c_uint32]: ...
+@dll.bind
+def LLVMGetEnumAttributeKindForName(Name:c.POINTER[Annotated[bytes, ctypes.c_char]], SLen:size_t) -> Annotated[int, ctypes.c_uint32]: ...
+@dll.bind
+def LLVMGetLastEnumAttributeKind() -> Annotated[int, ctypes.c_uint32]: ...
+uint64_t: TypeAlias = Annotated[int, ctypes.c_uint64]
+class struct_LLVMOpaqueAttributeRef(ctypes.Structure): pass
+LLVMAttributeRef: TypeAlias = c.POINTER[struct_LLVMOpaqueAttributeRef]
+@dll.bind
+def LLVMCreateEnumAttribute(C:LLVMContextRef, KindID:Annotated[int, ctypes.c_uint32], Val:uint64_t) -> LLVMAttributeRef: ...
+@dll.bind
+def LLVMGetEnumAttributeKind(A:LLVMAttributeRef) -> Annotated[int, ctypes.c_uint32]: ...
+@dll.bind
+def LLVMGetEnumAttributeValue(A:LLVMAttributeRef) -> uint64_t: ...
+class struct_LLVMOpaqueType(ctypes.Structure): pass
+LLVMTypeRef: TypeAlias = c.POINTER[struct_LLVMOpaqueType]
+@dll.bind
+def LLVMCreateTypeAttribute(C:LLVMContextRef, KindID:Annotated[int, ctypes.c_uint32], type_ref:LLVMTypeRef) -> LLVMAttributeRef: ...
+@dll.bind
+def LLVMGetTypeAttributeValue(A:LLVMAttributeRef) -> LLVMTypeRef: ...
+@dll.bind
+def LLVMCreateConstantRangeAttribute(C:LLVMContextRef, KindID:Annotated[int, ctypes.c_uint32], NumBits:Annotated[int, ctypes.c_uint32], LowerWords:c.Array[uint64_t, Literal[0]], UpperWords:c.Array[uint64_t, Literal[0]]) -> LLVMAttributeRef: ...
+@dll.bind
+def LLVMCreateStringAttribute(C:LLVMContextRef, K:c.POINTER[Annotated[bytes, ctypes.c_char]], KLength:Annotated[int, ctypes.c_uint32], V:c.POINTER[Annotated[bytes, ctypes.c_char]], VLength:Annotated[int, ctypes.c_uint32]) -> LLVMAttributeRef: ...
+@dll.bind
+def LLVMGetStringAttributeKind(A:LLVMAttributeRef, Length:c.POINTER[Annotated[int, ctypes.c_uint32]]) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
+@dll.bind
+def LLVMGetStringAttributeValue(A:LLVMAttributeRef, Length:c.POINTER[Annotated[int, ctypes.c_uint32]]) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
+@dll.bind
+def LLVMIsEnumAttribute(A:LLVMAttributeRef) -> LLVMBool: ...
+@dll.bind
+def LLVMIsStringAttribute(A:LLVMAttributeRef) -> LLVMBool: ...
+@dll.bind
+def LLVMIsTypeAttribute(A:LLVMAttributeRef) -> LLVMBool: ...
+@dll.bind
+def LLVMGetTypeByName2(C:LLVMContextRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMTypeRef: ...
+@dll.bind
+def LLVMModuleCreateWithName(ModuleID:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMModuleRef: ...
+@dll.bind
+def LLVMModuleCreateWithNameInContext(ModuleID:c.POINTER[Annotated[bytes, ctypes.c_char]], C:LLVMContextRef) -> LLVMModuleRef: ...
+@dll.bind
+def LLVMCloneModule(M:LLVMModuleRef) -> LLVMModuleRef: ...
+@dll.bind
+def LLVMDisposeModule(M:LLVMModuleRef) -> None: ...
+@dll.bind
+def LLVMIsNewDbgInfoFormat(M:LLVMModuleRef) -> LLVMBool: ...
+@dll.bind
+def LLVMSetIsNewDbgInfoFormat(M:LLVMModuleRef, UseNewFormat:LLVMBool) -> None: ...
+@dll.bind
+def LLVMGetModuleIdentifier(M:LLVMModuleRef, Len:c.POINTER[size_t]) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
+@dll.bind
+def LLVMSetModuleIdentifier(M:LLVMModuleRef, Ident:c.POINTER[Annotated[bytes, ctypes.c_char]], Len:size_t) -> None: ...
+@dll.bind
+def LLVMGetSourceFileName(M:LLVMModuleRef, Len:c.POINTER[size_t]) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
+@dll.bind
+def LLVMSetSourceFileName(M:LLVMModuleRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]], Len:size_t) -> None: ...
+@dll.bind
+def LLVMGetDataLayoutStr(M:LLVMModuleRef) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
+@dll.bind
+def LLVMGetDataLayout(M:LLVMModuleRef) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
+@dll.bind
+def LLVMSetDataLayout(M:LLVMModuleRef, DataLayoutStr:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> None: ...
+@dll.bind
+def LLVMGetTarget(M:LLVMModuleRef) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
+@dll.bind
+def LLVMSetTarget(M:LLVMModuleRef, Triple:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> None: ...
+class struct_LLVMOpaqueModuleFlagEntry(ctypes.Structure): pass
+LLVMModuleFlagEntry: TypeAlias = struct_LLVMOpaqueModuleFlagEntry
+@dll.bind
+def LLVMCopyModuleFlagsMetadata(M:LLVMModuleRef, Len:c.POINTER[size_t]) -> c.POINTER[LLVMModuleFlagEntry]: ...
+@dll.bind
+def LLVMDisposeModuleFlagsMetadata(Entries:c.POINTER[LLVMModuleFlagEntry]) -> None: ...
+@dll.bind
+def LLVMModuleFlagEntriesGetFlagBehavior(Entries:c.POINTER[LLVMModuleFlagEntry], Index:Annotated[int, ctypes.c_uint32]) -> LLVMModuleFlagBehavior: ...
+@dll.bind
+def LLVMModuleFlagEntriesGetKey(Entries:c.POINTER[LLVMModuleFlagEntry], Index:Annotated[int, ctypes.c_uint32], Len:c.POINTER[size_t]) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
+class struct_LLVMOpaqueMetadata(ctypes.Structure): pass
+LLVMMetadataRef: TypeAlias = c.POINTER[struct_LLVMOpaqueMetadata]
+@dll.bind
+def LLVMModuleFlagEntriesGetMetadata(Entries:c.POINTER[LLVMModuleFlagEntry], Index:Annotated[int, ctypes.c_uint32]) -> LLVMMetadataRef: ...
+@dll.bind
+def LLVMGetModuleFlag(M:LLVMModuleRef, Key:c.POINTER[Annotated[bytes, ctypes.c_char]], KeyLen:size_t) -> LLVMMetadataRef: ...
+@dll.bind
+def LLVMAddModuleFlag(M:LLVMModuleRef, Behavior:LLVMModuleFlagBehavior, Key:c.POINTER[Annotated[bytes, ctypes.c_char]], KeyLen:size_t, Val:LLVMMetadataRef) -> None: ...
+@dll.bind
+def LLVMDumpModule(M:LLVMModuleRef) -> None: ...
+@dll.bind
+def LLVMPrintModuleToFile(M:LLVMModuleRef, Filename:c.POINTER[Annotated[bytes, ctypes.c_char]], ErrorMessage:c.POINTER[c.POINTER[Annotated[bytes, ctypes.c_char]]]) -> LLVMBool: ...
+@dll.bind
+def LLVMPrintModuleToString(M:LLVMModuleRef) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
+@dll.bind
+def LLVMGetModuleInlineAsm(M:LLVMModuleRef, Len:c.POINTER[size_t]) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
+@dll.bind
+def LLVMSetModuleInlineAsm2(M:LLVMModuleRef, Asm:c.POINTER[Annotated[bytes, ctypes.c_char]], Len:size_t) -> None: ...
+@dll.bind
+def LLVMAppendModuleInlineAsm(M:LLVMModuleRef, Asm:c.POINTER[Annotated[bytes, ctypes.c_char]], Len:size_t) -> None: ...
+@dll.bind
+def LLVMGetInlineAsm(Ty:LLVMTypeRef, AsmString:c.POINTER[Annotated[bytes, ctypes.c_char]], AsmStringSize:size_t, Constraints:c.POINTER[Annotated[bytes, ctypes.c_char]], ConstraintsSize:size_t, HasSideEffects:LLVMBool, IsAlignStack:LLVMBool, Dialect:LLVMInlineAsmDialect, CanThrow:LLVMBool) -> LLVMValueRef: ...
+@dll.bind
+def LLVMGetInlineAsmAsmString(InlineAsmVal:LLVMValueRef, Len:c.POINTER[size_t]) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
+@dll.bind
+def LLVMGetInlineAsmConstraintString(InlineAsmVal:LLVMValueRef, Len:c.POINTER[size_t]) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
+@dll.bind
+def LLVMGetInlineAsmDialect(InlineAsmVal:LLVMValueRef) -> LLVMInlineAsmDialect: ...
+@dll.bind
+def LLVMGetInlineAsmFunctionType(InlineAsmVal:LLVMValueRef) -> LLVMTypeRef: ...
+@dll.bind
+def LLVMGetInlineAsmHasSideEffects(InlineAsmVal:LLVMValueRef) -> LLVMBool: ...
+@dll.bind
+def LLVMGetInlineAsmNeedsAlignedStack(InlineAsmVal:LLVMValueRef) -> LLVMBool: ...
+@dll.bind
+def LLVMGetInlineAsmCanUnwind(InlineAsmVal:LLVMValueRef) -> LLVMBool: ...
+@dll.bind
+def LLVMGetModuleContext(M:LLVMModuleRef) -> LLVMContextRef: ...
+@dll.bind
+def LLVMGetTypeByName(M:LLVMModuleRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMTypeRef: ...
+class struct_LLVMOpaqueNamedMDNode(ctypes.Structure): pass
+LLVMNamedMDNodeRef: TypeAlias = c.POINTER[struct_LLVMOpaqueNamedMDNode]
+@dll.bind
+def LLVMGetFirstNamedMetadata(M:LLVMModuleRef) -> LLVMNamedMDNodeRef: ...
+@dll.bind
+def LLVMGetLastNamedMetadata(M:LLVMModuleRef) -> LLVMNamedMDNodeRef: ...
+@dll.bind
+def LLVMGetNextNamedMetadata(NamedMDNode:LLVMNamedMDNodeRef) -> LLVMNamedMDNodeRef: ...
+@dll.bind
+def LLVMGetPreviousNamedMetadata(NamedMDNode:LLVMNamedMDNodeRef) -> LLVMNamedMDNodeRef: ...
+@dll.bind
+def LLVMGetNamedMetadata(M:LLVMModuleRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]], NameLen:size_t) -> LLVMNamedMDNodeRef: ...
+@dll.bind
+def LLVMGetOrInsertNamedMetadata(M:LLVMModuleRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]], NameLen:size_t) -> LLVMNamedMDNodeRef: ...
+@dll.bind
+def LLVMGetNamedMetadataName(NamedMD:LLVMNamedMDNodeRef, NameLen:c.POINTER[size_t]) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
+@dll.bind
+def LLVMGetNamedMetadataNumOperands(M:LLVMModuleRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> Annotated[int, ctypes.c_uint32]: ...
+@dll.bind
+def LLVMGetNamedMetadataOperands(M:LLVMModuleRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]], Dest:c.POINTER[LLVMValueRef]) -> None: ...
+@dll.bind
+def LLVMAddNamedMetadataOperand(M:LLVMModuleRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]], Val:LLVMValueRef) -> None: ...
+@dll.bind
+def LLVMGetDebugLocDirectory(Val:LLVMValueRef, Length:c.POINTER[Annotated[int, ctypes.c_uint32]]) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
+@dll.bind
+def LLVMGetDebugLocFilename(Val:LLVMValueRef, Length:c.POINTER[Annotated[int, ctypes.c_uint32]]) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
+@dll.bind
+def LLVMGetDebugLocLine(Val:LLVMValueRef) -> Annotated[int, ctypes.c_uint32]: ...
+@dll.bind
+def LLVMGetDebugLocColumn(Val:LLVMValueRef) -> Annotated[int, ctypes.c_uint32]: ...
+@dll.bind
+def LLVMAddFunction(M:LLVMModuleRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]], FunctionTy:LLVMTypeRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMGetNamedFunction(M:LLVMModuleRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMValueRef: ...
+@dll.bind
+def LLVMGetNamedFunctionWithLength(M:LLVMModuleRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]], Length:size_t) -> LLVMValueRef: ...
+@dll.bind
+def LLVMGetFirstFunction(M:LLVMModuleRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMGetLastFunction(M:LLVMModuleRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMGetNextFunction(Fn:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMGetPreviousFunction(Fn:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMSetModuleInlineAsm(M:LLVMModuleRef, Asm:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> None: ...
+@dll.bind
+def LLVMGetTypeKind(Ty:LLVMTypeRef) -> LLVMTypeKind: ...
+@dll.bind
+def LLVMTypeIsSized(Ty:LLVMTypeRef) -> LLVMBool: ...
+@dll.bind
+def LLVMGetTypeContext(Ty:LLVMTypeRef) -> LLVMContextRef: ...
+@dll.bind
+def LLVMDumpType(Val:LLVMTypeRef) -> None: ...
+@dll.bind
+def LLVMPrintTypeToString(Val:LLVMTypeRef) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
+@dll.bind
+def LLVMInt1TypeInContext(C:LLVMContextRef) -> LLVMTypeRef: ...
+@dll.bind
+def LLVMInt8TypeInContext(C:LLVMContextRef) -> LLVMTypeRef: ...
+@dll.bind
+def LLVMInt16TypeInContext(C:LLVMContextRef) -> LLVMTypeRef: ...
+@dll.bind
+def LLVMInt32TypeInContext(C:LLVMContextRef) -> LLVMTypeRef: ...
+@dll.bind
+def LLVMInt64TypeInContext(C:LLVMContextRef) -> LLVMTypeRef: ...
+@dll.bind
+def LLVMInt128TypeInContext(C:LLVMContextRef) -> LLVMTypeRef: ...
+@dll.bind
+def LLVMIntTypeInContext(C:LLVMContextRef, NumBits:Annotated[int, ctypes.c_uint32]) -> LLVMTypeRef: ...
+@dll.bind
+def LLVMInt1Type() -> LLVMTypeRef: ...
+@dll.bind
+def LLVMInt8Type() -> LLVMTypeRef: ...
+@dll.bind
+def LLVMInt16Type() -> LLVMTypeRef: ...
+@dll.bind
+def LLVMInt32Type() -> LLVMTypeRef: ...
+@dll.bind
+def LLVMInt64Type() -> LLVMTypeRef: ...
+@dll.bind
+def LLVMInt128Type() -> LLVMTypeRef: ...
+@dll.bind
+def LLVMIntType(NumBits:Annotated[int, ctypes.c_uint32]) -> LLVMTypeRef: ...
+@dll.bind
+def LLVMGetIntTypeWidth(IntegerTy:LLVMTypeRef) -> Annotated[int, ctypes.c_uint32]: ...
+@dll.bind
+def LLVMHalfTypeInContext(C:LLVMContextRef) -> LLVMTypeRef: ...
+@dll.bind
+def LLVMBFloatTypeInContext(C:LLVMContextRef) -> LLVMTypeRef: ...
+@dll.bind
+def LLVMFloatTypeInContext(C:LLVMContextRef) -> LLVMTypeRef: ...
+@dll.bind
+def LLVMDoubleTypeInContext(C:LLVMContextRef) -> LLVMTypeRef: ...
+@dll.bind
+def LLVMX86FP80TypeInContext(C:LLVMContextRef) -> LLVMTypeRef: ...
+@dll.bind
+def LLVMFP128TypeInContext(C:LLVMContextRef) -> LLVMTypeRef: ...
+@dll.bind
+def LLVMPPCFP128TypeInContext(C:LLVMContextRef) -> LLVMTypeRef: ...
+@dll.bind
+def LLVMHalfType() -> LLVMTypeRef: ...
+@dll.bind
+def LLVMBFloatType() -> LLVMTypeRef: ...
+@dll.bind
+def LLVMFloatType() -> LLVMTypeRef: ...
+@dll.bind
+def LLVMDoubleType() -> LLVMTypeRef: ...
+@dll.bind
+def LLVMX86FP80Type() -> LLVMTypeRef: ...
+@dll.bind
+def LLVMFP128Type() -> LLVMTypeRef: ...
+@dll.bind
+def LLVMPPCFP128Type() -> LLVMTypeRef: ...
+@dll.bind
+def LLVMFunctionType(ReturnType:LLVMTypeRef, ParamTypes:c.POINTER[LLVMTypeRef], ParamCount:Annotated[int, ctypes.c_uint32], IsVarArg:LLVMBool) -> LLVMTypeRef: ...
+@dll.bind
+def LLVMIsFunctionVarArg(FunctionTy:LLVMTypeRef) -> LLVMBool: ...
+@dll.bind
+def LLVMGetReturnType(FunctionTy:LLVMTypeRef) -> LLVMTypeRef: ...
+@dll.bind
+def LLVMCountParamTypes(FunctionTy:LLVMTypeRef) -> Annotated[int, ctypes.c_uint32]: ...
+@dll.bind
+def LLVMGetParamTypes(FunctionTy:LLVMTypeRef, Dest:c.POINTER[LLVMTypeRef]) -> None: ...
+@dll.bind
+def LLVMStructTypeInContext(C:LLVMContextRef, ElementTypes:c.POINTER[LLVMTypeRef], ElementCount:Annotated[int, ctypes.c_uint32], Packed:LLVMBool) -> LLVMTypeRef: ...
+@dll.bind
+def LLVMStructType(ElementTypes:c.POINTER[LLVMTypeRef], ElementCount:Annotated[int, ctypes.c_uint32], Packed:LLVMBool) -> LLVMTypeRef: ...
+@dll.bind
+def LLVMStructCreateNamed(C:LLVMContextRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMTypeRef: ...
+@dll.bind
+def LLVMGetStructName(Ty:LLVMTypeRef) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
+@dll.bind
+def LLVMStructSetBody(StructTy:LLVMTypeRef, ElementTypes:c.POINTER[LLVMTypeRef], ElementCount:Annotated[int, ctypes.c_uint32], Packed:LLVMBool) -> None: ...
+@dll.bind
+def LLVMCountStructElementTypes(StructTy:LLVMTypeRef) -> Annotated[int, ctypes.c_uint32]: ...
+@dll.bind
+def LLVMGetStructElementTypes(StructTy:LLVMTypeRef, Dest:c.POINTER[LLVMTypeRef]) -> None: ...
+@dll.bind
+def LLVMStructGetTypeAtIndex(StructTy:LLVMTypeRef, i:Annotated[int, ctypes.c_uint32]) -> LLVMTypeRef: ...
+@dll.bind
+def LLVMIsPackedStruct(StructTy:LLVMTypeRef) -> LLVMBool: ...
+@dll.bind
+def LLVMIsOpaqueStruct(StructTy:LLVMTypeRef) -> LLVMBool: ...
+@dll.bind
+def LLVMIsLiteralStruct(StructTy:LLVMTypeRef) -> LLVMBool: ...
+@dll.bind
+def LLVMGetElementType(Ty:LLVMTypeRef) -> LLVMTypeRef: ...
+@dll.bind
+def LLVMGetSubtypes(Tp:LLVMTypeRef, Arr:c.POINTER[LLVMTypeRef]) -> None: ...
+@dll.bind
+def LLVMGetNumContainedTypes(Tp:LLVMTypeRef) -> Annotated[int, ctypes.c_uint32]: ...
+@dll.bind
+def LLVMArrayType(ElementType:LLVMTypeRef, ElementCount:Annotated[int, ctypes.c_uint32]) -> LLVMTypeRef: ...
+@dll.bind
+def LLVMArrayType2(ElementType:LLVMTypeRef, ElementCount:uint64_t) -> LLVMTypeRef: ...
+@dll.bind
+def LLVMGetArrayLength(ArrayTy:LLVMTypeRef) -> Annotated[int, ctypes.c_uint32]: ...
+@dll.bind
+def LLVMGetArrayLength2(ArrayTy:LLVMTypeRef) -> uint64_t: ...
+@dll.bind
+def LLVMPointerType(ElementType:LLVMTypeRef, AddressSpace:Annotated[int, ctypes.c_uint32]) -> LLVMTypeRef: ...
+@dll.bind
+def LLVMPointerTypeIsOpaque(Ty:LLVMTypeRef) -> LLVMBool: ...
+@dll.bind
+def LLVMPointerTypeInContext(C:LLVMContextRef, AddressSpace:Annotated[int, ctypes.c_uint32]) -> LLVMTypeRef: ...
+@dll.bind
+def LLVMGetPointerAddressSpace(PointerTy:LLVMTypeRef) -> Annotated[int, ctypes.c_uint32]: ...
+@dll.bind
+def LLVMVectorType(ElementType:LLVMTypeRef, ElementCount:Annotated[int, ctypes.c_uint32]) -> LLVMTypeRef: ...
+@dll.bind
+def LLVMScalableVectorType(ElementType:LLVMTypeRef, ElementCount:Annotated[int, ctypes.c_uint32]) -> LLVMTypeRef: ...
+@dll.bind
+def LLVMGetVectorSize(VectorTy:LLVMTypeRef) -> Annotated[int, ctypes.c_uint32]: ...
+@dll.bind
+def LLVMGetConstantPtrAuthPointer(PtrAuth:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMGetConstantPtrAuthKey(PtrAuth:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMGetConstantPtrAuthDiscriminator(PtrAuth:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMGetConstantPtrAuthAddrDiscriminator(PtrAuth:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMVoidTypeInContext(C:LLVMContextRef) -> LLVMTypeRef: ...
+@dll.bind
+def LLVMLabelTypeInContext(C:LLVMContextRef) -> LLVMTypeRef: ...
+@dll.bind
+def LLVMX86AMXTypeInContext(C:LLVMContextRef) -> LLVMTypeRef: ...
+@dll.bind
+def LLVMTokenTypeInContext(C:LLVMContextRef) -> LLVMTypeRef: ...
+@dll.bind
+def LLVMMetadataTypeInContext(C:LLVMContextRef) -> LLVMTypeRef: ...
+@dll.bind
+def LLVMVoidType() -> LLVMTypeRef: ...
+@dll.bind
+def LLVMLabelType() -> LLVMTypeRef: ...
+@dll.bind
+def LLVMX86AMXType() -> LLVMTypeRef: ...
+@dll.bind
+def LLVMTargetExtTypeInContext(C:LLVMContextRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]], TypeParams:c.POINTER[LLVMTypeRef], TypeParamCount:Annotated[int, ctypes.c_uint32], IntParams:c.POINTER[Annotated[int, ctypes.c_uint32]], IntParamCount:Annotated[int, ctypes.c_uint32]) -> LLVMTypeRef: ...
+@dll.bind
+def LLVMGetTargetExtTypeName(TargetExtTy:LLVMTypeRef) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
+@dll.bind
+def LLVMGetTargetExtTypeNumTypeParams(TargetExtTy:LLVMTypeRef) -> Annotated[int, ctypes.c_uint32]: ...
+@dll.bind
+def LLVMGetTargetExtTypeTypeParam(TargetExtTy:LLVMTypeRef, Idx:Annotated[int, ctypes.c_uint32]) -> LLVMTypeRef: ...
+@dll.bind
+def LLVMGetTargetExtTypeNumIntParams(TargetExtTy:LLVMTypeRef) -> Annotated[int, ctypes.c_uint32]: ...
+@dll.bind
+def LLVMGetTargetExtTypeIntParam(TargetExtTy:LLVMTypeRef, Idx:Annotated[int, ctypes.c_uint32]) -> Annotated[int, ctypes.c_uint32]: ...
+@dll.bind
+def LLVMTypeOf(Val:LLVMValueRef) -> LLVMTypeRef: ...
+@dll.bind
+def LLVMGetValueKind(Val:LLVMValueRef) -> LLVMValueKind: ...
+@dll.bind
+def LLVMGetValueName2(Val:LLVMValueRef, Length:c.POINTER[size_t]) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
+@dll.bind
+def LLVMSetValueName2(Val:LLVMValueRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]], NameLen:size_t) -> None: ...
+@dll.bind
+def LLVMDumpValue(Val:LLVMValueRef) -> None: ...
+@dll.bind
+def LLVMPrintValueToString(Val:LLVMValueRef) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
+@dll.bind
+def LLVMGetValueContext(Val:LLVMValueRef) -> LLVMContextRef: ...
+class struct_LLVMOpaqueDbgRecord(ctypes.Structure): pass
+LLVMDbgRecordRef: TypeAlias = c.POINTER[struct_LLVMOpaqueDbgRecord]
+@dll.bind
+def LLVMPrintDbgRecordToString(Record:LLVMDbgRecordRef) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
+@dll.bind
+def LLVMReplaceAllUsesWith(OldVal:LLVMValueRef, NewVal:LLVMValueRef) -> None: ...
+@dll.bind
+def LLVMIsConstant(Val:LLVMValueRef) -> LLVMBool: ...
+@dll.bind
+def LLVMIsUndef(Val:LLVMValueRef) -> LLVMBool: ...
+@dll.bind
+def LLVMIsPoison(Val:LLVMValueRef) -> LLVMBool: ...
+@dll.bind
+def LLVMIsAArgument(Val:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMIsABasicBlock(Val:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMIsAInlineAsm(Val:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMIsAUser(Val:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMIsAConstant(Val:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMIsABlockAddress(Val:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMIsAConstantAggregateZero(Val:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMIsAConstantArray(Val:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMIsAConstantDataSequential(Val:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMIsAConstantDataArray(Val:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMIsAConstantDataVector(Val:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMIsAConstantExpr(Val:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMIsAConstantFP(Val:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMIsAConstantInt(Val:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMIsAConstantPointerNull(Val:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMIsAConstantStruct(Val:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMIsAConstantTokenNone(Val:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMIsAConstantVector(Val:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMIsAConstantPtrAuth(Val:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMIsAGlobalValue(Val:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMIsAGlobalAlias(Val:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMIsAGlobalObject(Val:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMIsAFunction(Val:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMIsAGlobalVariable(Val:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMIsAGlobalIFunc(Val:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMIsAUndefValue(Val:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMIsAPoisonValue(Val:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMIsAInstruction(Val:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMIsAUnaryOperator(Val:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMIsABinaryOperator(Val:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMIsACallInst(Val:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMIsAIntrinsicInst(Val:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMIsADbgInfoIntrinsic(Val:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMIsADbgVariableIntrinsic(Val:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMIsADbgDeclareInst(Val:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMIsADbgLabelInst(Val:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMIsAMemIntrinsic(Val:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMIsAMemCpyInst(Val:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMIsAMemMoveInst(Val:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMIsAMemSetInst(Val:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMIsACmpInst(Val:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMIsAFCmpInst(Val:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMIsAICmpInst(Val:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMIsAExtractElementInst(Val:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMIsAGetElementPtrInst(Val:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMIsAInsertElementInst(Val:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMIsAInsertValueInst(Val:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMIsALandingPadInst(Val:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMIsAPHINode(Val:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMIsASelectInst(Val:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMIsAShuffleVectorInst(Val:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMIsAStoreInst(Val:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMIsABranchInst(Val:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMIsAIndirectBrInst(Val:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMIsAInvokeInst(Val:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMIsAReturnInst(Val:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMIsASwitchInst(Val:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMIsAUnreachableInst(Val:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMIsAResumeInst(Val:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMIsACleanupReturnInst(Val:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMIsACatchReturnInst(Val:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMIsACatchSwitchInst(Val:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMIsACallBrInst(Val:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMIsAFuncletPadInst(Val:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMIsACatchPadInst(Val:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMIsACleanupPadInst(Val:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMIsAUnaryInstruction(Val:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMIsAAllocaInst(Val:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMIsACastInst(Val:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMIsAAddrSpaceCastInst(Val:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMIsABitCastInst(Val:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMIsAFPExtInst(Val:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMIsAFPToSIInst(Val:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMIsAFPToUIInst(Val:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMIsAFPTruncInst(Val:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMIsAIntToPtrInst(Val:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMIsAPtrToIntInst(Val:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMIsASExtInst(Val:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMIsASIToFPInst(Val:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMIsATruncInst(Val:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMIsAUIToFPInst(Val:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMIsAZExtInst(Val:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMIsAExtractValueInst(Val:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMIsALoadInst(Val:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMIsAVAArgInst(Val:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMIsAFreezeInst(Val:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMIsAAtomicCmpXchgInst(Val:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMIsAAtomicRMWInst(Val:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMIsAFenceInst(Val:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMIsAMDNode(Val:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMIsAValueAsMetadata(Val:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMIsAMDString(Val:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMGetValueName(Val:LLVMValueRef) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
+@dll.bind
+def LLVMSetValueName(Val:LLVMValueRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> None: ...
+class struct_LLVMOpaqueUse(ctypes.Structure): pass
+LLVMUseRef: TypeAlias = c.POINTER[struct_LLVMOpaqueUse]
+@dll.bind
+def LLVMGetFirstUse(Val:LLVMValueRef) -> LLVMUseRef: ...
+@dll.bind
+def LLVMGetNextUse(U:LLVMUseRef) -> LLVMUseRef: ...
+@dll.bind
+def LLVMGetUser(U:LLVMUseRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMGetUsedValue(U:LLVMUseRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMGetOperand(Val:LLVMValueRef, Index:Annotated[int, ctypes.c_uint32]) -> LLVMValueRef: ...
+@dll.bind
+def LLVMGetOperandUse(Val:LLVMValueRef, Index:Annotated[int, ctypes.c_uint32]) -> LLVMUseRef: ...
+@dll.bind
+def LLVMSetOperand(User:LLVMValueRef, Index:Annotated[int, ctypes.c_uint32], Val:LLVMValueRef) -> None: ...
+@dll.bind
+def LLVMGetNumOperands(Val:LLVMValueRef) -> Annotated[int, ctypes.c_int32]: ...
+@dll.bind
+def LLVMConstNull(Ty:LLVMTypeRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMConstAllOnes(Ty:LLVMTypeRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMGetUndef(Ty:LLVMTypeRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMGetPoison(Ty:LLVMTypeRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMIsNull(Val:LLVMValueRef) -> LLVMBool: ...
+@dll.bind
+def LLVMConstPointerNull(Ty:LLVMTypeRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMConstInt(IntTy:LLVMTypeRef, N:Annotated[int, ctypes.c_uint64], SignExtend:LLVMBool) -> LLVMValueRef: ...
+@dll.bind
+def LLVMConstIntOfArbitraryPrecision(IntTy:LLVMTypeRef, NumWords:Annotated[int, ctypes.c_uint32], Words:c.Array[uint64_t, Literal[0]]) -> LLVMValueRef: ...
+uint8_t: TypeAlias = Annotated[int, ctypes.c_ubyte]
+@dll.bind
+def LLVMConstIntOfString(IntTy:LLVMTypeRef, Text:c.POINTER[Annotated[bytes, ctypes.c_char]], Radix:uint8_t) -> LLVMValueRef: ...
+@dll.bind
+def LLVMConstIntOfStringAndSize(IntTy:LLVMTypeRef, Text:c.POINTER[Annotated[bytes, ctypes.c_char]], SLen:Annotated[int, ctypes.c_uint32], Radix:uint8_t) -> LLVMValueRef: ...
+@dll.bind
+def LLVMConstReal(RealTy:LLVMTypeRef, N:Annotated[float, ctypes.c_double]) -> LLVMValueRef: ...
+@dll.bind
+def LLVMConstRealOfString(RealTy:LLVMTypeRef, Text:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMValueRef: ...
+@dll.bind
+def LLVMConstRealOfStringAndSize(RealTy:LLVMTypeRef, Text:c.POINTER[Annotated[bytes, ctypes.c_char]], SLen:Annotated[int, ctypes.c_uint32]) -> LLVMValueRef: ...
+@dll.bind
+def LLVMConstIntGetZExtValue(ConstantVal:LLVMValueRef) -> Annotated[int, ctypes.c_uint64]: ...
+@dll.bind
+def LLVMConstIntGetSExtValue(ConstantVal:LLVMValueRef) -> Annotated[int, ctypes.c_int64]: ...
+@dll.bind
+def LLVMConstRealGetDouble(ConstantVal:LLVMValueRef, losesInfo:c.POINTER[LLVMBool]) -> Annotated[float, ctypes.c_double]: ...
+@dll.bind
+def LLVMConstStringInContext(C:LLVMContextRef, Str:c.POINTER[Annotated[bytes, ctypes.c_char]], Length:Annotated[int, ctypes.c_uint32], DontNullTerminate:LLVMBool) -> LLVMValueRef: ...
+@dll.bind
+def LLVMConstStringInContext2(C:LLVMContextRef, Str:c.POINTER[Annotated[bytes, ctypes.c_char]], Length:size_t, DontNullTerminate:LLVMBool) -> LLVMValueRef: ...
+@dll.bind
+def LLVMConstString(Str:c.POINTER[Annotated[bytes, ctypes.c_char]], Length:Annotated[int, ctypes.c_uint32], DontNullTerminate:LLVMBool) -> LLVMValueRef: ...
+@dll.bind
+def LLVMIsConstantString(c:LLVMValueRef) -> LLVMBool: ...
+@dll.bind
+def LLVMGetAsString(c:LLVMValueRef, Length:c.POINTER[size_t]) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
+@dll.bind
+def LLVMConstStructInContext(C:LLVMContextRef, ConstantVals:c.POINTER[LLVMValueRef], Count:Annotated[int, ctypes.c_uint32], Packed:LLVMBool) -> LLVMValueRef: ...
+@dll.bind
+def LLVMConstStruct(ConstantVals:c.POINTER[LLVMValueRef], Count:Annotated[int, ctypes.c_uint32], Packed:LLVMBool) -> LLVMValueRef: ...
+@dll.bind
+def LLVMConstArray(ElementTy:LLVMTypeRef, ConstantVals:c.POINTER[LLVMValueRef], Length:Annotated[int, ctypes.c_uint32]) -> LLVMValueRef: ...
+@dll.bind
+def LLVMConstArray2(ElementTy:LLVMTypeRef, ConstantVals:c.POINTER[LLVMValueRef], Length:uint64_t) -> LLVMValueRef: ...
+@dll.bind
+def LLVMConstNamedStruct(StructTy:LLVMTypeRef, ConstantVals:c.POINTER[LLVMValueRef], Count:Annotated[int, ctypes.c_uint32]) -> LLVMValueRef: ...
+@dll.bind
+def LLVMGetAggregateElement(C:LLVMValueRef, Idx:Annotated[int, ctypes.c_uint32]) -> LLVMValueRef: ...
+@dll.bind
+def LLVMGetElementAsConstant(C:LLVMValueRef, idx:Annotated[int, ctypes.c_uint32]) -> LLVMValueRef: ...
+@dll.bind
+def LLVMConstVector(ScalarConstantVals:c.POINTER[LLVMValueRef], Size:Annotated[int, ctypes.c_uint32]) -> LLVMValueRef: ...
+@dll.bind
+def LLVMConstantPtrAuth(Ptr:LLVMValueRef, Key:LLVMValueRef, Disc:LLVMValueRef, AddrDisc:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMGetConstOpcode(ConstantVal:LLVMValueRef) -> LLVMOpcode: ...
+@dll.bind
+def LLVMAlignOf(Ty:LLVMTypeRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMSizeOf(Ty:LLVMTypeRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMConstNeg(ConstantVal:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMConstNSWNeg(ConstantVal:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMConstNUWNeg(ConstantVal:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMConstNot(ConstantVal:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMConstAdd(LHSConstant:LLVMValueRef, RHSConstant:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMConstNSWAdd(LHSConstant:LLVMValueRef, RHSConstant:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMConstNUWAdd(LHSConstant:LLVMValueRef, RHSConstant:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMConstSub(LHSConstant:LLVMValueRef, RHSConstant:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMConstNSWSub(LHSConstant:LLVMValueRef, RHSConstant:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMConstNUWSub(LHSConstant:LLVMValueRef, RHSConstant:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMConstMul(LHSConstant:LLVMValueRef, RHSConstant:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMConstNSWMul(LHSConstant:LLVMValueRef, RHSConstant:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMConstNUWMul(LHSConstant:LLVMValueRef, RHSConstant:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMConstXor(LHSConstant:LLVMValueRef, RHSConstant:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMConstGEP2(Ty:LLVMTypeRef, ConstantVal:LLVMValueRef, ConstantIndices:c.POINTER[LLVMValueRef], NumIndices:Annotated[int, ctypes.c_uint32]) -> LLVMValueRef: ...
+@dll.bind
+def LLVMConstInBoundsGEP2(Ty:LLVMTypeRef, ConstantVal:LLVMValueRef, ConstantIndices:c.POINTER[LLVMValueRef], NumIndices:Annotated[int, ctypes.c_uint32]) -> LLVMValueRef: ...
+@dll.bind
+def LLVMConstGEPWithNoWrapFlags(Ty:LLVMTypeRef, ConstantVal:LLVMValueRef, ConstantIndices:c.POINTER[LLVMValueRef], NumIndices:Annotated[int, ctypes.c_uint32], NoWrapFlags:LLVMGEPNoWrapFlags) -> LLVMValueRef: ...
+@dll.bind
+def LLVMConstTrunc(ConstantVal:LLVMValueRef, ToType:LLVMTypeRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMConstPtrToInt(ConstantVal:LLVMValueRef, ToType:LLVMTypeRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMConstIntToPtr(ConstantVal:LLVMValueRef, ToType:LLVMTypeRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMConstBitCast(ConstantVal:LLVMValueRef, ToType:LLVMTypeRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMConstAddrSpaceCast(ConstantVal:LLVMValueRef, ToType:LLVMTypeRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMConstTruncOrBitCast(ConstantVal:LLVMValueRef, ToType:LLVMTypeRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMConstPointerCast(ConstantVal:LLVMValueRef, ToType:LLVMTypeRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMConstExtractElement(VectorConstant:LLVMValueRef, IndexConstant:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMConstInsertElement(VectorConstant:LLVMValueRef, ElementValueConstant:LLVMValueRef, IndexConstant:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMConstShuffleVector(VectorAConstant:LLVMValueRef, VectorBConstant:LLVMValueRef, MaskConstant:LLVMValueRef) -> LLVMValueRef: ...
+class struct_LLVMOpaqueBasicBlock(ctypes.Structure): pass
+LLVMBasicBlockRef: TypeAlias = c.POINTER[struct_LLVMOpaqueBasicBlock]
+@dll.bind
+def LLVMBlockAddress(F:LLVMValueRef, BB:LLVMBasicBlockRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMGetBlockAddressFunction(BlockAddr:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMGetBlockAddressBasicBlock(BlockAddr:LLVMValueRef) -> LLVMBasicBlockRef: ...
+@dll.bind
+def LLVMConstInlineAsm(Ty:LLVMTypeRef, AsmString:c.POINTER[Annotated[bytes, ctypes.c_char]], Constraints:c.POINTER[Annotated[bytes, ctypes.c_char]], HasSideEffects:LLVMBool, IsAlignStack:LLVMBool) -> LLVMValueRef: ...
+@dll.bind
+def LLVMGetGlobalParent(Global:LLVMValueRef) -> LLVMModuleRef: ...
+@dll.bind
+def LLVMIsDeclaration(Global:LLVMValueRef) -> LLVMBool: ...
+@dll.bind
+def LLVMGetLinkage(Global:LLVMValueRef) -> LLVMLinkage: ...
+@dll.bind
+def LLVMSetLinkage(Global:LLVMValueRef, Linkage:LLVMLinkage) -> None: ...
+@dll.bind
+def LLVMGetSection(Global:LLVMValueRef) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
+@dll.bind
+def LLVMSetSection(Global:LLVMValueRef, Section:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> None: ...
+@dll.bind
+def LLVMGetVisibility(Global:LLVMValueRef) -> LLVMVisibility: ...
+@dll.bind
+def LLVMSetVisibility(Global:LLVMValueRef, Viz:LLVMVisibility) -> None: ...
+@dll.bind
+def LLVMGetDLLStorageClass(Global:LLVMValueRef) -> LLVMDLLStorageClass: ...
+@dll.bind
+def LLVMSetDLLStorageClass(Global:LLVMValueRef, Class:LLVMDLLStorageClass) -> None: ...
+@dll.bind
+def LLVMGetUnnamedAddress(Global:LLVMValueRef) -> LLVMUnnamedAddr: ...
+@dll.bind
+def LLVMSetUnnamedAddress(Global:LLVMValueRef, UnnamedAddr:LLVMUnnamedAddr) -> None: ...
+@dll.bind
+def LLVMGlobalGetValueType(Global:LLVMValueRef) -> LLVMTypeRef: ...
+@dll.bind
+def LLVMHasUnnamedAddr(Global:LLVMValueRef) -> LLVMBool: ...
+@dll.bind
+def LLVMSetUnnamedAddr(Global:LLVMValueRef, HasUnnamedAddr:LLVMBool) -> None: ...
+@dll.bind
+def LLVMGetAlignment(V:LLVMValueRef) -> Annotated[int, ctypes.c_uint32]: ...
+@dll.bind
+def LLVMSetAlignment(V:LLVMValueRef, Bytes:Annotated[int, ctypes.c_uint32]) -> None: ...
+@dll.bind
+def LLVMGlobalSetMetadata(Global:LLVMValueRef, Kind:Annotated[int, ctypes.c_uint32], MD:LLVMMetadataRef) -> None: ...
+@dll.bind
+def LLVMGlobalEraseMetadata(Global:LLVMValueRef, Kind:Annotated[int, ctypes.c_uint32]) -> None: ...
+@dll.bind
+def LLVMGlobalClearMetadata(Global:LLVMValueRef) -> None: ...
+class struct_LLVMOpaqueValueMetadataEntry(ctypes.Structure): pass
+LLVMValueMetadataEntry: TypeAlias = struct_LLVMOpaqueValueMetadataEntry
+@dll.bind
+def LLVMGlobalCopyAllMetadata(Value:LLVMValueRef, NumEntries:c.POINTER[size_t]) -> c.POINTER[LLVMValueMetadataEntry]: ...
+@dll.bind
+def LLVMDisposeValueMetadataEntries(Entries:c.POINTER[LLVMValueMetadataEntry]) -> None: ...
+@dll.bind
+def LLVMValueMetadataEntriesGetKind(Entries:c.POINTER[LLVMValueMetadataEntry], Index:Annotated[int, ctypes.c_uint32]) -> Annotated[int, ctypes.c_uint32]: ...
+@dll.bind
+def LLVMValueMetadataEntriesGetMetadata(Entries:c.POINTER[LLVMValueMetadataEntry], Index:Annotated[int, ctypes.c_uint32]) -> LLVMMetadataRef: ...
+@dll.bind
+def LLVMAddGlobal(M:LLVMModuleRef, Ty:LLVMTypeRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMValueRef: ...
+@dll.bind
+def LLVMAddGlobalInAddressSpace(M:LLVMModuleRef, Ty:LLVMTypeRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]], AddressSpace:Annotated[int, ctypes.c_uint32]) -> LLVMValueRef: ...
+@dll.bind
+def LLVMGetNamedGlobal(M:LLVMModuleRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMValueRef: ...
+@dll.bind
+def LLVMGetNamedGlobalWithLength(M:LLVMModuleRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]], Length:size_t) -> LLVMValueRef: ...
+@dll.bind
+def LLVMGetFirstGlobal(M:LLVMModuleRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMGetLastGlobal(M:LLVMModuleRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMGetNextGlobal(GlobalVar:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMGetPreviousGlobal(GlobalVar:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMDeleteGlobal(GlobalVar:LLVMValueRef) -> None: ...
+@dll.bind
+def LLVMGetInitializer(GlobalVar:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMSetInitializer(GlobalVar:LLVMValueRef, ConstantVal:LLVMValueRef) -> None: ...
+@dll.bind
+def LLVMIsThreadLocal(GlobalVar:LLVMValueRef) -> LLVMBool: ...
+@dll.bind
+def LLVMSetThreadLocal(GlobalVar:LLVMValueRef, IsThreadLocal:LLVMBool) -> None: ...
+@dll.bind
+def LLVMIsGlobalConstant(GlobalVar:LLVMValueRef) -> LLVMBool: ...
+@dll.bind
+def LLVMSetGlobalConstant(GlobalVar:LLVMValueRef, IsConstant:LLVMBool) -> None: ...
+@dll.bind
+def LLVMGetThreadLocalMode(GlobalVar:LLVMValueRef) -> LLVMThreadLocalMode: ...
+@dll.bind
+def LLVMSetThreadLocalMode(GlobalVar:LLVMValueRef, Mode:LLVMThreadLocalMode) -> None: ...
+@dll.bind
+def LLVMIsExternallyInitialized(GlobalVar:LLVMValueRef) -> LLVMBool: ...
+@dll.bind
+def LLVMSetExternallyInitialized(GlobalVar:LLVMValueRef, IsExtInit:LLVMBool) -> None: ...
+@dll.bind
+def LLVMAddAlias2(M:LLVMModuleRef, ValueTy:LLVMTypeRef, AddrSpace:Annotated[int, ctypes.c_uint32], Aliasee:LLVMValueRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMValueRef: ...
+@dll.bind
+def LLVMGetNamedGlobalAlias(M:LLVMModuleRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]], NameLen:size_t) -> LLVMValueRef: ...
+@dll.bind
+def LLVMGetFirstGlobalAlias(M:LLVMModuleRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMGetLastGlobalAlias(M:LLVMModuleRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMGetNextGlobalAlias(GA:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMGetPreviousGlobalAlias(GA:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMAliasGetAliasee(Alias:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMAliasSetAliasee(Alias:LLVMValueRef, Aliasee:LLVMValueRef) -> None: ...
+@dll.bind
+def LLVMDeleteFunction(Fn:LLVMValueRef) -> None: ...
+@dll.bind
+def LLVMHasPersonalityFn(Fn:LLVMValueRef) -> LLVMBool: ...
+@dll.bind
+def LLVMGetPersonalityFn(Fn:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMSetPersonalityFn(Fn:LLVMValueRef, PersonalityFn:LLVMValueRef) -> None: ...
+@dll.bind
+def LLVMLookupIntrinsicID(Name:c.POINTER[Annotated[bytes, ctypes.c_char]], NameLen:size_t) -> Annotated[int, ctypes.c_uint32]: ...
+@dll.bind
+def LLVMGetIntrinsicID(Fn:LLVMValueRef) -> Annotated[int, ctypes.c_uint32]: ...
+@dll.bind
+def LLVMGetIntrinsicDeclaration(Mod:LLVMModuleRef, ID:Annotated[int, ctypes.c_uint32], ParamTypes:c.POINTER[LLVMTypeRef], ParamCount:size_t) -> LLVMValueRef: ...
+@dll.bind
+def LLVMIntrinsicGetType(Ctx:LLVMContextRef, ID:Annotated[int, ctypes.c_uint32], ParamTypes:c.POINTER[LLVMTypeRef], ParamCount:size_t) -> LLVMTypeRef: ...
+@dll.bind
+def LLVMIntrinsicGetName(ID:Annotated[int, ctypes.c_uint32], NameLength:c.POINTER[size_t]) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
+@dll.bind
+def LLVMIntrinsicCopyOverloadedName(ID:Annotated[int, ctypes.c_uint32], ParamTypes:c.POINTER[LLVMTypeRef], ParamCount:size_t, NameLength:c.POINTER[size_t]) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
+@dll.bind
+def LLVMIntrinsicCopyOverloadedName2(Mod:LLVMModuleRef, ID:Annotated[int, ctypes.c_uint32], ParamTypes:c.POINTER[LLVMTypeRef], ParamCount:size_t, NameLength:c.POINTER[size_t]) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
+@dll.bind
+def LLVMIntrinsicIsOverloaded(ID:Annotated[int, ctypes.c_uint32]) -> LLVMBool: ...
+@dll.bind
+def LLVMGetFunctionCallConv(Fn:LLVMValueRef) -> Annotated[int, ctypes.c_uint32]: ...
+@dll.bind
+def LLVMSetFunctionCallConv(Fn:LLVMValueRef, CC:Annotated[int, ctypes.c_uint32]) -> None: ...
+@dll.bind
+def LLVMGetGC(Fn:LLVMValueRef) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
+@dll.bind
+def LLVMSetGC(Fn:LLVMValueRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> None: ...
+@dll.bind
+def LLVMGetPrefixData(Fn:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMHasPrefixData(Fn:LLVMValueRef) -> LLVMBool: ...
+@dll.bind
+def LLVMSetPrefixData(Fn:LLVMValueRef, prefixData:LLVMValueRef) -> None: ...
+@dll.bind
+def LLVMGetPrologueData(Fn:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMHasPrologueData(Fn:LLVMValueRef) -> LLVMBool: ...
+@dll.bind
+def LLVMSetPrologueData(Fn:LLVMValueRef, prologueData:LLVMValueRef) -> None: ...
+@dll.bind
+def LLVMAddAttributeAtIndex(F:LLVMValueRef, Idx:LLVMAttributeIndex, A:LLVMAttributeRef) -> None: ...
+@dll.bind
+def LLVMGetAttributeCountAtIndex(F:LLVMValueRef, Idx:LLVMAttributeIndex) -> Annotated[int, ctypes.c_uint32]: ...
+@dll.bind
+def LLVMGetAttributesAtIndex(F:LLVMValueRef, Idx:LLVMAttributeIndex, Attrs:c.POINTER[LLVMAttributeRef]) -> None: ...
+@dll.bind
+def LLVMGetEnumAttributeAtIndex(F:LLVMValueRef, Idx:LLVMAttributeIndex, KindID:Annotated[int, ctypes.c_uint32]) -> LLVMAttributeRef: ...
+@dll.bind
+def LLVMGetStringAttributeAtIndex(F:LLVMValueRef, Idx:LLVMAttributeIndex, K:c.POINTER[Annotated[bytes, ctypes.c_char]], KLen:Annotated[int, ctypes.c_uint32]) -> LLVMAttributeRef: ...
+@dll.bind
+def LLVMRemoveEnumAttributeAtIndex(F:LLVMValueRef, Idx:LLVMAttributeIndex, KindID:Annotated[int, ctypes.c_uint32]) -> None: ...
+@dll.bind
+def LLVMRemoveStringAttributeAtIndex(F:LLVMValueRef, Idx:LLVMAttributeIndex, K:c.POINTER[Annotated[bytes, ctypes.c_char]], KLen:Annotated[int, ctypes.c_uint32]) -> None: ...
+@dll.bind
+def LLVMAddTargetDependentFunctionAttr(Fn:LLVMValueRef, A:c.POINTER[Annotated[bytes, ctypes.c_char]], V:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> None: ...
+@dll.bind
+def LLVMCountParams(Fn:LLVMValueRef) -> Annotated[int, ctypes.c_uint32]: ...
+@dll.bind
+def LLVMGetParams(Fn:LLVMValueRef, Params:c.POINTER[LLVMValueRef]) -> None: ...
+@dll.bind
+def LLVMGetParam(Fn:LLVMValueRef, Index:Annotated[int, ctypes.c_uint32]) -> LLVMValueRef: ...
+@dll.bind
+def LLVMGetParamParent(Inst:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMGetFirstParam(Fn:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMGetLastParam(Fn:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMGetNextParam(Arg:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMGetPreviousParam(Arg:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMSetParamAlignment(Arg:LLVMValueRef, Align:Annotated[int, ctypes.c_uint32]) -> None: ...
+@dll.bind
+def LLVMAddGlobalIFunc(M:LLVMModuleRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]], NameLen:size_t, Ty:LLVMTypeRef, AddrSpace:Annotated[int, ctypes.c_uint32], Resolver:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMGetNamedGlobalIFunc(M:LLVMModuleRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]], NameLen:size_t) -> LLVMValueRef: ...
+@dll.bind
+def LLVMGetFirstGlobalIFunc(M:LLVMModuleRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMGetLastGlobalIFunc(M:LLVMModuleRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMGetNextGlobalIFunc(IFunc:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMGetPreviousGlobalIFunc(IFunc:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMGetGlobalIFuncResolver(IFunc:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMSetGlobalIFuncResolver(IFunc:LLVMValueRef, Resolver:LLVMValueRef) -> None: ...
+@dll.bind
+def LLVMEraseGlobalIFunc(IFunc:LLVMValueRef) -> None: ...
+@dll.bind
+def LLVMRemoveGlobalIFunc(IFunc:LLVMValueRef) -> None: ...
+@dll.bind
+def LLVMMDStringInContext2(C:LLVMContextRef, Str:c.POINTER[Annotated[bytes, ctypes.c_char]], SLen:size_t) -> LLVMMetadataRef: ...
+@dll.bind
+def LLVMMDNodeInContext2(C:LLVMContextRef, MDs:c.POINTER[LLVMMetadataRef], Count:size_t) -> LLVMMetadataRef: ...
+@dll.bind
+def LLVMMetadataAsValue(C:LLVMContextRef, MD:LLVMMetadataRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMValueAsMetadata(Val:LLVMValueRef) -> LLVMMetadataRef: ...
+@dll.bind
+def LLVMGetMDString(V:LLVMValueRef, Length:c.POINTER[Annotated[int, ctypes.c_uint32]]) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
+@dll.bind
+def LLVMGetMDNodeNumOperands(V:LLVMValueRef) -> Annotated[int, ctypes.c_uint32]: ...
+@dll.bind
+def LLVMGetMDNodeOperands(V:LLVMValueRef, Dest:c.POINTER[LLVMValueRef]) -> None: ...
+@dll.bind
+def LLVMReplaceMDNodeOperandWith(V:LLVMValueRef, Index:Annotated[int, ctypes.c_uint32], Replacement:LLVMMetadataRef) -> None: ...
+@dll.bind
+def LLVMMDStringInContext(C:LLVMContextRef, Str:c.POINTER[Annotated[bytes, ctypes.c_char]], SLen:Annotated[int, ctypes.c_uint32]) -> LLVMValueRef: ...
+@dll.bind
+def LLVMMDString(Str:c.POINTER[Annotated[bytes, ctypes.c_char]], SLen:Annotated[int, ctypes.c_uint32]) -> LLVMValueRef: ...
+@dll.bind
+def LLVMMDNodeInContext(C:LLVMContextRef, Vals:c.POINTER[LLVMValueRef], Count:Annotated[int, ctypes.c_uint32]) -> LLVMValueRef: ...
+@dll.bind
+def LLVMMDNode(Vals:c.POINTER[LLVMValueRef], Count:Annotated[int, ctypes.c_uint32]) -> LLVMValueRef: ...
+class struct_LLVMOpaqueOperandBundle(ctypes.Structure): pass
+LLVMOperandBundleRef: TypeAlias = c.POINTER[struct_LLVMOpaqueOperandBundle]
+@dll.bind
+def LLVMCreateOperandBundle(Tag:c.POINTER[Annotated[bytes, ctypes.c_char]], TagLen:size_t, Args:c.POINTER[LLVMValueRef], NumArgs:Annotated[int, ctypes.c_uint32]) -> LLVMOperandBundleRef: ...
+@dll.bind
+def LLVMDisposeOperandBundle(Bundle:LLVMOperandBundleRef) -> None: ...
+@dll.bind
+def LLVMGetOperandBundleTag(Bundle:LLVMOperandBundleRef, Len:c.POINTER[size_t]) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
+@dll.bind
+def LLVMGetNumOperandBundleArgs(Bundle:LLVMOperandBundleRef) -> Annotated[int, ctypes.c_uint32]: ...
+@dll.bind
+def LLVMGetOperandBundleArgAtIndex(Bundle:LLVMOperandBundleRef, Index:Annotated[int, ctypes.c_uint32]) -> LLVMValueRef: ...
+@dll.bind
+def LLVMBasicBlockAsValue(BB:LLVMBasicBlockRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMValueIsBasicBlock(Val:LLVMValueRef) -> LLVMBool: ...
+@dll.bind
+def LLVMValueAsBasicBlock(Val:LLVMValueRef) -> LLVMBasicBlockRef: ...
+@dll.bind
+def LLVMGetBasicBlockName(BB:LLVMBasicBlockRef) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
+@dll.bind
+def LLVMGetBasicBlockParent(BB:LLVMBasicBlockRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMGetBasicBlockTerminator(BB:LLVMBasicBlockRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMCountBasicBlocks(Fn:LLVMValueRef) -> Annotated[int, ctypes.c_uint32]: ...
+@dll.bind
+def LLVMGetBasicBlocks(Fn:LLVMValueRef, BasicBlocks:c.POINTER[LLVMBasicBlockRef]) -> None: ...
+@dll.bind
+def LLVMGetFirstBasicBlock(Fn:LLVMValueRef) -> LLVMBasicBlockRef: ...
+@dll.bind
+def LLVMGetLastBasicBlock(Fn:LLVMValueRef) -> LLVMBasicBlockRef: ...
+@dll.bind
+def LLVMGetNextBasicBlock(BB:LLVMBasicBlockRef) -> LLVMBasicBlockRef: ...
+@dll.bind
+def LLVMGetPreviousBasicBlock(BB:LLVMBasicBlockRef) -> LLVMBasicBlockRef: ...
+@dll.bind
+def LLVMGetEntryBasicBlock(Fn:LLVMValueRef) -> LLVMBasicBlockRef: ...
+class struct_LLVMOpaqueBuilder(ctypes.Structure): pass
+LLVMBuilderRef: TypeAlias = c.POINTER[struct_LLVMOpaqueBuilder]
+@dll.bind
+def LLVMInsertExistingBasicBlockAfterInsertBlock(Builder:LLVMBuilderRef, BB:LLVMBasicBlockRef) -> None: ...
+@dll.bind
+def LLVMAppendExistingBasicBlock(Fn:LLVMValueRef, BB:LLVMBasicBlockRef) -> None: ...
+@dll.bind
+def LLVMCreateBasicBlockInContext(C:LLVMContextRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMBasicBlockRef: ...
+@dll.bind
+def LLVMAppendBasicBlockInContext(C:LLVMContextRef, Fn:LLVMValueRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMBasicBlockRef: ...
+@dll.bind
+def LLVMAppendBasicBlock(Fn:LLVMValueRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMBasicBlockRef: ...
+@dll.bind
+def LLVMInsertBasicBlockInContext(C:LLVMContextRef, BB:LLVMBasicBlockRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMBasicBlockRef: ...
+@dll.bind
+def LLVMInsertBasicBlock(InsertBeforeBB:LLVMBasicBlockRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMBasicBlockRef: ...
+@dll.bind
+def LLVMDeleteBasicBlock(BB:LLVMBasicBlockRef) -> None: ...
+@dll.bind
+def LLVMRemoveBasicBlockFromParent(BB:LLVMBasicBlockRef) -> None: ...
+@dll.bind
+def LLVMMoveBasicBlockBefore(BB:LLVMBasicBlockRef, MovePos:LLVMBasicBlockRef) -> None: ...
+@dll.bind
+def LLVMMoveBasicBlockAfter(BB:LLVMBasicBlockRef, MovePos:LLVMBasicBlockRef) -> None: ...
+@dll.bind
+def LLVMGetFirstInstruction(BB:LLVMBasicBlockRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMGetLastInstruction(BB:LLVMBasicBlockRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMHasMetadata(Val:LLVMValueRef) -> Annotated[int, ctypes.c_int32]: ...
+@dll.bind
+def LLVMGetMetadata(Val:LLVMValueRef, KindID:Annotated[int, ctypes.c_uint32]) -> LLVMValueRef: ...
+@dll.bind
+def LLVMSetMetadata(Val:LLVMValueRef, KindID:Annotated[int, ctypes.c_uint32], Node:LLVMValueRef) -> None: ...
+@dll.bind
+def LLVMInstructionGetAllMetadataOtherThanDebugLoc(Instr:LLVMValueRef, NumEntries:c.POINTER[size_t]) -> c.POINTER[LLVMValueMetadataEntry]: ...
+@dll.bind
+def LLVMGetInstructionParent(Inst:LLVMValueRef) -> LLVMBasicBlockRef: ...
+@dll.bind
+def LLVMGetNextInstruction(Inst:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMGetPreviousInstruction(Inst:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMInstructionRemoveFromParent(Inst:LLVMValueRef) -> None: ...
+@dll.bind
+def LLVMInstructionEraseFromParent(Inst:LLVMValueRef) -> None: ...
+@dll.bind
+def LLVMDeleteInstruction(Inst:LLVMValueRef) -> None: ...
+@dll.bind
+def LLVMGetInstructionOpcode(Inst:LLVMValueRef) -> LLVMOpcode: ...
+@dll.bind
+def LLVMGetICmpPredicate(Inst:LLVMValueRef) -> LLVMIntPredicate: ...
+@dll.bind
+def LLVMGetFCmpPredicate(Inst:LLVMValueRef) -> LLVMRealPredicate: ...
+@dll.bind
+def LLVMInstructionClone(Inst:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMIsATerminatorInst(Inst:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMGetFirstDbgRecord(Inst:LLVMValueRef) -> LLVMDbgRecordRef: ...
+@dll.bind
+def LLVMGetLastDbgRecord(Inst:LLVMValueRef) -> LLVMDbgRecordRef: ...
+@dll.bind
+def LLVMGetNextDbgRecord(DbgRecord:LLVMDbgRecordRef) -> LLVMDbgRecordRef: ...
+@dll.bind
+def LLVMGetPreviousDbgRecord(DbgRecord:LLVMDbgRecordRef) -> LLVMDbgRecordRef: ...
+@dll.bind
+def LLVMGetNumArgOperands(Instr:LLVMValueRef) -> Annotated[int, ctypes.c_uint32]: ...
+@dll.bind
+def LLVMSetInstructionCallConv(Instr:LLVMValueRef, CC:Annotated[int, ctypes.c_uint32]) -> None: ...
+@dll.bind
+def LLVMGetInstructionCallConv(Instr:LLVMValueRef) -> Annotated[int, ctypes.c_uint32]: ...
+@dll.bind
+def LLVMSetInstrParamAlignment(Instr:LLVMValueRef, Idx:LLVMAttributeIndex, Align:Annotated[int, ctypes.c_uint32]) -> None: ...
+@dll.bind
+def LLVMAddCallSiteAttribute(C:LLVMValueRef, Idx:LLVMAttributeIndex, A:LLVMAttributeRef) -> None: ...
+@dll.bind
+def LLVMGetCallSiteAttributeCount(C:LLVMValueRef, Idx:LLVMAttributeIndex) -> Annotated[int, ctypes.c_uint32]: ...
+@dll.bind
+def LLVMGetCallSiteAttributes(C:LLVMValueRef, Idx:LLVMAttributeIndex, Attrs:c.POINTER[LLVMAttributeRef]) -> None: ...
+@dll.bind
+def LLVMGetCallSiteEnumAttribute(C:LLVMValueRef, Idx:LLVMAttributeIndex, KindID:Annotated[int, ctypes.c_uint32]) -> LLVMAttributeRef: ...
+@dll.bind
+def LLVMGetCallSiteStringAttribute(C:LLVMValueRef, Idx:LLVMAttributeIndex, K:c.POINTER[Annotated[bytes, ctypes.c_char]], KLen:Annotated[int, ctypes.c_uint32]) -> LLVMAttributeRef: ...
+@dll.bind
+def LLVMRemoveCallSiteEnumAttribute(C:LLVMValueRef, Idx:LLVMAttributeIndex, KindID:Annotated[int, ctypes.c_uint32]) -> None: ...
+@dll.bind
+def LLVMRemoveCallSiteStringAttribute(C:LLVMValueRef, Idx:LLVMAttributeIndex, K:c.POINTER[Annotated[bytes, ctypes.c_char]], KLen:Annotated[int, ctypes.c_uint32]) -> None: ...
+@dll.bind
+def LLVMGetCalledFunctionType(C:LLVMValueRef) -> LLVMTypeRef: ...
+@dll.bind
+def LLVMGetCalledValue(Instr:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMGetNumOperandBundles(C:LLVMValueRef) -> Annotated[int, ctypes.c_uint32]: ...
+@dll.bind
+def LLVMGetOperandBundleAtIndex(C:LLVMValueRef, Index:Annotated[int, ctypes.c_uint32]) -> LLVMOperandBundleRef: ...
+@dll.bind
+def LLVMIsTailCall(CallInst:LLVMValueRef) -> LLVMBool: ...
+@dll.bind
+def LLVMSetTailCall(CallInst:LLVMValueRef, IsTailCall:LLVMBool) -> None: ...
+@dll.bind
+def LLVMGetTailCallKind(CallInst:LLVMValueRef) -> LLVMTailCallKind: ...
+@dll.bind
+def LLVMSetTailCallKind(CallInst:LLVMValueRef, kind:LLVMTailCallKind) -> None: ...
+@dll.bind
+def LLVMGetNormalDest(InvokeInst:LLVMValueRef) -> LLVMBasicBlockRef: ...
+@dll.bind
+def LLVMGetUnwindDest(InvokeInst:LLVMValueRef) -> LLVMBasicBlockRef: ...
+@dll.bind
+def LLVMSetNormalDest(InvokeInst:LLVMValueRef, B:LLVMBasicBlockRef) -> None: ...
+@dll.bind
+def LLVMSetUnwindDest(InvokeInst:LLVMValueRef, B:LLVMBasicBlockRef) -> None: ...
+@dll.bind
+def LLVMGetCallBrDefaultDest(CallBr:LLVMValueRef) -> LLVMBasicBlockRef: ...
+@dll.bind
+def LLVMGetCallBrNumIndirectDests(CallBr:LLVMValueRef) -> Annotated[int, ctypes.c_uint32]: ...
+@dll.bind
+def LLVMGetCallBrIndirectDest(CallBr:LLVMValueRef, Idx:Annotated[int, ctypes.c_uint32]) -> LLVMBasicBlockRef: ...
+@dll.bind
+def LLVMGetNumSuccessors(Term:LLVMValueRef) -> Annotated[int, ctypes.c_uint32]: ...
+@dll.bind
+def LLVMGetSuccessor(Term:LLVMValueRef, i:Annotated[int, ctypes.c_uint32]) -> LLVMBasicBlockRef: ...
+@dll.bind
+def LLVMSetSuccessor(Term:LLVMValueRef, i:Annotated[int, ctypes.c_uint32], block:LLVMBasicBlockRef) -> None: ...
+@dll.bind
+def LLVMIsConditional(Branch:LLVMValueRef) -> LLVMBool: ...
+@dll.bind
+def LLVMGetCondition(Branch:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMSetCondition(Branch:LLVMValueRef, Cond:LLVMValueRef) -> None: ...
+@dll.bind
+def LLVMGetSwitchDefaultDest(SwitchInstr:LLVMValueRef) -> LLVMBasicBlockRef: ...
+@dll.bind
+def LLVMGetAllocatedType(Alloca:LLVMValueRef) -> LLVMTypeRef: ...
+@dll.bind
+def LLVMIsInBounds(GEP:LLVMValueRef) -> LLVMBool: ...
+@dll.bind
+def LLVMSetIsInBounds(GEP:LLVMValueRef, InBounds:LLVMBool) -> None: ...
+@dll.bind
+def LLVMGetGEPSourceElementType(GEP:LLVMValueRef) -> LLVMTypeRef: ...
+@dll.bind
+def LLVMGEPGetNoWrapFlags(GEP:LLVMValueRef) -> LLVMGEPNoWrapFlags: ...
+@dll.bind
+def LLVMGEPSetNoWrapFlags(GEP:LLVMValueRef, NoWrapFlags:LLVMGEPNoWrapFlags) -> None: ...
+@dll.bind
+def LLVMAddIncoming(PhiNode:LLVMValueRef, IncomingValues:c.POINTER[LLVMValueRef], IncomingBlocks:c.POINTER[LLVMBasicBlockRef], Count:Annotated[int, ctypes.c_uint32]) -> None: ...
+@dll.bind
+def LLVMCountIncoming(PhiNode:LLVMValueRef) -> Annotated[int, ctypes.c_uint32]: ...
+@dll.bind
+def LLVMGetIncomingValue(PhiNode:LLVMValueRef, Index:Annotated[int, ctypes.c_uint32]) -> LLVMValueRef: ...
+@dll.bind
+def LLVMGetIncomingBlock(PhiNode:LLVMValueRef, Index:Annotated[int, ctypes.c_uint32]) -> LLVMBasicBlockRef: ...
+@dll.bind
+def LLVMGetNumIndices(Inst:LLVMValueRef) -> Annotated[int, ctypes.c_uint32]: ...
+@dll.bind
+def LLVMGetIndices(Inst:LLVMValueRef) -> c.POINTER[Annotated[int, ctypes.c_uint32]]: ...
+@dll.bind
+def LLVMCreateBuilderInContext(C:LLVMContextRef) -> LLVMBuilderRef: ...
+@dll.bind
+def LLVMCreateBuilder() -> LLVMBuilderRef: ...
+@dll.bind
+def LLVMPositionBuilder(Builder:LLVMBuilderRef, Block:LLVMBasicBlockRef, Instr:LLVMValueRef) -> None: ...
+@dll.bind
+def LLVMPositionBuilderBeforeDbgRecords(Builder:LLVMBuilderRef, Block:LLVMBasicBlockRef, Inst:LLVMValueRef) -> None: ...
+@dll.bind
+def LLVMPositionBuilderBefore(Builder:LLVMBuilderRef, Instr:LLVMValueRef) -> None: ...
+@dll.bind
+def LLVMPositionBuilderBeforeInstrAndDbgRecords(Builder:LLVMBuilderRef, Instr:LLVMValueRef) -> None: ...
+@dll.bind
+def LLVMPositionBuilderAtEnd(Builder:LLVMBuilderRef, Block:LLVMBasicBlockRef) -> None: ...
+@dll.bind
+def LLVMGetInsertBlock(Builder:LLVMBuilderRef) -> LLVMBasicBlockRef: ...
+@dll.bind
+def LLVMClearInsertionPosition(Builder:LLVMBuilderRef) -> None: ...
+@dll.bind
+def LLVMInsertIntoBuilder(Builder:LLVMBuilderRef, Instr:LLVMValueRef) -> None: ...
+@dll.bind
+def LLVMInsertIntoBuilderWithName(Builder:LLVMBuilderRef, Instr:LLVMValueRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> None: ...
+@dll.bind
+def LLVMDisposeBuilder(Builder:LLVMBuilderRef) -> None: ...
+@dll.bind
+def LLVMGetCurrentDebugLocation2(Builder:LLVMBuilderRef) -> LLVMMetadataRef: ...
+@dll.bind
+def LLVMSetCurrentDebugLocation2(Builder:LLVMBuilderRef, Loc:LLVMMetadataRef) -> None: ...
+@dll.bind
+def LLVMSetInstDebugLocation(Builder:LLVMBuilderRef, Inst:LLVMValueRef) -> None: ...
+@dll.bind
+def LLVMAddMetadataToInst(Builder:LLVMBuilderRef, Inst:LLVMValueRef) -> None: ...
+@dll.bind
+def LLVMBuilderGetDefaultFPMathTag(Builder:LLVMBuilderRef) -> LLVMMetadataRef: ...
+@dll.bind
+def LLVMBuilderSetDefaultFPMathTag(Builder:LLVMBuilderRef, FPMathTag:LLVMMetadataRef) -> None: ...
+@dll.bind
+def LLVMGetBuilderContext(Builder:LLVMBuilderRef) -> LLVMContextRef: ...
+@dll.bind
+def LLVMSetCurrentDebugLocation(Builder:LLVMBuilderRef, L:LLVMValueRef) -> None: ...
+@dll.bind
+def LLVMGetCurrentDebugLocation(Builder:LLVMBuilderRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMBuildRetVoid(_0:LLVMBuilderRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMBuildRet(_0:LLVMBuilderRef, V:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMBuildAggregateRet(_0:LLVMBuilderRef, RetVals:c.POINTER[LLVMValueRef], N:Annotated[int, ctypes.c_uint32]) -> LLVMValueRef: ...
+@dll.bind
+def LLVMBuildBr(_0:LLVMBuilderRef, Dest:LLVMBasicBlockRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMBuildCondBr(_0:LLVMBuilderRef, If:LLVMValueRef, Then:LLVMBasicBlockRef, Else:LLVMBasicBlockRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMBuildSwitch(_0:LLVMBuilderRef, V:LLVMValueRef, Else:LLVMBasicBlockRef, NumCases:Annotated[int, ctypes.c_uint32]) -> LLVMValueRef: ...
+@dll.bind
+def LLVMBuildIndirectBr(B:LLVMBuilderRef, Addr:LLVMValueRef, NumDests:Annotated[int, ctypes.c_uint32]) -> LLVMValueRef: ...
+@dll.bind
+def LLVMBuildCallBr(B:LLVMBuilderRef, Ty:LLVMTypeRef, Fn:LLVMValueRef, DefaultDest:LLVMBasicBlockRef, IndirectDests:c.POINTER[LLVMBasicBlockRef], NumIndirectDests:Annotated[int, ctypes.c_uint32], Args:c.POINTER[LLVMValueRef], NumArgs:Annotated[int, ctypes.c_uint32], Bundles:c.POINTER[LLVMOperandBundleRef], NumBundles:Annotated[int, ctypes.c_uint32], Name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMValueRef: ...
+@dll.bind
+def LLVMBuildInvoke2(_0:LLVMBuilderRef, Ty:LLVMTypeRef, Fn:LLVMValueRef, Args:c.POINTER[LLVMValueRef], NumArgs:Annotated[int, ctypes.c_uint32], Then:LLVMBasicBlockRef, Catch:LLVMBasicBlockRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMValueRef: ...
+@dll.bind
+def LLVMBuildInvokeWithOperandBundles(_0:LLVMBuilderRef, Ty:LLVMTypeRef, Fn:LLVMValueRef, Args:c.POINTER[LLVMValueRef], NumArgs:Annotated[int, ctypes.c_uint32], Then:LLVMBasicBlockRef, Catch:LLVMBasicBlockRef, Bundles:c.POINTER[LLVMOperandBundleRef], NumBundles:Annotated[int, ctypes.c_uint32], Name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMValueRef: ...
+@dll.bind
+def LLVMBuildUnreachable(_0:LLVMBuilderRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMBuildResume(B:LLVMBuilderRef, Exn:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMBuildLandingPad(B:LLVMBuilderRef, Ty:LLVMTypeRef, PersFn:LLVMValueRef, NumClauses:Annotated[int, ctypes.c_uint32], Name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMValueRef: ...
+@dll.bind
+def LLVMBuildCleanupRet(B:LLVMBuilderRef, CatchPad:LLVMValueRef, BB:LLVMBasicBlockRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMBuildCatchRet(B:LLVMBuilderRef, CatchPad:LLVMValueRef, BB:LLVMBasicBlockRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMBuildCatchPad(B:LLVMBuilderRef, ParentPad:LLVMValueRef, Args:c.POINTER[LLVMValueRef], NumArgs:Annotated[int, ctypes.c_uint32], Name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMValueRef: ...
+@dll.bind
+def LLVMBuildCleanupPad(B:LLVMBuilderRef, ParentPad:LLVMValueRef, Args:c.POINTER[LLVMValueRef], NumArgs:Annotated[int, ctypes.c_uint32], Name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMValueRef: ...
+@dll.bind
+def LLVMBuildCatchSwitch(B:LLVMBuilderRef, ParentPad:LLVMValueRef, UnwindBB:LLVMBasicBlockRef, NumHandlers:Annotated[int, ctypes.c_uint32], Name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMValueRef: ...
+@dll.bind
+def LLVMAddCase(Switch:LLVMValueRef, OnVal:LLVMValueRef, Dest:LLVMBasicBlockRef) -> None: ...
+@dll.bind
+def LLVMAddDestination(IndirectBr:LLVMValueRef, Dest:LLVMBasicBlockRef) -> None: ...
+@dll.bind
+def LLVMGetNumClauses(LandingPad:LLVMValueRef) -> Annotated[int, ctypes.c_uint32]: ...
+@dll.bind
+def LLVMGetClause(LandingPad:LLVMValueRef, Idx:Annotated[int, ctypes.c_uint32]) -> LLVMValueRef: ...
+@dll.bind
+def LLVMAddClause(LandingPad:LLVMValueRef, ClauseVal:LLVMValueRef) -> None: ...
+@dll.bind
+def LLVMIsCleanup(LandingPad:LLVMValueRef) -> LLVMBool: ...
+@dll.bind
+def LLVMSetCleanup(LandingPad:LLVMValueRef, Val:LLVMBool) -> None: ...
+@dll.bind
+def LLVMAddHandler(CatchSwitch:LLVMValueRef, Dest:LLVMBasicBlockRef) -> None: ...
+@dll.bind
+def LLVMGetNumHandlers(CatchSwitch:LLVMValueRef) -> Annotated[int, ctypes.c_uint32]: ...
+@dll.bind
+def LLVMGetHandlers(CatchSwitch:LLVMValueRef, Handlers:c.POINTER[LLVMBasicBlockRef]) -> None: ...
+@dll.bind
+def LLVMGetArgOperand(Funclet:LLVMValueRef, i:Annotated[int, ctypes.c_uint32]) -> LLVMValueRef: ...
+@dll.bind
+def LLVMSetArgOperand(Funclet:LLVMValueRef, i:Annotated[int, ctypes.c_uint32], value:LLVMValueRef) -> None: ...
+@dll.bind
+def LLVMGetParentCatchSwitch(CatchPad:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMSetParentCatchSwitch(CatchPad:LLVMValueRef, CatchSwitch:LLVMValueRef) -> None: ...
+@dll.bind
+def LLVMBuildAdd(_0:LLVMBuilderRef, LHS:LLVMValueRef, RHS:LLVMValueRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMValueRef: ...
+@dll.bind
+def LLVMBuildNSWAdd(_0:LLVMBuilderRef, LHS:LLVMValueRef, RHS:LLVMValueRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMValueRef: ...
+@dll.bind
+def LLVMBuildNUWAdd(_0:LLVMBuilderRef, LHS:LLVMValueRef, RHS:LLVMValueRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMValueRef: ...
+@dll.bind
+def LLVMBuildFAdd(_0:LLVMBuilderRef, LHS:LLVMValueRef, RHS:LLVMValueRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMValueRef: ...
+@dll.bind
+def LLVMBuildSub(_0:LLVMBuilderRef, LHS:LLVMValueRef, RHS:LLVMValueRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMValueRef: ...
+@dll.bind
+def LLVMBuildNSWSub(_0:LLVMBuilderRef, LHS:LLVMValueRef, RHS:LLVMValueRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMValueRef: ...
+@dll.bind
+def LLVMBuildNUWSub(_0:LLVMBuilderRef, LHS:LLVMValueRef, RHS:LLVMValueRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMValueRef: ...
+@dll.bind
+def LLVMBuildFSub(_0:LLVMBuilderRef, LHS:LLVMValueRef, RHS:LLVMValueRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMValueRef: ...
+@dll.bind
+def LLVMBuildMul(_0:LLVMBuilderRef, LHS:LLVMValueRef, RHS:LLVMValueRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMValueRef: ...
+@dll.bind
+def LLVMBuildNSWMul(_0:LLVMBuilderRef, LHS:LLVMValueRef, RHS:LLVMValueRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMValueRef: ...
+@dll.bind
+def LLVMBuildNUWMul(_0:LLVMBuilderRef, LHS:LLVMValueRef, RHS:LLVMValueRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMValueRef: ...
+@dll.bind
+def LLVMBuildFMul(_0:LLVMBuilderRef, LHS:LLVMValueRef, RHS:LLVMValueRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMValueRef: ...
+@dll.bind
+def LLVMBuildUDiv(_0:LLVMBuilderRef, LHS:LLVMValueRef, RHS:LLVMValueRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMValueRef: ...
+@dll.bind
+def LLVMBuildExactUDiv(_0:LLVMBuilderRef, LHS:LLVMValueRef, RHS:LLVMValueRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMValueRef: ...
+@dll.bind
+def LLVMBuildSDiv(_0:LLVMBuilderRef, LHS:LLVMValueRef, RHS:LLVMValueRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMValueRef: ...
+@dll.bind
+def LLVMBuildExactSDiv(_0:LLVMBuilderRef, LHS:LLVMValueRef, RHS:LLVMValueRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMValueRef: ...
+@dll.bind
+def LLVMBuildFDiv(_0:LLVMBuilderRef, LHS:LLVMValueRef, RHS:LLVMValueRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMValueRef: ...
+@dll.bind
+def LLVMBuildURem(_0:LLVMBuilderRef, LHS:LLVMValueRef, RHS:LLVMValueRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMValueRef: ...
+@dll.bind
+def LLVMBuildSRem(_0:LLVMBuilderRef, LHS:LLVMValueRef, RHS:LLVMValueRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMValueRef: ...
+@dll.bind
+def LLVMBuildFRem(_0:LLVMBuilderRef, LHS:LLVMValueRef, RHS:LLVMValueRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMValueRef: ...
+@dll.bind
+def LLVMBuildShl(_0:LLVMBuilderRef, LHS:LLVMValueRef, RHS:LLVMValueRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMValueRef: ...
+@dll.bind
+def LLVMBuildLShr(_0:LLVMBuilderRef, LHS:LLVMValueRef, RHS:LLVMValueRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMValueRef: ...
+@dll.bind
+def LLVMBuildAShr(_0:LLVMBuilderRef, LHS:LLVMValueRef, RHS:LLVMValueRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMValueRef: ...
+@dll.bind
+def LLVMBuildAnd(_0:LLVMBuilderRef, LHS:LLVMValueRef, RHS:LLVMValueRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMValueRef: ...
+@dll.bind
+def LLVMBuildOr(_0:LLVMBuilderRef, LHS:LLVMValueRef, RHS:LLVMValueRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMValueRef: ...
+@dll.bind
+def LLVMBuildXor(_0:LLVMBuilderRef, LHS:LLVMValueRef, RHS:LLVMValueRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMValueRef: ...
+@dll.bind
+def LLVMBuildBinOp(B:LLVMBuilderRef, Op:LLVMOpcode, LHS:LLVMValueRef, RHS:LLVMValueRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMValueRef: ...
+@dll.bind
+def LLVMBuildNeg(_0:LLVMBuilderRef, V:LLVMValueRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMValueRef: ...
+@dll.bind
+def LLVMBuildNSWNeg(B:LLVMBuilderRef, V:LLVMValueRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMValueRef: ...
+@dll.bind
+def LLVMBuildNUWNeg(B:LLVMBuilderRef, V:LLVMValueRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMValueRef: ...
+@dll.bind
+def LLVMBuildFNeg(_0:LLVMBuilderRef, V:LLVMValueRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMValueRef: ...
+@dll.bind
+def LLVMBuildNot(_0:LLVMBuilderRef, V:LLVMValueRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMValueRef: ...
+@dll.bind
+def LLVMGetNUW(ArithInst:LLVMValueRef) -> LLVMBool: ...
+@dll.bind
+def LLVMSetNUW(ArithInst:LLVMValueRef, HasNUW:LLVMBool) -> None: ...
+@dll.bind
+def LLVMGetNSW(ArithInst:LLVMValueRef) -> LLVMBool: ...
+@dll.bind
+def LLVMSetNSW(ArithInst:LLVMValueRef, HasNSW:LLVMBool) -> None: ...
+@dll.bind
+def LLVMGetExact(DivOrShrInst:LLVMValueRef) -> LLVMBool: ...
+@dll.bind
+def LLVMSetExact(DivOrShrInst:LLVMValueRef, IsExact:LLVMBool) -> None: ...
+@dll.bind
+def LLVMGetNNeg(NonNegInst:LLVMValueRef) -> LLVMBool: ...
+@dll.bind
+def LLVMSetNNeg(NonNegInst:LLVMValueRef, IsNonNeg:LLVMBool) -> None: ...
+@dll.bind
+def LLVMGetFastMathFlags(FPMathInst:LLVMValueRef) -> LLVMFastMathFlags: ...
+@dll.bind
+def LLVMSetFastMathFlags(FPMathInst:LLVMValueRef, FMF:LLVMFastMathFlags) -> None: ...
+@dll.bind
+def LLVMCanValueUseFastMathFlags(Inst:LLVMValueRef) -> LLVMBool: ...
+@dll.bind
+def LLVMGetIsDisjoint(Inst:LLVMValueRef) -> LLVMBool: ...
+@dll.bind
+def LLVMSetIsDisjoint(Inst:LLVMValueRef, IsDisjoint:LLVMBool) -> None: ...
+@dll.bind
+def LLVMBuildMalloc(_0:LLVMBuilderRef, Ty:LLVMTypeRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMValueRef: ...
+@dll.bind
+def LLVMBuildArrayMalloc(_0:LLVMBuilderRef, Ty:LLVMTypeRef, Val:LLVMValueRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMValueRef: ...
+@dll.bind
+def LLVMBuildMemSet(B:LLVMBuilderRef, Ptr:LLVMValueRef, Val:LLVMValueRef, Len:LLVMValueRef, Align:Annotated[int, ctypes.c_uint32]) -> LLVMValueRef: ...
+@dll.bind
+def LLVMBuildMemCpy(B:LLVMBuilderRef, Dst:LLVMValueRef, DstAlign:Annotated[int, ctypes.c_uint32], Src:LLVMValueRef, SrcAlign:Annotated[int, ctypes.c_uint32], Size:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMBuildMemMove(B:LLVMBuilderRef, Dst:LLVMValueRef, DstAlign:Annotated[int, ctypes.c_uint32], Src:LLVMValueRef, SrcAlign:Annotated[int, ctypes.c_uint32], Size:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMBuildAlloca(_0:LLVMBuilderRef, Ty:LLVMTypeRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMValueRef: ...
+@dll.bind
+def LLVMBuildArrayAlloca(_0:LLVMBuilderRef, Ty:LLVMTypeRef, Val:LLVMValueRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMValueRef: ...
+@dll.bind
+def LLVMBuildFree(_0:LLVMBuilderRef, PointerVal:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMBuildLoad2(_0:LLVMBuilderRef, Ty:LLVMTypeRef, PointerVal:LLVMValueRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMValueRef: ...
+@dll.bind
+def LLVMBuildStore(_0:LLVMBuilderRef, Val:LLVMValueRef, Ptr:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind
+def LLVMBuildGEP2(B:LLVMBuilderRef, Ty:LLVMTypeRef, Pointer:LLVMValueRef, Indices:c.POINTER[LLVMValueRef], NumIndices:Annotated[int, ctypes.c_uint32], Name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMValueRef: ...
+@dll.bind
+def LLVMBuildInBoundsGEP2(B:LLVMBuilderRef, Ty:LLVMTypeRef, Pointer:LLVMValueRef, Indices:c.POINTER[LLVMValueRef], NumIndices:Annotated[int, ctypes.c_uint32], Name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMValueRef: ...
+@dll.bind
+def LLVMBuildGEPWithNoWrapFlags(B:LLVMBuilderRef, Ty:LLVMTypeRef, Pointer:LLVMValueRef, Indices:c.POINTER[LLVMValueRef], NumIndices:Annotated[int, ctypes.c_uint32], Name:c.POINTER[Annotated[bytes, ctypes.c_char]], NoWrapFlags:LLVMGEPNoWrapFlags) -> LLVMValueRef: ...
+@dll.bind
+def LLVMBuildStructGEP2(B:LLVMBuilderRef, Ty:LLVMTypeRef, Pointer:LLVMValueRef, Idx:Annotated[int, ctypes.c_uint32], Name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMValueRef: ...
+@dll.bind
+def LLVMBuildGlobalString(B:LLVMBuilderRef, Str:c.POINTER[Annotated[bytes, ctypes.c_char]], Name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMValueRef: ...
+@dll.bind
+def LLVMBuildGlobalStringPtr(B:LLVMBuilderRef, Str:c.POINTER[Annotated[bytes, ctypes.c_char]], Name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMValueRef: ...
+@dll.bind
+def LLVMGetVolatile(MemoryAccessInst:LLVMValueRef) -> LLVMBool: ...
+@dll.bind
+def LLVMSetVolatile(MemoryAccessInst:LLVMValueRef, IsVolatile:LLVMBool) -> None: ...
+@dll.bind
+def LLVMGetWeak(CmpXchgInst:LLVMValueRef) -> LLVMBool: ...
+@dll.bind
+def LLVMSetWeak(CmpXchgInst:LLVMValueRef, IsWeak:LLVMBool) -> None: ...
+@dll.bind
+def LLVMGetOrdering(MemoryAccessInst:LLVMValueRef) -> LLVMAtomicOrdering: ...
+@dll.bind
+def LLVMSetOrdering(MemoryAccessInst:LLVMValueRef, Ordering:LLVMAtomicOrdering) -> None: ...
+@dll.bind
+def LLVMGetAtomicRMWBinOp(AtomicRMWInst:LLVMValueRef) -> LLVMAtomicRMWBinOp: ...
+@dll.bind
+def LLVMSetAtomicRMWBinOp(AtomicRMWInst:LLVMValueRef, BinOp:LLVMAtomicRMWBinOp) -> None: ...
+@dll.bind
+def LLVMBuildTrunc(_0:LLVMBuilderRef, Val:LLVMValueRef, DestTy:LLVMTypeRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMValueRef: ...
+@dll.bind
+def LLVMBuildZExt(_0:LLVMBuilderRef, Val:LLVMValueRef, DestTy:LLVMTypeRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMValueRef: ...
+@dll.bind
+def LLVMBuildSExt(_0:LLVMBuilderRef, Val:LLVMValueRef, DestTy:LLVMTypeRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMValueRef: ...
+@dll.bind
+def LLVMBuildFPToUI(_0:LLVMBuilderRef, Val:LLVMValueRef, DestTy:LLVMTypeRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMValueRef: ...
+@dll.bind
+def LLVMBuildFPToSI(_0:LLVMBuilderRef, Val:LLVMValueRef, DestTy:LLVMTypeRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMValueRef: ...
+@dll.bind
+def LLVMBuildUIToFP(_0:LLVMBuilderRef, Val:LLVMValueRef, DestTy:LLVMTypeRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMValueRef: ...
+@dll.bind
+def LLVMBuildSIToFP(_0:LLVMBuilderRef, Val:LLVMValueRef, DestTy:LLVMTypeRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMValueRef: ...
+@dll.bind
+def LLVMBuildFPTrunc(_0:LLVMBuilderRef, Val:LLVMValueRef, DestTy:LLVMTypeRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMValueRef: ...
+@dll.bind
+def LLVMBuildFPExt(_0:LLVMBuilderRef, Val:LLVMValueRef, DestTy:LLVMTypeRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMValueRef: ...
+@dll.bind
+def LLVMBuildPtrToInt(_0:LLVMBuilderRef, Val:LLVMValueRef, DestTy:LLVMTypeRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMValueRef: ...
+@dll.bind
+def LLVMBuildIntToPtr(_0:LLVMBuilderRef, Val:LLVMValueRef, DestTy:LLVMTypeRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMValueRef: ...
+@dll.bind
+def LLVMBuildBitCast(_0:LLVMBuilderRef, Val:LLVMValueRef, DestTy:LLVMTypeRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMValueRef: ...
+@dll.bind
+def LLVMBuildAddrSpaceCast(_0:LLVMBuilderRef, Val:LLVMValueRef, DestTy:LLVMTypeRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMValueRef: ...
+@dll.bind
+def LLVMBuildZExtOrBitCast(_0:LLVMBuilderRef, Val:LLVMValueRef, DestTy:LLVMTypeRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMValueRef: ...
+@dll.bind
+def LLVMBuildSExtOrBitCast(_0:LLVMBuilderRef, Val:LLVMValueRef, DestTy:LLVMTypeRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMValueRef: ...
+@dll.bind
+def LLVMBuildTruncOrBitCast(_0:LLVMBuilderRef, Val:LLVMValueRef, DestTy:LLVMTypeRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMValueRef: ...
+@dll.bind
+def LLVMBuildCast(B:LLVMBuilderRef, Op:LLVMOpcode, Val:LLVMValueRef, DestTy:LLVMTypeRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMValueRef: ...
+@dll.bind
+def LLVMBuildPointerCast(_0:LLVMBuilderRef, Val:LLVMValueRef, DestTy:LLVMTypeRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMValueRef: ...
+@dll.bind
+def LLVMBuildIntCast2(_0:LLVMBuilderRef, Val:LLVMValueRef, DestTy:LLVMTypeRef, IsSigned:LLVMBool, Name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMValueRef: ...
+@dll.bind
+def LLVMBuildFPCast(_0:LLVMBuilderRef, Val:LLVMValueRef, DestTy:LLVMTypeRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMValueRef: ...
+@dll.bind
+def LLVMBuildIntCast(_0:LLVMBuilderRef, Val:LLVMValueRef, DestTy:LLVMTypeRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMValueRef: ...
+@dll.bind
+def LLVMGetCastOpcode(Src:LLVMValueRef, SrcIsSigned:LLVMBool, DestTy:LLVMTypeRef, DestIsSigned:LLVMBool) -> LLVMOpcode: ...
+@dll.bind
+def LLVMBuildICmp(_0:LLVMBuilderRef, Op:LLVMIntPredicate, LHS:LLVMValueRef, RHS:LLVMValueRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMValueRef: ...
+@dll.bind
+def LLVMBuildFCmp(_0:LLVMBuilderRef, Op:LLVMRealPredicate, LHS:LLVMValueRef, RHS:LLVMValueRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMValueRef: ...
+@dll.bind
+def LLVMBuildPhi(_0:LLVMBuilderRef, Ty:LLVMTypeRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMValueRef: ...
+@dll.bind
+def LLVMBuildCall2(_0:LLVMBuilderRef, _1:LLVMTypeRef, Fn:LLVMValueRef, Args:c.POINTER[LLVMValueRef], NumArgs:Annotated[int, ctypes.c_uint32], Name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMValueRef: ...
+@dll.bind
+def LLVMBuildCallWithOperandBundles(_0:LLVMBuilderRef, _1:LLVMTypeRef, Fn:LLVMValueRef, Args:c.POINTER[LLVMValueRef], NumArgs:Annotated[int, ctypes.c_uint32], Bundles:c.POINTER[LLVMOperandBundleRef], NumBundles:Annotated[int, ctypes.c_uint32], Name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMValueRef: ...
+@dll.bind
+def LLVMBuildSelect(_0:LLVMBuilderRef, If:LLVMValueRef, Then:LLVMValueRef, Else:LLVMValueRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMValueRef: ...
+@dll.bind
+def LLVMBuildVAArg(_0:LLVMBuilderRef, List:LLVMValueRef, Ty:LLVMTypeRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMValueRef: ...
+@dll.bind
+def LLVMBuildExtractElement(_0:LLVMBuilderRef, VecVal:LLVMValueRef, Index:LLVMValueRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMValueRef: ...
+@dll.bind
+def LLVMBuildInsertElement(_0:LLVMBuilderRef, VecVal:LLVMValueRef, EltVal:LLVMValueRef, Index:LLVMValueRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMValueRef: ...
+@dll.bind
+def LLVMBuildShuffleVector(_0:LLVMBuilderRef, V1:LLVMValueRef, V2:LLVMValueRef, Mask:LLVMValueRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMValueRef: ...
+@dll.bind
+def LLVMBuildExtractValue(_0:LLVMBuilderRef, AggVal:LLVMValueRef, Index:Annotated[int, ctypes.c_uint32], Name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMValueRef: ...
+@dll.bind
+def LLVMBuildInsertValue(_0:LLVMBuilderRef, AggVal:LLVMValueRef, EltVal:LLVMValueRef, Index:Annotated[int, ctypes.c_uint32], Name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMValueRef: ...
+@dll.bind
+def LLVMBuildFreeze(_0:LLVMBuilderRef, Val:LLVMValueRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMValueRef: ...
+@dll.bind
+def LLVMBuildIsNull(_0:LLVMBuilderRef, Val:LLVMValueRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMValueRef: ...
+@dll.bind
+def LLVMBuildIsNotNull(_0:LLVMBuilderRef, Val:LLVMValueRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMValueRef: ...
+@dll.bind
+def LLVMBuildPtrDiff2(_0:LLVMBuilderRef, ElemTy:LLVMTypeRef, LHS:LLVMValueRef, RHS:LLVMValueRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMValueRef: ...
+@dll.bind
+def LLVMBuildFence(B:LLVMBuilderRef, ordering:LLVMAtomicOrdering, singleThread:LLVMBool, Name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMValueRef: ...
+@dll.bind
+def LLVMBuildFenceSyncScope(B:LLVMBuilderRef, ordering:LLVMAtomicOrdering, SSID:Annotated[int, ctypes.c_uint32], Name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMValueRef: ...
+@dll.bind
+def LLVMBuildAtomicRMW(B:LLVMBuilderRef, op:LLVMAtomicRMWBinOp, PTR:LLVMValueRef, Val:LLVMValueRef, ordering:LLVMAtomicOrdering, singleThread:LLVMBool) -> LLVMValueRef: ...
+@dll.bind
+def LLVMBuildAtomicRMWSyncScope(B:LLVMBuilderRef, op:LLVMAtomicRMWBinOp, PTR:LLVMValueRef, Val:LLVMValueRef, ordering:LLVMAtomicOrdering, SSID:Annotated[int, ctypes.c_uint32]) -> LLVMValueRef: ...
+@dll.bind
+def LLVMBuildAtomicCmpXchg(B:LLVMBuilderRef, Ptr:LLVMValueRef, Cmp:LLVMValueRef, New:LLVMValueRef, SuccessOrdering:LLVMAtomicOrdering, FailureOrdering:LLVMAtomicOrdering, SingleThread:LLVMBool) -> LLVMValueRef: ...
+@dll.bind
+def LLVMBuildAtomicCmpXchgSyncScope(B:LLVMBuilderRef, Ptr:LLVMValueRef, Cmp:LLVMValueRef, New:LLVMValueRef, SuccessOrdering:LLVMAtomicOrdering, FailureOrdering:LLVMAtomicOrdering, SSID:Annotated[int, ctypes.c_uint32]) -> LLVMValueRef: ...
+@dll.bind
+def LLVMGetNumMaskElements(ShuffleVectorInst:LLVMValueRef) -> Annotated[int, ctypes.c_uint32]: ...
+@dll.bind
+def LLVMGetUndefMaskElem() -> Annotated[int, ctypes.c_int32]: ...
+@dll.bind
+def LLVMGetMaskValue(ShuffleVectorInst:LLVMValueRef, Elt:Annotated[int, ctypes.c_uint32]) -> Annotated[int, ctypes.c_int32]: ...
+@dll.bind
+def LLVMIsAtomicSingleThread(AtomicInst:LLVMValueRef) -> LLVMBool: ...
+@dll.bind
+def LLVMSetAtomicSingleThread(AtomicInst:LLVMValueRef, SingleThread:LLVMBool) -> None: ...
+@dll.bind
+def LLVMIsAtomic(Inst:LLVMValueRef) -> LLVMBool: ...
+@dll.bind
+def LLVMGetAtomicSyncScopeID(AtomicInst:LLVMValueRef) -> Annotated[int, ctypes.c_uint32]: ...
+@dll.bind
+def LLVMSetAtomicSyncScopeID(AtomicInst:LLVMValueRef, SSID:Annotated[int, ctypes.c_uint32]) -> None: ...
+@dll.bind
+def LLVMGetCmpXchgSuccessOrdering(CmpXchgInst:LLVMValueRef) -> LLVMAtomicOrdering: ...
+@dll.bind
+def LLVMSetCmpXchgSuccessOrdering(CmpXchgInst:LLVMValueRef, Ordering:LLVMAtomicOrdering) -> None: ...
+@dll.bind
+def LLVMGetCmpXchgFailureOrdering(CmpXchgInst:LLVMValueRef) -> LLVMAtomicOrdering: ...
+@dll.bind
+def LLVMSetCmpXchgFailureOrdering(CmpXchgInst:LLVMValueRef, Ordering:LLVMAtomicOrdering) -> None: ...
+class struct_LLVMOpaqueModuleProvider(ctypes.Structure): pass
+LLVMModuleProviderRef: TypeAlias = c.POINTER[struct_LLVMOpaqueModuleProvider]
+@dll.bind
+def LLVMCreateModuleProviderForExistingModule(M:LLVMModuleRef) -> LLVMModuleProviderRef: ...
+@dll.bind
+def LLVMDisposeModuleProvider(M:LLVMModuleProviderRef) -> None: ...
+@dll.bind
+def LLVMCreateMemoryBufferWithContentsOfFile(Path:c.POINTER[Annotated[bytes, ctypes.c_char]], OutMemBuf:c.POINTER[LLVMMemoryBufferRef], OutMessage:c.POINTER[c.POINTER[Annotated[bytes, ctypes.c_char]]]) -> LLVMBool: ...
+@dll.bind
+def LLVMCreateMemoryBufferWithSTDIN(OutMemBuf:c.POINTER[LLVMMemoryBufferRef], OutMessage:c.POINTER[c.POINTER[Annotated[bytes, ctypes.c_char]]]) -> LLVMBool: ...
+@dll.bind
+def LLVMCreateMemoryBufferWithMemoryRange(InputData:c.POINTER[Annotated[bytes, ctypes.c_char]], InputDataLength:size_t, BufferName:c.POINTER[Annotated[bytes, ctypes.c_char]], RequiresNullTerminator:LLVMBool) -> LLVMMemoryBufferRef: ...
+@dll.bind
+def LLVMCreateMemoryBufferWithMemoryRangeCopy(InputData:c.POINTER[Annotated[bytes, ctypes.c_char]], InputDataLength:size_t, BufferName:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMMemoryBufferRef: ...
+@dll.bind
+def LLVMGetBufferStart(MemBuf:LLVMMemoryBufferRef) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
+@dll.bind
+def LLVMGetBufferSize(MemBuf:LLVMMemoryBufferRef) -> size_t: ...
+@dll.bind
+def LLVMDisposeMemoryBuffer(MemBuf:LLVMMemoryBufferRef) -> None: ...
+class struct_LLVMOpaquePassManager(ctypes.Structure): pass
+LLVMPassManagerRef: TypeAlias = c.POINTER[struct_LLVMOpaquePassManager]
+@dll.bind
+def LLVMCreatePassManager() -> LLVMPassManagerRef: ...
+@dll.bind
+def LLVMCreateFunctionPassManagerForModule(M:LLVMModuleRef) -> LLVMPassManagerRef: ...
+@dll.bind
+def LLVMCreateFunctionPassManager(MP:LLVMModuleProviderRef) -> LLVMPassManagerRef: ...
+@dll.bind
+def LLVMRunPassManager(PM:LLVMPassManagerRef, M:LLVMModuleRef) -> LLVMBool: ...
+@dll.bind
+def LLVMInitializeFunctionPassManager(FPM:LLVMPassManagerRef) -> LLVMBool: ...
+@dll.bind
+def LLVMRunFunctionPassManager(FPM:LLVMPassManagerRef, F:LLVMValueRef) -> LLVMBool: ...
+@dll.bind
+def LLVMFinalizeFunctionPassManager(FPM:LLVMPassManagerRef) -> LLVMBool: ...
+@dll.bind
+def LLVMDisposePassManager(PM:LLVMPassManagerRef) -> None: ...
+@dll.bind
+def LLVMStartMultithreaded() -> LLVMBool: ...
+@dll.bind
+def LLVMStopMultithreaded() -> None: ...
+@dll.bind
+def LLVMIsMultithreaded() -> LLVMBool: ...
+class LLVMDIFlags(Annotated[int, ctypes.c_uint32], c.Enum): pass
 LLVMDIFlagZero = LLVMDIFlags.define('LLVMDIFlagZero', 0)
 LLVMDIFlagPrivate = LLVMDIFlags.define('LLVMDIFlagPrivate', 1)
 LLVMDIFlagProtected = LLVMDIFlags.define('LLVMDIFlagProtected', 2)
@@ -3041,7 +2026,7 @@ LLVMDIFlagIndirectVirtualBase = LLVMDIFlags.define('LLVMDIFlagIndirectVirtualBas
 LLVMDIFlagAccessibility = LLVMDIFlags.define('LLVMDIFlagAccessibility', 3)
 LLVMDIFlagPtrToMemberRep = LLVMDIFlags.define('LLVMDIFlagPtrToMemberRep', 196608)
 
-LLVMDWARFSourceLanguage = CEnum(ctypes.c_uint32)
+class LLVMDWARFSourceLanguage(Annotated[int, ctypes.c_uint32], c.Enum): pass
 LLVMDWARFSourceLanguageC89 = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageC89', 0)
 LLVMDWARFSourceLanguageC = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageC', 1)
 LLVMDWARFSourceLanguageAda83 = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageAda83', 2)
@@ -3106,12 +2091,12 @@ LLVMDWARFSourceLanguageMips_Assembler = LLVMDWARFSourceLanguage.define('LLVMDWAR
 LLVMDWARFSourceLanguageGOOGLE_RenderScript = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageGOOGLE_RenderScript', 61)
 LLVMDWARFSourceLanguageBORLAND_Delphi = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageBORLAND_Delphi', 62)
 
-LLVMDWARFEmissionKind = CEnum(ctypes.c_uint32)
+class LLVMDWARFEmissionKind(Annotated[int, ctypes.c_uint32], c.Enum): pass
 LLVMDWARFEmissionNone = LLVMDWARFEmissionKind.define('LLVMDWARFEmissionNone', 0)
 LLVMDWARFEmissionFull = LLVMDWARFEmissionKind.define('LLVMDWARFEmissionFull', 1)
 LLVMDWARFEmissionLineTablesOnly = LLVMDWARFEmissionKind.define('LLVMDWARFEmissionLineTablesOnly', 2)
 
-_anonenum3 = CEnum(ctypes.c_uint32)
+class _anonenum3(Annotated[int, ctypes.c_uint32], c.Enum): pass
 LLVMMDStringMetadataKind = _anonenum3.define('LLVMMDStringMetadataKind', 0)
 LLVMConstantAsMetadataMetadataKind = _anonenum3.define('LLVMConstantAsMetadataMetadataKind', 1)
 LLVMLocalAsMetadataMetadataKind = _anonenum3.define('LLVMLocalAsMetadataMetadataKind', 2)
@@ -3149,985 +2134,598 @@ LLVMDIGenericSubrangeMetadataKind = _anonenum3.define('LLVMDIGenericSubrangeMeta
 LLVMDIArgListMetadataKind = _anonenum3.define('LLVMDIArgListMetadataKind', 34)
 LLVMDIAssignIDMetadataKind = _anonenum3.define('LLVMDIAssignIDMetadataKind', 35)
 
-LLVMMetadataKind = ctypes.c_uint32
-LLVMDWARFTypeEncoding = ctypes.c_uint32
-LLVMDWARFMacinfoRecordType = CEnum(ctypes.c_uint32)
+LLVMMetadataKind: TypeAlias = Annotated[int, ctypes.c_uint32]
+LLVMDWARFTypeEncoding: TypeAlias = Annotated[int, ctypes.c_uint32]
+class LLVMDWARFMacinfoRecordType(Annotated[int, ctypes.c_uint32], c.Enum): pass
 LLVMDWARFMacinfoRecordTypeDefine = LLVMDWARFMacinfoRecordType.define('LLVMDWARFMacinfoRecordTypeDefine', 1)
 LLVMDWARFMacinfoRecordTypeMacro = LLVMDWARFMacinfoRecordType.define('LLVMDWARFMacinfoRecordTypeMacro', 2)
 LLVMDWARFMacinfoRecordTypeStartFile = LLVMDWARFMacinfoRecordType.define('LLVMDWARFMacinfoRecordTypeStartFile', 3)
 LLVMDWARFMacinfoRecordTypeEndFile = LLVMDWARFMacinfoRecordType.define('LLVMDWARFMacinfoRecordTypeEndFile', 4)
 LLVMDWARFMacinfoRecordTypeVendorExt = LLVMDWARFMacinfoRecordType.define('LLVMDWARFMacinfoRecordTypeVendorExt', 255)
 
-try: (LLVMDebugMetadataVersion:=dll.LLVMDebugMetadataVersion).restype, LLVMDebugMetadataVersion.argtypes = ctypes.c_uint32, []
-except AttributeError: pass
-
-try: (LLVMGetModuleDebugMetadataVersion:=dll.LLVMGetModuleDebugMetadataVersion).restype, LLVMGetModuleDebugMetadataVersion.argtypes = ctypes.c_uint32, [LLVMModuleRef]
-except AttributeError: pass
-
-try: (LLVMStripModuleDebugInfo:=dll.LLVMStripModuleDebugInfo).restype, LLVMStripModuleDebugInfo.argtypes = LLVMBool, [LLVMModuleRef]
-except AttributeError: pass
-
-class struct_LLVMOpaqueDIBuilder(Struct): pass
-LLVMDIBuilderRef = ctypes.POINTER(struct_LLVMOpaqueDIBuilder)
-try: (LLVMCreateDIBuilderDisallowUnresolved:=dll.LLVMCreateDIBuilderDisallowUnresolved).restype, LLVMCreateDIBuilderDisallowUnresolved.argtypes = LLVMDIBuilderRef, [LLVMModuleRef]
-except AttributeError: pass
-
-try: (LLVMCreateDIBuilder:=dll.LLVMCreateDIBuilder).restype, LLVMCreateDIBuilder.argtypes = LLVMDIBuilderRef, [LLVMModuleRef]
-except AttributeError: pass
-
-try: (LLVMDisposeDIBuilder:=dll.LLVMDisposeDIBuilder).restype, LLVMDisposeDIBuilder.argtypes = None, [LLVMDIBuilderRef]
-except AttributeError: pass
-
-try: (LLVMDIBuilderFinalize:=dll.LLVMDIBuilderFinalize).restype, LLVMDIBuilderFinalize.argtypes = None, [LLVMDIBuilderRef]
-except AttributeError: pass
-
-try: (LLVMDIBuilderFinalizeSubprogram:=dll.LLVMDIBuilderFinalizeSubprogram).restype, LLVMDIBuilderFinalizeSubprogram.argtypes = None, [LLVMDIBuilderRef, LLVMMetadataRef]
-except AttributeError: pass
-
-try: (LLVMDIBuilderCreateCompileUnit:=dll.LLVMDIBuilderCreateCompileUnit).restype, LLVMDIBuilderCreateCompileUnit.argtypes = LLVMMetadataRef, [LLVMDIBuilderRef, LLVMDWARFSourceLanguage, LLVMMetadataRef, ctypes.POINTER(ctypes.c_char), size_t, LLVMBool, ctypes.POINTER(ctypes.c_char), size_t, ctypes.c_uint32, ctypes.POINTER(ctypes.c_char), size_t, LLVMDWARFEmissionKind, ctypes.c_uint32, LLVMBool, LLVMBool, ctypes.POINTER(ctypes.c_char), size_t, ctypes.POINTER(ctypes.c_char), size_t]
-except AttributeError: pass
-
-try: (LLVMDIBuilderCreateFile:=dll.LLVMDIBuilderCreateFile).restype, LLVMDIBuilderCreateFile.argtypes = LLVMMetadataRef, [LLVMDIBuilderRef, ctypes.POINTER(ctypes.c_char), size_t, ctypes.POINTER(ctypes.c_char), size_t]
-except AttributeError: pass
-
-try: (LLVMDIBuilderCreateModule:=dll.LLVMDIBuilderCreateModule).restype, LLVMDIBuilderCreateModule.argtypes = LLVMMetadataRef, [LLVMDIBuilderRef, LLVMMetadataRef, ctypes.POINTER(ctypes.c_char), size_t, ctypes.POINTER(ctypes.c_char), size_t, ctypes.POINTER(ctypes.c_char), size_t, ctypes.POINTER(ctypes.c_char), size_t]
-except AttributeError: pass
-
-try: (LLVMDIBuilderCreateNameSpace:=dll.LLVMDIBuilderCreateNameSpace).restype, LLVMDIBuilderCreateNameSpace.argtypes = LLVMMetadataRef, [LLVMDIBuilderRef, LLVMMetadataRef, ctypes.POINTER(ctypes.c_char), size_t, LLVMBool]
-except AttributeError: pass
-
-try: (LLVMDIBuilderCreateFunction:=dll.LLVMDIBuilderCreateFunction).restype, LLVMDIBuilderCreateFunction.argtypes = LLVMMetadataRef, [LLVMDIBuilderRef, LLVMMetadataRef, ctypes.POINTER(ctypes.c_char), size_t, ctypes.POINTER(ctypes.c_char), size_t, LLVMMetadataRef, ctypes.c_uint32, LLVMMetadataRef, LLVMBool, LLVMBool, ctypes.c_uint32, LLVMDIFlags, LLVMBool]
-except AttributeError: pass
-
-try: (LLVMDIBuilderCreateLexicalBlock:=dll.LLVMDIBuilderCreateLexicalBlock).restype, LLVMDIBuilderCreateLexicalBlock.argtypes = LLVMMetadataRef, [LLVMDIBuilderRef, LLVMMetadataRef, LLVMMetadataRef, ctypes.c_uint32, ctypes.c_uint32]
-except AttributeError: pass
-
-try: (LLVMDIBuilderCreateLexicalBlockFile:=dll.LLVMDIBuilderCreateLexicalBlockFile).restype, LLVMDIBuilderCreateLexicalBlockFile.argtypes = LLVMMetadataRef, [LLVMDIBuilderRef, LLVMMetadataRef, LLVMMetadataRef, ctypes.c_uint32]
-except AttributeError: pass
-
-try: (LLVMDIBuilderCreateImportedModuleFromNamespace:=dll.LLVMDIBuilderCreateImportedModuleFromNamespace).restype, LLVMDIBuilderCreateImportedModuleFromNamespace.argtypes = LLVMMetadataRef, [LLVMDIBuilderRef, LLVMMetadataRef, LLVMMetadataRef, LLVMMetadataRef, ctypes.c_uint32]
-except AttributeError: pass
-
-try: (LLVMDIBuilderCreateImportedModuleFromAlias:=dll.LLVMDIBuilderCreateImportedModuleFromAlias).restype, LLVMDIBuilderCreateImportedModuleFromAlias.argtypes = LLVMMetadataRef, [LLVMDIBuilderRef, LLVMMetadataRef, LLVMMetadataRef, LLVMMetadataRef, ctypes.c_uint32, ctypes.POINTER(LLVMMetadataRef), ctypes.c_uint32]
-except AttributeError: pass
-
-try: (LLVMDIBuilderCreateImportedModuleFromModule:=dll.LLVMDIBuilderCreateImportedModuleFromModule).restype, LLVMDIBuilderCreateImportedModuleFromModule.argtypes = LLVMMetadataRef, [LLVMDIBuilderRef, LLVMMetadataRef, LLVMMetadataRef, LLVMMetadataRef, ctypes.c_uint32, ctypes.POINTER(LLVMMetadataRef), ctypes.c_uint32]
-except AttributeError: pass
-
-try: (LLVMDIBuilderCreateImportedDeclaration:=dll.LLVMDIBuilderCreateImportedDeclaration).restype, LLVMDIBuilderCreateImportedDeclaration.argtypes = LLVMMetadataRef, [LLVMDIBuilderRef, LLVMMetadataRef, LLVMMetadataRef, LLVMMetadataRef, ctypes.c_uint32, ctypes.POINTER(ctypes.c_char), size_t, ctypes.POINTER(LLVMMetadataRef), ctypes.c_uint32]
-except AttributeError: pass
-
-try: (LLVMDIBuilderCreateDebugLocation:=dll.LLVMDIBuilderCreateDebugLocation).restype, LLVMDIBuilderCreateDebugLocation.argtypes = LLVMMetadataRef, [LLVMContextRef, ctypes.c_uint32, ctypes.c_uint32, LLVMMetadataRef, LLVMMetadataRef]
-except AttributeError: pass
-
-try: (LLVMDILocationGetLine:=dll.LLVMDILocationGetLine).restype, LLVMDILocationGetLine.argtypes = ctypes.c_uint32, [LLVMMetadataRef]
-except AttributeError: pass
-
-try: (LLVMDILocationGetColumn:=dll.LLVMDILocationGetColumn).restype, LLVMDILocationGetColumn.argtypes = ctypes.c_uint32, [LLVMMetadataRef]
-except AttributeError: pass
-
-try: (LLVMDILocationGetScope:=dll.LLVMDILocationGetScope).restype, LLVMDILocationGetScope.argtypes = LLVMMetadataRef, [LLVMMetadataRef]
-except AttributeError: pass
-
-try: (LLVMDILocationGetInlinedAt:=dll.LLVMDILocationGetInlinedAt).restype, LLVMDILocationGetInlinedAt.argtypes = LLVMMetadataRef, [LLVMMetadataRef]
-except AttributeError: pass
-
-try: (LLVMDIScopeGetFile:=dll.LLVMDIScopeGetFile).restype, LLVMDIScopeGetFile.argtypes = LLVMMetadataRef, [LLVMMetadataRef]
-except AttributeError: pass
-
-try: (LLVMDIFileGetDirectory:=dll.LLVMDIFileGetDirectory).restype, LLVMDIFileGetDirectory.argtypes = ctypes.POINTER(ctypes.c_char), [LLVMMetadataRef, ctypes.POINTER(ctypes.c_uint32)]
-except AttributeError: pass
-
-try: (LLVMDIFileGetFilename:=dll.LLVMDIFileGetFilename).restype, LLVMDIFileGetFilename.argtypes = ctypes.POINTER(ctypes.c_char), [LLVMMetadataRef, ctypes.POINTER(ctypes.c_uint32)]
-except AttributeError: pass
-
-try: (LLVMDIFileGetSource:=dll.LLVMDIFileGetSource).restype, LLVMDIFileGetSource.argtypes = ctypes.POINTER(ctypes.c_char), [LLVMMetadataRef, ctypes.POINTER(ctypes.c_uint32)]
-except AttributeError: pass
-
-try: (LLVMDIBuilderGetOrCreateTypeArray:=dll.LLVMDIBuilderGetOrCreateTypeArray).restype, LLVMDIBuilderGetOrCreateTypeArray.argtypes = LLVMMetadataRef, [LLVMDIBuilderRef, ctypes.POINTER(LLVMMetadataRef), size_t]
-except AttributeError: pass
-
-try: (LLVMDIBuilderCreateSubroutineType:=dll.LLVMDIBuilderCreateSubroutineType).restype, LLVMDIBuilderCreateSubroutineType.argtypes = LLVMMetadataRef, [LLVMDIBuilderRef, LLVMMetadataRef, ctypes.POINTER(LLVMMetadataRef), ctypes.c_uint32, LLVMDIFlags]
-except AttributeError: pass
-
-try: (LLVMDIBuilderCreateMacro:=dll.LLVMDIBuilderCreateMacro).restype, LLVMDIBuilderCreateMacro.argtypes = LLVMMetadataRef, [LLVMDIBuilderRef, LLVMMetadataRef, ctypes.c_uint32, LLVMDWARFMacinfoRecordType, ctypes.POINTER(ctypes.c_char), size_t, ctypes.POINTER(ctypes.c_char), size_t]
-except AttributeError: pass
-
-try: (LLVMDIBuilderCreateTempMacroFile:=dll.LLVMDIBuilderCreateTempMacroFile).restype, LLVMDIBuilderCreateTempMacroFile.argtypes = LLVMMetadataRef, [LLVMDIBuilderRef, LLVMMetadataRef, ctypes.c_uint32, LLVMMetadataRef]
-except AttributeError: pass
-
-int64_t = ctypes.c_int64
-try: (LLVMDIBuilderCreateEnumerator:=dll.LLVMDIBuilderCreateEnumerator).restype, LLVMDIBuilderCreateEnumerator.argtypes = LLVMMetadataRef, [LLVMDIBuilderRef, ctypes.POINTER(ctypes.c_char), size_t, int64_t, LLVMBool]
-except AttributeError: pass
-
-uint32_t = ctypes.c_uint32
-try: (LLVMDIBuilderCreateEnumerationType:=dll.LLVMDIBuilderCreateEnumerationType).restype, LLVMDIBuilderCreateEnumerationType.argtypes = LLVMMetadataRef, [LLVMDIBuilderRef, LLVMMetadataRef, ctypes.POINTER(ctypes.c_char), size_t, LLVMMetadataRef, ctypes.c_uint32, uint64_t, uint32_t, ctypes.POINTER(LLVMMetadataRef), ctypes.c_uint32, LLVMMetadataRef]
-except AttributeError: pass
-
-try: (LLVMDIBuilderCreateUnionType:=dll.LLVMDIBuilderCreateUnionType).restype, LLVMDIBuilderCreateUnionType.argtypes = LLVMMetadataRef, [LLVMDIBuilderRef, LLVMMetadataRef, ctypes.POINTER(ctypes.c_char), size_t, LLVMMetadataRef, ctypes.c_uint32, uint64_t, uint32_t, LLVMDIFlags, ctypes.POINTER(LLVMMetadataRef), ctypes.c_uint32, ctypes.c_uint32, ctypes.POINTER(ctypes.c_char), size_t]
-except AttributeError: pass
-
-try: (LLVMDIBuilderCreateArrayType:=dll.LLVMDIBuilderCreateArrayType).restype, LLVMDIBuilderCreateArrayType.argtypes = LLVMMetadataRef, [LLVMDIBuilderRef, uint64_t, uint32_t, LLVMMetadataRef, ctypes.POINTER(LLVMMetadataRef), ctypes.c_uint32]
-except AttributeError: pass
-
-try: (LLVMDIBuilderCreateVectorType:=dll.LLVMDIBuilderCreateVectorType).restype, LLVMDIBuilderCreateVectorType.argtypes = LLVMMetadataRef, [LLVMDIBuilderRef, uint64_t, uint32_t, LLVMMetadataRef, ctypes.POINTER(LLVMMetadataRef), ctypes.c_uint32]
-except AttributeError: pass
-
-try: (LLVMDIBuilderCreateUnspecifiedType:=dll.LLVMDIBuilderCreateUnspecifiedType).restype, LLVMDIBuilderCreateUnspecifiedType.argtypes = LLVMMetadataRef, [LLVMDIBuilderRef, ctypes.POINTER(ctypes.c_char), size_t]
-except AttributeError: pass
-
-try: (LLVMDIBuilderCreateBasicType:=dll.LLVMDIBuilderCreateBasicType).restype, LLVMDIBuilderCreateBasicType.argtypes = LLVMMetadataRef, [LLVMDIBuilderRef, ctypes.POINTER(ctypes.c_char), size_t, uint64_t, LLVMDWARFTypeEncoding, LLVMDIFlags]
-except AttributeError: pass
-
-try: (LLVMDIBuilderCreatePointerType:=dll.LLVMDIBuilderCreatePointerType).restype, LLVMDIBuilderCreatePointerType.argtypes = LLVMMetadataRef, [LLVMDIBuilderRef, LLVMMetadataRef, uint64_t, uint32_t, ctypes.c_uint32, ctypes.POINTER(ctypes.c_char), size_t]
-except AttributeError: pass
-
-try: (LLVMDIBuilderCreateStructType:=dll.LLVMDIBuilderCreateStructType).restype, LLVMDIBuilderCreateStructType.argtypes = LLVMMetadataRef, [LLVMDIBuilderRef, LLVMMetadataRef, ctypes.POINTER(ctypes.c_char), size_t, LLVMMetadataRef, ctypes.c_uint32, uint64_t, uint32_t, LLVMDIFlags, LLVMMetadataRef, ctypes.POINTER(LLVMMetadataRef), ctypes.c_uint32, ctypes.c_uint32, LLVMMetadataRef, ctypes.POINTER(ctypes.c_char), size_t]
-except AttributeError: pass
-
-try: (LLVMDIBuilderCreateMemberType:=dll.LLVMDIBuilderCreateMemberType).restype, LLVMDIBuilderCreateMemberType.argtypes = LLVMMetadataRef, [LLVMDIBuilderRef, LLVMMetadataRef, ctypes.POINTER(ctypes.c_char), size_t, LLVMMetadataRef, ctypes.c_uint32, uint64_t, uint32_t, uint64_t, LLVMDIFlags, LLVMMetadataRef]
-except AttributeError: pass
-
-try: (LLVMDIBuilderCreateStaticMemberType:=dll.LLVMDIBuilderCreateStaticMemberType).restype, LLVMDIBuilderCreateStaticMemberType.argtypes = LLVMMetadataRef, [LLVMDIBuilderRef, LLVMMetadataRef, ctypes.POINTER(ctypes.c_char), size_t, LLVMMetadataRef, ctypes.c_uint32, LLVMMetadataRef, LLVMDIFlags, LLVMValueRef, uint32_t]
-except AttributeError: pass
-
-try: (LLVMDIBuilderCreateMemberPointerType:=dll.LLVMDIBuilderCreateMemberPointerType).restype, LLVMDIBuilderCreateMemberPointerType.argtypes = LLVMMetadataRef, [LLVMDIBuilderRef, LLVMMetadataRef, LLVMMetadataRef, uint64_t, uint32_t, LLVMDIFlags]
-except AttributeError: pass
-
-try: (LLVMDIBuilderCreateObjCIVar:=dll.LLVMDIBuilderCreateObjCIVar).restype, LLVMDIBuilderCreateObjCIVar.argtypes = LLVMMetadataRef, [LLVMDIBuilderRef, ctypes.POINTER(ctypes.c_char), size_t, LLVMMetadataRef, ctypes.c_uint32, uint64_t, uint32_t, uint64_t, LLVMDIFlags, LLVMMetadataRef, LLVMMetadataRef]
-except AttributeError: pass
-
-try: (LLVMDIBuilderCreateObjCProperty:=dll.LLVMDIBuilderCreateObjCProperty).restype, LLVMDIBuilderCreateObjCProperty.argtypes = LLVMMetadataRef, [LLVMDIBuilderRef, ctypes.POINTER(ctypes.c_char), size_t, LLVMMetadataRef, ctypes.c_uint32, ctypes.POINTER(ctypes.c_char), size_t, ctypes.POINTER(ctypes.c_char), size_t, ctypes.c_uint32, LLVMMetadataRef]
-except AttributeError: pass
-
-try: (LLVMDIBuilderCreateObjectPointerType:=dll.LLVMDIBuilderCreateObjectPointerType).restype, LLVMDIBuilderCreateObjectPointerType.argtypes = LLVMMetadataRef, [LLVMDIBuilderRef, LLVMMetadataRef, LLVMBool]
-except AttributeError: pass
-
-try: (LLVMDIBuilderCreateQualifiedType:=dll.LLVMDIBuilderCreateQualifiedType).restype, LLVMDIBuilderCreateQualifiedType.argtypes = LLVMMetadataRef, [LLVMDIBuilderRef, ctypes.c_uint32, LLVMMetadataRef]
-except AttributeError: pass
-
-try: (LLVMDIBuilderCreateReferenceType:=dll.LLVMDIBuilderCreateReferenceType).restype, LLVMDIBuilderCreateReferenceType.argtypes = LLVMMetadataRef, [LLVMDIBuilderRef, ctypes.c_uint32, LLVMMetadataRef]
-except AttributeError: pass
-
-try: (LLVMDIBuilderCreateNullPtrType:=dll.LLVMDIBuilderCreateNullPtrType).restype, LLVMDIBuilderCreateNullPtrType.argtypes = LLVMMetadataRef, [LLVMDIBuilderRef]
-except AttributeError: pass
-
-try: (LLVMDIBuilderCreateTypedef:=dll.LLVMDIBuilderCreateTypedef).restype, LLVMDIBuilderCreateTypedef.argtypes = LLVMMetadataRef, [LLVMDIBuilderRef, LLVMMetadataRef, ctypes.POINTER(ctypes.c_char), size_t, LLVMMetadataRef, ctypes.c_uint32, LLVMMetadataRef, uint32_t]
-except AttributeError: pass
-
-try: (LLVMDIBuilderCreateInheritance:=dll.LLVMDIBuilderCreateInheritance).restype, LLVMDIBuilderCreateInheritance.argtypes = LLVMMetadataRef, [LLVMDIBuilderRef, LLVMMetadataRef, LLVMMetadataRef, uint64_t, uint32_t, LLVMDIFlags]
-except AttributeError: pass
-
-try: (LLVMDIBuilderCreateForwardDecl:=dll.LLVMDIBuilderCreateForwardDecl).restype, LLVMDIBuilderCreateForwardDecl.argtypes = LLVMMetadataRef, [LLVMDIBuilderRef, ctypes.c_uint32, ctypes.POINTER(ctypes.c_char), size_t, LLVMMetadataRef, LLVMMetadataRef, ctypes.c_uint32, ctypes.c_uint32, uint64_t, uint32_t, ctypes.POINTER(ctypes.c_char), size_t]
-except AttributeError: pass
-
-try: (LLVMDIBuilderCreateReplaceableCompositeType:=dll.LLVMDIBuilderCreateReplaceableCompositeType).restype, LLVMDIBuilderCreateReplaceableCompositeType.argtypes = LLVMMetadataRef, [LLVMDIBuilderRef, ctypes.c_uint32, ctypes.POINTER(ctypes.c_char), size_t, LLVMMetadataRef, LLVMMetadataRef, ctypes.c_uint32, ctypes.c_uint32, uint64_t, uint32_t, LLVMDIFlags, ctypes.POINTER(ctypes.c_char), size_t]
-except AttributeError: pass
-
-try: (LLVMDIBuilderCreateBitFieldMemberType:=dll.LLVMDIBuilderCreateBitFieldMemberType).restype, LLVMDIBuilderCreateBitFieldMemberType.argtypes = LLVMMetadataRef, [LLVMDIBuilderRef, LLVMMetadataRef, ctypes.POINTER(ctypes.c_char), size_t, LLVMMetadataRef, ctypes.c_uint32, uint64_t, uint64_t, uint64_t, LLVMDIFlags, LLVMMetadataRef]
-except AttributeError: pass
-
-try: (LLVMDIBuilderCreateClassType:=dll.LLVMDIBuilderCreateClassType).restype, LLVMDIBuilderCreateClassType.argtypes = LLVMMetadataRef, [LLVMDIBuilderRef, LLVMMetadataRef, ctypes.POINTER(ctypes.c_char), size_t, LLVMMetadataRef, ctypes.c_uint32, uint64_t, uint32_t, uint64_t, LLVMDIFlags, LLVMMetadataRef, ctypes.POINTER(LLVMMetadataRef), ctypes.c_uint32, LLVMMetadataRef, LLVMMetadataRef, ctypes.POINTER(ctypes.c_char), size_t]
-except AttributeError: pass
-
-try: (LLVMDIBuilderCreateArtificialType:=dll.LLVMDIBuilderCreateArtificialType).restype, LLVMDIBuilderCreateArtificialType.argtypes = LLVMMetadataRef, [LLVMDIBuilderRef, LLVMMetadataRef]
-except AttributeError: pass
-
-try: (LLVMDITypeGetName:=dll.LLVMDITypeGetName).restype, LLVMDITypeGetName.argtypes = ctypes.POINTER(ctypes.c_char), [LLVMMetadataRef, ctypes.POINTER(size_t)]
-except AttributeError: pass
-
-try: (LLVMDITypeGetSizeInBits:=dll.LLVMDITypeGetSizeInBits).restype, LLVMDITypeGetSizeInBits.argtypes = uint64_t, [LLVMMetadataRef]
-except AttributeError: pass
-
-try: (LLVMDITypeGetOffsetInBits:=dll.LLVMDITypeGetOffsetInBits).restype, LLVMDITypeGetOffsetInBits.argtypes = uint64_t, [LLVMMetadataRef]
-except AttributeError: pass
-
-try: (LLVMDITypeGetAlignInBits:=dll.LLVMDITypeGetAlignInBits).restype, LLVMDITypeGetAlignInBits.argtypes = uint32_t, [LLVMMetadataRef]
-except AttributeError: pass
-
-try: (LLVMDITypeGetLine:=dll.LLVMDITypeGetLine).restype, LLVMDITypeGetLine.argtypes = ctypes.c_uint32, [LLVMMetadataRef]
-except AttributeError: pass
-
-try: (LLVMDITypeGetFlags:=dll.LLVMDITypeGetFlags).restype, LLVMDITypeGetFlags.argtypes = LLVMDIFlags, [LLVMMetadataRef]
-except AttributeError: pass
-
-try: (LLVMDIBuilderGetOrCreateSubrange:=dll.LLVMDIBuilderGetOrCreateSubrange).restype, LLVMDIBuilderGetOrCreateSubrange.argtypes = LLVMMetadataRef, [LLVMDIBuilderRef, int64_t, int64_t]
-except AttributeError: pass
-
-try: (LLVMDIBuilderGetOrCreateArray:=dll.LLVMDIBuilderGetOrCreateArray).restype, LLVMDIBuilderGetOrCreateArray.argtypes = LLVMMetadataRef, [LLVMDIBuilderRef, ctypes.POINTER(LLVMMetadataRef), size_t]
-except AttributeError: pass
-
-try: (LLVMDIBuilderCreateExpression:=dll.LLVMDIBuilderCreateExpression).restype, LLVMDIBuilderCreateExpression.argtypes = LLVMMetadataRef, [LLVMDIBuilderRef, ctypes.POINTER(uint64_t), size_t]
-except AttributeError: pass
-
-try: (LLVMDIBuilderCreateConstantValueExpression:=dll.LLVMDIBuilderCreateConstantValueExpression).restype, LLVMDIBuilderCreateConstantValueExpression.argtypes = LLVMMetadataRef, [LLVMDIBuilderRef, uint64_t]
-except AttributeError: pass
-
-try: (LLVMDIBuilderCreateGlobalVariableExpression:=dll.LLVMDIBuilderCreateGlobalVariableExpression).restype, LLVMDIBuilderCreateGlobalVariableExpression.argtypes = LLVMMetadataRef, [LLVMDIBuilderRef, LLVMMetadataRef, ctypes.POINTER(ctypes.c_char), size_t, ctypes.POINTER(ctypes.c_char), size_t, LLVMMetadataRef, ctypes.c_uint32, LLVMMetadataRef, LLVMBool, LLVMMetadataRef, LLVMMetadataRef, uint32_t]
-except AttributeError: pass
-
-uint16_t = ctypes.c_uint16
-try: (LLVMGetDINodeTag:=dll.LLVMGetDINodeTag).restype, LLVMGetDINodeTag.argtypes = uint16_t, [LLVMMetadataRef]
-except AttributeError: pass
-
-try: (LLVMDIGlobalVariableExpressionGetVariable:=dll.LLVMDIGlobalVariableExpressionGetVariable).restype, LLVMDIGlobalVariableExpressionGetVariable.argtypes = LLVMMetadataRef, [LLVMMetadataRef]
-except AttributeError: pass
-
-try: (LLVMDIGlobalVariableExpressionGetExpression:=dll.LLVMDIGlobalVariableExpressionGetExpression).restype, LLVMDIGlobalVariableExpressionGetExpression.argtypes = LLVMMetadataRef, [LLVMMetadataRef]
-except AttributeError: pass
-
-try: (LLVMDIVariableGetFile:=dll.LLVMDIVariableGetFile).restype, LLVMDIVariableGetFile.argtypes = LLVMMetadataRef, [LLVMMetadataRef]
-except AttributeError: pass
-
-try: (LLVMDIVariableGetScope:=dll.LLVMDIVariableGetScope).restype, LLVMDIVariableGetScope.argtypes = LLVMMetadataRef, [LLVMMetadataRef]
-except AttributeError: pass
-
-try: (LLVMDIVariableGetLine:=dll.LLVMDIVariableGetLine).restype, LLVMDIVariableGetLine.argtypes = ctypes.c_uint32, [LLVMMetadataRef]
-except AttributeError: pass
-
-try: (LLVMTemporaryMDNode:=dll.LLVMTemporaryMDNode).restype, LLVMTemporaryMDNode.argtypes = LLVMMetadataRef, [LLVMContextRef, ctypes.POINTER(LLVMMetadataRef), size_t]
-except AttributeError: pass
-
-try: (LLVMDisposeTemporaryMDNode:=dll.LLVMDisposeTemporaryMDNode).restype, LLVMDisposeTemporaryMDNode.argtypes = None, [LLVMMetadataRef]
-except AttributeError: pass
-
-try: (LLVMMetadataReplaceAllUsesWith:=dll.LLVMMetadataReplaceAllUsesWith).restype, LLVMMetadataReplaceAllUsesWith.argtypes = None, [LLVMMetadataRef, LLVMMetadataRef]
-except AttributeError: pass
-
-try: (LLVMDIBuilderCreateTempGlobalVariableFwdDecl:=dll.LLVMDIBuilderCreateTempGlobalVariableFwdDecl).restype, LLVMDIBuilderCreateTempGlobalVariableFwdDecl.argtypes = LLVMMetadataRef, [LLVMDIBuilderRef, LLVMMetadataRef, ctypes.POINTER(ctypes.c_char), size_t, ctypes.POINTER(ctypes.c_char), size_t, LLVMMetadataRef, ctypes.c_uint32, LLVMMetadataRef, LLVMBool, LLVMMetadataRef, uint32_t]
-except AttributeError: pass
-
-try: (LLVMDIBuilderInsertDeclareRecordBefore:=dll.LLVMDIBuilderInsertDeclareRecordBefore).restype, LLVMDIBuilderInsertDeclareRecordBefore.argtypes = LLVMDbgRecordRef, [LLVMDIBuilderRef, LLVMValueRef, LLVMMetadataRef, LLVMMetadataRef, LLVMMetadataRef, LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMDIBuilderInsertDeclareRecordAtEnd:=dll.LLVMDIBuilderInsertDeclareRecordAtEnd).restype, LLVMDIBuilderInsertDeclareRecordAtEnd.argtypes = LLVMDbgRecordRef, [LLVMDIBuilderRef, LLVMValueRef, LLVMMetadataRef, LLVMMetadataRef, LLVMMetadataRef, LLVMBasicBlockRef]
-except AttributeError: pass
-
-try: (LLVMDIBuilderInsertDbgValueRecordBefore:=dll.LLVMDIBuilderInsertDbgValueRecordBefore).restype, LLVMDIBuilderInsertDbgValueRecordBefore.argtypes = LLVMDbgRecordRef, [LLVMDIBuilderRef, LLVMValueRef, LLVMMetadataRef, LLVMMetadataRef, LLVMMetadataRef, LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMDIBuilderInsertDbgValueRecordAtEnd:=dll.LLVMDIBuilderInsertDbgValueRecordAtEnd).restype, LLVMDIBuilderInsertDbgValueRecordAtEnd.argtypes = LLVMDbgRecordRef, [LLVMDIBuilderRef, LLVMValueRef, LLVMMetadataRef, LLVMMetadataRef, LLVMMetadataRef, LLVMBasicBlockRef]
-except AttributeError: pass
-
-try: (LLVMDIBuilderCreateAutoVariable:=dll.LLVMDIBuilderCreateAutoVariable).restype, LLVMDIBuilderCreateAutoVariable.argtypes = LLVMMetadataRef, [LLVMDIBuilderRef, LLVMMetadataRef, ctypes.POINTER(ctypes.c_char), size_t, LLVMMetadataRef, ctypes.c_uint32, LLVMMetadataRef, LLVMBool, LLVMDIFlags, uint32_t]
-except AttributeError: pass
-
-try: (LLVMDIBuilderCreateParameterVariable:=dll.LLVMDIBuilderCreateParameterVariable).restype, LLVMDIBuilderCreateParameterVariable.argtypes = LLVMMetadataRef, [LLVMDIBuilderRef, LLVMMetadataRef, ctypes.POINTER(ctypes.c_char), size_t, ctypes.c_uint32, LLVMMetadataRef, ctypes.c_uint32, LLVMMetadataRef, LLVMBool, LLVMDIFlags]
-except AttributeError: pass
-
-try: (LLVMGetSubprogram:=dll.LLVMGetSubprogram).restype, LLVMGetSubprogram.argtypes = LLVMMetadataRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMSetSubprogram:=dll.LLVMSetSubprogram).restype, LLVMSetSubprogram.argtypes = None, [LLVMValueRef, LLVMMetadataRef]
-except AttributeError: pass
-
-try: (LLVMDISubprogramGetLine:=dll.LLVMDISubprogramGetLine).restype, LLVMDISubprogramGetLine.argtypes = ctypes.c_uint32, [LLVMMetadataRef]
-except AttributeError: pass
-
-try: (LLVMInstructionGetDebugLoc:=dll.LLVMInstructionGetDebugLoc).restype, LLVMInstructionGetDebugLoc.argtypes = LLVMMetadataRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMInstructionSetDebugLoc:=dll.LLVMInstructionSetDebugLoc).restype, LLVMInstructionSetDebugLoc.argtypes = None, [LLVMValueRef, LLVMMetadataRef]
-except AttributeError: pass
-
-try: (LLVMDIBuilderCreateLabel:=dll.LLVMDIBuilderCreateLabel).restype, LLVMDIBuilderCreateLabel.argtypes = LLVMMetadataRef, [LLVMDIBuilderRef, LLVMMetadataRef, ctypes.POINTER(ctypes.c_char), size_t, LLVMMetadataRef, ctypes.c_uint32, LLVMBool]
-except AttributeError: pass
-
-try: (LLVMDIBuilderInsertLabelBefore:=dll.LLVMDIBuilderInsertLabelBefore).restype, LLVMDIBuilderInsertLabelBefore.argtypes = LLVMDbgRecordRef, [LLVMDIBuilderRef, LLVMMetadataRef, LLVMMetadataRef, LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMDIBuilderInsertLabelAtEnd:=dll.LLVMDIBuilderInsertLabelAtEnd).restype, LLVMDIBuilderInsertLabelAtEnd.argtypes = LLVMDbgRecordRef, [LLVMDIBuilderRef, LLVMMetadataRef, LLVMMetadataRef, LLVMBasicBlockRef]
-except AttributeError: pass
-
-try: (LLVMGetMetadataKind:=dll.LLVMGetMetadataKind).restype, LLVMGetMetadataKind.argtypes = LLVMMetadataKind, [LLVMMetadataRef]
-except AttributeError: pass
-
-try: (imaxabs:=dll.imaxabs).restype, imaxabs.argtypes = intmax_t, [intmax_t]
-except AttributeError: pass
-
-try: (imaxdiv:=dll.imaxdiv).restype, imaxdiv.argtypes = imaxdiv_t, [intmax_t, intmax_t]
-except AttributeError: pass
-
-try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (select:=dll.select).restype, select.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timeval)]
-except AttributeError: pass
-
-try: (pselect:=dll.pselect).restype, pselect.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timespec), ctypes.POINTER(__sigset_t)]
-except AttributeError: pass
-
-LLVMDisasmContextRef = ctypes.c_void_p
-LLVMOpInfoCallback = ctypes.CFUNCTYPE(ctypes.c_int32, ctypes.c_void_p, ctypes.c_uint64, ctypes.c_uint64, ctypes.c_uint64, ctypes.c_uint64, ctypes.c_int32, ctypes.c_void_p)
-LLVMSymbolLookupCallback = ctypes.CFUNCTYPE(ctypes.POINTER(ctypes.c_char), ctypes.c_void_p, ctypes.c_uint64, ctypes.POINTER(ctypes.c_uint64), ctypes.c_uint64, ctypes.POINTER(ctypes.POINTER(ctypes.c_char)))
-try: (LLVMCreateDisasm:=dll.LLVMCreateDisasm).restype, LLVMCreateDisasm.argtypes = LLVMDisasmContextRef, [ctypes.POINTER(ctypes.c_char), ctypes.c_void_p, ctypes.c_int32, LLVMOpInfoCallback, LLVMSymbolLookupCallback]
-except AttributeError: pass
-
-try: (LLVMCreateDisasmCPU:=dll.LLVMCreateDisasmCPU).restype, LLVMCreateDisasmCPU.argtypes = LLVMDisasmContextRef, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char), ctypes.c_void_p, ctypes.c_int32, LLVMOpInfoCallback, LLVMSymbolLookupCallback]
-except AttributeError: pass
-
-try: (LLVMCreateDisasmCPUFeatures:=dll.LLVMCreateDisasmCPUFeatures).restype, LLVMCreateDisasmCPUFeatures.argtypes = LLVMDisasmContextRef, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char), ctypes.c_void_p, ctypes.c_int32, LLVMOpInfoCallback, LLVMSymbolLookupCallback]
-except AttributeError: pass
-
-try: (LLVMSetDisasmOptions:=dll.LLVMSetDisasmOptions).restype, LLVMSetDisasmOptions.argtypes = ctypes.c_int32, [LLVMDisasmContextRef, uint64_t]
-except AttributeError: pass
-
-try: (LLVMDisasmDispose:=dll.LLVMDisasmDispose).restype, LLVMDisasmDispose.argtypes = None, [LLVMDisasmContextRef]
-except AttributeError: pass
-
-try: (LLVMDisasmInstruction:=dll.LLVMDisasmInstruction).restype, LLVMDisasmInstruction.argtypes = size_t, [LLVMDisasmContextRef, ctypes.POINTER(uint8_t), uint64_t, uint64_t, ctypes.POINTER(ctypes.c_char), size_t]
-except AttributeError: pass
-
-try: (imaxabs:=dll.imaxabs).restype, imaxabs.argtypes = intmax_t, [intmax_t]
-except AttributeError: pass
-
-try: (imaxdiv:=dll.imaxdiv).restype, imaxdiv.argtypes = imaxdiv_t, [intmax_t, intmax_t]
-except AttributeError: pass
-
-try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (select:=dll.select).restype, select.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timeval)]
-except AttributeError: pass
-
-try: (pselect:=dll.pselect).restype, pselect.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timespec), ctypes.POINTER(__sigset_t)]
-except AttributeError: pass
-
-class struct_LLVMOpInfoSymbol1(Struct): pass
-struct_LLVMOpInfoSymbol1._fields_ = [
-  ('Present', uint64_t),
-  ('Name', ctypes.POINTER(ctypes.c_char)),
-  ('Value', uint64_t),
-]
-class struct_LLVMOpInfo1(Struct): pass
-struct_LLVMOpInfo1._fields_ = [
-  ('AddSymbol', struct_LLVMOpInfoSymbol1),
-  ('SubtractSymbol', struct_LLVMOpInfoSymbol1),
-  ('Value', uint64_t),
-  ('VariantKind', uint64_t),
-]
-class struct_LLVMOpaqueError(Struct): pass
-LLVMErrorRef = ctypes.POINTER(struct_LLVMOpaqueError)
-LLVMErrorTypeId = ctypes.c_void_p
-try: (LLVMGetErrorTypeId:=dll.LLVMGetErrorTypeId).restype, LLVMGetErrorTypeId.argtypes = LLVMErrorTypeId, [LLVMErrorRef]
-except AttributeError: pass
-
-try: (LLVMConsumeError:=dll.LLVMConsumeError).restype, LLVMConsumeError.argtypes = None, [LLVMErrorRef]
-except AttributeError: pass
-
-try: (LLVMCantFail:=dll.LLVMCantFail).restype, LLVMCantFail.argtypes = None, [LLVMErrorRef]
-except AttributeError: pass
-
-try: (LLVMGetErrorMessage:=dll.LLVMGetErrorMessage).restype, LLVMGetErrorMessage.argtypes = ctypes.POINTER(ctypes.c_char), [LLVMErrorRef]
-except AttributeError: pass
-
-try: (LLVMDisposeErrorMessage:=dll.LLVMDisposeErrorMessage).restype, LLVMDisposeErrorMessage.argtypes = None, [ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMGetStringErrorTypeId:=dll.LLVMGetStringErrorTypeId).restype, LLVMGetStringErrorTypeId.argtypes = LLVMErrorTypeId, []
-except AttributeError: pass
-
-try: (LLVMCreateStringError:=dll.LLVMCreateStringError).restype, LLVMCreateStringError.argtypes = LLVMErrorRef, [ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMInstallFatalErrorHandler:=dll.LLVMInstallFatalErrorHandler).restype, LLVMInstallFatalErrorHandler.argtypes = None, [LLVMFatalErrorHandler]
-except AttributeError: pass
-
-try: (LLVMResetFatalErrorHandler:=dll.LLVMResetFatalErrorHandler).restype, LLVMResetFatalErrorHandler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMEnablePrettyStackTrace:=dll.LLVMEnablePrettyStackTrace).restype, LLVMEnablePrettyStackTrace.argtypes = None, []
-except AttributeError: pass
-
-try: (imaxabs:=dll.imaxabs).restype, imaxabs.argtypes = intmax_t, [intmax_t]
-except AttributeError: pass
-
-try: (imaxdiv:=dll.imaxdiv).restype, imaxdiv.argtypes = imaxdiv_t, [intmax_t, intmax_t]
-except AttributeError: pass
-
-try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (select:=dll.select).restype, select.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timeval)]
-except AttributeError: pass
-
-try: (pselect:=dll.pselect).restype, pselect.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timespec), ctypes.POINTER(__sigset_t)]
-except AttributeError: pass
-
-try: (LLVMInitializeAArch64TargetInfo:=dll.LLVMInitializeAArch64TargetInfo).restype, LLVMInitializeAArch64TargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAMDGPUTargetInfo:=dll.LLVMInitializeAMDGPUTargetInfo).restype, LLVMInitializeAMDGPUTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeARMTargetInfo:=dll.LLVMInitializeARMTargetInfo).restype, LLVMInitializeARMTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAVRTargetInfo:=dll.LLVMInitializeAVRTargetInfo).restype, LLVMInitializeAVRTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeBPFTargetInfo:=dll.LLVMInitializeBPFTargetInfo).restype, LLVMInitializeBPFTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeHexagonTargetInfo:=dll.LLVMInitializeHexagonTargetInfo).restype, LLVMInitializeHexagonTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeLanaiTargetInfo:=dll.LLVMInitializeLanaiTargetInfo).restype, LLVMInitializeLanaiTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeLoongArchTargetInfo:=dll.LLVMInitializeLoongArchTargetInfo).restype, LLVMInitializeLoongArchTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeMipsTargetInfo:=dll.LLVMInitializeMipsTargetInfo).restype, LLVMInitializeMipsTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeMSP430TargetInfo:=dll.LLVMInitializeMSP430TargetInfo).restype, LLVMInitializeMSP430TargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeNVPTXTargetInfo:=dll.LLVMInitializeNVPTXTargetInfo).restype, LLVMInitializeNVPTXTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializePowerPCTargetInfo:=dll.LLVMInitializePowerPCTargetInfo).restype, LLVMInitializePowerPCTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeRISCVTargetInfo:=dll.LLVMInitializeRISCVTargetInfo).restype, LLVMInitializeRISCVTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSparcTargetInfo:=dll.LLVMInitializeSparcTargetInfo).restype, LLVMInitializeSparcTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSPIRVTargetInfo:=dll.LLVMInitializeSPIRVTargetInfo).restype, LLVMInitializeSPIRVTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSystemZTargetInfo:=dll.LLVMInitializeSystemZTargetInfo).restype, LLVMInitializeSystemZTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeVETargetInfo:=dll.LLVMInitializeVETargetInfo).restype, LLVMInitializeVETargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeWebAssemblyTargetInfo:=dll.LLVMInitializeWebAssemblyTargetInfo).restype, LLVMInitializeWebAssemblyTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeX86TargetInfo:=dll.LLVMInitializeX86TargetInfo).restype, LLVMInitializeX86TargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeXCoreTargetInfo:=dll.LLVMInitializeXCoreTargetInfo).restype, LLVMInitializeXCoreTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeM68kTargetInfo:=dll.LLVMInitializeM68kTargetInfo).restype, LLVMInitializeM68kTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeXtensaTargetInfo:=dll.LLVMInitializeXtensaTargetInfo).restype, LLVMInitializeXtensaTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAArch64Target:=dll.LLVMInitializeAArch64Target).restype, LLVMInitializeAArch64Target.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAMDGPUTarget:=dll.LLVMInitializeAMDGPUTarget).restype, LLVMInitializeAMDGPUTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeARMTarget:=dll.LLVMInitializeARMTarget).restype, LLVMInitializeARMTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAVRTarget:=dll.LLVMInitializeAVRTarget).restype, LLVMInitializeAVRTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeBPFTarget:=dll.LLVMInitializeBPFTarget).restype, LLVMInitializeBPFTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeHexagonTarget:=dll.LLVMInitializeHexagonTarget).restype, LLVMInitializeHexagonTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeLanaiTarget:=dll.LLVMInitializeLanaiTarget).restype, LLVMInitializeLanaiTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeLoongArchTarget:=dll.LLVMInitializeLoongArchTarget).restype, LLVMInitializeLoongArchTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeMipsTarget:=dll.LLVMInitializeMipsTarget).restype, LLVMInitializeMipsTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeMSP430Target:=dll.LLVMInitializeMSP430Target).restype, LLVMInitializeMSP430Target.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeNVPTXTarget:=dll.LLVMInitializeNVPTXTarget).restype, LLVMInitializeNVPTXTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializePowerPCTarget:=dll.LLVMInitializePowerPCTarget).restype, LLVMInitializePowerPCTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeRISCVTarget:=dll.LLVMInitializeRISCVTarget).restype, LLVMInitializeRISCVTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSparcTarget:=dll.LLVMInitializeSparcTarget).restype, LLVMInitializeSparcTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSPIRVTarget:=dll.LLVMInitializeSPIRVTarget).restype, LLVMInitializeSPIRVTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSystemZTarget:=dll.LLVMInitializeSystemZTarget).restype, LLVMInitializeSystemZTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeVETarget:=dll.LLVMInitializeVETarget).restype, LLVMInitializeVETarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeWebAssemblyTarget:=dll.LLVMInitializeWebAssemblyTarget).restype, LLVMInitializeWebAssemblyTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeX86Target:=dll.LLVMInitializeX86Target).restype, LLVMInitializeX86Target.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeXCoreTarget:=dll.LLVMInitializeXCoreTarget).restype, LLVMInitializeXCoreTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeM68kTarget:=dll.LLVMInitializeM68kTarget).restype, LLVMInitializeM68kTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeXtensaTarget:=dll.LLVMInitializeXtensaTarget).restype, LLVMInitializeXtensaTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAArch64TargetMC:=dll.LLVMInitializeAArch64TargetMC).restype, LLVMInitializeAArch64TargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAMDGPUTargetMC:=dll.LLVMInitializeAMDGPUTargetMC).restype, LLVMInitializeAMDGPUTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeARMTargetMC:=dll.LLVMInitializeARMTargetMC).restype, LLVMInitializeARMTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAVRTargetMC:=dll.LLVMInitializeAVRTargetMC).restype, LLVMInitializeAVRTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeBPFTargetMC:=dll.LLVMInitializeBPFTargetMC).restype, LLVMInitializeBPFTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeHexagonTargetMC:=dll.LLVMInitializeHexagonTargetMC).restype, LLVMInitializeHexagonTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeLanaiTargetMC:=dll.LLVMInitializeLanaiTargetMC).restype, LLVMInitializeLanaiTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeLoongArchTargetMC:=dll.LLVMInitializeLoongArchTargetMC).restype, LLVMInitializeLoongArchTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeMipsTargetMC:=dll.LLVMInitializeMipsTargetMC).restype, LLVMInitializeMipsTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeMSP430TargetMC:=dll.LLVMInitializeMSP430TargetMC).restype, LLVMInitializeMSP430TargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeNVPTXTargetMC:=dll.LLVMInitializeNVPTXTargetMC).restype, LLVMInitializeNVPTXTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializePowerPCTargetMC:=dll.LLVMInitializePowerPCTargetMC).restype, LLVMInitializePowerPCTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeRISCVTargetMC:=dll.LLVMInitializeRISCVTargetMC).restype, LLVMInitializeRISCVTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSparcTargetMC:=dll.LLVMInitializeSparcTargetMC).restype, LLVMInitializeSparcTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSPIRVTargetMC:=dll.LLVMInitializeSPIRVTargetMC).restype, LLVMInitializeSPIRVTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSystemZTargetMC:=dll.LLVMInitializeSystemZTargetMC).restype, LLVMInitializeSystemZTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeVETargetMC:=dll.LLVMInitializeVETargetMC).restype, LLVMInitializeVETargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeWebAssemblyTargetMC:=dll.LLVMInitializeWebAssemblyTargetMC).restype, LLVMInitializeWebAssemblyTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeX86TargetMC:=dll.LLVMInitializeX86TargetMC).restype, LLVMInitializeX86TargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeXCoreTargetMC:=dll.LLVMInitializeXCoreTargetMC).restype, LLVMInitializeXCoreTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeM68kTargetMC:=dll.LLVMInitializeM68kTargetMC).restype, LLVMInitializeM68kTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeXtensaTargetMC:=dll.LLVMInitializeXtensaTargetMC).restype, LLVMInitializeXtensaTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAArch64AsmPrinter:=dll.LLVMInitializeAArch64AsmPrinter).restype, LLVMInitializeAArch64AsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAMDGPUAsmPrinter:=dll.LLVMInitializeAMDGPUAsmPrinter).restype, LLVMInitializeAMDGPUAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeARMAsmPrinter:=dll.LLVMInitializeARMAsmPrinter).restype, LLVMInitializeARMAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAVRAsmPrinter:=dll.LLVMInitializeAVRAsmPrinter).restype, LLVMInitializeAVRAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeBPFAsmPrinter:=dll.LLVMInitializeBPFAsmPrinter).restype, LLVMInitializeBPFAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeHexagonAsmPrinter:=dll.LLVMInitializeHexagonAsmPrinter).restype, LLVMInitializeHexagonAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeLanaiAsmPrinter:=dll.LLVMInitializeLanaiAsmPrinter).restype, LLVMInitializeLanaiAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeLoongArchAsmPrinter:=dll.LLVMInitializeLoongArchAsmPrinter).restype, LLVMInitializeLoongArchAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeMipsAsmPrinter:=dll.LLVMInitializeMipsAsmPrinter).restype, LLVMInitializeMipsAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeMSP430AsmPrinter:=dll.LLVMInitializeMSP430AsmPrinter).restype, LLVMInitializeMSP430AsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeNVPTXAsmPrinter:=dll.LLVMInitializeNVPTXAsmPrinter).restype, LLVMInitializeNVPTXAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializePowerPCAsmPrinter:=dll.LLVMInitializePowerPCAsmPrinter).restype, LLVMInitializePowerPCAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeRISCVAsmPrinter:=dll.LLVMInitializeRISCVAsmPrinter).restype, LLVMInitializeRISCVAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSparcAsmPrinter:=dll.LLVMInitializeSparcAsmPrinter).restype, LLVMInitializeSparcAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSPIRVAsmPrinter:=dll.LLVMInitializeSPIRVAsmPrinter).restype, LLVMInitializeSPIRVAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSystemZAsmPrinter:=dll.LLVMInitializeSystemZAsmPrinter).restype, LLVMInitializeSystemZAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeVEAsmPrinter:=dll.LLVMInitializeVEAsmPrinter).restype, LLVMInitializeVEAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeWebAssemblyAsmPrinter:=dll.LLVMInitializeWebAssemblyAsmPrinter).restype, LLVMInitializeWebAssemblyAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeX86AsmPrinter:=dll.LLVMInitializeX86AsmPrinter).restype, LLVMInitializeX86AsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeXCoreAsmPrinter:=dll.LLVMInitializeXCoreAsmPrinter).restype, LLVMInitializeXCoreAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeM68kAsmPrinter:=dll.LLVMInitializeM68kAsmPrinter).restype, LLVMInitializeM68kAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeXtensaAsmPrinter:=dll.LLVMInitializeXtensaAsmPrinter).restype, LLVMInitializeXtensaAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAArch64AsmParser:=dll.LLVMInitializeAArch64AsmParser).restype, LLVMInitializeAArch64AsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAMDGPUAsmParser:=dll.LLVMInitializeAMDGPUAsmParser).restype, LLVMInitializeAMDGPUAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeARMAsmParser:=dll.LLVMInitializeARMAsmParser).restype, LLVMInitializeARMAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAVRAsmParser:=dll.LLVMInitializeAVRAsmParser).restype, LLVMInitializeAVRAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeBPFAsmParser:=dll.LLVMInitializeBPFAsmParser).restype, LLVMInitializeBPFAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeHexagonAsmParser:=dll.LLVMInitializeHexagonAsmParser).restype, LLVMInitializeHexagonAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeLanaiAsmParser:=dll.LLVMInitializeLanaiAsmParser).restype, LLVMInitializeLanaiAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeLoongArchAsmParser:=dll.LLVMInitializeLoongArchAsmParser).restype, LLVMInitializeLoongArchAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeMipsAsmParser:=dll.LLVMInitializeMipsAsmParser).restype, LLVMInitializeMipsAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeMSP430AsmParser:=dll.LLVMInitializeMSP430AsmParser).restype, LLVMInitializeMSP430AsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializePowerPCAsmParser:=dll.LLVMInitializePowerPCAsmParser).restype, LLVMInitializePowerPCAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeRISCVAsmParser:=dll.LLVMInitializeRISCVAsmParser).restype, LLVMInitializeRISCVAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSparcAsmParser:=dll.LLVMInitializeSparcAsmParser).restype, LLVMInitializeSparcAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSystemZAsmParser:=dll.LLVMInitializeSystemZAsmParser).restype, LLVMInitializeSystemZAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeVEAsmParser:=dll.LLVMInitializeVEAsmParser).restype, LLVMInitializeVEAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeWebAssemblyAsmParser:=dll.LLVMInitializeWebAssemblyAsmParser).restype, LLVMInitializeWebAssemblyAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeX86AsmParser:=dll.LLVMInitializeX86AsmParser).restype, LLVMInitializeX86AsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeM68kAsmParser:=dll.LLVMInitializeM68kAsmParser).restype, LLVMInitializeM68kAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeXtensaAsmParser:=dll.LLVMInitializeXtensaAsmParser).restype, LLVMInitializeXtensaAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAArch64Disassembler:=dll.LLVMInitializeAArch64Disassembler).restype, LLVMInitializeAArch64Disassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAMDGPUDisassembler:=dll.LLVMInitializeAMDGPUDisassembler).restype, LLVMInitializeAMDGPUDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeARMDisassembler:=dll.LLVMInitializeARMDisassembler).restype, LLVMInitializeARMDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAVRDisassembler:=dll.LLVMInitializeAVRDisassembler).restype, LLVMInitializeAVRDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeBPFDisassembler:=dll.LLVMInitializeBPFDisassembler).restype, LLVMInitializeBPFDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeHexagonDisassembler:=dll.LLVMInitializeHexagonDisassembler).restype, LLVMInitializeHexagonDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeLanaiDisassembler:=dll.LLVMInitializeLanaiDisassembler).restype, LLVMInitializeLanaiDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeLoongArchDisassembler:=dll.LLVMInitializeLoongArchDisassembler).restype, LLVMInitializeLoongArchDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeMipsDisassembler:=dll.LLVMInitializeMipsDisassembler).restype, LLVMInitializeMipsDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeMSP430Disassembler:=dll.LLVMInitializeMSP430Disassembler).restype, LLVMInitializeMSP430Disassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializePowerPCDisassembler:=dll.LLVMInitializePowerPCDisassembler).restype, LLVMInitializePowerPCDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeRISCVDisassembler:=dll.LLVMInitializeRISCVDisassembler).restype, LLVMInitializeRISCVDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSparcDisassembler:=dll.LLVMInitializeSparcDisassembler).restype, LLVMInitializeSparcDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSystemZDisassembler:=dll.LLVMInitializeSystemZDisassembler).restype, LLVMInitializeSystemZDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeVEDisassembler:=dll.LLVMInitializeVEDisassembler).restype, LLVMInitializeVEDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeWebAssemblyDisassembler:=dll.LLVMInitializeWebAssemblyDisassembler).restype, LLVMInitializeWebAssemblyDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeX86Disassembler:=dll.LLVMInitializeX86Disassembler).restype, LLVMInitializeX86Disassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeXCoreDisassembler:=dll.LLVMInitializeXCoreDisassembler).restype, LLVMInitializeXCoreDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeM68kDisassembler:=dll.LLVMInitializeM68kDisassembler).restype, LLVMInitializeM68kDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeXtensaDisassembler:=dll.LLVMInitializeXtensaDisassembler).restype, LLVMInitializeXtensaDisassembler.argtypes = None, []
-except AttributeError: pass
-
-class struct_LLVMOpaqueTargetData(Struct): pass
-LLVMTargetDataRef = ctypes.POINTER(struct_LLVMOpaqueTargetData)
-try: (LLVMGetModuleDataLayout:=dll.LLVMGetModuleDataLayout).restype, LLVMGetModuleDataLayout.argtypes = LLVMTargetDataRef, [LLVMModuleRef]
-except AttributeError: pass
-
-try: (LLVMSetModuleDataLayout:=dll.LLVMSetModuleDataLayout).restype, LLVMSetModuleDataLayout.argtypes = None, [LLVMModuleRef, LLVMTargetDataRef]
-except AttributeError: pass
-
-try: (LLVMCreateTargetData:=dll.LLVMCreateTargetData).restype, LLVMCreateTargetData.argtypes = LLVMTargetDataRef, [ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMDisposeTargetData:=dll.LLVMDisposeTargetData).restype, LLVMDisposeTargetData.argtypes = None, [LLVMTargetDataRef]
-except AttributeError: pass
-
-class struct_LLVMOpaqueTargetLibraryInfotData(Struct): pass
-LLVMTargetLibraryInfoRef = ctypes.POINTER(struct_LLVMOpaqueTargetLibraryInfotData)
-try: (LLVMAddTargetLibraryInfo:=dll.LLVMAddTargetLibraryInfo).restype, LLVMAddTargetLibraryInfo.argtypes = None, [LLVMTargetLibraryInfoRef, LLVMPassManagerRef]
-except AttributeError: pass
-
-try: (LLVMCopyStringRepOfTargetData:=dll.LLVMCopyStringRepOfTargetData).restype, LLVMCopyStringRepOfTargetData.argtypes = ctypes.POINTER(ctypes.c_char), [LLVMTargetDataRef]
-except AttributeError: pass
-
-enum_LLVMByteOrdering = CEnum(ctypes.c_uint32)
+@dll.bind
+def LLVMDebugMetadataVersion() -> Annotated[int, ctypes.c_uint32]: ...
+@dll.bind
+def LLVMGetModuleDebugMetadataVersion(Module:LLVMModuleRef) -> Annotated[int, ctypes.c_uint32]: ...
+@dll.bind
+def LLVMStripModuleDebugInfo(Module:LLVMModuleRef) -> LLVMBool: ...
+class struct_LLVMOpaqueDIBuilder(ctypes.Structure): pass
+LLVMDIBuilderRef: TypeAlias = c.POINTER[struct_LLVMOpaqueDIBuilder]
+@dll.bind
+def LLVMCreateDIBuilderDisallowUnresolved(M:LLVMModuleRef) -> LLVMDIBuilderRef: ...
+@dll.bind
+def LLVMCreateDIBuilder(M:LLVMModuleRef) -> LLVMDIBuilderRef: ...
+@dll.bind
+def LLVMDisposeDIBuilder(Builder:LLVMDIBuilderRef) -> None: ...
+@dll.bind
+def LLVMDIBuilderFinalize(Builder:LLVMDIBuilderRef) -> None: ...
+@dll.bind
+def LLVMDIBuilderFinalizeSubprogram(Builder:LLVMDIBuilderRef, Subprogram:LLVMMetadataRef) -> None: ...
+@dll.bind
+def LLVMDIBuilderCreateCompileUnit(Builder:LLVMDIBuilderRef, Lang:LLVMDWARFSourceLanguage, FileRef:LLVMMetadataRef, Producer:c.POINTER[Annotated[bytes, ctypes.c_char]], ProducerLen:size_t, isOptimized:LLVMBool, Flags:c.POINTER[Annotated[bytes, ctypes.c_char]], FlagsLen:size_t, RuntimeVer:Annotated[int, ctypes.c_uint32], SplitName:c.POINTER[Annotated[bytes, ctypes.c_char]], SplitNameLen:size_t, Kind:LLVMDWARFEmissionKind, DWOId:Annotated[int, ctypes.c_uint32], SplitDebugInlining:LLVMBool, DebugInfoForProfiling:LLVMBool, SysRoot:c.POINTER[Annotated[bytes, ctypes.c_char]], SysRootLen:size_t, SDK:c.POINTER[Annotated[bytes, ctypes.c_char]], SDKLen:size_t) -> LLVMMetadataRef: ...
+@dll.bind
+def LLVMDIBuilderCreateFile(Builder:LLVMDIBuilderRef, Filename:c.POINTER[Annotated[bytes, ctypes.c_char]], FilenameLen:size_t, Directory:c.POINTER[Annotated[bytes, ctypes.c_char]], DirectoryLen:size_t) -> LLVMMetadataRef: ...
+@dll.bind
+def LLVMDIBuilderCreateModule(Builder:LLVMDIBuilderRef, ParentScope:LLVMMetadataRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]], NameLen:size_t, ConfigMacros:c.POINTER[Annotated[bytes, ctypes.c_char]], ConfigMacrosLen:size_t, IncludePath:c.POINTER[Annotated[bytes, ctypes.c_char]], IncludePathLen:size_t, APINotesFile:c.POINTER[Annotated[bytes, ctypes.c_char]], APINotesFileLen:size_t) -> LLVMMetadataRef: ...
+@dll.bind
+def LLVMDIBuilderCreateNameSpace(Builder:LLVMDIBuilderRef, ParentScope:LLVMMetadataRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]], NameLen:size_t, ExportSymbols:LLVMBool) -> LLVMMetadataRef: ...
+@dll.bind
+def LLVMDIBuilderCreateFunction(Builder:LLVMDIBuilderRef, Scope:LLVMMetadataRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]], NameLen:size_t, LinkageName:c.POINTER[Annotated[bytes, ctypes.c_char]], LinkageNameLen:size_t, File:LLVMMetadataRef, LineNo:Annotated[int, ctypes.c_uint32], Ty:LLVMMetadataRef, IsLocalToUnit:LLVMBool, IsDefinition:LLVMBool, ScopeLine:Annotated[int, ctypes.c_uint32], Flags:LLVMDIFlags, IsOptimized:LLVMBool) -> LLVMMetadataRef: ...
+@dll.bind
+def LLVMDIBuilderCreateLexicalBlock(Builder:LLVMDIBuilderRef, Scope:LLVMMetadataRef, File:LLVMMetadataRef, Line:Annotated[int, ctypes.c_uint32], Column:Annotated[int, ctypes.c_uint32]) -> LLVMMetadataRef: ...
+@dll.bind
+def LLVMDIBuilderCreateLexicalBlockFile(Builder:LLVMDIBuilderRef, Scope:LLVMMetadataRef, File:LLVMMetadataRef, Discriminator:Annotated[int, ctypes.c_uint32]) -> LLVMMetadataRef: ...
+@dll.bind
+def LLVMDIBuilderCreateImportedModuleFromNamespace(Builder:LLVMDIBuilderRef, Scope:LLVMMetadataRef, NS:LLVMMetadataRef, File:LLVMMetadataRef, Line:Annotated[int, ctypes.c_uint32]) -> LLVMMetadataRef: ...
+@dll.bind
+def LLVMDIBuilderCreateImportedModuleFromAlias(Builder:LLVMDIBuilderRef, Scope:LLVMMetadataRef, ImportedEntity:LLVMMetadataRef, File:LLVMMetadataRef, Line:Annotated[int, ctypes.c_uint32], Elements:c.POINTER[LLVMMetadataRef], NumElements:Annotated[int, ctypes.c_uint32]) -> LLVMMetadataRef: ...
+@dll.bind
+def LLVMDIBuilderCreateImportedModuleFromModule(Builder:LLVMDIBuilderRef, Scope:LLVMMetadataRef, M:LLVMMetadataRef, File:LLVMMetadataRef, Line:Annotated[int, ctypes.c_uint32], Elements:c.POINTER[LLVMMetadataRef], NumElements:Annotated[int, ctypes.c_uint32]) -> LLVMMetadataRef: ...
+@dll.bind
+def LLVMDIBuilderCreateImportedDeclaration(Builder:LLVMDIBuilderRef, Scope:LLVMMetadataRef, Decl:LLVMMetadataRef, File:LLVMMetadataRef, Line:Annotated[int, ctypes.c_uint32], Name:c.POINTER[Annotated[bytes, ctypes.c_char]], NameLen:size_t, Elements:c.POINTER[LLVMMetadataRef], NumElements:Annotated[int, ctypes.c_uint32]) -> LLVMMetadataRef: ...
+@dll.bind
+def LLVMDIBuilderCreateDebugLocation(Ctx:LLVMContextRef, Line:Annotated[int, ctypes.c_uint32], Column:Annotated[int, ctypes.c_uint32], Scope:LLVMMetadataRef, InlinedAt:LLVMMetadataRef) -> LLVMMetadataRef: ...
+@dll.bind
+def LLVMDILocationGetLine(Location:LLVMMetadataRef) -> Annotated[int, ctypes.c_uint32]: ...
+@dll.bind
+def LLVMDILocationGetColumn(Location:LLVMMetadataRef) -> Annotated[int, ctypes.c_uint32]: ...
+@dll.bind
+def LLVMDILocationGetScope(Location:LLVMMetadataRef) -> LLVMMetadataRef: ...
+@dll.bind
+def LLVMDILocationGetInlinedAt(Location:LLVMMetadataRef) -> LLVMMetadataRef: ...
+@dll.bind
+def LLVMDIScopeGetFile(Scope:LLVMMetadataRef) -> LLVMMetadataRef: ...
+@dll.bind
+def LLVMDIFileGetDirectory(File:LLVMMetadataRef, Len:c.POINTER[Annotated[int, ctypes.c_uint32]]) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
+@dll.bind
+def LLVMDIFileGetFilename(File:LLVMMetadataRef, Len:c.POINTER[Annotated[int, ctypes.c_uint32]]) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
+@dll.bind
+def LLVMDIFileGetSource(File:LLVMMetadataRef, Len:c.POINTER[Annotated[int, ctypes.c_uint32]]) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
+@dll.bind
+def LLVMDIBuilderGetOrCreateTypeArray(Builder:LLVMDIBuilderRef, Data:c.POINTER[LLVMMetadataRef], NumElements:size_t) -> LLVMMetadataRef: ...
+@dll.bind
+def LLVMDIBuilderCreateSubroutineType(Builder:LLVMDIBuilderRef, File:LLVMMetadataRef, ParameterTypes:c.POINTER[LLVMMetadataRef], NumParameterTypes:Annotated[int, ctypes.c_uint32], Flags:LLVMDIFlags) -> LLVMMetadataRef: ...
+@dll.bind
+def LLVMDIBuilderCreateMacro(Builder:LLVMDIBuilderRef, ParentMacroFile:LLVMMetadataRef, Line:Annotated[int, ctypes.c_uint32], RecordType:LLVMDWARFMacinfoRecordType, Name:c.POINTER[Annotated[bytes, ctypes.c_char]], NameLen:size_t, Value:c.POINTER[Annotated[bytes, ctypes.c_char]], ValueLen:size_t) -> LLVMMetadataRef: ...
+@dll.bind
+def LLVMDIBuilderCreateTempMacroFile(Builder:LLVMDIBuilderRef, ParentMacroFile:LLVMMetadataRef, Line:Annotated[int, ctypes.c_uint32], File:LLVMMetadataRef) -> LLVMMetadataRef: ...
+int64_t: TypeAlias = Annotated[int, ctypes.c_int64]
+@dll.bind
+def LLVMDIBuilderCreateEnumerator(Builder:LLVMDIBuilderRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]], NameLen:size_t, Value:int64_t, IsUnsigned:LLVMBool) -> LLVMMetadataRef: ...
+uint32_t: TypeAlias = Annotated[int, ctypes.c_uint32]
+@dll.bind
+def LLVMDIBuilderCreateEnumerationType(Builder:LLVMDIBuilderRef, Scope:LLVMMetadataRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]], NameLen:size_t, File:LLVMMetadataRef, LineNumber:Annotated[int, ctypes.c_uint32], SizeInBits:uint64_t, AlignInBits:uint32_t, Elements:c.POINTER[LLVMMetadataRef], NumElements:Annotated[int, ctypes.c_uint32], ClassTy:LLVMMetadataRef) -> LLVMMetadataRef: ...
+@dll.bind
+def LLVMDIBuilderCreateUnionType(Builder:LLVMDIBuilderRef, Scope:LLVMMetadataRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]], NameLen:size_t, File:LLVMMetadataRef, LineNumber:Annotated[int, ctypes.c_uint32], SizeInBits:uint64_t, AlignInBits:uint32_t, Flags:LLVMDIFlags, Elements:c.POINTER[LLVMMetadataRef], NumElements:Annotated[int, ctypes.c_uint32], RunTimeLang:Annotated[int, ctypes.c_uint32], UniqueId:c.POINTER[Annotated[bytes, ctypes.c_char]], UniqueIdLen:size_t) -> LLVMMetadataRef: ...
+@dll.bind
+def LLVMDIBuilderCreateArrayType(Builder:LLVMDIBuilderRef, Size:uint64_t, AlignInBits:uint32_t, Ty:LLVMMetadataRef, Subscripts:c.POINTER[LLVMMetadataRef], NumSubscripts:Annotated[int, ctypes.c_uint32]) -> LLVMMetadataRef: ...
+@dll.bind
+def LLVMDIBuilderCreateVectorType(Builder:LLVMDIBuilderRef, Size:uint64_t, AlignInBits:uint32_t, Ty:LLVMMetadataRef, Subscripts:c.POINTER[LLVMMetadataRef], NumSubscripts:Annotated[int, ctypes.c_uint32]) -> LLVMMetadataRef: ...
+@dll.bind
+def LLVMDIBuilderCreateUnspecifiedType(Builder:LLVMDIBuilderRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]], NameLen:size_t) -> LLVMMetadataRef: ...
+@dll.bind
+def LLVMDIBuilderCreateBasicType(Builder:LLVMDIBuilderRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]], NameLen:size_t, SizeInBits:uint64_t, Encoding:LLVMDWARFTypeEncoding, Flags:LLVMDIFlags) -> LLVMMetadataRef: ...
+@dll.bind
+def LLVMDIBuilderCreatePointerType(Builder:LLVMDIBuilderRef, PointeeTy:LLVMMetadataRef, SizeInBits:uint64_t, AlignInBits:uint32_t, AddressSpace:Annotated[int, ctypes.c_uint32], Name:c.POINTER[Annotated[bytes, ctypes.c_char]], NameLen:size_t) -> LLVMMetadataRef: ...
+@dll.bind
+def LLVMDIBuilderCreateStructType(Builder:LLVMDIBuilderRef, Scope:LLVMMetadataRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]], NameLen:size_t, File:LLVMMetadataRef, LineNumber:Annotated[int, ctypes.c_uint32], SizeInBits:uint64_t, AlignInBits:uint32_t, Flags:LLVMDIFlags, DerivedFrom:LLVMMetadataRef, Elements:c.POINTER[LLVMMetadataRef], NumElements:Annotated[int, ctypes.c_uint32], RunTimeLang:Annotated[int, ctypes.c_uint32], VTableHolder:LLVMMetadataRef, UniqueId:c.POINTER[Annotated[bytes, ctypes.c_char]], UniqueIdLen:size_t) -> LLVMMetadataRef: ...
+@dll.bind
+def LLVMDIBuilderCreateMemberType(Builder:LLVMDIBuilderRef, Scope:LLVMMetadataRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]], NameLen:size_t, File:LLVMMetadataRef, LineNo:Annotated[int, ctypes.c_uint32], SizeInBits:uint64_t, AlignInBits:uint32_t, OffsetInBits:uint64_t, Flags:LLVMDIFlags, Ty:LLVMMetadataRef) -> LLVMMetadataRef: ...
+@dll.bind
+def LLVMDIBuilderCreateStaticMemberType(Builder:LLVMDIBuilderRef, Scope:LLVMMetadataRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]], NameLen:size_t, File:LLVMMetadataRef, LineNumber:Annotated[int, ctypes.c_uint32], Type:LLVMMetadataRef, Flags:LLVMDIFlags, ConstantVal:LLVMValueRef, AlignInBits:uint32_t) -> LLVMMetadataRef: ...
+@dll.bind
+def LLVMDIBuilderCreateMemberPointerType(Builder:LLVMDIBuilderRef, PointeeType:LLVMMetadataRef, ClassType:LLVMMetadataRef, SizeInBits:uint64_t, AlignInBits:uint32_t, Flags:LLVMDIFlags) -> LLVMMetadataRef: ...
+@dll.bind
+def LLVMDIBuilderCreateObjCIVar(Builder:LLVMDIBuilderRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]], NameLen:size_t, File:LLVMMetadataRef, LineNo:Annotated[int, ctypes.c_uint32], SizeInBits:uint64_t, AlignInBits:uint32_t, OffsetInBits:uint64_t, Flags:LLVMDIFlags, Ty:LLVMMetadataRef, PropertyNode:LLVMMetadataRef) -> LLVMMetadataRef: ...
+@dll.bind
+def LLVMDIBuilderCreateObjCProperty(Builder:LLVMDIBuilderRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]], NameLen:size_t, File:LLVMMetadataRef, LineNo:Annotated[int, ctypes.c_uint32], GetterName:c.POINTER[Annotated[bytes, ctypes.c_char]], GetterNameLen:size_t, SetterName:c.POINTER[Annotated[bytes, ctypes.c_char]], SetterNameLen:size_t, PropertyAttributes:Annotated[int, ctypes.c_uint32], Ty:LLVMMetadataRef) -> LLVMMetadataRef: ...
+@dll.bind
+def LLVMDIBuilderCreateObjectPointerType(Builder:LLVMDIBuilderRef, Type:LLVMMetadataRef, Implicit:LLVMBool) -> LLVMMetadataRef: ...
+@dll.bind
+def LLVMDIBuilderCreateQualifiedType(Builder:LLVMDIBuilderRef, Tag:Annotated[int, ctypes.c_uint32], Type:LLVMMetadataRef) -> LLVMMetadataRef: ...
+@dll.bind
+def LLVMDIBuilderCreateReferenceType(Builder:LLVMDIBuilderRef, Tag:Annotated[int, ctypes.c_uint32], Type:LLVMMetadataRef) -> LLVMMetadataRef: ...
+@dll.bind
+def LLVMDIBuilderCreateNullPtrType(Builder:LLVMDIBuilderRef) -> LLVMMetadataRef: ...
+@dll.bind
+def LLVMDIBuilderCreateTypedef(Builder:LLVMDIBuilderRef, Type:LLVMMetadataRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]], NameLen:size_t, File:LLVMMetadataRef, LineNo:Annotated[int, ctypes.c_uint32], Scope:LLVMMetadataRef, AlignInBits:uint32_t) -> LLVMMetadataRef: ...
+@dll.bind
+def LLVMDIBuilderCreateInheritance(Builder:LLVMDIBuilderRef, Ty:LLVMMetadataRef, BaseTy:LLVMMetadataRef, BaseOffset:uint64_t, VBPtrOffset:uint32_t, Flags:LLVMDIFlags) -> LLVMMetadataRef: ...
+@dll.bind
+def LLVMDIBuilderCreateForwardDecl(Builder:LLVMDIBuilderRef, Tag:Annotated[int, ctypes.c_uint32], Name:c.POINTER[Annotated[bytes, ctypes.c_char]], NameLen:size_t, Scope:LLVMMetadataRef, File:LLVMMetadataRef, Line:Annotated[int, ctypes.c_uint32], RuntimeLang:Annotated[int, ctypes.c_uint32], SizeInBits:uint64_t, AlignInBits:uint32_t, UniqueIdentifier:c.POINTER[Annotated[bytes, ctypes.c_char]], UniqueIdentifierLen:size_t) -> LLVMMetadataRef: ...
+@dll.bind
+def LLVMDIBuilderCreateReplaceableCompositeType(Builder:LLVMDIBuilderRef, Tag:Annotated[int, ctypes.c_uint32], Name:c.POINTER[Annotated[bytes, ctypes.c_char]], NameLen:size_t, Scope:LLVMMetadataRef, File:LLVMMetadataRef, Line:Annotated[int, ctypes.c_uint32], RuntimeLang:Annotated[int, ctypes.c_uint32], SizeInBits:uint64_t, AlignInBits:uint32_t, Flags:LLVMDIFlags, UniqueIdentifier:c.POINTER[Annotated[bytes, ctypes.c_char]], UniqueIdentifierLen:size_t) -> LLVMMetadataRef: ...
+@dll.bind
+def LLVMDIBuilderCreateBitFieldMemberType(Builder:LLVMDIBuilderRef, Scope:LLVMMetadataRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]], NameLen:size_t, File:LLVMMetadataRef, LineNumber:Annotated[int, ctypes.c_uint32], SizeInBits:uint64_t, OffsetInBits:uint64_t, StorageOffsetInBits:uint64_t, Flags:LLVMDIFlags, Type:LLVMMetadataRef) -> LLVMMetadataRef: ...
+@dll.bind
+def LLVMDIBuilderCreateClassType(Builder:LLVMDIBuilderRef, Scope:LLVMMetadataRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]], NameLen:size_t, File:LLVMMetadataRef, LineNumber:Annotated[int, ctypes.c_uint32], SizeInBits:uint64_t, AlignInBits:uint32_t, OffsetInBits:uint64_t, Flags:LLVMDIFlags, DerivedFrom:LLVMMetadataRef, Elements:c.POINTER[LLVMMetadataRef], NumElements:Annotated[int, ctypes.c_uint32], VTableHolder:LLVMMetadataRef, TemplateParamsNode:LLVMMetadataRef, UniqueIdentifier:c.POINTER[Annotated[bytes, ctypes.c_char]], UniqueIdentifierLen:size_t) -> LLVMMetadataRef: ...
+@dll.bind
+def LLVMDIBuilderCreateArtificialType(Builder:LLVMDIBuilderRef, Type:LLVMMetadataRef) -> LLVMMetadataRef: ...
+@dll.bind
+def LLVMDITypeGetName(DType:LLVMMetadataRef, Length:c.POINTER[size_t]) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
+@dll.bind
+def LLVMDITypeGetSizeInBits(DType:LLVMMetadataRef) -> uint64_t: ...
+@dll.bind
+def LLVMDITypeGetOffsetInBits(DType:LLVMMetadataRef) -> uint64_t: ...
+@dll.bind
+def LLVMDITypeGetAlignInBits(DType:LLVMMetadataRef) -> uint32_t: ...
+@dll.bind
+def LLVMDITypeGetLine(DType:LLVMMetadataRef) -> Annotated[int, ctypes.c_uint32]: ...
+@dll.bind
+def LLVMDITypeGetFlags(DType:LLVMMetadataRef) -> LLVMDIFlags: ...
+@dll.bind
+def LLVMDIBuilderGetOrCreateSubrange(Builder:LLVMDIBuilderRef, LowerBound:int64_t, Count:int64_t) -> LLVMMetadataRef: ...
+@dll.bind
+def LLVMDIBuilderGetOrCreateArray(Builder:LLVMDIBuilderRef, Data:c.POINTER[LLVMMetadataRef], NumElements:size_t) -> LLVMMetadataRef: ...
+@dll.bind
+def LLVMDIBuilderCreateExpression(Builder:LLVMDIBuilderRef, Addr:c.POINTER[uint64_t], Length:size_t) -> LLVMMetadataRef: ...
+@dll.bind
+def LLVMDIBuilderCreateConstantValueExpression(Builder:LLVMDIBuilderRef, Value:uint64_t) -> LLVMMetadataRef: ...
+@dll.bind
+def LLVMDIBuilderCreateGlobalVariableExpression(Builder:LLVMDIBuilderRef, Scope:LLVMMetadataRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]], NameLen:size_t, Linkage:c.POINTER[Annotated[bytes, ctypes.c_char]], LinkLen:size_t, File:LLVMMetadataRef, LineNo:Annotated[int, ctypes.c_uint32], Ty:LLVMMetadataRef, LocalToUnit:LLVMBool, Expr:LLVMMetadataRef, Decl:LLVMMetadataRef, AlignInBits:uint32_t) -> LLVMMetadataRef: ...
+uint16_t: TypeAlias = Annotated[int, ctypes.c_uint16]
+@dll.bind
+def LLVMGetDINodeTag(MD:LLVMMetadataRef) -> uint16_t: ...
+@dll.bind
+def LLVMDIGlobalVariableExpressionGetVariable(GVE:LLVMMetadataRef) -> LLVMMetadataRef: ...
+@dll.bind
+def LLVMDIGlobalVariableExpressionGetExpression(GVE:LLVMMetadataRef) -> LLVMMetadataRef: ...
+@dll.bind
+def LLVMDIVariableGetFile(Var:LLVMMetadataRef) -> LLVMMetadataRef: ...
+@dll.bind
+def LLVMDIVariableGetScope(Var:LLVMMetadataRef) -> LLVMMetadataRef: ...
+@dll.bind
+def LLVMDIVariableGetLine(Var:LLVMMetadataRef) -> Annotated[int, ctypes.c_uint32]: ...
+@dll.bind
+def LLVMTemporaryMDNode(Ctx:LLVMContextRef, Data:c.POINTER[LLVMMetadataRef], NumElements:size_t) -> LLVMMetadataRef: ...
+@dll.bind
+def LLVMDisposeTemporaryMDNode(TempNode:LLVMMetadataRef) -> None: ...
+@dll.bind
+def LLVMMetadataReplaceAllUsesWith(TempTargetMetadata:LLVMMetadataRef, Replacement:LLVMMetadataRef) -> None: ...
+@dll.bind
+def LLVMDIBuilderCreateTempGlobalVariableFwdDecl(Builder:LLVMDIBuilderRef, Scope:LLVMMetadataRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]], NameLen:size_t, Linkage:c.POINTER[Annotated[bytes, ctypes.c_char]], LnkLen:size_t, File:LLVMMetadataRef, LineNo:Annotated[int, ctypes.c_uint32], Ty:LLVMMetadataRef, LocalToUnit:LLVMBool, Decl:LLVMMetadataRef, AlignInBits:uint32_t) -> LLVMMetadataRef: ...
+@dll.bind
+def LLVMDIBuilderInsertDeclareRecordBefore(Builder:LLVMDIBuilderRef, Storage:LLVMValueRef, VarInfo:LLVMMetadataRef, Expr:LLVMMetadataRef, DebugLoc:LLVMMetadataRef, Instr:LLVMValueRef) -> LLVMDbgRecordRef: ...
+@dll.bind
+def LLVMDIBuilderInsertDeclareRecordAtEnd(Builder:LLVMDIBuilderRef, Storage:LLVMValueRef, VarInfo:LLVMMetadataRef, Expr:LLVMMetadataRef, DebugLoc:LLVMMetadataRef, Block:LLVMBasicBlockRef) -> LLVMDbgRecordRef: ...
+@dll.bind
+def LLVMDIBuilderInsertDbgValueRecordBefore(Builder:LLVMDIBuilderRef, Val:LLVMValueRef, VarInfo:LLVMMetadataRef, Expr:LLVMMetadataRef, DebugLoc:LLVMMetadataRef, Instr:LLVMValueRef) -> LLVMDbgRecordRef: ...
+@dll.bind
+def LLVMDIBuilderInsertDbgValueRecordAtEnd(Builder:LLVMDIBuilderRef, Val:LLVMValueRef, VarInfo:LLVMMetadataRef, Expr:LLVMMetadataRef, DebugLoc:LLVMMetadataRef, Block:LLVMBasicBlockRef) -> LLVMDbgRecordRef: ...
+@dll.bind
+def LLVMDIBuilderCreateAutoVariable(Builder:LLVMDIBuilderRef, Scope:LLVMMetadataRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]], NameLen:size_t, File:LLVMMetadataRef, LineNo:Annotated[int, ctypes.c_uint32], Ty:LLVMMetadataRef, AlwaysPreserve:LLVMBool, Flags:LLVMDIFlags, AlignInBits:uint32_t) -> LLVMMetadataRef: ...
+@dll.bind
+def LLVMDIBuilderCreateParameterVariable(Builder:LLVMDIBuilderRef, Scope:LLVMMetadataRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]], NameLen:size_t, ArgNo:Annotated[int, ctypes.c_uint32], File:LLVMMetadataRef, LineNo:Annotated[int, ctypes.c_uint32], Ty:LLVMMetadataRef, AlwaysPreserve:LLVMBool, Flags:LLVMDIFlags) -> LLVMMetadataRef: ...
+@dll.bind
+def LLVMGetSubprogram(Func:LLVMValueRef) -> LLVMMetadataRef: ...
+@dll.bind
+def LLVMSetSubprogram(Func:LLVMValueRef, SP:LLVMMetadataRef) -> None: ...
+@dll.bind
+def LLVMDISubprogramGetLine(Subprogram:LLVMMetadataRef) -> Annotated[int, ctypes.c_uint32]: ...
+@dll.bind
+def LLVMInstructionGetDebugLoc(Inst:LLVMValueRef) -> LLVMMetadataRef: ...
+@dll.bind
+def LLVMInstructionSetDebugLoc(Inst:LLVMValueRef, Loc:LLVMMetadataRef) -> None: ...
+@dll.bind
+def LLVMDIBuilderCreateLabel(Builder:LLVMDIBuilderRef, Context:LLVMMetadataRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]], NameLen:size_t, File:LLVMMetadataRef, LineNo:Annotated[int, ctypes.c_uint32], AlwaysPreserve:LLVMBool) -> LLVMMetadataRef: ...
+@dll.bind
+def LLVMDIBuilderInsertLabelBefore(Builder:LLVMDIBuilderRef, LabelInfo:LLVMMetadataRef, Location:LLVMMetadataRef, InsertBefore:LLVMValueRef) -> LLVMDbgRecordRef: ...
+@dll.bind
+def LLVMDIBuilderInsertLabelAtEnd(Builder:LLVMDIBuilderRef, LabelInfo:LLVMMetadataRef, Location:LLVMMetadataRef, InsertAtEnd:LLVMBasicBlockRef) -> LLVMDbgRecordRef: ...
+@dll.bind
+def LLVMGetMetadataKind(Metadata:LLVMMetadataRef) -> LLVMMetadataKind: ...
+LLVMOpInfoCallback: TypeAlias = c.CFUNCTYPE[Annotated[int, ctypes.c_int32], [ctypes.c_void_p, Annotated[int, ctypes.c_uint64], Annotated[int, ctypes.c_uint64], Annotated[int, ctypes.c_uint64], Annotated[int, ctypes.c_uint64], Annotated[int, ctypes.c_int32], ctypes.c_void_p]]
+LLVMSymbolLookupCallback: TypeAlias = c.CFUNCTYPE[c.POINTER[Annotated[bytes, ctypes.c_char]], [ctypes.c_void_p, Annotated[int, ctypes.c_uint64], c.POINTER[Annotated[int, ctypes.c_uint64]], Annotated[int, ctypes.c_uint64], c.POINTER[c.POINTER[Annotated[bytes, ctypes.c_char]]]]]
+LLVMDisasmContextRef: TypeAlias = ctypes.c_void_p
+@dll.bind
+def LLVMCreateDisasm(TripleName:c.POINTER[Annotated[bytes, ctypes.c_char]], DisInfo:ctypes.c_void_p, TagType:Annotated[int, ctypes.c_int32], GetOpInfo:LLVMOpInfoCallback, SymbolLookUp:LLVMSymbolLookupCallback) -> LLVMDisasmContextRef: ...
+@dll.bind
+def LLVMCreateDisasmCPU(Triple:c.POINTER[Annotated[bytes, ctypes.c_char]], CPU:c.POINTER[Annotated[bytes, ctypes.c_char]], DisInfo:ctypes.c_void_p, TagType:Annotated[int, ctypes.c_int32], GetOpInfo:LLVMOpInfoCallback, SymbolLookUp:LLVMSymbolLookupCallback) -> LLVMDisasmContextRef: ...
+@dll.bind
+def LLVMCreateDisasmCPUFeatures(Triple:c.POINTER[Annotated[bytes, ctypes.c_char]], CPU:c.POINTER[Annotated[bytes, ctypes.c_char]], Features:c.POINTER[Annotated[bytes, ctypes.c_char]], DisInfo:ctypes.c_void_p, TagType:Annotated[int, ctypes.c_int32], GetOpInfo:LLVMOpInfoCallback, SymbolLookUp:LLVMSymbolLookupCallback) -> LLVMDisasmContextRef: ...
+@dll.bind
+def LLVMSetDisasmOptions(DC:LLVMDisasmContextRef, Options:uint64_t) -> Annotated[int, ctypes.c_int32]: ...
+@dll.bind
+def LLVMDisasmDispose(DC:LLVMDisasmContextRef) -> None: ...
+@dll.bind
+def LLVMDisasmInstruction(DC:LLVMDisasmContextRef, Bytes:c.POINTER[uint8_t], BytesSize:uint64_t, PC:uint64_t, OutString:c.POINTER[Annotated[bytes, ctypes.c_char]], OutStringSize:size_t) -> size_t: ...
+@c.record
+class struct_LLVMOpInfoSymbol1(c.Struct):
+  SIZE = 24
+  Present: Annotated[uint64_t, 0]
+  Name: Annotated[c.POINTER[Annotated[bytes, ctypes.c_char]], 8]
+  Value: Annotated[uint64_t, 16]
+@c.record
+class struct_LLVMOpInfo1(c.Struct):
+  SIZE = 64
+  AddSymbol: Annotated[struct_LLVMOpInfoSymbol1, 0]
+  SubtractSymbol: Annotated[struct_LLVMOpInfoSymbol1, 24]
+  Value: Annotated[uint64_t, 48]
+  VariantKind: Annotated[uint64_t, 56]
+class struct_LLVMOpaqueError(ctypes.Structure): pass
+LLVMErrorRef: TypeAlias = c.POINTER[struct_LLVMOpaqueError]
+LLVMErrorTypeId: TypeAlias = ctypes.c_void_p
+@dll.bind
+def LLVMGetErrorTypeId(Err:LLVMErrorRef) -> LLVMErrorTypeId: ...
+@dll.bind
+def LLVMConsumeError(Err:LLVMErrorRef) -> None: ...
+@dll.bind
+def LLVMCantFail(Err:LLVMErrorRef) -> None: ...
+@dll.bind
+def LLVMGetErrorMessage(Err:LLVMErrorRef) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
+@dll.bind
+def LLVMDisposeErrorMessage(ErrMsg:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> None: ...
+@dll.bind
+def LLVMGetStringErrorTypeId() -> LLVMErrorTypeId: ...
+@dll.bind
+def LLVMCreateStringError(ErrMsg:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMErrorRef: ...
+@dll.bind
+def LLVMInitializeAArch64TargetInfo() -> None: ...
+@dll.bind
+def LLVMInitializeAMDGPUTargetInfo() -> None: ...
+@dll.bind
+def LLVMInitializeARMTargetInfo() -> None: ...
+@dll.bind
+def LLVMInitializeAVRTargetInfo() -> None: ...
+@dll.bind
+def LLVMInitializeBPFTargetInfo() -> None: ...
+@dll.bind
+def LLVMInitializeHexagonTargetInfo() -> None: ...
+@dll.bind
+def LLVMInitializeLanaiTargetInfo() -> None: ...
+@dll.bind
+def LLVMInitializeLoongArchTargetInfo() -> None: ...
+@dll.bind
+def LLVMInitializeMipsTargetInfo() -> None: ...
+@dll.bind
+def LLVMInitializeMSP430TargetInfo() -> None: ...
+@dll.bind
+def LLVMInitializeNVPTXTargetInfo() -> None: ...
+@dll.bind
+def LLVMInitializePowerPCTargetInfo() -> None: ...
+@dll.bind
+def LLVMInitializeRISCVTargetInfo() -> None: ...
+@dll.bind
+def LLVMInitializeSparcTargetInfo() -> None: ...
+@dll.bind
+def LLVMInitializeSPIRVTargetInfo() -> None: ...
+@dll.bind
+def LLVMInitializeSystemZTargetInfo() -> None: ...
+@dll.bind
+def LLVMInitializeVETargetInfo() -> None: ...
+@dll.bind
+def LLVMInitializeWebAssemblyTargetInfo() -> None: ...
+@dll.bind
+def LLVMInitializeX86TargetInfo() -> None: ...
+@dll.bind
+def LLVMInitializeXCoreTargetInfo() -> None: ...
+@dll.bind
+def LLVMInitializeM68kTargetInfo() -> None: ...
+@dll.bind
+def LLVMInitializeXtensaTargetInfo() -> None: ...
+@dll.bind
+def LLVMInitializeAArch64Target() -> None: ...
+@dll.bind
+def LLVMInitializeAMDGPUTarget() -> None: ...
+@dll.bind
+def LLVMInitializeARMTarget() -> None: ...
+@dll.bind
+def LLVMInitializeAVRTarget() -> None: ...
+@dll.bind
+def LLVMInitializeBPFTarget() -> None: ...
+@dll.bind
+def LLVMInitializeHexagonTarget() -> None: ...
+@dll.bind
+def LLVMInitializeLanaiTarget() -> None: ...
+@dll.bind
+def LLVMInitializeLoongArchTarget() -> None: ...
+@dll.bind
+def LLVMInitializeMipsTarget() -> None: ...
+@dll.bind
+def LLVMInitializeMSP430Target() -> None: ...
+@dll.bind
+def LLVMInitializeNVPTXTarget() -> None: ...
+@dll.bind
+def LLVMInitializePowerPCTarget() -> None: ...
+@dll.bind
+def LLVMInitializeRISCVTarget() -> None: ...
+@dll.bind
+def LLVMInitializeSparcTarget() -> None: ...
+@dll.bind
+def LLVMInitializeSPIRVTarget() -> None: ...
+@dll.bind
+def LLVMInitializeSystemZTarget() -> None: ...
+@dll.bind
+def LLVMInitializeVETarget() -> None: ...
+@dll.bind
+def LLVMInitializeWebAssemblyTarget() -> None: ...
+@dll.bind
+def LLVMInitializeX86Target() -> None: ...
+@dll.bind
+def LLVMInitializeXCoreTarget() -> None: ...
+@dll.bind
+def LLVMInitializeM68kTarget() -> None: ...
+@dll.bind
+def LLVMInitializeXtensaTarget() -> None: ...
+@dll.bind
+def LLVMInitializeAArch64TargetMC() -> None: ...
+@dll.bind
+def LLVMInitializeAMDGPUTargetMC() -> None: ...
+@dll.bind
+def LLVMInitializeARMTargetMC() -> None: ...
+@dll.bind
+def LLVMInitializeAVRTargetMC() -> None: ...
+@dll.bind
+def LLVMInitializeBPFTargetMC() -> None: ...
+@dll.bind
+def LLVMInitializeHexagonTargetMC() -> None: ...
+@dll.bind
+def LLVMInitializeLanaiTargetMC() -> None: ...
+@dll.bind
+def LLVMInitializeLoongArchTargetMC() -> None: ...
+@dll.bind
+def LLVMInitializeMipsTargetMC() -> None: ...
+@dll.bind
+def LLVMInitializeMSP430TargetMC() -> None: ...
+@dll.bind
+def LLVMInitializeNVPTXTargetMC() -> None: ...
+@dll.bind
+def LLVMInitializePowerPCTargetMC() -> None: ...
+@dll.bind
+def LLVMInitializeRISCVTargetMC() -> None: ...
+@dll.bind
+def LLVMInitializeSparcTargetMC() -> None: ...
+@dll.bind
+def LLVMInitializeSPIRVTargetMC() -> None: ...
+@dll.bind
+def LLVMInitializeSystemZTargetMC() -> None: ...
+@dll.bind
+def LLVMInitializeVETargetMC() -> None: ...
+@dll.bind
+def LLVMInitializeWebAssemblyTargetMC() -> None: ...
+@dll.bind
+def LLVMInitializeX86TargetMC() -> None: ...
+@dll.bind
+def LLVMInitializeXCoreTargetMC() -> None: ...
+@dll.bind
+def LLVMInitializeM68kTargetMC() -> None: ...
+@dll.bind
+def LLVMInitializeXtensaTargetMC() -> None: ...
+@dll.bind
+def LLVMInitializeAArch64AsmPrinter() -> None: ...
+@dll.bind
+def LLVMInitializeAMDGPUAsmPrinter() -> None: ...
+@dll.bind
+def LLVMInitializeARMAsmPrinter() -> None: ...
+@dll.bind
+def LLVMInitializeAVRAsmPrinter() -> None: ...
+@dll.bind
+def LLVMInitializeBPFAsmPrinter() -> None: ...
+@dll.bind
+def LLVMInitializeHexagonAsmPrinter() -> None: ...
+@dll.bind
+def LLVMInitializeLanaiAsmPrinter() -> None: ...
+@dll.bind
+def LLVMInitializeLoongArchAsmPrinter() -> None: ...
+@dll.bind
+def LLVMInitializeMipsAsmPrinter() -> None: ...
+@dll.bind
+def LLVMInitializeMSP430AsmPrinter() -> None: ...
+@dll.bind
+def LLVMInitializeNVPTXAsmPrinter() -> None: ...
+@dll.bind
+def LLVMInitializePowerPCAsmPrinter() -> None: ...
+@dll.bind
+def LLVMInitializeRISCVAsmPrinter() -> None: ...
+@dll.bind
+def LLVMInitializeSparcAsmPrinter() -> None: ...
+@dll.bind
+def LLVMInitializeSPIRVAsmPrinter() -> None: ...
+@dll.bind
+def LLVMInitializeSystemZAsmPrinter() -> None: ...
+@dll.bind
+def LLVMInitializeVEAsmPrinter() -> None: ...
+@dll.bind
+def LLVMInitializeWebAssemblyAsmPrinter() -> None: ...
+@dll.bind
+def LLVMInitializeX86AsmPrinter() -> None: ...
+@dll.bind
+def LLVMInitializeXCoreAsmPrinter() -> None: ...
+@dll.bind
+def LLVMInitializeM68kAsmPrinter() -> None: ...
+@dll.bind
+def LLVMInitializeXtensaAsmPrinter() -> None: ...
+@dll.bind
+def LLVMInitializeAArch64AsmParser() -> None: ...
+@dll.bind
+def LLVMInitializeAMDGPUAsmParser() -> None: ...
+@dll.bind
+def LLVMInitializeARMAsmParser() -> None: ...
+@dll.bind
+def LLVMInitializeAVRAsmParser() -> None: ...
+@dll.bind
+def LLVMInitializeBPFAsmParser() -> None: ...
+@dll.bind
+def LLVMInitializeHexagonAsmParser() -> None: ...
+@dll.bind
+def LLVMInitializeLanaiAsmParser() -> None: ...
+@dll.bind
+def LLVMInitializeLoongArchAsmParser() -> None: ...
+@dll.bind
+def LLVMInitializeMipsAsmParser() -> None: ...
+@dll.bind
+def LLVMInitializeMSP430AsmParser() -> None: ...
+@dll.bind
+def LLVMInitializePowerPCAsmParser() -> None: ...
+@dll.bind
+def LLVMInitializeRISCVAsmParser() -> None: ...
+@dll.bind
+def LLVMInitializeSparcAsmParser() -> None: ...
+@dll.bind
+def LLVMInitializeSystemZAsmParser() -> None: ...
+@dll.bind
+def LLVMInitializeVEAsmParser() -> None: ...
+@dll.bind
+def LLVMInitializeWebAssemblyAsmParser() -> None: ...
+@dll.bind
+def LLVMInitializeX86AsmParser() -> None: ...
+@dll.bind
+def LLVMInitializeM68kAsmParser() -> None: ...
+@dll.bind
+def LLVMInitializeXtensaAsmParser() -> None: ...
+@dll.bind
+def LLVMInitializeAArch64Disassembler() -> None: ...
+@dll.bind
+def LLVMInitializeAMDGPUDisassembler() -> None: ...
+@dll.bind
+def LLVMInitializeARMDisassembler() -> None: ...
+@dll.bind
+def LLVMInitializeAVRDisassembler() -> None: ...
+@dll.bind
+def LLVMInitializeBPFDisassembler() -> None: ...
+@dll.bind
+def LLVMInitializeHexagonDisassembler() -> None: ...
+@dll.bind
+def LLVMInitializeLanaiDisassembler() -> None: ...
+@dll.bind
+def LLVMInitializeLoongArchDisassembler() -> None: ...
+@dll.bind
+def LLVMInitializeMipsDisassembler() -> None: ...
+@dll.bind
+def LLVMInitializeMSP430Disassembler() -> None: ...
+@dll.bind
+def LLVMInitializePowerPCDisassembler() -> None: ...
+@dll.bind
+def LLVMInitializeRISCVDisassembler() -> None: ...
+@dll.bind
+def LLVMInitializeSparcDisassembler() -> None: ...
+@dll.bind
+def LLVMInitializeSystemZDisassembler() -> None: ...
+@dll.bind
+def LLVMInitializeVEDisassembler() -> None: ...
+@dll.bind
+def LLVMInitializeWebAssemblyDisassembler() -> None: ...
+@dll.bind
+def LLVMInitializeX86Disassembler() -> None: ...
+@dll.bind
+def LLVMInitializeXCoreDisassembler() -> None: ...
+@dll.bind
+def LLVMInitializeM68kDisassembler() -> None: ...
+@dll.bind
+def LLVMInitializeXtensaDisassembler() -> None: ...
+class struct_LLVMOpaqueTargetData(ctypes.Structure): pass
+LLVMTargetDataRef: TypeAlias = c.POINTER[struct_LLVMOpaqueTargetData]
+@dll.bind
+def LLVMGetModuleDataLayout(M:LLVMModuleRef) -> LLVMTargetDataRef: ...
+@dll.bind
+def LLVMSetModuleDataLayout(M:LLVMModuleRef, DL:LLVMTargetDataRef) -> None: ...
+@dll.bind
+def LLVMCreateTargetData(StringRep:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMTargetDataRef: ...
+@dll.bind
+def LLVMDisposeTargetData(TD:LLVMTargetDataRef) -> None: ...
+class struct_LLVMOpaqueTargetLibraryInfotData(ctypes.Structure): pass
+LLVMTargetLibraryInfoRef: TypeAlias = c.POINTER[struct_LLVMOpaqueTargetLibraryInfotData]
+@dll.bind
+def LLVMAddTargetLibraryInfo(TLI:LLVMTargetLibraryInfoRef, PM:LLVMPassManagerRef) -> None: ...
+@dll.bind
+def LLVMCopyStringRepOfTargetData(TD:LLVMTargetDataRef) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
+class enum_LLVMByteOrdering(Annotated[int, ctypes.c_uint32], c.Enum): pass
 LLVMBigEndian = enum_LLVMByteOrdering.define('LLVMBigEndian', 0)
 LLVMLittleEndian = enum_LLVMByteOrdering.define('LLVMLittleEndian', 1)
 
-try: (LLVMByteOrder:=dll.LLVMByteOrder).restype, LLVMByteOrder.argtypes = enum_LLVMByteOrdering, [LLVMTargetDataRef]
-except AttributeError: pass
-
-try: (LLVMPointerSize:=dll.LLVMPointerSize).restype, LLVMPointerSize.argtypes = ctypes.c_uint32, [LLVMTargetDataRef]
-except AttributeError: pass
-
-try: (LLVMPointerSizeForAS:=dll.LLVMPointerSizeForAS).restype, LLVMPointerSizeForAS.argtypes = ctypes.c_uint32, [LLVMTargetDataRef, ctypes.c_uint32]
-except AttributeError: pass
-
-try: (LLVMIntPtrType:=dll.LLVMIntPtrType).restype, LLVMIntPtrType.argtypes = LLVMTypeRef, [LLVMTargetDataRef]
-except AttributeError: pass
-
-try: (LLVMIntPtrTypeForAS:=dll.LLVMIntPtrTypeForAS).restype, LLVMIntPtrTypeForAS.argtypes = LLVMTypeRef, [LLVMTargetDataRef, ctypes.c_uint32]
-except AttributeError: pass
-
-try: (LLVMIntPtrTypeInContext:=dll.LLVMIntPtrTypeInContext).restype, LLVMIntPtrTypeInContext.argtypes = LLVMTypeRef, [LLVMContextRef, LLVMTargetDataRef]
-except AttributeError: pass
-
-try: (LLVMIntPtrTypeForASInContext:=dll.LLVMIntPtrTypeForASInContext).restype, LLVMIntPtrTypeForASInContext.argtypes = LLVMTypeRef, [LLVMContextRef, LLVMTargetDataRef, ctypes.c_uint32]
-except AttributeError: pass
-
-try: (LLVMSizeOfTypeInBits:=dll.LLVMSizeOfTypeInBits).restype, LLVMSizeOfTypeInBits.argtypes = ctypes.c_uint64, [LLVMTargetDataRef, LLVMTypeRef]
-except AttributeError: pass
-
-try: (LLVMStoreSizeOfType:=dll.LLVMStoreSizeOfType).restype, LLVMStoreSizeOfType.argtypes = ctypes.c_uint64, [LLVMTargetDataRef, LLVMTypeRef]
-except AttributeError: pass
-
-try: (LLVMABISizeOfType:=dll.LLVMABISizeOfType).restype, LLVMABISizeOfType.argtypes = ctypes.c_uint64, [LLVMTargetDataRef, LLVMTypeRef]
-except AttributeError: pass
-
-try: (LLVMABIAlignmentOfType:=dll.LLVMABIAlignmentOfType).restype, LLVMABIAlignmentOfType.argtypes = ctypes.c_uint32, [LLVMTargetDataRef, LLVMTypeRef]
-except AttributeError: pass
-
-try: (LLVMCallFrameAlignmentOfType:=dll.LLVMCallFrameAlignmentOfType).restype, LLVMCallFrameAlignmentOfType.argtypes = ctypes.c_uint32, [LLVMTargetDataRef, LLVMTypeRef]
-except AttributeError: pass
-
-try: (LLVMPreferredAlignmentOfType:=dll.LLVMPreferredAlignmentOfType).restype, LLVMPreferredAlignmentOfType.argtypes = ctypes.c_uint32, [LLVMTargetDataRef, LLVMTypeRef]
-except AttributeError: pass
-
-try: (LLVMPreferredAlignmentOfGlobal:=dll.LLVMPreferredAlignmentOfGlobal).restype, LLVMPreferredAlignmentOfGlobal.argtypes = ctypes.c_uint32, [LLVMTargetDataRef, LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMElementAtOffset:=dll.LLVMElementAtOffset).restype, LLVMElementAtOffset.argtypes = ctypes.c_uint32, [LLVMTargetDataRef, LLVMTypeRef, ctypes.c_uint64]
-except AttributeError: pass
-
-try: (LLVMOffsetOfElement:=dll.LLVMOffsetOfElement).restype, LLVMOffsetOfElement.argtypes = ctypes.c_uint64, [LLVMTargetDataRef, LLVMTypeRef, ctypes.c_uint32]
-except AttributeError: pass
-
-class struct_LLVMTarget(Struct): pass
-LLVMTargetRef = ctypes.POINTER(struct_LLVMTarget)
-try: (LLVMGetFirstTarget:=dll.LLVMGetFirstTarget).restype, LLVMGetFirstTarget.argtypes = LLVMTargetRef, []
-except AttributeError: pass
-
-try: (LLVMGetNextTarget:=dll.LLVMGetNextTarget).restype, LLVMGetNextTarget.argtypes = LLVMTargetRef, [LLVMTargetRef]
-except AttributeError: pass
-
-try: (LLVMGetTargetFromName:=dll.LLVMGetTargetFromName).restype, LLVMGetTargetFromName.argtypes = LLVMTargetRef, [ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMGetTargetFromTriple:=dll.LLVMGetTargetFromTriple).restype, LLVMGetTargetFromTriple.argtypes = LLVMBool, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(LLVMTargetRef), ctypes.POINTER(ctypes.POINTER(ctypes.c_char))]
-except AttributeError: pass
-
-try: (LLVMGetTargetName:=dll.LLVMGetTargetName).restype, LLVMGetTargetName.argtypes = ctypes.POINTER(ctypes.c_char), [LLVMTargetRef]
-except AttributeError: pass
-
-try: (LLVMGetTargetDescription:=dll.LLVMGetTargetDescription).restype, LLVMGetTargetDescription.argtypes = ctypes.POINTER(ctypes.c_char), [LLVMTargetRef]
-except AttributeError: pass
-
-try: (LLVMTargetHasJIT:=dll.LLVMTargetHasJIT).restype, LLVMTargetHasJIT.argtypes = LLVMBool, [LLVMTargetRef]
-except AttributeError: pass
-
-try: (LLVMTargetHasTargetMachine:=dll.LLVMTargetHasTargetMachine).restype, LLVMTargetHasTargetMachine.argtypes = LLVMBool, [LLVMTargetRef]
-except AttributeError: pass
-
-try: (LLVMTargetHasAsmBackend:=dll.LLVMTargetHasAsmBackend).restype, LLVMTargetHasAsmBackend.argtypes = LLVMBool, [LLVMTargetRef]
-except AttributeError: pass
-
-class struct_LLVMOpaqueTargetMachineOptions(Struct): pass
-LLVMTargetMachineOptionsRef = ctypes.POINTER(struct_LLVMOpaqueTargetMachineOptions)
-try: (LLVMCreateTargetMachineOptions:=dll.LLVMCreateTargetMachineOptions).restype, LLVMCreateTargetMachineOptions.argtypes = LLVMTargetMachineOptionsRef, []
-except AttributeError: pass
-
-try: (LLVMDisposeTargetMachineOptions:=dll.LLVMDisposeTargetMachineOptions).restype, LLVMDisposeTargetMachineOptions.argtypes = None, [LLVMTargetMachineOptionsRef]
-except AttributeError: pass
-
-try: (LLVMTargetMachineOptionsSetCPU:=dll.LLVMTargetMachineOptionsSetCPU).restype, LLVMTargetMachineOptionsSetCPU.argtypes = None, [LLVMTargetMachineOptionsRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMTargetMachineOptionsSetFeatures:=dll.LLVMTargetMachineOptionsSetFeatures).restype, LLVMTargetMachineOptionsSetFeatures.argtypes = None, [LLVMTargetMachineOptionsRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMTargetMachineOptionsSetABI:=dll.LLVMTargetMachineOptionsSetABI).restype, LLVMTargetMachineOptionsSetABI.argtypes = None, [LLVMTargetMachineOptionsRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-LLVMCodeGenOptLevel = CEnum(ctypes.c_uint32)
+@dll.bind
+def LLVMByteOrder(TD:LLVMTargetDataRef) -> enum_LLVMByteOrdering: ...
+@dll.bind
+def LLVMPointerSize(TD:LLVMTargetDataRef) -> Annotated[int, ctypes.c_uint32]: ...
+@dll.bind
+def LLVMPointerSizeForAS(TD:LLVMTargetDataRef, AS:Annotated[int, ctypes.c_uint32]) -> Annotated[int, ctypes.c_uint32]: ...
+@dll.bind
+def LLVMIntPtrType(TD:LLVMTargetDataRef) -> LLVMTypeRef: ...
+@dll.bind
+def LLVMIntPtrTypeForAS(TD:LLVMTargetDataRef, AS:Annotated[int, ctypes.c_uint32]) -> LLVMTypeRef: ...
+@dll.bind
+def LLVMIntPtrTypeInContext(C:LLVMContextRef, TD:LLVMTargetDataRef) -> LLVMTypeRef: ...
+@dll.bind
+def LLVMIntPtrTypeForASInContext(C:LLVMContextRef, TD:LLVMTargetDataRef, AS:Annotated[int, ctypes.c_uint32]) -> LLVMTypeRef: ...
+@dll.bind
+def LLVMSizeOfTypeInBits(TD:LLVMTargetDataRef, Ty:LLVMTypeRef) -> Annotated[int, ctypes.c_uint64]: ...
+@dll.bind
+def LLVMStoreSizeOfType(TD:LLVMTargetDataRef, Ty:LLVMTypeRef) -> Annotated[int, ctypes.c_uint64]: ...
+@dll.bind
+def LLVMABISizeOfType(TD:LLVMTargetDataRef, Ty:LLVMTypeRef) -> Annotated[int, ctypes.c_uint64]: ...
+@dll.bind
+def LLVMABIAlignmentOfType(TD:LLVMTargetDataRef, Ty:LLVMTypeRef) -> Annotated[int, ctypes.c_uint32]: ...
+@dll.bind
+def LLVMCallFrameAlignmentOfType(TD:LLVMTargetDataRef, Ty:LLVMTypeRef) -> Annotated[int, ctypes.c_uint32]: ...
+@dll.bind
+def LLVMPreferredAlignmentOfType(TD:LLVMTargetDataRef, Ty:LLVMTypeRef) -> Annotated[int, ctypes.c_uint32]: ...
+@dll.bind
+def LLVMPreferredAlignmentOfGlobal(TD:LLVMTargetDataRef, GlobalVar:LLVMValueRef) -> Annotated[int, ctypes.c_uint32]: ...
+@dll.bind
+def LLVMElementAtOffset(TD:LLVMTargetDataRef, StructTy:LLVMTypeRef, Offset:Annotated[int, ctypes.c_uint64]) -> Annotated[int, ctypes.c_uint32]: ...
+@dll.bind
+def LLVMOffsetOfElement(TD:LLVMTargetDataRef, StructTy:LLVMTypeRef, Element:Annotated[int, ctypes.c_uint32]) -> Annotated[int, ctypes.c_uint64]: ...
+class struct_LLVMTarget(ctypes.Structure): pass
+LLVMTargetRef: TypeAlias = c.POINTER[struct_LLVMTarget]
+@dll.bind
+def LLVMGetFirstTarget() -> LLVMTargetRef: ...
+@dll.bind
+def LLVMGetNextTarget(T:LLVMTargetRef) -> LLVMTargetRef: ...
+@dll.bind
+def LLVMGetTargetFromName(Name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMTargetRef: ...
+@dll.bind
+def LLVMGetTargetFromTriple(Triple:c.POINTER[Annotated[bytes, ctypes.c_char]], T:c.POINTER[LLVMTargetRef], ErrorMessage:c.POINTER[c.POINTER[Annotated[bytes, ctypes.c_char]]]) -> LLVMBool: ...
+@dll.bind
+def LLVMGetTargetName(T:LLVMTargetRef) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
+@dll.bind
+def LLVMGetTargetDescription(T:LLVMTargetRef) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
+@dll.bind
+def LLVMTargetHasJIT(T:LLVMTargetRef) -> LLVMBool: ...
+@dll.bind
+def LLVMTargetHasTargetMachine(T:LLVMTargetRef) -> LLVMBool: ...
+@dll.bind
+def LLVMTargetHasAsmBackend(T:LLVMTargetRef) -> LLVMBool: ...
+class struct_LLVMOpaqueTargetMachineOptions(ctypes.Structure): pass
+LLVMTargetMachineOptionsRef: TypeAlias = c.POINTER[struct_LLVMOpaqueTargetMachineOptions]
+@dll.bind
+def LLVMCreateTargetMachineOptions() -> LLVMTargetMachineOptionsRef: ...
+@dll.bind
+def LLVMDisposeTargetMachineOptions(Options:LLVMTargetMachineOptionsRef) -> None: ...
+@dll.bind
+def LLVMTargetMachineOptionsSetCPU(Options:LLVMTargetMachineOptionsRef, CPU:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> None: ...
+@dll.bind
+def LLVMTargetMachineOptionsSetFeatures(Options:LLVMTargetMachineOptionsRef, Features:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> None: ...
+@dll.bind
+def LLVMTargetMachineOptionsSetABI(Options:LLVMTargetMachineOptionsRef, ABI:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> None: ...
+class LLVMCodeGenOptLevel(Annotated[int, ctypes.c_uint32], c.Enum): pass
 LLVMCodeGenLevelNone = LLVMCodeGenOptLevel.define('LLVMCodeGenLevelNone', 0)
 LLVMCodeGenLevelLess = LLVMCodeGenOptLevel.define('LLVMCodeGenLevelLess', 1)
 LLVMCodeGenLevelDefault = LLVMCodeGenOptLevel.define('LLVMCodeGenLevelDefault', 2)
 LLVMCodeGenLevelAggressive = LLVMCodeGenOptLevel.define('LLVMCodeGenLevelAggressive', 3)
 
-try: (LLVMTargetMachineOptionsSetCodeGenOptLevel:=dll.LLVMTargetMachineOptionsSetCodeGenOptLevel).restype, LLVMTargetMachineOptionsSetCodeGenOptLevel.argtypes = None, [LLVMTargetMachineOptionsRef, LLVMCodeGenOptLevel]
-except AttributeError: pass
-
-LLVMRelocMode = CEnum(ctypes.c_uint32)
+@dll.bind
+def LLVMTargetMachineOptionsSetCodeGenOptLevel(Options:LLVMTargetMachineOptionsRef, Level:LLVMCodeGenOptLevel) -> None: ...
+class LLVMRelocMode(Annotated[int, ctypes.c_uint32], c.Enum): pass
 LLVMRelocDefault = LLVMRelocMode.define('LLVMRelocDefault', 0)
 LLVMRelocStatic = LLVMRelocMode.define('LLVMRelocStatic', 1)
 LLVMRelocPIC = LLVMRelocMode.define('LLVMRelocPIC', 2)
@@ -4136,10 +2734,9 @@ LLVMRelocROPI = LLVMRelocMode.define('LLVMRelocROPI', 4)
 LLVMRelocRWPI = LLVMRelocMode.define('LLVMRelocRWPI', 5)
 LLVMRelocROPI_RWPI = LLVMRelocMode.define('LLVMRelocROPI_RWPI', 6)
 
-try: (LLVMTargetMachineOptionsSetRelocMode:=dll.LLVMTargetMachineOptionsSetRelocMode).restype, LLVMTargetMachineOptionsSetRelocMode.argtypes = None, [LLVMTargetMachineOptionsRef, LLVMRelocMode]
-except AttributeError: pass
-
-LLVMCodeModel = CEnum(ctypes.c_uint32)
+@dll.bind
+def LLVMTargetMachineOptionsSetRelocMode(Options:LLVMTargetMachineOptionsRef, Reloc:LLVMRelocMode) -> None: ...
+class LLVMCodeModel(Annotated[int, ctypes.c_uint32], c.Enum): pass
 LLVMCodeModelDefault = LLVMCodeModel.define('LLVMCodeModelDefault', 0)
 LLVMCodeModelJITDefault = LLVMCodeModel.define('LLVMCodeModelJITDefault', 1)
 LLVMCodeModelTiny = LLVMCodeModel.define('LLVMCodeModelTiny', 2)
@@ -4148,2228 +2745,476 @@ LLVMCodeModelKernel = LLVMCodeModel.define('LLVMCodeModelKernel', 4)
 LLVMCodeModelMedium = LLVMCodeModel.define('LLVMCodeModelMedium', 5)
 LLVMCodeModelLarge = LLVMCodeModel.define('LLVMCodeModelLarge', 6)
 
-try: (LLVMTargetMachineOptionsSetCodeModel:=dll.LLVMTargetMachineOptionsSetCodeModel).restype, LLVMTargetMachineOptionsSetCodeModel.argtypes = None, [LLVMTargetMachineOptionsRef, LLVMCodeModel]
-except AttributeError: pass
-
-class struct_LLVMOpaqueTargetMachine(Struct): pass
-LLVMTargetMachineRef = ctypes.POINTER(struct_LLVMOpaqueTargetMachine)
-try: (LLVMCreateTargetMachineWithOptions:=dll.LLVMCreateTargetMachineWithOptions).restype, LLVMCreateTargetMachineWithOptions.argtypes = LLVMTargetMachineRef, [LLVMTargetRef, ctypes.POINTER(ctypes.c_char), LLVMTargetMachineOptionsRef]
-except AttributeError: pass
-
-try: (LLVMCreateTargetMachine:=dll.LLVMCreateTargetMachine).restype, LLVMCreateTargetMachine.argtypes = LLVMTargetMachineRef, [LLVMTargetRef, ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char), LLVMCodeGenOptLevel, LLVMRelocMode, LLVMCodeModel]
-except AttributeError: pass
-
-try: (LLVMDisposeTargetMachine:=dll.LLVMDisposeTargetMachine).restype, LLVMDisposeTargetMachine.argtypes = None, [LLVMTargetMachineRef]
-except AttributeError: pass
-
-try: (LLVMGetTargetMachineTarget:=dll.LLVMGetTargetMachineTarget).restype, LLVMGetTargetMachineTarget.argtypes = LLVMTargetRef, [LLVMTargetMachineRef]
-except AttributeError: pass
-
-try: (LLVMGetTargetMachineTriple:=dll.LLVMGetTargetMachineTriple).restype, LLVMGetTargetMachineTriple.argtypes = ctypes.POINTER(ctypes.c_char), [LLVMTargetMachineRef]
-except AttributeError: pass
-
-try: (LLVMGetTargetMachineCPU:=dll.LLVMGetTargetMachineCPU).restype, LLVMGetTargetMachineCPU.argtypes = ctypes.POINTER(ctypes.c_char), [LLVMTargetMachineRef]
-except AttributeError: pass
-
-try: (LLVMGetTargetMachineFeatureString:=dll.LLVMGetTargetMachineFeatureString).restype, LLVMGetTargetMachineFeatureString.argtypes = ctypes.POINTER(ctypes.c_char), [LLVMTargetMachineRef]
-except AttributeError: pass
-
-try: (LLVMCreateTargetDataLayout:=dll.LLVMCreateTargetDataLayout).restype, LLVMCreateTargetDataLayout.argtypes = LLVMTargetDataRef, [LLVMTargetMachineRef]
-except AttributeError: pass
-
-try: (LLVMSetTargetMachineAsmVerbosity:=dll.LLVMSetTargetMachineAsmVerbosity).restype, LLVMSetTargetMachineAsmVerbosity.argtypes = None, [LLVMTargetMachineRef, LLVMBool]
-except AttributeError: pass
-
-try: (LLVMSetTargetMachineFastISel:=dll.LLVMSetTargetMachineFastISel).restype, LLVMSetTargetMachineFastISel.argtypes = None, [LLVMTargetMachineRef, LLVMBool]
-except AttributeError: pass
-
-try: (LLVMSetTargetMachineGlobalISel:=dll.LLVMSetTargetMachineGlobalISel).restype, LLVMSetTargetMachineGlobalISel.argtypes = None, [LLVMTargetMachineRef, LLVMBool]
-except AttributeError: pass
-
-LLVMGlobalISelAbortMode = CEnum(ctypes.c_uint32)
+@dll.bind
+def LLVMTargetMachineOptionsSetCodeModel(Options:LLVMTargetMachineOptionsRef, CodeModel:LLVMCodeModel) -> None: ...
+class struct_LLVMOpaqueTargetMachine(ctypes.Structure): pass
+LLVMTargetMachineRef: TypeAlias = c.POINTER[struct_LLVMOpaqueTargetMachine]
+@dll.bind
+def LLVMCreateTargetMachineWithOptions(T:LLVMTargetRef, Triple:c.POINTER[Annotated[bytes, ctypes.c_char]], Options:LLVMTargetMachineOptionsRef) -> LLVMTargetMachineRef: ...
+@dll.bind
+def LLVMCreateTargetMachine(T:LLVMTargetRef, Triple:c.POINTER[Annotated[bytes, ctypes.c_char]], CPU:c.POINTER[Annotated[bytes, ctypes.c_char]], Features:c.POINTER[Annotated[bytes, ctypes.c_char]], Level:LLVMCodeGenOptLevel, Reloc:LLVMRelocMode, CodeModel:LLVMCodeModel) -> LLVMTargetMachineRef: ...
+@dll.bind
+def LLVMDisposeTargetMachine(T:LLVMTargetMachineRef) -> None: ...
+@dll.bind
+def LLVMGetTargetMachineTarget(T:LLVMTargetMachineRef) -> LLVMTargetRef: ...
+@dll.bind
+def LLVMGetTargetMachineTriple(T:LLVMTargetMachineRef) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
+@dll.bind
+def LLVMGetTargetMachineCPU(T:LLVMTargetMachineRef) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
+@dll.bind
+def LLVMGetTargetMachineFeatureString(T:LLVMTargetMachineRef) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
+@dll.bind
+def LLVMCreateTargetDataLayout(T:LLVMTargetMachineRef) -> LLVMTargetDataRef: ...
+@dll.bind
+def LLVMSetTargetMachineAsmVerbosity(T:LLVMTargetMachineRef, VerboseAsm:LLVMBool) -> None: ...
+@dll.bind
+def LLVMSetTargetMachineFastISel(T:LLVMTargetMachineRef, Enable:LLVMBool) -> None: ...
+@dll.bind
+def LLVMSetTargetMachineGlobalISel(T:LLVMTargetMachineRef, Enable:LLVMBool) -> None: ...
+class LLVMGlobalISelAbortMode(Annotated[int, ctypes.c_uint32], c.Enum): pass
 LLVMGlobalISelAbortEnable = LLVMGlobalISelAbortMode.define('LLVMGlobalISelAbortEnable', 0)
 LLVMGlobalISelAbortDisable = LLVMGlobalISelAbortMode.define('LLVMGlobalISelAbortDisable', 1)
 LLVMGlobalISelAbortDisableWithDiag = LLVMGlobalISelAbortMode.define('LLVMGlobalISelAbortDisableWithDiag', 2)
 
-try: (LLVMSetTargetMachineGlobalISelAbort:=dll.LLVMSetTargetMachineGlobalISelAbort).restype, LLVMSetTargetMachineGlobalISelAbort.argtypes = None, [LLVMTargetMachineRef, LLVMGlobalISelAbortMode]
-except AttributeError: pass
-
-try: (LLVMSetTargetMachineMachineOutliner:=dll.LLVMSetTargetMachineMachineOutliner).restype, LLVMSetTargetMachineMachineOutliner.argtypes = None, [LLVMTargetMachineRef, LLVMBool]
-except AttributeError: pass
-
-LLVMCodeGenFileType = CEnum(ctypes.c_uint32)
+@dll.bind
+def LLVMSetTargetMachineGlobalISelAbort(T:LLVMTargetMachineRef, Mode:LLVMGlobalISelAbortMode) -> None: ...
+@dll.bind
+def LLVMSetTargetMachineMachineOutliner(T:LLVMTargetMachineRef, Enable:LLVMBool) -> None: ...
+class LLVMCodeGenFileType(Annotated[int, ctypes.c_uint32], c.Enum): pass
 LLVMAssemblyFile = LLVMCodeGenFileType.define('LLVMAssemblyFile', 0)
 LLVMObjectFile = LLVMCodeGenFileType.define('LLVMObjectFile', 1)
 
-try: (LLVMTargetMachineEmitToFile:=dll.LLVMTargetMachineEmitToFile).restype, LLVMTargetMachineEmitToFile.argtypes = LLVMBool, [LLVMTargetMachineRef, LLVMModuleRef, ctypes.POINTER(ctypes.c_char), LLVMCodeGenFileType, ctypes.POINTER(ctypes.POINTER(ctypes.c_char))]
-except AttributeError: pass
-
-try: (LLVMTargetMachineEmitToMemoryBuffer:=dll.LLVMTargetMachineEmitToMemoryBuffer).restype, LLVMTargetMachineEmitToMemoryBuffer.argtypes = LLVMBool, [LLVMTargetMachineRef, LLVMModuleRef, LLVMCodeGenFileType, ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.POINTER(LLVMMemoryBufferRef)]
-except AttributeError: pass
-
-try: (LLVMGetDefaultTargetTriple:=dll.LLVMGetDefaultTargetTriple).restype, LLVMGetDefaultTargetTriple.argtypes = ctypes.POINTER(ctypes.c_char), []
-except AttributeError: pass
-
-try: (LLVMNormalizeTargetTriple:=dll.LLVMNormalizeTargetTriple).restype, LLVMNormalizeTargetTriple.argtypes = ctypes.POINTER(ctypes.c_char), [ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMGetHostCPUName:=dll.LLVMGetHostCPUName).restype, LLVMGetHostCPUName.argtypes = ctypes.POINTER(ctypes.c_char), []
-except AttributeError: pass
-
-try: (LLVMGetHostCPUFeatures:=dll.LLVMGetHostCPUFeatures).restype, LLVMGetHostCPUFeatures.argtypes = ctypes.POINTER(ctypes.c_char), []
-except AttributeError: pass
-
-try: (LLVMAddAnalysisPasses:=dll.LLVMAddAnalysisPasses).restype, LLVMAddAnalysisPasses.argtypes = None, [LLVMTargetMachineRef, LLVMPassManagerRef]
-except AttributeError: pass
-
-try: (LLVMLinkInMCJIT:=dll.LLVMLinkInMCJIT).restype, LLVMLinkInMCJIT.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMLinkInInterpreter:=dll.LLVMLinkInInterpreter).restype, LLVMLinkInInterpreter.argtypes = None, []
-except AttributeError: pass
-
-class struct_LLVMOpaqueGenericValue(Struct): pass
-LLVMGenericValueRef = ctypes.POINTER(struct_LLVMOpaqueGenericValue)
-class struct_LLVMOpaqueExecutionEngine(Struct): pass
-LLVMExecutionEngineRef = ctypes.POINTER(struct_LLVMOpaqueExecutionEngine)
-class struct_LLVMOpaqueMCJITMemoryManager(Struct): pass
-LLVMMCJITMemoryManagerRef = ctypes.POINTER(struct_LLVMOpaqueMCJITMemoryManager)
-class struct_LLVMMCJITCompilerOptions(Struct): pass
-struct_LLVMMCJITCompilerOptions._fields_ = [
-  ('OptLevel', ctypes.c_uint32),
-  ('CodeModel', LLVMCodeModel),
-  ('NoFramePointerElim', LLVMBool),
-  ('EnableFastISel', LLVMBool),
-  ('MCJMM', LLVMMCJITMemoryManagerRef),
-]
-try: (LLVMCreateGenericValueOfInt:=dll.LLVMCreateGenericValueOfInt).restype, LLVMCreateGenericValueOfInt.argtypes = LLVMGenericValueRef, [LLVMTypeRef, ctypes.c_uint64, LLVMBool]
-except AttributeError: pass
-
-try: (LLVMCreateGenericValueOfPointer:=dll.LLVMCreateGenericValueOfPointer).restype, LLVMCreateGenericValueOfPointer.argtypes = LLVMGenericValueRef, [ctypes.c_void_p]
-except AttributeError: pass
-
-try: (LLVMCreateGenericValueOfFloat:=dll.LLVMCreateGenericValueOfFloat).restype, LLVMCreateGenericValueOfFloat.argtypes = LLVMGenericValueRef, [LLVMTypeRef, ctypes.c_double]
-except AttributeError: pass
-
-try: (LLVMGenericValueIntWidth:=dll.LLVMGenericValueIntWidth).restype, LLVMGenericValueIntWidth.argtypes = ctypes.c_uint32, [LLVMGenericValueRef]
-except AttributeError: pass
-
-try: (LLVMGenericValueToInt:=dll.LLVMGenericValueToInt).restype, LLVMGenericValueToInt.argtypes = ctypes.c_uint64, [LLVMGenericValueRef, LLVMBool]
-except AttributeError: pass
-
-try: (LLVMGenericValueToPointer:=dll.LLVMGenericValueToPointer).restype, LLVMGenericValueToPointer.argtypes = ctypes.c_void_p, [LLVMGenericValueRef]
-except AttributeError: pass
-
-try: (LLVMGenericValueToFloat:=dll.LLVMGenericValueToFloat).restype, LLVMGenericValueToFloat.argtypes = ctypes.c_double, [LLVMTypeRef, LLVMGenericValueRef]
-except AttributeError: pass
-
-try: (LLVMDisposeGenericValue:=dll.LLVMDisposeGenericValue).restype, LLVMDisposeGenericValue.argtypes = None, [LLVMGenericValueRef]
-except AttributeError: pass
-
-try: (LLVMCreateExecutionEngineForModule:=dll.LLVMCreateExecutionEngineForModule).restype, LLVMCreateExecutionEngineForModule.argtypes = LLVMBool, [ctypes.POINTER(LLVMExecutionEngineRef), LLVMModuleRef, ctypes.POINTER(ctypes.POINTER(ctypes.c_char))]
-except AttributeError: pass
-
-try: (LLVMCreateInterpreterForModule:=dll.LLVMCreateInterpreterForModule).restype, LLVMCreateInterpreterForModule.argtypes = LLVMBool, [ctypes.POINTER(LLVMExecutionEngineRef), LLVMModuleRef, ctypes.POINTER(ctypes.POINTER(ctypes.c_char))]
-except AttributeError: pass
-
-try: (LLVMCreateJITCompilerForModule:=dll.LLVMCreateJITCompilerForModule).restype, LLVMCreateJITCompilerForModule.argtypes = LLVMBool, [ctypes.POINTER(LLVMExecutionEngineRef), LLVMModuleRef, ctypes.c_uint32, ctypes.POINTER(ctypes.POINTER(ctypes.c_char))]
-except AttributeError: pass
-
-try: (LLVMInitializeMCJITCompilerOptions:=dll.LLVMInitializeMCJITCompilerOptions).restype, LLVMInitializeMCJITCompilerOptions.argtypes = None, [ctypes.POINTER(struct_LLVMMCJITCompilerOptions), size_t]
-except AttributeError: pass
-
-try: (LLVMCreateMCJITCompilerForModule:=dll.LLVMCreateMCJITCompilerForModule).restype, LLVMCreateMCJITCompilerForModule.argtypes = LLVMBool, [ctypes.POINTER(LLVMExecutionEngineRef), LLVMModuleRef, ctypes.POINTER(struct_LLVMMCJITCompilerOptions), size_t, ctypes.POINTER(ctypes.POINTER(ctypes.c_char))]
-except AttributeError: pass
-
-try: (LLVMDisposeExecutionEngine:=dll.LLVMDisposeExecutionEngine).restype, LLVMDisposeExecutionEngine.argtypes = None, [LLVMExecutionEngineRef]
-except AttributeError: pass
-
-try: (LLVMRunStaticConstructors:=dll.LLVMRunStaticConstructors).restype, LLVMRunStaticConstructors.argtypes = None, [LLVMExecutionEngineRef]
-except AttributeError: pass
-
-try: (LLVMRunStaticDestructors:=dll.LLVMRunStaticDestructors).restype, LLVMRunStaticDestructors.argtypes = None, [LLVMExecutionEngineRef]
-except AttributeError: pass
-
-try: (LLVMRunFunctionAsMain:=dll.LLVMRunFunctionAsMain).restype, LLVMRunFunctionAsMain.argtypes = ctypes.c_int32, [LLVMExecutionEngineRef, LLVMValueRef, ctypes.c_uint32, ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.POINTER(ctypes.POINTER(ctypes.c_char))]
-except AttributeError: pass
-
-try: (LLVMRunFunction:=dll.LLVMRunFunction).restype, LLVMRunFunction.argtypes = LLVMGenericValueRef, [LLVMExecutionEngineRef, LLVMValueRef, ctypes.c_uint32, ctypes.POINTER(LLVMGenericValueRef)]
-except AttributeError: pass
-
-try: (LLVMFreeMachineCodeForFunction:=dll.LLVMFreeMachineCodeForFunction).restype, LLVMFreeMachineCodeForFunction.argtypes = None, [LLVMExecutionEngineRef, LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMAddModule:=dll.LLVMAddModule).restype, LLVMAddModule.argtypes = None, [LLVMExecutionEngineRef, LLVMModuleRef]
-except AttributeError: pass
-
-try: (LLVMRemoveModule:=dll.LLVMRemoveModule).restype, LLVMRemoveModule.argtypes = LLVMBool, [LLVMExecutionEngineRef, LLVMModuleRef, ctypes.POINTER(LLVMModuleRef), ctypes.POINTER(ctypes.POINTER(ctypes.c_char))]
-except AttributeError: pass
-
-try: (LLVMFindFunction:=dll.LLVMFindFunction).restype, LLVMFindFunction.argtypes = LLVMBool, [LLVMExecutionEngineRef, ctypes.POINTER(ctypes.c_char), ctypes.POINTER(LLVMValueRef)]
-except AttributeError: pass
-
-try: (LLVMRecompileAndRelinkFunction:=dll.LLVMRecompileAndRelinkFunction).restype, LLVMRecompileAndRelinkFunction.argtypes = ctypes.c_void_p, [LLVMExecutionEngineRef, LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMGetExecutionEngineTargetData:=dll.LLVMGetExecutionEngineTargetData).restype, LLVMGetExecutionEngineTargetData.argtypes = LLVMTargetDataRef, [LLVMExecutionEngineRef]
-except AttributeError: pass
-
-try: (LLVMGetExecutionEngineTargetMachine:=dll.LLVMGetExecutionEngineTargetMachine).restype, LLVMGetExecutionEngineTargetMachine.argtypes = LLVMTargetMachineRef, [LLVMExecutionEngineRef]
-except AttributeError: pass
-
-try: (LLVMAddGlobalMapping:=dll.LLVMAddGlobalMapping).restype, LLVMAddGlobalMapping.argtypes = None, [LLVMExecutionEngineRef, LLVMValueRef, ctypes.c_void_p]
-except AttributeError: pass
-
-try: (LLVMGetPointerToGlobal:=dll.LLVMGetPointerToGlobal).restype, LLVMGetPointerToGlobal.argtypes = ctypes.c_void_p, [LLVMExecutionEngineRef, LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMGetGlobalValueAddress:=dll.LLVMGetGlobalValueAddress).restype, LLVMGetGlobalValueAddress.argtypes = uint64_t, [LLVMExecutionEngineRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMGetFunctionAddress:=dll.LLVMGetFunctionAddress).restype, LLVMGetFunctionAddress.argtypes = uint64_t, [LLVMExecutionEngineRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMExecutionEngineGetErrMsg:=dll.LLVMExecutionEngineGetErrMsg).restype, LLVMExecutionEngineGetErrMsg.argtypes = LLVMBool, [LLVMExecutionEngineRef, ctypes.POINTER(ctypes.POINTER(ctypes.c_char))]
-except AttributeError: pass
-
-LLVMMemoryManagerAllocateCodeSectionCallback = ctypes.CFUNCTYPE(ctypes.POINTER(ctypes.c_ubyte), ctypes.c_void_p, ctypes.c_uint64, ctypes.c_uint32, ctypes.c_uint32, ctypes.POINTER(ctypes.c_char))
-LLVMMemoryManagerAllocateDataSectionCallback = ctypes.CFUNCTYPE(ctypes.POINTER(ctypes.c_ubyte), ctypes.c_void_p, ctypes.c_uint64, ctypes.c_uint32, ctypes.c_uint32, ctypes.POINTER(ctypes.c_char), ctypes.c_int32)
-LLVMMemoryManagerFinalizeMemoryCallback = ctypes.CFUNCTYPE(ctypes.c_int32, ctypes.c_void_p, ctypes.POINTER(ctypes.POINTER(ctypes.c_char)))
-LLVMMemoryManagerDestroyCallback = ctypes.CFUNCTYPE(None, ctypes.c_void_p)
-try: (LLVMCreateSimpleMCJITMemoryManager:=dll.LLVMCreateSimpleMCJITMemoryManager).restype, LLVMCreateSimpleMCJITMemoryManager.argtypes = LLVMMCJITMemoryManagerRef, [ctypes.c_void_p, LLVMMemoryManagerAllocateCodeSectionCallback, LLVMMemoryManagerAllocateDataSectionCallback, LLVMMemoryManagerFinalizeMemoryCallback, LLVMMemoryManagerDestroyCallback]
-except AttributeError: pass
-
-try: (LLVMDisposeMCJITMemoryManager:=dll.LLVMDisposeMCJITMemoryManager).restype, LLVMDisposeMCJITMemoryManager.argtypes = None, [LLVMMCJITMemoryManagerRef]
-except AttributeError: pass
-
-class struct_LLVMOpaqueJITEventListener(Struct): pass
-LLVMJITEventListenerRef = ctypes.POINTER(struct_LLVMOpaqueJITEventListener)
-try: (LLVMCreateGDBRegistrationListener:=dll.LLVMCreateGDBRegistrationListener).restype, LLVMCreateGDBRegistrationListener.argtypes = LLVMJITEventListenerRef, []
-except AttributeError: pass
-
-try: (LLVMCreateIntelJITEventListener:=dll.LLVMCreateIntelJITEventListener).restype, LLVMCreateIntelJITEventListener.argtypes = LLVMJITEventListenerRef, []
-except AttributeError: pass
-
-try: (LLVMCreateOProfileJITEventListener:=dll.LLVMCreateOProfileJITEventListener).restype, LLVMCreateOProfileJITEventListener.argtypes = LLVMJITEventListenerRef, []
-except AttributeError: pass
-
-try: (LLVMCreatePerfJITEventListener:=dll.LLVMCreatePerfJITEventListener).restype, LLVMCreatePerfJITEventListener.argtypes = LLVMJITEventListenerRef, []
-except AttributeError: pass
-
-try: (imaxabs:=dll.imaxabs).restype, imaxabs.argtypes = intmax_t, [intmax_t]
-except AttributeError: pass
-
-try: (imaxdiv:=dll.imaxdiv).restype, imaxdiv.argtypes = imaxdiv_t, [intmax_t, intmax_t]
-except AttributeError: pass
-
-try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (select:=dll.select).restype, select.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timeval)]
-except AttributeError: pass
-
-try: (pselect:=dll.pselect).restype, pselect.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timespec), ctypes.POINTER(__sigset_t)]
-except AttributeError: pass
-
-try: (LLVMParseIRInContext:=dll.LLVMParseIRInContext).restype, LLVMParseIRInContext.argtypes = LLVMBool, [LLVMContextRef, LLVMMemoryBufferRef, ctypes.POINTER(LLVMModuleRef), ctypes.POINTER(ctypes.POINTER(ctypes.c_char))]
-except AttributeError: pass
-
-try: (LLVMGetErrorTypeId:=dll.LLVMGetErrorTypeId).restype, LLVMGetErrorTypeId.argtypes = LLVMErrorTypeId, [LLVMErrorRef]
-except AttributeError: pass
-
-try: (LLVMConsumeError:=dll.LLVMConsumeError).restype, LLVMConsumeError.argtypes = None, [LLVMErrorRef]
-except AttributeError: pass
-
-try: (LLVMCantFail:=dll.LLVMCantFail).restype, LLVMCantFail.argtypes = None, [LLVMErrorRef]
-except AttributeError: pass
-
-try: (LLVMGetErrorMessage:=dll.LLVMGetErrorMessage).restype, LLVMGetErrorMessage.argtypes = ctypes.POINTER(ctypes.c_char), [LLVMErrorRef]
-except AttributeError: pass
-
-try: (LLVMDisposeErrorMessage:=dll.LLVMDisposeErrorMessage).restype, LLVMDisposeErrorMessage.argtypes = None, [ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMGetStringErrorTypeId:=dll.LLVMGetStringErrorTypeId).restype, LLVMGetStringErrorTypeId.argtypes = LLVMErrorTypeId, []
-except AttributeError: pass
-
-try: (LLVMCreateStringError:=dll.LLVMCreateStringError).restype, LLVMCreateStringError.argtypes = LLVMErrorRef, [ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (imaxabs:=dll.imaxabs).restype, imaxabs.argtypes = intmax_t, [intmax_t]
-except AttributeError: pass
-
-try: (imaxdiv:=dll.imaxdiv).restype, imaxdiv.argtypes = imaxdiv_t, [intmax_t, intmax_t]
-except AttributeError: pass
-
-try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (select:=dll.select).restype, select.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timeval)]
-except AttributeError: pass
-
-try: (pselect:=dll.pselect).restype, pselect.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timespec), ctypes.POINTER(__sigset_t)]
-except AttributeError: pass
-
-try: (LLVMInitializeAArch64TargetInfo:=dll.LLVMInitializeAArch64TargetInfo).restype, LLVMInitializeAArch64TargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAMDGPUTargetInfo:=dll.LLVMInitializeAMDGPUTargetInfo).restype, LLVMInitializeAMDGPUTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeARMTargetInfo:=dll.LLVMInitializeARMTargetInfo).restype, LLVMInitializeARMTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAVRTargetInfo:=dll.LLVMInitializeAVRTargetInfo).restype, LLVMInitializeAVRTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeBPFTargetInfo:=dll.LLVMInitializeBPFTargetInfo).restype, LLVMInitializeBPFTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeHexagonTargetInfo:=dll.LLVMInitializeHexagonTargetInfo).restype, LLVMInitializeHexagonTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeLanaiTargetInfo:=dll.LLVMInitializeLanaiTargetInfo).restype, LLVMInitializeLanaiTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeLoongArchTargetInfo:=dll.LLVMInitializeLoongArchTargetInfo).restype, LLVMInitializeLoongArchTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeMipsTargetInfo:=dll.LLVMInitializeMipsTargetInfo).restype, LLVMInitializeMipsTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeMSP430TargetInfo:=dll.LLVMInitializeMSP430TargetInfo).restype, LLVMInitializeMSP430TargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeNVPTXTargetInfo:=dll.LLVMInitializeNVPTXTargetInfo).restype, LLVMInitializeNVPTXTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializePowerPCTargetInfo:=dll.LLVMInitializePowerPCTargetInfo).restype, LLVMInitializePowerPCTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeRISCVTargetInfo:=dll.LLVMInitializeRISCVTargetInfo).restype, LLVMInitializeRISCVTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSparcTargetInfo:=dll.LLVMInitializeSparcTargetInfo).restype, LLVMInitializeSparcTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSPIRVTargetInfo:=dll.LLVMInitializeSPIRVTargetInfo).restype, LLVMInitializeSPIRVTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSystemZTargetInfo:=dll.LLVMInitializeSystemZTargetInfo).restype, LLVMInitializeSystemZTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeVETargetInfo:=dll.LLVMInitializeVETargetInfo).restype, LLVMInitializeVETargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeWebAssemblyTargetInfo:=dll.LLVMInitializeWebAssemblyTargetInfo).restype, LLVMInitializeWebAssemblyTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeX86TargetInfo:=dll.LLVMInitializeX86TargetInfo).restype, LLVMInitializeX86TargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeXCoreTargetInfo:=dll.LLVMInitializeXCoreTargetInfo).restype, LLVMInitializeXCoreTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeM68kTargetInfo:=dll.LLVMInitializeM68kTargetInfo).restype, LLVMInitializeM68kTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeXtensaTargetInfo:=dll.LLVMInitializeXtensaTargetInfo).restype, LLVMInitializeXtensaTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAArch64Target:=dll.LLVMInitializeAArch64Target).restype, LLVMInitializeAArch64Target.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAMDGPUTarget:=dll.LLVMInitializeAMDGPUTarget).restype, LLVMInitializeAMDGPUTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeARMTarget:=dll.LLVMInitializeARMTarget).restype, LLVMInitializeARMTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAVRTarget:=dll.LLVMInitializeAVRTarget).restype, LLVMInitializeAVRTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeBPFTarget:=dll.LLVMInitializeBPFTarget).restype, LLVMInitializeBPFTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeHexagonTarget:=dll.LLVMInitializeHexagonTarget).restype, LLVMInitializeHexagonTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeLanaiTarget:=dll.LLVMInitializeLanaiTarget).restype, LLVMInitializeLanaiTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeLoongArchTarget:=dll.LLVMInitializeLoongArchTarget).restype, LLVMInitializeLoongArchTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeMipsTarget:=dll.LLVMInitializeMipsTarget).restype, LLVMInitializeMipsTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeMSP430Target:=dll.LLVMInitializeMSP430Target).restype, LLVMInitializeMSP430Target.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeNVPTXTarget:=dll.LLVMInitializeNVPTXTarget).restype, LLVMInitializeNVPTXTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializePowerPCTarget:=dll.LLVMInitializePowerPCTarget).restype, LLVMInitializePowerPCTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeRISCVTarget:=dll.LLVMInitializeRISCVTarget).restype, LLVMInitializeRISCVTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSparcTarget:=dll.LLVMInitializeSparcTarget).restype, LLVMInitializeSparcTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSPIRVTarget:=dll.LLVMInitializeSPIRVTarget).restype, LLVMInitializeSPIRVTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSystemZTarget:=dll.LLVMInitializeSystemZTarget).restype, LLVMInitializeSystemZTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeVETarget:=dll.LLVMInitializeVETarget).restype, LLVMInitializeVETarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeWebAssemblyTarget:=dll.LLVMInitializeWebAssemblyTarget).restype, LLVMInitializeWebAssemblyTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeX86Target:=dll.LLVMInitializeX86Target).restype, LLVMInitializeX86Target.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeXCoreTarget:=dll.LLVMInitializeXCoreTarget).restype, LLVMInitializeXCoreTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeM68kTarget:=dll.LLVMInitializeM68kTarget).restype, LLVMInitializeM68kTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeXtensaTarget:=dll.LLVMInitializeXtensaTarget).restype, LLVMInitializeXtensaTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAArch64TargetMC:=dll.LLVMInitializeAArch64TargetMC).restype, LLVMInitializeAArch64TargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAMDGPUTargetMC:=dll.LLVMInitializeAMDGPUTargetMC).restype, LLVMInitializeAMDGPUTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeARMTargetMC:=dll.LLVMInitializeARMTargetMC).restype, LLVMInitializeARMTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAVRTargetMC:=dll.LLVMInitializeAVRTargetMC).restype, LLVMInitializeAVRTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeBPFTargetMC:=dll.LLVMInitializeBPFTargetMC).restype, LLVMInitializeBPFTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeHexagonTargetMC:=dll.LLVMInitializeHexagonTargetMC).restype, LLVMInitializeHexagonTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeLanaiTargetMC:=dll.LLVMInitializeLanaiTargetMC).restype, LLVMInitializeLanaiTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeLoongArchTargetMC:=dll.LLVMInitializeLoongArchTargetMC).restype, LLVMInitializeLoongArchTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeMipsTargetMC:=dll.LLVMInitializeMipsTargetMC).restype, LLVMInitializeMipsTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeMSP430TargetMC:=dll.LLVMInitializeMSP430TargetMC).restype, LLVMInitializeMSP430TargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeNVPTXTargetMC:=dll.LLVMInitializeNVPTXTargetMC).restype, LLVMInitializeNVPTXTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializePowerPCTargetMC:=dll.LLVMInitializePowerPCTargetMC).restype, LLVMInitializePowerPCTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeRISCVTargetMC:=dll.LLVMInitializeRISCVTargetMC).restype, LLVMInitializeRISCVTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSparcTargetMC:=dll.LLVMInitializeSparcTargetMC).restype, LLVMInitializeSparcTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSPIRVTargetMC:=dll.LLVMInitializeSPIRVTargetMC).restype, LLVMInitializeSPIRVTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSystemZTargetMC:=dll.LLVMInitializeSystemZTargetMC).restype, LLVMInitializeSystemZTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeVETargetMC:=dll.LLVMInitializeVETargetMC).restype, LLVMInitializeVETargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeWebAssemblyTargetMC:=dll.LLVMInitializeWebAssemblyTargetMC).restype, LLVMInitializeWebAssemblyTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeX86TargetMC:=dll.LLVMInitializeX86TargetMC).restype, LLVMInitializeX86TargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeXCoreTargetMC:=dll.LLVMInitializeXCoreTargetMC).restype, LLVMInitializeXCoreTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeM68kTargetMC:=dll.LLVMInitializeM68kTargetMC).restype, LLVMInitializeM68kTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeXtensaTargetMC:=dll.LLVMInitializeXtensaTargetMC).restype, LLVMInitializeXtensaTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAArch64AsmPrinter:=dll.LLVMInitializeAArch64AsmPrinter).restype, LLVMInitializeAArch64AsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAMDGPUAsmPrinter:=dll.LLVMInitializeAMDGPUAsmPrinter).restype, LLVMInitializeAMDGPUAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeARMAsmPrinter:=dll.LLVMInitializeARMAsmPrinter).restype, LLVMInitializeARMAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAVRAsmPrinter:=dll.LLVMInitializeAVRAsmPrinter).restype, LLVMInitializeAVRAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeBPFAsmPrinter:=dll.LLVMInitializeBPFAsmPrinter).restype, LLVMInitializeBPFAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeHexagonAsmPrinter:=dll.LLVMInitializeHexagonAsmPrinter).restype, LLVMInitializeHexagonAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeLanaiAsmPrinter:=dll.LLVMInitializeLanaiAsmPrinter).restype, LLVMInitializeLanaiAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeLoongArchAsmPrinter:=dll.LLVMInitializeLoongArchAsmPrinter).restype, LLVMInitializeLoongArchAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeMipsAsmPrinter:=dll.LLVMInitializeMipsAsmPrinter).restype, LLVMInitializeMipsAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeMSP430AsmPrinter:=dll.LLVMInitializeMSP430AsmPrinter).restype, LLVMInitializeMSP430AsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeNVPTXAsmPrinter:=dll.LLVMInitializeNVPTXAsmPrinter).restype, LLVMInitializeNVPTXAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializePowerPCAsmPrinter:=dll.LLVMInitializePowerPCAsmPrinter).restype, LLVMInitializePowerPCAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeRISCVAsmPrinter:=dll.LLVMInitializeRISCVAsmPrinter).restype, LLVMInitializeRISCVAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSparcAsmPrinter:=dll.LLVMInitializeSparcAsmPrinter).restype, LLVMInitializeSparcAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSPIRVAsmPrinter:=dll.LLVMInitializeSPIRVAsmPrinter).restype, LLVMInitializeSPIRVAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSystemZAsmPrinter:=dll.LLVMInitializeSystemZAsmPrinter).restype, LLVMInitializeSystemZAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeVEAsmPrinter:=dll.LLVMInitializeVEAsmPrinter).restype, LLVMInitializeVEAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeWebAssemblyAsmPrinter:=dll.LLVMInitializeWebAssemblyAsmPrinter).restype, LLVMInitializeWebAssemblyAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeX86AsmPrinter:=dll.LLVMInitializeX86AsmPrinter).restype, LLVMInitializeX86AsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeXCoreAsmPrinter:=dll.LLVMInitializeXCoreAsmPrinter).restype, LLVMInitializeXCoreAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeM68kAsmPrinter:=dll.LLVMInitializeM68kAsmPrinter).restype, LLVMInitializeM68kAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeXtensaAsmPrinter:=dll.LLVMInitializeXtensaAsmPrinter).restype, LLVMInitializeXtensaAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAArch64AsmParser:=dll.LLVMInitializeAArch64AsmParser).restype, LLVMInitializeAArch64AsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAMDGPUAsmParser:=dll.LLVMInitializeAMDGPUAsmParser).restype, LLVMInitializeAMDGPUAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeARMAsmParser:=dll.LLVMInitializeARMAsmParser).restype, LLVMInitializeARMAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAVRAsmParser:=dll.LLVMInitializeAVRAsmParser).restype, LLVMInitializeAVRAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeBPFAsmParser:=dll.LLVMInitializeBPFAsmParser).restype, LLVMInitializeBPFAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeHexagonAsmParser:=dll.LLVMInitializeHexagonAsmParser).restype, LLVMInitializeHexagonAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeLanaiAsmParser:=dll.LLVMInitializeLanaiAsmParser).restype, LLVMInitializeLanaiAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeLoongArchAsmParser:=dll.LLVMInitializeLoongArchAsmParser).restype, LLVMInitializeLoongArchAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeMipsAsmParser:=dll.LLVMInitializeMipsAsmParser).restype, LLVMInitializeMipsAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeMSP430AsmParser:=dll.LLVMInitializeMSP430AsmParser).restype, LLVMInitializeMSP430AsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializePowerPCAsmParser:=dll.LLVMInitializePowerPCAsmParser).restype, LLVMInitializePowerPCAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeRISCVAsmParser:=dll.LLVMInitializeRISCVAsmParser).restype, LLVMInitializeRISCVAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSparcAsmParser:=dll.LLVMInitializeSparcAsmParser).restype, LLVMInitializeSparcAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSystemZAsmParser:=dll.LLVMInitializeSystemZAsmParser).restype, LLVMInitializeSystemZAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeVEAsmParser:=dll.LLVMInitializeVEAsmParser).restype, LLVMInitializeVEAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeWebAssemblyAsmParser:=dll.LLVMInitializeWebAssemblyAsmParser).restype, LLVMInitializeWebAssemblyAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeX86AsmParser:=dll.LLVMInitializeX86AsmParser).restype, LLVMInitializeX86AsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeM68kAsmParser:=dll.LLVMInitializeM68kAsmParser).restype, LLVMInitializeM68kAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeXtensaAsmParser:=dll.LLVMInitializeXtensaAsmParser).restype, LLVMInitializeXtensaAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAArch64Disassembler:=dll.LLVMInitializeAArch64Disassembler).restype, LLVMInitializeAArch64Disassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAMDGPUDisassembler:=dll.LLVMInitializeAMDGPUDisassembler).restype, LLVMInitializeAMDGPUDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeARMDisassembler:=dll.LLVMInitializeARMDisassembler).restype, LLVMInitializeARMDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAVRDisassembler:=dll.LLVMInitializeAVRDisassembler).restype, LLVMInitializeAVRDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeBPFDisassembler:=dll.LLVMInitializeBPFDisassembler).restype, LLVMInitializeBPFDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeHexagonDisassembler:=dll.LLVMInitializeHexagonDisassembler).restype, LLVMInitializeHexagonDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeLanaiDisassembler:=dll.LLVMInitializeLanaiDisassembler).restype, LLVMInitializeLanaiDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeLoongArchDisassembler:=dll.LLVMInitializeLoongArchDisassembler).restype, LLVMInitializeLoongArchDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeMipsDisassembler:=dll.LLVMInitializeMipsDisassembler).restype, LLVMInitializeMipsDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeMSP430Disassembler:=dll.LLVMInitializeMSP430Disassembler).restype, LLVMInitializeMSP430Disassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializePowerPCDisassembler:=dll.LLVMInitializePowerPCDisassembler).restype, LLVMInitializePowerPCDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeRISCVDisassembler:=dll.LLVMInitializeRISCVDisassembler).restype, LLVMInitializeRISCVDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSparcDisassembler:=dll.LLVMInitializeSparcDisassembler).restype, LLVMInitializeSparcDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSystemZDisassembler:=dll.LLVMInitializeSystemZDisassembler).restype, LLVMInitializeSystemZDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeVEDisassembler:=dll.LLVMInitializeVEDisassembler).restype, LLVMInitializeVEDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeWebAssemblyDisassembler:=dll.LLVMInitializeWebAssemblyDisassembler).restype, LLVMInitializeWebAssemblyDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeX86Disassembler:=dll.LLVMInitializeX86Disassembler).restype, LLVMInitializeX86Disassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeXCoreDisassembler:=dll.LLVMInitializeXCoreDisassembler).restype, LLVMInitializeXCoreDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeM68kDisassembler:=dll.LLVMInitializeM68kDisassembler).restype, LLVMInitializeM68kDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeXtensaDisassembler:=dll.LLVMInitializeXtensaDisassembler).restype, LLVMInitializeXtensaDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMGetModuleDataLayout:=dll.LLVMGetModuleDataLayout).restype, LLVMGetModuleDataLayout.argtypes = LLVMTargetDataRef, [LLVMModuleRef]
-except AttributeError: pass
-
-try: (LLVMSetModuleDataLayout:=dll.LLVMSetModuleDataLayout).restype, LLVMSetModuleDataLayout.argtypes = None, [LLVMModuleRef, LLVMTargetDataRef]
-except AttributeError: pass
-
-try: (LLVMCreateTargetData:=dll.LLVMCreateTargetData).restype, LLVMCreateTargetData.argtypes = LLVMTargetDataRef, [ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMDisposeTargetData:=dll.LLVMDisposeTargetData).restype, LLVMDisposeTargetData.argtypes = None, [LLVMTargetDataRef]
-except AttributeError: pass
-
-try: (LLVMAddTargetLibraryInfo:=dll.LLVMAddTargetLibraryInfo).restype, LLVMAddTargetLibraryInfo.argtypes = None, [LLVMTargetLibraryInfoRef, LLVMPassManagerRef]
-except AttributeError: pass
-
-try: (LLVMCopyStringRepOfTargetData:=dll.LLVMCopyStringRepOfTargetData).restype, LLVMCopyStringRepOfTargetData.argtypes = ctypes.POINTER(ctypes.c_char), [LLVMTargetDataRef]
-except AttributeError: pass
-
-try: (LLVMByteOrder:=dll.LLVMByteOrder).restype, LLVMByteOrder.argtypes = enum_LLVMByteOrdering, [LLVMTargetDataRef]
-except AttributeError: pass
-
-try: (LLVMPointerSize:=dll.LLVMPointerSize).restype, LLVMPointerSize.argtypes = ctypes.c_uint32, [LLVMTargetDataRef]
-except AttributeError: pass
-
-try: (LLVMPointerSizeForAS:=dll.LLVMPointerSizeForAS).restype, LLVMPointerSizeForAS.argtypes = ctypes.c_uint32, [LLVMTargetDataRef, ctypes.c_uint32]
-except AttributeError: pass
-
-try: (LLVMIntPtrType:=dll.LLVMIntPtrType).restype, LLVMIntPtrType.argtypes = LLVMTypeRef, [LLVMTargetDataRef]
-except AttributeError: pass
-
-try: (LLVMIntPtrTypeForAS:=dll.LLVMIntPtrTypeForAS).restype, LLVMIntPtrTypeForAS.argtypes = LLVMTypeRef, [LLVMTargetDataRef, ctypes.c_uint32]
-except AttributeError: pass
-
-try: (LLVMIntPtrTypeInContext:=dll.LLVMIntPtrTypeInContext).restype, LLVMIntPtrTypeInContext.argtypes = LLVMTypeRef, [LLVMContextRef, LLVMTargetDataRef]
-except AttributeError: pass
-
-try: (LLVMIntPtrTypeForASInContext:=dll.LLVMIntPtrTypeForASInContext).restype, LLVMIntPtrTypeForASInContext.argtypes = LLVMTypeRef, [LLVMContextRef, LLVMTargetDataRef, ctypes.c_uint32]
-except AttributeError: pass
-
-try: (LLVMSizeOfTypeInBits:=dll.LLVMSizeOfTypeInBits).restype, LLVMSizeOfTypeInBits.argtypes = ctypes.c_uint64, [LLVMTargetDataRef, LLVMTypeRef]
-except AttributeError: pass
-
-try: (LLVMStoreSizeOfType:=dll.LLVMStoreSizeOfType).restype, LLVMStoreSizeOfType.argtypes = ctypes.c_uint64, [LLVMTargetDataRef, LLVMTypeRef]
-except AttributeError: pass
-
-try: (LLVMABISizeOfType:=dll.LLVMABISizeOfType).restype, LLVMABISizeOfType.argtypes = ctypes.c_uint64, [LLVMTargetDataRef, LLVMTypeRef]
-except AttributeError: pass
-
-try: (LLVMABIAlignmentOfType:=dll.LLVMABIAlignmentOfType).restype, LLVMABIAlignmentOfType.argtypes = ctypes.c_uint32, [LLVMTargetDataRef, LLVMTypeRef]
-except AttributeError: pass
-
-try: (LLVMCallFrameAlignmentOfType:=dll.LLVMCallFrameAlignmentOfType).restype, LLVMCallFrameAlignmentOfType.argtypes = ctypes.c_uint32, [LLVMTargetDataRef, LLVMTypeRef]
-except AttributeError: pass
-
-try: (LLVMPreferredAlignmentOfType:=dll.LLVMPreferredAlignmentOfType).restype, LLVMPreferredAlignmentOfType.argtypes = ctypes.c_uint32, [LLVMTargetDataRef, LLVMTypeRef]
-except AttributeError: pass
-
-try: (LLVMPreferredAlignmentOfGlobal:=dll.LLVMPreferredAlignmentOfGlobal).restype, LLVMPreferredAlignmentOfGlobal.argtypes = ctypes.c_uint32, [LLVMTargetDataRef, LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMElementAtOffset:=dll.LLVMElementAtOffset).restype, LLVMElementAtOffset.argtypes = ctypes.c_uint32, [LLVMTargetDataRef, LLVMTypeRef, ctypes.c_uint64]
-except AttributeError: pass
-
-try: (LLVMOffsetOfElement:=dll.LLVMOffsetOfElement).restype, LLVMOffsetOfElement.argtypes = ctypes.c_uint64, [LLVMTargetDataRef, LLVMTypeRef, ctypes.c_uint32]
-except AttributeError: pass
-
-try: (LLVMGetFirstTarget:=dll.LLVMGetFirstTarget).restype, LLVMGetFirstTarget.argtypes = LLVMTargetRef, []
-except AttributeError: pass
-
-try: (LLVMGetNextTarget:=dll.LLVMGetNextTarget).restype, LLVMGetNextTarget.argtypes = LLVMTargetRef, [LLVMTargetRef]
-except AttributeError: pass
-
-try: (LLVMGetTargetFromName:=dll.LLVMGetTargetFromName).restype, LLVMGetTargetFromName.argtypes = LLVMTargetRef, [ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMGetTargetFromTriple:=dll.LLVMGetTargetFromTriple).restype, LLVMGetTargetFromTriple.argtypes = LLVMBool, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(LLVMTargetRef), ctypes.POINTER(ctypes.POINTER(ctypes.c_char))]
-except AttributeError: pass
-
-try: (LLVMGetTargetName:=dll.LLVMGetTargetName).restype, LLVMGetTargetName.argtypes = ctypes.POINTER(ctypes.c_char), [LLVMTargetRef]
-except AttributeError: pass
-
-try: (LLVMGetTargetDescription:=dll.LLVMGetTargetDescription).restype, LLVMGetTargetDescription.argtypes = ctypes.POINTER(ctypes.c_char), [LLVMTargetRef]
-except AttributeError: pass
-
-try: (LLVMTargetHasJIT:=dll.LLVMTargetHasJIT).restype, LLVMTargetHasJIT.argtypes = LLVMBool, [LLVMTargetRef]
-except AttributeError: pass
-
-try: (LLVMTargetHasTargetMachine:=dll.LLVMTargetHasTargetMachine).restype, LLVMTargetHasTargetMachine.argtypes = LLVMBool, [LLVMTargetRef]
-except AttributeError: pass
-
-try: (LLVMTargetHasAsmBackend:=dll.LLVMTargetHasAsmBackend).restype, LLVMTargetHasAsmBackend.argtypes = LLVMBool, [LLVMTargetRef]
-except AttributeError: pass
-
-try: (LLVMCreateTargetMachineOptions:=dll.LLVMCreateTargetMachineOptions).restype, LLVMCreateTargetMachineOptions.argtypes = LLVMTargetMachineOptionsRef, []
-except AttributeError: pass
-
-try: (LLVMDisposeTargetMachineOptions:=dll.LLVMDisposeTargetMachineOptions).restype, LLVMDisposeTargetMachineOptions.argtypes = None, [LLVMTargetMachineOptionsRef]
-except AttributeError: pass
-
-try: (LLVMTargetMachineOptionsSetCPU:=dll.LLVMTargetMachineOptionsSetCPU).restype, LLVMTargetMachineOptionsSetCPU.argtypes = None, [LLVMTargetMachineOptionsRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMTargetMachineOptionsSetFeatures:=dll.LLVMTargetMachineOptionsSetFeatures).restype, LLVMTargetMachineOptionsSetFeatures.argtypes = None, [LLVMTargetMachineOptionsRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMTargetMachineOptionsSetABI:=dll.LLVMTargetMachineOptionsSetABI).restype, LLVMTargetMachineOptionsSetABI.argtypes = None, [LLVMTargetMachineOptionsRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMTargetMachineOptionsSetCodeGenOptLevel:=dll.LLVMTargetMachineOptionsSetCodeGenOptLevel).restype, LLVMTargetMachineOptionsSetCodeGenOptLevel.argtypes = None, [LLVMTargetMachineOptionsRef, LLVMCodeGenOptLevel]
-except AttributeError: pass
-
-try: (LLVMTargetMachineOptionsSetRelocMode:=dll.LLVMTargetMachineOptionsSetRelocMode).restype, LLVMTargetMachineOptionsSetRelocMode.argtypes = None, [LLVMTargetMachineOptionsRef, LLVMRelocMode]
-except AttributeError: pass
-
-try: (LLVMTargetMachineOptionsSetCodeModel:=dll.LLVMTargetMachineOptionsSetCodeModel).restype, LLVMTargetMachineOptionsSetCodeModel.argtypes = None, [LLVMTargetMachineOptionsRef, LLVMCodeModel]
-except AttributeError: pass
-
-try: (LLVMCreateTargetMachineWithOptions:=dll.LLVMCreateTargetMachineWithOptions).restype, LLVMCreateTargetMachineWithOptions.argtypes = LLVMTargetMachineRef, [LLVMTargetRef, ctypes.POINTER(ctypes.c_char), LLVMTargetMachineOptionsRef]
-except AttributeError: pass
-
-try: (LLVMCreateTargetMachine:=dll.LLVMCreateTargetMachine).restype, LLVMCreateTargetMachine.argtypes = LLVMTargetMachineRef, [LLVMTargetRef, ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char), LLVMCodeGenOptLevel, LLVMRelocMode, LLVMCodeModel]
-except AttributeError: pass
-
-try: (LLVMDisposeTargetMachine:=dll.LLVMDisposeTargetMachine).restype, LLVMDisposeTargetMachine.argtypes = None, [LLVMTargetMachineRef]
-except AttributeError: pass
-
-try: (LLVMGetTargetMachineTarget:=dll.LLVMGetTargetMachineTarget).restype, LLVMGetTargetMachineTarget.argtypes = LLVMTargetRef, [LLVMTargetMachineRef]
-except AttributeError: pass
-
-try: (LLVMGetTargetMachineTriple:=dll.LLVMGetTargetMachineTriple).restype, LLVMGetTargetMachineTriple.argtypes = ctypes.POINTER(ctypes.c_char), [LLVMTargetMachineRef]
-except AttributeError: pass
-
-try: (LLVMGetTargetMachineCPU:=dll.LLVMGetTargetMachineCPU).restype, LLVMGetTargetMachineCPU.argtypes = ctypes.POINTER(ctypes.c_char), [LLVMTargetMachineRef]
-except AttributeError: pass
-
-try: (LLVMGetTargetMachineFeatureString:=dll.LLVMGetTargetMachineFeatureString).restype, LLVMGetTargetMachineFeatureString.argtypes = ctypes.POINTER(ctypes.c_char), [LLVMTargetMachineRef]
-except AttributeError: pass
-
-try: (LLVMCreateTargetDataLayout:=dll.LLVMCreateTargetDataLayout).restype, LLVMCreateTargetDataLayout.argtypes = LLVMTargetDataRef, [LLVMTargetMachineRef]
-except AttributeError: pass
-
-try: (LLVMSetTargetMachineAsmVerbosity:=dll.LLVMSetTargetMachineAsmVerbosity).restype, LLVMSetTargetMachineAsmVerbosity.argtypes = None, [LLVMTargetMachineRef, LLVMBool]
-except AttributeError: pass
-
-try: (LLVMSetTargetMachineFastISel:=dll.LLVMSetTargetMachineFastISel).restype, LLVMSetTargetMachineFastISel.argtypes = None, [LLVMTargetMachineRef, LLVMBool]
-except AttributeError: pass
-
-try: (LLVMSetTargetMachineGlobalISel:=dll.LLVMSetTargetMachineGlobalISel).restype, LLVMSetTargetMachineGlobalISel.argtypes = None, [LLVMTargetMachineRef, LLVMBool]
-except AttributeError: pass
-
-try: (LLVMSetTargetMachineGlobalISelAbort:=dll.LLVMSetTargetMachineGlobalISelAbort).restype, LLVMSetTargetMachineGlobalISelAbort.argtypes = None, [LLVMTargetMachineRef, LLVMGlobalISelAbortMode]
-except AttributeError: pass
-
-try: (LLVMSetTargetMachineMachineOutliner:=dll.LLVMSetTargetMachineMachineOutliner).restype, LLVMSetTargetMachineMachineOutliner.argtypes = None, [LLVMTargetMachineRef, LLVMBool]
-except AttributeError: pass
-
-try: (LLVMTargetMachineEmitToFile:=dll.LLVMTargetMachineEmitToFile).restype, LLVMTargetMachineEmitToFile.argtypes = LLVMBool, [LLVMTargetMachineRef, LLVMModuleRef, ctypes.POINTER(ctypes.c_char), LLVMCodeGenFileType, ctypes.POINTER(ctypes.POINTER(ctypes.c_char))]
-except AttributeError: pass
-
-try: (LLVMTargetMachineEmitToMemoryBuffer:=dll.LLVMTargetMachineEmitToMemoryBuffer).restype, LLVMTargetMachineEmitToMemoryBuffer.argtypes = LLVMBool, [LLVMTargetMachineRef, LLVMModuleRef, LLVMCodeGenFileType, ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.POINTER(LLVMMemoryBufferRef)]
-except AttributeError: pass
-
-try: (LLVMGetDefaultTargetTriple:=dll.LLVMGetDefaultTargetTriple).restype, LLVMGetDefaultTargetTriple.argtypes = ctypes.POINTER(ctypes.c_char), []
-except AttributeError: pass
-
-try: (LLVMNormalizeTargetTriple:=dll.LLVMNormalizeTargetTriple).restype, LLVMNormalizeTargetTriple.argtypes = ctypes.POINTER(ctypes.c_char), [ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMGetHostCPUName:=dll.LLVMGetHostCPUName).restype, LLVMGetHostCPUName.argtypes = ctypes.POINTER(ctypes.c_char), []
-except AttributeError: pass
-
-try: (LLVMGetHostCPUFeatures:=dll.LLVMGetHostCPUFeatures).restype, LLVMGetHostCPUFeatures.argtypes = ctypes.POINTER(ctypes.c_char), []
-except AttributeError: pass
-
-try: (LLVMAddAnalysisPasses:=dll.LLVMAddAnalysisPasses).restype, LLVMAddAnalysisPasses.argtypes = None, [LLVMTargetMachineRef, LLVMPassManagerRef]
-except AttributeError: pass
-
-class struct_LLVMOrcOpaqueExecutionSession(Struct): pass
-LLVMOrcExecutionSessionRef = ctypes.POINTER(struct_LLVMOrcOpaqueExecutionSession)
-LLVMOrcErrorReporterFunction = ctypes.CFUNCTYPE(None, ctypes.c_void_p, ctypes.POINTER(struct_LLVMOpaqueError))
-try: (LLVMOrcExecutionSessionSetErrorReporter:=dll.LLVMOrcExecutionSessionSetErrorReporter).restype, LLVMOrcExecutionSessionSetErrorReporter.argtypes = None, [LLVMOrcExecutionSessionRef, LLVMOrcErrorReporterFunction, ctypes.c_void_p]
-except AttributeError: pass
-
-class struct_LLVMOrcOpaqueSymbolStringPool(Struct): pass
-LLVMOrcSymbolStringPoolRef = ctypes.POINTER(struct_LLVMOrcOpaqueSymbolStringPool)
-try: (LLVMOrcExecutionSessionGetSymbolStringPool:=dll.LLVMOrcExecutionSessionGetSymbolStringPool).restype, LLVMOrcExecutionSessionGetSymbolStringPool.argtypes = LLVMOrcSymbolStringPoolRef, [LLVMOrcExecutionSessionRef]
-except AttributeError: pass
-
-try: (LLVMOrcSymbolStringPoolClearDeadEntries:=dll.LLVMOrcSymbolStringPoolClearDeadEntries).restype, LLVMOrcSymbolStringPoolClearDeadEntries.argtypes = None, [LLVMOrcSymbolStringPoolRef]
-except AttributeError: pass
-
-class struct_LLVMOrcOpaqueSymbolStringPoolEntry(Struct): pass
-LLVMOrcSymbolStringPoolEntryRef = ctypes.POINTER(struct_LLVMOrcOpaqueSymbolStringPoolEntry)
-try: (LLVMOrcExecutionSessionIntern:=dll.LLVMOrcExecutionSessionIntern).restype, LLVMOrcExecutionSessionIntern.argtypes = LLVMOrcSymbolStringPoolEntryRef, [LLVMOrcExecutionSessionRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-LLVMOrcLookupKind = CEnum(ctypes.c_uint32)
+@dll.bind
+def LLVMTargetMachineEmitToFile(T:LLVMTargetMachineRef, M:LLVMModuleRef, Filename:c.POINTER[Annotated[bytes, ctypes.c_char]], codegen:LLVMCodeGenFileType, ErrorMessage:c.POINTER[c.POINTER[Annotated[bytes, ctypes.c_char]]]) -> LLVMBool: ...
+@dll.bind
+def LLVMTargetMachineEmitToMemoryBuffer(T:LLVMTargetMachineRef, M:LLVMModuleRef, codegen:LLVMCodeGenFileType, ErrorMessage:c.POINTER[c.POINTER[Annotated[bytes, ctypes.c_char]]], OutMemBuf:c.POINTER[LLVMMemoryBufferRef]) -> LLVMBool: ...
+@dll.bind
+def LLVMGetDefaultTargetTriple() -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
+@dll.bind
+def LLVMNormalizeTargetTriple(triple:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
+@dll.bind
+def LLVMGetHostCPUName() -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
+@dll.bind
+def LLVMGetHostCPUFeatures() -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
+@dll.bind
+def LLVMAddAnalysisPasses(T:LLVMTargetMachineRef, PM:LLVMPassManagerRef) -> None: ...
+@dll.bind
+def LLVMLinkInMCJIT() -> None: ...
+@dll.bind
+def LLVMLinkInInterpreter() -> None: ...
+class struct_LLVMOpaqueGenericValue(ctypes.Structure): pass
+LLVMGenericValueRef: TypeAlias = c.POINTER[struct_LLVMOpaqueGenericValue]
+class struct_LLVMOpaqueExecutionEngine(ctypes.Structure): pass
+LLVMExecutionEngineRef: TypeAlias = c.POINTER[struct_LLVMOpaqueExecutionEngine]
+class struct_LLVMOpaqueMCJITMemoryManager(ctypes.Structure): pass
+LLVMMCJITMemoryManagerRef: TypeAlias = c.POINTER[struct_LLVMOpaqueMCJITMemoryManager]
+@c.record
+class struct_LLVMMCJITCompilerOptions(c.Struct):
+  SIZE = 24
+  OptLevel: Annotated[Annotated[int, ctypes.c_uint32], 0]
+  CodeModel: Annotated[LLVMCodeModel, 4]
+  NoFramePointerElim: Annotated[LLVMBool, 8]
+  EnableFastISel: Annotated[LLVMBool, 12]
+  MCJMM: Annotated[LLVMMCJITMemoryManagerRef, 16]
+@dll.bind
+def LLVMCreateGenericValueOfInt(Ty:LLVMTypeRef, N:Annotated[int, ctypes.c_uint64], IsSigned:LLVMBool) -> LLVMGenericValueRef: ...
+@dll.bind
+def LLVMCreateGenericValueOfPointer(P:ctypes.c_void_p) -> LLVMGenericValueRef: ...
+@dll.bind
+def LLVMCreateGenericValueOfFloat(Ty:LLVMTypeRef, N:Annotated[float, ctypes.c_double]) -> LLVMGenericValueRef: ...
+@dll.bind
+def LLVMGenericValueIntWidth(GenValRef:LLVMGenericValueRef) -> Annotated[int, ctypes.c_uint32]: ...
+@dll.bind
+def LLVMGenericValueToInt(GenVal:LLVMGenericValueRef, IsSigned:LLVMBool) -> Annotated[int, ctypes.c_uint64]: ...
+@dll.bind
+def LLVMGenericValueToPointer(GenVal:LLVMGenericValueRef) -> ctypes.c_void_p: ...
+@dll.bind
+def LLVMGenericValueToFloat(TyRef:LLVMTypeRef, GenVal:LLVMGenericValueRef) -> Annotated[float, ctypes.c_double]: ...
+@dll.bind
+def LLVMDisposeGenericValue(GenVal:LLVMGenericValueRef) -> None: ...
+@dll.bind
+def LLVMCreateExecutionEngineForModule(OutEE:c.POINTER[LLVMExecutionEngineRef], M:LLVMModuleRef, OutError:c.POINTER[c.POINTER[Annotated[bytes, ctypes.c_char]]]) -> LLVMBool: ...
+@dll.bind
+def LLVMCreateInterpreterForModule(OutInterp:c.POINTER[LLVMExecutionEngineRef], M:LLVMModuleRef, OutError:c.POINTER[c.POINTER[Annotated[bytes, ctypes.c_char]]]) -> LLVMBool: ...
+@dll.bind
+def LLVMCreateJITCompilerForModule(OutJIT:c.POINTER[LLVMExecutionEngineRef], M:LLVMModuleRef, OptLevel:Annotated[int, ctypes.c_uint32], OutError:c.POINTER[c.POINTER[Annotated[bytes, ctypes.c_char]]]) -> LLVMBool: ...
+@dll.bind
+def LLVMInitializeMCJITCompilerOptions(Options:c.POINTER[struct_LLVMMCJITCompilerOptions], SizeOfOptions:size_t) -> None: ...
+@dll.bind
+def LLVMCreateMCJITCompilerForModule(OutJIT:c.POINTER[LLVMExecutionEngineRef], M:LLVMModuleRef, Options:c.POINTER[struct_LLVMMCJITCompilerOptions], SizeOfOptions:size_t, OutError:c.POINTER[c.POINTER[Annotated[bytes, ctypes.c_char]]]) -> LLVMBool: ...
+@dll.bind
+def LLVMDisposeExecutionEngine(EE:LLVMExecutionEngineRef) -> None: ...
+@dll.bind
+def LLVMRunStaticConstructors(EE:LLVMExecutionEngineRef) -> None: ...
+@dll.bind
+def LLVMRunStaticDestructors(EE:LLVMExecutionEngineRef) -> None: ...
+@dll.bind
+def LLVMRunFunctionAsMain(EE:LLVMExecutionEngineRef, F:LLVMValueRef, ArgC:Annotated[int, ctypes.c_uint32], ArgV:c.POINTER[c.POINTER[Annotated[bytes, ctypes.c_char]]], EnvP:c.POINTER[c.POINTER[Annotated[bytes, ctypes.c_char]]]) -> Annotated[int, ctypes.c_int32]: ...
+@dll.bind
+def LLVMRunFunction(EE:LLVMExecutionEngineRef, F:LLVMValueRef, NumArgs:Annotated[int, ctypes.c_uint32], Args:c.POINTER[LLVMGenericValueRef]) -> LLVMGenericValueRef: ...
+@dll.bind
+def LLVMFreeMachineCodeForFunction(EE:LLVMExecutionEngineRef, F:LLVMValueRef) -> None: ...
+@dll.bind
+def LLVMAddModule(EE:LLVMExecutionEngineRef, M:LLVMModuleRef) -> None: ...
+@dll.bind
+def LLVMRemoveModule(EE:LLVMExecutionEngineRef, M:LLVMModuleRef, OutMod:c.POINTER[LLVMModuleRef], OutError:c.POINTER[c.POINTER[Annotated[bytes, ctypes.c_char]]]) -> LLVMBool: ...
+@dll.bind
+def LLVMFindFunction(EE:LLVMExecutionEngineRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]], OutFn:c.POINTER[LLVMValueRef]) -> LLVMBool: ...
+@dll.bind
+def LLVMRecompileAndRelinkFunction(EE:LLVMExecutionEngineRef, Fn:LLVMValueRef) -> ctypes.c_void_p: ...
+@dll.bind
+def LLVMGetExecutionEngineTargetData(EE:LLVMExecutionEngineRef) -> LLVMTargetDataRef: ...
+@dll.bind
+def LLVMGetExecutionEngineTargetMachine(EE:LLVMExecutionEngineRef) -> LLVMTargetMachineRef: ...
+@dll.bind
+def LLVMAddGlobalMapping(EE:LLVMExecutionEngineRef, Global:LLVMValueRef, Addr:ctypes.c_void_p) -> None: ...
+@dll.bind
+def LLVMGetPointerToGlobal(EE:LLVMExecutionEngineRef, Global:LLVMValueRef) -> ctypes.c_void_p: ...
+@dll.bind
+def LLVMGetGlobalValueAddress(EE:LLVMExecutionEngineRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> uint64_t: ...
+@dll.bind
+def LLVMGetFunctionAddress(EE:LLVMExecutionEngineRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> uint64_t: ...
+@dll.bind
+def LLVMExecutionEngineGetErrMsg(EE:LLVMExecutionEngineRef, OutError:c.POINTER[c.POINTER[Annotated[bytes, ctypes.c_char]]]) -> LLVMBool: ...
+LLVMMemoryManagerAllocateCodeSectionCallback: TypeAlias = c.CFUNCTYPE[c.POINTER[Annotated[int, ctypes.c_ubyte]], [ctypes.c_void_p, Annotated[int, ctypes.c_uint64], Annotated[int, ctypes.c_uint32], Annotated[int, ctypes.c_uint32], c.POINTER[Annotated[bytes, ctypes.c_char]]]]
+LLVMMemoryManagerAllocateDataSectionCallback: TypeAlias = c.CFUNCTYPE[c.POINTER[Annotated[int, ctypes.c_ubyte]], [ctypes.c_void_p, Annotated[int, ctypes.c_uint64], Annotated[int, ctypes.c_uint32], Annotated[int, ctypes.c_uint32], c.POINTER[Annotated[bytes, ctypes.c_char]], Annotated[int, ctypes.c_int32]]]
+LLVMMemoryManagerFinalizeMemoryCallback: TypeAlias = c.CFUNCTYPE[Annotated[int, ctypes.c_int32], [ctypes.c_void_p, c.POINTER[c.POINTER[Annotated[bytes, ctypes.c_char]]]]]
+LLVMMemoryManagerDestroyCallback: TypeAlias = c.CFUNCTYPE[None, [ctypes.c_void_p]]
+@dll.bind
+def LLVMCreateSimpleMCJITMemoryManager(Opaque:ctypes.c_void_p, AllocateCodeSection:LLVMMemoryManagerAllocateCodeSectionCallback, AllocateDataSection:LLVMMemoryManagerAllocateDataSectionCallback, FinalizeMemory:LLVMMemoryManagerFinalizeMemoryCallback, Destroy:LLVMMemoryManagerDestroyCallback) -> LLVMMCJITMemoryManagerRef: ...
+@dll.bind
+def LLVMDisposeMCJITMemoryManager(MM:LLVMMCJITMemoryManagerRef) -> None: ...
+class struct_LLVMOpaqueJITEventListener(ctypes.Structure): pass
+LLVMJITEventListenerRef: TypeAlias = c.POINTER[struct_LLVMOpaqueJITEventListener]
+@dll.bind
+def LLVMCreateGDBRegistrationListener() -> LLVMJITEventListenerRef: ...
+@dll.bind
+def LLVMCreateIntelJITEventListener() -> LLVMJITEventListenerRef: ...
+@dll.bind
+def LLVMCreateOProfileJITEventListener() -> LLVMJITEventListenerRef: ...
+@dll.bind
+def LLVMCreatePerfJITEventListener() -> LLVMJITEventListenerRef: ...
+@dll.bind
+def LLVMParseIRInContext(ContextRef:LLVMContextRef, MemBuf:LLVMMemoryBufferRef, OutM:c.POINTER[LLVMModuleRef], OutMessage:c.POINTER[c.POINTER[Annotated[bytes, ctypes.c_char]]]) -> LLVMBool: ...
+class struct_LLVMOrcOpaqueExecutionSession(ctypes.Structure): pass
+LLVMOrcExecutionSessionRef: TypeAlias = c.POINTER[struct_LLVMOrcOpaqueExecutionSession]
+LLVMOrcErrorReporterFunction: TypeAlias = c.CFUNCTYPE[None, [ctypes.c_void_p, c.POINTER[struct_LLVMOpaqueError]]]
+@dll.bind
+def LLVMOrcExecutionSessionSetErrorReporter(ES:LLVMOrcExecutionSessionRef, ReportError:LLVMOrcErrorReporterFunction, Ctx:ctypes.c_void_p) -> None: ...
+class struct_LLVMOrcOpaqueSymbolStringPool(ctypes.Structure): pass
+LLVMOrcSymbolStringPoolRef: TypeAlias = c.POINTER[struct_LLVMOrcOpaqueSymbolStringPool]
+@dll.bind
+def LLVMOrcExecutionSessionGetSymbolStringPool(ES:LLVMOrcExecutionSessionRef) -> LLVMOrcSymbolStringPoolRef: ...
+@dll.bind
+def LLVMOrcSymbolStringPoolClearDeadEntries(SSP:LLVMOrcSymbolStringPoolRef) -> None: ...
+class struct_LLVMOrcOpaqueSymbolStringPoolEntry(ctypes.Structure): pass
+LLVMOrcSymbolStringPoolEntryRef: TypeAlias = c.POINTER[struct_LLVMOrcOpaqueSymbolStringPoolEntry]
+@dll.bind
+def LLVMOrcExecutionSessionIntern(ES:LLVMOrcExecutionSessionRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMOrcSymbolStringPoolEntryRef: ...
+class LLVMOrcLookupKind(Annotated[int, ctypes.c_uint32], c.Enum): pass
 LLVMOrcLookupKindStatic = LLVMOrcLookupKind.define('LLVMOrcLookupKindStatic', 0)
 LLVMOrcLookupKindDLSym = LLVMOrcLookupKind.define('LLVMOrcLookupKindDLSym', 1)
 
-class LLVMOrcCJITDylibSearchOrderElement(Struct): pass
-class struct_LLVMOrcOpaqueJITDylib(Struct): pass
-LLVMOrcJITDylibRef = ctypes.POINTER(struct_LLVMOrcOpaqueJITDylib)
-LLVMOrcJITDylibLookupFlags = CEnum(ctypes.c_uint32)
+@c.record
+class LLVMOrcCJITDylibSearchOrderElement(c.Struct):
+  SIZE = 16
+  JD: Annotated[LLVMOrcJITDylibRef, 0]
+  JDLookupFlags: Annotated[LLVMOrcJITDylibLookupFlags, 8]
+class struct_LLVMOrcOpaqueJITDylib(ctypes.Structure): pass
+LLVMOrcJITDylibRef: TypeAlias = c.POINTER[struct_LLVMOrcOpaqueJITDylib]
+class LLVMOrcJITDylibLookupFlags(Annotated[int, ctypes.c_uint32], c.Enum): pass
 LLVMOrcJITDylibLookupFlagsMatchExportedSymbolsOnly = LLVMOrcJITDylibLookupFlags.define('LLVMOrcJITDylibLookupFlagsMatchExportedSymbolsOnly', 0)
 LLVMOrcJITDylibLookupFlagsMatchAllSymbols = LLVMOrcJITDylibLookupFlags.define('LLVMOrcJITDylibLookupFlagsMatchAllSymbols', 1)
 
-LLVMOrcCJITDylibSearchOrderElement._fields_ = [
-  ('JD', LLVMOrcJITDylibRef),
-  ('JDLookupFlags', LLVMOrcJITDylibLookupFlags),
-]
-LLVMOrcCJITDylibSearchOrder = ctypes.POINTER(LLVMOrcCJITDylibSearchOrderElement)
-class LLVMOrcCLookupSetElement(Struct): pass
-LLVMOrcSymbolLookupFlags = CEnum(ctypes.c_uint32)
+LLVMOrcCJITDylibSearchOrder: TypeAlias = c.POINTER[LLVMOrcCJITDylibSearchOrderElement]
+@c.record
+class LLVMOrcCLookupSetElement(c.Struct):
+  SIZE = 16
+  Name: Annotated[LLVMOrcSymbolStringPoolEntryRef, 0]
+  LookupFlags: Annotated[LLVMOrcSymbolLookupFlags, 8]
+class LLVMOrcSymbolLookupFlags(Annotated[int, ctypes.c_uint32], c.Enum): pass
 LLVMOrcSymbolLookupFlagsRequiredSymbol = LLVMOrcSymbolLookupFlags.define('LLVMOrcSymbolLookupFlagsRequiredSymbol', 0)
 LLVMOrcSymbolLookupFlagsWeaklyReferencedSymbol = LLVMOrcSymbolLookupFlags.define('LLVMOrcSymbolLookupFlagsWeaklyReferencedSymbol', 1)
 
-LLVMOrcCLookupSetElement._fields_ = [
-  ('Name', LLVMOrcSymbolStringPoolEntryRef),
-  ('LookupFlags', LLVMOrcSymbolLookupFlags),
-]
-LLVMOrcCLookupSet = ctypes.POINTER(LLVMOrcCLookupSetElement)
-class LLVMOrcCSymbolMapPair(Struct): pass
-class LLVMJITEvaluatedSymbol(Struct): pass
-LLVMOrcExecutorAddress = ctypes.c_uint64
-class LLVMJITSymbolFlags(Struct): pass
-LLVMJITSymbolFlags._fields_ = [
-  ('GenericFlags', uint8_t),
-  ('TargetFlags', uint8_t),
-]
-LLVMJITEvaluatedSymbol._fields_ = [
-  ('Address', LLVMOrcExecutorAddress),
-  ('Flags', LLVMJITSymbolFlags),
-]
-LLVMOrcCSymbolMapPair._fields_ = [
-  ('Name', LLVMOrcSymbolStringPoolEntryRef),
-  ('Sym', LLVMJITEvaluatedSymbol),
-]
-LLVMOrcExecutionSessionLookupHandleResultFunction = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_LLVMOpaqueError), ctypes.POINTER(LLVMOrcCSymbolMapPair), ctypes.c_uint64, ctypes.c_void_p)
-try: (LLVMOrcExecutionSessionLookup:=dll.LLVMOrcExecutionSessionLookup).restype, LLVMOrcExecutionSessionLookup.argtypes = None, [LLVMOrcExecutionSessionRef, LLVMOrcLookupKind, LLVMOrcCJITDylibSearchOrder, size_t, LLVMOrcCLookupSet, size_t, LLVMOrcExecutionSessionLookupHandleResultFunction, ctypes.c_void_p]
-except AttributeError: pass
-
-try: (LLVMOrcRetainSymbolStringPoolEntry:=dll.LLVMOrcRetainSymbolStringPoolEntry).restype, LLVMOrcRetainSymbolStringPoolEntry.argtypes = None, [LLVMOrcSymbolStringPoolEntryRef]
-except AttributeError: pass
-
-try: (LLVMOrcReleaseSymbolStringPoolEntry:=dll.LLVMOrcReleaseSymbolStringPoolEntry).restype, LLVMOrcReleaseSymbolStringPoolEntry.argtypes = None, [LLVMOrcSymbolStringPoolEntryRef]
-except AttributeError: pass
-
-try: (LLVMOrcSymbolStringPoolEntryStr:=dll.LLVMOrcSymbolStringPoolEntryStr).restype, LLVMOrcSymbolStringPoolEntryStr.argtypes = ctypes.POINTER(ctypes.c_char), [LLVMOrcSymbolStringPoolEntryRef]
-except AttributeError: pass
-
-class struct_LLVMOrcOpaqueResourceTracker(Struct): pass
-LLVMOrcResourceTrackerRef = ctypes.POINTER(struct_LLVMOrcOpaqueResourceTracker)
-try: (LLVMOrcReleaseResourceTracker:=dll.LLVMOrcReleaseResourceTracker).restype, LLVMOrcReleaseResourceTracker.argtypes = None, [LLVMOrcResourceTrackerRef]
-except AttributeError: pass
-
-try: (LLVMOrcResourceTrackerTransferTo:=dll.LLVMOrcResourceTrackerTransferTo).restype, LLVMOrcResourceTrackerTransferTo.argtypes = None, [LLVMOrcResourceTrackerRef, LLVMOrcResourceTrackerRef]
-except AttributeError: pass
-
-try: (LLVMOrcResourceTrackerRemove:=dll.LLVMOrcResourceTrackerRemove).restype, LLVMOrcResourceTrackerRemove.argtypes = LLVMErrorRef, [LLVMOrcResourceTrackerRef]
-except AttributeError: pass
-
-class struct_LLVMOrcOpaqueDefinitionGenerator(Struct): pass
-LLVMOrcDefinitionGeneratorRef = ctypes.POINTER(struct_LLVMOrcOpaqueDefinitionGenerator)
-try: (LLVMOrcDisposeDefinitionGenerator:=dll.LLVMOrcDisposeDefinitionGenerator).restype, LLVMOrcDisposeDefinitionGenerator.argtypes = None, [LLVMOrcDefinitionGeneratorRef]
-except AttributeError: pass
-
-class struct_LLVMOrcOpaqueMaterializationUnit(Struct): pass
-LLVMOrcMaterializationUnitRef = ctypes.POINTER(struct_LLVMOrcOpaqueMaterializationUnit)
-try: (LLVMOrcDisposeMaterializationUnit:=dll.LLVMOrcDisposeMaterializationUnit).restype, LLVMOrcDisposeMaterializationUnit.argtypes = None, [LLVMOrcMaterializationUnitRef]
-except AttributeError: pass
-
-class LLVMOrcCSymbolFlagsMapPair(Struct): pass
-LLVMOrcCSymbolFlagsMapPair._fields_ = [
-  ('Name', LLVMOrcSymbolStringPoolEntryRef),
-  ('Flags', LLVMJITSymbolFlags),
-]
-LLVMOrcCSymbolFlagsMapPairs = ctypes.POINTER(LLVMOrcCSymbolFlagsMapPair)
-class struct_LLVMOrcOpaqueMaterializationResponsibility(Struct): pass
-LLVMOrcMaterializationUnitMaterializeFunction = ctypes.CFUNCTYPE(None, ctypes.c_void_p, ctypes.POINTER(struct_LLVMOrcOpaqueMaterializationResponsibility))
-LLVMOrcMaterializationUnitDiscardFunction = ctypes.CFUNCTYPE(None, ctypes.c_void_p, ctypes.POINTER(struct_LLVMOrcOpaqueJITDylib), ctypes.POINTER(struct_LLVMOrcOpaqueSymbolStringPoolEntry))
-LLVMOrcMaterializationUnitDestroyFunction = ctypes.CFUNCTYPE(None, ctypes.c_void_p)
-try: (LLVMOrcCreateCustomMaterializationUnit:=dll.LLVMOrcCreateCustomMaterializationUnit).restype, LLVMOrcCreateCustomMaterializationUnit.argtypes = LLVMOrcMaterializationUnitRef, [ctypes.POINTER(ctypes.c_char), ctypes.c_void_p, LLVMOrcCSymbolFlagsMapPairs, size_t, LLVMOrcSymbolStringPoolEntryRef, LLVMOrcMaterializationUnitMaterializeFunction, LLVMOrcMaterializationUnitDiscardFunction, LLVMOrcMaterializationUnitDestroyFunction]
-except AttributeError: pass
-
-LLVMOrcCSymbolMapPairs = ctypes.POINTER(LLVMOrcCSymbolMapPair)
-try: (LLVMOrcAbsoluteSymbols:=dll.LLVMOrcAbsoluteSymbols).restype, LLVMOrcAbsoluteSymbols.argtypes = LLVMOrcMaterializationUnitRef, [LLVMOrcCSymbolMapPairs, size_t]
-except AttributeError: pass
-
-class struct_LLVMOrcOpaqueLazyCallThroughManager(Struct): pass
-LLVMOrcLazyCallThroughManagerRef = ctypes.POINTER(struct_LLVMOrcOpaqueLazyCallThroughManager)
-class struct_LLVMOrcOpaqueIndirectStubsManager(Struct): pass
-LLVMOrcIndirectStubsManagerRef = ctypes.POINTER(struct_LLVMOrcOpaqueIndirectStubsManager)
-class LLVMOrcCSymbolAliasMapPair(Struct): pass
-class LLVMOrcCSymbolAliasMapEntry(Struct): pass
-LLVMOrcCSymbolAliasMapEntry._fields_ = [
-  ('Name', LLVMOrcSymbolStringPoolEntryRef),
-  ('Flags', LLVMJITSymbolFlags),
-]
-LLVMOrcCSymbolAliasMapPair._fields_ = [
-  ('Name', LLVMOrcSymbolStringPoolEntryRef),
-  ('Entry', LLVMOrcCSymbolAliasMapEntry),
-]
-LLVMOrcCSymbolAliasMapPairs = ctypes.POINTER(LLVMOrcCSymbolAliasMapPair)
-try: (LLVMOrcLazyReexports:=dll.LLVMOrcLazyReexports).restype, LLVMOrcLazyReexports.argtypes = LLVMOrcMaterializationUnitRef, [LLVMOrcLazyCallThroughManagerRef, LLVMOrcIndirectStubsManagerRef, LLVMOrcJITDylibRef, LLVMOrcCSymbolAliasMapPairs, size_t]
-except AttributeError: pass
-
-LLVMOrcMaterializationResponsibilityRef = ctypes.POINTER(struct_LLVMOrcOpaqueMaterializationResponsibility)
-try: (LLVMOrcDisposeMaterializationResponsibility:=dll.LLVMOrcDisposeMaterializationResponsibility).restype, LLVMOrcDisposeMaterializationResponsibility.argtypes = None, [LLVMOrcMaterializationResponsibilityRef]
-except AttributeError: pass
-
-try: (LLVMOrcMaterializationResponsibilityGetTargetDylib:=dll.LLVMOrcMaterializationResponsibilityGetTargetDylib).restype, LLVMOrcMaterializationResponsibilityGetTargetDylib.argtypes = LLVMOrcJITDylibRef, [LLVMOrcMaterializationResponsibilityRef]
-except AttributeError: pass
-
-try: (LLVMOrcMaterializationResponsibilityGetExecutionSession:=dll.LLVMOrcMaterializationResponsibilityGetExecutionSession).restype, LLVMOrcMaterializationResponsibilityGetExecutionSession.argtypes = LLVMOrcExecutionSessionRef, [LLVMOrcMaterializationResponsibilityRef]
-except AttributeError: pass
-
-try: (LLVMOrcMaterializationResponsibilityGetSymbols:=dll.LLVMOrcMaterializationResponsibilityGetSymbols).restype, LLVMOrcMaterializationResponsibilityGetSymbols.argtypes = LLVMOrcCSymbolFlagsMapPairs, [LLVMOrcMaterializationResponsibilityRef, ctypes.POINTER(size_t)]
-except AttributeError: pass
-
-try: (LLVMOrcDisposeCSymbolFlagsMap:=dll.LLVMOrcDisposeCSymbolFlagsMap).restype, LLVMOrcDisposeCSymbolFlagsMap.argtypes = None, [LLVMOrcCSymbolFlagsMapPairs]
-except AttributeError: pass
-
-try: (LLVMOrcMaterializationResponsibilityGetInitializerSymbol:=dll.LLVMOrcMaterializationResponsibilityGetInitializerSymbol).restype, LLVMOrcMaterializationResponsibilityGetInitializerSymbol.argtypes = LLVMOrcSymbolStringPoolEntryRef, [LLVMOrcMaterializationResponsibilityRef]
-except AttributeError: pass
-
-try: (LLVMOrcMaterializationResponsibilityGetRequestedSymbols:=dll.LLVMOrcMaterializationResponsibilityGetRequestedSymbols).restype, LLVMOrcMaterializationResponsibilityGetRequestedSymbols.argtypes = ctypes.POINTER(LLVMOrcSymbolStringPoolEntryRef), [LLVMOrcMaterializationResponsibilityRef, ctypes.POINTER(size_t)]
-except AttributeError: pass
-
-try: (LLVMOrcDisposeSymbols:=dll.LLVMOrcDisposeSymbols).restype, LLVMOrcDisposeSymbols.argtypes = None, [ctypes.POINTER(LLVMOrcSymbolStringPoolEntryRef)]
-except AttributeError: pass
-
-try: (LLVMOrcMaterializationResponsibilityNotifyResolved:=dll.LLVMOrcMaterializationResponsibilityNotifyResolved).restype, LLVMOrcMaterializationResponsibilityNotifyResolved.argtypes = LLVMErrorRef, [LLVMOrcMaterializationResponsibilityRef, LLVMOrcCSymbolMapPairs, size_t]
-except AttributeError: pass
-
-class LLVMOrcCSymbolDependenceGroup(Struct): pass
-class LLVMOrcCSymbolsList(Struct): pass
-LLVMOrcCSymbolsList._fields_ = [
-  ('Symbols', ctypes.POINTER(LLVMOrcSymbolStringPoolEntryRef)),
-  ('Length', size_t),
-]
-class LLVMOrcCDependenceMapPair(Struct): pass
-LLVMOrcCDependenceMapPair._fields_ = [
-  ('JD', LLVMOrcJITDylibRef),
-  ('Names', LLVMOrcCSymbolsList),
-]
-LLVMOrcCDependenceMapPairs = ctypes.POINTER(LLVMOrcCDependenceMapPair)
-LLVMOrcCSymbolDependenceGroup._fields_ = [
-  ('Symbols', LLVMOrcCSymbolsList),
-  ('Dependencies', LLVMOrcCDependenceMapPairs),
-  ('NumDependencies', size_t),
-]
-try: (LLVMOrcMaterializationResponsibilityNotifyEmitted:=dll.LLVMOrcMaterializationResponsibilityNotifyEmitted).restype, LLVMOrcMaterializationResponsibilityNotifyEmitted.argtypes = LLVMErrorRef, [LLVMOrcMaterializationResponsibilityRef, ctypes.POINTER(LLVMOrcCSymbolDependenceGroup), size_t]
-except AttributeError: pass
-
-try: (LLVMOrcMaterializationResponsibilityDefineMaterializing:=dll.LLVMOrcMaterializationResponsibilityDefineMaterializing).restype, LLVMOrcMaterializationResponsibilityDefineMaterializing.argtypes = LLVMErrorRef, [LLVMOrcMaterializationResponsibilityRef, LLVMOrcCSymbolFlagsMapPairs, size_t]
-except AttributeError: pass
-
-try: (LLVMOrcMaterializationResponsibilityFailMaterialization:=dll.LLVMOrcMaterializationResponsibilityFailMaterialization).restype, LLVMOrcMaterializationResponsibilityFailMaterialization.argtypes = None, [LLVMOrcMaterializationResponsibilityRef]
-except AttributeError: pass
-
-try: (LLVMOrcMaterializationResponsibilityReplace:=dll.LLVMOrcMaterializationResponsibilityReplace).restype, LLVMOrcMaterializationResponsibilityReplace.argtypes = LLVMErrorRef, [LLVMOrcMaterializationResponsibilityRef, LLVMOrcMaterializationUnitRef]
-except AttributeError: pass
-
-try: (LLVMOrcMaterializationResponsibilityDelegate:=dll.LLVMOrcMaterializationResponsibilityDelegate).restype, LLVMOrcMaterializationResponsibilityDelegate.argtypes = LLVMErrorRef, [LLVMOrcMaterializationResponsibilityRef, ctypes.POINTER(LLVMOrcSymbolStringPoolEntryRef), size_t, ctypes.POINTER(LLVMOrcMaterializationResponsibilityRef)]
-except AttributeError: pass
-
-try: (LLVMOrcExecutionSessionCreateBareJITDylib:=dll.LLVMOrcExecutionSessionCreateBareJITDylib).restype, LLVMOrcExecutionSessionCreateBareJITDylib.argtypes = LLVMOrcJITDylibRef, [LLVMOrcExecutionSessionRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMOrcExecutionSessionCreateJITDylib:=dll.LLVMOrcExecutionSessionCreateJITDylib).restype, LLVMOrcExecutionSessionCreateJITDylib.argtypes = LLVMErrorRef, [LLVMOrcExecutionSessionRef, ctypes.POINTER(LLVMOrcJITDylibRef), ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMOrcExecutionSessionGetJITDylibByName:=dll.LLVMOrcExecutionSessionGetJITDylibByName).restype, LLVMOrcExecutionSessionGetJITDylibByName.argtypes = LLVMOrcJITDylibRef, [LLVMOrcExecutionSessionRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMOrcJITDylibCreateResourceTracker:=dll.LLVMOrcJITDylibCreateResourceTracker).restype, LLVMOrcJITDylibCreateResourceTracker.argtypes = LLVMOrcResourceTrackerRef, [LLVMOrcJITDylibRef]
-except AttributeError: pass
-
-try: (LLVMOrcJITDylibGetDefaultResourceTracker:=dll.LLVMOrcJITDylibGetDefaultResourceTracker).restype, LLVMOrcJITDylibGetDefaultResourceTracker.argtypes = LLVMOrcResourceTrackerRef, [LLVMOrcJITDylibRef]
-except AttributeError: pass
-
-try: (LLVMOrcJITDylibDefine:=dll.LLVMOrcJITDylibDefine).restype, LLVMOrcJITDylibDefine.argtypes = LLVMErrorRef, [LLVMOrcJITDylibRef, LLVMOrcMaterializationUnitRef]
-except AttributeError: pass
-
-try: (LLVMOrcJITDylibClear:=dll.LLVMOrcJITDylibClear).restype, LLVMOrcJITDylibClear.argtypes = LLVMErrorRef, [LLVMOrcJITDylibRef]
-except AttributeError: pass
-
-try: (LLVMOrcJITDylibAddGenerator:=dll.LLVMOrcJITDylibAddGenerator).restype, LLVMOrcJITDylibAddGenerator.argtypes = None, [LLVMOrcJITDylibRef, LLVMOrcDefinitionGeneratorRef]
-except AttributeError: pass
-
-class struct_LLVMOrcOpaqueLookupState(Struct): pass
-LLVMOrcCAPIDefinitionGeneratorTryToGenerateFunction = ctypes.CFUNCTYPE(ctypes.POINTER(struct_LLVMOpaqueError), ctypes.POINTER(struct_LLVMOrcOpaqueDefinitionGenerator), ctypes.c_void_p, ctypes.POINTER(ctypes.POINTER(struct_LLVMOrcOpaqueLookupState)), LLVMOrcLookupKind, ctypes.POINTER(struct_LLVMOrcOpaqueJITDylib), LLVMOrcJITDylibLookupFlags, ctypes.POINTER(LLVMOrcCLookupSetElement), ctypes.c_uint64)
-LLVMOrcDisposeCAPIDefinitionGeneratorFunction = ctypes.CFUNCTYPE(None, ctypes.c_void_p)
-try: (LLVMOrcCreateCustomCAPIDefinitionGenerator:=dll.LLVMOrcCreateCustomCAPIDefinitionGenerator).restype, LLVMOrcCreateCustomCAPIDefinitionGenerator.argtypes = LLVMOrcDefinitionGeneratorRef, [LLVMOrcCAPIDefinitionGeneratorTryToGenerateFunction, ctypes.c_void_p, LLVMOrcDisposeCAPIDefinitionGeneratorFunction]
-except AttributeError: pass
-
-LLVMOrcLookupStateRef = ctypes.POINTER(struct_LLVMOrcOpaqueLookupState)
-try: (LLVMOrcLookupStateContinueLookup:=dll.LLVMOrcLookupStateContinueLookup).restype, LLVMOrcLookupStateContinueLookup.argtypes = None, [LLVMOrcLookupStateRef, LLVMErrorRef]
-except AttributeError: pass
-
-LLVMOrcSymbolPredicate = ctypes.CFUNCTYPE(ctypes.c_int32, ctypes.c_void_p, ctypes.POINTER(struct_LLVMOrcOpaqueSymbolStringPoolEntry))
-try: (LLVMOrcCreateDynamicLibrarySearchGeneratorForProcess:=dll.LLVMOrcCreateDynamicLibrarySearchGeneratorForProcess).restype, LLVMOrcCreateDynamicLibrarySearchGeneratorForProcess.argtypes = LLVMErrorRef, [ctypes.POINTER(LLVMOrcDefinitionGeneratorRef), ctypes.c_char, LLVMOrcSymbolPredicate, ctypes.c_void_p]
-except AttributeError: pass
-
-try: (LLVMOrcCreateDynamicLibrarySearchGeneratorForPath:=dll.LLVMOrcCreateDynamicLibrarySearchGeneratorForPath).restype, LLVMOrcCreateDynamicLibrarySearchGeneratorForPath.argtypes = LLVMErrorRef, [ctypes.POINTER(LLVMOrcDefinitionGeneratorRef), ctypes.POINTER(ctypes.c_char), ctypes.c_char, LLVMOrcSymbolPredicate, ctypes.c_void_p]
-except AttributeError: pass
-
-class struct_LLVMOrcOpaqueObjectLayer(Struct): pass
-LLVMOrcObjectLayerRef = ctypes.POINTER(struct_LLVMOrcOpaqueObjectLayer)
-try: (LLVMOrcCreateStaticLibrarySearchGeneratorForPath:=dll.LLVMOrcCreateStaticLibrarySearchGeneratorForPath).restype, LLVMOrcCreateStaticLibrarySearchGeneratorForPath.argtypes = LLVMErrorRef, [ctypes.POINTER(LLVMOrcDefinitionGeneratorRef), LLVMOrcObjectLayerRef, ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-class struct_LLVMOrcOpaqueThreadSafeContext(Struct): pass
-LLVMOrcThreadSafeContextRef = ctypes.POINTER(struct_LLVMOrcOpaqueThreadSafeContext)
-try: (LLVMOrcCreateNewThreadSafeContext:=dll.LLVMOrcCreateNewThreadSafeContext).restype, LLVMOrcCreateNewThreadSafeContext.argtypes = LLVMOrcThreadSafeContextRef, []
-except AttributeError: pass
-
-try: (LLVMOrcThreadSafeContextGetContext:=dll.LLVMOrcThreadSafeContextGetContext).restype, LLVMOrcThreadSafeContextGetContext.argtypes = LLVMContextRef, [LLVMOrcThreadSafeContextRef]
-except AttributeError: pass
-
-try: (LLVMOrcDisposeThreadSafeContext:=dll.LLVMOrcDisposeThreadSafeContext).restype, LLVMOrcDisposeThreadSafeContext.argtypes = None, [LLVMOrcThreadSafeContextRef]
-except AttributeError: pass
-
-class struct_LLVMOrcOpaqueThreadSafeModule(Struct): pass
-LLVMOrcThreadSafeModuleRef = ctypes.POINTER(struct_LLVMOrcOpaqueThreadSafeModule)
-try: (LLVMOrcCreateNewThreadSafeModule:=dll.LLVMOrcCreateNewThreadSafeModule).restype, LLVMOrcCreateNewThreadSafeModule.argtypes = LLVMOrcThreadSafeModuleRef, [LLVMModuleRef, LLVMOrcThreadSafeContextRef]
-except AttributeError: pass
-
-try: (LLVMOrcDisposeThreadSafeModule:=dll.LLVMOrcDisposeThreadSafeModule).restype, LLVMOrcDisposeThreadSafeModule.argtypes = None, [LLVMOrcThreadSafeModuleRef]
-except AttributeError: pass
-
-LLVMOrcGenericIRModuleOperationFunction = ctypes.CFUNCTYPE(ctypes.POINTER(struct_LLVMOpaqueError), ctypes.c_void_p, ctypes.POINTER(struct_LLVMOpaqueModule))
-try: (LLVMOrcThreadSafeModuleWithModuleDo:=dll.LLVMOrcThreadSafeModuleWithModuleDo).restype, LLVMOrcThreadSafeModuleWithModuleDo.argtypes = LLVMErrorRef, [LLVMOrcThreadSafeModuleRef, LLVMOrcGenericIRModuleOperationFunction, ctypes.c_void_p]
-except AttributeError: pass
-
-class struct_LLVMOrcOpaqueJITTargetMachineBuilder(Struct): pass
-LLVMOrcJITTargetMachineBuilderRef = ctypes.POINTER(struct_LLVMOrcOpaqueJITTargetMachineBuilder)
-try: (LLVMOrcJITTargetMachineBuilderDetectHost:=dll.LLVMOrcJITTargetMachineBuilderDetectHost).restype, LLVMOrcJITTargetMachineBuilderDetectHost.argtypes = LLVMErrorRef, [ctypes.POINTER(LLVMOrcJITTargetMachineBuilderRef)]
-except AttributeError: pass
-
-try: (LLVMOrcJITTargetMachineBuilderCreateFromTargetMachine:=dll.LLVMOrcJITTargetMachineBuilderCreateFromTargetMachine).restype, LLVMOrcJITTargetMachineBuilderCreateFromTargetMachine.argtypes = LLVMOrcJITTargetMachineBuilderRef, [LLVMTargetMachineRef]
-except AttributeError: pass
-
-try: (LLVMOrcDisposeJITTargetMachineBuilder:=dll.LLVMOrcDisposeJITTargetMachineBuilder).restype, LLVMOrcDisposeJITTargetMachineBuilder.argtypes = None, [LLVMOrcJITTargetMachineBuilderRef]
-except AttributeError: pass
-
-try: (LLVMOrcJITTargetMachineBuilderGetTargetTriple:=dll.LLVMOrcJITTargetMachineBuilderGetTargetTriple).restype, LLVMOrcJITTargetMachineBuilderGetTargetTriple.argtypes = ctypes.POINTER(ctypes.c_char), [LLVMOrcJITTargetMachineBuilderRef]
-except AttributeError: pass
-
-try: (LLVMOrcJITTargetMachineBuilderSetTargetTriple:=dll.LLVMOrcJITTargetMachineBuilderSetTargetTriple).restype, LLVMOrcJITTargetMachineBuilderSetTargetTriple.argtypes = None, [LLVMOrcJITTargetMachineBuilderRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMOrcObjectLayerAddObjectFile:=dll.LLVMOrcObjectLayerAddObjectFile).restype, LLVMOrcObjectLayerAddObjectFile.argtypes = LLVMErrorRef, [LLVMOrcObjectLayerRef, LLVMOrcJITDylibRef, LLVMMemoryBufferRef]
-except AttributeError: pass
-
-try: (LLVMOrcObjectLayerAddObjectFileWithRT:=dll.LLVMOrcObjectLayerAddObjectFileWithRT).restype, LLVMOrcObjectLayerAddObjectFileWithRT.argtypes = LLVMErrorRef, [LLVMOrcObjectLayerRef, LLVMOrcResourceTrackerRef, LLVMMemoryBufferRef]
-except AttributeError: pass
-
-try: (LLVMOrcObjectLayerEmit:=dll.LLVMOrcObjectLayerEmit).restype, LLVMOrcObjectLayerEmit.argtypes = None, [LLVMOrcObjectLayerRef, LLVMOrcMaterializationResponsibilityRef, LLVMMemoryBufferRef]
-except AttributeError: pass
-
-try: (LLVMOrcDisposeObjectLayer:=dll.LLVMOrcDisposeObjectLayer).restype, LLVMOrcDisposeObjectLayer.argtypes = None, [LLVMOrcObjectLayerRef]
-except AttributeError: pass
-
-class struct_LLVMOrcOpaqueIRTransformLayer(Struct): pass
-LLVMOrcIRTransformLayerRef = ctypes.POINTER(struct_LLVMOrcOpaqueIRTransformLayer)
-try: (LLVMOrcIRTransformLayerEmit:=dll.LLVMOrcIRTransformLayerEmit).restype, LLVMOrcIRTransformLayerEmit.argtypes = None, [LLVMOrcIRTransformLayerRef, LLVMOrcMaterializationResponsibilityRef, LLVMOrcThreadSafeModuleRef]
-except AttributeError: pass
-
-LLVMOrcIRTransformLayerTransformFunction = ctypes.CFUNCTYPE(ctypes.POINTER(struct_LLVMOpaqueError), ctypes.c_void_p, ctypes.POINTER(ctypes.POINTER(struct_LLVMOrcOpaqueThreadSafeModule)), ctypes.POINTER(struct_LLVMOrcOpaqueMaterializationResponsibility))
-try: (LLVMOrcIRTransformLayerSetTransform:=dll.LLVMOrcIRTransformLayerSetTransform).restype, LLVMOrcIRTransformLayerSetTransform.argtypes = None, [LLVMOrcIRTransformLayerRef, LLVMOrcIRTransformLayerTransformFunction, ctypes.c_void_p]
-except AttributeError: pass
-
-class struct_LLVMOrcOpaqueObjectTransformLayer(Struct): pass
-LLVMOrcObjectTransformLayerRef = ctypes.POINTER(struct_LLVMOrcOpaqueObjectTransformLayer)
-LLVMOrcObjectTransformLayerTransformFunction = ctypes.CFUNCTYPE(ctypes.POINTER(struct_LLVMOpaqueError), ctypes.c_void_p, ctypes.POINTER(ctypes.POINTER(struct_LLVMOpaqueMemoryBuffer)))
-try: (LLVMOrcObjectTransformLayerSetTransform:=dll.LLVMOrcObjectTransformLayerSetTransform).restype, LLVMOrcObjectTransformLayerSetTransform.argtypes = None, [LLVMOrcObjectTransformLayerRef, LLVMOrcObjectTransformLayerTransformFunction, ctypes.c_void_p]
-except AttributeError: pass
-
-try: (LLVMOrcCreateLocalIndirectStubsManager:=dll.LLVMOrcCreateLocalIndirectStubsManager).restype, LLVMOrcCreateLocalIndirectStubsManager.argtypes = LLVMOrcIndirectStubsManagerRef, [ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMOrcDisposeIndirectStubsManager:=dll.LLVMOrcDisposeIndirectStubsManager).restype, LLVMOrcDisposeIndirectStubsManager.argtypes = None, [LLVMOrcIndirectStubsManagerRef]
-except AttributeError: pass
-
-LLVMOrcJITTargetAddress = ctypes.c_uint64
-try: (LLVMOrcCreateLocalLazyCallThroughManager:=dll.LLVMOrcCreateLocalLazyCallThroughManager).restype, LLVMOrcCreateLocalLazyCallThroughManager.argtypes = LLVMErrorRef, [ctypes.POINTER(ctypes.c_char), LLVMOrcExecutionSessionRef, LLVMOrcJITTargetAddress, ctypes.POINTER(LLVMOrcLazyCallThroughManagerRef)]
-except AttributeError: pass
-
-try: (LLVMOrcDisposeLazyCallThroughManager:=dll.LLVMOrcDisposeLazyCallThroughManager).restype, LLVMOrcDisposeLazyCallThroughManager.argtypes = None, [LLVMOrcLazyCallThroughManagerRef]
-except AttributeError: pass
-
-class struct_LLVMOrcOpaqueDumpObjects(Struct): pass
-LLVMOrcDumpObjectsRef = ctypes.POINTER(struct_LLVMOrcOpaqueDumpObjects)
-try: (LLVMOrcCreateDumpObjects:=dll.LLVMOrcCreateDumpObjects).restype, LLVMOrcCreateDumpObjects.argtypes = LLVMOrcDumpObjectsRef, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMOrcDisposeDumpObjects:=dll.LLVMOrcDisposeDumpObjects).restype, LLVMOrcDisposeDumpObjects.argtypes = None, [LLVMOrcDumpObjectsRef]
-except AttributeError: pass
-
-try: (LLVMOrcDumpObjects_CallOperator:=dll.LLVMOrcDumpObjects_CallOperator).restype, LLVMOrcDumpObjects_CallOperator.argtypes = LLVMErrorRef, [LLVMOrcDumpObjectsRef, ctypes.POINTER(LLVMMemoryBufferRef)]
-except AttributeError: pass
-
-LLVMOrcLLJITBuilderObjectLinkingLayerCreatorFunction = ctypes.CFUNCTYPE(ctypes.POINTER(struct_LLVMOrcOpaqueObjectLayer), ctypes.c_void_p, ctypes.POINTER(struct_LLVMOrcOpaqueExecutionSession), ctypes.POINTER(ctypes.c_char))
-class struct_LLVMOrcOpaqueLLJITBuilder(Struct): pass
-LLVMOrcLLJITBuilderRef = ctypes.POINTER(struct_LLVMOrcOpaqueLLJITBuilder)
-class struct_LLVMOrcOpaqueLLJIT(Struct): pass
-LLVMOrcLLJITRef = ctypes.POINTER(struct_LLVMOrcOpaqueLLJIT)
-try: (LLVMOrcCreateLLJITBuilder:=dll.LLVMOrcCreateLLJITBuilder).restype, LLVMOrcCreateLLJITBuilder.argtypes = LLVMOrcLLJITBuilderRef, []
-except AttributeError: pass
-
-try: (LLVMOrcDisposeLLJITBuilder:=dll.LLVMOrcDisposeLLJITBuilder).restype, LLVMOrcDisposeLLJITBuilder.argtypes = None, [LLVMOrcLLJITBuilderRef]
-except AttributeError: pass
-
-try: (LLVMOrcLLJITBuilderSetJITTargetMachineBuilder:=dll.LLVMOrcLLJITBuilderSetJITTargetMachineBuilder).restype, LLVMOrcLLJITBuilderSetJITTargetMachineBuilder.argtypes = None, [LLVMOrcLLJITBuilderRef, LLVMOrcJITTargetMachineBuilderRef]
-except AttributeError: pass
-
-try: (LLVMOrcLLJITBuilderSetObjectLinkingLayerCreator:=dll.LLVMOrcLLJITBuilderSetObjectLinkingLayerCreator).restype, LLVMOrcLLJITBuilderSetObjectLinkingLayerCreator.argtypes = None, [LLVMOrcLLJITBuilderRef, LLVMOrcLLJITBuilderObjectLinkingLayerCreatorFunction, ctypes.c_void_p]
-except AttributeError: pass
-
-try: (LLVMOrcCreateLLJIT:=dll.LLVMOrcCreateLLJIT).restype, LLVMOrcCreateLLJIT.argtypes = LLVMErrorRef, [ctypes.POINTER(LLVMOrcLLJITRef), LLVMOrcLLJITBuilderRef]
-except AttributeError: pass
-
-try: (LLVMOrcDisposeLLJIT:=dll.LLVMOrcDisposeLLJIT).restype, LLVMOrcDisposeLLJIT.argtypes = LLVMErrorRef, [LLVMOrcLLJITRef]
-except AttributeError: pass
-
-try: (LLVMOrcLLJITGetExecutionSession:=dll.LLVMOrcLLJITGetExecutionSession).restype, LLVMOrcLLJITGetExecutionSession.argtypes = LLVMOrcExecutionSessionRef, [LLVMOrcLLJITRef]
-except AttributeError: pass
-
-try: (LLVMOrcLLJITGetMainJITDylib:=dll.LLVMOrcLLJITGetMainJITDylib).restype, LLVMOrcLLJITGetMainJITDylib.argtypes = LLVMOrcJITDylibRef, [LLVMOrcLLJITRef]
-except AttributeError: pass
-
-try: (LLVMOrcLLJITGetTripleString:=dll.LLVMOrcLLJITGetTripleString).restype, LLVMOrcLLJITGetTripleString.argtypes = ctypes.POINTER(ctypes.c_char), [LLVMOrcLLJITRef]
-except AttributeError: pass
-
-try: (LLVMOrcLLJITGetGlobalPrefix:=dll.LLVMOrcLLJITGetGlobalPrefix).restype, LLVMOrcLLJITGetGlobalPrefix.argtypes = ctypes.c_char, [LLVMOrcLLJITRef]
-except AttributeError: pass
-
-try: (LLVMOrcLLJITMangleAndIntern:=dll.LLVMOrcLLJITMangleAndIntern).restype, LLVMOrcLLJITMangleAndIntern.argtypes = LLVMOrcSymbolStringPoolEntryRef, [LLVMOrcLLJITRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMOrcLLJITAddObjectFile:=dll.LLVMOrcLLJITAddObjectFile).restype, LLVMOrcLLJITAddObjectFile.argtypes = LLVMErrorRef, [LLVMOrcLLJITRef, LLVMOrcJITDylibRef, LLVMMemoryBufferRef]
-except AttributeError: pass
-
-try: (LLVMOrcLLJITAddObjectFileWithRT:=dll.LLVMOrcLLJITAddObjectFileWithRT).restype, LLVMOrcLLJITAddObjectFileWithRT.argtypes = LLVMErrorRef, [LLVMOrcLLJITRef, LLVMOrcResourceTrackerRef, LLVMMemoryBufferRef]
-except AttributeError: pass
-
-try: (LLVMOrcLLJITAddLLVMIRModule:=dll.LLVMOrcLLJITAddLLVMIRModule).restype, LLVMOrcLLJITAddLLVMIRModule.argtypes = LLVMErrorRef, [LLVMOrcLLJITRef, LLVMOrcJITDylibRef, LLVMOrcThreadSafeModuleRef]
-except AttributeError: pass
-
-try: (LLVMOrcLLJITAddLLVMIRModuleWithRT:=dll.LLVMOrcLLJITAddLLVMIRModuleWithRT).restype, LLVMOrcLLJITAddLLVMIRModuleWithRT.argtypes = LLVMErrorRef, [LLVMOrcLLJITRef, LLVMOrcResourceTrackerRef, LLVMOrcThreadSafeModuleRef]
-except AttributeError: pass
-
-try: (LLVMOrcLLJITLookup:=dll.LLVMOrcLLJITLookup).restype, LLVMOrcLLJITLookup.argtypes = LLVMErrorRef, [LLVMOrcLLJITRef, ctypes.POINTER(LLVMOrcExecutorAddress), ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMOrcLLJITGetObjLinkingLayer:=dll.LLVMOrcLLJITGetObjLinkingLayer).restype, LLVMOrcLLJITGetObjLinkingLayer.argtypes = LLVMOrcObjectLayerRef, [LLVMOrcLLJITRef]
-except AttributeError: pass
-
-try: (LLVMOrcLLJITGetObjTransformLayer:=dll.LLVMOrcLLJITGetObjTransformLayer).restype, LLVMOrcLLJITGetObjTransformLayer.argtypes = LLVMOrcObjectTransformLayerRef, [LLVMOrcLLJITRef]
-except AttributeError: pass
-
-try: (LLVMOrcLLJITGetIRTransformLayer:=dll.LLVMOrcLLJITGetIRTransformLayer).restype, LLVMOrcLLJITGetIRTransformLayer.argtypes = LLVMOrcIRTransformLayerRef, [LLVMOrcLLJITRef]
-except AttributeError: pass
-
-try: (LLVMOrcLLJITGetDataLayoutStr:=dll.LLVMOrcLLJITGetDataLayoutStr).restype, LLVMOrcLLJITGetDataLayoutStr.argtypes = ctypes.POINTER(ctypes.c_char), [LLVMOrcLLJITRef]
-except AttributeError: pass
-
-try: (LLVMGetErrorTypeId:=dll.LLVMGetErrorTypeId).restype, LLVMGetErrorTypeId.argtypes = LLVMErrorTypeId, [LLVMErrorRef]
-except AttributeError: pass
-
-try: (LLVMConsumeError:=dll.LLVMConsumeError).restype, LLVMConsumeError.argtypes = None, [LLVMErrorRef]
-except AttributeError: pass
-
-try: (LLVMCantFail:=dll.LLVMCantFail).restype, LLVMCantFail.argtypes = None, [LLVMErrorRef]
-except AttributeError: pass
-
-try: (LLVMGetErrorMessage:=dll.LLVMGetErrorMessage).restype, LLVMGetErrorMessage.argtypes = ctypes.POINTER(ctypes.c_char), [LLVMErrorRef]
-except AttributeError: pass
-
-try: (LLVMDisposeErrorMessage:=dll.LLVMDisposeErrorMessage).restype, LLVMDisposeErrorMessage.argtypes = None, [ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMGetStringErrorTypeId:=dll.LLVMGetStringErrorTypeId).restype, LLVMGetStringErrorTypeId.argtypes = LLVMErrorTypeId, []
-except AttributeError: pass
-
-try: (LLVMCreateStringError:=dll.LLVMCreateStringError).restype, LLVMCreateStringError.argtypes = LLVMErrorRef, [ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (imaxabs:=dll.imaxabs).restype, imaxabs.argtypes = intmax_t, [intmax_t]
-except AttributeError: pass
-
-try: (imaxdiv:=dll.imaxdiv).restype, imaxdiv.argtypes = imaxdiv_t, [intmax_t, intmax_t]
-except AttributeError: pass
-
-try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (select:=dll.select).restype, select.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timeval)]
-except AttributeError: pass
-
-try: (pselect:=dll.pselect).restype, pselect.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timespec), ctypes.POINTER(__sigset_t)]
-except AttributeError: pass
-
-try: (LLVMInitializeAArch64TargetInfo:=dll.LLVMInitializeAArch64TargetInfo).restype, LLVMInitializeAArch64TargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAMDGPUTargetInfo:=dll.LLVMInitializeAMDGPUTargetInfo).restype, LLVMInitializeAMDGPUTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeARMTargetInfo:=dll.LLVMInitializeARMTargetInfo).restype, LLVMInitializeARMTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAVRTargetInfo:=dll.LLVMInitializeAVRTargetInfo).restype, LLVMInitializeAVRTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeBPFTargetInfo:=dll.LLVMInitializeBPFTargetInfo).restype, LLVMInitializeBPFTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeHexagonTargetInfo:=dll.LLVMInitializeHexagonTargetInfo).restype, LLVMInitializeHexagonTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeLanaiTargetInfo:=dll.LLVMInitializeLanaiTargetInfo).restype, LLVMInitializeLanaiTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeLoongArchTargetInfo:=dll.LLVMInitializeLoongArchTargetInfo).restype, LLVMInitializeLoongArchTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeMipsTargetInfo:=dll.LLVMInitializeMipsTargetInfo).restype, LLVMInitializeMipsTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeMSP430TargetInfo:=dll.LLVMInitializeMSP430TargetInfo).restype, LLVMInitializeMSP430TargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeNVPTXTargetInfo:=dll.LLVMInitializeNVPTXTargetInfo).restype, LLVMInitializeNVPTXTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializePowerPCTargetInfo:=dll.LLVMInitializePowerPCTargetInfo).restype, LLVMInitializePowerPCTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeRISCVTargetInfo:=dll.LLVMInitializeRISCVTargetInfo).restype, LLVMInitializeRISCVTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSparcTargetInfo:=dll.LLVMInitializeSparcTargetInfo).restype, LLVMInitializeSparcTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSPIRVTargetInfo:=dll.LLVMInitializeSPIRVTargetInfo).restype, LLVMInitializeSPIRVTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSystemZTargetInfo:=dll.LLVMInitializeSystemZTargetInfo).restype, LLVMInitializeSystemZTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeVETargetInfo:=dll.LLVMInitializeVETargetInfo).restype, LLVMInitializeVETargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeWebAssemblyTargetInfo:=dll.LLVMInitializeWebAssemblyTargetInfo).restype, LLVMInitializeWebAssemblyTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeX86TargetInfo:=dll.LLVMInitializeX86TargetInfo).restype, LLVMInitializeX86TargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeXCoreTargetInfo:=dll.LLVMInitializeXCoreTargetInfo).restype, LLVMInitializeXCoreTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeM68kTargetInfo:=dll.LLVMInitializeM68kTargetInfo).restype, LLVMInitializeM68kTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeXtensaTargetInfo:=dll.LLVMInitializeXtensaTargetInfo).restype, LLVMInitializeXtensaTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAArch64Target:=dll.LLVMInitializeAArch64Target).restype, LLVMInitializeAArch64Target.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAMDGPUTarget:=dll.LLVMInitializeAMDGPUTarget).restype, LLVMInitializeAMDGPUTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeARMTarget:=dll.LLVMInitializeARMTarget).restype, LLVMInitializeARMTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAVRTarget:=dll.LLVMInitializeAVRTarget).restype, LLVMInitializeAVRTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeBPFTarget:=dll.LLVMInitializeBPFTarget).restype, LLVMInitializeBPFTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeHexagonTarget:=dll.LLVMInitializeHexagonTarget).restype, LLVMInitializeHexagonTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeLanaiTarget:=dll.LLVMInitializeLanaiTarget).restype, LLVMInitializeLanaiTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeLoongArchTarget:=dll.LLVMInitializeLoongArchTarget).restype, LLVMInitializeLoongArchTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeMipsTarget:=dll.LLVMInitializeMipsTarget).restype, LLVMInitializeMipsTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeMSP430Target:=dll.LLVMInitializeMSP430Target).restype, LLVMInitializeMSP430Target.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeNVPTXTarget:=dll.LLVMInitializeNVPTXTarget).restype, LLVMInitializeNVPTXTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializePowerPCTarget:=dll.LLVMInitializePowerPCTarget).restype, LLVMInitializePowerPCTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeRISCVTarget:=dll.LLVMInitializeRISCVTarget).restype, LLVMInitializeRISCVTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSparcTarget:=dll.LLVMInitializeSparcTarget).restype, LLVMInitializeSparcTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSPIRVTarget:=dll.LLVMInitializeSPIRVTarget).restype, LLVMInitializeSPIRVTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSystemZTarget:=dll.LLVMInitializeSystemZTarget).restype, LLVMInitializeSystemZTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeVETarget:=dll.LLVMInitializeVETarget).restype, LLVMInitializeVETarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeWebAssemblyTarget:=dll.LLVMInitializeWebAssemblyTarget).restype, LLVMInitializeWebAssemblyTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeX86Target:=dll.LLVMInitializeX86Target).restype, LLVMInitializeX86Target.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeXCoreTarget:=dll.LLVMInitializeXCoreTarget).restype, LLVMInitializeXCoreTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeM68kTarget:=dll.LLVMInitializeM68kTarget).restype, LLVMInitializeM68kTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeXtensaTarget:=dll.LLVMInitializeXtensaTarget).restype, LLVMInitializeXtensaTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAArch64TargetMC:=dll.LLVMInitializeAArch64TargetMC).restype, LLVMInitializeAArch64TargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAMDGPUTargetMC:=dll.LLVMInitializeAMDGPUTargetMC).restype, LLVMInitializeAMDGPUTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeARMTargetMC:=dll.LLVMInitializeARMTargetMC).restype, LLVMInitializeARMTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAVRTargetMC:=dll.LLVMInitializeAVRTargetMC).restype, LLVMInitializeAVRTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeBPFTargetMC:=dll.LLVMInitializeBPFTargetMC).restype, LLVMInitializeBPFTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeHexagonTargetMC:=dll.LLVMInitializeHexagonTargetMC).restype, LLVMInitializeHexagonTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeLanaiTargetMC:=dll.LLVMInitializeLanaiTargetMC).restype, LLVMInitializeLanaiTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeLoongArchTargetMC:=dll.LLVMInitializeLoongArchTargetMC).restype, LLVMInitializeLoongArchTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeMipsTargetMC:=dll.LLVMInitializeMipsTargetMC).restype, LLVMInitializeMipsTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeMSP430TargetMC:=dll.LLVMInitializeMSP430TargetMC).restype, LLVMInitializeMSP430TargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeNVPTXTargetMC:=dll.LLVMInitializeNVPTXTargetMC).restype, LLVMInitializeNVPTXTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializePowerPCTargetMC:=dll.LLVMInitializePowerPCTargetMC).restype, LLVMInitializePowerPCTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeRISCVTargetMC:=dll.LLVMInitializeRISCVTargetMC).restype, LLVMInitializeRISCVTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSparcTargetMC:=dll.LLVMInitializeSparcTargetMC).restype, LLVMInitializeSparcTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSPIRVTargetMC:=dll.LLVMInitializeSPIRVTargetMC).restype, LLVMInitializeSPIRVTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSystemZTargetMC:=dll.LLVMInitializeSystemZTargetMC).restype, LLVMInitializeSystemZTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeVETargetMC:=dll.LLVMInitializeVETargetMC).restype, LLVMInitializeVETargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeWebAssemblyTargetMC:=dll.LLVMInitializeWebAssemblyTargetMC).restype, LLVMInitializeWebAssemblyTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeX86TargetMC:=dll.LLVMInitializeX86TargetMC).restype, LLVMInitializeX86TargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeXCoreTargetMC:=dll.LLVMInitializeXCoreTargetMC).restype, LLVMInitializeXCoreTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeM68kTargetMC:=dll.LLVMInitializeM68kTargetMC).restype, LLVMInitializeM68kTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeXtensaTargetMC:=dll.LLVMInitializeXtensaTargetMC).restype, LLVMInitializeXtensaTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAArch64AsmPrinter:=dll.LLVMInitializeAArch64AsmPrinter).restype, LLVMInitializeAArch64AsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAMDGPUAsmPrinter:=dll.LLVMInitializeAMDGPUAsmPrinter).restype, LLVMInitializeAMDGPUAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeARMAsmPrinter:=dll.LLVMInitializeARMAsmPrinter).restype, LLVMInitializeARMAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAVRAsmPrinter:=dll.LLVMInitializeAVRAsmPrinter).restype, LLVMInitializeAVRAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeBPFAsmPrinter:=dll.LLVMInitializeBPFAsmPrinter).restype, LLVMInitializeBPFAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeHexagonAsmPrinter:=dll.LLVMInitializeHexagonAsmPrinter).restype, LLVMInitializeHexagonAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeLanaiAsmPrinter:=dll.LLVMInitializeLanaiAsmPrinter).restype, LLVMInitializeLanaiAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeLoongArchAsmPrinter:=dll.LLVMInitializeLoongArchAsmPrinter).restype, LLVMInitializeLoongArchAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeMipsAsmPrinter:=dll.LLVMInitializeMipsAsmPrinter).restype, LLVMInitializeMipsAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeMSP430AsmPrinter:=dll.LLVMInitializeMSP430AsmPrinter).restype, LLVMInitializeMSP430AsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeNVPTXAsmPrinter:=dll.LLVMInitializeNVPTXAsmPrinter).restype, LLVMInitializeNVPTXAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializePowerPCAsmPrinter:=dll.LLVMInitializePowerPCAsmPrinter).restype, LLVMInitializePowerPCAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeRISCVAsmPrinter:=dll.LLVMInitializeRISCVAsmPrinter).restype, LLVMInitializeRISCVAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSparcAsmPrinter:=dll.LLVMInitializeSparcAsmPrinter).restype, LLVMInitializeSparcAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSPIRVAsmPrinter:=dll.LLVMInitializeSPIRVAsmPrinter).restype, LLVMInitializeSPIRVAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSystemZAsmPrinter:=dll.LLVMInitializeSystemZAsmPrinter).restype, LLVMInitializeSystemZAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeVEAsmPrinter:=dll.LLVMInitializeVEAsmPrinter).restype, LLVMInitializeVEAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeWebAssemblyAsmPrinter:=dll.LLVMInitializeWebAssemblyAsmPrinter).restype, LLVMInitializeWebAssemblyAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeX86AsmPrinter:=dll.LLVMInitializeX86AsmPrinter).restype, LLVMInitializeX86AsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeXCoreAsmPrinter:=dll.LLVMInitializeXCoreAsmPrinter).restype, LLVMInitializeXCoreAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeM68kAsmPrinter:=dll.LLVMInitializeM68kAsmPrinter).restype, LLVMInitializeM68kAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeXtensaAsmPrinter:=dll.LLVMInitializeXtensaAsmPrinter).restype, LLVMInitializeXtensaAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAArch64AsmParser:=dll.LLVMInitializeAArch64AsmParser).restype, LLVMInitializeAArch64AsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAMDGPUAsmParser:=dll.LLVMInitializeAMDGPUAsmParser).restype, LLVMInitializeAMDGPUAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeARMAsmParser:=dll.LLVMInitializeARMAsmParser).restype, LLVMInitializeARMAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAVRAsmParser:=dll.LLVMInitializeAVRAsmParser).restype, LLVMInitializeAVRAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeBPFAsmParser:=dll.LLVMInitializeBPFAsmParser).restype, LLVMInitializeBPFAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeHexagonAsmParser:=dll.LLVMInitializeHexagonAsmParser).restype, LLVMInitializeHexagonAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeLanaiAsmParser:=dll.LLVMInitializeLanaiAsmParser).restype, LLVMInitializeLanaiAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeLoongArchAsmParser:=dll.LLVMInitializeLoongArchAsmParser).restype, LLVMInitializeLoongArchAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeMipsAsmParser:=dll.LLVMInitializeMipsAsmParser).restype, LLVMInitializeMipsAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeMSP430AsmParser:=dll.LLVMInitializeMSP430AsmParser).restype, LLVMInitializeMSP430AsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializePowerPCAsmParser:=dll.LLVMInitializePowerPCAsmParser).restype, LLVMInitializePowerPCAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeRISCVAsmParser:=dll.LLVMInitializeRISCVAsmParser).restype, LLVMInitializeRISCVAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSparcAsmParser:=dll.LLVMInitializeSparcAsmParser).restype, LLVMInitializeSparcAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSystemZAsmParser:=dll.LLVMInitializeSystemZAsmParser).restype, LLVMInitializeSystemZAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeVEAsmParser:=dll.LLVMInitializeVEAsmParser).restype, LLVMInitializeVEAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeWebAssemblyAsmParser:=dll.LLVMInitializeWebAssemblyAsmParser).restype, LLVMInitializeWebAssemblyAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeX86AsmParser:=dll.LLVMInitializeX86AsmParser).restype, LLVMInitializeX86AsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeM68kAsmParser:=dll.LLVMInitializeM68kAsmParser).restype, LLVMInitializeM68kAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeXtensaAsmParser:=dll.LLVMInitializeXtensaAsmParser).restype, LLVMInitializeXtensaAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAArch64Disassembler:=dll.LLVMInitializeAArch64Disassembler).restype, LLVMInitializeAArch64Disassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAMDGPUDisassembler:=dll.LLVMInitializeAMDGPUDisassembler).restype, LLVMInitializeAMDGPUDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeARMDisassembler:=dll.LLVMInitializeARMDisassembler).restype, LLVMInitializeARMDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAVRDisassembler:=dll.LLVMInitializeAVRDisassembler).restype, LLVMInitializeAVRDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeBPFDisassembler:=dll.LLVMInitializeBPFDisassembler).restype, LLVMInitializeBPFDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeHexagonDisassembler:=dll.LLVMInitializeHexagonDisassembler).restype, LLVMInitializeHexagonDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeLanaiDisassembler:=dll.LLVMInitializeLanaiDisassembler).restype, LLVMInitializeLanaiDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeLoongArchDisassembler:=dll.LLVMInitializeLoongArchDisassembler).restype, LLVMInitializeLoongArchDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeMipsDisassembler:=dll.LLVMInitializeMipsDisassembler).restype, LLVMInitializeMipsDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeMSP430Disassembler:=dll.LLVMInitializeMSP430Disassembler).restype, LLVMInitializeMSP430Disassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializePowerPCDisassembler:=dll.LLVMInitializePowerPCDisassembler).restype, LLVMInitializePowerPCDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeRISCVDisassembler:=dll.LLVMInitializeRISCVDisassembler).restype, LLVMInitializeRISCVDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSparcDisassembler:=dll.LLVMInitializeSparcDisassembler).restype, LLVMInitializeSparcDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSystemZDisassembler:=dll.LLVMInitializeSystemZDisassembler).restype, LLVMInitializeSystemZDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeVEDisassembler:=dll.LLVMInitializeVEDisassembler).restype, LLVMInitializeVEDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeWebAssemblyDisassembler:=dll.LLVMInitializeWebAssemblyDisassembler).restype, LLVMInitializeWebAssemblyDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeX86Disassembler:=dll.LLVMInitializeX86Disassembler).restype, LLVMInitializeX86Disassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeXCoreDisassembler:=dll.LLVMInitializeXCoreDisassembler).restype, LLVMInitializeXCoreDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeM68kDisassembler:=dll.LLVMInitializeM68kDisassembler).restype, LLVMInitializeM68kDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeXtensaDisassembler:=dll.LLVMInitializeXtensaDisassembler).restype, LLVMInitializeXtensaDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMGetModuleDataLayout:=dll.LLVMGetModuleDataLayout).restype, LLVMGetModuleDataLayout.argtypes = LLVMTargetDataRef, [LLVMModuleRef]
-except AttributeError: pass
-
-try: (LLVMSetModuleDataLayout:=dll.LLVMSetModuleDataLayout).restype, LLVMSetModuleDataLayout.argtypes = None, [LLVMModuleRef, LLVMTargetDataRef]
-except AttributeError: pass
-
-try: (LLVMCreateTargetData:=dll.LLVMCreateTargetData).restype, LLVMCreateTargetData.argtypes = LLVMTargetDataRef, [ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMDisposeTargetData:=dll.LLVMDisposeTargetData).restype, LLVMDisposeTargetData.argtypes = None, [LLVMTargetDataRef]
-except AttributeError: pass
-
-try: (LLVMAddTargetLibraryInfo:=dll.LLVMAddTargetLibraryInfo).restype, LLVMAddTargetLibraryInfo.argtypes = None, [LLVMTargetLibraryInfoRef, LLVMPassManagerRef]
-except AttributeError: pass
-
-try: (LLVMCopyStringRepOfTargetData:=dll.LLVMCopyStringRepOfTargetData).restype, LLVMCopyStringRepOfTargetData.argtypes = ctypes.POINTER(ctypes.c_char), [LLVMTargetDataRef]
-except AttributeError: pass
-
-try: (LLVMByteOrder:=dll.LLVMByteOrder).restype, LLVMByteOrder.argtypes = enum_LLVMByteOrdering, [LLVMTargetDataRef]
-except AttributeError: pass
-
-try: (LLVMPointerSize:=dll.LLVMPointerSize).restype, LLVMPointerSize.argtypes = ctypes.c_uint32, [LLVMTargetDataRef]
-except AttributeError: pass
-
-try: (LLVMPointerSizeForAS:=dll.LLVMPointerSizeForAS).restype, LLVMPointerSizeForAS.argtypes = ctypes.c_uint32, [LLVMTargetDataRef, ctypes.c_uint32]
-except AttributeError: pass
-
-try: (LLVMIntPtrType:=dll.LLVMIntPtrType).restype, LLVMIntPtrType.argtypes = LLVMTypeRef, [LLVMTargetDataRef]
-except AttributeError: pass
-
-try: (LLVMIntPtrTypeForAS:=dll.LLVMIntPtrTypeForAS).restype, LLVMIntPtrTypeForAS.argtypes = LLVMTypeRef, [LLVMTargetDataRef, ctypes.c_uint32]
-except AttributeError: pass
-
-try: (LLVMIntPtrTypeInContext:=dll.LLVMIntPtrTypeInContext).restype, LLVMIntPtrTypeInContext.argtypes = LLVMTypeRef, [LLVMContextRef, LLVMTargetDataRef]
-except AttributeError: pass
-
-try: (LLVMIntPtrTypeForASInContext:=dll.LLVMIntPtrTypeForASInContext).restype, LLVMIntPtrTypeForASInContext.argtypes = LLVMTypeRef, [LLVMContextRef, LLVMTargetDataRef, ctypes.c_uint32]
-except AttributeError: pass
-
-try: (LLVMSizeOfTypeInBits:=dll.LLVMSizeOfTypeInBits).restype, LLVMSizeOfTypeInBits.argtypes = ctypes.c_uint64, [LLVMTargetDataRef, LLVMTypeRef]
-except AttributeError: pass
-
-try: (LLVMStoreSizeOfType:=dll.LLVMStoreSizeOfType).restype, LLVMStoreSizeOfType.argtypes = ctypes.c_uint64, [LLVMTargetDataRef, LLVMTypeRef]
-except AttributeError: pass
-
-try: (LLVMABISizeOfType:=dll.LLVMABISizeOfType).restype, LLVMABISizeOfType.argtypes = ctypes.c_uint64, [LLVMTargetDataRef, LLVMTypeRef]
-except AttributeError: pass
-
-try: (LLVMABIAlignmentOfType:=dll.LLVMABIAlignmentOfType).restype, LLVMABIAlignmentOfType.argtypes = ctypes.c_uint32, [LLVMTargetDataRef, LLVMTypeRef]
-except AttributeError: pass
-
-try: (LLVMCallFrameAlignmentOfType:=dll.LLVMCallFrameAlignmentOfType).restype, LLVMCallFrameAlignmentOfType.argtypes = ctypes.c_uint32, [LLVMTargetDataRef, LLVMTypeRef]
-except AttributeError: pass
-
-try: (LLVMPreferredAlignmentOfType:=dll.LLVMPreferredAlignmentOfType).restype, LLVMPreferredAlignmentOfType.argtypes = ctypes.c_uint32, [LLVMTargetDataRef, LLVMTypeRef]
-except AttributeError: pass
-
-try: (LLVMPreferredAlignmentOfGlobal:=dll.LLVMPreferredAlignmentOfGlobal).restype, LLVMPreferredAlignmentOfGlobal.argtypes = ctypes.c_uint32, [LLVMTargetDataRef, LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMElementAtOffset:=dll.LLVMElementAtOffset).restype, LLVMElementAtOffset.argtypes = ctypes.c_uint32, [LLVMTargetDataRef, LLVMTypeRef, ctypes.c_uint64]
-except AttributeError: pass
-
-try: (LLVMOffsetOfElement:=dll.LLVMOffsetOfElement).restype, LLVMOffsetOfElement.argtypes = ctypes.c_uint64, [LLVMTargetDataRef, LLVMTypeRef, ctypes.c_uint32]
-except AttributeError: pass
-
-try: (LLVMGetFirstTarget:=dll.LLVMGetFirstTarget).restype, LLVMGetFirstTarget.argtypes = LLVMTargetRef, []
-except AttributeError: pass
-
-try: (LLVMGetNextTarget:=dll.LLVMGetNextTarget).restype, LLVMGetNextTarget.argtypes = LLVMTargetRef, [LLVMTargetRef]
-except AttributeError: pass
-
-try: (LLVMGetTargetFromName:=dll.LLVMGetTargetFromName).restype, LLVMGetTargetFromName.argtypes = LLVMTargetRef, [ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMGetTargetFromTriple:=dll.LLVMGetTargetFromTriple).restype, LLVMGetTargetFromTriple.argtypes = LLVMBool, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(LLVMTargetRef), ctypes.POINTER(ctypes.POINTER(ctypes.c_char))]
-except AttributeError: pass
-
-try: (LLVMGetTargetName:=dll.LLVMGetTargetName).restype, LLVMGetTargetName.argtypes = ctypes.POINTER(ctypes.c_char), [LLVMTargetRef]
-except AttributeError: pass
-
-try: (LLVMGetTargetDescription:=dll.LLVMGetTargetDescription).restype, LLVMGetTargetDescription.argtypes = ctypes.POINTER(ctypes.c_char), [LLVMTargetRef]
-except AttributeError: pass
-
-try: (LLVMTargetHasJIT:=dll.LLVMTargetHasJIT).restype, LLVMTargetHasJIT.argtypes = LLVMBool, [LLVMTargetRef]
-except AttributeError: pass
-
-try: (LLVMTargetHasTargetMachine:=dll.LLVMTargetHasTargetMachine).restype, LLVMTargetHasTargetMachine.argtypes = LLVMBool, [LLVMTargetRef]
-except AttributeError: pass
-
-try: (LLVMTargetHasAsmBackend:=dll.LLVMTargetHasAsmBackend).restype, LLVMTargetHasAsmBackend.argtypes = LLVMBool, [LLVMTargetRef]
-except AttributeError: pass
-
-try: (LLVMCreateTargetMachineOptions:=dll.LLVMCreateTargetMachineOptions).restype, LLVMCreateTargetMachineOptions.argtypes = LLVMTargetMachineOptionsRef, []
-except AttributeError: pass
-
-try: (LLVMDisposeTargetMachineOptions:=dll.LLVMDisposeTargetMachineOptions).restype, LLVMDisposeTargetMachineOptions.argtypes = None, [LLVMTargetMachineOptionsRef]
-except AttributeError: pass
-
-try: (LLVMTargetMachineOptionsSetCPU:=dll.LLVMTargetMachineOptionsSetCPU).restype, LLVMTargetMachineOptionsSetCPU.argtypes = None, [LLVMTargetMachineOptionsRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMTargetMachineOptionsSetFeatures:=dll.LLVMTargetMachineOptionsSetFeatures).restype, LLVMTargetMachineOptionsSetFeatures.argtypes = None, [LLVMTargetMachineOptionsRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMTargetMachineOptionsSetABI:=dll.LLVMTargetMachineOptionsSetABI).restype, LLVMTargetMachineOptionsSetABI.argtypes = None, [LLVMTargetMachineOptionsRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMTargetMachineOptionsSetCodeGenOptLevel:=dll.LLVMTargetMachineOptionsSetCodeGenOptLevel).restype, LLVMTargetMachineOptionsSetCodeGenOptLevel.argtypes = None, [LLVMTargetMachineOptionsRef, LLVMCodeGenOptLevel]
-except AttributeError: pass
-
-try: (LLVMTargetMachineOptionsSetRelocMode:=dll.LLVMTargetMachineOptionsSetRelocMode).restype, LLVMTargetMachineOptionsSetRelocMode.argtypes = None, [LLVMTargetMachineOptionsRef, LLVMRelocMode]
-except AttributeError: pass
-
-try: (LLVMTargetMachineOptionsSetCodeModel:=dll.LLVMTargetMachineOptionsSetCodeModel).restype, LLVMTargetMachineOptionsSetCodeModel.argtypes = None, [LLVMTargetMachineOptionsRef, LLVMCodeModel]
-except AttributeError: pass
-
-try: (LLVMCreateTargetMachineWithOptions:=dll.LLVMCreateTargetMachineWithOptions).restype, LLVMCreateTargetMachineWithOptions.argtypes = LLVMTargetMachineRef, [LLVMTargetRef, ctypes.POINTER(ctypes.c_char), LLVMTargetMachineOptionsRef]
-except AttributeError: pass
-
-try: (LLVMCreateTargetMachine:=dll.LLVMCreateTargetMachine).restype, LLVMCreateTargetMachine.argtypes = LLVMTargetMachineRef, [LLVMTargetRef, ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char), LLVMCodeGenOptLevel, LLVMRelocMode, LLVMCodeModel]
-except AttributeError: pass
-
-try: (LLVMDisposeTargetMachine:=dll.LLVMDisposeTargetMachine).restype, LLVMDisposeTargetMachine.argtypes = None, [LLVMTargetMachineRef]
-except AttributeError: pass
-
-try: (LLVMGetTargetMachineTarget:=dll.LLVMGetTargetMachineTarget).restype, LLVMGetTargetMachineTarget.argtypes = LLVMTargetRef, [LLVMTargetMachineRef]
-except AttributeError: pass
-
-try: (LLVMGetTargetMachineTriple:=dll.LLVMGetTargetMachineTriple).restype, LLVMGetTargetMachineTriple.argtypes = ctypes.POINTER(ctypes.c_char), [LLVMTargetMachineRef]
-except AttributeError: pass
-
-try: (LLVMGetTargetMachineCPU:=dll.LLVMGetTargetMachineCPU).restype, LLVMGetTargetMachineCPU.argtypes = ctypes.POINTER(ctypes.c_char), [LLVMTargetMachineRef]
-except AttributeError: pass
-
-try: (LLVMGetTargetMachineFeatureString:=dll.LLVMGetTargetMachineFeatureString).restype, LLVMGetTargetMachineFeatureString.argtypes = ctypes.POINTER(ctypes.c_char), [LLVMTargetMachineRef]
-except AttributeError: pass
-
-try: (LLVMCreateTargetDataLayout:=dll.LLVMCreateTargetDataLayout).restype, LLVMCreateTargetDataLayout.argtypes = LLVMTargetDataRef, [LLVMTargetMachineRef]
-except AttributeError: pass
-
-try: (LLVMSetTargetMachineAsmVerbosity:=dll.LLVMSetTargetMachineAsmVerbosity).restype, LLVMSetTargetMachineAsmVerbosity.argtypes = None, [LLVMTargetMachineRef, LLVMBool]
-except AttributeError: pass
-
-try: (LLVMSetTargetMachineFastISel:=dll.LLVMSetTargetMachineFastISel).restype, LLVMSetTargetMachineFastISel.argtypes = None, [LLVMTargetMachineRef, LLVMBool]
-except AttributeError: pass
-
-try: (LLVMSetTargetMachineGlobalISel:=dll.LLVMSetTargetMachineGlobalISel).restype, LLVMSetTargetMachineGlobalISel.argtypes = None, [LLVMTargetMachineRef, LLVMBool]
-except AttributeError: pass
-
-try: (LLVMSetTargetMachineGlobalISelAbort:=dll.LLVMSetTargetMachineGlobalISelAbort).restype, LLVMSetTargetMachineGlobalISelAbort.argtypes = None, [LLVMTargetMachineRef, LLVMGlobalISelAbortMode]
-except AttributeError: pass
-
-try: (LLVMSetTargetMachineMachineOutliner:=dll.LLVMSetTargetMachineMachineOutliner).restype, LLVMSetTargetMachineMachineOutliner.argtypes = None, [LLVMTargetMachineRef, LLVMBool]
-except AttributeError: pass
-
-try: (LLVMTargetMachineEmitToFile:=dll.LLVMTargetMachineEmitToFile).restype, LLVMTargetMachineEmitToFile.argtypes = LLVMBool, [LLVMTargetMachineRef, LLVMModuleRef, ctypes.POINTER(ctypes.c_char), LLVMCodeGenFileType, ctypes.POINTER(ctypes.POINTER(ctypes.c_char))]
-except AttributeError: pass
-
-try: (LLVMTargetMachineEmitToMemoryBuffer:=dll.LLVMTargetMachineEmitToMemoryBuffer).restype, LLVMTargetMachineEmitToMemoryBuffer.argtypes = LLVMBool, [LLVMTargetMachineRef, LLVMModuleRef, LLVMCodeGenFileType, ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.POINTER(LLVMMemoryBufferRef)]
-except AttributeError: pass
-
-try: (LLVMGetDefaultTargetTriple:=dll.LLVMGetDefaultTargetTriple).restype, LLVMGetDefaultTargetTriple.argtypes = ctypes.POINTER(ctypes.c_char), []
-except AttributeError: pass
-
-try: (LLVMNormalizeTargetTriple:=dll.LLVMNormalizeTargetTriple).restype, LLVMNormalizeTargetTriple.argtypes = ctypes.POINTER(ctypes.c_char), [ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMGetHostCPUName:=dll.LLVMGetHostCPUName).restype, LLVMGetHostCPUName.argtypes = ctypes.POINTER(ctypes.c_char), []
-except AttributeError: pass
-
-try: (LLVMGetHostCPUFeatures:=dll.LLVMGetHostCPUFeatures).restype, LLVMGetHostCPUFeatures.argtypes = ctypes.POINTER(ctypes.c_char), []
-except AttributeError: pass
-
-try: (LLVMAddAnalysisPasses:=dll.LLVMAddAnalysisPasses).restype, LLVMAddAnalysisPasses.argtypes = None, [LLVMTargetMachineRef, LLVMPassManagerRef]
-except AttributeError: pass
-
-try: (LLVMOrcExecutionSessionSetErrorReporter:=dll.LLVMOrcExecutionSessionSetErrorReporter).restype, LLVMOrcExecutionSessionSetErrorReporter.argtypes = None, [LLVMOrcExecutionSessionRef, LLVMOrcErrorReporterFunction, ctypes.c_void_p]
-except AttributeError: pass
-
-try: (LLVMOrcExecutionSessionGetSymbolStringPool:=dll.LLVMOrcExecutionSessionGetSymbolStringPool).restype, LLVMOrcExecutionSessionGetSymbolStringPool.argtypes = LLVMOrcSymbolStringPoolRef, [LLVMOrcExecutionSessionRef]
-except AttributeError: pass
-
-try: (LLVMOrcSymbolStringPoolClearDeadEntries:=dll.LLVMOrcSymbolStringPoolClearDeadEntries).restype, LLVMOrcSymbolStringPoolClearDeadEntries.argtypes = None, [LLVMOrcSymbolStringPoolRef]
-except AttributeError: pass
-
-try: (LLVMOrcExecutionSessionIntern:=dll.LLVMOrcExecutionSessionIntern).restype, LLVMOrcExecutionSessionIntern.argtypes = LLVMOrcSymbolStringPoolEntryRef, [LLVMOrcExecutionSessionRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMOrcExecutionSessionLookup:=dll.LLVMOrcExecutionSessionLookup).restype, LLVMOrcExecutionSessionLookup.argtypes = None, [LLVMOrcExecutionSessionRef, LLVMOrcLookupKind, LLVMOrcCJITDylibSearchOrder, size_t, LLVMOrcCLookupSet, size_t, LLVMOrcExecutionSessionLookupHandleResultFunction, ctypes.c_void_p]
-except AttributeError: pass
-
-try: (LLVMOrcRetainSymbolStringPoolEntry:=dll.LLVMOrcRetainSymbolStringPoolEntry).restype, LLVMOrcRetainSymbolStringPoolEntry.argtypes = None, [LLVMOrcSymbolStringPoolEntryRef]
-except AttributeError: pass
-
-try: (LLVMOrcReleaseSymbolStringPoolEntry:=dll.LLVMOrcReleaseSymbolStringPoolEntry).restype, LLVMOrcReleaseSymbolStringPoolEntry.argtypes = None, [LLVMOrcSymbolStringPoolEntryRef]
-except AttributeError: pass
-
-try: (LLVMOrcSymbolStringPoolEntryStr:=dll.LLVMOrcSymbolStringPoolEntryStr).restype, LLVMOrcSymbolStringPoolEntryStr.argtypes = ctypes.POINTER(ctypes.c_char), [LLVMOrcSymbolStringPoolEntryRef]
-except AttributeError: pass
-
-try: (LLVMOrcReleaseResourceTracker:=dll.LLVMOrcReleaseResourceTracker).restype, LLVMOrcReleaseResourceTracker.argtypes = None, [LLVMOrcResourceTrackerRef]
-except AttributeError: pass
-
-try: (LLVMOrcResourceTrackerTransferTo:=dll.LLVMOrcResourceTrackerTransferTo).restype, LLVMOrcResourceTrackerTransferTo.argtypes = None, [LLVMOrcResourceTrackerRef, LLVMOrcResourceTrackerRef]
-except AttributeError: pass
-
-try: (LLVMOrcResourceTrackerRemove:=dll.LLVMOrcResourceTrackerRemove).restype, LLVMOrcResourceTrackerRemove.argtypes = LLVMErrorRef, [LLVMOrcResourceTrackerRef]
-except AttributeError: pass
-
-try: (LLVMOrcDisposeDefinitionGenerator:=dll.LLVMOrcDisposeDefinitionGenerator).restype, LLVMOrcDisposeDefinitionGenerator.argtypes = None, [LLVMOrcDefinitionGeneratorRef]
-except AttributeError: pass
-
-try: (LLVMOrcDisposeMaterializationUnit:=dll.LLVMOrcDisposeMaterializationUnit).restype, LLVMOrcDisposeMaterializationUnit.argtypes = None, [LLVMOrcMaterializationUnitRef]
-except AttributeError: pass
-
-try: (LLVMOrcCreateCustomMaterializationUnit:=dll.LLVMOrcCreateCustomMaterializationUnit).restype, LLVMOrcCreateCustomMaterializationUnit.argtypes = LLVMOrcMaterializationUnitRef, [ctypes.POINTER(ctypes.c_char), ctypes.c_void_p, LLVMOrcCSymbolFlagsMapPairs, size_t, LLVMOrcSymbolStringPoolEntryRef, LLVMOrcMaterializationUnitMaterializeFunction, LLVMOrcMaterializationUnitDiscardFunction, LLVMOrcMaterializationUnitDestroyFunction]
-except AttributeError: pass
-
-try: (LLVMOrcAbsoluteSymbols:=dll.LLVMOrcAbsoluteSymbols).restype, LLVMOrcAbsoluteSymbols.argtypes = LLVMOrcMaterializationUnitRef, [LLVMOrcCSymbolMapPairs, size_t]
-except AttributeError: pass
-
-try: (LLVMOrcLazyReexports:=dll.LLVMOrcLazyReexports).restype, LLVMOrcLazyReexports.argtypes = LLVMOrcMaterializationUnitRef, [LLVMOrcLazyCallThroughManagerRef, LLVMOrcIndirectStubsManagerRef, LLVMOrcJITDylibRef, LLVMOrcCSymbolAliasMapPairs, size_t]
-except AttributeError: pass
-
-try: (LLVMOrcDisposeMaterializationResponsibility:=dll.LLVMOrcDisposeMaterializationResponsibility).restype, LLVMOrcDisposeMaterializationResponsibility.argtypes = None, [LLVMOrcMaterializationResponsibilityRef]
-except AttributeError: pass
-
-try: (LLVMOrcMaterializationResponsibilityGetTargetDylib:=dll.LLVMOrcMaterializationResponsibilityGetTargetDylib).restype, LLVMOrcMaterializationResponsibilityGetTargetDylib.argtypes = LLVMOrcJITDylibRef, [LLVMOrcMaterializationResponsibilityRef]
-except AttributeError: pass
-
-try: (LLVMOrcMaterializationResponsibilityGetExecutionSession:=dll.LLVMOrcMaterializationResponsibilityGetExecutionSession).restype, LLVMOrcMaterializationResponsibilityGetExecutionSession.argtypes = LLVMOrcExecutionSessionRef, [LLVMOrcMaterializationResponsibilityRef]
-except AttributeError: pass
-
-try: (LLVMOrcMaterializationResponsibilityGetSymbols:=dll.LLVMOrcMaterializationResponsibilityGetSymbols).restype, LLVMOrcMaterializationResponsibilityGetSymbols.argtypes = LLVMOrcCSymbolFlagsMapPairs, [LLVMOrcMaterializationResponsibilityRef, ctypes.POINTER(size_t)]
-except AttributeError: pass
-
-try: (LLVMOrcDisposeCSymbolFlagsMap:=dll.LLVMOrcDisposeCSymbolFlagsMap).restype, LLVMOrcDisposeCSymbolFlagsMap.argtypes = None, [LLVMOrcCSymbolFlagsMapPairs]
-except AttributeError: pass
-
-try: (LLVMOrcMaterializationResponsibilityGetInitializerSymbol:=dll.LLVMOrcMaterializationResponsibilityGetInitializerSymbol).restype, LLVMOrcMaterializationResponsibilityGetInitializerSymbol.argtypes = LLVMOrcSymbolStringPoolEntryRef, [LLVMOrcMaterializationResponsibilityRef]
-except AttributeError: pass
-
-try: (LLVMOrcMaterializationResponsibilityGetRequestedSymbols:=dll.LLVMOrcMaterializationResponsibilityGetRequestedSymbols).restype, LLVMOrcMaterializationResponsibilityGetRequestedSymbols.argtypes = ctypes.POINTER(LLVMOrcSymbolStringPoolEntryRef), [LLVMOrcMaterializationResponsibilityRef, ctypes.POINTER(size_t)]
-except AttributeError: pass
-
-try: (LLVMOrcDisposeSymbols:=dll.LLVMOrcDisposeSymbols).restype, LLVMOrcDisposeSymbols.argtypes = None, [ctypes.POINTER(LLVMOrcSymbolStringPoolEntryRef)]
-except AttributeError: pass
-
-try: (LLVMOrcMaterializationResponsibilityNotifyResolved:=dll.LLVMOrcMaterializationResponsibilityNotifyResolved).restype, LLVMOrcMaterializationResponsibilityNotifyResolved.argtypes = LLVMErrorRef, [LLVMOrcMaterializationResponsibilityRef, LLVMOrcCSymbolMapPairs, size_t]
-except AttributeError: pass
-
-try: (LLVMOrcMaterializationResponsibilityNotifyEmitted:=dll.LLVMOrcMaterializationResponsibilityNotifyEmitted).restype, LLVMOrcMaterializationResponsibilityNotifyEmitted.argtypes = LLVMErrorRef, [LLVMOrcMaterializationResponsibilityRef, ctypes.POINTER(LLVMOrcCSymbolDependenceGroup), size_t]
-except AttributeError: pass
-
-try: (LLVMOrcMaterializationResponsibilityDefineMaterializing:=dll.LLVMOrcMaterializationResponsibilityDefineMaterializing).restype, LLVMOrcMaterializationResponsibilityDefineMaterializing.argtypes = LLVMErrorRef, [LLVMOrcMaterializationResponsibilityRef, LLVMOrcCSymbolFlagsMapPairs, size_t]
-except AttributeError: pass
-
-try: (LLVMOrcMaterializationResponsibilityFailMaterialization:=dll.LLVMOrcMaterializationResponsibilityFailMaterialization).restype, LLVMOrcMaterializationResponsibilityFailMaterialization.argtypes = None, [LLVMOrcMaterializationResponsibilityRef]
-except AttributeError: pass
-
-try: (LLVMOrcMaterializationResponsibilityReplace:=dll.LLVMOrcMaterializationResponsibilityReplace).restype, LLVMOrcMaterializationResponsibilityReplace.argtypes = LLVMErrorRef, [LLVMOrcMaterializationResponsibilityRef, LLVMOrcMaterializationUnitRef]
-except AttributeError: pass
-
-try: (LLVMOrcMaterializationResponsibilityDelegate:=dll.LLVMOrcMaterializationResponsibilityDelegate).restype, LLVMOrcMaterializationResponsibilityDelegate.argtypes = LLVMErrorRef, [LLVMOrcMaterializationResponsibilityRef, ctypes.POINTER(LLVMOrcSymbolStringPoolEntryRef), size_t, ctypes.POINTER(LLVMOrcMaterializationResponsibilityRef)]
-except AttributeError: pass
-
-try: (LLVMOrcExecutionSessionCreateBareJITDylib:=dll.LLVMOrcExecutionSessionCreateBareJITDylib).restype, LLVMOrcExecutionSessionCreateBareJITDylib.argtypes = LLVMOrcJITDylibRef, [LLVMOrcExecutionSessionRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMOrcExecutionSessionCreateJITDylib:=dll.LLVMOrcExecutionSessionCreateJITDylib).restype, LLVMOrcExecutionSessionCreateJITDylib.argtypes = LLVMErrorRef, [LLVMOrcExecutionSessionRef, ctypes.POINTER(LLVMOrcJITDylibRef), ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMOrcExecutionSessionGetJITDylibByName:=dll.LLVMOrcExecutionSessionGetJITDylibByName).restype, LLVMOrcExecutionSessionGetJITDylibByName.argtypes = LLVMOrcJITDylibRef, [LLVMOrcExecutionSessionRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMOrcJITDylibCreateResourceTracker:=dll.LLVMOrcJITDylibCreateResourceTracker).restype, LLVMOrcJITDylibCreateResourceTracker.argtypes = LLVMOrcResourceTrackerRef, [LLVMOrcJITDylibRef]
-except AttributeError: pass
-
-try: (LLVMOrcJITDylibGetDefaultResourceTracker:=dll.LLVMOrcJITDylibGetDefaultResourceTracker).restype, LLVMOrcJITDylibGetDefaultResourceTracker.argtypes = LLVMOrcResourceTrackerRef, [LLVMOrcJITDylibRef]
-except AttributeError: pass
-
-try: (LLVMOrcJITDylibDefine:=dll.LLVMOrcJITDylibDefine).restype, LLVMOrcJITDylibDefine.argtypes = LLVMErrorRef, [LLVMOrcJITDylibRef, LLVMOrcMaterializationUnitRef]
-except AttributeError: pass
-
-try: (LLVMOrcJITDylibClear:=dll.LLVMOrcJITDylibClear).restype, LLVMOrcJITDylibClear.argtypes = LLVMErrorRef, [LLVMOrcJITDylibRef]
-except AttributeError: pass
-
-try: (LLVMOrcJITDylibAddGenerator:=dll.LLVMOrcJITDylibAddGenerator).restype, LLVMOrcJITDylibAddGenerator.argtypes = None, [LLVMOrcJITDylibRef, LLVMOrcDefinitionGeneratorRef]
-except AttributeError: pass
-
-try: (LLVMOrcCreateCustomCAPIDefinitionGenerator:=dll.LLVMOrcCreateCustomCAPIDefinitionGenerator).restype, LLVMOrcCreateCustomCAPIDefinitionGenerator.argtypes = LLVMOrcDefinitionGeneratorRef, [LLVMOrcCAPIDefinitionGeneratorTryToGenerateFunction, ctypes.c_void_p, LLVMOrcDisposeCAPIDefinitionGeneratorFunction]
-except AttributeError: pass
-
-try: (LLVMOrcLookupStateContinueLookup:=dll.LLVMOrcLookupStateContinueLookup).restype, LLVMOrcLookupStateContinueLookup.argtypes = None, [LLVMOrcLookupStateRef, LLVMErrorRef]
-except AttributeError: pass
-
-try: (LLVMOrcCreateDynamicLibrarySearchGeneratorForProcess:=dll.LLVMOrcCreateDynamicLibrarySearchGeneratorForProcess).restype, LLVMOrcCreateDynamicLibrarySearchGeneratorForProcess.argtypes = LLVMErrorRef, [ctypes.POINTER(LLVMOrcDefinitionGeneratorRef), ctypes.c_char, LLVMOrcSymbolPredicate, ctypes.c_void_p]
-except AttributeError: pass
-
-try: (LLVMOrcCreateDynamicLibrarySearchGeneratorForPath:=dll.LLVMOrcCreateDynamicLibrarySearchGeneratorForPath).restype, LLVMOrcCreateDynamicLibrarySearchGeneratorForPath.argtypes = LLVMErrorRef, [ctypes.POINTER(LLVMOrcDefinitionGeneratorRef), ctypes.POINTER(ctypes.c_char), ctypes.c_char, LLVMOrcSymbolPredicate, ctypes.c_void_p]
-except AttributeError: pass
-
-try: (LLVMOrcCreateStaticLibrarySearchGeneratorForPath:=dll.LLVMOrcCreateStaticLibrarySearchGeneratorForPath).restype, LLVMOrcCreateStaticLibrarySearchGeneratorForPath.argtypes = LLVMErrorRef, [ctypes.POINTER(LLVMOrcDefinitionGeneratorRef), LLVMOrcObjectLayerRef, ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMOrcCreateNewThreadSafeContext:=dll.LLVMOrcCreateNewThreadSafeContext).restype, LLVMOrcCreateNewThreadSafeContext.argtypes = LLVMOrcThreadSafeContextRef, []
-except AttributeError: pass
-
-try: (LLVMOrcThreadSafeContextGetContext:=dll.LLVMOrcThreadSafeContextGetContext).restype, LLVMOrcThreadSafeContextGetContext.argtypes = LLVMContextRef, [LLVMOrcThreadSafeContextRef]
-except AttributeError: pass
-
-try: (LLVMOrcDisposeThreadSafeContext:=dll.LLVMOrcDisposeThreadSafeContext).restype, LLVMOrcDisposeThreadSafeContext.argtypes = None, [LLVMOrcThreadSafeContextRef]
-except AttributeError: pass
-
-try: (LLVMOrcCreateNewThreadSafeModule:=dll.LLVMOrcCreateNewThreadSafeModule).restype, LLVMOrcCreateNewThreadSafeModule.argtypes = LLVMOrcThreadSafeModuleRef, [LLVMModuleRef, LLVMOrcThreadSafeContextRef]
-except AttributeError: pass
-
-try: (LLVMOrcDisposeThreadSafeModule:=dll.LLVMOrcDisposeThreadSafeModule).restype, LLVMOrcDisposeThreadSafeModule.argtypes = None, [LLVMOrcThreadSafeModuleRef]
-except AttributeError: pass
-
-try: (LLVMOrcThreadSafeModuleWithModuleDo:=dll.LLVMOrcThreadSafeModuleWithModuleDo).restype, LLVMOrcThreadSafeModuleWithModuleDo.argtypes = LLVMErrorRef, [LLVMOrcThreadSafeModuleRef, LLVMOrcGenericIRModuleOperationFunction, ctypes.c_void_p]
-except AttributeError: pass
-
-try: (LLVMOrcJITTargetMachineBuilderDetectHost:=dll.LLVMOrcJITTargetMachineBuilderDetectHost).restype, LLVMOrcJITTargetMachineBuilderDetectHost.argtypes = LLVMErrorRef, [ctypes.POINTER(LLVMOrcJITTargetMachineBuilderRef)]
-except AttributeError: pass
-
-try: (LLVMOrcJITTargetMachineBuilderCreateFromTargetMachine:=dll.LLVMOrcJITTargetMachineBuilderCreateFromTargetMachine).restype, LLVMOrcJITTargetMachineBuilderCreateFromTargetMachine.argtypes = LLVMOrcJITTargetMachineBuilderRef, [LLVMTargetMachineRef]
-except AttributeError: pass
-
-try: (LLVMOrcDisposeJITTargetMachineBuilder:=dll.LLVMOrcDisposeJITTargetMachineBuilder).restype, LLVMOrcDisposeJITTargetMachineBuilder.argtypes = None, [LLVMOrcJITTargetMachineBuilderRef]
-except AttributeError: pass
-
-try: (LLVMOrcJITTargetMachineBuilderGetTargetTriple:=dll.LLVMOrcJITTargetMachineBuilderGetTargetTriple).restype, LLVMOrcJITTargetMachineBuilderGetTargetTriple.argtypes = ctypes.POINTER(ctypes.c_char), [LLVMOrcJITTargetMachineBuilderRef]
-except AttributeError: pass
-
-try: (LLVMOrcJITTargetMachineBuilderSetTargetTriple:=dll.LLVMOrcJITTargetMachineBuilderSetTargetTriple).restype, LLVMOrcJITTargetMachineBuilderSetTargetTriple.argtypes = None, [LLVMOrcJITTargetMachineBuilderRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMOrcObjectLayerAddObjectFile:=dll.LLVMOrcObjectLayerAddObjectFile).restype, LLVMOrcObjectLayerAddObjectFile.argtypes = LLVMErrorRef, [LLVMOrcObjectLayerRef, LLVMOrcJITDylibRef, LLVMMemoryBufferRef]
-except AttributeError: pass
-
-try: (LLVMOrcObjectLayerAddObjectFileWithRT:=dll.LLVMOrcObjectLayerAddObjectFileWithRT).restype, LLVMOrcObjectLayerAddObjectFileWithRT.argtypes = LLVMErrorRef, [LLVMOrcObjectLayerRef, LLVMOrcResourceTrackerRef, LLVMMemoryBufferRef]
-except AttributeError: pass
-
-try: (LLVMOrcObjectLayerEmit:=dll.LLVMOrcObjectLayerEmit).restype, LLVMOrcObjectLayerEmit.argtypes = None, [LLVMOrcObjectLayerRef, LLVMOrcMaterializationResponsibilityRef, LLVMMemoryBufferRef]
-except AttributeError: pass
-
-try: (LLVMOrcDisposeObjectLayer:=dll.LLVMOrcDisposeObjectLayer).restype, LLVMOrcDisposeObjectLayer.argtypes = None, [LLVMOrcObjectLayerRef]
-except AttributeError: pass
-
-try: (LLVMOrcIRTransformLayerEmit:=dll.LLVMOrcIRTransformLayerEmit).restype, LLVMOrcIRTransformLayerEmit.argtypes = None, [LLVMOrcIRTransformLayerRef, LLVMOrcMaterializationResponsibilityRef, LLVMOrcThreadSafeModuleRef]
-except AttributeError: pass
-
-try: (LLVMOrcIRTransformLayerSetTransform:=dll.LLVMOrcIRTransformLayerSetTransform).restype, LLVMOrcIRTransformLayerSetTransform.argtypes = None, [LLVMOrcIRTransformLayerRef, LLVMOrcIRTransformLayerTransformFunction, ctypes.c_void_p]
-except AttributeError: pass
-
-try: (LLVMOrcObjectTransformLayerSetTransform:=dll.LLVMOrcObjectTransformLayerSetTransform).restype, LLVMOrcObjectTransformLayerSetTransform.argtypes = None, [LLVMOrcObjectTransformLayerRef, LLVMOrcObjectTransformLayerTransformFunction, ctypes.c_void_p]
-except AttributeError: pass
-
-try: (LLVMOrcCreateLocalIndirectStubsManager:=dll.LLVMOrcCreateLocalIndirectStubsManager).restype, LLVMOrcCreateLocalIndirectStubsManager.argtypes = LLVMOrcIndirectStubsManagerRef, [ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMOrcDisposeIndirectStubsManager:=dll.LLVMOrcDisposeIndirectStubsManager).restype, LLVMOrcDisposeIndirectStubsManager.argtypes = None, [LLVMOrcIndirectStubsManagerRef]
-except AttributeError: pass
-
-try: (LLVMOrcCreateLocalLazyCallThroughManager:=dll.LLVMOrcCreateLocalLazyCallThroughManager).restype, LLVMOrcCreateLocalLazyCallThroughManager.argtypes = LLVMErrorRef, [ctypes.POINTER(ctypes.c_char), LLVMOrcExecutionSessionRef, LLVMOrcJITTargetAddress, ctypes.POINTER(LLVMOrcLazyCallThroughManagerRef)]
-except AttributeError: pass
-
-try: (LLVMOrcDisposeLazyCallThroughManager:=dll.LLVMOrcDisposeLazyCallThroughManager).restype, LLVMOrcDisposeLazyCallThroughManager.argtypes = None, [LLVMOrcLazyCallThroughManagerRef]
-except AttributeError: pass
-
-try: (LLVMOrcCreateDumpObjects:=dll.LLVMOrcCreateDumpObjects).restype, LLVMOrcCreateDumpObjects.argtypes = LLVMOrcDumpObjectsRef, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMOrcDisposeDumpObjects:=dll.LLVMOrcDisposeDumpObjects).restype, LLVMOrcDisposeDumpObjects.argtypes = None, [LLVMOrcDumpObjectsRef]
-except AttributeError: pass
-
-try: (LLVMOrcDumpObjects_CallOperator:=dll.LLVMOrcDumpObjects_CallOperator).restype, LLVMOrcDumpObjects_CallOperator.argtypes = LLVMErrorRef, [LLVMOrcDumpObjectsRef, ctypes.POINTER(LLVMMemoryBufferRef)]
-except AttributeError: pass
-
-try: (LLVMOrcCreateLLJITBuilder:=dll.LLVMOrcCreateLLJITBuilder).restype, LLVMOrcCreateLLJITBuilder.argtypes = LLVMOrcLLJITBuilderRef, []
-except AttributeError: pass
-
-try: (LLVMOrcDisposeLLJITBuilder:=dll.LLVMOrcDisposeLLJITBuilder).restype, LLVMOrcDisposeLLJITBuilder.argtypes = None, [LLVMOrcLLJITBuilderRef]
-except AttributeError: pass
-
-try: (LLVMOrcLLJITBuilderSetJITTargetMachineBuilder:=dll.LLVMOrcLLJITBuilderSetJITTargetMachineBuilder).restype, LLVMOrcLLJITBuilderSetJITTargetMachineBuilder.argtypes = None, [LLVMOrcLLJITBuilderRef, LLVMOrcJITTargetMachineBuilderRef]
-except AttributeError: pass
-
-try: (LLVMOrcLLJITBuilderSetObjectLinkingLayerCreator:=dll.LLVMOrcLLJITBuilderSetObjectLinkingLayerCreator).restype, LLVMOrcLLJITBuilderSetObjectLinkingLayerCreator.argtypes = None, [LLVMOrcLLJITBuilderRef, LLVMOrcLLJITBuilderObjectLinkingLayerCreatorFunction, ctypes.c_void_p]
-except AttributeError: pass
-
-try: (LLVMOrcCreateLLJIT:=dll.LLVMOrcCreateLLJIT).restype, LLVMOrcCreateLLJIT.argtypes = LLVMErrorRef, [ctypes.POINTER(LLVMOrcLLJITRef), LLVMOrcLLJITBuilderRef]
-except AttributeError: pass
-
-try: (LLVMOrcDisposeLLJIT:=dll.LLVMOrcDisposeLLJIT).restype, LLVMOrcDisposeLLJIT.argtypes = LLVMErrorRef, [LLVMOrcLLJITRef]
-except AttributeError: pass
-
-try: (LLVMOrcLLJITGetExecutionSession:=dll.LLVMOrcLLJITGetExecutionSession).restype, LLVMOrcLLJITGetExecutionSession.argtypes = LLVMOrcExecutionSessionRef, [LLVMOrcLLJITRef]
-except AttributeError: pass
-
-try: (LLVMOrcLLJITGetMainJITDylib:=dll.LLVMOrcLLJITGetMainJITDylib).restype, LLVMOrcLLJITGetMainJITDylib.argtypes = LLVMOrcJITDylibRef, [LLVMOrcLLJITRef]
-except AttributeError: pass
-
-try: (LLVMOrcLLJITGetTripleString:=dll.LLVMOrcLLJITGetTripleString).restype, LLVMOrcLLJITGetTripleString.argtypes = ctypes.POINTER(ctypes.c_char), [LLVMOrcLLJITRef]
-except AttributeError: pass
-
-try: (LLVMOrcLLJITGetGlobalPrefix:=dll.LLVMOrcLLJITGetGlobalPrefix).restype, LLVMOrcLLJITGetGlobalPrefix.argtypes = ctypes.c_char, [LLVMOrcLLJITRef]
-except AttributeError: pass
-
-try: (LLVMOrcLLJITMangleAndIntern:=dll.LLVMOrcLLJITMangleAndIntern).restype, LLVMOrcLLJITMangleAndIntern.argtypes = LLVMOrcSymbolStringPoolEntryRef, [LLVMOrcLLJITRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMOrcLLJITAddObjectFile:=dll.LLVMOrcLLJITAddObjectFile).restype, LLVMOrcLLJITAddObjectFile.argtypes = LLVMErrorRef, [LLVMOrcLLJITRef, LLVMOrcJITDylibRef, LLVMMemoryBufferRef]
-except AttributeError: pass
-
-try: (LLVMOrcLLJITAddObjectFileWithRT:=dll.LLVMOrcLLJITAddObjectFileWithRT).restype, LLVMOrcLLJITAddObjectFileWithRT.argtypes = LLVMErrorRef, [LLVMOrcLLJITRef, LLVMOrcResourceTrackerRef, LLVMMemoryBufferRef]
-except AttributeError: pass
-
-try: (LLVMOrcLLJITAddLLVMIRModule:=dll.LLVMOrcLLJITAddLLVMIRModule).restype, LLVMOrcLLJITAddLLVMIRModule.argtypes = LLVMErrorRef, [LLVMOrcLLJITRef, LLVMOrcJITDylibRef, LLVMOrcThreadSafeModuleRef]
-except AttributeError: pass
-
-try: (LLVMOrcLLJITAddLLVMIRModuleWithRT:=dll.LLVMOrcLLJITAddLLVMIRModuleWithRT).restype, LLVMOrcLLJITAddLLVMIRModuleWithRT.argtypes = LLVMErrorRef, [LLVMOrcLLJITRef, LLVMOrcResourceTrackerRef, LLVMOrcThreadSafeModuleRef]
-except AttributeError: pass
-
-try: (LLVMOrcLLJITLookup:=dll.LLVMOrcLLJITLookup).restype, LLVMOrcLLJITLookup.argtypes = LLVMErrorRef, [LLVMOrcLLJITRef, ctypes.POINTER(LLVMOrcExecutorAddress), ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMOrcLLJITGetObjLinkingLayer:=dll.LLVMOrcLLJITGetObjLinkingLayer).restype, LLVMOrcLLJITGetObjLinkingLayer.argtypes = LLVMOrcObjectLayerRef, [LLVMOrcLLJITRef]
-except AttributeError: pass
-
-try: (LLVMOrcLLJITGetObjTransformLayer:=dll.LLVMOrcLLJITGetObjTransformLayer).restype, LLVMOrcLLJITGetObjTransformLayer.argtypes = LLVMOrcObjectTransformLayerRef, [LLVMOrcLLJITRef]
-except AttributeError: pass
-
-try: (LLVMOrcLLJITGetIRTransformLayer:=dll.LLVMOrcLLJITGetIRTransformLayer).restype, LLVMOrcLLJITGetIRTransformLayer.argtypes = LLVMOrcIRTransformLayerRef, [LLVMOrcLLJITRef]
-except AttributeError: pass
-
-try: (LLVMOrcLLJITGetDataLayoutStr:=dll.LLVMOrcLLJITGetDataLayoutStr).restype, LLVMOrcLLJITGetDataLayoutStr.argtypes = ctypes.POINTER(ctypes.c_char), [LLVMOrcLLJITRef]
-except AttributeError: pass
-
-try: (LLVMOrcLLJITEnableDebugSupport:=dll.LLVMOrcLLJITEnableDebugSupport).restype, LLVMOrcLLJITEnableDebugSupport.argtypes = LLVMErrorRef, [LLVMOrcLLJITRef]
-except AttributeError: pass
-
-try: (imaxabs:=dll.imaxabs).restype, imaxabs.argtypes = intmax_t, [intmax_t]
-except AttributeError: pass
-
-try: (imaxdiv:=dll.imaxdiv).restype, imaxdiv.argtypes = imaxdiv_t, [intmax_t, intmax_t]
-except AttributeError: pass
-
-try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (select:=dll.select).restype, select.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timeval)]
-except AttributeError: pass
-
-try: (pselect:=dll.pselect).restype, pselect.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timespec), ctypes.POINTER(__sigset_t)]
-except AttributeError: pass
-
-LLVMLinkerMode = CEnum(ctypes.c_uint32)
+LLVMOrcCLookupSet: TypeAlias = c.POINTER[LLVMOrcCLookupSetElement]
+@c.record
+class LLVMOrcCSymbolMapPair(c.Struct):
+  SIZE = 24
+  Name: Annotated[LLVMOrcSymbolStringPoolEntryRef, 0]
+  Sym: Annotated[LLVMJITEvaluatedSymbol, 8]
+@c.record
+class LLVMJITEvaluatedSymbol(c.Struct):
+  SIZE = 16
+  Address: Annotated[LLVMOrcExecutorAddress, 0]
+  Flags: Annotated[LLVMJITSymbolFlags, 8]
+LLVMOrcExecutorAddress: TypeAlias = Annotated[int, ctypes.c_uint64]
+@c.record
+class LLVMJITSymbolFlags(c.Struct):
+  SIZE = 2
+  GenericFlags: Annotated[uint8_t, 0]
+  TargetFlags: Annotated[uint8_t, 1]
+LLVMOrcExecutionSessionLookupHandleResultFunction: TypeAlias = c.CFUNCTYPE[None, [c.POINTER[struct_LLVMOpaqueError], c.POINTER[LLVMOrcCSymbolMapPair], Annotated[int, ctypes.c_uint64], ctypes.c_void_p]]
+@dll.bind
+def LLVMOrcExecutionSessionLookup(ES:LLVMOrcExecutionSessionRef, K:LLVMOrcLookupKind, SearchOrder:LLVMOrcCJITDylibSearchOrder, SearchOrderSize:size_t, Symbols:LLVMOrcCLookupSet, SymbolsSize:size_t, HandleResult:LLVMOrcExecutionSessionLookupHandleResultFunction, Ctx:ctypes.c_void_p) -> None: ...
+@dll.bind
+def LLVMOrcRetainSymbolStringPoolEntry(S:LLVMOrcSymbolStringPoolEntryRef) -> None: ...
+@dll.bind
+def LLVMOrcReleaseSymbolStringPoolEntry(S:LLVMOrcSymbolStringPoolEntryRef) -> None: ...
+@dll.bind
+def LLVMOrcSymbolStringPoolEntryStr(S:LLVMOrcSymbolStringPoolEntryRef) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
+class struct_LLVMOrcOpaqueResourceTracker(ctypes.Structure): pass
+LLVMOrcResourceTrackerRef: TypeAlias = c.POINTER[struct_LLVMOrcOpaqueResourceTracker]
+@dll.bind
+def LLVMOrcReleaseResourceTracker(RT:LLVMOrcResourceTrackerRef) -> None: ...
+@dll.bind
+def LLVMOrcResourceTrackerTransferTo(SrcRT:LLVMOrcResourceTrackerRef, DstRT:LLVMOrcResourceTrackerRef) -> None: ...
+@dll.bind
+def LLVMOrcResourceTrackerRemove(RT:LLVMOrcResourceTrackerRef) -> LLVMErrorRef: ...
+class struct_LLVMOrcOpaqueDefinitionGenerator(ctypes.Structure): pass
+LLVMOrcDefinitionGeneratorRef: TypeAlias = c.POINTER[struct_LLVMOrcOpaqueDefinitionGenerator]
+@dll.bind
+def LLVMOrcDisposeDefinitionGenerator(DG:LLVMOrcDefinitionGeneratorRef) -> None: ...
+class struct_LLVMOrcOpaqueMaterializationUnit(ctypes.Structure): pass
+LLVMOrcMaterializationUnitRef: TypeAlias = c.POINTER[struct_LLVMOrcOpaqueMaterializationUnit]
+@dll.bind
+def LLVMOrcDisposeMaterializationUnit(MU:LLVMOrcMaterializationUnitRef) -> None: ...
+@c.record
+class LLVMOrcCSymbolFlagsMapPair(c.Struct):
+  SIZE = 16
+  Name: Annotated[LLVMOrcSymbolStringPoolEntryRef, 0]
+  Flags: Annotated[LLVMJITSymbolFlags, 8]
+LLVMOrcCSymbolFlagsMapPairs: TypeAlias = c.POINTER[LLVMOrcCSymbolFlagsMapPair]
+class struct_LLVMOrcOpaqueMaterializationResponsibility(ctypes.Structure): pass
+LLVMOrcMaterializationUnitMaterializeFunction: TypeAlias = c.CFUNCTYPE[None, [ctypes.c_void_p, c.POINTER[struct_LLVMOrcOpaqueMaterializationResponsibility]]]
+LLVMOrcMaterializationUnitDiscardFunction: TypeAlias = c.CFUNCTYPE[None, [ctypes.c_void_p, c.POINTER[struct_LLVMOrcOpaqueJITDylib], c.POINTER[struct_LLVMOrcOpaqueSymbolStringPoolEntry]]]
+LLVMOrcMaterializationUnitDestroyFunction: TypeAlias = c.CFUNCTYPE[None, [ctypes.c_void_p]]
+@dll.bind
+def LLVMOrcCreateCustomMaterializationUnit(Name:c.POINTER[Annotated[bytes, ctypes.c_char]], Ctx:ctypes.c_void_p, Syms:LLVMOrcCSymbolFlagsMapPairs, NumSyms:size_t, InitSym:LLVMOrcSymbolStringPoolEntryRef, Materialize:LLVMOrcMaterializationUnitMaterializeFunction, Discard:LLVMOrcMaterializationUnitDiscardFunction, Destroy:LLVMOrcMaterializationUnitDestroyFunction) -> LLVMOrcMaterializationUnitRef: ...
+LLVMOrcCSymbolMapPairs: TypeAlias = c.POINTER[LLVMOrcCSymbolMapPair]
+@dll.bind
+def LLVMOrcAbsoluteSymbols(Syms:LLVMOrcCSymbolMapPairs, NumPairs:size_t) -> LLVMOrcMaterializationUnitRef: ...
+class struct_LLVMOrcOpaqueLazyCallThroughManager(ctypes.Structure): pass
+LLVMOrcLazyCallThroughManagerRef: TypeAlias = c.POINTER[struct_LLVMOrcOpaqueLazyCallThroughManager]
+class struct_LLVMOrcOpaqueIndirectStubsManager(ctypes.Structure): pass
+LLVMOrcIndirectStubsManagerRef: TypeAlias = c.POINTER[struct_LLVMOrcOpaqueIndirectStubsManager]
+@c.record
+class LLVMOrcCSymbolAliasMapPair(c.Struct):
+  SIZE = 24
+  Name: Annotated[LLVMOrcSymbolStringPoolEntryRef, 0]
+  Entry: Annotated[LLVMOrcCSymbolAliasMapEntry, 8]
+@c.record
+class LLVMOrcCSymbolAliasMapEntry(c.Struct):
+  SIZE = 16
+  Name: Annotated[LLVMOrcSymbolStringPoolEntryRef, 0]
+  Flags: Annotated[LLVMJITSymbolFlags, 8]
+LLVMOrcCSymbolAliasMapPairs: TypeAlias = c.POINTER[LLVMOrcCSymbolAliasMapPair]
+@dll.bind
+def LLVMOrcLazyReexports(LCTM:LLVMOrcLazyCallThroughManagerRef, ISM:LLVMOrcIndirectStubsManagerRef, SourceRef:LLVMOrcJITDylibRef, CallableAliases:LLVMOrcCSymbolAliasMapPairs, NumPairs:size_t) -> LLVMOrcMaterializationUnitRef: ...
+LLVMOrcMaterializationResponsibilityRef: TypeAlias = c.POINTER[struct_LLVMOrcOpaqueMaterializationResponsibility]
+@dll.bind
+def LLVMOrcDisposeMaterializationResponsibility(MR:LLVMOrcMaterializationResponsibilityRef) -> None: ...
+@dll.bind
+def LLVMOrcMaterializationResponsibilityGetTargetDylib(MR:LLVMOrcMaterializationResponsibilityRef) -> LLVMOrcJITDylibRef: ...
+@dll.bind
+def LLVMOrcMaterializationResponsibilityGetExecutionSession(MR:LLVMOrcMaterializationResponsibilityRef) -> LLVMOrcExecutionSessionRef: ...
+@dll.bind
+def LLVMOrcMaterializationResponsibilityGetSymbols(MR:LLVMOrcMaterializationResponsibilityRef, NumPairs:c.POINTER[size_t]) -> LLVMOrcCSymbolFlagsMapPairs: ...
+@dll.bind
+def LLVMOrcDisposeCSymbolFlagsMap(Pairs:LLVMOrcCSymbolFlagsMapPairs) -> None: ...
+@dll.bind
+def LLVMOrcMaterializationResponsibilityGetInitializerSymbol(MR:LLVMOrcMaterializationResponsibilityRef) -> LLVMOrcSymbolStringPoolEntryRef: ...
+@dll.bind
+def LLVMOrcMaterializationResponsibilityGetRequestedSymbols(MR:LLVMOrcMaterializationResponsibilityRef, NumSymbols:c.POINTER[size_t]) -> c.POINTER[LLVMOrcSymbolStringPoolEntryRef]: ...
+@dll.bind
+def LLVMOrcDisposeSymbols(Symbols:c.POINTER[LLVMOrcSymbolStringPoolEntryRef]) -> None: ...
+@dll.bind
+def LLVMOrcMaterializationResponsibilityNotifyResolved(MR:LLVMOrcMaterializationResponsibilityRef, Symbols:LLVMOrcCSymbolMapPairs, NumPairs:size_t) -> LLVMErrorRef: ...
+@c.record
+class LLVMOrcCSymbolDependenceGroup(c.Struct):
+  SIZE = 32
+  Symbols: Annotated[LLVMOrcCSymbolsList, 0]
+  Dependencies: Annotated[LLVMOrcCDependenceMapPairs, 16]
+  NumDependencies: Annotated[size_t, 24]
+@c.record
+class LLVMOrcCSymbolsList(c.Struct):
+  SIZE = 16
+  Symbols: Annotated[c.POINTER[LLVMOrcSymbolStringPoolEntryRef], 0]
+  Length: Annotated[size_t, 8]
+@c.record
+class LLVMOrcCDependenceMapPair(c.Struct):
+  SIZE = 24
+  JD: Annotated[LLVMOrcJITDylibRef, 0]
+  Names: Annotated[LLVMOrcCSymbolsList, 8]
+LLVMOrcCDependenceMapPairs: TypeAlias = c.POINTER[LLVMOrcCDependenceMapPair]
+@dll.bind
+def LLVMOrcMaterializationResponsibilityNotifyEmitted(MR:LLVMOrcMaterializationResponsibilityRef, SymbolDepGroups:c.POINTER[LLVMOrcCSymbolDependenceGroup], NumSymbolDepGroups:size_t) -> LLVMErrorRef: ...
+@dll.bind
+def LLVMOrcMaterializationResponsibilityDefineMaterializing(MR:LLVMOrcMaterializationResponsibilityRef, Pairs:LLVMOrcCSymbolFlagsMapPairs, NumPairs:size_t) -> LLVMErrorRef: ...
+@dll.bind
+def LLVMOrcMaterializationResponsibilityFailMaterialization(MR:LLVMOrcMaterializationResponsibilityRef) -> None: ...
+@dll.bind
+def LLVMOrcMaterializationResponsibilityReplace(MR:LLVMOrcMaterializationResponsibilityRef, MU:LLVMOrcMaterializationUnitRef) -> LLVMErrorRef: ...
+@dll.bind
+def LLVMOrcMaterializationResponsibilityDelegate(MR:LLVMOrcMaterializationResponsibilityRef, Symbols:c.POINTER[LLVMOrcSymbolStringPoolEntryRef], NumSymbols:size_t, Result:c.POINTER[LLVMOrcMaterializationResponsibilityRef]) -> LLVMErrorRef: ...
+@dll.bind
+def LLVMOrcExecutionSessionCreateBareJITDylib(ES:LLVMOrcExecutionSessionRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMOrcJITDylibRef: ...
+@dll.bind
+def LLVMOrcExecutionSessionCreateJITDylib(ES:LLVMOrcExecutionSessionRef, Result:c.POINTER[LLVMOrcJITDylibRef], Name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMErrorRef: ...
+@dll.bind
+def LLVMOrcExecutionSessionGetJITDylibByName(ES:LLVMOrcExecutionSessionRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMOrcJITDylibRef: ...
+@dll.bind
+def LLVMOrcJITDylibCreateResourceTracker(JD:LLVMOrcJITDylibRef) -> LLVMOrcResourceTrackerRef: ...
+@dll.bind
+def LLVMOrcJITDylibGetDefaultResourceTracker(JD:LLVMOrcJITDylibRef) -> LLVMOrcResourceTrackerRef: ...
+@dll.bind
+def LLVMOrcJITDylibDefine(JD:LLVMOrcJITDylibRef, MU:LLVMOrcMaterializationUnitRef) -> LLVMErrorRef: ...
+@dll.bind
+def LLVMOrcJITDylibClear(JD:LLVMOrcJITDylibRef) -> LLVMErrorRef: ...
+@dll.bind
+def LLVMOrcJITDylibAddGenerator(JD:LLVMOrcJITDylibRef, DG:LLVMOrcDefinitionGeneratorRef) -> None: ...
+class struct_LLVMOrcOpaqueLookupState(ctypes.Structure): pass
+LLVMOrcCAPIDefinitionGeneratorTryToGenerateFunction: TypeAlias = c.CFUNCTYPE[c.POINTER[struct_LLVMOpaqueError], [c.POINTER[struct_LLVMOrcOpaqueDefinitionGenerator], ctypes.c_void_p, c.POINTER[c.POINTER[struct_LLVMOrcOpaqueLookupState]], LLVMOrcLookupKind, c.POINTER[struct_LLVMOrcOpaqueJITDylib], LLVMOrcJITDylibLookupFlags, c.POINTER[LLVMOrcCLookupSetElement], Annotated[int, ctypes.c_uint64]]]
+LLVMOrcDisposeCAPIDefinitionGeneratorFunction: TypeAlias = c.CFUNCTYPE[None, [ctypes.c_void_p]]
+@dll.bind
+def LLVMOrcCreateCustomCAPIDefinitionGenerator(F:LLVMOrcCAPIDefinitionGeneratorTryToGenerateFunction, Ctx:ctypes.c_void_p, Dispose:LLVMOrcDisposeCAPIDefinitionGeneratorFunction) -> LLVMOrcDefinitionGeneratorRef: ...
+LLVMOrcLookupStateRef: TypeAlias = c.POINTER[struct_LLVMOrcOpaqueLookupState]
+@dll.bind
+def LLVMOrcLookupStateContinueLookup(S:LLVMOrcLookupStateRef, Err:LLVMErrorRef) -> None: ...
+LLVMOrcSymbolPredicate: TypeAlias = c.CFUNCTYPE[Annotated[int, ctypes.c_int32], [ctypes.c_void_p, c.POINTER[struct_LLVMOrcOpaqueSymbolStringPoolEntry]]]
+@dll.bind
+def LLVMOrcCreateDynamicLibrarySearchGeneratorForProcess(Result:c.POINTER[LLVMOrcDefinitionGeneratorRef], GlobalPrefx:Annotated[bytes, ctypes.c_char], Filter:LLVMOrcSymbolPredicate, FilterCtx:ctypes.c_void_p) -> LLVMErrorRef: ...
+@dll.bind
+def LLVMOrcCreateDynamicLibrarySearchGeneratorForPath(Result:c.POINTER[LLVMOrcDefinitionGeneratorRef], FileName:c.POINTER[Annotated[bytes, ctypes.c_char]], GlobalPrefix:Annotated[bytes, ctypes.c_char], Filter:LLVMOrcSymbolPredicate, FilterCtx:ctypes.c_void_p) -> LLVMErrorRef: ...
+class struct_LLVMOrcOpaqueObjectLayer(ctypes.Structure): pass
+LLVMOrcObjectLayerRef: TypeAlias = c.POINTER[struct_LLVMOrcOpaqueObjectLayer]
+@dll.bind
+def LLVMOrcCreateStaticLibrarySearchGeneratorForPath(Result:c.POINTER[LLVMOrcDefinitionGeneratorRef], ObjLayer:LLVMOrcObjectLayerRef, FileName:c.POINTER[Annotated[bytes, ctypes.c_char]], TargetTriple:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMErrorRef: ...
+class struct_LLVMOrcOpaqueThreadSafeContext(ctypes.Structure): pass
+LLVMOrcThreadSafeContextRef: TypeAlias = c.POINTER[struct_LLVMOrcOpaqueThreadSafeContext]
+@dll.bind
+def LLVMOrcCreateNewThreadSafeContext() -> LLVMOrcThreadSafeContextRef: ...
+@dll.bind
+def LLVMOrcThreadSafeContextGetContext(TSCtx:LLVMOrcThreadSafeContextRef) -> LLVMContextRef: ...
+@dll.bind
+def LLVMOrcDisposeThreadSafeContext(TSCtx:LLVMOrcThreadSafeContextRef) -> None: ...
+class struct_LLVMOrcOpaqueThreadSafeModule(ctypes.Structure): pass
+LLVMOrcThreadSafeModuleRef: TypeAlias = c.POINTER[struct_LLVMOrcOpaqueThreadSafeModule]
+@dll.bind
+def LLVMOrcCreateNewThreadSafeModule(M:LLVMModuleRef, TSCtx:LLVMOrcThreadSafeContextRef) -> LLVMOrcThreadSafeModuleRef: ...
+@dll.bind
+def LLVMOrcDisposeThreadSafeModule(TSM:LLVMOrcThreadSafeModuleRef) -> None: ...
+LLVMOrcGenericIRModuleOperationFunction: TypeAlias = c.CFUNCTYPE[c.POINTER[struct_LLVMOpaqueError], [ctypes.c_void_p, c.POINTER[struct_LLVMOpaqueModule]]]
+@dll.bind
+def LLVMOrcThreadSafeModuleWithModuleDo(TSM:LLVMOrcThreadSafeModuleRef, F:LLVMOrcGenericIRModuleOperationFunction, Ctx:ctypes.c_void_p) -> LLVMErrorRef: ...
+class struct_LLVMOrcOpaqueJITTargetMachineBuilder(ctypes.Structure): pass
+LLVMOrcJITTargetMachineBuilderRef: TypeAlias = c.POINTER[struct_LLVMOrcOpaqueJITTargetMachineBuilder]
+@dll.bind
+def LLVMOrcJITTargetMachineBuilderDetectHost(Result:c.POINTER[LLVMOrcJITTargetMachineBuilderRef]) -> LLVMErrorRef: ...
+@dll.bind
+def LLVMOrcJITTargetMachineBuilderCreateFromTargetMachine(TM:LLVMTargetMachineRef) -> LLVMOrcJITTargetMachineBuilderRef: ...
+@dll.bind
+def LLVMOrcDisposeJITTargetMachineBuilder(JTMB:LLVMOrcJITTargetMachineBuilderRef) -> None: ...
+@dll.bind
+def LLVMOrcJITTargetMachineBuilderGetTargetTriple(JTMB:LLVMOrcJITTargetMachineBuilderRef) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
+@dll.bind
+def LLVMOrcJITTargetMachineBuilderSetTargetTriple(JTMB:LLVMOrcJITTargetMachineBuilderRef, TargetTriple:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> None: ...
+@dll.bind
+def LLVMOrcObjectLayerAddObjectFile(ObjLayer:LLVMOrcObjectLayerRef, JD:LLVMOrcJITDylibRef, ObjBuffer:LLVMMemoryBufferRef) -> LLVMErrorRef: ...
+@dll.bind
+def LLVMOrcObjectLayerAddObjectFileWithRT(ObjLayer:LLVMOrcObjectLayerRef, RT:LLVMOrcResourceTrackerRef, ObjBuffer:LLVMMemoryBufferRef) -> LLVMErrorRef: ...
+@dll.bind
+def LLVMOrcObjectLayerEmit(ObjLayer:LLVMOrcObjectLayerRef, R:LLVMOrcMaterializationResponsibilityRef, ObjBuffer:LLVMMemoryBufferRef) -> None: ...
+@dll.bind
+def LLVMOrcDisposeObjectLayer(ObjLayer:LLVMOrcObjectLayerRef) -> None: ...
+class struct_LLVMOrcOpaqueIRTransformLayer(ctypes.Structure): pass
+LLVMOrcIRTransformLayerRef: TypeAlias = c.POINTER[struct_LLVMOrcOpaqueIRTransformLayer]
+@dll.bind
+def LLVMOrcIRTransformLayerEmit(IRTransformLayer:LLVMOrcIRTransformLayerRef, MR:LLVMOrcMaterializationResponsibilityRef, TSM:LLVMOrcThreadSafeModuleRef) -> None: ...
+LLVMOrcIRTransformLayerTransformFunction: TypeAlias = c.CFUNCTYPE[c.POINTER[struct_LLVMOpaqueError], [ctypes.c_void_p, c.POINTER[c.POINTER[struct_LLVMOrcOpaqueThreadSafeModule]], c.POINTER[struct_LLVMOrcOpaqueMaterializationResponsibility]]]
+@dll.bind
+def LLVMOrcIRTransformLayerSetTransform(IRTransformLayer:LLVMOrcIRTransformLayerRef, TransformFunction:LLVMOrcIRTransformLayerTransformFunction, Ctx:ctypes.c_void_p) -> None: ...
+class struct_LLVMOrcOpaqueObjectTransformLayer(ctypes.Structure): pass
+LLVMOrcObjectTransformLayerRef: TypeAlias = c.POINTER[struct_LLVMOrcOpaqueObjectTransformLayer]
+LLVMOrcObjectTransformLayerTransformFunction: TypeAlias = c.CFUNCTYPE[c.POINTER[struct_LLVMOpaqueError], [ctypes.c_void_p, c.POINTER[c.POINTER[struct_LLVMOpaqueMemoryBuffer]]]]
+@dll.bind
+def LLVMOrcObjectTransformLayerSetTransform(ObjTransformLayer:LLVMOrcObjectTransformLayerRef, TransformFunction:LLVMOrcObjectTransformLayerTransformFunction, Ctx:ctypes.c_void_p) -> None: ...
+@dll.bind
+def LLVMOrcCreateLocalIndirectStubsManager(TargetTriple:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMOrcIndirectStubsManagerRef: ...
+@dll.bind
+def LLVMOrcDisposeIndirectStubsManager(ISM:LLVMOrcIndirectStubsManagerRef) -> None: ...
+LLVMOrcJITTargetAddress: TypeAlias = Annotated[int, ctypes.c_uint64]
+@dll.bind
+def LLVMOrcCreateLocalLazyCallThroughManager(TargetTriple:c.POINTER[Annotated[bytes, ctypes.c_char]], ES:LLVMOrcExecutionSessionRef, ErrorHandlerAddr:LLVMOrcJITTargetAddress, LCTM:c.POINTER[LLVMOrcLazyCallThroughManagerRef]) -> LLVMErrorRef: ...
+@dll.bind
+def LLVMOrcDisposeLazyCallThroughManager(LCTM:LLVMOrcLazyCallThroughManagerRef) -> None: ...
+class struct_LLVMOrcOpaqueDumpObjects(ctypes.Structure): pass
+LLVMOrcDumpObjectsRef: TypeAlias = c.POINTER[struct_LLVMOrcOpaqueDumpObjects]
+@dll.bind
+def LLVMOrcCreateDumpObjects(DumpDir:c.POINTER[Annotated[bytes, ctypes.c_char]], IdentifierOverride:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMOrcDumpObjectsRef: ...
+@dll.bind
+def LLVMOrcDisposeDumpObjects(DumpObjects:LLVMOrcDumpObjectsRef) -> None: ...
+@dll.bind
+def LLVMOrcDumpObjects_CallOperator(DumpObjects:LLVMOrcDumpObjectsRef, ObjBuffer:c.POINTER[LLVMMemoryBufferRef]) -> LLVMErrorRef: ...
+LLVMOrcLLJITBuilderObjectLinkingLayerCreatorFunction: TypeAlias = c.CFUNCTYPE[c.POINTER[struct_LLVMOrcOpaqueObjectLayer], [ctypes.c_void_p, c.POINTER[struct_LLVMOrcOpaqueExecutionSession], c.POINTER[Annotated[bytes, ctypes.c_char]]]]
+class struct_LLVMOrcOpaqueLLJITBuilder(ctypes.Structure): pass
+LLVMOrcLLJITBuilderRef: TypeAlias = c.POINTER[struct_LLVMOrcOpaqueLLJITBuilder]
+class struct_LLVMOrcOpaqueLLJIT(ctypes.Structure): pass
+LLVMOrcLLJITRef: TypeAlias = c.POINTER[struct_LLVMOrcOpaqueLLJIT]
+@dll.bind
+def LLVMOrcCreateLLJITBuilder() -> LLVMOrcLLJITBuilderRef: ...
+@dll.bind
+def LLVMOrcDisposeLLJITBuilder(Builder:LLVMOrcLLJITBuilderRef) -> None: ...
+@dll.bind
+def LLVMOrcLLJITBuilderSetJITTargetMachineBuilder(Builder:LLVMOrcLLJITBuilderRef, JTMB:LLVMOrcJITTargetMachineBuilderRef) -> None: ...
+@dll.bind
+def LLVMOrcLLJITBuilderSetObjectLinkingLayerCreator(Builder:LLVMOrcLLJITBuilderRef, F:LLVMOrcLLJITBuilderObjectLinkingLayerCreatorFunction, Ctx:ctypes.c_void_p) -> None: ...
+@dll.bind
+def LLVMOrcCreateLLJIT(Result:c.POINTER[LLVMOrcLLJITRef], Builder:LLVMOrcLLJITBuilderRef) -> LLVMErrorRef: ...
+@dll.bind
+def LLVMOrcDisposeLLJIT(J:LLVMOrcLLJITRef) -> LLVMErrorRef: ...
+@dll.bind
+def LLVMOrcLLJITGetExecutionSession(J:LLVMOrcLLJITRef) -> LLVMOrcExecutionSessionRef: ...
+@dll.bind
+def LLVMOrcLLJITGetMainJITDylib(J:LLVMOrcLLJITRef) -> LLVMOrcJITDylibRef: ...
+@dll.bind
+def LLVMOrcLLJITGetTripleString(J:LLVMOrcLLJITRef) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
+@dll.bind
+def LLVMOrcLLJITGetGlobalPrefix(J:LLVMOrcLLJITRef) -> Annotated[bytes, ctypes.c_char]: ...
+@dll.bind
+def LLVMOrcLLJITMangleAndIntern(J:LLVMOrcLLJITRef, UnmangledName:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMOrcSymbolStringPoolEntryRef: ...
+@dll.bind
+def LLVMOrcLLJITAddObjectFile(J:LLVMOrcLLJITRef, JD:LLVMOrcJITDylibRef, ObjBuffer:LLVMMemoryBufferRef) -> LLVMErrorRef: ...
+@dll.bind
+def LLVMOrcLLJITAddObjectFileWithRT(J:LLVMOrcLLJITRef, RT:LLVMOrcResourceTrackerRef, ObjBuffer:LLVMMemoryBufferRef) -> LLVMErrorRef: ...
+@dll.bind
+def LLVMOrcLLJITAddLLVMIRModule(J:LLVMOrcLLJITRef, JD:LLVMOrcJITDylibRef, TSM:LLVMOrcThreadSafeModuleRef) -> LLVMErrorRef: ...
+@dll.bind
+def LLVMOrcLLJITAddLLVMIRModuleWithRT(J:LLVMOrcLLJITRef, JD:LLVMOrcResourceTrackerRef, TSM:LLVMOrcThreadSafeModuleRef) -> LLVMErrorRef: ...
+@dll.bind
+def LLVMOrcLLJITLookup(J:LLVMOrcLLJITRef, Result:c.POINTER[LLVMOrcExecutorAddress], Name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMErrorRef: ...
+@dll.bind
+def LLVMOrcLLJITGetObjLinkingLayer(J:LLVMOrcLLJITRef) -> LLVMOrcObjectLayerRef: ...
+@dll.bind
+def LLVMOrcLLJITGetObjTransformLayer(J:LLVMOrcLLJITRef) -> LLVMOrcObjectTransformLayerRef: ...
+@dll.bind
+def LLVMOrcLLJITGetIRTransformLayer(J:LLVMOrcLLJITRef) -> LLVMOrcIRTransformLayerRef: ...
+@dll.bind
+def LLVMOrcLLJITGetDataLayoutStr(J:LLVMOrcLLJITRef) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
+@dll.bind
+def LLVMOrcLLJITEnableDebugSupport(J:LLVMOrcLLJITRef) -> LLVMErrorRef: ...
+class LLVMLinkerMode(Annotated[int, ctypes.c_uint32], c.Enum): pass
 LLVMLinkerDestroySource = LLVMLinkerMode.define('LLVMLinkerDestroySource', 0)
 LLVMLinkerPreserveSource_Removed = LLVMLinkerMode.define('LLVMLinkerPreserveSource_Removed', 1)
 
-try: (LLVMLinkModules2:=dll.LLVMLinkModules2).restype, LLVMLinkModules2.argtypes = LLVMBool, [LLVMModuleRef, LLVMModuleRef]
-except AttributeError: pass
-
-try: (imaxabs:=dll.imaxabs).restype, imaxabs.argtypes = intmax_t, [intmax_t]
-except AttributeError: pass
-
-try: (imaxdiv:=dll.imaxdiv).restype, imaxdiv.argtypes = imaxdiv_t, [intmax_t, intmax_t]
-except AttributeError: pass
-
-try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (select:=dll.select).restype, select.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timeval)]
-except AttributeError: pass
-
-try: (pselect:=dll.pselect).restype, pselect.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timespec), ctypes.POINTER(__sigset_t)]
-except AttributeError: pass
-
-class struct_LLVMOpaqueSectionIterator(Struct): pass
-LLVMSectionIteratorRef = ctypes.POINTER(struct_LLVMOpaqueSectionIterator)
-class struct_LLVMOpaqueSymbolIterator(Struct): pass
-LLVMSymbolIteratorRef = ctypes.POINTER(struct_LLVMOpaqueSymbolIterator)
-class struct_LLVMOpaqueRelocationIterator(Struct): pass
-LLVMRelocationIteratorRef = ctypes.POINTER(struct_LLVMOpaqueRelocationIterator)
-LLVMBinaryType = CEnum(ctypes.c_uint32)
+@dll.bind
+def LLVMLinkModules2(Dest:LLVMModuleRef, Src:LLVMModuleRef) -> LLVMBool: ...
+class struct_LLVMOpaqueSectionIterator(ctypes.Structure): pass
+LLVMSectionIteratorRef: TypeAlias = c.POINTER[struct_LLVMOpaqueSectionIterator]
+class struct_LLVMOpaqueSymbolIterator(ctypes.Structure): pass
+LLVMSymbolIteratorRef: TypeAlias = c.POINTER[struct_LLVMOpaqueSymbolIterator]
+class struct_LLVMOpaqueRelocationIterator(ctypes.Structure): pass
+LLVMRelocationIteratorRef: TypeAlias = c.POINTER[struct_LLVMOpaqueRelocationIterator]
+class LLVMBinaryType(Annotated[int, ctypes.c_uint32], c.Enum): pass
 LLVMBinaryTypeArchive = LLVMBinaryType.define('LLVMBinaryTypeArchive', 0)
 LLVMBinaryTypeMachOUniversalBinary = LLVMBinaryType.define('LLVMBinaryTypeMachOUniversalBinary', 1)
 LLVMBinaryTypeCOFFImportFile = LLVMBinaryType.define('LLVMBinaryTypeCOFFImportFile', 2)
@@ -6387,1931 +3232,103 @@ LLVMBinaryTypeMachO64B = LLVMBinaryType.define('LLVMBinaryTypeMachO64B', 13)
 LLVMBinaryTypeWasm = LLVMBinaryType.define('LLVMBinaryTypeWasm', 14)
 LLVMBinaryTypeOffload = LLVMBinaryType.define('LLVMBinaryTypeOffload', 15)
 
-class struct_LLVMOpaqueBinary(Struct): pass
-LLVMBinaryRef = ctypes.POINTER(struct_LLVMOpaqueBinary)
-try: (LLVMCreateBinary:=dll.LLVMCreateBinary).restype, LLVMCreateBinary.argtypes = LLVMBinaryRef, [LLVMMemoryBufferRef, LLVMContextRef, ctypes.POINTER(ctypes.POINTER(ctypes.c_char))]
-except AttributeError: pass
-
-try: (LLVMDisposeBinary:=dll.LLVMDisposeBinary).restype, LLVMDisposeBinary.argtypes = None, [LLVMBinaryRef]
-except AttributeError: pass
-
-try: (LLVMBinaryCopyMemoryBuffer:=dll.LLVMBinaryCopyMemoryBuffer).restype, LLVMBinaryCopyMemoryBuffer.argtypes = LLVMMemoryBufferRef, [LLVMBinaryRef]
-except AttributeError: pass
-
-try: (LLVMBinaryGetType:=dll.LLVMBinaryGetType).restype, LLVMBinaryGetType.argtypes = LLVMBinaryType, [LLVMBinaryRef]
-except AttributeError: pass
-
-try: (LLVMMachOUniversalBinaryCopyObjectForArch:=dll.LLVMMachOUniversalBinaryCopyObjectForArch).restype, LLVMMachOUniversalBinaryCopyObjectForArch.argtypes = LLVMBinaryRef, [LLVMBinaryRef, ctypes.POINTER(ctypes.c_char), size_t, ctypes.POINTER(ctypes.POINTER(ctypes.c_char))]
-except AttributeError: pass
-
-try: (LLVMObjectFileCopySectionIterator:=dll.LLVMObjectFileCopySectionIterator).restype, LLVMObjectFileCopySectionIterator.argtypes = LLVMSectionIteratorRef, [LLVMBinaryRef]
-except AttributeError: pass
-
-try: (LLVMObjectFileIsSectionIteratorAtEnd:=dll.LLVMObjectFileIsSectionIteratorAtEnd).restype, LLVMObjectFileIsSectionIteratorAtEnd.argtypes = LLVMBool, [LLVMBinaryRef, LLVMSectionIteratorRef]
-except AttributeError: pass
-
-try: (LLVMObjectFileCopySymbolIterator:=dll.LLVMObjectFileCopySymbolIterator).restype, LLVMObjectFileCopySymbolIterator.argtypes = LLVMSymbolIteratorRef, [LLVMBinaryRef]
-except AttributeError: pass
-
-try: (LLVMObjectFileIsSymbolIteratorAtEnd:=dll.LLVMObjectFileIsSymbolIteratorAtEnd).restype, LLVMObjectFileIsSymbolIteratorAtEnd.argtypes = LLVMBool, [LLVMBinaryRef, LLVMSymbolIteratorRef]
-except AttributeError: pass
-
-try: (LLVMDisposeSectionIterator:=dll.LLVMDisposeSectionIterator).restype, LLVMDisposeSectionIterator.argtypes = None, [LLVMSectionIteratorRef]
-except AttributeError: pass
-
-try: (LLVMMoveToNextSection:=dll.LLVMMoveToNextSection).restype, LLVMMoveToNextSection.argtypes = None, [LLVMSectionIteratorRef]
-except AttributeError: pass
-
-try: (LLVMMoveToContainingSection:=dll.LLVMMoveToContainingSection).restype, LLVMMoveToContainingSection.argtypes = None, [LLVMSectionIteratorRef, LLVMSymbolIteratorRef]
-except AttributeError: pass
-
-try: (LLVMDisposeSymbolIterator:=dll.LLVMDisposeSymbolIterator).restype, LLVMDisposeSymbolIterator.argtypes = None, [LLVMSymbolIteratorRef]
-except AttributeError: pass
-
-try: (LLVMMoveToNextSymbol:=dll.LLVMMoveToNextSymbol).restype, LLVMMoveToNextSymbol.argtypes = None, [LLVMSymbolIteratorRef]
-except AttributeError: pass
-
-try: (LLVMGetSectionName:=dll.LLVMGetSectionName).restype, LLVMGetSectionName.argtypes = ctypes.POINTER(ctypes.c_char), [LLVMSectionIteratorRef]
-except AttributeError: pass
-
-try: (LLVMGetSectionSize:=dll.LLVMGetSectionSize).restype, LLVMGetSectionSize.argtypes = uint64_t, [LLVMSectionIteratorRef]
-except AttributeError: pass
-
-try: (LLVMGetSectionContents:=dll.LLVMGetSectionContents).restype, LLVMGetSectionContents.argtypes = ctypes.POINTER(ctypes.c_char), [LLVMSectionIteratorRef]
-except AttributeError: pass
-
-try: (LLVMGetSectionAddress:=dll.LLVMGetSectionAddress).restype, LLVMGetSectionAddress.argtypes = uint64_t, [LLVMSectionIteratorRef]
-except AttributeError: pass
-
-try: (LLVMGetSectionContainsSymbol:=dll.LLVMGetSectionContainsSymbol).restype, LLVMGetSectionContainsSymbol.argtypes = LLVMBool, [LLVMSectionIteratorRef, LLVMSymbolIteratorRef]
-except AttributeError: pass
-
-try: (LLVMGetRelocations:=dll.LLVMGetRelocations).restype, LLVMGetRelocations.argtypes = LLVMRelocationIteratorRef, [LLVMSectionIteratorRef]
-except AttributeError: pass
-
-try: (LLVMDisposeRelocationIterator:=dll.LLVMDisposeRelocationIterator).restype, LLVMDisposeRelocationIterator.argtypes = None, [LLVMRelocationIteratorRef]
-except AttributeError: pass
-
-try: (LLVMIsRelocationIteratorAtEnd:=dll.LLVMIsRelocationIteratorAtEnd).restype, LLVMIsRelocationIteratorAtEnd.argtypes = LLVMBool, [LLVMSectionIteratorRef, LLVMRelocationIteratorRef]
-except AttributeError: pass
-
-try: (LLVMMoveToNextRelocation:=dll.LLVMMoveToNextRelocation).restype, LLVMMoveToNextRelocation.argtypes = None, [LLVMRelocationIteratorRef]
-except AttributeError: pass
-
-try: (LLVMGetSymbolName:=dll.LLVMGetSymbolName).restype, LLVMGetSymbolName.argtypes = ctypes.POINTER(ctypes.c_char), [LLVMSymbolIteratorRef]
-except AttributeError: pass
-
-try: (LLVMGetSymbolAddress:=dll.LLVMGetSymbolAddress).restype, LLVMGetSymbolAddress.argtypes = uint64_t, [LLVMSymbolIteratorRef]
-except AttributeError: pass
-
-try: (LLVMGetSymbolSize:=dll.LLVMGetSymbolSize).restype, LLVMGetSymbolSize.argtypes = uint64_t, [LLVMSymbolIteratorRef]
-except AttributeError: pass
-
-try: (LLVMGetRelocationOffset:=dll.LLVMGetRelocationOffset).restype, LLVMGetRelocationOffset.argtypes = uint64_t, [LLVMRelocationIteratorRef]
-except AttributeError: pass
-
-try: (LLVMGetRelocationSymbol:=dll.LLVMGetRelocationSymbol).restype, LLVMGetRelocationSymbol.argtypes = LLVMSymbolIteratorRef, [LLVMRelocationIteratorRef]
-except AttributeError: pass
-
-try: (LLVMGetRelocationType:=dll.LLVMGetRelocationType).restype, LLVMGetRelocationType.argtypes = uint64_t, [LLVMRelocationIteratorRef]
-except AttributeError: pass
-
-try: (LLVMGetRelocationTypeName:=dll.LLVMGetRelocationTypeName).restype, LLVMGetRelocationTypeName.argtypes = ctypes.POINTER(ctypes.c_char), [LLVMRelocationIteratorRef]
-except AttributeError: pass
-
-try: (LLVMGetRelocationValueString:=dll.LLVMGetRelocationValueString).restype, LLVMGetRelocationValueString.argtypes = ctypes.POINTER(ctypes.c_char), [LLVMRelocationIteratorRef]
-except AttributeError: pass
-
-class struct_LLVMOpaqueObjectFile(Struct): pass
-LLVMObjectFileRef = ctypes.POINTER(struct_LLVMOpaqueObjectFile)
-try: (LLVMCreateObjectFile:=dll.LLVMCreateObjectFile).restype, LLVMCreateObjectFile.argtypes = LLVMObjectFileRef, [LLVMMemoryBufferRef]
-except AttributeError: pass
-
-try: (LLVMDisposeObjectFile:=dll.LLVMDisposeObjectFile).restype, LLVMDisposeObjectFile.argtypes = None, [LLVMObjectFileRef]
-except AttributeError: pass
-
-try: (LLVMGetSections:=dll.LLVMGetSections).restype, LLVMGetSections.argtypes = LLVMSectionIteratorRef, [LLVMObjectFileRef]
-except AttributeError: pass
-
-try: (LLVMIsSectionIteratorAtEnd:=dll.LLVMIsSectionIteratorAtEnd).restype, LLVMIsSectionIteratorAtEnd.argtypes = LLVMBool, [LLVMObjectFileRef, LLVMSectionIteratorRef]
-except AttributeError: pass
-
-try: (LLVMGetSymbols:=dll.LLVMGetSymbols).restype, LLVMGetSymbols.argtypes = LLVMSymbolIteratorRef, [LLVMObjectFileRef]
-except AttributeError: pass
-
-try: (LLVMIsSymbolIteratorAtEnd:=dll.LLVMIsSymbolIteratorAtEnd).restype, LLVMIsSymbolIteratorAtEnd.argtypes = LLVMBool, [LLVMObjectFileRef, LLVMSymbolIteratorRef]
-except AttributeError: pass
-
-try: (LLVMGetErrorTypeId:=dll.LLVMGetErrorTypeId).restype, LLVMGetErrorTypeId.argtypes = LLVMErrorTypeId, [LLVMErrorRef]
-except AttributeError: pass
-
-try: (LLVMConsumeError:=dll.LLVMConsumeError).restype, LLVMConsumeError.argtypes = None, [LLVMErrorRef]
-except AttributeError: pass
-
-try: (LLVMCantFail:=dll.LLVMCantFail).restype, LLVMCantFail.argtypes = None, [LLVMErrorRef]
-except AttributeError: pass
-
-try: (LLVMGetErrorMessage:=dll.LLVMGetErrorMessage).restype, LLVMGetErrorMessage.argtypes = ctypes.POINTER(ctypes.c_char), [LLVMErrorRef]
-except AttributeError: pass
-
-try: (LLVMDisposeErrorMessage:=dll.LLVMDisposeErrorMessage).restype, LLVMDisposeErrorMessage.argtypes = None, [ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMGetStringErrorTypeId:=dll.LLVMGetStringErrorTypeId).restype, LLVMGetStringErrorTypeId.argtypes = LLVMErrorTypeId, []
-except AttributeError: pass
-
-try: (LLVMCreateStringError:=dll.LLVMCreateStringError).restype, LLVMCreateStringError.argtypes = LLVMErrorRef, [ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (imaxabs:=dll.imaxabs).restype, imaxabs.argtypes = intmax_t, [intmax_t]
-except AttributeError: pass
-
-try: (imaxdiv:=dll.imaxdiv).restype, imaxdiv.argtypes = imaxdiv_t, [intmax_t, intmax_t]
-except AttributeError: pass
-
-try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (select:=dll.select).restype, select.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timeval)]
-except AttributeError: pass
-
-try: (pselect:=dll.pselect).restype, pselect.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timespec), ctypes.POINTER(__sigset_t)]
-except AttributeError: pass
-
-try: (LLVMInitializeAArch64TargetInfo:=dll.LLVMInitializeAArch64TargetInfo).restype, LLVMInitializeAArch64TargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAMDGPUTargetInfo:=dll.LLVMInitializeAMDGPUTargetInfo).restype, LLVMInitializeAMDGPUTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeARMTargetInfo:=dll.LLVMInitializeARMTargetInfo).restype, LLVMInitializeARMTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAVRTargetInfo:=dll.LLVMInitializeAVRTargetInfo).restype, LLVMInitializeAVRTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeBPFTargetInfo:=dll.LLVMInitializeBPFTargetInfo).restype, LLVMInitializeBPFTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeHexagonTargetInfo:=dll.LLVMInitializeHexagonTargetInfo).restype, LLVMInitializeHexagonTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeLanaiTargetInfo:=dll.LLVMInitializeLanaiTargetInfo).restype, LLVMInitializeLanaiTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeLoongArchTargetInfo:=dll.LLVMInitializeLoongArchTargetInfo).restype, LLVMInitializeLoongArchTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeMipsTargetInfo:=dll.LLVMInitializeMipsTargetInfo).restype, LLVMInitializeMipsTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeMSP430TargetInfo:=dll.LLVMInitializeMSP430TargetInfo).restype, LLVMInitializeMSP430TargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeNVPTXTargetInfo:=dll.LLVMInitializeNVPTXTargetInfo).restype, LLVMInitializeNVPTXTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializePowerPCTargetInfo:=dll.LLVMInitializePowerPCTargetInfo).restype, LLVMInitializePowerPCTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeRISCVTargetInfo:=dll.LLVMInitializeRISCVTargetInfo).restype, LLVMInitializeRISCVTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSparcTargetInfo:=dll.LLVMInitializeSparcTargetInfo).restype, LLVMInitializeSparcTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSPIRVTargetInfo:=dll.LLVMInitializeSPIRVTargetInfo).restype, LLVMInitializeSPIRVTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSystemZTargetInfo:=dll.LLVMInitializeSystemZTargetInfo).restype, LLVMInitializeSystemZTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeVETargetInfo:=dll.LLVMInitializeVETargetInfo).restype, LLVMInitializeVETargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeWebAssemblyTargetInfo:=dll.LLVMInitializeWebAssemblyTargetInfo).restype, LLVMInitializeWebAssemblyTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeX86TargetInfo:=dll.LLVMInitializeX86TargetInfo).restype, LLVMInitializeX86TargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeXCoreTargetInfo:=dll.LLVMInitializeXCoreTargetInfo).restype, LLVMInitializeXCoreTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeM68kTargetInfo:=dll.LLVMInitializeM68kTargetInfo).restype, LLVMInitializeM68kTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeXtensaTargetInfo:=dll.LLVMInitializeXtensaTargetInfo).restype, LLVMInitializeXtensaTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAArch64Target:=dll.LLVMInitializeAArch64Target).restype, LLVMInitializeAArch64Target.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAMDGPUTarget:=dll.LLVMInitializeAMDGPUTarget).restype, LLVMInitializeAMDGPUTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeARMTarget:=dll.LLVMInitializeARMTarget).restype, LLVMInitializeARMTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAVRTarget:=dll.LLVMInitializeAVRTarget).restype, LLVMInitializeAVRTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeBPFTarget:=dll.LLVMInitializeBPFTarget).restype, LLVMInitializeBPFTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeHexagonTarget:=dll.LLVMInitializeHexagonTarget).restype, LLVMInitializeHexagonTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeLanaiTarget:=dll.LLVMInitializeLanaiTarget).restype, LLVMInitializeLanaiTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeLoongArchTarget:=dll.LLVMInitializeLoongArchTarget).restype, LLVMInitializeLoongArchTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeMipsTarget:=dll.LLVMInitializeMipsTarget).restype, LLVMInitializeMipsTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeMSP430Target:=dll.LLVMInitializeMSP430Target).restype, LLVMInitializeMSP430Target.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeNVPTXTarget:=dll.LLVMInitializeNVPTXTarget).restype, LLVMInitializeNVPTXTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializePowerPCTarget:=dll.LLVMInitializePowerPCTarget).restype, LLVMInitializePowerPCTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeRISCVTarget:=dll.LLVMInitializeRISCVTarget).restype, LLVMInitializeRISCVTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSparcTarget:=dll.LLVMInitializeSparcTarget).restype, LLVMInitializeSparcTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSPIRVTarget:=dll.LLVMInitializeSPIRVTarget).restype, LLVMInitializeSPIRVTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSystemZTarget:=dll.LLVMInitializeSystemZTarget).restype, LLVMInitializeSystemZTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeVETarget:=dll.LLVMInitializeVETarget).restype, LLVMInitializeVETarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeWebAssemblyTarget:=dll.LLVMInitializeWebAssemblyTarget).restype, LLVMInitializeWebAssemblyTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeX86Target:=dll.LLVMInitializeX86Target).restype, LLVMInitializeX86Target.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeXCoreTarget:=dll.LLVMInitializeXCoreTarget).restype, LLVMInitializeXCoreTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeM68kTarget:=dll.LLVMInitializeM68kTarget).restype, LLVMInitializeM68kTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeXtensaTarget:=dll.LLVMInitializeXtensaTarget).restype, LLVMInitializeXtensaTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAArch64TargetMC:=dll.LLVMInitializeAArch64TargetMC).restype, LLVMInitializeAArch64TargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAMDGPUTargetMC:=dll.LLVMInitializeAMDGPUTargetMC).restype, LLVMInitializeAMDGPUTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeARMTargetMC:=dll.LLVMInitializeARMTargetMC).restype, LLVMInitializeARMTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAVRTargetMC:=dll.LLVMInitializeAVRTargetMC).restype, LLVMInitializeAVRTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeBPFTargetMC:=dll.LLVMInitializeBPFTargetMC).restype, LLVMInitializeBPFTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeHexagonTargetMC:=dll.LLVMInitializeHexagonTargetMC).restype, LLVMInitializeHexagonTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeLanaiTargetMC:=dll.LLVMInitializeLanaiTargetMC).restype, LLVMInitializeLanaiTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeLoongArchTargetMC:=dll.LLVMInitializeLoongArchTargetMC).restype, LLVMInitializeLoongArchTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeMipsTargetMC:=dll.LLVMInitializeMipsTargetMC).restype, LLVMInitializeMipsTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeMSP430TargetMC:=dll.LLVMInitializeMSP430TargetMC).restype, LLVMInitializeMSP430TargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeNVPTXTargetMC:=dll.LLVMInitializeNVPTXTargetMC).restype, LLVMInitializeNVPTXTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializePowerPCTargetMC:=dll.LLVMInitializePowerPCTargetMC).restype, LLVMInitializePowerPCTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeRISCVTargetMC:=dll.LLVMInitializeRISCVTargetMC).restype, LLVMInitializeRISCVTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSparcTargetMC:=dll.LLVMInitializeSparcTargetMC).restype, LLVMInitializeSparcTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSPIRVTargetMC:=dll.LLVMInitializeSPIRVTargetMC).restype, LLVMInitializeSPIRVTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSystemZTargetMC:=dll.LLVMInitializeSystemZTargetMC).restype, LLVMInitializeSystemZTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeVETargetMC:=dll.LLVMInitializeVETargetMC).restype, LLVMInitializeVETargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeWebAssemblyTargetMC:=dll.LLVMInitializeWebAssemblyTargetMC).restype, LLVMInitializeWebAssemblyTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeX86TargetMC:=dll.LLVMInitializeX86TargetMC).restype, LLVMInitializeX86TargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeXCoreTargetMC:=dll.LLVMInitializeXCoreTargetMC).restype, LLVMInitializeXCoreTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeM68kTargetMC:=dll.LLVMInitializeM68kTargetMC).restype, LLVMInitializeM68kTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeXtensaTargetMC:=dll.LLVMInitializeXtensaTargetMC).restype, LLVMInitializeXtensaTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAArch64AsmPrinter:=dll.LLVMInitializeAArch64AsmPrinter).restype, LLVMInitializeAArch64AsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAMDGPUAsmPrinter:=dll.LLVMInitializeAMDGPUAsmPrinter).restype, LLVMInitializeAMDGPUAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeARMAsmPrinter:=dll.LLVMInitializeARMAsmPrinter).restype, LLVMInitializeARMAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAVRAsmPrinter:=dll.LLVMInitializeAVRAsmPrinter).restype, LLVMInitializeAVRAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeBPFAsmPrinter:=dll.LLVMInitializeBPFAsmPrinter).restype, LLVMInitializeBPFAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeHexagonAsmPrinter:=dll.LLVMInitializeHexagonAsmPrinter).restype, LLVMInitializeHexagonAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeLanaiAsmPrinter:=dll.LLVMInitializeLanaiAsmPrinter).restype, LLVMInitializeLanaiAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeLoongArchAsmPrinter:=dll.LLVMInitializeLoongArchAsmPrinter).restype, LLVMInitializeLoongArchAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeMipsAsmPrinter:=dll.LLVMInitializeMipsAsmPrinter).restype, LLVMInitializeMipsAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeMSP430AsmPrinter:=dll.LLVMInitializeMSP430AsmPrinter).restype, LLVMInitializeMSP430AsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeNVPTXAsmPrinter:=dll.LLVMInitializeNVPTXAsmPrinter).restype, LLVMInitializeNVPTXAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializePowerPCAsmPrinter:=dll.LLVMInitializePowerPCAsmPrinter).restype, LLVMInitializePowerPCAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeRISCVAsmPrinter:=dll.LLVMInitializeRISCVAsmPrinter).restype, LLVMInitializeRISCVAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSparcAsmPrinter:=dll.LLVMInitializeSparcAsmPrinter).restype, LLVMInitializeSparcAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSPIRVAsmPrinter:=dll.LLVMInitializeSPIRVAsmPrinter).restype, LLVMInitializeSPIRVAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSystemZAsmPrinter:=dll.LLVMInitializeSystemZAsmPrinter).restype, LLVMInitializeSystemZAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeVEAsmPrinter:=dll.LLVMInitializeVEAsmPrinter).restype, LLVMInitializeVEAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeWebAssemblyAsmPrinter:=dll.LLVMInitializeWebAssemblyAsmPrinter).restype, LLVMInitializeWebAssemblyAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeX86AsmPrinter:=dll.LLVMInitializeX86AsmPrinter).restype, LLVMInitializeX86AsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeXCoreAsmPrinter:=dll.LLVMInitializeXCoreAsmPrinter).restype, LLVMInitializeXCoreAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeM68kAsmPrinter:=dll.LLVMInitializeM68kAsmPrinter).restype, LLVMInitializeM68kAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeXtensaAsmPrinter:=dll.LLVMInitializeXtensaAsmPrinter).restype, LLVMInitializeXtensaAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAArch64AsmParser:=dll.LLVMInitializeAArch64AsmParser).restype, LLVMInitializeAArch64AsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAMDGPUAsmParser:=dll.LLVMInitializeAMDGPUAsmParser).restype, LLVMInitializeAMDGPUAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeARMAsmParser:=dll.LLVMInitializeARMAsmParser).restype, LLVMInitializeARMAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAVRAsmParser:=dll.LLVMInitializeAVRAsmParser).restype, LLVMInitializeAVRAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeBPFAsmParser:=dll.LLVMInitializeBPFAsmParser).restype, LLVMInitializeBPFAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeHexagonAsmParser:=dll.LLVMInitializeHexagonAsmParser).restype, LLVMInitializeHexagonAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeLanaiAsmParser:=dll.LLVMInitializeLanaiAsmParser).restype, LLVMInitializeLanaiAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeLoongArchAsmParser:=dll.LLVMInitializeLoongArchAsmParser).restype, LLVMInitializeLoongArchAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeMipsAsmParser:=dll.LLVMInitializeMipsAsmParser).restype, LLVMInitializeMipsAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeMSP430AsmParser:=dll.LLVMInitializeMSP430AsmParser).restype, LLVMInitializeMSP430AsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializePowerPCAsmParser:=dll.LLVMInitializePowerPCAsmParser).restype, LLVMInitializePowerPCAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeRISCVAsmParser:=dll.LLVMInitializeRISCVAsmParser).restype, LLVMInitializeRISCVAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSparcAsmParser:=dll.LLVMInitializeSparcAsmParser).restype, LLVMInitializeSparcAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSystemZAsmParser:=dll.LLVMInitializeSystemZAsmParser).restype, LLVMInitializeSystemZAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeVEAsmParser:=dll.LLVMInitializeVEAsmParser).restype, LLVMInitializeVEAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeWebAssemblyAsmParser:=dll.LLVMInitializeWebAssemblyAsmParser).restype, LLVMInitializeWebAssemblyAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeX86AsmParser:=dll.LLVMInitializeX86AsmParser).restype, LLVMInitializeX86AsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeM68kAsmParser:=dll.LLVMInitializeM68kAsmParser).restype, LLVMInitializeM68kAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeXtensaAsmParser:=dll.LLVMInitializeXtensaAsmParser).restype, LLVMInitializeXtensaAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAArch64Disassembler:=dll.LLVMInitializeAArch64Disassembler).restype, LLVMInitializeAArch64Disassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAMDGPUDisassembler:=dll.LLVMInitializeAMDGPUDisassembler).restype, LLVMInitializeAMDGPUDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeARMDisassembler:=dll.LLVMInitializeARMDisassembler).restype, LLVMInitializeARMDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAVRDisassembler:=dll.LLVMInitializeAVRDisassembler).restype, LLVMInitializeAVRDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeBPFDisassembler:=dll.LLVMInitializeBPFDisassembler).restype, LLVMInitializeBPFDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeHexagonDisassembler:=dll.LLVMInitializeHexagonDisassembler).restype, LLVMInitializeHexagonDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeLanaiDisassembler:=dll.LLVMInitializeLanaiDisassembler).restype, LLVMInitializeLanaiDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeLoongArchDisassembler:=dll.LLVMInitializeLoongArchDisassembler).restype, LLVMInitializeLoongArchDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeMipsDisassembler:=dll.LLVMInitializeMipsDisassembler).restype, LLVMInitializeMipsDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeMSP430Disassembler:=dll.LLVMInitializeMSP430Disassembler).restype, LLVMInitializeMSP430Disassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializePowerPCDisassembler:=dll.LLVMInitializePowerPCDisassembler).restype, LLVMInitializePowerPCDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeRISCVDisassembler:=dll.LLVMInitializeRISCVDisassembler).restype, LLVMInitializeRISCVDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSparcDisassembler:=dll.LLVMInitializeSparcDisassembler).restype, LLVMInitializeSparcDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSystemZDisassembler:=dll.LLVMInitializeSystemZDisassembler).restype, LLVMInitializeSystemZDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeVEDisassembler:=dll.LLVMInitializeVEDisassembler).restype, LLVMInitializeVEDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeWebAssemblyDisassembler:=dll.LLVMInitializeWebAssemblyDisassembler).restype, LLVMInitializeWebAssemblyDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeX86Disassembler:=dll.LLVMInitializeX86Disassembler).restype, LLVMInitializeX86Disassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeXCoreDisassembler:=dll.LLVMInitializeXCoreDisassembler).restype, LLVMInitializeXCoreDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeM68kDisassembler:=dll.LLVMInitializeM68kDisassembler).restype, LLVMInitializeM68kDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeXtensaDisassembler:=dll.LLVMInitializeXtensaDisassembler).restype, LLVMInitializeXtensaDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMGetModuleDataLayout:=dll.LLVMGetModuleDataLayout).restype, LLVMGetModuleDataLayout.argtypes = LLVMTargetDataRef, [LLVMModuleRef]
-except AttributeError: pass
-
-try: (LLVMSetModuleDataLayout:=dll.LLVMSetModuleDataLayout).restype, LLVMSetModuleDataLayout.argtypes = None, [LLVMModuleRef, LLVMTargetDataRef]
-except AttributeError: pass
-
-try: (LLVMCreateTargetData:=dll.LLVMCreateTargetData).restype, LLVMCreateTargetData.argtypes = LLVMTargetDataRef, [ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMDisposeTargetData:=dll.LLVMDisposeTargetData).restype, LLVMDisposeTargetData.argtypes = None, [LLVMTargetDataRef]
-except AttributeError: pass
-
-try: (LLVMAddTargetLibraryInfo:=dll.LLVMAddTargetLibraryInfo).restype, LLVMAddTargetLibraryInfo.argtypes = None, [LLVMTargetLibraryInfoRef, LLVMPassManagerRef]
-except AttributeError: pass
-
-try: (LLVMCopyStringRepOfTargetData:=dll.LLVMCopyStringRepOfTargetData).restype, LLVMCopyStringRepOfTargetData.argtypes = ctypes.POINTER(ctypes.c_char), [LLVMTargetDataRef]
-except AttributeError: pass
-
-try: (LLVMByteOrder:=dll.LLVMByteOrder).restype, LLVMByteOrder.argtypes = enum_LLVMByteOrdering, [LLVMTargetDataRef]
-except AttributeError: pass
-
-try: (LLVMPointerSize:=dll.LLVMPointerSize).restype, LLVMPointerSize.argtypes = ctypes.c_uint32, [LLVMTargetDataRef]
-except AttributeError: pass
-
-try: (LLVMPointerSizeForAS:=dll.LLVMPointerSizeForAS).restype, LLVMPointerSizeForAS.argtypes = ctypes.c_uint32, [LLVMTargetDataRef, ctypes.c_uint32]
-except AttributeError: pass
-
-try: (LLVMIntPtrType:=dll.LLVMIntPtrType).restype, LLVMIntPtrType.argtypes = LLVMTypeRef, [LLVMTargetDataRef]
-except AttributeError: pass
-
-try: (LLVMIntPtrTypeForAS:=dll.LLVMIntPtrTypeForAS).restype, LLVMIntPtrTypeForAS.argtypes = LLVMTypeRef, [LLVMTargetDataRef, ctypes.c_uint32]
-except AttributeError: pass
-
-try: (LLVMIntPtrTypeInContext:=dll.LLVMIntPtrTypeInContext).restype, LLVMIntPtrTypeInContext.argtypes = LLVMTypeRef, [LLVMContextRef, LLVMTargetDataRef]
-except AttributeError: pass
-
-try: (LLVMIntPtrTypeForASInContext:=dll.LLVMIntPtrTypeForASInContext).restype, LLVMIntPtrTypeForASInContext.argtypes = LLVMTypeRef, [LLVMContextRef, LLVMTargetDataRef, ctypes.c_uint32]
-except AttributeError: pass
-
-try: (LLVMSizeOfTypeInBits:=dll.LLVMSizeOfTypeInBits).restype, LLVMSizeOfTypeInBits.argtypes = ctypes.c_uint64, [LLVMTargetDataRef, LLVMTypeRef]
-except AttributeError: pass
-
-try: (LLVMStoreSizeOfType:=dll.LLVMStoreSizeOfType).restype, LLVMStoreSizeOfType.argtypes = ctypes.c_uint64, [LLVMTargetDataRef, LLVMTypeRef]
-except AttributeError: pass
-
-try: (LLVMABISizeOfType:=dll.LLVMABISizeOfType).restype, LLVMABISizeOfType.argtypes = ctypes.c_uint64, [LLVMTargetDataRef, LLVMTypeRef]
-except AttributeError: pass
-
-try: (LLVMABIAlignmentOfType:=dll.LLVMABIAlignmentOfType).restype, LLVMABIAlignmentOfType.argtypes = ctypes.c_uint32, [LLVMTargetDataRef, LLVMTypeRef]
-except AttributeError: pass
-
-try: (LLVMCallFrameAlignmentOfType:=dll.LLVMCallFrameAlignmentOfType).restype, LLVMCallFrameAlignmentOfType.argtypes = ctypes.c_uint32, [LLVMTargetDataRef, LLVMTypeRef]
-except AttributeError: pass
-
-try: (LLVMPreferredAlignmentOfType:=dll.LLVMPreferredAlignmentOfType).restype, LLVMPreferredAlignmentOfType.argtypes = ctypes.c_uint32, [LLVMTargetDataRef, LLVMTypeRef]
-except AttributeError: pass
-
-try: (LLVMPreferredAlignmentOfGlobal:=dll.LLVMPreferredAlignmentOfGlobal).restype, LLVMPreferredAlignmentOfGlobal.argtypes = ctypes.c_uint32, [LLVMTargetDataRef, LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMElementAtOffset:=dll.LLVMElementAtOffset).restype, LLVMElementAtOffset.argtypes = ctypes.c_uint32, [LLVMTargetDataRef, LLVMTypeRef, ctypes.c_uint64]
-except AttributeError: pass
-
-try: (LLVMOffsetOfElement:=dll.LLVMOffsetOfElement).restype, LLVMOffsetOfElement.argtypes = ctypes.c_uint64, [LLVMTargetDataRef, LLVMTypeRef, ctypes.c_uint32]
-except AttributeError: pass
-
-try: (LLVMGetFirstTarget:=dll.LLVMGetFirstTarget).restype, LLVMGetFirstTarget.argtypes = LLVMTargetRef, []
-except AttributeError: pass
-
-try: (LLVMGetNextTarget:=dll.LLVMGetNextTarget).restype, LLVMGetNextTarget.argtypes = LLVMTargetRef, [LLVMTargetRef]
-except AttributeError: pass
-
-try: (LLVMGetTargetFromName:=dll.LLVMGetTargetFromName).restype, LLVMGetTargetFromName.argtypes = LLVMTargetRef, [ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMGetTargetFromTriple:=dll.LLVMGetTargetFromTriple).restype, LLVMGetTargetFromTriple.argtypes = LLVMBool, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(LLVMTargetRef), ctypes.POINTER(ctypes.POINTER(ctypes.c_char))]
-except AttributeError: pass
-
-try: (LLVMGetTargetName:=dll.LLVMGetTargetName).restype, LLVMGetTargetName.argtypes = ctypes.POINTER(ctypes.c_char), [LLVMTargetRef]
-except AttributeError: pass
-
-try: (LLVMGetTargetDescription:=dll.LLVMGetTargetDescription).restype, LLVMGetTargetDescription.argtypes = ctypes.POINTER(ctypes.c_char), [LLVMTargetRef]
-except AttributeError: pass
-
-try: (LLVMTargetHasJIT:=dll.LLVMTargetHasJIT).restype, LLVMTargetHasJIT.argtypes = LLVMBool, [LLVMTargetRef]
-except AttributeError: pass
-
-try: (LLVMTargetHasTargetMachine:=dll.LLVMTargetHasTargetMachine).restype, LLVMTargetHasTargetMachine.argtypes = LLVMBool, [LLVMTargetRef]
-except AttributeError: pass
-
-try: (LLVMTargetHasAsmBackend:=dll.LLVMTargetHasAsmBackend).restype, LLVMTargetHasAsmBackend.argtypes = LLVMBool, [LLVMTargetRef]
-except AttributeError: pass
-
-try: (LLVMCreateTargetMachineOptions:=dll.LLVMCreateTargetMachineOptions).restype, LLVMCreateTargetMachineOptions.argtypes = LLVMTargetMachineOptionsRef, []
-except AttributeError: pass
-
-try: (LLVMDisposeTargetMachineOptions:=dll.LLVMDisposeTargetMachineOptions).restype, LLVMDisposeTargetMachineOptions.argtypes = None, [LLVMTargetMachineOptionsRef]
-except AttributeError: pass
-
-try: (LLVMTargetMachineOptionsSetCPU:=dll.LLVMTargetMachineOptionsSetCPU).restype, LLVMTargetMachineOptionsSetCPU.argtypes = None, [LLVMTargetMachineOptionsRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMTargetMachineOptionsSetFeatures:=dll.LLVMTargetMachineOptionsSetFeatures).restype, LLVMTargetMachineOptionsSetFeatures.argtypes = None, [LLVMTargetMachineOptionsRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMTargetMachineOptionsSetABI:=dll.LLVMTargetMachineOptionsSetABI).restype, LLVMTargetMachineOptionsSetABI.argtypes = None, [LLVMTargetMachineOptionsRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMTargetMachineOptionsSetCodeGenOptLevel:=dll.LLVMTargetMachineOptionsSetCodeGenOptLevel).restype, LLVMTargetMachineOptionsSetCodeGenOptLevel.argtypes = None, [LLVMTargetMachineOptionsRef, LLVMCodeGenOptLevel]
-except AttributeError: pass
-
-try: (LLVMTargetMachineOptionsSetRelocMode:=dll.LLVMTargetMachineOptionsSetRelocMode).restype, LLVMTargetMachineOptionsSetRelocMode.argtypes = None, [LLVMTargetMachineOptionsRef, LLVMRelocMode]
-except AttributeError: pass
-
-try: (LLVMTargetMachineOptionsSetCodeModel:=dll.LLVMTargetMachineOptionsSetCodeModel).restype, LLVMTargetMachineOptionsSetCodeModel.argtypes = None, [LLVMTargetMachineOptionsRef, LLVMCodeModel]
-except AttributeError: pass
-
-try: (LLVMCreateTargetMachineWithOptions:=dll.LLVMCreateTargetMachineWithOptions).restype, LLVMCreateTargetMachineWithOptions.argtypes = LLVMTargetMachineRef, [LLVMTargetRef, ctypes.POINTER(ctypes.c_char), LLVMTargetMachineOptionsRef]
-except AttributeError: pass
-
-try: (LLVMCreateTargetMachine:=dll.LLVMCreateTargetMachine).restype, LLVMCreateTargetMachine.argtypes = LLVMTargetMachineRef, [LLVMTargetRef, ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char), LLVMCodeGenOptLevel, LLVMRelocMode, LLVMCodeModel]
-except AttributeError: pass
-
-try: (LLVMDisposeTargetMachine:=dll.LLVMDisposeTargetMachine).restype, LLVMDisposeTargetMachine.argtypes = None, [LLVMTargetMachineRef]
-except AttributeError: pass
-
-try: (LLVMGetTargetMachineTarget:=dll.LLVMGetTargetMachineTarget).restype, LLVMGetTargetMachineTarget.argtypes = LLVMTargetRef, [LLVMTargetMachineRef]
-except AttributeError: pass
-
-try: (LLVMGetTargetMachineTriple:=dll.LLVMGetTargetMachineTriple).restype, LLVMGetTargetMachineTriple.argtypes = ctypes.POINTER(ctypes.c_char), [LLVMTargetMachineRef]
-except AttributeError: pass
-
-try: (LLVMGetTargetMachineCPU:=dll.LLVMGetTargetMachineCPU).restype, LLVMGetTargetMachineCPU.argtypes = ctypes.POINTER(ctypes.c_char), [LLVMTargetMachineRef]
-except AttributeError: pass
-
-try: (LLVMGetTargetMachineFeatureString:=dll.LLVMGetTargetMachineFeatureString).restype, LLVMGetTargetMachineFeatureString.argtypes = ctypes.POINTER(ctypes.c_char), [LLVMTargetMachineRef]
-except AttributeError: pass
-
-try: (LLVMCreateTargetDataLayout:=dll.LLVMCreateTargetDataLayout).restype, LLVMCreateTargetDataLayout.argtypes = LLVMTargetDataRef, [LLVMTargetMachineRef]
-except AttributeError: pass
-
-try: (LLVMSetTargetMachineAsmVerbosity:=dll.LLVMSetTargetMachineAsmVerbosity).restype, LLVMSetTargetMachineAsmVerbosity.argtypes = None, [LLVMTargetMachineRef, LLVMBool]
-except AttributeError: pass
-
-try: (LLVMSetTargetMachineFastISel:=dll.LLVMSetTargetMachineFastISel).restype, LLVMSetTargetMachineFastISel.argtypes = None, [LLVMTargetMachineRef, LLVMBool]
-except AttributeError: pass
-
-try: (LLVMSetTargetMachineGlobalISel:=dll.LLVMSetTargetMachineGlobalISel).restype, LLVMSetTargetMachineGlobalISel.argtypes = None, [LLVMTargetMachineRef, LLVMBool]
-except AttributeError: pass
-
-try: (LLVMSetTargetMachineGlobalISelAbort:=dll.LLVMSetTargetMachineGlobalISelAbort).restype, LLVMSetTargetMachineGlobalISelAbort.argtypes = None, [LLVMTargetMachineRef, LLVMGlobalISelAbortMode]
-except AttributeError: pass
-
-try: (LLVMSetTargetMachineMachineOutliner:=dll.LLVMSetTargetMachineMachineOutliner).restype, LLVMSetTargetMachineMachineOutliner.argtypes = None, [LLVMTargetMachineRef, LLVMBool]
-except AttributeError: pass
-
-try: (LLVMTargetMachineEmitToFile:=dll.LLVMTargetMachineEmitToFile).restype, LLVMTargetMachineEmitToFile.argtypes = LLVMBool, [LLVMTargetMachineRef, LLVMModuleRef, ctypes.POINTER(ctypes.c_char), LLVMCodeGenFileType, ctypes.POINTER(ctypes.POINTER(ctypes.c_char))]
-except AttributeError: pass
-
-try: (LLVMTargetMachineEmitToMemoryBuffer:=dll.LLVMTargetMachineEmitToMemoryBuffer).restype, LLVMTargetMachineEmitToMemoryBuffer.argtypes = LLVMBool, [LLVMTargetMachineRef, LLVMModuleRef, LLVMCodeGenFileType, ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.POINTER(LLVMMemoryBufferRef)]
-except AttributeError: pass
-
-try: (LLVMGetDefaultTargetTriple:=dll.LLVMGetDefaultTargetTriple).restype, LLVMGetDefaultTargetTriple.argtypes = ctypes.POINTER(ctypes.c_char), []
-except AttributeError: pass
-
-try: (LLVMNormalizeTargetTriple:=dll.LLVMNormalizeTargetTriple).restype, LLVMNormalizeTargetTriple.argtypes = ctypes.POINTER(ctypes.c_char), [ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMGetHostCPUName:=dll.LLVMGetHostCPUName).restype, LLVMGetHostCPUName.argtypes = ctypes.POINTER(ctypes.c_char), []
-except AttributeError: pass
-
-try: (LLVMGetHostCPUFeatures:=dll.LLVMGetHostCPUFeatures).restype, LLVMGetHostCPUFeatures.argtypes = ctypes.POINTER(ctypes.c_char), []
-except AttributeError: pass
-
-try: (LLVMAddAnalysisPasses:=dll.LLVMAddAnalysisPasses).restype, LLVMAddAnalysisPasses.argtypes = None, [LLVMTargetMachineRef, LLVMPassManagerRef]
-except AttributeError: pass
-
-LLVMJITSymbolGenericFlags = CEnum(ctypes.c_uint32)
+class struct_LLVMOpaqueBinary(ctypes.Structure): pass
+LLVMBinaryRef: TypeAlias = c.POINTER[struct_LLVMOpaqueBinary]
+@dll.bind
+def LLVMCreateBinary(MemBuf:LLVMMemoryBufferRef, Context:LLVMContextRef, ErrorMessage:c.POINTER[c.POINTER[Annotated[bytes, ctypes.c_char]]]) -> LLVMBinaryRef: ...
+@dll.bind
+def LLVMDisposeBinary(BR:LLVMBinaryRef) -> None: ...
+@dll.bind
+def LLVMBinaryCopyMemoryBuffer(BR:LLVMBinaryRef) -> LLVMMemoryBufferRef: ...
+@dll.bind
+def LLVMBinaryGetType(BR:LLVMBinaryRef) -> LLVMBinaryType: ...
+@dll.bind
+def LLVMMachOUniversalBinaryCopyObjectForArch(BR:LLVMBinaryRef, Arch:c.POINTER[Annotated[bytes, ctypes.c_char]], ArchLen:size_t, ErrorMessage:c.POINTER[c.POINTER[Annotated[bytes, ctypes.c_char]]]) -> LLVMBinaryRef: ...
+@dll.bind
+def LLVMObjectFileCopySectionIterator(BR:LLVMBinaryRef) -> LLVMSectionIteratorRef: ...
+@dll.bind
+def LLVMObjectFileIsSectionIteratorAtEnd(BR:LLVMBinaryRef, SI:LLVMSectionIteratorRef) -> LLVMBool: ...
+@dll.bind
+def LLVMObjectFileCopySymbolIterator(BR:LLVMBinaryRef) -> LLVMSymbolIteratorRef: ...
+@dll.bind
+def LLVMObjectFileIsSymbolIteratorAtEnd(BR:LLVMBinaryRef, SI:LLVMSymbolIteratorRef) -> LLVMBool: ...
+@dll.bind
+def LLVMDisposeSectionIterator(SI:LLVMSectionIteratorRef) -> None: ...
+@dll.bind
+def LLVMMoveToNextSection(SI:LLVMSectionIteratorRef) -> None: ...
+@dll.bind
+def LLVMMoveToContainingSection(Sect:LLVMSectionIteratorRef, Sym:LLVMSymbolIteratorRef) -> None: ...
+@dll.bind
+def LLVMDisposeSymbolIterator(SI:LLVMSymbolIteratorRef) -> None: ...
+@dll.bind
+def LLVMMoveToNextSymbol(SI:LLVMSymbolIteratorRef) -> None: ...
+@dll.bind
+def LLVMGetSectionName(SI:LLVMSectionIteratorRef) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
+@dll.bind
+def LLVMGetSectionSize(SI:LLVMSectionIteratorRef) -> uint64_t: ...
+@dll.bind
+def LLVMGetSectionContents(SI:LLVMSectionIteratorRef) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
+@dll.bind
+def LLVMGetSectionAddress(SI:LLVMSectionIteratorRef) -> uint64_t: ...
+@dll.bind
+def LLVMGetSectionContainsSymbol(SI:LLVMSectionIteratorRef, Sym:LLVMSymbolIteratorRef) -> LLVMBool: ...
+@dll.bind
+def LLVMGetRelocations(Section:LLVMSectionIteratorRef) -> LLVMRelocationIteratorRef: ...
+@dll.bind
+def LLVMDisposeRelocationIterator(RI:LLVMRelocationIteratorRef) -> None: ...
+@dll.bind
+def LLVMIsRelocationIteratorAtEnd(Section:LLVMSectionIteratorRef, RI:LLVMRelocationIteratorRef) -> LLVMBool: ...
+@dll.bind
+def LLVMMoveToNextRelocation(RI:LLVMRelocationIteratorRef) -> None: ...
+@dll.bind
+def LLVMGetSymbolName(SI:LLVMSymbolIteratorRef) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
+@dll.bind
+def LLVMGetSymbolAddress(SI:LLVMSymbolIteratorRef) -> uint64_t: ...
+@dll.bind
+def LLVMGetSymbolSize(SI:LLVMSymbolIteratorRef) -> uint64_t: ...
+@dll.bind
+def LLVMGetRelocationOffset(RI:LLVMRelocationIteratorRef) -> uint64_t: ...
+@dll.bind
+def LLVMGetRelocationSymbol(RI:LLVMRelocationIteratorRef) -> LLVMSymbolIteratorRef: ...
+@dll.bind
+def LLVMGetRelocationType(RI:LLVMRelocationIteratorRef) -> uint64_t: ...
+@dll.bind
+def LLVMGetRelocationTypeName(RI:LLVMRelocationIteratorRef) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
+@dll.bind
+def LLVMGetRelocationValueString(RI:LLVMRelocationIteratorRef) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
+class struct_LLVMOpaqueObjectFile(ctypes.Structure): pass
+LLVMObjectFileRef: TypeAlias = c.POINTER[struct_LLVMOpaqueObjectFile]
+@dll.bind
+def LLVMCreateObjectFile(MemBuf:LLVMMemoryBufferRef) -> LLVMObjectFileRef: ...
+@dll.bind
+def LLVMDisposeObjectFile(ObjectFile:LLVMObjectFileRef) -> None: ...
+@dll.bind
+def LLVMGetSections(ObjectFile:LLVMObjectFileRef) -> LLVMSectionIteratorRef: ...
+@dll.bind
+def LLVMIsSectionIteratorAtEnd(ObjectFile:LLVMObjectFileRef, SI:LLVMSectionIteratorRef) -> LLVMBool: ...
+@dll.bind
+def LLVMGetSymbols(ObjectFile:LLVMObjectFileRef) -> LLVMSymbolIteratorRef: ...
+@dll.bind
+def LLVMIsSymbolIteratorAtEnd(ObjectFile:LLVMObjectFileRef, SI:LLVMSymbolIteratorRef) -> LLVMBool: ...
+class LLVMJITSymbolGenericFlags(Annotated[int, ctypes.c_uint32], c.Enum): pass
 LLVMJITSymbolGenericFlagsNone = LLVMJITSymbolGenericFlags.define('LLVMJITSymbolGenericFlagsNone', 0)
 LLVMJITSymbolGenericFlagsExported = LLVMJITSymbolGenericFlags.define('LLVMJITSymbolGenericFlagsExported', 1)
 LLVMJITSymbolGenericFlagsWeak = LLVMJITSymbolGenericFlags.define('LLVMJITSymbolGenericFlagsWeak', 2)
 LLVMJITSymbolGenericFlagsCallable = LLVMJITSymbolGenericFlags.define('LLVMJITSymbolGenericFlagsCallable', 4)
 LLVMJITSymbolGenericFlagsMaterializationSideEffectsOnly = LLVMJITSymbolGenericFlags.define('LLVMJITSymbolGenericFlagsMaterializationSideEffectsOnly', 8)
 
-LLVMJITSymbolTargetFlags = ctypes.c_ubyte
-class struct_LLVMOrcOpaqueObjectLinkingLayer(Struct): pass
-LLVMOrcObjectLinkingLayerRef = ctypes.POINTER(struct_LLVMOrcOpaqueObjectLinkingLayer)
-try: (LLVMOrcExecutionSessionSetErrorReporter:=dll.LLVMOrcExecutionSessionSetErrorReporter).restype, LLVMOrcExecutionSessionSetErrorReporter.argtypes = None, [LLVMOrcExecutionSessionRef, LLVMOrcErrorReporterFunction, ctypes.c_void_p]
-except AttributeError: pass
-
-try: (LLVMOrcExecutionSessionGetSymbolStringPool:=dll.LLVMOrcExecutionSessionGetSymbolStringPool).restype, LLVMOrcExecutionSessionGetSymbolStringPool.argtypes = LLVMOrcSymbolStringPoolRef, [LLVMOrcExecutionSessionRef]
-except AttributeError: pass
-
-try: (LLVMOrcSymbolStringPoolClearDeadEntries:=dll.LLVMOrcSymbolStringPoolClearDeadEntries).restype, LLVMOrcSymbolStringPoolClearDeadEntries.argtypes = None, [LLVMOrcSymbolStringPoolRef]
-except AttributeError: pass
-
-try: (LLVMOrcExecutionSessionIntern:=dll.LLVMOrcExecutionSessionIntern).restype, LLVMOrcExecutionSessionIntern.argtypes = LLVMOrcSymbolStringPoolEntryRef, [LLVMOrcExecutionSessionRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMOrcExecutionSessionLookup:=dll.LLVMOrcExecutionSessionLookup).restype, LLVMOrcExecutionSessionLookup.argtypes = None, [LLVMOrcExecutionSessionRef, LLVMOrcLookupKind, LLVMOrcCJITDylibSearchOrder, size_t, LLVMOrcCLookupSet, size_t, LLVMOrcExecutionSessionLookupHandleResultFunction, ctypes.c_void_p]
-except AttributeError: pass
-
-try: (LLVMOrcRetainSymbolStringPoolEntry:=dll.LLVMOrcRetainSymbolStringPoolEntry).restype, LLVMOrcRetainSymbolStringPoolEntry.argtypes = None, [LLVMOrcSymbolStringPoolEntryRef]
-except AttributeError: pass
-
-try: (LLVMOrcReleaseSymbolStringPoolEntry:=dll.LLVMOrcReleaseSymbolStringPoolEntry).restype, LLVMOrcReleaseSymbolStringPoolEntry.argtypes = None, [LLVMOrcSymbolStringPoolEntryRef]
-except AttributeError: pass
-
-try: (LLVMOrcSymbolStringPoolEntryStr:=dll.LLVMOrcSymbolStringPoolEntryStr).restype, LLVMOrcSymbolStringPoolEntryStr.argtypes = ctypes.POINTER(ctypes.c_char), [LLVMOrcSymbolStringPoolEntryRef]
-except AttributeError: pass
-
-try: (LLVMOrcReleaseResourceTracker:=dll.LLVMOrcReleaseResourceTracker).restype, LLVMOrcReleaseResourceTracker.argtypes = None, [LLVMOrcResourceTrackerRef]
-except AttributeError: pass
-
-try: (LLVMOrcResourceTrackerTransferTo:=dll.LLVMOrcResourceTrackerTransferTo).restype, LLVMOrcResourceTrackerTransferTo.argtypes = None, [LLVMOrcResourceTrackerRef, LLVMOrcResourceTrackerRef]
-except AttributeError: pass
-
-try: (LLVMOrcResourceTrackerRemove:=dll.LLVMOrcResourceTrackerRemove).restype, LLVMOrcResourceTrackerRemove.argtypes = LLVMErrorRef, [LLVMOrcResourceTrackerRef]
-except AttributeError: pass
-
-try: (LLVMOrcDisposeDefinitionGenerator:=dll.LLVMOrcDisposeDefinitionGenerator).restype, LLVMOrcDisposeDefinitionGenerator.argtypes = None, [LLVMOrcDefinitionGeneratorRef]
-except AttributeError: pass
-
-try: (LLVMOrcDisposeMaterializationUnit:=dll.LLVMOrcDisposeMaterializationUnit).restype, LLVMOrcDisposeMaterializationUnit.argtypes = None, [LLVMOrcMaterializationUnitRef]
-except AttributeError: pass
-
-try: (LLVMOrcCreateCustomMaterializationUnit:=dll.LLVMOrcCreateCustomMaterializationUnit).restype, LLVMOrcCreateCustomMaterializationUnit.argtypes = LLVMOrcMaterializationUnitRef, [ctypes.POINTER(ctypes.c_char), ctypes.c_void_p, LLVMOrcCSymbolFlagsMapPairs, size_t, LLVMOrcSymbolStringPoolEntryRef, LLVMOrcMaterializationUnitMaterializeFunction, LLVMOrcMaterializationUnitDiscardFunction, LLVMOrcMaterializationUnitDestroyFunction]
-except AttributeError: pass
-
-try: (LLVMOrcAbsoluteSymbols:=dll.LLVMOrcAbsoluteSymbols).restype, LLVMOrcAbsoluteSymbols.argtypes = LLVMOrcMaterializationUnitRef, [LLVMOrcCSymbolMapPairs, size_t]
-except AttributeError: pass
-
-try: (LLVMOrcLazyReexports:=dll.LLVMOrcLazyReexports).restype, LLVMOrcLazyReexports.argtypes = LLVMOrcMaterializationUnitRef, [LLVMOrcLazyCallThroughManagerRef, LLVMOrcIndirectStubsManagerRef, LLVMOrcJITDylibRef, LLVMOrcCSymbolAliasMapPairs, size_t]
-except AttributeError: pass
-
-try: (LLVMOrcDisposeMaterializationResponsibility:=dll.LLVMOrcDisposeMaterializationResponsibility).restype, LLVMOrcDisposeMaterializationResponsibility.argtypes = None, [LLVMOrcMaterializationResponsibilityRef]
-except AttributeError: pass
-
-try: (LLVMOrcMaterializationResponsibilityGetTargetDylib:=dll.LLVMOrcMaterializationResponsibilityGetTargetDylib).restype, LLVMOrcMaterializationResponsibilityGetTargetDylib.argtypes = LLVMOrcJITDylibRef, [LLVMOrcMaterializationResponsibilityRef]
-except AttributeError: pass
-
-try: (LLVMOrcMaterializationResponsibilityGetExecutionSession:=dll.LLVMOrcMaterializationResponsibilityGetExecutionSession).restype, LLVMOrcMaterializationResponsibilityGetExecutionSession.argtypes = LLVMOrcExecutionSessionRef, [LLVMOrcMaterializationResponsibilityRef]
-except AttributeError: pass
-
-try: (LLVMOrcMaterializationResponsibilityGetSymbols:=dll.LLVMOrcMaterializationResponsibilityGetSymbols).restype, LLVMOrcMaterializationResponsibilityGetSymbols.argtypes = LLVMOrcCSymbolFlagsMapPairs, [LLVMOrcMaterializationResponsibilityRef, ctypes.POINTER(size_t)]
-except AttributeError: pass
-
-try: (LLVMOrcDisposeCSymbolFlagsMap:=dll.LLVMOrcDisposeCSymbolFlagsMap).restype, LLVMOrcDisposeCSymbolFlagsMap.argtypes = None, [LLVMOrcCSymbolFlagsMapPairs]
-except AttributeError: pass
-
-try: (LLVMOrcMaterializationResponsibilityGetInitializerSymbol:=dll.LLVMOrcMaterializationResponsibilityGetInitializerSymbol).restype, LLVMOrcMaterializationResponsibilityGetInitializerSymbol.argtypes = LLVMOrcSymbolStringPoolEntryRef, [LLVMOrcMaterializationResponsibilityRef]
-except AttributeError: pass
-
-try: (LLVMOrcMaterializationResponsibilityGetRequestedSymbols:=dll.LLVMOrcMaterializationResponsibilityGetRequestedSymbols).restype, LLVMOrcMaterializationResponsibilityGetRequestedSymbols.argtypes = ctypes.POINTER(LLVMOrcSymbolStringPoolEntryRef), [LLVMOrcMaterializationResponsibilityRef, ctypes.POINTER(size_t)]
-except AttributeError: pass
-
-try: (LLVMOrcDisposeSymbols:=dll.LLVMOrcDisposeSymbols).restype, LLVMOrcDisposeSymbols.argtypes = None, [ctypes.POINTER(LLVMOrcSymbolStringPoolEntryRef)]
-except AttributeError: pass
-
-try: (LLVMOrcMaterializationResponsibilityNotifyResolved:=dll.LLVMOrcMaterializationResponsibilityNotifyResolved).restype, LLVMOrcMaterializationResponsibilityNotifyResolved.argtypes = LLVMErrorRef, [LLVMOrcMaterializationResponsibilityRef, LLVMOrcCSymbolMapPairs, size_t]
-except AttributeError: pass
-
-try: (LLVMOrcMaterializationResponsibilityNotifyEmitted:=dll.LLVMOrcMaterializationResponsibilityNotifyEmitted).restype, LLVMOrcMaterializationResponsibilityNotifyEmitted.argtypes = LLVMErrorRef, [LLVMOrcMaterializationResponsibilityRef, ctypes.POINTER(LLVMOrcCSymbolDependenceGroup), size_t]
-except AttributeError: pass
-
-try: (LLVMOrcMaterializationResponsibilityDefineMaterializing:=dll.LLVMOrcMaterializationResponsibilityDefineMaterializing).restype, LLVMOrcMaterializationResponsibilityDefineMaterializing.argtypes = LLVMErrorRef, [LLVMOrcMaterializationResponsibilityRef, LLVMOrcCSymbolFlagsMapPairs, size_t]
-except AttributeError: pass
-
-try: (LLVMOrcMaterializationResponsibilityFailMaterialization:=dll.LLVMOrcMaterializationResponsibilityFailMaterialization).restype, LLVMOrcMaterializationResponsibilityFailMaterialization.argtypes = None, [LLVMOrcMaterializationResponsibilityRef]
-except AttributeError: pass
-
-try: (LLVMOrcMaterializationResponsibilityReplace:=dll.LLVMOrcMaterializationResponsibilityReplace).restype, LLVMOrcMaterializationResponsibilityReplace.argtypes = LLVMErrorRef, [LLVMOrcMaterializationResponsibilityRef, LLVMOrcMaterializationUnitRef]
-except AttributeError: pass
-
-try: (LLVMOrcMaterializationResponsibilityDelegate:=dll.LLVMOrcMaterializationResponsibilityDelegate).restype, LLVMOrcMaterializationResponsibilityDelegate.argtypes = LLVMErrorRef, [LLVMOrcMaterializationResponsibilityRef, ctypes.POINTER(LLVMOrcSymbolStringPoolEntryRef), size_t, ctypes.POINTER(LLVMOrcMaterializationResponsibilityRef)]
-except AttributeError: pass
-
-try: (LLVMOrcExecutionSessionCreateBareJITDylib:=dll.LLVMOrcExecutionSessionCreateBareJITDylib).restype, LLVMOrcExecutionSessionCreateBareJITDylib.argtypes = LLVMOrcJITDylibRef, [LLVMOrcExecutionSessionRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMOrcExecutionSessionCreateJITDylib:=dll.LLVMOrcExecutionSessionCreateJITDylib).restype, LLVMOrcExecutionSessionCreateJITDylib.argtypes = LLVMErrorRef, [LLVMOrcExecutionSessionRef, ctypes.POINTER(LLVMOrcJITDylibRef), ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMOrcExecutionSessionGetJITDylibByName:=dll.LLVMOrcExecutionSessionGetJITDylibByName).restype, LLVMOrcExecutionSessionGetJITDylibByName.argtypes = LLVMOrcJITDylibRef, [LLVMOrcExecutionSessionRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMOrcJITDylibCreateResourceTracker:=dll.LLVMOrcJITDylibCreateResourceTracker).restype, LLVMOrcJITDylibCreateResourceTracker.argtypes = LLVMOrcResourceTrackerRef, [LLVMOrcJITDylibRef]
-except AttributeError: pass
-
-try: (LLVMOrcJITDylibGetDefaultResourceTracker:=dll.LLVMOrcJITDylibGetDefaultResourceTracker).restype, LLVMOrcJITDylibGetDefaultResourceTracker.argtypes = LLVMOrcResourceTrackerRef, [LLVMOrcJITDylibRef]
-except AttributeError: pass
-
-try: (LLVMOrcJITDylibDefine:=dll.LLVMOrcJITDylibDefine).restype, LLVMOrcJITDylibDefine.argtypes = LLVMErrorRef, [LLVMOrcJITDylibRef, LLVMOrcMaterializationUnitRef]
-except AttributeError: pass
-
-try: (LLVMOrcJITDylibClear:=dll.LLVMOrcJITDylibClear).restype, LLVMOrcJITDylibClear.argtypes = LLVMErrorRef, [LLVMOrcJITDylibRef]
-except AttributeError: pass
-
-try: (LLVMOrcJITDylibAddGenerator:=dll.LLVMOrcJITDylibAddGenerator).restype, LLVMOrcJITDylibAddGenerator.argtypes = None, [LLVMOrcJITDylibRef, LLVMOrcDefinitionGeneratorRef]
-except AttributeError: pass
-
-try: (LLVMOrcCreateCustomCAPIDefinitionGenerator:=dll.LLVMOrcCreateCustomCAPIDefinitionGenerator).restype, LLVMOrcCreateCustomCAPIDefinitionGenerator.argtypes = LLVMOrcDefinitionGeneratorRef, [LLVMOrcCAPIDefinitionGeneratorTryToGenerateFunction, ctypes.c_void_p, LLVMOrcDisposeCAPIDefinitionGeneratorFunction]
-except AttributeError: pass
-
-try: (LLVMOrcLookupStateContinueLookup:=dll.LLVMOrcLookupStateContinueLookup).restype, LLVMOrcLookupStateContinueLookup.argtypes = None, [LLVMOrcLookupStateRef, LLVMErrorRef]
-except AttributeError: pass
-
-try: (LLVMOrcCreateDynamicLibrarySearchGeneratorForProcess:=dll.LLVMOrcCreateDynamicLibrarySearchGeneratorForProcess).restype, LLVMOrcCreateDynamicLibrarySearchGeneratorForProcess.argtypes = LLVMErrorRef, [ctypes.POINTER(LLVMOrcDefinitionGeneratorRef), ctypes.c_char, LLVMOrcSymbolPredicate, ctypes.c_void_p]
-except AttributeError: pass
-
-try: (LLVMOrcCreateDynamicLibrarySearchGeneratorForPath:=dll.LLVMOrcCreateDynamicLibrarySearchGeneratorForPath).restype, LLVMOrcCreateDynamicLibrarySearchGeneratorForPath.argtypes = LLVMErrorRef, [ctypes.POINTER(LLVMOrcDefinitionGeneratorRef), ctypes.POINTER(ctypes.c_char), ctypes.c_char, LLVMOrcSymbolPredicate, ctypes.c_void_p]
-except AttributeError: pass
-
-try: (LLVMOrcCreateStaticLibrarySearchGeneratorForPath:=dll.LLVMOrcCreateStaticLibrarySearchGeneratorForPath).restype, LLVMOrcCreateStaticLibrarySearchGeneratorForPath.argtypes = LLVMErrorRef, [ctypes.POINTER(LLVMOrcDefinitionGeneratorRef), LLVMOrcObjectLayerRef, ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMOrcCreateNewThreadSafeContext:=dll.LLVMOrcCreateNewThreadSafeContext).restype, LLVMOrcCreateNewThreadSafeContext.argtypes = LLVMOrcThreadSafeContextRef, []
-except AttributeError: pass
-
-try: (LLVMOrcThreadSafeContextGetContext:=dll.LLVMOrcThreadSafeContextGetContext).restype, LLVMOrcThreadSafeContextGetContext.argtypes = LLVMContextRef, [LLVMOrcThreadSafeContextRef]
-except AttributeError: pass
-
-try: (LLVMOrcDisposeThreadSafeContext:=dll.LLVMOrcDisposeThreadSafeContext).restype, LLVMOrcDisposeThreadSafeContext.argtypes = None, [LLVMOrcThreadSafeContextRef]
-except AttributeError: pass
-
-try: (LLVMOrcCreateNewThreadSafeModule:=dll.LLVMOrcCreateNewThreadSafeModule).restype, LLVMOrcCreateNewThreadSafeModule.argtypes = LLVMOrcThreadSafeModuleRef, [LLVMModuleRef, LLVMOrcThreadSafeContextRef]
-except AttributeError: pass
-
-try: (LLVMOrcDisposeThreadSafeModule:=dll.LLVMOrcDisposeThreadSafeModule).restype, LLVMOrcDisposeThreadSafeModule.argtypes = None, [LLVMOrcThreadSafeModuleRef]
-except AttributeError: pass
-
-try: (LLVMOrcThreadSafeModuleWithModuleDo:=dll.LLVMOrcThreadSafeModuleWithModuleDo).restype, LLVMOrcThreadSafeModuleWithModuleDo.argtypes = LLVMErrorRef, [LLVMOrcThreadSafeModuleRef, LLVMOrcGenericIRModuleOperationFunction, ctypes.c_void_p]
-except AttributeError: pass
-
-try: (LLVMOrcJITTargetMachineBuilderDetectHost:=dll.LLVMOrcJITTargetMachineBuilderDetectHost).restype, LLVMOrcJITTargetMachineBuilderDetectHost.argtypes = LLVMErrorRef, [ctypes.POINTER(LLVMOrcJITTargetMachineBuilderRef)]
-except AttributeError: pass
-
-try: (LLVMOrcJITTargetMachineBuilderCreateFromTargetMachine:=dll.LLVMOrcJITTargetMachineBuilderCreateFromTargetMachine).restype, LLVMOrcJITTargetMachineBuilderCreateFromTargetMachine.argtypes = LLVMOrcJITTargetMachineBuilderRef, [LLVMTargetMachineRef]
-except AttributeError: pass
-
-try: (LLVMOrcDisposeJITTargetMachineBuilder:=dll.LLVMOrcDisposeJITTargetMachineBuilder).restype, LLVMOrcDisposeJITTargetMachineBuilder.argtypes = None, [LLVMOrcJITTargetMachineBuilderRef]
-except AttributeError: pass
-
-try: (LLVMOrcJITTargetMachineBuilderGetTargetTriple:=dll.LLVMOrcJITTargetMachineBuilderGetTargetTriple).restype, LLVMOrcJITTargetMachineBuilderGetTargetTriple.argtypes = ctypes.POINTER(ctypes.c_char), [LLVMOrcJITTargetMachineBuilderRef]
-except AttributeError: pass
-
-try: (LLVMOrcJITTargetMachineBuilderSetTargetTriple:=dll.LLVMOrcJITTargetMachineBuilderSetTargetTriple).restype, LLVMOrcJITTargetMachineBuilderSetTargetTriple.argtypes = None, [LLVMOrcJITTargetMachineBuilderRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMOrcObjectLayerAddObjectFile:=dll.LLVMOrcObjectLayerAddObjectFile).restype, LLVMOrcObjectLayerAddObjectFile.argtypes = LLVMErrorRef, [LLVMOrcObjectLayerRef, LLVMOrcJITDylibRef, LLVMMemoryBufferRef]
-except AttributeError: pass
-
-try: (LLVMOrcObjectLayerAddObjectFileWithRT:=dll.LLVMOrcObjectLayerAddObjectFileWithRT).restype, LLVMOrcObjectLayerAddObjectFileWithRT.argtypes = LLVMErrorRef, [LLVMOrcObjectLayerRef, LLVMOrcResourceTrackerRef, LLVMMemoryBufferRef]
-except AttributeError: pass
-
-try: (LLVMOrcObjectLayerEmit:=dll.LLVMOrcObjectLayerEmit).restype, LLVMOrcObjectLayerEmit.argtypes = None, [LLVMOrcObjectLayerRef, LLVMOrcMaterializationResponsibilityRef, LLVMMemoryBufferRef]
-except AttributeError: pass
-
-try: (LLVMOrcDisposeObjectLayer:=dll.LLVMOrcDisposeObjectLayer).restype, LLVMOrcDisposeObjectLayer.argtypes = None, [LLVMOrcObjectLayerRef]
-except AttributeError: pass
-
-try: (LLVMOrcIRTransformLayerEmit:=dll.LLVMOrcIRTransformLayerEmit).restype, LLVMOrcIRTransformLayerEmit.argtypes = None, [LLVMOrcIRTransformLayerRef, LLVMOrcMaterializationResponsibilityRef, LLVMOrcThreadSafeModuleRef]
-except AttributeError: pass
-
-try: (LLVMOrcIRTransformLayerSetTransform:=dll.LLVMOrcIRTransformLayerSetTransform).restype, LLVMOrcIRTransformLayerSetTransform.argtypes = None, [LLVMOrcIRTransformLayerRef, LLVMOrcIRTransformLayerTransformFunction, ctypes.c_void_p]
-except AttributeError: pass
-
-try: (LLVMOrcObjectTransformLayerSetTransform:=dll.LLVMOrcObjectTransformLayerSetTransform).restype, LLVMOrcObjectTransformLayerSetTransform.argtypes = None, [LLVMOrcObjectTransformLayerRef, LLVMOrcObjectTransformLayerTransformFunction, ctypes.c_void_p]
-except AttributeError: pass
-
-try: (LLVMOrcCreateLocalIndirectStubsManager:=dll.LLVMOrcCreateLocalIndirectStubsManager).restype, LLVMOrcCreateLocalIndirectStubsManager.argtypes = LLVMOrcIndirectStubsManagerRef, [ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMOrcDisposeIndirectStubsManager:=dll.LLVMOrcDisposeIndirectStubsManager).restype, LLVMOrcDisposeIndirectStubsManager.argtypes = None, [LLVMOrcIndirectStubsManagerRef]
-except AttributeError: pass
-
-try: (LLVMOrcCreateLocalLazyCallThroughManager:=dll.LLVMOrcCreateLocalLazyCallThroughManager).restype, LLVMOrcCreateLocalLazyCallThroughManager.argtypes = LLVMErrorRef, [ctypes.POINTER(ctypes.c_char), LLVMOrcExecutionSessionRef, LLVMOrcJITTargetAddress, ctypes.POINTER(LLVMOrcLazyCallThroughManagerRef)]
-except AttributeError: pass
-
-try: (LLVMOrcDisposeLazyCallThroughManager:=dll.LLVMOrcDisposeLazyCallThroughManager).restype, LLVMOrcDisposeLazyCallThroughManager.argtypes = None, [LLVMOrcLazyCallThroughManagerRef]
-except AttributeError: pass
-
-try: (LLVMOrcCreateDumpObjects:=dll.LLVMOrcCreateDumpObjects).restype, LLVMOrcCreateDumpObjects.argtypes = LLVMOrcDumpObjectsRef, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMOrcDisposeDumpObjects:=dll.LLVMOrcDisposeDumpObjects).restype, LLVMOrcDisposeDumpObjects.argtypes = None, [LLVMOrcDumpObjectsRef]
-except AttributeError: pass
-
-try: (LLVMOrcDumpObjects_CallOperator:=dll.LLVMOrcDumpObjects_CallOperator).restype, LLVMOrcDumpObjects_CallOperator.argtypes = LLVMErrorRef, [LLVMOrcDumpObjectsRef, ctypes.POINTER(LLVMMemoryBufferRef)]
-except AttributeError: pass
-
-try: (LLVMGetErrorTypeId:=dll.LLVMGetErrorTypeId).restype, LLVMGetErrorTypeId.argtypes = LLVMErrorTypeId, [LLVMErrorRef]
-except AttributeError: pass
-
-try: (LLVMConsumeError:=dll.LLVMConsumeError).restype, LLVMConsumeError.argtypes = None, [LLVMErrorRef]
-except AttributeError: pass
-
-try: (LLVMCantFail:=dll.LLVMCantFail).restype, LLVMCantFail.argtypes = None, [LLVMErrorRef]
-except AttributeError: pass
-
-try: (LLVMGetErrorMessage:=dll.LLVMGetErrorMessage).restype, LLVMGetErrorMessage.argtypes = ctypes.POINTER(ctypes.c_char), [LLVMErrorRef]
-except AttributeError: pass
-
-try: (LLVMDisposeErrorMessage:=dll.LLVMDisposeErrorMessage).restype, LLVMDisposeErrorMessage.argtypes = None, [ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMGetStringErrorTypeId:=dll.LLVMGetStringErrorTypeId).restype, LLVMGetStringErrorTypeId.argtypes = LLVMErrorTypeId, []
-except AttributeError: pass
-
-try: (LLVMCreateStringError:=dll.LLVMCreateStringError).restype, LLVMCreateStringError.argtypes = LLVMErrorRef, [ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (imaxabs:=dll.imaxabs).restype, imaxabs.argtypes = intmax_t, [intmax_t]
-except AttributeError: pass
-
-try: (imaxdiv:=dll.imaxdiv).restype, imaxdiv.argtypes = imaxdiv_t, [intmax_t, intmax_t]
-except AttributeError: pass
-
-try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (select:=dll.select).restype, select.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timeval)]
-except AttributeError: pass
-
-try: (pselect:=dll.pselect).restype, pselect.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timespec), ctypes.POINTER(__sigset_t)]
-except AttributeError: pass
-
-try: (LLVMInitializeAArch64TargetInfo:=dll.LLVMInitializeAArch64TargetInfo).restype, LLVMInitializeAArch64TargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAMDGPUTargetInfo:=dll.LLVMInitializeAMDGPUTargetInfo).restype, LLVMInitializeAMDGPUTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeARMTargetInfo:=dll.LLVMInitializeARMTargetInfo).restype, LLVMInitializeARMTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAVRTargetInfo:=dll.LLVMInitializeAVRTargetInfo).restype, LLVMInitializeAVRTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeBPFTargetInfo:=dll.LLVMInitializeBPFTargetInfo).restype, LLVMInitializeBPFTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeHexagonTargetInfo:=dll.LLVMInitializeHexagonTargetInfo).restype, LLVMInitializeHexagonTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeLanaiTargetInfo:=dll.LLVMInitializeLanaiTargetInfo).restype, LLVMInitializeLanaiTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeLoongArchTargetInfo:=dll.LLVMInitializeLoongArchTargetInfo).restype, LLVMInitializeLoongArchTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeMipsTargetInfo:=dll.LLVMInitializeMipsTargetInfo).restype, LLVMInitializeMipsTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeMSP430TargetInfo:=dll.LLVMInitializeMSP430TargetInfo).restype, LLVMInitializeMSP430TargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeNVPTXTargetInfo:=dll.LLVMInitializeNVPTXTargetInfo).restype, LLVMInitializeNVPTXTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializePowerPCTargetInfo:=dll.LLVMInitializePowerPCTargetInfo).restype, LLVMInitializePowerPCTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeRISCVTargetInfo:=dll.LLVMInitializeRISCVTargetInfo).restype, LLVMInitializeRISCVTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSparcTargetInfo:=dll.LLVMInitializeSparcTargetInfo).restype, LLVMInitializeSparcTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSPIRVTargetInfo:=dll.LLVMInitializeSPIRVTargetInfo).restype, LLVMInitializeSPIRVTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSystemZTargetInfo:=dll.LLVMInitializeSystemZTargetInfo).restype, LLVMInitializeSystemZTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeVETargetInfo:=dll.LLVMInitializeVETargetInfo).restype, LLVMInitializeVETargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeWebAssemblyTargetInfo:=dll.LLVMInitializeWebAssemblyTargetInfo).restype, LLVMInitializeWebAssemblyTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeX86TargetInfo:=dll.LLVMInitializeX86TargetInfo).restype, LLVMInitializeX86TargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeXCoreTargetInfo:=dll.LLVMInitializeXCoreTargetInfo).restype, LLVMInitializeXCoreTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeM68kTargetInfo:=dll.LLVMInitializeM68kTargetInfo).restype, LLVMInitializeM68kTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeXtensaTargetInfo:=dll.LLVMInitializeXtensaTargetInfo).restype, LLVMInitializeXtensaTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAArch64Target:=dll.LLVMInitializeAArch64Target).restype, LLVMInitializeAArch64Target.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAMDGPUTarget:=dll.LLVMInitializeAMDGPUTarget).restype, LLVMInitializeAMDGPUTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeARMTarget:=dll.LLVMInitializeARMTarget).restype, LLVMInitializeARMTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAVRTarget:=dll.LLVMInitializeAVRTarget).restype, LLVMInitializeAVRTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeBPFTarget:=dll.LLVMInitializeBPFTarget).restype, LLVMInitializeBPFTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeHexagonTarget:=dll.LLVMInitializeHexagonTarget).restype, LLVMInitializeHexagonTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeLanaiTarget:=dll.LLVMInitializeLanaiTarget).restype, LLVMInitializeLanaiTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeLoongArchTarget:=dll.LLVMInitializeLoongArchTarget).restype, LLVMInitializeLoongArchTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeMipsTarget:=dll.LLVMInitializeMipsTarget).restype, LLVMInitializeMipsTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeMSP430Target:=dll.LLVMInitializeMSP430Target).restype, LLVMInitializeMSP430Target.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeNVPTXTarget:=dll.LLVMInitializeNVPTXTarget).restype, LLVMInitializeNVPTXTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializePowerPCTarget:=dll.LLVMInitializePowerPCTarget).restype, LLVMInitializePowerPCTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeRISCVTarget:=dll.LLVMInitializeRISCVTarget).restype, LLVMInitializeRISCVTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSparcTarget:=dll.LLVMInitializeSparcTarget).restype, LLVMInitializeSparcTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSPIRVTarget:=dll.LLVMInitializeSPIRVTarget).restype, LLVMInitializeSPIRVTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSystemZTarget:=dll.LLVMInitializeSystemZTarget).restype, LLVMInitializeSystemZTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeVETarget:=dll.LLVMInitializeVETarget).restype, LLVMInitializeVETarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeWebAssemblyTarget:=dll.LLVMInitializeWebAssemblyTarget).restype, LLVMInitializeWebAssemblyTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeX86Target:=dll.LLVMInitializeX86Target).restype, LLVMInitializeX86Target.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeXCoreTarget:=dll.LLVMInitializeXCoreTarget).restype, LLVMInitializeXCoreTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeM68kTarget:=dll.LLVMInitializeM68kTarget).restype, LLVMInitializeM68kTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeXtensaTarget:=dll.LLVMInitializeXtensaTarget).restype, LLVMInitializeXtensaTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAArch64TargetMC:=dll.LLVMInitializeAArch64TargetMC).restype, LLVMInitializeAArch64TargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAMDGPUTargetMC:=dll.LLVMInitializeAMDGPUTargetMC).restype, LLVMInitializeAMDGPUTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeARMTargetMC:=dll.LLVMInitializeARMTargetMC).restype, LLVMInitializeARMTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAVRTargetMC:=dll.LLVMInitializeAVRTargetMC).restype, LLVMInitializeAVRTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeBPFTargetMC:=dll.LLVMInitializeBPFTargetMC).restype, LLVMInitializeBPFTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeHexagonTargetMC:=dll.LLVMInitializeHexagonTargetMC).restype, LLVMInitializeHexagonTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeLanaiTargetMC:=dll.LLVMInitializeLanaiTargetMC).restype, LLVMInitializeLanaiTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeLoongArchTargetMC:=dll.LLVMInitializeLoongArchTargetMC).restype, LLVMInitializeLoongArchTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeMipsTargetMC:=dll.LLVMInitializeMipsTargetMC).restype, LLVMInitializeMipsTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeMSP430TargetMC:=dll.LLVMInitializeMSP430TargetMC).restype, LLVMInitializeMSP430TargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeNVPTXTargetMC:=dll.LLVMInitializeNVPTXTargetMC).restype, LLVMInitializeNVPTXTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializePowerPCTargetMC:=dll.LLVMInitializePowerPCTargetMC).restype, LLVMInitializePowerPCTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeRISCVTargetMC:=dll.LLVMInitializeRISCVTargetMC).restype, LLVMInitializeRISCVTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSparcTargetMC:=dll.LLVMInitializeSparcTargetMC).restype, LLVMInitializeSparcTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSPIRVTargetMC:=dll.LLVMInitializeSPIRVTargetMC).restype, LLVMInitializeSPIRVTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSystemZTargetMC:=dll.LLVMInitializeSystemZTargetMC).restype, LLVMInitializeSystemZTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeVETargetMC:=dll.LLVMInitializeVETargetMC).restype, LLVMInitializeVETargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeWebAssemblyTargetMC:=dll.LLVMInitializeWebAssemblyTargetMC).restype, LLVMInitializeWebAssemblyTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeX86TargetMC:=dll.LLVMInitializeX86TargetMC).restype, LLVMInitializeX86TargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeXCoreTargetMC:=dll.LLVMInitializeXCoreTargetMC).restype, LLVMInitializeXCoreTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeM68kTargetMC:=dll.LLVMInitializeM68kTargetMC).restype, LLVMInitializeM68kTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeXtensaTargetMC:=dll.LLVMInitializeXtensaTargetMC).restype, LLVMInitializeXtensaTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAArch64AsmPrinter:=dll.LLVMInitializeAArch64AsmPrinter).restype, LLVMInitializeAArch64AsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAMDGPUAsmPrinter:=dll.LLVMInitializeAMDGPUAsmPrinter).restype, LLVMInitializeAMDGPUAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeARMAsmPrinter:=dll.LLVMInitializeARMAsmPrinter).restype, LLVMInitializeARMAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAVRAsmPrinter:=dll.LLVMInitializeAVRAsmPrinter).restype, LLVMInitializeAVRAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeBPFAsmPrinter:=dll.LLVMInitializeBPFAsmPrinter).restype, LLVMInitializeBPFAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeHexagonAsmPrinter:=dll.LLVMInitializeHexagonAsmPrinter).restype, LLVMInitializeHexagonAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeLanaiAsmPrinter:=dll.LLVMInitializeLanaiAsmPrinter).restype, LLVMInitializeLanaiAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeLoongArchAsmPrinter:=dll.LLVMInitializeLoongArchAsmPrinter).restype, LLVMInitializeLoongArchAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeMipsAsmPrinter:=dll.LLVMInitializeMipsAsmPrinter).restype, LLVMInitializeMipsAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeMSP430AsmPrinter:=dll.LLVMInitializeMSP430AsmPrinter).restype, LLVMInitializeMSP430AsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeNVPTXAsmPrinter:=dll.LLVMInitializeNVPTXAsmPrinter).restype, LLVMInitializeNVPTXAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializePowerPCAsmPrinter:=dll.LLVMInitializePowerPCAsmPrinter).restype, LLVMInitializePowerPCAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeRISCVAsmPrinter:=dll.LLVMInitializeRISCVAsmPrinter).restype, LLVMInitializeRISCVAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSparcAsmPrinter:=dll.LLVMInitializeSparcAsmPrinter).restype, LLVMInitializeSparcAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSPIRVAsmPrinter:=dll.LLVMInitializeSPIRVAsmPrinter).restype, LLVMInitializeSPIRVAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSystemZAsmPrinter:=dll.LLVMInitializeSystemZAsmPrinter).restype, LLVMInitializeSystemZAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeVEAsmPrinter:=dll.LLVMInitializeVEAsmPrinter).restype, LLVMInitializeVEAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeWebAssemblyAsmPrinter:=dll.LLVMInitializeWebAssemblyAsmPrinter).restype, LLVMInitializeWebAssemblyAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeX86AsmPrinter:=dll.LLVMInitializeX86AsmPrinter).restype, LLVMInitializeX86AsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeXCoreAsmPrinter:=dll.LLVMInitializeXCoreAsmPrinter).restype, LLVMInitializeXCoreAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeM68kAsmPrinter:=dll.LLVMInitializeM68kAsmPrinter).restype, LLVMInitializeM68kAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeXtensaAsmPrinter:=dll.LLVMInitializeXtensaAsmPrinter).restype, LLVMInitializeXtensaAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAArch64AsmParser:=dll.LLVMInitializeAArch64AsmParser).restype, LLVMInitializeAArch64AsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAMDGPUAsmParser:=dll.LLVMInitializeAMDGPUAsmParser).restype, LLVMInitializeAMDGPUAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeARMAsmParser:=dll.LLVMInitializeARMAsmParser).restype, LLVMInitializeARMAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAVRAsmParser:=dll.LLVMInitializeAVRAsmParser).restype, LLVMInitializeAVRAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeBPFAsmParser:=dll.LLVMInitializeBPFAsmParser).restype, LLVMInitializeBPFAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeHexagonAsmParser:=dll.LLVMInitializeHexagonAsmParser).restype, LLVMInitializeHexagonAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeLanaiAsmParser:=dll.LLVMInitializeLanaiAsmParser).restype, LLVMInitializeLanaiAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeLoongArchAsmParser:=dll.LLVMInitializeLoongArchAsmParser).restype, LLVMInitializeLoongArchAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeMipsAsmParser:=dll.LLVMInitializeMipsAsmParser).restype, LLVMInitializeMipsAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeMSP430AsmParser:=dll.LLVMInitializeMSP430AsmParser).restype, LLVMInitializeMSP430AsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializePowerPCAsmParser:=dll.LLVMInitializePowerPCAsmParser).restype, LLVMInitializePowerPCAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeRISCVAsmParser:=dll.LLVMInitializeRISCVAsmParser).restype, LLVMInitializeRISCVAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSparcAsmParser:=dll.LLVMInitializeSparcAsmParser).restype, LLVMInitializeSparcAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSystemZAsmParser:=dll.LLVMInitializeSystemZAsmParser).restype, LLVMInitializeSystemZAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeVEAsmParser:=dll.LLVMInitializeVEAsmParser).restype, LLVMInitializeVEAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeWebAssemblyAsmParser:=dll.LLVMInitializeWebAssemblyAsmParser).restype, LLVMInitializeWebAssemblyAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeX86AsmParser:=dll.LLVMInitializeX86AsmParser).restype, LLVMInitializeX86AsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeM68kAsmParser:=dll.LLVMInitializeM68kAsmParser).restype, LLVMInitializeM68kAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeXtensaAsmParser:=dll.LLVMInitializeXtensaAsmParser).restype, LLVMInitializeXtensaAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAArch64Disassembler:=dll.LLVMInitializeAArch64Disassembler).restype, LLVMInitializeAArch64Disassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAMDGPUDisassembler:=dll.LLVMInitializeAMDGPUDisassembler).restype, LLVMInitializeAMDGPUDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeARMDisassembler:=dll.LLVMInitializeARMDisassembler).restype, LLVMInitializeARMDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAVRDisassembler:=dll.LLVMInitializeAVRDisassembler).restype, LLVMInitializeAVRDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeBPFDisassembler:=dll.LLVMInitializeBPFDisassembler).restype, LLVMInitializeBPFDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeHexagonDisassembler:=dll.LLVMInitializeHexagonDisassembler).restype, LLVMInitializeHexagonDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeLanaiDisassembler:=dll.LLVMInitializeLanaiDisassembler).restype, LLVMInitializeLanaiDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeLoongArchDisassembler:=dll.LLVMInitializeLoongArchDisassembler).restype, LLVMInitializeLoongArchDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeMipsDisassembler:=dll.LLVMInitializeMipsDisassembler).restype, LLVMInitializeMipsDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeMSP430Disassembler:=dll.LLVMInitializeMSP430Disassembler).restype, LLVMInitializeMSP430Disassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializePowerPCDisassembler:=dll.LLVMInitializePowerPCDisassembler).restype, LLVMInitializePowerPCDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeRISCVDisassembler:=dll.LLVMInitializeRISCVDisassembler).restype, LLVMInitializeRISCVDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSparcDisassembler:=dll.LLVMInitializeSparcDisassembler).restype, LLVMInitializeSparcDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSystemZDisassembler:=dll.LLVMInitializeSystemZDisassembler).restype, LLVMInitializeSystemZDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeVEDisassembler:=dll.LLVMInitializeVEDisassembler).restype, LLVMInitializeVEDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeWebAssemblyDisassembler:=dll.LLVMInitializeWebAssemblyDisassembler).restype, LLVMInitializeWebAssemblyDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeX86Disassembler:=dll.LLVMInitializeX86Disassembler).restype, LLVMInitializeX86Disassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeXCoreDisassembler:=dll.LLVMInitializeXCoreDisassembler).restype, LLVMInitializeXCoreDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeM68kDisassembler:=dll.LLVMInitializeM68kDisassembler).restype, LLVMInitializeM68kDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeXtensaDisassembler:=dll.LLVMInitializeXtensaDisassembler).restype, LLVMInitializeXtensaDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMGetModuleDataLayout:=dll.LLVMGetModuleDataLayout).restype, LLVMGetModuleDataLayout.argtypes = LLVMTargetDataRef, [LLVMModuleRef]
-except AttributeError: pass
-
-try: (LLVMSetModuleDataLayout:=dll.LLVMSetModuleDataLayout).restype, LLVMSetModuleDataLayout.argtypes = None, [LLVMModuleRef, LLVMTargetDataRef]
-except AttributeError: pass
-
-try: (LLVMCreateTargetData:=dll.LLVMCreateTargetData).restype, LLVMCreateTargetData.argtypes = LLVMTargetDataRef, [ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMDisposeTargetData:=dll.LLVMDisposeTargetData).restype, LLVMDisposeTargetData.argtypes = None, [LLVMTargetDataRef]
-except AttributeError: pass
-
-try: (LLVMAddTargetLibraryInfo:=dll.LLVMAddTargetLibraryInfo).restype, LLVMAddTargetLibraryInfo.argtypes = None, [LLVMTargetLibraryInfoRef, LLVMPassManagerRef]
-except AttributeError: pass
-
-try: (LLVMCopyStringRepOfTargetData:=dll.LLVMCopyStringRepOfTargetData).restype, LLVMCopyStringRepOfTargetData.argtypes = ctypes.POINTER(ctypes.c_char), [LLVMTargetDataRef]
-except AttributeError: pass
-
-try: (LLVMByteOrder:=dll.LLVMByteOrder).restype, LLVMByteOrder.argtypes = enum_LLVMByteOrdering, [LLVMTargetDataRef]
-except AttributeError: pass
-
-try: (LLVMPointerSize:=dll.LLVMPointerSize).restype, LLVMPointerSize.argtypes = ctypes.c_uint32, [LLVMTargetDataRef]
-except AttributeError: pass
-
-try: (LLVMPointerSizeForAS:=dll.LLVMPointerSizeForAS).restype, LLVMPointerSizeForAS.argtypes = ctypes.c_uint32, [LLVMTargetDataRef, ctypes.c_uint32]
-except AttributeError: pass
-
-try: (LLVMIntPtrType:=dll.LLVMIntPtrType).restype, LLVMIntPtrType.argtypes = LLVMTypeRef, [LLVMTargetDataRef]
-except AttributeError: pass
-
-try: (LLVMIntPtrTypeForAS:=dll.LLVMIntPtrTypeForAS).restype, LLVMIntPtrTypeForAS.argtypes = LLVMTypeRef, [LLVMTargetDataRef, ctypes.c_uint32]
-except AttributeError: pass
-
-try: (LLVMIntPtrTypeInContext:=dll.LLVMIntPtrTypeInContext).restype, LLVMIntPtrTypeInContext.argtypes = LLVMTypeRef, [LLVMContextRef, LLVMTargetDataRef]
-except AttributeError: pass
-
-try: (LLVMIntPtrTypeForASInContext:=dll.LLVMIntPtrTypeForASInContext).restype, LLVMIntPtrTypeForASInContext.argtypes = LLVMTypeRef, [LLVMContextRef, LLVMTargetDataRef, ctypes.c_uint32]
-except AttributeError: pass
-
-try: (LLVMSizeOfTypeInBits:=dll.LLVMSizeOfTypeInBits).restype, LLVMSizeOfTypeInBits.argtypes = ctypes.c_uint64, [LLVMTargetDataRef, LLVMTypeRef]
-except AttributeError: pass
-
-try: (LLVMStoreSizeOfType:=dll.LLVMStoreSizeOfType).restype, LLVMStoreSizeOfType.argtypes = ctypes.c_uint64, [LLVMTargetDataRef, LLVMTypeRef]
-except AttributeError: pass
-
-try: (LLVMABISizeOfType:=dll.LLVMABISizeOfType).restype, LLVMABISizeOfType.argtypes = ctypes.c_uint64, [LLVMTargetDataRef, LLVMTypeRef]
-except AttributeError: pass
-
-try: (LLVMABIAlignmentOfType:=dll.LLVMABIAlignmentOfType).restype, LLVMABIAlignmentOfType.argtypes = ctypes.c_uint32, [LLVMTargetDataRef, LLVMTypeRef]
-except AttributeError: pass
-
-try: (LLVMCallFrameAlignmentOfType:=dll.LLVMCallFrameAlignmentOfType).restype, LLVMCallFrameAlignmentOfType.argtypes = ctypes.c_uint32, [LLVMTargetDataRef, LLVMTypeRef]
-except AttributeError: pass
-
-try: (LLVMPreferredAlignmentOfType:=dll.LLVMPreferredAlignmentOfType).restype, LLVMPreferredAlignmentOfType.argtypes = ctypes.c_uint32, [LLVMTargetDataRef, LLVMTypeRef]
-except AttributeError: pass
-
-try: (LLVMPreferredAlignmentOfGlobal:=dll.LLVMPreferredAlignmentOfGlobal).restype, LLVMPreferredAlignmentOfGlobal.argtypes = ctypes.c_uint32, [LLVMTargetDataRef, LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMElementAtOffset:=dll.LLVMElementAtOffset).restype, LLVMElementAtOffset.argtypes = ctypes.c_uint32, [LLVMTargetDataRef, LLVMTypeRef, ctypes.c_uint64]
-except AttributeError: pass
-
-try: (LLVMOffsetOfElement:=dll.LLVMOffsetOfElement).restype, LLVMOffsetOfElement.argtypes = ctypes.c_uint64, [LLVMTargetDataRef, LLVMTypeRef, ctypes.c_uint32]
-except AttributeError: pass
-
-try: (LLVMGetFirstTarget:=dll.LLVMGetFirstTarget).restype, LLVMGetFirstTarget.argtypes = LLVMTargetRef, []
-except AttributeError: pass
-
-try: (LLVMGetNextTarget:=dll.LLVMGetNextTarget).restype, LLVMGetNextTarget.argtypes = LLVMTargetRef, [LLVMTargetRef]
-except AttributeError: pass
-
-try: (LLVMGetTargetFromName:=dll.LLVMGetTargetFromName).restype, LLVMGetTargetFromName.argtypes = LLVMTargetRef, [ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMGetTargetFromTriple:=dll.LLVMGetTargetFromTriple).restype, LLVMGetTargetFromTriple.argtypes = LLVMBool, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(LLVMTargetRef), ctypes.POINTER(ctypes.POINTER(ctypes.c_char))]
-except AttributeError: pass
-
-try: (LLVMGetTargetName:=dll.LLVMGetTargetName).restype, LLVMGetTargetName.argtypes = ctypes.POINTER(ctypes.c_char), [LLVMTargetRef]
-except AttributeError: pass
-
-try: (LLVMGetTargetDescription:=dll.LLVMGetTargetDescription).restype, LLVMGetTargetDescription.argtypes = ctypes.POINTER(ctypes.c_char), [LLVMTargetRef]
-except AttributeError: pass
-
-try: (LLVMTargetHasJIT:=dll.LLVMTargetHasJIT).restype, LLVMTargetHasJIT.argtypes = LLVMBool, [LLVMTargetRef]
-except AttributeError: pass
-
-try: (LLVMTargetHasTargetMachine:=dll.LLVMTargetHasTargetMachine).restype, LLVMTargetHasTargetMachine.argtypes = LLVMBool, [LLVMTargetRef]
-except AttributeError: pass
-
-try: (LLVMTargetHasAsmBackend:=dll.LLVMTargetHasAsmBackend).restype, LLVMTargetHasAsmBackend.argtypes = LLVMBool, [LLVMTargetRef]
-except AttributeError: pass
-
-try: (LLVMCreateTargetMachineOptions:=dll.LLVMCreateTargetMachineOptions).restype, LLVMCreateTargetMachineOptions.argtypes = LLVMTargetMachineOptionsRef, []
-except AttributeError: pass
-
-try: (LLVMDisposeTargetMachineOptions:=dll.LLVMDisposeTargetMachineOptions).restype, LLVMDisposeTargetMachineOptions.argtypes = None, [LLVMTargetMachineOptionsRef]
-except AttributeError: pass
-
-try: (LLVMTargetMachineOptionsSetCPU:=dll.LLVMTargetMachineOptionsSetCPU).restype, LLVMTargetMachineOptionsSetCPU.argtypes = None, [LLVMTargetMachineOptionsRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMTargetMachineOptionsSetFeatures:=dll.LLVMTargetMachineOptionsSetFeatures).restype, LLVMTargetMachineOptionsSetFeatures.argtypes = None, [LLVMTargetMachineOptionsRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMTargetMachineOptionsSetABI:=dll.LLVMTargetMachineOptionsSetABI).restype, LLVMTargetMachineOptionsSetABI.argtypes = None, [LLVMTargetMachineOptionsRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMTargetMachineOptionsSetCodeGenOptLevel:=dll.LLVMTargetMachineOptionsSetCodeGenOptLevel).restype, LLVMTargetMachineOptionsSetCodeGenOptLevel.argtypes = None, [LLVMTargetMachineOptionsRef, LLVMCodeGenOptLevel]
-except AttributeError: pass
-
-try: (LLVMTargetMachineOptionsSetRelocMode:=dll.LLVMTargetMachineOptionsSetRelocMode).restype, LLVMTargetMachineOptionsSetRelocMode.argtypes = None, [LLVMTargetMachineOptionsRef, LLVMRelocMode]
-except AttributeError: pass
-
-try: (LLVMTargetMachineOptionsSetCodeModel:=dll.LLVMTargetMachineOptionsSetCodeModel).restype, LLVMTargetMachineOptionsSetCodeModel.argtypes = None, [LLVMTargetMachineOptionsRef, LLVMCodeModel]
-except AttributeError: pass
-
-try: (LLVMCreateTargetMachineWithOptions:=dll.LLVMCreateTargetMachineWithOptions).restype, LLVMCreateTargetMachineWithOptions.argtypes = LLVMTargetMachineRef, [LLVMTargetRef, ctypes.POINTER(ctypes.c_char), LLVMTargetMachineOptionsRef]
-except AttributeError: pass
-
-try: (LLVMCreateTargetMachine:=dll.LLVMCreateTargetMachine).restype, LLVMCreateTargetMachine.argtypes = LLVMTargetMachineRef, [LLVMTargetRef, ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char), LLVMCodeGenOptLevel, LLVMRelocMode, LLVMCodeModel]
-except AttributeError: pass
-
-try: (LLVMDisposeTargetMachine:=dll.LLVMDisposeTargetMachine).restype, LLVMDisposeTargetMachine.argtypes = None, [LLVMTargetMachineRef]
-except AttributeError: pass
-
-try: (LLVMGetTargetMachineTarget:=dll.LLVMGetTargetMachineTarget).restype, LLVMGetTargetMachineTarget.argtypes = LLVMTargetRef, [LLVMTargetMachineRef]
-except AttributeError: pass
-
-try: (LLVMGetTargetMachineTriple:=dll.LLVMGetTargetMachineTriple).restype, LLVMGetTargetMachineTriple.argtypes = ctypes.POINTER(ctypes.c_char), [LLVMTargetMachineRef]
-except AttributeError: pass
-
-try: (LLVMGetTargetMachineCPU:=dll.LLVMGetTargetMachineCPU).restype, LLVMGetTargetMachineCPU.argtypes = ctypes.POINTER(ctypes.c_char), [LLVMTargetMachineRef]
-except AttributeError: pass
-
-try: (LLVMGetTargetMachineFeatureString:=dll.LLVMGetTargetMachineFeatureString).restype, LLVMGetTargetMachineFeatureString.argtypes = ctypes.POINTER(ctypes.c_char), [LLVMTargetMachineRef]
-except AttributeError: pass
-
-try: (LLVMCreateTargetDataLayout:=dll.LLVMCreateTargetDataLayout).restype, LLVMCreateTargetDataLayout.argtypes = LLVMTargetDataRef, [LLVMTargetMachineRef]
-except AttributeError: pass
-
-try: (LLVMSetTargetMachineAsmVerbosity:=dll.LLVMSetTargetMachineAsmVerbosity).restype, LLVMSetTargetMachineAsmVerbosity.argtypes = None, [LLVMTargetMachineRef, LLVMBool]
-except AttributeError: pass
-
-try: (LLVMSetTargetMachineFastISel:=dll.LLVMSetTargetMachineFastISel).restype, LLVMSetTargetMachineFastISel.argtypes = None, [LLVMTargetMachineRef, LLVMBool]
-except AttributeError: pass
-
-try: (LLVMSetTargetMachineGlobalISel:=dll.LLVMSetTargetMachineGlobalISel).restype, LLVMSetTargetMachineGlobalISel.argtypes = None, [LLVMTargetMachineRef, LLVMBool]
-except AttributeError: pass
-
-try: (LLVMSetTargetMachineGlobalISelAbort:=dll.LLVMSetTargetMachineGlobalISelAbort).restype, LLVMSetTargetMachineGlobalISelAbort.argtypes = None, [LLVMTargetMachineRef, LLVMGlobalISelAbortMode]
-except AttributeError: pass
-
-try: (LLVMSetTargetMachineMachineOutliner:=dll.LLVMSetTargetMachineMachineOutliner).restype, LLVMSetTargetMachineMachineOutliner.argtypes = None, [LLVMTargetMachineRef, LLVMBool]
-except AttributeError: pass
-
-try: (LLVMTargetMachineEmitToFile:=dll.LLVMTargetMachineEmitToFile).restype, LLVMTargetMachineEmitToFile.argtypes = LLVMBool, [LLVMTargetMachineRef, LLVMModuleRef, ctypes.POINTER(ctypes.c_char), LLVMCodeGenFileType, ctypes.POINTER(ctypes.POINTER(ctypes.c_char))]
-except AttributeError: pass
-
-try: (LLVMTargetMachineEmitToMemoryBuffer:=dll.LLVMTargetMachineEmitToMemoryBuffer).restype, LLVMTargetMachineEmitToMemoryBuffer.argtypes = LLVMBool, [LLVMTargetMachineRef, LLVMModuleRef, LLVMCodeGenFileType, ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.POINTER(LLVMMemoryBufferRef)]
-except AttributeError: pass
-
-try: (LLVMGetDefaultTargetTriple:=dll.LLVMGetDefaultTargetTriple).restype, LLVMGetDefaultTargetTriple.argtypes = ctypes.POINTER(ctypes.c_char), []
-except AttributeError: pass
-
-try: (LLVMNormalizeTargetTriple:=dll.LLVMNormalizeTargetTriple).restype, LLVMNormalizeTargetTriple.argtypes = ctypes.POINTER(ctypes.c_char), [ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMGetHostCPUName:=dll.LLVMGetHostCPUName).restype, LLVMGetHostCPUName.argtypes = ctypes.POINTER(ctypes.c_char), []
-except AttributeError: pass
-
-try: (LLVMGetHostCPUFeatures:=dll.LLVMGetHostCPUFeatures).restype, LLVMGetHostCPUFeatures.argtypes = ctypes.POINTER(ctypes.c_char), []
-except AttributeError: pass
-
-try: (LLVMAddAnalysisPasses:=dll.LLVMAddAnalysisPasses).restype, LLVMAddAnalysisPasses.argtypes = None, [LLVMTargetMachineRef, LLVMPassManagerRef]
-except AttributeError: pass
-
-try: (LLVMLinkInMCJIT:=dll.LLVMLinkInMCJIT).restype, LLVMLinkInMCJIT.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMLinkInInterpreter:=dll.LLVMLinkInInterpreter).restype, LLVMLinkInInterpreter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMCreateGenericValueOfInt:=dll.LLVMCreateGenericValueOfInt).restype, LLVMCreateGenericValueOfInt.argtypes = LLVMGenericValueRef, [LLVMTypeRef, ctypes.c_uint64, LLVMBool]
-except AttributeError: pass
-
-try: (LLVMCreateGenericValueOfPointer:=dll.LLVMCreateGenericValueOfPointer).restype, LLVMCreateGenericValueOfPointer.argtypes = LLVMGenericValueRef, [ctypes.c_void_p]
-except AttributeError: pass
-
-try: (LLVMCreateGenericValueOfFloat:=dll.LLVMCreateGenericValueOfFloat).restype, LLVMCreateGenericValueOfFloat.argtypes = LLVMGenericValueRef, [LLVMTypeRef, ctypes.c_double]
-except AttributeError: pass
-
-try: (LLVMGenericValueIntWidth:=dll.LLVMGenericValueIntWidth).restype, LLVMGenericValueIntWidth.argtypes = ctypes.c_uint32, [LLVMGenericValueRef]
-except AttributeError: pass
-
-try: (LLVMGenericValueToInt:=dll.LLVMGenericValueToInt).restype, LLVMGenericValueToInt.argtypes = ctypes.c_uint64, [LLVMGenericValueRef, LLVMBool]
-except AttributeError: pass
-
-try: (LLVMGenericValueToPointer:=dll.LLVMGenericValueToPointer).restype, LLVMGenericValueToPointer.argtypes = ctypes.c_void_p, [LLVMGenericValueRef]
-except AttributeError: pass
-
-try: (LLVMGenericValueToFloat:=dll.LLVMGenericValueToFloat).restype, LLVMGenericValueToFloat.argtypes = ctypes.c_double, [LLVMTypeRef, LLVMGenericValueRef]
-except AttributeError: pass
-
-try: (LLVMDisposeGenericValue:=dll.LLVMDisposeGenericValue).restype, LLVMDisposeGenericValue.argtypes = None, [LLVMGenericValueRef]
-except AttributeError: pass
-
-try: (LLVMCreateExecutionEngineForModule:=dll.LLVMCreateExecutionEngineForModule).restype, LLVMCreateExecutionEngineForModule.argtypes = LLVMBool, [ctypes.POINTER(LLVMExecutionEngineRef), LLVMModuleRef, ctypes.POINTER(ctypes.POINTER(ctypes.c_char))]
-except AttributeError: pass
-
-try: (LLVMCreateInterpreterForModule:=dll.LLVMCreateInterpreterForModule).restype, LLVMCreateInterpreterForModule.argtypes = LLVMBool, [ctypes.POINTER(LLVMExecutionEngineRef), LLVMModuleRef, ctypes.POINTER(ctypes.POINTER(ctypes.c_char))]
-except AttributeError: pass
-
-try: (LLVMCreateJITCompilerForModule:=dll.LLVMCreateJITCompilerForModule).restype, LLVMCreateJITCompilerForModule.argtypes = LLVMBool, [ctypes.POINTER(LLVMExecutionEngineRef), LLVMModuleRef, ctypes.c_uint32, ctypes.POINTER(ctypes.POINTER(ctypes.c_char))]
-except AttributeError: pass
-
-try: (LLVMInitializeMCJITCompilerOptions:=dll.LLVMInitializeMCJITCompilerOptions).restype, LLVMInitializeMCJITCompilerOptions.argtypes = None, [ctypes.POINTER(struct_LLVMMCJITCompilerOptions), size_t]
-except AttributeError: pass
-
-try: (LLVMCreateMCJITCompilerForModule:=dll.LLVMCreateMCJITCompilerForModule).restype, LLVMCreateMCJITCompilerForModule.argtypes = LLVMBool, [ctypes.POINTER(LLVMExecutionEngineRef), LLVMModuleRef, ctypes.POINTER(struct_LLVMMCJITCompilerOptions), size_t, ctypes.POINTER(ctypes.POINTER(ctypes.c_char))]
-except AttributeError: pass
-
-try: (LLVMDisposeExecutionEngine:=dll.LLVMDisposeExecutionEngine).restype, LLVMDisposeExecutionEngine.argtypes = None, [LLVMExecutionEngineRef]
-except AttributeError: pass
-
-try: (LLVMRunStaticConstructors:=dll.LLVMRunStaticConstructors).restype, LLVMRunStaticConstructors.argtypes = None, [LLVMExecutionEngineRef]
-except AttributeError: pass
-
-try: (LLVMRunStaticDestructors:=dll.LLVMRunStaticDestructors).restype, LLVMRunStaticDestructors.argtypes = None, [LLVMExecutionEngineRef]
-except AttributeError: pass
-
-try: (LLVMRunFunctionAsMain:=dll.LLVMRunFunctionAsMain).restype, LLVMRunFunctionAsMain.argtypes = ctypes.c_int32, [LLVMExecutionEngineRef, LLVMValueRef, ctypes.c_uint32, ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.POINTER(ctypes.POINTER(ctypes.c_char))]
-except AttributeError: pass
-
-try: (LLVMRunFunction:=dll.LLVMRunFunction).restype, LLVMRunFunction.argtypes = LLVMGenericValueRef, [LLVMExecutionEngineRef, LLVMValueRef, ctypes.c_uint32, ctypes.POINTER(LLVMGenericValueRef)]
-except AttributeError: pass
-
-try: (LLVMFreeMachineCodeForFunction:=dll.LLVMFreeMachineCodeForFunction).restype, LLVMFreeMachineCodeForFunction.argtypes = None, [LLVMExecutionEngineRef, LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMAddModule:=dll.LLVMAddModule).restype, LLVMAddModule.argtypes = None, [LLVMExecutionEngineRef, LLVMModuleRef]
-except AttributeError: pass
-
-try: (LLVMRemoveModule:=dll.LLVMRemoveModule).restype, LLVMRemoveModule.argtypes = LLVMBool, [LLVMExecutionEngineRef, LLVMModuleRef, ctypes.POINTER(LLVMModuleRef), ctypes.POINTER(ctypes.POINTER(ctypes.c_char))]
-except AttributeError: pass
-
-try: (LLVMFindFunction:=dll.LLVMFindFunction).restype, LLVMFindFunction.argtypes = LLVMBool, [LLVMExecutionEngineRef, ctypes.POINTER(ctypes.c_char), ctypes.POINTER(LLVMValueRef)]
-except AttributeError: pass
-
-try: (LLVMRecompileAndRelinkFunction:=dll.LLVMRecompileAndRelinkFunction).restype, LLVMRecompileAndRelinkFunction.argtypes = ctypes.c_void_p, [LLVMExecutionEngineRef, LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMGetExecutionEngineTargetData:=dll.LLVMGetExecutionEngineTargetData).restype, LLVMGetExecutionEngineTargetData.argtypes = LLVMTargetDataRef, [LLVMExecutionEngineRef]
-except AttributeError: pass
-
-try: (LLVMGetExecutionEngineTargetMachine:=dll.LLVMGetExecutionEngineTargetMachine).restype, LLVMGetExecutionEngineTargetMachine.argtypes = LLVMTargetMachineRef, [LLVMExecutionEngineRef]
-except AttributeError: pass
-
-try: (LLVMAddGlobalMapping:=dll.LLVMAddGlobalMapping).restype, LLVMAddGlobalMapping.argtypes = None, [LLVMExecutionEngineRef, LLVMValueRef, ctypes.c_void_p]
-except AttributeError: pass
-
-try: (LLVMGetPointerToGlobal:=dll.LLVMGetPointerToGlobal).restype, LLVMGetPointerToGlobal.argtypes = ctypes.c_void_p, [LLVMExecutionEngineRef, LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMGetGlobalValueAddress:=dll.LLVMGetGlobalValueAddress).restype, LLVMGetGlobalValueAddress.argtypes = uint64_t, [LLVMExecutionEngineRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMGetFunctionAddress:=dll.LLVMGetFunctionAddress).restype, LLVMGetFunctionAddress.argtypes = uint64_t, [LLVMExecutionEngineRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMExecutionEngineGetErrMsg:=dll.LLVMExecutionEngineGetErrMsg).restype, LLVMExecutionEngineGetErrMsg.argtypes = LLVMBool, [LLVMExecutionEngineRef, ctypes.POINTER(ctypes.POINTER(ctypes.c_char))]
-except AttributeError: pass
-
-try: (LLVMCreateSimpleMCJITMemoryManager:=dll.LLVMCreateSimpleMCJITMemoryManager).restype, LLVMCreateSimpleMCJITMemoryManager.argtypes = LLVMMCJITMemoryManagerRef, [ctypes.c_void_p, LLVMMemoryManagerAllocateCodeSectionCallback, LLVMMemoryManagerAllocateDataSectionCallback, LLVMMemoryManagerFinalizeMemoryCallback, LLVMMemoryManagerDestroyCallback]
-except AttributeError: pass
-
-try: (LLVMDisposeMCJITMemoryManager:=dll.LLVMDisposeMCJITMemoryManager).restype, LLVMDisposeMCJITMemoryManager.argtypes = None, [LLVMMCJITMemoryManagerRef]
-except AttributeError: pass
-
-try: (LLVMCreateGDBRegistrationListener:=dll.LLVMCreateGDBRegistrationListener).restype, LLVMCreateGDBRegistrationListener.argtypes = LLVMJITEventListenerRef, []
-except AttributeError: pass
-
-try: (LLVMCreateIntelJITEventListener:=dll.LLVMCreateIntelJITEventListener).restype, LLVMCreateIntelJITEventListener.argtypes = LLVMJITEventListenerRef, []
-except AttributeError: pass
-
-try: (LLVMCreateOProfileJITEventListener:=dll.LLVMCreateOProfileJITEventListener).restype, LLVMCreateOProfileJITEventListener.argtypes = LLVMJITEventListenerRef, []
-except AttributeError: pass
-
-try: (LLVMCreatePerfJITEventListener:=dll.LLVMCreatePerfJITEventListener).restype, LLVMCreatePerfJITEventListener.argtypes = LLVMJITEventListenerRef, []
-except AttributeError: pass
-
-try: (LLVMOrcExecutionSessionSetErrorReporter:=dll.LLVMOrcExecutionSessionSetErrorReporter).restype, LLVMOrcExecutionSessionSetErrorReporter.argtypes = None, [LLVMOrcExecutionSessionRef, LLVMOrcErrorReporterFunction, ctypes.c_void_p]
-except AttributeError: pass
-
-try: (LLVMOrcExecutionSessionGetSymbolStringPool:=dll.LLVMOrcExecutionSessionGetSymbolStringPool).restype, LLVMOrcExecutionSessionGetSymbolStringPool.argtypes = LLVMOrcSymbolStringPoolRef, [LLVMOrcExecutionSessionRef]
-except AttributeError: pass
-
-try: (LLVMOrcSymbolStringPoolClearDeadEntries:=dll.LLVMOrcSymbolStringPoolClearDeadEntries).restype, LLVMOrcSymbolStringPoolClearDeadEntries.argtypes = None, [LLVMOrcSymbolStringPoolRef]
-except AttributeError: pass
-
-try: (LLVMOrcExecutionSessionIntern:=dll.LLVMOrcExecutionSessionIntern).restype, LLVMOrcExecutionSessionIntern.argtypes = LLVMOrcSymbolStringPoolEntryRef, [LLVMOrcExecutionSessionRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMOrcExecutionSessionLookup:=dll.LLVMOrcExecutionSessionLookup).restype, LLVMOrcExecutionSessionLookup.argtypes = None, [LLVMOrcExecutionSessionRef, LLVMOrcLookupKind, LLVMOrcCJITDylibSearchOrder, size_t, LLVMOrcCLookupSet, size_t, LLVMOrcExecutionSessionLookupHandleResultFunction, ctypes.c_void_p]
-except AttributeError: pass
-
-try: (LLVMOrcRetainSymbolStringPoolEntry:=dll.LLVMOrcRetainSymbolStringPoolEntry).restype, LLVMOrcRetainSymbolStringPoolEntry.argtypes = None, [LLVMOrcSymbolStringPoolEntryRef]
-except AttributeError: pass
-
-try: (LLVMOrcReleaseSymbolStringPoolEntry:=dll.LLVMOrcReleaseSymbolStringPoolEntry).restype, LLVMOrcReleaseSymbolStringPoolEntry.argtypes = None, [LLVMOrcSymbolStringPoolEntryRef]
-except AttributeError: pass
-
-try: (LLVMOrcSymbolStringPoolEntryStr:=dll.LLVMOrcSymbolStringPoolEntryStr).restype, LLVMOrcSymbolStringPoolEntryStr.argtypes = ctypes.POINTER(ctypes.c_char), [LLVMOrcSymbolStringPoolEntryRef]
-except AttributeError: pass
-
-try: (LLVMOrcReleaseResourceTracker:=dll.LLVMOrcReleaseResourceTracker).restype, LLVMOrcReleaseResourceTracker.argtypes = None, [LLVMOrcResourceTrackerRef]
-except AttributeError: pass
-
-try: (LLVMOrcResourceTrackerTransferTo:=dll.LLVMOrcResourceTrackerTransferTo).restype, LLVMOrcResourceTrackerTransferTo.argtypes = None, [LLVMOrcResourceTrackerRef, LLVMOrcResourceTrackerRef]
-except AttributeError: pass
-
-try: (LLVMOrcResourceTrackerRemove:=dll.LLVMOrcResourceTrackerRemove).restype, LLVMOrcResourceTrackerRemove.argtypes = LLVMErrorRef, [LLVMOrcResourceTrackerRef]
-except AttributeError: pass
-
-try: (LLVMOrcDisposeDefinitionGenerator:=dll.LLVMOrcDisposeDefinitionGenerator).restype, LLVMOrcDisposeDefinitionGenerator.argtypes = None, [LLVMOrcDefinitionGeneratorRef]
-except AttributeError: pass
-
-try: (LLVMOrcDisposeMaterializationUnit:=dll.LLVMOrcDisposeMaterializationUnit).restype, LLVMOrcDisposeMaterializationUnit.argtypes = None, [LLVMOrcMaterializationUnitRef]
-except AttributeError: pass
-
-try: (LLVMOrcCreateCustomMaterializationUnit:=dll.LLVMOrcCreateCustomMaterializationUnit).restype, LLVMOrcCreateCustomMaterializationUnit.argtypes = LLVMOrcMaterializationUnitRef, [ctypes.POINTER(ctypes.c_char), ctypes.c_void_p, LLVMOrcCSymbolFlagsMapPairs, size_t, LLVMOrcSymbolStringPoolEntryRef, LLVMOrcMaterializationUnitMaterializeFunction, LLVMOrcMaterializationUnitDiscardFunction, LLVMOrcMaterializationUnitDestroyFunction]
-except AttributeError: pass
-
-try: (LLVMOrcAbsoluteSymbols:=dll.LLVMOrcAbsoluteSymbols).restype, LLVMOrcAbsoluteSymbols.argtypes = LLVMOrcMaterializationUnitRef, [LLVMOrcCSymbolMapPairs, size_t]
-except AttributeError: pass
-
-try: (LLVMOrcLazyReexports:=dll.LLVMOrcLazyReexports).restype, LLVMOrcLazyReexports.argtypes = LLVMOrcMaterializationUnitRef, [LLVMOrcLazyCallThroughManagerRef, LLVMOrcIndirectStubsManagerRef, LLVMOrcJITDylibRef, LLVMOrcCSymbolAliasMapPairs, size_t]
-except AttributeError: pass
-
-try: (LLVMOrcDisposeMaterializationResponsibility:=dll.LLVMOrcDisposeMaterializationResponsibility).restype, LLVMOrcDisposeMaterializationResponsibility.argtypes = None, [LLVMOrcMaterializationResponsibilityRef]
-except AttributeError: pass
-
-try: (LLVMOrcMaterializationResponsibilityGetTargetDylib:=dll.LLVMOrcMaterializationResponsibilityGetTargetDylib).restype, LLVMOrcMaterializationResponsibilityGetTargetDylib.argtypes = LLVMOrcJITDylibRef, [LLVMOrcMaterializationResponsibilityRef]
-except AttributeError: pass
-
-try: (LLVMOrcMaterializationResponsibilityGetExecutionSession:=dll.LLVMOrcMaterializationResponsibilityGetExecutionSession).restype, LLVMOrcMaterializationResponsibilityGetExecutionSession.argtypes = LLVMOrcExecutionSessionRef, [LLVMOrcMaterializationResponsibilityRef]
-except AttributeError: pass
-
-try: (LLVMOrcMaterializationResponsibilityGetSymbols:=dll.LLVMOrcMaterializationResponsibilityGetSymbols).restype, LLVMOrcMaterializationResponsibilityGetSymbols.argtypes = LLVMOrcCSymbolFlagsMapPairs, [LLVMOrcMaterializationResponsibilityRef, ctypes.POINTER(size_t)]
-except AttributeError: pass
-
-try: (LLVMOrcDisposeCSymbolFlagsMap:=dll.LLVMOrcDisposeCSymbolFlagsMap).restype, LLVMOrcDisposeCSymbolFlagsMap.argtypes = None, [LLVMOrcCSymbolFlagsMapPairs]
-except AttributeError: pass
-
-try: (LLVMOrcMaterializationResponsibilityGetInitializerSymbol:=dll.LLVMOrcMaterializationResponsibilityGetInitializerSymbol).restype, LLVMOrcMaterializationResponsibilityGetInitializerSymbol.argtypes = LLVMOrcSymbolStringPoolEntryRef, [LLVMOrcMaterializationResponsibilityRef]
-except AttributeError: pass
-
-try: (LLVMOrcMaterializationResponsibilityGetRequestedSymbols:=dll.LLVMOrcMaterializationResponsibilityGetRequestedSymbols).restype, LLVMOrcMaterializationResponsibilityGetRequestedSymbols.argtypes = ctypes.POINTER(LLVMOrcSymbolStringPoolEntryRef), [LLVMOrcMaterializationResponsibilityRef, ctypes.POINTER(size_t)]
-except AttributeError: pass
-
-try: (LLVMOrcDisposeSymbols:=dll.LLVMOrcDisposeSymbols).restype, LLVMOrcDisposeSymbols.argtypes = None, [ctypes.POINTER(LLVMOrcSymbolStringPoolEntryRef)]
-except AttributeError: pass
-
-try: (LLVMOrcMaterializationResponsibilityNotifyResolved:=dll.LLVMOrcMaterializationResponsibilityNotifyResolved).restype, LLVMOrcMaterializationResponsibilityNotifyResolved.argtypes = LLVMErrorRef, [LLVMOrcMaterializationResponsibilityRef, LLVMOrcCSymbolMapPairs, size_t]
-except AttributeError: pass
-
-try: (LLVMOrcMaterializationResponsibilityNotifyEmitted:=dll.LLVMOrcMaterializationResponsibilityNotifyEmitted).restype, LLVMOrcMaterializationResponsibilityNotifyEmitted.argtypes = LLVMErrorRef, [LLVMOrcMaterializationResponsibilityRef, ctypes.POINTER(LLVMOrcCSymbolDependenceGroup), size_t]
-except AttributeError: pass
-
-try: (LLVMOrcMaterializationResponsibilityDefineMaterializing:=dll.LLVMOrcMaterializationResponsibilityDefineMaterializing).restype, LLVMOrcMaterializationResponsibilityDefineMaterializing.argtypes = LLVMErrorRef, [LLVMOrcMaterializationResponsibilityRef, LLVMOrcCSymbolFlagsMapPairs, size_t]
-except AttributeError: pass
-
-try: (LLVMOrcMaterializationResponsibilityFailMaterialization:=dll.LLVMOrcMaterializationResponsibilityFailMaterialization).restype, LLVMOrcMaterializationResponsibilityFailMaterialization.argtypes = None, [LLVMOrcMaterializationResponsibilityRef]
-except AttributeError: pass
-
-try: (LLVMOrcMaterializationResponsibilityReplace:=dll.LLVMOrcMaterializationResponsibilityReplace).restype, LLVMOrcMaterializationResponsibilityReplace.argtypes = LLVMErrorRef, [LLVMOrcMaterializationResponsibilityRef, LLVMOrcMaterializationUnitRef]
-except AttributeError: pass
-
-try: (LLVMOrcMaterializationResponsibilityDelegate:=dll.LLVMOrcMaterializationResponsibilityDelegate).restype, LLVMOrcMaterializationResponsibilityDelegate.argtypes = LLVMErrorRef, [LLVMOrcMaterializationResponsibilityRef, ctypes.POINTER(LLVMOrcSymbolStringPoolEntryRef), size_t, ctypes.POINTER(LLVMOrcMaterializationResponsibilityRef)]
-except AttributeError: pass
-
-try: (LLVMOrcExecutionSessionCreateBareJITDylib:=dll.LLVMOrcExecutionSessionCreateBareJITDylib).restype, LLVMOrcExecutionSessionCreateBareJITDylib.argtypes = LLVMOrcJITDylibRef, [LLVMOrcExecutionSessionRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMOrcExecutionSessionCreateJITDylib:=dll.LLVMOrcExecutionSessionCreateJITDylib).restype, LLVMOrcExecutionSessionCreateJITDylib.argtypes = LLVMErrorRef, [LLVMOrcExecutionSessionRef, ctypes.POINTER(LLVMOrcJITDylibRef), ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMOrcExecutionSessionGetJITDylibByName:=dll.LLVMOrcExecutionSessionGetJITDylibByName).restype, LLVMOrcExecutionSessionGetJITDylibByName.argtypes = LLVMOrcJITDylibRef, [LLVMOrcExecutionSessionRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMOrcJITDylibCreateResourceTracker:=dll.LLVMOrcJITDylibCreateResourceTracker).restype, LLVMOrcJITDylibCreateResourceTracker.argtypes = LLVMOrcResourceTrackerRef, [LLVMOrcJITDylibRef]
-except AttributeError: pass
-
-try: (LLVMOrcJITDylibGetDefaultResourceTracker:=dll.LLVMOrcJITDylibGetDefaultResourceTracker).restype, LLVMOrcJITDylibGetDefaultResourceTracker.argtypes = LLVMOrcResourceTrackerRef, [LLVMOrcJITDylibRef]
-except AttributeError: pass
-
-try: (LLVMOrcJITDylibDefine:=dll.LLVMOrcJITDylibDefine).restype, LLVMOrcJITDylibDefine.argtypes = LLVMErrorRef, [LLVMOrcJITDylibRef, LLVMOrcMaterializationUnitRef]
-except AttributeError: pass
-
-try: (LLVMOrcJITDylibClear:=dll.LLVMOrcJITDylibClear).restype, LLVMOrcJITDylibClear.argtypes = LLVMErrorRef, [LLVMOrcJITDylibRef]
-except AttributeError: pass
-
-try: (LLVMOrcJITDylibAddGenerator:=dll.LLVMOrcJITDylibAddGenerator).restype, LLVMOrcJITDylibAddGenerator.argtypes = None, [LLVMOrcJITDylibRef, LLVMOrcDefinitionGeneratorRef]
-except AttributeError: pass
-
-try: (LLVMOrcCreateCustomCAPIDefinitionGenerator:=dll.LLVMOrcCreateCustomCAPIDefinitionGenerator).restype, LLVMOrcCreateCustomCAPIDefinitionGenerator.argtypes = LLVMOrcDefinitionGeneratorRef, [LLVMOrcCAPIDefinitionGeneratorTryToGenerateFunction, ctypes.c_void_p, LLVMOrcDisposeCAPIDefinitionGeneratorFunction]
-except AttributeError: pass
-
-try: (LLVMOrcLookupStateContinueLookup:=dll.LLVMOrcLookupStateContinueLookup).restype, LLVMOrcLookupStateContinueLookup.argtypes = None, [LLVMOrcLookupStateRef, LLVMErrorRef]
-except AttributeError: pass
-
-try: (LLVMOrcCreateDynamicLibrarySearchGeneratorForProcess:=dll.LLVMOrcCreateDynamicLibrarySearchGeneratorForProcess).restype, LLVMOrcCreateDynamicLibrarySearchGeneratorForProcess.argtypes = LLVMErrorRef, [ctypes.POINTER(LLVMOrcDefinitionGeneratorRef), ctypes.c_char, LLVMOrcSymbolPredicate, ctypes.c_void_p]
-except AttributeError: pass
-
-try: (LLVMOrcCreateDynamicLibrarySearchGeneratorForPath:=dll.LLVMOrcCreateDynamicLibrarySearchGeneratorForPath).restype, LLVMOrcCreateDynamicLibrarySearchGeneratorForPath.argtypes = LLVMErrorRef, [ctypes.POINTER(LLVMOrcDefinitionGeneratorRef), ctypes.POINTER(ctypes.c_char), ctypes.c_char, LLVMOrcSymbolPredicate, ctypes.c_void_p]
-except AttributeError: pass
-
-try: (LLVMOrcCreateStaticLibrarySearchGeneratorForPath:=dll.LLVMOrcCreateStaticLibrarySearchGeneratorForPath).restype, LLVMOrcCreateStaticLibrarySearchGeneratorForPath.argtypes = LLVMErrorRef, [ctypes.POINTER(LLVMOrcDefinitionGeneratorRef), LLVMOrcObjectLayerRef, ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMOrcCreateNewThreadSafeContext:=dll.LLVMOrcCreateNewThreadSafeContext).restype, LLVMOrcCreateNewThreadSafeContext.argtypes = LLVMOrcThreadSafeContextRef, []
-except AttributeError: pass
-
-try: (LLVMOrcThreadSafeContextGetContext:=dll.LLVMOrcThreadSafeContextGetContext).restype, LLVMOrcThreadSafeContextGetContext.argtypes = LLVMContextRef, [LLVMOrcThreadSafeContextRef]
-except AttributeError: pass
-
-try: (LLVMOrcDisposeThreadSafeContext:=dll.LLVMOrcDisposeThreadSafeContext).restype, LLVMOrcDisposeThreadSafeContext.argtypes = None, [LLVMOrcThreadSafeContextRef]
-except AttributeError: pass
-
-try: (LLVMOrcCreateNewThreadSafeModule:=dll.LLVMOrcCreateNewThreadSafeModule).restype, LLVMOrcCreateNewThreadSafeModule.argtypes = LLVMOrcThreadSafeModuleRef, [LLVMModuleRef, LLVMOrcThreadSafeContextRef]
-except AttributeError: pass
-
-try: (LLVMOrcDisposeThreadSafeModule:=dll.LLVMOrcDisposeThreadSafeModule).restype, LLVMOrcDisposeThreadSafeModule.argtypes = None, [LLVMOrcThreadSafeModuleRef]
-except AttributeError: pass
-
-try: (LLVMOrcThreadSafeModuleWithModuleDo:=dll.LLVMOrcThreadSafeModuleWithModuleDo).restype, LLVMOrcThreadSafeModuleWithModuleDo.argtypes = LLVMErrorRef, [LLVMOrcThreadSafeModuleRef, LLVMOrcGenericIRModuleOperationFunction, ctypes.c_void_p]
-except AttributeError: pass
-
-try: (LLVMOrcJITTargetMachineBuilderDetectHost:=dll.LLVMOrcJITTargetMachineBuilderDetectHost).restype, LLVMOrcJITTargetMachineBuilderDetectHost.argtypes = LLVMErrorRef, [ctypes.POINTER(LLVMOrcJITTargetMachineBuilderRef)]
-except AttributeError: pass
-
-try: (LLVMOrcJITTargetMachineBuilderCreateFromTargetMachine:=dll.LLVMOrcJITTargetMachineBuilderCreateFromTargetMachine).restype, LLVMOrcJITTargetMachineBuilderCreateFromTargetMachine.argtypes = LLVMOrcJITTargetMachineBuilderRef, [LLVMTargetMachineRef]
-except AttributeError: pass
-
-try: (LLVMOrcDisposeJITTargetMachineBuilder:=dll.LLVMOrcDisposeJITTargetMachineBuilder).restype, LLVMOrcDisposeJITTargetMachineBuilder.argtypes = None, [LLVMOrcJITTargetMachineBuilderRef]
-except AttributeError: pass
-
-try: (LLVMOrcJITTargetMachineBuilderGetTargetTriple:=dll.LLVMOrcJITTargetMachineBuilderGetTargetTriple).restype, LLVMOrcJITTargetMachineBuilderGetTargetTriple.argtypes = ctypes.POINTER(ctypes.c_char), [LLVMOrcJITTargetMachineBuilderRef]
-except AttributeError: pass
-
-try: (LLVMOrcJITTargetMachineBuilderSetTargetTriple:=dll.LLVMOrcJITTargetMachineBuilderSetTargetTriple).restype, LLVMOrcJITTargetMachineBuilderSetTargetTriple.argtypes = None, [LLVMOrcJITTargetMachineBuilderRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMOrcObjectLayerAddObjectFile:=dll.LLVMOrcObjectLayerAddObjectFile).restype, LLVMOrcObjectLayerAddObjectFile.argtypes = LLVMErrorRef, [LLVMOrcObjectLayerRef, LLVMOrcJITDylibRef, LLVMMemoryBufferRef]
-except AttributeError: pass
-
-try: (LLVMOrcObjectLayerAddObjectFileWithRT:=dll.LLVMOrcObjectLayerAddObjectFileWithRT).restype, LLVMOrcObjectLayerAddObjectFileWithRT.argtypes = LLVMErrorRef, [LLVMOrcObjectLayerRef, LLVMOrcResourceTrackerRef, LLVMMemoryBufferRef]
-except AttributeError: pass
-
-try: (LLVMOrcObjectLayerEmit:=dll.LLVMOrcObjectLayerEmit).restype, LLVMOrcObjectLayerEmit.argtypes = None, [LLVMOrcObjectLayerRef, LLVMOrcMaterializationResponsibilityRef, LLVMMemoryBufferRef]
-except AttributeError: pass
-
-try: (LLVMOrcDisposeObjectLayer:=dll.LLVMOrcDisposeObjectLayer).restype, LLVMOrcDisposeObjectLayer.argtypes = None, [LLVMOrcObjectLayerRef]
-except AttributeError: pass
-
-try: (LLVMOrcIRTransformLayerEmit:=dll.LLVMOrcIRTransformLayerEmit).restype, LLVMOrcIRTransformLayerEmit.argtypes = None, [LLVMOrcIRTransformLayerRef, LLVMOrcMaterializationResponsibilityRef, LLVMOrcThreadSafeModuleRef]
-except AttributeError: pass
-
-try: (LLVMOrcIRTransformLayerSetTransform:=dll.LLVMOrcIRTransformLayerSetTransform).restype, LLVMOrcIRTransformLayerSetTransform.argtypes = None, [LLVMOrcIRTransformLayerRef, LLVMOrcIRTransformLayerTransformFunction, ctypes.c_void_p]
-except AttributeError: pass
-
-try: (LLVMOrcObjectTransformLayerSetTransform:=dll.LLVMOrcObjectTransformLayerSetTransform).restype, LLVMOrcObjectTransformLayerSetTransform.argtypes = None, [LLVMOrcObjectTransformLayerRef, LLVMOrcObjectTransformLayerTransformFunction, ctypes.c_void_p]
-except AttributeError: pass
-
-try: (LLVMOrcCreateLocalIndirectStubsManager:=dll.LLVMOrcCreateLocalIndirectStubsManager).restype, LLVMOrcCreateLocalIndirectStubsManager.argtypes = LLVMOrcIndirectStubsManagerRef, [ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMOrcDisposeIndirectStubsManager:=dll.LLVMOrcDisposeIndirectStubsManager).restype, LLVMOrcDisposeIndirectStubsManager.argtypes = None, [LLVMOrcIndirectStubsManagerRef]
-except AttributeError: pass
-
-try: (LLVMOrcCreateLocalLazyCallThroughManager:=dll.LLVMOrcCreateLocalLazyCallThroughManager).restype, LLVMOrcCreateLocalLazyCallThroughManager.argtypes = LLVMErrorRef, [ctypes.POINTER(ctypes.c_char), LLVMOrcExecutionSessionRef, LLVMOrcJITTargetAddress, ctypes.POINTER(LLVMOrcLazyCallThroughManagerRef)]
-except AttributeError: pass
-
-try: (LLVMOrcDisposeLazyCallThroughManager:=dll.LLVMOrcDisposeLazyCallThroughManager).restype, LLVMOrcDisposeLazyCallThroughManager.argtypes = None, [LLVMOrcLazyCallThroughManagerRef]
-except AttributeError: pass
-
-try: (LLVMOrcCreateDumpObjects:=dll.LLVMOrcCreateDumpObjects).restype, LLVMOrcCreateDumpObjects.argtypes = LLVMOrcDumpObjectsRef, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMOrcDisposeDumpObjects:=dll.LLVMOrcDisposeDumpObjects).restype, LLVMOrcDisposeDumpObjects.argtypes = None, [LLVMOrcDumpObjectsRef]
-except AttributeError: pass
-
-try: (LLVMOrcDumpObjects_CallOperator:=dll.LLVMOrcDumpObjects_CallOperator).restype, LLVMOrcDumpObjects_CallOperator.argtypes = LLVMErrorRef, [LLVMOrcDumpObjectsRef, ctypes.POINTER(LLVMMemoryBufferRef)]
-except AttributeError: pass
-
-LLVMMemoryManagerCreateContextCallback = ctypes.CFUNCTYPE(ctypes.c_void_p, ctypes.c_void_p)
-LLVMMemoryManagerNotifyTerminatingCallback = ctypes.CFUNCTYPE(None, ctypes.c_void_p)
-try: (LLVMOrcCreateRTDyldObjectLinkingLayerWithSectionMemoryManager:=dll.LLVMOrcCreateRTDyldObjectLinkingLayerWithSectionMemoryManager).restype, LLVMOrcCreateRTDyldObjectLinkingLayerWithSectionMemoryManager.argtypes = LLVMOrcObjectLayerRef, [LLVMOrcExecutionSessionRef]
-except AttributeError: pass
-
-try: (LLVMOrcCreateRTDyldObjectLinkingLayerWithMCJITMemoryManagerLikeCallbacks:=dll.LLVMOrcCreateRTDyldObjectLinkingLayerWithMCJITMemoryManagerLikeCallbacks).restype, LLVMOrcCreateRTDyldObjectLinkingLayerWithMCJITMemoryManagerLikeCallbacks.argtypes = LLVMOrcObjectLayerRef, [LLVMOrcExecutionSessionRef, ctypes.c_void_p, LLVMMemoryManagerCreateContextCallback, LLVMMemoryManagerNotifyTerminatingCallback, LLVMMemoryManagerAllocateCodeSectionCallback, LLVMMemoryManagerAllocateDataSectionCallback, LLVMMemoryManagerFinalizeMemoryCallback, LLVMMemoryManagerDestroyCallback]
-except AttributeError: pass
-
-try: (LLVMOrcRTDyldObjectLinkingLayerRegisterJITEventListener:=dll.LLVMOrcRTDyldObjectLinkingLayerRegisterJITEventListener).restype, LLVMOrcRTDyldObjectLinkingLayerRegisterJITEventListener.argtypes = None, [LLVMOrcObjectLayerRef, LLVMJITEventListenerRef]
-except AttributeError: pass
-
-try: (imaxabs:=dll.imaxabs).restype, imaxabs.argtypes = intmax_t, [intmax_t]
-except AttributeError: pass
-
-try: (imaxdiv:=dll.imaxdiv).restype, imaxdiv.argtypes = imaxdiv_t, [intmax_t, intmax_t]
-except AttributeError: pass
-
-try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (select:=dll.select).restype, select.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timeval)]
-except AttributeError: pass
-
-try: (pselect:=dll.pselect).restype, pselect.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timespec), ctypes.POINTER(__sigset_t)]
-except AttributeError: pass
-
-enum_LLVMRemarkType = CEnum(ctypes.c_uint32)
+LLVMJITSymbolTargetFlags: TypeAlias = Annotated[int, ctypes.c_ubyte]
+class struct_LLVMOrcOpaqueObjectLinkingLayer(ctypes.Structure): pass
+LLVMOrcObjectLinkingLayerRef: TypeAlias = c.POINTER[struct_LLVMOrcOpaqueObjectLinkingLayer]
+LLVMMemoryManagerCreateContextCallback: TypeAlias = c.CFUNCTYPE[ctypes.c_void_p, [ctypes.c_void_p]]
+LLVMMemoryManagerNotifyTerminatingCallback: TypeAlias = c.CFUNCTYPE[None, [ctypes.c_void_p]]
+@dll.bind
+def LLVMOrcCreateRTDyldObjectLinkingLayerWithSectionMemoryManager(ES:LLVMOrcExecutionSessionRef) -> LLVMOrcObjectLayerRef: ...
+@dll.bind
+def LLVMOrcCreateRTDyldObjectLinkingLayerWithMCJITMemoryManagerLikeCallbacks(ES:LLVMOrcExecutionSessionRef, CreateContextCtx:ctypes.c_void_p, CreateContext:LLVMMemoryManagerCreateContextCallback, NotifyTerminating:LLVMMemoryManagerNotifyTerminatingCallback, AllocateCodeSection:LLVMMemoryManagerAllocateCodeSectionCallback, AllocateDataSection:LLVMMemoryManagerAllocateDataSectionCallback, FinalizeMemory:LLVMMemoryManagerFinalizeMemoryCallback, Destroy:LLVMMemoryManagerDestroyCallback) -> LLVMOrcObjectLayerRef: ...
+@dll.bind
+def LLVMOrcRTDyldObjectLinkingLayerRegisterJITEventListener(RTDyldObjLinkingLayer:LLVMOrcObjectLayerRef, Listener:LLVMJITEventListenerRef) -> None: ...
+class enum_LLVMRemarkType(Annotated[int, ctypes.c_uint32], c.Enum): pass
 LLVMRemarkTypeUnknown = enum_LLVMRemarkType.define('LLVMRemarkTypeUnknown', 0)
 LLVMRemarkTypePassed = enum_LLVMRemarkType.define('LLVMRemarkTypePassed', 1)
 LLVMRemarkTypeMissed = enum_LLVMRemarkType.define('LLVMRemarkTypeMissed', 2)
@@ -8320,1971 +3337,146 @@ LLVMRemarkTypeAnalysisFPCommute = enum_LLVMRemarkType.define('LLVMRemarkTypeAnal
 LLVMRemarkTypeAnalysisAliasing = enum_LLVMRemarkType.define('LLVMRemarkTypeAnalysisAliasing', 5)
 LLVMRemarkTypeFailure = enum_LLVMRemarkType.define('LLVMRemarkTypeFailure', 6)
 
-class struct_LLVMRemarkOpaqueString(Struct): pass
-LLVMRemarkStringRef = ctypes.POINTER(struct_LLVMRemarkOpaqueString)
-try: (LLVMRemarkStringGetData:=dll.LLVMRemarkStringGetData).restype, LLVMRemarkStringGetData.argtypes = ctypes.POINTER(ctypes.c_char), [LLVMRemarkStringRef]
-except AttributeError: pass
-
-try: (LLVMRemarkStringGetLen:=dll.LLVMRemarkStringGetLen).restype, LLVMRemarkStringGetLen.argtypes = uint32_t, [LLVMRemarkStringRef]
-except AttributeError: pass
-
-class struct_LLVMRemarkOpaqueDebugLoc(Struct): pass
-LLVMRemarkDebugLocRef = ctypes.POINTER(struct_LLVMRemarkOpaqueDebugLoc)
-try: (LLVMRemarkDebugLocGetSourceFilePath:=dll.LLVMRemarkDebugLocGetSourceFilePath).restype, LLVMRemarkDebugLocGetSourceFilePath.argtypes = LLVMRemarkStringRef, [LLVMRemarkDebugLocRef]
-except AttributeError: pass
-
-try: (LLVMRemarkDebugLocGetSourceLine:=dll.LLVMRemarkDebugLocGetSourceLine).restype, LLVMRemarkDebugLocGetSourceLine.argtypes = uint32_t, [LLVMRemarkDebugLocRef]
-except AttributeError: pass
-
-try: (LLVMRemarkDebugLocGetSourceColumn:=dll.LLVMRemarkDebugLocGetSourceColumn).restype, LLVMRemarkDebugLocGetSourceColumn.argtypes = uint32_t, [LLVMRemarkDebugLocRef]
-except AttributeError: pass
-
-class struct_LLVMRemarkOpaqueArg(Struct): pass
-LLVMRemarkArgRef = ctypes.POINTER(struct_LLVMRemarkOpaqueArg)
-try: (LLVMRemarkArgGetKey:=dll.LLVMRemarkArgGetKey).restype, LLVMRemarkArgGetKey.argtypes = LLVMRemarkStringRef, [LLVMRemarkArgRef]
-except AttributeError: pass
-
-try: (LLVMRemarkArgGetValue:=dll.LLVMRemarkArgGetValue).restype, LLVMRemarkArgGetValue.argtypes = LLVMRemarkStringRef, [LLVMRemarkArgRef]
-except AttributeError: pass
-
-try: (LLVMRemarkArgGetDebugLoc:=dll.LLVMRemarkArgGetDebugLoc).restype, LLVMRemarkArgGetDebugLoc.argtypes = LLVMRemarkDebugLocRef, [LLVMRemarkArgRef]
-except AttributeError: pass
-
-class struct_LLVMRemarkOpaqueEntry(Struct): pass
-LLVMRemarkEntryRef = ctypes.POINTER(struct_LLVMRemarkOpaqueEntry)
-try: (LLVMRemarkEntryDispose:=dll.LLVMRemarkEntryDispose).restype, LLVMRemarkEntryDispose.argtypes = None, [LLVMRemarkEntryRef]
-except AttributeError: pass
-
-try: (LLVMRemarkEntryGetType:=dll.LLVMRemarkEntryGetType).restype, LLVMRemarkEntryGetType.argtypes = enum_LLVMRemarkType, [LLVMRemarkEntryRef]
-except AttributeError: pass
-
-try: (LLVMRemarkEntryGetPassName:=dll.LLVMRemarkEntryGetPassName).restype, LLVMRemarkEntryGetPassName.argtypes = LLVMRemarkStringRef, [LLVMRemarkEntryRef]
-except AttributeError: pass
-
-try: (LLVMRemarkEntryGetRemarkName:=dll.LLVMRemarkEntryGetRemarkName).restype, LLVMRemarkEntryGetRemarkName.argtypes = LLVMRemarkStringRef, [LLVMRemarkEntryRef]
-except AttributeError: pass
-
-try: (LLVMRemarkEntryGetFunctionName:=dll.LLVMRemarkEntryGetFunctionName).restype, LLVMRemarkEntryGetFunctionName.argtypes = LLVMRemarkStringRef, [LLVMRemarkEntryRef]
-except AttributeError: pass
-
-try: (LLVMRemarkEntryGetDebugLoc:=dll.LLVMRemarkEntryGetDebugLoc).restype, LLVMRemarkEntryGetDebugLoc.argtypes = LLVMRemarkDebugLocRef, [LLVMRemarkEntryRef]
-except AttributeError: pass
-
-try: (LLVMRemarkEntryGetHotness:=dll.LLVMRemarkEntryGetHotness).restype, LLVMRemarkEntryGetHotness.argtypes = uint64_t, [LLVMRemarkEntryRef]
-except AttributeError: pass
-
-try: (LLVMRemarkEntryGetNumArgs:=dll.LLVMRemarkEntryGetNumArgs).restype, LLVMRemarkEntryGetNumArgs.argtypes = uint32_t, [LLVMRemarkEntryRef]
-except AttributeError: pass
-
-try: (LLVMRemarkEntryGetFirstArg:=dll.LLVMRemarkEntryGetFirstArg).restype, LLVMRemarkEntryGetFirstArg.argtypes = LLVMRemarkArgRef, [LLVMRemarkEntryRef]
-except AttributeError: pass
-
-try: (LLVMRemarkEntryGetNextArg:=dll.LLVMRemarkEntryGetNextArg).restype, LLVMRemarkEntryGetNextArg.argtypes = LLVMRemarkArgRef, [LLVMRemarkArgRef, LLVMRemarkEntryRef]
-except AttributeError: pass
-
-class struct_LLVMRemarkOpaqueParser(Struct): pass
-LLVMRemarkParserRef = ctypes.POINTER(struct_LLVMRemarkOpaqueParser)
-try: (LLVMRemarkParserCreateYAML:=dll.LLVMRemarkParserCreateYAML).restype, LLVMRemarkParserCreateYAML.argtypes = LLVMRemarkParserRef, [ctypes.c_void_p, uint64_t]
-except AttributeError: pass
-
-try: (LLVMRemarkParserCreateBitstream:=dll.LLVMRemarkParserCreateBitstream).restype, LLVMRemarkParserCreateBitstream.argtypes = LLVMRemarkParserRef, [ctypes.c_void_p, uint64_t]
-except AttributeError: pass
-
-try: (LLVMRemarkParserGetNext:=dll.LLVMRemarkParserGetNext).restype, LLVMRemarkParserGetNext.argtypes = LLVMRemarkEntryRef, [LLVMRemarkParserRef]
-except AttributeError: pass
-
-try: (LLVMRemarkParserHasError:=dll.LLVMRemarkParserHasError).restype, LLVMRemarkParserHasError.argtypes = LLVMBool, [LLVMRemarkParserRef]
-except AttributeError: pass
-
-try: (LLVMRemarkParserGetErrorMessage:=dll.LLVMRemarkParserGetErrorMessage).restype, LLVMRemarkParserGetErrorMessage.argtypes = ctypes.POINTER(ctypes.c_char), [LLVMRemarkParserRef]
-except AttributeError: pass
-
-try: (LLVMRemarkParserDispose:=dll.LLVMRemarkParserDispose).restype, LLVMRemarkParserDispose.argtypes = None, [LLVMRemarkParserRef]
-except AttributeError: pass
-
-try: (LLVMRemarkVersion:=dll.LLVMRemarkVersion).restype, LLVMRemarkVersion.argtypes = uint32_t, []
-except AttributeError: pass
-
-try: (imaxabs:=dll.imaxabs).restype, imaxabs.argtypes = intmax_t, [intmax_t]
-except AttributeError: pass
-
-try: (imaxdiv:=dll.imaxdiv).restype, imaxdiv.argtypes = imaxdiv_t, [intmax_t, intmax_t]
-except AttributeError: pass
-
-try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (select:=dll.select).restype, select.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timeval)]
-except AttributeError: pass
-
-try: (pselect:=dll.pselect).restype, pselect.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timespec), ctypes.POINTER(__sigset_t)]
-except AttributeError: pass
-
-try: (LLVMLoadLibraryPermanently:=dll.LLVMLoadLibraryPermanently).restype, LLVMLoadLibraryPermanently.argtypes = LLVMBool, [ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMParseCommandLineOptions:=dll.LLVMParseCommandLineOptions).restype, LLVMParseCommandLineOptions.argtypes = None, [ctypes.c_int32, ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMSearchForAddressOfSymbol:=dll.LLVMSearchForAddressOfSymbol).restype, LLVMSearchForAddressOfSymbol.argtypes = ctypes.c_void_p, [ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMAddSymbol:=dll.LLVMAddSymbol).restype, LLVMAddSymbol.argtypes = None, [ctypes.POINTER(ctypes.c_char), ctypes.c_void_p]
-except AttributeError: pass
-
-try: (imaxabs:=dll.imaxabs).restype, imaxabs.argtypes = intmax_t, [intmax_t]
-except AttributeError: pass
-
-try: (imaxdiv:=dll.imaxdiv).restype, imaxdiv.argtypes = imaxdiv_t, [intmax_t, intmax_t]
-except AttributeError: pass
-
-try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (select:=dll.select).restype, select.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timeval)]
-except AttributeError: pass
-
-try: (pselect:=dll.pselect).restype, pselect.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timespec), ctypes.POINTER(__sigset_t)]
-except AttributeError: pass
-
-try: (LLVMInitializeAArch64TargetInfo:=dll.LLVMInitializeAArch64TargetInfo).restype, LLVMInitializeAArch64TargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAMDGPUTargetInfo:=dll.LLVMInitializeAMDGPUTargetInfo).restype, LLVMInitializeAMDGPUTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeARMTargetInfo:=dll.LLVMInitializeARMTargetInfo).restype, LLVMInitializeARMTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAVRTargetInfo:=dll.LLVMInitializeAVRTargetInfo).restype, LLVMInitializeAVRTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeBPFTargetInfo:=dll.LLVMInitializeBPFTargetInfo).restype, LLVMInitializeBPFTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeHexagonTargetInfo:=dll.LLVMInitializeHexagonTargetInfo).restype, LLVMInitializeHexagonTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeLanaiTargetInfo:=dll.LLVMInitializeLanaiTargetInfo).restype, LLVMInitializeLanaiTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeLoongArchTargetInfo:=dll.LLVMInitializeLoongArchTargetInfo).restype, LLVMInitializeLoongArchTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeMipsTargetInfo:=dll.LLVMInitializeMipsTargetInfo).restype, LLVMInitializeMipsTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeMSP430TargetInfo:=dll.LLVMInitializeMSP430TargetInfo).restype, LLVMInitializeMSP430TargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeNVPTXTargetInfo:=dll.LLVMInitializeNVPTXTargetInfo).restype, LLVMInitializeNVPTXTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializePowerPCTargetInfo:=dll.LLVMInitializePowerPCTargetInfo).restype, LLVMInitializePowerPCTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeRISCVTargetInfo:=dll.LLVMInitializeRISCVTargetInfo).restype, LLVMInitializeRISCVTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSparcTargetInfo:=dll.LLVMInitializeSparcTargetInfo).restype, LLVMInitializeSparcTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSPIRVTargetInfo:=dll.LLVMInitializeSPIRVTargetInfo).restype, LLVMInitializeSPIRVTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSystemZTargetInfo:=dll.LLVMInitializeSystemZTargetInfo).restype, LLVMInitializeSystemZTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeVETargetInfo:=dll.LLVMInitializeVETargetInfo).restype, LLVMInitializeVETargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeWebAssemblyTargetInfo:=dll.LLVMInitializeWebAssemblyTargetInfo).restype, LLVMInitializeWebAssemblyTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeX86TargetInfo:=dll.LLVMInitializeX86TargetInfo).restype, LLVMInitializeX86TargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeXCoreTargetInfo:=dll.LLVMInitializeXCoreTargetInfo).restype, LLVMInitializeXCoreTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeM68kTargetInfo:=dll.LLVMInitializeM68kTargetInfo).restype, LLVMInitializeM68kTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeXtensaTargetInfo:=dll.LLVMInitializeXtensaTargetInfo).restype, LLVMInitializeXtensaTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAArch64Target:=dll.LLVMInitializeAArch64Target).restype, LLVMInitializeAArch64Target.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAMDGPUTarget:=dll.LLVMInitializeAMDGPUTarget).restype, LLVMInitializeAMDGPUTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeARMTarget:=dll.LLVMInitializeARMTarget).restype, LLVMInitializeARMTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAVRTarget:=dll.LLVMInitializeAVRTarget).restype, LLVMInitializeAVRTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeBPFTarget:=dll.LLVMInitializeBPFTarget).restype, LLVMInitializeBPFTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeHexagonTarget:=dll.LLVMInitializeHexagonTarget).restype, LLVMInitializeHexagonTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeLanaiTarget:=dll.LLVMInitializeLanaiTarget).restype, LLVMInitializeLanaiTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeLoongArchTarget:=dll.LLVMInitializeLoongArchTarget).restype, LLVMInitializeLoongArchTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeMipsTarget:=dll.LLVMInitializeMipsTarget).restype, LLVMInitializeMipsTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeMSP430Target:=dll.LLVMInitializeMSP430Target).restype, LLVMInitializeMSP430Target.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeNVPTXTarget:=dll.LLVMInitializeNVPTXTarget).restype, LLVMInitializeNVPTXTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializePowerPCTarget:=dll.LLVMInitializePowerPCTarget).restype, LLVMInitializePowerPCTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeRISCVTarget:=dll.LLVMInitializeRISCVTarget).restype, LLVMInitializeRISCVTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSparcTarget:=dll.LLVMInitializeSparcTarget).restype, LLVMInitializeSparcTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSPIRVTarget:=dll.LLVMInitializeSPIRVTarget).restype, LLVMInitializeSPIRVTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSystemZTarget:=dll.LLVMInitializeSystemZTarget).restype, LLVMInitializeSystemZTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeVETarget:=dll.LLVMInitializeVETarget).restype, LLVMInitializeVETarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeWebAssemblyTarget:=dll.LLVMInitializeWebAssemblyTarget).restype, LLVMInitializeWebAssemblyTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeX86Target:=dll.LLVMInitializeX86Target).restype, LLVMInitializeX86Target.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeXCoreTarget:=dll.LLVMInitializeXCoreTarget).restype, LLVMInitializeXCoreTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeM68kTarget:=dll.LLVMInitializeM68kTarget).restype, LLVMInitializeM68kTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeXtensaTarget:=dll.LLVMInitializeXtensaTarget).restype, LLVMInitializeXtensaTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAArch64TargetMC:=dll.LLVMInitializeAArch64TargetMC).restype, LLVMInitializeAArch64TargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAMDGPUTargetMC:=dll.LLVMInitializeAMDGPUTargetMC).restype, LLVMInitializeAMDGPUTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeARMTargetMC:=dll.LLVMInitializeARMTargetMC).restype, LLVMInitializeARMTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAVRTargetMC:=dll.LLVMInitializeAVRTargetMC).restype, LLVMInitializeAVRTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeBPFTargetMC:=dll.LLVMInitializeBPFTargetMC).restype, LLVMInitializeBPFTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeHexagonTargetMC:=dll.LLVMInitializeHexagonTargetMC).restype, LLVMInitializeHexagonTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeLanaiTargetMC:=dll.LLVMInitializeLanaiTargetMC).restype, LLVMInitializeLanaiTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeLoongArchTargetMC:=dll.LLVMInitializeLoongArchTargetMC).restype, LLVMInitializeLoongArchTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeMipsTargetMC:=dll.LLVMInitializeMipsTargetMC).restype, LLVMInitializeMipsTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeMSP430TargetMC:=dll.LLVMInitializeMSP430TargetMC).restype, LLVMInitializeMSP430TargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeNVPTXTargetMC:=dll.LLVMInitializeNVPTXTargetMC).restype, LLVMInitializeNVPTXTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializePowerPCTargetMC:=dll.LLVMInitializePowerPCTargetMC).restype, LLVMInitializePowerPCTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeRISCVTargetMC:=dll.LLVMInitializeRISCVTargetMC).restype, LLVMInitializeRISCVTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSparcTargetMC:=dll.LLVMInitializeSparcTargetMC).restype, LLVMInitializeSparcTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSPIRVTargetMC:=dll.LLVMInitializeSPIRVTargetMC).restype, LLVMInitializeSPIRVTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSystemZTargetMC:=dll.LLVMInitializeSystemZTargetMC).restype, LLVMInitializeSystemZTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeVETargetMC:=dll.LLVMInitializeVETargetMC).restype, LLVMInitializeVETargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeWebAssemblyTargetMC:=dll.LLVMInitializeWebAssemblyTargetMC).restype, LLVMInitializeWebAssemblyTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeX86TargetMC:=dll.LLVMInitializeX86TargetMC).restype, LLVMInitializeX86TargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeXCoreTargetMC:=dll.LLVMInitializeXCoreTargetMC).restype, LLVMInitializeXCoreTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeM68kTargetMC:=dll.LLVMInitializeM68kTargetMC).restype, LLVMInitializeM68kTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeXtensaTargetMC:=dll.LLVMInitializeXtensaTargetMC).restype, LLVMInitializeXtensaTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAArch64AsmPrinter:=dll.LLVMInitializeAArch64AsmPrinter).restype, LLVMInitializeAArch64AsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAMDGPUAsmPrinter:=dll.LLVMInitializeAMDGPUAsmPrinter).restype, LLVMInitializeAMDGPUAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeARMAsmPrinter:=dll.LLVMInitializeARMAsmPrinter).restype, LLVMInitializeARMAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAVRAsmPrinter:=dll.LLVMInitializeAVRAsmPrinter).restype, LLVMInitializeAVRAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeBPFAsmPrinter:=dll.LLVMInitializeBPFAsmPrinter).restype, LLVMInitializeBPFAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeHexagonAsmPrinter:=dll.LLVMInitializeHexagonAsmPrinter).restype, LLVMInitializeHexagonAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeLanaiAsmPrinter:=dll.LLVMInitializeLanaiAsmPrinter).restype, LLVMInitializeLanaiAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeLoongArchAsmPrinter:=dll.LLVMInitializeLoongArchAsmPrinter).restype, LLVMInitializeLoongArchAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeMipsAsmPrinter:=dll.LLVMInitializeMipsAsmPrinter).restype, LLVMInitializeMipsAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeMSP430AsmPrinter:=dll.LLVMInitializeMSP430AsmPrinter).restype, LLVMInitializeMSP430AsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeNVPTXAsmPrinter:=dll.LLVMInitializeNVPTXAsmPrinter).restype, LLVMInitializeNVPTXAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializePowerPCAsmPrinter:=dll.LLVMInitializePowerPCAsmPrinter).restype, LLVMInitializePowerPCAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeRISCVAsmPrinter:=dll.LLVMInitializeRISCVAsmPrinter).restype, LLVMInitializeRISCVAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSparcAsmPrinter:=dll.LLVMInitializeSparcAsmPrinter).restype, LLVMInitializeSparcAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSPIRVAsmPrinter:=dll.LLVMInitializeSPIRVAsmPrinter).restype, LLVMInitializeSPIRVAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSystemZAsmPrinter:=dll.LLVMInitializeSystemZAsmPrinter).restype, LLVMInitializeSystemZAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeVEAsmPrinter:=dll.LLVMInitializeVEAsmPrinter).restype, LLVMInitializeVEAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeWebAssemblyAsmPrinter:=dll.LLVMInitializeWebAssemblyAsmPrinter).restype, LLVMInitializeWebAssemblyAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeX86AsmPrinter:=dll.LLVMInitializeX86AsmPrinter).restype, LLVMInitializeX86AsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeXCoreAsmPrinter:=dll.LLVMInitializeXCoreAsmPrinter).restype, LLVMInitializeXCoreAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeM68kAsmPrinter:=dll.LLVMInitializeM68kAsmPrinter).restype, LLVMInitializeM68kAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeXtensaAsmPrinter:=dll.LLVMInitializeXtensaAsmPrinter).restype, LLVMInitializeXtensaAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAArch64AsmParser:=dll.LLVMInitializeAArch64AsmParser).restype, LLVMInitializeAArch64AsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAMDGPUAsmParser:=dll.LLVMInitializeAMDGPUAsmParser).restype, LLVMInitializeAMDGPUAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeARMAsmParser:=dll.LLVMInitializeARMAsmParser).restype, LLVMInitializeARMAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAVRAsmParser:=dll.LLVMInitializeAVRAsmParser).restype, LLVMInitializeAVRAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeBPFAsmParser:=dll.LLVMInitializeBPFAsmParser).restype, LLVMInitializeBPFAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeHexagonAsmParser:=dll.LLVMInitializeHexagonAsmParser).restype, LLVMInitializeHexagonAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeLanaiAsmParser:=dll.LLVMInitializeLanaiAsmParser).restype, LLVMInitializeLanaiAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeLoongArchAsmParser:=dll.LLVMInitializeLoongArchAsmParser).restype, LLVMInitializeLoongArchAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeMipsAsmParser:=dll.LLVMInitializeMipsAsmParser).restype, LLVMInitializeMipsAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeMSP430AsmParser:=dll.LLVMInitializeMSP430AsmParser).restype, LLVMInitializeMSP430AsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializePowerPCAsmParser:=dll.LLVMInitializePowerPCAsmParser).restype, LLVMInitializePowerPCAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeRISCVAsmParser:=dll.LLVMInitializeRISCVAsmParser).restype, LLVMInitializeRISCVAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSparcAsmParser:=dll.LLVMInitializeSparcAsmParser).restype, LLVMInitializeSparcAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSystemZAsmParser:=dll.LLVMInitializeSystemZAsmParser).restype, LLVMInitializeSystemZAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeVEAsmParser:=dll.LLVMInitializeVEAsmParser).restype, LLVMInitializeVEAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeWebAssemblyAsmParser:=dll.LLVMInitializeWebAssemblyAsmParser).restype, LLVMInitializeWebAssemblyAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeX86AsmParser:=dll.LLVMInitializeX86AsmParser).restype, LLVMInitializeX86AsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeM68kAsmParser:=dll.LLVMInitializeM68kAsmParser).restype, LLVMInitializeM68kAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeXtensaAsmParser:=dll.LLVMInitializeXtensaAsmParser).restype, LLVMInitializeXtensaAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAArch64Disassembler:=dll.LLVMInitializeAArch64Disassembler).restype, LLVMInitializeAArch64Disassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAMDGPUDisassembler:=dll.LLVMInitializeAMDGPUDisassembler).restype, LLVMInitializeAMDGPUDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeARMDisassembler:=dll.LLVMInitializeARMDisassembler).restype, LLVMInitializeARMDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAVRDisassembler:=dll.LLVMInitializeAVRDisassembler).restype, LLVMInitializeAVRDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeBPFDisassembler:=dll.LLVMInitializeBPFDisassembler).restype, LLVMInitializeBPFDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeHexagonDisassembler:=dll.LLVMInitializeHexagonDisassembler).restype, LLVMInitializeHexagonDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeLanaiDisassembler:=dll.LLVMInitializeLanaiDisassembler).restype, LLVMInitializeLanaiDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeLoongArchDisassembler:=dll.LLVMInitializeLoongArchDisassembler).restype, LLVMInitializeLoongArchDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeMipsDisassembler:=dll.LLVMInitializeMipsDisassembler).restype, LLVMInitializeMipsDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeMSP430Disassembler:=dll.LLVMInitializeMSP430Disassembler).restype, LLVMInitializeMSP430Disassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializePowerPCDisassembler:=dll.LLVMInitializePowerPCDisassembler).restype, LLVMInitializePowerPCDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeRISCVDisassembler:=dll.LLVMInitializeRISCVDisassembler).restype, LLVMInitializeRISCVDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSparcDisassembler:=dll.LLVMInitializeSparcDisassembler).restype, LLVMInitializeSparcDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSystemZDisassembler:=dll.LLVMInitializeSystemZDisassembler).restype, LLVMInitializeSystemZDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeVEDisassembler:=dll.LLVMInitializeVEDisassembler).restype, LLVMInitializeVEDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeWebAssemblyDisassembler:=dll.LLVMInitializeWebAssemblyDisassembler).restype, LLVMInitializeWebAssemblyDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeX86Disassembler:=dll.LLVMInitializeX86Disassembler).restype, LLVMInitializeX86Disassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeXCoreDisassembler:=dll.LLVMInitializeXCoreDisassembler).restype, LLVMInitializeXCoreDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeM68kDisassembler:=dll.LLVMInitializeM68kDisassembler).restype, LLVMInitializeM68kDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeXtensaDisassembler:=dll.LLVMInitializeXtensaDisassembler).restype, LLVMInitializeXtensaDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMGetModuleDataLayout:=dll.LLVMGetModuleDataLayout).restype, LLVMGetModuleDataLayout.argtypes = LLVMTargetDataRef, [LLVMModuleRef]
-except AttributeError: pass
-
-try: (LLVMSetModuleDataLayout:=dll.LLVMSetModuleDataLayout).restype, LLVMSetModuleDataLayout.argtypes = None, [LLVMModuleRef, LLVMTargetDataRef]
-except AttributeError: pass
-
-try: (LLVMCreateTargetData:=dll.LLVMCreateTargetData).restype, LLVMCreateTargetData.argtypes = LLVMTargetDataRef, [ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMDisposeTargetData:=dll.LLVMDisposeTargetData).restype, LLVMDisposeTargetData.argtypes = None, [LLVMTargetDataRef]
-except AttributeError: pass
-
-try: (LLVMAddTargetLibraryInfo:=dll.LLVMAddTargetLibraryInfo).restype, LLVMAddTargetLibraryInfo.argtypes = None, [LLVMTargetLibraryInfoRef, LLVMPassManagerRef]
-except AttributeError: pass
-
-try: (LLVMCopyStringRepOfTargetData:=dll.LLVMCopyStringRepOfTargetData).restype, LLVMCopyStringRepOfTargetData.argtypes = ctypes.POINTER(ctypes.c_char), [LLVMTargetDataRef]
-except AttributeError: pass
-
-try: (LLVMByteOrder:=dll.LLVMByteOrder).restype, LLVMByteOrder.argtypes = enum_LLVMByteOrdering, [LLVMTargetDataRef]
-except AttributeError: pass
-
-try: (LLVMPointerSize:=dll.LLVMPointerSize).restype, LLVMPointerSize.argtypes = ctypes.c_uint32, [LLVMTargetDataRef]
-except AttributeError: pass
-
-try: (LLVMPointerSizeForAS:=dll.LLVMPointerSizeForAS).restype, LLVMPointerSizeForAS.argtypes = ctypes.c_uint32, [LLVMTargetDataRef, ctypes.c_uint32]
-except AttributeError: pass
-
-try: (LLVMIntPtrType:=dll.LLVMIntPtrType).restype, LLVMIntPtrType.argtypes = LLVMTypeRef, [LLVMTargetDataRef]
-except AttributeError: pass
-
-try: (LLVMIntPtrTypeForAS:=dll.LLVMIntPtrTypeForAS).restype, LLVMIntPtrTypeForAS.argtypes = LLVMTypeRef, [LLVMTargetDataRef, ctypes.c_uint32]
-except AttributeError: pass
-
-try: (LLVMIntPtrTypeInContext:=dll.LLVMIntPtrTypeInContext).restype, LLVMIntPtrTypeInContext.argtypes = LLVMTypeRef, [LLVMContextRef, LLVMTargetDataRef]
-except AttributeError: pass
-
-try: (LLVMIntPtrTypeForASInContext:=dll.LLVMIntPtrTypeForASInContext).restype, LLVMIntPtrTypeForASInContext.argtypes = LLVMTypeRef, [LLVMContextRef, LLVMTargetDataRef, ctypes.c_uint32]
-except AttributeError: pass
-
-try: (LLVMSizeOfTypeInBits:=dll.LLVMSizeOfTypeInBits).restype, LLVMSizeOfTypeInBits.argtypes = ctypes.c_uint64, [LLVMTargetDataRef, LLVMTypeRef]
-except AttributeError: pass
-
-try: (LLVMStoreSizeOfType:=dll.LLVMStoreSizeOfType).restype, LLVMStoreSizeOfType.argtypes = ctypes.c_uint64, [LLVMTargetDataRef, LLVMTypeRef]
-except AttributeError: pass
-
-try: (LLVMABISizeOfType:=dll.LLVMABISizeOfType).restype, LLVMABISizeOfType.argtypes = ctypes.c_uint64, [LLVMTargetDataRef, LLVMTypeRef]
-except AttributeError: pass
-
-try: (LLVMABIAlignmentOfType:=dll.LLVMABIAlignmentOfType).restype, LLVMABIAlignmentOfType.argtypes = ctypes.c_uint32, [LLVMTargetDataRef, LLVMTypeRef]
-except AttributeError: pass
-
-try: (LLVMCallFrameAlignmentOfType:=dll.LLVMCallFrameAlignmentOfType).restype, LLVMCallFrameAlignmentOfType.argtypes = ctypes.c_uint32, [LLVMTargetDataRef, LLVMTypeRef]
-except AttributeError: pass
-
-try: (LLVMPreferredAlignmentOfType:=dll.LLVMPreferredAlignmentOfType).restype, LLVMPreferredAlignmentOfType.argtypes = ctypes.c_uint32, [LLVMTargetDataRef, LLVMTypeRef]
-except AttributeError: pass
-
-try: (LLVMPreferredAlignmentOfGlobal:=dll.LLVMPreferredAlignmentOfGlobal).restype, LLVMPreferredAlignmentOfGlobal.argtypes = ctypes.c_uint32, [LLVMTargetDataRef, LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMElementAtOffset:=dll.LLVMElementAtOffset).restype, LLVMElementAtOffset.argtypes = ctypes.c_uint32, [LLVMTargetDataRef, LLVMTypeRef, ctypes.c_uint64]
-except AttributeError: pass
-
-try: (LLVMOffsetOfElement:=dll.LLVMOffsetOfElement).restype, LLVMOffsetOfElement.argtypes = ctypes.c_uint64, [LLVMTargetDataRef, LLVMTypeRef, ctypes.c_uint32]
-except AttributeError: pass
-
-try: (imaxabs:=dll.imaxabs).restype, imaxabs.argtypes = intmax_t, [intmax_t]
-except AttributeError: pass
-
-try: (imaxdiv:=dll.imaxdiv).restype, imaxdiv.argtypes = imaxdiv_t, [intmax_t, intmax_t]
-except AttributeError: pass
-
-try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (select:=dll.select).restype, select.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timeval)]
-except AttributeError: pass
-
-try: (pselect:=dll.pselect).restype, pselect.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timespec), ctypes.POINTER(__sigset_t)]
-except AttributeError: pass
-
-try: (LLVMInitializeAArch64TargetInfo:=dll.LLVMInitializeAArch64TargetInfo).restype, LLVMInitializeAArch64TargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAMDGPUTargetInfo:=dll.LLVMInitializeAMDGPUTargetInfo).restype, LLVMInitializeAMDGPUTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeARMTargetInfo:=dll.LLVMInitializeARMTargetInfo).restype, LLVMInitializeARMTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAVRTargetInfo:=dll.LLVMInitializeAVRTargetInfo).restype, LLVMInitializeAVRTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeBPFTargetInfo:=dll.LLVMInitializeBPFTargetInfo).restype, LLVMInitializeBPFTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeHexagonTargetInfo:=dll.LLVMInitializeHexagonTargetInfo).restype, LLVMInitializeHexagonTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeLanaiTargetInfo:=dll.LLVMInitializeLanaiTargetInfo).restype, LLVMInitializeLanaiTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeLoongArchTargetInfo:=dll.LLVMInitializeLoongArchTargetInfo).restype, LLVMInitializeLoongArchTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeMipsTargetInfo:=dll.LLVMInitializeMipsTargetInfo).restype, LLVMInitializeMipsTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeMSP430TargetInfo:=dll.LLVMInitializeMSP430TargetInfo).restype, LLVMInitializeMSP430TargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeNVPTXTargetInfo:=dll.LLVMInitializeNVPTXTargetInfo).restype, LLVMInitializeNVPTXTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializePowerPCTargetInfo:=dll.LLVMInitializePowerPCTargetInfo).restype, LLVMInitializePowerPCTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeRISCVTargetInfo:=dll.LLVMInitializeRISCVTargetInfo).restype, LLVMInitializeRISCVTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSparcTargetInfo:=dll.LLVMInitializeSparcTargetInfo).restype, LLVMInitializeSparcTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSPIRVTargetInfo:=dll.LLVMInitializeSPIRVTargetInfo).restype, LLVMInitializeSPIRVTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSystemZTargetInfo:=dll.LLVMInitializeSystemZTargetInfo).restype, LLVMInitializeSystemZTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeVETargetInfo:=dll.LLVMInitializeVETargetInfo).restype, LLVMInitializeVETargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeWebAssemblyTargetInfo:=dll.LLVMInitializeWebAssemblyTargetInfo).restype, LLVMInitializeWebAssemblyTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeX86TargetInfo:=dll.LLVMInitializeX86TargetInfo).restype, LLVMInitializeX86TargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeXCoreTargetInfo:=dll.LLVMInitializeXCoreTargetInfo).restype, LLVMInitializeXCoreTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeM68kTargetInfo:=dll.LLVMInitializeM68kTargetInfo).restype, LLVMInitializeM68kTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeXtensaTargetInfo:=dll.LLVMInitializeXtensaTargetInfo).restype, LLVMInitializeXtensaTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAArch64Target:=dll.LLVMInitializeAArch64Target).restype, LLVMInitializeAArch64Target.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAMDGPUTarget:=dll.LLVMInitializeAMDGPUTarget).restype, LLVMInitializeAMDGPUTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeARMTarget:=dll.LLVMInitializeARMTarget).restype, LLVMInitializeARMTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAVRTarget:=dll.LLVMInitializeAVRTarget).restype, LLVMInitializeAVRTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeBPFTarget:=dll.LLVMInitializeBPFTarget).restype, LLVMInitializeBPFTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeHexagonTarget:=dll.LLVMInitializeHexagonTarget).restype, LLVMInitializeHexagonTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeLanaiTarget:=dll.LLVMInitializeLanaiTarget).restype, LLVMInitializeLanaiTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeLoongArchTarget:=dll.LLVMInitializeLoongArchTarget).restype, LLVMInitializeLoongArchTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeMipsTarget:=dll.LLVMInitializeMipsTarget).restype, LLVMInitializeMipsTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeMSP430Target:=dll.LLVMInitializeMSP430Target).restype, LLVMInitializeMSP430Target.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeNVPTXTarget:=dll.LLVMInitializeNVPTXTarget).restype, LLVMInitializeNVPTXTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializePowerPCTarget:=dll.LLVMInitializePowerPCTarget).restype, LLVMInitializePowerPCTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeRISCVTarget:=dll.LLVMInitializeRISCVTarget).restype, LLVMInitializeRISCVTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSparcTarget:=dll.LLVMInitializeSparcTarget).restype, LLVMInitializeSparcTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSPIRVTarget:=dll.LLVMInitializeSPIRVTarget).restype, LLVMInitializeSPIRVTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSystemZTarget:=dll.LLVMInitializeSystemZTarget).restype, LLVMInitializeSystemZTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeVETarget:=dll.LLVMInitializeVETarget).restype, LLVMInitializeVETarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeWebAssemblyTarget:=dll.LLVMInitializeWebAssemblyTarget).restype, LLVMInitializeWebAssemblyTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeX86Target:=dll.LLVMInitializeX86Target).restype, LLVMInitializeX86Target.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeXCoreTarget:=dll.LLVMInitializeXCoreTarget).restype, LLVMInitializeXCoreTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeM68kTarget:=dll.LLVMInitializeM68kTarget).restype, LLVMInitializeM68kTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeXtensaTarget:=dll.LLVMInitializeXtensaTarget).restype, LLVMInitializeXtensaTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAArch64TargetMC:=dll.LLVMInitializeAArch64TargetMC).restype, LLVMInitializeAArch64TargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAMDGPUTargetMC:=dll.LLVMInitializeAMDGPUTargetMC).restype, LLVMInitializeAMDGPUTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeARMTargetMC:=dll.LLVMInitializeARMTargetMC).restype, LLVMInitializeARMTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAVRTargetMC:=dll.LLVMInitializeAVRTargetMC).restype, LLVMInitializeAVRTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeBPFTargetMC:=dll.LLVMInitializeBPFTargetMC).restype, LLVMInitializeBPFTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeHexagonTargetMC:=dll.LLVMInitializeHexagonTargetMC).restype, LLVMInitializeHexagonTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeLanaiTargetMC:=dll.LLVMInitializeLanaiTargetMC).restype, LLVMInitializeLanaiTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeLoongArchTargetMC:=dll.LLVMInitializeLoongArchTargetMC).restype, LLVMInitializeLoongArchTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeMipsTargetMC:=dll.LLVMInitializeMipsTargetMC).restype, LLVMInitializeMipsTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeMSP430TargetMC:=dll.LLVMInitializeMSP430TargetMC).restype, LLVMInitializeMSP430TargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeNVPTXTargetMC:=dll.LLVMInitializeNVPTXTargetMC).restype, LLVMInitializeNVPTXTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializePowerPCTargetMC:=dll.LLVMInitializePowerPCTargetMC).restype, LLVMInitializePowerPCTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeRISCVTargetMC:=dll.LLVMInitializeRISCVTargetMC).restype, LLVMInitializeRISCVTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSparcTargetMC:=dll.LLVMInitializeSparcTargetMC).restype, LLVMInitializeSparcTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSPIRVTargetMC:=dll.LLVMInitializeSPIRVTargetMC).restype, LLVMInitializeSPIRVTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSystemZTargetMC:=dll.LLVMInitializeSystemZTargetMC).restype, LLVMInitializeSystemZTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeVETargetMC:=dll.LLVMInitializeVETargetMC).restype, LLVMInitializeVETargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeWebAssemblyTargetMC:=dll.LLVMInitializeWebAssemblyTargetMC).restype, LLVMInitializeWebAssemblyTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeX86TargetMC:=dll.LLVMInitializeX86TargetMC).restype, LLVMInitializeX86TargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeXCoreTargetMC:=dll.LLVMInitializeXCoreTargetMC).restype, LLVMInitializeXCoreTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeM68kTargetMC:=dll.LLVMInitializeM68kTargetMC).restype, LLVMInitializeM68kTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeXtensaTargetMC:=dll.LLVMInitializeXtensaTargetMC).restype, LLVMInitializeXtensaTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAArch64AsmPrinter:=dll.LLVMInitializeAArch64AsmPrinter).restype, LLVMInitializeAArch64AsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAMDGPUAsmPrinter:=dll.LLVMInitializeAMDGPUAsmPrinter).restype, LLVMInitializeAMDGPUAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeARMAsmPrinter:=dll.LLVMInitializeARMAsmPrinter).restype, LLVMInitializeARMAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAVRAsmPrinter:=dll.LLVMInitializeAVRAsmPrinter).restype, LLVMInitializeAVRAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeBPFAsmPrinter:=dll.LLVMInitializeBPFAsmPrinter).restype, LLVMInitializeBPFAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeHexagonAsmPrinter:=dll.LLVMInitializeHexagonAsmPrinter).restype, LLVMInitializeHexagonAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeLanaiAsmPrinter:=dll.LLVMInitializeLanaiAsmPrinter).restype, LLVMInitializeLanaiAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeLoongArchAsmPrinter:=dll.LLVMInitializeLoongArchAsmPrinter).restype, LLVMInitializeLoongArchAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeMipsAsmPrinter:=dll.LLVMInitializeMipsAsmPrinter).restype, LLVMInitializeMipsAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeMSP430AsmPrinter:=dll.LLVMInitializeMSP430AsmPrinter).restype, LLVMInitializeMSP430AsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeNVPTXAsmPrinter:=dll.LLVMInitializeNVPTXAsmPrinter).restype, LLVMInitializeNVPTXAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializePowerPCAsmPrinter:=dll.LLVMInitializePowerPCAsmPrinter).restype, LLVMInitializePowerPCAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeRISCVAsmPrinter:=dll.LLVMInitializeRISCVAsmPrinter).restype, LLVMInitializeRISCVAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSparcAsmPrinter:=dll.LLVMInitializeSparcAsmPrinter).restype, LLVMInitializeSparcAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSPIRVAsmPrinter:=dll.LLVMInitializeSPIRVAsmPrinter).restype, LLVMInitializeSPIRVAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSystemZAsmPrinter:=dll.LLVMInitializeSystemZAsmPrinter).restype, LLVMInitializeSystemZAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeVEAsmPrinter:=dll.LLVMInitializeVEAsmPrinter).restype, LLVMInitializeVEAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeWebAssemblyAsmPrinter:=dll.LLVMInitializeWebAssemblyAsmPrinter).restype, LLVMInitializeWebAssemblyAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeX86AsmPrinter:=dll.LLVMInitializeX86AsmPrinter).restype, LLVMInitializeX86AsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeXCoreAsmPrinter:=dll.LLVMInitializeXCoreAsmPrinter).restype, LLVMInitializeXCoreAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeM68kAsmPrinter:=dll.LLVMInitializeM68kAsmPrinter).restype, LLVMInitializeM68kAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeXtensaAsmPrinter:=dll.LLVMInitializeXtensaAsmPrinter).restype, LLVMInitializeXtensaAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAArch64AsmParser:=dll.LLVMInitializeAArch64AsmParser).restype, LLVMInitializeAArch64AsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAMDGPUAsmParser:=dll.LLVMInitializeAMDGPUAsmParser).restype, LLVMInitializeAMDGPUAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeARMAsmParser:=dll.LLVMInitializeARMAsmParser).restype, LLVMInitializeARMAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAVRAsmParser:=dll.LLVMInitializeAVRAsmParser).restype, LLVMInitializeAVRAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeBPFAsmParser:=dll.LLVMInitializeBPFAsmParser).restype, LLVMInitializeBPFAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeHexagonAsmParser:=dll.LLVMInitializeHexagonAsmParser).restype, LLVMInitializeHexagonAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeLanaiAsmParser:=dll.LLVMInitializeLanaiAsmParser).restype, LLVMInitializeLanaiAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeLoongArchAsmParser:=dll.LLVMInitializeLoongArchAsmParser).restype, LLVMInitializeLoongArchAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeMipsAsmParser:=dll.LLVMInitializeMipsAsmParser).restype, LLVMInitializeMipsAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeMSP430AsmParser:=dll.LLVMInitializeMSP430AsmParser).restype, LLVMInitializeMSP430AsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializePowerPCAsmParser:=dll.LLVMInitializePowerPCAsmParser).restype, LLVMInitializePowerPCAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeRISCVAsmParser:=dll.LLVMInitializeRISCVAsmParser).restype, LLVMInitializeRISCVAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSparcAsmParser:=dll.LLVMInitializeSparcAsmParser).restype, LLVMInitializeSparcAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSystemZAsmParser:=dll.LLVMInitializeSystemZAsmParser).restype, LLVMInitializeSystemZAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeVEAsmParser:=dll.LLVMInitializeVEAsmParser).restype, LLVMInitializeVEAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeWebAssemblyAsmParser:=dll.LLVMInitializeWebAssemblyAsmParser).restype, LLVMInitializeWebAssemblyAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeX86AsmParser:=dll.LLVMInitializeX86AsmParser).restype, LLVMInitializeX86AsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeM68kAsmParser:=dll.LLVMInitializeM68kAsmParser).restype, LLVMInitializeM68kAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeXtensaAsmParser:=dll.LLVMInitializeXtensaAsmParser).restype, LLVMInitializeXtensaAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAArch64Disassembler:=dll.LLVMInitializeAArch64Disassembler).restype, LLVMInitializeAArch64Disassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAMDGPUDisassembler:=dll.LLVMInitializeAMDGPUDisassembler).restype, LLVMInitializeAMDGPUDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeARMDisassembler:=dll.LLVMInitializeARMDisassembler).restype, LLVMInitializeARMDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAVRDisassembler:=dll.LLVMInitializeAVRDisassembler).restype, LLVMInitializeAVRDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeBPFDisassembler:=dll.LLVMInitializeBPFDisassembler).restype, LLVMInitializeBPFDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeHexagonDisassembler:=dll.LLVMInitializeHexagonDisassembler).restype, LLVMInitializeHexagonDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeLanaiDisassembler:=dll.LLVMInitializeLanaiDisassembler).restype, LLVMInitializeLanaiDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeLoongArchDisassembler:=dll.LLVMInitializeLoongArchDisassembler).restype, LLVMInitializeLoongArchDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeMipsDisassembler:=dll.LLVMInitializeMipsDisassembler).restype, LLVMInitializeMipsDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeMSP430Disassembler:=dll.LLVMInitializeMSP430Disassembler).restype, LLVMInitializeMSP430Disassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializePowerPCDisassembler:=dll.LLVMInitializePowerPCDisassembler).restype, LLVMInitializePowerPCDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeRISCVDisassembler:=dll.LLVMInitializeRISCVDisassembler).restype, LLVMInitializeRISCVDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSparcDisassembler:=dll.LLVMInitializeSparcDisassembler).restype, LLVMInitializeSparcDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSystemZDisassembler:=dll.LLVMInitializeSystemZDisassembler).restype, LLVMInitializeSystemZDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeVEDisassembler:=dll.LLVMInitializeVEDisassembler).restype, LLVMInitializeVEDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeWebAssemblyDisassembler:=dll.LLVMInitializeWebAssemblyDisassembler).restype, LLVMInitializeWebAssemblyDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeX86Disassembler:=dll.LLVMInitializeX86Disassembler).restype, LLVMInitializeX86Disassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeXCoreDisassembler:=dll.LLVMInitializeXCoreDisassembler).restype, LLVMInitializeXCoreDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeM68kDisassembler:=dll.LLVMInitializeM68kDisassembler).restype, LLVMInitializeM68kDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeXtensaDisassembler:=dll.LLVMInitializeXtensaDisassembler).restype, LLVMInitializeXtensaDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMGetModuleDataLayout:=dll.LLVMGetModuleDataLayout).restype, LLVMGetModuleDataLayout.argtypes = LLVMTargetDataRef, [LLVMModuleRef]
-except AttributeError: pass
-
-try: (LLVMSetModuleDataLayout:=dll.LLVMSetModuleDataLayout).restype, LLVMSetModuleDataLayout.argtypes = None, [LLVMModuleRef, LLVMTargetDataRef]
-except AttributeError: pass
-
-try: (LLVMCreateTargetData:=dll.LLVMCreateTargetData).restype, LLVMCreateTargetData.argtypes = LLVMTargetDataRef, [ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMDisposeTargetData:=dll.LLVMDisposeTargetData).restype, LLVMDisposeTargetData.argtypes = None, [LLVMTargetDataRef]
-except AttributeError: pass
-
-try: (LLVMAddTargetLibraryInfo:=dll.LLVMAddTargetLibraryInfo).restype, LLVMAddTargetLibraryInfo.argtypes = None, [LLVMTargetLibraryInfoRef, LLVMPassManagerRef]
-except AttributeError: pass
-
-try: (LLVMCopyStringRepOfTargetData:=dll.LLVMCopyStringRepOfTargetData).restype, LLVMCopyStringRepOfTargetData.argtypes = ctypes.POINTER(ctypes.c_char), [LLVMTargetDataRef]
-except AttributeError: pass
-
-try: (LLVMByteOrder:=dll.LLVMByteOrder).restype, LLVMByteOrder.argtypes = enum_LLVMByteOrdering, [LLVMTargetDataRef]
-except AttributeError: pass
-
-try: (LLVMPointerSize:=dll.LLVMPointerSize).restype, LLVMPointerSize.argtypes = ctypes.c_uint32, [LLVMTargetDataRef]
-except AttributeError: pass
-
-try: (LLVMPointerSizeForAS:=dll.LLVMPointerSizeForAS).restype, LLVMPointerSizeForAS.argtypes = ctypes.c_uint32, [LLVMTargetDataRef, ctypes.c_uint32]
-except AttributeError: pass
-
-try: (LLVMIntPtrType:=dll.LLVMIntPtrType).restype, LLVMIntPtrType.argtypes = LLVMTypeRef, [LLVMTargetDataRef]
-except AttributeError: pass
-
-try: (LLVMIntPtrTypeForAS:=dll.LLVMIntPtrTypeForAS).restype, LLVMIntPtrTypeForAS.argtypes = LLVMTypeRef, [LLVMTargetDataRef, ctypes.c_uint32]
-except AttributeError: pass
-
-try: (LLVMIntPtrTypeInContext:=dll.LLVMIntPtrTypeInContext).restype, LLVMIntPtrTypeInContext.argtypes = LLVMTypeRef, [LLVMContextRef, LLVMTargetDataRef]
-except AttributeError: pass
-
-try: (LLVMIntPtrTypeForASInContext:=dll.LLVMIntPtrTypeForASInContext).restype, LLVMIntPtrTypeForASInContext.argtypes = LLVMTypeRef, [LLVMContextRef, LLVMTargetDataRef, ctypes.c_uint32]
-except AttributeError: pass
-
-try: (LLVMSizeOfTypeInBits:=dll.LLVMSizeOfTypeInBits).restype, LLVMSizeOfTypeInBits.argtypes = ctypes.c_uint64, [LLVMTargetDataRef, LLVMTypeRef]
-except AttributeError: pass
-
-try: (LLVMStoreSizeOfType:=dll.LLVMStoreSizeOfType).restype, LLVMStoreSizeOfType.argtypes = ctypes.c_uint64, [LLVMTargetDataRef, LLVMTypeRef]
-except AttributeError: pass
-
-try: (LLVMABISizeOfType:=dll.LLVMABISizeOfType).restype, LLVMABISizeOfType.argtypes = ctypes.c_uint64, [LLVMTargetDataRef, LLVMTypeRef]
-except AttributeError: pass
-
-try: (LLVMABIAlignmentOfType:=dll.LLVMABIAlignmentOfType).restype, LLVMABIAlignmentOfType.argtypes = ctypes.c_uint32, [LLVMTargetDataRef, LLVMTypeRef]
-except AttributeError: pass
-
-try: (LLVMCallFrameAlignmentOfType:=dll.LLVMCallFrameAlignmentOfType).restype, LLVMCallFrameAlignmentOfType.argtypes = ctypes.c_uint32, [LLVMTargetDataRef, LLVMTypeRef]
-except AttributeError: pass
-
-try: (LLVMPreferredAlignmentOfType:=dll.LLVMPreferredAlignmentOfType).restype, LLVMPreferredAlignmentOfType.argtypes = ctypes.c_uint32, [LLVMTargetDataRef, LLVMTypeRef]
-except AttributeError: pass
-
-try: (LLVMPreferredAlignmentOfGlobal:=dll.LLVMPreferredAlignmentOfGlobal).restype, LLVMPreferredAlignmentOfGlobal.argtypes = ctypes.c_uint32, [LLVMTargetDataRef, LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMElementAtOffset:=dll.LLVMElementAtOffset).restype, LLVMElementAtOffset.argtypes = ctypes.c_uint32, [LLVMTargetDataRef, LLVMTypeRef, ctypes.c_uint64]
-except AttributeError: pass
-
-try: (LLVMOffsetOfElement:=dll.LLVMOffsetOfElement).restype, LLVMOffsetOfElement.argtypes = ctypes.c_uint64, [LLVMTargetDataRef, LLVMTypeRef, ctypes.c_uint32]
-except AttributeError: pass
-
-try: (LLVMGetFirstTarget:=dll.LLVMGetFirstTarget).restype, LLVMGetFirstTarget.argtypes = LLVMTargetRef, []
-except AttributeError: pass
-
-try: (LLVMGetNextTarget:=dll.LLVMGetNextTarget).restype, LLVMGetNextTarget.argtypes = LLVMTargetRef, [LLVMTargetRef]
-except AttributeError: pass
-
-try: (LLVMGetTargetFromName:=dll.LLVMGetTargetFromName).restype, LLVMGetTargetFromName.argtypes = LLVMTargetRef, [ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMGetTargetFromTriple:=dll.LLVMGetTargetFromTriple).restype, LLVMGetTargetFromTriple.argtypes = LLVMBool, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(LLVMTargetRef), ctypes.POINTER(ctypes.POINTER(ctypes.c_char))]
-except AttributeError: pass
-
-try: (LLVMGetTargetName:=dll.LLVMGetTargetName).restype, LLVMGetTargetName.argtypes = ctypes.POINTER(ctypes.c_char), [LLVMTargetRef]
-except AttributeError: pass
-
-try: (LLVMGetTargetDescription:=dll.LLVMGetTargetDescription).restype, LLVMGetTargetDescription.argtypes = ctypes.POINTER(ctypes.c_char), [LLVMTargetRef]
-except AttributeError: pass
-
-try: (LLVMTargetHasJIT:=dll.LLVMTargetHasJIT).restype, LLVMTargetHasJIT.argtypes = LLVMBool, [LLVMTargetRef]
-except AttributeError: pass
-
-try: (LLVMTargetHasTargetMachine:=dll.LLVMTargetHasTargetMachine).restype, LLVMTargetHasTargetMachine.argtypes = LLVMBool, [LLVMTargetRef]
-except AttributeError: pass
-
-try: (LLVMTargetHasAsmBackend:=dll.LLVMTargetHasAsmBackend).restype, LLVMTargetHasAsmBackend.argtypes = LLVMBool, [LLVMTargetRef]
-except AttributeError: pass
-
-try: (LLVMCreateTargetMachineOptions:=dll.LLVMCreateTargetMachineOptions).restype, LLVMCreateTargetMachineOptions.argtypes = LLVMTargetMachineOptionsRef, []
-except AttributeError: pass
-
-try: (LLVMDisposeTargetMachineOptions:=dll.LLVMDisposeTargetMachineOptions).restype, LLVMDisposeTargetMachineOptions.argtypes = None, [LLVMTargetMachineOptionsRef]
-except AttributeError: pass
-
-try: (LLVMTargetMachineOptionsSetCPU:=dll.LLVMTargetMachineOptionsSetCPU).restype, LLVMTargetMachineOptionsSetCPU.argtypes = None, [LLVMTargetMachineOptionsRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMTargetMachineOptionsSetFeatures:=dll.LLVMTargetMachineOptionsSetFeatures).restype, LLVMTargetMachineOptionsSetFeatures.argtypes = None, [LLVMTargetMachineOptionsRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMTargetMachineOptionsSetABI:=dll.LLVMTargetMachineOptionsSetABI).restype, LLVMTargetMachineOptionsSetABI.argtypes = None, [LLVMTargetMachineOptionsRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMTargetMachineOptionsSetCodeGenOptLevel:=dll.LLVMTargetMachineOptionsSetCodeGenOptLevel).restype, LLVMTargetMachineOptionsSetCodeGenOptLevel.argtypes = None, [LLVMTargetMachineOptionsRef, LLVMCodeGenOptLevel]
-except AttributeError: pass
-
-try: (LLVMTargetMachineOptionsSetRelocMode:=dll.LLVMTargetMachineOptionsSetRelocMode).restype, LLVMTargetMachineOptionsSetRelocMode.argtypes = None, [LLVMTargetMachineOptionsRef, LLVMRelocMode]
-except AttributeError: pass
-
-try: (LLVMTargetMachineOptionsSetCodeModel:=dll.LLVMTargetMachineOptionsSetCodeModel).restype, LLVMTargetMachineOptionsSetCodeModel.argtypes = None, [LLVMTargetMachineOptionsRef, LLVMCodeModel]
-except AttributeError: pass
-
-try: (LLVMCreateTargetMachineWithOptions:=dll.LLVMCreateTargetMachineWithOptions).restype, LLVMCreateTargetMachineWithOptions.argtypes = LLVMTargetMachineRef, [LLVMTargetRef, ctypes.POINTER(ctypes.c_char), LLVMTargetMachineOptionsRef]
-except AttributeError: pass
-
-try: (LLVMCreateTargetMachine:=dll.LLVMCreateTargetMachine).restype, LLVMCreateTargetMachine.argtypes = LLVMTargetMachineRef, [LLVMTargetRef, ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char), LLVMCodeGenOptLevel, LLVMRelocMode, LLVMCodeModel]
-except AttributeError: pass
-
-try: (LLVMDisposeTargetMachine:=dll.LLVMDisposeTargetMachine).restype, LLVMDisposeTargetMachine.argtypes = None, [LLVMTargetMachineRef]
-except AttributeError: pass
-
-try: (LLVMGetTargetMachineTarget:=dll.LLVMGetTargetMachineTarget).restype, LLVMGetTargetMachineTarget.argtypes = LLVMTargetRef, [LLVMTargetMachineRef]
-except AttributeError: pass
-
-try: (LLVMGetTargetMachineTriple:=dll.LLVMGetTargetMachineTriple).restype, LLVMGetTargetMachineTriple.argtypes = ctypes.POINTER(ctypes.c_char), [LLVMTargetMachineRef]
-except AttributeError: pass
-
-try: (LLVMGetTargetMachineCPU:=dll.LLVMGetTargetMachineCPU).restype, LLVMGetTargetMachineCPU.argtypes = ctypes.POINTER(ctypes.c_char), [LLVMTargetMachineRef]
-except AttributeError: pass
-
-try: (LLVMGetTargetMachineFeatureString:=dll.LLVMGetTargetMachineFeatureString).restype, LLVMGetTargetMachineFeatureString.argtypes = ctypes.POINTER(ctypes.c_char), [LLVMTargetMachineRef]
-except AttributeError: pass
-
-try: (LLVMCreateTargetDataLayout:=dll.LLVMCreateTargetDataLayout).restype, LLVMCreateTargetDataLayout.argtypes = LLVMTargetDataRef, [LLVMTargetMachineRef]
-except AttributeError: pass
-
-try: (LLVMSetTargetMachineAsmVerbosity:=dll.LLVMSetTargetMachineAsmVerbosity).restype, LLVMSetTargetMachineAsmVerbosity.argtypes = None, [LLVMTargetMachineRef, LLVMBool]
-except AttributeError: pass
-
-try: (LLVMSetTargetMachineFastISel:=dll.LLVMSetTargetMachineFastISel).restype, LLVMSetTargetMachineFastISel.argtypes = None, [LLVMTargetMachineRef, LLVMBool]
-except AttributeError: pass
-
-try: (LLVMSetTargetMachineGlobalISel:=dll.LLVMSetTargetMachineGlobalISel).restype, LLVMSetTargetMachineGlobalISel.argtypes = None, [LLVMTargetMachineRef, LLVMBool]
-except AttributeError: pass
-
-try: (LLVMSetTargetMachineGlobalISelAbort:=dll.LLVMSetTargetMachineGlobalISelAbort).restype, LLVMSetTargetMachineGlobalISelAbort.argtypes = None, [LLVMTargetMachineRef, LLVMGlobalISelAbortMode]
-except AttributeError: pass
-
-try: (LLVMSetTargetMachineMachineOutliner:=dll.LLVMSetTargetMachineMachineOutliner).restype, LLVMSetTargetMachineMachineOutliner.argtypes = None, [LLVMTargetMachineRef, LLVMBool]
-except AttributeError: pass
-
-try: (LLVMTargetMachineEmitToFile:=dll.LLVMTargetMachineEmitToFile).restype, LLVMTargetMachineEmitToFile.argtypes = LLVMBool, [LLVMTargetMachineRef, LLVMModuleRef, ctypes.POINTER(ctypes.c_char), LLVMCodeGenFileType, ctypes.POINTER(ctypes.POINTER(ctypes.c_char))]
-except AttributeError: pass
-
-try: (LLVMTargetMachineEmitToMemoryBuffer:=dll.LLVMTargetMachineEmitToMemoryBuffer).restype, LLVMTargetMachineEmitToMemoryBuffer.argtypes = LLVMBool, [LLVMTargetMachineRef, LLVMModuleRef, LLVMCodeGenFileType, ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.POINTER(LLVMMemoryBufferRef)]
-except AttributeError: pass
-
-try: (LLVMGetDefaultTargetTriple:=dll.LLVMGetDefaultTargetTriple).restype, LLVMGetDefaultTargetTriple.argtypes = ctypes.POINTER(ctypes.c_char), []
-except AttributeError: pass
-
-try: (LLVMNormalizeTargetTriple:=dll.LLVMNormalizeTargetTriple).restype, LLVMNormalizeTargetTriple.argtypes = ctypes.POINTER(ctypes.c_char), [ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMGetHostCPUName:=dll.LLVMGetHostCPUName).restype, LLVMGetHostCPUName.argtypes = ctypes.POINTER(ctypes.c_char), []
-except AttributeError: pass
-
-try: (LLVMGetHostCPUFeatures:=dll.LLVMGetHostCPUFeatures).restype, LLVMGetHostCPUFeatures.argtypes = ctypes.POINTER(ctypes.c_char), []
-except AttributeError: pass
-
-try: (LLVMAddAnalysisPasses:=dll.LLVMAddAnalysisPasses).restype, LLVMAddAnalysisPasses.argtypes = None, [LLVMTargetMachineRef, LLVMPassManagerRef]
-except AttributeError: pass
-
-try: (LLVMGetErrorTypeId:=dll.LLVMGetErrorTypeId).restype, LLVMGetErrorTypeId.argtypes = LLVMErrorTypeId, [LLVMErrorRef]
-except AttributeError: pass
-
-try: (LLVMConsumeError:=dll.LLVMConsumeError).restype, LLVMConsumeError.argtypes = None, [LLVMErrorRef]
-except AttributeError: pass
-
-try: (LLVMCantFail:=dll.LLVMCantFail).restype, LLVMCantFail.argtypes = None, [LLVMErrorRef]
-except AttributeError: pass
-
-try: (LLVMGetErrorMessage:=dll.LLVMGetErrorMessage).restype, LLVMGetErrorMessage.argtypes = ctypes.POINTER(ctypes.c_char), [LLVMErrorRef]
-except AttributeError: pass
-
-try: (LLVMDisposeErrorMessage:=dll.LLVMDisposeErrorMessage).restype, LLVMDisposeErrorMessage.argtypes = None, [ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMGetStringErrorTypeId:=dll.LLVMGetStringErrorTypeId).restype, LLVMGetStringErrorTypeId.argtypes = LLVMErrorTypeId, []
-except AttributeError: pass
-
-try: (LLVMCreateStringError:=dll.LLVMCreateStringError).restype, LLVMCreateStringError.argtypes = LLVMErrorRef, [ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (imaxabs:=dll.imaxabs).restype, imaxabs.argtypes = intmax_t, [intmax_t]
-except AttributeError: pass
-
-try: (imaxdiv:=dll.imaxdiv).restype, imaxdiv.argtypes = imaxdiv_t, [intmax_t, intmax_t]
-except AttributeError: pass
-
-try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (select:=dll.select).restype, select.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timeval)]
-except AttributeError: pass
-
-try: (pselect:=dll.pselect).restype, pselect.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timespec), ctypes.POINTER(__sigset_t)]
-except AttributeError: pass
-
-try: (LLVMInitializeAArch64TargetInfo:=dll.LLVMInitializeAArch64TargetInfo).restype, LLVMInitializeAArch64TargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAMDGPUTargetInfo:=dll.LLVMInitializeAMDGPUTargetInfo).restype, LLVMInitializeAMDGPUTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeARMTargetInfo:=dll.LLVMInitializeARMTargetInfo).restype, LLVMInitializeARMTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAVRTargetInfo:=dll.LLVMInitializeAVRTargetInfo).restype, LLVMInitializeAVRTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeBPFTargetInfo:=dll.LLVMInitializeBPFTargetInfo).restype, LLVMInitializeBPFTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeHexagonTargetInfo:=dll.LLVMInitializeHexagonTargetInfo).restype, LLVMInitializeHexagonTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeLanaiTargetInfo:=dll.LLVMInitializeLanaiTargetInfo).restype, LLVMInitializeLanaiTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeLoongArchTargetInfo:=dll.LLVMInitializeLoongArchTargetInfo).restype, LLVMInitializeLoongArchTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeMipsTargetInfo:=dll.LLVMInitializeMipsTargetInfo).restype, LLVMInitializeMipsTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeMSP430TargetInfo:=dll.LLVMInitializeMSP430TargetInfo).restype, LLVMInitializeMSP430TargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeNVPTXTargetInfo:=dll.LLVMInitializeNVPTXTargetInfo).restype, LLVMInitializeNVPTXTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializePowerPCTargetInfo:=dll.LLVMInitializePowerPCTargetInfo).restype, LLVMInitializePowerPCTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeRISCVTargetInfo:=dll.LLVMInitializeRISCVTargetInfo).restype, LLVMInitializeRISCVTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSparcTargetInfo:=dll.LLVMInitializeSparcTargetInfo).restype, LLVMInitializeSparcTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSPIRVTargetInfo:=dll.LLVMInitializeSPIRVTargetInfo).restype, LLVMInitializeSPIRVTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSystemZTargetInfo:=dll.LLVMInitializeSystemZTargetInfo).restype, LLVMInitializeSystemZTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeVETargetInfo:=dll.LLVMInitializeVETargetInfo).restype, LLVMInitializeVETargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeWebAssemblyTargetInfo:=dll.LLVMInitializeWebAssemblyTargetInfo).restype, LLVMInitializeWebAssemblyTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeX86TargetInfo:=dll.LLVMInitializeX86TargetInfo).restype, LLVMInitializeX86TargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeXCoreTargetInfo:=dll.LLVMInitializeXCoreTargetInfo).restype, LLVMInitializeXCoreTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeM68kTargetInfo:=dll.LLVMInitializeM68kTargetInfo).restype, LLVMInitializeM68kTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeXtensaTargetInfo:=dll.LLVMInitializeXtensaTargetInfo).restype, LLVMInitializeXtensaTargetInfo.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAArch64Target:=dll.LLVMInitializeAArch64Target).restype, LLVMInitializeAArch64Target.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAMDGPUTarget:=dll.LLVMInitializeAMDGPUTarget).restype, LLVMInitializeAMDGPUTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeARMTarget:=dll.LLVMInitializeARMTarget).restype, LLVMInitializeARMTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAVRTarget:=dll.LLVMInitializeAVRTarget).restype, LLVMInitializeAVRTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeBPFTarget:=dll.LLVMInitializeBPFTarget).restype, LLVMInitializeBPFTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeHexagonTarget:=dll.LLVMInitializeHexagonTarget).restype, LLVMInitializeHexagonTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeLanaiTarget:=dll.LLVMInitializeLanaiTarget).restype, LLVMInitializeLanaiTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeLoongArchTarget:=dll.LLVMInitializeLoongArchTarget).restype, LLVMInitializeLoongArchTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeMipsTarget:=dll.LLVMInitializeMipsTarget).restype, LLVMInitializeMipsTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeMSP430Target:=dll.LLVMInitializeMSP430Target).restype, LLVMInitializeMSP430Target.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeNVPTXTarget:=dll.LLVMInitializeNVPTXTarget).restype, LLVMInitializeNVPTXTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializePowerPCTarget:=dll.LLVMInitializePowerPCTarget).restype, LLVMInitializePowerPCTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeRISCVTarget:=dll.LLVMInitializeRISCVTarget).restype, LLVMInitializeRISCVTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSparcTarget:=dll.LLVMInitializeSparcTarget).restype, LLVMInitializeSparcTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSPIRVTarget:=dll.LLVMInitializeSPIRVTarget).restype, LLVMInitializeSPIRVTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSystemZTarget:=dll.LLVMInitializeSystemZTarget).restype, LLVMInitializeSystemZTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeVETarget:=dll.LLVMInitializeVETarget).restype, LLVMInitializeVETarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeWebAssemblyTarget:=dll.LLVMInitializeWebAssemblyTarget).restype, LLVMInitializeWebAssemblyTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeX86Target:=dll.LLVMInitializeX86Target).restype, LLVMInitializeX86Target.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeXCoreTarget:=dll.LLVMInitializeXCoreTarget).restype, LLVMInitializeXCoreTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeM68kTarget:=dll.LLVMInitializeM68kTarget).restype, LLVMInitializeM68kTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeXtensaTarget:=dll.LLVMInitializeXtensaTarget).restype, LLVMInitializeXtensaTarget.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAArch64TargetMC:=dll.LLVMInitializeAArch64TargetMC).restype, LLVMInitializeAArch64TargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAMDGPUTargetMC:=dll.LLVMInitializeAMDGPUTargetMC).restype, LLVMInitializeAMDGPUTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeARMTargetMC:=dll.LLVMInitializeARMTargetMC).restype, LLVMInitializeARMTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAVRTargetMC:=dll.LLVMInitializeAVRTargetMC).restype, LLVMInitializeAVRTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeBPFTargetMC:=dll.LLVMInitializeBPFTargetMC).restype, LLVMInitializeBPFTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeHexagonTargetMC:=dll.LLVMInitializeHexagonTargetMC).restype, LLVMInitializeHexagonTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeLanaiTargetMC:=dll.LLVMInitializeLanaiTargetMC).restype, LLVMInitializeLanaiTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeLoongArchTargetMC:=dll.LLVMInitializeLoongArchTargetMC).restype, LLVMInitializeLoongArchTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeMipsTargetMC:=dll.LLVMInitializeMipsTargetMC).restype, LLVMInitializeMipsTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeMSP430TargetMC:=dll.LLVMInitializeMSP430TargetMC).restype, LLVMInitializeMSP430TargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeNVPTXTargetMC:=dll.LLVMInitializeNVPTXTargetMC).restype, LLVMInitializeNVPTXTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializePowerPCTargetMC:=dll.LLVMInitializePowerPCTargetMC).restype, LLVMInitializePowerPCTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeRISCVTargetMC:=dll.LLVMInitializeRISCVTargetMC).restype, LLVMInitializeRISCVTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSparcTargetMC:=dll.LLVMInitializeSparcTargetMC).restype, LLVMInitializeSparcTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSPIRVTargetMC:=dll.LLVMInitializeSPIRVTargetMC).restype, LLVMInitializeSPIRVTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSystemZTargetMC:=dll.LLVMInitializeSystemZTargetMC).restype, LLVMInitializeSystemZTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeVETargetMC:=dll.LLVMInitializeVETargetMC).restype, LLVMInitializeVETargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeWebAssemblyTargetMC:=dll.LLVMInitializeWebAssemblyTargetMC).restype, LLVMInitializeWebAssemblyTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeX86TargetMC:=dll.LLVMInitializeX86TargetMC).restype, LLVMInitializeX86TargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeXCoreTargetMC:=dll.LLVMInitializeXCoreTargetMC).restype, LLVMInitializeXCoreTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeM68kTargetMC:=dll.LLVMInitializeM68kTargetMC).restype, LLVMInitializeM68kTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeXtensaTargetMC:=dll.LLVMInitializeXtensaTargetMC).restype, LLVMInitializeXtensaTargetMC.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAArch64AsmPrinter:=dll.LLVMInitializeAArch64AsmPrinter).restype, LLVMInitializeAArch64AsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAMDGPUAsmPrinter:=dll.LLVMInitializeAMDGPUAsmPrinter).restype, LLVMInitializeAMDGPUAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeARMAsmPrinter:=dll.LLVMInitializeARMAsmPrinter).restype, LLVMInitializeARMAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAVRAsmPrinter:=dll.LLVMInitializeAVRAsmPrinter).restype, LLVMInitializeAVRAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeBPFAsmPrinter:=dll.LLVMInitializeBPFAsmPrinter).restype, LLVMInitializeBPFAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeHexagonAsmPrinter:=dll.LLVMInitializeHexagonAsmPrinter).restype, LLVMInitializeHexagonAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeLanaiAsmPrinter:=dll.LLVMInitializeLanaiAsmPrinter).restype, LLVMInitializeLanaiAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeLoongArchAsmPrinter:=dll.LLVMInitializeLoongArchAsmPrinter).restype, LLVMInitializeLoongArchAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeMipsAsmPrinter:=dll.LLVMInitializeMipsAsmPrinter).restype, LLVMInitializeMipsAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeMSP430AsmPrinter:=dll.LLVMInitializeMSP430AsmPrinter).restype, LLVMInitializeMSP430AsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeNVPTXAsmPrinter:=dll.LLVMInitializeNVPTXAsmPrinter).restype, LLVMInitializeNVPTXAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializePowerPCAsmPrinter:=dll.LLVMInitializePowerPCAsmPrinter).restype, LLVMInitializePowerPCAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeRISCVAsmPrinter:=dll.LLVMInitializeRISCVAsmPrinter).restype, LLVMInitializeRISCVAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSparcAsmPrinter:=dll.LLVMInitializeSparcAsmPrinter).restype, LLVMInitializeSparcAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSPIRVAsmPrinter:=dll.LLVMInitializeSPIRVAsmPrinter).restype, LLVMInitializeSPIRVAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSystemZAsmPrinter:=dll.LLVMInitializeSystemZAsmPrinter).restype, LLVMInitializeSystemZAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeVEAsmPrinter:=dll.LLVMInitializeVEAsmPrinter).restype, LLVMInitializeVEAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeWebAssemblyAsmPrinter:=dll.LLVMInitializeWebAssemblyAsmPrinter).restype, LLVMInitializeWebAssemblyAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeX86AsmPrinter:=dll.LLVMInitializeX86AsmPrinter).restype, LLVMInitializeX86AsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeXCoreAsmPrinter:=dll.LLVMInitializeXCoreAsmPrinter).restype, LLVMInitializeXCoreAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeM68kAsmPrinter:=dll.LLVMInitializeM68kAsmPrinter).restype, LLVMInitializeM68kAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeXtensaAsmPrinter:=dll.LLVMInitializeXtensaAsmPrinter).restype, LLVMInitializeXtensaAsmPrinter.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAArch64AsmParser:=dll.LLVMInitializeAArch64AsmParser).restype, LLVMInitializeAArch64AsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAMDGPUAsmParser:=dll.LLVMInitializeAMDGPUAsmParser).restype, LLVMInitializeAMDGPUAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeARMAsmParser:=dll.LLVMInitializeARMAsmParser).restype, LLVMInitializeARMAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAVRAsmParser:=dll.LLVMInitializeAVRAsmParser).restype, LLVMInitializeAVRAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeBPFAsmParser:=dll.LLVMInitializeBPFAsmParser).restype, LLVMInitializeBPFAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeHexagonAsmParser:=dll.LLVMInitializeHexagonAsmParser).restype, LLVMInitializeHexagonAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeLanaiAsmParser:=dll.LLVMInitializeLanaiAsmParser).restype, LLVMInitializeLanaiAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeLoongArchAsmParser:=dll.LLVMInitializeLoongArchAsmParser).restype, LLVMInitializeLoongArchAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeMipsAsmParser:=dll.LLVMInitializeMipsAsmParser).restype, LLVMInitializeMipsAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeMSP430AsmParser:=dll.LLVMInitializeMSP430AsmParser).restype, LLVMInitializeMSP430AsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializePowerPCAsmParser:=dll.LLVMInitializePowerPCAsmParser).restype, LLVMInitializePowerPCAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeRISCVAsmParser:=dll.LLVMInitializeRISCVAsmParser).restype, LLVMInitializeRISCVAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSparcAsmParser:=dll.LLVMInitializeSparcAsmParser).restype, LLVMInitializeSparcAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSystemZAsmParser:=dll.LLVMInitializeSystemZAsmParser).restype, LLVMInitializeSystemZAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeVEAsmParser:=dll.LLVMInitializeVEAsmParser).restype, LLVMInitializeVEAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeWebAssemblyAsmParser:=dll.LLVMInitializeWebAssemblyAsmParser).restype, LLVMInitializeWebAssemblyAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeX86AsmParser:=dll.LLVMInitializeX86AsmParser).restype, LLVMInitializeX86AsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeM68kAsmParser:=dll.LLVMInitializeM68kAsmParser).restype, LLVMInitializeM68kAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeXtensaAsmParser:=dll.LLVMInitializeXtensaAsmParser).restype, LLVMInitializeXtensaAsmParser.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAArch64Disassembler:=dll.LLVMInitializeAArch64Disassembler).restype, LLVMInitializeAArch64Disassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAMDGPUDisassembler:=dll.LLVMInitializeAMDGPUDisassembler).restype, LLVMInitializeAMDGPUDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeARMDisassembler:=dll.LLVMInitializeARMDisassembler).restype, LLVMInitializeARMDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeAVRDisassembler:=dll.LLVMInitializeAVRDisassembler).restype, LLVMInitializeAVRDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeBPFDisassembler:=dll.LLVMInitializeBPFDisassembler).restype, LLVMInitializeBPFDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeHexagonDisassembler:=dll.LLVMInitializeHexagonDisassembler).restype, LLVMInitializeHexagonDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeLanaiDisassembler:=dll.LLVMInitializeLanaiDisassembler).restype, LLVMInitializeLanaiDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeLoongArchDisassembler:=dll.LLVMInitializeLoongArchDisassembler).restype, LLVMInitializeLoongArchDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeMipsDisassembler:=dll.LLVMInitializeMipsDisassembler).restype, LLVMInitializeMipsDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeMSP430Disassembler:=dll.LLVMInitializeMSP430Disassembler).restype, LLVMInitializeMSP430Disassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializePowerPCDisassembler:=dll.LLVMInitializePowerPCDisassembler).restype, LLVMInitializePowerPCDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeRISCVDisassembler:=dll.LLVMInitializeRISCVDisassembler).restype, LLVMInitializeRISCVDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSparcDisassembler:=dll.LLVMInitializeSparcDisassembler).restype, LLVMInitializeSparcDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeSystemZDisassembler:=dll.LLVMInitializeSystemZDisassembler).restype, LLVMInitializeSystemZDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeVEDisassembler:=dll.LLVMInitializeVEDisassembler).restype, LLVMInitializeVEDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeWebAssemblyDisassembler:=dll.LLVMInitializeWebAssemblyDisassembler).restype, LLVMInitializeWebAssemblyDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeX86Disassembler:=dll.LLVMInitializeX86Disassembler).restype, LLVMInitializeX86Disassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeXCoreDisassembler:=dll.LLVMInitializeXCoreDisassembler).restype, LLVMInitializeXCoreDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeM68kDisassembler:=dll.LLVMInitializeM68kDisassembler).restype, LLVMInitializeM68kDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMInitializeXtensaDisassembler:=dll.LLVMInitializeXtensaDisassembler).restype, LLVMInitializeXtensaDisassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (LLVMGetModuleDataLayout:=dll.LLVMGetModuleDataLayout).restype, LLVMGetModuleDataLayout.argtypes = LLVMTargetDataRef, [LLVMModuleRef]
-except AttributeError: pass
-
-try: (LLVMSetModuleDataLayout:=dll.LLVMSetModuleDataLayout).restype, LLVMSetModuleDataLayout.argtypes = None, [LLVMModuleRef, LLVMTargetDataRef]
-except AttributeError: pass
-
-try: (LLVMCreateTargetData:=dll.LLVMCreateTargetData).restype, LLVMCreateTargetData.argtypes = LLVMTargetDataRef, [ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMDisposeTargetData:=dll.LLVMDisposeTargetData).restype, LLVMDisposeTargetData.argtypes = None, [LLVMTargetDataRef]
-except AttributeError: pass
-
-try: (LLVMAddTargetLibraryInfo:=dll.LLVMAddTargetLibraryInfo).restype, LLVMAddTargetLibraryInfo.argtypes = None, [LLVMTargetLibraryInfoRef, LLVMPassManagerRef]
-except AttributeError: pass
-
-try: (LLVMCopyStringRepOfTargetData:=dll.LLVMCopyStringRepOfTargetData).restype, LLVMCopyStringRepOfTargetData.argtypes = ctypes.POINTER(ctypes.c_char), [LLVMTargetDataRef]
-except AttributeError: pass
-
-try: (LLVMByteOrder:=dll.LLVMByteOrder).restype, LLVMByteOrder.argtypes = enum_LLVMByteOrdering, [LLVMTargetDataRef]
-except AttributeError: pass
-
-try: (LLVMPointerSize:=dll.LLVMPointerSize).restype, LLVMPointerSize.argtypes = ctypes.c_uint32, [LLVMTargetDataRef]
-except AttributeError: pass
-
-try: (LLVMPointerSizeForAS:=dll.LLVMPointerSizeForAS).restype, LLVMPointerSizeForAS.argtypes = ctypes.c_uint32, [LLVMTargetDataRef, ctypes.c_uint32]
-except AttributeError: pass
-
-try: (LLVMIntPtrType:=dll.LLVMIntPtrType).restype, LLVMIntPtrType.argtypes = LLVMTypeRef, [LLVMTargetDataRef]
-except AttributeError: pass
-
-try: (LLVMIntPtrTypeForAS:=dll.LLVMIntPtrTypeForAS).restype, LLVMIntPtrTypeForAS.argtypes = LLVMTypeRef, [LLVMTargetDataRef, ctypes.c_uint32]
-except AttributeError: pass
-
-try: (LLVMIntPtrTypeInContext:=dll.LLVMIntPtrTypeInContext).restype, LLVMIntPtrTypeInContext.argtypes = LLVMTypeRef, [LLVMContextRef, LLVMTargetDataRef]
-except AttributeError: pass
-
-try: (LLVMIntPtrTypeForASInContext:=dll.LLVMIntPtrTypeForASInContext).restype, LLVMIntPtrTypeForASInContext.argtypes = LLVMTypeRef, [LLVMContextRef, LLVMTargetDataRef, ctypes.c_uint32]
-except AttributeError: pass
-
-try: (LLVMSizeOfTypeInBits:=dll.LLVMSizeOfTypeInBits).restype, LLVMSizeOfTypeInBits.argtypes = ctypes.c_uint64, [LLVMTargetDataRef, LLVMTypeRef]
-except AttributeError: pass
-
-try: (LLVMStoreSizeOfType:=dll.LLVMStoreSizeOfType).restype, LLVMStoreSizeOfType.argtypes = ctypes.c_uint64, [LLVMTargetDataRef, LLVMTypeRef]
-except AttributeError: pass
-
-try: (LLVMABISizeOfType:=dll.LLVMABISizeOfType).restype, LLVMABISizeOfType.argtypes = ctypes.c_uint64, [LLVMTargetDataRef, LLVMTypeRef]
-except AttributeError: pass
-
-try: (LLVMABIAlignmentOfType:=dll.LLVMABIAlignmentOfType).restype, LLVMABIAlignmentOfType.argtypes = ctypes.c_uint32, [LLVMTargetDataRef, LLVMTypeRef]
-except AttributeError: pass
-
-try: (LLVMCallFrameAlignmentOfType:=dll.LLVMCallFrameAlignmentOfType).restype, LLVMCallFrameAlignmentOfType.argtypes = ctypes.c_uint32, [LLVMTargetDataRef, LLVMTypeRef]
-except AttributeError: pass
-
-try: (LLVMPreferredAlignmentOfType:=dll.LLVMPreferredAlignmentOfType).restype, LLVMPreferredAlignmentOfType.argtypes = ctypes.c_uint32, [LLVMTargetDataRef, LLVMTypeRef]
-except AttributeError: pass
-
-try: (LLVMPreferredAlignmentOfGlobal:=dll.LLVMPreferredAlignmentOfGlobal).restype, LLVMPreferredAlignmentOfGlobal.argtypes = ctypes.c_uint32, [LLVMTargetDataRef, LLVMValueRef]
-except AttributeError: pass
-
-try: (LLVMElementAtOffset:=dll.LLVMElementAtOffset).restype, LLVMElementAtOffset.argtypes = ctypes.c_uint32, [LLVMTargetDataRef, LLVMTypeRef, ctypes.c_uint64]
-except AttributeError: pass
-
-try: (LLVMOffsetOfElement:=dll.LLVMOffsetOfElement).restype, LLVMOffsetOfElement.argtypes = ctypes.c_uint64, [LLVMTargetDataRef, LLVMTypeRef, ctypes.c_uint32]
-except AttributeError: pass
-
-try: (LLVMGetFirstTarget:=dll.LLVMGetFirstTarget).restype, LLVMGetFirstTarget.argtypes = LLVMTargetRef, []
-except AttributeError: pass
-
-try: (LLVMGetNextTarget:=dll.LLVMGetNextTarget).restype, LLVMGetNextTarget.argtypes = LLVMTargetRef, [LLVMTargetRef]
-except AttributeError: pass
-
-try: (LLVMGetTargetFromName:=dll.LLVMGetTargetFromName).restype, LLVMGetTargetFromName.argtypes = LLVMTargetRef, [ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMGetTargetFromTriple:=dll.LLVMGetTargetFromTriple).restype, LLVMGetTargetFromTriple.argtypes = LLVMBool, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(LLVMTargetRef), ctypes.POINTER(ctypes.POINTER(ctypes.c_char))]
-except AttributeError: pass
-
-try: (LLVMGetTargetName:=dll.LLVMGetTargetName).restype, LLVMGetTargetName.argtypes = ctypes.POINTER(ctypes.c_char), [LLVMTargetRef]
-except AttributeError: pass
-
-try: (LLVMGetTargetDescription:=dll.LLVMGetTargetDescription).restype, LLVMGetTargetDescription.argtypes = ctypes.POINTER(ctypes.c_char), [LLVMTargetRef]
-except AttributeError: pass
-
-try: (LLVMTargetHasJIT:=dll.LLVMTargetHasJIT).restype, LLVMTargetHasJIT.argtypes = LLVMBool, [LLVMTargetRef]
-except AttributeError: pass
-
-try: (LLVMTargetHasTargetMachine:=dll.LLVMTargetHasTargetMachine).restype, LLVMTargetHasTargetMachine.argtypes = LLVMBool, [LLVMTargetRef]
-except AttributeError: pass
-
-try: (LLVMTargetHasAsmBackend:=dll.LLVMTargetHasAsmBackend).restype, LLVMTargetHasAsmBackend.argtypes = LLVMBool, [LLVMTargetRef]
-except AttributeError: pass
-
-try: (LLVMCreateTargetMachineOptions:=dll.LLVMCreateTargetMachineOptions).restype, LLVMCreateTargetMachineOptions.argtypes = LLVMTargetMachineOptionsRef, []
-except AttributeError: pass
-
-try: (LLVMDisposeTargetMachineOptions:=dll.LLVMDisposeTargetMachineOptions).restype, LLVMDisposeTargetMachineOptions.argtypes = None, [LLVMTargetMachineOptionsRef]
-except AttributeError: pass
-
-try: (LLVMTargetMachineOptionsSetCPU:=dll.LLVMTargetMachineOptionsSetCPU).restype, LLVMTargetMachineOptionsSetCPU.argtypes = None, [LLVMTargetMachineOptionsRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMTargetMachineOptionsSetFeatures:=dll.LLVMTargetMachineOptionsSetFeatures).restype, LLVMTargetMachineOptionsSetFeatures.argtypes = None, [LLVMTargetMachineOptionsRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMTargetMachineOptionsSetABI:=dll.LLVMTargetMachineOptionsSetABI).restype, LLVMTargetMachineOptionsSetABI.argtypes = None, [LLVMTargetMachineOptionsRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMTargetMachineOptionsSetCodeGenOptLevel:=dll.LLVMTargetMachineOptionsSetCodeGenOptLevel).restype, LLVMTargetMachineOptionsSetCodeGenOptLevel.argtypes = None, [LLVMTargetMachineOptionsRef, LLVMCodeGenOptLevel]
-except AttributeError: pass
-
-try: (LLVMTargetMachineOptionsSetRelocMode:=dll.LLVMTargetMachineOptionsSetRelocMode).restype, LLVMTargetMachineOptionsSetRelocMode.argtypes = None, [LLVMTargetMachineOptionsRef, LLVMRelocMode]
-except AttributeError: pass
-
-try: (LLVMTargetMachineOptionsSetCodeModel:=dll.LLVMTargetMachineOptionsSetCodeModel).restype, LLVMTargetMachineOptionsSetCodeModel.argtypes = None, [LLVMTargetMachineOptionsRef, LLVMCodeModel]
-except AttributeError: pass
-
-try: (LLVMCreateTargetMachineWithOptions:=dll.LLVMCreateTargetMachineWithOptions).restype, LLVMCreateTargetMachineWithOptions.argtypes = LLVMTargetMachineRef, [LLVMTargetRef, ctypes.POINTER(ctypes.c_char), LLVMTargetMachineOptionsRef]
-except AttributeError: pass
-
-try: (LLVMCreateTargetMachine:=dll.LLVMCreateTargetMachine).restype, LLVMCreateTargetMachine.argtypes = LLVMTargetMachineRef, [LLVMTargetRef, ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char), LLVMCodeGenOptLevel, LLVMRelocMode, LLVMCodeModel]
-except AttributeError: pass
-
-try: (LLVMDisposeTargetMachine:=dll.LLVMDisposeTargetMachine).restype, LLVMDisposeTargetMachine.argtypes = None, [LLVMTargetMachineRef]
-except AttributeError: pass
-
-try: (LLVMGetTargetMachineTarget:=dll.LLVMGetTargetMachineTarget).restype, LLVMGetTargetMachineTarget.argtypes = LLVMTargetRef, [LLVMTargetMachineRef]
-except AttributeError: pass
-
-try: (LLVMGetTargetMachineTriple:=dll.LLVMGetTargetMachineTriple).restype, LLVMGetTargetMachineTriple.argtypes = ctypes.POINTER(ctypes.c_char), [LLVMTargetMachineRef]
-except AttributeError: pass
-
-try: (LLVMGetTargetMachineCPU:=dll.LLVMGetTargetMachineCPU).restype, LLVMGetTargetMachineCPU.argtypes = ctypes.POINTER(ctypes.c_char), [LLVMTargetMachineRef]
-except AttributeError: pass
-
-try: (LLVMGetTargetMachineFeatureString:=dll.LLVMGetTargetMachineFeatureString).restype, LLVMGetTargetMachineFeatureString.argtypes = ctypes.POINTER(ctypes.c_char), [LLVMTargetMachineRef]
-except AttributeError: pass
-
-try: (LLVMCreateTargetDataLayout:=dll.LLVMCreateTargetDataLayout).restype, LLVMCreateTargetDataLayout.argtypes = LLVMTargetDataRef, [LLVMTargetMachineRef]
-except AttributeError: pass
-
-try: (LLVMSetTargetMachineAsmVerbosity:=dll.LLVMSetTargetMachineAsmVerbosity).restype, LLVMSetTargetMachineAsmVerbosity.argtypes = None, [LLVMTargetMachineRef, LLVMBool]
-except AttributeError: pass
-
-try: (LLVMSetTargetMachineFastISel:=dll.LLVMSetTargetMachineFastISel).restype, LLVMSetTargetMachineFastISel.argtypes = None, [LLVMTargetMachineRef, LLVMBool]
-except AttributeError: pass
-
-try: (LLVMSetTargetMachineGlobalISel:=dll.LLVMSetTargetMachineGlobalISel).restype, LLVMSetTargetMachineGlobalISel.argtypes = None, [LLVMTargetMachineRef, LLVMBool]
-except AttributeError: pass
-
-try: (LLVMSetTargetMachineGlobalISelAbort:=dll.LLVMSetTargetMachineGlobalISelAbort).restype, LLVMSetTargetMachineGlobalISelAbort.argtypes = None, [LLVMTargetMachineRef, LLVMGlobalISelAbortMode]
-except AttributeError: pass
-
-try: (LLVMSetTargetMachineMachineOutliner:=dll.LLVMSetTargetMachineMachineOutliner).restype, LLVMSetTargetMachineMachineOutliner.argtypes = None, [LLVMTargetMachineRef, LLVMBool]
-except AttributeError: pass
-
-try: (LLVMTargetMachineEmitToFile:=dll.LLVMTargetMachineEmitToFile).restype, LLVMTargetMachineEmitToFile.argtypes = LLVMBool, [LLVMTargetMachineRef, LLVMModuleRef, ctypes.POINTER(ctypes.c_char), LLVMCodeGenFileType, ctypes.POINTER(ctypes.POINTER(ctypes.c_char))]
-except AttributeError: pass
-
-try: (LLVMTargetMachineEmitToMemoryBuffer:=dll.LLVMTargetMachineEmitToMemoryBuffer).restype, LLVMTargetMachineEmitToMemoryBuffer.argtypes = LLVMBool, [LLVMTargetMachineRef, LLVMModuleRef, LLVMCodeGenFileType, ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.POINTER(LLVMMemoryBufferRef)]
-except AttributeError: pass
-
-try: (LLVMGetDefaultTargetTriple:=dll.LLVMGetDefaultTargetTriple).restype, LLVMGetDefaultTargetTriple.argtypes = ctypes.POINTER(ctypes.c_char), []
-except AttributeError: pass
-
-try: (LLVMNormalizeTargetTriple:=dll.LLVMNormalizeTargetTriple).restype, LLVMNormalizeTargetTriple.argtypes = ctypes.POINTER(ctypes.c_char), [ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMGetHostCPUName:=dll.LLVMGetHostCPUName).restype, LLVMGetHostCPUName.argtypes = ctypes.POINTER(ctypes.c_char), []
-except AttributeError: pass
-
-try: (LLVMGetHostCPUFeatures:=dll.LLVMGetHostCPUFeatures).restype, LLVMGetHostCPUFeatures.argtypes = ctypes.POINTER(ctypes.c_char), []
-except AttributeError: pass
-
-try: (LLVMAddAnalysisPasses:=dll.LLVMAddAnalysisPasses).restype, LLVMAddAnalysisPasses.argtypes = None, [LLVMTargetMachineRef, LLVMPassManagerRef]
-except AttributeError: pass
-
-class struct_LLVMOpaquePassBuilderOptions(Struct): pass
-LLVMPassBuilderOptionsRef = ctypes.POINTER(struct_LLVMOpaquePassBuilderOptions)
-try: (LLVMRunPasses:=dll.LLVMRunPasses).restype, LLVMRunPasses.argtypes = LLVMErrorRef, [LLVMModuleRef, ctypes.POINTER(ctypes.c_char), LLVMTargetMachineRef, LLVMPassBuilderOptionsRef]
-except AttributeError: pass
-
-try: (LLVMRunPassesOnFunction:=dll.LLVMRunPassesOnFunction).restype, LLVMRunPassesOnFunction.argtypes = LLVMErrorRef, [LLVMValueRef, ctypes.POINTER(ctypes.c_char), LLVMTargetMachineRef, LLVMPassBuilderOptionsRef]
-except AttributeError: pass
-
-try: (LLVMCreatePassBuilderOptions:=dll.LLVMCreatePassBuilderOptions).restype, LLVMCreatePassBuilderOptions.argtypes = LLVMPassBuilderOptionsRef, []
-except AttributeError: pass
-
-try: (LLVMPassBuilderOptionsSetVerifyEach:=dll.LLVMPassBuilderOptionsSetVerifyEach).restype, LLVMPassBuilderOptionsSetVerifyEach.argtypes = None, [LLVMPassBuilderOptionsRef, LLVMBool]
-except AttributeError: pass
-
-try: (LLVMPassBuilderOptionsSetDebugLogging:=dll.LLVMPassBuilderOptionsSetDebugLogging).restype, LLVMPassBuilderOptionsSetDebugLogging.argtypes = None, [LLVMPassBuilderOptionsRef, LLVMBool]
-except AttributeError: pass
-
-try: (LLVMPassBuilderOptionsSetAAPipeline:=dll.LLVMPassBuilderOptionsSetAAPipeline).restype, LLVMPassBuilderOptionsSetAAPipeline.argtypes = None, [LLVMPassBuilderOptionsRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (LLVMPassBuilderOptionsSetLoopInterleaving:=dll.LLVMPassBuilderOptionsSetLoopInterleaving).restype, LLVMPassBuilderOptionsSetLoopInterleaving.argtypes = None, [LLVMPassBuilderOptionsRef, LLVMBool]
-except AttributeError: pass
-
-try: (LLVMPassBuilderOptionsSetLoopVectorization:=dll.LLVMPassBuilderOptionsSetLoopVectorization).restype, LLVMPassBuilderOptionsSetLoopVectorization.argtypes = None, [LLVMPassBuilderOptionsRef, LLVMBool]
-except AttributeError: pass
-
-try: (LLVMPassBuilderOptionsSetSLPVectorization:=dll.LLVMPassBuilderOptionsSetSLPVectorization).restype, LLVMPassBuilderOptionsSetSLPVectorization.argtypes = None, [LLVMPassBuilderOptionsRef, LLVMBool]
-except AttributeError: pass
-
-try: (LLVMPassBuilderOptionsSetLoopUnrolling:=dll.LLVMPassBuilderOptionsSetLoopUnrolling).restype, LLVMPassBuilderOptionsSetLoopUnrolling.argtypes = None, [LLVMPassBuilderOptionsRef, LLVMBool]
-except AttributeError: pass
-
-try: (LLVMPassBuilderOptionsSetForgetAllSCEVInLoopUnroll:=dll.LLVMPassBuilderOptionsSetForgetAllSCEVInLoopUnroll).restype, LLVMPassBuilderOptionsSetForgetAllSCEVInLoopUnroll.argtypes = None, [LLVMPassBuilderOptionsRef, LLVMBool]
-except AttributeError: pass
-
-try: (LLVMPassBuilderOptionsSetLicmMssaOptCap:=dll.LLVMPassBuilderOptionsSetLicmMssaOptCap).restype, LLVMPassBuilderOptionsSetLicmMssaOptCap.argtypes = None, [LLVMPassBuilderOptionsRef, ctypes.c_uint32]
-except AttributeError: pass
-
-try: (LLVMPassBuilderOptionsSetLicmMssaNoAccForPromotionCap:=dll.LLVMPassBuilderOptionsSetLicmMssaNoAccForPromotionCap).restype, LLVMPassBuilderOptionsSetLicmMssaNoAccForPromotionCap.argtypes = None, [LLVMPassBuilderOptionsRef, ctypes.c_uint32]
-except AttributeError: pass
-
-try: (LLVMPassBuilderOptionsSetCallGraphProfile:=dll.LLVMPassBuilderOptionsSetCallGraphProfile).restype, LLVMPassBuilderOptionsSetCallGraphProfile.argtypes = None, [LLVMPassBuilderOptionsRef, LLVMBool]
-except AttributeError: pass
-
-try: (LLVMPassBuilderOptionsSetMergeFunctions:=dll.LLVMPassBuilderOptionsSetMergeFunctions).restype, LLVMPassBuilderOptionsSetMergeFunctions.argtypes = None, [LLVMPassBuilderOptionsRef, LLVMBool]
-except AttributeError: pass
-
-try: (LLVMPassBuilderOptionsSetInlinerThreshold:=dll.LLVMPassBuilderOptionsSetInlinerThreshold).restype, LLVMPassBuilderOptionsSetInlinerThreshold.argtypes = None, [LLVMPassBuilderOptionsRef, ctypes.c_int32]
-except AttributeError: pass
-
-try: (LLVMDisposePassBuilderOptions:=dll.LLVMDisposePassBuilderOptions).restype, LLVMDisposePassBuilderOptions.argtypes = None, [LLVMPassBuilderOptionsRef]
-except AttributeError: pass
-
-try: (imaxabs:=dll.imaxabs).restype, imaxabs.argtypes = intmax_t, [intmax_t]
-except AttributeError: pass
-
-try: (imaxdiv:=dll.imaxdiv).restype, imaxdiv.argtypes = imaxdiv_t, [intmax_t, intmax_t]
-except AttributeError: pass
-
-try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (select:=dll.select).restype, select.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timeval)]
-except AttributeError: pass
-
-try: (pselect:=dll.pselect).restype, pselect.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timespec), ctypes.POINTER(__sigset_t)]
-except AttributeError: pass
-
-class llvm_blake3_chunk_state(Struct): pass
-llvm_blake3_chunk_state._fields_ = [
-  ('cv', (uint32_t * 8)),
-  ('chunk_counter', uint64_t),
-  ('buf', (uint8_t * 64)),
-  ('buf_len', uint8_t),
-  ('blocks_compressed', uint8_t),
-  ('flags', uint8_t),
-]
-class llvm_blake3_hasher(Struct): pass
-llvm_blake3_hasher._fields_ = [
-  ('key', (uint32_t * 8)),
-  ('chunk', llvm_blake3_chunk_state),
-  ('cv_stack_len', uint8_t),
-  ('cv_stack', (uint8_t * 1760)),
-]
-try: (llvm_blake3_version:=dll.llvm_blake3_version).restype, llvm_blake3_version.argtypes = ctypes.POINTER(ctypes.c_char), []
-except AttributeError: pass
-
-try: (llvm_blake3_hasher_init:=dll.llvm_blake3_hasher_init).restype, llvm_blake3_hasher_init.argtypes = None, [ctypes.POINTER(llvm_blake3_hasher)]
-except AttributeError: pass
-
-try: (llvm_blake3_hasher_init_keyed:=dll.llvm_blake3_hasher_init_keyed).restype, llvm_blake3_hasher_init_keyed.argtypes = None, [ctypes.POINTER(llvm_blake3_hasher), (uint8_t * 32)]
-except AttributeError: pass
-
-try: (llvm_blake3_hasher_init_derive_key:=dll.llvm_blake3_hasher_init_derive_key).restype, llvm_blake3_hasher_init_derive_key.argtypes = None, [ctypes.POINTER(llvm_blake3_hasher), ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (llvm_blake3_hasher_init_derive_key_raw:=dll.llvm_blake3_hasher_init_derive_key_raw).restype, llvm_blake3_hasher_init_derive_key_raw.argtypes = None, [ctypes.POINTER(llvm_blake3_hasher), ctypes.c_void_p, size_t]
-except AttributeError: pass
-
-try: (llvm_blake3_hasher_update:=dll.llvm_blake3_hasher_update).restype, llvm_blake3_hasher_update.argtypes = None, [ctypes.POINTER(llvm_blake3_hasher), ctypes.c_void_p, size_t]
-except AttributeError: pass
-
-try: (llvm_blake3_hasher_finalize:=dll.llvm_blake3_hasher_finalize).restype, llvm_blake3_hasher_finalize.argtypes = None, [ctypes.POINTER(llvm_blake3_hasher), ctypes.POINTER(uint8_t), size_t]
-except AttributeError: pass
-
-try: (llvm_blake3_hasher_finalize_seek:=dll.llvm_blake3_hasher_finalize_seek).restype, llvm_blake3_hasher_finalize_seek.argtypes = None, [ctypes.POINTER(llvm_blake3_hasher), uint64_t, ctypes.POINTER(uint8_t), size_t]
-except AttributeError: pass
-
-try: (llvm_blake3_hasher_reset:=dll.llvm_blake3_hasher_reset).restype, llvm_blake3_hasher_reset.argtypes = None, [ctypes.POINTER(llvm_blake3_hasher)]
-except AttributeError: pass
-
-try: (select:=dll.select).restype, select.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timeval)]
-except AttributeError: pass
-
-try: (pselect:=dll.pselect).restype, pselect.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timespec), ctypes.POINTER(__sigset_t)]
-except AttributeError: pass
-
-lto_bool_t = ctypes.c_bool
-lto_symbol_attributes = CEnum(ctypes.c_uint32)
+class struct_LLVMRemarkOpaqueString(ctypes.Structure): pass
+LLVMRemarkStringRef: TypeAlias = c.POINTER[struct_LLVMRemarkOpaqueString]
+@dll.bind
+def LLVMRemarkStringGetData(String:LLVMRemarkStringRef) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
+@dll.bind
+def LLVMRemarkStringGetLen(String:LLVMRemarkStringRef) -> uint32_t: ...
+class struct_LLVMRemarkOpaqueDebugLoc(ctypes.Structure): pass
+LLVMRemarkDebugLocRef: TypeAlias = c.POINTER[struct_LLVMRemarkOpaqueDebugLoc]
+@dll.bind
+def LLVMRemarkDebugLocGetSourceFilePath(DL:LLVMRemarkDebugLocRef) -> LLVMRemarkStringRef: ...
+@dll.bind
+def LLVMRemarkDebugLocGetSourceLine(DL:LLVMRemarkDebugLocRef) -> uint32_t: ...
+@dll.bind
+def LLVMRemarkDebugLocGetSourceColumn(DL:LLVMRemarkDebugLocRef) -> uint32_t: ...
+class struct_LLVMRemarkOpaqueArg(ctypes.Structure): pass
+LLVMRemarkArgRef: TypeAlias = c.POINTER[struct_LLVMRemarkOpaqueArg]
+@dll.bind
+def LLVMRemarkArgGetKey(Arg:LLVMRemarkArgRef) -> LLVMRemarkStringRef: ...
+@dll.bind
+def LLVMRemarkArgGetValue(Arg:LLVMRemarkArgRef) -> LLVMRemarkStringRef: ...
+@dll.bind
+def LLVMRemarkArgGetDebugLoc(Arg:LLVMRemarkArgRef) -> LLVMRemarkDebugLocRef: ...
+class struct_LLVMRemarkOpaqueEntry(ctypes.Structure): pass
+LLVMRemarkEntryRef: TypeAlias = c.POINTER[struct_LLVMRemarkOpaqueEntry]
+@dll.bind
+def LLVMRemarkEntryDispose(Remark:LLVMRemarkEntryRef) -> None: ...
+@dll.bind
+def LLVMRemarkEntryGetType(Remark:LLVMRemarkEntryRef) -> enum_LLVMRemarkType: ...
+@dll.bind
+def LLVMRemarkEntryGetPassName(Remark:LLVMRemarkEntryRef) -> LLVMRemarkStringRef: ...
+@dll.bind
+def LLVMRemarkEntryGetRemarkName(Remark:LLVMRemarkEntryRef) -> LLVMRemarkStringRef: ...
+@dll.bind
+def LLVMRemarkEntryGetFunctionName(Remark:LLVMRemarkEntryRef) -> LLVMRemarkStringRef: ...
+@dll.bind
+def LLVMRemarkEntryGetDebugLoc(Remark:LLVMRemarkEntryRef) -> LLVMRemarkDebugLocRef: ...
+@dll.bind
+def LLVMRemarkEntryGetHotness(Remark:LLVMRemarkEntryRef) -> uint64_t: ...
+@dll.bind
+def LLVMRemarkEntryGetNumArgs(Remark:LLVMRemarkEntryRef) -> uint32_t: ...
+@dll.bind
+def LLVMRemarkEntryGetFirstArg(Remark:LLVMRemarkEntryRef) -> LLVMRemarkArgRef: ...
+@dll.bind
+def LLVMRemarkEntryGetNextArg(It:LLVMRemarkArgRef, Remark:LLVMRemarkEntryRef) -> LLVMRemarkArgRef: ...
+class struct_LLVMRemarkOpaqueParser(ctypes.Structure): pass
+LLVMRemarkParserRef: TypeAlias = c.POINTER[struct_LLVMRemarkOpaqueParser]
+@dll.bind
+def LLVMRemarkParserCreateYAML(Buf:ctypes.c_void_p, Size:uint64_t) -> LLVMRemarkParserRef: ...
+@dll.bind
+def LLVMRemarkParserCreateBitstream(Buf:ctypes.c_void_p, Size:uint64_t) -> LLVMRemarkParserRef: ...
+@dll.bind
+def LLVMRemarkParserGetNext(Parser:LLVMRemarkParserRef) -> LLVMRemarkEntryRef: ...
+@dll.bind
+def LLVMRemarkParserHasError(Parser:LLVMRemarkParserRef) -> LLVMBool: ...
+@dll.bind
+def LLVMRemarkParserGetErrorMessage(Parser:LLVMRemarkParserRef) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
+@dll.bind
+def LLVMRemarkParserDispose(Parser:LLVMRemarkParserRef) -> None: ...
+@dll.bind
+def LLVMRemarkVersion() -> uint32_t: ...
+@dll.bind
+def LLVMLoadLibraryPermanently(Filename:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMBool: ...
+@dll.bind
+def LLVMParseCommandLineOptions(argc:Annotated[int, ctypes.c_int32], argv:c.POINTER[c.POINTER[Annotated[bytes, ctypes.c_char]]], Overview:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> None: ...
+@dll.bind
+def LLVMSearchForAddressOfSymbol(symbolName:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> ctypes.c_void_p: ...
+@dll.bind
+def LLVMAddSymbol(symbolName:c.POINTER[Annotated[bytes, ctypes.c_char]], symbolValue:ctypes.c_void_p) -> None: ...
+class struct_LLVMOpaquePassBuilderOptions(ctypes.Structure): pass
+LLVMPassBuilderOptionsRef: TypeAlias = c.POINTER[struct_LLVMOpaquePassBuilderOptions]
+@dll.bind
+def LLVMRunPasses(M:LLVMModuleRef, Passes:c.POINTER[Annotated[bytes, ctypes.c_char]], TM:LLVMTargetMachineRef, Options:LLVMPassBuilderOptionsRef) -> LLVMErrorRef: ...
+@dll.bind
+def LLVMRunPassesOnFunction(F:LLVMValueRef, Passes:c.POINTER[Annotated[bytes, ctypes.c_char]], TM:LLVMTargetMachineRef, Options:LLVMPassBuilderOptionsRef) -> LLVMErrorRef: ...
+@dll.bind
+def LLVMCreatePassBuilderOptions() -> LLVMPassBuilderOptionsRef: ...
+@dll.bind
+def LLVMPassBuilderOptionsSetVerifyEach(Options:LLVMPassBuilderOptionsRef, VerifyEach:LLVMBool) -> None: ...
+@dll.bind
+def LLVMPassBuilderOptionsSetDebugLogging(Options:LLVMPassBuilderOptionsRef, DebugLogging:LLVMBool) -> None: ...
+@dll.bind
+def LLVMPassBuilderOptionsSetAAPipeline(Options:LLVMPassBuilderOptionsRef, AAPipeline:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> None: ...
+@dll.bind
+def LLVMPassBuilderOptionsSetLoopInterleaving(Options:LLVMPassBuilderOptionsRef, LoopInterleaving:LLVMBool) -> None: ...
+@dll.bind
+def LLVMPassBuilderOptionsSetLoopVectorization(Options:LLVMPassBuilderOptionsRef, LoopVectorization:LLVMBool) -> None: ...
+@dll.bind
+def LLVMPassBuilderOptionsSetSLPVectorization(Options:LLVMPassBuilderOptionsRef, SLPVectorization:LLVMBool) -> None: ...
+@dll.bind
+def LLVMPassBuilderOptionsSetLoopUnrolling(Options:LLVMPassBuilderOptionsRef, LoopUnrolling:LLVMBool) -> None: ...
+@dll.bind
+def LLVMPassBuilderOptionsSetForgetAllSCEVInLoopUnroll(Options:LLVMPassBuilderOptionsRef, ForgetAllSCEVInLoopUnroll:LLVMBool) -> None: ...
+@dll.bind
+def LLVMPassBuilderOptionsSetLicmMssaOptCap(Options:LLVMPassBuilderOptionsRef, LicmMssaOptCap:Annotated[int, ctypes.c_uint32]) -> None: ...
+@dll.bind
+def LLVMPassBuilderOptionsSetLicmMssaNoAccForPromotionCap(Options:LLVMPassBuilderOptionsRef, LicmMssaNoAccForPromotionCap:Annotated[int, ctypes.c_uint32]) -> None: ...
+@dll.bind
+def LLVMPassBuilderOptionsSetCallGraphProfile(Options:LLVMPassBuilderOptionsRef, CallGraphProfile:LLVMBool) -> None: ...
+@dll.bind
+def LLVMPassBuilderOptionsSetMergeFunctions(Options:LLVMPassBuilderOptionsRef, MergeFunctions:LLVMBool) -> None: ...
+@dll.bind
+def LLVMPassBuilderOptionsSetInlinerThreshold(Options:LLVMPassBuilderOptionsRef, Threshold:Annotated[int, ctypes.c_int32]) -> None: ...
+@dll.bind
+def LLVMDisposePassBuilderOptions(Options:LLVMPassBuilderOptionsRef) -> None: ...
+@c.record
+class llvm_blake3_chunk_state(c.Struct):
+  SIZE = 112
+  cv: Annotated[c.Array[uint32_t, Literal[8]], 0]
+  chunk_counter: Annotated[uint64_t, 32]
+  buf: Annotated[c.Array[uint8_t, Literal[64]], 40]
+  buf_len: Annotated[uint8_t, 104]
+  blocks_compressed: Annotated[uint8_t, 105]
+  flags: Annotated[uint8_t, 106]
+@c.record
+class llvm_blake3_hasher(c.Struct):
+  SIZE = 1912
+  key: Annotated[c.Array[uint32_t, Literal[8]], 0]
+  chunk: Annotated[llvm_blake3_chunk_state, 32]
+  cv_stack_len: Annotated[uint8_t, 144]
+  cv_stack: Annotated[c.Array[uint8_t, Literal[1760]], 145]
+@dll.bind
+def llvm_blake3_version() -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
+@dll.bind
+def llvm_blake3_hasher_init(self:c.POINTER[llvm_blake3_hasher]) -> None: ...
+@dll.bind
+def llvm_blake3_hasher_init_keyed(self:c.POINTER[llvm_blake3_hasher], key:c.Array[uint8_t, Literal[32]]) -> None: ...
+@dll.bind
+def llvm_blake3_hasher_init_derive_key(self:c.POINTER[llvm_blake3_hasher], context:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> None: ...
+@dll.bind
+def llvm_blake3_hasher_init_derive_key_raw(self:c.POINTER[llvm_blake3_hasher], context:ctypes.c_void_p, context_len:size_t) -> None: ...
+@dll.bind
+def llvm_blake3_hasher_update(self:c.POINTER[llvm_blake3_hasher], input:ctypes.c_void_p, input_len:size_t) -> None: ...
+@dll.bind
+def llvm_blake3_hasher_finalize(self:c.POINTER[llvm_blake3_hasher], out:c.POINTER[uint8_t], out_len:size_t) -> None: ...
+@dll.bind
+def llvm_blake3_hasher_finalize_seek(self:c.POINTER[llvm_blake3_hasher], seek:uint64_t, out:c.POINTER[uint8_t], out_len:size_t) -> None: ...
+@dll.bind
+def llvm_blake3_hasher_reset(self:c.POINTER[llvm_blake3_hasher]) -> None: ...
+lto_bool_t: TypeAlias = Annotated[bool, ctypes.c_bool]
+class lto_symbol_attributes(Annotated[int, ctypes.c_uint32], c.Enum): pass
 LTO_SYMBOL_ALIGNMENT_MASK = lto_symbol_attributes.define('LTO_SYMBOL_ALIGNMENT_MASK', 31)
 LTO_SYMBOL_PERMISSIONS_MASK = lto_symbol_attributes.define('LTO_SYMBOL_PERMISSIONS_MASK', 224)
 LTO_SYMBOL_PERMISSIONS_CODE = lto_symbol_attributes.define('LTO_SYMBOL_PERMISSIONS_CODE', 160)
@@ -10305,306 +3497,230 @@ LTO_SYMBOL_SCOPE_DEFAULT_CAN_BE_HIDDEN = lto_symbol_attributes.define('LTO_SYMBO
 LTO_SYMBOL_COMDAT = lto_symbol_attributes.define('LTO_SYMBOL_COMDAT', 16384)
 LTO_SYMBOL_ALIAS = lto_symbol_attributes.define('LTO_SYMBOL_ALIAS', 32768)
 
-lto_debug_model = CEnum(ctypes.c_uint32)
+class lto_debug_model(Annotated[int, ctypes.c_uint32], c.Enum): pass
 LTO_DEBUG_MODEL_NONE = lto_debug_model.define('LTO_DEBUG_MODEL_NONE', 0)
 LTO_DEBUG_MODEL_DWARF = lto_debug_model.define('LTO_DEBUG_MODEL_DWARF', 1)
 
-lto_codegen_model = CEnum(ctypes.c_uint32)
+class lto_codegen_model(Annotated[int, ctypes.c_uint32], c.Enum): pass
 LTO_CODEGEN_PIC_MODEL_STATIC = lto_codegen_model.define('LTO_CODEGEN_PIC_MODEL_STATIC', 0)
 LTO_CODEGEN_PIC_MODEL_DYNAMIC = lto_codegen_model.define('LTO_CODEGEN_PIC_MODEL_DYNAMIC', 1)
 LTO_CODEGEN_PIC_MODEL_DYNAMIC_NO_PIC = lto_codegen_model.define('LTO_CODEGEN_PIC_MODEL_DYNAMIC_NO_PIC', 2)
 LTO_CODEGEN_PIC_MODEL_DEFAULT = lto_codegen_model.define('LTO_CODEGEN_PIC_MODEL_DEFAULT', 3)
 
-class struct_LLVMOpaqueLTOModule(Struct): pass
-lto_module_t = ctypes.POINTER(struct_LLVMOpaqueLTOModule)
-class struct_LLVMOpaqueLTOCodeGenerator(Struct): pass
-lto_code_gen_t = ctypes.POINTER(struct_LLVMOpaqueLTOCodeGenerator)
-class struct_LLVMOpaqueThinLTOCodeGenerator(Struct): pass
-thinlto_code_gen_t = ctypes.POINTER(struct_LLVMOpaqueThinLTOCodeGenerator)
-try: (lto_get_version:=dll.lto_get_version).restype, lto_get_version.argtypes = ctypes.POINTER(ctypes.c_char), []
-except AttributeError: pass
-
-try: (lto_get_error_message:=dll.lto_get_error_message).restype, lto_get_error_message.argtypes = ctypes.POINTER(ctypes.c_char), []
-except AttributeError: pass
-
-try: (lto_module_is_object_file:=dll.lto_module_is_object_file).restype, lto_module_is_object_file.argtypes = lto_bool_t, [ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (lto_module_is_object_file_for_target:=dll.lto_module_is_object_file_for_target).restype, lto_module_is_object_file_for_target.argtypes = lto_bool_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (lto_module_has_objc_category:=dll.lto_module_has_objc_category).restype, lto_module_has_objc_category.argtypes = lto_bool_t, [ctypes.c_void_p, size_t]
-except AttributeError: pass
-
-try: (lto_module_is_object_file_in_memory:=dll.lto_module_is_object_file_in_memory).restype, lto_module_is_object_file_in_memory.argtypes = lto_bool_t, [ctypes.c_void_p, size_t]
-except AttributeError: pass
-
-try: (lto_module_is_object_file_in_memory_for_target:=dll.lto_module_is_object_file_in_memory_for_target).restype, lto_module_is_object_file_in_memory_for_target.argtypes = lto_bool_t, [ctypes.c_void_p, size_t, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (lto_module_create:=dll.lto_module_create).restype, lto_module_create.argtypes = lto_module_t, [ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (lto_module_create_from_memory:=dll.lto_module_create_from_memory).restype, lto_module_create_from_memory.argtypes = lto_module_t, [ctypes.c_void_p, size_t]
-except AttributeError: pass
-
-try: (lto_module_create_from_memory_with_path:=dll.lto_module_create_from_memory_with_path).restype, lto_module_create_from_memory_with_path.argtypes = lto_module_t, [ctypes.c_void_p, size_t, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (lto_module_create_in_local_context:=dll.lto_module_create_in_local_context).restype, lto_module_create_in_local_context.argtypes = lto_module_t, [ctypes.c_void_p, size_t, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (lto_module_create_in_codegen_context:=dll.lto_module_create_in_codegen_context).restype, lto_module_create_in_codegen_context.argtypes = lto_module_t, [ctypes.c_void_p, size_t, ctypes.POINTER(ctypes.c_char), lto_code_gen_t]
-except AttributeError: pass
-
-try: (lto_module_create_from_fd:=dll.lto_module_create_from_fd).restype, lto_module_create_from_fd.argtypes = lto_module_t, [ctypes.c_int32, ctypes.POINTER(ctypes.c_char), size_t]
-except AttributeError: pass
-
-off_t = ctypes.c_int64
-try: (lto_module_create_from_fd_at_offset:=dll.lto_module_create_from_fd_at_offset).restype, lto_module_create_from_fd_at_offset.argtypes = lto_module_t, [ctypes.c_int32, ctypes.POINTER(ctypes.c_char), size_t, size_t, off_t]
-except AttributeError: pass
-
-try: (lto_module_dispose:=dll.lto_module_dispose).restype, lto_module_dispose.argtypes = None, [lto_module_t]
-except AttributeError: pass
-
-try: (lto_module_get_target_triple:=dll.lto_module_get_target_triple).restype, lto_module_get_target_triple.argtypes = ctypes.POINTER(ctypes.c_char), [lto_module_t]
-except AttributeError: pass
-
-try: (lto_module_set_target_triple:=dll.lto_module_set_target_triple).restype, lto_module_set_target_triple.argtypes = None, [lto_module_t, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (lto_module_get_num_symbols:=dll.lto_module_get_num_symbols).restype, lto_module_get_num_symbols.argtypes = ctypes.c_uint32, [lto_module_t]
-except AttributeError: pass
-
-try: (lto_module_get_symbol_name:=dll.lto_module_get_symbol_name).restype, lto_module_get_symbol_name.argtypes = ctypes.POINTER(ctypes.c_char), [lto_module_t, ctypes.c_uint32]
-except AttributeError: pass
-
-try: (lto_module_get_symbol_attribute:=dll.lto_module_get_symbol_attribute).restype, lto_module_get_symbol_attribute.argtypes = lto_symbol_attributes, [lto_module_t, ctypes.c_uint32]
-except AttributeError: pass
-
-try: (lto_module_get_linkeropts:=dll.lto_module_get_linkeropts).restype, lto_module_get_linkeropts.argtypes = ctypes.POINTER(ctypes.c_char), [lto_module_t]
-except AttributeError: pass
-
-try: (lto_module_get_macho_cputype:=dll.lto_module_get_macho_cputype).restype, lto_module_get_macho_cputype.argtypes = lto_bool_t, [lto_module_t, ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32)]
-except AttributeError: pass
-
-try: (lto_module_has_ctor_dtor:=dll.lto_module_has_ctor_dtor).restype, lto_module_has_ctor_dtor.argtypes = lto_bool_t, [lto_module_t]
-except AttributeError: pass
-
-lto_codegen_diagnostic_severity_t = CEnum(ctypes.c_uint32)
+class struct_LLVMOpaqueLTOModule(ctypes.Structure): pass
+lto_module_t: TypeAlias = c.POINTER[struct_LLVMOpaqueLTOModule]
+class struct_LLVMOpaqueLTOCodeGenerator(ctypes.Structure): pass
+lto_code_gen_t: TypeAlias = c.POINTER[struct_LLVMOpaqueLTOCodeGenerator]
+class struct_LLVMOpaqueThinLTOCodeGenerator(ctypes.Structure): pass
+thinlto_code_gen_t: TypeAlias = c.POINTER[struct_LLVMOpaqueThinLTOCodeGenerator]
+@dll.bind
+def lto_get_version() -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
+@dll.bind
+def lto_get_error_message() -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
+@dll.bind
+def lto_module_is_object_file(path:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> lto_bool_t: ...
+@dll.bind
+def lto_module_is_object_file_for_target(path:c.POINTER[Annotated[bytes, ctypes.c_char]], target_triple_prefix:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> lto_bool_t: ...
+@dll.bind
+def lto_module_has_objc_category(mem:ctypes.c_void_p, length:size_t) -> lto_bool_t: ...
+@dll.bind
+def lto_module_is_object_file_in_memory(mem:ctypes.c_void_p, length:size_t) -> lto_bool_t: ...
+@dll.bind
+def lto_module_is_object_file_in_memory_for_target(mem:ctypes.c_void_p, length:size_t, target_triple_prefix:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> lto_bool_t: ...
+@dll.bind
+def lto_module_create(path:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> lto_module_t: ...
+@dll.bind
+def lto_module_create_from_memory(mem:ctypes.c_void_p, length:size_t) -> lto_module_t: ...
+@dll.bind
+def lto_module_create_from_memory_with_path(mem:ctypes.c_void_p, length:size_t, path:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> lto_module_t: ...
+@dll.bind
+def lto_module_create_in_local_context(mem:ctypes.c_void_p, length:size_t, path:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> lto_module_t: ...
+@dll.bind
+def lto_module_create_in_codegen_context(mem:ctypes.c_void_p, length:size_t, path:c.POINTER[Annotated[bytes, ctypes.c_char]], cg:lto_code_gen_t) -> lto_module_t: ...
+@dll.bind
+def lto_module_create_from_fd(fd:Annotated[int, ctypes.c_int32], path:c.POINTER[Annotated[bytes, ctypes.c_char]], file_size:size_t) -> lto_module_t: ...
+off_t: TypeAlias = Annotated[int, ctypes.c_int64]
+@dll.bind
+def lto_module_create_from_fd_at_offset(fd:Annotated[int, ctypes.c_int32], path:c.POINTER[Annotated[bytes, ctypes.c_char]], file_size:size_t, map_size:size_t, offset:off_t) -> lto_module_t: ...
+@dll.bind
+def lto_module_dispose(mod:lto_module_t) -> None: ...
+@dll.bind
+def lto_module_get_target_triple(mod:lto_module_t) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
+@dll.bind
+def lto_module_set_target_triple(mod:lto_module_t, triple:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> None: ...
+@dll.bind
+def lto_module_get_num_symbols(mod:lto_module_t) -> Annotated[int, ctypes.c_uint32]: ...
+@dll.bind
+def lto_module_get_symbol_name(mod:lto_module_t, index:Annotated[int, ctypes.c_uint32]) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
+@dll.bind
+def lto_module_get_symbol_attribute(mod:lto_module_t, index:Annotated[int, ctypes.c_uint32]) -> lto_symbol_attributes: ...
+@dll.bind
+def lto_module_get_linkeropts(mod:lto_module_t) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
+@dll.bind
+def lto_module_get_macho_cputype(mod:lto_module_t, out_cputype:c.POINTER[Annotated[int, ctypes.c_uint32]], out_cpusubtype:c.POINTER[Annotated[int, ctypes.c_uint32]]) -> lto_bool_t: ...
+@dll.bind
+def lto_module_has_ctor_dtor(mod:lto_module_t) -> lto_bool_t: ...
+class lto_codegen_diagnostic_severity_t(Annotated[int, ctypes.c_uint32], c.Enum): pass
 LTO_DS_ERROR = lto_codegen_diagnostic_severity_t.define('LTO_DS_ERROR', 0)
 LTO_DS_WARNING = lto_codegen_diagnostic_severity_t.define('LTO_DS_WARNING', 1)
 LTO_DS_REMARK = lto_codegen_diagnostic_severity_t.define('LTO_DS_REMARK', 3)
 LTO_DS_NOTE = lto_codegen_diagnostic_severity_t.define('LTO_DS_NOTE', 2)
 
-lto_diagnostic_handler_t = ctypes.CFUNCTYPE(None, lto_codegen_diagnostic_severity_t, ctypes.POINTER(ctypes.c_char), ctypes.c_void_p)
-try: (lto_codegen_set_diagnostic_handler:=dll.lto_codegen_set_diagnostic_handler).restype, lto_codegen_set_diagnostic_handler.argtypes = None, [lto_code_gen_t, lto_diagnostic_handler_t, ctypes.c_void_p]
-except AttributeError: pass
-
-try: (lto_codegen_create:=dll.lto_codegen_create).restype, lto_codegen_create.argtypes = lto_code_gen_t, []
-except AttributeError: pass
-
-try: (lto_codegen_create_in_local_context:=dll.lto_codegen_create_in_local_context).restype, lto_codegen_create_in_local_context.argtypes = lto_code_gen_t, []
-except AttributeError: pass
-
-try: (lto_codegen_dispose:=dll.lto_codegen_dispose).restype, lto_codegen_dispose.argtypes = None, [lto_code_gen_t]
-except AttributeError: pass
-
-try: (lto_codegen_add_module:=dll.lto_codegen_add_module).restype, lto_codegen_add_module.argtypes = lto_bool_t, [lto_code_gen_t, lto_module_t]
-except AttributeError: pass
-
-try: (lto_codegen_set_module:=dll.lto_codegen_set_module).restype, lto_codegen_set_module.argtypes = None, [lto_code_gen_t, lto_module_t]
-except AttributeError: pass
-
-try: (lto_codegen_set_debug_model:=dll.lto_codegen_set_debug_model).restype, lto_codegen_set_debug_model.argtypes = lto_bool_t, [lto_code_gen_t, lto_debug_model]
-except AttributeError: pass
-
-try: (lto_codegen_set_pic_model:=dll.lto_codegen_set_pic_model).restype, lto_codegen_set_pic_model.argtypes = lto_bool_t, [lto_code_gen_t, lto_codegen_model]
-except AttributeError: pass
-
-try: (lto_codegen_set_cpu:=dll.lto_codegen_set_cpu).restype, lto_codegen_set_cpu.argtypes = None, [lto_code_gen_t, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (lto_codegen_set_assembler_path:=dll.lto_codegen_set_assembler_path).restype, lto_codegen_set_assembler_path.argtypes = None, [lto_code_gen_t, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (lto_codegen_set_assembler_args:=dll.lto_codegen_set_assembler_args).restype, lto_codegen_set_assembler_args.argtypes = None, [lto_code_gen_t, ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (lto_codegen_add_must_preserve_symbol:=dll.lto_codegen_add_must_preserve_symbol).restype, lto_codegen_add_must_preserve_symbol.argtypes = None, [lto_code_gen_t, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (lto_codegen_write_merged_modules:=dll.lto_codegen_write_merged_modules).restype, lto_codegen_write_merged_modules.argtypes = lto_bool_t, [lto_code_gen_t, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (lto_codegen_compile:=dll.lto_codegen_compile).restype, lto_codegen_compile.argtypes = ctypes.c_void_p, [lto_code_gen_t, ctypes.POINTER(size_t)]
-except AttributeError: pass
-
-try: (lto_codegen_compile_to_file:=dll.lto_codegen_compile_to_file).restype, lto_codegen_compile_to_file.argtypes = lto_bool_t, [lto_code_gen_t, ctypes.POINTER(ctypes.POINTER(ctypes.c_char))]
-except AttributeError: pass
-
-try: (lto_codegen_optimize:=dll.lto_codegen_optimize).restype, lto_codegen_optimize.argtypes = lto_bool_t, [lto_code_gen_t]
-except AttributeError: pass
-
-try: (lto_codegen_compile_optimized:=dll.lto_codegen_compile_optimized).restype, lto_codegen_compile_optimized.argtypes = ctypes.c_void_p, [lto_code_gen_t, ctypes.POINTER(size_t)]
-except AttributeError: pass
-
-try: (lto_api_version:=dll.lto_api_version).restype, lto_api_version.argtypes = ctypes.c_uint32, []
-except AttributeError: pass
-
-try: (lto_set_debug_options:=dll.lto_set_debug_options).restype, lto_set_debug_options.argtypes = None, [ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (lto_codegen_debug_options:=dll.lto_codegen_debug_options).restype, lto_codegen_debug_options.argtypes = None, [lto_code_gen_t, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (lto_codegen_debug_options_array:=dll.lto_codegen_debug_options_array).restype, lto_codegen_debug_options_array.argtypes = None, [lto_code_gen_t, ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (lto_initialize_disassembler:=dll.lto_initialize_disassembler).restype, lto_initialize_disassembler.argtypes = None, []
-except AttributeError: pass
-
-try: (lto_codegen_set_should_internalize:=dll.lto_codegen_set_should_internalize).restype, lto_codegen_set_should_internalize.argtypes = None, [lto_code_gen_t, lto_bool_t]
-except AttributeError: pass
-
-try: (lto_codegen_set_should_embed_uselists:=dll.lto_codegen_set_should_embed_uselists).restype, lto_codegen_set_should_embed_uselists.argtypes = None, [lto_code_gen_t, lto_bool_t]
-except AttributeError: pass
-
-class struct_LLVMOpaqueLTOInput(Struct): pass
-lto_input_t = ctypes.POINTER(struct_LLVMOpaqueLTOInput)
-try: (lto_input_create:=dll.lto_input_create).restype, lto_input_create.argtypes = lto_input_t, [ctypes.c_void_p, size_t, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (lto_input_dispose:=dll.lto_input_dispose).restype, lto_input_dispose.argtypes = None, [lto_input_t]
-except AttributeError: pass
-
-try: (lto_input_get_num_dependent_libraries:=dll.lto_input_get_num_dependent_libraries).restype, lto_input_get_num_dependent_libraries.argtypes = ctypes.c_uint32, [lto_input_t]
-except AttributeError: pass
-
-try: (lto_input_get_dependent_library:=dll.lto_input_get_dependent_library).restype, lto_input_get_dependent_library.argtypes = ctypes.POINTER(ctypes.c_char), [lto_input_t, size_t, ctypes.POINTER(size_t)]
-except AttributeError: pass
-
-try: (lto_runtime_lib_symbols_list:=dll.lto_runtime_lib_symbols_list).restype, lto_runtime_lib_symbols_list.argtypes = ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), [ctypes.POINTER(size_t)]
-except AttributeError: pass
-
-class LTOObjectBuffer(Struct): pass
-LTOObjectBuffer._fields_ = [
-  ('Buffer', ctypes.POINTER(ctypes.c_char)),
-  ('Size', size_t),
-]
-try: (thinlto_create_codegen:=dll.thinlto_create_codegen).restype, thinlto_create_codegen.argtypes = thinlto_code_gen_t, []
-except AttributeError: pass
-
-try: (thinlto_codegen_dispose:=dll.thinlto_codegen_dispose).restype, thinlto_codegen_dispose.argtypes = None, [thinlto_code_gen_t]
-except AttributeError: pass
-
-try: (thinlto_codegen_add_module:=dll.thinlto_codegen_add_module).restype, thinlto_codegen_add_module.argtypes = None, [thinlto_code_gen_t, ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char), ctypes.c_int32]
-except AttributeError: pass
-
-try: (thinlto_codegen_process:=dll.thinlto_codegen_process).restype, thinlto_codegen_process.argtypes = None, [thinlto_code_gen_t]
-except AttributeError: pass
-
-try: (thinlto_module_get_num_objects:=dll.thinlto_module_get_num_objects).restype, thinlto_module_get_num_objects.argtypes = ctypes.c_uint32, [thinlto_code_gen_t]
-except AttributeError: pass
-
-try: (thinlto_module_get_object:=dll.thinlto_module_get_object).restype, thinlto_module_get_object.argtypes = LTOObjectBuffer, [thinlto_code_gen_t, ctypes.c_uint32]
-except AttributeError: pass
-
-try: (thinlto_module_get_num_object_files:=dll.thinlto_module_get_num_object_files).restype, thinlto_module_get_num_object_files.argtypes = ctypes.c_uint32, [thinlto_code_gen_t]
-except AttributeError: pass
-
-try: (thinlto_module_get_object_file:=dll.thinlto_module_get_object_file).restype, thinlto_module_get_object_file.argtypes = ctypes.POINTER(ctypes.c_char), [thinlto_code_gen_t, ctypes.c_uint32]
-except AttributeError: pass
-
-try: (thinlto_codegen_set_pic_model:=dll.thinlto_codegen_set_pic_model).restype, thinlto_codegen_set_pic_model.argtypes = lto_bool_t, [thinlto_code_gen_t, lto_codegen_model]
-except AttributeError: pass
-
-try: (thinlto_codegen_set_savetemps_dir:=dll.thinlto_codegen_set_savetemps_dir).restype, thinlto_codegen_set_savetemps_dir.argtypes = None, [thinlto_code_gen_t, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (thinlto_set_generated_objects_dir:=dll.thinlto_set_generated_objects_dir).restype, thinlto_set_generated_objects_dir.argtypes = None, [thinlto_code_gen_t, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (thinlto_codegen_set_cpu:=dll.thinlto_codegen_set_cpu).restype, thinlto_codegen_set_cpu.argtypes = None, [thinlto_code_gen_t, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (thinlto_codegen_disable_codegen:=dll.thinlto_codegen_disable_codegen).restype, thinlto_codegen_disable_codegen.argtypes = None, [thinlto_code_gen_t, lto_bool_t]
-except AttributeError: pass
-
-try: (thinlto_codegen_set_codegen_only:=dll.thinlto_codegen_set_codegen_only).restype, thinlto_codegen_set_codegen_only.argtypes = None, [thinlto_code_gen_t, lto_bool_t]
-except AttributeError: pass
-
-try: (thinlto_debug_options:=dll.thinlto_debug_options).restype, thinlto_debug_options.argtypes = None, [ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (lto_module_is_thinlto:=dll.lto_module_is_thinlto).restype, lto_module_is_thinlto.argtypes = lto_bool_t, [lto_module_t]
-except AttributeError: pass
-
-try: (thinlto_codegen_add_must_preserve_symbol:=dll.thinlto_codegen_add_must_preserve_symbol).restype, thinlto_codegen_add_must_preserve_symbol.argtypes = None, [thinlto_code_gen_t, ctypes.POINTER(ctypes.c_char), ctypes.c_int32]
-except AttributeError: pass
-
-try: (thinlto_codegen_add_cross_referenced_symbol:=dll.thinlto_codegen_add_cross_referenced_symbol).restype, thinlto_codegen_add_cross_referenced_symbol.argtypes = None, [thinlto_code_gen_t, ctypes.POINTER(ctypes.c_char), ctypes.c_int32]
-except AttributeError: pass
-
-try: (thinlto_codegen_set_cache_dir:=dll.thinlto_codegen_set_cache_dir).restype, thinlto_codegen_set_cache_dir.argtypes = None, [thinlto_code_gen_t, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (thinlto_codegen_set_cache_pruning_interval:=dll.thinlto_codegen_set_cache_pruning_interval).restype, thinlto_codegen_set_cache_pruning_interval.argtypes = None, [thinlto_code_gen_t, ctypes.c_int32]
-except AttributeError: pass
-
-try: (thinlto_codegen_set_final_cache_size_relative_to_available_space:=dll.thinlto_codegen_set_final_cache_size_relative_to_available_space).restype, thinlto_codegen_set_final_cache_size_relative_to_available_space.argtypes = None, [thinlto_code_gen_t, ctypes.c_uint32]
-except AttributeError: pass
-
-try: (thinlto_codegen_set_cache_entry_expiration:=dll.thinlto_codegen_set_cache_entry_expiration).restype, thinlto_codegen_set_cache_entry_expiration.argtypes = None, [thinlto_code_gen_t, ctypes.c_uint32]
-except AttributeError: pass
-
-try: (thinlto_codegen_set_cache_size_bytes:=dll.thinlto_codegen_set_cache_size_bytes).restype, thinlto_codegen_set_cache_size_bytes.argtypes = None, [thinlto_code_gen_t, ctypes.c_uint32]
-except AttributeError: pass
-
-try: (thinlto_codegen_set_cache_size_megabytes:=dll.thinlto_codegen_set_cache_size_megabytes).restype, thinlto_codegen_set_cache_size_megabytes.argtypes = None, [thinlto_code_gen_t, ctypes.c_uint32]
-except AttributeError: pass
-
-try: (thinlto_codegen_set_cache_size_files:=dll.thinlto_codegen_set_cache_size_files).restype, thinlto_codegen_set_cache_size_files.argtypes = None, [thinlto_code_gen_t, ctypes.c_uint32]
-except AttributeError: pass
-
-LLVMDisassembler_Option_UseMarkup = 1
-LLVMDisassembler_Option_PrintImmHex = 2
-LLVMDisassembler_Option_AsmPrinterVariant = 4
-LLVMDisassembler_Option_SetInstrComments = 8
-LLVMDisassembler_Option_PrintLatency = 16
-LLVMDisassembler_Option_Color = 32
-LLVMDisassembler_VariantKind_None = 0
-LLVMDisassembler_VariantKind_ARM_HI16 = 1
-LLVMDisassembler_VariantKind_ARM_LO16 = 2
-LLVMDisassembler_VariantKind_ARM64_PAGE = 1
-LLVMDisassembler_VariantKind_ARM64_PAGEOFF = 2
-LLVMDisassembler_VariantKind_ARM64_GOTPAGE = 3
-LLVMDisassembler_VariantKind_ARM64_GOTPAGEOFF = 4
-LLVMDisassembler_VariantKind_ARM64_TLVP = 5
-LLVMDisassembler_VariantKind_ARM64_TLVOFF = 6
-LLVMDisassembler_ReferenceType_InOut_None = 0
-LLVMDisassembler_ReferenceType_In_Branch = 1
-LLVMDisassembler_ReferenceType_In_PCrel_Load = 2
-LLVMDisassembler_ReferenceType_In_ARM64_ADRP = 0x100000001
-LLVMDisassembler_ReferenceType_In_ARM64_ADDXri = 0x100000002
-LLVMDisassembler_ReferenceType_In_ARM64_LDRXui = 0x100000003
-LLVMDisassembler_ReferenceType_In_ARM64_LDRXl = 0x100000004
-LLVMDisassembler_ReferenceType_In_ARM64_ADR = 0x100000005
-LLVMDisassembler_ReferenceType_Out_SymbolStub = 1
-LLVMDisassembler_ReferenceType_Out_LitPool_SymAddr = 2
-LLVMDisassembler_ReferenceType_Out_LitPool_CstrAddr = 3
-LLVMDisassembler_ReferenceType_Out_Objc_CFString_Ref = 4
-LLVMDisassembler_ReferenceType_Out_Objc_Message = 5
-LLVMDisassembler_ReferenceType_Out_Objc_Message_Ref = 6
-LLVMDisassembler_ReferenceType_Out_Objc_Selector_Ref = 7
-LLVMDisassembler_ReferenceType_Out_Objc_Class_Ref = 8
-LLVMDisassembler_ReferenceType_DeMangled_Name = 9
-LLVMErrorSuccess = 0
-REMARKS_API_VERSION = 1
-LLVM_BLAKE3_VERSION_STRING = "1.3.1"
-LLVM_BLAKE3_KEY_LEN = 32
-LLVM_BLAKE3_OUT_LEN = 32
-LLVM_BLAKE3_BLOCK_LEN = 64
-LLVM_BLAKE3_CHUNK_LEN = 1024
-LLVM_BLAKE3_MAX_DEPTH = 54
-LTO_API_VERSION = 29
+lto_diagnostic_handler_t: TypeAlias = c.CFUNCTYPE[None, [lto_codegen_diagnostic_severity_t, c.POINTER[Annotated[bytes, ctypes.c_char]], ctypes.c_void_p]]
+@dll.bind
+def lto_codegen_set_diagnostic_handler(_0:lto_code_gen_t, _1:lto_diagnostic_handler_t, _2:ctypes.c_void_p) -> None: ...
+@dll.bind
+def lto_codegen_create() -> lto_code_gen_t: ...
+@dll.bind
+def lto_codegen_create_in_local_context() -> lto_code_gen_t: ...
+@dll.bind
+def lto_codegen_dispose(_0:lto_code_gen_t) -> None: ...
+@dll.bind
+def lto_codegen_add_module(cg:lto_code_gen_t, mod:lto_module_t) -> lto_bool_t: ...
+@dll.bind
+def lto_codegen_set_module(cg:lto_code_gen_t, mod:lto_module_t) -> None: ...
+@dll.bind
+def lto_codegen_set_debug_model(cg:lto_code_gen_t, _1:lto_debug_model) -> lto_bool_t: ...
+@dll.bind
+def lto_codegen_set_pic_model(cg:lto_code_gen_t, _1:lto_codegen_model) -> lto_bool_t: ...
+@dll.bind
+def lto_codegen_set_cpu(cg:lto_code_gen_t, cpu:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> None: ...
+@dll.bind
+def lto_codegen_set_assembler_path(cg:lto_code_gen_t, path:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> None: ...
+@dll.bind
+def lto_codegen_set_assembler_args(cg:lto_code_gen_t, args:c.POINTER[c.POINTER[Annotated[bytes, ctypes.c_char]]], nargs:Annotated[int, ctypes.c_int32]) -> None: ...
+@dll.bind
+def lto_codegen_add_must_preserve_symbol(cg:lto_code_gen_t, symbol:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> None: ...
+@dll.bind
+def lto_codegen_write_merged_modules(cg:lto_code_gen_t, path:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> lto_bool_t: ...
+@dll.bind
+def lto_codegen_compile(cg:lto_code_gen_t, length:c.POINTER[size_t]) -> ctypes.c_void_p: ...
+@dll.bind
+def lto_codegen_compile_to_file(cg:lto_code_gen_t, name:c.POINTER[c.POINTER[Annotated[bytes, ctypes.c_char]]]) -> lto_bool_t: ...
+@dll.bind
+def lto_codegen_optimize(cg:lto_code_gen_t) -> lto_bool_t: ...
+@dll.bind
+def lto_codegen_compile_optimized(cg:lto_code_gen_t, length:c.POINTER[size_t]) -> ctypes.c_void_p: ...
+@dll.bind
+def lto_api_version() -> Annotated[int, ctypes.c_uint32]: ...
+@dll.bind
+def lto_set_debug_options(options:c.POINTER[c.POINTER[Annotated[bytes, ctypes.c_char]]], number:Annotated[int, ctypes.c_int32]) -> None: ...
+@dll.bind
+def lto_codegen_debug_options(cg:lto_code_gen_t, _1:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> None: ...
+@dll.bind
+def lto_codegen_debug_options_array(cg:lto_code_gen_t, _1:c.POINTER[c.POINTER[Annotated[bytes, ctypes.c_char]]], number:Annotated[int, ctypes.c_int32]) -> None: ...
+@dll.bind
+def lto_initialize_disassembler() -> None: ...
+@dll.bind
+def lto_codegen_set_should_internalize(cg:lto_code_gen_t, ShouldInternalize:lto_bool_t) -> None: ...
+@dll.bind
+def lto_codegen_set_should_embed_uselists(cg:lto_code_gen_t, ShouldEmbedUselists:lto_bool_t) -> None: ...
+class struct_LLVMOpaqueLTOInput(ctypes.Structure): pass
+lto_input_t: TypeAlias = c.POINTER[struct_LLVMOpaqueLTOInput]
+@dll.bind
+def lto_input_create(buffer:ctypes.c_void_p, buffer_size:size_t, path:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> lto_input_t: ...
+@dll.bind
+def lto_input_dispose(input:lto_input_t) -> None: ...
+@dll.bind
+def lto_input_get_num_dependent_libraries(input:lto_input_t) -> Annotated[int, ctypes.c_uint32]: ...
+@dll.bind
+def lto_input_get_dependent_library(input:lto_input_t, index:size_t, size:c.POINTER[size_t]) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
+@dll.bind
+def lto_runtime_lib_symbols_list(size:c.POINTER[size_t]) -> c.POINTER[c.POINTER[Annotated[bytes, ctypes.c_char]]]: ...
+@c.record
+class LTOObjectBuffer(c.Struct):
+  SIZE = 16
+  Buffer: Annotated[c.POINTER[Annotated[bytes, ctypes.c_char]], 0]
+  Size: Annotated[size_t, 8]
+@dll.bind
+def thinlto_create_codegen() -> thinlto_code_gen_t: ...
+@dll.bind
+def thinlto_codegen_dispose(cg:thinlto_code_gen_t) -> None: ...
+@dll.bind
+def thinlto_codegen_add_module(cg:thinlto_code_gen_t, identifier:c.POINTER[Annotated[bytes, ctypes.c_char]], data:c.POINTER[Annotated[bytes, ctypes.c_char]], length:Annotated[int, ctypes.c_int32]) -> None: ...
+@dll.bind
+def thinlto_codegen_process(cg:thinlto_code_gen_t) -> None: ...
+@dll.bind
+def thinlto_module_get_num_objects(cg:thinlto_code_gen_t) -> Annotated[int, ctypes.c_uint32]: ...
+@dll.bind
+def thinlto_module_get_object(cg:thinlto_code_gen_t, index:Annotated[int, ctypes.c_uint32]) -> LTOObjectBuffer: ...
+@dll.bind
+def thinlto_module_get_num_object_files(cg:thinlto_code_gen_t) -> Annotated[int, ctypes.c_uint32]: ...
+@dll.bind
+def thinlto_module_get_object_file(cg:thinlto_code_gen_t, index:Annotated[int, ctypes.c_uint32]) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
+@dll.bind
+def thinlto_codegen_set_pic_model(cg:thinlto_code_gen_t, _1:lto_codegen_model) -> lto_bool_t: ...
+@dll.bind
+def thinlto_codegen_set_savetemps_dir(cg:thinlto_code_gen_t, save_temps_dir:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> None: ...
+@dll.bind
+def thinlto_set_generated_objects_dir(cg:thinlto_code_gen_t, save_temps_dir:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> None: ...
+@dll.bind
+def thinlto_codegen_set_cpu(cg:thinlto_code_gen_t, cpu:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> None: ...
+@dll.bind
+def thinlto_codegen_disable_codegen(cg:thinlto_code_gen_t, disable:lto_bool_t) -> None: ...
+@dll.bind
+def thinlto_codegen_set_codegen_only(cg:thinlto_code_gen_t, codegen_only:lto_bool_t) -> None: ...
+@dll.bind
+def thinlto_debug_options(options:c.POINTER[c.POINTER[Annotated[bytes, ctypes.c_char]]], number:Annotated[int, ctypes.c_int32]) -> None: ...
+@dll.bind
+def lto_module_is_thinlto(mod:lto_module_t) -> lto_bool_t: ...
+@dll.bind
+def thinlto_codegen_add_must_preserve_symbol(cg:thinlto_code_gen_t, name:c.POINTER[Annotated[bytes, ctypes.c_char]], length:Annotated[int, ctypes.c_int32]) -> None: ...
+@dll.bind
+def thinlto_codegen_add_cross_referenced_symbol(cg:thinlto_code_gen_t, name:c.POINTER[Annotated[bytes, ctypes.c_char]], length:Annotated[int, ctypes.c_int32]) -> None: ...
+@dll.bind
+def thinlto_codegen_set_cache_dir(cg:thinlto_code_gen_t, cache_dir:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> None: ...
+@dll.bind
+def thinlto_codegen_set_cache_pruning_interval(cg:thinlto_code_gen_t, interval:Annotated[int, ctypes.c_int32]) -> None: ...
+@dll.bind
+def thinlto_codegen_set_final_cache_size_relative_to_available_space(cg:thinlto_code_gen_t, percentage:Annotated[int, ctypes.c_uint32]) -> None: ...
+@dll.bind
+def thinlto_codegen_set_cache_entry_expiration(cg:thinlto_code_gen_t, expiration:Annotated[int, ctypes.c_uint32]) -> None: ...
+@dll.bind
+def thinlto_codegen_set_cache_size_bytes(cg:thinlto_code_gen_t, max_size_bytes:Annotated[int, ctypes.c_uint32]) -> None: ...
+@dll.bind
+def thinlto_codegen_set_cache_size_megabytes(cg:thinlto_code_gen_t, max_size_megabytes:Annotated[int, ctypes.c_uint32]) -> None: ...
+@dll.bind
+def thinlto_codegen_set_cache_size_files(cg:thinlto_code_gen_t, max_size_files:Annotated[int, ctypes.c_uint32]) -> None: ...
+c.init_records()
+LLVMDisassembler_Option_UseMarkup = 1 # type: ignore
+LLVMDisassembler_Option_PrintImmHex = 2 # type: ignore
+LLVMDisassembler_Option_AsmPrinterVariant = 4 # type: ignore
+LLVMDisassembler_Option_SetInstrComments = 8 # type: ignore
+LLVMDisassembler_Option_PrintLatency = 16 # type: ignore
+LLVMDisassembler_Option_Color = 32 # type: ignore
+LLVMDisassembler_VariantKind_None = 0 # type: ignore
+LLVMDisassembler_VariantKind_ARM_HI16 = 1 # type: ignore
+LLVMDisassembler_VariantKind_ARM_LO16 = 2 # type: ignore
+LLVMDisassembler_VariantKind_ARM64_PAGE = 1 # type: ignore
+LLVMDisassembler_VariantKind_ARM64_PAGEOFF = 2 # type: ignore
+LLVMDisassembler_VariantKind_ARM64_GOTPAGE = 3 # type: ignore
+LLVMDisassembler_VariantKind_ARM64_GOTPAGEOFF = 4 # type: ignore
+LLVMDisassembler_VariantKind_ARM64_TLVP = 5 # type: ignore
+LLVMDisassembler_VariantKind_ARM64_TLVOFF = 6 # type: ignore
+LLVMDisassembler_ReferenceType_InOut_None = 0 # type: ignore
+LLVMDisassembler_ReferenceType_In_Branch = 1 # type: ignore
+LLVMDisassembler_ReferenceType_In_PCrel_Load = 2 # type: ignore
+LLVMDisassembler_ReferenceType_In_ARM64_ADRP = 0x100000001 # type: ignore
+LLVMDisassembler_ReferenceType_In_ARM64_ADDXri = 0x100000002 # type: ignore
+LLVMDisassembler_ReferenceType_In_ARM64_LDRXui = 0x100000003 # type: ignore
+LLVMDisassembler_ReferenceType_In_ARM64_LDRXl = 0x100000004 # type: ignore
+LLVMDisassembler_ReferenceType_In_ARM64_ADR = 0x100000005 # type: ignore
+LLVMDisassembler_ReferenceType_Out_SymbolStub = 1 # type: ignore
+LLVMDisassembler_ReferenceType_Out_LitPool_SymAddr = 2 # type: ignore
+LLVMDisassembler_ReferenceType_Out_LitPool_CstrAddr = 3 # type: ignore
+LLVMDisassembler_ReferenceType_Out_Objc_CFString_Ref = 4 # type: ignore
+LLVMDisassembler_ReferenceType_Out_Objc_Message = 5 # type: ignore
+LLVMDisassembler_ReferenceType_Out_Objc_Message_Ref = 6 # type: ignore
+LLVMDisassembler_ReferenceType_Out_Objc_Selector_Ref = 7 # type: ignore
+LLVMDisassembler_ReferenceType_Out_Objc_Class_Ref = 8 # type: ignore
+LLVMDisassembler_ReferenceType_DeMangled_Name = 9 # type: ignore
+LLVMErrorSuccess = 0 # type: ignore
+REMARKS_API_VERSION = 1 # type: ignore
+LLVM_BLAKE3_VERSION_STRING = "1.3.1" # type: ignore
+LLVM_BLAKE3_KEY_LEN = 32 # type: ignore
+LLVM_BLAKE3_OUT_LEN = 32 # type: ignore
+LLVM_BLAKE3_BLOCK_LEN = 64 # type: ignore
+LLVM_BLAKE3_CHUNK_LEN = 1024 # type: ignore
+LLVM_BLAKE3_MAX_DEPTH = 54 # type: ignore
+LTO_API_VERSION = 29 # type: ignore

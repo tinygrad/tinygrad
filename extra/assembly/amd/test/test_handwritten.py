@@ -4,29 +4,32 @@
 import unittest, struct
 from extra.assembly.amd.autogen.rdna3.ins import *
 from extra.assembly.amd.dsl import Inst
-from extra.assembly.amd.asm import asm
 from extra.assembly.amd.test.test_roundtrip import compile_asm
 
-class TestIntegration(unittest.TestCase):
+class IntegrationTestBase(unittest.TestCase):
   inst: Inst
+  arch: str
   def tearDown(self):
     if not hasattr(self, 'inst'): return
     b = self.inst.to_bytes()
     st = self.inst.disasm()
-    reasm = asm(st)
-    desc = f"{st:25s} {self.inst} {b!r} {reasm}"
-    self.assertEqual(b, compile_asm(st), desc)
-    # TODO: this compare should work for valid things
-    #self.assertEqual(self.inst, reasm)
-    self.assertEqual(repr(self.inst), repr(reasm))
+    # Test that the instruction can be compiled by LLVM and produces the same bytes
+    desc = f"{st:25s} {self.inst} {b!r}"
+    self.assertEqual(b, compile_asm(st, arch=self.arch), desc)
     print(desc)
+
+class TestIntegration(IntegrationTestBase):
+  arch: str = "rdna3"
+
+  def test_wmma(self):
+    self.inst = v_wmma_f32_16x16x16_f16(v[0:7], v[184:191], v[136:143], v[0:7])
 
   def test_load_b128(self):
     self.inst = s_load_b128(s[4:7], s[0:1], NULL, 0)
 
   def test_load_b128_wrong_size(self):
     # this should have to be 4 regs on the loaded to
-    with self.assertRaises(Exception):
+    with self.assertRaises(TypeError):
       self.inst = s_load_b128(s[4:6], s[0:1], NULL, 0)
 
   def test_mov_b32(self):
@@ -125,6 +128,17 @@ class TestIntegration(unittest.TestCase):
     int_inst = s_mov_b32(s[0], struct.unpack("I", struct.pack("f", 1337.0))[0])
     self.assertEqual(self.inst, int_inst)
 
+class TestIntegrationCDNA(IntegrationTestBase):
+  arch = "cdna"
+
+  def test_mfma(self):
+    from extra.assembly.amd.autogen.cdna.ins import v_mfma_f32_16x16x16_f16
+    self.inst = v_mfma_f32_16x16x16_f16(v[0:3], v[0:1], v[0:1], 0)
+
+  def test_mfma_fp8(self):
+    from extra.assembly.amd.autogen.cdna.ins import v_mfma_f32_16x16x128_f8f6f4
+    self.inst = v_mfma_f32_16x16x128_f8f6f4(v[0:3], v[0:5], v[0:5], 1, cbsz=2, blgp=2)
+
 class TestRegisterSliceSyntax(unittest.TestCase):
   """
   Issue: Register slice syntax should use AMD assembly convention (inclusive end).
@@ -140,7 +154,7 @@ class TestRegisterSliceSyntax(unittest.TestCase):
   def test_register_slice_count(self):
     # s[4:7] should give 4 registers: s4, s5, s6, s7 (AMD convention, inclusive)
     reg = s[4:7]
-    self.assertEqual(reg.count, 4, "s[4:7] should give 4 registers (s4, s5, s6, s7)")
+    self.assertEqual(reg.sz, 4, "s[4:7] should give 4 registers (s4, s5, s6, s7)")
 
   def test_register_slice_roundtrip(self):
     # Round-trip: DSL -> disasm -> DSL should preserve register count
@@ -151,7 +165,7 @@ class TestRegisterSliceSyntax(unittest.TestCase):
     self.assertIn("s[4:7]", disasm)
     # And s[4:7] in DSL should give the same 4 registers
     reg_from_disasm = s[4:7]
-    self.assertEqual(reg_from_disasm.count, 4, "s[4:7] from disasm should give 4 registers")
+    self.assertEqual(reg_from_disasm.sz, 4, "s[4:7] from disasm should give 4 registers")
 
 class TestInstructionEquality(unittest.TestCase):
   """

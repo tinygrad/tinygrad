@@ -1,12 +1,41 @@
 #!/usr/bin/env python3
 import multiprocessing, pickle, difflib, os, threading, json, time, sys, webbrowser, socket, argparse, functools, codecs, io, struct
-import ctypes, pathlib, traceback, itertools
+import pathlib, traceback, itertools, socketserver
 from contextlib import redirect_stdout, redirect_stderr, contextmanager
 from decimal import Decimal
 from urllib.parse import parse_qs, urlparse
+from http.server import BaseHTTPRequestHandler
 from typing import Any, TypedDict, TypeVar, Generator, Callable
 from tinygrad.helpers import colored, getenv, tqdm, unwrap, word_wrap, TRACEMETA, ProfileEvent, ProfileRangeEvent, TracingKey, ProfilePointEvent, temp
-from tinygrad.helpers import printable, TCPServerWithReuse, HTTPRequestHandler
+from tinygrad.helpers import printable
+
+# NOTE: using HTTPServer forces a potentially slow socket.getfqdn
+class TCPServerWithReuse(socketserver.TCPServer):
+  allow_reuse_address = True
+  def __init__(self, server_address, RequestHandlerClass):
+    print(f"*** started server on http://127.0.0.1:{server_address[1]}")
+    super().__init__(server_address, RequestHandlerClass)
+
+class HTTPRequestHandler(BaseHTTPRequestHandler):
+  def send_data(self, data:bytes, content_type:str="application/json", status_code:int=200):
+    self.send_response(status_code)
+    self.send_header("Content-Type", content_type)
+    self.send_header("Content-Length", str(len(data)))
+    self.end_headers()
+    return self.wfile.write(data)
+  def stream_json(self, source:Generator):
+    try:
+      self.send_response(200)
+      self.send_header("Content-Type", "text/event-stream")
+      self.send_header("Cache-Control", "no-cache")
+      self.end_headers()
+      for r in source:
+        self.wfile.write(f"data: {json.dumps(r)}\n\n".encode("utf-8"))
+        self.wfile.flush()
+      self.wfile.write("data: [DONE]\n\n".encode("utf-8"))
+    # pass if client closed connection
+    except (BrokenPipeError, ConnectionResetError): return
+
 from tinygrad.uop.ops import TrackedGraphRewrite, RewriteTrace, UOp, Ops, GroupOp, srender, sint, sym_infer, range_str, pyrender
 from tinygrad.uop.ops import print_uops, range_start, multirange_str
 from tinygrad.device import ProfileDeviceEvent, ProfileGraphEvent, ProfileGraphEntry, Device, ProfileProgramEvent
@@ -19,6 +48,7 @@ uops_colors = {Ops.LOAD: "#ffc0c0", Ops.STORE: "#87CEEB", Ops.CONST: "#e0e0e0", 
                Ops.INDEX: "#cef263", Ops.WMMA: "#efefc0", Ops.MULTI: "#f6ccff", Ops.KERNEL: "#3e7f55", Ops.CUSTOM_KERNEL: "#3ebf55",
                **{x:"#D8F9E4" for x in GroupOp.Movement}, **{x:"#ffffc0" for x in GroupOp.ALU}, Ops.THREEFRY:"#ffff80",
                Ops.BUFFER_VIEW: "#E5EAFF", Ops.BUFFER: "#B0BDFF", Ops.COPY: "#a040a0", Ops.ENCDEC: "#bf71b6",
+               Ops.CALL: "#00B7C8", Ops.PARAM: "#14686F",
                Ops.ALLREDUCE: "#ff40a0", Ops.MSELECT: "#d040a0", Ops.MSTACK: "#d040a0", Ops.CONTIGUOUS: "#FFC14D",
                Ops.BUFFERIZE: "#FF991C", Ops.REWRITE_ERROR: "#ff2e2e", Ops.AFTER: "#8A7866", Ops.END: "#524C46"}
 
@@ -91,7 +121,7 @@ def uop_to_json(x:UOp) -> dict[int, dict]:
       if u._shape is not None:
         label += f"\n{shape_to_str(u.shape)}"
       if u.op in {Ops.INDEX, Ops.BUFFERIZE}:
-        label += f"\n{u.render()}"
+        if len(u.toposort()) < 30: label += f"\n{u.render()}"
         ranges: list[UOp] = []
         for us in u.src[1:]: ranges += [s for s in us.toposort() if s.op in {Ops.RANGE, Ops.SPECIAL}]
         if ranges: label += "\n"+' '.join([f"{s.render()}={s.vmax+1}" for s in ranges])
@@ -175,6 +205,7 @@ def timeline_layout(dev_events:list[tuple[int, int, float, DevEvent]], start_ts:
     elif isinstance(e.name, TracingKey):
       name = e.name.display_name
       ref = next((v for k in e.name.keys if (v:=ref_map.get(k)) is not None), None)
+      if isinstance(e.name.ret, str): fmt.append(e.name.ret)
     events.append(struct.pack("<IIIIfI", enum_str(name, scache), option(ref), option(key), st-start_ts, dur, enum_str("\n".join(fmt), scache)))
   return struct.pack("<BI", 0, len(events))+b"".join(events) if events else None
 
@@ -218,55 +249,96 @@ def soft_err(fn:Callable):
   try: yield
   except Exception: fn({"src":traceback.format_exc()})
 
-def row_tuple(row:str) -> tuple[int, ...]: return tuple(int(x.split(":")[1]) for x in row.split())
+def row_tuple(row:str) -> tuple[tuple[int, int], ...]:
+  return tuple((ord(ss[0][0]), int(ss[1])) if len(ss:=x.split(":"))>1 else (999,999) for x in row.split())
 
 # *** Performance counters
+
+metrics:dict[str, Callable[[dict[str, tuple[int, int, int]]], str]] = {
+  "VALU utilization": lambda s: f"{100 * (s['SQ_INSTS_VALU'][0] / s['SQ_INSTS_VALU'][2]) / (s['GRBM_GUI_ACTIVE'][1] * 4):.1f}%",
+  "SALU utilization": lambda s: f"{100 * (s['SQ_INSTS_SALU'][0] / s['SQ_INSTS_SALU'][2]) / (s['GRBM_GUI_ACTIVE'][1] * 4):.1f}%",
+}
 
 def unpack_pmc(e) -> dict:
   agg_cols = ["Name", "Sum"]
   sample_cols = ["XCC", "INST", "SE", "SA", "WGP", "Value"]
   rows:list[list] = []
+  stats:dict[str, tuple[int, int, int]] = {}  # name -> (sum, max, count)
   view, ptr = memoryview(e.blob).cast('Q'), 0
   for s in e.sched:
     row:list = [s.name, 0, {"cols":sample_cols, "rows":[]}]
+    max_val, cnt = 0, 0
     for sample in itertools.product(range(s.xcc), range(s.inst), range(s.se), range(s.sa), range(s.wgp)):
       row[1] += (val:=int(view[ptr]))
+      max_val, cnt = max(max_val, val), cnt + 1
       row[2]["rows"].append(sample+(val,))
       ptr += 1
+    stats[s.name] = (row[1], max_val, cnt)
     rows.append(row)
+  for name, fn in metrics.items():
+    try: rows.append([name, fn(stats)])
+    except KeyError: pass
   return {"rows":rows, "cols":agg_cols}
 
 # ** on startup, list all the performance counter traces
 
 def load_counters(profile:list[ProfileEvent]) -> None:
   from tinygrad.runtime.ops_amd import ProfileSQTTEvent, ProfilePMCEvent
-  counter_events:dict[tuple[str, int], dict] = {}
+  counter_events:dict[tuple[int, int], dict] = {}
   durations:dict[str, list[float]] = {}
-  prg_events:dict[str, ProfileProgramEvent] = {}
+  prg_events:dict[int, ProfileProgramEvent] = {}
   for e in profile:
     if isinstance(e, (ProfilePMCEvent, ProfileSQTTEvent)): counter_events.setdefault((e.kern, e.exec_tag), {}).setdefault(type(e), []).append(e)
     if isinstance(e, ProfileRangeEvent) and e.device.startswith("AMD") and e.en is not None:
       durations.setdefault(str(e.name), []).append(float(e.en-e.st))
-    if isinstance(e, ProfileProgramEvent): prg_events[str(e.name)] = e
+    if isinstance(e, ProfileProgramEvent) and e.tag is not None: prg_events[e.tag] = e
   if len(counter_events) == 0: return None
   ctxs.append({"name":"All Counters", "steps":[create_step("PMC", ("/all-pmc", len(ctxs), 0), (durations, all_counters:={}))]})
   run_number = {n:0 for n,_ in counter_events}
   for (k, tag),v in counter_events.items():
     # use the colored name if it exists
-    name = trace.keys[r].ret.name if (r:=ref_map.get(k)) is not None else k
+    name = trace.keys[r].ret.name if (r:=ref_map.get(pname:=prg_events[k].name)) is not None else pname
     run_number[k] += 1
     steps:list[dict] = []
     if (pmc:=v.get(ProfilePMCEvent)):
       steps.append(create_step("PMC", ("/prg-pmc", len(ctxs), len(steps)), pmc))
-      all_counters[(name, run_number[k], k)] = pmc[0]
+      all_counters[(name, run_number[k], pname)] = pmc[0]
+    # to decode a SQTT trace, we need the raw stream, program binary and device properties
     if (sqtt:=v.get(ProfileSQTTEvent)):
-      # to decode a SQTT trace, we need the raw stream, program binary and device properties
+      for e in sqtt:
+        if e.itrace: steps.append(create_step(f"PKTS SE:{e.se}", (f"/prg-pkts-{e.se}", len(ctxs), len(steps)), data=(e.blob, prg_events[k].lib)))
       steps.append(create_step("SQTT", ("/prg-sqtt", len(ctxs), len(steps)), ((k, tag), sqtt, prg_events[k])))
-      if getenv("SQTT_PARSE"):
-        # run our decoder on startup, we don't use this since it only works on gfx11
-        from extra.sqtt.attempt_sqtt_parse import parse_sqtt_print_packets
-        for e in sqtt: parse_sqtt_print_packets(e.blob)
     ctxs.append({"name":f"Exec {name}"+(f" n{run_number[k]}" if run_number[k] > 1 else ""), "steps":steps})
+
+def sqtt_timeline(data:bytes, lib:bytes) -> list[ProfileEvent]:
+  from extra.assembly.amd.sqttmap import map_insts, InstructionInfo
+  from extra.assembly.amd.sqtt import PacketType, INST, InstOp, VALUINST, IMMEDIATE, IMMEDIATE_MASK, VMEMEXEC, ALUEXEC
+  ret:list[ProfileEvent] = []
+  rows:dict[str, None] = {}
+  trace:dict[str, set[int]] = {}
+  def add(name:str, p:PacketType, idx=0, width=1, op_name=None, wave=None, info:InstructionInfo|None=None) -> None:
+    if hasattr(p, "wave"): wave = p.wave
+    rows.setdefault(r:=(f"WAVE:{wave}" if wave is not None else f"{p.__class__.__name__}:0 {name}"))
+    key = TracingKey(f"{op_name if op_name is not None else name} OP:{idx}", ret=info.inst.disasm() if info is not None else None)
+    ret.append(ProfileRangeEvent(r, key, Decimal(p._time), Decimal(p._time+width)))
+  for p, info in map_insts(data, lib):
+    if len(ret) > getenv("MAX_SQTT_PKTS", 50_000): break
+    if isinstance(p, INST):
+      op_name = p.op.name if isinstance(p.op, InstOp) else f"0x{p.op:02x}"
+      name, width = (op_name, 10 if "BARRIER" in op_name else 1)
+      add(name, p, width=width, idx=int("OTHER" in name), info=info)
+    if isinstance(p, (VALUINST, IMMEDIATE)): add(p.__class__.__name__, p, info=info)
+    if isinstance(p, IMMEDIATE_MASK): add("IMMEDIATE", p, wave=unwrap(info.wave), info=info)
+    if isinstance(p, (VMEMEXEC, ALUEXEC)):
+      name = str(p.src).split('.')[1]
+      if name == "VALU_SALU":
+        add("VALU", p)
+        add("SALU", p)
+      else:
+        add(name.replace("_ALT", ""), p, op_name=name)
+      if p._time in trace.setdefault(name, set()): raise AssertionError(f"packets overlap in shared resource! {name}")
+      trace[name].add(p._time)
+  return [ProfilePointEvent(r, "start", r, ts=Decimal(0)) for r in rows]+ret
 
 # ** SQTT OCC only unpacks wave start, end time and SIMD location
 
@@ -274,8 +346,9 @@ def unpack_sqtt(key:tuple[str, int], data:list, p:ProfileProgramEvent) -> tuple[
   # * init decoder
   from extra.sqtt.roc import decode
   base = unwrap(p.base)
-  disasm = {addr+base:inst_disasm for addr,inst_disasm in llvm_disasm(device_props[p.device]["gfx_target_version"], unwrap(p.lib)).items()}
-  rctx = decode(data, {p.name:disasm})
+  addr_table = amd_decode(unwrap(p.lib), device_props[p.device]["gfx_target_version"], )
+  disasm:dict[int, tuple[str, int]] = {addr+base:(inst.disasm(), inst.size()) for addr, inst in addr_table.items()}
+  rctx = decode(data, {p.tag:disasm})
   cu_events:dict[str, list[ProfileEvent]] = {}
   # * INST waves
   wave_insts:dict[str, dict[str, dict]] = {}
@@ -284,8 +357,8 @@ def unpack_sqtt(key:tuple[str, int], data:list, p:ProfileProgramEvent) -> tuple[
     if (u:=w.wave_loc) not in inst_units: inst_units[u] = itertools.count(0)
     n = next(inst_units[u])
     if (events:=cu_events.get(w.cu_loc)) is None: cu_events[w.cu_loc] = events = []
-    events.append(ProfileRangeEvent(w.simd_loc, loc:=f"INST WAVE:{w.wave_id} N:{n}", Decimal(w.begin_time), Decimal(w.end_time)))
-    wave_insts.setdefault(w.cu_loc, {})[f"{u} N:{n}"] = {"wave":w, "disasm":disasm, "run_number":n, "loc":loc}
+    events.append(ProfileRangeEvent(f"SIMD:{w.simd}", loc:=f"INST WAVE:{w.wave_id} N:{n}", Decimal(w.begin_time), Decimal(w.end_time)))
+    wave_insts.setdefault(w.cu_loc, {})[f"{u} N:{n}"] = {"wave":w, "disasm":disasm, "prg":p, "run_number":n, "loc":loc}
   # * OCC waves
   units:dict[str, itertools.count] = {}
   wave_start:dict[str, int] = {}
@@ -295,7 +368,7 @@ def unpack_sqtt(key:tuple[str, int], data:list, p:ProfileProgramEvent) -> tuple[
     if occ.start: wave_start[u] = occ.time
     else:
       if (events:=cu_events.get(occ.cu_loc)) is None: cu_events[occ.cu_loc] = events = []
-      events.append(ProfileRangeEvent(occ.simd_loc, f"OCC WAVE:{occ.wave_id} N:{next(units[u])}", Decimal(wave_start.pop(u)), Decimal(occ.time)))
+      events.append(ProfileRangeEvent(f"SIMD:{occ.simd}", f"OCC WAVE:{occ.wave_id} N:{next(units[u])}", Decimal(wave_start.pop(u)),Decimal(occ.time)))
   return cu_events, list(units), wave_insts
 
 def device_sort_fn(k:str) -> tuple[int, str, int]:
@@ -360,67 +433,70 @@ def amd_readelf(lib:bytes) -> list[dict]:
           ".group_segment_fixed_size":"LDS size", ".private_segment_fixed_size":"Scratch size"}
   return [{"label":label, "value":v} for k,label in keys.items() if (v:=notes["amdhsa.kernels"][0][k]) > 0]
 
-def llvm_disasm(target:int, lib:bytes) -> dict[int, tuple[str, int]]:
-  from tinygrad.runtime.autogen import llvm
+def amd_decode(lib:bytes, target:int) -> dict[int, Any]: # Any is the Inst class from extra.assembly.amd.dsl
   from tinygrad.runtime.support.elf import elf_loader
-  llvm.LLVMInitializeAMDGPUTargetInfo()
-  llvm.LLVMInitializeAMDGPUTargetMC()
-  llvm.LLVMInitializeAMDGPUAsmParser()
-  llvm.LLVMInitializeAMDGPUDisassembler()
-  # pass NULL to callbacks
-  cbs = [ctypes.cast(0, llvm.LLVMCreateDisasmCPUFeatures.argtypes[i]) for i in {5,6}]
-  arch = "gfx%d%x%x" % (target // 10000, (target // 100) % 100, target % 100)
-  ctx = llvm.LLVMCreateDisasmCPUFeatures("amdgcn-amd-amdhsa".encode(), arch.encode(), "".encode(), None, 0, *cbs)
+  from extra.assembly.amd import detect_format
+  from extra.assembly.amd.dsl import Inst
   image, sections, _ = elf_loader(lib)
-  text = next((sh.header for sh in sections if sh.name == ".text"), None)
+  text = next((sh for sh in sections if sh.name == ".text"), None)
   assert text is not None, "no .text section found in ELF"
-  off, sz = text.sh_addr, text.sh_size
-  addr_table:dict[int, tuple[str, int]] = {}
-  out = ctypes.create_string_buffer(128)
-  cur_off = off
-  while cur_off < sz + off:
-    view = (ctypes.c_ubyte * ((sz + off) - cur_off)).from_buffer_copy(memoryview(image)[cur_off:])
-    instr_sz = llvm.LLVMDisasmInstruction(ctx, view, ctypes.c_uint64(len(view)), ctypes.c_uint64(0), out, ctypes.c_size_t(128))
-    addr_table[cur_off] = (out.value.decode("utf-8", "replace").strip(), instr_sz)
-    cur_off += instr_sz
+  off, buf = text.header.sh_addr, text.content
+  arch = {11:"rdna3", 12:"rdna4"}.get(target//10000, "cdna")
+  addr_table:dict[int, Inst] = {}
+  offset = 0
+  while offset < len(buf):
+    remaining = buf[offset:]
+    fmt = detect_format(remaining, arch)
+    decoded = fmt.from_bytes(remaining)
+    addr_table[off+offset] = decoded
+    offset += decoded.size()
   return addr_table
 
-SOPP_INSTS = {"s_branch", "s_cbranch_scc0", "s_cbranch_scc1", "s_cbranch_vccz", "s_cbranch_vccnz", "s_cbranch_execz", "s_cbranch_execnz"}
-def parse_branch(asm:str) -> int|None:
-  inst, *operands = asm.split(" ")
-  if inst in SOPP_INSTS:
-    x = int(operands[0]) & 0xffff
+def parse_branch(inst) -> int|None:
+  if "branch" in getattr(inst, "op_name", "").lower():
+    x = inst.simm16 & 0xffff
     return (x - 0x10000 if x & 0x8000 else x)*4
   return None
 
 COND_TAKEN, COND_NOT_TAKEN, UNCOND = range(3)
-cfg_colors = {COND_TAKEN: "#3f7564", COND_NOT_TAKEN: "#7a4540", UNCOND: "#3b5f7e"}
 def amdgpu_cfg(lib:bytes, target:int) -> dict:
-  # disassemble
-  pc_table = llvm_disasm(target, lib)
+  # decode
+  pc_table = amd_decode(lib, target)
   # get leaders
   leaders:set[int] = {next(iter(pc_table))}
-  for pc, (asm, sz) in pc_table.items():
-    if (offset:=parse_branch(asm)) is not None: leaders.update((pc+sz+offset, pc+sz))
+  for pc, inst in pc_table.items():
+    if (offset:=parse_branch(inst)) is not None: leaders.update((pc+inst.size()+offset, pc+inst.size()))
   # build the cfg
   curr:int|None = None
   blocks:dict[int, list[int]] = {}
   paths:dict[int, dict[int, int]] = {}
-  for pc, (asm, sz) in pc_table.items():
+  lines:list[str] = []
+  disasm = {pc:inst.disasm() for pc,inst in pc_table.items()}
+  asm_width = max(len(asm) for asm in disasm.values())
+  for pc, inst in pc_table.items():
+    # skip instructions only used for padding
+    if (asm:=disasm[pc]) == "s_code_end": continue
+    lines.append(f"  {asm:<{asm_width}}  // {pc:012X}")
     if pc in leaders:
       paths[curr:=pc] = {}
       blocks[pc] = []
     else: assert curr is not None, f"no basic block found for {pc}"
     blocks[curr].append(pc)
-    # control flow ends in endpgm
-    if asm == "s_endpgm": break
     # otherwise a basic block can have exactly one or two paths
-    nx = pc+sz
-    if (offset:=parse_branch(asm)) is not None:
-      if asm.startswith("s_branch"): paths[curr][nx+offset] = UNCOND
+    nx = pc+inst.size()
+    if (offset:=parse_branch(inst)) is not None:
+      if inst.op_name == "S_BRANCH": paths[curr][nx+offset] = UNCOND
       else: paths[curr].update([(nx+offset, COND_TAKEN), (nx, COND_NOT_TAKEN)])
     elif nx in leaders: paths[curr][nx] = UNCOND
-  return {"blocks":blocks, "paths":paths, "pc_table":pc_table, "colors":cfg_colors}
+  pc_tokens:dict[int, list[dict]] = {}
+  from extra.assembly.amd.dsl import Reg
+  for pc, inst in pc_table.items():
+    pc_tokens[pc] = tokens = []
+    for name, field in inst._fields:
+      if isinstance(val:=getattr(inst, name), Reg): tokens.append({"st":val.fmt(), "keys":[f"r{val.offset+i}" for i in range(val.sz)], "kind":1})
+      elif name in {"op","opx","opy"}: tokens.append({"st":(op_name:=val.name.lower()), "keys":[op_name], "kind":0})
+      elif name != "encoding" and val != field.default: tokens.append({"st":(s:=repr(val)), "keys":[s], "kind":1})
+  return {"data":{"blocks":blocks, "paths":paths, "pc_tokens":pc_tokens}, "src":"\n".join(lines)}
 
 # ** Main render function to get the complete details about a trace event
 
@@ -434,21 +510,26 @@ def get_render(query:str) -> dict:
   if fmt == "asm":
     ret:dict = {"metadata":[]}
     if data.device.startswith("AMD") and data.lib is not None:
-      with soft_err(lambda err: ret.update(err)):
-        ret["data"] = amdgpu_cfg(lib:=data.lib, device_props[data.device]["gfx_target_version"])
-        with soft_err(lambda err: ret["metadata"].append(err)): ret["metadata"].append(amd_readelf(lib))
+      with soft_err(lambda err: ret.update(err)): ret.update(amdgpu_cfg(data.lib, device_props[data.device]["gfx_target_version"]))
+      with soft_err(lambda err: ret["metadata"].append(err)): ret["metadata"].append(amd_readelf(data.lib))
     else: ret["src"] = get_stdout(lambda: (compiler:=Device[data.device].compiler).disassemble(compiler.compile(data.src)))
     return ret
   if fmt == "all-pmc":
     durations, pmc = data
     ret = {"cols":{}, "rows":[]}
-    for (name, n, k),events in data[1].items():
+    for (name, n, k),events in pmc.items():
       pmc_table = unpack_pmc(events)
       ret["cols"].update([(r[0], None) for r in pmc_table["rows"]])
       ret["rows"].append((name, durations[k][n-1], *[r[1] for r in pmc_table["rows"]]))
     ret["cols"] = ["Kernel", "Duration", *ret["cols"]]
     return ret
   if fmt == "prg-pmc": return unpack_pmc(data[0])
+  if fmt.startswith("prg-pkts"):
+    ret = {}
+    with soft_err(lambda err:ret.update(err)):
+      if (events:=get_profile(sqtt_timeline(*data), sort_fn=row_tuple)): ret = {"value":events, "content_type":"application/octet-stream"}
+      else: ret = {"src":"No SQTT trace on this SE."}
+    return ret
   if fmt == "prg-sqtt":
     ret = {}
     if len((steps:=ctxs[i]["steps"])[j+1:]) == 0:
@@ -475,11 +556,11 @@ def get_render(query:str) -> dict:
     pc_to_inst = data["disasm"]
     start_pc = None
     rows:dict[int, dict] = {}
+    for pc, (inst,_) in pc_to_inst.items():
+      if start_pc is None: start_pc = pc
+      rows[pc] = {"pc":pc-start_pc, "inst":inst, "hit_count":0, "dur":0, "stall":0, "type":"", "hits":{"cols":inst_columns, "rows":[]}}
     for e in w.unpack_insts():
-      if start_pc is None: start_pc = e.pc
-      if (inst:=rows.get(e.pc)) is None:
-        rows[e.pc] = inst = {"pc":e.pc-start_pc, "inst":pc_to_inst[e.pc][0], "hit_count":0, "dur":0, "stall":0, "type":str(e.typ).split("_")[-1],
-                             "hits":{"cols":inst_columns, "rows":[]}}
+      if not (inst:=rows[e.pc]).get("type"): inst["type"] = str(e.typ).split("_")[-1]
       inst["hit_count"] += 1
       inst["dur"] += e.dur
       inst["stall"] += e.stall
@@ -487,7 +568,7 @@ def get_render(query:str) -> dict:
       prev_instr = max(prev_instr, e.time + e.dur)
     summary = [{"label":"Total Cycles", "value":w.end_time-w.begin_time}, {"label":"SE", "value":w.se}, {"label":"CU", "value":w.cu},
                {"label":"SIMD", "value":w.simd}, {"label":"Wave ID", "value":w.wave_id}, {"label":"Run number", "value":data["run_number"]}]
-    return {"rows":[tuple(v.values()) for v in rows.values()], "cols":columns, "metadata":[summary]}
+    return {"rows":[tuple(v.values()) for v in rows.values()], "cols":columns, "metadata":[summary], "ref":ref_map.get(data["prg"].name)}
   return data
 
 # ** HTTP server

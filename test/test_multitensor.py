@@ -409,6 +409,28 @@ class TestMultiTensor(unittest.TestCase):
 
     np.testing.assert_allclose(z.numpy(), z_shard.numpy(), atol=1e-6, rtol=1e-6)
 
+  def test_embedding_backward(self, shard_weight_axis=None):
+    B, T, embed_size, vocab_size = 4, 10, 20, 28
+
+    layer = nn.Embedding(vocab_size, embed_size)
+    layer.weight.requires_grad = True
+    x = Tensor(np.random.randint(0, vocab_size, (B, T), dtype=np.int32))
+    z = layer(x)
+    z.sum().backward()
+    grad = layer.weight.grad.numpy()
+
+    layer_sharded = nn.Embedding(vocab_size, embed_size)
+    layer_sharded.weight.replace(layer.weight.shard(devices_2, axis=shard_weight_axis)).realize()
+    layer_sharded.weight.requires_grad = True
+    x_sharded = x.shard(devices_2, axis=None)
+    z_shard = layer_sharded(x_sharded)
+    z_shard.sum().backward()
+    grad_shard = layer_sharded.weight.grad.numpy()
+
+    np.testing.assert_allclose(grad, grad_shard, atol=1e-6, rtol=1e-6)
+
+  def test_embedding_backward_shard_weight(self): self.test_embedding_backward(shard_weight_axis=1)
+
   def test_rmsnorm(self):
     B, T, embed_size = 4, 10, 20
 
@@ -540,6 +562,37 @@ class TestMultiTensor(unittest.TestCase):
       r = jf()
       np.testing.assert_allclose(r.numpy(), np.ones(256)+np.ones(256), atol=1e-4, rtol=1e-5)
     assert len(jf.jit_cache) > 0
+
+  def test_multitensor_jit_in_list(self):
+    # test MULTI tensor inside a list container - exercises the container unpacking + MULTI unpacking
+    @TinyJit
+    def f(a, arr): return (a + arr[0]).realize()
+    for i in range(5):
+      a = Tensor.full((4,), i).contiguous().realize().shard(devices_2, 0).realize()
+      b = Tensor.ones(4).contiguous().realize().shard(devices_2, 0).realize()
+      out = f(a, [b])
+      np.testing.assert_allclose(out.numpy(), np.full(4, i) + np.ones(4), atol=1e-4, rtol=1e-5)
+
+  def test_multitensor_jit_multiple_inputs(self):
+    # test multiple MULTI tensors as inputs - each gets unpacked to component UOps
+    @TinyJit
+    def f(a, b, c): return (a + b + c).realize()
+    for i in range(5):
+      a = Tensor.full((4,), i).contiguous().realize().shard(devices_2, 0).realize()
+      b = Tensor.full((4,), i*2).contiguous().realize().shard(devices_2, 0).realize()
+      c = Tensor.ones(4).contiguous().realize().shard(devices_2, 0).realize()
+      out = f(a, b, c)
+      np.testing.assert_allclose(out.numpy(), np.full(4, i) + np.full(4, i*2) + np.ones(4), atol=1e-4, rtol=1e-5)
+
+  def test_multitensor_jit_different_sharding(self):
+    # test MULTI tensors with different sharding - one sharded on axis 0, one broadcast (axis=None)
+    @TinyJit
+    def f(a, b): return (a + b).realize()
+    for i in range(5):
+      a = Tensor.full((4, 4), i).contiguous().realize().shard(devices_2, 0).realize()
+      b = Tensor.full((4, 4), i*2).contiguous().realize().shard(devices_2, None).realize()
+      out = f(a, b)
+      np.testing.assert_allclose(out.numpy(), np.full((4, 4), i) + np.full((4, 4), i*2), atol=1e-4, rtol=1e-5)
 
   @unittest.skip("test broken")
   def test_multi_device_jit_graph(self):
@@ -984,7 +1037,6 @@ class TestShrinkMultiTensorShardedAxis(unittest.TestCase):
     np.testing.assert_equal((a+a).numpy(), na+na)
     np.testing.assert_equal((b+b).numpy(), nb+nb)
 
-  # @unittest.skip("why didn't this work?")
   def test_add_two_partitions(self):
     t = Tensor.arange(64).reshape(8, 8).contiguous().realize()
     t.shard_([f"{Device.DEFAULT}:{i}" for i in range(4)], axis=0)
@@ -1220,6 +1272,21 @@ class TestMultiRamUsage(unittest.TestCase):
   def test_zeros_contiguous_shard(self):
     _ = Tensor.zeros(self.N, self.N).contiguous().shard(devices_2, axis=0).contiguous().realize()
     self.assertUsed(self.N*self.N*4) # sharding should not increase total ram usage
+
+  def _test_matmul_half(self, dev_count:int):
+    N = 32
+    total_mem = {}
+    devs = tuple(f"NULL:{i}" for i in range(dev_count))
+    for dtype in {dtypes.float, dtypes.half}:
+      GlobalCounters.reset()
+      a = Tensor.empty((N, N), dtype=dtype, device=devs[0]).shard(devs, axis=0)
+      b = Tensor.empty((N, N), dtype=dtype, device=devs[0]).shard(devs, axis=None)
+      (a @ b).realize()
+      total_mem[dtype] = GlobalCounters.global_mem
+    self.assertEqual(total_mem[dtypes.half], total_mem[dtypes.float] // 2)
+
+  def test_matmul_half(self): self._test_matmul_half(dev_count=2)
+  def test_matmul_half_alt(self): self._test_matmul_half(dev_count=4)
 
 @unittest.skipIf(not_support_multi_device(), "need multi")
 class TestMultiFromUnrenderable(unittest.TestCase):

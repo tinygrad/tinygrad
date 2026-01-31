@@ -1,13 +1,14 @@
-import unittest, math
+import contextlib, unittest, math
 import numpy as np
 import torch
 from typing import Any, List
 from tinygrad.device import is_dtype_supported
-from tinygrad.helpers import getenv, DEBUG, CI
+from tinygrad.helpers import getenv, DEBUG, CI, EMULATED_DTYPES
 from tinygrad.dtype import DType, DTYPES_DICT, least_upper_dtype, fp8_to_float, float_to_fp8, _to_np_dtype, _to_torch_dtype, truncate
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.nir import NIRRenderer
-from tinygrad import Device, Tensor, dtypes
+from tinygrad import Context, Device, Tensor, dtypes
+from tinygrad.uop import Ops
 from hypothesis import given, settings, strategies as strat
 from test.helpers import rand_for_dtype
 from test.unit.test_dtype_spec import _assert_eq, core_dtypes, dtype_ints, dtype_floats, FP8E4M3_MAX, FP8E5M2_MAX
@@ -18,9 +19,12 @@ settings.register_profile("my_profile", max_examples=200, deadline=None, derando
 settings.load_profile("my_profile")
 
 def get_available_cast_dtypes(dtype: DType) -> List[DType]:
-  if not is_dtype_supported(dtype): return []
   # dont cast internal dtypes
-  return [v for k, v in DTYPES_DICT.items() if v != dtype and is_dtype_supported(v) and not k.startswith("_")]
+  dts = [v for k, v in DTYPES_DICT.items() if v != dtype and is_dtype_supported(v) and not k.startswith("_")]
+  if not is_dtype_supported(dtype) or dtypes.long in EMULATED_DTYPES.tolist(dtypes):
+    if dtype in (dtypes.long, dtypes.ulong): return [dt for dt in dts if dt != dtypes.double] # can't bitcast with no 64-bit support
+    else: return []
+  return dts
 
 def _to_torch_storage_type(dtype:DType):
   if dtype == dtypes.bfloat16: return torch.float32
@@ -43,16 +47,13 @@ def _test_cast(a:Tensor, target_dtype:DType):
   if a.is_floating_point() and dtypes.is_unsigned(target_dtype):
     # converting negative float to unsigned integer is undefined
     a = a.abs()
-  if target_dtype == dtypes.half and Device.DEFAULT == "PYTHON":
-    # TODO: struct.pack cannot pack value > 65504 (max of half) into e format
-    a = (a > 65504).where(65504, a)
 
   expected = list(a.numpy().astype(_to_np_dtype(target_dtype)))
-  if target_dtype in dtypes.fp8s: expected = list(map(lambda x: truncate[target_dtype](x), expected))
+  if target_dtype in dtypes.fp8s: expected = [truncate[target_dtype](x) for x in expected]
   _test_op(lambda: a.cast(target_dtype), target_dtype, expected)
 def _test_bitcast(a:Tensor, target_dtype:DType, target=None):
   expected = torch.tensor(a.tolist(), dtype=_to_torch_storage_type(a.dtype)).view(_to_torch_dtype(target_dtype)).tolist()
-  if target_dtype in dtypes.fp8s: expected = list(map(lambda x: fp8_to_float(x, target_dtype), expected))
+  if target_dtype in dtypes.fp8s: expected = [fp8_to_float(x, target_dtype) for x in expected]
   _test_op(lambda: a.bitcast(target_dtype), target_dtype, target or expected)
 
 class TestDType(unittest.TestCase):
@@ -68,37 +69,34 @@ class TestDType(unittest.TestCase):
   def test_to_np(self):
     _test_to_np(Tensor(self.DATA, dtype=self.DTYPE), _to_np_dtype(self.DTYPE), np.array(self.DATA, dtype=_to_np_dtype(self.DTYPE)))
 
-  def test_casts_to(self): list(map(
-    lambda dtype: _test_cast(Tensor(self.DATA, dtype=dtype), self.DTYPE),
-    get_available_cast_dtypes(self.DTYPE)
-  ))
-  def test_casts_from(self): list(map(
-    lambda dtype: _test_cast(Tensor(self.DATA, dtype=self.DTYPE), dtype),
-    get_available_cast_dtypes(self.DTYPE)
-  ))
+  def test_casts_to(self):
+    for dtype in get_available_cast_dtypes(self.DTYPE):
+      _test_cast(Tensor(self.DATA, dtype=dtype), self.DTYPE)
+
+  def test_casts_from(self):
+    for dtype in get_available_cast_dtypes(self.DTYPE):
+      _test_cast(Tensor(self.DATA, dtype=self.DTYPE), dtype)
 
   def test_same_size_ops(self):
-    list(map(
-      lambda dtype: _test_ops(a_dtype=self.DTYPE, b_dtype=dtype) if dtype.itemsize == self.DTYPE.itemsize else None,
-      get_available_cast_dtypes(self.DTYPE)
-    ))
+    for dtype in get_available_cast_dtypes(self.DTYPE):
+      if dtype.itemsize == self.DTYPE.itemsize:
+        _test_ops(a_dtype=self.DTYPE, b_dtype=dtype)
+
   def test_upcast_ops(self):
-    list(map(
-      lambda dtype: _test_ops(a_dtype=self.DTYPE, b_dtype=dtype) if dtype.itemsize > self.DTYPE.itemsize else None,
-      get_available_cast_dtypes(self.DTYPE)
-  ))
+    for dtype in get_available_cast_dtypes(self.DTYPE):
+      if dtype.itemsize > self.DTYPE.itemsize:
+        _test_ops(a_dtype=self.DTYPE, b_dtype=dtype)
+
   def test_upcast_to_ops(self):
-    list(map(
-      lambda dtype: _test_ops(a_dtype=dtype, b_dtype=self.DTYPE) if dtype.itemsize < self.DTYPE.itemsize else None,
-      get_available_cast_dtypes(self.DTYPE)
-  ))
+    for dtype in get_available_cast_dtypes(self.DTYPE):
+      if dtype.itemsize < self.DTYPE.itemsize:
+        _test_ops(a_dtype=dtype, b_dtype=self.DTYPE)
+
   def test_bitcast(self):
     if self.DTYPE == dtypes.bool: raise unittest.SkipTest("no bools in bitcast")
-    list(map(
-      lambda dtype:
-        _test_bitcast(Tensor(self.DATA[:8], dtype=self.DTYPE), dtype) if dtype != dtypes.bool else None,
-     get_available_cast_dtypes(self.DTYPE)
-    ))
+    for dtype in get_available_cast_dtypes(self.DTYPE):
+      if dtype != dtypes.bool:
+        _test_bitcast(Tensor(self.DATA[:8], dtype=self.DTYPE), dtype)
 
   @unittest.skipIf(Device.DEFAULT == "PYTHON", "skip for now")
   @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, (PTXRenderer, NIRRenderer)), "skip for now")
@@ -108,13 +106,12 @@ class TestDType(unittest.TestCase):
     _test_to_np(Tensor(v, dtype=self.DTYPE)+2, _to_np_dtype(self.DTYPE), np.array(v, dtype=_to_np_dtype(self.DTYPE))+2)
     _test_to_np(Tensor(v, dtype=self.DTYPE)*2, _to_np_dtype(self.DTYPE), np.array(v, dtype=_to_np_dtype(self.DTYPE))*2)
 
-  def test_dtypes_fields(self):
-    fields = dtypes.fields()
-    self.assertIn("float", fields)
-    self.assertIn("float32", fields)
-    self.assertEqual(len(fields), 26)
-    self.assertTrue(all(isinstance(value, DType) for value in fields.values()))
-    self.assertTrue(all(issubclass(_to_np_dtype(value), np.generic) for value in fields.values() if _to_np_dtype(value) is not None))
+  def test_dtypes_DTYPES_DICT(self):
+    self.assertIn("float", DTYPES_DICT)
+    self.assertIn("float32", DTYPES_DICT)
+    self.assertEqual(len(DTYPES_DICT), 26)
+    self.assertTrue(all(isinstance(value, DType) for value in DTYPES_DICT.values()))
+    self.assertTrue(all(issubclass(_to_np_dtype(value), np.generic) for value in DTYPES_DICT.values() if _to_np_dtype(value) is not None))
 
   def test_resulting_and_init_dtypes_match(self):
     dtypes = list(map(np.dtype, ["bool", "uint8", "int8", "int16", "int32", "int64", "float32", "float64"]))
@@ -131,7 +128,7 @@ class TestDType(unittest.TestCase):
   def test_finfo(self):
     if self.DTYPE not in [dtypes.float16, dtypes.float32, dtypes.float64]: return
     info = np.finfo(_to_np_dtype(self.DTYPE))
-    self.assertEqual(info.bits, self.DTYPE.itemsize*8)
+    self.assertEqual(info.bits, self.DTYPE.bitsize)
     self.assertEqual((info.nexp, info.nmant), dtypes.finfo(self.DTYPE))
 
 def _test_ops(a_dtype:DType, b_dtype:DType, target_dtype=None):
@@ -219,7 +216,7 @@ class TestBFloat16DType(unittest.TestCase):
     back = t.cast(dtypes.float32)
     assert tuple(back.numpy().tolist()) == (9984., -1, -1000, -9984, 20)
 
-@unittest.skipUnless(is_dtype_supported(dtypes.bfloat16), "bfloat16 not supported")
+@unittest.skipUnless(is_dtype_supported(dtypes.bfloat16) and is_dtype_supported(dtypes.float16), "bfloat16 or float16 not supported")
 class TestBFloat16DTypeCast(unittest.TestCase):
   def test_f16_to_bf16_conversion(self):
     original_tensor = Tensor([1.0, 2.0, 3.0], dtype=dtypes.float16)
@@ -307,7 +304,7 @@ class TestBitCast(unittest.TestCase):
     data = rand_for_dtype(dt1, 32).reshape(2, 2, 8)
     expected = torch.tensor(data.tolist(), dtype=_to_torch_storage_type(dt1)).view(_to_torch_dtype(dt2))
     if dt2 in dtypes.fp8s:
-      expected = torch.tensor(list(map(lambda x: fp8_to_float(x, dt2), expected.view(-1).tolist()))).view_as(expected)
+      expected = torch.tensor([fp8_to_float(x, dt2) for x in expected.view(-1).tolist()]).view_as(expected)
     _test_op(lambda: Tensor(data, dtype=dt1).bitcast(dt2), dt2, expected.tolist())
 
   def test_shape_change_bitcast_exceptions(self):
@@ -341,10 +338,35 @@ class TestInt32DType(TestDType): DTYPE = dtypes.int32
 class TestUint32DType(TestDType): DTYPE = dtypes.uint32
 
 class TestInt64DType(TestDType): DTYPE = dtypes.int64
+
+@unittest.skipUnless(Ops.SHL in Device[Device.DEFAULT].renderer.code_for_op, "long decomp requires bitshift")
+@unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, PTXRenderer), "PTX does indexing math with longs")
+class TestEmulatedInt64DType(TestInt64DType):
+  @classmethod
+  def setUpClass(cls):
+    cls.stack = contextlib.ExitStack()
+    cls.stack.enter_context(Context(EMULATED_DTYPES="long"))
+    cls.DATA = rand_for_dtype(cls.DTYPE, 10)
+
+  @classmethod
+  def tearDownClass(cls): cls.stack.close()
+
 class TestUint64DType(TestDType):
   DTYPE = dtypes.uint64
   def test_uint64_load(self):
     assert Tensor(2**64 - 1, dtype=dtypes.uint64).numpy() == 2**64 - 1
+
+@unittest.skipUnless(Ops.SHL in Device[Device.DEFAULT].renderer.code_for_op, "long decomp requires bitshift")
+@unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, PTXRenderer), "PTX does indexing math with longs")
+class TestEmulatedUInt64DType(TestUint64DType):
+  @classmethod
+  def setUpClass(cls):
+    cls.stack = contextlib.ExitStack()
+    cls.stack.enter_context(Context(EMULATED_DTYPES="long"))
+    cls.DATA = rand_for_dtype(cls.DTYPE, 10)
+
+  @classmethod
+  def tearDownClass(cls): cls.stack.close()
 
 class TestBoolDType(TestDType): DTYPE = dtypes.bool
 
@@ -429,7 +451,6 @@ class TestDtypeUsage(unittest.TestCase):
 class TestOpsBFloat16(unittest.TestCase):
   def test_cast(self):
     # TODO: helper_test_op breaks in unrelated part
-    # TODO: wrong output with CL=1 on mac
     data = [60000.0, 70000.0, 80000.0]
     np.testing.assert_allclose(Tensor(data).cast("bfloat16").numpy(), torch.tensor(data).type(torch.bfloat16).float().numpy())
 

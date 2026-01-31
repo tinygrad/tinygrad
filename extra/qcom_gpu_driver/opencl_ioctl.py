@@ -42,7 +42,7 @@ def get_struct(argp, stype):
 
 def format_struct(s):
   sdats = []
-  for field_name, field_type in s._fields_:
+  for field_name, *_ in s._real_fields_:
     if field_name in {"__pad", "PADDING_0"}: continue
     dat = getattr(s, field_name)
     if isinstance(dat, int): sdats.append(f"{field_name}:0x{dat:X}")

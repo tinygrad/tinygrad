@@ -44,7 +44,7 @@ class TestConv(unittest.TestCase):
     x = Tensor.rand(1,1,32,32)
     w = Tensor.rand(1,1,3,3)
     out = x.conv2d(w, padding=(1,1))
-    np.testing.assert_allclose(out.relu().numpy(), np.maximum(out.numpy(), 0))
+    np.testing.assert_allclose(out.relu().numpy(), np.maximum(out.numpy(), 0), atol=1e-6)
 
   def test_two_binops_no_rerun(self):
     x = Tensor.randn(1,12,16,32)

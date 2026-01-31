@@ -7,7 +7,7 @@ from tinygrad.uop.ops import Ops
 from tinygrad.helpers import getenv, prod, strides_for_shape, argfix
 import torch.lib
 TORCH_DEBUG = getenv("TORCH_DEBUG")
-import torch, pathlib, math, operator, functools, weakref
+import torch, pathlib, operator, functools, weakref
 torch.autograd.grad_mode.set_multithreading_enabled(False)
 from tinygrad.dtype import _from_torch_dtype, _to_torch_dtype
 
@@ -74,6 +74,7 @@ view_ops = {
   "aten.select.int": lambda self, dim, idx: self[(slice(None),) * (dim%self.ndim) + (idx,)],
   "aten.permute": Tensor.permute,
   "aten.alias": lambda self: self,
+  "aten.diagonal": Tensor.diagonal,
   }
 
 # torch 2.10 handles this natively
@@ -154,21 +155,13 @@ def index_put(self, indices, values, accumulate=False):
   return aten.index_put(self.cpu(), [z.cpu() if isinstance(z, torch.Tensor) else None for z in indices], values.clone().cpu(), accumulate).tiny()
 
 @torch.library.impl("aten::isin.Tensor_Tensor_out", "privateuseone")
-def isin_tensor_tensor_out(x, y, *, assume_unique=False, invert=False, out=None): return out.copy_(aten.isin(x.cpu(), y.cpu(), assume_unique=assume_unique, invert=invert).tiny())
+def isin_tensor_tensor_out(x, y, *, assume_unique=False, invert=False, out=None):
+  result = (unwrap(x).unsqueeze(-1) == unwrap(y).flatten()).any(-1)
+  return out.copy_(wrap(~result if invert else result))
 
 @torch.library.impl("aten::randperm.generator_out", "privateuseone")
 def randperm_generator(n, generator=None, out=None):
   return out.copy_(wrap(Tensor.randperm(n, generator=generator, device=unwrap(out).device)))
-
-@torch.library.impl("aten::cummax", "privateuseone")
-def cummax(self, dim):
-  # TODO: support cummax with indices to match torch
-  cummax, indices = aten.cummax(self.cpu(), dim)
-  return (cummax.tiny(), indices.tiny())
-
-@torch.library.impl("aten::nonzero", "privateuseone")
-# TODO: move to tinygrad
-def nonzero(self): return aten.nonzero(self.cpu()).tiny()
 
 @torch.library.impl("aten::_linalg_eigh", "privateuseone")
 # TODO: move to tinygrad
@@ -472,7 +465,7 @@ for k,v in get_decompositions(decomps).items():
 # the goal is to make as much as we can this
 simple_tensor_methods = [
   # unary (ish)
-  "log", "log2", "sqrt", "rsqrt", "sign", "silu", "hardsigmoid", "exp", "exp2", "neg", "reciprocal", "bitwise_not",
+  "log", "log2", "log10", "sqrt", "rsqrt", "sign", "silu", "hardsigmoid", "exp", "exp2", "neg", "reciprocal", "bitwise_not",
   "sigmoid", "clamp", "mish", "erf", "leaky_relu",
   # trig
   "acos", "acosh", "cos", "cosh", "asin", "asinh", "sin", "sinh", "atan", "atanh", "tan", "tanh",
@@ -516,7 +509,6 @@ tiny_backend_out = {**{f"aten.{x}.out":getattr(Tensor,x) for x in simple_tensor_
   "aten.bitwise_left_shift.Tensor_out": lambda x,y: x*(2**y),
   "aten.bitwise_right_shift.Tensor_out": lambda x,y: x//(2**y),
   # not in tinygrad. are there decomps for these?
-  "aten.log10.out": lambda self: self.log2() * (math.log(2) / math.log(10)),
   "aten.log1p.out": lambda self: (self+1).log(),
   "aten.expm1.out": lambda self: self.exp() - 1,
   "aten.fmax.out": lambda input,other: Tensor.where(input.isnan() & ~other.isnan(), other, Tensor.where(~input.isnan() & other.isnan(), input, Tensor.maximum(input, other))),
@@ -625,7 +617,8 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
     Tensor.linspace(start, stop, steps, **({"dtype": _from_torch_dtype(dtype)} if dtype is not None else {})),
   "aten.topk": Tensor.topk,
   "aten.constant_pad_nd": lambda self, padding, value=0.0: self.pad(padding, mode="constant", value=value).contiguous(),
-  "aten.cumsum": lambda self, dim: self.cumsum(dim).contiguous(), # TODO: fix test_simple_cumsum, fails without contiguous for shapes >512
+  # TODO: input contiguous is needed to prevent CFGContext circular dependency assertion for shapes >512 (see test_cumsum_arange_large)
+  "aten.cumsum": lambda self, dim: self.contiguous().cumsum(dim),
   "aten.logsumexp": lambda self, axis, keepdim=False: self.logsumexp(axis[0], keepdim=keepdim),
   "aten.roll": Tensor.roll,
   "aten.logcumsumexp": Tensor.logcumsumexp,
@@ -634,6 +627,9 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
     self.ones_like(**{k: v for k, v in {"dtype": _from_torch_dtype(dtype) if dtype else None,
                                         "device": _from_torch_device(device) if device else None}.items() if v is not None}),
   "aten.max.dim": lambda self, dim, keepdim=False: (self.max(dim, keepdim), self.argmax(dim, keepdim).cast(dtype=dtypes.int64)),
+  "aten.cummax": lambda self, dim: ((r := self.cummax(dim))[0], r[1].cast(dtypes.int64)),
+  "aten.cummin": lambda self, dim: ((r := self.cummin(dim))[0], r[1].cast(dtypes.int64)),
+  "aten.nonzero": Tensor.nonzero,
   "aten.unfold": Tensor.unfold,
 }}
 
@@ -751,16 +747,3 @@ def _pad_circular(self, padding): return _PadCircular.apply(self, padding)
 
 @torch.library.impl("aten::_pad_circular", "AutogradPrivateUse1")
 def _pad_circular_autograd(self, padding): return _PadCircular.apply(self, padding)
-
-# only needed for test_diag_backward_gradient_values
-# was going through torch before, but now we are using tinygrad directly and tracking views
-# Tensor.diagonal does not support all cases tests in the tests
-@torch.library.impl("aten::diagonal", "privateuseone")
-@wrap_view_op
-def diagonal(self, offset=0, dim1=0, dim2=1):
-  if offset != 0: raise NotImplementedError(f"diagonal with {offset=} not implemented")
-  dim1, dim2 = dim1 % self.ndim, dim2 % self.ndim
-  if dim1 != self.ndim - 2 or dim2 != self.ndim - 1: raise NotImplementedError(f"diagonal with {dim1=}, {dim2=} not implemented, only last two dims supported")
-  batch_shape, m, n = self.shape[:-2], self.shape[-2], self.shape[-1]
-  diag_len = min(m, n)
-  return self.reshape(*batch_shape, m*n).pad(tuple((0,0) for _ in batch_shape) + ((0, diag_len),)).reshape(*batch_shape, diag_len, n+1)[..., :, 0]

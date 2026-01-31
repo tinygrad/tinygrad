@@ -3,12 +3,13 @@ from tinygrad.device import  Compiled, Allocator, Compiler, BufferSpec, Compiler
 from tinygrad.renderer.wgsl import WGSLRenderer
 from tinygrad.helpers import round_up, suppress_finalizing
 from tinygrad.runtime.autogen import webgpu
-from typing import List, Any, TypeAlias
+from tinygrad.runtime.support import c
+from typing import cast, List, Any, TypeAlias
 import ctypes
 import os
 
-WGPUDevPtr: TypeAlias = webgpu.WGPUDevice # type: ignore
-WGPUBufPtr: TypeAlias = webgpu.WGPUBuffer # type: ignore
+WGPUDevPtr: TypeAlias = webgpu.WGPUDevice
+WGPUBufPtr: TypeAlias = webgpu.WGPUBuffer
 
 backend_types = {v: k for k, v in webgpu.enum_WGPUBackendType.items() }
 
@@ -35,7 +36,7 @@ def _run(async_fun, cb_info_type, cb_type, status_enum, res_idx:int|None, msg_id
     result[:] = params
     if msg_idx: result[msg_idx] = from_wgpu_str(result[msg_idx])
 
-  cb_info = cb_info_type(nextInChain=None, mode=webgpu.WGPUCallbackMode_WaitAnyOnly, callback=cb_type(cb))
+  cb_info = cb_info_type(mode=webgpu.WGPUCallbackMode_WaitAnyOnly, callback=cb_type(cb))
   _wait(async_fun(*params, cb_info))
 
   if result[0] != 1: raise RuntimeError(f"[{status_enum.get(result[0]) if status_enum else 'ERROR'}]{result[msg_idx] if msg_idx else ''}")
@@ -72,14 +73,14 @@ def create_uniform(wgpu_device:WGPUDevPtr, val:int|float) -> WGPUBufPtr:
   return buf
 
 class WebGPUProgram:
-  def __init__(self, dev:tuple[WGPUDevPtr, bool], name:str, lib:bytes):
+  def __init__(self, dev:tuple[WGPUDevPtr, bool], name:str, lib:bytes, **kwargs):
     (self.dev, self.timestamp_supported) = dev
 
     # Creating shader module
     shader = webgpu.WGPUShaderModuleWGSLDescriptor(code=to_wgpu_str(lib.decode()),
       chain=webgpu.WGPUChainedStruct(sType=webgpu.WGPUSType_ShaderSourceWGSL))
     module = webgpu.WGPUShaderModuleDescriptor()
-    module.nextInChain = ctypes.cast(ctypes.pointer(shader), ctypes.POINTER(webgpu.struct_WGPUChainedStruct))
+    module.nextInChain = ctypes.cast(ctypes.pointer(shader), c.POINTER[webgpu.struct_WGPUChainedStruct])
 
     # Check compiler error
     webgpu.wgpuDevicePushErrorScope(self.dev, webgpu.WGPUErrorFilter_Validation)
@@ -126,7 +127,7 @@ class WebGPUProgram:
 
     # Creating bind group
     bindings = [webgpu.WGPUBindGroupEntry(binding=0, buffer=create_uniform(self.dev, float('inf')), offset=0, size=4)]
-    bindings += [webgpu.WGPUBindGroupEntry(binding=i+1, buffer=create_uniform(self.dev, x) if i >= len(tmp_bufs) else x, offset=0,
+    bindings += [webgpu.WGPUBindGroupEntry(binding=i+1, buffer=create_uniform(self.dev, cast(int, x)) if i >= len(tmp_bufs) else x, offset=0,
       size=4 if i >= len(tmp_bufs) else webgpu.wgpuBufferGetSize(x)) for i,x in enumerate(tuple(tmp_bufs)+vals)]
 
     bg_arr_type = webgpu.WGPUBindGroupEntry * len(bindings)
@@ -143,13 +144,13 @@ class WebGPUProgram:
     webgpu.WGPUCreateComputePipelineAsyncCallback2, webgpu.WGPUCreatePipelineAsyncStatus, 1, None, self.dev, compute_desc)
 
     command_encoder = webgpu.wgpuDeviceCreateCommandEncoder(self.dev, webgpu.WGPUCommandEncoderDescriptor())
-    comp_pass_desc = webgpu.WGPUComputePassDescriptor(nextInChain=None)
+    comp_pass_desc = webgpu.WGPUComputePassDescriptor()
 
     if wait:
       query_set = webgpu.wgpuDeviceCreateQuerySet(self.dev, webgpu.WGPUQuerySetDescriptor(type=webgpu.WGPUQueryType_Timestamp, count=2))
       query_buf = webgpu.wgpuDeviceCreateBuffer(self.dev,
         webgpu.WGPUBufferDescriptor(size=16, usage=webgpu.WGPUBufferUsage_QueryResolve | webgpu.WGPUBufferUsage_CopySrc))
-      comp_pass_desc.timestampWrites = ctypes.pointer(webgpu.WGPUComputePassTimestampWrites(
+      comp_pass_desc.timestampWrites = c.pointer(webgpu.WGPUComputePassTimestampWrites(
         querySet=query_set, beginningOfPassWriteIndex=0, endOfPassWriteIndex=1))
 
     # Begin compute pass
@@ -175,18 +176,18 @@ class WebGPUProgram:
       return time
     return None
 
-class WebGpuAllocator(Allocator['WGPUDevPtr']):
+class WebGpuAllocator(Allocator['WebGpuDevice']):
   def _alloc(self, size:int, options:BufferSpec) -> WGPUBufPtr:
     # WebGPU buffers have to be 4-byte aligned
-    return webgpu.wgpuDeviceCreateBuffer(self.dev, webgpu.WGPUBufferDescriptor(size=round_up(size, 4),
+    return webgpu.wgpuDeviceCreateBuffer(self.dev.device_res, webgpu.WGPUBufferDescriptor(size=round_up(size, 4),
       usage=webgpu.WGPUBufferUsage_Storage | webgpu.WGPUBufferUsage_CopyDst | webgpu.WGPUBufferUsage_CopySrc))
   def _copyin(self, dest:WGPUBufPtr, src:memoryview):
     if src.nbytes % 4:
       padded_src = bytearray(round_up(src.nbytes, 4))
       padded_src[:src.nbytes] = src
-    write_buffer(self.dev, dest, 0, padded_src if src.nbytes % 4 else src)
+    write_buffer(self.dev.device_res, dest, 0, padded_src if src.nbytes % 4 else src)
   def _copyout(self, dest:memoryview, src:WGPUBufPtr):
-    buffer_data = read_buffer(self.dev, src)
+    buffer_data = read_buffer(self.dev.device_res, src)
     dest[:] = buffer_data[:dest.nbytes] if webgpu.wgpuBufferGetSize(src)  > dest.nbytes else buffer_data
   @suppress_finalizing
   def _free(self, opaque:WGPUBufPtr, options:BufferSpec): webgpu.wgpuBufferDestroy(opaque)
@@ -203,21 +204,22 @@ class WebGpuDevice(Compiled):
     webgpu.wgpuAdapterGetFeatures(adapter_res, supported_features)
     supported = [supported_features.features[i] for i in range(supported_features.featureCount)]
     features = [feat for feat in [webgpu.WGPUFeatureName_TimestampQuery, webgpu.WGPUFeatureName_ShaderF16] if feat in supported]
-    dev_desc = webgpu.WGPUDeviceDescriptor(requiredFeatureCount=len(features),requiredFeatures=(webgpu.WGPUFeatureName * len(features))(*features))
+    dev_desc = webgpu.WGPUDeviceDescriptor(requiredFeatureCount=len(features),
+                                           requiredFeatures=c.Array(webgpu.WGPUFeatureName, len(features))(*features)) # type: ignore
 
     # Limits
     supported_limits = webgpu.WGPUSupportedLimits()
     webgpu.wgpuAdapterGetLimits(adapter_res, ctypes.cast(ctypes.pointer(supported_limits),ctypes.POINTER(webgpu.struct_WGPUSupportedLimits)))
     limits = webgpu.WGPURequiredLimits(limits=supported_limits.limits)
-    dev_desc.requiredLimits = ctypes.cast(ctypes.pointer(limits),ctypes.POINTER(webgpu.struct_WGPURequiredLimits))
+    dev_desc.requiredLimits = c.pointer(limits)
 
     # Requesting a device
-    device_res = _run(webgpu.wgpuAdapterRequestDeviceF, webgpu.WGPURequestDeviceCallbackInfo, webgpu.WGPURequestDeviceCallback,
+    self.device_res = _run(webgpu.wgpuAdapterRequestDeviceF, webgpu.WGPURequestDeviceCallbackInfo, webgpu.WGPURequestDeviceCallback,
       webgpu.WGPURequestDeviceStatus, 1, 2, adapter_res, dev_desc)
 
-    super().__init__(device, WebGpuAllocator(device_res), CompilerSet([CompilerPair(WGSLRenderer, Compiler)]),
-      functools.partial(WebGPUProgram, (device_res, webgpu.WGPUFeatureName_TimestampQuery in supported)))
+    super().__init__(device, WebGpuAllocator(self), CompilerSet([CompilerPair(WGSLRenderer, Compiler)]),
+      functools.partial(WebGPUProgram, (self.device_res, webgpu.WGPUFeatureName_TimestampQuery in supported)))
 
   def synchronize(self):
     _run(webgpu.wgpuQueueOnSubmittedWorkDone2, webgpu.WGPUQueueWorkDoneCallbackInfo2, webgpu.WGPUQueueWorkDoneCallback2,
-    webgpu.WGPUQueueWorkDoneStatus, None, None, webgpu.wgpuDeviceGetQueue(self.runtime.args[0][0]))
+    webgpu.WGPUQueueWorkDoneStatus, None, None, webgpu.wgpuDeviceGetQueue(self.device_res))

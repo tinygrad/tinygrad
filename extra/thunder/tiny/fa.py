@@ -1,6 +1,7 @@
 import math
 
 from tinygrad import Tensor, dtypes
+from tinygrad.helpers import DEBUG
 from tinygrad.uop.ops import UOp
 
 from extra.thunder.tiny.tk import WARP_THREADS
@@ -8,8 +9,17 @@ from extra.thunder.tiny.tk.kernel import Kernel
 from extra.thunder.tiny.tk.tiles import GL, TileLayout
 
 NUM_WORKERS = 1
-Q_BLOCK_SIZE = 16
-KV_BLOCK_SIZE = 16
+Q_BLOCK_SIZE = 32
+KV_BLOCK_SIZE = 32
+
+def _sharded_empty(shape:Tensor, ref:Tensor, axis:int|None) -> Tensor:
+  if not isinstance(ref.device, tuple): return Tensor.empty(*shape, dtype=ref.dtype, device=ref.device)
+  shape = tuple(s // len(ref.device) if i == ref.uop.axis else s for i, s in enumerate(shape))
+  axis = ref.uop.axis if axis is None else axis
+  return Tensor(Tensor.empty(*shape, dtype=ref.dtype, device=ref.device).uop.multi(axis), dtype=ref.dtype, device=ref.device)
+
+def _sharded_empty_like(ref:Tensor, axis:int|None=None) -> Tensor:
+  return _sharded_empty(ref.shape, ref, axis)
 
 def flash_attention(xq, xk, xv, attn_mask:Tensor|None=None, is_causal:bool=False):
   if len(xq.shape) == 3: xq, xk, xv = xq.unsqueeze(0), xk.unsqueeze(0), xv.unsqueeze(0)
@@ -29,10 +39,12 @@ def flash_attention(xq, xk, xv, attn_mask:Tensor|None=None, is_causal:bool=False
   B, N, H, D = xq.shape
   H_KV = xk.shape[2]
   GROUP_SIZE = H // H_KV
-  print(f"Flash Attention {B=} {N=} {H=} {D=} {H_KV=} {GROUP_SIZE=}")
+  num_devices = len(xq.device) if isinstance(xq.device, tuple) else 1
+  B_local = B // num_devices
+  if DEBUG >= 2: print(f"Flash Attention {B=} {B_local=} {N=} {H=} {D=} {H_KV=} {GROUP_SIZE=}")
 
   def custom_forward(ou:UOp, l_vecu:UOp, qu:UOp, ku:UOp, vu:UOp, masku:UOp) -> UOp:
-    with Kernel("fa_custom_forward", (H, N // (Q_BLOCK_SIZE*NUM_WORKERS), B), NUM_WORKERS * WARP_THREADS) as ker:
+    with Kernel("fa_custom_forward", (H, N // (Q_BLOCK_SIZE*NUM_WORKERS), B_local), NUM_WORKERS * WARP_THREADS) as ker:
       warp = ker.warp
 
       o, q, k, v, mask, l_vec = GL(ou, ker), GL(qu, ker), GL(ku, ker), GL(vu, ker), GL(masku, ker), GL(l_vecu, ker)
@@ -58,10 +70,10 @@ def flash_attention(xq, xk, xv, attn_mask:Tensor|None=None, is_causal:bool=False
       mask_reg = ker.rt((Q_BLOCK_SIZE, KV_BLOCK_SIZE), dtypes.float32)
       mask_reg_transposed = ker.rt((KV_BLOCK_SIZE, Q_BLOCK_SIZE), dtypes.float32, TileLayout.COL)
 
-      max_vec_last = ker.rv(KV_BLOCK_SIZE, dtypes.float32)
-      max_vec = ker.rv(KV_BLOCK_SIZE, dtypes.float32)
-      norm_vec = ker.rv(KV_BLOCK_SIZE, dtypes.float32)
-      scale_vec = ker.rv(KV_BLOCK_SIZE, dtypes.float32)
+      max_vec_last = ker.rv(Q_BLOCK_SIZE, dtypes.float32)
+      max_vec = ker.rv(Q_BLOCK_SIZE, dtypes.float32)
+      norm_vec = ker.rv(Q_BLOCK_SIZE, dtypes.float32)
+      scale_vec = ker.rv(Q_BLOCK_SIZE, dtypes.float32)
 
       max_vec = warp.neg_inf(max_vec)
       norm_vec = warp.zero(norm_vec)
@@ -93,7 +105,7 @@ def flash_attention(xq, xk, xv, attn_mask:Tensor|None=None, is_causal:bool=False
 
         # softmax
         max_vec_last = warp.copy(max_vec_last.after(kv_idx), max_vec)
-        max_vec = warp.row_reduce(max_vec.after(max_vec_last), att_block, lambda a, b: a.maximum(b), init_value=-math.inf)
+        max_vec = warp.col_reduce(max_vec.after(max_vec_last), att_block, lambda a, b: a.maximum(b), init_value=-math.inf)
 
         scale_vec = warp.map(scale_vec.after(max_vec_last, max_vec), lambda _, idx: max_vec_last[*idx] - max_vec[*idx])
         scale_vec = scale_vec.exp2()
@@ -104,7 +116,7 @@ def flash_attention(xq, xk, xv, attn_mask:Tensor|None=None, is_causal:bool=False
         att_block -= max_vec
         att_block = att_block.exp2()
 
-        norm_vec = warp.row_reduce(norm_vec.after(scale_vec), att_block, lambda a, b: a + b)
+        norm_vec = warp.col_reduce(norm_vec.after(scale_vec), att_block, lambda a, b: a + b)
 
         # mma av
         att_block_mma = warp.copy(att_block_mma.after(kv_idx, norm_vec), att_block)
@@ -130,7 +142,7 @@ def flash_attention(xq, xk, xv, attn_mask:Tensor|None=None, is_causal:bool=False
       return ker.finish()
 
   def custom_backward_q(dqu:UOp, dou:UOp, qu:UOp, ku:UOp, vu:UOp, masku:UOp, l_vecu:UOp, delta_vecu:UOp) -> UOp:
-    with Kernel("fa_custom_backward_q", (H, N // (Q_BLOCK_SIZE*NUM_WORKERS), B), NUM_WORKERS * WARP_THREADS) as ker:
+    with Kernel("fa_custom_backward_q", (H, N // (Q_BLOCK_SIZE*NUM_WORKERS), B_local), NUM_WORKERS * WARP_THREADS) as ker:
       warp = ker.warp
 
       dq, do, q, k, v, mask = GL(dqu, ker), GL(dou, ker), GL(qu, ker), GL(ku, ker), GL(vu, ker), GL(masku, ker)
@@ -144,6 +156,7 @@ def flash_attention(xq, xk, xv, attn_mask:Tensor|None=None, is_causal:bool=False
       k_smem = ker.st((KV_BLOCK_SIZE, D), dtypes.bfloat16)
       v_smem = ker.st((KV_BLOCK_SIZE, D), dtypes.bfloat16)
 
+      q_reg_fl = ker.rt((Q_BLOCK_SIZE, D), dtypes.float32)
       q_reg = ker.rt((Q_BLOCK_SIZE, D), dtypes.bfloat16)
       q_reg_t = ker.rt((D, Q_BLOCK_SIZE), dtypes.bfloat16, TileLayout.COL)
       k_reg = ker.rt((KV_BLOCK_SIZE, D), dtypes.bfloat16)
@@ -168,7 +181,9 @@ def flash_attention(xq, xk, xv, attn_mask:Tensor|None=None, is_causal:bool=False
       dq_reg = warp.zero(dq_reg)
 
       # load q tile
-      q_reg = warp.load(q_reg, q, (), (batch, q_seq, head, 0), axis=1)
+      q_reg_fl = warp.load(q_reg_fl, q, (), (batch, q_seq, head, 0), axis=1)
+      q_reg_fl *= (1.0 / math.sqrt(D)) * (1.0 / math.log(2))
+      q_reg = warp.copy(q_reg, q_reg_fl)
       q_reg_t = warp.transpose(q_reg_t, q_reg)
 
       # load do tile
@@ -198,7 +213,6 @@ def flash_attention(xq, xk, xv, attn_mask:Tensor|None=None, is_causal:bool=False
         mask_reg_transposed = warp.transpose(mask_reg_transposed, mask_reg)
         att_block += mask_reg_transposed
 
-        att_block *= (1.0 / math.sqrt(D)) * (1.0 / math.log(2))
         att_block -= l_vec_reg
         att_block = att_block.exp2()
 
@@ -207,18 +221,18 @@ def flash_attention(xq, xk, xv, attn_mask:Tensor|None=None, is_causal:bool=False
         dp_block -= delta_vec_reg
         att_block *= dp_block
 
-        att_block_mma = warp.copy(att_block_mma.after(att_block), att_block)
+        att_block *= 1.0 / math.sqrt(D)
+        att_block_mma = warp.copy(att_block_mma, att_block)
         dq_reg = warp.mma_AB(dq_reg, k_reg_col_t, att_block_mma)
       dq_reg = ker.endrange()
 
-      dq_reg *= 1.0 / math.sqrt(D)
       dq_reg_transposed = warp.transpose(dq_reg_transposed, dq_reg)
       dq = warp.store(dq, dq_reg_transposed, (batch, q_seq, head, 0), axis=1)
 
       return ker.finish()
 
-  def custom_backward_kv(dku:UOp, dvu:UOp, dou:UOp, qu:UOp, ku:UOp, vu:UOp, masku:UOp, l_vecu:UOp, delta_vecu:UOp) -> UOp:
-    with Kernel("fa_custom_backward_kv", (H_KV, N // (KV_BLOCK_SIZE*NUM_WORKERS), B), NUM_WORKERS * WARP_THREADS) as ker:
+  def custom_backward_kv(dku:UOp, dvu:UOp, dou:UOp, qu:UOp, ku:UOp, vu:UOp, masku:UOp, l_vecu:UOp, delta_vecu:UOp):
+    with Kernel("fa_custom_backward_kv", (H_KV, N // (KV_BLOCK_SIZE*NUM_WORKERS), B_local), NUM_WORKERS * WARP_THREADS) as ker:
       warp = ker.warp
 
       dk, dv, do, q, k, v, mask = GL(dku, ker), GL(dvu, ker), GL(dou, ker), GL(qu, ker), GL(ku, ker), GL(vu, ker), GL(masku, ker)
@@ -285,13 +299,13 @@ def flash_attention(xq, xk, xv, attn_mask:Tensor|None=None, is_causal:bool=False
           # mma qk^t
           att_block = warp.zero(att_block.after(g))
           att_block = warp.mma_AtB(att_block, k_reg_t, q_reg_t)
+          att_block *= (1.0 / math.sqrt(D)) * (1.0 / math.log(2))
 
           # apply attention mask
           mask_reg = warp.load(mask_reg, mask, (), (batch, 0, q_idx, kv_seq), axis=2)
           mask_reg_transposed = warp.transpose(mask_reg_transposed, mask_reg)
           att_block += mask_reg_transposed
 
-          att_block *= (1.0 / math.sqrt(D)) * (1.0 / math.log(2))
           att_block -= l_vec_reg
           att_block = att_block.exp2()
 
@@ -299,53 +313,59 @@ def flash_attention(xq, xk, xv, attn_mask:Tensor|None=None, is_causal:bool=False
           att_block_transposed = warp.transpose(att_block_transposed, att_block_mma)
           att_smem = warp.store(att_smem, att_block_transposed)
           att_block_row = warp.load(att_block_row, att_smem)
-          dv_reg_ = warp.mma_AB(dv_reg, att_block_row, do_reg_col)
+          dv_reg_ = warp.mma_AtB(dv_reg, att_block_row, do_reg_col)
 
           dp_block = warp.zero(dp_block.after(g, q_idx, dv_reg_))
           dp_block = warp.mma_ABt(dp_block, v_reg, do_reg)
           dp_block -= delta_vec_reg
           att_block *= dp_block
 
+          att_block *= 1.0 / math.sqrt(D)
           att_block_mma = warp.copy(att_block_mma, att_block)
           att_block_transposed = warp.transpose(att_block_transposed, att_block_mma)
           att_smem = warp.store(att_smem, att_block_transposed)
           att_block_row = warp.load(att_block_row, att_smem)
-          dk_reg = warp.mma_AB(dk_reg, att_block_row, q_reg_col)
+          dk_reg = warp.mma_AtB(dk_reg, att_block_row, q_reg_col)
       dk_reg = ker.endrange(2)
       dv_reg = dv_reg.after(dk_reg)
 
-      dk_reg *= 1.0 / math.sqrt(D)
+      dv_reg = warp.map(dv_reg, lambda x, idx: x + v_reg[*idx].cast(dtypes.float32) * 1e-30)
 
       dk = warp.store(dk, dk_reg, (batch, kv_seq, head_kv, 0), axis=1)
       dv = warp.store(dv, dv_reg, (batch, kv_seq, head_kv, 0), axis=1)
 
       return ker.finish(2)
 
+  single_device = xq.device[0] if isinstance(xq.device, tuple) else xq.device
+
   if is_causal:
     if attn_mask is not None: raise RuntimeError("cannot set attn_mask when is_causal=True")
-    attn_mask = Tensor.ones((B, 1, N, N), requires_grad=False, device=xq.device, dtype=dtypes.bool).tril()
+    attn_mask = Tensor.ones((B, 1, N, N), requires_grad=False, device=single_device, dtype=dtypes.bool).tril()
   if attn_mask is not None:
     if attn_mask.dtype == dtypes.bool: attn_mask = attn_mask.where(0, -float("inf"))
   else:
-    attn_mask = Tensor.zeros((B, 1, N, N), requires_grad=False, device=xq.device, dtype=dtypes.float32)
+    attn_mask = Tensor.zeros((B, 1, N, N), requires_grad=False, device=single_device, dtype=dtypes.float32)
+  if attn_mask.shape != (B, 1, N, N):
+    attn_mask = attn_mask.expand(B, 1, N, N)
+  if isinstance(xq.device, tuple) and not isinstance(attn_mask.device, tuple):
+    attn_mask = attn_mask.shard(xq.device, axis=0)
 
-  attn = Tensor.empty_like(xq)
-  l_vec = Tensor.empty(B, H, 1, N, requires_grad=False, device=xq.device, dtype=dtypes.float32).detach()
+  attn = _sharded_empty_like(xq, axis=0)
+  l_vec = _sharded_empty((B, H, 1, N), xq, axis=0)
 
-  def grad(gradu:UOp, kernel:UOp) -> tuple[None, None, UOp, UOp, UOp, None]:
-    grad = Tensor(gradu)
-    grad_q = Tensor.empty_like(q := Tensor(kernel.src[2]))
-    grad_k = Tensor.empty_like(k := Tensor(kernel.src[3]))
-    grad_v = Tensor.empty_like(v := Tensor(kernel.src[4]))
-    mask = Tensor(kernel.src[5])
+  def grad(gradu:UOp, _) -> tuple[None, None, UOp, UOp, UOp, None]:
+    grad = Tensor(gradu, device=gradu.device)
+    grad_q = _sharded_empty_like(xq, axis=0)
+    grad_k = _sharded_empty_like(xk, axis=0)
+    grad_v = _sharded_empty_like(xv, axis=0)
 
-    delta_vec = (grad * attn).sum(-1).transpose(1, 2).unsqueeze(-2).detach()
+    delta_vec = (grad * attn).sum(-1, dtype=dtypes.float32).transpose(1, 2).unsqueeze(-2).detach()
 
-    grad_q = Tensor.custom_kernel(grad_q, grad, q, k, v, mask, l_vec, delta_vec, fxn=custom_backward_q)[0]
-    grad_k, grad_v = Tensor.custom_kernel(grad_k, grad_v, grad, q, k, v, mask, l_vec, delta_vec, fxn=custom_backward_kv)[:2]
+    grad_q = Tensor.custom_kernel(grad_q, grad, xq, xk, xv, attn_mask, l_vec, delta_vec, fxn=custom_backward_q)[0]
+    grad_k, grad_v = Tensor.custom_kernel(grad_k, grad_v, grad, xq, xk, xv, attn_mask, l_vec, delta_vec, fxn=custom_backward_kv)[:2]
     return (None, None, grad_q.uop, grad_k.uop, grad_v.uop, None)
 
   attn, l_vec = Tensor.custom_kernel(attn, l_vec, xq, xk, xv, attn_mask, fxn=custom_forward, grad_fxn=grad)[:2]
-  attn = attn[:, :N_, :, :D_]
+  attn_ = attn[:, :N_, :, :D_]
 
-  return attn.transpose(1, 2).cast(odtype)
+  return attn_.transpose(1, 2).cast(odtype)

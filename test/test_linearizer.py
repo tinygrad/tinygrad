@@ -234,7 +234,7 @@ class TestLinearizer(unittest.TestCase):
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "test requires float4")
   def test_simple_unroll_no_between_phi_dependencies(self):
-    x, y = Tensor.rand(128, 128), Tensor.rand(128, 128)
+    x, y = Tensor.empty(64, 64), Tensor.empty(64, 64)
     r = (x@y).relu()
     opt = [Opt(OptOps.UNROLL, 0, 4), Opt(OptOps.UPCAST, 0, 4)]
     ast = helper_linearizer_opt(r, [opt])
@@ -399,8 +399,7 @@ class TestLinearizer(unittest.TestCase):
       assert len(set([u.op for u in uops if u.op in {Ops.RANGE, Ops.SPECIAL}])) == 1, "has either specials or ranges, not both"
       reg_stores = [u for u in uops if u.op is Ops.STORE and isinstance(dt:=u.src[0].dtype, PtrDType) and dt.addrspace == AddrSpace.REG]
       assert len(reg_stores) == 0, "STORE to reg should have been simplified"
-      # TODO: once uops track min/max this will be fixed
-      #assert len([u for u in uops if u.op is Ops.MAX]) <= max_ops, "no unnecessary MAX ops"
+      assert len([u for u in uops if u.op is Ops.MAX]) <= max_ops, "no unnecessary MAX ops"
 
     helper(Tensor.arange(5.5, (3.5*300), 3.5), max_ops=2)
     helper(Tensor.arange(-1, -100, -5), max_ops=2)
@@ -421,7 +420,7 @@ class TestLinearizer(unittest.TestCase):
     simplifies to:
     *((device float4*)(data0+alu2)) = acc0;
     """
-    x, y = Tensor.randn(64,64), Tensor.randn(64,64)
+    x, y = Tensor.empty(64,64), Tensor.empty(64,64)
     out = x.matmul(y)
     with Context(TC=0):
       ast = helper_linearizer_opt(out)
@@ -443,7 +442,7 @@ class TestLinearizer(unittest.TestCase):
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "test requires float4")
   def test_grouped_store_locals_and_globals(self):
-    x, y = Tensor.rand(128, 128), Tensor.rand(128, 128)
+    x, y = Tensor.empty(64, 64), Tensor.empty(64, 64)
     out = x@y
     opt = [Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.GROUPTOP, 0, 8),
             Opt(OptOps.UNROLL, 0, 4), Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 1, 2)] # upcast accs in both reduces

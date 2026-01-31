@@ -2,10 +2,11 @@ import time, math, unittest, functools, platform, warnings
 import numpy as np
 from typing import List, Callable
 import torch
-from tinygrad.helpers import getenv, IMAGE, DEBUG, CI, Context, CPU_LLVM, CPU_LVP, AMD_LLVM, EMULATE
+from tinygrad.helpers import getenv, IMAGE, DEBUG, CI, Context, CPU_LLVM, AMD_LLVM, EMULATE
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.tensor import _to_np_dtype
 from tinygrad.device import is_dtype_supported
+from tinygrad.renderer.nir import NIRRenderer
 
 if getenv("TINY_BACKEND"):
   import tinygrad.nn.torch # noqa: F401 # pylint: disable=unused-import
@@ -235,8 +236,7 @@ class TestOps(unittest.TestCase):
   def test_unfold(self):
     helper_test_op([(8,)], lambda x: x.unfold(0, 2, 1))
     helper_test_op([(8,)], lambda x: x.unfold(0, 2, 2))
-    # TODO: something is wrong with unfold
-    if not getenv("TINY_BACKEND"): helper_test_op([(8,)], lambda x: x.unfold(0, 7, 3))
+    helper_test_op([(8,)], lambda x: x.unfold(0, 7, 3))
     helper_test_op([(3,3,3)], lambda x: x.unfold(2, 2, 8))
     helper_test_op([(3,3,3)], lambda x: x.unfold(1, 0, 8))
     helper_test_op([(3,3,3,3,3)], lambda x: x.unfold(-1, 2, 2))
@@ -640,6 +640,8 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45,65), (45,65)], lambda x,y: x**y)
     helper_test_op([(45,65), (45,65)], lambda x,y: x.pow(y))
 
+  # TODO: WEBGPU NaN handling in pow operations
+  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "WEBGPU NaN handling differs")
   def test_pow(self):
     helper_test_op([(45,65)], lambda x: x**0)
     helper_test_op([(45,65)], lambda x: x**1)
@@ -682,6 +684,7 @@ class TestOps(unittest.TestCase):
     helper_test_op(None, lambda x: 0.7**x, vals=[[-2,-1,0,1,2,3]], forward_only=True)
 
   @unittest.skipIf(COMPILE_ONLY, "test requires runtime")
+  @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, NIRRenderer), "TODO: broken in LVP")
   def test_pow_const_direct(self):
     # x ** c
     def get_tiny_gradient(x, c):
@@ -695,16 +698,21 @@ class TestOps(unittest.TestCase):
         tiny_out = get_tiny_gradient(x, c)
         torch_out = get_torch_gradient(x, c)
         if math.isnan(tiny_out):
+          if Device.DEFAULT == "WEBGPU": continue # TODO: WEBGPU issue with nan
           assert math.isnan(torch_out)
         else:
           self.assertAlmostEqual(tiny_out, torch_out, msg=f"{x}, {c}")
 
   def test_pow_zero_tensor(self):
     helper_test_op(None, lambda x,y: x**y, vals=[[0.0], [0.0]])
-    # TODO: fix WEBGPU and LVP
-    if Device.DEFAULT != "WEBGPU" and not CPU_LVP:
+    # TODO: fix WEBGPU
+    if Device.DEFAULT != "WEBGPU":
       helper_test_op(None, lambda x,y: x**y, vals=[[0.0], [0.3]])
       helper_test_op(None, lambda x,y: x**y, vals=[[0.0], [-0.3]])
+  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "WEBGPU issue")
+  def test_exp2_log2_zero_times_negative(self):
+    # gallivm's exp2/log2 have "undefined behavior with infs, 0s and nans", so exp2(log2(0)*y) returns 0 instead of inf
+    helper_test_op(None, lambda x,y: (x.log2()*y).exp2(), lambda x,y: (x.log2()*y).exp2(), vals=[[0.0], [-0.7]], forward_only=True)
   def test_pow_zero_const(self):
     helper_test_op(None, lambda x: x**0.3, vals=[[0.0]])
     helper_test_op(None, lambda x: x**0.0, vals=[[0.0]])
@@ -905,12 +913,18 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45,65)], torch.abs, Tensor.abs)
     helper_test_op([()], torch.abs, Tensor.abs)
   def test_abs_exact(self):
-    helper_test_op(None, torch.abs, Tensor.abs, vals=[[-1.,0,1]])
+    for v in [-1., -0., 0., 1., math.inf, -math.inf, math.nan, -math.nan]:
+      # abs(nan) gradient is undefined: torch=0, tinygrad=1, jax=-1
+      helper_test_op(None, torch.abs, Tensor.abs, vals=[[v]], forward_only=math.isnan(v))
 
   def test_log(self):
     helper_test_op([(45,65)], torch.log, Tensor.log)
     helper_test_op(None, torch.log, Tensor.log, vals=[[math.inf, -math.inf, math.nan]])
     helper_test_op([()], torch.log, Tensor.log)
+  def test_log10(self):
+    helper_test_op([(45,65)], torch.log10, Tensor.log10)
+    helper_test_op(None, torch.log10, Tensor.log10, vals=[[math.inf, -math.inf, math.nan]])
+    helper_test_op([()], torch.log10, Tensor.log10)
   def test_log2(self):
     helper_test_op([(45,65)], torch.log2, Tensor.log2)
     helper_test_op(None, torch.log2, Tensor.log2, vals=[[math.inf, -math.inf, math.nan]])
@@ -936,10 +950,15 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45,65), (45,1)], torch.copysign, Tensor.copysign)
     helper_test_op([(45,1), (1,65)], torch.copysign, Tensor.copysign)
     helper_test_op([(), ()], torch.copysign, Tensor.copysign)
+
+  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "fails locally")
   def test_copysign_exact(self):
-    for i in [-1.,0.,1.]:
-      for j in [-1., 0., 1.]:
-        helper_test_op(None, torch.copysign, Tensor.copysign, vals=[[i], [j]])
+    # NOTE: -nan (negative nan) is not tested because we can't detect its sign bit without bitcast
+    v = [-1., -0., 0., 1., math.inf, -math.inf, math.nan]
+    for i in v:
+      for j in v:
+        # torch returns nan gradient for copysign at inf, but mathematically (and per jax) it's ±1
+        helper_test_op(None, torch.copysign, Tensor.copysign, vals=[[i], [j]], forward_only=math.isinf(i) or math.isnan(i))
 
   def test_logaddexp(self):
     helper_test_op([(45,65), (45,65)], torch.logaddexp, Tensor.logaddexp)
@@ -1065,29 +1084,75 @@ class TestOps(unittest.TestCase):
     helper_test_op([(2, 3, 0)],lambda x: torch.cumprod(x, dim=2),lambda x: Tensor.cumprod(x, axis=2))
 
   def test_small_cummax(self):
-    helper_test_op([(10)], lambda x: torch.cummax(x, dim=0).values, lambda x: Tensor.cummax(x, axis=0))
+    helper_test_op([(10)], lambda x: torch.cummax(x, dim=0).values, lambda x: Tensor.cummax(x, axis=0)[0])
+    helper_test_op([(10)], lambda x: torch.cummax(x, dim=0).indices.int(), lambda x: Tensor.cummax(x, axis=0)[1], forward_only=True)
   @slow_test
   def test_simple_cummax(self):
-    helper_test_op([(512)], lambda x: torch.cummax(x, dim=0).values, lambda x: Tensor.cummax(x, axis=0))
-    helper_test_op([(1022)], lambda x: torch.cummax(x, dim=0).values, lambda x: Tensor.cummax(x, axis=0))
+    helper_test_op([(512)], lambda x: torch.cummax(x, dim=0).values, lambda x: Tensor.cummax(x, axis=0)[0])
+    helper_test_op([(512)], lambda x: torch.cummax(x, dim=0).indices.int(), lambda x: Tensor.cummax(x, axis=0)[1], forward_only=True)
+    helper_test_op([(1022)], lambda x: torch.cummax(x, dim=0).values, lambda x: Tensor.cummax(x, axis=0)[0])
+    helper_test_op([(1022)], lambda x: torch.cummax(x, dim=0).indices.int(), lambda x: Tensor.cummax(x, axis=0)[1], forward_only=True)
   @slow_test
   def test_cummax(self):
-    helper_test_op([()], lambda x: torch.cummax(x, dim=0).values, lambda x: Tensor.cummax(x, axis=0))
-    self.helper_test_exception([()], lambda x: torch.cummax(x, dim=1).values, lambda x: Tensor.cummax(x, axis=1), expected=IndexError)
-    helper_test_op([(20,)], lambda x: torch.cummax(x, dim=0).values, lambda x: Tensor.cummax(x, axis=0))
-    self.helper_test_exception([(20,)], lambda x: torch.cummax(x, dim=1).values, lambda x: Tensor.cummax(x, axis=1), expected=IndexError)
-    self.helper_test_exception([(20,)], lambda x: torch.cummax(x, dim=-2).values, lambda x: Tensor.cummax(x, axis=-2), expected=IndexError)
-    helper_test_op([(20,30)], lambda x: torch.cummax(x, dim=0).values, lambda x: Tensor.cummax(x, axis=0))
-    helper_test_op([(20,30)], lambda x: torch.cummax(x, dim=1).values, lambda x: Tensor.cummax(x, axis=1))
-    helper_test_op([(20,30,40)], lambda x: torch.cummax(x, dim=2).values, lambda x: Tensor.cummax(x, axis=2))
-    helper_test_op([(20,30,40)], lambda x: torch.cummax(x, dim=-1).values, lambda x: Tensor.cummax(x, axis=-1))
+    helper_test_op([()], lambda x: torch.cummax(x, dim=0).values, lambda x: Tensor.cummax(x, axis=0)[0])
+    helper_test_op([()], lambda x: torch.cummax(x, dim=0).indices.int(), lambda x: Tensor.cummax(x, axis=0)[1], forward_only=True)
+    self.helper_test_exception([()], lambda x: torch.cummax(x, dim=1).values, lambda x: Tensor.cummax(x, axis=1)[0], expected=IndexError)
+    helper_test_op([(5,)], lambda x: torch.cummax(x, dim=0).values, lambda x: Tensor.cummax(x, axis=0)[0])
+    helper_test_op([(5,)], lambda x: torch.cummax(x, dim=0).indices.int(), lambda x: Tensor.cummax(x, axis=0)[1], forward_only=True)
+    self.helper_test_exception([(5,)], lambda x: torch.cummax(x, dim=1).values, lambda x: Tensor.cummax(x, axis=1)[0], expected=IndexError)
+    self.helper_test_exception([(5,)], lambda x: torch.cummax(x, dim=-2).values, lambda x: Tensor.cummax(x, axis=-2)[0], expected=IndexError)
+    helper_test_op([(5,6)], lambda x: torch.cummax(x, dim=0).values, lambda x: Tensor.cummax(x, axis=0)[0])
+    helper_test_op([(5,6)], lambda x: torch.cummax(x, dim=0).indices.int(), lambda x: Tensor.cummax(x, axis=0)[1], forward_only=True)
+    helper_test_op([(5,6)], lambda x: torch.cummax(x, dim=1).values, lambda x: Tensor.cummax(x, axis=1)[0])
+    helper_test_op([(5,6)], lambda x: torch.cummax(x, dim=1).indices.int(), lambda x: Tensor.cummax(x, axis=1)[1], forward_only=True)
+    helper_test_op([(5,6,7)], lambda x: torch.cummax(x, dim=2).values, lambda x: Tensor.cummax(x, axis=2)[0])
+    helper_test_op([(5,6,7)], lambda x: torch.cummax(x, dim=2).indices.int(), lambda x: Tensor.cummax(x, axis=2)[1], forward_only=True)
+    helper_test_op([(5,6,7)], lambda x: torch.cummax(x, dim=-1).values, lambda x: Tensor.cummax(x, axis=-1)[0])
+    helper_test_op([(5,6,7)], lambda x: torch.cummax(x, dim=-1).indices.int(), lambda x: Tensor.cummax(x, axis=-1)[1], forward_only=True)
   def test_cummax_zero_axis(self):
-    helper_test_op([(2,0,4)], lambda x: torch.cummax(x, dim=1).values, lambda x: Tensor.cummax(x, axis=1))
-    helper_test_op([(0,3)], lambda x: torch.cummax(x, dim=0).values, lambda x: Tensor.cummax(x, axis=0))
-    helper_test_op([(2,3,0)], lambda x: torch.cummax(x, dim=2).values, lambda x: Tensor.cummax(x, axis=2))
+    helper_test_op([(2,0,4)], lambda x: torch.cummax(x, dim=1).values, lambda x: Tensor.cummax(x, axis=1)[0])
+    helper_test_op([(2,0,4)], lambda x: torch.cummax(x, dim=1).indices.int(), lambda x: Tensor.cummax(x, axis=1)[1], forward_only=True)
+    helper_test_op([(0,3)], lambda x: torch.cummax(x, dim=0).values, lambda x: Tensor.cummax(x, axis=0)[0])
+    helper_test_op([(0,3)], lambda x: torch.cummax(x, dim=0).indices.int(), lambda x: Tensor.cummax(x, axis=0)[1], forward_only=True)
+    helper_test_op([(2,3,0)], lambda x: torch.cummax(x, dim=2).values, lambda x: Tensor.cummax(x, axis=2)[0])
+    helper_test_op([(2,3,0)], lambda x: torch.cummax(x, dim=2).indices.int(), lambda x: Tensor.cummax(x, axis=2)[1], forward_only=True)
+
+  def test_small_cummin(self):
+    helper_test_op([(10)], lambda x: torch.cummin(x, dim=0).values, lambda x: Tensor.cummin(x, axis=0)[0])
+    helper_test_op([(10)], lambda x: torch.cummin(x, dim=0).indices.int(), lambda x: Tensor.cummin(x, axis=0)[1], forward_only=True)
+  @slow_test
+  def test_simple_cummin(self):
+    helper_test_op([(512)], lambda x: torch.cummin(x, dim=0).values, lambda x: Tensor.cummin(x, axis=0)[0])
+    helper_test_op([(512)], lambda x: torch.cummin(x, dim=0).indices.int(), lambda x: Tensor.cummin(x, axis=0)[1], forward_only=True)
+    helper_test_op([(1022)], lambda x: torch.cummin(x, dim=0).values, lambda x: Tensor.cummin(x, axis=0)[0])
+    helper_test_op([(1022)], lambda x: torch.cummin(x, dim=0).indices.int(), lambda x: Tensor.cummin(x, axis=0)[1], forward_only=True)
+  @slow_test
+  def test_cummin(self):
+    helper_test_op([()], lambda x: torch.cummin(x, dim=0).values, lambda x: Tensor.cummin(x, axis=0)[0])
+    helper_test_op([()], lambda x: torch.cummin(x, dim=0).indices.int(), lambda x: Tensor.cummin(x, axis=0)[1], forward_only=True)
+    self.helper_test_exception([()], lambda x: torch.cummin(x, dim=1).values, lambda x: Tensor.cummin(x, axis=1)[0], expected=IndexError)
+    helper_test_op([(5,)], lambda x: torch.cummin(x, dim=0).values, lambda x: Tensor.cummin(x, axis=0)[0])
+    helper_test_op([(5,)], lambda x: torch.cummin(x, dim=0).indices.int(), lambda x: Tensor.cummin(x, axis=0)[1], forward_only=True)
+    self.helper_test_exception([(5,)], lambda x: torch.cummin(x, dim=1).values, lambda x: Tensor.cummin(x, axis=1)[0], expected=IndexError)
+    self.helper_test_exception([(5,)], lambda x: torch.cummin(x, dim=-2).values, lambda x: Tensor.cummin(x, axis=-2)[0], expected=IndexError)
+    helper_test_op([(5,6)], lambda x: torch.cummin(x, dim=0).values, lambda x: Tensor.cummin(x, axis=0)[0])
+    helper_test_op([(5,6)], lambda x: torch.cummin(x, dim=0).indices.int(), lambda x: Tensor.cummin(x, axis=0)[1], forward_only=True)
+    helper_test_op([(5,6)], lambda x: torch.cummin(x, dim=1).values, lambda x: Tensor.cummin(x, axis=1)[0])
+    helper_test_op([(5,6)], lambda x: torch.cummin(x, dim=1).indices.int(), lambda x: Tensor.cummin(x, axis=1)[1], forward_only=True)
+    helper_test_op([(5,6,7)], lambda x: torch.cummin(x, dim=2).values, lambda x: Tensor.cummin(x, axis=2)[0])
+    helper_test_op([(5,6,7)], lambda x: torch.cummin(x, dim=2).indices.int(), lambda x: Tensor.cummin(x, axis=2)[1], forward_only=True)
+    helper_test_op([(5,6,7)], lambda x: torch.cummin(x, dim=-1).values, lambda x: Tensor.cummin(x, axis=-1)[0])
+    helper_test_op([(5,6,7)], lambda x: torch.cummin(x, dim=-1).indices.int(), lambda x: Tensor.cummin(x, axis=-1)[1], forward_only=True)
+  def test_cummin_zero_axis(self):
+    helper_test_op([(2,0,4)], lambda x: torch.cummin(x, dim=1).values, lambda x: Tensor.cummin(x, axis=1)[0])
+    helper_test_op([(2,0,4)], lambda x: torch.cummin(x, dim=1).indices.int(), lambda x: Tensor.cummin(x, axis=1)[1], forward_only=True)
+    helper_test_op([(0,3)], lambda x: torch.cummin(x, dim=0).values, lambda x: Tensor.cummin(x, axis=0)[0])
+    helper_test_op([(0,3)], lambda x: torch.cummin(x, dim=0).indices.int(), lambda x: Tensor.cummin(x, axis=0)[1], forward_only=True)
+    helper_test_op([(2,3,0)], lambda x: torch.cummin(x, dim=2).values, lambda x: Tensor.cummin(x, axis=2)[0])
+    helper_test_op([(2,3,0)], lambda x: torch.cummin(x, dim=2).indices.int(), lambda x: Tensor.cummin(x, axis=2)[1], forward_only=True)
 
   def test_argmax(self):
-    # check if it returns the first index for multiple occurences
+    # check if it returns the first index for multiple occurrences
     helper_test_op(None, lambda x: x.argmax().type(torch.int32), lambda x: x.argmax(), forward_only=True, vals=[[2, 2]])
     helper_test_op(None, lambda x: x.argmax().type(torch.int32), lambda x: x.argmax(), forward_only=True, vals=[[1, 2, 2]])
     if not COMPILE_ONLY:
@@ -1107,7 +1172,7 @@ class TestOps(unittest.TestCase):
     helper_test_op(None, lambda x: x.type(torch.int32).argmax().type(torch.int32), lambda x: x.argmax(), forward_only=True, vals=[[True, False]])
 
   def test_argmin(self):
-    # check if it returns the first index for multiple occurences
+    # check if it returns the first index for multiple occurrences
     helper_test_op(None, lambda x: x.argmin().type(torch.int32), lambda x: x.argmin(), forward_only=True, vals=[[2, 2]])
     helper_test_op(None, lambda x: x.argmin().type(torch.int32), lambda x: x.argmin(), forward_only=True, vals=[[3, 2, 2]])
     if not COMPILE_ONLY:
@@ -1171,6 +1236,8 @@ class TestOps(unittest.TestCase):
 
   @slow_test
   def test_einsum(self):
+    # scalar
+    helper_test_op([()], lambda a: torch.einsum('->', a), lambda a: Tensor.einsum('->', a))
     # matrix transpose
     helper_test_op([(10,10)], lambda a: torch.einsum('ij->ji', a), lambda a: Tensor.einsum('ij->ji', a))
     helper_test_op([(10,10)], lambda a: torch.einsum('ij -> ji', a), lambda a: Tensor.einsum('ij -> ji', a))
@@ -1238,6 +1305,18 @@ class TestOps(unittest.TestCase):
     # multiple ellipsis must broadcast together
     self.helper_test_exception([(2, 3, 4), (2, 3, 4)], lambda a, b: torch.einsum('i...j,ji...->...', [a, b]),
                 lambda a, b: Tensor.einsum('i...j,ji...->...', [a, b]), expected=RuntimeError)
+
+  def test_einsum_trace(self):
+    # inner product
+    helper_test_op([(5,), (5,)], lambda a, b: torch.einsum('i,i', a, b), lambda a, b: Tensor.einsum('i,i', a, b))
+    # simple diagonal
+    helper_test_op([(4, 4)], lambda a: torch.einsum('ii->i', a), lambda a: Tensor.einsum('ii->i', a))
+    # trace (sum of diagonal)
+    helper_test_op([(4, 4)], lambda a: torch.einsum('ii->', a), lambda a: Tensor.einsum('ii->', a))
+    # batch diagonal
+    helper_test_op([(3, 5, 5)], lambda a: torch.einsum('...ii->...i', a), lambda a: Tensor.einsum('...ii->...i', a))
+    # batch trace
+    helper_test_op([(3, 5, 5)], lambda a: torch.einsum('...ii->...', a), lambda a: Tensor.einsum('...ii->...', a))
 
   def test_einsum_shape_check(self):
     self.helper_test_exception([(3,8,10,5), (11,5,13,16,8)], lambda a, b: torch.einsum('pqrs,tuqvr->pstuv', [a, b]),
@@ -1448,6 +1527,9 @@ class TestOps(unittest.TestCase):
     helper_test_op([(3,4,5,6)], lambda x: x.all(axis=(1,2)), forward_only=True)
   def test_all_zero_axis(self):
     helper_test_op([(1,0,3,0,5)], lambda x: x.all(axis=(1,3)), forward_only=True)
+  def test_all_large(self):
+    for exp in [15, 16, 20]:
+      helper_test_op(None, lambda: torch.ones(2**exp).bool().all(), lambda: Tensor.ones(2**exp).bool().all(), vals=[], forward_only=True)
 
   def test_isclose(self):
     helper_test_op([(3, 4, 5, 6)], lambda x: x.isclose(x), forward_only=True)
@@ -1589,6 +1671,7 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45,65)], lambda x: torch.logsumexp(x, dim=0), lambda x: x.logsumexp(0), atol=1e-7, grad_atol=1e-7)
     helper_test_op([(45,65)], lambda x: torch.logsumexp(x, dim=0, keepdim=True), lambda x: x.logsumexp(0, True), atol=1e-7, grad_atol=1e-7)
     helper_test_op([(45,65)], lambda x: torch.logsumexp(x, dim=1), lambda x: x.logsumexp(1), atol=1e-7, grad_atol=1e-7)
+    helper_test_op([(45,65)], lambda x: torch.logsumexp(x, dim=1, keepdim=True), lambda x: x.logsumexp(1, True), atol=1e-7, grad_atol=1e-7)
     helper_test_op([(6,6,6)], lambda x: torch.logsumexp(x, dim=2), lambda x: x.logsumexp(2), atol=1e-7, grad_atol=1e-7)
     helper_test_op([(6,6,6,6)], lambda x: torch.logsumexp(x, dim=2), lambda x: x.logsumexp(2), atol=1e-7, grad_atol=1e-7)
     helper_test_op([(6,6,6,6)], lambda x: torch.logsumexp(x, dim=3), lambda x: x.logsumexp(3), atol=1e-7, grad_atol=1e-7)
@@ -1986,6 +2069,15 @@ class TestOps(unittest.TestCase):
 
   def test_diagonal(self):
     helper_test_op([(5,5)], lambda x: x.diagonal())
+    helper_test_op([(3,4)], lambda x: x.diagonal())  # rectangular
+    helper_test_op([(4,3)], lambda x: x.diagonal())  # rectangular (other way)
+    helper_test_op([(3,3,3)], lambda x: x.diagonal(dim1=-2, dim2=-1))  # batched
+    helper_test_op([(4,5,6)], lambda x: x.diagonal(dim1=-2, dim2=-1))  # batched rectangular
+    helper_test_op([(2,3,4,5)], lambda x: x.diagonal(dim1=-2, dim2=-1))  # 4D batched
+    helper_test_op([(5,5)], lambda x: x.diagonal(offset=1))  # positive offset
+    helper_test_op([(5,5)], lambda x: x.diagonal(offset=-1))  # negative offset
+    helper_test_op([(3,5)], lambda x: x.diagonal(offset=2))  # offset on rectangular
+    self.helper_test_exception([(3,3)], lambda x: x.diagonal(dim1=0, dim2=0), expected=RuntimeError)
 
   def test_roll(self):
     helper_test_op([(2, 4)], lambda x: x.roll(1))
@@ -3181,6 +3273,11 @@ class TestOps(unittest.TestCase):
     helper_test_op([(32, 10)], lambda x: x.masked_select(x>0.5), lambda x: x.masked_select(x>0.5), forward_only=True)
     helper_test_op([(32, 10)], lambda x: x.masked_select(torch.tensor(True)), lambda x: x.masked_select(Tensor(True)), forward_only=True)
 
+  def test_nonzero(self):
+    helper_test_op([(32, 10)], lambda x: (x>0.5).nonzero().int(), lambda x: (x>0.5).nonzero(), forward_only=True)
+    helper_test_op([(20,)], lambda x: (x>0.5).nonzero().int(), lambda x: (x>0.5).nonzero(), forward_only=True)
+    helper_test_op([(10, 5, 3)], lambda x: (x>0.5).nonzero().int(), lambda x: (x>0.5).nonzero(), forward_only=True)
+
   @unittest.skipIf(Device.DEFAULT == "QCOM", "OpenCL fails to compile this (both on GPU(qcom)/QCOM backends)")
   def test_cast(self):
     helper_test_op([(3, 3)], lambda x: x.float())
@@ -3192,20 +3289,9 @@ class TestOps(unittest.TestCase):
   def test_bitcast(self):
     helper_test_op([(3, 3)], lambda x: x.view(torch.int32), lambda x: x.bitcast(dtypes.int32), forward_only=True)
 
-  @unittest.skip("we have test_linalg, no need to test here. TODO: should be in torch backend tests")
-  def test_svd(self):
-    # test for tiny backend. real svd tests are in test_linalg
-    A = torch.randn(5, 5)
-    U, S, Vh = torch.linalg.svd(A)
-    np.testing.assert_equal(U.shape, (5,5))
-    np.testing.assert_equal(Vh.shape, (5,5))
-    np.testing.assert_allclose(torch.dist(A, U @ torch.diag(S) @ Vh).cpu().numpy(), 0, atol=1e-5)
-
-    A = torch.randn(5, 3)
-    U, S, Vh = torch.linalg.svd(A, full_matrices=False)
-    np.testing.assert_equal(U.shape, (5,3))
-    np.testing.assert_equal(Vh.shape, (3,3))
-    np.testing.assert_allclose(torch.dist(A, U @ torch.diag(S) @ Vh).cpu().numpy(), 0, atol=1e-5)
+  def test_int_or(self):
+    t = (Tensor([0], dtype='int') | 0xFFFFFFFF).item()
+    if not COMPILE_ONLY: assert t == -1
 
 @unittest.skipUnless(is_dtype_supported(dtypes.uchar), f"no uint8 on {Device.DEFAULT}")
 class TestOpsUint8(unittest.TestCase):

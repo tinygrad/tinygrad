@@ -22,9 +22,7 @@ class WaveSlot:
   @property
   def cu_loc(self) -> str: return f"SE:{self.se} CU:{self.cu}"
   @property
-  def simd_loc(self) -> str: return f"{self.cu_loc} SIMD:{self.simd}"
-  @property
-  def wave_loc(self) -> str: return f"{self.simd_loc} W:{self.wave_id}"
+  def wave_loc(self) -> str: return f"{self.cu_loc} SIMD:{self.simd} W:{self.wave_id}"
 
 @dataclasses.dataclass(frozen=True)
 class WaveExec(WaveSlot):
@@ -113,12 +111,17 @@ def decode(sqtt_evs:list[ProfileSQTTEvent], disasms:dict[str, dict[int, tuple[st
 
     return rocprof.ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS
 
+  exc:Exception|None = None
   def worker():
+    nonlocal exc
     try: rocprof.rocprof_trace_decoder_parse_data(copy_cb, trace_cb, isa_cb, None)
     except AttributeError as e:
-      raise RuntimeError("Failed to find rocprof-trace-decoder. Run sudo ./extra/sqtt/install_sqtt_decoder.py to install") from e
+      exc = RuntimeError("Failed to find rocprof-trace-decoder. Run sudo ./extra/sqtt/install_sqtt_decoder.py to install")
+      exc.__cause__ = e
   (t:=threading.Thread(target=worker, daemon=True)).start()
   t.join()
+  if exc is not None:
+    raise exc
   return ROCParseCtx
 
 def print_data(data:dict) -> None:
@@ -156,6 +159,7 @@ def main() -> None:
   if not trace: raise RuntimeError(f"no matching trace for {args.kernel}")
   n = 0
   for s in trace["steps"]:
+    if "PKTS" in s["name"]: continue
     print(s["name"])
     data = viz.get_render(s["query"])
     print_data(data)

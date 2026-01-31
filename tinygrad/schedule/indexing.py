@@ -3,6 +3,7 @@ import functools, operator, itertools
 from dataclasses import dataclass, field
 from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, graph_rewrite, sint, AxisType, profile_matches
+from tinygrad.uop.ops import consumer_map_from_toposort
 from tinygrad.uop.symbolic import symbolic, pm_simplify_valid, pm_drop_and_clauses
 from tinygrad.helpers import argsort, all_same, cpu_profile, PCONTIG, colored
 
@@ -73,7 +74,7 @@ def create_bufferize_and_index_based_on_ranges(ctx:IndexingContext, x:UOp):
         removable = x.op is not Ops.COPY and s.op not in ALWAYS_CONTIGUOUS
         # None in the device assigns it a number later
         opts = BufferizeOpts(device=s.device, removable=removable) if len(ctx.range_map[s][1]) == len(realized_ranges) else \
-               BufferizeOpts(None, AddrSpace.LOCAL, removable=removable)
+               BufferizeOpts(device=s.device, addrspace=AddrSpace.LOCAL, removable=removable)
         new_src = UOp(Ops.BUFFERIZE, s.dtype, src=(new_src,)+closed_ranges, arg=opts, tag=s.tag if opts.addrspace == AddrSpace.GLOBAL else None)
         if x in ctx.range_map: new_src = new_src.index(*[r for i,r in enumerate(ctx.range_map[x][0]) if i in realized_ranges])
     new_srcs.append(new_src)
@@ -121,7 +122,7 @@ pm_apply_rangeify = PatternMatcher([
 
 @functools.cache
 def _apply_reshape(in_shape:tuple[sint,...], out_shape:tuple[sint, ...], urngs:UOp) -> UOp:
-  acc = 1
+  acc:sint = 1
   axes_in:list[UOp] = []
   for s,src in list(zip(out_shape, urngs.src))[::-1]:
     axes_in.append(acc*src)
@@ -163,13 +164,13 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
   # get ops to realize
   graph_rewrite(tsink, pm_generate_realize_map, ctx=rctx.realize_map, name="get realize")
 
-  # get the traversal order
-  with cpu_profile("reverse toposort", "TINY"):
-    tsink_reverse_toposort = tsink.reverse_toposort(consumer_map:=tsink.get_consumer_map())
+  # get the consumer map
+  with cpu_profile("consumer map in rangeify", "TINY"):
+    consumer_map = consumer_map_from_toposort(tsink_toposort:=tsink.toposort())
 
   # explicit rangeify
   ending_ranges: dict[UOp, list[UOp]] = {}
-  for x in tsink_reverse_toposort:
+  for x in reversed(tsink_toposort):
     if x.op in {Ops.DEVICE, Ops.UNIQUE}: continue
 
     # no ranges on kernels, they are internal

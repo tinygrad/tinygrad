@@ -113,7 +113,7 @@ class TestGraph(unittest.TestCase):
   def skip_if_not_multigraph(self):
     graph = g.func if isinstance(g:=(d:=Device[Device.DEFAULT]).graph, functools.partial) else g
     if not issubclass(graph, MultiGraphRunner): self.skipTest("graph is not supported (not MultiGraphRunner)")
-    if not hasattr(d.allocator, '_transfer'): self.skipTest("device is not supported (no transfers)")
+    if not hasattr(d.allocator, '_transfer') or not d.allocator.supports_transfer: self.skipTest("device is not supported (no transfers)")
 
   def test_order_copy_writed(self):
     self.skip_if_not_multigraph()
