@@ -220,33 +220,20 @@ class AMDev(PCIDevImplBase):
 
   def fini(self):
     if DEBUG >= 2: print(f"am {self.devfmt}: Finalizing")
-    for ip in [self.sdma, self.gfx]: ip.fini_hw()
+    self.sdma.fini_hw()
+    self.gfx.dequeue_rings(wait=True)
     self.smu.set_clocks(level=0)
     self.ih.interrupt_handler()
     self.reg("regSCRATCH_REG6").write(self.is_err_state) # set finalized state.
 
   def recover(self):
-    """Recover from GPU fault by resetting queues and clearing fault status."""
+    if self.is_hive(): return
     if DEBUG >= 2: print(f"am {self.devfmt}: Recovering from GPU fault")
-
-    # Drain any pending interrupts
     self.ih.interrupt_handler()
-
-    # Finalize and reset the queues (dequeue current commands, reset waves)
-    # Use force_reset=True to handle hung MEC
-    self.sdma.fini_hw()
-    self.gfx.fini_hw(force_reset=True)
-
-    # Clear fault status registers
+    self.gfx.dequeue_rings(reset=True)
     self.gmc.clear_fault()
-
-    # Flush TLB to ensure clean state
     self.gmc.flush_tlb(ip='GC', vmid=0)
-    self.gmc.flush_tlb(ip='MM', vmid=0)
-
-    # Clear error state
     self.is_err_state = False
-
     if DEBUG >= 2: print(f"am {self.devfmt}: Recovery complete")
 
   def is_hive(self) -> bool: return self.gmc.xgmi_seg_sz > 0

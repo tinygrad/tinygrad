@@ -177,10 +177,8 @@ class AM_GMC(AM_IP):
     return None
 
   def clear_fault(self):
-    """Clear protection fault status registers."""
     for ip in ["GC", "MM"]:
       for inst in range(self.vmhubs if ip == "MM" else self.adev.gfx.xccs):
-        # Clear fault status by writing to invalidate engine with clear_protection_fault_status_addr=1
         self.adev.reg(f"reg{ip}VM_INVALIDATE_ENG17_REQ").write(clear_protection_fault_status_addr=1, inst=inst)
 
 class AM_SMU(AM_IP):
@@ -292,34 +290,24 @@ class AM_GFX(AM_IP):
     # Set 1 partition
     if self.xccs > 1 and not self.adev.partial_boot: self.adev.psp._spatial_partition_cmd(1)
 
-  def fini_hw(self, force_reset=False):
-    # NOTE: For aqls with xccs (queue=1), will continue from the saved state.
+  def dequeue_rings(self, wait=False, reset=False):
     for q in range(2 if self.xccs == 1 else 1):
       for xcc in range(self.xccs):
         self._grbm_select(me=1, pipe=0, queue=q, inst=xcc)
         if self.adev.regCP_HQD_ACTIVE.read(inst=xcc) & 1:
-          self.adev.regCP_HQD_DEQUEUE_REQUEST.write(0x2, inst=xcc) # 1 - DRAIN_PIPE; 2 - RESET_WAVES
-          # Wait for dequeue to complete (with short timeout for recovery)
-          try: wait_cond(lambda: self.adev.regCP_HQD_ACTIVE.read(inst=xcc) & 1, value=0, timeout_ms=500 if force_reset else 10000,
-                         msg="HQD dequeue timeout")
-          except TimeoutError:
-            if not force_reset: raise
-            # MEC is hung, need to reset it
-            if DEBUG >= 2: print(f"am {self.adev.devfmt}: HQD dequeue timeout, resetting MEC")
-        self._grbm_select(inst=xcc)
-
-    if force_reset:
-      # Reset MEC to recover from hung state
-      for xcc in range(self.xccs):
-        if self.adev.ip_ver[am.GC_HWIP] >= (10,0,0):
-          self.adev.regCP_MEC_RS64_CNTL.update(mec_pipe0_reset=1, mec_halt=1, inst=xcc)
-          time.sleep(0.01)
-          self.adev.regCP_MEC_RS64_CNTL.update(mec_pipe0_reset=0, mec_pipe0_active=1, mec_halt=0, inst=xcc)
-        else:
-          self.adev.regCP_MEC_CNTL.write(mec_me1_halt=1, mec_me2_halt=1, inst=xcc)
-          time.sleep(0.01)
-          self.adev.regCP_MEC_CNTL.write(0x0, inst=xcc)
-      time.sleep(0.05)  # Wait for MEC to be ready
+          self.adev.regCP_HQD_DEQUEUE_REQUEST.write(0x2, inst=xcc)
+          if wait: wait_cond(lambda: self.adev.regCP_HQD_ACTIVE.read(inst=xcc) & 1, value=0, timeout_ms=10000)
+    self._grbm_select()
+    if not reset: return
+    for xcc in range(self.xccs):
+      if (rs64:=self.adev.ip_ver[am.GC_HWIP] >= (10,0,0)): self.adev.regCP_MEC_RS64_CNTL.update(mec_pipe0_reset=1, mec_halt=1, inst=xcc)
+      else: self.adev.regCP_MEC_CNTL.write(mec_me1_halt=1, mec_me2_halt=1, inst=xcc)
+    time.sleep(0.01)
+    for xcc in range(self.xccs):
+      if rs64: self.adev.regCP_MEC_RS64_CNTL.update(mec_pipe0_reset=0, mec_pipe0_active=1, mec_halt=0, inst=xcc)
+      else: self.adev.regCP_MEC_CNTL.write(0x0, inst=xcc)
+    time.sleep(0.05)
+    self._config_gfx_rs64()
 
   def setup_ring(self, ring_addr:int, ring_size:int, rptr_addr:int, wptr_addr:int, eop_addr:int, eop_size:int, idx:int, aql:bool) -> tuple[int, int]:
     pipe, queue, doorbell = idx // 4, idx % 4, am.AMDGPU_NAVI10_DOORBELL_MEC_RING0

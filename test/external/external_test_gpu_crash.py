@@ -23,23 +23,9 @@ class TestGPUCrash(unittest.TestCase):
     cls.compiler = HIPCompiler(cls.dev.arch)
 
   def setUp(self):
-    # Try to recover if device is in error state from previous test
-    if self.dev.error_state is not None and self.dev.is_am():
-      self.dev.recover()
-
-    # Verify device works before each test
     from tinygrad import Tensor
-    try:
-      t = Tensor([1.0, 2.0], device="AMD").realize()
-      assert (t + 1).numpy().tolist() == [2.0, 3.0]
-    except Exception:
-      # Try recovery once more if it failed
-      if self.dev.is_am():
-        self.dev.recover()
-        t = Tensor([1.0, 2.0], device="AMD").realize()
-        assert (t + 1).numpy().tolist() == [2.0, 3.0]
-      else:
-        self.fail("Device not working before test")
+    t = Tensor([1.0, 2.0], device="AMD").realize()
+    assert (t + 1).numpy().tolist() == [2.0, 3.0]
 
   def _run(self, code: str):
     from tinygrad.runtime.ops_amd import AMDProgram
@@ -50,26 +36,14 @@ class TestGPUCrash(unittest.TestCase):
   def _run_bytes(self, raw: bytes): self._run(".byte " + ",".join(f"0x{b:02x}" for b in raw))
 
   def _assert_gpu_fault(self, func):
-    """Assert that func raises a RuntimeError indicating a GPU fault (not a setup error)."""
-    with self.assertRaises(RuntimeError) as cm:
-      func()
-    err_msg = str(cm.exception).lower()
-    # Verify it's a GPU fault, not a setup/device initialization error
-    self.assertTrue(
-      re.search(r'fault|hang|timeout|illegal|memviol', err_msg),
-      f"Expected GPU fault error, got: {cm.exception}"
-    )
-    # Recover from the fault so subsequent tests can run
-    if self.dev.is_am(): self.dev.recover()
+    with self.assertRaises(RuntimeError) as cm: func()
+    self.assertTrue(re.search(r'fault|hang|timeout|illegal|memviol', str(cm.exception).lower()), f"Expected GPU fault, got: {cm.exception}")
 
   def _assert_gpu_fault_and_recover(self, func):
-    """Assert GPU fault then recover and verify device works."""
     self._assert_gpu_fault(func)
-    if self.dev.is_am():
-      # Verify device works after recovery
-      from tinygrad import Tensor
-      t = Tensor([1.0, 2.0], device="AMD").realize()
-      self.assertEqual((t + 1).numpy().tolist(), [2.0, 3.0])
+    from tinygrad import Tensor
+    t = Tensor([1.0, 2.0], device="AMD").realize()
+    self.assertEqual((t + 1).numpy().tolist(), [2.0, 3.0])
 
 
 class TestIllegalInstructions(TestGPUCrash):
@@ -187,37 +161,55 @@ class TestScratchMemoryFaults(TestGPUCrash):
 
 
 @unittest.skipIf(Device.DEFAULT != "AMD", "AMD required")
+class TestSDMAFaults(TestGPUCrash):
+  """Tests for SDMA queue faults."""
+
+  def test_sdma_copy_to_null(self):
+    """SDMA copy to NULL address should fault but engine continues (fence still executes).
+    This test verifies that SDMA faults are detected and device enters error state.
+    """
+    import time
+    from tinygrad.runtime.ops_amd import AMDCopyQueue
+    if not self.dev.is_am(): self.skipTest("AM driver only")
+    if not self.dev.has_sdma_queue: self.skipTest("SDMA queue required")
+    # Issue copy from valid buffer to NULL address using AMDCopyQueue abstraction
+    src_buf = self.dev.allocator.alloc(64)
+    sig = self.dev.new_signal()
+    q = AMDCopyQueue(self.dev)
+    q.copy(dest=0, src=src_buf.va_addr, copy_size=64).signal(sig, 1).submit(self.dev)
+    # SDMA faults don't halt the engine - the fence still executes
+    sig.wait(1)
+    time.sleep(0.1)  # Give time for interrupt to be processed
+    self.dev.iface.dev_impl.ih.interrupt_handler()
+    # Verify the device detected the fault
+    fault = self.dev.iface.dev_impl.gmc.check_fault()
+    self.assertTrue(fault is not None or self.dev.iface.dev_impl.is_err_state, "Expected SDMA fault to be detected")
+    # Clear the fault so device can continue
+    self.dev.iface.dev_impl.gmc.clear_fault()
+    self.dev.iface.dev_impl.gmc.flush_tlb(ip='GC', vmid=0)
+    self.dev.iface.dev_impl.is_err_state = False
+
+
+@unittest.skipIf(Device.DEFAULT != "AMD", "AMD required")
 class TestGPURecovery(TestGPUCrash):
   """Tests for GPU recovery after faults (AM driver only)."""
 
   def test_recovery_after_null_ptr_access(self):
-    """Test that GPU recovers after NULL pointer access."""
-    if not self.dev.is_am():
-      self.skipTest("GPU recovery only supported with AM driver")
-
-    # Trigger a memory fault
+    if not self.dev.is_am(): self.skipTest("AM driver only")
     insts = [v_mov_b32_e32(v[0], 0), v_mov_b32_e32(v[1], 0),
              global_load_b32(v[2], addr=v[0:1], saddr=NULL, offset=0), s_waitcnt(0), s_endpgm()]
     self._assert_gpu_fault_and_recover(lambda: self._run_insts(insts))
 
   def test_recovery_after_unmapped_access(self):
-    """Test that GPU recovers after unmapped memory access."""
-    if not self.dev.is_am():
-      self.skipTest("GPU recovery only supported with AM driver")
-
-    # Trigger a memory fault at unmapped address
+    if not self.dev.is_am(): self.skipTest("AM driver only")
     insts = [v_mov_b32_e32(v[0], 0x00000000), v_mov_b32_e32(v[1], 0xDEAD),
              global_load_b32(v[2], addr=v[0:1], saddr=NULL, offset=0), s_waitcnt(0), s_endpgm()]
     self._assert_gpu_fault_and_recover(lambda: self._run_insts(insts))
 
   def test_multiple_recoveries(self):
-    """Test that GPU can recover multiple times in a row."""
-    if not self.dev.is_am():
-      self.skipTest("GPU recovery only supported with AM driver")
-
+    if not self.dev.is_am(): self.skipTest("AM driver only")
     for i in range(3):
       with self.subTest(iteration=i):
-        # Trigger a memory fault
         insts = [v_mov_b32_e32(v[0], 0), v_mov_b32_e32(v[1], 0),
                  global_load_b32(v[2], addr=v[0:1], saddr=NULL, offset=0), s_waitcnt(0), s_endpgm()]
         self._assert_gpu_fault_and_recover(lambda: self._run_insts(insts))
