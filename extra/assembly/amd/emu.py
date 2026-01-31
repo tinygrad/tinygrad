@@ -799,18 +799,11 @@ def _compile_vop3p(inst: VOP3P, ctx: _Ctx) -> UOp:
       return get_half_bits(src, bool(opsel_lo_bit), bool(neg_lo_bit)) | (get_half_bits(src, bool(opsel_hi_bit), bool(neg_hi_bit)) << UOp.const(dtypes.uint32, 16))
     # DOT IU instructions use NEG bits for signed/unsigned selection, not fp16 negation
     is_dot_iu = 'DOT' in op_name and 'IU' in op_name
-    if is_dot_iu:
-      s0_raw = build_remapped_src(src0, opsel & 1, opsel_hi & 1, 0, 0)
-      s1_raw = build_remapped_src(src1, opsel & 2, opsel_hi & 2, 0, 0)
-      s2_raw = build_remapped_src(src2, opsel & 4, 1 if opsel_hi2 else 0, 0, 0) if src2 is not None else None
-      srcs = {'S0': s0_raw, 'S1': s1_raw}
-      if s2_raw is not None: srcs['S2'] = s2_raw
-      srcs['NEG'] = UOp.const(dtypes.uint32, neg)
-    else:
-      s0_new = build_remapped_src(src0, opsel & 1, opsel_hi & 1, neg & 1, neg_hi & 1)
-      s1_new = build_remapped_src(src1, opsel & 2, opsel_hi & 2, neg & 2, neg_hi & 2)
-      s2_new = build_remapped_src(src2, opsel & 4, 1 if opsel_hi2 else 0, neg & 4, neg_hi & 4)
-      srcs = {'S0': s0_new, 'S1': s1_new, 'S2': s2_new}
+    n0, n1, n2, nh0, nh1, nh2 = (0, 0, 0, 0, 0, 0) if is_dot_iu else (neg & 1, neg & 2, neg & 4, neg_hi & 1, neg_hi & 2, neg_hi & 4)
+    srcs = {'S0': build_remapped_src(src0, opsel & 1, opsel_hi & 1, n0, nh0),
+            'S1': build_remapped_src(src1, opsel & 2, opsel_hi & 2, n1, nh1),
+            'S2': build_remapped_src(src2, opsel & 4, 1 if opsel_hi2 else 0, n2, nh2)}
+    if is_dot_iu: srcs['NEG'] = UOp.const(dtypes.uint32, neg)
   return ctx.compile_vop_pcode(inst.op, srcs, lane, vdst_reg, exec_mask)
 
 def _compile_vopd(inst: VOPD, ctx: _Ctx) -> UOp:
