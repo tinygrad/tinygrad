@@ -20,7 +20,7 @@ jobs:
   testmacpytest:
     name: Mac pytest
     runs-on: [self-hosted, macOS]
-    timeout-minutes: 10
+    timeout-minutes: 3
     defaults:
       run:
         shell: bash -e -o pipefail {0}
