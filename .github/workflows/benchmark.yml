@@ -42,7 +42,9 @@ jobs:
         echo "CACHEDB=/tmp/pytest-db-ci.db" >> $GITHUB_ENV
         rm -f /tmp/pytest-db-ci*
     - name: Run pytest -nauto
-      run: pytest -nauto
+      run: |
+        source /tmp/tinygrad_pytest_ci/bin/activate
+        pytest -nauto
 
   testmacbenchmark:
     name: Mac Benchmark
