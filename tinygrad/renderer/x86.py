@@ -217,9 +217,9 @@ def def_reg(dt:DType, reg:Register|None=None) -> UOp: return UOp(X86Ops.DEFINE_R
 # xmm2 selects its lower 2 32 bits from xmm0 and its upper 2 32 bits from xmm1
 def vshufps(x:UOp) -> UOp:
   def _in(i:int) -> UOp: return s.src[0] if (s:=x.src[i]).op is Ops.GEP else s
-  if len(x.src) != 4 or not (_in(0) is _in(1) and _in(2) is _in(3)): return None
+  if len(x.src) != 4 or _in(0) is not _in(1) or _in(2) is not _in(3): return None
   return UOp(X86Ops.VSHUFPS, x.dtype, (_in(0), _in(2),
-    imm(dtypes.uint8, sum((s.arg[0] if s.op is Ops.GEP else 0) << (2*i) for i,s in enumerate(x.src)))))
+    imm(dtypes.uint8, sum(s.arg[0] << 2*i if s.op is Ops.GEP else 0 for i,s in enumerate(x.src)))))
 
 # vinsertps xmm2, xmm0, xmm1
 # inserts any 32 bit element in xmm1 into any position in xmm0, result is written to xmm2
@@ -228,7 +228,7 @@ def vinsertps(x:UOp) -> UOp:
   def _insert(ret:UOp, i:int) -> UOp:
     s, v = x.src[i], 0
     if s.op is Ops.GEP: s, v = s.src[0], s.arg[0]
-    # if first src is not a gep or gep[0] it's just moving the 0th element from an xmm reg to another without shuffling which does nothing
+    # moving the 0th element into the 0th position does nothing
     return s if i == v == 0 else UOp(X86Ops.VINSERTPS, x.dtype, (ret, s, imm(dtypes.uint8, v << 6 | i << 4)))
   return functools.reduce(_insert, range(len(x.src)), def_reg(x.dtype))
 
