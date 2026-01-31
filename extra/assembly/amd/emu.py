@@ -379,9 +379,15 @@ class _Ctx:
     new_pc = self.rpc() + UOp.const(dtypes.uint64, self.inst_size)
     return [self.sgpr.index(_c(PC_LO_IDX, dtypes.int), ptr=True).cast(dtypes.uint64.ptr(SGPR_COUNT // 2)).store(new_pc)]
 
-  def scalar_stores(self, assigns: list[tuple[str, UOp]], sdst_reg: UOp, sdst_size: int = 1) -> list[UOp]:
-    """Generate stores for scalar assigns with dynamic destination register (D0, SCC, EXEC, VCC)."""
+  def wpc(self, val: UOp) -> UOp:
+    """Write PC as 64-bit byte address. Returns store UOp."""
+    return self.sgpr.index(_c(PC_LO_IDX, dtypes.int), ptr=True).cast(dtypes.uint64.ptr(SGPR_COUNT // 2)).store(val.cast(dtypes.uint64))
+
+  def scalar_stores(self, assigns: list[tuple[str, UOp]], sdst_reg: UOp, sdst_size: int = 1) -> tuple[list[UOp], bool]:
+    """Generate stores for scalar assigns with dynamic destination register (D0, SCC, EXEC, VCC, PC).
+    Returns (stores, pc_assigned) where pc_assigned is True if PC was set by pcode."""
     stores: list[UOp] = []
+    pc_assigned = False
     for dest, val in assigns:
       if dest.startswith('D0'):
         if sdst_size == 2:
@@ -391,15 +397,20 @@ class _Ctx:
       elif dest.startswith('SCC'): stores.append(self.wsgpr_dyn(_c(SCC.offset), _to_u32(val)))
       elif dest.startswith('EXEC'): stores.append(self.wsgpr_dyn(_c(EXEC_LO.offset), _to_u32(val)))
       elif dest.startswith('VCC'): stores.append(self.wsgpr_dyn(_c(VCC_LO.offset), _to_u32(val)))
-    return stores
+      elif dest == 'PC':
+        stores.append(self.wpc(val))
+        pc_assigned = True
+    return stores, pc_assigned
 
   def compile_sop_pcode(self, op, srcs: dict[str, UOp], sdst_reg: UOp, sdst_size: int) -> UOp:
     """Compile a scalar instruction with dynamic destination register."""
     pcode = get_pcode(op)
-    srcs.update({'VCC': self.rsgpr_dyn(_c(VCC_LO.offset)), 'EXEC': self.rsgpr_dyn(_c(EXEC_LO.offset)), 'SCC': self.rsgpr_dyn(_c(SCC.offset))})
+    srcs.update({'VCC': self.rsgpr_dyn(_c(VCC_LO.offset)), 'EXEC': self.rsgpr_dyn(_c(EXEC_LO.offset)), 'SCC': self.rsgpr_dyn(_c(SCC.offset)),
+                 'PC': self.rpc()})
     if 'D0' not in srcs: srcs['D0'] = self.rsgpr_dyn(sdst_reg)  # D0 is current dest value for read-modify-write ops
     _, assigns = parse_pcode(pcode, srcs)
-    return UOp.sink(*self.scalar_stores(assigns, sdst_reg, sdst_size), *self.inc_pc())
+    stores, pc_assigned = self.scalar_stores(assigns, sdst_reg, sdst_size)
+    return UOp.sink(*stores, *([] if pc_assigned else self.inc_pc()))
 
   def compile_lane_pcode(self, op, inst) -> UOp:
     """Compile READLANE/READFIRSTLANE/WRITELANE using pcode parser."""

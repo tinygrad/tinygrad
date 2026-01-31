@@ -270,6 +270,7 @@ class TestCfg(unittest.TestCase):
         s_add_u32(s[4], s[4], 1),
         # return
         s_swappc_b64(s[2:3], s[0:1]),
+        s_code_end(),
     ])
 
 if __name__ == "__main__":
