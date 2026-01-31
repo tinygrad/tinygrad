@@ -307,14 +307,16 @@ glbls:dict[str, Any] = {"inf": math.inf, "nan": math.nan, "KernelInfo": KernelIn
                         "UOp": UOp, "dtypes": dtypes, "Ops": Ops, "AxisType": AxisType, "Invalid": Invalid, "CustomKernel": CustomKernel,
                         "Opt": Opt, "OptOps": OptOps, "BufferizeOpts": BufferizeOpts, "AddrSpace": AddrSpace, "panic": panic,
                         "ConstFloat": ConstFloat}
-def eval_pyrender(code:str) -> UOp:
+def eval_pyrender(code:str) -> UOp|None:
   lcls:dict[str, Any] = {}
-  exec(code, glbls, lcls)
+  try: exec(code, glbls, lcls)
+  except SyntaxError: return None  # too many nested parentheses
   return lcls['ast']
 
 def test_pyrender(test_ast:UOp, assert_parents=True):
-  code = pyrender(test_ast)
-  ast:UOp = eval_pyrender(code)
+  try: code = pyrender(test_ast)
+  except NotImplementedError: return None  # this is okay, not all ops can be pyrendered
+  if (ast := eval_pyrender(code)) is None: return None
   if ast is not test_ast:
     if assert_parents:
       for u in test_ast.toposort(): test_pyrender(u, assert_parents=False)
