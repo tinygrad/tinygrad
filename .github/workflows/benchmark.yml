@@ -17,6 +17,8 @@ on:
 
 jobs:
   # the goal of this test is to replicate a normal person on a laptop running the test
+  # no process replay, no benchmarks, no CI, just a normal laptop person
+  # the 3 minute timeout should not be raised
   testmacpytest:
     name: Mac pytest
     runs-on: [self-hosted, macOS]
