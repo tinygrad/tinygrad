@@ -260,7 +260,7 @@ class TestMultiTensor(unittest.TestCase):
       a,b = _test_allreduce(Tensor.rand(256, 256))
       np.testing.assert_almost_equal(a.numpy(), b.numpy(), decimal=5)
 
-  def test_multiple_to_single_device_naive(self):  
+  def test_multiple_to_single_device_naive(self):
     t = _test_multiple_to_single_device(0)
     self.assertEqual(t.device, Device.DEFAULT)
 
