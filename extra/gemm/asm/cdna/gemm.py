@@ -16,7 +16,7 @@ def custom_asm_gemm(C:UOp, A:UOp, B:UOp, dname:str, arch:str, wg:int) -> UOp:
   assert K == K2
   lidx = UOp.special(WORKGROUP_SIZE, "lidx0")
   gidx = UOp.special(wg, "gidx0")
-  k = build_kernel(batch, M, N, K)
+  k = build_kernel(batch, M, N, K, A.dtype.base)
   sink = UOp.sink(C.base, A.base, B.base, lidx, gidx,
                   arg=KernelInfo(name=k.name, estimates=Estimates(ops=2*batch*M*N*K, mem=(batch*M*K + K*N + batch*M*N)*2)))
   binary = HIPCompiler(arch).compile(k.to_asm())
@@ -29,7 +29,7 @@ atexit.register(lambda: print("\n".join([f'asm_gemm: {counters["used"]} used, {l
 
 def can_use_asm_gemm(a:Tensor, b:Tensor) -> bool:
   if a.dtype != b.dtype: return todo(f"dtype mismatch {a.dtype} != {b.dtype}")
-  if a.dtype not in {dtypes.bfloat16}: return todo(f"dtype {a.dtype}")
+  if a.dtype not in {dtypes.bfloat16, dtypes.float16}: return todo(f"dtype {a.dtype}")
   # only sharding on the batch is tested
   if isinstance(a.device, tuple) and not (a.ndim == 3 and a.uop.axis == 0 and b.uop.axis is None):
     return todo(f"sharding mismatch a.ndim={a.ndim} a.uop.axis={a.uop.axis} b.uop.axis={b.uop.axis}")
