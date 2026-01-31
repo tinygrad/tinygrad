@@ -462,11 +462,19 @@ class TestAssign(unittest.TestCase):
     np.testing.assert_allclose(a.numpy(), [0., 0., 1., 2., 3., 0., 0., 0.])
 
   def test_assign_bitcast(self):
-    # assign to a bitcast view should modify the underlying buffer (only works on DISK currently)
+    # assign to a bitcast view should modify the underlying buffer
     a = Tensor([1.0, 2.0, 3.0, 4.0], dtype=dtypes.float32).realize()
     # IEEE 754: 1.0f = 0x3f800000, 2.0f = 0x40000000, 3.0f = 0x40400000, 4.0f = 0x40800000
     a.bitcast(dtypes.uint32).assign(Tensor([0x40800000, 0x40400000, 0x40000000, 0x3f800000], dtype=dtypes.uint32)).realize()
-    np.testing.assert_allclose(a.numpy(), [1.0, 2.0, 3.0, 4.0])  # TODO: should be [4.0, 3.0, 2.0, 1.0]
+    np.testing.assert_allclose(a.numpy(), [4.0, 3.0, 2.0, 1.0])
+    # double bitcast
+    b = Tensor([1.0, 2.0, 3.0, 4.0], dtype=dtypes.float32).realize()
+    b.bitcast(dtypes.uint32).bitcast(dtypes.int32).assign(Tensor([0x40800000, 0x40400000, 0x40000000, 0x3f800000], dtype=dtypes.int32)).realize()
+    np.testing.assert_allclose(b.numpy(), [4.0, 3.0, 2.0, 1.0])
+    # shrink then bitcast
+    c = Tensor([1.0, 2.0, 3.0, 4.0], dtype=dtypes.float32).realize()
+    c[0:2].bitcast(dtypes.uint32).assign(Tensor([0x40800000, 0x40400000], dtype=dtypes.uint32)).realize()
+    np.testing.assert_allclose(c.numpy(), [4.0, 3.0, 3.0, 4.0])
 
   def test_assign_bitcast_different_size(self):
     # different-size bitcast creates a new tensor, not a view, so assign doesn't modify the original
