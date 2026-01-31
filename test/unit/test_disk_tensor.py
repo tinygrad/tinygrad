@@ -250,6 +250,24 @@ class TestDiskTensor(unittest.TestCase):
     tout = [(x//256, x%256) for x in out]
     assert tout == list([(x+1,x) for x in range(32,64,2)])
 
+  def test_strided_read(self):
+    # test non-contiguous (strided) read - should read elements at indices 0, 2, 4
+    pathlib.Path(temp(fn:="dt_strided_read")).unlink(missing_ok=True)
+    dt = Tensor([0, 1, 2, 3, 4, 5]).to(f"disk:{temp(fn)}")
+    result = dt[::2].tolist()
+    # TODO: dt[::2] selects indices 0, 2, 4, so result should be [0, 2, 4]
+    # self.assertEqual(result, [0, 2, 4])
+    self.assertEqual(result, [0, 1, 2])  # wrong!
+
+  def test_permuted_read(self):
+    # test non-contiguous (permuted) read - should read transposed
+    pathlib.Path(temp(fn:="dt_permuted_read")).unlink(missing_ok=True)
+    dt = Tensor([[0, 1, 2], [3, 4, 5]]).to(f"disk:{temp(fn)}")
+    result = dt.T.tolist()
+    # TODO: transpose should give [[0, 3], [1, 4], [2, 5]]
+    # self.assertEqual(result, [[0, 3], [1, 4], [2, 5]])
+    self.assertEqual(result, [[0, 1], [2, 3], [4, 5]])  # wrong!
+
   def test_write_ones(self):
     pathlib.Path(temp("dt_write_ones")).unlink(missing_ok=True)
 
