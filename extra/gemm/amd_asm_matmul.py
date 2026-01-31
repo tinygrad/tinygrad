@@ -477,6 +477,7 @@ def test_matmul():
     # Load the stock kernel from amd_seb/kernel8_batched_gmem.s
     stock_path = Path(__file__).parent / "amd_seb" / "kernel8_batched_gmem.s"
     asm = stock_path.read_text()
+    binary = dev.compiler.compile(asm)
     print(f"Loaded stock kernel from {stock_path}")
   else:
     asm, binary = build_kernel(dev.renderer.arch)
