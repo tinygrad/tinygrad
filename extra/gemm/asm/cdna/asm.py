@@ -109,6 +109,13 @@ def build_kernel(batch, M, N, K, dtype):
   k.emit(s_mov_b32(M0, 133120))
   k.emit(v_mov_b32_e32(v[180], v[0]))
   # XCCG=256
+  # labels are named based on function:
+  # PGR = Prefetch Global Read (the global→LDS pipeline stage)
+  # SK = Stream-K (work partitioning by K-iterations, not tiles)
+  # WGM = WorkGroup Mapping (tile assignment scheme for cache locality)
+  # GLVW = Global Load Vector Width (edge tile width handling)
+  # BM0 = Block M offset 0 (register block position)
+  # OrdNLL = Ordered No-Load-Loop (final iteration without prefetch loads)
   k.emit(s_mov_b32(s[75], 256))
   k.emit(v_cvt_f32_u32_e32(v[18], s[75]))
   k.emit(v_rcp_iflag_f32_e32(v[18], v[18]))
