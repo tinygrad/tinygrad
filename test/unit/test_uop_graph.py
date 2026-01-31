@@ -479,6 +479,26 @@ class TestUOpGraph(unittest.TestCase):
     for u in uops:
       self.assertNotEqual(u.dtype, dtypes.long)
 
+  def test_load_idx_no_math_on_loaded(self):
+    # test the (x+y)<c pattern where x has loads - we shouldn't do math on loaded indices
+    c0 = UOp(Ops.DEFINE_GLOBAL, dtypes.uchar.ptr(128000), arg=0, src=())
+    c1 = UOp.range(UOp.const(dtypes.index, 512), 1, AxisType.LOOP)
+    c2 = UOp.range(UOp.const(dtypes.index, 250), 2, AxisType.LOOP)
+    c3 = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(512), arg=1, src=())
+    c4 = c3.index(c1)  # c4 is a load
+    c5 = UOp.range(UOp.const(dtypes.index, 240), 0, AxisType.REDUCE)
+    c6 = ((c2*UOp.const(dtypes.index, 240))+c5)
+    c7 = UOp(Ops.DEFINE_GLOBAL, dtypes.uchar.ptr(60000), arg=2, src=())
+    c8 = c7.index(c6)
+    # (loaded + range) < const pattern - loaded value shouldn't be promoted to long
+    loaded_idx = c4.cast(dtypes.index)
+    comparison = (loaded_idx + c5) < UOp.const(dtypes.index, 60000)
+    c9 = comparison.where(c8.cast(dtypes.uint).cast(dtypes.uchar), 0).reduce(c5, arg=Ops.ADD)
+    c10 = c0.index(((c1*UOp.const(dtypes.index, 250))+c2)).store(c9).end(c1, c2)
+    uops = to_uops_list([c10])
+    for u in uops:
+      self.assertNotEqual(u.dtype, dtypes.long)
+
   def test_fold_gated_load(self):
     glbl0 = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), (), 0)
     glbl1 = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), (), 1)
