@@ -30,6 +30,12 @@ jobs:
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
+    - name: Setup environment
+      run: |
+        rm -rf /tmp/tinygrad_pytest_ci
+        uv venv /tmp/tinygrad_pytest_ci
+        source /tmp/tinygrad_pytest_ci/bin/activate
+        uv pip install .[testing]
     - name: Run pytest -nauto
       run: pytest -nauto
 
