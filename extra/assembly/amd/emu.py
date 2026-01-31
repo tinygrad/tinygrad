@@ -427,7 +427,8 @@ class _Ctx:
     pcode = get_pcode(op)
     vcc_reg = sdst_reg if sdst_reg is not None else VCC_LO.offset
     if 'VCC' not in srcs: srcs['VCC'] = self.rsgpr_dyn(_c(vcc_reg))
-    srcs.update({'EXEC': exec_mask, 'SCC': self.rsgpr_dyn(_c(SCC.offset)), 'laneId': lane})
+    srcs.update({'EXEC': exec_mask, 'SCC': self.rsgpr_dyn(_c(SCC.offset)), 'laneId': lane,
+                 'ROUND_MODE': _c(0), 'ROUND_TOWARD_ZERO': _c(0)})  # rounding mode: 0=RNE, RTZ constant
     _, assigns = parse_pcode(pcode, srcs)
 
     raw_stores: list = []
@@ -796,10 +797,13 @@ def _compile_vop3p(inst: VOP3P, ctx: _Ctx) -> UOp:
       return bits
     def build_remapped_src(src: UOp, opsel_lo_bit: int, opsel_hi_bit: int, neg_lo_bit: int, neg_hi_bit: int) -> UOp:
       return get_half_bits(src, bool(opsel_lo_bit), bool(neg_lo_bit)) | (get_half_bits(src, bool(opsel_hi_bit), bool(neg_hi_bit)) << UOp.const(dtypes.uint32, 16))
-    s0_new = build_remapped_src(src0, opsel & 1, opsel_hi & 1, neg & 1, neg_hi & 1)
-    s1_new = build_remapped_src(src1, opsel & 2, opsel_hi & 2, neg & 2, neg_hi & 2)
-    s2_new = build_remapped_src(src2, opsel & 4, 1 if opsel_hi2 else 0, neg & 4, neg_hi & 4)
-    srcs = {'S0': s0_new, 'S1': s1_new, 'S2': s2_new}
+    # DOT IU instructions use NEG bits for signed/unsigned selection, not fp16 negation
+    is_dot_iu = 'DOT' in op_name and 'IU' in op_name
+    n0, n1, n2, nh0, nh1, nh2 = (0, 0, 0, 0, 0, 0) if is_dot_iu else (neg & 1, neg & 2, neg & 4, neg_hi & 1, neg_hi & 2, neg_hi & 4)
+    srcs = {'S0': build_remapped_src(src0, opsel & 1, opsel_hi & 1, n0, nh0),
+            'S1': build_remapped_src(src1, opsel & 2, opsel_hi & 2, n1, nh1),
+            'S2': build_remapped_src(src2, opsel & 4, 1 if opsel_hi2 else 0, n2, nh2)}
+    if is_dot_iu: srcs['NEG'] = UOp.const(dtypes.uint32, neg)
   return ctx.compile_vop_pcode(inst.op, srcs, lane, vdst_reg, exec_mask)
 
 def _compile_vopd(inst: VOPD, ctx: _Ctx) -> UOp:
@@ -1004,7 +1008,7 @@ def _get_runner(inst_bytes: bytes):
   canonical_name = f"{_op_name(inst).lower()}_{base.to_bytes(size, 'little').hex()}"
   sink = sink.replace(arg=KernelInfo(name=canonical_name)).rtag(1)
 
-  with Context(NOOPT=1, CHECK_OOB=0, TUPLE_ORDER=0):
+  with Context(NOOPT=1, CHECK_OOB=0, TUPLE_ORDER=0, EMULATED_DTYPES=""):
     runner = get_runner('CPU', sink)
   _canonical_runner_cache.append((base, mask, size, runner))
   return runner, True

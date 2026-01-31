@@ -1,5 +1,5 @@
-import subprocess, pathlib, struct, ctypes, tempfile, functools, contextlib, decimal, platform, sys
-from tinygrad.helpers import prod, to_mv, getenv, round_up, cache_dir, PROFILE, ProfileRangeEvent, cpu_profile, unwrap
+import subprocess, pathlib, struct, ctypes, tempfile, functools, contextlib, decimal, platform
+from tinygrad.helpers import prod, to_mv, getenv, round_up, cache_dir, PROFILE, ProfileRangeEvent, cpu_profile, unwrap, suppress_finalizing
 import tinygrad.runtime.support.objc as objc
 from tinygrad.device import Compiled, Compiler, CompileError, LRUAllocator, ProfileDeviceEvent, CompilerSet, CompilerPair
 from tinygrad.renderer.cstyle import MetalRenderer
@@ -167,8 +167,9 @@ class MetalAllocator(LRUAllocator[MetalDevice]):
     ret.retain = False
     if ret.value is None: raise MemoryError(f"Metal OOM while allocating {size=}")
     return MetalBuffer(ret, size)
+  @suppress_finalizing
   def _free(self, opaque:MetalBuffer, options):
-    if not sys.is_finalizing(): opaque.buf.release
+    if not options.external_ptr: opaque.buf.release
   def _transfer(self, dest:MetalBuffer, src:MetalBuffer, sz:int, src_dev:MetalDevice, dest_dev:MetalDevice):
     dest_dev.synchronize()
     src_command_buffer = src_dev.mtl_queue.commandBuffer().retained()
