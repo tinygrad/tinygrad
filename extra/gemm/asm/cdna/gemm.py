@@ -25,22 +25,22 @@ def custom_asm_gemm(C:UOp, A:UOp, B:UOp, dname:str, arch:str, wg:int) -> UOp:
 
 counters = {"used":0, "todos":[]}
 def todo(msg:str) -> bool: counters["todos"].append(msg); return False
-atexit.register(lambda: print("\n".join([f'asm_gemm: {counters["used"]} used, {len(counters["todos"])} not used', *dedup(counters["todos"][:3])])))
+atexit.register(lambda: print(f'asm_gemm: {counters["used"]} used, {len(counters["todos"])} not used'))
 
 def can_use_asm_gemm(a:Tensor, b:Tensor) -> bool:
-  if a.dtype != b.dtype: return todo(f"dtype mismatch {a.dtype} != {b.dtype}")
-  if a.dtype not in {dtypes.bfloat16, dtypes.float16}: return todo(f"dtype {a.dtype}")
-  # only sharding on the batch is tested
+  if a.dtype != b.dtype: return todo(f"dtypes must match {a.dtype} != {b.dtype}")
+  if a.dtype not in {dtypes.bfloat16, dtypes.float16}: return todo(f"only bfloat16/float16, got {a.dtype}")
+  # only sharding on the batch is tested, others might work too
   if isinstance(a.device, tuple) and not (a.ndim == 3 and a.uop.axis == 0 and b.uop.axis is None):
     return todo(f"sharding mismatch a.ndim={a.ndim} a.uop.axis={a.uop.axis} b.uop.axis={b.uop.axis}")
   batch, M, K = (1, *a.shape) if a.ndim == 2 else a.shape
   N = b.shape[1]
   if isinstance(a.device, tuple): batch //= len(a.device)
-  if (key:=(batch, M, N, K)) not in GEMM_ARGS: return todo(f"{key} not in GEMM_ARGS")
+  if (key:=(batch, M, N, K)) not in GEMM_ARGS: return todo(f"GEMM shape not supported {key}")
   return True
 
-# ** UOp gemm to test custom_kernel multi and backward correctness on non cdna4
-# note: this can be removed once gemm is in mixins
+# ** UOp gemm to test Tensor.custom_kernel multi and backward correctness on non cdna4
+# note: this can be removed after we have GEMM on mixins
 
 def custom_uop_gemm(C:UOp, A:UOp, B:UOp) -> UOp:
   M, K = A.shape[0]*A.shape[1], A.shape[2]

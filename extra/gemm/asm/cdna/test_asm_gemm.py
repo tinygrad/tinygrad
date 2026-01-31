@@ -4,6 +4,7 @@ from tinygrad.helpers import getenv
 from extra.gemm.asm.cdna.gemm import asm_gemm
 
 def verify_asm_gemm(batch:int, M:int, N:int, K:int, dtype=dtypes.bfloat16, multi=False) -> None:
+  Tensor.manual_seed(0)
   a_rand = Tensor.randn((batch, M, K), dtype=dtypes.float).sub(0.5).cast(dtype)
   b_rand = Tensor.randn((K, N), dtype=dtypes.float).sub(0.5).cast(dtype)
   with Context(DEBUG=0):
@@ -32,12 +33,14 @@ class TestGemm(unittest.TestCase):
   def test_simple(self): verify_asm_gemm(8, 8192, 1024, 4096)
   def test_square(self): verify_asm_gemm(1, N:=getenv("N", 4096), N, N, dtype=dtypes.half)
 
-  def test_gemm1(self): verify_asm_gemm(8, 8192, 1024, 4096, multi=True)
-  def test_gemm2(self): verify_asm_gemm(8, 8192, 4096, 14336, multi=True)
-  def test_gemm3(self): verify_asm_gemm(8, 8192, 128256, 4096, multi=True)
-  def test_gemm4(self): verify_asm_gemm(8, 8192, 14336, 4096, multi=True)
-  def test_gemm5(self): verify_asm_gemm(8, 4096, 14336, 4096, multi=True)
-  def test_gemm6(self): verify_asm_gemm(8, 4096, 4096, 14336, multi=True)
+  def test_gemm1(self): verify_asm_gemm(8, 8192, 4096, 14336, multi=True)
+  def test_gemm2(self): verify_asm_gemm(8, 8192, 128256, 4096, multi=True)
+  def test_gemm3(self): verify_asm_gemm(8, 8192, 14336, 4096, multi=True)
+  def test_gemm4(self): verify_asm_gemm(8, 4096, 14336, 4096, multi=True)
+  def test_gemm5(self): verify_asm_gemm(8, 4096, 4096, 14336, multi=True)
+  def test_gemm_unsupported(self):
+    with self.assertRaisesRegex(AssertionError, "shape not supported"):
+      verify_asm_gemm(8, 8192, 1024, 4096, multi=True)
 
 if __name__ == "__main__":
   unittest.main()
