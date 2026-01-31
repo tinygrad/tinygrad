@@ -31,12 +31,16 @@ jobs:
     - name: Checkout Code
       uses: actions/checkout@v4
     # brew install uv
-    - name: Setup environment
+    - name: setup python environment
       run: |
         rm -rf /tmp/tinygrad_pytest_ci
         uv venv /tmp/tinygrad_pytest_ci
         source /tmp/tinygrad_pytest_ci/bin/activate
         uv pip install .[testing]
+    - name: setup staging db
+      run: |
+        echo "CACHEDB=/tmp/pytest-db-ci.db" >> $GITHUB_ENV
+        rm -f /tmp/pytest-db-ci*
     - name: Run pytest -nauto
       run: pytest -nauto
 
