@@ -169,7 +169,6 @@ class TestSymbolicOps(unittest.TestCase):
       vi = Variable("i", 1, 10).bind(i)
       a = Tensor.rand(7, 11)
       symbolic = a[3:5, vi:vi+2]
-      print(symbolic.shape)
       symbolic = symbolic.numpy()
       expected = a[3:5, i:i+2].numpy()
       np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)

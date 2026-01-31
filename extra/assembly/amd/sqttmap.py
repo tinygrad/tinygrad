@@ -6,7 +6,7 @@ from tinygrad.runtime.support.elf import elf_loader
 
 from extra.assembly.amd.sqtt import decode, print_packets, INST, VALUINST, IMMEDIATE, WAVESTART, WAVEEND, InstOp, PacketType, IMMEDIATE_MASK
 from extra.assembly.amd.dsl import Inst
-from extra.assembly.amd.decode import decode_inst
+from extra.assembly.amd import decode_inst
 from extra.assembly.amd.autogen.rdna3.ins import SOPP, s_endpgm
 from extra.assembly.amd.autogen.rdna3.enum import SOPPOp
 

@@ -69,11 +69,11 @@ class CUDAAllocator(LRUAllocator['CUDADevice']):
     if options.external_ptr: return cuda.CUdeviceptr_v2(options.external_ptr)
     if options.host: return init_c_var(ctypes.c_void_p, lambda x: check(cuda.cuMemHostAlloc(ctypes.byref(x), size, 0x01)))
     return init_c_var(cuda.CUdeviceptr, lambda x: check(cuda.cuMemAlloc_v2(ctypes.byref(x), size)))
+  @suppress_finalizing
   def _free(self, opaque, options:BufferSpec):
-    try:
-      if options.host: check(cuda.cuMemFreeHost(opaque))
-      else: check(cuda.cuMemFree_v2(opaque))
-    except (TypeError, AttributeError): pass
+    if options.external_ptr: return
+    if options.host: check(cuda.cuMemFreeHost(opaque))
+    else: check(cuda.cuMemFree_v2(opaque))
   def _copyin(self, dest, src:memoryview):
     check(cuda.cuCtxSetCurrent(self.dev.context))
     host_mem = self.alloc(len(src), BufferSpec(host=True))

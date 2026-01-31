@@ -409,6 +409,28 @@ class TestMultiTensor(unittest.TestCase):
 
     np.testing.assert_allclose(z.numpy(), z_shard.numpy(), atol=1e-6, rtol=1e-6)
 
+  def test_embedding_backward(self, shard_weight_axis=None):
+    B, T, embed_size, vocab_size = 4, 10, 20, 28
+
+    layer = nn.Embedding(vocab_size, embed_size)
+    layer.weight.requires_grad = True
+    x = Tensor(np.random.randint(0, vocab_size, (B, T), dtype=np.int32))
+    z = layer(x)
+    z.sum().backward()
+    grad = layer.weight.grad.numpy()
+
+    layer_sharded = nn.Embedding(vocab_size, embed_size)
+    layer_sharded.weight.replace(layer.weight.shard(devices_2, axis=shard_weight_axis)).realize()
+    layer_sharded.weight.requires_grad = True
+    x_sharded = x.shard(devices_2, axis=None)
+    z_shard = layer_sharded(x_sharded)
+    z_shard.sum().backward()
+    grad_shard = layer_sharded.weight.grad.numpy()
+
+    np.testing.assert_allclose(grad, grad_shard, atol=1e-6, rtol=1e-6)
+
+  def test_embedding_backward_shard_weight(self): self.test_embedding_backward(shard_weight_axis=1)
+
   def test_rmsnorm(self):
     B, T, embed_size = 4, 10, 20
 
@@ -1250,6 +1272,20 @@ class TestMultiRamUsage(unittest.TestCase):
   def test_zeros_contiguous_shard(self):
     _ = Tensor.zeros(self.N, self.N).contiguous().shard(devices_2, axis=0).contiguous().realize()
     self.assertUsed(self.N*self.N*4) # sharding should not increase total ram usage
+
+  def _test_matmul_half(self, devs):
+    N = 32
+    total_mem = {}
+    for dtype in {dtypes.float, dtypes.half}:
+      GlobalCounters.reset()
+      a = Tensor.empty((N, N), dtype=dtype).shard(devs, axis=0)
+      b = Tensor.empty((N, N), dtype=dtype).shard(devs, axis=None)
+      (a @ b).realize()
+      total_mem[dtype] = GlobalCounters.global_mem
+    self.assertEqual(total_mem[dtypes.half], total_mem[dtypes.float] // 2)
+
+  def test_matmul_half(self): self._test_matmul_half(devices_2)
+  def test_matmul_half_alt(self): self._test_matmul_half(devices_4)
 
 @unittest.skipIf(not_support_multi_device(), "need multi")
 class TestMultiFromUnrenderable(unittest.TestCase):

@@ -138,6 +138,50 @@ class TestDS2AddrMore(unittest.TestCase):
     self.assertEqual(st.vgpr[0][4], 0x12345678, "v4 should be untouched")
 
 
+class TestDSB96(unittest.TestCase):
+  """Tests for DS_STORE_B96 and DS_LOAD_B96 (96-bit / 3 dwords)."""
+
+  def test_ds_store_load_b96(self):
+    """DS_STORE_B96 stores 3 VGPRs, DS_LOAD_B96 loads them back."""
+    instructions = [
+      v_mov_b32_e32(v[10], 0),
+      s_mov_b32(s[0], 0x11111111),
+      v_mov_b32_e32(v[0], s[0]),
+      s_mov_b32(s[0], 0x22222222),
+      v_mov_b32_e32(v[1], s[0]),
+      s_mov_b32(s[0], 0x33333333),
+      v_mov_b32_e32(v[2], s[0]),
+      ds_store_b96(addr=v[10], data0=v[0:2]),
+      s_waitcnt(lgkmcnt=0),
+      ds_load_b96(addr=v[10], vdst=v[4:6]),
+      s_waitcnt(lgkmcnt=0),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][4], 0x11111111, "v4 should have first dword")
+    self.assertEqual(st.vgpr[0][5], 0x22222222, "v5 should have second dword")
+    self.assertEqual(st.vgpr[0][6], 0x33333333, "v6 should have third dword")
+
+  def test_ds_store_b96_with_offset(self):
+    """DS_STORE_B96 with non-zero offset."""
+    instructions = [
+      v_mov_b32_e32(v[10], 0),
+      s_mov_b32(s[0], 0xAAAAAAAA),
+      v_mov_b32_e32(v[0], s[0]),
+      s_mov_b32(s[0], 0xBBBBBBBB),
+      v_mov_b32_e32(v[1], s[0]),
+      s_mov_b32(s[0], 0xCCCCCCCC),
+      v_mov_b32_e32(v[2], s[0]),
+      DS(DSOp.DS_STORE_B96, addr=v[10], data0=v[0:2], offset0=12),
+      s_waitcnt(lgkmcnt=0),
+      DS(DSOp.DS_LOAD_B96, addr=v[10], vdst=v[4:6], offset0=12),
+      s_waitcnt(lgkmcnt=0),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][4], 0xAAAAAAAA)
+    self.assertEqual(st.vgpr[0][5], 0xBBBBBBBB)
+    self.assertEqual(st.vgpr[0][6], 0xCCCCCCCC)
+
+
 class TestDSB128(unittest.TestCase):
   """Tests for DS_STORE_B128 and DS_LOAD_B128 (128-bit / 4 dwords)."""
 

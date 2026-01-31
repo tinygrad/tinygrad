@@ -44,6 +44,8 @@ pm_gradient = PatternMatcher([
   # NOTE: this is only correct when the KERNEL has a single output
   (UPat(Ops.AFTER), lambda ctx: (ctx, ctx)),
   (UPat(Ops.CUSTOM_KERNEL, name="k"), lambda ctx, k: k.arg.grad_fxn(ctx, k)),
+  # gradient on CALL is a custom function
+  (UPat(Ops.CALL, name="k"), lambda ctx, k: (None,)+k.arg(ctx, k)),
   # there's no gradient for bitcast
   (UPat(Ops.BITCAST), lambda: (None,)),
 ])

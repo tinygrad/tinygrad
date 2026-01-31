@@ -56,7 +56,15 @@ runs:
 
     # **** Caching packages ****
 
+    - name: Cache Python packages (PR)
+      if: github.event_name == 'pull_request'
+      id: restore-venv-pr
+      uses: actions/cache/restore@v4
+      with:
+        path: ${{ github.workspace }}/.venv
+        key: venv-${{ runner.os }}-python-${{ steps.setup-python.outputs.python-version }}-${{ inputs.deps }}-${{ inputs.pydeps }}-${{ env.CACHE_VERSION }}
     - name: Cache Python packages
+      if: github.event_name != 'pull_request'
       id: restore-venv
       uses: actions/cache@v4
       with:
@@ -65,23 +73,23 @@ runs:
 
     # **** Caching downloads ****
 
-    - name: Cache downloads (Linux)
-      if: inputs.key != '' && runner.os == 'Linux'
-      uses: actions/cache@v4
+    - name: Cache downloads (PR)
+      if: inputs.key != '' && github.event_name == 'pull_request'
+      uses: actions/cache/restore@v4
       with:
-        path: ~/.cache/tinygrad/downloads/
+        path: ${{ runner.os == 'Linux' && '~/.cache/tinygrad/downloads/' || '~/Library/Caches/tinygrad/downloads/' }}
         key: downloads-${{ github.job }}-${{ inputs.key }}-${{ env.CACHE_VERSION }}
-    - name: Cache downloads (macOS)
-      if: inputs.key != '' && runner.os == 'macOS'
+    - name: Cache downloads
+      if: inputs.key != '' && github.event_name != 'pull_request'
       uses: actions/cache@v4
       with:
-        path: ~/Library/Caches/tinygrad/downloads/
+        path: ${{ runner.os == 'Linux' && '~/.cache/tinygrad/downloads/' || '~/Library/Caches/tinygrad/downloads/' }}
         key: downloads-${{ github.job }}-${{ inputs.key }}-${{ env.CACHE_VERSION }}
 
     # **** Python deps ****
 
     - name: Install dependencies in venv (with extra)
-      if: inputs.deps != '' && steps.restore-venv.outputs.cache-hit != 'true'
+      if: inputs.deps != '' && steps.restore-venv-pr.outputs.cache-hit != 'true' && steps.restore-venv.outputs.cache-hit != 'true'
       shell: bash
       run: |
         python -m venv .venv
@@ -92,7 +100,7 @@ runs:
         fi
         python -m pip install -e ".[${{ inputs.deps }}]" ${{ inputs.pydeps }} --extra-index-url https://download.pytorch.org/whl/cpu --extra-index-url https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/Triton-Nightly/pypi/simple/
     - name: Install dependencies in venv (without extra)
-      if: inputs.deps == '' && steps.restore-venv.outputs.cache-hit != 'true'
+      if: inputs.deps == '' && steps.restore-venv-pr.outputs.cache-hit != 'true' && steps.restore-venv.outputs.cache-hit != 'true'
       shell: bash
       run: |
         python -m venv .venv
@@ -182,8 +190,14 @@ runs:
         echo "pkgs=$pkgs" >> "$GITHUB_OUTPUT"
         echo "hash=$(echo -n "$pkgs" | sha256sum | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
 
+    - name: Cache apt (PR)
+      if: runner.os == 'Linux' && (inputs.opencl == 'true' || inputs.amd == 'true' || inputs.cuda == 'true' || inputs.webgpu == 'true' || inputs.llvm == 'true') && github.event_name == 'pull_request'
+      uses: actions/cache/restore@v4
+      with:
+        path: /var/cache/apt/archives/
+        key: ${{ runner.os }}-apt-${{ steps.apt-pkgs.outputs.hash }}-${{ env.CACHE_VERSION }}
     - name: Cache apt
-      if: runner.os == 'Linux' && (inputs.opencl == 'true' || inputs.amd == 'true' || inputs.cuda == 'true' || inputs.webgpu == 'true' || inputs.llvm == 'true')
+      if: runner.os == 'Linux' && (inputs.opencl == 'true' || inputs.amd == 'true' || inputs.cuda == 'true' || inputs.webgpu == 'true' || inputs.llvm == 'true') && github.event_name != 'pull_request'
       uses: actions/cache@v4
       with:
         path: /var/cache/apt/archives/
@@ -239,8 +253,17 @@ runs:
         ln -s /opt/homebrew/opt/boost@1.85 /opt/homebrew/opt/boost || true
         ln -s /opt/homebrew/opt/boost/lib/libboost_atomic-mt.dylib /opt/homebrew/opt/boost/lib/libboost_atomic.dylib || true
         ln -s /opt/homebrew/opt/boost/lib/libboost_thread-mt.dylib /opt/homebrew/opt/boost/lib/libboost_thread.dylib || true
+    - name: Cache gpuocelot (PR)
+      if: inputs.ocelot == 'true' && github.event_name == 'pull_request'
+      id: cache-build-pr
+      uses: actions/cache/restore@v4
+      env:
+        cache-name: cache-gpuocelot-build-1
+      with:
+        path: ${{ github.workspace }}/gpuocelot/ocelot
+        key: ${{ runner.os }}-gpuocelot-b16039dc940dc6bc4ea0a98380495769ff35ed99-rebuild-${{ env.CACHE_VERSION }}
     - name: Cache gpuocelot
-      if: inputs.ocelot == 'true'
+      if: inputs.ocelot == 'true' && github.event_name != 'pull_request'
       id: cache-build
       uses: actions/cache@v4
       env:
@@ -249,7 +272,7 @@ runs:
         path: ${{ github.workspace }}/gpuocelot/ocelot
         key: ${{ runner.os }}-gpuocelot-b16039dc940dc6bc4ea0a98380495769ff35ed99-rebuild-${{ env.CACHE_VERSION }}
     - name: Clone/compile gpuocelot
-      if: inputs.ocelot == 'true' && steps.cache-build.outputs.cache-hit != 'true'
+      if: inputs.ocelot == 'true' && steps.cache-build-pr.outputs.cache-hit != 'true' && steps.cache-build.outputs.cache-hit != 'true'
       shell: bash
       run: |
         git clone --recurse-submodules https://github.com/gpuocelot/gpuocelot.git ${{ github.workspace }}/gpuocelot
