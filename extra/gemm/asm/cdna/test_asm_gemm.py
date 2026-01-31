@@ -30,7 +30,6 @@ def verify_asm_gemm(batch:int, M:int, N:int, K:int, dtype=dtypes.bfloat16, multi
     assert (b.grad - b_ref.grad).square().max().float().item() < 1e-3, "grad_b mismatch"
 
 class TestGemm(unittest.TestCase):
-  def test_simple(self): verify_asm_gemm(8, 8192, 1024, 4096)
   def test_square(self): verify_asm_gemm(1, N:=getenv("N", 4096), N, N, dtype=dtypes.half)
 
   def test_gemm1(self): verify_asm_gemm(8, 8192, 4096, 14336, multi=True)
@@ -38,6 +37,7 @@ class TestGemm(unittest.TestCase):
   def test_gemm3(self): verify_asm_gemm(8, 8192, 14336, 4096, multi=True)
   def test_gemm4(self): verify_asm_gemm(8, 4096, 14336, 4096, multi=True)
   def test_gemm5(self): verify_asm_gemm(8, 4096, 4096, 14336, multi=True)
+  def test_gemm6(self): verify_asm_gemm(16, 4096, 4096, 14336, multi=True)
   def test_gemm_unsupported(self):
     with self.assertRaisesRegex(AssertionError, "shape not supported"):
       verify_asm_gemm(8, 8192, 1024, 4096, multi=True)
