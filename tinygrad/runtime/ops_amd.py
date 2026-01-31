@@ -638,12 +638,24 @@ class AMDAllocator(HCQAllocator['AMDDevice']):
   def _map(self, buf:HCQBuffer): return self.dev.iface.map(buf._base if buf._base is not None else buf)
 
 @dataclass
+class AMDQueueConfig:
+  """Configuration data for recreating a queue during recovery."""
+  queue_type: int
+  ring: 'HCQBuffer'
+  gart: 'HCQBuffer'
+  rptr: int
+  wptr: int
+  eop_buffer: 'HCQBuffer|None' = None
+  idx: int = 0
+
+@dataclass
 class AMDQueueDesc:
   ring: MMIOInterface
   read_ptrs: list[MMIOInterface]
   write_ptrs: list[MMIOInterface]
   doorbells: list[MMIOInterface]
   put_value: int = 0
+  config: AMDQueueConfig|None = None  # Stored for recovery
 
   @property
   def read_ptr(self): return min(p[0] for p in self.read_ptrs)
@@ -857,8 +869,30 @@ class PCIIface(PCIIfaceBase):
         wptr_addr=gart.va_addr+wptr, eop_addr=eop_buffer.va_addr, eop_size=eop_buffer.size,
         idx=int(is_aql:=(queue_type==kfd.KFD_IOC_QUEUE_TYPE_COMPUTE_AQL)), aql=is_aql)
 
+    config = AMDQueueConfig(queue_type=queue_type, ring=ring, gart=gart, rptr=rptr, wptr=wptr, eop_buffer=eop_buffer, idx=idx)
     return AMDQueueDesc(ring=ring.cpu_view().view(fmt='I'), doorbells=[self.dev_impl.doorbell64.view(doorbell_index * 8, 8, fmt='Q')],
-      read_ptrs=[gart.cpu_view().view(offset=rptr, size=8, fmt='Q')], write_ptrs=[gart.cpu_view().view(offset=wptr, size=8, fmt='Q')], put_value=pv)
+      read_ptrs=[gart.cpu_view().view(offset=rptr, size=8, fmt='Q')], write_ptrs=[gart.cpu_view().view(offset=wptr, size=8, fmt='Q')],
+      put_value=pv, config=config)
+
+  def reconfigure_queue(self, queue_desc:AMDQueueDesc):
+    """Reconfigure a queue after recovery using its stored configuration."""
+    if queue_desc.config is None: raise RuntimeError("Queue has no stored configuration for recovery")
+    cfg = queue_desc.config
+
+    if cfg.queue_type == kfd.KFD_IOC_QUEUE_TYPE_SDMA:
+      pv, doorbell_index = self.dev_impl.sdma.setup_ring(ring_addr=cfg.ring.va_addr, ring_size=cfg.ring.size,
+        rptr_addr=cfg.gart.va_addr+cfg.rptr, wptr_addr=cfg.gart.va_addr+cfg.wptr, idx=cfg.idx)
+    else:
+      pv, doorbell_index = self.dev_impl.gfx.setup_ring(ring_addr=cfg.ring.va_addr, ring_size=cfg.ring.size,
+        rptr_addr=cfg.gart.va_addr+cfg.rptr, wptr_addr=cfg.gart.va_addr+cfg.wptr,
+        eop_addr=cfg.eop_buffer.va_addr, eop_size=cfg.eop_buffer.size,
+        idx=int(is_aql:=(cfg.queue_type==kfd.KFD_IOC_QUEUE_TYPE_COMPUTE_AQL)), aql=is_aql)
+
+    # Update the queue descriptor with new state
+    queue_desc.put_value = pv
+    queue_desc.doorbells = [self.dev_impl.doorbell64.view(doorbell_index * 8, 8, fmt='Q')]
+    # Reset write pointers to match new put_value
+    for write_ptr in queue_desc.write_ptrs: write_ptr[0] = pv
 
   def sleep(self, timeout) -> bool:
     if hasattr(self.pci_dev, 'irq_poller') and self.pci_dev.irq_poller is not None and (events_cnt:=len(self.pci_dev.irq_poller.poll(timeout))):
@@ -871,6 +905,8 @@ class PCIIface(PCIIfaceBase):
     for d in devs: d.iface.dev_impl.ih.interrupt_handler()
     faults = [f for d in devs if (f:=d.iface.dev_impl.gmc.check_fault())]
     raise RuntimeError(f"Device hang detected: {'; '.join(faults)}" if faults else "Device hang detected")
+
+  def recover(self): self.dev_impl.recover()
 
   def device_fini(self): self.dev_impl.fini()
 
@@ -1017,10 +1053,16 @@ class AMDDevice(HCQCompiled):
             wptr=getattr(hsa.amd_queue_t, 'write_dispatch_id').offset, eop_buffer=eop_buffer, cwsr_buffer=cwsr_buffer,
             ctx_save_restore_size=ctx_save_restore_size, ctl_stack_size=ctl_stack_size, idx=idx))
 
-  @functools.lru_cache(None)
   def sdma_queue(self, idx:int):
     if getenv("AMD_DISABLE_SDMA"): return None
-    with contextlib.suppress(OSError): return self.create_queue(kfd.KFD_IOC_QUEUE_TYPE_SDMA, 0x200 if self.is_usb() else (16 << 20), idx=idx)
+    # Check cache first
+    if not hasattr(self, '_sdma_queues'): self._sdma_queues:dict[int, AMDQueueDesc|None] = {}
+    if idx in self._sdma_queues: return self._sdma_queues[idx]
+    # Create and cache
+    with contextlib.suppress(OSError):
+      self._sdma_queues[idx] = self.create_queue(kfd.KFD_IOC_QUEUE_TYPE_SDMA, 0x200 if self.is_usb() else (16 << 20), idx=idx)
+      return self._sdma_queues[idx]
+    self._sdma_queues[idx] = None
     return None
 
   def _ensure_has_local_memory(self, private_segment_size):
@@ -1060,5 +1102,44 @@ class AMDDevice(HCQCompiled):
     self.synchronize()
 
   def on_device_hang(self): self.iface.on_device_hang()
+
+  def recover(self):
+    """Recover from a GPU fault by resetting and reconfiguring queues. Only supported for AM driver."""
+    if not self.is_am(): raise RuntimeError("GPU recovery is only supported with the AM driver")
+
+    if DEBUG >= 1: print(f"AMDDevice: Recovering from GPU fault")
+
+    # Perform low-level recovery (reset queues, clear faults, reinit hardware)
+    self.iface.recover()
+
+    # Reconfigure the compute queue
+    self.iface.reconfigure_queue(self.compute_queue)
+
+    # Reconfigure all cached SDMA queues
+    if hasattr(self, '_sdma_queues'):
+      for idx, sdma_q in self._sdma_queues.items():
+        if sdma_q is not None:
+          self.iface.reconfigure_queue(sdma_q)
+
+    # Reset the PM4 IB allocator if using AQL
+    if self.is_aql: self.pm4_ib_alloc = BumpAllocator(self.pm4_ibs.size, wrap=True)
+
+    # Reset timeline to a known state
+    self.timeline_value = 1
+    self.timeline_signal.value = 0
+    self._shadow_timeline_signal.value = 0
+
+    # Reset allocator timeline tracking
+    from tinygrad.runtime.support.hcq import HCQAllocatorBase
+    if hasattr(self.allocator, 'b_timeline'):
+      cast(HCQAllocatorBase, self.allocator).b_timeline = [0] * len(cast(HCQAllocatorBase, self.allocator).b)
+
+    # Reset kernargs allocator
+    self.kernargs_offset_allocator = BumpAllocator(self.kernargs_buf.size, wrap=True)
+
+    # Clear error state
+    self.error_state = None
+
+    if DEBUG >= 1: print(f"AMDDevice: Recovery complete")
 
   def device_props(self): return self.iface.props
