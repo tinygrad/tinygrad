@@ -5,5 +5,5 @@ export FAKEDATA=1
 export HIP_VISIBLE_DEVICES=""
 export DEV=NULL
 export JITBEAM=0
-export LLAMA_LAYERS=2
+export LLAMA_LAYERS=${LLAMA_LAYERS:-"2"}
 time examples/mlperf/training_submission_v6.0/tinycorp/benchmarks/llama8b/implementations/tinybox_8xMI350X/dev_run.sh
