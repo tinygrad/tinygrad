@@ -87,7 +87,8 @@ def flash_attention(xq, xk, xv, attn_mask:Tensor|None=None, is_causal:bool=False
       q_reg = warp.copy(q_reg, q_reg_fl)
       q_reg_transposed = warp.transpose(q_reg_transposed, q_reg)
 
-      for kv_idx in ker.range(N // KV_BLOCK_SIZE):
+      num_kv_blocks = (q_seq + 1) if is_causal else (N // KV_BLOCK_SIZE)
+      for kv_idx in ker.range(num_kv_blocks):
         k_smem = warp.load(k_smem, k, (), (batch, kv_idx, head_kv, 0), axis=1)
         v_smem = warp.load(v_smem, v, (), (batch, kv_idx, head_kv, 0), axis=1)
 
@@ -209,7 +210,8 @@ def flash_attention(xq, xk, xv, attn_mask:Tensor|None=None, is_causal:bool=False
       l_vec_reg *= 1.0 / math.log(2)
       delta_vec_reg = warp.load(delta_vec_reg, delta_vec, (), (batch, head, 0, q_seq), axis=2)
 
-      for kv_idx in ker.range(N // KV_BLOCK_SIZE):
+      num_kv_blocks = (q_seq + 1) if is_causal else (N // KV_BLOCK_SIZE)
+      for kv_idx in ker.range(num_kv_blocks):
         k_smem = warp.load(k_smem, k, (), (batch, kv_idx, head_kv, 0), axis=1)
         v_smem = warp.load(v_smem, v, (), (batch, kv_idx, head_kv, 0), axis=1)
 
@@ -306,7 +308,8 @@ def flash_attention(xq, xk, xv, attn_mask:Tensor|None=None, is_causal:bool=False
       k_reg_t = warp.transpose(k_reg_t, k_reg)
       v_reg = warp.load(v_reg, v, (), (batch, kv_seq, head_kv, 0), axis=1)
 
-      for q_idx in ker.range(N // Q_BLOCK_SIZE):
+      start_q_idx = kv_seq if is_causal else 0
+      for q_idx in ker.range(start_q_idx, N // Q_BLOCK_SIZE):
         for g in ker.range(GROUP_SIZE):
           head_q = head_kv * GROUP_SIZE + g
 
