@@ -10,9 +10,9 @@ def put(dst:bytearray, off:int, data:bytes) -> None:
   dst[off:end] = data
 
 def pack_hsaco(prg:bytes, kd:dict) -> bytes:
-  rodata_offset = align_up(ctypes.sizeof(libc.Elf64_Ehdr), hsa.AMD_KERNEL_CODE_ALIGN_BYTES)
-  rodata_size = ctypes.sizeof(amdgpu_kd.llvm_amdhsa_kernel_descriptor_t)
-  text_offset = align_up(rodata_offset + rodata_size, hsa.AMD_ISA_ALIGN_BYTES)
+  text = prg + b'\x00' * ((hsa.AMD_ISA_ALIGN_BYTES - len(prg) % hsa.AMD_ISA_ALIGN_BYTES) % hsa.AMD_ISA_ALIGN_BYTES)
+  text_offset = align_up(ctypes.sizeof(libc.Elf64_Ehdr), hsa.AMD_ISA_ALIGN_BYTES)
+  rodata_offset = text_offset + len(text)
 
   # ** pack rodata object
   desc = amdgpu_kd.llvm_amdhsa_kernel_descriptor_t()
@@ -48,16 +48,16 @@ def pack_hsaco(prg:bytes, kd:dict) -> bytes:
   # ** pack elf sections
   sh_names:list[int] = []
   strtab = bytearray(b"\x00")
-  for name in [".rodata", ".text", ".strtab"]:
+  for name in [".text", ".rodata", ".strtab"]:
     sh_names.append(len(strtab))
     strtab += name.encode("ascii") + b"\x00"
 
-  text_size = len(prg)
-  strtab_offset = text_offset+text_size
+  rodata_offset = align_up(text_offset+(text_size:=len(text)), hsa.AMD_KERNEL_CODE_ALIGN_BYTES)
+  strtab_offset = rodata_offset+(rodata_size:=len(rodata))
   shdr_offset   = strtab_offset+(strtab_size:=len(strtab))
 
-  sections = [(libc.SHT_PROGBITS, libc.SHF_ALLOC, rodata_offset, rodata_offset, rodata_size),
-              (libc.SHT_PROGBITS, libc.SHF_ALLOC | libc.SHF_EXECINSTR, text_offset, text_offset, text_size),
+  sections = [(libc.SHT_PROGBITS, libc.SHF_ALLOC | libc.SHF_EXECINSTR, text_offset, text_offset, text_size),
+              (libc.SHT_PROGBITS, libc.SHF_ALLOC, rodata_offset, rodata_offset, rodata_size),
               (libc.SHT_STRTAB, 0, 0, strtab_offset, strtab_size)]
   shdrs = (libc.Elf64_Shdr * len(sections))()
   for i,s in enumerate(sections): shdrs[i] = libc.Elf64_Shdr(sh_names[i], *s)
@@ -67,8 +67,8 @@ def pack_hsaco(prg:bytes, kd:dict) -> bytes:
 
   elf = bytearray(shdr_offset + ctypes.sizeof(shdrs))
   put(elf, 0, bytes(ehdr))
+  put(elf, text_offset, text)
   put(elf, rodata_offset, rodata)
-  put(elf, text_offset, prg)
   put(elf, strtab_offset, strtab)
   put(elf, shdr_offset, bytes(shdrs))
   return bytes(elf)
