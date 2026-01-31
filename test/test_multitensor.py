@@ -33,6 +33,10 @@ def _test_allreduce(t:Tensor):
   b.realize()
   return aa, b
 
+def _test_multiple_to_single_device(ring:int) -> Tensor:
+  t = Tensor.empty(32).shard(devices_4, 0).to(Device.DEFAULT)
+  with Context(RING=ring, SCACHE=0): return t.realize()
+
 @unittest.skipIf(not_support_multi_device(), "no multi")
 class TestMultiTensor(unittest.TestCase):
   @needs_second_gpu
@@ -256,13 +260,14 @@ class TestMultiTensor(unittest.TestCase):
       a,b = _test_allreduce(Tensor.rand(256, 256))
       np.testing.assert_almost_equal(a.numpy(), b.numpy(), decimal=5)
 
-  @unittest.skip("TODO: naive and ring allreduce result in different devices")
-  def test_allreduce_naive_vs_ring_device(self):
-    t_naive = Tensor.empty(32).shard(devices_4, 0).to(Device.DEFAULT)
-    t_ring = Tensor.empty(32).shard(devices_4, 0).to(Device.DEFAULT)
-    with Context(RING=0, SCACHE=0): t_naive.realize()
-    with Context(RING=2, SCACHE=0): t_ring.realize()
-    self.assertEqual(t_naive.device, t_ring.device)
+  def test_multiple_to_single_device_naive(self):  
+    t = _test_multiple_to_single_device(0)
+    self.assertEqual(t.device, Device.DEFAULT)
+
+  @unittest.skip("TODO: ring allreduce ignores target device")
+  def test_multiple_to_single_device_ring(self):
+    t = _test_multiple_to_single_device(2)
+    self.assertEqual(t.device, Device.DEFAULT)
 
   def test_allreduce_all2all(self):
     with Context(ALL2ALL=2):
