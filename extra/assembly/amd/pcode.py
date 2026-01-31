@@ -38,15 +38,6 @@ def _bitreverse(v: UOp, bits: int) -> UOp:
   for m, s in masks: v = ((v >> _const(dt, s)) & _const(dt, m)) | ((v & _const(dt, m)) << _const(dt, s))
   return (v >> _const(dt, 32 if bits == 64 else 16)) | (v << _const(dt, 32 if bits == 64 else 16))
 
-def _try_const_fold(v: UOp) -> UOp:
-  """Try to constant-fold a UOp tree of arithmetic on constants."""
-  if v.op == Ops.CONST: return v
-  if v.op in (Ops.ADD, Ops.MUL) and all(s.op == Ops.CONST or _try_const_fold(s).op == Ops.CONST for s in v.src):
-    vals = [int(_try_const_fold(s).arg) for s in v.src]
-    result = (vals[0] + vals[1]) if v.op == Ops.ADD else (vals[0] * vals[1])
-    return UOp.const(v.dtype, result)
-  return v
-
 def _extract_bits(val: UOp, hi: int, lo: int) -> UOp:
   dt = dtypes.uint64 if val.dtype in (dtypes.uint64, dtypes.int64) else dtypes.uint32
   return ((val >> _const(dt, lo)) if lo > 0 else val) & _const(val.dtype, (1 << (hi - lo + 1)) - 1)
@@ -287,7 +278,7 @@ for is_max, name in [(False, 'min'), (True, 'max')]:
 
 DTYPES = {'u32': dtypes.uint32, 'i32': dtypes.int, 'f32': dtypes.float32, 'b32': dtypes.uint32, 'u64': dtypes.uint64, 'i64': dtypes.int64,
           'f64': dtypes.float64, 'b64': dtypes.uint64, 'u16': dtypes.uint16, 'i16': dtypes.short, 'f16': dtypes.half, 'b16': dtypes.uint16,
-          'u8': dtypes.uint8, 'i8': dtypes.int8, 'b8': dtypes.uint8, 'u1': dtypes.uint32}
+          'u8': dtypes.uint8, 'i8': dtypes.int8, 'b8': dtypes.uint8, 'u4': dtypes.uint8, 'i4': dtypes.int8, 'u1': dtypes.uint32}
 _BITS_DT = {8: dtypes.uint8, 16: dtypes.uint16, 32: dtypes.uint32, 64: dtypes.uint64}
 _NUM_SUFFIXES = ('ULL', 'LL', 'UL', 'U', 'L', 'F', 'f')
 def _strip_suffix(num: str) -> tuple[str, str]:
@@ -515,6 +506,7 @@ class Parser:
     if dt == base.dtype: return base
     if dt.itemsize == 2 and base.dtype.itemsize == 4:
       return (base & _const(base.dtype, 0xFFFF)).cast(dtypes.uint16) if dt == dtypes.uint16 else (base & _const(base.dtype, 0xFFFF)).cast(dtypes.uint16).bitcast(dt)
+    if field == 'i4': return _signext_4bit(base)
     return _cast_to(base, dt)
 
   def _handle_bracket(self, base, var_name: str | None = None) -> UOp:
@@ -533,7 +525,6 @@ class Parser:
     if self.try_eat('COLON'):
       second = self.parse()
       self.eat('RBRACKET')
-      first, second = _try_const_fold(first), _try_const_fold(second)
       if first.op == Ops.CONST and second.op == Ops.CONST:
         a, b = int(first.arg), int(second.arg)
         if a < b: return _bitreverse(base, b - a + 1)
