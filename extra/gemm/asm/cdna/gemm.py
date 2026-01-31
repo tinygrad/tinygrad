@@ -70,7 +70,7 @@ def custom_gemm_bw(gradient:UOp, kernel:UOp):
 # ** main gemm function
 
 def asm_gemm(a:Tensor, b:Tensor) -> Tensor:
-  assert can_use_asm_gemm(a, b)
+  assert can_use_asm_gemm(a, b), f"{counters['todos'][-1]}"
   counters["used"] += 1
   squeeze = a.ndim == 2
   if squeeze: a = a.unsqueeze(0)
