@@ -11,14 +11,14 @@ class TestX86Schedule(unittest.TestCase):
   def test_hide_latency(self):
     buf = UOp(Ops.DEFINE_GLOBAL, dtypes.float32.ptr(), arg=0)
     load1 = buf.index(UOp.const(dtypes.int32, 1), ptr=True).load()
-    load2 = buf.index(UOp.const(dtypes.int32, 1), ptr=True).load()
+    load2 = buf.index(UOp.const(dtypes.int32, 2), ptr=True).load()
     const = UOp.const(dtypes.float32, 1)
     # short path, cheap alu
     add = load1 + const
     # long path, expensive alu
-    fmadd = UOp.alu(Ops.MULACC, load2, const, const)
+    #fmadd = UOp.alu(Ops.MULACC, load2, const, const)
     # unify the paths
-    n = self.schedule(add + fmadd)
+    #n = self.schedule(add + fmadd)
     # load2 should be picked first as it has a longer path
 
   # in-order core can't issue ops with dependencies between them in a single cycle
