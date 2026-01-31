@@ -30,6 +30,7 @@ jobs:
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
+    # brew install uv
     - name: Setup environment
       run: |
         rm -rf /tmp/tinygrad_pytest_ci
