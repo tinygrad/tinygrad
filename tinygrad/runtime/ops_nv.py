@@ -828,3 +828,5 @@ class NVDevice(HCQCompiled[NVSignal]):
     self.iface.rm_control(self.profiler, nv_gpu.NVB0CC_CTRL_CMD_PMA_STREAM_UPDATE_GET_PUT,
       nv_gpu.struct_NVB0CC_CTRL_PMA_STREAM_UPDATE_GET_PUT_PARAMS(bytesConsumed=params.bytesAvailable))
     return pma_data
+
+  def device_props(self): return {'arch': self.arch, 'sm_version': self.sm_version}

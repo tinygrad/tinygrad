@@ -9,8 +9,8 @@ from extra.thunder.tiny.tk.kernel import Kernel
 from extra.thunder.tiny.tk.tiles import GL, TileLayout
 
 NUM_WORKERS = 1
-Q_BLOCK_SIZE = 16
-KV_BLOCK_SIZE = 16
+Q_BLOCK_SIZE = 32
+KV_BLOCK_SIZE = 32
 
 def _sharded_empty(shape:Tensor, ref:Tensor, axis:int|None) -> Tensor:
   if not isinstance(ref.device, tuple): return Tensor.empty(*shape, dtype=ref.dtype, device=ref.device)
@@ -70,10 +70,10 @@ def flash_attention(xq, xk, xv, attn_mask:Tensor|None=None, is_causal:bool=False
       mask_reg = ker.rt((Q_BLOCK_SIZE, KV_BLOCK_SIZE), dtypes.float32)
       mask_reg_transposed = ker.rt((KV_BLOCK_SIZE, Q_BLOCK_SIZE), dtypes.float32, TileLayout.COL)
 
-      max_vec_last = ker.rv(KV_BLOCK_SIZE, dtypes.float32)
-      max_vec = ker.rv(KV_BLOCK_SIZE, dtypes.float32)
-      norm_vec = ker.rv(KV_BLOCK_SIZE, dtypes.float32)
-      scale_vec = ker.rv(KV_BLOCK_SIZE, dtypes.float32)
+      max_vec_last = ker.rv(Q_BLOCK_SIZE, dtypes.float32)
+      max_vec = ker.rv(Q_BLOCK_SIZE, dtypes.float32)
+      norm_vec = ker.rv(Q_BLOCK_SIZE, dtypes.float32)
+      scale_vec = ker.rv(Q_BLOCK_SIZE, dtypes.float32)
 
       max_vec = warp.neg_inf(max_vec)
       norm_vec = warp.zero(norm_vec)
@@ -105,7 +105,7 @@ def flash_attention(xq, xk, xv, attn_mask:Tensor|None=None, is_causal:bool=False
 
         # softmax
         max_vec_last = warp.copy(max_vec_last.after(kv_idx), max_vec)
-        max_vec = warp.row_reduce(max_vec.after(max_vec_last), att_block, lambda a, b: a.maximum(b), init_value=-math.inf)
+        max_vec = warp.col_reduce(max_vec.after(max_vec_last), att_block, lambda a, b: a.maximum(b), init_value=-math.inf)
 
         scale_vec = warp.map(scale_vec.after(max_vec_last, max_vec), lambda _, idx: max_vec_last[*idx] - max_vec[*idx])
         scale_vec = scale_vec.exp2()
@@ -116,7 +116,7 @@ def flash_attention(xq, xk, xv, attn_mask:Tensor|None=None, is_causal:bool=False
         att_block -= max_vec
         att_block = att_block.exp2()
 
-        norm_vec = warp.row_reduce(norm_vec.after(scale_vec), att_block, lambda a, b: a + b)
+        norm_vec = warp.col_reduce(norm_vec.after(scale_vec), att_block, lambda a, b: a + b)
 
         # mma av
         att_block_mma = warp.copy(att_block_mma.after(kv_idx, norm_vec), att_block)
@@ -313,7 +313,7 @@ def flash_attention(xq, xk, xv, attn_mask:Tensor|None=None, is_causal:bool=False
           att_block_transposed = warp.transpose(att_block_transposed, att_block_mma)
           att_smem = warp.store(att_smem, att_block_transposed)
           att_block_row = warp.load(att_block_row, att_smem)
-          dv_reg_ = warp.mma_AB(dv_reg, att_block_row, do_reg_col)
+          dv_reg_ = warp.mma_AtB(dv_reg, att_block_row, do_reg_col)
 
           dp_block = warp.zero(dp_block.after(g, q_idx, dv_reg_))
           dp_block = warp.mma_ABt(dp_block, v_reg, do_reg)
@@ -325,7 +325,7 @@ def flash_attention(xq, xk, xv, attn_mask:Tensor|None=None, is_causal:bool=False
           att_block_transposed = warp.transpose(att_block_transposed, att_block_mma)
           att_smem = warp.store(att_smem, att_block_transposed)
           att_block_row = warp.load(att_block_row, att_smem)
-          dk_reg = warp.mma_AB(dk_reg, att_block_row, q_reg_col)
+          dk_reg = warp.mma_AtB(dk_reg, att_block_row, q_reg_col)
       dk_reg = ker.endrange(2)
       dv_reg = dv_reg.after(dk_reg)
 

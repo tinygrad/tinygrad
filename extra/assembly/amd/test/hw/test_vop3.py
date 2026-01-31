@@ -857,7 +857,6 @@ class TestF16Modifiers(unittest.TestCase):
 
   def test_v_fma_f16_inline_const_1_0(self):
     """V_FMA_F16: a*b + 1.0 should use f16 inline constant."""
-    from extra.assembly.amd.test.hw.helpers import f32_to_f16, _f16
     f16_a = f32_to_f16(0.325928)  # ~0x3537
     f16_b = f32_to_f16(-0.486572)  # ~0xb7c9
     instructions = [
@@ -868,13 +867,12 @@ class TestF16Modifiers(unittest.TestCase):
       v_fma_f16(v[4], v[4], v[6], 1.0),  # 1.0 is inline constant
     ]
     st = run_program(instructions, n_lanes=1)
-    result = _f16(st.vgpr[0][4] & 0xffff)
+    result = f16(st.vgpr[0][4] & 0xffff)
     expected = 0.325928 * (-0.486572) + 1.0
     self.assertAlmostEqual(result, expected, delta=0.01)
 
   def test_v_fma_f16_inline_const_0_5(self):
     """V_FMA_F16: a*b + 0.5 should use f16 inline constant."""
-    from extra.assembly.amd.test.hw.helpers import f32_to_f16, _f16
     f16_a = f32_to_f16(2.0)
     f16_b = f32_to_f16(3.0)
     instructions = [
@@ -885,13 +883,12 @@ class TestF16Modifiers(unittest.TestCase):
       v_fma_f16(v[2], v[0], v[1], 0.5),  # 0.5 is inline constant
     ]
     st = run_program(instructions, n_lanes=1)
-    result = _f16(st.vgpr[0][2] & 0xffff)
+    result = f16(st.vgpr[0][2] & 0xffff)
     expected = 2.0 * 3.0 + 0.5
     self.assertAlmostEqual(result, expected, delta=0.01)
 
   def test_v_fma_f16_inline_const_neg_1_0(self):
     """V_FMA_F16: a*b + (-1.0) should use f16 inline constant."""
-    from extra.assembly.amd.test.hw.helpers import f32_to_f16, _f16
     f16_a = f32_to_f16(2.0)
     f16_b = f32_to_f16(3.0)
     instructions = [
@@ -902,13 +899,12 @@ class TestF16Modifiers(unittest.TestCase):
       v_fma_f16(v[2], v[0], v[1], -1.0),  # -1.0 is inline constant
     ]
     st = run_program(instructions, n_lanes=1)
-    result = _f16(st.vgpr[0][2] & 0xffff)
+    result = f16(st.vgpr[0][2] & 0xffff)
     expected = 2.0 * 3.0 + (-1.0)
     self.assertAlmostEqual(result, expected, delta=0.01)
 
   def test_v_add_f16_abs_both(self):
     """V_ADD_F16 with abs on both operands."""
-    from extra.assembly.amd.test.hw.helpers import f32_to_f16, _f16
     f16_neg2 = f32_to_f16(-2.0)
     f16_neg3 = f32_to_f16(-3.0)
     instructions = [
@@ -919,12 +915,11 @@ class TestF16Modifiers(unittest.TestCase):
       v_add_f16_e64(v[2], abs(v[0]), abs(v[1])),  # |-2| + |-3| = 5
     ]
     st = run_program(instructions, n_lanes=1)
-    result = _f16(st.vgpr[0][2] & 0xffff)
+    result = f16(st.vgpr[0][2] & 0xffff)
     self.assertAlmostEqual(result, 5.0, delta=0.01)
 
   def test_v_mul_f16_neg_abs(self):
     """V_MUL_F16 with neg on one operand and abs on another."""
-    from extra.assembly.amd.test.hw.helpers import f32_to_f16, _f16
     f16_2 = f32_to_f16(2.0)
     f16_neg3 = f32_to_f16(-3.0)
     instructions = [
@@ -935,7 +930,7 @@ class TestF16Modifiers(unittest.TestCase):
       v_mul_f16_e64(v[2], -v[0], abs(v[1])),  # -(2) * |-3| = -6
     ]
     st = run_program(instructions, n_lanes=1)
-    result = _f16(st.vgpr[0][2] & 0xffff)
+    result = f16(st.vgpr[0][2] & 0xffff)
     self.assertAlmostEqual(result, -6.0, delta=0.01)
 
   def test_v_fmac_f16_hi_dest(self):
@@ -943,7 +938,6 @@ class TestF16Modifiers(unittest.TestCase):
 
     This tests the case from AMD_LLVM sin(0) where V_FMAC_F16 writes to v0.h.
     """
-    from extra.assembly.amd.test.hw.helpers import _f16
     instructions = [
       s_mov_b32(s[0], 0x38003c00),  # v0 = {hi=0.5, lo=1.0}
       v_mov_b32_e32(v[0], s[0]),
@@ -954,8 +948,8 @@ class TestF16Modifiers(unittest.TestCase):
     ]
     st = run_program(instructions, n_lanes=1)
     v0 = st.vgpr[0][0]
-    result_hi = _f16((v0 >> 16) & 0xffff)
-    result_lo = _f16(v0 & 0xffff)
+    result_hi = f16((v0 >> 16) & 0xffff)
+    result_lo = f16(v0 & 0xffff)
     self.assertAlmostEqual(result_hi, 0.5, delta=0.01, msg=f"Expected hi=0.5, got {result_hi}")
     self.assertAlmostEqual(result_lo, 1.0, delta=0.01, msg=f"Expected lo=1.0, got {result_lo}")
 
@@ -2953,6 +2947,319 @@ class TestVOP3Clamp(unittest.TestCase):
     self.assertAlmostEqual(i2f(st.vgpr[1][1]), 0.5, places=5, msg="lane 1: 0.5 should pass through")
     self.assertAlmostEqual(i2f(st.vgpr[2][1]), 1.0, places=5, msg="lane 2: 1.5 should clamp to 1.0")
     self.assertAlmostEqual(i2f(st.vgpr[3][1]), 1.0, places=5, msg="lane 3: 2.5 should clamp to 1.0")
+
+
+class TestCvtPkF16(unittest.TestCase):
+  """Tests for V_CVT_PK_RTZ_F16_F32 - pack two f32 to f16 with round toward zero."""
+
+  def test_cvt_pk_rtz_f16_f32_basic(self):
+    """V_CVT_PK_RTZ_F16_F32: basic pack of two f32 values."""
+    instructions = [
+      v_mov_b32_e32(v[0], 1.0),
+      v_mov_b32_e32(v[1], 2.0),
+      v_cvt_pk_rtz_f16_f32_e64(v[2], v[0], v[1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = st.vgpr[0][2]
+    lo_f16 = f16(result & 0xffff)
+    hi_f16 = f16((result >> 16) & 0xffff)
+    self.assertAlmostEqual(lo_f16, 1.0, delta=0.01)
+    self.assertAlmostEqual(hi_f16, 2.0, delta=0.01)
+
+
+class TestCvtPkNorm(unittest.TestCase):
+  """Tests for V_CVT_PK_NORM_I16_F32 and V_CVT_PK_NORM_U16_F32."""
+
+  def test_cvt_pk_norm_i16_f32_basic(self):
+    """V_CVT_PK_NORM_I16_F32: pack two f32 to normalized i16."""
+    instructions = [
+      v_mov_b32_e32(v[0], 1.0),
+      v_mov_b32_e32(v[1], -1.0),
+      v_cvt_pk_norm_i16_f32(v[2], v[0], v[1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = st.vgpr[0][2]
+    lo = result & 0xffff
+    hi = (result >> 16) & 0xffff
+    self.assertEqual(lo, 32767)
+    self.assertEqual(hi, 0x8001)  # -32767, hardware uses symmetric range
+
+  def test_cvt_pk_norm_u16_f32_basic(self):
+    """V_CVT_PK_NORM_U16_F32: pack two f32 to normalized u16."""
+    instructions = [
+      v_mov_b32_e32(v[0], 1.0),
+      v_mov_b32_e32(v[1], 0.5),
+      v_cvt_pk_norm_u16_f32(v[2], v[0], v[1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = st.vgpr[0][2]
+    lo = result & 0xffff
+    hi = (result >> 16) & 0xffff
+    self.assertEqual(lo, 65535)
+    self.assertAlmostEqual(hi, 32768, delta=1)
+
+
+class TestCvtPkInt(unittest.TestCase):
+  """Tests for V_CVT_PK_I16_I32, V_CVT_PK_U16_U32, V_CVT_PK_I16_F32, V_CVT_PK_U16_F32."""
+
+  def test_cvt_pk_i16_i32_basic(self):
+    """V_CVT_PK_I16_I32: pack two i32 to i16."""
+    instructions = [
+      s_mov_b32(s[0], 100),
+      s_mov_b32(s[1], -100 & 0xffffffff),
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[1]),
+      v_cvt_pk_i16_i32(v[2], v[0], v[1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = st.vgpr[0][2]
+    lo = result & 0xffff
+    hi = (result >> 16) & 0xffff
+    lo_signed = lo if lo < 32768 else lo - 65536
+    hi_signed = hi if hi < 32768 else hi - 65536
+    self.assertEqual(lo_signed, 100)
+    self.assertEqual(hi_signed, -100)
+
+  def test_cvt_pk_u16_u32_basic(self):
+    """V_CVT_PK_U16_U32: pack two u32 to u16."""
+    instructions = [
+      s_mov_b32(s[0], 1000),
+      s_mov_b32(s[1], 2000),
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[1]),
+      v_cvt_pk_u16_u32(v[2], v[0], v[1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = st.vgpr[0][2]
+    lo = result & 0xffff
+    hi = (result >> 16) & 0xffff
+    self.assertEqual(lo, 1000)
+    self.assertEqual(hi, 2000)
+
+  def test_cvt_pk_i16_f32_basic(self):
+    """V_CVT_PK_I16_F32: convert two f32 to packed i16."""
+    instructions = [
+      v_mov_b32_e32(v[0], 100.5),
+      v_mov_b32_e32(v[1], -50.7),
+      v_cvt_pk_i16_f32(v[2], v[0], v[1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = st.vgpr[0][2]
+    lo = result & 0xffff
+    hi = (result >> 16) & 0xffff
+    lo_signed = lo if lo < 32768 else lo - 65536
+    hi_signed = hi if hi < 32768 else hi - 65536
+    self.assertEqual(lo_signed, 100)
+    self.assertEqual(hi_signed, -50)
+
+  def test_cvt_pk_u16_f32_basic(self):
+    """V_CVT_PK_U16_F32: convert two f32 to packed u16."""
+    instructions = [
+      v_mov_b32_e32(v[0], 100.9),
+      v_mov_b32_e32(v[1], 200.1),
+      v_cvt_pk_u16_f32(v[2], v[0], v[1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = st.vgpr[0][2]
+    lo = result & 0xffff
+    hi = (result >> 16) & 0xffff
+    self.assertEqual(lo, 100)
+    self.assertEqual(hi, 200)
+
+  def test_cvt_pk_u8_f32_basic(self):
+    """V_CVT_PK_U8_F32: convert f32 to u8 and pack at byte position."""
+    instructions = [
+      v_mov_b32_e32(v[0], 128.5),
+      v_mov_b32_e32(v[1], 0),
+      v_mov_b32_e32(v[2], 0),
+      v_cvt_pk_u8_f32(v[2], v[0], v[1], v[2]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = st.vgpr[0][2]
+    byte0 = result & 0xff
+    self.assertEqual(byte0, 128)
+
+
+class TestDotProduct(unittest.TestCase):
+  """Tests for dot product instructions V_DOT4_U32_U8, V_DOT8_U32_U4."""
+
+  def test_v_dot4_u32_u8_basic(self):
+    """V_DOT4_U32_U8: 4-element dot product of u8 vectors."""
+    src0 = 0x04030201  # {4, 3, 2, 1}
+    src1 = 0x01010101  # {1, 1, 1, 1}
+    instructions = [
+      s_mov_b32(s[0], src0),
+      s_mov_b32(s[1], src1),
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[1]),
+      v_mov_b32_e32(v[2], 0),
+      v_dot4_u32_u8(v[2], v[0], v[1], v[2]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = st.vgpr[0][2]
+    self.assertEqual(result, 10)
+
+  def test_v_dot4_u32_u8_with_accumulator(self):
+    """V_DOT4_U32_U8 with non-zero accumulator."""
+    src0 = 0x02020202  # {2, 2, 2, 2}
+    src1 = 0x03030303  # {3, 3, 3, 3}
+    instructions = [
+      s_mov_b32(s[0], src0),
+      s_mov_b32(s[1], src1),
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[1]),
+      v_mov_b32_e32(v[2], 100),
+      v_dot4_u32_u8(v[2], v[0], v[1], v[2]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = st.vgpr[0][2]
+    self.assertEqual(result, 124)
+
+  def test_v_dot8_u32_u4_basic(self):
+    """V_DOT8_U32_U4: 8-element dot product of u4 vectors."""
+    # src0 = 8 nibbles: {1,2,3,4,5,6,7,8} packed as 0x87654321
+    # src1 = 8 nibbles: {1,1,1,1,1,1,1,1} packed as 0x11111111
+    # result = 1+2+3+4+5+6+7+8 = 36
+    src0 = 0x87654321
+    src1 = 0x11111111
+    instructions = [
+      s_mov_b32(s[0], src0),
+      s_mov_b32(s[1], src1),
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[1]),
+      v_mov_b32_e32(v[2], 0),
+      v_dot8_u32_u4(v[2], v[0], v[1], v[2]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = st.vgpr[0][2]
+    self.assertEqual(result, 36)
+
+
+class TestMinMaxF16Vop3(unittest.TestCase):
+  """Tests for V_MIN3_F16, V_MAX3_F16, V_MED3_F16, V_MINMAX_F16, V_MAXMIN_F16."""
+
+  def test_v_min3_f16_basic(self):
+    """V_MIN3_F16: minimum of three f16 values."""
+    instructions = [
+      s_mov_b32(s[0], f32_to_f16(3.0)),
+      s_mov_b32(s[1], f32_to_f16(1.0)),
+      s_mov_b32(s[2], f32_to_f16(2.0)),
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[1]),
+      v_mov_b32_e32(v[2], s[2]),
+      v_min3_f16(v[3], v[0], v[1], v[2]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = f16(st.vgpr[0][3] & 0xffff)
+    self.assertAlmostEqual(result, 1.0, delta=0.01)
+
+  def test_v_max3_f16_basic(self):
+    """V_MAX3_F16: maximum of three f16 values."""
+    instructions = [
+      s_mov_b32(s[0], f32_to_f16(1.0)),
+      s_mov_b32(s[1], f32_to_f16(3.0)),
+      s_mov_b32(s[2], f32_to_f16(2.0)),
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[1]),
+      v_mov_b32_e32(v[2], s[2]),
+      v_max3_f16(v[3], v[0], v[1], v[2]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = f16(st.vgpr[0][3] & 0xffff)
+    self.assertAlmostEqual(result, 3.0, delta=0.01)
+
+  def test_v_med3_f16_basic(self):
+    """V_MED3_F16: median of three f16 values."""
+    instructions = [
+      s_mov_b32(s[0], f32_to_f16(3.0)),
+      s_mov_b32(s[1], f32_to_f16(1.0)),
+      s_mov_b32(s[2], f32_to_f16(2.0)),
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[1]),
+      v_mov_b32_e32(v[2], s[2]),
+      v_med3_f16(v[3], v[0], v[1], v[2]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = f16(st.vgpr[0][3] & 0xffff)
+    self.assertAlmostEqual(result, 2.0, delta=0.01)
+
+  def test_v_minmax_f16_basic(self):
+    """V_MINMAX_F16: clamp(src0, min=src1, max=src2)."""
+    instructions = [
+      s_mov_b32(s[0], f32_to_f16(2.5)),
+      s_mov_b32(s[1], f32_to_f16(1.0)),
+      s_mov_b32(s[2], f32_to_f16(2.0)),
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[1]),
+      v_mov_b32_e32(v[2], s[2]),
+      v_minmax_f16(v[3], v[0], v[1], v[2]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = f16(st.vgpr[0][3] & 0xffff)
+    self.assertAlmostEqual(result, 2.0, delta=0.01)
+
+  def test_v_maxmin_f16_basic(self):
+    """V_MAXMIN_F16: clamp(src0, min=src2, max=src1)."""
+    instructions = [
+      s_mov_b32(s[0], f32_to_f16(0.5)),
+      s_mov_b32(s[1], f32_to_f16(2.0)),
+      s_mov_b32(s[2], f32_to_f16(1.0)),
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[1]),
+      v_mov_b32_e32(v[2], s[2]),
+      v_maxmin_f16(v[3], v[0], v[1], v[2]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = f16(st.vgpr[0][3] & 0xffff)
+    self.assertAlmostEqual(result, 1.0, delta=0.01)
+
+  def test_v_min3_f16_with_neg(self):
+    """V_MIN3_F16 with neg modifier: min(-3, 1, 2) = -3."""
+    instructions = [
+      s_mov_b32(s[0], f32_to_f16(3.0)),
+      s_mov_b32(s[1], f32_to_f16(1.0)),
+      s_mov_b32(s[2], f32_to_f16(2.0)),
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[1]),
+      v_mov_b32_e32(v[2], s[2]),
+      v_min3_f16(v[3], -v[0], v[1], v[2]),  # neg on first operand
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = f16(st.vgpr[0][3] & 0xffff)
+    self.assertAlmostEqual(result, -3.0, delta=0.01)
+
+  def test_v_max3_f16_with_abs(self):
+    """V_MAX3_F16 with abs modifier: max(|-3|, 1, 2) = 3."""
+    instructions = [
+      s_mov_b32(s[0], f32_to_f16(-3.0)),
+      s_mov_b32(s[1], f32_to_f16(1.0)),
+      s_mov_b32(s[2], f32_to_f16(2.0)),
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[1]),
+      v_mov_b32_e32(v[2], s[2]),
+      v_max3_f16(v[3], abs(v[0]), v[1], v[2]),  # abs on first operand
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = f16(st.vgpr[0][3] & 0xffff)
+    self.assertAlmostEqual(result, 3.0, delta=0.01)
+
+  def test_v_med3_f16_opsel_hi(self):
+    """V_MED3_F16 with opsel reading from hi half."""
+    # Pack two f16 values: hi=5.0, lo=1.0
+    packed = (f32_to_f16(5.0) << 16) | f32_to_f16(1.0)
+    instructions = [
+      s_mov_b32(s[0], packed),
+      s_mov_b32(s[1], f32_to_f16(3.0)),
+      s_mov_b32(s[2], f32_to_f16(4.0)),
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[1]),
+      v_mov_b32_e32(v[2], s[2]),
+      # Read hi half of v[0] (5.0), med3(5, 3, 4) = 4
+      v_med3_f16(v[3], v[0].h, v[1], v[2]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = f16(st.vgpr[0][3] & 0xffff)
+    self.assertAlmostEqual(result, 4.0, delta=0.01)
 
 
 if __name__ == '__main__':

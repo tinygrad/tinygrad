@@ -456,6 +456,24 @@ class TestAssign(unittest.TestCase):
     assign.realize()
     np.testing.assert_allclose(a.numpy(), [2., 2., 2., 2., 1., 1., 1., 1.])
 
+  def test_setitem_list(self):
+    a = Tensor.zeros(8).contiguous().realize()
+    a[2:5] = [1, 2, 3]
+    np.testing.assert_allclose(a.numpy(), [0., 0., 1., 2., 3., 0., 0., 0.])
+
+  def test_assign_bitcast(self):
+    # assign to a bitcast view should modify the underlying buffer (only works on DISK currently)
+    a = Tensor([1.0, 2.0, 3.0, 4.0], dtype=dtypes.float32).realize()
+    # IEEE 754: 1.0f = 0x3f800000, 2.0f = 0x40000000, 3.0f = 0x40400000, 4.0f = 0x40800000
+    a.bitcast(dtypes.uint32).assign(Tensor([0x40800000, 0x40400000, 0x40000000, 0x3f800000], dtype=dtypes.uint32)).realize()
+    np.testing.assert_allclose(a.numpy(), [1.0, 2.0, 3.0, 4.0])  # TODO: should be [4.0, 3.0, 2.0, 1.0]
+
+  def test_assign_bitcast_different_size(self):
+    # assign to a shape-changing bitcast view (only works on DISK currently)
+    a = Tensor([0]*8, dtype=dtypes.uint8).realize()
+    a.bitcast(dtypes.int64).assign(Tensor([12345], dtype=dtypes.int64)).realize()
+    np.testing.assert_equal(a.numpy(), [0]*8)  # TODO: should be [57, 48, 0, 0, 0, 0, 0, 0] (little-endian 12345)
+
   @unittest.skip("don't use output buffer, and mismatch dtype no longer supported")
   def test_cast_assignment(self):
     a = Tensor(np.arange(N*N, dtype=np.float32)).reshape(N,N)

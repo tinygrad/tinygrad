@@ -94,12 +94,18 @@ def _trig_reduce(x, phase=0.0):
   return UOp(Ops.SIN, x.dtype, (x - n * _const(x.dtype, 6.283185307179586),))
 
 def _signext(val: UOp) -> UOp:
-  for bits, mask, ext in [(8, 0xFF, 0xFFFFFF00), (16, 0xFFFF, 0xFFFF0000)]:
+  for bits, mask, ext in [(4, 0xF, 0xFFFFFFF0), (8, 0xFF, 0xFFFFFF00), (16, 0xFFFF, 0xFFFF0000)]:
     if (val.op == Ops.AND and len(val.src) == 2 and val.src[1].op == Ops.CONST and val.src[1].arg == mask) or val.dtype.itemsize == bits // 8:
       v32 = val.cast(dtypes.uint32) if val.dtype != dtypes.uint32 else val
       sb = (v32 >> _u32(bits - 1)) & _u32(1)
       return sb.ne(_u32(0)).where(v32 | _u32(ext), v32).cast(dtypes.int)
   return val.cast(dtypes.int64) if val.dtype in (dtypes.int, dtypes.int32) else val
+
+def _signext_4bit(val: UOp) -> UOp:
+  """Sign extend a 4-bit value to 32-bit signed integer."""
+  v32 = val.cast(dtypes.uint32) if val.dtype != dtypes.uint32 else val
+  sb = (v32 >> _u32(3)) & _u32(1)  # sign bit at position 3
+  return sb.ne(_u32(0)).where(v32 | _u32(0xFFFFFFF0), v32).bitcast(dtypes.int)
 
 def _abs(val: UOp) -> UOp:
   if val.dtype not in (dtypes.float32, dtypes.float64, dtypes.half): return val
@@ -227,11 +233,44 @@ _FUNCS: dict[str, Callable[..., UOp]] = {
   'signext_from_bit': _signext_from_bit, 'ldexp': _ldexp, 'frexp_mant': _frexp_mant, 'mantissa': _frexp_mant,
   'frexp_exp': _frexp_exp, 'trig_preop_result': _trig_preop,
   's_ff1_i32_b32': lambda a: _ff1(a, 32), 's_ff1_i32_b64': lambda a: _ff1(a, 64),
+  # Normalization conversions: map [-1,1] or [0,1] to integer range
+  # Use floor(x + 0.5) for round-to-nearest
+  # SNORM: round(value * 32767), range is [-32767, 32767] (hardware behavior)
+  'f16_to_snorm': lambda a: _floor(_f16_extract(a).cast(dtypes.float32) * _const(dtypes.float32, 32767) + _const(dtypes.float32, 0.5)).cast(dtypes.int).cast(dtypes.int16),
+  'f16_to_unorm': lambda a: _floor(_f16_extract(a).cast(dtypes.float32) * _const(dtypes.float32, 65535) + _const(dtypes.float32, 0.5)).cast(dtypes.uint16),
+  'f32_to_snorm': lambda a: _floor(a.bitcast(dtypes.float32) * _const(dtypes.float32, 32767) + _const(dtypes.float32, 0.5)).cast(dtypes.int).cast(dtypes.int16),
+  'f32_to_unorm': lambda a: _floor(a.bitcast(dtypes.float32) * _const(dtypes.float32, 65535) + _const(dtypes.float32, 0.5)).cast(dtypes.uint16),
+  'f32_to_u8': lambda a: _f_to_u(a.bitcast(dtypes.float32), dtypes.uint8),
+  # Integer truncation conversions
+  'i32_to_i16': lambda a: a.cast(dtypes.int).cast(dtypes.int16),
+  'u32_to_u16': lambda a: a.cast(dtypes.uint32).cast(dtypes.uint16),
+  'u16_to_u32': lambda a: (a.cast(dtypes.uint32) & _u32(0xFFFF)),
+  'u8_to_u32': lambda a: (a.cast(dtypes.uint32) & _u32(0xFF)),
+  'u4_to_u32': lambda a: (a.cast(dtypes.uint32) & _u32(0xF)),
+  # Signed extraction with sign extension for dot products
+  'i16_to_i32': lambda a: _signext(a.cast(dtypes.uint32) & _u32(0xFFFF)),
+  'i8_to_i32': lambda a: _signext(a.cast(dtypes.uint32) & _u32(0xFF)),
+  'i4_to_i32': lambda a: _signext_4bit(a.cast(dtypes.uint32) & _u32(0xF)),
+  # Float to int16 conversions
+  'v_cvt_i16_f32': lambda a: UOp(Ops.TRUNC, dtypes.float32, (a.bitcast(dtypes.float32),)).cast(dtypes.int16),
+  'v_cvt_u16_f32': lambda a: _f_to_u(a.bitcast(dtypes.float32), dtypes.uint16),
 }
 for is_max, name in [(False, 'min'), (True, 'max')]:
   for dt, sfx in [(dtypes.float32, 'f32'), (dtypes.int, 'i32'), (dtypes.uint32, 'u32'), (dtypes.int16, 'i16'), (dtypes.uint16, 'u16')]:
     _FUNCS[f'v_{name}_{sfx}'] = lambda *a, im=is_max, d=dt: _minmax_reduce(im, d, *a)
     _FUNCS[f'v_{name}3_{sfx}'] = lambda *a, im=is_max, d=dt: _minmax_reduce(im, d, *a)
+# f16 min/max/min3/max3/med3
+for is_max, name in [(False, 'min'), (True, 'max')]:
+  _FUNCS[f'v_{name}_f16'] = lambda *a, im=is_max: _minmax_reduce(im, dtypes.half, *[_f16_extract(x) for x in a])
+  _FUNCS[f'v_{name}3_f16'] = lambda *a, im=is_max: _minmax_reduce(im, dtypes.half, *[_f16_extract(x) for x in a])
+  _FUNCS[f'v_{name}_num_f16'] = lambda *a, im=is_max: _minmax_reduce(im, dtypes.half, *[_f16_extract(x) for x in a])
+  _FUNCS[f'v_{name}_num_f32'] = lambda *a, im=is_max: _minmax_reduce(im, dtypes.float32, *a)
+  _FUNCS[f'v_{name}3_num_f16'] = lambda *a, im=is_max: _minmax_reduce(im, dtypes.half, *[_f16_extract(x) for x in a])
+  _FUNCS[f'v_{name}3_num_f32'] = lambda *a, im=is_max: _minmax_reduce(im, dtypes.float32, *a)
+  _FUNCS[f'v_{name}imum_f16'] = lambda *a, im=is_max: _minmax_reduce(im, dtypes.half, *[_f16_extract(x) for x in a])
+  _FUNCS[f'v_{name}imum_f32'] = lambda *a, im=is_max: _minmax_reduce(im, dtypes.float32, *a)
+  _FUNCS[f'v_{name}imum3_f16'] = lambda *a, im=is_max: _minmax_reduce(im, dtypes.half, *[_f16_extract(x) for x in a])
+  _FUNCS[f'v_{name}imum3_f32'] = lambda *a, im=is_max: _minmax_reduce(im, dtypes.float32, *a)
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # TOKENIZER/PARSER
@@ -239,7 +278,7 @@ for is_max, name in [(False, 'min'), (True, 'max')]:
 
 DTYPES = {'u32': dtypes.uint32, 'i32': dtypes.int, 'f32': dtypes.float32, 'b32': dtypes.uint32, 'u64': dtypes.uint64, 'i64': dtypes.int64,
           'f64': dtypes.float64, 'b64': dtypes.uint64, 'u16': dtypes.uint16, 'i16': dtypes.short, 'f16': dtypes.half, 'b16': dtypes.uint16,
-          'u8': dtypes.uint8, 'i8': dtypes.int8, 'b8': dtypes.uint8, 'u1': dtypes.uint32}
+          'u8': dtypes.uint8, 'i8': dtypes.int8, 'b8': dtypes.uint8, 'u4': dtypes.uint8, 'i4': dtypes.int8, 'u1': dtypes.uint32}
 _BITS_DT = {8: dtypes.uint8, 16: dtypes.uint16, 32: dtypes.uint32, 64: dtypes.uint64}
 _NUM_SUFFIXES = ('ULL', 'LL', 'UL', 'U', 'L', 'F', 'f')
 def _strip_suffix(num: str) -> tuple[str, str]:
@@ -432,14 +471,6 @@ class Parser:
         return elem
       if self.at('LBRACKET') and name not in self.vars:
         self.eat('LBRACKET')
-        if self.at('NUM'):
-          idx_num = int(self.peek().val)
-          if f'{name}{idx_num}' in self.vars:
-            self.eat('NUM')
-            self.eat('RBRACKET')
-            elem = self.vars[f'{name}{idx_num}']
-            if self.try_eat('DOT'): return _cast_to(elem, DTYPES.get(self.eat('IDENT').val, dtypes.uint32))
-            return elem
         first = self.parse()
         return self._handle_bracket_rest(first, _u32(0), name)
       if name in self.vars:
@@ -467,6 +498,7 @@ class Parser:
     if dt == base.dtype: return base
     if dt.itemsize == 2 and base.dtype.itemsize == 4:
       return (base & _const(base.dtype, 0xFFFF)).cast(dtypes.uint16) if dt == dtypes.uint16 else (base & _const(base.dtype, 0xFFFF)).cast(dtypes.uint16).bitcast(dt)
+    if field == 'i4': return _signext_4bit(base)
     return _cast_to(base, dt)
 
   def _handle_bracket(self, base, var_name: str | None = None) -> UOp:
@@ -509,8 +541,8 @@ class Parser:
       var_name = self._find_var_name(base)
     if first.op == Ops.CONST:
       idx = int(first.arg)
-      if var_name and f'{var_name}{idx}' in self.vars:
-        v = self.vars[f'{var_name}{idx}']
+      if var_name and f'{var_name}@{idx}' in self.vars:
+        v = self.vars[f'{var_name}@{idx}']
         return _cast_to(v, dt_suffix) if dt_suffix else v
       dt = dtypes.uint64 if base.dtype in (dtypes.uint64, dtypes.int64) else dtypes.uint32
       base_cast = base.cast(dt) if base.dtype != dt else base
@@ -518,7 +550,7 @@ class Parser:
       return _cast_to(result, dt_suffix) if dt_suffix else result
     if var_name:
       idx_u32 = _to_u32(first)
-      elems = [(i, self.vars[f'{var_name}{i}']) for i in range(256) if f'{var_name}{i}' in self.vars]
+      elems = [(i, self.vars[f'{var_name}@{i}']) for i in range(256) if f'{var_name}@{i}' in self.vars]
       if elems:
         result = elems[-1][1]
         for ei, ev in reversed(elems[:-1]):
@@ -537,7 +569,7 @@ class Parser:
     self.eat('RBRACE')
     var_name = self._find_var_name(base)
     if var_name:
-      elem = self.vars.get(f'{var_name}{idx}', _u32(0))
+      elem = self.vars.get(f'{var_name}@{idx}', _u32(0))  # use @ to avoid collision with temps like A4
       if self.try_eat('DOT'):
         dt_name = self.eat('IDENT').val
         return _cast_to(elem, DTYPES.get(dt_name, dtypes.uint32))
@@ -787,7 +819,7 @@ def parse_block(lines: list[str], start: int, vars: dict[str, VarVal], funcs: di
       if found_var: vars[found_var] = block_assigns[found_var] = _const(dtypes.bool, False)
       for loop_i in range(start_val, end_val + 1):
         subst_lines = [_subst_loop_var(bl, loop_var, loop_i) for bl in body_lines if not (has_break and bl.strip().lower() == 'break')]
-        _, iter_assigns, _ = parse_block(subst_lines, 0, vars, funcs, assigns)
+        _, iter_assigns, _ = parse_block(subst_lines, 0, {**vars, **block_assigns}, funcs, assigns)
         if has_break:
           assert found_var is not None
           found = block_assigns.get(found_var, vars.get(found_var))
@@ -944,7 +976,7 @@ def parse_block(lines: list[str], start: int, vars: dict[str, VarVal], funcs: di
         if existing is not None and isinstance(existing, UOp):
           block_assigns[var] = vars[var] = _set_bit(existing, _u32(idx), val)
         else:
-          block_assigns[f'{var}{idx}'] = vars[f'{var}{idx}'] = val
+          block_assigns[f'{var}@{idx}'] = vars[f'{var}@{idx}'] = val
         i += 1; continue
 
     # Compound assignment: var += or var -=

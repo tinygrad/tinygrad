@@ -60,7 +60,7 @@ def split_reduceop(reduce:UOp, x:UOp):
 
 mop_cleanup = PatternMatcher([
   # merge adjacent RESHAPES, safe because they are not tagged
-  (UPat(Ops.RESHAPE, name="x2").f(Ops.RESHAPE, allow_any_len=True, name="x"),
+  (UPat(Ops.RESHAPE, src=(UPat(Ops.RESHAPE, name="x2"), UPat()), name="x"),
    lambda x,x2: x.replace(src=(x2.src[0], x.src[1])) if x.tag is None and x2.tag is None else None),
 ])
 
@@ -68,15 +68,29 @@ def resolve_custom_kernel(ck:UOp) -> UOp:
   placeholders = [UOp.placeholder_like(s, slot=i) for i,s in enumerate(ck.src)]
   return UOp(Ops.KERNEL, src=ck.src, arg=Kernel(ck.arg.fxn(*placeholders)))
 
+def resolve_call(c:UOp) -> UOp:
+  params = sorted([x for x in c.src[0].toposort() if x.op == Ops.PARAM], key=lambda x: x.arg)
+  args = c.src[1:]
+  # TODO: this check belongs in spec, not here
+  if [x.arg for x in params] != list(range(len(params))): raise RuntimeError(f"params not in order: {[x.arg for x in params]}")
+  if len(params) != len(args): raise TypeError(f"expected {len(params)} args, got {len(args)}")
+  for i, (p, a) in enumerate(zip(params, args)):
+    if p.shape != a.shape: raise TypeError(f"arg {i} shape mismatch: expected {p.shape}, got {a.shape}")
+    if p.dtype != a.dtype: raise TypeError(f"arg {i} dtype mismatch: expected {p.dtype}, got {a.dtype}")
+  return c.src[0].substitute(dict(zip(params, args))).rtag(c.tag)
+
 earliest_rewrites = mop_cleanup+PatternMatcher([
   # just removing it works...
   (UPat((Ops.DETACH, Ops.CONTIGUOUS_BACKWARD), name="x"), lambda x: x.src[0]),
+
+  # resolve calls
+  (UPat(Ops.CALL, name="c"), resolve_call),
 
   # resolve custom kernels
   (UPat(Ops.CUSTOM_KERNEL, name="ck"), resolve_custom_kernel),
 
   # remove CONTIGUOUS if the BUFFER is already contiguous
-  (UPat(Ops.BUFFER).f(Ops.RESHAPE, allow_any_len=True, name="r").f(Ops.CONTIGUOUS, name="c"), lambda r,c: r.replace(tag=c.tag)),
+  (UPat(Ops.RESHAPE, src=(UPat(Ops.BUFFER), UPat()), name="r").f(Ops.CONTIGUOUS, name="c"), lambda r,c: r.replace(tag=c.tag)),
 
   # split_reduceop
   (UPat(Ops.REDUCE_AXIS, name="reduce", src=(UPat.var("x"),)), split_reduceop),
@@ -233,7 +247,7 @@ pm_const_buffer_folding = pm_mops+PatternMatcher([
   # dont bufferize an arange
   (UPat.any((r:=UPat(dtype=dtypes.index).cast()).named("src"), r.eq(UPat()).named("src")).f(Ops.BUFFERIZE,
     allow_any_len=True, name="buf").f(Ops.INDEX, allow_any_len=True, name="idx"), remove_bufferize),
-  # no buffers for const
+  # no buffers for const (ranges don't matter for const - it's the same value everywhere)
   (UPat(Ops.CONST, name='c').f(Ops.BUFFERIZE, allow_any_len=True, name="b"), lambda c,b: b.const_like(c.arg).rtag(b.tag)),
   # indexing a const is a const
   (UPat(Ops.INDEX, src=(UPat(Ops.CONST, name="c"),),), lambda c: c),
@@ -252,24 +266,24 @@ pm_remove_bufferize = PatternMatcher([
 ])
 
 def late_buffer_view(t:UOp, b:UOp):
-  if isinstance(b.device, str) and (b.device.startswith("DISK") or b.device.startswith("TINYFS")):
-    shape = b.shape
-    size = prod(shape)
+  if not (isinstance(b.device, str) and b.device.startswith(("DISK", "TINYFS"))): return b
+  shape = b.shape
+  size = prod(shape)
 
-    # walk up for the INDEX
-    x = t
-    while not any(u.op is Ops.INDEX for u in x.src):
-      assert x.op not in GroupOp.Elementwise, "can't buffer view elementwise"
-      x = x.src[0]
-    x = next(u for u in x.src if u.op is Ops.INDEX)
+  # walk up for the INDEX
+  x = t
+  while not any(u.op is Ops.INDEX for u in x.src):
+    assert x.op not in GroupOp.Elementwise, "can't buffer view elementwise"
+    x = x.src[0]
+  x = next(u for u in x.src if u.op is Ops.INDEX)
 
-    if len(shape) == 0: offset = x.src[1].arg
-    else: offset = max(sum(idx.vmin for idx in x.src[1:]), 0)
+  if len(shape) == 0: offset = x.src[1].arg
+  else: offset = max(sum(idx.vmin for idx in x.src[1:]), 0)
 
-    return b.replace(src=(UOp(Ops.BUFFER_VIEW, t.dtype, (x.base,), (size, offset), tag=t.tag),) + b.src[1:])
-  return b
+  return b.replace(src=(UOp(Ops.BUFFER_VIEW, t.dtype, (x.base,), (size, offset), tag=t.tag), b.src[1]))
+
 to_bufferview = PatternMatcher([
-  (UPat((Ops.BITCAST, Ops.CONTIGUOUS), name="t").f(Ops.BUFFERIZE, allow_any_len=True, name="b"), late_buffer_view),
+  (UPat(Ops.BUFFERIZE, src=(UPat((Ops.BITCAST, Ops.CONTIGUOUS), name="t"), UPat()), name="b"), late_buffer_view),
   (UPat((Ops.BITCAST, Ops.CONTIGUOUS)).f(Ops.BUFFER_VIEW, name="b"), lambda b: b.replace(src=b.src[0].src)),
 ])
 
@@ -502,12 +516,11 @@ def split_store(ctx:list[UOp], x:UOp) -> UOp|None:
   # gather the metadata
   metadatas = [ctx[y].metadata for y in lctx.parent_tags]
 
-  # NOTE: the hack for COPY is here
-  for u in ret.toposort():
-    # TODO: this can be wrong if there's multiple of these
-    if u.op in {Ops.COPY, Ops.BUFFER_VIEW, Ops.ENCDEC}:
-      ret = u
-      break
+  # SINK requires all buffers on the same device, but COPY/BUFFER_VIEW/ENCDEC are cross-device or special hardware ops
+  if ret.op is Ops.STORE: stored = ret.src[1]
+  elif ret.op is Ops.END and ret.src[0].op is Ops.STORE: stored = ret.src[0].src[1]
+  else: raise RuntimeError(f"unknown kernel type {ret.op}")
+  if stored.op in {Ops.COPY, Ops.BUFFER_VIEW, Ops.ENCDEC}: ret = stored
   else:
     ret = ret.sink(arg=KernelInfo(opts_to_apply=lctx.opts) if lctx.opts is not None else None)
 
@@ -521,11 +534,14 @@ split_kernels = PatternMatcher([
   (UPat((Ops.STORE, Ops.END), name="x"), split_store),
 ])
 
-def tag_uop(ctx:list[UOp], x:UOp):
-  if x.tag is not None: return None
+def tag_uop(ctx:tuple[list[UOp], set[UOp]], x:UOp):
+  if x.tag is not None or x in ctx[1]: return None
+  if x.tag is None and x.op is Ops.CALL:
+    # don't tag anything in a CALL
+    for u in x.src[0].toposort(): ctx[1].add(u)
   if x.dtype.scalar() == dtypes.index: return None
-  ctx.append(x)
-  return x.replace(tag=(len(ctx)-1,))
+  ctx[0].append(x)
+  return x.replace(tag=(len(ctx[0])-1,))
 add_tags = PatternMatcher([
   # don't tag BUFFERs, they are global
   (UPat(GroupOp.All-{Ops.BUFFER, Ops.CONST, Ops.DEVICE, Ops.UNIQUE, Ops.LUNIQUE, Ops.DEFINE_VAR, Ops.BIND, Ops.KERNEL, Ops.END,
@@ -551,7 +567,7 @@ replace_contiguous = PatternMatcher([
 def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
   if getenv("VIZ"): graph_rewrite(sink, PatternMatcher([]), name="View Input Graph")
   uop_list: list[UOp] = []
-  tsink = graph_rewrite(sink, add_tags, ctx=uop_list, bottom_up=True, name="number the uops")
+  tsink = graph_rewrite(sink, add_tags, ctx=(uop_list, set()), bottom_up=True, name="number the uops")
 
   tsink = graph_rewrite(tsink, pm_mops+earliest_rewrites+replace_contiguous, ctx={}, name="earliest rewrites")
 
