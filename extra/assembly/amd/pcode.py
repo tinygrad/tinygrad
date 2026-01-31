@@ -105,7 +105,7 @@ def _signext_4bit(val: UOp) -> UOp:
   """Sign extend a 4-bit value to 32-bit signed integer."""
   v32 = val.cast(dtypes.uint32) if val.dtype != dtypes.uint32 else val
   sb = (v32 >> _u32(3)) & _u32(1)  # sign bit at position 3
-  return sb.ne(_u32(0)).where(v32 | _u32(0xFFFFFFF0), v32).cast(dtypes.int)
+  return sb.ne(_u32(0)).where(v32 | _u32(0xFFFFFFF0), v32).bitcast(dtypes.int)
 
 def _abs(val: UOp) -> UOp:
   if val.dtype not in (dtypes.float32, dtypes.float64, dtypes.half): return val
@@ -471,14 +471,6 @@ class Parser:
         return elem
       if self.at('LBRACKET') and name not in self.vars:
         self.eat('LBRACKET')
-        if self.at('NUM'):
-          idx_num = int(self.peek().val)
-          if f'{name}{idx_num}' in self.vars:
-            self.eat('NUM')
-            self.eat('RBRACKET')
-            elem = self.vars[f'{name}{idx_num}']
-            if self.try_eat('DOT'): return _cast_to(elem, DTYPES.get(self.eat('IDENT').val, dtypes.uint32))
-            return elem
         first = self.parse()
         return self._handle_bracket_rest(first, _u32(0), name)
       if name in self.vars:
@@ -549,8 +541,8 @@ class Parser:
       var_name = self._find_var_name(base)
     if first.op == Ops.CONST:
       idx = int(first.arg)
-      if var_name and f'{var_name}{idx}' in self.vars:
-        v = self.vars[f'{var_name}{idx}']
+      if var_name and f'{var_name}@{idx}' in self.vars:
+        v = self.vars[f'{var_name}@{idx}']
         return _cast_to(v, dt_suffix) if dt_suffix else v
       dt = dtypes.uint64 if base.dtype in (dtypes.uint64, dtypes.int64) else dtypes.uint32
       base_cast = base.cast(dt) if base.dtype != dt else base
@@ -558,7 +550,7 @@ class Parser:
       return _cast_to(result, dt_suffix) if dt_suffix else result
     if var_name:
       idx_u32 = _to_u32(first)
-      elems = [(i, self.vars[f'{var_name}{i}']) for i in range(256) if f'{var_name}{i}' in self.vars]
+      elems = [(i, self.vars[f'{var_name}@{i}']) for i in range(256) if f'{var_name}@{i}' in self.vars]
       if elems:
         result = elems[-1][1]
         for ei, ev in reversed(elems[:-1]):
@@ -577,7 +569,7 @@ class Parser:
     self.eat('RBRACE')
     var_name = self._find_var_name(base)
     if var_name:
-      elem = self.vars.get(f'{var_name}{idx}', _u32(0))
+      elem = self.vars.get(f'{var_name}@{idx}', _u32(0))  # use @ to avoid collision with temps like A4
       if self.try_eat('DOT'):
         dt_name = self.eat('IDENT').val
         return _cast_to(elem, DTYPES.get(dt_name, dtypes.uint32))
@@ -825,16 +817,9 @@ def parse_block(lines: list[str], start: int, vars: dict[str, VarVal], funcs: di
       has_break = any('break' in bl.lower() for bl in body_lines)
       found_var = f'_found_{id(body_lines)}' if has_break else None
       if found_var: vars[found_var] = block_assigns[found_var] = _const(dtypes.bool, False)
-      _arr_elems: dict[str, UOp] = {}  # protected array element assignments
       for loop_i in range(start_val, end_val + 1):
         subst_lines = [_subst_loop_var(bl, loop_var, loop_i) for bl in body_lines if not (has_break and bl.strip().lower() == 'break')]
-        _, iter_assigns, _ = parse_block(subst_lines, 0, {**vars, **block_assigns, **_arr_elems}, funcs, assigns)
-        # Detect brace assignments (array elements) and protect them from being overwritten by temps
-        for sl in subst_lines:
-          stoks = tokenize(sl)
-          if len(stoks) >= 5 and stoks[0].type == 'IDENT' and stoks[1].type == 'LBRACE' and stoks[2].type == 'NUM':
-            key = f'{stoks[0].val}{stoks[2].val}'
-            if key in iter_assigns: _arr_elems[key] = iter_assigns[key]
+        _, iter_assigns, _ = parse_block(subst_lines, 0, {**vars, **block_assigns}, funcs, assigns)
         if has_break:
           assert found_var is not None
           found = block_assigns.get(found_var, vars.get(found_var))
@@ -855,8 +840,6 @@ def parse_block(lines: list[str], start: int, vars: dict[str, VarVal], funcs: di
                 break
         else:
           block_assigns.update(iter_assigns); vars.update(iter_assigns)
-      # Restore protected array elements that may have been overwritten by temps with same name
-      block_assigns.update(_arr_elems); vars.update(_arr_elems)
       continue
 
     # declare
@@ -993,7 +976,7 @@ def parse_block(lines: list[str], start: int, vars: dict[str, VarVal], funcs: di
         if existing is not None and isinstance(existing, UOp):
           block_assigns[var] = vars[var] = _set_bit(existing, _u32(idx), val)
         else:
-          block_assigns[f'{var}{idx}'] = vars[f'{var}{idx}'] = val
+          block_assigns[f'{var}@{idx}'] = vars[f'{var}@{idx}'] = val
         i += 1; continue
 
     # Compound assignment: var += or var -=
