@@ -313,7 +313,7 @@ def _embedding_bwd(grad_emb:UOp, call:UOp) -> tuple:
     grad_emb = grad_emb.copy_to_device(weight.device)
     idx = idx.copy_to_device(weight.device)
   # weight is replicated, grad_weight should match
-  grad_weight_uop = Tensor.empty(weight.shape, dtype=weight.dtype, device=weight.device).uop
+  grad_weight_uop = Tensor.empty(weight.shape, dtype=dtypes.float, device=weight.device).uop
 
   # TODO: how do we remove this dumb kernel and use Tensor.zeros?
   def _zero_kernel(out:UOp) -> UOp:
@@ -334,11 +334,11 @@ def _embedding_bwd(grad_emb:UOp, call:UOp) -> tuple:
     if device in ("CPU", "NULL"): atomic_arg = "__atomic_fetch_add({0}, {1}, __ATOMIC_RELAXED);"
     elif device == "AMD": atomic_arg = "__hip_atomic_fetch_add({0}, {1}, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);"
     else: raise NotImplementedError(f"no atomics for device {device}")
-    atomic = UOp(Ops.CUSTOM, dtypes.void, (grad_weight.index(token_id, j, ptr=True), grad_emb_flat[i, j]), arg = atomic_arg)
+    atomic = UOp(Ops.CUSTOM, dtypes.void, (grad_weight.index(token_id, j, ptr=True), grad_emb_flat[i, j].cast(dtypes.float)), arg = atomic_arg)
     return atomic.end(i, j).sink(arg=KernelInfo(name="embedding_bwd", opts_to_apply=()))
   grad_weight_uop = grad_weight_uop.custom_kernel(grad_emb, idx, fxn=_embedding_bwd_kernel)[0]
 
-  return (grad_weight_uop, None)
+  return (grad_weight_uop.cast(weight.dtype), None)
 
 def _embedding_fwd(weight:Tensor, idx:Tensor) -> Tensor:
   arange = Tensor.arange(weight.shape[0], requires_grad=False, device=weight.device)
