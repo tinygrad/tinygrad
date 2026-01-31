@@ -14,10 +14,11 @@ def validate_index(buf:UOp, idx:UOp, gate:UOp|None=None):
   if 0<=idx.vmin and idx.vmax<sz: return True
 
   # TODO: validate these
-  # WEBGPU has a BITCAST in the index, PTX casts pointer to long
+  # WEBGPU has a BITCAST in the index, PTX casts pointer to long, X86 turns certain casts into NOOPs
   # VECTORIZE/GEP can't be properly modeled in z3 since it doesn't support vectors
   for x in idx.toposort() | gate.toposort():
-    if x.op in {Ops.BITCAST, Ops.VECTORIZE, Ops.GEP} or (x.op is Ops.CAST and isinstance(x.src[0].dtype, PtrDType)): return True
+    if x.op in {Ops.BITCAST, Ops.VECTORIZE, Ops.GEP} or (x.op is Ops.CAST and isinstance(x.src[0].dtype, PtrDType)) \
+      or x.op is Ops.NOOP: return True
 
   # if all is good and CHECK_OOB=1, validate with z3
   from tinygrad.uop.validate import validate_index_with_z3
