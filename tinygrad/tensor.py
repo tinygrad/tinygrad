@@ -289,6 +289,7 @@ class Tensor(OpMixin):
     # TODO: this is a hack for writing to DISK. remove with working assign
     if isinstance(self.device, str) and self.device.startswith("DISK"):
       if not isinstance(x, Tensor): x = Tensor(x, device="CPU", dtype=self.dtype)
+      if self.dtype != x.dtype: raise RuntimeError(f"DISK assign dtype mismatch {self.dtype} != {x.dtype}")
       self._buffer().copyin(x._data())
       return self
     if not isinstance(x, Tensor): x = Tensor(x, device=self.device, dtype=self.dtype)
@@ -3868,7 +3869,10 @@ class Tensor(OpMixin):
 
   def bitcast(self, dtype:DTypeLike) -> Tensor:
     """
-    Bitcasts `self` to the given `dtype` of the same itemsize.
+    Bitcasts `self` to the given `dtype`.
+
+    When the target dtype has the same itemsize, this is a view of the same memory.
+    When itemsizes differ, the last dimension is adjusted and a new Tensor is created.
 
     `self` must not require a gradient.
 

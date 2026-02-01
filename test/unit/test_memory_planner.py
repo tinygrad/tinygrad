@@ -1,5 +1,5 @@
 import unittest
-from tinygrad import dtypes, Device
+from tinygrad import dtypes
 from tinygrad.device import Buffer
 from tinygrad.engine.memory import _internal_memory_planner
 
@@ -7,7 +7,7 @@ global_map = {}
 def b(i, base=None, offset=0, pin=False, size=16):
   global global_map
   if i in global_map: return global_map[i]
-  global_map[i] = Buffer(Device.DEFAULT, size, dtypes.int8, base=global_map[base] if base is not None else None, offset=offset)
+  global_map[i] = Buffer("NULL", size, dtypes.int8, base=global_map[base] if base is not None else None, offset=offset)
   if pin: global_map[i].ref(1)
   return global_map[i]
 
