@@ -53,6 +53,7 @@ class Kernel:
            ('ieee_mode', 1), ('fp16_overflow', 0), ('dx10_clamp', 1)]
     return create_elf(inst_bytes, dict(hsa), arch="cdna")
 
+  # outputs readable source code for this kernel
   def to_text(self) -> str:
     lines, pos = [], 0
     for inst in self.instructions:
