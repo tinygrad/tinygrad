@@ -1074,6 +1074,24 @@ class TestGatedUopGivenValid(unittest.TestCase):
     expected_vec = UOp(Ops.VECTORIZE, dtypes.index.vec(2), (uconst(0), r0))
     self.assertEqual(idx, (r0 < 3).where(expected_vec, UOp.invalid()))
 
+class TestRangeSplitting(unittest.TestCase):
+  def test_range_split_on_mod(self):
+    # test that mark_range_mod splits RANGE(8) into RANGE(4)*2 + RANGE(2) when used with %2
+    from tinygrad.codegen.simplify import pm_split_ranges, pm_flatten_range
+    r0 = UOp.range(uconst(8), 0)
+    # create a simple expression using the range with mod: store range%2 to a buffer
+    buf = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), arg=0)
+    val = (r0 % uconst(2)).cast(dtypes.int)
+    store = UOp(Ops.STORE, dtypes.void, (buf.index(uconst(0)), val))
+    sink = UOp(Ops.SINK, dtypes.void, (UOp(Ops.END, dtypes.void, (store, r0)),))
+    # count RANGEs before
+    ranges_before = len([u for u in sink.toposort() if u.op is Ops.RANGE])
+    # apply the range splitting optimization
+    sink_after = graph_rewrite(sink, pm_split_ranges+pm_flatten_range, ctx={}, name="test split ranges")
+    # count RANGEs after - should have more due to splitting
+    ranges_after = len([u for u in sink_after.toposort() if u.op is Ops.RANGE])
+    self.assertGreater(ranges_after, ranges_before, "RANGE should be split when used with mod of divisible constant")
+
 class TestBounds(unittest.TestCase):
   def test_unrolled_arange(self):
     # #include <metal_stdlib>

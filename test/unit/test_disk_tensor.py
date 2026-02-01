@@ -59,13 +59,13 @@ class TestRawDiskBuffer(unittest.TestCase):
     _test_bitcasted(t, dtypes.float32, 0.0)
     _test_bitcasted(t, dtypes.uint32, 0)
     # pi in float16 stored via int16
-    t.bitcast(dtypes.uint16).assign(Tensor.full((128, 64), 0x4248, dtype=dtypes.uint16)).realize()
+    t.assign(Tensor.full((128, 64), 0x4248, dtype=dtypes.uint16).bitcast(dtypes.uint8)).realize()
     _test_bitcasted(t, dtypes.float16, 3.140625)
     _test_bitcasted(t, dtypes.float32, 50.064727)
     _test_bitcasted(t, dtypes.uint16, 0x4248)
     _test_bitcasted(t, dtypes.uint32, 0x42484248)
     # pi in float32 stored via float32
-    t.bitcast(dtypes.float32).assign(Tensor.full((128, 32), 3.1415927, dtype=dtypes.float32)).realize()
+    t.assign(Tensor.full((128, 32), 3.1415927, dtype=dtypes.float32).bitcast(dtypes.uint8)).realize()
     _test_bitcasted(t, dtypes.float32, 3.1415927)
     _test_bitcasted(t, dtypes.uint32, 0x40490FDB)
     # doesn't suport normal cast
@@ -348,13 +348,16 @@ class TestDiskTensor(unittest.TestCase):
 
   def test_assign_with_bitcast(self):
     # bitcast assign is used in safe_save for writing header length
-    # this tests the synchronous disk assign hack handles bitcast correctly
+    # bitcast on source side works, bitcast on target side raises
     pathlib.Path(temp(fn:="dt_assign_bitcast")).unlink(missing_ok=True)
     t = Tensor.empty(16, device=f"disk:{temp(fn)}", dtype=dtypes.uint8)
-    t[0:8].bitcast(dtypes.int64).assign([12345])
-    # verify the data was written correctly
+    # correct way: bitcast the source to match target dtype
+    t[0:8].assign(Tensor([12345], dtype=dtypes.int64, device="CPU").bitcast(dtypes.uint8))
     val = int.from_bytes(t[0:8].data(), 'little')
     self.assertEqual(val, 12345)
+    # bitcast on target with non-broadcastable dtype raises
+    with self.assertRaises(RuntimeError):
+      t[0:4].bitcast(dtypes.int32).assign(Tensor([12345], dtype=dtypes.int64))
 
   def test_assign_cross_device(self):
     # disk assign allows cross-device (source on GPU/CPU, target on disk)
