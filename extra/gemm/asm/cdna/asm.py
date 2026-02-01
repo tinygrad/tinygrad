@@ -1,4 +1,5 @@
 from extra.assembly.amd.autogen.cdna.ins import *
+from extra.amdgpu_elf import pack_hsaco
 from tinygrad.dtype import dtypes
 
 # M0 is encoded with 124 (NULL in RDNA) in CDNA
@@ -35,7 +36,7 @@ class Kernel:
     waitcnt = (vmcnt & 0xF) | ((expcnt & 0x7) << 4) | ((lgkmcnt & 0xF) << 8) | (((vmcnt >> 4) & 0x3) << 14)
     self.emit(s_waitcnt(waitcnt))
 
-  def to_asm(self):
+  def to_binary(self):
     # patch branches
     for inst in self.instructions:
       if inst._target is None: continue
@@ -50,17 +51,7 @@ class Kernel:
            ('accum_offset', 256), ('uses_dynamic_stack', 0), ('tg_split', 0), ('float_round_mode_32', 0),
            ('float_round_mode_16_64', 0), ('float_denorm_mode_32', 3), ('float_denorm_mode_16_64', 3),
            ('ieee_mode', 1), ('fp16_overflow', 0), ('dx10_clamp', 1)]
-    args = '\n'.join(f'      - .address_space: generic\n        .name: {n}\n        .offset: {i*8}\n'
-                     f'        .size: 8\n        .value_kind: global_buffer' for i,n in enumerate(['C', 'A', 'B']))
-    n = self.name
-    return '\n'.join(['.text', '.section\t.text.', f'.global\t{n}', '.p2align\t8', f'.type\t{n},@function', '', f'{n}:',
-      body, '', '.section .rodata,"a",@progbits', '.p2align 6, 0x0', f'.amdhsa_kernel {n}',
-      *[f'  .amdhsa_{k} {v}' for k, v in hsa], '.end_amdhsa_kernel', '', '.amdgpu_metadata', '---', 'amdhsa.kernels:',
-      '  - .args:', args, '    .group_segment_fixed_size: 133120', '    .kernarg_segment_align: 8',
-      '    .kernarg_segment_size: 24', '    .max_flat_workgroup_size: 256', f'    .name: {n}',
-      '    .private_segment_fixed_size: 0', '    .sgpr_count: 95', '    .sgpr_spill_count: 0', f'    .symbol: {n}.kd',
-      '    .vgpr_count: 249', '    .vgpr_spill_count: 0', '    .wavefront_size: 64', 'amdhsa.version:', '  - 1',
-      '  - 1', '...', '.end_amdgpu_metadata', ''])
+    return pack_hsaco(inst_bytes, dict(hsa))
 
   # outputs readable source code for this kernel
   def to_text(self) -> str:
