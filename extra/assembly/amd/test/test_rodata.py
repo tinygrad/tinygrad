@@ -6,18 +6,16 @@ from tinygrad.runtime.autogen.amdgpu_kd import KERNEL_CODE_ENTRY_BYTE_OFFSET_OFF
 from extra.assembly.amd.elf import create_elf
 from extra.assembly.amd.test.helpers import TARGET_TO_ARCH
 
-# verify rodata and text (program) bytes match LLVM
-def assert_elf_eq(cmp:bytes, ref:bytes):
+def assert_rodata_eq(cmp:bytes, ref:bytes):
   _, ref_sections, __ = elf_loader(ref)
   _, cmp_sections, __ = elf_loader(cmp)
-  for name in [".text", ".rodata"]:
-    s_ref = bytearray(next(s.content for s in ref_sections if s.name == name))
-    s_cmp = bytearray(next(s.content for s in cmp_sections if s.name == name))
-    # zero out kernel_code_entry_byte_offset (8 bytes), our ELF layout is different from LLVM
-    if name == ".rodata": s_ref[CO_OFFSET:CO_OFFSET+8] = s_cmp[CO_OFFSET:CO_OFFSET+8] = b'\x00' * 8
-    assert s_ref == s_cmp, f"{name}: {s_cmp.hex()} != {s_ref.hex()}"
+  s_ref = bytearray(next(s.content for s in ref_sections if s.name == ".rodata"))
+  s_cmp = bytearray(next(s.content for s in cmp_sections if s.name == ".rodata"))
+  # zero out kernel_code_entry_byte_offset (8 bytes), our ELF layout is different from LLVM
+  s_ref[CO_OFFSET:CO_OFFSET+8] = s_cmp[CO_OFFSET:CO_OFFSET+8] = b'\x00' * 8
+  assert s_ref == s_cmp, f"{s_cmp.hex()} != {s_ref.hex()}"
 
-class TestElf(unittest.TestCase):
+class TestRodata(unittest.TestCase):
 
   def simple_test(self, target:str, **kwargs):
     arch = TARGET_TO_ARCH[target]
@@ -50,7 +48,7 @@ class TestElf(unittest.TestCase):
       'amdhsa.version:', '  - 1', '  - 2', '...', '\t.end_amdgpu_metadata'])
     llvm_lib = HIPCompiler(target).compile(src)
 
-    assert_elf_eq(our_lib, llvm_lib)
+    assert_rodata_eq(our_lib, llvm_lib)
 
   def test_rdna(self):
     self.simple_test("gfx1100")

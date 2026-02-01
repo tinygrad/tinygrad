@@ -3,6 +3,10 @@ import ctypes
 from tinygrad.helpers import ceildiv, round_up
 from tinygrad.runtime.autogen import amdgpu_kd, hsa, libc
 
+# instructions used for padding
+from extra.assembly.amd.autogen.rdna3.ins import s_code_end # same encoding as RDNA4
+from extra.assembly.amd.autogen.cdna.ins import s_nop as s_nop_cdna
+
 def put(dst:bytearray, off:int, data:bytes) -> None:
   end = off + len(data)
   if end > len(dst): raise ValueError("write past end of buffer")
@@ -10,8 +14,10 @@ def put(dst:bytearray, off:int, data:bytes) -> None:
 
 def create_elf(prg:bytes, kd:dict, arch:str) -> bytes:
   is_cdna, is_rdna4 = arch == "cdna", arch == "rdna4"
+  padding_inst = (s_nop_cdna(0) if is_cdna else s_code_end()).to_bytes()
+  text = prg + padding_inst * ((hsa.AMD_ISA_ALIGN_BYTES - len(prg) % hsa.AMD_ISA_ALIGN_BYTES) % hsa.AMD_ISA_ALIGN_BYTES)
   text_offset = round_up(ctypes.sizeof(libc.Elf64_Ehdr), hsa.AMD_ISA_ALIGN_BYTES)
-  rodata_offset = text_offset + len(prg)
+  rodata_offset = text_offset + len(text)
 
   # ** pack rodata object
   desc = amdgpu_kd.llvm_amdhsa_kernel_descriptor_t()
@@ -67,7 +73,7 @@ def create_elf(prg:bytes, kd:dict, arch:str) -> bytes:
     sh_names.append(len(strtab))
     strtab += name.encode("ascii") + b"\x00"
 
-  rodata_offset = round_up(text_offset+(text_size:=len(prg)), hsa.AMD_KERNEL_CODE_ALIGN_BYTES)
+  rodata_offset = round_up(text_offset+(text_size:=len(text)), hsa.AMD_KERNEL_CODE_ALIGN_BYTES)
   strtab_offset = rodata_offset+(rodata_size:=len(rodata))
   shdr_offset   = strtab_offset+(strtab_size:=len(strtab))
 
@@ -82,7 +88,7 @@ def create_elf(prg:bytes, kd:dict, arch:str) -> bytes:
 
   elf = bytearray(shdr_offset + ctypes.sizeof(shdrs))
   put(elf, 0, bytes(ehdr))
-  put(elf, text_offset, prg)
+  put(elf, text_offset, text)
   put(elf, rodata_offset, rodata)
   put(elf, strtab_offset, strtab)
   put(elf, shdr_offset, bytes(shdrs))
