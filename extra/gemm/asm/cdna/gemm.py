@@ -1,7 +1,6 @@
 import atexit, functools
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.uop.ops import UOp, Ops, KernelInfo, AxisType
-from tinygrad.runtime.support.compiler_amd import HIPCompiler
 from tinygrad.renderer import Estimates
 from tinygrad.helpers import getenv, all_same, dedup
 from extra.gemm.asm.cdna.asm import build_kernel, GEMM_ARGS

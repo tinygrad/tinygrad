@@ -192,7 +192,7 @@ class Kernel:
     lines, pos = [], 0
     labels_at = {v:k for k, v in self.labels.items()}
     for inst in self.instructions:
-      if (label:=labels_at.get(pos)): lines.append(f"{label}:")
+      if (label := self.label_at_pos.get(pos)) is not None: lines.append(f"{label}:")
       lines.append(f"  {inst.disasm()}" if inst._target is None else f" {inst.op_name.lower()} {inst._target}")
       pos += inst.size()
     return "\n".join(lines)
