@@ -712,6 +712,10 @@ class TestSchedule(unittest.TestCase):
     t = Tensor([1.0, 2.0, 3.0]) ** 8
     self.assertEqual(self._alu_from_tensor(t), [Ops.MUL, Ops.MUL, Ops.MUL])
 
+  def test_abs_squared_is_x_squared(self):
+    t = Tensor([1.0, 2.0, 3.0]).abs() ** 2
+    self.assertEqual(self._alu_from_tensor(t), [Ops.MUL])
+
   def test_pow_const_tensor_to_zero(self):
     x = Tensor([1,2,3,4])
     out = x ** Tensor(0.0)

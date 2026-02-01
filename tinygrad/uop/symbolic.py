@@ -100,6 +100,8 @@ symbolic_simple = propagate_invalid + PatternMatcher([
   # b.cast(a).cast(b) -> b if a preserves all values in b
   (UPat.var('x').cast(name="a").cast(name="b"), lambda x,a,b: x if x.dtype == b.dtype and can_lossless_cast(b.dtype, a.dtype) else None),
   # ** pow **
+  (((u := UPat.var("u")) * (u != 0).where((u < 0).where(UPat.cvar(arg=-1), UPat.cvar(arg=1)), UPat.cvar(arg=0))).alu(
+    Ops.POW, UPat.cvar("c", vec=False)), lambda u,c: u.pow(c) if int(c.arg) == c.arg and c.arg % 2 == 0 else None), # abs(u)**even = u**even
   (UPat.var("x").alu(Ops.POW, UPat.cvar("c", vec=False)), simplify_pow),
   # positive const ** x
   (UPat.cvar("c", vec=False).alu(Ops.POW, UPat.var("x")), lambda c,x: c if c.arg == 1 else (x*math.log2(c.arg)).exp2() if c.arg > 0 else None),
