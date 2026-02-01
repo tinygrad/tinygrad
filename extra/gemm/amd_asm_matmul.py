@@ -17,8 +17,8 @@ from tinygrad.runtime.support.compiler_amd import HIPCompiler
 from tinygrad.runtime.support.elf import elf_loader
 from tinygrad.runtime.autogen import amdgpu_kd
 from tinygrad.engine.realize import Estimates
-from extra.amdgpu_elf import pack_hsaco
 from extra.assembly.amd.dsl import s, v, VCC_LO, NULL
+from extra.assembly.amd.elf import pack_hsaco
 from extra.assembly.amd.autogen.rdna3.ins import *
 
 # =============================================================================

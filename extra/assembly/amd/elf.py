@@ -1,8 +1,11 @@
 # minimal amdgpu elf packer
 import ctypes
+from tinygrad.helpers import round_up
 from tinygrad.runtime.autogen import amdgpu_kd, hsa, libc
 
-def align_up(x:int, a:int) -> int: return (x + (a - 1)) & ~(a - 1)
+# instructions used for padding
+from extra.assembly.amd.autogen.rdna3.ins import s_code_end # same encoding as RDNA4
+from extra.assembly.amd.autogen.cdna.ins import s_nop as s_nop_cdna
 
 def put(dst:bytearray, off:int, data:bytes) -> None:
   end = off + len(data)
@@ -10,8 +13,10 @@ def put(dst:bytearray, off:int, data:bytes) -> None:
   dst[off:end] = data
 
 def pack_hsaco(prg:bytes, kd:dict) -> bytes:
-  text = prg + b'\x00' * ((hsa.AMD_ISA_ALIGN_BYTES - len(prg) % hsa.AMD_ISA_ALIGN_BYTES) % hsa.AMD_ISA_ALIGN_BYTES)
-  text_offset = align_up(ctypes.sizeof(libc.Elf64_Ehdr), hsa.AMD_ISA_ALIGN_BYTES)
+  is_cdna = 'wavefront_size' not in kd
+  padding_inst = (s_nop_cdna(0) if is_cdna else s_code_end()).to_bytes()
+  text = prg + padding_inst * ((hsa.AMD_ISA_ALIGN_BYTES - len(prg) % hsa.AMD_ISA_ALIGN_BYTES) % hsa.AMD_ISA_ALIGN_BYTES)
+  text_offset = round_up(ctypes.sizeof(libc.Elf64_Ehdr), hsa.AMD_ISA_ALIGN_BYTES)
   rodata_offset = text_offset + len(text)
 
   # ** pack rodata object
@@ -22,7 +27,7 @@ def pack_hsaco(prg:bytes, kd:dict) -> bytes:
   desc.kernel_code_entry_byte_offset = text_offset-rodata_offset
   # rsrc1
   vgpr_granule = max(0, (kd['next_free_vgpr'] + 7) // 8 - 1)
-  sgpr_granule = kd.get('sgpr_granule', 0)  # GFX9: 2*max(0,ceil(sgprs/16)-1), GFX10+: reserved=0
+  sgpr_granule = (2 * max(0, (kd.get("next_free_sgpr", 0) + 15) // 16 - 1)) if is_cdna else 0
   reserved1 = (kd.get('workgroup_processor_mode', 1) << 3) | (kd.get('memory_ordered', 1) << 4)
   desc.compute_pgm_rsrc1 = (vgpr_granule << hsa.AMD_COMPUTE_PGM_RSRC_ONE_GRANULATED_WORKITEM_VGPR_COUNT_SHIFT |
                             sgpr_granule << hsa.AMD_COMPUTE_PGM_RSRC_ONE_GRANULATED_WAVEFRONT_SGPR_COUNT_SHIFT |
@@ -36,7 +41,7 @@ def pack_hsaco(prg:bytes, kd:dict) -> bytes:
                             kd.get('system_sgpr_workgroup_id_x', 1) << hsa.AMD_COMPUTE_PGM_RSRC_TWO_ENABLE_SGPR_WORKGROUP_ID_X_SHIFT |
                             kd.get('system_sgpr_workgroup_id_y', 0) << hsa.AMD_COMPUTE_PGM_RSRC_TWO_ENABLE_SGPR_WORKGROUP_ID_Y_SHIFT |
                             kd.get('system_sgpr_workgroup_id_z', 0) << hsa.AMD_COMPUTE_PGM_RSRC_TWO_ENABLE_SGPR_WORKGROUP_ID_Z_SHIFT)
-  # rsrc3, only gfx90a uses this
+  # rsrc3, only cdna uses this
   amdhsa_accum_offset = kd.get('amdhsa_accum_offset', 0) & amdgpu_kd.COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET
   desc.compute_pgm_rsrc3 = (amdhsa_accum_offset << amdgpu_kd.COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET_SHIFT)
   # code properties, different for every arch
@@ -52,7 +57,7 @@ def pack_hsaco(prg:bytes, kd:dict) -> bytes:
     sh_names.append(len(strtab))
     strtab += name.encode("ascii") + b"\x00"
 
-  rodata_offset = align_up(text_offset+(text_size:=len(text)), hsa.AMD_KERNEL_CODE_ALIGN_BYTES)
+  rodata_offset = round_up(text_offset+(text_size:=len(text)), hsa.AMD_KERNEL_CODE_ALIGN_BYTES)
   strtab_offset = rodata_offset+(rodata_size:=len(rodata))
   shdr_offset   = strtab_offset+(strtab_size:=len(strtab))
 

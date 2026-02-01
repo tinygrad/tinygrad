@@ -448,7 +448,6 @@ def amd_decode(lib:bytes, target:int) -> dict[int, Any]: # Any is the Inst class
     remaining = buf[offset:]
     fmt = detect_format(remaining, arch)
     decoded = fmt.from_bytes(remaining)
-    if getattr(decoded, "op_name", "").lower() == "s_code_end": break
     addr_table[off+offset] = decoded
     offset += decoded.size()
   return addr_table
