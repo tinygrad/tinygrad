@@ -6,7 +6,7 @@ os.environ["AMD_AQL"] = "1"
 from tinygrad.device import Device
 from tinygrad.runtime.support.compiler_amd import HIPCompiler
 from extra.assembly.amd.dsl import Reg, Inst, s, v
-from extra.amdgpu_elf import pack_hsaco
+from extra.assembly.amd.elf import pack_hsaco
 
 NUM_WORKGROUPS = 96
 WAVE_SIZE = 32
@@ -94,7 +94,7 @@ if __name__=="__main__":
   elif arch == 'gfx950':
     from extra.assembly.amd.autogen.cdna.ins import *
     DIRECTIVE = ".amdhsa_accum_offset 4"
-    KD_OPTS = {'sgpr_granule': 1, 'wavefront_size32': 0}  # CDNA: wave64, no WGP/MEM_ORDERED
+    KD_OPTS = {'next_free_sgpr': 8, 'wavefront_size32': 0}  # CDNA: wave64, no WGP/MEM_ORDERED
     NUM_WORKGROUPS = 256
     WAVE_SIZE = 64
     NUM_WAVES = 4

@@ -1,6 +1,6 @@
 # minimal amdgpu elf packer
 import ctypes
-from tinygrad.helpers import round_up
+from tinygrad.helpers import ceildiv, round_up
 from tinygrad.runtime.autogen import amdgpu_kd, hsa, libc
 
 # instructions used for padding
@@ -27,8 +27,9 @@ def pack_hsaco(prg:bytes, kd:dict) -> bytes:
   desc.kernel_code_entry_byte_offset = text_offset-rodata_offset
   # rsrc1
   vgpr_granule = max(0, (kd['next_free_vgpr'] + 7) // 8 - 1)
-  sgpr_granule = (2 * max(0, (kd.get("next_free_sgpr", 0) + 15) // 16 - 1)) if is_cdna else 0
-  reserved1 = (kd.get('workgroup_processor_mode', 1) << 3) | (kd.get('memory_ordered', 1) << 4)
+  # CDNA: add 6 for VCC(2) + FLAT_SCRATCH(2) + XNACK_MASK(2)
+  sgpr_granule = (2 * max(0, ceildiv(kd['next_free_sgpr'] + 6, 16) - 1)) if is_cdna else 0
+  reserved1 = 0 if is_cdna else (kd.get('workgroup_processor_mode', 1) << 3) | (kd.get('memory_ordered', 1) << 4)
   desc.compute_pgm_rsrc1 = (vgpr_granule << hsa.AMD_COMPUTE_PGM_RSRC_ONE_GRANULATED_WORKITEM_VGPR_COUNT_SHIFT |
                             sgpr_granule << hsa.AMD_COMPUTE_PGM_RSRC_ONE_GRANULATED_WAVEFRONT_SGPR_COUNT_SHIFT |
                             3 << hsa.AMD_COMPUTE_PGM_RSRC_ONE_FLOAT_DENORM_MODE_32_SHIFT |
@@ -42,12 +43,13 @@ def pack_hsaco(prg:bytes, kd:dict) -> bytes:
                             kd.get('system_sgpr_workgroup_id_y', 0) << hsa.AMD_COMPUTE_PGM_RSRC_TWO_ENABLE_SGPR_WORKGROUP_ID_Y_SHIFT |
                             kd.get('system_sgpr_workgroup_id_z', 0) << hsa.AMD_COMPUTE_PGM_RSRC_TWO_ENABLE_SGPR_WORKGROUP_ID_Z_SHIFT)
   # rsrc3, only cdna uses this
-  amdhsa_accum_offset = kd.get('amdhsa_accum_offset', 0) & amdgpu_kd.COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET
+  accum_offset = kd.get('accum_offset', 0)
+  amdhsa_accum_offset = ((accum_offset // 4) - 1) & amdgpu_kd.COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET if accum_offset else 0
   desc.compute_pgm_rsrc3 = (amdhsa_accum_offset << amdgpu_kd.COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET_SHIFT)
   # code properties, different for every arch
   desc.kernel_code_properties = (kd.get('user_sgpr_kernarg_segment_ptr', 0) << hsa.AMD_KERNEL_CODE_PROPERTIES_ENABLE_SGPR_KERNARG_SEGMENT_PTR_SHIFT |
                                  kd.get('uses_dynamic_stack', 0) << hsa.AMD_KERNEL_CODE_PROPERTIES_IS_DYNAMIC_CALLSTACK_SHIFT |
-                                 kd.get('wavefront_size32', 1) << hsa.AMD_KERNEL_CODE_PROPERTIES_ENABLE_WAVEFRONT_SIZE32_SHIFT)
+                                 kd.get('wavefront_size32', 0 if is_cdna else 1) << hsa.AMD_KERNEL_CODE_PROPERTIES_ENABLE_WAVEFRONT_SIZE32_SHIFT)
   rodata = bytes(desc)
 
   # ** pack elf sections

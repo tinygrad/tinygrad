@@ -31,8 +31,9 @@ def run_asm(name:str, k:Kernel) -> None:
 class TestCfg(unittest.TestCase):
   def setUp(self):
     arch = Device["AMD"].arch
-    if not any(arch.startswith(a) for a in {"gfx11", "gfx12"}):
-      self.skipTest(f"tests written for RDNA, got arch {arch}")
+    # note: it can also work on rdna4 with a linker, only the encodings are different from rdna3
+    if not arch.startswith("gfx11"):
+      self.skipTest(f"tests written for RDNA3, got arch {arch}")
 
   def test_simple(self):
     k = Kernel()

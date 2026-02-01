@@ -1,5 +1,5 @@
 from extra.assembly.amd.autogen.cdna.ins import *
-from extra.amdgpu_elf import pack_hsaco
+from extra.assembly.amd.elf import pack_hsaco
 from tinygrad.dtype import dtypes
 
 # M0 is encoded with 124 (NULL in RDNA) in CDNA
@@ -57,7 +57,7 @@ class Kernel:
   def to_text(self) -> str:
     lines, pos = [], 0
     for inst in self.instructions:
-      if (label := self.label_at_pos.get(pos)) is not None: lines.append(f"{label}:")
+      if (label:=self.label_at_pos.get(pos)) is not None: lines.append(f"{label}:")
       lines.append(f"  {inst.disasm()}" if inst._target is None else f" {inst.op_name.lower()} {inst._target}")
       pos += inst.size()
     return "\n".join(lines)
