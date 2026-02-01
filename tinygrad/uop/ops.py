@@ -1445,7 +1445,13 @@ def pyrender(ast:UOp) -> str:
   kernels: dict[UOp, tuple[str, str]] = {}
   r: dict[UOp, str] = {}
   ret: dict[str, str] = {}
+  depth: dict[UOp, int] = {}
   for i,u in enumerate(lst):
+    # limit inline depth to avoid "too many nested parentheses" in Python parser
+    op_depth = 1 + max([depth[s] for s in u.src], default=0)
+    if op_depth > 100: to_render.add(u)
+    depth[u] = 0 if u in to_render else op_depth
+    # do the rendering
     if u.op is Ops.KERNEL:
       if u.arg.ast not in kernels:
         kernels[u.arg.ast] = (f"k{len(kernels)}", f"def k{len(kernels)}():\n  " + pyrender(u.arg.ast).replace('\n', '\n  ') + "\n  return ast\n\n")
