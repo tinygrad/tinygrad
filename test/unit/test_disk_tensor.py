@@ -359,6 +359,15 @@ class TestDiskTensor(unittest.TestCase):
     with self.assertRaises(RuntimeError):
       t[0:4].bitcast(dtypes.int32).assign(Tensor([12345], dtype=dtypes.int64))
 
+  def test_assign_to_bitcast_view(self):
+    # assign float values to a float32 view of a uint8 disk buffer (used by safe_save)
+    pathlib.Path(temp(fn:="dt_bitcast_view_assign")).unlink(missing_ok=True)
+    t = Tensor.empty(32, device=f"disk:{temp(fn)}", dtype=dtypes.uint8)
+    # create float32 view of bytes 8-24 (4 floats)
+    float_view = t[8:24].bitcast(dtypes.float32)
+    float_view.assign(Tensor([1.0, 2.0, 3.0, 4.0], dtype=dtypes.float32, device="CPU"))
+    np.testing.assert_array_equal(float_view.numpy(), [1.0, 2.0, 3.0, 4.0])
+
   def test_assign_cross_device(self):
     # disk assign allows cross-device (source on GPU/CPU, target on disk)
     pathlib.Path(temp(fn:="dt_assign_cross")).unlink(missing_ok=True)
