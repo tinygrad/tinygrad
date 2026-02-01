@@ -37,7 +37,7 @@ def launchBenchmark(instruction, vgprIndices, dense=True, accum=False, **kwargs)
     if isinstance(val:=getattr(inst, n), Reg) and val.offset >= v.offset: vgprs |= {val.offset+i for i in range(val.sz)}
   inst_bytes = repeat([inst for _ in range(INSTRUCTIONS_PER_LOOP)], n=INTERNAL_LOOP, counter_sreg=s[1])
   # new elf packer
-  lib = pack_hsaco(inst_bytes, {"next_free_vgpr":len(vgprs), **KD_OPTS})
+  lib = pack_hsaco(inst_bytes, {"next_free_vgpr":len(vgprs), **KD_OPTS}, arch)
   fxn = DEV.runtime("matmul", lib)
   elapsed = min([fxn(global_size=(NUM_WORKGROUPS,1,1), local_size=(WAVE_SIZE*NUM_WAVES,1,1), wait=True) for _ in range(2)])
   FLOPs = FLOPS_PER_MATMUL * NUM_WAVES * NUM_WORKGROUPS * INTERNAL_LOOP * INSTRUCTIONS_PER_LOOP

@@ -51,7 +51,7 @@ class Kernel:
            ('accum_offset', 256), ('uses_dynamic_stack', 0), ('tg_split', 0), ('float_round_mode_32', 0),
            ('float_round_mode_16_64', 0), ('float_denorm_mode_32', 3), ('float_denorm_mode_16_64', 3),
            ('ieee_mode', 1), ('fp16_overflow', 0), ('dx10_clamp', 1)]
-    return pack_hsaco(inst_bytes, dict(hsa))
+    return pack_hsaco(inst_bytes, dict(hsa), arch="gfx950")
 
   # outputs readable source code for this kernel
   def to_text(self) -> str:

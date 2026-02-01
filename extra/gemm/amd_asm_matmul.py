@@ -192,7 +192,7 @@ class Kernel:
     lines, pos = [], 0
     labels_at = {v:k for k, v in self.labels.items()}
     for inst in self.instructions:
-      if (label := self.label_at_pos.get(pos)) is not None: lines.append(f"{label}:")
+      if (label:=labels_at.get(pos)): lines.append(f"{label}:")
       lines.append(f"  {inst.disasm()}" if inst._target is None else f" {inst.op_name.lower()} {inst._target}")
       pos += inst.size()
     return "\n".join(lines)
@@ -223,7 +223,7 @@ class Kernel:
       ('fp16_overflow', 0), ('workgroup_processor_mode', 0), ('memory_ordered', 1), ('forward_progress', 0),
       ('shared_vgpr_count', 0)]
 
-    return pack_hsaco(prg, dict(hsa))
+    return pack_hsaco(prg, dict(hsa), arch=self.arch)
 
 
 # =============================================================================
