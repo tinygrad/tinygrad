@@ -289,8 +289,8 @@ class Tensor(OpMixin):
     is_disk = isinstance(self.device, str) and self.device.startswith("DISK")
     if not isinstance(x, Tensor): x = Tensor(x, device="CPU" if is_disk else self.device, dtype=self.dtype)
     if self.uop is x.uop: return self  # a self assign is a NOOP
-    # broadcast x
-    if least_upper_dtype(self.dtype, x.dtype) == self.dtype: x = x._broadcast_to(self.shape).cast(self.dtype)
+    # broadcast x (shape only, dtype must match)
+    if self.shape != x.shape: x = x._broadcast_to(self.shape)
     if self.shape != x.shape: raise RuntimeError(f"assign shape mismatch {self.shape} != {x.shape}")
     if not is_disk and self.device != x.device: raise RuntimeError(f"assign device mismatch {self.device} != {x.device}")
     if self.dtype != x.dtype: raise RuntimeError(f"assign dtype mismatch {self.dtype} != {x.dtype}")
