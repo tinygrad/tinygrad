@@ -33,7 +33,7 @@ class TestElf(unittest.TestCase):
     prg = b"".join(inst.to_bytes() for inst in insts)
     our_lib = pack_hsaco(prg, hsa, arch)
 
-    # llvm requires a yaml style boilerplate section to compile this
+    # LLVM requires a YAML style boilerplate section to create the ELF
     src = '\n'.join([
       '\t.text', f'\t.amdgcn_target "amdgcn-amd-amdhsa--{target}"',
       '\t.protected\tkernel', '\t.globl\tkernel', '\t.p2align\t8', '\t.type\tkernel,@function', 'kernel:',
@@ -67,6 +67,10 @@ class TestElf(unittest.TestCase):
   def test_vgpr_out_of_range(self):
     with self.assertRaises(CompileError):
       self.simple_test("gfx1100", next_free_vgpr=513)
+
+  def test_accum_offset_min(self):
+    with self.assertRaises(CompileError):
+      self.simple_test("gfx950", accum_offset=0)
 
 if __name__ == "__main__":
   unittest.main()
