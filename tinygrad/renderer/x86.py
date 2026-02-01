@@ -288,7 +288,8 @@ isel_matcher = PatternMatcher([
   (UPat(Ops.SINK, name="x"), lambda x: x.replace(op=X86Ops.RET, src=x.src + tuple(def_reg(dtypes.uint64, r) for r in [RSP, RBP]))),
   # TODO: RANGE and END is tricky. Both linearizer and regalloc need them so they stay as Ops. This gets into a broader issue with tinygrad
   # not being able to represent control flow properly. For now they are rewritten after regalloc
-  (UPat(Ops.RANGE, name="x"), lambda ctx,x: x.replace(src=(imm(x.src[0].dtype, x.src[0].arg),) + x.src[1:], arg=ctx.vreg(WGPR)) if not isinstance(x.arg, Register) else None), # noqa: E501
+  (UPat(Ops.RANGE, src=(UPat.cvar("c"),), allow_any_len=True, name="x"), lambda c,x: x.replace(src=(imm(c.dtype, c.arg),) + x.src[1:])),
+  (UPat(Ops.RANGE, name="x"), lambda ctx,x: x.replace(arg=ctx.vreg(WGPR)) if not isinstance(x.arg, Register) else None),
   # function abi constraints
   (UPat((Ops.DEFINE_GLOBAL, Ops.DEFINE_VAR, Ops.SPECIAL), name="x"), abi),
   # these are treated the same for now
