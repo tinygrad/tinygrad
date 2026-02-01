@@ -183,19 +183,27 @@ class AM_SMU(AM_IP):
     self.driver_table_paddr = self.adev.mm.palloc(0x4000, zero=False, boot=True)
 
   def init_hw(self):
-    self._send_msg(self.smu_mod.PPSMC_MSG_SetDriverDramAddrHigh, hi32(self.adev.paddr2mc(self.driver_table_paddr)))
-    self._send_msg(self.smu_mod.PPSMC_MSG_SetDriverDramAddrLow, lo32(self.adev.paddr2mc(self.driver_table_paddr)))
-    self._send_msg(self.smu_mod.PPSMC_MSG_EnableAllSmuFeatures, 0)
+    self._send_msg(0x1, 0)
+    print(f"am {self.adev.devfmt}: SMU is alive: {self.is_smu_alive()}")
+
+    # self._send_msg(self.smu_mod.PPSMC_MSG_SetDriverDramAddrHigh, hi32(self.adev.paddr2mc(self.driver_table_paddr)))
+    # self._send_msg(self.smu_mod.PPSMC_MSG_SetDriverDramAddrLow, lo32(self.adev.paddr2mc(self.driver_table_paddr)))
+    # self._send_msg(self.smu_mod.PPSMC_MSG_EnableAllSmuFeatures, 0)
+    self._send_msg(self.smu_mod.PPSMC_MSG_EnableGfxImu, 0)
 
   def is_smu_alive(self):
     with contextlib.suppress(TimeoutError): self._send_msg(0x2, 0, timeout=100)
     return self.adev.mmMP1_SMN_C2PMSG_90.read() != 0
 
   def mode1_reset(self):
+    pass
     if DEBUG >= 2: print(f"am {self.adev.devfmt}: mode1 reset")
-    if self.adev.ip_ver[am.MP0_HWIP] >= (14,0,0): self._send_msg(__DEBUGSMC_MSG_Mode1Reset:=2, 0, debug=True)
+    if self.adev.ip_ver[am.MP0_HWIP] >= (14,0,2): self._send_msg(__DEBUGSMC_MSG_Mode1Reset:=2, 0, debug=True)
     elif self.adev.ip_ver[am.MP0_HWIP] in {(13,0,6), (13,0,12)}: self._send_msg(self.smu_mod.PPSMC_MSG_GfxDriverReset, 1)
     else: self._send_msg(self.smu_mod.PPSMC_MSG_Mode1Reset, 0)
+
+    # self._send_msg(self.smu_mod.PPSMC_MSG_Mode1Reset, 0)
+    # PPSMC_MSG_GfxDeviceDriverReset
 
     if not self.adev.is_hive(): time.sleep(0.5) # 500ms
 
@@ -521,10 +529,18 @@ class AM_PSP(AM_IP):
     self.ring_size = 0x10000
     self.ring_paddr = self.adev.mm.palloc(self.ring_size, zero=False, boot=True)
 
-    self.max_tmr_size, self.tmr_size = 0x1300000, 0
     self.boot_time_tmr = self.adev.ip_ver[am.MP0_HWIP] in {(13,0,6), (13,0,14), (14,0,2), (14,0,3)}
     self.autoload_tmr = self.adev.ip_ver[am.MP0_HWIP] not in {(13,0,6), (13,0,14)}
-    self.tmr_paddr = self.adev.mm.palloc(self.max_tmr_size, align=am.PSP_TMR_ALIGNMENT, zero=False, boot=True) if not self.boot_time_tmr else 0
+    if self.adev.is_apu():
+      self.max_tmr_size, self.tmr_size = 0x8c00000, 0
+      self.tmr_addr = self.adev.mm.alloc_vaddr(size=self.max_tmr_size, align=am.PSP_TMR_ALIGNMENT)
+      tmr_paddrs = self.adev.pci_dev.alloc_sysmem(self.max_tmr_size)[1]
+      self.adev.mm.map_range(self.tmr_addr, self.max_tmr_size, [(x, 0x1000) for x in tmr_paddrs], AddrSpace.SYS, uncached=True, boot=True)
+      self.tmr_paddr = tmr_paddrs[0]
+    else:
+      self.max_tmr_size, self.tmr_size = 0x1300000, 0
+      self.tmr_paddr = self.adev.mm.palloc(self.max_tmr_size, align=am.PSP_TMR_ALIGNMENT, zero=False, boot=True) if not self.boot_time_tmr else 0
+      self.tmr_addr = self.adev.paddr2mc(self.tmr_paddr) if not self.boot_time_tmr else 0
 
   def init_hw(self):
     spl_key = am.PSP_FW_TYPE_PSP_SPL if self.adev.ip_ver[am.MP0_HWIP] >= (14,0,0) else am.PSP_FW_TYPE_PSP_KDB
@@ -632,10 +648,10 @@ class AM_PSP(AM_IP):
     tmr_paddr = self.adev.paddr2xgmi(self.tmr_paddr) if self.tmr_paddr else 0
 
     cmd = am.struct_psp_gfx_cmd_resp(cmd_id=am.GFX_CMD_ID_SETUP_TMR)
-    cmd.cmd.cmd_setup_tmr.buf_phy_addr_hi, cmd.cmd.cmd_setup_tmr.buf_phy_addr_lo = data64(self.adev.paddr2mc(self.tmr_paddr) if self.tmr_paddr else 0)
+    cmd.cmd.cmd_setup_tmr.buf_phy_addr_hi, cmd.cmd.cmd_setup_tmr.buf_phy_addr_lo = data64(self.tmr_addr)
     cmd.cmd.cmd_setup_tmr.system_phy_addr_hi, cmd.cmd.cmd_setup_tmr.system_phy_addr_lo = data64(tmr_paddr)
     cmd.cmd.cmd_setup_tmr.bitfield.virt_phy_addr = 1
-    cmd.cmd.cmd_setup_tmr.buf_size = self.tmr_size if self.tmr_paddr else 0
+    cmd.cmd.cmd_setup_tmr.buf_size = self.tmr_size if self.tmr_addr else 0
     return self._ring_submit(cmd)
 
   def _load_toc_cmd(self, toc_size:int) -> am.struct_psp_gfx_cmd_resp:

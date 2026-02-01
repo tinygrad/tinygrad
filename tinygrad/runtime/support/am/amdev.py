@@ -76,7 +76,7 @@ class AMFirmware:
         # Code
         self.descs += [self.desc(blob, ucode_off, hdr.header.ucode_size_bytes - hdr.jt_size * 4, getattr(am, f'GFX_FW_TYPE_CP_{fw_name}'))]
         # JT
-        self.descs += [self.desc(blob, ucode_off + hdr.jt_offset * 4, hdr.jt_size * 4, getattr(am, f'GFX_FW_TYPE_CP_{fw_name}_ME1'))]
+        # self.descs += [self.desc(blob, ucode_off + hdr.jt_offset * 4, hdr.jt_size * 4, getattr(am, f'GFX_FW_TYPE_CP_{fw_name}_ME1'))]
       else:
         # Code
         self.descs += [self.desc(blob, ucode_off, hdr.ucode_size_bytes, getattr(am, f'GFX_FW_TYPE_RS64_{fw_name}'))]
@@ -96,7 +96,7 @@ class AMFirmware:
       am.struct_rlc_firmware_header_v2_1, am.struct_rlc_firmware_header_v2_2, am.struct_rlc_firmware_header_v2_3)
 
     if hdr0.header.header_version_minor == 1:
-      for mem,fmem in [('LIST_SRM_CNTL', 'list_cntl'), ('LIST_GPM_MEM', 'list_gpm'), ('LIST_SRM_MEM', 'list_srm')]:
+      for mem,fmem in [('LIST_GPM_MEM', 'list_gpm'), ('LIST_SRM_MEM', 'list_srm')]:
         off, sz = getattr(hdr1, f'save_restore_{fmem}_offset_bytes'), getattr(hdr1, f'save_restore_{fmem}_size_bytes')
         self.descs += [self.desc(blob, off, sz, getattr(am, f'GFX_FW_TYPE_RLC_RESTORE_{mem}'))]
 
@@ -106,7 +106,7 @@ class AMFirmware:
         self.descs += [self.desc(blob, off, sz, getattr(am, f'GFX_FW_TYPE_RLC_{mem}'))]
 
     if hdr0.header.header_version_minor == 3:
-      for mem in ['P', 'V']:
+      for mem in ['P']:
         off, sz = getattr(hdr3, f'rlc{mem.lower()}_ucode_offset_bytes'), getattr(hdr3, f'rlc{mem.lower()}_ucode_size_bytes')
         self.descs += [self.desc(blob, off, sz, getattr(am, f'GFX_FW_TYPE_RLC_{mem}'))]
 
@@ -146,7 +146,7 @@ class AMMemoryManager(MemoryManager):
   def on_range_mapped(self):
     # Invalidate TLB after mappings.
     self.dev.gmc.flush_tlb(ip='GC', vmid=0)
-    self.dev.gmc.flush_tlb(ip='MM', vmid=0)
+    # self.dev.gmc.flush_tlb(ip='MM', vmid=0)
 
 class AMDev(PCIDevImplBase):
   Version = 0xA0000008
@@ -231,6 +231,7 @@ class AMDev(PCIDevImplBase):
     self.reg("regSCRATCH_REG6").write(self.is_err_state) # set finalized state.
 
   def is_hive(self) -> bool: return self.gmc.xgmi_seg_sz > 0
+  def is_apu(self) -> bool: return True
 
   def paddr2mc(self, paddr:int) -> int: return self.gmc.mc_base + paddr
   def paddr2xgmi(self, paddr:int) -> int: return self.gmc.paddr_base + paddr
