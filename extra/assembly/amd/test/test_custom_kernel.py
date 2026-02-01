@@ -3,18 +3,17 @@ import functools
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.uop.ops import UOp, Ops, KernelInfo
 from tinygrad.renderer import Estimates
-from tinygrad.runtime.support.compiler_amd import HIPCompiler
 
 from extra.assembly.amd.autogen.rdna3.ins import *
 from extra.assembly.amd.dsl import s, v, Inst
+from extra.assembly.amd.elf import create_elf
 
 def assemble_insts(insts:list[Inst], name:str, arch:str, kernarg_size:int=8) -> tuple[UOp, UOp]:
-  kd = {"kernarg_size":kernarg_size, "user_sgpr_kernarg_segment_ptr":1, "next_free_vgpr":8, "next_free_sgpr":8, "wavefront_size32":1}
+  kd = {"kernarg_size":kernarg_size, "user_sgpr_kernarg_segment_ptr":1, "user_sgpr_count":2, "next_free_vgpr":8, "next_free_sgpr":8,
+        "wavefront_size32":1}
   disasm = "\n".join([inst.disasm() for inst in insts])
-  hsasrc = f".text\n.globl {name}\n.p2align 8\n.type fn_name,@function\n{name}:\n{disasm}\ns_code_end\n"
-  hsasrc += f".rodata\n.p2align 6\n.amdhsa_kernel {name}\n"+"\n".join([f".amdhsa_{k} {v}" for k,v in kd.items()])+"\n.end_amdhsa_kernel"
-  binary = HIPCompiler(arch).compile(hsasrc)
-  return UOp(Ops.SOURCE, arg=disasm), UOp(Ops.BINARY, arg=binary)
+  binary = create_elf(b"".join(inst.to_bytes() for inst in insts+[s_code_end()]), kd, arch="rdna3")
+  return UOp(Ops.SOURCE, arg=disasm), UOp(Ops.BINARY, arg=binary2 if getenv("B2") else binary)
 
 def custom_add_one(A:UOp, arch:str) -> UOp:
   A = A.flatten()
