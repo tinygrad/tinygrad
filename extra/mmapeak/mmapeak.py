@@ -4,9 +4,8 @@ import os
 os.environ["AMD_AQL"] = "1"
 
 from tinygrad.device import Device
-from tinygrad.runtime.support.compiler_amd import HIPCompiler
 from extra.assembly.amd.dsl import Reg, Inst, s, v
-from extra.assembly.amd.elf import pack_hsaco
+from extra.assembly.amd.elf import create_elf
 
 NUM_WORKGROUPS = 96
 WAVE_SIZE = 32
@@ -36,7 +35,7 @@ def launchBenchmark(instruction, vgprIndices, dense=True, accum=False, **kwargs)
     if isinstance(val:=getattr(inst, n), Reg) and val.offset >= v.offset: vgprs |= {val.offset+i for i in range(val.sz)}
   inst_bytes = repeat([inst for _ in range(INSTRUCTIONS_PER_LOOP)], n=INTERNAL_LOOP, counter_sreg=s[1])
   # new elf packer
-  lib = pack_hsaco(inst_bytes, {"next_free_vgpr":len(vgprs), **KD_OPTS}, arch)
+  lib = create_elf(inst_bytes, {"next_free_vgpr":len(vgprs), **KD_OPTS}, arch)
   fxn = DEV.runtime("matmul", lib)
   elapsed = min([fxn(global_size=(NUM_WORKGROUPS,1,1), local_size=(WAVE_SIZE*NUM_WAVES,1,1), wait=True) for _ in range(2)])
   FLOPs = FLOPS_PER_MATMUL * NUM_WAVES * NUM_WORKGROUPS * INTERNAL_LOOP * INSTRUCTIONS_PER_LOOP
@@ -45,9 +44,7 @@ def launchBenchmark(instruction, vgprIndices, dense=True, accum=False, **kwargs)
 if __name__=="__main__":
   DEV = Device[Device.DEFAULT]
   arch = DEV.renderer.arch
-  print("mmapeak on arch", arch)
 
-  COMPILER = HIPCompiler(arch)
   if arch in {'gfx1100', 'gfx1103', 'gfx1151'}:
     from extra.assembly.amd.autogen.rdna3.ins import *
     if arch == 'gfx1103': NUM_WORKGROUPS = 8
@@ -89,7 +86,7 @@ if __name__=="__main__":
     launchBenchmark(v_swmmac_i32_16x16x64_iu4, (7,8,9,10,13,14), False)
   elif arch == 'gfx950':
     from extra.assembly.amd.autogen.cdna.ins import *
-    KD_OPTS = {"next_free_sgpr":8, "accum_offset":4}
+    KD_OPTS = {"accum_offset":4, "next_free_sgpr":3}
     NUM_WORKGROUPS = 256
     WAVE_SIZE = 64
     NUM_WAVES = 4

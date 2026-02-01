@@ -13,12 +13,9 @@ from pathlib import Path
 from tinygrad import Tensor, Device, Context, GlobalCounters
 from tinygrad.uop.ops import UOp, Ops, KernelInfo
 from tinygrad.helpers import getenv, colored
-from tinygrad.runtime.support.compiler_amd import HIPCompiler
-from tinygrad.runtime.support.elf import elf_loader
-from tinygrad.runtime.autogen import amdgpu_kd
 from tinygrad.engine.realize import Estimates
 from extra.assembly.amd.dsl import s, v, VCC_LO, NULL
-from extra.assembly.amd.elf import pack_hsaco
+from extra.assembly.amd.elf import create_elf
 from extra.assembly.amd.autogen.rdna3.ins import *
 
 # =============================================================================
@@ -187,10 +184,9 @@ class Kernel:
     waitcnt = (expcnt & 0x7) | ((lgkmcnt & 0x3f) << 4) | ((vmcnt & 0x3f) << 10)
     self.emit(s_waitcnt(simm16=waitcnt))
 
-  # outputs readable source code for this kernel
-  def to_text(self) -> str:
+  def to_text(self):
     lines, pos = [], 0
-    labels_at = {v:k for k, v in self.labels.items()}
+    labels_at = {v:k for k,v in self.labels.items()}
     for inst in self.instructions:
       if (label:=labels_at.get(pos)): lines.append(f"{label}:")
       lines.append(f"  {inst.disasm()}" if inst._target is None else f" {inst.op_name.lower()} {inst._target}")
@@ -223,7 +219,7 @@ class Kernel:
       ('fp16_overflow', 0), ('workgroup_processor_mode', 0), ('memory_ordered', 1), ('forward_progress', 0),
       ('shared_vgpr_count', 0)]
 
-    return pack_hsaco(prg, dict(hsa), arch=self.arch)
+    return create_elf(prg, dict(hsa), arch=self.arch)
 
 
 # =============================================================================

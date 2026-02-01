@@ -3,16 +3,17 @@ from tinygrad.runtime.support.elf import elf_loader
 from tinygrad.runtime.support.compiler_amd import HIPCompiler
 from tinygrad.device import CompileError
 from tinygrad.runtime.autogen.amdgpu_kd import KERNEL_CODE_ENTRY_BYTE_OFFSET_OFFSET as CO_OFFSET
-from extra.assembly.amd.elf import pack_hsaco
+from extra.assembly.amd.elf import create_elf
 from extra.assembly.amd.test.helpers import TARGET_TO_ARCH
 
+# verify rodata and text (program) bytes match LLVM
 def assert_elf_eq(cmp:bytes, ref:bytes):
   _, ref_sections, __ = elf_loader(ref)
   _, cmp_sections, __ = elf_loader(cmp)
   for name in [".text", ".rodata"]:
     s_ref = bytearray(next(s.content for s in ref_sections if s.name == name))
     s_cmp = bytearray(next(s.content for s in cmp_sections if s.name == name))
-    # zero out kernel_code_entry_byte_offset (8 bytes) since our ELF layout is different
+    # zero out kernel_code_entry_byte_offset (8 bytes), our ELF layout is different from LLVM
     if name == ".rodata": s_ref[CO_OFFSET:CO_OFFSET+8] = s_cmp[CO_OFFSET:CO_OFFSET+8] = b'\x00' * 8
     assert s_ref == s_cmp, f"{name}: {s_cmp.hex()} != {s_ref.hex()}"
 
@@ -31,7 +32,7 @@ class TestElf(unittest.TestCase):
 
     insts = [s_nop(i) for i in range(1, 10)]+[s_endpgm()]
     prg = b"".join(inst.to_bytes() for inst in insts)
-    our_lib = pack_hsaco(prg, hsa, arch)
+    our_lib = create_elf(prg, hsa, arch)
 
     # LLVM requires a YAML style boilerplate section to create the ELF
     src = '\n'.join([

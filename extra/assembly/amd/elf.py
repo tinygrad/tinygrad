@@ -8,7 +8,7 @@ def put(dst:bytearray, off:int, data:bytes) -> None:
   if end > len(dst): raise ValueError("write past end of buffer")
   dst[off:end] = data
 
-def pack_hsaco(prg:bytes, kd:dict, arch:str) -> bytes:
+def create_elf(prg:bytes, kd:dict, arch:str) -> bytes:
   is_cdna, is_rdna4 = arch == "cdna", arch == "rdna4"
   text_offset = round_up(ctypes.sizeof(libc.Elf64_Ehdr), hsa.AMD_ISA_ALIGN_BYTES)
   rodata_offset = text_offset + len(prg)
