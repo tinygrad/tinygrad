@@ -355,9 +355,9 @@ class TestDiskTensor(unittest.TestCase):
     t[0:8].assign(Tensor([12345], dtype=dtypes.int64, device="CPU").bitcast(dtypes.uint8))
     val = int.from_bytes(t[0:8].data(), 'little')
     self.assertEqual(val, 12345)
-    # bitcast on target with mismatched dtype raises
+    # bitcast on target with non-broadcastable dtype raises
     with self.assertRaises(RuntimeError):
-      t[0:8].bitcast(dtypes.int64).assign(Tensor([12345], dtype=dtypes.int32))
+      t[0:4].bitcast(dtypes.int32).assign(Tensor([12345], dtype=dtypes.int64))
 
   def test_assign_cross_device(self):
     # disk assign allows cross-device (source on GPU/CPU, target on disk)
