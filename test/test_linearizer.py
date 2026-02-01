@@ -539,5 +539,17 @@ def _helper_linearizer_opt_ast(realized_ast:UOp, real_bufs:list[Buffer], opts=[]
   for x in opts: # Check custom transformations if any.
     check_opt(([Opt(OptOps.TC, 0, (TC_SELECT.value, TC_OPT.value, 1))] if apply_tc else [])+x)
 
+class TestVectorAccumulator(unittest.TestCase):
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "test requires float4")
+  def test_reduce_vector_accumulator_no_dependency_chain(self):
+    x = Tensor.rand(256, 256).realize()
+    r = x.sum()
+    ast = r.schedule()[-1].ast
+    uops = get_program(ast, renderer=Device[Device.DEFAULT].renderer, opts=[Opt(OptOps.UNROLL, 0, 4)]).uops
+    accs = [u for u in uops if u.op is Ops.DEFINE_REG]
+    assert len(accs) == 1, f"expected 1 vector accumulator, got {len(accs)}"
+    acc_size = accs[0].dtype.size if hasattr(accs[0].dtype, 'size') else 1
+    assert acc_size == 4, f"accumulator should have size 4, got {acc_size}"
+
 if __name__ == '__main__':
   unittest.main()

@@ -317,15 +317,21 @@ def reduce_to_acc(ctx:ReduceContext, red:UOp):
     topo = inp.toposort()
     ended_ranges = flatten([x.ended_ranges for x in topo if x.op is Ops.END])
     input_ranges = tuple([x for x in topo if x.op is Ops.RANGE and x not in reduce_range and x not in ended_ranges])
-    identity = red.const(red.dtype, identity_element(red.arg, red.dtype.scalar()))
-    acc = UOp(Ops.DEFINE_REG, red.dtype.ptr(size=1, addrspace=AddrSpace.REG), arg=ctx.acc_num)
-    acc_init = acc.after(*input_ranges).index(UOp.const(dtypes.int, 0)).store(identity) if len(input_ranges) else \
-               acc.index(UOp.const(dtypes.int, 0)).store(identity)
-    lst = [acc.after(acc_init, *reduce_range).index(UOp.const(dtypes.int, 0))] + lst  # put acc as the first element
+    vec_count = len(lst) if red.dtype.count == 1 and red.dtype.scalar() in dtypes.floats else 1
+    acc = UOp(Ops.DEFINE_REG, (red.dtype.vec(vec_count) if vec_count > 1 else red.dtype).ptr(size=1, addrspace=AddrSpace.REG), arg=ctx.acc_num)
     ctx.acc_num += 1
+    def acc_at(*deps): return (acc.after(*deps) if deps else acc).index(UOp.const(dtypes.index, 0))
+    identity = red.const(red.dtype, identity_element(red.arg, red.dtype.scalar()))
+    acc_init = acc_at(*input_ranges).store(identity.broadcast(vec_count) if vec_count > 1 else identity)
+    acc_val = acc_at(acc_init, *reduce_range)
+    if vec_count > 1: # vector accumulator: no dependency chain between unrolled adds
+      new_val = acc_val.alu(red.arg, UOp(Ops.VECTORIZE, red.dtype.vec(vec_count), tuple(lst)))
+      ended = acc_at(acc_at().store(new_val).end(*reduce_range))
+      return functools.reduce(lambda x,y: x.alu(red.arg, y), [ended.gep((i,)) for i in range(vec_count)])
+    lst = [acc_val] + lst  # put acc as the first element
   ret = functools.reduce(lambda x,y: x.alu(red.arg, y), lst)
   if len(reduce_range) == 0: return ret
-  return acc.after(acc.index(UOp.const(dtypes.int, 0)).store(ret).end(*reduce_range)).index(UOp.const(dtypes.int, 0))
+  return acc_at(acc_at().store(ret).end(*reduce_range))
 
 pm_reduce = PatternMatcher([
   # REDUCE -> DEFINE_ACC+ASSIGN
