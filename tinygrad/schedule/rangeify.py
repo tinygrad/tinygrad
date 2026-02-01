@@ -275,14 +275,15 @@ def late_buffer_view(t:UOp, b:UOp):
   size = prod(shape)
 
   # walk up for the INDEX
+  # NOTE: even though we allow RESHAPE and SHRINK, they can combine to form non-contiguous access patterns (e.g. t[::2])
   x = t
-  while not any(u.op is Ops.INDEX for u in x.src):
-    assert x.op not in GroupOp.Elementwise, "can't buffer view elementwise"
+  while x.op is not Ops.INDEX:
+    assert x.op in {Ops.BITCAST, Ops.CONTIGUOUS, Ops.SHRINK, Ops.RESHAPE}, f"unexpected op {x.op} in buffer view walk"
     x = x.src[0]
-  x = next(u for u in x.src if u.op is Ops.INDEX)
 
   if len(shape) == 0: offset = x.src[1].arg
-  else: offset = max(sum(idx.vmin for idx in x.src[1:]), 0)
+  else: offset = sum(idx.vmin for idx in x.src[1:])
+  if offset < 0: raise RuntimeError(f"negative offset {offset} in buffer view")
 
   return b.replace(src=(UOp(Ops.BUFFER_VIEW, t.dtype, (x.base,), (size, offset), tag=t.tag), b.src[1]))
 
