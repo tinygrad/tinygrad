@@ -13,7 +13,7 @@ def assemble_insts(insts:list[Inst], name:str, arch:str, kernarg_size:int=8) -> 
         "wavefront_size32":1}
   disasm = "\n".join([inst.disasm() for inst in insts])
   binary = create_elf(b"".join(inst.to_bytes() for inst in insts+[s_code_end()]), kd, arch="rdna3")
-  return UOp(Ops.SOURCE, arg=disasm), UOp(Ops.BINARY, arg=binary2 if getenv("B2") else binary)
+  return UOp(Ops.SOURCE, arg=disasm), UOp(Ops.BINARY, arg=binary)
 
 def custom_add_one(A:UOp, arch:str) -> UOp:
   A = A.flatten()
@@ -54,6 +54,10 @@ def custom_add_var(A:UOp, B:UOp, arch:str) -> UOp:
                                *assemble_insts(insts, name, arch, kernarg_size=16)))
 
 class TestCustomKernel(unittest.TestCase):
+  def setUp(self):
+    if not Device[Device.DEFAULT].renderer.arch.startswith("gfx11"):
+      self.skipTest("tests written for RDNA3")
+
   def test_simple(self):
     a = Tensor.full((16, 16), 1.).contiguous().realize()
     a = Tensor.custom_kernel(a, fxn=functools.partial(custom_add_one, arch=Device[Device.DEFAULT].renderer.arch))[0]
