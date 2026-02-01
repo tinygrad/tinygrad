@@ -3,7 +3,7 @@ from typing import Any, Callable, cast, TYPE_CHECKING, Type, Sequence, Iterable,
 import sys, time, functools, itertools, math, operator, hashlib, os, types, pickle, pathlib, inspect, weakref, collections
 from dataclasses import dataclass
 from enum import Enum, auto
-from tinygrad.uop import Ops, GroupOp, X86Ops
+from tinygrad.uop import Ops, GroupOp, X86Ops, X86GroupOp
 from tinygrad.dtype import ConstType, ImageDType, dtypes, DType, truncate, PtrDType, least_upper_dtype, Invalid, AddrSpace, ConstFloat, PyConst
 from tinygrad.helpers import ContextVar, all_int, prod, getenv, all_same, Context, partition, temp, unwrap, T, argfix, Metadata, flatten, TRACEMETA
 from tinygrad.helpers import PROFILE, dedup, cdiv, cmod, diskcache_put, to_function_name, cpu_profile, TracingKey, VIZ, SPEC
@@ -297,6 +297,9 @@ class UOp(OpMixin, Generic[OpT], metaclass=UOpMetaClass):
       if len(input_shapes) == 0: return None
       if not all_same(input_shapes): raise RuntimeError(f"shape mismatch at {self.op}: {input_shapes}")
       return input_shapes[0]
+
+    # backend ops don't have a shape
+    if self.op in X86GroupOp.All: return None
 
     # all Ops must be explicitly handled
     raise NotImplementedError(f"no shape handling for {self.op} with {self.dtype}")

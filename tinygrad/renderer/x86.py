@@ -288,8 +288,7 @@ isel_matcher = PatternMatcher([
   (UPat(Ops.SINK, name="x"), lambda x: x.replace(op=X86Ops.RET, src=x.src + tuple(def_reg(dtypes.uint64, r) for r in [RSP, RBP]))),
   # TODO: RANGE and END is tricky. Both linearizer and regalloc need them so they stay as Ops. This gets into a broader issue with tinygrad
   # not being able to represent control flow properly. For now they are rewritten after regalloc
-  # HACK: annoying hack so const doesn't get rewritten because linearizer needs it
-  (UPat(Ops.RANGE, name="x"), lambda ctx,x: x.replace(src=(x.src[0].replace(tag=1 if x.src[0].op is Ops.CONST else None),) + x.src[1:], arg=ctx.vreg(WGPR)) if not isinstance(x.arg, Register) else None), # noqa: E501
+  (UPat(Ops.RANGE, name="x"), lambda ctx,x: x.replace(src=(imm(x.src[0].dtype, x.src[0].arg),) + x.src[1:], arg=ctx.vreg(WGPR)) if not isinstance(x.arg, Register) else None), # noqa: E501
   # function abi constraints
   (UPat((Ops.DEFINE_GLOBAL, Ops.DEFINE_VAR, Ops.SPECIAL), name="x"), abi),
   # these are treated the same for now
@@ -299,8 +298,8 @@ isel_matcher = PatternMatcher([
   (UPat(Ops.CONST, dtypes.float16, name="x"), lambda x: UOp(X86Ops.VPINSRW, x.dtype, (def_reg(x.dtype), UOp(X86Ops.MOVi, dtypes.int16, (imm(x.dtype, x.arg),)), imm(dtypes.uint8, 0)))), # noqa: E501
   (UPat(Ops.CONST, dtypes.float32, name="x"), lambda x: UOp(X86Ops.VMOVD, x.dtype, (UOp(X86Ops.MOVi, dtypes.int32, (imm(x.dtype, x.arg),)),))),
   (UPat(Ops.CONST, dtypes.float64, name="x"), lambda x: UOp(X86Ops.VMOVQ, x.dtype, (UOp(X86Ops.MOVABS, dtypes.int64, (imm(x.dtype, x.arg),)),))),
-  (UPat(Ops.CONST, dtypes.int64s, name="x"), lambda x: UOp(X86Ops.MOVABS, x.dtype, (imm(x.dtype, x.arg),)) if x.tag is None else None),
-  (UPat(Ops.CONST, dtypes.ints+(dtypes.bool,), name="x"), lambda x: UOp(X86Ops.MOVi, x.dtype, (imm(x.dtype, x.arg),)) if x.tag is None else None),
+  (UPat(Ops.CONST, dtypes.int64s, name="x"), lambda x: UOp(X86Ops.MOVABS, x.dtype, (imm(x.dtype, x.arg),))),
+  (UPat(Ops.CONST, dtypes.ints+(dtypes.bool,), name="x"), lambda x: UOp(X86Ops.MOVi, x.dtype, (imm(x.dtype, x.arg),))),
   # conditional moves that use masks NOTE: these currently assume a mask producing cmp exists
   (UPat.var("m").where(UPat.var("a", dtypes.ints), UPat.var("b")), lambda m,a,b: UOp(X86Ops.VPBLENDVB, a.dtype, (b, a, m.replace(dtype=m.src[0].dtype))) if a.dtype.count > 1 else None), # noqa: E501
   (UPat.var("m").where(UPat.var("a", dtypes.float32), UPat.var("b")), lambda m,a,b: UOp(X86Ops.VBLENDVPS, a.dtype, (b, a, m.replace(dtype=m.src[0].dtype)))), # noqa: E501
@@ -487,13 +486,13 @@ post_regalloc_matcher = PatternMatcher([
    (x, [UOp(X86Ops.ADDi, dtypes.uint64, (imm(dtypes.uint32, ctx.stack_size),), RSP), x]) if ctx.stack_size > 0 else None),
   # rewrite FRAME_INDEX to IMM now that the stack size is known
   (UPat(X86Ops.FRAME_INDEX, name="x"), lambda ctx,x: (nx:=x.replace(op=X86Ops.IMM, arg=ctx.stack_size + x.arg), [nx])),
-  # this is the CONST in RANGE
-  (UPat(Ops.CONST, name="x"), lambda x: (nx:=imm(x.dtype, x.arg), [nx])),
   # rewrite RANGE to MOV reg, 0. Terrible HACK to pass the CONST to the END
   (UPat(Ops.RANGE, name="x"), lambda x: (nx:=x.replace(op=X86Ops.MOVi, src=(imm(x.dtype, 0),), tag=x.src[0].arg), [nx])),
   # rewrite END to ADD 1 -> CMPLT -> JUMP
-  (UPat(Ops.END, name="x"), lambda x: (jl:=x.replace(op=X86Ops.JL, src=(x.src[1], cmp:=UOp(X86Ops.CMPi,
-    src=(add:=UOp(X86Ops.ADDi, x.src[1].dtype, (imm(x.src[1].dtype, 1),), x.src[1].arg), imm(x.src[1].dtype, x.src[1].tag))))), [add, cmp, jl])),
+  (UPat(Ops.END, name="x"), lambda x:
+   (jl:=x.replace(op=X86Ops.JL, src=(x.src[1], cmp:=UOp(X86Ops.CMPi if isinstance(x.src[1].tag, int) else X86Ops.CMP,
+    src=(add:=UOp(X86Ops.ADDi, x.src[1].dtype, (imm(x.src[1].dtype, 1),), x.src[1].arg),
+         imm(x.src[1].dtype, x.src[1].tag) if isinstance(x.src[1].tag, int) else def_reg(x.src[1].dtype, x.src[1].tag))))), [add, cmp, jl])),
   # TODO: need a generic way to model clobbers, idiv and flags should be handled the same way, maybe add clobber field to Register?
   # fixup div, zero rdx again because scheduling constraint isn't being respected
   (UPat(X86Ops.DIV, name="x"), lambda x:
