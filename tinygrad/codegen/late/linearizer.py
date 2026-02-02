@@ -86,16 +86,17 @@ class CFGContext:
         self.edges[y.src[1]] = x
 
 def unify_ends(sink:UOp) -> UOp:
-  # multiply ENDs with the same RANGE create cycles in CFGContext
+  # multiple ENDs with the same RANGE create cycles in CFGContext
   ends = [u for u in sink.toposort() if u.op is Ops.END]
   by_range: dict[tuple[UOp, ...], list[UOp]] = defaultdict(list)
   for e in ends: by_range[e.src[1:]].append(e)
 
   replacements: dict[UOp, UOp] = {}
   for r, es in by_range.items():
-    if len(es) > 1:
-      new_end = UOp(Ops.END, es[0].dtype, (UOp.group(*(e.src[0] for e in es)),) + r)
-      for e in es: replacements[e] = new_end
+    if len(es) <= 1: continue
+    new_data = UOp.group(*(e.src[0] for e in es))
+    new_end = UOp(Ops.END, new_data.dtype, (new_data,) + r)
+    for i, e in enumerate(es): replacements[e] = new_end.gep(i) if len(es) > 1 else new_end
 
   return sink.substitute(replacements)
 
