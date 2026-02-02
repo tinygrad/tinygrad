@@ -1,7 +1,7 @@
 from typing import Any, cast
 import functools, operator, itertools
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from tinygrad.dtype import dtypes, ImageDType, DType, AddrSpace, Invalid, PtrDType
 from tinygrad.uop.ops import UOp, Ops, UPat, PatternMatcher, GroupOp, identity_element
 from tinygrad.uop.symbolic import uop_given_valid, parse_valid, invalid_gate
@@ -298,7 +298,12 @@ pm_render = PatternMatcher([
 
 @dataclass
 class ReduceContext:
+  sink: UOp|None = None
   acc_num: int = 0
+  seen_ranges: set[UOp] = field(default_factory=set)
+  next_axis: int = field(init=False)
+  def __post_init__(self):
+    self.next_axis = 0 if self.sink is None else max((r.arg[0] for r in self.sink.toposort() if r.op is Ops.RANGE), default=-1) + 1
 
 def horizontal_reduce(inp:UOp, out_dtype:DType) -> list[UOp]:
   # if this has a horizontal reduction component, do that first
@@ -309,7 +314,20 @@ def horizontal_reduce(inp:UOp, out_dtype:DType) -> list[UOp]:
   return [inp]
 
 def reduce_to_acc(ctx:ReduceContext, red:UOp):
-  inp, reduce_range = red.src[0], red.src[1:]
+  inp, reduce_range = red.src[0], list(red.src[1:])
+  sub: dict[UOp, UOp] = {}
+  new_reduce_range: list[UOp] = []
+  for r in reduce_range:
+    if r in ctx.seen_ranges:
+      nr = UOp.range(r.src[0], ctx.next_axis, r.arg[1], *r.arg[2:], dtype=r.dtype, src=r.src[1:])
+      ctx.next_axis += 1
+      sub[r] = nr
+      new_reduce_range.append(nr)
+    else:
+      ctx.seen_ranges.add(r)
+      new_reduce_range.append(r)
+  if sub: inp = inp.substitute(sub)
+  reduce_range = tuple(new_reduce_range)
   lst = horizontal_reduce(inp, red.dtype)
   assert all(x.dtype == red.dtype for x in lst), f"horizontal reduction mismatch {lst[0].dtype} != {red.dtype}"
   # if we have a range
@@ -344,4 +362,3 @@ pm_add_loads = PatternMatcher([
   # remove loads from stores
   (UPat(Ops.STORE, src=(UPat(Ops.LOAD), UPat(name="val")), name="s"), lambda s,val: s.replace(src=(s.src[0].src[0], val))),
 ])
-
