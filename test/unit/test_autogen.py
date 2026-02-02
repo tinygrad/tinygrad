@@ -223,45 +223,6 @@ class TestC(unittest.TestCase):
     self.assertEqual(out.contents.a, 20)
     self.assertEqual(out.contents.b, 10)
 
-  @unittest.skipIf(OSX, "can't find stdint?")
-  def test_packed_fields(self):
-    ns = self.run_gen("""#include <stdint.h>
-typedef struct die_info
- {
-	 uint16_t die_id;
-	 uint16_t die_offset; /* Points to the corresponding die_header structure */
- } die_info;
-
-typedef struct ip_discovery_header
- {
-	 uint32_t signature;    /* Table Signature */
-	 uint16_t version;      /* Table Version */
-	 uint16_t size;         /* Table Size */
-	 uint32_t id;           /* Table ID */
-	 uint16_t num_dies;     /* Number of Dies */
-	 die_info die_info[16]; /* list die information for up to 16 dies */
-	 union {
-		 uint16_t padding[1];	/* version <= 3 */
-		 struct {		/* version == 4 */
-			 uint8_t base_addr_64_bit : 1; /* ip structures are using 64 bit base address */
-			 uint8_t reserved : 7;
-			 uint8_t reserved2;
-		 };
-	 };
- } ip_discovery_header;
-""")
-
-    ip_discovery_header = ns['ip_discovery_header']
-
-    hdr = b'IPDS\x04\x00|\x1d\x80\x1a\xffd\x01\x00\x00\x00\x8c\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x01\x00' # noqa: E501
-    ihdr = ip_discovery_header.from_buffer_copy(hdr)
-
-    assert ctypes.sizeof(ihdr) == 80
-    assert ihdr.signature == 0x53445049
-    assert ihdr.version == 0x0004
-    assert ihdr.num_dies == 1
-    assert ihdr.base_addr_64_bit == 1
-
   def test_pointer_field_roundtrip(self):
     # This tests storing a pointer in a record struct field and passing it to C
     # Mimics how mesa.struct_lp_build_tgsi_params.mask is used
@@ -497,5 +458,44 @@ typedef struct
     assert namespace["enum_Bar"].get(0) == "X"
     assert namespace["enum_Bar"].get(1) == "Y"
     assert namespace["enum_Bar"].get(2) == "Z"
+
+  @unittest.skipIf(OSX, "can't find stdint?")
+  def test_packed_fields(self):
+    ns = self.run_gen("""#include <stdint.h>
+typedef struct die_info
+ {
+	 uint16_t die_id;
+	 uint16_t die_offset; /* Points to the corresponding die_header structure */
+ } die_info;
+
+typedef struct ip_discovery_header
+ {
+	 uint32_t signature;    /* Table Signature */
+	 uint16_t version;      /* Table Version */
+	 uint16_t size;         /* Table Size */
+	 uint32_t id;           /* Table ID */
+	 uint16_t num_dies;     /* Number of Dies */
+	 die_info die_info[16]; /* list die information for up to 16 dies */
+	 union {
+		 uint16_t padding[1];	/* version <= 3 */
+		 struct {		/* version == 4 */
+			 uint8_t base_addr_64_bit : 1; /* ip structures are using 64 bit base address */
+			 uint8_t reserved : 7;
+			 uint8_t reserved2;
+		 };
+	 };
+ } ip_discovery_header;
+""")
+
+    ip_discovery_header = ns['ip_discovery_header']
+
+    hdr = b'IPDS\x04\x00|\x1d\x80\x1a\xffd\x01\x00\x00\x00\x8c\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x01\x00' # noqa: E501
+    ihdr = ip_discovery_header.from_buffer_copy(hdr)
+
+    assert ctypes.sizeof(ihdr) == 80
+    assert ihdr.signature == 0x53445049
+    assert ihdr.version == 0x0004
+    assert ihdr.num_dies == 1
+    assert ihdr.base_addr_64_bit == 1
 
 if __name__ == "__main__": unittest.main()
