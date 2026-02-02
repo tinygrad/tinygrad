@@ -200,6 +200,28 @@ def _ff1(val: UOp, bits: int) -> UOp:
     result = cond.where(_const(dtypes.int, i), result)
   return result
 
+def _sad_u8(a: UOp, b: UOp, acc: UOp) -> UOp:
+  """Sum of absolute differences of 4 unsigned bytes + accumulator."""
+  a, b, acc = a.cast(dtypes.uint32), b.cast(dtypes.uint32), acc.cast(dtypes.uint32)
+  result = acc
+  for i in range(4):
+    a_byte = (a >> _u32(i * 8)) & _u32(0xFF)
+    b_byte = (b >> _u32(i * 8)) & _u32(0xFF)
+    diff = (a_byte > b_byte).where(a_byte - b_byte, b_byte - a_byte)
+    result = result + diff
+  return result
+
+def _msad_u8(a: UOp, b: UOp, acc: UOp) -> UOp:
+  """Masked SAD - like SAD but skips bytes where a == 0."""
+  a, b, acc = a.cast(dtypes.uint32), b.cast(dtypes.uint32), acc.cast(dtypes.uint32)
+  result = acc
+  for i in range(4):
+    a_byte = (a >> _u32(i * 8)) & _u32(0xFF)
+    b_byte = (b >> _u32(i * 8)) & _u32(0xFF)
+    diff = (a_byte > b_byte).where(a_byte - b_byte, b_byte - a_byte)
+    result = result + a_byte.ne(_u32(0)).where(diff, _u32(0))
+  return result
+
 _FUNCS: dict[str, Callable[..., UOp]] = {
   'sqrt': lambda a: UOp(Ops.SQRT, a.dtype, (a,)), 'trunc': lambda a: UOp(Ops.TRUNC, a.dtype, (a,)),
   'log2': lambda a: UOp(Ops.LOG2, a.dtype, (a,)), 'sin': lambda a: _trig_reduce(a),
@@ -254,6 +276,12 @@ _FUNCS: dict[str, Callable[..., UOp]] = {
   # Float to int16 conversions
   'v_cvt_i16_f32': lambda a: UOp(Ops.TRUNC, dtypes.float32, (a.bitcast(dtypes.float32),)).cast(dtypes.int16),
   'v_cvt_u16_f32': lambda a: _f_to_u(a.bitcast(dtypes.float32), dtypes.uint16),
+  # SAD (Sum of Absolute Differences) - sum |a_i - b_i| for 4 bytes + accumulator
+  'v_sad_u8': lambda a, b, c: _sad_u8(a, b, c),
+  'v_msad_u8': lambda a, b, c: _msad_u8(a, b, c),
+  # System NOPs - these are scheduling hints, no effect on emulation
+  'MIN': lambda a, b: (a < b).where(a, b),
+  's_nop': lambda a: _u32(0),
 }
 for is_max, name in [(False, 'min'), (True, 'max')]:
   for dt, sfx in [(dtypes.float32, 'f32'), (dtypes.int, 'i32'), (dtypes.uint32, 'u32'), (dtypes.int16, 'i16'), (dtypes.uint16, 'u16')]:
@@ -435,7 +463,7 @@ class Parser:
         self.eat('DOT')
         dt_name = self.eat('IDENT').val
         return self._handle_mem_load(addr, DTYPES.get(dt_name, dtypes.uint32))
-      if name == 'VGPR':
+      if name == 'VGPR' and self.at('LBRACKET'):
         self.eat('LBRACKET')
         lane = self.parse()
         self.eat('RBRACKET')
@@ -462,7 +490,23 @@ class Parser:
       if self.try_eat('LBRACE'):
         idx = self.eat('NUM').val
         self.eat('RBRACE')
-        elem = self.vars.get(f'{name}{idx}', _u32(0))
+        # Handle VGPR{lane}[reg] - 2D array access after loop unrolling
+        if name == 'VGPR' and self.at('LBRACKET'):
+          self.eat('LBRACKET')
+          reg = self.parse()
+          self.eat('RBRACKET')
+          vgpr = self.vars.get('_vgpr')
+          if vgpr is None: return _u32(0)
+          return vgpr.index(_to_u32(reg) * _u32(32) + _u32(int(idx)), ptr=True).load()
+        elem = self.vars.get(f'{name}@{idx}', self.vars.get(f'{name}{idx}'))
+        if elem is None:
+          # Fallback: if name exists as a UOp, extract bit idx from it (like var[idx])
+          base = self.vars.get(name)
+          if isinstance(base, UOp):
+            dt = dtypes.uint64 if base.dtype in (dtypes.uint64, dtypes.int64) else dtypes.uint32
+            elem = (base.cast(dt) >> _const(dt, int(idx))) & _const(dt, 1)
+          else:
+            elem = _u32(0)
         if self.try_eat('DOT'):
           dt_name = self.eat('IDENT').val
           return _cast_to(elem, DTYPES.get(dt_name, dtypes.uint32))
@@ -631,7 +675,9 @@ class Parser:
     raise RuntimeError(f"unexpected token after {bits}': {self.peek()}")
 
   def _parse_number(self, num: str) -> UOp:
-    if num.startswith('0x') or num.startswith('0X'): return _const(dtypes.uint64, int(num.rstrip('ULul'), 16))
+    if num.startswith('0x') or num.startswith('0X'):
+      val = int(num.rstrip('ULul'), 16)
+      return _const(dtypes.uint64 if val > 0xFFFFFFFF else dtypes.uint32, val)
     suffix, num = _strip_suffix(num)
     if '.' in num or suffix in ('F', 'f'):
       return _const(dtypes.float32 if suffix in ('F', 'f') else dtypes.float64, float(num))
@@ -798,7 +844,11 @@ def parse_block(lines: list[str], start: int, vars: dict[str, VarVal], funcs: di
         if p.at('NUM') and p.peek(1).type == 'QUOTE': p.eat('NUM'); p.eat('QUOTE')
         if p.at('NUM'): return int(p.eat('NUM').val.rstrip('UuLl'))
         expr = p.parse()
-        return int(expr.arg) if expr.op == Ops.CONST else 0
+        if expr.op == Ops.CONST: return int(expr.arg)
+        # Handle WHERE with constant condition (e.g. WAVE32 ? 1 : 3)
+        if expr.op == Ops.WHERE and expr.src[0].op == Ops.CONST:
+          return int(expr.src[1].arg) if expr.src[0].arg else int(expr.src[2].arg)
+        return 0
       start_val = parse_bound()
       p.eat('COLON')
       end_val = parse_bound()
@@ -844,7 +894,9 @@ def parse_block(lines: list[str], start: int, vars: dict[str, VarVal], funcs: di
 
     # declare
     if first == 'declare':
-      if '[' not in line and len(toks) >= 2 and toks[1].type == 'IDENT': vars[toks[1].val] = _u32(0)
+      # Only initialize if not already passed as a source (e.g. PERMUTE needs ADDR, DATA0, VDST from instruction)
+      if '[' not in line and len(toks) >= 2 and toks[1].type == 'IDENT' and toks[1].val not in vars:
+        vars[toks[1].val] = _u32(0)
       i += 1; continue
 
     # lambda definition
@@ -897,14 +949,27 @@ def parse_block(lines: list[str], start: int, vars: dict[str, VarVal], funcs: di
       if assigns is not None: assigns.append((f'MEM[{_tok_str(addr_toks)}].{dt_name}', (addr, rhs)))
       i += 1; continue
 
-    # VGPR assignment: VGPR[lane][reg] = value
+    # VGPR assignment: VGPR[lane][reg] = value or VGPR{lane}[reg] = value (after loop unrolling)
+    # Also handles VGPR[lane][reg].type = value
     if first == 'vgpr' and toks[1].type == 'LBRACKET':
       j, lane_toks = _match_bracket(toks, 1)
       if j < len(toks) and toks[j].type == 'LBRACKET':
         j, reg_toks = _match_bracket(toks, j)
+        if j < len(toks) and toks[j].type == 'DOT': j += 2  # skip .type suffix
         if j < len(toks) and toks[j].type == 'EQUALS': j += 1
         ln, rg, val = parse_tokens(lane_toks, vars, funcs), parse_tokens(reg_toks, vars, funcs), parse_tokens(toks[j:], vars, funcs)
         if assigns is not None: assigns.append((f'VGPR[{_tok_str(lane_toks)}][{_tok_str(reg_toks)}]', (_to_u32(rg) * _u32(32) + _to_u32(ln), val)))
+        i += 1; continue
+    if first == 'vgpr' and toks[1].type == 'LBRACE':
+      # VGPR{lane}[reg] = value (after loop substitution)
+      lane_idx = int(toks[2].val)
+      j = 4  # skip VGPR { idx }
+      if j < len(toks) and toks[j].type == 'LBRACKET':
+        j, reg_toks = _match_bracket(toks, j)
+        if j < len(toks) and toks[j].type == 'DOT': j += 2  # skip .type suffix
+        if j < len(toks) and toks[j].type == 'EQUALS': j += 1
+        rg, val = parse_tokens(reg_toks, vars, funcs), parse_tokens(toks[j:], vars, funcs)
+        if assigns is not None: assigns.append((f'VGPR[{lane_idx}][{_tok_str(reg_toks)}]', (_to_u32(rg) * _u32(32) + _u32(lane_idx), val)))
         i += 1; continue
 
     # Compound destination: {hi.type, lo.type} = value
@@ -965,7 +1030,7 @@ def parse_block(lines: list[str], start: int, vars: dict[str, VarVal], funcs: di
             block_assigns[var] = vars[var] = _set_bit(existing, _to_u32(parse_tokens(bit_toks, vars, funcs)), parse_tokens(toks[j+1:], vars, funcs))
             i += 1; continue
 
-    # Array element: var{idx} = value
+    # Array element: var{idx} = value (static) or var[expr] = value (dynamic)
     if len(toks) >= 5 and toks[0].type == 'IDENT' and toks[1].type == 'LBRACE' and toks[2].type == 'NUM':
       var, idx = toks[0].val, int(toks[2].val)
       j = 4
@@ -978,6 +1043,22 @@ def parse_block(lines: list[str], start: int, vars: dict[str, VarVal], funcs: di
         else:
           block_assigns[f'{var}@{idx}'] = vars[f'{var}@{idx}'] = val
         i += 1; continue
+    # Dynamic array element: var[expr] = value where var has @-elements
+    if len(toks) >= 4 and toks[0].type == 'IDENT' and toks[1].type == 'LBRACKET':
+      var = toks[0].val
+      elems = [(k.split('@')[1], v) for k, v in {**vars, **block_assigns}.items() if k.startswith(f'{var}@') and isinstance(v, UOp)]
+      if elems:
+        j, idx_toks = _match_bracket(toks, 1)
+        if j < len(toks) and toks[j].type == 'EQUALS':
+          idx_expr = parse_tokens(idx_toks, vars, funcs)
+          val = parse_tokens(toks[j+1:], vars, funcs)
+          # Update all elements: elem = WHERE(idx == elem_idx, val, old_elem)
+          for elem_idx_str, old_elem in elems:
+            elem_idx = int(elem_idx_str)
+            cond = _to_u32(idx_expr).eq(_u32(elem_idx))
+            new_val = cond.where(val.cast(old_elem.dtype) if val.dtype != old_elem.dtype else val, old_elem)
+            block_assigns[f'{var}@{elem_idx}'] = vars[f'{var}@{elem_idx}'] = new_val
+          i += 1; continue
 
     # Compound assignment: var += or var -=
     assign_op = next((j for j, t in enumerate(toks) if t.type == 'ASSIGN_OP'), None)

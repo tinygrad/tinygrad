@@ -3262,5 +3262,81 @@ class TestMinMaxF16Vop3(unittest.TestCase):
     self.assertAlmostEqual(result, 4.0, delta=0.01)
 
 
+class TestSadHi(unittest.TestCase):
+  """Tests for V_SAD_HI_U8 instruction."""
+
+  def test_v_sad_hi_u8_basic(self):
+    """V_SAD_HI_U8: (sad << 16) + acc."""
+    # |1-5| + |2-6| + |3-7| + |4-8| = 16, << 16 = 0x100000, + 100 = 0x100064
+    instructions = [
+      v_mov_b32_e32(v[0], 0x04030201),
+      v_mov_b32_e32(v[1], 0x08070605),
+      v_mov_b32_e32(v[2], 100),
+      v_sad_hi_u8(v[3], v[0], v[1], v[2]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][3], (16 << 16) + 100)
+
+  def test_v_sad_hi_u8_zero_diff(self):
+    """V_SAD_HI_U8: identical inputs gives acc only."""
+    instructions = [
+      v_mov_b32_e32(v[0], 0x12345678),
+      v_mov_b32_e32(v[2], 50),
+      v_sad_hi_u8(v[3], v[0], v[0], v[2]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][3], 50)
+
+
+class TestPermlane(unittest.TestCase):
+  """Tests for V_PERMLANE16_B32 and V_PERMLANEX16_B32 instructions."""
+
+  def test_v_permlane16_b32_identity(self):
+    """V_PERMLANE16_B32 with identity permutation (lane i reads from lane i within row)."""
+    # lanesel encodes 4 bits per position: position i gets lanesel[i*4+3:i*4]
+    # Identity: position 0->0, 1->1, ..., 15->15
+    # lanesel = 0xFEDCBA9876543210 (positions 15-0 in nibbles)
+    instructions = [
+      v_mov_b32_e32(v[0], 0xDEADBEEF),  # source data
+      s_mov_b32(s[0], 0x76543210),       # lanesel low (positions 0-7)
+      s_mov_b32(s[1], 0xFEDCBA98),       # lanesel high (positions 8-15)
+      v_permlane16_b32(v[1], v[0], s[0], s[1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    # Lane 0 reads from lane 0 (position 0 -> lanesel[3:0] = 0)
+    self.assertEqual(st.vgpr[0][1], 0xDEADBEEF)
+
+  def test_v_permlane16_b32_broadcast(self):
+    """V_PERMLANE16_B32 broadcast lane 0 to all lanes in row."""
+    # lanesel = all zeros -> all positions read from lane 0 within row
+    instructions = [
+      v_mov_b32_e32(v[0], 0xCAFEBABE),  # source data
+      s_mov_b32(s[0], 0),                # lanesel low = 0 (all read lane 0)
+      s_mov_b32(s[1], 0),                # lanesel high = 0
+      v_permlane16_b32(v[1], v[0], s[0], s[1]),
+    ]
+    st = run_program(instructions, n_lanes=4)
+    # All lanes read from lane 0 of their row
+    for lane in range(4):
+      self.assertEqual(st.vgpr[lane][1], 0xCAFEBABE)
+
+  def test_v_permlanex16_b32_identity(self):
+    """V_PERMLANEX16_B32 cross-row read with identity selection."""
+    # In wave32: row 0 (lanes 0-15) reads from row 1 (lanes 16-31) and vice versa
+    # With single lane in row 0, it reads from lane 0 of row 1 (lane 16)
+    # But lane 16 doesn't exist in 1-lane test, so use 32 lanes
+    instructions = [
+      v_mov_b32_e32(v[0], 0x11111111),  # All lanes have this initially
+      s_mov_b32(s[0], 0x76543210),       # lanesel low
+      s_mov_b32(s[1], 0xFEDCBA98),       # lanesel high
+      v_permlanex16_b32(v[1], v[0], s[0], s[1]),
+    ]
+    st = run_program(instructions, n_lanes=32)
+    # Lane 0 in row 0 reads from lane 0 of row 1 (lane 16)
+    self.assertEqual(st.vgpr[0][1], 0x11111111)
+    # Lane 16 in row 1 reads from lane 0 of row 0 (lane 0)
+    self.assertEqual(st.vgpr[16][1], 0x11111111)
+
+
 if __name__ == '__main__':
   unittest.main()

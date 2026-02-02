@@ -402,17 +402,19 @@ class _Ctx:
     return UOp.sink(*self.scalar_stores(assigns, sdst_reg, sdst_size), *self.inc_pc())
 
   def compile_lane_pcode(self, op, inst) -> UOp:
-    """Compile READLANE/READFIRSTLANE/WRITELANE using pcode parser."""
+    """Compile cross-lane ops (READLANE/WRITELANE/PERMLANE) using pcode parser."""
     pcode = get_pcode(op)
     op_name = op.name if hasattr(op, 'name') else str(op)
     src0_off, vdst_off = self.inst_field(type(inst).src0), self.inst_field(type(inst).vdst)
     src0_reg = (src0_off >= _c(256)).where(src0_off - _c(256), _c(0))  # VGPR index or 0
     src1_off = self.inst_field(type(inst).src1) if hasattr(type(inst), 'src1') else None
+    src2_off = self.inst_field(type(inst).src2) if hasattr(type(inst), 'src2') else None
     exec_lo = self.rsgpr_dyn(_c(EXEC_LO.offset))
     srcs = {
       'SRC0': src0_reg, 'VDST': vdst_off, 'EXEC_LO': exec_lo, 'EXEC': exec_lo.cast(dtypes.uint64), '_vgpr': self.vgpr,
       'S0': self.rsrc_dyn(src0_off, _c(0, dtypes.int)) if 'WRITELANE' in op_name else src0_reg,
       'S1': self.rsrc_dyn(src1_off, _c(0, dtypes.int)) if src1_off is not None else _c(0),
+      'S2': self.rsrc_dyn(src2_off, _c(0, dtypes.int)) if src2_off is not None else _c(0),
     }
     _, assigns = parse_pcode(pcode, srcs)
     stores = []
@@ -553,6 +555,10 @@ def _compile_sop(inst: SOP1 | SOP2 | SOPC | SOPK, ctx: _Ctx) -> UOp:
 def _compile_vop12(inst: VOP1 | VOP1_SDST | VOP2, ctx: _Ctx) -> UOp:
   op_name = _op_name(inst)
   if op_name == 'V_READFIRSTLANE_B32_E32': return ctx.compile_lane_pcode(inst.op, inst)
+  # V_PERMLANE64_B32: cross-half lane swap (lane i <-> lane i^32), wave64 only
+  # In wave32 mode (emulator default), this is a NOP - just increment PC
+  if 'PERMLANE64' in op_name:
+    return UOp.sink(*ctx.inc_pc())
   lane, exec_mask, bits = ctx.range(), ctx.rsgpr_dyn(_c(EXEC_LO.offset)), inst.canonical_op_bits
   literal = ctx.inst_field(type(inst).literal) if hasattr(type(inst), 'literal') else None
   vdst_reg = ctx.inst_field(VOP1.vdst)
@@ -643,6 +649,10 @@ def _compile_vop3(inst: VOP3, ctx: _Ctx) -> UOp:
 
   # Lane operations
   if op_name in ('V_READLANE_B32', 'V_READFIRSTLANE_B32', 'V_READFIRSTLANE_B32_E64', 'V_WRITELANE_B32'):
+    return ctx.compile_lane_pcode(inst.op, inst)
+
+  # V_PERMLANE16_B32 / V_PERMLANEX16_B32: cross-lane swizzle via pcode
+  if 'PERMLANE16' in op_name or 'PERMLANEX16' in op_name:
     return ctx.compile_lane_pcode(inst.op, inst)
 
   # VOP3 VOPC (v_cmp_*_e64) - delegate to unified VOPC handler
@@ -871,6 +881,15 @@ def _compile_mem_op(inst: DS | FLAT | GLOBAL | SCRATCH, ctx: _Ctx) -> UOp:
   is_atomic, glc = 'ATOMIC' in op_name, getattr(inst, 'glc', 0)
   has_data1 = is_lds and hasattr(inst, 'data1') and inst.data1 is not None
   data1_reg = ctx.inst_field(DS.data1) if is_lds else _c(0)
+
+  # DS_PERMUTE/DS_BPERMUTE: cross-lane VGPR access via pcode
+  if is_lds and 'PERMUTE' in op_name:
+    pcode = get_pcode(inst.op)
+    srcs = {'ADDR': addr_reg, 'DATA0': vdata_reg, 'VDST': vdst_reg, 'OFFSET': offset,
+            'EXEC': exec_mask.cast(dtypes.uint64), '_vgpr': ctx.vgpr}
+    _, assigns = parse_pcode(pcode, srcs)
+    stores = [ctx.vgpr.index(val[0].cast(dtypes.int)).store(val[1].cast(dtypes.uint32)) for dest, val in assigns if dest.startswith('VGPR[')]
+    return UOp.sink(*stores, *ctx.inc_pc())
 
   def make_addr(lane: UOp) -> UOp:
     if is_lds: return ctx.rvgpr_dyn(addr_reg, lane)
