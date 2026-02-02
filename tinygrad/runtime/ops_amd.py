@@ -872,15 +872,11 @@ class PCIIface(PCIIfaceBase):
     for d in devs: d.iface.dev_impl.ih.interrupt_handler()
     faults = [f for d in devs if (f:=d.iface.dev_impl.gmc.check_fault())]
     for d in devs:
-      if DEBUG >= 1: print(f"AMDDevice: Recovering from GPU fault")
-      d.iface.dev_impl.recover()
-      if DEBUG >= 2: print(f"AMDDevice: Setting up ring with params {d.compute_queue.params}")
-      d.compute_queue.put_value, _ = d.iface.dev_impl.gfx.setup_ring(*d.compute_queue.params)
-      if DEBUG >= 2: print(f"AMDDevice: put_value={d.compute_queue.put_value}, timeline={d.timeline_value}")
-      d.compute_queue.read_ptrs[0][0] = d.compute_queue.write_ptrs[0][0] = d.compute_queue.put_value
-      d.timeline_signal.value = d.timeline_value - 1
-      d.error_state = None
-      if DEBUG >= 2: print(f"AMDDevice: Recovery done, timeline_signal.value={d.timeline_signal.value}")
+      if d.iface.dev_impl.recover():
+        d.compute_queue.put_value, _ = d.iface.dev_impl.gfx.setup_ring(*d.compute_queue.params)
+        d.compute_queue.read_ptrs[0][0] = d.compute_queue.write_ptrs[0][0] = d.compute_queue.put_value
+        d.timeline_signal.value = d.timeline_value - 1
+        d.error_state = None
     raise RuntimeError(f"Device hang detected: {'; '.join(faults)}" if faults else "Device hang detected")
 
   def device_fini(self): self.dev_impl.fini()
