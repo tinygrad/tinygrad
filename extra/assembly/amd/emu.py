@@ -51,12 +51,8 @@ from tinygrad.engine.realize import get_runner
 from extra.assembly.amd import decode_inst
 from extra.assembly.amd.autogen.rdna3.str_pcode import PCODE as PCODE_RDNA3
 from extra.assembly.amd.autogen.rdna4.str_pcode import PCODE as PCODE_RDNA4
-from extra.assembly.amd.autogen.rdna3.ins import (SOP1, SOP2, SOPC, SOPK, SOPP, SMEM, VOP1, VOP1_SDST, VOP2, VOP3, VOP3_SDST, VOP3SD, VOP3P, VOPC,
-  DS, FLAT, GLOBAL, SCRATCH, VOPD, SOPPOp, SMEMOp, VOP1Op, VOP2Op, VOP3Op, VOPDOp)
-from extra.assembly.amd.autogen.rdna4.ins import (SOP1 as R4_SOP1, SOP2 as R4_SOP2, SOPC as R4_SOPC, SOPK as R4_SOPK, SOPP as R4_SOPP,
-  SMEM as R4_SMEM, VOP1 as R4_VOP1, VOP1_SDST as R4_VOP1_SDST, VOP2 as R4_VOP2, VOP3 as R4_VOP3, VOP3_SDST as R4_VOP3_SDST,
-  VOP3SD as R4_VOP3SD, VOP3P as R4_VOP3P, VOPC as R4_VOPC, DS as R4_DS, VFLAT as R4_FLAT, VGLOBAL as R4_GLOBAL, VSCRATCH as R4_SCRATCH,
-  VOPD as R4_VOPD, SOPPOp as R4_SOPPOp, VOPDOp as R4_VOPDOp, SMEMOp as R4_SMEMOp)
+from extra.assembly.amd.autogen.rdna3 import ins as ir3
+from extra.assembly.amd.autogen.rdna4 import ins as ir4
 from extra.assembly.amd.dsl import VCC_LO, EXEC_LO, SCC, ttmp
 from extra.assembly.amd.autogen.common import Fmt, OpType
 from extra.assembly.amd.pcode import parse_block, _FUNCS
@@ -86,21 +82,21 @@ def _apply_src_mods(val: UOp, mod_bit: int, abs_bits: int, neg_bits: int, bits: 
 
 # Map VOPD ops to VOP2 ops for pcode lookup (both RDNA3 and RDNA4)
 VOPD_TO_VOP2 = {
-  VOPDOp.V_DUAL_FMAC_F32: VOP2Op.V_FMAC_F32_E32, VOPDOp.V_DUAL_MUL_F32: VOP2Op.V_MUL_F32_E32,
-  VOPDOp.V_DUAL_ADD_F32: VOP2Op.V_ADD_F32_E32, VOPDOp.V_DUAL_SUB_F32: VOP2Op.V_SUB_F32_E32,
-  VOPDOp.V_DUAL_SUBREV_F32: VOP2Op.V_SUBREV_F32_E32, VOPDOp.V_DUAL_MAX_F32: VOP2Op.V_MAX_F32_E32,
-  VOPDOp.V_DUAL_MIN_F32: VOP2Op.V_MIN_F32_E32, VOPDOp.V_DUAL_ADD_NC_U32: VOP2Op.V_ADD_NC_U32_E32,
-  VOPDOp.V_DUAL_LSHLREV_B32: VOP2Op.V_LSHLREV_B32_E32, VOPDOp.V_DUAL_AND_B32: VOP2Op.V_AND_B32_E32,
-  VOPDOp.V_DUAL_MOV_B32: VOP1Op.V_MOV_B32_E32, VOPDOp.V_DUAL_CNDMASK_B32: VOP2Op.V_CNDMASK_B32_E32,
-  VOPDOp.V_DUAL_FMAAK_F32: VOP2Op.V_FMAAK_F32_E32, VOPDOp.V_DUAL_FMAMK_F32: VOP2Op.V_FMAMK_F32_E32,
+  ir3.VOPDOp.V_DUAL_FMAC_F32: ir3.VOP2Op.V_FMAC_F32_E32, ir3.VOPDOp.V_DUAL_MUL_F32: ir3.VOP2Op.V_MUL_F32_E32,
+  ir3.VOPDOp.V_DUAL_ADD_F32: ir3.VOP2Op.V_ADD_F32_E32, ir3.VOPDOp.V_DUAL_SUB_F32: ir3.VOP2Op.V_SUB_F32_E32,
+  ir3.VOPDOp.V_DUAL_SUBREV_F32: ir3.VOP2Op.V_SUBREV_F32_E32, ir3.VOPDOp.V_DUAL_MAX_F32: ir3.VOP2Op.V_MAX_F32_E32,
+  ir3.VOPDOp.V_DUAL_MIN_F32: ir3.VOP2Op.V_MIN_F32_E32, ir3.VOPDOp.V_DUAL_ADD_NC_U32: ir3.VOP2Op.V_ADD_NC_U32_E32,
+  ir3.VOPDOp.V_DUAL_LSHLREV_B32: ir3.VOP2Op.V_LSHLREV_B32_E32, ir3.VOPDOp.V_DUAL_AND_B32: ir3.VOP2Op.V_AND_B32_E32,
+  ir3.VOPDOp.V_DUAL_MOV_B32: ir3.VOP1Op.V_MOV_B32_E32, ir3.VOPDOp.V_DUAL_CNDMASK_B32: ir3.VOP2Op.V_CNDMASK_B32_E32,
+  ir3.VOPDOp.V_DUAL_FMAAK_F32: ir3.VOP2Op.V_FMAAK_F32_E32, ir3.VOPDOp.V_DUAL_FMAMK_F32: ir3.VOP2Op.V_FMAMK_F32_E32,
   # RDNA4 mappings (same VOP1/VOP2 targets, RDNA4 uses _NUM_ suffix for min/max)
-  R4_VOPDOp.V_DUAL_FMAC_F32: VOP2Op.V_FMAC_F32_E32, R4_VOPDOp.V_DUAL_MUL_F32: VOP2Op.V_MUL_F32_E32,
-  R4_VOPDOp.V_DUAL_ADD_F32: VOP2Op.V_ADD_F32_E32, R4_VOPDOp.V_DUAL_SUB_F32: VOP2Op.V_SUB_F32_E32,
-  R4_VOPDOp.V_DUAL_SUBREV_F32: VOP2Op.V_SUBREV_F32_E32, R4_VOPDOp.V_DUAL_MAX_NUM_F32: VOP2Op.V_MAX_F32_E32,
-  R4_VOPDOp.V_DUAL_MIN_NUM_F32: VOP2Op.V_MIN_F32_E32, R4_VOPDOp.V_DUAL_ADD_NC_U32: VOP2Op.V_ADD_NC_U32_E32,
-  R4_VOPDOp.V_DUAL_LSHLREV_B32: VOP2Op.V_LSHLREV_B32_E32, R4_VOPDOp.V_DUAL_AND_B32: VOP2Op.V_AND_B32_E32,
-  R4_VOPDOp.V_DUAL_MOV_B32: VOP1Op.V_MOV_B32_E32, R4_VOPDOp.V_DUAL_CNDMASK_B32: VOP2Op.V_CNDMASK_B32_E32,
-  R4_VOPDOp.V_DUAL_FMAAK_F32: VOP2Op.V_FMAAK_F32_E32, R4_VOPDOp.V_DUAL_FMAMK_F32: VOP2Op.V_FMAMK_F32_E32,
+  ir4.VOPDOp.V_DUAL_FMAC_F32: ir3.VOP2Op.V_FMAC_F32_E32, ir4.VOPDOp.V_DUAL_MUL_F32: ir3.VOP2Op.V_MUL_F32_E32,
+  ir4.VOPDOp.V_DUAL_ADD_F32: ir3.VOP2Op.V_ADD_F32_E32, ir4.VOPDOp.V_DUAL_SUB_F32: ir3.VOP2Op.V_SUB_F32_E32,
+  ir4.VOPDOp.V_DUAL_SUBREV_F32: ir3.VOP2Op.V_SUBREV_F32_E32, ir4.VOPDOp.V_DUAL_MAX_NUM_F32: ir3.VOP2Op.V_MAX_F32_E32,
+  ir4.VOPDOp.V_DUAL_MIN_NUM_F32: ir3.VOP2Op.V_MIN_F32_E32, ir4.VOPDOp.V_DUAL_ADD_NC_U32: ir3.VOP2Op.V_ADD_NC_U32_E32,
+  ir4.VOPDOp.V_DUAL_LSHLREV_B32: ir3.VOP2Op.V_LSHLREV_B32_E32, ir4.VOPDOp.V_DUAL_AND_B32: ir3.VOP2Op.V_AND_B32_E32,
+  ir4.VOPDOp.V_DUAL_MOV_B32: ir3.VOP1Op.V_MOV_B32_E32, ir4.VOPDOp.V_DUAL_CNDMASK_B32: ir3.VOP2Op.V_CNDMASK_B32_E32,
+  ir4.VOPDOp.V_DUAL_FMAAK_F32: ir3.VOP2Op.V_FMAAK_F32_E32, ir4.VOPDOp.V_DUAL_FMAMK_F32: ir3.VOP2Op.V_FMAMK_F32_E32,
 }
 WAVE_SIZE = 32
 # Special registers stored after inline constants (256-259)
@@ -506,12 +502,12 @@ class _Ctx:
 # INSTRUCTION HANDLERS
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def _compile_sopp(inst: SOPP, ctx: _Ctx) -> UOp:
-  simm16 = ctx.inst_field_signed(SOPP.simm16).cast(dtypes.int16)
-  if inst.op == SOPPOp.S_ENDPGM:
+def _compile_sopp(inst: ir3.SOPP | ir4.SOPP, ctx: _Ctx) -> UOp:
+  simm16 = ctx.inst_field_signed(type(inst).simm16).cast(dtypes.int16)
+  if inst.op == ir3.SOPPOp.S_ENDPGM:
     return UOp.sink(ctx.wsgpr_dyn(_c(PC_LO_IDX), UOp.const(dtypes.uint32, 0xFFFFFFFF)),
                           ctx.wsgpr_dyn(_c(PC_HI_IDX), UOp.const(dtypes.uint32, 0xFFFFFFFF)))
-  if inst.op in (SOPPOp.S_NOP, R4_SOPPOp.S_NOP): return UOp.sink(*ctx.inc_pc())  # S_NOP is a no-op
+  if inst.op in (ir3.SOPPOp.S_NOP, ir4.SOPPOp.S_NOP): return UOp.sink(*ctx.inc_pc())  # S_NOP is a no-op
   # NOTE: we ignore SOPPs without PCODE
   if inst.op in _get_pcode_dict(inst.op):
     pcode = get_pcode(inst.op)
@@ -525,10 +521,10 @@ def _compile_sopp(inst: SOPP, ctx: _Ctx) -> UOp:
         return UOp.sink(ctx.wsgpr_dyn(_c(PC_LO_IDX), lo), ctx.wsgpr_dyn(_c(PC_HI_IDX), hi))
   return UOp.sink(*ctx.inc_pc())
 
-def _compile_smem(inst: SMEM, ctx: _Ctx) -> UOp:
+def _compile_smem(inst: ir3.SMEM | ir4.SMEM, ctx: _Ctx) -> UOp:
   # Cache invalidation instructions are no-ops in the emulator (we don't model caches)
-  cache_inv_ops = [SMEMOp.S_GL1_INV, SMEMOp.S_DCACHE_INV, R4_SMEMOp.S_DCACHE_INV]
-  if hasattr(R4_SMEMOp, 'S_GL1_INV'): cache_inv_ops.append(R4_SMEMOp.S_GL1_INV)
+  cache_inv_ops = [ir3.SMEMOp.S_GL1_INV, ir3.SMEMOp.S_DCACHE_INV, ir4.SMEMOp.S_DCACHE_INV]
+  if hasattr(ir4.SMEMOp, 'S_GL1_INV'): cache_inv_ops.append(ir4.SMEMOp.S_GL1_INV)
   if inst.op in cache_inv_ops:
     return UOp.sink(*ctx.inc_pc())
   # Dynamic sbase field (bits 5:0) - SGPR pair, field value * 2 = register offset
@@ -541,30 +537,31 @@ def _compile_smem(inst: SMEM, ctx: _Ctx) -> UOp:
   # Dynamic soffset field - SGPR for additional offset (NULL=124 reads as 0)
   soffset = ctx.inst_field(type(inst).soffset)
   addr = _u64(ctx.rsgpr_dyn(sbase), ctx.rsgpr_dyn(sbase + _c(1))) + offset.cast(dtypes.uint64) + ctx.rsgpr_dyn(soffset).cast(dtypes.uint64)
-  _SMEM_NDWORDS = {SMEMOp.S_LOAD_B32: 1, SMEMOp.S_LOAD_B64: 2, SMEMOp.S_LOAD_B128: 4, SMEMOp.S_LOAD_B256: 8, SMEMOp.S_LOAD_B512: 16,
-    R4_SMEMOp.S_LOAD_B32: 1, R4_SMEMOp.S_LOAD_B64: 2, R4_SMEMOp.S_LOAD_B128: 4, R4_SMEMOp.S_LOAD_B256: 8, R4_SMEMOp.S_LOAD_B512: 16}
+  _SMEM_NDWORDS = {ir3.SMEMOp.S_LOAD_B32: 1, ir3.SMEMOp.S_LOAD_B64: 2, ir3.SMEMOp.S_LOAD_B128: 4,
+    ir3.SMEMOp.S_LOAD_B256: 8, ir3.SMEMOp.S_LOAD_B512: 16, ir4.SMEMOp.S_LOAD_B32: 1, ir4.SMEMOp.S_LOAD_B64: 2,
+    ir4.SMEMOp.S_LOAD_B128: 4, ir4.SMEMOp.S_LOAD_B256: 8, ir4.SMEMOp.S_LOAD_B512: 16}
   ndwords = _SMEM_NDWORDS.get(inst.op, 1)
   stores = [ctx.wsgpr_dyn(sdata_reg + _c(i), ctx.vmem.index((addr + UOp.const(dtypes.uint64, i * 4) >> UOp.const(dtypes.uint64, 2)).cast(dtypes.int)))
             for i in range(ndwords)]
   return UOp.sink(*stores, *ctx.inc_pc())
 
-def _compile_sop(inst: SOP1 | SOP2 | SOPC | SOPK, ctx: _Ctx) -> UOp:
+def _compile_sop(inst: ir3.SOP1 | ir3.SOP2 | ir3.SOPC | ir3.SOPK | ir4.SOP1 | ir4.SOP2 | ir4.SOPC | ir4.SOPK, ctx: _Ctx) -> UOp:
   bits = inst.canonical_op_bits
   literal = ctx.inst_field(type(inst).literal) if hasattr(type(inst), 'literal') else None
 
-  if isinstance(inst, (SOPK, R4_SOPK)):
+  if isinstance(inst, (ir3.SOPK, ir4.SOPK)):
     sdst_off = ctx.inst_field(type(inst).sdst)
     simm16 = ctx.inst_field(type(inst).simm16)
     # Sign-extend simm16
     simm16_sext = simm16.cast(dtypes.int16).cast(dtypes.int32)
     srcs = {'S0': ctx.rsgpr_dyn(sdst_off), 'SIMM16': simm16_sext, 'D0': ctx.rsgpr_dyn(sdst_off)}
     dst_off, dst_size = sdst_off, 1
-  elif isinstance(inst, (SOP1, R4_SOP1)):
+  elif isinstance(inst, (ir3.SOP1, ir4.SOP1)):
     sdst_off = ctx.inst_field(type(inst).sdst)
     ssrc0_off = ctx.inst_field(type(inst).ssrc0)
     srcs = {'S0': ctx.rsrc_dyn(ssrc0_off, None, bits['s0'], literal)}
     dst_off, dst_size = sdst_off, bits['d'] // 32
-  elif isinstance(inst, (SOP2, R4_SOP2)):
+  elif isinstance(inst, (ir3.SOP2, ir4.SOP2)):
     sdst_off = ctx.inst_field(type(inst).sdst)
     ssrc0_off = ctx.inst_field(type(inst).ssrc0)
     ssrc1_off = ctx.inst_field(type(inst).ssrc1)
@@ -572,7 +569,7 @@ def _compile_sop(inst: SOP1 | SOP2 | SOPC | SOPK, ctx: _Ctx) -> UOp:
             'S1': ctx.rsrc_dyn(ssrc1_off, None, bits['s1'], literal)}
     if literal is not None: srcs['SIMM32'] = literal
     dst_off, dst_size = sdst_off, bits['d'] // 32
-  elif isinstance(inst, (SOPC, R4_SOPC)):
+  elif isinstance(inst, (ir3.SOPC, ir4.SOPC)):
     ssrc0_off = ctx.inst_field(type(inst).ssrc0)
     ssrc1_off = ctx.inst_field(type(inst).ssrc1)
     srcs = {'S0': ctx.rsrc_dyn(ssrc0_off, None, bits['s0'], literal),
@@ -583,18 +580,18 @@ def _compile_sop(inst: SOP1 | SOP2 | SOPC | SOPK, ctx: _Ctx) -> UOp:
 
   return ctx.compile_sop_pcode(inst.op, srcs, dst_off, dst_size)
 
-def _compile_vop12(inst: VOP1 | VOP1_SDST | VOP2, ctx: _Ctx) -> UOp:
+def _compile_vop12(inst: ir3.VOP1 | ir3.VOP1_SDST | ir3.VOP2 | ir4.VOP1 | ir4.VOP1_SDST | ir4.VOP2, ctx: _Ctx) -> UOp:
   op_name = _op_name(inst)
   if op_name in ('V_READFIRSTLANE_B32_E32', 'V_PERMLANE64_B32_E32'): return ctx.compile_lane_pcode(inst.op, inst)
   lane, exec_mask, bits = ctx.range(), ctx.rsgpr_dyn(_c(EXEC_LO.offset)), inst.canonical_op_bits
   literal = ctx.inst_field(type(inst).literal) if hasattr(type(inst), 'literal') else None
-  vdst_reg = ctx.inst_field(VOP1.vdst)
+  vdst_reg = ctx.inst_field(type(inst).vdst)
   write_hi_half = bits['d'] == 16 and (vdst_reg >= _c(128))
   if isinstance(write_hi_half, UOp): vdst_reg = write_hi_half.where(vdst_reg - _c(128), vdst_reg)
   elif write_hi_half: vdst_reg -= 128
-  if isinstance(inst, VOP1):
+  if isinstance(inst, (ir3.VOP1, ir4.VOP1)):
     # Handle VOP1 hi-half source operand (src0 >= v[128] for 16-bit ops)
-    src0_off = ctx.inst_field(VOP1.src0)
+    src0_off = ctx.inst_field(type(inst).src0)
     s0 = ctx.rsrc_dyn(src0_off, lane, bits['s0'], literal)
     if bits['s0'] == 16:
       src0_hi = src0_off >= _c(384)
@@ -603,13 +600,13 @@ def _compile_vop12(inst: VOP1 | VOP1_SDST | VOP2, ctx: _Ctx) -> UOp:
       s0 = src0_hi.where(_hi16(ctx.rvgpr_dyn(src0_reg, lane)), s0)
     srcs = {'S0': s0}
   else:
-    vsrc1_reg = ctx.inst_field(VOP2.vsrc1)
+    vsrc1_reg = ctx.inst_field(type(inst).vsrc1)
     vsrc1_hi = bits['s0'] == 16 and (vsrc1_reg >= _c(128))
     vsrc1_actual = _cond(vsrc1_hi, vsrc1_reg - _c(128), vsrc1_reg)
     s1 = _cond_hi16(vsrc1_hi, ctx.rvgpr_dyn(vsrc1_actual, lane))
     d0 = _cond_hi16(write_hi_half, ctx.rvgpr_dyn(vdst_reg, lane))  # FMAC/FMAMK hi-half dest needs hi-half accumulator
     # Handle VOP2 hi-half src0 operand (src0 >= v[128] for 16-bit ops)
-    src0_off = ctx.inst_field(VOP2.src0)
+    src0_off = ctx.inst_field(type(inst).src0)
     s0 = ctx.rsrc_dyn(src0_off, lane, bits['s0'], literal)
     if bits['s0'] == 16:
       src0_hi = src0_off >= _c(384)
@@ -617,19 +614,20 @@ def _compile_vop12(inst: VOP1 | VOP1_SDST | VOP2, ctx: _Ctx) -> UOp:
       src0_reg = src0_hi.where(src0_off - _c(384), _c(0))
       s0 = src0_hi.where(_hi16(ctx.rvgpr_dyn(src0_reg, lane)), s0)
     srcs = {'S0': s0, 'S1': s1, 'D0': d0}
-    if inst.op in (VOP2Op.V_FMAAK_F32_E32, VOP2Op.V_FMAMK_F32_E32, VOP2Op.V_FMAAK_F16_E32, VOP2Op.V_FMAMK_F16_E32):
+    if inst.op in (ir3.VOP2Op.V_FMAAK_F32_E32, ir3.VOP2Op.V_FMAMK_F32_E32, ir3.VOP2Op.V_FMAAK_F16_E32,
+                   ir3.VOP2Op.V_FMAMK_F16_E32):
       assert literal is not None
       srcs['SIMM32'] = literal
   return ctx.compile_vop_pcode(inst.op, srcs, lane, vdst_reg, exec_mask, opsel_dst_hi=write_hi_half)
 
-def _compile_vopc(inst: VOPC | VOP3, ctx: _Ctx, opsel: int = 0, abs_bits: int = 0, neg_bits: int = 0) -> UOp:
+def _compile_vopc(inst: ir3.VOPC | ir3.VOP3 | ir4.VOPC | ir4.VOP3, ctx: _Ctx, opsel: int = 0, abs_bits: int = 0, neg_bits: int = 0) -> UOp:
   exec_mask, op_name, bits = ctx.rsgpr_dyn(_c(EXEC_LO.offset)), _op_name(inst), inst.canonical_op_bits
   is_cmpx, is_vopc = 'CMPX' in op_name, hasattr(inst, 'vsrc1')  # is_vopc: e32 vs e64
 
   # Handle both VOPC (vsrc1) and VOP3 (src1) instruction formats - read operands dynamically
   if is_vopc:
-    src0_off = ctx.inst_field(VOPC.src0)
-    vsrc1_off = ctx.inst_field(VOPC.vsrc1)
+    src0_off = ctx.inst_field(type(inst).src0)
+    vsrc1_off = ctx.inst_field(type(inst).vsrc1)
     # For 16-bit ops, vsrc1 >= 128 means hi-half of v[vsrc1-128]
     if bits['s0'] == 16:
       vsrc1_hi = vsrc1_off >= _c(128)
@@ -638,9 +636,9 @@ def _compile_vopc(inst: VOPC | VOP3, ctx: _Ctx, opsel: int = 0, abs_bits: int = 
       vsrc1_hi = False
       src1_off = _c(256) + vsrc1_off
   else:
-    src0_off = ctx.inst_field(VOP3.src0)
-    src1_off = ctx.inst_field(VOP3.src1)
-    dst_off = ctx.inst_field(VOP3.vdst)
+    src0_off = ctx.inst_field(type(inst).src0)
+    src1_off = ctx.inst_field(type(inst).src1)
+    dst_off = ctx.inst_field(type(inst).vdst)
     vsrc1_hi = False
   literal = ctx.inst_field(type(inst).literal) if hasattr(type(inst), 'literal') else None
 
@@ -669,7 +667,7 @@ def _compile_vopc(inst: VOPC | VOP3, ctx: _Ctx, opsel: int = 0, abs_bits: int = 
     stores = [ctx.wsgpr_dyn(dst_off, new_result)] if not is_vopc else [ctx.wsgpr_dyn(_c(VCC_LO.offset), new_result)]
   return UOp.sink(*stores, *ctx.inc_pc())
 
-def _compile_vop3(inst: VOP3, ctx: _Ctx) -> UOp:
+def _compile_vop3(inst: ir3.VOP3 | ir4.VOP3, ctx: _Ctx) -> UOp:
   exec_mask = ctx.rsgpr_dyn(_c(EXEC_LO.offset))
   bits = inst.canonical_op_bits
   opsel, op_name = getattr(inst, 'opsel', 0) or 0, _op_name(inst)
@@ -688,12 +686,12 @@ def _compile_vop3(inst: VOP3, ctx: _Ctx) -> UOp:
 
   # Regular VOP3 - read operands dynamically
   lane = ctx.range()
-  vdst_reg = ctx.inst_field(VOP3.vdst)
+  vdst_reg = ctx.inst_field(type(inst).vdst)
   literal = ctx.inst_field(type(inst).literal) if hasattr(type(inst), 'literal') else None
   ops = inst.canonical_operands
-  src0 = ctx.rsrc_dyn(ctx.inst_field(VOP3.src0), lane, bits['s0'], literal, 's0' in ops and ops['s0'][0] == Fmt.FMT_NUM_F64)
-  src1 = ctx.rsrc_dyn(ctx.inst_field(VOP3.src1), lane, bits['s1'], literal, 's1' in ops and ops['s1'][0] == Fmt.FMT_NUM_F64)
-  src2 = ctx.rsrc_dyn(ctx.inst_field(VOP3.src2), lane, bits['s2'], literal, 's2' in ops and ops['s2'][0] == Fmt.FMT_NUM_F64)
+  src0 = ctx.rsrc_dyn(ctx.inst_field(type(inst).src0), lane, bits['s0'], literal, 's0' in ops and ops['s0'][0] == Fmt.FMT_NUM_F64)
+  src1 = ctx.rsrc_dyn(ctx.inst_field(type(inst).src1), lane, bits['s1'], literal, 's1' in ops and ops['s1'][0] == Fmt.FMT_NUM_F64)
+  src2 = ctx.rsrc_dyn(ctx.inst_field(type(inst).src2), lane, bits['s2'], literal, 's2' in ops and ops['s2'][0] == Fmt.FMT_NUM_F64)
   if bits['s0'] == 16:
     src0 = _apply_opsel(src0, 0, opsel)
     src1 = _apply_opsel(src1, 1, opsel)
@@ -703,19 +701,19 @@ def _compile_vop3(inst: VOP3, ctx: _Ctx) -> UOp:
   src1 = _apply_src_mods(src1, 1, abs_bits, neg_bits, bits['s1'])
   src2 = _apply_src_mods(src2, 2, abs_bits, neg_bits, bits['s2'])
   srcs = {'S0': src0, 'S1': src1, 'S2': src2}
-  if inst.op in (VOP3Op.V_CNDMASK_B32_E64, VOP3Op.V_CNDMASK_B16) and src2 is not None: srcs['VCC'] = src2
+  if inst.op in (ir3.VOP3Op.V_CNDMASK_B32_E64, ir3.VOP3Op.V_CNDMASK_B16) and src2 is not None: srcs['VCC'] = src2
   # FMAC instructions need D0 (accumulator) from destination register
   if 'FMAC' in op_name: srcs['D0'] = ctx.rvgpr_dyn(vdst_reg, lane)
   opsel_dst_hi = bool(opsel & 0b1000) and bits['d'] == 16
   return ctx.compile_vop_pcode(inst.op, srcs, lane, vdst_reg, exec_mask, opsel_dst_hi=opsel_dst_hi, clmp=getattr(inst, 'clmp', 0))
 
-def _compile_vop3sd(inst: VOP3SD, ctx: _Ctx) -> UOp:
+def _compile_vop3sd(inst: ir3.VOP3SD | ir4.VOP3SD, ctx: _Ctx) -> UOp:
   exec_mask = ctx.rsgpr_dyn(_c(EXEC_LO.offset))
   bits, pcode, ops = inst.canonical_op_bits, get_pcode(inst.op), inst.canonical_operands
 
   # Read operands dynamically from instruction encoding
-  vdst_reg, sdst_off = ctx.inst_field(VOP3SD.vdst), ctx.inst_field(VOP3SD.sdst)
-  src0_off, src1_off, src2_off = ctx.inst_field(VOP3SD.src0), ctx.inst_field(VOP3SD.src1), ctx.inst_field(VOP3SD.src2)
+  vdst_reg, sdst_off = ctx.inst_field(type(inst).vdst), ctx.inst_field(type(inst).sdst)
+  src0_off, src1_off, src2_off = ctx.inst_field(type(inst).src0), ctx.inst_field(type(inst).src1), ctx.inst_field(type(inst).src2)
   literal = ctx.inst_field(type(inst).literal) if hasattr(type(inst), 'literal') else None
 
   has_carry_in = 's2' in ops and ops['s2'][2] == OpType.OPR_SREG
@@ -761,13 +759,13 @@ def _compile_vop3sd(inst: VOP3SD, ctx: _Ctx) -> UOp:
   else:
     return ctx.compile_vop_pcode(inst.op, srcs, lane, vdst_reg, exec_mask, sdst_reg=inst.sdst.offset)
 
-def _compile_wmma(inst: VOP3P, ctx: _Ctx) -> UOp:
+def _compile_wmma(inst: ir3.VOP3P | ir4.VOP3P, ctx: _Ctx) -> UOp:
   op_name = _op_name(inst)
   exec_mask = ctx.rsgpr_dyn(_c(EXEC_LO.offset))
-  vdst_reg = ctx.inst_field(VOP3P.vdst)
-  src0_r = ctx.inst_field(VOP3P.src0) - _c(256)
-  src1_r = ctx.inst_field(VOP3P.src1) - _c(256)
-  src2_r = ctx.inst_field(VOP3P.src2) - _c(256)
+  vdst_reg = ctx.inst_field(type(inst).vdst)
+  src0_r = ctx.inst_field(type(inst).src0) - _c(256)
+  src1_r = ctx.inst_field(type(inst).src1) - _c(256)
+  src2_r = ctx.inst_field(type(inst).src2) - _c(256)
   is_f16_output = 'F16_16X16X16_F16' in op_name or 'BF16_16X16X16_BF16' in op_name  # F16/BF16 output vs F32 output
   is_bf16 = 'BF16' in op_name
   cvt = _FUNCS['bf16_to_f32'] if is_bf16 else _FUNCS['f16_to_f32']
@@ -794,16 +792,16 @@ def _compile_wmma(inst: VOP3P, ctx: _Ctx) -> UOp:
     stores = [ctx.wvgpr_dyn(vdst_reg + _c(i // 32), UOp.const(dtypes.int, i % 32), mat_d[i].bitcast(dtypes.uint32), exec_mask) for i in range(256)]
   return UOp.sink(*stores, *ctx.inc_pc())
 
-def _compile_vop3p(inst: VOP3P, ctx: _Ctx) -> UOp:
+def _compile_vop3p(inst: ir3.VOP3P | ir4.VOP3P, ctx: _Ctx) -> UOp:
   op_name = _op_name(inst)
   if 'WMMA' in op_name and ('16X16X16_F16' in op_name or '16X16X16_BF16' in op_name): return _compile_wmma(inst, ctx)
 
   lane = ctx.range()
   exec_mask = ctx.rsgpr_dyn(_c(EXEC_LO.offset))
-  vdst_reg = ctx.inst_field(VOP3P.vdst)
-  src0 = ctx.rsrc_dyn(ctx.inst_field(VOP3P.src0), lane, 16)
-  src1 = ctx.rsrc_dyn(ctx.inst_field(VOP3P.src1), lane, 16)
-  src2 = ctx.rsrc_dyn(ctx.inst_field(VOP3P.src2), lane, 16)
+  vdst_reg = ctx.inst_field(type(inst).vdst)
+  src0 = ctx.rsrc_dyn(ctx.inst_field(type(inst).src0), lane, 16)
+  src1 = ctx.rsrc_dyn(ctx.inst_field(type(inst).src1), lane, 16)
+  src2 = ctx.rsrc_dyn(ctx.inst_field(type(inst).src2), lane, 16)
   opsel, opsel_hi = getattr(inst, 'opsel', 0) or 0, getattr(inst, 'opsel_hi', 3) if getattr(inst, 'opsel_hi', 3) is not None else 3
   opsel_hi2 = getattr(inst, 'opsel_hi2', 1) if getattr(inst, 'opsel_hi2', 1) is not None else 1
   neg, neg_hi = getattr(inst, 'neg', 0) or 0, getattr(inst, 'neg_hi', 0) or 0
@@ -843,7 +841,7 @@ def _compile_vop3p(inst: VOP3P, ctx: _Ctx) -> UOp:
     if is_dot_iu: srcs['NEG'] = UOp.const(dtypes.uint32, neg)
   return ctx.compile_vop_pcode(inst.op, srcs, lane, vdst_reg, exec_mask)
 
-def _compile_vopd(inst: VOPD | R4_VOPD, ctx: _Ctx) -> UOp:
+def _compile_vopd(inst: ir3.VOPD | ir4.VOPD, ctx: _Ctx) -> UOp:
   exec_mask = ctx.rsgpr_dyn(_c(EXEC_LO.offset))
   # Read operands dynamically - use type(inst) to get correct field descriptors
   inst_type = type(inst)
@@ -866,23 +864,23 @@ def _compile_vopd(inst: VOPD | R4_VOPD, ctx: _Ctx) -> UOp:
     assert vop is not None, f"no VOP mapping for VOPD {label}: {op}"
     if label == 'Y': srcs = {'S0': srcy0, 'S1': srcy1, 'D0': ctx.rvgpr_dyn(vdst_reg, lane)}
     else: srcs = {'S0': ctx.rsrc_dyn(src0_off, lane, literal=literal), 'S1': ctx.rvgpr_dyn(vsrc1_reg, lane), 'D0': ctx.rvgpr_dyn(vdst_reg, lane)}
-    if op in (VOPDOp.V_DUAL_FMAAK_F32, VOPDOp.V_DUAL_FMAMK_F32):
+    if op in (ir3.VOPDOp.V_DUAL_FMAAK_F32, ir3.VOPDOp.V_DUAL_FMAMK_F32, ir4.VOPDOp.V_DUAL_FMAAK_F32, ir4.VOPDOp.V_DUAL_FMAMK_F32):
       assert literal is not None
       srcs['SIMM32'] = literal
-    if op == VOPDOp.V_DUAL_CNDMASK_B32: srcs['VCC'] = ctx.rsgpr_dyn(_c(VCC_LO.offset))
+    if op in (ir3.VOPDOp.V_DUAL_CNDMASK_B32, ir4.VOPDOp.V_DUAL_CNDMASK_B32): srcs['VCC'] = ctx.rsgpr_dyn(_c(VCC_LO.offset))
     pcode = get_pcode(vop)
     srcs.update({'VCC': ctx.rsgpr_dyn(_c(VCC_LO.offset)), 'EXEC': exec_mask, 'SCC': ctx.rsgpr_dyn(_c(SCC.offset)), 'laneId': lane})
     for dest, val in parse_pcode(pcode, srcs)[1]:
       if dest.startswith('D0'): all_stores.append(ctx.wvgpr_dyn(vdst_reg, lane, _val_to_u32(val), exec_mask, after=srcy1))
   return UOp.sink(UOp.group(*all_stores).end(lane), *ctx.inc_pc())
 
-def _compile_mem_op(inst: DS | FLAT | GLOBAL | SCRATCH, ctx: _Ctx) -> UOp:
+def _compile_mem_op(inst: ir3.DS | ir3.FLAT | ir3.GLOBAL | ir3.SCRATCH | ir4.DS | ir4.VFLAT | ir4.VGLOBAL | ir4.VSCRATCH, ctx: _Ctx) -> UOp:
   """Unified memory operation compiler for DS, FLAT, GLOBAL, SCRATCH."""
   exec_mask, op_name = ctx.rsgpr_dyn(_c(EXEC_LO.offset)), _op_name(inst)
   pcode = get_pcode(inst.op)
 
-  is_lds = isinstance(inst, (DS, R4_DS))
-  is_scratch = isinstance(inst, (SCRATCH, R4_SCRATCH))
+  is_lds = isinstance(inst, (ir3.DS, ir4.DS))
+  is_scratch = isinstance(inst, (ir3.SCRATCH, ir4.VSCRATCH))
   mem = ctx.lds if is_lds else ctx.scratch if is_scratch else ctx.vmem
   addr_shift = UOp.const(dtypes.uint32 if is_lds else dtypes.uint64, 2)
 
@@ -895,7 +893,7 @@ def _compile_mem_op(inst: DS | FLAT | GLOBAL | SCRATCH, ctx: _Ctx) -> UOp:
     offset1 = ctx.inst_field(type(inst).offset1)
     offset = offset0  # DS uses offset0 as primary offset
     saddr_reg = None
-  elif isinstance(inst, (R4_GLOBAL, R4_SCRATCH, R4_FLAT)):  # RDNA4: vaddr, vsrc, ioffset
+  elif isinstance(inst, (ir4.VGLOBAL, ir4.VSCRATCH, ir4.VFLAT)):  # RDNA4: vaddr, vsrc, ioffset
     addr_reg = ctx.inst_field(type(inst).vaddr)
     vdata_reg = ctx.inst_field(type(inst).vsrc)
     vdst_reg = ctx.inst_field(type(inst).vdst)
@@ -914,7 +912,7 @@ def _compile_mem_op(inst: DS | FLAT | GLOBAL | SCRATCH, ctx: _Ctx) -> UOp:
   data_bits_mem = inst.canonical_op_bits.get('data', 32)
   is_atomic, glc = 'ATOMIC' in op_name, getattr(inst, 'glc', 0)
   has_data1 = is_lds and hasattr(inst, 'data1') and inst.data1 is not None
-  data1_reg = ctx.inst_field(DS.data1) if is_lds else _c(0)
+  data1_reg = ctx.inst_field(type(inst).data1) if is_lds else _c(0)
 
   # DS_PERMUTE/DS_BPERMUTE: cross-lane VGPR access via pcode
   if is_lds and 'PERMUTE' in op_name:
@@ -1035,15 +1033,15 @@ def _compile_mem_op(inst: DS | FLAT | GLOBAL | SCRATCH, ctx: _Ctx) -> UOp:
 
 # Dispatch table: instruction type -> handler function
 _INST_HANDLERS: dict[type, Callable[..., UOp]] = {
-  SOPP: _compile_sopp, SMEM: _compile_smem, SOP1: _compile_sop, SOP2: _compile_sop, SOPC: _compile_sop, SOPK: _compile_sop,
-  VOP1: _compile_vop12, VOP1_SDST: _compile_vop12, VOP2: _compile_vop12, VOPC: _compile_vopc, VOP3: _compile_vop3, VOP3_SDST: _compile_vop3,
-  VOP3SD: _compile_vop3sd, VOP3P: _compile_vop3p, VOPD: _compile_vopd,
-  DS: _compile_mem_op, FLAT: _compile_mem_op, GLOBAL: _compile_mem_op, SCRATCH: _compile_mem_op,
+  ir3.SOPP: _compile_sopp, ir3.SMEM: _compile_smem, ir3.SOP1: _compile_sop, ir3.SOP2: _compile_sop, ir3.SOPC: _compile_sop, ir3.SOPK: _compile_sop,
+  ir3.VOP1: _compile_vop12, ir3.VOP1_SDST: _compile_vop12, ir3.VOP2: _compile_vop12, ir3.VOPC: _compile_vopc, ir3.VOP3: _compile_vop3,
+  ir3.VOP3_SDST: _compile_vop3, ir3.VOP3SD: _compile_vop3sd, ir3.VOP3P: _compile_vop3p, ir3.VOPD: _compile_vopd,
+  ir3.DS: _compile_mem_op, ir3.FLAT: _compile_mem_op, ir3.GLOBAL: _compile_mem_op, ir3.SCRATCH: _compile_mem_op,
   # RDNA4 instruction classes
-  R4_SOPP: _compile_sopp, R4_SMEM: _compile_smem, R4_SOP1: _compile_sop, R4_SOP2: _compile_sop, R4_SOPC: _compile_sop, R4_SOPK: _compile_sop,
-  R4_VOP1: _compile_vop12, R4_VOP1_SDST: _compile_vop12, R4_VOP2: _compile_vop12, R4_VOPC: _compile_vopc, R4_VOP3: _compile_vop3,
-  R4_VOP3_SDST: _compile_vop3, R4_VOP3SD: _compile_vop3sd, R4_VOP3P: _compile_vop3p, R4_VOPD: _compile_vopd,
-  R4_DS: _compile_mem_op, R4_FLAT: _compile_mem_op, R4_GLOBAL: _compile_mem_op, R4_SCRATCH: _compile_mem_op,
+  ir4.SOPP: _compile_sopp, ir4.SMEM: _compile_smem, ir4.SOP1: _compile_sop, ir4.SOP2: _compile_sop, ir4.SOPC: _compile_sop, ir4.SOPK: _compile_sop,
+  ir4.VOP1: _compile_vop12, ir4.VOP1_SDST: _compile_vop12, ir4.VOP2: _compile_vop12, ir4.VOPC: _compile_vopc, ir4.VOP3: _compile_vop3,
+  ir4.VOP3_SDST: _compile_vop3, ir4.VOP3SD: _compile_vop3sd, ir4.VOP3P: _compile_vop3p, ir4.VOPD: _compile_vopd,
+  ir4.DS: _compile_mem_op, ir4.VFLAT: _compile_mem_op, ir4.VGLOBAL: _compile_mem_op, ir4.VSCRATCH: _compile_mem_op,
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1090,7 +1088,7 @@ def decode_program(data: bytes, arch: str = "rdna3") -> dict[int, tuple[str, Cal
   i = 0
   while i < len(data):
     inst = decode_inst(data[i:], arch)
-    if hasattr(inst, 'op') and inst.op in (SOPPOp.S_CODE_END, R4_SOPPOp.S_CODE_END): break
+    if hasattr(inst, 'op') and inst.op in (ir3.SOPPOp.S_CODE_END, ir4.SOPPOp.S_CODE_END): break
     try:
       runner, is_new = _get_runner(bytes(data[i:i + inst.size() + 4]), arch)
       if DEBUG >= 3:
