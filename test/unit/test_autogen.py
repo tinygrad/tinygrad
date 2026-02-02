@@ -5,24 +5,13 @@ from tinygrad.runtime.support.c import DLL, record, init_records
 from tinygrad.runtime.support import c
 from tinygrad.runtime.support.autogen import gen
 
-class TestAutogen(unittest.TestCase):
+@unittest.skipIf(WIN, "doesn't compile on windows")
+class TestC(unittest.TestCase):
   def compile(self, src):
     with tempfile.NamedTemporaryFile(suffix=".so") as f:
       subprocess.check_output(('clang', '-x', 'c', '-fPIC', '-shared', '-', '-o', f.name), input=src.encode())
       return DLL("test", f.name)
 
-  def run_gen(self, contents):
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.h') as f:
-      f.write(contents)
-      f.flush()
-
-      generated_code = gen(name="test_header", dll=None, files=[f.name])
-
-      namespace = {}
-      exec(generated_code, namespace)
-      return namespace
-
-  @unittest.skipIf(WIN, "doesn't compile on windows")
   def test_packed_struct(self):
     @record
     class Baz:
@@ -45,7 +34,6 @@ class TestAutogen(unittest.TestCase):
     assert b.c == 1
     assert b.d == 0
 
-  @unittest.skipIf(WIN, "doesn't compile on windows")
   def test_packed_struct_interop(self):
     @record
     class Baz:
@@ -75,7 +63,6 @@ class TestAutogen(unittest.TestCase):
     self.assertEqual(test(b), b.a + b.b + b.c + b.d)
 
   # https://github.com/python/cpython/issues/90914
-  @unittest.skipIf(WIN, "doesn't compile on windows")
   def test_bitfield_interop(self):
     @record
     class Baz:
@@ -103,7 +90,6 @@ class TestAutogen(unittest.TestCase):
     def test(x:Baz) -> ctypes.c_int: ...
     for i in range(8): self.assertEqual(test(Baz(*(j==i for j in range(8)))), i==2)
 
-  @unittest.skipIf(WIN, "doesn't compile on windows")
   def test_struct_interop(self):
     @record
     class Baz:
@@ -131,7 +117,6 @@ class TestAutogen(unittest.TestCase):
     def test(x:Baz) -> Baz: ...
     self.assertEqual(bytes(test(Baz(*range(8)))), struct.pack("8i", *range(7, -1, -1)))
 
-  @unittest.skipIf(WIN, "doesn't compile on windows")
   def test_aos_interop(self):
     @record
     class Item:
@@ -151,7 +136,6 @@ class TestAutogen(unittest.TestCase):
     def test(arr:(Item * 3)) -> ctypes.c_int: ...
     self.assertEqual(test((Item * 3)(Item(10), Item(20), Item(30))), 60)
 
-  @unittest.skipIf(WIN, "doesn't compile on windows")
   def test_soa_interop(self):
     @record
     class Row:
@@ -173,7 +157,6 @@ class TestAutogen(unittest.TestCase):
     self.assertEqual(r.data[1], 20)
     self.assertEqual(r.data[2], 10)
 
-  @unittest.skipIf(WIN, "doesn't compile on windows")
   def test_soa_ptr_interop(self):
     @record
     class Row:
@@ -191,7 +174,6 @@ class TestAutogen(unittest.TestCase):
     def test(x:Row) -> ctypes.c_int: ...
     assert test(Row((ctypes.c_int * 3)(10, 20, 30))) == 60
 
-  @unittest.skipIf(WIN, "doesn't compile on windows")
   def test_nested_struct_interop(self):
     @record
     class Inner:
@@ -217,7 +199,6 @@ class TestAutogen(unittest.TestCase):
     self.assertEqual(o.inner.a, 20)
     self.assertEqual(o.b, 10)
 
-  @unittest.skipIf(WIN, "doesn't compile on windows")
   def test_struct_pointer_interop(self):
     @record
     class Foo:
@@ -242,7 +223,88 @@ class TestAutogen(unittest.TestCase):
     self.assertEqual(out.contents.a, 20)
     self.assertEqual(out.contents.b, 10)
 
-  @unittest.skipIf(WIN, "doesn't compile on windows")
+  def test_pointer_field_roundtrip(self):
+    # This tests storing a pointer in a record struct field and passing it to C
+    # Mimics how mesa.struct_lp_build_tgsi_params.mask is used
+    from tinygrad.runtime.support.c import POINTER
+    @record
+    class Inner:
+      SIZE = 8
+      value: Annotated[ctypes.c_int, 0]
+      flag: Annotated[ctypes.c_int, 4]
+    @record
+    class Outer:
+      SIZE = 16
+      x: Annotated[ctypes.c_int, 0]
+      inner_ptr: Annotated[POINTER[Inner], 8]
+    init_records()
+
+    src = """
+      struct inner { int value; int flag; };
+      struct outer { int x; struct inner *inner_ptr; };
+      int test(struct inner *p) {
+        return p->value + p->flag;
+      }
+    """
+    dll = self.compile(src)
+    @dll.bind
+    def test(p:POINTER[Inner]) -> ctypes.c_int: ...
+
+    inner = Inner(value=42, flag=10)
+    outer = Outer(x=1, inner_ptr=ctypes.pointer(inner))
+    # Retrieve pointer from struct field and pass to C
+    self.assertEqual(test(outer.inner_ptr), 52)
+
+  def test_pointer_field_loses_reference(self):
+    # BUG: When a pointer is stored in a record struct field, only the address bytes are saved.
+    # The pointer's _objects dict (which prevents GC of the pointed-to object) is lost.
+    # This causes the pointed-to object to be garbage collected, leading to use-after-free.
+    from tinygrad.runtime.support.c import POINTER
+    @record
+    class MaskContext:
+      SIZE = 16
+      value: Annotated[ctypes.c_int, 0]
+      initialized: Annotated[ctypes.c_int, 4]
+      ptr: Annotated[ctypes.c_void_p, 8]
+    @record
+    class Params:
+      SIZE = 16
+      x: Annotated[ctypes.c_int, 0]
+      mask: Annotated[POINTER[MaskContext], 8]
+    init_records()
+
+    src = """
+      struct mask_ctx { int value; int initialized; void *ptr; };
+      void mask_begin(struct mask_ctx *m, int val) { m->value = val; m->initialized = 1; }
+      int mask_end(struct mask_ctx *m) { return m->value + m->initialized; }
+    """
+    dll = self.compile(src)
+    @dll.bind
+    def mask_begin(m:POINTER[MaskContext], val:ctypes.c_int) -> None: ...
+    @dll.bind
+    def mask_end(m:POINTER[MaskContext]) -> ctypes.c_int: ...
+
+    # When MaskContext() is created inline, it gets garbage collected after the pointer
+    # is stored because only the address bytes are saved, not the _objects reference.
+    params = Params(x=1, mask=ctypes.pointer(MaskContext()))
+    mask_begin(params.mask, 42)
+    result = mask_end(params.mask)
+    self.assertEqual(result, 43)  # 42 + 1
+
+@unittest.skipIf(OSX and ('MTLCompiler' in DLL._loaded_ or 'llvm' in DLL._loaded_), "libclang can't be loaded after MTLCompiler or llvm on OSX")
+@unittest.skipIf(WIN, "doesn't compile on windows")
+class TestAutogen(unittest.TestCase):
+  def run_gen(self, contents):
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.h') as f:
+      f.write(contents)
+      f.flush()
+
+      generated_code = gen(name="test_header", dll=None, files=[f.name])
+
+      namespace = {}
+      exec(generated_code, namespace)
+      return namespace
+
   def test_packed_structs(self):
     ns = self.run_gen("""
 typedef unsigned NvU32;
@@ -292,47 +354,6 @@ typedef struct
     assert frts_cmd.readVbiosDesc.__class__ is FWSECLIC_READ_VBIOS_DESC
     assert frts_cmd.frtsRegionDesc.__class__ is FWSECLIC_FRTS_REGION_DESC
 
-  @unittest.skipIf(WIN, "doesn't compile on windows")
-  @unittest.skipIf(OSX, "can't find stdint?")
-  def test_packed_fields(self):
-    ns = self.run_gen("""#include <stdint.h>
-typedef struct die_info
- {
-	 uint16_t die_id;
-	 uint16_t die_offset; /* Points to the corresponding die_header structure */
- } die_info;
-
-typedef struct ip_discovery_header
- {
-	 uint32_t signature;    /* Table Signature */
-	 uint16_t version;      /* Table Version */
-	 uint16_t size;         /* Table Size */
-	 uint32_t id;           /* Table ID */
-	 uint16_t num_dies;     /* Number of Dies */
-	 die_info die_info[16]; /* list die information for up to 16 dies */
-	 union {
-		 uint16_t padding[1];	/* version <= 3 */
-		 struct {		/* version == 4 */
-			 uint8_t base_addr_64_bit : 1; /* ip structures are using 64 bit base address */
-			 uint8_t reserved : 7;
-			 uint8_t reserved2;
-		 };
-	 };
- } ip_discovery_header;
-""")
-
-    ip_discovery_header = ns['ip_discovery_header']
-
-    hdr = b'IPDS\x04\x00|\x1d\x80\x1a\xffd\x01\x00\x00\x00\x8c\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x01\x00' # noqa: E501
-    ihdr = ip_discovery_header.from_buffer_copy(hdr)
-
-    assert ctypes.sizeof(ihdr) == 80
-    assert ihdr.signature == 0x53445049
-    assert ihdr.version == 0x0004
-    assert ihdr.num_dies == 1
-    assert ihdr.base_addr_64_bit == 1
-
-  @unittest.skipIf(WIN, "doesn't compile on windows")
   def test_gen_from_header(self):
     namespace = self.run_gen("""
     typedef struct {
@@ -378,7 +399,6 @@ typedef struct ip_discovery_header
     self.assertTrue(hasattr(rect, 'height'))
     self.assertTrue(hasattr(rect, 'color'))
 
-  @unittest.skipIf(WIN, "doesn't compile on windows")
   def test_struct_ordering(self):
     namespace = self.run_gen("""
     struct A;
@@ -408,77 +428,6 @@ typedef struct ip_discovery_header
     self.assertTrue(hasattr(b, 'c_ptr'))
     self.assertTrue(hasattr(c, 'a_ptr'))
 
-  @unittest.skipIf(WIN, "doesn't compile on windows")
-  def test_pointer_field_roundtrip(self):
-    # This tests storing a pointer in a record struct field and passing it to C
-    # Mimics how mesa.struct_lp_build_tgsi_params.mask is used
-    from tinygrad.runtime.support.c import POINTER
-    @record
-    class Inner:
-      SIZE = 8
-      value: Annotated[ctypes.c_int, 0]
-      flag: Annotated[ctypes.c_int, 4]
-    @record
-    class Outer:
-      SIZE = 16
-      x: Annotated[ctypes.c_int, 0]
-      inner_ptr: Annotated[POINTER[Inner], 8]
-    init_records()
-
-    src = """
-      struct inner { int value; int flag; };
-      struct outer { int x; struct inner *inner_ptr; };
-      int test(struct inner *p) {
-        return p->value + p->flag;
-      }
-    """
-    dll = self.compile(src)
-    @dll.bind
-    def test(p:POINTER[Inner]) -> ctypes.c_int: ...
-
-    inner = Inner(value=42, flag=10)
-    outer = Outer(x=1, inner_ptr=ctypes.pointer(inner))
-    # Retrieve pointer from struct field and pass to C
-    self.assertEqual(test(outer.inner_ptr), 52)
-
-  @unittest.skipIf(WIN, "doesn't compile on windows")
-  def test_pointer_field_loses_reference(self):
-    # BUG: When a pointer is stored in a record struct field, only the address bytes are saved.
-    # The pointer's _objects dict (which prevents GC of the pointed-to object) is lost.
-    # This causes the pointed-to object to be garbage collected, leading to use-after-free.
-    from tinygrad.runtime.support.c import POINTER
-    @record
-    class MaskContext:
-      SIZE = 16
-      value: Annotated[ctypes.c_int, 0]
-      initialized: Annotated[ctypes.c_int, 4]
-      ptr: Annotated[ctypes.c_void_p, 8]
-    @record
-    class Params:
-      SIZE = 16
-      x: Annotated[ctypes.c_int, 0]
-      mask: Annotated[POINTER[MaskContext], 8]
-    init_records()
-
-    src = """
-      struct mask_ctx { int value; int initialized; void *ptr; };
-      void mask_begin(struct mask_ctx *m, int val) { m->value = val; m->initialized = 1; }
-      int mask_end(struct mask_ctx *m) { return m->value + m->initialized; }
-    """
-    dll = self.compile(src)
-    @dll.bind
-    def mask_begin(m:POINTER[MaskContext], val:ctypes.c_int) -> None: ...
-    @dll.bind
-    def mask_end(m:POINTER[MaskContext]) -> ctypes.c_int: ...
-
-    # When MaskContext() is created inline, it gets garbage collected after the pointer
-    # is stored because only the address bytes are saved, not the _objects reference.
-    params = Params(x=1, mask=ctypes.pointer(MaskContext()))
-    mask_begin(params.mask, 42)
-    result = mask_end(params.mask)
-    self.assertEqual(result, 43)  # 42 + 1
-
-  @unittest.skipIf(WIN, "doesn't compile on windows")
   def test_anonymous_children(self):
     namespace = self.run_gen("""
       struct foo {
@@ -491,7 +440,6 @@ typedef struct ip_discovery_header
     self.assertIn('struct_foo', namespace)
     self.assertIn('struct_foo_bar', namespace)
 
-  @unittest.skipIf(WIN, "doesn't compile on windows")
   def test_enums(self):
     namespace = self.run_gen("""
       enum Foo { A, B, C };
@@ -510,5 +458,44 @@ typedef struct ip_discovery_header
     assert namespace["enum_Bar"].get(0) == "X"
     assert namespace["enum_Bar"].get(1) == "Y"
     assert namespace["enum_Bar"].get(2) == "Z"
+
+  @unittest.skipIf(OSX, "can't find stdint?")
+  def test_packed_fields(self):
+    ns = self.run_gen("""#include <stdint.h>
+typedef struct die_info
+ {
+	 uint16_t die_id;
+	 uint16_t die_offset; /* Points to the corresponding die_header structure */
+ } die_info;
+
+typedef struct ip_discovery_header
+ {
+	 uint32_t signature;    /* Table Signature */
+	 uint16_t version;      /* Table Version */
+	 uint16_t size;         /* Table Size */
+	 uint32_t id;           /* Table ID */
+	 uint16_t num_dies;     /* Number of Dies */
+	 die_info die_info[16]; /* list die information for up to 16 dies */
+	 union {
+		 uint16_t padding[1];	/* version <= 3 */
+		 struct {		/* version == 4 */
+			 uint8_t base_addr_64_bit : 1; /* ip structures are using 64 bit base address */
+			 uint8_t reserved : 7;
+			 uint8_t reserved2;
+		 };
+	 };
+ } ip_discovery_header;
+""")
+
+    ip_discovery_header = ns['ip_discovery_header']
+
+    hdr = b'IPDS\x04\x00|\x1d\x80\x1a\xffd\x01\x00\x00\x00\x8c\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x01\x00' # noqa: E501
+    ihdr = ip_discovery_header.from_buffer_copy(hdr)
+
+    assert ctypes.sizeof(ihdr) == 80
+    assert ihdr.signature == 0x53445049
+    assert ihdr.version == 0x0004
+    assert ihdr.num_dies == 1
+    assert ihdr.base_addr_64_bit == 1
 
 if __name__ == "__main__": unittest.main()
