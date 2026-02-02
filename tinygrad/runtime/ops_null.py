@@ -3,8 +3,9 @@ from tinygrad.device import Compiled, Compiler, Allocator, CompilerSet, Compiler
 from tinygrad.engine.jit import MultiGraphRunner
 from tinygrad.renderer.cstyle import Renderer, CStyleLanguage, AMDHIPRenderer
 from tinygrad.uop.ops import Ops
-from tinygrad.helpers import cpu_profile, EMULATE, NULL_IR3, NULL_NAK
+from tinygrad.helpers import cpu_profile, EMULATE, NULL_IR3, NULL_NAK, NULL_VRAM_SIZE
 from tinygrad.renderer.nir import IR3Renderer, NAKRenderer
+from tinygrad.runtime.support.memory import TLSFAllocator
 
 class NullRenderer(CStyleLanguage):
   device = "NULL"
@@ -19,7 +20,13 @@ class NullProgram:
     with cpu_profile(self.name, self.device): return 1e-3
 
 class NullAllocator(Allocator['NullDevice']):
-  def _alloc(self, size, options): pass
+  def __init__(self, dev):
+    super().__init__(dev)
+    self.pa_allocator = TLSFAllocator(NULL_VRAM_SIZE.value) if NULL_VRAM_SIZE.value >= 0 else None
+  def _alloc(self, size, options):
+    if self.pa_allocator is not None: return self.pa_allocator.alloc(size)
+  def _free(self, opaque, options):
+    if self.pa_allocator is not None and opaque is not None: self.pa_allocator.free(opaque)
   def _copyin(self, dest, src:memoryview): pass
   def _copyout(self, dest:memoryview, src): pass
   def _transfer(self, dest, src, sz:int, src_dev, dest_dev):
