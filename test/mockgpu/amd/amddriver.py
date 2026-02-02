@@ -4,7 +4,7 @@ import tinygrad.runtime.autogen.am.am as am
 import tinygrad.runtime.autogen.amdgpu_drm as amdgpu_drm
 from tinygrad.helpers import from_mv
 from test.mockgpu.driver import VirtDriver, VirtFileDesc, TextFileDesc, DirFileDesc, VirtFile
-from test.mockgpu.amd.amdgpu import AMDGPU, gpu_props
+from test.mockgpu.amd.amdgpu import AMDGPU, gpu_props, GFX_TARGET_VERSION, MOCKGPU_ARCH
 
 libc = ctypes.CDLL(ctypes.util.find_library("c"))
 libc.mmap.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_long]
@@ -90,35 +90,30 @@ class AMDDriver(VirtDriver):
   def _prepare_gpu(self, gpu_id):
     self.doorbells[gpu_id] = memoryview(bytearray(0x2000))
     self.gpus[gpu_id] = AMDGPU(gpu_id)
+    # IP versions: rdna3 = GC 11.0.0, NBIF 4.3.0; rdna4 = GC 12.0.0, NBIF 6.3.1
+    ip_versions = {"rdna3": {"gc": (11, 0, 0), "sdma": (6, 0, 0), "nbif": (4, 3, 0)},
+                   "rdna4": {"gc": (12, 0, 0), "sdma": (6, 0, 0), "nbif": (6, 3, 1)}}[MOCKGPU_ARCH]
+    def ip_discovery_files(hwid, ver, base_addr):
+      p = f'/sys/class/drm/renderD{gpu_id}/device/ip_discovery/die/0/{hwid}/0'
+      return [VirtFile(f'/sys/class/drm/renderD{gpu_id}/device/ip_discovery/die/0/{hwid}', functools.partial(DirFileDesc, child_names=['0'])),
+              VirtFile(f'{p}/major', functools.partial(TextFileDesc, text=str(ver[0]))),
+              VirtFile(f'{p}/minor', functools.partial(TextFileDesc, text=str(ver[1]))),
+              VirtFile(f'{p}/revision', functools.partial(TextFileDesc, text=str(ver[2]))),
+              VirtFile(f'{p}/base_addr', functools.partial(TextFileDesc, text=base_addr))]
     self.tracked_files += [
       VirtFile('/sys/module/amdgpu', functools.partial(TextFileDesc, text="1")),
       VirtFile('/sys/module/amdgpu/parameters/ppfeaturemask', functools.partial(TextFileDesc, text="0xffff3fff")),
       VirtFile(f'/sys/devices/virtual/kfd/kfd/topology/nodes/{gpu_id}', functools.partial(DirFileDesc, child_names=['gpu_id', 'properties'])),
       VirtFile(f'/sys/devices/virtual/kfd/kfd/topology/nodes/{gpu_id}/gpu_id', functools.partial(TextFileDesc, text=f"{gpu_id}")),
       VirtFile(f'/sys/devices/virtual/kfd/kfd/topology/nodes/{gpu_id}/properties',
-        functools.partial(TextFileDesc, text=gpu_props.format(drm_render_minor=gpu_id))),
+        functools.partial(TextFileDesc, text=gpu_props.format(drm_render_minor=gpu_id, gfx_target_version=GFX_TARGET_VERSION))),
       VirtFile(f'/sys/class/drm/renderD{gpu_id}/device/power_dpm_force_performance_level',
                functools.partial(TextFileDesc, text='profile_standard\n')),
       VirtFile(f'/sys/class/drm/renderD{gpu_id}/device/ip_discovery/die/0',
                functools.partial(DirFileDesc, child_names=[str(am.GC_HWID), str(am.SDMA0_HWID), str(am.NBIF_HWID)])),
-      VirtFile(f'/sys/class/drm/renderD{gpu_id}/device/ip_discovery/die/0/{am.GC_HWID}', functools.partial(DirFileDesc, child_names=['0'])),
-      VirtFile(f'/sys/class/drm/renderD{gpu_id}/device/ip_discovery/die/0/{am.GC_HWID}/0/major', functools.partial(TextFileDesc, text='11')),
-      VirtFile(f'/sys/class/drm/renderD{gpu_id}/device/ip_discovery/die/0/{am.GC_HWID}/0/minor', functools.partial(TextFileDesc, text='0')),
-      VirtFile(f'/sys/class/drm/renderD{gpu_id}/device/ip_discovery/die/0/{am.GC_HWID}/0/revision', functools.partial(TextFileDesc, text='0')),
-      VirtFile(f'/sys/class/drm/renderD{gpu_id}/device/ip_discovery/die/0/{am.GC_HWID}/0/base_addr',
-               functools.partial(TextFileDesc, text='0x00001260\n0x0000A000\n0x0001C000\n0x02402C00')),
-      VirtFile(f'/sys/class/drm/renderD{gpu_id}/device/ip_discovery/die/0/{am.SDMA0_HWID}', functools.partial(DirFileDesc, child_names=['0'])),
-      VirtFile(f'/sys/class/drm/renderD{gpu_id}/device/ip_discovery/die/0/{am.SDMA0_HWID}/0/major', functools.partial(TextFileDesc, text='6')),
-      VirtFile(f'/sys/class/drm/renderD{gpu_id}/device/ip_discovery/die/0/{am.SDMA0_HWID}/0/minor', functools.partial(TextFileDesc, text='0')),
-      VirtFile(f'/sys/class/drm/renderD{gpu_id}/device/ip_discovery/die/0/{am.SDMA0_HWID}/0/revision', functools.partial(TextFileDesc, text='0')),
-      VirtFile(f'/sys/class/drm/renderD{gpu_id}/device/ip_discovery/die/0/{am.SDMA0_HWID}/0/base_addr',
-               functools.partial(TextFileDesc, text='0x00001260\n0x0000A000\n0x0001C000\n0x02402C00')),
-      VirtFile(f'/sys/class/drm/renderD{gpu_id}/device/ip_discovery/die/0/{am.NBIF_HWID}', functools.partial(DirFileDesc, child_names=['0'])),
-      VirtFile(f'/sys/class/drm/renderD{gpu_id}/device/ip_discovery/die/0/{am.NBIF_HWID}/0/major', functools.partial(TextFileDesc, text='4')),
-      VirtFile(f'/sys/class/drm/renderD{gpu_id}/device/ip_discovery/die/0/{am.NBIF_HWID}/0/minor', functools.partial(TextFileDesc, text='3')),
-      VirtFile(f'/sys/class/drm/renderD{gpu_id}/device/ip_discovery/die/0/{am.NBIF_HWID}/0/revision', functools.partial(TextFileDesc, text='0')),
-      VirtFile(f'/sys/class/drm/renderD{gpu_id}/device/ip_discovery/die/0/{am.NBIF_HWID}/0/base_addr',
-               functools.partial(TextFileDesc, text='0x00000000\n0x00000014\n0x00000D20\n0x00010400\n0x0241B000\n0x04040000')),
+      *ip_discovery_files(am.GC_HWID, ip_versions["gc"], '0x00001260\n0x0000A000\n0x0001C000\n0x02402C00'),
+      *ip_discovery_files(am.SDMA0_HWID, ip_versions["sdma"], '0x00001260\n0x0000A000\n0x0001C000\n0x02402C00'),
+      *ip_discovery_files(am.NBIF_HWID, ip_versions["nbif"], '0x00000000\n0x00000014\n0x00000D20\n0x00010400\n0x0241B000\n0x04040000'),
       VirtFile(f'/dev/dri/renderD{gpu_id}', functools.partial(DRMFileDesc, driver=self, gpu=f"{self.gpus[gpu_id]}")),
     ]
 

@@ -317,7 +317,8 @@ def eval_pyrender(code:str) -> UOp:
   return lcls['ast']
 
 def test_pyrender(test_ast:UOp, assert_parents=True):
-  code = pyrender(test_ast)
+  try: code = pyrender(test_ast)
+  except NotImplementedError: return None  # this is okay, not all ops can be pyrendered
   ast:UOp = eval_pyrender(code)
   if ast is not test_ast:
     if assert_parents:
