@@ -2,11 +2,8 @@
 from dataclasses import dataclass
 from typing import Iterator
 
-from tinygrad.runtime.support.elf import elf_loader
-
 from extra.assembly.amd.sqtt import decode, print_packets, INST, VALUINST, IMMEDIATE, WAVESTART, WAVEEND, InstOp, PacketType, IMMEDIATE_MASK
 from extra.assembly.amd.dsl import Inst
-from extra.assembly.amd import decode_inst
 from extra.assembly.amd.autogen.rdna3.ins import SOPP, s_endpgm
 from extra.assembly.amd.autogen.rdna3.enum import SOPPOp
 
@@ -16,19 +13,11 @@ class InstructionInfo:
   wave: int
   inst: Inst
 
-def map_insts(data:bytes, lib:bytes) -> Iterator[tuple[PacketType, InstructionInfo|None]]:
+def map_insts(data:bytes, lib:bytes, target:int) -> Iterator[tuple[PacketType, InstructionInfo|None]]:
   """maps SQTT packets to instructions, yields (packet, instruction_info or None)"""
   # map pcs to insts
-  pc_map:dict[int, Inst] = {}
-  image, sections, _ = elf_loader(lib)
-  text = next((sh for sh in sections if sh.name == ".text"), None)
-  assert text is not None, "no .text section found"
-  text_off, text_size = text.header.sh_addr, text.header.sh_size
-  offset = text_off
-  while offset < text_off + text_size:
-    inst = decode_inst(image[offset:])
-    pc_map[offset-text_off] = inst
-    offset += inst.size()
+  from tinygrad.viz.serve import amd_decode
+  pc_map = amd_decode(lib, target)
 
   wave_pc:dict[int, int] = {}
   # only processing packets on one [CU, SIMD] unit
@@ -37,7 +26,7 @@ def map_insts(data:bytes, lib:bytes) -> Iterator[tuple[PacketType, InstructionIn
     if not simd_select(p): continue
     if isinstance(p, WAVESTART):
       assert p.wave not in wave_pc, "only one inflight wave per unit"
-      wave_pc[p.wave] = 0
+      wave_pc[p.wave] = next(iter(pc_map))
       continue
     if isinstance(p, WAVEEND):
       pc = wave_pc.pop(p.wave)
@@ -80,22 +69,22 @@ def map_insts(data:bytes, lib:bytes) -> Iterator[tuple[PacketType, InstructionIn
 # test to compare every packet with the rocprof decoder
 
 def test_rocprof_inst_traces_match(sqtt, prg, target):
-  from tinygrad.viz.serve import llvm_disasm
+  from tinygrad.viz.serve import amd_decode
   from extra.sqtt.roc import decode as roc_decode, InstExec
-  disasm = {addr+prg.base:inst_disasm for addr, inst_disasm in llvm_disasm(target, prg.lib).items()}
-  rctx = roc_decode([sqtt], {prg.name:disasm})
-  rwaves = rctx.inst_execs[(sqtt.kern, sqtt.exec_tag)]
+  addr_table = amd_decode(prg.lib, target)
+  disasm = {addr+prg.base:(inst.disasm(), inst.size()) for addr,inst in addr_table.items()}
+  rctx = roc_decode([sqtt], {prg.tag:disasm})
+  rwaves = rctx.inst_execs.get((sqtt.kern, sqtt.exec_tag), [])
   rwaves_iter:dict[int, list[Iterator[InstExec]]] = {} # wave unit (0-15) -> list of inst trace iterators for all executions on that unit
   for w in rwaves: rwaves_iter.setdefault(w.wave_id, []).append(w.unpack_insts())
-  rwaves_base = next(iter(disasm)) # base program counter
 
   passed_insts = 0
-  for pkt, info in map_insts(sqtt.blob, prg.lib):
+  for pkt, info in map_insts(sqtt.blob, prg.lib, target):
     if DEBUG >= 2: print_packets([pkt])
     if info is None: continue
     if DEBUG >= 2: print(f"{' '*29}{info.inst.disasm()}")
     rocprof_inst = next(rwaves_iter[info.wave][0])
-    ref_pc = rocprof_inst.pc-rwaves_base
+    ref_pc = rocprof_inst.pc-prg.base
     # always check pc matches
     assert ref_pc == info.pc, f"pc mismatch {ref_pc}:{disasm[rocprof_inst.pc][0]} != {info.pc}:{info.inst.disasm()}"
     # special handling for s_endpgm, it marks the wave completion.
@@ -110,7 +99,8 @@ def test_rocprof_inst_traces_match(sqtt, prg, target):
   for k,v in rwaves_iter.items():
     assert len(v) == 0, f"incomplete wave {k}"
 
-  print(f"passed for {passed_insts} instructions across {len(rwaves)} waves scheduled on {len(rwaves_iter)} wave units")
+  if len(rwaves):
+    print(f"passed for {passed_insts} instructions across {len(rwaves)} waves scheduled on {len(rwaves_iter)} wave units")
 
 if __name__ == "__main__":
   import argparse, pickle, pathlib
@@ -123,7 +113,7 @@ if __name__ == "__main__":
   with open(args.profile, "rb") as f:
     data = pickle.load(f)
   sqtt_events = [e for e in data if type(e).__name__ == "ProfileSQTTEvent"]
-  kern_events = {e.name:e for e in data if type(e).__name__ == "ProfileProgramEvent"}
+  kern_events = {e.tag:e for e in data if type(e).__name__ == "ProfileProgramEvent"}
   target = next((e for e in data if type(e).__name__ == "ProfileDeviceEvent" and e.device.startswith("AMD"))).props["gfx_target_version"]
   for e in sqtt_events:
     if args.kernel is not None and args.kernel != e.kern: continue
