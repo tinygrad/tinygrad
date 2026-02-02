@@ -319,7 +319,7 @@ def threefry2x32(x: UOp, key: UOp):
 
 l2i_dt = {dtypes.long: dtypes.int, dtypes.ulong: dtypes.uint}
 def unpack32(v:UOp) -> tuple[UOp, UOp]: return v.bitcast(dtypes.uint) & 0xFFFF, v.bitcast(dtypes.uint) >> 16
-def l2i_idx(idx:UOp, off:int) -> UOp: return idx.replace(src=(idx.src[0], idx.src[1]*2+off))
+def reindex(idx:UOp, off:int, mul=2) -> UOp: return idx.replace(src=(idx.src[0], idx.src[1]*mul+off))
 
 # 4.3.1 is the relevant section in TAOCP
 def l2i(op: Ops, dt: DType, *uops:UOp):
@@ -396,6 +396,11 @@ def f2f(v, fr:DType, to:DType):
     underflow, overflow = exp < (1 + fb - tb), exp > ((1 << te) - 2 + (fb - tb))
     return exp.eq((1 << fe) - 1).where(infnan, sign.cast(f2f_dt[to]) | underflow.where(0, overflow.where(((1 << te) - 1) << tm, norm)))
 
+def f2f_load(x: UOp) -> UOp:
+  if x.dtype.count == 1: return f2f(x.replace(dtype=dtypes.ushort), dtypes.half, dtypes.float)
+  return UOp.vectorize(*(f2f(x.replace(dtype=dtypes.ushort, src=(reindex(x.src[0].src[0], i, 1),)), dtypes.half, dtypes.float)
+                         for i in range(x.dtype.count)))
+
 # ***** decomposition patterns *****
 
 powers_of_two: dict[int, int] = {2**i:i for i in range(64)}
@@ -450,17 +455,19 @@ def get_late_rewrite_patterns(ops:tuple[Ops, ...], device:str, force_transcenden
   if not is_dtype_supported(dtypes.half, device) or dtypes.half in emulated_dtypes:
     pat += [(UPat((*GroupOp.Defines, Ops.INDEX), name="x"), lambda x:
              x.replace(dtype=dtypes.uint16.ptr(x.dtype.size), tag=dtypes.half) if x.dtype.base == dtypes.half else None)]
-    pat += [(UPat(Ops.LOAD, dtypes.half, name="x"), lambda x: f2f(x.replace(dtype=dtypes.ushort), dtypes.half, dtypes.float))]
-    pat += [(UPat(GroupOp.ALU, dtypes.half, name="x"), lambda x: x.replace(dtype=dtypes.float))]
+    pat += [(UPat(GroupOp.All, src=(UPat(Ops.LOAD, dtypes.half, name="ld"),), name="x"), lambda x,ld:
+             x.replace(src=(ld.replace(dtype=dtypes.ushort).bitcast(x.dtype) if x.op == Ops.BITCAST else f2f_load(ld),)))]
+    pat += [(UPat((*GroupOp.ALU, Ops.CONST, Ops.CAST, Ops.GEP), dtypes.half, name="x"), lambda x: x.replace(dtype=dtypes.float.vec(x.dtype.count)))]
+    pat += [(UPat(Ops.BITCAST, (dtypes.ushort, dtypes.short, dtypes.bfloat16), src=(UPat.var("x", dtypes.float),), name="bc"), lambda bc,x:
+             bc.replace(src=(f2f(x.bitcast(dtypes.uint), dtypes.float, dtypes.half),)))]
     pat += [(UPat(Ops.STORE, src=(UPat.var("idx"), UPat.var("val", dtypes.float)), name='st'), lambda st,idx,val:
              st.replace(src=(idx,f2f(val.bitcast(dtypes.uint), dtypes.float, dtypes.half).bitcast(dtypes.ushort))) if idx.tag == dtypes.half else None)]
   if not is_dtype_supported(dtypes.long, device) or dtypes.long in emulated_dtypes:
     pat += [(UPat((*GroupOp.Defines, Ops.INDEX), name="x"), lambda x:
              x.replace(dtype=l2i_dt[x.dtype.base].ptr(x.dtype.size * 2)) if hasattr(x.dtype, 'size') and x.dtype.base in l2i_dt else None)]
-    pat += [(UPat(Ops.INDEX, tuple(l2i_dt.keys()), name='x'), lambda x:
-             None if x.tag is None else x.replace(dtype=l2i_dt[x.dtype], src=(x.src[0], x.src[1]*2+x.tag)))]
+    pat += [(UPat(Ops.INDEX, tuple(l2i_dt.keys()), name='x'), lambda x: None if x.tag is None else reindex(x, x.tag).replace(dtype=l2i_dt[x.dtype]))]
     pat += [(UPat(Ops.STORE, src=(UPat.var('idx'), UPat.var('val', tuple(l2i_dt.keys()))), name='st'), lambda st,idx,val:
-             st.replace(src=(l2i_idx(idx, 0), val.rtag(0))).group(st.replace(src=(l2i_idx(idx, 1), val.rtag(1)))) if val.tag is None else None)]
+             st.replace(src=(reindex(idx, 0), val.rtag(0))).group(st.replace(src=(reindex(idx, 1), val.rtag(1)))) if val.tag is None else None)]
     pat += [(UPat(GroupOp.Comparison, src=(UPat.var('a', tuple(l2i_dt.keys())), UPat.var('b', tuple(l2i_dt.keys()))), name="x"), lambda a,b,x:
              l2i(x.op, dt:=l2i_dt[a.dtype], a.rtag(0).cast(dt), a.rtag(1).cast(dt), b.rtag(0).cast(dt), b.rtag(1).cast(dt)))]
     pat += [(UPat(Ops.CAST, tuple(l2i_dt.keys()), src=(UPat.var('a'),), name="x"), lambda a,x:
@@ -473,7 +480,7 @@ def get_late_rewrite_patterns(ops:tuple[Ops, ...], device:str, force_transcenden
              None if x.tag is None else l2i(x.op, l2i_dt[x.dtype], *flatten((a.rtag(0).cast(dt:=l2i_dt[x.src[-1].dtype]), a.rtag(1).cast(dt))
                                                                             if a.dtype in l2i_dt else (a,) for a in x.src))[x.tag])]
     pat += [(UPat(Ops.LOAD, tuple(l2i_dt.keys()), src=(UPat.var('idx'),), name='x'), lambda x,idx:
-             None if x.tag is None else x.replace(dtype=l2i_dt[x.dtype], src=(l2i_idx(idx, x.tag),)))]
+             None if x.tag is None else x.replace(dtype=l2i_dt[x.dtype], src=(reindex(idx, x.tag),)))]
     pat += [(UPat(Ops.CONST, tuple(l2i_dt.keys()), name='x'), lambda x:
              None if x.tag is None else UOp.const(dt:=l2i_dt[x.dtype], truncate[dt]((x.arg >> 32) if x.tag == 1 else (x.arg & 0xFFFFFFFF))))]
   return PatternMatcher(pat)
