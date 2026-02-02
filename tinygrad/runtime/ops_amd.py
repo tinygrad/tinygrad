@@ -871,7 +871,7 @@ class PCIIface(PCIIfaceBase):
     for d in devs:
       if d.iface.dev_impl.recover():
         d.compute_queue.put_value, _ = d.iface.dev_impl.gfx.setup_ring(*d.compute_queue.params)
-        d.compute_queue.read_ptrs[0][0] = d.compute_queue.write_ptrs[0][0] = d.compute_queue.put_value
+        d.compute_queue.read_ptr[0] = d.compute_queue.write_ptr[0] = d.compute_queue.put_value
         d.timeline_signal.value = d.timeline_value - 1
         d.error_state = None
     raise RuntimeError(f"Device hang detected: {'; '.join(faults)}" if faults else "Device hang detected")
