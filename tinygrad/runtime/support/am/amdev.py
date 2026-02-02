@@ -225,6 +225,15 @@ class AMDev(PCIDevImplBase):
     self.ih.interrupt_handler()
     self.reg("regSCRATCH_REG6").write(self.is_err_state) # set finalized state.
 
+  def recover(self) -> bool:
+    if self.is_hive() or not self.is_err_state: return False # TODO: support mi300
+    if DEBUG >= 2: print(f"am {self.devfmt}: Start recovery")
+    self.ih.interrupt_handler()
+    self.gfx.reset_mec()
+    self.is_err_state = False
+    if DEBUG >= 2: print(f"am {self.devfmt}: Recovery complete")
+    return True
+
   def is_hive(self) -> bool: return self.gmc.xgmi_seg_sz > 0
 
   def paddr2mc(self, paddr:int) -> int: return self.gmc.mc_base + paddr
