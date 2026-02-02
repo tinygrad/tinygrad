@@ -500,13 +500,11 @@ class Parser:
           return vgpr.index(_to_u32(reg) * _u32(32) + _u32(int(idx)), ptr=True).load()
         elem = self.vars.get(f'{name}@{idx}', self.vars.get(f'{name}{idx}'))
         if elem is None:
-          # Fallback: if name exists as a UOp, extract bit idx from it (like var[idx])
+          # Extract bit idx from base variable (like var[idx])
           base = self.vars.get(name)
-          if isinstance(base, UOp):
-            dt = dtypes.uint64 if base.dtype in (dtypes.uint64, dtypes.int64) else dtypes.uint32
-            elem = (base.cast(dt) >> _const(dt, int(idx))) & _const(dt, 1)
-          else:
-            elem = _u32(0)
+          assert isinstance(base, UOp), f"unknown variable: {name}{idx}"
+          dt = dtypes.uint64 if base.dtype in (dtypes.uint64, dtypes.int64) else dtypes.uint32
+          elem = (base.cast(dt) >> _const(dt, int(idx))) & _const(dt, 1)
         if self.try_eat('DOT'):
           dt_name = self.eat('IDENT').val
           return _cast_to(elem, DTYPES.get(dt_name, dtypes.uint32))
@@ -519,15 +517,13 @@ class Parser:
         return self._handle_bracket_rest(first, _u32(0), name)
       if name in self.vars:
         v = self.vars[name]
-        return v if isinstance(v, UOp) else _u32(0) if isinstance(v, dict) else _u32(0)
+        assert isinstance(v, UOp), f"expected UOp for {name}, got {type(v)}"
+        return v
       raise RuntimeError(f"unknown variable: {name}")
     raise RuntimeError(f"unexpected token in primary: {self.peek()}")
 
   def _handle_dot(self, base, field: str) -> UOp:
-    if isinstance(base, str): return _u32(0)
-    if not isinstance(base, UOp):
-      if isinstance(base, dict): return base.get(field, _u32(0))
-      return _u32(0)
+    assert isinstance(base, UOp), f"expected UOp for dot access, got {type(base)}"
     if field == 'u64' and self.at('LBRACKET') and self.peek(1).type == 'IDENT' and self.peek(1).val == 'laneId':
       self.eat('LBRACKET')
       self.eat_val('laneId', 'IDENT')
@@ -701,7 +697,8 @@ class Parser:
       if ';' in body or '\n' in body or 'return' in body.lower():
         lines = [l.strip() for l in body.replace(';', '\n').split('\n') if l.strip() and not l.strip().startswith('//')]
         _, _, result = parse_block(lines, 0, lv, self.funcs)
-        return result if result is not None else _u32(0)
+        assert result is not None, f"lambda {name} must return a value"
+        return result
       return parse_expr(body, lv, self.funcs)
     if name in self.funcs:
       return self.funcs[name](*args)
@@ -709,7 +706,7 @@ class Parser:
 
   def _handle_mem_load(self, addr: UOp, dt) -> UOp:
     mem = self.vars.get('_vmem') if '_vmem' in self.vars else self.vars.get('_lds')
-    if mem is None: return _const(dt, 0)
+    assert mem is not None, "memory load requires _vmem or _lds"
     adt = dtypes.uint64 if addr.dtype == dtypes.uint64 else dtypes.uint32
     active = self.vars.get('_active')
     gate = (active,) if active is not None else ()
