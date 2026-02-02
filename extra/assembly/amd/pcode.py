@@ -271,6 +271,9 @@ _FUNCS: dict[str, Callable[..., UOp]] = {
   # System NOPs - these are scheduling hints, no effect on emulation
   'MIN': lambda a, b: (a < b).where(a, b),
   's_nop': lambda a: _u32(0),
+  # Address calculation for memory operations
+  'CalcDsAddr': lambda a, o, *r: a.cast(dtypes.uint32) + o.cast(dtypes.uint32),
+  'CalcGlobalAddr': lambda v, s, *r: v.cast(dtypes.uint64) + s.cast(dtypes.uint64),
 }
 for is_max, name in [(False, 'min'), (True, 'max')]:
   for dt, sfx in [(dtypes.float32, 'f32'), (dtypes.int, 'i32'), (dtypes.uint32, 'u32'), (dtypes.int16, 'i16'), (dtypes.uint16, 'u16')]:
@@ -288,21 +291,6 @@ for is_max, name in [(False, 'min'), (True, 'max')]:
   _FUNCS[f'v_{name}imum_f32'] = lambda *a, im=is_max: _minmax_reduce(im, dtypes.float32, *a)
   _FUNCS[f'v_{name}imum3_f16'] = lambda *a, im=is_max: _minmax_reduce(im, dtypes.half, *[_f16_extract(x) for x in a])
   _FUNCS[f'v_{name}imum3_f32'] = lambda *a, im=is_max: _minmax_reduce(im, dtypes.float32, *a)
-
-# Address calculation functions for memory operations
-def _calc_ds_addr(vgpr_a, offset, *rest):
-  """CalcDsAddr - calculate LDS address from vgpr + offset."""
-  return (vgpr_a.cast(dtypes.uint32) if vgpr_a.dtype != dtypes.uint32 else vgpr_a) + \
-         (offset.cast(dtypes.uint32) if offset.dtype != dtypes.uint32 else offset)
-
-def _calc_global_addr(v_addr, s_saddr, *rest):
-  """CalcGlobalAddr - calculate global address from vaddr + saddr. Emulator pre-computes v_addr and s_saddr correctly."""
-  v64 = v_addr.cast(dtypes.uint64) if v_addr.dtype != dtypes.uint64 else v_addr
-  s64 = s_saddr.cast(dtypes.uint64) if s_saddr.dtype != dtypes.uint64 else s_saddr
-  return v64 + s64
-
-_FUNCS['CalcDsAddr'] = _calc_ds_addr
-_FUNCS['CalcGlobalAddr'] = _calc_global_addr
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # TOKENIZER/PARSER
