@@ -795,7 +795,7 @@ def _compile_vop3p(inst: VOP3P, ctx: _Ctx) -> UOp:
     s0_mod = apply_neg_mix(apply_abs(src0, 1, 1, 1), 1, 1, 1)
     s1_mod = apply_neg_mix(apply_abs(src1, 2, 2, 2), 2, 2, 2)
     s2_mod = apply_neg_mix(apply_abs(src2, 4, 4, 4), 4, 4, 4)
-    srcs = {'S0': s0_mod, 'S1': s1_mod, 'S2': s2_mod,
+    srcs = {'S@0': s0_mod, 'S@1': s1_mod, 'S@2': s2_mod,
             'OPSEL_HI': UOp.const(dtypes.uint32, combined_opsel_hi), 'OPSEL': UOp.const(dtypes.uint32, opsel)}
   else:
     def get_half_bits(val: UOp, use_hi: bool, apply_neg: bool = False) -> UOp:

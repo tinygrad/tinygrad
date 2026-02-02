@@ -570,9 +570,11 @@ class Parser:
       var_name = self._find_var_name(base)
     if first.op == Ops.CONST:
       idx = int(first.arg)
+      # Check for array element (var@idx)
       if var_name and f'{var_name}@{idx}' in self.vars:
         v = self.vars[f'{var_name}@{idx}']
         return _cast_to(v, dt_suffix) if dt_suffix else v
+      # Bit extraction
       dt = dtypes.uint64 if base.dtype in (dtypes.uint64, dtypes.int64) else dtypes.uint32
       base_cast = base.cast(dt) if base.dtype != dt else base
       result = ((base_cast >> _const(dt, idx)) & _const(dt, 1))
@@ -661,14 +663,13 @@ class Parser:
 
   def _parse_number(self, num: str) -> UOp:
     if num.startswith('0x') or num.startswith('0X'):
-      val = int(num.rstrip('ULul'), 16)
-      return _const(dtypes.uint64 if val > 0xFFFFFFFF else dtypes.uint32, val)
-    suffix, num = _strip_suffix(num)
-    if '.' in num or suffix in ('F', 'f'):
-      return _const(dtypes.float32 if suffix in ('F', 'f') else dtypes.float64, float(num))
-    val = int(num)
-    if 'ULL' in suffix: return _const(dtypes.uint64, val)
-    if 'LL' in suffix or 'L' in suffix: return _const(dtypes.uint64, val)
+      is_u64 = num.upper().endswith('ULL') or num.upper().endswith('LL') or num.upper().endswith('UL')
+      return _const(dtypes.uint64 if is_u64 else dtypes.uint32, int(num.rstrip('ULul'), 16))
+    suffix, num_str = _strip_suffix(num)
+    if '.' in num_str or suffix in ('F', 'f'):
+      return _const(dtypes.float32 if suffix in ('F', 'f') else dtypes.float64, float(num_str))
+    val = int(num_str)
+    if 'ULL' in suffix or 'LL' in suffix or 'L' in suffix: return _const(dtypes.uint64, val)
     if 'U' in suffix: return _const(dtypes.uint32, val)
     return _const(dtypes.int if val < 0 else dtypes.uint32, val)
 
@@ -757,29 +758,9 @@ def parse_tokens(toks: list[Token], vars: dict[str, VarVal], funcs: dict | None 
 
 # Unified block parser for pcode
 def _subst_loop_var(line: str, loop_var: str, val: int) -> str:
-  """Substitute loop variable and evaluate bracket expressions.
-  Converts var[loop_var] to var{val} for array element access (like the old regex parser)."""
+  """Substitute loop variable with its value."""
   toks = tokenize(line)
-  # First pass: convert var[loop_var] to var{loop_var} to mark for array element assignment
-  result_toks: list[Token] = []
-  j = 0
-  while j < len(toks):
-    t = toks[j]
-    # Check for pattern: IDENT[loop_var] where it's not preceded by a dot (not .type[...])
-    if t.type == 'IDENT' and j+3 < len(toks) and toks[j+1].type == 'LBRACKET' and toks[j+2].type == 'IDENT' and toks[j+2].val == loop_var and toks[j+3].type == 'RBRACKET':
-      # Check that it's not .type[loop_var]
-      if not result_toks or result_toks[-1].type != 'DOT':
-        result_toks.append(t)
-        result_toks.append(Token('LBRACE', '{'))
-        result_toks.append(Token('NUM', str(val)))
-        result_toks.append(Token('RBRACE', '}'))
-        j += 4
-        continue
-    result_toks.append(t)
-    j += 1
-  # Second pass: substitute loop variable in remaining positions
-  subst_parts = [str(val) if t.type == 'IDENT' and t.val == loop_var else t.val for t in result_toks if t.type != 'EOF']
-  return ' '.join(subst_parts)
+  return ' '.join(str(val) if t.type == 'IDENT' and t.val == loop_var else t.val for t in toks if t.type != 'EOF')
 
 def _set_bits(old: UOp, val: UOp, width: int, offset: int) -> UOp:
   """Set bits [offset:offset+width) in old to val, masking and shifting appropriately."""
@@ -932,19 +913,15 @@ def parse_block(lines: list[str], start: int, vars: dict[str, VarVal], funcs: di
       if assigns is not None: assigns.append((f'MEM[{_tok_str(addr_toks)}].{dt_name}', (addr, rhs)))
       i += 1; continue
 
-    # VGPR assignment: VGPR[lane][reg] = value or VGPR{lane}[reg] = value (after loop unrolling)
-    if first == 'vgpr' and toks[1].type in ('LBRACKET', 'LBRACE'):
-      if toks[1].type == 'LBRACKET':
-        j, lane_toks = _match_bracket(toks, 1)
-        ln = parse_tokens(lane_toks, vars, funcs)
-      else:  # LBRACE - after loop substitution
-        ln, j = _u32(int(toks[2].val)), 4
+    # VGPR assignment: VGPR[lane][reg] = value
+    if first == 'vgpr' and toks[1].type == 'LBRACKET':
+      j, lane_toks = _match_bracket(toks, 1)
       if j < len(toks) and toks[j].type == 'LBRACKET':
         j, reg_toks = _match_bracket(toks, j)
         if j < len(toks) and toks[j].type == 'DOT': j += 2  # skip .type suffix
         if j < len(toks) and toks[j].type == 'EQUALS': j += 1
-        rg, val = parse_tokens(reg_toks, vars, funcs), parse_tokens(toks[j:], vars, funcs)
-        if assigns is not None: assigns.append((f'VGPR[{ln.arg if ln.op == Ops.CONST else "?"}][{_tok_str(reg_toks)}]', (_to_u32(rg) * _u32(32) + _to_u32(ln), val)))
+        ln, rg, val = parse_tokens(lane_toks, vars, funcs), parse_tokens(reg_toks, vars, funcs), parse_tokens(toks[j:], vars, funcs)
+        if assigns is not None: assigns.append((f'VGPR[{_tok_str(lane_toks)}][{_tok_str(reg_toks)}]', (_to_u32(rg) * _u32(32) + _to_u32(ln), val)))
         i += 1; continue
 
     # Compound destination: {hi.type, lo.type} = value
@@ -1005,29 +982,26 @@ def parse_block(lines: list[str], start: int, vars: dict[str, VarVal], funcs: di
             block_assigns[var] = vars[var] = _set_bit(existing, _to_u32(parse_tokens(bit_toks, vars, funcs)), parse_tokens(toks[j+1:], vars, funcs))
             i += 1; continue
 
-    # Array element: var{idx} = value (static) or var[expr] = value (dynamic)
-    if len(toks) >= 5 and toks[0].type == 'IDENT' and toks[1].type == 'LBRACE' and toks[2].type == 'NUM':
-      var, idx = toks[0].val, int(toks[2].val)
-      j = 4
-      while j < len(toks) and toks[j].type != 'EQUALS': j += 1
-      if j < len(toks):
-        val = parse_tokens(toks[j+1:], vars, funcs)
-        existing = block_assigns.get(var, vars.get(var))
-        if existing is not None and isinstance(existing, UOp):
-          block_assigns[var] = vars[var] = _set_bit(existing, _u32(idx), val)
-        else:
-          block_assigns[f'{var}@{idx}'] = vars[f'{var}@{idx}'] = val
-        i += 1; continue
-    # Dynamic array element: var[expr] = value where var has @-elements
+    # Array element: var[idx] = value (static index) or var[expr] = value (dynamic)
     if len(toks) >= 4 and toks[0].type == 'IDENT' and toks[1].type == 'LBRACKET':
       var = toks[0].val
-      elems = [(k.split('@')[1], v) for k, v in {**vars, **block_assigns}.items() if k.startswith(f'{var}@') and isinstance(v, UOp)]
-      if elems:
-        j, idx_toks = _match_bracket(toks, 1)
-        if j < len(toks) and toks[j].type == 'EQUALS':
+      j, idx_toks = _match_bracket(toks, 1)
+      if j < len(toks) and toks[j].type == 'EQUALS':
+        # Static index: var[NUM] = value
+        if len(idx_toks) == 1 and idx_toks[0].type == 'NUM':
+          idx = int(idx_toks[0].val.rstrip('UuLl'))
+          val = parse_tokens(toks[j+1:], vars, funcs)
+          existing = block_assigns.get(var, vars.get(var))
+          if existing is not None and isinstance(existing, UOp):
+            block_assigns[var] = vars[var] = _set_bit(existing, _u32(idx), val)
+          else:
+            block_assigns[f'{var}@{idx}'] = vars[f'{var}@{idx}'] = val
+          i += 1; continue
+        # Dynamic index: var[expr] = value where var has @-elements
+        elems = [(k.split('@')[1], v) for k, v in {**vars, **block_assigns}.items() if k.startswith(f'{var}@') and isinstance(v, UOp)]
+        if elems:
           idx_expr = parse_tokens(idx_toks, vars, funcs)
           val = parse_tokens(toks[j+1:], vars, funcs)
-          # Update all elements: elem = WHERE(idx == elem_idx, val, old_elem)
           for elem_idx_str, old_elem in elems:
             elem_idx = int(elem_idx_str)
             cond = _to_u32(idx_expr).eq(_u32(elem_idx))
