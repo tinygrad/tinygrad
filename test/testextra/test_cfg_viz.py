@@ -43,7 +43,7 @@ class TestCfg(unittest.TestCase):
       self.skipTest(f"tests written for RDNA, got arch {arch}")
 
   def test_simple(self):
-    k = Kernel()
+    k = Kernel(arch=Device["AMD"].arch)
     k.label("entry")
     k.emit(s_branch(), target="bb1")
     k.label("bb1")
@@ -52,7 +52,7 @@ class TestCfg(unittest.TestCase):
     run_asm("simple", k)
 
   def test_diamond(self):
-    k = Kernel()
+    k = Kernel(arch=Device["AMD"].arch)
     k.label("entry")
     k.emit(s_mov_b32(s[0], 0))
     k.emit(s_mov_b32(s[1], 0))
@@ -82,7 +82,7 @@ class TestCfg(unittest.TestCase):
     self.assertEqual(insts, ['s_mov_b32', 's_cmp_eq_u64'])
 
   def test_loop(self):
-    k = Kernel()
+    k = Kernel(arch=Device["AMD"].arch)
     k.label("entry")
     k.emit(s_mov_b32(s[1], 4))
     k.label("loop")
@@ -94,7 +94,7 @@ class TestCfg(unittest.TestCase):
     run_asm("simple_loop", k)
 
   def test_loop_branch(self):
-    k = Kernel()
+    k = Kernel(arch=Device["AMD"].arch)
     k.label("entry")
     k.emit(s_mov_b32(s[1], 4))
     k.label("loop")
@@ -112,7 +112,7 @@ class TestCfg(unittest.TestCase):
     run_asm("loop_if", k)
 
   def test_loop_break(self):
-    k = Kernel()
+    k = Kernel(arch=Device["AMD"].arch)
     k.label("entry")
     k.emit(s_mov_b32(s[1], 8))
     k.label("loop")
@@ -127,7 +127,7 @@ class TestCfg(unittest.TestCase):
     run_asm("loop_break", k)
 
   def test_switch(self):
-    k = Kernel()
+    k = Kernel(arch=Device["AMD"].arch)
     k.label("entry")
     k.emit(s_cmp_eq_i32(s[0], 0))
     k.emit(s_cbranch_scc1(), target="case0")
@@ -149,7 +149,7 @@ class TestCfg(unittest.TestCase):
     run_asm("switch_case", k)
 
   def test_ping_pong(self):
-    k = Kernel()
+    k = Kernel(arch=Device["AMD"].arch)
     k.label("entry")
     k.emit(s_cmp_eq_i32(s[0], 0))
     k.emit(s_cbranch_scc1(), target="ping")
@@ -168,7 +168,7 @@ class TestCfg(unittest.TestCase):
 
   def test_colored_blocks(self):
     N = 10
-    k = Kernel()
+    k = Kernel(arch=Device["AMD"].arch)
     k.label("entry")
     k.emit(s_branch(), target="init0")
     for i in range(N):
@@ -188,7 +188,7 @@ class TestCfg(unittest.TestCase):
     run_asm("test_colored_blocks", k)
 
   def test_jump_back_to_end(self):
-    k = Kernel()
+    k = Kernel(arch=Device["AMD"].arch)
     k.label("entry")
     k.emit(s_mov_b32(s[1], 2))
     k.emit(s_cbranch_execz(), target="loop")
@@ -202,7 +202,7 @@ class TestCfg(unittest.TestCase):
     run_asm("jump_back_to_end", k)
 
   def test_hit_count(self):
-    k = Kernel()
+    k = Kernel(arch=Device["AMD"].arch)
     k.label("entry")
     k.emit(s_mov_b32(s[1], 1))
     k.emit(s_branch(), target="alt")
