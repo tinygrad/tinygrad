@@ -142,8 +142,7 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
 # *****************
 # 3.5 cleanups
 
-# Ops.NOOP happens when we have a COPY to the device the Tensor is already on. We treat it like COPY here for MSTACK.
-ALWAYS_RUN_OPS = {Ops.CONTIGUOUS, Ops.COPY, Ops.ASSIGN, Ops.ENCDEC, Ops.NOOP}
+ALWAYS_RUN_OPS = {Ops.CONTIGUOUS, Ops.COPY, Ops.ASSIGN, Ops.ENCDEC}
 
 # you don't know in the first pass if axes are going to die, this happens if there's an EXPAND to the left
 def cleanup_dead_axes(b:UOp):
@@ -258,7 +257,7 @@ pm_const_buffer_folding = pm_mops+PatternMatcher([
   # copy on CONST is CONST
   (UPat(Ops.COPY, src=(UPat.cvar("x"), UPat()), name="copy"), lambda copy,x: copy.const_like(x.arg)),
   # hack if a noop turned to a const
-  (UPat.cvar("c").f(Ops.NOOP).f(Ops.BUFFERIZE, allow_any_len=True, name="buf"), lambda c,buf: buf.replace(src=(c,)+buf.src[1:])),
+  (UPat(Ops.NOOP, src=(UPat.cvar("c"),), name="noop"), lambda c,noop: c.rtag(noop.tag)),
   # mstack on CONST is CONST
   (UPat(Ops.MSTACK, src=(UPat.var("s"),), allow_any_len=True).f(Ops.INDEX, allow_any_len=True),
    lambda s: UOp.const(c.dtype, c.arg) if (c:=s.base).op is Ops.CONST else None),
