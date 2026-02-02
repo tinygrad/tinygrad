@@ -315,7 +315,7 @@ def eval_pyrender(code:str) -> UOp:
 def test_pyrender(test_ast:UOp, assert_parents=True):
   try: code = pyrender(test_ast)
   except NotImplementedError: return None  # this is okay, not all ops can be pyrendered
-  ast = eval_pyrender(code)
+  ast:UOp = eval_pyrender(code)
   if ast is not test_ast:
     if assert_parents:
       for u in test_ast.toposort(): test_pyrender(u, assert_parents=False)
