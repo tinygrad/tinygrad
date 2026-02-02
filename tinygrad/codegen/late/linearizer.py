@@ -94,9 +94,23 @@ def unify_ends(sink:UOp) -> UOp:
   replacements: dict[UOp, UOp] = {}
   for r, es in by_range.items():
     if len(es) <= 1: continue
-    new_data = UOp.group(*(e.src[0] for e in es))
-    new_end = UOp(Ops.END, new_data.dtype, (new_data,) + r)
-    for i, e in enumerate(es): replacements[e] = new_end.gep(i) if len(es) > 1 else new_end
+    from tinygrad.dtype import dtypes
+    void_ends = [e for e in es if e.dtype == dtypes.void]
+    val_ends = [e for e in es if e.dtype != dtypes.void]
+
+    if not val_ends:
+      new_end = UOp(Ops.END, dtypes.void, (UOp.group(*(e.src[0] for e in void_ends)),) + r)
+      for e in es: replacements[e] = new_end
+    else:
+      if len(val_ends) > 1 and all(e.dtype == val_ends[0].dtype for e in val_ends):
+        val_uop = UOp(Ops.VECTORIZE, val_ends[0].dtype.vec(len(val_ends)), tuple(e.src[0] for e in val_ends))
+      else: val_uop = val_ends[0].src[0]
+
+      new_data = val_uop.after(*(e.src[0] for e in void_ends))
+      new_end = UOp(Ops.END, new_data.dtype, (new_data,) + r)
+      for e in void_ends: replacements[e] = new_end
+      for i, e in enumerate(val_ends):
+        replacements[e] = new_end.gep(i) if len(val_ends) > 1 else new_end
 
   return sink.substitute(replacements)
 
