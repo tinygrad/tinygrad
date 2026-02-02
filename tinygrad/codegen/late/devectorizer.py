@@ -314,10 +314,10 @@ def horizontal_reduce(inp:UOp, out_dtype:DType) -> list[UOp]:
   return [inp]
 
 def reduce_to_acc(ctx:ReduceContext, red:UOp):
-  inp, reduce_range = red.src[0], list(red.src[1:])
+  inp, orig_reduce_range = red.src[0], red.src[1:]
   sub: dict[UOp, UOp] = {}
   new_reduce_range: list[UOp] = []
-  for r in reduce_range:
+  for r in orig_reduce_range:
     if r in ctx.seen_ranges:
       nr = UOp.range(r.src[0], ctx.next_axis, r.arg[1], *r.arg[2:], dtype=r.dtype, src=r.src[1:])
       ctx.next_axis += 1
