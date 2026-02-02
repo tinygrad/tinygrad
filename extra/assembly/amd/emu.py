@@ -359,17 +359,17 @@ class _Ctx:
     If lane is None, only scalar access is supported (off must be < 256).
     is_f64: True for F64 operations where 64-bit literals go in high 32 bits."""
     is_float_const = (off >= _c(240)) & (off <= _c(248))
-    # Guard SGPR access: only read when off < 256 to avoid OOB when off is in VGPR range
-    is_scalar = off < _c(256)
-    sgpr_lo = self.sgpr.index((is_scalar.where(off, _c(0))).cast(dtypes.int), ptr=True).load()
+    is_vgpr = off >= _c(256)
+    sgpr_lo = self.sgpr.index((is_vgpr.ne(True).where(off, _c(0))).cast(dtypes.int), ptr=True).load()  # guard OOB when off >= 256
 
     if lane is not None:
-      is_vgpr, vgpr_reg = off >= _c(256), off - _c(256)
+      vgpr_reg = off - _c(256)
       vgpr_lo = self.rvgpr_dyn(vgpr_reg, lane, is_vgpr)
       vgpr_val = _u64(vgpr_lo, self.rvgpr_dyn(vgpr_reg + _c(1), lane, is_vgpr)) if bits == 64 else vgpr_lo
 
     if bits == 64:
-      sgpr_val = _u64(sgpr_lo, self.rsgpr_dyn(off + _c(1)))
+      sgpr_hi = self.sgpr.index((is_vgpr.ne(True).where(off + _c(1), _c(0))).cast(dtypes.int), ptr=True).load()
+      sgpr_val = _u64(sgpr_lo, sgpr_hi)
       # Integer inline constants: sign-extend 32-bit value from buffer to 64-bit
       # Float constants: cast F32 to F64
       int_inline = sgpr_lo.cast(dtypes.int32).cast(dtypes.int64)
