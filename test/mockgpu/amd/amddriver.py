@@ -4,7 +4,7 @@ import tinygrad.runtime.autogen.am.am as am
 import tinygrad.runtime.autogen.amdgpu_drm as amdgpu_drm
 from tinygrad.helpers import from_mv
 from test.mockgpu.driver import VirtDriver, VirtFileDesc, TextFileDesc, DirFileDesc, VirtFile
-from test.mockgpu.amd.amdgpu import AMDGPU, gpu_props, MOCKGPU_ARCH, GFX_TARGET_VERSION
+from test.mockgpu.amd.amdgpu import AMDGPU, gpu_props, GFX_TARGET_VERSION
 
 libc = ctypes.CDLL(ctypes.util.find_library("c"))
 libc.mmap.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_long]

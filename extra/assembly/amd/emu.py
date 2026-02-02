@@ -188,10 +188,10 @@ def parse_pcode(pcode: str, srcs: dict[str, UOp] | None = None) -> tuple[dict, l
   vars: dict = srcs.copy() if srcs else {}
   assigns: list[tuple[str, UOp]] = []
   raw_lines = [l.strip().rstrip(';') for l in pcode.split('\n') if l.strip() and not l.strip().startswith('//')]
-  # Join continuation lines (lines ending with && || or open paren)
+  # TODO: pcode.py should tokenize full pcode string instead of line-by-line, then this hack can be removed
   lines: list[str] = []
   for l in raw_lines:
-    if lines and lines[-1].rstrip().endswith(('&&', '||', '(')): lines[-1] = lines[-1] + ' ' + l
+    if lines and lines[-1].endswith('&&'): lines[-1] = lines[-1] + ' ' + l
     else: lines.append(l)
   _, final, _ = parse_block(lines, 0, vars, assigns=assigns)
   sliced = set(d.split('[')[0] for d, _ in assigns if '[' in d)
