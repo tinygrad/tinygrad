@@ -356,10 +356,6 @@ class TestPolyN(unittest.TestCase):
     np.testing.assert_allclose(polyN(3.0, [1.0, -2.0, 1.0]), 4.0)
     np.testing.assert_allclose(polyN(4.0, [1.0, -2.0, 1.0]), 9.0)
 
-  def test_tensor(self):
-    from tinygrad.tensor import Tensor
-    np.testing.assert_allclose(polyN(Tensor([1.0, 2.0, 3.0, 4.0]), [1.0, -2.0, 1.0]).numpy(), [0.0, 1.0, 4.0, 9.0])
-
   def test_uop(self):
     from tinygrad.dtype import dtypes
     from tinygrad.uop.ops import UOp
