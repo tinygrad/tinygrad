@@ -9,8 +9,7 @@ from extra.assembly.amd.dsl import s, v, Inst
 from extra.assembly.amd.elf import create_elf
 
 def assemble_insts(insts:list[Inst], name:str, arch:str, kernarg_size:int=8) -> tuple[UOp, UOp]:
-  kd = {"kernarg_size":kernarg_size, "user_sgpr_kernarg_segment_ptr":1, "user_sgpr_count":2, "next_free_vgpr":8, "next_free_sgpr":8,
-        "wavefront_size32":1}
+  kd = {"kernarg_size":kernarg_size, "user_sgpr_kernarg_segment_ptr":1, "next_free_vgpr":8, "user_sgpr_count":2, "wavefront_size32":1}
   disasm = "\n".join([inst.disasm() for inst in insts])
   binary = create_elf(b"".join(inst.to_bytes() for inst in insts+[s_code_end()]), kd, arch="rdna3")
   return UOp(Ops.SOURCE, arg=disasm), UOp(Ops.BINARY, arg=binary)
