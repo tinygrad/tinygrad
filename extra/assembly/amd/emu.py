@@ -57,7 +57,7 @@ from extra.assembly.amd.autogen.rdna4.ins import (SOP1 as R4_SOP1, SOP2 as R4_SO
   SMEM as R4_SMEM, VOP1 as R4_VOP1, VOP1_SDST as R4_VOP1_SDST, VOP2 as R4_VOP2, VOP3 as R4_VOP3, VOP3_SDST as R4_VOP3_SDST,
   VOP3SD as R4_VOP3SD, VOP3P as R4_VOP3P, VOPC as R4_VOPC, DS as R4_DS, VFLAT as R4_FLAT, VGLOBAL as R4_GLOBAL, VSCRATCH as R4_SCRATCH,
   VOPD as R4_VOPD, SOPPOp as R4_SOPPOp, VOPDOp as R4_VOPDOp, SMEMOp as R4_SMEMOp)
-from extra.assembly.amd.dsl import VCC_LO, EXEC_LO, SCC
+from extra.assembly.amd.dsl import VCC_LO, EXEC_LO, SCC, ttmp
 from extra.assembly.amd.autogen.common import Fmt, OpType
 from extra.assembly.amd.pcode import parse_block, _FUNCS
 
@@ -191,7 +191,12 @@ def get_pcode(op) -> str:
 def parse_pcode(pcode: str, srcs: dict[str, UOp] | None = None) -> tuple[dict, list[tuple[str, UOp]]]:
   vars: dict = srcs.copy() if srcs else {}
   assigns: list[tuple[str, UOp]] = []
-  lines = [l.strip().rstrip(';') for l in pcode.split('\n') if l.strip() and not l.strip().startswith('//')]
+  raw_lines = [l.strip().rstrip(';') for l in pcode.split('\n') if l.strip() and not l.strip().startswith('//')]
+  # Join continuation lines (lines ending with && || or open paren)
+  lines: list[str] = []
+  for l in raw_lines:
+    if lines and lines[-1].rstrip().endswith(('&&', '||', '(')): lines[-1] = lines[-1] + ' ' + l
+    else: lines.append(l)
   _, final, _ = parse_block(lines, 0, vars, assigns=assigns)
   sliced = set(d.split('[')[0] for d, _ in assigns if '[' in d)
   for var, val in final.items():
@@ -506,7 +511,7 @@ def _compile_sopp(inst: SOPP, ctx: _Ctx) -> UOp:
   if inst.op == SOPPOp.S_ENDPGM:
     return UOp.sink(ctx.wsgpr_dyn(_c(PC_LO_IDX), UOp.const(dtypes.uint32, 0xFFFFFFFF)),
                           ctx.wsgpr_dyn(_c(PC_HI_IDX), UOp.const(dtypes.uint32, 0xFFFFFFFF)))
-  if inst.op == SOPPOp.S_NOP: return UOp.sink(*ctx.inc_pc())  # S_NOP is a no-op
+  if inst.op in (SOPPOp.S_NOP, R4_SOPPOp.S_NOP): return UOp.sink(*ctx.inc_pc())  # S_NOP is a no-op
   # NOTE: we ignore SOPPs without PCODE
   if inst.op in _get_pcode_dict(inst.op):
     pcode = get_pcode(inst.op)
@@ -960,7 +965,9 @@ def _compile_mem_op(inst: DS | FLAT | GLOBAL | SCRATCH, ctx: _Ctx) -> UOp:
       else:
         data = {'DATA': _u64(ctx.rvgpr_dyn(vdata_reg, lane), ctx.rvgpr_dyn(vdata_reg + _c(1), lane)),
                 'DATA2': _u64(ctx.rvgpr_dyn(data1_reg, lane), ctx.rvgpr_dyn(data1_reg + _c(1), lane)) if has_data1 else UOp.const(dtypes.uint64, 0)}
-      return {'ADDR': addr, 'ADDR_BASE': addr, 'OFFSET': offset, 'OFFSET0': offset0, 'OFFSET1': offset1, '_lds': mem, 'laneId': lane, **data}
+      # RDNA3 uses ADDR/OFFSET, RDNA4 uses vgpr_a/offset (lowercase) + CalcDsAddr function
+      return {'ADDR': addr, 'ADDR_BASE': addr, 'OFFSET': offset, 'OFFSET0': offset0, 'OFFSET1': offset1, '_lds': mem, 'laneId': lane,
+              'vgpr_a': ctx.rvgpr_dyn(addr_reg, lane), 'offset': offset, **data}
     active = _lane_active(exec_mask, lane)
     # saddr < 124 means valid SGPR pair, otherwise use 0 (NULL means no saddr contribution)
     use_saddr = (saddr_reg < _c(124)) if saddr_reg is not None else UOp.const(dtypes.bool, False)
@@ -1083,7 +1090,7 @@ def decode_program(data: bytes, arch: str = "rdna3") -> dict[int, tuple[str, Cal
   i = 0
   while i < len(data):
     inst = decode_inst(data[i:], arch)
-    if inst.op in (SOPPOp.S_CODE_END, R4_SOPPOp.S_CODE_END): break
+    if hasattr(inst, 'op') and inst.op in (SOPPOp.S_CODE_END, R4_SOPPOp.S_CODE_END): break
     try:
       runner, is_new = _get_runner(bytes(data[i:i + inst.size() + 4]), arch)
       if DEBUG >= 3:
@@ -1173,6 +1180,12 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
                                  (hsa.AMD_COMPUTE_PGM_RSRC_TWO_ENABLE_SGPR_WORKGROUP_ID_Y, gidy),
                                  (hsa.AMD_COMPUTE_PGM_RSRC_TWO_ENABLE_SGPR_WORKGROUP_ID_Z, gidz)]:
               if rsrc2 & enabled: st._write_sgpr(sgpr_idx, gid); sgpr_idx += 1
+
+            # RDNA4 uses TTMP registers for workgroup IDs: ttmp[9]=gidx, ttmp[10]=gidy, ttmp[11]=gidz
+            if arch == "rdna4":
+              st._write_sgpr(ttmp[9].offset, gidx)
+              st._write_sgpr(ttmp[10].offset, gidy)
+              st._write_sgpr(ttmp[11].offset, gidz)
 
             # v0 = packed workitem IDs, scratch stride in secret SGPR
             for lane in range(n_lanes):
