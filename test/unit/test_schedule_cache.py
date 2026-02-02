@@ -35,7 +35,6 @@ class TestScheduleCache(unittest.TestCase):
     _, var_vals = t.schedule_with_vars()
     self.assertEqual(var_vals, {'pos': 42})
 
-  @Context(SPEC=0)
   def test_custom_kernel(self):
     for i in range(4):
       a = Tensor.empty(1)
@@ -43,7 +42,6 @@ class TestScheduleCache(unittest.TestCase):
       a.realize()
       self.assertEqual(a.item(), i)
 
-  @Context(SPEC=0)
   def test_same_custom_function_reuses_cache(self):
     schedule_cache.clear()
     fxn = functools.partial(custom_set0_kernel, num=10)
