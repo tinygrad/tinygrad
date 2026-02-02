@@ -331,6 +331,7 @@ typedef struct ip_discovery_header
     self.assertEqual(result, 43)  # 42 + 1
 
 @unittest.skipIf(OSX and ('MTLCompiler' in DLL._loaded_ or 'llvm' in DLL._loaded_), "libclang can't be loaded after MTLCompiler or llvm on OSX")
+@unittest.skipIf(WIN, "doesn't compile on windows")
 class TestAutogen(unittest.TestCase):
   def run_gen(self, contents):
     with tempfile.NamedTemporaryFile(mode='w', suffix='.h') as f:
