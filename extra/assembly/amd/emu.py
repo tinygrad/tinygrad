@@ -874,15 +874,6 @@ def _compile_mem_op(inst: DS | FLAT | GLOBAL | SCRATCH, ctx: _Ctx) -> UOp:
   mem = ctx.lds if is_lds else ctx.scratch if is_scratch else ctx.vmem
   addr_shift = UOp.const(dtypes.uint32 if is_lds else dtypes.uint64, 2)
 
-  # Helper to get field by name, handling rdna3/rdna4 naming differences
-  def get_field(name):
-    # rdna4 renames: addr->vaddr, data->vsrc, offset->ioffset
-    rdna4_names = {'addr': 'vaddr', 'data': 'vsrc', 'offset': 'ioffset'}
-    field = getattr(type(inst), name, None)
-    if field is None and name in rdna4_names:
-      field = getattr(type(inst), rdna4_names[name], None)
-    return field
-
   # Extract register info - all dynamic for deduplication
   if is_lds:
     addr_reg = ctx.inst_field(type(inst).addr)
@@ -892,13 +883,19 @@ def _compile_mem_op(inst: DS | FLAT | GLOBAL | SCRATCH, ctx: _Ctx) -> UOp:
     offset1 = ctx.inst_field(type(inst).offset1)
     offset = offset0  # DS uses offset0 as primary offset
     saddr_reg = None
-  else:
-    addr_reg = ctx.inst_field(get_field('addr'))
-    vdata_reg = ctx.inst_field(get_field('data'))
+  elif isinstance(inst, (R4_GLOBAL, R4_SCRATCH, R4_FLAT)):  # RDNA4: vaddr, vsrc, ioffset
+    addr_reg = ctx.inst_field(type(inst).vaddr)
+    vdata_reg = ctx.inst_field(type(inst).vsrc)
     vdst_reg = ctx.inst_field(type(inst).vdst)
-    offset = ctx.inst_field_signed(get_field('offset'))
+    offset = ctx.inst_field_signed(type(inst).ioffset)
     offset0, offset1 = _c(0), _c(0)
-    # Dynamic saddr - read field, NULL (124) or >= 128 means no saddr
+    saddr_reg = ctx.inst_field(type(inst).saddr) if hasattr(type(inst), 'saddr') else None
+  else:  # RDNA3: addr, data, offset
+    addr_reg = ctx.inst_field(type(inst).addr)
+    vdata_reg = ctx.inst_field(type(inst).data)
+    vdst_reg = ctx.inst_field(type(inst).vdst)
+    offset = ctx.inst_field_signed(type(inst).offset)
+    offset0, offset1 = _c(0), _c(0)
     saddr_reg = ctx.inst_field(type(inst).saddr) if hasattr(type(inst), 'saddr') else None
 
   # Data width from canonical_op_bits (32/64/96/128), default to 32 for untyped ops
@@ -1062,12 +1059,6 @@ def _get_runner(inst_bytes: bytes, arch: str = "rdna3"):
   _canonical_runner_cache.append((base, mask, size, runner))
   return runner, True
 
-def _is_code_end(inst) -> bool:
-  """Check if instruction is S_CODE_END for either RDNA3 or RDNA4."""
-  if isinstance(inst, SOPP) and inst.op == SOPPOp.S_CODE_END: return True
-  if isinstance(inst, R4_SOPP) and inst.op == R4_SOPPOp.S_CODE_END: return True
-  return False
-
 @functools.cache
 def decode_program(data: bytes, arch: str = "rdna3") -> dict[int, tuple[str, Callable, list[int], Any]]:
   """Decode program to {pc: (name, fxn, globals, runner)}."""
@@ -1075,7 +1066,7 @@ def decode_program(data: bytes, arch: str = "rdna3") -> dict[int, tuple[str, Cal
   i = 0
   while i < len(data):
     inst = decode_inst(data[i:], arch)
-    if _is_code_end(inst): break
+    if inst.op in (SOPPOp.S_CODE_END, R4_SOPPOp.S_CODE_END): break
     try:
       runner, is_new = _get_runner(bytes(data[i:i + inst.size() + 4]), arch)
       if DEBUG >= 3:
@@ -1183,9 +1174,7 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
               assert 4 not in globals_list or scratch_buf, f"SCRATCH instruction {name} but scratch_size=0"
               if DEBUG >= 6:
                 inst = decode_inst(bytes((ctypes.c_char * 12).from_address(pc).raw), arch)
-                print(f"[emu] exec PC={pc:X}: {inst!r}", flush=True)
-              if DEBUG >= 7:
-                print(f"[emu] calling {name} with globals_list={globals_list}, bufs={[hex(b.value) for b in c_bufs]}", flush=True)
+                print(f"[emu] exec PC={pc:X}: {inst!r}")
               fxn(*[c_bufs[g] for g in globals_list])
             else: raise RuntimeError("exceeded 1M instructions, likely infinite loop")
   return 0
