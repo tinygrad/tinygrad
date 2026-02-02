@@ -55,7 +55,7 @@ if __name__ == "__main__":
     with Context(CORRECT_DIVMOD_FOLDING=1):
       simplified_expr = expr.simplify()
 
-    solver = z3.Solver()
+    solver = z3.Solver(ctx=z3.Context())
     solver.set(timeout=5000)  # some expressions take very long verify, but its very unlikely they actually return sat
     z3_expr, z3_simplified_expr, v1, v2, v3 = uops_to_z3(solver, expr, simplified_expr, u1, u2, u3)
     check = solver.check(z3_simplified_expr != z3_expr)

@@ -5,7 +5,7 @@ from pathlib import Path
 from tinygrad.helpers import DEBUG
 from tinygrad.runtime.autogen import rocprof
 from tinygrad.runtime.support.elf import elf_loader
-from extra.assembly.amd.decode import decode_inst
+from extra.assembly.amd import decode_inst
 from extra.assembly.amd.autogen.rdna3.ins import SOPP
 from extra.assembly.amd.autogen.rdna3.enum import SOPPOp
 from extra.assembly.amd.sqtt import (decode, LAYOUT_HEADER, WAVESTART, WAVESTART_L4, WAVEEND, INST, INST_L4, VALUINST, IMMEDIATE, IMMEDIATE_MASK,

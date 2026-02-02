@@ -1,16 +1,9 @@
 # Test to compare Python and Rust RDNA3 emulators by running real tinygrad kernels
-import unittest, ctypes, os
+import unittest, ctypes
 from dataclasses import dataclass
-from pathlib import Path
 
-# Set environment before any tinygrad imports to use MOCKGPU
-# This allows generating AMD GPU kernels without requiring real hardware
-os.environ["AMD"] = "1"
-os.environ["MOCKGPU"] = "1"
-os.environ["PYTHON_REMU"] = "1"
-
-from extra.assembly.amd.emu2 import WaveState, decode_program, WAVE_SIZE, MASK32, PC_LO_IDX, PC_HI_IDX, SCC_IDX, VCC_LO, EXEC_LO
-from extra.assembly.amd.decode import decode_inst
+from extra.assembly.amd.emu import WaveState, decode_program, WAVE_SIZE, VCC_LO, EXEC_LO, SCC
+from extra.assembly.amd import decode_inst
 from extra.assembly.amd.test.helpers import KernelInfo
 from extra.assembly.amd.test.bench_emu import REMU_PATH
 
@@ -140,7 +133,7 @@ class PythonEmulator:
     vgpr = [[self.state._read_vgpr(reg, lane) for reg in range(256)] for lane in range(WAVE_SIZE)]
     # Convert actual PC address to word offset for comparison with Rust emulator
     pc_offset = (self.state.pc - self.lib_addr) // 4 if self.state.pc != 0xFFFFFFFFFFFFFFFF else 0xFFFFFFFFFFFFFFFF
-    return StateSnapshot(pc=pc_offset, scc=self.state._read_sgpr(SCC_IDX), vcc=sgpr[VCC_LO.offset],
+    return StateSnapshot(pc=pc_offset, scc=self.state._read_sgpr(SCC.offset), vcc=sgpr[VCC_LO.offset],
                          exec_mask=sgpr[EXEC_LO.offset], sgpr=sgpr, vgpr=vgpr)
 
 def run_single_kernel(kernel: bytes, n_lanes: int, args_ptr: int, global_size: tuple[int, int, int],
@@ -257,7 +250,7 @@ def run_single_kernel(kernel: bytes, n_lanes: int, args_ptr: int, global_size: t
               assert python.state is not None
               # Convert Rust's word-based PC to Python's actual address
               python.state.pc = python.lib_addr + rust_after.pc * 4
-              python.state._write_sgpr(SCC_IDX, rust_after.scc)
+              python.state._write_sgpr(SCC.offset, rust_after.scc)
               python.state._write_sgpr(VCC_LO.offset, rust_after.vcc)
               python.state._write_sgpr(EXEC_LO.offset, rust_after.exec_mask)
             prev_sync_after = sync_after
@@ -465,6 +458,13 @@ class TestTinygradKernels(unittest.TestCase):
     # Values around 859240 trigger the Payne-Hanek algorithm
     # This tests the integer multiply-high instructions used in range reduction
     self._test_kernel(lambda T: T([859240.0, 1000000.0, 100594688.0]).sin())
+
+  def test_clip_zero_one(self):
+    """Test clip(0, 1) - regression for binary_crossentropy failure."""
+    import numpy as np
+    np.random.seed(0)
+    x_np = np.random.uniform(-2, 2, (32, 10)).astype(np.float32).tolist()
+    self._test_kernel(lambda T: T(x_np).clip(0, 1))
 
   def test_mod_int64(self):
     """Test int64 modulo, especially edge cases like 1 % -1."""

@@ -123,12 +123,12 @@ load_store_folding = PatternMatcher([
   (UPat(Ops.LOAD, src=(UPat(Ops.GEP, name="gep"),), name="ld", allow_any_len=True),
    lambda gep, ld: ld.replace(dtype=ld.dtype.scalar().vec(gep.dtype.count), src=(gep.src[0],)+ld.src[1:]).gep(gep.arg)),
   # GEP on data of STORE
-  (UPat(Ops.STORE, src=(UPat(Ops.GEP, name="gep"), UPat.var("st")), allow_any_len=True, name="sto"), gep_on_store),
+  (UPat(Ops.STORE, src=(UPat(Ops.GEP, name="gep"), UPat.var("st")), name="sto"), gep_on_store),
   # put PTRCAT after LOAD
   (UPat(Ops.LOAD, src=(UPat(Ops.PTRCAT, name="cat"),), name="ld", allow_any_len=True),
    lambda cat,ld: UOp(Ops.CAT, cat.dtype.base.vec(cat.dtype.vcount), tuple(ld.replace(dtype=x.dtype.base, src=(x,)+ld.src[1:]) for x in cat.src))),
   # put PTRCAT after STORE
-  (UPat(Ops.STORE, src=(UPat(Ops.PTRCAT, name="cat"), UPat(name="data")), allow_any_len=True, name="sto"), cat_after_store),
+  (UPat(Ops.STORE, src=(UPat(Ops.PTRCAT, name="cat"), UPat(name="data")), name="sto"), cat_after_store),
 ])
 
 # *** correct load/store ***
@@ -201,7 +201,7 @@ def image_fixup(ls:UOp):
     x_mod_4 = x % 4
     def sel(ret, i): return x_mod_4.ne(i).where(ret, vec_load.gep(i))
     # if x is non-negative, x % 4 is in [0, 3] and we can skip NAN fallback
-    if x_mod_4.vmin >= 0: return functools.reduce(sel, range(x_mod_4.vmin+1, x_mod_4.vmax+1), vec_load.gep(x_mod_4.vmin))
+    if x_mod_4.vmin >= 0: return functools.reduce(sel, range(int(x_mod_4.vmin)+1, int(x_mod_4.vmax)+1), vec_load.gep(int(x_mod_4.vmin)))
     return functools.reduce(sel, range(4), ls.const_like(float('nan')))
 
   return None
@@ -342,6 +342,6 @@ pm_add_loads = PatternMatcher([
   (UPat(Ops.INDEX, name="idx"), lambda idx: None if isinstance(idx.dtype, (PtrDType, ImageDType)) else
     idx.replace(dtype=idx.src[0].dtype).load(dtype=idx.dtype.base)),
   # remove loads from stores
-  (UPat(Ops.STORE, src=(UPat(Ops.LOAD),), allow_any_len=True, name="s"), lambda s: s.replace(src=(s.src[0].src[0],)+s.src[1:])),
+  (UPat(Ops.STORE, src=(UPat(Ops.LOAD), UPat(name="val")), name="s"), lambda s,val: s.replace(src=(s.src[0].src[0], val))),
 ])
 

@@ -6,14 +6,14 @@ Set USE_HW=1 to run on both emulator and hardware, comparing results.
 import ctypes, math, os, struct
 from extra.assembly.amd.autogen.rdna3.ins import *
 
-from extra.assembly.amd.emu2 import run_asm
+from extra.assembly.amd.emu import run_asm
 from extra.assembly.amd.dsl import NULL, SCC, VCC_LO, VCC_HI, EXEC_LO, EXEC_HI, M0
 
 def _i32(f: float) -> int: return struct.unpack('<I', struct.pack('<f', f))[0]
 def _f32(i: int) -> float: return struct.unpack('<f', struct.pack('<I', i & 0xFFFFFFFF))[0]
 
 # f16 conversion helpers
-def _f16(i: int) -> float: return struct.unpack('<e', struct.pack('<H', i & 0xFFFF))[0]
+def f16(i: int) -> float: return struct.unpack('<e', struct.pack('<H', i & 0xFFFF))[0]
 def f32_to_f16(f: float) -> int:
   f = float(f)
   if math.isnan(f): return 0x7e00
