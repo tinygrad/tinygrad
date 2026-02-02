@@ -719,5 +719,47 @@ class TestAtomicOrdering(unittest.TestCase):
     self.assertEqual(st.vgpr[0][4], 150, "Final value should be 150")
 
 
+class TestDsPermute(unittest.TestCase):
+  """Tests for DS_PERMUTE_B32 and DS_BPERMUTE_B32 instructions."""
+
+  def test_ds_permute_b32_identity(self):
+    """DS_PERMUTE_B32 with identity permutation (lane 0 sends to lane 0)."""
+    # For simplicity, test with single lane
+    instructions = [
+      v_mov_b32_e32(v[0], 0),  # addr = 0 (lane 0)
+      v_mov_b32_e32(v[1], 0xDEADBEEF),  # data
+      ds_permute_b32(v[2], v[0], v[1]),
+      s_waitcnt(lgkmcnt=0),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    # Lane 0 sends to lane 0, so lane 0 gets 0xDEADBEEF
+    self.assertEqual(st.vgpr[0][2], 0xDEADBEEF)
+
+  def test_ds_bpermute_b32_identity(self):
+    """DS_BPERMUTE_B32 with identity permutation (each lane reads from itself)."""
+    instructions = [
+      v_mov_b32_e32(v[0], 0),  # addr = 0 (read from lane 0)
+      v_mov_b32_e32(v[1], 0xCAFEBABE),  # data in lane 0
+      ds_bpermute_b32(v[2], v[0], v[1]),
+      s_waitcnt(lgkmcnt=0),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    # Lane 0 reads from lane 0's v[1]
+    self.assertEqual(st.vgpr[0][2], 0xCAFEBABE)
+
+  def test_ds_permute_b32_broadcast(self):
+    """DS_PERMUTE_B32 broadcast - all lanes send to lane 0."""
+    # With 4 lanes, all sending to lane 0, highest lane wins
+    instructions = [
+      v_mov_b32_e32(v[0], 0),  # All lanes send to addr 0 (lane 0)
+      v_mov_b32_e32(v[1], 0x11111111),  # All lanes send same data
+      ds_permute_b32(v[2], v[0], v[1]),
+      s_waitcnt(lgkmcnt=0),
+    ]
+    st = run_program(instructions, n_lanes=4)
+    # Lane 0 receives data (highest numbered active lane wins)
+    self.assertEqual(st.vgpr[0][2], 0x11111111)
+
+
 if __name__ == '__main__':
   unittest.main()
