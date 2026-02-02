@@ -1105,13 +1105,14 @@ def parse_block(lines: list[str], start: int, vars: dict[str, VarVal], funcs: di
       def parse_cond(s, kw):
         ll = s.lower()
         return _to_bool(parse_expr(s[ll.find(kw) + len(kw):ll.rfind('then')].strip(), vars, funcs))
-      def not_static_false(c): return c.op != Ops.CONST or c.arg is not False
+      def is_const(c, v): return c.op == Ops.CONST and c.arg is v
       cond = parse_cond(line, 'if')
-      conditions: list[tuple[UOp, UOp | dict[str, VarVal] | None]] = [(cond, None)] if not_static_false(cond) else []
+      conditions: list[tuple[UOp, UOp | dict[str, VarVal] | None]] = [(cond, None)] if not is_const(cond, False) else []
       else_branch: tuple[UOp | None, dict[str, VarVal]] = (None, {})
       vars_snap = dict(vars)
+      static_true = is_const(cond, True)  # track if any condition is statically true
       i += 1
-      i, branch, ret = parse_block(lines, i, vars, funcs, assigns)
+      i, branch, ret = parse_block(lines, i, vars, funcs, assigns if not is_const(cond, False) else None)
       if conditions: conditions[0] = (cond, ret if ret is not None else branch)
       vars.clear(); vars.update(vars_snap)
       while i < len(lines):
@@ -1120,12 +1121,16 @@ def parse_block(lines: list[str], start: int, vars: dict[str, VarVal], funcs: di
         lf = ltoks[0].val.lower()
         if lf == 'elsif':
           c = parse_cond(lines[i], 'elsif')
-          i += 1; i, branch, ret = parse_block(lines, i, vars, funcs, assigns)
-          if not_static_false(c): conditions.append((c, ret if ret is not None else branch))
+          take = not static_true and not is_const(c, False)
+          i += 1; i, branch, ret = parse_block(lines, i, vars, funcs, assigns if take else None)
+          if take:
+            conditions.append((c, ret if ret is not None else branch))
+            if is_const(c, True): static_true = True
           vars.clear(); vars.update(vars_snap)
         elif lf == 'else':
-          i += 1; i, branch, ret = parse_block(lines, i, vars, funcs, assigns)
-          else_branch = (ret, branch)
+          i += 1
+          i, branch, ret = parse_block(lines, i, vars, funcs, assigns if not static_true else None)
+          if not static_true: else_branch = (ret, branch)
           vars.clear(); vars.update(vars_snap)
         elif lf == 'endif': i += 1; break
         else: break
@@ -1137,17 +1142,21 @@ def parse_block(lines: list[str], start: int, vars: dict[str, VarVal], funcs: di
             if rv.dtype != result.dtype and rv.dtype.itemsize == result.dtype.itemsize: result = result.cast(rv.dtype)
             result = c.where(rv, result)
         return i, block_assigns, result
-      # Main style: merge variable assignments with WHERE
-      else_assigns = else_branch[1]
-      all_vars = set().union(*[ba.keys() for _, ba in conditions if isinstance(ba, dict)], else_assigns.keys())
-      for var in all_vars:
-        res: Any = else_assigns.get(var, block_assigns.get(var, vars.get(var, _u32(0))))
-        for cond, ba in reversed(conditions):
-          if isinstance(ba, dict) and var in ba:
-            tv = ba[var]
-            if isinstance(tv, UOp) and isinstance(res, UOp):
-              res = cond.where(tv, res.cast(tv.dtype) if tv.dtype != res.dtype and tv.dtype.itemsize == res.dtype.itemsize else res)
-        block_assigns[var] = vars[var] = res
+      # If statically true, use that branch directly; otherwise merge with WHERE
+      if static_true:
+        ba = next((b for c, b in conditions if is_const(c, True) and isinstance(b, dict)), {})
+        block_assigns.update(ba); vars.update(ba)
+      else:
+        else_assigns = else_branch[1]
+        all_vars = set().union(*[ba.keys() for _, ba in conditions if isinstance(ba, dict)], else_assigns.keys())
+        for var in all_vars:
+          res: Any = else_assigns.get(var, block_assigns.get(var, vars.get(var, _u32(0))))
+          for cond, ba in reversed(conditions):
+            if isinstance(ba, dict) and var in ba:
+              tv = ba[var]
+              if isinstance(tv, UOp) and isinstance(res, UOp):
+                res = cond.where(tv, res.cast(tv.dtype) if tv.dtype != res.dtype and tv.dtype.itemsize == res.dtype.itemsize else res)
+          block_assigns[var] = vars[var] = res
       continue
 
     # Regular assignment: var = value
