@@ -62,7 +62,6 @@ class TestBasicScalar(unittest.TestCase):
     st = run_program(instructions, n_lanes=1)
     self.assertEqual(st.sgpr[1], 0x80000000)
 
-  @unittest.skipIf(USE_HW, "SALU FP ops not working on hardware")
   def test_s_fmamk_f32(self):
     """S_FMAMK_F32: D = S0 * literal + S1."""
     # 2.0 * 3.0 + 1.0 = 7.0
@@ -74,7 +73,6 @@ class TestBasicScalar(unittest.TestCase):
     st = run_program(instructions, n_lanes=1)
     self.assertEqual(st.sgpr[2], f2i(7.0))
 
-  @unittest.skipIf(USE_HW, "SALU FP ops not working on hardware")
   def test_s_fmamk_f32_negative(self):
     """S_FMAMK_F32 with negative values."""
     # -2.0 * 4.0 + 10.0 = 2.0
