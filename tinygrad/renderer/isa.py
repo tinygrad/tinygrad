@@ -18,7 +18,8 @@ class IselContext:
     self.uses = sink.get_consumer_map()
     self.reg_n = itertools.count()
     self.stack_size = 0
-    self.func_args = sorted([u for u in self.uses if u.op in (Ops.DEFINE_GLOBAL, Ops.DEFINE_VAR, Ops.SPECIAL)], key=lambda k: (k.op, k.arg))
+    arg_order = {Ops.DEFINE_GLOBAL: 0, Ops.DEFINE_VAR: 1, Ops.SPECIAL: 2}
+    self.func_args = sorted([u for u in self.uses if u.op in arg_order], key=lambda k: (arg_order[k.op], k.arg))
 
   def inc_stack(self, amt:int):
     ret = self.stack_size
