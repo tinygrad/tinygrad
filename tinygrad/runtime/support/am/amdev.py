@@ -230,7 +230,6 @@ class AMDev(PCIDevImplBase):
     if DEBUG >= 2: print(f"am {self.devfmt}: Start recovery")
     self.ih.interrupt_handler()
     self.gfx.reset_mec()
-    self.gmc.flush_tlb(ip='GC', vmid=0, clear_fault=True)
     self.is_err_state = False
     if DEBUG >= 2: print(f"am {self.devfmt}: Recovery complete")
     return True
