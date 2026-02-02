@@ -195,8 +195,10 @@ class TestAssignIssues(unittest.TestCase):
     t.shrink(((1, 3), (1, 3))).assign(Tensor.ones(2, 2))
     np.testing.assert_allclose(t.numpy(), torch_tensor.numpy())
 
+  @unittest.expectedFailure
   def test_assign_broadcast(self):
     # broadcasting during assign should behave like PyTorch
+    # NOTE: we don't want implicit dtype casting (int64 -> float32 loses precision), so this fails
     torch_tensor = torch.zeros(3, 5)
     torch_tensor[:] = torch.arange(5)
     t = Tensor.zeros(3, 5)
