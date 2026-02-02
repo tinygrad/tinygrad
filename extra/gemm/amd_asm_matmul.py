@@ -471,7 +471,7 @@ THREADS = 128
 
 def test_matmul():
   dev = Device[Device.DEFAULT]
-  print(f"Device arch: {dev.arch}")
+  print(f"Device arch: {dev.renderer.arch}")
 
   if getenv("STOCK", 0):
     # Load the stock kernel from amd_seb/kernel8_batched_gmem.s
@@ -479,7 +479,7 @@ def test_matmul():
     asm = stock_path.read_text()
     print(f"Loaded stock kernel from {stock_path}")
   else:
-    asm = build_kernel(dev.arch)
+    asm = build_kernel(dev.renderer.arch)
 
   binary = dev.compiler.compile(asm)
   print(f"Compiled! Binary size: {len(binary)} bytes")

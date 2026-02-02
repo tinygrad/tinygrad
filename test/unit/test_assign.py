@@ -461,6 +461,27 @@ class TestAssign(unittest.TestCase):
     a[2:5] = [1, 2, 3]
     np.testing.assert_allclose(a.numpy(), [0., 0., 1., 2., 3., 0., 0., 0.])
 
+  def test_assign_bitcast(self):
+    # assign to a bitcast view should modify the underlying buffer
+    a = Tensor([1.0, 2.0, 3.0, 4.0], dtype=dtypes.float32).realize()
+    # IEEE 754: 1.0f = 0x3f800000, 2.0f = 0x40000000, 3.0f = 0x40400000, 4.0f = 0x40800000
+    a.bitcast(dtypes.uint32).assign(Tensor([0x40800000, 0x40400000, 0x40000000, 0x3f800000], dtype=dtypes.uint32)).realize()
+    np.testing.assert_allclose(a.numpy(), [4.0, 3.0, 2.0, 1.0])
+    # double bitcast
+    b = Tensor([1.0, 2.0, 3.0, 4.0], dtype=dtypes.float32).realize()
+    b.bitcast(dtypes.uint32).bitcast(dtypes.int32).assign(Tensor([0x40800000, 0x40400000, 0x40000000, 0x3f800000], dtype=dtypes.int32)).realize()
+    np.testing.assert_allclose(b.numpy(), [4.0, 3.0, 2.0, 1.0])
+    # shrink then bitcast
+    c = Tensor([1.0, 2.0, 3.0, 4.0], dtype=dtypes.float32).realize()
+    c[0:2].bitcast(dtypes.uint32).assign(Tensor([0x40800000, 0x40400000], dtype=dtypes.uint32)).realize()
+    np.testing.assert_allclose(c.numpy(), [4.0, 3.0, 3.0, 4.0])
+
+  def test_assign_bitcast_different_size(self):
+    # different-size bitcast creates a new tensor, not a view, so assign doesn't modify the original
+    a = Tensor([0]*8, dtype=dtypes.uint8).realize()
+    a.bitcast(dtypes.int64).assign(Tensor([12345], dtype=dtypes.int64)).realize()
+    np.testing.assert_equal(a.numpy(), [0]*8)
+
   @unittest.skip("don't use output buffer, and mismatch dtype no longer supported")
   def test_cast_assignment(self):
     a = Tensor(np.arange(N*N, dtype=np.float32)).reshape(N,N)
@@ -471,6 +492,38 @@ class TestAssign(unittest.TestCase):
     oba2 = a.uop.base.output_buffer
     assert oba1 is None and oba2 is None
     np.testing.assert_allclose(a.numpy(), np.arange(N*N,dtype=np.int32).reshape((N,N)))
+
+  def test_assign_dtype_mismatch(self):
+    # assign should not implicitly cast dtypes - this can lose precision
+    a = Tensor.zeros(4, dtype=dtypes.float32).contiguous().realize()
+    b = Tensor([1, 2, 3, 4], dtype=dtypes.int32)
+    with self.assertRaisesRegex(RuntimeError, "assign dtype mismatch"):
+      a.assign(b)
+
+  def test_assign_dtype_mismatch_int64_to_float32(self):
+    # int64 -> float32 loses precision for large values, should not be implicit
+    a = Tensor.zeros(1, dtype=dtypes.float32).contiguous().realize()
+    b = Tensor([16777217], dtype=dtypes.int64)  # 2^24 + 1, not exactly representable in float32
+    with self.assertRaisesRegex(RuntimeError, "assign dtype mismatch"):
+      a.assign(b)
+
+  def test_assign_shape_broadcast(self):
+    # shape broadcasting should work when dtypes match
+    a = Tensor.zeros(3, 5, dtype=dtypes.float32).contiguous().realize()
+    b = Tensor([1., 2., 3., 4., 5.], dtype=dtypes.float32)
+    a.assign(b)
+    a.realize()
+    expected = np.array([[1., 2., 3., 4., 5.]] * 3)
+    np.testing.assert_allclose(a.numpy(), expected)
+
+  def test_assign_shape_broadcast_2d(self):
+    # broadcast (1, 5) to (3, 5)
+    a = Tensor.zeros(3, 5, dtype=dtypes.float32).contiguous().realize()
+    b = Tensor([[1., 2., 3., 4., 5.]], dtype=dtypes.float32)
+    a.assign(b)
+    a.realize()
+    expected = np.array([[1., 2., 3., 4., 5.]] * 3)
+    np.testing.assert_allclose(a.numpy(), expected)
 
   def test_disk_assignment(self):
     a = Tensor.empty(5, device=f"disk:{temp('disk_assignment')}").assign(Tensor.ones(5)).numpy()
@@ -566,12 +619,12 @@ class TestAssignOrdering(unittest.TestCase):
   def test_slice_write_then_full_read(self):
     """Write to slice, then read full buffer."""
     # without .realize(): orphan slice assign not triggered by .numpy()
-    buf = Tensor.zeros(4).contiguous().realize()
+    buf = Tensor.zeros(4, dtype=dtypes.int32).contiguous().realize()
     buf[1:3].assign(Tensor([5, 6]))
     np.testing.assert_equal(buf.numpy(), [0, 0, 0, 0])  # TODO: wrong! should be [0, 5, 6, 0]
 
     # with .realize(): assign executes
-    buf = Tensor.zeros(4).contiguous().realize()
+    buf = Tensor.zeros(4, dtype=dtypes.int32).contiguous().realize()
     buf[1:3].assign(Tensor([5, 6])).realize()
     np.testing.assert_equal(buf.numpy(), [0, 5, 6, 0])
 
@@ -653,7 +706,7 @@ class TestAssignOrdering(unittest.TestCase):
 
   def test_three_buffer_chain(self):
     """Chain: A depends on B, B depends on C - ordering matters."""
-    a = Tensor.zeros(4).contiguous().realize()
+    a = Tensor.zeros(4, dtype=dtypes.int32).contiguous().realize()
     b = Tensor([1, 2, 3, 4]).contiguous().realize()
     c = Tensor([10, 10, 10, 10]).contiguous().realize()
     # b reads from c, a reads from b
@@ -665,8 +718,8 @@ class TestAssignOrdering(unittest.TestCase):
 
   def test_interleaved_assign_read_patterns(self):
     """Complex interleaved pattern: write A, read A into B, write B, read B."""
-    a = Tensor.zeros(4).contiguous().realize()
-    b = Tensor.zeros(4).contiguous().realize()
+    a = Tensor.zeros(4, dtype=dtypes.int32).contiguous().realize()
+    b = Tensor.zeros(4, dtype=dtypes.int32).contiguous().realize()
 
     a.assign(Tensor([1, 2, 3, 4]))
     b.assign(a.contiguous())       # b should get [1,2,3,4]
