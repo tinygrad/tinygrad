@@ -49,9 +49,14 @@ from tinygrad.helpers import Context, DEBUG, colored
 from tinygrad.engine.realize import get_runner
 
 from extra.assembly.amd import decode_inst
-from extra.assembly.amd.autogen.rdna3.str_pcode import PCODE
+from extra.assembly.amd.autogen.rdna3.str_pcode import PCODE as PCODE_RDNA3
+from extra.assembly.amd.autogen.rdna4.str_pcode import PCODE as PCODE_RDNA4
 from extra.assembly.amd.autogen.rdna3.ins import (SOP1, SOP2, SOPC, SOPK, SOPP, SMEM, VOP1, VOP1_SDST, VOP2, VOP3, VOP3_SDST, VOP3SD, VOP3P, VOPC,
   DS, FLAT, GLOBAL, SCRATCH, VOPD, SOPPOp, SMEMOp, VOP1Op, VOP2Op, VOP3Op, VOPDOp)
+from extra.assembly.amd.autogen.rdna4.ins import (SOP1 as R4_SOP1, SOP2 as R4_SOP2, SOPC as R4_SOPC, SOPK as R4_SOPK, SOPP as R4_SOPP,
+  SMEM as R4_SMEM, VOP1 as R4_VOP1, VOP1_SDST as R4_VOP1_SDST, VOP2 as R4_VOP2, VOP3 as R4_VOP3, VOP3_SDST as R4_VOP3_SDST,
+  VOP3SD as R4_VOP3SD, VOP3P as R4_VOP3P, VOPC as R4_VOPC, DS as R4_DS, VFLAT as R4_FLAT, VGLOBAL as R4_GLOBAL, VSCRATCH as R4_SCRATCH,
+  VOPD as R4_VOPD, SOPPOp as R4_SOPPOp, VOPDOp as R4_VOPDOp, SMEMOp as R4_SMEMOp)
 from extra.assembly.amd.dsl import VCC_LO, EXEC_LO, SCC
 from extra.assembly.amd.autogen.common import Fmt, OpType
 from extra.assembly.amd.pcode import parse_block, _FUNCS
@@ -79,7 +84,7 @@ def _apply_src_mods(val: UOp, mod_bit: int, abs_bits: int, neg_bits: int, bits: 
   if neg_bits & (1 << mod_bit): fv = fv.neg()
   return fv.bitcast(ut).cast(dtypes.uint32) if bits == 16 else fv.bitcast(ut)
 
-# Map VOPD ops to VOP2 ops for pcode lookup
+# Map VOPD ops to VOP2 ops for pcode lookup (both RDNA3 and RDNA4)
 VOPD_TO_VOP2 = {
   VOPDOp.V_DUAL_FMAC_F32: VOP2Op.V_FMAC_F32_E32, VOPDOp.V_DUAL_MUL_F32: VOP2Op.V_MUL_F32_E32,
   VOPDOp.V_DUAL_ADD_F32: VOP2Op.V_ADD_F32_E32, VOPDOp.V_DUAL_SUB_F32: VOP2Op.V_SUB_F32_E32,
@@ -88,6 +93,14 @@ VOPD_TO_VOP2 = {
   VOPDOp.V_DUAL_LSHLREV_B32: VOP2Op.V_LSHLREV_B32_E32, VOPDOp.V_DUAL_AND_B32: VOP2Op.V_AND_B32_E32,
   VOPDOp.V_DUAL_MOV_B32: VOP1Op.V_MOV_B32_E32, VOPDOp.V_DUAL_CNDMASK_B32: VOP2Op.V_CNDMASK_B32_E32,
   VOPDOp.V_DUAL_FMAAK_F32: VOP2Op.V_FMAAK_F32_E32, VOPDOp.V_DUAL_FMAMK_F32: VOP2Op.V_FMAMK_F32_E32,
+  # RDNA4 mappings (same VOP1/VOP2 targets, RDNA4 uses _NUM_ suffix for min/max)
+  R4_VOPDOp.V_DUAL_FMAC_F32: VOP2Op.V_FMAC_F32_E32, R4_VOPDOp.V_DUAL_MUL_F32: VOP2Op.V_MUL_F32_E32,
+  R4_VOPDOp.V_DUAL_ADD_F32: VOP2Op.V_ADD_F32_E32, R4_VOPDOp.V_DUAL_SUB_F32: VOP2Op.V_SUB_F32_E32,
+  R4_VOPDOp.V_DUAL_SUBREV_F32: VOP2Op.V_SUBREV_F32_E32, R4_VOPDOp.V_DUAL_MAX_NUM_F32: VOP2Op.V_MAX_F32_E32,
+  R4_VOPDOp.V_DUAL_MIN_NUM_F32: VOP2Op.V_MIN_F32_E32, R4_VOPDOp.V_DUAL_ADD_NC_U32: VOP2Op.V_ADD_NC_U32_E32,
+  R4_VOPDOp.V_DUAL_LSHLREV_B32: VOP2Op.V_LSHLREV_B32_E32, R4_VOPDOp.V_DUAL_AND_B32: VOP2Op.V_AND_B32_E32,
+  R4_VOPDOp.V_DUAL_MOV_B32: VOP1Op.V_MOV_B32_E32, R4_VOPDOp.V_DUAL_CNDMASK_B32: VOP2Op.V_CNDMASK_B32_E32,
+  R4_VOPDOp.V_DUAL_FMAAK_F32: VOP2Op.V_FMAAK_F32_E32, R4_VOPDOp.V_DUAL_FMAMK_F32: VOP2Op.V_FMAMK_F32_E32,
 }
 WAVE_SIZE = 32
 # Special registers stored after inline constants (256-259)
@@ -146,11 +159,15 @@ _pcode_fixes = {
   'V_TRIG_PREOP_F64': ("result = 64'F((1201'B(2.0 / PI)[1200 : 0] << shift.u32) & 1201'0x1fffffffffffff)", "result = trig_preop_result(shift)"),
 }
 
+def _get_pcode_dict(op) -> dict:
+  """Return the PCODE dictionary for the given opcode based on its architecture."""
+  return PCODE_RDNA4 if 'rdna4' in type(op).__module__ else PCODE_RDNA3
+
 # Pcode parser
 @functools.cache
 def get_pcode(op) -> str:
   op_name = op.name
-  pcode = PCODE[op]
+  pcode = _get_pcode_dict(op)[op]
   if op_name in _pcode_fixes: pcode = pcode.replace(*_pcode_fixes[op_name])
   if 'V_DIV_SCALE' in op_name:
     dt, exp_lim, ldexp_val = ('f32', '23', '64') if 'F32' in op_name else ('f64', '52', '128')
@@ -341,7 +358,9 @@ class _Ctx:
     If lane is None, only scalar access is supported (off must be < 256).
     is_f64: True for F64 operations where 64-bit literals go in high 32 bits."""
     is_float_const = (off >= _c(240)) & (off <= _c(248))
-    sgpr_lo = self.rsgpr_dyn(off)
+    # Guard SGPR access: only read when off < 256 to avoid OOB when off is in VGPR range
+    is_scalar = off < _c(256)
+    sgpr_lo = self.sgpr.index((is_scalar.where(off, _c(0))).cast(dtypes.int), ptr=True).load()
 
     if lane is not None:
       is_vgpr, vgpr_reg = off >= _c(256), off - _c(256)
@@ -486,7 +505,7 @@ def _compile_sopp(inst: SOPP, ctx: _Ctx) -> UOp:
     return UOp.sink(ctx.wsgpr_dyn(_c(PC_LO_IDX), UOp.const(dtypes.uint32, 0xFFFFFFFF)),
                           ctx.wsgpr_dyn(_c(PC_HI_IDX), UOp.const(dtypes.uint32, 0xFFFFFFFF)))
   # NOTE: we ignore SOPPs without PCODE
-  if inst.op in PCODE:
+  if inst.op in _get_pcode_dict(inst.op):
     pcode = get_pcode(inst.op)
     pc_bytes = ctx.rpc()  # PC is already 64-bit byte address
     vcc, exec_lo = ctx.rsgpr_dyn(_c(VCC_LO.offset)), ctx.rsgpr_dyn(_c(EXEC_LO.offset))
@@ -500,17 +519,23 @@ def _compile_sopp(inst: SOPP, ctx: _Ctx) -> UOp:
 
 def _compile_smem(inst: SMEM, ctx: _Ctx) -> UOp:
   # Cache invalidation instructions are no-ops in the emulator (we don't model caches)
-  if inst.op in (SMEMOp.S_GL1_INV, SMEMOp.S_DCACHE_INV):
+  cache_inv_ops = [SMEMOp.S_GL1_INV, SMEMOp.S_DCACHE_INV, R4_SMEMOp.S_DCACHE_INV]
+  if hasattr(R4_SMEMOp, 'S_GL1_INV'): cache_inv_ops.append(R4_SMEMOp.S_GL1_INV)
+  if inst.op in cache_inv_ops:
     return UOp.sink(*ctx.inc_pc())
   # Dynamic sbase field (bits 5:0) - SGPR pair, field value * 2 = register offset
-  sbase = ctx.inst_field(SMEM.sbase) * _c(2)
+  sbase = ctx.inst_field(type(inst).sbase) * _c(2)
   # Dynamic sdata field (bits 12:6) - destination SGPR
-  sdata_reg = ctx.inst_field(SMEM.sdata)
-  offset = ctx.inst_field_signed(SMEM.offset)  # 21-bit signed immediate
-  # Dynamic soffset field (bits 63:57) - SGPR for additional offset (NULL=124 reads as 0)
-  soffset = ctx.inst_field(SMEM.soffset)
+  sdata_reg = ctx.inst_field(type(inst).sdata)
+  # RDNA4 uses 'ioffset', RDNA3 uses 'offset' - use type(inst) to get correct field
+  offset_field = type(inst).ioffset if hasattr(type(inst), 'ioffset') else type(inst).offset
+  offset = ctx.inst_field_signed(offset_field)  # signed immediate
+  # Dynamic soffset field - SGPR for additional offset (NULL=124 reads as 0)
+  soffset = ctx.inst_field(type(inst).soffset)
   addr = _u64(ctx.rsgpr_dyn(sbase), ctx.rsgpr_dyn(sbase + _c(1))) + offset.cast(dtypes.uint64) + ctx.rsgpr_dyn(soffset).cast(dtypes.uint64)
-  ndwords = {SMEMOp.S_LOAD_B32: 1, SMEMOp.S_LOAD_B64: 2, SMEMOp.S_LOAD_B128: 4, SMEMOp.S_LOAD_B256: 8, SMEMOp.S_LOAD_B512: 16}.get(inst.op, 1)
+  _SMEM_NDWORDS = {SMEMOp.S_LOAD_B32: 1, SMEMOp.S_LOAD_B64: 2, SMEMOp.S_LOAD_B128: 4, SMEMOp.S_LOAD_B256: 8, SMEMOp.S_LOAD_B512: 16,
+    R4_SMEMOp.S_LOAD_B32: 1, R4_SMEMOp.S_LOAD_B64: 2, R4_SMEMOp.S_LOAD_B128: 4, R4_SMEMOp.S_LOAD_B256: 8, R4_SMEMOp.S_LOAD_B512: 16}
+  ndwords = _SMEM_NDWORDS.get(inst.op, 1)
   stores = [ctx.wsgpr_dyn(sdata_reg + _c(i), ctx.vmem.index((addr + UOp.const(dtypes.uint64, i * 4) >> UOp.const(dtypes.uint64, 2)).cast(dtypes.int)))
             for i in range(ndwords)]
   return UOp.sink(*stores, *ctx.inc_pc())
@@ -519,29 +544,29 @@ def _compile_sop(inst: SOP1 | SOP2 | SOPC | SOPK, ctx: _Ctx) -> UOp:
   bits = inst.canonical_op_bits
   literal = ctx.inst_field(type(inst).literal) if hasattr(type(inst), 'literal') else None
 
-  if isinstance(inst, SOPK):
-    sdst_off = ctx.inst_field(SOPK.sdst)
-    simm16 = ctx.inst_field(SOPK.simm16)
+  if isinstance(inst, (SOPK, R4_SOPK)):
+    sdst_off = ctx.inst_field(type(inst).sdst)
+    simm16 = ctx.inst_field(type(inst).simm16)
     # Sign-extend simm16
     simm16_sext = simm16.cast(dtypes.int16).cast(dtypes.int32)
     srcs = {'S0': ctx.rsgpr_dyn(sdst_off), 'SIMM16': simm16_sext, 'D0': ctx.rsgpr_dyn(sdst_off)}
     dst_off, dst_size = sdst_off, 1
-  elif isinstance(inst, SOP1):
-    sdst_off = ctx.inst_field(SOP1.sdst)
-    ssrc0_off = ctx.inst_field(SOP1.ssrc0)
+  elif isinstance(inst, (SOP1, R4_SOP1)):
+    sdst_off = ctx.inst_field(type(inst).sdst)
+    ssrc0_off = ctx.inst_field(type(inst).ssrc0)
     srcs = {'S0': ctx.rsrc_dyn(ssrc0_off, None, bits['s0'], literal)}
     dst_off, dst_size = sdst_off, bits['d'] // 32
-  elif isinstance(inst, SOP2):
-    sdst_off = ctx.inst_field(SOP2.sdst)
-    ssrc0_off = ctx.inst_field(SOP2.ssrc0)
-    ssrc1_off = ctx.inst_field(SOP2.ssrc1)
+  elif isinstance(inst, (SOP2, R4_SOP2)):
+    sdst_off = ctx.inst_field(type(inst).sdst)
+    ssrc0_off = ctx.inst_field(type(inst).ssrc0)
+    ssrc1_off = ctx.inst_field(type(inst).ssrc1)
     srcs = {'S0': ctx.rsrc_dyn(ssrc0_off, None, bits['s0'], literal),
             'S1': ctx.rsrc_dyn(ssrc1_off, None, bits['s1'], literal)}
     if literal is not None: srcs['SIMM32'] = literal
     dst_off, dst_size = sdst_off, bits['d'] // 32
-  elif isinstance(inst, SOPC):
-    ssrc0_off = ctx.inst_field(SOPC.ssrc0)
-    ssrc1_off = ctx.inst_field(SOPC.ssrc1)
+  elif isinstance(inst, (SOPC, R4_SOPC)):
+    ssrc0_off = ctx.inst_field(type(inst).ssrc0)
+    ssrc1_off = ctx.inst_field(type(inst).ssrc1)
     srcs = {'S0': ctx.rsrc_dyn(ssrc0_off, None, bits['s0'], literal),
             'S1': ctx.rsrc_dyn(ssrc1_off, None, bits['s1'], literal)}
     dst_off, dst_size = _c(0), 0  # SOPC writes to SCC, not sdst
@@ -806,18 +831,19 @@ def _compile_vop3p(inst: VOP3P, ctx: _Ctx) -> UOp:
     if is_dot_iu: srcs['NEG'] = UOp.const(dtypes.uint32, neg)
   return ctx.compile_vop_pcode(inst.op, srcs, lane, vdst_reg, exec_mask)
 
-def _compile_vopd(inst: VOPD, ctx: _Ctx) -> UOp:
+def _compile_vopd(inst: VOPD | R4_VOPD, ctx: _Ctx) -> UOp:
   exec_mask = ctx.rsgpr_dyn(_c(EXEC_LO.offset))
-  # Read operands dynamically
-  vdstx_reg = ctx.inst_field(VOPD.vdstx)
+  # Read operands dynamically - use type(inst) to get correct field descriptors
+  inst_type = type(inst)
+  vdstx_reg = ctx.inst_field(inst_type.vdstx)
   # vdsty has complex encoding: actual = (raw << 1) | ((vdstx & 1) ^ 1)
-  vdsty_raw = ctx.inst_field(VOPD.vdsty)
+  vdsty_raw = ctx.inst_field(inst_type.vdsty)
   vdsty_reg = (vdsty_raw << _c(1)) | ((vdstx_reg & _c(1)) ^ _c(1))
-  srcx0_off = ctx.inst_field(VOPD.srcx0)
-  srcy0_off = ctx.inst_field(VOPD.srcy0)
-  vsrcx1_reg = ctx.inst_field(VOPD.vsrcx1)
-  vsrcy1_reg = ctx.inst_field(VOPD.vsrcy1)
-  literal = ctx.inst_field(type(inst).literal) if hasattr(type(inst), 'literal') else None
+  srcx0_off = ctx.inst_field(inst_type.srcx0)
+  srcy0_off = ctx.inst_field(inst_type.srcy0)
+  vsrcx1_reg = ctx.inst_field(inst_type.vsrcx1)
+  vsrcy1_reg = ctx.inst_field(inst_type.vsrcy1)
+  literal = ctx.inst_field(inst_type.literal) if hasattr(inst_type, 'literal') else None
 
   lane = ctx.range()
   srcy0, srcy1 = ctx.rsrc_dyn(srcy0_off, lane, literal=literal), ctx.rvgpr_dyn(vsrcy1_reg, lane)
@@ -843,28 +869,37 @@ def _compile_mem_op(inst: DS | FLAT | GLOBAL | SCRATCH, ctx: _Ctx) -> UOp:
   exec_mask, op_name = ctx.rsgpr_dyn(_c(EXEC_LO.offset)), _op_name(inst)
   pcode = get_pcode(inst.op)
 
-  is_lds = isinstance(inst, DS)
-  is_scratch = isinstance(inst, SCRATCH)
+  is_lds = isinstance(inst, (DS, R4_DS))
+  is_scratch = isinstance(inst, (SCRATCH, R4_SCRATCH))
   mem = ctx.lds if is_lds else ctx.scratch if is_scratch else ctx.vmem
   addr_shift = UOp.const(dtypes.uint32 if is_lds else dtypes.uint64, 2)
 
+  # Helper to get field by name, handling rdna3/rdna4 naming differences
+  def get_field(name):
+    # rdna4 renames: addr->vaddr, data->vsrc, offset->ioffset
+    rdna4_names = {'addr': 'vaddr', 'data': 'vsrc', 'offset': 'ioffset'}
+    field = getattr(type(inst), name, None)
+    if field is None and name in rdna4_names:
+      field = getattr(type(inst), rdna4_names[name], None)
+    return field
+
   # Extract register info - all dynamic for deduplication
   if is_lds:
-    addr_reg = ctx.inst_field(DS.addr)
-    vdata_reg = ctx.inst_field(DS.data0)
-    vdst_reg = ctx.inst_field(DS.vdst)
-    offset0 = ctx.inst_field(DS.offset0)
-    offset1 = ctx.inst_field(DS.offset1)
+    addr_reg = ctx.inst_field(type(inst).addr)
+    vdata_reg = ctx.inst_field(type(inst).data0)
+    vdst_reg = ctx.inst_field(type(inst).vdst)
+    offset0 = ctx.inst_field(type(inst).offset0)
+    offset1 = ctx.inst_field(type(inst).offset1)
     offset = offset0  # DS uses offset0 as primary offset
     saddr_reg = None
   else:
-    addr_reg = ctx.inst_field(type(inst).addr)
-    vdata_reg = ctx.inst_field(type(inst).data)
+    addr_reg = ctx.inst_field(get_field('addr'))
+    vdata_reg = ctx.inst_field(get_field('data'))
     vdst_reg = ctx.inst_field(type(inst).vdst)
-    offset = ctx.inst_field_signed(type(inst).offset)
+    offset = ctx.inst_field_signed(get_field('offset'))
     offset0, offset1 = _c(0), _c(0)
     # Dynamic saddr - read field, NULL (124) or >= 128 means no saddr
-    saddr_reg = ctx.inst_field(type(inst).saddr) if hasattr(inst, 'saddr') else None
+    saddr_reg = ctx.inst_field(type(inst).saddr) if hasattr(type(inst), 'saddr') else None
 
   # Data width from canonical_op_bits (32/64/96/128), default to 32 for untyped ops
   data_bits_mem = inst.canonical_op_bits.get('data', 32)
@@ -914,12 +949,21 @@ def _compile_mem_op(inst: DS | FLAT | GLOBAL | SCRATCH, ctx: _Ctx) -> UOp:
                 'DATA2': _u64(ctx.rvgpr_dyn(data1_reg, lane), ctx.rvgpr_dyn(data1_reg + _c(1), lane)) if has_data1 else UOp.const(dtypes.uint64, 0)}
       return {'ADDR': addr, 'ADDR_BASE': addr, 'OFFSET': offset, 'OFFSET0': offset0, 'OFFSET1': offset1, '_lds': mem, 'laneId': lane, **data}
     active = _lane_active(exec_mask, lane)
+    # RDNA4 pcode uses v_addr and s_saddr instead of computing ADDR directly
+    vaddr_base = _u64(ctx.rvgpr_dyn(addr_reg, lane), ctx.rvgpr_dyn(addr_reg + _c(1), lane))
+    # saddr < 124 means valid SGPR pair, otherwise use 0 (NULL means no saddr contribution)
+    use_saddr = (saddr_reg < _c(124)) if saddr_reg is not None else UOp.const(dtypes.bool, False)
+    saddr_raw = _u64(ctx.rsgpr_dyn(saddr_reg), ctx.rsgpr_dyn(saddr_reg + _c(1))) if saddr_reg is not None else UOp.const(dtypes.uint64, 0)
+    saddr_base = use_saddr.where(saddr_raw, UOp.const(dtypes.uint64, 0))
+    # For RDNA4 pcode: provide 'ioffset' for CalcGlobalAddr to use
+    # Sign-extend offset to 64-bit for the final address calculation
+    ioffset64 = offset.cast(dtypes.int64).cast(dtypes.uint64)
     if is_atomic:
       return {'ADDR': addr, 'DATA': _u64(ctx.rvgpr_dyn(vdata_reg, lane), ctx.rvgpr_dyn(vdata_reg + _c(1), lane)) if data_bits_mem == 64 else ctx.rvgpr_dyn(vdata_reg, lane),
-              '_vmem': mem, '_active': active, 'laneId': lane}
+              '_vmem': mem, '_active': active, 'laneId': lane, 'v_addr': vaddr_base, 's_saddr': saddr_base, 'ioffset': ioffset64, 'use_saddr': use_saddr}
     vdata = ctx.rvgpr_dyn(vdata_reg, lane).cast(dtypes.uint64) if 'STORE' in op_name else ctx.rvgpr_dyn(vdst_reg, lane) if 'D16' in op_name else UOp.const(dtypes.uint32, 0)
     if 'STORE' in op_name and data_bits_mem >= 64: vdata = vdata | (ctx.rvgpr_dyn(vdata_reg + _c(1), lane).cast(dtypes.uint64) << UOp.const(dtypes.uint64, 32))
-    srcs = {'ADDR': addr, 'VDATA': vdata, '_vmem': mem, '_active': active, 'laneId': lane}
+    srcs = {'ADDR': addr, 'VDATA': vdata, '_vmem': mem, '_active': active, 'laneId': lane, 'v_addr': vaddr_base, 's_saddr': saddr_base, 'ioffset': ioffset64, 'use_saddr': use_saddr}
     for i in range(data_bits_mem // 32): srcs[f'VDATA{i}'] = ctx.rvgpr_dyn(vdata_reg + _c(i), lane) if 'STORE' in op_name else UOp.const(dtypes.uint32, 0)
     return srcs
 
@@ -974,6 +1018,11 @@ _INST_HANDLERS: dict[type, Callable[..., UOp]] = {
   VOP1: _compile_vop12, VOP1_SDST: _compile_vop12, VOP2: _compile_vop12, VOPC: _compile_vopc, VOP3: _compile_vop3, VOP3_SDST: _compile_vop3,
   VOP3SD: _compile_vop3sd, VOP3P: _compile_vop3p, VOPD: _compile_vopd,
   DS: _compile_mem_op, FLAT: _compile_mem_op, GLOBAL: _compile_mem_op, SCRATCH: _compile_mem_op,
+  # RDNA4 instruction classes
+  R4_SOPP: _compile_sopp, R4_SMEM: _compile_smem, R4_SOP1: _compile_sop, R4_SOP2: _compile_sop, R4_SOPC: _compile_sop, R4_SOPK: _compile_sop,
+  R4_VOP1: _compile_vop12, R4_VOP1_SDST: _compile_vop12, R4_VOP2: _compile_vop12, R4_VOPC: _compile_vopc, R4_VOP3: _compile_vop3,
+  R4_VOP3_SDST: _compile_vop3, R4_VOP3SD: _compile_vop3sd, R4_VOP3P: _compile_vop3p, R4_VOPD: _compile_vopd,
+  R4_DS: _compile_mem_op, R4_FLAT: _compile_mem_op, R4_GLOBAL: _compile_mem_op, R4_SCRATCH: _compile_mem_op,
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -983,9 +1032,9 @@ _INST_HANDLERS: dict[type, Callable[..., UOp]] = {
 _canonical_runner_cache: list[tuple[int, int, int, object]] = []  # [(base, mask, size, runner), ...]
 
 @functools.cache
-def _get_runner(inst_bytes: bytes):
+def _get_runner(inst_bytes: bytes, arch: str = "rdna3"):
   """Build and compile instruction to CompiledRunner. Cached by instruction bytes, with canonical dedup."""
-  inst = decode_inst(inst_bytes)
+  inst = decode_inst(inst_bytes, arch)
   inst_size = inst.size()
   inst_int = int.from_bytes(inst_bytes[:inst_size], 'little')
 
@@ -1013,16 +1062,22 @@ def _get_runner(inst_bytes: bytes):
   _canonical_runner_cache.append((base, mask, size, runner))
   return runner, True
 
+def _is_code_end(inst) -> bool:
+  """Check if instruction is S_CODE_END for either RDNA3 or RDNA4."""
+  if isinstance(inst, SOPP) and inst.op == SOPPOp.S_CODE_END: return True
+  if isinstance(inst, R4_SOPP) and inst.op == R4_SOPPOp.S_CODE_END: return True
+  return False
+
 @functools.cache
-def decode_program(data: bytes) -> dict[int, tuple[str, Callable, list[int], Any]]:
+def decode_program(data: bytes, arch: str = "rdna3") -> dict[int, tuple[str, Callable, list[int], Any]]:
   """Decode program to {pc: (name, fxn, globals, runner)}."""
   result: dict[int, tuple[str, Callable, list[int], Any]] = {}
   i = 0
   while i < len(data):
-    inst = decode_inst(data[i:])
-    if isinstance(inst, SOPP) and inst.op == SOPPOp.S_CODE_END: break
+    inst = decode_inst(data[i:], arch)
+    if _is_code_end(inst): break
     try:
-      runner, is_new = _get_runner(bytes(data[i:i + inst.size() + 4]))
+      runner, is_new = _get_runner(bytes(data[i:i + inst.size() + 4]), arch)
       if DEBUG >= 3:
         try: inst_str = repr(inst)
         except Exception: inst_str = f"<{type(inst).__name__} at PC={i}>"
@@ -1081,9 +1136,9 @@ class WaveState:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, lz: int, args_ptr: int, rsrc2: int = 0x19c,
-            scratch_size: int = 0) -> int:
+            scratch_size: int = 0, arch: str = "rdna3") -> int:
   """Execute AMD assembly program. scratch_size is private_segment_fixed_size from kernel descriptor (per-lane)."""
-  program_raw = decode_program(bytes((ctypes.c_char * lib_sz).from_address(lib).raw))
+  program_raw = decode_program(bytes((ctypes.c_char * lib_sz).from_address(lib).raw), arch)
   program = {lib + offset: val for offset, val in program_raw.items()}  # Remap to actual addresses
   lds_size = ((rsrc2 & hsa.AMD_COMPUTE_PGM_RSRC_TWO_GRANULATED_LDS_SIZE) >> hsa.AMD_COMPUTE_PGM_RSRC_TWO_GRANULATED_LDS_SIZE_SHIFT) * 512
   total_threads = lx * ly * lz
@@ -1127,8 +1182,10 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
               assert fxn is not None, f"[emu] No fxn for {name} at PC={pc}"
               assert 4 not in globals_list or scratch_buf, f"SCRATCH instruction {name} but scratch_size=0"
               if DEBUG >= 6:
-                inst = decode_inst(bytes((ctypes.c_char * 12).from_address(pc).raw))
-                print(f"[emu] exec PC={pc:X}: {inst!r}")
+                inst = decode_inst(bytes((ctypes.c_char * 12).from_address(pc).raw), arch)
+                print(f"[emu] exec PC={pc:X}: {inst!r}", flush=True)
+              if DEBUG >= 7:
+                print(f"[emu] calling {name} with globals_list={globals_list}, bufs={[hex(b.value) for b in c_bufs]}", flush=True)
               fxn(*[c_bufs[g] for g in globals_list])
             else: raise RuntimeError("exceeded 1M instructions, likely infinite loop")
   return 0
