@@ -60,7 +60,7 @@ def split_reduceop(reduce:UOp, x:UOp):
 
 mop_cleanup = PatternMatcher([
   # merge adjacent RESHAPES, safe because they are not tagged
-  (UPat(Ops.RESHAPE, name="x2").f(Ops.RESHAPE, allow_any_len=True, name="x"),
+  (UPat(Ops.RESHAPE, src=(UPat(Ops.RESHAPE, name="x2"), UPat()), name="x"),
    lambda x,x2: x.replace(src=(x2.src[0], x.src[1])) if x.tag is None and x2.tag is None else None),
 ])
 
@@ -90,7 +90,7 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
   (UPat(Ops.CUSTOM_KERNEL, name="ck"), resolve_custom_kernel),
 
   # remove CONTIGUOUS if the BUFFER is already contiguous
-  (UPat(Ops.BUFFER).f(Ops.RESHAPE, allow_any_len=True, name="r").f(Ops.CONTIGUOUS, name="c"), lambda r,c: r.replace(tag=c.tag)),
+  (UPat(Ops.RESHAPE, src=(UPat(Ops.BUFFER), UPat()), name="r").f(Ops.CONTIGUOUS, name="c"), lambda r,c: r.replace(tag=c.tag)),
 
   # split_reduceop
   (UPat(Ops.REDUCE_AXIS, name="reduce", src=(UPat.var("x"),)), split_reduceop),
@@ -125,6 +125,10 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
   (UPat(Ops.COPY, src=(UPat.var("x"), UPat()), name="copy"), lambda x,copy: x.f(Ops.NOOP, tag=copy.tag) if x.device == copy.device else None),
 
   # ** assign rules **
+
+  # move bitcast from assign target to source: a.bitcast(X).assign(src) -> a.assign(src.bitcast(a.dtype))
+  (UPat(Ops.ASSIGN, src=(UPat(Ops.BITCAST, src=(UPat(name="target"),)), UPat(name="src")), name="assign"),
+   lambda target, src, assign: target.assign(src.bitcast(target.dtype)).replace(tag=assign.tag)),
 
   # assign only to buffer, otherwise make it a CONTIGUOUS
   (UPat(Ops.ASSIGN, src=(UPat(GroupOp.All-{Ops.BUFFER}, name="target"), UPat(name="x")), name="assign"),
@@ -247,7 +251,7 @@ pm_const_buffer_folding = pm_mops+PatternMatcher([
   # dont bufferize an arange
   (UPat.any((r:=UPat(dtype=dtypes.index).cast()).named("src"), r.eq(UPat()).named("src")).f(Ops.BUFFERIZE,
     allow_any_len=True, name="buf").f(Ops.INDEX, allow_any_len=True, name="idx"), remove_bufferize),
-  # no buffers for const
+  # no buffers for const (ranges don't matter for const - it's the same value everywhere)
   (UPat(Ops.CONST, name='c').f(Ops.BUFFERIZE, allow_any_len=True, name="b"), lambda c,b: b.const_like(c.arg).rtag(b.tag)),
   # indexing a const is a const
   (UPat(Ops.INDEX, src=(UPat(Ops.CONST, name="c"),),), lambda c: c),
@@ -271,20 +275,20 @@ def late_buffer_view(t:UOp, b:UOp):
   size = prod(shape)
 
   # walk up for the INDEX
+  # NOTE: even though we allow RESHAPE and SHRINK, they can combine to form non-contiguous access patterns (e.g. t[::2])
   x = t
-  while not any(u.op is Ops.INDEX for u in x.src):
-    assert x.op not in GroupOp.Elementwise, "can't buffer view elementwise"
+  while x.op is not Ops.INDEX:
+    assert x.op in {Ops.BITCAST, Ops.CONTIGUOUS, Ops.SHRINK, Ops.RESHAPE}, f"unexpected op {x.op} in buffer view walk"
     x = x.src[0]
-  x = next(u for u in x.src if u.op is Ops.INDEX)
 
   if len(shape) == 0: offset = x.src[1].arg
-  else: offset = max(sum(idx.vmin for idx in x.src[1:]), 0)
+  else: offset = sum(idx.vmin for idx in x.src[1:])
+  if offset < 0: raise RuntimeError(f"negative offset {offset} in buffer view")
 
-  return b.replace(src=(UOp(Ops.BUFFER_VIEW, t.dtype, (x.base,), (size, offset), tag=t.tag),) + b.src[1:])
+  return b.replace(src=(UOp(Ops.BUFFER_VIEW, t.dtype, (x.base,), (size, offset), tag=t.tag), b.src[1]))
 
 to_bufferview = PatternMatcher([
-  (UPat((Ops.BITCAST, Ops.CONTIGUOUS), name="t").f(Ops.BUFFERIZE, allow_any_len=True, name="b"), late_buffer_view),
-  (UPat((Ops.BITCAST, Ops.CONTIGUOUS)).f(Ops.BUFFER_VIEW, name="b"), lambda b: b.replace(src=b.src[0].src)),
+  (UPat(Ops.BUFFERIZE, src=(UPat((Ops.BITCAST, Ops.CONTIGUOUS), name="t"), UPat()), name="b"), late_buffer_view),
 ])
 
 DEVICE_MAX_BUFS = {"METAL": 31, "WEBGPU": 8} # TODO: get from device?
@@ -451,9 +455,6 @@ to_define_global = PatternMatcher([
   # this is only needed if you are using symbolic
   (UPat((Ops.CONST, Ops.DEFINE_VAR), name="c"), lambda c: c.replace(src=()) if len(c.src) else None),
 
-  # remove RANGE with 0 size
-  (UPat(Ops.RANGE, name="r"), lambda r: UOp.const(dtypes.index, 0) if r.vmax == 0 else None),
-
   # renumber the ranges starting with 0 so that kernel deduping works
   (UPat(Ops.RANGE, name="r"), renumber_range),
 ])
@@ -468,9 +469,6 @@ rangeify_codegen = PatternMatcher([
   # no NOOP in the kernel graph
   # TODO: this can be moved into codegen?
   (UPat(Ops.NOOP, name="x"), lambda x: x.src[0]),
-
-  # strip the arg from store
-  (UPat(Ops.STORE, name="x"), lambda x: x.replace(arg=None) if x.arg is not None else None),
 
   # add loads to non ptr indexes
   # TODO: this can be moved into codegen?

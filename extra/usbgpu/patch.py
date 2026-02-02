@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-import sys, os, zlib, struct, hashlib
-from tinygrad.helpers import DEBUG, getenv, fetch
+import os, zlib, struct, hashlib
+from tinygrad.helpers import getenv
 from tinygrad.runtime.support.usb import USB3
 
 SUPPORTED_CONTROLLERS = [
@@ -50,7 +50,7 @@ patched_fw = patch(file_path, file_hash, patches)
 dev = None
 for vendor, device in SUPPORTED_CONTROLLERS:
   try:
-    dev = USB3(vendor, device, 0x81, 0x83, 0x02, 0x04)
+    dev = USB3(vendor, device, 0x81, 0x83, 0x02, 0x04, use_bot=True)
     break
   except RuntimeError: pass
 if dev is None:

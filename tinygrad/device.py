@@ -147,8 +147,9 @@ class Buffer:
   def deallocate(self):
     assert hasattr(self, '_buf'), "buffer must be allocated to deallocate"
     if DEBUG is not None and DEBUG >= 7: print(f"buffer: deallocate {self.nbytes} bytes on {self.device}")
-    if self._base is None and (self.options is None or self.options.external_ptr is None):
-      if GlobalCounters is not None and not self.device.startswith("DISK"): GlobalCounters.mem_used -= self.nbytes
+    if self._base is None:
+      if GlobalCounters is not None and not self.device.startswith("DISK") and (self.options is None or self.options.external_ptr is None):
+        GlobalCounters.mem_used -= self.nbytes
       if PROFILE: Buffer.profile_events.append(ProfilePointEvent(self.device, "free", self.trace_num))
       self.allocator.free(self._buf, self.nbytes, self.options)
     elif self._base is not None: self._base.allocated_views -= 1
@@ -263,7 +264,7 @@ class LRUAllocator(Allocator, Generic[DeviceType]):
       for opaque in opaques: super().free(opaque, sz, options)
       opaques.clear()
   def free(self, opaque:Any, size:int, options:BufferSpec|None=None):
-    if LRU and (options is None or not options.nolru): self.cache[(size, options)].append(opaque)
+    if LRU and (options is None or (not options.nolru and options.external_ptr is None)): self.cache[(size, options)].append(opaque)
     else: super().free(opaque, size, options)
 
 # **************** for Compiled Devices ****************

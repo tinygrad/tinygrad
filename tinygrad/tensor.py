@@ -7,7 +7,7 @@ if TYPE_CHECKING: import numpy
 from tinygrad.dtype import DType, DTypeLike, dtypes, ImageDType, ConstType, least_upper_float, least_upper_dtype, sum_acc_dtype, to_dtype, truncate
 from tinygrad.dtype import _from_np_dtype, _to_np_dtype, PyConst
 from tinygrad.helpers import argfix, make_tuple, flatten, prod, all_int, round_up, merge_dicts, argsort, getenv, all_same, fully_flatten
-from tinygrad.helpers import IMAGE, WINO, Metadata, TRACEMETA, ceildiv, fetch, polyN, is_numpy_ndarray, TracingKey, cpu_profile
+from tinygrad.helpers import IMAGE, WINO, Metadata, TRACEMETA, ASM_GEMM, ceildiv, fetch, polyN, is_numpy_ndarray, TracingKey, cpu_profile
 from tinygrad.helpers import suppress_finalizing, disable_gc
 from tinygrad.gradient import compute_gradient
 from tinygrad.mixin import OpMixin
@@ -286,20 +286,20 @@ class Tensor(OpMixin):
     return self
 
   def assign(self, x:Tensor|PyConst|list|tuple) -> Tensor:
+    is_disk = isinstance(self.device, str) and self.device.startswith("DISK")
+    if not isinstance(x, Tensor): x = Tensor(x, device="CPU" if is_disk else self.device, dtype=self.dtype)
+    if self.uop is x.uop: return self  # a self assign is a NOOP
+    # broadcast x (shape only, dtype must match)
+    if self.shape != x.shape: x = x._broadcast_to(self.shape)
+    if self.shape != x.shape: raise RuntimeError(f"assign shape mismatch {self.shape} != {x.shape}")
+    if not is_disk and self.device != x.device: raise RuntimeError(f"assign device mismatch {self.device} != {x.device}")
+    if self.dtype != x.dtype: raise RuntimeError(f"assign dtype mismatch {self.dtype} != {x.dtype}")
+    if isinstance(self.device, tuple) and self.uop.axis != x.uop.axis: raise RuntimeError(f"multi axis mismatch {self.uop.axis} != {x.uop.axis}")
+
     # TODO: this is a hack for writing to DISK. remove with working assign
-    if isinstance(self.device, str) and self.device.startswith("DISK"):
-      if not isinstance(x, Tensor): x = Tensor(x, device="CPU", dtype=self.dtype)
+    if is_disk:
       self._buffer().copyin(x._data())
       return self
-    if not isinstance(x, Tensor): x = Tensor(x, device=self.device, dtype=self.dtype)
-    if self.uop is x.uop: return self  # a self assign is a NOOP
-    # NOTE: we allow cross device assign
-    # broadcast x
-    if least_upper_dtype(self.dtype, x.dtype) == self.dtype: x = x._broadcast_to(self.shape).cast(self.dtype)
-    assert self.shape == x.shape, f"assign shape mismatch {self.shape} != {x.shape}"
-    assert self.device == x.device, f"assign device mismatch {self.device} != {x.device}"
-    assert self.dtype == x.dtype, f"assign dtype mismatch {self.dtype} != {x.dtype}"
-    assert not isinstance(self.device, tuple) or self.uop.axis == x.uop.axis, f"multi assign axis mismatch {self.uop.axis} != {x.uop.axis}"
     return self.replace(self._apply_uop(UOp.assign, x))
 
   def detach(self) -> Tensor:
@@ -2431,6 +2431,9 @@ class Tensor(OpMixin):
     ```
     """
     if IMAGE: return self.image_dot(w, dtype)
+    if ASM_GEMM:
+      from extra.gemm.asm.cdna.gemm import can_use_asm_gemm, asm_gemm
+      if can_use_asm_gemm(self, w): return asm_gemm(self, w)
     x, dx, dw = self, self.ndim, w.ndim
     if not (dx > 0 and dw > 0): raise RuntimeError(f"both tensors need to be at least 1D, got {dx}D and {dw}D")
     if x.shape[-1] != w.shape[axis_w:=-min(w.ndim,2)]: raise RuntimeError(f"cannot dot {x.shape} and {w.shape}")
@@ -3865,7 +3868,10 @@ class Tensor(OpMixin):
 
   def bitcast(self, dtype:DTypeLike) -> Tensor:
     """
-    Bitcasts `self` to the given `dtype` of the same itemsize.
+    Bitcasts `self` to the given `dtype`.
+
+    When the target dtype has the same itemsize, this is a view of the same memory.
+    When itemsizes differ, the last dimension is adjusted and a new Tensor is created.
 
     `self` must not require a gradient.
 

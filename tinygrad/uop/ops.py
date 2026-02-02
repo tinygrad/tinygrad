@@ -206,7 +206,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     match self.op:
       # late ops don't have shape
       case Ops.UNIQUE | Ops.LUNIQUE | Ops.DEVICE | Ops.RANGE | Ops.LOAD | Ops.IF | Ops.BARRIER | Ops.CUSTOM | Ops.CUSTOMI | \
-           Ops.VECTORIZE | Ops.VCONST | Ops.GEP | Ops.SPECIAL | Ops.UNROLL | Ops.CONTRACT | Ops.CUSTOM_KERNEL | \
+           Ops.VECTORIZE | Ops.VCONST | Ops.GEP | Ops.SPECIAL | Ops.UNROLL | Ops.CONTRACT | Ops.CUSTOM_KERNEL | Ops.SINK | \
            Ops.LINEAR | Ops.PROGRAM | Ops.SOURCE | Ops.BINARY:
         return None
 
@@ -224,8 +224,9 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
       case Ops.BUFFER_VIEW: return (self.arg[0],)
       case Ops.ENCDEC: return self.arg[0]
       case Ops.BUFFERIZE: return tuple([int(r.vmax+1) for r in self.src[1:]])
-      case Ops.DEFINE_GLOBAL | Ops.DEFINE_LOCAL | Ops.DEFINE_REG: return (self.ptrdtype.size,)
+      case Ops.DEFINE_LOCAL | Ops.DEFINE_REG: return (self.ptrdtype.size,)
       case Ops.PARAM:
+        if isinstance(self.dtype, PtrDType): return (self.ptrdtype.size,)
         # NOTE: copied from marg
         if len(self.src) >= 1: return tuple(self.src[0].sgep(i) for i in range(self.src[0].dtype.count))
         return None
@@ -441,7 +442,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     # NOTE: b is ConstType, not ConstLike, so UOps and tuples aren't allowed
     assert not isinstance(b, (UOp, tuple)), "unique const only works on numbers"
     ret = UOp.const(dtype, b, device)
-    return ret.replace(src=ret.src + (UOp.unique(None if unique is True else unique),))
+    return ret.replace(src=(UOp.unique(None if unique is True else unique),) + ret.src)
   @staticmethod
   def range(end:sint, axis_id, axis_type=AxisType.LOOP, *arg, dtype=dtypes.index, src=(), **kwargs):
     return UOp(Ops.RANGE, dtype=dtype, src=(sint_to_uop(end, dtype),)+src, arg=(axis_id, axis_type)+arg, **kwargs)
@@ -1378,8 +1379,8 @@ def render_marg(ctx,x:UOp):
 sugar = {Ops.SINK, Ops.END, Ops.STORE, Ops.LOAD, Ops.UNIQUE, Ops.SQRT, Ops.INDEX, Ops.REDUCE, Ops.AFTER, Ops.THREEFRY,
          Ops.WHERE, Ops.RECIPROCAL, Ops.EXP2, Ops.LOG2, Ops.SIN, Ops.CONTIGUOUS, Ops.BARRIER, Ops.ASSIGN, Ops.DETACH}
 pm_pyrender_extra = PatternMatcher([
-  (UPat(Ops.CONST, src=(UPat(Ops.DEVICE, name="d"), UPat(Ops.UNIQUE, name="u")), name="x"),
-   lambda x,d,u: f"UOp.unique_const({x.dtype}, {x.arg}, device={repr(d.arg)}, unique={u.arg})"),
+  (UPat(Ops.CONST, src=(UPat(Ops.UNIQUE, name="u"), UPat(Ops.DEVICE, name="d")), name="x"),
+   lambda x,u,d: f"UOp.unique_const({x.dtype}, {x.arg}, device={repr(d.arg)}, unique={u.arg})"),
   (UPat(Ops.CONST, src=(UPat(Ops.DEVICE, name="d"),), name="x"), lambda x,d: f"UOp.const({x.dtype}, {x.arg}, device={repr(d.arg)})"),
   (UPat(Ops.CONST, name="x"), lambda x: f"UOp.const({x.dtype}, {x.arg})"),
   (UPat(Ops.DEFINE_VAR, src=(), name="x"), lambda x:
@@ -1436,6 +1437,7 @@ def pyrender(ast:UOp) -> str:
       for s in u.src: to_render.add(s)
     if u.op is Ops.STORE: to_render.add(u.src[1])
     if u.op in {Ops.REDUCE, Ops.REDUCE_AXIS}: to_render.add(u.src[0])
+    if u.op in {Ops.CUSTOM_KERNEL, Ops.CALL}: raise NotImplementedError("custom_kernel / call can't be pyrendered")
     if u.op in not_rendered: continue
     # checking the consumers is not enough, you have to make sure it's not used twice by the one consumer
     if len(cmap[u]) == 1 and len([x for x in list(cmap[u].keys())[0].src if x is u]) == 1 and u.op not in always_rendered: continue
@@ -1444,7 +1446,13 @@ def pyrender(ast:UOp) -> str:
   kernels: dict[UOp, tuple[str, str]] = {}
   r: dict[UOp, str] = {}
   ret: dict[str, str] = {}
+  depth: dict[UOp, int] = {}
   for i,u in enumerate(lst):
+    # limit inline depth to avoid "too many nested parentheses" in Python parser
+    op_depth = 1 + max([depth[s] for s in u.src], default=0)
+    if op_depth > 100: to_render.add(u)
+    depth[u] = 0 if u in to_render else op_depth
+    # do the rendering
     if u.op is Ops.KERNEL:
       if u.arg.ast not in kernels:
         kernels[u.arg.ast] = (f"k{len(kernels)}", f"def k{len(kernels)}():\n  " + pyrender(u.arg.ast).replace('\n', '\n  ') + "\n  return ast\n\n")

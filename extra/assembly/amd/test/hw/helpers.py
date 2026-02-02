@@ -13,7 +13,7 @@ def _i32(f: float) -> int: return struct.unpack('<I', struct.pack('<f', f))[0]
 def _f32(i: int) -> float: return struct.unpack('<f', struct.pack('<I', i & 0xFFFFFFFF))[0]
 
 # f16 conversion helpers
-def _f16(i: int) -> float: return struct.unpack('<e', struct.pack('<H', i & 0xFFFF))[0]
+def f16(i: int) -> float: return struct.unpack('<e', struct.pack('<H', i & 0xFFFF))[0]
 def f32_to_f16(f: float) -> int:
   f = float(f)
   if math.isnan(f): return 0x7e00
@@ -42,6 +42,23 @@ class SrcEnum:
 VCC = VCC_LO  # For VOP3SD sdst field (VCC_LO is exported from dsl)
 USE_HW = os.environ.get("USE_HW", "0") == "1"
 FLOAT_TOLERANCE = 1e-5
+
+def get_gpu_target() -> tuple[int, int, int]:
+  """Get the GPU target as (major, minor, stepping) tuple."""
+  if not USE_HW: return (0, 0, 0)
+  from tinygrad.device import Device
+  return Device["AMD"].target
+
+def skip_unless_gfx(min_major: int, min_minor: int = 0, reason: str = ""):
+  """Skip test if GPU target is below the minimum required version."""
+  import unittest
+  def decorator(test_func):
+    if not USE_HW: return test_func
+    target = get_gpu_target()
+    if target[0] < min_major or (target[0] == min_major and target[1] < min_minor):
+      return unittest.skip(reason or f"requires gfx{min_major}{min_minor}0+")(test_func)
+    return test_func
+  return decorator
 
 # Output buffer layout: vgpr[16][32], sgpr[16], vcc, scc, exec
 N_VGPRS, N_SGPRS, WAVE_SIZE = 16, 16, 32
@@ -212,8 +229,12 @@ amdhsa.kernels:
 
   return parse_output(bytes(out_buf), n_lanes)
 
-def compare_wave_states(emu_st: WaveState, hw_st: WaveState, n_lanes: int, n_vgprs: int = N_VGPRS) -> list[str]:
-  """Compare two WaveStates and return list of differences."""
+def compare_wave_states(emu_st: WaveState, hw_st: WaveState, n_lanes: int, n_vgprs: int = N_VGPRS, ulp_tolerance: int = 0) -> list[str]:
+  """Compare two WaveStates and return list of differences.
+
+  Args:
+    ulp_tolerance: Allow up to this many ULPs difference for float comparisons (0 = exact match required)
+  """
   import math
   diffs = []
   for i in range(n_vgprs):
@@ -224,6 +245,11 @@ def compare_wave_states(emu_st: WaveState, hw_st: WaveState, n_lanes: int, n_vgp
         emu_f, hw_f = _f32(emu_val), _f32(hw_val)
         if math.isnan(emu_f) and math.isnan(hw_f):
           continue
+        # Check ULP difference for floats (only for same-sign values)
+        if ulp_tolerance > 0 and (emu_val < 0x80000000) == (hw_val < 0x80000000):
+          ulp_diff = abs(int(emu_val) - int(hw_val))
+          if ulp_diff <= ulp_tolerance:
+            continue
         diffs.append(f"v[{i}] lane {lane}: emu=0x{emu_val:08x} ({emu_f:.6g}) hw=0x{hw_val:08x} ({hw_f:.6g})")
   for i in range(N_SGPRS):
     emu_val = emu_st.sgpr[i]
@@ -236,16 +262,19 @@ def compare_wave_states(emu_st: WaveState, hw_st: WaveState, n_lanes: int, n_vgp
     diffs.append(f"scc: emu={emu_st.scc} hw={hw_st.scc}")
   return diffs
 
-def run_program(instructions: list, n_lanes: int = 1) -> WaveState:
+def run_program(instructions: list, n_lanes: int = 1, ulp_tolerance: int = 0) -> WaveState:
   """Run instructions and return WaveState.
 
   If USE_HW=1, runs on both emulator and hardware, compares results, and raises if they differ.
   Otherwise, runs only on emulator.
+
+  Args:
+    ulp_tolerance: Allow up to this many ULPs difference for float comparisons (0 = exact match required)
   """
   emu_st = run_program_emu(instructions, n_lanes)
   if USE_HW:
     hw_st = run_program_hw(instructions, n_lanes)
-    diffs = compare_wave_states(emu_st, hw_st, n_lanes)
+    diffs = compare_wave_states(emu_st, hw_st, n_lanes, ulp_tolerance=ulp_tolerance)
     if diffs:
       raise AssertionError(f"Emulator vs Hardware mismatch:\n" + "\n".join(diffs))
     return hw_st

@@ -470,5 +470,19 @@ class TestUnfoldableImageChannelSelection(unittest.TestCase):
     load = UOp(Ops.LOAD, dtypes.float, (UOp(Ops.DEFINE_GLOBAL, dtypes.imagef((10, 10, 4)), arg=0).index(x, ptr=True), UOp.const(dtypes.float, 0)))
     self.assertEqual(self._count_nans(load), 1)
 
+class TestDropTrueGate(unittest.TestCase):
+  def test_drop_true_gate_on_index(self):
+    # test that INDEX with a constant True gate gets simplified to drop the gate
+    from tinygrad.codegen.late.devectorizer import load_store_indexing
+    from tinygrad.uop.ops import graph_rewrite
+    buf = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), arg=0)
+    idx = UOp.const(dtypes.index, 0)
+    true_gate = UOp.const(dtypes.bool, True)
+    index_with_gate = UOp(Ops.INDEX, dtypes.int.ptr(), (buf, idx, true_gate))
+    # apply the optimization
+    result = graph_rewrite(index_with_gate, load_store_indexing)
+    # the True gate should be dropped (INDEX should only have 2 sources)
+    self.assertEqual(len(result.src), 2, "True gate should be dropped from INDEX")
+
 if __name__ == '__main__':
   unittest.main()

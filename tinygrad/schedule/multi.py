@@ -71,7 +71,8 @@ def handle_allreduce(buf:UOp, red:UOp) -> UOp|None:
   # allgather
   copied_chunks = []
   for i,rc in enumerate(reduced_chunks):
-    if use_all2all: copied_chunks.append(UOp(Ops.MSTACK, buf.dtype, tuple(rc.copy_to_device(buf.device[j]) for j in range(n_lbs))))
+    if isinstance(red.src[1].arg, str): copied_chunks.append(rc.copy_to_device(red.src[1].arg))
+    elif use_all2all: copied_chunks.append(UOp(Ops.MSTACK, buf.dtype, tuple(rc.copy_to_device(buf.device[j]) for j in range(n_lbs))))
     else:
       this_chunk: list[UOp|None] = [None] * n_lbs
       this_chunk[(i+n_lbs-1)%n_lbs] = rc

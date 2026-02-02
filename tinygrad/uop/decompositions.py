@@ -1,6 +1,6 @@
 from typing import Callable
 import math, functools
-from tinygrad.dtype import dtypes, DType, promo_lattice
+from tinygrad.dtype import dtypes, DType, promo_lattice, truncate
 from tinygrad.device import is_dtype_supported
 from tinygrad.helpers import flatten, polyN
 from tinygrad.uop import GroupOp
@@ -353,8 +353,9 @@ def l2i(op: Ops, dt: DType, *uops:UOp):
     case Ops.IDIV | Ops.MOD:
       # TAOCP Algorithm 4.3.1D could be faster here, but must be parameterized over the width of b
       if dt == dtypes.int:
-        a0, a1 = (a_neg:=a1 < zero).where((n:=l2i(Ops.NEG, dt, a0, a1))[0], a0).bitcast(dtypes.uint), a_neg.where(n[1], a1).bitcast(dtypes.uint)
-        b0, b1 = (b_neg:=b1 < zero).where((n:=l2i(Ops.NEG, dt, b0, b1))[0], b0).bitcast(dtypes.uint), b_neg.where(n[1], b1).bitcast(dtypes.uint)
+        ua0, ua1, ub0, ub1 = a0.bitcast(dtypes.uint), a1.bitcast(dtypes.uint), b0.bitcast(dtypes.uint), b1.bitcast(dtypes.uint)
+        a0, a1 = (a_neg:=a1 < zero).where((n:=l2i(Ops.NEG, dtypes.uint, ua0, ua1))[0], ua0), a_neg.where(n[1], ua1)
+        b0, b1 = (b_neg:=b1 < zero).where((n:=l2i(Ops.NEG, dtypes.uint, ub0, ub1))[0], ub0), b_neg.where(n[1], ub1)
       q, r = (z:=UOp.const(dtypes.uint, 0), z), (z, z)
       for i in range(63, -1, -1):
         r = l2i(Ops.SHL, dtypes.uint, *r, UOp.const(dtypes.uint, 1), z)
@@ -364,8 +365,9 @@ def l2i(op: Ops, dt: DType, *uops:UOp):
         q = ((q[0] | cond.cast(dtypes.uint) << (i % 32), q[1]) if i < 32 else (q[0], q[1] | cond.cast(dtypes.uint) << (i % 32)))
         r = l2i(Ops.WHERE, dtypes.uint, cond, *diff, *r)
       if dt == dtypes.int:
-        nq, nr = l2i(Ops.NEG, dt, q0:=q[0].bitcast(dt), q1:=q[1].bitcast(dt)), l2i(Ops.NEG, dt, r0:=r[0].bitcast(dt), r1:=r[1].bitcast(dt))
-        return (a_neg.where(nr[0], r0), a_neg.where(nr[1], r1)) if op == Ops.MOD else ((a_neg^b_neg).where(nq[0], q0), (a_neg^b_neg).where(nq[1], q1))
+        (nq0, nq1), (nr0, nr1) = l2i(Ops.BITCAST, dt, *l2i(Ops.NEG, dtypes.uint, *q)), l2i(Ops.BITCAST, dt, *l2i(Ops.NEG, dtypes.uint, *r))
+        (q0, q1), (r0, r1) = l2i(Ops.BITCAST, dt, *q), l2i(Ops.BITCAST, dt, *r)
+        return (a_neg.where(nr0, r0), a_neg.where(nr1, r1)) if op == Ops.MOD else ((a_neg^b_neg).where(nq0, q0), (a_neg^b_neg).where(nq1, q1))
       return (r[0].bitcast(dt), r[1].bitcast(dt)) if op == Ops.MOD else (q[0].bitcast(dt), q[1].bitcast(dt))
     case Ops.CMPLT: return (a1 < b1) | ((a1.eq(b1)) & (a0.bitcast(dtypes.uint) < b0.bitcast(dtypes.uint)))
     case Ops.CMPEQ: return a0.eq(b0) & a1.eq(b1)
@@ -447,5 +449,5 @@ def get_late_rewrite_patterns(ops:tuple[Ops, ...], device:str, force_transcenden
     pat += [(UPat(Ops.LOAD, tuple(l2i_dt.keys()), src=(UPat.var('idx'),), name='x'), lambda x,idx:
              None if x.tag is None else x.replace(dtype=l2i_dt[x.dtype], src=(l2i_idx(idx, x.tag),)))]
     pat += [(UPat(Ops.CONST, tuple(l2i_dt.keys()), name='x'), lambda x:
-             None if x.tag is None else UOp.const(l2i_dt[x.dtype], (x.arg >> 32) if x.tag == 1 else (x.arg & 0xFFFFFFFF)))]
+             None if x.tag is None else UOp.const(dt:=l2i_dt[x.dtype], truncate[dt]((x.arg >> 32) if x.tag == 1 else (x.arg & 0xFFFFFFFF))))]
   return PatternMatcher(pat)
