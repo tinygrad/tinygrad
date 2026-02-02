@@ -638,18 +638,13 @@ class AMDAllocator(HCQAllocator['AMDDevice']):
   def _map(self, buf:HCQBuffer): return self.dev.iface.map(buf._base if buf._base is not None else buf)
 
 @dataclass
-class AMDComputeQueueState:
-  ring: HCQBuffer; gart: HCQBuffer; rptr: int; wptr: int; eop_buffer: HCQBuffer; aql: bool
-
-@dataclass
 class AMDQueueDesc:
   ring: MMIOInterface
   read_ptrs: list[MMIOInterface]
   write_ptrs: list[MMIOInterface]
   doorbells: list[MMIOInterface]
   put_value: int = 0
-  idx: int = 0
-  hw: AMDComputeQueueState|None = None
+  params: tuple|None = None  # setup_ring params for recovery
 
   @property
   def read_ptr(self): return min(p[0] for p in self.read_ptrs)
@@ -854,15 +849,17 @@ class PCIIface(PCIIfaceBase):
   def create_queue(self, queue_type, ring, gart, rptr, wptr, eop_buffer=None, cwsr_buffer=None, ctl_stack_size=0, ctx_save_restore_size=0,
                    xcc_id=0, idx=0):
     assert cwsr_buffer is None, "no cwsr buffer for am"
-    aql = queue_type == kfd.KFD_IOC_QUEUE_TYPE_COMPUTE_AQL
+
     if queue_type == kfd.KFD_IOC_QUEUE_TYPE_SDMA:
-      pv, doorbell_index = self.dev_impl.sdma.setup_ring(ring.va_addr, ring.size, gart.va_addr+rptr, gart.va_addr+wptr, idx)
+      pv, doorbell_index = self.dev_impl.sdma.setup_ring(*(params:=(ring.va_addr, ring.size, gart.va_addr+rptr, gart.va_addr+wptr, idx)))
     else:
-      pv, doorbell_index = self.dev_impl.gfx.setup_ring(ring.va_addr, ring.size, gart.va_addr+rptr, gart.va_addr+wptr, eop_buffer.va_addr, eop_buffer.size, idx, aql)
-    hw = AMDComputeQueueState(ring, gart, rptr, wptr, eop_buffer, aql) if eop_buffer else None
+      aql = queue_type == kfd.KFD_IOC_QUEUE_TYPE_COMPUTE_AQL
+      pv, doorbell_index = self.dev_impl.gfx.setup_ring(*(params:=(ring.va_addr, ring.size, gart.va_addr+rptr, gart.va_addr+wptr,
+        eop_buffer.va_addr, eop_buffer.size, idx, aql)))
+
     return AMDQueueDesc(ring=ring.cpu_view().view(fmt='I'), doorbells=[self.dev_impl.doorbell64.view(doorbell_index * 8, 8, fmt='Q')],
       read_ptrs=[gart.cpu_view().view(offset=rptr, size=8, fmt='Q')], write_ptrs=[gart.cpu_view().view(offset=wptr, size=8, fmt='Q')],
-      put_value=pv, idx=idx, hw=hw)
+      put_value=pv, params=params)
 
   def sleep(self, timeout) -> bool:
     if hasattr(self.pci_dev, 'irq_poller') and self.pci_dev.irq_poller is not None and (events_cnt:=len(self.pci_dev.irq_poller.poll(timeout))):
@@ -877,13 +874,13 @@ class PCIIface(PCIIfaceBase):
     for d in devs:
       if DEBUG >= 1: print(f"AMDDevice: Recovering from GPU fault")
       d.iface.dev_impl.recover()
-      hw = d.compute_queue.hw
-      d.compute_queue.put_value, _ = d.iface.dev_impl.gfx.setup_ring(hw.ring.va_addr, hw.ring.size, hw.gart.va_addr+hw.rptr, hw.gart.va_addr+hw.wptr,
-                                                                     hw.eop_buffer.va_addr, hw.eop_buffer.size, d.compute_queue.idx, hw.aql)
-      for rp in d.compute_queue.read_ptrs: rp[0] = d.compute_queue.put_value
-      for wp in d.compute_queue.write_ptrs: wp[0] = d.compute_queue.put_value
-      d.timeline_signal.value = d._shadow_timeline_signal.value = d.timeline_value - 1
-      d.allocator.b_timeline, d.error_state = [0] * len(d.allocator.b), None
+      if DEBUG >= 2: print(f"AMDDevice: Setting up ring with params {d.compute_queue.params}")
+      d.compute_queue.put_value, _ = d.iface.dev_impl.gfx.setup_ring(*d.compute_queue.params)
+      if DEBUG >= 2: print(f"AMDDevice: put_value={d.compute_queue.put_value}, timeline={d.timeline_value}")
+      d.compute_queue.read_ptrs[0][0] = d.compute_queue.write_ptrs[0][0] = d.compute_queue.put_value
+      d.timeline_signal.value = d.timeline_value - 1
+      d.error_state = None
+      if DEBUG >= 2: print(f"AMDDevice: Recovery done, timeline_signal.value={d.timeline_signal.value}")
     raise RuntimeError(f"Device hang detected: {'; '.join(faults)}" if faults else "Device hang detected")
 
   def device_fini(self): self.dev_impl.fini()

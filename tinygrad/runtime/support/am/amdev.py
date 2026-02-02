@@ -220,19 +220,17 @@ class AMDev(PCIDevImplBase):
 
   def fini(self):
     if DEBUG >= 2: print(f"am {self.devfmt}: Finalizing")
-    self.sdma.fini_hw()
-    self.gfx.dequeue_rings(wait=True)
+    for ip in [self.sdma, self.gfx]: ip.fini_hw()
     self.smu.set_clocks(level=0)
     self.ih.interrupt_handler()
     self.reg("regSCRATCH_REG6").write(self.is_err_state) # set finalized state.
 
   def recover(self):
-    if self.is_hive(): return
+    if self.is_hive() or not self.is_err_state: return # TODO: support mi300
     if DEBUG >= 2: print(f"am {self.devfmt}: Recovering from GPU fault")
     self.ih.interrupt_handler()
-    self.gfx.dequeue_rings(reset=True)
-    self.gmc.clear_fault()
-    self.gmc.flush_tlb(ip='GC', vmid=0)
+    self.gfx.reset_mec()
+    self.gmc.flush_tlb(ip='GC', vmid=0, clear_fault=True)
     self.is_err_state = False
     if DEBUG >= 2: print(f"am {self.devfmt}: Recovery complete")
 

@@ -185,8 +185,7 @@ class TestSDMAFaults(TestGPUCrash):
     fault = self.dev.iface.dev_impl.gmc.check_fault()
     self.assertTrue(fault is not None or self.dev.iface.dev_impl.is_err_state, "Expected SDMA fault to be detected")
     # Clear the fault so device can continue
-    self.dev.iface.dev_impl.gmc.clear_fault()
-    self.dev.iface.dev_impl.gmc.flush_tlb(ip='GC', vmid=0)
+    self.dev.iface.dev_impl.gmc.flush_tlb(ip='GC', vmid=0, clear_fault=True)
     self.dev.iface.dev_impl.is_err_state = False
 
 
