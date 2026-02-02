@@ -18,7 +18,7 @@ from tinygrad.codegen.late.devectorizer import load_store_folding, load_store_in
 from tinygrad.codegen.opt.postrange import apply_opts, make_images
 from tinygrad.codegen.simplify import pm_simplify_ranges, pm_flatten_range, pm_split_ranges, pm_load_collapse, pm_split_store
 from tinygrad.schedule.rangeify import pm_add_buffers_local, rangeify_codegen, pm_mops
-from tinygrad.codegen.late.linearizer import CFGContext, pm_split_ends, pm_add_control_flow, linearize
+from tinygrad.codegen.late.linearizer import CFGContext, pm_split_ends, pm_add_control_flow, linearize, unify_ends
 
 pm_syntactic_sugar = PatternMatcher([
   # INDEX on ptr INDEX concats them
@@ -105,6 +105,7 @@ def full_rewrite_to_sink(sink:UOp, ren:Renderer|None=None, optimize:bool=True) -
   sink = graph_rewrite(sink, pm_final_rewrite, ctx=ren.device, name="final rewrite")
 
   # this was the linearizer
+  sink = unify_ends(sink)
   sink = graph_rewrite(sink, pm_add_control_flow, ctx=CFGContext(sink), name="add control flow", bottom_up=True)
 
   # return the rewritten sink

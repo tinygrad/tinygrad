@@ -85,6 +85,20 @@ class CFGContext:
         assert y.src[1] not in x.backward_slice_with_self
         self.edges[y.src[1]] = x
 
+def unify_ends(sink:UOp) -> UOp:
+  # multiply ENDs with the same RANGE create cycles in CFGContext
+  ends = [u for u in sink.toposort() if u.op is Ops.END]
+  by_range: dict[tuple[UOp, ...], list[UOp]] = defaultdict(list)
+  for e in ends: by_range[e.src[1:]].append(e)
+
+  replacements: dict[UOp, UOp] = {}
+  for r, es in by_range.items():
+    if len(es) > 1:
+      new_end = UOp(Ops.END, es[0].dtype, (UOp.group(*(e.src[0] for e in es)),) + r)
+      for e in es: replacements[e] = new_end
+
+  return sink.substitute(replacements)
+
 pm_add_control_flow = PatternMatcher([
   (UPat(Ops.RANGE, name="x"), lambda ctx,x: x.replace(src=x.src+(y,)) if (y:=ctx.edges.get(x)) is not None else None),
 ])
