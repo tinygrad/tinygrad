@@ -847,6 +847,7 @@ class PCIIface(PCIIfaceBase):
                    xcc_id=0, idx=0):
     assert cwsr_buffer is None, "no cwsr buffer for am"
 
+    params: tuple
     if queue_type == kfd.KFD_IOC_QUEUE_TYPE_SDMA:
       pv, doorbell_index = self.dev_impl.sdma.setup_ring(*(params:=(ring.va_addr, ring.size, gart.va_addr+rptr, gart.va_addr+wptr, idx)))
     else:
