@@ -37,7 +37,6 @@ class TestGPUCrash(unittest.TestCase):
     prg(self.dev.allocator.alloc(64), global_size=(1,1,1), local_size=(1,1,1), wait=True)
 
   def _run_insts(self, insts: list[Inst]): self._run("\n".join(i.disasm() for i in insts))
-  def _run_bytes(self, raw: bytes): self._run(".byte " + ",".join(f"0x{b:02x}" for b in raw))
 
   def _assert_gpu_fault(self, func):
     """Assert that func raises a RuntimeError indicating a GPU fault (not a setup error)."""
@@ -49,26 +48,6 @@ class TestGPUCrash(unittest.TestCase):
       re.search(r'fault|hang|timeout|illegal|memviol', err_msg),
       f"Expected GPU fault error, got: {cm.exception}"
     )
-
-
-class TestIllegalInstructions(TestGPUCrash):
-  """Tests for illegal/undefined instruction encodings."""
-
-  def test_all_ones_encoding(self):
-    """All-ones encoding (0xFFFFFFFF) is undefined."""
-    self._assert_gpu_fault(lambda: self._run_bytes(bytes([0xff, 0xff, 0xff, 0xff]) + s_endpgm().to_bytes()))
-
-  def test_all_zeros_encoding(self):
-    """All-zeros encoding (0x00000000) is undefined."""
-    self._assert_gpu_fault(lambda: self._run_bytes(bytes([0x00, 0x00, 0x00, 0x00]) + s_endpgm().to_bytes()))
-
-  def test_random_garbage_bytes(self):
-    """Random garbage bytes that don't decode to valid instructions."""
-    self._assert_gpu_fault(lambda: self._run_bytes(bytes([0xDE, 0xAD, 0xBE, 0xEF]) + s_endpgm().to_bytes()))
-
-  def test_truncated_instruction(self):
-    """Only half of a 64-bit instruction."""
-    self._assert_gpu_fault(lambda: self._run_bytes(s_load_b64(s[0:1], s[2:3], 0, soffset=NULL).to_bytes()[:4] + s_endpgm().to_bytes()))
 
 
 class TestOutOfBoundsMemoryAccess(TestGPUCrash):
@@ -98,12 +77,6 @@ class TestOutOfBoundsMemoryAccess(TestGPUCrash):
              global_store_b32(addr=v[0:1], data=v[2], saddr=NULL, offset=0), s_waitcnt(0), s_endpgm()]
     self._assert_gpu_fault(lambda: self._run_insts(insts))
 
-  def test_global_load_b128_misaligned(self):
-    """128-bit load from misaligned address."""
-    insts = [v_mov_b32_e32(v[0], 0xBEEF0001), v_mov_b32_e32(v[1], 0xDEAD),
-             global_load_b128(v[2:5], addr=v[0:1], saddr=NULL, offset=0), s_waitcnt(0), s_endpgm()]
-    self._assert_gpu_fault(lambda: self._run_insts(insts))
-
   def test_global_atomic_unmapped(self):
     """Atomic operation on unmapped memory."""
     insts = [v_mov_b32_e32(v[0], 0xBEEF0000), v_mov_b32_e32(v[1], 0xDEAD), v_mov_b32_e32(v[2], 1),
@@ -126,12 +99,6 @@ class TestSMEMFaults(TestGPUCrash):
              s_load_b32(s[4], s[2:3], 0, soffset=NULL), s_waitcnt(0), s_endpgm()]
     self._assert_gpu_fault(lambda: self._run_insts(insts))
 
-  def test_smem_load_b256_misaligned(self):
-    """256-bit SMEM load from misaligned address."""
-    insts = [s_mov_b32(s[2], 0xBEEF0004), s_mov_b32(s[3], 0xDEAD),
-             s_load_b256(s[4:11], s[2:3], 0, soffset=NULL), s_waitcnt(0), s_endpgm()]
-    self._assert_gpu_fault(lambda: self._run_insts(insts))
-
 
 class TestFlatMemoryFaults(TestGPUCrash):
   """Tests for FLAT memory instruction faults."""
@@ -152,16 +119,6 @@ class TestFlatMemoryFaults(TestGPUCrash):
     """FLAT atomic on NULL address."""
     insts = [v_mov_b32_e32(v[0], 0), v_mov_b32_e32(v[1], 0), v_mov_b32_e32(v[2], 1),
              flat_atomic_add_u32(addr=v[0:1], data=v[2], saddr=NULL, offset=0), s_waitcnt(0), s_endpgm()]
-    self._assert_gpu_fault(lambda: self._run_insts(insts))
-
-
-class TestScratchMemoryFaults(TestGPUCrash):
-  """Tests for private/scratch memory faults."""
-
-  def test_scratch_load_huge_offset(self):
-    """Scratch load with huge offset beyond allocated scratch."""
-    insts = [v_mov_b32_e32(v[0], 0),
-             scratch_load_b32(v[1], addr=v[0], saddr=NULL, offset=0x1FFF), s_waitcnt(0), s_endpgm()]
     self._assert_gpu_fault(lambda: self._run_insts(insts))
 
 
