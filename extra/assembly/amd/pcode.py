@@ -200,26 +200,15 @@ def _ff1(val: UOp, bits: int) -> UOp:
     result = cond.where(_const(dtypes.int, i), result)
   return result
 
-def _sad_u8(a: UOp, b: UOp, acc: UOp) -> UOp:
-  """Sum of absolute differences of 4 unsigned bytes + accumulator."""
+def _sad_u8(a: UOp, b: UOp, acc: UOp, masked: bool = False) -> UOp:
+  """Sum of absolute differences of 4 unsigned bytes + accumulator. If masked, skips bytes where a == 0."""
   a, b, acc = a.cast(dtypes.uint32), b.cast(dtypes.uint32), acc.cast(dtypes.uint32)
   result = acc
   for i in range(4):
     a_byte = (a >> _u32(i * 8)) & _u32(0xFF)
     b_byte = (b >> _u32(i * 8)) & _u32(0xFF)
     diff = (a_byte > b_byte).where(a_byte - b_byte, b_byte - a_byte)
-    result = result + diff
-  return result
-
-def _msad_u8(a: UOp, b: UOp, acc: UOp) -> UOp:
-  """Masked SAD - like SAD but skips bytes where a == 0."""
-  a, b, acc = a.cast(dtypes.uint32), b.cast(dtypes.uint32), acc.cast(dtypes.uint32)
-  result = acc
-  for i in range(4):
-    a_byte = (a >> _u32(i * 8)) & _u32(0xFF)
-    b_byte = (b >> _u32(i * 8)) & _u32(0xFF)
-    diff = (a_byte > b_byte).where(a_byte - b_byte, b_byte - a_byte)
-    result = result + a_byte.ne(_u32(0)).where(diff, _u32(0))
+    result = result + (a_byte.ne(_u32(0)).where(diff, _u32(0)) if masked else diff)
   return result
 
 _FUNCS: dict[str, Callable[..., UOp]] = {
@@ -278,7 +267,7 @@ _FUNCS: dict[str, Callable[..., UOp]] = {
   'v_cvt_u16_f32': lambda a: _f_to_u(a.bitcast(dtypes.float32), dtypes.uint16),
   # SAD (Sum of Absolute Differences) - sum |a_i - b_i| for 4 bytes + accumulator
   'v_sad_u8': lambda a, b, c: _sad_u8(a, b, c),
-  'v_msad_u8': lambda a, b, c: _msad_u8(a, b, c),
+  'v_msad_u8': lambda a, b, c: _sad_u8(a, b, c, masked=True),
   # System NOPs - these are scheduling hints, no effect on emulation
   'MIN': lambda a, b: (a < b).where(a, b),
   's_nop': lambda a: _u32(0),
@@ -888,9 +877,9 @@ def parse_block(lines: list[str], start: int, vars: dict[str, VarVal], funcs: di
 
     # declare
     if first == 'declare':
-      # Only initialize if not already passed as a source (e.g. PERMUTE needs ADDR, DATA0, VDST from instruction)
-      if '[' not in line and len(toks) >= 2 and toks[1].type == 'IDENT' and toks[1].val not in vars:
-        vars[toks[1].val] = _u32(0)
+      # Initialize scalar declarations (skip arrays and vars already passed as srcs)
+      if '[' not in line and len(toks) >= 2 and toks[1].type == 'IDENT':
+        vars.setdefault(toks[1].val, _u32(0))
       i += 1; continue
 
     # lambda definition
