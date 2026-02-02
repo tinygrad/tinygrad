@@ -843,12 +843,9 @@ def parse_block(lines: list[str], start: int, vars: dict[str, VarVal], funcs: di
       def parse_bound():
         if p.at('NUM') and p.peek(1).type == 'QUOTE': p.eat('NUM'); p.eat('QUOTE')
         if p.at('NUM'): return int(p.eat('NUM').val.rstrip('UuLl'))
-        expr = p.parse()
-        if expr.op == Ops.CONST: return int(expr.arg)
-        # Handle WHERE with constant condition (e.g. WAVE32 ? 1 : 3)
-        if expr.op == Ops.WHERE and expr.src[0].op == Ops.CONST:
-          return int(expr.src[1].arg) if expr.src[0].arg else int(expr.src[2].arg)
-        return 0
+        expr = p.parse().simplify()
+        assert expr.op == Ops.CONST, f"loop bound must be constant, got {expr}"
+        return int(expr.arg)
       start_val = parse_bound()
       p.eat('COLON')
       end_val = parse_bound()

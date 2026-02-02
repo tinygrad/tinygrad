@@ -487,6 +487,7 @@ def _compile_sopp(inst: SOPP, ctx: _Ctx) -> UOp:
   if inst.op == SOPPOp.S_ENDPGM:
     return UOp.sink(ctx.wsgpr_dyn(_c(PC_LO_IDX), UOp.const(dtypes.uint32, 0xFFFFFFFF)),
                           ctx.wsgpr_dyn(_c(PC_HI_IDX), UOp.const(dtypes.uint32, 0xFFFFFFFF)))
+  if inst.op == SOPPOp.S_NOP: return UOp.sink(*ctx.inc_pc())  # S_NOP is a no-op
   # NOTE: we ignore SOPPs without PCODE
   if inst.op in PCODE:
     pcode = get_pcode(inst.op)
