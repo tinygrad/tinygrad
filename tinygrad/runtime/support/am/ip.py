@@ -281,23 +281,6 @@ class AM_GFX(AM_IP):
     # Set 1 partition
     if self.xccs > 1 and not self.adev.partial_boot: self.adev.psp._spatial_partition_cmd(1)
 
-  def _enable_mec(self):
-    for xcc in range(self.xccs):
-      if self.adev.ip_ver[am.GC_HWIP] >= (10,0,0): self.adev.regCP_MEC_RS64_CNTL.update(mec_pipe0_reset=0, mec_pipe0_active=1, mec_halt=0, inst=xcc)
-      else: self.adev.regCP_MEC_CNTL.write(0x0, inst=xcc)
-    time.sleep(0.05)  # Wait for MEC to be ready
-
-  def _dequeue_hqds(self, reset=False):
-    # NOTE: For aqls with xccs (queue=1), will continue from the saved state.
-    for q in range(2 if self.xccs == 1 else 1):
-      for xcc in range(self.xccs):
-        self._grbm_select(me=1, pipe=0, queue=q, inst=xcc)
-        if self.adev.regCP_HQD_ACTIVE.read(inst=xcc) & 1:
-          self.adev.regCP_HQD_DEQUEUE_REQUEST.write(0x2, inst=xcc)  # 0x2 = RESET_WAVES
-          if reset: self.adev.regSPI_COMPUTE_QUEUE_RESET.write(1, inst=xcc)
-          else: wait_cond(lambda: self.adev.regCP_HQD_ACTIVE.read(inst=xcc) & 1, value=0, msg="HQD dequeue timeout")
-    self._grbm_select()
-
   def fini_hw(self): self._dequeue_hqds()
 
   def reset_mec(self):
@@ -375,6 +358,12 @@ class AM_GFX(AM_IP):
   def _grbm_select(self, me=0, pipe=0, queue=0, vmid=0, inst=0):
     self.adev.regGRBM_GFX_CNTL.write(meid=me, pipeid=pipe, vmid=vmid, queueid=queue, inst=inst)
 
+  def _enable_mec(self):
+    for xcc in range(self.xccs):
+      if self.adev.ip_ver[am.GC_HWIP] >= (10,0,0): self.adev.regCP_MEC_RS64_CNTL.update(mec_pipe0_reset=0, mec_pipe0_active=1, mec_halt=0, inst=xcc)
+      else: self.adev.regCP_MEC_CNTL.write(0x0, inst=xcc)
+    time.sleep(0.05)  # Wait for MEC to be ready
+
   def _config_mec(self):
     def _config_helper(eng_name, cntl_reg, eng_reg, pipe_cnt, me=0, xcc=0):
       for pipe in range(pipe_cnt):
@@ -392,6 +381,17 @@ class AM_GFX(AM_IP):
         _config_helper(eng_name="ME", cntl_reg="ME", eng_reg="ME", pipe_cnt=1, xcc=xcc)
       if self.adev.ip_ver[am.GC_HWIP] >= (10,0,0):
         _config_helper(eng_name="MEC", cntl_reg="MEC_RS64", eng_reg="MEC_RS64", pipe_cnt=1, me=1, xcc=xcc)
+
+  def _dequeue_hqds(self, reset=False):
+    # NOTE: For aqls with xccs (queue=1), will continue from the saved state.
+    for q in range(2 if self.xccs == 1 else 1):
+      for xcc in range(self.xccs):
+        self._grbm_select(me=1, pipe=0, queue=q, inst=xcc)
+        if self.adev.regCP_HQD_ACTIVE.read(inst=xcc) & 1:
+          self.adev.regCP_HQD_DEQUEUE_REQUEST.write(0x2, inst=xcc) # 1 - DRAIN_PIPE; 2 - RESET_WAVES
+          if reset: self.adev.regSPI_COMPUTE_QUEUE_RESET.write(1, inst=xcc)
+          else: wait_cond(lambda: self.adev.regCP_HQD_ACTIVE.read(inst=xcc) & 1, value=0, msg="HQD dequeue timeout")
+    self._grbm_select()
 
 class AM_IH(AM_IP):
   def init_sw(self):
