@@ -278,18 +278,11 @@ def _calc_ds_addr(vgpr_a, offset, *rest):
   return (vgpr_a.cast(dtypes.uint32) if vgpr_a.dtype != dtypes.uint32 else vgpr_a) + \
          (offset.cast(dtypes.uint32) if offset.dtype != dtypes.uint32 else offset)
 
-def _calc_global_addr(v_addr, s_saddr, *rest, _vars=None):
-  """CalcGlobalAddr - calculate global address from vaddr + saddr + ioffset. RDNA4: v_addr is 64-bit, s_saddr is 64-bit SGPR pair."""
-  # In RDNA4 pcode: CalcGlobalAddr(v_addr.b64, s_saddr.b64) - both are 64-bit
+def _calc_global_addr(v_addr, s_saddr, *rest):
+  """CalcGlobalAddr - calculate global address from vaddr + saddr. Emulator pre-computes v_addr and s_saddr correctly."""
   v64 = v_addr.cast(dtypes.uint64) if v_addr.dtype != dtypes.uint64 else v_addr
   s64 = s_saddr.cast(dtypes.uint64) if s_saddr.dtype != dtypes.uint64 else s_saddr
-  # Add ioffset if available (provided by RDNA4 memory ops)
-  ioffset = _vars.get('ioffset', UOp.const(dtypes.uint64, 0)) if _vars else UOp.const(dtypes.uint64, 0)
-  # use_saddr is passed from emulator (saddr_reg < 124), tells us whether saddr is valid
-  use_saddr = _vars.get('use_saddr', UOp.const(dtypes.bool, False)) if _vars else UOp.const(dtypes.bool, False)
-  # When saddr is valid: v_addr is 32-bit offset; otherwise v_addr is full 64-bit address
-  v_offset = v64 & UOp.const(dtypes.uint64, 0xFFFFFFFF)  # Low 32 bits as offset
-  return use_saddr.where(s64 + v_offset + ioffset, v64 + ioffset)
+  return v64 + s64
 
 _FUNCS['CalcDsAddr'] = _calc_ds_addr
 _FUNCS['CalcGlobalAddr'] = _calc_global_addr
@@ -680,9 +673,6 @@ class Parser:
         return result if result is not None else _u32(0)
       return parse_expr(body, lv, self.funcs)
     if name in self.funcs:
-      # Pass _vars to functions that need it (CalcGlobalAddr, CalcDsAddr)
-      if name in ('CalcGlobalAddr', 'CalcDsAddr'):
-        return self.funcs[name](*args, _vars=self.vars)
       return self.funcs[name](*args)
     raise RuntimeError(f"unknown function: {name}")
 
