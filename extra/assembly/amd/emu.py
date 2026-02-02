@@ -335,9 +335,9 @@ class _Ctx:
     return base, mask, size
 
   # Dynamic register access (takes UOp index instead of int)
-  def rsgpr_dyn(self, reg: UOp) -> UOp:
+  def rsgpr_dyn(self, reg: UOp, valid: UOp | None = None) -> UOp:
     """Read SGPR with dynamic register index."""
-    return self.sgpr.index(reg.cast(dtypes.int), ptr=True).load()
+    return self.sgpr.index(reg.cast(dtypes.int), valid, ptr=True).load() if valid is not None else self.sgpr.index(reg.cast(dtypes.int), ptr=True).load()
 
   def wsgpr_dyn(self, reg: UOp, val: UOp) -> UOp:
     """Write SGPR with dynamic register index. Writes to NULL (124) are discarded."""
@@ -360,7 +360,8 @@ class _Ctx:
     is_f64: True for F64 operations where 64-bit literals go in high 32 bits."""
     is_float_const = (off >= _c(240)) & (off <= _c(248))
     is_vgpr = off >= _c(256)
-    sgpr_lo = self.sgpr.index((is_vgpr.ne(True).where(off, _c(0))).cast(dtypes.int), ptr=True).load()  # guard OOB when off >= 256
+    is_sgpr = is_vgpr.ne(True)
+    sgpr_lo = self.rsgpr_dyn(off, is_sgpr)
 
     if lane is not None:
       vgpr_reg = off - _c(256)
@@ -368,7 +369,7 @@ class _Ctx:
       vgpr_val = _u64(vgpr_lo, self.rvgpr_dyn(vgpr_reg + _c(1), lane, is_vgpr)) if bits == 64 else vgpr_lo
 
     if bits == 64:
-      sgpr_hi = self.sgpr.index((is_vgpr.ne(True).where(off + _c(1), _c(0))).cast(dtypes.int), ptr=True).load()
+      sgpr_hi = self.rsgpr_dyn(off + _c(1), is_sgpr)
       sgpr_val = _u64(sgpr_lo, sgpr_hi)
       # Integer inline constants: sign-extend 32-bit value from buffer to 64-bit
       # Float constants: cast F32 to F64
