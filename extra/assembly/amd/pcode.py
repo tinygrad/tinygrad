@@ -944,26 +944,18 @@ def parse_block(lines: list[str], start: int, vars: dict[str, VarVal], funcs: di
       i += 1; continue
 
     # VGPR assignment: VGPR[lane][reg] = value or VGPR{lane}[reg] = value (after loop unrolling)
-    # Also handles VGPR[lane][reg].type = value
-    if first == 'vgpr' and toks[1].type == 'LBRACKET':
-      j, lane_toks = _match_bracket(toks, 1)
-      if j < len(toks) and toks[j].type == 'LBRACKET':
-        j, reg_toks = _match_bracket(toks, j)
-        if j < len(toks) and toks[j].type == 'DOT': j += 2  # skip .type suffix
-        if j < len(toks) and toks[j].type == 'EQUALS': j += 1
-        ln, rg, val = parse_tokens(lane_toks, vars, funcs), parse_tokens(reg_toks, vars, funcs), parse_tokens(toks[j:], vars, funcs)
-        if assigns is not None: assigns.append((f'VGPR[{_tok_str(lane_toks)}][{_tok_str(reg_toks)}]', (_to_u32(rg) * _u32(32) + _to_u32(ln), val)))
-        i += 1; continue
-    if first == 'vgpr' and toks[1].type == 'LBRACE':
-      # VGPR{lane}[reg] = value (after loop substitution)
-      lane_idx = int(toks[2].val)
-      j = 4  # skip VGPR { idx }
+    if first == 'vgpr' and toks[1].type in ('LBRACKET', 'LBRACE'):
+      if toks[1].type == 'LBRACKET':
+        j, lane_toks = _match_bracket(toks, 1)
+        ln = parse_tokens(lane_toks, vars, funcs)
+      else:  # LBRACE - after loop substitution
+        ln, j = _u32(int(toks[2].val)), 4
       if j < len(toks) and toks[j].type == 'LBRACKET':
         j, reg_toks = _match_bracket(toks, j)
         if j < len(toks) and toks[j].type == 'DOT': j += 2  # skip .type suffix
         if j < len(toks) and toks[j].type == 'EQUALS': j += 1
         rg, val = parse_tokens(reg_toks, vars, funcs), parse_tokens(toks[j:], vars, funcs)
-        if assigns is not None: assigns.append((f'VGPR[{lane_idx}][{_tok_str(reg_toks)}]', (_to_u32(rg) * _u32(32) + _u32(lane_idx), val)))
+        if assigns is not None: assigns.append((f'VGPR[{ln.arg if ln.op == Ops.CONST else "?"}][{_tok_str(reg_toks)}]', (_to_u32(rg) * _u32(32) + _to_u32(ln), val)))
         i += 1; continue
 
     # Compound destination: {hi.type, lo.type} = value
