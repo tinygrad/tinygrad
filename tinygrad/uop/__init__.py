@@ -14,7 +14,7 @@ class Ops(FastEnum):
   # ** 1 -- defines/special **
 
   # define GLOBAL/VAR are ptrs to outside the Kernel
-  DEFINE_GLOBAL = auto(); DEFINE_VAR = auto(); BIND = auto()
+  DEFINE_VAR = auto(); BIND = auto()
 
   # this is a RANGE for GPU dimensions, similar to symbolic shapes but not exactly
   SPECIAL = auto()
@@ -26,6 +26,10 @@ class Ops(FastEnum):
 
   # uops that aren't rendered
   NOOP = auto(); REWRITE_ERROR = auto()
+  PARAM = auto(); CALL = auto()
+
+  # TODO: remove this alias, DEFINE_GLOBAL is PARAM now
+  DEFINE_GLOBAL = PARAM
 
   # renderer
   # LINEAR is a list of UOps, SOURCE has a str arg that's human readable, BINARY has bytes arg that's compiled

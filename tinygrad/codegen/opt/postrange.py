@@ -1,3 +1,4 @@
+from __future__ import annotations
 import math, itertools
 from collections import defaultdict
 from typing import cast, Final
@@ -25,11 +26,11 @@ class Scheduler:
     # always in order by axistype
     return sorted([u for u in self.ast.backward_slice if u.op is Ops.RANGE and u.vmax > 0], key=lambda x: (axis_to_pos[x.arg[-1]],) + x.arg[0:-1])
   @property
-  def shape_len(self): return len(self.rngs)
+  def shape_len(self) -> int: return len(self.rngs)
   @property
   def full_shape(self): return [ssimplify(x.src[0]) for x in self.rngs]
   @property
-  def axis_types(self): return [x.arg[-1] for x in self.rngs]
+  def axis_types(self) -> list[AxisType]: return [x.arg[-1] for x in self.rngs]
 
   # strings like ['g0', 'g1', 'l0', 'l1', 'l2', 'l3', 'l4', 'l5', 'R0', 'r0', 'r1', 'r2', 'u0', 'u1', 'u2']
   def shape_str(self) -> list[str]:
@@ -41,7 +42,7 @@ class Scheduler:
     return ret
   def shape_str_to_axis(self, nms:list[str]) -> tuple[int, ...]: return tuple([self.shape_str().index(x) for x in nms])
 
-  def copy(self):
+  def copy(self) -> Scheduler:
     ret = Scheduler(self.ast, self.ren)
     ret.dont_use_locals = self.dont_use_locals
     ret.applied_opts = self.applied_opts[:]
@@ -49,7 +50,7 @@ class Scheduler:
     return ret
 
   kernel_cnt: Final[defaultdict[str, int]] = defaultdict(int)
-  def get_optimized_ast(self, name_override:str|None=None):
+  def get_optimized_ast(self, name_override:str|None=None) -> UOp:
     if name_override is not None: name = name_override
     else:
       k_type = "r" if self.reduceop is not None else "E"
@@ -72,8 +73,8 @@ class Scheduler:
         ret = [r for r in ret if r in x.ranges]
     return ret
 
-  def convert_loop_to_global(self):
-    if not self.ren.has_local: return None
+  def convert_loop_to_global(self) -> None:
+    if not self.ren.has_local: return
 
     globalizible_rngs = self._globalizable_rngs()
     rng = [x.replace(arg=x.arg[0:-1]+(AxisType.GLOBAL,)) if x in globalizible_rngs else x for x in self.rngs]
@@ -92,7 +93,7 @@ class Scheduler:
     return ret
   def colored_shape(self) -> str: return ' '.join([colored(f'{x.src[0].render():>4s}', color) for x,color in zip(self.rngs, self.colors())])
 
-  def shift_to(self, rng:UOp, amount:int, new_type:AxisType, top:bool=False, input_new_rng=None):
+  def shift_to(self, rng:UOp, amount:int, new_type:AxisType, top:bool=False, input_new_rng:UOp|None=None):
     if (old_sz:=rng.src[0].divides(amount)) is None:
       raise KernelOptError(f"{amount} can't divide {rng.src[0]} in {self.colored_shape()}")
     new_rng = UOp.range(amount, next(self.opt_range), new_type) if input_new_rng is None else input_new_rng
@@ -104,7 +105,7 @@ class Scheduler:
   def ranges_of(self, *axis_type:AxisType) -> list[UOp]: return [r for r in self.rngs if r.arg[-1] in axis_type]
   def axes_of(self, *axis_type:AxisType) -> list[int]: return [i for i,t in enumerate(self.axis_types) if t in axis_type]
 
-  def upcast_size(self) -> int: return prod(self.full_shape[a] for a in self.axes_of(AxisType.UPCAST, AxisType.UNROLL))
+  def upcast_size(self): return prod(self.full_shape[a] for a in self.axes_of(AxisType.UPCAST, AxisType.UNROLL))
 
   # copied from kernel.py
   @property
@@ -114,7 +115,7 @@ class Scheduler:
   def unrollable_dims(self) -> list[int]: return [i for i in self.axes_of(AxisType.GROUP_REDUCE, AxisType.REDUCE) \
                                                   if isinstance(s:=self.full_shape[i], int) and s > 1]
 
-  def real_axis(self, op:OptOps, axis:int|None):
+  def real_axis(self, op:OptOps, axis:int|None) -> int:
     try:
       if axis is None or op is OptOps.TC: return -1
       if op is OptOps.UNROLL: return self.unrollable_dims[axis]
@@ -220,7 +221,7 @@ class Scheduler:
   def _apply_tc_opt(self, use_tensor_cores:int, axis:int, tc_select:int, opt_level:int) -> None|list[UOp]:
     if not (reduceops := self.reduceops): raise KernelOptError("no reduce ops for TensorCore")
     reduceop = reduceops[0]
-    if use_tensor_cores and reduceop is not None and reduceop.arg is Ops.ADD:
+    if use_tensor_cores and reduceop.arg is Ops.ADD:
       mul = reduceop.src[0] if reduceop.src[0].op is not Ops.CAST else reduceop.src[0].src[0]
       if mul.op is not Ops.MUL: return None
       in0, in1 = mul.src

@@ -138,6 +138,100 @@ class TestDS2AddrMore(unittest.TestCase):
     self.assertEqual(st.vgpr[0][4], 0x12345678, "v4 should be untouched")
 
 
+class TestDSB96(unittest.TestCase):
+  """Tests for DS_STORE_B96 and DS_LOAD_B96 (96-bit / 3 dwords)."""
+
+  def test_ds_store_load_b96(self):
+    """DS_STORE_B96 stores 3 VGPRs, DS_LOAD_B96 loads them back."""
+    instructions = [
+      v_mov_b32_e32(v[10], 0),
+      s_mov_b32(s[0], 0x11111111),
+      v_mov_b32_e32(v[0], s[0]),
+      s_mov_b32(s[0], 0x22222222),
+      v_mov_b32_e32(v[1], s[0]),
+      s_mov_b32(s[0], 0x33333333),
+      v_mov_b32_e32(v[2], s[0]),
+      ds_store_b96(addr=v[10], data0=v[0:2]),
+      s_waitcnt(lgkmcnt=0),
+      ds_load_b96(addr=v[10], vdst=v[4:6]),
+      s_waitcnt(lgkmcnt=0),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][4], 0x11111111, "v4 should have first dword")
+    self.assertEqual(st.vgpr[0][5], 0x22222222, "v5 should have second dword")
+    self.assertEqual(st.vgpr[0][6], 0x33333333, "v6 should have third dword")
+
+  def test_ds_store_b96_with_offset(self):
+    """DS_STORE_B96 with non-zero offset."""
+    instructions = [
+      v_mov_b32_e32(v[10], 0),
+      s_mov_b32(s[0], 0xAAAAAAAA),
+      v_mov_b32_e32(v[0], s[0]),
+      s_mov_b32(s[0], 0xBBBBBBBB),
+      v_mov_b32_e32(v[1], s[0]),
+      s_mov_b32(s[0], 0xCCCCCCCC),
+      v_mov_b32_e32(v[2], s[0]),
+      DS(DSOp.DS_STORE_B96, addr=v[10], data0=v[0:2], offset0=12),
+      s_waitcnt(lgkmcnt=0),
+      DS(DSOp.DS_LOAD_B96, addr=v[10], vdst=v[4:6], offset0=12),
+      s_waitcnt(lgkmcnt=0),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][4], 0xAAAAAAAA)
+    self.assertEqual(st.vgpr[0][5], 0xBBBBBBBB)
+    self.assertEqual(st.vgpr[0][6], 0xCCCCCCCC)
+
+
+class TestDSB128(unittest.TestCase):
+  """Tests for DS_STORE_B128 and DS_LOAD_B128 (128-bit / 4 dwords)."""
+
+  def test_ds_store_load_b128(self):
+    """DS_STORE_B128 stores 4 VGPRs, DS_LOAD_B128 loads them back."""
+    instructions = [
+      v_mov_b32_e32(v[10], 0),
+      s_mov_b32(s[0], 0x11111111),
+      v_mov_b32_e32(v[0], s[0]),
+      s_mov_b32(s[0], 0x22222222),
+      v_mov_b32_e32(v[1], s[0]),
+      s_mov_b32(s[0], 0x33333333),
+      v_mov_b32_e32(v[2], s[0]),
+      s_mov_b32(s[0], 0x44444444),
+      v_mov_b32_e32(v[3], s[0]),
+      ds_store_b128(addr=v[10], data0=v[0:3]),
+      s_waitcnt(lgkmcnt=0),
+      ds_load_b128(addr=v[10], vdst=v[4:7]),
+      s_waitcnt(lgkmcnt=0),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][4], 0x11111111, "v4 should have first dword")
+    self.assertEqual(st.vgpr[0][5], 0x22222222, "v5 should have second dword")
+    self.assertEqual(st.vgpr[0][6], 0x33333333, "v6 should have third dword")
+    self.assertEqual(st.vgpr[0][7], 0x44444444, "v7 should have fourth dword")
+
+  def test_ds_store_b128_with_offset(self):
+    """DS_STORE_B128 with non-zero offset."""
+    instructions = [
+      v_mov_b32_e32(v[10], 0),
+      s_mov_b32(s[0], 0xAAAAAAAA),
+      v_mov_b32_e32(v[0], s[0]),
+      s_mov_b32(s[0], 0xBBBBBBBB),
+      v_mov_b32_e32(v[1], s[0]),
+      s_mov_b32(s[0], 0xCCCCCCCC),
+      v_mov_b32_e32(v[2], s[0]),
+      s_mov_b32(s[0], 0xDDDDDDDD),
+      v_mov_b32_e32(v[3], s[0]),
+      DS(DSOp.DS_STORE_B128, addr=v[10], data0=v[0:3], offset0=16),
+      s_waitcnt(lgkmcnt=0),
+      DS(DSOp.DS_LOAD_B128, addr=v[10], vdst=v[4:7], offset0=16),
+      s_waitcnt(lgkmcnt=0),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][4], 0xAAAAAAAA)
+    self.assertEqual(st.vgpr[0][5], 0xBBBBBBBB)
+    self.assertEqual(st.vgpr[0][6], 0xCCCCCCCC)
+    self.assertEqual(st.vgpr[0][7], 0xDDDDDDDD)
+
+
 class TestDSAtomic(unittest.TestCase):
   """Tests for DS atomic operations."""
 
@@ -623,6 +717,48 @@ class TestAtomicOrdering(unittest.TestCase):
     self.assertEqual(st.vgpr[0][2], 100, "First add should return 100")
     self.assertEqual(st.vgpr[0][3], 125, "Second add should return 125")
     self.assertEqual(st.vgpr[0][4], 150, "Final value should be 150")
+
+
+class TestDsPermute(unittest.TestCase):
+  """Tests for DS_PERMUTE_B32 and DS_BPERMUTE_B32 instructions."""
+
+  def test_ds_permute_b32_identity(self):
+    """DS_PERMUTE_B32 with identity permutation (lane 0 sends to lane 0)."""
+    # For simplicity, test with single lane
+    instructions = [
+      v_mov_b32_e32(v[0], 0),  # addr = 0 (lane 0)
+      v_mov_b32_e32(v[1], 0xDEADBEEF),  # data
+      ds_permute_b32(v[2], v[0], v[1]),
+      s_waitcnt(lgkmcnt=0),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    # Lane 0 sends to lane 0, so lane 0 gets 0xDEADBEEF
+    self.assertEqual(st.vgpr[0][2], 0xDEADBEEF)
+
+  def test_ds_bpermute_b32_identity(self):
+    """DS_BPERMUTE_B32 with identity permutation (each lane reads from itself)."""
+    instructions = [
+      v_mov_b32_e32(v[0], 0),  # addr = 0 (read from lane 0)
+      v_mov_b32_e32(v[1], 0xCAFEBABE),  # data in lane 0
+      ds_bpermute_b32(v[2], v[0], v[1]),
+      s_waitcnt(lgkmcnt=0),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    # Lane 0 reads from lane 0's v[1]
+    self.assertEqual(st.vgpr[0][2], 0xCAFEBABE)
+
+  def test_ds_permute_b32_broadcast(self):
+    """DS_PERMUTE_B32 broadcast - all lanes send to lane 0."""
+    # With 4 lanes, all sending to lane 0, highest lane wins
+    instructions = [
+      v_mov_b32_e32(v[0], 0),  # All lanes send to addr 0 (lane 0)
+      v_mov_b32_e32(v[1], 0x11111111),  # All lanes send same data
+      ds_permute_b32(v[2], v[0], v[1]),
+      s_waitcnt(lgkmcnt=0),
+    ]
+    st = run_program(instructions, n_lanes=4)
+    # Lane 0 receives data (highest numbered active lane wins)
+    self.assertEqual(st.vgpr[0][2], 0x11111111)
 
 
 if __name__ == '__main__':

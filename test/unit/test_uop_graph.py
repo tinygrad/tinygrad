@@ -194,8 +194,8 @@ class TestGraphRewrite(unittest.TestCase):
 
 class TestUOpGraph(unittest.TestCase):
   def test_add_constant_fold(self):
-    c1 = UOp(Ops.CONST, dtypes.float, arg=1.0)
-    c2 = UOp(Ops.CONST, dtypes.float, arg=2.0)
+    c1 = UOp.const(dtypes.float, 1.0)
+    c2 = UOp.const(dtypes.float, 2.0)
     out = UOp(Ops.ADD, dtypes.float, (c1, c2))
     uops = to_uops_list([out])
     self.assertEqual(len(uops), 2)  # +1 for SINK
@@ -205,9 +205,9 @@ class TestUOpGraph(unittest.TestCase):
 
   def test_where_same_fold(self):
     v = UOp.variable('tmp', 0, 1)
-    c0 = UOp(Ops.CONST, dtypes.index, arg=0)
+    c0 = UOp.const(dtypes.index, 0)
     vc = UOp(Ops.CMPNE, dtypes.bool, (v, c0))
-    c1 = UOp(Ops.CONST, dtypes.float, arg=1.0)
+    c1 = UOp.const(dtypes.float, 1.0)
     out = UOp(Ops.WHERE, dtypes.float, (vc, c1, c1))
     uops = to_uops_list([out])
     self.assertEqual(len(uops), 2)  # +1 for SINK
@@ -216,9 +216,9 @@ class TestUOpGraph(unittest.TestCase):
     self.assertEqual(out.arg, 1.0)
 
   def test_where_const_fold(self):
-    bf = UOp(Ops.CONST, dtypes.bool, arg=False)
-    c1 = UOp(Ops.CONST, dtypes.float, arg=1.0)
-    c2 = UOp(Ops.CONST, dtypes.float, arg=2.0)
+    bf = UOp.const(dtypes.bool, False)
+    c1 = UOp.const(dtypes.float, 1.0)
+    c2 = UOp.const(dtypes.float, 2.0)
     out = UOp(Ops.WHERE, dtypes.float, (bf, c1, c2))
     uops = to_uops_list([out])
     self.assertEqual(len(uops), 2)  # +1 for SINK
@@ -227,7 +227,7 @@ class TestUOpGraph(unittest.TestCase):
     self.assertEqual(out.arg, 2.0)
 
   def test_const_cast(self):
-    bf = UOp(Ops.CONST, dtypes.bool, arg=False)
+    bf = UOp.const(dtypes.bool, False)
     out = UOp(Ops.CAST, dtypes.int, (bf,))
     uops = to_uops_list([out])
     self.assertEqual(len(uops), 2)  # +1 for SINK
@@ -236,7 +236,7 @@ class TestUOpGraph(unittest.TestCase):
     self.assertEqual(out.arg, 0)
 
   def test_const_bitcast(self):
-    bf = UOp(Ops.CONST, dtypes.float, arg=1.0)
+    bf = UOp.const(dtypes.float, 1.0)
     out = UOp(Ops.BITCAST, dtypes.uint32, (bf,))
     uops = to_uops_list([out])
     self.assertEqual(len(uops), 2)  # +1 for SINK
@@ -246,7 +246,7 @@ class TestUOpGraph(unittest.TestCase):
 
   @unittest.expectedFailure
   def test_const_shape_change_bitcast(self):
-    bf = UOp(Ops.CONST, dtypes.uint8, arg=0x3F)
+    bf = UOp.const(dtypes.uint8, 0x3F)
     out = UOp(Ops.BITCAST, dtypes.half, (bf,))
     uops = to_uops_list([out])
     self.assertEqual(len(uops), 2)  # +1 for SINK
@@ -394,8 +394,8 @@ class TestUOpGraph(unittest.TestCase):
 
   def test_depth_2_const_fold(self):
     v = UOp.variable("tmp", 0, 1, dtypes.int)
-    c2 = UOp(Ops.CONST, dtypes.int, arg=2)
-    c4 = UOp(Ops.CONST, dtypes.int, arg=4)
+    c2 = UOp.const(dtypes.int, 2)
+    c4 = UOp.const(dtypes.int, 4)
     vc = UOp(Ops.ADD, dtypes.int, (v, c2))
     out = UOp(Ops.ADD, dtypes.int, (vc, c4))
     uops = to_uops_list([out])
@@ -479,6 +479,26 @@ class TestUOpGraph(unittest.TestCase):
     for u in uops:
       self.assertNotEqual(u.dtype, dtypes.long)
 
+  def test_load_idx_no_math_on_loaded(self):
+    # test the (x+y)<c pattern where x has loads - we shouldn't do math on loaded indices
+    c0 = UOp(Ops.DEFINE_GLOBAL, dtypes.uchar.ptr(128000), arg=0, src=())
+    c1 = UOp.range(UOp.const(dtypes.index, 512), 1, AxisType.LOOP)
+    c2 = UOp.range(UOp.const(dtypes.index, 250), 2, AxisType.LOOP)
+    c3 = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(512), arg=1, src=())
+    c4 = c3.index(c1)  # c4 is a load
+    c5 = UOp.range(UOp.const(dtypes.index, 240), 0, AxisType.REDUCE)
+    c6 = ((c2*UOp.const(dtypes.index, 240))+c5)
+    c7 = UOp(Ops.DEFINE_GLOBAL, dtypes.uchar.ptr(60000), arg=2, src=())
+    c8 = c7.index(c6)
+    # (loaded + range) < const pattern - loaded value shouldn't be promoted to long
+    loaded_idx = c4.cast(dtypes.index)
+    comparison = (loaded_idx + c5) < UOp.const(dtypes.index, 60000)
+    c9 = comparison.where(c8.cast(dtypes.uint).cast(dtypes.uchar), 0).reduce(c5, arg=Ops.ADD)
+    c10 = c0.index(((c1*UOp.const(dtypes.index, 250))+c2)).store(c9).end(c1, c2)
+    uops = to_uops_list([c10])
+    for u in uops:
+      self.assertNotEqual(u.dtype, dtypes.long)
+
   def test_fold_gated_load(self):
     glbl0 = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), (), 0)
     glbl1 = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), (), 1)
@@ -530,7 +550,7 @@ class TestUOpGraph(unittest.TestCase):
     c = r + 1
     self.assertIn(r, c.ranges)
 
-    e = UOp.const(dtypes.void, None).end(r)
+    e = UOp.const(dtypes.int, 1).end(r)
     self.assertNotIn(r, e.ranges)
 
     a = c.after(e)
@@ -685,6 +705,97 @@ class TestExpander(unittest.TestCase):
     sink = UOp(Ops.REDUCE, dtypes.int, (e1,e2), Ops.ADD)
     sink = expander_rewrite(sink)
     print(sink)
+
+class TestReduceCollapse(unittest.TestCase):
+  def test_multi_range_reduce_add(self):
+    """Test that (x + y).reduce(r1, r2) distributes over multiple ranges"""
+    from tinygrad.codegen.simplify import pm_reduce_collapse
+    # Create two ranges
+    r1 = UOp.range(3, 0)
+    r2 = UOp.range(4, 1)
+    # Create x + y where x and y depend on different ranges
+    x = r1.cast(dtypes.float)
+    y = r2.cast(dtypes.float)
+    # (x + y).reduce(r1, r2) should be rewritten
+    red = (x + y).reduce(r1, r2, arg=Ops.ADD)
+    self.assertEqual(len(red.src), 3)  # value + 2 ranges
+    result = graph_rewrite(red, pm_reduce_collapse, name='test')
+    # Should become add of two separate reduces
+    self.assertEqual(result.op, Ops.ADD)
+
+class TestLoadStoreFolding(unittest.TestCase):
+  def test_gated_load_gep_preserves_alt(self):
+    """Test that LOAD(GEP, alt) preserves alt value after rewrite"""
+    from tinygrad.codegen.late.devectorizer import load_store_folding
+    buf = UOp(Ops.DEFINE_GLOBAL, dtypes.float.vec(4).ptr(), (), 0)
+    idx = UOp.const(dtypes.int, 0)
+    gate = UOp.const(dtypes.bool, True)
+    gated_index = buf.index(idx, gate)
+    gep = gated_index.gep(0)
+    alt = UOp.const(dtypes.float, 42.0)
+    gated_load = gep.load(alt)
+    self.assertEqual(len(gated_load.src), 2)  # GEP + alt
+    result = graph_rewrite(gated_load, load_store_folding, name='test')
+    # After rewrite, should still have alt value preserved
+    self.assertEqual(result.op, Ops.GEP)
+    inner_load = result.src[0]
+    self.assertEqual(inner_load.op, Ops.LOAD)
+    self.assertEqual(len(inner_load.src), 2)  # INDEX + alt
+
+  def test_gated_load_ptrcat_preserves_alt(self):
+    """Test that LOAD(PTRCAT, alt) preserves alt value after rewrite"""
+    from tinygrad.codegen.late.devectorizer import load_store_folding
+    buf1 = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), (), 0)
+    buf2 = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), (), 1)
+    idx = UOp.const(dtypes.int, 0)
+    idx1 = buf1.index(idx)
+    idx2 = buf2.index(idx)
+    ptrcat = UOp(Ops.PTRCAT, dtypes.float.ptr().vec(2), (idx1, idx2))
+    alt = UOp.const(dtypes.float.vec(2), 42.0)
+    gated_load = ptrcat.load(alt)
+    self.assertEqual(len(gated_load.src), 2)  # PTRCAT + alt
+    result = graph_rewrite(gated_load, load_store_folding, name='test')
+    # After rewrite, should be CAT of LOADs, each preserving alt
+    self.assertEqual(result.op, Ops.CAT)
+    for inner_load in result.src:
+      self.assertEqual(inner_load.op, Ops.LOAD)
+      self.assertEqual(len(inner_load.src), 2)  # INDEX + alt
+    self.assertEqual(inner_load.src[1].arg, 42.0)  # alt value preserved
+
+class TestConstBufferize(unittest.TestCase):
+  def test_const_bufferize_with_ranges(self):
+    """Test that CONST.BUFFERIZE with ranges is folded correctly.
+
+    BUFFERIZE can have ranges as additional sources beyond the value.
+    The pattern at rangeify.py uses allow_any_len=True because
+    CONST doesn't depend on ranges (constant is same value everywhere).
+    """
+    from tinygrad.schedule.rangeify import pm_const_buffer_folding, BufferizeOpts
+    c = UOp.const(dtypes.float, 42.0)
+    r1 = UOp.range(3, 0)
+    bufferize_with_range = UOp(Ops.BUFFERIZE, dtypes.float, (c, r1), arg=BufferizeOpts(device="CPU"))
+    self.assertEqual(len(bufferize_with_range.src), 2)  # const + 1 range
+
+    result = graph_rewrite(bufferize_with_range, pm_const_buffer_folding, name='test')
+    # BUFFERIZE should be removed, result is const broadcast to shape
+    self.assertNotEqual(result.op, Ops.BUFFERIZE)
+    const_vals = [u.arg for u in result.toposort() if u.op is Ops.CONST and u.dtype == dtypes.float]
+    self.assertIn(42.0, const_vals)
+
+  def test_const_bufferize_with_multiple_ranges(self):
+    """Test CONST.BUFFERIZE with multiple ranges is also folded."""
+    from tinygrad.schedule.rangeify import pm_const_buffer_folding, BufferizeOpts
+    c = UOp.const(dtypes.float, 3.14)
+    r1 = UOp.range(3, 0)
+    r2 = UOp.range(4, 1)
+    bufferize_with_ranges = UOp(Ops.BUFFERIZE, dtypes.float, (c, r1, r2), arg=BufferizeOpts(device="CPU"))
+    self.assertEqual(len(bufferize_with_ranges.src), 3)  # const + 2 ranges
+
+    result = graph_rewrite(bufferize_with_ranges, pm_const_buffer_folding, name='test')
+    # BUFFERIZE should be removed
+    self.assertNotEqual(result.op, Ops.BUFFERIZE)
+    const_vals = [u.arg for u in result.toposort() if u.op is Ops.CONST and u.dtype == dtypes.float]
+    self.assertIn(3.14, const_vals)
 
 class TestUOpTags(unittest.TestCase):
   def test_inc_by_one(self):

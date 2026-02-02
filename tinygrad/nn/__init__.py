@@ -3,7 +3,7 @@ import math
 from tinygrad.tensor import Tensor
 from tinygrad.dtype import dtypes
 from tinygrad.device import is_dtype_supported
-from tinygrad.helpers import prod, make_tuple, flatten
+from tinygrad.helpers import prod, make_tuple, flatten, USE_ATOMICS
 from tinygrad.nn import optim, state, datasets  # noqa: F401
 
 class BatchNorm:
@@ -304,6 +304,46 @@ class RMSNorm:
     x = self._norm(x.float()).cast(x.dtype)
     return x if self.weight is None else x * self.weight
 
+from tinygrad.uop.ops import UOp, KernelInfo, Ops
+def _embedding_bwd(grad_emb:UOp, call:UOp) -> tuple:
+  weight, idx = call.src[1:]
+  # for multi-device: unshard inputs to one device
+  if isinstance(weight.device, tuple):
+    assert weight.axis is None, "sharded weights on Embedding not supported with USE_ATOMICS"
+    grad_emb = grad_emb.copy_to_device(weight.device)
+    idx = idx.copy_to_device(weight.device)
+  # weight is replicated, grad_weight should match
+  grad_weight_uop = Tensor.empty(weight.shape, dtype=dtypes.float, device=weight.device).uop
+
+  # TODO: how do we remove this dumb kernel and use Tensor.zeros?
+  def _zero_kernel(out:UOp) -> UOp:
+    i = UOp.range(out.size, 0)
+    return out.flatten()[i].store(0).end(i).sink(arg=KernelInfo(name="zero"))
+  grad_weight_uop = grad_weight_uop.custom_kernel(fxn=_zero_kernel)[0]
+
+  # TODO: do we have a universal helper for this?
+  device = call.device.split(":")[0] if not isinstance(call.device, tuple) else call.device[0].split(":")[0]
+
+  # this is the real atomic kernel
+  def _embedding_bwd_kernel(grad_weight:UOp, grad_emb:UOp, idx:UOp) -> UOp:
+    idx_flat, grad_emb_flat = idx.flatten(), grad_emb.reshape((idx.size, grad_weight.shape[-1]))
+    i = UOp.range(grad_emb_flat.shape[0], 0)  # batch_size * sequence_length
+    j = UOp.range(grad_emb_flat.shape[1], 1)  # embed_size
+    token_id = idx_flat[i].clip(0, grad_weight.shape[0]-1).cast(dtypes.index)
+    # atomic scatter-add: grad_weight[token_id, j] += grad_emb_flat[i, j]
+    if device in ("CPU", "NULL"): atomic_arg = "__atomic_fetch_add({0}, {1}, __ATOMIC_RELAXED);"
+    elif device == "AMD": atomic_arg = "__hip_atomic_fetch_add({0}, {1}, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);"
+    else: raise NotImplementedError(f"no atomics for device {device}")
+    atomic = UOp(Ops.CUSTOM, dtypes.void, (grad_weight.index(token_id, j, ptr=True), grad_emb_flat[i, j].cast(dtypes.float)), arg = atomic_arg)
+    return atomic.end(i, j).sink(arg=KernelInfo(name="embedding_bwd", opts_to_apply=()))
+  grad_weight_uop = grad_weight_uop.custom_kernel(grad_emb, idx, fxn=_embedding_bwd_kernel)[0]
+
+  return (grad_weight_uop.cast(weight.dtype), None)
+
+def _embedding_fwd(weight:Tensor, idx:Tensor) -> Tensor:
+  arange = Tensor.arange(weight.shape[0], requires_grad=False, device=weight.device)
+  return (arange == idx.unsqueeze(-1)).unsqueeze(-1).where(weight, 0).sum(-2, dtype=weight.dtype)
+
 class Embedding:
   """
   A simple lookup table that stores embeddings of a fixed dictionary and size.
@@ -316,14 +356,12 @@ class Embedding:
   ```
   """
   def __init__(self, vocab_size:int, embed_size:int):
-    self.vocab_sz, self.embed_sz, self.weight = vocab_size, embed_size, Tensor.glorot_uniform(vocab_size, embed_size)
+    self.weight = Tensor.glorot_uniform(vocab_size, embed_size)
 
   def __call__(self, idx:Tensor) -> Tensor:
-    if not hasattr(self, 'arange'): self.arange = Tensor.arange(self.vocab_sz, requires_grad=False, device=self.weight.device).unsqueeze(-1)
     if not dtypes.is_int(idx.dtype): raise TypeError(f"Expected integer dtype for index in embedding, got {idx.dtype}")
-    big_shp = idx.shape+(self.vocab_sz, self.embed_sz)
-    arange, idx, vals = self.arange.expand(big_shp), idx.reshape(idx.shape+(1, 1)).expand(big_shp), self.weight.expand(big_shp)
-    return (arange == idx).where(vals, 0).sum(-2, dtype=vals.dtype)
+    if USE_ATOMICS: return Tensor.call(self.weight, idx, fxn=_embedding_fwd(self.weight.as_param(0), idx.as_param(1)), grad_fxn=_embedding_bwd)
+    return _embedding_fwd(self.weight, idx)
 
 class LSTMCell:
   """

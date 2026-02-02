@@ -5,6 +5,20 @@ from dataclasses import dataclass, fields
 from tinygrad.helpers import getenv, prod, round_up, next_power2, OSX
 from enum import Enum, auto
 
+class ConstFloat(float):
+  """Float subclass that distinguishes -0.0 from 0.0 and where nan == nan."""
+  __slots__ = ('bits',)
+  bits: int
+  def __new__(cls, v:float):
+    obj = super().__new__(cls, v)
+    obj.bits = struct.unpack('<Q', struct.pack('<d', v))[0]
+    return obj
+  def __eq__(self, other):
+    if self is other: return True
+    if isinstance(other, float) and math.isnan(self) and math.isnan(other): return True
+    return float.__eq__(self, other)
+  def __hash__(self): return hash(self.bits)
+
 class InvalidType:
   _instance: ClassVar[InvalidType|None] = None
   def __new__(cls):
@@ -19,7 +33,8 @@ class InvalidType:
 
 Invalid = InvalidType()
 
-ConstType = float|int|bool
+PyConst = float|int|bool
+ConstType = PyConst|InvalidType
 
 FmtStr = Literal['?', 'b', 'B', 'h', 'H', 'i', 'I', 'q', 'Q', 'e', 'f', 'd']
 
@@ -134,14 +149,15 @@ class dtypes:
     if x.__class__ is list or x.__class__ is tuple: return max(dtypes.from_py(xi) for xi in x) if x else dtypes.default_float
     raise RuntimeError(f"Could not infer dtype of {x} with type {type(x)}")
   @staticmethod
-  def as_const(val: tuple[ConstType|InvalidType, ...]|ConstType|InvalidType, dtype:DType):
+  def as_const(val: tuple[ConstType, ...]|ConstType, dtype:DType):
     if isinstance(val, tuple):
       assert len(val) == dtype.count, f"mismatch {val} {dtype}"
       return tuple(dtypes.as_const(x, dtype) for x in val)
     if isinstance(val, InvalidType): return val
     # NOTE: float('nan') != float('nan'), so we canonicalize here
     if isinstance(val, float) and math.isnan(val): val = math.nan
-    return int(val) if dtypes.is_int(dtype) else float(val) if dtypes.is_float(dtype) else bool(val)
+    # int is the default. wrap floats in ConstFloat to distinguish -0.0 from 0.0 in cache
+    return ConstFloat(float(val)) if dtypes.is_float(dtype) else bool(val) if dtypes.is_bool(dtype) else int(val)
   @staticmethod
   @functools.cache
   def min(dtype:DType):
@@ -169,6 +185,8 @@ class dtypes:
   uint32: Final[DType] = DType.new(6, 32, "unsigned int", 'I')
   int64: Final[DType] = DType.new(7, 64, "long", 'q')
   uint64: Final[DType] = DType.new(8, 64, "unsigned long", 'Q')
+  _uint128: Final[DType] = DType.new(8, 128, "uint128", None)
+  _uint256: Final[DType] = DType.new(8, 256, "uint256", None)
   fp8e4m3: Final[DType] = DType.new(9, 8, "float8_e4m3", None)
   fp8e5m2: Final[DType] = DType.new(10, 8, "float8_e5m2", None)
   float16: Final[DType] = DType.new(11, 16, "half", 'e')
@@ -208,7 +226,7 @@ def to_dtype(dtype:DTypeLike) -> DType: return dtype if isinstance(dtype, DType)
 # https://jax.readthedocs.io/en/latest/jep/9407-type-promotion.html
 # we don't support weak type and complex type
 promo_lattice = { dtypes.bool: [dtypes.int8, dtypes.uint8], dtypes.int8: [dtypes.int16], dtypes.int16: [dtypes.int32], dtypes.int32: [dtypes.int64],
-  dtypes.int64: [dtypes.fp8e4m3, dtypes.fp8e5m2], dtypes.uint8: [dtypes.int16, dtypes.uint16], dtypes.uint16: [dtypes.int32, dtypes.uint32],
+  dtypes.int64: [dtypes.uint64], dtypes.uint8: [dtypes.int16, dtypes.uint16], dtypes.uint16: [dtypes.int32, dtypes.uint32],
   dtypes.uint32: [dtypes.int64, dtypes.uint64], dtypes.uint64: [dtypes.fp8e4m3, dtypes.fp8e5m2],
   dtypes.fp8e5m2: [dtypes.float16, dtypes.bfloat16], dtypes.fp8e4m3: [dtypes.float16, dtypes.bfloat16],
   dtypes.float16: [dtypes.float32], dtypes.bfloat16: [dtypes.float32], dtypes.float32: [dtypes.float64], }
@@ -222,7 +240,7 @@ def least_upper_dtype(*ds:DType) -> DType:
       if not (images:=[d for d in ds if isinstance(d, ImageDType)]) else images[0]
 def least_upper_float(dt:DType) -> DType: return dt if dtypes.is_float(dt) else least_upper_dtype(dt, dtypes.default_float)
 
-DTYPES_DICT = {k: v for k, v in dtypes.__dict__.items() if isinstance(v, DType) and not k.startswith(("default", "void", "index"))}
+DTYPES_DICT = {k: v for k, v in dtypes.__dict__.items() if isinstance(v, DType) and not k.startswith(("default", "void", "index", "_"))}
 INVERSE_DTYPES_DICT = {**{v.name:k for k,v in DTYPES_DICT.items()}, "void": "void", "index":"index"}
 
 @functools.cache
