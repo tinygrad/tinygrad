@@ -422,16 +422,14 @@ def get_stdout(f: Callable) -> str:
   return buf.getvalue()
 
 def amd_readelf(lib:bytes) -> list[dict]:
+  from tinygrad.runtime.autogen import amdgpu_kd
   from tinygrad.runtime.support.elf import elf_loader
-  import msgpack
-  _, sections, __ = elf_loader(lib)
-  data = next((s for s in sections if s.name.startswith(".note"))).content
-  namesz, descsz, typ = struct.unpack_from(hdr:="<III", data, 0)
-  offset = (struct.calcsize(hdr)+namesz+3) & -4
-  notes = msgpack.unpackb(data[offset:offset+descsz])
-  keys = {".sgpr_count":"SGPRs", ".vgpr_count":"VGPRs", ".max_flat_workgroup_size":"Max WGP size",
-          ".group_segment_fixed_size":"LDS size", ".private_segment_fixed_size":"Scratch size"}
-  return [{"label":label, "value":v} for k,label in keys.items() if (v:=notes["amdhsa.kernels"][0][k]) > 0]
+  image, sections, __ = elf_loader(lib)
+  rodata = next((s for s in sections if s.name == ".rodata")).content
+  kd = amdgpu_kd.llvm_amdhsa_kernel_descriptor_t.from_buffer_copy(bytearray(rodata))
+  vgpr_gran = kd.compute_pgm_rsrc1 & amdgpu_kd.COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT
+  return [{"label":f"{resource} Alloc", "value":val} for resource,val in [("VGPR", (vgpr_gran+1)*8-7), ("LDS",kd.group_segment_fixed_size),
+                                                                          ("Scratch", kd.private_segment_fixed_size)] if val > 0]
 
 def amd_decode(lib:bytes, target:int) -> dict[int, Any]: # Any is the Inst class from extra.assembly.amd.dsl
   from tinygrad.runtime.support.elf import elf_loader
