@@ -1,8 +1,11 @@
 import ctypes, time
 from test.mockgpu.gpu import VirtGPU
 from test.mockgpu.helpers import _try_dlopen_remu
-from tinygrad.helpers import getbits, to_mv
+from tinygrad.helpers import getbits, to_mv, getenv
 from tinygrad.runtime.support import c
+
+MOCKGPU_ARCH = getenv("MOCKGPU_ARCH", "rdna3")
+GFX_TARGET_VERSION = {"rdna3": 110000, "rdna4": 120000}[MOCKGPU_ARCH]
 import tinygrad.runtime.autogen.amd_gpu as amd_gpu, tinygrad.runtime.autogen.am.pm4_nv as pm4
 
 SDMA_MAX_COPY_SIZE = 0x400000
@@ -194,10 +197,11 @@ class PM4Executor(AMDQueue):
     scratch_size = wavesize * 4  # This gives the scratch size per thread (lane)
 
     assert prg_sz > 0, "Invalid prg ptr (not found in mapped ranges)"
-    # Pass valid memory ranges, rsrc2, and scratch_size to Python emulator
+    # Pass valid memory ranges, rsrc2, scratch_size and arch to Python emulator
     if hasattr(remu, 'valid_mem_ranges'): remu.valid_mem_ranges = self.gpu.mapped_ranges
     if hasattr(remu, 'rsrc2'): remu.rsrc2 = rsrc2
     if hasattr(remu, 'scratch_size'): remu.scratch_size = scratch_size
+    if hasattr(remu, 'arch'): remu.arch = self.gpu.arch
     err = remu.run_asm(prg_addr, prg_sz, *gl, *lc, args_addr)
     if err != 0: raise RuntimeError("remu does not support the new instruction introduced in this kernel")
 
@@ -314,6 +318,7 @@ class AMDGPU(VirtGPU):
     self.regs = AMDGPURegisters()
     self.mapped_ranges = set()
     self.queues = []
+    self.arch = MOCKGPU_ARCH
 
   def map_range(self, vaddr, size): self.mapped_ranges.add((vaddr, size))
   def unmap_range(self, vaddr, size): self.mapped_ranges.remove((vaddr, size))
@@ -342,7 +347,7 @@ simd_arrays_per_engine 2
 cu_per_simd_array 8
 simd_per_cu 2
 max_slots_scratch_cu 32
-gfx_target_version 110000
+gfx_target_version {gfx_target_version}
 vendor_id 4098
 device_id 29772
 location_id 34304
