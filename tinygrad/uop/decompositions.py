@@ -385,18 +385,20 @@ def rne(v: UOp, s) -> UOp: return (v >> s) + (((v >> (s - 1)) & 1) & ((v & ((1 <
 def f2f(v, fr:DType, to:DType):
   fs, fb, (fe, fm), ts, tb, (te, tm) = fr.bitsize, exponent_bias(fr), dtypes.finfo(fr), to.bitsize, exponent_bias(to), dtypes.finfo(to)
   # NB: denormals are zero!
-  if fs < ts:
+  if fe < te and fm < tm:
     sign, nosign = (v & (1 << (fs-1))).cast(f2f_dt[to]) << (ts - fs), (v & ((1 << (fs-1)) - 1)).cast(f2f_dt[to])
     exp, norm = nosign >> fm, (nosign << (tm - fm)) + ((tb - fb) << tm)
     inf_or_nan = (nosign << (tm - fm)) | (((1 << te) - 1) << tm)
     return (sign | exp.eq(0).where(0, exp.eq((1 << fe) - 1).where(inf_or_nan, norm))).bitcast(to)
-  else:
+  elif fe > te and fm > tm:
     sign, nosign, exp = (v >> (fs - ts)) & (1 << (ts - 1)), v & ((1 << (fs - 1)) - 1), (v >> fm) & ((1 << fe) - 1)
     norm, infnan = (rne(nosign, fm - tm) - ((fb - tb) << tm)).cast(f2f_dt[to]), (sign | ((nosign >> (fm - tm)) & ((1 << tm) - 1)) | (((1 << te) - 1) << tm)).cast(f2f_dt[to])
     underflow, overflow = exp < (1 + fb - tb), exp > ((1 << te) - 2 + (fb - tb))
     return exp.eq((1 << fe) - 1).where(infnan, sign.cast(f2f_dt[to]) | underflow.where(0, overflow.where(((1 << te) - 1) << tm, norm)))
+  else: raise NotImplementedError(f"unsupported decomp {fr} -> {to}")
 
-def f2f_load(x: UOp) -> UOp:
+def f2f_load(x: UOp, op: Ops) -> UOp:
+  if op == Ops.BITCAST: return x.replace(dtype=dtypes.ushort)
   if x.dtype.count == 1: return f2f(x.replace(dtype=dtypes.ushort), dtypes.half, dtypes.float)
   return UOp.vectorize(*(f2f(x.replace(dtype=dtypes.ushort, src=(reindex(x.src[0].src[0], i, 1),)), dtypes.half, dtypes.float)
                          for i in range(x.dtype.count)))
@@ -455,9 +457,11 @@ def get_late_rewrite_patterns(ops:tuple[Ops, ...], device:str, force_transcenden
   if not is_dtype_supported(dtypes.half, device) or dtypes.half in emulated_dtypes:
     pat += [(UPat((*GroupOp.Defines, Ops.INDEX), name="x"), lambda x:
              x.replace(dtype=dtypes.uint16.ptr(x.dtype.size), tag=dtypes.half) if x.dtype.base == dtypes.half else None)]
-    pat += [(UPat(GroupOp.All, src=(UPat(Ops.LOAD, dtypes.half, name="ld"),), name="x"), lambda x,ld:
-             x.replace(src=(ld.replace(dtype=dtypes.ushort).bitcast(x.dtype) if x.op == Ops.BITCAST else f2f_load(ld),)))]
-    pat += [(UPat((*GroupOp.ALU, Ops.CONST, Ops.CAST, Ops.GEP), dtypes.half, name="x"), lambda x: x.replace(dtype=dtypes.float.vec(x.dtype.count)))]
+    # FIXME: this is slow
+    pat += [(UPat(GroupOp.All, name="x"), lambda x:
+             x.replace(src=tuple(f2f_load(s, x.op) if s.op == Ops.LOAD and s.dtype.scalar() == dtypes.half else s for s in x.src)))]
+    pat += [(UPat((*GroupOp.ALU, Ops.CONST, Ops.CAST, Ops.GEP, Ops.VECTORIZE), dtypes.half, name="x"), lambda x:
+             x.replace(dtype=dtypes.float.vec(x.dtype.count)))]
     pat += [(UPat(Ops.BITCAST, (dtypes.ushort, dtypes.short, dtypes.bfloat16), src=(UPat.var("x", dtypes.float),), name="bc"), lambda bc,x:
              bc.replace(src=(f2f(x.bitcast(dtypes.uint), dtypes.float, dtypes.half),)))]
     pat += [(UPat(Ops.STORE, src=(UPat.var("idx"), UPat.var("val", dtypes.float)), name='st'), lambda st,idx,val:
