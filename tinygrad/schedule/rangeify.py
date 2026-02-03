@@ -68,7 +68,15 @@ def resolve_custom_kernel(ck:UOp) -> UOp:
   placeholders = [UOp.placeholder_like(s, slot=i) for i,s in enumerate(ck.src)]
   return UOp(Ops.KERNEL, src=ck.src, arg=Kernel(ck.arg.fxn(*placeholders)))
 
+param_to_ptr = PatternMatcher([
+  (UPat(Ops.PARAM, name="x"), lambda x:
+   None if isinstance(x.dtype, PtrDType) else x.replace(src=(), dtype=x.dtype.ptr(size=x.size)).reshape(x.shape)),
+])
+
 def resolve_call(c:UOp) -> UOp:
+  if c.src[0].op is Ops.SINK:
+    # CALL is KERNEL...sort of
+    return UOp(Ops.KERNEL, src=c.src[1:], arg=Kernel(graph_rewrite(c.src[0], param_to_ptr)))
   params = sorted([x for x in c.src[0].toposort() if x.op == Ops.PARAM], key=lambda x: x.arg)
   args = c.src[1:]
   # TODO: this check belongs in spec, not here
