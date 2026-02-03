@@ -273,7 +273,6 @@ class QCOMProgram(HCQProgram):
     if self.max_threads < prod(local_size): raise RuntimeError("Too many resources requested for launch")
     if any(g*l>mx for g,l,mx in zip(global_size, local_size, [65536, 65536, 65536])) and any(l>mx for l,mx in zip(local_size, [1024, 1024, 1024])):
       raise RuntimeError(f"Invalid global/local dims {global_size=}, {local_size=}")
-    print('call with', [hex(b.va_addr) for b in bufs])
     return super().__call__(*bufs, global_size=global_size, local_size=local_size, vals=vals, wait=wait)
 
   def _parse_lib(self):
@@ -414,7 +413,7 @@ class QCOMDevice(HCQCompiled):
 
   def _gpu_free(self, mem:HCQBuffer):
     if mem.meta[0] is None: return # external (gpu) ptr
-    if not mem.meta[1]: kgsl.IOCTL_KGSL_SHAREDMEM_FREE(self.fd, gpuaddr=mem.meta[0].gpuaddr)
+    if not mem.meta[1]: kgsl.IOCTL_KGSL_SHAREDMEM_FREE(self.fd, gpuaddr=mem.meta[0].gpuaddr) # external (cpu) ptr
     else:
       kgsl.IOCTL_KGSL_GPUOBJ_FREE(self.fd, id=mem.meta[0].id)
       FileIOInterface.munmap(mem.va_addr, mem.meta[0].mmapsize)
