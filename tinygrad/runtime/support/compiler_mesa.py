@@ -1,4 +1,4 @@
-import base64, ctypes, pathlib, tempfile, hashlib, sys
+import base64, ctypes, pathlib, tempfile, hashlib
 from tinygrad.device import Compiler
 from tinygrad.helpers import cpu_objdump, system, data64
 from tinygrad.runtime.autogen import mesa, llvm
