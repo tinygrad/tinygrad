@@ -14,6 +14,7 @@ spec.loader.exec_module(test_module)
 
 def patched_test_sum(self):
   def f(a, b): return a.sum()
+  test_module.helper_test_generic_square('sum', 3072, f, f, onearg=True)
   test_module.helper_test_generic_square('sum', 4096, f, f, onearg=True)
 test_module.TestSpeed.test_sum = patched_test_sum
 
