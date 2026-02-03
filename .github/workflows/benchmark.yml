@@ -16,6 +16,36 @@ on:
   workflow_dispatch:
 
 jobs:
+  # the goal of this test is to replicate a normal person on a laptop running the test
+  # no process replay, no benchmarks, no CI, just a normal laptop person
+  # the 3 minute timeout should not be raised
+  testmacpytest:
+    name: Mac pytest
+    runs-on: [self-hosted, macOS]
+    timeout-minutes: 3
+    defaults:
+      run:
+        shell: bash -e -o pipefail {0}
+    if: github.repository_owner == 'tinygrad'
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+    # brew install uv
+    - name: setup python environment
+      run: |
+        rm -rf /tmp/tinygrad_pytest_ci
+        uv venv /tmp/tinygrad_pytest_ci
+        source /tmp/tinygrad_pytest_ci/bin/activate
+        uv pip install .[testing]
+    - name: setup staging db
+      run: |
+        echo "CACHEDB=/tmp/pytest-db-ci.db" >> $GITHUB_ENV
+        rm -f /tmp/pytest-db-ci*
+    - name: Run pytest -nauto
+      run: |
+        source /tmp/tinygrad_pytest_ci/bin/activate
+        pytest -nauto --durations=20
+
   testmacbenchmark:
     name: Mac Benchmark
     env:

@@ -353,8 +353,8 @@ def load_profile(lst:list[ProfileEvent]) -> dict:
     event_type, event_count = u("<BI")
     if event_type == 0:
       for _ in range(event_count):
-        name, ref, key, st, dur, _ = u("<IIIIfI")
-        v["events"].append({"name":strings[name], "ref":option(ref), "key":option(key), "st":st, "dur":dur})
+        name, ref, key, st, dur, fmt = u("<IIIIfI")
+        v["events"].append({"name":strings[name], "ref":option(ref), "key":option(key), "st":st, "dur":dur, "fmt":strings[fmt]})
     else:
       v["peak"] = u("<Q")[0]
       for _ in range(event_count):
