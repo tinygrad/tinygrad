@@ -49,7 +49,8 @@ if __name__ == "__main__":
         if args.kernel is not None:
           if ansistrip(e["name"]) == args.kernel and n < 10:
             ptm = colored(time_to_str(et, w=9), "yellow" if et > 0.01 else None) if et is not None else ""
-            print(f"{e['name'] + ' ' * (46 - ansilen(e['name']))} {ptm}/{(et or 0)*1e3:9.2f}ms  {e['fmt'].replace('\n', ' | ')}  ")
+            name = e["name"]+(" " * (46 - ansilen(e["name"])))
+            print(f"{name} {ptm}/{(et or 0)*1e3:9.2f}ms  {e['fmt'].replace('\n', ' | ')}  ")
             n += 1
         else:
           a = agg.setdefault(e["name"], [0.0, 0])
