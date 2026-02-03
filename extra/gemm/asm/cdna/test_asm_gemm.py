@@ -10,16 +10,16 @@ def verify_asm_gemm(batch:int, M:int, N:int, K:int, dtype=dtypes.bfloat16, gpus:
   with Context(DEBUG=0):
     Tensor.realize(a_rand, b_rand)
 
-  gpus = tuple(f"{Device.DEFAULT}:{i}" for i in range(gpus)) if (multi:=gpus>1) else None
+  devs = tuple(f"{Device.DEFAULT}:{i}" for i in range(gpus)) if (multi:=gpus>1) else None
 
   a, b = Tensor(a_rand.numpy(), requires_grad=True).cast(dtype), Tensor(b_rand.numpy(), requires_grad=True).cast(dtype)
-  if multi: a, b = a.shard(gpus, axis=0), b.shard(gpus, axis=None)
+  if multi: a, b = a.shard(devs, axis=0), b.shard(devs, axis=None)
   tst = asm_gemm(a, b)
   tst.sum().backward()
   Tensor.realize(tst, a.grad, b.grad)
 
   a_ref, b_ref = Tensor(a_rand.numpy(), requires_grad=True).cast(dtype), Tensor(b_rand.numpy(), requires_grad=True).cast(dtype)
-  if multi: a_ref, b_ref = a_ref.shard(gpus, axis=0), b_ref.shard(gpus, axis=None)
+  if multi: a_ref, b_ref = a_ref.shard(devs, axis=0), b_ref.shard(devs, axis=None)
   with Context(ASM_GEMM=0): ref = a_ref @ b_ref
   ref.sum().backward()
   Tensor.realize(ref, a_ref.grad, b_ref.grad)
