@@ -839,5 +839,72 @@ class TestJitRandom(unittest.TestCase):
     for i, (t0, t1) in enumerate(zip(tst[0], tst[1])):
       self.assertListEqual(t0, t1, msg=f"mismatch at list {i}")
 
+class TestJitGradAccumulation(unittest.TestCase):
+  def test_bert_minibatch_grad_accumulation(self):
+    """Test that gradient accumulation works correctly with JIT for BERT-like model."""
+    from extra.models.bert import BertForPretraining
+    from tinygrad.nn.state import get_parameters
+    # very small BERT config for fast testing
+    # disable dropout for determinism
+    config = {
+      'attention_probs_dropout_prob': 0.0, 'hidden_dropout_prob': 0.0, 'vocab_size': 8, 'type_vocab_size': 2, 'max_position_embeddings': 8,
+      'hidden_size': 4, 'intermediate_size': 16, 'num_attention_heads': 2, 'num_hidden_layers': 1
+    }
+    Tensor.manual_seed(42)
+    model = BertForPretraining(**config)
+    params = get_parameters(model)
+    for p in params:
+      p.requires_grad = True
+      p.realize()
+      p.grad = p.zeros_like().contiguous().realize()
+
+    BS, SEQ_LEN, MASKED_LM_POSITIONS = 2, 4, 2
+    inputs = []
+    for _ in range(5):
+      input_ids = Tensor.randint(BS, SEQ_LEN, low=0, high=config['vocab_size']).realize()
+      segment_ids = Tensor.randint(BS, SEQ_LEN, low=0, high=config['type_vocab_size']).realize()
+      attention_mask = Tensor.ones(BS, SEQ_LEN).realize()
+      masked_positions = Tensor.randint(BS, MASKED_LM_POSITIONS, low=0, high=SEQ_LEN).realize()
+      masked_lm_ids = Tensor.randint(BS, MASKED_LM_POSITIONS, low=0, high=config['vocab_size']).realize()
+      masked_lm_weights = Tensor.zeros(BS, MASKED_LM_POSITIONS).realize()  # all valid
+      next_sentence_labels = Tensor.randint(BS, low=0, high=2).float().realize()
+      inputs.append((input_ids, segment_ids, attention_mask, masked_positions, masked_lm_ids, masked_lm_weights, next_sentence_labels))
+
+    def minibatch(input_ids, segment_ids, attention_mask, masked_positions, masked_lm_ids, masked_lm_weights, next_sentence_labels):
+      with Tensor.train():
+        lm_logits, seq_relationship_logits = model(input_ids, attention_mask, masked_positions, segment_ids)
+        loss = model.loss(lm_logits, seq_relationship_logits, masked_lm_ids, masked_lm_weights, next_sentence_labels)
+        loss.backward()
+        Tensor.realize(loss, *[p.grad for p in params])
+        return loss
+
+    losses_nojit = []
+    for inp in inputs:
+      loss = minibatch(*inp)
+      losses_nojit.append(loss.numpy())
+    grads_nojit = [p.grad.numpy().copy() for p in params]
+
+    for p in params:
+      p.grad = p.zeros_like().contiguous().realize()
+
+    minibatch_jit = TinyJit(minibatch)
+
+    losses_jit = []
+    for inp in inputs:
+      loss = minibatch_jit(*inp)
+      losses_jit.append(loss.numpy())
+    grads_jit = [p.grad.numpy().copy() for p in params]
+
+    for i, (loss_nojit, loss_jit) in enumerate(zip(losses_nojit, losses_jit)):
+      np.testing.assert_allclose(loss_nojit, loss_jit, atol=1e-4, rtol=1e-4,
+        err_msg=f"Loss mismatch at minibatch {i}")
+
+    for i, (grad_nojit, grad_jit) in enumerate(zip(grads_nojit, grads_jit)):
+      np.testing.assert_allclose(grad_nojit, grad_jit, atol=1e-4, rtol=1e-4,
+        err_msg=f"Gradient mismatch at parameter {i}, shapes: {grad_nojit.shape} vs {grad_jit.shape}")
+
+    total_grad_norm = sum(np.abs(g).sum() for g in grads_jit)
+    assert total_grad_norm > 0, "Gradients should not all be zero"
+
 if __name__ == '__main__':
   unittest.main()
