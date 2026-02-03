@@ -70,6 +70,15 @@ class QCOMComputeQueue(HWQueue):
     if invalidate: self.cmd(mesa.CP_EVENT_WRITE, mesa.CACHE_INVALIDATE) # invalidate cache lines (following reads from RAM).
     if memsync: self.cmd(mesa.CP_WAIT_MEM_WRITES)
     if sync: self.cmd(mesa.CP_WAIT_FOR_IDLE)
+    
+    self.cmd(mesa.CP_WAIT_FOR_IDLE)
+    self.cmd(mesa.CP_WAIT_MEM_WRITES)
+    self.cmd(mesa.CP_EVENT_WRITE, mesa.CACHE_INVALIDATE) # invalidate cache lines (following reads from RAM).
+    self.cmd(mesa.CP_EVENT_WRITE, mesa.CACHE_FLUSH_TS, *data64_le(self.dev.dummy_addr), 0) # dirty cache write-back.
+    self.cmd(mesa.CP_EVENT_WRITE, mesa.CACHE_INVALIDATE) # invalidate cache lines (following reads from RAM).
+    self.cmd(mesa.CP_WAIT_MEM_WRITES)
+    self.cmd(mesa.CP_WAIT_FOR_IDLE)
+    self.cmd(mesa.CP_WAIT_FOR_ME)
 
   def memory_barrier(self):
     self._cache_flush(write_back=True, invalidate=True, sync=True, memsync=True)
@@ -186,7 +195,7 @@ class QCOMComputeQueue(HWQueue):
                qreg.cp_exec_cs_1(ngroups_x=global_size[0]), qreg.cp_exec_cs_2(ngroups_y=global_size[1]), qreg.cp_exec_cs_3(_ngroups_z=global_size[2]))
     else: self.cmd(mesa.CP_RUN_OPENCL, 0)
 
-    self._cache_flush(write_back=True, invalidate=False, sync=False, memsync=False)
+    self._cache_flush(write_back=True, invalidate=True, sync=True, memsync=True)
     return self
 
 class QCOMArgsState(HCQArgsState):
@@ -261,6 +270,7 @@ class QCOMProgram(HCQProgram):
     if self.max_threads < prod(local_size): raise RuntimeError("Too many resources requested for launch")
     if any(g*l>mx for g,l,mx in zip(global_size, local_size, [65536, 65536, 65536])) and any(l>mx for l,mx in zip(local_size, [1024, 1024, 1024])):
       raise RuntimeError(f"Invalid global/local dims {global_size=}, {local_size=}")
+    print('call with', [hex(b.va_addr) for b in bufs])
     return super().__call__(*bufs, global_size=global_size, local_size=local_size, vals=vals, wait=wait)
 
   def _parse_lib(self):
@@ -333,10 +343,12 @@ class QCOMAllocator(HCQAllocatorBase):
     self.dev.synchronize()
 
     stride, pitch = (src.image.shape[1] * 4 * src.image.itemsize, src.image.pitch) if src.image else (src.size, src.size)
+    kgsl.IOCTL_KGSL_GPUMEM_SYNC_CACHE(self.dev.fd, id=src.meta[0].id, op=kgsl.KGSL_GPUMEM_CACHE_FLUSH, length=src.meta[0].size)
     self._do_copy(src.cpu_view().addr, mv_address(dest), src.size, stride, pitch, stride, f"{self.dev.device} -> TINY")
 
   def _as_buffer(self, src:HCQBuffer) -> memoryview:
     self.dev.synchronize()
+    kgsl.IOCTL_KGSL_GPUMEM_SYNC_CACHE(self.dev.fd, id=src.meta[0].id, op=kgsl.KGSL_GPUMEM_CACHE_FLUSH, length=src.meta[0].size)
     return to_mv(src.cpu_view().addr, src.size)
 
   def _do_free(self, opaque, options:BufferSpec): self.dev._gpu_free(opaque)
@@ -387,21 +399,30 @@ class QCOMDevice(HCQCompiled):
     va_addr = self.fd.mmap(0, bosz, mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_SHARED, alloc.id * 0x1000)
 
     if fill_zeroes: ctypes.memset(va_addr, 0, size)
+    kgsl.IOCTL_KGSL_GPUMEM_SYNC_CACHE(self.fd, id=alloc.id, op=kgsl.KGSL_GPUMEM_CACHE_FLUSH, length=size)
     return HCQBuffer(va_addr=va_addr, size=size, meta=(alloc, True), view=MMIOInterface(va_addr, size, fmt='B'), owner=self, **kwargs)
 
   def _gpu_map(self, ptr:int, size:int, **kwargs) -> HCQBuffer:
     ptr_aligned, size_aligned = (ptr & ~0xfff), round_up(size + (ptr & 0xfff), 0x1000)
+    System.memory_barrier()
     try:
-      mi = kgsl.IOCTL_KGSL_MAP_USER_MEM(self.fd, hostptr=ptr_aligned, len=size_aligned, memtype=kgsl.KGSL_USER_MEM_TYPE_ADDR)
-      return HCQBuffer(mi.gpuaddr + (ptr - ptr_aligned), size=size, meta=(mi, False), view=MMIOInterface(ptr, size, fmt='B'), owner=self, **kwargs)
+      mi = kgsl.IOCTL_KGSL_MAP_USER_MEM(self.fd, hostptr=ptr_aligned, len=size_aligned, memtype=kgsl.KGSL_USER_MEM_TYPE_ADDR,
+        flags=flag("KGSL_CACHEMODE", kgsl.KGSL_CACHEMODE_UNCACHED))
+      x = HCQBuffer(mi.gpuaddr + (ptr - ptr_aligned), size=size, meta=(mi, False), view=MMIOInterface(ptr, size, fmt='B'), owner=self, **kwargs)
+      kgsl.IOCTL_KGSL_GPUMEM_SYNC_CACHE(self.fd, gpuaddr=mi.gpuaddr, op=kgsl.KGSL_GPUMEM_CACHE_FLUSH, length=size_aligned)
+      print(hex(ptr_aligned), hex(mi.gpuaddr))
+      return x
     except OSError as e:
       if e.errno == 14: return HCQBuffer(va_addr=ptr, size=size, meta=(None, False), view=MMIOInterface(ptr, size, fmt='B'), owner=self, **kwargs)
       raise RuntimeError("Failed to map external pointer to GPU memory") from e
 
   def _gpu_free(self, mem:HCQBuffer):
     if mem.meta[0] is None: return # external (gpu) ptr
-    if not mem.meta[1]: kgsl.IOCTL_KGSL_SHAREDMEM_FREE(self.fd, gpuaddr=mem.meta[0].gpuaddr) # external (cpu) ptr
+    if not mem.meta[1]:
+      kgsl.IOCTL_KGSL_GPUMEM_SYNC_CACHE(self.fd, gpuaddr=mem.meta[0].gpuaddr, op=kgsl.KGSL_GPUMEM_CACHE_FLUSH, length=mem.meta[0].len)
+      # kgsl.IOCTL_KGSL_SHAREDMEM_FREE(self.fd, gpuaddr=mem.meta[0].gpuaddr) # external (cpu) ptr
     else:
+      kgsl.IOCTL_KGSL_GPUMEM_SYNC_CACHE(self.fd, id=mem.meta[0].id, op=kgsl.KGSL_GPUMEM_CACHE_FLUSH, length=mem.meta[0].size)
       kgsl.IOCTL_KGSL_GPUOBJ_FREE(self.fd, id=mem.meta[0].id)
       FileIOInterface.munmap(mem.va_addr, mem.meta[0].mmapsize)
 
