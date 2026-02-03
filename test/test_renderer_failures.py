@@ -26,8 +26,8 @@ def _test_uop_result(inputs:list[Tensor], prg, local_size=None):
 
 def _setup_and_test_alu(alu_op:Ops, input_val:ConstType, *alu_src_uops:UOp):
   dtype = alu_src_uops[0].dtype
-  a = UOp(Ops.DEFINE_GLOBAL, dtype.ptr(), (), 0)
-  b = UOp(Ops.DEFINE_GLOBAL, dtype.ptr(), (), 1)
+  a = UOp(Ops.PARAM, dtype.ptr(), (), 0)
+  b = UOp(Ops.PARAM, dtype.ptr(), (), 1)
   idx = UOp.const(dtypes.int, 0)
   ld = b.index(idx)
   alu = ld.alu(alu_op, *alu_src_uops)
@@ -39,7 +39,7 @@ def _setup_and_test_alu(alu_op:Ops, input_val:ConstType, *alu_src_uops:UOp):
 class TestRendererFailures(unittest.TestCase):
   @unittest.skipIf(not isinstance(Device[Device.DEFAULT].renderer, (PTXRenderer, PythonRenderer)), "test is for ptx or python renderer")
   def test_gated_store_with_alu(self):
-    a = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), (), 0)
+    a = UOp(Ops.PARAM, dtypes.int.ptr(), (), 0)
     gate_alu = (lidx0:=UOp(Ops.SPECIAL, dtypes.int, (UOp.const(dtypes.int, 4),), 'lidx0')).ne(0)
     gated_alu_store = UOp(Ops.STORE, dtypes.void, (a.index(lidx0.valid(gate_alu)), UOp.const(dtypes.int, 1)))
     sink = UOp(Ops.SINK, dtypes.void, (gated_alu_store,))
@@ -49,7 +49,7 @@ class TestRendererFailures(unittest.TestCase):
 
   @unittest.skipIf(not isinstance(Device[Device.DEFAULT].renderer, (PTXRenderer, PythonRenderer)), "test is for ptx or python renderer")
   def test_gated_store_with_alu_2d(self):
-    a = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), (), 0)
+    a = UOp(Ops.PARAM, dtypes.int.ptr(), (), 0)
     gate_alu_0 = (lidx0:=UOp(Ops.SPECIAL, dtypes.int, (UOp.const(dtypes.int, 4),), 'lidx0')).ne(0)
     gate_alu_1 = (lidx1:=UOp(Ops.SPECIAL, dtypes.int, (UOp.const(dtypes.int, 2),), 'lidx1')).ne(0)
     gated_alu_store = UOp(Ops.STORE, dtypes.void, (a.index((lidx0+lidx1*4).valid(gate_alu_0&gate_alu_1)), UOp.const(dtypes.int, 1)))
@@ -94,7 +94,7 @@ class TestWGSLFailures(unittest.TestCase):
 class TestPTXFailures(unittest.TestCase):
   @unittest.skip("INDEX can only have a gate ALU parent, not an IF")
   def test_gated_store_with_if(self):
-    a = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), (), 0)
+    a = UOp(Ops.PARAM, dtypes.int.ptr(), (), 0)
     gate_alu = (lidx0:=UOp(Ops.SPECIAL, dtypes.int, (UOp.const(dtypes.int, 4),), 'lidx0')).ne(0)
     val = UOp.const(dtypes.int, 1)
     if_uop = UOp(Ops.IF, dtypes.void, (gate_alu,))

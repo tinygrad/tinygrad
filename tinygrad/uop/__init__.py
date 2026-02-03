@@ -28,9 +28,6 @@ class Ops(FastEnum):
   NOOP = auto(); REWRITE_ERROR = auto()
   PARAM = auto(); CALL = auto()
 
-  # TODO: remove this alias, DEFINE_GLOBAL is PARAM now
-  DEFINE_GLOBAL = PARAM
-
   # renderer
   # LINEAR is a list of UOps, SOURCE has a str arg that's human readable, BINARY has bytes arg that's compiled
   PROGRAM = auto(); LINEAR = auto(); SOURCE = auto(); BINARY = auto()
@@ -114,7 +111,7 @@ class GroupOp:
   # TODO: is BITCAST always Elementwise if it's shape changing?
   Elementwise = set.union(ALU, {Ops.CAST, Ops.BITCAST})
 
-  Defines = {Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL, Ops.DEFINE_REG}
+  Defines = {Ops.PARAM, Ops.DEFINE_LOCAL, Ops.DEFINE_REG}
 
   Irreducible = {Ops.CONST, Ops.DEFINE_VAR, Ops.SPECIAL, Ops.RANGE}
   Movement = {Ops.RESHAPE, Ops.EXPAND, Ops.PERMUTE, Ops.PAD, Ops.SHRINK, Ops.FLIP}

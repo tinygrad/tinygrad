@@ -265,11 +265,11 @@ def _collect_data_slices(assigns: list[tuple[str, UOp]], data_prefix: str, pcode
 class _Ctx:
   """Context for instruction compilation - holds buffers and helpers."""
   __slots__ = ('inst_size', 'dyn_fields', '_axis_id')
-  sgpr = UOp(Ops.DEFINE_GLOBAL, dtypes.uint32.ptr(SGPR_COUNT), arg=0)
-  vgpr = UOp(Ops.DEFINE_GLOBAL, dtypes.uint32.ptr(VGPR_SIZE), arg=1)
-  vmem = UOp(Ops.DEFINE_GLOBAL, dtypes.uint32.ptr(1 << 46), arg=2)
-  lds = UOp(Ops.DEFINE_GLOBAL, dtypes.uint32.ptr(16384), arg=3)
-  scratch = UOp(Ops.DEFINE_GLOBAL, dtypes.uint8.ptr(1 << 30), arg=4)
+  sgpr = UOp(Ops.PARAM, dtypes.uint32.ptr(SGPR_COUNT), arg=0)
+  vgpr = UOp(Ops.PARAM, dtypes.uint32.ptr(VGPR_SIZE), arg=1)
+  vmem = UOp(Ops.PARAM, dtypes.uint32.ptr(1 << 46), arg=2)
+  lds = UOp(Ops.PARAM, dtypes.uint32.ptr(16384), arg=3)
+  scratch = UOp(Ops.PARAM, dtypes.uint8.ptr(1 << 30), arg=4)
 
   def __init__(self, inst_size: int):
     self.inst_size, self._axis_id = inst_size, 0

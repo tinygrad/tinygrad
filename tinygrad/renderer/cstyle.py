@@ -177,15 +177,15 @@ class CStyleLanguage(Renderer):
       if u.op is Ops.SINK:
         if u.arg is not None: name = u.arg.function_name
         continue
-      if u.op in (Ops.DEFINE_GLOBAL, Ops.DEFINE_VAR):
-        r[u] = (f"data{u.arg}_{sz}" if (sz:=u.ptrdtype.size) > 0 else f"data{u.arg}") if u.op is Ops.DEFINE_GLOBAL else u.arg[0]
+      if u.op in (Ops.PARAM, Ops.DEFINE_VAR):
+        r[u] = (f"data{u.arg}_{sz}" if (sz:=u.ptrdtype.size) > 0 else f"data{u.arg}") if u.op is Ops.PARAM else u.arg[0]
         bufs[u] = (r[u], (u.dtype, False))
         continue
 
       # mark buffers that we store to writable
       if u.op is Ops.STORE:
         for up in u.src[0].toposort():
-          if up.op is Ops.DEFINE_GLOBAL: bufs[up] = (bufs[up][0], (bufs[up][1][0], True))
+          if up.op is Ops.PARAM: bufs[up] = (bufs[up][0], (bufs[up][1][0], True))
 
       # naming
       prefix = None
@@ -318,7 +318,7 @@ class OpenCLRenderer(CStyleLanguage):
     if any(uop.dtype.base == dtypes.half for uop in uops): prefix = (["#pragma OPENCL EXTENSION cl_khr_fp16 : enable"] + (prefix or []))
     return super().render_kernel(function_name, kernel, bufs, uops, prefix)
 
-  def aux(self, uops:list[UOp]): return (tuple(u.dtype for u in uops if u.op == Ops.DEFINE_GLOBAL),)
+  def aux(self, uops:list[UOp]): return (tuple(u.dtype for u in uops if u.op == Ops.PARAM),)
 
 class IntelRenderer(OpenCLRenderer):
   device, suffix, kernel_typedef = "CL", "INTEL", "__attribute__((intel_reqd_sub_group_size(8)))\n" + "__kernel void"
