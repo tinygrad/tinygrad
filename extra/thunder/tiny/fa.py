@@ -9,6 +9,7 @@ from extra.thunder.tiny.tk.kernel import Kernel
 from extra.thunder.tiny.tk.tiles import GL, TileLayout
 
 NUM_WORKERS = 1
+PIPE_STAGES = 1
 Q_BLOCK_SIZE = 32
 KV_BLOCK_SIZE = 32
 
@@ -54,7 +55,7 @@ def flash_attention(xq, xk, xv, attn_mask:Tensor|None=None, is_causal:bool=False
       batch = ker.blockIdx_z
       q_seq = ker.blockIdx_y * NUM_WORKERS + ker.warpid
 
-      k_smem = ker.st((KV_BLOCK_SIZE, D), dtypes.bfloat16)
+      k_smem = [ker.st((KV_BLOCK_SIZE, D), dtypes.bfloat16) for _ in range(PIPE_STAGES)]
       v_smem = ker.st((KV_BLOCK_SIZE, D), dtypes.bfloat16)
 
       q_reg_fl = ker.rt((Q_BLOCK_SIZE, D), dtypes.float32)
@@ -86,41 +87,45 @@ def flash_attention(xq, xk, xv, attn_mask:Tensor|None=None, is_causal:bool=False
       q_reg = warp.copy(q_reg, q_reg_fl)
       q_reg_transposed = warp.transpose(q_reg_transposed, q_reg)
 
-      for kv_idx in ker.range(N // KV_BLOCK_SIZE):
-        k_smem = warp.load(k_smem, k, (), (batch, kv_idx, head_kv, 0), axis=1)
-        v_smem = warp.load(v_smem, v, (), (batch, kv_idx, head_kv, 0), axis=1)
+      print(N, KV_BLOCK_SIZE, PIPE_STAGES)
+      print(N // KV_BLOCK_SIZE, (N // KV_BLOCK_SIZE) // PIPE_STAGES)
 
-        k_reg = warp.load(k_reg, k_smem)
-        v_reg = warp.load(v_reg, v_smem)
+      for kv_idx in ker.range((N // KV_BLOCK_SIZE) // PIPE_STAGES):
+        for stage in range(PIPE_STAGES):
+          k_smem[0] = warp.load(k_smem[0], k, (), (batch, kv_idx, head_kv, 0), axis=1)
+          v_smem = warp.load(v_smem, v, (), (batch, kv_idx, head_kv, 0), axis=1)
 
-        # mma qk^t
-        att_block = warp.zero(att_block.after(kv_idx))
-        k_reg_transposed = warp.transpose(k_reg_transposed, k_reg)
-        att_block = warp.mma_AtB(att_block, k_reg_transposed, q_reg_transposed)
+          k_reg = warp.load(k_reg, k_smem[0])
+          v_reg = warp.load(v_reg, v_smem)
 
-        # apply attention mask
-        mask_reg = warp.load(mask_reg, mask, (), (batch, 0, q_seq, kv_idx), axis=2)
-        mask_reg_transposed = warp.transpose(mask_reg_transposed, mask_reg)
-        att_block += mask_reg_transposed
+          # mma qk^t
+          att_block = warp.zero(att_block.after(kv_idx))
+          k_reg_transposed = warp.transpose(k_reg_transposed, k_reg)
+          att_block = warp.mma_AtB(att_block, k_reg_transposed, q_reg_transposed)
 
-        # softmax
-        max_vec_last = warp.copy(max_vec_last.after(kv_idx), max_vec)
-        max_vec = warp.col_reduce(max_vec.after(max_vec_last), att_block, lambda a, b: a.maximum(b), init_value=-math.inf)
+          # apply attention mask
+          mask_reg = warp.load(mask_reg, mask, (), (batch, 0, q_seq, kv_idx), axis=2)
+          mask_reg_transposed = warp.transpose(mask_reg_transposed, mask_reg)
+          att_block += mask_reg_transposed
 
-        scale_vec = warp.map(scale_vec.after(max_vec_last, max_vec), lambda _, idx: max_vec_last[*idx] - max_vec[*idx])
-        scale_vec = scale_vec.exp2()
+          # softmax
+          max_vec_last = warp.copy(max_vec_last.after(kv_idx), max_vec)
+          max_vec = warp.col_reduce(max_vec.after(max_vec_last), att_block, lambda a, b: a.maximum(b), init_value=-math.inf)
 
-        o_reg *= scale_vec
-        norm_vec *= scale_vec
+          scale_vec = warp.map(scale_vec.after(max_vec_last, max_vec), lambda _, idx: max_vec_last[*idx] - max_vec[*idx])
+          scale_vec = scale_vec.exp2()
 
-        att_block -= max_vec
-        att_block = att_block.exp2()
+          o_reg *= scale_vec
+          norm_vec *= scale_vec
 
-        norm_vec = warp.col_reduce(norm_vec.after(scale_vec), att_block, lambda a, b: a + b)
+          att_block -= max_vec
+          att_block = att_block.exp2()
 
-        # mma av
-        att_block_mma = warp.copy(att_block_mma.after(kv_idx, norm_vec), att_block)
-        o_reg = warp.mma_AtB(o_reg, v_reg, att_block_mma)
+          norm_vec = warp.col_reduce(norm_vec.after(scale_vec), att_block, lambda a, b: a + b)
+
+          # mma av
+          att_block_mma = warp.copy(att_block_mma.after(kv_idx, norm_vec), att_block)
+          o_reg = warp.mma_AtB(o_reg, v_reg, att_block_mma)
       o_reg = ker.endrange()
       norm_vec = norm_vec.after(o_reg)
       max_vec = max_vec.after(o_reg)
