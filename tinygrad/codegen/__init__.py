@@ -94,7 +94,7 @@ def full_rewrite_to_sink(sink:UOp, ren:Renderer|None=None, optimize:bool=True) -
   supported_ops = tuple(ren.code_for_op.keys())
   pm_decomp = symbolic_simple+get_late_rewrite_patterns(supported_ops, ren.device, bool(DISABLE_FAST_IDIV))
   pm_unsupported = get_unsupported_dtypes_patterns(ren.device, tuple(EMULATED_DTYPES.tolist(dtypes)))
-  pm_transcendental = get_transcendental_patterns(supported_ops, TRANSCENDENTAL>=2)
+  pm_transcendental = symbolic_simple+get_transcendental_patterns(supported_ops, TRANSCENDENTAL>=2)
   sink = graph_rewrite(sink, pm_decomp, ctx=ren.device, name="decompositions")
   sink = graph_rewrite(sink, pm_unsupported, ctx=ren.device, name="unsupported dtypes", bottom_up=True)
   sink = graph_rewrite(sink, pm_transcendental, ctx=ren.device, name="transcendental decompositions")
