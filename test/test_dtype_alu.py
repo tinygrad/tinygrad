@@ -120,6 +120,10 @@ class TestDTypeALU(unittest.TestCase):
   @given(ht.float16, ht.float16, strat.sampled_from(binary_operations))
   def test_float16(self, a, b, op): universal_test(a, b, dtypes.float16, op)
 
+  @given(ht.float16, ht.float16, strat.sampled_from(binary_operations))
+  @Context(EMULATED_DTYPES="half")
+  def test_emulated_float16(self, a, b, op): universal_test(a, b, dtypes.float16, op)
+
   @unittest.skipUnless(is_dtype_supported(dtypes.bfloat16), f"no bfloat16 on {Device.DEFAULT}")
   @given(ht.bfloat16, ht.bfloat16, strat.sampled_from(binary_operations))
   def test_bfloat16(self, a, b, op):
@@ -141,6 +145,10 @@ class TestDTypeALU(unittest.TestCase):
   @unittest.skipUnless(is_dtype_supported(dtypes.float16), f"no float16 on {Device.DEFAULT}")
   @given(ht.float16, strat.sampled_from(unary_operations))
   def test_float16_unary(self, a, op): universal_test_unary(a, dtypes.float16, op)
+
+  @given(ht.float16, strat.sampled_from(unary_operations))
+  @Context(EMULATED_DTYPES="half")
+  def test_emulated_float16_unary(self, a, op): universal_test_unary(a, dtypes.float16, op)
 
   @unittest.skipUnless(is_dtype_supported(dtypes.bfloat16), f"no bfloat16 on {Device.DEFAULT}")
   @given(ht.bfloat16, strat.sampled_from(unary_operations))
