@@ -74,7 +74,7 @@ param_to_ptr = PatternMatcher([
 ])
 
 def resolve_call(c:UOp) -> UOp:
-  if c.src[0].op is Ops.SINK:
+  if c.src[0].op in {Ops.SINK, Ops.PROGRAM}:
     # CALL is KERNEL...sort of
     return UOp(Ops.KERNEL, src=c.src[1:], arg=Kernel(graph_rewrite(c.src[0], param_to_ptr)))
   params = sorted([x for x in c.src[0].toposort() if x.op == Ops.PARAM], key=lambda x: x.arg)
