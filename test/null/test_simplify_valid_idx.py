@@ -5,7 +5,7 @@ from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import UOp, Ops
 from tinygrad.uop.symbolic import simplify_valid
 from tinygrad.helpers import Context
-from test.unit.test_uop_symbolic import check_uop_against_string
+from test.null.test_uop_symbolic import check_uop_against_string
 
 def get_gated_load_uop(valid:UOp, idx:UOp):
   return UOp(Ops.LOAD, dtypes.float, (
