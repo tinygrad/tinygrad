@@ -82,15 +82,6 @@ class QCOMComputeQueue(HWQueue):
     if invalidate: self.cmd(mesa.CP_EVENT_WRITE, mesa.CACHE_INVALIDATE) # invalidate cache lines (following reads from RAM).
     if memsync: self.cmd(mesa.CP_WAIT_MEM_WRITES)
     if sync: self.cmd(mesa.CP_WAIT_FOR_IDLE)
-    
-    self.cmd(mesa.CP_WAIT_FOR_IDLE)
-    self.cmd(mesa.CP_WAIT_MEM_WRITES)
-    self.cmd(mesa.CP_EVENT_WRITE, mesa.CACHE_INVALIDATE) # invalidate cache lines (following reads from RAM).
-    self.cmd(mesa.CP_EVENT_WRITE, mesa.CACHE_FLUSH_TS, *data64_le(self.dev.dummy_addr), 0) # dirty cache write-back.
-    self.cmd(mesa.CP_EVENT_WRITE, mesa.CACHE_INVALIDATE) # invalidate cache lines (following reads from RAM).
-    self.cmd(mesa.CP_WAIT_MEM_WRITES)
-    self.cmd(mesa.CP_WAIT_FOR_IDLE)
-    self.cmd(mesa.CP_WAIT_FOR_ME)
 
   def memory_barrier(self):
     self._cache_flush(write_back=True, invalidate=True, sync=True, memsync=True)
@@ -207,7 +198,7 @@ class QCOMComputeQueue(HWQueue):
                qreg.cp_exec_cs_1(ngroups_x=global_size[0]), qreg.cp_exec_cs_2(ngroups_y=global_size[1]), qreg.cp_exec_cs_3(_ngroups_z=global_size[2]))
     else: self.cmd(mesa.CP_RUN_OPENCL, 0)
 
-    self._cache_flush(write_back=True, invalidate=True, sync=True, memsync=True)
+    self._cache_flush(write_back=True, invalidate=False, sync=False, memsync=False)
     return self
 
 class QCOMArgsState(HCQArgsState):
@@ -423,8 +414,7 @@ class QCOMDevice(HCQCompiled):
 
   def _gpu_free(self, mem:HCQBuffer):
     if mem.meta[0] is None: return # external (gpu) ptr
-    if not mem.meta[1]:
-      kgsl.IOCTL_KGSL_SHAREDMEM_FREE(self.fd, gpuaddr=mem.meta[0].gpuaddr)
+    if not mem.meta[1]: kgsl.IOCTL_KGSL_SHAREDMEM_FREE(self.fd, gpuaddr=mem.meta[0].gpuaddr)
     else:
       kgsl.IOCTL_KGSL_GPUOBJ_FREE(self.fd, id=mem.meta[0].id)
       FileIOInterface.munmap(mem.va_addr, mem.meta[0].mmapsize)
