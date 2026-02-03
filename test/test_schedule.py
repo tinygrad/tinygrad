@@ -1092,6 +1092,18 @@ class TestSchedule(unittest.TestCase):
     np.testing.assert_allclose(out[0].numpy(), np.sqrt(np.square(x.numpy() - np_mu).sum(-1)/x.shape[-1]), atol=1e-4, rtol=1e-4)
     np.testing.assert_allclose(out[1].numpy(), np.sqrt(np.square(y.numpy() - np_mu).sum(-1)/y.shape[-1]), atol=1e-4, rtol=1e-4)
 
+  def test_cumsum_parallel_reduce_fused(self):
+    # two-stage cumsum + ops triggers parallel REDUCEs in one kernel that must share an END
+    step, num_steps = 513, 10
+    t = Tensor.arange(step).float().realize()
+    phase = t.cumsum()
+    tiled = phase.repeat((num_steps,)).reshape(num_steps, step)
+    pattern = Tensor([1,0,0,1,0,0,0,0,1,0]).reshape(num_steps, 1)
+    out = (tiled * pattern).flatten()
+    expected = np.tile(np.arange(step).astype(np.float32).cumsum(), num_steps).reshape(num_steps, step)
+    expected = (expected * np.array([1,0,0,1,0,0,0,0,1,0]).reshape(num_steps, 1)).flatten()
+    np.testing.assert_allclose(out.numpy(), expected, atol=1e-4, rtol=1e-4)
+
   def test_multimatmul_fusion(self):
     Tensor.manual_seed(0)
     a,b = Tensor.randn(4, 64).realize(), Tensor.rand(64,8).realize()
