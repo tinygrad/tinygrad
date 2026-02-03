@@ -12,7 +12,7 @@ from test.helpers import derandomize_model
 
 from examples.gpt2 import Transformer as GPT2Transformer
 from examples.hlb_cifar10 import SpeedyResNet, hyp
-from examples.llama import Transformer as LLaMaTransformer
+from extra.models.llama import Transformer as LLaMaTransformer
 from examples.stable_diffusion import UNetModel, unet_params
 from extra.models.unet import ResBlock
 from extra.models.bert import BertForPretraining
