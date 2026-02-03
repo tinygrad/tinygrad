@@ -262,6 +262,7 @@ _nload_img = nir_instr(intrins=lambda dtype:{'IMAGE_DIM':mesa.GLSL_SAMPLER_DIM_2
 
 class IR3Renderer(NIRRenderer):
   device = "QCOM"
+  has_aux = True
 
   def nload_img(ctx,img,coord):
     ctx.texs.add(img)
@@ -294,3 +295,5 @@ class IR3Renderer(NIRRenderer):
 
     self.b.shader.contents.info.num_ubos = len([u for u in bufs if not isinstance(u.dtype, ImageDType)])
     self.b.shader.contents.info.num_images = texs() + imgs()
+
+  def aux(self, uops:list[UOp]): return (tuple(u.dtype for u in uops if u.op == Ops.DEFINE_GLOBAL),)
