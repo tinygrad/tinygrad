@@ -380,21 +380,22 @@ def l2i(op: Ops, dt: DType, *uops:UOp):
 # ***** floats *****
 f2f_dt = { dtypes.half: dtypes.ushort, dtypes.float: dtypes.uint }
 
-def rne(v: UOp, s) -> UOp: return (v >> s) + (((v >> (s - 1)) & 1) & ((v & ((1 << (s - 1)) - 1)).ne(0).cast(v.dtype) | ((v >> s) & 1)))
+def rne(v: UOp, s) -> UOp: return shr(v, s) + ((shr(v, s - 1) & 1) & ((v & ((1 << (s - 1)) - 1)).ne(0).cast(v.dtype) | (shr(v, s) & 1)))
 
 def f2f(v, fr:DType, to:DType):
   fs, fb, (fe, fm), ts, tb, (te, tm) = fr.bitsize, exponent_bias(fr), dtypes.finfo(fr), to.bitsize, exponent_bias(to), dtypes.finfo(to)
   # NB: denormals are zero!
   if fe < te and fm < tm:
-    sign, nosign = (v & (1 << (fs-1))).cast(f2f_dt[to]) << (ts - fs), (v & ((1 << (fs-1)) - 1)).cast(f2f_dt[to])
-    exp, norm = nosign >> fm, (nosign << (tm - fm)) + ((tb - fb) << tm)
-    inf_or_nan = (nosign << (tm - fm)) | (((1 << te) - 1) << tm)
-    return (sign | exp.eq(0).where(0, exp.eq((1 << fe) - 1).where(inf_or_nan, norm))).bitcast(to)
+    sign, nosign = shl((v & shl(1, fs-1)).cast(f2f_dt[to]), ts - fs), (v & (shl(1, fs-1) - 1)).cast(f2f_dt[to])
+    exp, norm = shr(nosign, fm), shl(nosign, tm - fm) + shl(tb - fb, tm)
+    inf_or_nan = shl(nosign, tm - fm) | shl((shl(1, te) - 1), tm)
+    return (sign | exp.eq(0).where(0, exp.eq(shl(1, fe) - 1).where(inf_or_nan, norm))).bitcast(to)
   elif fe > te and fm > tm:
-    sign, nosign, exp = (v >> (fs - ts)) & (1 << (ts - 1)), v & ((1 << (fs - 1)) - 1), (v >> fm) & ((1 << fe) - 1)
-    norm, infnan = (rne(nosign, fm - tm) - ((fb - tb) << tm)).cast(f2f_dt[to]), (sign | ((nosign >> (fm - tm)) & ((1 << tm) - 1)) | (((1 << te) - 1) << tm)).cast(f2f_dt[to])
-    underflow, overflow = exp < (1 + fb - tb), exp > ((1 << te) - 2 + (fb - tb))
-    return exp.eq((1 << fe) - 1).where(infnan, sign.cast(f2f_dt[to]) | underflow.where(0, overflow.where(((1 << te) - 1) << tm, norm)))
+    sign, nosign, exp = shr(v, fs - ts) & shl(1, ts - 1), v & (shl(1, fs - 1) - 1), shr(v, fm) & (shl(1, fe) - 1)
+    norm = (rne(nosign, fm - tm) - shl(fb - tb, tm)).cast(f2f_dt[to])
+    infnan = (sign | (shr(nosign, fm - tm) & (shl(1, tm) - 1)) | shl(shl(1, te) - 1, tm)).cast(f2f_dt[to])
+    underflow, overflow = exp < (1 + fb - tb), exp > (shl(1, te) - 2 + (fb - tb))
+    return exp.eq(shl(1, fe) - 1).where(infnan, sign.cast(f2f_dt[to]) | underflow.where(0, overflow.where(shl(shl(1, te) - 1, tm), norm)))
   else: raise NotImplementedError(f"unsupported decomp {fr} -> {to}")
 
 def f2f_load(x: UOp, op: Ops) -> UOp:
