@@ -409,10 +409,8 @@ def f2f_store(st, idx, val):
 
 # ***** decomposition patterns *****
 
-powers_of_two: dict[int, int] = {2**i:i for i in range(64)}
 @functools.cache
-def get_late_rewrite_patterns(ops:tuple[Ops, ...], device:str, force_transcendental:bool, disable_fast_idiv:bool,
-                              emulated_dtypes:tuple[DType, ...]) -> PatternMatcher:
+def get_transcendental_patterns(ops:tuple[Ops, ...], force_transcendental:bool) -> PatternMatcher:
   pat: list[tuple[UPat, Callable]] = []
   for op,f in ((Ops.EXP2, xexp2), (Ops.LOG2, xlog2), (Ops.SIN, xsin)):
     if op not in ops or force_transcendental:
@@ -421,6 +419,12 @@ def get_late_rewrite_patterns(ops:tuple[Ops, ...], device:str, force_transcenden
                 lambda x,d: d.cast(dtypes.float32).alu(x.op).cast(x.dtype))]
   # rewrite SQRT to xpow 0.5
   if Ops.SQRT not in ops or force_transcendental: pat.append((UPat(Ops.SQRT, src=UPat.var("d")), lambda d: xpow(d, d.const_like(0.5))))
+  return PatternMatcher(pat)
+
+powers_of_two: dict[int, int] = {2**i:i for i in range(64)}
+@functools.cache
+def get_late_rewrite_patterns(ops:tuple[Ops, ...], device:str, disable_fast_idiv:bool) -> PatternMatcher:
+  pat: list[tuple[UPat, Callable]] = []
   # no real hardware supports THREEFRY, but NullRenderer does
   if Ops.THREEFRY not in ops: pat.append((UPat(Ops.THREEFRY, dtype=dtypes.uint64, src=(UPat.var("x"), UPat.var("key"))), threefry2x32))
   # MAX can be rewritten as CMPLT + WHERE (max function is annoying on many cstyle backends)
@@ -458,18 +462,11 @@ def get_late_rewrite_patterns(ops:tuple[Ops, ...], device:str, force_transcenden
   if Ops.FDIV in ops:
     pat += [(UPat.var("x").reciprocal(), lambda x: x.const_like(1).alu(Ops.FDIV, x))]
     pat += [(UPat.var("a", dtypes.floats) * UPat.const(dtypes.floats, 1).alu(Ops.FDIV, UPat.var("b")), lambda a,b: a.alu(Ops.FDIV, b))]
-  if dtypes.half in emulated_dtypes:
-    pat += [(UPat((*GroupOp.Defines, Ops.INDEX), name="x"), lambda x:
-             x.replace(dtype=dtypes.uint16.ptr(x.dtype.size), tag=dtypes.half) if x.dtype.base == dtypes.half else None)]
-    # FIXME: this is slow
-    pat += [(UPat(GroupOp.All, name="x"), lambda x:
-             x.replace(src=tuple(f2f_load(s, x.op) if s.op == Ops.LOAD and s.dtype.scalar() == dtypes.half else s for s in x.src)))]
-    pat += [(UPat((*GroupOp.ALU, Ops.CONST, Ops.CAST, Ops.GEP, Ops.VECTORIZE), dtypes.half, name="x"), lambda x:
-             x.replace(dtype=dtypes.float.vec(x.dtype.count)))]
-    pat += [(UPat(Ops.BITCAST, (dtypes.ushort, dtypes.short, dtypes.bfloat16), src=(UPat.var("x", dtypes.float),), name="bc"), lambda bc,x:
-             bc.replace(src=(f2f(x.bitcast(dtypes.uint), dtypes.float, dtypes.half),)))]
-    pat += [(UPat(Ops.STORE, src=(UPat.var("idx"), UPat.var("val", dtypes.float)), name='st'), lambda st,idx,val:
-             f2f_store(st, idx, val) if (idx:=idx.src[0] if idx.op == Ops.CAST else idx).tag == dtypes.half else None)]
+  return PatternMatcher(pat)
+
+@functools.cache
+def get_unsupported_dtypes_patterns(device:str, emulated_dtypes:tuple[DType, ...]) -> PatternMatcher:
+  pat: list[tuple[UPat, Callable]] = []
   if not is_dtype_supported(dtypes.long, device) or dtypes.long in emulated_dtypes:
     pat += [(UPat((*GroupOp.Defines, Ops.INDEX), name="x"), lambda x:
              x.replace(dtype=l2i_dt[x.dtype.base].ptr(x.dtype.size * 2)) if hasattr(x.dtype, 'size') and x.dtype.base in l2i_dt else None)]
@@ -491,4 +488,16 @@ def get_late_rewrite_patterns(ops:tuple[Ops, ...], device:str, force_transcenden
              None if x.tag is None else x.replace(dtype=l2i_dt[x.dtype], src=(reindex(idx, x.tag),)))]
     pat += [(UPat(Ops.CONST, tuple(l2i_dt.keys()), name='x'), lambda x:
              None if x.tag is None else UOp.const(dt:=l2i_dt[x.dtype], truncate[dt]((x.arg >> 32) if x.tag == 1 else (x.arg & 0xFFFFFFFF))))]
+  if dtypes.half in emulated_dtypes:
+    pat += [(UPat((*GroupOp.Defines, Ops.INDEX), name="x"), lambda x:
+             x.replace(dtype=dtypes.uint16.ptr(x.dtype.size), tag=dtypes.half) if x.dtype.base == dtypes.half else None)]
+    # FIXME: this is slow
+    pat += [(UPat(GroupOp.All, name="x"), lambda x:
+             x.replace(src=tuple(f2f_load(s, x.op) if s.op == Ops.LOAD and s.dtype.scalar() == dtypes.half else s for s in x.src)))]
+    pat += [(UPat((*GroupOp.ALU, Ops.CONST, Ops.CAST, Ops.GEP, Ops.VECTORIZE), dtypes.half, name="x"), lambda x:
+             x.replace(dtype=dtypes.float.vec(x.dtype.count)))]
+    pat += [(UPat(Ops.BITCAST, (dtypes.ushort, dtypes.short, dtypes.bfloat16), src=(UPat.var("x", dtypes.float),), name="bc"), lambda bc,x:
+             bc.replace(src=(f2f(x.bitcast(dtypes.uint), dtypes.float, dtypes.half),)))]
+    pat += [(UPat(Ops.STORE, src=(UPat.var("idx"), UPat.var("val", dtypes.float)), name='st'), lambda st,idx,val:
+             f2f_store(st, idx, val) if (idx:=idx.src[0] if idx.op == Ops.CAST else idx).tag == dtypes.half else None)]
   return PatternMatcher(pat)
