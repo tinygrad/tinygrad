@@ -97,7 +97,7 @@ def full_rewrite_to_sink(sink:UOp, ren:Renderer|None=None, optimize:bool=True) -
   pm_transcendental = symbolic_simple+get_transcendental_patterns(supported_ops, TRANSCENDENTAL>=2)
   sink = graph_rewrite(sink, pm_decomp, ctx=ren.device, name="decompositions")
   sink = graph_rewrite(sink, pm_unsupported, ctx=ren.device, name="unsupported dtypes", bottom_up=True)
-  sink = graph_rewrite(sink, pm_transcendental, ctx=ren.device, name="transcendental decompositions")
+  sink = graph_rewrite(sink, pm_transcendental, ctx=ren.device, name="transcendental")
 
   # final rules for the renderer (without sym)
   extra_matcher = ren.extra_matcher if ren.extra_matcher is not None else PatternMatcher([])

@@ -470,7 +470,7 @@ def get_unsupported_dtypes_patterns(device:str, emulated_dtypes:tuple[DType, ...
   if not is_dtype_supported(dtypes.long, device) or dtypes.long in emulated_dtypes:
     pat += [(UPat((*GroupOp.Defines, Ops.INDEX), name="x"), lambda x:
              x.replace(dtype=l2i_dt[x.dtype.base].ptr(x.dtype.size * 2)) if hasattr(x.dtype, 'size') and x.dtype.base in l2i_dt else None)]
-    pat += [(UPat(Ops.INDEX, tuple(l2i_dt.keys()), name='x'), lambda x: None if x.tag is None else reindex(x, x.tag).replace(dtype=l2i_dt[x.dtype]))]
+    pat += [(UPat(Ops.INDEX, tuple(l2i_dt.keys()), name='x'), lambda x: reindex(x, x.tag).replace(dtype=l2i_dt[x.dtype]))]
     pat += [(UPat(Ops.STORE, src=(UPat.var('idx'), UPat.var('val', tuple(l2i_dt.keys()))), name='st'), lambda st,idx,val:
              st.replace(src=(reindex(idx, 0), val.rtag(0))).group(st.replace(src=(reindex(idx, 1), val.rtag(1)))) if val.tag is None else None)]
     pat += [(UPat(GroupOp.Comparison, src=(UPat.var('a', tuple(l2i_dt.keys())), UPat.var('b', tuple(l2i_dt.keys()))), name="x"), lambda a,b,x:
@@ -478,16 +478,16 @@ def get_unsupported_dtypes_patterns(device:str, emulated_dtypes:tuple[DType, ...
     pat += [(UPat(Ops.CAST, tuple(l2i_dt.keys()), src=(UPat.var('a'),), name="x"), lambda a,x:
              l2i(x.op, x.dtype, a)[x.tag] if x.tag is not None and a.dtype not in l2i_dt else None)]
     pat += [(UPat(Ops.CAST, tuple(l2i_dt.keys()), src=(UPat.var('a', tuple(l2i_dt.keys())),), name="x"), lambda a,x:
-             None if x.tag is None else (a.rtag(0).cast(dt:=l2i_dt[a.dtype]).bitcast(xdt:=l2i_dt[x.dtype]), a.rtag(1).cast(dt).bitcast(xdt))[x.tag])]
+             (a.rtag(0).cast(dt:=l2i_dt[a.dtype]).bitcast(xdt:=l2i_dt[x.dtype]), a.rtag(1).cast(dt).bitcast(xdt))[x.tag])]
     pat += [(UPat(Ops.CAST, src=(UPat.var('a', tuple(l2i_dt.keys())),), name="x"), lambda a,x:
              l2i(x.op, x.dtype, a.rtag(0).cast(dt:=l2i_dt[a.dtype]), a.rtag(1).cast(dt)) if x.dtype not in l2i_dt and a.tag is None else None)]
     pat += [(UPat((*(GroupOp.ALU - GroupOp.Comparison), Ops.BITCAST), tuple(l2i_dt.keys()), name="x"), lambda x:
-             None if x.tag is None else l2i(x.op, l2i_dt[x.dtype], *flatten((a.rtag(0).cast(dt:=l2i_dt[x.src[-1].dtype]), a.rtag(1).cast(dt))
+             l2i(x.op, l2i_dt[x.dtype], *flatten((a.rtag(0).cast(dt:=l2i_dt[x.src[-1].dtype]), a.rtag(1).cast(dt))
                                                                             if a.dtype in l2i_dt else (a,) for a in x.src))[x.tag])]
     pat += [(UPat(Ops.LOAD, tuple(l2i_dt.keys()), src=(UPat.var('idx'),), name='x'), lambda x,idx:
-             None if x.tag is None else x.replace(dtype=l2i_dt[x.dtype], src=(reindex(idx, x.tag),)))]
+             x.replace(dtype=l2i_dt[x.dtype], src=(reindex(idx, x.tag),)))]
     pat += [(UPat(Ops.CONST, tuple(l2i_dt.keys()), name='x'), lambda x:
-             None if x.tag is None else UOp.const(dt:=l2i_dt[x.dtype], truncate[dt]((x.arg >> 32) if x.tag == 1 else (x.arg & 0xFFFFFFFF))))]
+             UOp.const(dt:=l2i_dt[x.dtype], truncate[dt]((x.arg >> 32) if x.tag == 1 else (x.arg & 0xFFFFFFFF))))]
   if dtypes.half in emulated_dtypes:
     pat += [(UPat((*GroupOp.Defines, Ops.INDEX), name="x"), lambda x:
              x.replace(dtype=dtypes.uint16.ptr(x.dtype.size), tag=dtypes.half) if x.dtype.base == dtypes.half else None)]
