@@ -458,8 +458,7 @@ def get_late_rewrite_patterns(ops:tuple[Ops, ...], device:str, force_transcenden
   if Ops.FDIV in ops:
     pat += [(UPat.var("x").reciprocal(), lambda x: x.const_like(1).alu(Ops.FDIV, x))]
     pat += [(UPat.var("a", dtypes.floats) * UPat.const(dtypes.floats, 1).alu(Ops.FDIV, UPat.var("b")), lambda a,b: a.alu(Ops.FDIV, b))]
-  if not is_dtype_supported(dtypes.half, device) or dtypes.half in emulated_dtypes:
-    print("HALF IS EMULATED")
+  if dtypes.half in emulated_dtypes:
     pat += [(UPat((*GroupOp.Defines, Ops.INDEX), name="x"), lambda x:
              x.replace(dtype=dtypes.uint16.ptr(x.dtype.size), tag=dtypes.half) if x.dtype.base == dtypes.half else None)]
     # FIXME: this is slow
