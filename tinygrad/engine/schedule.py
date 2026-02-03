@@ -2,7 +2,7 @@ import time
 from typing import cast
 from collections import deque
 from tinygrad.uop.ops import UOp, Ops, buffers, UOpMetaClass, track_rewrites, PatternMatcher, UPat, graph_rewrite, graph_rewrite_map, Kernel
-from tinygrad.uop.spec import type_verify, tensor_spec
+from tinygrad.uop.spec import type_verify, tensor_spec, kernel_spec
 from tinygrad.device import Buffer, MultiBuffer
 from tinygrad.helpers import DEBUG, cpu_profile, TracingKey, SPEC, flatten, pluralize, SCACHE, Metadata
 from tinygrad.engine.realize import ExecItem
@@ -144,7 +144,7 @@ def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[dict[UOp, UOp], li
 
   if not SCACHE or (sc_ret:=schedule_cache.get(sched_cache_key, None)) is None:
     # verify Tensors match the spec (on big_sink, we only need to do this if cache misses)
-    if SPEC: type_verify(big_sink, tensor_spec)
+    if SPEC: type_verify(big_sink, tensor_spec+kernel_spec)
 
     # hack to preserve metadata
     graph_rewrite_map(big_sink, pm_pre_sched_cache, ctx=({}, {}), name="preserve metadata")

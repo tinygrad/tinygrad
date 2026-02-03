@@ -130,7 +130,7 @@ _tensor_spec = PatternMatcher([
   (UPat(Ops.REDUCE, src=(UPat(),), allow_any_len=True, name="x"), lambda x: all(y.dtype == dtypes.index for y in x.src[1:])),
 
   # AFTER if things were kernelized
-  (UPat(Ops.AFTER, src=(UPat((Ops.BUFFER, Ops.AFTER, Ops.PARAM)),), allow_any_len=True), lambda: True),
+  (UPat(Ops.AFTER, src=(UPat((Ops.BUFFER, Ops.AFTER)),), allow_any_len=True), lambda: True),
 
   # Tensor range bind / store
   (UPat(Ops.BIND, (dtypes.int,dtypes.index,), (UPat(Ops.DEFINE_VAR), UPat(Ops.RANGE)), arg=None), lambda: True),
