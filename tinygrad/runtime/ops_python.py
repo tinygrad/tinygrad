@@ -85,7 +85,7 @@ class PythonProgram:
           i += 1
           continue
         if uop is Ops.AFTER: values[i] = src_values[0]
-        elif uop in {Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL, Ops.DEFINE_REG}:
+        elif uop in {Ops.PARAM, Ops.DEFINE_LOCAL, Ops.DEFINE_REG}:
           assert isinstance(dtype, PtrDType), dtype
           storage_fmt = storage_fmt_for_dtype(dtype.base.scalar())
           if storage_fmt is None: raise RuntimeError(f"{dtype=} is not supported")
@@ -94,7 +94,7 @@ class PythonProgram:
             # REGs are per thread
             values[i] = [memoryview(bytearray(dtype.size*dtype.itemsize)).cast(storage_fmt) for _ in range(warp_size)]
           else:
-            buf = memoryview(bytearray(dtype.size*dtype.itemsize)) if uop is not Ops.DEFINE_GLOBAL else pbufs.pop(0)
+            buf = memoryview(bytearray(dtype.size*dtype.itemsize)) if uop is not Ops.PARAM else pbufs.pop(0)
             values[i] = [buf.cast(storage_fmt)] * warp_size
         elif uop is Ops.DEFINE_VAR:
           values[i] = [pvals.pop(0)] * warp_size
