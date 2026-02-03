@@ -447,9 +447,8 @@ to_define_global = PatternMatcher([
   # remove device from local BUFFERIZE
   (UPat(Ops.BUFFERIZE, name="b"), lambda b: b.replace(arg=replace(b.arg, device=None))),
 
-  # HACK in case any CONSTs were replaced
-  # this is only needed if you are using symbolic
-  (UPat((Ops.CONST, Ops.DEFINE_VAR), name="c"), lambda c: c.replace(src=()) if len(c.src) else None),
+  # remove UNIQUE/DEVICE to dedup CONST
+  (UPat(Ops.CONST, name="c"), lambda c: c.replace(src=()) if len(c.src) else None),
 
   # renumber the ranges starting with 0 so that kernel deduping works
   (UPat(Ops.RANGE, name="r"), renumber_range),
