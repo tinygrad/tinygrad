@@ -939,7 +939,7 @@ jobs:
       - name: Run NULL backend tests
         if: matrix.backend=='llvm'
         shell: bash
-        run: NULL=1 python -m pytest -n=auto test/null/ --durations=20
+        run: CPU=0 CPU_LLVM=0 NULL=1 python -m pytest -n=auto test/null/ --durations=20
       - name: Run pytest (${{ matrix.backend }})
         shell: bash
         run: |
