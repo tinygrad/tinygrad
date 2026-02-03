@@ -1,7 +1,7 @@
 import itertools
 from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, graph_rewrite, _substitute, range_start
 from tinygrad.uop.symbolic import symbolic
-from tinygrad.helpers import partition, dedup
+from tinygrad.helpers import partition
 from tinygrad.dtype import dtypes, ImageDType
 
 def flatten_range(r:UOp) -> UOp|None:
@@ -146,17 +146,4 @@ pm_load_collapse = PatternMatcher([
   (UPat(Ops.REDUCE, arg=Ops.ADD, src=(UPat.var("u"), UPat()), name="red"), reduce_load_collapse),
   # we want to make sure we dont do math on a loaded index since that can cause overflow, this undoes the rule in pm_reduce_load_collapse
   ((UPat.var("x", dtypes.index)+UPat.var("y"))<UPat.var("c"), lambda x,y,c: x < c-y if no_load(y) and no_load(c) and not no_load(x) else None),
-])
-
-def cut_store_range(ctx:str, store:UOp, r:UOp) -> UOp|None:
-  # only cut ranges on CPU for now
-  if r.src[0].op is not Ops.CONST or ctx!="CPU": return None
-  if not (cuts:=[c.src[1].arg for c in store.get_consumer_map()[r] if c.op is Ops.CMPLT and r is c.src[0] and c.src[1].op is Ops.CONST]): return None
-  cuts = sorted(dedup([0] + cuts + [r.src[0].arg]))
-  ranges = [UOp.range((end-start), *(r.arg[0:-1]+(i,r.arg[-1]))) for i,(start,end) in enumerate(zip(cuts[:-1], cuts[1:]))]
-
-  return UOp.group(*[store.substitute({r: new_r+start}).end(new_r) for new_r, start in zip(ranges, cuts[:-1])])
-
-pm_split_store = pm_flatten_range+PatternMatcher([
-  (UPat(Ops.END, src=(UPat(Ops.STORE, name="store"), UPat.var("r"))), cut_store_range),
 ])

@@ -190,7 +190,6 @@ class TestLinearizer(unittest.TestCase):
     assert stores[1].src[1].dtype == dtypes.float
     assert any(x.op is Ops.DEFINE_GLOBAL for x in stores[1].toposort())
 
-  @unittest.skipIf(Device.DEFAULT=="CPU", "CPU splits the cat so cant upcast")
   def test_zero_fold(self):
     a, b = Tensor.randn(1).realize(), Tensor.randn(1).realize()
     r = Tensor.stack(a, b)
