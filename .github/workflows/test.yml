@@ -704,6 +704,8 @@ jobs:
       # TODO: run all once emulator is faster
       - name: Run RDNA3 ops tests
         run: SKIP_SLOW_TEST=1 AMD_LLVM=0 pytest -n=auto test/test_ops.py -k "test_sparse_categorical_crossentropy or test_tril or test_nonzero or test_softmax_argmax" --durations 20
+      - name: Run RDNA4 emulator tests
+        run: MOCKGPU_ARCH=rdna4 python -m pytest test/test_tiny.py -v --durations 20
 
   testnvidia:
     strategy:
