@@ -746,7 +746,7 @@ class TestSymbolic(unittest.TestCase):
     expr = cond.where(a, b).cast(dtypes.half)
 
     # TODO: copied from render, render does not support cast
-    glbl = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), arg=0)
+    glbl = UOp(Ops.PARAM, dtypes.int.ptr(), arg=0)
     uops = get_uops(UOp(Ops.STORE, dtypes.void, (glbl.index(UOp.const(dtypes.int, 0)), expr)).sink())
     rewritten_uop = [uop for uop in uops if uop.op is Ops.STORE][0].src[1]
 
@@ -1028,7 +1028,7 @@ class TestStoreLoadFolding(unittest.TestCase):
   """Tests for store(index, load(index)) -> NOOP rule. This rule matches patterns that EMERGE during simplification."""
   def test_store_load_folding(self):
     # store(idx, load(idx)) -> NOOP, including emergent patterns like store(idx, load(idx) + 0)
-    buf = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), arg=0)
+    buf = UOp(Ops.PARAM, dtypes.int.ptr(), arg=0)
     index = buf.index(UOp.const(dtypes.index, 0))
     # Direct: store(idx, load(idx)) -> NOOP
     self.assertEqual(graph_rewrite(index.store(index.load()), sym).op, Ops.NOOP)
@@ -1073,6 +1073,24 @@ class TestGatedUopGivenValid(unittest.TestCase):
     # NOTE: independent simplification: (r0-1)//3 -> 0, r0%3 -> r0 when r0 in [0,2]
     expected_vec = UOp(Ops.VECTORIZE, dtypes.index.vec(2), (uconst(0), r0))
     self.assertEqual(idx, (r0 < 3).where(expected_vec, UOp.invalid()))
+
+class TestRangeSplitting(unittest.TestCase):
+  def test_range_split_on_mod(self):
+    # test that mark_range_mod splits RANGE(8) into RANGE(4)*2 + RANGE(2) when used with %2
+    from tinygrad.codegen.simplify import pm_split_ranges, pm_flatten_range
+    r0 = UOp.range(uconst(8), 0)
+    # create a simple expression using the range with mod: store range%2 to a buffer
+    buf = UOp(Ops.PARAM, dtypes.int.ptr(), arg=0)
+    val = (r0 % uconst(2)).cast(dtypes.int)
+    store = UOp(Ops.STORE, dtypes.void, (buf.index(uconst(0)), val))
+    sink = UOp(Ops.SINK, dtypes.void, (UOp(Ops.END, dtypes.void, (store, r0)),))
+    # count RANGEs before
+    ranges_before = len([u for u in sink.toposort() if u.op is Ops.RANGE])
+    # apply the range splitting optimization
+    sink_after = graph_rewrite(sink, pm_split_ranges+pm_flatten_range, ctx={}, name="test split ranges")
+    # count RANGEs after - should have more due to splitting
+    ranges_after = len([u for u in sink_after.toposort() if u.op is Ops.RANGE])
+    self.assertGreater(ranges_after, ranges_before, "RANGE should be split when used with mod of divisible constant")
 
 class TestBounds(unittest.TestCase):
   def test_unrolled_arange(self):

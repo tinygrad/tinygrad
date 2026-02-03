@@ -42,7 +42,7 @@ class Estimates:
       if u.op in {Ops.LOAD, Ops.STORE}:
         buf = u
         while len(buf.src): buf = buf.src[0]
-        if buf.op is Ops.DEFINE_GLOBAL: # assume all DEFINE_GLOBAL memory is accessed
+        if buf.op is Ops.PARAM: # assume all DEFINE_GLOBAL memory is accessed
           mem[(buf, u.op)] = buf.ptrdtype.size * buf.dtype.itemsize
       if u.op is Ops.RANGE:
         mult_stack.append(mults)
@@ -118,10 +118,10 @@ class ProgramSpec:
     local_size: list[int]|None = [1, 1, 1]
     for u in uops:
       if u.op is Ops.DEFINE_VAR: _vars.append(u)
-      if u.op is Ops.DEFINE_GLOBAL: _globals.append(u.arg)
+      if u.op is Ops.PARAM: _globals.append(u.arg)
       if u.op in (Ops.STORE, Ops.LOAD):
         if (idx:=u.src[0]).op is Ops.INDEX or (u.src[0].op is Ops.CAST and (idx:=u.src[0].src[0]).op is Ops.INDEX):
-          if (buf:=idx.src[0]).op is Ops.DEFINE_GLOBAL: (outs if u.op is Ops.STORE else ins).append(buf.arg)
+          if (buf:=idx.src[0]).op is Ops.PARAM: (outs if u.op is Ops.STORE else ins).append(buf.arg)
         # TODO: can else happen?
       if u.op is Ops.SPECIAL:
         if u.arg[0] == 'i': local_size = None

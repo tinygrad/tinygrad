@@ -207,11 +207,11 @@ jobs:
       run: DEBUG=2 AMX=1 EMULATE=AMX FORWARD_ONLY=1 PYTHON=1 python3 test/opt/test_tensor_cores.py
     - name: Test device flop counts
       run: |
-        DEBUG=2 EMULATE=METAL PYTHON=1 python3 ./test/test_uops_stats.py TestUOpsStatsMatmulHalf
-        DEBUG=2 EMULATE=AMD PYTHON=1 python3 ./test/test_uops_stats.py TestUOpsStatsMatmulHalf
-        DEBUG=2 EMULATE=CUDA PYTHON=1 python3 ./test/test_uops_stats.py TestUOpsStatsMatmulHalf
-        DEBUG=2 EMULATE=INTEL PYTHON=1 python3 ./test/test_uops_stats.py TestUOpsStatsMatmulHalf
-        DEBUG=2 AMX=1 EMULATE=AMX PYTHON=1 python3 ./test/test_uops_stats.py TestUOpsStats.test_simple_matmul
+        DEBUG=2 EMULATE=METAL PYTHON=1 python3 ./test/null/test_uops_stats.py TestUOpsStatsMatmulHalf
+        DEBUG=2 EMULATE=AMD PYTHON=1 python3 ./test/null/test_uops_stats.py TestUOpsStatsMatmulHalf
+        DEBUG=2 EMULATE=CUDA PYTHON=1 python3 ./test/null/test_uops_stats.py TestUOpsStatsMatmulHalf
+        DEBUG=2 EMULATE=INTEL PYTHON=1 python3 ./test/null/test_uops_stats.py TestUOpsStatsMatmulHalf
+        DEBUG=2 AMX=1 EMULATE=AMX PYTHON=1 python3 ./test/null/test_uops_stats.py TestUOpsStats.test_simple_matmul
 
   linter:
     name: Linters
@@ -266,17 +266,19 @@ jobs:
       run: python -c "from tinygrad import Device; assert Device.DEFAULT == 'CPU', Device.DEFAULT"
     - name: Run unit tests
       run: |
-        CPU=1 python test/unit/test_device.py TestRunAsModule.test_module_runs
-        CPU=1 python -m pytest -n=auto test/unit/ --durations=20 --deselect=test/unit/test_device.py::TestRunAsModule::test_module_runs
+        CPU=1 python test/null/test_device.py TestRunAsModule.test_module_runs
+        CPU=1 python -m pytest -n=auto test/unit/ --durations=20
+    - name: Run NULL backend tests
+      run: NULL=1 python -m pytest -n=auto test/null/ --durations=20
     - name: Run targetted tests on NULL backend
-      run: NULL=1 python3 -m unittest test.test_multitensor.TestMultiTensor.test_data_parallel_resnet_train_step test/device/test_null.py
+      run: NULL=1 python3 -m unittest test.test_multitensor.TestMultiTensor.test_data_parallel_resnet_train_step
     # TODO: too slow
     # - name: Run SDXL on NULL backend
     #   run: NULL=1 DEBUG=1 python3 examples/sdxl.py --seed 0 --noshow --timing --fakeweights
     - name: Run Clip tests for SD MLPerf on NULL backend
       run: NULL=1 python -m pytest -n=auto test/external/mlperf_stable_diffusion/external_test_models.py::TestOpenClip --durations=20
     - name: Run AMD emulated BERT training on NULL backend
-      run: EMULATE=AMD_RDNA4 NULL=1 CAPTURE_PROCESS_REPLAY=0 DEFAULT_FLOAT=HALF BENCHMARK=10 BS=66 GPUS=1 BERT_LAYERS=2 MODEL=bert python3 examples/mlperf/model_train.py
+      run: EMULATE=AMD_RDNA4 NULL=1 NULL_ALLOW_COPYOUT=1 CAPTURE_PROCESS_REPLAY=0 DEFAULT_FLOAT=HALF BENCHMARK=10 BS=66 GPUS=1 BERT_LAYERS=2 MODEL=bert python3 examples/mlperf/model_train.py
     # TODO: support fake weights
     #- name: Run LLaMA 7B on 4 fake devices
     #  run: NULL=1 python3 examples/llama.py --gen 1 --size 7B --shard 4 --prompt "Hello." --count 3 --temperature 0 --timing
@@ -314,7 +316,7 @@ jobs:
         deps: testing_unit
         python-version: '3.14'
     - name: Test SPEC=2
-      run: SPEC=2 pytest --maxfail=10 -n auto --durations=30 --ignore=test/models --ignore test/test_custom_kernel.py --ignore test/unit/test_hashing.py --ignore test/unit/test_autogen.py --timeout 60 -k "not test_setitem_big" --splits 2 --group ${{ matrix.group }}
+      run: SPEC=2 pytest --maxfail=10 -n auto --durations=30 --ignore=test/models --ignore=test/null --ignore test/test_custom_kernel.py --ignore test/unit/test_hashing.py --timeout 60 -k "not test_setitem_big" --splits 2 --group ${{ matrix.group }}
 
   fuzzing:
     name: Fuzzing
@@ -465,11 +467,11 @@ jobs:
       - name: Test MLPerf stuff
         run: CL=1 python -m pytest -n=auto test/external/external_test_optim.py test/external/external_test_losses.py test/external/external_test_metrics.py test/external/external_test_datasets.py --durations=20
       - name: NULL=1 beautiful_mnist_multigpu
-        run: NULL=1 python examples/beautiful_mnist_multigpu.py
+        run: NULL=1 NULL_ALLOW_COPYOUT=1 python examples/beautiful_mnist_multigpu.py
       - name: Test Bert training
-        run: NULL=1 DEFAULT_FLOAT=HALF BENCHMARK=10 BS=24 GPUS=4 BERT_LAYERS=2 MODEL=bert python3 examples/mlperf/model_train.py
+        run: NULL=1 NULL_ALLOW_COPYOUT=1 DEFAULT_FLOAT=HALF BENCHMARK=10 BS=24 GPUS=4 BERT_LAYERS=2 MODEL=bert python3 examples/mlperf/model_train.py
       - name: Test llama 3 training
-        run: NULL=1 SAMPLES=300 BS=8 SEQLEN=512 GRADIENT_ACC_STEPS=1 FAKEDATA=1 DEFAULT_FLOAT=bfloat16 OPTIM_DTYPE=bfloat16 LLAMA3_SIZE=1B MODEL=llama3 python3 examples/mlperf/model_train.py
+        run: NULL=1 NULL_ALLOW_COPYOUT=1 SAMPLES=300 BS=8 SEQLEN=512 GRADIENT_ACC_STEPS=1 FAKEDATA=1 DEFAULT_FLOAT=bfloat16 OPTIM_DTYPE=bfloat16 LLAMA3_SIZE=1B MODEL=llama3 python3 examples/mlperf/model_train.py
       - name: Run process replay tests
         uses: ./.github/actions/process-replay
 
@@ -609,7 +611,7 @@ jobs:
         WEBGPU=1 DEBUG=4 FORWARD_ONLY=1 python3 test/test_ops.py TestOps.test_add
     - name: Run selected webgpu tests
       run: |
-          WEBGPU=1 WEBGPU_BACKEND="WGPUBackendType_Vulkan" python3 -m pytest -n=auto test/ --ignore=test/models --ignore=test/unit --durations=20
+          WEBGPU=1 WEBGPU_BACKEND="WGPUBackendType_Vulkan" python3 -m pytest -n=auto test/ --ignore=test/models --ignore=test/unit --ignore=test/null --durations=20
     - name: Run process replay tests
       uses: ./.github/actions/process-replay
 
@@ -704,6 +706,8 @@ jobs:
       # TODO: run all once emulator is faster
       - name: Run RDNA3 ops tests
         run: SKIP_SLOW_TEST=1 AMD_LLVM=0 pytest -n=auto test/test_ops.py -k "test_sparse_categorical_crossentropy or test_tril or test_nonzero or test_softmax_argmax" --durations 20
+      - name: Run RDNA4 emulator tests
+        run: MOCKGPU_ARCH=rdna4 python -m pytest test/test_tiny.py -v --durations 20
 
   testnvidia:
     strategy:
@@ -735,7 +739,7 @@ jobs:
           DEBUG=5 FORWARD_ONLY=1 python3 test/test_ops.py TestOps.test_add
       - name: Run pytest (cuda)
         # skip multitensor because it's slow
-        run: python -m pytest -n=auto test/ --ignore=test/models --ignore=test/unit --ignore test/test_gc.py --ignore test/test_multitensor.py --durations=20
+        run: python -m pytest -n=auto test/ --ignore=test/models --ignore=test/unit --ignore=test/null --ignore test/test_gc.py --ignore test/test_multitensor.py --durations=20
       - name: Run TestOps.test_add with PMA
         run: VIZ=-1 PMA=1 DEBUG=5 python3 test/test_ops.py TestOps.test_add
       - name: Run process replay tests
@@ -768,7 +772,7 @@ jobs:
           python3 -c "from tinygrad import Device; assert Device.DEFAULT in ['CPU','CL'], Device.DEFAULT"
           DEBUG=5 FORWARD_ONLY=1 python3 test/test_ops.py TestOps.test_add
       - name: Run pytest (${{ matrix.backend }})
-        run: python -m pytest -n=auto test/ --ignore=test/models --ignore=test/unit --durations=20
+        run: python -m pytest -n=auto test/ --ignore=test/models --ignore=test/unit --ignore=test/null --durations=20
       - name: Run TRANSCENDENTAL math
         run: TRANSCENDENTAL=2 python -m pytest -n=auto test/test_ops.py::TestOps::test_sin test/test_ops.py::TestOps::test_cos test/test_ops.py::TestOps::test_tan test/test_ops.py::TestOps::test_exp test/test_ops.py::TestOps::test_log --durations=20
       - name: Run process replay tests
@@ -795,6 +799,8 @@ jobs:
         llvm: 'true'
     - name: Run unit tests
       run: METAL=1 python -m pytest -n=auto test/unit/ --durations=20
+    - name: Run NULL backend tests
+      run: NULL=1 python -m pytest -n=auto test/null/ --durations=20
     - name: Run ONNX
       run: METAL=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
     - name: Test tensor core ops (fake)
@@ -896,7 +902,7 @@ jobs:
           python -c "from tinygrad import Device; assert Device.DEFAULT == {'LLVM':'CPU','LVP':'CPU'}.get(x:='${{ matrix.backend }}'.upper(), x), Device.DEFAULT"
           DEBUG=4 python3 test/test_tiny.py TestTiny.test_plus
       - name: Run pytest (${{ matrix.backend }})
-        run: python3 -m pytest -n=auto test/ --ignore=test/models --ignore=test/unit --durations=20
+        run: python3 -m pytest -n=auto test/ --ignore=test/models --ignore=test/unit --ignore=test/null --durations=20
       - name: Run process replay tests
         uses: ./.github/actions/process-replay
       - name: Run macOS-specific unit test
@@ -929,7 +935,11 @@ jobs:
       - name: Run unit tests
         if: matrix.backend=='llvm'
         # test_newton_schulz hits RecursionError
-        run: python -m pytest -n=auto test/unit/ --ignore=test/unit/test_disk_tensor.py --ignore=test/unit/test_elf.py --ignore=test/unit/test_tar.py --ignore=test/unit/test_linalg.py --durations=20
+        run: python -m pytest -n=auto test/unit/ --ignore=test/unit/test_disk_tensor.py --ignore=test/unit/test_tar.py --ignore=test/unit/test_linalg.py --durations=20
+      - name: Run NULL backend tests
+        if: matrix.backend=='llvm'
+        shell: bash
+        run: CPU=0 CPU_LLVM=0 NULL=1 python -m pytest -n=auto test/null/ --ignore=test/null/test_elf.py --durations=20
       - name: Run pytest (${{ matrix.backend }})
         shell: bash
         run: |
@@ -955,10 +965,10 @@ jobs:
           key: compile-${{ matrix.backend }}
           deps: testing_unit
           mesa: ${{ (matrix.backend == 'ir3' || matrix.backend == 'nak') && 'true' }}
-          python-version: '3.14'
+          python-version: '3.12'
       - name: Set env
         shell: bash
-        run: printf "NULL=1\n${{ matrix.backend == 'ir3' && 'NULL_IR3=1' || matrix.backend == 'nak' && 'NULL_NAK=1' }}" >> $GITHUB_ENV
+        run: printf "NULL=1\nNULL_ALLOW_COPYOUT=1\n${{ matrix.backend == 'ir3' && 'NULL_IR3=1' || matrix.backend == 'nak' && 'NULL_NAK=1' }}" >> $GITHUB_ENV
       - name: Run test_ops
         shell: bash
         run: |

@@ -767,6 +767,7 @@ class TestDot2F32F16(unittest.TestCase):
     """V_DOT2_F32_F16 with negative f16 values."""
     # src0 = {hi=-2.0, lo=3.0}, src1 = {hi=1.0, lo=2.0}
     # result = 3.0*2.0 + (-2.0)*1.0 + 0 = 6 - 2 = 4.0
+    # NOTE: Hardware DOT2 may have up to 1 ULP difference due to internal implementation
     src0 = (f32_to_f16(-2.0) << 16) | f32_to_f16(3.0)
     src1 = (f32_to_f16(1.0) << 16) | f32_to_f16(2.0)
     instructions = [
@@ -777,7 +778,7 @@ class TestDot2F32F16(unittest.TestCase):
       v_mov_b32_e32(v[2], 0),
       v_dot2_f32_f16(v[3], v[0], v[1], v[2], opsel_hi=3, opsel_hi2=1),
     ]
-    st = run_program(instructions, n_lanes=1)
+    st = run_program(instructions, n_lanes=1, ulp_tolerance=1)
     result = i2f(st.vgpr[0][3])
     self.assertAlmostEqual(result, 4.0, places=2)
 

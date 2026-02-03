@@ -224,8 +224,9 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
       case Ops.BUFFER_VIEW: return (self.arg[0],)
       case Ops.ENCDEC: return self.arg[0]
       case Ops.BUFFERIZE: return tuple([int(r.vmax+1) for r in self.src[1:]])
-      case Ops.DEFINE_GLOBAL | Ops.DEFINE_LOCAL | Ops.DEFINE_REG: return (self.ptrdtype.size,)
+      case Ops.DEFINE_LOCAL | Ops.DEFINE_REG: return (self.ptrdtype.size,)
       case Ops.PARAM:
+        if isinstance(self.dtype, PtrDType): return (self.ptrdtype.size,)
         # NOTE: copied from marg
         if len(self.src) >= 1: return tuple(self.src[0].sgep(i) for i in range(self.src[0].dtype.count))
         return None
@@ -413,10 +414,8 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
   def load(self, *src:UOp, **kwargs): return UOp(Ops.LOAD, dtype=kwargs.pop("dtype", self.dtype.base), src=(self,)+src, **kwargs)
   def store(self, src:UOp|ConstType, **kwargs):
     return UOp(Ops.STORE, kwargs.pop("dtype", dtypes.void), (self, UOp.const(self.dtype, src) if not isinstance(src, UOp) else src), **kwargs)
-  def end(self, *src:UOp):
-    if len(src) == 0: return self
-    return UOp(Ops.END, src=(self,)+src)
-  def after(self, *src:UOp, **kwargs): return UOp(Ops.AFTER, self.dtype, (self,)+src, **kwargs)
+  def end(self, *src:UOp): return UOp(Ops.END, src=(self,)+src) if len(src) else self
+  def after(self, *src:UOp, **kwargs): return UOp(Ops.AFTER, self.dtype, (self,)+src, **kwargs) if len(src) else self
   def assign(self, x:UOp): return UOp(Ops.ASSIGN, self.dtype, (self, x))
   def barrier(self, *src:UOp): return UOp(Ops.BARRIER, src=(self,)+src)
   def contract(self, *rngs:UOp):
@@ -627,7 +626,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
   def buf_target(self) -> UOp:
     # the buffer that's being loaded from or store to
     match self.op:
-      case Ops.DEFINE_GLOBAL | Ops.DEFINE_LOCAL | Ops.DEFINE_REG: return self
+      case Ops.PARAM | Ops.DEFINE_LOCAL | Ops.DEFINE_REG: return self
       case Ops.AFTER | Ops.INDEX | Ops.STORE | Ops.LOAD: return self.src[0].buf_target()
       case Ops.VECTORIZE:
         assert all_same(self.src)
@@ -813,7 +812,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
 
   @staticmethod
   def placeholder(shape:tuple[int, ...], dtype:DType, slot:int, addrspace=AddrSpace.GLOBAL):
-    lookup = {AddrSpace.GLOBAL: Ops.DEFINE_GLOBAL, AddrSpace.LOCAL: Ops.DEFINE_LOCAL, AddrSpace.REG: Ops.DEFINE_REG}
+    lookup = {AddrSpace.GLOBAL: Ops.PARAM, AddrSpace.LOCAL: Ops.DEFINE_LOCAL, AddrSpace.REG: Ops.DEFINE_REG}
     ret = UOp(lookup[addrspace], dtype.ptr(prod(shape), addrspace), arg=slot)
     if len(shape) > 1: ret = ret.reshape(shape)
     return ret
@@ -1427,7 +1426,7 @@ def pyrender(ast:UOp) -> str:
 
   cmap = consumer_map_from_toposort(lst)
   not_rendered = {Ops.CONST, Ops.VCONST, Ops.DEVICE}
-  always_rendered = {Ops.DEFINE_GLOBAL, Ops.LOAD, Ops.SPECIAL, Ops.RANGE, Ops.CONTIGUOUS, Ops.VECTORIZE,
+  always_rendered = {Ops.PARAM, Ops.LOAD, Ops.SPECIAL, Ops.RANGE, Ops.CONTIGUOUS, Ops.VECTORIZE,
                      Ops.BUFFER, Ops.COPY, Ops.KERNEL, Ops.WHERE, Ops.END, Ops.ASSIGN}
 
   to_render: set[UOp] = {ast}
@@ -1436,6 +1435,7 @@ def pyrender(ast:UOp) -> str:
       for s in u.src: to_render.add(s)
     if u.op is Ops.STORE: to_render.add(u.src[1])
     if u.op in {Ops.REDUCE, Ops.REDUCE_AXIS}: to_render.add(u.src[0])
+    if u.op in {Ops.CUSTOM_KERNEL, Ops.CALL}: raise NotImplementedError("custom_kernel / call can't be pyrendered")
     if u.op in not_rendered: continue
     # checking the consumers is not enough, you have to make sure it's not used twice by the one consumer
     if len(cmap[u]) == 1 and len([x for x in list(cmap[u].keys())[0].src if x is u]) == 1 and u.op not in always_rendered: continue
@@ -1444,7 +1444,13 @@ def pyrender(ast:UOp) -> str:
   kernels: dict[UOp, tuple[str, str]] = {}
   r: dict[UOp, str] = {}
   ret: dict[str, str] = {}
+  depth: dict[UOp, int] = {}
   for i,u in enumerate(lst):
+    # limit inline depth to avoid "too many nested parentheses" in Python parser
+    op_depth = 1 + max([depth[s] for s in u.src], default=0)
+    if op_depth > 100: to_render.add(u)
+    depth[u] = 0 if u in to_render else op_depth
+    # do the rendering
     if u.op is Ops.KERNEL:
       if u.arg.ast not in kernels:
         kernels[u.arg.ast] = (f"k{len(kernels)}", f"def k{len(kernels)}():\n  " + pyrender(u.arg.ast).replace('\n', '\n  ') + "\n  return ast\n\n")
