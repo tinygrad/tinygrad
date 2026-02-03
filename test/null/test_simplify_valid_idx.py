@@ -5,17 +5,17 @@ from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import UOp, Ops
 from tinygrad.uop.symbolic import simplify_valid
 from tinygrad.helpers import Context
-from test.unit.test_uop_symbolic import check_uop_against_string
+from test.null.test_uop_symbolic import check_uop_against_string
 
 def get_gated_load_uop(valid:UOp, idx:UOp):
   return UOp(Ops.LOAD, dtypes.float, (
-    UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), arg=0).index(idx.valid(valid), ptr=True),
+    UOp(Ops.PARAM, dtypes.float.ptr(), arg=0).index(idx.valid(valid), ptr=True),
     UOp.const(dtypes.float, 0.0)
   ))
 
 def get_load_image_uop(image_shape:tuple[int, ...], valid:UOp, idx:tuple[UOp, UOp]):
   return UOp(Ops.LOAD, dtypes.float.vec(4), (
-    UOp(Ops.DEFINE_GLOBAL, dtypes.imagef(image_shape), arg=0).index(UOp(Ops.VECTORIZE, dtypes.index.vec(2), idx).valid(valid), ptr=True),
+    UOp(Ops.PARAM, dtypes.imagef(image_shape), arg=0).index(UOp(Ops.VECTORIZE, dtypes.index.vec(2), idx).valid(valid), ptr=True),
     UOp(Ops.VECTORIZE, dtypes.float.vec(4), src=(UOp.const(dtypes.float, 0.0),) * 4)
   ))
 
@@ -461,13 +461,13 @@ class TestUnfoldableImageChannelSelection(unittest.TestCase):
   def test_bounded_channel_no_nan(self):
     # unfoldable image load with bounded idx % 4 range [0,1] -> no NAN fallback needed
     lidx = Special("lidx", 2)
-    load = UOp(Ops.LOAD, dtypes.float, (UOp(Ops.DEFINE_GLOBAL, dtypes.imagef((10, 10, 4)), arg=0).index(lidx, ptr=True), UOp.const(dtypes.float, 0)))
+    load = UOp(Ops.LOAD, dtypes.float, (UOp(Ops.PARAM, dtypes.imagef((10, 10, 4)), arg=0).index(lidx, ptr=True), UOp.const(dtypes.float, 0)))
     self.assertEqual(self._count_nans(load), 0)
 
   def test_unbounded_channel_has_nan(self):
     # variable with negative range -> x % 4 can be negative -> needs NAN fallback
     x = Variable("x", -10, 10)
-    load = UOp(Ops.LOAD, dtypes.float, (UOp(Ops.DEFINE_GLOBAL, dtypes.imagef((10, 10, 4)), arg=0).index(x, ptr=True), UOp.const(dtypes.float, 0)))
+    load = UOp(Ops.LOAD, dtypes.float, (UOp(Ops.PARAM, dtypes.imagef((10, 10, 4)), arg=0).index(x, ptr=True), UOp.const(dtypes.float, 0)))
     self.assertEqual(self._count_nans(load), 1)
 
 class TestDropTrueGate(unittest.TestCase):
@@ -475,7 +475,7 @@ class TestDropTrueGate(unittest.TestCase):
     # test that INDEX with a constant True gate gets simplified to drop the gate
     from tinygrad.codegen.late.devectorizer import load_store_indexing
     from tinygrad.uop.ops import graph_rewrite
-    buf = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), arg=0)
+    buf = UOp(Ops.PARAM, dtypes.int.ptr(), arg=0)
     idx = UOp.const(dtypes.index, 0)
     true_gate = UOp.const(dtypes.bool, True)
     index_with_gate = UOp(Ops.INDEX, dtypes.int.ptr(), (buf, idx, true_gate))

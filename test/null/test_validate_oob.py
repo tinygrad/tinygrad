@@ -11,7 +11,7 @@ class TestValidateOOB(unittest.TestCase):
   # basic index patterns
   def test_const_index(self):
     with Context(CHECK_OOB=1, SPEC=2):
-      buf = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(16), (), 0)
+      buf = UOp(Ops.PARAM, dtypes.int.ptr(16), (), 0)
       to_uops_list([buf.index(UOp.const(dtypes.int, 0), ptr=True).load(dtype=dtypes.int)])  # valid
       to_uops_list([buf.index(UOp.const(dtypes.int, 15), ptr=True).load(dtype=dtypes.int)])  # valid (last element)
       with self.assertRaises(RuntimeError):
@@ -21,7 +21,7 @@ class TestValidateOOB(unittest.TestCase):
 
   def test_variable_index(self):
     with Context(CHECK_OOB=1, SPEC=2):
-      buf = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(16), (), 0)
+      buf = UOp(Ops.PARAM, dtypes.int.ptr(16), (), 0)
       to_uops_list([buf.index(Variable("i", 0, 15), ptr=True).load(dtype=dtypes.int)])  # valid
       with self.assertRaises(RuntimeError):
         to_uops_list([buf.index(Variable("i", 0, 20), ptr=True).load(dtype=dtypes.int)])  # oob
@@ -30,7 +30,7 @@ class TestValidateOOB(unittest.TestCase):
 
   def test_range_with_mask(self):
     with Context(CHECK_OOB=1, SPEC=2):
-      buf = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(16), (), 0)
+      buf = UOp(Ops.PARAM, dtypes.int.ptr(16), (), 0)
       r = UOp.range(42, 0, AxisType.GLOBAL)
       to_uops_list([buf.index(r.valid(r < 16), ptr=True).load(dtype=dtypes.int)])  # valid
       with self.assertRaises(RuntimeError):
@@ -38,7 +38,7 @@ class TestValidateOOB(unittest.TestCase):
 
   def test_variable_with_mask(self):
     with Context(CHECK_OOB=1, SPEC=2):
-      buf = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(16), (), 0)
+      buf = UOp(Ops.PARAM, dtypes.int.ptr(16), (), 0)
       v = Variable("v", -5, 80)
       to_uops_list([buf.index(v.valid((v >= 0) & (v < 16)), ptr=True).load(dtype=dtypes.int)])  # valid
       with self.assertRaises(RuntimeError):
@@ -46,7 +46,7 @@ class TestValidateOOB(unittest.TestCase):
 
   def test_gated_store(self):
     with Context(CHECK_OOB=1, SPEC=2):
-      buf = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(16), (), 0)
+      buf = UOp(Ops.PARAM, dtypes.int.ptr(16), (), 0)
       v = Variable("v", 0, 20)
       to_uops_list([buf.index(v.valid(v < 16)).store(0)])  # valid
       with self.assertRaises(RuntimeError):
@@ -55,14 +55,14 @@ class TestValidateOOB(unittest.TestCase):
   # ALU ops in index
   def test_idiv(self):
     with Context(CHECK_OOB=1, SPEC=2):
-      buf = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(16), (), 0)
+      buf = UOp(Ops.PARAM, dtypes.int.ptr(16), (), 0)
       to_uops_list([buf.index(UOp.range(32, 0, AxisType.GLOBAL) // 2, ptr=True).load(dtype=dtypes.int)])  # 0..15 valid
       with self.assertRaises(RuntimeError):
         to_uops_list([buf.index(UOp.range(34, 0, AxisType.GLOBAL) // 2, ptr=True).load(dtype=dtypes.int)])  # 0..16 oob
 
   def test_mod(self):
     with Context(CHECK_OOB=1, SPEC=2):
-      buf = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(16), (), 0)
+      buf = UOp(Ops.PARAM, dtypes.int.ptr(16), (), 0)
       r = UOp.range(100, 0, AxisType.GLOBAL)
       to_uops_list([buf.index(r % 16, ptr=True).load(dtype=dtypes.int)])  # 0..15 valid
       with self.assertRaises(RuntimeError):
@@ -70,14 +70,14 @@ class TestValidateOOB(unittest.TestCase):
 
   def test_shr(self):
     with Context(CHECK_OOB=1, SPEC=2):
-      buf = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(16), (), 0)
+      buf = UOp(Ops.PARAM, dtypes.int.ptr(16), (), 0)
       to_uops_list([buf.index(UOp.range(64, 0, AxisType.GLOBAL) >> 2, ptr=True).load(dtype=dtypes.int)])  # 0..15 valid
       with self.assertRaises(RuntimeError):
         to_uops_list([buf.index(UOp.range(128, 0, AxisType.GLOBAL) >> 2, ptr=True).load(dtype=dtypes.int)])  # 0..31 oob
 
   def test_shl(self):
     with Context(CHECK_OOB=1, SPEC=2):
-      buf = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(64), (), 0)
+      buf = UOp(Ops.PARAM, dtypes.int.ptr(64), (), 0)
       r = UOp.range(8, 0, AxisType.GLOBAL)
       to_uops_list([buf.index(r << 2, ptr=True).load(dtype=dtypes.int)])  # 0..28 valid
       with self.assertRaises(RuntimeError):
@@ -85,7 +85,7 @@ class TestValidateOOB(unittest.TestCase):
 
   def test_and(self):
     with Context(CHECK_OOB=1, SPEC=2):
-      buf = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(16), (), 0)
+      buf = UOp(Ops.PARAM, dtypes.int.ptr(16), (), 0)
       r = UOp.range(100, 0, AxisType.GLOBAL)
       to_uops_list([buf.index(r & 15, ptr=True).load(dtype=dtypes.int)])  # 0..15 valid
       with self.assertRaises(RuntimeError):
@@ -93,14 +93,14 @@ class TestValidateOOB(unittest.TestCase):
 
   def test_max(self):
     with Context(CHECK_OOB=1, SPEC=2):
-      buf = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(16), (), 0)
+      buf = UOp(Ops.PARAM, dtypes.int.ptr(16), (), 0)
       to_uops_list([buf.index(Variable("v", -10, 15).maximum(0), ptr=True).load(dtype=dtypes.int)])  # 0..15 valid
       with self.assertRaises(RuntimeError):
         to_uops_list([buf.index(Variable("v2", -10, 20).maximum(0), ptr=True).load(dtype=dtypes.int)])  # 0..20 oob
 
   def test_xor_in_mask(self):
     with Context(CHECK_OOB=1, SPEC=2):
-      buf = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(16), (), 0)
+      buf = UOp(Ops.PARAM, dtypes.int.ptr(16), (), 0)
       r = UOp.range(32, 0, AxisType.GLOBAL)
       to_uops_list([buf.index(r.valid((r < 8) ^ ((r >= 8) & (r < 16))), ptr=True).load(dtype=dtypes.int)])  # 0..15 valid
       with self.assertRaises(RuntimeError):
@@ -109,22 +109,22 @@ class TestValidateOOB(unittest.TestCase):
   # cast patterns
   def test_float_cast_in_index(self):
     with Context(CHECK_OOB=1, SPEC=2):
-      buf = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(16), (), 0)
+      buf = UOp(Ops.PARAM, dtypes.int.ptr(16), (), 0)
       r = UOp.range(20, 0)
       i = (r.cast(dtypes.float) * 0.68).trunc().cast(dtypes.int)
       to_uops_list([buf.index(i.valid((i >= 0) & (i < 16)), ptr=True).load(dtype=dtypes.int)])
 
   def test_bool_cast_in_mask(self):
     with Context(CHECK_OOB=1, SPEC=2):
-      buf = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(1), (), 0)
+      buf = UOp(Ops.PARAM, dtypes.int.ptr(1), (), 0)
       r = UOp.range(20, 0)
       to_uops_list([buf.index(r.valid(r.cast(dtypes.bool).logical_not()), ptr=True).load(dtype=dtypes.int)])  # only r=0 valid
 
   # load result as index/mask
   def test_load_as_index(self):
     with Context(CHECK_OOB=1, SPEC=2):
-      buf0 = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(16), (), 0)
-      buf1 = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(64), (), 1)
+      buf0 = UOp(Ops.PARAM, dtypes.int.ptr(16), (), 0)
+      buf1 = UOp(Ops.PARAM, dtypes.int.ptr(64), (), 1)
       r = UOp.range(42, 0, AxisType.GLOBAL)
       ld0 = buf0.index(r.valid(r < 8), ptr=True).load(dtype=dtypes.int).cast(dtypes.index)
       to_uops_list([buf1.index((ld0 * 2).valid((ld0 >= 0) & (ld0 < 32)), ptr=True).load(dtype=dtypes.int)])  # valid
@@ -133,8 +133,8 @@ class TestValidateOOB(unittest.TestCase):
 
   def test_load_bool_as_mask(self):
     with Context(CHECK_OOB=1, SPEC=2):
-      buf_bool = UOp(Ops.DEFINE_GLOBAL, dtypes.bool.ptr(16), (), 0)
-      buf_int = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(8), (), 1)
+      buf_bool = UOp(Ops.PARAM, dtypes.bool.ptr(16), (), 0)
+      buf_int = UOp(Ops.PARAM, dtypes.int.ptr(8), (), 1)
       gidx = UOp(Ops.SPECIAL, dtypes.index, (UOp.const(dtypes.index, 16),), "gidx0")
       ld_bool = buf_bool.index(gidx, ptr=True).load()
       with self.assertRaises(RuntimeError):
@@ -145,7 +145,7 @@ class TestValidateOOB(unittest.TestCase):
   def test_in_bounds_access_gated_local(self):
     with Context(CHECK_OOB=1):
       # Define buffers
-      gbuf = UOp(Ops.DEFINE_GLOBAL, dtypes.uint.ptr(400), (), 0)
+      gbuf = UOp(Ops.PARAM, dtypes.uint.ptr(400), (), 0)
       sbuf = UOp(Ops.DEFINE_LOCAL, dtypes.uint.ptr(8, addrspace=AddrSpace.LOCAL), (), "temp0")
 
       # Define indices, valids and barrier
@@ -169,8 +169,8 @@ class TestValidateOOB(unittest.TestCase):
   @unittest.skip("Bool load is not supported yet")
   def test_load_mask(self):
     with Context(CHECK_OOB=1):
-      glbl0 = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(16), (), 0)
-      mask = UOp(Ops.DEFINE_GLOBAL, dtypes.bool.ptr(16), (), 0)
+      glbl0 = UOp(Ops.PARAM, dtypes.int.ptr(16), (), 0)
+      mask = UOp(Ops.PARAM, dtypes.bool.ptr(16), (), 0)
       ridx = UOp.range(20, 0)
       ld0 = UOp(Ops.LOAD, dtypes.int, (glbl0.index(UOp.const(ridx, ridx<16&mask), ptr=True)))
       to_uops_list([ld0])

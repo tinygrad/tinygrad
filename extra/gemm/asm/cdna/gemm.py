@@ -86,7 +86,7 @@ def asm_gemm(a:Tensor, b:Tensor) -> Tensor:
     out = Tensor.empty(batch, M, N, dtype=a.dtype, device=a.device)
 
   dname = a.device[0] if is_multi else a.device
-  arch = getattr(Device[dname].renderer, "arch", None)
+  arch = getattr(Device[dname].renderer, "arch", "")
   if arch.startswith("gfx950") and getenv("USE_ASM", 1):
     numWG = GEMM_ARGS[(M, N, K)][0]
     out = Tensor.custom_kernel(out, a, b, fxn=functools.partial(custom_asm_gemm, dname=dname, wg=numWG, arch=arch), grad_fxn=custom_gemm_bw)[0]
