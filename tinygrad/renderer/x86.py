@@ -291,7 +291,7 @@ isel_matcher = PatternMatcher([
   (UPat(Ops.RANGE, src=(UPat.cvar("c"),), allow_any_len=True, name="x"), lambda c,x: x.replace(src=(imm(c.dtype, c.arg),) + x.src[1:])),
   (UPat(Ops.RANGE, name="x"), lambda ctx,x: x.replace(arg=ctx.vreg(WGPR)) if not isinstance(x.arg, Register) else None),
   # function abi constraints
-  (UPat((Ops.DEFINE_GLOBAL, Ops.DEFINE_VAR, Ops.SPECIAL), name="x"), abi),
+  (UPat((Ops.PARAM, Ops.DEFINE_VAR, Ops.SPECIAL), name="x"), abi),
   # these are treated the same for now
   (UPat((Ops.DEFINE_REG, Ops.DEFINE_LOCAL), name="x"), lambda ctx,x:
    x.replace(op=X86Ops.LEA, src=(def_reg(dtypes.uint64, RSP), UOp(Ops.NOOP), imm(dtypes.int32, ctx.inc_stack(x.dtype.nbytes()))), arg=None)),
