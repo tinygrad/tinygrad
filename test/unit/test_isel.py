@@ -72,28 +72,28 @@ class TestIselX86(unittest.TestCase):
   # complex address is [base + index*scale + displacement]
   def test_complex_address(self):
     a = UOp.variable("a", 0, 0, dtypes.int32)
-    load = UOp(Ops.DEFINE_GLOBAL, dtypes.int32.ptr(), arg=0).index(a + 1, ptr=True).load()
+    load = UOp(Ops.PARAM, dtypes.int32.ptr(), arg=0).index(a + 1, ptr=True).load()
     n = self.isel_rewrite(load)
-    # base is DEFINE_GLOBAL, index is "a"
+    # base is PARAM, index is "a"
     self.assertTrue(n.src[0].op is X86Ops.DEFINE_REG and n.src[1].op is X86Ops.DEFINE_REG)
     # displacement is the constant in "a" scaled to the buffer element size, dtype is int8 when the value fits otherwise int32
     self.assertTrue(n.src[2].op is X86Ops.IMM and n.src[2].dtype is dtypes.int8 and n.src[2].arg == 4)
 
   def test_fuse_load(self):
-    load1 = UOp(Ops.DEFINE_GLOBAL, dtypes.int32.ptr(), arg=0).index(UOp.const(dtypes.int32, 0), ptr=True).load()
-    load2 = UOp(Ops.DEFINE_GLOBAL, dtypes.int32.ptr(), arg=0).index(UOp.const(dtypes.int32, 1), ptr=True).load()
+    load1 = UOp(Ops.PARAM, dtypes.int32.ptr(), arg=0).index(UOp.const(dtypes.int32, 0), ptr=True).load()
+    load2 = UOp(Ops.PARAM, dtypes.int32.ptr(), arg=0).index(UOp.const(dtypes.int32, 1), ptr=True).load()
     n = self.isel_rewrite(load1 + load2)
     self.assertTrue(len(n.src) == 4)
 
   # don't fuse when used multiple times
   def test_dont_fuse_load_diff_users(self):
-    load = UOp(Ops.DEFINE_GLOBAL, dtypes.int32.ptr(), arg=0).index(UOp.const(dtypes.int32, 0), ptr=True).load()
+    load = UOp(Ops.PARAM, dtypes.int32.ptr(), arg=0).index(UOp.const(dtypes.int32, 0), ptr=True).load()
     add = load + 1
     n = self.isel_rewrite(add + load)
     self.assertTrue(len(n.src) == 2)
 
   def test_dont_fuse_load_same_user(self):
-    load = UOp(Ops.DEFINE_GLOBAL, dtypes.int32.ptr(), arg=0).index(UOp.const(dtypes.int32, 0), ptr=True).load()
+    load = UOp(Ops.PARAM, dtypes.int32.ptr(), arg=0).index(UOp.const(dtypes.int32, 0), ptr=True).load()
     n = self.isel_rewrite(load * load)
     self.assertTrue(len(n.src) == 2)
 
@@ -102,7 +102,7 @@ class TestIselX86(unittest.TestCase):
   # by giving them the same reg as src we ensure they share the same live range
   @unittest.skip("hmmm")
   def test_noop(self):
-    noop = UOp(Ops.NOOP, dtypes.int32, (UOp(Ops.DEFINE_GLOBAL, dtypes.int32.ptr(), arg=0),))
+    noop = UOp(Ops.NOOP, dtypes.int32, (UOp(Ops.PARAM, dtypes.int32.ptr(), arg=0),))
     n = self.isel_rewrite(noop)
     self.assertTrue(isinstance(n.arg, Register) and n.arg == n.src[0].arg)
 

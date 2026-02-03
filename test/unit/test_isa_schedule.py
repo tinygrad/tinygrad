@@ -9,7 +9,7 @@ class TestX86Schedule(unittest.TestCase):
     x = graph_rewrite(x, X86Renderer().isel_matcher, IselContext(x), bottom_up=True)
 
   def test_hide_latency(self):
-    buf = UOp(Ops.DEFINE_GLOBAL, dtypes.float32.ptr(), arg=0)
+    buf = UOp(Ops.PARAM, dtypes.float32.ptr(), arg=0)
     load1 = buf.index(UOp.const(dtypes.int32, 1), ptr=True).load()
     load2 = buf.index(UOp.const(dtypes.int32, 2), ptr=True).load()
     const = UOp.const(dtypes.float32, 1)
