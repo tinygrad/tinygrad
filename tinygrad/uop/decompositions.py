@@ -399,9 +399,12 @@ def f2f(v, fr:DType, to:DType):
 
 def f2f_load(x: UOp, op: Ops) -> UOp:
   if op == Ops.BITCAST: return x.replace(dtype=dtypes.ushort)
-  if x.dtype.count == 1: return f2f(x.replace(dtype=dtypes.ushort), dtypes.half, dtypes.float)
-  return UOp.vectorize(*(f2f(x.replace(dtype=dtypes.ushort, src=(reindex(x.src[0].src[0], i, 1),)), dtypes.half, dtypes.float)
-                         for i in range(x.dtype.count)))
+  if (n:=x.dtype.count) == 1: return f2f(x.replace(dtype=dtypes.ushort), dtypes.half, dtypes.float)
+  return UOp.vectorize(*(f2f(x.replace(dtype=dtypes.ushort, src=(reindex(x.src[0].src[0], i, 1),)), dtypes.half, dtypes.float) for i in range(n)))
+
+def f2f_store(st, idx, val):
+  if (n:=val.dtype.count) == 1: return st.replace(src=(idx, f2f(val.bitcast(dtypes.uint), dtypes.float, dtypes.half)))
+  return UOp.group(*(st.replace(src=(reindex(idx, i, 1), f2f(val.gep(i).bitcast(dtypes.uint), dtypes.float, dtypes.half))) for i in range(n)))
 
 # ***** decomposition patterns *****
 
@@ -465,7 +468,7 @@ def get_late_rewrite_patterns(ops:tuple[Ops, ...], device:str, force_transcenden
     pat += [(UPat(Ops.BITCAST, (dtypes.ushort, dtypes.short, dtypes.bfloat16), src=(UPat.var("x", dtypes.float),), name="bc"), lambda bc,x:
              bc.replace(src=(f2f(x.bitcast(dtypes.uint), dtypes.float, dtypes.half),)))]
     pat += [(UPat(Ops.STORE, src=(UPat.var("idx"), UPat.var("val", dtypes.float)), name='st'), lambda st,idx,val:
-             st.replace(src=(idx,f2f(val.bitcast(dtypes.uint), dtypes.float, dtypes.half).bitcast(dtypes.ushort))) if idx.tag == dtypes.half else None)]
+             f2f_store(st, idx, val) if (idx:=idx.src[0] if idx.op == Ops.CAST else idx).tag == dtypes.half else None)]
   if not is_dtype_supported(dtypes.long, device) or dtypes.long in emulated_dtypes:
     pat += [(UPat((*GroupOp.Defines, Ops.INDEX), name="x"), lambda x:
              x.replace(dtype=l2i_dt[x.dtype.base].ptr(x.dtype.size * 2)) if hasattr(x.dtype, 'size') and x.dtype.base in l2i_dt else None)]
