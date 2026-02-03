@@ -11,7 +11,7 @@ from tinygrad.codegen.opt import Opt
 # import all pattern matchers here
 from tinygrad.codegen.gpudims import pm_add_gpudims
 from tinygrad.uop.symbolic import sym, symbolic_simple, gep_pushing, symbolic, pm_move_where_on_load
-from tinygrad.uop.decompositions import get_late_rewrite_patterns
+from tinygrad.uop.decompositions import get_late_rewrite_patterns, get_unsupported_dtypes_patterns
 from tinygrad.codegen.late.expander import expander, pm_pre_expander, pm_group_for_reduce
 from tinygrad.codegen.late.devectorizer import load_store_folding, load_store_indexing, devectorize, pm_reduce, \
   ReduceContext, correct_load_store, pm_render, pm_add_loads
@@ -92,9 +92,11 @@ def full_rewrite_to_sink(sink:UOp, ren:Renderer|None=None, optimize:bool=True) -
 
   # decompositions
   supported_ops = tuple(ren.code_for_op.keys())
-  pm_decomp = symbolic_simple+get_late_rewrite_patterns(supported_ops, ren.device, TRANSCENDENTAL>=2, bool(DISABLE_FAST_IDIV),
-                                                        tuple(EMULATED_DTYPES.tolist(dtypes)))
+  pm_unsupported = symbolic_simple+get_unsupported_dtypes_patterns(ren.device, tuple(EMULATED_DTYPES.tolist(dtypes)))
+  pm_decomp = symbolic_simple+get_late_rewrite_patterns(supported_ops, ren.device, TRANSCENDENTAL>=2, bool(DISABLE_FAST_IDIV))
   sink = graph_rewrite(sink, pm_decomp, ctx=ren.device, name="decompositions")
+  sink = graph_rewrite(sink, pm_unsupported, ctx=ren.device, name="unsupported dtypes", bottom_up=True)
+  sink = graph_rewrite(sink, pm_decomp, ctx=ren.device, name="decompositions 2")
 
   # final rules for the renderer (without sym)
   extra_matcher = ren.extra_matcher if ren.extra_matcher is not None else PatternMatcher([])
