@@ -267,7 +267,7 @@ jobs:
     - name: Run unit tests
       run: |
         CPU=1 python test/unit/test_device.py TestRunAsModule.test_module_runs
-        CPU=1 python -m pytest -n=auto test/unit/ --durations=20 --deselect=test/unit/test_device.py::TestRunAsModule::test_module_runs
+        CPU=1 python -m pytest -n=auto test/unit/ test/null/ --durations=20 --deselect=test/unit/test_device.py::TestRunAsModule::test_module_runs
     - name: Run targetted tests on NULL backend
       run: NULL=1 python3 -m unittest test.test_multitensor.TestMultiTensor.test_data_parallel_resnet_train_step test/device/test_null.py
     # TODO: too slow
@@ -314,7 +314,7 @@ jobs:
         deps: testing_unit
         python-version: '3.14'
     - name: Test SPEC=2
-      run: SPEC=2 pytest --maxfail=10 -n auto --durations=30 --ignore=test/models --ignore test/test_custom_kernel.py --ignore test/unit/test_hashing.py --ignore test/unit/test_autogen.py --timeout 60 -k "not test_setitem_big" --splits 2 --group ${{ matrix.group }}
+      run: SPEC=2 pytest --maxfail=10 -n auto --durations=30 --ignore=test/models --ignore test/test_custom_kernel.py --ignore test/unit/test_hashing.py --ignore test/unit/test_autogen.py --ignore test/null --timeout 60 -k "not test_setitem_big" --splits 2 --group ${{ matrix.group }}
 
   fuzzing:
     name: Fuzzing
@@ -609,7 +609,7 @@ jobs:
         WEBGPU=1 DEBUG=4 FORWARD_ONLY=1 python3 test/test_ops.py TestOps.test_add
     - name: Run selected webgpu tests
       run: |
-          WEBGPU=1 WEBGPU_BACKEND="WGPUBackendType_Vulkan" python3 -m pytest -n=auto test/ --ignore=test/models --ignore=test/unit --durations=20
+          WEBGPU=1 WEBGPU_BACKEND="WGPUBackendType_Vulkan" python3 -m pytest -n=auto test/ --ignore=test/models --ignore=test/unit --ignore=test/null --durations=20
     - name: Run process replay tests
       uses: ./.github/actions/process-replay
 
@@ -737,7 +737,7 @@ jobs:
           DEBUG=5 FORWARD_ONLY=1 python3 test/test_ops.py TestOps.test_add
       - name: Run pytest (cuda)
         # skip multitensor because it's slow
-        run: python -m pytest -n=auto test/ --ignore=test/models --ignore=test/unit --ignore test/test_gc.py --ignore test/test_multitensor.py --durations=20
+        run: python -m pytest -n=auto test/ --ignore=test/models --ignore=test/unit --ignore=test/null --ignore test/test_gc.py --ignore test/test_multitensor.py --durations=20
       - name: Run TestOps.test_add with PMA
         run: VIZ=-1 PMA=1 DEBUG=5 python3 test/test_ops.py TestOps.test_add
       - name: Run process replay tests
@@ -770,7 +770,7 @@ jobs:
           python3 -c "from tinygrad import Device; assert Device.DEFAULT in ['CPU','CL'], Device.DEFAULT"
           DEBUG=5 FORWARD_ONLY=1 python3 test/test_ops.py TestOps.test_add
       - name: Run pytest (${{ matrix.backend }})
-        run: python -m pytest -n=auto test/ --ignore=test/models --ignore=test/unit --durations=20
+        run: python -m pytest -n=auto test/ --ignore=test/models --ignore=test/unit --ignore=test/null --durations=20
       - name: Run TRANSCENDENTAL math
         run: TRANSCENDENTAL=2 python -m pytest -n=auto test/test_ops.py::TestOps::test_sin test/test_ops.py::TestOps::test_cos test/test_ops.py::TestOps::test_tan test/test_ops.py::TestOps::test_exp test/test_ops.py::TestOps::test_log --durations=20
       - name: Run process replay tests
@@ -796,7 +796,7 @@ jobs:
         ocelot: 'true'
         llvm: 'true'
     - name: Run unit tests
-      run: METAL=1 python -m pytest -n=auto test/unit/ --durations=20
+      run: METAL=1 python -m pytest -n=auto test/unit/ test/null/ --durations=20
     - name: Run ONNX
       run: METAL=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
     - name: Test tensor core ops (fake)
@@ -898,7 +898,7 @@ jobs:
           python -c "from tinygrad import Device; assert Device.DEFAULT == {'LLVM':'CPU','LVP':'CPU'}.get(x:='${{ matrix.backend }}'.upper(), x), Device.DEFAULT"
           DEBUG=4 python3 test/test_tiny.py TestTiny.test_plus
       - name: Run pytest (${{ matrix.backend }})
-        run: python3 -m pytest -n=auto test/ --ignore=test/models --ignore=test/unit --durations=20
+        run: python3 -m pytest -n=auto test/ --ignore=test/models --ignore=test/unit --ignore=test/null --durations=20
       - name: Run process replay tests
         uses: ./.github/actions/process-replay
       - name: Run macOS-specific unit test
@@ -931,7 +931,7 @@ jobs:
       - name: Run unit tests
         if: matrix.backend=='llvm'
         # test_newton_schulz hits RecursionError
-        run: python -m pytest -n=auto test/unit/ --ignore=test/unit/test_disk_tensor.py --ignore=test/unit/test_elf.py --ignore=test/unit/test_tar.py --ignore=test/unit/test_linalg.py --durations=20
+        run: python -m pytest -n=auto test/unit/ test/null/ --ignore=test/unit/test_disk_tensor.py --ignore=test/unit/test_elf.py --ignore=test/unit/test_tar.py --ignore=test/unit/test_linalg.py --durations=20
       - name: Run pytest (${{ matrix.backend }})
         shell: bash
         run: |
