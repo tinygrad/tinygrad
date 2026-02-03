@@ -59,7 +59,7 @@ if __name__ == "__main__":
     if agg:
       rows = [[n, t, time_to_str(t, w=9), t / c if c else 0.0, c, (t / total * 100.0) if total else 0.0] for n, (t, c) in agg.items()]
       rows.sort(key=lambda r: r[1], reverse=True)
-      print(tabulate([[r[0], r[2], r[4], f"{r[5]:.2f}%"] for r in rows[:10]], headers=["name", "total", "count", "pct"], tablefmt="github"))
+      print(tabulate([[r[0], r[2], r[4], f"{r[5]:.2f}%"] for r in rows[:30]], headers=["name", "total", "count", "pct"], tablefmt="github"))
     exit(0)
 
   for k in viz.ctxs:
