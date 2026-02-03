@@ -9,8 +9,8 @@ from tinygrad.runtime.autogen import kgsl, mesa
 from tinygrad.runtime.ops_cl import CLCompiler, CLDevice
 from tinygrad.renderer.cstyle import QCOMRenderer, ClangJITRenderer
 from tinygrad.renderer.nir import IR3Renderer
-from tinygrad.helpers import getenv, mv_address, to_mv, round_up, ceildiv, data64_le, prod, fromimport, cpu_profile, lo32, PROFILE, suppress_finalizing
-from tinygrad.helpers import next_power2, flatten, QCOM_IR3, QCOM_CC
+from tinygrad.helpers import getenv, mv_address, to_mv, round_up, data64_le, ceildiv, prod, fromimport, cpu_profile, lo32, suppress_finalizing
+from tinygrad.helpers import next_power2, flatten, QCOM_IR3, QCOM_CC, PROFILE
 from tinygrad.dtype import ImageDType, dtypes
 from tinygrad.runtime.support.system import System
 if getenv("IOCTL"): import extra.qcom_gpu_driver.opencl_ioctl  # noqa: F401  # pylint: disable=unused-import
