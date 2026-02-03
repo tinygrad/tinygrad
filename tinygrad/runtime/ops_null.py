@@ -14,7 +14,7 @@ class NullRenderer(CStyleLanguage):
   code_for_op = {**CStyleLanguage.code_for_op, Ops.THREEFRY: lambda a,b,dtype: f"threefry({a},{b})", Ops.MAX: lambda a,b,dtype: f"max({a},{b})"}
 
 class NullProgram:
-  def __init__(self, device:str, name:str, lib:bytes, **kwargs): self.device, self.name = device, name
+  def __init__(self, device:str, name:str, lib:bytes, *args, **kwargs): self.device, self.name = device, name
   def __call__(self, *bufs, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), vals:tuple[int, ...]=(), wait=False):
     with cpu_profile(self.name, self.device): return 1e-3
 
