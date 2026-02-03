@@ -957,7 +957,7 @@ jobs:
           key: compile-${{ matrix.backend }}
           deps: testing_unit
           mesa: ${{ (matrix.backend == 'ir3' || matrix.backend == 'nak') && 'true' }}
-          python-version: '3.14'
+          python-version: '3.12'
       - name: Set env
         shell: bash
         run: printf "NULL=1\nNULL_ALLOW_COPYOUT=1\n${{ matrix.backend == 'ir3' && 'NULL_IR3=1' || matrix.backend == 'nak' && 'NULL_NAK=1' }}" >> $GITHUB_ENV
