@@ -938,6 +938,7 @@ jobs:
         run: python -m pytest -n=auto test/unit/ --ignore=test/unit/test_disk_tensor.py --ignore=test/unit/test_tar.py --ignore=test/unit/test_linalg.py --durations=20
       - name: Run NULL backend tests
         if: matrix.backend=='llvm'
+        shell: bash
         run: NULL=1 python -m pytest -n=auto test/null/ --durations=20
       - name: Run pytest (${{ matrix.backend }})
         shell: bash
