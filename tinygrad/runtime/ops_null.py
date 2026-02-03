@@ -3,7 +3,7 @@ from tinygrad.device import Compiled, Compiler, Allocator, CompilerSet, Compiler
 from tinygrad.engine.jit import MultiGraphRunner
 from tinygrad.renderer.cstyle import Renderer, CStyleLanguage, AMDHIPRenderer
 from tinygrad.uop.ops import Ops
-from tinygrad.helpers import cpu_profile, EMULATE, NULL_IR3, NULL_NAK
+from tinygrad.helpers import cpu_profile, EMULATE, NULL_IR3, NULL_NAK, NULL_ALLOW_COPYOUT
 from tinygrad.renderer.nir import IR3Renderer, NAKRenderer
 
 class NullRenderer(CStyleLanguage):
@@ -21,7 +21,8 @@ class NullProgram:
 class NullAllocator(Allocator['NullDevice']):
   def _alloc(self, size, options): pass
   def _copyin(self, dest, src:memoryview): pass
-  def _copyout(self, dest:memoryview, src): raise RuntimeError("no copyout on NULL")
+  def _copyout(self, dest:memoryview, src):
+    if not NULL_ALLOW_COPYOUT: raise RuntimeError("no copyout on NULL")
   def _transfer(self, dest, src, sz:int, src_dev, dest_dev):
     with cpu_profile(f"{src_dev.device} -> {dest_dev.device}", self.dev.device): pass
   def _offset(self, buf, offset:int, size:int): pass
