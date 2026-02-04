@@ -194,6 +194,7 @@ class X86Ops(FastEnum):
   VMULSS = auto(); VMULSD = auto(); VMULPS = auto(); VMULPD = auto() # noqa: E702
   VDIVSS = auto(); VDIVSD = auto(); VDIVPS = auto(); VDIVPD = auto() # noqa: E702
   VMAXSS = auto(); VMAXSD = auto(); VMAXPS = auto(); VMAXPD = auto() # noqa: E702
+  VMINSS = auto(); VMINSD = auto(); VMINPS = auto(); VMINPD = auto() # noqa: E702
   # int vector binary
   VPADDB = auto(); VPADDW = auto(); VPADDD = auto(); VPADDQ = auto() # noqa: E702
   VPSUBB = auto(); VPSUBW = auto(); VPSUBD = auto(); VPSUBQ = auto() # noqa: E702
@@ -234,8 +235,8 @@ class X86GroupOp:
                 X86Ops.VPMULLW, X86Ops.VPMULLD, X86Ops.VROUNDSS, X86Ops.VROUNDSD, X86Ops.VSQRTSS, X86Ops.VSQRTSD, X86Ops.VSHUFPS, X86Ops.VINSERTPS,
                 X86Ops.VPINSRB, X86Ops.VPINSRW, X86Ops.VPINSRD, X86Ops.VPINSRQ, X86Ops.VPAND, X86Ops.VPOR, X86Ops.VPXOR, X86Ops.VPSLLVD,
                 X86Ops.VPSLLVQ, X86Ops.VPSRLVD, X86Ops.VPSRLVQ, X86Ops.VPSRAVD, X86Ops.CMOVNE, X86Ops.CMOVE, X86Ops.CMOVL, X86Ops.CMOVB,
-                X86Ops.VMAXSS, X86Ops.VMAXSD, X86Ops.VMAXPS, X86Ops.VMAXPD, X86Ops.VCVTSI2SS, X86Ops.VCVTSI2SD, X86Ops.VCVTSS2SD, X86Ops.VCVTSD2SS,
-                X86Ops.VUCOMISS, X86Ops.VUCOMISD}
+                X86Ops.VMAXSS, X86Ops.VMAXSD, X86Ops.VMAXPS, X86Ops.VMAXPD, X86Ops.VMINSS, X86Ops.VMINSD, X86Ops.VMINPS, X86Ops.VMINPD,
+                X86Ops.VCVTSI2SS, X86Ops.VCVTSI2SD, X86Ops.VCVTSS2SD, X86Ops.VCVTSD2SS, X86Ops.VUCOMISS, X86Ops.VUCOMISD}
 
   # X86Ops whose third src can read from memory NOTE: these are TwoAddress1st so the third src is actually the second
   ReadMem3rd = {X86Ops.VFMADD213SS, X86Ops.VFMADD213SD, X86Ops.VFMADD213PS, X86Ops.VFMADD213PD}

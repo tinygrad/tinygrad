@@ -130,8 +130,6 @@ extra_matcher = PatternMatcher([
   (UPat(Ops.CAST, dtype=dtypes.floats, src=(UPat(dtype=dtypes.uint64),), name="c"),
    lambda c: ((c.src[0] >> 63) != 0).where((c.src[0] & 0x7FFFFFFFFFFFFFFF).cast(dtypes.int64).cast(c.dtype) * 2, \
                                                c.src[0].cast(dtypes.int64).cast(c.dtype))),
-  # Ops.SUB is hidden behind Ops.NEG in get_late_rewrite_patterns but we don't really want Ops.NEG
-  (UPat.var('x')+(UPat.var('y')*-1), lambda x,y: x.alu(Ops.SUB, y)),
   # mulacc only available for floats
   (UPat.var('a', dtypes.floats)*UPat.var('b')+UPat.var('c'), lambda a,b,c: a.alu(Ops.MULACC, b, c)),
   # no max for scalar ints
@@ -282,14 +280,17 @@ dt_64bit = tuple(dt.vec(l) for dt in dts for l in [8,4,2,1] if dt.vec(l).itemsiz
 dt_128bit = tuple(dt.vec(l) for dt in dts for l in [16,8,4,2,1] if dt.vec(l).itemsize == 16)
 
 isel_matcher = PatternMatcher([
-  # **** Op rewrites ****
+  # **** Op -> Op ****
+  # rewrite -x -> 0 - x, this is done here because NEG is useful for MIN
+  (UPat(Ops.NEG, name="x"), lambda x: UOp(Ops.SUB, x.dtype, (x.const_like(0),) + x.src)),
+  # TODO: RANGE and END is tricky. Both linearizer and regalloc need them so they stay as Ops and get rewritten post regalloc
+  # control flow ops need a refactor in general
+  (UPat(Ops.RANGE, src=(UPat.cvar("c"),), allow_any_len=True, name="x"), lambda c,x: x.replace(src=(imm(c.dtype, c.arg),) + x.src[1:])),
+  (UPat(Ops.RANGE, name="x"), lambda ctx,x: x.replace(arg=ctx.vreg(WGPR)) if not isinstance(x.arg, Register) else None),
+  # **** Op -> X86Op ****
   # add callee saved registers to the RET, these will be scheduled at the top of the kernel and will be saved/restored if they are used in regalloc
   # so regalloc builds the prologue/epilogue naturally
   (UPat(Ops.SINK, name="x"), lambda x: x.replace(op=X86Ops.RET, src=x.src + tuple(def_reg(dtypes.uint64, r) for r in [RSP, RBP]))),
-  # TODO: RANGE and END is tricky. Both linearizer and regalloc need them so they stay as Ops. This gets into a broader issue with tinygrad
-  # not being able to represent control flow properly. For now they are rewritten after regalloc
-  (UPat(Ops.RANGE, src=(UPat.cvar("c"),), allow_any_len=True, name="x"), lambda c,x: x.replace(src=(imm(c.dtype, c.arg),) + x.src[1:])),
-  (UPat(Ops.RANGE, name="x"), lambda ctx,x: x.replace(arg=ctx.vreg(WGPR)) if not isinstance(x.arg, Register) else None),
   # function abi constraints
   (UPat((Ops.PARAM, Ops.DEFINE_VAR, Ops.SPECIAL), name="x"), abi),
   # these are treated the same for now
@@ -409,6 +410,9 @@ isel_matcher = PatternMatcher([
   (UPat(Ops.FDIV, dtypes.float64, name="x"), lambda x: x.replace(op=X86Ops.VDIVSD if x.dtype.count == 1 else X86Ops.VDIVPD)),
   (UPat(Ops.MAX, dtypes.float32, name="x"), lambda x: x.replace(op=X86Ops.VMAXSS if x.dtype.count == 1 else X86Ops.VMAXPS)),
   (UPat(Ops.MAX, dtypes.float64, name="x"), lambda x: x.replace(op=X86Ops.VMAXSD if x.dtype.count == 1 else X86Ops.VMAXPD)),
+  # TODO: because this is common across isas and there's multiple patterns probably want Ops.MIN and do this in decomp
+  ((UPat.var("a", dtypes.float32) < UPat.var("b")).where(UPat.var("a"), UPat.var("b")), lambda a,b: UOp(X86Ops.VMINSS if a.dtype.count == 1 else X86Ops.VMINPS, a.dtype, (a, b))),
+  ((UPat.var("a", dtypes.float64) < UPat.var("b")).where(UPat.var("a"), UPat.var("b")), lambda a,b: UOp(X86Ops.VMINSD if a.dtype.count == 1 else X86Ops.VMINPD, a.dtype, (a, b))),
   # casts
   (UPat(dtype=dtypes.int32).cast(dtypes.float32, name="x"), lambda x: x.replace(op=X86Ops.VCVTDQ2PS) if x.dtype.count > 1 else None),
   (UPat(dtype=dtypes.int32).cast(dtypes.float64, name="x"), lambda x: x.replace(op=X86Ops.VCVTDQ2PD) if x.dtype.count > 1 else None),
@@ -464,7 +468,7 @@ isel_matcher = PatternMatcher([
   (UPat(Ops.STORE, src=(UPat(), UPat(dtype=dt_16bit)), name="x"), lambda x: x.replace(op=X86Ops.VPEXTRW, src=fuse_address(x.src[0]) + (x.src[1], imm(dtypes.uint8, 0)))), # noqa: E501
   (UPat(Ops.STORE, src=(UPat(), UPat(dtype=dtypes.ints+(dtypes.bool,))), name="x"),
    lambda x: x.replace(op=X86Ops.MOVm, src=fuse_address(x.src[0]) + (x.src[1],)) if (i:=to_imm(x.src[1])) is None else x.replace(op=X86Ops.MOVi, src=fuse_address(x.src[0]) + (i,))), # noqa: E501
-  # **** X86Op rewrites ****
+  # **** X86Op -> X86Op ****
   # fuse loads into X86Ops that allow it, if beneficial
   (UPat(X86GroupOp.ReadMem1st, src=(UPat(Ops.LOAD),), allow_any_len=True, name="x"), lambda ctx,x: fuse_load(ctx, x, 0)),
   (UPat(X86GroupOp.ReadMem2nd, src=(UPat(), UPat(Ops.LOAD)), allow_any_len=True, name="x"), lambda ctx,x: fuse_load(ctx, x, 1)),
@@ -703,6 +707,8 @@ encodings = PatternMatcher([
   (UPat(X86Ops.VCMPSD, name="x"), lambda x: encode(x, 0xC2, pp=3, sel=1)), (UPat(X86Ops.VCMPPD, name="x"), lambda x: encode(x, 0xC2, pp=1, sel=1)),
   (UPat(X86Ops.VMAXSS, name="x"), lambda x: encode(x, 0x5F, pp=2, sel=1)), (UPat(X86Ops.VMAXPS, name="x"), lambda x: encode(x, 0x5F, pp=0, sel=1)),
   (UPat(X86Ops.VMAXSD, name="x"), lambda x: encode(x, 0x5F, pp=3, sel=1)), (UPat(X86Ops.VMAXPD, name="x"), lambda x: encode(x, 0x5F, pp=1, sel=1)),
+  (UPat(X86Ops.VMINSS, name="x"), lambda x: encode(x, 0x5D, pp=2, sel=1)), (UPat(X86Ops.VMINPS, name="x"), lambda x: encode(x, 0x5D, pp=0, sel=1)),
+  (UPat(X86Ops.VMINSD, name="x"), lambda x: encode(x, 0x5D, pp=3, sel=1)), (UPat(X86Ops.VMINPD, name="x"), lambda x: encode(x, 0x5D, pp=1, sel=1)),
   # ternary
   (UPat(X86Ops.CMOVB, name="x"), lambda x: encode(x, 0x0F42)), (UPat(X86Ops.CMOVL, name="x"), lambda x: encode(x, 0x0F4C)),
   (UPat(X86Ops.CMOVE, name="x"), lambda x: encode(x, 0x0F44)), (UPat(X86Ops.CMOVNE, name="x"), lambda x: encode(x, 0x0F45)),
@@ -740,7 +746,7 @@ class X86Renderer(ISARenderer):
   post_regalloc_matcher = post_regalloc_matcher
   isa_spec = isa_spec
   mach_info = zen4_mach_info
-  code_for_op = {x: lambda: None for x in (Ops.SQRT, Ops.AND, Ops.OR, Ops.SHL, Ops.SHR, Ops.FDIV, Ops.CMPLT, Ops.CMPEQ, Ops.MAX)}
+  code_for_op = {x: lambda: None for x in (Ops.SQRT, Ops.AND, Ops.OR, Ops.SHL, Ops.SHR, Ops.NEG, Ops.SUB, Ops.FDIV, Ops.CMPLT, Ops.CMPEQ, Ops.MAX)}
 
   def stack_pointer(self) -> UOp: return UOp(X86Ops.DEFINE_REG, dtypes.uint64, arg=RSP)
   def render(self, uops:list[UOp], lower:bool=True) -> str:
