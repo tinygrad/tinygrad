@@ -2087,7 +2087,7 @@ class TestCopyFolding(unittest.TestCase):
     check_schedule(b, 1, filter_sink=False) # TODO: 0?
 
   def test_copy_to_same_device_sched(self):
-    a = Tensor.ones(4).contiguous().realize().uop.as_buf()
+    a = Tensor.ones(4).contiguous().realize().uop.buf_uop
     t = Tensor(a.copy_to_device(a.device))
     sched = t.schedule()
     assert len([s for s in sched if s.ast.op is Ops.COPY]) == 0
