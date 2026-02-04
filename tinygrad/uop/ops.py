@@ -460,11 +460,6 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     return self.src[0] if self.op is Ops.WHERE and self.src[2].arg is Invalid else UOp.const(dtypes.bool, self.arg is not Invalid)
   def reduce(self, *src:UOp, **kwargs): return UOp(Ops.REDUCE, kwargs.pop('dtype', self.dtype), src=(self,)+src, **kwargs)
 
-  def is_contiguous(self):
-    # TODO: this is is_realized
-    if self.op in {Ops.RESHAPE, Ops.MULTI}: return self.src[0].is_contiguous()
-    return self.op is Ops.BUFFER
-
   def is_writable_view(self) -> bool:
     """Check if this UOp is a writable view backed by a buffer (injective mapping)."""
     if self.op in {Ops.RESHAPE, Ops.SHRINK, Ops.PERMUTE, Ops.FLIP, Ops.DETACH}: return self.src[0].is_writable_view()
@@ -473,7 +468,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
 
   def contiguous(self, *args, **kwargs):
     if self.op is Ops.CONTIGUOUS: return self
-    if self.is_contiguous(): return self
+    if self.has_buffer_identity(): return self
     return UOp(Ops.CONTIGUOUS, dtype=self.dtype, src=(self,)+args, **kwargs)
   def contiguous_backward(self): return self.alu(Ops.CONTIGUOUS_BACKWARD)
   def bufferize(self, *args, **kwargs): return UOp(Ops.BUFFERIZE, dtype=self.dtype, src=(self,)+args, **kwargs)
@@ -638,6 +633,11 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
         assert all_same(self.src)
         return self.src[0].buf_target()
       case _: raise RuntimeError(f"buf_target called on non load/index/store {self.op}")
+
+  def has_buffer_identity(self):
+    """Check if this UOp has a concrete buffer identity in the graph (RESHAPE/MULTI -> BUFFER chain)."""
+    if self.op in {Ops.RESHAPE, Ops.MULTI}: return self.src[0].has_buffer_identity()
+    return self.op is Ops.BUFFER
 
   @property
   def buffer(self) -> Buffer|MultiBuffer:

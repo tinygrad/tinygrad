@@ -344,7 +344,7 @@ def scatter_add(self, dim, index, src, out):
 def _copy_between_devices(src, dest, cast_dtype, to_device, non_blocking=False):
   if src.is_tiny and dest.is_tiny:
     src_t, dest_t = unwrap(src), unwrap(dest)
-    if dest_t.uop.is_contiguous() or dest_t.uop.is_realized: src_t = src_t.contiguous()
+    if dest_t.uop.has_buffer_identity() or dest_t.uop.is_realized: src_t = src_t.contiguous()
     _apply_inplace(dest_t, src_t.cast(cast_dtype).to(to_device))
   elif src.is_tiny and dest.is_cpu:
     dest.resize_(src.numel()).resize_(src.shape)
