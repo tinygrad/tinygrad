@@ -7,7 +7,6 @@ from tinygrad.device import is_dtype_supported
 from tinygrad.runtime.ops_python import from_storage_scalar
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.nir import NIRRenderer
-from tinygrad.uop import Ops
 import numpy as np
 import pytest
 from hypothesis import assume, given, strategies as strat, settings
