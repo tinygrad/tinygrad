@@ -67,5 +67,37 @@ class TestTorchBackendInplace(unittest.TestCase):
     d += torch.arange(4)
     np.testing.assert_array_equal(a.cpu(), torch.arange(4).cpu())
 
+  def test_inplace_view_metadata(self):
+    a = torch.arange(6, dtype=torch.float32).reshape(1, 2, 3)
+    ret = a.squeeze_(0)
+    self.assertIs(ret, a)
+    self.assertEqual(a.shape, torch.Size([2, 3]))
+    ret = a.unsqueeze_(1)
+    self.assertIs(ret, a)
+    self.assertEqual(a.shape, torch.Size([2, 1, 3]))
+    ret = a.transpose_(0, 2)
+    self.assertIs(ret, a)
+    self.assertEqual(a.shape, torch.Size([3, 1, 2]))
+
+  def test_t_inplace_metadata(self):
+    a = torch.arange(6, dtype=torch.float32).reshape(2, 3)
+    ret = a.t_()
+    self.assertIs(ret, a)
+    self.assertEqual(a.shape, torch.Size([3, 2]))
+    expected = torch.arange(6, dtype=torch.float32).reshape(2, 3).t()
+    np.testing.assert_array_equal(a.cpu().numpy(), expected.cpu().numpy())
+
+  def test_squeeze_matmul(self):
+    # squeeze_ is used internally by PyTorch for vector-matrix matmul (unsqueeze -> mm -> squeeze_)
+    a = torch.arange(65, dtype=torch.float32)
+    b = torch.arange(65*45, dtype=torch.float32).reshape(65, 45)
+    result = a.matmul(b)
+    self.assertEqual(result.shape, torch.Size([45]))
+    # verify correctness
+    a_cpu = torch.arange(65, dtype=torch.float32, device='cpu')
+    b_cpu = torch.arange(65*45, dtype=torch.float32, device='cpu').reshape(65, 45)
+    expected = a_cpu.matmul(b_cpu)
+    np.testing.assert_allclose(result.cpu().numpy(), expected.numpy(), rtol=1e-4, atol=1e-4)
+
 if __name__ == "__main__":
   unittest.main()

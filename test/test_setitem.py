@@ -54,7 +54,32 @@ class TestSetitem(unittest.TestCase):
     t = Tensor.ones(4)
     with self.assertRaises(RuntimeError): t[1] = 5
 
-  @unittest.skip("TODO: flaky")
+  def test_setitem_chained_indexing(self):
+    # N[i][j] must work the same as N[i, j]
+    N1 = Tensor.zeros((3, 3)).contiguous().realize()
+    N1[1, 2] = 5
+    N2 = Tensor.zeros((3, 3)).contiguous().realize()
+    N2[1][2] = 5
+    np.testing.assert_equal(N1.numpy(), N2.numpy())
+
+  def test_setitem_detach(self):
+    # setitem on detached tensor should work
+    t = Tensor.zeros((3, 3)).contiguous().realize()
+    t.detach()[1, 2] = 5
+    self.assertEqual(t[1, 2].item(), 5.0)
+
+  def test_setitem_permute(self):
+    # setitem on permuted tensor should modify original
+    t = Tensor.zeros((2, 3)).contiguous().realize()
+    t.T[1, 0] = 5  # t.T is (3, 2), so [1, 0] maps to t[0, 1]
+    self.assertEqual(t[0, 1].item(), 5.0)
+
+  def test_setitem_flip(self):
+    # setitem on flipped tensor should modify original
+    t = Tensor.zeros((3,)).contiguous().realize()
+    t[::-1][0] = 5  # flip, then set first element (which is last in original)
+    self.assertEqual(t[2].item(), 5.0)
+
   def test_setitem_inplace_operator(self):
     t = Tensor.arange(4).reshape(2, 2).contiguous()
     t[1] += 2

@@ -20,7 +20,7 @@ class TestAMD(unittest.TestCase):
                               global_size=TestAMD.d0_runner.global_size, local_size=TestAMD.d0_runner.local_size)
       TestAMD.d0_runner.clprg(TestAMD.a.uop.buffer._buf, TestAMD.b.uop.buffer._buf,
                               global_size=TestAMD.d0_runner.global_size, local_size=TestAMD.d0_runner.local_size)
-    val = TestAMD.a.uop.buffer.as_buffer().cast("f")[0]
+    val = TestAMD.a.uop.buffer.as_memoryview().cast("f")[0]
     assert val == 4000.0, f"got val {val}"
 
 if __name__ == "__main__":
