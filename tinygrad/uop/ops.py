@@ -613,13 +613,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     if self.op is Ops.BUFFER: return self
     if self.op is Ops.MSELECT: return self.src[0].buf_uop.mselect(self.arg)
     if self.op is Ops.MSTACK: return UOp(Ops.MSTACK, self.dtype, src=tuple(x.buf_uop for x in self.src))
-    assert self.base.op is Ops.AFTER, f"must be AFTER {self.base.op}"
-    return self.base.src[0].buf_uop.base
-
-  def as_buf(self) -> UOp:
-    if self.op is Ops.MSELECT: return self.src[0].as_buf().mselect(self.arg)
-    if self.op is Ops.MSTACK: return UOp(Ops.MSTACK, self.dtype, src=tuple(x.as_buf() for x in self.src))
-    # TODO: this should be the only one of these. this is the one RANGEIFY uses
+    if self.base.op is Ops.AFTER: return self.base.src[0].buf_uop.base
     s = self
     while len(s.src) and s.op not in {Ops.BUFFER, Ops.BUFFERIZE, Ops.MSTACK}: s = s.src[0]
     return s
