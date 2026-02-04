@@ -465,6 +465,12 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     if self.op in {Ops.RESHAPE, Ops.MULTI}: return self.src[0].is_contiguous()
     return self.op is Ops.BUFFER
 
+  def is_writable_view(self) -> bool:
+    """Check if this UOp is a writable view backed by a buffer (injective mapping)."""
+    if self.op in {Ops.RESHAPE, Ops.SHRINK, Ops.PERMUTE, Ops.FLIP, Ops.DETACH}: return self.src[0].is_writable_view()
+    if self.op is Ops.MULTI: return all(x.is_writable_view() for x in self.src)
+    return self.op is Ops.BUFFER
+
   def contiguous(self, *args, **kwargs):
     if self.op is Ops.CONTIGUOUS: return self
     if self.is_contiguous(): return self
