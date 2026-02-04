@@ -88,9 +88,11 @@ class Attention:
 
     keys, values = repeat_kv(keys, self.n_rep), repeat_kv(values, self.n_rep)
     xq, keys, values = xq.transpose(1, 2), keys.transpose(1, 2), values.transpose(1, 2)
-    attn = xq.scaled_dot_product_attention(keys, values, mask).transpose(1, 2)
+    if Tensor.training:
+      attn = xq.scaled_dot_product_attention(keys, values, is_causal=True).transpose(1, 2)
+    else:
+      attn = xq.scaled_dot_product_attention(keys, values, mask).transpose(1, 2)
     if getenv("STUB_ATTENTION"):
-      # TODO: do we need mask?
       from tinygrad.uop.ops import UOp, KernelInfo
       def fa_custom_forward(attn:UOp, q:UOp, k:UOp, v:UOp) -> UOp:
         return UOp.sink(arg=KernelInfo(name="fa_custom_forward"))
@@ -197,7 +199,9 @@ class Transformer:
     h = self.tok_embeddings(tokens)
     freqs_cis = self.freqs_cis.cast(h.dtype)[:, start_pos:start_pos+seqlen, :, :, :]
 
-    mask = Tensor.full((1, 1, seqlen, start_pos+seqlen), float("-inf"), dtype=h.dtype, device=h.device).triu(start_pos+1) if seqlen > 1 else None
+    if not Tensor.training and seqlen > 1:
+      mask = Tensor.full((1, 1, seqlen, start_pos+seqlen), float("-inf"), dtype=h.dtype, device=h.device).triu(start_pos+1)
+    else: mask = None
     for layer in self.layers: h = layer(h, start_pos, freqs_cis, mask)
     logits = self.output(self.norm(h))
     if math.isnan(temperature): return logits
