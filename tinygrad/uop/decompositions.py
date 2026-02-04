@@ -18,8 +18,8 @@ def exponent_bias(d:DType) -> int: return {dtypes.float64: 1023, dtypes.float32:
 def exponent_mask(d:DType) -> int: return {dtypes.float64: 2047, dtypes.float32: 255, dtypes.float16: 31}[d.scalar()]
 
 # **** utils ****
-def shr(x:UOp|int, y:int) -> UOp: return x // (2**y)
-def shl(x:UOp|int, y:int) -> UOp: return x * (2**y)
+def shr(x:UOp|int, y:UOp|int) -> UOp: return x // (2**(y.simplify().arg) if isinstance(y, UOp) else 2**y)
+def shl(x:UOp|int, y:UOp|int) -> UOp: return x * (2**(y.simplify().arg) if isinstance(y, UOp) else 2**y)
 
 def rintk(d:UOp) -> UOp:
   """round d:float to int away from 0"""
