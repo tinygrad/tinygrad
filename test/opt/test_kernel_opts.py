@@ -111,7 +111,7 @@ class TestKernelOpts(unittest.TestCase):
     ])
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
-  @unittest.skipUnless(any(tc.dtype_in == tc.dtype_out == dtypes.half for tc in Device[Device.DEFAULT].renderer.tensor_cores),
+  @unittest.skipUnless(any(tc.dtype_in[0] == tc.dtype_out == dtypes.half for tc in Device[Device.DEFAULT].renderer.tensor_cores),
                       "test requires tensor cores with accumulation in half") # testing with half suffices.
   def test_tensor_core_opts(self):
     N = 128
@@ -135,7 +135,7 @@ class TestKernelOpts(unittest.TestCase):
     ], apply_tc=True, atol=atol, rtol=rtol)
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
-  @unittest.skipUnless(any(tc.dtype_in == tc.dtype_out == dtypes.half for tc in Device[Device.DEFAULT].renderer.tensor_cores),
+  @unittest.skipUnless(any(tc.dtype_in[0] == tc.dtype_out == dtypes.half for tc in Device[Device.DEFAULT].renderer.tensor_cores),
                       "test requires tensor cores with accumulation in half") # testing with half suffices.
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   def test_tensor_core_opts_locals(self):
@@ -154,7 +154,7 @@ class TestKernelOpts(unittest.TestCase):
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared memory")
-  @unittest.skipUnless(any(tc.dtype_in == tc.dtype_out == dtypes.half for tc in Device[Device.DEFAULT].renderer.tensor_cores),
+  @unittest.skipUnless(any(tc.dtype_in[0] == tc.dtype_out == dtypes.half for tc in Device[Device.DEFAULT].renderer.tensor_cores),
                       "test requires tensor cores with accumulation in half") # testing with half suffices.
   # NOTE: the METAL test is broken, likely due to a compiler bug. passes on CI with -O0 and with default opt level locally on M3
   @unittest.skipIf(Device.DEFAULT == "METAL", "broken for METAL")
