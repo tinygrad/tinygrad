@@ -398,8 +398,7 @@ def f2f(v, fr:DType, to:DType):
     return exp.eq(shl(1, fe) - 1).where(infnan, sign.cast(f2f_dt[to]) | underflow.where(0, overflow.where(shl(shl(1, te) - 1, tm), norm)))
   else: raise NotImplementedError(f"unsupported decomp {fr} -> {to}")
 
-def f2f_load(x: UOp, op: Ops) -> UOp:
-  if op == Ops.BITCAST: return x.replace(dtype=dtypes.ushort)
+def f2f_load(x: UOp) -> UOp:
   if (n:=x.dtype.count) == 1: return f2f(x.replace(dtype=dtypes.ushort), dtypes.half, dtypes.float)
   return UOp.vectorize(*(f2f(x.replace(dtype=dtypes.ushort, src=(reindex(x.src[0].src[0], i, 1),)), dtypes.half, dtypes.float) for i in range(n)))
 
@@ -491,13 +490,13 @@ def get_unsupported_dtypes_patterns(device:str, emulated_dtypes:tuple[DType, ...
   if dtypes.half in emulated_dtypes:
     pat += [(UPat((*GroupOp.Defines, Ops.INDEX), name="x"), lambda x:
              x.replace(dtype=dtypes.uint16.ptr(x.dtype.size), tag=dtypes.half) if x.dtype.base == dtypes.half else None)]
-    # FIXME: this is slow
-    pat += [(UPat(GroupOp.All, name="x"), lambda x:
-             x.replace(src=tuple(f2f_load(s, x.op) if s.op == Ops.LOAD and s.dtype.scalar() == dtypes.half else s for s in x.src)))]
-    pat += [(UPat((*GroupOp.ALU, Ops.CONST, Ops.CAST, Ops.GEP, Ops.VECTORIZE), dtypes.half, name="x"), lambda x:
-             x.replace(dtype=dtypes.float.vec(x.dtype.count)))]
+    pat += [(UPat(Ops.LOAD, dtypes.half, name="x"), f2f_load)]
+    pat += [(UPat(Ops.BITCAST, src=(UPat(Ops.LOAD, dtypes.half, name="ld"),), name="bc"), lambda bc,ld:
+             ld.replace(dtype=dtypes.ushort).bitcast(bc.dtype))]
     pat += [(UPat(Ops.BITCAST, (dtypes.ushort, dtypes.short, dtypes.bfloat16), src=(UPat.var("x", dtypes.float),), name="bc"), lambda bc,x:
              bc.replace(src=(f2f(x.bitcast(dtypes.uint), dtypes.float, dtypes.half),)))]
+    pat += [(UPat(GroupOp.All, dtypes.half, name="x"), lambda x:
+             x.replace(dtype=dtypes.float.vec(x.dtype.count), src=tuple(s.cast(dtypes.float) if s.dtype == dtypes.half else s for s in x.src)))]
     pat += [(UPat(Ops.STORE, src=(UPat.var("idx"), UPat.var("val", dtypes.float)), name='st'), lambda st,idx,val:
              f2f_store(st, idx, val) if (idx:=idx.src[0] if idx.op == Ops.CAST else idx).tag == dtypes.half else None)]
   return PatternMatcher(pat)
