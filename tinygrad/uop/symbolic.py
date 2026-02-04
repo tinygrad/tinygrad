@@ -390,9 +390,8 @@ sym = symbolic+pm_simplify_valid+PatternMatcher([
   (UPat(GroupOp.ALU, src=(UPat(Ops.VECTORIZE, src=UPat(name='x')), UPat(Ops.VECTORIZE, src=UPat(name='y'))), name='alu'),
    lambda x,y,alu: UOp(Ops.VECTORIZE, alu.dtype, (UOp(alu.op, alu.dtype.scalar(), (x,y)),)*alu.dtype.count)),
   # ** self folding **
-  # x!=0 -> (bool)x
-  #(UPat.var("x")!=0, lambda x: x.cast(dtypes.bool.vec(x.dtype.count))),
-  (UPat.var("x").cast(dtypes.bool), lambda x: x != x.const_like(0)),
+  # (bool)x -> x!=0
+  (UPat.var("x").cast(dtypes.bool), lambda x: x != 0),
   # ** where **
   # # fold nested where with same condition: in cond.where(t,f), cond.where(a,b)->a in t, ->b in f
   # (UPat.var("cond").where(UPat.var("t"), UPat.var("f")), fold_where_closure),
