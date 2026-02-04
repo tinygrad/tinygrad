@@ -311,7 +311,7 @@ class TinyJit(Generic[ReturnType]):
       assert self.fxn is not None
       with Context(BEAM=0 if getenv("IGNORE_JIT_FIRST_BEAM") else BEAM.value):
         ret = self.fxn(*args, **kwargs)
-        if len(params:=get_parameters(ret)): Tensor.realize(params[0], *params[1:])
+        if params:=get_parameters(ret): Tensor.realize(*params)
     elif self.cnt == 1:
       # jit capture
       assert self.fxn is not None
@@ -323,7 +323,7 @@ class TinyJit(Generic[ReturnType]):
         capturing.append(self)
         try:
           ret = self.fxn(*args, **kwargs)
-          if len(params:=get_parameters(ret)): Tensor.realize(params[0], *params[1:])
+          if params:=get_parameters(ret): Tensor.realize(*params)
         finally: capturing.clear()
       jit_cache = self._jit_cache
       del self._buffer_replace, self._jit_cache
