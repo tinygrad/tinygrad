@@ -624,16 +624,6 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     while len(s.src) and s.op not in {Ops.BUFFER, Ops.BUFFERIZE, Ops.MSTACK}: s = s.src[0]
     return s
 
-  def buf_target(self) -> UOp:
-    # the buffer that's being loaded from or store to
-    match self.op:
-      case Ops.PARAM | Ops.DEFINE_LOCAL | Ops.DEFINE_REG: return self
-      case Ops.AFTER | Ops.INDEX | Ops.STORE | Ops.LOAD: return self.src[0].buf_target()
-      case Ops.VECTORIZE:
-        assert all_same(self.src)
-        return self.src[0].buf_target()
-      case _: raise RuntimeError(f"buf_target called on non load/index/store {self.op}")
-
   def has_buffer_identity(self):
     """Check if this UOp has a concrete buffer identity in the graph (RESHAPE/MULTI -> BUFFER chain)."""
     if self.op in {Ops.RESHAPE, Ops.MULTI}: return self.src[0].has_buffer_identity()
