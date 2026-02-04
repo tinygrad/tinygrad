@@ -48,6 +48,7 @@ class TestGemmLarge(unittest.TestCase):
   def test_gemm4(self): verify_asm_gemm(8, 4096, 14336, 4096, gpus=8)
   def test_gemm5(self): verify_asm_gemm(8, 4096, 4096, 14336, gpus=8)
   def test_gemm6(self): verify_asm_gemm(16, 4096, 4096, 14336, gpus=8)
+  def test_gemm7(self): verify_asm_gemm(1, 8192, 128256, 4096)
 
 if __name__ == "__main__":
   unittest.main()
