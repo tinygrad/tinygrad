@@ -417,7 +417,7 @@ def get_transcendental_patterns(ops:tuple[Ops, ...], force_transcendental:bool) 
               (UPat(op, dtype=tuple(dt for dt in dtypes.floats if dt not in TRANSCENDENTAL_DTYPES), src=(UPat.var("d"),), name="x"),
                 lambda x,d: d.cast(dtypes.float32).alu(x.op).cast(x.dtype))]
   # rewrite SQRT to xpow 0.5
-  if Ops.SQRT not in ops or force_transcendental: pat.append((UPat(Ops.SQRT, src=UPat.var("d")), lambda d: xpow(d, d.const_like(0.5))))
+  if Ops.SQRT not in ops or force_transcendental: pat += [(UPat(Ops.SQRT, src=UPat.var("d")), lambda d: xpow(d, d.const_like(0.5)))]
   return PatternMatcher(pat)
 
 powers_of_two: dict[int, int] = {2**i:i for i in range(64)}
@@ -425,14 +425,13 @@ powers_of_two: dict[int, int] = {2**i:i for i in range(64)}
 def get_late_rewrite_patterns(ops:tuple[Ops, ...], device:str, disable_fast_idiv:bool) -> PatternMatcher:
   pat: list[tuple[UPat, Callable]] = []
   # no real hardware supports THREEFRY, but NullRenderer does
-  if Ops.THREEFRY not in ops: pat.append((UPat(Ops.THREEFRY, dtype=dtypes.uint64, src=(UPat.var("x"), UPat.var("key"))), threefry2x32))
+  if Ops.THREEFRY not in ops: pat += [(UPat(Ops.THREEFRY, dtype=dtypes.uint64, src=(UPat.var("x"), UPat.var("key"))), threefry2x32)]
   # MAX can be rewritten as CMPLT + WHERE (max function is annoying on many cstyle backends)
-  if Ops.MAX not in ops and Ops.CMPLT in ops: pat.append((UPat(Ops.MAX, name="m"), lambda m: (m.src[0] < m.src[1]).where(m.src[1], m.src[0])))
+  if Ops.MAX not in ops and Ops.CMPLT in ops: pat += [(UPat(Ops.MAX, name="m"), lambda m: (m.src[0] < m.src[1]).where(m.src[1], m.src[0]))]
   if Ops.MAX in ops: pat += [((UPat.var("a") < UPat.var("b")).where(UPat.var("b"), UPat.var("a")), lambda a,b: a.alu(Ops.MAX, b))]
   # rewrite MOD to AND (which should always be supported, but not for generic in tests): x % (2**y) -> x & (2**y-1)
   if Ops.AND in ops: pat += [(UPat.var("x", dtypes.ints)%UPat.cvar("c"), lambda x,c: x & (c.arg-1) if c.arg in powers_of_two else None)]
-  if Ops.OR in ops: pat += [(UPat.var("x", dtypes.bool).logical_not()&UPat.var("y", dtypes.bool).logical_not(),
-    lambda x,y: (x | y).logical_not())]
+  if Ops.OR in ops: pat += [(UPat.var("x", dtypes.bool).logical_not()&UPat.var("y", dtypes.bool).logical_not(), lambda x,y: (x | y).logical_not())]
   # rewrite MUL/IDIV to SHL+SHR: x*(2**y) -> shl(x,y) and x//(2**y) -> shr(x,y)
   if Ops.SHL in ops: pat += [(UPat.var("x", dtypes.ints)*UPat.cvar("c"), lambda c,x: x << v if (v:=powers_of_two.get(c.arg, 0)) else None)]
   if Ops.SHR in ops:
@@ -444,8 +443,8 @@ def get_late_rewrite_patterns(ops:tuple[Ops, ...], device:str, disable_fast_idiv
       pat += [(UPat.var("x", dtypes.ints)//UPat.cvar("d", vec=False), lambda ctx, x, d: fast_idiv(ctx, x, d.arg))]
       pat += [(UPat.var("x", dtypes.ints)%UPat.var("d"), lambda x, d: x-d*(x//d))]
   if Ops.NEG in ops:
-    pat += [(UPat.var('x')*-1, lambda ctx,x: x.alu(Ops.NEG))]
-    if Ops.SUB in ops: pat += [(UPat.var('x')+UPat.var('y').alu(Ops.NEG), lambda ctx,x,y: x.alu(Ops.SUB, y))]
+    pat += [(UPat.var('x')*-1, lambda x: x.alu(Ops.NEG))]
+    if Ops.SUB in ops: pat += [(UPat.var('x')+UPat.var('y').alu(Ops.NEG), lambda x,y: x.alu(Ops.SUB, y))]
   if Ops.CMPLT in ops:
     # These are late rewrites because simplex expects equalities to be a certain format
     pat += [
