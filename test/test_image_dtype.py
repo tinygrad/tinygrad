@@ -12,7 +12,7 @@ class TestImageCopy(unittest.TestCase):
   def test_image_copyout_1x8(self, img_type=dtypes.imagef):
     it = Tensor.arange(32).cast(img_type((1,8,4))).realize()
     buf = it.uop.buffer
-    out = buf.as_buffer()
+    out = buf.as_memoryview()
     np.testing.assert_equal(out.cast(it.dtype.fmt).tolist(), np.arange(32))
 
   @unittest.skipUnless(is_dtype_supported(dtypes.half, device="PYTHON"), "need half")
@@ -26,14 +26,14 @@ class TestImageCopy(unittest.TestCase):
   def test_image_copyout_2x4(self):
     it = Tensor.arange(2*4*4).cast(dtypes.imagef((2,4,4))).realize()
     buf = it.uop.buffer
-    out = buf.as_buffer()
+    out = buf.as_memoryview()
     np.testing.assert_equal(out.cast('f').tolist(), np.arange(2*4*4))
 
   def test_image_roundtrip(self):
     sz = (4,2,4)
     it = Tensor.rand(prod(sz)).cast(dtypes.imagef(sz)).realize()
     buf = it.uop.buffer
-    out = buf.as_buffer()
+    out = buf.as_memoryview()
 
     it2 = Tensor.rand(prod(sz)).cast(dtypes.imagef(sz)).realize()
     buf2 = it2.uop.buffer
@@ -190,7 +190,7 @@ class TestImageDType(unittest.TestCase):
       for s in sched:
         s.run()
         if s.bufs[0].dtype == dtypes.float:
-          lst = s.bufs[0].as_buffer().cast("f").tolist()
+          lst = s.bufs[0].as_memoryview().cast("f").tolist()
           print(lst)
           assert not np.any(np.isnan(lst))
       # NOTE: the w1 grad must realize to a separate kernel

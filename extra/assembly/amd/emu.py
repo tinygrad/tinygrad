@@ -1120,8 +1120,8 @@ class WaveState:
     self.n_lanes = n_lanes
     self.vgpr_buf = Buffer('CPU', VGPR_SIZE, dtypes.uint32).ensure_allocated()
     self.sgpr_buf = Buffer('CPU', SGPR_COUNT, dtypes.uint32).ensure_allocated()
-    self._vgpr_mv = self.vgpr_buf.as_buffer(force_zero_copy=True).cast('I')
-    self._sgpr_mv = self.sgpr_buf.as_buffer(force_zero_copy=True).cast('I')
+    self._vgpr_mv = self.vgpr_buf.as_memoryview(force_zero_copy=True).cast('I')
+    self._sgpr_mv = self.sgpr_buf.as_memoryview(force_zero_copy=True).cast('I')
     # Zero memory using ctypes memset (much faster than Python loops)
     ctypes.memset(self.vgpr_buf._buf.va_addr, 0, VGPR_SIZE * 4)
     ctypes.memset(self.sgpr_buf._buf.va_addr, 0, SGPR_COUNT * 4)
