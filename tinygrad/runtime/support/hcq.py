@@ -243,12 +243,11 @@ class HCQSignal(Generic[HCQDeviceType]):
     """
     return self.timestamp_mv[0] / self.timestamp_divider
 
-  def _sleep(self, time_spent_waiting_ms:int) -> bool:
+  def _sleep(self, time_spent_since_last_sleep_ms:int):
     """
     Optional function which can implement sleep functionality for the signal.
-    Returns True if a fault was detected, False otherwise.
+    Raises RuntimeError if a fault is detected.
     """
-    return False
 
   def wait(self, value:int, timeout:int=getenv("HCQDEV_WAIT_TIMEOUT_MS", 30000)):
     """
@@ -258,12 +257,12 @@ class HCQSignal(Generic[HCQDeviceType]):
       value: The value to wait for.
       timeout: Maximum time to wait in milliseconds. Defaults to 30s.
     """
-    start_time, fault = int(time.perf_counter() * 1000), False
-    while (not_passed:=(prev_value:=self.value) < value) and (time_spent:=int(time.perf_counter() * 1000) - start_time) < timeout:
-      if fault:=self._sleep(time_spent): break
-      if self.value != prev_value: start_time = int(time.perf_counter() * 1000) # progress was made, reset timer
-    if not_passed and self.value < value:
-      raise RuntimeError("Device fault detected" if fault else f"Wait timeout: {timeout} ms! (the signal is not set to {value}, but {self.value})")
+    start_time = last_sleep_time = int(time.perf_counter() * 1000)
+    while (not_passed:=(prev_value:=self.value) < value) and (cur_time:=int(time.perf_counter() * 1000)) - start_time < timeout:
+      self._sleep(cur_time - last_sleep_time)
+      last_sleep_time = int(time.perf_counter() * 1000)
+      if self.value != prev_value: start_time = last_sleep_time # progress was made, reset timer
+    if not_passed and self.value < value: raise RuntimeError(f"Wait timeout: {timeout} ms! (the signal is not set to {value}, but {self.value})")
 
 @contextlib.contextmanager
 def hcq_profile(dev:HCQCompiled, enabled, desc, queue_type:Callable[[], HWQueue]|None=None, queue:HWQueue|None=None):
