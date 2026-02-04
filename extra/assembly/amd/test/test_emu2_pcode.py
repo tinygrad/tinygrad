@@ -62,6 +62,16 @@ class TestWithSources(unittest.TestCase):
     dest, val = assigns[0]
     self.assertEqual(val.op, Ops.MUL)
 
+  def test_s_pack_ll_b32_b16(self):
+    """Test S_PACK_LL_B32_B16 packs two 16-bit values into 32-bit result."""
+    s0 = UOp.const(dtypes.uint32, 0xDEADAAAA)
+    s1 = UOp.const(dtypes.uint32, 0xDEADBBBB)
+    _, assigns = parse_pcode(PCODE[SOP2Op.S_PACK_LL_B32_B16], {'S0': s0, 'S1': s1})
+    self.assertEqual(len(assigns), 1)
+    dest, val = assigns[0]
+    self.assertTrue(dest.startswith('D0'))
+    self.assertEqual(val.simplify().arg, 0xBBBBAAAA)
+
 class TestParseExpr(unittest.TestCase):
   """Test the parse_expr function directly."""
 
