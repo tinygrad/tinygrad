@@ -86,9 +86,13 @@ class Attention:
       assert start_pos == 0
       keys, values = xk, xv
 
-    keys, values = repeat_kv(keys, self.n_rep), repeat_kv(values, self.n_rep)
-    xq, keys, values = xq.transpose(1, 2), keys.transpose(1, 2), values.transpose(1, 2)
-    attn = xq.scaled_dot_product_attention(keys, values, mask).transpose(1, 2)
+    if Tensor.training:
+      xq, keys, values = xq.transpose(1, 2), keys.transpose(1, 2), values.transpose(1, 2)
+      attn = xq.scaled_dot_product_attention(keys, values, is_causal=True, enable_gqa=True).transpose(1, 2)
+    else:
+      keys, values = repeat_kv(keys, self.n_rep), repeat_kv(values, self.n_rep)
+      xq, keys, values = xq.transpose(1, 2), keys.transpose(1, 2), values.transpose(1, 2)
+      attn = xq.scaled_dot_product_attention(keys, values, mask).transpose(1, 2)
     if getenv("STUB_ATTENTION"):
       # TODO: do we need mask?
       from tinygrad.uop.ops import UOp, KernelInfo
