@@ -100,6 +100,36 @@ class TestPack(unittest.TestCase):
     st = run_program(instructions, n_lanes=1)
     self.assertEqual(st.sgpr[2], 0xBBBBAAAA)
 
+  def test_s_pack_lh_b32_b16(self):
+    """S_PACK_LH_B32_B16: D0 = { S1[31:16], S0[15:0] }."""
+    instructions = [
+      s_mov_b32(s[0], 0xDEADAAAA),
+      s_mov_b32(s[1], 0xDEADBBBB),
+      s_pack_lh_b32_b16(s[2], s[0], s[1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.sgpr[2], 0xDEADAAAA)
+
+  def test_s_pack_hh_b32_b16(self):
+    """S_PACK_HH_B32_B16: D0 = { S1[31:16], S0[31:16] }."""
+    instructions = [
+      s_mov_b32(s[0], 0xDEADAAAA),
+      s_mov_b32(s[1], 0xDEADBBBB),
+      s_pack_hh_b32_b16(s[2], s[0], s[1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.sgpr[2], 0xDEADDEAD)
+
+  def test_s_pack_hl_b32_b16(self):
+    """S_PACK_HL_B32_B16: D0 = { S1[15:0], S0[31:16] }."""
+    instructions = [
+      s_mov_b32(s[0], 0xDEADAAAA),
+      s_mov_b32(s[1], 0xDEADBBBB),
+      s_pack_hl_b32_b16(s[2], s[0], s[1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.sgpr[2], 0xBBBBDEAD)
+
 
 class TestQuadmaskWqm(unittest.TestCase):
   """Tests for S_QUADMASK_B32 and S_WQM_B32."""
