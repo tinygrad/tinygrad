@@ -175,6 +175,14 @@ class TestSchedule(unittest.TestCase):
     child.realize()
     assert a.uop.is_realized
 
+  def test_realize_view_of_realized_has_empty_schedule(self):
+    # views of realized buffers produce an empty schedule
+    t = Tensor.zeros((3, 3)).contiguous().realize()
+    v = t[1]  # view - is_realized but not has_buffer_identity
+    assert v.uop.is_realized
+    sched, _ = Tensor.schedule_with_vars(v)
+    self.assertEqual(len(sched), 0)
+
   # NOTE: because empty does not have a lowered ExecItem if realize is called on a childless empty, it never gets allocated.
   def test_childless_empty_never_allocates(self):
     a = Tensor.empty(10)

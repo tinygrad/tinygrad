@@ -248,6 +248,18 @@ class TestBFloat16DTypeCast(unittest.TestCase):
 
 class TestHalfDType(TestDType): DTYPE = dtypes.half
 
+@unittest.skipUnless(Ops.SHL in Device[Device.DEFAULT].renderer.code_for_op, "half decomp requires bitshift")
+class TestEmulatedHalf(TestHalfDType):
+  @classmethod
+  def setUpClass(cls):
+    cls.stack = contextlib.ExitStack()
+    cls.stack.enter_context(Context(EMULATED_DTYPES="half"))
+    cls.DATA = rand_for_dtype(cls.DTYPE, 10)
+
+  @classmethod
+  def tearDownClass(cls): cls.stack.close()
+
+
 class TestFloatDType(TestDType):
   DTYPE = dtypes.float
 
