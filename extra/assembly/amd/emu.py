@@ -135,19 +135,10 @@ def _val_to_u32(val: UOp) -> UOp:
   if val.dtype in (dtypes.uint16, dtypes.int16): return val.cast(dtypes.uint32)
   return val.cast(dtypes.uint32)
 
-def _apply_clamp(val: UOp, clmp: int | UOp, saturate: tuple[UOp, UOp] | None = None) -> UOp:
-  """Apply VOP3 clamp modifier: clamp float results to [0.0, 1.0] range, unsigned ints saturate on over/underflow."""
-  if isinstance(clmp, int) and clmp == 0: return val
-  clamped = None
-  if val.dtype in (dtypes.float32, dtypes.half, dtypes.float64):
-    zero, one = UOp.const(val.dtype, 0.0), UOp.const(val.dtype, 1.0)
-    clamped = val.maximum(zero).minimum(one)
-  elif saturate is not None:
-    # Cast saturation value to match val dtype for proper WHERE typing
-    sat_val = saturate[1].cast(val.dtype) if saturate[1].dtype != val.dtype else saturate[1]
-    clamped = saturate[0].where(sat_val, val)
-  if clamped is None: return val
-  return clmp.ne(_c(0)).where(clamped, val) if isinstance(clmp, UOp) else clamped
+def _apply_clamp(val: UOp, clmp: int) -> UOp:
+  """Apply VOP3 clamp modifier: clamp float results to [0.0, 1.0] range."""
+  if clmp == 0 or val.dtype not in (dtypes.float32, dtypes.half, dtypes.float64): return val
+  return val.maximum(UOp.const(val.dtype, 0.0)).minimum(UOp.const(val.dtype, 1.0))
 
 _pcode_fixes = {
   'V_DIV_FMAS_F32': ('D0.f32 = 2.0F ** 32 * fma(S0.f32, S1.f32, S2.f32)',
@@ -451,7 +442,7 @@ class _Ctx:
     return UOp.sink(*stores, *self.inc_pc())
 
   def compile_vop_pcode(self, op, srcs: dict[str, UOp], lane: UOp, vdst_reg: UOp, exec_mask: UOp,
-                        opsel_dst_hi: bool | UOp = False, sdst_reg: int | None = None, clmp: int | UOp = 0) -> UOp:
+                        opsel_dst_hi: bool | UOp = False, sdst_reg: int | None = None, clmp: int = 0) -> UOp:
     """Compile VOP instruction. Returns sink with stores and inc_pc."""
     pcode = get_pcode(op)
     vcc_reg = sdst_reg if sdst_reg is not None else VCC_LO.offset
@@ -493,8 +484,8 @@ class _Ctx:
             raw_stores.append(('vgpr_slice', (lo_bit, width, val_bits)))
             continue
         # For integer ops with clamp, use pre-computed saturated value
-        if int_saturate is not None: val = int_saturate if (isinstance(clmp, int) and clmp) else clmp.ne(_c(0)).where(int_saturate, val)
-        else: val = _apply_clamp(val, clmp, None)
+        if int_saturate is not None: val = int_saturate
+        else: val = _apply_clamp(val, clmp)
         if val.dtype in (dtypes.uint64, dtypes.int64, dtypes.float64):
           lo, hi = _split64(val)
           raw_stores.extend([('vgpr', self.wvgpr_dyn(vdst_reg, lane, lo, exec_mask)), ('vgpr', self.wvgpr_dyn(vdst_reg + _c(1), lane, hi, exec_mask))])
