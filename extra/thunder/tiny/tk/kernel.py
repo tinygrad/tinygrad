@@ -12,7 +12,7 @@ class _tk_range:
   def __next__(self):
     if not self.done:
       self.done = True
-      self._rng = UOp.range(self.end // self.step, self.rid, axis_type=self.axis_type) * self.step + self.start
+      self._rng = UOp.range((self.end - self.start) // self.step, self.rid, axis_type=self.axis_type) * self.step + self.start
       return self._rng
     raise StopIteration
 
