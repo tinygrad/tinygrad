@@ -119,7 +119,7 @@ class TestHCQ(unittest.TestCase):
     TestHCQ.d0.timeline_signal.wait(TestHCQ.d0.timeline_value)
     TestHCQ.d0.timeline_value += 1
 
-    val = TestHCQ.b.uop.buffer.as_buffer().cast("f")[0]
+    val = TestHCQ.b.uop.buffer.as_memoryview().cast("f")[0]
     assert val == 1.0, f"got val {val}"
 
   def test_exec_2_kernels_100_times(self):
@@ -135,7 +135,7 @@ class TestHCQ(unittest.TestCase):
       q.submit(TestHCQ.d0, {virt_val.expr: TestHCQ.d0.timeline_value})
       TestHCQ.d0.timeline_value += 1
 
-    val = TestHCQ.a.uop.buffer.as_buffer().cast("f")[0]
+    val = TestHCQ.a.uop.buffer.as_memoryview().cast("f")[0]
     assert val == 200.0, f"got val {val}"
 
   @unittest.skipIf(Device.DEFAULT in {"CPU"}, "No globals/locals on LLVM/CPU")
@@ -151,9 +151,9 @@ class TestHCQ(unittest.TestCase):
     TestHCQ.d0.timeline_signal.wait(TestHCQ.d0.timeline_value)
     TestHCQ.d0.timeline_value += 1
 
-    val = TestHCQ.b.uop.buffer.as_buffer().cast("f")[0]
+    val = TestHCQ.b.uop.buffer.as_memoryview().cast("f")[0]
     assert val == 1.0, f"got val {val}"
-    val = TestHCQ.b.uop.buffer.as_buffer().cast("f")[1]
+    val = TestHCQ.b.uop.buffer.as_memoryview().cast("f")[1]
     assert val == 0.0, f"got val {val}, should not be updated"
 
   @unittest.skipIf(Device.DEFAULT in {"CPU"}, "No globals/locals on LLVM/CPU")
@@ -186,7 +186,7 @@ class TestHCQ(unittest.TestCase):
           TestHCQ.d0.timeline_signal.wait(TestHCQ.d0.timeline_value)
           TestHCQ.d0.timeline_value += 1
 
-          res_sum = sum(x for x in zt.as_buffer().cast("I"))
+          res_sum = sum(x for x in zt.as_memoryview().cast("I"))
           assert x * y * z == res_sum, f"want {x * y * z}, got {res_sum}"
 
   # Test copy
@@ -200,7 +200,7 @@ class TestHCQ(unittest.TestCase):
     TestHCQ.d0.timeline_signal.wait(TestHCQ.d0.timeline_value)
     TestHCQ.d0.timeline_value += 1
 
-    val = TestHCQ.b.uop.buffer.as_buffer().cast("f")[1]
+    val = TestHCQ.b.uop.buffer.as_memoryview().cast("f")[1]
     assert val == 1.0, f"got val {val}"
 
   def test_copy_long(self):
@@ -218,7 +218,7 @@ class TestHCQ(unittest.TestCase):
     TestHCQ.d0.timeline_signal.wait(TestHCQ.d0.timeline_value)
     TestHCQ.d0.timeline_value += 1
 
-    mv_buf1 = buf1.as_buffer().cast('Q')
+    mv_buf1 = buf1.as_memoryview().cast('Q')
     assert libc.memcmp(mv_address(mv_buf1), buf2._buf.va_addr, sz) == 0
 
   @slow
@@ -242,7 +242,7 @@ class TestHCQ(unittest.TestCase):
       TestHCQ.d0.timeline_signal.wait(TestHCQ.d0.timeline_value)
       TestHCQ.d0.timeline_value += 1
 
-      mv_buf1 = buf1.as_buffer()
+      mv_buf1 = buf1.as_memoryview()
       assert libc.memcmp(mv_address(mv_buf1), buf2._buf.va_addr, sz) == 0
 
   def test_update_copy(self):
@@ -260,7 +260,7 @@ class TestHCQ(unittest.TestCase):
     TestHCQ.d0.timeline_signal.wait(TestHCQ.d0.timeline_value)
     TestHCQ.d0.timeline_value += 1
 
-    val = TestHCQ.b.uop.buffer.as_buffer().cast("f")[1]
+    val = TestHCQ.b.uop.buffer.as_memoryview().cast("f")[1]
     assert val == 1.0, f"got val {val}"
 
   def test_update_copy_long(self):
@@ -283,7 +283,7 @@ class TestHCQ(unittest.TestCase):
     TestHCQ.d0.timeline_signal.wait(TestHCQ.d0.timeline_value)
     TestHCQ.d0.timeline_value += 1
 
-    mv_buf1 = buf1.as_buffer().cast('Q')
+    mv_buf1 = buf1.as_memoryview().cast('Q')
     for i in range(sz//8): assert mv_buf1[i] == 0x0101010101010101, f"offset {i*8} differs, not all copied, got {hex(mv_buf1[i])}"
 
   # Test bind api
@@ -421,7 +421,7 @@ class TestHCQ(unittest.TestCase):
       TestHCQ.d0.timeline_signal.wait(TestHCQ.d0.timeline_value)
       TestHCQ.d0.timeline_value += 1
 
-      assert buf1.as_buffer()[0] == i
+      assert buf1.as_memoryview()[0] == i
 
   def test_small_copies_from_host_buf_intercopy(self):
     if TestHCQ.d0.hw_copy_queue_t is None: self.skipTest("device does not support copy queue")
@@ -440,7 +440,7 @@ class TestHCQ(unittest.TestCase):
       TestHCQ.d0.timeline_signal.wait(TestHCQ.d0.timeline_value)
       TestHCQ.d0.timeline_value += 1
 
-      assert buf2.as_buffer()[0] == i
+      assert buf2.as_memoryview()[0] == i
 
   def test_small_copies_from_host_buf_transfer(self):
     if TestHCQ.d0.hw_copy_queue_t is None: self.skipTest("device does not support copy queue")
@@ -463,7 +463,7 @@ class TestHCQ(unittest.TestCase):
       TestHCQ.d0.timeline_signal.wait(TestHCQ.d0.timeline_value)
       TestHCQ.d0.timeline_value += 1
 
-      assert buf2.as_buffer()[0] == i
+      assert buf2.as_memoryview()[0] == i
 
   def test_memory_barrier(self):
     a = Tensor([0, 1], device=Device.DEFAULT, dtype=dtypes.int8).realize()
@@ -486,7 +486,7 @@ class TestHCQ(unittest.TestCase):
       TestHCQ.d0.timeline_signal.wait(TestHCQ.d0.timeline_value)
       TestHCQ.d0.timeline_value += 1
 
-      assert buf1.as_buffer()[0] == (i + 1), f"has {buf1.as_buffer()[0]}, need {i + 1}"
+      assert buf1.as_memoryview()[0] == (i + 1), f"has {buf1.as_memoryview()[0]}, need {i + 1}"
 
   def test_memory_barrier_before_copy(self):
     if TestHCQ.d0.hw_copy_queue_t is None: self.skipTest("device does not support copy queue")
@@ -511,7 +511,7 @@ class TestHCQ(unittest.TestCase):
       TestHCQ.d0.timeline_signal.wait(TestHCQ.d0.timeline_value)
       TestHCQ.d0.timeline_value += 1
 
-      assert buf2.as_buffer()[0] == i
+      assert buf2.as_memoryview()[0] == i
 
   def test_map_cpu_buffer_to_device(self):
     if Device[Device.DEFAULT].hw_copy_queue_t is None: self.skipTest("skip device without copy queue")

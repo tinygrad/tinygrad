@@ -1,4 +1,4 @@
-import math, functools, operator
+import math
 from tinygrad.uop.ops import UOp, Ops, sint, PatternMatcher, UPat, KernelInfo, ssimplify, AxisType, sint_to_uop
 from tinygrad.helpers import all_int, dedup, get_contraction
 from tinygrad.dtype import dtypes, AddrSpace, Invalid
@@ -88,12 +88,11 @@ def add_gpudims(ctx:Renderer, s:UOp):
   subs = {}
   for r in s_topo:
     # look for local INDEXes that are not used in the GLOBAL store, then add them as an INVALID
-    if r.op is Ops.STORE and r.buf_target().ptrdtype.addrspace == AddrSpace.GLOBAL:
-      idx = r.src[0]
+    if r.op is Ops.STORE and (idx := r.src[0]).src[0].ptrdtype.addrspace == AddrSpace.GLOBAL:
       missing_locals = [all_ranges[rng] for rng in local_dims if all_ranges[rng] not in idx.ranges]
       if len(missing_locals):
         assert len(idx.src) == 2, "index has 2 sources"
-        mask: UOp = functools.reduce(operator.and_, [x.eq(0) for x in missing_locals])
+        mask: UOp = UOp.prod(*[x.eq(0) for x in missing_locals])
         subs[idx] = idx.replace(src=(idx.src[0], mask.broadcast(idx.src[1].dtype.count).where(idx.src[1], Invalid)))
     if r.op is not Ops.RANGE: continue
     try:

@@ -131,7 +131,7 @@ class TestAssign(unittest.TestCase):
 
   @unittest.skip("assign to contiguous shouldn't change the base buffer")
   def test_assign_changes_buffer_alt(self):
-    a, b = [Tensor(Tensor(0).contiguous().realize().uop.as_buf()) for _ in range(2)]
+    a, b = [Tensor(Tensor(0).contiguous().realize().uop.buf_uop) for _ in range(2)]
     Tensor.realize(a.contiguous().assign(1), b.contiguous().assign(2))
     self.assertEqual((a + b).item(), 3)
 

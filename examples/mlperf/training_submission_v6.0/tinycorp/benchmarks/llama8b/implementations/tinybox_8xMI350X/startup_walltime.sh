@@ -2,6 +2,7 @@
 export BENCHMARK=5
 export EVAL_BS=0
 export FAKEDATA=1
+export NULL_ALLOW_COPYOUT=1
 export HIP_VISIBLE_DEVICES=""
 export DEV=NULL
 export JITBEAM=0

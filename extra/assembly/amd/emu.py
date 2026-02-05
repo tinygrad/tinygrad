@@ -265,11 +265,11 @@ def _collect_data_slices(assigns: list[tuple[str, UOp]], data_prefix: str, pcode
 class _Ctx:
   """Context for instruction compilation - holds buffers and helpers."""
   __slots__ = ('inst_size', 'dyn_fields', '_axis_id')
-  sgpr = UOp(Ops.DEFINE_GLOBAL, dtypes.uint32.ptr(SGPR_COUNT), arg=0)
-  vgpr = UOp(Ops.DEFINE_GLOBAL, dtypes.uint32.ptr(VGPR_SIZE), arg=1)
-  vmem = UOp(Ops.DEFINE_GLOBAL, dtypes.uint32.ptr(1 << 46), arg=2)
-  lds = UOp(Ops.DEFINE_GLOBAL, dtypes.uint32.ptr(16384), arg=3)
-  scratch = UOp(Ops.DEFINE_GLOBAL, dtypes.uint8.ptr(1 << 30), arg=4)
+  sgpr = UOp(Ops.PARAM, dtypes.uint32.ptr(SGPR_COUNT), arg=0)
+  vgpr = UOp(Ops.PARAM, dtypes.uint32.ptr(VGPR_SIZE), arg=1)
+  vmem = UOp(Ops.PARAM, dtypes.uint32.ptr(1 << 46), arg=2)
+  lds = UOp(Ops.PARAM, dtypes.uint32.ptr(16384), arg=3)
+  scratch = UOp(Ops.PARAM, dtypes.uint8.ptr(1 << 30), arg=4)
 
   def __init__(self, inst_size: int):
     self.inst_size, self._axis_id = inst_size, 0
@@ -354,7 +354,7 @@ class _Ctx:
     offset = reg.cast(dtypes.int) * _c(32, dtypes.int) + lane.cast(dtypes.int)
     return buf.index(offset, _lane_active(exec_mask, lane)).store(val.cast(dtypes.uint32))
 
-  def rsrc_dyn(self, off: UOp, lane: UOp | None, bits: int = 32, literal: UOp | None = None, is_f64: bool = False) -> UOp:
+  def rsrc_dyn(self, off: UOp, lane: UOp | None, bits: int = 32, literal: UOp | None = None, is_f64: bool = False, do_cast: bool = True) -> UOp:
     """Read source operand with dynamic offset. Handles SGPR/inline constants (<256), VGPR (>=256).
     If lane is None, only scalar access is supported (off must be < 256).
     is_f64: True for F64 operations where 64-bit literals go in high 32 bits."""
@@ -385,7 +385,7 @@ class _Ctx:
     else:
       scalar_val = sgpr_lo
       if literal is not None: scalar_val = off.eq(_c(255)).where(literal, scalar_val)
-      if bits == 16:  # Float constants: cast F32 to F16
+      if bits == 16 and do_cast:  # Float constants: cast F32 to F16
         scalar_val = is_float_const.where(scalar_val.bitcast(dtypes.float32).cast(dtypes.half).bitcast(dtypes.uint16).cast(dtypes.uint32), scalar_val)
 
     return is_vgpr.where(vgpr_val, scalar_val) if lane is not None else scalar_val
@@ -800,9 +800,10 @@ def _compile_vop3p(inst: ir3.VOP3P | ir4.VOP3P, ctx: _Ctx) -> UOp:
   lane = ctx.range()
   exec_mask = ctx.rsgpr_dyn(_c(EXEC_LO.offset))
   vdst_reg = ctx.inst_field(type(inst).vdst)
-  src0 = ctx.rsrc_dyn(ctx.inst_field(type(inst).src0), lane, 16)
-  src1 = ctx.rsrc_dyn(ctx.inst_field(type(inst).src1), lane, 16)
-  src2 = ctx.rsrc_dyn(ctx.inst_field(type(inst).src2), lane, 16)
+  do_cast = any(x in op_name for x in ('F16', 'F32', 'BF16')) and 'IU' not in op_name
+  src0 = ctx.rsrc_dyn(ctx.inst_field(type(inst).src0), lane, 16, do_cast=do_cast)
+  src1 = ctx.rsrc_dyn(ctx.inst_field(type(inst).src1), lane, 16, do_cast=do_cast)
+  src2 = ctx.rsrc_dyn(ctx.inst_field(type(inst).src2), lane, 16, do_cast=do_cast)
   opsel, opsel_hi = getattr(inst, 'opsel', 0) or 0, getattr(inst, 'opsel_hi', 3) if getattr(inst, 'opsel_hi', 3) is not None else 3
   opsel_hi2 = getattr(inst, 'opsel_hi2', 1) if getattr(inst, 'opsel_hi2', 1) is not None else 1
   neg, neg_hi = getattr(inst, 'neg', 0) or 0, getattr(inst, 'neg_hi', 0) or 0
@@ -1120,8 +1121,8 @@ class WaveState:
     self.n_lanes = n_lanes
     self.vgpr_buf = Buffer('CPU', VGPR_SIZE, dtypes.uint32).ensure_allocated()
     self.sgpr_buf = Buffer('CPU', SGPR_COUNT, dtypes.uint32).ensure_allocated()
-    self._vgpr_mv = self.vgpr_buf.as_buffer(force_zero_copy=True).cast('I')
-    self._sgpr_mv = self.sgpr_buf.as_buffer(force_zero_copy=True).cast('I')
+    self._vgpr_mv = self.vgpr_buf.as_memoryview(force_zero_copy=True).cast('I')
+    self._sgpr_mv = self.sgpr_buf.as_memoryview(force_zero_copy=True).cast('I')
     # Zero memory using ctypes memset (much faster than Python loops)
     ctypes.memset(self.vgpr_buf._buf.va_addr, 0, VGPR_SIZE * 4)
     ctypes.memset(self.sgpr_buf._buf.va_addr, 0, SGPR_COUNT * 4)

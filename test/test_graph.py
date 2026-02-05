@@ -40,7 +40,7 @@ def helper_alloc_rawbuffer(device, fill=False):
   if fill:
     with Context(DEBUG=0):
       data = np.random.randint(-10000, 10000, size=rawbuf.size, dtype=_to_np_dtype(rawbuf.dtype))
-      rawbuf.copyin(Tensor(data).realize().uop.base.realized.as_buffer())
+      rawbuf.copyin(Tensor(data).realize().uop.base.realized.as_memoryview())
   return rawbuf
 
 def helper_create_offset_rawbuffer(base, offset=0):
@@ -54,7 +54,7 @@ def helper_run_jit(jis, bufs, out_buffers):
     rawbuf.copyin(mv)
 
   for ei in jis: ei.run({}, jit=True)
-  return [rawbuf.as_buffer() for rawbuf in bufs]
+  return [rawbuf.as_memoryview() for rawbuf in bufs]
 
 def helper_test_graphs(graph_impl, graphs, runs=RUN_CNT):
   reg_ji = []

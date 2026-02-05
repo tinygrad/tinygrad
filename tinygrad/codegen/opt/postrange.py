@@ -331,7 +331,7 @@ class Scheduler:
   def group_for_reduces(self) -> int: return len(self.axes_of(AxisType.GROUP_REDUCE))
 
 def bufs_from_ast(ast:UOp, dname:str) -> list[Buffer]:
-  glbls = sorted([x for x in ast.backward_slice if x.op is Ops.DEFINE_GLOBAL], key=lambda x: x.arg)
+  glbls = sorted([x for x in ast.backward_slice if x.op is Ops.PARAM], key=lambda x: x.arg)
   return [Buffer(dname, x.ptrdtype.size, x.dtype.base if not isinstance(x.dtype, ImageDType) else x.dtype) for x in glbls]
 
 def apply_opts(ast:UOp, ren:Renderer) -> UOp:
@@ -362,7 +362,7 @@ def make_images(ast:UOp, ren:Renderer) -> UOp:
         ctx[dg.arg] = dt
         return dg.replace(dtype=dtypes.imagef((1, dt.size // 4, 4), dt.nbytes()))
 
-    ast = graph_rewrite(ast, PatternMatcher([(UPat(Ops.DEFINE_GLOBAL, name="dg"), make_image)]), ctx=dg_types, name="create image buffers")
+    ast = graph_rewrite(ast, PatternMatcher([(UPat(Ops.PARAM, name="dg"), make_image)]), ctx=dg_types, name="create image buffers")
 
     # undo unfoldable stores
     def undo_image_store(ctx, st, idx, dg):
@@ -370,6 +370,6 @@ def make_images(ast:UOp, ren:Renderer) -> UOp:
         return st.replace(src=(idx.replace(src=(dg.replace(dtype=ctx[dg.arg]),)+idx.src[1:]),)+st.src[1:])
 
     ast = graph_rewrite(ast, PatternMatcher([
-      (UPat(Ops.DEFINE_GLOBAL, name="dg").index(UPat(), name="idx").store(UPat(), name="st"), undo_image_store)
+      (UPat(Ops.PARAM, name="dg").index(UPat(), name="idx").store(UPat(), name="st"), undo_image_store)
     ]), ctx=dg_types, name="remove unfoldable image stores")
   return ast

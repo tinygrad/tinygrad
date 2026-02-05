@@ -440,7 +440,7 @@ class Parser:
       self.eat('COMMA')
       lo = self.parse()
       self.eat('RBRACE')
-      return (hi.cast(dtypes.uint64) << _u64(32)) | lo.cast(dtypes.uint64)
+      return (hi.cast(dt:=_BITS_DT.get((s:=lo.dtype.bitsize) * 2, dtypes.uint64)) << _const(dt, s)) | lo.cast(dt)
     if self.at('NUM'):
       num = self.eat('NUM').val
       if self.try_eat('QUOTE'):

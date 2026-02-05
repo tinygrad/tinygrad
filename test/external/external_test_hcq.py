@@ -65,7 +65,7 @@ class TestHCQ(unittest.TestCase):
     q.submit(TestHCQ.d0)
     TestHCQ.d0._wait_signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value)
     TestHCQ.d0.timeline_value += 1
-    val = TestHCQ.a.uop.buffer.as_buffer().cast("f")[0]
+    val = TestHCQ.a.uop.buffer.as_memoryview().cast("f")[0]
     assert val == 2000.0, f"got val {val}"
 
   def test_run_1000_times(self):
@@ -81,7 +81,7 @@ class TestHCQ(unittest.TestCase):
       TestHCQ.compute_queue().signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value).submit(TestHCQ.d0)
       TestHCQ.d0._wait_signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value)
       TestHCQ.d0.timeline_value += 1
-    val = TestHCQ.a.uop.buffer.as_buffer().cast("f")[0]
+    val = TestHCQ.a.uop.buffer.as_memoryview().cast("f")[0]
     assert val == 2000.0, f"got val {val}"
 
   def test_run_to_3(self):
@@ -95,7 +95,7 @@ class TestHCQ(unittest.TestCase):
     q.signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value).submit(TestHCQ.d0)
     TestHCQ.d0._wait_signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value)
     TestHCQ.d0.timeline_value += 1
-    val = TestHCQ.b.uop.buffer.as_buffer().cast("f")[0]
+    val = TestHCQ.b.uop.buffer.as_memoryview().cast("f")[0]
     assert val == 3.0, f"got val {val}"
 
   def test_update_exec(self):
@@ -106,9 +106,9 @@ class TestHCQ(unittest.TestCase):
     q.signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value).submit(TestHCQ.d0)
     TestHCQ.d0._wait_signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value)
     TestHCQ.d0.timeline_value += 1
-    val = TestHCQ.b.uop.buffer.as_buffer().cast("f")[0]
+    val = TestHCQ.b.uop.buffer.as_memoryview().cast("f")[0]
     assert val == 1.0, f"got val {val}"
-    val = TestHCQ.b.uop.buffer.as_buffer().cast("f")[1]
+    val = TestHCQ.b.uop.buffer.as_memoryview().cast("f")[1]
     assert val == 0.0, f"got val {val}, should not be updated"
 
   @unittest.skipUnless(Device.DEFAULT == "NV", "Only NV supports bind")
@@ -126,7 +126,7 @@ class TestHCQ(unittest.TestCase):
       TestHCQ.compute_queue().signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value).submit(TestHCQ.d0)
       TestHCQ.d0._wait_signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value)
       TestHCQ.d0.timeline_value += 1
-    val = TestHCQ.a.uop.buffer.as_buffer().cast("f")[0]
+    val = TestHCQ.a.uop.buffer.as_memoryview().cast("f")[0]
     assert val == 2000.0, f"got val {val}"
 
   @unittest.skipUnless(Device.DEFAULT == "NV", "Only NV supports bind")
@@ -141,9 +141,9 @@ class TestHCQ(unittest.TestCase):
     q.submit(TestHCQ.d0)
     TestHCQ.d0._wait_signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value)
     TestHCQ.d0.timeline_value += 1
-    val = TestHCQ.b.uop.buffer.as_buffer().cast("f")[0]
+    val = TestHCQ.b.uop.buffer.as_memoryview().cast("f")[0]
     assert val == 1.0, f"got val {val}"
-    val = TestHCQ.b.uop.buffer.as_buffer().cast("f")[1]
+    val = TestHCQ.b.uop.buffer.as_memoryview().cast("f")[1]
     assert val == 0.0, f"got val {val}, should not be updated"
 
   @unittest.skipIf(CI, "Can't handle async update on CPU")
@@ -174,7 +174,7 @@ class TestHCQ(unittest.TestCase):
     q.signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value).submit(TestHCQ.d0)
     TestHCQ.d0._wait_signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value)
     TestHCQ.d0.timeline_value += 1
-    val = TestHCQ.b.uop.buffer.as_buffer().cast("f")[0]
+    val = TestHCQ.b.uop.buffer.as_memoryview().cast("f")[0]
     assert val == 1.0, f"got val {val}"
 
   def test_submit_empty_queues(self):
@@ -206,7 +206,7 @@ class TestHCQ(unittest.TestCase):
     q.submit(TestHCQ.d0)
     TestHCQ.d0._wait_signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value)
     TestHCQ.d0.timeline_value += 1
-    val = TestHCQ.b.uop.buffer.as_buffer().cast("f")[0]
+    val = TestHCQ.b.uop.buffer.as_memoryview().cast("f")[0]
     assert val == 1.0, f"got val {val}"
 
   def test_copy_1000_times(self):
@@ -221,7 +221,7 @@ class TestHCQ(unittest.TestCase):
     # confirm the signal didn't exceed the put value
     with self.assertRaises(RuntimeError):
       TestHCQ.d0._wait_signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value + 1, timeout=50)
-    val = TestHCQ.b.uop.buffer.as_buffer().cast("f")[1]
+    val = TestHCQ.b.uop.buffer.as_memoryview().cast("f")[1]
     assert val == 0.0, f"got val {val}"
 
   def test_copy(self):
@@ -231,7 +231,7 @@ class TestHCQ(unittest.TestCase):
     q.submit(TestHCQ.d0)
     TestHCQ.d0._wait_signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value)
     TestHCQ.d0.timeline_value += 1
-    val = TestHCQ.b.uop.buffer.as_buffer().cast("f")[1]
+    val = TestHCQ.b.uop.buffer.as_memoryview().cast("f")[1]
     assert val == 1.0, f"got val {val}"
 
   @unittest.skipUnless(Device.DEFAULT == "NV", "Only NV supports bind")
@@ -248,7 +248,7 @@ class TestHCQ(unittest.TestCase):
     # confirm the signal didn't exceed the put value
     with self.assertRaises(RuntimeError):
       TestHCQ.d0._wait_signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value + 1, timeout=50)
-    val = TestHCQ.b.uop.buffer.as_buffer().cast("f")[1]
+    val = TestHCQ.b.uop.buffer.as_memoryview().cast("f")[1]
     assert val == 0.0, f"got val {val}"
 
   def test_copy_bandwidth(self):
@@ -288,7 +288,7 @@ class TestHCQ(unittest.TestCase):
     q.submit(TestHCQ.d0)
     TestHCQ.d0._wait_signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value)
     TestHCQ.d0.timeline_value += 1
-    val = TestHCQ.a.uop.buffer.as_buffer().cast("f")[0]
+    val = TestHCQ.a.uop.buffer.as_memoryview().cast("f")[0]
     assert val == 1.0, f"got val {val}"
 
   def test_cross_device_signal(self):
@@ -319,7 +319,7 @@ class TestHCQ(unittest.TestCase):
       q.signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value).submit(TestHCQ.d0)
       TestHCQ.d0._wait_signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value)
       TestHCQ.d0.timeline_value += 1
-      val = TestHCQ.b.uop.buffer.as_buffer().cast("f")[0]
+      val = TestHCQ.b.uop.buffer.as_memoryview().cast("f")[0]
       assert val == 1.0, f"got val {val}"
 
 if __name__ == "__main__":

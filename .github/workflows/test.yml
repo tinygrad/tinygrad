@@ -207,11 +207,11 @@ jobs:
       run: DEBUG=2 AMX=1 EMULATE=AMX FORWARD_ONLY=1 PYTHON=1 python3 test/opt/test_tensor_cores.py
     - name: Test device flop counts
       run: |
-        DEBUG=2 EMULATE=METAL PYTHON=1 python3 ./test/test_uops_stats.py TestUOpsStatsMatmulHalf
-        DEBUG=2 EMULATE=AMD PYTHON=1 python3 ./test/test_uops_stats.py TestUOpsStatsMatmulHalf
-        DEBUG=2 EMULATE=CUDA PYTHON=1 python3 ./test/test_uops_stats.py TestUOpsStatsMatmulHalf
-        DEBUG=2 EMULATE=INTEL PYTHON=1 python3 ./test/test_uops_stats.py TestUOpsStatsMatmulHalf
-        DEBUG=2 AMX=1 EMULATE=AMX PYTHON=1 python3 ./test/test_uops_stats.py TestUOpsStats.test_simple_matmul
+        DEBUG=2 EMULATE=METAL PYTHON=1 python3 ./test/null/test_uops_stats.py TestUOpsStatsMatmulHalf
+        DEBUG=2 EMULATE=AMD PYTHON=1 python3 ./test/null/test_uops_stats.py TestUOpsStatsMatmulHalf
+        DEBUG=2 EMULATE=CUDA PYTHON=1 python3 ./test/null/test_uops_stats.py TestUOpsStatsMatmulHalf
+        DEBUG=2 EMULATE=INTEL PYTHON=1 python3 ./test/null/test_uops_stats.py TestUOpsStatsMatmulHalf
+        DEBUG=2 AMX=1 EMULATE=AMX PYTHON=1 python3 ./test/null/test_uops_stats.py TestUOpsStats.test_simple_matmul
 
   linter:
     name: Linters
