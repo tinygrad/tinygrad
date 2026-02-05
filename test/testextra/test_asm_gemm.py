@@ -35,7 +35,7 @@ class TestGemm(unittest.TestCase):
   def test_gemm_multi(self): verify_asm_gemm(2, 8192, 4096, 4096, gpus=2)
   def test_gemm_unsupported(self):
     with self.assertRaisesRegex(AssertionError, "shape not supported"):
-      verify_asm_gemm(8, 8192, 1024, 4096, gpus=8)
+      verify_asm_gemm(8, 1024, 1024, 4096, gpus=8)
 
 class TestGemmLarge(unittest.TestCase):
   def setUp(self):
