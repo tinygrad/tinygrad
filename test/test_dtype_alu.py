@@ -133,6 +133,11 @@ class TestDTypeALU(unittest.TestCase):
   def test_fp8e4m3(self, a, b, op):
     universal_test(from_storage_scalar(a, dtypes.fp8e4m3), from_storage_scalar(b, dtypes.fp8e4m3), dtypes.fp8e4m3, op)
 
+  @given(ht.fp8e4m3, ht.fp8e4m3, strat.sampled_from(binary_operations))
+  @Context(EMULATED_DTYPES="fp8e4m3")
+  def test_emulated_fp8e4m3(self, a, b, op):
+    universal_test(from_storage_scalar(a, dtypes.fp8e4m3), from_storage_scalar(b, dtypes.fp8e4m3), dtypes.fp8e4m3, op)
+
   @unittest.skipUnless(is_dtype_supported(dtypes.fp8e5m2), f"no fp8e5m2 on {Device.DEFAULT}")
   @given(ht.fp8e5m2, ht.fp8e5m2, strat.sampled_from(binary_operations))
   def test_fp8e5m2(self, a, b, op):
@@ -156,6 +161,12 @@ class TestDTypeALU(unittest.TestCase):
   @unittest.skipUnless(is_dtype_supported(dtypes.fp8e4m3), f"no fp8e4m3 on {Device.DEFAULT}")
   @given(ht.fp8e4m3, strat.sampled_from(unary_operations))
   def test_fp8e4m3_unary(self, a, op):
+    if op[1] == np.reciprocal: assume(from_storage_scalar(a, dtype=dtypes.fp8e4m3) != 0.0)
+    universal_test_unary(from_storage_scalar(a, dtype=dtypes.fp8e4m3), dtypes.fp8e4m3, op)
+
+  @given(ht.fp8e4m3, strat.sampled_from(unary_operations))
+  @Context(EMULATED_DTYPES="fp8e4m3")
+  def test_emulated_fp8e4m3_unary(self, a, op):
     if op[1] == np.reciprocal: assume(from_storage_scalar(a, dtype=dtypes.fp8e4m3) != 0.0)
     universal_test_unary(from_storage_scalar(a, dtype=dtypes.fp8e4m3), dtypes.fp8e4m3, op)
 

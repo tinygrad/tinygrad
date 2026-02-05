@@ -14,8 +14,8 @@ def _lazy_map_numbers(x:UOp, inf:UOp, _inf:UOp, nan:UOp, ratio:UOp):
 
 # *** helper functions for bit manipulation ***
 def mantissa_bits(d:DType) -> int: return dtypes.finfo(d.scalar())[1]
-def exponent_bias(d:DType) -> int: return {dtypes.float64: 1023, dtypes.float32: 127, dtypes.float16: 15}[d.scalar()]
-def exponent_mask(d:DType) -> int: return {dtypes.float64: 2047, dtypes.float32: 255, dtypes.float16: 31}[d.scalar()]
+def exponent_bias(d:DType) -> int: return (1 << (dtypes.finfo(d.scalar())[0] - 1)) - 1
+def exponent_mask(d:DType) -> int: return (1 << dtypes.finfo(d.scalar())[0]) - 1
 
 # **** utils ****
 def shr(x:UOp|int, y:UOp|int) -> UOp: return x // (2**(y.simplify().arg) if isinstance(y, UOp) else 2**y)
@@ -378,7 +378,7 @@ def l2i(op: Ops, dt: DType, *uops:UOp):
     case _: raise NotImplementedError(f"long decomposition of {op} unsupported")
 
 # ***** floats *****
-f2f_dt = { dtypes.half: dtypes.ushort, dtypes.float: dtypes.uint }
+f2f_dt = { dtypes.fp8e4m3: dtypes.uint8, dtypes.fp8e5m2: dtypes.uint8, dtypes.half: dtypes.ushort, dtypes.bfloat16: dtypes.ushort, dtypes.float: dtypes.uint }
 
 def rne(v: UOp, s) -> UOp: return shr(v, s) + ((shr(v, s - 1) & 1) & ((v & ((1 << (s - 1)) - 1)).ne(0).cast(v.dtype) | (shr(v, s) & 1)))
 
@@ -388,23 +388,30 @@ def f2f(v, fr:DType, to:DType):
   if fe < te and fm < tm:
     sign, nosign = shl((v & shl(1, fs-1)).cast(f2f_dt[to]), ts - fs), (v & (shl(1, fs-1) - 1)).cast(f2f_dt[to])
     exp, norm = shr(nosign, fm), shl(nosign, tm - fm) + shl(tb - fb, tm)
-    inf_or_nan = shl(nosign, tm - fm) | shl((shl(1, te) - 1), tm)
-    return (sign | exp.eq(0).where(0, exp.eq(shl(1, fe) - 1).where(inf_or_nan, norm))).bitcast(to)
+    nan = shl(nosign, tm - fm) | shl((shl(1, te) - 1), tm)
+    # fp8e4m3: only exp=15 AND mantissa=7 is NaN, other exp=15 values are normal
+    is_nan = (nosign.eq(shl(1, fm + fe) - 1) if fr == dtypes.fp8e4m3 else exp.eq(shl(1, fe) - 1))
+    return (sign | exp.eq(0).where(0, is_nan.where(nan, norm))).bitcast(to)
   elif fe > te and fm > tm:
     sign, nosign, exp = shr(v, fs - ts) & shl(1, ts - 1), v & (shl(1, fs - 1) - 1), shr(v, fm) & (shl(1, fe) - 1)
+    mantissa = nosign & (shl(1, fm) - 1)
+    # fp8e4m3 has no infinity - saturate to max normal (0x7E) instead of inf
+    maxnorm = shl(shl(1, te) - 1, tm) | (shl(1, tm) - 2) if to == dtypes.fp8e4m3 else shl(shl(1, te) - 1, tm)
     norm = (rne(nosign, fm - tm) - shl(fb - tb, tm)).cast(f2f_dt[to])
-    infnan = (sign | (shr(nosign, fm - tm) & (shl(1, tm) - 1)) | shl(shl(1, te) - 1, tm)).cast(f2f_dt[to])
+    nan = (sign | (shr(nosign, fm - tm) & (shl(1, tm) - 1)) | shl(shl(1, te) - 1, tm)).cast(f2f_dt[to])
+    # for fp8e4m3: infinity (mantissa=0) -> maxnorm, NaN (mantissa!=0) -> nan
+    infnan = mantissa.eq(0).where(sign.cast(f2f_dt[to]) | maxnorm, nan) if to == dtypes.fp8e4m3 else nan
     underflow, overflow = exp < (1 + fb - tb), exp > (shl(1, te) - 2 + (fb - tb))
-    return exp.eq(shl(1, fe) - 1).where(infnan, sign.cast(f2f_dt[to]) | underflow.where(0, overflow.where(shl(shl(1, te) - 1, tm), norm)))
+    return exp.eq(shl(1, fe) - 1).where(infnan, sign.cast(f2f_dt[to]) | underflow.where(0, overflow.where(maxnorm, norm)))
   else: raise NotImplementedError(f"unsupported decomp {fr} -> {to}")
 
-def f2f_load(x: UOp) -> UOp:
-  if (n:=x.dtype.count) == 1: return f2f(x.replace(dtype=dtypes.ushort), dtypes.half, dtypes.float)
-  return UOp.vectorize(*(f2f(x.replace(dtype=dtypes.ushort, src=(reindex(x.src[0].src[0], i, 1),)), dtypes.half, dtypes.float) for i in range(n)))
+def f2f_load(x: UOp, fr:DType, to:DType) -> UOp:
+  if (n:=x.dtype.count) == 1: return f2f(x.replace(dtype=f2f_dt[fr]), fr, to)
+  return UOp.vectorize(*(f2f(x.replace(dtype=f2f_dt[fr], src=(reindex(x.src[0].src[0], i, 1),)), fr, to) for i in range(n)))
 
-def f2f_store(st, idx, val):
-  if (n:=val.dtype.count) == 1: return st.replace(src=(idx, f2f(val.bitcast(dtypes.uint), dtypes.float, dtypes.half)))
-  return UOp.group(*(st.replace(src=(reindex(idx, i, 1), f2f(val.gep(i).bitcast(dtypes.uint), dtypes.float, dtypes.half))) for i in range(n)))
+def f2f_store(st, idx, val, fr:DType, to:DType):
+  if (n:=val.dtype.count) == 1: return st.replace(src=(idx, f2f(val.bitcast(f2f_dt[to]), to, fr)))
+  return UOp.group(*(st.replace(src=(reindex(idx, i, 1), f2f(val.gep(i).bitcast(f2f_dt[to]), to, fr))) for i in range(n)))
 
 # ***** decomposition patterns *****
 
@@ -487,16 +494,20 @@ def get_unsupported_dtypes_patterns(device:str, emulated_dtypes:tuple[DType, ...
              x.replace(dtype=l2i_dt[x.dtype], src=(reindex(idx, x.tag),)))]
     pat += [(UPat(Ops.CONST, tuple(l2i_dt.keys()), name='x'), lambda x:
              UOp.const(dt:=l2i_dt[x.dtype], truncate[dt]((x.arg >> 32) if x.tag == 1 else (x.arg & 0xFFFFFFFF))))]
-  if dtypes.half in emulated_dtypes:
-    pat += [(UPat((*GroupOp.Defines, Ops.INDEX), name="x"), lambda x:
-             x.replace(dtype=dtypes.uint16.ptr(x.dtype.size), tag=dtypes.half) if x.dtype.base == dtypes.half else None)]
-    pat += [(UPat(Ops.LOAD, dtypes.half, name="x"), f2f_load)]
-    pat += [(UPat(Ops.BITCAST, src=(UPat(Ops.LOAD, dtypes.half, name="ld"),), name="bc"), lambda bc,ld:
-             ld.replace(dtype=dtypes.ushort).bitcast(bc.dtype))]
-    pat += [(UPat(Ops.BITCAST, (dtypes.ushort, dtypes.short, dtypes.bfloat16), src=(UPat.var("x", dtypes.float),), name="bc"), lambda bc,x:
-             bc.replace(src=(f2f(x.bitcast(dtypes.uint), dtypes.float, dtypes.half),)))]
-    pat += [(UPat(GroupOp.All, dtypes.half, name="x"), lambda x:
-             x.replace(dtype=dtypes.float.vec(x.dtype.count), src=tuple(s.cast(dtypes.float) if s.dtype == dtypes.half else s for s in x.src)))]
-    pat += [(UPat(Ops.STORE, src=(UPat.var("idx"), UPat.var("val", dtypes.float)), name='st'), lambda st,idx,val:
-             f2f_store(st, idx, val) if (idx:=idx.src[0] if idx.op == Ops.CAST else idx).tag == dtypes.half else None)]
   return PatternMatcher(pat)
+
+# float decomposition patterns - ctx is (fr, to) tuple
+pm_float_decomp = PatternMatcher([
+  (UPat((*GroupOp.Defines, Ops.INDEX), name="x"), lambda ctx,x:
+   x.replace(dtype=f2f_dt[ctx[0]].ptr(x.dtype.size), tag=ctx[0]) if x.dtype.base == ctx[0] else None),
+  (UPat(Ops.LOAD, dtypes.floats, name="x"), lambda ctx,x: f2f_load(x, *ctx) if x.dtype.scalar() == ctx[0] else None),
+  (UPat(Ops.BITCAST, src=(UPat(Ops.LOAD, dtypes.floats, name="ld"),), name="bc"), lambda ctx,bc,ld:
+   ld.replace(dtype=f2f_dt[ctx[0]]).bitcast(bc.dtype) if ld.dtype == ctx[0] else None),
+  # TODO: this rule looks wrong - needs review
+  (UPat(Ops.BITCAST, src=(UPat.var("x", dtypes.floats),), name="bc"), lambda ctx,bc,x:
+   bc.replace(src=(f2f(x.bitcast(f2f_dt[ctx[1]]), ctx[1], ctx[0]),)) if x.dtype == ctx[1] and bc.dtype.bitsize == ctx[0].bitsize else None),
+  (UPat(GroupOp.All, dtypes.floats, name="x"), lambda ctx,x:
+   x.replace(dtype=ctx[1].vec(x.dtype.count), src=tuple(s.cast(ctx[1]) if s.dtype == ctx[0] else s for s in x.src)) if x.dtype.scalar() == ctx[0] else None),
+  (UPat(Ops.STORE, src=(UPat.var("idx"), UPat.var("val", dtypes.floats)), name='st'), lambda ctx,st,idx,val:
+   f2f_store(st, idx, val, *ctx) if val.dtype.scalar() == ctx[1] and (idx:=idx.src[0] if idx.op == Ops.CAST else idx).tag == ctx[0] else None),
+])

@@ -381,6 +381,18 @@ class TestBoolDType(TestDType): DTYPE = dtypes.bool
 class TestBFloat16Type(TestDType): DTYPE = dtypes.bfloat16
 
 class TestFp8e4m3(TestDType): DTYPE = dtypes.fp8e4m3
+
+@unittest.skipUnless(Ops.SHL in Device[Device.DEFAULT].renderer.code_for_op, "fp8 decomp requires bitshift")
+class TestEmulatedFp8e4m3(TestFp8e4m3):
+  @classmethod
+  def setUpClass(cls):
+    cls.stack = contextlib.ExitStack()
+    cls.stack.enter_context(Context(EMULATED_DTYPES="fp8e4m3"))
+    cls.DATA = rand_for_dtype(cls.DTYPE, 10)
+
+  @classmethod
+  def tearDownClass(cls): cls.stack.close()
+
 class TestFp8e5m2(TestDType): DTYPE = dtypes.fp8e5m2
 
 class TestPtrDType(unittest.TestCase):
