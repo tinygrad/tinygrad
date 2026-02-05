@@ -2949,6 +2949,24 @@ class TestVOP3Clamp(unittest.TestCase):
     self.assertAlmostEqual(i2f(st.vgpr[3][1]), 1.0, places=5, msg="lane 3: 2.5 should clamp to 1.0")
 
 
+class TestVOP3ClampUint32(unittest.TestCase):
+  """Tests for VOP3 clamp modifier on unsigned 32-bit integer operations."""
+
+  def test_v_sub_nc_u32_e64_clamp_underflow(self):
+    """V_SUB_NC_U32_E64 with clamp: 0 - 1 should saturate to 0."""
+    instructions = [
+      v_mov_b32_e32(v[0], 0),    # S0 = 0
+      v_mov_b32_e32(v[1], 1),    # S1 = 1
+      # v_sub_nc_u32_e64 v[2], v[0], v[1], clmp=1
+      # D0 = S0 - S1 = 0 - 1 = underflow -> should saturate to 0
+      v_sub_nc_u32_e64(v[2], v[0], v[1], clmp=1),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    # Without clamp saturation, this would be 0xFFFFFFFF (wraparound)
+    # With proper clamp, it should be 0
+    self.assertEqual(st.vgpr[0][2], 0, f"expected 0, got 0x{st.vgpr[0][2]:08x}")
+
+
 class TestCvtPkF16(unittest.TestCase):
   """Tests for V_CVT_PK_RTZ_F16_F32 - pack two f32 to f16 with round toward zero."""
 
