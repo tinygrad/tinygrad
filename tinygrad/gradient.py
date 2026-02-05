@@ -14,7 +14,7 @@ def reduce_gradient(ctx:UOp, ret:UOp, op:Ops):
   if op == Ops.MUL: return (broadcast_to_input(ctx * ret) / ret.src[0],)
 
 def call_gradient(ctx:UOp, k:UOp):
-  if k.arg is not None: return (None,) + k.arg(ctx, k)
+  if k.arg.grad_fxn is not None: return (None,) + k.arg.grad_fxn(ctx, k)
   # auto-differentiate the function
   fxn, args = k.src[0], k.src[1:]
   params = sorted([x for x in fxn.toposort() if x.op == Ops.PARAM], key=lambda x: x.arg)
