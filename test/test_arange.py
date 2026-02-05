@@ -188,7 +188,7 @@ class TestIndexing(unittest.TestCase):
     for i in idx.flatten().numpy(): expected_grad[i] += 2
     np.testing.assert_allclose(emb.weight.grad.numpy(), expected_grad, rtol=1e-5, atol=1e-5)
 
-  # bf16 has ~10x op overhead vs half
+  # ~10x overhead in fused matmul bw with rope in bf16 vs float16
   def base_test_llama_8b_rope_backward(self, dtype, ops_scale):
     from extra.models.llama import precompute_freqs_cis, apply_rotary_emb
     Tensor.training = True
@@ -201,7 +201,10 @@ class TestIndexing(unittest.TestCase):
     Tensor.realize(x, wq, freqs_cis)
 
     GlobalCounters.reset()
-    xq = (x @ wq.T).reshape(bs, seqlen, n_heads, head_dim)
+    xq = (x @ wq.T)
+    # main llama does not fuse it
+    #xq = xq.contiguous_backward()
+    xq = xq.reshape(bs, seqlen, n_heads, head_dim)
     xq_rope, _ = apply_rotary_emb(xq, xq, freqs_cis)
     xq_rope.sum().backward()
     wq.grad.realize()

@@ -31,14 +31,18 @@ if __name__ == "__main__":
                       help='Rewrites: Select an item within the chosen kernel (optional name, default: only list names)')
   parser.add_argument('--profile', action="store_true", help="View profiling trace (default: views rewrites)")
   parser.add_argument('--device', type=str, default=None, metavar="NAME", help="Profile only: Select a device (default: prints all devices)")
+  parser.add_argument('--profile-path', type=pathlib.Path, metavar="PATH", help='Path to profile (optional file, default: latest profile)',
+                      default=pathlib.Path(temp("profile.pkl", append_user=True)))
+  parser.add_argument('--rewrites-path', type=pathlib.Path, metavar="PATH", help='Path to rewrites (optional file, default: latest rewrites)',
+                      default=pathlib.Path(temp("rewrites.pkl", append_user=True)))
   args = parser.parse_args()
 
-  viz.trace = viz.load_pickle(pathlib.Path(temp("rewrites.pkl", append_user=True)), default=RewriteTrace([], [], {}))
+  viz.trace = viz.load_pickle(args.rewrites_path, default=RewriteTrace([], [], {}))
   viz.ctxs = viz.get_rewrites(viz.trace)
 
   if args.profile:
     from tabulate import tabulate
-    profile = load_profile(viz.load_pickle(pathlib.Path(temp("profile.pkl", append_user=True)), default=[]))
+    profile = load_profile(viz.load_pickle(args.profile_path, default=[]))
     agg, total, n = {}, 0, 0
     for k,v in profile["layout"].items():
       if not optional_eq({"name":k}, args.device): continue
