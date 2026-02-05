@@ -15,6 +15,24 @@ class MetalGraph(GraphRunner):
     super().__init__(jit_cache, input_buffers, var_vals, orig_valid_positions)
     if not all(isinstance(ji.prg, CompiledRunner) for ji in jit_cache): raise GraphException
 
+    self.fixedvars = merge_dicts([ji.fixedvars for ji in jit_cache])
+    self.command_buffer: Any = None
+
+    # use direct dispatch for small kernel counts to avoid ICB overhead
+    self.use_direct = len(jit_cache) <= getenv("METAL_DIRECT_MAX", 8)
+
+    if self.use_direct:
+      self.kernels: list[tuple[Any, list[tuple[int, Any]], int, list[str], tuple[int,...], tuple[int,...]]] = []
+      for j,ji in enumerate(jit_cache):
+        prg: CompiledRunner = cast(CompiledRunner, ji.prg)
+        fixed_bufs = [(i, b._buf) for i,b in enumerate(ji.bufs) if b is not None and (j,i) not in self.input_replace]
+        global_size, local_size = prg.p.launch_dims(var_vals)
+        self.kernels.append((prg._prg.pipeline_state, fixed_bufs, len(ji.bufs), [v.expr for v in prg.p.vars],
+                             tuple(global_size), tuple(local_size)))
+    else:
+      self._init_icb(jit_cache, var_vals)
+
+  def _init_icb(self, jit_cache: list[ExecItem], var_vals: dict[str, int]):
     # create metal batch exec
     icb_descriptor = metal.MTLIndirectCommandBufferDescriptor.new()
     icb_descriptor.setCommandTypes(metal.MTLIndirectCommandTypeConcurrentDispatch)
@@ -29,7 +47,6 @@ class MetalGraph(GraphRunner):
     icb_label = bytes(objc.msg("UTF8String", ctypes.c_char_p)(objc.msg("description")(self.icb).retained())).decode()
     self.needs_icb_fix = int((m := re.search(r'AGXG(\d+)XFamily', icb_label)) is None or int(m.group(1)) < 15) # not required on M3+
 
-    self.fixedvars = merge_dicts([ji.fixedvars for ji in jit_cache])
     self.varlist = self.vars + list(self.fixedvars.keys())
     if len(self.varlist): self.int_buf = self.dev.allocator.alloc(len(self.varlist)*dtypes.int32.itemsize)
 
@@ -51,7 +68,6 @@ class MetalGraph(GraphRunner):
 
     self.all_resources = dedup(all_resources)
     self.all_pipelines = dedup(all_pipelines)
-    self.command_buffer: Any = None
     if len(self.varlist): self.int_buf_view = self.dev.allocator._as_buffer(self.int_buf).cast('i')
     for var in self.fixedvars: self.int_buf_view[self.varlist.index(var)] = self.fixedvars[var]
     self.range = metal.NSRange(0, len(jit_cache))
@@ -61,6 +77,49 @@ class MetalGraph(GraphRunner):
     # NOTE: old command buffer may not be inflight anymore
     if self.command_buffer is not None and PROFILE: self.collect_timestamps()
 
+    if self.use_direct: return self._call_direct(input_buffers, var_vals, wait)
+    return self._call_icb(input_buffers, var_vals, wait)
+
+  def _call_direct(self, input_buffers: list[Buffer], var_vals: dict[str, int], wait=False) -> float|None:
+    command_buffer = self.dev.mtl_queue.commandBuffer().retained()
+    encoder = command_buffer.computeCommandEncoder().retained()
+
+    # build a map for updated launch dims
+    updated_dims: dict[int, tuple[tuple[int,...], tuple[int,...]]] = {j: (gd, ld) for j, gd, ld in self.updated_launch_dims(var_vals)}
+    # build a map for input replacements by kernel index
+    input_map: dict[int, list[tuple[int, int]]] = {}
+    for (j,i), input_idx in self.input_replace.items():
+      input_map.setdefault(j, []).append((i, input_idx))
+
+    all_var_vals = self.fixedvars | var_vals
+    for j, (pipeline_state, fixed_bufs, num_bufs, var_exprs, global_size, local_size) in enumerate(self.kernels):
+      encoder.setComputePipelineState(pipeline_state)
+      # set fixed buffers
+      for i, buf in fixed_bufs: encoder.setBuffer_offset_atIndex(buf.buf, buf.offset, i)
+      # set variable input buffers
+      for i, input_idx in input_map.get(j, []):
+        encoder.setBuffer_offset_atIndex(input_buffers[input_idx]._buf.buf, input_buffers[input_idx]._buf.offset, i)
+      # set variable values
+      for vi, expr in enumerate(var_exprs):
+        encoder.setBytes_length_atIndex(bytes(ctypes.c_int(all_var_vals[expr])), 4, num_bufs + vi)
+      # dispatch with potentially updated launch dims
+      gs, ls = updated_dims.get(j, (global_size, local_size))
+      encoder.dispatchThreadgroups_threadsPerThreadgroup(metal.MTLSize(*gs), metal.MTLSize(*ls))
+      # memory barrier between kernels to ensure writes are visible
+      if j < len(self.kernels) - 1: encoder.memoryBarrierWithScope(metal.MTLBarrierScopeBuffers)
+
+    encoder.endEncoding()
+    command_buffer.setLabel(to_ns_str(f"batched {len(self.jit_cache)}"))
+    command_buffer.commit()
+    self.command_buffer = command_buffer
+
+    self.dev.mtl_buffers_in_flight.append(command_buffer)
+    if wait:
+      wait_check(command_buffer)
+      return command_buffer.GPUEndTime() - command_buffer.GPUStartTime()
+    return None
+
+  def _call_icb(self, input_buffers: list[Buffer], var_vals: dict[str, int], wait=False) -> float|None:
     all_resources = dedup(self.all_resources + [input_buffers[input_idx]._buf.buf for input_idx in self.input_replace.values()])
     for (j,i),input_idx in self.input_replace.items():
       computeCommand = self.icb.indirectComputeCommandAtIndex(j)
