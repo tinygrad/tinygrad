@@ -80,6 +80,7 @@ class TestHuggingFaceOnnxModels(unittest.TestCase):
     print(f"Validating model: {repo_id}/{model_file} ({file_size/1e6:.2f}M)")
     validate(onnx_model_path, custom_inputs, rtol=rtol, atol=atol)
 
+  @unittest.skip("onnxruntime 1.24+ rejects huggingface_hub symlinks as path traversal")
   def test_xlm_roberta_large(self):
     repo_id = "FacebookAI/xlm-roberta-large"
     model_file = "onnx/model.onnx"
