@@ -62,10 +62,7 @@ def custom_gemm_bw(gradient:UOp, kernel:UOp):
   assert all_same([gradient.device, a.device, b.device, out.device])
   a_t, b_t, g_t = Tensor(a, device=a.device), Tensor(b, device=a.device), Tensor(gradient, device=a.device)
   grad_a = (g_t @ b_t.T).uop
-  a_T = a_t.transpose(-2, -1)
-  a_T = a_T.reshape(*a_T.shape[:-1], 1, a_T.shape[-1])
-  g_r = g_t.reshape(*g_t.shape[:-2], 1, *g_t.shape[-2:]).transpose(-1, -2)
-  grad_b = (a_T * g_r).sum((-1, 0)).uop
+  grad_b = (a_t.transpose(-2, -1) @ g_t).sum(0).uop
   return (None, grad_a, grad_b)
 
 # ** main gemm function
