@@ -569,7 +569,7 @@ jobs:
       with:
         key: dsp-minimal
         deps: testing_unit
-        pydeps: "onnx==1.18.0 onnxruntime"
+        pydeps: "onnx==1.18.0 onnxruntime==1.23.2"
         llvm: "true"
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
