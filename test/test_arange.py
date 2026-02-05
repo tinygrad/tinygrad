@@ -189,17 +189,16 @@ class TestIndexing(unittest.TestCase):
     np.testing.assert_allclose(emb.weight.grad.numpy(), expected_grad, rtol=1e-5, atol=1e-5)
 
   # ~10x overhead in fused matmul bw with rope in bf16 vs float16
+  @Context(EMULATE="AMD_CDNA4")
   def base_test_llama_8b_rope_backward(self, dtype, ops_scale):
     from extra.models.llama import precompute_freqs_cis, apply_rotary_emb
     Tensor.training = True
     bs, seqlen, dim, n_heads = 1, 512, 256, 4
     head_dim = dim // n_heads
-
-    x = Tensor.randn(bs, seqlen, dim, dtype=dtype)
-    wq = Tensor.randn(dim, dim, dtype=dtype, requires_grad=True)
-    freqs_cis = precompute_freqs_cis(head_dim, seqlen).cast(dtype)
+    x = Tensor.randn(bs, seqlen, dim, dtype=dtype, device="NULL")
+    wq = Tensor.randn(dim, dim, dtype=dtype, requires_grad=True, device="NULL")
+    freqs_cis = precompute_freqs_cis(head_dim, seqlen).cast(dtype).to("NULL")
     Tensor.realize(x, wq, freqs_cis)
-
     GlobalCounters.reset()
     xq = (x @ wq.T)
     # main llama does not fuse it
@@ -208,7 +207,6 @@ class TestIndexing(unittest.TestCase):
     xq_rope, _ = apply_rotary_emb(xq, xq, freqs_cis)
     xq_rope.sum().backward()
     wq.grad.realize()
-
     bwd_ops = GlobalCounters.global_ops
     expected_ops = bs*seqlen*dim*dim*ops_scale
     print(f"\nrope matmul bwd ({dtype}): {GlobalCounters.kernel_count} kernels, {bwd_ops:,} ops")
