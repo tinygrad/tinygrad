@@ -515,9 +515,9 @@ def split_store(ctx:list[UOp], x:UOp) -> UOp|None:
   else: raise RuntimeError(f"unknown kernel type {ret.op}")
   if stored.op in {Ops.COPY, Ops.BUFFER_VIEW, Ops.ENCDEC}: ret = stored
   else:
-    ret = ret.sink(arg=KernelInfo(opts_to_apply=lctx.opts) if lctx.opts is not None else None)
+    ret = ret.sink(arg=KernelInfo(opts_to_apply=lctx.opts) if lctx.opts is not None else KernelInfo())
   metadata = tuple(dedup(flatten([x for x in metadatas if x is not None])))[::-1]
-  kernel = ret.rtag().call(*lctx.map.values(), *lctx.vars.keys(), metadata=metadata)
+  kernel = ret.call(*lctx.map.values(), *lctx.vars.keys(), metadata=metadata)
   if ret.op is Ops.SINK and not all_same([x.device for x in kernel.src[1:] if x.op is not Ops.BIND]):
     raise RuntimeError(f"all buffers must be on the same device: {tuple(b.buf_uop for b in kernel[1:].src)}")
   return kernel
@@ -531,7 +531,8 @@ def split_store(ctx:list[UOp], x:UOp) -> UOp|None:
 
 split_kernels = PatternMatcher([
   (UPat((Ops.STORE, Ops.END), name="x"), split_store),
-  (UPat(Ops.SINK, name="sink"), lambda sink: panic(BottomUpGate) if sink.tag is not None else None),
+  # if it's a Kernel, stop
+  (UPat(Ops.SINK, name="sink"), lambda sink: panic(BottomUpGate) if isinstance(sink.arg, KernelInfo) else None),
 ])
 
 def tag_uop(ctx:tuple[list[UOp], set[UOp]], x:UOp):
