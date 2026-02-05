@@ -4,16 +4,15 @@ from tinygrad import Device, dtypes, Tensor, Context
 from tinygrad.device import LRUAllocator, is_dtype_supported
 from tinygrad.dtype import ImageDType
 from tinygrad.helpers import prod, unwrap
-from test.helpers import REAL_DEV
 
 IMAGE_SUPPORTED_DEVICES = ("QCOM", "CL")
 
-@unittest.skipUnless(REAL_DEV in IMAGE_SUPPORTED_DEVICES, "Images not supported")
+@unittest.skipUnless(Device.DEFAULT in IMAGE_SUPPORTED_DEVICES, "Images not supported")
 class TestImageCopy(unittest.TestCase):
   def test_image_copyout_1x8(self, img_type=dtypes.imagef):
     it = Tensor.arange(32).cast(img_type((1,8,4))).realize()
     buf = it.uop.buffer
-    out = buf.as_buffer()
+    out = buf.as_memoryview()
     np.testing.assert_equal(out.cast(it.dtype.fmt).tolist(), np.arange(32))
 
   @unittest.skipUnless(is_dtype_supported(dtypes.half, device="PYTHON"), "need half")
@@ -27,14 +26,14 @@ class TestImageCopy(unittest.TestCase):
   def test_image_copyout_2x4(self):
     it = Tensor.arange(2*4*4).cast(dtypes.imagef((2,4,4))).realize()
     buf = it.uop.buffer
-    out = buf.as_buffer()
+    out = buf.as_memoryview()
     np.testing.assert_equal(out.cast('f').tolist(), np.arange(2*4*4))
 
   def test_image_roundtrip(self):
     sz = (4,2,4)
     it = Tensor.rand(prod(sz)).cast(dtypes.imagef(sz)).realize()
     buf = it.uop.buffer
-    out = buf.as_buffer()
+    out = buf.as_memoryview()
 
     it2 = Tensor.rand(prod(sz)).cast(dtypes.imagef(sz)).realize()
     buf2 = it2.uop.buffer
@@ -42,7 +41,7 @@ class TestImageCopy(unittest.TestCase):
 
     assert (it == it2).sum().item() == prod(sz)
 
-@unittest.skipUnless(REAL_DEV in IMAGE_SUPPORTED_DEVICES, "Images not supported")
+@unittest.skipUnless(Device.DEFAULT in IMAGE_SUPPORTED_DEVICES, "Images not supported")
 class TestImageDType(unittest.TestCase):
   def test_image_pitch(self):
     def __validate(imgdt, expected_pitch):
@@ -191,7 +190,7 @@ class TestImageDType(unittest.TestCase):
       for s in sched:
         s.run()
         if s.bufs[0].dtype == dtypes.float:
-          lst = s.bufs[0].as_buffer().cast("f").tolist()
+          lst = s.bufs[0].as_memoryview().cast("f").tolist()
           print(lst)
           assert not np.any(np.isnan(lst))
       # NOTE: the w1 grad must realize to a separate kernel
@@ -199,7 +198,7 @@ class TestImageDType(unittest.TestCase):
       self.assertEqual(w1.grad.uop.base.buffer.dtype, dtypes.float32)
       self.assertEqual(len(sched), 9)
 
-@unittest.skipUnless(REAL_DEV in IMAGE_SUPPORTED_DEVICES, "Images not supported")
+@unittest.skipUnless(Device.DEFAULT in IMAGE_SUPPORTED_DEVICES, "Images not supported")
 class TestImageRealization(unittest.TestCase):
   def test_image_dtype_expand(self):
     data = Tensor.randn(9*32*4).realize()
