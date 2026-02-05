@@ -97,6 +97,13 @@ struct TinyOpaqueTensorImpl : public OpaqueTensorImpl<OpaqueHandle> {
       : OpaqueTensorImpl<OpaqueHandle>(key_set, data_type, device, opaque_handle, sizes) {
     this->sizes_and_strides_.set_strides(strides);
     this->storage_offset_ = storage_offset;
+    this->storage_ = c10::Storage(
+        c10::Storage::use_byte_size_t(),
+        0,
+        c10::GetAllocator(c10::DeviceType::CPU),
+        false
+    );
+    this->storage_access_should_throw_ = false;
   }
 };
 }

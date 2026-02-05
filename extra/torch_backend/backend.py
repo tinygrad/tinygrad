@@ -25,7 +25,9 @@ def calculate_storage_offset(x: Tensor) -> int:
       u_strides = strides_for_shape(u.src[0].shape)
       for i, (start, _) in enumerate(u.marg): offset += start * u_strides[i]
   return offset
+@torch._dynamo.disable
 def wrap(x: Tensor) -> torch.Tensor:
+  if x is None: return x
   x._strides = strides_for_shape(x.shape) # always recalculate
   if (not hasattr(x, '_storage_offset')) or (not x.uop.is_realized): x._storage_offset = calculate_storage_offset(x)
   return mod.wrap(x, _to_torch_dtype(x.dtype), _to_torch_device(x.device).index)
@@ -33,6 +35,7 @@ def _update_torch_metadata(tensor: torch.Tensor, tiny: Tensor) -> None:
   tiny._strides = strides_for_shape(tiny.shape)
   tiny._storage_offset = calculate_storage_offset(tiny)
   mod.update_metadata(tensor, tiny.shape, tiny._strides, tiny._storage_offset)
+@torch._dynamo.disable
 def unwrap(x:torch.Tensor) -> Tensor:
   assert isinstance(x, torch.Tensor), f"x isn't {type(x)}"
   return mod.unwrap(x)
@@ -757,6 +760,10 @@ def native_batch_norm(input, weight, bias, running_mean, running_var, training, 
   else:
     out = input_t.batchnorm(weight_t, bias_t, running_mean_t, running_var_t.add(eps).rsqrt())
     return wrap(out), wrap(running_mean_t), wrap(running_var_t.add(eps).rsqrt())
+
+@torch.library.impl("aten::_native_batch_norm_legit", "privateuseone")
+def native_batch_norm_legit(input, weight, bias, running_mean, running_var, training, momentum, eps):
+    return torch.ops.aten.native_batch_norm(input, weight, bias, running_mean, running_var, training, momentum, eps)
 
 @torch.library.impl("aten::native_batch_norm_backward", "privateuseone")
 def native_batch_norm_backward(grad_out, input, weight, running_mean, running_var, save_mean, save_invstd, train, eps, output_mask):
