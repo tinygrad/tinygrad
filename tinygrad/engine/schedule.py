@@ -23,12 +23,12 @@ def create_schedule(sched_sink:UOp) -> tuple[list[ExecItem], UOp]:
     children: dict[UOp, list[UOp]] = {}
     in_degree: dict[UOp, int] = {}
     for u in sched_sink.toposort():
-      if u.op is Ops.RANGE:
-        in_degree.setdefault(u, 0)
-        continue
-      if u.op is not Ops.AFTER or u.src[1].op is Ops.RANGE: continue
-      k = u.src[1]
+      if u.op is Ops.RANGE: in_degree.setdefault(u, 0)
+      if u.op is not Ops.AFTER: continue
+      if (k:=u.src[1]).op is Ops.RANGE: continue  # outer range is handled through BIND
+      assert k.op in {Ops.KERNEL, Ops.END}, f"AFTER src[1] should be KERNEL or END, not {k.op}"
       in_degree.setdefault(k, 0)
+      if k.op is Ops.END: assert k.src[0].op is Ops.KERNEL, f"END src[0] should be KERNEL, not {k.src[0].op}"
       for s in k.src[0].src if k.op is Ops.END else k.src:
         match (s := _unwrap_src(s)).op:
           case Ops.AFTER:
