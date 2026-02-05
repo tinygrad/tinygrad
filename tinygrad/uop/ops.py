@@ -681,10 +681,9 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
   @property
   def val(self) -> int: return self.unbind()[1]
   def vars(self) -> set[UOp]:
-    bound_vars = set([x for x in self.toposort() if x.op is Ops.BIND and x.src[0].op is Ops.DEFINE_VAR])
-    bound_var_base = set(x.src[0] for x in bound_vars)
-    all_vars = set([x for x in self.toposort() if x.op is Ops.DEFINE_VAR])
-    return bound_vars.union(set([x for x in all_vars if x not in bound_var_base]))
+    topo = self.toposort()
+    bound = {x.src[0]: x for x in topo if x.op is Ops.BIND and x.src[0].op is Ops.DEFINE_VAR}
+    return {bound.get(x, x) for x in topo if x.op is Ops.DEFINE_VAR}
   def variables(self) -> list[Variable]:
     return sorted(set([x.unbind()[0] if x.op is not Ops.DEFINE_VAR else x for x in self.vars()]), key=lambda v: v.arg)
 
