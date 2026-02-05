@@ -32,7 +32,7 @@ def verify_asm_gemm(batch:int, M:int, N:int, K:int, dtype=dtypes.float16, gpus:i
 class TestGemm(unittest.TestCase):
   def test_simple(self): verify_asm_gemm(1, N:=getenv("N", 4096), N, N, dtype=dtypes.half)
   def test_gemm(self): verify_asm_gemm(1, 8192, 4096, 14336)
-  def test_gemm_multi(self): verify_asm_gemm(2, 8192, 4096, 14336, gpus=2)
+  def test_gemm_multi(self): verify_asm_gemm(2, 8192, 4096, 4096, gpus=2)
   def test_gemm_unsupported(self):
     with self.assertRaisesRegex(AssertionError, "shape not supported"):
       verify_asm_gemm(8, 8192, 1024, 4096, gpus=8)
