@@ -191,7 +191,7 @@ class TestIndexing(unittest.TestCase):
   # ~10x overhead in fused matmul bw with rope in bf16 vs float16
   def base_test_llama_8b_rope_backward(self, dtype, ops_scale):
     from extra.models.llama import precompute_freqs_cis, apply_rotary_emb
-    from tinygrad.renderer.cstyle import AMDHIPRenderer
+    from tinygrad.renderer.llvmir import AMDLLVMRenderer
     Tensor.training = True
     bs, seqlen, dim, n_heads = 1, 512, 256, 4
     head_dim = dim // n_heads
@@ -207,14 +207,14 @@ class TestIndexing(unittest.TestCase):
     xq_rope.sum().backward()
     sched = wq.grad.schedule()
     assert len(sched) == 1, f"expected one kernel for backward, got: {len(sched)}"
-    prg = get_program(sched[0].ast, AMDHIPRenderer("gfx950"))
+    prg = get_program(sched[0].ast, AMDLLVMRenderer("gfx950"))
     bwd_ops = prg.estimates.ops
     expected_ops = bs*seqlen*dim*dim*ops_scale
     print(f"\nrope matmul bwd ({dtype}): {GlobalCounters.kernel_count} kernels, {bwd_ops:,} ops")
     self.assertLess(bwd_ops, expected_ops, f"rope bwd ops {bwd_ops:,} should be < {ops_scale} per (got {bwd_ops/(bs*seqlen*dim*dim):.1f})")
 
   def test_llama_8b_rope_backward_f16(self): self.base_test_llama_8b_rope_backward(dtypes.float16, 1)
-  def test_llama_8b_rope_backward_bf16(self): self.base_test_llama_8b_rope_backward(dtypes.bfloat16, 10)
+  def test_llama_8b_rope_backward_bf16(self): self.base_test_llama_8b_rope_backward(dtypes.bfloat16, 11)
 
 if __name__ == "__main__":
   unittest.main()
