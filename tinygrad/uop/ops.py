@@ -762,7 +762,12 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
       if self.op is Ops.OR and self.dtype == dtypes.bool: return s0_vmin or s1_vmin, s0_vmax or s1_vmax
       if self.op is Ops.AND and self.dtype == dtypes.bool: return s0_vmin and s1_vmin, s0_vmax and s1_vmax
     # float has NAN issue and we use explicit NAN in transcendental
-    if self.op is Ops.WHERE and dtypes.is_int(self.dtype): return min(self.src[1].vmin, self.src[2].vmin), max(self.src[1].vmax, self.src[2].vmax)
+    if self.op is Ops.WHERE and dtypes.is_int(self.dtype):
+      m, a, b = self.src
+      if m.op is Ops.CMPLT:
+        if m.src[0] is b and m.src[1] is a: return max(a.vmin, b.vmin), max(a.vmax, b.vmax)
+        if m.src[0] is a and m.src[1] is b: return min(a.vmin, b.vmin), min(a.vmax, b.vmax)
+      return min(a.vmin, b.vmin), max(a.vmax, b.vmax)
     # NOTE: returned UOp is assumed to be CONST
     if self.op is Ops.DEFINE_VAR and self.arg: return self.arg[1], self.arg[2]
     if self.op in (Ops.RANGE, Ops.SPECIAL): return 0, (self.src[0]-1).vmax

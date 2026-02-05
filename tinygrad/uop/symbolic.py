@@ -82,6 +82,7 @@ symbolic_simple = propagate_invalid + PatternMatcher([
   (UPat.var('x', dtype=dtypes.bool) * UPat.var('y', dtype=dtypes.bool), lambda x,y: x&y),
   (UPat.var('x', dtype=dtypes.bool) + UPat.var('y', dtype=dtypes.bool), lambda x,y: x|y),
   (UPat.var('x', dtype=dtypes.bool).maximum(UPat.var('y', dtype=dtypes.bool)), lambda x,y: x|y),
+  (UPat.var('x', dtype=dtypes.bool).minimum(UPat.var('y', dtype=dtypes.bool)), lambda x,y: x&y),
   # *** div rules ***
   (UPat.cvar('x', arg=0) / 0, lambda x: x.const_like(float('nan'))),   # 0/0 -> nan
   ((UPat.var("x") * 0) / 0, lambda x: x.const_like(float('nan'))),     # (x*0)/0 -> nan
@@ -209,8 +210,12 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
   # ALU/variable min==max -> CONST (slow!)
   (UPat(GroupOp.ALU|{Ops.DEFINE_VAR, Ops.SPECIAL}, name="x"), lambda x: x.const_like(x.vmin) if x.vmin == x.vmax else None),
   (UPat(Ops.RANGE, src=(UPat(Ops.CONST,)), name="x"), lambda x: x.const_like(x.vmin) if x.vmin == x.vmax else None),
-  # max folding
+  # ** max/min **
+  (UPat(Ops.MAX, src=(UPat.var("x"), UPat.var("y"))), lambda x,y: x.maximum(y)), # max(x, y) -> (x < y).where(y, x)
+  #(-UPat.maximum(-UPat.var("x"), -UPat.var("y")), lambda x,y: x.minimum(y)), # -max(-x, -y) -> min(x, y)
+  #(UPat.var("x") + UPat.var("y") - UPat.maximum(UPat.var("x"), UPat.var("y")), lambda x,y: x.minimum(y)), # x + y - max(x, y) -> min(x, y)
   (UPat.maximum(UPat.var("x"), UPat.var("y")), lambda x,y: x if x.vmin >= y.vmax else y if x.vmax <= y.vmin else None),
+  (UPat.minimum(UPat.var("x"), UPat.var("y")), lambda x,y: y if x.vmin >= y.vmax else x if x.vmax <= y.vmin else None),
   # TODO: why does this rule break beautiful_mnist?
   #((UPat.var("x")+UPat.var("z")).maximum(UPat.var("y")+UPat.var("z")), lambda x,y,z: x.maximum(y) + z),
   # ** two stage ALU folding **

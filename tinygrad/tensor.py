@@ -3343,7 +3343,8 @@ class Tensor(OpMixin):
     print(Tensor([-1, 2, 3]).maximum(Tensor([-4, -2, 9])).numpy())
     ```
     """
-    return self._apply_broadcasted_uop(UOp.maximum, x)
+    # NOTE: maximum has a unique gradient so requires an Ops.MAX, internally it's (x < y).where(y, x)
+    return self._binop(Ops.MAX, x, False)
 
   def minimum(self, x:Tensor|ConstType) -> Tensor:
     """
