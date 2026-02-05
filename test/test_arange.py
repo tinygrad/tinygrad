@@ -1,7 +1,7 @@
 import unittest
 import numpy as np
 from tinygrad import Tensor, GlobalCounters, dtypes, nn, Device, Variable
-from tinygrad.helpers import Context, getenv
+from tinygrad.helpers import Context, getenv, EMULATE
 from tinygrad.engine.realize import run_schedule
 from tinygrad.engine.realize import CompiledRunner, get_program
 from tinygrad.engine.schedule import ExecItem
@@ -189,15 +189,15 @@ class TestIndexing(unittest.TestCase):
     np.testing.assert_allclose(emb.weight.grad.numpy(), expected_grad, rtol=1e-5, atol=1e-5)
 
   # ~10x overhead in fused matmul bw with rope in bf16 vs float16
+  @unittest.skipUnless(Device.DEFAULT == "AMD" or (Device.DEFAULT == "NULL" and EMULATE.value.startswith("AMD")), "tests AMD bf16 cast overhead")
   def base_test_llama_8b_rope_backward(self, dtype, ops_scale):
     from extra.models.llama import precompute_freqs_cis, apply_rotary_emb
-    from tinygrad.renderer.llvmir import AMDLLVMRenderer
     Tensor.training = True
     bs, seqlen, dim, n_heads = 1, 512, 256, 4
     head_dim = dim // n_heads
-    x = Tensor.randn(bs, seqlen, dim, dtype=dtype, device="NULL")
-    wq = Tensor.randn(dim, dim, dtype=dtype, requires_grad=True, device="NULL")
-    freqs_cis = precompute_freqs_cis(head_dim, seqlen).cast(dtype).to("NULL")
+    x = Tensor.randn(bs, seqlen, dim, dtype=dtype)
+    wq = Tensor.randn(dim, dim, dtype=dtype, requires_grad=True)
+    freqs_cis = precompute_freqs_cis(head_dim, seqlen).cast(dtype)
     Tensor.realize(x, wq, freqs_cis)
     xq = (x @ wq.T)
     # main llama does not fuse it
@@ -207,7 +207,7 @@ class TestIndexing(unittest.TestCase):
     xq_rope.sum().backward()
     sched = wq.grad.schedule()
     assert len(sched) == 1, f"expected one kernel for backward, got: {len(sched)}"
-    prg = get_program(sched[0].ast, AMDLLVMRenderer("gfx950"))
+    prg = sched[0].lower().prg.p
     bwd_ops = prg.estimates.ops
     expected_ops = bs*seqlen*dim*dim*ops_scale
     print(f"\nrope matmul bwd ({dtype}): {GlobalCounters.kernel_count} kernels, {bwd_ops:,} ops")
