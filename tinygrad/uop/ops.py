@@ -848,8 +848,8 @@ class CustomKernel:
 class CallInfo:
   grad_fxn: Callable|None = None
   metadata: tuple[Metadata, ...] = ()
-  # CallInfo can't be pickled or reconstructed as a str when grad_fxn is set
-  def __reduce__(self): return (CallInfo, ())
+  # grad_fxn can't be pickled, but metadata can
+  def __reduce__(self): return (CallInfo, (None, self.metadata))
   def __repr__(self): return f"CallInfo({id(self.grad_fxn) if self.grad_fxn else None}, {self.metadata})"
 
 @dataclass(frozen=True)
