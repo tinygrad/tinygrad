@@ -27,10 +27,9 @@ PMA = ContextVar("PMA", abs(VIZ.value)>=2)
 class ProfilePMAEvent(ProfileEvent): device:str; kern:str; blob:bytes # noqa: E702
 
 class NVSignal(HCQSignal):
-  def _sleep(self, time_spent_waiting_ms:int) -> bool:
-    # Resonable to sleep for long workloads (which take more than 2s) and only timeline signals.
-    if time_spent_waiting_ms > 2000 and self.is_timeline and self.owner is not None: return self.owner.iface.sleep(200)
-    return False
+  def _sleep(self, time_spent_since_last_sleep_ms:int):
+    # Reasonable to sleep for long workloads (which take more than 200ms) and only timeline signals.
+    if time_spent_since_last_sleep_ms > 200 and self.is_timeline and self.owner is not None: self.owner.iface.sleep(200)
 
 def get_error_str(status): return f"{status}: {nv_gpu.nv_status_codes.get(status, 'Unknown error')}"
 
@@ -525,7 +524,7 @@ class NVKIface:
   def _alloc_gpu_vaddr(self, size, alignment=(4 << 10), force_low=False):
     return NVKIface.low_uvm_vaddr_allocator.alloc(size, alignment) if force_low else NVKIface.uvm_vaddr_allocator.alloc(size, alignment)
 
-  def sleep(self, tm:int) -> bool: return False
+  def sleep(self, tm:int): pass
 
 class PCIIface(PCIIfaceBase):
   gpus:ClassVar[list[str]] = []
@@ -561,9 +560,9 @@ class PCIIface(PCIIfaceBase):
 
   def device_fini(self): self.dev_impl.fini()
 
-  def sleep(self, timeout) -> bool:
+  def sleep(self, timeout):
     for _ in self.dev_impl.gsp.stat_q.read_resp(): pass
-    return self.dev_impl.is_err_state
+    if self.dev_impl.is_err_state: raise RuntimeError("Device fault detected")
 
 class NVDevice(HCQCompiled[NVSignal]):
   def is_nvd(self) -> bool: return isinstance(self.iface, PCIIface)

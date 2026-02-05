@@ -276,12 +276,12 @@ class Tensor(OpMixin):
       run_schedule(*Tensor.schedule_with_vars(*to_realize), do_update_stats=do_update_stats)
     return self
 
-  def replace(self, x:Tensor, allow_shape_mismatch=False) -> Tensor:
+  def replace(self, x:Tensor) -> Tensor:
     """
     Replaces the data of this tensor with the data of another tensor. Only the shape of the tensors must match.
     """
     # used for replacing a Tensor with a new version of it (potentially with a different device and dtype)
-    assert self.shape == x.shape or allow_shape_mismatch, f"replace shape mismatch {self.shape} != {x.shape}"
+    assert self.shape == x.shape, f"replace shape mismatch {self.shape} != {x.shape}"
     self.uop = x.uop
     return self
 
@@ -316,7 +316,7 @@ class Tensor(OpMixin):
     x = self.cast(self.dtype.base).contiguous()
     if isinstance(self.device, tuple): x = x.to("CPU")
     return cast(Buffer, x.realize().uop.base.buffer).ensure_allocated()
-  def _data(self) -> memoryview: return self._buffer().as_buffer()
+  def _data(self) -> memoryview: return self._buffer().as_memoryview()
 
   def data(self) -> memoryview:
     """
@@ -329,7 +329,9 @@ class Tensor(OpMixin):
     """
     if 0 in self.shape: return memoryview(bytearray(0)).cast(self.dtype.base.fmt)
     assert all_int(self.shape), f"no data if shape is symbolic, {self.shape=}"
-    return self._buffer().as_typed_buffer(self.shape)
+    assert self.dtype.base.fmt is not None, f"no fmt dtype for {self.dtype.base}"
+    assert self.dtype.base.fmt != "e" or sys.version_info >= (3, 12)
+    return self._buffer().as_memoryview().cast(self.dtype.base.fmt, self.shape)
 
   def item(self) -> PyConst:
     """

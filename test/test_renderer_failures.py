@@ -22,7 +22,7 @@ def _test_uop_result(inputs:list[Tensor], prg, local_size=None):
   if local_size is not None: prg = replace(prg, local_size=local_size)
   ei = CompiledRunner(prg)
   ei.exec(outbufs+inbufs)
-  return [np.frombuffer(x.as_buffer(), _to_np_dtype(x.dtype)) for x in outbufs]
+  return [np.frombuffer(x.as_memoryview(), _to_np_dtype(x.dtype)) for x in outbufs]
 
 def _setup_and_test_alu(alu_op:Ops, input_val:ConstType, *alu_src_uops:UOp):
   dtype = alu_src_uops[0].dtype

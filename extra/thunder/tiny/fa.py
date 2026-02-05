@@ -55,9 +55,6 @@ def flash_attention(xq, xk, xv, attn_mask:Tensor|None=None, is_causal:bool=False
       batch = ker.blockIdx_z
       q_seq = ker.blockIdx_y * NUM_WORKERS + ker.warpid
 
-      k_smem = ker.st((KV_BLOCK_SIZE, D), dtypes.bfloat16)
-      v_smem = ker.st((KV_BLOCK_SIZE, D), dtypes.bfloat16)
-
       q_reg_fl = ker.rt((Q_BLOCK_SIZE, D), dtypes.float32)
       q_reg = ker.rt((Q_BLOCK_SIZE, D), dtypes.bfloat16)
       q_reg_transposed = ker.rt((D, Q_BLOCK_SIZE), dtypes.bfloat16, TileLayout.COL)
@@ -89,11 +86,8 @@ def flash_attention(xq, xk, xv, attn_mask:Tensor|None=None, is_causal:bool=False
 
       num_kv_blocks = (q_seq + 1) if is_causal else (N // KV_BLOCK_SIZE)
       for kv_idx in ker.range(num_kv_blocks):
-        k_smem = warp.load(k_smem, k, (), (batch, kv_idx, head_kv, 0), axis=1)
-        v_smem = warp.load(v_smem, v, (), (batch, kv_idx, head_kv, 0), axis=1)
-
-        k_reg = warp.load(k_reg, k_smem)
-        v_reg = warp.load(v_reg, v_smem)
+        k_reg = warp.load(k_reg, k, (), (batch, kv_idx, head_kv, 0), axis=1)
+        v_reg = warp.load(v_reg, v, (), (batch, kv_idx, head_kv, 0), axis=1)
 
         # mma qk^t
         att_block = warp.zero(att_block.after(kv_idx))
@@ -169,9 +163,6 @@ def flash_attention(xq, xk, xv, attn_mask:Tensor|None=None, is_causal:bool=False
       batch = ker.blockIdx_z
       q_seq = ker.blockIdx_y * NUM_WORKERS + ker.warpid
 
-      k_smem = ker.st((KV_BLOCK_SIZE, D), dtypes.bfloat16)
-      v_smem = ker.st((KV_BLOCK_SIZE, D), dtypes.bfloat16)
-
       q_reg_fl = ker.rt((Q_BLOCK_SIZE, D), dtypes.float32)
       q_reg = ker.rt((Q_BLOCK_SIZE, D), dtypes.bfloat16)
       q_reg_t = ker.rt((D, Q_BLOCK_SIZE), dtypes.bfloat16, TileLayout.COL)
@@ -212,14 +203,12 @@ def flash_attention(xq, xk, xv, attn_mask:Tensor|None=None, is_causal:bool=False
 
       num_kv_blocks = (q_seq + 1) if is_causal else (N // KV_BLOCK_SIZE)
       for kv_idx in ker.range(num_kv_blocks):
-        k_smem = warp.load(k_smem, k, (), (batch, kv_idx, head_kv, 0), axis=1)
-        v_smem = warp.load(v_smem, v, (), (batch, kv_idx, head_kv, 0), axis=1)
+        k_reg = warp.load(k_reg, k, (), (batch, kv_idx, head_kv, 0), axis=1)
+        k_reg_col = warp.load(k_reg_col, k, (), (batch, kv_idx, head_kv, 0), axis=1)
+        v_reg = warp.load(v_reg, v, (), (batch, kv_idx, head_kv, 0), axis=1)
 
-        k_reg = warp.load(k_reg, k_smem)
         k_reg_t = warp.transpose(k_reg_t, k_reg)
-        k_reg_col = warp.load(k_reg_col, k_smem)
         k_reg_col_t = warp.transpose(k_reg_col_t, k_reg_col)
-        v_reg = warp.load(v_reg, v_smem)
 
         # mma qk^t
         att_block = warp.zero(att_block.after(kv_idx))
@@ -273,8 +262,6 @@ def flash_attention(xq, xk, xv, attn_mask:Tensor|None=None, is_causal:bool=False
       batch = ker.blockIdx_z
       kv_seq = ker.blockIdx_y * NUM_WORKERS + ker.warpid
 
-      q_smem = ker.st((Q_BLOCK_SIZE, D), dtypes.bfloat16)
-      do_smem = ker.st((Q_BLOCK_SIZE, D), dtypes.bfloat16)
       att_smem = ker.st((Q_BLOCK_SIZE, KV_BLOCK_SIZE), dtypes.bfloat16)
 
       q_reg = ker.rt((Q_BLOCK_SIZE, D), dtypes.bfloat16)
@@ -312,15 +299,12 @@ def flash_attention(xq, xk, xv, attn_mask:Tensor|None=None, is_causal:bool=False
         for g in ker.range(GROUP_SIZE):
           head_q = head_kv * GROUP_SIZE + g
 
-          # load q and do
-          q_smem = warp.load(q_smem, q, (), (batch, q_idx, head_q, 0), axis=1)
-          do_smem = warp.load(do_smem, do, (), (batch, q_idx, head_q, 0), axis=1)
+          q_reg = warp.load(q_reg, q, (), (batch, q_idx, head_q, 0), axis=1)
+          q_reg_col = warp.load(q_reg_col, q, (), (batch, q_idx, head_q, 0), axis=1)
+          do_reg = warp.load(do_reg, do, (), (batch, q_idx, head_q, 0), axis=1)
+          do_reg_col = warp.load(do_reg_col, do, (), (batch, q_idx, head_q, 0), axis=1)
 
-          q_reg = warp.load(q_reg, q_smem)
           q_reg_t = warp.transpose(q_reg_t, q_reg)
-          q_reg_col = warp.load(q_reg_col, q_smem)
-          do_reg = warp.load(do_reg, do_smem)
-          do_reg_col = warp.load(do_reg_col, do_smem)
 
           # load l_vec and delta_vec
           l_vec_reg = warp.load(l_vec_reg, l_vec, (), (batch, head_q, 0, q_idx), axis=2)
