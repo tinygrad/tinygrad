@@ -1,6 +1,6 @@
 import unittest
 from tinygrad import Tensor, Device, dtypes, Context
-from tinygrad.helpers import getenv
+from tinygrad.helpers import getenv, CI
 from extra.gemm.asm.cdna.gemm import asm_gemm
 
 def verify_asm_gemm(batch:int, M:int, N:int, K:int, dtype=dtypes.float16, gpus:int=1) -> None:
@@ -29,13 +29,15 @@ def verify_asm_gemm(batch:int, M:int, N:int, K:int, dtype=dtypes.float16, gpus:i
     assert (a.grad - a_ref.grad).square().max().float().item() < 1e-3, "grad_a mismatch"
     assert (b.grad - b_ref.grad).square().max().float().item() < 1e-3, "grad_b mismatch"
 
+SCALE = 64 if CI else 1
+
 class TestGemm(unittest.TestCase):
-  def test_simple(self): verify_asm_gemm(1, N:=getenv("N", 4096), N, N, dtype=dtypes.half)
-  def test_gemm(self): verify_asm_gemm(1, 8192, 4096, 14336)
-  def test_gemm_multi(self): verify_asm_gemm(2, 8192, 4096, 4096, gpus=2)
+  def test_simple(self): verify_asm_gemm(1, N:=getenv("N", 4096)//SCALE, N//SCALE, N//SCALE, dtype=dtypes.half)
+  def test_gemm(self): verify_asm_gemm(1, 8192//SCALE, 4096//SCALE, 14336//SCALE)
+  def test_gemm_multi(self): verify_asm_gemm(2, 8192//SCALE, 4096//SCALE, 4096//SCALE, gpus=2)
   def test_gemm_unsupported(self):
     with self.assertRaisesRegex(AssertionError, "shape not supported"):
-      verify_asm_gemm(8, 1024, 1024, 4096, gpus=8)
+      verify_asm_gemm(8, 1024//SCALE, 1024//SCALE, 4096//SCALE, gpus=8)
 
 class TestGemmLarge(unittest.TestCase):
   def setUp(self):
