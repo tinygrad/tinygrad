@@ -3,7 +3,7 @@ from tinygrad import Tensor, Device, dtypes, Context
 from tinygrad.helpers import getenv
 from extra.gemm.asm.cdna.gemm import asm_gemm
 
-def verify_asm_gemm(batch:int, M:int, N:int, K:int, dtype=dtypes.bfloat16, gpus:int=1) -> None:
+def verify_asm_gemm(batch:int, M:int, N:int, K:int, dtype=dtypes.float16, gpus:int=1) -> None:
   Tensor.manual_seed(0)
   a_rand = Tensor.randn((batch, M, K), dtype=dtypes.float).sub(0.5).cast(dtype)
   b_rand = Tensor.randn((K, N), dtype=dtypes.float).sub(0.5).cast(dtype)
@@ -42,12 +42,12 @@ class TestGemmLarge(unittest.TestCase):
     if getattr(Device[Device.DEFAULT].renderer, "arch", "") != "gfx950":
       self.skipTest("very slow on non mi350x")
 
-  def test_gemm1(self): verify_asm_gemm(8, 8192, 4096, 14336, gpus=8)
-  def test_gemm2(self): verify_asm_gemm(8, 8192, 128256, 4096, gpus=8)
-  def test_gemm3(self): verify_asm_gemm(8, 8192, 14336, 4096, gpus=8)
-  def test_gemm4(self): verify_asm_gemm(8, 4096, 14336, 4096, gpus=8)
-  def test_gemm5(self): verify_asm_gemm(8, 4096, 4096, 14336, gpus=8)
-  def test_gemm6(self): verify_asm_gemm(16, 4096, 4096, 14336, gpus=8)
+  def test_gemm1(self): verify_asm_gemm(8, 8192, 4096, 14336, dtype=dtypes.bfloat16, gpus=8)
+  def test_gemm2(self): verify_asm_gemm(8, 8192, 128256, 4096, dtype=dtypes.bfloat16, gpus=8)
+  def test_gemm3(self): verify_asm_gemm(8, 8192, 14336, 4096, dtype=dtypes.bfloat16, gpus=8)
+  def test_gemm4(self): verify_asm_gemm(8, 4096, 14336, 4096, dtype=dtypes.bfloat16, gpus=8)
+  def test_gemm5(self): verify_asm_gemm(8, 4096, 4096, 14336, dtype=dtypes.bfloat16, gpus=8)
+  def test_gemm6(self): verify_asm_gemm(16, 4096, 4096, 14336, dtype=dtypes.bfloat16, gpus=8)
   def test_gemm7(self): verify_asm_gemm(1, 8192, 128256, 4096)
 
 if __name__ == "__main__":
