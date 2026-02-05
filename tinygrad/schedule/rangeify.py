@@ -2,7 +2,7 @@ from dataclasses import dataclass, field, replace
 import itertools
 from tinygrad.dtype import dtypes, PtrDType, ImageDType, AddrSpace
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, _substitute, KernelInfo
-from tinygrad.uop.ops import graph_rewrite, identity_element, sint, AxisType, BottomUpGate, Kernel, _remove_all_tags, range_str
+from tinygrad.uop.ops import graph_rewrite, identity_element, sint, AxisType, BottomUpGate, _remove_all_tags, range_str
 from tinygrad.uop.symbolic import symbolic
 from tinygrad.helpers import argsort, prod, all_same, getenv, flatten, dedup, all_int, DEBUG, SPLIT_REDUCEOP, DEBUG_RANGEIFY
 from tinygrad.helpers import PCONTIG, partition, get_single_element, panic
@@ -66,9 +66,11 @@ mop_cleanup = PatternMatcher([
 
 def resolve_custom_kernel(ck:UOp) -> UOp:
   placeholders = [UOp.placeholder_like(s, slot=i) for i,s in enumerate(ck.src)]
-  return UOp(Ops.KERNEL, src=ck.src, arg=Kernel(ck.arg.fxn(*placeholders)))
+  return ck.arg.fxn(*placeholders).call(*ck.src)
 
-def resolve_call(c:UOp) -> UOp:
+def resolve_call(c:UOp) -> UOp|None:
+  # don't resolve CALLs with SINK - those are kernel calls from split_store/custom_kernel
+  if c.src[0].op is Ops.SINK: return None
   params = sorted([x for x in c.src[0].toposort() if x.op == Ops.PARAM], key=lambda x: x.arg)
   args = c.src[1:]
   # TODO: this check belongs in spec, not here
@@ -83,7 +85,7 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
   # just removing it works...
   (UPat((Ops.DETACH, Ops.CONTIGUOUS_BACKWARD), name="x"), lambda x: x.src[0]),
 
-  # resolve calls
+  # resolve calls (but not CALLs with SINK - those are kernel calls from split_store)
   (UPat(Ops.CALL, name="c"), resolve_call),
 
   # resolve custom kernels
@@ -384,8 +386,8 @@ pm_add_buffers = pm_mops+pm_flatten_bufferize+to_bufferview+PatternMatcher([
   (UPat((Ops.MSELECT, Ops.MSTACK), src=UPat(Ops.RESHAPE), name="m"),
    lambda m: m.replace(src=tuple([x.src[0].base for x in m.src]), tag=None).reshape(m.shape).rtag(m.tag)),
 
-  # remove any RESHAPEs on KERNEL
-  (UPat(Ops.KERNEL, name="k"), lambda k: k.replace(src=tuple(x.src[0] if x.op is Ops.RESHAPE else x for x in k.src))),
+  # remove any RESHAPEs on CALL
+  (UPat(Ops.CALL, name="k"), lambda k: k.replace(src=(k.src[0],)+tuple(x.src[0] if x.op is Ops.RESHAPE else x for x in k.src[1:]))),
 ])
 
 pm_add_buffers_local = pm_mops+pm_flatten_bufferize+to_bufferview+PatternMatcher([
@@ -519,20 +521,13 @@ def split_store(ctx:list[UOp], x:UOp) -> UOp|None:
   metadata = tuple(dedup(flatten([x for x in metadatas if x is not None])))[::-1]
   kernel = ret.call(*lctx.map.values(), *lctx.vars.keys(), metadata=metadata)
   if ret.op is Ops.SINK and not all_same([x.device for x in kernel.src[1:] if x.op is not Ops.BIND]):
-    raise RuntimeError(f"all buffers must be on the same device: {tuple(b.buf_uop for b in kernel[1:].src)}")
-  return kernel
-
-  # old
-  kernel_arg = Kernel(ret,tuple(dedup(flatten([x for x in metadatas if x is not None])))[::-1])
-  kernel = UOp(Ops.KERNEL, src=tuple(lctx.map.values())+tuple(lctx.vars.keys()), arg=kernel_arg)
-  if ret.op is Ops.SINK and not all_same([x.device for x in kernel.src if x.op is not Ops.BIND]):
-    raise RuntimeError(f"all buffers must be on the same device: {tuple(b.buf_uop for b in kernel.src)}")
+    raise RuntimeError(f"all buffers must be on the same device: {tuple(b.buf_uop for b in kernel.src[1:])}")
   return kernel
 
 split_kernels = PatternMatcher([
   (UPat((Ops.STORE, Ops.END), name="x"), split_store),
   # if it's a Kernel, stop
-  (UPat(Ops.SINK, name="sink"), lambda sink: panic(BottomUpGate) if isinstance(sink.arg, KernelInfo) else None),
+  (UPat(Ops.SINK, name="sink"), lambda sink: panic(BottomUpGate()) if isinstance(sink.arg, KernelInfo) else None),
 ])
 
 def tag_uop(ctx:tuple[list[UOp], set[UOp]], x:UOp):
@@ -545,7 +540,7 @@ def tag_uop(ctx:tuple[list[UOp], set[UOp]], x:UOp):
   return x.replace(tag=(len(ctx[0])-1,))
 add_tags = PatternMatcher([
   # don't tag BUFFERs, they are global
-  (UPat(GroupOp.All-{Ops.BUFFER, Ops.CONST, Ops.DEVICE, Ops.UNIQUE, Ops.LUNIQUE, Ops.DEFINE_VAR, Ops.BIND, Ops.KERNEL, Ops.END,
+  (UPat(GroupOp.All-{Ops.BUFFER, Ops.CONST, Ops.DEVICE, Ops.UNIQUE, Ops.LUNIQUE, Ops.DEFINE_VAR, Ops.BIND, Ops.CALL, Ops.END,
                      Ops.MSTACK, Ops.MSELECT, Ops.RANGE}.union(GroupOp.Movement), name="x"), tag_uop),
   (UPat({Ops.MSTACK, Ops.MSELECT}, name="x"), lambda ctx,x: None if all(s.op is Ops.BUFFER for s in x.src) else tag_uop(ctx, x)),
 ])

@@ -364,7 +364,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
   @recursive_property
   def trace_num(self):
     num = next(ucount)
-    # KERNEL also has a UOp in the arg
+    # KERNEL has a UOp in the arg, CALL has it in src[0] so no special handling needed
     arg = type(self.arg)(self.arg.ast.trace_num, self.arg.metadata) if self.op is Ops.KERNEL else self.arg
     uop_fields[num] = (self.op, self.dtype, tuple(s.trace_num for s in self.src), arg, self.tag)+((self.metadata,) if TRACEMETA>=2 else ())
     return num
@@ -1414,7 +1414,7 @@ pm_pyrender_extra = PatternMatcher([
 
 # NOTE: you can remove pm_pyrender_extra and it'll still be correct
 pm_pyrender = pm_pyrender_extra+PatternMatcher([
-  (UPat(Ops.KERNEL, name="u"), lambda ctx,u: f"UOp(Ops.KERNEL, src={srcs(ctx,u.src)}, arg=Kernel({ctx[u.arg.ast]}(), {u.arg.metadata}))"),
+  (UPat(Ops.CALL, name="u"), lambda ctx,u: f"{ctx[u.src[0]]}.call({', '.join(ctx[s] for s in u.src[1:])}, metadata={u.arg.metadata})"),
   (UPat(GroupOp.All, name="u"), lambda ctx,u: f"UOp({u.op}, {u.dtype}, {srcs(ctx,u.src)}"+(f", {repr(u.arg)})" if u.arg is not None else ")")),
 ])
 
@@ -1424,7 +1424,7 @@ def pyrender(ast:UOp) -> str:
   cmap = consumer_map_from_toposort(lst)
   not_rendered = {Ops.CONST, Ops.VCONST, Ops.DEVICE}
   always_rendered = {Ops.PARAM, Ops.LOAD, Ops.SPECIAL, Ops.RANGE, Ops.CONTIGUOUS, Ops.VECTORIZE,
-                     Ops.BUFFER, Ops.COPY, Ops.KERNEL, Ops.WHERE, Ops.END, Ops.ASSIGN}
+                     Ops.BUFFER, Ops.COPY, Ops.CALL, Ops.WHERE, Ops.END, Ops.ASSIGN}
 
   to_render: set[UOp] = {ast}
   for u in lst:
