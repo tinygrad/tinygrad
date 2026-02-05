@@ -88,8 +88,8 @@ if __name__ == "__main__":
       # repo id
       # validates all onnx models inside repo
       repo_id = "/".join(path)
-      root_path = snapshot_download_with_retry(repo_id=repo_id, allow_patterns=["*.onnx", "*.onnx_data"], cache_dir=DOWNLOADS_DIR)
-      snapshot_download_with_retry(repo_id=repo_id, allow_patterns=["*config.json"], cache_dir=DOWNLOADS_DIR)
+      root_path = snapshot_download_with_retry(repo_id=repo_id, allow_patterns=["*.onnx", "*.onnx_data"], local_dir=DOWNLOADS_DIR / repo_id)
+      snapshot_download_with_retry(repo_id=repo_id, allow_patterns=["*config.json"], local_dir=DOWNLOADS_DIR / repo_id)
       config = get_config(root_path)
       for onnx_model in root_path.rglob("*.onnx"):
         rtol, atol = get_tolerances(onnx_model.name)
@@ -101,8 +101,8 @@ if __name__ == "__main__":
       onnx_model = path[-1]
       assert path[-1].endswith(".onnx")
       repo_id, relative_path = "/".join(path[:2]), "/".join(path[2:])
-      root_path = snapshot_download_with_retry(repo_id=repo_id, allow_patterns=[relative_path], cache_dir=DOWNLOADS_DIR)
-      snapshot_download_with_retry(repo_id=repo_id, allow_patterns=["*config.json"], cache_dir=DOWNLOADS_DIR)
+      root_path = snapshot_download_with_retry(repo_id=repo_id, allow_patterns=[relative_path], local_dir=DOWNLOADS_DIR / repo_id)
+      snapshot_download_with_retry(repo_id=repo_id, allow_patterns=["*config.json"], local_dir=DOWNLOADS_DIR / repo_id)
       config = get_config(root_path)
       rtol, atol = get_tolerances(onnx_model)
       print(f"validating {relative_path} with truncate={args.truncate}, {rtol=}, {atol=}")
