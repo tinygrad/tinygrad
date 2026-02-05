@@ -385,6 +385,8 @@ class _Ctx:
     else:
       scalar_val = sgpr_lo
       if literal is not None: scalar_val = off.eq(_c(255)).where(literal, scalar_val)
+      if bits == 16:  # Float constants: cast F32 to F16
+        scalar_val = is_float_const.where(scalar_val.bitcast(dtypes.float32).cast(dtypes.half).bitcast(dtypes.uint16).cast(dtypes.uint32), scalar_val)
 
     return is_vgpr.where(vgpr_val, scalar_val) if lane is not None else scalar_val
 
