@@ -188,5 +188,31 @@ class TestIndexing(unittest.TestCase):
     for i in idx.flatten().numpy(): expected_grad[i] += 2
     np.testing.assert_allclose(emb.weight.grad.numpy(), expected_grad, rtol=1e-5, atol=1e-5)
 
+  # bf16 has ~10x op overhead vs half
+  def base_test_llama_8b_rope_backward(self, dtype, ops_scale):
+    from extra.models.llama import precompute_freqs_cis, apply_rotary_emb
+    Tensor.training = True
+    bs, seqlen, dim, n_heads = 1, 512, 256, 4
+    head_dim = dim // n_heads
+
+    x = Tensor.randn(bs, seqlen, dim, dtype=dtype)
+    wq = Tensor.randn(dim, dim, dtype=dtype, requires_grad=True)
+    freqs_cis = precompute_freqs_cis(head_dim, seqlen).cast(dtype)
+    Tensor.realize(x, wq, freqs_cis)
+
+    GlobalCounters.reset()
+    xq = (x @ wq.T).reshape(bs, seqlen, n_heads, head_dim)
+    xq_rope, _ = apply_rotary_emb(xq, xq, freqs_cis)
+    xq_rope.sum().backward()
+    wq.grad.realize()
+
+    bwd_ops = GlobalCounters.global_ops
+    expected_ops = bs*seqlen*dim*dim*ops_scale
+    print(f"\nrope matmul bwd ({dtype}): {GlobalCounters.kernel_count} kernels, {bwd_ops:,} ops")
+    self.assertLess(bwd_ops, expected_ops, f"rope bwd ops {bwd_ops:,} should be < {ops_scale} per (got {bwd_ops/(bs*seqlen*dim*dim):.1f})")
+
+  def test_llama_8b_rope_backward_f16(self): self.base_test_llama_8b_rope_backward(dtypes.float16, 1)
+  def test_llama_8b_rope_backward_bf16(self): self.base_test_llama_8b_rope_backward(dtypes.bfloat16, 10)
+
 if __name__ == "__main__":
   unittest.main()
