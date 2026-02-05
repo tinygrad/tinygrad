@@ -135,12 +135,18 @@ def _val_to_u32(val: UOp) -> UOp:
   if val.dtype in (dtypes.uint16, dtypes.int16): return val.cast(dtypes.uint32)
   return val.cast(dtypes.uint32)
 
-def _apply_clamp(val: UOp, clmp: int | UOp) -> UOp:
-  """Apply VOP3 clamp modifier: clamp float results to [0.0, 1.0] range."""
+def _apply_clamp(val: UOp, clmp: int | UOp, saturate: tuple[UOp, UOp] | None = None) -> UOp:
+  """Apply VOP3 clamp modifier: clamp float results to [0.0, 1.0] range, unsigned ints saturate on over/underflow."""
   if isinstance(clmp, int) and clmp == 0: return val
-  if val.dtype not in (dtypes.float32, dtypes.half, dtypes.float64): return val
-  zero, one = UOp.const(val.dtype, 0.0), UOp.const(val.dtype, 1.0)
-  clamped = val.maximum(zero).minimum(one)
+  clamped = None
+  if val.dtype in (dtypes.float32, dtypes.half, dtypes.float64):
+    zero, one = UOp.const(val.dtype, 0.0), UOp.const(val.dtype, 1.0)
+    clamped = val.maximum(zero).minimum(one)
+  elif saturate is not None:
+    # Cast saturation value to match val dtype for proper WHERE typing
+    sat_val = saturate[1].cast(val.dtype) if saturate[1].dtype != val.dtype else saturate[1]
+    clamped = saturate[0].where(sat_val, val)
+  if clamped is None: return val
   return clmp.ne(_c(0)).where(clamped, val) if isinstance(clmp, UOp) else clamped
 
 _pcode_fixes = {
@@ -454,6 +460,24 @@ class _Ctx:
                  'ROUND_MODE': _c(0), 'ROUND_TOWARD_ZERO': _c(0)})  # rounding mode: 0=RNE, RTZ constant
     _, assigns = parse_pcode(pcode, srcs)
 
+    # For integer ops with clamp, compute overflow using wide arithmetic
+    # NOTE: MUL_LO ops don't saturate - they always return the low bits
+    int_saturate = None
+    if clmp and any(p in op.name for p in ('_NC_U', '_MAD_U', '_NC_I', '_MAD_I')):
+      is_signed, is_16bit = '_I' in op.name and '_U' not in op.name, '16' in op.name
+      if not (is_16bit and is_signed):  # Skip 16-bit signed ops due to codegen issues
+        s0, s1, s2 = srcs.get('S0'), srcs.get('S1'), srcs.get('S2')
+        if s0 is not None and s1 is not None:
+          narrow_dt = dtypes.uint16 if is_16bit else (dtypes.int32 if is_signed else dtypes.uint32)
+          wide_dt = dtypes.int32 if is_16bit else dtypes.int64
+          narrow_max, narrow_min = (0xFFFF, 0) if is_16bit else ((0x7FFFFFFF, -0x80000000) if is_signed else (0xFFFFFFFF, 0))
+          def to_wide(x): return (x.bitcast(narrow_dt) if x.dtype.itemsize == narrow_dt.itemsize else x.cast(narrow_dt)).cast(wide_dt)
+          is_sub, is_mad = 'SUB' in op.name, 'MAD' in op.name
+          full = (to_wide(s0) * to_wide(s1) + to_wide(s2)) if is_mad and s2 is not None else \
+                 (to_wide(s1) - to_wide(s0)) if is_sub and 'SUBREV' in op.name else \
+                 (to_wide(s0) - to_wide(s1)) if is_sub else (to_wide(s0) + to_wide(s1))
+          int_saturate = full.clamp(narrow_min, narrow_max).cast(narrow_dt)
+
     raw_stores: list = []
     vcc_val, exec_val = None, None
     for dest, val in assigns:
@@ -468,7 +492,9 @@ class _Ctx:
                        val.cast(dtypes.uint32) if val.dtype in (dtypes.uint16, dtypes.int16) else val.cast(dtypes.uint32) & UOp.const(dtypes.uint32, slice_mask)
             raw_stores.append(('vgpr_slice', (lo_bit, width, val_bits)))
             continue
-        val = _apply_clamp(val, clmp)
+        # For integer ops with clamp, use pre-computed saturated value
+        if int_saturate is not None: val = int_saturate if (isinstance(clmp, int) and clmp) else clmp.ne(_c(0)).where(int_saturate, val)
+        else: val = _apply_clamp(val, clmp, None)
         if val.dtype in (dtypes.uint64, dtypes.int64, dtypes.float64):
           lo, hi = _split64(val)
           raw_stores.extend([('vgpr', self.wvgpr_dyn(vdst_reg, lane, lo, exec_mask)), ('vgpr', self.wvgpr_dyn(vdst_reg + _c(1), lane, hi, exec_mask))])
@@ -732,6 +758,7 @@ def _compile_vop3sd(inst: ir3.VOP3SD | ir4.VOP3SD, ctx: _Ctx) -> UOp:
   _, assigns = parse_pcode(pcode, srcs)
 
   has_per_lane_vcc = any('[laneId]' in dest for dest, _ in assigns if dest.startswith('VCC') or dest.startswith('D0.u64'))
+  clmp = getattr(inst, 'clmp', 0)
   if has_per_lane_vcc:
     # VCC computation: RANGE+REDUCE gets axis ID first (lower ID = runs first)
     # This ensures VCC reads source values BEFORE VGPR stores modify them
@@ -743,11 +770,17 @@ def _compile_vop3sd(inst: ir3.VOP3SD | ir4.VOP3SD, ctx: _Ctx) -> UOp:
     final_vcc = ctx.unroll_lanes(get_vcc_bit, exec_mask)
     # VGPR stores: RANGE gets axis ID second (higher ID = runs after VCC loop)
     lane3 = ctx.range()
-    d0_val = None
+    d0_val, vcc_per_lane = None, None
     for dest, val in parse_pcode(pcode, load_srcs(lane3))[1]:
       if dest.startswith('D0') and '[laneId]' not in dest: d0_val = val
+      if dest.startswith('VCC') or (dest.startswith('D0.u64') and '[laneId]' in dest): vcc_per_lane = val
     vgpr_stores = []
     if d0_val is not None:
+      # Apply clamp using carry/borrow bit: ADD overflow->0xFFFFFFFF, SUB underflow->0
+      if clmp and vcc_per_lane is not None:
+        is_sub = 'SUB' in inst.op.name
+        sat_val = _c(0) if is_sub else _c(0xFFFFFFFF)
+        d0_val = vcc_per_lane.cast(dtypes.bool).where(sat_val, d0_val.cast(dtypes.uint32))
       if d0_val.dtype in (dtypes.uint64, dtypes.int64, dtypes.float64):
         lo, hi = _split64(d0_val)
         vgpr_stores.extend([ctx.wvgpr_dyn(vdst_reg, lane3, lo, exec_mask), ctx.wvgpr_dyn(vdst_reg + _c(1), lane3, hi, exec_mask)])
