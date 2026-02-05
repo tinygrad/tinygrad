@@ -1,7 +1,7 @@
 from typing import cast
 import functools, itertools
 from tinygrad.helpers import all_same, all_int, prod, DEBUG, RING, ALL2ALL, getenv
-from tinygrad.uop.ops import Ops, UOp, sint, PatternMatcher, UPat, GroupOp, graph_rewrite_map, graph_rewrite
+from tinygrad.uop.ops import Ops, UOp, PatternMatcher, UPat, GroupOp, graph_rewrite_map, graph_rewrite
 from tinygrad.device import Device
 
 # *** allreduce implementation ***
