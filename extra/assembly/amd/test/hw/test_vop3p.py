@@ -390,6 +390,24 @@ class TestVOP3P(unittest.TestCase):
     self.assertAlmostEqual(lo, 6.0, places=1)
     self.assertAlmostEqual(hi, 0.0, places=1)
 
+  def test_v_pk_add_u16_float_inline_const_opsel(self):
+    """V_PK_ADD_U16 with float inline constant 2.0
+    Regression test: for integer packed ops, do not perform the f32->f16 conversion.
+    """
+    # src1 = inline float constant 2.0
+    instructions = [
+      s_mov_b32(s[0], 0x00030005),  # packed u16: hi=3, lo=5
+      v_mov_b32_e32(v[0], s[0]),
+      v_pk_add_u16(v[1], v[0], SrcEnum.POS_TWO, opsel_hi=3, opsel_hi2=1),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = st.vgpr[0][1]
+    lo = result & 0xffff
+    hi = (result >> 16) & 0xffff
+    # lo = 5 + 0x0000 = 0x0005, hi = 3 + 0x4000 = 0x4003
+    self.assertEqual(lo, 0x0005, f"lo: expected 0x0005, got 0x{lo:04x}")
+    self.assertEqual(hi, 0x4003, f"hi: expected 0x4003, got 0x{hi:04x}")
+
 
 class TestWMMAF16(unittest.TestCase):
   """Tests for WMMA F16 output variant (V_WMMA_F16_16X16X16_F16).
