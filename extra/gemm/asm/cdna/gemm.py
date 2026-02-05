@@ -66,7 +66,9 @@ def custom_gemm_bw(gradient:UOp, kernel:UOp):
   assert all_same([gradient.device, a.device, b.device, out.device])
   a_t, b_t, g_t = Tensor(a, device=a.device), Tensor(b, device=a.device), Tensor(gradient, device=a.device)
   grad_a = (g_t @ b_t.T).uop
-  grad_b = (a_t.transpose(-2, -1) @ g_t).sum(0).uop
+  # TODO: casts exist because multi does the matmul with float16 acc otherwise
+  # this should be fixed in multi.py
+  grad_b = (a_t.cast(dtypes.float).transpose(-2, -1) @ g_t.cast(dtypes.float)).sum(0).cast(a.dtype.base).uop
   return (None, grad_a, grad_b)
 
 # ** main gemm function
