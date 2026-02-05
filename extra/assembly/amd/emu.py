@@ -354,7 +354,7 @@ class _Ctx:
     offset = reg.cast(dtypes.int) * _c(32, dtypes.int) + lane.cast(dtypes.int)
     return buf.index(offset, _lane_active(exec_mask, lane)).store(val.cast(dtypes.uint32))
 
-  def rsrc_dyn(self, off: UOp, lane: UOp | None, bits: int = 32, literal: UOp | None = None, is_f64: bool = False) -> UOp:
+  def rsrc_dyn(self, off: UOp, lane: UOp | None, bits: int = 32, literal: UOp | None = None, is_f64: bool = False, do_cast: bool = True) -> UOp:
     """Read source operand with dynamic offset. Handles SGPR/inline constants (<256), VGPR (>=256).
     If lane is None, only scalar access is supported (off must be < 256).
     is_f64: True for F64 operations where 64-bit literals go in high 32 bits."""
@@ -385,7 +385,7 @@ class _Ctx:
     else:
       scalar_val = sgpr_lo
       if literal is not None: scalar_val = off.eq(_c(255)).where(literal, scalar_val)
-      if bits == 16:  # Float constants: cast F32 to F16
+      if bits == 16 and do_cast:  # Float constants: cast F32 to F16
         scalar_val = is_float_const.where(scalar_val.bitcast(dtypes.float32).cast(dtypes.half).bitcast(dtypes.uint16).cast(dtypes.uint32), scalar_val)
 
     return is_vgpr.where(vgpr_val, scalar_val) if lane is not None else scalar_val
@@ -800,15 +800,9 @@ def _compile_vop3p(inst: ir3.VOP3P | ir4.VOP3P, ctx: _Ctx) -> UOp:
   lane = ctx.range()
   exec_mask = ctx.rsgpr_dyn(_c(EXEC_LO.offset))
   vdst_reg = ctx.inst_field(type(inst).vdst)
-  src0_off, src1_off, src2_off = ctx.inst_field(type(inst).src0), ctx.inst_field(type(inst).src1), ctx.inst_field(type(inst).src2)
-  src0, src1, src2 = ctx.rsrc_dyn(src0_off, lane), ctx.rsrc_dyn(src1_off, lane), ctx.rsrc_dyn(src2_off, lane)
-  # only convert float consts for float operations.
-  if any(x in op_name for x in ('F16', 'F32', 'BF16')) and 'IU' not in op_name:
-    def _f32_to_f16(src: UOp, off: UOp) -> UOp:
-      is_float_const = (off >= _c(240)) & (off <= _c(248))
-      half_val = src.bitcast(dtypes.float32).cast(dtypes.half).bitcast(dtypes.uint16).cast(dtypes.uint32)
-      return is_float_const.where(half_val, src)
-    src0, src1, src2 = _f32_to_f16(src0, src0_off), _f32_to_f16(src1, src1_off), _f32_to_f16(src2, src2_off)
+  src0 = ctx.rsrc_dyn(ctx.inst_field(type(inst).src0), lane, 16, do_cast=any(x in op_name for x in ('F16', 'F32', 'BF16')) and 'IU' not in op_name)
+  src1 = ctx.rsrc_dyn(ctx.inst_field(type(inst).src1), lane, 16, do_cast=any(x in op_name for x in ('F16', 'F32', 'BF16')) and 'IU' not in op_name)
+  src2 = ctx.rsrc_dyn(ctx.inst_field(type(inst).src2), lane, 16, do_cast=any(x in op_name for x in ('F16', 'F32', 'BF16')) and 'IU' not in op_name)
   opsel, opsel_hi = getattr(inst, 'opsel', 0) or 0, getattr(inst, 'opsel_hi', 3) if getattr(inst, 'opsel_hi', 3) is not None else 3
   opsel_hi2 = getattr(inst, 'opsel_hi2', 1) if getattr(inst, 'opsel_hi2', 1) is not None else 1
   neg, neg_hi = getattr(inst, 'neg', 0) or 0, getattr(inst, 'neg_hi', 0) or 0
