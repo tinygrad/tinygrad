@@ -35,9 +35,13 @@ def can_use_asm_gemm(a:Tensor, b:Tensor) -> bool:
     return todo(f"sharding mismatch a.ndim={a.ndim} a.uop.axis={a.uop.axis} b.uop.axis={b.uop.axis}")
   batch, M, K = (1, *a.shape) if a.ndim == 2 else a.shape
   N = b.shape[1]
-  if isinstance(a.device, tuple): batch //= len(a.device)
+  if isinstance(a.device, tuple):
+    batch //= len(a.device)
+    dname = a.device[0]
+  else: dname = a.device
+  arch = getattr(Device[dname].renderer, "arch", "")
   if batch not in {1, 2}: return todo(f"GEMM batch size {batch}")
-  if (key:=(M, N, K)) not in GEMM_ARGS: return todo(f"GEMM shape not supported {key}")
+  if (key:=(M, N, K)) not in GEMM_ARGS and arch == "gfx950": return todo(f"GEMM shape not supported {key} on {arch}")
   return True
 
 # ** UOp gemm to test Tensor.custom_kernel multi and backward correctness on non cdna4
