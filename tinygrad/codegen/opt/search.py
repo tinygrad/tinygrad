@@ -1,6 +1,6 @@
 import functools, math, time, multiprocessing, traceback, signal, atexit
 from dataclasses import replace
-from tinygrad.uop.ops import sym_infer, AxisType, pyrender
+from tinygrad.uop.ops import Ops, sym_infer, AxisType, pyrender
 from tinygrad.device import Device, Buffer, Compiler
 from tinygrad.helpers import prod, flatten, DEBUG, CACHELEVEL, diskcache_get, diskcache_put, getenv, Context, colored, time_to_str, unwrap
 from tinygrad.helpers import IGNORE_BEAM_CACHE
@@ -126,6 +126,13 @@ def beam_search(s:Scheduler, rawbufs:list[Buffer], amt:int, allow_test_size=True
     return ret
 
   beam: list[tuple[Scheduler, float]] = [(s, float("inf"))]
+  # seed beam search with heuristic for better starting point
+  if not any(u.op is Ops.BUFFERIZE for u in s.ast.backward_slice):
+    try:
+      from tinygrad.codegen.opt.heuristic import hand_coded_optimizations
+      heuristic_s = hand_coded_optimizations(s.copy())
+      beam.append((heuristic_s, float("inf")))
+    except Exception: pass
   seen_libs = set()
 
   default_parallel = multiprocessing.cpu_count() if s.ren.device in {"CUDA", "AMD", "NV", "METAL", "HIP"} else 0
