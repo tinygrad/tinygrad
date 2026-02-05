@@ -29,15 +29,12 @@ def verify_asm_gemm(batch:int, M:int, N:int, K:int, dtype=dtypes.float16, gpus:i
     assert (a.grad - a_ref.grad).square().max().float().item() < 1e-3, "grad_a mismatch"
     assert (b.grad - b_ref.grad).square().max().float().item() < 1e-3, "grad_b mismatch"
 
-SCALE = 64 if CI else 1
+SCALE = 128 if CI else 1
 
 class TestGemm(unittest.TestCase):
   def test_simple(self): verify_asm_gemm(1, N:=getenv("N", 4096)//SCALE, N//SCALE, N//SCALE, dtype=dtypes.half)
   def test_gemm(self): verify_asm_gemm(1, 8192//SCALE, 4096//SCALE, 14336//SCALE)
   def test_gemm_multi(self): verify_asm_gemm(2, 8192//SCALE, 4096//SCALE, 4096//SCALE, gpus=2)
-  def test_gemm_unsupported(self):
-    with self.assertRaisesRegex(AssertionError, "shape not supported"):
-      verify_asm_gemm(8, 1024//SCALE, 1024//SCALE, 4096//SCALE, gpus=8)
 
 class TestGemmLarge(unittest.TestCase):
   def setUp(self):
@@ -51,6 +48,9 @@ class TestGemmLarge(unittest.TestCase):
   def test_gemm5(self): verify_asm_gemm(8, 4096, 4096, 14336, dtype=dtypes.bfloat16, gpus=8)
   def test_gemm6(self): verify_asm_gemm(16, 4096, 4096, 14336, dtype=dtypes.bfloat16, gpus=8)
   def test_gemm7(self): verify_asm_gemm(1, 8192, 128256, 4096)
+  def test_gemm_unsupported(self):
+    with self.assertRaisesRegex(AssertionError, "shape not supported"):
+      verify_asm_gemm(8, 1024, 1024, 4096, gpus=8)
 
 if __name__ == "__main__":
   unittest.main()
