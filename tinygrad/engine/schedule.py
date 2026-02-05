@@ -25,7 +25,7 @@ def create_schedule(sched_sink:UOp) -> tuple[list[ExecItem], UOp]:
     for u in sched_sink.toposort():
       if u.op is Ops.RANGE: in_degree.setdefault(u, 0)
       if u.op is not Ops.AFTER: continue
-      if (k:=u.src[1]).op is Ops.RANGE: continue  # outer range is handled through BIND
+      if (k:=u.src[1]).op is Ops.RANGE: continue  # RANGEs are scheduled directly, not through dependency graph
       assert k.op in {Ops.KERNEL, Ops.END}, f"AFTER src[1] should be KERNEL or END, not {k.op}"
       in_degree.setdefault(k, 0)
       if k.op is Ops.END: assert k.src[0].op is Ops.KERNEL, f"END src[0] should be KERNEL, not {k.src[0].op}"
@@ -42,14 +42,12 @@ def create_schedule(sched_sink:UOp) -> tuple[list[ExecItem], UOp]:
                 children.setdefault(ss.src[1], []).append(k)
                 in_degree[k] += 1
           case Ops.BUFFER | Ops.BIND:
-            pass  # BUFFER is already realized, BIND is outer range (handled via bound_ranges below)
+            pass  # BUFFER is already realized, BIND is a bound variable (not a buffer dependency)
           case _:
             raise RuntimeError(f"input to kernel must be AFTER, BUFFER, MSELECT, MSTACK, or BIND, not {s.op}")
 
   with cpu_profile(TracingKey("linearize schedule")):
-    queue: deque[UOp] = deque()
-    for k,v in in_degree.items():
-      if v == 0: queue.append(k)
+    queue: deque[UOp] = deque(k for k,v in in_degree.items() if v == 0)
 
     schedule: list[UOp] = []  # RANGE, KERNEL, or END UOps
     sched_item: dict[UOp, ScheduleItem] = {}
