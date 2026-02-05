@@ -2955,27 +2955,42 @@ class TestVOP3ClampUint32(unittest.TestCase):
   def test_v_sub_nc_u32_e64_clamp_underflow(self):
     """V_SUB_NC_U32_E64 with clamp: 0 - 1 should saturate to 0."""
     instructions = [
-      v_mov_b32_e32(v[0], 0),    # S0 = 0
-      v_mov_b32_e32(v[1], 1),    # S1 = 1
-      # v_sub_nc_u32_e64 v[2], v[0], v[1], clmp=1
-      # D0 = S0 - S1 = 0 - 1 = underflow -> should saturate to 0
+      v_mov_b32_e32(v[0], 0),
+      v_mov_b32_e32(v[1], 1),
       v_sub_nc_u32_e64(v[2], v[0], v[1], clmp=1),
     ]
     st = run_program(instructions, n_lanes=1)
-    # Without clamp saturation, this would be 0xFFFFFFFF (wraparound)
-    # With proper clamp, it should be 0
     self.assertEqual(st.vgpr[0][2], 0, f"expected 0, got 0x{st.vgpr[0][2]:08x}")
+
+  def test_v_sub_nc_u32_e64_clamp_no_underflow(self):
+    """V_SUB_NC_U32_E64 with clamp: 100 - 50 = 50 (no saturation needed)."""
+    instructions = [
+      v_mov_b32_e32(v[0], 100),
+      v_mov_b32_e32(v[1], 50),
+      v_sub_nc_u32_e64(v[2], v[0], v[1], clmp=1),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][2], 50, f"expected 50, got {st.vgpr[0][2]}")
 
   def test_v_add_nc_u32_e64_clamp_overflow(self):
     """V_ADD_NC_U32_E64 with clamp: 0xFFFFFFFF + 1 should saturate to 0xFFFFFFFF."""
     instructions = [
-      v_mov_b32_e32(v[0], 0xFFFFFFFF),  # S0 = max u32
-      v_mov_b32_e32(v[1], 1),            # S1 = 1
-      # D0 = S0 + S1 = overflow -> should saturate to 0xFFFFFFFF
+      v_mov_b32_e32(v[0], 0xFFFFFFFF),
+      v_mov_b32_e32(v[1], 1),
       v_add_nc_u32_e64(v[2], v[0], v[1], clmp=1),
     ]
     st = run_program(instructions, n_lanes=1)
     self.assertEqual(st.vgpr[0][2], 0xFFFFFFFF, f"expected 0xFFFFFFFF, got 0x{st.vgpr[0][2]:08x}")
+
+  def test_v_add_nc_u32_e64_clamp_no_overflow(self):
+    """V_ADD_NC_U32_E64 with clamp: 100 + 50 = 150 (no saturation needed)."""
+    instructions = [
+      v_mov_b32_e32(v[0], 100),
+      v_mov_b32_e32(v[1], 50),
+      v_add_nc_u32_e64(v[2], v[0], v[1], clmp=1),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][2], 150, f"expected 150, got {st.vgpr[0][2]}")
 
 
 class TestVOP3ClampUint16(unittest.TestCase):
@@ -2984,26 +2999,42 @@ class TestVOP3ClampUint16(unittest.TestCase):
   def test_v_sub_nc_u16_clamp_underflow(self):
     """V_SUB_NC_U16 with clamp: 0 - 1 should saturate to 0."""
     instructions = [
-      v_mov_b32_e32(v[0], 0),    # S0 = 0
-      v_mov_b32_e32(v[1], 1),    # S1 = 1
-      # D0 = S0 - S1 = 0 - 1 = underflow -> should saturate to 0
+      v_mov_b32_e32(v[0], 0),
+      v_mov_b32_e32(v[1], 1),
       v_sub_nc_u16(v[2], v[0], v[1], clmp=1),
     ]
     st = run_program(instructions, n_lanes=1)
-    # Without clamp saturation, this would be 0xFFFF (wraparound)
-    # With proper clamp, it should be 0
     self.assertEqual(st.vgpr[0][2] & 0xFFFF, 0, f"expected 0, got 0x{st.vgpr[0][2] & 0xFFFF:04x}")
+
+  def test_v_sub_nc_u16_clamp_no_underflow(self):
+    """V_SUB_NC_U16 with clamp: 100 - 50 = 50 (no saturation needed)."""
+    instructions = [
+      v_mov_b32_e32(v[0], 100),
+      v_mov_b32_e32(v[1], 50),
+      v_sub_nc_u16(v[2], v[0], v[1], clmp=1),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][2] & 0xFFFF, 50, f"expected 50, got {st.vgpr[0][2] & 0xFFFF}")
 
   def test_v_add_nc_u16_clamp_overflow(self):
     """V_ADD_NC_U16 with clamp: 0xFFFF + 1 should saturate to 0xFFFF."""
     instructions = [
-      v_mov_b32_e32(v[0], 0xFFFF),  # S0 = max u16
-      v_mov_b32_e32(v[1], 1),        # S1 = 1
-      # D0 = S0 + S1 = overflow -> should saturate to 0xFFFF
+      v_mov_b32_e32(v[0], 0xFFFF),
+      v_mov_b32_e32(v[1], 1),
       v_add_nc_u16(v[2], v[0], v[1], clmp=1),
     ]
     st = run_program(instructions, n_lanes=1)
     self.assertEqual(st.vgpr[0][2] & 0xFFFF, 0xFFFF, f"expected 0xFFFF, got 0x{st.vgpr[0][2] & 0xFFFF:04x}")
+
+  def test_v_add_nc_u16_clamp_no_overflow(self):
+    """V_ADD_NC_U16 with clamp: 100 + 50 = 150 (no saturation needed)."""
+    instructions = [
+      v_mov_b32_e32(v[0], 100),
+      v_mov_b32_e32(v[1], 50),
+      v_add_nc_u16(v[2], v[0], v[1], clmp=1),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][2] & 0xFFFF, 150, f"expected 150, got {st.vgpr[0][2] & 0xFFFF}")
 
 
 class TestVOP3ClampInt32(unittest.TestCase):

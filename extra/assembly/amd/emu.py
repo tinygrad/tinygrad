@@ -135,11 +135,6 @@ def _val_to_u32(val: UOp) -> UOp:
   if val.dtype in (dtypes.uint16, dtypes.int16): return val.cast(dtypes.uint32)
   return val.cast(dtypes.uint32)
 
-def _apply_clamp(val: UOp, clmp: int) -> UOp:
-  """Apply VOP3 clamp modifier: clamp float results to [0.0, 1.0] range."""
-  if clmp == 0 or val.dtype not in (dtypes.float32, dtypes.half, dtypes.float64): return val
-  return val.maximum(UOp.const(val.dtype, 0.0)).minimum(UOp.const(val.dtype, 1.0))
-
 _pcode_fixes = {
   'V_DIV_FMAS_F32': ('D0.f32 = 2.0F ** 32 * fma(S0.f32, S1.f32, S2.f32)',
     'D0.f32 = (exponent(S2.f32) > 127) ? (2.0F ** 64 * fma(S0.f32, S1.f32, S2.f32)) : (2.0F ** -64 * fma(S0.f32, S1.f32, S2.f32))'),
@@ -483,9 +478,10 @@ class _Ctx:
                        val.cast(dtypes.uint32) if val.dtype in (dtypes.uint16, dtypes.int16) else val.cast(dtypes.uint32) & UOp.const(dtypes.uint32, slice_mask)
             raw_stores.append(('vgpr_slice', (lo_bit, width, val_bits)))
             continue
-        # For integer ops with clamp, use pre-computed saturated value
+        # For integer ops with clamp, use pre-computed saturated value; for floats, clamp to [0,1]
         if int_saturate is not None: val = int_saturate
-        else: val = _apply_clamp(val, clmp)
+        elif clmp and val.dtype in (dtypes.float32, dtypes.half, dtypes.float64):
+          val = val.maximum(UOp.const(val.dtype, 0.0)).minimum(UOp.const(val.dtype, 1.0))
         if val.dtype in (dtypes.uint64, dtypes.int64, dtypes.float64):
           lo, hi = _split64(val)
           raw_stores.extend([('vgpr', self.wvgpr_dyn(vdst_reg, lane, lo, exec_mask)), ('vgpr', self.wvgpr_dyn(vdst_reg + _c(1), lane, hi, exec_mask))])
