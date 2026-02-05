@@ -1,5 +1,6 @@
 import unittest
 from tinygrad import Tensor, Device, dtypes, Context
+from tinygrad.device import is_dtype_supported
 from tinygrad.helpers import getenv, CI
 from extra.gemm.asm.cdna.gemm import asm_gemm
 
@@ -31,6 +32,7 @@ def verify_asm_gemm(batch:int, M:int, N:int, K:int, dtype=dtypes.float16, gpus:i
 
 SCALE = 128 if CI else 1
 
+@unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
 class TestGemm(unittest.TestCase):
   def test_simple(self): verify_asm_gemm(1, N:=getenv("N", 4096)//SCALE, N//SCALE, N//SCALE, dtype=dtypes.half)
   def test_gemm(self): verify_asm_gemm(1, 8192//SCALE, 4096//SCALE, 14336//SCALE)
