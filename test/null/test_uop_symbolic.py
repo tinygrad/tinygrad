@@ -390,6 +390,10 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable(Variable("a", 0, 6) < 3, 0, 1, "(a<3)")
     self.helper_test_variable(Variable("a", 0, 6) < 8, 1, 1, "True")
 
+  def test_cast_bool(self):
+    a = Variable("a", 0, 10)
+    self.helper_test_variable(a.cast(dtypes.bool) | a.ne(0), 0, 1, "a!=0")
+
   def test_lt_sum_remove(self):
     self.helper_test_variable(Variable("a", 0, 6) + 2 < 3, 0, 1, "(a<1)")
 
