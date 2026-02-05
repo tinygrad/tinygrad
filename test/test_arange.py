@@ -210,7 +210,7 @@ class TestIndexing(unittest.TestCase):
     prg = sched[0].lower().prg.p
     bwd_ops = prg.estimates.ops
     expected_ops = bs*seqlen*dim*dim*ops_scale
-    print(f"\nrope matmul bwd ({dtype}): {GlobalCounters.kernel_count} kernels, {bwd_ops:,} ops")
+    print(f"rope matmul bwd ({dtype}): {GlobalCounters.kernel_count} kernels, {bwd_ops:,} ops")
     self.assertLess(bwd_ops, expected_ops, f"rope bwd ops {bwd_ops:,} should be < {ops_scale} per (got {bwd_ops/(bs*seqlen*dim*dim):.1f})")
 
   def test_llama_8b_rope_backward_f16(self): self.base_test_llama_8b_rope_backward(dtypes.float16, 1)
