@@ -87,8 +87,9 @@ _tensor_spec = PatternMatcher([
   (UPat(Ops.BUFFER, src=(UPat((Ops.LUNIQUE, Ops.UNIQUE)), UPat(Ops.DEVICE)), name="buf"),
    lambda buf: isinstance(buf.arg, int) and isinstance(buf.dtype, (DType, ImageDType))),
 
-  # KERNEL can attach to an AFTER to describe the compute required to realize a BUFFER
-  (UPat(Ops.KERNEL, src=UPat((Ops.BUFFER, Ops.AFTER, Ops.MSELECT, Ops.MSTACK, Ops.BIND))), lambda: True),
+  # CALL can attach to an AFTER to describe the compute required to realize a BUFFER
+  # src[0] is the function (SINK), src[1:] are buffers/bindings
+  (UPat(Ops.CALL, src=(UPat(Ops.SINK), UPat((Ops.BUFFER, Ops.AFTER, Ops.MSELECT, Ops.MSTACK, Ops.BIND))), allow_any_len=True), lambda: True),
 
   # ASSIGN has a target and a value. It can also optionally depend on other assigns
   (UPat(Ops.ASSIGN, name="x"), lambda x: len(x.src) >= 2 and all(s.op is Ops.ASSIGN for s in x.src[2:])),
@@ -249,8 +250,8 @@ full_spec = PatternMatcher([
   # vectorized index
   (UPat(Ops.INDEX, src=(UPat((Ops.VECTORIZE, Ops.CAST)), UPat())), lambda: True),
 
-  # linearizer: outputs + intermediate KERNELs
-  (UPat(Ops.KERNEL, dtype=dtypes.void), lambda: True),
+  # linearizer: outputs + intermediate CALLs
+  (UPat(Ops.CALL, dtype=dtypes.void), lambda: True),
 
   # Invalid must have type Index
   (UPat(Ops.CONST, arg=Invalid, name="x"), lambda x: x.dtype.scalar() == dtypes.index),

@@ -1,7 +1,7 @@
 import time
 from typing import cast
 from collections import deque
-from tinygrad.uop.ops import UOp, Ops, buffers, UOpMetaClass, track_rewrites, PatternMatcher, UPat, graph_rewrite, graph_rewrite_map, Kernel
+from tinygrad.uop.ops import UOp, Ops, buffers, UOpMetaClass, track_rewrites, PatternMatcher, UPat, graph_rewrite, graph_rewrite_map, CallInfo
 from tinygrad.uop.spec import type_verify, tensor_spec
 from tinygrad.device import Buffer, MultiBuffer
 from tinygrad.helpers import DEBUG, cpu_profile, TracingKey, SPEC, flatten, pluralize, SCACHE, Metadata
@@ -28,8 +28,7 @@ def create_schedule(sched_sink:UOp) -> tuple[list[ExecItem], UOp]:
       if (k:=u.src[1]).op is Ops.RANGE: continue  # RANGEs are scheduled directly, not through dependency graph
       assert k.op in {Ops.KERNEL, Ops.END}, f"AFTER src[1] should be KERNEL or END, not {k.op}"
       in_degree.setdefault(k, 0)
-      if k.op is Ops.END: assert k.src[0].op is Ops.KERNEL, f"END src[0] should be KERNEL, not {k.src[0].op}"
-      for s in k.src[0].src if k.op is Ops.END else k.src:
+      for s in k.src[0].src if k.op is Ops.END else k.src[1:]:
         match (s := _unwrap_src(s)).op:
           case Ops.AFTER:
             children.setdefault(s.src[1], []).append(k)
@@ -54,14 +53,13 @@ def create_schedule(sched_sink:UOp) -> tuple[list[ExecItem], UOp]:
     while len(queue):
       k = rk = queue.popleft()
       if k.op is Ops.END: k = k.src[0]
-      assert k.op in {Ops.RANGE, Ops.KERNEL}, f"unexpected op in queue: {k.op}"
+      assert k.op in {Ops.RANGE, Ops.CALL}, f"unexpected op in queue: {k.op}"
       if k.op is Ops.RANGE: schedule.append(k)
-      elif k.op is Ops.KERNEL:
-        ast = (kernel:=cast(Kernel, k.arg)).ast
-        buf_uops = tuple(_unwrap_src(s).buf_uop for s in k.src if s.op is not Ops.BIND)
-        bound_ranges = tuple(s for s in k.src if s.op is Ops.BIND and len(s.src) > 1 and s.src[1].op is Ops.RANGE)
-        sched_item[k] = (ast, buf_uops, kernel.metadata, bound_ranges)
-        schedule.append(k)
+      elif k.op is Ops.CALL:
+        ast = k.src[0]
+        buf_uops = tuple(_unwrap_src(s).buf_uop for s in k.src[1:] if s.op is not Ops.BIND)
+        bound_ranges = tuple(s for s in k.src[1:] if s.op is Ops.BIND and len(s.src) > 1 and s.src[1].op is Ops.RANGE)
+        schedule.append((ast, buf_uops, cast(CallInfo, k.arg).metadata, {}, bound_ranges))
         if rk.op is Ops.END: schedule.append(rk)
       for x in children.get(rk, []):
         in_degree[x] -= 1
