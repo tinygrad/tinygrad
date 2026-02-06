@@ -125,7 +125,7 @@ from tinygrad.mixin import OpMixin
 class UOp(OpMixin, Generic[OpT], metaclass=UOpMetaClass):
   op:OpT
   dtype:DType = dtypes.void
-  src:tuple[UOp, ...] = tuple()
+  src:tuple[UOp[OpT], ...] = tuple()
   arg:Any = None
   tag:Any = None
   def __del__(self):
