@@ -175,7 +175,6 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
       else: cache[node] = visitor(node) # second time i'm seeing this node, add visit to returned toposort
     return cache
 
-  # passes visitor as lambda None to match dict[UOp, None] pattern
   def toposort(self, gate:Callable|None=None) -> dict[UOp, None]: return self._topomap({}, (lambda x: None), gate)
 
   def topovisit(self, visitor:Callable[[UOp], T], cache:dict[UOp, T]) -> T: return self._topomap(cache, visitor)[self]
