@@ -382,7 +382,6 @@ class TestBFloat16Type(TestDType): DTYPE = dtypes.bfloat16
 
 class TestFp8e4m3(TestDType): DTYPE = dtypes.fp8e4m3
 
-@unittest.skipUnless(Ops.SHL in Device[Device.DEFAULT].renderer.code_for_op, "fp8 decomp requires bitshift")
 class TestEmulatedFp8e4m3(TestFp8e4m3):
   @classmethod
   def setUpClass(cls):
