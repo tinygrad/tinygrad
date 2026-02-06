@@ -207,7 +207,7 @@ class CapturedJit(Generic[ReturnType]):
     asgn = _internal_memory_planner([[b for item in self.jit_cache for b in item.bufs if b is not None and b not in blacklist]], ignore_checks=True)
     self.jit_cache = [replace(item, bufs=[asgn.get(b,b) if b is not None else None for b in item.bufs]) for item in self.jit_cache]
     for old, new in asgn.items():
-      if old.is_allocated(): new.ensure_allocated().copyin(old.as_buffer())
+      if old.is_allocated(): new.ensure_allocated().copyin(old.as_memoryview())
     self.__post_init__()
 
   # jit exec
@@ -219,7 +219,7 @@ class CapturedJit(Generic[ReturnType]):
     # copy aliased inputs to prevent read-after-write hazard
     for i, ib in enumerate(input_buffers):
       if (writer := self._output_to_writer.get(ib)) is not None and self._input_to_max_reader.get(i, -1) > writer:
-        input_buffers[i] = Buffer(ib.device, ib.size, ib.dtype).ensure_allocated().copyin(ib.as_buffer())
+        input_buffers[i] = Buffer(ib.device, ib.size, ib.dtype).ensure_allocated().copyin(ib.as_memoryview())
 
     for (j,i),input_idx in self._input_replace.items(): self._jit_cache[j].bufs[i] = input_buffers[input_idx]
 
@@ -257,8 +257,7 @@ def _prepare_jit_inputs(args, kwargs):
   input_uops: list[UOp] = flatten([t.uop.src if t.uop.op is Ops.MULTI else [t.uop] for t in tensors])
   if any(u.base.op is Ops.CONST for u in input_uops):
     raise JitError("JIT inputs cannot be const, create a buffer with .contiguous()")
-  input_buffers: list[Buffer] = flatten([b.bufs if isinstance(b:=u.base.realized, MultiBuffer) else [b]
-                                         for u in input_uops if u.base.realized is not None])
+  input_buffers: list[Buffer] = flatten([b.bufs if isinstance(b, MultiBuffer) else [b] for u in input_uops if (b:=u.base.realized) is not None])
   if len(set(input_buffers)) != len(input_buffers): raise JitError("duplicate inputs to JIT")
   inputs = [(*(u.substitute({u.base:UOp(Ops.NOOP)}, extra_pm=mop_cleanup).unbind_all()), u.dtype, u.device) for u in input_uops]
   _var_vals = merge_dicts([x[1] for x in inputs] + [dict(v.unbind() for v in (args + tuple(kwargs.values())) if isinstance(v, UOp))])
@@ -311,7 +310,7 @@ class TinyJit(Generic[ReturnType]):
       assert self.fxn is not None
       with Context(BEAM=0 if getenv("IGNORE_JIT_FIRST_BEAM") else BEAM.value):
         ret = self.fxn(*args, **kwargs)
-        if len(params:=get_parameters(ret)): Tensor.realize(params[0], *params[1:])
+        if len(params:=get_parameters(ret)): Tensor.realize(*params)
     elif self.cnt == 1:
       # jit capture
       assert self.fxn is not None
@@ -323,7 +322,7 @@ class TinyJit(Generic[ReturnType]):
         capturing.append(self)
         try:
           ret = self.fxn(*args, **kwargs)
-          if len(params:=get_parameters(ret)): Tensor.realize(params[0], *params[1:])
+          if len(params:=get_parameters(ret)): Tensor.realize(*params)
         finally: capturing.clear()
       jit_cache = self._jit_cache
       del self._buffer_replace, self._jit_cache

@@ -62,6 +62,7 @@ class TestBasicScalar(unittest.TestCase):
     st = run_program(instructions, n_lanes=1)
     self.assertEqual(st.sgpr[1], 0x80000000)
 
+  @skip_unless_gfx(11, 5, "SALU FP ops require gfx1150+")
   def test_s_fmamk_f32(self):
     """S_FMAMK_F32: D = S0 * literal + S1."""
     # 2.0 * 3.0 + 1.0 = 7.0
@@ -73,6 +74,7 @@ class TestBasicScalar(unittest.TestCase):
     st = run_program(instructions, n_lanes=1)
     self.assertEqual(st.sgpr[2], f2i(7.0))
 
+  @skip_unless_gfx(11, 5, "SALU FP ops require gfx1150+")
   def test_s_fmamk_f32_negative(self):
     """S_FMAMK_F32 with negative values."""
     # -2.0 * 4.0 + 10.0 = 2.0
@@ -83,6 +85,50 @@ class TestBasicScalar(unittest.TestCase):
     ]
     st = run_program(instructions, n_lanes=1)
     self.assertEqual(st.sgpr[2], f2i(2.0))
+
+
+class TestPack(unittest.TestCase):
+  """Tests for S_PACK instructions."""
+
+  def test_s_pack_ll_b32_b16(self):
+    """S_PACK_LL_B32_B16 packs low 16 bits of two sources into one 32-bit result."""
+    instructions = [
+      s_mov_b32(s[0], 0xDEADAAAA),
+      s_mov_b32(s[1], 0xDEADBBBB),
+      s_pack_ll_b32_b16(s[2], s[0], s[1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.sgpr[2], 0xBBBBAAAA)
+
+  def test_s_pack_lh_b32_b16(self):
+    """S_PACK_LH_B32_B16: D0 = { S1[31:16], S0[15:0] }."""
+    instructions = [
+      s_mov_b32(s[0], 0xDEADAAAA),
+      s_mov_b32(s[1], 0xDEADBBBB),
+      s_pack_lh_b32_b16(s[2], s[0], s[1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.sgpr[2], 0xDEADAAAA)
+
+  def test_s_pack_hh_b32_b16(self):
+    """S_PACK_HH_B32_B16: D0 = { S1[31:16], S0[31:16] }."""
+    instructions = [
+      s_mov_b32(s[0], 0xDEADAAAA),
+      s_mov_b32(s[1], 0xDEADBBBB),
+      s_pack_hh_b32_b16(s[2], s[0], s[1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.sgpr[2], 0xDEADDEAD)
+
+  def test_s_pack_hl_b32_b16(self):
+    """S_PACK_HL_B32_B16: D0 = { S1[15:0], S0[31:16] }."""
+    instructions = [
+      s_mov_b32(s[0], 0xDEADAAAA),
+      s_mov_b32(s[1], 0xDEADBBBB),
+      s_pack_hl_b32_b16(s[2], s[0], s[1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.sgpr[2], 0xBBBBDEAD)
 
 
 class TestQuadmaskWqm(unittest.TestCase):

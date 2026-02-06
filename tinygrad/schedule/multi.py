@@ -1,5 +1,5 @@
 from typing import cast
-import functools, itertools, operator
+import functools, itertools
 from tinygrad.helpers import all_same, all_int, prod, DEBUG, RING, ALL2ALL, getenv
 from tinygrad.uop.ops import Ops, UOp, sint, PatternMatcher, UPat, GroupOp, graph_rewrite_map, graph_rewrite
 from tinygrad.device import Device
@@ -71,7 +71,8 @@ def handle_allreduce(buf:UOp, red:UOp) -> UOp|None:
   # allgather
   copied_chunks = []
   for i,rc in enumerate(reduced_chunks):
-    if use_all2all: copied_chunks.append(UOp(Ops.MSTACK, buf.dtype, tuple(rc.copy_to_device(buf.device[j]) for j in range(n_lbs))))
+    if isinstance(red.src[1].arg, str): copied_chunks.append(rc.copy_to_device(red.src[1].arg))
+    elif use_all2all: copied_chunks.append(UOp(Ops.MSTACK, buf.dtype, tuple(rc.copy_to_device(buf.device[j]) for j in range(n_lbs))))
     else:
       this_chunk: list[UOp|None] = [None] * n_lbs
       this_chunk[(i+n_lbs-1)%n_lbs] = rc
@@ -80,8 +81,7 @@ def handle_allreduce(buf:UOp, red:UOp) -> UOp|None:
       copied_chunks.append(UOp(Ops.MSTACK, buf.dtype, tuple(cast(list[UOp], this_chunk))))
 
   # reassemble
-  pads = [((s,numel-e),) for s,e in chunks]
-  return functools.reduce(operator.add, [c.pad(pad) for pad,c in zip(pads, copied_chunks)]).reshape(shape)
+  return UOp.sum(*[c.pad(((s,numel-e),)) for (s,e),c in zip(chunks, copied_chunks)]).reshape(shape)
 
 # ***** multi rewrite MSELECT/MSTACK *****
 
@@ -93,12 +93,7 @@ def mstack_early_shrink(ms:UOp, shrink:UOp):
     return s.shrink(tuple(new_arg))
   for i, x in enumerate(ms.src):
     if x.op is Ops.COPY:
-      # if src device doesn't have a renderer, we have to view after the copy
-      # TODO: a way to understand this
-      if x.src[0].device in {"DISK", "NPY"}:
-        ret.append(apply_shrink(x, i))
-      else:
-        ret.append(apply_shrink(x.src[0], i).copy_to_device(x.device))
+      ret.append(apply_shrink(x.src[0], i).copy_to_device(x.device))
     else:
       ret.append(apply_shrink(x, i).contiguous())
   return ms.replace(src=tuple(ret))

@@ -240,7 +240,7 @@ class Tensor(OpMixin):
       param = UOp.param(slot, self.dtype, self.shape, self.device)
     return Tensor(param, device=self.device)
   def call(self, *lst:Tensor, fxn:Tensor|UOp, grad_fxn:Callable|None=None) -> Tensor:
-    return Tensor(UOp.call(*[t.uop for t in (self,)+lst], fxn=fxn.uop if isinstance(fxn, Tensor) else fxn, arg=grad_fxn), device=self.device)
+    return Tensor((fxn.uop if isinstance(fxn, Tensor) else fxn).call(*[t.uop for t in (self,)+lst], grad_fxn=grad_fxn), device=self.device)
 
   def custom_kernel(self, *lst:Tensor, fxn:Callable, grad_fxn:Callable|None=None) -> list[Tensor]:
     """
@@ -272,34 +272,34 @@ class Tensor(OpMixin):
   @disable_gc()
   def realize(self, *lst:Tensor, do_update_stats=True) -> Tensor:
     """Triggers the computation needed to create these Tensor(s)."""
-    if len(to_realize:=[x for x in (self,)+lst if not x.uop.is_contiguous()]):
+    if len(to_realize:=[x for x in (self,)+lst if not x.uop.has_buffer_identity()]):
       run_schedule(*Tensor.schedule_with_vars(*to_realize), do_update_stats=do_update_stats)
     return self
 
-  def replace(self, x:Tensor, allow_shape_mismatch=False) -> Tensor:
+  def replace(self, x:Tensor) -> Tensor:
     """
     Replaces the data of this tensor with the data of another tensor. Only the shape of the tensors must match.
     """
     # used for replacing a Tensor with a new version of it (potentially with a different device and dtype)
-    assert self.shape == x.shape or allow_shape_mismatch, f"replace shape mismatch {self.shape} != {x.shape}"
+    assert self.shape == x.shape, f"replace shape mismatch {self.shape} != {x.shape}"
     self.uop = x.uop
     return self
 
   def assign(self, x:Tensor|PyConst|list|tuple) -> Tensor:
+    is_disk = isinstance(self.device, str) and self.device.startswith("DISK")
+    if not isinstance(x, Tensor): x = Tensor(x, device="CPU" if is_disk else self.device, dtype=self.dtype)
+    if self.uop is x.uop: return self  # a self assign is a NOOP
+    # broadcast x (shape only, dtype must match)
+    if self.shape != x.shape: x = x._broadcast_to(self.shape)
+    if self.shape != x.shape: raise RuntimeError(f"assign shape mismatch {self.shape} != {x.shape}")
+    if not is_disk and self.device != x.device: raise RuntimeError(f"assign device mismatch {self.device} != {x.device}")
+    if self.dtype != x.dtype: raise RuntimeError(f"assign dtype mismatch {self.dtype} != {x.dtype}")
+    if isinstance(self.device, tuple) and self.uop.axis != x.uop.axis: raise RuntimeError(f"multi axis mismatch {self.uop.axis} != {x.uop.axis}")
+
     # TODO: this is a hack for writing to DISK. remove with working assign
-    if isinstance(self.device, str) and self.device.startswith("DISK"):
-      if not isinstance(x, Tensor): x = Tensor(x, device="CPU", dtype=self.dtype)
+    if is_disk:
       self._buffer().copyin(x._data())
       return self
-    if not isinstance(x, Tensor): x = Tensor(x, device=self.device, dtype=self.dtype)
-    if self.uop is x.uop: return self  # a self assign is a NOOP
-    # NOTE: we allow cross device assign
-    # broadcast x
-    if least_upper_dtype(self.dtype, x.dtype) == self.dtype: x = x._broadcast_to(self.shape).cast(self.dtype)
-    assert self.shape == x.shape, f"assign shape mismatch {self.shape} != {x.shape}"
-    assert self.device == x.device, f"assign device mismatch {self.device} != {x.device}"
-    assert self.dtype == x.dtype, f"assign dtype mismatch {self.dtype} != {x.dtype}"
-    assert not isinstance(self.device, tuple) or self.uop.axis == x.uop.axis, f"multi assign axis mismatch {self.uop.axis} != {x.uop.axis}"
     return self.replace(self._apply_uop(UOp.assign, x))
 
   def detach(self) -> Tensor:
@@ -316,7 +316,7 @@ class Tensor(OpMixin):
     x = self.cast(self.dtype.base).contiguous()
     if isinstance(self.device, tuple): x = x.to("CPU")
     return cast(Buffer, x.realize().uop.base.buffer).ensure_allocated()
-  def _data(self) -> memoryview: return self._buffer().as_buffer()
+  def _data(self) -> memoryview: return self._buffer().as_memoryview()
 
   def data(self) -> memoryview:
     """
@@ -329,7 +329,9 @@ class Tensor(OpMixin):
     """
     if 0 in self.shape: return memoryview(bytearray(0)).cast(self.dtype.base.fmt)
     assert all_int(self.shape), f"no data if shape is symbolic, {self.shape=}"
-    return self._buffer().as_typed_buffer(self.shape)
+    assert self.dtype.base.fmt is not None, f"no fmt dtype for {self.dtype.base}"
+    assert self.dtype.base.fmt != "e" or sys.version_info >= (3, 12)
+    return self._buffer().as_memoryview().cast(self.dtype.base.fmt, self.shape)
 
   def item(self) -> PyConst:
     """
@@ -1286,7 +1288,7 @@ class Tensor(OpMixin):
     if not isinstance(v, Tensor): v = Tensor(v, device=self.device, dtype=self.dtype)
     if self.requires_grad or v.requires_grad: raise NotImplementedError("setitem with requires_grad is not supported")
     self.realize()
-    if not self.uop.is_contiguous(): raise RuntimeError("setitem target needs to be contiguous")
+    if not self.uop.is_writable_view(): raise RuntimeError("setitem target must be a writable view backed by a buffer")
     res = self._getitem(indices, v)
     # if shapes match and data is not shared it's a copy and we assign to self
     if res.shape == self.shape and res.uop is not self.uop:
@@ -3868,7 +3870,10 @@ class Tensor(OpMixin):
 
   def bitcast(self, dtype:DTypeLike) -> Tensor:
     """
-    Bitcasts `self` to the given `dtype` of the same itemsize.
+    Bitcasts `self` to the given `dtype`.
+
+    When the target dtype has the same itemsize, this is a view of the same memory.
+    When itemsizes differ, the last dimension is adjusted and a new Tensor is created.
 
     `self` must not require a gradient.
 

@@ -43,7 +43,7 @@ from tinygrad.renderer import ProgramSpec
 from tinygrad.dtype import dtypes
 
 uops_colors = {Ops.LOAD: "#ffc0c0", Ops.STORE: "#87CEEB", Ops.CONST: "#e0e0e0", Ops.VCONST: "#e0e0e0", Ops.REDUCE: "#FF5B5B",
-               Ops.DEFINE_GLOBAL:"#cb9037", **{x:"#f2cb91" for x in {Ops.DEFINE_LOCAL, Ops.DEFINE_REG}}, Ops.REDUCE_AXIS: "#FF6B6B",
+               Ops.PARAM:"#cb9037", **{x:"#f2cb91" for x in {Ops.DEFINE_LOCAL, Ops.DEFINE_REG}}, Ops.REDUCE_AXIS: "#FF6B6B",
                Ops.RANGE: "#c8a0e0", Ops.ASSIGN: "#909090", Ops.BARRIER: "#ff8080", Ops.IF: "#c8b0c0", Ops.SPECIAL: "#c0c0ff",
                Ops.INDEX: "#cef263", Ops.WMMA: "#efefc0", Ops.MULTI: "#f6ccff", Ops.KERNEL: "#3e7f55", Ops.CUSTOM_KERNEL: "#3ebf55",
                **{x:"#D8F9E4" for x in GroupOp.Movement}, **{x:"#ffffc0" for x in GroupOp.ALU}, Ops.THREEFRY:"#ffff80",
@@ -109,6 +109,7 @@ def uop_to_json(x:UOp) -> dict[int, dict]:
     if u.op is Ops.KERNEL:
       ast_str = f"SINK{tuple(s.op for s in u.arg.ast.src)}" if u.arg.ast.op is Ops.SINK else repr(u.arg.ast.op)
       argst = f"<Kernel {len(list(u.arg.ast.toposort()))} {ast_str} {[str(m) for m in u.arg.metadata]}>"
+    if u.op is Ops.BINARY: argst = f"<{len(u.arg)} bytes>"
     label = f"{str(u.op).split('.')[1]}{(chr(10)+word_wrap(argst.replace(':', ''))) if u.arg is not None else ''}"
     if u.dtype != dtypes.void: label += f"\n{u.dtype}"
     for idx,x in enumerate(u.src[:1] if u.op in {Ops.BUFFERIZE, Ops.INDEX} else (u.src if u.op is not Ops.END else [])):
@@ -170,7 +171,7 @@ def option(s:int|None) -> int: return 0 if s is None else s+1
 device_ts_diffs:dict[str, tuple[Decimal, Decimal]] = {}
 def cpu_ts_diff(device:str, thread=0) -> Decimal: return device_ts_diffs.get(device, (Decimal(0),))[thread]
 
-device_props:dict[str, dict] = {}
+amdgpu_targets:dict[str, int] = {}
 
 DevEvent = ProfileRangeEvent|ProfileGraphEntry|ProfilePointEvent
 def flatten_events(profile:list[ProfileEvent]) -> Generator[tuple[Decimal, Decimal, DevEvent], None, None]:
@@ -306,11 +307,12 @@ def load_counters(profile:list[ProfileEvent]) -> None:
     # to decode a SQTT trace, we need the raw stream, program binary and device properties
     if (sqtt:=v.get(ProfileSQTTEvent)):
       for e in sqtt:
-        if e.itrace: steps.append(create_step(f"PKTS SE:{e.se}", (f"/prg-pkts-{e.se}", len(ctxs), len(steps)), data=(e.blob, prg_events[k].lib)))
+        if e.itrace: steps.append(create_step(f"PKTS SE:{e.se}", (f"/prg-pkts-{e.se}", len(ctxs), len(steps)),
+                                              data=(e.blob, prg_events[k].lib, amdgpu_targets[e.device])))
       steps.append(create_step("SQTT", ("/prg-sqtt", len(ctxs), len(steps)), ((k, tag), sqtt, prg_events[k])))
     ctxs.append({"name":f"Exec {name}"+(f" n{run_number[k]}" if run_number[k] > 1 else ""), "steps":steps})
 
-def sqtt_timeline(data:bytes, lib:bytes) -> list[ProfileEvent]:
+def sqtt_timeline(data:bytes, lib:bytes, target:int) -> list[ProfileEvent]:
   from extra.assembly.amd.sqttmap import map_insts, InstructionInfo
   from extra.assembly.amd.sqtt import PacketType, INST, InstOp, VALUINST, IMMEDIATE, IMMEDIATE_MASK, VMEMEXEC, ALUEXEC
   ret:list[ProfileEvent] = []
@@ -321,7 +323,7 @@ def sqtt_timeline(data:bytes, lib:bytes) -> list[ProfileEvent]:
     rows.setdefault(r:=(f"WAVE:{wave}" if wave is not None else f"{p.__class__.__name__}:0 {name}"))
     key = TracingKey(f"{op_name if op_name is not None else name} OP:{idx}", ret=info.inst.disasm() if info is not None else None)
     ret.append(ProfileRangeEvent(r, key, Decimal(p._time), Decimal(p._time+width)))
-  for p, info in map_insts(data, lib):
+  for p, info in map_insts(data, lib, target):
     if len(ret) > getenv("MAX_SQTT_PKTS", 50_000): break
     if isinstance(p, INST):
       op_name = p.op.name if isinstance(p.op, InstOp) else f"0x{p.op:02x}"
@@ -346,7 +348,7 @@ def unpack_sqtt(key:tuple[str, int], data:list, p:ProfileProgramEvent) -> tuple[
   # * init decoder
   from extra.sqtt.roc import decode
   base = unwrap(p.base)
-  addr_table = amd_decode(unwrap(p.lib), device_props[p.device]["gfx_target_version"], )
+  addr_table = amd_decode(unwrap(p.lib), amdgpu_targets[p.device])
   disasm:dict[int, tuple[str, int]] = {addr+base:(inst.disasm(), inst.size()) for addr, inst in addr_table.items()}
   rctx = decode(data, {p.tag:disasm})
   cu_events:dict[str, list[ProfileEvent]] = {}
@@ -383,8 +385,9 @@ def get_profile(profile:list[ProfileEvent], sort_fn:Callable[[str], Any]=device_
   for ev in profile:
     if isinstance(ev, ProfileDeviceEvent):
       device_ts_diffs[ev.device] = (ev.comp_tdiff,ev.copy_tdiff if ev.copy_tdiff is not None else ev.comp_tdiff)
-      if ev.props is not None: device_props[ev.device] = ev.props
-      if (d:=ev.device.split(":")[0]) == "AMD": device_decoders[d] = load_counters
+      if (d:=ev.device.split(":")[0]) == "AMD":
+        device_decoders[d] = load_counters
+        amdgpu_targets[d] = unwrap(ev.props)["gfx_target_version"]
   # load device specific counters
   for fxn in device_decoders.values(): fxn(profile)
   # map events per device
@@ -422,16 +425,14 @@ def get_stdout(f: Callable) -> str:
   return buf.getvalue()
 
 def amd_readelf(lib:bytes) -> list[dict]:
+  from tinygrad.runtime.autogen import amdgpu_kd
   from tinygrad.runtime.support.elf import elf_loader
-  import msgpack
-  _, sections, __ = elf_loader(lib)
-  data = next((s for s in sections if s.name.startswith(".note"))).content
-  namesz, descsz, typ = struct.unpack_from(hdr:="<III", data, 0)
-  offset = (struct.calcsize(hdr)+namesz+3) & -4
-  notes = msgpack.unpackb(data[offset:offset+descsz])
-  keys = {".sgpr_count":"SGPRs", ".vgpr_count":"VGPRs", ".max_flat_workgroup_size":"Max WGP size",
-          ".group_segment_fixed_size":"LDS size", ".private_segment_fixed_size":"Scratch size"}
-  return [{"label":label, "value":v} for k,label in keys.items() if (v:=notes["amdhsa.kernels"][0][k]) > 0]
+  image, sections, __ = elf_loader(lib)
+  rodata = next((s for s in sections if s.name == ".rodata")).content
+  kd = amdgpu_kd.llvm_amdhsa_kernel_descriptor_t.from_buffer_copy(bytearray(rodata))
+  vgpr_gran = kd.compute_pgm_rsrc1 & amdgpu_kd.COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT
+  return [{"label":f"{resource} Alloc", "value":val} for resource,val in [("VGPR", (vgpr_gran+1)*8-7), ("LDS",kd.group_segment_fixed_size),
+                                                                          ("Scratch", kd.private_segment_fixed_size)] if val > 0]
 
 def amd_decode(lib:bytes, target:int) -> dict[int, Any]: # Any is the Inst class from extra.assembly.amd.dsl
   from tinygrad.runtime.support.elf import elf_loader
@@ -510,7 +511,7 @@ def get_render(query:str) -> dict:
   if fmt == "asm":
     ret:dict = {"metadata":[]}
     if data.device.startswith("AMD") and data.lib is not None:
-      with soft_err(lambda err: ret.update(err)): ret.update(amdgpu_cfg(data.lib, device_props[data.device]["gfx_target_version"]))
+      with soft_err(lambda err: ret.update(err)): ret.update(amdgpu_cfg(data.lib, amdgpu_targets[data.device]))
       with soft_err(lambda err: ret["metadata"].append(err)): ret["metadata"].append(amd_readelf(data.lib))
     else: ret["src"] = get_stdout(lambda: (compiler:=Device[data.device].compiler).disassemble(compiler.compile(data.src)))
     return ret

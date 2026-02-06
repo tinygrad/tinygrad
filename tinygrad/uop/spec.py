@@ -84,14 +84,11 @@ _tensor_spec = PatternMatcher([
   (UPat(Ops.LUNIQUE, dtypes.void, ()), lambda: True),
   (UPat(Ops.DEVICE, dtypes.void, (), name="d"), lambda d:
    isinstance(d.arg, str) or (isinstance(d.arg, tuple) and all(isinstance(s, str) for s in d.arg))),
-  (UPat(Ops.BUFFER, src=(UPat((Ops.LUNIQUE, Ops.UNIQUE)), UPat(Ops.DEVICE)), allow_any_len=True, name="buf"),
+  (UPat(Ops.BUFFER, src=(UPat((Ops.LUNIQUE, Ops.UNIQUE)), UPat(Ops.DEVICE)), name="buf"),
    lambda buf: isinstance(buf.arg, int) and isinstance(buf.dtype, (DType, ImageDType))),
-  (UPat(Ops.BUFFER_VIEW, src=(UPat(Ops.BUFFER),), name="buf_view"),
-   lambda buf_view: isinstance(buf_view.arg, tuple) and len(buf_view.arg) == 2 and all(isinstance(arg, (int, UOp)) for arg in buf_view.arg)),
-  (UPat(Ops.BUFFER_VIEW, src=(UPat(Ops.MSTACK, src=UPat(Ops.BUFFER)),)), lambda: True),
 
   # KERNEL can attach to an AFTER to describe the compute required to realize a BUFFER
-  (UPat(Ops.KERNEL, src=UPat((Ops.BUFFER, Ops.BUFFER_VIEW, Ops.AFTER, Ops.MSELECT, Ops.MSTACK, Ops.BIND, Ops.CONTIGUOUS))), lambda: True),
+  (UPat(Ops.KERNEL, src=UPat((Ops.BUFFER, Ops.AFTER, Ops.MSELECT, Ops.MSTACK, Ops.BIND))), lambda: True),
 
   # ASSIGN has a target and a value. It can also optionally depend on other assigns
   (UPat(Ops.ASSIGN, name="x"), lambda x: len(x.src) >= 2 and all(s.op is Ops.ASSIGN for s in x.src[2:])),
@@ -153,7 +150,7 @@ tensor_spec = PatternMatcher([
 
 shared_codegen_spec = PatternMatcher([
   # DEFINEs
-  (UPat(Ops.DEFINE_GLOBAL, name="x"), lambda x: isinstance(x.dtype, (PtrDType, ImageDType)) and x.dtype.addrspace == AddrSpace.GLOBAL),
+  (UPat(Ops.PARAM, name="x"), lambda x: isinstance(x.dtype, (PtrDType, ImageDType)) and x.dtype.addrspace == AddrSpace.GLOBAL),
   (UPat(Ops.DEFINE_LOCAL, name="x"), lambda x: isinstance(x.dtype, PtrDType) and x.dtype.addrspace == AddrSpace.LOCAL),
   (UPat(Ops.DEFINE_REG, src=(), name="x"), lambda x: isinstance(x.arg, int)),
 
@@ -316,7 +313,8 @@ def eval_pyrender(code:str) -> UOp:
   return lcls['ast']
 
 def test_pyrender(test_ast:UOp, assert_parents=True):
-  code = pyrender(test_ast)
+  try: code = pyrender(test_ast)
+  except NotImplementedError: return None  # this is okay, not all ops can be pyrendered
   ast:UOp = eval_pyrender(code)
   if ast is not test_ast:
     if assert_parents:

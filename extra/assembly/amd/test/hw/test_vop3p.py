@@ -390,6 +390,24 @@ class TestVOP3P(unittest.TestCase):
     self.assertAlmostEqual(lo, 6.0, places=1)
     self.assertAlmostEqual(hi, 0.0, places=1)
 
+  def test_v_pk_add_u16_float_inline_const_opsel(self):
+    """V_PK_ADD_U16 with float inline constant 2.0
+    Regression test: for integer packed ops, do not perform the f32->f16 conversion.
+    """
+    # src1 = inline float constant 2.0
+    instructions = [
+      s_mov_b32(s[0], 0x00030005),  # packed u16: hi=3, lo=5
+      v_mov_b32_e32(v[0], s[0]),
+      v_pk_add_u16(v[1], v[0], SrcEnum.POS_TWO, opsel_hi=3, opsel_hi2=1),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = st.vgpr[0][1]
+    lo = result & 0xffff
+    hi = (result >> 16) & 0xffff
+    # lo = 5 + 0x0000 = 0x0005, hi = 3 + 0x4000 = 0x4003
+    self.assertEqual(lo, 0x0005, f"lo: expected 0x0005, got 0x{lo:04x}")
+    self.assertEqual(hi, 0x4003, f"hi: expected 0x4003, got 0x{hi:04x}")
+
 
 class TestWMMAF16(unittest.TestCase):
   """Tests for WMMA F16 output variant (V_WMMA_F16_16X16X16_F16).
@@ -767,6 +785,7 @@ class TestDot2F32F16(unittest.TestCase):
     """V_DOT2_F32_F16 with negative f16 values."""
     # src0 = {hi=-2.0, lo=3.0}, src1 = {hi=1.0, lo=2.0}
     # result = 3.0*2.0 + (-2.0)*1.0 + 0 = 6 - 2 = 4.0
+    # NOTE: Hardware DOT2 may have up to 1 ULP difference due to internal implementation
     src0 = (f32_to_f16(-2.0) << 16) | f32_to_f16(3.0)
     src1 = (f32_to_f16(1.0) << 16) | f32_to_f16(2.0)
     instructions = [
@@ -777,7 +796,7 @@ class TestDot2F32F16(unittest.TestCase):
       v_mov_b32_e32(v[2], 0),
       v_dot2_f32_f16(v[3], v[0], v[1], v[2], opsel_hi=3, opsel_hi2=1),
     ]
-    st = run_program(instructions, n_lanes=1)
+    st = run_program(instructions, n_lanes=1, ulp_tolerance=1)
     result = i2f(st.vgpr[0][3])
     self.assertAlmostEqual(result, 4.0, places=2)
 

@@ -60,7 +60,7 @@ def split_reduceop(reduce:UOp, x:UOp):
 
 mop_cleanup = PatternMatcher([
   # merge adjacent RESHAPES, safe because they are not tagged
-  (UPat(Ops.RESHAPE, name="x2").f(Ops.RESHAPE, allow_any_len=True, name="x"),
+  (UPat(Ops.RESHAPE, src=(UPat(Ops.RESHAPE, name="x2"), UPat()), name="x"),
    lambda x,x2: x.replace(src=(x2.src[0], x.src[1])) if x.tag is None and x2.tag is None else None),
 ])
 
@@ -90,7 +90,7 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
   (UPat(Ops.CUSTOM_KERNEL, name="ck"), resolve_custom_kernel),
 
   # remove CONTIGUOUS if the BUFFER is already contiguous
-  (UPat(Ops.BUFFER).f(Ops.RESHAPE, allow_any_len=True, name="r").f(Ops.CONTIGUOUS, name="c"), lambda r,c: r.replace(tag=c.tag)),
+  (UPat(Ops.RESHAPE, src=(UPat(Ops.BUFFER), UPat()), name="r").f(Ops.CONTIGUOUS, name="c"), lambda r,c: r.replace(tag=c.tag)),
 
   # split_reduceop
   (UPat(Ops.REDUCE_AXIS, name="reduce", src=(UPat.var("x"),)), split_reduceop),
@@ -126,6 +126,10 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
 
   # ** assign rules **
 
+  # move bitcast from assign target to source: a.bitcast(X).assign(src) -> a.assign(src.bitcast(a.dtype))
+  (UPat(Ops.ASSIGN, src=(UPat(Ops.BITCAST, src=(UPat(name="target"),)), UPat(name="src")), name="assign"),
+   lambda target, src, assign: target.assign(src.bitcast(target.dtype)).replace(tag=assign.tag)),
+
   # assign only to buffer, otherwise make it a CONTIGUOUS
   (UPat(Ops.ASSIGN, src=(UPat(GroupOp.All-{Ops.BUFFER}, name="target"), UPat(name="x")), name="assign"),
    lambda x,target,assign: x.f(Ops.CONTIGUOUS, tag=assign.tag) if ((t:=target.base).op is not Ops.BUFFER and \
@@ -138,8 +142,7 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
 # *****************
 # 3.5 cleanups
 
-# Ops.NOOP happens when we have a COPY to the device the Tensor is already on. We treat it like COPY here for MSTACK.
-ALWAYS_RUN_OPS = {Ops.CONTIGUOUS, Ops.COPY, Ops.ASSIGN, Ops.ENCDEC, Ops.NOOP}
+ALWAYS_RUN_OPS = {Ops.CONTIGUOUS, Ops.COPY, Ops.ASSIGN, Ops.ENCDEC}
 
 # you don't know in the first pass if axes are going to die, this happens if there's an EXPAND to the left
 def cleanup_dead_axes(b:UOp):
@@ -244,17 +247,14 @@ pm_const_buffer_folding = pm_mops+PatternMatcher([
     and (resolve(prod(x.dtype.shape)!=prod(x.shape)) or x.shape[-1]%4!=0) else None),
   # remove noop buffers. if we look at the next index we can remove even more of these
   (UPat(Ops.INDEX, name="idx").f(Ops.BUFFERIZE, allow_any_len=True, name="b2"), remove_noop_bufferize),
-  # dont bufferize an arange
-  (UPat.any((r:=UPat(dtype=dtypes.index).cast()).named("src"), r.eq(UPat()).named("src")).f(Ops.BUFFERIZE,
-    allow_any_len=True, name="buf").f(Ops.INDEX, allow_any_len=True, name="idx"), remove_bufferize),
-  # no buffers for const
+  # no buffers for const (ranges don't matter for const - it's the same value everywhere)
   (UPat(Ops.CONST, name='c').f(Ops.BUFFERIZE, allow_any_len=True, name="b"), lambda c,b: b.const_like(c.arg).rtag(b.tag)),
   # indexing a const is a const
   (UPat(Ops.INDEX, src=(UPat(Ops.CONST, name="c"),),), lambda c: c),
   # copy on CONST is CONST
   (UPat(Ops.COPY, src=(UPat.cvar("x"), UPat()), name="copy"), lambda copy,x: copy.const_like(x.arg)),
   # hack if a noop turned to a const
-  (UPat.cvar("c").f(Ops.NOOP).f(Ops.BUFFERIZE, allow_any_len=True, name="buf"), lambda c,buf: buf.replace(src=(c,)+buf.src[1:])),
+  (UPat(Ops.NOOP, src=(UPat.cvar("c"),), name="noop"), lambda c,noop: c.rtag(noop.tag)),
   # mstack on CONST is CONST
   (UPat(Ops.MSTACK, src=(UPat.var("s"),), allow_any_len=True).f(Ops.INDEX, allow_any_len=True),
    lambda s: UOp.const(c.dtype, c.arg) if (c:=s.base).op is Ops.CONST else None),
@@ -284,7 +284,6 @@ def late_buffer_view(t:UOp, b:UOp):
 
 to_bufferview = PatternMatcher([
   (UPat(Ops.BUFFERIZE, src=(UPat((Ops.BITCAST, Ops.CONTIGUOUS), name="t"), UPat()), name="b"), late_buffer_view),
-  (UPat((Ops.BITCAST, Ops.CONTIGUOUS)).f(Ops.BUFFER_VIEW, name="b"), lambda b: b.replace(src=b.src[0].src)),
 ])
 
 DEVICE_MAX_BUFS = {"METAL": 31, "WEBGPU": 8} # TODO: get from device?
@@ -405,7 +404,7 @@ class LocalAddBufferContext:
   opts:tuple|None = None
 
 def debuf(ctx:LocalAddBufferContext, buf:UOp):
-  ret = UOp(Ops.DEFINE_GLOBAL, buf.dtype.ptr(buf.arg), arg=ctx.dg)
+  ret = UOp(Ops.PARAM, buf.dtype.ptr(buf.arg), arg=ctx.dg)
   if buf not in ctx.map: ctx.map[buf] = buf
   ctx.dg += 1
   return ret
@@ -416,7 +415,7 @@ def unbind_kernel(ctx:LocalAddBufferContext, b:UOp):
 
 def handle_after(ctx:LocalAddBufferContext, after:UOp):
   if isinstance(after.dtype, PtrDType) and after.ptrdtype.addrspace == AddrSpace.LOCAL: return None
-  buf = after.as_buf()
+  buf = after.buf_uop
   # HACK to put the buffer in the MAP instead of MSTACK/MSELECT
   if buf.op in {Ops.MSTACK, Ops.MSELECT}: buf = buf.src[0]
   assert buf not in ctx.map
@@ -435,7 +434,7 @@ def renumber_range(ctx:LocalAddBufferContext, r:UOp):
 def find_bufs(x:UOp):
   idxs = [s for s in x.toposort(gate=lambda x: x.op is not Ops.AFTER) if s.op is Ops.INDEX]
   read_from: dict[UOp, Ops] = {}
-  if any((buf:=idx.as_buf()).op is Ops.BUFFER and read_from.setdefault(buf, op:=idx.src[0].op) is not op for idx in idxs):
+  if any((buf:=idx.buf_uop).op is Ops.BUFFER and read_from.setdefault(buf, op:=idx.src[0].op) is not op for idx in idxs):
     raise RuntimeError(f"cycle detected while indexing {buf}")
 
 to_define_global = PatternMatcher([
@@ -447,12 +446,8 @@ to_define_global = PatternMatcher([
   # remove device from local BUFFERIZE
   (UPat(Ops.BUFFERIZE, name="b"), lambda b: b.replace(arg=replace(b.arg, device=None))),
 
-  # HACK in case any CONSTs were replaced
-  # this is only needed if you are using symbolic
-  (UPat((Ops.CONST, Ops.DEFINE_VAR), name="c"), lambda c: c.replace(src=()) if len(c.src) else None),
-
-  # remove RANGE with 0 size
-  (UPat(Ops.RANGE, name="r"), lambda r: UOp.const(dtypes.index, 0) if r.vmax == 0 else None),
+  # remove UNIQUE/DEVICE to dedup CONST
+  (UPat(Ops.CONST, name="c"), lambda c: c.replace(src=()) if len(c.src) else None),
 
   # renumber the ranges starting with 0 so that kernel deduping works
   (UPat(Ops.RANGE, name="r"), renumber_range),
@@ -468,9 +463,6 @@ rangeify_codegen = PatternMatcher([
   # no NOOP in the kernel graph
   # TODO: this can be moved into codegen?
   (UPat(Ops.NOOP, name="x"), lambda x: x.src[0]),
-
-  # strip the arg from store
-  (UPat(Ops.STORE, name="x"), lambda x: x.replace(arg=None) if x.arg is not None else None),
 
   # add loads to non ptr indexes
   # TODO: this can be moved into codegen?
@@ -521,8 +513,7 @@ def split_store(ctx:list[UOp], x:UOp) -> UOp|None:
   elif ret.op is Ops.END and ret.src[0].op is Ops.STORE: stored = ret.src[0].src[1]
   else: raise RuntimeError(f"unknown kernel type {ret.op}")
   if stored.op in {Ops.COPY, Ops.BUFFER_VIEW, Ops.ENCDEC}: ret = stored
-  else:
-    ret = ret.sink(arg=KernelInfo(opts_to_apply=lctx.opts) if lctx.opts is not None else None)
+  else: ret = ret.sink(arg=KernelInfo(opts_to_apply=lctx.opts))
 
   kernel_arg = Kernel(ret,tuple(dedup(flatten([x for x in metadatas if x is not None])))[::-1])
   kernel = UOp(Ops.KERNEL, src=tuple(lctx.map.values())+tuple(lctx.vars.keys()), arg=kernel_arg)

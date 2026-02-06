@@ -14,7 +14,7 @@ class Ops(FastEnum):
   # ** 1 -- defines/special **
 
   # define GLOBAL/VAR are ptrs to outside the Kernel
-  DEFINE_GLOBAL = auto(); DEFINE_VAR = auto(); BIND = auto()
+  DEFINE_VAR = auto(); BIND = auto()
 
   # this is a RANGE for GPU dimensions, similar to symbolic shapes but not exactly
   SPECIAL = auto()
@@ -111,7 +111,7 @@ class GroupOp:
   # TODO: is BITCAST always Elementwise if it's shape changing?
   Elementwise = set.union(ALU, {Ops.CAST, Ops.BITCAST})
 
-  Defines = {Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL, Ops.DEFINE_REG}
+  Defines = {Ops.PARAM, Ops.DEFINE_LOCAL, Ops.DEFINE_REG}
 
   Irreducible = {Ops.CONST, Ops.DEFINE_VAR, Ops.SPECIAL, Ops.RANGE}
   Movement = {Ops.RESHAPE, Ops.EXPAND, Ops.PERMUTE, Ops.PAD, Ops.SHRINK, Ops.FLIP}

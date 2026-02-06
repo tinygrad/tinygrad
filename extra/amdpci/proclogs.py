@@ -19,8 +19,9 @@ amdev = importlib.import_module("tinygrad.runtime.support.am.amdev")
 amdev.AMDev = AMDFake
 from tinygrad.runtime.ops_amd import PCIIface
 
-def parse_amdgpu_logs(log_content, register_names=None, *, only_xcc0: bool = False):
+def parse_amdgpu_logs(log_content, register_names=None, register_objects=None, *, only_xcc0: bool = False):
   register_map = register_names or {}
+  register_objs = register_objects or {}
 
   def replace_register(match):
     reg = match.group(1)
@@ -37,6 +38,28 @@ def parse_amdgpu_logs(log_content, register_names=None, *, only_xcc0: bool = Fal
   # remove timing prefix
   processed_log = re.sub(r'^\[\s*\d+(?:\.\d+)?\]\s*', '', processed_log, flags=re.MULTILINE)
 
+  # decode register values into field dicts
+  def decode_value(match):
+    reg_name = match.group(1)
+    xcc_part = match.group(2)  # "xcc=0 " or ""
+    val_str = match.group(3)
+    val = int(val_str, 16)
+
+    reg_obj = register_objs.get(reg_name)
+    if reg_obj is not None and reg_obj.fields:
+      fields = reg_obj.decode(val)
+      # show raw for unaccounted bits
+      accounted = 0
+      for name, (start, end) in reg_obj.fields.items():
+        accounted |= (((1 << (end - start + 1)) - 1) << start)
+      unaccounted = val & ~accounted
+      parts = {k: v for k, v in fields.items() if v != 0}
+      if unaccounted: parts['_raw_unaccounted'] = hex(unaccounted)
+      return f"register {reg_name}, {xcc_part}with value {val_str} {parts}"
+    return match.group(0)
+
+  processed_log = re.sub(r'register (reg\w+), ((?:xcc=\d+ )?)with value (0x[0-9a-fA-F]+)', decode_value, processed_log)
+
   # keep only xcc=0 lines (but keep lines with no xcc at all)
   if only_xcc0:
     kept = []
@@ -50,16 +73,18 @@ def main():
   only_xcc0 = bool(getenv("ONLY_XCC0", 0))
 
   reg_names = {}
+  reg_objs = {}
   dev = PCIIface(None, 0)
   for x, y in dev.dev_impl.__dict__.items():
     if isinstance(y, AMRegister):
       for xcc, addr in y.addr.items():
         reg_names[addr] = f"{x}, xcc={xcc}"
+      reg_objs[x] = y
 
   with open(sys.argv[1], 'r') as f:
     log_content = f.read()
 
-  processed_log = parse_amdgpu_logs(log_content, reg_names, only_xcc0=only_xcc0)
+  processed_log = parse_amdgpu_logs(log_content, reg_names, reg_objs, only_xcc0=only_xcc0)
 
   with open(sys.argv[2], 'w') as f:
     f.write(processed_log)

@@ -1561,5 +1561,24 @@ class TestCvtNormF16(unittest.TestCase):
     self.assertAlmostEqual(result, 32768, delta=1)
 
 
+class TestPermlane64(unittest.TestCase):
+  """Tests for V_PERMLANE64_B32 instruction (wave64 cross-half swap)."""
+
+  def test_v_permlane64_b32_is_nop_in_wave32(self):
+    """V_PERMLANE64_B32 is a NOP in wave32 mode.
+
+    Per AMD pcode: "if WAVE32 then s_nop(...) else ... endif"
+    The emulator runs in wave32 mode, so this instruction should not modify registers.
+    """
+    instructions = [
+      v_mov_b32_e32(v[0], 0xCAFEBABE),  # source
+      v_mov_b32_e32(v[1], 0x12345678),  # dest (should be preserved)
+      v_permlane64_b32_e32(v[1], v[0]),  # NOP in wave32
+    ]
+    st = run_program(instructions, n_lanes=1)
+    # Dest register should be unchanged (NOP behavior in wave32)
+    self.assertEqual(st.vgpr[0][1], 0x12345678)
+
+
 if __name__ == '__main__':
   unittest.main()

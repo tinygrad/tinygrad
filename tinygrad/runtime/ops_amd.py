@@ -43,10 +43,9 @@ class ProfilePMCEvent(ProfileEvent): device:str; kern:int; sched:list[PMCSample]
 class AMDSignal(HCQSignal):
   def __init__(self, *args, **kwargs): super().__init__(*args, **{**kwargs, 'timestamp_divider': 100})
 
-  def _sleep(self, time_spent_waiting_ms:int) -> bool:
-    # Resonable to sleep for long workloads (which take more than 2s) and only timeline signals.
-    if time_spent_waiting_ms > 2000 and self.is_timeline and self.owner is not None: return self.owner.iface.sleep(200)
-    return False
+  def _sleep(self, time_spent_since_last_sleep_ms:int):
+    # Reasonable to sleep for long workloads (which take more than 200ms) and only timeline signals.
+    if time_spent_since_last_sleep_ms > 200 and self.is_timeline and self.owner is not None: self.owner.iface.sleep(200)
 
 class AMDComputeQueue(HWQueue):
   def __init__(self, dev:AMDDevice):
@@ -644,6 +643,7 @@ class AMDQueueDesc:
   write_ptr: MMIOInterface
   doorbell: MMIOInterface
   put_value: int = 0
+  params: tuple|None = None  # setup_ring params for recovery
 
   def signal_doorbell(self, dev, doorbell_value:int|None=None):
     try:
@@ -777,9 +777,8 @@ class KFDIface:
                         write_ptr=MMIOInterface(queue.write_pointer_address, 8, fmt='Q'),
                         doorbell=MMIOInterface(self.doorbells + queue.doorbell_offset - self.doorbells_base, 8, fmt='Q'))
 
-  def sleep(self, tm:int) -> bool:
+  def sleep(self, tm:int):
     kfd.AMDKFD_IOC_WAIT_EVENTS(KFDIface.kfd, events_ptr=self.queue_event_arr_ptr, num_events=1, wait_for_all=1, timeout=tm)
-    return False
 
   def on_device_hang(self):
     def _collect_str(st): return ' '.join(f'{k[0]}={getattr(st, k[0])}' for k in st._real_fields_)
@@ -846,27 +845,32 @@ class PCIIface(PCIIfaceBase):
                    xcc_id=0, idx=0):
     assert cwsr_buffer is None, "no cwsr buffer for am"
 
+    rcvr_params: tuple
     if queue_type == kfd.KFD_IOC_QUEUE_TYPE_SDMA:
-      pv, doorbell_index = self.dev_impl.sdma.setup_ring(ring_addr=ring.va_addr, ring_size=ring.size, rptr_addr=gart.va_addr+rptr,
-                                                         wptr_addr=gart.va_addr+wptr, idx=idx)
+      pv, doorbell_index = self.dev_impl.sdma.setup_ring(*(rcvr_params:=(ring.va_addr, ring.size, gart.va_addr+rptr, gart.va_addr+wptr, idx)))
     else:
-      pv, doorbell_index = self.dev_impl.gfx.setup_ring(ring_addr=ring.va_addr, ring_size=ring.size, rptr_addr=gart.va_addr+rptr,
-        wptr_addr=gart.va_addr+wptr, eop_addr=eop_buffer.va_addr, eop_size=eop_buffer.size,
-        idx=int(is_aql:=(queue_type==kfd.KFD_IOC_QUEUE_TYPE_COMPUTE_AQL)), aql=is_aql)
+      pv, doorbell_index = self.dev_impl.gfx.setup_ring(*(rcvr_params:=(ring.va_addr, ring.size, gart.va_addr+rptr, gart.va_addr+wptr,
+        eop_buffer.va_addr, eop_buffer.size, is_aql:=(queue_type==kfd.KFD_IOC_QUEUE_TYPE_COMPUTE_AQL), is_aql)))
 
-    return AMDQueueDesc(ring=ring.cpu_view().view(fmt='I'), doorbell=self.dev_impl.doorbell64.view(doorbell_index * 8, 8, fmt='Q'),
-      read_ptr=gart.cpu_view().view(offset=rptr, size=8, fmt='Q'), write_ptr=gart.cpu_view().view(offset=wptr, size=8, fmt='Q'), put_value=pv)
+    return AMDQueueDesc(ring=ring.cpu_view().view(fmt='I'), doorbell=self.dev_impl.doorbell64.view(doorbell_index * 8, 8, fmt='Q'), put_value=pv,
+      read_ptr=gart.cpu_view().view(offset=rptr, size=8, fmt='Q'), write_ptr=gart.cpu_view().view(offset=wptr, size=8, fmt='Q'), params=rcvr_params)
 
-  def sleep(self, timeout) -> bool:
+  def sleep(self, timeout):
     if hasattr(self.pci_dev, 'irq_poller') and self.pci_dev.irq_poller is not None and (events_cnt:=len(self.pci_dev.irq_poller.poll(timeout))):
       self.pci_dev.irq_fd.read(8 * events_cnt)
     self.dev_impl.ih.interrupt_handler()
-    return self.dev_impl.is_err_state
+    if self.dev_impl.is_err_state: raise RuntimeError("Device fault detected")
 
   def on_device_hang(self):
     devs:list[AMDDevice] = [d for pg in HCQCompiled.peer_groups.values() for d in pg if isinstance(d, AMDDevice) and d.is_am()]
     for d in devs: d.iface.dev_impl.ih.interrupt_handler()
     faults = [f for d in devs if (f:=d.iface.dev_impl.gmc.check_fault())]
+    for d in devs:
+      if d.iface.dev_impl.recover():
+        d.compute_queue.put_value, _ = d.iface.dev_impl.gfx.setup_ring(*d.compute_queue.params)
+        d.compute_queue.read_ptr[0] = d.compute_queue.write_ptr[0] = d.compute_queue.put_value
+        d.timeline_signal.value = d.timeline_value - 1
+        d.error_state = None
     raise RuntimeError(f"Device hang detected: {'; '.join(faults)}" if faults else "Device hang detected")
 
   def device_fini(self): self.dev_impl.fini()
@@ -899,7 +903,7 @@ class USBIface(PCIIface):
     if queue_type == kfd.KFD_IOC_QUEUE_TYPE_COMPUTE: self.pci_dev.usb._pci_cacheable += [(ring.cpu_view().addr, ring.size)]
     return super().create_queue(queue_type, ring, gart, rptr, wptr, eop_buffer, cwsr_buffer, ctl_stack_size, ctx_save_restore_size, xcc_id, idx)
 
-  def sleep(self, timeout) -> bool: return False
+  def sleep(self, timeout): pass
 
 class AMDDevice(HCQCompiled):
   def is_am(self) -> bool: return isinstance(self.iface, (PCIIface, USBIface))

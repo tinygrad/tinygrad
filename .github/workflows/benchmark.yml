@@ -16,6 +16,48 @@ on:
   workflow_dispatch:
 
 jobs:
+  # the goal of this test is to replicate a normal person on a laptop running the test
+  # no process replay, no benchmarks, no CI, just a normal laptop person
+  # the 3 minute timeout should not be raised
+  testmacpytest:
+    name: Mac pytest
+    runs-on: [self-hosted, macOS]
+    timeout-minutes: 3
+    defaults:
+      run:
+        shell: bash -e -o pipefail {0}
+    if: github.repository_owner == 'tinygrad'
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+    # brew install uv
+    - name: setup python environment
+      run: |
+        rm -rf /tmp/tinygrad_pytest_ci
+        uv venv /tmp/tinygrad_pytest_ci
+        source /tmp/tinygrad_pytest_ci/bin/activate
+        uv pip install .[testing]
+    - name: setup staging db
+      run: |
+        echo "CACHEDB=/tmp/pytest-db-ci.db" >> $GITHUB_ENV
+        rm -f /tmp/pytest-db-ci*
+    # TODO: remove this step once all old caches are migrated
+    - name: Migrate old huggingface cache (symlinks break onnxruntime 1.24+)
+      run: |
+        cd ~/Library/Caches/tinygrad/downloads/models 2>/dev/null || exit 0
+        for old_dir in models--*; do
+          [ -d "$old_dir" ] || continue
+          repo_id=$(echo "$old_dir" | sed 's/models--//; s/--/\//g')
+          snapshot=$(ls -1 "$old_dir/snapshots" 2>/dev/null | head -1)
+          [ -n "$snapshot" ] || continue
+          mkdir -p "$repo_id"
+          cp -RLn "$old_dir/snapshots/$snapshot/"* "$repo_id/" 2>/dev/null || true
+        done
+    - name: Run pytest -nauto
+      run: |
+        source /tmp/tinygrad_pytest_ci/bin/activate
+        pytest -nauto --durations=20
+
   testmacbenchmark:
     name: Mac Benchmark
     env:
