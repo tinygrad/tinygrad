@@ -271,15 +271,14 @@ def late_buffer_view(t:UOp, b:UOp):
   size = prod(shape)
 
   # walk up for the INDEX
-  # NOTE: even though we allow RESHAPE and SHRINK, they can combine to form non-contiguous access patterns (e.g. t[::2])
   x = t
-  while x.op is not Ops.INDEX:
-    assert x.op in {Ops.BITCAST, Ops.CONTIGUOUS, Ops.SHRINK, Ops.RESHAPE}, f"unexpected op {x.op} in buffer view walk"
+  while not any(u.op is Ops.INDEX for u in x.src):
+    assert x.op not in GroupOp.Elementwise, "can't buffer view elementwise"
     x = x.src[0]
+  x = next(u for u in x.src if u.op is Ops.INDEX)
 
   if len(shape) == 0: offset = x.src[1].arg
-  else: offset = sum(idx.vmin for idx in x.src[1:])
-  if offset < 0: raise RuntimeError(f"negative offset {offset} in buffer view")
+  else: offset = max(sum(idx.vmin for idx in x.src[1:]), 0)
 
   return b.replace(src=(UOp(Ops.BUFFER_VIEW, t.dtype, (x.base,), (size, offset), tag=t.tag), b.src[1]))
 
@@ -514,8 +513,7 @@ def split_store(ctx:list[UOp], x:UOp) -> UOp|None:
   elif ret.op is Ops.END and ret.src[0].op is Ops.STORE: stored = ret.src[0].src[1]
   else: raise RuntimeError(f"unknown kernel type {ret.op}")
   if stored.op in {Ops.COPY, Ops.BUFFER_VIEW, Ops.ENCDEC}: ret = stored
-  else:
-    ret = ret.sink(arg=KernelInfo(opts_to_apply=lctx.opts) if lctx.opts is not None else None)
+  else: ret = ret.sink(arg=KernelInfo(opts_to_apply=lctx.opts))
 
   kernel_arg = Kernel(ret,tuple(dedup(flatten([x for x in metadatas if x is not None])))[::-1])
   kernel = UOp(Ops.KERNEL, src=tuple(lctx.map.values())+tuple(lctx.vars.keys()), arg=kernel_arg)
