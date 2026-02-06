@@ -5,7 +5,7 @@ from tinygrad.helpers import DISABLE_FAST_IDIV, EMULATED_DTYPES, DEVECTORIZE, TR
 from tinygrad.uop.ops import PatternMatcher, graph_rewrite, UOp, pm_lower_index_dtype, Ops, UPat, track_rewrites, KernelInfo, pyrender
 from tinygrad.uop.spec import type_verify, program_spec, kernel_spec
 from tinygrad.renderer import Renderer, ProgramSpec
-from tinygrad.dtype import dtypes, PtrDType
+from tinygrad.dtype import dtypes
 from tinygrad.helpers import panic
 from tinygrad.codegen.opt import Opt
 
@@ -18,14 +18,8 @@ from tinygrad.codegen.late.devectorizer import load_store_folding, load_store_in
   ReduceContext, correct_load_store, pm_render, pm_add_loads
 from tinygrad.codegen.opt.postrange import apply_opts, make_images
 from tinygrad.codegen.simplify import pm_simplify_ranges, pm_flatten_range, pm_split_ranges, pm_load_collapse
-from tinygrad.schedule.rangeify import pm_add_buffers_local, rangeify_codegen, pm_mops
+from tinygrad.schedule.rangeify import pm_add_buffers_local, rangeify_codegen, pm_mops, pm_syntactic_sugar
 from tinygrad.codegen.late.linearizer import CFGContext, pm_split_ends, pm_add_control_flow, linearize
-
-pm_syntactic_sugar = PatternMatcher([
-  # INDEX on ptr INDEX concats them
-  (UPat(Ops.INDEX, name="i1").f(Ops.INDEX, name="i2", allow_any_len=True),
-   lambda i1,i2: i2.replace(src=i1.src+i2.src[1:]) if isinstance(i1.dtype, PtrDType) and not isinstance(i2.dtype, PtrDType) else None),
-])
 
 def full_rewrite_to_sink(sink:UOp, ren:Renderer|None=None, optimize:bool=True) -> UOp:
   if ren is None: ren = Renderer()
