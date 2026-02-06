@@ -1,4 +1,4 @@
-from tinygrad.uop.ops import UOp, AllOps
+from tinygrad.uop.ops import UOp, OpType
 from tinygrad.codegen.late.regalloc import Register
 from dataclasses import dataclass
 from typing import Callable
@@ -32,7 +32,7 @@ class MachineInfo:
   issue_width: int # number of micro-ops that can be issued per cycle
   mop_buffer_size: int # number of micro-ops that can be buffered (this is the minimum between the size of the reorder buffer,
                        # entries in register file and size of the unified reservation station), for an in-order core this number is 0
-  op_info: dict[AllOps, Callable] # op scheduling info
+  op_info: dict[OpType, Callable] # op scheduling info
 
 class MachineScheduler:
   def __init__(self, sink:UOp, mach_info: MachineInfo):
