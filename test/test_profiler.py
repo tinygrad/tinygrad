@@ -96,7 +96,9 @@ class TestProfiler(unittest.TestCase):
       buf1.copyin(memoryview(bytearray(struct.pack("ff", 0, 1))))
       buf2.copyin(memoryview(bytearray(struct.pack("ff", 0, 1))))
 
-    _dev_base = lambda d: (p:=d.split(":"))[0] if len(p) < 2 or not p[1].isdigit() else f"{p[0]}:{p[1]}"
+    def _dev_base(d):
+      p = d.split(":")
+      return p[0] if len(p) < 2 or not p[1].isdigit() else f"{p[0]}:{p[1]}"
     for dev in [TestProfiler.d0.device, d1.device]:
       evs = [x for x in profile if isinstance(x, ProfileRangeEvent) and _dev_base(x.device) == dev]
       assert len(evs) == 1, "one kernel runs are expected"
