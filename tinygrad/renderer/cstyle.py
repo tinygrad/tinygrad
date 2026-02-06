@@ -98,15 +98,6 @@ pm_manual_bf16_cast = PatternMatcher([
   (UPat(Ops.CAST, dtype=dtypes.bfloat16, src=(UPat.var("x", dtype=dtypes.float),)), cast_float_to_bf16),
 ])
 
-pm_cdna4_bf16_cast = PatternMatcher([
-  (UPat(Ops.CAST, dtypes.float, (UPat.var("x", dtypes.bfloat16),)),
-   lambda x: UOp(Ops.CUSTOM, dtypes.float, (x,),
-     '({{ float __t; __asm__ volatile("v_cvt_f32_bf16 %0, %1" : "=v"(__t) : "v"({0})); __t; }})')),
-  (UPat(Ops.CAST, dtype=dtypes.bfloat16, src=(UPat.var("x", dtype=dtypes.float),)),
-   lambda x: UOp(Ops.CUSTOM, dtypes.bfloat16, (x,),
-     '({{ unsigned int __t; __asm__ volatile("v_cvt_pk_bf16_f32 %0, %1, %1" : "=v"(__t) : "v"({0})); (hip_bfloat16)__t; }})')),
-])
-
 def uops_to_dtypes(uops:list[UOp]) -> list[DType]: return dedup(u.dtype for u in uops if not isinstance(u.dtype, (ImageDType, PtrDType)))
 
 # (name, dims, dtype_in, dtype_out, device, threads, upcast_axes, reduce_axes)
@@ -481,8 +472,7 @@ class AMDHIPRenderer(CStyleLanguage):
     from tinygrad.runtime.support.compiler_amd import HIPCompiler
     self.arch, self.compiler = arch, HIPCompiler(arch)
     self.tensor_cores = self.get_tensor_cores(arch)
-    if self.is_cdna4(self.arch): self.extra_matcher += pm_cdna4_bf16_cast + extra_pm
-    else: self.extra_matcher += pm_manual_bf16_cast + extra_pm
+    if not self.is_cdna4(self.arch): self.extra_matcher += pm_manual_bf16_cast + extra_pm
     if self.is_cdna(self.arch):
       self.string_rewrite = PatternMatcher([
         (UPat(Ops.WMMA, name="x"), lambda ctx,x: f"__{x.arg[0]}({ctx[x.src[0]]}, {ctx[x.src[1]]}, {ctx[x.src[2]]},"
@@ -533,7 +523,8 @@ class AMDHIPRenderer(CStyleLanguage):
     ocml_ops = {Ops.EXP2: ("exp2", "pure"), Ops.LOG2: ("log2", "pure"), Ops.SQRT: ("sqrt", "const"), Ops.SIN: ("sin", ""), Ops.TRUNC: ("trunc", "")}
     ocml = [(f"__ocml_{ocml_ops[op][0]}_f{dt.bitsize}", dt.name, dt.name, ocml_ops[op][1])
       for op, dt in dedup((u.op, u.dtype.scalar()) for u in uops) if op in ocml_ops and dt in (dtypes.half, dtypes.float, dtypes.double)]
-    if any(dt.scalar() == dtypes.bfloat16 for dt in used_dtypes): prefix.append("typedef unsigned short hip_bfloat16;")
+    if any(dt.scalar() == dtypes.bfloat16 for dt in used_dtypes):
+      prefix.append(f"typedef {'__bf16' if self.is_cdna4(self.arch) else 'unsigned short'} hip_bfloat16;")
     if any(dt.scalar() == dtypes.half for dt in used_dtypes): prefix.append("#define half _Float16")
     if any(dt.scalar() in dtypes.fp8s for dt in used_dtypes):
       prefix += ["typedef unsigned char hip_bf8;", "typedef unsigned char hip_fp8;"]
