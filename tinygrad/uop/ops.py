@@ -236,9 +236,6 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
       case Ops.REDUCE | Ops.MSTACK | Ops.MSELECT | Ops.DETACH | Ops.CONTIGUOUS | Ops.CONTIGUOUS_BACKWARD | Ops.AFTER | Ops.END | Ops.CALL:
         return self.src[0]._shape
 
-      # ops with custom handling
-      #case Ops.KERNEL: return self.arg.ast._shape
-
       # TODO: disallow shape changing bitcast
       case Ops.BITCAST:
         ps = self.src[0]._shape
@@ -1455,11 +1452,6 @@ def pyrender(ast:UOp) -> str:
     op_depth = 1 + max([depth[s] for s in u.src], default=0)
     if op_depth > 100: to_render.add(u)
     depth[u] = 0 if u in to_render else op_depth
-    # do the rendering
-    #if u.op is Ops.KERNEL:
-    #  if u.arg.ast not in kernels:
-    #    kernels[u.arg.ast] = (f"k{len(kernels)}", f"def k{len(kernels)}():\n  " + pyrender(u.arg.ast).replace('\n', '\n  ') + "\n  return ast\n\n")
-    #  r[u.arg.ast] = kernels[u.arg.ast][0]
     ren = cast(str, pm_pyrender.rewrite(u, ctx=r))
     assert isinstance(ren, str)
     if u.tag is not None: ren += f".rtag({repr(u.tag)})"

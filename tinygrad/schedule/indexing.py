@@ -19,8 +19,7 @@ def realize_srcs(ctx:dict[UOp, None], rb:UOp) -> None:
 
 def realize_assign(ctx:dict[UOp, None], a:UOp) -> None:
   if a.src[1].op not in ALWAYS_CONTIGUOUS: ctx[a.src[1]] = None
-  # if it's a kernel, we don't realize it
-  if a.src[1].op is not Ops.KERNEL: ctx[a] = None
+  ctx[a] = None
 
 pm_generate_realize_map = pm_gate_kernel_sink+PatternMatcher([
   # always realize SINK src
