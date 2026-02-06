@@ -818,7 +818,8 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     src = (UOp(Ops.NOOP) if shape is None else shape_to_shape_arg(shape),) + (() if device is None else (UOp(Ops.DEVICE, arg=device),))
     return UOp(Ops.PARAM, dtype, src, arg=slot)
 
-  def call(*srcs:UOp, fxn:UOp, arg:Any|None) -> UOp: return UOp(Ops.CALL, fxn.dtype, (fxn,)+srcs, arg)
+  def call(self, *srcs:UOp, grad_fxn:Callable|None=None, metadata:tuple[Metadata, ...]=()) -> UOp:
+    return UOp(Ops.CALL, self.dtype, (self,)+srcs, CallInfo(grad_fxn, metadata))
   def custom_kernel(*srcs:UOp, fxn:Callable, grad_fxn:Callable|None=None) -> list[UOp]:
     contig_srcs = tuple(x.contiguous() if x.op is not Ops.AFTER else x for x in srcs)
     kernel = UOp(Ops.CUSTOM_KERNEL, src=contig_srcs, arg=CustomKernel(fxn=fxn, grad_fxn=grad_fxn))
@@ -842,6 +843,14 @@ class CustomKernel:
   # sadly CustomKernel can't be pickled or reconstructed as a str
   def __reduce__(self): return (CustomKernel, (panic,))
   def __repr__(self): return f"CustomKernel({id(self.fxn)})"
+
+@dataclass(frozen=True)
+class CallInfo:
+  grad_fxn: Callable|None = None
+  metadata: tuple[Metadata, ...] = ()
+  # grad_fxn can't be pickled, but metadata can
+  def __reduce__(self): return (CallInfo, (None, self.metadata))
+  def __repr__(self): return f"CallInfo({id(self.grad_fxn) if self.grad_fxn else None}, {self.metadata})"
 
 @dataclass(frozen=True)
 class Kernel:
