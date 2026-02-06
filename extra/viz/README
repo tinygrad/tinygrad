@@ -4,15 +4,15 @@ After running with VIZ=-1, use `PYTHONPATH=. extra/viz/cli.py` to explore the sa
 
 ## Inspect runtime profiling
 
-Use `PYTHONPATH=. extra/viz/cli.py --profile` to get a list of traced devices.
+Use `PYTHONPATH=. extra/viz/cli.py --profile` to list all traced devices.
 
 List top slowest kernels on a device: `--profile --device "AMD"`
 List samples of a kernel on a device: `--profile --device "AMD" --kernel E_3`
 
 ## Inspect codegen and PatternMatcher
 
-Run `PYTHONPATH=. extra/viz/cli.py` to list all the compiled kernels.
+Use `PYTHONPATH=. extra/viz/cli.py --rewrites` to list all traced kernels.
 
 List all codegen steps for a kernel: `--kernel E_3`
-Get sourece code: `--kernel E_3 --select "View Program"`
+Get source code: `--kernel E_3 --select "View Program"`
 Inspect a graph rewrite: `--kernel E_3 --select "initial symbolic"`
