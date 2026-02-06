@@ -135,14 +135,6 @@ def _val_to_u32(val: UOp) -> UOp:
   if val.dtype in (dtypes.uint16, dtypes.int16): return val.cast(dtypes.uint32)
   return val.cast(dtypes.uint32)
 
-def _apply_clamp(val: UOp, clmp: int | UOp) -> UOp:
-  """Apply VOP3 clamp modifier: clamp float results to [0.0, 1.0] range."""
-  if isinstance(clmp, int) and clmp == 0: return val
-  if val.dtype not in (dtypes.float32, dtypes.half, dtypes.float64): return val
-  zero, one = UOp.const(val.dtype, 0.0), UOp.const(val.dtype, 1.0)
-  clamped = val.maximum(zero).minimum(one)
-  return clmp.ne(_c(0)).where(clamped, val) if isinstance(clmp, UOp) else clamped
-
 _pcode_fixes = {
   'V_DIV_FMAS_F32': ('D0.f32 = 2.0F ** 32 * fma(S0.f32, S1.f32, S2.f32)',
     'D0.f32 = (exponent(S2.f32) > 127) ? (2.0F ** 64 * fma(S0.f32, S1.f32, S2.f32)) : (2.0F ** -64 * fma(S0.f32, S1.f32, S2.f32))'),
@@ -354,7 +346,7 @@ class _Ctx:
     offset = reg.cast(dtypes.int) * _c(32, dtypes.int) + lane.cast(dtypes.int)
     return buf.index(offset, _lane_active(exec_mask, lane)).store(val.cast(dtypes.uint32))
 
-  def rsrc_dyn(self, off: UOp, lane: UOp | None, bits: int = 32, literal: UOp | None = None, is_f64: bool = False) -> UOp:
+  def rsrc_dyn(self, off: UOp, lane: UOp | None, bits: int = 32, literal: UOp | None = None, is_f64: bool = False, do_cast: bool = True) -> UOp:
     """Read source operand with dynamic offset. Handles SGPR/inline constants (<256), VGPR (>=256).
     If lane is None, only scalar access is supported (off must be < 256).
     is_f64: True for F64 operations where 64-bit literals go in high 32 bits."""
@@ -385,7 +377,7 @@ class _Ctx:
     else:
       scalar_val = sgpr_lo
       if literal is not None: scalar_val = off.eq(_c(255)).where(literal, scalar_val)
-      if bits == 16:  # Float constants: cast F32 to F16
+      if bits == 16 and do_cast:  # Float constants: cast F32 to F16
         scalar_val = is_float_const.where(scalar_val.bitcast(dtypes.float32).cast(dtypes.half).bitcast(dtypes.uint16).cast(dtypes.uint32), scalar_val)
 
     return is_vgpr.where(vgpr_val, scalar_val) if lane is not None else scalar_val
@@ -445,7 +437,7 @@ class _Ctx:
     return UOp.sink(*stores, *self.inc_pc())
 
   def compile_vop_pcode(self, op, srcs: dict[str, UOp], lane: UOp, vdst_reg: UOp, exec_mask: UOp,
-                        opsel_dst_hi: bool | UOp = False, sdst_reg: int | None = None, clmp: int | UOp = 0) -> UOp:
+                        opsel_dst_hi: bool | UOp = False, sdst_reg: int | None = None, clmp: int = 0) -> UOp:
     """Compile VOP instruction. Returns sink with stores and inc_pc."""
     pcode = get_pcode(op)
     vcc_reg = sdst_reg if sdst_reg is not None else VCC_LO.offset
@@ -453,6 +445,24 @@ class _Ctx:
     srcs.update({'EXEC': exec_mask, 'SCC': self.rsgpr_dyn(_c(SCC.offset)), 'laneId': lane,
                  'ROUND_MODE': _c(0), 'ROUND_TOWARD_ZERO': _c(0)})  # rounding mode: 0=RNE, RTZ constant
     _, assigns = parse_pcode(pcode, srcs)
+
+    # For integer ops with clamp, compute overflow using wide arithmetic
+    # NOTE: MUL_LO ops don't saturate - they always return the low bits
+    int_saturate = None
+    if clmp and any(p in op.name for p in ('_NC_U', '_MAD_U', '_NC_I', '_MAD_I')):
+      is_signed, is_16bit = '_I' in op.name and '_U' not in op.name, '16' in op.name
+      if not (is_16bit and is_signed):  # Skip 16-bit signed ops due to codegen issues
+        s0, s1, s2 = srcs.get('S0'), srcs.get('S1'), srcs.get('S2')
+        if s0 is not None and s1 is not None:
+          narrow_dt = dtypes.uint16 if is_16bit else (dtypes.int32 if is_signed else dtypes.uint32)
+          wide_dt = dtypes.int32 if is_16bit else dtypes.int64
+          narrow_max, narrow_min = (0xFFFF, 0) if is_16bit else ((0x7FFFFFFF, -0x80000000) if is_signed else (0xFFFFFFFF, 0))
+          def to_wide(x): return (x.bitcast(narrow_dt) if x.dtype.itemsize == narrow_dt.itemsize else x.cast(narrow_dt)).cast(wide_dt)
+          is_sub, is_mad = 'SUB' in op.name, 'MAD' in op.name
+          full = (to_wide(s0) * to_wide(s1) + to_wide(s2)) if is_mad and s2 is not None else \
+                 (to_wide(s1) - to_wide(s0)) if is_sub and 'SUBREV' in op.name else \
+                 (to_wide(s0) - to_wide(s1)) if is_sub else (to_wide(s0) + to_wide(s1))
+          int_saturate = full.clamp(narrow_min, narrow_max).cast(narrow_dt)
 
     raw_stores: list = []
     vcc_val, exec_val = None, None
@@ -468,7 +478,10 @@ class _Ctx:
                        val.cast(dtypes.uint32) if val.dtype in (dtypes.uint16, dtypes.int16) else val.cast(dtypes.uint32) & UOp.const(dtypes.uint32, slice_mask)
             raw_stores.append(('vgpr_slice', (lo_bit, width, val_bits)))
             continue
-        val = _apply_clamp(val, clmp)
+        # For integer ops with clamp, use pre-computed saturated value; for floats, clamp to [0,1]
+        if int_saturate is not None: val = int_saturate
+        elif clmp and val.dtype in (dtypes.float32, dtypes.half, dtypes.float64):
+          val = val.maximum(UOp.const(val.dtype, 0.0)).minimum(UOp.const(val.dtype, 1.0))
         if val.dtype in (dtypes.uint64, dtypes.int64, dtypes.float64):
           lo, hi = _split64(val)
           raw_stores.extend([('vgpr', self.wvgpr_dyn(vdst_reg, lane, lo, exec_mask)), ('vgpr', self.wvgpr_dyn(vdst_reg + _c(1), lane, hi, exec_mask))])
@@ -732,6 +745,7 @@ def _compile_vop3sd(inst: ir3.VOP3SD | ir4.VOP3SD, ctx: _Ctx) -> UOp:
   _, assigns = parse_pcode(pcode, srcs)
 
   has_per_lane_vcc = any('[laneId]' in dest for dest, _ in assigns if dest.startswith('VCC') or dest.startswith('D0.u64'))
+  clmp = getattr(inst, 'clmp', 0)
   if has_per_lane_vcc:
     # VCC computation: RANGE+REDUCE gets axis ID first (lower ID = runs first)
     # This ensures VCC reads source values BEFORE VGPR stores modify them
@@ -743,11 +757,17 @@ def _compile_vop3sd(inst: ir3.VOP3SD | ir4.VOP3SD, ctx: _Ctx) -> UOp:
     final_vcc = ctx.unroll_lanes(get_vcc_bit, exec_mask)
     # VGPR stores: RANGE gets axis ID second (higher ID = runs after VCC loop)
     lane3 = ctx.range()
-    d0_val = None
+    d0_val, vcc_per_lane = None, None
     for dest, val in parse_pcode(pcode, load_srcs(lane3))[1]:
       if dest.startswith('D0') and '[laneId]' not in dest: d0_val = val
+      if dest.startswith('VCC') or (dest.startswith('D0.u64') and '[laneId]' in dest): vcc_per_lane = val
     vgpr_stores = []
     if d0_val is not None:
+      # Apply clamp using carry/borrow bit: ADD overflow->0xFFFFFFFF, SUB underflow->0
+      if clmp and vcc_per_lane is not None:
+        is_sub = 'SUB' in inst.op.name
+        sat_val = _c(0) if is_sub else _c(0xFFFFFFFF)
+        d0_val = vcc_per_lane.cast(dtypes.bool).where(sat_val, d0_val.cast(dtypes.uint32))
       if d0_val.dtype in (dtypes.uint64, dtypes.int64, dtypes.float64):
         lo, hi = _split64(d0_val)
         vgpr_stores.extend([ctx.wvgpr_dyn(vdst_reg, lane3, lo, exec_mask), ctx.wvgpr_dyn(vdst_reg + _c(1), lane3, hi, exec_mask)])
@@ -800,9 +820,10 @@ def _compile_vop3p(inst: ir3.VOP3P | ir4.VOP3P, ctx: _Ctx) -> UOp:
   lane = ctx.range()
   exec_mask = ctx.rsgpr_dyn(_c(EXEC_LO.offset))
   vdst_reg = ctx.inst_field(type(inst).vdst)
-  src0 = ctx.rsrc_dyn(ctx.inst_field(type(inst).src0), lane, 16)
-  src1 = ctx.rsrc_dyn(ctx.inst_field(type(inst).src1), lane, 16)
-  src2 = ctx.rsrc_dyn(ctx.inst_field(type(inst).src2), lane, 16)
+  do_cast = any(x in op_name for x in ('F16', 'F32', 'BF16')) and 'IU' not in op_name
+  src0 = ctx.rsrc_dyn(ctx.inst_field(type(inst).src0), lane, 16, do_cast=do_cast)
+  src1 = ctx.rsrc_dyn(ctx.inst_field(type(inst).src1), lane, 16, do_cast=do_cast)
+  src2 = ctx.rsrc_dyn(ctx.inst_field(type(inst).src2), lane, 16, do_cast=do_cast)
   opsel, opsel_hi = getattr(inst, 'opsel', 0) or 0, getattr(inst, 'opsel_hi', 3) if getattr(inst, 'opsel_hi', 3) is not None else 3
   opsel_hi2 = getattr(inst, 'opsel_hi2', 1) if getattr(inst, 'opsel_hi2', 1) is not None else 1
   neg, neg_hi = getattr(inst, 'neg', 0) or 0, getattr(inst, 'neg_hi', 0) or 0
@@ -1120,8 +1141,8 @@ class WaveState:
     self.n_lanes = n_lanes
     self.vgpr_buf = Buffer('CPU', VGPR_SIZE, dtypes.uint32).ensure_allocated()
     self.sgpr_buf = Buffer('CPU', SGPR_COUNT, dtypes.uint32).ensure_allocated()
-    self._vgpr_mv = self.vgpr_buf.as_buffer(force_zero_copy=True).cast('I')
-    self._sgpr_mv = self.sgpr_buf.as_buffer(force_zero_copy=True).cast('I')
+    self._vgpr_mv = self.vgpr_buf.as_memoryview(force_zero_copy=True).cast('I')
+    self._sgpr_mv = self.sgpr_buf.as_memoryview(force_zero_copy=True).cast('I')
     # Zero memory using ctypes memset (much faster than Python loops)
     ctypes.memset(self.vgpr_buf._buf.va_addr, 0, VGPR_SIZE * 4)
     ctypes.memset(self.sgpr_buf._buf.va_addr, 0, SGPR_COUNT * 4)

@@ -505,7 +505,7 @@ def helper_linearizer_opt(r:Tensor|list[Tensor], *args, **kwargs):
   return realized_ast
 
 def copyout_outputs(outbufs:list[Buffer]) -> list[np.ndarray]:
-  return [np.frombuffer(x.as_buffer(), _to_np_dtype(x.dtype)) for x in outbufs]
+  return [np.frombuffer(x.as_memoryview(), _to_np_dtype(x.dtype)) for x in outbufs]
 
 def reset_bufs(bufs:list[Buffer]):
   for buf in bufs: buf.copyin(np.zeros((buf.size*buf.dtype.itemsize,), dtype=np.uint8).data)

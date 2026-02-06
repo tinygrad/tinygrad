@@ -76,7 +76,7 @@ class TestPickle(unittest.TestCase):
     del a
     del buffer
     a2:UOp = pickle.loads(s)
-    self.assertListEqual(a2.base.realized.as_buffer().cast("I").tolist(), [0, 1, 2, 3])
+    self.assertListEqual(a2.base.realized.as_memoryview().cast("I").tolist(), [0, 1, 2, 3])
 
   def test_pickle_unrealized_tensor(self):
     t = Tensor.ones(10, 10)

@@ -55,11 +55,14 @@ class Attention:
       xqkv = x @ self.wqkv.T
       xq, xk, xv = xqkv.split([self.wq.weight.shape[0], self.wk.weight.shape[0], self.wv.weight.shape[0]], dim=2)
     else:
-      xq, xk, xv = self.wq(x), self.wk(x), self.wv(x)
+      xq, xk, xv = self.wq(x), self.wk(x.contiguous_backward()), self.wv(x)
 
     if self.q_norm is not None and self.k_norm is not None:
       xq = self.q_norm(xq)
       xk = self.k_norm(xk)
+
+    # cast_float_to_bf16 is expensive in reduction loops, break it out
+    if x.dtype == dtypes.bfloat16: xq, xk = xq.contiguous_backward(), xk.contiguous_backward()
 
     xq = xq.reshape(xq.shape[0], xq.shape[1], self.n_heads, self.head_dim)
     xk = xk.reshape(xk.shape[0], xk.shape[1], self.n_kv_heads, self.head_dim)
@@ -86,11 +89,12 @@ class Attention:
       assert start_pos == 0
       keys, values = xk, xv
 
-    keys, values = repeat_kv(keys, self.n_rep), repeat_kv(values, self.n_rep)
-    xq, keys, values = xq.transpose(1, 2), keys.transpose(1, 2), values.transpose(1, 2)
     if Tensor.training:
-      attn = xq.scaled_dot_product_attention(keys, values, is_causal=True).transpose(1, 2)
+      xq, keys, values = xq.transpose(1, 2), keys.transpose(1, 2), values.transpose(1, 2)
+      attn = xq.scaled_dot_product_attention(keys, values, is_causal=True, enable_gqa=True).transpose(1, 2)
     else:
+      keys, values = repeat_kv(keys, self.n_rep), repeat_kv(values, self.n_rep)
+      xq, keys, values = xq.transpose(1, 2), keys.transpose(1, 2), values.transpose(1, 2)
       attn = xq.scaled_dot_product_attention(keys, values, mask).transpose(1, 2)
     if getenv("STUB_ATTENTION"):
       from tinygrad.uop.ops import UOp, KernelInfo

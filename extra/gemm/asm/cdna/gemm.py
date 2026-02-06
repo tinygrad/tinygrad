@@ -35,9 +35,13 @@ def can_use_asm_gemm(a:Tensor, b:Tensor) -> bool:
     return todo(f"sharding mismatch a.ndim={a.ndim} a.uop.axis={a.uop.axis} b.uop.axis={b.uop.axis}")
   batch, M, K = (1, *a.shape) if a.ndim == 2 else a.shape
   N = b.shape[1]
-  if isinstance(a.device, tuple): batch //= len(a.device)
+  if isinstance(a.device, tuple):
+    batch //= len(a.device)
+    dname = a.device[0]
+  else: dname = a.device
+  arch = getattr(Device[dname].renderer, "arch", "")
   if batch not in {1, 2}: return todo(f"GEMM batch size {batch}")
-  if (key:=(M, N, K)) not in GEMM_ARGS: return todo(f"GEMM shape not supported {key}")
+  if (key:=(M, N, K)) not in GEMM_ARGS and arch == "gfx950": return todo(f"GEMM shape not supported {key} on {arch}")
   return True
 
 # ** UOp gemm to test Tensor.custom_kernel multi and backward correctness on non cdna4
@@ -62,10 +66,7 @@ def custom_gemm_bw(gradient:UOp, kernel:UOp):
   assert all_same([gradient.device, a.device, b.device, out.device])
   a_t, b_t, g_t = Tensor(a, device=a.device), Tensor(b, device=a.device), Tensor(gradient, device=a.device)
   grad_a = (g_t @ b_t.T).uop
-  a_T = a_t.transpose(-2, -1)
-  a_T = a_T.reshape(*a_T.shape[:-1], 1, a_T.shape[-1])
-  g_r = g_t.reshape(*g_t.shape[:-2], 1, *g_t.shape[-2:]).transpose(-1, -2)
-  grad_b = (a_T * g_r).sum((-1, 0)).uop
+  grad_b = (a_t.permute(2, 0, 1).reshape(a_t.shape[2], -1) @ g_t.reshape(-1, g_t.shape[-1])).uop
   return (None, grad_a, grad_b)
 
 # ** main gemm function

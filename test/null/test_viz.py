@@ -365,8 +365,8 @@ def load_profile(lst:list[ProfileEvent]) -> dict:
 
 class TestVizProfiler(BaseTestViz):
   def test_node(self):
-    prof = [ProfileRangeEvent(device='NV', name='E_2', st=decimal.Decimal(1000), en=decimal.Decimal(1010), is_copy=False),
-            ProfileDeviceEvent(device='NV', comp_tdiff=decimal.Decimal(-1000), copy_tdiff=decimal.Decimal(-100))]
+    prof = [ProfileRangeEvent(device='NV', name='E_2', st=decimal.Decimal(1000), en=decimal.Decimal(1010)),
+            ProfileDeviceEvent(device='NV', tdiff=decimal.Decimal(-1000))]
 
     j = load_profile(prof)
 
@@ -379,28 +379,28 @@ class TestVizProfiler(BaseTestViz):
     assert event['ref'] is None
 
   def test_copy_node(self):
-    prof = [ProfileRangeEvent(device='NV', name='COPYxx', st=decimal.Decimal(1000), en=decimal.Decimal(1010), is_copy=True),
-            ProfileRangeEvent(device='NV:2', name='COPYxx', st=decimal.Decimal(1000), en=decimal.Decimal(1010), is_copy=True),
-            ProfileDeviceEvent(device='NV', comp_tdiff=decimal.Decimal(-1000), copy_tdiff=decimal.Decimal(-100)),
-            ProfileDeviceEvent(device='NV:2', comp_tdiff=decimal.Decimal(-800), copy_tdiff=decimal.Decimal(-80))]
+    prof = [ProfileRangeEvent(device='NV:SDMA:0', name='COPYxx', st=decimal.Decimal(1000), en=decimal.Decimal(1010)),
+            ProfileRangeEvent(device='NV:2:SDMA:0', name='COPYxx', st=decimal.Decimal(1000), en=decimal.Decimal(1010)),
+            ProfileDeviceEvent(device='NV:SDMA:0', tdiff=decimal.Decimal(-100)),
+            ProfileDeviceEvent(device='NV:2:SDMA:0', tdiff=decimal.Decimal(-80))]
 
     j = load_profile(prof)
 
-    event = j['layout']['NV']['events'][0]
+    event = j['layout']['NV:SDMA:0']['events'][0]
     self.assertEqual(event['name'], 'COPYxx')
     self.assertEqual(event['st'], 0)   # first event
     self.assertEqual(event['dur'], 10)
 
-    event2 = j['layout']['NV:2']['events'][0]
+    event2 = j['layout']['NV:2:SDMA:0']['events'][0]
     self.assertEqual(event2['st'], 20) # second event, diff clock
 
     self.assertEqual(j["dur"], (event2["st"]+event2["dur"])-event["st"])
 
   def test_graph(self):
-    prof = [ProfileDeviceEvent(device='NV', comp_tdiff=decimal.Decimal(-1000), copy_tdiff=decimal.Decimal(-100)),
-            ProfileDeviceEvent(device='NV:1', comp_tdiff=decimal.Decimal(-500), copy_tdiff=decimal.Decimal(-50)),
-            ProfileGraphEvent(ents=[ProfileGraphEntry(device='NV', name='E_25_4n2', st_id=0, en_id=1, is_copy=False),
-                                    ProfileGraphEntry(device='NV:1', name='NV -> NV:1', st_id=2, en_id=3, is_copy=True)],
+    prof = [ProfileDeviceEvent(device='NV', tdiff=decimal.Decimal(-1000)),
+            ProfileDeviceEvent(device='NV:1:SDMA:0', tdiff=decimal.Decimal(-50)),
+            ProfileGraphEvent(ents=[ProfileGraphEntry(device='NV', name='E_25_4n2', st_id=0, en_id=1),
+                                    ProfileGraphEntry(device='NV:1:SDMA:0', name='NV -> NV:1', st_id=2, en_id=3)],
                               deps=[[], [0]],
                               sigs=[decimal.Decimal(1000), decimal.Decimal(1002), decimal.Decimal(1004), decimal.Decimal(1008)])]
 
@@ -409,22 +409,20 @@ class TestVizProfiler(BaseTestViz):
     tracks = list(j['layout'])
     self.assertEqual(tracks[0], 'NV')
     self.assertEqual(tracks[1], 'NV Graph')
-    self.assertEqual(tracks[2], 'NV:1')
+    self.assertEqual(tracks[2], 'NV:1:SDMA:0')
 
     nv_events = j['layout']['NV']['events']
     self.assertEqual(nv_events[0]['name'], 'E_25_4n2')
     self.assertEqual(nv_events[0]['st'], 0)
     self.assertEqual(nv_events[0]['dur'], 2)
-    #self.assertEqual(j['devEvents'][6]['pid'], j['devEvents'][0]['pid'])
 
-    nv1_events = j['layout']['NV:1']['events']
-    self.assertEqual(nv1_events[0]['name'], 'NV -> NV:1')
-    self.assertEqual(nv1_events[0]['st'], 954)
-    #self.assertEqual(j['devEvents'][7]['pid'], j['devEvents'][3]['pid'])
+    sdma_events = j['layout']['NV:1:SDMA:0']['events']
+    self.assertEqual(sdma_events[0]['name'], 'NV -> NV:1')
+    self.assertEqual(sdma_events[0]['st'], 954)
 
     graph_events = j['layout']['NV Graph']['events']
     self.assertEqual(graph_events[0]['st'], nv_events[0]['st'])
-    self.assertEqual(graph_events[0]['st']+graph_events[0]['dur'], nv1_events[0]['st']+nv1_events[0]['dur'])
+    self.assertEqual(graph_events[0]['st']+graph_events[0]['dur'], sdma_events[0]['st']+sdma_events[0]['dur'])
 
   def test_bytes_per_kernel(self):
     step = 10
@@ -465,11 +463,11 @@ class TestVizProfiler(BaseTestViz):
 
   def test_layout_order(self):
     def fn(): return
-    for dname in ["TINY", "USER", "TEST:1 N1", "TEST:2 N1", "TEST:1 N2"]:
+    for dname in ["TINY", "USER", "TEST:1 N1", "TEST:2 N1", "TEST:1 N2", "TEST:1:ENGINE:0", "TEST:1"]:
       with cpu_profile("fn", dname): fn()
     layout = list(load_profile(cpu_events)["layout"])
     self.assertListEqual(layout[:2], ["USER","TINY"])
-    self.assertListEqual(layout[2:], ["TEST:1 N1","TEST:1 N2", "TEST:2 N1"])
+    self.assertListEqual(layout[2:], ["TEST:1", "TEST:1:ENGINE:0", "TEST:1 N1","TEST:1 N2", "TEST:2 N1"])
 
 def _alloc(b:int):
   a = Tensor.empty(b, device="NULL", dtype=dtypes.char)

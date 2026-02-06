@@ -53,7 +53,9 @@ def replay_get_rangeify_map(ret:dict[UOp, UOp], big_sink:UOp) -> tuple[str, str,
 
 def replay_get_program(p:ProgramSpec, ast:UOp, renderer:Renderer, opts:list[Opt]|None=None) -> tuple[str, str, tuple[Any, ...]]:
   # the ast.arg is non None if we are inside of search.py
-  sink_arg = ast.arg or KernelInfo(opts_to_apply=tuple(opts) if opts is not None else p.applied_opts if BEAM>=1 else None)
+  sink_arg = ast.arg or KernelInfo()
+  if opts is not None: sink_arg = replace(sink_arg, opts_to_apply=tuple(opts))
+  elif BEAM >= 1 and sink_arg.opts_to_apply is None: sink_arg = replace(sink_arg, opts_to_apply=p.applied_opts)
   input_ast = ast if ast.op is Ops.PROGRAM else ast.replace(arg=replace(sink_arg, name=p.name))
   p2 = get_program(input_ast, renderer=renderer)
   def to_str(ret:ProgramSpec) -> str:

@@ -1,10 +1,11 @@
 from typing import cast
+from dataclasses import replace
 import itertools
 from tinygrad.helpers import DISABLE_FAST_IDIV, EMULATED_DTYPES, DEVECTORIZE, TRANSCENDENTAL, SPEC, DEBUG, getenv, TracingKey, Context
 from tinygrad.uop.ops import PatternMatcher, graph_rewrite, UOp, pm_lower_index_dtype, Ops, UPat, track_rewrites, KernelInfo, pyrender
 from tinygrad.uop.spec import type_verify, program_spec, kernel_spec
 from tinygrad.renderer import Renderer, ProgramSpec
-from tinygrad.dtype import dtypes, PtrDType
+from tinygrad.dtype import dtypes
 from tinygrad.helpers import panic
 from tinygrad.codegen.opt import Opt
 
@@ -17,14 +18,8 @@ from tinygrad.codegen.late.devectorizer import load_store_folding, load_store_in
   ReduceContext, correct_load_store, pm_render, pm_add_loads
 from tinygrad.codegen.opt.postrange import apply_opts, make_images
 from tinygrad.codegen.simplify import pm_simplify_ranges, pm_flatten_range, pm_split_ranges, pm_load_collapse
-from tinygrad.schedule.rangeify import pm_add_buffers_local, rangeify_codegen, pm_mops
+from tinygrad.schedule.rangeify import pm_add_buffers_local, rangeify_codegen, pm_mops, pm_syntactic_sugar
 from tinygrad.codegen.late.linearizer import CFGContext, pm_split_ends, pm_add_control_flow, linearize
-
-pm_syntactic_sugar = PatternMatcher([
-  # INDEX on ptr INDEX concats them
-  (UPat(Ops.INDEX, name="i1").f(Ops.INDEX, name="i2", allow_any_len=True),
-   lambda i1,i2: i2.replace(src=i1.src+i2.src[1:]) if isinstance(i1.dtype, PtrDType) and not isinstance(i2.dtype, PtrDType) else None),
-])
 
 def full_rewrite_to_sink(sink:UOp, ren:Renderer|None=None, optimize:bool=True) -> UOp:
   if ren is None: ren = Renderer()
@@ -164,17 +159,19 @@ def get_program(ast:UOp, renderer:Renderer, opts:list[Opt]|None=None) -> Program
     The ProgramSpec of the program.
   """
 
-  # fix up KernelInfo
-  if opts is not None:
-    assert ast.arg is None, "can't apply opts if sink has an arg"
-    ast = ast.replace(arg=KernelInfo(opts_to_apply=tuple(opts)))
-  if ast.arg is None and ast.op is Ops.SINK: ast = ast.replace(arg=KernelInfo())
-
-  # rewrite to prg
   if ast.op is Ops.PROGRAM: prg = ast
-  else:
+  elif ast.op is Ops.SINK:
+    # rewrite to prg
+    assert isinstance(ast.arg, KernelInfo), "requires KernelInfo on arg to get_program"
+    if opts is not None:
+      # TODO: should this be here?
+      assert ast.arg.opts_to_apply is None, "can't apply opts if there's already opts to apply"
+      ast = ast.replace(arg=replace(ast.arg, opts_to_apply=tuple(opts)))
     full_sink = full_rewrite_to_sink(ast, renderer, optimize=ast.tag is None)
     prg = UOp(Ops.PROGRAM, src=(full_sink, UOp(Ops.DEVICE, arg=renderer.device)))
+  else:
+    raise RuntimeError(f"can't call get_program on {ast.op}")
+
   prg = graph_rewrite(prg, pm_to_program, ctx=renderer, name="linearize/render")
 
   # create the ProgramSpec

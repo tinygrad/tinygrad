@@ -57,11 +57,10 @@ class QCOMCompiler(CLCompiler):
 class QCOMSignal(HCQSignal):
   def __init__(self, *args, **kwargs): super().__init__(*args, **{**kwargs, 'timestamp_divider': 19.2})
 
-  def _sleep(self, time_spent_waiting_ms:int) -> bool:
+  def _sleep(self, time_spent_since_last_sleep_ms:int):
     # Sleep only for timeline signals. Do it immediately to free cpu.
     if self.is_timeline and self.owner is not None:
       kgsl.IOCTL_KGSL_DEVICE_WAITTIMESTAMP_CTXTID(self.owner.fd, context_id=self.owner.ctx, timestamp=self.owner.last_cmd, timeout=0xffffffff)
-    return False
 
 class QCOMComputeQueue(HWQueue):
   def __init__(self, dev:QCOMDevice):
@@ -332,7 +331,7 @@ class QCOMAllocator(HCQAllocatorBase):
     return self.dev._gpu_map(opts.external_ptr, size, image=opts.image) if opts.external_ptr else self.dev._gpu_alloc(size, image=opts.image)
 
   def _do_copy(self, src_addr, dest_addr, src_size, real_size, src_stride, dest_stride, prof_text, dest_off=0, src_off=0):
-    with cpu_profile(prof_text, self.dev.device, is_copy=True):
+    with cpu_profile(prof_text, self.dev.device):
       while src_off < src_size:
         ctypes.memmove(dest_addr+dest_off, src_addr+src_off, real_size)
         src_off, dest_off = src_off+src_stride, dest_off+dest_stride

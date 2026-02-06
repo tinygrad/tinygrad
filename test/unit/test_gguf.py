@@ -40,8 +40,6 @@ def ggml_tensor_to_numpy(tensor: ggml.ggml_tensor_p):
   return np.lib.stride_tricks.as_strided(output, shape=shape, strides=strides), ctx
 
 @unittest.skipIf(any(not is_dtype_supported(t) for t in [ dtypes.uint8, dtypes.half ]), "Backend must support uint8 and half")
-# TODO: WEBGPU GGUF dequantization produces incorrect values
-@unittest.skipIf(Device.DEFAULT == "WEBGPU", "WEBGPU GGUF dequantization issue")
 class TestGGUF(unittest.TestCase):
   def setUp(self) -> None:
     params = ggml.ggml_init_params(mem_size=0, mem_buffer=None, no_alloc=False)

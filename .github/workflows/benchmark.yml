@@ -41,6 +41,18 @@ jobs:
       run: |
         echo "CACHEDB=/tmp/pytest-db-ci.db" >> $GITHUB_ENV
         rm -f /tmp/pytest-db-ci*
+    # TODO: remove this step once all old caches are migrated
+    - name: Migrate old huggingface cache (symlinks break onnxruntime 1.24+)
+      run: |
+        cd ~/Library/Caches/tinygrad/downloads/models 2>/dev/null || exit 0
+        for old_dir in models--*; do
+          [ -d "$old_dir" ] || continue
+          repo_id=$(echo "$old_dir" | sed 's/models--//; s/--/\//g')
+          snapshot=$(ls -1 "$old_dir/snapshots" 2>/dev/null | head -1)
+          [ -n "$snapshot" ] || continue
+          mkdir -p "$repo_id"
+          cp -RLn "$old_dir/snapshots/$snapshot/"* "$repo_id/" 2>/dev/null || true
+        done
     - name: Run pytest -nauto
       run: |
         source /tmp/tinygrad_pytest_ci/bin/activate

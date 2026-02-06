@@ -8,7 +8,6 @@ from tinygrad.dtype import DType, DTYPES_DICT, least_upper_dtype, fp8_to_float, 
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.nir import NIRRenderer
 from tinygrad import Context, Device, Tensor, dtypes
-from tinygrad.uop import Ops
 from hypothesis import given, settings, strategies as strat
 from test.helpers import rand_for_dtype
 from test.unit.test_dtype_spec import _assert_eq, core_dtypes, dtype_ints, dtype_floats, FP8E4M3_MAX, FP8E5M2_MAX
@@ -247,7 +246,6 @@ class TestBFloat16DTypeCast(unittest.TestCase):
 
 class TestHalfDType(TestDType): DTYPE = dtypes.half
 
-@unittest.skipUnless(Ops.SHL in Device[Device.DEFAULT].renderer.code_for_op, "half decomp requires bitshift")
 class TestEmulatedHalf(TestHalfDType):
   @classmethod
   def setUpClass(cls):
@@ -351,7 +349,6 @@ class TestUint32DType(TestDType): DTYPE = dtypes.uint32
 
 class TestInt64DType(TestDType): DTYPE = dtypes.int64
 
-@unittest.skipUnless(Ops.SHL in Device[Device.DEFAULT].renderer.code_for_op, "long decomp requires bitshift")
 @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, PTXRenderer), "PTX does indexing math with longs")
 class TestEmulatedInt64DType(TestInt64DType):
   @classmethod
@@ -368,7 +365,6 @@ class TestUint64DType(TestDType):
   def test_uint64_load(self):
     assert Tensor(2**64 - 1, dtype=dtypes.uint64).numpy() == 2**64 - 1
 
-@unittest.skipUnless(Ops.SHL in Device[Device.DEFAULT].renderer.code_for_op, "long decomp requires bitshift")
 @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, PTXRenderer), "PTX does indexing math with longs")
 class TestEmulatedUInt64DType(TestUint64DType):
   @classmethod

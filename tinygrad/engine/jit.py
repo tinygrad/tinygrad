@@ -207,7 +207,7 @@ class CapturedJit(Generic[ReturnType]):
     asgn = _internal_memory_planner([[b for item in self.jit_cache for b in item.bufs if b is not None and b not in blacklist]], ignore_checks=True)
     self.jit_cache = [replace(item, bufs=[asgn.get(b,b) if b is not None else None for b in item.bufs]) for item in self.jit_cache]
     for old, new in asgn.items():
-      if old.is_allocated(): new.ensure_allocated().copyin(old.as_buffer())
+      if old.is_allocated(): new.ensure_allocated().copyin(old.as_memoryview())
     self.__post_init__()
 
   # jit exec
@@ -219,7 +219,7 @@ class CapturedJit(Generic[ReturnType]):
     # copy aliased inputs to prevent read-after-write hazard
     for i, ib in enumerate(input_buffers):
       if (writer := self._output_to_writer.get(ib)) is not None and self._input_to_max_reader.get(i, -1) > writer:
-        input_buffers[i] = Buffer(ib.device, ib.size, ib.dtype).ensure_allocated().copyin(ib.as_buffer())
+        input_buffers[i] = Buffer(ib.device, ib.size, ib.dtype).ensure_allocated().copyin(ib.as_memoryview())
 
     for (j,i),input_idx in self._input_replace.items(): self._jit_cache[j].bufs[i] = input_buffers[input_idx]
 
@@ -310,7 +310,7 @@ class TinyJit(Generic[ReturnType]):
       assert self.fxn is not None
       with Context(BEAM=0 if getenv("IGNORE_JIT_FIRST_BEAM") else BEAM.value):
         ret = self.fxn(*args, **kwargs)
-        if len(params:=get_parameters(ret)): Tensor.realize(params[0], *params[1:])
+        if len(params:=get_parameters(ret)): Tensor.realize(*params)
     elif self.cnt == 1:
       # jit capture
       assert self.fxn is not None
@@ -322,7 +322,7 @@ class TinyJit(Generic[ReturnType]):
         capturing.append(self)
         try:
           ret = self.fxn(*args, **kwargs)
-          if len(params:=get_parameters(ret)): Tensor.realize(params[0], *params[1:])
+          if len(params:=get_parameters(ret)): Tensor.realize(*params)
         finally: capturing.clear()
       jit_cache = self._jit_cache
       del self._buffer_replace, self._jit_cache

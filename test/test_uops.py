@@ -24,7 +24,7 @@ def to_uops_list(u:list[UOp], ren=None) -> list[UOp]:
   return ret
 
 def _uops_to_prg(uops_list):
-  prg = get_program(UOp.sink(*uops_list), Device[Device.DEFAULT].renderer)
+  prg = get_program(UOp.sink(*uops_list, arg=KernelInfo()), Device[Device.DEFAULT].renderer)
   return CompiledRunner(replace(prg, device=Device.DEFAULT))
 
 def uop(uops:list[UOp], op:Ops, dtype:Optional[DType], src:tuple[UOp, ...], arg:Any=None) -> UOp:
@@ -283,7 +283,7 @@ class TestUOpPrograms(unittest.TestCase):
     ptr = UOp.placeholder(out.shape, out.dtype, slot=0)
     i, j = UOp.range(10, axis_id=0), UOp.range(10, axis_id=1)
     prog = ptr[i,j].set(42).end(i,j)
-    self._run(prog.sink(), out)
+    self._run(prog.sink(arg=KernelInfo()), out)
 
     with Context(DEBUG=0): self.assertTrue((out == 42).all().item())
 
