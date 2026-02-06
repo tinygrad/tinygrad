@@ -248,7 +248,10 @@ class Tensor(OpMixin):
 
     This API is alpha and may change.
     """
-    return [Tensor(u, device=u.device) for u in UOp.custom_kernel(*[t.uop for t in (self,)+lst], fxn=fxn, grad_fxn=grad_fxn)]
+    contig_srcs = tuple(x.contiguous() if x.uop.op is not Ops.AFTER else x for x in ((self,)+lst))
+    params = [x.as_param(i) for i,x in enumerate(contig_srcs)]
+    kernel = UOp.call(*[x.uop for x in contig_srcs], fxn=fxn(*[x.uop for x in params]), arg=grad_fxn)
+    return [Tensor(s.uop.after(kernel), device=s.device) for s in contig_srcs]
 
   def schedule_with_vars(self, *lst:Tensor) -> tuple[list[ExecItem], dict[str, int]]:
     """
