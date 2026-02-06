@@ -70,10 +70,14 @@ if __name__ == "__main__":
           a[0] += et
           a[1] += 1
           total += et
-    if agg:
-      rows = [[n, t, time_to_str(t, w=9), t / c if c else 0.0, c, (t / total * 100.0) if total else 0.0] for n, (t, c) in agg.items()]
-      rows.sort(key=lambda r: r[1], reverse=True)
-      print(tabulate([[r[0], r[2], r[4], f"{r[5]:.2f}%"] for r in rows[:30]], headers=["name", "total", "count", "pct"], tablefmt="github"))
+    if agg and total > 0:
+      items = sorted(agg.items(), key=lambda kv:kv[1][0], reverse=True)
+      sel = items[:10]
+      table = [[name, time_to_str(t, w=9), c, f"{(t/total*100.0):.2f}%"] for name,(t,c) in sel]
+      if (other:=items[len(sel):]):
+        other_t = total-sum(t for _, (t, _) in sel)
+        table.append([f"Other ({len(other)} unique)", time_to_str(other_t, w=9), sum(c for _,(_,c) in other), f"{other_t/total*100.0:.2f}%"])
+      print(tabulate(table, headers=["name", "total", "count", "pct"], tablefmt="github"))
     exit(0)
 
   for k in viz.ctxs:
