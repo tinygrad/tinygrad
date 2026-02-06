@@ -295,7 +295,8 @@ def flash_attention(xq, xk, xv, attn_mask:Tensor|None=None, is_causal:bool=False
       k_reg_t = warp.transpose(k_reg_t, k_reg)
       v_reg = warp.load(v_reg, v, (), (batch, kv_seq, head_kv, 0), axis=1)
 
-      for q_idx in ker.range(N // Q_BLOCK_SIZE):
+      q_start = kv_seq if is_causal else 0
+      for q_idx in ker.range(q_start, N // Q_BLOCK_SIZE):
         for g in ker.range(GROUP_SIZE):
           head_q = head_kv * GROUP_SIZE + g
 
