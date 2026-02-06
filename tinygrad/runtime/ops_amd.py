@@ -8,7 +8,7 @@ from tinygrad.runtime.support.hcq import MMIOInterface, BumpAllocator, hcq_filte
 from tinygrad.uop.ops import sint
 from tinygrad.device import Compiled, DMAFdRef, BufferSpec, CompilerSet, CompilerPair
 from tinygrad.helpers import getenv, round_up, data64_le, DEBUG, PROFILE, ProfileEvent, lo32, hi32, colored, prod, ContextVar
-from tinygrad.helpers import VIZ, AMD_CC, AMD_LLVM, ceildiv
+from tinygrad.helpers import VIZ, AMD_CC, AMD_LLVM, ceildiv, unwrap
 from tinygrad.renderer.cstyle import AMDHIPRenderer, AMDHIPCCRenderer
 from tinygrad.renderer.llvmir import AMDLLVMRenderer
 from tinygrad.runtime.autogen import kfd, hsa, pci, sqtt, amdgpu_kd, amdgpu_drm
@@ -955,6 +955,7 @@ class AMDDevice(HCQCompiled):
       ctx_save_restore_size=0 if self.is_am() else wg_data_size + ctl_stack_size, ctl_stack_size=ctl_stack_size, debug_memory_size=debug_memory_size)
 
     self.max_copy_size = 0x40000000 if self.iface.ip_versions[am.SDMA0_HWIP][0] >= 5 else 0x400000
+    self.sdma_queues:dict = {}
     self.has_sdma_queue = self.sdma_queue(0) is not None
 
     compilers = CompilerSet([CompilerPair(functools.partial(AMDHIPRenderer, self.arch), None),
@@ -1018,11 +1019,12 @@ class AMDDevice(HCQCompiled):
             wptr=getattr(hsa.amd_queue_t, 'write_dispatch_id').offset, eop_buffer=eop_buffer, cwsr_buffer=cwsr_buffer,
             ctx_save_restore_size=ctx_save_restore_size, ctl_stack_size=ctl_stack_size, idx=idx))
 
-  @functools.lru_cache(None)
   def sdma_queue(self, idx:int):
     if getenv("AMD_DISABLE_SDMA"): return None
-    with contextlib.suppress(OSError): return self.create_queue(kfd.KFD_IOC_QUEUE_TYPE_SDMA, 0x200 if self.is_usb() else (16 << 20), idx=idx)
-    return None
+    if idx in self.sdma_queues: return self.sdma_queues[idx]
+    with contextlib.suppress(OSError):
+      self.sdma_queues[idx] = self.create_queue(kfd.KFD_IOC_QUEUE_TYPE_SDMA, 0x200 if self.is_usb() else (16 << 20), idx=idx)
+    return self.sdma_queues.get(idx, None)
 
   def _ensure_has_local_memory(self, private_segment_size):
     if self.max_private_segment_size >= private_segment_size: return
@@ -1063,3 +1065,5 @@ class AMDDevice(HCQCompiled):
   def on_device_hang(self): self.iface.on_device_hang()
 
   def device_props(self): return self.iface.props
+
+  def hw_copy_queues(self): return [(f"SDMA:{i}", functools.partial(unwrap(self.hw_copy_queue_t), queue_idx=i)) for i in self.sdma_queues]
