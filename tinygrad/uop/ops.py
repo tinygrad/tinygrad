@@ -155,8 +155,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     # Check self first, then iterate backward_slice (avoids creating intermediate dict)
     return self.op in ops or any(x.op in ops for x in self.backward_slice)
 
-  def toposort(self, gate:Callable|None=None) -> dict[UOp, None]:
-    cache: dict[UOp, None] = {}
+  def _topomap(self, cache:dict[UOp, T], visitor:Callable[[UOp], T], gate:Callable|None=None) -> dict[UOp, T]:
     stack: list[tuple[UOp, bool]] = [(self, False)] # each stack entry is (node, visited_flag)
     while stack:
       node, visited = stack.pop()
@@ -165,20 +164,13 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
         if gate is None or gate(node):
           stack.append((node, True))  # push node back on stack to process after its srcs
           for s in reversed(node.src): stack.append((s, False)) # push srcs on the stack
-      else: cache[node] = None # second time i'm seeing this node, add it to returned toposort
+      else: cache[node] = visitor(node) # second time i'm seeing this node, add visit to returned toposort
     return cache
 
-  def topovisit(self, visitor:Callable[[UOp], T], cache:dict[UOp, T]) -> T:
-    # NOTE: this shares a lot of code with toposort
-    stack: list[tuple[UOp, bool]] = [(self, False)]
-    while stack:
-      node, visited = stack.pop()
-      if node in cache: continue
-      if not visited:
-        stack.append((node, True))
-        for s in reversed(node.src): stack.append((s, False))
-      else: cache[node] = visitor(node)
-    return cache[self]
+  # passes visitor as None callback to match dict[UOp, None] pattern
+  def toposort(self, gate:Callable|None=None) -> dict[UOp, None]: return self._topomap({}, (lambda x: None), gate)
+
+  def topovisit(self, visitor:Callable[[UOp], T], cache:dict[UOp, T]) -> T: return self._topomap(cache, visitor)[self]
 
   # returns map of UOps to their consumers in the graph rooted by self
   def get_consumer_map(self) -> dict[UOp, dict[UOp, None]]: return consumer_map_from_toposort(self.toposort())
