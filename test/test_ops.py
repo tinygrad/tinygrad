@@ -2227,6 +2227,8 @@ class TestOps(unittest.TestCase):
         lambda x,w: Tensor.conv_transpose2d(x,w,padding=padding), grad_rtol=1e-5)
     self.helper_test_exception([(2,16,2,2), (32,16,3,3)], lambda x,w: torch.nn.functional.conv_transpose2d(x,w,padding=(1,1,1)),
                    lambda x,w: Tensor.conv_transpose2d(x,w,padding=(1,1,1)), expected=(RuntimeError, ValueError))
+    self.helper_test_exception([(2,4,9,9), (4,4,3,3)], lambda x,w: torch.nn.functional.conv_transpose2d(x,w,dilation=0),
+                   lambda x,w: Tensor.conv_transpose2d(x,w,dilation=0), expected=RuntimeError)
 
   @slow_test
   def test_dilated_conv_transpose2d(self):
@@ -2319,6 +2321,8 @@ class TestOps(unittest.TestCase):
                                expected=(RuntimeError, AssertionError))
     self.helper_test_exception([(2,16,2,2), (32,16,3,3)], lambda x,w:torch.nn.functional.conv2d(x,w,padding=(1,1,1)),
                                lambda x,w: Tensor.conv2d(x,w,padding=(1,1,1)), expected=(RuntimeError, ValueError))
+    self.helper_test_exception([(2,4,9,9), (4,4,3,3)], lambda x,w: torch.nn.functional.conv2d(x,w,dilation=0),
+                   lambda x,w: Tensor.conv2d(x,w,dilation=0), expected=RuntimeError)
 
   @slow_test
   def test_large_input_conv2d(self):
