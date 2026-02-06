@@ -738,12 +738,13 @@ window.addEventListener("popstate", (e) => {
 });
 
 const createToggle = (id, text) => {
-  const label = d3.create("label").text(text).node();
+  const label = d3.create("label").style("display", "block").text(text).node();
   const toggle = d3.create("input").attr("type", "checkbox").attr("id", id).property("checked", true).node();
   label.prepend(toggle);
   return { toggle, label };
 }
-const { toggle, label:toggleLabel } = createToggle("show-indexing", "Show indexing (r)");
+const showIndexing = createToggle("show-indexing", "Show indexing (r)");
+const showCallSrc = createToggle("show-call-src", "Show CALL src (c)");
 const showGraph = createToggle("show-graph", "Show graph (g)");
 showGraph.toggle.onchange = () => displaySelection(rect("#graph").width > 0 ? "#custom" : "#graph");
 
@@ -893,11 +894,13 @@ async function main() {
   // ** center graph
   const data = ret[currentRewrite];
   const render = (opts) => renderDag({ data, opts }, { recenter:currentRewrite === 0 });
-  render({ showIndexing:toggle.checked });
-  toggle.onchange = (e) => render({ showIndexing:e.target.checked });
+  const getOpts = () => ({ showIndexing:showIndexing.toggle.checked, showCallSrc:showCallSrc.toggle.checked });
+  render(getOpts());
+  showIndexing.toggle.onchange = () => render(getOpts());
+  showCallSrc.toggle.onchange = () => render(getOpts());
   // ** right sidebar metadata
   metadata.innerHTML = "";
-  if (ckey.includes("rewrites")) metadata.appendChild(toggleLabel);
+  if (ckey.includes("rewrites")) metadata.append(showIndexing.label, showCallSrc.label);
   if (step.code_line != null) metadata.appendChild(codeBlock(step.code_line, "python", { loc:step.loc, wrap:true }));
   if (step.trace) {
     const trace = d3.create("pre").append("code").classed("hljs", true);
@@ -1025,7 +1028,9 @@ document.addEventListener("keydown", (event) => {
     document.getElementById("zoom-to-fit-btn").click();
   }
   // r key toggles indexing
-  if (event.key === "r") toggle.click();
+  if (event.key === "r") showIndexing.toggle.click();
+  // c key toggles CALL src
+  if (event.key === "c") showCallSrc.toggle.click();
   // g key toggles graph
   if (event.key === "g") showGraph.toggle.click();
 });
