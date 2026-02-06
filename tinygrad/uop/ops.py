@@ -67,7 +67,8 @@ def consumer_map_from_toposort(lst:Iterable[UOp]):
   ret: dict[UOp, dict[UOp, None]] = {}
   for u in lst:
     ret[u] = {}
-    for s in u.src: ret[s][u] = None
+    for s in u.src:
+      if s in ret: ret[s][u] = None
   return ret
 
 def pretty_print(x:UOp, cache=None, d=0)->str:
@@ -236,7 +237,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
         return self.src[0]._shape
 
       # ops with custom handling
-      case Ops.KERNEL: return self.arg.ast._shape
+      #case Ops.KERNEL: return self.arg.ast._shape
 
       # TODO: disallow shape changing bitcast
       case Ops.BITCAST:
@@ -835,6 +836,8 @@ class KernelInfo:
   estimates: Estimates|None = None
   @property
   def function_name(self): return to_function_name(self.name)
+
+def gate_kernel_sink(x:UOp) -> bool: return not (x.op is Ops.SINK and isinstance(x.arg, KernelInfo))
 
 @dataclass(frozen=True)
 class CustomKernel:
@@ -1448,10 +1451,10 @@ def pyrender(ast:UOp) -> str:
     if op_depth > 100: to_render.add(u)
     depth[u] = 0 if u in to_render else op_depth
     # do the rendering
-    if u.op is Ops.KERNEL:
-      if u.arg.ast not in kernels:
-        kernels[u.arg.ast] = (f"k{len(kernels)}", f"def k{len(kernels)}():\n  " + pyrender(u.arg.ast).replace('\n', '\n  ') + "\n  return ast\n\n")
-      r[u.arg.ast] = kernels[u.arg.ast][0]
+    #if u.op is Ops.KERNEL:
+    #  if u.arg.ast not in kernels:
+    #    kernels[u.arg.ast] = (f"k{len(kernels)}", f"def k{len(kernels)}():\n  " + pyrender(u.arg.ast).replace('\n', '\n  ') + "\n  return ast\n\n")
+    #  r[u.arg.ast] = kernels[u.arg.ast][0]
     ren = cast(str, pm_pyrender.rewrite(u, ctx=r))
     assert isinstance(ren, str)
     if u.tag is not None: ren += f".rtag({repr(u.tag)})"

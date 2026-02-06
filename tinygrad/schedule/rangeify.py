@@ -2,7 +2,7 @@ from dataclasses import dataclass, field, replace
 import itertools
 from tinygrad.dtype import dtypes, PtrDType, ImageDType, AddrSpace
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, _substitute, KernelInfo
-from tinygrad.uop.ops import graph_rewrite, identity_element, sint, AxisType, BottomUpGate, Kernel, _remove_all_tags, range_str
+from tinygrad.uop.ops import graph_rewrite, identity_element, sint, AxisType, BottomUpGate, _remove_all_tags, range_str
 from tinygrad.uop.symbolic import symbolic
 from tinygrad.helpers import argsort, prod, all_same, getenv, flatten, dedup, all_int, DEBUG, SPLIT_REDUCEOP, DEBUG_RANGEIFY
 from tinygrad.helpers import PCONTIG, partition, get_single_element, panic
@@ -66,9 +66,12 @@ mop_cleanup = PatternMatcher([
 
 def resolve_custom_kernel(ck:UOp) -> UOp:
   placeholders = [UOp.placeholder_like(s, slot=i) for i,s in enumerate(ck.src)]
-  return UOp(Ops.KERNEL, src=ck.src, arg=Kernel(ck.arg.fxn(*placeholders)))
+  return ck.arg.fxn(*placeholders).call(*ck.src)
 
-def resolve_call(c:UOp) -> UOp:
+def resolve_call(c:UOp) -> UOp|None:
+  # don't resolve real kernel calls, sink or program
+  if c.src[0].op is Ops.SINK and isinstance(c.src[0].arg, KernelInfo): return None
+  if c.src[0].op is Ops.PROGRAM: return None
   params = sorted([x for x in c.src[0].toposort() if x.op == Ops.PARAM], key=lambda x: x.arg)
   args = c.src[1:]
   # TODO: this check belongs in spec, not here
