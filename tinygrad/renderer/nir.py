@@ -37,10 +37,7 @@ def nif(b:mesa.nir_builder, cond:mesa.nir_def, then_fn:Callable, else_fn:Callabl
   mesa.nir_pop_if(b, nif)
   return t, e
 
-def nalu(b:mesa.nir_builder, op:str, *srcs:mesa.nir_def, exact:bool=False) -> mesa.nir_def:
-  ret = g(f"nir_build_alu{len(srcs)}")(b, g(f"nir_op_{op}"), *srcs).contents
-  if exact: ctypes.cast(ret.parent_instr, POINTER[mesa.nir_alu_instr]).contents.exact = True
-  return ret
+def nalu(b:mesa.nir_builder, op:str, *srcs:mesa.nir_def) -> mesa.nir_def: return g(f"nir_build_alu{len(srcs)}")(b, g(f"nir_op_{op}"), *srcs).contents
 
 def nir_instr(nc=1, bs=lambda: None, intrins=None, srcs=None, has_def=True, df=None, also=lambda: None, **contents):
   def dec(f:Callable):
@@ -153,8 +150,7 @@ class NIRRenderer(Renderer):
     (UPat(Ops.LOAD, src=(UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("off"))),), allow_any_len=True, name="x"),
      lambda ctx,x,buf,off: nload(ctx.b, buf.ptrdtype.addrspace, nidx(ctx.b, ctx.r[buf], ctx.r[off], buf.dtype), x.dtype)),
     (UPat(Ops.VECTORIZE, name="x"), lambda ctx,x: nalu(ctx.b, f"vec{x.dtype.count}", *[ctx.r[src] for src in x.src])),
-    (UPat(GroupOp.ALU, name="x"), lambda ctx,x: nalu(ctx.b, aop[x.src[0].dtype.scalar()][x.op], *[ctx.r[src] for src in x.src],
-                                                     exact=x.op is Ops.CMPLT and x.src[0].dtype.scalar() in dtypes.floats)),
+    (UPat(GroupOp.ALU, name="x"), lambda ctx,x: nalu(ctx.b, aop[x.src[0].dtype.scalar()][x.op], *[ctx.r[src] for src in x.src])),
     (UPat(Ops.CAST, name="x"), lambda ctx,x: ncast(ctx.b, ctx.r[x.src[0]], x.src[0].dtype, x.dtype)),
     (UPat(Ops.BITCAST, src=(UPat.var("a"),), allow_any_len=True), lambda ctx,a: ctx.r[a]),
     (UPat(Ops.GEP, src=(UPat.var("a"),), name="x"), lambda ctx,x,a: nchannel(ctx.b, ctx.r[a], x.arg[0])),

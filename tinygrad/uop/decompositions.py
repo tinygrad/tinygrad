@@ -408,7 +408,8 @@ def f2f_clamp(val:UOp, dt:DType) -> UOp:
   max_exp, max_man = ((1 << e) - 1, (1 << m) - 2) if dt == dtypes.fp8e4m3 else ((1 << e) - 2, (1 << m) - 1)
   mx = val.const_like(2.0**(max_exp - exponent_bias(dt)) * (1.0 + max_man / (1 << m)))
   sat = mx if dt in dtypes.fp8s else val.const_like(float('inf'))
-  return (val < -mx).where(-sat, (mx < val).where(sat, val))
+  clamped = (val < -mx).where(-sat, (mx < val).where(sat, val))
+  return val.ne(val).where(val, clamped)
 
 def f2f_load(x: UOp, fr:DType, to:DType) -> UOp:
   if (n:=x.dtype.count) == 1: return f2f(x.replace(dtype=f2f_dt[fr]), fr, to)
