@@ -85,7 +85,7 @@ class MetalDevice(Compiled):
       if s > 4 or PROFILE: wait_check(cbuf)  # skip waitUntilCompleted on success to avoid CPU clock spin-down
       if PROFILE and (lb:=cmdbuf_label(cbuf)) is not None and not lb.startswith("batched"):
         st, en = decimal.Decimal(cbuf.GPUStartTime()) * 1000000, decimal.Decimal(cbuf.GPUEndTime()) * 1000000
-        Compiled.profile_events += [ProfileRangeEvent(self.device, lb, st, en, is_copy=lb.startswith("COPY"))]
+        Compiled.profile_events += [ProfileRangeEvent(self.device, lb, st, en)]
     self.mtl_buffers_in_flight.clear()
     # fire wake kernel immediately to keep GPU warm during .numpy() / CPU processing
     self._fire_wake()

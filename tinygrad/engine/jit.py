@@ -366,10 +366,13 @@ class TinyJit(Generic[ReturnType]):
           break
       if _fast_ok and (len(input_buffers) <= 1 or len(set(input_buffers)) == len(input_buffers)):
         assert self.captured is not None
-        if direct_call is not None: direct_call(input_buffers, cached_var_vals)
-        else: self.captured(input_buffers, cached_var_vals)
-        self.cnt += 1
-        return self.captured.ret
+        # check for read-after-write hazard: if an input buffer aliases an output, fall through to normal path which copies
+        if not any((w := self.captured._output_to_writer.get(ib)) is not None and self.captured._input_to_max_reader.get(i, -1) > w
+                   for i, ib in enumerate(input_buffers)):
+          if direct_call is not None: direct_call(input_buffers, cached_var_vals)
+          else: self.captured(input_buffers, cached_var_vals)
+          self.cnt += 1
+          return self.captured.ret
 
     input_buffers, var_vals, names, expected_input_info = _prepare_jit_inputs(args, kwargs)
     if not JIT or self.cnt == 0:

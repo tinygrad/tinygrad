@@ -1,7 +1,7 @@
 import unittest
 import numpy as np
 from tinygrad import Tensor, TinyJit, Device
-from tinygrad.helpers import Context, getenv
+from tinygrad.helpers import Context
 
 # *** beam search heuristic seeding ***
 
@@ -23,35 +23,6 @@ class TestBeamHeuristicSeed(unittest.TestCase):
     with Context(BEAM=2, IGNORE_BEAM_CACHE=1):
       a = Tensor([[1.,2.],[3.,4.]])
       np.testing.assert_allclose(a.sum(axis=1).numpy(), [3.0, 7.0], rtol=1e-5)
-
-# *** GROUPTOP heuristic for large reductions ***
-
-class TestGrouptopHeuristic(unittest.TestCase):
-  def test_large_reduce_tries_larger_grouptop(self):
-    """for reduce_size >= 4096, heuristic tries GROUPTOP sizes (64, 32, 16) instead of just (16,)."""
-    from tinygrad.codegen.opt.heuristic import hand_coded_optimizations
-    from tinygrad.codegen.opt.search import OptOps
-    from tinygrad.codegen.opt.postrange import Scheduler
-    a = Tensor.ones(8192).contiguous()
-    si = a.sum().schedule()[-1]
-    k = Scheduler(si.ast, Device[Device.DEFAULT].renderer)
-    opt_k = hand_coded_optimizations(k)
-    grouptop_opts = [o for o in opt_k.applied_opts if o.op is OptOps.GROUPTOP]
-    self.assertTrue(len(grouptop_opts) > 0, "expected GROUPTOP to be applied for large reduction")
-    self.assertGreater(grouptop_opts[0].arg, 16, "expected GROUPTOP size > 16 for reduce_size >= 4096")
-
-  def test_small_reduce_uses_default_grouptop(self):
-    """for reduce_size < 4096, heuristic uses default GROUPTOP size (16)."""
-    from tinygrad.codegen.opt.heuristic import hand_coded_optimizations
-    from tinygrad.codegen.opt.search import OptOps
-    from tinygrad.codegen.opt.postrange import Scheduler
-    a = Tensor.ones(256).contiguous()
-    si = a.sum().schedule()[-1]
-    k = Scheduler(si.ast, Device[Device.DEFAULT].renderer)
-    opt_k = hand_coded_optimizations(k)
-    grouptop_opts = [o for o in opt_k.applied_opts if o.op is OptOps.GROUPTOP]
-    if len(grouptop_opts) > 0:
-      self.assertEqual(grouptop_opts[0].arg, 16, "expected default GROUPTOP size 16 for small reduction")
 
 # *** fast JIT replay ***
 
@@ -128,7 +99,6 @@ class TestMetalDirectDispatch(unittest.TestCase):
 class TestMetalWakeAndSync(unittest.TestCase):
   def test_wake_kernel_infrastructure(self):
     """MetalDevice has wake kernel infrastructure initialized."""
-    from tinygrad.runtime.ops_metal import MetalDevice
     dev = Device[Device.DEFAULT]
     self.assertTrue(hasattr(dev, '_wake_pipeline'))
     self.assertTrue(hasattr(dev, '_wake_buf'))
