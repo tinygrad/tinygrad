@@ -12,7 +12,7 @@ class FastEnum(IntEnum):
 OpType = FastEnum
 
 # the order of these Ops controls the order of the toposort
-class Ops(FastEnum):
+class Ops(OpType):
   # ** 1 -- defines/special **
 
   # define GLOBAL/VAR are ptrs to outside the Kernel
@@ -140,73 +140,73 @@ class GroupOp:
 # **** backend specific ops ****
 
 # NOTE: X86Ops with i suffix are variants that take an immediate, m suffix are variants that can write to memory instead of read from
-class X86Ops(FastEnum):
+class X86Ops(OpType):
   # register, not an instruction. FRAME_INDEX is used when the function arg is on the stack and is rewritten to IMM when stack size is known
-  DEFINE_REG = auto(); FRAME_INDEX = auto() # noqa: E702
+  DEFINE_REG = auto(); FRAME_INDEX = auto()
   # const
   IMM = auto()
   # index
   LEA = auto()
   # register / memory / immediate moves
-  MOV = auto(); MOVm = auto(); MOVi = auto(); MOVABS = auto() # noqa: E702
-  VMOVSS = auto(); VMOVSD = auto(); VMOVUPS = auto() # noqa: E702
-  VMOVSSm = auto(); VMOVSDm = auto(); VMOVUPSm = auto() # noqa: E702
+  MOV = auto(); MOVm = auto(); MOVi = auto(); MOVABS = auto()
+  VMOVSS = auto(); VMOVSD = auto(); VMOVUPS = auto()
+  VMOVSSm = auto(); VMOVSDm = auto(); VMOVUPSm = auto()
   # casts
-  MOVZX = auto(); MOVSX = auto(); MOVSXD = auto() # noqa: E702
-  VPMOVZXBW = auto(); VPMOVZXBD = auto(); VPMOVZXBQ = auto() # noqa: E702
-  VPMOVZXWD = auto(); VPMOVZXWQ = auto(); VPMOVZXDQ = auto() # noqa: E702
-  VPMOVSXBW = auto(); VPMOVSXBD = auto(); VPMOVSXBQ = auto() # noqa: E702
-  VPMOVSXWD = auto(); VPMOVSXWQ = auto(); VPMOVSXDQ = auto() # noqa: E702
-  VCVTDQ2PS = auto(); VCVTDQ2PD = auto(); VCVTTPS2DQ = auto(); VCVTTPD2DQ = auto() # noqa: E702
-  VCVTPH2PS = auto(); VCVTPS2PH = auto(); VCVTPS2PD = auto(); VCVTPD2PS = auto() # noqa: E702
-  VCVTSS2SD = auto(); VCVTSD2SS = auto(); VCVTSI2SS = auto(); VCVTSI2SD = auto() # noqa: E702
-  VCVTTSS2SI = auto(); VCVTTSD2SI = auto() # noqa: E702
+  MOVZX = auto(); MOVSX = auto(); MOVSXD = auto()
+  VPMOVZXBW = auto(); VPMOVZXBD = auto(); VPMOVZXBQ = auto()
+  VPMOVZXWD = auto(); VPMOVZXWQ = auto(); VPMOVZXDQ = auto()
+  VPMOVSXBW = auto(); VPMOVSXBD = auto(); VPMOVSXBQ = auto()
+  VPMOVSXWD = auto(); VPMOVSXWQ = auto(); VPMOVSXDQ = auto()
+  VCVTDQ2PS = auto(); VCVTDQ2PD = auto(); VCVTTPS2DQ = auto(); VCVTTPD2DQ = auto()
+  VCVTPH2PS = auto(); VCVTPS2PH = auto(); VCVTPS2PD = auto(); VCVTPD2PS = auto()
+  VCVTSS2SD = auto(); VCVTSD2SS = auto(); VCVTSI2SS = auto(); VCVTSI2SD = auto()
+  VCVTTSS2SI = auto(); VCVTTSD2SI = auto()
   # bitcasts
-  VMOVD = auto(); VMOVQ = auto(); VMOVDm = auto(); VMOVQm = auto() # noqa: E702
+  VMOVD = auto(); VMOVQ = auto(); VMOVDm = auto(); VMOVQm = auto()
   # comparisons
-  VUCOMISS = auto(); VUCOMISD = auto() # noqa: E702
-  VCMPSS = auto(); VCMPSD = auto(); VCMPPS = auto(); VCMPPD = auto() # noqa: E702
-  VPCMPGTB = auto(); VPCMPGTW = auto(); VPCMPGTD = auto(); VPCMPGTQ = auto() # noqa: E702
-  VPCMPEQB = auto(); VPCMPEQW = auto(); VPCMPEQD = auto(); VPCMPEQQ = auto() # noqa: E702
-  SETNE = auto(); SETE = auto(); SETL = auto(); SETB = auto() # noqa: E702
+  VUCOMISS = auto(); VUCOMISD = auto()
+  VCMPSS = auto(); VCMPSD = auto(); VCMPPS = auto(); VCMPPD = auto()
+  VPCMPGTB = auto(); VPCMPGTW = auto(); VPCMPGTD = auto(); VPCMPGTQ = auto()
+  VPCMPEQB = auto(); VPCMPEQW = auto(); VPCMPEQD = auto(); VPCMPEQQ = auto()
+  SETNE = auto(); SETE = auto(); SETL = auto(); SETB = auto()
   # where
-  CMOVNE = auto(); CMOVE = auto(); CMOVL = auto(); CMOVB = auto() # noqa: E702
-  VPBLENDVB = auto(); VBLENDVPS = auto(); VBLENDVPD = auto() # noqa: E702
+  CMOVNE = auto(); CMOVE = auto(); CMOVL = auto(); CMOVB = auto()
+  VPBLENDVB = auto(); VBLENDVPS = auto(); VBLENDVPD = auto()
   # jumps
-  JNE = auto(); JE = auto(); JL = auto(); JB = auto() # noqa: E702
+  JNE = auto(); JE = auto(); JL = auto(); JB = auto()
   # vectorize / gep
-  VSHUFPS = auto(); VINSERTPS = auto() # noqa: E702
-  VPEXTRB = auto(); VPEXTRW = auto(); VPEXTRD = auto(); VPEXTRQ = auto() # noqa: E702
-  VPINSRB = auto(); VPINSRW = auto(); VPINSRD = auto(); VPINSRQ = auto() # noqa: E702
-  VPBROADCASTB = auto(); VPBROADCASTW = auto(); VPBROADCASTD = auto(); VPBROADCASTQ = auto() # noqa: E702
+  VSHUFPS = auto(); VINSERTPS = auto()
+  VPEXTRB = auto(); VPEXTRW = auto(); VPEXTRD = auto(); VPEXTRQ = auto()
+  VPINSRB = auto(); VPINSRW = auto(); VPINSRD = auto(); VPINSRQ = auto()
+  VPBROADCASTB = auto(); VPBROADCASTW = auto(); VPBROADCASTD = auto(); VPBROADCASTQ = auto()
   VBROADCASTSS = auto() # TODO: VBROADCASTSD is ymm only, add once they are supported
   # int division
-  IDIV = auto(); DIV = auto() # noqa: E702
-  CBW = auto(); CWD = auto(); CDQ = auto(); CQO = auto() # noqa: E702
+  IDIV = auto(); DIV = auto()
+  CBW = auto(); CWD = auto(); CDQ = auto(); CQO = auto()
   # int binary
-  ADD = auto(); ADDi = auto(); SUB = auto(); SUBi = auto(); IMUL = auto(); IMULi = auto() # noqa: E702
-  AND = auto(); ANDi = auto(); XOR = auto(); XORi = auto(); OR = auto(); ORi = auto() # noqa: E702
-  SHL = auto(); SHLi = auto(); SHR = auto(); SHRi = auto(); SAR = auto(); SARi = auto(); CMP = auto(); CMPi = auto() # noqa: E702
+  ADD = auto(); ADDi = auto(); SUB = auto(); SUBi = auto(); IMUL = auto(); IMULi = auto()
+  AND = auto(); ANDi = auto(); XOR = auto(); XORi = auto(); OR = auto(); ORi = auto()
+  SHL = auto(); SHLi = auto(); SHR = auto(); SHRi = auto(); SAR = auto(); SARi = auto(); CMP = auto(); CMPi = auto()
   # float unary (sometimes not unary)
-  VROUNDSS = auto(); VROUNDSD = auto(); VROUNDPS = auto(); VROUNDPD = auto() # noqa: E702
-  VSQRTSS = auto(); VSQRTSD = auto(); VSQRTPS = auto(); VSQRTPD = auto() # noqa: E702
+  VROUNDSS = auto(); VROUNDSD = auto(); VROUNDPS = auto(); VROUNDPD = auto()
+  VSQRTSS = auto(); VSQRTSD = auto(); VSQRTPS = auto(); VSQRTPD = auto()
   # float scalar / vector binary
-  VADDSS = auto(); VADDSD = auto(); VADDPS = auto(); VADDPD = auto() # noqa: E702
-  VSUBSS = auto(); VSUBSD = auto(); VSUBPS = auto(); VSUBPD = auto() # noqa: E702
-  VMULSS = auto(); VMULSD = auto(); VMULPS = auto(); VMULPD = auto() # noqa: E702
-  VDIVSS = auto(); VDIVSD = auto(); VDIVPS = auto(); VDIVPD = auto() # noqa: E702
-  VMAXSS = auto(); VMAXSD = auto(); VMAXPS = auto(); VMAXPD = auto() # noqa: E702
-  VMINSS = auto(); VMINSD = auto(); VMINPS = auto(); VMINPD = auto() # noqa: E702
+  VADDSS = auto(); VADDSD = auto(); VADDPS = auto(); VADDPD = auto()
+  VSUBSS = auto(); VSUBSD = auto(); VSUBPS = auto(); VSUBPD = auto()
+  VMULSS = auto(); VMULSD = auto(); VMULPS = auto(); VMULPD = auto()
+  VDIVSS = auto(); VDIVSD = auto(); VDIVPS = auto(); VDIVPD = auto()
+  VMAXSS = auto(); VMAXSD = auto(); VMAXPS = auto(); VMAXPD = auto()
+  VMINSS = auto(); VMINSD = auto(); VMINPS = auto(); VMINPD = auto()
   # int vector binary
-  VPADDB = auto(); VPADDW = auto(); VPADDD = auto(); VPADDQ = auto() # noqa: E702
-  VPSUBB = auto(); VPSUBW = auto(); VPSUBD = auto(); VPSUBQ = auto() # noqa: E702
-  VPMULLW = auto(); VPMULLD = auto() # noqa: E702
+  VPADDB = auto(); VPADDW = auto(); VPADDD = auto(); VPADDQ = auto()
+  VPSUBB = auto(); VPSUBW = auto(); VPSUBD = auto(); VPSUBQ = auto()
+  VPMULLW = auto(); VPMULLD = auto()
   # packed bitwise TODO: might also want vandp cause of different execution ports
-  VPAND = auto(); VPOR = auto(); VPXOR = auto() # noqa: E702
+  VPAND = auto(); VPOR = auto(); VPXOR = auto()
   # packed variable shifts
-  VPSLLVD = auto(); VPSLLVQ = auto(); VPSRLVD = auto(); VPSRLVQ = auto(); VPSRAVD = auto() # noqa: E702
+  VPSLLVD = auto(); VPSLLVQ = auto(); VPSRLVD = auto(); VPSRLVQ = auto(); VPSRAVD = auto()
   # fused multiply add TODO: add other variants to fuse more loads
-  VFMADD213SS = auto(); VFMADD213SD = auto(); VFMADD213PS = auto(); VFMADD213PD = auto() # noqa: E702
+  VFMADD213SS = auto(); VFMADD213SD = auto(); VFMADD213PS = auto(); VFMADD213PD = auto()
   # return
   RET = auto()
 
