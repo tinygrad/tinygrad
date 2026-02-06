@@ -6,6 +6,9 @@ from tinygrad.runtime.support.hcq import HCQCompiled
 from tinygrad.engine.realize import get_runner
 
 MOCKGPU = getenv("MOCKGPU")
+def _dev_base(d):
+  p = d.split(":")
+  return p[0] if len(p) < 2 or not p[1].isdigit() else f"{p[0]}:{p[1]}"
 
 @contextlib.contextmanager
 def helper_collect_profile(*devs):
@@ -55,7 +58,7 @@ class TestProfiler(unittest.TestCase):
     kernel_runs = [x for x in profile if isinstance(x, ProfileRangeEvent)]
     assert len(kernel_runs) == 1, "one kernel run is expected"
     assert kernel_runs[0].name == runner_name, "kernel name is not correct"
-    assert all(p.isdigit() for p in kernel_runs[0].device.split(":")[1:]), "kernel should not be on a sub-device"
+    assert _dev_base(kernel_runs[0].device) == kernel_runs[0].device, "kernel should not be on a sub-device"
 
   def test_profile_copyin(self):
     buf1 = Buffer(Device.DEFAULT, 2, dtypes.float, options=BufferSpec(nolru=True)).ensure_allocated()
@@ -96,9 +99,6 @@ class TestProfiler(unittest.TestCase):
       buf1.copyin(memoryview(bytearray(struct.pack("ff", 0, 1))))
       buf2.copyin(memoryview(bytearray(struct.pack("ff", 0, 1))))
 
-    def _dev_base(d):
-      p = d.split(":")
-      return p[0] if len(p) < 2 or not p[1].isdigit() else f"{p[0]}:{p[1]}"
     for dev in [TestProfiler.d0.device, d1.device]:
       evs = [x for x in profile if isinstance(x, ProfileRangeEvent) and _dev_base(x.device) == dev]
       assert len(evs) == 1, "one kernel runs are expected"
@@ -220,7 +220,7 @@ class TestProfiler(unittest.TestCase):
         Tensor.realize(a, b)
     profile, _ = helper_profile_filter_device(profile, TestProfiler.d0.device)
     exec_points = [e for e in profile if isinstance(e, ProfilePointEvent) and e.name == "exec"]
-    range_events = [e for e in profile if isinstance(e, ProfileRangeEvent) and all(p.isdigit() for p in e.device.split(":")[1:])]
+    range_events = [e for e in profile if isinstance(e, ProfileRangeEvent) and _dev_base(e.device) == e.device]
     self.assertEqual(len(exec_points), len(range_events), 2)
     self.assertEqual(len(dedup(e.arg['name'] for e in exec_points)), 1)
     self.assertEqual(len(dedup(e.arg['metadata'] for e in exec_points)), 1)
