@@ -375,9 +375,12 @@ def unpack_sqtt(key:tuple[str, int], data:list, p:ProfileProgramEvent) -> tuple[
 
 def device_sort_fn(k:str) -> tuple[int, str, int]:
   order = {"GC": 0, "USER": 1, "TINY": 2, "DISK": 999}
-  dname = k.split()[0]
+  dname, *rest = k.split()
   dev_rank = next((v for k,v in order.items() if dname.startswith(k)), len(order))
-  return (dev_rank, dname, len(k))
+  if len(parts:=dname.split(":")) < 2 or not parts[1].isdigit(): parts.insert(1, "0")
+  eng_rank = 2 if rest else 1 if len(parts) > 2 else 0
+  # 3 levels of hierarchy: device class, index in multi device, engine within device
+  return (dev_rank, parts[1], eng_rank)
 
 def get_profile(profile:list[ProfileEvent], sort_fn:Callable[[str], Any]=device_sort_fn) -> bytes|None:
   # start by getting the time diffs

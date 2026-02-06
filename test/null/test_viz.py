@@ -463,11 +463,11 @@ class TestVizProfiler(BaseTestViz):
 
   def test_layout_order(self):
     def fn(): return
-    for dname in ["TINY", "USER", "TEST:1 N1", "TEST:2 N1", "TEST:1 N2"]:
+    for dname in ["TINY", "USER", "TEST:1 N1", "TEST:2 N1", "TEST:1 N2", "TEST:1:ENGINE:0", "TEST:1"]:
       with cpu_profile("fn", dname): fn()
     layout = list(load_profile(cpu_events)["layout"])
     self.assertListEqual(layout[:2], ["USER","TINY"])
-    self.assertListEqual(layout[2:], ["TEST:1 N1","TEST:1 N2", "TEST:2 N1"])
+    self.assertListEqual(layout[2:], ["TEST:1", "TEST:1:ENGINE:0", "TEST:1 N1","TEST:1 N2", "TEST:2 N1"])
 
 def _alloc(b:int):
   a = Tensor.empty(b, device="NULL", dtype=dtypes.char)
