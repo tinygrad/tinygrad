@@ -1,4 +1,5 @@
-import ctypes, gzip, unittest, timeit, pickle
+import ctypes, gzip, unittest, timeit, pickle, socket, urllib
+from unittest.mock import patch
 from tinygrad import Variable
 from tinygrad.helpers import Context, ContextVar, argfix, colored, word_wrap, is_numpy_ndarray, mv_address, get_contraction, count, all_same
 from tinygrad.helpers import merge_dicts, strip_parens, prod, round_up, fetch, fully_flatten, from_mv, to_mv, polyN, time_to_str, cdiv, cmod, getbits
@@ -209,12 +210,29 @@ class TestFetch(unittest.TestCase):
           headers={"Range": "bytes=0-100"}).read_bytes()
     assert len(x) == 101, f"{len(x) != 101}"
 
-  def test_fetch_retries(self):
-    from unittest.mock import patch
-    with patch('urllib.request.urlopen', side_effect=TimeoutError()) as mock_urlopen:
-      with self.assertRaises(TimeoutError):
-        fetch('http://example.com/test', allow_caching=False, retries=2)
-      assert mock_urlopen.call_count == 2
+class TestFetchRetries(unittest.TestCase):
+
+  def _test_retryable(self, error, retries=2):
+    with patch('urllib.request.urlopen', side_effect=error) as mock_urlopen:
+      with self.assertRaises(type(error)): fetch('http://example.com/test', allow_caching=False, retries=retries)
+      assert mock_urlopen.call_count == retries + 1  # initial attempt + retries
+
+  def _test_non_retryable(self, error):
+    with patch('urllib.request.urlopen', side_effect=error) as mock_urlopen:
+      with self.assertRaises(type(error)): fetch('http://example.com/test', allow_caching=False, retries=2)
+      assert mock_urlopen.call_count == 1  # fails immediately, no retries
+
+  # Retryable errors - should retry
+  def test_fetch_connection_reset_error(self): self._test_retryable(ConnectionResetError())
+  def test_fetch_socket_timeout(self): self._test_retryable(socket.timeout())
+  def test_fetch_http_503(self): self._test_retryable(urllib.error.HTTPError(None, 503, None, None, None))
+  def test_fetch_urlerror_timeout(self): self._test_retryable(urllib.error.URLError(TimeoutError()))
+
+  # Non-retryable errors - should fail immediately
+  def test_fetch_http_404_no_retry(self): self._test_non_retryable(urllib.error.HTTPError(None, 404, None, None, None))
+  def test_fetch_value_error_no_retry(self): self._test_non_retryable(ValueError("invalid url"))
+  def test_fetch_permission_error_no_retry(self): self._test_non_retryable(PermissionError())
+
 
 class TestFullyFlatten(unittest.TestCase):
   def test_fully_flatten(self):

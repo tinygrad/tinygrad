@@ -379,6 +379,13 @@ def _ensure_downloads_dir() -> pathlib.Path:
     return downloads_dir
   return pathlib.Path(cache_dir) / "downloads"
 
+def _is_retryable(e: Exception) -> bool:
+  import urllib.error, socket
+  # 408=timeout, 429=rate limit, 500=server error, 502=bad gateway, 503=service unavailable, 504=gateway timeout, 522/524=cloudflare timeout
+  if isinstance(e, urllib.error.HTTPError): return e.code in (408, 429, 500, 502, 503, 504, 522, 524)
+  if isinstance(e, urllib.error.URLError) and isinstance(e.reason, Exception): e = e.reason # unwrap to check underlying reason
+  return isinstance(e, (TimeoutError, ConnectionError, socket.gaierror))
+
 def fetch(url:str, name:pathlib.Path|str|None=None, subdir:str|None=None, gunzip:bool=False,
           allow_caching=not getenv("DISABLE_HTTP_CACHE"), headers:dict[str, str]={}, retries:int=3) -> pathlib.Path:
   import urllib.request
@@ -389,8 +396,7 @@ def fetch(url:str, name:pathlib.Path|str|None=None, subdir:str|None=None, gunzip
     fp = _ensure_downloads_dir() / (subdir or "") / ((name or hashlib.md5(url.encode('utf-8')).hexdigest()) + hh + (".gunzip" if gunzip else ""))
   if not fp.is_file() or not allow_caching:
     (_dir := fp.parent).mkdir(parents=True, exist_ok=True)
-    assert retries > 0
-    for retry in range(retries):
+    for attempt in range(retries+1):
       try:
         with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "tinygrad 0.12.0", **headers}), timeout=10) as r:
           assert r.status in {200, 206}, r.status
@@ -403,11 +409,11 @@ def fetch(url:str, name:pathlib.Path|str|None=None, subdir:str|None=None, gunzip
             pathlib.Path(f.name).rename(fp)
           progress_bar.update(close=True)
           if length and (file_size:=os.stat(fp).st_size) < length: raise RuntimeError(f"fetch size incomplete, {file_size} < {length}")
-        break # success so don't retry
+        break
       except Exception as e:
-        if retry+1 == retries: raise e
-        if DEBUG >= 2: print(f'Request {retry+1} failed: {e}. Retrying...')
-        time.sleep(0.1 * 2**retry) # exponential backoff
+        if not _is_retryable(e) or attempt == retries: raise
+        if DEBUG >= 2: print(f'fetch {url} {e}, retrying...')
+        time.sleep(0.1 * 2**attempt) # exponential backoff
   return fp
 
 # *** Exec helpers
