@@ -512,6 +512,7 @@ class HCQAllocatorBase(LRUAllocator[HCQDeviceType], Generic[HCQDeviceType]):
     if hasattr(self, '_do_free'): self._do_free(buf, options)
 
   def _offset(self, buf, size:int, offset:int) -> HCQBuffer: return buf.offset(offset=offset, size=size)
+  def _device_ptr(self, opaque: HCQBuffer) -> int: return int(opaque.va_addr)
 
 class HCQAllocator(HCQAllocatorBase, Generic[HCQDeviceType]):
   def _copyin(self, dest:HCQBuffer, src:memoryview):

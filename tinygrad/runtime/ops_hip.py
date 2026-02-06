@@ -64,3 +64,4 @@ class HIPAllocator(LRUAllocator[HIPDevice]):
   def _copyout(self, dest:memoryview, src):
     self.dev.synchronize()
     check(hip.hipMemcpy(mv_address(dest), src, len(dest), hip.hipMemcpyDeviceToHost))
+  def _device_ptr(self, opaque) -> int: return int(opaque)

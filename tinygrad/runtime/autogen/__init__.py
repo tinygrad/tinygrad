@@ -7,6 +7,7 @@ nv_src = {"nv_570": "https://github.com/NVIDIA/open-gpu-kernel-modules/archive/8
 ffmpeg_src = "https://ffmpeg.org/releases/ffmpeg-8.0.1.tar.gz"
 rocr_src = "https://github.com/ROCm/rocm-systems/archive/refs/tags/rocm-7.1.1.tar.gz"
 macossdk = "/var/db/xcode_select_link/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk"
+dlpack_src = "https://github.com/dmlc/dlpack/archive/6ea9b3eb64c881f614cd4537f95f0e125a35555c.tar.gz"
 
 llvm_lib = (r"'C:\\Program Files\\LLVM\\bin\\LLVM-C.dll' if WIN else '/opt/homebrew/opt/llvm@20/lib/libLLVM.dylib' if OSX else " +
             repr(['LLVM'] + [f'LLVM-{i}' for i in reversed(range(14, 21+1))]))
@@ -83,6 +84,7 @@ def __getattr__(nm):
     case "llvm": return load("llvm", llvm_lib, lambda: [system("llvm-config-20 --includedir")+"/llvm-c/**/*.h"],
                              args=lambda: system("llvm-config-20 --cflags").split(), recsym=True, prolog=["from tinygrad.helpers import WIN, OSX"])
     case "pci": return load("pci", None, ["/usr/include/linux/pci_regs.h"])
+    case "dlpack": return load("dlpack", None, ["{}/include/dlpack/dlpack.h"], tarball=dlpack_src)
     case "vfio": return load("vfio", None, ["/usr/include/linux/vfio.h"])
     # could add rule: WGPU_COMMA -> ','
     case "webgpu": return load("webgpu", webgpu_lib, [root/"extra/webgpu/webgpu.h"],

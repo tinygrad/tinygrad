@@ -1,6 +1,6 @@
 # inspired by https://github.com/karpathy/micrograd/blob/master/micrograd/engine.py
 from __future__ import annotations
-import time, math, itertools, functools, struct, sys, inspect, pathlib, string, hashlib, weakref
+import ctypes, time, math, itertools, functools, struct, sys, inspect, pathlib, string, hashlib, weakref
 from contextlib import ContextDecorator
 from typing import Any, Callable, ClassVar, Sequence, cast, get_args, Literal, SupportsIndex, ParamSpec, TypeVar, Generic, TYPE_CHECKING
 if TYPE_CHECKING: import numpy
@@ -16,6 +16,8 @@ from tinygrad.uop.ops import smax, smin, resolve, UOp, Ops, sint, identity_eleme
 from tinygrad.engine.schedule import ExecItem, complete_create_schedule_with_vars
 from tinygrad.device import Device, Buffer
 from tinygrad.engine.realize import run_schedule
+from tinygrad.runtime.autogen import dlpack as c_dlpack
+from tinygrad.runtime.support import dlpack
 
 # TODO: this should be the only usage of Device
 def canonicalize_device(device:str|tuple|list|None) -> str|tuple[str, ...]:
@@ -379,6 +381,120 @@ class Tensor(OpMixin):
     if 0 in self.shape: return np.empty(self.shape, dtype=_to_np_dtype(self.dtype.base))
     return self._buffer().numpy().reshape(self.shape)
 
+  def __dlpack_device__(self) -> tuple[int, int]:
+    """
+    Returns the device type and device ID of this tensor in DLPack format.
+
+    Returns a tuple `(device_type, device_id)` where device_type is a DLPack device type code.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([1, 2, 3])
+    print(t.__dlpack_device__())
+    ```
+    """
+    if isinstance(self.device, tuple):
+      raise TypeError("DLPack export is not supported for multi-device tensors")
+    return dlpack.get_dlpack_device(self.device)
+
+  def __dlpack__(self, *, stream: int|None = None, max_version: tuple[int, int]|None = None,
+                 dl_device: tuple[int, int]|None = None, copy: bool|None = None):
+    """
+    Export tensor to DLPack format.
+
+    Args:
+      stream: Stream for synchronization (CUDA/ROCm). None uses default stream.
+      max_version: Maximum DLPack version supported by consumer as (major, minor).
+      dl_device: Target device as (device_type, device_id) for cross-device export.
+      copy: If True, always copy. If False, never copy (raise BufferError if needed). If None, copy if needed.
+
+    Returns:
+      PyCapsule containing DLManagedTensorVersioned struct.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([1, 2, 3, 4], dtype=dtypes.float32)
+    capsule = t.__dlpack__()
+    print(type(capsule))
+    ```
+    """
+    if isinstance(self.device, tuple):
+      raise TypeError("DLPack export is not supported for multi-device tensors")
+    if not all_int(self.shape):
+      raise RuntimeError(f"DLPack export requires concrete shapes, got {self.shape}")
+    if max_version is not None and max_version[0] < c_dlpack.DLPACK_MAJOR_VERSION:
+      version = f"{c_dlpack.DLPACK_MAJOR_VERSION}.{c_dlpack.DLPACK_MINOR_VERSION}"
+      raise RuntimeError(f"Consumer max_version {max_version} is incompatible with DLPack {version}")
+
+    # Handle dl_device (cross-device copy)
+    if dl_device is not None:
+      target_device_type, target_device_id = dl_device
+      current_device_type, current_device_id = dlpack.get_dlpack_device(self.device)
+      if target_device_type != current_device_type or target_device_id != current_device_id:
+        if copy is False:
+          raise BufferError("Cross-device export requires copy but copy=False was specified")
+        if target_device_type == c_dlpack.kDLCPU:
+          return self.to("CPU").__dlpack__(stream=stream, max_version=max_version, dl_device=None, copy=True)
+        raise BufferError(f"Cross-device copy to device type {target_device_type} is not supported")
+
+    # Ensure tensor is contiguous
+    flags = 0
+    tensor = self
+    if not self.uop.is_contiguous():
+      if copy is False:
+        raise BufferError("Non-contiguous tensor requires copy but copy=False was specified")
+      tensor = self.contiguous()
+      flags |= c_dlpack.DLPACK_FLAG_BITMASK_IS_COPIED
+
+    tensor = tensor.realize()
+    assert isinstance(tensor.device, str)
+    Device[tensor.device].synchronize()
+    buffer = tensor._buffer()
+    if not hasattr(buffer.allocator, '_device_ptr'):
+      device_type = tensor.device.split(":")[0].upper() if isinstance(tensor.device, str) else ""
+      raise BufferError(f"Zero-copy DLPack export not supported for {device_type}. Use copy=True or export to CPU first.")
+    data_ptr = buffer.allocator._device_ptr(buffer._buf)
+    shape_array = (ctypes.c_int64 * len(tensor.shape))(*[int(s) for s in tensor.shape])
+
+    # Build DLDevice (device is guaranteed to be str at this point)
+    assert isinstance(tensor.device, str)
+    dl_device_type, dl_device_id = dlpack.get_dlpack_device(tensor.device)
+    dl_device_struct = c_dlpack.DLDevice(device_type=dl_device_type, device_id=dl_device_id)
+
+    # Build DLTensor
+    dl_tensor = c_dlpack.DLTensor()
+    dl_tensor.data = data_ptr
+    dl_tensor.device = dl_device_struct
+    dl_tensor.ndim = len(tensor.shape)
+    dl_tensor.dtype = dlpack.dtype_to_dl_datatype(tensor.dtype)
+    dl_tensor.shape = ctypes.cast(shape_array, ctypes.POINTER(ctypes.c_int64))
+    dl_tensor.strides = None  # Contiguous tensor, no explicit strides
+    dl_tensor.byte_offset = 0
+
+    # Store refs to in-flight data and block GC
+    ctx = dlpack.DLPackContext(tensor, buffer, shape_array)
+    ctypes.pythonapi.Py_IncRef(ctypes.py_object(ctx))
+
+    @dlpack.DLManagedTensorDeleter
+    def deleter(self_ptr):
+      try:
+        managed_ptr = ctypes.cast(self_ptr, ctypes.POINTER(dlpack.DLManagedTensorVersioned))
+        ctx_id = managed_ptr.contents.manager_ctx
+        if ctx_id:
+          ctypes.pythonapi.Py_DecRef(ctypes.cast(ctx_id, ctypes.py_object))
+      except Exception:
+        pass  # Ignore errors during cleanup
+
+    managed = dlpack.DLManagedTensorVersioned()
+    managed.version = c_dlpack.DLPackVersion(major=c_dlpack.DLPACK_MAJOR_VERSION, minor=c_dlpack.DLPACK_MINOR_VERSION)
+    managed.manager_ctx = id(ctx)  # store Python object id as void pointer
+    managed.flags = flags
+    managed.dl_tensor = dl_tensor
+    managed.deleter = deleter
+
+    ctx._prevent_deleter_gc = deleter
+    ctx._prevent_managed_gc = managed
+
+    return dlpack.pycapsule_new(ctypes.addressof(managed), dlpack.DLPACK_CAPSULE_NAME, dlpack.dlpack_capsule_deleter)
+
   def clone(self) -> Tensor:
     """
     Creates a clone of this tensor allocating a separate buffer for the data.
@@ -536,6 +652,81 @@ class Tensor(OpMixin):
     assert isinstance(r.device, str)
     cast(Buffer, r.uop.buffer).allocate(external_ptr=ptr)
     return r
+
+  @staticmethod
+  def from_dlpack(x, /, *, copy: bool | None = None) -> Tensor:
+    """
+    Import a tensor from DLPack format.
+
+    Args:
+      x: Object with __dlpack__ method or a DLPack PyCapsule.
+      copy: If True, always copy. If False, never copy (raise if needed). If None, copy if needed.
+
+    Returns:
+      Tensor containing the imported data.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    import numpy as np
+    arr = np.array([1.0, 2.0, 3.0], dtype=np.float32)
+    t = Tensor.from_dlpack(arr)
+    print(t.numpy())
+    ```
+    """
+    # Get capsule from object with __dlpack__ protocol or use directly if capsule
+    if not hasattr(x, '__dlpack__'):
+      raise ValueError("Object does not support DLPack")
+    capsule = x.__dlpack__() if copy is None else x.__dlpack__(copy=copy)
+
+    # Try versioned format first, then legacy
+    if dlpack.pycapsule_isvalid(capsule, dlpack.DLPACK_CAPSULE_NAME):
+      managed_void_ptr = dlpack.pycapsule_getpointer(capsule, dlpack.DLPACK_CAPSULE_NAME)
+      managed_ptr = ctypes.cast(managed_void_ptr, ctypes.POINTER(c_dlpack.DLManagedTensorVersioned))
+      dl_tensor = managed_ptr.contents.dl_tensor
+      used_name = dlpack.DLPACK_CAPSULE_USED_NAME
+    elif dlpack.pycapsule_isvalid(capsule, dlpack.DLPACK_CAPSULE_NAME_LEGACY):
+      managed_void_ptr = dlpack.pycapsule_getpointer(capsule, dlpack.DLPACK_CAPSULE_NAME_LEGACY)
+      managed_ptr = ctypes.cast(managed_void_ptr, ctypes.POINTER(c_dlpack.DLManagedTensor))  # type: ignore[arg-type]
+      dl_tensor = managed_ptr.contents.dl_tensor
+      used_name = dlpack.DLPACK_CAPSULE_USED_NAME_LEGACY
+    else:
+      raise RuntimeError("Invalid DLPack capsule")
+
+    # Extract tensor info
+    data_ptr = dl_tensor.data + dl_tensor.byte_offset
+    ndim = dl_tensor.ndim
+    shape = tuple(dl_tensor.shape[i] for i in range(ndim))
+    dtype = dlpack.dl_datatype_to_dtype(dl_tensor.dtype)
+    device = dlpack.get_tinygrad_device(dl_tensor.device)
+
+    # Check strides for contiguity (strides is NULL for contiguous C-order tensors)
+    if dl_tensor.strides and ndim > 0:
+      strides = tuple(dl_tensor.strides[i] for i in range(ndim))
+      expected = []
+      stride = 1
+      for s in reversed(shape):
+        expected.append(stride)
+        stride *= s
+      if strides != tuple(reversed(expected)):
+        if copy is False:
+          raise BufferError("Non-contiguous DLPack tensor requires copy but copy=False")
+        raise NotImplementedError("Import of non-contiguous DLPack tensors not yet supported")
+
+    # Mark capsule as consumed
+    dlpack.pycapsule_setname(capsule, used_name)
+
+    # Create context to manage memory lifetime
+    import_ctx = dlpack.DLPackImportContext(capsule, managed_ptr)
+
+    # Create tensor from the data pointer
+    tensor = Tensor.from_blob(data_ptr, shape, dtype=dtype, device=device)
+
+    # Store context keyed by buffer to keep it alive until buffer is GC'd
+    buffer = cast(Buffer, tensor.uop.buffer)
+    if buffer not in dlpack._import_ctx_store:
+      dlpack._import_ctx_store[buffer] = []
+    dlpack._import_ctx_store[buffer].append(import_ctx)
+
+    return tensor
 
   @staticmethod
   def from_url(url:str, gunzip:bool=False, **kwargs) -> Tensor:
