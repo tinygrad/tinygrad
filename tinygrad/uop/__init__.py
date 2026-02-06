@@ -9,6 +9,8 @@ class FastEnum(IntEnum):
   @staticmethod
   def _generate_next_value_(_, __, ___, last_values): return 1 + max([0, *last_values, *[max(c) for c in FastEnum.__subclasses__()]])
 
+OpType = FastEnum
+
 # the order of these Ops controls the order of the toposort
 class Ops(FastEnum):
   # ** 1 -- defines/special **

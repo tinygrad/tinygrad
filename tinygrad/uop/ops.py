@@ -3,7 +3,7 @@ from typing import Any, Callable, cast, TYPE_CHECKING, Type, Sequence, Iterable,
 import sys, time, functools, itertools, math, operator, hashlib, os, types, pickle, pathlib, inspect, weakref, collections
 from dataclasses import dataclass
 from enum import Enum, auto
-from tinygrad.uop import Ops, GroupOp, X86Ops, X86GroupOp
+from tinygrad.uop import Ops, GroupOp, X86GroupOp, OpType
 from tinygrad.dtype import ConstType, ImageDType, dtypes, DType, truncate, PtrDType, least_upper_dtype, Invalid, AddrSpace, ConstFloat, PyConst
 from tinygrad.helpers import ContextVar, all_int, prod, getenv, all_same, Context, partition, temp, unwrap, T, argfix, Metadata, flatten, TRACEMETA
 from tinygrad.helpers import PROFILE, dedup, cdiv, cmod, diskcache_put, to_function_name, cpu_profile, TracingKey, VIZ, SPEC
@@ -26,7 +26,7 @@ axis_colors = {AxisType.GLOBAL: "blue", AxisType.THREAD: "BLUE", AxisType.LOCAL:
 axis_to_pos = {AxisType.LOOP: -1, AxisType.THREAD: 0, AxisType.GLOBAL: 0, AxisType.WARP: 1, AxisType.LOCAL: 2, AxisType.UPCAST: 3,
                AxisType.GROUP_REDUCE: 2, AxisType.REDUCE: 4, AxisType.UNROLL: 5, AxisType.OUTER: -2}
 
-range_start = {Ops.BUFFERIZE: 1, Ops.REDUCE: 1, Ops.STORE: 2, Ops.WMMA: 3, Ops.END: 1}
+range_start:dict[OpType, int] = {Ops.BUFFERIZE: 1, Ops.REDUCE: 1, Ops.STORE: 2, Ops.WMMA: 3, Ops.END: 1}
 
 # https://en.wikipedia.org/wiki/Identity_element
 def identity_element(op:Ops, dt:DType) -> PyConst: return dtypes.as_const({Ops.ADD:0, Ops.MUL:1, Ops.MAX:dtypes.min(dt)}[op], dt)
@@ -80,13 +80,9 @@ def pretty_print(x:UOp, cache=None, d=0)->str:
   cx[2], srcs = True, (''.join(f'\n{pretty_print(s, cache, d+2)},' for s in x.src))
   return f"{' '*d}{f'x{cx[0]}:=' * (cx[1]>1)}{type(x).__name__}({x.op}, {x.dtype}, arg={x.argstr()}{x.tagstr()}, src=({srcs}))"
 
-from typing import Generic
-from typing_extensions import TypeVar
-OpT = TypeVar("OpT", Ops, X86Ops, default=Ops)
-
 class UOpMetaClass(type):
   ucache:dict[tuple, weakref.ReferenceType[UOp]] = {}
-  def __call__(cls, op:OpT, dtype:DType=dtypes.void, src:tuple[UOp,...]=tuple(), arg:Any=None, tag:Any=None,
+  def __call__(cls, op:OpType, dtype:DType=dtypes.void, src:tuple[UOp,...]=tuple(), arg:Any=None, tag:Any=None,
                metadata:tuple[Metadata,...]|None=None, _buffer:Buffer|None=None):
     if (wret:=UOpMetaClass.ucache.get(key:=(op, dtype, src, arg, tag), None)) is not None and (ret:=wret()) is not None: return ret
     UOpMetaClass.ucache[key] = weakref.ref(created:=super().__call__(*key))
@@ -122,10 +118,10 @@ from tinygrad.mixin import OpMixin
 
 # NOTE: this should be frozen, but frozen is slower
 @dataclass(eq=False, slots=True)
-class UOp(OpMixin, Generic[OpT], metaclass=UOpMetaClass):
-  op:OpT
+class UOp(OpMixin, metaclass=UOpMetaClass):
+  op:OpType
   dtype:DType = dtypes.void
-  src:tuple[UOp[OpT], ...] = tuple()
+  src:tuple[UOp, ...] = tuple()
   arg:Any = None
   tag:Any = None
   def __del__(self):
@@ -919,15 +915,13 @@ def get_location() -> tuple[str, int]:
     frm = frm.f_back
   return frm.f_code.co_filename, frm.f_lineno
 
-AllOps = Ops | X86Ops
-
 class UPat(OpMixin):
   __slots__ = ("op", "dtype", "arg", "name", "src", "is_any")
-  def __init__(self, op:AllOps|tuple[AllOps, ...]|set[Ops]|set[X86Ops]|None=None, dtype:DType|tuple[DType, ...]|set[DType]|None=None,
+  def __init__(self, op:OpType|tuple[OpType, ...]|set[Ops]|None=None, dtype:DType|tuple[DType, ...]|set[DType]|None=None,
                src:tuple[UPat, ...]|list[UPat]|UPat|None=None, arg:Any=None,
                name:str|None=None, allow_any_len:bool=False, custom_early_reject:set[Ops]|None=None, location=None, is_any:bool=False):
-    assert op is None or isinstance(op, (AllOps, tuple, set)), "op must be Ops or tuple of Ops"
-    self.op: tuple[AllOps, ...]|None = (op,) if isinstance(op, AllOps) else (tuple(op) if isinstance(op, set) else op)
+    assert op is None or isinstance(op, (OpType, tuple, set)), "op must be Ops or tuple of Ops"
+    self.op: tuple[OpType, ...]|None = (op,) if isinstance(op, OpType) else (tuple(op) if isinstance(op, set) else op)
     self.dtype: tuple[DType, ...]|None = (dtype,) if isinstance(dtype, DType) else (tuple(dtype) if isinstance(dtype, set) else dtype)
     self.arg, self.name, self._in_src, self.custom_early_reject = arg, name, src, custom_early_reject
     self.src: Any = None
@@ -1051,7 +1045,7 @@ class PatternMatcher:
     # if this comes from a pickle, we reconstruct the lambda functions here
     self.patterns:list[tuple[UPat, Callable]] = [(p,types.FunctionType(*fxn) if isinstance(fxn, tuple) else fxn) for p,fxn in patterns]
     # NOTE: use of DefaultDict here is very dangerous! all keys will live for the lifetime of the PatternMatcher!
-    self.pdict: dict[Ops, list[list]] = {}
+    self.pdict: dict[OpType, list[list]] = {}
     # uop is required, arg is optional
     for p,fxn in self.patterns:
       assert p.op is not None
@@ -1345,7 +1339,7 @@ pm_unbind = PatternMatcher([(UPat(Ops.BIND, name="x"), do_unbind)])
 syms = { Ops.ADD: "+", Ops.SUB: "-", Ops.IDIV: "//", Ops.MOD: "%", Ops.SHL: "<<", Ops.SHR: ">>",
          Ops.MUL: "*", Ops.CMPLT: "<", Ops.CMPNE: "!=", Ops.AND: "&", Ops.OR: "|", Ops.XOR: "^"}
 # comparison operators are not in here because they are chained in python, not left-associative
-precedence = {Ops.MUL:1, Ops.IDIV:1, Ops.MOD:1, Ops.ADD:2, Ops.SUB:2, Ops.SHL:3, Ops.SHR:3, Ops.AND:4, Ops.XOR:5, Ops.OR:6}
+precedence:dict[OpType, int] = {Ops.MUL:1, Ops.IDIV:1, Ops.MOD:1, Ops.ADD:2, Ops.SUB:2, Ops.SHL:3, Ops.SHR:3, Ops.AND:4, Ops.XOR:5, Ops.OR:6}
 def strip_binary_parens(x:UOp, left:str, right:str, code_for_op) -> str:
   if x.op not in precedence: return code_for_op(left, right)
   return code_for_op(strip_parens(left) if precedence.get(x.src[0].op,99)<=precedence[x.op] else left, strip_parens(right) if
