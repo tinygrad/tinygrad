@@ -378,7 +378,7 @@ def l2i(op: Ops, dt: DType, *uops:UOp):
     case _: raise NotImplementedError(f"long decomposition of {op} unsupported")
 
 # ***** floats *****
-f2f_dt = { dtypes.fp8e4m3: dtypes.uint8, dtypes.fp8e5m2: dtypes.uint8, dtypes.half: dtypes.ushort, dtypes.bfloat16: dtypes.ushort, dtypes.float: dtypes.uint }
+f2f_dt = { f:getattr(dtypes, f"uint{f.bitsize}") for f in dtypes.floats }
 
 def rne(v: UOp, s) -> UOp: return shr(v, s) + ((shr(v, s - 1) & 1) & ((v & ((1 << (s - 1)) - 1)).ne(0).cast(v.dtype) | (shr(v, s) & 1)))
 
@@ -398,10 +398,14 @@ def f2f(v, fr:DType, to:DType):
     # fp8e4m3 has no infinity - saturate to max normal (0x7E) instead of inf
     maxnorm = shl(shl(1, te) - 1, tm) | (shl(1, tm) - 2) if to == dtypes.fp8e4m3 else shl(shl(1, te) - 1, tm)
     norm = (rne(nosign, fm - tm) - shl(fb - tb, tm)).cast(f2f_dt[to])
-    nan = (sign | (shr(nosign, fm - tm) & (shl(1, tm) - 1)) | shl(shl(1, te) - 1, tm)).cast(f2f_dt[to])
-    # for fp8e4m3: infinity (mantissa=0) -> maxnorm, NaN (mantissa!=0) -> nan
+    # fp8e4m3: NaN is only exp=15,mantissa=7 (0x7F), so all mantissa bits must be set
+    nan_mantissa = (shl(1, tm) - 1) if to == dtypes.fp8e4m3 else (shr(nosign, fm - tm) & (shl(1, tm) - 1))
+    nan = (sign | nan_mantissa | shl(shl(1, te) - 1, tm)).cast(f2f_dt[to])
+    # fp8e4m3 has no infinity: source inf (mantissa=0) saturates to maxnorm, source NaN (mantissa!=0) maps to NaN
     infnan = mantissa.eq(0).where(sign.cast(f2f_dt[to]) | maxnorm, nan) if to == dtypes.fp8e4m3 else nan
     underflow, overflow = exp < (1 + fb - tb), exp > (shl(1, te) - 2 + (fb - tb))
+    # fp8e4m3: no infinity, max exponent is normal; overflow if exponent too large or mantissa rounds to NaN pattern
+    if to == dtypes.fp8e4m3: overflow = (exp > (shl(1, te) - 1 + (fb - tb))) | (norm >= (shl(1, ts - 1) - 1))
     return exp.eq(shl(1, fe) - 1).where(infnan, sign.cast(f2f_dt[to]) | underflow.where(0, overflow.where(maxnorm, norm)))
   else: raise NotImplementedError(f"unsupported decomp {fr} -> {to}")
 
@@ -501,13 +505,15 @@ pm_float_decomp = PatternMatcher([
   (UPat((*GroupOp.Defines, Ops.INDEX), name="x"), lambda ctx,x:
    x.replace(dtype=f2f_dt[ctx[0]].ptr(x.dtype.size), tag=ctx[0]) if x.dtype.base == ctx[0] else None),
   (UPat(Ops.LOAD, dtypes.floats, name="x"), lambda ctx,x: f2f_load(x, *ctx) if x.dtype.scalar() == ctx[0] else None),
-  (UPat(Ops.BITCAST, src=(UPat(Ops.LOAD, dtypes.floats, name="ld"),), name="bc"), lambda ctx,bc,ld:
-   ld.replace(dtype=f2f_dt[ctx[0]]).bitcast(bc.dtype) if ld.dtype == ctx[0] else None),
+  (UPat(Ops.BITCAST, src=(UPat(Ops.LOAD, name="ld"),), name="bc"), lambda ctx,bc,ld:
+   ld.replace(dtype=f2f_dt[ctx[0]]).bitcast(bc.dtype) if ld.dtype.bitsize == ctx[0].bitsize else None),
   # TODO: this rule looks wrong - needs review
   (UPat(Ops.BITCAST, src=(UPat.var("x", dtypes.floats),), name="bc"), lambda ctx,bc,x:
    bc.replace(src=(f2f(x.bitcast(f2f_dt[ctx[1]]), ctx[1], ctx[0]),)) if x.dtype == ctx[1] and bc.dtype.bitsize == ctx[0].bitsize else None),
-  (UPat(GroupOp.All, dtypes.floats, name="x"), lambda ctx,x:
+  (UPat(GroupOp.All-{Ops.BITCAST}, dtypes.floats, name="x"), lambda ctx,x:
    x.replace(dtype=ctx[1].vec(x.dtype.count), src=tuple(s.cast(ctx[1]) if s.dtype == ctx[0] else s for s in x.src)) if x.dtype.scalar() == ctx[0] else None),
+  (UPat(Ops.STORE, src=(UPat.var("idx"), UPat(Ops.BITCAST, dtypes.floats, name="val")), name='st'), lambda ctx,st,idx,val:
+   st.replace(src=(idx, val.replace(dtype=f2f_dt[ctx[0]]))) if val.dtype == ctx[0] and idx.tag == ctx[0] else None),
   (UPat(Ops.STORE, src=(UPat.var("idx"), UPat.var("val", dtypes.floats)), name='st'), lambda ctx,st,idx,val:
    f2f_store(st, idx, val, *ctx) if val.dtype.scalar() == ctx[1] and (idx:=idx.src[0] if idx.op == Ops.CAST else idx).tag == ctx[0] else None),
 ])
