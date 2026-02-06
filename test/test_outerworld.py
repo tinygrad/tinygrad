@@ -38,7 +38,7 @@ class TestOuterRange(unittest.TestCase):
     vi = UOp.variable("i", i.vmin, i.vmax).bind(i)
     out = Tensor(acc.uop.after(acc_i.store(acc_i + a[:, vi].uop).end(i)))
     out.realize()
-    assert all(x == 10.0 for x in out.tolist())
+    self.assertEqual(out.tolist(), [10.0]*10)
 
   def test_range_matmul(self):
     vec = Tensor.randn(1, 10).realize()
