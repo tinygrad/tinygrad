@@ -1,11 +1,20 @@
 #!/usr/bin/env python
-import unittest
+import os, signal, unittest
 import numpy as np
 from tinygrad import dtypes, Tensor, TinyJit, GlobalCounters, Variable
 from tinygrad.device import is_dtype_supported
 from tinygrad.helpers import temp, CI, CPU_LVP, Context
 
 N = 200  # has to be bigger than the cache to fail
+
+def _print_mem(label=""):
+  try:
+    import resource
+    rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    # Linux reports in KB, macOS in bytes
+    rss_mb = rss / 1024 if os.uname().sysname == "Linux" else rss / (1024 * 1024)
+    print(f"[MEM {label}] RSS={rss_mb:.1f} MB, PID={os.getpid()}")
+  except Exception: pass
 
 class TestAssign(unittest.TestCase):
   def test_simple_assignment(self):
@@ -415,8 +424,8 @@ class TestAssign(unittest.TestCase):
 
   # TODO: is there a way to sneak in a permute such that it returns the wrong answer?
 
-  @unittest.skip("this test is crashing!")
   def test_overlapping_shrink_assignment_forward(self):
+    _print_mem("overlapping_forward_start")
     # Forward shift: read index > write index in overlap
     N = 100000
     shift = 1000
@@ -424,10 +433,11 @@ class TestAssign(unittest.TestCase):
     expected = np.arange(N, dtype=np.float32)
     expected[:N-shift] = expected[shift:].copy()
     with Context(NOOPT=1): a[0:N-shift].assign(a[shift:N]).realize()
+    _print_mem("overlapping_forward_end")
     np.testing.assert_allclose(a.numpy(), expected)
 
-  @unittest.skip("this test is crashing!")
   def test_overlapping_shrink_assignment_reverse(self):
+    _print_mem("overlapping_reverse_start")
     # Reverse shift: write index > read index in overlap
     N = 100000
     shift = 1000
@@ -435,10 +445,11 @@ class TestAssign(unittest.TestCase):
     expected = np.arange(N, dtype=np.float32)
     expected[shift:] = expected[:N-shift].copy()
     with Context(NOOPT=1): a[shift:N].assign(a[0:N-shift]).realize()
+    _print_mem("overlapping_reverse_end")
     np.testing.assert_allclose(a.numpy(), expected)
 
-  @unittest.skip("this test is crashing!")
   def test_nonoverlapping_shrink_assignment(self):
+    _print_mem("nonoverlapping_start")
     # TODO: non-overlapping shrinks don't actually need contiguous, could be 1 kernel with smarter range analysis
     a = Tensor.arange(100).float().contiguous().realize()
     expected = np.arange(100, dtype=np.float32)
@@ -446,6 +457,7 @@ class TestAssign(unittest.TestCase):
     kc = GlobalCounters.kernel_count
     a[0:10].assign(a[50:60]).realize()
     assert GlobalCounters.kernel_count - kc == 2, "currently conservative, forces contiguous"
+    _print_mem("nonoverlapping_end")
     np.testing.assert_allclose(a.numpy(), expected)
 
   @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
