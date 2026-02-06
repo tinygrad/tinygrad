@@ -389,25 +389,26 @@ def f2f(v, fr:DType, to:DType):
     sign, nosign = shl((v & shl(1, fs-1)).cast(f2f_dt[to]), ts - fs), (v & (shl(1, fs-1) - 1)).cast(f2f_dt[to])
     exp, norm = shr(nosign, fm), shl(nosign, tm - fm) + shl(tb - fb, tm)
     nan = shl(nosign, tm - fm) | shl((shl(1, te) - 1), tm)
-    # fp8e4m3: only exp=15 AND mantissa=7 is NaN, other exp=15 values are normal
+    # fp8e4m3 has only one nan
     is_nan = (nosign.eq(shl(1, fm + fe) - 1) if fr == dtypes.fp8e4m3 else exp.eq(shl(1, fe) - 1))
     return (sign | exp.eq(0).where(0, is_nan.where(nan, norm))).bitcast(to)
   elif fe > te and fm > tm:
-    sign, nosign, exp = shr(v, fs - ts) & shl(1, ts - 1), v & (shl(1, fs - 1) - 1), shr(v, fm) & (shl(1, fe) - 1)
-    mantissa = nosign & (shl(1, fm) - 1)
-    # fp8e4m3 has no infinity - saturate to max normal (0x7E) instead of inf
-    maxnorm = shl(shl(1, te) - 1, tm) | (shl(1, tm) - 2) if to == dtypes.fp8e4m3 else shl(shl(1, te) - 1, tm)
+    v = f2f_clamp(v.bitcast(fr), to).bitcast(f2f_dt[fr])
+    sign, nosign = shr(v, fs - ts) & shl(1, ts - 1), v & (shl(1, fs - 1) - 1)
     norm = (rne(nosign, fm - tm) - shl(fb - tb, tm)).cast(f2f_dt[to])
-    # fp8e4m3: NaN is only exp=15,mantissa=7 (0x7F), so all mantissa bits must be set
+    underflow = (shr(v, fm) & (shl(1, fe) - 1)) < (1 + fb - tb)
     nan_mantissa = (shl(1, tm) - 1) if to == dtypes.fp8e4m3 else (shr(nosign, fm - tm) & (shl(1, tm) - 1))
     nan = (sign | nan_mantissa | shl(shl(1, te) - 1, tm)).cast(f2f_dt[to])
-    # fp8e4m3 has no infinity: source inf (mantissa=0) saturates to maxnorm, source NaN (mantissa!=0) maps to NaN
-    infnan = mantissa.eq(0).where(sign.cast(f2f_dt[to]) | maxnorm, nan) if to == dtypes.fp8e4m3 else nan
-    underflow, overflow = exp < (1 + fb - tb), exp > (shl(1, te) - 2 + (fb - tb))
-    # fp8e4m3: no infinity, max exponent is normal; overflow if exponent too large or mantissa rounds to NaN pattern
-    if to == dtypes.fp8e4m3: overflow = (exp > (shl(1, te) - 1 + (fb - tb))) | (norm >= (shl(1, ts - 1) - 1))
-    return exp.eq(shl(1, fe) - 1).where(infnan, sign.cast(f2f_dt[to]) | underflow.where(0, overflow.where(maxnorm, norm)))
+    is_nan = (shr(v, fm) & (shl(1, fe) - 1)).eq(shl(1, fe) - 1)
+    return is_nan.where(nan, sign.cast(f2f_dt[to]) | underflow.where(0, norm))
   else: raise NotImplementedError(f"unsupported decomp {fr} -> {to}")
+
+def f2f_clamp(val:UOp, dt:DType) -> UOp:
+  e, m = dtypes.finfo(dt)
+  max_exp, max_man = ((1 << e) - 1, (1 << m) - 2) if dt == dtypes.fp8e4m3 else ((1 << e) - 2, (1 << m) - 1)
+  mx = val.const_like(2.0**(max_exp - exponent_bias(dt)) * (1.0 + max_man / (1 << m)))
+  sat = mx if dt == dtypes.fp8e4m3 else val.const_like(float('inf'))
+  return (val < -mx).where(-sat, (mx < val).where(sat, val))
 
 def f2f_load(x: UOp, fr:DType, to:DType) -> UOp:
   if (n:=x.dtype.count) == 1: return f2f(x.replace(dtype=f2f_dt[fr]), fr, to)
@@ -506,8 +507,11 @@ pm_float_decomp = PatternMatcher([
   # TODO: this rule looks wrong - needs review
   (UPat(Ops.BITCAST, src=(UPat.var("x", dtypes.floats),), name="bc"), lambda ctx,bc,x:
    bc.replace(src=(f2f(x.bitcast(f2f_dt[ctx[1]]), ctx[1], ctx[0]),)) if x.dtype == ctx[1] and bc.dtype.bitsize == ctx[0].bitsize else None),
+  (UPat(Ops.CAST, dtypes.floats, src=(UPat.var("val"),), name="x"), lambda ctx,x,val:
+   f2f_clamp(val.cast(ctx[1]), ctx[0]) if x.dtype.scalar() == ctx[0] else None),
   (UPat(GroupOp.All-{Ops.BITCAST}, dtypes.floats, name="x"), lambda ctx,x:
-   x.replace(dtype=ctx[1].vec(x.dtype.count), src=tuple(s.cast(ctx[1]) if s.dtype == ctx[0] else s for s in x.src)) if x.dtype.scalar() == ctx[0] else None),
+   x.replace(dtype=ctx[1].vec(x.dtype.count), src=tuple(s.cast(ctx[1]) if s.dtype == ctx[0] else s for s in x.src))
+   if x.dtype.scalar() == ctx[0] else None),
   (UPat(Ops.STORE, src=(UPat.var("idx"), UPat(Ops.BITCAST, dtypes.floats, name="val")), name='st'), lambda ctx,st,idx,val:
    st.replace(src=(idx, val.replace(dtype=f2f_dt[ctx[0]]))) if val.dtype == ctx[0] and idx.tag == ctx[0] else None),
   (UPat(Ops.STORE, src=(UPat.var("idx"), UPat.var("val", dtypes.floats)), name='st'), lambda ctx,st,idx,val:
