@@ -174,15 +174,19 @@ def cpu_ts_diff(device:str, thread=0) -> Decimal: return device_ts_diffs.get(dev
 amdgpu_targets:dict[str, int] = {}
 
 DevEvent = ProfileRangeEvent|ProfileGraphEntry|ProfilePointEvent
-def flatten_events(profile:list[ProfileEvent]) -> Generator[tuple[Decimal, Decimal, DevEvent], None, None]:
+def fmt_device(device:str, is_copy:bool) -> str: return f"{device} SDMA" if is_copy else device
+
+def flatten_events(profile:list[ProfileEvent]) -> Generator[tuple[Decimal, Decimal, str, DevEvent], None, None]:
   for e in profile:
-    if isinstance(e, ProfileRangeEvent): yield (e.st+(diff:=cpu_ts_diff(e.device, e.is_copy)), (e.en if e.en is not None else e.st)+diff, e)
-    elif isinstance(e, ProfilePointEvent): yield (e.ts, e.ts, e)
+    if isinstance(e, ProfileRangeEvent):
+      yield (e.st+(diff:=cpu_ts_diff(e.device, e.is_copy)), (e.en if e.en is not None else e.st)+diff, fmt_device(e.device, e.is_copy), e)
+    elif isinstance(e, ProfilePointEvent): yield (e.ts, e.ts, e.device, e)
     elif isinstance(e, ProfileGraphEvent):
       cpu_ts = []
       for ent in e.ents: cpu_ts += [e.sigs[ent.st_id]+(diff:=cpu_ts_diff(ent.device, ent.is_copy)), e.sigs[ent.en_id]+diff]
-      yield (st:=min(cpu_ts)), (et:=max(cpu_ts)), ProfileRangeEvent(f"{e.ents[0].device.split(':')[0]} Graph", f"batched {len(e.ents)}", st, et)
-      for i,ent in enumerate(e.ents): yield (cpu_ts[i*2], cpu_ts[i*2+1], ent)
+      yield (st:=min(cpu_ts)), (et:=max(cpu_ts)), f"{e.ents[0].device.split(':')[0]} Graph", \
+        ProfileRangeEvent(f"{e.ents[0].device.split(':')[0]} Graph", f"batched {len(e.ents)}", st, et)
+      for i,ent in enumerate(e.ents): yield (cpu_ts[i*2], cpu_ts[i*2+1], fmt_device(ent.device, ent.is_copy), ent)
 
 # normalize event timestamps and attach kernel metadata
 def timeline_layout(dev_events:list[tuple[int, int, float, DevEvent]], start_ts:int, scache:dict[str, int]) -> bytes|None:
@@ -395,8 +399,8 @@ def get_profile(profile:list[ProfileEvent], sort_fn:Callable[[str], Any]=device_
   markers:list[ProfilePointEvent] = []
   start_ts:int|None = None
   end_ts:int|None = None
-  for ts,en,e in flatten_events(profile):
-    dev_events.setdefault(e.device,[]).append((st:=int(ts), et:=int(en), float(en-ts), e))
+  for ts,en,dev,e in flatten_events(profile):
+    dev_events.setdefault(dev,[]).append((st:=int(ts), et:=int(en), float(en-ts), e))
     if start_ts is None or st < start_ts: start_ts = st
     if end_ts is None or et > end_ts: end_ts = et
     if isinstance(e, ProfilePointEvent) and e.name == "marker": markers.append(e)
