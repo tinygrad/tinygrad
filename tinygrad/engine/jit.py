@@ -260,7 +260,7 @@ def _prepare_jit_inputs(args, kwargs):
   input_buffers: list[Buffer] = flatten([b.bufs if isinstance(b, MultiBuffer) else [b] for u in input_uops if (b:=u.base.realized) is not None])
   if len(set(input_buffers)) != len(input_buffers): raise JitError("duplicate inputs to JIT")
   _noop = UOp(Ops.NOOP)
-  inputs: list[tuple[UOp, dict, ...]] = []
+  inputs: list[tuple] = []
   for u in input_uops:
     if u.src[0] is u.base:
       view = u.replace(src=(_noop, *u.src[1:]))
@@ -343,7 +343,7 @@ class TinyJit(Generic[ReturnType]):
     # fast replay path for cnt >= 3 (after first successful replay set up the cache)
     if self.cnt >= 3 and hasattr(self, '_fast_replay') and not kwargs:
       tensor_indices, expected_src, expected_dtypes, expected_devices, cached_var_vals, direct_call = self._fast_replay
-      input_buffers: list[Buffer] = []
+      input_buffers = list[Buffer]()
       _fast_ok = True
       for idx, i in enumerate(tensor_indices):
         t = args[i]
@@ -365,6 +365,7 @@ class TinyJit(Generic[ReturnType]):
           _fast_ok = False
           break
       if _fast_ok and (len(input_buffers) <= 1 or len(set(input_buffers)) == len(input_buffers)):
+        assert self.captured is not None
         if direct_call is not None: direct_call(input_buffers, cached_var_vals)
         else: self.captured(input_buffers, cached_var_vals)
         self.cnt += 1
