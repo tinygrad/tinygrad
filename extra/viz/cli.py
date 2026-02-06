@@ -26,16 +26,24 @@ def print_data(data:dict) -> None:
 
 if __name__ == "__main__":
   parser = argparse.ArgumentParser()
-  parser.add_argument('--kernel', type=str, default=None, metavar="NAME", help='Select a kernel by name (optional name, default: only list names)')
-  parser.add_argument('--select', type=str, default=None, metavar="NAME",
-                      help='Rewrites: Select an item within the chosen kernel (optional name, default: only list names)')
-  parser.add_argument('--profile', action="store_true", help="View profiling trace (default: views rewrites)")
-  parser.add_argument('--device', type=str, default=None, metavar="NAME", help="Profile only: Select a device (default: prints all devices)")
-  parser.add_argument('--profile-path', type=pathlib.Path, metavar="PATH", help='Path to profile (optional file, default: latest profile)',
-                      default=pathlib.Path(temp("profile.pkl", append_user=True)))
-  parser.add_argument('--rewrites-path', type=pathlib.Path, metavar="PATH", help='Path to rewrites (optional file, default: latest rewrites)',
-                      default=pathlib.Path(temp("rewrites.pkl", append_user=True)))
+  g_mode = parser.add_argument_group("mode")
+  g_mode.add_argument("--profile", action="store_true", help="View profile trace")
+  g_mode.add_argument("--rewrites", action="store_true", help="View rewrites trace")
+  g_profile = parser.add_argument_group("profile options")
+  g_profile.add_argument("--device", type=str, default=None, metavar="NAME", help="Select a device (optional name, default: only list names)")
+  g_rewrites = parser.add_argument_group("rewrites options")
+  g_rewrites.add_argument("--select", type=str, default=None, metavar="NAME",
+                          help="Select an item within the chosen kernel (optional name, default: only list names)")
+  g_common = parser.add_argument_group("common options")
+  g_common.add_argument("--kernel", type=str, default=None, metavar="NAME", help="Select a kernel by name (optional name, default: only list names)")
+  parser.add_argument("--profile-path", type=pathlib.Path, metavar="PATH", help="Path to profile (optional file, default: latest profile)",
+                        default=pathlib.Path(temp("profile.pkl", append_user=True)))
+  parser.add_argument("--rewrites-path", type=pathlib.Path, metavar="PATH", help="Path to rewrites (optional file, default: latest rewrites)",
+                        default=pathlib.Path(temp("rewrites.pkl", append_user=True)))
   args = parser.parse_args()
+  if not args.profile and not args.rewrites:
+    parser.print_help()
+    exit(0)
 
   viz.trace = viz.load_pickle(args.rewrites_path, default=RewriteTrace([], [], {}))
   viz.ctxs = viz.get_rewrites(viz.trace)
@@ -44,9 +52,10 @@ if __name__ == "__main__":
     from tabulate import tabulate
     profile = load_profile(viz.load_pickle(args.profile_path, default=[]))
     agg, total, n = {}, 0, 0
+    if args.device is None: print("Select a device:")
     for k,v in profile["layout"].items():
       if not optional_eq({"name":k}, args.device): continue
-      print(k)
+      print(f"  {k}")
       if args.device is None: continue
       for e in v.get("events", []):
         et = e["dur"]*1e-6
@@ -61,7 +70,6 @@ if __name__ == "__main__":
           a[0] += et
           a[1] += 1
           total += et
-
     if agg:
       rows = [[n, t, time_to_str(t, w=9), t / c if c else 0.0, c, (t / total * 100.0) if total else 0.0] for n, (t, c) in agg.items()]
       rows.sort(key=lambda r: r[1], reverse=True)
