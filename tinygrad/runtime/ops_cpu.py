@@ -137,3 +137,5 @@ class CPUDevice(HCQCompiled):
     compilers = CompilerSet([CompilerPair(ClangJITRenderer, None), CompilerPair(CPULLVMRenderer, CPULLVMCompiler, ctrl_var=CPU_LLVM),
                              CompilerPair(LVPRenderer, None, ctrl_var=CPU_LVP)], ctrl_var=CPU_CC)
     super().__init__(device, CPUAllocator(self), compilers, functools.partial(CPUProgram, self), CPUSignal, CPUComputeQueue)
+    from tinygrad.runtime.graph.cpu import CPUGraph
+    self.graph = CPUGraph

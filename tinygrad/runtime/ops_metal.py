@@ -12,6 +12,7 @@ REQUEST_TYPE_COMPILE = 13
 # Must be loaded for default Metal Device: https://developer.apple.com/documentation/metal/1433401-mtlcreatesystemdefaultdevice?language=objc
 DLL("CoreGraphics", "CoreGraphics")
 
+
 # FIXME: these need autogen to support objc categories
 # https://developer.apple.com/library/archive/documentation/Cocoa/Conceptual/ObjectiveC/Chapters/ocCategories.html
 @functools.cache
@@ -36,6 +37,14 @@ class MetalDevice(Compiled):
     self.mtl_buffers_in_flight: list[metal.MTLCommandBuffer] = []
     self.timeline_signal = self.sysdevice.newSharedEvent()
     self.timeline_value = 0
+    self._gpu_needs_wake = False
+    self._wake_queue = self.sysdevice.newCommandQueueWithMaxCommandBufferCount(8)
+    # compile a compute kernel for GPU wake-up that runs ~800us to keep compute units warm during CPU idle time
+    wake_src = "kernel void _wake(device float *d [[buffer(0)]]) { float x = d[0]; for (int i = 0; i < 15000; i++) x = x * 1.0001f; d[0] = x; }"
+    wake_lib = metal_src_to_library(self, wake_src)
+    self._wake_fn = wake_lib.newFunctionWithName(to_ns_str("_wake")).retained()
+    self._wake_pipeline = self.sysdevice.newComputePipelineStateWithFunction_error(self._wake_fn, None).retained()
+    self._wake_buf = self.sysdevice.newBufferWithLength_options(16, metal.MTLResourceStorageModePrivate)
 
     Compiled.profile_events += [ProfileDeviceEvent(device)]
 
@@ -45,14 +54,42 @@ class MetalDevice(Compiled):
     super().__init__(device, MetalAllocator(self), CompilerSet([CompilerPair(MetalRenderer, MetalCompiler), CompilerPair(MetalRenderer, Compiler)]),
       functools.partial(MetalProgram, self), MetalGraph if 'virtual' not in from_ns_str(self.sysdevice.name()).lower() else None)
 
+  def invalidate_caches(self):
+    if not hasattr(self, '_l2_flush_buf'):
+      self._l2_flush_buf = self.sysdevice.newBufferWithLength_options(32*1024*1024, metal.MTLResourceStorageModePrivate)
+    cb = self.mtl_queue.commandBuffer().retained()
+    enc = cb.blitCommandEncoder().retained()
+    enc.fillBuffer_range_value(self._l2_flush_buf, metal.NSRange(0, 32*1024*1024), 0)
+    enc.endEncoding()
+    cb.commit()
+    wait_check(cb)
+
+  def _fire_wake(self):
+    wake = self._wake_queue.commandBuffer()
+    enc = wake.computeCommandEncoder()
+    enc.setComputePipelineState(self._wake_pipeline)
+    enc.setBuffer_offset_atIndex(self._wake_buf, 0, 0)
+    enc.dispatchThreadgroups_threadsPerThreadgroup(metal.MTLSize(1, 1, 1), metal.MTLSize(1, 1, 1))
+    enc.endEncoding()
+    wake.commit()
+
   def synchronize(self):
+    if not self.mtl_buffers_in_flight:
+      # fire second wake ping just before next dispatch to cover the cache_defeat gap
+      if self._gpu_needs_wake:
+        self._fire_wake()
+        self._gpu_needs_wake = False
+      return
     for cbuf in self.mtl_buffers_in_flight:
-      wait_check(cbuf)
-      st, en = decimal.Decimal(cbuf.GPUStartTime()) * 1000000, decimal.Decimal(cbuf.GPUEndTime()) * 1000000
-      # NOTE: command buffers from MetalGraph are not profiled here
+      while (s := cbuf.status()) < 4: pass  # spin-wait: avoids CPU frequency drop from blocking wait
+      if s > 4 or PROFILE: wait_check(cbuf)  # skip waitUntilCompleted on success to avoid CPU clock spin-down
       if PROFILE and (lb:=cmdbuf_label(cbuf)) is not None and not lb.startswith("batched"):
-        Compiled.profile_events += [ProfileRangeEvent(self.device, lb, st, en)]
+        st, en = decimal.Decimal(cbuf.GPUStartTime()) * 1000000, decimal.Decimal(cbuf.GPUEndTime()) * 1000000
+        Compiled.profile_events += [ProfileRangeEvent(self.device, lb, st, en, is_copy=lb.startswith("COPY"))]
     self.mtl_buffers_in_flight.clear()
+    # fire wake kernel immediately to keep GPU warm during .numpy() / CPU processing
+    self._fire_wake()
+    self._gpu_needs_wake = True
 
 def metal_src_to_library(device:MetalDevice, src:str) -> metal.MTLLibrary:
   options = metal.MTLCompileOptions.new()

@@ -21,14 +21,19 @@ class MetalGraph(GraphRunner):
     # use direct dispatch for small kernel counts to avoid ICB overhead
     self.use_direct = len(jit_cache) <= getenv("METAL_DIRECT_MAX", 8)
 
+    # pre-compute input replacements per kernel for fast dispatch
+    self.input_map: dict[int, list[tuple[int, int]]] = {}
+    for (j,i), input_idx in self.input_replace.items():
+      self.input_map.setdefault(j, []).append((i, input_idx))
+
     if self.use_direct:
-      self.kernels: list[tuple[Any, list[tuple[int, Any]], int, list[str], tuple[int,...], tuple[int,...]]] = []
+      self.kernels = []
       for j,ji in enumerate(jit_cache):
         prg: CompiledRunner = cast(CompiledRunner, ji.prg)
         fixed_bufs = [(i, b._buf) for i,b in enumerate(ji.bufs) if b is not None and (j,i) not in self.input_replace]
         global_size, local_size = prg.p.launch_dims(var_vals)
         self.kernels.append((prg._prg.pipeline_state, fixed_bufs, len(ji.bufs), [v.expr for v in prg.p.vars],
-                             tuple(global_size), tuple(local_size)))
+                             metal.MTLSize(*global_size), metal.MTLSize(*local_size), self.input_map.get(j, [])))
     else:
       self._init_icb(jit_cache, var_vals)
 
@@ -84,32 +89,23 @@ class MetalGraph(GraphRunner):
     command_buffer = self.dev.mtl_queue.commandBuffer().retained()
     encoder = command_buffer.computeCommandEncoder().retained()
 
-    # build a map for updated launch dims
-    updated_dims: dict[int, tuple[tuple[int,...], tuple[int,...]]] = {j: (gd, ld) for j, gd, ld in self.updated_launch_dims(var_vals)}
-    # build a map for input replacements by kernel index
-    input_map: dict[int, list[tuple[int, int]]] = {}
-    for (j,i), input_idx in self.input_replace.items():
-      input_map.setdefault(j, []).append((i, input_idx))
-
-    all_var_vals = self.fixedvars | var_vals
-    for j, (pipeline_state, fixed_bufs, num_bufs, var_exprs, global_size, local_size) in enumerate(self.kernels):
+    if self.launch_dims_replace:
+      updated_dims = {j: (metal.MTLSize(*gd), metal.MTLSize(*ld)) for j, gd, ld in self.updated_launch_dims(var_vals)}
+    all_var_vals = self.fixedvars | var_vals if var_vals else self.fixedvars
+    last_j = len(self.kernels) - 1
+    for j, (pipeline_state, fixed_bufs, num_bufs, var_exprs, gs, ls, j_inputs) in enumerate(self.kernels):
       encoder.setComputePipelineState(pipeline_state)
-      # set fixed buffers
       for i, buf in fixed_bufs: encoder.setBuffer_offset_atIndex(buf.buf, buf.offset, i)
-      # set variable input buffers
-      for i, input_idx in input_map.get(j, []):
+      for i, input_idx in j_inputs:
         encoder.setBuffer_offset_atIndex(input_buffers[input_idx]._buf.buf, input_buffers[input_idx]._buf.offset, i)
-      # set variable values
       for vi, expr in enumerate(var_exprs):
         encoder.setBytes_length_atIndex(bytes(ctypes.c_int(all_var_vals[expr])), 4, num_bufs + vi)
-      # dispatch with potentially updated launch dims
-      gs, ls = updated_dims.get(j, (global_size, local_size))
-      encoder.dispatchThreadgroups_threadsPerThreadgroup(metal.MTLSize(*gs), metal.MTLSize(*ls))
-      # memory barrier between kernels to ensure writes are visible
-      if j < len(self.kernels) - 1: encoder.memoryBarrierWithScope(metal.MTLBarrierScopeBuffers)
+      if self.launch_dims_replace and j in updated_dims: gs, ls = updated_dims[j]
+      encoder.dispatchThreadgroups_threadsPerThreadgroup(gs, ls)
+      if j < last_j: encoder.memoryBarrierWithScope(metal.MTLBarrierScopeBuffers)
 
     encoder.endEncoding()
-    command_buffer.setLabel(to_ns_str(f"batched {len(self.jit_cache)}"))
+    if PROFILE: command_buffer.setLabel(to_ns_str(f"batched {len(self.jit_cache)}"))
     command_buffer.commit()
     self.command_buffer = command_buffer
 
@@ -147,7 +143,7 @@ class MetalGraph(GraphRunner):
 
     encoder.executeCommandsInBuffer_withRange(self.icb, self.range)
     encoder.endEncoding()
-    command_buffer.setLabel(to_ns_str(f"batched {len(self.jit_cache)}"))
+    if PROFILE: command_buffer.setLabel(to_ns_str(f"batched {len(self.jit_cache)}"))
     command_buffer.commit()
     self.command_buffer = command_buffer
 

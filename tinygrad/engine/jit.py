@@ -259,8 +259,17 @@ def _prepare_jit_inputs(args, kwargs):
     raise JitError("JIT inputs cannot be const, create a buffer with .contiguous()")
   input_buffers: list[Buffer] = flatten([b.bufs if isinstance(b, MultiBuffer) else [b] for u in input_uops if (b:=u.base.realized) is not None])
   if len(set(input_buffers)) != len(input_buffers): raise JitError("duplicate inputs to JIT")
-  inputs = [(*(u.substitute({u.base:UOp(Ops.NOOP)}, extra_pm=mop_cleanup).unbind_all()), u.dtype, u.device) for u in input_uops]
-  _var_vals = merge_dicts([x[1] for x in inputs] + [dict(v.unbind() for v in (args + tuple(kwargs.values())) if isinstance(v, UOp))])
+  _noop = UOp(Ops.NOOP)
+  inputs: list[tuple[UOp, dict, ...]] = []
+  for u in input_uops:
+    if u.src[0] is u.base:
+      view = u.replace(src=(_noop, *u.src[1:]))
+      inputs.append((view, {}, u.dtype, u.device) if not any(s.op is Ops.BIND for s in u.src[1:]) else (*view.unbind_all(), u.dtype, u.device))
+    else:
+      inputs.append((*u.substitute({u.base:_noop}, extra_pm=mop_cleanup).unbind_all(), u.dtype, u.device))
+  uop_vars = [v.unbind() for v in (args + tuple(kwargs.values())) if isinstance(v, UOp)]
+  all_var_dicts = [x[1] for x in inputs if x[1]] + ([dict(uop_vars)] if uop_vars else [])
+  _var_vals = merge_dicts(all_var_dicts) if all_var_dicts else {}
   var_vals = {k.expr:v for k,v in _var_vals.items()}
   expected_input_info = [(x[0], tuple(sorted(x[1].keys(), key=lambda v: v.expr)), x[2], x[3]) for x in inputs]
   return input_buffers, var_vals, names, expected_input_info
@@ -303,7 +312,64 @@ class TinyJit(Generic[ReturnType]):
 
   def __get__(self, obj, objtype): return functools.partial(self.__call__, obj) # add support for instance methods
 
+  def _setup_fast_replay(self, args, kwargs, input_buffers, var_vals, expected_input_info):
+    """Cache extraction pattern after first successful replay for faster subsequent replays."""
+    assert self.captured is not None
+    # only enable fast path for simple cases: positional args only, no containers, no MultiBuffers, no variables, no extra views
+    if kwargs or any(isinstance(v, UOp) for v in args) or self.captured.extra_view_inputs: return
+    # cache which arg indices are tensors and which are not
+    tensor_indices = [i for i, t in enumerate(args) if t.__class__ is Tensor]
+    # check if any tensor has MULTI uop or MultiBuffer
+    tensors = [args[i] for i in tensor_indices]
+    if any(t.uop.op is Ops.MULTI for t in tensors): return
+    if any(isinstance(t.uop.base.realized, MultiBuffer) for t in tensors): return
+    # verify tensor count matches expected inputs and all are contiguous (src[0] is base)
+    if len(tensor_indices) != len(expected_input_info): return
+    input_uops = [t.uop for t in tensors]
+    if not all(u.src[0] is u.base for u in input_uops): return
+    # cache component-wise view data for fast validation (avoids u.replace ucache lookup)
+    expected_src = [u.src for u in input_uops]
+    expected_dtypes = [u.dtype for u in input_uops]
+    expected_devices = [u.device for u in input_uops]
+    # check for direct graph call (single GraphRunner, bypasses CapturedJit + ExecItem overhead)
+    # store _call_direct bound method to bypass GraphRunner.__call__ overhead (saves ~3us from if-checks + method dispatch)
+    direct_graph = self.captured._jit_cache[0].prg if len(self.captured._jit_cache) == 1 and \
+      isinstance(self.captured._jit_cache[0].prg, GraphRunner) else None
+    direct_call = direct_graph._call_direct if direct_graph is not None and hasattr(direct_graph, '_call_direct') and \
+      getattr(direct_graph, 'use_direct', False) else (direct_graph if direct_graph is not None else None)
+    self._fast_replay = (tensor_indices, expected_src, expected_dtypes, expected_devices, var_vals, direct_call)
+
   def __call__(self, *args, **kwargs) -> ReturnType:
+    # fast replay path for cnt >= 3 (after first successful replay set up the cache)
+    if self.cnt >= 3 and hasattr(self, '_fast_replay') and not kwargs:
+      tensor_indices, expected_src, expected_dtypes, expected_devices, cached_var_vals, direct_call = self._fast_replay
+      input_buffers: list[Buffer] = []
+      _fast_ok = True
+      for idx, i in enumerate(tensor_indices):
+        t = args[i]
+        if t.__class__ is not Tensor:
+          _fast_ok = False
+          break
+        u = t.uop
+        buf = u.base.realized
+        if buf is None:
+          _fast_ok = False
+          break
+        input_buffers.append(buf)
+        # validate view structure via component-wise identity checks (avoids u.replace ucache lookup)
+        exp_src = expected_src[idx]
+        if len(u.src) != len(exp_src) or u.dtype is not expected_dtypes[idx] or u.device != expected_devices[idx]:
+          _fast_ok = False
+          break
+        if len(exp_src) > 1 and any(u.src[k] is not exp_src[k] for k in range(1, len(exp_src))):
+          _fast_ok = False
+          break
+      if _fast_ok and (len(input_buffers) <= 1 or len(set(input_buffers)) == len(input_buffers)):
+        if direct_call is not None: direct_call(input_buffers, cached_var_vals)
+        else: self.captured(input_buffers, cached_var_vals)
+        self.cnt += 1
+        return self.captured.ret
+
     input_buffers, var_vals, names, expected_input_info = _prepare_jit_inputs(args, kwargs)
     if not JIT or self.cnt == 0:
       # jit ignore
@@ -370,6 +436,8 @@ class TinyJit(Generic[ReturnType]):
       if self.captured.expected_input_info != expected_input_info:
         raise JitError(f"args mismatch in JIT: {self.captured.expected_input_info=} != {expected_input_info=}")
       ret = self.captured(input_buffers, var_vals)
+      # set up fast replay cache after first successful replay
+      if self.cnt == 2: self._setup_fast_replay(args, kwargs, input_buffers, var_vals, expected_input_info)
 
     self.cnt += 1
     return ret
