@@ -116,6 +116,7 @@ extra_matcher = PatternMatcher([
   # bitcasts between scalar float and scalar int are real, rest are noops
   (UPat.var("y").bitcast().named("x"), lambda y,x: None if (y.dtype in dtypes.floats and x.dtype in dtypes.ints) or \
    (y.dtype in dtypes.ints and x.dtype in dtypes.floats) else x.replace(op=Ops.NOOP)),
+  # TODO: this should be removed when bool cast is canonicalized
   # rewrite cast to bool to CMPNE 0
   (UPat.var("y").cast(dtypes.bool), lambda y: y != y.const_like(0)),
   # can't cast from float16 to ints/float64 directly and vice versa
@@ -130,8 +131,7 @@ extra_matcher = PatternMatcher([
   (UPat(Ops.CAST, dtype=dtypes.floats, src=(UPat(dtype=dtypes.uint64),), name="c"),
    lambda c: ((c.src[0] >> 63) != 0).where((c.src[0] & 0x7FFFFFFFFFFFFFFF).cast(dtypes.int64).cast(c.dtype) * 2, \
                                                c.src[0].cast(dtypes.int64).cast(c.dtype))),
-  # mulacc only available for floats
-  (UPat.var('a', dtypes.floats)*UPat.var('b')+UPat.var('c'), lambda a,b,c: a.alu(Ops.MULACC, b, c)),
+  # TODO: these should be removed once max is canonicalized
   # no max for scalar ints
   (UPat(Ops.MAX, dtypes.ints, name="m"), lambda m: (m.src[0] < m.src[1]).where(m.src[1], m.src[0]) if m.dtype.count == 1 else None),
   # even with Ops.MAX in decompositions this pattern still hits
@@ -198,6 +198,7 @@ WGPR = tuple(r for r in GPR if r != RSP)
 
 # ***** X86 instruction selection *****
 
+def def_reg(dt:DType, reg:Register|None=None) -> UOp: return UOp(X86Ops.DEFINE_REG, dt, arg=reg)
 def imm(dt:DType, v:int|float) -> UOp: return UOp(X86Ops.IMM, dt, arg=v)
 def to_imm(c:UOp) -> UOp|None:
   if c.op is not Ops.CONST: return None
@@ -209,7 +210,6 @@ def cmp(x:UOp) -> UOp:
   if x.src[0].dtype is dtypes.float32: return UOp(X86Ops.VUCOMISS, src=x.src)
   if x.src[0].dtype is dtypes.float64: return UOp(X86Ops.VUCOMISD, src=x.src)
   return UOp(X86Ops.CMP, src=x.src) if (i:=to_imm(x.src[1])) is None else UOp(X86Ops.CMPi, src=(x.src[0], i))
-def def_reg(dt:DType, reg:Register|None=None) -> UOp: return UOp(X86Ops.DEFINE_REG, dt, arg=reg)
 
 # vshufps xmm2, xmm0, xmm1, imm
 # xmm2 selects its lower 2 32 bits from xmm0 and its upper 2 32 bits from xmm1 according to imm
@@ -364,9 +364,9 @@ isel_matcher = PatternMatcher([
   (UPat.var("y", dtypes.int16s).gep(name="x"), lambda y,x: UOp(X86Ops.VPEXTRW, x.dtype, (y, imm(dtypes.uint8, x.arg[0])))),
   (UPat.var("y", dtypes.int32s).gep(name="x"), lambda y,x: UOp(X86Ops.VPEXTRD, x.dtype, (y, imm(dtypes.uint8, x.arg[0])))),
   (UPat.var("y", dtypes.int64s).gep(name="x"), lambda y,x: UOp(X86Ops.VPEXTRQ, x.dtype, (y, imm(dtypes.uint8, x.arg[0])))),
-  # fused multiply add
-  (UPat(Ops.MULACC, dtypes.float32, name="x"), lambda x: x.replace(op=X86Ops.VFMADD213SS if x.dtype.count == 1 else X86Ops.VFMADD213PS)),
-  (UPat(Ops.MULACC, dtypes.float64, name="x"), lambda x: x.replace(op=X86Ops.VFMADD213SD if x.dtype.count == 1 else X86Ops.VFMADD213PD)),
+  # fused multiply add TODO: don't fuse if mul used several times
+  (UPat.var('a', dtypes.float32) * UPat.var('b') + UPat.var('c'), lambda a,b,c: a.alu(X86Ops.VFMADD213SS if a.dtype.count == 1 else X86Ops.VFMADD213PS, b, c)), # noqa: E501
+  (UPat.var('a', dtypes.float64) * UPat.var('b') + UPat.var('c'), lambda a,b,c: a.alu(X86Ops.VFMADD213SD if a.dtype.count == 1 else X86Ops.VFMADD213PD, b, c)), # noqa: E501
   # packed bitwise
   ((UPat() & UPat()).named("x"), lambda x: x.replace(op=X86Ops.VPAND) if x.dtype.count > 1 else None),
   ((UPat() | UPat()).named("x"), lambda x: x.replace(op=X86Ops.VPOR) if x.dtype.count > 1 else None),
@@ -408,11 +408,11 @@ isel_matcher = PatternMatcher([
   (UPat(Ops.SUB, dtypes.float64, name="x"), lambda x: x.replace(op=X86Ops.VSUBSD if x.dtype.count == 1 else X86Ops.VSUBPD)),
   (UPat(Ops.FDIV, dtypes.float32, name="x"), lambda x: x.replace(op=X86Ops.VDIVSS if x.dtype.count == 1 else X86Ops.VDIVPS)),
   (UPat(Ops.FDIV, dtypes.float64, name="x"), lambda x: x.replace(op=X86Ops.VDIVSD if x.dtype.count == 1 else X86Ops.VDIVPD)),
+  # TODO: these should use a.maximum(b) / a.minimum(b)
   (UPat(Ops.MAX, dtypes.float32, name="x"), lambda x: x.replace(op=X86Ops.VMAXSS if x.dtype.count == 1 else X86Ops.VMAXPS)),
   (UPat(Ops.MAX, dtypes.float64, name="x"), lambda x: x.replace(op=X86Ops.VMAXSD if x.dtype.count == 1 else X86Ops.VMAXPD)),
-  # TODO: because this is common across isas and there's multiple patterns probably want Ops.MIN and do this in decomp
-  ((UPat.var("a", dtypes.float32) < UPat.var("b")).where(UPat.var("a"), UPat.var("b")), lambda a,b: UOp(X86Ops.VMINSS if a.dtype.count == 1 else X86Ops.VMINPS, a.dtype, (a, b))),
-  ((UPat.var("a", dtypes.float64) < UPat.var("b")).where(UPat.var("a"), UPat.var("b")), lambda a,b: UOp(X86Ops.VMINSD if a.dtype.count == 1 else X86Ops.VMINPD, a.dtype, (a, b))),
+  ((UPat.var("a", dtypes.float32) < UPat.var("b")).where(UPat.var("a"), UPat.var("b")), lambda a,b: UOp(X86Ops.VMINSS if a.dtype.count == 1 else X86Ops.VMINPS, a.dtype, (a, b))), # noqa: E501
+  ((UPat.var("a", dtypes.float64) < UPat.var("b")).where(UPat.var("a"), UPat.var("b")), lambda a,b: UOp(X86Ops.VMINSD if a.dtype.count == 1 else X86Ops.VMINPD, a.dtype, (a, b))), # noqa: E501
   # casts
   (UPat(dtype=dtypes.int32).cast(dtypes.float32, name="x"), lambda x: x.replace(op=X86Ops.VCVTDQ2PS) if x.dtype.count > 1 else None),
   (UPat(dtype=dtypes.int32).cast(dtypes.float64, name="x"), lambda x: x.replace(op=X86Ops.VCVTDQ2PD) if x.dtype.count > 1 else None),

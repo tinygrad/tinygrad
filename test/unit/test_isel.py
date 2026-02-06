@@ -106,7 +106,6 @@ class TestIselX86(unittest.TestCase):
     n = self.isel_rewrite(noop)
     self.assertTrue(isinstance(n.arg, Register) and n.arg == n.src[0].arg)
 
-  # TODO: don't use fmadd if uop used multiple times
   # TODO: might want to check that load isn't part of another range when fusing
 
 if __name__ == "__main__":

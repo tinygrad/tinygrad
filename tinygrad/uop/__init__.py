@@ -208,7 +208,7 @@ class X86Ops(FastEnum):
   # return
   RET = auto()
 
-# TODO: add associative groupop to fuse more loads
+# TODO: add commutative groupop to fuse more loads
 class X86GroupOp:
   # X86Ops whose first src is also the destination
   TwoAddress1st = {X86Ops.ADD, X86Ops.ADDi, X86Ops.AND, X86Ops.ANDi, X86Ops.XOR, X86Ops.XORi, X86Ops.OR, X86Ops.ORi, X86Ops.IMUL,
