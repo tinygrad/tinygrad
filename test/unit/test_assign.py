@@ -259,15 +259,15 @@ class TestAssign(unittest.TestCase):
     np.testing.assert_allclose(out, [1.,1.,1.,1.,1.,1.,0.,0.,1.,1.,1.,1.,1.,1.,0.,0.])
 
   def test_assign_contiguous(self):
-    b = Tensor.rand(4,4).realize()
-    a = (Tensor.rand(4,4).realize() + 1)
+    b = Tensor.arange(16).reshape(4,4).contiguous().realize()
+    a = (Tensor.arange(16).reshape(4,4).contiguous().realize() + 1)
     kc = GlobalCounters.kernel_count
     b.assign(a.contiguous()).realize()
     assert GlobalCounters.kernel_count - kc == 2
 
   def test_assign_contiguous_permute(self):
-    b = Tensor.rand(4,4).realize()
-    a = (Tensor.rand(4,4).realize() + 1).permute((1,0))
+    b = Tensor.arange(16).reshape(4,4).contiguous().realize()
+    a = (Tensor.arange(16).reshape(4,4).contiguous().realize() + 1).permute((1,0))
     kc = GlobalCounters.kernel_count
     b.assign(a.contiguous()).realize()
     assert GlobalCounters.kernel_count - kc == 2
@@ -333,7 +333,7 @@ class TestAssign(unittest.TestCase):
 
   @unittest.skip("multi output not supported anymore")
   def test_simple_assignment_multioutput(self):
-    a = Tensor.randn(32, 32).realize()
+    a = Tensor.arange(32*32).reshape(32, 32).contiguous().realize()
     b = Tensor.full((32, ), 1.).contiguous().realize()
     c = Tensor.full((32, ), 2.).contiguous().realize()
     d = Tensor.full((32, ), 3.).contiguous().realize()
@@ -361,16 +361,16 @@ class TestAssign(unittest.TestCase):
     np.testing.assert_equal(a.numpy(), np.arange(4 * 4).reshape(4, 4).transpose(1, 0) + np.arange(4 * 4).reshape(4, 4))
 
   def test_permuted_reduceop_child_dual_use(self):
-    a = Tensor.randn(32, 32, 32).realize()
-    b = Tensor.full((32, 32), 1.).contiguous().realize()
+    a = Tensor.arange(32*32*32).reshape(32, 32, 32).contiguous().realize()
+    b = Tensor.ones(32, 32, dtype=dtypes.int).contiguous().realize()
     r = a.sum(axis=1)
     b.assign(r + b.permute(1, 0))
     b.realize()
-    np.testing.assert_allclose(b.numpy(), a.numpy().sum(axis=1)+np.ones((32, 32)).transpose(1, 0), atol=1e-6, rtol=1e-3)
+    np.testing.assert_equal(b.numpy(), a.numpy().sum(axis=1)+np.ones((32, 32), dtype=np.int32).transpose(1, 0))
 
   @unittest.skip("multi output not supported anymore")
   def test_permuted_reduceop_multioutput_dual_use(self):
-    a = Tensor.randn(32, 32, 32).realize()
+    a = Tensor.arange(32*32*32).reshape(32, 32, 32).contiguous().realize()
     b = Tensor.full((32, 32), 1.).contiguous().realize()
     c = Tensor.full((32, 32), 2.).contiguous().realize()
 
@@ -383,7 +383,7 @@ class TestAssign(unittest.TestCase):
 
   @unittest.skip("multi output not supported anymore")
   def test_permuted_reduceop_multioutput_dual_use_possible(self):
-    a = Tensor.randn(32, 32, 32, dtype=dtypes.int).realize()
+    a = Tensor.arange(32*32*32).reshape(32, 32, 32).contiguous().realize()
     b = Tensor.arange(32 * 32).reshape(32, 32).realize()
     c = Tensor.arange(32 * 32).reshape(32, 32).realize()
 
