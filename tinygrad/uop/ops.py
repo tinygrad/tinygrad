@@ -542,6 +542,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
   def base(self) -> UOp:
     if self.op in GroupOp.Movement: return self.src[0].base
     if self.op is Ops.MULTI: return self.src[0].base  # MULTI is really a VIEW
+    if self.op is Ops.DETACH: return self.src[0].base  # DETACH can't change base
     return self
 
   # like gep, but might return an integer
