@@ -171,7 +171,7 @@ def option(s:int|None) -> int: return 0 if s is None else s+1
 device_ts_diffs:dict[str, tuple[Decimal, Decimal]] = {}
 def cpu_ts_diff(device:str, thread=0) -> Decimal: return device_ts_diffs.get(device, (Decimal(0),))[thread]
 
-device_props:dict[str, dict] = {}
+amdgpu_targets:dict[str, int] = {}
 
 DevEvent = ProfileRangeEvent|ProfileGraphEntry|ProfilePointEvent
 def flatten_events(profile:list[ProfileEvent]) -> Generator[tuple[Decimal, Decimal, DevEvent], None, None]:
@@ -308,7 +308,7 @@ def load_counters(profile:list[ProfileEvent]) -> None:
     if (sqtt:=v.get(ProfileSQTTEvent)):
       for e in sqtt:
         if e.itrace: steps.append(create_step(f"PKTS SE:{e.se}", (f"/prg-pkts-{e.se}", len(ctxs), len(steps)),
-                                              data=(e.blob, prg_events[k].lib, device_props[e.device]["gfx_target_version"])))
+                                              data=(e.blob, prg_events[k].lib, amdgpu_targets[e.device])))
       steps.append(create_step("SQTT", ("/prg-sqtt", len(ctxs), len(steps)), ((k, tag), sqtt, prg_events[k])))
     ctxs.append({"name":f"Exec {name}"+(f" n{run_number[k]}" if run_number[k] > 1 else ""), "steps":steps})
 
@@ -348,7 +348,7 @@ def unpack_sqtt(key:tuple[str, int], data:list, p:ProfileProgramEvent) -> tuple[
   # * init decoder
   from extra.sqtt.roc import decode
   base = unwrap(p.base)
-  addr_table = amd_decode(unwrap(p.lib), device_props[p.device]["gfx_target_version"])
+  addr_table = amd_decode(unwrap(p.lib), amd_targets[p.device])
   disasm:dict[int, tuple[str, int]] = {addr+base:(inst.disasm(), inst.size()) for addr, inst in addr_table.items()}
   rctx = decode(data, {p.tag:disasm})
   cu_events:dict[str, list[ProfileEvent]] = {}
@@ -385,8 +385,9 @@ def get_profile(profile:list[ProfileEvent], sort_fn:Callable[[str], Any]=device_
   for ev in profile:
     if isinstance(ev, ProfileDeviceEvent):
       device_ts_diffs[ev.device] = (ev.comp_tdiff,ev.copy_tdiff if ev.copy_tdiff is not None else ev.comp_tdiff)
-      if ev.props is not None: device_props[ev.device] = ev.props
-      if (d:=ev.device.split(":")[0]) == "AMD": device_decoders[d] = load_counters
+      if (d:=ev.device.split(":")[0]) == "AMD":
+        device_decoders[d] = load_counters
+        amdgpu_targets[d] = ev.props["gfx_target_version"]
   # load device specific counters
   for fxn in device_decoders.values(): fxn(profile)
   # map events per device
@@ -510,7 +511,7 @@ def get_render(query:str) -> dict:
   if fmt == "asm":
     ret:dict = {"metadata":[]}
     if data.device.startswith("AMD") and data.lib is not None:
-      with soft_err(lambda err: ret.update(err)): ret.update(amdgpu_cfg(data.lib, device_props[data.device]["gfx_target_version"]))
+      with soft_err(lambda err: ret.update(err)): ret.update(amdgpu_cfg(data.lib, amdgpu_targets[data.device]))
       with soft_err(lambda err: ret["metadata"].append(err)): ret["metadata"].append(amd_readelf(data.lib))
     else: ret["src"] = get_stdout(lambda: (compiler:=Device[data.device].compiler).disassemble(compiler.compile(data.src)))
     return ret
