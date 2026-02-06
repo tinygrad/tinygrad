@@ -161,7 +161,7 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
   rctx = IndexingContext()
 
   # get ops to realize
-  graph_rewrite(tsink, pm_generate_realize_map, ctx=rctx.realize_map, name="get realize")
+  graph_rewrite(tsink, pm_generate_realize_map, ctx=rctx.realize_map, bottom_up=True, name="get realize")
 
   # get the consumer map
   with cpu_profile("consumer map in rangeify", "TINY"):
