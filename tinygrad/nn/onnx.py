@@ -1,12 +1,12 @@
 # pylint: disable=possibly-unused-variable
 from typing import Any, Sequence, cast, Literal, NamedTuple, Generator
 import dataclasses, functools, io, math, types, warnings, pathlib, sys, os, struct, enum
-from io import BufferedReader
 from tinygrad.nn.state import TensorIO
 from tinygrad.tensor import Tensor, _broadcast_shape, ReductionStr
 from tinygrad.helpers import getenv, all_same, prod, flatten, make_tuple, argsort, is_numpy_ndarray, get_single_element, polyN
 from tinygrad.dtype import DType, ConstType, dtypes, _from_np_dtype, truncate, least_upper_dtype, DTYPES_DICT
 from tinygrad.device import is_dtype_supported, Device
+from tinygrad.uop.ops import sint
 
 # ***** protobuf definitions ******
 class WireType(enum.IntEnum):
@@ -75,7 +75,7 @@ class OnnxNode:
   opts: dict[str, Any]
 
 # ***** protobuf parsing ******
-class PBBufferedReader(BufferedReader):
+class PBBufferedReader(io.BufferedReader):
   def __init__(self, tensor: Tensor):
     assert tensor.dtype == dtypes.uint8, tensor
     super().__init__(TensorIO(tensor))
@@ -677,7 +677,7 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
   def ReduceLogSumExp(data:Tensor, axes:list[int]|None=None, keepdims:int=1, noop_with_empty_axes:int=0):
     return ReduceSum(data.exp(), axes, keepdims, noop_with_empty_axes).log()
   def ArgMax(x:Tensor, axis:int=0, keepdims:int=1, select_last_index:int=0):
-    if select_last_index: return ((x.shape[axis]-1) - x.flip(axis).argmax(axis, keepdim=keepdims)).cast(dtypes.int64)
+    if select_last_index: return ((int(x.shape[axis])-1) - x.flip(axis).argmax(axis, keepdim=keepdims)).cast(dtypes.int64)
     return x.argmax(axis, keepdim=keepdims).cast(dtypes.int64)
   def ArgMin(x, axis:int=0, keepdims:int=1, select_last_index:int=0):
     return ArgMax(-x, axis=axis, keepdims=keepdims, select_last_index=select_last_index)
@@ -704,7 +704,7 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
     return data[tuple(slices)]
 
   def Split(data:Tensor, split:list[int]|None=None, num_outputs:int=0, axis:int=0):
-    sz = data.shape[axis]
+    sz = int(data.shape[axis])
     if split is None: split = [sz // num_outputs + (1 if i < sz % num_outputs else 0) for i in range(num_outputs)]
     return data.split(split, axis)
 
@@ -717,8 +717,8 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
     return x.pad(padding=_onnx_pads_to_tiny_pads(real_pads), mode={"edge":"replicate", "wrap":"circular"}.get(mode, mode), value=value)
 
   def CenterCropPad(t:Tensor, shape:list[int], axes:list[int]|None=None):
-    shrink_arg:list[None|tuple[int,int]] = [None] * t.ndim
-    pad_arg:list[None|tuple[int,int]] = [None] * t.ndim
+    shrink_arg:list[None|tuple[sint,sint]] = [None] * t.ndim
+    pad_arg:list[None|tuple[sint,sint]] = [None] * t.ndim
     for s, x in zip(shape, axes or range(t.ndim)):
       tx = t.shape[x]
       if s < tx: shrink_arg[x] = (tx//2 - (s+1)//2, tx//2 + s//2)
@@ -752,8 +752,8 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
       pads = _auto_pad([s_*(i-1) + op_ + ((k_-1)*d_+1) - os for s_,i,op_,k_,d_,os in
                         zip(strides_, input_shape_, output_padding_, kernel_shape_, dilations_, output_shape)], auto_pad)
     if pads is None: # we generate pads
-      output_shape = output_shape or [X.shape[i+2] * strides_[i] for i in range(len(strides_))]
-      pads = [strides_[i]*(input_shape_[i]-1)+output_padding_[i]+((kernel_shape_[i]-1)*dilations_[i]+1)-output_shape[i]
+      output_shape = output_shape or [int(X.shape[i+2]) * strides_[i] for i in range(len(strides_))]
+      pads = [int(strides_[i]*(input_shape_[i]-1)+output_padding_[i]+((kernel_shape_[i]-1)*dilations_[i]+1)-output_shape[i])
               for i in range(len(input_shape_))]
       pads = _auto_pad(pads, auto_pad) if auto_pad != "NOTSET" else [0] * len(input_shape_) * 2
     pads = _onnx_pads_to_tiny_pads(pads)
@@ -1015,7 +1015,7 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
                         num_heads:int|None=None, past_present_share_buffer:int|None=None, qkv_hidden_sizes:list[int]|None=None,
                         rotary_embedding_dim:int|None=None, scale:float|None=None, unidirectional:int=0):
     assert not do_rotary and not attention_bias, "TODO"
-    if qkv_hidden_sizes is None: qkv_hidden_sizes = [weights.shape[1] // 3] * 3
+    if qkv_hidden_sizes is None: qkv_hidden_sizes = [int(weights.shape[1] // 3)] * 3
     qkv = x.linear(weights, bias)
     q, k, v = qkv.split(qkv_hidden_sizes, dim=2)
 
@@ -1113,7 +1113,7 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
     if X.ndim == 4: X = X.permute(0, 2, 1, 3)
     elif X.ndim == 3:
       assert num_heads is not None, "num_heads must be provided for 3D input"
-      X = X.unflatten(-1, (num_heads, X.shape[-1] // num_heads))
+      X = X.unflatten(-1, (num_heads, int(X.shape[-1]) // num_heads))
 
     head_size = cast(int, X.shape[-1])
     rot_dim = rotary_embedding_dim or head_size
@@ -1183,7 +1183,7 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
 
   def TensorScatter(data: Tensor, updates: Tensor, indices: Tensor, mode: str = 'default'):
     # scatter updates along axis -2 at positions given by indices, for each batch
-    B, U, D = indices.shape[0], updates.shape[-2], data.shape[-2]
+    B, U, D = indices.shape[0], updates.shape[-2], int(data.shape[-2])
     orig_shape, data_flat, updates_flat = data.shape, data.reshape(-1, D, data.shape[-1]), updates.reshape(-1, U, updates.shape[-1])
     B_total = data_flat.shape[0]
     batch_idx = Tensor.arange(B_total, device=data.device).reshape(B_total, 1).expand(B_total, U)

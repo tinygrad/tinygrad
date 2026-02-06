@@ -731,6 +731,111 @@ class TestVCCBehavior(unittest.TestCase):
     self.assertEqual(st.vcc >> 16, 0x0000, "Lanes 16-31 should be false")
 
 
+class TestCmpNge(unittest.TestCase):
+  """Tests for V_CMP_NGE (not-greater-or-equal) with NaN semantics.
+
+  NGE = !(a >= b). With NaN inputs:
+  - If either input is NaN, a >= b is false, so !(false) = true
+  - This differs from a < b which returns false for NaN inputs
+  """
+
+  def test_v_cmp_nge_f32_normal_values(self):
+    """v_cmp_nge_f32: basic comparison with normal floats."""
+    instructions = [
+      v_mov_b32_e32(v[0], f2i(1.0)),
+      v_mov_b32_e32(v[1], f2i(2.0)),
+      v_cmp_nge_f32_e32(v[0], v[1]),  # !(1.0 >= 2.0) = !(false) = true
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vcc & 1, 1, "!(1.0 >= 2.0) should be true")
+
+  def test_v_cmp_nge_f32_equal_values(self):
+    """v_cmp_nge_f32: equal values should return false."""
+    instructions = [
+      v_mov_b32_e32(v[0], f2i(1.0)),
+      v_mov_b32_e32(v[1], f2i(1.0)),
+      v_cmp_nge_f32_e32(v[0], v[1]),  # !(1.0 >= 1.0) = !(true) = false
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vcc & 1, 0, "!(1.0 >= 1.0) should be false")
+
+  def test_v_cmp_nge_f32_greater_value(self):
+    """v_cmp_nge_f32: greater value should return false."""
+    instructions = [
+      v_mov_b32_e32(v[0], f2i(2.0)),
+      v_mov_b32_e32(v[1], f2i(1.0)),
+      v_cmp_nge_f32_e32(v[0], v[1]),  # !(2.0 >= 1.0) = !(true) = false
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vcc & 1, 0, "!(2.0 >= 1.0) should be false")
+
+  def test_v_cmp_nge_f32_neg_inf(self):
+    """v_cmp_nge_f32: -inf compared to normal value."""
+    neg_inf = 0xff800000  # -inf
+    instructions = [
+      s_mov_b32(s[0], neg_inf),
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], f2i(1.0)),
+      v_cmp_nge_f32_e32(v[0], v[1]),  # !(-inf >= 1.0) = !(false) = true
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vcc & 1, 1, "!(-inf >= 1.0) should be true")
+
+  def test_v_cmp_nge_f32_clears_inactive_vcc_bits(self):
+    """v_cmp_nge_f32 with partial EXEC clears inactive VCC bits (hardware behavior)."""
+    neg_inf = 0xff800000  # -inf
+    instructions = [
+      # Set VCC to all 1s first
+      s_mov_b32(VCC_LO, 0xFFFFFFFF),
+      # Set EXEC to only lane 0
+      s_mov_b32(EXEC_LO, 0x00000001),
+      # v0 = 1.0 for lane 0
+      v_mov_b32_e32(v[0], f2i(1.0)),
+      # Compare: !(-inf >= 1.0) = true for lane 0
+      v_cmp_nge_f32_e32(neg_inf, v[0]),
+    ]
+    st = run_program(instructions, n_lanes=16)
+    # Hardware clears inactive lane bits, only active lane results remain
+    # Lane 0 result = 1 (true), lanes 1-15 = 0 (cleared)
+    self.assertEqual(st.vcc, 0x00000001, "VCC should only have active lane results")
+
+  def test_v_cmp_nge_f32_nan_src0(self):
+    """v_cmp_nge_f32: NaN in src0 should return true (NaN >= x is false)."""
+    quiet_nan = 0x7fc00000
+    instructions = [
+      s_mov_b32(s[0], quiet_nan),
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], f2i(1.0)),
+      v_cmp_nge_f32_e32(v[0], v[1]),  # !(NaN >= 1.0) = !(false) = true
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vcc & 1, 1, "!(NaN >= 1.0) should be true")
+
+  def test_v_cmp_nge_f32_nan_src1(self):
+    """v_cmp_nge_f32: NaN in src1 should return true (x >= NaN is false)."""
+    quiet_nan = 0x7fc00000
+    instructions = [
+      s_mov_b32(s[0], quiet_nan),
+      v_mov_b32_e32(v[0], f2i(1.0)),
+      v_mov_b32_e32(v[1], s[0]),
+      v_cmp_nge_f32_e32(v[0], v[1]),  # !(1.0 >= NaN) = !(false) = true
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vcc & 1, 1, "!(1.0 >= NaN) should be true")
+
+  def test_v_cmp_nge_f32_both_nan(self):
+    """v_cmp_nge_f32: both NaN should return true."""
+    quiet_nan = 0x7fc00000
+    instructions = [
+      s_mov_b32(s[0], quiet_nan),
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[0]),
+      v_cmp_nge_f32_e32(v[0], v[1]),  # !(NaN >= NaN) = !(false) = true
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vcc & 1, 1, "!(NaN >= NaN) should be true")
+
+
 class TestCmpxPartialWavefront(unittest.TestCase):
   """Tests for V_CMPX with partial wavefronts (fewer than 32 active lanes).
 

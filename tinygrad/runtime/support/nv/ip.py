@@ -48,12 +48,9 @@ class NVRpcQueue:
     self.seq += 1
     self.gsp.nvdev.NV_PGSP_QUEUE_HEAD[0].write(0x0)
 
-  def wait_resp(self, cmd:int, timeout=10000) -> memoryview:
-    start_time = int(time.perf_counter() * 1000)
-    while (int(time.perf_counter() * 1000) - start_time) < timeout:
-      System.memory_barrier()
-      if self.rx.readPtr == self.tx.writePtr: continue
-
+  def read_resp(self):
+    System.memory_barrier()
+    while self.rx.readPtr != self.tx.writePtr:
       off = self.rx.readPtr * self.tx.msgSize
       hdr = nv.rpc_message_header_v.from_address(self.queue_va + off + 0x30)
       msg = self.queue_mv[off + 0x50 : off + 0x50 + hdr.length]
@@ -62,6 +59,8 @@ class NVRpcQueue:
       if hdr.function == nv.NV_VGPU_MSG_EVENT_GSP_RUN_CPU_SEQUENCER: self.gsp.run_cpu_seq(msg)
       elif hdr.function == nv.NV_VGPU_MSG_EVENT_OS_ERROR_LOG:
         print(f"nv {self.gsp.nvdev.devfmt}: GSP LOG: {msg[12:].tobytes().rstrip(bytes([0])).decode('utf-8')}")
+
+      self.gsp.nvdev.is_err_state |= hdr.function in {nv.NV_VGPU_MSG_EVENT_OS_ERROR_LOG, nv.NV_VGPU_MSG_EVENT_MMU_FAULT_QUEUED}
 
       # Update the read pointer
       self.rx.readPtr = (self.rx.readPtr + round_up(hdr.length, self.tx.msgSize) // self.tx.msgSize) % self.tx.msgCount
@@ -72,7 +71,12 @@ class NVRpcQueue:
         print(f"nv {self.gsp.nvdev.devfmt}: in RPC: {nm}, res:{hdr.rpc_result:#x}")
 
       if hdr.rpc_result != 0: raise RuntimeError(f"RPC call {hdr.function} failed with result {hdr.rpc_result}")
-      if hdr.function == cmd: return msg
+      yield hdr.function, msg
+
+  def wait_resp(self, cmd:int, timeout:int=10000) -> memoryview:
+    start_time = int(time.perf_counter() * 1000)
+    while (int(time.perf_counter() * 1000) - start_time) < timeout:
+      if (msg:=next((message for func, message in self.read_resp() if func == cmd), None)) is not None: return msg
     raise RuntimeError(f"Timeout waiting for RPC response for command {cmd}")
 
 class NV_FLCN(NV_IP):

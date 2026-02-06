@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 
 import argparse, glob, os, time, subprocess, sys
+from tinygrad.helpers import temp
 
 def scan_devs_based_on_lock(prefix:str, args) -> list[str]:
   target_dev = args.pci_bus if 'pci_bus' in args.__dir__() else ""
 
   devs = []
-  for dev in glob.glob(f'/tmp/{prefix}_*.lock'):
-    dev_id = dev[8:-5]
-    if os.path.exists(f"/sys/bus/pci/devices/{dev_id}") and dev_id.startswith(target_dev): devs.append(dev_id)
+  for dev in glob.glob(temp(f'{prefix}_*.lock')):
+    dev_id = dev.split('/')[-1][len(prefix)+1:-5]
+    if dev_id.startswith(target_dev): devs.append(dev_id)
   return devs
 
 def _do_reset_device(pci_bus): os.system(f"sudo sh -c 'echo 1 > /sys/bus/pci/devices/{pci_bus}/reset'")
@@ -53,16 +54,7 @@ def cmd_show_pids(args):
 
   for dev in devs:
     try:
-      pid = subprocess.check_output(['sudo', 'lsof', f'/tmp/{prefix}_{dev}.lock']).decode('utf-8').strip().split('\n')[1].split()[1]
-      print(f"{dev}: {pid}")
-    except subprocess.CalledProcessError: print(f"{dev}: No processes found using this device")
-
-def cmd_kill_pids(args):
-  devs = scan_devs_based_on_lock(prefix:={"amd":"am", "nv":"nv"}[args.backend], args)
-
-  for dev in devs:
-    try:
-      pid = subprocess.check_output(['sudo', 'lsof', f'/tmp/{prefix}_{dev}.lock']).decode('utf-8').strip().split('\n')[1].split()[1]
+      pid = subprocess.check_output(['sudo', 'lsof', temp(f'{prefix}_{dev}.lock')]).decode('utf-8').strip().split('\n')[1].split()[1]
       print(f"{dev}: {pid}")
     except subprocess.CalledProcessError: print(f"{dev}: No processes found using this device")
 
@@ -74,7 +66,7 @@ def cmd_kill_pids(args):
       if i > 0: time.sleep(0.2)
 
       try:
-        try: pid = subprocess.check_output(['sudo', 'lsof', f'/tmp/{prefix}_{dev}.lock']).decode('utf-8').strip().split('\n')[1].split()[1]
+        try: pid = subprocess.check_output(['sudo', 'lsof', temp(f'{prefix}_{dev}.lock')]).decode('utf-8').strip().split('\n')[1].split()[1]
         except subprocess.CalledProcessError: break
 
         print(f"Killing process {pid} (which uses {dev})")

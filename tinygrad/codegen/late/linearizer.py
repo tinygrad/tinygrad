@@ -26,7 +26,7 @@ def linearize(sink:UOp) -> list[UOp]:
     extra = None
     match u.op:
       # the order and placement of these defines is important
-      case Ops.DEFINE_GLOBAL: priority, extra = -20, u.arg
+      case Ops.PARAM: priority, extra = -20, u.arg
       case Ops.DEFINE_VAR: priority, extra = -19, u.arg
       case Ops.DEFINE_LOCAL: priority = -18
       case Ops.DEFINE_REG: priority = -17

@@ -3,6 +3,7 @@ import time, pprint, random, itertools, math
 from dataclasses import dataclass, replace, field
 from tinygrad.helpers import all_same, colored, DEBUG, GlobalCounters, ansilen, BEAM, NOOPT, all_int, CAPTURING, Metadata, TRACEMETA, TracingKey
 from tinygrad.helpers import DEVECTORIZE, time_to_str, VALIDATE_WITH_CPU, cpu_profile, PROFILE, ProfilePointEvent, cpu_events, prod, Context, unwrap
+from tinygrad.helpers import EMULATED_DTYPES
 from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, sym_infer
 from tinygrad.device import Device, Buffer
 from tinygrad.renderer import ProgramSpec, Estimates
@@ -36,7 +37,7 @@ def optimize_local_size(_prg:Callable, global_size:list[int], rawbufs:list[Buffe
 
 class CompiledRunner(Runner):
   def __init__(self, p:ProgramSpec, prg=None):
-    if DEBUG >= 3: print(p.applied_opts)
+    if DEBUG >= 3 and p.applied_opts: print(p.applied_opts)
     if DEBUG >= 4: print(p.src)
     if p.lib is None:
       with cpu_profile(TracingKey(f"compile {p.name}", (p.function_name,)), "TINY"):
@@ -74,11 +75,11 @@ class BufferCopy(Runner):
       getattr(src.allocator.dev, 'fd', None) is not None and dest.allocator.supports_copy_from_disk
     if disk_supports_fast_copyout and hasattr(dest.allocator, 'copy_from_disk') and src.nbytes >= 4096:
       dest.allocator.copy_from_disk(dest._buf, src._buf, src.nbytes)
-    elif (src.device.startswith("DISK") or src.device.startswith("TINYFS")) and hasattr(dest.allocator, '_as_buffer'):
+    elif isinstance(src.device, str) and src.device.startswith(("DISK", "TINYFS")) and hasattr(dest.allocator, '_as_buffer'):
       # fast(ish) path, uses readinto in diskbuffers
       src.allocator._copyout(dest.allocator._as_buffer(dest._buf), src._buf)
     else:
-      dest.copyin(src.as_buffer(allow_zero_copy=True))  # may allocate a CPU buffer depending on allow_zero_copy
+      dest.copyin(src.as_memoryview(allow_zero_copy=True))  # may allocate a CPU buffer depending on allow_zero_copy
   def __call__(self, rawbufs:list[Buffer], var_vals:dict[str, int], wait=False):
     dest, src = rawbufs[0:2]
     assert dest.size == src.size and dest.dtype == src.dtype, f"buffer copy mismatch, {dest.size} != {src.size}, {dest.dtype} != {src.dtype}"
@@ -106,10 +107,10 @@ class EncDec(Runner):
 
 # **************** method cache ****************
 
-method_cache: dict[tuple[str, type, bytes, tuple[int, ...], bool], CompiledRunner] = {}
+method_cache: dict[tuple[str, type, bytes, tuple, bool], CompiledRunner] = {}
 def get_runner(device:str, ast:UOp) -> CompiledRunner:
   # TODO: this should be all context relevant to rendering
-  context = (BEAM.value, NOOPT.value, DEVECTORIZE.value)
+  context = (BEAM.value, NOOPT.value, DEVECTORIZE.value, EMULATED_DTYPES.value)
   ckey = (device, type(Device[device].compiler), ast.key, context, False)
   if cret:=method_cache.get(ckey): return cret
   bkey = (device.split(":")[0], type(Device[device].compiler), ast.key, context, True)
@@ -158,7 +159,7 @@ class ExecItem:
     var_vals = self.fixedvars if _var_vals is None else (_var_vals|self.fixedvars)
     # reorder bufs to match program globals if needed
     _bufs = [self.bufs[i] for i in self.prg.p.globals] if isinstance(self.prg, CompiledRunner) else self.bufs
-    bufs = cast(list[Buffer], [unwrap(x) for x in _bufs] if jit else [unwrap(x).ensure_allocated() for x in _bufs])
+    bufs = [unwrap(x) for x in _bufs] if jit else [unwrap(x).ensure_allocated() for x in _bufs]
     if PROFILE:
       payload = {"metadata":self.metadata, "var_vals":var_vals, "bufs":[b.trace_num for b in bufs], "name":self.prg.display_name}
       payload["outputs"], payload["inputs"] = (self.prg.p.outs, self.prg.p.ins) if isinstance(self.prg, CompiledRunner) else ([0], [1])
@@ -198,7 +199,7 @@ def run_schedule(schedule:list[ExecItem], var_vals:dict[str, int]|None=None, do_
       bufs = [b for b in ei.bufs if b is not None]
       nb: list[Buffer|None] = [Buffer("CPU", b.size, b.dtype) for b in bufs]
       for cpu_b, gpu_b in zip(nb, bufs):
-        if cpu_b is not None and gpu_b.is_allocated(): cpu_b.ensure_allocated().copyin(gpu_b.as_buffer())
+        if cpu_b is not None and gpu_b.is_allocated(): cpu_b.ensure_allocated().copyin(gpu_b.as_memoryview())
 
       # run on GPU
       ei.run(var_vals, do_update_stats=do_update_stats)

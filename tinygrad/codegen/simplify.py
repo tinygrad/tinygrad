@@ -1,10 +1,10 @@
 import itertools
 from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, graph_rewrite, _substitute, range_start
 from tinygrad.uop.symbolic import symbolic
-from tinygrad.helpers import partition, dedup
+from tinygrad.helpers import partition
 from tinygrad.dtype import dtypes, ImageDType
 
-def flatten_range(r:UOp):
+def flatten_range(r:UOp) -> UOp|None:
   off = range_start[r.op]
   rngs = r.src[off:]
   if not len(rngs): return None
@@ -16,7 +16,7 @@ pm_flatten_range = PatternMatcher([
   (UPat((Ops.REDUCE, Ops.STORE, Ops.END), name="r"), flatten_range),
 ])
 
-def count_divmod(x:UOp): return len([u for u in x.toposort() if u.op in {Ops.IDIV, Ops.MOD}])
+def count_divmod(x:UOp) -> int: return len([u for u in x.toposort() if u.op in {Ops.IDIV, Ops.MOD}])
 def simplify_merge_adjacent(u:UOp) -> UOp|None:
   reduce_ranges = [x.ranges for x in u.backward_slice_with_self if x.op is Ops.REDUCE]
   # on END we only want to merge adjacent ranges, on REDUCE we want to try all combinations
@@ -40,10 +40,10 @@ pm_simplify_ranges = PatternMatcher([
   (UPat((Ops.END, Ops.REDUCE), name="u"), simplify_merge_adjacent),
 ])
 
-def mark_range_mod(ctx, r:UOp, c:UOp):
+def mark_range_mod(ctx:dict[UOp, UOp|None], r:UOp, c:UOp) -> None:
   if r not in ctx and r.src[0].op is Ops.CONST and r.src[0].divides(c.arg) is not None: ctx[r] = c
 
-def do_substitute(ctx, x: UOp):
+def do_substitute(ctx:dict[UOp, UOp|None], x: UOp) -> UOp|None:
   subs = {}
   for k,v in ctx.items():
     if v is not None:
@@ -53,7 +53,7 @@ def do_substitute(ctx, x: UOp):
   ctx.clear()
   return ret
 
-def dont_sub_ranges_for_image(ctx, x:UOp):
+def dont_sub_ranges_for_image(ctx:dict[UOp, UOp|None], x:UOp) -> None:
   if isinstance(x.src[0].src[0].dtype, ImageDType):
     for s in x.src[0].ranges: ctx[s] = None
 
@@ -67,7 +67,7 @@ pm_split_ranges = PatternMatcher([
 
 def no_range(u:UOp) -> bool: return not any(x.op is Ops.RANGE for x in u.backward_slice_with_self)
 
-def reduce_unparented(red:UOp):
+def reduce_unparented(red:UOp) -> UOp|None:
   if red.arg not in {Ops.ADD, Ops.MAX, Ops.MUL}: return None
   assert all(x.op is Ops.RANGE for x in red.src[1:]), "some reduce srcs aren't ranges"
   reduce_parented, reduce_unparented = partition(red.src[1:], lambda x: x in red.src[0].ranges)
@@ -119,14 +119,14 @@ pm_reduce_load_collapse = pm_reduce_collapse + PatternMatcher([
    lambda r,idx,expr: (v:=(idx.cast(r.dtype) >= 0) & (idx.cast(r.dtype) < r.src[0])).where(expr.substitute({r:idx.cast(r.dtype).valid(v)}),0)),
 ])
 
-def reduce_collapse(red:UOp, u:UOp, pm=pm_reduce_collapse):
+def reduce_collapse(red:UOp, u:UOp, pm:PatternMatcher=pm_reduce_collapse) -> UOp|None:
   for r in red.src[1:]:
     included = u.toposort(gate=lambda x: r in x.ranges)
     if any(x.op in {Ops.STORE, Ops.REDUCE} for x in included): return None
     replaces: dict[UOp, UOp] = {}
     for u in included:
       for s in u.src:
-        if s in included or s in replaces or s.op in {Ops.CONST, Ops.VCONST, Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL, Ops.DEFINE_VAR}: continue
+        if s in included or s in replaces or s.op in {Ops.CONST, Ops.VCONST, Ops.PARAM, Ops.DEFINE_LOCAL, Ops.DEFINE_VAR}: continue
         replaces[s] = UOp(Ops.DEFINE_VAR, dtype=s.dtype, arg=(f'in{len(replaces)}', s.vmin, s.vmax))
     collapse_fxn = u.substitute(replaces).reduce(r, arg=Ops.ADD)
     sink = graph_rewrite(collapse_fxn, pm, name="reduce_collapse")
@@ -134,7 +134,7 @@ def reduce_collapse(red:UOp, u:UOp, pm=pm_reduce_collapse):
     u = sink.substitute({v:k for k,v in replaces.items()})
   return u
 
-def reduce_load_collapse(red:UOp, u:UOp): return reduce_collapse(red, u, pm=pm_reduce_load_collapse)
+def reduce_load_collapse(red:UOp, u:UOp) -> UOp|None: return reduce_collapse(red, u, pm=pm_reduce_load_collapse)
 
 # remove REDUCE without loads (generic arange opt / indexing).
 pm_reduce_simplify = pm_reduce_unparented + PatternMatcher([
@@ -146,17 +146,4 @@ pm_load_collapse = PatternMatcher([
   (UPat(Ops.REDUCE, arg=Ops.ADD, src=(UPat.var("u"), UPat()), name="red"), reduce_load_collapse),
   # we want to make sure we dont do math on a loaded index since that can cause overflow, this undoes the rule in pm_reduce_load_collapse
   ((UPat.var("x", dtypes.index)+UPat.var("y"))<UPat.var("c"), lambda x,y,c: x < c-y if no_load(y) and no_load(c) and not no_load(x) else None),
-])
-
-def cut_store_range(ctx, store:UOp, r:UOp):
-  # only cut ranges on CPU for now
-  if r.src[0].op is not Ops.CONST or ctx!="CPU": return None
-  if not (cuts:=[c.src[1].arg for c in store.get_consumer_map()[r] if c.op is Ops.CMPLT and r is c.src[0] and c.src[1].op is Ops.CONST]): return None
-  cuts = sorted(dedup([0] + cuts + [r.src[0].arg]))
-  ranges = [UOp.range((end-start), *(r.arg[0:-1]+(i,r.arg[-1]))) for i,(start,end) in enumerate(zip(cuts[:-1], cuts[1:]))]
-
-  return UOp.group(*[store.substitute({r: new_r+start}).end(new_r) for new_r, start in zip(ranges, cuts[:-1])])
-
-pm_split_store = pm_flatten_range+PatternMatcher([
-  (UPat(Ops.END, src=(UPat(Ops.STORE, name="store"), UPat.var("r"))), cut_store_range),
 ])

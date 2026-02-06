@@ -2,20 +2,32 @@ from __future__ import annotations
 import os, ctypes, functools, mmap, struct, array, math, sys, weakref, contextlib
 assert sys.platform != 'win32'
 from typing import Any
-from tinygrad.device import BufferSpec, CompilerSet, CompilerPair
+from tinygrad.device import BufferSpec, CompilerSet, CompilerPair, Device
 from tinygrad.runtime.support.hcq import HCQBuffer, HWQueue, HCQProgram, HCQCompiled, HCQAllocatorBase, HCQSignal, HCQArgsState, BumpAllocator
 from tinygrad.runtime.support.hcq import FileIOInterface, MMIOInterface
 from tinygrad.runtime.autogen import kgsl, mesa
 from tinygrad.runtime.ops_cl import CLCompiler, CLDevice
 from tinygrad.renderer.cstyle import QCOMRenderer
 from tinygrad.renderer.nir import IR3Renderer
-from tinygrad.helpers import getenv, mv_address, to_mv, round_up, data64_le, prod, fromimport, cpu_profile, lo32, PROFILE, suppress_finalizing
-from tinygrad.helpers import next_power2, flatten, QCOM_IR3, QCOM_CC
-from tinygrad.dtype import ImageDType
+from tinygrad.helpers import getenv, mv_address, to_mv, round_up, data64_le, ceildiv, prod, fromimport, cpu_profile, lo32, suppress_finalizing
+from tinygrad.helpers import next_power2, flatten, QCOM_IR3, QCOM_CC, PROFILE
+from tinygrad.dtype import ImageDType, dtypes
 from tinygrad.runtime.support.system import System
 if getenv("IOCTL"): import extra.qcom_gpu_driver.opencl_ioctl  # noqa: F401  # pylint: disable=unused-import
 
 BUFTYPE_BUF, BUFTYPE_TEX, BUFTYPE_IBO = 0, 1, 2
+
+@functools.cache
+def dcache_flush():
+  from tinygrad.uop.ops import UOp, Ops, KernelInfo
+  from tinygrad.codegen import get_program
+  buf, n = UOp(Ops.PARAM, dtypes.uint8.ptr(), arg=0), UOp(Ops.PARAM, dtypes.uint8.ptr(), arg=1)
+  i = UOp.range(n.cast(dtypes.int), 0, dtype=dtypes.int)
+  flush = UOp(Ops.CUSTOM, dtypes.void, (buf.cast(dtypes.ulong) + i.cast(dtypes.ulong) * UOp.const(dtypes.ulong, 64),),
+              arg='__asm__ volatile("dc cvac, %0" :: "r"({0}) : "memory");')
+  sink = UOp.sink(flush.end(i), UOp(Ops.CUSTOM, dtypes.void, (), arg='__asm__ volatile("dsb sy" ::: "memory");'), arg=KernelInfo(name="dcache_flush"))
+  ps = get_program(UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg="CPU"), UOp(Ops.LINEAR, src=tuple(sink.toposort())))), Device["CPU"].renderer)
+  return Device["CPU"].runtime(ps.function_name, ps.lib)
 
 #Parse C-style defines: <regname>_<field_x>__SHIFT and <regname>_<field_y>__MASK from the adreno module into the following format:
 # qreg.<regname>(<field_x>=..., <field_y>=..., ..., <field_n>=...)
@@ -45,11 +57,10 @@ class QCOMCompiler(CLCompiler):
 class QCOMSignal(HCQSignal):
   def __init__(self, *args, **kwargs): super().__init__(*args, **{**kwargs, 'timestamp_divider': 19.2})
 
-  def _sleep(self, time_spent_waiting_ms:int) -> bool:
+  def _sleep(self, time_spent_since_last_sleep_ms:int):
     # Sleep only for timeline signals. Do it immediately to free cpu.
     if self.is_timeline and self.owner is not None:
       kgsl.IOCTL_KGSL_DEVICE_WAITTIMESTAMP_CTXTID(self.owner.fd, context_id=self.owner.ctx, timestamp=self.owner.last_cmd, timeout=0xffffffff)
-    return False
 
 class QCOMComputeQueue(HWQueue):
   def __init__(self, dev:QCOMDevice):
@@ -143,7 +154,7 @@ class QCOMComputeQueue(HWQueue):
              qreg.a6xx_sp_cs_pvt_mem_param(memsizeperitem=prg.pvtmem_size_per_item), *data64_le(prg.dev._stack.va_addr),
              qreg.a6xx_sp_cs_pvt_mem_size(totalpvtmemsize=prg.pvtmem_size_total))
 
-    if prg.NIR and prg.wgsz != 0xfc: to_mv(args_state.buf.va_addr + prg.wgsz * 4, 12)[:] = struct.pack("III", *local_size)
+    if prg.NIR and prg.wgsz != 0xfc: to_mv(int(args_state.buf.va_addr) + prg.wgsz * 4, 12)[:] = struct.pack("III", *local_size)
     self.cmd(mesa.CP_LOAD_STATE6_FRAG, qreg.cp_load_state6_0(state_type=mesa.ST_CONSTANTS, state_src=mesa.SS6_INDIRECT,
                                                              state_block=mesa.SB6_CS_SHADER, num_unit=1024 // 4),
              *data64_le(args_state.buf.va_addr))
@@ -199,7 +210,7 @@ class QCOMArgsState(HCQArgsState):
     ibos, texs = uavs[:prg.ibo_cnt], uavs[prg.ibo_cnt:]
     for cnst_val,cnst_off,cnst_sz in prg.consts_info: to_mv(self.buf.va_addr + cnst_off, cnst_sz)[:] = cnst_val.to_bytes(cnst_sz, byteorder='little')
 
-    if prg.samp_cnt > 0: to_mv(self.buf.va_addr + prg.samp_off, len(prg.samplers) * 4).cast('I')[:] = array.array('I', prg.samplers)
+    if prg.samp_cnt > 0: to_mv(int(self.buf.va_addr) + prg.samp_off, len(prg.samplers) * 4).cast('I')[:] = array.array('I', prg.samplers)
     if prg.NIR:
       self.bind_sints_to_buf(*[b.va_addr for b in ubos], buf=self.buf, fmt='Q', offset=prg.buf_off)
       self.bind_sints_to_buf(*vals, buf=self.buf, fmt='I', offset=prg.buf_off + len(ubos) * 8)
@@ -257,7 +268,7 @@ class QCOMProgram(HCQProgram):
     super().__init__(QCOMArgsState, self.dev, self.name, kernargs_alloc_size=kernargs_alloc_size)
     weakref.finalize(self, self._fini, self.dev, self.lib_gpu, buf_spec)
 
-  def __call__(self, *bufs, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), vals:tuple[int, ...]=(), wait=False):
+  def __call__(self, *bufs, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), vals:tuple[int|None, ...]=(), wait=False):
     if self.max_threads < prod(local_size): raise RuntimeError("Too many resources requested for launch")
     if any(g*l>mx for g,l,mx in zip(global_size, local_size, [65536, 65536, 65536])) and any(l>mx for l,mx in zip(local_size, [1024, 1024, 1024])):
       raise RuntimeError(f"Invalid global/local dims {global_size=}, {local_size=}")
@@ -320,7 +331,7 @@ class QCOMAllocator(HCQAllocatorBase):
     return self.dev._gpu_map(opts.external_ptr, size, image=opts.image) if opts.external_ptr else self.dev._gpu_alloc(size, image=opts.image)
 
   def _do_copy(self, src_addr, dest_addr, src_size, real_size, src_stride, dest_stride, prof_text, dest_off=0, src_off=0):
-    with cpu_profile(prof_text, self.dev.device, is_copy=True):
+    with cpu_profile(prof_text, self.dev.device):
       while src_off < src_size:
         ctypes.memmove(dest_addr+dest_off, src_addr+src_off, real_size)
         src_off, dest_off = src_off+src_stride, dest_off+dest_stride
@@ -391,6 +402,7 @@ class QCOMDevice(HCQCompiled):
 
   def _gpu_map(self, ptr:int, size:int, **kwargs) -> HCQBuffer:
     ptr_aligned, size_aligned = (ptr & ~0xfff), round_up(size + (ptr & 0xfff), 0x1000)
+    dcache_flush().fxn(ctypes.c_uint64(ptr_line_aligned:=ptr & ~63), ctypes.c_uint64(ceildiv(ptr + size - ptr_line_aligned, 64)))
     try:
       mi = kgsl.IOCTL_KGSL_MAP_USER_MEM(self.fd, hostptr=ptr_aligned, len=size_aligned, memtype=kgsl.KGSL_USER_MEM_TYPE_ADDR)
       return HCQBuffer(mi.gpuaddr + (ptr - ptr_aligned), size=size, meta=(mi, False), view=MMIOInterface(ptr, size, fmt='B'), owner=self, **kwargs)
@@ -399,9 +411,11 @@ class QCOMDevice(HCQCompiled):
       raise RuntimeError("Failed to map external pointer to GPU memory") from e
 
   def _gpu_free(self, mem:HCQBuffer):
-    if mem.meta[0] is None: return
-    kgsl.IOCTL_KGSL_GPUOBJ_FREE(self.fd, id=mem.meta[0].id)
-    if mem.meta[1]: FileIOInterface.munmap(mem.va_addr, mem.meta[0].mmapsize)
+    if mem.meta[0] is None: return # external (gpu) ptr
+    if not mem.meta[1]: kgsl.IOCTL_KGSL_SHAREDMEM_FREE(self.fd, gpuaddr=mem.meta[0].gpuaddr) # external (cpu) ptr
+    else:
+      kgsl.IOCTL_KGSL_GPUOBJ_FREE(self.fd, id=mem.meta[0].id)
+      FileIOInterface.munmap(mem.va_addr, mem.meta[0].mmapsize)
 
   def _ensure_stack_size(self, sz):
     if not hasattr(self, '_stack'): self._stack = self._gpu_alloc(sz)

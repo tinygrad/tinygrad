@@ -72,7 +72,7 @@ vliw_prepare = PatternMatcher([
   # cast is fake
   (UPat(Ops.CAST, name="c"), lambda c: c.src[0]),
   # rewrites to hardcode the addresses in memory
-  (UPat(Ops.DEFINE_GLOBAL, name="dg"), lambda dg: UOp.const(dtypes.uint, global_addrs[dg.arg])),
+  (UPat(Ops.PARAM, name="dg"), lambda dg: UOp.const(dtypes.uint, global_addrs[dg.arg])),
   # INDEX is just plus
   (UPat(Ops.INDEX, name="i"), lambda i: i.src[0]+i.src[1]),
 ])+symbolic

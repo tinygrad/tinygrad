@@ -26,7 +26,7 @@ import unittest
 import numpy as np
 import torch
 from tinygrad import Tensor, dtypes, nn
-from tinygrad.device import Device, is_dtype_supported
+from tinygrad.device import Device
 from tinygrad.helpers import getenv
 from tinygrad.renderer.nir import NIRRenderer
 
@@ -195,8 +195,10 @@ class TestAssignIssues(unittest.TestCase):
     t.shrink(((1, 3), (1, 3))).assign(Tensor.ones(2, 2))
     np.testing.assert_allclose(t.numpy(), torch_tensor.numpy())
 
+  @unittest.expectedFailure
   def test_assign_broadcast(self):
     # broadcasting during assign should behave like PyTorch
+    # NOTE: we don't want implicit dtype casting (int64 -> float32 loses precision), so this fails
     torch_tensor = torch.zeros(3, 5)
     torch_tensor[:] = torch.arange(5)
     t = Tensor.zeros(3, 5)
@@ -207,8 +209,7 @@ class TestUOpValidationIssue(unittest.TestCase):
   # these fail with UOp verification error.
   # we want more of these with diverse errors!
 
-  @unittest.skipIf((not is_dtype_supported(dtypes.long)) or MOCKGPU or isinstance(Device[Device.DEFAULT].renderer, NIRRenderer),
-                   "hangs gpuocelot, NIR cannot render")
+  @unittest.skipIf(MOCKGPU or isinstance(Device[Device.DEFAULT].renderer, NIRRenderer), "hangs gpuocelot, NIR cannot render")
   def test_tensor_index_overflow(self):
     val = Tensor([1])
     big = val.expand(2**31 + 3)

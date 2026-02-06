@@ -188,9 +188,8 @@ class TestLinearizer(unittest.TestCase):
     assert any(x.op is Ops.DEFINE_LOCAL for x in stores[0].toposort())
     # the second store is to gds with no upcasts
     assert stores[1].src[1].dtype == dtypes.float
-    assert any(x.op is Ops.DEFINE_GLOBAL for x in stores[1].toposort())
+    assert any(x.op is Ops.PARAM for x in stores[1].toposort())
 
-  @unittest.skipIf(Device.DEFAULT=="CPU", "CPU splits the cat so cant upcast")
   def test_zero_fold(self):
     a, b = Tensor.randn(1).realize(), Tensor.randn(1).realize()
     r = Tensor.stack(a, b)
@@ -234,7 +233,7 @@ class TestLinearizer(unittest.TestCase):
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "test requires float4")
   def test_simple_unroll_no_between_phi_dependencies(self):
-    x, y = Tensor.rand(128, 128), Tensor.rand(128, 128)
+    x, y = Tensor.empty(64, 64), Tensor.empty(64, 64)
     r = (x@y).relu()
     opt = [Opt(OptOps.UNROLL, 0, 4), Opt(OptOps.UPCAST, 0, 4)]
     ast = helper_linearizer_opt(r, [opt])
@@ -420,7 +419,7 @@ class TestLinearizer(unittest.TestCase):
     simplifies to:
     *((device float4*)(data0+alu2)) = acc0;
     """
-    x, y = Tensor.randn(64,64), Tensor.randn(64,64)
+    x, y = Tensor.empty(64,64), Tensor.empty(64,64)
     out = x.matmul(y)
     with Context(TC=0):
       ast = helper_linearizer_opt(out)
@@ -442,7 +441,7 @@ class TestLinearizer(unittest.TestCase):
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "test requires float4")
   def test_grouped_store_locals_and_globals(self):
-    x, y = Tensor.rand(128, 128), Tensor.rand(128, 128)
+    x, y = Tensor.empty(64, 64), Tensor.empty(64, 64)
     out = x@y
     opt = [Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.GROUPTOP, 0, 8),
             Opt(OptOps.UNROLL, 0, 4), Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 1, 2)] # upcast accs in both reduces
@@ -450,7 +449,7 @@ class TestLinearizer(unittest.TestCase):
     def get_recursive(uop): return set.union(set(uop.src), [uop], *[get_recursive(v) for v in uop.src])
     uops = get_program(ast, renderer=Device[Device.DEFAULT].renderer, opts=opt).uops
     local_stores = [u for u in uops if u.op is Ops.STORE and any(x.op is Ops.DEFINE_LOCAL for x in get_recursive(u.src[0]))]
-    global_stores = [u for u in uops if u.op is Ops.STORE and any(x.op is Ops.DEFINE_GLOBAL for x in get_recursive(u.src[0]))]
+    global_stores = [u for u in uops if u.op is Ops.STORE and any(x.op is Ops.PARAM for x in get_recursive(u.src[0]))]
     barrier = [u for u in uops if u.op is Ops.BARRIER]
     assert len(barrier) == 1
     # check that the float4 cast collapses for all stores
@@ -505,7 +504,7 @@ def helper_linearizer_opt(r:Tensor|list[Tensor], *args, **kwargs):
   return realized_ast
 
 def copyout_outputs(outbufs:list[Buffer]) -> list[np.ndarray]:
-  return [np.frombuffer(x.as_buffer(), _to_np_dtype(x.dtype)) for x in outbufs]
+  return [np.frombuffer(x.as_memoryview(), _to_np_dtype(x.dtype)) for x in outbufs]
 
 def reset_bufs(bufs:list[Buffer]):
   for buf in bufs: buf.copyin(np.zeros((buf.size*buf.dtype.itemsize,), dtype=np.uint8).data)

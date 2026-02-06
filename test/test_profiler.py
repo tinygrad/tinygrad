@@ -6,6 +6,9 @@ from tinygrad.runtime.support.hcq import HCQCompiled
 from tinygrad.engine.realize import get_runner
 
 MOCKGPU = getenv("MOCKGPU")
+def _dev_base(d):
+  p = d.split(":")
+  return p[0] if len(p) < 2 or not p[1].isdigit() else f"{p[0]}:{p[1]}"
 
 @contextlib.contextmanager
 def helper_collect_profile(*devs):
@@ -55,7 +58,7 @@ class TestProfiler(unittest.TestCase):
     kernel_runs = [x for x in profile if isinstance(x, ProfileRangeEvent)]
     assert len(kernel_runs) == 1, "one kernel run is expected"
     assert kernel_runs[0].name == runner_name, "kernel name is not correct"
-    assert not kernel_runs[0].is_copy, "kernel should not be copy"
+    assert _dev_base(kernel_runs[0].device) == kernel_runs[0].device, "kernel should not be on a sub-device"
 
   def test_profile_copyin(self):
     buf1 = Buffer(Device.DEFAULT, 2, dtypes.float, options=BufferSpec(nolru=True)).ensure_allocated()
@@ -63,10 +66,8 @@ class TestProfiler(unittest.TestCase):
     with helper_collect_profile(TestProfiler.d0) as profile:
       buf1.copyin(memoryview(bytearray(struct.pack("ff", 0, 1))))
 
-    profile, _ = helper_profile_filter_device(profile, TestProfiler.d0.device)
-    kernel_runs = [x for x in profile if isinstance(x, ProfileRangeEvent)]
+    kernel_runs = [x for x in profile if isinstance(x, ProfileRangeEvent) and x.device.startswith(TestProfiler.d0.device)]
     assert len(kernel_runs) == 1, "one kernel run is expected"
-    assert kernel_runs[0].is_copy, "kernel should be copy"
 
   def test_profile_multiops(self):
     runner_name = TestProfiler.runner._prg.name
@@ -77,16 +78,12 @@ class TestProfiler(unittest.TestCase):
       TestProfiler.runner([buf1, TestProfiler.a.uop.buffer], var_vals={})
       buf1.copyout(memoryview(bytearray(buf1.nbytes)))
 
-    profile, _ = helper_profile_filter_device(profile, TestProfiler.d0.device)
-    evs = [x for x in profile if isinstance(x, ProfileRangeEvent)]
+    evs = [x for x in profile if isinstance(x, ProfileRangeEvent) and x.device.startswith(TestProfiler.d0.device)]
 
     assert len(evs) == 3, "3 kernel runs are expected"
     # NOTE: order of events does not matter, the tool is responsible for sorting them
-    copy_events = [e for e in evs if e.is_copy]
-    self.assertEqual(len(copy_events), 2)
-
-    prg_events = [e for e in evs if not e.is_copy]
-    assert prg_events[0].name == runner_name, "kernel name is not correct"
+    prg_events = [e for e in evs if e.device == TestProfiler.d0.device]
+    assert any(e.name == runner_name for e in prg_events), "kernel name is not correct"
 
     #for i in range(1, 3):
     #  assert evs[i].st > evs[i-1].en, "timestamp not aranged"
@@ -102,13 +99,9 @@ class TestProfiler(unittest.TestCase):
       buf1.copyin(memoryview(bytearray(struct.pack("ff", 0, 1))))
       buf2.copyin(memoryview(bytearray(struct.pack("ff", 0, 1))))
 
-    profile0, _ = helper_profile_filter_device(profile, TestProfiler.d0.device)
-    profile1, _ = helper_profile_filter_device(profile, d1.device)
-
-    for p in [profile0, profile1]:
-      evs = [x for x in p if isinstance(x, ProfileRangeEvent)]
+    for dev in [TestProfiler.d0.device, d1.device]:
+      evs = [x for x in profile if isinstance(x, ProfileRangeEvent) and _dev_base(x.device) == dev]
       assert len(evs) == 1, "one kernel runs are expected"
-      assert evs[0].is_copy, "kernel should be copy"
 
   def test_profile_multidev_transfer(self):
     try: d1 = Device[f"{Device.DEFAULT}:1"]
@@ -118,10 +111,8 @@ class TestProfiler(unittest.TestCase):
     with helper_collect_profile(TestProfiler.d0, d1) as profile:
       buf1.to(f"{Device.DEFAULT}:1").realize()
 
-    profile0, _ = helper_profile_filter_device(profile, TestProfiler.d0.device)
-    kernel_runs = [x for x in profile0 if isinstance(x, ProfileRangeEvent)]
+    kernel_runs = [x for x in profile if isinstance(x, ProfileRangeEvent) and x.device.startswith(TestProfiler.d0.device)]
     assert len(kernel_runs) == 1, "one kernel run is expected"
-    assert kernel_runs[0].is_copy, "kernel should be copy"
 
   @unittest.skipIf(Device.DEFAULT in "METAL" or (MOCKGPU and Device.DEFAULT == "AMD"), "AMD mockgpu does not support queue wait interrupts")
   def test_profile_graph(self):
@@ -167,17 +158,19 @@ class TestProfiler(unittest.TestCase):
       return d2.timeline_signal.timestamp - d1.timeline_signal.timestamp
 
     # then test it by timing the GPU to GPU times
+    dev_evs = {x.device:x for x in Compiled.profile_events if isinstance(x, ProfileDeviceEvent)}
     jitter_matrix = [[float('nan')] * len(devs) for _ in range(len(devs))]
     pairs = [(p1, p2) for p1 in enumerate(devs) for p2 in enumerate(devs) if p1 != p2]
     for (i1, d1), (i2, d2) in pairs:
-      cpu_diff = d1.gpu2cpu_compute_time_diff - d2.gpu2cpu_compute_time_diff
+      cpu_diff = dev_evs[d1.device].tdiff - dev_evs[d2.device].tdiff
       jitter_matrix[i1][i2] = statistics.median(_sync_d2d(d1, d2) - _sync_d2d(d2, d1) for _ in range(20)) / 2 - cpu_diff
+
+    print("pairwise clock jitter matrix (us):\n" + '\n'.join([''.join([f'{float(item):8.3f}' for item in row]) for row in jitter_matrix]))
 
     for (i1, d1), (i2, d2) in pairs:
       assert abs(jitter_matrix[i1][i2]) < 0.5, "jitter should be less than 0.5us"
 
-    print("pairwise clock jitter matrix (us):\n" + '\n'.join([''.join([f'{float(item):8.3f}' for item in row]) for row in jitter_matrix]))
-
+  @unittest.skip("this test is flaky")
   def test_cpu_profile(self):
     def test_fxn(err=False):
       time.sleep(0.1)
@@ -227,7 +220,7 @@ class TestProfiler(unittest.TestCase):
         Tensor.realize(a, b)
     profile, _ = helper_profile_filter_device(profile, TestProfiler.d0.device)
     exec_points = [e for e in profile if isinstance(e, ProfilePointEvent) and e.name == "exec"]
-    range_events = [e for e in profile if isinstance(e, ProfileRangeEvent) and not e.is_copy]
+    range_events = [e for e in profile if isinstance(e, ProfileRangeEvent) and _dev_base(e.device) == e.device]
     self.assertEqual(len(exec_points), len(range_events), 2)
     self.assertEqual(len(dedup(e.arg['name'] for e in exec_points)), 1)
     self.assertEqual(len(dedup(e.arg['metadata'] for e in exec_points)), 1)

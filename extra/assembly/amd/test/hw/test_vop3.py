@@ -857,7 +857,6 @@ class TestF16Modifiers(unittest.TestCase):
 
   def test_v_fma_f16_inline_const_1_0(self):
     """V_FMA_F16: a*b + 1.0 should use f16 inline constant."""
-    from extra.assembly.amd.test.hw.helpers import f32_to_f16, _f16
     f16_a = f32_to_f16(0.325928)  # ~0x3537
     f16_b = f32_to_f16(-0.486572)  # ~0xb7c9
     instructions = [
@@ -868,13 +867,12 @@ class TestF16Modifiers(unittest.TestCase):
       v_fma_f16(v[4], v[4], v[6], 1.0),  # 1.0 is inline constant
     ]
     st = run_program(instructions, n_lanes=1)
-    result = _f16(st.vgpr[0][4] & 0xffff)
+    result = f16(st.vgpr[0][4] & 0xffff)
     expected = 0.325928 * (-0.486572) + 1.0
     self.assertAlmostEqual(result, expected, delta=0.01)
 
   def test_v_fma_f16_inline_const_0_5(self):
     """V_FMA_F16: a*b + 0.5 should use f16 inline constant."""
-    from extra.assembly.amd.test.hw.helpers import f32_to_f16, _f16
     f16_a = f32_to_f16(2.0)
     f16_b = f32_to_f16(3.0)
     instructions = [
@@ -885,13 +883,12 @@ class TestF16Modifiers(unittest.TestCase):
       v_fma_f16(v[2], v[0], v[1], 0.5),  # 0.5 is inline constant
     ]
     st = run_program(instructions, n_lanes=1)
-    result = _f16(st.vgpr[0][2] & 0xffff)
+    result = f16(st.vgpr[0][2] & 0xffff)
     expected = 2.0 * 3.0 + 0.5
     self.assertAlmostEqual(result, expected, delta=0.01)
 
   def test_v_fma_f16_inline_const_neg_1_0(self):
     """V_FMA_F16: a*b + (-1.0) should use f16 inline constant."""
-    from extra.assembly.amd.test.hw.helpers import f32_to_f16, _f16
     f16_a = f32_to_f16(2.0)
     f16_b = f32_to_f16(3.0)
     instructions = [
@@ -902,13 +899,12 @@ class TestF16Modifiers(unittest.TestCase):
       v_fma_f16(v[2], v[0], v[1], -1.0),  # -1.0 is inline constant
     ]
     st = run_program(instructions, n_lanes=1)
-    result = _f16(st.vgpr[0][2] & 0xffff)
+    result = f16(st.vgpr[0][2] & 0xffff)
     expected = 2.0 * 3.0 + (-1.0)
     self.assertAlmostEqual(result, expected, delta=0.01)
 
   def test_v_add_f16_abs_both(self):
     """V_ADD_F16 with abs on both operands."""
-    from extra.assembly.amd.test.hw.helpers import f32_to_f16, _f16
     f16_neg2 = f32_to_f16(-2.0)
     f16_neg3 = f32_to_f16(-3.0)
     instructions = [
@@ -919,12 +915,11 @@ class TestF16Modifiers(unittest.TestCase):
       v_add_f16_e64(v[2], abs(v[0]), abs(v[1])),  # |-2| + |-3| = 5
     ]
     st = run_program(instructions, n_lanes=1)
-    result = _f16(st.vgpr[0][2] & 0xffff)
+    result = f16(st.vgpr[0][2] & 0xffff)
     self.assertAlmostEqual(result, 5.0, delta=0.01)
 
   def test_v_mul_f16_neg_abs(self):
     """V_MUL_F16 with neg on one operand and abs on another."""
-    from extra.assembly.amd.test.hw.helpers import f32_to_f16, _f16
     f16_2 = f32_to_f16(2.0)
     f16_neg3 = f32_to_f16(-3.0)
     instructions = [
@@ -935,7 +930,7 @@ class TestF16Modifiers(unittest.TestCase):
       v_mul_f16_e64(v[2], -v[0], abs(v[1])),  # -(2) * |-3| = -6
     ]
     st = run_program(instructions, n_lanes=1)
-    result = _f16(st.vgpr[0][2] & 0xffff)
+    result = f16(st.vgpr[0][2] & 0xffff)
     self.assertAlmostEqual(result, -6.0, delta=0.01)
 
   def test_v_fmac_f16_hi_dest(self):
@@ -943,7 +938,6 @@ class TestF16Modifiers(unittest.TestCase):
 
     This tests the case from AMD_LLVM sin(0) where V_FMAC_F16 writes to v0.h.
     """
-    from extra.assembly.amd.test.hw.helpers import _f16
     instructions = [
       s_mov_b32(s[0], 0x38003c00),  # v0 = {hi=0.5, lo=1.0}
       v_mov_b32_e32(v[0], s[0]),
@@ -954,8 +948,8 @@ class TestF16Modifiers(unittest.TestCase):
     ]
     st = run_program(instructions, n_lanes=1)
     v0 = st.vgpr[0][0]
-    result_hi = _f16((v0 >> 16) & 0xffff)
-    result_lo = _f16(v0 & 0xffff)
+    result_hi = f16((v0 >> 16) & 0xffff)
+    result_lo = f16(v0 & 0xffff)
     self.assertAlmostEqual(result_hi, 0.5, delta=0.01, msg=f"Expected hi=0.5, got {result_hi}")
     self.assertAlmostEqual(result_lo, 1.0, delta=0.01, msg=f"Expected lo=1.0, got {result_lo}")
 
@@ -1357,6 +1351,43 @@ class TestF64ToI64Conversion(unittest.TestCase):
     hi = st.vgpr[0][5]
     result = struct.unpack('<q', struct.pack('<II', lo, hi))[0]
     self.assertEqual(result, 5000000000)
+
+
+class TestB64VOPLiteral(unittest.TestCase):
+  """Tests for B64 VOP operations with literal encoding.
+
+  B64 operations (like V_LSHLREV_B64) should zero-extend the literal to 64 bits,
+  NOT put it in the high 32 bits like F64 operations do.
+  """
+
+  def test_v_lshlrev_b64_literal_shift_amount(self):
+    """V_LSHLREV_B64 with literal shift amount (src0 is 32-bit)."""
+    # Shift 1 left by 100 (0x64) - uses literal encoding for src0
+    # Shift amount is 100 & 63 = 36, so 1 << 36 = 0x1000000000
+    instructions = [
+      s_mov_b32(s[0], 1),
+      s_mov_b32(s[1], 0),
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[1]),
+      v_lshlrev_b64(v[2:3], 100, v[0:1]),  # 100 > 64, uses literal encoding
+    ]
+    st = run_program(instructions, n_lanes=1)
+    # lo = 0x00000000, hi = 0x00000010 = 1 << (36-32)
+    self.assertEqual(st.vgpr[0][2], 0x00000000)
+    self.assertEqual(st.vgpr[0][3], 0x00000010)
+
+  def test_v_lshlrev_b64_literal_value(self):
+    """V_LSHLREV_B64 with literal as the 64-bit value being shifted (src1).
+
+    B64 literals are zero-extended (not shifted to high bits like F64).
+    0xDEADBEEF << 4 = 0xDEADBEEF0 = lo=0xEADBEEF0, hi=0x0000000D
+    """
+    instructions = [
+      v_lshlrev_b64(v[0:1], 4, 0xDEADBEEF),  # shift literal left by 4
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][0], 0xEADBEEF0)  # lo
+    self.assertEqual(st.vgpr[0][1], 0x0000000D)  # hi
 
 
 class TestWMMAMore(unittest.TestCase):
@@ -2809,6 +2840,802 @@ class TestMin3Max3Unsigned(unittest.TestCase):
     ]
     st = run_program(instructions, n_lanes=1)
     self.assertEqual(st.vgpr[0][1] & 0xFFFF, 0)
+
+
+class TestVOP3Clamp(unittest.TestCase):
+  """Tests for VOP3 clamp modifier (clmp=1).
+
+  The clamp modifier restricts float outputs to [0.0, 1.0] range.
+  This is used by operations like clip(0, 1) which AMD LLVM compiles to
+  v_max_f32_e64 with clmp=1.
+
+  Regression test for: clip(0, 1) bug where emulator ignored clmp field.
+  """
+
+  def test_v_max_f32_e64_clamp_positive(self):
+    """V_MAX_F32_E64 with clamp: value > 1.0 should be clamped to 1.0."""
+    instructions = [
+      v_mov_b32_e32(v[0], 2.5),
+      VOP3(VOP3Op.V_MAX_F32_E64, vdst=v[1], src0=v[0], src1=v[0], clmp=1),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertAlmostEqual(i2f(st.vgpr[0][1]), 1.0, places=5)
+
+  def test_v_max_f32_e64_clamp_negative(self):
+    """V_MAX_F32_E64 with clamp: value < 0.0 should be clamped to 0.0."""
+    instructions = [
+      v_mov_b32_e32(v[0], -1.5),
+      VOP3(VOP3Op.V_MAX_F32_E64, vdst=v[1], src0=v[0], src1=v[0], clmp=1),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertAlmostEqual(i2f(st.vgpr[0][1]), 0.0, places=5)
+
+  def test_v_max_f32_e64_clamp_in_range(self):
+    """V_MAX_F32_E64 with clamp: value in [0,1] should pass through."""
+    instructions = [
+      v_mov_b32_e32(v[0], 0.5),
+      VOP3(VOP3Op.V_MAX_F32_E64, vdst=v[1], src0=v[0], src1=v[0], clmp=1),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertAlmostEqual(i2f(st.vgpr[0][1]), 0.5, places=5)
+
+  def test_v_max_f32_e64_no_clamp(self):
+    """V_MAX_F32_E64 without clamp: value > 1.0 should pass through."""
+    instructions = [
+      v_mov_b32_e32(v[0], 2.5),
+      VOP3(VOP3Op.V_MAX_F32_E64, vdst=v[1], src0=v[0], src1=v[0], clmp=0),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertAlmostEqual(i2f(st.vgpr[0][1]), 2.5, places=5)
+
+  def test_v_min_f32_e64_clamp_negative(self):
+    """V_MIN_F32_E64 with clamp: value < 0.0 should be clamped to 0.0."""
+    instructions = [
+      v_mov_b32_e32(v[0], -2.0),
+      VOP3(VOP3Op.V_MIN_F32_E64, vdst=v[1], src0=v[0], src1=v[0], clmp=1),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertAlmostEqual(i2f(st.vgpr[0][1]), 0.0, places=5)
+
+  def test_v_add_f32_e64_clamp(self):
+    """V_ADD_F32_E64 with clamp: 0.7 + 0.8 = 1.5 -> 1.0."""
+    instructions = [
+      v_mov_b32_e32(v[0], 0.7),
+      v_mov_b32_e32(v[1], 0.8),
+      VOP3(VOP3Op.V_ADD_F32_E64, vdst=v[2], src0=v[0], src1=v[1], clmp=1),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertAlmostEqual(i2f(st.vgpr[0][2]), 1.0, places=5)
+
+  def test_v_mul_f32_e64_clamp_underflow(self):
+    """V_MUL_F32_E64 with clamp: 0.5 * -2.0 = -1.0 -> 0.0."""
+    instructions = [
+      v_mov_b32_e32(v[0], 0.5),
+      v_mov_b32_e32(v[1], -2.0),
+      VOP3(VOP3Op.V_MUL_F32_E64, vdst=v[2], src0=v[0], src1=v[1], clmp=1),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertAlmostEqual(i2f(st.vgpr[0][2]), 0.0, places=5)
+
+  def test_v_fma_f32_clamp(self):
+    """V_FMA_F32 with clamp: 2*2+1 = 5 -> 1.0."""
+    instructions = [
+      v_mov_b32_e32(v[0], 2.0),
+      v_mov_b32_e32(v[1], 2.0),
+      v_mov_b32_e32(v[2], 1.0),
+      VOP3(VOP3Op.V_FMA_F32, vdst=v[3], src0=v[0], src1=v[1], src2=v[2], clmp=1),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertAlmostEqual(i2f(st.vgpr[0][3]), 1.0, places=5)
+
+  def test_v_max_f32_e64_clamp_multilane(self):
+    """V_MAX_F32_E64 with clamp: test multiple lanes with different values."""
+    # lane 0: -0.5 -> 0.0
+    # lane 1: 0.5 -> 0.5
+    # lane 2: 1.5 -> 1.0
+    # lane 3: 2.5 -> 1.0
+    instructions = [
+      # Setup different values per lane using lane_id
+      s_mov_b32(s[0], f2i(0.5)),
+      v_cvt_f32_i32_e32(v[0], v[255]),  # Convert lane_id to float
+      v_mov_b32_e32(v[2], s[0]),        # v2 = 0.5
+      v_sub_f32_e32(v[0], v[0], v[2]),  # Subtract 0.5: lane0=-0.5, lane1=0.5, lane2=1.5, lane3=2.5
+      VOP3(VOP3Op.V_MAX_F32_E64, vdst=v[1], src0=v[0], src1=v[0], clmp=1),
+    ]
+    st = run_program(instructions, n_lanes=4)
+    self.assertAlmostEqual(i2f(st.vgpr[0][1]), 0.0, places=5, msg="lane 0: -0.5 should clamp to 0.0")
+    self.assertAlmostEqual(i2f(st.vgpr[1][1]), 0.5, places=5, msg="lane 1: 0.5 should pass through")
+    self.assertAlmostEqual(i2f(st.vgpr[2][1]), 1.0, places=5, msg="lane 2: 1.5 should clamp to 1.0")
+    self.assertAlmostEqual(i2f(st.vgpr[3][1]), 1.0, places=5, msg="lane 3: 2.5 should clamp to 1.0")
+
+
+class TestVOP3ClampUint32(unittest.TestCase):
+  """Tests for VOP3 clamp modifier on unsigned 32-bit integer operations."""
+
+  def test_v_sub_nc_u32_e64_clamp_underflow(self):
+    """V_SUB_NC_U32_E64 with clamp: 0 - 1 should saturate to 0."""
+    instructions = [
+      v_mov_b32_e32(v[0], 0),
+      v_mov_b32_e32(v[1], 1),
+      v_sub_nc_u32_e64(v[2], v[0], v[1], clmp=1),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][2], 0, f"expected 0, got 0x{st.vgpr[0][2]:08x}")
+
+  def test_v_sub_nc_u32_e64_clamp_no_underflow(self):
+    """V_SUB_NC_U32_E64 with clamp: 100 - 50 = 50 (no saturation needed)."""
+    instructions = [
+      v_mov_b32_e32(v[0], 100),
+      v_mov_b32_e32(v[1], 50),
+      v_sub_nc_u32_e64(v[2], v[0], v[1], clmp=1),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][2], 50, f"expected 50, got {st.vgpr[0][2]}")
+
+  def test_v_add_nc_u32_e64_clamp_overflow(self):
+    """V_ADD_NC_U32_E64 with clamp: 0xFFFFFFFF + 1 should saturate to 0xFFFFFFFF."""
+    instructions = [
+      v_mov_b32_e32(v[0], 0xFFFFFFFF),
+      v_mov_b32_e32(v[1], 1),
+      v_add_nc_u32_e64(v[2], v[0], v[1], clmp=1),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][2], 0xFFFFFFFF, f"expected 0xFFFFFFFF, got 0x{st.vgpr[0][2]:08x}")
+
+  def test_v_add_nc_u32_e64_clamp_no_overflow(self):
+    """V_ADD_NC_U32_E64 with clamp: 100 + 50 = 150 (no saturation needed)."""
+    instructions = [
+      v_mov_b32_e32(v[0], 100),
+      v_mov_b32_e32(v[1], 50),
+      v_add_nc_u32_e64(v[2], v[0], v[1], clmp=1),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][2], 150, f"expected 150, got {st.vgpr[0][2]}")
+
+
+class TestVOP3ClampUint16(unittest.TestCase):
+  """Tests for VOP3 clamp modifier on unsigned 16-bit integer operations."""
+
+  def test_v_sub_nc_u16_clamp_underflow(self):
+    """V_SUB_NC_U16 with clamp: 0 - 1 should saturate to 0."""
+    instructions = [
+      v_mov_b32_e32(v[0], 0),
+      v_mov_b32_e32(v[1], 1),
+      v_sub_nc_u16(v[2], v[0], v[1], clmp=1),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][2] & 0xFFFF, 0, f"expected 0, got 0x{st.vgpr[0][2] & 0xFFFF:04x}")
+
+  def test_v_sub_nc_u16_clamp_no_underflow(self):
+    """V_SUB_NC_U16 with clamp: 100 - 50 = 50 (no saturation needed)."""
+    instructions = [
+      v_mov_b32_e32(v[0], 100),
+      v_mov_b32_e32(v[1], 50),
+      v_sub_nc_u16(v[2], v[0], v[1], clmp=1),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][2] & 0xFFFF, 50, f"expected 50, got {st.vgpr[0][2] & 0xFFFF}")
+
+  def test_v_add_nc_u16_clamp_overflow(self):
+    """V_ADD_NC_U16 with clamp: 0xFFFF + 1 should saturate to 0xFFFF."""
+    instructions = [
+      v_mov_b32_e32(v[0], 0xFFFF),
+      v_mov_b32_e32(v[1], 1),
+      v_add_nc_u16(v[2], v[0], v[1], clmp=1),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][2] & 0xFFFF, 0xFFFF, f"expected 0xFFFF, got 0x{st.vgpr[0][2] & 0xFFFF:04x}")
+
+  def test_v_add_nc_u16_clamp_no_overflow(self):
+    """V_ADD_NC_U16 with clamp: 100 + 50 = 150 (no saturation needed)."""
+    instructions = [
+      v_mov_b32_e32(v[0], 100),
+      v_mov_b32_e32(v[1], 50),
+      v_add_nc_u16(v[2], v[0], v[1], clmp=1),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][2] & 0xFFFF, 150, f"expected 150, got {st.vgpr[0][2] & 0xFFFF}")
+
+
+class TestVOP3ClampInt32(unittest.TestCase):
+  """Tests for VOP3 clamp modifier on signed 32-bit integer operations."""
+
+  def test_v_add_nc_i32_clamp_overflow(self):
+    """V_ADD_NC_I32 with clamp: INT_MAX + 1 should saturate to INT_MAX."""
+    instructions = [
+      v_mov_b32_e32(v[0], 0x7FFFFFFF),  # S0 = INT_MAX
+      v_mov_b32_e32(v[1], 1),            # S1 = 1
+      v_add_nc_i32(v[2], v[0], v[1], clmp=1),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][2], 0x7FFFFFFF, f"expected 0x7FFFFFFF, got 0x{st.vgpr[0][2]:08x}")
+
+  def test_v_add_nc_i32_clamp_underflow(self):
+    """V_ADD_NC_I32 with clamp: INT_MIN + (-1) should saturate to INT_MIN."""
+    instructions = [
+      v_mov_b32_e32(v[0], 0x80000000),  # S0 = INT_MIN
+      v_mov_b32_e32(v[1], 0xFFFFFFFF),  # S1 = -1
+      v_add_nc_i32(v[2], v[0], v[1], clmp=1),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][2], 0x80000000, f"expected 0x80000000, got 0x{st.vgpr[0][2]:08x}")
+
+  def test_v_sub_nc_i32_clamp_underflow(self):
+    """V_SUB_NC_I32 with clamp: INT_MIN - 1 should saturate to INT_MIN."""
+    instructions = [
+      v_mov_b32_e32(v[0], 0x80000000),  # S0 = INT_MIN
+      v_mov_b32_e32(v[1], 1),            # S1 = 1
+      v_sub_nc_i32(v[2], v[0], v[1], clmp=1),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][2], 0x80000000, f"expected 0x80000000, got 0x{st.vgpr[0][2]:08x}")
+
+  def test_v_sub_nc_i32_clamp_overflow(self):
+    """V_SUB_NC_I32 with clamp: INT_MAX - (-1) should saturate to INT_MAX."""
+    instructions = [
+      v_mov_b32_e32(v[0], 0x7FFFFFFF),  # S0 = INT_MAX
+      v_mov_b32_e32(v[1], 0xFFFFFFFF),  # S1 = -1
+      v_sub_nc_i32(v[2], v[0], v[1], clmp=1),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][2], 0x7FFFFFFF, f"expected 0x7FFFFFFF, got 0x{st.vgpr[0][2]:08x}")
+
+  def test_v_add_nc_i32_no_saturation_positive(self):
+    """V_ADD_NC_I32 with clamp: 100 + 200 = 300 (no saturation needed)."""
+    instructions = [
+      v_mov_b32_e32(v[0], 100),
+      v_mov_b32_e32(v[1], 200),
+      v_add_nc_i32(v[2], v[0], v[1], clmp=1),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][2], 300, f"expected 300, got {st.vgpr[0][2]}")
+
+  def test_v_add_nc_i32_no_saturation_negative(self):
+    """V_ADD_NC_I32 with clamp: -100 + -200 = -300 (no saturation needed)."""
+    instructions = [
+      v_mov_b32_e32(v[0], 0xFFFFFF9C),  # -100
+      v_mov_b32_e32(v[1], 0xFFFFFF38),  # -200
+      v_add_nc_i32(v[2], v[0], v[1], clmp=1),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    expected = 0xFFFFFED4  # -300
+    self.assertEqual(st.vgpr[0][2], expected, f"expected 0x{expected:08x}, got 0x{st.vgpr[0][2]:08x}")
+
+
+class TestVOP3ClampCarry(unittest.TestCase):
+  """Tests for VOP3 clamp modifier on carry operations (VOP3SD)."""
+
+  def test_v_add_co_u32_clamp_overflow(self):
+    """V_ADD_CO_U32 with clamp: 0xFFFFFFFF + 1 should saturate to 0xFFFFFFFF."""
+    instructions = [
+      v_mov_b32_e32(v[0], 0xFFFFFFFF),
+      v_mov_b32_e32(v[1], 1),
+      v_add_co_u32(v[2], VCC, v[0], v[1], clmp=1),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][2], 0xFFFFFFFF, f"expected 0xFFFFFFFF, got 0x{st.vgpr[0][2]:08x}")
+
+  def test_v_add_co_u32_clamp_no_overflow(self):
+    """V_ADD_CO_U32 with clamp: 100 + 200 = 300 (no saturation)."""
+    instructions = [
+      v_mov_b32_e32(v[0], 100),
+      v_mov_b32_e32(v[1], 200),
+      v_add_co_u32(v[2], VCC, v[0], v[1], clmp=1),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][2], 300, f"expected 300, got {st.vgpr[0][2]}")
+
+  def test_v_sub_co_u32_clamp_underflow(self):
+    """V_SUB_CO_U32 with clamp: 0 - 1 should saturate to 0."""
+    instructions = [
+      v_mov_b32_e32(v[0], 0),
+      v_mov_b32_e32(v[1], 1),
+      v_sub_co_u32(v[2], VCC, v[0], v[1], clmp=1),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][2], 0, f"expected 0, got 0x{st.vgpr[0][2]:08x}")
+
+  def test_v_sub_co_u32_clamp_no_underflow(self):
+    """V_SUB_CO_U32 with clamp: 300 - 100 = 200 (no saturation)."""
+    instructions = [
+      v_mov_b32_e32(v[0], 300),
+      v_mov_b32_e32(v[1], 100),
+      v_sub_co_u32(v[2], VCC, v[0], v[1], clmp=1),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][2], 200, f"expected 200, got {st.vgpr[0][2]}")
+
+  def test_v_subrev_co_u32_clamp_underflow(self):
+    """V_SUBREV_CO_U32 with clamp: 1 - 0 reversed = 0 - 1 should saturate to 0."""
+    instructions = [
+      v_mov_b32_e32(v[0], 1),  # This becomes the subtrahend
+      v_mov_b32_e32(v[1], 0),  # This becomes the minuend (0 - 1)
+      v_subrev_co_u32(v[2], VCC, v[0], v[1], clmp=1),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][2], 0, f"expected 0, got 0x{st.vgpr[0][2]:08x}")
+
+  def test_v_add_co_ci_u32_clamp_overflow(self):
+    """V_ADD_CO_CI_U32 with clamp: 0xFFFFFFFF + 1 + 0 should saturate to 0xFFFFFFFF."""
+    instructions = [
+      v_mov_b32_e32(v[0], 0xFFFFFFFF),
+      v_mov_b32_e32(v[1], 1),
+      s_mov_b64(VCC, 0),  # No carry in
+      v_add_co_ci_u32(v[2], VCC, v[0], v[1], VCC, clmp=1),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][2], 0xFFFFFFFF, f"expected 0xFFFFFFFF, got 0x{st.vgpr[0][2]:08x}")
+
+  def test_v_add_co_ci_u32_clamp_overflow_with_carry(self):
+    """V_ADD_CO_CI_U32 with clamp: 0xFFFFFFFE + 1 + 1 should saturate to 0xFFFFFFFF."""
+    instructions = [
+      v_mov_b32_e32(v[0], 0xFFFFFFFE),
+      v_mov_b32_e32(v[1], 1),
+      s_mov_b64(VCC, 1),  # Carry in = 1
+      v_add_co_ci_u32(v[2], VCC, v[0], v[1], VCC, clmp=1),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][2], 0xFFFFFFFF, f"expected 0xFFFFFFFF, got 0x{st.vgpr[0][2]:08x}")
+
+  def test_v_sub_co_ci_u32_clamp_underflow(self):
+    """V_SUB_CO_CI_U32 with clamp: 0 - 1 - 0 should saturate to 0."""
+    instructions = [
+      v_mov_b32_e32(v[0], 0),
+      v_mov_b32_e32(v[1], 1),
+      s_mov_b64(VCC, 0),  # No borrow in
+      v_sub_co_ci_u32(v[2], VCC, v[0], v[1], VCC, clmp=1),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][2], 0, f"expected 0, got 0x{st.vgpr[0][2]:08x}")
+
+  def test_v_subrev_co_ci_u32_clamp_underflow(self):
+    """V_SUBREV_CO_CI_U32 with clamp: reversed 1 - 0 - 0 = 0 - 1 should saturate to 0."""
+    instructions = [
+      v_mov_b32_e32(v[0], 1),
+      v_mov_b32_e32(v[1], 0),
+      s_mov_b64(VCC, 0),
+      v_subrev_co_ci_u32(v[2], VCC, v[0], v[1], VCC, clmp=1),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][2], 0, f"expected 0, got 0x{st.vgpr[0][2]:08x}")
+
+
+class TestVOP3ClampMAD(unittest.TestCase):
+  """Tests for VOP3 clamp modifier on MAD (multiply-add) operations."""
+
+  def test_v_mad_u16_clamp_overflow(self):
+    """V_MAD_U16 with clamp: 0xFFFF * 2 + 0 should saturate to 0xFFFF."""
+    instructions = [
+      v_mov_b32_e32(v[0], 0xFFFF),
+      v_mov_b32_e32(v[1], 2),
+      v_mov_b32_e32(v[2], 0),
+      v_mad_u16(v[3], v[0], v[1], v[2], clmp=1),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][3] & 0xFFFF, 0xFFFF, f"expected 0xFFFF, got 0x{st.vgpr[0][3] & 0xFFFF:04x}")
+
+  def test_v_mad_u16_clamp_overflow_with_add(self):
+    """V_MAD_U16 with clamp: 0x8000 * 2 + 0x1000 should saturate to 0xFFFF."""
+    instructions = [
+      v_mov_b32_e32(v[0], 0x8000),  # 32768
+      v_mov_b32_e32(v[1], 2),        # * 2 = 65536
+      v_mov_b32_e32(v[2], 0x1000),   # + 4096 = 69632 > 0xFFFF
+      v_mad_u16(v[3], v[0], v[1], v[2], clmp=1),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][3] & 0xFFFF, 0xFFFF, f"expected 0xFFFF, got 0x{st.vgpr[0][3] & 0xFFFF:04x}")
+
+  def test_v_mad_u16_no_overflow(self):
+    """V_MAD_U16 with clamp: 100 * 100 + 50 = 10050 (no saturation)."""
+    instructions = [
+      v_mov_b32_e32(v[0], 100),
+      v_mov_b32_e32(v[1], 100),
+      v_mov_b32_e32(v[2], 50),
+      v_mad_u16(v[3], v[0], v[1], v[2], clmp=1),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][3] & 0xFFFF, 10050, f"expected 10050, got {st.vgpr[0][3] & 0xFFFF}")
+
+  def test_v_mad_u16_no_clamp(self):
+    """V_MAD_U16 without clamp: 0xFFFF * 2 + 0 should wrap to 0xFFFE."""
+    instructions = [
+      v_mov_b32_e32(v[0], 0xFFFF),
+      v_mov_b32_e32(v[1], 2),
+      v_mov_b32_e32(v[2], 0),
+      v_mad_u16(v[3], v[0], v[1], v[2], clmp=0),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    # 0xFFFF * 2 = 0x1FFFE, low 16 bits = 0xFFFE
+    self.assertEqual(st.vgpr[0][3] & 0xFFFF, 0xFFFE, f"expected 0xFFFE, got 0x{st.vgpr[0][3] & 0xFFFF:04x}")
+
+
+class TestCvtPkF16(unittest.TestCase):
+  """Tests for V_CVT_PK_RTZ_F16_F32 - pack two f32 to f16 with round toward zero."""
+
+  def test_cvt_pk_rtz_f16_f32_basic(self):
+    """V_CVT_PK_RTZ_F16_F32: basic pack of two f32 values."""
+    instructions = [
+      v_mov_b32_e32(v[0], 1.0),
+      v_mov_b32_e32(v[1], 2.0),
+      v_cvt_pk_rtz_f16_f32_e64(v[2], v[0], v[1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = st.vgpr[0][2]
+    lo_f16 = f16(result & 0xffff)
+    hi_f16 = f16((result >> 16) & 0xffff)
+    self.assertAlmostEqual(lo_f16, 1.0, delta=0.01)
+    self.assertAlmostEqual(hi_f16, 2.0, delta=0.01)
+
+
+class TestCvtPkNorm(unittest.TestCase):
+  """Tests for V_CVT_PK_NORM_I16_F32 and V_CVT_PK_NORM_U16_F32."""
+
+  def test_cvt_pk_norm_i16_f32_basic(self):
+    """V_CVT_PK_NORM_I16_F32: pack two f32 to normalized i16."""
+    instructions = [
+      v_mov_b32_e32(v[0], 1.0),
+      v_mov_b32_e32(v[1], -1.0),
+      v_cvt_pk_norm_i16_f32(v[2], v[0], v[1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = st.vgpr[0][2]
+    lo = result & 0xffff
+    hi = (result >> 16) & 0xffff
+    self.assertEqual(lo, 32767)
+    self.assertEqual(hi, 0x8001)  # -32767, hardware uses symmetric range
+
+  def test_cvt_pk_norm_u16_f32_basic(self):
+    """V_CVT_PK_NORM_U16_F32: pack two f32 to normalized u16."""
+    instructions = [
+      v_mov_b32_e32(v[0], 1.0),
+      v_mov_b32_e32(v[1], 0.5),
+      v_cvt_pk_norm_u16_f32(v[2], v[0], v[1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = st.vgpr[0][2]
+    lo = result & 0xffff
+    hi = (result >> 16) & 0xffff
+    self.assertEqual(lo, 65535)
+    self.assertAlmostEqual(hi, 32768, delta=1)
+
+
+class TestCvtPkInt(unittest.TestCase):
+  """Tests for V_CVT_PK_I16_I32, V_CVT_PK_U16_U32, V_CVT_PK_I16_F32, V_CVT_PK_U16_F32."""
+
+  def test_cvt_pk_i16_i32_basic(self):
+    """V_CVT_PK_I16_I32: pack two i32 to i16."""
+    instructions = [
+      s_mov_b32(s[0], 100),
+      s_mov_b32(s[1], -100 & 0xffffffff),
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[1]),
+      v_cvt_pk_i16_i32(v[2], v[0], v[1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = st.vgpr[0][2]
+    lo = result & 0xffff
+    hi = (result >> 16) & 0xffff
+    lo_signed = lo if lo < 32768 else lo - 65536
+    hi_signed = hi if hi < 32768 else hi - 65536
+    self.assertEqual(lo_signed, 100)
+    self.assertEqual(hi_signed, -100)
+
+  def test_cvt_pk_u16_u32_basic(self):
+    """V_CVT_PK_U16_U32: pack two u32 to u16."""
+    instructions = [
+      s_mov_b32(s[0], 1000),
+      s_mov_b32(s[1], 2000),
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[1]),
+      v_cvt_pk_u16_u32(v[2], v[0], v[1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = st.vgpr[0][2]
+    lo = result & 0xffff
+    hi = (result >> 16) & 0xffff
+    self.assertEqual(lo, 1000)
+    self.assertEqual(hi, 2000)
+
+  def test_cvt_pk_i16_f32_basic(self):
+    """V_CVT_PK_I16_F32: convert two f32 to packed i16."""
+    instructions = [
+      v_mov_b32_e32(v[0], 100.5),
+      v_mov_b32_e32(v[1], -50.7),
+      v_cvt_pk_i16_f32(v[2], v[0], v[1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = st.vgpr[0][2]
+    lo = result & 0xffff
+    hi = (result >> 16) & 0xffff
+    lo_signed = lo if lo < 32768 else lo - 65536
+    hi_signed = hi if hi < 32768 else hi - 65536
+    self.assertEqual(lo_signed, 100)
+    self.assertEqual(hi_signed, -50)
+
+  def test_cvt_pk_u16_f32_basic(self):
+    """V_CVT_PK_U16_F32: convert two f32 to packed u16."""
+    instructions = [
+      v_mov_b32_e32(v[0], 100.9),
+      v_mov_b32_e32(v[1], 200.1),
+      v_cvt_pk_u16_f32(v[2], v[0], v[1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = st.vgpr[0][2]
+    lo = result & 0xffff
+    hi = (result >> 16) & 0xffff
+    self.assertEqual(lo, 100)
+    self.assertEqual(hi, 200)
+
+  def test_cvt_pk_u8_f32_basic(self):
+    """V_CVT_PK_U8_F32: convert f32 to u8 and pack at byte position."""
+    instructions = [
+      v_mov_b32_e32(v[0], 128.5),
+      v_mov_b32_e32(v[1], 0),
+      v_mov_b32_e32(v[2], 0),
+      v_cvt_pk_u8_f32(v[2], v[0], v[1], v[2]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = st.vgpr[0][2]
+    byte0 = result & 0xff
+    self.assertEqual(byte0, 128)
+
+
+class TestDotProduct(unittest.TestCase):
+  """Tests for dot product instructions V_DOT4_U32_U8, V_DOT8_U32_U4."""
+
+  def test_v_dot4_u32_u8_basic(self):
+    """V_DOT4_U32_U8: 4-element dot product of u8 vectors."""
+    src0 = 0x04030201  # {4, 3, 2, 1}
+    src1 = 0x01010101  # {1, 1, 1, 1}
+    instructions = [
+      s_mov_b32(s[0], src0),
+      s_mov_b32(s[1], src1),
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[1]),
+      v_mov_b32_e32(v[2], 0),
+      v_dot4_u32_u8(v[2], v[0], v[1], v[2]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = st.vgpr[0][2]
+    self.assertEqual(result, 10)
+
+  def test_v_dot4_u32_u8_with_accumulator(self):
+    """V_DOT4_U32_U8 with non-zero accumulator."""
+    src0 = 0x02020202  # {2, 2, 2, 2}
+    src1 = 0x03030303  # {3, 3, 3, 3}
+    instructions = [
+      s_mov_b32(s[0], src0),
+      s_mov_b32(s[1], src1),
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[1]),
+      v_mov_b32_e32(v[2], 100),
+      v_dot4_u32_u8(v[2], v[0], v[1], v[2]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = st.vgpr[0][2]
+    self.assertEqual(result, 124)
+
+  def test_v_dot8_u32_u4_basic(self):
+    """V_DOT8_U32_U4: 8-element dot product of u4 vectors."""
+    # src0 = 8 nibbles: {1,2,3,4,5,6,7,8} packed as 0x87654321
+    # src1 = 8 nibbles: {1,1,1,1,1,1,1,1} packed as 0x11111111
+    # result = 1+2+3+4+5+6+7+8 = 36
+    src0 = 0x87654321
+    src1 = 0x11111111
+    instructions = [
+      s_mov_b32(s[0], src0),
+      s_mov_b32(s[1], src1),
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[1]),
+      v_mov_b32_e32(v[2], 0),
+      v_dot8_u32_u4(v[2], v[0], v[1], v[2]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = st.vgpr[0][2]
+    self.assertEqual(result, 36)
+
+
+class TestMinMaxF16Vop3(unittest.TestCase):
+  """Tests for V_MIN3_F16, V_MAX3_F16, V_MED3_F16, V_MINMAX_F16, V_MAXMIN_F16."""
+
+  def test_v_min3_f16_basic(self):
+    """V_MIN3_F16: minimum of three f16 values."""
+    instructions = [
+      s_mov_b32(s[0], f32_to_f16(3.0)),
+      s_mov_b32(s[1], f32_to_f16(1.0)),
+      s_mov_b32(s[2], f32_to_f16(2.0)),
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[1]),
+      v_mov_b32_e32(v[2], s[2]),
+      v_min3_f16(v[3], v[0], v[1], v[2]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = f16(st.vgpr[0][3] & 0xffff)
+    self.assertAlmostEqual(result, 1.0, delta=0.01)
+
+  def test_v_max3_f16_basic(self):
+    """V_MAX3_F16: maximum of three f16 values."""
+    instructions = [
+      s_mov_b32(s[0], f32_to_f16(1.0)),
+      s_mov_b32(s[1], f32_to_f16(3.0)),
+      s_mov_b32(s[2], f32_to_f16(2.0)),
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[1]),
+      v_mov_b32_e32(v[2], s[2]),
+      v_max3_f16(v[3], v[0], v[1], v[2]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = f16(st.vgpr[0][3] & 0xffff)
+    self.assertAlmostEqual(result, 3.0, delta=0.01)
+
+  def test_v_med3_f16_basic(self):
+    """V_MED3_F16: median of three f16 values."""
+    instructions = [
+      s_mov_b32(s[0], f32_to_f16(3.0)),
+      s_mov_b32(s[1], f32_to_f16(1.0)),
+      s_mov_b32(s[2], f32_to_f16(2.0)),
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[1]),
+      v_mov_b32_e32(v[2], s[2]),
+      v_med3_f16(v[3], v[0], v[1], v[2]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = f16(st.vgpr[0][3] & 0xffff)
+    self.assertAlmostEqual(result, 2.0, delta=0.01)
+
+  def test_v_minmax_f16_basic(self):
+    """V_MINMAX_F16: clamp(src0, min=src1, max=src2)."""
+    instructions = [
+      s_mov_b32(s[0], f32_to_f16(2.5)),
+      s_mov_b32(s[1], f32_to_f16(1.0)),
+      s_mov_b32(s[2], f32_to_f16(2.0)),
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[1]),
+      v_mov_b32_e32(v[2], s[2]),
+      v_minmax_f16(v[3], v[0], v[1], v[2]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = f16(st.vgpr[0][3] & 0xffff)
+    self.assertAlmostEqual(result, 2.0, delta=0.01)
+
+  def test_v_maxmin_f16_basic(self):
+    """V_MAXMIN_F16: clamp(src0, min=src2, max=src1)."""
+    instructions = [
+      s_mov_b32(s[0], f32_to_f16(0.5)),
+      s_mov_b32(s[1], f32_to_f16(2.0)),
+      s_mov_b32(s[2], f32_to_f16(1.0)),
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[1]),
+      v_mov_b32_e32(v[2], s[2]),
+      v_maxmin_f16(v[3], v[0], v[1], v[2]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = f16(st.vgpr[0][3] & 0xffff)
+    self.assertAlmostEqual(result, 1.0, delta=0.01)
+
+  def test_v_min3_f16_with_neg(self):
+    """V_MIN3_F16 with neg modifier: min(-3, 1, 2) = -3."""
+    instructions = [
+      s_mov_b32(s[0], f32_to_f16(3.0)),
+      s_mov_b32(s[1], f32_to_f16(1.0)),
+      s_mov_b32(s[2], f32_to_f16(2.0)),
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[1]),
+      v_mov_b32_e32(v[2], s[2]),
+      v_min3_f16(v[3], -v[0], v[1], v[2]),  # neg on first operand
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = f16(st.vgpr[0][3] & 0xffff)
+    self.assertAlmostEqual(result, -3.0, delta=0.01)
+
+  def test_v_max3_f16_with_abs(self):
+    """V_MAX3_F16 with abs modifier: max(|-3|, 1, 2) = 3."""
+    instructions = [
+      s_mov_b32(s[0], f32_to_f16(-3.0)),
+      s_mov_b32(s[1], f32_to_f16(1.0)),
+      s_mov_b32(s[2], f32_to_f16(2.0)),
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[1]),
+      v_mov_b32_e32(v[2], s[2]),
+      v_max3_f16(v[3], abs(v[0]), v[1], v[2]),  # abs on first operand
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = f16(st.vgpr[0][3] & 0xffff)
+    self.assertAlmostEqual(result, 3.0, delta=0.01)
+
+  def test_v_med3_f16_opsel_hi(self):
+    """V_MED3_F16 with opsel reading from hi half."""
+    # Pack two f16 values: hi=5.0, lo=1.0
+    packed = (f32_to_f16(5.0) << 16) | f32_to_f16(1.0)
+    instructions = [
+      s_mov_b32(s[0], packed),
+      s_mov_b32(s[1], f32_to_f16(3.0)),
+      s_mov_b32(s[2], f32_to_f16(4.0)),
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[1]),
+      v_mov_b32_e32(v[2], s[2]),
+      # Read hi half of v[0] (5.0), med3(5, 3, 4) = 4
+      v_med3_f16(v[3], v[0].h, v[1], v[2]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = f16(st.vgpr[0][3] & 0xffff)
+    self.assertAlmostEqual(result, 4.0, delta=0.01)
+
+
+class TestSadHi(unittest.TestCase):
+  """Tests for V_SAD_HI_U8 instruction."""
+
+  def test_v_sad_hi_u8_basic(self):
+    """V_SAD_HI_U8: (sad << 16) + acc."""
+    # |1-5| + |2-6| + |3-7| + |4-8| = 16, << 16 = 0x100000, + 100 = 0x100064
+    instructions = [
+      v_mov_b32_e32(v[0], 0x04030201),
+      v_mov_b32_e32(v[1], 0x08070605),
+      v_mov_b32_e32(v[2], 100),
+      v_sad_hi_u8(v[3], v[0], v[1], v[2]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][3], (16 << 16) + 100)
+
+  def test_v_sad_hi_u8_zero_diff(self):
+    """V_SAD_HI_U8: identical inputs gives acc only."""
+    instructions = [
+      v_mov_b32_e32(v[0], 0x12345678),
+      v_mov_b32_e32(v[2], 50),
+      v_sad_hi_u8(v[3], v[0], v[0], v[2]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][3], 50)
+
+
+class TestPermlane(unittest.TestCase):
+  """Tests for V_PERMLANE16_B32 and V_PERMLANEX16_B32 instructions."""
+
+  def test_v_permlane16_b32_identity(self):
+    """V_PERMLANE16_B32 with identity permutation (lane i reads from lane i within row)."""
+    # lanesel encodes 4 bits per position: position i gets lanesel[i*4+3:i*4]
+    # Identity: position 0->0, 1->1, ..., 15->15
+    # lanesel = 0xFEDCBA9876543210 (positions 15-0 in nibbles)
+    instructions = [
+      v_mov_b32_e32(v[0], 0xDEADBEEF),  # source data
+      s_mov_b32(s[0], 0x76543210),       # lanesel low (positions 0-7)
+      s_mov_b32(s[1], 0xFEDCBA98),       # lanesel high (positions 8-15)
+      v_permlane16_b32(v[1], v[0], s[0], s[1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    # Lane 0 reads from lane 0 (position 0 -> lanesel[3:0] = 0)
+    self.assertEqual(st.vgpr[0][1], 0xDEADBEEF)
+
+  def test_v_permlane16_b32_broadcast(self):
+    """V_PERMLANE16_B32 broadcast lane 0 to all lanes in row."""
+    # lanesel = all zeros -> all positions read from lane 0 within row
+    instructions = [
+      v_mov_b32_e32(v[0], 0xCAFEBABE),  # source data
+      s_mov_b32(s[0], 0),                # lanesel low = 0 (all read lane 0)
+      s_mov_b32(s[1], 0),                # lanesel high = 0
+      v_permlane16_b32(v[1], v[0], s[0], s[1]),
+    ]
+    st = run_program(instructions, n_lanes=4)
+    # All lanes read from lane 0 of their row
+    for lane in range(4):
+      self.assertEqual(st.vgpr[lane][1], 0xCAFEBABE)
+
+  def test_v_permlanex16_b32_identity(self):
+    """V_PERMLANEX16_B32 cross-row read with identity selection."""
+    # In wave32: row 0 (lanes 0-15) reads from row 1 (lanes 16-31) and vice versa
+    # With single lane in row 0, it reads from lane 0 of row 1 (lane 16)
+    # But lane 16 doesn't exist in 1-lane test, so use 32 lanes
+    instructions = [
+      v_mov_b32_e32(v[0], 0x11111111),  # All lanes have this initially
+      s_mov_b32(s[0], 0x76543210),       # lanesel low
+      s_mov_b32(s[1], 0xFEDCBA98),       # lanesel high
+      v_permlanex16_b32(v[1], v[0], s[0], s[1]),
+    ]
+    st = run_program(instructions, n_lanes=32)
+    # Lane 0 in row 0 reads from lane 0 of row 1 (lane 16)
+    self.assertEqual(st.vgpr[0][1], 0x11111111)
+    # Lane 16 in row 1 reads from lane 0 of row 0 (lane 0)
+    self.assertEqual(st.vgpr[16][1], 0x11111111)
 
 
 if __name__ == '__main__':

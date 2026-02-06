@@ -5,7 +5,7 @@ env:
   CAPTURE_PROCESS_REPLAY: 1
   GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   PYTHONPATH: ${{ github.workspace }}
-  IGNORE_OOB: 0
+  CHECK_OOB: 1
 
 on:
   push:
@@ -26,19 +26,19 @@ jobs:
       uses: ./.github/actions/setup-tinygrad
       with:
         key: llvm-speed
-        deps: testing_minimal
+        deps: testing_unit
         llvm: 'true'
     - name: Speed Test
-      run: CPU=1 CPU_LLVM=1 python3 test/speed/external_test_speed_v_torch.py
+      run: CPU=1 CPU_LLVM=1 THREADS=0 python3 test/speed/external_test_speed_v_torch.py
     - name: Speed Test (BEAM=2)
-      run: BEAM=2 CPU=1 CPU_LLVM=1 python3 test/speed/external_test_speed_v_torch.py
+      run: BEAM=2 CPU=1 CPU_LLVM=1 THREADS=0 python3 test/speed/external_test_speed_v_torch.py
 
   docs:
     name: Docs
     runs-on: ubuntu-22.04
     timeout-minutes: 10
     env:
-      IGNORE_OOB: 1
+      CHECK_OOB: 0
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
@@ -98,7 +98,7 @@ jobs:
       uses: ./.github/actions/setup-tinygrad
       with:
         key: torch-backend-pillow-torchvision-et-pt
-        deps: testing_minimal
+        deps: testing_unit
         pydeps: "pillow torchvision expecttest"
         llvm: 'true'
     - name: Install ninja
@@ -134,7 +134,7 @@ jobs:
       uses: ./.github/actions/setup-tinygrad
       with:
         key: torch-backend-pillow-torchvision-et-pt
-        deps: testing_minimal
+        deps: testing_unit
         llvm: 'true'
     - name: Install ninja
       run: |
@@ -156,7 +156,7 @@ jobs:
       uses: ./.github/actions/setup-tinygrad
       with:
         key: be-minimal
-        deps: testing_minimal
+        deps: testing_unit
     - name: Test dtype with Python emulator
       run: DEBUG=1 PYTHON=1 python3 -m pytest -n=auto test/test_dtype.py test/test_dtype_alu.py
     - name: Test ops with Python emulator
@@ -207,11 +207,11 @@ jobs:
       run: DEBUG=2 AMX=1 EMULATE=AMX FORWARD_ONLY=1 PYTHON=1 python3 test/opt/test_tensor_cores.py
     - name: Test device flop counts
       run: |
-        DEBUG=2 EMULATE=METAL PYTHON=1 python3 ./test/test_uops_stats.py TestUOpsStatsMatmulHalf
-        DEBUG=2 EMULATE=AMD PYTHON=1 python3 ./test/test_uops_stats.py TestUOpsStatsMatmulHalf
-        DEBUG=2 EMULATE=CUDA PYTHON=1 python3 ./test/test_uops_stats.py TestUOpsStatsMatmulHalf
-        DEBUG=2 EMULATE=INTEL PYTHON=1 python3 ./test/test_uops_stats.py TestUOpsStatsMatmulHalf
-        DEBUG=2 AMX=1 EMULATE=AMX PYTHON=1 python3 ./test/test_uops_stats.py TestUOpsStats.test_simple_matmul
+        DEBUG=2 EMULATE=METAL PYTHON=1 python3 ./test/null/test_uops_stats.py TestUOpsStatsMatmulHalf
+        DEBUG=2 EMULATE=AMD PYTHON=1 python3 ./test/null/test_uops_stats.py TestUOpsStatsMatmulHalf
+        DEBUG=2 EMULATE=CUDA PYTHON=1 python3 ./test/null/test_uops_stats.py TestUOpsStatsMatmulHalf
+        DEBUG=2 EMULATE=INTEL PYTHON=1 python3 ./test/null/test_uops_stats.py TestUOpsStatsMatmulHalf
+        DEBUG=2 AMX=1 EMULATE=AMX PYTHON=1 python3 ./test/null/test_uops_stats.py TestUOpsStats.test_simple_matmul
 
   linter:
     name: Linters
@@ -239,9 +239,10 @@ jobs:
     - name: Run mypy with lineprecision report
       run: |
         python -m mypy --lineprecision-report .
+        grep -v autogen lineprecision.txt | awk 'NR>2 {lines+=$2; precise+=$3; imprecise+=$4; any+=$5; empty+=$6} END {t=lines-empty; printf "TOTAL: %d lines, %d precise (%.1f%%), %d imprecise (%.1f%%), %d any (%.1f%%)\n", t, precise, 100*precise/t, imprecise, 100*imprecise/t, any, 100*any/t}'
         cat lineprecision.txt
     - name: Run TYPED=1
-      run: TYPED=1 python -c "import tinygrad"
+      run: CHECK_OOB=0 DEV=CPU TYPED=1 python test/test_tiny.py
 
   unittest:
     name: Unit Tests
@@ -255,26 +256,29 @@ jobs:
       uses: ./.github/actions/setup-tinygrad
       with:
         key: unittest-13
-        pydeps: "pillow numpy ftfy regex pre-commit"
+        pydeps: "pillow ftfy regex pre-commit"
         deps: testing_unit
         llvm: 'true'
+        amd: 'true'
     - name: Run pre-commit test hooks
       run: SKIP=ruff,mypy pre-commit run --all-files
     - name: Check Device.DEFAULT
       run: python -c "from tinygrad import Device; assert Device.DEFAULT == 'CPU', Device.DEFAULT"
     - name: Run unit tests
       run: |
-        CPU=1 python test/unit/test_device.py TestRunAsModule.test_module_runs
-        CPU=1 python -m pytest -n=auto test/unit/ --durations=20 --deselect=test/unit/test_device.py::TestRunAsModule::test_module_runs
+        CPU=1 python test/null/test_device.py TestRunAsModule.test_module_runs
+        CPU=1 python -m pytest -n=auto test/unit/ --durations=20
+    - name: Run NULL backend tests
+      run: NULL=1 python -m pytest -n=auto test/null/ --durations=20
     - name: Run targetted tests on NULL backend
-      run: NULL=1 python3 -m unittest test.test_multitensor.TestMultiTensor.test_data_parallel_resnet_train_step test/device/test_null.py
+      run: NULL=1 python3 -m unittest test.test_multitensor.TestMultiTensor.test_data_parallel_resnet_train_step
     # TODO: too slow
     # - name: Run SDXL on NULL backend
     #   run: NULL=1 DEBUG=1 python3 examples/sdxl.py --seed 0 --noshow --timing --fakeweights
     - name: Run Clip tests for SD MLPerf on NULL backend
       run: NULL=1 python -m pytest -n=auto test/external/mlperf_stable_diffusion/external_test_models.py::TestOpenClip --durations=20
     - name: Run AMD emulated BERT training on NULL backend
-      run: EMULATE=AMD_RDNA4 NULL=1 CAPTURE_PROCESS_REPLAY=0 DEFAULT_FLOAT=HALF BENCHMARK=10 BS=66 GPUS=1 BERT_LAYERS=2 MODEL=bert python3 examples/mlperf/model_train.py
+      run: EMULATE=AMD_RDNA4 NULL=1 NULL_ALLOW_COPYOUT=1 CAPTURE_PROCESS_REPLAY=0 DEFAULT_FLOAT=HALF BENCHMARK=10 BS=66 GPUS=1 BERT_LAYERS=2 MODEL=bert python3 examples/mlperf/model_train.py
     # TODO: support fake weights
     #- name: Run LLaMA 7B on 4 fake devices
     #  run: NULL=1 python3 examples/llama.py --gen 1 --size 7B --shard 4 --prompt "Hello." --count 3 --temperature 0 --timing
@@ -312,7 +316,7 @@ jobs:
         deps: testing_unit
         python-version: '3.14'
     - name: Test SPEC=2
-      run: SPEC=2 pytest --maxfail=10 -n auto --durations=30 --ignore=test/models --ignore test/test_custom_kernel.py --ignore test/unit/test_hashing.py --ignore test/unit/test_autogen.py --timeout 60 -k "not test_setitem_big" --splits 2 --group ${{ matrix.group }}
+      run: SPEC=2 pytest --maxfail=10 -n auto --durations=30 --ignore=test/models --ignore=test/null --ignore test/test_custom_kernel.py --ignore test/unit/test_hashing.py --timeout 60 -k "not test_setitem_big" --splits 2 --group ${{ matrix.group }}
 
   fuzzing:
     name: Fuzzing
@@ -346,7 +350,7 @@ jobs:
         uses: ./.github/actions/setup-tinygrad
         with:
           key: gpu-image
-          deps: testing_minimal
+          deps: testing_unit
           opencl: 'true'
       - name: Test CL IMAGE=2 ops
         run: |
@@ -422,7 +426,7 @@ jobs:
         with:
           key: onnxoptc
           deps: testing
-          python-version: '3.11'
+          python-version: '3.12'
           llvm: 'true'
       - name: Test ONNX (CPU)
         run: CPU=1 CPU_LLVM=0 python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
@@ -450,7 +454,7 @@ jobs:
           key: onnxoptl
           deps: testing
           pydeps: "tensorflow==2.19"
-          python-version: '3.11'
+          python-version: '3.12'
           opencl: 'true'
       - name: Test ONNX (CL)
         run: CL=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
@@ -463,11 +467,11 @@ jobs:
       - name: Test MLPerf stuff
         run: CL=1 python -m pytest -n=auto test/external/external_test_optim.py test/external/external_test_losses.py test/external/external_test_metrics.py test/external/external_test_datasets.py --durations=20
       - name: NULL=1 beautiful_mnist_multigpu
-        run: NULL=1 python examples/beautiful_mnist_multigpu.py
+        run: NULL=1 NULL_ALLOW_COPYOUT=1 python examples/beautiful_mnist_multigpu.py
       - name: Test Bert training
-        run: NULL=1 DEFAULT_FLOAT=HALF BENCHMARK=10 BS=24 GPUS=4 BERT_LAYERS=2 MODEL=bert python3 examples/mlperf/model_train.py
+        run: NULL=1 NULL_ALLOW_COPYOUT=1 DEFAULT_FLOAT=HALF BENCHMARK=10 BS=24 GPUS=4 BERT_LAYERS=2 MODEL=bert python3 examples/mlperf/model_train.py
       - name: Test llama 3 training
-        run: NULL=1 SAMPLES=300 BS=8 SEQLEN=512 GRADIENT_ACC_STEPS=1 FAKEDATA=1 DEFAULT_FLOAT=bfloat16 OPTIM_DTYPE=bfloat16 LLAMA3_SIZE=1B MODEL=llama3 python3 examples/mlperf/model_train.py
+        run: NULL=1 NULL_ALLOW_COPYOUT=1 SAMPLES=300 BS=8 SEQLEN=512 GRADIENT_ACC_STEPS=1 FAKEDATA=1 DEFAULT_FLOAT=bfloat16 OPTIM_DTYPE=bfloat16 LLAMA3_SIZE=1B MODEL=llama3 python3 examples/mlperf/model_train.py
       - name: Run process replay tests
         uses: ./.github/actions/process-replay
 
@@ -476,7 +480,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     env:
-      IGNORE_OOB: 1
+      CHECK_OOB: 0
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -524,7 +528,7 @@ jobs:
       with:
         key: metal
         deps: testing
-        python-version: '3.11'
+        python-version: '3.12'
     - name: Test models (Metal)
       run: METAL=1 python -m pytest -n=auto test/models --durations=20
     - name: Test LLaMA compile speed
@@ -543,7 +547,7 @@ jobs:
       uses: ./.github/actions/setup-tinygrad
       with:
         key: devectorize-minimal
-        deps: testing_minimal
+        deps: testing_unit
         pydeps: "pillow"
         llvm: "true"
     - name: Test LLVM=1 DEVECTORIZE=0
@@ -564,8 +568,8 @@ jobs:
       uses: ./.github/actions/setup-tinygrad
       with:
         key: dsp-minimal
-        deps: testing_minimal
-        pydeps: "onnx==1.18.0 onnxruntime pillow"
+        deps: testing_unit
+        pydeps: "onnx==1.18.0 onnxruntime ml_dtypes"
         llvm: "true"
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
@@ -598,8 +602,8 @@ jobs:
       uses: ./.github/actions/setup-tinygrad
       with:
         key: webgpu-minimal
-        deps: testing_minimal
-        python-version: '3.11'
+        deps: testing_unit
+        python-version: '3.12'
         webgpu: 'true'
     - name: Check Device.DEFAULT (WEBGPU) and print some source
       run: |
@@ -607,7 +611,7 @@ jobs:
         WEBGPU=1 DEBUG=4 FORWARD_ONLY=1 python3 test/test_ops.py TestOps.test_add
     - name: Run selected webgpu tests
       run: |
-          WEBGPU=1 WEBGPU_BACKEND="WGPUBackendType_Vulkan" python3 -m pytest -n=auto test/ --ignore=test/models --ignore=test/unit --durations=20
+          WEBGPU=1 WEBGPU_BACKEND="WGPUBackendType_Vulkan" python3 -m pytest -n=auto test/ --ignore=test/models --ignore=test/unit --ignore=test/null --durations=20
     - name: Run process replay tests
       uses: ./.github/actions/process-replay
 
@@ -632,7 +636,7 @@ jobs:
         uses: ./.github/actions/setup-tinygrad
         with:
           key: ${{ matrix.backend }}-minimal
-          deps: testing_minimal
+          deps: testing_unit
           amd: 'true'
           llvm: ${{ matrix.backend == 'amdllvm' && 'true' }}
       - name: Check Device.DEFAULT and print some source
@@ -650,16 +654,23 @@ jobs:
         run: TRANSCENDENTAL=2 python -m pytest -n=auto test/test_ops.py::TestOps::test_sin test/test_ops.py::TestOps::test_cos test/test_ops.py::TestOps::test_tan test/test_ops.py::TestOps::test_exp test/test_ops.py::TestOps::test_log --durations=20
       - name: Run TestOps.test_add with SQTT
         run: |
-          VIZ=1 PMC=1 DEBUG=5 python3 test/test_ops.py TestOps.test_add
-          VIZ=1 SQTT=1 DEBUG=5 python3 test/test_ops.py TestOps.test_add
+          VIZ=-2 DEBUG=5 python3 test/test_ops.py TestOps.test_add
           extra/sqtt/rgptool.py create "/tmp/profile.pkl.$USER" -o /tmp/gpu0.rgp
+      - name: Run AMD emulated mmapeak on NULL backend
+        env:
+          AMD: 0
+        run: PYTHONPATH=. NULL=1 EMULATE=AMD python extra/mmapeak/mmapeak.py
       - name: Run process replay tests
         uses: ./.github/actions/process-replay
 
   testamdasm:
     name: AMD ASM IDE
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 20
+    env:
+      AMD: 1
+      PYTHON_REMU: 1
+      MOCKGPU: 1
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -667,12 +678,12 @@ jobs:
         uses: ./.github/actions/setup-tinygrad
         with:
           key: rdna3-emu
-          deps: testing_minimal
+          deps: testing_unit
           amd: 'true'
-          python-version: '3.13'
+          python-version: '3.14'
       - name: Verify AMD autogen is up to date
         run: |
-          python -m extra.assembly.amd.amdxml
+          python -m extra.assembly.amd.generate
           git diff --exit-code extra/assembly/amd/autogen/
       - name: Install LLVM 21
         run: |
@@ -685,16 +696,18 @@ jobs:
       - name: Install rocprof-trace-decoder
         run: sudo PYTHONPATH="." ./extra/sqtt/install_sqtt_decoder.py
       - name: Run RDNA3 emulator tests
-        run: python -m pytest -n=auto extra/assembly/amd/ --durations 20
+        run: AMD_LLVM=0 python -m pytest -n=auto extra/assembly/amd/ --durations 20
       - name: Run RDNA3 emulator tests (AMD_LLVM=1)
         run: AMD_LLVM=1 python -m pytest -n=auto extra/assembly/amd/ --durations 20
       - name: Run RDNA3 dtype tests
-        run: AMD=1 PYTHON_REMU=1 MOCKGPU=1 AMD_LLVM=0 pytest -n=auto test/test_dtype_alu.py test/test_dtype.py
+        run: AMD_LLVM=0 pytest -n=auto test/test_dtype_alu.py test/test_dtype.py --durations 20
       - name: Run RDNA3 dtype tests (AMD_LLVM=1)
-        run: AMD=1 PYTHON_REMU=1 MOCKGPU=1 AMD_LLVM=1 pytest -n=auto test/test_dtype_alu.py test/test_dtype.py
+        run: AMD_LLVM=1 pytest -n=auto test/test_dtype_alu.py test/test_dtype.py --durations 20
       # TODO: run all once emulator is faster
       - name: Run RDNA3 ops tests
-        run: SKIP_SLOW_TEST=1 AMD=1 PYTHON_REMU=1 MOCKGPU=1 AMD_LLVM=0 pytest -n=auto test/test_ops.py -k "test_sparse_categorical_crossentropy or test_tril"
+        run: SKIP_SLOW_TEST=1 AMD_LLVM=0 pytest -n=auto test/test_ops.py -k "test_sparse_categorical_crossentropy or test_tril or test_nonzero or test_softmax_argmax" --durations 20
+      - name: Run RDNA4 emulator tests
+        run: MOCKGPU_ARCH=rdna4 python -m pytest test/test_tiny.py -v --durations 20
 
   testnvidia:
     strategy:
@@ -715,7 +728,7 @@ jobs:
         uses: ./.github/actions/setup-tinygrad
         with:
           key: ${{ matrix.backend }}-minimal
-          deps: testing_minimal
+          deps: testing_unit
           cuda: 'true'
           ocelot: 'true'
       - name: Set env
@@ -726,9 +739,9 @@ jobs:
           DEBUG=5 FORWARD_ONLY=1 python3 test/test_ops.py TestOps.test_add
       - name: Run pytest (cuda)
         # skip multitensor because it's slow
-        run: python -m pytest -n=auto test/ --ignore=test/models --ignore=test/unit --ignore test/test_gc.py --ignore test/test_multitensor.py --durations=20
+        run: python -m pytest -n=auto test/ --ignore=test/models --ignore=test/unit --ignore=test/null --ignore test/test_gc.py --ignore test/test_multitensor.py --durations=20
       - name: Run TestOps.test_add with PMA
-        run: VIZ=1 PMA=1 DEBUG=5 python3 test/test_ops.py TestOps.test_add
+        run: VIZ=-1 PMA=1 DEBUG=5 python3 test/test_ops.py TestOps.test_add
       - name: Run process replay tests
         uses: ./.github/actions/process-replay
 
@@ -748,7 +761,7 @@ jobs:
         uses: ./.github/actions/setup-tinygrad
         with:
           key: ${{ matrix.backend }}-minimal
-          deps: testing_minimal
+          deps: testing_unit
           opencl: ${{ matrix.backend == 'opencl' && 'true' }}
           llvm: ${{ matrix.backend == 'llvm' || matrix.backend == 'lvp' }}
           mesa: ${{ matrix.backend == 'lvp' && 'true' }}
@@ -759,7 +772,7 @@ jobs:
           python3 -c "from tinygrad import Device; assert Device.DEFAULT in ['CPU','CL'], Device.DEFAULT"
           DEBUG=5 FORWARD_ONLY=1 python3 test/test_ops.py TestOps.test_add
       - name: Run pytest (${{ matrix.backend }})
-        run: python -m pytest -n=auto test/ --ignore=test/models --ignore=test/unit --durations=20
+        run: python -m pytest -n=auto test/ --ignore=test/models --ignore=test/unit --ignore=test/null --durations=20
       - name: Run TRANSCENDENTAL math
         run: TRANSCENDENTAL=2 python -m pytest -n=auto test/test_ops.py::TestOps::test_sin test/test_ops.py::TestOps::test_cos test/test_ops.py::TestOps::test_tan test/test_ops.py::TestOps::test_exp test/test_ops.py::TestOps::test_log --durations=20
       - name: Run process replay tests
@@ -779,15 +792,15 @@ jobs:
       with:
         key: metal
         deps: testing
-        python-version: '3.11'
+        python-version: '3.12'
         amd: 'true'
         cuda: 'true'
         ocelot: 'true'
         llvm: 'true'
     - name: Run unit tests
-      env:
-        LIBCLANG_PATH: '/opt/homebrew/opt/llvm@20/lib/libclang.dylib'
       run: METAL=1 python -m pytest -n=auto test/unit/ --durations=20
+    - name: Run NULL backend tests
+      run: NULL=1 python -m pytest -n=auto test/null/ --durations=20
     - name: Run ONNX
       run: METAL=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
     - name: Test tensor core ops (fake)
@@ -879,8 +892,7 @@ jobs:
         uses: ./.github/actions/setup-tinygrad
         with:
           key: macos-${{ matrix.backend }}-minimal
-          deps: testing_minimal
-          pydeps: "capstone"
+          deps: testing_unit
           llvm: ${{ matrix.backend == 'llvm' || matrix.backend == 'lvp' }}
           mesa: ${{ matrix.backend == 'lvp' && 'true' }}
       - name: Set env
@@ -890,7 +902,7 @@ jobs:
           python -c "from tinygrad import Device; assert Device.DEFAULT == {'LLVM':'CPU','LVP':'CPU'}.get(x:='${{ matrix.backend }}'.upper(), x), Device.DEFAULT"
           DEBUG=4 python3 test/test_tiny.py TestTiny.test_plus
       - name: Run pytest (${{ matrix.backend }})
-        run: python3 -m pytest -n=auto test/ --ignore=test/models --ignore=test/unit --durations=20
+        run: python3 -m pytest -n=auto test/ --ignore=test/models --ignore=test/unit --ignore=test/null --durations=20
       - name: Run process replay tests
         uses: ./.github/actions/process-replay
       - name: Run macOS-specific unit test
@@ -923,7 +935,11 @@ jobs:
       - name: Run unit tests
         if: matrix.backend=='llvm'
         # test_newton_schulz hits RecursionError
-        run: python -m pytest -n=auto test/unit/ --ignore=test/unit/test_disk_tensor.py --ignore=test/unit/test_elf.py --ignore=test/unit/test_tar.py --ignore=test/unit/test_linalg.py --durations=20
+        run: python -m pytest -n=auto test/unit/ --ignore=test/unit/test_disk_tensor.py --ignore=test/unit/test_tar.py --ignore=test/unit/test_linalg.py --durations=20
+      - name: Run NULL backend tests
+        if: matrix.backend=='llvm'
+        shell: bash
+        run: CPU=0 CPU_LLVM=0 NULL=1 python -m pytest -n=auto test/null/ --ignore=test/null/test_elf.py --durations=20
       - name: Run pytest (${{ matrix.backend }})
         shell: bash
         run: |
@@ -947,12 +963,12 @@ jobs:
         uses: ./.github/actions/setup-tinygrad
         with:
           key: compile-${{ matrix.backend }}
-          deps: testing_minimal
+          deps: testing_unit
           mesa: ${{ (matrix.backend == 'ir3' || matrix.backend == 'nak') && 'true' }}
-          python-version: '3.14'
+          python-version: '3.12'
       - name: Set env
         shell: bash
-        run: printf "NULL=1\n${{ matrix.backend == 'ir3' && 'NULL_IR3=1' || matrix.backend == 'nak' && 'NULL_NAK=1' }}" >> $GITHUB_ENV
+        run: printf "NULL=1\nNULL_ALLOW_COPYOUT=1\n${{ matrix.backend == 'ir3' && 'NULL_IR3=1' || matrix.backend == 'nak' && 'NULL_NAK=1' }}" >> $GITHUB_ENV
       - name: Run test_ops
         shell: bash
         run: |

@@ -1,15 +1,16 @@
-import subprocess, pathlib, struct, ctypes, tempfile, functools, contextlib, decimal, platform, sys
-from tinygrad.helpers import prod, to_mv, getenv, round_up, cache_dir, PROFILE, ProfileRangeEvent, cpu_profile, unwrap
+import subprocess, pathlib, struct, ctypes, tempfile, functools, contextlib, decimal, platform
+from tinygrad.helpers import prod, to_mv, getenv, round_up, cache_dir, PROFILE, ProfileRangeEvent, cpu_profile, unwrap, suppress_finalizing
 import tinygrad.runtime.support.objc as objc
 from tinygrad.device import Compiled, Compiler, CompileError, LRUAllocator, ProfileDeviceEvent, CompilerSet, CompilerPair
 from tinygrad.renderer.cstyle import MetalRenderer
 from tinygrad.runtime.autogen import metal
+from tinygrad.runtime.support.c import DLL
 
 # 13 is requestType that metal uses to compile source code into MTLB, there aren't any docs or symbols.
 REQUEST_TYPE_COMPILE = 13
 
 # Must be loaded for default Metal Device: https://developer.apple.com/documentation/metal/1433401-mtlcreatesystemdefaultdevice?language=objc
-ctypes.CDLL("/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics")
+DLL("CoreGraphics", "CoreGraphics")
 
 # FIXME: these need autogen to support objc categories
 # https://developer.apple.com/library/archive/documentation/Cocoa/Conceptual/ObjectiveC/Chapters/ocCategories.html
@@ -50,7 +51,7 @@ class MetalDevice(Compiled):
       st, en = decimal.Decimal(cbuf.GPUStartTime()) * 1000000, decimal.Decimal(cbuf.GPUEndTime()) * 1000000
       # NOTE: command buffers from MetalGraph are not profiled here
       if PROFILE and (lb:=cmdbuf_label(cbuf)) is not None and not lb.startswith("batched"):
-        Compiled.profile_events += [ProfileRangeEvent(self.device, lb, st, en, is_copy=lb.startswith("COPY"))]
+        Compiled.profile_events += [ProfileRangeEvent(self.device, lb, st, en)]
     self.mtl_buffers_in_flight.clear()
 
 def metal_src_to_library(device:MetalDevice, src:str) -> metal.MTLLibrary:
@@ -67,7 +68,7 @@ class MetalCompiler(Compiler):
   # doesn't seem to be anything we can do.
   with contextlib.suppress(FileNotFoundError, ModuleNotFoundError):
     import tinygrad.runtime.autogen.llvm # noqa: F401
-  support = ctypes.CDLL("/System/Library/PrivateFrameworks/MTLCompiler.framework/MTLCompiler")
+  support = DLL("MTLCompiler", "MTLCompiler")
   support.MTLCodeGenServiceCreate.restype = ctypes.c_void_p
 
   def __init__(self):
@@ -167,8 +168,9 @@ class MetalAllocator(LRUAllocator[MetalDevice]):
     ret.retain = False
     if ret.value is None: raise MemoryError(f"Metal OOM while allocating {size=}")
     return MetalBuffer(ret, size)
+  @suppress_finalizing
   def _free(self, opaque:MetalBuffer, options):
-    if not sys.is_finalizing(): opaque.buf.release
+    if not options.external_ptr: opaque.buf.release
   def _transfer(self, dest:MetalBuffer, src:MetalBuffer, sz:int, src_dev:MetalDevice, dest_dev:MetalDevice):
     dest_dev.synchronize()
     src_command_buffer = src_dev.mtl_queue.commandBuffer().retained()
@@ -189,7 +191,7 @@ class MetalAllocator(LRUAllocator[MetalDevice]):
     # There is no real metal multidevice support for now, so transfer is used only for tests.
     src_dev.synchronize()
   def _cp_mv(self, dst, src, prof_desc):
-    with cpu_profile(prof_desc, self.dev.device, is_copy=True): dst[:] = src
+    with cpu_profile(prof_desc, self.dev.device): dst[:] = src
   def _as_buffer(self, src:MetalBuffer) -> memoryview:
     self.dev.synchronize()
     return to_mv(src.buf.contents(), src.size + src.offset)[src.offset:]

@@ -13,9 +13,8 @@ from tinygrad.runtime.support.elf import jit_loader
 from tinygrad.uop.ops import sint
 
 class CPUSignal(HCQSignal):
-  def _sleep(self, time_spent_waiting_ms:int) -> bool:
+  def _sleep(self, time_spent_since_last_sleep_ms:int):
     if self.is_timeline and self.owner is not None: self.owner.tasks.join()
-    return False
 
 class CPUWorker(threading.Thread):
   def __init__(self, dev, tasks, thread_id):
@@ -73,7 +72,7 @@ class CPUProgram(HCQProgram):
   try: rt_lib = ctypes.CDLL(ctypes.util.find_library('System' if OSX else 'kernel32') if OSX or WIN else 'libgcc_s.so.1')
   except OSError: pass
 
-  def __init__(self, dev, name:str, lib:bytes, runtimevars:dict[str, tuple[int, int]]|None=None, **kwargs):
+  def __init__(self, dev, name:str, lib:bytes, runtimevars:dict[str, int]|None=None, **kwargs):
     self.runtimevars = runtimevars or {}
 
     LVP = isinstance(dev.renderer, LVPRenderer)
