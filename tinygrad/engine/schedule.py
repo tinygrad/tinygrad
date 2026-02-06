@@ -57,7 +57,6 @@ def create_schedule(sched_sink:UOp) -> tuple[list[ExecItem], UOp]:
       assert k.op in {Ops.RANGE, Ops.KERNEL}, f"unexpected op in queue: {k.op}"
       if k.op is Ops.RANGE: schedule.append(k)
       elif k.op is Ops.KERNEL:
-        #ast = (kernel:=cast(Kernel, k.arg)).ast
         ast = k.src[0]
         buf_uops = tuple(_unwrap_src(s).buf_uop for s in k.src[1:] if s.op is not Ops.BIND)
         bound_ranges = tuple(s for s in k.src[1:] if s.op is Ops.BIND and len(s.src) > 1 and s.src[1].op is Ops.RANGE)
