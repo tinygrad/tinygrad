@@ -387,7 +387,7 @@ def get_profile(profile:list[ProfileEvent], sort_fn:Callable[[str], Any]=device_
       device_ts_diffs[ev.device] = (ev.comp_tdiff,ev.copy_tdiff if ev.copy_tdiff is not None else ev.comp_tdiff)
       if (d:=ev.device.split(":")[0]) == "AMD":
         device_decoders[d] = load_counters
-        amdgpu_targets[d] = ev.props["gfx_target_version"]
+        amdgpu_targets[d] = unwrap(ev.props)["gfx_target_version"]
   # load device specific counters
   for fxn in device_decoders.values(): fxn(profile)
   # map events per device
