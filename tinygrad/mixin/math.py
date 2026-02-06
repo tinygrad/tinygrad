@@ -307,10 +307,8 @@ class MathMixin:
     ```
     """
     if min_ is None and max_ is None: raise RuntimeError("at least one of 'min_' or 'max_' must not be None")
-    #ret = self.maximum(min_) if min_ is not None else self
-    #return ret.minimum(max_) if max_ is not None else ret
-    ret = (self < min_).where(min_, self) if min_ is not None else self
-    return (ret > max_).where(max_, ret) if max_ is not None else ret
+    ret = self.maximum(min_) if min_ is not None else self
+    return ret.minimum(max_) if max_ is not None else ret
 
   def clip(self, min_=None, max_=None) -> Self:
     """Alias for `Tensor.clamp`."""
@@ -374,8 +372,7 @@ class MathMixin:
     print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).relu().numpy())
     ```
     """
-    # NOTE: if you write this as self.maximum(0) the gradient is wrong, passing through half when self is 0
-    return (self > 0).where(self, 0)
+    return self.maximum(0)
 
   def sigmoid(self) -> Self:
     """
