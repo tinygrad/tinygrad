@@ -5,10 +5,9 @@ from tinygrad.uop import X86Ops, X86GroupOp
 from tinygrad.renderer import Renderer
 from tinygrad.uop.ops import PatternMatcher, graph_rewrite, UOp, UPat, Ops
 from tinygrad.codegen import line_rewrite
-from tinygrad.codegen.late.schedule import MachineScheduler, MachineInfo
 from tinygrad.codegen.late.regalloc import RegallocContext, pm_regalloc, pm_insert_spills, Register
 from tinygrad.uop.spec import type_verify
-from tinygrad.helpers import SPEC, DEBUG, getenv, prod
+from tinygrad.helpers import SPEC, DEBUG, prod
 
 def print_uop_asm(uops:list[UOp]):
   for i,u in enumerate(uops):
@@ -113,7 +112,6 @@ class ISARenderer(Renderer):
   pre_isel_matcher: PatternMatcher
   isel_matcher: PatternMatcher
   post_regalloc_matcher: PatternMatcher
-  mach_info: MachineInfo
 
   def stack_pointer(self) -> UOp: raise NotImplementedError("arch specific")
   # TODO: these should go with the other rewrites after we know what to do with ProgramSpec and Estimates
@@ -123,8 +121,7 @@ class ISARenderer(Renderer):
     sink = graph_rewrite(sink, self.isel_matcher, ctx=isel_ctx, name="instruction selection", bottom_up=True)
     # TODO: remove, annoying needed for noops
     sink = graph_rewrite(sink, isel_fixup, name="instruction selection fixup")
-    if getenv("MACHINE_SCHEDULER"): lst = MachineScheduler(sink, self.mach_info).schedule()
-    else: lst = isa_linearize(sink)
+    lst = isa_linearize(sink)
     if DEBUG >= 8: print_uop_asm(lst)
     regalloc_ctx = RegallocContext(lst, self.isel_matcher, self.stack_pointer(), isel_ctx.stack_size)
     lst = line_rewrite(lst, pm_regalloc, regalloc_ctx)

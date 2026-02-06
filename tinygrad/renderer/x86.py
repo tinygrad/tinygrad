@@ -5,96 +5,7 @@ from tinygrad.uop import Ops, X86Ops, GroupOp, X86GroupOp
 from tinygrad.uop.ops import UOp, UPat, PatternMatcher
 from tinygrad.renderer.isa import ISARenderer, IselContext
 from tinygrad.codegen.late.regalloc import Register, assign
-from tinygrad.codegen.late.schedule import MachineInfo, OpInfo, Resource, Unit
 from tinygrad.helpers import getenv, CPU_COUNT
-
-def has_load(x:UOp) -> bool:
-  if x.op in X86GroupOp.ReadMem1st and len(x.src) > 2: return True
-  if x.op in X86GroupOp.ReadMem2nd and len(x.src) > 3: return True
-  if x.op in X86GroupOp.ReadMem3rd and len(x.src) > 4: return True
-  return False
-
-# ***** X86 scheduling info, specific to a processor generation *****
-# zen 4, this is the default scheduling model
-# these are the execution units
-zen4_agu0, zen4_agu1, zen4_agu2 = Unit(), Unit(), Unit()
-zen4_lsu0, zen4_lsu1, zen4_lsu2 = Unit(), Unit(), Unit()
-zen4_flp0, zen4_flp1, zen4_flp2 = Unit(), Unit(), Unit()
-zen4_flp3, zen4_flp4, zen4_flp5 = Unit(), Unit(), Unit()
-zen4_alu0, zen4_alu1, zen4_alu2 = Unit(), Unit(), Unit()
-zen4_alu3 = Unit()
-# grouping of execution units
-zen4_agu012 = Resource((zen4_agu0, zen4_agu1, zen4_agu2))
-zen4_lsu01 = Resource((zen4_lsu0, zen4_lsu1))
-zen4_lsu012 = Resource((zen4_lsu0, zen4_lsu1, zen4_lsu2))
-zen4_alu0123 = Resource((zen4_alu0, zen4_alu1, zen4_alu2, zen4_alu3))
-zen4_alu03 = Resource((zen4_alu0, zen4_alu3))
-zen4_alu12 = Resource((zen4_alu1, zen4_alu2))
-zen4_flp01 = Resource((zen4_flp0, zen4_flp1))
-zen4_flp03 = Resource((zen4_flp0, zen4_flp3))
-zen4_flp12 = Resource((zen4_flp1, zen4_flp2))
-zen4_flp23 = Resource((zen4_flp2, zen4_flp3))
-zen4_flp45 = Resource((zen4_flp4, zen4_flp5))
-zen4_flp0123 = Resource((zen4_flp0, zen4_flp1, zen4_flp2, zen4_flp3))
-# TODO: fp stores are supported on 2 pipelines but throughput is 1 per cycle
-zen4_flpst = Resource((zen4_flp4, zen4_flp5))
-# loads assume an l1 cache hit
-load_lat, vec_load_lat, store_lat = 4, 7, 1
-
-def info(x:UOp, lat:int, resources:list[tuple[Resource, int, int]], mops:int=1, load_mops:int=0):
-  if not has_load(x): return OpInfo(lat, tuple(resources), mops)
-  lat += load_lat if x.dtype in dtypes.ints+(dtypes.bool,) else vec_load_lat
-  agu = zen4_agu012 if x.dtype in dtypes.ints+(dtypes.bool,) else zen4_flp45
-  resources = [(agu, 0, 1,), (zen4_lsu012, 1, 2)] + [(res, start + 2, end + 2) for res,start,end in resources]
-  return OpInfo(lat, tuple(resources), mops + load_mops)
-
-# TODO: spends 3 cycles in agu if dtype <= 16
-zen4_op_info = {
-X86Ops.MOV: lambda: OpInfo(load_lat+1, [(zen4_agu012, 0, 1), (zen4_lsu012, 1, 2)]),
-X86Ops.MOVm: lambda: OpInfo(store_lat, [(zen4_agu012, 0, 1), (zen4_lsu01, 1, 3)]),
-**{x: lambda: OpInfo(vec_load_lat+1, [(zen4_flp45, 0, 1), (zen4_lsu012, 1, 2)]) for x in (X86Ops.VMOVSS, X86Ops.VMOVSD, X86Ops.VMOVUPS)},
-**{x: lambda: OpInfo(store_lat, [(zen4_flpst, 0, 1), (zen4_lsu01, 1, 2)]) for x in (X86Ops.VMOVSSm, X86Ops.VMOVSDm, X86Ops.VMOVUPSm)},
-**{x: lambda x: info(x, 3, [(zen4_flp23, 0, 1)]) for x in (X86Ops.VADDSS, X86Ops.VADDPS, X86Ops.VSUBSS, X86Ops.VSUBPS,
-                                                 X86Ops.VADDSD, X86Ops.VADDPD, X86Ops.VSUBSD, X86Ops.VSUBPD)},
-**{x: lambda x: info(x, 1, [(zen4_alu03, 0, 1)]) for x in (X86Ops.CMOVB, X86Ops.CMOVE, X86Ops.CMOVL, X86Ops.CMOVNE)},
-**{x: lambda x: info(x, 1, [(zen4_alu03, 0, 2)]) for x in (X86Ops.SETB, X86Ops.SETE, X86Ops.SETL, X86Ops.SETNE)},
-**{x: lambda x: info(x, 1, [(zen4_alu12, 0, 1)], 1, 1) for x in (X86Ops.SHL, X86Ops.SHR, X86Ops.SHLi, X86Ops.SHRi)},
-**{x: lambda x: info(x, 3, [(zen4_flp23, 0, 1)]) for x in (X86Ops.VROUNDSS, X86Ops.VROUNDSD, X86Ops.VROUNDPS, X86Ops.VROUNDPD)},
-**{x: lambda x: info(x, 1, [(zen4_flp23, 0, 1)]) for x in (X86Ops.VCVTTSD2SI,)},
-**{x: lambda x: info(x, 3, [(zen4_flp23, 0, 2)]) for x in (X86Ops.VCVTTPD2DQ, X86Ops.VCVTPS2PH)},
-**{x: lambda x: info(x, 5, [(zen4_flp23, 0, 5)], 2) for x in (X86Ops.VCVTTSS2SI,)},
-**{x: lambda x: info(x, 3, [(zen4_flp23, 0, 1)]) for x in (X86Ops.VCVTTPS2DQ, X86Ops.VCVTDQ2PD, X86Ops.VCVTDQ2PS, X86Ops.VCVTSS2SD,
-                                                 X86Ops.VCVTPS2PD, X86Ops.VCVTSD2SS, X86Ops.VCVTPD2PS, X86Ops.VCVTPH2PS)},
-# this is actually 1 less micro op if load is fused
-**{x: lambda x: info(x, 4, [(zen4_flp23, 0, 2)], 2, -1) for x in (X86Ops.VCVTSI2SD,)},
-**{x: lambda x: info(x, 3, [(zen4_flp23, 0, 2)], 2, -1) for x in (X86Ops.VCVTSI2SS,)},
-**{x: lambda x: info(x, 2, [(zen4_flp01, 0, 2)]) for x in (X86Ops.VCMPSS, X86Ops.VMAXSS, X86Ops.VMAXSD, X86Ops.VMAXPS, X86Ops.VMAXPD)},
-**{x: lambda x: info(x, 1, [(zen4_flp01, 0, 1)]) for x in (X86Ops.VCMPSD,)},
-**{x: lambda x: info(x, 2, [(zen4_flp01, 0, 1)]) for x in (X86Ops.VCMPPS, X86Ops.VCMPPD)},
-**{x: lambda x: info(x, 3, [(zen4_flp01, 0, 1)]) for x in (X86Ops.VMULSS, X86Ops.VMULSD, X86Ops.VMULPS, X86Ops.VMULPD)},
-**{x: lambda x: info(x, 4, [(zen4_flp01, 0, 2)]) for x in (X86Ops.VFMADD213SS, X86Ops.VFMADD213SD)},
-**{x: lambda x: info(x, 4, [(zen4_flp01, 0, 1)]) for x in (X86Ops.VFMADD213PS, X86Ops.VFMADD213PD)},
-**{x: lambda x: info(x, 1, [(zen4_flp01, 0, 1)]) for x in (X86Ops.VBLENDVPS, X86Ops.VBLENDVPD)},
-**{x: lambda x: info(x, 1, [(zen4_flp45, 0, 2)]) for x in (X86Ops.VMOVD, X86Ops.VMOVDm, X86Ops.VMOVQ, X86Ops.VMOVQm)},
-**{x: lambda x: info(x, 1, [(zen4_flp45, 0, 2)], 2, -1) for x in (X86Ops.VPINSRB, X86Ops.VPINSRW, X86Ops.VPINSRD, X86Ops.VPINSRQ,
-                                                                X86Ops.VPEXTRB, X86Ops.VPEXTRW, X86Ops.VPEXTRD, X86Ops.VPEXTRQ)},
-**{x: lambda x: info(x, 1, [(zen4_flp0123, 0, 1)]) for x in (X86Ops.VPADDB, X86Ops.VPADDW, X86Ops.VPADDD, X86Ops.VPADDQ,
-                                                   X86Ops.VPSUBB, X86Ops.VPSUBW, X86Ops.VPSUBD, X86Ops.VPSUBQ,
-                                                   X86Ops.VPCMPGTB, X86Ops.VPCMPGTW, X86Ops.VPCMPGTD, X86Ops.VPCMPGTQ,
-                                                   X86Ops.VPCMPEQB, X86Ops.VPCMPEQW, X86Ops.VPCMPEQD)},
-**{x: lambda x: info(x, 2, [(zen4_flp01, 0, 2)]) for x in (X86Ops.VPCMPEQQ,)},
-**{x: lambda x: info(x, 3, [(zen4_flp03, 0, 1)]) for x in (X86Ops.VPMULLW, X86Ops.VPMULLD)},
-**{x: lambda x: info(x, 1, [(zen4_flp03, 0, 1)]) for x in (X86Ops.VPBLENDVB,)},
-**{x: lambda x: info(x, 1, [(zen4_flp12, 0, 1)]) for x in (X86Ops.VSHUFPS, X86Ops.VINSERTPS, X86Ops.VBROADCASTSS, X86Ops.VPBROADCASTD,
-                                                 X86Ops.VPBROADCASTB, X86Ops.VPBROADCASTW, X86Ops.VPBROADCASTD, X86Ops.VPBROADCASTQ,
-                                                 X86Ops.VPSLLVD, X86Ops.VPSLLVQ, X86Ops.VPSRLVD, X86Ops.VPSRLVQ, X86Ops.VPSRAVD)},
-**{x: lambda x: info(x, 11, [(Resource((zen4_flp1,)), 0, 3)]) for x in (X86Ops.VDIVSS, X86Ops.VDIVPS)},
-**{x: lambda x: info(x, 13, [(Resource((zen4_flp1,)), 0, 5)]) for x in (X86Ops.VDIVSD, X86Ops.VDIVPD)},
-**{x: lambda x: info(x, 15, [(Resource((zen4_flp1,)), 0, 5)]) for x in (X86Ops.VSQRTSS, X86Ops.VSQRTPS)},
-**{x: lambda x: info(x, 21, [(Resource((zen4_flp1,)), 0, 9)]) for x in (X86Ops.VSQRTSD, X86Ops.VSQRTPD)},
-}
-# can dispatch up to 6 macro ops per cycle, retire control unit can track up to 320 macro ops in flight
-zen4_mach_info = MachineInfo(6, 320, zen4_op_info)
 
 # ***** X86 legalization *****
 
@@ -745,7 +656,6 @@ class X86Renderer(ISARenderer):
   isel_matcher = isel_matcher
   post_regalloc_matcher = post_regalloc_matcher
   isa_spec = isa_spec
-  mach_info = zen4_mach_info
   code_for_op = {x: lambda: None for x in (Ops.SQRT, Ops.AND, Ops.OR, Ops.SHL, Ops.SHR, Ops.NEG, Ops.SUB, Ops.FDIV, Ops.CMPLT, Ops.CMPEQ, Ops.MAX)}
 
   def stack_pointer(self) -> UOp: return UOp(X86Ops.DEFINE_REG, dtypes.uint64, arg=RSP)
