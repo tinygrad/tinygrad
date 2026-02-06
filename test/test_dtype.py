@@ -7,7 +7,6 @@ from tinygrad.helpers import getenv, DEBUG, CI, EMULATED_DTYPES
 from tinygrad.dtype import DType, DTYPES_DICT, least_upper_dtype, fp8_to_float, float_to_fp8, _to_np_dtype, _to_torch_dtype, truncate
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.nir import NIRRenderer
-from tinygrad.renderer.x86 import X86Renderer
 from tinygrad import Context, Device, Tensor, dtypes
 from tinygrad.uop import Ops
 from hypothesis import given, settings, strategies as strat
@@ -354,7 +353,6 @@ class TestInt64DType(TestDType): DTYPE = dtypes.int64
 
 @unittest.skipUnless(Ops.SHL in Device[Device.DEFAULT].renderer.code_for_op, "long decomp requires bitshift")
 @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, PTXRenderer), "PTX does indexing math with longs")
-@unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, X86Renderer), "X86 needs to cast uint32 to int64 causing infinite loop")
 class TestEmulatedInt64DType(TestInt64DType):
   @classmethod
   def setUpClass(cls):
@@ -372,7 +370,6 @@ class TestUint64DType(TestDType):
 
 @unittest.skipUnless(Ops.SHL in Device[Device.DEFAULT].renderer.code_for_op, "long decomp requires bitshift")
 @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, PTXRenderer), "PTX does indexing math with longs")
-@unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, X86Renderer), "X86 needs to cast uint32 to int64 causing infinite loop")
 class TestEmulatedUInt64DType(TestUint64DType):
   @classmethod
   def setUpClass(cls):
