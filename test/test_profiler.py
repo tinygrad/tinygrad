@@ -97,7 +97,7 @@ class TestProfiler(unittest.TestCase):
       buf2.copyin(memoryview(bytearray(struct.pack("ff", 0, 1))))
 
     for dev in [TestProfiler.d0.device, d1.device]:
-      evs = [x for x in profile if isinstance(x, ProfileRangeEvent) and (x.device == dev or x.device.startswith(dev + ":"))]
+      evs = [x for x in profile if isinstance(x, ProfileRangeEvent) and (x.device == dev or x.device.startswith(dev + ":SDMA"))]
       assert len(evs) == 1, "one kernel runs are expected"
 
   def test_profile_multidev_transfer(self):
