@@ -12,7 +12,7 @@ from tinygrad.codegen.opt import Opt
 # import all pattern matchers here
 from tinygrad.codegen.gpudims import pm_add_gpudims
 from tinygrad.uop.symbolic import sym, symbolic_simple, gep_pushing, symbolic, pm_move_where_on_load
-from tinygrad.uop.decompositions import get_late_rewrite_patterns, get_unsupported_dtypes_patterns, get_transcendental_patterns, pm_float_decomp
+from tinygrad.uop.decompositions import get_late_rewrite_patterns, get_transcendental_patterns, pm_float_decomp, pm_long_decomp
 from tinygrad.dtype import promo_lattice
 from tinygrad.device import is_dtype_supported
 from tinygrad.codegen.late.expander import expander, pm_pre_expander, pm_group_for_reduce
@@ -90,14 +90,12 @@ def full_rewrite_to_sink(sink:UOp, ren:Renderer|None=None, optimize:bool=True) -
   # decompositions
   supported_ops = tuple(ren.code_for_op.keys())
   pm_decomp = symbolic_simple+get_late_rewrite_patterns(supported_ops, ren.device, bool(DISABLE_FAST_IDIV))
-  pm_unsupported = get_unsupported_dtypes_patterns(ren.device, tuple(EMULATED_DTYPES.tolist(dtypes)))
   pm_transcendental = symbolic_simple+get_transcendental_patterns(supported_ops, TRANSCENDENTAL>=2)
   sink = graph_rewrite(sink, pm_decomp, ctx=ren.device, name="decompositions")
-  sink = graph_rewrite(sink, pm_unsupported, ctx=ren.device, name="unsupported dtypes", bottom_up=True)
-  for em in EMULATED_DTYPES.tolist(dtypes):
-    if em not in dtypes.floats: continue
-    to = next((d for d in promo_lattice.get(em, []) if d in dtypes.floats and is_dtype_supported(d, ren.device)), dtypes.float)
-    sink = graph_rewrite(sink, pm_float_decomp, ctx=(em, to), name=f"decomp {em}", bottom_up=True)
+  if dtypes.long in EMULATED_DTYPES.tolist(dtypes): sink = graph_rewrite(sink, pm_long_decomp, name="decomp long -> int", bottom_up=True)
+  for fr, to in [(fr, next(to for to in promo_lattice[fr] if is_dtype_supported(to, ren.device)))
+                 for fr in EMULATED_DTYPES.tolist(dtypes) if fr in dtypes.floats]:
+    sink = graph_rewrite(sink, pm_float_decomp, ctx=(fr, to), name=f"decomp {fr} -> {to}", bottom_up=True)
   sink = graph_rewrite(sink, pm_transcendental, ctx=ren.device, name="transcendental")
 
   # final rules for the renderer (without sym)
