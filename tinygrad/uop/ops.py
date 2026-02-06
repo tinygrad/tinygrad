@@ -1417,7 +1417,6 @@ pm_pyrender_extra = PatternMatcher([
 
 # NOTE: you can remove pm_pyrender_extra and it'll still be correct
 pm_pyrender = pm_pyrender_extra+PatternMatcher([
-  (UPat(Ops.KERNEL, name="u"), lambda ctx,u: f"UOp(Ops.KERNEL, src={srcs(ctx,u.src)}, arg=Kernel({ctx[u.arg.ast]}(), {u.arg.metadata}))"),
   (UPat(GroupOp.All, name="u"), lambda ctx,u: f"UOp({u.op}, {u.dtype}, {srcs(ctx,u.src)}"+(f", {repr(u.arg)})" if u.arg is not None else ")")),
 ])
 
