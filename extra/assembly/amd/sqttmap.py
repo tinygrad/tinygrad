@@ -114,7 +114,7 @@ if __name__ == "__main__":
     data = pickle.load(f)
   sqtt_events = [e for e in data if type(e).__name__ == "ProfileSQTTEvent"]
   kern_events = {e.tag:e for e in data if type(e).__name__ == "ProfileProgramEvent"}
-  target = next((e for e in data if type(e).__name__ == "ProfileDeviceEvent" and e.device.startswith("AMD"))).props["gfx_target_version"]
+  target = next(e for e in data if type(e).__name__ == "ProfileDeviceEvent" and e.device.startswith("AMD") and ":SDMA:" not in e.device).props["gfx_target_version"]
   for e in sqtt_events:
     if args.kernel is not None and args.kernel != e.kern: continue
     if not e.itrace: continue

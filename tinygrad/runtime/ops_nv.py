@@ -333,7 +333,7 @@ class NVAllocator(HCQAllocator['NVDevice']):
     self.dev._ensure_has_vid_hw(w, h)
 
     q = NVVideoQueue().wait(self.dev.timeline_signal, self.dev.timeline_value - 1)
-    with hcq_profile(self.dev, queue=q, desc="NVDEC", enabled=PROFILE):
+    with hcq_profile(self.dev, queue=q, desc="HEVC Decode", enabled=PROFILE, dev_suff="NVDEC"):
       q.decode_hevc_chunk(desc_buf, bufin, bufout, frame_pos, hist, [(frame_pos-x) % (len(hist) + 1) for x in range(len(hist), 0, -1)],
                           round_up(w, 64)*round_up(h, 64), self.dev.vid_coloc_buf, self.dev.vid_filter_buf, self.dev.intra_top_off,
                           self.dev.intra_unk_off, self.dev.vid_stat_buf)
