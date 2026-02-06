@@ -168,19 +168,19 @@ def option(s:int|None) -> int: return 0 if s is None else s+1
 
 # Profiler API
 
-device_ts_diffs:dict[str, tuple[Decimal, Decimal]] = {}
-def cpu_ts_diff(device:str, thread=0) -> Decimal: return device_ts_diffs.get(device, (Decimal(0),))[thread]
+device_ts_diffs:dict[str, Decimal] = {}
+def cpu_ts_diff(device:str) -> Decimal: return device_ts_diffs.get(device, Decimal(0))
 
 amdgpu_targets:dict[str, int] = {}
 
 DevEvent = ProfileRangeEvent|ProfileGraphEntry|ProfilePointEvent
 def flatten_events(profile:list[ProfileEvent]) -> Generator[tuple[Decimal, Decimal, DevEvent], None, None]:
   for e in profile:
-    if isinstance(e, ProfileRangeEvent): yield (e.st+(diff:=cpu_ts_diff(e.device, e.is_copy)), (e.en if e.en is not None else e.st)+diff, e)
+    if isinstance(e, ProfileRangeEvent): yield (e.st+(diff:=cpu_ts_diff(e.device)), (e.en if e.en is not None else e.st)+diff, e)
     elif isinstance(e, ProfilePointEvent): yield (e.ts, e.ts, e)
     elif isinstance(e, ProfileGraphEvent):
       cpu_ts = []
-      for ent in e.ents: cpu_ts += [e.sigs[ent.st_id]+(diff:=cpu_ts_diff(ent.device, ent.is_copy)), e.sigs[ent.en_id]+diff]
+      for ent in e.ents: cpu_ts += [e.sigs[ent.st_id]+(diff:=cpu_ts_diff(ent.device)), e.sigs[ent.en_id]+diff]
       yield (st:=min(cpu_ts)), (et:=max(cpu_ts)), ProfileRangeEvent(f"{e.ents[0].device.split(':')[0]} Graph", f"batched {len(e.ents)}", st, et)
       for i,ent in enumerate(e.ents): yield (cpu_ts[i*2], cpu_ts[i*2+1], ent)
 
@@ -387,7 +387,7 @@ def get_profile(profile:list[ProfileEvent], sort_fn:Callable[[str], Any]=device_
   device_decoders:dict[str, Callable[[list[ProfileEvent]], None]] = {}
   for ev in profile:
     if isinstance(ev, ProfileDeviceEvent):
-      device_ts_diffs[ev.device] = (ev.comp_tdiff,ev.copy_tdiff if ev.copy_tdiff is not None else ev.comp_tdiff)
+      device_ts_diffs[ev.device] = ev.tdiff
       if (d:=ev.device.split(":")[0]) == "AMD":
         device_decoders[d] = load_counters
         amdgpu_targets[d] = unwrap(ev.props)["gfx_target_version"]

@@ -131,7 +131,8 @@ class HCQGraph(MultiGraphRunner):
         # Description based on the command.
         prof_ji_desc = ji.prg._prg.name if is_exec_prg else f"{ji.bufs[1].device} -> {ji.bufs[0].device}" # type: ignore
 
-        self.prof_graph_entries.append(ProfileGraphEntry(enqueue_dev.device, prof_ji_desc, sig_st, j * 2 + 1, is_copy=not is_exec_prg))
+        prof_name = f"{enqueue_dev.device}:SDMA:{queue_idx}" if not is_exec_prg else enqueue_dev.device
+        self.prof_graph_entries.append(ProfileGraphEntry(prof_name, prof_ji_desc, sig_st, j * 2 + 1))
         self.prof_graph_deps.append([d - 1 for _, d in rdeps])
 
       last_j[enqueue_queue] = j
