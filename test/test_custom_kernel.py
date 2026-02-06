@@ -104,7 +104,7 @@ def backward_gemm_custom(gradient:UOp, kernel:UOp) -> tuple[UOp, UOp]:
 class TestCustomKernel(unittest.TestCase):
   def test_empty(self):
     a = Tensor.empty(1)
-    a = Tensor.custom_kernel(a, fxn=lambda _: UOp.sink())[0]
+    a = Tensor.custom_kernel(a, fxn=lambda _: UOp.sink(arg=KernelInfo()))[0]
     a.realize()
 
   def test_simple(self):

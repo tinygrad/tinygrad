@@ -1,4 +1,5 @@
 from typing import cast
+from dataclasses import replace
 import itertools
 from tinygrad.helpers import DISABLE_FAST_IDIV, EMULATED_DTYPES, DEVECTORIZE, TRANSCENDENTAL, SPEC, DEBUG, getenv, TracingKey, Context
 from tinygrad.uop.ops import PatternMatcher, graph_rewrite, UOp, pm_lower_index_dtype, Ops, UPat, track_rewrites, KernelInfo, pyrender
@@ -164,17 +165,19 @@ def get_program(ast:UOp, renderer:Renderer, opts:list[Opt]|None=None) -> Program
     The ProgramSpec of the program.
   """
 
-  # fix up KernelInfo
-  if opts is not None:
-    assert ast.arg is None, "can't apply opts if sink has an arg"
-    ast = ast.replace(arg=KernelInfo(opts_to_apply=tuple(opts)))
-  if ast.arg is None and ast.op is Ops.SINK: ast = ast.replace(arg=KernelInfo())
-
-  # rewrite to prg
   if ast.op is Ops.PROGRAM: prg = ast
-  else:
+  elif ast.op is Ops.SINK:
+    # rewrite to prg
+    assert isinstance(ast.arg, KernelInfo), "requires KernelInfo on arg to get_program"
+    if opts is not None:
+      # TODO: should this be here?
+      assert ast.arg.opts_to_apply is None, "can't apply opts if there's already opts to apply"
+      ast = ast.replace(arg=replace(ast.arg, opts_to_apply=tuple(opts)))
     full_sink = full_rewrite_to_sink(ast, renderer, optimize=ast.tag is None)
     prg = UOp(Ops.PROGRAM, src=(full_sink, UOp(Ops.DEVICE, arg=renderer.device)))
+  else:
+    raise RuntimeError(f"can't call get_program on {ast.op}")
+
   prg = graph_rewrite(prg, pm_to_program, ctx=renderer, name="linearize/render")
 
   # create the ProgramSpec
