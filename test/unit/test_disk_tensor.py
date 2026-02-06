@@ -4,7 +4,7 @@ from tinygrad import Tensor, Device, dtypes
 from tinygrad.device import is_dtype_supported
 from tinygrad.dtype import DType, DTYPES_DICT
 from tinygrad.nn.state import safe_load, safe_save, get_state_dict, torch_load
-from tinygrad.helpers import Timing, fetch, OSX
+from tinygrad.helpers import Timing, fetch, OSX, dedup
 from test.helpers import slow
 
 class TempDirTestCase(unittest.TestCase):
@@ -172,7 +172,7 @@ class TestSafetensors(TempDirTestCase):
     assert json.loads(dat[8:8+sz])['__metadata__']['hello'] == 'world'
 
   def test_save_all_dtypes(self):
-    for dtype in DTYPES_DICT.values():
+    for dtype in dedup(DTYPES_DICT.values()):
       if dtype in [dtypes.bfloat16]: continue # not supported in numpy
       if not is_dtype_supported(dtype): continue
       path = self.tmp(f"ones.{dtype}.safetensors")
