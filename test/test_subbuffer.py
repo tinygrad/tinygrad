@@ -13,26 +13,26 @@ class TestSubBuffer(unittest.TestCase):
 
   def test_subbuffer(self):
     vbuf = self.buf.view(2, dtypes.uint8, offset=3).ensure_allocated()
-    tst = vbuf.as_buffer().tolist()
+    tst = vbuf.as_memoryview().tolist()
     assert tst == [3, 4]
 
   def test_subbuffer_cast(self):
     # NOTE: bitcast depends on endianness
     vbuf = self.buf.view(2, dtypes.uint16, offset=3).ensure_allocated()
-    tst = vbuf.as_buffer().cast("H").tolist()
+    tst = vbuf.as_memoryview().cast("H").tolist()
     assert tst == [3|(4<<8), 5|(6<<8)]
 
   def test_subbuffer_double(self):
     vbuf = self.buf.view(4, dtypes.uint8, offset=3).ensure_allocated()
     vvbuf = vbuf.view(2, dtypes.uint8, offset=1).ensure_allocated()
-    tst = vvbuf.as_buffer().tolist()
+    tst = vvbuf.as_memoryview().tolist()
     assert tst == [4, 5]
 
   def test_subbuffer_len(self):
     vbuf = self.buf.view(5, dtypes.uint8, 2).ensure_allocated()
-    mv = vbuf.as_buffer()
+    mv = vbuf.as_memoryview()
     assert len(mv) == 5
-    mv = vbuf.as_buffer(allow_zero_copy=True)
+    mv = vbuf.as_memoryview(allow_zero_copy=True)
     assert len(mv) == 5
 
   def test_subbuffer_used(self):
@@ -63,7 +63,7 @@ class TestSubBuffer(unittest.TestCase):
 
       vbuf.ensure_allocated()
 
-      tst = vbuf.as_buffer().tolist()
+      tst = vbuf.as_memoryview().tolist()
       assert tst == [13, 14]
 
   def test_subbuffer_is_allocated(self):
@@ -112,8 +112,8 @@ class TestSubBuffer(unittest.TestCase):
     sub_buf.copyout(memoryview(data_out_sub))
     assert data_out_sub == bytearray(range(3, 6))
     sub_buf.copyin(memoryview(bytearray(range(3))))
-    assert sub_buf.as_buffer().tolist() == list(range(3))
-    assert self.buf.as_buffer().tolist()[3:6] == list(range(3))
+    assert sub_buf.as_memoryview().tolist() == list(range(3))
+    assert self.buf.as_memoryview().tolist()[3:6] == list(range(3))
     sub_buf.copyout(memoryview(data_out_sub))
     assert data_out_sub == bytearray(range(3))
     data_out_base = bytearray([0]*10)
@@ -145,17 +145,17 @@ class TestSubBuffer(unittest.TestCase):
     sub_buf = self.buf.view(4, dtypes.int8, offset=3)
     sub_buf.allocate()
     sub_buf.copyin(memoryview(bytearray(range(10, 14))))
-    assert self.buf.as_buffer().tolist()[3:7] == sub_buf.as_buffer().tolist()
+    assert self.buf.as_memoryview().tolist()[3:7] == sub_buf.as_memoryview().tolist()
 
     sub_buf = self.buf_unalloc.view(4, dtypes.int8, offset=3)
     sub_buf.allocate()
     sub_buf.copyin(memoryview(bytearray(range(10, 14))))
-    assert self.buf_unalloc.as_buffer().tolist()[3:7] == sub_buf.as_buffer().tolist()
+    assert self.buf_unalloc.as_memoryview().tolist()[3:7] == sub_buf.as_memoryview().tolist()
 
   def test_subbuffer_dealloc(self):
     sub_buf = self.buf.view(4, dtypes.int8, offset=3).ensure_allocated()
     sub_buf.deallocate()
-    assert self.buf.as_buffer().tolist() == list(range(10))
+    assert self.buf.as_memoryview().tolist() == list(range(10))
 
   def test_subbuffer_double_dealloc(self):
     sub_buf = self.buf.view(3, dtypes.uint8, offset=4).ensure_allocated()
@@ -168,17 +168,17 @@ class TestSubBuffer(unittest.TestCase):
 
   def test_subbuffer_uaf(self):
     sub_buf = self.buf.view(4, dtypes.int8, offset=3).ensure_allocated()
-    assert self.buf.as_buffer().tolist(), list(range(10))
+    assert self.buf.as_memoryview().tolist(), list(range(10))
     sub_buf.deallocate()
     with self.assertRaises(AssertionError):
-      sub_buf.as_buffer().tolist()
-    assert self.buf.as_buffer().tolist(), list(range(10))
+      sub_buf.as_memoryview().tolist()
+    assert self.buf.as_memoryview().tolist(), list(range(10))
 
     sub_buf = self.buf.view(4, dtypes.int8, offset=3).ensure_allocated()
-    assert sub_buf.as_buffer().tolist(), list(range(3, 7))
+    assert sub_buf.as_memoryview().tolist(), list(range(3, 7))
     self.buf.deallocate()
     with self.assertRaises(AssertionError):
-      sub_buf.as_buffer().tolist()
+      sub_buf.as_memoryview().tolist()
 
 if __name__ == '__main__':
   unittest.main()

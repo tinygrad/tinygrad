@@ -1,4 +1,4 @@
-import base64, ctypes, pathlib, tempfile, hashlib, sys
+import base64, ctypes, pathlib, tempfile, hashlib
 from tinygrad.device import Compiler
 from tinygrad.helpers import cpu_objdump, system, data64
 from tinygrad.runtime.autogen import mesa, llvm
@@ -90,7 +90,6 @@ def disas_adreno(lib:bytes, gpu_id=630):
 
 class IR3Compiler(Compiler):
   def __init__(self, chip_id, cache_key="ir3"):
-    assert sys.version_info >= (3,14), "IR3 requires python 3.14's bitfield fixes"
     self.dev_id = mesa.struct_fd_dev_id(((chip_id >> 24) & 0xFF) * 100 + ((chip_id >> 16) & 0xFF) * 10 + ((chip_id >>  8) & 0xFF), chip_id)
     self.cc = mesa.ir3_compiler_create(None, self.dev_id, mesa.fd_dev_info(self.dev_id),
                                        mesa.struct_ir3_compiler_options(disable_cache=True)).contents

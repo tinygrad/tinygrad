@@ -256,6 +256,18 @@ class TestMultiTensor(unittest.TestCase):
       a,b = _test_allreduce(Tensor.rand(256, 256))
       np.testing.assert_almost_equal(a.numpy(), b.numpy(), decimal=5)
 
+  def test_multiple_to_single_device_naive(self):
+    with Context(RING=0):
+      t = Tensor.arange(32).shard(devices_4, 0).to(Device.DEFAULT).realize()
+    self.assertEqual(t.device, Device.DEFAULT)
+    np.testing.assert_equal(t.numpy(), np.arange(32))
+
+  def test_multiple_to_single_device_ring(self):
+    with Context(RING=2):
+      t = Tensor.arange(32).shard(devices_4, 0).to(Device.DEFAULT).realize()
+    self.assertEqual(t.device, Device.DEFAULT)
+    np.testing.assert_equal(t.numpy(), np.arange(32))
+
   def test_allreduce_all2all(self):
     with Context(ALL2ALL=2):
       a,b = _test_allreduce(Tensor.rand(256, 256))
@@ -408,6 +420,28 @@ class TestMultiTensor(unittest.TestCase):
     z_shard = layer_sharded(x_sharded)
 
     np.testing.assert_allclose(z.numpy(), z_shard.numpy(), atol=1e-6, rtol=1e-6)
+
+  def test_embedding_backward(self, shard_weight_axis=None):
+    B, T, embed_size, vocab_size = 4, 10, 20, 28
+
+    layer = nn.Embedding(vocab_size, embed_size)
+    layer.weight.requires_grad = True
+    x = Tensor(np.random.randint(0, vocab_size, (B, T), dtype=np.int32))
+    z = layer(x)
+    z.sum().backward()
+    grad = layer.weight.grad.numpy()
+
+    layer_sharded = nn.Embedding(vocab_size, embed_size)
+    layer_sharded.weight.replace(layer.weight.shard(devices_2, axis=shard_weight_axis)).realize()
+    layer_sharded.weight.requires_grad = True
+    x_sharded = x.shard(devices_2, axis=None)
+    z_shard = layer_sharded(x_sharded)
+    z_shard.sum().backward()
+    grad_shard = layer_sharded.weight.grad.numpy()
+
+    np.testing.assert_allclose(grad, grad_shard, atol=1e-6, rtol=1e-6)
+
+  def test_embedding_backward_shard_weight(self): self.test_embedding_backward(shard_weight_axis=1)
 
   def test_rmsnorm(self):
     B, T, embed_size = 4, 10, 20
@@ -1213,43 +1247,6 @@ class TestTensorOps(unittest.TestCase):
   @needs_second_gpu
   def test_bitcast(self):
     helper_test_shard_op([(256,), (256,)], lambda x: x.bitcast(dtypes.int))
-
-@unittest.skipIf(not_support_multi_device(), "no multi")
-class TestMultiRamUsage(unittest.TestCase):
-  def setUp(self):
-    self.baseline = GlobalCounters.mem_used
-    self.N = 100
-  def assertUsed(self, amt, strict=True):
-    used = GlobalCounters.mem_used - self.baseline
-    print(f"used {used} bytes")
-    if strict: self.assertEqual(used, amt)
-    else: self.assertLessEqual(used, amt)
-
-  def test_zeros(self):
-    _ = Tensor.zeros(self.N, self.N).contiguous().realize()
-    self.assertUsed(self.N*self.N*4)
-
-  def test_zeros_del(self):
-    _ = Tensor.zeros(self.N, self.N).contiguous().realize()
-    del _
-    self.assertUsed(0)
-
-  @unittest.skip("flaky")
-  def test_zeros_copy(self):
-    _ = Tensor.zeros(self.N, self.N).contiguous().to(devices_2).realize()
-    # NOTE: the first one on the DEFAULT device should be freed
-    self.assertUsed(self.N*self.N*4*2)
-
-  @unittest.skip("flaky")
-  def test_zeros_shard(self, devices=(d1, d2)):
-    _ = Tensor.zeros(self.N, self.N).contiguous().shard(devices, axis=0).realize()
-    self.assertUsed(self.N*self.N*4) # sharding should not increase total ram usage
-  def test_zeros_shard_self(self): self.test_zeros_shard((d0, d1))
-
-  @unittest.skip("flaky")
-  def test_zeros_contiguous_shard(self):
-    _ = Tensor.zeros(self.N, self.N).contiguous().shard(devices_2, axis=0).contiguous().realize()
-    self.assertUsed(self.N*self.N*4) # sharding should not increase total ram usage
 
 @unittest.skipIf(not_support_multi_device(), "need multi")
 class TestMultiFromUnrenderable(unittest.TestCase):

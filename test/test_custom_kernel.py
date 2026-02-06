@@ -52,7 +52,7 @@ def flip_contract_kernel(dest:UOp, src:UOp):
   j = UOp.range(dest.shape[1], 1, AxisType.UPCAST)
   vec = src[i, j].contract(j)
   store = UOp.group(*[dest[i, k].store(vec.gep(3-k)) for k in range(4)])
-  return store.end(i).sink(arg=KernelInfo(name=f"flip_contract_{dest.size}", opts_to_apply=()))
+  return store.end(i, j).sink(arg=KernelInfo(name=f"flip_contract_{dest.size}", opts_to_apply=()))
 
 def slice_sum_kernel(dest:UOp, src:UOp):
   G = UOp.range(src.shape[0], 0)
@@ -104,7 +104,7 @@ def backward_gemm_custom(gradient:UOp, kernel:UOp) -> tuple[UOp, UOp]:
 class TestCustomKernel(unittest.TestCase):
   def test_empty(self):
     a = Tensor.empty(1)
-    a = Tensor.custom_kernel(a, fxn=lambda _: UOp.sink())[0]
+    a = Tensor.custom_kernel(a, fxn=lambda _: UOp.sink(arg=KernelInfo()))[0]
     a.realize()
 
   def test_simple(self):
@@ -246,6 +246,40 @@ class TestCustomKernel(unittest.TestCase):
     Tensor.realize(O_custom, O_ref)
     err = (O_custom - O_ref).square().max()
     self.assertLess(err.item(), 1e-6)
+
+  def test_multi_after_schedule_order(self):
+    """Test correct scheduling order when custom_kernel has multiple outputs.
+
+    custom_kernel with 4 arguments creates 4 AFTERs from the same kernel.
+    The custom_kernel depends on both A2 and B2, so it must be scheduled after both.
+    E only depends on A2, so E can run before custom_kernel finishes waiting for B2.
+
+    Expected schedule order: [A2, B2, E, custom_addmul, final_sum]
+    The custom_addmul kernel should be at index 3.
+    """
+    from tinygrad.engine.schedule import create_schedule
+    from tinygrad.schedule.rangeify import get_rangeify_map
+
+    A, B = Tensor.empty(4, 4), Tensor.empty(4, 4)
+    A2 = (A + 1).contiguous()                      # kernel 0: depends on A
+    B2 = (B * 2).contiguous()                      # kernel 1: depends on B
+    C, D = Tensor.empty(4, 4), Tensor.empty(4, 4)
+    C, D, _, _ = Tensor.custom_kernel(C, D, A2, B2, fxn=custom_elementwise_addmul_kernel)  # depends on A2 AND B2
+    E = (A2 * 3).contiguous()                      # kernel 2: depends only on A2
+    result = (C + D + E).sum()                     # kernel 3: custom_addmul, then kernel 4: sum
+
+    big_sink = result.uop.sink()
+    tensor_map = get_rangeify_map(big_sink)
+    sched_sink = big_sink.substitute(tensor_map)
+    schedule, _ = create_schedule(sched_sink)
+
+    # Find the custom_addmul kernel position
+    custom_idx = next((i for i, item in enumerate(schedule)
+                       if hasattr(item.ast, "arg") and hasattr(item.ast.arg, "name")
+                       and "custom_addmul" in item.ast.arg.name), None)
+
+    self.assertIsNotNone(custom_idx, "custom_addmul kernel not found in schedule")
+    self.assertEqual(custom_idx, 3, f"custom_addmul should be at index 3, got {custom_idx}")
 
 if __name__ == '__main__':
   unittest.main()

@@ -1,7 +1,7 @@
 import unittest
 import numpy as np
 from tinygrad import Tensor, GlobalCounters, dtypes, nn, Device, Variable
-from tinygrad.helpers import Context, getenv
+from tinygrad.helpers import Context, getenv, EMULATE
 from tinygrad.engine.realize import run_schedule
 from tinygrad.engine.realize import CompiledRunner, get_program
 from tinygrad.engine.schedule import ExecItem
@@ -162,6 +162,59 @@ class TestIndexing(unittest.TestCase):
       np.testing.assert_allclose(z.numpy().reshape(4, embed_size), torch_z.detach().numpy(), atol=1e-8, rtol=1e-8)
   # at least the arange is being fused
   def test_llama_embedding_opt(self): self.test_llama_embedding(0, 1_736_704_000)
+
+  # NOTE: call doesn't work with SPEC=2
+  @unittest.skipIf(Device.DEFAULT not in ("CPU", "AMD"), "atomics only on AMD/CPU")
+  @Context(USE_ATOMICS=1, SPEC=1)
+  def test_llama_8b_embedding_backward(self):
+    from tinygrad.renderer.cstyle import CStyleLanguage
+    if Device.DEFAULT == "CPU" and not isinstance(Device["CPU"].renderer, CStyleLanguage): self.skipTest("CPU needs Clang renderer")
+    vocab_size, embed_size = 1000, 128
+    bs, seqlen = 4, 256
+    idx = Tensor.randint(bs, seqlen, high=vocab_size)
+    emb = nn.Embedding(vocab_size, embed_size)
+    emb.weight = Tensor.ones(vocab_size, embed_size, requires_grad=True)
+    gt = Tensor.zeros(bs, seqlen, embed_size)
+    Tensor.realize(idx, emb.weight, gt)
+    GlobalCounters.reset()
+    loss = (emb(idx)-gt).square().sum()
+    loss.backward()
+    emb.weight.grad.realize()
+    bwd_ops = GlobalCounters.global_ops
+    print(f"embedding bwd: {GlobalCounters.kernel_count} kernels, {bwd_ops:,} ops")
+    self.assertLess(bwd_ops, bs*seqlen*embed_size*20, f"backward ops {bwd_ops:,} should be less than 20 per with atomic scatter-add")
+    # correctness check
+    expected_grad = np.zeros((vocab_size, embed_size), dtype=np.float32)
+    for i in idx.flatten().numpy(): expected_grad[i] += 2
+    np.testing.assert_allclose(emb.weight.grad.numpy(), expected_grad, rtol=1e-5, atol=1e-5)
+
+  # ~10x overhead in fused matmul bw with rope in bf16 vs float16
+  @unittest.skipUnless(Device.DEFAULT == "AMD" or (Device.DEFAULT == "NULL" and EMULATE.value.startswith("AMD")), "tests AMD bf16 cast overhead")
+  def base_test_llama_8b_rope_backward(self, dtype, ops_scale):
+    from extra.models.llama import precompute_freqs_cis, apply_rotary_emb
+    Tensor.training = True
+    bs, seqlen, dim, n_heads = 1, 512, 256, 4
+    head_dim = dim // n_heads
+    x = Tensor.randn(bs, seqlen, dim, dtype=dtype)
+    wq = Tensor.randn(dim, dim, dtype=dtype, requires_grad=True)
+    freqs_cis = precompute_freqs_cis(head_dim, seqlen).cast(dtype)
+    Tensor.realize(x, wq, freqs_cis)
+    xq = (x @ wq.T)
+    # main llama does not fuse it
+    #xq = xq.contiguous_backward()
+    xq = xq.reshape(bs, seqlen, n_heads, head_dim)
+    xq_rope, _ = apply_rotary_emb(xq, xq, freqs_cis)
+    xq_rope.sum().backward()
+    sched = wq.grad.schedule()
+    assert len(sched) == 1, f"expected one kernel for backward, got: {len(sched)}"
+    prg = sched[0].lower().prg.p
+    bwd_ops = prg.estimates.ops
+    expected_ops = bs*seqlen*dim*dim*ops_scale
+    print(f"rope matmul bwd ({dtype}): {GlobalCounters.kernel_count} kernels, {bwd_ops:,} ops")
+    self.assertLess(bwd_ops, expected_ops, f"rope bwd ops {bwd_ops:,} should be < {ops_scale} per (got {bwd_ops/(bs*seqlen*dim*dim):.1f})")
+
+  def test_llama_8b_rope_backward_f16(self): self.base_test_llama_8b_rope_backward(dtypes.float16, 1)
+  def test_llama_8b_rope_backward_bf16(self): self.base_test_llama_8b_rope_backward(dtypes.bfloat16, 11)
 
 if __name__ == "__main__":
   unittest.main()

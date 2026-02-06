@@ -255,7 +255,6 @@ class TestF16Conversions(unittest.TestCase):
 
   def test_v_cvt_f16_f32_small(self):
     """V_CVT_F16_F32 converts small f32 value."""
-    from extra.assembly.amd.test.hw.helpers import f32_to_f16
     instructions = [
       v_mov_b32_e32(v[0], 0.5),
       v_cvt_f16_f32_e32(v[1], v[0]),
@@ -293,7 +292,6 @@ class TestF16Conversions(unittest.TestCase):
 
   def test_v_cvt_f16_f32_reads_full_32bit_source(self):
     """V_CVT_F16_F32 must read full 32-bit f32 source."""
-    from extra.assembly.amd.test.hw.helpers import _f16
     instructions = [
       s_mov_b32(s[0], 0x3fc00000),  # f32 1.5
       v_mov_b32_e32(v[0], s[0]),
@@ -302,7 +300,7 @@ class TestF16Conversions(unittest.TestCase):
     st = run_program(instructions, n_lanes=1)
     result = st.vgpr[0][1]
     lo_bits = result & 0xffff
-    self.assertEqual(lo_bits, 0x3e00, f"Expected f16(1.5)=0x3e00, got 0x{lo_bits:04x} ({_f16(lo_bits)})")
+    self.assertEqual(lo_bits, 0x3e00, f"Expected f16(1.5)=0x3e00, got 0x{lo_bits:04x} ({f16(lo_bits)})")
 
   def test_v_cvt_i16_f16_zero(self):
     """V_CVT_I16_F16 converts f16 zero to i16 zero."""
@@ -696,7 +694,6 @@ class TestCvtF16Modifiers(unittest.TestCase):
 
   def test_v_cvt_f32_f16_abs_negative(self):
     """V_CVT_F32_F16 with |abs| on negative value."""
-    from extra.assembly.amd.test.hw.helpers import f32_to_f16
     f16_neg1 = f32_to_f16(-1.0)  # 0xbc00
     instructions = [
       s_mov_b32(s[0], f16_neg1),
@@ -709,7 +706,6 @@ class TestCvtF16Modifiers(unittest.TestCase):
 
   def test_v_cvt_f32_f16_abs_positive(self):
     """V_CVT_F32_F16 with |abs| on positive value (should stay positive)."""
-    from extra.assembly.amd.test.hw.helpers import f32_to_f16
     f16_2 = f32_to_f16(2.0)  # 0x4000
     instructions = [
       s_mov_b32(s[0], f16_2),
@@ -722,7 +718,6 @@ class TestCvtF16Modifiers(unittest.TestCase):
 
   def test_v_cvt_f32_f16_neg_positive(self):
     """V_CVT_F32_F16 with neg on positive value."""
-    from extra.assembly.amd.test.hw.helpers import f32_to_f16
     f16_2 = f32_to_f16(2.0)  # 0x4000
     instructions = [
       s_mov_b32(s[0], f16_2),
@@ -735,7 +730,6 @@ class TestCvtF16Modifiers(unittest.TestCase):
 
   def test_v_cvt_f32_f16_neg_negative(self):
     """V_CVT_F32_F16 with neg on negative value (double negative)."""
-    from extra.assembly.amd.test.hw.helpers import f32_to_f16
     f16_neg2 = f32_to_f16(-2.0)  # 0xc000
     instructions = [
       s_mov_b32(s[0], f16_neg2),
@@ -748,7 +742,6 @@ class TestCvtF16Modifiers(unittest.TestCase):
 
   def test_v_cvt_f16_f32_then_pack_for_wmma(self):
     """CVT F32->F16 followed by pack (common WMMA pattern)."""
-    from extra.assembly.amd.test.hw.helpers import _f16
     f32_val = 3.5
     instructions = [
       s_mov_b32(s[0], f2i(f32_val)),
@@ -757,8 +750,8 @@ class TestCvtF16Modifiers(unittest.TestCase):
       v_pack_b32_f16(v[2], v[1], v[1]),  # Pack same value
     ]
     st = run_program(instructions, n_lanes=1)
-    lo = _f16(st.vgpr[0][2] & 0xffff)
-    hi = _f16((st.vgpr[0][2] >> 16) & 0xffff)
+    lo = f16(st.vgpr[0][2] & 0xffff)
+    hi = f16((st.vgpr[0][2] >> 16) & 0xffff)
     self.assertAlmostEqual(lo, f32_val, places=1)
     self.assertAlmostEqual(hi, f32_val, places=1)
 
@@ -804,7 +797,6 @@ class TestConversionRounding(unittest.TestCase):
 
   def test_f16_to_f32_precision(self):
     """F16 to F32 conversion precision."""
-    from extra.assembly.amd.test.hw.helpers import f32_to_f16
     f16_val = f32_to_f16(1.5)
     instructions = [
       s_mov_b32(s[0], f16_val),
@@ -816,7 +808,6 @@ class TestConversionRounding(unittest.TestCase):
 
   def test_f16_denormal_to_f32(self):
     """F16 denormal converts to small positive f32."""
-    from extra.assembly.amd.test.hw.helpers import _f16
     f16_denorm = 0x0001  # Smallest positive f16 denormal
     instructions = [
       v_mov_b32_e32(v[0], f16_denorm),
@@ -1510,6 +1501,83 @@ class TestReciprocalF16(unittest.TestCase):
     st = run_program(instructions, n_lanes=1)
     result = bits_to_f16(st.vgpr[0][1] & 0xFFFF)
     self.assertAlmostEqual(result, 0.25, places=2, msg="1/4.0 should be 0.25")
+
+
+class TestCvtNormF16(unittest.TestCase):
+  """Tests for V_CVT_NORM_I16_F16 and V_CVT_NORM_U16_F16."""
+
+  def test_cvt_norm_i16_f16_positive(self):
+    """V_CVT_NORM_I16_F16: f16 1.0 -> i16 max (32767)."""
+    instructions = [
+      s_mov_b32(s[0], f32_to_f16(1.0)),
+      v_mov_b32_e32(v[0], s[0]),
+      v_cvt_norm_i16_f16_e32(v[1], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = st.vgpr[0][1] & 0xffff
+    self.assertEqual(result, 32767)
+
+  def test_cvt_norm_i16_f16_negative(self):
+    """V_CVT_NORM_I16_F16: f16 -1.0 -> i16 -32767 (0x8001)."""
+    instructions = [
+      s_mov_b32(s[0], f32_to_f16(-1.0)),
+      v_mov_b32_e32(v[0], s[0]),
+      v_cvt_norm_i16_f16_e32(v[1], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = st.vgpr[0][1] & 0xffff
+    self.assertEqual(result, 0x8001)  # -32767, hardware uses symmetric range
+
+  def test_cvt_norm_i16_f16_zero(self):
+    """V_CVT_NORM_I16_F16: f16 0.0 -> i16 0."""
+    instructions = [
+      v_mov_b32_e32(v[0], 0),
+      v_cvt_norm_i16_f16_e32(v[1], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = st.vgpr[0][1] & 0xffff
+    self.assertEqual(result, 0)
+
+  def test_cvt_norm_u16_f16_one(self):
+    """V_CVT_NORM_U16_F16: f16 1.0 -> u16 max (65535)."""
+    instructions = [
+      s_mov_b32(s[0], f32_to_f16(1.0)),
+      v_mov_b32_e32(v[0], s[0]),
+      v_cvt_norm_u16_f16_e32(v[1], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = st.vgpr[0][1] & 0xffff
+    self.assertEqual(result, 65535)
+
+  def test_cvt_norm_u16_f16_half(self):
+    """V_CVT_NORM_U16_F16: f16 0.5 -> u16 ~32768."""
+    instructions = [
+      s_mov_b32(s[0], f32_to_f16(0.5)),
+      v_mov_b32_e32(v[0], s[0]),
+      v_cvt_norm_u16_f16_e32(v[1], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = st.vgpr[0][1] & 0xffff
+    self.assertAlmostEqual(result, 32768, delta=1)
+
+
+class TestPermlane64(unittest.TestCase):
+  """Tests for V_PERMLANE64_B32 instruction (wave64 cross-half swap)."""
+
+  def test_v_permlane64_b32_is_nop_in_wave32(self):
+    """V_PERMLANE64_B32 is a NOP in wave32 mode.
+
+    Per AMD pcode: "if WAVE32 then s_nop(...) else ... endif"
+    The emulator runs in wave32 mode, so this instruction should not modify registers.
+    """
+    instructions = [
+      v_mov_b32_e32(v[0], 0xCAFEBABE),  # source
+      v_mov_b32_e32(v[1], 0x12345678),  # dest (should be preserved)
+      v_permlane64_b32_e32(v[1], v[0]),  # NOP in wave32
+    ]
+    st = run_program(instructions, n_lanes=1)
+    # Dest register should be unchanged (NOP behavior in wave32)
+    self.assertEqual(st.vgpr[0][1], 0x12345678)
 
 
 if __name__ == '__main__':

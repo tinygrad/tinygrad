@@ -93,7 +93,7 @@ if __name__ == "__main__":
     forward: Any = None
 
   sub_steps = [
-    Step(name = "textModel", input = [Tensor.randn(1, 77)], forward = model.cond_stage_model.transformer.text_model),
+    Step(name = "textModel", input = [Tensor.randint(1, 77, low=0, high=49408, dtype=dtypes.int32)], forward = model.cond_stage_model.transformer.text_model),
     Step(name = "diffusor", input = [Tensor.randn(1, 77, 768), Tensor.randn(1, 77, 768), Tensor.randn(1,4,64,64), Tensor.rand(1), Tensor.randn(1), Tensor.randn(1), Tensor.randn(1)], forward = model),
     Step(name = "decoder", input = [Tensor.randn(1,4,64,64)], forward = model.decode),
     Step(name = "f16tof32", input = [Tensor.randn(2097120, dtype=dtypes.uint32)], forward = u32_to_f16)

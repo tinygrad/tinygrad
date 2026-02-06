@@ -6,7 +6,6 @@ import argparse, time
 from collections import namedtuple
 from typing import Dict, Any
 
-from PIL import Image
 import numpy as np
 from tinygrad import Device, GlobalCounters, dtypes, Tensor, TinyJit
 from tinygrad.helpers import Timing, Context, getenv, fetch, colored, tqdm, flatten, profile_marker
@@ -336,6 +335,7 @@ if __name__ == "__main__":
   print(x.shape)
 
   profile_marker("save image")
+  from PIL import Image
   im = Image.fromarray(x.numpy())
   print(f"saving {args.out}")
   im.save(args.out)

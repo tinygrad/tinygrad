@@ -13,6 +13,15 @@ def reduce_gradient(ctx:UOp, ret:UOp, op:Ops):
     return ((mask/broadcast_to_input(count)) * broadcast_to_input(ctx),)
   if op == Ops.MUL: return (broadcast_to_input(ctx * ret) / ret.src[0],)
 
+def call_gradient(ctx:UOp, k:UOp):
+  if k.arg.grad_fxn is not None: return (None,) + k.arg.grad_fxn(ctx, k)
+  # auto-differentiate the function
+  fxn, args = k.src[0], k.src[1:]
+  params = sorted([x for x in fxn.toposort() if x.op == Ops.PARAM], key=lambda x: x.arg)
+  grads = compute_gradient(fxn, ctx, set(params))
+  subst = dict(zip(params, args))
+  return (None,) + tuple(grads[p].substitute(subst) if p in grads else None for p in params)
+
 # ctx is grad_output
 pm_gradient = PatternMatcher([
   (UPat(Ops.CAST, name="ret"), lambda ctx, ret: (ctx.cast(ret.src[0].dtype),)),
@@ -44,6 +53,8 @@ pm_gradient = PatternMatcher([
   # NOTE: this is only correct when the KERNEL has a single output
   (UPat(Ops.AFTER), lambda ctx: (ctx, ctx)),
   (UPat(Ops.CUSTOM_KERNEL, name="k"), lambda ctx, k: k.arg.grad_fxn(ctx, k)),
+  # gradient on CALL: use provided grad_fxn or auto-differentiate
+  (UPat(Ops.CALL, name="k"), call_gradient),
   # there's no gradient for bitcast
   (UPat(Ops.BITCAST), lambda: (None,)),
 ])

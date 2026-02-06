@@ -42,7 +42,9 @@ def _memoryview(cls, mem):
       for st,en,rcb,wcb in d.tracked_addresses:
         if st <= addr <= en: return TrackedMemoryView(mem, rcb, wcb)
   return original_memoryview(mem)
-builtins.memoryview = type("memoryview", (), {'__new__': _memoryview}) # type: ignore
+class _MockMemoryviewMeta(type):
+  def __instancecheck__(cls, instance): return isinstance(instance, (original_memoryview, TrackedMemoryView))
+builtins.memoryview = _MockMemoryviewMeta("memoryview", (), {'__new__': _memoryview}) # type: ignore
 
 def _open(path, flags):
   for d in drivers:

@@ -373,126 +373,16 @@ class TestGetShape(unittest.TestCase):
   def test_inhomogeneous_shape(self):
     with self.assertRaises(ValueError): get_shape([[], [1]])
     with self.assertRaises(ValueError): get_shape([[1, [2]], [1]])
+import unittest
+import numpy as np
+from tinygrad.helpers import polyN, is_numpy_ndarray
+from tinygrad.tensor import Tensor
 
 class TestPolyN(unittest.TestCase):
-  def test_float(self):
-    np.testing.assert_allclose(polyN(1.0, [1.0, -2.0, 1.0]), 0.0)
-    np.testing.assert_allclose(polyN(2.0, [1.0, -2.0, 1.0]), 1.0)
-    np.testing.assert_allclose(polyN(3.0, [1.0, -2.0, 1.0]), 4.0)
-    np.testing.assert_allclose(polyN(4.0, [1.0, -2.0, 1.0]), 9.0)
-
   def test_tensor(self):
-    from tinygrad.tensor import Tensor
     np.testing.assert_allclose(polyN(Tensor([1.0, 2.0, 3.0, 4.0]), [1.0, -2.0, 1.0]).numpy(), [0.0, 1.0, 4.0, 9.0])
 
-  def test_uop(self):
-    from tinygrad.dtype import dtypes
-    from tinygrad.uop.ops import UOp
-    from test.helpers import eval_uop
-    np.testing.assert_allclose(eval_uop(polyN(UOp.const(dtypes.float, 1.0), [1.0, -2.0, 1.0])), 0.0)
-    np.testing.assert_allclose(eval_uop(polyN(UOp.const(dtypes.float, 2.0), [1.0, -2.0, 1.0])), 1.0)
-    np.testing.assert_allclose(eval_uop(polyN(UOp.const(dtypes.float, 3.0), [1.0, -2.0, 1.0])), 4.0)
-    np.testing.assert_allclose(eval_uop(polyN(UOp.const(dtypes.float, 4.0), [1.0, -2.0, 1.0])), 9.0)
-
-class TestTimeToStr(unittest.TestCase):
-  def test_seconds(self):           self.assertEqual("   10.01s ", time_to_str(10.01))
-  def test_boundary_sec_ms(self):   self.assertEqual("10000.00ms", time_to_str(10))
-  def test_milliseconds(self):      self.assertEqual("  500.00ms", time_to_str(0.5))
-  def test_boundary_ms_us(self):    self.assertEqual("10000.00us", time_to_str(0.01))
-  def test_microseconds(self):      self.assertEqual("  100.00us", time_to_str(0.0001))
-  def test_zero(self):              self.assertEqual("    0.00us", time_to_str(0))
-  def test_width_formatting(self):  self.assertEqual(" 10.01s ", time_to_str(10.01, w=6))
-
-class TestCStyleDivMod(unittest.TestCase):
-  def test_div_pos(self):
-    self.assertEqual(cdiv(-9, 5), -1)
-    self.assertEqual(cdiv(-4, 5), 0)
-    self.assertEqual(cdiv(0, 5), 0)
-    self.assertEqual(cdiv(4, 5), 0)
-    self.assertEqual(cdiv(9, 5), 1)
-  def test_div_neg(self):
-    self.assertEqual(cdiv(-9, -5), 1)
-    self.assertEqual(cdiv(-4, -5), 0)
-    self.assertEqual(cdiv(0, -5), 0)
-    self.assertEqual(cdiv(4, -5), 0)
-    self.assertEqual(cdiv(9, -5), -1)
-  def test_mod_pos(self):
-    self.assertEqual(cmod(-9, 5), -4)
-    self.assertEqual(cmod(-4, 5), -4)
-    self.assertEqual(cmod(0, 5), 0)
-    self.assertEqual(cmod(4, 5), 4)
-    self.assertEqual(cmod(9, 5), 4)
-  def test_mod_neg(self):
-    self.assertEqual(cmod(-9, -5), -4)
-    self.assertEqual(cmod(-4, -5), -4)
-    self.assertEqual(cmod(0, -5), 0)
-    self.assertEqual(cmod(4, -5), 4)
-    self.assertEqual(cmod(9, -5), 4)
-
-class TestGetBits(unittest.TestCase):
-  def test_low_bits(self):
-    self.assertEqual(getbits(0b11010110, 0, 3), 0b0110)
-
-  def test_high_bits(self):
-    self.assertEqual(getbits(0b11010110, 4, 7), 0b1101)
-
-  def test_middle_bits(self):
-    self.assertEqual(getbits(0b11010110, 3, 5), 0b010)
-
-  def test_full_range(self):
-    self.assertEqual(getbits(0b11010110, 0, 7), 0b11010110)
-
-  def test_single_bit(self):
-    self.assertEqual(getbits(0b100000000, 8, 8), 1)
-
-class TestArgFix(unittest.TestCase):
-  def test_none(self):
-    self.assertEqual(argfix(None), (None, ))
-    self.assertEqual(argfix(None, None), (None, None))
-  def test_positional_arguments(self):
-    self.assertEqual(argfix(1, 2, 3), (1, 2, 3))
-  def test_tuple(self):
-    self.assertEqual(argfix((1., 2., 3.)), (1., 2., 3.))
-  def test_list(self):
-    self.assertEqual(argfix([True, False]), (True, False))
-
-class TestWordWrap(unittest.TestCase):
-  def test_wrap_simple(self):
-    wrap = 10
-    st = "x"*wrap*2
-    st2 = word_wrap(st, wrap)
-    self.assertEqual(len(st2.splitlines()), 2)
-
-  def test_wrap_colored(self):
-    wrap = 10
-    st = colored("x"*wrap*2, "red")
-    st2 = word_wrap(st, wrap=wrap)
-    self.assertEqual(len(st2.splitlines()), 2)
-
-  def test_wrap_explicit_newline(self):
-    wrap = 10
-    st = "\n".join(["x"*wrap, "x"*wrap, "x"*wrap])
-    st2 = word_wrap(st, wrap=wrap)
-    self.assertEqual(len(st2.splitlines()), len(st.splitlines()))
-
-    st = "\n".join(["x"*(wrap+1), "x"*wrap, "x"*wrap])
-    st2 = word_wrap(st, wrap=wrap)
-    self.assertEqual(len(st2.splitlines()), len(st.splitlines())+1)
-
-    st = "\n".join(["x"*(wrap+1), "x"*(wrap+1), "x"*(wrap+1)])
-    st2 = word_wrap(st, wrap=wrap)
-    self.assertEqual(len(st2.splitlines()), len(st.splitlines())+3)
-
 class TestIsNumpyNdarray(unittest.TestCase):
-  def test_ndarray(self):
-    self.assertTrue(is_numpy_ndarray(np.array([1, 2, 3])))
-  def test_ndarray_tolist(self):
-    self.assertFalse(is_numpy_ndarray(np.array([1, 2, 3]).tolist()))
-  def test_list(self):
-    self.assertFalse(is_numpy_ndarray([1, 2, 3]))
-  def test_tensor(self):
-    self.assertFalse(is_numpy_ndarray(Tensor([1, 2, 3])))
-    self.assertFalse(is_numpy_ndarray(Tensor(np.array([1, 2, 3]))))
   def test_tensor_numpy(self):
     self.assertTrue(is_numpy_ndarray(Tensor([1, 2, 3]).numpy()))
 

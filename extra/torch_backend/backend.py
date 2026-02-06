@@ -29,6 +29,10 @@ def wrap(x: Tensor) -> torch.Tensor:
   x._strides = strides_for_shape(x.shape) # always recalculate
   if (not hasattr(x, '_storage_offset')) or (not x.uop.is_realized): x._storage_offset = calculate_storage_offset(x)
   return mod.wrap(x, _to_torch_dtype(x.dtype), _to_torch_device(x.device).index)
+def _update_torch_metadata(tensor: torch.Tensor, tiny: Tensor) -> None:
+  tiny._strides = strides_for_shape(tiny.shape)
+  tiny._storage_offset = calculate_storage_offset(tiny)
+  mod.update_metadata(tensor, tiny.shape, tiny._strides, tiny._storage_offset)
 def unwrap(x:torch.Tensor) -> Tensor:
   assert isinstance(x, torch.Tensor), f"x isn't {type(x)}"
   return mod.unwrap(x)
@@ -344,7 +348,7 @@ def scatter_add(self, dim, index, src, out):
 def _copy_between_devices(src, dest, cast_dtype, to_device, non_blocking=False):
   if src.is_tiny and dest.is_tiny:
     src_t, dest_t = unwrap(src), unwrap(dest)
-    if dest_t.uop.is_contiguous() or dest_t.uop.is_realized: src_t = src_t.contiguous()
+    if dest_t.uop.has_buffer_identity() or dest_t.uop.is_realized: src_t = src_t.contiguous()
     _apply_inplace(dest_t, src_t.cast(cast_dtype).to(to_device))
   elif src.is_tiny and dest.is_cpu:
     dest.resize_(src.numel()).resize_(src.shape)
@@ -611,7 +615,10 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten.fill_.Tensor": lambda self, value: Tensor.full(self.shape, value.reshape(()).item(), device=self.device, dtype=self.dtype),
   "aten.flip": Tensor.flip,
   "aten.scatter_reduce.two": Tensor.scatter_reduce,
-  "aten.squeeze_.dim": lambda self, dim: self.replace(self.squeeze(dim), allow_shape_mismatch=True), # TODO: inplace view op, here?
+  "aten.squeeze_.dim": Tensor.squeeze,
+  "aten.unsqueeze_": Tensor.unsqueeze,
+  "aten.transpose_": Tensor.transpose,
+  "aten.t_": Tensor.transpose,
   "aten.add.Tensor": lambda input,other,alpha=1: input+alpha*other,
   "aten.linspace": lambda start, stop, steps, dtype=None, **kwargs:
     Tensor.linspace(start, stop, steps, **({"dtype": _from_torch_dtype(dtype)} if dtype is not None else {})),
@@ -655,6 +662,13 @@ inplace_ops = {
   "aten.masked_fill_.Tensor",
 }
 
+inplace_view_ops = {
+  "aten.squeeze_.dim",
+  "aten.unsqueeze_",
+  "aten.transpose_",
+  "aten.t_",
+}
+
 def wrap_fxn(k,f):
   def nf(*args, **kwargs):
     if TORCH_DEBUG:
@@ -675,8 +689,42 @@ def wrap_inplace(k,f):
     return orig
   return nf
 
+def wrap_inplace_view_op(k,f):
+  def nf(*args, **kwargs):
+    orig = args[0]
+    args, kwargs = unwrap_args(args, kwargs)
+    target = args[0]
+    new_view = f(*args, **kwargs)
+    if new_view is target or new_view.uop is target.uop:
+      _update_torch_metadata(orig, target)
+      return orig
+    base = canonical_base(target)
+    op = (f, args[1:], kwargs)
+    if target is base:
+      views = derived_views(base)
+      if views:
+        old_base = Tensor(base.uop, device=base.device)
+        old_base.requires_grad = base.requires_grad
+        old_base._views = getattr(base, "_views", set())
+        for v in views: v._view_base = old_base
+        base._views = set()
+        base._view_base = old_base
+        base._view_ops = [op]
+        old_base._views.add(weakref.ref(base))
+    else:
+      target._view_base = base
+      base._views = getattr(base, "_views", set())
+      base._views.add(weakref.ref(target))
+      target._view_ops = _get_view_ops(target) + [op]
+    target.uop = new_view.uop
+    _update_torch_metadata(orig, target)
+    return orig
+  return nf
+
 for k,v in tiny_backend.items():
-  wrapper = wrap_inplace if k in inplace_ops else wrap_fxn
+  if k in inplace_view_ops: wrapper = wrap_inplace_view_op
+  elif k in inplace_ops: wrapper = wrap_inplace
+  else: wrapper = wrap_fxn
   torch.library.impl(k.replace("aten.", "aten::"), "privateuseone")(wrapper(k,v))
 
 @torch.library.impl("aten::equal", "privateuseone")

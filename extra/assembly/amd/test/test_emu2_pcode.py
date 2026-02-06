@@ -4,8 +4,8 @@ from collections import defaultdict
 from tinygrad.helpers import DEBUG
 from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import UOp, Ops
-from extra.assembly.amd.emu2 import parse_pcode
-from extra.assembly.amd.expr_parser import parse_expr
+from extra.assembly.amd.emu import parse_pcode
+from extra.assembly.amd.pcode import parse_expr
 from extra.assembly.amd.autogen.rdna3.str_pcode import PCODE
 from extra.assembly.amd.autogen.rdna3.enum import VOP1Op, VOP2Op, VOP3Op, SOP1Op, SOP2Op, DSOp
 
@@ -180,7 +180,7 @@ class TestDSPcodePatterns(unittest.TestCase):
   def test_mem_read_parsing(self):
     """Test MEM[addr].type read expression parsing."""
     # Create a mock LDS buffer
-    lds = UOp(Ops.DEFINE_GLOBAL, dtypes.uint32.ptr(16384), arg=3)
+    lds = UOp(Ops.PARAM, dtypes.uint32.ptr(16384), arg=3)
     addr = UOp.const(dtypes.uint32, 0)
     vars = {'_lds': lds, 'ADDR': addr, 'OFFSET': UOp.const(dtypes.uint32, 0)}
 
@@ -213,7 +213,7 @@ class TestDSPcodePatterns(unittest.TestCase):
     """Test DS_LOAD_2ADDR_B32 pcode parsing produces RETURN_DATA assignments."""
     pcode = PCODE.get(DSOp.DS_LOAD_2ADDR_B32)
     self.assertIsNotNone(pcode)
-    lds = UOp(Ops.DEFINE_GLOBAL, dtypes.uint32.ptr(16384), arg=3)
+    lds = UOp(Ops.PARAM, dtypes.uint32.ptr(16384), arg=3)
     srcs = {
       'ADDR': UOp.const(dtypes.uint32, 0),
       'OFFSET0': UOp.const(dtypes.uint32, 0),
@@ -286,7 +286,7 @@ class TestAllPcode(unittest.TestCase):
   def _make_srcs(self):
     """Create dummy source variables for pcode parsing."""
     u32, u64 = lambda v=0: UOp.const(dtypes.uint32, v), lambda v=0: UOp.const(dtypes.uint64, v)
-    lds = UOp(Ops.DEFINE_GLOBAL, dtypes.uint32.ptr(16384), arg=3)
+    lds = UOp(Ops.PARAM, dtypes.uint32.ptr(16384), arg=3)
     return {'laneId': u32(), 'laneID': u32(), 'S0': u32(), 'S1': u32(), 'S2': u32(), 'S3': u32(), 'SRC0': u32(),
             'D0': u32(), 'D1': u32(), 'DST': u32(), 'VDST': u32(), 'SDST': u32(),
             'VCC': u64(), 'VCCZ': u32(), 'EXEC': u64(), 'EXEC_LO': u32(), 'EXECZ': u32(), 'SCC': u32(),
@@ -294,7 +294,7 @@ class TestAllPcode(unittest.TestCase):
             'ADDR': u32(), 'ADDR_BASE': u32(), 'TADDR': u32(), 'DATA': u32(), 'DATA0': u32(), 'DATA1': u32(), 'DATA2': u32(),
             'VDATA': u32(), 'VDATA0': u32(), 'VDATA1': u32(), 'VDATA2': u32(), 'VDATA3': u32(),
             'OPSEL': u32(), 'OPSEL_HI': u32(), 'NEG': u32(), 'NEG_HI': u32(), 'CLAMP': u32(),
-            'M0': u32(), 'PC': u64(), 'DENORM': u32(1), 'ROUND_MODE': u32(), 'WAVE_STATUS': u32(),
+            'M0': u32(), 'PC': u64(), 'DENORM': u32(1), 'ROUND_MODE': u32(), 'ROUND_TOWARD_ZERO': u32(), 'ROUND_NEAREST_EVEN': u32(), 'WAVE_STATUS': u32(),
             'MAX_FLOAT_F32': u32(0x7f7fffff), 'Unsigned': u32(1), 'clampedLOD': u32(),
             '_lds': lds, '_vmem': lds, '_active': UOp.const(dtypes.bool, True)}
 

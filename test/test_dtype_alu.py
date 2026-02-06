@@ -1,7 +1,7 @@
 import unittest, operator, math
-from tinygrad import Tensor, dtypes, Device
+from tinygrad import Context, Tensor, dtypes, Device
 from tinygrad.dtype import DType, truncate
-from tinygrad.helpers import CI, getenv
+from tinygrad.helpers import CI, EMULATED_DTYPES, getenv
 from tinygrad.tensor import _to_np_dtype
 from tinygrad.device import is_dtype_supported
 from tinygrad.runtime.ops_python import from_storage_scalar
@@ -63,7 +63,10 @@ def universal_test(a, b, dtype, op):
   numpy_value = op[1](ta.numpy(), tb.numpy())
   if dtype in dtypes.fp8s: numpy_value = truncate[dtype](numpy_value.item())
   if dtype in dtypes.floats:
-    atol, rtol = {dtypes.bfloat16:(1e-3, 1e-2), dtypes.fp8e4m3:(1e-1, 1e-1), dtypes.fp8e5m2:(1.0, 5e-1)}.get(dtype, (1e-10, 1e-7))
+    if not is_dtype_supported(dtype) or dtype in EMULATED_DTYPES.tolist(dtypes): # denormals are zero
+      fe, fm = dtypes.finfo(dtype)
+      atol, rtol = 2 ** (2 - (1 << (fe - 1))), 2 ** (-fm)
+    else: atol, rtol = {dtypes.bfloat16:(1e-3, 1e-2), dtypes.fp8e4m3:(1e-1, 1e-1), dtypes.fp8e5m2:(1.0, 5e-1)}.get(dtype, (1e-10, 1e-7))
     np.testing.assert_allclose(tensor_value, numpy_value, atol=atol, rtol=rtol)
   else: np.testing.assert_equal(tensor_value, numpy_value)
 
@@ -116,6 +119,10 @@ class TestDTypeALU(unittest.TestCase):
   @given(ht.float16, ht.float16, strat.sampled_from(binary_operations))
   def test_float16(self, a, b, op): universal_test(a, b, dtypes.float16, op)
 
+  @given(ht.float16, ht.float16, strat.sampled_from(binary_operations))
+  @Context(EMULATED_DTYPES="half")
+  def test_emulated_float16(self, a, b, op): universal_test(a, b, dtypes.float16, op)
+
   @unittest.skipUnless(is_dtype_supported(dtypes.bfloat16), f"no bfloat16 on {Device.DEFAULT}")
   @given(ht.bfloat16, ht.bfloat16, strat.sampled_from(binary_operations))
   def test_bfloat16(self, a, b, op):
@@ -137,6 +144,10 @@ class TestDTypeALU(unittest.TestCase):
   @unittest.skipUnless(is_dtype_supported(dtypes.float16), f"no float16 on {Device.DEFAULT}")
   @given(ht.float16, strat.sampled_from(unary_operations))
   def test_float16_unary(self, a, op): universal_test_unary(a, dtypes.float16, op)
+
+  @given(ht.float16, strat.sampled_from(unary_operations))
+  @Context(EMULATED_DTYPES="half")
+  def test_emulated_float16_unary(self, a, op): universal_test_unary(a, dtypes.float16, op)
 
   @unittest.skipUnless(is_dtype_supported(dtypes.bfloat16), f"no bfloat16 on {Device.DEFAULT}")
   @given(ht.bfloat16, strat.sampled_from(unary_operations))
@@ -169,6 +180,11 @@ class TestDTypeALU(unittest.TestCase):
   @given(ht.uint64, ht.uint64, strat.sampled_from(integer_binary_operations))
   def test_uint64(self, a, b, op): universal_test(a, b, dtypes.uint64, op)
 
+  @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, PTXRenderer), "PTX does indexing math with longs")
+  @given(ht.uint64, ht.uint64, strat.sampled_from(integer_binary_operations))
+  @Context(EMULATED_DTYPES="long")
+  def test_emulated_uint64(self, a, b, op): universal_test(a, b, dtypes.uint64, op)
+
   @given(ht.int8, ht.int8, strat.sampled_from(integer_binary_operations))
   def test_int8(self, a, b, op): universal_test(a, b, dtypes.int8, op)
 
@@ -181,6 +197,11 @@ class TestDTypeALU(unittest.TestCase):
   @unittest.skipUnless(is_dtype_supported(dtypes.int64), f"no int64 on {Device.DEFAULT}")
   @given(ht.int64, ht.int64, strat.sampled_from(integer_binary_operations))
   def test_int64(self, a, b, op): universal_test(a, b, dtypes.int64, op)
+
+  @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, PTXRenderer), "PTX does indexing math with longs")
+  @given(ht.int64, ht.int64, strat.sampled_from(integer_binary_operations))
+  @Context(EMULATED_DTYPES="long")
+  def test_emulated_int64(self, a, b, op): universal_test(a, b, dtypes.int64, op)
 
   @given(ht.uint8, strat.sampled_from(integer_unary_operations))
   def test_uint8_unary(self, a, op): universal_test_unary(a, dtypes.uint8, op)
@@ -197,6 +218,11 @@ class TestDTypeALU(unittest.TestCase):
   @given(ht.uint64, strat.sampled_from(integer_unary_operations))
   def test_uint64_unary(self, a, op): universal_test_unary(a, dtypes.uint64, op)
 
+  @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, PTXRenderer), "PTX does indexing math with longs")
+  @given(ht.uint64, strat.sampled_from(integer_unary_operations))
+  @Context(EMULATED_DTYPES="long")
+  def test_emulated_uint64_unary(self, a, op): universal_test_unary(a, dtypes.uint64, op)
+
   @given(ht.int8, strat.sampled_from(integer_unary_operations))
   def test_int8_unary(self, a, op): universal_test_unary(a, dtypes.int8, op)
 
@@ -209,6 +235,11 @@ class TestDTypeALU(unittest.TestCase):
   @unittest.skipUnless(is_dtype_supported(dtypes.int64), f"no int64 on {Device.DEFAULT}")
   @given(ht.int64, strat.sampled_from(integer_unary_operations))
   def test_int64_unary(self, a, op): universal_test_unary(a, dtypes.int64, op)
+
+  @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, PTXRenderer), "PTX does indexing math with longs")
+  @given(ht.int64, strat.sampled_from(integer_unary_operations))
+  @Context(EMULATED_DTYPES="long")
+  def test_emulated_int64_unary(self, a, op): universal_test_unary(a, dtypes.int64, op)
 
   @given(ht.bool, ht.bool, strat.sampled_from(((operator.add, operator.add), (operator.mul, operator.mul))))
   def test_bool(self, a, b, op): universal_test(a, b, dtypes.bool, op)
