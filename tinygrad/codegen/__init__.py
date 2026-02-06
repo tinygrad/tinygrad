@@ -92,7 +92,8 @@ def full_rewrite_to_sink(sink:UOp, ren:Renderer|None=None, optimize:bool=True) -
   pm_decomp = symbolic_simple+get_late_rewrite_patterns(supported_ops, ren.device, bool(DISABLE_FAST_IDIV))
   pm_transcendental = symbolic_simple+get_transcendental_patterns(supported_ops, TRANSCENDENTAL>=2)
   sink = graph_rewrite(sink, pm_decomp, ctx=ren.device, name="decompositions")
-  if dtypes.long in EMULATED_DTYPES.tolist(dtypes): sink = graph_rewrite(sink, pm_long_decomp, name="decomp long -> int", bottom_up=True)
+  if not is_dtype_supported(dtypes.long, ren.device) or dtypes.long in EMULATED_DTYPES.tolist(dtypes):
+    sink = graph_rewrite(sink, pm_long_decomp, name="decomp long -> int", bottom_up=True)
   for fr, to in [(fr, next((to for to in promo_lattice[fr] if is_dtype_supported(to, ren.device)), dtypes.float))
                  for fr in EMULATED_DTYPES.tolist(dtypes) if fr in dtypes.floats]:
     sink = graph_rewrite(sink, pm_float_decomp, ctx=(fr, to), name=f"decomp {fr} -> {to}", bottom_up=True)
