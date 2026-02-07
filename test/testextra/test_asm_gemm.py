@@ -55,6 +55,7 @@ class TestGemmLarge(unittest.TestCase):
   def test_gemm6(self): verify_asm_gemm(16, 4096, 4096, 14336, dtype=dtypes.bfloat16, gpus=8)
   @unittest.skip("disabled, asm in this shape is slower than tinygrad")
   def test_gemm7(self): verify_asm_gemm(1, 8192, 128256, 4096)
+  def test_gemm8(self): verify_asm_gemm(1, 4096, 14336, 8192)
   def test_gemm_unsupported(self):
     with self.assertRaisesRegex(AssertionError, "shape not supported"):
       verify_asm_gemm(8, 1024, 1024, 4096, gpus=8)
