@@ -47,7 +47,7 @@ def replay_get_rangeify_map(ret:dict[UOp, UOp], big_sink:UOp) -> tuple[str, str,
   UOp.unique_num = itertools.count(max([u.arg for u in big_sink.toposort() if u.op is Ops.UNIQUE], default=0)+1)
   new_sink = big_sink.substitute(get_rangeify_map(big_sink))
   def to_str(ret:UOp) -> str:
-    asts = [repr(u.arg.ast) for u in ret.toposort() if u.op is Ops.KERNEL]
+    asts = [repr(u.arg.ast) for u in ret.toposort() if u.op is Ops.CALL]
     return "\n".join([f"{len(asts)} kernels", *asts])
   return to_str(new_sink), to_str(big_sink.substitute(ret)), (big_sink,)
 

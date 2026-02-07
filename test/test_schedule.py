@@ -683,7 +683,7 @@ class TestSchedule(unittest.TestCase):
     a = Tensor.zeros(1, dtype=dtypes.int).contiguous().realize().uop
     b = Tensor.zeros(1, dtype=dtypes.int).contiguous().realize().uop
     c = Tensor.arange(4).realize().uop
-    kernel = UOp(Ops.KERNEL, src=(a.base, b.base, c.base), arg=Kernel(UOp.sink(c.r(Ops.ADD, (0,))+1, c.r(Ops.ADD, (0,))*2)))
+    kernel = UOp(Ops.CALL, src=(a.base, b.base, c.base), arg=Kernel(UOp.sink(c.r(Ops.ADD, (0,))+1, c.r(Ops.ADD, (0,))*2)))
     run_schedule(check_schedule(UOp.sink(a.assign(kernel), b.assign(kernel)), 1))
     self.assertEqual(a.buffer.numpy(), [7])
     self.assertEqual(b.buffer.numpy(), [12])
