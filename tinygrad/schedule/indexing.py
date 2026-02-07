@@ -9,7 +9,7 @@ from tinygrad.helpers import argsort, all_same, cpu_profile, PCONTIG, colored
 
 ALWAYS_CONTIGUOUS: set[Ops] = {Ops.CONTIGUOUS, Ops.ASSIGN, Ops.COPY, Ops.BUFFER, Ops.BUFFER_VIEW,
                      Ops.CONST, Ops.BIND, Ops.DEVICE, Ops.MSELECT, Ops.MSTACK, Ops.PARAM,
-                     Ops.DEFINE_LOCAL, Ops.DEFINE_REG, Ops.LOAD, Ops.KERNEL, Ops.ENCDEC}
+                     Ops.DEFINE_LOCAL, Ops.DEFINE_REG, Ops.LOAD, Ops.CALL, Ops.ENCDEC}
 
 def realize(ctx:dict[UOp, None], tr:UOp) -> None: ctx[tr] = None
 
@@ -92,7 +92,7 @@ def remove_movement_op_after_rangeify(ctx:IndexingContext, x:UOp):
   if x in ctx.range_map or x.src[0].op is Ops.INDEX: return x.src[0]
 
 def add_third_op_to_assign_to_track_shape(ctx:IndexingContext, assign:UOp):
-  if assign.src[1].op is Ops.KERNEL: return None
+  if assign.src[1].op is Ops.CALL: return None
   to_mop = graph_rewrite(assign.src[0], PatternMatcher([(UPat(GroupOp.Movement, name="x"), lambda x: x.replace(tag=()))]))
   ret = assign.replace(src=assign.src+(to_mop,))
   ctx.range_map[ret] = ctx.range_map[assign]
@@ -167,7 +167,7 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
     if x.op in {Ops.DEVICE, Ops.UNIQUE}: continue
 
     # no ranges on kernels, they are internal
-    if x.op is Ops.KERNEL: continue
+    if x.op is Ops.CALL: continue
 
     if x.dtype.scalar() == dtypes.index: continue  # TODO: why do I need this?
     ending_ranges[x] = sum([ending_ranges.get(u, []) for u in consumer_map[x]], [])
