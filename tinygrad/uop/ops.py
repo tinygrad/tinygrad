@@ -846,12 +846,6 @@ class CallInfo:
   def __reduce__(self): return (CallInfo, (None, self.metadata))
   def __repr__(self): return f"CallInfo({id(self.grad_fxn) if self.grad_fxn else None}, {self.metadata})"
 
-@dataclass(frozen=True)
-class Kernel:
-  ast: UOp
-  metadata: tuple[Metadata, ...] = ()
-  grad_fxn: Callable|None = None
-
 # ******** ops in python ********
 
 def safe_exp2(x):
