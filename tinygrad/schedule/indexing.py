@@ -17,21 +17,15 @@ def realize_srcs(ctx:dict[UOp, None], rb:UOp) -> None:
   for s in rb.src:
     if s.base.op not in ALWAYS_CONTIGUOUS: ctx[s] = None
 
-def realize_assign(ctx:dict[UOp, None], a:UOp) -> None:
-  if a.src[1].op not in ALWAYS_CONTIGUOUS: ctx[a.src[1]] = None
-  ctx[a] = None
-
 pm_generate_realize_map = pm_gate_kernel_sink+PatternMatcher([
   # always realize SINK src
   (UPat(Ops.SINK, name="s"), lambda ctx,s: ctx.update((x.base, None) for x in s.src if x.base.op not in ALWAYS_CONTIGUOUS)),
-  # always realize COPY/BUFFER_VIEW/CONTIGUOUS/STORE/ENCDEC
-  (UPat({Ops.COPY, Ops.BUFFER_VIEW, Ops.CONTIGUOUS, Ops.STORE, Ops.ENCDEC}, name="tr"), realize),
+  # always realize
+  (UPat({Ops.COPY, Ops.BUFFER_VIEW, Ops.CONTIGUOUS, Ops.STORE, Ops.ASSIGN, Ops.ENCDEC}, name="tr"), realize),
   # always realize REDUCE on outer ranges
   (UPat(Ops.REDUCE, name="r"), lambda ctx,r: realize(ctx, r) if any(tr.arg[-1] == AxisType.OUTER for tr in r.src[1:]) else None),
-  # realize srcs of COPY, MSELECT, MSTACK, ENCDEC
-  (UPat((Ops.COPY, Ops.MSELECT, Ops.MSTACK, Ops.ENCDEC), name="rb"), realize_srcs),
-  # realize ASSIGN and input to assign (might be optimized out)
-  (UPat(Ops.ASSIGN, name="a"), realize_assign),
+  # realize srcs of these
+  (UPat((Ops.COPY, Ops.MSELECT, Ops.MSTACK, Ops.ASSIGN, Ops.ENCDEC), name="rb"), realize_srcs),
 ])
 
 @dataclass(frozen=True)

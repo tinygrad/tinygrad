@@ -380,8 +380,39 @@ class TestBoolDType(TestDType): DTYPE = dtypes.bool
 
 class TestBFloat16Type(TestDType): DTYPE = dtypes.bfloat16
 
+class TestEmulatedBFloat16Type(TestBFloat16Type):
+  @classmethod
+  def setUpClass(cls):
+    cls.stack = contextlib.ExitStack()
+    cls.stack.enter_context(Context(EMULATED_DTYPES="bfloat16"))
+    cls.DATA = rand_for_dtype(cls.DTYPE, 10)
+
+  @classmethod
+  def tearDownClass(cls): cls.stack.close()
+
 class TestFp8e4m3(TestDType): DTYPE = dtypes.fp8e4m3
+
+class TestEmulatedFp8e4m3(TestFp8e4m3):
+  @classmethod
+  def setUpClass(cls):
+    cls.stack = contextlib.ExitStack()
+    cls.stack.enter_context(Context(EMULATED_DTYPES="fp8e4m3"))
+    cls.DATA = rand_for_dtype(cls.DTYPE, 10)
+
+  @classmethod
+  def tearDownClass(cls): cls.stack.close()
+
 class TestFp8e5m2(TestDType): DTYPE = dtypes.fp8e5m2
+
+class TestEmulatedFp8e5m2(TestFp8e5m2):
+  @classmethod
+  def setUpClass(cls):
+    cls.stack = contextlib.ExitStack()
+    cls.stack.enter_context(Context(EMULATED_DTYPES="fp8e5m2"))
+    cls.DATA = rand_for_dtype(cls.DTYPE, 10)
+
+  @classmethod
+  def tearDownClass(cls): cls.stack.close()
 
 class TestPtrDType(unittest.TestCase):
   def test_vec_double(self):

@@ -1,12 +1,12 @@
-import random, operator
+import random, operator, sys
 import z3
 from tinygrad import Variable, dtypes
 from tinygrad.uop.ops import UOp
 from tinygrad.uop.validate import uops_to_z3
 from tinygrad.helpers import DEBUG, Context
 
-seed = random.randint(0, 100)
-print(f"Seed: {seed}")
+seed = int(sys.argv[1]) if len(sys.argv) > 1 else random.randint(0, 100)
+print(f"Seed: {seed}", flush=True)
 random.seed(seed)
 
 unary_ops = [lambda a:a+random.randint(-4, 4), lambda a: a*random.randint(-4, 4),
