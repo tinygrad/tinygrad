@@ -6,8 +6,6 @@ import functools
 
 from tinygrad import Device, Tensor
 from tinygrad.uop.ops import UOp, Ops, KernelInfo
-from tinygrad.device import Compiler
-from tinygrad.runtime.support.compiler_amd import HIPCompiler
 from tinygrad.viz.serve import amdgpu_cfg
 
 from extra.assembly.amd.autogen.rdna3.ins import *
@@ -16,22 +14,16 @@ from extra.assembly.amd.dsl import s
 # TODO: this belongs to the dsl infrastructure
 from extra.gemm.amd_asm_matmul import Kernel
 
-# TODO: shouldn't need compiler once we can output ELF
-# outputs a text disassembly for humans and a machine readable binary
-def assemble(name:str, k:Kernel, compiler:Compiler) -> tuple[str, bytes]:
-  src = k.to_asm()
-  return (src, compiler.compile(src))
-
-def asm_kernel(out:UOp, k:Kernel, name:str, device:str, compiler:Compiler, n_threads:int=1, n_workgroups:int=1) -> UOp:
+def asm_kernel(out:UOp, k:Kernel, name:str, device:str, n_threads:int=1, n_workgroups:int=1) -> UOp:
   lidx = UOp.special(n_threads, "lidx0")
   gidx = UOp.special(n_workgroups, "gidx0")
   sink = UOp.sink(out, lidx, gidx, arg=KernelInfo(name=name))
-  src, lib = assemble(name, k, compiler)
+  src, lib = k.to_text(), k.to_binary()
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg=device), UOp(Ops.LINEAR, src=(*sink.src, sink)),
                                UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=lib)))
 
 def run_asm(name:str, k:Kernel) -> None:
-  fxn = functools.partial(asm_kernel, k=k, name=name, device=Device.DEFAULT, compiler=HIPCompiler(Device[Device.DEFAULT].renderer.arch))
+  fxn = functools.partial(asm_kernel, k=k, name=name, device=Device.DEFAULT)
   out = Tensor.custom_kernel(Tensor.empty(1), fxn=fxn)[0]
   out.realize()
 
@@ -39,8 +31,9 @@ def run_asm(name:str, k:Kernel) -> None:
 class TestCfg(unittest.TestCase):
   def setUp(self):
     arch = Device["AMD"].arch
-    if not any(arch.startswith(a) for a in {"gfx11", "gfx12"}):
-      self.skipTest(f"tests written for RDNA, got arch {arch}")
+    # note: it can also work on rdna4 with a linker, only the encodings are different from rdna3
+    if not arch.startswith("gfx11"):
+      self.skipTest(f"tests written for RDNA3, got arch {arch}")
 
   def test_simple(self):
     k = Kernel(arch=Device["AMD"].arch)
@@ -68,7 +61,7 @@ class TestCfg(unittest.TestCase):
     k.emit(s_endpgm())
     k.emit(s_code_end())
     run_asm("diamond", k)
-    _, lib = assemble("diamond", k, HIPCompiler(Device[Device.DEFAULT].arch))
+    lib = k.to_binary()
     cfg = amdgpu_cfg(lib, Device[Device.DEFAULT].device_props()["gfx_target_version"])["data"]
     self.assertEqual(len(cfg["blocks"]), 5)
     edge_count = sum(len(v) for v in cfg["paths"].values())

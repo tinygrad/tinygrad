@@ -1,5 +1,4 @@
 import atexit, functools
-from tinygrad.runtime.support.compiler_amd import HIPCompiler
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.uop.ops import UOp, Ops, KernelInfo, AxisType
 from tinygrad.renderer import Estimates
@@ -19,7 +18,7 @@ def custom_asm_gemm(C:UOp, A:UOp, B:UOp, dname:str, arch:str, wg:int) -> UOp:
   k = build_kernel(batch, M, N, K, A.dtype.base)
   sink = UOp.sink(C.base, A.base, B.base, lidx, gidx,
                   arg=KernelInfo(name=k.name, estimates=Estimates(ops=2*batch*M*N*K, mem=(batch*M*K + K*N + batch*M*N)*2)))
-  binary = HIPCompiler(arch).compile(k.to_asm())
+  binary = k.to_binary()
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg=dname), UOp(Ops.LINEAR, src=(*sink.src, sink)),
                                UOp(Ops.SOURCE, arg=k.to_text()), UOp(Ops.BINARY, arg=binary)))
 

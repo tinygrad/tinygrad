@@ -15,6 +15,7 @@ from tinygrad.uop.ops import UOp, Ops, KernelInfo
 from tinygrad.helpers import getenv, colored
 from tinygrad.engine.realize import Estimates
 from extra.assembly.amd.dsl import s, v, VCC_LO, NULL
+from extra.assembly.amd.elf import create_elf
 from extra.assembly.amd.autogen.rdna3.ins import *
 
 # =============================================================================
@@ -183,7 +184,16 @@ class Kernel:
     waitcnt = (expcnt & 0x7) | ((lgkmcnt & 0x3f) << 4) | ((vmcnt & 0x3f) << 10)
     self.emit(s_waitcnt(simm16=waitcnt))
 
-  def to_asm(self):
+  def to_text(self):
+    lines, pos = [], 0
+    labels_at = {v:k for k,v in self.labels.items()}
+    for inst in self.instructions:
+      if (label:=labels_at.get(pos)): lines.append(f"{label}:")
+      lines.append(f"  {inst.disasm()}" if inst._target is None else f" {inst.op_name.lower()} {inst._target}")
+      pos += inst.size()
+    return "\n".join(lines)
+
+  def to_binary(self):
     # Patch branch offsets: simm16 = (target_pos - branch_end_pos) / 4
     for inst in self.instructions:
       if inst._target is None: continue
@@ -191,8 +201,7 @@ class Kernel:
       if not -32768 <= offset_dwords <= 32767: raise ValueError(f"branch to '{inst._target}' offset {offset_dwords} exceeds simm16 range")
       inst.simm16 = offset_dwords
 
-    # TODO: replace this with direct ELF
-    body = ['\t' + inst.disasm() for inst in self.instructions]
+    prg = b''.join(inst.to_bytes() for inst in self.instructions)
 
     # limit wave occupancy by using more LDS
     lds_size = max(LDS_SIZE, 65536//getenv("LIMIT_OCC", 65536))
@@ -210,20 +219,7 @@ class Kernel:
       ('fp16_overflow', 0), ('workgroup_processor_mode', 0), ('memory_ordered', 1), ('forward_progress', 0),
       ('shared_vgpr_count', 0)]
 
-    return '\n'.join([
-      '\t.text', f'\t.amdgcn_target "amdgcn-amd-amdhsa--{self.arch}"',
-      '\t.protected\tkernel', '\t.globl\tkernel', '\t.p2align\t8', '\t.type\tkernel,@function', 'kernel:',
-      *body,
-      '\t.section\t.rodata,"a",@progbits', '\t.p2align\t6, 0x0', '\t.amdhsa_kernel kernel',
-      *[f'\t\t.amdhsa_{k} {v}' for k, v in hsa],
-      '\t.end_amdhsa_kernel', '\t.text', '.Lfunc_end0:', '\t.size\tkernel, .Lfunc_end0-kernel',
-      '\t.amdgpu_metadata', '---', 'amdhsa.kernels:', '  - .args:',
-      *[f'      - .address_space: global\n        .offset: {i*8}\n        .size: 8\n        .value_kind: global_buffer' for i in range(3)],
-      f'    .group_segment_fixed_size: {lds_size}', '    .kernarg_segment_align: 8',
-      '    .kernarg_segment_size: 24', '    .max_flat_workgroup_size: 128', '    .name: kernel',
-      '    .private_segment_fixed_size: 0', '    .sgpr_count: 60', '    .symbol: kernel.kd',
-      '    .vgpr_count: 179', '    .wavefront_size: 32', f'amdhsa.target: amdgcn-amd-amdhsa--{self.arch}',
-      'amdhsa.version:', '  - 1', '  - 2', '...', '\t.end_amdgpu_metadata'])
+    return create_elf(prg, dict(hsa), arch=self.arch)
 
 
 # =============================================================================
@@ -459,7 +455,7 @@ def build_kernel(arch='gfx1100'):
   k.emit(s_sendmsg(simm16=3))  # DEALLOC_VGPRS
   k.emit(s_endpgm())
 
-  return k.to_asm()
+  return (k.to_text(), k.to_binary())
 
 # =============================================================================
 # Test harness
@@ -477,11 +473,11 @@ def test_matmul():
     # Load the stock kernel from amd_seb/kernel8_batched_gmem.s
     stock_path = Path(__file__).parent / "amd_seb" / "kernel8_batched_gmem.s"
     asm = stock_path.read_text()
+    binary = dev.compiler.compile(asm)
     print(f"Loaded stock kernel from {stock_path}")
   else:
-    asm = build_kernel(dev.renderer.arch)
+    asm, binary = build_kernel(dev.renderer.arch)
 
-  binary = dev.compiler.compile(asm)
   print(f"Compiled! Binary size: {len(binary)} bytes")
 
   rng = np.random.default_rng(42)
