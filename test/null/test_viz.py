@@ -272,6 +272,20 @@ class TestVizIntegration(BaseTestViz):
     self.assertEqual(lst[0]["name"], "Schedule 1 Kernel n1")
     self.assertEqual(lst[1]["name"], prg.name)
 
+  # schedule graph CALL nodes have a link to jump to codegen
+  def test_link_sched_codegen(self):
+    c1 = Tensor.empty(4).add(1)
+    c2 = Tensor.empty(8).add(1)
+    sched = Tensor.schedule(c1, c2)
+    prgs = [si.lower().prg.p.name for si in sched]
+    lst = get_viz_list()
+    viz_kernel = next(i for i,s in enumerate(lst[0]["steps"]) if s["name"] == "View Kernel Graph")
+    graph = next(get_viz_details(0, viz_kernel))["graph"]
+    call_nodes = [n for n in graph.values() if n["label"].startswith("CALL")]
+    for i,n in enumerate(call_nodes):
+      assert n["ref"] is not None
+      self.assertEqual(lst[n["ref"]]["name"], prgs[i])
+
   def test_metadata_tracing(self):
     with Context(TRACEMETA=2):
       a = Tensor.empty(1)
