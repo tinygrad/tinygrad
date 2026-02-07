@@ -13,6 +13,21 @@ from tinygrad.dtype import _from_torch_dtype, _to_torch_dtype
 
 # https://pytorch.org/docs/stable/torch.compiler_ir.html
 
+try:
+  from torch._subclasses.fake_tensor import FakeTensorMode
+  _orig_from_tensor = FakeTensorMode.from_tensor
+  def _from_tensor(self, tensor, **kwargs):
+    try: return _orig_from_tensor(self, tensor, **kwargs)
+    except NotImplementedError as e:
+      if "OpaqueTensorImpl" not in str(e): raise
+      meta = torch.empty_strided(tensor.size(), tensor.stride(), device="meta", dtype=tensor.dtype)
+      return _orig_from_tensor(self, meta, **kwargs)
+  if not getattr(FakeTensorMode.from_tensor, "_tinygrad_patched", False):
+    FakeTensorMode.from_tensor = _from_tensor
+    FakeTensorMode.from_tensor._tinygrad_patched = True
+except Exception:
+  pass
+
 def _from_torch_device(device: torch.device): return f"{Device.DEFAULT}:{device.index or 0}"
 def _to_torch_device(device: str): return torch.device("tiny", int(device.partition(":")[2] or 0))
 
