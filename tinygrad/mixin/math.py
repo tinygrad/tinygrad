@@ -240,10 +240,10 @@ class MathMixin:
     return self.rshift(x, True)
 
   def maximum(self, x: Self | ConstType) -> Self:
-    return self.alu(Ops.MAX, self.ufix(x))
+    return (self < x).where(x, self)
 
   def minimum(self, x: Self | ConstType) -> Self:
-    return -(-self).maximum(-self.ufix(x))
+    return (self > x).where(x, self)
 
   def where(self, x: Self | ConstType, y: Self | ConstType) -> Self:
     if isinstance(x, type(self)):
@@ -307,6 +307,8 @@ class MathMixin:
     ```
     """
     if min_ is None and max_ is None: raise RuntimeError("at least one of 'min_' or 'max_' must not be None")
+    #ret = self.maximum(min_) if min_ is not None else self
+    #return ret.minimum(max_) if max_ is not None else ret
     ret = (self < min_).where(min_, self) if min_ is not None else self
     return (ret > max_).where(max_, ret) if max_ is not None else ret
 
