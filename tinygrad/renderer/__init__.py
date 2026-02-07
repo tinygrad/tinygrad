@@ -3,7 +3,7 @@ from typing import Callable, cast, TYPE_CHECKING
 import functools
 from dataclasses import dataclass, field
 from tinygrad.helpers import to_function_name, dedup, prod, DEBUG
-from tinygrad.uop.ops import Ops, UOp, sym_infer, sint, Variable, ssimplify, GroupOp, PatternMatcher, print_uops, KernelInfo
+from tinygrad.uop.ops import Ops, UOp, sym_infer, sint, Variable, ssimplify, GroupOp, PatternMatcher, print_uops, KernelInfo, OpType
 from tinygrad.dtype import AddrSpace, PtrDType
 from tinygrad.codegen.opt.tc import TensorCore
 from tinygrad.codegen.opt import Opt
@@ -23,7 +23,7 @@ class Estimates:
   def from_uops(uops:list[UOp], ignore_indexing=False) -> Estimates:
     flops: sint = 0
     lds: sint = 0
-    mem: dict[tuple[UOp, Ops], sint] = {}
+    mem: dict[tuple[UOp, OpType], sint] = {}
     mults: sint = 1
     mult_stack: list[sint] = []
     dont_count: set[UOp] = set()
