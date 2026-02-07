@@ -833,6 +833,13 @@ def tiny(gm:torch.fx.GraphModule, sample_inputs):
       outs = tuple(unwrap(x) for x in outs)
       for x in outs: x.realize()
       return outs
-    def torch_function(*args:torch.Tensor): return tuple(wrap(x) for x in tiny_function(*[unwrap(x) for x in args]))
+    def torch_function(*args:torch.Tensor):
+      tiny_args = []
+      for x in args:
+        if not x.is_tiny:
+          if x.requires_grad: raise RuntimeError("tiny backend requires tiny tensors for grad inputs")
+          x = x.to("tiny")
+        tiny_args.append(unwrap(x))
+      return tuple(wrap(x) for x in tiny_function(*tiny_args))
     return torch_function
   return aot_module_simplified(gm, sample_inputs, decompositions={}, fw_compiler=my_compiler)
