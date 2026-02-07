@@ -781,19 +781,19 @@ class KFDIface:
 
   def sleep(self, tm:int):
     kfd.AMDKFD_IOC_WAIT_EVENTS(KFDIface.kfd, events_ptr=self.queue_event_arr_ptr, num_events=3, wait_for_all=0, timeout=tm)
-    if self.queue_event_arr[1].memory_exception_data.gpu_id or self.queue_event_arr[2].hw_exception_data.gpu_id: raise RuntimeError("Device fault")
+    if self.queue_event_arr[1].mem_exc_data.gpu_id or self.queue_event_arr[2].hw_exc_data.gpu_id: raise RuntimeError("Device fault")
 
   def on_device_hang(self):
     def _collect_str(st): return ' '.join(f'{k[0]}={getattr(st, k[0])}' for k in st._real_fields_)
 
     # try to collect fault info if not already set from sleep().
-    if not self.queue_event_arr[1].memory_exception_data.gpu_id and not self.queue_event_arr[2].hw_exception_data.gpu_id:
+    if not self.queue_event_arr[1].mem_exc_data.gpu_id and not self.queue_event_arr[2].hw_exc_data.gpu_id:
       with contextlib.suppress(RuntimeError): self.sleep(tm=1)
 
     report = []
-    if self.queue_event_arr[1].memory_exception_data.gpu_id:
-      report += [f"MMU fault: 0x{self.queue_event_arr[1].memory_exception_data.va:X} | {_collect_str(self.queue_event_arr[1].memory_exception_data.failure)}"]
-    if self.queue_event_arr[2].hw_exception_data.gpu_id: report += [f"HW fault: {_collect_str(self.queue_event_arr[2].hw_exception_data)}"]
+    if self.queue_event_arr[1].mem_exc_data.gpu_id:
+      report += [f"MMU fault: 0x{self.queue_event_arr[1].mem_exc_data.va:X} | {_collect_str(self.queue_event_arr[1].mem_exc_data.failure)}"]
+    if self.queue_event_arr[2].hw_exc_data.gpu_id: report += [f"HW fault: {_collect_str(self.queue_event_arr[2].hw_exc_data)}"]
 
     raise RuntimeError("\n".join(report))
 
