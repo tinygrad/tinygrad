@@ -773,6 +773,12 @@ def native_batch_norm(input, weight, bias, running_mean, running_var, training, 
     out = input_t.batchnorm(weight_t, bias_t, running_mean_t, running_var_t.add(eps).rsqrt())
     return wrap(out), wrap(running_mean_t), wrap(running_var_t.add(eps).rsqrt())
 
+@torch.library.impl("aten::_native_batch_norm_legit", "privateuseone")
+def _native_batch_norm_legit(*args, **kwargs): return native_batch_norm(*args, **kwargs)
+
+@torch.library.impl("aten::_native_batch_norm_legit", "AutogradPrivateUse1")
+def _native_batch_norm_legit_autograd(*args, **kwargs): return native_batch_norm(*args, **kwargs)
+
 @torch.library.impl("aten::native_batch_norm_backward", "privateuseone")
 def native_batch_norm_backward(grad_out, input, weight, running_mean, running_var, save_mean, save_invstd, train, eps, output_mask):
   grad_out_t, input_t = unwrap(grad_out), unwrap(input)
