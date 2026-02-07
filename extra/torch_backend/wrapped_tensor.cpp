@@ -2,8 +2,16 @@
 #include <c10/core/impl/alloc_cpu.h>
 #include <torch/extension.h>
 #include <torch/csrc/PyInterpreter.h>
-#include <ATen/OpaqueTensorImpl.h>
 
+#ifdef _WIN32
+#pragma push_macro("TORCH_API")
+#undef TORCH_API
+#define TORCH_API
+#include <ATen/OpaqueTensorImpl.h>
+#pragma pop_macro("TORCH_API")
+#else
+#include <ATen/OpaqueTensorImpl.h>
+#endif
 // register guard
 namespace at {
 namespace detail {
