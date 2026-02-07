@@ -67,7 +67,7 @@ testing_minimal = [
   "pytest-timeout",
   "pytest-split",
   "hypothesis>=6.148.9",
-  "z3-solver",
+  "z3-solver<4.15.4",  # 4.15.4 has a segfault when creating many z3.Context()
 ]
 testing_unit = ["tinygrad[testing_minimal]", "tqdm", "safetensors", "tabulate", "openai", "ggml-python"]
 testing = [
