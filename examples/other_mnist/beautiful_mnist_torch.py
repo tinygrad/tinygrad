@@ -29,22 +29,26 @@ if __name__ == "__main__":
   if getenv("TINY_BACKEND"):
     import tinygrad.nn.torch  # noqa: F401
     device = torch.device("tiny")
+    data_device = torch.device("cpu")
   else:
     device = torch.device({"METAL":"mps","NV":"cuda"}.get(Device.DEFAULT, "cpu"))
+    data_device = device
   if DEBUG >= 1: print(f"using torch backend {device}")
   X_train, Y_train, X_test, Y_test = mnist()
-  X_train = torch.tensor(X_train.float().numpy(), device=device)
-  Y_train = torch.tensor(Y_train.cast(dtypes.int64).numpy(), device=device)
-  X_test = torch.tensor(X_test.float().numpy(), device=device)
-  Y_test = torch.tensor(Y_test.cast(dtypes.int64).numpy(), device=device)
+  X_train = torch.tensor(X_train.float().numpy(), device=data_device)
+  Y_train = torch.tensor(Y_train.cast(dtypes.int64).numpy(), device=data_device)
+  X_test = torch.tensor(X_test.float().numpy(), device=data_device)
+  Y_test = torch.tensor(Y_test.cast(dtypes.int64).numpy(), device=data_device)
 
   if getenv("TORCHVIZ"): torch.cuda.memory._record_memory_history()
   model = Model().to(device)
   optimizer = optim.Adam(model.parameters(), 1e-3)
 
   loss_fn = nn.CrossEntropyLoss()
-  def step(samples):
-    X,Y = X_train[samples], Y_train[samples]
+  def step(X, Y):
+    if data_device != device:
+      X = X.to(device)
+      Y = Y.to(device)
     out = model(X)
     loss = loss_fn(out, Y)
     optimizer.zero_grad()
@@ -54,10 +58,13 @@ if __name__ == "__main__":
   if getenv("TINY_BACKEND"): step = torch.compile(step, backend="tiny")
 
   test_acc = float('nan')
+  X_test_tiny = X_test.to(device) if data_device != device else X_test
+  Y_test_tiny = Y_test.to(device) if data_device != device else Y_test
   for i in (t:=trange(getenv("STEPS", 70))):
     samples = torch.randint(0, X_train.shape[0], (512,))  # putting this in JIT didn't work well
-    loss = step(samples)
-    if i%10 == 9: test_acc = ((model(X_test).argmax(axis=-1) == Y_test).sum() * 100 / X_test.shape[0]).item()
+    X, Y = X_train[samples], Y_train[samples]
+    loss = step(X, Y)
+    if i%10 == 9: test_acc = ((model(X_test_tiny).argmax(axis=-1) == Y_test_tiny).sum() * 100 / X_test_tiny.shape[0]).item()
     t.set_description(f"loss: {loss.item():6.2f} test_accuracy: {test_acc:5.2f}%")
 
   # verify eval acc
