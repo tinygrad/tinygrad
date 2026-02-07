@@ -43,7 +43,6 @@ if __name__ == "__main__":
   optimizer = optim.Adam(model.parameters(), 1e-3)
 
   loss_fn = nn.CrossEntropyLoss()
-  #@torch.compile
   def step(samples):
     X,Y = X_train[samples], Y_train[samples]
     out = model(X)
@@ -52,6 +51,7 @@ if __name__ == "__main__":
     loss.backward()
     optimizer.step()
     return loss
+  if getenv("TINY_BACKEND"): step = torch.compile(step, backend="tiny")
 
   test_acc = float('nan')
   for i in (t:=trange(getenv("STEPS", 70))):
