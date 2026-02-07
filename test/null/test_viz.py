@@ -408,8 +408,8 @@ class TestVizProfiler(BaseTestViz):
 
     tracks = list(j['layout'])
     self.assertEqual(tracks[0], 'NV')
-    self.assertEqual(tracks[1], 'NV Graph')
-    self.assertEqual(tracks[2], 'NV:1:SDMA:0')
+    self.assertEqual(tracks[1], 'NV:1:SDMA:0')
+    self.assertEqual(tracks[2], 'NV Graph')
 
     nv_events = j['layout']['NV']['events']
     self.assertEqual(nv_events[0]['name'], 'E_25_4n2')
@@ -423,6 +423,24 @@ class TestVizProfiler(BaseTestViz):
     graph_events = j['layout']['NV Graph']['events']
     self.assertEqual(graph_events[0]['st'], nv_events[0]['st'])
     self.assertEqual(graph_events[0]['st']+graph_events[0]['dur'], sdma_events[0]['st']+sdma_events[0]['dur'])
+
+  def test_block_ordering(self):
+    prof = [ProfileDeviceEvent(device='NV', tdiff=decimal.Decimal(-1000)),
+            ProfileDeviceEvent(device='NV:1', tdiff=decimal.Decimal(-500)),
+            ProfileDeviceEvent(device='NV:SDMA:0', tdiff=decimal.Decimal(-100)),
+            ProfileRangeEvent(device='NV', name='E_2', st=decimal.Decimal(1000), en=decimal.Decimal(1010)),
+            ProfileRangeEvent(device='NV:1', name='E_3', st=decimal.Decimal(1000), en=decimal.Decimal(1010)),
+            ProfileRangeEvent(device='NV:SDMA:0', name='COPY', st=decimal.Decimal(1000), en=decimal.Decimal(1010)),
+            ProfileGraphEvent(ents=[ProfileGraphEntry(device='NV', name='E_2', st_id=0, en_id=1)],
+                              deps=[[]], sigs=[decimal.Decimal(1000), decimal.Decimal(1010)])]
+    j = load_profile(prof)
+    tracks = list(j['layout'])
+    # block 0: devices, block 1: graphs, block 2: memory (only if non-empty)
+    devs = [t for t in tracks if not t.endswith(' Graph') and not t.endswith(' Memory')]
+    graphs = [t for t in tracks if t.endswith(' Graph')]
+    self.assertTrue(all(tracks.index(d) < tracks.index(g) for d in devs for g in graphs))
+    self.assertEqual(devs, ['NV', 'NV:SDMA:0', 'NV:1'])
+    self.assertEqual(graphs, ['NV Graph'])
 
   def test_bytes_per_kernel(self):
     step = 10
@@ -463,11 +481,11 @@ class TestVizProfiler(BaseTestViz):
 
   def test_layout_order(self):
     def fn(): return
-    for dname in ["TINY", "USER", "TEST:1 N1", "TEST:2 N1", "TEST:1 N2", "TEST:1:ENGINE:0", "TEST:1"]:
+    for dname in ["TINY", "USER", "TEST:1 N1", "TEST:2 N1", "TEST:1 N2", "TEST:1:ENGINE:0", "TEST:1:ENGINE:0 N1", "TEST:1"]:
       with cpu_profile("fn", dname): fn()
     layout = list(load_profile(cpu_events)["layout"])
     self.assertListEqual(layout[:2], ["USER","TINY"])
-    self.assertListEqual(layout[2:], ["TEST:1", "TEST:1:ENGINE:0", "TEST:1 N1","TEST:1 N2", "TEST:2 N1"])
+    self.assertListEqual(layout[2:], ["TEST:1", "TEST:1 N1", "TEST:1 N2", "TEST:1:ENGINE:0", "TEST:1:ENGINE:0 N1", "TEST:2 N1"])
 
 def _alloc(b:int):
   a = Tensor.empty(b, device="NULL", dtype=dtypes.char)
