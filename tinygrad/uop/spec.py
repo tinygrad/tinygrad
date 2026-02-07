@@ -138,11 +138,6 @@ _tensor_spec = PatternMatcher([
   (UPat(Ops.PARAM), lambda: True),
 ])+movement_ops+shared_spec
 
-tensor_spec = PatternMatcher([
-  # no tags allowed in tensor graph
-  (UPat(GroupOp.All, name="x"), lambda x: None if x.tag is None else False),
-])+_tensor_spec
-
 # ***** UOp spec in codegen shared between kernel and program *****
 
 shared_codegen_spec = PatternMatcher([
@@ -221,6 +216,21 @@ program_spec = PatternMatcher([
   (UPat(Ops.ENDIF, dtype=dtypes.void, src=(UPat(Ops.IF),)), lambda: True),
 ])+shared_codegen_spec+shared_spec
 
+# custom_kernel creates CALL nodes with kernel/program bodies directly in the tensor graph
+tensor_spec = PatternMatcher([
+  # no tags allowed in tensor graph
+  (UPat(GroupOp.All, name="x"), lambda x: None if x.tag is None else False),
+  # codegen: PROGRAM with progressive sources through the pipeline (SINK, DEVICE, LINEAR?, SOURCE?, BINARY?)
+  (UPat(Ops.PROGRAM, dtypes.void, src=(UPat(Ops.SINK), UPat(Ops.DEVICE))), lambda: True),
+  (UPat(Ops.PROGRAM, dtypes.void, src=(UPat(Ops.SINK), UPat(Ops.DEVICE), UPat(Ops.LINEAR))), lambda: True),
+  (UPat(Ops.PROGRAM, dtypes.void, src=(UPat(Ops.SINK), UPat(Ops.DEVICE), UPat(Ops.LINEAR), UPat(Ops.SOURCE))), lambda: True),
+  (UPat(Ops.PROGRAM, dtypes.void, src=(UPat(Ops.SINK), UPat(Ops.DEVICE), UPat(Ops.LINEAR), UPat(Ops.SOURCE), UPat(Ops.BINARY))), lambda: True),
+  # codegen: standalone LINEAR/SOURCE/BINARY
+  (UPat(Ops.LINEAR, dtypes.void), lambda: True),
+  (UPat(Ops.SOURCE, dtypes.void, src=()), lambda: True),
+  (UPat(Ops.BINARY, dtypes.void, src=()), lambda: True),
+])+_tensor_spec+kernel_spec+program_spec
+
 # *** this spec should match all UOps ever created ***
 
 full_spec = PatternMatcher([
@@ -263,16 +273,6 @@ full_spec = PatternMatcher([
   # in progress MSTACK may lose device
   (UPat((Ops.MSELECT, Ops.MSTACK), name="x"), lambda x: True),
 
-  # codegen: PROGRAM with progressive sources through the pipeline (SINK, DEVICE, LINEAR?, SOURCE?, BINARY?)
-  (UPat(Ops.PROGRAM, dtypes.void, src=(UPat(Ops.SINK), UPat(Ops.DEVICE))), lambda: True),
-  (UPat(Ops.PROGRAM, dtypes.void, src=(UPat(Ops.SINK), UPat(Ops.DEVICE), UPat(Ops.LINEAR))), lambda: True),
-  (UPat(Ops.PROGRAM, dtypes.void, src=(UPat(Ops.SINK), UPat(Ops.DEVICE), UPat(Ops.LINEAR), UPat(Ops.SOURCE))), lambda: True),
-  (UPat(Ops.PROGRAM, dtypes.void, src=(UPat(Ops.SINK), UPat(Ops.DEVICE), UPat(Ops.LINEAR), UPat(Ops.SOURCE), UPat(Ops.BINARY))), lambda: True),
-  # codegen: standalone LINEAR/SOURCE/BINARY
-  (UPat(Ops.LINEAR, dtypes.void), lambda: True),
-  (UPat(Ops.SOURCE, dtypes.void, src=()), lambda: True),
-  (UPat(Ops.BINARY, dtypes.void, src=()), lambda: True),
-
   # temp VECTORIZE/INDEX during rewrite have the wrong dtype
   (UPat(Ops.VECTORIZE), lambda: True),
   (UPat(Ops.INDEX), lambda: True),
@@ -287,19 +287,10 @@ full_spec = PatternMatcher([
 
 # ***** uop helpers *****
 
-def type_verify(ast:UOp|list[UOp], check_spec:PatternMatcher, skip_call_bodies:bool=False):
+def type_verify(ast:UOp|list[UOp], check_spec:PatternMatcher):
   lst = list(ast.toposort()) if isinstance(ast, UOp) else ast
   if SPEC > 1: test_pyrender(lst[-1])  # assume this is the sink
-
-  # skip UOps inside CALL kernel bodies (CALL src[0] is the kernel body)
-  if skip_call_bodies:
-    call_body_uops: set[UOp] = set()
-    for u in lst:
-      if u.op is Ops.CALL and u.src[0].op in {Ops.SINK, Ops.PROGRAM}:
-        call_body_uops.update(u.src[0].toposort())
-
   for i,u in enumerate(lst):
-    if skip_call_bodies and u in call_body_uops: continue
     with Context(TRACK_MATCH_STATS=0): ret = check_spec.rewrite(u)
     if cast(bool|None, ret) is not True:
       if DEBUG >= 3: print_uops(lst)

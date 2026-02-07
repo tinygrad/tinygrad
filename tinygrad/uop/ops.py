@@ -838,8 +838,6 @@ class KernelInfo:
   @property
   def function_name(self): return to_function_name(self.name)
 
-
-
 @dataclass(frozen=True)
 class CallInfo:
   grad_fxn: Callable|None = None

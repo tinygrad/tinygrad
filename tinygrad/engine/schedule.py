@@ -145,7 +145,7 @@ def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[dict[UOp, UOp], li
 
   if not SCACHE or (sc_ret:=schedule_cache.get(sched_cache_key, None)) is None:
     # verify Tensors match the spec (on big_sink, we only need to do this if cache misses)
-    if SPEC: type_verify(big_sink, tensor_spec, skip_call_bodies=True)
+    if SPEC: type_verify(big_sink, tensor_spec)
 
     # hack to preserve metadata
     graph_rewrite_map(big_sink, pm_pre_sched_cache, ctx=({}, {}), name="preserve metadata")
