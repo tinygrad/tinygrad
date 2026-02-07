@@ -88,13 +88,13 @@ def simple_qkv_kernel(O:UOp, Q:UOp, K:UOp, V:UOp) -> UOp:
 # **** backward callbacks ****
 
 def backward_gemm(gradient:UOp, kernel:UOp) -> tuple[UOp, UOp]:
-  out, a, b = kernel.src
+  out, a, b = kernel.src[1:]
   grad_a = (Tensor(gradient) @ Tensor(b).T).uop
   grad_b = (Tensor(a).T @ Tensor(gradient)).uop
   return (None, grad_a, grad_b)
 
 def backward_gemm_custom(gradient:UOp, kernel:UOp) -> tuple[UOp, UOp]:
-  out, a, b = kernel.src
+  out, a, b = kernel.src[1:]
   grad_a = Tensor.empty_like(Tensor(a)).custom_kernel(Tensor(gradient), Tensor(b).T, fxn=custom_gemm)[0].uop
   grad_b = Tensor.empty_like(Tensor(b)).custom_kernel(Tensor(a).T, Tensor(gradient), fxn=custom_gemm)[0].uop
   return (None, grad_a, grad_b)

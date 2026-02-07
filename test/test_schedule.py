@@ -10,7 +10,7 @@ from hypothesis import assume, given, settings, strategies as strat
 from tinygrad import nn, dtypes, Device, Tensor, Variable
 from tinygrad.device import is_dtype_supported
 from tinygrad.dtype import DType, ImageDType
-from tinygrad.uop.ops import UOp, Ops, GroupOp, UPat, Kernel
+from tinygrad.uop.ops import UOp, Ops, GroupOp, UPat
 from tinygrad.helpers import CI, DEBUG, SPLIT_REDUCEOP, GlobalCounters, Context, getenv, all_same, temp
 from tinygrad.engine.realize import CompiledRunner, run_schedule
 
@@ -676,17 +676,6 @@ class TestSchedule(unittest.TestCase):
     b = Tensor.randn(16, 16).realize()
     c = (a.sum(2).contiguous() + b).contiguous()
     check_schedule(c, 2)
-
-  # TODO: this requires supporting multiple stores in the AST
-  @unittest.expectedFailure
-  def test_multioutput_ast(self):
-    a = Tensor.zeros(1, dtype=dtypes.int).contiguous().realize().uop
-    b = Tensor.zeros(1, dtype=dtypes.int).contiguous().realize().uop
-    c = Tensor.arange(4).realize().uop
-    kernel = UOp(Ops.CALL, src=(a.base, b.base, c.base), arg=Kernel(UOp.sink(c.r(Ops.ADD, (0,))+1, c.r(Ops.ADD, (0,))*2)))
-    run_schedule(check_schedule(UOp.sink(a.assign(kernel), b.assign(kernel)), 1))
-    self.assertEqual(a.buffer.numpy(), [7])
-    self.assertEqual(b.buffer.numpy(), [12])
 
   @unittest.skip("no longer supported")
   def test_double_from(self):
