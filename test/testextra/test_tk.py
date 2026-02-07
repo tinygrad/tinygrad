@@ -10,7 +10,7 @@ import numpy as np
 
 from extra.thunder.tiny.tk import WARP_THREADS
 from extra.thunder.tiny.tk.kernel import Kernel
-from extra.thunder.tiny.tk.tiles import ST_16X32, RT_16X32, RT_16X16, TileLayout
+from extra.thunder.tiny.tk.tiles import ST_16X32, ST_32X16, ST_32X32, RT_16X32, RT_16X32_4, RT_32X16, RT_32X16_4, RT_16X16, RT_32X32, TileLayout
 
 @unittest.skipIf(CI or Device.DEFAULT not in ["AMD"], "only amd")
 class TestTK(unittest.TestCase):
@@ -119,6 +119,43 @@ class TestTK(unittest.TestCase):
     c = c.float()
 
     ref = a.matmul(b.transpose(2, 3), dtype=dtypes.float32).float()
+
+    np.testing.assert_allclose(c.numpy(), ref.numpy())
+
+  @unittest.skipIf(CI, "no wmma in ci")
+  def test_matmul_32x32_mfma(self):
+    M, K, N = 32, 16, 32
+    with Kernel("matmul_32x32_mfma", (1, 1, 1), WARP_THREADS) as ker:
+      warp = ker.warp
+
+      c = ker.gl((1, 1, M, N), dtypes.float32)
+      a = ker.gl((1, 1, M, K), dtypes.bfloat16)
+      b = ker.gl((1, 1, K, N), dtypes.bfloat16)
+
+      a_reg = ker.rt((M, K), dtypes.bfloat16, base_shape=RT_32X16)
+      b_reg = ker.rt((K, N), dtypes.bfloat16, TileLayout.COL, base_shape=RT_16X32)
+      c_reg = ker.rt((M, N), dtypes.float32, TileLayout.COL, base_shape=RT_32X32)
+
+      c_reg = warp.zero(c_reg)
+      a_reg = warp.load(a_reg, a, (), (0, 0, 0, 0), axis=2)
+      b_reg = warp.load(b_reg, b, (), (0, 0, 0, 0), axis=2)
+      c_reg = warp.mma_AB(c_reg, a_reg, b_reg)
+
+      c = warp.store(c, c_reg, (0, 0, 0, 0), (), axis=2)
+
+      sink = ker.finish()
+
+    with Context(DEBUG=0):
+      a = Tensor.rand(1, 1, M, K, dtype="bfloat16").contiguous()
+      b = Tensor.rand(1, 1, K, N, dtype="bfloat16").contiguous()
+      c = Tensor.empty(1, 1, M, N, dtype="float32")
+      Tensor.realize(a, b, c)
+
+    ei = ExecItem(sink, [t.uop.buffer for t in (c, a, b)], prg=get_runner(Device.DEFAULT, sink))
+    for _ in range(5): ei.run(wait=True)
+    c = c.float()
+
+    ref = a.matmul(b, dtype=dtypes.float32).float()
 
     np.testing.assert_allclose(c.numpy(), ref.numpy())
 
@@ -240,6 +277,102 @@ class TestTK(unittest.TestCase):
 
     np.testing.assert_allclose(b.numpy(), ref.numpy())
     np.testing.assert_allclose(c.numpy(), ref.numpy())
+
+  def test_load_store_32x16(self):
+    M, K = 32, 16
+    with Kernel("load_store_32x16", (1, 1, 1), WARP_THREADS) as ker:
+      warp = ker.warp
+
+      b = ker.gl((1, 1, M, K), dtypes.float32)
+      a = ker.gl((1, 1, M, K), dtypes.float32)
+
+      a_reg = ker.rt((M, K), dtypes.float32, base_shape=RT_32X16_4)
+      b_reg = ker.rt((M, K), dtypes.float32, base_shape=RT_32X16_4)
+
+      a_reg = warp.load(a_reg, a, (), (0, 0, 0, 0), axis=2)
+      b_reg = warp.copy(b_reg, a_reg)
+      b = warp.store(b, b_reg, (0, 0, 0, 0), (), axis=2)
+
+      sink = ker.finish()
+
+    with Context(DEBUG=0):
+      a = Tensor.rand(1, 1, M, K, dtype="float32").contiguous()
+      b = Tensor.empty(1, 1, M, K, dtype="float32")
+      Tensor.realize(a, b)
+
+    ei = ExecItem(sink, [t.uop.buffer for t in (b, a)], prg=get_runner(Device.DEFAULT, sink))
+    for _ in range(5): ei.run(wait=True)
+    b = b.float()
+
+    ref = a.float()
+
+    np.testing.assert_allclose(b.numpy(), ref.numpy())
+
+  def test_load_store_16x32(self):
+    M, K = 16, 32
+    with Kernel("load_store_16x32", (1, 1, 1), WARP_THREADS) as ker:
+      warp = ker.warp
+
+      b = ker.gl((1, 1, M, K), dtypes.float32)
+      a = ker.gl((1, 1, M, K), dtypes.float32)
+
+      a_reg = ker.rt((M, K), dtypes.float32, TileLayout.COL, base_shape=RT_16X32)
+      b_reg = ker.rt((M, K), dtypes.float32, TileLayout.COL, base_shape=RT_16X32)
+
+      a_reg = warp.load(a_reg, a, (), (0, 0, 0, 0), axis=2)
+      b_reg = warp.copy(b_reg, a_reg)
+      b = warp.store(b, b_reg, (0, 0, 0, 0), (), axis=2)
+
+      sink = ker.finish()
+
+    with Context(DEBUG=0):
+      a = Tensor.rand(1, 1, M, K, dtype="float32").contiguous()
+      b = Tensor.empty(1, 1, M, K, dtype="float32")
+      Tensor.realize(a, b)
+
+    ei = ExecItem(sink, [t.uop.buffer for t in (b, a)], prg=get_runner(Device.DEFAULT, sink))
+    for _ in range(5): ei.run(wait=True)
+    b = b.float()
+
+    ref = a.float()
+
+    np.testing.assert_allclose(b.numpy(), ref.numpy())
+
+  def test_load_store_32x32(self):
+    N = 64
+    BLOCK_SIZE = 32
+    with Kernel("load_store_32x32", (N // BLOCK_SIZE, N // BLOCK_SIZE, 1), WARP_THREADS) as ker:
+      warp = ker.warp
+
+      b = ker.gl((1, 1, N, N), dtypes.float32)
+      a = ker.gl((1, 1, N, N), dtypes.float32)
+
+      a_smem = ker.st((BLOCK_SIZE, BLOCK_SIZE), dtypes.float32, base_shape=ST_32X32)
+
+      a_reg = ker.rt((BLOCK_SIZE, BLOCK_SIZE), dtypes.float32, base_shape=RT_32X32)
+      b_reg = ker.rt((BLOCK_SIZE, BLOCK_SIZE), dtypes.float32, base_shape=RT_32X32)
+
+      col, row = ker.blockIdx_x, ker.blockIdx_y
+
+      a_smem = warp.load(a_smem, a, (), (0, 0, row, col), axis=2)
+      a_reg = warp.load(a_reg, a_smem)
+      b_reg = warp.copy(b_reg, a_reg)
+      b = warp.store(b, b_reg, (0, 0, row, col), (), axis=2)
+
+      sink = ker.finish()
+
+    with Context(DEBUG=0):
+      a = Tensor.rand(1, 1, N, N, dtype="float32").contiguous()
+      b = Tensor.empty(1, 1, N, N, dtype="float32")
+      Tensor.realize(a, b)
+
+    ei = ExecItem(sink, [t.uop.buffer for t in (b, a)], prg=get_runner(Device.DEFAULT, sink))
+    for _ in range(5): ei.run(wait=True)
+    b = b.float()
+
+    ref = a.float()
+
+    np.testing.assert_allclose(b.numpy(), ref.numpy())
 
   def test_load_store_group(self):
     N = 1024
