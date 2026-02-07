@@ -70,10 +70,6 @@ mop_cleanup = PatternMatcher([
    lambda x,x2: x.replace(src=(x2.src[0], x.src[1])) if x.tag is None and x2.tag is None else None),
 ])
 
-def resolve_custom_kernel(ck:UOp) -> UOp:
-  placeholders = [UOp.placeholder_like(s, slot=i) for i,s in enumerate(ck.src)]
-  return ck.arg.fxn(*placeholders).call(*ck.src)
-
 def resolve_call(c:UOp) -> UOp|None:
   # don't resolve real kernel calls, sink or program
   if c.src[0].op is Ops.SINK and isinstance(c.src[0].arg, KernelInfo): return None
@@ -94,9 +90,6 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
 
   # resolve calls
   (UPat(Ops.CALL, name="c"), resolve_call),
-
-  # resolve custom kernels
-  (UPat(Ops.CUSTOM_KERNEL, name="ck"), resolve_custom_kernel),
 
   # remove CONTIGUOUS if the BUFFER is already contiguous
   (UPat(Ops.RESHAPE, src=(UPat(Ops.BUFFER), UPat()), name="r").f(Ops.CONTIGUOUS, name="c"), lambda r,c: r.replace(tag=c.tag)),
@@ -542,7 +535,7 @@ def tag_uop(ctx:tuple[list[UOp], set[UOp]], x:UOp):
   if x.dtype.scalar() == dtypes.index: return None
   ctx[0].append(x)
   return x.replace(tag=(len(ctx[0])-1,))
-add_tags = PatternMatcher([
+add_tags = pm_gate_kernel_sink+PatternMatcher([
   # don't tag BUFFERs, they are global
   (UPat(GroupOp.All-{Ops.BUFFER, Ops.CONST, Ops.DEVICE, Ops.UNIQUE, Ops.LUNIQUE, Ops.DEFINE_VAR, Ops.BIND, Ops.CALL, Ops.END,
                      Ops.MSTACK, Ops.MSELECT, Ops.RANGE}.union(GroupOp.Movement), name="x"), tag_uop),

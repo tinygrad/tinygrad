@@ -1,6 +1,6 @@
 import math
 from typing import cast, Any
-from tinygrad.uop.ops import PatternMatcher, UPat, GroupOp, Ops, UOp, print_uops, AxisType, KernelInfo, pyrender, Kernel, CustomKernel
+from tinygrad.uop.ops import PatternMatcher, UPat, GroupOp, Ops, UOp, print_uops, AxisType, KernelInfo, pyrender, Kernel
 from tinygrad.dtype import DType, ImageDType, dtypes, PtrDType, AddrSpace, Invalid, ConstFloat
 from tinygrad.helpers import DEBUG, Context, prod, SPEC, Metadata, panic, CHECK_OOB
 
@@ -73,9 +73,6 @@ movement_ops = PatternMatcher([
 
   # AFTER on Movement Op
   (UPat(Ops.AFTER, src=(UPat(GroupOp.Movement.union({Ops.MULTI, Ops.CONTIGUOUS})),), allow_any_len=True), lambda: True),
-
-  # custom kernels allowed here
-  (UPat(Ops.CUSTOM_KERNEL), lambda: True),
 ])
 
 _tensor_spec = PatternMatcher([
@@ -290,11 +287,19 @@ full_spec = PatternMatcher([
 
 # ***** uop helpers *****
 
-def type_verify(ast:UOp|list[UOp], check_spec:PatternMatcher):
+def type_verify(ast:UOp|list[UOp], check_spec:PatternMatcher, skip_call_bodies:bool=False):
   lst = list(ast.toposort()) if isinstance(ast, UOp) else ast
   if SPEC > 1: test_pyrender(lst[-1])  # assume this is the sink
 
+  # skip UOps inside CALL kernel bodies (CALL src[0] is the kernel body)
+  if skip_call_bodies:
+    call_body_uops: set[UOp] = set()
+    for u in lst:
+      if u.op is Ops.CALL and u.src[0].op in {Ops.SINK, Ops.PROGRAM}:
+        call_body_uops.update(u.src[0].toposort())
+
   for i,u in enumerate(lst):
+    if skip_call_bodies and u in call_body_uops: continue
     with Context(TRACK_MATCH_STATS=0): ret = check_spec.rewrite(u)
     if cast(bool|None, ret) is not True:
       if DEBUG >= 3: print_uops(lst)
@@ -304,7 +309,7 @@ def type_verify(ast:UOp|list[UOp], check_spec:PatternMatcher):
 from tinygrad.codegen.opt import Opt, OptOps
 from tinygrad.schedule.rangeify import BufferizeOpts
 glbls:dict[str, Any] = {"inf": math.inf, "nan": math.nan, "KernelInfo": KernelInfo, "Kernel": Kernel, "Metadata": Metadata,
-                        "UOp": UOp, "dtypes": dtypes, "Ops": Ops, "AxisType": AxisType, "Invalid": Invalid, "CustomKernel": CustomKernel,
+                        "UOp": UOp, "dtypes": dtypes, "Ops": Ops, "AxisType": AxisType, "Invalid": Invalid,
                         "Opt": Opt, "OptOps": OptOps, "BufferizeOpts": BufferizeOpts, "AddrSpace": AddrSpace, "panic": panic,
                         "ConstFloat": ConstFloat}
 def eval_pyrender(code:str) -> UOp:

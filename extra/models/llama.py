@@ -103,9 +103,9 @@ class Attention:
       def fa_custom_backward(out_q:UOp, out_k:UOp, out_v:UOp, grad:UOp, q:UOp, k:UOp, v:UOp) -> UOp:
         return UOp.sink(arg=KernelInfo(name="fa_custom_backward"))
       def fa_backward(grad:UOp, kernel:UOp) -> tuple[None, UOp, UOp, UOp]:
-        grad_q = Tensor.empty_like(q:=Tensor(kernel.src[1]))
-        grad_k = Tensor.empty_like(k:=Tensor(kernel.src[2]))
-        grad_v = Tensor.empty_like(v:=Tensor(kernel.src[3]))
+        grad_q = Tensor.empty_like(q:=Tensor(kernel.src[2]))
+        grad_k = Tensor.empty_like(k:=Tensor(kernel.src[3]))
+        grad_v = Tensor.empty_like(v:=Tensor(kernel.src[4]))
         ck = Tensor.custom_kernel(grad_q, grad_k, grad_v, Tensor(grad), q, k, v, fxn=fa_custom_backward)[:3]
         return (None, ck[0].uop, ck[1].uop, ck[2].uop)
       attn = Tensor.empty_like(attn).custom_kernel(xq, keys, values, fxn=fa_custom_forward, grad_fxn=fa_backward)[0]
