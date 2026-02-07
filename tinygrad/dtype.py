@@ -211,6 +211,10 @@ class dtypes:
 
   fp8s = (fp8e4m3, fp8e5m2)
   floats = fp8s + (float16, bfloat16, float32, float64)
+  int8s = (uint8, int8)
+  int16s = (uint16, int16)
+  int32s = (uint32, int32)
+  int64s = (uint64, int64)
   uints = (uint8, uint16, uint32, uint64)
   sints = (int8, int16, int32, int64)
   ints = uints + sints
