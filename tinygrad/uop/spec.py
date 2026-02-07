@@ -290,6 +290,7 @@ full_spec = PatternMatcher([
 def type_verify(ast:UOp|list[UOp], check_spec:PatternMatcher):
   lst = list(ast.toposort()) if isinstance(ast, UOp) else ast
   if SPEC > 1: test_pyrender(lst[-1])  # assume this is the sink
+
   for i,u in enumerate(lst):
     with Context(TRACK_MATCH_STATS=0): ret = check_spec.rewrite(u)
     if cast(bool|None, ret) is not True:
