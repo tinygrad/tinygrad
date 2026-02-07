@@ -91,20 +91,25 @@ def convert_reduce_axis_to_reduce_with_ranges(ctx:IndexingContext, x:UOp):
 def remove_movement_op_after_rangeify(ctx:IndexingContext, x:UOp):
   if x in ctx.range_map or x.src[0].op is Ops.INDEX: return x.src[0]
 
-def add_third_op_to_assign_to_track_shape(ctx:IndexingContext, assign:UOp):
-  if assign.src[1].op is Ops.CALL: return None
-  to_mop = graph_rewrite(assign.src[0], PatternMatcher([(UPat(GroupOp.Movement, name="x"), lambda x: x.replace(tag=()))]))
-  ret = assign.replace(src=assign.src+(to_mop,))
-  ctx.range_map[ret] = ctx.range_map[assign]
-  return ret
+def handle_assign_mops(ctx:IndexingContext, assign:UOp, target:UOp, src:UOp):
+  if target.op in GroupOp.Movement and src.op is not Ops.CALL:
+    mops = []
+    while target.op in GroupOp.Movement:
+      mops.append((target.op, target.marg))
+      target = target.src[0]
+    if mops and assign in ctx.range_map:
+      ret = assign.replace(arg=tuple(mops))
+      ctx.range_map[ret] = ctx.range_map[assign]
+      return ret
+  return None
 
 pm_apply_rangeify = PatternMatcher([
   # REDUCE_AXIS -> REDUCE
   (UPat(Ops.REDUCE_AXIS, name="x"), convert_reduce_axis_to_reduce_with_ranges),
   # PAD -> WHERE
   (UPat(Ops.PAD, name="x"), convert_pad_to_where_to_keep_behavior_local),
-  # add third op to assign
-  (UPat(Ops.ASSIGN, src=(UPat(), UPat()), name="assign"), add_third_op_to_assign_to_track_shape),
+  # store movement ops in ASSIGN arg
+  (UPat(Ops.ASSIGN, src=(UPat(name="target"), UPat(name="src")), name="assign"), handle_assign_mops),
   # finally, apply_rangeify
   (UPat(GroupOp.All, name="x"), create_bufferize_and_index_based_on_ranges),
   # remove movement op

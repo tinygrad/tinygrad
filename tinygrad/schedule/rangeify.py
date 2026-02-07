@@ -334,19 +334,13 @@ def bufferize_to_store(ctx:itertools.count, x:UOp, idx:UOp, allow_locals=True):
   assert size > 0 and isinstance(size, int), f"no zero sized or symbolic sized buffers {size}"
 
   sdtype = x.dtype.ptr(size=size, addrspace=x.arg.addrspace)
-  if x.src[0].op is Ops.ASSIGN:
-    assign_target, assign_src, assign_mops = x.src[0].src
+  if (assign := x.src[0]).op is Ops.ASSIGN:
+    assign_target, assign_src = assign.src[0], assign.src[1]
     assert assign_target.op is Ops.INDEX, f"{assign_target.op} is not index"
     # in assign, this is the buffer size, not the bufferize size
-    # TODO: assign_mops here
     do_store = assign_target.replace(dtype=sdtype).store(assign_src, tag=x.tag).end(*rngs)
     ret = assign_target.src[0].after(do_store)
-    mops = []
-    walk = assign_mops
-    while walk is not assign_mops.base:
-      mops.append((walk.op, walk.marg))
-      walk = walk.src[0]
-    for m in mops[::-1]: ret = ret._mop(*m)
+    for op, marg in reversed(assign.arg or ()): ret = ret._mop(op, marg)
     return ret
 
   # lower outerworld reduce here
