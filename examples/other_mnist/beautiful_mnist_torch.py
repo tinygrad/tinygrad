@@ -46,9 +46,6 @@ if __name__ == "__main__":
 
   loss_fn = nn.CrossEntropyLoss()
   def step(X, Y):
-    if data_device != device:
-      X = X.to(device)
-      Y = Y.to(device)
     out = model(X)
     loss = loss_fn(out, Y)
     optimizer.zero_grad()
