@@ -26,6 +26,7 @@ class GPFIFO:
     self.gpfifo = to_mv(self.base, self.entries_cnt * 8).cast("Q")
     self.ctrl = nv_gpu.AmpereAControlGPFifo.from_address(self.base + self.entries_cnt * 8)
     self.state = {}
+    self.bound_engines: set[int] = set()
 
     # Buf exec state
     self.buf = None
@@ -115,10 +116,10 @@ class GPFIFO:
   def execute_cmd(self, cmd) -> SchedResult:
     if cmd == nv_gpu.NVC56F_SEM_EXECUTE: return self._exec_signal()
     elif cmd == nv_gpu.NVC6C0_LAUNCH_DMA: return self._exec_nvc6c0_dma()
-    elif cmd == nv_gpu.NVC6B5_LAUNCH_DMA: return self._exec_nvc6b5_dma()
+    elif cmd == nv_gpu.NVC6B5_LAUNCH_DMA: # NOTE: NVC6B5_LAUNCH_DMA == NVC9B0_EXECUTE == 0x300
+      return self._exec_vid_decode() if self.bound_engines & {nv_gpu.NVC9B0_VIDEO_DECODER, nv_gpu.NVCFB0_VIDEO_DECODER} else self._exec_nvc6b5_dma()
     elif cmd == nv_gpu.NVC6C0_SEND_SIGNALING_PCAS2_B: return self._exec_pcas2()
     elif cmd == 0x0320: return self._exec_load_inline_qmd() # NVC6C0_LOAD_INLINE_QMD_DATA
-    elif cmd == nv_gpu.NVC9B0_EXECUTE: return self._exec_vid_decode()
     elif cmd == nv_gpu.NVC9B0_SEMAPHORE_D: return self._exec_vid_semaphore()
     else: self.state[cmd] = self._next_dword() # just state update
     return SchedResult.CONT
