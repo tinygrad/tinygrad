@@ -33,13 +33,17 @@ pm_mops = PatternMatcher([
 # *****************
 # 0. do some cleanup rewrites, mostly copied from the old stuff
 
-def fix_assign_hazard(dest:UOp, src:UOp, assign:UOp):
+def assign_to_contiguous(assign:UOp, target:UOp, src:UOp):
+  if (t := target.base).op is Ops.BUFFER or (t.op is Ops.MSTACK and all(s.op is Ops.BUFFER for s in t.src)): return None
+  return src.f(Ops.CONTIGUOUS, tag=assign.tag)
+
+def fix_assign_hazard(assign:UOp, target:UOp, src:UOp):
   # PERMUTE and FLIP reorder indices, SHRINK can have overlapping regions when dest is also shrunk
-  unsafe = {Ops.PERMUTE, Ops.FLIP} | ({Ops.SHRINK} if dest.op_in_backward_slice_with_self(Ops.SHRINK) else set())
+  unsafe = {Ops.PERMUTE, Ops.FLIP} | ({Ops.SHRINK} if target.op_in_backward_slice_with_self(Ops.SHRINK) else set())
   if not (hazards:=[s for s in src.toposort(gate=lambda s:s.op not in ALWAYS_CONTIGUOUS) if s.op in unsafe]): return
   for h in hazards:
-    if any(s is dest.base for s in h.toposort(gate=lambda s:s.op not in ALWAYS_CONTIGUOUS-{Ops.BUFFER})):
-      return assign.replace(src=(dest, src.contiguous()))
+    if any(s is target.base for s in h.toposort(gate=lambda s:s.op not in ALWAYS_CONTIGUOUS-{Ops.BUFFER})):
+      return assign.replace(src=(target, src.contiguous()))
 
 def split_reduceop(reduce:UOp, x:UOp):
   if prod(reduce.shape) == 0: return None
@@ -137,15 +141,13 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
 
   # move bitcast from assign target to source: a.bitcast(X).assign(src) -> a.assign(src.bitcast(a.dtype))
   (UPat(Ops.ASSIGN, src=(UPat(Ops.BITCAST, src=(UPat(name="target"),)), UPat(name="src")), name="assign"),
-   lambda target, src, assign: target.assign(src.bitcast(target.dtype)).replace(tag=assign.tag)),
+   lambda assign, target, src: target.assign(src.bitcast(target.dtype)).replace(tag=assign.tag)),
 
   # assign only to buffer, otherwise make it a CONTIGUOUS
-  (UPat(Ops.ASSIGN, src=(UPat(GroupOp.All-{Ops.BUFFER}, name="target"), UPat(name="x")), name="assign"),
-   lambda x,target,assign: x.f(Ops.CONTIGUOUS, tag=assign.tag) if ((t:=target.base).op is not Ops.BUFFER and \
-       not (t.op is Ops.MSTACK and all(s.op is Ops.BUFFER for s in t.src))) else None),
+  (UPat(Ops.ASSIGN, src=(UPat(GroupOp.All-{Ops.BUFFER}, name="target"), UPat(name="src")), name="assign"), assign_to_contiguous),
 
    # make source contiguous if it has hazardous movement ops on the dest buffer
-   (UPat(Ops.ASSIGN, src=(UPat.var("dest"), UPat.var("src")), name="assign"), fix_assign_hazard),
+   (UPat(Ops.ASSIGN, src=(UPat.var("target"), UPat.var("src")), name="assign"), fix_assign_hazard),
 ])
 
 # *****************
