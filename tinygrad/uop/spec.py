@@ -136,6 +136,18 @@ _tensor_spec = PatternMatcher([
   # allow CALL/PARAM
   (UPat(Ops.CALL, src=(UPat(name="f"),), name="c", allow_any_len=True), lambda c,f: c.dtype == f.dtype),
   (UPat(Ops.PARAM), lambda: True),
+
+  # ** for custom kernels **
+
+  # codegen: PROGRAM with progressive sources through the pipeline (SINK, DEVICE, LINEAR?, SOURCE?, BINARY?)
+  (UPat(Ops.PROGRAM, dtypes.void, src=(UPat(Ops.SINK), UPat(Ops.DEVICE))), lambda: True),
+  (UPat(Ops.PROGRAM, dtypes.void, src=(UPat(Ops.SINK), UPat(Ops.DEVICE), UPat(Ops.LINEAR))), lambda: True),
+  (UPat(Ops.PROGRAM, dtypes.void, src=(UPat(Ops.SINK), UPat(Ops.DEVICE), UPat(Ops.LINEAR), UPat(Ops.SOURCE))), lambda: True),
+  (UPat(Ops.PROGRAM, dtypes.void, src=(UPat(Ops.SINK), UPat(Ops.DEVICE), UPat(Ops.LINEAR), UPat(Ops.SOURCE), UPat(Ops.BINARY))), lambda: True),
+  # codegen: standalone LINEAR/SOURCE/BINARY
+  (UPat(Ops.LINEAR, dtypes.void), lambda: True),
+  (UPat(Ops.SOURCE, dtypes.void, src=()), lambda: True),
+  (UPat(Ops.BINARY, dtypes.void, src=()), lambda: True),
 ])+movement_ops+shared_spec
 
 # ***** UOp spec in codegen shared between kernel and program *****
@@ -196,6 +208,11 @@ kernel_spec = PatternMatcher([
   (UPat(Ops.REDUCE, src=(UPat(),), allow_any_len=True, name="x"), lambda x: all(y.dtype in (dtypes.index, dtypes.int) for y in x.src[1:])),
 ])+movement_ops+shared_codegen_spec+shared_spec
 
+tensor_spec = PatternMatcher([
+  # no tags allowed in tensor graph
+  (UPat(GroupOp.All, name="x"), lambda x: None if x.tag is None else False),
+])+_tensor_spec+kernel_spec
+
 # ***** UOp spec in linearized programs *****
 
 program_spec = PatternMatcher([
@@ -215,21 +232,6 @@ program_spec = PatternMatcher([
   (UPat(Ops.IF, dtype=dtypes.void, src=(UPat(dtype=dtypes.bool), UPat((Ops.CAST, Ops.INDEX)))), lambda: True),
   (UPat(Ops.ENDIF, dtype=dtypes.void, src=(UPat(Ops.IF),)), lambda: True),
 ])+shared_codegen_spec+shared_spec
-
-# custom_kernel creates CALL nodes with kernel/program bodies directly in the tensor graph
-tensor_spec = PatternMatcher([
-  # no tags allowed in tensor graph
-  (UPat(GroupOp.All, name="x"), lambda x: None if x.tag is None else False),
-  # codegen: PROGRAM with progressive sources through the pipeline (SINK, DEVICE, LINEAR?, SOURCE?, BINARY?)
-  (UPat(Ops.PROGRAM, dtypes.void, src=(UPat(Ops.SINK), UPat(Ops.DEVICE))), lambda: True),
-  (UPat(Ops.PROGRAM, dtypes.void, src=(UPat(Ops.SINK), UPat(Ops.DEVICE), UPat(Ops.LINEAR))), lambda: True),
-  (UPat(Ops.PROGRAM, dtypes.void, src=(UPat(Ops.SINK), UPat(Ops.DEVICE), UPat(Ops.LINEAR), UPat(Ops.SOURCE))), lambda: True),
-  (UPat(Ops.PROGRAM, dtypes.void, src=(UPat(Ops.SINK), UPat(Ops.DEVICE), UPat(Ops.LINEAR), UPat(Ops.SOURCE), UPat(Ops.BINARY))), lambda: True),
-  # codegen: standalone LINEAR/SOURCE/BINARY
-  (UPat(Ops.LINEAR, dtypes.void), lambda: True),
-  (UPat(Ops.SOURCE, dtypes.void, src=()), lambda: True),
-  (UPat(Ops.BINARY, dtypes.void, src=()), lambda: True),
-])+_tensor_spec+kernel_spec+program_spec
 
 # *** this spec should match all UOps ever created ***
 
