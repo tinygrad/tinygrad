@@ -150,7 +150,7 @@ pm_to_program = PatternMatcher([
 ])
 
 @Context(ALLOW_DEVICE_USAGE=0)
-@track_rewrites(name=lambda *args,ret,**kwargs: TracingKey(ret.name, (ret.function_name, ret.ast), ret=ret), replay=True)
+@track_rewrites(name=lambda ast,*args,ret,**kwargs: TracingKey(ret.name, (ret.function_name, ast), ret=ret), replay=True)
 def get_program(ast:UOp, renderer:Renderer, opts:list[Opt]|None=None) -> ProgramSpec:
   """
   Transform an AST into a ProgramSpec. May trigger BEAM search.
