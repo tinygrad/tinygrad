@@ -26,11 +26,6 @@ def custom_asm_gemm(C:UOp, A:UOp, B:UOp, dname:str, arch:str, wg:int) -> UOp:
 counters = {"used":0, "todos":[]}
 def todo(msg:str) -> bool: counters["todos"].append(msg); return False
 atexit.register(lambda: print(f'asm_gemm: {counters["used"]} used, {len(counters["todos"])} not used'))
-@atexit.register
-def print_todos():
-  from tinygrad.helpers import dedup
-  for t in dedup(counters["todos"]):
-    print(t)
 
 def can_use_asm_gemm(a:Tensor, b:Tensor) -> bool:
   if a.dtype != b.dtype: return todo(f"dtypes must match {a.dtype} != {b.dtype}")
@@ -70,8 +65,8 @@ def custom_gemm_bw(gradient:UOp, kernel:UOp):
   out, a, b = kernel.src
   assert all_same([gradient.device, a.device, b.device, out.device])
   a_t, b_t, g_t = Tensor(a, device=a.device), Tensor(b, device=a.device), Tensor(gradient, device=a.device)
-  # k-sharding: .sum(0) backward expands gradient to (gpus, M, N), but all slices are identical — take one
-  if gradient.shape[0] != a.shape[0]: g_t = g_t[:1]
+  # TODO: this should be cleaned up
+  if isinstance(g_t.device, tuple) and g_t.shape[0] != a_t.shape[0]: g_t = g_t[1:]
   grad_a = (g_t @ b_t.T).uop
   grad_b = (a_t.permute(2, 0, 1).reshape(a_t.shape[2], -1) @ g_t.reshape(-1, g_t.shape[-1])).uop
   return (None, grad_a, grad_b)
