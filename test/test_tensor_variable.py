@@ -1,7 +1,7 @@
 import unittest
 import numpy as np
 from tinygrad import Tensor, Variable, Device
-from tinygrad.renderer.x86 import X86Renderer
+from tinygrad.renderer.isa.x86 import X86Renderer
 
 class TestTensorVariable(unittest.TestCase):
   def test_add_tvar(self):

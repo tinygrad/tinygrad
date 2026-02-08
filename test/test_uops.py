@@ -12,7 +12,7 @@ from tinygrad.engine.schedule import ExecItem
 from tinygrad.device import is_dtype_supported
 from tinygrad.codegen.opt import Opt, OptOps
 from tinygrad.renderer.ptx import PTXRenderer
-from tinygrad.renderer.x86 import X86Renderer
+from tinygrad.renderer.isa.x86 import X86Renderer
 from test.helpers import get_uops
 from dataclasses import replace
 
