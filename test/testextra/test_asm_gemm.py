@@ -5,6 +5,8 @@ from tinygrad.helpers import getenv
 from extra.gemm.asm.cdna.gemm import asm_gemm
 from test.helpers import needs_second_gpu
 
+def is_cdna4(): return getattr(Device[Device.DEFAULT].renderer, "arch", "").startswith("gfx950")
+
 def verify_asm_gemm(batch:int, M:int, N:int, K:int, dtype=dtypes.float16, gpus:int=1) -> None:
   Tensor.manual_seed(0)
   a_rand = Tensor.randn((batch, M, K), dtype=dtypes.float).sub(0.5).cast(dtype)
@@ -34,8 +36,6 @@ def verify_asm_gemm(batch:int, M:int, N:int, K:int, dtype=dtypes.float16, gpus:i
     assert (tst - ref).square().max().float().item() < 1e-6, "forward mismatch"
     assert (a.grad - a_ref.grad).square().max().float().item() < 1e-3, "grad_a mismatch"
     assert (b.grad - b_ref.grad).square().max().float().item() < 1e-3, "grad_b mismatch"
-
-def is_cdna4(): return getattr(Device[Device.DEFAULT].renderer, "arch", "").startswith("gfx950")
 
 # 128x smaller than usual
 # uses the UOp GEMM, runs on non CDNA4 devices and CI
