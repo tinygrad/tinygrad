@@ -5,6 +5,8 @@ from tinygrad.helpers import getenv
 from extra.gemm.asm.cdna.gemm import asm_gemm
 from test.helpers import needs_second_gpu
 
+# On non CDNA4 it will only validate the Tensor.custom_kernel integration
+# Use NULL=1 EMULATE=AMD_CDNA4 to also test the assembly
 def is_cdna4(): return getattr(Device[Device.DEFAULT].renderer, "arch", "").startswith("gfx950")
 
 def verify_asm_gemm(batch:int, M:int, N:int, K:int, dtype=dtypes.float16, gpus:int=1) -> None:
@@ -38,7 +40,7 @@ def verify_asm_gemm(batch:int, M:int, N:int, K:int, dtype=dtypes.float16, gpus:i
     assert (b.grad - b_ref.grad).square().max().float().item() < 1e-3, "grad_b mismatch"
 
 # 128x smaller than usual
-# uses the UOp GEMM, runs on non CDNA4 devices and CI
+# uses the UOp GEMM, runs on non CDNA4 and CI
 @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
 class TestGemm(unittest.TestCase):
   def setUp(self):
@@ -49,7 +51,7 @@ class TestGemm(unittest.TestCase):
   @needs_second_gpu
   def test_gemm_multi(self): verify_asm_gemm(2, 64, 32, 32, gpus=2)
 
-# uses the Asm GEMM, runs on CDNA4 only for speed reasons
+# uses the Asm GEMM on CDNA4 only for speed reasons
 class TestGemmLarge(unittest.TestCase):
   def setUp(self):
     if not is_cdna4():
