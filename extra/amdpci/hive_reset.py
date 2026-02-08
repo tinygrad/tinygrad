@@ -6,7 +6,7 @@ from tinygrad.runtime.support.am.amdev import AMDev
 
 if __name__ == "__main__":
   gpus = System.pci_scan_bus(0x1002, [(0xffff, [0x74a1, 0x75a0])])
-  pcidevs = [PCIDevice(f"reset:{gpu}", gpu, bars=[0, 2, 5]) for gpu in gpus]
+  pcidevs = [PCIDevice("AM", gpu, bars=[0, 2, 5]) for gpu in gpus]
   amdevs = []
   with Context(DEBUG=2):
     for pcidev in pcidevs:
