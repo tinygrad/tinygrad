@@ -295,8 +295,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
       return input_shapes[0]
 
     # backend ops don't have a shape
-    from tinygrad.renderer.isa.x86 import X86GroupOp
-    if self.op in X86GroupOp.All: return None
+    if self.op not in GroupOp.All: return None
 
     # all Ops must be explicitly handled
     raise NotImplementedError(f"no shape handling for {self.op} with {self.dtype}")
