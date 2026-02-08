@@ -102,8 +102,8 @@ class TestCompiler(unittest.TestCase):
 
 class TestRunAsModule(unittest.TestCase):
   def test_module_runs(self):
-    out = '\n'.join(enumerate_devices_str())
-    self.assertIn("CPU", out) # for sanity check
+    cpu_line = [l for l in enumerate_devices_str() if "CPU" in l][0]
+    self.assertIn("PASS", cpu_line, f"expected CPU to PASS, got: {cpu_line}")
 
 if __name__ == "__main__":
   unittest.main()

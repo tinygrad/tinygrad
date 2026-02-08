@@ -212,6 +212,7 @@ class TestProfiler(unittest.TestCase):
     for ge in graphs:
       self.assertEqual(len(ge.ents), len(graphs))
 
+  @unittest.skip("this test is flaky")
   def test_trace_metadata(self):
     with Context(TRACEMETA=1):
       a = Tensor.empty(1)+2

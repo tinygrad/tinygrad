@@ -1,6 +1,6 @@
 import unittest, operator, math
 from tinygrad import Context, Tensor, dtypes, Device
-from tinygrad.dtype import DType, truncate
+from tinygrad.dtype import DType, truncate, fp8_to_float
 from tinygrad.helpers import CI, EMULATED_DTYPES, getenv
 from tinygrad.tensor import _to_np_dtype
 from tinygrad.device import is_dtype_supported
@@ -59,9 +59,10 @@ def universal_test(a, b, dtype, op):
   # lt and max with nan is undefined in tinygrad
   if op[0] in (operator.lt, Tensor.maximum) and (math.isnan(a) or math.isnan(b)): return
   ta, tb = Tensor([a], dtype=dtype), Tensor([b], dtype=dtype)
-  tensor_value = (op[0](ta, tb)).numpy()
-  numpy_value = op[1](ta.numpy(), tb.numpy())
-  if dtype in dtypes.fp8s: numpy_value = truncate[dtype](numpy_value.item())
+  if dtype in dtypes.fp8s and op[0] not in (operator.lt, operator.eq):
+    tensor_value = fp8_to_float((op[0](ta.realize(), tb.realize())).bitcast(dtypes.uint8).item(), dtype)
+    numpy_value = truncate[dtype](op[1](ta.numpy(), tb.numpy()).item())
+  else: tensor_value, numpy_value = (op[0](ta, tb)).numpy(), op[1](ta.numpy(), tb.numpy())
   if dtype in dtypes.floats:
     if not is_dtype_supported(dtype) or dtype in EMULATED_DTYPES.tolist(dtypes): # denormals are zero
       fe, fm = dtypes.finfo(dtype)
@@ -76,13 +77,14 @@ def universal_test_unary(a, dtype, op):
   # TODO: cos does not match for large input
   if op[0] == Tensor.cos and abs(a) > 30: return
   if op[0] == Tensor.log and a <= 0: return
-  out: Tensor = op[0](ta)
-  tensor_value = out.numpy()
-  numpy_value = op[1](ta.numpy())
   if dtype in dtypes.fp8s:
+    # normals are zero
+    if dtype in EMULATED_DTYPES.tolist(dtypes) and abs(ta.numpy().item()) < 0.015625: return
+    tensor_value = fp8_to_float(op[0](ta.realize()).bitcast(dtypes.uint8).item(), dtype)
+    numpy_value = truncate[dtype](v:=op[1](ta.numpy()).item())
     # cuda cast f32 inf to f8 MAX, amd cast it to nan(E4M3)/inf(E5M2)
-    if math.isinf(numpy_value.item()): return
-    numpy_value = truncate[dtype](numpy_value.item())
+    if math.isinf(v): return
+  else: tensor_value, numpy_value = op[0](ta).numpy(), op[1](ta.numpy())
   if dtype in dtypes.floats:
     atol, rtol = { dtypes.float16:(1e-3, 1e-2), dtypes.bfloat16:(1e-3, 2e-2),
       dtypes.fp8e4m3:(1e-1, 1e-1), dtypes.fp8e5m2: (1.0, 5e-1)}.get(dtype, (1e-6, 1e-5))
@@ -128,14 +130,29 @@ class TestDTypeALU(unittest.TestCase):
   def test_bfloat16(self, a, b, op):
     universal_test(from_storage_scalar(a, dtypes.bfloat16), from_storage_scalar(a, dtypes.bfloat16), dtypes.bfloat16, op)
 
+  @given(ht.bfloat16, ht.bfloat16, strat.sampled_from(binary_operations))
+  @Context(EMULATED_DTYPES="bfloat16")
+  def test_emulated_bfloat16(self, a, b, op):
+    universal_test(from_storage_scalar(a, dtypes.bfloat16), from_storage_scalar(a, dtypes.bfloat16), dtypes.bfloat16, op)
+
   @unittest.skipUnless(is_dtype_supported(dtypes.fp8e4m3), f"no fp8e4m3 on {Device.DEFAULT}")
   @given(ht.fp8e4m3, ht.fp8e4m3, strat.sampled_from(binary_operations))
   def test_fp8e4m3(self, a, b, op):
     universal_test(from_storage_scalar(a, dtypes.fp8e4m3), from_storage_scalar(b, dtypes.fp8e4m3), dtypes.fp8e4m3, op)
 
+  @given(ht.fp8e4m3, ht.fp8e4m3, strat.sampled_from(binary_operations))
+  @Context(EMULATED_DTYPES="fp8e4m3")
+  def test_emulated_fp8e4m3(self, a, b, op):
+    universal_test(from_storage_scalar(a, dtypes.fp8e4m3), from_storage_scalar(b, dtypes.fp8e4m3), dtypes.fp8e4m3, op)
+
   @unittest.skipUnless(is_dtype_supported(dtypes.fp8e5m2), f"no fp8e5m2 on {Device.DEFAULT}")
   @given(ht.fp8e5m2, ht.fp8e5m2, strat.sampled_from(binary_operations))
   def test_fp8e5m2(self, a, b, op):
+    universal_test(from_storage_scalar(a, dtypes.fp8e5m2), from_storage_scalar(b, dtypes.fp8e5m2), dtypes.fp8e5m2, op)
+
+  @given(ht.fp8e5m2, ht.fp8e5m2, strat.sampled_from(binary_operations))
+  @Context(EMULATED_DTYPES="fp8e5m2")
+  def test_emulated_fp8e5m2(self, a, b, op):
     universal_test(from_storage_scalar(a, dtypes.fp8e5m2), from_storage_scalar(b, dtypes.fp8e5m2), dtypes.fp8e5m2, op)
 
   @given(ht.float32, strat.sampled_from(unary_operations))
@@ -153,15 +170,31 @@ class TestDTypeALU(unittest.TestCase):
   @given(ht.bfloat16, strat.sampled_from(unary_operations))
   def test_bfloat16_unary(self, a, op): universal_test_unary(from_storage_scalar(a, dtypes.bfloat16), dtypes.bfloat16, op)
 
+  @given(ht.bfloat16, strat.sampled_from(unary_operations))
+  @Context(EMULATED_DTYPES="bfloat16")
+  def test_emulated_bfloat16_unary(self, a, op): universal_test_unary(from_storage_scalar(a, dtypes.bfloat16), dtypes.bfloat16, op)
+
   @unittest.skipUnless(is_dtype_supported(dtypes.fp8e4m3), f"no fp8e4m3 on {Device.DEFAULT}")
   @given(ht.fp8e4m3, strat.sampled_from(unary_operations))
   def test_fp8e4m3_unary(self, a, op):
     if op[1] == np.reciprocal: assume(from_storage_scalar(a, dtype=dtypes.fp8e4m3) != 0.0)
     universal_test_unary(from_storage_scalar(a, dtype=dtypes.fp8e4m3), dtypes.fp8e4m3, op)
 
+  @given(ht.fp8e4m3, strat.sampled_from(unary_operations))
+  @Context(EMULATED_DTYPES="fp8e4m3")
+  def test_emulated_fp8e4m3_unary(self, a, op):
+    if op[1] == np.reciprocal: assume(from_storage_scalar(a, dtype=dtypes.fp8e4m3) != 0.0)
+    universal_test_unary(from_storage_scalar(a, dtype=dtypes.fp8e4m3), dtypes.fp8e4m3, op)
+
   @unittest.skipUnless(is_dtype_supported(dtypes.fp8e5m2), f"no fp8e5m2 on {Device.DEFAULT}")
   @given(ht.fp8e5m2, strat.sampled_from(unary_operations))
   def test_fp8e5m2_unary(self, a, op):
+    if op[1] == np.reciprocal: assume(from_storage_scalar(a, dtype=dtypes.fp8e5m2) != 0.0)
+    universal_test_unary(from_storage_scalar(a, dtype=dtypes.fp8e5m2), dtypes.fp8e5m2, op)
+
+  @given(ht.fp8e5m2, strat.sampled_from(unary_operations))
+  @Context(EMULATED_DTYPES="fp8e5m2")
+  def test_emulated_fp8e5m2_unary(self, a, op):
     if op[1] == np.reciprocal: assume(from_storage_scalar(a, dtype=dtypes.fp8e5m2) != 0.0)
     universal_test_unary(from_storage_scalar(a, dtype=dtypes.fp8e5m2), dtypes.fp8e5m2, op)
 

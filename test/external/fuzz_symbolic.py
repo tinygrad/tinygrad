@@ -1,3 +1,7 @@
+# NOTE: z3-solver 4.15.4 segfaults (exit code 139) when creating many z3.Context() with complex expressions.
+# Reproduces consistently with seed=74 around iteration 1767. Versions <=4.15.3 are fine.
+# Workaround: reuse a single z3.Context, or pin z3-solver<4.15.4 (see pyproject.toml).
+# To repro: pip install z3-solver==4.15.4.0 && python test/external/fuzz_symbolic.py 74
 import random, operator, sys
 import z3
 from tinygrad import Variable, dtypes

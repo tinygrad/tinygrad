@@ -28,7 +28,7 @@ def custom_matmul(output: UOp, inp: UOp, weight: UOp) -> UOp:
   return store_op.sink(arg=KernelInfo(name=f"fp8_matmul_{inp.shape}x{weight.shape}"))
 
 def custom_matmul_backward(gradient: UOp, kernel: UOp) -> tuple[UOp, UOp]:
-  _, input_uop, weight_uop = kernel.src
+  _, input_uop, weight_uop = kernel.src[1:]
   input_tensor = Tensor(input_uop, device=input_uop.device)
   grad_tensor = Tensor(gradient, device=gradient.device)
   weight_tensor = Tensor(weight_uop, device=weight_uop.device)

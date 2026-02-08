@@ -88,13 +88,13 @@ def simple_qkv_kernel(O:UOp, Q:UOp, K:UOp, V:UOp) -> UOp:
 # **** backward callbacks ****
 
 def backward_gemm(gradient:UOp, kernel:UOp) -> tuple[UOp, UOp]:
-  out, a, b = kernel.src
+  out, a, b = kernel.src[1:]
   grad_a = (Tensor(gradient) @ Tensor(b).T).uop
   grad_b = (Tensor(a).T @ Tensor(gradient)).uop
   return (None, grad_a, grad_b)
 
 def backward_gemm_custom(gradient:UOp, kernel:UOp) -> tuple[UOp, UOp]:
-  out, a, b = kernel.src
+  out, a, b = kernel.src[1:]
   grad_a = Tensor.empty_like(Tensor(a)).custom_kernel(Tensor(gradient), Tensor(b).T, fxn=custom_gemm)[0].uop
   grad_b = Tensor.empty_like(Tensor(b)).custom_kernel(Tensor(a).T, Tensor(gradient), fxn=custom_gemm)[0].uop
   return (None, grad_a, grad_b)
@@ -127,6 +127,14 @@ class TestCustomKernel(unittest.TestCase):
     c = Tensor.custom_kernel(c,a,b, fxn=custom_elementwise_add_kernel)[0]
     out = c.flatten().tolist()
     assert all(x == 2 for x in out), "all 2"
+
+  def test_sharded_add_one(self):
+    # PYTHON backend explicitly checks for OOB access for wrong multi shape regression
+    devs = ("PYTHON:0", "PYTHON:1")
+    a = Tensor.ones(4, 4).contiguous().shard(devs, axis=0)
+    c = Tensor(Tensor.empty(2, 4, device=devs).uop.multi(0), device=devs)
+    c = Tensor.custom_kernel(c, a, fxn=custom_add_one_kernel)[0]
+    assert (c == 2).all().item()
 
   def test_multioutput(self):
     a = Tensor.full((16, 16), 3.).contiguous()
