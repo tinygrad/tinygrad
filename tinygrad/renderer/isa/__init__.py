@@ -1,11 +1,10 @@
 # flake8: noqa: E702
 # allow semicolons to put multiple ops on one line
-# it also doesn't allow overriding of Ops.ADD to X86Ops.ADD
 from tinygrad.uop.ops import Ops, auto
 
 # ***** X86 *****
 
-# NOTE: mypy doesn't allow extending enums even with our meta class, it also doesn't allow overriding i.e. Ops.ADD to X86Ops.ADD
+# NOTE: mypy doesn't allow extending enums even with our wrapper, it also doesn't allow overriding i.e. Ops.ADD to X86Ops.ADD
 # we ignore it in both cases
 class X86Ops(Ops): # type: ignore[misc]
   # NOTE: X86Ops with i suffix are variants that take an immediate, m suffix are variants that can write to memory instead of read from
