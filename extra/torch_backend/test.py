@@ -36,6 +36,25 @@ class TestTorchBackend(unittest.TestCase):
     c = a+b
     np.testing.assert_equal(c.cpu().numpy(), [2,2,2,2])
 
+  def test_torch_compile(self):
+    if device != "tiny": raise unittest.SkipTest("requires tiny backend")
+    from extra.torch_backend.backend import wrap, unwrap
+    from extra.torch_backend.compile_backend import register_tiny_backend
+    register_tiny_backend(wrap, unwrap)
+
+    g = torch.randn(2, 3, device=device)
+    def foo(x):
+      return (torch.sin(x).reshape(-1) + torch.cos(g).reshape(-1)).sum()
+
+    opt = torch.compile(foo, backend="tiny")
+    x1 = torch.randn(2, 3, device=device, requires_grad=True)
+    x2 = x1.detach().clone().requires_grad_(True)
+    y1, y2 = opt(x1), foo(x2)
+    torch.testing.assert_close(y1.cpu(), y2.cpu(), atol=1e-4, rtol=1e-4)
+    y1.backward()
+    y2.backward()
+    torch.testing.assert_close(x1.grad.cpu(), x2.grad.cpu(), atol=1e-4, rtol=1e-4)
+
   def test_expand(self):
     a = torch.Tensor([1,2,3,4]).to(device)
     out = a.reshape(4,1).expand(4,4)

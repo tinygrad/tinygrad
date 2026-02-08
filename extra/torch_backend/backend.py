@@ -13,6 +13,27 @@ from tinygrad.dtype import _from_torch_dtype, _to_torch_dtype
 
 # https://pytorch.org/docs/stable/torch.compiler_ir.html
 
+# torch.compile uses FakeTensorMode for tracing. On the tiny backend, we can end up with Meta tensors whose underlying
+# TensorImpl is already associated with a different Python object, which breaks FakeTensor wrapping. Re-wrapping meta
+# outputs as a fresh view avoids this.
+try:
+  from torch._subclasses.fake_tensor import FakeTensorMode  # type: ignore
+  from torch.utils._pytree import tree_map
+  if not hasattr(FakeTensorMode, "_tiny_patched"):
+    _orig_wrap_meta_outputs = FakeTensorMode.wrap_meta_outputs_with_default_device_logic
+    def _tiny_wrap_meta_outputs(self, r, func, flat_args, device):
+      if not any(isinstance(x, torch.Tensor) and x.device.type == "tiny" for x in flat_args):
+        return _orig_wrap_meta_outputs(self, r, func, flat_args, device)
+      def _fresh(e):
+        if isinstance(e, torch.Tensor) and e.device.type == "meta":
+          return _meta_like(e)
+        return e
+      return _orig_wrap_meta_outputs(self, tree_map(_fresh, r), func, flat_args, device)
+    FakeTensorMode.wrap_meta_outputs_with_default_device_logic = _tiny_wrap_meta_outputs
+    FakeTensorMode._tiny_patched = True
+except ImportError:
+  pass
+
 def _from_torch_device(device: torch.device): return f"{Device.DEFAULT}:{device.index or 0}"
 def _to_torch_device(device: str): return torch.device("tiny", int(device.partition(":")[2] or 0))
 
@@ -47,15 +68,59 @@ torch.utils.rename_privateuse1_backend("tiny")
 torch._register_device_module("tiny", TinyBackend())
 torch.utils.generate_methods_for_privateuse1_backend()
 aten = torch.ops.aten
+from extra.torch_backend.compile_backend import register_tiny_backend
+register_tiny_backend(wrap, unwrap)
 
 # track view relationships for in place operations
 def canonical_base(view: Tensor): return getattr(view, "_view_base", view)
 def derived_views(base: Tensor): return [t for tref in getattr(base, "_views", set()) if (t:=tref()) is not None]
 def unwrap_args(args, kwargs):
   return [unwrap(x) if isinstance(x, torch.Tensor) else x for x in args], {k:unwrap(v) if isinstance(v, torch.Tensor) else v for k,v in kwargs.items()}
-def wrap_view_op(fn):
+def _meta_like(x: torch.Tensor) -> torch.Tensor:
+  size, stride, storage_offset = tuple(x.shape), tuple(x.stride()), x.storage_offset()
+  with torch._C._DisableTorchDispatch():
+    if any(s == 0 for s in size): return torch.empty_strided(size, stride, device="meta", dtype=x.dtype)
+    max_offset = storage_offset
+    for s, st in zip(size, stride): max_offset += (s - 1) * st
+    base = torch.empty((max_offset + 1,), device="meta", dtype=x.dtype)
+    return torch.as_strided(base, size, stride, storage_offset)
+
+# ProxyTensor tracing detaches FakeTensors by redispatching detach and then wrapping the result back into FakeTensor. On
+# the tiny backend, detach can return a Meta tensor whose TensorImpl is still owned by another Python object, which makes
+# FakeTensor wrapping fail. Re-wrapping as a fresh view fixes this.
+try:
+  import torch._subclasses.fake_impls as fake_impls  # type: ignore
+  import torch.fx.experimental.proxy_tensor as proxy_tensor  # type: ignore
+  if not hasattr(proxy_tensor, "_tiny_patched_fast_detach"):
+    def _tiny_fast_detach(fake_mode, x, include_real=False):
+      with fake_impls.no_python_dispatcher(), fake_impls.in_kernel_invocation_manager(fake_mode):
+        out = torch.ops.aten.detach.default(x)
+      if isinstance(out, torch.Tensor) and out.device.type == "meta" and x.device.type == "tiny": out = _meta_like(out)
+      if include_real: return fake_impls.FakeTensor(fake_mode, out, x.device, real_tensor=x.real_tensor)
+      return fake_impls.FakeTensor(fake_mode, out, x.device)
+    fake_impls.fast_detach = _tiny_fast_detach
+    proxy_tensor.fast_detach = _tiny_fast_detach
+    proxy_tensor._tiny_patched_fast_detach = True
+except ImportError:
+  pass
+def _fresh_meta(x: torch.Tensor) -> torch.Tensor:
+  if x.device.type != "meta": return x
+  with torch._C._DisableTorchDispatch():
+    return torch.as_strided(x, tuple(x.shape), tuple(x.stride()), x.storage_offset())
+def wrap_view_op(fn=None, *, meta_op=None):
+  if fn is None: return lambda fn: wrap_view_op(fn, meta_op=meta_op)
   @functools.wraps(fn)
   def _wrap(*args, **kwargs):
+    # Called under FakeTensor/meta tracing: avoid touching tinygrad state.
+    meta = torch._C._meta_in_tls_dispatch_include()
+    fake = any(getattr(x, "fake_mode", None) is not None for x in args)
+    meta_arg = any(isinstance(x, torch.Tensor) and x.device.type == "meta" for x in args)
+    if meta_op is not None and (meta or fake or meta_arg):
+      # FakeTensorMode kernel invocation includes Meta, but PrivateUse1 wins dispatch priority.
+      # Re-dispatch without PrivateUse1 to run PyTorch's meta kernels.
+      guard = torch._C.DispatchKeySet(torch._C.DispatchKey.PrivateUse1)
+      with torch._C._ExcludeDispatchKeyGuard(guard):
+        return meta_op(*args, **kwargs)
     args, kwargs = unwrap_args(args, kwargs)
     ret = fn(*args, **kwargs)
     base = canonical_base(args[0])
@@ -84,7 +149,14 @@ view_ops = {
 # torch 2.10 handles this natively
 if tuple(map(int, torch.__version__.split('.')[:2])) < (2, 10): view_ops.update({"aten.detach": Tensor.detach})
 
-for k,v in view_ops.items(): torch.library.impl(k.replace("aten.", "aten::"), "privateuseone")(wrap_view_op(v))
+def _op_from_key(key: str):
+  name = key.split("aten.", 1)[1]
+  packet, _, overload = name.partition(".")
+  op = getattr(aten, packet)
+  return getattr(op, overload) if overload else op.default
+
+for k,v in view_ops.items():
+  torch.library.impl(k.replace("aten.", "aten::"), "privateuseone")(wrap_view_op(v, meta_op=_op_from_key(k)))
 
 def _get_view_ops(view): return getattr(view, "_view_ops", [])
 
@@ -199,7 +271,7 @@ def index_tensor(x, y):
 @torch.library.impl("aten::_local_scalar_dense", "privateuseone")
 def _local_scalar_dense(tensor): return unwrap(tensor).item()
 
-@wrap_view_op
+@wrap_view_op(meta_op=aten.as_strided.default)
 def _as_strided(tensor:Tensor, size, stride, storage_offset=0):
   base = getattr(tensor, "_as_strided_base", canonical_base(tensor)).flatten()
   if prod(size) == 1: return base[storage_offset].reshape(size)
@@ -286,7 +358,7 @@ def convolution_backward_overrideable(grad_out, input, weight, stride, padding, 
   return tuple([wrap(grads.pop(0)) if m else None for m in output_mask])
 
 @torch.library.impl("aten::slice.Tensor", "privateuseone")
-@wrap_view_op
+@wrap_view_op(meta_op=aten.slice.Tensor)
 def slice_tensor(self, dim=0, start=None, end=None, step=1):
   slices = [slice(None)] * self.ndim
   slices[dim] = slice(start, end, step)
@@ -758,21 +830,53 @@ def native_batch_norm(input, weight, bias, running_mean, running_var, training, 
     out = input_t.batchnorm(weight_t, bias_t, running_mean_t, running_var_t.add(eps).rsqrt())
     return wrap(out), wrap(running_mean_t), wrap(running_var_t.add(eps).rsqrt())
 
+@torch.library.impl("aten::_native_batch_norm_legit", "privateuseone")
+def _native_batch_norm_legit(input, weight, bias, running_mean, running_var, training, momentum, eps):
+  return native_batch_norm(input, weight, bias, running_mean, running_var, training, momentum, eps)
+
+@torch.library.impl("aten::_native_batch_norm_legit_no_training", "privateuseone")
+def _native_batch_norm_legit_no_training(input, weight, bias, running_mean, running_var, momentum, eps):
+  return native_batch_norm(input, weight, bias, running_mean, running_var, False, momentum, eps)
+
+@torch.library.impl("aten::_native_batch_norm_legit_functional", "privateuseone")
+def _native_batch_norm_legit_functional(input, weight, bias, running_mean, running_var, training, momentum, eps):
+  input_t, weight_t, bias_t = unwrap(input), unwrap(weight) if weight is not None else None, unwrap(bias) if bias is not None else None
+  running_mean_t, running_var_t = unwrap(running_mean), unwrap(running_var)
+  if training:
+    batch_var, batch_mean = input_t.var_mean(axis=tuple(x for x in range(input_t.ndim) if x != 1), correction=0)
+    batch_invstd = batch_var.add(eps).rsqrt()
+    out = input_t.batchnorm(weight_t, bias_t, batch_mean, batch_invstd)
+    numel_ratio = input_t.numel() / (input_t.numel() - input_t.shape[1])
+    running_mean_out = (1 - momentum) * running_mean_t + momentum * batch_mean.detach()
+    running_var_out = (1 - momentum) * running_var_t + momentum * numel_ratio * batch_var.detach()
+    return wrap(out), wrap(batch_mean), wrap(batch_invstd), wrap(running_mean_out), wrap(running_var_out)
+  invstd = running_var_t.add(eps).rsqrt()
+  out = input_t.batchnorm(weight_t, bias_t, running_mean_t, invstd)
+  return wrap(out), wrap(running_mean_t), wrap(invstd), wrap(running_mean_t), wrap(running_var_t)
+
 @torch.library.impl("aten::native_batch_norm_backward", "privateuseone")
 def native_batch_norm_backward(grad_out, input, weight, running_mean, running_var, save_mean, save_invstd, train, eps, output_mask):
   grad_out_t, input_t = unwrap(grad_out), unwrap(input)
   weight_t = unwrap(weight) if weight is not None else None
-  save_mean_t = unwrap(save_mean)
-  save_invstd_t = unwrap(save_invstd)
-  out = input_t.batchnorm(weight_t, None, save_mean_t, save_invstd_t)
-  targets = [t for t, m in zip([input_t, weight_t], output_mask[:2]) if t is not None and m]
-  if targets:
-    grads = out.gradient(*targets, gradient=grad_out_t)
-    grad_input = grads.pop(0) if output_mask[0] else None
-    grad_weight = grads.pop(0) if output_mask[1] and weight_t is not None else None
-  else:
-    grad_input, grad_weight = None, None
-  grad_bias = grad_out_t.sum(axis=tuple(x for x in range(grad_out_t.ndim) if x != 1)) if output_mask[2] else None
+  save_mean_t, save_invstd_t = unwrap(save_mean), unwrap(save_invstd)
+  axis = tuple(i for i in range(input_t.ndim) if i != 1)
+  m = 1
+  for i in axis: m *= input_t.shape[i]
+  stats_shape = tuple(input_t.shape[i] if i == 1 else 1 for i in range(input_t.ndim))
+  mean, invstd = save_mean_t.reshape(stats_shape), save_invstd_t.reshape(stats_shape)
+  x_hat = (input_t - mean) * invstd
+
+  grad_input = grad_weight = grad_bias = None
+  if output_mask[0]:
+    dy = grad_out_t if weight_t is None else grad_out_t * weight_t.reshape(stats_shape)
+    if train:
+      sum_dy = dy.sum(axis=axis, keepdim=True)
+      sum_dy_xhat = (dy * x_hat).sum(axis=axis, keepdim=True)
+      grad_input = (dy * m - sum_dy - x_hat * sum_dy_xhat) * (invstd / m)
+    else:
+      grad_input = dy * invstd
+  if output_mask[1] and weight_t is not None: grad_weight = (grad_out_t * x_hat).sum(axis=axis)
+  if output_mask[2]: grad_bias = grad_out_t.sum(axis=axis)
   return (wrap(grad_input) if grad_input is not None else None,
           wrap(grad_weight) if grad_weight is not None else None,
           wrap(grad_bias) if grad_bias is not None else None)
