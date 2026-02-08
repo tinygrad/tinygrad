@@ -800,7 +800,6 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
 
   @property
   def shard_shape(self):
-    # shape of the shard. is this duplicated anywhere?
     if self.axis is None: return self.shape
     return tuple(x//len(self.device) if i == self.axis else x for i,x in enumerate(self.shape))
 

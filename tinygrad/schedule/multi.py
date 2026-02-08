@@ -215,7 +215,7 @@ multi_pm = PatternMatcher([
   (UPat(Ops.ALLREDUCE, src=(UPat(Ops.MULTI, name="multi"), UPat(Ops.DEVICE, name="device")), name="red"),
     lambda multi,device,red: multi.src[0].allreduce(red.arg, device).multi(axis=multi.axis)),
   (UPat(Ops.CALL, src=(UPat(Ops.MULTI, name="multi"), ), name="root", allow_any_len=True), passthrough_multi),
-  # we just remove the MULTI from CALLs with dtypes.void and assume they are handled outside
+  # we just remove the MULTI from CALLs with dtypes.void and assume they are handled by the user for custom kernels
   (UPat(Ops.CALL, dtype=dtypes.void, name="root", custom_early_reject=set([Ops.MULTI])), lambda root:
     UOp(root.op, root.dtype, tuple(x.src[0] if x.op is Ops.MULTI else x for x in root.src), root.arg)),
   (UPat((Ops.CAST, Ops.BITCAST, Ops.CONTIGUOUS, Ops.DETACH, Ops.CONTIGUOUS_BACKWARD),
