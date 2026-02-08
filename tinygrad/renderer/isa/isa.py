@@ -1,7 +1,6 @@
 import itertools, heapq
 from typing import Any
 from collections import defaultdict
-from tinygrad.uop import X86Ops, X86GroupOp
 from tinygrad.renderer import Renderer
 from tinygrad.uop.ops import PatternMatcher, graph_rewrite, UOp, UPat, Ops
 from tinygrad.codegen import line_rewrite
@@ -37,7 +36,7 @@ isel_fixup = PatternMatcher([
 
 # TODO: this will eventually be a proper scheduler
 def isa_linearize(sink:UOp) -> list[UOp]:
-  from tinygrad.renderer.x86 import RSP
+  from tinygrad.renderer.isa.x86 import RSP, X86Ops, X86GroupOp
   # this is a toposort with priority
   lst = list(sink.toposort())
   out_degree:defaultdict[UOp, int] = defaultdict(int)

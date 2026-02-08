@@ -1,9 +1,8 @@
 import unittest
-from tinygrad.renderer.x86 import X86Renderer, RBP, RDI, RSP, RSI, RAX, RDX, XMM, GPR, imm, def_reg
-from tinygrad.uop import X86Ops, Ops
-from tinygrad.uop.ops import UOp
+from tinygrad.uop.ops import UOp, Ops
 from tinygrad.dtype import dtypes
 from tinygrad.helpers import SPEC
+from tinygrad.renderer.isa.x86 import X86Ops, X86Renderer, RBP, RDI, RSP, RSI, RAX, RDX, XMM, GPR, imm, def_reg
 
 @unittest.skipIf(SPEC > 1, "x86 spec not supported in full_spec")
 class TestEncodingsX86(unittest.TestCase):

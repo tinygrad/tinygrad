@@ -1,7 +1,7 @@
 from __future__ import annotations
 import itertools
 from tinygrad.uop.ops import UOp, Ops, PatternMatcher, UPat
-from tinygrad.uop import X86GroupOp
+from tinygrad.renderer.isa import X86GroupOp
 from tinygrad.dtype import dtypes, DType, PtrDType
 from dataclasses import dataclass, field
 

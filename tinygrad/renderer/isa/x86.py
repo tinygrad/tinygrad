@@ -1,9 +1,9 @@
 import sys, struct, functools
 from typing import cast
 from tinygrad.dtype import dtypes, PtrDType, DType, truncate
-from tinygrad.uop import Ops, X86Ops, GroupOp, X86GroupOp
-from tinygrad.uop.ops import UOp, UPat, PatternMatcher
-from tinygrad.renderer.isa import ISARenderer, IselContext
+from tinygrad.uop.ops import Ops, GroupOp, UOp, UPat, PatternMatcher
+from tinygrad.renderer.isa import X86Ops, X86GroupOp
+from tinygrad.renderer.isa.isa import ISARenderer, IselContext
 from tinygrad.codegen.late.regalloc import Register, assign
 from tinygrad.helpers import getenv, CPU_COUNT
 

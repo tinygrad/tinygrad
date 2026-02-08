@@ -8,7 +8,7 @@ from tinygrad.runtime.support.hcq import CLikeArgsState
 from tinygrad.renderer.cstyle import ClangJITRenderer
 from tinygrad.renderer.llvmir import CPULLVMRenderer
 from tinygrad.renderer.nir import LVPRenderer
-from tinygrad.renderer.x86 import X86Renderer
+from tinygrad.renderer.isa.x86 import X86Renderer
 from tinygrad.runtime.support.compiler_cpu import CPULLVMCompiler, X86Compiler
 from tinygrad.runtime.support.elf import jit_loader
 from tinygrad.uop.ops import sint
