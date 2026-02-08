@@ -40,7 +40,7 @@ def isa_linearize(sink:UOp) -> list[UOp]:
   # this is a toposort with priority
   lst = list(sink.toposort())
   out_degree:defaultdict[UOp, int] = defaultdict(int)
-  priorities:dict[UOp, tuple[int, int, Any]] = {}
+  priorities:dict[UOp, tuple[int, int]] = {}
 
   # get consumers and assign priorities
   # NOTE: this requires the lst be locally toposorted
@@ -129,5 +129,3 @@ class ISARenderer(Renderer):
     if DEBUG >= 7: print_uop_asm(lst)
     if SPEC: type_verify(lst, self.isa_spec)
     return lst
-
-# TODO: shared matchers can go here

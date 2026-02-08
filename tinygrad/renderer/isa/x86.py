@@ -124,7 +124,7 @@ def cmp(x:UOp) -> UOp:
 
 # vshufps xmm2, xmm0, xmm1, imm
 # xmm2 selects its lower 2 32 bits from xmm0 and its upper 2 32 bits from xmm1 according to imm
-def vshufps(x:UOp) -> UOp:
+def vshufps(x:UOp) -> UOp|None:
   def _in(i:int) -> UOp: return s.src[0] if (s:=x.src[i]).op is Ops.GEP else s
   if len(x.src) != 4 or _in(0) is not _in(1) or _in(2) is not _in(3): return None
   return UOp(X86Ops.VSHUFPS, x.dtype, (_in(0), _in(2),
@@ -662,7 +662,7 @@ class X86Renderer(ISARenderer):
   def render(self, uops:list[UOp], lower:bool=True) -> str:
     if lower: uops = self.lower(uops[-1])
     targets: set[UOp] = set()
-    target_loc: list[UOp, int] = []
+    target_loc: list[int] = []
     binary = bytearray()
     for u in uops:
       if u.op in (X86Ops.JL, X86Ops.JB, X86Ops.JE, X86Ops.JNE): targets.add(u.src[0])

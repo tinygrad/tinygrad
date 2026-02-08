@@ -71,7 +71,7 @@ def alloc(ctx:RegallocContext, cons:tuple[Register, ...], i:int) -> Register:
     offset = ctx.stack_size + (sz - ctx.stack_size % sz) % sz
     ctx.spills[vreg] = UOp.const(dtypes.int32, offset)
     ctx.stack_size = offset + sz
-  return ctx.live.pop(vreg, reg)
+  return ctx.live.pop(vreg) if vreg is not None else reg
 
 def regalloc(ctx:RegallocContext, x:UOp, i:int) -> tuple[UOp, list[UOp]]:
   nsrc, loads = [], []
