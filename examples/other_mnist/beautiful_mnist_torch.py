@@ -31,32 +31,32 @@ if __name__ == "__main__":
     device = torch.device("tiny")
   else:
     device = torch.device({"METAL":"mps","NV":"cuda"}.get(Device.DEFAULT, "cpu"))
+  data_device = device
   if DEBUG >= 1: print(f"using torch backend {device}")
   X_train, Y_train, X_test, Y_test = mnist()
-  X_train = torch.tensor(X_train.float().numpy(), device=device)
-  Y_train = torch.tensor(Y_train.cast(dtypes.int64).numpy(), device=device)
-  X_test = torch.tensor(X_test.float().numpy(), device=device)
-  Y_test = torch.tensor(Y_test.cast(dtypes.int64).numpy(), device=device)
+  X_train = torch.tensor(X_train.float().numpy(), device=data_device)
+  Y_train = torch.tensor(Y_train.cast(dtypes.int64).numpy(), device=data_device)
+  X_test = torch.tensor(X_test.float().numpy(), device=data_device)
+  Y_test = torch.tensor(Y_test.cast(dtypes.int64).numpy(), device=data_device)
 
   if getenv("TORCHVIZ"): torch.cuda.memory._record_memory_history()
   model = Model().to(device)
+  if getenv("TINY_BACKEND"): model = torch.compile(model, backend="tiny")
   optimizer = optim.Adam(model.parameters(), 1e-3)
 
   loss_fn = nn.CrossEntropyLoss()
-  #@torch.compile
-  def step(samples):
+  def forward(samples):
     X,Y = X_train[samples], Y_train[samples]
     out = model(X)
     loss = loss_fn(out, Y)
-    optimizer.zero_grad()
-    loss.backward()
-    optimizer.step()
     return loss
-
   test_acc = float('nan')
   for i in (t:=trange(getenv("STEPS", 70))):
     samples = torch.randint(0, X_train.shape[0], (512,))  # putting this in JIT didn't work well
-    loss = step(samples)
+    optimizer.zero_grad()
+    loss = forward(samples)
+    loss.backward()
+    optimizer.step()
     if i%10 == 9: test_acc = ((model(X_test).argmax(axis=-1) == Y_test).sum() * 100 / X_test.shape[0]).item()
     t.set_description(f"loss: {loss.item():6.2f} test_accuracy: {test_acc:5.2f}%")
 

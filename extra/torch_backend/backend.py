@@ -2,7 +2,7 @@
 # A001 Variable `input` is shadowing a Python builtin
 # A002 Function argument `input` is shadowing a Python builtin
 # A006 Lambda argument `input` is shadowing a Python builtin
-from tinygrad import Tensor, dtypes, Device
+from tinygrad import Tensor, dtypes, Device, TinyJit
 from tinygrad.uop.ops import Ops
 from tinygrad.helpers import getenv, prod, strides_for_shape, argfix
 import torch.lib
@@ -12,6 +12,21 @@ torch.autograd.grad_mode.set_multithreading_enabled(False)
 from tinygrad.dtype import _from_torch_dtype, _to_torch_dtype
 
 # https://pytorch.org/docs/stable/torch.compiler_ir.html
+
+try:
+  from torch._subclasses.fake_tensor import FakeTensorMode
+  _orig_from_tensor = FakeTensorMode.from_tensor
+  def _from_tensor(self, tensor, **kwargs):
+    try: return _orig_from_tensor(self, tensor, **kwargs)
+    except NotImplementedError as e:
+      if "OpaqueTensorImpl" not in str(e): raise
+      meta = torch.empty_strided(tensor.size(), tensor.stride(), device="meta", dtype=tensor.dtype)
+      return _orig_from_tensor(self, meta, **kwargs)
+  if not getattr(FakeTensorMode.from_tensor, "_tinygrad_patched", False):
+    FakeTensorMode.from_tensor = _from_tensor
+    FakeTensorMode.from_tensor._tinygrad_patched = True
+except Exception:
+  pass
 
 def _from_torch_device(device: torch.device): return f"{Device.DEFAULT}:{device.index or 0}"
 def _to_torch_device(device: str): return torch.device("tiny", int(device.partition(":")[2] or 0))
@@ -741,8 +756,7 @@ if TORCH_DEBUG:
 
 # this implementation is needed to allow the batchnorm kernels to fuse in e.g. mnist training
 # aten::native_batch_norm does more than Tensor.batchnorm
-@torch.library.impl("aten::native_batch_norm", "privateuseone")
-def native_batch_norm(input, weight, bias, running_mean, running_var, training, momentum, eps):
+def _native_batch_norm_impl(input, weight, bias, running_mean, running_var, training, momentum, eps):
   input_t, weight_t, bias_t = unwrap(input), unwrap(weight) if weight is not None else None, unwrap(bias) if bias is not None else None
   running_mean_t, running_var_t = unwrap(running_mean) if running_mean is not None else None, unwrap(running_var) if running_var is not None else None
   if training:
@@ -757,6 +771,16 @@ def native_batch_norm(input, weight, bias, running_mean, running_var, training, 
   else:
     out = input_t.batchnorm(weight_t, bias_t, running_mean_t, running_var_t.add(eps).rsqrt())
     return wrap(out), wrap(running_mean_t), wrap(running_var_t.add(eps).rsqrt())
+
+@torch.library.impl("aten::native_batch_norm", "privateuseone")
+def native_batch_norm(input, weight, bias, running_mean, running_var, training, momentum, eps):
+  return _native_batch_norm_impl(input, weight, bias, running_mean, running_var, training, momentum, eps)
+
+@torch.library.impl("aten::_native_batch_norm_legit", "privateuseone")
+def _native_batch_norm_legit(*args, **kwargs): return _native_batch_norm_impl(*args, **kwargs)
+
+@torch.library.impl("aten::_native_batch_norm_legit", "AutogradPrivateUse1")
+def _native_batch_norm_legit_autograd(*args, **kwargs): return _native_batch_norm_impl(*args, **kwargs)
 
 @torch.library.impl("aten::native_batch_norm_backward", "privateuseone")
 def native_batch_norm_backward(grad_out, input, weight, running_mean, running_var, save_mean, save_invstd, train, eps, output_mask):
@@ -795,3 +819,27 @@ def _pad_circular(self, padding): return _PadCircular.apply(self, padding)
 
 @torch.library.impl("aten::_pad_circular", "AutogradPrivateUse1")
 def _pad_circular_autograd(self, padding): return _PadCircular.apply(self, padding)
+
+# torch.compile backend
+from torch._dynamo.backends.registry import register_backend
+from torch._functorch.aot_autograd import aot_module_simplified
+@register_backend
+def tiny(gm:torch.fx.GraphModule, sample_inputs):
+  def my_compiler(gm:torch.fx.GraphModule, sample_inputs):
+    @TinyJit
+    def tiny_function(*args:Tensor):
+      outs = gm(*[wrap(x) for x in args])
+      if isinstance(outs, torch.Tensor): outs = (outs,)
+      outs = tuple(unwrap(x) for x in outs)
+      for x in outs: x.realize()
+      return outs
+    def torch_function(*args:torch.Tensor):
+      tiny_args = []
+      for x in args:
+        if not x.is_tiny:
+          if x.requires_grad: raise RuntimeError("tiny backend requires tiny tensors for grad inputs")
+          x = x.to("tiny")
+        tiny_args.append(unwrap(x))
+      return tuple(wrap(x) for x in tiny_function(*tiny_args))
+    return torch_function
+  return aot_module_simplified(gm, sample_inputs, decompositions={}, fw_compiler=my_compiler)
