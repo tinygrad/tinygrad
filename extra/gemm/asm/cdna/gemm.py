@@ -65,8 +65,8 @@ def custom_gemm_bw(gradient:UOp, kernel:UOp):
   out, a, b = kernel.src
   assert all_same([gradient.device, a.device, b.device, out.device])
   a_t, b_t, g_t = Tensor(a, device=a.device), Tensor(b, device=a.device), Tensor(gradient, device=a.device)
-  # TODO: this should be cleaned up
-  if isinstance(g_t.device, tuple) and g_t.shape[0] != a_t.shape[0]: g_t = g_t[:1]
+  # TODO: this needs to be cleaned up and done properly, the batch dim of grad and a multi need to align
+  g_t = g_t[:a.shape[0]]
   grad_a = (g_t @ b_t.T).uop
   grad_b = (a_t.permute(2, 0, 1).reshape(a_t.shape[2], -1) @ g_t.reshape(-1, g_t.shape[-1])).uop
   return (None, grad_a, grad_b)
