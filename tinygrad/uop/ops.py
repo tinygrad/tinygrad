@@ -798,6 +798,12 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
 
   # *** uop high level syntactic sugar ***
 
+  @property
+  def shard_shape(self):
+    # shape of the shard. is this duplicated anywhere?
+    if self.axis is None: return self.shape
+    return tuple(x//len(self.device) if i == self.axis else x for i,x in enumerate(self.shape))
+
   @staticmethod
   def placeholder(shape:tuple[int, ...], dtype:DType, slot:int, addrspace=AddrSpace.GLOBAL):
     lookup = {AddrSpace.GLOBAL: Ops.PARAM, AddrSpace.LOCAL: Ops.DEFINE_LOCAL, AddrSpace.REG: Ops.DEFINE_REG}
@@ -806,7 +812,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     return ret
   def placeholder_like(self, slot:int):
     assert all_int(self.shape), "no placeholder-like on symbolic shape"
-    return UOp.placeholder(self.shape, self.dtype, slot)
+    return UOp.placeholder(self.shard_shape, self.dtype, slot)
 
   # set is store+end+after
   def set(self:UOp, val:UOp|ConstType, end:UOp|tuple[UOp, ...]|list[UOp]=()) -> UOp:

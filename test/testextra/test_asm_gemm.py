@@ -1,7 +1,7 @@
 import unittest
 from tinygrad import Tensor, Device, dtypes, Context
 from tinygrad.device import is_dtype_supported
-from tinygrad.helpers import getenv, CI
+from tinygrad.helpers import getenv
 from extra.gemm.asm.cdna.gemm import asm_gemm
 from test.helpers import needs_second_gpu
 
@@ -31,7 +31,8 @@ def verify_asm_gemm(batch:int, M:int, N:int, K:int, dtype=dtypes.float16, gpus:i
     assert (a.grad - a_ref.grad).square().max().float().item() < 1e-3, "grad_a mismatch"
     assert (b.grad - b_ref.grad).square().max().float().item() < 1e-3, "grad_b mismatch"
 
-SCALE = 128 if CI else 1
+# 128x smaller than usual
+SCALE = 128
 
 @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
 class TestGemm(unittest.TestCase):
