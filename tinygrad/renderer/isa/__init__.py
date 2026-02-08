@@ -1,14 +1,16 @@
 # flake8: noqa: E702
 # allow semicolons to put multiple ops on one line
+# it also doesn't allow overriding of Ops.ADD to X86Ops.ADD
 from tinygrad.uop.ops import Ops, auto
 
 # ***** X86 *****
 
-# NOTE: mypy doesn't allow extending enums even though our meta class does, so we ignore it here
-class X86Ops(Ops): # type: ignore
+# NOTE: mypy doesn't allow extending enums even with our meta class, it also doesn't allow overriding i.e. Ops.ADD to X86Ops.ADD
+# we ignore it in both cases
+class X86Ops(Ops): # type: ignore[misc]
   # NOTE: X86Ops with i suffix are variants that take an immediate, m suffix are variants that can write to memory instead of read from
   # register, not an instruction. FRAME_INDEX is used when the function arg is on the stack and is rewritten to IMM when stack size is known
-  DEFINE_REG = auto(); FRAME_INDEX = auto()
+  DEFINE_REG = auto(); FRAME_INDEX = auto() # type: ignore[misc]
   # const
   IMM = auto()
   # index
@@ -47,12 +49,12 @@ class X86Ops(Ops): # type: ignore
   VPBROADCASTB = auto(); VPBROADCASTW = auto(); VPBROADCASTD = auto(); VPBROADCASTQ = auto()
   VBROADCASTSS = auto() # TODO: VBROADCASTSD is ymm only, add once they are supported
   # int division
-  IDIV = auto(); DIV = auto()
+  IDIV = auto(); DIV = auto() # type: ignore[misc]
   CBW = auto(); CWD = auto(); CDQ = auto(); CQO = auto()
   # int binary
-  ADD = auto(); ADDi = auto(); SUB = auto(); SUBi = auto(); IMUL = auto(); IMULi = auto()
-  AND = auto(); ANDi = auto(); XOR = auto(); XORi = auto(); OR = auto(); ORi = auto()
-  SHL = auto(); SHLi = auto(); SHR = auto(); SHRi = auto(); SAR = auto(); SARi = auto(); CMP = auto(); CMPi = auto()
+  ADD = auto(); ADDi = auto(); SUB = auto(); SUBi = auto(); IMUL = auto(); IMULi = auto() # type: ignore[misc]
+  AND = auto(); ANDi = auto(); XOR = auto(); XORi = auto(); OR = auto(); ORi = auto() # type: ignore[misc]
+  SHL = auto(); SHLi = auto(); SHR = auto(); SHRi = auto(); SAR = auto(); SARi = auto(); CMP = auto(); CMPi = auto() # type: ignore[misc]
   # float unary (sometimes not unary)
   VROUNDSS = auto(); VROUNDSD = auto(); VROUNDPS = auto(); VROUNDPD = auto()
   VSQRTSS = auto(); VSQRTSD = auto(); VSQRTPS = auto(); VSQRTPD = auto()
