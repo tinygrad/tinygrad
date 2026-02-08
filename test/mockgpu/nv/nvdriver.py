@@ -130,15 +130,18 @@ class NVDriver(VirtDriver):
       struct.hObjectNew = self._alloc_handle()
       self.object_by_handle[struct.hObjectNew] = NVContextShare(self.object_by_handle[struct.hObjectParent])
     elif struct.hClass == nv_gpu.AMPERE_CHANNEL_GPFIFO_A:
-      assert struct.hObjectParent in self.object_by_handle and isinstance(self.object_by_handle[struct.hObjectParent], NVChannelGroup)
+      parent = self.object_by_handle.get(struct.hObjectParent)
+      assert parent is not None and isinstance(parent, (NVChannelGroup, NVGPU))
       struct.hObjectNew = self._alloc_handle()
       params = nv_gpu.NV_CHANNELGPFIFO_ALLOCATION_PARAMETERS.from_address(params_ptr)
-      gpu = self.object_by_handle[struct.hObjectParent].device
+      gpu = parent.device if isinstance(parent, NVChannelGroup) else parent
       gpfifo_token = gpu.add_gpfifo(params.gpFifoOffset, params.gpFifoEntries)
       self.object_by_handle[struct.hObjectNew] = NVGPFIFO(gpu, gpfifo_token)
-    elif struct.hClass == nv_gpu.AMPERE_DMA_COPY_B or struct.hClass == nv_gpu.ADA_COMPUTE_A:
+    elif struct.hClass in (nv_gpu.AMPERE_DMA_COPY_B, nv_gpu.ADA_COMPUTE_A, nv_gpu.NVC9B0_VIDEO_DECODER, nv_gpu.NVCFB0_VIDEO_DECODER):
       assert struct.hObjectParent in self.object_by_handle and isinstance(self.object_by_handle[struct.hObjectParent], NVGPFIFO)
       struct.hObjectNew = self._alloc_handle()
+      gpfifo = self.object_by_handle[struct.hObjectParent]
+      gpfifo.device.queues[gpfifo.token].bound_engines.add(struct.hClass)
     elif struct.hClass == nv_gpu.GT200_DEBUGGER:
       struct.hObjectNew = self._alloc_handle()
     elif struct.hClass == nv_gpu.MAXWELL_PROFILER_DEVICE:
@@ -194,7 +197,7 @@ class NVDriver(VirtDriver):
       params = nv_gpu.NVC36F_CTRL_CMD_GPFIFO_GET_WORK_SUBMIT_TOKEN_PARAMS.from_address(params_ptr)
       gpu_fifo = self.object_by_handle[struct.hObject]
       params.workSubmitToken = gpu_fifo.token
-    elif struct.cmd == nv_gpu.NVA06C_CTRL_CMD_GPFIFO_SCHEDULE: pass
+    elif struct.cmd in (nv_gpu.NVA06C_CTRL_CMD_GPFIFO_SCHEDULE, nv_gpu.NVA06F_CTRL_CMD_BIND, nv_gpu.NVA06F_CTRL_CMD_GPFIFO_SCHEDULE): pass
     elif struct.cmd == nv_gpu.NV2080_CTRL_CMD_PERF_BOOST: pass
     elif struct.cmd == nv_gpu.NV2080_CTRL_CMD_FB_FLUSH_GPU_CACHE: pass
     elif struct.cmd == nv_gpu.NV83DE_CTRL_CMD_DEBUG_READ_ALL_SM_ERROR_STATES:
