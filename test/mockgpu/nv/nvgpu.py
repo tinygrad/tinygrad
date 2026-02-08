@@ -26,6 +26,7 @@ class GPFIFO:
     self.gpfifo = to_mv(self.base, self.entries_cnt * 8).cast("Q")
     self.ctrl = nv_gpu.AmpereAControlGPFifo.from_address(self.base + self.entries_cnt * 8)
     self.state = {}
+    self.bound_engines: set[int] = set()
 
     # Buf exec state
     self.buf = None
@@ -115,9 +116,11 @@ class GPFIFO:
   def execute_cmd(self, cmd) -> SchedResult:
     if cmd == nv_gpu.NVC56F_SEM_EXECUTE: return self._exec_signal()
     elif cmd == nv_gpu.NVC6C0_LAUNCH_DMA: return self._exec_nvc6c0_dma()
-    elif cmd == nv_gpu.NVC6B5_LAUNCH_DMA: return self._exec_nvc6b5_dma()
+    elif cmd == nv_gpu.NVC6B5_LAUNCH_DMA: # NOTE: NVC6B5_LAUNCH_DMA == NVC9B0_EXECUTE == 0x300
+      return self._exec_vid_decode() if self.bound_engines & {nv_gpu.NVC9B0_VIDEO_DECODER, nv_gpu.NVCFB0_VIDEO_DECODER} else self._exec_nvc6b5_dma()
     elif cmd == nv_gpu.NVC6C0_SEND_SIGNALING_PCAS2_B: return self._exec_pcas2()
     elif cmd == 0x0320: return self._exec_load_inline_qmd() # NVC6C0_LOAD_INLINE_QMD_DATA
+    elif cmd == nv_gpu.NVC9B0_SEMAPHORE_D: return self._exec_vid_semaphore()
     else: self.state[cmd] = self._next_dword() # just state update
     return SchedResult.CONT
 
@@ -134,6 +137,27 @@ class GPFIFO:
       mval = to_mv(signal, 8).cast('Q')[0]
       return SchedResult.CONT if mval >= val else SchedResult.YIELD
     else: raise RuntimeError(f"Unsupported type={typ} in exec wait/signal")
+    return SchedResult.CONT
+
+  def _exec_vid_decode(self) -> SchedResult:
+    self._next_dword() # consume execute flags
+    # validate that all required decode state was set up correctly
+    assert self._state(nv_gpu.NVC9B0_SET_APPLICATION_ID) == nv_gpu.NVC9B0_SET_APPLICATION_ID_ID_HEVC
+    pic_desc_addr = self._state(nv_gpu.NVC9B0_SET_DRV_PIC_SETUP_OFFSET) << 8
+    pic = nv_gpu.nvdec_hevc_pic_s.from_address(pic_desc_addr)
+    assert pic.stream_len > 0 and pic.pic_width_in_luma_samples > 0 and pic.pic_height_in_luma_samples > 0
+    assert self._state(nv_gpu.NVC9B0_SET_IN_BUF_BASE_OFFSET) != 0
+    assert self._state(nv_gpu.NVC9B0_SET_COLOC_DATA_OFFSET) != 0
+    assert self._state(nv_gpu.NVC9B0_SET_NVDEC_STATUS_OFFSET) != 0
+    assert self._state(nv_gpu.NVC9B0_HEVC_SET_FILTER_BUFFER_OFFSET) != 0
+    return SchedResult.CONT
+
+  def _exec_vid_semaphore(self) -> SchedResult:
+    signal = self._state64(nv_gpu.NVC9B0_SEMAPHORE_A)
+    val = self._state(nv_gpu.NVC9B0_SEMAPHORE_C)
+    self._next_dword() # flags
+    to_mv(signal, 8).cast('Q')[0] = val
+    to_mv(signal + 8, 8).cast('Q')[0] = int(time.perf_counter() * 1e9)
     return SchedResult.CONT
 
   def _exec_load_inline_qmd(self):

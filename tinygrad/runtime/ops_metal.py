@@ -51,7 +51,7 @@ class MetalDevice(Compiled):
       st, en = decimal.Decimal(cbuf.GPUStartTime()) * 1000000, decimal.Decimal(cbuf.GPUEndTime()) * 1000000
       # NOTE: command buffers from MetalGraph are not profiled here
       if PROFILE and (lb:=cmdbuf_label(cbuf)) is not None and not lb.startswith("batched"):
-        Compiled.profile_events += [ProfileRangeEvent(self.device, lb, st, en, is_copy=lb.startswith("COPY"))]
+        Compiled.profile_events += [ProfileRangeEvent(self.device, lb, st, en)]
     self.mtl_buffers_in_flight.clear()
 
 def metal_src_to_library(device:MetalDevice, src:str) -> metal.MTLLibrary:
@@ -191,7 +191,7 @@ class MetalAllocator(LRUAllocator[MetalDevice]):
     # There is no real metal multidevice support for now, so transfer is used only for tests.
     src_dev.synchronize()
   def _cp_mv(self, dst, src, prof_desc):
-    with cpu_profile(prof_desc, self.dev.device, is_copy=True): dst[:] = src
+    with cpu_profile(prof_desc, self.dev.device): dst[:] = src
   def _as_buffer(self, src:MetalBuffer) -> memoryview:
     self.dev.synchronize()
     return to_mv(src.buf.contents(), src.size + src.offset)[src.offset:]

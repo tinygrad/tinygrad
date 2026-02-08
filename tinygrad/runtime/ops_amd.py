@@ -8,7 +8,7 @@ from tinygrad.runtime.support.hcq import MMIOInterface, BumpAllocator, hcq_filte
 from tinygrad.uop.ops import sint
 from tinygrad.device import Compiled, DMAFdRef, BufferSpec, CompilerSet, CompilerPair
 from tinygrad.helpers import getenv, round_up, data64_le, DEBUG, PROFILE, ProfileEvent, lo32, hi32, colored, prod, ContextVar
-from tinygrad.helpers import VIZ, AMD_CC, AMD_LLVM, ceildiv
+from tinygrad.helpers import VIZ, AMD_CC, AMD_LLVM, ceildiv, unwrap
 from tinygrad.renderer.cstyle import AMDHIPRenderer, AMDHIPCCRenderer
 from tinygrad.renderer.llvmir import AMDLLVMRenderer
 from tinygrad.runtime.autogen import kfd, hsa, pci, sqtt, amdgpu_kd, amdgpu_drm
@@ -703,12 +703,14 @@ class KFDIface:
     # Event to wait for queues completion
     self.dev.queue_event = kfd.AMDKFD_IOC_CREATE_EVENT(KFDIface.kfd, event_type=kfd.KFD_IOC_EVENT_SIGNAL, auto_reset=1)
     self.dev.queue_event_mailbox_ptr = KFDIface.event_page.va_addr + self.dev.queue_event.event_slot_index * 8
-    self.queue_event_arr = (kfd.struct_kfd_event_data)(event_id=self.dev.queue_event.event_id)
-    self.queue_event_arr_ptr = ctypes.addressof(self.queue_event_arr)
 
     # OS events to collect memory and hardware faults
     self.mem_fault_event = kfd.AMDKFD_IOC_CREATE_EVENT(KFDIface.kfd, event_type=kfd.KFD_IOC_EVENT_MEMORY)
     self.hw_fault_event = kfd.AMDKFD_IOC_CREATE_EVENT(KFDIface.kfd, event_type=kfd.KFD_IOC_EVENT_HW_EXCEPTION)
+
+    self.queue_event_arr = (kfd.struct_kfd_event_data * 3)(kfd.struct_kfd_event_data(event_id=self.dev.queue_event.event_id),
+      kfd.struct_kfd_event_data(event_id=self.mem_fault_event.event_id), kfd.struct_kfd_event_data(event_id=self.hw_fault_event.event_id))
+    self.queue_event_arr_ptr = ctypes.addressof(self.queue_event_arr)
 
   def alloc(self, size:int, host=False, uncached=False, cpu_access=False, contiguous=False, cpu_addr=None) -> HCQBuffer:
     flags = kfd.KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE | kfd.KFD_IOC_ALLOC_MEM_FLAGS_EXECUTABLE | kfd.KFD_IOC_ALLOC_MEM_FLAGS_NO_SUBSTITUTE
@@ -778,18 +780,20 @@ class KFDIface:
                         doorbell=MMIOInterface(self.doorbells + queue.doorbell_offset - self.doorbells_base, 8, fmt='Q'))
 
   def sleep(self, tm:int):
-    kfd.AMDKFD_IOC_WAIT_EVENTS(KFDIface.kfd, events_ptr=self.queue_event_arr_ptr, num_events=1, wait_for_all=1, timeout=tm)
+    kfd.AMDKFD_IOC_WAIT_EVENTS(KFDIface.kfd, events_ptr=self.queue_event_arr_ptr, num_events=3, wait_for_all=0, timeout=tm)
+    if self.queue_event_arr[1].memory_exception_data.gpu_id or self.queue_event_arr[2].hw_exception_data.gpu_id: raise RuntimeError("Device fault")
 
   def on_device_hang(self):
-    def _collect_str(st): return ' '.join(f'{k[0]}={getattr(st, k[0])}' for k in st._real_fields_)
+    def _str(st): return ' '.join(f'{k[0]}={getattr(st, k[0])}' for k in st._real_fields_)
+
+    # try to collect fault info if not already set from sleep().
+    if not self.queue_event_arr[1].memory_exception_data.gpu_id and not self.queue_event_arr[2].hw_exception_data.gpu_id:
+      with contextlib.suppress(RuntimeError): self.sleep(tm=1)
 
     report = []
-    for evnt in [self.mem_fault_event, self.hw_fault_event]:
-      ev = (kfd.struct_kfd_event_data)(event_id=evnt.event_id)
-      kfd.AMDKFD_IOC_WAIT_EVENTS(KFDIface.kfd, events_ptr=ctypes.addressof(ev), num_events=1, wait_for_all=1)
-      if evnt == self.mem_fault_event and ev.memory_exception_data.gpu_id:
-        report += [f"MMU fault: 0x{ev.memory_exception_data.va:X} | {_collect_str(ev.memory_exception_data.failure)}"]
-      if evnt == self.hw_fault_event and ev.hw_exception_data.gpu_id: report += [f"HW fault: {_collect_str(ev.hw_exception_data)}"]
+    if self.queue_event_arr[1].memory_exception_data.gpu_id:
+      report += [f"MMU fault: 0x{self.queue_event_arr[1].memory_exception_data.va:X} | {_str(self.queue_event_arr[1].memory_exception_data.failure)}"]
+    if self.queue_event_arr[2].hw_exception_data.gpu_id: report += [f"HW fault: {_str(self.queue_event_arr[2].hw_exception_data)}"]
 
     raise RuntimeError("\n".join(report))
 
@@ -955,6 +959,7 @@ class AMDDevice(HCQCompiled):
       ctx_save_restore_size=0 if self.is_am() else wg_data_size + ctl_stack_size, ctl_stack_size=ctl_stack_size, debug_memory_size=debug_memory_size)
 
     self.max_copy_size = 0x40000000 if self.iface.ip_versions[am.SDMA0_HWIP][0] >= 5 else 0x400000
+    self.sdma_queues:dict = {}
     self.has_sdma_queue = self.sdma_queue(0) is not None
 
     compilers = CompilerSet([CompilerPair(functools.partial(AMDHIPRenderer, self.arch), None),
@@ -1018,11 +1023,12 @@ class AMDDevice(HCQCompiled):
             wptr=getattr(hsa.amd_queue_t, 'write_dispatch_id').offset, eop_buffer=eop_buffer, cwsr_buffer=cwsr_buffer,
             ctx_save_restore_size=ctx_save_restore_size, ctl_stack_size=ctl_stack_size, idx=idx))
 
-  @functools.lru_cache(None)
   def sdma_queue(self, idx:int):
     if getenv("AMD_DISABLE_SDMA"): return None
-    with contextlib.suppress(OSError): return self.create_queue(kfd.KFD_IOC_QUEUE_TYPE_SDMA, 0x200 if self.is_usb() else (16 << 20), idx=idx)
-    return None
+    if idx in self.sdma_queues: return self.sdma_queues[idx]
+    with contextlib.suppress(OSError):
+      self.sdma_queues[idx] = self.create_queue(kfd.KFD_IOC_QUEUE_TYPE_SDMA, 0x200 if self.is_usb() else (16 << 20), idx=idx)
+    return self.sdma_queues.get(idx, None)
 
   def _ensure_has_local_memory(self, private_segment_size):
     if self.max_private_segment_size >= private_segment_size: return
@@ -1063,3 +1069,5 @@ class AMDDevice(HCQCompiled):
   def on_device_hang(self): self.iface.on_device_hang()
 
   def device_props(self): return self.iface.props
+
+  def hw_copy_queues(self): return [(f"SDMA:{i}", functools.partial(unwrap(self.hw_copy_queue_t), queue_idx=i)) for i in self.sdma_queues]

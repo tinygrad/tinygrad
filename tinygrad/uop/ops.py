@@ -67,7 +67,8 @@ def consumer_map_from_toposort(lst:Iterable[UOp]):
   ret: dict[UOp, dict[UOp, None]] = {}
   for u in lst:
     ret[u] = {}
-    for s in u.src: ret[s][u] = None
+    for s in u.src:
+      if s in ret: ret[s][u] = None
   return ret
 
 def pretty_print(x:UOp, cache=None, d=0)->str:
@@ -235,9 +236,6 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
       case Ops.REDUCE | Ops.MSTACK | Ops.MSELECT | Ops.DETACH | Ops.CONTIGUOUS | Ops.CONTIGUOUS_BACKWARD | Ops.AFTER | Ops.END | Ops.CALL:
         return self.src[0]._shape
 
-      # ops with custom handling
-      case Ops.KERNEL: return self.arg.ast._shape
-
       # TODO: disallow shape changing bitcast
       case Ops.BITCAST:
         ps = self.src[0]._shape
@@ -287,10 +285,11 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
             raise ValueError(f"invalid type for axis: {axis_arg}")
           return tuple(1 if i in axis_arg else s for i,s in enumerate(ps))
 
+    if self.op is Ops.ASSIGN: return self.src[1]._shape
+
     # elementwise ops keep the shape the same. all inputs with shape must match
-    if self.op in GroupOp.ALU.union({Ops.CAST, Ops.COPY, Ops.ASSIGN, Ops.NOOP, Ops.GROUP, Ops.SINK, Ops.ALLREDUCE, Ops.STORE}):
-      # TODO: remove this hack for 3 op assign
-      input_shapes = [x._shape for x in (self.src[:2] if self.op is Ops.ASSIGN else self.src) if x._shape is not None]
+    if self.op in GroupOp.ALU.union({Ops.CAST, Ops.COPY, Ops.NOOP, Ops.GROUP, Ops.SINK, Ops.ALLREDUCE, Ops.STORE}):
+      input_shapes = [x._shape for x in self.src if x._shape is not None]
       if len(input_shapes) == 0: return None
       if not all_same(input_shapes): raise RuntimeError(f"shape mismatch at {self.op}: {input_shapes}")
       return input_shapes[0]
@@ -310,6 +309,8 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
   def ended_ranges(self):
     if self.op in range_start: return self.src[range_start[self.op]:]
     if self.op is Ops.AFTER: return tuple(flatten([x.ended_ranges for x in self.src[1:]]))
+    # TODO: copy isn't using range properly and isn't ending the range it uses, remove this
+    if self.op in {Ops.COPY, Ops.BUFFER_VIEW}: return self.src[0].ranges
     return ()
 
   # determine what ranges this is in
@@ -364,9 +365,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
   @recursive_property
   def trace_num(self):
     num = next(ucount)
-    # KERNEL also has a UOp in the arg
-    arg = type(self.arg)(self.arg.ast.trace_num, self.arg.metadata) if self.op is Ops.KERNEL else self.arg
-    uop_fields[num] = (self.op, self.dtype, tuple(s.trace_num for s in self.src), arg, self.tag)+((self.metadata,) if TRACEMETA>=2 else ())
+    uop_fields[num] = (self.op, self.dtype, tuple(s.trace_num for s in self.src), self.arg, self.tag)+((self.metadata,) if TRACEMETA>=2 else ())
     return num
 
   # *** uop syntactic sugar ***
@@ -539,6 +538,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
   def base(self) -> UOp:
     if self.op in GroupOp.Movement: return self.src[0].base
     if self.op is Ops.MULTI: return self.src[0].base  # MULTI is really a VIEW
+    if self.op is Ops.DETACH: return self.src[0].base  # DETACH can't change base
     return self
 
   # like gep, but might return an integer
@@ -819,6 +819,8 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     return UOp(Ops.PARAM, dtype, src, arg=slot)
 
   def call(self, *srcs:UOp, grad_fxn:Callable|None=None, metadata:tuple[Metadata, ...]=()) -> UOp:
+    # TODO: reenable this after ENCDEC is fixed
+    #assert len(self.ranges) == 0, f"ranges {self.ranges} are leaking out of the call in {self.pyrender()}"
     return UOp(Ops.CALL, self.dtype, (self,)+srcs, CallInfo(grad_fxn, metadata))
   def custom_kernel(*srcs:UOp, fxn:Callable, grad_fxn:Callable|None=None) -> list[UOp]:
     contig_srcs = tuple(x.contiguous() if x.op is not Ops.AFTER else x for x in srcs)
@@ -1317,6 +1319,9 @@ def _index_to_concrete_int(u:UOp) -> UOp: return graph_rewrite(u.sink(), pm_lowe
 _substitute = PatternMatcher([(UPat(tuple(Ops), name="x"), lambda ctx,x: ctx.get(x,None))])
 _remove_all_tags = PatternMatcher([(UPat(GroupOp.All, name="x"), lambda x: x.replace(tag=None) if x.tag is not None else None)])
 
+def gate_kernel_sink(x:UOp) -> bool: return not (x.op is Ops.SINK and isinstance(x.arg, KernelInfo))
+pm_gate_kernel_sink = PatternMatcher([(UPat(Ops.SINK, name="sink"), lambda sink: None if gate_kernel_sink(sink) else panic(BottomUpGate))])
+
 def do_unbind(ctx:dict[Variable, int], x:UOp):
   v,i = x.unbind()
   ctx[v] = i
@@ -1414,7 +1419,6 @@ pm_pyrender_extra = PatternMatcher([
 
 # NOTE: you can remove pm_pyrender_extra and it'll still be correct
 pm_pyrender = pm_pyrender_extra+PatternMatcher([
-  (UPat(Ops.KERNEL, name="u"), lambda ctx,u: f"UOp(Ops.KERNEL, src={srcs(ctx,u.src)}, arg=Kernel({ctx[u.arg.ast]}(), {u.arg.metadata}))"),
   (UPat(GroupOp.All, name="u"), lambda ctx,u: f"UOp({u.op}, {u.dtype}, {srcs(ctx,u.src)}"+(f", {repr(u.arg)})" if u.arg is not None else ")")),
 ])
 
@@ -1424,7 +1428,7 @@ def pyrender(ast:UOp) -> str:
   cmap = consumer_map_from_toposort(lst)
   not_rendered = {Ops.CONST, Ops.VCONST, Ops.DEVICE}
   always_rendered = {Ops.PARAM, Ops.LOAD, Ops.SPECIAL, Ops.RANGE, Ops.CONTIGUOUS, Ops.VECTORIZE,
-                     Ops.BUFFER, Ops.COPY, Ops.KERNEL, Ops.WHERE, Ops.END, Ops.ASSIGN}
+                     Ops.BUFFER, Ops.COPY, Ops.CALL, Ops.WHERE, Ops.END, Ops.ASSIGN}
 
   to_render: set[UOp] = {ast}
   for u in lst:
@@ -1447,11 +1451,6 @@ def pyrender(ast:UOp) -> str:
     op_depth = 1 + max([depth[s] for s in u.src], default=0)
     if op_depth > 100: to_render.add(u)
     depth[u] = 0 if u in to_render else op_depth
-    # do the rendering
-    if u.op is Ops.KERNEL:
-      if u.arg.ast not in kernels:
-        kernels[u.arg.ast] = (f"k{len(kernels)}", f"def k{len(kernels)}():\n  " + pyrender(u.arg.ast).replace('\n', '\n  ') + "\n  return ast\n\n")
-      r[u.arg.ast] = kernels[u.arg.ast][0]
     ren = cast(str, pm_pyrender.rewrite(u, ctx=r))
     assert isinstance(ren, str)
     if u.tag is not None: ren += f".rtag({repr(u.tag)})"

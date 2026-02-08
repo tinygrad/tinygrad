@@ -1,0 +1,18 @@
+A command line tool for exploring the VIZ trace.
+
+After running with VIZ=-1, use `PYTHONPATH=. extra/viz/cli.py` to explore the saved trace files.
+
+## Inspect runtime profiling
+
+Use `PYTHONPATH=. extra/viz/cli.py --profile` to list all traced devices.
+
+List top slowest kernels on a device: `--profile --device "AMD"`
+List samples of a kernel on a device: `--profile --device "AMD" --kernel E_3`
+
+## Inspect codegen and PatternMatcher
+
+Use `PYTHONPATH=. extra/viz/cli.py --rewrites` to list all traced kernels.
+
+List all codegen steps for a kernel: `--rewrites --kernel E_3`
+Get source code: `--rewrites --kernel E_3 --select "View Program"`
+Inspect a graph rewrite: `--rewrites --kernel E_3 --select "initial symbolic"`

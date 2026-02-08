@@ -45,7 +45,7 @@ from tinygrad.dtype import dtypes
 uops_colors = {Ops.LOAD: "#ffc0c0", Ops.STORE: "#87CEEB", Ops.CONST: "#e0e0e0", Ops.VCONST: "#e0e0e0", Ops.REDUCE: "#FF5B5B",
                Ops.PARAM:"#cb9037", **{x:"#f2cb91" for x in {Ops.DEFINE_LOCAL, Ops.DEFINE_REG}}, Ops.REDUCE_AXIS: "#FF6B6B",
                Ops.RANGE: "#c8a0e0", Ops.ASSIGN: "#909090", Ops.BARRIER: "#ff8080", Ops.IF: "#c8b0c0", Ops.SPECIAL: "#c0c0ff",
-               Ops.INDEX: "#cef263", Ops.WMMA: "#efefc0", Ops.MULTI: "#f6ccff", Ops.KERNEL: "#3e7f55", Ops.CUSTOM_KERNEL: "#3ebf55",
+               Ops.INDEX: "#cef263", Ops.WMMA: "#efefc0", Ops.MULTI: "#f6ccff", Ops.CUSTOM_KERNEL: "#3ebf55",
                **{x:"#D8F9E4" for x in GroupOp.Movement}, **{x:"#ffffc0" for x in GroupOp.ALU}, Ops.THREEFRY:"#ffff80",
                Ops.BUFFER_VIEW: "#E5EAFF", Ops.BUFFER: "#B0BDFF", Ops.COPY: "#a040a0", Ops.ENCDEC: "#bf71b6",
                Ops.CALL: "#00B7C8", Ops.PARAM: "#14686F",
@@ -106,9 +106,6 @@ def uop_to_json(x:UOp) -> dict[int, dict]:
     if u in excluded: continue
     argst = codecs.decode(str(u.arg), "unicode_escape")
     if u.op in GroupOp.Movement: argst = (mask_to_str if u.op in {Ops.SHRINK, Ops.PAD} else shape_to_str)(u.marg)
-    if u.op is Ops.KERNEL:
-      ast_str = f"SINK{tuple(s.op for s in u.arg.ast.src)}" if u.arg.ast.op is Ops.SINK else repr(u.arg.ast.op)
-      argst = f"<Kernel {len(list(u.arg.ast.toposort()))} {ast_str} {[str(m) for m in u.arg.metadata]}>"
     if u.op is Ops.BINARY: argst = f"<{len(u.arg)} bytes>"
     label = f"{str(u.op).split('.')[1]}{(chr(10)+word_wrap(argst.replace(':', ''))) if u.arg is not None else ''}"
     if u.dtype != dtypes.void: label += f"\n{u.dtype}"
@@ -130,9 +127,9 @@ def uop_to_json(x:UOp) -> dict[int, dict]:
         label += "\n"+' '.join([f"{range_str(s, color=True)}({s.vmax+1})" for s in trngs])
     except Exception:
       label += "\n<ISSUE GETTING LABEL>"
-    if (ref:=ref_map.get(u.arg.ast) if u.op is Ops.KERNEL else None) is not None: label += f"\ncodegen@{ctxs[ref]['name']}"
+    if (ref:=ref_map.get(u.src[0]) if u.op is Ops.CALL else None) is not None: label += f"\ncodegen@{ctxs[ref]['name']}"
     # NOTE: kernel already has metadata in arg
-    if TRACEMETA >= 2 and u.metadata is not None and u.op is not Ops.KERNEL: label += "\n"+str(u.metadata)
+    if TRACEMETA >= 2 and u.metadata is not None and u.op is not Ops.CALL: label += "\n"+str(u.metadata)
     graph[id(u)] = {"label":label, "src":[(i,id(x)) for i,x in enumerate(u.src) if x not in excluded], "color":uops_colors.get(u.op, "#ffffff"),
                     "ref":ref, "tag":repr(u.tag) if u.tag is not None else None}
   return graph
@@ -140,12 +137,10 @@ def uop_to_json(x:UOp) -> dict[int, dict]:
 @functools.cache
 def _reconstruct(a:int):
   op, dtype, src, arg, *rest = trace.uop_fields[a]
-  arg = type(arg)(_reconstruct(arg.ast), arg.metadata) if op is Ops.KERNEL else arg
   return UOp(op, dtype, tuple(_reconstruct(s) for s in src), arg, *rest)
 
 def get_full_rewrite(ctx:TrackedGraphRewrite) -> Generator[GraphRewriteDetails, None, None]:
   next_sink = _reconstruct(ctx.sink)
-  # in the schedule graph we don't show indexing ops (unless it's in a kernel AST or rewriting dtypes.index sink)
   yield {"graph":uop_to_json(next_sink), "uop":pystr(next_sink), "change":None, "diff":None, "upat":None}
   replaces: dict[UOp, UOp] = {}
   for u0_num,u1_num,upat_loc,dur in tqdm(ctx.matches):
@@ -168,19 +163,19 @@ def option(s:int|None) -> int: return 0 if s is None else s+1
 
 # Profiler API
 
-device_ts_diffs:dict[str, tuple[Decimal, Decimal]] = {}
-def cpu_ts_diff(device:str, thread=0) -> Decimal: return device_ts_diffs.get(device, (Decimal(0),))[thread]
+device_ts_diffs:dict[str, Decimal] = {}
+def cpu_ts_diff(device:str) -> Decimal: return device_ts_diffs.get(device, Decimal(0))
 
-device_props:dict[str, dict] = {}
+amdgpu_targets:dict[str, int] = {}
 
 DevEvent = ProfileRangeEvent|ProfileGraphEntry|ProfilePointEvent
 def flatten_events(profile:list[ProfileEvent]) -> Generator[tuple[Decimal, Decimal, DevEvent], None, None]:
   for e in profile:
-    if isinstance(e, ProfileRangeEvent): yield (e.st+(diff:=cpu_ts_diff(e.device, e.is_copy)), (e.en if e.en is not None else e.st)+diff, e)
+    if isinstance(e, ProfileRangeEvent): yield (e.st+(diff:=cpu_ts_diff(e.device)), (e.en if e.en is not None else e.st)+diff, e)
     elif isinstance(e, ProfilePointEvent): yield (e.ts, e.ts, e)
     elif isinstance(e, ProfileGraphEvent):
       cpu_ts = []
-      for ent in e.ents: cpu_ts += [e.sigs[ent.st_id]+(diff:=cpu_ts_diff(ent.device, ent.is_copy)), e.sigs[ent.en_id]+diff]
+      for ent in e.ents: cpu_ts += [e.sigs[ent.st_id]+(diff:=cpu_ts_diff(ent.device)), e.sigs[ent.en_id]+diff]
       yield (st:=min(cpu_ts)), (et:=max(cpu_ts)), ProfileRangeEvent(f"{e.ents[0].device.split(':')[0]} Graph", f"batched {len(e.ents)}", st, et)
       for i,ent in enumerate(e.ents): yield (cpu_ts[i*2], cpu_ts[i*2+1], ent)
 
@@ -308,7 +303,7 @@ def load_counters(profile:list[ProfileEvent]) -> None:
     if (sqtt:=v.get(ProfileSQTTEvent)):
       for e in sqtt:
         if e.itrace: steps.append(create_step(f"PKTS SE:{e.se}", (f"/prg-pkts-{e.se}", len(ctxs), len(steps)),
-                                              data=(e.blob, prg_events[k].lib, device_props[e.device]["gfx_target_version"])))
+                                              data=(e.blob, prg_events[k].lib, amdgpu_targets[e.device])))
       steps.append(create_step("SQTT", ("/prg-sqtt", len(ctxs), len(steps)), ((k, tag), sqtt, prg_events[k])))
     ctxs.append({"name":f"Exec {name}"+(f" n{run_number[k]}" if run_number[k] > 1 else ""), "steps":steps})
 
@@ -348,7 +343,7 @@ def unpack_sqtt(key:tuple[str, int], data:list, p:ProfileProgramEvent) -> tuple[
   # * init decoder
   from extra.sqtt.roc import decode
   base = unwrap(p.base)
-  addr_table = amd_decode(unwrap(p.lib), device_props[p.device]["gfx_target_version"])
+  addr_table = amd_decode(unwrap(p.lib), amdgpu_targets[p.device])
   disasm:dict[int, tuple[str, int]] = {addr+base:(inst.disasm(), inst.size()) for addr, inst in addr_table.items()}
   rctx = decode(data, {p.tag:disasm})
   cu_events:dict[str, list[ProfileEvent]] = {}
@@ -375,18 +370,22 @@ def unpack_sqtt(key:tuple[str, int], data:list, p:ProfileProgramEvent) -> tuple[
 
 def device_sort_fn(k:str) -> tuple[int, str, int]:
   order = {"GC": 0, "USER": 1, "TINY": 2, "DISK": 999}
-  dname = k.split()[0]
+  dname, *rest = k.split()
   dev_rank = next((v for k,v in order.items() if dname.startswith(k)), len(order))
-  return (dev_rank, dname, len(k))
+  if len(parts:=dname.split(":")) < 2 or not parts[1].isdigit(): parts.insert(1, "0")
+  eng_rank = 2 if rest else 1 if len(parts) > 2 else 0
+  # 3 levels of hierarchy: device class, index in multi device, engine within device
+  return (dev_rank, parts[1], eng_rank)
 
 def get_profile(profile:list[ProfileEvent], sort_fn:Callable[[str], Any]=device_sort_fn) -> bytes|None:
   # start by getting the time diffs
   device_decoders:dict[str, Callable[[list[ProfileEvent]], None]] = {}
   for ev in profile:
     if isinstance(ev, ProfileDeviceEvent):
-      device_ts_diffs[ev.device] = (ev.comp_tdiff,ev.copy_tdiff if ev.copy_tdiff is not None else ev.comp_tdiff)
-      if ev.props is not None: device_props[ev.device] = ev.props
-      if (d:=ev.device.split(":")[0]) == "AMD": device_decoders[d] = load_counters
+      device_ts_diffs[ev.device] = ev.tdiff
+      if (d:=ev.device.split(":")[0]) == "AMD":
+        device_decoders[d] = load_counters
+        amdgpu_targets[d] = unwrap(ev.props)["gfx_target_version"]
   # load device specific counters
   for fxn in device_decoders.values(): fxn(profile)
   # map events per device
@@ -510,7 +509,7 @@ def get_render(query:str) -> dict:
   if fmt == "asm":
     ret:dict = {"metadata":[]}
     if data.device.startswith("AMD") and data.lib is not None:
-      with soft_err(lambda err: ret.update(err)): ret.update(amdgpu_cfg(data.lib, device_props[data.device]["gfx_target_version"]))
+      with soft_err(lambda err: ret.update(err)): ret.update(amdgpu_cfg(data.lib, amdgpu_targets[data.device]))
       with soft_err(lambda err: ret["metadata"].append(err)): ret["metadata"].append(amd_readelf(data.lib))
     else: ret["src"] = get_stdout(lambda: (compiler:=Device[data.device].compiler).disassemble(compiler.compile(data.src)))
     return ret

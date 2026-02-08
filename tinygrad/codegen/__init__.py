@@ -1,36 +1,31 @@
 from typing import cast
 from dataclasses import replace
 import itertools
-from tinygrad.helpers import DISABLE_FAST_IDIV, EMULATED_DTYPES, DEVECTORIZE, TRANSCENDENTAL, SPEC, DEBUG, getenv, TracingKey, Context
+from tinygrad.helpers import DISABLE_FAST_IDIV, EMULATED_DTYPES, DEVECTORIZE, TRANSCENDENTAL, SPEC, DEBUG, VIZ, TracingKey, Context
 from tinygrad.uop.ops import PatternMatcher, graph_rewrite, UOp, pm_lower_index_dtype, Ops, UPat, track_rewrites, KernelInfo, pyrender
 from tinygrad.uop.spec import type_verify, program_spec, kernel_spec
 from tinygrad.renderer import Renderer, ProgramSpec
-from tinygrad.dtype import dtypes, PtrDType
+from tinygrad.dtype import dtypes, promo_lattice
+from tinygrad.device import is_dtype_supported
 from tinygrad.helpers import panic
 from tinygrad.codegen.opt import Opt
 
 # import all pattern matchers here
 from tinygrad.codegen.gpudims import pm_add_gpudims
 from tinygrad.uop.symbolic import sym, symbolic_simple, gep_pushing, symbolic, pm_move_where_on_load
-from tinygrad.uop.decompositions import get_late_rewrite_patterns, get_unsupported_dtypes_patterns, get_transcendental_patterns
+from tinygrad.uop.decompositions import get_late_rewrite_patterns, get_transcendental_patterns, pm_float_decomp, pm_long_decomp
 from tinygrad.codegen.late.expander import expander, pm_pre_expander, pm_group_for_reduce
 from tinygrad.codegen.late.devectorizer import load_store_folding, load_store_indexing, devectorize, pm_reduce, \
   ReduceContext, correct_load_store, pm_render, pm_add_loads
 from tinygrad.codegen.opt.postrange import apply_opts, make_images
 from tinygrad.codegen.simplify import pm_simplify_ranges, pm_flatten_range, pm_split_ranges, pm_load_collapse
-from tinygrad.schedule.rangeify import pm_add_buffers_local, rangeify_codegen, pm_mops
+from tinygrad.schedule.rangeify import pm_add_buffers_local, rangeify_codegen, pm_mops, pm_syntactic_sugar
 from tinygrad.codegen.late.linearizer import CFGContext, pm_split_ends, pm_add_control_flow, linearize
-
-pm_syntactic_sugar = PatternMatcher([
-  # INDEX on ptr INDEX concats them
-  (UPat(Ops.INDEX, name="i1").f(Ops.INDEX, name="i2", allow_any_len=True),
-   lambda i1,i2: i2.replace(src=i1.src+i2.src[1:]) if isinstance(i1.dtype, PtrDType) and not isinstance(i2.dtype, PtrDType) else None),
-])
 
 def full_rewrite_to_sink(sink:UOp, ren:Renderer|None=None, optimize:bool=True) -> UOp:
   if ren is None: ren = Renderer()
 
-  if getenv("VIZ"): graph_rewrite(sink, PatternMatcher([]), name="View Base AST")
+  if VIZ: graph_rewrite(sink, PatternMatcher([]), name="View Base AST")
   if DEBUG >= 5: print(pyrender(sink))
   if SPEC: type_verify(sink, kernel_spec)
 
@@ -94,10 +89,13 @@ def full_rewrite_to_sink(sink:UOp, ren:Renderer|None=None, optimize:bool=True) -
   # decompositions
   supported_ops = tuple(ren.code_for_op.keys())
   pm_decomp = symbolic_simple+get_late_rewrite_patterns(supported_ops, ren.device, bool(DISABLE_FAST_IDIV))
-  pm_unsupported = get_unsupported_dtypes_patterns(ren.device, tuple(EMULATED_DTYPES.tolist(dtypes)))
   pm_transcendental = symbolic_simple+get_transcendental_patterns(supported_ops, TRANSCENDENTAL>=2)
   sink = graph_rewrite(sink, pm_decomp, ctx=ren.device, name="decompositions")
-  sink = graph_rewrite(sink, pm_unsupported, ctx=ren.device, name="unsupported dtypes", bottom_up=True)
+  if not is_dtype_supported(dtypes.long, ren.device) or dtypes.long in EMULATED_DTYPES.tolist(dtypes):
+    sink = graph_rewrite(sink, pm_long_decomp, name="decomp long -> int", bottom_up=True)
+  for fr, to in [(fr, next((to for to in promo_lattice[fr] if is_dtype_supported(to, ren.device)), dtypes.float))
+                 for fr in EMULATED_DTYPES.tolist(dtypes) if fr in dtypes.floats]:
+    sink = graph_rewrite(sink, pm_float_decomp, ctx=(fr, to), name=f"decomp {fr} -> {to}", bottom_up=True)
   sink = graph_rewrite(sink, pm_transcendental, ctx=ren.device, name="transcendental")
 
   # final rules for the renderer (without sym)
@@ -114,7 +112,7 @@ def full_rewrite_to_sink(sink:UOp, ren:Renderer|None=None, optimize:bool=True) -
 # inject IF/ENDIF. only needed if device doesn't support gated stores
 pm_linearize_cleanups = PatternMatcher([
   # if statements are not allowed in the graph
-  (UPat((Ops.IF, Ops.ENDIF)), lambda: panic(RuntimeError("if not allowed in graph"))),
+  (UPat((Ops.IF, Ops.ENDIF)), lambda: panic(RuntimeError, "if not allowed in graph")),
   # gated INDEX becomes IF-STORE-ENDIF. this is the only use of IF-ENDIF
   (UPat(Ops.STORE, name="u", src=(UPat(Ops.INDEX, src=(UPat(), UPat(), UPat(name="gate", dtype=dtypes.bool))).or_casted(), UPat())),
    lambda u, gate: (u, [mif:=UOp(Ops.IF, src=(gate, u.src[0])), u, UOp(Ops.ENDIF, src=(mif,))]))

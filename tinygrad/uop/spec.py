@@ -88,7 +88,7 @@ _tensor_spec = PatternMatcher([
    lambda buf: isinstance(buf.arg, int) and isinstance(buf.dtype, (DType, ImageDType))),
 
   # KERNEL can attach to an AFTER to describe the compute required to realize a BUFFER
-  (UPat(Ops.KERNEL, src=UPat((Ops.BUFFER, Ops.AFTER, Ops.MSELECT, Ops.MSTACK, Ops.BIND))), lambda: True),
+  (UPat(Ops.CALL, src=UPat((Ops.BUFFER, Ops.AFTER, Ops.MSELECT, Ops.MSTACK, Ops.BIND))), lambda: True),
 
   # ASSIGN has a target and a value. It can also optionally depend on other assigns
   (UPat(Ops.ASSIGN, name="x"), lambda x: len(x.src) >= 2 and all(s.op is Ops.ASSIGN for s in x.src[2:])),
@@ -235,8 +235,6 @@ full_spec = PatternMatcher([
 
   # rangeify: buffer view with index or load is okay
   (UPat(Ops.BUFFER_VIEW, src=(UPat((Ops.INDEX, Ops.LOAD)),)), lambda: True),
-  # assign on index. the third op is the shape
-  (UPat(Ops.ASSIGN, src=(UPat(), UPat(), UPat())), lambda: True),
 
   # expander: unroll/contract/gep/ptrcat/cat
   (UPat((Ops.UNROLL, Ops.CONTRACT), src=(UPat(),)), lambda: True),
@@ -250,7 +248,7 @@ full_spec = PatternMatcher([
   (UPat(Ops.INDEX, src=(UPat((Ops.VECTORIZE, Ops.CAST)), UPat())), lambda: True),
 
   # linearizer: outputs + intermediate KERNELs
-  (UPat(Ops.KERNEL, dtype=dtypes.void), lambda: True),
+  (UPat(Ops.CALL, dtype=dtypes.void), lambda: True),
 
   # Invalid must have type Index
   (UPat(Ops.CONST, arg=Invalid, name="x"), lambda x: x.dtype.scalar() == dtypes.index),

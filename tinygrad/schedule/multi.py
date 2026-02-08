@@ -1,6 +1,6 @@
 from typing import cast
 import functools, itertools
-from tinygrad.helpers import all_same, all_int, prod, DEBUG, RING, ALL2ALL, getenv
+from tinygrad.helpers import all_same, all_int, prod, DEBUG, RING, ALL2ALL, VIZ, getenv
 from tinygrad.uop.ops import Ops, UOp, sint, PatternMatcher, UPat, GroupOp, graph_rewrite_map, graph_rewrite
 from tinygrad.device import Device
 
@@ -224,7 +224,7 @@ multi_pm = PatternMatcher([
 ])+replace_allreduce
 
 def get_multi_map(big_sink:UOp) -> dict[UOp, UOp]:
-  if getenv("VIZ"): graph_rewrite(big_sink, PatternMatcher([]), name="View Multi AST")
+  if VIZ: graph_rewrite(big_sink, PatternMatcher([]), name="View Multi AST")
   ret = graph_rewrite_map(big_sink, multi_pm, name="multi_pm")
-  if getenv("VIZ"): graph_rewrite(ret[big_sink], PatternMatcher([]), name="View Post Multi AST")
+  if VIZ: graph_rewrite(ret[big_sink], PatternMatcher([]), name="View Post Multi AST")
   return ret

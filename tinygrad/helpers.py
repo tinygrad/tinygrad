@@ -86,7 +86,9 @@ def word_wrap(x, wrap=80):
   while len(ansistrip(x[:i])) < wrap and i < len(x): i += 1
   return x[:i] + "\n" + word_wrap(x[i:], wrap)
 def pad_bytes(b:bytes, align:int) -> bytes: return b + b'\x00' * ((align - (len(b) % align)) % align)
-def panic(e:Exception|None=None): raise e if e is not None else RuntimeError("PANIC!")
+
+# NOTE: you must create the exception inside the function where it's raised or you will get a GC cycle!
+def panic(e:type[Exception]|None=None, *arg): raise e(*arg) if e is not None else RuntimeError("PANIC!")
 
 @functools.cache
 def canonicalize_strides(shape:tuple[T, ...], strides:tuple[T, ...]) -> tuple[T, ...]:
@@ -287,8 +289,7 @@ class TracingKey:
 class ProfileEvent: pass
 
 @dataclass
-class ProfileRangeEvent(ProfileEvent):
-  device:str; name:str|TracingKey; st:decimal.Decimal; en:decimal.Decimal|None=None; is_copy:bool=False # noqa: E702
+class ProfileRangeEvent(ProfileEvent): device:str; name:str|TracingKey; st:decimal.Decimal; en:decimal.Decimal|None=None # noqa: E702
 
 @dataclass(frozen=True)
 class ProfilePointEvent(ProfileEvent):
@@ -296,8 +297,8 @@ class ProfilePointEvent(ProfileEvent):
 
 cpu_events:list[ProfileEvent] = []
 @contextlib.contextmanager
-def cpu_profile(name:str|TracingKey, device="TINY", is_copy=False, display=True) -> Generator[ProfileRangeEvent, None, None]:
-  res = ProfileRangeEvent(device, name, perf_counter_us(), is_copy=is_copy)
+def cpu_profile(name:str|TracingKey, device="TINY", display=True) -> Generator[ProfileRangeEvent, None, None]:
+  res = ProfileRangeEvent(device, name, perf_counter_us())
   try: yield res
   finally:
     res.en = perf_counter_us()

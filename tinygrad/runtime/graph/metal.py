@@ -101,7 +101,7 @@ class MetalGraph(GraphRunner):
   def collect_timestamps(self):
     # create a graph event and evenly space each program
     st, en = decimal.Decimal(self.command_buffer.GPUStartTime()) * 1000000, decimal.Decimal(self.command_buffer.GPUEndTime()) * 1000000
-    ents = [ProfileGraphEntry(self.device, cast(CompiledRunner, ji.prg)._prg.name, i, i+1, is_copy=False) for i,ji in enumerate(self.jit_cache)]
+    ents = [ProfileGraphEntry(self.device, cast(CompiledRunner, ji.prg)._prg.name, i, i+1) for i,ji in enumerate(self.jit_cache)]
     step = (en-st)/len(ents)
     self.dev.profile_events += [ProfileGraphEvent(ents, [], [st+step*i for i in range(len(ents)+1)])]
 
