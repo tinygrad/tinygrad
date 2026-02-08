@@ -4,8 +4,8 @@ from enum import auto, IntEnum, Enum, EnumType
 
 # wrapper around EnumType to allow extending enums with members
 class ExtensibleEnumType(EnumType):
-    @classmethod
-    def _check_for_existing_members_(mcls, class_name, bases): return
+  @classmethod
+  def _check_for_existing_members_(mcls, class_name, bases): return
 
 # wrapper around IntEnum that preserves Enum.__str__ and makes auto() unique across all FastEnum subclasses
 class FastEnum(IntEnum, metaclass=ExtensibleEnumType):
@@ -138,4 +138,3 @@ class GroupOp:
   UnsafePad = {Ops.RECIPROCAL, Ops.LOG2, Ops.EXP2, Ops.IDIV, Ops.POW}
 
   All = set(Ops)
-
