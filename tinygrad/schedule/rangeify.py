@@ -4,7 +4,7 @@ from tinygrad.dtype import dtypes, PtrDType, ImageDType, AddrSpace
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, _substitute, KernelInfo, pm_gate_kernel_sink
 from tinygrad.uop.ops import graph_rewrite, identity_element, sint, AxisType, BottomUpGate, _remove_all_tags, range_str
 from tinygrad.uop.symbolic import symbolic
-from tinygrad.helpers import argsort, prod, all_same, getenv, flatten, dedup, all_int, DEBUG, SPLIT_REDUCEOP, DEBUG_RANGEIFY
+from tinygrad.helpers import argsort, prod, all_same, getenv, flatten, dedup, all_int, DEBUG, SPLIT_REDUCEOP, DEBUG_RANGEIFY, VIZ
 from tinygrad.helpers import PCONTIG, partition, get_single_element
 from tinygrad.codegen.simplify import pm_flatten_range, pm_reduce_simplify
 from tinygrad.codegen.opt import Opt
@@ -74,10 +74,6 @@ mop_cleanup = PatternMatcher([
    lambda x,x2: x.replace(src=(x2.src[0], x.src[1])) if x.tag is None and x2.tag is None else None),
 ])
 
-def resolve_custom_kernel(ck:UOp) -> UOp:
-  placeholders = [UOp.placeholder_like(s, slot=i) for i,s in enumerate(ck.src)]
-  return ck.arg.fxn(*placeholders).call(*ck.src)
-
 def resolve_call(c:UOp) -> UOp|None:
   # don't resolve real kernel calls, sink or program
   if c.src[0].op is Ops.SINK and isinstance(c.src[0].arg, KernelInfo): return None
@@ -98,9 +94,6 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
 
   # resolve calls
   (UPat(Ops.CALL, name="c"), resolve_call),
-
-  # resolve custom kernels
-  (UPat(Ops.CUSTOM_KERNEL, name="ck"), resolve_custom_kernel),
 
   # remove CONTIGUOUS if the BUFFER is already contiguous
   (UPat(Ops.RESHAPE, src=(UPat(Ops.BUFFER), UPat()), name="r").f(Ops.CONTIGUOUS, name="c"), lambda r,c: r.replace(tag=c.tag)),
@@ -538,7 +531,7 @@ def tag_uop(ctx:tuple[list[UOp], set[UOp]], x:UOp):
   if x.dtype.scalar() == dtypes.index: return None
   ctx[0].append(x)
   return x.replace(tag=(len(ctx[0])-1,))
-add_tags = PatternMatcher([
+add_tags = pm_gate_kernel_sink+PatternMatcher([
   # don't tag BUFFERs, they are global
   (UPat(GroupOp.All-{Ops.BUFFER, Ops.CONST, Ops.DEVICE, Ops.UNIQUE, Ops.LUNIQUE, Ops.DEFINE_VAR, Ops.BIND, Ops.CALL, Ops.END,
                      Ops.MSTACK, Ops.MSELECT, Ops.RANGE}.union(GroupOp.Movement), name="x"), tag_uop),
@@ -561,7 +554,7 @@ replace_contiguous = PatternMatcher([
 ])
 
 def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
-  if getenv("VIZ"): graph_rewrite(sink, PatternMatcher([]), name="View Input Graph")
+  if VIZ: graph_rewrite(sink, PatternMatcher([]), name="View Input Graph")
   uop_list: list[UOp] = []
   tsink = graph_rewrite(sink, add_tags, ctx=(uop_list, set()), bottom_up=True, name="number the uops")
 
@@ -579,7 +572,7 @@ def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
   tsink = UOp.sink(*[x for x in tsink.backward_slice if x.base.op in {Ops.BUFFERIZE, Ops.MSTACK, Ops.CONST, Ops.BUFFER, Ops.AFTER} and \
                      x.tag is not None and len(x.tag)])
 
-  if getenv("VIZ"): graph_rewrite(tsink, PatternMatcher([]), name="View Tagged Rangeify")
+  if VIZ: graph_rewrite(tsink, PatternMatcher([]), name="View Tagged Rangeify")
 
   # bufferize -> store
   lunique_start: int = max([-1]+[x.arg for x in tsink.toposort() if x.op is Ops.LUNIQUE]) + 1
@@ -605,7 +598,7 @@ def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
   sink_tags = [s.tag for s in tsink.src]
   tsink = graph_rewrite(tsink, _remove_all_tags, name="remove all tags")
 
-  if getenv("VIZ"): graph_rewrite(tsink, PatternMatcher([]), name="View Kernel Graph")
+  if VIZ: graph_rewrite(tsink, PatternMatcher([]), name="View Kernel Graph")
 
   becomes_map: dict[UOp, UOp] = {}
   for tag, s in zip(sink_tags, tsink.src):

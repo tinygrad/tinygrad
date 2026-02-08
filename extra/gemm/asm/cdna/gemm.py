@@ -62,7 +62,7 @@ def custom_uop_gemm(C:UOp, A:UOp, B:UOp) -> UOp:
 # ** backward gemm, might use the asm gemm
 
 def custom_gemm_bw(gradient:UOp, kernel:UOp):
-  out, a, b = kernel.src
+  out, a, b = kernel.src[1:]
   assert all_same([gradient.device, a.device, b.device, out.device])
   a_t, b_t, g_t = Tensor(a, device=a.device), Tensor(b, device=a.device), Tensor(gradient, device=a.device)
   # TODO: this needs to be cleaned up and done properly, the batch dim of grad and a multi need to align
