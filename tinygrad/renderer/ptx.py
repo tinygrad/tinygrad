@@ -148,7 +148,7 @@ class PTXRenderer(Renderer):
     from tinygrad.runtime.support.compiler_cuda import NVPTXCompiler, PTXCompiler
     from tinygrad.runtime.support.hcq import MOCKGPU
     self.compiler, self.device, self.arch = (PTXCompiler if bool(MOCKGPU) or device == "CUDA" else NVPTXCompiler)(arch), device, arch
-    self.tensor_cores = PTXRenderer.tc_sm80 if (ver:=int(arch[3:]) >= 80 else tc.cuda_sm75 if ver >= 75 else []
+    self.tensor_cores = PTXRenderer.tc_sm80 if (ver:=int(arch[3:])) >= 80 else tc.cuda_sm75 if ver >= 75 else []
   def __reduce__(self): return self.__class__, (self.arch, self.device)
 
   # language options
