@@ -392,7 +392,7 @@ class CUDARenderer(CStyleLanguage):
     cc = NVRTCCompiler if device == "NV" or cast(str, CUDA_CC.value) != "NVCC" else NVCCCompiler
     self.device, self.arch, self.compiler, arch_ver = device, arch, cc(arch, ptx=bool(MOCKGPU) or device == "CUDA"), int(arch[3:])
     self.tensor_cores = tc.cuda_sm89 if arch_ver >= 89 else tc.cuda_sm80 if arch_ver >= 80 else tc.cuda_sm75 if arch_ver >= 75 else []
-  def __reduce__(self): return self.__class__, (self.arch,)
+  def __reduce__(self): return self.__class__, (self.arch, self.device)
 
   # language options
   # https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html
