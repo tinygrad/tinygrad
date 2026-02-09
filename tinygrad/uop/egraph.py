@@ -115,15 +115,22 @@ class EGraph:
 def egraph_saturate(root:UOp, pm:PatternMatcher, max_iters:int=10, ctx=None) -> dict[UOp, dict[UOp, None]]:
   """Build an e-graph with full equality saturation (with rebuilding). Returns eclass map."""
   eg = EGraph(root)
+  worklist: dict[UOp, None] = dict(eg.all_nodes)  # nodes to match rules on
   for _ in range(max_iters):
-    # phase 1: match all rules on all known nodes, skip if already in same eclass
+    # phase 1: match rules only on worklist nodes
     new_equalities: list[tuple[UOp, UOp]] = []
-    for u in list(eg.all_nodes):
+    next_worklist: dict[UOp, None] = {}
+    prev_nodes = dict(eg.all_nodes)
+    for u in list(worklist):
       for new in rewrite_all(pm, u, ctx):
         if new in eg.parent and uf_find(eg.parent, new) is uf_find(eg.parent, u): continue
         eg._add_node(new)
         new_equalities.append((u, new))
-    if not new_equalities: break
+    # all newly added nodes (including sub-nodes of rewrite results) go on next worklist
+    for u in eg.all_nodes:
+      if u not in prev_nodes: next_worklist[u] = None
+    if not new_equalities:
+      break
 
     # phase 2: merge and rebuild until no new merges
     while new_equalities:
@@ -132,8 +139,10 @@ def egraph_saturate(root:UOp, pm:PatternMatcher, max_iters:int=10, ctx=None) -> 
         merged = eg._merge(a, b)
         if merged is not None: dirty[merged] = None
       if not dirty: break
-      # phase 3: rebuild parents of dirty eclasses
+      # phase 3: rebuild parents of dirty eclasses, add rebuilt nodes to next worklist
       new_equalities = eg._rebuild(dirty, pm, ctx)
+      for a, b in new_equalities: next_worklist[b] = None
+    worklist = next_worklist
 
   return eg.eclass
 
