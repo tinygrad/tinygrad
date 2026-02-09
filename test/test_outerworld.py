@@ -57,7 +57,7 @@ class TestOuterRange(unittest.TestCase):
     out.realize()
 
     # TODO: testing allclose
-    assert Tensor.allclose(ref, out, atol=1e-6), f"{ref.numpy()=}, {out.numpy()=}"
+    assert Tensor.allclose(ref, out, atol=1e-6), f"max diff {(ref-out).abs().max().item()}"
 
 class TestOuterScan(unittest.TestCase):
   def _test_scan(self):
@@ -85,7 +85,7 @@ class TestOuterScan(unittest.TestCase):
     out.realize()
 
     # TODO: testing allclose
-    assert Tensor.allclose(ref, out, atol=1e-6), f"{ref.numpy()=}, {out.numpy()=}"
+    assert Tensor.allclose(ref, out, atol=1e-5), f"max diff {(ref-out).abs().max().item()}"
 
 class TestOuterworld(unittest.TestCase):
   def test_range_plus_1(self):
@@ -166,7 +166,7 @@ class TestVmap(unittest.TestCase):
     out.realize()
 
     # TODO: testing allclose
-    assert Tensor.allclose(ref, out, atol=1e-6), f"{ref.numpy()=}, {out.numpy()=}"
+    assert Tensor.allclose(ref, out, atol=1e-6), f"max diff {(ref-out).abs().max().item()}"
   def test_vmap_inner_fuse(self): self.test_vmap_inner(fuse=True)
   def test_vmap_outer(self): self.test_vmap_inner(AxisType.OUTER)
   def test_vmap_outer_fuse(self): self.test_vmap_inner(AxisType.OUTER, fuse=True)

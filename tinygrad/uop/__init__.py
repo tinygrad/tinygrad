@@ -80,7 +80,6 @@ class Ops(FastEnum):
 
   # tensor graph ops
   UNIQUE = auto(); DEVICE = auto(); ASSIGN = auto()
-  CUSTOM_KERNEL = auto()
 
   # local unique
   LUNIQUE = auto()

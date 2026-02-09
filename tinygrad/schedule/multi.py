@@ -1,7 +1,8 @@
 from typing import cast
 import functools, itertools
-from tinygrad.helpers import all_same, all_int, prod, DEBUG, RING, ALL2ALL, getenv
+from tinygrad.helpers import all_same, all_int, prod, DEBUG, RING, ALL2ALL, VIZ, getenv
 from tinygrad.uop.ops import Ops, UOp, sint, PatternMatcher, UPat, GroupOp, graph_rewrite_map, graph_rewrite
+from tinygrad.dtype import dtypes
 from tinygrad.device import Device
 
 # *** allreduce implementation ***
@@ -214,17 +215,18 @@ multi_pm = PatternMatcher([
   (UPat(Ops.ALLREDUCE, src=(UPat(Ops.MULTI, name="multi"), UPat(Ops.DEVICE, name="device")), name="red"),
     lambda multi,device,red: multi.src[0].allreduce(red.arg, device).multi(axis=multi.axis)),
   (UPat(Ops.CALL, src=(UPat(Ops.MULTI, name="multi"), ), name="root", allow_any_len=True), passthrough_multi),
+  # we just remove the MULTI from CALLs with dtypes.void and assume they are handled by the user for custom kernels
+  (UPat(Ops.CALL, dtype=dtypes.void, name="root", custom_early_reject=set([Ops.MULTI])), lambda root:
+    UOp(root.op, root.dtype, tuple(x.src[0] if x.op is Ops.MULTI else x for x in root.src), root.arg)),
   (UPat((Ops.CAST, Ops.BITCAST, Ops.CONTIGUOUS, Ops.DETACH, Ops.CONTIGUOUS_BACKWARD),
         src=(UPat(Ops.MULTI, name="multi"), ), name="root"), passthrough_multi),
-  # multi supports custom kernels with CUSTOM_KERNEL + AFTER
-  (UPat(Ops.CUSTOM_KERNEL, src=UPat((Ops.MULTI, Ops.CONTIGUOUS)), name="ck"),
-    lambda ck: ck.replace(src=tuple(m.src[0] if m.op is Ops.MULTI else m for m in ck.src))),
-  (UPat(Ops.AFTER, src=(UPat(Ops.MULTI, name="multi"), UPat(Ops.CUSTOM_KERNEL)), name="a"),
-    lambda multi,a: a.replace(src=(multi.src[0],)+a.src[1:]).multi(multi.axis))
+  # after CALL
+  (UPat(Ops.AFTER, src=(UPat(Ops.MULTI, name="multi"), UPat(Ops.CALL)), name="a"),
+    lambda multi,a: a.replace(src=(multi.src[0],)+a.src[1:]).multi(multi.axis)),
 ])+replace_allreduce
 
 def get_multi_map(big_sink:UOp) -> dict[UOp, UOp]:
-  if getenv("VIZ"): graph_rewrite(big_sink, PatternMatcher([]), name="View Multi AST")
+  if VIZ: graph_rewrite(big_sink, PatternMatcher([]), name="View Multi AST")
   ret = graph_rewrite_map(big_sink, multi_pm, name="multi_pm")
-  if getenv("VIZ"): graph_rewrite(ret[big_sink], PatternMatcher([]), name="View Post Multi AST")
+  if VIZ: graph_rewrite(ret[big_sink], PatternMatcher([]), name="View Post Multi AST")
   return ret
