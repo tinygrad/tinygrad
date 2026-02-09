@@ -278,7 +278,9 @@ class Compiler:
   def disassemble(self, lib:bytes): pass
 
 @dataclass(frozen=True)
-class CompilerPair: renderer:type[Renderer]|functools.partial; compiler:type[Compiler]|functools.partial|None; ctrl_var:ContextVar|None = None # noqa: E702
+class CompilerPair:
+  renderer:type[Renderer]|functools.partial; compiler:type[Compiler]|functools.partial|None = None; ctrl_var:ContextVar|None = None # noqa: E702
+  name:str|None = None
 
 @dataclass(frozen=True)
 class CompilerSet: cset:list[CompilerPair]; ctrl_var:ContextVar|None = None # noqa: E702
@@ -293,7 +295,7 @@ class Compiled:
     self.comp_sets:dict[Any, tuple[ContextVar|None, tuple[type[Renderer]|functools.partial, type[Compiler]|functools.partial|None]]] = {}
     self.cached_pair:dict[Any, tuple[Renderer, Compiler|None]] = {}
     for cpair in (compilers.cset if compilers is not None else [CompilerPair(Renderer, Compiler)]):
-      self.comp_sets[self._compiler_name(cpair.renderer, cpair.compiler)] = (cpair.ctrl_var, (cpair.renderer, cpair.compiler))
+      self.comp_sets[cpair.name or self._compiler_name(cpair.renderer, cpair.compiler)] = (cpair.ctrl_var, (cpair.renderer, cpair.compiler))
 
   @property
   def renderer(self) -> Renderer: return self._select_compiler_pair()[0]
