@@ -389,7 +389,7 @@ class CUDARenderer(CStyleLanguage):
   def __init__(self, arch:str, device:str="NV"):
     from tinygrad.runtime.support.compiler_cuda import NVRTCCompiler, NVCCCompiler
     from tinygrad.runtime.support.hcq import MOCKGPU
-    cc = NVRTCCompiler if device == "NV" or cast(str, CUDA_CC.value) != "NVCC" else NVCCCompiler
+    cc = NVRTCCompiler if device == "NV" or CUDA_CC.value != "NVCC" else NVCCCompiler
     self.device, self.arch, self.compiler, arch_ver = device, arch, cc(arch, ptx=bool(MOCKGPU) or device == "CUDA"), int(arch[3:])
     self.tensor_cores = tc.cuda_sm89 if arch_ver >= 89 else tc.cuda_sm80 if arch_ver >= 80 else tc.cuda_sm75 if arch_ver >= 75 else []
   def __reduce__(self): return self.__class__, (self.arch, self.device)

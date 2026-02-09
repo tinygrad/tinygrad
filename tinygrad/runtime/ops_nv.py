@@ -622,7 +622,7 @@ class NVDevice(HCQCompiled[NVSignal]):
     compilers = CompilerSet(ctrl_var=NV_CC, cset=[CompilerPair(functools.partial(CUDARenderer, self.arch)),
        CompilerPair(functools.partial(PTXRenderer, self.arch, device="NV"), ctrl_var=NV_PTX),
        CompilerPair(functools.partial(NAKRenderer, self.arch, self.max_warps_per_sm), ctrl_var=NV_NAK)])
-    super().__init__(device, NVAllocator(self), compilers, functools.partial(NVProgram, self), HCQSignal, NVComputeQueue, NVCopyQueue)
+    super().__init__(device, NVAllocator(self), compilers, functools.partial(NVProgram, self), NVSignal, NVComputeQueue, NVCopyQueue)
 
     self.pma_enabled = PMA.value > 0 and PROFILE >= 1
     if self.pma_enabled: self._prof_init()
