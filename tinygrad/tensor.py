@@ -1286,9 +1286,10 @@ class Tensor(OpMixin):
       if is_advanced: raise RuntimeError("advanced setitem is not supported for DISK tensors")
       self.realize()._getitem(indices).assign(v)
       return
-    if not isinstance(v, Tensor): v = Tensor(v, device=self.device, dtype=self.dtype)
-    if self.requires_grad or v.requires_grad: raise NotImplementedError("setitem with requires_grad is not supported")
-    if is_advanced: self.assign(self._getitem(indices, v)).realize()
+    if self.requires_grad or (isinstance(v, Tensor) and v.requires_grad): raise NotImplementedError("setitem with requires_grad is not supported")
+    if is_advanced:
+      if not isinstance(v, Tensor): v = Tensor(v, device=self.device, dtype=self.dtype)
+      self.assign(self._getitem(indices, v)).realize()
     else: # basic setitem
       self.realize()
       if not self.uop.is_writable_view(): raise RuntimeError("setitem target must be a writable view backed by a buffer")
