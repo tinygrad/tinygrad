@@ -1280,19 +1280,19 @@ class Tensor(OpMixin):
 
   def __setitem__(self, indices, v:Tensor|PyConst|list|tuple) -> None:
     if isinstance(v, Tensor) and v.dtype != self.dtype: raise RuntimeError(f"setitem dtype mismatch: {self.dtype=} != {v.dtype=}")
+    idx = [indices] if (isinstance(indices, list) and all_int(indices)) or not isinstance(indices, (tuple, list)) else list(indices)
+    is_advanced = any(isinstance(i, (Tensor, list, tuple)) for i in idx)
     if isinstance(self.device, str) and self.device.startswith("DISK"):
+      if is_advanced: raise RuntimeError("advanced setitem is not supported for DISK tensors")
       self.realize()._getitem(indices).assign(v)
       return
     if not isinstance(v, Tensor): v = Tensor(v, device=self.device, dtype=self.dtype)
     if self.requires_grad or v.requires_grad: raise NotImplementedError("setitem with requires_grad is not supported")
-    res = self._getitem(indices, v)
-    # if shapes match and data is not shared, it's advanced indexing, res is the assigned output
-    if res.shape == self.shape and res.uop is not self.uop:
-      self.assign(res).realize()
+    if is_advanced: self.assign(self._getitem(indices, v)).realize()
     else: # basic setitem
       self.realize()
       if not self.uop.is_writable_view(): raise RuntimeError("setitem target must be a writable view backed by a buffer")
-      res.assign(v).realize()
+      self[indices].assign(v).realize()
 
   def __delitem__(self, indices) -> None:
     raise TypeError("Tensor does not support deleting items")
