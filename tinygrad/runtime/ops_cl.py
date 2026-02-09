@@ -1,11 +1,11 @@
 from __future__ import annotations
 from typing import cast
-import ctypes, functools, hashlib
+import ctypes, functools
 from tinygrad.runtime.autogen import opencl as cl
 from tinygrad.runtime.support import c
 from tinygrad.helpers import to_char_p_p, from_mv, OSX, DEBUG, mv_address, suppress_finalizing
 from tinygrad.renderer.cstyle import OpenCLRenderer, IntelRenderer
-from tinygrad.device import BufferSpec, LRUAllocator, Compiled, Compiler, CompileError, CompilerPair, CompilerSet
+from tinygrad.device import BufferSpec, LRUAllocator, Compiled, CompileError, CompilerSet
 from tinygrad.dtype import ImageDType
 
 CC_CB = c.CFUNCTYPE[None, [c.POINTER[ctypes.c_char], c.POINTER[None], cl.size_t, c.POINTER[None]]]
@@ -19,29 +19,25 @@ def check(status):
   if status != 0: raise RuntimeError(f"OpenCL Error {status}: {cl_errors.get(status, 'Unknown error')}")
 def checked(ret, status): return (check(status.value), ret)[1]
 
-class CLCompiler(Compiler):
-  def __init__(self, dev:CLDevice, compile_key:str):
-    self.dev = dev
-    super().__init__(f"compile_cl_{compile_key}")
-  def compile(self, src:str) -> bytes:
-    program = checked(cl.clCreateProgramWithSource(self.dev.context, 1, to_char_p_p([src.encode()]), None, status := ctypes.c_int32()), status)
-    build_status: int = cl.clBuildProgram(program, 1, self.dev.device_id, None, BP_CB(), None)
-    if build_status != 0:
-      cl.clGetProgramBuildInfo(program, self.dev.device_id, cl.CL_PROGRAM_BUILD_LOG, 0, None, log_size := ctypes.c_size_t())
-      cl.clGetProgramBuildInfo(program, self.dev.device_id, cl.CL_PROGRAM_BUILD_LOG,
-                               log_size.value, mstr := ctypes.create_string_buffer(log_size.value), None)
-      raise CompileError(f"OpenCL Compile Error\n\n{mstr.value.decode()}")
-    check(cl.clGetProgramInfo(program, cl.CL_PROGRAM_BINARY_SIZES, ctypes.sizeof(ctypes.c_size_t), binary_sizes := (ctypes.c_size_t * 1)(), None))
-    check(cl.clGetProgramInfo(program, cl.CL_PROGRAM_BINARIES, ctypes.sizeof(ctypes.c_void_p),
-                              (ctypes.c_void_p * 1)(ctypes.addressof(binary := ctypes.create_string_buffer(binary_sizes[0]))), None))
-    check(cl.clReleaseProgram(program))
-    return bytes(binary)
+def cl_compile(dev:CLDevice, src:str) -> bytes:
+  program = checked(cl.clCreateProgramWithSource(dev.context, 1, to_char_p_p([src.encode()]), None, status := ctypes.c_int32()), status)
+  build_status: int = cl.clBuildProgram(program, 1, dev.device_id, None, BP_CB(), None)
+  if build_status != 0:
+    cl.clGetProgramBuildInfo(program, dev.device_id, cl.CL_PROGRAM_BUILD_LOG, 0, None, log_size := ctypes.c_size_t())
+    cl.clGetProgramBuildInfo(program, dev.device_id, cl.CL_PROGRAM_BUILD_LOG,
+                             log_size.value, mstr := ctypes.create_string_buffer(log_size.value), None)
+    raise CompileError(f"OpenCL Compile Error\n\n{mstr.value.decode()}")
+  check(cl.clGetProgramInfo(program, cl.CL_PROGRAM_BINARY_SIZES, ctypes.sizeof(ctypes.c_size_t), binary_sizes := (ctypes.c_size_t * 1)(), None))
+  check(cl.clGetProgramInfo(program, cl.CL_PROGRAM_BINARIES, ctypes.sizeof(ctypes.c_void_p),
+                            (ctypes.c_void_p * 1)(ctypes.addressof(binary := ctypes.create_string_buffer(binary_sizes[0]))), None))
+  check(cl.clReleaseProgram(program))
+  return bytes(binary)
 
 class CLProgram:
   def __init__(self, device:CLDevice, name:str, lib:bytes, buf_dtypes=[], **kwargs):
-    self.dev, self.name, self.lib, self.buf_dtypes = device, name, lib, buf_dtypes
-    self.program = checked(cl.clCreateProgramWithBinary(device.context, 1, device.device_id, (ctypes.c_size_t * 1)(len(lib)),
-                                                        to_char_p_p([lib], ctypes.c_ubyte), binary_status := ctypes.c_int32(),
+    self.dev, self.name, self.lib, self.buf_dtypes = device, name, cl_compile(device, lib.decode()), buf_dtypes
+    self.program = checked(cl.clCreateProgramWithBinary(device.context, 1, device.device_id, (ctypes.c_size_t * 1)(len(self.lib)),
+                                                        to_char_p_p([self.lib], ctypes.c_ubyte), binary_status := ctypes.c_int32(),
                                                         errcode_ret := ctypes.c_int32()), errcode_ret)
     check(binary_status.value)
     check(cl.clBuildProgram(self.program, 1, device.device_id, None, BP_CB(), None)) # NOTE: OSX requires this
@@ -125,8 +121,7 @@ class CLDevice(Compiled):
                                            ctypes.string_at(buf, size=total.value).decode())[1]
 
     renderer = IntelRenderer if "cl_intel_subgroup_matrix_multiply_accumulate" in self.device_exts else OpenCLRenderer
-    compiler = functools.partial(CLCompiler, self, f"{hashlib.md5(self.device_name.encode() + self.driver_version.encode()).hexdigest()}")
-    super().__init__(device, CLAllocator(self), CompilerSet([CompilerPair(renderer, compiler)]), functools.partial(CLProgram, self))
+    super().__init__(device, CLAllocator(self), CompilerSet([(renderer, None)]), functools.partial(CLProgram, self))
   def synchronize(self):
     check(cl.clFinish(self.queue))
     self.pending_copyin.clear()
