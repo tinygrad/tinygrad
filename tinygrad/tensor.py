@@ -234,8 +234,7 @@ class Tensor(OpMixin):
 
   def as_param(self, slot:int):
     if self.uop.axis is not None:
-      multi_shape = tuple([s//len(self.device) if i==self.uop.axis else s for i,s in enumerate(self.shape)])
-      param = UOp.param(slot, self.dtype, multi_shape, self.device).multi(self.uop.axis)
+      param = UOp.param(slot, self.dtype, self.uop.shard_shape, self.device).multi(self.uop.axis)
     else:
       param = UOp.param(slot, self.dtype, self.shape, self.device)
     return Tensor(param, device=self.device)
@@ -756,8 +755,7 @@ class Tensor(OpMixin):
     dtype = kwargs.pop("dtype", self.dtype)
     if kwargs.get("device") is not None: raise RuntimeError("cannot specify `device` on `*_like` of a multi device tensor")
     if self.uop.axis is None: return fxn(self.shape, *args, dtype=dtype, **kwargs).shard(self.device)
-    sharded_shape = tuple(s//len(self.device) if a==self.uop.axis else s for a,s in enumerate(self.shape))
-    stacked = UOp(Ops.MSTACK, dtype=dtype, src=tuple([fxn(sharded_shape, *args, device=d, dtype=dtype, **kwargs).uop for d in self.device]))
+    stacked = UOp(Ops.MSTACK, dtype=dtype, src=tuple([fxn(self.uop.shard_shape, *args, device=d, dtype=dtype, **kwargs).uop for d in self.device]))
     return Tensor(UOp.multi(stacked, axis=self.uop.axis), device=self.device, dtype=dtype)
 
   def full_like(self, fill_value:PyConst, **kwargs) -> Tensor:
@@ -3786,7 +3784,7 @@ class Tensor(OpMixin):
     S, indices = U.square().sum(-2).sqrt().sort(dim = -1, descending=True)
     new_indices = indices.reshape(b_shape + (1, num)).expand(b_shape + (num, num))
     U = U.gather(-1, new_indices) / (S != 0).where(S, 1).unsqueeze(-2)
-    V = V.gather(-1, new_indices).realize()
+    V = V.gather(-1, new_indices)
 
     padded_u = Tensor.eye(q_num, dtype=U.dtype).reshape((1,) * len(b_shape) + (q_num, q_num)).expand(b_shape + (q_num, q_num)).contiguous()
     padded_u[..., 0:num, 0:num] = U

@@ -8,7 +8,6 @@ from tinygrad.runtime.support.hcq import CLikeArgsState
 from tinygrad.renderer.cstyle import ClangJITRenderer
 from tinygrad.renderer.llvmir import CPULLVMRenderer
 from tinygrad.renderer.nir import LVPRenderer
-from tinygrad.runtime.support.compiler_cpu import CPULLVMCompiler
 from tinygrad.runtime.support.elf import jit_loader
 from tinygrad.uop.ops import sint
 
@@ -134,6 +133,6 @@ class CPUDevice(HCQCompiled):
   def __init__(self, device:str=""):
     self.tasks:queue.Queue = queue.Queue()
     CPUWorker(self, self.tasks, thread_id=0).start()
-    compilers = CompilerSet([CompilerPair(ClangJITRenderer, None), CompilerPair(CPULLVMRenderer, CPULLVMCompiler, ctrl_var=CPU_LLVM),
+    compilers = CompilerSet([CompilerPair(ClangJITRenderer, None), CompilerPair(CPULLVMRenderer, None, ctrl_var=CPU_LLVM),
                              CompilerPair(LVPRenderer, None, ctrl_var=CPU_LVP)], ctrl_var=CPU_CC)
     super().__init__(device, CPUAllocator(self), compilers, functools.partial(CPUProgram, self), CPUSignal, CPUComputeQueue)

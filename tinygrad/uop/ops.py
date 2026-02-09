@@ -207,7 +207,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     match self.op:
       # late ops don't have shape
       case Ops.UNIQUE | Ops.LUNIQUE | Ops.DEVICE | Ops.RANGE | Ops.LOAD | Ops.IF | Ops.BARRIER | Ops.CUSTOM | Ops.CUSTOMI | \
-           Ops.VECTORIZE | Ops.VCONST | Ops.GEP | Ops.SPECIAL | Ops.UNROLL | Ops.CONTRACT | Ops.CUSTOM_KERNEL | Ops.SINK | \
+           Ops.VECTORIZE | Ops.VCONST | Ops.GEP | Ops.SPECIAL | Ops.UNROLL | Ops.CONTRACT | Ops.SINK | \
            Ops.LINEAR | Ops.PROGRAM | Ops.SOURCE | Ops.BINARY:
         return None
 
@@ -285,10 +285,11 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
             raise ValueError(f"invalid type for axis: {axis_arg}")
           return tuple(1 if i in axis_arg else s for i,s in enumerate(ps))
 
+    if self.op is Ops.ASSIGN: return self.src[1]._shape
+
     # elementwise ops keep the shape the same. all inputs with shape must match
-    if self.op in GroupOp.ALU.union({Ops.CAST, Ops.COPY, Ops.ASSIGN, Ops.NOOP, Ops.GROUP, Ops.SINK, Ops.ALLREDUCE, Ops.STORE}):
-      # TODO: remove this hack for 3 op assign
-      input_shapes = [x._shape for x in (self.src[:2] if self.op is Ops.ASSIGN else self.src) if x._shape is not None]
+    if self.op in GroupOp.ALU.union({Ops.CAST, Ops.COPY, Ops.NOOP, Ops.GROUP, Ops.SINK, Ops.ALLREDUCE, Ops.STORE}):
+      input_shapes = [x._shape for x in self.src if x._shape is not None]
       if len(input_shapes) == 0: return None
       if not all_same(input_shapes): raise RuntimeError(f"shape mismatch at {self.op}: {input_shapes}")
       return input_shapes[0]
@@ -797,6 +798,11 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
 
   # *** uop high level syntactic sugar ***
 
+  @property
+  def shard_shape(self):
+    if self.axis is None: return self.shape
+    return tuple(x//len(self.device) if i == self.axis else x for i,x in enumerate(self.shape))
+
   @staticmethod
   def placeholder(shape:tuple[int, ...], dtype:DType, slot:int, addrspace=AddrSpace.GLOBAL):
     lookup = {AddrSpace.GLOBAL: Ops.PARAM, AddrSpace.LOCAL: Ops.DEFINE_LOCAL, AddrSpace.REG: Ops.DEFINE_REG}
@@ -805,7 +811,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     return ret
   def placeholder_like(self, slot:int):
     assert all_int(self.shape), "no placeholder-like on symbolic shape"
-    return UOp.placeholder(self.shape, self.dtype, slot)
+    return UOp.placeholder(self.shard_shape, self.dtype, slot)
 
   # set is store+end+after
   def set(self:UOp, val:UOp|ConstType, end:UOp|tuple[UOp, ...]|list[UOp]=()) -> UOp:
@@ -823,7 +829,8 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     return UOp(Ops.CALL, self.dtype, (self,)+srcs, CallInfo(grad_fxn, metadata))
   def custom_kernel(*srcs:UOp, fxn:Callable, grad_fxn:Callable|None=None) -> list[UOp]:
     contig_srcs = tuple(x.contiguous() if x.op is not Ops.AFTER else x for x in srcs)
-    kernel = UOp(Ops.CUSTOM_KERNEL, src=contig_srcs, arg=CustomKernel(fxn=fxn, grad_fxn=grad_fxn))
+    placeholders = [UOp.placeholder_like(s, slot=i) for i,s in enumerate(contig_srcs)]
+    kernel = fxn(*placeholders).call(*contig_srcs, grad_fxn=grad_fxn)
     return [s.after(kernel) for s in contig_srcs]
 
 @dataclass(frozen=True)
@@ -838,26 +845,12 @@ class KernelInfo:
   def function_name(self): return to_function_name(self.name)
 
 @dataclass(frozen=True)
-class CustomKernel:
-  fxn: Callable
-  grad_fxn: Callable|None = None
-  # sadly CustomKernel can't be pickled or reconstructed as a str
-  def __reduce__(self): return (CustomKernel, (panic,))
-  def __repr__(self): return f"CustomKernel({id(self.fxn)})"
-
-@dataclass(frozen=True)
 class CallInfo:
   grad_fxn: Callable|None = None
   metadata: tuple[Metadata, ...] = ()
   # grad_fxn can't be pickled, but metadata can
   def __reduce__(self): return (CallInfo, (None, self.metadata))
   def __repr__(self): return f"CallInfo({id(self.grad_fxn) if self.grad_fxn else None}, {self.metadata})"
-
-@dataclass(frozen=True)
-class Kernel:
-  ast: UOp
-  metadata: tuple[Metadata, ...] = ()
-  grad_fxn: Callable|None = None
 
 # ******** ops in python ********
 
@@ -1435,7 +1428,7 @@ def pyrender(ast:UOp) -> str:
       for s in u.src: to_render.add(s)
     if u.op is Ops.STORE: to_render.add(u.src[1])
     if u.op in {Ops.REDUCE, Ops.REDUCE_AXIS}: to_render.add(u.src[0])
-    if u.op in {Ops.CUSTOM_KERNEL, Ops.CALL}: raise NotImplementedError("custom_kernel / call can't be pyrendered")
+    if u.op is Ops.CALL: raise NotImplementedError("call can't be pyrendered")
     if u.op in not_rendered: continue
     # checking the consumers is not enough, you have to make sure it's not used twice by the one consumer
     if len(cmap[u]) == 1 and len([x for x in list(cmap[u].keys())[0].src if x is u]) == 1 and u.op not in always_rendered: continue
