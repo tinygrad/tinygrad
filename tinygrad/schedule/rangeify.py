@@ -33,6 +33,10 @@ pm_mops = PatternMatcher([
 # *****************
 # 0. do some cleanup rewrites, mostly copied from the old stuff
 
+def collapse_nested_assign(assign:UOp, target:UOp, src:UOp):
+  """nested ASSIGN to the same buffer (e.g. __iadd__ in __setitem__): collapse the redundant outer ASSIGN"""
+  if src.src[0].base is target.base: return src if src.src[0] is target else assign.replace(src=(target, src.src[1]))
+
 def assign_to_contiguous(assign:UOp, target:UOp, src:UOp):
   if (t := target.base).op is Ops.BUFFER or (t.op is Ops.MSTACK and all(s.op is Ops.BUFFER for s in t.src)): return None
   return src.f(Ops.CONTIGUOUS, tag=assign.tag)
@@ -74,10 +78,6 @@ mop_cleanup = PatternMatcher([
    lambda x,x2: x.replace(src=(x2.src[0], x.src[1])) if x.tag is None and x2.tag is None else None),
 ])
 
-def resolve_custom_kernel(ck:UOp) -> UOp:
-  placeholders = [UOp.placeholder_like(s, slot=i) for i,s in enumerate(ck.src)]
-  return ck.arg.fxn(*placeholders).call(*ck.src)
-
 def resolve_call(c:UOp) -> UOp|None:
   # don't resolve real kernel calls, sink or program
   if c.src[0].op is Ops.SINK and isinstance(c.src[0].arg, KernelInfo): return None
@@ -98,9 +98,6 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
 
   # resolve calls
   (UPat(Ops.CALL, name="c"), resolve_call),
-
-  # resolve custom kernels
-  (UPat(Ops.CUSTOM_KERNEL, name="ck"), resolve_custom_kernel),
 
   # remove CONTIGUOUS if the BUFFER is already contiguous
   (UPat(Ops.RESHAPE, src=(UPat(Ops.BUFFER), UPat()), name="r").f(Ops.CONTIGUOUS, name="c"), lambda r,c: r.replace(tag=c.tag)),
@@ -138,6 +135,9 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
   (UPat(Ops.COPY, src=(UPat.var("x"), UPat()), name="copy"), lambda x,copy: x.f(Ops.NOOP, tag=copy.tag) if x.device == copy.device else None),
 
   # ** assign rules **
+
+  # collapse nested ASSIGN to the same buffer (e.g. __iadd__ in __setitem__)
+  (UPat(Ops.ASSIGN, src=(UPat(name="target"), UPat(Ops.ASSIGN, name="src")), name="assign"), collapse_nested_assign),
 
   # move bitcast from assign target to source: a.bitcast(X).assign(src) -> a.assign(src.bitcast(a.dtype))
   (UPat(Ops.ASSIGN, src=(UPat(Ops.BITCAST, src=(UPat(name="target"),)), UPat(name="src")), name="assign"),
@@ -538,7 +538,7 @@ def tag_uop(ctx:tuple[list[UOp], set[UOp]], x:UOp):
   if x.dtype.scalar() == dtypes.index: return None
   ctx[0].append(x)
   return x.replace(tag=(len(ctx[0])-1,))
-add_tags = PatternMatcher([
+add_tags = pm_gate_kernel_sink+PatternMatcher([
   # don't tag BUFFERs, they are global
   (UPat(GroupOp.All-{Ops.BUFFER, Ops.CONST, Ops.DEVICE, Ops.UNIQUE, Ops.LUNIQUE, Ops.DEFINE_VAR, Ops.BIND, Ops.CALL, Ops.END,
                      Ops.MSTACK, Ops.MSELECT, Ops.RANGE}.union(GroupOp.Movement), name="x"), tag_uop),

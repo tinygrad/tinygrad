@@ -278,7 +278,9 @@ class Compiler:
   def disassemble(self, lib:bytes): pass
 
 @dataclass(frozen=True)
-class CompilerPair: renderer:type[Renderer]|functools.partial; compiler:type[Compiler]|functools.partial|None; ctrl_var:ContextVar|None = None # noqa: E702
+class CompilerPair:
+  renderer:type[Renderer]|functools.partial; compiler:type[Compiler]|functools.partial|None = None; ctrl_var:ContextVar|None = None # noqa: E702
+  name:str|None = None
 
 @dataclass(frozen=True)
 class CompilerSet: cset:list[CompilerPair]; ctrl_var:ContextVar|None = None # noqa: E702
@@ -293,7 +295,7 @@ class Compiled:
     self.comp_sets:dict[Any, tuple[ContextVar|None, tuple[type[Renderer]|functools.partial, type[Compiler]|functools.partial|None]]] = {}
     self.cached_pair:dict[Any, tuple[Renderer, Compiler|None]] = {}
     for cpair in (compilers.cset if compilers is not None else [CompilerPair(Renderer, Compiler)]):
-      self.comp_sets[self._compiler_name(cpair.renderer, cpair.compiler)] = (cpair.ctrl_var, (cpair.renderer, cpair.compiler))
+      self.comp_sets[cpair.name or self._compiler_name(cpair.renderer, cpair.compiler)] = (cpair.ctrl_var, (cpair.renderer, cpair.compiler))
 
   @property
   def renderer(self) -> Renderer: return self._select_compiler_pair()[0]
@@ -406,9 +408,9 @@ def enumerate_devices_str() -> Generator[str, None, None]:
             if test != [2,4,6]: raise ValueError(f"got {test} instead of [2, 4, 6]")
             set_text = f'({cc_ctrl_var.key}={d._compiler_name(r, c)} to make default)' if cc_ctrl_var is not None else ''
             default_text = '(default)' if type(default_compiler) is type(d.compiler) else set_text
-            compilers_results.append(f"{colored('+', 'green')} {unwrap_class_type(c).__name__} {default_text}")
+            compilers_results.append(f"{colored('+', 'green')} {d._compiler_name(r, c)} {default_text}")
             any_works = True
-          except Exception as e: compilers_results.append(f"{colored('-', 'yellow')} {unwrap_class_type(c).__name__}: {e}")
+          except Exception as e: compilers_results.append(f"{colored('-', 'yellow')} {d._compiler_name(r, c)}: {e}")
       finally:
         # put the defaults back!
         d.comp_sets, d.comps_ctrl_var = default_comp_pairs, cc_ctrl_var

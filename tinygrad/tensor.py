@@ -234,8 +234,7 @@ class Tensor(OpMixin):
 
   def as_param(self, slot:int):
     if self.uop.axis is not None:
-      multi_shape = tuple([s//len(self.device) if i==self.uop.axis else s for i,s in enumerate(self.shape)])
-      param = UOp.param(slot, self.dtype, multi_shape, self.device).multi(self.uop.axis)
+      param = UOp.param(slot, self.dtype, self.uop.shard_shape, self.device).multi(self.uop.axis)
     else:
       param = UOp.param(slot, self.dtype, self.shape, self.device)
     return Tensor(param, device=self.device)
@@ -756,8 +755,7 @@ class Tensor(OpMixin):
     dtype = kwargs.pop("dtype", self.dtype)
     if kwargs.get("device") is not None: raise RuntimeError("cannot specify `device` on `*_like` of a multi device tensor")
     if self.uop.axis is None: return fxn(self.shape, *args, dtype=dtype, **kwargs).shard(self.device)
-    sharded_shape = tuple(s//len(self.device) if a==self.uop.axis else s for a,s in enumerate(self.shape))
-    stacked = UOp(Ops.MSTACK, dtype=dtype, src=tuple([fxn(sharded_shape, *args, device=d, dtype=dtype, **kwargs).uop for d in self.device]))
+    stacked = UOp(Ops.MSTACK, dtype=dtype, src=tuple([fxn(self.uop.shard_shape, *args, device=d, dtype=dtype, **kwargs).uop for d in self.device]))
     return Tensor(UOp.multi(stacked, axis=self.uop.axis), device=self.device, dtype=dtype)
 
   def full_like(self, fill_value:PyConst, **kwargs) -> Tensor:
@@ -1281,20 +1279,19 @@ class Tensor(OpMixin):
     return self._getitem(indices)
 
   def __setitem__(self, indices, v:Tensor|PyConst|list|tuple) -> None:
+    if isinstance(v, Tensor) and v.dtype != self.dtype: raise RuntimeError(f"setitem dtype mismatch: {self.dtype=} != {v.dtype=}")
     if isinstance(self.device, str) and self.device.startswith("DISK"):
       self.realize()._getitem(indices).assign(v)
       return
-    # NOTE: check that setitem target is valid first
     if not isinstance(v, Tensor): v = Tensor(v, device=self.device, dtype=self.dtype)
     if self.requires_grad or v.requires_grad: raise NotImplementedError("setitem with requires_grad is not supported")
-    self.realize()
-    if not self.uop.is_writable_view(): raise RuntimeError("setitem target must be a writable view backed by a buffer")
     res = self._getitem(indices, v)
-    # if shapes match and data is not shared it's a copy and we assign to self
+    # if shapes match and data is not shared, it's advanced indexing, res is the assigned output
     if res.shape == self.shape and res.uop is not self.uop:
       self.assign(res).realize()
-    else: # no copy, basic setitem
-      v = v.cast(res.dtype)._broadcast_to(_broadcast_shape(res.shape, v.shape)).contiguous()
+    else: # basic setitem
+      self.realize()
+      if not self.uop.is_writable_view(): raise RuntimeError("setitem target must be a writable view backed by a buffer")
       res.assign(v).realize()
 
   def __delitem__(self, indices) -> None:
@@ -3786,7 +3783,7 @@ class Tensor(OpMixin):
     S, indices = U.square().sum(-2).sqrt().sort(dim = -1, descending=True)
     new_indices = indices.reshape(b_shape + (1, num)).expand(b_shape + (num, num))
     U = U.gather(-1, new_indices) / (S != 0).where(S, 1).unsqueeze(-2)
-    V = V.gather(-1, new_indices).realize()
+    V = V.gather(-1, new_indices)
 
     padded_u = Tensor.eye(q_num, dtype=U.dtype).reshape((1,) * len(b_shape) + (q_num, q_num)).expand(b_shape + (q_num, q_num)).contiguous()
     padded_u[..., 0:num, 0:num] = U
