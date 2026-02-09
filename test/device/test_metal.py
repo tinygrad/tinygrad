@@ -1,5 +1,5 @@
 import unittest
-from tinygrad.device import CompileError, Device, Compiler
+from tinygrad.device import CompileError, Device
 if Device.DEFAULT=="METAL":
   from tinygrad.runtime.ops_metal import MetalDevice, MetalCompiler, MetalProgram
 @unittest.skipIf(Device.DEFAULT!="METAL", "Metal support required")
