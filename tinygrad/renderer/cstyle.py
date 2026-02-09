@@ -382,17 +382,15 @@ class MetalRenderer(CStyleLanguage):
 _nms = list("xyzwabcdefghijkl") + [f'v{i}' for i in range(16, 32)]
 
 class CUDARenderer(CStyleLanguage):
+  device = "CUDA"
   global_max = (2147483647, 65535, 65535)
   local_max = (1024, 1024, 64)
   shared_max = 49152
 
-  def __init__(self, arch:str, device:str="NV", use_nvcc=False):
-    from tinygrad.runtime.support.compiler_cuda import NVRTCCompiler, NVCCCompiler
-    from tinygrad.runtime.support.hcq import MOCKGPU
-    cc = NVRTCCompiler if use_nvcc else NVCCCompiler
-    self.device, self.arch, self.compiler, self.use_nvcc = device, arch, cc(arch, ptx=bool(MOCKGPU) or device == "CUDA"), use_nvcc
-    self.tensor_cores = tc.cuda_sm89 if (ver:=int(arch[3:])) >= 89 else tc.cuda_sm80 if ver >= 80 else tc.cuda_sm75 if ver >= 75 else []
-  def __reduce__(self): return self.__class__, (self.arch, self.device, self.use_nvcc)
+  def __init__(self, arch:str):
+    self.arch, arch_ver = arch, int(arch[3:])
+    self.tensor_cores = tc.cuda_sm89 if arch_ver >= 89 else tc.cuda_sm80 if arch_ver >= 80 else tc.cuda_sm75 if arch_ver >= 75 else []
+  def __reduce__(self): return self.__class__, (self.arch,)
 
   # language options
   # https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html
@@ -549,6 +547,7 @@ class AMDHIPRenderer(CStyleLanguage):
   for (int n = 0; n < 8; n++) { d[n] = c_frag[n*2]; } return d;\n}""")
     return super().render_kernel(function_name, kernel, bufs, uops, prefix)
 
+class NVRenderer(CUDARenderer): device = "NV"
 class HIPRenderer(AMDHIPRenderer): device = "HIP"
 class AMDHIPCCRenderer(AMDHIPRenderer):
   def __init__(self, arch:str):

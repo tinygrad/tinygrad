@@ -1,4 +1,5 @@
-import hashlib, tempfile, ctypes, re, pathlib
+import subprocess, hashlib, tempfile, ctypes, re, pathlib
+from typing import Callable
 from tinygrad.helpers import to_char_p_p, colored, getenv, system
 from tinygrad.runtime.support.c import init_c_var
 from tinygrad.runtime.autogen import nvrtc, nvjitlink as jitlink
@@ -41,32 +42,36 @@ def cuda_disassemble(lib:bytes, arch:str, ptx=False):
     print(system(f'nvdisasm {fn}'))
   except Exception as e: print("Failed to generate SASS", str(e), "Make sure your PATH contains ptxas/nvdisasm binary of compatible version.")
 
-class NVRTCCompiler(Compiler):
-  def __init__(self, arch:str, ptx=True, cache_key:str="cuda"):
-    self.ptx, self.arch, self.compile_options = ptx, arch, [f'--gpu-architecture={arch}']
+class CUDACompiler(Compiler):
+  def __init__(self, arch:str, cache_key:str="cuda"):
+    self.arch, self.compile_options = arch, [f'--gpu-architecture={arch}']
     self.compile_options += [f"-I{CUDA_PATH}/include"] if CUDA_PATH else ["-I/usr/local/cuda/include", "-I/usr/include", "-I/opt/cuda/include"]
     nvrtc_check(nvrtc.nvrtcVersion((nvrtcMajor := ctypes.c_int()), (nvrtcMinor := ctypes.c_int())))
     if (nvrtcMajor.value, nvrtcMinor.value) >= (12, 4): self.compile_options.append("--minimal")
     super().__init__(f"compile_{cache_key}_{self.arch}")
-  def compile(self, src:str) -> bytes:
+  def _compile_program(self, src:str, nvrtc_get_content:Callable, nvrtc_get_size:Callable) -> bytes:
     nvrtc_check(nvrtc.nvrtcCreateProgram(ctypes.byref(prog := nvrtc.nvrtcProgram()), src.encode(), "<null>".encode(), 0, None, None))
     nvrtc_check(nvrtc.nvrtcCompileProgram(prog, len(self.compile_options), to_char_p_p([o.encode() for o in self.compile_options])), prog)
-    data = _get_bytes(prog, nvrtc.nvrtcGetPTX if self.ptx else nvrtc.nvrtcGetCUBIN,
-                      nvrtc.nvrtcGetPTXSize if self.ptx else nvrtc.nvrtcGetCUBINSize, nvrtc_check)
+    data = _get_bytes(prog, nvrtc_get_content, nvrtc_get_size, nvrtc_check)
     nvrtc_check(nvrtc.nvrtcDestroyProgram(ctypes.byref(prog)))
     return data
-  def disassemble(self, lib:bytes): cuda_disassemble(lib, self.arch, ptx=self.ptx)
+  def compile(self, src:str) -> bytes: return self._compile_program(src, nvrtc.nvrtcGetPTX, nvrtc.nvrtcGetPTXSize)
+  def disassemble(self, lib:bytes): cuda_disassemble(lib, self.arch, ptx=True)
+
+class NVCompiler(CUDACompiler):
+  def __init__(self, arch:str): super().__init__(arch, cache_key="nv")
+  def compile(self, src:str) -> bytes: return self._compile_program(src, nvrtc.nvrtcGetCUBIN, nvrtc.nvrtcGetCUBINSize)
+  def disassemble(self, lib:bytes): cuda_disassemble(lib, self.arch)
 
 class NVCCCompiler(Compiler):
-  def __init__(self, arch:str, ptx:bool=True, extra_options:list[str]=[]):
-    assert ptx, "NVCCCompiler cubin support unimplemented"
+  def __init__(self, arch:str, extra_options:list[str]=[]):
     self.arch, self.extra_options = arch, extra_options
     super().__init__(f"compile_nvcc_{self.arch}_{hashlib.sha256(' '.join(extra_options).encode()).hexdigest()[:8]}")
   def compile(self, src:str) -> bytes:
     with tempfile.NamedTemporaryFile(suffix=".cu") as srcf, tempfile.NamedTemporaryFile(suffix=".ptx") as libf:
       srcf.write(src.encode())
       srcf.flush()
-      system(f"nvcc -arch={self.arch} -ptx -o {libf.name} {srcf.name}" + ' '.join(self.extra_options))
+      subprocess.run(["nvcc", f"-arch={self.arch}", "-ptx", "-o", libf.name, srcf.name] + self.extra_options, check=True)
       return libf.read()
   def disassemble(self, lib:bytes): cuda_disassemble(lib, self.arch, ptx=True)
 
