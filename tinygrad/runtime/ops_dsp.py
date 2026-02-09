@@ -45,6 +45,8 @@ class DSPRenderer(ClangRenderer):
   type_map = { **ClangRenderer.type_map, dtypes.uint64: "unsigned long long", dtypes.int64: "long long" }
   code_for_op = {k:v for k,v in ClangRenderer.code_for_op.items() if k != Ops.SQRT}
 
+  def __init__(self): self.compiler = ClangCompiler("compile_dsp", ["-shared"] + compiler_args + [f"-T{self.link_ld.name}"], 'llvm-objdump')
+
   def _render_defines(self, uops) -> list[str]:
     return ['''/* DSP boilerplate */ struct dcvs_v2_req { int type; int _pad; _Bool dcvs_enable; char dcvs_option; _Bool set_latency; int latency;
       _Bool set_dcvs_params; short _pad2; char target_corner; char min_corner; char max_corner; int _pad3[3];};''','int HAP_power_set(void*, void*);',
@@ -130,12 +132,11 @@ class ClangCompiler(Compiler):
 
   def disassemble(self, lib:bytes): return cpu_objdump(lib, self.objdump_tool)
 
+compiler_args = ["--target=hexagon", "-mcpu=hexagonv65", "-fuse-ld=lld", "-nostdlib",  "-mhvx=v65", "-mhvx-length=128b"]
+
 class DSPDevice(Compiled):
   def __init__(self, device:str=""):
-    compiler_args = ["--target=hexagon", "-mcpu=hexagonv65", "-fuse-ld=lld", "-nostdlib",  "-mhvx=v65", "-mhvx-length=128b"]
-    if getenv("MOCKDSP"):
-      mock_compilers = CompilerSet([CompilerPair(MockDSPRenderer, functools.partial(ClangCompiler, None, ["-static"]+compiler_args, 'llvm-objdump'))])
-      super().__init__(device, DSPAllocator(self), mock_compilers, MockDSPProgram)
+    if getenv("MOCKDSP"): super().__init__(device, DSPAllocator(self), CompilerSet([CompilerPair(MockDSPRenderer)]), MockDSPProgram)
     else:
       self.ion_fd = os.open('/dev/ion', os.O_RDONLY)
       # Generate link script to pass into clang. Aligning all used sections to 4k fixes invoke problem.
@@ -146,8 +147,7 @@ class DSPDevice(Compiled):
         self.link_ld.write(f"SECTIONS {{ . = 0x0; {sections_link}\n /DISCARD/ : {{ *(.note .note.* .gnu.hash .comment) }} }}".encode())
         self.link_ld.flush()
 
-      compiler = functools.partial(ClangCompiler, "compile_dsp", ["-shared"] + compiler_args + [f"-T{self.link_ld.name}"], 'llvm-objdump')
-      super().__init__(device, DSPAllocator(self), CompilerSet([CompilerPair(DSPRenderer, compiler)]), functools.partial(DSPProgram, self))
+      super().__init__(device, DSPAllocator(self), CompilerSet([CompilerPair(DSPRenderer)]), functools.partial(DSPProgram, self))
       fastrpc_shell = memoryview(bytearray(pathlib.Path('/dsp/cdsp/fastrpc_shell_3').read_bytes()))
       self.shell_buf = self.allocator.alloc(round_up(fastrpc_shell.nbytes, 0x1000), BufferSpec(nolru=True))
       ctypes.memmove(self.shell_buf.va_addr, mv_address(fastrpc_shell), fastrpc_shell.nbytes)
@@ -268,6 +268,7 @@ static void *mmap2(void *addr, unsigned int length, int prot, int flags, int fd,
 return (void*)syscall((long)addr, length, prot, flags, fd, offset, 222); }}'''
 
 class MockDSPRenderer(DSPRenderer):
+  def __init__(self): self.compiler = ClangCompiler(None, ["-static"]+compiler_args, 'llvm-objdump')
   def _render_defines(self, uops) -> list[str]: return ClangRenderer._render_defines(self, uops)
   def _render_entry(self, function_name:str, bufs:list[tuple[str,tuple[DType,bool]]]) -> str:
     # https://gpages.juszkiewicz.com.pl/syscalls-table/syscalls.html
