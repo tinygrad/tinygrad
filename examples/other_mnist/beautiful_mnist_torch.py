@@ -41,22 +41,22 @@ if __name__ == "__main__":
 
   if getenv("TORCHVIZ"): torch.cuda.memory._record_memory_history()
   model = Model().to(device)
+  if getenv("TINY_BACKEND"): model = torch.compile(model, backend="tiny")
   optimizer = optim.Adam(model.parameters(), 1e-3)
 
   loss_fn = nn.CrossEntropyLoss()
-  def step(samples):
+  def forward(samples):
     X,Y = X_train[samples], Y_train[samples]
     out = model(X)
     loss = loss_fn(out, Y)
-    optimizer.zero_grad()
-    loss.backward()
-    optimizer.step()
     return loss
-  if getenv("TINY_BACKEND"): step = torch.compile(step, backend="tiny")
   test_acc = float('nan')
   for i in (t:=trange(getenv("STEPS", 70))):
     samples = torch.randint(0, X_train.shape[0], (512,))  # putting this in JIT didn't work well
-    loss = step(samples)
+    optimizer.zero_grad()
+    loss = forward(samples)
+    loss.backward()
+    optimizer.step()
     if i%10 == 9: test_acc = ((model(X_test).argmax(axis=-1) == Y_test).sum() * 100 / X_test.shape[0]).item()
     t.set_description(f"loss: {loss.item():6.2f} test_accuracy: {test_acc:5.2f}%")
 
