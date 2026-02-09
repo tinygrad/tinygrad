@@ -2,7 +2,7 @@
 # A001 Variable `input` is shadowing a Python builtin
 # A002 Function argument `input` is shadowing a Python builtin
 # A006 Lambda argument `input` is shadowing a Python builtin
-from tinygrad import Tensor, dtypes, Device, TinyJit
+from tinygrad import Tensor, dtypes, Device
 from tinygrad.uop.ops import Ops
 from tinygrad.helpers import getenv, prod, strides_for_shape, argfix
 import torch.lib
@@ -62,6 +62,8 @@ torch.utils.rename_privateuse1_backend("tiny")
 torch._register_device_module("tiny", TinyBackend())
 torch.utils.generate_methods_for_privateuse1_backend()
 aten = torch.ops.aten
+from extra.torch_backend.compile_backend import register_tiny_backend
+register_tiny_backend(wrap, unwrap)
 
 # track view relationships for in place operations
 def canonical_base(view: Tensor): return getattr(view, "_view_base", view)
@@ -820,26 +822,3 @@ def _pad_circular(self, padding): return _PadCircular.apply(self, padding)
 @torch.library.impl("aten::_pad_circular", "AutogradPrivateUse1")
 def _pad_circular_autograd(self, padding): return _PadCircular.apply(self, padding)
 
-# torch.compile backend
-from torch._dynamo.backends.registry import register_backend
-from torch._functorch.aot_autograd import aot_module_simplified
-@register_backend
-def tiny(gm:torch.fx.GraphModule, sample_inputs):
-  def my_compiler(gm:torch.fx.GraphModule, sample_inputs):
-    @TinyJit
-    def tiny_function(*args:Tensor):
-      outs = gm(*[wrap(x) for x in args])
-      if isinstance(outs, torch.Tensor): outs = (outs,)
-      outs = tuple(unwrap(x) for x in outs)
-      for x in outs: x.realize()
-      return outs
-    def torch_function(*args:torch.Tensor):
-      tiny_args = []
-      for x in args:
-        if not x.is_tiny:
-          if x.requires_grad: raise RuntimeError("tiny backend requires tiny tensors for grad inputs")
-          x = x.to("tiny")
-        tiny_args.append(unwrap(x))
-      return tuple(wrap(x) for x in tiny_function(*tiny_args))
-    return torch_function
-  return aot_module_simplified(gm, sample_inputs, decompositions={}, fw_compiler=my_compiler)
