@@ -24,6 +24,7 @@ def canonicalize_device(device:str|tuple|list|None) -> str|tuple[str, ...]:
 # *** all in scope Tensors are here. this gets relevant UOps ***
 
 all_tensors: dict[weakref.ref[Tensor], None] = {}
+_pending_assigns: dict[UOp, list[UOp]] = {}  # buffer_uop -> [assign_uops in insertion order]
 def _apply_map_to_tensors(applied_map:dict[UOp, UOp], name:str) -> None:
   with cpu_profile(TracingKey(name), "TINY"):
     # get tensors in scope
@@ -271,6 +272,13 @@ class Tensor(OpMixin):
   @disable_gc()
   def realize(self, *lst:Tensor, do_update_stats=True) -> Tensor:
     """Triggers the computation needed to create these Tensor(s)."""
+    # side-realize pending assigns for buffers referenced by these tensors
+    if _pending_assigns:
+      for buf in {u for t in (self,)+lst for u in t.uop.toposort() if u.op is Ops.BUFFER}:
+        for assign_uop in _pending_assigns.pop(buf, []):
+          becomes_map, schedule, var_vals = complete_create_schedule_with_vars(UOp.sink(assign_uop))
+          _apply_map_to_tensors(becomes_map, name="Apply Pending Assign")
+          run_schedule(schedule, var_vals, do_update_stats=do_update_stats)
     if len(to_realize:=[x for x in (self,)+lst if not x.uop.has_buffer_identity()]):
       run_schedule(*Tensor.schedule_with_vars(*to_realize), do_update_stats=do_update_stats)
     return self
@@ -299,7 +307,11 @@ class Tensor(OpMixin):
     if is_disk:
       self._buffer().copyin(x._data())
       return self
-    return self.replace(self._apply_uop(UOp.assign, x))
+    result = self._apply_uop(UOp.assign, x)
+    # track view assigns (not full-buffer or assign-chain) so they can be side-realized when the buffer is read
+    if (buf_uop:=self.uop.base).op is Ops.BUFFER and self.uop.op is not Ops.ASSIGN and not self.uop.has_buffer_identity():
+      _pending_assigns.setdefault(buf_uop, []).append(result.uop)
+    return self.replace(result)
 
   def detach(self) -> Tensor:
     """
