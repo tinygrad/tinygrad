@@ -1291,7 +1291,7 @@ class Tensor(OpMixin):
     else: # basic setitem
       self.realize()
       if not self.uop.is_writable_view(): raise RuntimeError("setitem target must be a writable view backed by a buffer")
-      v = v.cast(res.dtype)._broadcast_to(_broadcast_shape(res.shape, v.shape)).contiguous()
+      v = v.cast(res.dtype)._broadcast_to(_broadcast_shape(res.shape, v.shape))
       res.assign(v).realize()
 
   def __delitem__(self, indices) -> None:
