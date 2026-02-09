@@ -86,6 +86,16 @@ C10_REGISTER_GUARD_IMPL(PrivateUse1, CustomNoOpDeviceGuardImpl);
 
 template <typename OpaqueHandle>
 struct TinyOpaqueTensorImpl : public OpaqueTensorImpl<OpaqueHandle> {
+  static c10::Storage make_fake_storage(const caffe2::TypeMeta data_type, c10::IntArrayRef sizes, c10::IntArrayRef strides, int64_t storage_offset) {
+    int64_t max_offset = storage_offset;
+    for (int i = 0; i < sizes.size(); i++) {
+      if (sizes[i] == 0) return at::empty({0}, at::TensorOptions().dtype(at::kByte).device(at::kMeta)).storage();
+      max_offset += (sizes[i] - 1) * strides[i];
+    }
+    int64_t nbytes = (max_offset + 1) * data_type.itemsize();
+    return at::empty({nbytes}, at::TensorOptions().dtype(at::kByte).device(at::kMeta)).storage();
+  }
+
   TinyOpaqueTensorImpl(
       at::DispatchKeySet key_set,
       const caffe2::TypeMeta data_type,
@@ -97,7 +107,57 @@ struct TinyOpaqueTensorImpl : public OpaqueTensorImpl<OpaqueHandle> {
       : OpaqueTensorImpl<OpaqueHandle>(key_set, data_type, device, opaque_handle, sizes) {
     this->sizes_and_strides_.set_strides(strides);
     this->storage_offset_ = storage_offset;
+    fake_storage_ = make_fake_storage(data_type, sizes, strides, storage_offset);
   }
+
+  const c10::Storage& storage() const override {
+    return fake_storage_;
+  }
+
+  c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach(
+      const c10::VariableVersion& version_counter,
+      bool allow_tensor_metadata_change) const override {
+    auto impl = c10::make_intrusive<TinyOpaqueTensorImpl<OpaqueHandle>>(
+        this->key_set(),
+        this->dtype(),
+        this->device(),
+        this->opaque_handle(),
+        this->sizes_and_strides_.sizes_arrayref(),
+        this->sizes_and_strides_.strides_arrayref(),
+        this->storage_offset_);
+    this->copy_tensor_metadata(
+        /*src_opaque_impl=*/this,
+        /*dest_opaque_impl=*/impl.get(),
+        /*version_counter=*/version_counter,
+        /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
+    impl->fake_storage_ = fake_storage_;
+    impl->refresh_numel();
+    return impl;
+  }
+
+  c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach(
+      c10::VariableVersion&& version_counter,
+      bool allow_tensor_metadata_change) const override {
+    auto impl = c10::make_intrusive<TinyOpaqueTensorImpl<OpaqueHandle>>(
+        this->key_set(),
+        this->dtype(),
+        this->device(),
+        this->opaque_handle(),
+        this->sizes_and_strides_.sizes_arrayref(),
+        this->sizes_and_strides_.strides_arrayref(),
+        this->storage_offset_);
+    this->copy_tensor_metadata(
+        /*src_opaque_impl=*/this,
+        /*dest_opaque_impl=*/impl.get(),
+        /*version_counter=*/std::move(version_counter),
+        /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
+    impl->fake_storage_ = fake_storage_;
+    impl->refresh_numel();
+    return impl;
+  }
+
+ private:
+  c10::Storage fake_storage_;
 };
 }
 
