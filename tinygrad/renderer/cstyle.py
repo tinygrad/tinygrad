@@ -386,13 +386,13 @@ class CUDARenderer(CStyleLanguage):
   local_max = (1024, 1024, 64)
   shared_max = 49152
 
-  def __init__(self, arch:str, device:str="NV"):
+  def __init__(self, arch:str, device:str="NV", use_nvcc=False):
     from tinygrad.runtime.support.compiler_cuda import NVRTCCompiler, NVCCCompiler
     from tinygrad.runtime.support.hcq import MOCKGPU
-    cc = NVRTCCompiler if device == "NV" or CUDA_CC.value != "NVCC" else NVCCCompiler
-    self.device, self.arch, self.compiler, arch_ver = device, arch, cc(arch, ptx=bool(MOCKGPU) or device == "CUDA"), int(arch[3:])
-    self.tensor_cores = tc.cuda_sm89 if arch_ver >= 89 else tc.cuda_sm80 if arch_ver >= 80 else tc.cuda_sm75 if arch_ver >= 75 else []
-  def __reduce__(self): return self.__class__, (self.arch, self.device)
+    cc = NVRTCCompiler if use_nvcc else NVCCCompiler
+    self.device, self.arch, self.compiler, self.use_nvcc = device, arch, cc(arch, ptx=bool(MOCKGPU) or device == "CUDA"), use_nvcc
+    self.tensor_cores = tc.cuda_sm89 if (ver:=int(arch[3:])) >= 89 else tc.cuda_sm80 if ver >= 80 else tc.cuda_sm75 if ver >= 75 else []
+  def __reduce__(self): return self.__class__, (self.arch, self.device, self.use_nvcc)
 
   # language options
   # https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html
