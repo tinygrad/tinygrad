@@ -1,8 +1,18 @@
 import unittest
+from unittest.mock import patch
 from tinygrad import Device
 from tinygrad.device import Buffer
 from tinygrad.dtype import dtypes
-from tinygrad.runtime.ops_cl import CLDevice, CLAllocator, CLProgram
+from tinygrad.runtime.ops_cl import CLDevice, CLAllocator, CLCompiler, CLProgram
+
+@unittest.skipUnless(Device.DEFAULT == "CL", "Runs only on OpenCL")
+class TestCLCompileCache(unittest.TestCase):
+  def test_compile_cached(self):
+    device = Device[Device.DEFAULT]
+    src = "__kernel void cached_test(__global int* a) { a[0] = 1; }"
+    CLProgram(device, name="cached_test", lib=src.encode())
+    with patch.object(CLCompiler, 'compile', side_effect=RuntimeError("compile should not be called on cache hit")):
+      CLProgram(device, name="cached_test", lib=src.encode())
 
 @unittest.skipUnless(Device.DEFAULT == "CL", "Runs only on OpenCL")
 class TestCLError(unittest.TestCase):

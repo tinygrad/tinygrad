@@ -6,7 +6,7 @@ from tinygrad.device import BufferSpec, CompilerSet, Device
 from tinygrad.runtime.support.hcq import HCQBuffer, HWQueue, HCQProgram, HCQCompiled, HCQAllocatorBase, HCQSignal, HCQArgsState, BumpAllocator
 from tinygrad.runtime.support.hcq import FileIOInterface, MMIOInterface
 from tinygrad.runtime.autogen import kgsl, mesa
-from tinygrad.runtime.ops_cl import CLDevice, cl_compile
+from tinygrad.runtime.ops_cl import CLDevice
 from tinygrad.renderer.cstyle import QCOMRenderer
 from tinygrad.renderer.nir import IR3Renderer
 from tinygrad.helpers import getenv, mv_address, to_mv, round_up, data64_le, ceildiv, prod, fromimport, cpu_profile, lo32, suppress_finalizing
@@ -249,7 +249,7 @@ class QCOMProgram(HCQProgram):
       self.fregs, self.hregs = v.info.max_reg + 1, v.info.max_half_reg + 1
       self.consts_info:list[tuple] = []
     else:
-      self._parse_lib(lib:=cl_compile(self.dev.cl_dev, lib.decode()))
+      self._parse_lib(lib:=self.dev.cl_dev.clc.compile_cached(lib.decode()))
       if DEBUG >= 7: fromimport('tinygrad.runtime.support.compiler_mesa', 'disas_adreno')(lib[(ofs:=_read_lib(lib, 0xc0)):ofs+_read_lib(lib, 0x100)])
 
     self.lib_gpu: HCQBuffer = self.dev.allocator.alloc(self.image_size, buf_spec:=BufferSpec(cpu_access=True, nolru=True))
