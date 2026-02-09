@@ -54,13 +54,6 @@ class MetalDevice(Compiled):
         Compiled.profile_events += [ProfileRangeEvent(self.device, lb, st, en)]
     self.mtl_buffers_in_flight.clear()
 
-def metal_src_to_library(device:MetalDevice, src:str) -> metal.MTLLibrary:
-  options = metal.MTLCompileOptions.new()
-  options.setFastMathEnabled(getenv("METAL_FAST_MATH"))
-  library = device.sysdevice.newLibraryWithSource_options_error(to_ns_str(src), options, ctypes.byref(compileError:=metal.NSError().retained()))
-  error_check(compileError, CompileError)
-  return library
-
 class MetalCompiler(Compiler):
   # Opening METAL after LLVM doesn't fail because ctypes.CDLL opens with RTLD_LOCAL but MTLCompiler opens it's own llvm with RTLD_GLOBAL
   # This means that MTLCompiler's llvm will create it's own instances of global state because RTLD_LOCAL doesn't export symbols, but if RTLD_GLOBAL
@@ -118,15 +111,9 @@ class MetalCompiler(Compiler):
 class MetalProgram:
   def __init__(self, dev:MetalDevice, name:str, lib:bytes, **kwargs):
     self.dev, self.name, self.lib = dev, name, lib
-    if lib[:4] == b"MTLB":
-      # binary metal library
-      data = objc.dispatch_data_create(lib, len(lib), None, None)
-      self.library = self.dev.sysdevice.newLibraryWithData_error(data, ctypes.byref(error_lib:=metal.NSError().retained())).retained()
-      error_check(error_lib)
-    else:
-      # metal source. rely on OS caching
-      try: self.library = metal_src_to_library(self.dev, lib.decode())
-      except CompileError as e: raise RuntimeError from e
+    data = objc.dispatch_data_create(lib, len(lib), None, None)
+    self.library = self.dev.sysdevice.newLibraryWithData_error(data, ctypes.byref(error_lib:=metal.NSError().retained())).retained()
+    error_check(error_lib)
     self.fxn = self.library.newFunctionWithName(to_ns_str(name)).retained()
     descriptor = metal.MTLComputePipelineDescriptor.new()
     descriptor.setComputeFunction(self.fxn)

@@ -3,10 +3,9 @@ import os, math, sys, struct
 from collections import defaultdict, Counter
 from tinygrad.codegen.opt import tc
 from tinygrad.uop.ops import GroupOp, Ops, UOp, PatternMatcher, UPat, range_str, axis_letters
-from tinygrad.helpers import strip_parens, getenv, prod, dedup, select_first_inited, AMX, CPU_COUNT
+from tinygrad.helpers import strip_parens, getenv, prod, dedup, AMX, CPU_COUNT
 from tinygrad.dtype import ImageDType, dtypes, DType, PtrDType, AddrSpace, truncate, float_to_bf16
 from tinygrad.renderer import Renderer
-from tinygrad.device import Compiler
 from tinygrad.codegen.late.devectorizer import no_vectorized_alu
 
 
@@ -343,8 +342,7 @@ class MetalRenderer(CStyleLanguage):
   shared_max = 32768
   def __init__(self):
     from tinygrad.runtime.ops_metal import MetalCompiler
-    self.compiler = select_first_inited([MetalCompiler, Compiler], "No compiler for METAL is available")
-    self.tensor_cores = tc.metal if hasattr(os, 'uname') and os.uname().machine == "arm64" else []
+    self.compiler, self.tensor_cores = MetalCompiler(), tc.metal if hasattr(os, 'uname') and os.uname().machine == "arm64" else []
 
   # language options
   kernel_typedef = "kernel void"
