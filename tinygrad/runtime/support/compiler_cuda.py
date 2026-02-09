@@ -58,10 +58,10 @@ class NVRTCCompiler(Compiler):
   def disassemble(self, lib:bytes): cuda_disassemble(lib, self.arch, ptx=self.ptx)
 
 class NVCCCompiler(Compiler):
-  def __init__(self, arch:str, ptx:bool=True, extra_options:list[str]=[]):
+  def __init__(self, arch:str, ptx:bool=True, cache_key:str="cuda", extra_options:list[str]=[]):
     assert ptx, "NVCCCompiler cubin support unimplemented"
     self.arch, self.extra_options = arch, extra_options
-    super().__init__(f"compile_nvcc_{self.arch}_{hashlib.sha256(' '.join(extra_options).encode()).hexdigest()[:8]}")
+    super().__init__(f"compile_nvcc_{cache_key}_{self.arch}_{hashlib.sha256(' '.join(extra_options).encode()).hexdigest()[:8]}")
   def compile(self, src:str) -> bytes:
     with tempfile.NamedTemporaryFile(suffix=".cu") as srcf, tempfile.NamedTemporaryFile(suffix=".ptx") as libf:
       srcf.write(src.encode())
