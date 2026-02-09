@@ -1,7 +1,7 @@
 from __future__ import annotations
 import ctypes, os, mmap, tempfile, pathlib, array, functools, threading, contextlib, sys, subprocess, struct
 assert sys.platform != 'win32'
-from tinygrad.device import BufferSpec, Compiled, Allocator, Compiler, CompilerSet, CompilerPair
+from tinygrad.device import BufferSpec, Compiled, Allocator, Compiler, CompilerSet
 from tinygrad.dtype import dtypes, DType, PtrDType
 from tinygrad.uop.ops import Ops, UOp
 from tinygrad.helpers import getenv, round_up, mv_address, to_mv, cpu_objdump, system, DEBUG, suppress_finalizing
@@ -146,10 +146,10 @@ class DSPCompiler(Compiler):
 
 class DSPDevice(Compiled):
   def __init__(self, device:str=""):
-    if getenv("MOCKDSP"): super().__init__(device, DSPAllocator(self), CompilerSet([CompilerPair(MockDSPRenderer)]), MockDSPProgram)
+    if getenv("MOCKDSP"): super().__init__(device, DSPAllocator(self), CompilerSet([(MockDSPRenderer, None)]), MockDSPProgram)
     else:
       self.ion_fd = os.open('/dev/ion', os.O_RDONLY)
-      super().__init__(device, DSPAllocator(self), CompilerSet([CompilerPair(DSPRenderer)]), functools.partial(DSPProgram, self))
+      super().__init__(device, DSPAllocator(self), CompilerSet([(DSPRenderer, None)]), functools.partial(DSPProgram, self))
       fastrpc_shell = memoryview(bytearray(pathlib.Path('/dsp/cdsp/fastrpc_shell_3').read_bytes()))
       self.shell_buf = self.allocator.alloc(round_up(fastrpc_shell.nbytes, 0x1000), BufferSpec(nolru=True))
       ctypes.memmove(self.shell_buf.va_addr, mv_address(fastrpc_shell), fastrpc_shell.nbytes)

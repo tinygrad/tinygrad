@@ -2,6 +2,7 @@ from tinygrad.dtype import DType, PtrDType, dtypes, truncate, AddrSpace
 from tinygrad.uop.ops import UOp, Ops, PatternMatcher, UPat
 from tinygrad.renderer.cstyle import CStyleLanguage, base_rewrite, extra_pm
 from tinygrad.helpers import strip_parens
+from tinygrad.device import Compiler
 
 def _mask(dt:DType): return 0xFF if dt.itemsize == 1 else 0xFFFF
 
@@ -58,6 +59,8 @@ class WGSLRenderer(CStyleLanguage):
   nan = "nan()"
   type_map = { dtypes.float: "f32", dtypes.uchar: "u32", dtypes.ushort: "u32", dtypes.short: "i32",
               dtypes.char: "i32", dtypes.int32: "i32", dtypes.uint32: "u32", dtypes.bool: "bool", dtypes.half: "f16" }
+
+  compiler = Compiler()
 
   string_rewrite = PatternMatcher([
     (UPat(Ops.NEG, dtypes.uints, src=(UPat.var('x'))), lambda ctx,x: f"(0-{ctx[x]})"),

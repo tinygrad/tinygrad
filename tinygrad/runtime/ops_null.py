@@ -1,5 +1,5 @@
 import functools
-from tinygrad.device import Compiled, Compiler, Allocator, CompilerSet, CompilerPair
+from tinygrad.device import Compiled, Compiler, Allocator, CompilerSet
 from tinygrad.engine.jit import MultiGraphRunner
 from tinygrad.renderer.cstyle import Renderer, CStyleLanguage, AMDHIPRenderer
 from tinygrad.uop.ops import Ops
@@ -12,6 +12,7 @@ class NullRenderer(CStyleLanguage):
   float4 = "float4"
   barrier = "// BARRIER"
   code_for_op = {**CStyleLanguage.code_for_op, Ops.THREEFRY: lambda a,b,dtype: f"threefry({a},{b})", Ops.MAX: lambda a,b,dtype: f"max({a},{b})"}
+  compiler = Compiler()
 
 class NullProgram:
   def __init__(self, device:str, name:str, lib:bytes, *args, **kwargs): self.device, self.name = device, name
@@ -39,6 +40,6 @@ class NullDevice(Compiled):
       case "AMD_CDNA4": renderer = functools.partial(AMDHIPRenderer, "gfx950")
       case "": renderer = NullRenderer
       case _: raise RuntimeError(f"can't EMULATE device: {EMULATE.value}")
-    compilers = CompilerSet([CompilerPair(renderer, Compiler), CompilerPair(functools.partial(IR3Renderer, 0x6030001), None, NULL_IR3), # adreno 630
-                             CompilerPair(functools.partial(NAKRenderer, "sm_120", 48), None, NULL_NAK)]) # 5090
+    compilers = CompilerSet([(renderer, None), (functools.partial(IR3Renderer, 0x6030001), NULL_IR3), # adreno 630
+                             (functools.partial(NAKRenderer, "sm_120", 48), NULL_NAK)]) # 5090
     super().__init__(device, NullAllocator(self), compilers, functools.partial(NullProgram, device), NullGraph)
