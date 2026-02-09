@@ -111,30 +111,18 @@ class TestJitFootguns(unittest.TestCase):
       self.assertEqual(first.numpy().item(), expected_first)
       buf = new_buf
 
-  def test_slice_assign_requires_realize(self):
-    """Slice assign then read from same buffer - assign isn't connected to read without explicit realize()."""
+  def test_slice_assign_works_without_realize(self):
+    """Slice assign then read from same buffer - pending assigns are side-realized."""
     from tinygrad import Variable
     v_pos = Variable("pos", 0, 3)
-
-    # without .realize() after assign, the read doesn't see the assigned values
     cache = Tensor.zeros(4, 4).contiguous().realize()
     @TinyJit
-    def f_broken(pos):
+    def f(pos):
       cache[pos:pos+1, :].assign(Tensor.ones(1, 4))
       return cache.sum().realize()
     for i in range(4):
       cache.assign(Tensor.zeros(4, 4)).realize()
-      self.assertEqual(f_broken(v_pos.bind(i)).item(), 0.0)  # should be 4.0!
-
-    # workaround: add .realize() after assign
-    cache2 = Tensor.zeros(4, 4).contiguous().realize()
-    @TinyJit
-    def f_fixed(pos):
-      cache2[pos:pos+1, :].assign(Tensor.ones(1, 4)).realize()
-      return cache2.sum().realize()
-    for i in range(4):
-      cache2.assign(Tensor.zeros(4, 4)).realize()
-      self.assertEqual(f_fixed(v_pos.bind(i)).item(), 4.0)
+      self.assertEqual(f(v_pos.bind(i)).item(), 4.0)
 
   def test_symbolic_pad_view_frozen(self):
     """Symbolic pad view has BIND values baked in at capture time. TODO: pad should be captured in jit."""
