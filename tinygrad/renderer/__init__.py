@@ -150,6 +150,7 @@ class Renderer:
   pre_matcher: PatternMatcher|None = None
   extra_matcher: PatternMatcher|None = None
   code_for_op: dict[Ops, Callable] = {}
+
   compiler: Compiler = Compiler()
 
   def __reduce__(self): return self.__class__, ()
