@@ -1279,6 +1279,7 @@ class Tensor(OpMixin):
     return self._getitem(indices)
 
   def __setitem__(self, indices, v:Tensor|PyConst|list|tuple) -> None:
+    if isinstance(v, Tensor) and v.dtype != self.dtype: raise RuntimeError(f"setitem dtype mismatch: {self.dtype=} != {v.dtype=}")
     if isinstance(self.device, str) and self.device.startswith("DISK"):
       self.realize()._getitem(indices).assign(v)
       return
@@ -1291,7 +1292,7 @@ class Tensor(OpMixin):
     else: # basic setitem
       self.realize()
       if not self.uop.is_writable_view(): raise RuntimeError("setitem target must be a writable view backed by a buffer")
-      res.assign(v.cast(res.dtype)).realize()
+      res.assign(v).realize()
 
   def __delitem__(self, indices) -> None:
     raise TypeError("Tensor does not support deleting items")
