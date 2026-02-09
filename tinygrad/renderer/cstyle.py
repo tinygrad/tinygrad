@@ -3,7 +3,7 @@ import os, math, sys, struct
 from collections import defaultdict, Counter
 from tinygrad.codegen.opt import tc
 from tinygrad.uop.ops import GroupOp, Ops, UOp, PatternMatcher, UPat, range_str, axis_letters
-from tinygrad.helpers import strip_parens, getenv, prod, dedup, AMX, CPU_COUNT
+from tinygrad.helpers import strip_parens, getenv, prod, dedup, AMX, CPU_COUNT, CUDA_CC
 from tinygrad.dtype import ImageDType, dtypes, DType, PtrDType, AddrSpace, truncate, float_to_bf16
 from tinygrad.renderer import Renderer
 from tinygrad.codegen.late.devectorizer import no_vectorized_alu
@@ -382,13 +382,15 @@ class MetalRenderer(CStyleLanguage):
 _nms = list("xyzwabcdefghijkl") + [f'v{i}' for i in range(16, 32)]
 
 class CUDARenderer(CStyleLanguage):
-  device = "CUDA"
   global_max = (2147483647, 65535, 65535)
   local_max = (1024, 1024, 64)
   shared_max = 49152
 
-  def __init__(self, arch:str):
-    self.arch, arch_ver = arch, int(arch[3:])
+  def __init__(self, arch:str, device:str="NV"):
+    from tinygrad.runtime.support.compiler_cuda import NVRTCCompiler, NVCCCompiler
+    from tinygrad.runtime.support.hcq import MOCKGPU
+    cc = NVRTCCompiler if device == "NV" or cast(str, CUDA_CC.value) != "NVCC" else NVCCCompiler
+    self.device, self.arch, self.compiler, arch_ver = device, arch, cc(arch, ptx=bool(MOCKGPU) or device == "CUDA"), int(arch[3:])
     self.tensor_cores = tc.cuda_sm89 if arch_ver >= 89 else tc.cuda_sm80 if arch_ver >= 80 else tc.cuda_sm75 if arch_ver >= 75 else []
   def __reduce__(self): return self.__class__, (self.arch,)
 
@@ -547,7 +549,6 @@ class AMDHIPRenderer(CStyleLanguage):
   for (int n = 0; n < 8; n++) { d[n] = c_frag[n*2]; } return d;\n}""")
     return super().render_kernel(function_name, kernel, bufs, uops, prefix)
 
-class NVRenderer(CUDARenderer): device = "NV"
 class HIPRenderer(AMDHIPRenderer): device = "HIP"
 class AMDHIPCCRenderer(AMDHIPRenderer):
   def __init__(self, arch:str):
