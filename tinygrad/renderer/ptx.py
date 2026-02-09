@@ -144,9 +144,11 @@ class PTXRenderer(Renderer):
   tc_sm80 = [x for x in tc.cuda_sm80 if x.dtype_in in [dtypes.half, dtypes.float]]
   code_for_op = asm_for_op
   extra_matcher = ptx_matcher
-  def __init__(self, arch:str, device="CUDA"):
-    self.device, self.arch, arch_ver = device, arch, int(arch[3:])
-    self.tensor_cores = PTXRenderer.tc_sm80 if arch_ver >= 80 else tc.cuda_sm75 if arch_ver >= 75 else []
+  def __init__(self, arch:str, device="NV"):
+    from tinygrad.runtime.support.compiler_cuda import NVPTXCompiler, PTXCompiler
+    from tinygrad.runtime.support.hcq import MOCKGPU
+    self.compiler, self.device, self.arch = (PTXCompiler if bool(MOCKGPU) or device == "CUDA" else NVPTXCompiler)(arch), device, arch
+    self.tensor_cores = PTXRenderer.tc_sm80 if (ver:=int(arch[3:])) >= 80 else tc.cuda_sm75 if ver >= 75 else []
   def __reduce__(self): return self.__class__, (self.arch, self.device)
 
   # language options
