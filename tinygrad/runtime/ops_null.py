@@ -1,5 +1,5 @@
 import functools
-from tinygrad.device import Compiled, Compiler, Allocator, CompilerSet
+from tinygrad.device import Compiled, Allocator, CompilerSet
 from tinygrad.engine.jit import MultiGraphRunner
 from tinygrad.renderer.cstyle import Renderer, CStyleLanguage, AMDHIPRenderer
 from tinygrad.uop.ops import Ops
@@ -12,7 +12,6 @@ class NullRenderer(CStyleLanguage):
   float4 = "float4"
   barrier = "// BARRIER"
   code_for_op = {**CStyleLanguage.code_for_op, Ops.THREEFRY: lambda a,b,dtype: f"threefry({a},{b})", Ops.MAX: lambda a,b,dtype: f"max({a},{b})"}
-  compiler = Compiler()
 
 class NullProgram:
   def __init__(self, device:str, name:str, lib:bytes, *args, **kwargs): self.device, self.name = device, name
