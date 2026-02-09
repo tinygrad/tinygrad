@@ -31,6 +31,7 @@ if __name__ == "__main__":
   g_mode.add_argument("--rewrites", action="store_true", help="View rewrites trace")
   g_profile = parser.add_argument_group("profile options")
   g_profile.add_argument("--device", type=str, default=None, metavar="NAME", help="Select a device (optional name, default: only list names)")
+  g_profile.add_argument("--top", type=int, default=10, metavar="N", help="Number of top kernels to show (-1 for all, default: 10)")
   g_rewrites = parser.add_argument_group("rewrites options")
   g_rewrites.add_argument("--select", type=str, default=None, metavar="NAME",
                           help="Select an item within the chosen kernel (optional name, default: only list names)")
@@ -72,9 +73,9 @@ if __name__ == "__main__":
           total += et
     if agg and total > 0:
       items = sorted(agg.items(), key=lambda kv:kv[1][0], reverse=True)
-      sel = items[:10]
+      sel = items if args.top == -1 else items[:args.top]
       table = [[name, time_to_str(t, w=9), c, f"{(t/total*100.0):.2f}%"] for name,(t,c) in sel]
-      if (other:=items[len(sel):]):
+      if args.top != -1 and (other:=items[len(sel):]):
         other_t = total-sum(t for _, (t, _) in sel)
         table.append([f"Other ({len(other)} unique)", time_to_str(other_t, w=9), sum(c for _,(_,c) in other), f"{other_t/total*100.0:.2f}%"])
       print(tabulate(table, headers=["name", "total", "count", "pct"], tablefmt="github"))
