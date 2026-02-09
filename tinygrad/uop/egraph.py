@@ -195,16 +195,21 @@ def egraph_extract(root:UOp, pm:PatternMatcher, max_iters:int=10, ctx=None) -> U
   if root_canon is not None and root_canon in cost_of: return _rebuild_tree(cost_of[root_canon][1], eclass_of, cost_of)
   return root
 
-def _rebuild_tree(u:UOp, eclass_of:dict[UOp, UOp], cost_of:dict[UOp, tuple[int, UOp]]) -> UOp:
+def _rebuild_tree(u:UOp, eclass_of:dict[UOp, UOp], cost_of:dict[UOp, tuple[int, UOp]], cache:dict[UOp, UOp]|None=None) -> UOp:
   """Recursively rebuild a UOp tree, picking the cheapest representative for each child's eclass."""
   if not u.src: return u
+  if cache is None: cache = {}
   new_src = []
   for s in u.src:
     s_canon = eclass_of.get(s)
     if s_canon is not None and s_canon in cost_of:
-      new_src.append(_rebuild_tree(cost_of[s_canon][1], eclass_of, cost_of))
+      if s_canon in cache: new_src.append(cache[s_canon])
+      else:
+        cache[s_canon] = s  # placeholder breaks cycles
+        cache[s_canon] = _rebuild_tree(cost_of[s_canon][1], eclass_of, cost_of, cache)
+        new_src.append(cache[s_canon])
     else:
-      new_src.append(_rebuild_tree(s, eclass_of, cost_of))
+      new_src.append(_rebuild_tree(s, eclass_of, cost_of, cache))
   new_src_tuple = tuple(new_src)
   return u if new_src_tuple == u.src else UOp(u.op, u.dtype, new_src_tuple, u.arg, u.tag)
 

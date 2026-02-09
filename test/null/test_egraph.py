@@ -1,7 +1,7 @@
 import unittest
 from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import Ops, UOp, GroupOp, PatternMatcher, UPat, graph_rewrite
-from tinygrad.uop.egraph import uf_find, uf_union, rewrite_all, EGraph, egraph_saturate, egraph_extract, node_cost
+from tinygrad.uop.egraph import uf_find, uf_union, rewrite_all, EGraph, egraph_saturate, egraph_extract, node_cost, _rebuild_tree
 
 # *** test union-find ***
 
@@ -458,6 +458,45 @@ class TestEGraphBeatsGreedy(unittest.TestCase):
     self.assertEqual(egraph.src[1].arg, 4)
     # both have cost 2 here (shared subexpression), but egraph result is canonical
     self.assertLessEqual(_total_cost(egraph), _total_cost(greedy))
+
+# *** test cycle-breaking in extraction ***
+
+class TestExtractionCycles(unittest.TestCase):
+  def test_self_referencing_eclass(self):
+    """x+0 -> x merges x+0 into x's eclass. Extraction must not recurse on the self-reference."""
+    pm = PatternMatcher([(UPat.var("x") + 0, lambda x: x)])
+    a = UOp.variable("a", 0, 10)
+    self.assertIs(egraph_extract(a + 0, pm), a)
+
+  def test_nested_self_referencing_eclass(self):
+    """((a+0)+0)+0 — all merge into a's eclass. Deep self-reference chain."""
+    pm = PatternMatcher([(UPat.var("x") + 0, lambda x: x)])
+    a = UOp.variable("a", 0, 10)
+    self.assertIs(egraph_extract(((a + 0) + 0) + 0, pm), a)
+
+  def test_mutual_eclass_cycle(self):
+    """Two eclasses whose best nodes reference each other — extraction must terminate via cycle-breaking cache."""
+    x = UOp.variable("x", 0, 10)
+    y = UOp.variable("y", 0, 10)
+    one = UOp.const(dtypes.index, 1)
+    two = UOp.const(dtypes.index, 2)
+    node1 = x + one  # E1's best, child x is in E2
+    node2 = y + two  # E2's best, child y is in E1
+    eclass_of = {node1: node1, x: node2, node2: node2, y: node1, one: one, two: two}
+    cost_of = {node1: (2, node1), node2: (2, node2), one: (0, one), two: (0, two)}
+    # without cycle-breaking cache, this would recurse: E1->E2->E1->...
+    result = _rebuild_tree(node1, eclass_of, cost_of)
+    self.assertIsNotNone(result)  # just verify it terminates
+
+  def test_mutual_rewrite_cycle(self):
+    """x+x <-> x*2 mutual rewrite. Both forms in same eclass, extraction picks cheaper (ADD)."""
+    pm = PatternMatcher([
+      (UPat.var("x") + UPat.var("x"), lambda x: x * 2),
+      (UPat.var("x") * UPat.cvar("c", vec=False), lambda x,c: x+x if c.arg == 2 else None),
+    ])
+    a = UOp.variable("a", 0, 10)
+    result = egraph_extract(a + a, pm)
+    self.assertEqual(result.op, Ops.ADD)  # ADD cost 1 < MUL cost 2
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)
