@@ -53,6 +53,8 @@ if __name__ == "__main__":
     optimizer.step()
     return loss
   if getenv("TINY_BACKEND"): step = torch.compile(step, backend="tiny")
+  if getenv("TINY_BACKEND") and DEBUG >= 1:
+    print(f"tiny_backend compile path active torch={torch.__version__} step={step}")
   test_acc = float('nan')
   for i in (t:=trange(getenv("STEPS", 70))):
     samples = torch.randint(0, X_train.shape[0], (512,))  # putting this in JIT didn't work well
