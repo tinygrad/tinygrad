@@ -7,7 +7,6 @@ Comments marked "should be X!" indicate the intuitively expected value.
 
 SILENT MISMATCHES (highest priority - wrong results, no error):
   class_method_shared_across_instances EASY could check if first arg is self and warn
-  slice_assign_requires_realize      MED    assign graph not connected to read during JIT replay
   output_buffer_reuse                MED    performance tradeoff, could add option or better docs
   symbolic_pad_view_frozen           MED    pad view BIND values baked in at capture time
   python_constants_frozen            HARD   inherent to tracing JITs
@@ -174,15 +173,14 @@ class TestJitFootguns(unittest.TestCase):
     with self.assertRaises(RuntimeError):
       outer(Tensor([2])).realize()  # fails
 
-  def test_implicit_inputs_need_realize(self):
-    """Closure tensors must be realized before JIT call."""
+  def test_closure_inputs_works_without_realize(self):
     x = Tensor([0])
 
     @TinyJit
     def f(): return (x * 2).realize()
 
     for i in range(5):
-      x.assign(Tensor([i])).realize()  # must realize!
+      x.assign(Tensor([i]))
       self.assertEqual(f().item(), i * 2)
 
   def test_views_with_different_offsets_fail(self):
