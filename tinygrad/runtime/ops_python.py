@@ -6,7 +6,7 @@ from typing import Any, TYPE_CHECKING
 import pickle, base64, itertools, time, struct, sys, functools
 from tinygrad.dtype import DType, dtypes, ImageDType, PtrDType, truncate, float_to_fp16, float_to_bf16, float_to_fp8, fp8_to_float
 from tinygrad.helpers import all_same, getenv, flatten, get_single_element, EMULATE
-from tinygrad.device import Compiled, Compiler, Allocator, CompilerSet, CompilerPair
+from tinygrad.device import Compiled, Compiler, Allocator, CompilerSet
 from tinygrad.codegen.opt import tc
 from tinygrad.uop.ops import exec_alu, python_alu, Ops, UOp, GroupOp
 from tinygrad.renderer import Renderer
@@ -248,4 +248,4 @@ class PythonAllocator(Allocator['PythonDevice']):
 
 class PythonDevice(Compiled):
   def __init__(self, device:str):
-    super().__init__(device, PythonAllocator(self), CompilerSet([CompilerPair(PythonRenderer, None)]), PythonProgram)
+    super().__init__(device, PythonAllocator(self), CompilerSet([(PythonRenderer, None)]), PythonProgram)
