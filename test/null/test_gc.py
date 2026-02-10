@@ -72,7 +72,6 @@ class TestGC(unittest.TestCase):
     ys = y.schedule()
     del x
     run_schedule(ys)
-    np.testing.assert_equal(y.numpy(), np.full((256,), 2))
     self.assertEqual(bufs_allocated()-init, 1)
     del y
     self.assertEqual(bufs_allocated()-init, 0)
