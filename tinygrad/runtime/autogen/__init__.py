@@ -115,7 +115,7 @@ def __getattr__(nm):
       return load("rocprof", "['rocprof-trace-decoder', p:='/usr/local/lib/rocprof-trace-decoder.so', p.replace('so','dylib')]",
                   [f"{{}}/include/{s}.h" for s in ["rocprof_trace_decoder", "trace_decoder_instrument", "trace_decoder_types"]],
                   tarball="https://github.com/ROCm/rocprof-trace-decoder/archive/dd0485100971522cc4cd8ae136bdda431061a04d.tar.gz")
-    case "mesa": return load("mesa", "([] if CPU_CC.value == 'LVP' or bool(CPU_LVP) else ['tinymesa']) + ['libtinymesa_cpu']", [
+    case "mesa": return load("mesa", "([] if CPU_CC.value == 'LVP' or bool(CPU_LVP) else ['tinymesa']) + ['tinymesa_cpu']", [
         *[f"{{}}/src/compiler/nir/{s}.h" for s in ["nir", "nir_builder", "nir_shader_compiler_options", "nir_serialize"]], "{}/gen/nir_intrinsics.h",
         *[f"{{}}/src/nouveau/{s}.h" for s in ["headers/nv_device_info", "compiler/nak"]],
         *[f"{{}}/src/gallium/auxiliary/gallivm/lp_bld{s}.h" for s in ["", "_passmgr", "_misc", "_type", "_init", "_nir", "_struct", "_jit_types",
