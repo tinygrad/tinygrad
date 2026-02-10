@@ -1298,9 +1298,9 @@ class Tensor(OpMixin):
     if any(isinstance(i, (Tensor, list, tuple)) for i in idx): # advanced setitem
       if is_disk: raise RuntimeError("advanced setitem is not supported for DISK tensors")
       if not isinstance(v, Tensor): v = Tensor(v, device=self.device, dtype=self.dtype)
-      self.assign(self._getitem(indices, v)).realize()
+      self.assign(self._getitem(indices, v))
     else: # basic setitem
-      if is_disk: self.realize()[indices].assign(v)
+      if is_disk: self[indices].assign(v)
       else:
         self.realize()
         if not self.uop.is_writable_view(): raise RuntimeError("setitem target must be a writable view backed by a buffer")
