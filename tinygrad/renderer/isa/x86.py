@@ -658,7 +658,9 @@ class X86Renderer(ISARenderer):
   post_regalloc_matcher = post_regalloc_matcher
   isa_spec = isa_spec
   code_for_op = {x: lambda: None for x in (Ops.SQRT, Ops.AND, Ops.OR, Ops.SHL, Ops.SHR, Ops.NEG, Ops.SUB, Ops.FDIV, Ops.CMPLT, Ops.CMPEQ, Ops.MAX)}
-
+  def __init__(self):
+    from tinygrad.runtime.support.compiler_cpu import X86Compiler
+    self.compiler = X86Compiler()
   def stack_pointer(self) -> UOp: return UOp(X86Ops.DEFINE_REG, dtypes.uint64, arg=RSP)
   def render(self, uops:list[UOp], lower:bool=True) -> str:
     if lower: uops = self.lower(uops[-1])
