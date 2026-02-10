@@ -1,11 +1,11 @@
 from __future__ import annotations
 from typing import cast
-import ctypes, hashlib, functools
+import ctypes, functools, hashlib
 from tinygrad.runtime.autogen import opencl as cl
 from tinygrad.runtime.support import c
 from tinygrad.helpers import to_char_p_p, from_mv, OSX, DEBUG, mv_address, suppress_finalizing
 from tinygrad.renderer.cstyle import OpenCLRenderer, IntelRenderer
-from tinygrad.device import BufferSpec, LRUAllocator, Compiler, Compiled, CompileError, CompilerSet
+from tinygrad.device import BufferSpec, LRUAllocator, Compiled, Compiler, CompileError, CompilerSet
 from tinygrad.dtype import ImageDType
 
 CC_CB = c.CFUNCTYPE[None, [c.POINTER[ctypes.c_char], c.POINTER[None], cl.size_t, c.POINTER[None]]]

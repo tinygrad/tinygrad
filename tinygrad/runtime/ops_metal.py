@@ -1,4 +1,4 @@
-import subprocess, pathlib, struct, ctypes, tempfile, functools, contextlib, decimal, platform
+import subprocess, pathlib, struct, ctypes, tempfile, functools, decimal, platform
 from tinygrad.helpers import prod, to_mv, round_up, cache_dir, PROFILE, ProfileRangeEvent, cpu_profile, unwrap, suppress_finalizing
 import tinygrad.runtime.support.objc as objc
 from tinygrad.device import Compiled, Compiler, CompileError, LRUAllocator, ProfileDeviceEvent, CompilerSet
@@ -59,8 +59,7 @@ class MetalCompiler(Compiler):
   # This means that MTLCompiler's llvm will create it's own instances of global state because RTLD_LOCAL doesn't export symbols, but if RTLD_GLOBAL
   # library is loaded first then RTLD_LOCAL library will just use it's symbols. On linux there is RTLD_DEEPBIND to prevent that, but on macos there
   # doesn't seem to be anything we can do.
-  with contextlib.suppress(FileNotFoundError, ModuleNotFoundError):
-    import tinygrad.runtime.autogen.llvm # noqa: F401
+  import tinygrad.runtime.autogen.llvm as _
   support = DLL("MTLCompiler", "MTLCompiler")
   support.MTLCodeGenServiceCreate.restype = ctypes.c_void_p
 
