@@ -39,7 +39,7 @@ class CLCompiler(Compiler):
 
 class CLProgram:
   def __init__(self, device:CLDevice, name:str, lib:bytes, buf_dtypes=[], **kwargs):
-    self.dev, self.name, self.lib, self.buf_dtypes = device, name, device.clc.compile_cached(lib.decode()), buf_dtypes
+    self.dev, self.name, self.lib, self.buf_dtypes = device, name, device.cl_compiler.compile_cached(lib.decode()), buf_dtypes
     self.program = checked(cl.clCreateProgramWithBinary(device.context, 1, device.device_id, (ctypes.c_size_t * 1)(len(self.lib)),
                                                         to_char_p_p([self.lib], ctypes.c_ubyte), binary_status := ctypes.c_int32(),
                                                         errcode_ret := ctypes.c_int32()), errcode_ret)
@@ -125,8 +125,9 @@ class CLDevice(Compiled):
                                            ctypes.string_at(buf, size=total.value).decode())[1]
 
     renderer = IntelRenderer if "cl_intel_subgroup_matrix_multiply_accumulate" in self.device_exts else OpenCLRenderer
-    self.clc = CLCompiler(self, f"{hashlib.md5(self.device_name.encode() + self.driver_version.encode()).hexdigest()}")
+    self.cl_compiler = CLCompiler(self, f"{hashlib.md5(self.device_name.encode() + self.driver_version.encode()).hexdigest()}")
     super().__init__(device, CLAllocator(self), CompilerSet([(renderer, None)]), functools.partial(CLProgram, self))
+
   def synchronize(self):
     check(cl.clFinish(self.queue))
     self.pending_copyin.clear()
