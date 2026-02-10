@@ -249,7 +249,7 @@ class QCOMProgram(HCQProgram):
       self.fregs, self.hregs = v.info.max_reg + 1, v.info.max_half_reg + 1
       self.consts_info:list[tuple] = []
     else:
-      self._parse_lib(lib:=self.dev.cl_dev.clc.compile_cached(lib.decode()))
+      self._parse_lib(lib:=self.dev.cl_dev.cl_compiler.compile_cached(lib.decode()))
       if DEBUG >= 7: fromimport('tinygrad.runtime.support.compiler_mesa', 'disas_adreno')(lib[(ofs:=_read_lib(lib, 0xc0)):ofs+_read_lib(lib, 0x100)])
 
     self.lib_gpu: HCQBuffer = self.dev.allocator.alloc(self.image_size, buf_spec:=BufferSpec(cpu_access=True, nolru=True))
