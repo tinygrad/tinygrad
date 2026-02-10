@@ -207,7 +207,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     match self.op:
       # late ops don't have shape
       case Ops.UNIQUE | Ops.LUNIQUE | Ops.DEVICE | Ops.RANGE | Ops.LOAD | Ops.IF | Ops.BARRIER | Ops.CUSTOM | Ops.CUSTOMI | \
-           Ops.VECTORIZE | Ops.VCONST | Ops.GEP | Ops.SPECIAL | Ops.UNROLL | Ops.CONTRACT | Ops.SINK | \
+           Ops.VECTORIZE | Ops.GEP | Ops.SPECIAL | Ops.UNROLL | Ops.CONTRACT | Ops.SINK | \
            Ops.LINEAR | Ops.PROGRAM | Ops.SOURCE | Ops.BINARY:
         return None
 
@@ -220,7 +220,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
         return self.src[0].shape[len(self.src[1:]):]
 
       # some ops init the shape
-      case Ops.CONST | Ops.DEFINE_VAR | Ops.BIND: return () if self._device is not None else None
+      case Ops.CONST | Ops.VCONST | Ops.DEFINE_VAR | Ops.BIND: return ()
       case Ops.BUFFER: return (self.arg,)
       case Ops.BUFFER_VIEW: return (self.arg[0],)
       case Ops.ENCDEC: return self.arg[0]
