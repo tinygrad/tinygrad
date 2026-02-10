@@ -1,5 +1,5 @@
 # schedule tests that pass on NULL backend (no copyout needed)
-import unittest
+import unittest, time
 from tinygrad import nn, dtypes, Device, Tensor
 from tinygrad.device import is_dtype_supported
 from tinygrad.uop.ops import UOp, Ops, GroupOp, UPat
@@ -1086,6 +1086,50 @@ class TestUOpBecome(unittest.TestCase):
     assert a.uop.buffer._base is None
     assert b.uop.op_in_backward_slice_with_self(Ops.SHRINK)
     assert b.uop.base is a.uop.base
+
+class TestFusionOp(unittest.TestCase):
+  def test_recursive_add(self):
+    st = time.perf_counter()
+    a = Tensor([1,2,3,4])
+    for _ in range(24): a = a + a
+    sched = a.schedule()
+    sched[-1].lower()
+    self.assertLess(time.perf_counter()-st, 2.0)
+    assert len(sched[-1].prg.p.src.splitlines()) < 250
+
+  def test_recursive_add_cmp(self):
+    st = time.perf_counter()
+    a = Tensor([1,2,3,4])
+    for _ in range(24): a = a + a
+    sched1 = a.schedule()
+    b = Tensor([1,2,3,4])
+    for _ in range(24): b = b + b
+    sched2 = b.schedule()
+    c = Tensor([1,2,3,4])
+    for _ in range(23): c = c + c
+    sched3 = c.schedule()
+    self.assertEqual(sched1[-1].ast, sched2[-1].ast)
+    with self.assertRaises(AssertionError): self.assertEqual(sched1[-1].ast, sched3[-1].ast)
+    self.assertLess(time.perf_counter()-st, 2.0)
+
+  def test_recursive_pad(self):
+    st = time.perf_counter()
+    val = 1.0
+    a = Tensor(val)
+    for _ in range(24): a = Tensor.stack(a, a)[0]
+    sched = a.schedule()
+    self.assertEqual(len(sched), 0)
+    self.assertLess(time.perf_counter()-st, 2.0)
+
+  def test_recursive_reshape(self):
+    st = time.perf_counter()
+    a = Tensor.empty(32, 32).realize()
+    b = Tensor.empty(16, 2).realize()
+    r = a.sum(1)
+    for _ in range(24): r = r.reshape(16, 2) + b
+    sched = r.schedule()
+    self.assertEqual(len(sched), 1)
+    self.assertLess(time.perf_counter()-st, 2.0)
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)
