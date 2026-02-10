@@ -50,7 +50,8 @@ if __name__ == "__main__":
     loss.backward()
     optimizer.step()
     return loss
-  if getenv("TINY_BACKEND"): step = torch.compile(step, backend="tiny")
+  should_compile = getenv("TORCH_COMPILE", int(bool(getenv("TINY_BACKEND")) and not bool(getenv("CPU"))))
+  if should_compile: step = torch.compile(step, backend="tiny")
 
   test_acc = float('nan')
   for i in (t:=trange(getenv("STEPS", 70))):
