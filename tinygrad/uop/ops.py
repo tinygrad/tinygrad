@@ -163,29 +163,24 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     # Check self first, then iterate backward_slice (avoids creating intermediate dict)
     return self.op in ops or any(x.op in ops for x in self.backward_slice)
 
-  def toposort(self, gate:Callable|None=None) -> dict[UOp, None]:
+  def _postorder_dfs(self, *, cache: dict[UOp, T], on_post: Callable[[UOp], T], gate: Callable[[UOp], bool] | None = None,) -> None:
+      stack: list[tuple[UOp, bool]] = [(self, False)]
+      while stack:
+          node, visited = stack.pop()
+          if node in cache: continue
+          if not visited:
+              if gate is None or gate(node):
+                  stack.append((node, True))
+                  for s in reversed(node.src): stack.append((s, False))
+          else: cache[node] = on_post(node)
+
+  def toposort(self, gate: Callable[[UOp], bool] | None = None) -> dict[UOp, None]:
     cache: dict[UOp, None] = {}
-    stack: list[tuple[UOp, bool]] = [(self, False)] # each stack entry is (node, visited_flag)
-    while stack:
-      node, visited = stack.pop()
-      if node in cache: continue
-      if not visited:
-        if gate is None or gate(node):
-          stack.append((node, True))  # push node back on stack to process after its srcs
-          for s in reversed(node.src): stack.append((s, False)) # push srcs on the stack
-      else: cache[node] = None # second time i'm seeing this node, add it to returned toposort
+    self._postorder_dfs(cache=cache, on_post=lambda _: None, gate=gate)
     return cache
 
-  def topovisit(self, visitor:Callable[[UOp], T], cache:dict[UOp, T]) -> T:
-    # NOTE: this shares a lot of code with toposort
-    stack: list[tuple[UOp, bool]] = [(self, False)]
-    while stack:
-      node, visited = stack.pop()
-      if node in cache: continue
-      if not visited:
-        stack.append((node, True))
-        for s in reversed(node.src): stack.append((s, False))
-      else: cache[node] = visitor(node)
+  def topovisit(self, visitor: Callable[[UOp], T], cache: dict[UOp, T]) -> T:
+    self._postorder_dfs(on_post=visitor, cache=cache)
     return cache[self]
 
   # returns map of UOps to their consumers in the graph rooted by self
