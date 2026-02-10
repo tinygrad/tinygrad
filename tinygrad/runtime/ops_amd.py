@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import cast, ClassVar
-import os, ctypes, struct, hashlib, functools, importlib, mmap, errno, array, contextlib, sys, weakref, itertools, collections, atexit
+import os, ctypes, struct, hashlib, functools, importlib, mmap, errno, array, contextlib, sys, weakref, itertools, collections, atexit, time
 assert sys.platform != 'win32'
 from dataclasses import dataclass
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, HWQueue, CLikeArgsState, HCQSignal, HCQProgram, FileIOInterface
@@ -425,24 +425,37 @@ class AMDComputeAQLQueue(AMDComputeQueue):
     self.bind_sints_to_mem(*[l * g for l,g in zip(local_size, global_size)], mem=pkt_view, fmt='I', offset=12)
     return self
 
-  def bind(self, dev:AMDDevice): pass # not supported
+  def _ib_pkt(self, addr, cnt):
+    return bytes(array.array('I', [AQL_HDR | (hsa.HSA_PACKET_TYPE_VENDOR_SPECIFIC << hsa.HSA_PACKET_HEADER_TYPE) | (1 << 16),
+      self.pm4.PACKET3(self.pm4.PACKET3_INDIRECT_BUFFER, 2), *data64_le(addr), cnt | self.pm4.INDIRECT_BUFFER_VALID, 10] + [0] * 10))
+
+  def _prep_aql(self, q, pm4_addr, pm4_view=None):
+    cmds, pm4_off, pm4_start = [], 0, 0
+    for cmd in q:
+      if isinstance(cmd, hsa.hsa_kernel_dispatch_packet_t):
+        if pm4_off > pm4_start: cmds.append(self._ib_pkt(pm4_addr + pm4_start * 4, pm4_off - pm4_start))
+        cmds.append(cmd)
+        pm4_off += 1  # NOP slot to keep pm4 offsets matching _q positions
+        pm4_start = pm4_off
+      else:
+        if pm4_view is not None: pm4_view[pm4_off] = cmd
+        pm4_off += 1
+    if pm4_off > pm4_start: cmds.append(self._ib_pkt(pm4_addr + pm4_start * 4, pm4_off - pm4_start))
+    return cmds
+
+  def bind(self, dev:AMDDevice):
+    self.binded_device = dev
+    self.hw_page = dev.allocator.alloc(len(self._q) * 4, BufferSpec(cpu_access=True, nolru=True, uncached=True))
+    hw_view = self.hw_page.cpu_view().view(fmt='I')
+    self._cmds = self._prep_aql(self._q, self.hw_page.va_addr, hw_view)
+    self._q = hw_view
+    return self
+
   def _submit(self, dev:AMDDevice):
-    pm4_batch:list[int] = []
-    aql_bytes = bytes()
-
-    def flush_pm4_batch():
-      nonlocal pm4_batch
-      if not pm4_batch: return bytes()
-      dev.pm4_ibs.cpu_view().view(off:=dev.pm4_ib_alloc.alloc(len(pm4_batch) * 4, 16), fmt='I')[:len(pm4_batch)] = array.array('I', pm4_batch)
-      pkt = [AQL_HDR | (hsa.HSA_PACKET_TYPE_VENDOR_SPECIFIC << hsa.HSA_PACKET_HEADER_TYPE) | (1 << 16),
-        self.pm4.PACKET3(self.pm4.PACKET3_INDIRECT_BUFFER, 2), *data64_le(dev.pm4_ibs.va_addr+off), len(pm4_batch)|self.pm4.INDIRECT_BUFFER_VALID, 10]
-      pm4_batch.clear()
-      return bytes(array.array('I', pkt + [0] * 10))
-
-    for cmd in self._q:
-      if isinstance(cmd, hsa.hsa_kernel_dispatch_packet_t): aql_bytes += flush_pm4_batch() + bytes(cmd)
-      else: pm4_batch.append(cmd)
-    aql_bytes += flush_pm4_batch()
+    st = time.perf_counter()
+    cmds = self._cmds if dev == self.binded_device else \
+      self._prep_aql(self._q, dev.pm4_ibs.va_addr + (off:=dev.pm4_ib_alloc.alloc(len(self._q) * 4, 16)), dev.pm4_ibs.cpu_view().view(off, fmt='I'))
+    aql_bytes = b''.join(bytes(c) if isinstance(c, hsa.hsa_kernel_dispatch_packet_t) else c for c in cmds)
 
     assert len(aql_bytes) < dev.compute_queue.ring.nbytes, "submit is too large for the queue"
     cp_bytes = min(len(aql_bytes), (dev.compute_queue.ring.nbytes - (dev.compute_queue.put_value * 64) % dev.compute_queue.ring.nbytes))
@@ -450,6 +463,7 @@ class AMDComputeAQLQueue(AMDComputeQueue):
     if (tail_bytes:=(len(aql_bytes) - cp_bytes)) > 0: dev.compute_queue.ring.view(offset=0, fmt='B')[:tail_bytes] = aql_bytes[cp_bytes:]
     dev.compute_queue.put_value += len(aql_bytes) // 64
     dev.compute_queue.signal_doorbell(dev, doorbell_value=dev.compute_queue.put_value-1)
+    if DEBUG >= 2: print(f"  aql submit: {(time.perf_counter()-st)*1e3:.4f}ms")
 
 class AMDCopyQueue(HWQueue):
   def __init__(self, dev, max_copy_size=0x40000000, queue_idx=0):
