@@ -425,15 +425,15 @@ class AMDComputeAQLQueue(AMDComputeQueue):
     self.bind_sints_to_mem(*[l * g for l,g in zip(local_size, global_size)], mem=pkt_view, fmt='I', offset=12)
     return self
 
-  def _pm4_pkt(self, addr:int, cnt:int) -> bytes:
+  def _pm4_pkt(self, addr:sint, cnt:int) -> bytes:
     return bytes(array.array('I', [AQL_HDR | (hsa.HSA_PACKET_TYPE_VENDOR_SPECIFIC << hsa.HSA_PACKET_HEADER_TYPE) | (1 << 16),
       self.pm4.PACKET3(self.pm4.PACKET3_INDIRECT_BUFFER, 2), *data64_le(addr), cnt | self.pm4.INDIRECT_BUFFER_VALID, 10] + [0] * 10))
 
   def _prep_aql(self, q:list, pm4_buf:HCQBuffer) -> list[bytes|hsa.hsa_kernel_dispatch_packet_t]:
-    pm4_buf.cpu_view().view(fmt='I')[:len(q)] = [0 if isinstance(c, hsa.hsa_kernel_dispatch_packet_t) else c for c in q]
+    pm4_buf.cpu_view().view(fmt='I')[:len(q)] = array.array('I', [0 if isinstance(c, hsa.hsa_kernel_dispatch_packet_t) else c for c in q])
 
     splits = [-1, *[i for i, c in enumerate(q) if isinstance(c, hsa.hsa_kernel_dispatch_packet_t)], len(q)]
-    aql_cmds = []
+    aql_cmds:list[bytes|hsa.hsa_kernel_dispatch_packet_t] = []
     for prev_pkt, cur_pkt in zip(splits, splits[1:]):
       if cur_pkt - prev_pkt > 1: aql_cmds.append(self._pm4_pkt(pm4_buf.va_addr + (prev_pkt+1) * 4, cur_pkt - prev_pkt - 1)) # pm4 commands
       if cur_pkt < len(q): aql_cmds.append(q[cur_pkt]) # aql
