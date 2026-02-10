@@ -51,12 +51,36 @@ aten = torch.ops.aten
 # track view relationships for in place operations
 def canonical_base(view: Tensor): return getattr(view, "_view_base", view)
 def derived_views(base: Tensor): return [t for tref in getattr(base, "_views", set()) if (t:=tref()) is not None]
+def _unwrap_if_tensor(x):
+  if not isinstance(x, torch.Tensor): return x, True
+  try: return unwrap(x), True
+  except RuntimeError: return x, False
 def unwrap_args(args, kwargs):
-  return [unwrap(x) if isinstance(x, torch.Tensor) else x for x in args], {k:unwrap(v) if isinstance(v, torch.Tensor) else v for k,v in kwargs.items()}
-def wrap_view_op(fn):
+  all_unwrapped = True
+  unwrapped_args = []
+  for x in args:
+    u, ok = _unwrap_if_tensor(x)
+    all_unwrapped &= ok
+    unwrapped_args.append(u)
+  unwrapped_kwargs = {}
+  for k,v in kwargs.items():
+    u, ok = _unwrap_if_tensor(v)
+    all_unwrapped &= ok
+    unwrapped_kwargs[k] = u
+  return unwrapped_args, unwrapped_kwargs, all_unwrapped
+def wrap_view_op(name_or_fn, fn=None):
+  if fn is None:
+    fn = name_or_fn
+    name = fn.__name__
+  else:
+    name = name_or_fn
   @functools.wraps(fn)
   def _wrap(*args, **kwargs):
-    args, kwargs = unwrap_args(args, kwargs)
+    args, kwargs, all_unwrapped = unwrap_args(args, kwargs)
+    if not all_unwrapped:
+      # Fake tensor wrapping can hit tiny view registrations while materializing tiny-device metadata.
+      if name in {"aten.alias", "aten.detach"} and len(args) > 0 and isinstance(args[0], torch.Tensor): return args[0].clone()
+      raise RuntimeError(f"{name} received non-unwrappable tensor input")
     ret = fn(*args, **kwargs)
     base = canonical_base(args[0])
     ret._view_base = base
@@ -82,9 +106,9 @@ view_ops = {
   }
 
 # torch 2.10 handles this natively
-if tuple(map(int, torch.__version__.split('.')[:2])) < (2, 10): view_ops.update({"aten.detach": Tensor.detach})
+# On older torch versions, custom detach can interfere with fake tensor wrapping used by torch.compile.
 
-for k,v in view_ops.items(): torch.library.impl(k.replace("aten.", "aten::"), "privateuseone")(wrap_view_op(v))
+for k,v in view_ops.items(): torch.library.impl(k.replace("aten.", "aten::"), "privateuseone")(wrap_view_op(k, v))
 
 def _get_view_ops(view): return getattr(view, "_view_ops", [])
 
@@ -344,6 +368,31 @@ def scatter_add(self, dim, index, src, out):
   if self.shape == (): _apply_inplace(out_unwrapped, src)
   else: _apply_inplace(out_unwrapped, Tensor.scatter_reduce(self, dim, index, src, reduce='sum'))
   return out
+
+@torch.library.impl("aten::mse_loss.out", "privateuseone")
+def mse_loss_out(self, target, reduction=1, out=None):
+  loss = (unwrap(self) - unwrap(target)).square()
+  if reduction == 0: reduced = loss
+  elif reduction == 1: reduced = loss.mean()
+  elif reduction == 2: reduced = loss.sum()
+  else: raise RuntimeError(f"unknown reduction {reduction} for mse_loss")
+  _apply_inplace(unwrap(out), reduced)
+  return out
+
+@torch.library.impl("aten::resize_", "privateuseone")
+def resize_(self, size, memory_format=None):
+  tiny = unwrap(self)
+  target_shape = tuple(int(x) for x in size)
+  if tiny.numel() == prod(target_shape):
+    tiny.uop = tiny.reshape(target_shape).uop
+  else:
+    tiny.uop = Tensor.empty(*target_shape, dtype=tiny.dtype, device=tiny.device).uop
+  _update_torch_metadata(self, tiny)
+  return self
+
+@torch.library.impl("aten::resize_as_", "privateuseone")
+def resize_as_(self, the_template, memory_format=None):
+  return resize_(self, the_template.shape, memory_format)
 
 def _copy_between_devices(src, dest, cast_dtype, to_device, non_blocking=False):
   if src.is_tiny and dest.is_tiny:
@@ -674,7 +723,8 @@ def wrap_fxn(k,f):
     if TORCH_DEBUG:
       print(k, len(args), [x.shape if isinstance(x, torch.Tensor) else x for x in args],
                           {k:v.shape if isinstance(v, torch.Tensor) else v for k,v in kwargs.items()})
-    args, kwargs = unwrap_args(args, kwargs)
+    args, kwargs, all_unwrapped = unwrap_args(args, kwargs)
+    if not all_unwrapped: raise RuntimeError(f"{k} received non-unwrappable tensor input")
     out = f(*args, **kwargs)
     if isinstance(out, Tensor): return wrap(out)
     elif isinstance(out, tuple): return tuple(wrap(x) for x in out)
@@ -684,7 +734,8 @@ def wrap_fxn(k,f):
 def wrap_inplace(k,f):
   def nf(*args, **kwargs):
     orig = args[0]
-    args, kwargs = unwrap_args(args, kwargs)
+    args, kwargs, all_unwrapped = unwrap_args(args, kwargs)
+    if not all_unwrapped: raise RuntimeError(f"{k} received non-unwrappable tensor input")
     _inplace_op(args[0], f(*args, **kwargs))
     return orig
   return nf
@@ -692,7 +743,8 @@ def wrap_inplace(k,f):
 def wrap_inplace_view_op(k,f):
   def nf(*args, **kwargs):
     orig = args[0]
-    args, kwargs = unwrap_args(args, kwargs)
+    args, kwargs, all_unwrapped = unwrap_args(args, kwargs)
+    if not all_unwrapped: raise RuntimeError(f"{k} received non-unwrappable tensor input")
     target = args[0]
     new_view = f(*args, **kwargs)
     if new_view is target or new_view.uop is target.uop:
