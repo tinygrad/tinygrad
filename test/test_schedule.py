@@ -762,7 +762,7 @@ class TestSchedule(unittest.TestCase):
   def test_conv2d(self): _test_conv2d(5 if SPLIT_REDUCEOP else 4)
   def test_conv2d_fused(self): _test_conv2d(5 if SPLIT_REDUCEOP else 4)
 
-  @unittest.skipUnless(is_dtype_supported(dtypes.half) and is_dtype_supported(dtypes.ulong), "need half and ulong")
+  @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
   def test_conv2d_half(self): _test_conv2d(5 if SPLIT_REDUCEOP else 4, dtype=dtypes.half)
   @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
   @unittest.skipIf(Device.DEFAULT == "WEBGPU", "Causes other tests to fail")

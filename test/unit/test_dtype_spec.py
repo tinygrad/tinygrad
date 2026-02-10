@@ -82,8 +82,7 @@ class TestTypeSpec(unittest.TestCase):
 
     _assert_eq(Tensor.eye(0), dtypes.default_float, np.eye(0))
     _assert_eq(Tensor.eye(3), dtypes.default_float, np.eye(3))
-    if is_dtype_supported(dtypes.int64):
-      _assert_eq(Tensor.eye(3, dtype=dtypes.int64), dtypes.int64, np.eye(3))
+    _assert_eq(Tensor.eye(3, dtype=dtypes.int64), dtypes.int64, np.eye(3))
     if is_dtype_supported(dtypes.float16):
       _assert_eq(Tensor.eye(3, dtype=dtypes.float16), dtypes.float16, np.eye(3))
 
@@ -92,23 +91,20 @@ class TestTypeSpec(unittest.TestCase):
     dtypes.default_int, dtypes.default_float = default_int, default_float
 
     _assert_eq(Tensor.zeros((2, 3)), dtypes.default_float, np.zeros((2, 3)))
-    if is_dtype_supported(dtypes.int64):
-      _assert_eq(Tensor.zeros((2, 3), dtype=dtypes.int64), dtypes.int64, np.zeros((2, 3)))
+    _assert_eq(Tensor.zeros((2, 3), dtype=dtypes.int64), dtypes.int64, np.zeros((2, 3)))
     if is_dtype_supported(dtypes.float16):
       _assert_eq(Tensor.zeros((2, 3), dtype=dtypes.float16), dtypes.float16, np.zeros((2, 3)))
 
     _assert_eq(Tensor.ones((2, 3)), dtypes.default_float, np.ones((2, 3)))
-    if is_dtype_supported(dtypes.int64):
-      _assert_eq(Tensor.ones((2, 3), dtype=dtypes.int64), dtypes.int64, np.ones((2, 3)))
+    _assert_eq(Tensor.ones((2, 3), dtype=dtypes.int64), dtypes.int64, np.ones((2, 3)))
     if is_dtype_supported(dtypes.float16):
       _assert_eq(Tensor.ones((2, 3), dtype=dtypes.float16), dtypes.float16, np.ones((2, 3)))
 
     _assert_eq(Tensor.full((2, 3), 3.0), dtypes.default_float, np.full((2, 3), 3.0))
     _assert_eq(Tensor.full((2, 3), 3), dtypes.default_int, np.full((2, 3), 3))
     _assert_eq(Tensor.full((2, 3), True), dtypes.bool, np.full((2, 3), True))
-    if is_dtype_supported(dtypes.int64):
-      _assert_eq(Tensor.full((2, 3), 3, dtype=dtypes.int64), dtypes.int64, np.full((2, 3), 3))
-      _assert_eq(Tensor.full((2, 3), 3.0, dtype=dtypes.int64), dtypes.int64, np.full((2, 3), 3))
+    _assert_eq(Tensor.full((2, 3), 3, dtype=dtypes.int64), dtypes.int64, np.full((2, 3), 3))
+    _assert_eq(Tensor.full((2, 3), 3.0, dtype=dtypes.int64), dtypes.int64, np.full((2, 3), 3))
     if is_dtype_supported(dtypes.float16):
       _assert_eq(Tensor.full((2, 3), 3, dtype=dtypes.float16), dtypes.float16, np.full((2, 3), 3))
       _assert_eq(Tensor.full((2, 3), 3.0, dtype=dtypes.float16), dtypes.float16, np.full((2, 3), 3))
@@ -130,8 +126,7 @@ class TestTypeSpec(unittest.TestCase):
     _assert_eq(Tensor.arange(5.0), dtypes.default_float, np.arange(5))
     if is_dtype_supported(dtypes.int16):
       _assert_eq(Tensor.arange(5, dtype=dtypes.int16), dtypes.int16, np.arange(5))
-    if is_dtype_supported(dtypes.int64):
-      _assert_eq(Tensor.arange(5, dtype=dtypes.int64), dtypes.int64, np.arange(5))
+    _assert_eq(Tensor.arange(5, dtype=dtypes.int64), dtypes.int64, np.arange(5))
     if is_dtype_supported(dtypes.float16):
       _assert_eq(Tensor.arange(5, dtype=dtypes.float16), dtypes.float16, np.arange(5))
     _assert_eq(Tensor.arange(3, 9, 0.7), dtypes.default_float, np.arange(3, 9, 0.7), 1e-6 if Device.DEFAULT == "WEBGPU" else 1e-7)
