@@ -277,21 +277,21 @@ class Compiler:
     return lib
   def disassemble(self, lib:bytes): pass
 
-@dataclass(frozen=True)
-class CompilerSet: cset:list[tuple[type[Renderer]|functools.partial, ContextVar|None]]; ctrl_var:ContextVar|None = None # noqa: E702
+RendererList = list[tuple[type[Renderer]|functools.partial, ContextVar|None]]
 
 class Compiled:
   profile_events:list[ProfileEvent] = [ProfileDeviceEvent("CPU")] # NOTE: CPU is the default device.
 
-  def __init__(self, device:str, allocator:Allocator, compilers:CompilerSet|None, runtime, graph=None, group_id=None):
+  def __init__(self, device:str, allocator:Allocator, renderers:RendererList|None, runtime,
+               graph=None, group_id=None, ctrl_var:ContextVar|None=None):
     from tinygrad.renderer import Renderer
 
     self.device, self.allocator, self.runtime, self.graph, self.group_id = device, allocator, runtime, graph, group_id
 
-    self.comps_ctrl_var = compilers.ctrl_var if compilers is not None else None
+    self.comps_ctrl_var = ctrl_var
     self.comp_sets:dict[str, tuple[ContextVar|None, type[Renderer]|functools.partial]] = {}
     self.cached_pair:dict[Any, Renderer] = {}
-    for ren, var in (compilers.cset if compilers is not None else [(Renderer, None)]):
+    for ren, var in (renderers or [(Renderer, None)]):
       self.comp_sets[var.key.split('_', 1)[-1] if var is not None else self._compiler_name(ren)] = (var, ren)
 
   @property
