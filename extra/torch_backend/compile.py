@@ -5,6 +5,7 @@ from torch._functorch.aot_autograd import aot_module_simplified, make_boxed_func
 from torch._subclasses.fake_tensor import is_fake
 
 from tinygrad import Tensor, TinyJit
+from tinygrad.helpers import Context
 from tinygrad.uop import Ops
 from extra.torch_backend.backend import unwrap, wrap
 
@@ -15,9 +16,14 @@ def _to_tiny_tensor(x:torch.Tensor) -> Tensor:
   return unwrap(x) if x.device.type == "tiny" else unwrap(x.tiny())
 
 def _to_jit_input_tensor(x:torch.Tensor) -> Tensor:
-  # TinyJit rejects const inputs; bufferize scalar constants for compiled graphs.
+  # TinyJit replay expects leaf buffers as inputs.
+  # Materialize constants and graph-derived tensors (ex: advanced indexing batches)
+  # so changing runtime inputs are not tied to a stale captured producer graph.
   t = _to_tiny_tensor(x)
-  return t.contiguous() if t.uop.base.op is Ops.CONST else t
+  return t.contiguous() if t.uop.base.op not in {Ops.BUFFER, Ops.ASSIGN} else t
+
+def _is_leaf_jit_input(t:Tensor) -> bool:
+  return t.uop.base.op in {Ops.BUFFER, Ops.ASSIGN, Ops.CONST}
 
 @torch._dynamo.disable
 def _to_fake_cpu_tensor(x:torch.Tensor) -> torch.Tensor:
@@ -45,8 +51,13 @@ def tiny(gm:torch.fx.GraphModule, sample_inputs):
       if torch._dynamo.is_compiling() or any(_is_fake_tiny_tensor(x) for x in args): return gm(*[_to_fake_cpu_tensor(x) for x in args])
       has_tiny_arg = any(isinstance(x, torch.Tensor) and x.device.type == "tiny" for x in args)
       has_grad_arg = any(isinstance(x, torch.Tensor) and x.requires_grad for x in args)
+      jit_inputs = [_to_jit_input_tensor(x) for x in args]
+      force_no_jit = has_grad_arg and any(not _is_leaf_jit_input(t) for t in jit_inputs)
       try:
-        outs = tuple(wrap(x) for x in tiny_function(*[_to_jit_input_tensor(x) for x in args]))
+        if force_no_jit:
+          with Context(JIT=0): outs = tuple(wrap(x) for x in tiny_function(*jit_inputs))
+        else:
+          outs = tuple(wrap(x) for x in tiny_function(*jit_inputs))
       except NotImplementedError:
         # fall back to torch graph when tiny backend misses an op in training graphs
         return gm(*args)
