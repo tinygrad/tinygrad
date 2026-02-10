@@ -165,16 +165,19 @@ def load_state_dict(model, state_dict:dict[str, Tensor], strict=True, verbose=Tr
 @accept_filename
 def zip_extract(t: Tensor) -> dict[str, Tensor]:
   files: dict[str, Tensor] = {}
-  file_offsets: dict[str, tuple[Tensor, int, int]] = {}
+  file_offsets: dict[str, tuple[int, int, int]] = {}
+  offsets: dict[str, int] = {}
   with zipfile.ZipFile(TensorIO(t), "r") as myzip:
-    for zi in myzip.filelist:
-      file_offset = zi.header_offset+30+t[zi.header_offset+26:zi.header_offset+30].bitcast(dtypes.uint16).to("CPU").sum()
-      file_offsets[zi.filename] = (file_offset, zi.compress_size, zi.compress_type)
-  # sadly, the extra length needs to be read from the local header of each file. this is a limitation of the zip file format
-  Tensor.realize(*[x[0] for x in file_offsets.values()])
-  for filename, (file_offset, compress_size, compress_type) in file_offsets.items():
-    # possible to remove this realize/item? it's slow
-    file_offset_int = int(file_offset.item())
+    # Batch realize all header reads first
+    header_contents = [t[zi.header_offset+26:zi.header_offset+30].bitcast(dtypes.uint16).to('CPU') for zi in myzip.filelist]
+    Tensor.realize(*header_contents)
+    for zi, header_content in zip(myzip.filelist, header_contents):
+      # header_offset + sizeFileHeader + File name length + Extra field length
+      file_offset_int = zi.header_offset + 30 + sum(cast(list[int], header_content.tolist()))
+      file_offsets[zi.filename] = (file_offset_int, zi.compress_size, zi.compress_type)
+      offsets[zi.filename.split("/")[-1]] = file_offset_int
+    return offsets
+  for filename, (file_offset_int, compress_size, compress_type) in file_offsets.items():
     files[filename] = t[file_offset_int:file_offset_int+compress_size]
     match compress_type:
       case zipfile.ZIP_STORED: pass
@@ -267,16 +270,17 @@ def torch_load(t:Tensor) -> dict[str, Tensor]:
     myzip = zipfile.ZipFile(fobj, 'r')
     base_name = None
     header_offsets = {}
+    offsets = zip_extract(t)
     for zi in myzip.filelist:
       if base_name is None: base_name = zi.filename.split('/', 1)[0]
       if zi.filename.startswith(f'{base_name}/data/'): header_offsets[zi.filename.split("/")[-1]] = zi.header_offset
-    # sadly there's no way to get the start of the file in the zip without reading the header
-    # at least here we read them in parallel
-    header_contents = [t[v+26:v+30].bitcast(dtypes.uint16).to('CPU') for v in header_offsets.values()]
-    Tensor.realize(*header_contents)
-    for (n,o),c in zip(header_offsets.items(), header_contents):
-      # header_offset + sizeFileHeader + File name length + Extra field length : https://en.wikipedia.org/wiki/ZIP_(file_format)
-      offsets[n] = o+30+sum(cast(list[int], c.tolist()))
+    # # sadly there's no way to get the start of the file in the zip without reading the header
+    # # at least here we read them in parallel
+    # header_contents = [t[v+26:v+30].bitcast(dtypes.uint16).to('CPU') for v in header_offsets.values()]
+    # Tensor.realize(*header_contents)
+    # for (n,o),c in zip(header_offsets.items(), header_contents):
+    #   # header_offset + sizeFileHeader + File name length + Extra field length : https://en.wikipedia.org/wiki/ZIP_(file_format)
+    #   offsets[n] = o+30+sum(cast(list[int], c.tolist()))
     with myzip.open(f'{base_name}/data.pkl') as myfile:
       return TorchPickle(myfile).load()
   elif passthrough_reset(tarfile.is_tarfile(fobj)): # NOTE: passthrough_reset required to support python < 3.11
