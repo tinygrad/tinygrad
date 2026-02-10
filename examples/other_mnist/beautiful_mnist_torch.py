@@ -29,7 +29,9 @@ if __name__ == "__main__":
   use_compile = getenv("COMPILE")
   if getenv("TINY_BACKEND"):
     import tinygrad.nn.torch  # noqa: F401
-    device = torch.device("tiny")
+    # torch.compile tracing can't currently handle opaque tiny storage.
+    # Keep tensors on CPU for compile mode while still dispatching backend="tiny".
+    device = torch.device("cpu") if use_compile else torch.device("tiny")
   else:
     device = torch.device({"METAL":"mps","NV":"cuda"}.get(Device.DEFAULT, "cpu"))
   if DEBUG >= 1: print(f"using torch backend {device}")
@@ -53,11 +55,8 @@ if __name__ == "__main__":
     return loss
 
   if use_compile:
-    def compile_probe(x, y):
-      return torch.sin(x) + torch.cos(y)
-    compile_probe = torch.compile(compile_probe, backend="tiny") if getenv("TINY_BACKEND") else torch.compile(compile_probe)
-    probe_out = compile_probe(torch.randn(8, 8), torch.randn(8, 8))
-    if DEBUG >= 1: print(f"torch.compile probe backend {probe_out.device}")
+    step = torch.compile(step, backend="tiny") if getenv("TINY_BACKEND") else torch.compile(step)
+    if DEBUG >= 1: print("using torch.compile on training step")
 
   test_acc = float('nan')
   for i in (t:=trange(getenv("STEPS", 70))):

@@ -1,5 +1,6 @@
 import unittest
 import torch
+from torch import nn, optim
 
 import tinygrad.nn.torch  # noqa: F401  # pylint: disable=unused-import
 
@@ -31,6 +32,25 @@ class TestTorchCompileRegression(unittest.TestCase):
     for out in outs:
       self.assertEqual(out.shape, (10, 10))
       self.assertEqual(out.device.type, "tiny")
+
+  @unittest.skipIf(not hasattr(torch, "compile"), "torch.compile is unavailable")
+  def test_compile_tiny_backend_training_step(self):
+    model = nn.Linear(16, 4).cpu()
+    optimizer = optim.SGD(model.parameters(), lr=1e-3)
+    loss_fn = nn.MSELoss()
+
+    def step(x, y):
+      out = model(x)
+      loss = loss_fn(out, y)
+      optimizer.zero_grad()
+      loss.backward()
+      optimizer.step()
+      return loss
+
+    compiled_step = torch.compile(step, backend="tiny")
+    for _ in range(2):
+      loss = compiled_step(torch.randn(8, 16), torch.randn(8, 4))
+    self.assertTrue(torch.isfinite(loss).item())
 
 
 if __name__ == "__main__":
