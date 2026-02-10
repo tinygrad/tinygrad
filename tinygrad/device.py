@@ -1,7 +1,7 @@
 from __future__ import annotations
 from dataclasses import dataclass, replace
 from collections import defaultdict
-from typing import Any, Generic, TypeVar, Iterator, Generator, TYPE_CHECKING
+from typing import Any, Generic, TypeVar, Iterator, Generator, TypeAlias, TYPE_CHECKING
 import importlib, inspect, functools, pathlib, os, platform, contextlib, sys, re, atexit, pickle, decimal
 from tinygrad.helpers import CI, OSX, LRU, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, flat_mv, PROFILE, temp, colored
 from tinygrad.helpers import Context, CCACHE, ALLOW_DEVICE_USAGE, MAX_BUFFER_SIZE, cpu_events, ProfileEvent, ProfilePointEvent, dedup, ContextVar
@@ -9,6 +9,7 @@ from tinygrad.helpers import unwrap_class_type, suppress_finalizing, select_firs
 from tinygrad.helpers import EMULATED_DTYPES
 from tinygrad.dtype import DType, ImageDType, PtrDType, dtypes, _to_np_dtype
 if TYPE_CHECKING: from tinygrad.renderer import Renderer
+RendererList: TypeAlias = "list[tuple[type[Renderer]|functools.partial, ContextVar|None]]"
 
 # **************** Device ****************
 
@@ -276,8 +277,6 @@ class Compiler:
       if self.cachekey is not None: diskcache_put(self.cachekey, src, lib)
     return lib
   def disassemble(self, lib:bytes): pass
-
-RendererList = list[tuple[type[Renderer]|functools.partial, ContextVar|None]]
 
 class Compiled:
   profile_events:list[ProfileEvent] = [ProfileDeviceEvent("CPU")] # NOTE: CPU is the default device.
