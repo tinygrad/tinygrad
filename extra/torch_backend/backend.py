@@ -11,6 +11,36 @@ import torch, pathlib, operator, functools, weakref
 torch.autograd.grad_mode.set_multithreading_enabled(False)
 from tinygrad.dtype import _from_torch_dtype, _to_torch_dtype
 
+# torch's native cross_entropy path for PrivateUse1 currently diverges from tinygrad for 0<label_smoothing<1.
+# Use an equivalent primitive formulation on tiny tensors while leaving other devices untouched.
+if not hasattr(torch.nn.functional, "_tiny_orig_cross_entropy"):
+  torch.nn.functional._tiny_orig_cross_entropy = torch.nn.functional.cross_entropy
+_orig_cross_entropy = torch.nn.functional._tiny_orig_cross_entropy
+def _tiny_cross_entropy(input, target, weight=None, size_average=None, ignore_index=-100, reduce=None, reduction='mean', label_smoothing=0.0):
+  if size_average is not None or reduce is not None: reduction = torch.nn.functional._Reduction.legacy_get_string(size_average, reduce)
+  if reduction not in ('none', 'mean', 'sum'): raise ValueError(f"{reduction} is not a valid value for reduction")
+  if not isinstance(input, torch.Tensor) or input.device.type != "tiny" or weight is not None:
+    return _orig_cross_entropy(input, target, weight=weight, size_average=size_average, ignore_index=ignore_index,
+                               reduce=reduce, reduction=reduction, label_smoothing=label_smoothing)
+  classes_dim = 0 if input.ndim == 1 else 1
+  log_probs = torch.log_softmax(input, dim=classes_dim)
+  if input.shape == target.shape:
+    probs = (1 - label_smoothing) * target + label_smoothing / input.shape[classes_dim]
+    losses = -(probs * log_probs).sum(classes_dim)
+  else:
+    nll_losses = torch.nn.functional.nll_loss(log_probs, target, ignore_index=ignore_index, reduction='none')
+    smooth_losses = -log_probs.mean(classes_dim)
+    if ignore_index >= 0:
+      mask = target == ignore_index
+      nll_losses = nll_losses.masked_fill(mask, 0)
+      smooth_losses = smooth_losses.masked_fill(mask, 0)
+    losses = (1 - label_smoothing) * nll_losses + label_smoothing * smooth_losses
+  if reduction == 'none': return losses
+  if reduction == 'sum': return losses.sum()
+  if input.shape == target.shape or ignore_index < 0: return losses.mean()
+  return losses.sum() / (target != ignore_index).sum()
+torch.nn.functional.cross_entropy = _tiny_cross_entropy
+
 # https://pytorch.org/docs/stable/torch.compiler_ir.html
 
 def _from_torch_device(device: torch.device): return f"{Device.DEFAULT}:{device.index or 0}"
