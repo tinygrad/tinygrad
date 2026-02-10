@@ -2,15 +2,15 @@ from __future__ import annotations
 import os, ctypes, functools, mmap, struct, array, math, sys, weakref, contextlib
 assert sys.platform != 'win32'
 from typing import Any
-from tinygrad.device import BufferSpec, CompilerSet, CompilerPair, Device
+from tinygrad.device import BufferSpec, CompilerSet, Device
 from tinygrad.runtime.support.hcq import HCQBuffer, HWQueue, HCQProgram, HCQCompiled, HCQAllocatorBase, HCQSignal, HCQArgsState, BumpAllocator
 from tinygrad.runtime.support.hcq import FileIOInterface, MMIOInterface
 from tinygrad.runtime.autogen import kgsl, mesa
-from tinygrad.runtime.ops_cl import CLCompiler, CLDevice
+from tinygrad.runtime.ops_cl import CLDevice
 from tinygrad.renderer.cstyle import QCOMRenderer
 from tinygrad.renderer.nir import IR3Renderer
 from tinygrad.helpers import getenv, mv_address, to_mv, round_up, data64_le, ceildiv, prod, fromimport, cpu_profile, lo32, suppress_finalizing
-from tinygrad.helpers import next_power2, flatten, QCOM_IR3, QCOM_CC, PROFILE
+from tinygrad.helpers import next_power2, flatten, QCOM_IR3, QCOM_CC, PROFILE, DEBUG
 from tinygrad.dtype import ImageDType, dtypes
 from tinygrad.runtime.support.system import System
 if getenv("IOCTL"): import extra.qcom_gpu_driver.opencl_ioctl  # noqa: F401  # pylint: disable=unused-import
@@ -49,10 +49,6 @@ def pkt7_hdr(opcode: int, cnt: int): return mesa.CP_TYPE7_PKT | cnt & 0x3FFF | p
 def pkt4_hdr(reg: int, cnt: int): return mesa.CP_TYPE4_PKT | cnt & 0x7F | parity(cnt) << 7 | (reg & 0x3FFFF) << 8 | parity(reg) << 27
 
 def _read_lib(lib, off) -> int: return struct.unpack("I", lib[off:off+4])[0]
-class QCOMCompiler(CLCompiler):
-  def __init__(self, device:str=""): super().__init__(CLDevice(device), 'compile_qcom')
-  def disassemble(self, lib:bytes):
-    fromimport('tinygrad.runtime.support.compiler_mesa', 'disas_adreno')(lib[(ofs:=_read_lib(lib, 0xc0)):ofs+_read_lib(lib, 0x100)])
 
 class QCOMSignal(HCQSignal):
   def __init__(self, *args, **kwargs): super().__init__(*args, **{**kwargs, 'timestamp_divider': 19.2})
@@ -231,7 +227,7 @@ class QCOMArgsState(HCQArgsState):
 class QCOMProgram(HCQProgram):
   def __init__(self, dev: QCOMDevice, name: str, lib: bytes, buf_dtypes=[], **kwargs):
     self.dev: QCOMDevice = dev
-    self.buf_dtypes, self.name, self.lib, self.NIR = buf_dtypes, name, lib, isinstance(dev.renderer, IR3Renderer)
+    self.buf_dtypes, self.name, self.NIR = buf_dtypes, name, isinstance(dev.renderer, IR3Renderer)
 
     if self.NIR:
       from tinygrad.runtime.support.compiler_mesa import IR3Compiler
@@ -252,7 +248,9 @@ class QCOMProgram(HCQProgram):
       self.tex_off, self.ibo_off, self.samp_off = 2048, 2048 + 0x40 * self.tex_cnt, 2048 + 0x40 * (self.tex_cnt + self.ibo_cnt)
       self.fregs, self.hregs = v.info.max_reg + 1, v.info.max_half_reg + 1
       self.consts_info:list[tuple] = []
-    else: self._parse_lib()
+    else:
+      self._parse_lib(lib:=self.dev.cl_dev.cl_compiler.compile_cached(lib.decode()))
+      if DEBUG >= 7: fromimport('tinygrad.runtime.support.compiler_mesa', 'disas_adreno')(lib[(ofs:=_read_lib(lib, 0xc0)):ofs+_read_lib(lib, 0x100)])
 
     self.lib_gpu: HCQBuffer = self.dev.allocator.alloc(self.image_size, buf_spec:=BufferSpec(cpu_access=True, nolru=True))
     to_mv(self.lib_gpu.va_addr, self.image_size)[:] = self.image
@@ -274,21 +272,21 @@ class QCOMProgram(HCQProgram):
       raise RuntimeError(f"Invalid global/local dims {global_size=}, {local_size=}")
     return super().__call__(*bufs, global_size=global_size, local_size=local_size, vals=vals, wait=wait)
 
-  def _parse_lib(self):
+  def _parse_lib(self, lib):
     # Extract image binary
-    self.image_size = _read_lib(self.lib, 0x100)
-    self.image = bytearray(self.lib[(image_offset:=_read_lib(self.lib, 0xc0)):image_offset+self.image_size])
+    self.image_size = _read_lib(lib, 0x100)
+    self.image = bytearray(lib[(image_offset:=_read_lib(lib, 0xc0)):image_offset+self.image_size])
 
     # Parse image descriptors
-    image_desc_off = _read_lib(self.lib, 0x110)
-    self.prg_offset, self.brnchstck = _read_lib(self.lib, image_desc_off+0xc4), _read_lib(self.lib, image_desc_off+0x108) // 2
-    self.pvtmem, self.shmem = _read_lib(self.lib, image_desc_off+0xc8), _read_lib(self.lib, image_desc_off+0xd8)
+    image_desc_off = _read_lib(lib, 0x110)
+    self.prg_offset, self.brnchstck = _read_lib(lib, image_desc_off+0xc4), _read_lib(lib, image_desc_off+0x108) // 2
+    self.pvtmem, self.shmem = _read_lib(lib, image_desc_off+0xc8), _read_lib(lib, image_desc_off+0xd8)
 
     # Fill up constants and buffers info
     self.consts_info = []
 
     # Collect sampler info.
-    self.samp_cnt = samp_cnt_in_file = _read_lib(self.lib, image_desc_off + 0xdc)
+    self.samp_cnt = samp_cnt_in_file = _read_lib(lib, image_desc_off + 0xdc)
     assert self.samp_cnt <= 1, "Up to one sampler supported"
     if self.samp_cnt:
       self.samp_cnt += 1
@@ -298,8 +296,8 @@ class QCOMProgram(HCQProgram):
 
     # Collect kernel arguments (buffers) info.
     bdoff, binfos = round_up(image_desc_off + 0x158 + len(self.name), 4) + 8 * samp_cnt_in_file, []
-    while bdoff + 32 <= len(self.lib):
-      length, _, _, offset_words, _, _, _, typ = struct.unpack("8I", self.lib[bdoff:bdoff+32])
+    while bdoff + 32 <= len(lib):
+      length, _, _, offset_words, _, _, _, typ = struct.unpack("8I", lib[bdoff:bdoff+32])
       if length == 0: break
       binfos.append((offset_words * 4, typ))
       bdoff += length
@@ -309,16 +307,16 @@ class QCOMProgram(HCQProgram):
     self.tex_cnt, self.ibo_cnt = sum(typ is BUFTYPE_TEX for _,typ in binfos), sum(typ is BUFTYPE_IBO for _,typ in binfos)
     self.ibo_off, self.tex_off, self.samp_off = 2048, 2048 + 0x40 * self.ibo_cnt, 2048 + 0x40 * self.tex_cnt + 0x40 * self.ibo_cnt
 
-    if _read_lib(self.lib, 0xb0) != 0: # check if we have constants.
-      cdoff = _read_lib(self.lib, 0xac)
+    if _read_lib(lib, 0xb0) != 0: # check if we have constants.
+      cdoff = _read_lib(lib, 0xac)
       while cdoff + 40 <= image_offset:
-        cnst, offset_words, _, is32 = struct.unpack("I", self.lib[cdoff:cdoff+4])[0], *struct.unpack("III", self.lib[cdoff+16:cdoff+28])
+        cnst, offset_words, _, is32 = struct.unpack("I", lib[cdoff:cdoff+4])[0], *struct.unpack("III", lib[cdoff+16:cdoff+28])
         self.consts_info.append((cnst, offset_words * (sz_bytes:=(2 << is32)), sz_bytes))
         cdoff += 40
 
     # Registers info
-    reg_desc_off = _read_lib(self.lib, 0x34)
-    self.fregs, self.hregs = _read_lib(self.lib, reg_desc_off + 0x14), _read_lib(self.lib, reg_desc_off + 0x18)
+    reg_desc_off = _read_lib(lib, 0x34)
+    self.fregs, self.hregs = _read_lib(lib, reg_desc_off + 0x14), _read_lib(lib, reg_desc_off + 0x18)
 
 class QCOMTextureInfo:
   def __init__(self, pitch:int, real_stride:int, desc:list[int], ibo:list[int]):
@@ -385,8 +383,8 @@ class QCOMDevice(HCQCompiled):
     if PROFILE and self.gpu_id[:2] < (7, 3):
       System.write_sysfs("/sys/class/kgsl/kgsl-3d0/idle_timer", value="4000000000", msg="Failed to disable suspend mode", expected="4294967276")
 
-    compilers = CompilerSet(ctrl_var=QCOM_CC, cset=[CompilerPair(QCOMRenderer, functools.partial(QCOMCompiler, device)),
-                                                    CompilerPair(functools.partial(IR3Renderer, info.chip_id), None, QCOM_IR3)])
+    self.cl_dev = CLDevice(device)
+    compilers = CompilerSet(ctrl_var=QCOM_CC, cset=[(QCOMRenderer, None), (functools.partial(IR3Renderer, info.chip_id), QCOM_IR3)])
     super().__init__(device, QCOMAllocator(self), compilers, functools.partial(QCOMProgram, self), QCOMSignal,
                      functools.partial(QCOMComputeQueue, self), None)
 

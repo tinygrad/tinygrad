@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Callable, cast, TYPE_CHECKING
+from typing import Callable, cast
 import functools
 from dataclasses import dataclass, field
 from tinygrad.helpers import to_function_name, dedup, prod, DEBUG
@@ -7,7 +7,7 @@ from tinygrad.uop.ops import Ops, UOp, sym_infer, sint, Variable, ssimplify, Gro
 from tinygrad.dtype import AddrSpace, PtrDType
 from tinygrad.codegen.opt.tc import TensorCore
 from tinygrad.codegen.opt import Opt
-if TYPE_CHECKING: from tinygrad.device import Compiler
+from tinygrad.device import Compiler
 
 @dataclass(frozen=True)
 class Estimates:
@@ -150,7 +150,8 @@ class Renderer:
   pre_matcher: PatternMatcher|None = None
   extra_matcher: PatternMatcher|None = None
   code_for_op: dict[Ops, Callable] = {}
-  compiler: Compiler|None = None
+
+  compiler: Compiler = Compiler()
 
   def __reduce__(self): return self.__class__, ()
   def render(self, uops:list[UOp]) -> str: raise NotImplementedError("needs a renderer")

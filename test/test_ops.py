@@ -596,7 +596,7 @@ class TestOps(unittest.TestCase):
     helper_test_op(None, lambda x: x//2, forward_only=True, vals=[[3, 4, 5]])
     helper_test_op(None, functools.partial(torch.div, rounding_mode="trunc"), Tensor.idiv, forward_only=True,
                    vals=[[-4, 7, 5, 4, -7, 8], [2, -3, 8, -2, 3, 5]])
-    if is_dtype_supported(dtypes.uint64) and not COMPILE_ONLY:
+    if not COMPILE_ONLY:
       x = Tensor(2**64 - 1, dtype=dtypes.uint64).idiv(1)
       np.testing.assert_equal(x.numpy(), 2**64 - 1)
 

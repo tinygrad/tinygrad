@@ -34,9 +34,8 @@ class TestMovedConstFolding(unittest.TestCase):
       _check_ast_count(1, Tensor.full(4, fill_value=-1).pad(((1, 1),)).cast(dtypes.uint16))
       np.testing.assert_equal(Tensor.full(4, fill_value=-1).pad(((1, 1),)).cast(dtypes.uint16).numpy(), [0, 65535, 65535, 65535, 65535, 0])
     # folded
-    if is_dtype_supported(dtypes.int64):
-      _check_ast_count(1, Tensor.ones(4).pad(((1, 1),)).cast(dtypes.int64))
-      np.testing.assert_equal(Tensor.ones(4).pad(((1, 1),)).cast(dtypes.int64).numpy(), [0, 1, 1, 1, 1, 0])
+    _check_ast_count(1, Tensor.ones(4).pad(((1, 1),)).cast(dtypes.int64))
+    np.testing.assert_equal(Tensor.ones(4).pad(((1, 1),)).cast(dtypes.int64).numpy(), [0, 1, 1, 1, 1, 0])
 
 class TestReduceOpsConstFolding(unittest.TestCase):
   def test_const_sum(self):

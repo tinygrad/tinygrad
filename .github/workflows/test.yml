@@ -1,7 +1,7 @@
 name: Unit Tests
 env:
   # increment this when downloads substantially change to avoid the internet
-  CACHE_VERSION: '15'
+  CACHE_VERSION: '16'
   CAPTURE_PROCESS_REPLAY: 1
   GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   PYTHONPATH: ${{ github.workspace }}
@@ -581,7 +581,7 @@ jobs:
         load: true
         tags: qemu-hexagon:latest
         cache-from: type=gha
-        cache-to: type=gha,mode=min
+        cache-to: ${{ github.event_name != 'pull_request' && 'type=gha,mode=min' || '' }}
     - name: Set MOCKDSP env
       run: printf "MOCKDSP=1" >> $GITHUB_ENV
     - name: Run test_tiny on DSP
@@ -739,7 +739,7 @@ jobs:
           DEBUG=5 FORWARD_ONLY=1 python3 test/test_ops.py TestOps.test_add
       - name: Run pytest (cuda)
         # skip multitensor because it's slow
-        run: python -m pytest -n=auto test/ --ignore=test/models --ignore=test/unit --ignore=test/null --ignore test/test_gc.py --ignore test/test_multitensor.py --durations=20
+        run: python -m pytest -n=auto test/ --ignore=test/models --ignore=test/unit --ignore=test/null --ignore test/test_multitensor.py --durations=20
       - name: Run TestOps.test_add with PMA
         run: VIZ=-1 PMA=1 DEBUG=5 python3 test/test_ops.py TestOps.test_add
       - name: Run process replay tests

@@ -83,7 +83,7 @@ class TestRandomness(unittest.TestCase):
     self.assertTrue(r1.uop.is_realized, "tensor should be realized after .realize()")
     self.assertTrue(r2.uop.is_realized, "tensor should be realized after .realize()")
 
-  @unittest.skipUnless(is_dtype_supported(dtypes.float16) and is_dtype_supported(dtypes.ulong), "need float16 and ulong support")
+  @unittest.skipUnless(is_dtype_supported(dtypes.float16), "need float16 support")
   def test_rand_float16(self):
     N = 128
     x = Tensor.rand((2, N, N), dtype=dtypes.float16)

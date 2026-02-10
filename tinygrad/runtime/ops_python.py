@@ -6,7 +6,7 @@ from typing import Any, TYPE_CHECKING
 import pickle, base64, itertools, time, struct, sys, functools
 from tinygrad.dtype import DType, dtypes, ImageDType, PtrDType, truncate, float_to_fp16, float_to_bf16, float_to_fp8, fp8_to_float
 from tinygrad.helpers import all_same, getenv, flatten, get_single_element, EMULATE
-from tinygrad.device import Compiled, Compiler, Allocator, CompilerSet, CompilerPair
+from tinygrad.device import Compiled, Compiler, Allocator, CompilerSet
 from tinygrad.codegen.opt import tc
 from tinygrad.uop.ops import exec_alu, python_alu, Ops, UOp, GroupOp
 from tinygrad.renderer import Renderer
@@ -214,9 +214,14 @@ class PythonProgram:
         i += 1
     return time.perf_counter() - st
 
+class PythonCompiler(Compiler):
+  def compile(self, src:str) -> bytes: return base64.b64decode(src)
+
 class PythonRenderer(Renderer):
   device = "PYTHON"
   code_for_op = python_alu
+  compiler = PythonCompiler()
+
   def __init__(self):
     match EMULATE.value:
       case "METAL": self.device, self.tensor_cores = "METAL", tc.metal
@@ -236,9 +241,6 @@ class PythonRenderer(Renderer):
     lops = [(u.op, u.dtype, [uops.index(v) for v in u.src if u.op is not Ops.SPECIAL], u.arg) for u in uops]
     return base64.b64encode(pickle.dumps(lops)).decode()
 
-class PythonCompiler(Compiler):
-  def compile(self, src:str) -> bytes: return base64.b64decode(src)
-
 class PythonAllocator(Allocator['PythonDevice']):
   def _alloc(self, size, options): return memoryview(bytearray(size))
   def _copyin(self, dest, src:memoryview): dest[:] = src
@@ -246,4 +248,4 @@ class PythonAllocator(Allocator['PythonDevice']):
 
 class PythonDevice(Compiled):
   def __init__(self, device:str):
-    super().__init__(device, PythonAllocator(self), CompilerSet([CompilerPair(PythonRenderer, PythonCompiler)]), PythonProgram)
+    super().__init__(device, PythonAllocator(self), CompilerSet([(PythonRenderer, None)]), PythonProgram)

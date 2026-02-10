@@ -1,8 +1,6 @@
-import unittest
-import random
-from os import getenv
+import unittest, random
 from tinygrad import Tensor, TinyJit, Variable, dtypes, Device
-from tinygrad.helpers import Context
+from tinygrad.helpers import Context, getenv
 import numpy as np
 
 class TestSetitem(unittest.TestCase):
@@ -13,7 +11,7 @@ class TestSetitem(unittest.TestCase):
       ((6,6), (slice(2,4), slice(3,5)), 1.0),
       ((6,6), (3, 4), 1.0),
       ((6,6), (3, None, 4, None), 1.0),
-      ((4,4,4,4), (Ellipsis, slice(1,3), slice(None)), Tensor(4)),
+      ((4,4,4,4), (Ellipsis, slice(1,3), slice(None)), Tensor(4.0)),
       ((4,4,4,4), (Ellipsis, slice(1,3)), 4),
       ((4,4,4,4), (2, slice(1,3), None, 1), 4),
       ((4,4,4,4), (slice(1,3), slice(None), slice(0,4,2)), 4),
@@ -49,6 +47,10 @@ class TestSetitem(unittest.TestCase):
         t = Tensor.ones(6,6, dtype=dt).contiguous()
         t[1] = v
         self.assertEqual(t.dtype, dt)
+
+  def test_setitem_dtype_mismatch(self):
+    t = Tensor.zeros(6, dtype=dtypes.float).contiguous().realize()
+    with self.assertRaises(RuntimeError): t[2:4] = Tensor([1, 2], dtype=dtypes.int)
 
   def test_setitem_into_noncontiguous(self):
     t = Tensor.ones(4)
@@ -109,8 +111,6 @@ class TestSetitem(unittest.TestCase):
   def test_setitem_consecutive_inplace_operator(self):
     t = Tensor.arange(4).reshape(2, 2).contiguous()
     t[1] += 2
-    t = t.contiguous()
-    # TODO: RuntimeError: can't double realize in one schedule
     t[1] -= 1
     np.testing.assert_allclose(t.numpy(), [[0, 1], [3, 4]])
 
@@ -182,7 +182,7 @@ class TestSetitem(unittest.TestCase):
     t[:-1] = t[1:]
     self.assertEqual(t.tolist(), [[2.0], [1.0], [1.0]])
 
-  # TODO: WEBGPU pipeline validation error
+  # TODO: WEBGPU pipeline validation error. this generates (1==gidx0)|(2==gidx0)|(3==gidx0)|(4==gidx0)|(5==gidx0) ...
   @unittest.skipIf(Device.DEFAULT == "WEBGPU", "WEBGPU pipeline validation error")
   def test_setitem_big(self):
     idx_size, val = 256, 4
@@ -193,23 +193,23 @@ class TestSetitem(unittest.TestCase):
 
   def test_setitem_advanced_indexing(self):
     # Example from https://numpy.org/doc/stable/user/basics.indexing.html#combining-advanced-and-basic-indexing
-    t = Tensor.zeros(10,20,30,40,50).contiguous()
+    t = Tensor.zeros(10,20,30,40,50, dtype=dtypes.int).contiguous()
     ind_1 = Tensor([5,3,7,8])
     ind_2 = Tensor([[[0],[1],[2]],[[3],[4],[5]]])
     v = Tensor.arange(2*3*4*10*30*50).reshape(2,3,4,10,30,50)
     t[:, ind_1, :, ind_2, :] = v
-    n = np.zeros((10,20,30,40,50))
+    n = np.zeros((10,20,30,40,50), dtype=np.int32)
     n[:, ind_1.numpy(), :, ind_2.numpy(), :] = v.numpy()
-    np.testing.assert_allclose(t.numpy(), n)
+    np.testing.assert_equal(t.numpy(), n)
 
   def test_setitem_2d_tensor_indexing(self):
-    t = Tensor.zeros(2).contiguous()
+    t = Tensor.zeros(2, dtype=dtypes.int).contiguous()
     index = Tensor([[0, 1], [1,0]])
     v = Tensor.arange(2*2).reshape(2, 2).contiguous()
     t[index] = v
-    n = np.zeros((2,))
+    n = np.zeros((2,), dtype=np.int32)
     n[index.numpy()] = v.numpy()
-    np.testing.assert_allclose(t.numpy(), n)
+    np.testing.assert_equal(t.numpy(), n)
 
   @unittest.skip("slow")
   def test_setitem_tensor_indexing_fuzz(self):

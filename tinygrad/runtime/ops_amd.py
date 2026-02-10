@@ -6,9 +6,9 @@ from dataclasses import dataclass
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, HWQueue, CLikeArgsState, HCQSignal, HCQProgram, FileIOInterface
 from tinygrad.runtime.support.hcq import MMIOInterface, BumpAllocator, hcq_filter_visible_devices
 from tinygrad.uop.ops import sint
-from tinygrad.device import Compiled, DMAFdRef, BufferSpec, CompilerSet, CompilerPair
+from tinygrad.device import Compiled, DMAFdRef, BufferSpec, CompilerSet
 from tinygrad.helpers import getenv, round_up, data64_le, DEBUG, PROFILE, ProfileEvent, lo32, hi32, colored, prod, ContextVar
-from tinygrad.helpers import VIZ, AMD_CC, AMD_LLVM, ceildiv, unwrap
+from tinygrad.helpers import VIZ, AMD_CC, AMD_LLVM, AMD_HIPCC, ceildiv, unwrap
 from tinygrad.renderer.cstyle import AMDHIPRenderer, AMDHIPCCRenderer
 from tinygrad.renderer.llvmir import AMDLLVMRenderer
 from tinygrad.runtime.autogen import kfd, hsa, pci, sqtt, amdgpu_kd, amdgpu_drm
@@ -425,24 +425,30 @@ class AMDComputeAQLQueue(AMDComputeQueue):
     self.bind_sints_to_mem(*[l * g for l,g in zip(local_size, global_size)], mem=pkt_view, fmt='I', offset=12)
     return self
 
-  def bind(self, dev:AMDDevice): pass # not supported
+  def _pm4_pkt(self, addr:sint, cnt:int) -> bytes:
+    return bytes(array.array('I', [AQL_HDR | (hsa.HSA_PACKET_TYPE_VENDOR_SPECIFIC << hsa.HSA_PACKET_HEADER_TYPE) | (1 << 16),
+      self.pm4.PACKET3(self.pm4.PACKET3_INDIRECT_BUFFER, 2), *data64_le(addr), cnt | self.pm4.INDIRECT_BUFFER_VALID, 10] + [0] * 10))
+
+  def _prep_aql(self, q:list, pm4_buf:HCQBuffer) -> list[bytes|hsa.hsa_kernel_dispatch_packet_t]:
+    pm4_buf.cpu_view().view(fmt='I')[:len(q)] = array.array('I', [0 if isinstance(c, hsa.hsa_kernel_dispatch_packet_t) else c for c in q])
+
+    splits = [-1, *[i for i, c in enumerate(q) if isinstance(c, hsa.hsa_kernel_dispatch_packet_t)], len(q)]
+    aql_cmds:list[bytes|hsa.hsa_kernel_dispatch_packet_t] = []
+    for prev_pkt, cur_pkt in zip(splits, splits[1:]):
+      if cur_pkt - prev_pkt > 1: aql_cmds.append(self._pm4_pkt(pm4_buf.va_addr + (prev_pkt+1) * 4, cur_pkt - prev_pkt - 1)) # pm4 commands
+      if cur_pkt < len(q): aql_cmds.append(q[cur_pkt]) # aql
+    return aql_cmds
+
+  def bind(self, dev:AMDDevice):
+    self.binded_device = dev
+    self.hw_page = dev.allocator.alloc(len(self._q) * 4, BufferSpec(cpu_access=True, nolru=True, uncached=True))
+    self._cmds = self._prep_aql(self._q, self.hw_page)
+    self._q = self.hw_page.cpu_view().view(fmt='I')
+    return self
+
   def _submit(self, dev:AMDDevice):
-    pm4_batch:list[int] = []
-    aql_bytes = bytes()
-
-    def flush_pm4_batch():
-      nonlocal pm4_batch
-      if not pm4_batch: return bytes()
-      dev.pm4_ibs.cpu_view().view(off:=dev.pm4_ib_alloc.alloc(len(pm4_batch) * 4, 16), fmt='I')[:len(pm4_batch)] = array.array('I', pm4_batch)
-      pkt = [AQL_HDR | (hsa.HSA_PACKET_TYPE_VENDOR_SPECIFIC << hsa.HSA_PACKET_HEADER_TYPE) | (1 << 16),
-        self.pm4.PACKET3(self.pm4.PACKET3_INDIRECT_BUFFER, 2), *data64_le(dev.pm4_ibs.va_addr+off), len(pm4_batch)|self.pm4.INDIRECT_BUFFER_VALID, 10]
-      pm4_batch.clear()
-      return bytes(array.array('I', pkt + [0] * 10))
-
-    for cmd in self._q:
-      if isinstance(cmd, hsa.hsa_kernel_dispatch_packet_t): aql_bytes += flush_pm4_batch() + bytes(cmd)
-      else: pm4_batch.append(cmd)
-    aql_bytes += flush_pm4_batch()
+    cmds = self._cmds if dev == self.binded_device else self._prep_aql(self._q, dev.pm4_ibs.offset(dev.pm4_ib_alloc.alloc(len(self._q) * 4, 16)))
+    aql_bytes = b''.join(bytes(c) if isinstance(c, hsa.hsa_kernel_dispatch_packet_t) else c for c in cmds)
 
     assert len(aql_bytes) < dev.compute_queue.ring.nbytes, "submit is too large for the queue"
     cp_bytes = min(len(aql_bytes), (dev.compute_queue.ring.nbytes - (dev.compute_queue.put_value * 64) % dev.compute_queue.ring.nbytes))
@@ -962,9 +968,9 @@ class AMDDevice(HCQCompiled):
     self.sdma_queues:dict = {}
     self.has_sdma_queue = self.sdma_queue(0) is not None
 
-    compilers = CompilerSet([CompilerPair(functools.partial(AMDHIPRenderer, self.arch), None),
-                             CompilerPair(functools.partial(AMDLLVMRenderer, self.arch), None, AMD_LLVM),
-                             CompilerPair(functools.partial(AMDHIPCCRenderer, self.arch), None)], ctrl_var=AMD_CC)
+    compilers = CompilerSet([(functools.partial(AMDHIPRenderer, self.arch), None),
+                             (functools.partial(AMDLLVMRenderer, self.arch), AMD_LLVM),
+                             (functools.partial(AMDHIPCCRenderer, self.arch), AMD_HIPCC)], ctrl_var=AMD_CC)
 
     super().__init__(device, AMDAllocator(self), compilers, functools.partial(AMDProgram, self), AMDSignal,
                      functools.partial(AMDComputeAQLQueue if self.is_aql else AMDComputeQueue, self),

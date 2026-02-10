@@ -139,7 +139,6 @@ def do_render(ctx:Renderer, prg:UOp, lin:UOp) -> UOp:
   return prg.replace(src=prg.src + (UOp(Ops.SOURCE, arg=src),), arg=ctx.aux(list(lin.src)) if ctx.has_aux else prg.arg)
 
 def do_compile(ctx:Renderer, prg:UOp, source:UOp) -> UOp|None:
-  if ctx.compiler is None: return None
   lib = ctx.compiler.compile_cached(source.arg)
   return prg.replace(src=prg.src + (UOp(Ops.BINARY, arg=lib),))
 
