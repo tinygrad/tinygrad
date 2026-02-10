@@ -442,42 +442,32 @@ def to_bytes(dt:DType, v:int|float):
   return v.to_bytes(dt.itemsize, 'little', signed=dt in dtypes.sints)
 
 def encode(x:UOp, opc:int, reg:int|None=None, pp:int=0, sel:int=0, we:int=0):
-  # get the encoding structure of the uop
-  reg_uop, vvvv_uop, rm_uop, idx_uop, disp_uop, imm_uop = None, None, None, None, None, None
   # when a uop writes to memory it takes the form of a store, dtype is void, no definition
   if x.op in X86GroupOp.WriteMem:
-    if len(x.src) > 3: rm_uop, idx_uop, disp_uop = x.src[0], x.src[1], x.src[2]
-    else: rm_uop = x
-    if reg is None:
-      reg_uop = x.src[3] if len(x.src) > 3 else x.src[0]
-      imm_uop = x.src[4] if len(x.src) == 5 else x.src[1] if len(x.src) == 2 else None
-    else: imm_uop = x.src[3] if len(x.src) > 3 and x.src[3].arg is not None else x.src[0] if x.src[0].arg is not None else None
+    if len(x.src) > 3: address, rest = x.src[:3], x.src[3:]
+    else: address, rest = (x, None, None), x.src
 
   elif x.op in X86GroupOp.ReadMem1st or x.op in X86GroupOp.ReadMem2nd and x.op in X86GroupOp.TwoAddress1st:
-    if len(x.src) > 2: idx_uop, disp_uop = x.src[1], x.src[2]
-    if reg is None: reg_uop = x
-    if x.src[-1].dtype != dtypes.void: imm_uop = x.src[3] if len(x.src) == 4 else x.src[1] if len(x.src) == 2 else None
-    rm_uop = x.src[0]
+    if len(x.src) > 2: address, rest = x.src[:3], (x,) + x.src[3:]
+    else: address, rest = (x.src[0], None, None), (x,) + x.src[1:]
 
   elif x.op in X86GroupOp.ReadMem2nd or x.op in X86GroupOp.ReadMem3rd and x.op in X86GroupOp.TwoAddress1st:
-    if len(x.src) > 3: idx_uop, disp_uop = x.src[2], x.src[3]
-    reg_uop = x if x.dtype != dtypes.void else x.src[0]
-    vvvv_uop = x.src[0] if x.dtype != dtypes.void else None
-    imm_uop = x.src[4] if len(x.src) == 5 else x.src[2] if len(x.src) == 3 else None
-    rm_uop = x.src[1]
+    if len(x.src) > 3: address, rest = x.src[1:4], x.src[:1] + x.src[4:]
+    else: address, rest = (x.src[1], None, None), x.src[:1] + x.src[2:]
+    if x.dtype is not dtypes.void: rest = (x,) + rest
 
-  assert rm_uop is not None
-  assert reg_uop is None if reg is not None else reg_uop is not None
-  if imm_uop is not None: assert imm_uop.op is X86Ops.IMM or x.op in {X86Ops.VPBLENDVB, X86Ops.VBLENDVPS, X86Ops.VBLENDVPD}, x.op
-  # now get the encoding values of the different fields
-  rm = cast(Register, rm_uop.arg).index
-  reg = cast(Register, reg_uop.arg).index if reg_uop is not None else reg
-  vvvv = cast(Register, vvvv_uop.arg).index if vvvv_uop is not None else 0
-  # index == 4 (rsp) indicates no index is present
-  idx = cast(Register, idx_uop.arg).index if idx_uop is not None and idx_uop.arg is not None else 4
-  reg_sz = (reg_uop.dtype.itemsize if not isinstance(reg_uop.dtype, PtrDType) else 8) if reg_uop is not None else 0
+  else: return None
+
+  # get the encoding values of the different fields
+  reg_sz = (rest[0].dtype.itemsize if not isinstance(rest[0].dtype, PtrDType) else 8) if reg is None else 0
+  reg = cast(Register, rest[0].arg).index if reg is None else reg
+  vvvv = rest[1].arg.index if len(rest) > 1 and isinstance(rest[1].arg, Register) else 0
+  rm = cast(Register, address[0].arg).index
+  idx = cast(Register, address[1].arg).index if address[1] is not None and address[1].arg is not None else 4
+  disp_uop = address[2]
+  imm_uop = rest[-1] if rest[-1].op is X86Ops.IMM or len(rest) == 3 else None
   # TODO: another reason to get rid of ptrs, if we access memory the size should be in scale uop otherwise size is in rm
-  rm_sz = 8 if isinstance(rm_uop.dtype, PtrDType) and disp_uop is None else rm_uop.dtype.itemsize
+  rm_sz = 8 if isinstance(address[0].dtype, PtrDType) and disp_uop is None else address[0].dtype.itemsize
 
   # encode instruction
   inst = bytes([])
@@ -489,7 +479,6 @@ def encode(x:UOp, opc:int, reg:int|None=None, pp:int=0, sel:int=0, we:int=0):
   # r extends reg field, x extends index field, b extends rm or base field
   r, _x, b = reg >> 3, idx >> 3, rm >> 3
   if sel:
-    assert reg_uop is not None
     l = (max(reg_sz, rm_sz) > 16) & 0b1
     if sel == 1 and _x == b == we == 0: inst += bytes([0xC5, (~r & 0b1) << 7 | (~vvvv & 0b1111) << 3 | l << 2 | pp])
     else: inst += bytes([0xC4, (~r & 0b1) << 7 | (~_x & 0b1) << 6 | (~b & 0b1) << 5 | sel, we << 7 | (~vvvv & 0b1111) << 3 | l << 2 | pp])
