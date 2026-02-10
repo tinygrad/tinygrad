@@ -99,8 +99,8 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
   # resolve calls
   (UPat(Ops.CALL, name="c"), resolve_call),
 
-  # remove CONTIGUOUS if the BUFFER is already contiguous
-  (UPat(Ops.RESHAPE, src=(UPat(Ops.BUFFER), UPat()), name="r").f(Ops.CONTIGUOUS, name="c"), lambda r,c: r.replace(tag=c.tag)),
+  # remove CONTIGUOUS if the source is already contiguous
+  (UPat(Ops.RESHAPE, src=(UPat((Ops.BUFFER, Ops.CONTIGUOUS)), UPat()), name="r").f(Ops.CONTIGUOUS, name="c"), lambda r,c: r.replace(tag=c.tag)),
 
   # split_reduceop
   (UPat(Ops.REDUCE_AXIS, name="reduce", src=(UPat.var("x"),)), split_reduceop),
