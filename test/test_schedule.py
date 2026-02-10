@@ -1012,6 +1012,15 @@ class TestSchedule(unittest.TestCase):
   def test_setitem_permuted_sched(self): self.test_setitem_sched(lambda x: x.T, 2)
   def test_setitem_paddded_sched(self): self.test_setitem_sched(lambda x: x.shrink_to(4, 1).pad_to(4, 4), 1)
 
+  def test_setitem_const_fused(self):
+    # https://github.com/tinygrad/tinygrad/issues/10690
+    a = Tensor.arange(16).contiguous().realize()
+    GlobalCounters.reset()
+    a[4] = 3
+    # TODO: update when this becomes lazy
+    self.assertEqual(GlobalCounters.kernel_count, 1)
+    self.assertListEqual(a.tolist(), [0, 1, 2, 3, 3, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15])
+
   def test_no_extra_contiguous_on_setitem_assign_back(self):
     # pattern: contiguous copy, advanced setitem, assign back (e.g. torch backend _view_write)
     base = Tensor.arange(16).reshape(4, 4).contiguous()
