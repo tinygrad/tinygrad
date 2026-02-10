@@ -26,6 +26,7 @@ class Model(nn.Module):
     return self.lin(torch.flatten(x, 1))
 
 if __name__ == "__main__":
+  use_compile = getenv("COMPILE")
   if getenv("TINY_BACKEND"):
     import tinygrad.nn.torch  # noqa: F401
     device = torch.device("tiny")
@@ -43,9 +44,7 @@ if __name__ == "__main__":
   optimizer = optim.Adam(model.parameters(), 1e-3)
 
   loss_fn = nn.CrossEntropyLoss()
-  #@torch.compile
-  def step(samples):
-    X,Y = X_train[samples], Y_train[samples]
+  def step(X, Y):
     out = model(X)
     loss = loss_fn(out, Y)
     optimizer.zero_grad()
@@ -53,10 +52,18 @@ if __name__ == "__main__":
     optimizer.step()
     return loss
 
+  if use_compile:
+    def compile_probe(x, y):
+      return torch.sin(x) + torch.cos(y)
+    compile_probe = torch.compile(compile_probe, backend="tiny") if getenv("TINY_BACKEND") else torch.compile(compile_probe)
+    probe_out = compile_probe(torch.randn(8, 8), torch.randn(8, 8))
+    if DEBUG >= 1: print(f"torch.compile probe backend {probe_out.device}")
+
   test_acc = float('nan')
   for i in (t:=trange(getenv("STEPS", 70))):
-    samples = torch.randint(0, X_train.shape[0], (512,))  # putting this in JIT didn't work well
-    loss = step(samples)
+    samples = torch.randint(0, X_train.shape[0], (512,))
+    X,Y = X_train[samples], Y_train[samples]
+    loss = step(X, Y)
     if i%10 == 9: test_acc = ((model(X_test).argmax(axis=-1) == Y_test).sum() * 100 / X_test.shape[0]).item()
     t.set_description(f"loss: {loss.item():6.2f} test_accuracy: {test_acc:5.2f}%")
 

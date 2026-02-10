@@ -1,0 +1,37 @@
+import unittest
+import torch
+
+import tinygrad.nn.torch  # noqa: F401  # pylint: disable=unused-import
+
+
+class TestTorchCompileRegression(unittest.TestCase):
+  @unittest.skipIf(not hasattr(torch, "compile"), "torch.compile is unavailable")
+  def test_compile_tiny_backend_runs(self):
+    def foo(x, y):
+      return torch.sin(x) + torch.cos(y)
+
+    opt_foo = torch.compile(foo, backend="tiny")
+    for _ in range(2):
+      out = opt_foo(torch.randn(10, 10), torch.randn(10, 10))
+    self.assertEqual(out.shape, (10, 10))
+    self.assertEqual(out.device.type, "tiny")
+
+  @unittest.skipIf(not hasattr(torch, "compile"), "torch.compile is unavailable")
+  def test_compile_tiny_backend_tuple_outputs(self):
+    def foo(x, y):
+      a = torch.sin(x)
+      b = torch.cos(y)
+      return a, b, a + b
+
+    opt_foo = torch.compile(foo, backend="tiny")
+    for _ in range(2):
+      outs = opt_foo(torch.randn(10, 10), torch.randn(10, 10))
+
+    self.assertEqual(len(outs), 3)
+    for out in outs:
+      self.assertEqual(out.shape, (10, 10))
+      self.assertEqual(out.device.type, "tiny")
+
+
+if __name__ == "__main__":
+  unittest.main()
