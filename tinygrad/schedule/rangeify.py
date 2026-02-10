@@ -131,9 +131,6 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
   (UPat(Ops.COPY, src=(UPat(GroupOp.Movement, name="r"), UPat(name="d")), name="c"),
    lambda c,r,d: c.replace(src=(r.contiguous(), d)) if r.size != r.base.size else None),
 
-  # copy only to different device
-  (UPat(Ops.COPY, src=(UPat.var("x"), UPat()), name="copy"), lambda x,copy: x.f(Ops.NOOP, tag=copy.tag) if x.device == copy.device else None),
-
   # ** assign rules **
 
   # collapse nested ASSIGN to the same buffer (e.g. __iadd__ in __setitem__)
@@ -247,7 +244,7 @@ def remove_bufferize(src:UOp, buf:UOp, idx:UOp):
   return src.substitute({k:v for k,v in zip(buf.src[1:], idx.src[1:]) if k.op is not Ops.CONST}, extra_pm=pm_gate_substitute)
 
 def remove_noop_bufferize(idx,b2):
-  if idx.src[1:] != b2.src[1:] or idx.src[0].op is Ops.BUFFER_VIEW: return None
+  if idx.src[1:] != b2.src[1:] or idx.src[0].op is Ops.BUFFER_VIEW or not b2.arg.removable: return None
   new_tag = (idx.src[0].tag or ()) + (b2.tag or ()) or None
   return idx.src[0].rtag(new_tag).shrink(tuple((0, s) for s in b2.shape)) if b2.shape else idx.src[0].rtag(new_tag)
 
@@ -264,6 +261,8 @@ pm_const_buffer_folding = pm_mops+PatternMatcher([
   (UPat(Ops.INDEX, src=(UPat(Ops.CONST, name="c"),),), lambda c: c),
   # copy on CONST is CONST
   (UPat(Ops.COPY, src=(UPat.cvar("x"), UPat()), name="copy"), lambda copy,x: copy.const_like(x.arg)),
+  # same-device COPY is just the source
+  (UPat(Ops.COPY, src=(UPat.var("x"), UPat()), name="copy"), lambda copy,x: x if x.device == copy.device else None),
   # hack if a noop turned to a const
   (UPat(Ops.NOOP, src=(UPat.cvar("c"),), name="noop"), lambda c,noop: c.rtag(noop.tag)),
   # mstack on CONST is CONST
@@ -339,7 +338,6 @@ def bufferize_to_store(ctx:itertools.count, x:UOp, idx:UOp, allow_locals=True):
   if (assign := x.src[0]).op is Ops.ASSIGN:
     assign_target, assign_src = assign.src[0], assign.src[1]
     assert assign_target.op is Ops.INDEX, f"{assign_target.op} is not index"
-    while assign_src.op is Ops.NOOP: assign_src = assign_src.src[0]
     # skip self-assign from same-device copy, otherwise create the store
     # in assign, this is the buffer size, not the bufferize size
     if assign_src is assign_target: ret = assign_target.src[0]
