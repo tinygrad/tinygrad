@@ -13,6 +13,6 @@ if __name__ == "__main__":
   print("calling compile")
   opt_foo1 = torch.compile(foo, backend="tiny")
   print("compiled")
-  for i in range(5):
+  for _ in range(5):
     out = opt_foo1(torch.randn(10, 10), torch.randn(10, 10))
     print(out.device)

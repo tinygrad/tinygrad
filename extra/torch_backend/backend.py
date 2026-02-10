@@ -79,7 +79,7 @@ def wrap_view_op(name_or_fn, fn=None):
     args, kwargs, all_unwrapped = unwrap_args(args, kwargs)
     if not all_unwrapped:
       # Fake tensor wrapping can hit tiny view registrations while materializing tiny-device metadata.
-      if name in {"aten.alias", "aten.detach"} and len(args) > 0 and isinstance(args[0], torch.Tensor): return args[0].clone()
+      if name in {"aten.alias", "aten.detach"} and args and isinstance(args[0], torch.Tensor): return args[0].clone()
       raise RuntimeError(f"{name} received non-unwrappable tensor input")
     ret = fn(*args, **kwargs)
     base = canonical_base(args[0])
@@ -105,8 +105,7 @@ view_ops = {
   "aten.diagonal": Tensor.diagonal,
   }
 
-# torch 2.10 handles this natively
-# On older torch versions, custom detach can interfere with fake tensor wrapping used by torch.compile.
+# Let torch handle detach: custom detach registration can interfere with fake tensor wrapping.
 
 for k,v in view_ops.items(): torch.library.impl(k.replace("aten.", "aten::"), "privateuseone")(wrap_view_op(k, v))
 

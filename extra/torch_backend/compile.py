@@ -8,6 +8,9 @@ from tinygrad import Tensor, TinyJit
 from tinygrad.uop import Ops
 from extra.torch_backend.backend import unwrap, wrap
 
+def _is_fake_tiny_tensor(x) -> bool:
+  return isinstance(x, torch.Tensor) and x.device.type == "tiny" and is_fake(x)
+
 def _to_tiny_tensor(x:torch.Tensor) -> Tensor:
   return unwrap(x) if x.device.type == "tiny" else unwrap(x.tiny())
 
@@ -39,15 +42,16 @@ def tiny(gm:torch.fx.GraphModule, sample_inputs):
     # TODO: this should be able to pass in .tiny() Tensors, not need to convert them. it tries to access Storage if you pass in.
     def torch_function(*args:torch.Tensor):
       # Let fake tensor tracing run in torch-space to avoid touching opaque tiny storage.
-      if torch._dynamo.is_compiling() or any(is_fake(x) for x in args): return gm(*[_to_fake_cpu_tensor(x) for x in args])
-      has_tiny_arg = any(x.device.type == "tiny" for x in args)
+      if torch._dynamo.is_compiling() or any(_is_fake_tiny_tensor(x) for x in args): return gm(*[_to_fake_cpu_tensor(x) for x in args])
+      has_tiny_arg = any(isinstance(x, torch.Tensor) and x.device.type == "tiny" for x in args)
+      has_grad_arg = any(isinstance(x, torch.Tensor) and x.requires_grad for x in args)
       try:
         outs = tuple(wrap(x) for x in tiny_function(*[_to_jit_input_tensor(x) for x in args]))
       except NotImplementedError:
         # fall back to torch graph when tiny backend misses an op in training graphs
         return gm(*args)
       # Grad-bearing paths can cross graph breaks in training.
-      if is_backward_graph or any(x.requires_grad for x in args): return outs if has_tiny_arg else tuple(x.cpu() for x in outs)
+      if is_backward_graph or has_grad_arg: return outs if has_tiny_arg else tuple(x.cpu() for x in outs)
       return outs
     return make_boxed_func(torch_function)
   return aot_module_simplified(gm, sample_inputs, decompositions={}, fw_compiler=my_compiler)
