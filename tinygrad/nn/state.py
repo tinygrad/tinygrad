@@ -166,7 +166,6 @@ def load_state_dict(model, state_dict:dict[str, Tensor], strict=True, verbose=Tr
 def zip_extract(t: Tensor) -> dict[str, Tensor]:
   files: dict[str, Tensor] = {}
   file_offsets: dict[str, tuple[int, int, int]] = {}
-  offsets: dict[str, int] = {}
   with zipfile.ZipFile(TensorIO(t), "r") as myzip:
     # Batch realize all header reads first
     header_contents = [t[zi.header_offset+26:zi.header_offset+30].bitcast(dtypes.uint16).to('CPU') for zi in myzip.filelist]
@@ -175,8 +174,6 @@ def zip_extract(t: Tensor) -> dict[str, Tensor]:
       # header_offset + sizeFileHeader + File name length + Extra field length
       file_offset_int = zi.header_offset + 30 + sum(cast(list[int], header_content.tolist()))
       file_offsets[zi.filename] = (file_offset_int, zi.compress_size, zi.compress_type)
-      offsets[zi.filename.split("/")[-1]] = file_offset_int
-    return offsets
   for filename, (file_offset_int, compress_size, compress_type) in file_offsets.items():
     files[filename] = t[file_offset_int:file_offset_int+compress_size]
     match compress_type:
@@ -218,7 +215,7 @@ def torch_load(t:Tensor) -> dict[str, Tensor]:
   state_dict = nn.state.torch_load("test.pth")
   ```
   """
-  offsets: dict[str|int, int] = {}
+  storage_source: dict[str|int, int|Tensor] = {}  # int offset or Tensor for zip
   lens: dict[str|int, int] = {}
 
   def _rebuild_tensor(storage, storage_offset, size, stride):
@@ -227,9 +224,7 @@ def torch_load(t:Tensor) -> dict[str, Tensor]:
   def _rebuild_tensor_v2(storage, storage_offset, size, stride, requires_grad=None, backward_hooks=None, metadata=None):
     #print(storage, storage_offset, size, stride, requires_grad, backward_hooks, metadata)
     lens[storage[2]] = storage[4] * storage[1].itemsize
-    if storage[2] not in offsets: return None
-    byte_offset = offsets[storage[2]]+storage_offset*storage[1].itemsize
-    ret = t[byte_offset:byte_offset+prod(size)*storage[1].itemsize].bitcast(storage[1])
+    ret = storage_source[storage[2]].bitcast(storage[1])
 
     # 7 lines to deal with permuted tensors. NOTE: this currently requires reading off the disk
     shape_strides = [(s, st) for s,st in zip(size, stride) if s != 1]
@@ -268,9 +263,14 @@ def torch_load(t:Tensor) -> dict[str, Tensor]:
 
   if passthrough_reset(zipfile.is_zipfile(fobj)): # NOTE: passthrough_reset required to support python < 3.14
     myzip = zipfile.ZipFile(fobj, 'r')
-    header_offsets = {}
-    offsets = zip_extract(t)
+    files = zip_extract(t)
     base_name = myzip.filelist[0].filename.split('/', 1)[0]
+    data_prefix = f"{base_name}/data/"
+    for fn, data in files.items():
+      if fn.startswith(data_prefix) and not fn.endswith(".pkl"):
+        storage_id = fn.split("/")[-1]
+        storage_source[storage_id] = storage_source[fn] = data
+        if storage_id.isdigit(): storage_source[int(storage_id)] = data
     with myzip.open(f'{base_name}/data.pkl') as myfile:
       return TorchPickle(myfile).load()
   elif passthrough_reset(tarfile.is_tarfile(fobj)): # NOTE: passthrough_reset required to support python < 3.11
@@ -279,7 +279,7 @@ def torch_load(t:Tensor) -> dict[str, Tensor]:
       f = unwrap(tar.extractfile('storages'))
       for i in range(TorchPickle(f).load()):  # num_storages
         (key, _, storage_type), sz = TorchPickle(f).load(), struct.unpack('<q', f.read(8))[0]
-        offsets[key] = storages_offset + f.tell()
+        storage_source[key] = storages_offset + f.tell()
         f.seek(sz*storage_type.itemsize, 1)
       f = unwrap(tar.extractfile('tensors'))
       for _ in range(TorchPickle(f).load()):  # num_tensors
@@ -292,7 +292,7 @@ def torch_load(t:Tensor) -> dict[str, Tensor]:
     pkl = TorchPickle(fobj)
     _, _, _, rwd, _, ids, base_offset = pkl.load(), pkl.load(), pkl.load(), fobj.tell(), pkl.load(), pkl.load(), fobj.tell()
     for i in ids:
-      offsets[i] = base_offset + 8
+      storage_source[i] = base_offset + 8
       base_offset += 8 + lens[i]
     fobj.seek(rwd)
     return TorchPickle(fobj).load()
