@@ -1293,11 +1293,9 @@ class TestCopyFolding(unittest.TestCase):
 
   def test_self_assign_same_device_copy(self):
     a = Tensor.ones(4, 4).contiguous().realize()
-    a.assign(a.to(a.device))
-    sched = a.schedule()
-    for si in sched: si.lower()
-    assert len([si for si in sched if isinstance(si.prg, CompiledRunner)]) == 0
-    run_schedule(sched)
+    # use copy_to_device to bypass Tensor.to() shortcircuit and force a real same-device COPY in the graph
+    a.assign(Tensor(a.uop.copy_to_device(a.device), a.device))
+    run_schedule(check_schedule(a, 0, filter_sink=False))
     self.assertListEqual(a.tolist(), [[1.]*4]*4)
 
   def test_clone(self):
