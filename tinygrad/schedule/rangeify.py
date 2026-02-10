@@ -339,9 +339,11 @@ def bufferize_to_store(ctx:itertools.count, x:UOp, idx:UOp, allow_locals=True):
   if (assign := x.src[0]).op is Ops.ASSIGN:
     assign_target, assign_src = assign.src[0], assign.src[1]
     assert assign_target.op is Ops.INDEX, f"{assign_target.op} is not index"
+    while assign_src.op is Ops.NOOP: assign_src = assign_src.src[0]
+    # skip self-assign from same-device copy, otherwise create the store
     # in assign, this is the buffer size, not the bufferize size
-    do_store = assign_target.replace(dtype=sdtype).store(assign_src, tag=x.tag).end(*rngs)
-    ret = assign_target.src[0].after(do_store)
+    if assign_src is assign_target: ret = assign_target.src[0]
+    else: ret = assign_target.src[0].after(assign_target.replace(dtype=sdtype).store(assign_src, tag=x.tag).end(*rngs))
     for op, marg in reversed(assign.arg or ()): ret = ret._mop(op, marg)
     return ret
 
