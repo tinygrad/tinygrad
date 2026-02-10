@@ -610,6 +610,7 @@ def wrap_out(f):
   return _wrap_out
 
 def _inplace_op(t, new_value):
+  if new_value.dtype != t.dtype: new_value = new_value.cast(t.dtype)
   if not hasattr(t, "_view_base") and not getattr(canonical_base(t), "_views", set()): t.replace(new_value)
   else: _apply_inplace(t, new_value)
   return t
