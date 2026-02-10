@@ -127,20 +127,17 @@ pm_pre_sched_cache = PatternMatcher([
   (UPat(Ops.BIND, src=(UPat(Ops.DEFINE_VAR), UPat(Ops.CONST)), name="b"), strip_bind),
 ])
 
-def replace_input_buffer_back(ctx:dict[UOp, UOp], b:UOp):
-  if (ret:=ctx.get(b, None)) is None:
-    # if it's not in the cache, create a new buffer
-    ctx[b] = ret = UOp.new_buffer(b.device, b.arg, b.dtype)
+def create_new_buffer(ctx:dict[UOp, UOp], b:UOp):
+  if (ret:=ctx.get(b, None)) is None: ctx[b] = ret = UOp.new_buffer(b.device, b.arg, b.dtype)
   return ret
 
-def replace_input_param_back(ctx:dict[UOp, UOp], b:UOp):
-  return ctx.get(b)
-
 pm_post_sched_cache = PatternMatcher([
-  # restore PARAM back to BUFFER
-  (UPat(Ops.PARAM, src=(UPat(), UPat(Ops.DEVICE)), name="b"), replace_input_param_back),
-  # restore LUNIQUE back to UNIQUE for CONST and new BUFFERs
-  (UPat((Ops.BUFFER, Ops.CONST), src=(UPat(Ops.LUNIQUE), UPat(Ops.DEVICE)), name="b"), replace_input_buffer_back),
+  # create new BUFFERs for LUNIQUE BUFFERs from rangeify
+  (UPat(Ops.BUFFER, src=(UPat(Ops.LUNIQUE), UPat(Ops.DEVICE)), name="b"), create_new_buffer),
+  # restore CONST back to original CONST
+  (UPat(Ops.CONST, src=(UPat(Ops.LUNIQUE), UPat(Ops.DEVICE)), name="b"), lambda ctx,b: ctx.get(b)),
+  # restore PARAM back to original BUFFER
+  (UPat(Ops.PARAM, src=(UPat(), UPat(Ops.DEVICE)), name="b"), lambda ctx,b: ctx.get(b)),
   # restore BIND value stripped in pm_pre_sched_cache
   (UPat(Ops.BIND, src=(UPat(Ops.DEFINE_VAR),), name="b"), lambda ctx,b: ctx.get(b)),
 ])
