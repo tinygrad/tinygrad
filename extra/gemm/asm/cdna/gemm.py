@@ -30,13 +30,13 @@ atexit.register(lambda: print(f'asm_gemm: {counters["used"]} used, {len(counters
 def can_use_asm_gemm(a:Tensor, b:Tensor) -> bool:
   if a.dtype != b.dtype: return todo(f"dtypes must match {a.dtype} != {b.dtype}")
   if a.dtype not in {dtypes.bfloat16, dtypes.float16}: return todo(f"only bfloat16/float16, got {a.dtype}")
-  # only sharding on the batch is tested, others might work too
-  if isinstance(a.device, tuple) and not (a.ndim == 3 and a.uop.axis == 0 and b.uop.axis is None):
-    return todo(f"sharding mismatch a.ndim={a.ndim} a.uop.axis={a.uop.axis} b.uop.axis={b.uop.axis}")
   batch, M, K = (1, *a.shape) if a.ndim == 2 else a.shape
   N = b.shape[1]
+  # only sharding on the batch or K is tested, others might work too
   if isinstance(a.device, tuple):
-    batch //= len(a.device)
+    if a.ndim == 2 and a.uop.axis == 1 and b.uop.axis == 0: K //= len(a.device)
+    elif a.ndim == 3 and a.uop.axis == 0 and b.uop.axis is None: batch //= len(a.device)
+    else: return todo(f"sharding mismatch a.ndim={a.ndim} a.uop.axis={a.uop.axis} b.uop.axis={b.uop.axis}")
     dname = a.device[0]
   else: dname = a.device
   arch = getattr(Device[dname].renderer, "arch", "")
@@ -65,6 +65,8 @@ def custom_gemm_bw(gradient:UOp, kernel:UOp):
   out, a, b = kernel.src[1:]
   assert all_same([gradient.device, a.device, b.device, out.device])
   a_t, b_t, g_t = Tensor(a, device=a.device), Tensor(b, device=a.device), Tensor(gradient, device=a.device)
+  # TODO: this needs to be cleaned up and done properly, the batch dim of grad and a multi need to align
+  g_t = g_t[:a.shape[0]]
   grad_a = (g_t @ b_t.T).uop
   grad_b = (a_t.permute(2, 0, 1).reshape(a_t.shape[2], -1) @ g_t.reshape(-1, g_t.shape[-1])).uop
   return (None, grad_a, grad_b)
@@ -80,9 +82,10 @@ def asm_gemm(a:Tensor, b:Tensor) -> Tensor:
   batch, M, K = a.shape
   N = b.shape[1]
   is_multi = isinstance(a.device, tuple)
+  if (k_sharded:=is_multi and a.uop.axis == 2): K //= len(a.device)
 
   if is_multi:
-    out = Tensor(Tensor.empty(batch//len(a.device), M, N, dtype=a.dtype, device=a.device).uop.multi(0), device=a.device)
+    out = Tensor(Tensor.empty(batch//len(a.device) if a.uop.axis==0 else batch, M, N, dtype=a.dtype, device=a.device).uop.multi(0), device=a.device)
   else:
     out = Tensor.empty(batch, M, N, dtype=a.dtype, device=a.device)
 
@@ -93,4 +96,5 @@ def asm_gemm(a:Tensor, b:Tensor) -> Tensor:
     out = Tensor.custom_kernel(out, a, b, fxn=functools.partial(custom_asm_gemm, dname=dname, wg=numWG, arch=arch), grad_fxn=custom_gemm_bw)[0]
   else:
     out = Tensor.custom_kernel(out, a, b, fxn=custom_uop_gemm, grad_fxn=custom_gemm_bw)[0]
+  if k_sharded: out = out.sum(0)
   return out.squeeze(0) if squeeze else out
