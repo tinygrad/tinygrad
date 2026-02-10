@@ -81,7 +81,7 @@ def payne_hanek_reduction(d:UOp, supports_long:bool=True) -> tuple[UOp, UOp]:
   intermediate_dtype = dtypes.float32.vec(d.dtype.count) if d.dtype.base.scalar() == dtypes.float16 else d.dtype
 
   f, e = frexp(d) # NOTE: this implicitly assumes that double support implies long support
-  ia = (f.cast(intermediate_dtype) * 4.294967296e9).cast(dtypes.uint)
+  ia = (f.cast(intermediate_dtype) * 4.294967296e9)
   # extract 96 relevant bits of 2/pi based on magnitude of argument
   i = shr(e.cast(dtypes.uint32), 5)
   e = e.cast(dtypes.int32) & 31
@@ -110,9 +110,9 @@ def payne_hanek_reduction(d:UOp, supports_long:bool=True) -> tuple[UOp, UOp]:
     q = shr(p, 62).cast(dtypes.int32)
     p = (p & 0x3fffffffffffffff).cast(intermediate_dtype)
   else:
-    zero = UOp.const(dtypes.uint, 0)
+    zero, ia = UOp.const(dtypes.uint, 0), l2i(Ops.CAST, dtypes.uint64, ia)
     # compute x * 2/pi: (ia * { hi, lo }) + (ia * lo, 32)_lo
-    p = l2i(Ops.ADD, dtypes.uint, *l2i(Ops.MUL, dtypes.uint, ia, zero, mi, hi), l2i(Ops.MUL, dtypes.uint, ia, zero, lo, zero)[1], zero)
+    p = l2i(Ops.ADD, dtypes.uint, *l2i(Ops.MUL, dtypes.uint, *ia, mi, hi), l2i(Ops.MUL, dtypes.uint, *ia, lo, zero)[1], zero)
     # round quotient to nearest: q = shr(p, 62) = p_hi >> 30
     q = shr(p[1], 30).cast(dtypes.int32)
     p = l2i(Ops.CAST, intermediate_dtype, p[0], p[1] & 0x3FFFFFFF)
