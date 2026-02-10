@@ -41,6 +41,23 @@ class TestSetitem(unittest.TestCase):
     t[1] = 5
     np.testing.assert_allclose(t.numpy(), [[0, 1], [5, 5]])
 
+  def test_setitem_into_unrealized_sliced_compute(self):
+    # base computation contains SHRINK from prior slicing (like QR decomposition pattern)
+    a = Tensor.arange(6, dtype=dtypes.float).reshape(2, 3)
+    w = a[0] + a[1]  # unrealized ADD with SHRINK in graph: [3, 5, 7]
+    w[1] = 99
+    np.testing.assert_allclose(w.numpy(), [3, 99, 7])
+
+  def test_setitem_fancy_on_unrealized_view(self):
+    # fancy indexing setitem on unrealized SHRINK view (triggered infinite loop in graph_rewrite)
+    base = Tensor.arange(20, dtype=dtypes.float).reshape(4, 5)
+    sub = base[1:3]
+    flat = sub.reshape(sub.numel()).contiguous()
+    idx = Tensor([0, 3, 7, 9])
+    flat[idx] = Tensor([99, 98, 97, 96], dtype=dtypes.float)
+    sub.assign(flat.reshape(2, 5))
+    np.testing.assert_allclose(sub.numpy(), [[99, 6, 7, 98, 9], [10, 11, 97, 13, 96]])
+
   def test_setitem_dtype(self):
     for dt in (dtypes.int, dtypes.float, dtypes.bool):
       for v in (5., 5, True):
