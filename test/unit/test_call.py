@@ -60,6 +60,16 @@ class TestCall(unittest.TestCase):
     c = Tensor.call(a, b, fxn=a.as_param(0) @ b.as_param(1))
     np.testing.assert_allclose(c.numpy(), a.numpy() @ b.numpy(), rtol=1e-5, atol=1e-6)
 
+  def test_call_gemm_assign(self):
+    M, K, N = 4, 8, 4
+    a = Tensor.randn(M, K)
+    b = Tensor.randn(K, N)
+    c = Tensor.empty(M, N)
+    Tensor.realize(a, b)
+    sink = c.as_param(0).assign(a.as_param(1) @ b.as_param(2)).sink()
+    new_c = c.after(Tensor.call(c, a, b, fxn=sink))
+    np.testing.assert_allclose(new_c.numpy(), a.numpy() @ b.numpy(), rtol=1e-5, atol=1e-6)
+
   @unittest.skip("needs GEMM on mixins")
   def test_call_gemm_uop(self):
     M, K, N = 4, 8, 4

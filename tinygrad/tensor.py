@@ -242,6 +242,10 @@ class Tensor(OpMixin):
   def call(self, *lst:Tensor, fxn:Tensor|UOp, grad_fxn:Callable|None=None) -> Tensor:
     return Tensor((fxn.uop if isinstance(fxn, Tensor) else fxn).call(*[t.uop for t in (self,)+lst], grad_fxn=grad_fxn), device=self.device)
 
+  # TODO: Tensor should just proxy everything to UOp
+  def after(self, *lst:Tensor): return Tensor(self.uop.after(*[t.uop for t in lst]), device=self.device)
+  def sink(self): return Tensor(self.uop.sink(), device=self.device)
+
   def custom_kernel(self, *lst:Tensor, fxn:Callable, grad_fxn:Callable|None=None) -> list[Tensor]:
     """
     Call into a custom kernel written in UOps. Returns the Tensors after the Kernel has been applied.
