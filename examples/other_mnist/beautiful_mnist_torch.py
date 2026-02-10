@@ -29,9 +29,8 @@ if __name__ == "__main__":
   use_compile = getenv("COMPILE")
   if getenv("TINY_BACKEND"):
     import tinygrad.nn.torch  # noqa: F401
-    # torch.compile tracing can't currently handle opaque tiny storage.
-    # Keep tensors on CPU for compile mode while still dispatching backend="tiny".
-    device = torch.device("cpu") if use_compile else torch.device("tiny")
+    # Fake tracing uses CPU metadata internally, but runtime stays on tiny.
+    device = torch.device("tiny")
   else:
     device = torch.device({"METAL":"mps","NV":"cuda"}.get(Device.DEFAULT, "cpu"))
   if DEBUG >= 1: print(f"using torch backend {device}")

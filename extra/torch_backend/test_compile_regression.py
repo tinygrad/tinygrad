@@ -64,7 +64,6 @@ class TestTorchCompileRegression(unittest.TestCase):
     self.assertEqual(out.device.type, "tiny")
 
   @unittest.skipIf(not hasattr(torch, "compile"), "torch.compile is unavailable")
-  @unittest.expectedFailure
   def test_compile_tiny_backend_training_step_all_tiny(self):
     model = nn.Linear(16, 4).to("tiny")
     optimizer = optim.SGD(model.parameters(), lr=1e-3)
@@ -81,6 +80,32 @@ class TestTorchCompileRegression(unittest.TestCase):
     compiled_step = torch.compile(step, backend="tiny")
     for _ in range(2):
       loss = compiled_step(torch.randn(8, 16, device="tiny"), torch.randn(8, 4, device="tiny"))
+    self.assertEqual(loss.device.type, "tiny")
+    self.assertTrue(torch.isfinite(loss).item())
+
+  @unittest.skipIf(not hasattr(torch, "compile"), "torch.compile is unavailable")
+  def test_compile_tiny_backend_training_step_batchnorm_all_tiny(self):
+    model = nn.Sequential(
+      nn.Linear(16, 16),
+      nn.BatchNorm1d(16),
+      nn.ReLU(),
+      nn.Linear(16, 4),
+    ).to("tiny")
+    optimizer = optim.SGD(model.parameters(), lr=1e-3)
+    loss_fn = nn.MSELoss()
+
+    def step(x, y):
+      out = model(x)
+      loss = loss_fn(out, y)
+      optimizer.zero_grad()
+      loss.backward()
+      optimizer.step()
+      return loss
+
+    compiled_step = torch.compile(step, backend="tiny")
+    for _ in range(2):
+      loss = compiled_step(torch.randn(8, 16, device="tiny"), torch.randn(8, 4, device="tiny"))
+    self.assertEqual(loss.device.type, "tiny")
     self.assertTrue(torch.isfinite(loss).item())
 
 
