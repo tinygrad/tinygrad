@@ -379,6 +379,23 @@ def mse_loss_out(self, target, reduction=1, out=None):
   _apply_inplace(unwrap(out), reduced)
   return out
 
+def _mse_loss_backward_impl(grad_output, self, target, reduction):
+  grad = unwrap(self) - unwrap(target)
+  if reduction == 0: pass
+  elif reduction == 1: grad = grad * (2.0 / grad.numel())
+  elif reduction == 2: grad = grad * 2.0
+  else: raise RuntimeError(f"unknown reduction {reduction} for mse_loss_backward")
+  return unwrap(grad_output) * grad
+
+@torch.library.impl("aten::mse_loss_backward", "privateuseone")
+def mse_loss_backward(grad_output, self, target, reduction=1):
+  return wrap(_mse_loss_backward_impl(grad_output, self, target, reduction))
+
+@torch.library.impl("aten::mse_loss_backward.grad_input", "privateuseone")
+def mse_loss_backward_grad_input(grad_output, self, target, reduction=1, *, grad_input):
+  _apply_inplace(unwrap(grad_input), _mse_loss_backward_impl(grad_output, self, target, reduction))
+  return grad_input
+
 @torch.library.impl("aten::resize_", "privateuseone")
 def resize_(self, size, memory_format=None):
   tiny = unwrap(self)
@@ -718,40 +735,45 @@ inplace_view_ops = {
   "aten.t_",
 }
 
-def wrap_fxn(k,f):
+def _debug_shapes(args, kwargs):
+  dargs = [x.shape if isinstance(x, torch.Tensor) else x for x in args]
+  dkwargs = {name:value.shape if isinstance(value, torch.Tensor) else value for name,value in kwargs.items()}
+  return dargs, dkwargs
+
+def wrap_fxn(op_name, op_impl):
   def nf(*args, **kwargs):
     if TORCH_DEBUG:
-      print(k, len(args), [x.shape if isinstance(x, torch.Tensor) else x for x in args],
-                          {k:v.shape if isinstance(v, torch.Tensor) else v for k,v in kwargs.items()})
+      dargs, dkwargs = _debug_shapes(args, kwargs)
+      print(op_name, len(args), dargs, dkwargs)
     args, kwargs, all_unwrapped = unwrap_args(args, kwargs)
-    if not all_unwrapped: raise RuntimeError(f"{k} received non-unwrappable tensor input")
-    out = f(*args, **kwargs)
+    if not all_unwrapped: raise RuntimeError(f"{op_name} received non-unwrappable tensor input")
+    out = op_impl(*args, **kwargs)
     if isinstance(out, Tensor): return wrap(out)
     elif isinstance(out, tuple): return tuple(wrap(x) for x in out)
     else: raise RuntimeError(f"unknown output type {type(out)}")
   return nf
 
-def wrap_inplace(k,f):
+def wrap_inplace(op_name, op_impl):
   def nf(*args, **kwargs):
     orig = args[0]
     args, kwargs, all_unwrapped = unwrap_args(args, kwargs)
-    if not all_unwrapped: raise RuntimeError(f"{k} received non-unwrappable tensor input")
-    _inplace_op(args[0], f(*args, **kwargs))
+    if not all_unwrapped: raise RuntimeError(f"{op_name} received non-unwrappable tensor input")
+    _inplace_op(args[0], op_impl(*args, **kwargs))
     return orig
   return nf
 
-def wrap_inplace_view_op(k,f):
+def wrap_inplace_view_op(op_name, op_impl):
   def nf(*args, **kwargs):
     orig = args[0]
     args, kwargs, all_unwrapped = unwrap_args(args, kwargs)
-    if not all_unwrapped: raise RuntimeError(f"{k} received non-unwrappable tensor input")
+    if not all_unwrapped: raise RuntimeError(f"{op_name} received non-unwrappable tensor input")
     target = args[0]
-    new_view = f(*args, **kwargs)
+    new_view = op_impl(*args, **kwargs)
     if new_view is target or new_view.uop is target.uop:
       _update_torch_metadata(orig, target)
       return orig
     base = canonical_base(target)
-    op = (f, args[1:], kwargs)
+    op = (op_impl, args[1:], kwargs)
     if target is base:
       views = derived_views(base)
       if views:
@@ -773,11 +795,11 @@ def wrap_inplace_view_op(k,f):
     return orig
   return nf
 
-for k,v in tiny_backend.items():
-  if k in inplace_view_ops: wrapper = wrap_inplace_view_op
-  elif k in inplace_ops: wrapper = wrap_inplace
+for op_name,op_impl in tiny_backend.items():
+  if op_name in inplace_view_ops: wrapper = wrap_inplace_view_op
+  elif op_name in inplace_ops: wrapper = wrap_inplace
   else: wrapper = wrap_fxn
-  torch.library.impl(k.replace("aten.", "aten::"), "privateuseone")(wrapper(k,v))
+  torch.library.impl(op_name.replace("aten.", "aten::"), "privateuseone")(wrapper(op_name, op_impl))
 
 @torch.library.impl("aten::equal", "privateuseone")
 def equal(x: torch.Tensor, y: torch.Tensor): return (x==y).all().item()
