@@ -1,8 +1,6 @@
-import unittest
-import random
-from os import getenv
+import unittest, random
 from tinygrad import Tensor, TinyJit, Variable, dtypes, Device
-from tinygrad.helpers import Context
+from tinygrad.helpers import Context, getenv
 import numpy as np
 
 class TestSetitem(unittest.TestCase):
@@ -113,8 +111,6 @@ class TestSetitem(unittest.TestCase):
   def test_setitem_consecutive_inplace_operator(self):
     t = Tensor.arange(4).reshape(2, 2).contiguous()
     t[1] += 2
-    t = t.contiguous()
-    # TODO: RuntimeError: can't double realize in one schedule
     t[1] -= 1
     np.testing.assert_allclose(t.numpy(), [[0, 1], [3, 4]])
 
@@ -186,7 +182,7 @@ class TestSetitem(unittest.TestCase):
     t[:-1] = t[1:]
     self.assertEqual(t.tolist(), [[2.0], [1.0], [1.0]])
 
-  # TODO: WEBGPU pipeline validation error
+  # TODO: WEBGPU pipeline validation error. this generates (1==gidx0)|(2==gidx0)|(3==gidx0)|(4==gidx0)|(5==gidx0) ...
   @unittest.skipIf(Device.DEFAULT == "WEBGPU", "WEBGPU pipeline validation error")
   def test_setitem_big(self):
     idx_size, val = 256, 4
