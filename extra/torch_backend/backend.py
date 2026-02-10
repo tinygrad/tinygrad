@@ -446,8 +446,10 @@ def _copy_between_devices(src, dest, cast_dtype, to_device, non_blocking=False):
     if dest_t.uop.has_buffer_identity() or dest_t.uop.is_realized: src_t = src_t.contiguous()
     _apply_inplace(dest_t, src_t.cast(cast_dtype).to(to_device))
   elif src.is_tiny and dest.is_cpu:
+    # materialize a contiguous tiny tensor before host conversion to avoid rangeify cycles on complex view graphs
+    src_t = unwrap(src).cast(cast_dtype).contiguous()
     dest.resize_(src.numel()).resize_(src.shape)
-    dest.copy_(torch.from_numpy(unwrap(src).cast(cast_dtype).numpy()))
+    dest.copy_(torch.from_numpy(src_t.numpy()))
   elif src.is_cpu and dest.is_tiny:
     unwrap(dest).assign(Tensor(src.numpy()).cast(cast_dtype).to(to_device))
   else:
