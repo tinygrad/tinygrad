@@ -2,7 +2,6 @@ import unittest
 from tinygrad import Tensor, Variable, GlobalCounters
 from tinygrad.uop.ops import sym_infer
 from tinygrad.dtype import dtypes
-from tinygrad.device import is_dtype_supported
 from examples.gpt2 import Attention
 import numpy as np
 
@@ -273,7 +272,6 @@ class TestSymbolicOps(unittest.TestCase):
         symbolic = symbolic_result[:].numpy()
       np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=0)
 
-  @unittest.skipUnless(is_dtype_supported(dtypes.uint64), "no uint64")
   def test_bitcast_up(self):
     a = Tensor.rand(10, 4)
     for i in range(1, 5):
