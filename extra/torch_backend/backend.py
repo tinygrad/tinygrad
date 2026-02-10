@@ -762,9 +762,16 @@ def native_batch_norm(input, weight, bias, running_mean, running_var, training, 
 def native_batch_norm_backward(grad_out, input, weight, running_mean, running_var, save_mean, save_invstd, train, eps, output_mask):
   grad_out_t, input_t = unwrap(grad_out), unwrap(input)
   weight_t = unwrap(weight) if weight is not None else None
-  save_mean_t = unwrap(save_mean)
-  save_invstd_t = unwrap(save_invstd)
-  out = input_t.batchnorm(weight_t, None, save_mean_t, save_invstd_t)
+  if train:
+    # recompute mean/invstd from input so autograd tracks the dependency
+    reduce_dims = tuple(x for x in range(input_t.ndim) if x != 1)
+    batch_var, batch_mean = input_t.var_mean(axis=reduce_dims, correction=0)
+    batch_invstd = batch_var.add(eps).rsqrt()
+    out = input_t.batchnorm(weight_t, None, batch_mean, batch_invstd)
+  else:
+    save_mean_t = unwrap(save_mean)
+    save_invstd_t = unwrap(save_invstd)
+    out = input_t.batchnorm(weight_t, None, save_mean_t, save_invstd_t)
   targets = [t for t, m in zip([input_t, weight_t], output_mask[:2]) if t is not None and m]
   if targets:
     grads = out.gradient(*targets, gradient=grad_out_t)
@@ -776,6 +783,40 @@ def native_batch_norm_backward(grad_out, input, weight, running_mean, running_va
   return (wrap(grad_input) if grad_input is not None else None,
           wrap(grad_weight) if grad_weight is not None else None,
           wrap(grad_bias) if grad_bias is not None else None)
+
+# functional variant used by aot_autograd / torch.compile: returns updated running stats instead of mutating
+@torch.library.impl("aten::_native_batch_norm_legit_functional", "privateuseone")
+def _native_batch_norm_legit_functional(input, weight, bias, running_mean, running_var, training, momentum, eps):
+  input_t, weight_t, bias_t = unwrap(input), unwrap(weight) if weight is not None else None, unwrap(bias) if bias is not None else None
+  running_mean_t, running_var_t = unwrap(running_mean), unwrap(running_var)
+  if training:
+    batch_var, batch_mean = input_t.var_mean(axis=tuple(x for x in range(input_t.ndim) if x != 1), correction=0)
+    batch_invstd = batch_var.add(eps).rsqrt()
+    out = input_t.batchnorm(weight_t, bias_t, batch_mean, batch_invstd)
+    numel_ratio = input_t.numel() / (input_t.numel() - input_t.shape[1])
+    running_mean_out = (1 - momentum) * running_mean_t + momentum * batch_mean.detach()
+    running_var_out = (1 - momentum) * running_var_t + momentum * numel_ratio * batch_var.detach()
+    return wrap(out), wrap(batch_mean), wrap(batch_invstd), wrap(running_mean_out), wrap(running_var_out)
+  else:
+    out = input_t.batchnorm(weight_t, bias_t, running_mean_t, running_var_t.add(eps).rsqrt())
+    return wrap(out), wrap(running_mean_t), wrap(running_var_t.add(eps).rsqrt()), wrap(running_mean_t.clone()), wrap(running_var_t.clone())
+
+# non-functional variant used by aot_autograd: mutates running_mean/running_var in-place
+@torch.library.impl("aten::_native_batch_norm_legit", "privateuseone")
+def _native_batch_norm_legit(input, weight, bias, running_mean, running_var, training, momentum, eps):
+  input_t, weight_t, bias_t = unwrap(input), unwrap(weight) if weight is not None else None, unwrap(bias) if bias is not None else None
+  running_mean_t, running_var_t = unwrap(running_mean), unwrap(running_var)
+  if training:
+    batch_var, batch_mean = input_t.var_mean(axis=tuple(x for x in range(input_t.ndim) if x != 1), correction=0)
+    batch_invstd = batch_var.add(eps).rsqrt()
+    out = input_t.batchnorm(weight_t, bias_t, batch_mean, batch_invstd)
+    numel_ratio = input_t.numel() / (input_t.numel() - input_t.shape[1])
+    running_mean_t.assign((1 - momentum) * running_mean_t + momentum * batch_mean.detach())
+    running_var_t.assign((1 - momentum) * running_var_t + momentum * numel_ratio * batch_var.detach())
+    return wrap(out), wrap(batch_mean), wrap(batch_invstd)
+  else:
+    out = input_t.batchnorm(weight_t, bias_t, running_mean_t, running_var_t.add(eps).rsqrt())
+    return wrap(out), wrap(running_mean_t), wrap(running_var_t.add(eps).rsqrt())
 
 # _pad_circular is not CompositeImplicitAutograd (unlike reflect/replicate pad)
 # we need torch.autograd.Function with explicit AutogradPrivateUse1 registration
@@ -795,3 +836,54 @@ def _pad_circular(self, padding): return _PadCircular.apply(self, padding)
 
 @torch.library.impl("aten::_pad_circular", "AutogradPrivateUse1")
 def _pad_circular_autograd(self, padding): return _PadCircular.apply(self, padding)
+
+# *** torch.compile support ***
+
+# Patch MetaTensorDescriber.describe_tensor to skip storage access for opaque tensors (e.g. tiny device)
+# See https://github.com/pytorch/pytorch/issues/148695
+import torch._subclasses.meta_utils as _meta_utils
+_orig_describe_tensor = _meta_utils.MetaTensorDescriber.describe_tensor
+def _patched_describe_tensor(self, t, *, recurse=True, trace=False):
+  if isinstance(t, torch.Tensor) and not torch._C._has_storage(t):
+    # Create a CPU tensor with matching metadata for description purposes
+    strides = t.stride()
+    storage_size = max((si * st for si, st in zip(t.shape, strides) if st > 0), default=0) + t.storage_offset() if t.dim() > 0 else 1
+    cpu_storage = torch.empty(storage_size, dtype=t.dtype, device="cpu")
+    cpu_t = torch.as_strided(cpu_storage, t.shape, strides, t.storage_offset())
+    if t.requires_grad: cpu_t = cpu_t.detach().requires_grad_(True)
+    return _orig_describe_tensor(self, cpu_t, recurse=recurse, trace=trace)
+  return _orig_describe_tensor(self, t, recurse=recurse, trace=trace)
+_meta_utils.MetaTensorDescriber.describe_tensor = _patched_describe_tensor
+
+from torch._dynamo.backends.registry import register_backend
+from torch._functorch.aot_autograd import aot_module_simplified
+from functorch.compile import make_boxed_func
+from tinygrad import TinyJit
+from tinygrad.engine.jit import JitError
+
+_compile_decomps = get_decompositions([])
+
+@register_backend
+def tiny(gm:torch.fx.GraphModule, sample_inputs):
+  def my_compiler(gm:torch.fx.GraphModule, sample_inputs):
+    from tinygrad.engine.jit import capturing
+    def run_gm(*args:Tensor):
+      outs = gm(*[wrap(x) for x in args])
+      return tuple(unwrap(x).realize() if x is not None else None for x in outs)
+    jit_fn = TinyJit(run_gm)
+    use_jit = True
+    def torch_function(*args:torch.Tensor):
+      nonlocal use_jit
+      tiny_args = [unwrap(x) if x.is_tiny else unwrap(x.tiny()) for x in args]
+      tiny_args = [x.contiguous() for x in tiny_args]
+      if use_jit and not capturing:
+        try:
+          outs = jit_fn(*tiny_args)
+        except JitError:
+          use_jit = False
+          outs = run_gm(*tiny_args)
+      else:
+        outs = run_gm(*tiny_args)
+      return tuple(wrap(x) if x is not None else None for x in outs)
+    return make_boxed_func(torch_function)
+  return aot_module_simplified(gm, sample_inputs, decompositions=_compile_decomps, fw_compiler=my_compiler)
