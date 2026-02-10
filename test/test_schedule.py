@@ -1807,6 +1807,19 @@ class TestSchedule(unittest.TestCase):
   def test_setitem_permuted_sched(self): self.test_setitem_sched(lambda x: x.T, 2)
   def test_setitem_paddded_sched(self): self.test_setitem_sched(lambda x: x.shrink_to(4, 1).pad_to(4, 4), 1)
 
+  def test_no_extra_contiguous_on_setitem_assign_back(self):
+    # pattern: contiguous copy, advanced setitem, assign back (e.g. torch backend _view_write)
+    base = Tensor.arange(16).reshape(4, 4).contiguous()
+    flat_base = base.reshape(16).contiguous()
+    idx = Tensor([1,2,5,6], dtype=dtypes.int32)
+    flat_base[idx] = Tensor([99,99,99,99])
+    base.assign(flat_base.reshape(4, 4))
+    sched = check_schedule(base, 2)
+    run_schedule(sched)
+    expected = list(range(16))
+    for i, v in zip([1,2,5,6], [99,99,99,99]): expected[i] = v
+    np.testing.assert_equal(base.reshape(16).numpy(), expected)
+
   def test_sparse_categorical_crossentropy_simple(self):
     X = Tensor([[0, 2, 3], [1, 2, 3]]).realize()
     Y = Tensor([1, 2]).realize()
