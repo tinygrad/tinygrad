@@ -1390,6 +1390,7 @@ def train_llama3():
 
   @TinyJit
   def minibatch(tokens:Tensor):
+    tokens = tokens.to(None)
     if (DP := getenv("DP", 1)) > 1:
       device = tuple(f"{Device.DEFAULT}:{i}" for i in range(DP))
       tokens = tokens.shard(device, 0)
@@ -1401,7 +1402,7 @@ def train_llama3():
     loss.backward()
     assert all(p.grad is g for p,g in zip(optim.params, grads))
     Tensor.realize(loss, *grads)
-    return loss
+    return loss.flatten().float().to("CPU")
 
   @TinyJit
   def optim_step():
@@ -1428,11 +1429,12 @@ def train_llama3():
     lr = optim.lr
     Tensor.realize(lr, *grads)
 
-    return lr
+    return lr.float().to("CPU")
 
   @TinyJit
   @Tensor.train(False)
   def eval_step(tokens:Tensor):
+    tokens = tokens.to(None)
     if (DP := getenv("DP", 1)) > 1:
       device = tuple(f"{Device.DEFAULT}:{i}" for i in range(DP))
       tokens = tokens.shard(device, 0)
@@ -1441,7 +1443,7 @@ def train_llama3():
       tokens = tokens.shard(device)
     logits:Tensor = model(tokens[:, :-1], start_pos=0, temperature=math.nan)
     loss = logits.sparse_categorical_crossentropy(tokens[:, 1:])
-    return loss.flatten().float()
+    return loss.flatten().float().to("CPU")
 
   # ** data iters **
   def fake_data(bs, samples):
