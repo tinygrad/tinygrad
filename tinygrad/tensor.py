@@ -274,11 +274,20 @@ class Tensor(OpMixin):
     """Triggers the computation needed to create these Tensor(s)."""
     # side-realize pending assigns for buffers referenced by these tensors
     if _pending_assigns:
-      for buf in {u for t in (self,)+lst for u in t.uop.toposort() if u.op is Ops.BUFFER}:
+      def _realize_pending(buf):
         for assign_uop in _pending_assigns.pop(buf, []):
+          # recursively realize pending assigns that this assign's value depends on
+          for u in assign_uop.toposort():
+            if u.op is Ops.BUFFER and u in _pending_assigns: _realize_pending(u)
           becomes_map, schedule, var_vals = complete_create_schedule_with_vars(UOp.sink(assign_uop))
           _apply_map_to_tensors(becomes_map, name="Apply Pending Assign")
           run_schedule(schedule, var_vals, do_update_stats=do_update_stats)
+          # update remaining pending assigns so they reference realized buffers instead of stale lazy graphs
+          if becomes_map:
+            for assigns in _pending_assigns.values():
+              for i in range(len(assigns)): assigns[i] = assigns[i].substitute(becomes_map)
+      for buf in {u for t in (self,)+lst for u in t.uop.toposort() if u.op is Ops.BUFFER}:
+        if buf in _pending_assigns: _realize_pending(buf)
     if len(to_realize:=[x for x in (self,)+lst if not x.uop.has_buffer_identity()]):
       run_schedule(*Tensor.schedule_with_vars(*to_realize), do_update_stats=do_update_stats)
     return self
