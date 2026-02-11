@@ -1,6 +1,6 @@
 from __future__ import annotations
 import ctypes, time, array, struct, itertools, dataclasses
-from typing import cast, Any, Sequence
+from typing import cast, Any
 from tinygrad.runtime.autogen import nv, nv_570 as nv_gpu, pci
 from tinygrad.helpers import to_mv, lo32, hi32, DEBUG, round_up, round_down, mv_address, fetch, wait_cond
 from tinygrad.runtime.support.system import System
@@ -503,7 +503,7 @@ class NV_GSP(NV_IP):
 
   ### RPCs
 
-  def rpc_alloc_memory(self, hDevice:int, hClass:int, flags:int, paddrs:Sequence[tuple[int,int]], length:int, client:int|None=None, fmt:int=6) -> int:
+  def rpc_alloc_memory(self, hDevice:int, hClass:int, flags:int, paddrs:list[tuple[int,int]], length:int, client:int|None=None, fmt:int=6) -> int:
     assert all(sz == 0x1000 for _, sz in paddrs), f"all pages must be 4KB, got {[(hex(p), hex(sz)) for p, sz in paddrs]}"
     rpc = nv.rpc_alloc_memory_v(hClient=(client:=client or self.priv_root), hDevice=hDevice, hMemory=(handle:=next(self.handle_gen)),
       hClass=hClass, flags=flags, pteAdjust=0, format=fmt, length=length, pageCount=len(paddrs))
