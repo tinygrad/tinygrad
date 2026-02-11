@@ -503,10 +503,11 @@ class NV_GSP(NV_IP):
 
   ### RPCs
 
-  def rpc_alloc_memory(self, hDevice:int, hClass:int, flags:int, paddrs:list[tuple[int,int]], length:int, client:int|None=None, fmt:int=6) -> int:
+  def rpc_alloc_memory(self, hDevice:int, hClass:int, paddrs:list[tuple[int,int]], length:int, flags:int, client:int|None=None) -> int:
     assert all(sz == 0x1000 for _, sz in paddrs), f"all pages must be 4KB, got {[(hex(p), hex(sz)) for p, sz in paddrs]}"
+
     rpc = nv.rpc_alloc_memory_v(hClient=(client:=client or self.priv_root), hDevice=hDevice, hMemory=(handle:=next(self.handle_gen)),
-      hClass=hClass, flags=flags, pteAdjust=0, format=fmt, length=length, pageCount=len(paddrs))
+      hClass=hClass, flags=flags, pteAdjust=0, format=6, length=length, pageCount=len(paddrs))
     rpc.pteDesc.idr, rpc.pteDesc.length = nv.NV_VGPU_PTEDESC_IDR_NONE, (len(paddrs) & 0xffff)
 
     payload = bytes(rpc) + b''.join(bytes(nv.struct_pte_desc_pte_pde(pte=(paddr >> 12))) for paddr, _ in paddrs)
@@ -547,9 +548,10 @@ class NV_GSP(NV_IP):
         bAdminProfilingPermitted=1, bDevProfilingPermitted=1, bCtxProfilingPermitted=1, bVideoMemoryProfilingPermitted=1,
         bSysMemoryProfilingPermitted=1), client=client)
     elif cmd == nv_gpu.NVB0CC_CTRL_CMD_ALLOC_PMA_STREAM:
-      pma = self.rpc_alloc_memory(self.device, nv_gpu.NV01_MEMORY_LIST_SYSTEM, 0x40000010, extra[0].meta.mapping.paddrs, extra[0].size, client=client)
-      avl = self.rpc_alloc_memory(self.device, nv_gpu.NV01_MEMORY_LIST_SYSTEM, 0x40200010, extra[1].meta.mapping.paddrs, extra[1].size, client=client)
-      params.hMemPmaBuffer, params.hMemPmaBytesAvailable = pma, avl
+      params.hMemPmaBuffer = self.rpc_alloc_memory(self.device, nv_gpu.NV01_MEMORY_LIST_SYSTEM, extra[0].meta.mapping.paddrs, extra[0].size,
+        pma_flags:=(nv_gpu.NVOS02_FLAGS_PHYSICALITY_NONCONTIGUOUS << 4 | nv_gpu.NVOS02_FLAGS_MAPPING_NO_MAP << 30), client=client)
+      params.hMemPmaBytesAvailable = self.rpc_alloc_memory(self.device, nv_gpu.NV01_MEMORY_LIST_SYSTEM, extra[1].meta.mapping.paddrs, extra[1].size,
+        pma_flags | nv_gpu.NVOS02_FLAGS_ALLOC_USER_READ_ONLY_YES << 21, client=client)
 
     control_args = nv.rpc_gsp_rm_control_v(hClient=(client:=client or self.priv_root), hObject=hObject, cmd=cmd, flags=0x0,
       paramsSize=ctypes.sizeof(params) if params is not None else 0x0)
