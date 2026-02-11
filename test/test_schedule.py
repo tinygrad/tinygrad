@@ -1092,6 +1092,13 @@ class TestSchedule(unittest.TestCase):
     for X in range(1,N): root = root + bufs[X][vi] + bufs[X][vj]
     self.assertEqual(root.item(), N * 2)
 
+  def test_self_assign_no_empty_kernel(self):
+    for shape in [(3, 3), (4, 4)]:
+      a = Tensor.ones(*shape).contiguous().realize()
+      a.assign(a / 1)
+      run_schedule(check_schedule(a, 0, filter_sink=False))
+      self.assertListEqual(a.tolist(), [[1.]*shape[1]]*shape[0])
+
 class TestSwizzle(unittest.TestCase):
   def test_swizzle_simple(self):
     Tensor.manual_seed(0)
