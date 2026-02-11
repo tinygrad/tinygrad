@@ -26,7 +26,8 @@ class TestTranscendentalMath(unittest.TestCase):
                                  atol=3e-2, rtol=1e-5)  # sin can have bigger atol for very big x
 
   @unittest.skipIf(getenv("MOCKGPU") and Device.DEFAULT in {"NV", "CUDA"}, "crashed")
-  @given(ht.float32, strat.sampled_from([(Tensor.exp, np.exp), (Tensor.log, np.log), (Tensor.sin, np.sin)]))
+  @given(ht.float32, strat.sampled_from([(Tensor.exp, np.exp),(Tensor.log, np.log)] +
+    ([(Tensor.sin, np.sin)] if is_dtype_supported(dtypes.ulong) else [])))
   def test_float32(self, x, op):
     # wrong nan behavior on Vulkan
     if (math.isnan(x) or (x < 0 and op[0] == Tensor.log)) and CI and Device.DEFAULT == "WEBGPU" and not OSX: return
@@ -36,7 +37,8 @@ class TestTranscendentalMath(unittest.TestCase):
                                  atol=2e-5, rtol=1e-5)
 
   @unittest.skipUnless(is_dtype_supported(dtypes.float16, Device.DEFAULT), f"no float16 on {Device.DEFAULT}")
-  @given(ht.float16, strat.sampled_from([(Tensor.exp, np.exp), (Tensor.log, np.log), (Tensor.sin, np.sin)]))
+  @given(ht.float16, strat.sampled_from([(Tensor.exp, np.exp),(Tensor.log, np.log)] +
+    ([(Tensor.sin, np.sin)] if is_dtype_supported(dtypes.ulong) else [])))
   def test_float16(self, x, op):
     # wrong nan behavior on Vulkan
     if (math.isnan(x) or (x < 0 and op[0] == Tensor.log)) and CI and Device.DEFAULT == "WEBGPU" and not OSX: return
@@ -59,6 +61,7 @@ class TestTranscendentalMath(unittest.TestCase):
 
 class TestFromFuzzer(unittest.TestCase):
   @given(strat.sampled_from(dtypes_float))
+  @unittest.skipUnless(is_dtype_supported(dtypes.ulong), "Needs ulong")
   def test_sin(self, dtype):
     if not is_dtype_supported(dtype): return
     if dtype == dtypes.float64:
@@ -139,6 +142,7 @@ class TestFloat16Log2(unittest.TestCase):
         np.testing.assert_allclose(result, expected, rtol=5e-2, err_msg=f"log2({val})")
 
 class TestTranscendentalSchedule(unittest.TestCase):
+  @unittest.skipUnless(is_dtype_supported(dtypes.ulong), "Needs ulong")
   def test_transcendental_sin_fusion(self):
     with Context(TRANSCENDENTAL=2):
       a = Tensor.empty(10)
