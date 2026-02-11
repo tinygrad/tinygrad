@@ -508,12 +508,10 @@ class NV_GSP(NV_IP):
   def rpc_alloc_memory(self, hDevice:int, hClass:int, flags:int, paddrs:Sequence[tuple[int,int]], length:int, client:int|None=None, fmt:int=6) -> int:
     assert all(sz == 0x1000 for _, sz in paddrs), f"all pages must be 4KB, got {[(hex(p), hex(sz)) for p, sz in paddrs]}"
     rpc = nv.rpc_alloc_memory_v(hClient=(client:=client or self.priv_root), hDevice=hDevice, hMemory=(handle:=next(self.handle_gen)),
-      hClass=hClass, flags=flags,
-      pteAdjust=0, format=fmt, length=length, pageCount=len(paddrs))
+      hClass=hClass, flags=flags, pteAdjust=0, format=fmt, length=length, pageCount=len(paddrs))
     rpc.pteDesc.idr, rpc.pteDesc.length = nv.NV_VGPU_PTEDESC_IDR_NONE, len(paddrs)
 
-    payload = bytearray(bytes(rpc))
-    payload += b''.join(bytes(nv.struct_pte_desc_pte_pde(pte=(paddr >> 12))) for paddr, _ in paddrs)
+    payload = bytes(rpc) + b''.join(bytes(nv.struct_pte_desc_pte_pde(pte=(paddr >> 12))) for paddr, _ in paddrs)
     self.cmd_q.send_rpc(nv.NV_VGPU_MSG_FUNCTION_ALLOC_MEMORY, bytes(payload))
     self.stat_q.wait_resp(nv.NV_VGPU_MSG_FUNCTION_ALLOC_MEMORY)
     return handle
