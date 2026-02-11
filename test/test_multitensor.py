@@ -2,7 +2,7 @@ import unittest, functools, random
 from tinygrad import Tensor, Device, nn, GlobalCounters, TinyJit, dtypes, Variable
 from tinygrad.device import is_dtype_supported
 from tinygrad.uop.ops import Ops, UOp
-from tinygrad.helpers import getenv, prod, Context
+from tinygrad.helpers import getenv, prod, Context, OSX
 from tinygrad.nn.state import get_parameters, get_state_dict
 from tinygrad.engine.realize import BufferCopy, CompiledRunner, run_schedule
 import numpy as np
@@ -915,13 +915,52 @@ class TestMultiTensor(unittest.TestCase):
     t.shard_(devices, axis=0).realize()
     assert all([lb is lb.base and lb.realized.base.size == 4 * 16 for lb in t.uop.src])
 
-  @unittest.skip("this is unreliable on OSX")
+  @unittest.skipIf(OSX, "this is unreliable on OSX")
   def test_clone(self):
     t = Tensor.rand(16, 16).shard(devices_2, axis=None)
     np.testing.assert_allclose(t.numpy(), t.clone().numpy())
 
     t = Tensor.rand(16, 16).shard(devices_2, axis=0)
     np.testing.assert_allclose(t.numpy(), t.clone().numpy())
+
+  # NOTE: test_clone is "unreliable on OSX". This could be too.
+  def test_sharded_clone(self):
+    t = Tensor.rand(16, 16).shard(devices_2, axis=0).realize()
+    t_clone = t.clone()
+    sched = t_clone.schedule()
+    size_per_shard = t.numel() / len(t.device)
+
+    # a runner per shard
+    self.assertEqual(len(sched), len(t.device))
+
+    for ei in sched:
+      # one to the other
+      self.assertEqual(len(ei.bufs), 2)
+      buf1, buf2 = ei.bufs
+
+      # all bufs exist
+      self.assertIsNotNone(buf1)
+      self.assertIsNotNone(buf2)
+
+      # no cross device runners
+      self.assertEqual(buf1.device, buf2.device)
+
+      # bufs should only fit a single device's shard
+      self.assertEqual(buf1.size, size_per_shard)
+      self.assertEqual(buf2.size, size_per_shard)
+
+    # both should be multi buffers
+    og_bufs, new_bufs = set(t.uop.base.buffer.bufs), set(t_clone.uop.base.buffer.bufs)
+
+    # all new buffers
+    self.assertEqual(len(og_bufs), len(new_bufs))
+    self.assertTrue(og_bufs.isdisjoint(new_bufs), msg=f"{og_bufs=} - {new_bufs=}")
+
+    # schedule() is not reentrant...
+    run_schedule(sched)
+
+    # equal data
+    np.testing.assert_allclose(t.numpy(), t_clone.numpy())
 
   @unittest.skip("RANGEIFY doesn't support multi const folding")
   def test_multi_const_folding(self):
