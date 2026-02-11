@@ -22,6 +22,8 @@ class TestScheduleScaling(unittest.TestCase):
     fn(n).schedule()
     return time.perf_counter() - st
 
+  # *** rangeify: ending_ranges accumulation and consumer merge ***
+
   # ending_ranges accumulation via sum([], []) and nested scan in run_rangeify.
   # this creates reduce ops whose ending_ranges lists grow with graph depth, causing O(n^2) list copies.
   def test_multi_reduce_scaling(self):
@@ -42,6 +44,18 @@ class TestScheduleScaling(unittest.TestCase):
       return x
     self._assert_linear(wide_reduce)
 
+  # expand ops inject into ending_ranges via the EXPAND path in run_rangeify
+  def test_expand_reduce_scaling(self):
+    def expand_reduce(n):
+      x = Tensor.empty(256, 1)
+      for _ in range(n):
+        y = x.expand(256, 256)
+        x = (y + y).sum(axis=-1, keepdim=True)
+      return x
+    self._assert_linear(expand_reduce)
+
+  # *** graph_rewrite: multi-consumer DAG patterns ***
+
   # multi-consumer diamond pattern (fan-out/fan-in) stresses consumer_rngs merge in run_rangeify
   def test_diamond_scaling(self):
     def diamond(n):
@@ -61,15 +75,60 @@ class TestScheduleScaling(unittest.TestCase):
       return x
     self._assert_linear(chain)
 
-  # expand ops inject into ending_ranges via the EXPAND path in run_rangeify
-  def test_expand_reduce_scaling(self):
-    def expand_reduce(n):
-      x = Tensor.empty(256, 1)
-      for _ in range(n):
-        y = x.expand(256, 256)
-        x = (y + y).sum(axis=-1, keepdim=True)
+  # softmax has multi-consumer structure (x used for max, exp, and sum), stresses graph_rewrite on DAGs
+  def test_softmax_scaling(self):
+    def softmax_chain(n):
+      x = Tensor.empty(64, 256)
+      for _ in range(n): x = x.softmax(axis=-1)
       return x
-    self._assert_linear(expand_reduce)
+    self._assert_linear(softmax_chain)
+
+  # *** post-rangeify: symbolic rewrites, kernel splitting ***
+
+  # matmul chain stresses symbolic+reduce_collapse and split_store
+  def test_matmul_scaling(self):
+    def matmul_chain(n):
+      xs = [Tensor.empty(32, 32) for _ in range(n + 1)]
+      result = xs[0]
+      for i in range(n): result = result @ xs[i + 1]
+      return result
+    self._assert_linear(matmul_chain)
+
+  # contiguous chain stresses remove_bufferize callbacks (toposort per BUFFERIZE node)
+  def test_contiguous_scaling(self):
+    def contiguous_chain(n):
+      x = Tensor.empty(256, 256)
+      for _ in range(n): x = (x + 1).contiguous()
+      return x
+    self._assert_linear(contiguous_chain)
+
+  # *** schedule: AFTER handling, assign ***
+
+  # assign chain stresses AFTER cycle detection (toposort inside toposort loop in get_rangeify_map)
+  def test_assign_scaling(self):
+    def assign_chain(n):
+      x = Tensor.empty(256, 256).realize()
+      for _ in range(n): x.assign(x + 1)
+      return x
+    self._assert_linear(assign_chain)
+
+  # layernorm has multi-consumer reduces (mean reused in variance), stresses consumer_rngs merge and symbolic rewrites
+  def test_layernorm_scaling(self):
+    def layernorm_chain(n):
+      x = Tensor.empty(64, 256)
+      for _ in range(n):
+        mean = x.mean(axis=-1, keepdim=True)
+        var = ((x - mean) ** 2).mean(axis=-1, keepdim=True)
+        x = (x - mean) / (var + 1e-5).sqrt()
+      return x
+    self._assert_linear(layernorm_chain)
+
+  # concat chain stresses MSTACK/MSELECT handling and wide SINK construction
+  def test_concat_scaling(self):
+    def concat_chain(n):
+      parts = [Tensor.empty(4, 256) + i for i in range(n)]
+      return parts[0].cat(*parts[1:])
+    self._assert_linear(concat_chain)
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)

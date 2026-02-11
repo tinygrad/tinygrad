@@ -140,7 +140,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     if (self.op, self.dtype, self.src, self.arg, self.tag) == new_args: return self
     return UOp(*new_args)
   def rtag(self, tag=True): return self.replace(tag=tag)
-  @functools.cached_property
+  @recursive_property
   def key(self) -> bytes:
     return hashlib.sha256(str((self.op, self.dtype, self.arg)).encode() + b"".join([s.key for s in self.src])).digest()
   def __repr__(self): return pretty_print(self)
@@ -1042,7 +1042,7 @@ class PatternMatcher:
 
   def rewrite(self, uop:UOp, ctx=None):
     if len(pats:=self.pdict.get(uop.op, [])):
-      ler = {u.op for u in uop.src}
+      if (ler:=uop.__dict__.get('_src_ops')) is None: uop.__dict__['_src_ops'] = ler = {u.op for u in uop.src}
       for _,match,early_reject in pats:
         if not early_reject.issubset(ler): continue
         if (ret:=match(uop, ctx)) is not None and ret is not uop: return ret
