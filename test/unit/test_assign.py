@@ -535,16 +535,10 @@ class TestAssign(unittest.TestCase):
     This is the KV cache pattern from llm.py.
     """
     v_pos = Variable("pos", 0, 3).bind(0)
-
-    # without .realize() after assign, the read doesn't see the assigned values
     cache = Tensor.zeros(4, 4).contiguous().realize()
     cache[v_pos:v_pos+1, :].assign(Tensor.ones(1, 4))
-    self.assertEqual(cache.sum().item(), 0.0)  # should be 4.0!
+    self.assertEqual(cache.sum().item(), 4.0)
 
-    # TODO: remove .realize() workaround once assign-read dependency is fixed
-    cache2 = Tensor.zeros(4, 4).contiguous().realize()
-    cache2[v_pos:v_pos+1, :].assign(Tensor.ones(1, 4)).realize()
-    self.assertEqual(cache2.sum().item(), 4.0)
 
 class TestAssignOrdering(unittest.TestCase):
   """Tests for complex assign orderings that could differ between lazy and eager execution.
