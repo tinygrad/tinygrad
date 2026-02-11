@@ -224,6 +224,8 @@ def torch_load(t:Tensor) -> dict[str, Tensor]:
   def _rebuild_tensor_v2(storage, storage_offset, size, stride, requires_grad=None, backward_hooks=None, metadata=None):
     # print(storage, storage_offset, size, stride, requires_grad, backward_hooks, metadata)
     lens[storage[2]] = storage[4] * storage[1].itemsize
+    if storage[2] not in storage_source:
+      return None
     src = storage_source[storage[2]]
     if isinstance(src, Tensor):
       ret = storage_source[storage[2]].bitcast(storage[1])
@@ -294,8 +296,11 @@ def torch_load(t:Tensor) -> dict[str, Tensor]:
   else:
     pkl = TorchPickle(fobj)
     _, _, _, rwd, _, ids, base_offset = pkl.load(), pkl.load(), pkl.load(), fobj.tell(), pkl.load(), pkl.load(), fobj.tell()
+    fobj.seek(rwd)
+    TorchPickle(fobj).load()  # first pass: populate lens via _rebuild_tensor_v2 (returns None)
+    fobj.seek(base_offset)
     for i in ids:
-      storage_source[i] = base_offset + 8
+      storage_source[i] = storage_source[str(i)] = base_offset + 8
       base_offset += 8 + lens[i]
     fobj.seek(rwd)
     return TorchPickle(fobj).load()
