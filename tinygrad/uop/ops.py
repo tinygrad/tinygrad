@@ -1208,6 +1208,7 @@ class RewriteContext:
   def unified_rewrite(self, root:UOp) -> UOp:
     stack: collections.deque[tuple[UOp, int, UOp]] = collections.deque([(root, 0, root)])
     on_stack = {root}  # all UOps either on the stack or in self.replace, i.e. dont have to be placed again
+    waitlist: dict[UOp, list[tuple[UOp, int, UOp]]] = {}  # UOps waiting on a dependency to be in self.replace
     while stack:
       if len(stack) > REWRITE_STACK_LIMIT: raise RuntimeError("infinite loop in graph_rewrite (stack too big)")
       n, stage, new_n = stack.pop()
@@ -1226,6 +1227,7 @@ class RewriteContext:
           except BottomUpGate:
             # if the bpm matching raised a gate, we are done with this node and dont continue down the srcs
             self.replace[n] = unwrap(test_n)
+            if n in waitlist: stack.extend(waitlist.pop(n))
             continue
         stack.append((n, 1, new_n))
         for x in reversed(new_n.src):
@@ -1236,8 +1238,8 @@ class RewriteContext:
         tmp = []
         for x in new_n.src:
           if (rx:=self.replace.get(x, SENTINEL)) is SENTINEL:
-            # if some new sources aren't ready, we try this again later. happens with on_stack, maybe should remove?
-            stack.appendleft((n, 1, new_n))
+            # source not ready: register in waitlist instead of spinning
+            waitlist.setdefault(x, []).append((n, 1, new_n))
             break
           tmp.append(rx)
         else:
@@ -1246,6 +1248,7 @@ class RewriteContext:
             # if top down, do the rewrite. if no rewrite or bottom up, we are done rewriting this node so we add it to the dict
             if self.pm is None or (new_src_n:=self.pm_rewrite(new_n)) is None:
               self.replace[n] = new_n
+              if n in waitlist: stack.extend(waitlist.pop(n))
               continue
           else:
             # if srcs changed from rewrites, construct a new UOp with the new srcs
@@ -1256,11 +1259,12 @@ class RewriteContext:
       else:
         # in stage 2, we link the result of new_n to the result of n
         if (replaced_new_n:=self.replace.get(new_n, SENTINEL)) is SENTINEL:
-          # not ready, try the link later
-          stack.appendleft((n, 2, new_n))
+          # not ready: register in waitlist instead of spinning
+          waitlist.setdefault(new_n, []).append((n, 2, new_n))
         else:
           # otherwise we are done
           self.replace[n] = replaced_new_n
+          if n in waitlist: stack.extend(waitlist.pop(n))
     return self.replace[root]
 
 @profile_matches
