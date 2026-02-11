@@ -1209,8 +1209,6 @@ class RewriteContext:
     stack: collections.deque[tuple[UOp, int, UOp]] = collections.deque([(root, 0, root)])
     on_stack = {root}  # all UOps either on the stack or in self.replace, i.e. dont have to be placed again
     waitlist: dict[UOp, list[tuple[UOp, int, UOp]]] = {}  # UOps waiting on a dependency to be in self.replace
-    def _finish(u:UOp):
-      for entry in waitlist.pop(u, []): stack.append(entry)
     while stack:
       if len(stack) > REWRITE_STACK_LIMIT: raise RuntimeError("infinite loop in graph_rewrite (stack too big)")
       n, stage, new_n = stack.pop()
@@ -1229,7 +1227,7 @@ class RewriteContext:
           except BottomUpGate:
             # if the bpm matching raised a gate, we are done with this node and dont continue down the srcs
             self.replace[n] = unwrap(test_n)
-            _finish(n)
+            if n in waitlist: stack.extend(waitlist.pop(n))
             continue
         stack.append((n, 1, new_n))
         for x in reversed(new_n.src):
@@ -1250,7 +1248,7 @@ class RewriteContext:
             # if top down, do the rewrite. if no rewrite or bottom up, we are done rewriting this node so we add it to the dict
             if self.pm is None or (new_src_n:=self.pm_rewrite(new_n)) is None:
               self.replace[n] = new_n
-              _finish(n)
+              if n in waitlist: stack.extend(waitlist.pop(n))
               continue
           else:
             # if srcs changed from rewrites, construct a new UOp with the new srcs
@@ -1266,7 +1264,7 @@ class RewriteContext:
         else:
           # otherwise we are done
           self.replace[n] = replaced_new_n
-          _finish(n)
+          if n in waitlist: stack.extend(waitlist.pop(n))
     return self.replace[root]
 
 @profile_matches
