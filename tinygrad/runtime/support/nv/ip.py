@@ -498,13 +498,6 @@ class NV_GSP(NV_IP):
 
   ### RPCs
 
-  def _rpc_rm_control(self, hObject:int, cmd:int, params:Any, client:int):
-    control_args = nv.rpc_gsp_rm_control_v(hClient=client, hObject=hObject, cmd=cmd, flags=0x0,
-      paramsSize=ctypes.sizeof(params) if params is not None else 0x0)
-    self.cmd_q.send_rpc(nv.NV_VGPU_MSG_FUNCTION_GSP_RM_CONTROL, bytes(control_args) + (bytes(params) if params is not None else b''))
-    res = self.stat_q.wait_resp(nv.NV_VGPU_MSG_FUNCTION_GSP_RM_CONTROL)
-    return type(params).from_buffer_copy(res[len(bytes(control_args)):]) if params is not None else None
-
   def rpc_alloc_memory(self, hDevice:int, hClass:int, flags:int, paddrs:Sequence[tuple[int,int]], length:int, client:int|None=None, fmt:int=6) -> int:
     assert all(sz == 0x1000 for _, sz in paddrs), f"all pages must be 4KB, got {[(hex(p), hex(sz)) for p, sz in paddrs]}"
     rpc = nv.rpc_alloc_memory_v(hClient=(client:=client or self.priv_root), hDevice=hDevice, hMemory=(handle:=next(self.handle_gen)),
@@ -544,9 +537,8 @@ class NV_GSP(NV_IP):
     return obj if hClass != nv_gpu.NV1_ROOT else client
 
   def rpc_rm_control(self, hObject:int, cmd:int, params:Any, client=None, extra=None):
-    client = client or self.priv_root
     if cmd == nv_gpu.NVB0CC_CTRL_CMD_POWER_REQUEST_FEATURES:
-      self._rpc_rm_control(hObject, nv_gpu.NVB0CC_CTRL_CMD_INTERNAL_PERMISSIONS_INIT, nv_gpu.NVB0CC_CTRL_INTERNAL_PERMISSIONS_INIT_PARAMS(
+      self.rpc_rm_control(hObject, nv_gpu.NVB0CC_CTRL_CMD_INTERNAL_PERMISSIONS_INIT, nv_gpu.NVB0CC_CTRL_INTERNAL_PERMISSIONS_INIT_PARAMS(
         bAdminProfilingPermitted=1, bDevProfilingPermitted=1, bCtxProfilingPermitted=1, bVideoMemoryProfilingPermitted=1,
         bSysMemoryProfilingPermitted=1), client=client)
     elif cmd == nv_gpu.NVB0CC_CTRL_CMD_ALLOC_PMA_STREAM:
@@ -554,7 +546,11 @@ class NV_GSP(NV_IP):
       avl = self.rpc_alloc_memory(self.device, nv_gpu.NV01_MEMORY_LIST_SYSTEM, 0x40200010, extra[1].meta.mapping.paddrs, extra[1].size, client=client)
       params.hMemPmaBuffer, params.hMemPmaBytesAvailable = pma, avl
 
-    st = self._rpc_rm_control(hObject, cmd, params, client=client)
+    control_args = nv.rpc_gsp_rm_control_v(hClient=(client:=client or self.priv_root), hObject=hObject, cmd=cmd, flags=0x0,
+      paramsSize=ctypes.sizeof(params) if params is not None else 0x0)
+    self.cmd_q.send_rpc(nv.NV_VGPU_MSG_FUNCTION_GSP_RM_CONTROL, bytes(control_args) + (bytes(params) if params is not None else b''))
+    res = self.stat_q.wait_resp(nv.NV_VGPU_MSG_FUNCTION_GSP_RM_CONTROL)
+    st = type(params).from_buffer_copy(res[len(bytes(control_args)):]) if params is not None else None
 
     # NOTE: gb20x requires the enable bit for token submission. Patch workSubmitToken here to maintain userspace compatibility.
     if self.nvdev.chip_name.startswith("GB2") and cmd == nv_gpu.NVC36F_CTRL_CMD_GPFIFO_GET_WORK_SUBMIT_TOKEN:
