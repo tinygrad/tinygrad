@@ -1,4 +1,4 @@
-import os
+import os, subprocess, sys
 import unittest
 import numpy as np
 from tinygrad import Tensor, Device
@@ -7,6 +7,11 @@ from tinygrad.runtime.ops_rknn import RKNNRuntime
 
 
 class TestRKNN(unittest.TestCase):
+  def test_rknn_env_selects_backend(self):
+    env = {**os.environ, "RKNN": "1"}
+    out = subprocess.check_output([sys.executable, "-c", "from tinygrad import Device; print(Device.DEFAULT)"], env=env, text=True)
+    self.assertEqual(out.strip(), "RKNN")
+
   def test_rknn_select_and_add(self):
     out = (Tensor.ones(16, device="RKNN") + 2).realize().numpy()
     np.testing.assert_allclose(out, np.full((16,), 3.0, dtype=np.float32), atol=0, rtol=0)
