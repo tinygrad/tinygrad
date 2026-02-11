@@ -8,7 +8,8 @@ from tinygrad.runtime.ops_rknn import RKNNRuntime
 
 class TestRKNN(unittest.TestCase):
   def test_rknn_env_selects_backend(self):
-    env = {**os.environ, "RKNN": "1"}
+    env = {k: v for k, v in os.environ.items() if k not in Device._devices and k != "DEV"}
+    env["RKNN"] = "1"
     out = subprocess.check_output([sys.executable, "-c", "from tinygrad import Device; print(Device.DEFAULT)"], env=env, text=True)
     self.assertEqual(out.strip(), "RKNN")
 
