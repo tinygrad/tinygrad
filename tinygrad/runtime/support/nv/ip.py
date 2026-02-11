@@ -25,6 +25,33 @@ class NVRpcQueue:
     self.gsp, self.va, self.queue_va, self.seq = gsp, va, va + self.tx.entryOff, 0
     self.queue_mv = to_mv(self.queue_va, self.tx.msgSize * self.tx.msgCount)
 
+  def _write_queue(self, packet:bytes, elem_count:int):
+    for i in range(elem_count):
+      slot_off = ((self.tx.writePtr + i) % self.tx.msgCount) * self.tx.msgSize
+      pkt_off = i * self.tx.msgSize
+      chunk = packet[pkt_off:pkt_off + self.tx.msgSize]
+      self.queue_mv[slot_off:slot_off+len(chunk)] = chunk
+      if len(chunk) < self.tx.msgSize:
+        self.queue_mv[slot_off+len(chunk):slot_off+self.tx.msgSize] = b'\x00' * (self.tx.msgSize - len(chunk))
+
+  def _send_rpc_record(self, func:int, payload:bytes):
+    rpc_hdr_sz, queue_hdr_sz = ctypes.sizeof(nv.rpc_message_header_v), ctypes.sizeof(nv.GSP_MSG_QUEUE_ELEMENT)
+    rpc_header = nv.rpc_message_header_v(signature=nv.NV_VGPU_MSG_SIGNATURE_VALID, rpc_result=nv.NV_VGPU_MSG_RESULT_RPC_PENDING,
+      rpc_result_private=nv.NV_VGPU_MSG_RESULT_RPC_PENDING, header_version=(3<<24), function=func, length=len(payload) + rpc_hdr_sz)
+    rpc_record = bytes(rpc_header) + payload
+
+    elem_count = round_up(queue_hdr_sz + len(rpc_record), self.tx.msgSize) // self.tx.msgSize
+    qhdr = nv.GSP_MSG_QUEUE_ELEMENT(elemCount=elem_count, seqNum=self.seq)
+    qhdr.checkSum = self._checksum(bytes(qhdr) + rpc_record)
+    packet = bytes(qhdr) + rpc_record
+    if (pad:=(-len(packet)) % 8): packet += b'\x00' * pad
+
+    self._write_queue(packet, elem_count)
+    self.tx.writePtr = (self.tx.writePtr + elem_count) % self.tx.msgCount
+    System.memory_barrier()
+    self.seq += 1
+    self.gsp.nvdev.NV_PGSP_QUEUE_HEAD[0].write(0x0)
+
   def _checksum(self, data:bytes):
     if (pad_len:=(-len(data)) % 8): data += b'\x00' * pad_len
     checksum = 0
@@ -32,21 +59,20 @@ class NVRpcQueue:
     return hi32(checksum) ^ lo32(checksum)
 
   def send_rpc(self, func:int, msg:bytes, wait=False):
-    header = nv.rpc_message_header_v(signature=nv.NV_VGPU_MSG_SIGNATURE_VALID, rpc_result=nv.NV_VGPU_MSG_RESULT_RPC_PENDING,
-      rpc_result_private=nv.NV_VGPU_MSG_RESULT_RPC_PENDING, header_version=(3<<24), function=func, length=len(msg) + 0x20)
+    queue_hdr_sz, rpc_hdr_sz = ctypes.sizeof(nv.GSP_MSG_QUEUE_ELEMENT), ctypes.sizeof(nv.rpc_message_header_v)
+    max_rpc_size = (self.tx.msgSize * 16) - queue_hdr_sz
+    max_payload = max_rpc_size - rpc_hdr_sz
+    if max_payload <= 0: raise RuntimeError("invalid RPC payload size")
 
-    msg = bytes(header) + msg
-    phdr = nv.GSP_MSG_QUEUE_ELEMENT(elemCount=round_up(len(msg), self.tx.msgSize) // self.tx.msgSize, seqNum=self.seq)
-    phdr.checkSum = self._checksum(bytes(phdr) + msg)
-    msg = bytes(phdr) + msg
+    if len(msg) == 0:
+      self._send_rpc_record(func, b'')
+      return
 
-    off = self.tx.writePtr * self.tx.msgSize
-    self.queue_mv[off:off+len(msg)] = msg
-    self.tx.writePtr = (self.tx.writePtr + round_up(len(msg), self.tx.msgSize) // self.tx.msgSize) % self.tx.msgCount
-    System.memory_barrier()
-
-    self.seq += 1
-    self.gsp.nvdev.NV_PGSP_QUEUE_HEAD[0].write(0x0)
+    msg_off = 0
+    while msg_off < len(msg):
+      chunk = msg[msg_off:msg_off + max_payload]
+      self._send_rpc_record(func if msg_off == 0 else nv.NV_VGPU_MSG_FUNCTION_CONTINUATION_RECORD, chunk)
+      msg_off += len(chunk)
 
   def read_resp(self):
     System.memory_barrier()
@@ -502,7 +528,7 @@ class NV_GSP(NV_IP):
     assert all(sz == 0x1000 for _, sz in paddrs), f"all pages must be 4KB, got {[(hex(p), hex(sz)) for p, sz in paddrs]}"
     rpc = nv.rpc_alloc_memory_v(hClient=(client:=client or self.priv_root), hDevice=hDevice, hMemory=(handle:=next(self.handle_gen)),
       hClass=hClass, flags=flags, pteAdjust=0, format=fmt, length=length, pageCount=len(paddrs))
-    rpc.pteDesc.idr, rpc.pteDesc.length = nv.NV_VGPU_PTEDESC_IDR_NONE, len(paddrs)
+    rpc.pteDesc.idr, rpc.pteDesc.length = nv.NV_VGPU_PTEDESC_IDR_NONE, (len(paddrs) & 0xffff)
 
     payload = bytes(rpc) + b''.join(bytes(nv.struct_pte_desc_pte_pde(pte=(paddr >> 12))) for paddr, _ in paddrs)
     self.cmd_q.send_rpc(nv.NV_VGPU_MSG_FUNCTION_ALLOC_MEMORY, bytes(payload))
