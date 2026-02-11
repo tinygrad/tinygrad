@@ -1,13 +1,25 @@
 """SQTT (SQ Thread Trace) packet decoder for CDNA/MI300 GPUs.
 
 CDNA uses a completely different 16-bit header format from RDNA's nibble-based encoding.
+
+Rocprof decoder reference (from ghidra decompilation of librocprof-trace-decoder.so):
+  - Raw packet parsing is in an unnamed function around address 0x111980
+  - Packet format determined by: pkt_fmt = header & 0xf
+  - Packet size determined by lookup table (packet_class): 0x10=2B, 0x20=4B, 0x30=6B, 0x40=8B
+  - Time handling uses switch on (pkt_fmt * 4 - 4):
+    - case 0 (pkt_fmt=1, 8-byte): local_58 = (data_word * 4 >> 18) = (data_word >> 16) [TIMESTAMP sets absolute time]
+    - case 0 (pkt_fmt=1, 4-byte): local_58 = (data_word >> 16) [TIMESTAMP from upper 16 bits]
+    - case 0 (pkt_fmt=1, 2-byte): local_58 = 0 [clears time - DELTA packets don't accumulate in raw decoder!]
+  - Post-processing in parse_structured_0x180 uses puVar58[0]=time, puVar58[1]=data, puVar58[2]=pkt_type
+  - For pkt_type=7: time contribution is (puVar58[1] * 4 >> 18) = (data >> 16)
 """
 from __future__ import annotations
 from typing import Iterator
 from extra.assembly.amd.dsl import bits
 from extra.assembly.amd.sqtt import PacketType
 
-# CDNA pkt_fmt -> size in bytes (extracted from rocprof hash table)
+# CDNA pkt_fmt -> size in bytes (extracted from rocprof hash table via packet_class lookup)
+# packet_class: 0x10=2 bytes, 0x20=4 bytes, 0x30=6 bytes, 0x40=8 bytes
 CDNA_PKT_SIZES = {0: 2, 1: 8, 2: 8, 3: 4, 4: 2, 5: 6, 6: 2, 7: 2, 8: 2, 9: 2, 10: 2, 11: 8, 12: 6, 13: 4, 14: 8, 15: 6}
 
 class CDNA_DELTA(PacketType):
@@ -127,22 +139,35 @@ for pkt_fmt, pkt_cls in CDNA_PKT_TYPES.items():
   assert CDNA_PKT_SIZES[pkt_fmt] * 2 == pkt_cls._size_nibbles, f"{pkt_cls.__name__} size {pkt_cls._size_nibbles//2} != {CDNA_PKT_SIZES[pkt_fmt]}"
 
 def decode(data: bytes) -> Iterator[PacketType]:
-  """Decode CDNA SQTT blob using 16-bit header format."""
-  pos, time, ts_offset = 0, 0, None
+  """Decode CDNA SQTT blob using 16-bit header format.
+
+  Timestamp calculation (reverse-engineered from rocprof FUN_001117c0):
+  - First real TIMESTAMP (>100) establishes offset: offset = ts - accumulated_time
+  - Subsequent TIMESTAMPs set time = (ts - offset) & ~3
+  - DELTA packets (pkt_fmt=0) contribute (delta * 4) to accumulated time
+  """
+  pos, time, offset = 0, 0, None
   while pos + 2 <= len(data):
     header = int.from_bytes(data[pos:pos+2], 'little')
     pkt_fmt = header & 0xf
     pkt_size = CDNA_PKT_SIZES[pkt_fmt]
     if pos + pkt_size > len(data): break
-
     raw = int.from_bytes(data[pos:pos+pkt_size], 'little')
-    # pkt_fmt=0 has delta in bits[11:4], accumulate it
-    if pkt_fmt == 0: time += ((raw >> 4) & 0xff) * 4
-    # pkt_fmt=1 with unk_0=0 is absolute timestamp - use it to anchor time
-    if pkt_fmt == 1 and ((raw >> 4) & 0xfff) == 0:
-      abs_ts = raw >> 16
-      if ts_offset is None: ts_offset = abs_ts - time  # first timestamp: save offset
-      else: time = ((abs_ts - ts_offset) & ~3) - 4     # subsequent: compute time, align to 4, subtract 4
+
+    # TIMESTAMP packets: first one sets offset, subsequent ones set absolute time
+    if pkt_fmt == 1:
+      ts = raw >> 16
+      if ts > 100:  # Skip init timestamps (e.g., ts=15)
+        if offset is None:
+          offset = ts - time  # First real TS: offset = ts - accumulated_time
+        else:
+          time = (ts - offset) & ~3  # Later TS: time = (ts - offset) aligned to 4
+
+    # DELTA packets add (delta * 4) to time
+    elif pkt_fmt == 0:
+      delta = (raw >> 4) & 0xff
+      time += delta * 4
+
     pkt_cls = CDNA_PKT_TYPES[pkt_fmt]
     yield pkt_cls.from_raw(raw, time)
     pos += pkt_size
