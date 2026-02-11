@@ -93,6 +93,9 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
 
   # **** below this line need to be optional and benchmarked ****
 
+  # skip upcast/unroll for renderers without float4 folding -- without vectorization these just bloat the generated code
+  if k.ren is not None and not k.ren.supports_float4 and not k.ren.has_local: return k
+
   # if there are small dims with lots of valid masks, upcast them (they might be from Tensor.stack)
   to_upcast: list[int] = []
   # upcast leading axes first (hack-ish for winograd; we actually want to upcast masked axes with low stride first)
