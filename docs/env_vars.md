@@ -37,6 +37,10 @@ AMD                 | [1]        | enable AMD backend
 NV                  | [1]        | enable NV backend
 METAL               | [1]        | enable Metal backend (for Mac M1 and after)
 CPU                 | [1]        | enable CPU backend
+RKNN                | [1]        | enable RKNN backend
+RKNN_OFFLOAD        | [1]        | enable RKNN matmul offload path (falls back to CPU on unsupported hosts)
+RKNN_LIB            | str        | path to RKNN runtime shared library (`librknnrt.so`)
+RKNN_REQUIRE_LIB    | [1]        | fail fast when RKNN runtime cannot be loaded
 BEAM                | [#]        | number of beams in kernel beam search
 DEFAULT_FLOAT       | [HALF, ...]| specify the default float dtype (FLOAT32, HALF, BFLOAT16, FLOAT64, ...), default to FLOAT32
 IMAGE               | [1-2]      | enable 2d specific optimizations

@@ -11,6 +11,7 @@ tinygrad supports various runtimes, enabling your code to scale across a wide ra
 | [CUDA](https://github.com/tinygrad/tinygrad/tree/master/tinygrad/runtime/ops_cuda.py) | Utilizes CUDA for acceleration on NVIDIA GPUs | nvrtc (default)<br> PTX (`CUDA_PTX=1`) | NVIDIA GPU with CUDA support |
 | [CL](https://github.com/tinygrad/tinygrad/tree/master/tinygrad/runtime/ops_cl.py) | Accelerates computations using OpenCL on GPUs | - | OpenCL 2.0 compatible device |
 | [CPU](https://github.com/tinygrad/tinygrad/tree/master/tinygrad/runtime/ops_cpu.py) | Runs on CPU using the clang or llvm compiler | Clang JIT (default)<br>LLVM IR (`CPU_LLVM=1`) | `clang` compiler in system `PATH` |
+| [RKNN](https://github.com/tinygrad/tinygrad/tree/master/tinygrad/runtime/ops_rknn.py) | CPU-compatible fallback runtime with optional RKNN matmul offload | Clang JIT | Linux + AArch64 + `librknnrt.so` for offload (`RKNN_OFFLOAD=1`) |
 | [WEBGPU](https://github.com/tinygrad/tinygrad/tree/master/tinygrad/runtime/ops_webgpu.py) | Runs on GPU using the Dawn WebGPU engine (used in Google Chrome) | - | Dawn library installed and discoverable. Binaries: [pydawn v0.3.0](https://github.com/wpmed92/pydawn/releases/tag/v0.3.0) |
 
 
