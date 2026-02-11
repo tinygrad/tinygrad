@@ -1,6 +1,6 @@
 from __future__ import annotations
 import ctypes, time, array, struct, itertools, dataclasses
-from typing import cast, Any
+from typing import cast, Any, Sequence
 from tinygrad.runtime.autogen import nv, nv_570 as nv_gpu, pci
 from tinygrad.helpers import to_mv, lo32, hi32, DEBUG, round_up, round_down, mv_address, fetch, wait_cond
 from tinygrad.runtime.support.system import System
@@ -333,7 +333,7 @@ class NV_GSP(NV_IP):
     self.alloc_info: dict[int, tuple[int, int, int]] = {}
     self.rpc_alloc_mem: dict[tuple[int, ...], int] = {}
     self.rpc_alloc_mem_handles: set[int] = set()
-    self.profiler_perm_inited: set[int] = set()
+
     self.init_rm_args()
     self.init_libos_args()
     self.init_wpr_meta()
@@ -508,7 +508,7 @@ class NV_GSP(NV_IP):
     res = self.stat_q.wait_resp(nv.NV_VGPU_MSG_FUNCTION_GSP_RM_CONTROL)
     return type(params).from_buffer_copy(res[len(bytes(control_args)):]) if params is not None else None
 
-  def _rpc_alloc_memory(self, hClient:int, hDevice:int, hMemory:int, hClass:int, flags:int, paddrs:list[int], length:int, fmt:int=6):
+  def _rpc_alloc_memory(self, hClient:int, hDevice:int, hMemory:int, hClass:int, flags:int, paddrs:Sequence[int], length:int, fmt:int=6):
     rpc = nv.rpc_alloc_memory_v(hClient=hClient, hDevice=hDevice, hMemory=hMemory, hClass=hClass, flags=flags,
       pteAdjust=0, format=fmt, length=length, pageCount=len(paddrs))
     rpc.pteDesc.idr, rpc.pteDesc.length = nv.NV_VGPU_PTEDESC_IDR_NONE, len(paddrs)
@@ -518,43 +518,37 @@ class NV_GSP(NV_IP):
     self.cmd_q.send_rpc(nv.NV_VGPU_MSG_FUNCTION_ALLOC_MEMORY, bytes(payload))
     self.stat_q.wait_resp(nv.NV_VGPU_MSG_FUNCTION_ALLOC_MEMORY)
 
-  def _find_device_for_object(self, hObject:int, hClient:int) -> int:
-    seen, cur = set(), hObject
-    while cur not in seen:
-      seen.add(cur)
-      if (ai:=self.alloc_info.get(cur)) is None: break
-      if ai[1] == nv_gpu.NV01_DEVICE_0 and ai[2] == hClient: return cur
-      cur = ai[0]
-
-    for obj, (_, hClass, client) in self.alloc_info.items():
-      if hClass == nv_gpu.NV01_DEVICE_0 and client == hClient: return obj
-    raise RuntimeError(f"can't resolve device object for hObject={hObject:#x}, hClient={hClient:#x}")
+  def _resolve_pma_buffer_pages(self, params) -> tuple[int, ...]|None:
+    if params.pmaBufferVA == 0 or params.pmaBufferSize == 0: return None
+    try:
+      return tuple(System.system_paddrs(int(params.pmaBufferVA) + int(params.pmaBufferOffset),
+                                        round_up(int(params.pmaBufferSize), 0x1000)))
+    except (OSError, ValueError):
+      return None
 
   def _register_profiler_memory(self, hObject:int, hClient:int, params):
-    hDevice = self._find_device_for_object(hObject, hClient)
-    pma_buf_paddrs = None
-    if params.pmaBufferVA != 0 and params.pmaBufferSize != 0:
-      try:
-        pma_buf_paddrs = System.system_paddrs(int(params.pmaBufferVA) + int(params.pmaBufferOffset), round_up(int(params.pmaBufferSize), 0x1000))
-      except (OSError, ValueError):
-        pma_buf_paddrs = None
+    hDevice = self.device or next((obj for obj, (_, hClass, client) in self.alloc_info.items()
+                                   if hClass == nv_gpu.NV01_DEVICE_0 and client == hClient), None)
+    if hDevice is None: raise RuntimeError(f"can't resolve device object for hClient={hClient:#x}")
+    pma_buf_pages = self._resolve_pma_buffer_pages(params)
+    desc = (("hMemPmaBuffer", False, int(params.pmaBufferSize), pma_buf_pages),
+            ("hMemPmaBytesAvailable", True, nv_gpu.NVB0CC_PMA_BYTES_AVAILABLE_SIZE, None))
 
-    for field, is_ro, sz in [("hMemPmaBuffer", False, params.pmaBufferSize), ("hMemPmaBytesAvailable", True, nv_gpu.NVB0CC_PMA_BYTES_AVAILABLE_SIZE)]:
+    for field, is_ro, sz, resolved_pages in desc:
       hMem = int(getattr(params, field))
       if hMem in self.alloc_info or hMem in self.rpc_alloc_mem_handles or (hMem & 0xfff) != 0: continue
 
       hClass = nv_gpu.NV01_MEMORY_LIST_SYSTEM
       flags = 0x40200010 if is_ro else 0x40000010
-      paddrs = pma_buf_paddrs if (field == "hMemPmaBuffer" and pma_buf_paddrs is not None) else [hMem]
-      key = (hClient, hDevice, hMem, hClass, flags, int(sz), *paddrs)
+      pages = resolved_pages if resolved_pages is not None else (hMem,)
+      key = (hClient, hDevice, hMem, hClass, flags, sz, *pages)
 
       if (mem_handle:=self.rpc_alloc_mem.get(key)) is None:
         mem_handle = next(self.handle_gen)
-        self._rpc_alloc_memory(hClient, hDevice, mem_handle, hClass=hClass, flags=flags, paddrs=paddrs, length=int(sz))
+        self._rpc_alloc_memory(hClient, hDevice, mem_handle, hClass=hClass, flags=flags, paddrs=pages, length=sz)
         self.rpc_alloc_mem[key] = mem_handle
         self.rpc_alloc_mem_handles.add(mem_handle)
       setattr(params, field, mem_handle)
-      if DEBUG >= 3: print(f"nv {self.nvdev.devfmt}: pma memreg {field} paddr={hMem:#x} pages={paddrs[0]:#x} -> hMemory={mem_handle:#x}")
 
   def rpc_rm_alloc(self, hParent:int, hClass:int, params:Any, client=None) -> int:
     if hClass == self.gpfifo_class:
@@ -577,6 +571,7 @@ class NV_GSP(NV_IP):
 
     if hClass == nv_gpu.FERMI_VASPACE_A and client != self.priv_root:
       self.rpc_set_page_directory(device=hParent, hVASpace=obj, pdir_paddr=self.nvdev.mm.root_page_table.paddr, client=client)
+    if hClass == nv_gpu.NV01_DEVICE_0 and client != self.priv_root: self.device = obj # save user device handle
     if hClass == nv_gpu.NV20_SUBDEVICE_0: self.subdevice = obj # save subdevice handle
     if hClass == self.compute_class and client != self.priv_root:
       phys_gr_ctx = self.promote_ctx(client, self.subdevice, hParent, {k:v for k,v in self.grctx_bufs.items() if k in [0, 1, 2]}, virt=False)
@@ -585,17 +580,13 @@ class NV_GSP(NV_IP):
 
   def rpc_rm_control(self, hObject:int, cmd:int, params:Any, client=None):
     client = client or self.priv_root
-    if cmd == nv_gpu.NVB0CC_CTRL_CMD_POWER_REQUEST_FEATURES and hObject not in self.profiler_perm_inited:
+    if cmd == nv_gpu.NVB0CC_CTRL_CMD_POWER_REQUEST_FEATURES:
       self._rpc_rm_control(hObject, nv_gpu.NVB0CC_CTRL_CMD_INTERNAL_PERMISSIONS_INIT, nv_gpu.NVB0CC_CTRL_INTERNAL_PERMISSIONS_INIT_PARAMS(
         bAdminProfilingPermitted=1, bDevProfilingPermitted=1, bCtxProfilingPermitted=1, bVideoMemoryProfilingPermitted=1,
         bSysMemoryProfilingPermitted=1), client=client)
-      self.profiler_perm_inited.add(hObject)
-
-    if cmd == nv_gpu.NVB0CC_CTRL_CMD_ALLOC_PMA_STREAM and params is not None: self._register_profiler_memory(hObject, client, params)
+    elif cmd == nv_gpu.NVB0CC_CTRL_CMD_ALLOC_PMA_STREAM and params is not None: self._register_profiler_memory(hObject, client, params)
 
     st = self._rpc_rm_control(hObject, cmd, params, client=client)
-    if DEBUG >= 3 and cmd == nv_gpu.NVB0CC_CTRL_CMD_ALLOC_PMA_STREAM and params is not None and st is not None:
-      print(f"nv {self.nvdev.devfmt}: pma alloc in_va={params.pmaBufferVA:#x} out_va={st.pmaBufferVA:#x} ch={st.pmaChannelIdx}")
 
     # NOTE: gb20x requires the enable bit for token submission. Patch workSubmitToken here to maintain userspace compatibility.
     if self.nvdev.chip_name.startswith("GB2") and cmd == nv_gpu.NVC36F_CTRL_CMD_GPFIFO_GET_WORK_SUBMIT_TOKEN:
