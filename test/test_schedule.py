@@ -155,7 +155,7 @@ class TestSchedule(unittest.TestCase):
     b = Tensor.randn(10,10,1).realize()
     c = a.sum(axis=0, keepdim=True).permute(2,1,0) + b
     run_schedule(check_schedule(c, 1))
-    np.testing.assert_allclose(c.numpy(), np.sum(a.numpy(), axis=0, keepdims=True).transpose(2,1,0)+b.numpy())
+    np.testing.assert_allclose(c.numpy(), np.sum(a.numpy(), axis=0, keepdims=True).transpose(2,1,0)+b.numpy(), atol=1e-5)
 
   def test_div_collapse_buffer(self):
     a = Tensor.full((4,), 4.0).contiguous().realize()

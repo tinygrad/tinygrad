@@ -142,11 +142,22 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
         if k.unrollable_dims and s <= 3 and k.full_shape[k.unrollable_dims[-1]] <= 3:
           k.apply_opt(Opt(OptOps.UNROLL, len(k.unrollable_dims)-1, 0))
       else:
-        for splits in [4]:
+        for splits in [8, 4]:
           if k.full_shape[axis:=k.unrollable_dims[-1]]%splits == 0:
             k.apply_opt(Opt(OptOps.UNROLL, len(k.unrollable_dims)-1, splits))
             break
   except KernelOptError: pass
+
+  # for CPU (no local memory), add more upcasts after unroll to better utilize wide vector registers
+  if not k.ren.has_local:
+    try:
+      while k.upcastable_dims and k.upcast_size() < 64:
+        for splits in [4]:
+          if k.full_shape[k.upcastable_dims[-1]] % splits == 0:
+            k.apply_opt(Opt(OptOps.UPCAST, k.upcastable_dims[-1], splits))
+            break
+        else: break
+    except KernelOptError: pass
 
   # if nothing at all is upcasted and it's easy to, do an upcast
   for splits in [4]:

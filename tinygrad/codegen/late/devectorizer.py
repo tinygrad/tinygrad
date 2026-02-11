@@ -154,7 +154,9 @@ def split_load_store(ctx:Renderer|None, ls:UOp, idx:UOp):
     lengths = [4]
   elif ctx is not None and ctx.supports_float4:
     # TODO: a better way to get this than ctx
-    lengths = [8,4,2] if buf.dtype.base == dtypes.half and getenv("ALLOW_HALF8") else ([16,8,4,2] if AMX else [4,2])
+    if buf.dtype.base == dtypes.half and getenv("ALLOW_HALF8"): lengths = [8,4,2]
+    elif AMX: lengths = [16,8,4,2]
+    else: lengths = [4,2]
   lengths.append(1)  # worst case, it's not folded
 
   # filter fold lengths that don't divide

@@ -18,7 +18,7 @@ jobs:
   llvmspeed:
     name: LLVM Speed
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
@@ -27,11 +27,16 @@ jobs:
       with:
         key: llvm-speed
         deps: testing_unit
+        pydeps: torch transformers
         llvm: 'true'
     - name: Speed Test
       run: CPU=1 CPU_LLVM=1 THREADS=0 python3 test/speed/external_test_speed_v_torch.py
     - name: Speed Test (BEAM=2)
       run: BEAM=2 CPU=1 CPU_LLVM=1 THREADS=0 python3 test/speed/external_test_speed_v_torch.py
+    - name: LLaMA CPU Test
+      run: CPU=1 CPU_LLVM=1 THREADS=0 python3 test/speed/external_test_llama_cpu.py
+    - name: LLaMA CPU Test (BEAM=2)
+      run: BEAM=2 CPU=1 CPU_LLVM=1 THREADS=0 python3 test/speed/external_test_llama_cpu.py
 
   docs:
     name: Docs
