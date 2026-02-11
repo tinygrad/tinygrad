@@ -222,9 +222,15 @@ def torch_load(t:Tensor) -> dict[str, Tensor]:
     return _rebuild_tensor_v2(storage, storage_offset, size, stride)
 
   def _rebuild_tensor_v2(storage, storage_offset, size, stride, requires_grad=None, backward_hooks=None, metadata=None):
-    #print(storage, storage_offset, size, stride, requires_grad, backward_hooks, metadata)
+    # print(storage, storage_offset, size, stride, requires_grad, backward_hooks, metadata)
     lens[storage[2]] = storage[4] * storage[1].itemsize
-    ret = storage_source[storage[2]].bitcast(storage[1])
+    src = storage_source[storage[2]]
+    if isinstance(src, Tensor):
+      ret = storage_source[storage[2]].bitcast(storage[1])
+    # TODO: Pickle still calculates the offset
+    else:
+      byte_offset = src + storage_offset * storage[1].itemsize
+      ret = t[byte_offset:byte_offset + prod(size) * storage[1].itemsize].bitcast(storage[1])
 
     # 7 lines to deal with permuted tensors. NOTE: this currently requires reading off the disk
     shape_strides = [(s, st) for s,st in zip(size, stride) if s != 1]
@@ -260,34 +266,29 @@ def torch_load(t:Tensor) -> dict[str, Tensor]:
 
   fobj = io.BufferedReader(TensorIO(t))
   def passthrough_reset(v: bool): return fobj.seek(0, 0) or v
-
+  # Serial format: https://docs.pytorch.org/docs/stable/notes/serialization.html 
   if passthrough_reset(zipfile.is_zipfile(fobj)): # NOTE: passthrough_reset required to support python < 3.14
     myzip = zipfile.ZipFile(fobj, 'r')
-    files = zip_extract(t)
     base_name = myzip.filelist[0].filename.split('/', 1)[0]
-    data_prefix = f"{base_name}/data/"
-    for fn, data in files.items():
-      if fn.startswith(data_prefix) and not fn.endswith(".pkl"):
-        storage_id = fn.split("/")[-1]
-        storage_source[storage_id] = storage_source[fn] = data
-        if storage_id.isdigit(): storage_source[int(storage_id)] = data
+    files = zip_extract(t)
+    # key by id
+    storage_source = {fn.split("/")[-1]: data for fn, data in files.items() if fn.startswith(f"{base_name}/data/") and not fn.endswith(".pkl")}
     with myzip.open(f'{base_name}/data.pkl') as myfile:
       return TorchPickle(myfile).load()
   elif passthrough_reset(tarfile.is_tarfile(fobj)): # NOTE: passthrough_reset required to support python < 3.11
-    with tarfile.open(fileobj=fobj, mode="r") as tar:
-      storages_offset = tar.getmember('storages').offset_data
-      f = unwrap(tar.extractfile('storages'))
-      for i in range(TorchPickle(f).load()):  # num_storages
-        (key, _, storage_type), sz = TorchPickle(f).load(), struct.unpack('<q', f.read(8))[0]
-        storage_source[key] = storages_offset + f.tell()
-        f.seek(sz*storage_type.itemsize, 1)
-      f = unwrap(tar.extractfile('tensors'))
-      for _ in range(TorchPickle(f).load()):  # num_tensors
-        (key, storage_id, _), ndim, _ = TorchPickle(f).load(), struct.unpack('<i', f.read(4))[0], f.read(4)
-        size, stride = struct.unpack(f'<{ndim}q', f.read(8 * ndim)), struct.unpack(f'<{ndim}q', f.read(8 * ndim))
-        storage_offset = struct.unpack('<q', f.read(8))[0]
-        deserialized_objects[str(key)] = _rebuild_tensor_v2((None, storage_type, storage_id, None, -1), storage_offset, size, stride)
-      return {k:v.tensor if isinstance(v, Parameter) else v for k,v in TorchPickle(unwrap(tar.extractfile('pickle'))).load().items()}
+    files = tar_extract(t)
+    f = io.BufferedReader(TensorIO(files["storages"]))
+    for _ in range(TorchPickle(f).load()):
+      (key, _, storage_type), sz = TorchPickle(f).load(), struct.unpack('<q', f.read(8))[0]
+      storage_source[key] = files["storages"][f.tell():f.tell() + sz * storage_type.itemsize]
+      f.seek(sz * storage_type.itemsize, 1)
+    f = io.BufferedReader(TensorIO(files["tensors"]))
+    for _ in range(TorchPickle(f).load()):
+      (key, storage_id, _), ndim, _ = TorchPickle(f).load(), struct.unpack('<i', f.read(4))[0], f.read(4)
+      size, stride = struct.unpack(f'<{ndim}q', f.read(8 * ndim)), struct.unpack(f'<{ndim}q', f.read(8 * ndim))
+      storage_offset = struct.unpack('<q', f.read(8))[0]
+      deserialized_objects[str(key)] = _rebuild_tensor_v2((None, storage_type, storage_id, None, -1), storage_offset, size, stride)
+    return {k: v.tensor if isinstance(v, Parameter) else v for k, v in TorchPickle(io.BufferedReader(TensorIO(files["pickle"]))).load().items()}
   else:
     pkl = TorchPickle(fobj)
     _, _, _, rwd, _, ids, base_offset = pkl.load(), pkl.load(), pkl.load(), fobj.tell(), pkl.load(), pkl.load(), fobj.tell()
