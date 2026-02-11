@@ -744,8 +744,6 @@ class NVDevice(HCQCompiled[NVSignal]):
     raise RuntimeError("\n".join(report))
 
   def _prof_init(self):
-    # assert not self.is_nvd()
-
     self.profiler = self.iface.rm_alloc(self.subdevice, nv_gpu.MAXWELL_PROFILER_DEVICE,
       nv_gpu.NVB2CC_ALLOC_PARAMETERS(hClientTarget=self.iface.root, hContextTarget=self.channel_group))
 
@@ -823,18 +821,12 @@ class NVDevice(HCQCompiled[NVSignal]):
     params = self.iface.rm_control(self.profiler, nv_gpu.NVB0CC_CTRL_CMD_PMA_STREAM_UPDATE_GET_PUT,
       nv_gpu.struct_NVB0CC_CTRL_PMA_STREAM_UPDATE_GET_PUT_PARAMS(bUpdateAvailableBytes=1, bWait=1))
 
-    print(params.bytesAvailable)
-    assert params.bytesAvailable != 0
-    
     if params.bOverflowStatus: raise RuntimeError("PMA profiler: buffer overflow detected")
     if params.bytesAvailable == 0: return None
 
     start, end = self.pma_rptr, self.pma_rptr + params.bytesAvailable
     pma_data = self.pma_buf.cpu_view()[start:min(end, self.pma_buf.size)] + self.pma_buf.cpu_view()[:max(0, end - self.pma_buf.size)]
     self.pma_rptr = end % self.pma_buf.size
-
-    from hexdump import hexdump
-    hexdump(pma_data)
 
     self.iface.rm_control(self.profiler, nv_gpu.NVB0CC_CTRL_CMD_PMA_STREAM_UPDATE_GET_PUT,
       nv_gpu.struct_NVB0CC_CTRL_PMA_STREAM_UPDATE_GET_PUT_PARAMS(bytesConsumed=params.bytesAvailable))

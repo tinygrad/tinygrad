@@ -31,11 +31,11 @@ class NVRpcQueue:
     for offset in range(0, len(data), 8): checksum ^= struct.unpack_from('Q', data, offset)[0]
     return hi32(checksum) ^ lo32(checksum)
 
-  def _send_rpc_record(self, func:int, payload:bytes):
+  def _send_rpc_record(self, func:int, msg:bytes):
     header = nv.rpc_message_header_v(signature=nv.NV_VGPU_MSG_SIGNATURE_VALID, rpc_result=nv.NV_VGPU_MSG_RESULT_RPC_PENDING,
-      rpc_result_private=nv.NV_VGPU_MSG_RESULT_RPC_PENDING, header_version=(3<<24), function=func, length=len(payload) + 0x20)
+      rpc_result_private=nv.NV_VGPU_MSG_RESULT_RPC_PENDING, header_version=(3<<24), function=func, length=len(msg) + 0x20)
 
-    msg = bytes(header) + payload
+    msg = bytes(header) + msg
     phdr = nv.GSP_MSG_QUEUE_ELEMENT(elemCount=round_up(len(msg) + 0x30, self.tx.msgSize) // self.tx.msgSize, seqNum=self.seq)
     phdr.checkSum = self._checksum(bytes(phdr) + msg)
     msg = (bytes(phdr) + msg).ljust(phdr.elemCount * self.tx.msgSize, b'\x00')
@@ -336,7 +336,6 @@ class NV_FLCN_COT(NV_IP):
 class NV_GSP(NV_IP):
   def init_sw(self):
     self.handle_gen = itertools.count(0xcf000000)
-
     self.init_rm_args()
     self.init_libos_args()
     self.init_wpr_meta()
