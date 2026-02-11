@@ -310,6 +310,8 @@ class Tensor(OpMixin):
     result = self._apply_uop(UOp.assign, x)
     # track view assigns (not full-buffer or assign-chain) so they can be side-realized when the buffer is read
     if (buf_uop:=self.uop.base).op is Ops.BUFFER and self.uop.op is not Ops.ASSIGN and not self.uop.has_buffer_identity():
+      # deduplicate: if the value is already a pending assign for this buffer (e.g. __iadd__ in __setitem__), remove it
+      if x.uop in _pending_assigns.get(buf_uop, []): _pending_assigns[buf_uop].remove(x.uop)
       _pending_assigns.setdefault(buf_uop, []).append(result.uop)
     return self.replace(result)
 
@@ -1302,8 +1304,6 @@ class Tensor(OpMixin):
     else: # basic setitem
       if is_disk: self[indices].assign(v)
       else:
-        self.realize()
-        if not self.uop.is_writable_view(): raise RuntimeError("setitem target must be a writable view backed by a buffer")
         self[indices].assign(v).realize()
 
   def __delitem__(self, indices) -> None:
