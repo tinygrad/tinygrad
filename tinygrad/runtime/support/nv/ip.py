@@ -330,6 +330,11 @@ class NV_FLCN_COT(NV_IP):
 class NV_GSP(NV_IP):
   def init_sw(self):
     self.handle_gen = itertools.count(0xcf000000)
+    self.alloc_info: dict[int, tuple[int, int, int]] = {}
+    self.rpc_alloc_mem: dict[tuple[int, int, int, int, int, int], int] = {}
+    self.rpc_alloc_mem_handles: set[int] = set()
+    self.profiler_perm_inited: set[int] = set()
+    self.profiler_pma_inited: set[int] = set()
     self.init_rm_args()
     self.init_libos_args()
     self.init_wpr_meta()
@@ -497,6 +502,52 @@ class NV_GSP(NV_IP):
 
   ### RPCs
 
+  def _rpc_rm_control(self, hObject:int, cmd:int, params:Any, client:int):
+    control_args = nv.rpc_gsp_rm_control_v(hClient=client, hObject=hObject, cmd=cmd, flags=0x0,
+      paramsSize=ctypes.sizeof(params) if params is not None else 0x0)
+    self.cmd_q.send_rpc(nv.NV_VGPU_MSG_FUNCTION_GSP_RM_CONTROL, bytes(control_args) + (bytes(params) if params is not None else b''))
+    res = self.stat_q.wait_resp(nv.NV_VGPU_MSG_FUNCTION_GSP_RM_CONTROL)
+    return type(params).from_buffer_copy(res[len(bytes(control_args)):]) if params is not None else None
+
+  def _rpc_alloc_memory(self, hClient:int, hDevice:int, hMemory:int, hClass:int, flags:int, paddrs:list[int], length:int, fmt:int=6):
+    rpc = nv.rpc_alloc_memory_v(hClient=hClient, hDevice=hDevice, hMemory=hMemory, hClass=hClass, flags=flags,
+      pteAdjust=0, format=fmt, length=length, pageCount=len(paddrs))
+    rpc.pteDesc.idr, rpc.pteDesc.length = nv.NV_VGPU_PTEDESC_IDR_NONE, len(paddrs)
+
+    payload = bytearray(bytes(rpc))
+    payload += b''.join(bytes(nv.struct_pte_desc_pte_pde(pte=(paddr >> 12))) for paddr in paddrs)
+    self.cmd_q.send_rpc(nv.NV_VGPU_MSG_FUNCTION_ALLOC_MEMORY, bytes(payload))
+    self.stat_q.wait_resp(nv.NV_VGPU_MSG_FUNCTION_ALLOC_MEMORY)
+
+  def _find_device_for_object(self, hObject:int, hClient:int) -> int:
+    seen, cur = set(), hObject
+    while cur not in seen:
+      seen.add(cur)
+      if (ai:=self.alloc_info.get(cur)) is None: break
+      if ai[1] == nv_gpu.NV01_DEVICE_0 and ai[2] == hClient: return cur
+      cur = ai[0]
+
+    for obj, (_, hClass, client) in self.alloc_info.items():
+      if hClass == nv_gpu.NV01_DEVICE_0 and client == hClient: return obj
+    raise RuntimeError(f"can't resolve device object for hObject={hObject:#x}, hClient={hClient:#x}")
+
+  def _register_profiler_memory(self, hObject:int, hClient:int, params):
+    hDevice = self._find_device_for_object(hObject, hClient)
+    for field, is_ro, sz in [("hMemPmaBuffer", False, params.pmaBufferSize), ("hMemPmaBytesAvailable", True, nv_gpu.NVB0CC_PMA_BYTES_AVAILABLE_SIZE)]:
+      hMem = int(getattr(params, field))
+      if hMem in self.alloc_info or hMem in self.rpc_alloc_mem_handles or (hMem & 0xfff) != 0: continue
+
+      hClass = nv_gpu.NV01_MEMORY_LIST_SYSTEM
+      flags = 0x40200010 if is_ro else 0x40000010
+      key = (hClient, hDevice, hMem, hClass, flags, int(sz))
+
+      if (mem_handle:=self.rpc_alloc_mem.get(key)) is None:
+        mem_handle = next(self.handle_gen)
+        self._rpc_alloc_memory(hClient, hDevice, mem_handle, hClass=hClass, flags=flags, paddrs=[hMem], length=int(sz))
+        self.rpc_alloc_mem[key] = mem_handle
+        self.rpc_alloc_mem_handles.add(mem_handle)
+      setattr(params, field, mem_handle)
+
   def rpc_rm_alloc(self, hParent:int, hClass:int, params:Any, client=None) -> int:
     if hClass == self.gpfifo_class:
       ramfc_alloc = self.nvdev.mm.valloc(0x1000, contiguous=True)
@@ -514,6 +565,7 @@ class NV_GSP(NV_IP):
       hClass=hClass, flags=0x0, paramsSize=ctypes.sizeof(params) if params is not None else 0x0)
     self.cmd_q.send_rpc(nv.NV_VGPU_MSG_FUNCTION_GSP_RM_ALLOC, bytes(alloc_args) + (bytes(params) if params is not None else b''))
     self.stat_q.wait_resp(nv.NV_VGPU_MSG_FUNCTION_GSP_RM_ALLOC)
+    if hClass != nv_gpu.NV1_ROOT: self.alloc_info[obj] = (hParent, hClass, client)
 
     if hClass == nv_gpu.FERMI_VASPACE_A and client != self.priv_root:
       self.rpc_set_page_directory(device=hParent, hVASpace=obj, pdir_paddr=self.nvdev.mm.root_page_table.paddr, client=client)
@@ -524,11 +576,43 @@ class NV_GSP(NV_IP):
     return obj if hClass != nv_gpu.NV1_ROOT else client
 
   def rpc_rm_control(self, hObject:int, cmd:int, params:Any, client=None):
-    control_args = nv.rpc_gsp_rm_control_v(hClient=(client:=client or self.priv_root), hObject=hObject, cmd=cmd, flags=0x0,
-      paramsSize=ctypes.sizeof(params) if params is not None else 0x0)
-    self.cmd_q.send_rpc(nv.NV_VGPU_MSG_FUNCTION_GSP_RM_CONTROL, bytes(control_args) + (bytes(params) if params is not None else b''))
-    res = self.stat_q.wait_resp(nv.NV_VGPU_MSG_FUNCTION_GSP_RM_CONTROL)
-    st = type(params).from_buffer_copy(res[len(bytes(control_args)):]) if params is not None else None
+    client = client or self.priv_root
+    if cmd == nv_gpu.NVB0CC_CTRL_CMD_POWER_REQUEST_FEATURES and hObject not in self.profiler_perm_inited:
+      self._rpc_rm_control(hObject, nv_gpu.NVB0CC_CTRL_CMD_INTERNAL_PERMISSIONS_INIT, nv_gpu.NVB0CC_CTRL_INTERNAL_PERMISSIONS_INIT_PARAMS(
+        bAdminProfilingPermitted=1, bDevProfilingPermitted=1, bCtxProfilingPermitted=1, bVideoMemoryProfilingPermitted=1,
+        bSysMemoryProfilingPermitted=1), client=client)
+      self.profiler_perm_inited.add(hObject)
+
+    if cmd == nv_gpu.NVB0CC_CTRL_CMD_ALLOC_PMA_STREAM:
+      self._register_profiler_memory(hObject, client, params)
+      if hObject not in self.profiler_pma_inited:
+        self._rpc_rm_control(hObject, nv_gpu.NVB0CC_CTRL_CMD_INTERNAL_GET_MAX_PMAS, nv_gpu.NVB0CC_CTRL_INTERNAL_GET_MAX_PMAS_PARAMS(), client=client)
+        self.profiler_pma_inited.add(hObject)
+
+      ip = nv_gpu.NVB0CC_CTRL_INTERNAL_ALLOC_PMA_STREAM_PARAMS(hMemPmaBuffer=params.hMemPmaBuffer, pmaBufferOffset=params.pmaBufferOffset,
+        pmaBufferSize=params.pmaBufferSize, hMemPmaBytesAvailable=params.hMemPmaBytesAvailable,
+        pmaBytesAvailableOffset=params.pmaBytesAvailableOffset, ctxsw=params.ctxsw, pmaChannelIdx=params.pmaChannelIdx,
+        pmaBufferVA=params.pmaBufferVA, bInputPmaChIdx=0)
+      isp = self._rpc_rm_control(hObject, nv_gpu.NVB0CC_CTRL_CMD_INTERNAL_ALLOC_PMA_STREAM, ip, client=client)
+      params.pmaChannelIdx, params.pmaBufferVA = isp.pmaChannelIdx, isp.pmaBufferVA
+      return params
+
+    if cmd == nv_gpu.NVB0CC_CTRL_CMD_RESERVE_HWPM_LEGACY and params is not None:
+      self._rpc_rm_control(hObject, nv_gpu.NVB0CC_CTRL_CMD_INTERNAL_RESERVE_HWPM_LEGACY,
+        nv_gpu.NVB0CC_CTRL_INTERNAL_RESERVE_HWPM_LEGACY_PARAMS(ctxsw=params.ctxsw), client=client)
+      return params
+
+    if cmd == nv_gpu.NVB0CC_CTRL_CMD_BIND_PM_RESOURCES:
+      return self._rpc_rm_control(hObject, nv_gpu.NVB0CC_CTRL_CMD_INTERNAL_BIND_PM_RESOURCES, None, client=client)
+    if cmd == nv_gpu.NVB0CC_CTRL_CMD_UNBIND_PM_RESOURCES:
+      return self._rpc_rm_control(hObject, nv_gpu.NVB0CC_CTRL_CMD_INTERNAL_UNBIND_PM_RESOURCES, None, client=client)
+
+    if cmd == nv_gpu.NVB0CC_CTRL_CMD_FREE_PMA_STREAM and params is not None:
+      self._rpc_rm_control(hObject, nv_gpu.NVB0CC_CTRL_CMD_INTERNAL_FREE_PMA_STREAM,
+        nv_gpu.NVB0CC_CTRL_INTERNAL_FREE_PMA_STREAM_PARAMS(pmaChannelIdx=params.pmaChannelIdx), client=client)
+      return params
+
+    st = self._rpc_rm_control(hObject, cmd, params, client=client)
 
     # NOTE: gb20x requires the enable bit for token submission. Patch workSubmitToken here to maintain userspace compatibility.
     if self.nvdev.chip_name.startswith("GB2") and cmd == nv_gpu.NVC36F_CTRL_CMD_GPFIFO_GET_WORK_SUBMIT_TOKEN:
