@@ -179,7 +179,10 @@ gep_pushing = PatternMatcher([
 commutative = PatternMatcher([
   # ** COMMUTATIVE flipping (only for index) **
   # NOTE: this can break merging vector math by only flipping some of them
-  (UPat(GroupOp.Commutative, dtype=dtypes.index, name='x'), lambda x: x.replace(src=x.src[::-1]) if x.src[1].tuplize < x.src[0].tuplize else None),
+  (UPat(GroupOp.Commutative, dtype=dtypes.index, name='x'),
+   lambda x: x.replace(src=x.src[::-1]) if (x.src[1].op.value, x.src[1].arg, x.src[1].dtype,
+     tuple((s.op.value, s.arg, s.dtype) for s in x.src[1].src)) < (x.src[0].op.value, x.src[0].arg, x.src[0].dtype,
+     tuple((s.op.value, s.arg, s.dtype) for s in x.src[0].src)) else None),
 ])
 
 symbolic = symbolic_simple+commutative+PatternMatcher([
