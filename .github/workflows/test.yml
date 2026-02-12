@@ -683,8 +683,8 @@ jobs:
           python-version: '3.14'
       - name: Verify AMD autogen is up to date
         run: |
-          python -m extra.assembly.amd.generate
-          git diff --exit-code extra/assembly/amd/autogen/
+          python -m tinygrad.renderer.amd.generate
+          git diff --exit-code tinygrad/runtime/autogen/amd/
       - name: Install LLVM 21
         run: |
           wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc
@@ -692,13 +692,13 @@ jobs:
           sudo apt-get update
           sudo apt-get install llvm-21 llvm-21-tools cloc
       - name: RDNA3 Line Count
-        run: cloc --by-file extra/assembly/amd/*.py
+        run: cloc --by-file tinygrad/renderer/amd/*.py
       - name: Install rocprof-trace-decoder
         run: sudo PYTHONPATH="." ./extra/sqtt/install_sqtt_decoder.py
       - name: Run RDNA3 emulator tests
-        run: AMD_LLVM=0 python -m pytest -n=auto extra/assembly/amd/ --durations 20
+        run: AMD_LLVM=0 python -m pytest -n=auto test/amd/ --durations 20
       - name: Run RDNA3 emulator tests (AMD_LLVM=1)
-        run: AMD_LLVM=1 python -m pytest -n=auto extra/assembly/amd/ --durations 20
+        run: AMD_LLVM=1 python -m pytest -n=auto test/amd/ --durations 20
       - name: Run RDNA3 dtype tests
         run: AMD_LLVM=0 pytest -n=auto test/backend/test_dtype_alu.py test/backend/test_dtype.py --durations 20
       - name: Run RDNA3 dtype tests (AMD_LLVM=1)

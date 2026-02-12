@@ -3,7 +3,7 @@ from __future__ import annotations
 import enum, collections
 from typing import Iterator
 from tinygrad.helpers import colored
-from extra.assembly.amd.sqtt import PacketType, bits
+from tinygrad.renderer.amd.sqtt import PacketType, bits
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # STALL REASONS

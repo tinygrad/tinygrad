@@ -309,7 +309,7 @@ def load_counters(profile:list[ProfileEvent]) -> None:
     ctxs.append({"name":f"Exec {name}"+(f" n{run_number[k]}" if run_number[k] > 1 else ""), "steps":steps})
 
 def sqtt_timeline(data:bytes, lib:bytes, target:int) -> list[ProfileEvent]:
-  from extra.assembly.amd.sqtt import map_insts, InstructionInfo, PacketType, INST, InstOp, VALUINST, IMMEDIATE, IMMEDIATE_MASK, VMEMEXEC, ALUEXEC
+  from tinygrad.renderer.amd.sqtt import map_insts, InstructionInfo, PacketType, INST, InstOp, VALUINST, IMMEDIATE, IMMEDIATE_MASK, VMEMEXEC, ALUEXEC
   ret:list[ProfileEvent] = []
   rows:dict[str, None] = {}
   trace:dict[str, set[int]] = {}
@@ -430,10 +430,10 @@ def amd_readelf(lib:bytes) -> list[dict]:
   return [{"label":f"{resource} Alloc", "value":val} for resource,val in [("VGPR", (vgpr_gran+1)*8-7), ("LDS",kd.group_segment_fixed_size),
                                                                           ("Scratch", kd.private_segment_fixed_size)] if val > 0]
 
-def amd_decode(lib:bytes, target:int) -> dict[int, Any]: # Any is the Inst class from extra.assembly.amd.dsl
+def amd_decode(lib:bytes, target:int) -> dict[int, Any]: # Any is the Inst class from tinygrad.renderer.amd.dsl
   from tinygrad.runtime.support.elf import elf_loader
-  from extra.assembly.amd import detect_format
-  from extra.assembly.amd.dsl import Inst
+  from tinygrad.renderer.amd import detect_format
+  from tinygrad.renderer.amd.dsl import Inst
   image, sections, _ = elf_loader(lib)
   text = next((sh for sh in sections if sh.name == ".text"), None)
   assert text is not None, "no .text section found in ELF"
@@ -486,7 +486,7 @@ def amdgpu_cfg(lib:bytes, target:int) -> dict:
       else: paths[curr].update([(nx+offset, COND_TAKEN), (nx, COND_NOT_TAKEN)])
     elif nx in leaders: paths[curr][nx] = UNCOND
   pc_tokens:dict[int, list[dict]] = {}
-  from extra.assembly.amd.dsl import Reg
+  from tinygrad.renderer.amd.dsl import Reg
   for pc, inst in pc_table.items():
     pc_tokens[pc] = tokens = []
     for name, field in inst._fields:
