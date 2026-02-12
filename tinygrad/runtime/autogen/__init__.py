@@ -6,6 +6,7 @@ nv_src = {"nv_570": "https://github.com/NVIDIA/open-gpu-kernel-modules/archive/8
           "nv_580": "https://github.com/NVIDIA/open-gpu-kernel-modules/archive/2af9f1f0f7de4988432d4ae875b5858ffdb09cc2.tar.gz"}
 ffmpeg_src = "https://ffmpeg.org/releases/ffmpeg-8.0.1.tar.gz"
 rocr_src = "https://github.com/ROCm/rocm-systems/archive/refs/tags/rocm-7.1.1.tar.gz"
+linux_src = "https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.19.tar.xz"
 macossdk = "/var/db/xcode_select_link/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk"
 
 llvm_lib = (r"'C:\\Program Files\\LLVM\\bin\\LLVM-C.dll' if WIN else '/opt/homebrew/opt/llvm@20/lib/libLLVM.dylib' if OSX else " +
@@ -82,8 +83,10 @@ def __getattr__(nm):
                                                "/usr/include/infiniband/ib_user_ioctl_verbs.h","/usr/include/rdma/ib_user_verbs.h"], errno=True)
     case "llvm": return load("llvm", llvm_lib, lambda: [system("llvm-config-20 --includedir")+"/llvm-c/**/*.h"],
                              args=lambda: system("llvm-config-20 --cflags").split(), recsym=True, prolog=["from tinygrad.helpers import WIN, OSX"])
-    case "pci": return load("pci", None, ["/usr/include/linux/pci_regs.h"])
-    case "vfio": return load("vfio", None, ["/usr/include/linux/vfio.h"])
+    case "pci": return load("pci", None, ["{}/gen/include/linux/pci_regs.h"], args=["-I{}/gen/include"], tarball=linux_src,
+                             preprocess=lambda path: subprocess.run("make headers_install INSTALL_HDR_PATH=./gen", cwd=path))
+    case "vfio": return load("vfio", None, ["{}/gen/include/linux/vfio.h"], args=["-I{}/gen/include"], tarball=linux_src,
+                             preprocess=lambda path: subprocess.run("make headers_install INSTALL_HDR_PATH=./gen", cwd=path))
     # could add rule: WGPU_COMMA -> ','
     case "webgpu": return load("webgpu", webgpu_lib, [root/"extra/webgpu/webgpu.h"],
                                prolog=["from tinygrad.helpers import WIN, OSX", "import sysconfig, os"])
