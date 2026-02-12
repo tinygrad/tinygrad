@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Test that invalid instructions raise exceptions through the mock GPU stack."""
-import unittest, subprocess, os, time
+import unittest, subprocess, os, sys, time
 
 class TestMockGPUInvalidInstruction(unittest.TestCase):
   def test_unsupported_instruction_raises(self):
@@ -43,7 +43,7 @@ dev.synchronize()
     env["HCQDEV_WAIT_TIMEOUT_MS"] = "10000"
 
     st = time.perf_counter()
-    result = subprocess.run(["python", "-c", test_code], env=env, capture_output=True, text=True, timeout=60)
+    result = subprocess.run([sys.executable, "-c", test_code], env=env, capture_output=True, text=True, timeout=60)
     elapsed = time.perf_counter() - st
 
     self.assertNotEqual(result.returncode, 0, "should have raised")
