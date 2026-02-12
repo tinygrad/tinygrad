@@ -355,14 +355,14 @@ def apply_opts(ast:UOp, ren:Renderer) -> UOp:
 
 def _valid_image_dt(dt): return dt.base in (dtypes.half, dtypes.float) and not isinstance(dt, ImageDType) and dt.size <= 65536 and dt.nbytes()%64 == 0
 def make_image(pa, off, idx):
-  if not idx.tag and _valid_image_dt(dt:=pa.dtype):
+  if (idx.tag is None or idx.tag) and _valid_image_dt(dt:=pa.dtype):
     return idx.replace(src=(pa.replace(dtype=(dtypes.imageh if dt.base==dtypes.half else dtypes.imagef)((1, dt.size // 4, 4), dt.nbytes())), off),
                        dtype=dtypes.float if dt.base == dtypes.half else idx.dtype)
 
 pm_make_images = PatternMatcher([
   # ensure we dont create an unfoldable image store
   (UPat(Ops.STORE, src=(UPat.var("idx"),), allow_any_len=True, name="st"), lambda idx,st:
-   st.replace(src=(idx.rtag(not (is_image:=any(c.op is Ops.RANGE and (c.vmax+1)%4 == 0 for c in idx.src[1].get_idx().split_uop(Ops.ADD)))),
-                   st.src[1].cast(dtypes.float) if _valid_image_dt(idx.src[0].dtype) and is_image else st.src[1]))),
+   st.replace(src=(idx.rtag(is_image:=any(c.op is Ops.RANGE and (c.vmax+1)%4 == 0 for c in idx.src[1].get_idx().split_uop(Ops.ADD))),
+                   st.src[1].cast(dtypes.float if is_image and _valid_image_dt(idx.src[0].dtype) else idx.dtype.base)))),
   (UPat(Ops.INDEX, src=(UPat(Ops.PARAM, name="pa"), UPat.var("off")), name="idx"), make_image),
 ])
