@@ -215,7 +215,7 @@ def torch_load(t:Tensor) -> dict[str, Tensor]:
   state_dict = nn.state.torch_load("test.pth")
   ```
   """
-  storage_source: dict[str|int, int|Tensor] = {}  # int offset or Tensor for zip
+  storage_source: dict[str|int, Tensor] = {}
   lens: dict[str|int, int] = {}
 
   def _rebuild_tensor(storage, storage_offset, size, stride):
@@ -226,13 +226,8 @@ def torch_load(t:Tensor) -> dict[str, Tensor]:
     lens[storage[2]] = storage[4] * storage[1].itemsize
     if storage[2] not in storage_source:
       return None
-    src = storage_source[storage[2]]
-    if isinstance(src, Tensor):
-      ret = storage_source[storage[2]].bitcast(storage[1])
-    # TODO: Pickle still calculates the offset
-    else:
-      byte_offset = src + storage_offset * storage[1].itemsize
-      ret = t[byte_offset:byte_offset + prod(size) * storage[1].itemsize].bitcast(storage[1])
+
+    ret = storage_source[storage[2]].bitcast(storage[1])
 
     # 7 lines to deal with permuted tensors. NOTE: this currently requires reading off the disk
     shape_strides = [(s, st) for s,st in zip(size, stride) if s != 1]
@@ -296,11 +291,11 @@ def torch_load(t:Tensor) -> dict[str, Tensor]:
   else:
     pkl = TorchPickle(fobj)
     _, _, _, rwd, _, ids, base_offset = pkl.load(), pkl.load(), pkl.load(), fobj.tell(), pkl.load(), pkl.load(), fobj.tell()
-    fobj.seek(rwd)
-    TorchPickle(fobj).load()  # first pass: populate lens via _rebuild_tensor_v2 (returns None)
+    # fobj.seek(rwd)
+    # TorchPickle(fobj).load()  # first pass: populate lens via _rebuild_tensor_v2 (returns None)
     fobj.seek(base_offset)
     for i in ids:
-      storage_source[i] = storage_source[str(i)] = base_offset + 8
+      storage_source[i] = storage_source[str(i)] = t[base_offset + 8:base_offset + 8 + lens[i]]
       base_offset += 8 + lens[i]
     fobj.seek(rwd)
     return TorchPickle(fobj).load()
