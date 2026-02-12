@@ -1,9 +1,12 @@
-"""Tests comparing sqtt.py PACKET_TYPES_L3/L4 against AMD's rocprof-trace-decoder binary."""
+"""Tests comparing sqtt.py PACKET_TYPES_RDNA3/RDNA4 against AMD's rocprof-trace-decoder binary."""
 import unittest, struct, ctypes, pickle
 from pathlib import Path
 
 ROCPROF_LIB = Path("/usr/lib/librocprof-trace-decoder.so")
 EXAMPLES_DIR = Path(__file__).parent.parent.parent.parent / "sqtt/examples"
+
+# CDNA pkt_fmt -> size in bytes (extracted from rocprof hash table)
+CDNA_PKT_SIZES = {0: 2, 1: 8, 2: 8, 3: 4, 4: 2, 5: 6, 6: 2, 7: 2, 8: 2, 9: 2, 10: 2, 11: 8, 12: 6, 13: 4, 14: 8, 15: 6}
 
 def _find_segment(perms: str):
   """Find a segment of the loaded library with given permissions (e.g. 'rw-p', 'r--p')."""
@@ -116,28 +119,34 @@ class TestSQTTMatchesBinary(unittest.TestCase):
     if not (EXAMPLES_DIR / "gfx950").exists(): self.skipTest("no CDNA examples")
     pkt_sizes = extract_cdna_packet_sizes()
     self.assertIsNotNone(pkt_sizes, "failed to extract CDNA packet sizes")
-    from extra.assembly.amd.sqtt_cdna import CDNA_PKT_SIZES
     for pkt_fmt, size in CDNA_PKT_SIZES.items():
       with self.subTest(pkt_fmt=pkt_fmt): self.assertEqual(pkt_sizes.get(pkt_fmt), size)
 
+  def test_cdna_packet_definitions(self):
+    from extra.assembly.amd.sqtt import PACKET_TYPES_CDNA
+    for pkt_fmt, pkt_cls in PACKET_TYPES_CDNA.items():
+      with self.subTest(packet=pkt_cls.__name__):
+        self.assertEqual(pkt_cls.encoding.default, pkt_fmt)
+        self.assertEqual(CDNA_PKT_SIZES[pkt_fmt] * 2, pkt_cls._size_nibbles)
+
   def _test_bit_counts(self, layout: int):
     if not (tables := extract_bit_tables()): self.skipTest("rocprof-trace-decoder not installed")
-    from extra.assembly.amd.sqtt import PACKET_TYPES_L3, PACKET_TYPES_L4
-    for type_id, pkt_cls in {3: PACKET_TYPES_L3, 4: PACKET_TYPES_L4}[layout].items():
+    from extra.assembly.amd.sqtt import PACKET_TYPES_RDNA3, PACKET_TYPES_RDNA4
+    for type_id, pkt_cls in {3: PACKET_TYPES_RDNA3, 4: PACKET_TYPES_RDNA4}[layout].items():
       with self.subTest(packet=pkt_cls.__name__):
         self.assertEqual(pkt_cls._size_nibbles * 4, tables[layout - 2][type_id])
 
   def _test_encodings(self, layout: int):
     if not (encodings := extract_packet_encodings()): self.skipTest("rocprof-trace-decoder not installed")
-    from extra.assembly.amd.sqtt import PACKET_TYPES_L3, PACKET_TYPES_L4
-    for type_id, pkt_cls in {3: PACKET_TYPES_L3, 4: PACKET_TYPES_L4}[layout].items():
+    from extra.assembly.amd.sqtt import PACKET_TYPES_RDNA3, PACKET_TYPES_RDNA4
+    for type_id, pkt_cls in {3: PACKET_TYPES_RDNA3, 4: PACKET_TYPES_RDNA4}[layout].items():
       with self.subTest(packet=pkt_cls.__name__):
         self.assertEqual((pkt_cls.encoding.mask, pkt_cls.encoding.default), encodings[layout - 2][type_id])
 
   def _test_delta_fields(self, layout: int):
     if not (deltas := extract_delta_fields()): self.skipTest("rocprof-trace-decoder not installed")
-    from extra.assembly.amd.sqtt import PACKET_TYPES_L3, PACKET_TYPES_L4
-    for type_id, pkt_cls in {3: PACKET_TYPES_L3, 4: PACKET_TYPES_L4}[layout].items():
+    from extra.assembly.amd.sqtt import PACKET_TYPES_RDNA3, PACKET_TYPES_RDNA4
+    for type_id, pkt_cls in {3: PACKET_TYPES_RDNA3, 4: PACKET_TYPES_RDNA4}[layout].items():
       if type_id not in deltas[layout - 2]: continue
       delta = getattr(pkt_cls, 'delta', None)
       actual = (0, 0) if delta is None else (delta.lo, delta.hi + 1)

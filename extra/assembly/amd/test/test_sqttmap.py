@@ -3,8 +3,7 @@ import unittest, pickle
 from typing import Iterator
 from pathlib import Path
 from tinygrad.helpers import DEBUG
-from extra.assembly.amd.sqtt import print_packets
-from extra.assembly.amd.sqttmap import map_insts
+from extra.assembly.amd.sqtt import print_packets, map_insts
 from extra.assembly.amd.autogen.rdna3.ins import s_endpgm
 from extra.assembly.amd.test.disasm import disasm
 
