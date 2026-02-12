@@ -3,7 +3,7 @@ from typing import Callable, cast
 import functools
 from dataclasses import dataclass, field
 from tinygrad.helpers import to_function_name, dedup, prod, DEBUG
-from tinygrad.uop.ops import Ops, UOp, sym_infer, sint, Variable, ssimplify, GroupOp, PatternMatcher, print_uops, KernelInfo
+from tinygrad.uop.ops import Ops, UOp, sym_infer, sint, Variable, ssimplify, smin, GroupOp, PatternMatcher, print_uops, KernelInfo
 from tinygrad.dtype import AddrSpace, PtrDType
 from tinygrad.codegen.opt.tc import TensorCore
 from tinygrad.codegen.opt import Opt
@@ -42,8 +42,10 @@ class Estimates:
       if u.op in {Ops.LOAD, Ops.STORE}:
         buf = u
         while len(buf.src): buf = buf.src[0]
-        if buf.op is Ops.PARAM: # assume all DEFINE_GLOBAL memory is accessed
-          mem[(buf, u.op)] = buf.ptrdtype.size * buf.dtype.itemsize
+        if buf.op is Ops.PARAM:
+          # u.src[0] is INDEX, cap at buffer size for re-reads (e.g. matmul)
+          accessed = mem.get((buf, u.op), 0) + u.src[0].dtype.base.itemsize * mults
+          mem[(buf, u.op)] = smin(accessed, buf.ptrdtype.nbytes()) if buf.ptrdtype.size != -1 else accessed
       if u.op is Ops.RANGE:
         mult_stack.append(mults)
         mults *= cast(sint, u.src[0].ssimplify())
