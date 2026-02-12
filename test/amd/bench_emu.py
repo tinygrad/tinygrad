@@ -3,9 +3,6 @@
 import ctypes, time, os
 from pathlib import Path
 
-# Set AMD=1 before importing tinygrad
-os.environ["AMD"] = "1"
-
 from tinygrad.renderer.amd.emu import run_asm as python_run_asm, decode_program
 from tinygrad.renderer.amd import decode_inst
 from tinygrad.runtime.autogen.amd.rdna3.ins import SOPP, SOPPOp
@@ -266,4 +263,5 @@ def main():
     print(f"{name:<16} {n_insts:<6} {n_compiled:<6} {n_wgs:<5} {compile_ms:<14} {exec_ms:<12} {rust_ms:<12} {speedup:<10}")
 
 if __name__ == "__main__":
+  os.environ["AMD"] = "1"
   main()

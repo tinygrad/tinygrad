@@ -55,6 +55,7 @@ def custom_add_var(A:UOp, B:UOp, arch:str) -> UOp:
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg="AMD"), UOp(Ops.LINEAR, src=(*sink.src, sink)),
                                *assemble_insts(insts, name, arch, kernarg_size=16)))
 
+@unittest.skipUnless(Device.DEFAULT == "AMD", "requires AMD device")
 class TestCustomKernel(unittest.TestCase):
   def test_simple(self):
     a = Tensor.full((16, 16), 1.).contiguous().realize()

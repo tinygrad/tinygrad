@@ -1,6 +1,7 @@
 # Test to compare Python and Rust RDNA3 emulators by running real tinygrad kernels
 import unittest, ctypes
 from dataclasses import dataclass
+from tinygrad import Device
 
 from tinygrad.renderer.amd.emu import WaveState, decode_program, WAVE_SIZE, VCC_LO, EXEC_LO, SCC
 from tinygrad.renderer.amd import decode_inst
@@ -400,6 +401,7 @@ def get_kernel_from_tinygrad(op_fn) -> tuple[bytes, tuple[int, int, int], tuple[
   k = kernels[-1]
   return k.code, k.global_size, k.local_size, k.buf_sizes
 
+@unittest.skipUnless(Device.DEFAULT == "AMD", "requires AMD device")
 class TestTinygradKernels(unittest.TestCase):
   """Compare emulators on real tinygrad-compiled kernels."""
 
