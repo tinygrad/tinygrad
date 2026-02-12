@@ -8,9 +8,11 @@ from tinygrad.runtime.support.hcq import MMIOInterface, BumpAllocator, hcq_filte
 from tinygrad.uop.ops import sint
 from tinygrad.device import Compiled, DMAFdRef, BufferSpec, CompilerSet
 from tinygrad.helpers import getenv, round_up, data64_le, DEBUG, PROFILE, ProfileEvent, lo32, hi32, colored, prod, ContextVar
-from tinygrad.helpers import VIZ, AMD_CC, AMD_LLVM, AMD_HIPCC, ceildiv, unwrap
+from tinygrad.helpers import VIZ, AMD_CC, AMD_LLVM, AMD_HIPCC, AMD_ISEL, AMD_ASM, ceildiv, unwrap
 from tinygrad.renderer.cstyle import AMDHIPRenderer, AMDHIPCCRenderer
 from tinygrad.renderer.llvmir import AMDLLVMRenderer
+from extra.assembly.amd.isel import AMDISELRenderer
+from extra.assembly.amd.renderer import AMDAssemblyRenderer
 from tinygrad.runtime.autogen import kfd, hsa, pci, sqtt, amdgpu_kd, amdgpu_drm
 from tinygrad.runtime.autogen.am import am
 from tinygrad.runtime.support.elf import elf_loader
@@ -970,7 +972,9 @@ class AMDDevice(HCQCompiled):
 
     compilers = CompilerSet([(functools.partial(AMDHIPRenderer, self.arch), None),
                              (functools.partial(AMDLLVMRenderer, self.arch), AMD_LLVM),
-                             (functools.partial(AMDHIPCCRenderer, self.arch), AMD_HIPCC)], ctrl_var=AMD_CC)
+                             (functools.partial(AMDHIPCCRenderer, self.arch), AMD_HIPCC),
+                             (functools.partial(AMDISELRenderer, self.arch), AMD_ISEL),
+                             (functools.partial(AMDAssemblyRenderer, self.arch), AMD_ASM)], ctrl_var=AMD_CC)
 
     super().__init__(device, AMDAllocator(self), compilers, functools.partial(AMDProgram, self), AMDSignal,
                      functools.partial(AMDComputeAQLQueue if self.is_aql else AMDComputeQueue, self),
