@@ -31,8 +31,8 @@ class MetalGraph(GraphRunner):
 
     self.fixedvars = merge_dicts([ji.fixedvars for ji in jit_cache])
     self.varlist = self.vars + list(self.fixedvars.keys())
-    self.varlist_idxs = {}
-    for i,v in enumerate(self.varlist): self.varlist_idxs.setdefault(v, i)
+    self.varlist_idxs: dict[str, int] = {}
+    for i,var_name in enumerate(self.varlist): self.varlist_idxs.setdefault(var_name, i)
     if len(self.varlist): self.int_buf = self.dev.allocator.alloc(len(self.varlist)*dtypes.int32.itemsize)
 
     all_pipelines, all_resources = [], [self.int_buf.buf] if len(self.varlist) else []
@@ -45,7 +45,7 @@ class MetalGraph(GraphRunner):
         if b is not None and (j,i) not in self.input_replace:
           icb_command.setKernelBuffer_offset_atIndex(b._buf.buf, b._buf.offset, i)
           all_resources.append(b._buf.buf)
-      for i,v in enumerate(prg.p.vars): icb_command.setKernelBuffer_offset_atIndex(self.int_buf.buf, self.varlist_idxs[v.expr]*4, len(ji.bufs)+i)
+      for i,var in enumerate(prg.p.vars): icb_command.setKernelBuffer_offset_atIndex(self.int_buf.buf, self.varlist_idxs[var.expr]*4, len(ji.bufs)+i)
 
       global_size, local_size = prg.p.launch_dims(var_vals)
       icb_command.concurrentDispatchThreadgroups_threadsPerThreadgroup(metal.MTLSize(*global_size), metal.MTLSize(*local_size))
@@ -55,7 +55,7 @@ class MetalGraph(GraphRunner):
     self.all_pipelines = dedup(all_pipelines)
     self.command_buffer: Any = None
     if len(self.varlist): self.int_buf_view = self.dev.allocator._as_buffer(self.int_buf).cast('i')
-    for var in self.fixedvars: self.int_buf_view[self.varlist_idxs[var]] = self.fixedvars[var]
+    for var_name in self.fixedvars: self.int_buf_view[self.varlist_idxs[var_name]] = self.fixedvars[var_name]
     self.range = metal.NSRange(0, len(jit_cache))
 
   def __call__(self, input_buffers: list[Buffer], var_vals: dict[str, int], wait=False) -> float|None:
@@ -71,7 +71,7 @@ class MetalGraph(GraphRunner):
     for j, global_dims, local_dims in self.updated_launch_dims(var_vals):
       computeCommand = self.icb.indirectComputeCommandAtIndex(j)
       computeCommand.concurrentDispatchThreadgroups_threadsPerThreadgroup(metal.MTLSize(*global_dims), metal.MTLSize(*local_dims))
-    for var in self.vars: self.int_buf_view[self.varlist_idxs[var]] = var_vals[var]
+    for var_name in self.vars: self.int_buf_view[self.varlist_idxs[var_name]] = var_vals[var_name]
 
     command_buffer = self.dev.mtl_queue.commandBuffer().retained()
     encoder = command_buffer.computeCommandEncoder().retained()
