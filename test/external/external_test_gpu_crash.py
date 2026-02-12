@@ -36,7 +36,9 @@ class TestGPUCrash(unittest.TestCase):
     prg = AMDProgram(self.dev, "test", self.compiler.compile(assemble(code)))
     prg(self.dev.allocator.alloc(64), global_size=(1,1,1), local_size=(1,1,1), wait=True)
 
-  def _run_insts(self, insts: list[Inst]): self._run("\n".join(i.disasm() for i in insts))
+  def _run_insts(self, insts: list[Inst]):
+    from extra.assembly.amd.test.disasm import disasm
+    self._run("\n".join(disasm(i) for i in insts))
 
   def _assert_gpu_fault(self, func):
     """Assert that func raises a RuntimeError indicating a GPU fault (not a setup error)."""

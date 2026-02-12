@@ -2,6 +2,7 @@
 import unittest, subprocess
 from extra.assembly.amd.autogen.rdna3.ins import *
 from extra.assembly.amd.test.helpers import get_llvm_mc
+from extra.assembly.amd.test.disasm import disasm
 
 def llvm_assemble(asm: str) -> bytes:
   """Assemble using llvm-mc and return bytes."""
@@ -67,7 +68,7 @@ global_store_b32 v[0:1], v2, off
 s_endpgm
 """
     expected = llvm_assemble(asm)
-    for inst,rt in zip(program, asm.strip().split("\n")): print(f"{inst.disasm():50s} {rt}")
+    for inst,rt in zip(program, asm.strip().split("\n")): print(f"{disasm(inst):50s} {rt}")
     actual = b''.join(inst.to_bytes() for inst in program)
     self.assertEqual(actual, expected)
 

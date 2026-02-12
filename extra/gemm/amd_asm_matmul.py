@@ -192,7 +192,8 @@ class Kernel:
       inst.simm16 = offset_dwords
 
     # TODO: replace this with direct ELF
-    body = ['\t' + inst.disasm() for inst in self.instructions]
+    from extra.assembly.amd.test.disasm import disasm
+    body = ['\t' + disasm(inst) for inst in self.instructions]
 
     # limit wave occupancy by using more LDS
     lds_size = max(LDS_SIZE, 65536//getenv("LIMIT_OCC", 65536))

@@ -5,7 +5,8 @@ from extra.assembly.amd.dsl import s, v, Inst, NULL
 
 def assemble_kernel(insts:list[Inst], name:str="test") -> str:
   kd = {"next_free_vgpr": 8, "next_free_sgpr": 8, "wavefront_size32": 1, "user_sgpr_kernarg_segment_ptr": 1, "kernarg_size": 8}
-  disasm = "\n".join(inst.disasm() for inst in insts)
+  from extra.assembly.amd.test.disasm import disasm as _disasm
+  disasm = "\n".join(_disasm(inst) for inst in insts)
   hsasrc = f".text\n.globl {name}\n.p2align 8\n.type {name},@function\n{name}:\n{disasm}\n"
   return hsasrc + f".rodata\n.p2align 6\n.amdhsa_kernel {name}\n" + "\n".join(f".amdhsa_{k} {v}" for k, v in kd.items()) + "\n.end_amdhsa_kernel"
 
