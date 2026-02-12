@@ -51,12 +51,12 @@ def _emit_obj(asm_text:str, mcpu:str, mattr:str, diag_errors:list[str]|None=None
   tm = _create_target_machine(mcpu, mattr)
   ctx = llvm.LLVMContextCreate()
   try:
-    if diag_errors is not None:
-      @llvm.LLVMDiagnosticHandler
-      def handle_diag(diag_ref, _arg):
-        if llvm.LLVMGetDiagInfoSeverity(diag_ref) == llvm.LLVMDSError:
-          diag_errors.append(ctypes.string_at(llvm.LLVMGetDiagInfoDescription(diag_ref)).decode())
-      llvm.LLVMContextSetDiagnosticHandler(ctx, handle_diag, None)
+    errors = diag_errors if diag_errors is not None else []
+    @llvm.LLVMDiagnosticHandler
+    def handle_diag(diag_ref, _arg):
+      if llvm.LLVMGetDiagInfoSeverity(diag_ref) == llvm.LLVMDSError:
+        errors.append(ctypes.string_at(llvm.LLVMGetDiagInfoDescription(diag_ref)).decode())
+    llvm.LLVMContextSetDiagnosticHandler(ctx, handle_diag, None)
     mod = llvm.LLVMModuleCreateWithNameInContext(b'asm', ctx)
     llvm.LLVMSetTarget(mod, b'amdgcn-amd-amdhsa')
     asm_bytes = asm_text.encode()
