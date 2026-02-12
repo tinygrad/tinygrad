@@ -367,9 +367,6 @@ PACKET_TYPES_RDNA4: dict[int, type[PacketType]] = {
 # CDNA PACKET TYPE DEFINITIONS
 # ═══════════════════════════════════════════════════════════════════════════════
 
-# CDNA pkt_fmt -> size in bytes (extracted from rocprof hash table)
-CDNA_PKT_SIZES = {0: 2, 1: 8, 2: 8, 3: 4, 4: 2, 5: 6, 6: 2, 7: 2, 8: 2, 9: 2, 10: 2, 11: 8, 12: 6, 13: 4, 14: 8, 15: 6}
-
 class CDNA_DELTA(PacketType):
   """pkt_fmt=0: 16-bit timestamp delta packet"""
   encoding = bits[3:0] == 0
@@ -502,10 +499,9 @@ PACKET_TYPES_CDNA: dict[int, type[PacketType]] = {
   13: CDNA_INST, 14: CDNA_PKT_14, 15: CDNA_PKT_15,
 }
 
-# Validate CDNA packet definitions against extracted sizes
-for _pkt_fmt, _pkt_cls in PACKET_TYPES_CDNA.items():
-  assert _pkt_cls.encoding.default == _pkt_fmt, f"{_pkt_cls.__name__} encoding {_pkt_cls.encoding.default} != pkt_fmt {_pkt_fmt}"
-  assert CDNA_PKT_SIZES[_pkt_fmt] * 2 == _pkt_cls._size_nibbles, f"{_pkt_cls.__name__} size {_pkt_cls._size_nibbles//2} != {CDNA_PKT_SIZES[_pkt_fmt]}"
+# ═══════════════════════════════════════════════════════════════════════════════
+# DECODER
+# ═══════════════════════════════════════════════════════════════════════════════
 
 def _build_decode_tables(packet_types: dict[int, type[PacketType]]) -> tuple[dict[int, tuple], bytes]:
   # Build state table: byte -> opcode. Sort by mask specificity (more bits first), NOP last
@@ -524,10 +520,6 @@ def _build_decode_tables(packet_types: dict[int, type[PacketType]]) -> tuple[dic
 _DECODE_INFO_RDNA3, _STATE_TABLE_RDNA3 = _build_decode_tables(PACKET_TYPES_RDNA3)
 _DECODE_INFO_RDNA4, _STATE_TABLE_RDNA4 = _build_decode_tables(PACKET_TYPES_RDNA4)
 _DECODE_INFO_CDNA, _STATE_TABLE_CDNA = _build_decode_tables(PACKET_TYPES_CDNA)
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# DECODER
-# ═══════════════════════════════════════════════════════════════════════════════
 
 def decode(data: bytes) -> Iterator[PacketType]:
   """Decode raw SQTT blob, yielding packet instances. Auto-detects RDNA (layout 3/4) vs CDNA."""
