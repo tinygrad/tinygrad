@@ -212,13 +212,8 @@ class TestSQTTExamplesRDNA3(SQTTExamplesTestBase):
   }
 
 class TestSQTTExamplesRDNA4(SQTTExamplesTestBase): target = "gfx1200"
-# CDNA/MI300 (gfx950) uses a completely different 16-bit header packet format, not the nibble-based format.
-# See decode_tt_header_stream in ghidra/librocprof-trace-decoder.c - it reads 16-bit headers and uses
-# pkt_fmt = header & 0xf to look up packet_class (0x10=2bytes, 0x20=4bytes, 0x30=6bytes, 0x40=8bytes).
-# This is NOT implemented yet - the nibble decoder produces garbage for CDNA data.
-@unittest.skip("CDNA/MI300 uses 16-bit header format, not nibble-based - decoder not implemented")
-class TestSQTTExamplesCDNA(SQTTExamplesTestBase):
-  target = "gfx950"
+@unittest.skip("TODO: fix CDNA")
+class TestSQTTExamplesCDNA(SQTTExamplesTestBase): target = "gfx950"
 
 if __name__ == "__main__":
   unittest.main()

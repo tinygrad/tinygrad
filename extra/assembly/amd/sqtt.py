@@ -362,30 +362,177 @@ PACKET_TYPES_RDNA4: dict[int, type[PacketType]] = {
   7: TS_DELTA_S8_W3_RDNA4, 9: WAVESTART_RDNA4, 10: TS_DELTA_S5_W2_RDNA4, 11: WAVEALLOC_RDNA4,
   12: TS_DELTA_S5_W3_RDNA4, 13: PERF_RDNA4, 22: TS_DELTA_OR_MARK_RDNA4, 24: INST_RDNA4,
 }
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# CDNA PACKET TYPE DEFINITIONS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# CDNA pkt_fmt -> size in bytes (extracted from rocprof hash table)
+CDNA_PKT_SIZES = {0: 2, 1: 8, 2: 8, 3: 4, 4: 2, 5: 6, 6: 2, 7: 2, 8: 2, 9: 2, 10: 2, 11: 8, 12: 6, 13: 4, 14: 8, 15: 6}
+
+class CDNA_DELTA(PacketType):
+  """pkt_fmt=0: 16-bit timestamp delta packet"""
+  encoding = bits[3:0] == 0
+  delta = bits[11:4]      # (data >> 4) & 0xff
+  unk_0 = bits[12:12]     # (data >> 0xc) & 1
+  unk_1 = bits[15:13]     # (data >> 0xd)
+
+class CDNA_TIMESTAMP(PacketType):
+  """pkt_fmt=1: 64-bit timestamp packet (case 0x0)"""
+  encoding = bits[3:0] == 1
+  unk_0 = bits[15:4]
+  timestamp = bits[63:16]   # stored as (data_word >> 0x10) in low 46 bits of local_58
+
+class CDNA_PKT_2(PacketType):
+  """pkt_fmt=2: 64-bit packet (case 0x4)"""
+  encoding = bits[3:0] == 2
+  unk_0 = bits[6:5]       # (data >> 5) & 3
+  unk_1 = bits[7:7]       # (data >> 7) + 1 & 1
+  unk_padding = bits[63:8]
+
+class CDNA_WAVESTART(PacketType):
+  """pkt_fmt=3: 32-bit WAVESTART packet (case 0x8)"""
+  encoding = bits[3:0] == 3
+  unk_0 = bits[5:5]       # (data >> 5) & 1
+  unk_1 = bits[9:6]       # (data >> 6) & 0xf
+  wave = bits[13:10]      # (data >> 10) & 0xf
+  simd = bits[15:14]      # (data >> 0xe) & 3
+  cu = bits[17:16]        # (data >> 0x10) & 3
+  unk_5 = bits[19:18]     # (data >> 0x12) & 3
+  unk_6 = bits[28:22]     # (data >> 0x16) & 0x7f
+  unk_padding = bits[31:29]
+
+class CDNA_PKT_4(PacketType):
+  """pkt_fmt=4: 16-bit packet (case 0xc, same as 0x8/0x14)"""
+  encoding = bits[3:0] == 4
+  unk_0 = bits[5:5]       # (data_word >> 5) & 1
+  unk_1 = bits[9:6]       # (data_word >> 6) & 0xf
+  unk_2 = bits[13:10]     # (data_word >> 10) & 0xf
+  unk_3 = bits[15:14]     # (data_word >> 0xe)
+
+class CDNA_PKT_5(PacketType):
+  """pkt_fmt=5: 48-bit packet (case 0x10)"""
+  encoding = bits[3:0] == 5
+  unk_0 = bits[6:5]       # (data >> 5) & 3
+  unk_1 = bits[7:7]       # (data >> 7) + 1 & 1
+  unk_2 = bits[15:9]      # (data >> 9) & 0x7f
+  unk_padding = bits[47:16]
+
+class CDNA_WAVEEND(PacketType):
+  """pkt_fmt=6: 16-bit WAVEEND packet (case 0x14, same as 0x8/0xc)"""
+  encoding = bits[3:0] == 6
+  unk_0 = bits[5:5]       # (data_word >> 5) & 1
+  unk_1 = bits[9:6]       # (data_word >> 6) & 0xf
+  wave = bits[13:10]      # (data_word >> 10) & 0xf
+  simd = bits[15:14]      # (data_word >> 0xe)
+
+class CDNA_EXEC(PacketType):
+  """pkt_fmt=10: 16-bit EXEC packet (case 0x24)"""
+  encoding = bits[3:0] == 10
+  unk_0 = bits[8:5]       # (data_word >> 5) & 0xf
+  unk_1 = bits[10:9]      # (data_word >> 9) & 3
+  unk_2 = bits[15:11]     # (data_word >> 0xb)
+
+class CDNA_PKT_11(PacketType):
+  """pkt_fmt=11: 64-bit packet (case 0x28)"""
+  encoding = bits[3:0] == 11
+  unk_0 = bits[8:5]       # (data_word >> 5) & 0xf
+  unk_1 = bits[10:9]      # (data_word >> 9) & 3
+  unk_2 = bits[15:15]     # (data_word >> 0xf) & 1
+  unk_padding = bits[63:16]
+
+class CDNA_INST(PacketType):
+  """pkt_fmt=13: 32-bit INST packet (case 0x30)"""
+  encoding = bits[3:0] == 13
+  unk_0 = bits[6:5]       # (data >> 5) & 3
+  unk_1 = bits[9:8]       # (data >> 8) & 3
+  unk_2 = bits[11:10]     # (data >> 10) & 3
+  unk_3 = bits[13:12]     # (data >> 0xc) & 3
+  unk_4 = bits[15:14]     # (data >> 0xe) & 3
+  unk_5 = bits[19:18]     # (data >> 0x12) & 3
+  unk_6 = bits[21:20]     # (data >> 0x14) & 3
+  unk_7 = bits[23:22]     # (data >> 0x16) & 3
+  unk_8 = bits[25:24]     # (data >> 0x18) & 3
+  unk_9 = bits[27:26]     # (data >> 0x1a) & 3
+  unk_padding = bits[31:28]
+
+class CDNA_PKT_14(PacketType):
+  """pkt_fmt=14: 64-bit packet (case 0x34)"""
+  encoding = bits[3:0] == 14
+  unk_0 = bits[5:5]       # (data >> 5) & 1
+  unk_1 = bits[9:6]       # (data >> 6) & 0xf
+  unk_2 = bits[11:10]     # (data >> 10) & 3
+  unk_3 = bits[24:12]     # (data >> 0xc) & 0x1fff
+  unk_4 = bits[37:25]     # (data >> 0x19) & 0x1fff
+  unk_5 = bits[50:38]     # (data >> 0x26) & 0x1fff
+  unk_6 = bits[51:51]     # (data >> 0x33) & 1
+  unk_padding = bits[63:52]
+
+class CDNA_PKT_7(PacketType):
+  """pkt_fmt=7: 16-bit packet"""
+  encoding = bits[3:0] == 7
+  unk_padding = bits[15:4]
+
+class CDNA_PKT_8(PacketType):
+  """pkt_fmt=8: 16-bit packet"""
+  encoding = bits[3:0] == 8
+  unk_padding = bits[15:4]
+
+class CDNA_PKT_9(PacketType):
+  """pkt_fmt=9: 16-bit packet"""
+  encoding = bits[3:0] == 9
+  unk_padding = bits[15:4]
+
+class CDNA_PKT_12(PacketType):
+  """pkt_fmt=12: 48-bit packet"""
+  encoding = bits[3:0] == 12
+  unk_padding = bits[47:4]
+
+class CDNA_PKT_15(PacketType):
+  """pkt_fmt=15: 48-bit packet (case 0x38, same as 0x10)"""
+  encoding = bits[3:0] == 15
+  unk_0 = bits[6:5]       # (data >> 5) & 3
+  unk_1 = bits[7:7]       # (data >> 7) + 1 & 1
+  unk_2 = bits[15:9]      # (data >> 9) & 0x7f
+  unk_padding = bits[47:16]
+
+PACKET_TYPES_CDNA: dict[int, type[PacketType]] = {
+  0: CDNA_DELTA, 1: CDNA_TIMESTAMP, 2: CDNA_PKT_2, 3: CDNA_WAVESTART, 4: CDNA_PKT_4, 5: CDNA_PKT_5, 6: CDNA_WAVEEND,
+  7: CDNA_PKT_7, 8: CDNA_PKT_8, 9: CDNA_PKT_9, 10: CDNA_EXEC, 11: CDNA_PKT_11, 12: CDNA_PKT_12,
+  13: CDNA_INST, 14: CDNA_PKT_14, 15: CDNA_PKT_15,
+}
+
+# Validate CDNA packet definitions against extracted sizes
+for _pkt_fmt, _pkt_cls in PACKET_TYPES_CDNA.items():
+  assert _pkt_cls.encoding.default == _pkt_fmt, f"{_pkt_cls.__name__} encoding {_pkt_cls.encoding.default} != pkt_fmt {_pkt_fmt}"
+  assert CDNA_PKT_SIZES[_pkt_fmt] * 2 == _pkt_cls._size_nibbles, f"{_pkt_cls.__name__} size {_pkt_cls._size_nibbles//2} != {CDNA_PKT_SIZES[_pkt_fmt]}"
+
 def _build_decode_tables(packet_types: dict[int, type[PacketType]]) -> tuple[dict[int, tuple], bytes]:
   # Build state table: byte -> opcode. Sort by mask specificity (more bits first), NOP last
   sorted_types = sorted(packet_types.items(), key=lambda x: (-bin(x[1].encoding.mask).count('1'), x[0] == 16))
   state_table = bytes(next((op for op, cls in sorted_types if (b & cls.encoding.mask) == cls.encoding.default), 16) for b in range(256))
   # Build decode info: opcode -> (pkt_cls, nib_count, delta_lo, delta_mask, special_case)
-  # special_case: 0=none, 1=TS_DELTA_OR_MARK (check is_marker), 2=TS_DELTA_SHORT (add 8)
+  # special_case: 0=none, 1=TS_DELTA_OR_MARK (check is_marker), 2=TS_DELTA_SHORT (add 8), 3=CDNA_DELTA (*4), 4=CDNA_TIMESTAMP (absolute)
+  _special = {TS_DELTA_OR_MARK: 1, TS_DELTA_OR_MARK_RDNA4: 1, TS_DELTA_SHORT: 2, CDNA_DELTA: 3, CDNA_TIMESTAMP: 4}
   decode_info = {}
   for opcode, pkt_cls in packet_types.items():
     delta_field = getattr(pkt_cls, 'delta', None)
-    special = {22: 1, 15: 2}.get(opcode, 0)  # TS_DELTA_OR_MARK=22, TS_DELTA_SHORT=15
+    special = _special.get(pkt_cls, 0)
     decode_info[opcode] = (pkt_cls, pkt_cls._size_nibbles, delta_field.lo if delta_field else 0, delta_field.mask if delta_field else 0, special)
   return decode_info, state_table
 
 _DECODE_INFO_RDNA3, _STATE_TABLE_RDNA3 = _build_decode_tables(PACKET_TYPES_RDNA3)
 _DECODE_INFO_RDNA4, _STATE_TABLE_RDNA4 = _build_decode_tables(PACKET_TYPES_RDNA4)
+_DECODE_INFO_CDNA, _STATE_TABLE_CDNA = _build_decode_tables(PACKET_TYPES_CDNA)
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # DECODER
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def decode(data: bytes) -> Iterator[PacketType]:
-  """Decode raw SQTT blob, yielding packet instances. Auto-detects layout from LAYOUT_HEADER."""
-  n, reg, pos, nib_off, nib_count, time = len(data), 0, 0, 0, 16, 0
-  decode_info, state_table = _DECODE_INFO_RDNA3, _STATE_TABLE_RDNA3  # default to layout 3, will update after seeing LAYOUT_HEADER
+  """Decode raw SQTT blob, yielding packet instances. Auto-detects RDNA (layout 3/4) vs CDNA."""
+  n, reg, pos, nib_off, nib_count, time, ts_offset = len(data), 0, 0, 0, 16, 0, None
+  decode_info, state_table = _DECODE_INFO_RDNA3, _STATE_TABLE_RDNA3  # start RDNA3, auto-detect switches if needed
 
   while pos + ((nib_count + nib_off + 1) >> 1) <= n:
     need = nib_count - nib_off
@@ -405,12 +552,25 @@ def decode(data: bytes) -> Iterator[PacketType]:
       pkt = pkt_cls.from_raw(reg, 0)  # create packet to check is_marker
       if pkt.is_marker: delta = 0
     elif special == 2: delta += 8  # TS_DELTA_SHORT
+    elif special == 3: delta *= 4  # CDNA_DELTA
+    elif special == 4:  # CDNA_TIMESTAMP (absolute timestamp anchoring)
+      if (reg >> 4) & 0xfff == 0:  # unk_0 == 0 means absolute timestamp
+        abs_ts = reg >> 16
+        if ts_offset is None: ts_offset = abs_ts - time
+        else: time = ((abs_ts - ts_offset) & ~3) - 4
+      delta = 0
     time += delta
     pkt = pkt_cls.from_raw(reg, time)
-    # detect layout from first LAYOUT_HEADER and switch decode tables if needed
-    # NOTE: CDNA uses a completely different 16-bit header format, not nibbles - not supported here
-    if pkt_cls is LAYOUT_HEADER and pkt.layout == 4:
-      decode_info, state_table = _DECODE_INFO_RDNA4, _STATE_TABLE_RDNA4
+    # auto-detect: first packet is always LAYOUT_HEADER (RDNA layout 3/4) or misdetected (CDNA)
+    if pkt_cls is LAYOUT_HEADER:
+      if pkt.layout == 4: decode_info, state_table = _DECODE_INFO_RDNA4, _STATE_TABLE_RDNA4
+      elif pkt.layout != 3:  # not a real LAYOUT_HEADER — switch to CDNA and re-decode first packet
+        decode_info, state_table = _DECODE_INFO_CDNA, _STATE_TABLE_CDNA
+        opcode = state_table[reg & 0xFF]
+        pkt_cls, nib_count, delta_lo, delta_mask, special = decode_info[opcode]
+        if special == 4 and (reg >> 4) & 0xfff == 0:  # CDNA_TIMESTAMP absolute
+          ts_offset = (reg >> 16) - time
+        pkt = pkt_cls.from_raw(reg, time)
     yield pkt
 
 # ═══════════════════════════════════════════════════════════════════════════════
