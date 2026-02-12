@@ -1,10 +1,11 @@
 from __future__ import annotations
 from typing import Any, Callable, cast, TYPE_CHECKING, Type, Sequence, Iterable, Final, Iterator
-import sys, time, functools, itertools, math, operator, hashlib, os, types, pickle, pathlib, inspect, weakref, collections
+import sys, time, functools, itertools, math, operator, hashlib, os, types, pickle, pathlib, inspect, weakref, collections, struct
 from dataclasses import dataclass
 from enum import Enum, auto
 from tinygrad.uop import Ops, GroupOp
 from tinygrad.dtype import ConstType, ImageDType, dtypes, DType, truncate, PtrDType, least_upper_dtype, Invalid, AddrSpace, ConstFloat, PyConst
+from tinygrad.dtype import storage_fmt_for_dtype, to_storage_scalar, from_storage_scalar
 from tinygrad.helpers import ContextVar, all_int, prod, getenv, all_same, Context, partition, temp, unwrap, T, argfix, Metadata, flatten, TRACEMETA
 from tinygrad.helpers import PROFILE, dedup, cdiv, cmod, diskcache_put, to_function_name, cpu_profile, TracingKey, VIZ, SPEC
 from tinygrad.helpers import strip_parens, colored, ansilen, printable, panic
@@ -1328,6 +1329,16 @@ def strip_binary_parens(x:UOp, left:str, right:str, code_for_op) -> str:
   return code_for_op(strip_parens(left) if precedence.get(x.src[0].op,99)<=precedence[x.op] else left, strip_parens(right) if
     precedence.get(x.src[1].op,99)<precedence[x.op] else right)
 
+def bitcast(x, in_dtype:DType, out_dtype:DType):
+  assert in_dtype.itemsize == out_dtype.itemsize, "bitcast itemsize mismatch"
+  in_count, out_count = in_dtype.count, out_dtype.count
+  in_vals = (x,) if in_count == 1 else tuple(x)
+  assert len(in_vals) == in_count, f"bitcast expected {in_count} values, got {len(in_vals)}"
+  packed = struct.pack(f"{in_count}{storage_fmt_for_dtype(in_dtype.scalar())}", *[to_storage_scalar(v, in_dtype.scalar()) for v in in_vals])
+  out_vals = struct.unpack(f"{out_count}{storage_fmt_for_dtype(out_dtype.scalar())}", packed)
+  ret = tuple(from_storage_scalar(v, out_dtype.scalar()) for v in out_vals)
+  return ret[0] if out_count == 1 else ret
+
 renderer = PatternMatcher([
   (UPat((Ops.DEFINE_VAR,), name="x"), lambda x: x.arg[0]),
   (UPat((Ops.SPECIAL), name="x"), lambda x: x.arg),
@@ -1351,6 +1362,7 @@ renderer = PatternMatcher([
 renderer_infer = PatternMatcher([
   (UPat(Ops.MOD, name="x"), lambda ctx,x: f"cmod({ctx[x.src[0]]}, {ctx[x.src[1]]})"),
   (UPat(Ops.IDIV, name="x"), lambda ctx,x: f"cdiv({ctx[x.src[0]]}, {ctx[x.src[1]]})"),
+  (UPat(Ops.BITCAST, name="x"), lambda ctx,x: f"bitcast({ctx[x.src[0]]}, {x.src[0].dtype!r}, {x.dtype!r})"),
 ]) + renderer
 
 # *** pyrender ***
