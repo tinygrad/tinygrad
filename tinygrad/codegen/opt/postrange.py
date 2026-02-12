@@ -353,23 +353,16 @@ def apply_opts(ast:UOp, ren:Renderer) -> UOp:
       k = hand_coded_optimizations(k)
   return k.get_optimized_ast(name_override=ast.arg.name if ast.arg is not None and ast.arg.name != "test" else None)
 
-# create image buffers
-def make_images(ast:UOp, ren:Renderer) -> UOp:
-  if IMAGE == 1 and ren.device in {"QCOM", "CL"}:
-    dg_types: dict = {}
-    def make_image(ctx, dg):
-      if (dt:=dg.dtype).base is dtypes.float and not isinstance(dt, ImageDType) and dt.size < 65536 and dt.nbytes() % 64 == 0:
-        ctx[dg.arg] = dt
-        return dg.replace(dtype=dtypes.imagef((1, dt.size // 4, 4), dt.nbytes()))
+def _valid_image_dt(dt): return dt.base in (dtypes.half, dtypes.float) and not isinstance(dt, ImageDType) and dt.size <= 65536 and dt.nbytes()%64 == 0
+def make_image(pa, off, idx):
+  if not idx.tag and _valid_image_dt(dt:=pa.dtype):
+    return idx.replace(src=(pa.replace(dtype=(dtypes.imageh if dt.base==dtypes.half else dtypes.imagef)((1, dt.size // 4, 4), dt.nbytes())), off),
+                       dtype=dtypes.float if dt.base == dtypes.half else idx.dtype)
 
-    ast = graph_rewrite(ast, PatternMatcher([(UPat(Ops.PARAM, name="dg"), make_image)]), ctx=dg_types, name="create image buffers")
-
-    # undo unfoldable stores
-    def undo_image_store(ctx, st, idx, dg):
-      if dg.arg in ctx and not any(c.op is Ops.RANGE and (c.vmax+1)%4 == 0 for c in idx.src[1].get_idx().split_uop(Ops.ADD)):
-        return st.replace(src=(idx.replace(src=(dg.replace(dtype=ctx[dg.arg]),)+idx.src[1:]),)+st.src[1:])
-
-    ast = graph_rewrite(ast, PatternMatcher([
-      (UPat(Ops.PARAM, name="dg").index(UPat(), name="idx").store(UPat(), name="st"), undo_image_store)
-    ]), ctx=dg_types, name="remove unfoldable image stores")
-  return ast
+pm_make_images = PatternMatcher([
+  # ensure we dont create an unfoldable image store
+  (UPat(Ops.STORE, src=(UPat.var("idx"),), allow_any_len=True, name="st"), lambda idx,st:
+   st.replace(src=(idx.rtag(not (is_image:=any(c.op is Ops.RANGE and (c.vmax+1)%4 == 0 for c in idx.src[1].get_idx().split_uop(Ops.ADD)))),
+                   st.src[1].cast(dtypes.float) if _valid_image_dt(idx.src[0].dtype) and is_image else st.src[1]))),
+  (UPat(Ops.INDEX, src=(UPat(Ops.PARAM, name="pa"), UPat.var("off")), name="idx"), make_image),
+])
