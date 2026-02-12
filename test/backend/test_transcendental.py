@@ -190,6 +190,7 @@ class TestTranscendentalVectorized(unittest.TestCase):
 
   @unittest.skipIf(getenv("DSP"), "requires int division")
   @unittest.skipIf(getenv("NV_NAK"), "MUFU.SIN is not accurate enough")
+  @unittest.skipIf(Device.DEFAULT == "WEBGPU" and OSX, "WEBGPU Metal backend is not accurate enough")
   def test_sin_vectorized(self):
     for vec_size in [1,2,3,4,5,127,128]: self._test_vectorized_op(Tensor.sin, np.sin, (-100, 100), vec_size)
 
