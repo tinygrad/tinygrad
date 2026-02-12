@@ -1,14 +1,16 @@
 # RDNA3/RDNA4/CDNA disassembler
 from __future__ import annotations
-import re, struct
+import re
 from typing import Callable
 from extra.assembly.amd.dsl import Inst, Reg
 
 # Special register mappings for disassembly
 SPECIAL_GPRS = {106: 'vcc_lo', 107: 'vcc_hi', 124: 'null', 125: 'm0', 126: 'exec_lo', 127: 'exec_hi',
-                128: '0', 240: '0.5', 241: '-0.5', 242: '1.0', 243: '-1.0', 244: '2.0', 245: '-2.0', 246: '4.0', 247: '-4.0', 248: '0x3e22f983', 253: 'scc'}
+                128: '0', 240: '0.5', 241: '-0.5', 242: '1.0', 243: '-1.0', 244: '2.0', 245: '-2.0',
+                246: '4.0', 247: '-4.0', 248: '0x3e22f983', 253: 'scc'}
 SPECIAL_GPRS_CDNA = {106: 'vcc_lo', 107: 'vcc_hi', 124: 'm0', 126: 'exec_lo', 127: 'exec_hi',
-                     128: '0', 240: '0.5', 241: '-0.5', 242: '1.0', 243: '-1.0', 244: '2.0', 245: '-2.0', 246: '4.0', 247: '-4.0', 248: '0x3e22f983', 253: 'scc',
+                     128: '0', 240: '0.5', 241: '-0.5', 242: '1.0', 243: '-1.0', 244: '2.0', 245: '-2.0',
+                     246: '4.0', 247: '-4.0', 248: '0x3e22f983', 253: 'scc',
                      102: 'flat_scratch_lo', 103: 'flat_scratch_hi', 104: 'xnack_mask_lo', 105: 'xnack_mask_hi',
                      251: 'src_vccz', 252: 'src_execz'}
 SPECIAL_PAIRS = {106: 'vcc', 126: 'exec'}
@@ -70,7 +72,9 @@ def _num_srcs(inst) -> int:
   if any(x in n for x in ('FMA', 'MAD', 'CNDMASK', 'BFE', 'BFI', 'LERP', 'MED3', 'SAD', 'DIV_FMAS', 'DIV_FIXUP', 'DIV_SCALE', 'CUBE')): return 3
   # PERMLANE_VAR ops are 2-source, but PERMLANE (non-VAR) are 3-source
   if 'PERMLANE' in n and '_VAR' not in n: return 3
-  if any(x in n for x in ('_ADD3', '_LSHL_ADD', '_ADD_LSHL', '_LSHL_OR', '_AND_OR', 'OR3_B32', 'AND_OR_B32', 'ALIGNBIT', 'ALIGNBYTE', 'V_PERM_', 'XOR3', 'XAD', 'MULLIT', 'MINMAX', 'MAXMIN', 'MINIMUMMAXIMUM', 'MAXIMUMMINIMUM', 'MINIMUM3', 'MAXIMUM3', 'MIN3', 'MAX3', 'DOT2', 'CVT_PK_U8_F32', 'DOT4', 'DOT8', 'WMMA', 'SWMMAC')): return 3
+  if any(x in n for x in ('_ADD3', '_LSHL_ADD', '_ADD_LSHL', '_LSHL_OR', '_AND_OR', 'OR3_B32', 'AND_OR_B32', 'ALIGNBIT',
+    'ALIGNBYTE', 'V_PERM_', 'XOR3', 'XAD', 'MULLIT', 'MINMAX', 'MAXMIN', 'MINIMUMMAXIMUM', 'MAXIMUMMINIMUM',
+    'MINIMUM3', 'MAXIMUM3', 'MIN3', 'MAX3', 'DOT2', 'CVT_PK_U8_F32', 'DOT4', 'DOT8', 'WMMA', 'SWMMAC')): return 3
   return 2
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -80,13 +84,14 @@ def _num_srcs(inst) -> int:
 from extra.assembly.amd.autogen.rdna3.ins import (VOP1, VOP1_SDST, VOP1_SDST_LIT, VOP1_LIT, VOP2, VOP2_LIT, VOP3, VOP3_SDST, VOP3_SDST_LIT,
   VOP3_LIT, VOP3SD, VOP3SD_LIT, VOP3P, VOP3P_LIT, VOPC, VOPC_LIT, VOPD, VOPD_LIT, VINTERP, SOP1, SOP1_LIT, SOP2, SOP2_LIT, SOPC, SOPC_LIT,
   SOPK, SOPK_LIT, SOPP, SMEM, DS, FLAT, GLOBAL, SCRATCH, VOP2Op, VOPDOp, SOPPOp, HWREG, MSG)
-from extra.assembly.amd.autogen.rdna4.ins import (VOP1 as R4_VOP1, VOP1_SDST as R4_VOP1_SDST, VOP1_SDST_LIT as R4_VOP1_SDST_LIT, VOP1_LIT as R4_VOP1_LIT,
+from extra.assembly.amd.autogen.rdna4.ins import (VOP1 as R4_VOP1, VOP1_SDST as R4_VOP1_SDST,
+  VOP1_SDST_LIT as R4_VOP1_SDST_LIT, VOP1_LIT as R4_VOP1_LIT,
   VOP2 as R4_VOP2, VOP2_LIT as R4_VOP2_LIT, VOP3 as R4_VOP3, VOP3_SDST as R4_VOP3_SDST, VOP3_SDST_LIT as R4_VOP3_SDST_LIT, VOP3_LIT as R4_VOP3_LIT,
   VOP3SD as R4_VOP3SD, VOP3SD_LIT as R4_VOP3SD_LIT, VOP3P as R4_VOP3P, VOP3P_LIT as R4_VOP3P_LIT, VOPC as R4_VOPC, VOPC_LIT as R4_VOPC_LIT,
   VOPD as R4_VOPD, VOPD_LIT as R4_VOPD_LIT, VINTERP as R4_VINTERP, SOP1 as R4_SOP1, SOP1_LIT as R4_SOP1_LIT, SOP2 as R4_SOP2, SOP2_LIT as R4_SOP2_LIT,
   SOPC as R4_SOPC, SOPC_LIT as R4_SOPC_LIT, SOPK as R4_SOPK, SOPK_LIT as R4_SOPK_LIT, SOPP as R4_SOPP, SMEM as R4_SMEM, DS as R4_DS,
   VOPDOp as R4_VOPDOp, HWREG as HWREG_RDNA4, VFLAT as R4_FLAT, VGLOBAL as R4_GLOBAL, VSCRATCH as R4_SCRATCH)
-from extra.assembly.amd.autogen.cdna.ins import FLAT as C_FLAT, HWREG as HWREG_CDNA
+from extra.assembly.amd.autogen.cdna.ins import HWREG as HWREG_CDNA
 
 def _is_cdna(inst: Inst) -> bool: return 'cdna' in inst.__class__.__module__
 def _is_r4(inst: Inst) -> bool: return 'rdna4' in inst.__class__.__module__
@@ -100,9 +105,15 @@ _CDNA_DISASM_ALIASES = {'v_fmac_f64': 'v_mul_legacy_f32', 'v_dot2c_f32_bf16': 'v
 
 def _reg(p: str, b: int, n: int = 1) -> str: return f"{p}{_unwrap(b)}" if n == 1 else f"{p}[{_unwrap(b)}:{_unwrap(b)+n-1}]"
 def _sreg(b: int, n: int = 1) -> str: return _reg("s", _unwrap(b), n)
-def _vreg(b: int, n: int = 1) -> str: b = _unwrap(b); return _reg("v", b - 256 if b >= 256 else b, n)
-def _areg(b: int, n: int = 1) -> str: b = _unwrap(b); return _reg("a", b - 256 if b >= 256 else b, n)  # accumulator registers for GFX90a
-def _ttmp(b, n: int = 1) -> str | None: b = _unwrap(b); return _reg("ttmp", b - 108, n) if 108 <= b <= 123 else None
+def _vreg(b: int, n: int = 1) -> str:
+  b = _unwrap(b)
+  return _reg("v", b - 256 if b >= 256 else b, n)
+def _areg(b: int, n: int = 1) -> str:
+  b = _unwrap(b)
+  return _reg("a", b - 256 if b >= 256 else b, n)  # accumulator registers for GFX90a
+def _ttmp(b, n: int = 1) -> str | None:
+  b = _unwrap(b)
+  return _reg("ttmp", b - 108, n) if 108 <= b <= 123 else None
 
 def _fmt_sdst(v, n: int = 1, cdna: bool = False) -> str:
   v = _unwrap(v)
@@ -130,7 +141,9 @@ def _fmt_v16(v, base: int = 256, hi_thresh: int = 384) -> str:
 
 def _has(op: str, *subs) -> bool: return any(s in op for s in subs)
 def _omod(v: int) -> str: return {1: " mul:2", 2: " mul:4", 3: " div:2"}.get(v, "")
-def _src16(inst, v: int) -> str: v = _unwrap(v); return _fmt_v16(v) if v >= 256 else _lit(inst, v)  # format 16-bit src: vgpr.h/l or literal
+def _src16(inst, v: int) -> str:
+  v = _unwrap(v)
+  return _fmt_v16(v) if v >= 256 else _lit(inst, v)  # format 16-bit src: vgpr.h/l or literal
 def _mods(*pairs) -> str: return " ".join(m for c, m in pairs if c)
 def _fmt_bits(label: str, val: int, count: int) -> str: return f"{label}:[{','.join(str((val >> i) & 1) for i in range(count))}]"
 
@@ -201,7 +214,8 @@ def _disasm_vop2(inst: VOP2) -> str:
   basename = name.replace('_e32', '')
   if cdna and basename in _VOP2_CARRY_OUT: return f"{name}{suf} {inst.vdst.fmt()}, {vcc}, {_lit(inst, inst.src0)}, {inst.vsrc1.fmt()}"
   if cdna and basename in _VOP2_CARRY_INOUT: return f"{name}{suf} {inst.vdst.fmt()}, {vcc}, {_lit(inst, inst.src0)}, {inst.vsrc1.fmt()}, {vcc}"
-  if not cdna and basename in _VOP2_CARRY_INOUT_RDNA: return f"{name}{suf} {inst.vdst.fmt()}, {vcc}, {_lit(inst, inst.src0)}, {inst.vsrc1.fmt()}, {vcc}"
+  if not cdna and basename in _VOP2_CARRY_INOUT_RDNA:
+    return f"{name}{suf} {inst.vdst.fmt()}, {vcc}, {_lit(inst, inst.src0)}, {inst.vsrc1.fmt()}, {vcc}"
   sn0 = inst.canonical_op_regs.get('s0', 1)
   if inst.vdst.sz > 1 or sn0 > 1 or inst.vsrc1.sz > 1:
     src0 = _lit(inst, inst.src0) if inst.src0.offset == 255 else _fmt_src(inst.src0, sn0, cdna)
@@ -217,7 +231,10 @@ def _disasm_vopc(inst: VOPC) -> str:
     return f"{name} vcc, {s0}, {inst.vsrc1.fmt()}"  # CDNA VOPC always outputs vcc
   # RDNA: v_cmpx_* writes to exec (no vcc), v_cmp_* writes to vcc_lo
   has_vcc = 'cmpx' not in name
-  s0 = _lit(inst, inst.src0) if inst.src0.offset == 255 else inst.src0.fmt() if inst.src0.sz > 1 else _src16(inst, inst.src0.offset) if is16 else _lit(inst, inst.src0)
+  if inst.src0.offset == 255: s0 = _lit(inst, inst.src0)
+  elif inst.src0.sz > 1: s0 = inst.src0.fmt()
+  elif is16: s0 = _src16(inst, inst.src0.offset)
+  else: s0 = _lit(inst, inst.src0)
   s1 = inst.vsrc1.fmt() if inst.vsrc1.sz > 1 else _fmt_v16(inst.vsrc1) if is16 else inst.vsrc1.fmt()
   suf = "" if name.endswith('_e32') else "_e32"
   return f"{name}{suf} vcc_lo, {s0}, {s1}" if has_vcc else f"{name}{suf} {s0}, {s1}"
@@ -253,10 +270,11 @@ def _disasm_sopp(inst: SOPP) -> str:
     p = [f"vmcnt({vm})" if vm != 0x3f else "", f"expcnt({exp})" if exp != 7 else "", f"lgkmcnt({lgkm})" if lgkm != 0x3f else ""]
     return f"s_waitcnt {' '.join(x for x in p if x) or '0'}"
   if name == 's_delay_alu':
-    deps = ['VALU_DEP_1','VALU_DEP_2','VALU_DEP_3','VALU_DEP_4','TRANS32_DEP_1','TRANS32_DEP_2','TRANS32_DEP_3','FMA_ACCUM_CYCLE_1','SALU_CYCLE_1','SALU_CYCLE_2','SALU_CYCLE_3']
+    deps = ['VALU_DEP_1','VALU_DEP_2','VALU_DEP_3','VALU_DEP_4','TRANS32_DEP_1','TRANS32_DEP_2',
+            'TRANS32_DEP_3','FMA_ACCUM_CYCLE_1','SALU_CYCLE_1','SALU_CYCLE_2','SALU_CYCLE_3']
     skips = ['SAME','NEXT','SKIP_1','SKIP_2','SKIP_3','SKIP_4']
     id0, skip, id1 = inst.simm16 & 0xf, (inst.simm16 >> 4) & 0x7, (inst.simm16 >> 7) & 0xf
-    dep = lambda v: deps[v-1] if 0 < v <= len(deps) else str(v)
+    def dep(v): return deps[v-1] if 0 < v <= len(deps) else str(v)
     p = [f"instid0({dep(id0)})" if id0 else "", f"instskip({skips[skip]})" if skip else "", f"instid1({dep(id1)})" if id1 else ""]
     return f"s_delay_alu {' | '.join(x for x in p if x) or '0'}"
   if name.startswith(('s_cbranch', 's_branch')): return f"{name} {inst.simm16}"
@@ -267,7 +285,7 @@ def _disasm_smem(inst: SMEM) -> str:
   if name in ('s_gl1_inv', 's_dcache_inv', 's_dcache_inv_vol', 's_dcache_wb', 's_dcache_wb_vol', 's_icache_inv'): return name
   soe, imm = getattr(inst, 'soe', 0) or getattr(inst, 'soffset_en', 0), getattr(inst, 'imm', 1)
   is_rdna4 = _is_r4(inst)
-  offset = inst.ioffset if is_rdna4 else getattr(inst, 'offset', 0)
+  offset = inst.ioffset if is_rdna4 else getattr(inst, 'offset', 0)  # type: ignore[attr-defined]
   if cdna:
     if soe and imm: off_s = f"{decode_src(inst.soffset, cdna)} offset:0x{offset:x}"
     elif imm: off_s = f"0x{offset:x}"
@@ -278,7 +296,9 @@ def _disasm_smem(inst: SMEM) -> str:
   else: off_s = decode_src(inst.soffset, cdna)
   is_buffer = 'buffer' in name or 's_atc_probe_buffer' == name
   sbase_idx, sbase_count = _unwrap(inst.sbase), 4 if is_buffer else 2
-  sbase_str = _fmt_src(sbase_idx, sbase_count, cdna) if sbase_count == 2 else _sreg(sbase_idx, sbase_count) if sbase_idx <= 105 else _reg("ttmp", sbase_idx - 108, sbase_count)
+  if sbase_count == 2: sbase_str = _fmt_src(sbase_idx, sbase_count, cdna)
+  elif sbase_idx <= 105: sbase_str = _sreg(sbase_idx, sbase_count)
+  else: sbase_str = _reg("ttmp", sbase_idx - 108, sbase_count)
   if name in ('s_atc_probe', 's_atc_probe_buffer'): return f"{name} {_unwrap(inst.sdata)}, {sbase_str}, {off_s}"
   if 'prefetch' in name:
     off = getattr(inst, 'ioffset', getattr(inst, 'offset', 0))
@@ -312,7 +332,7 @@ def _disasm_flat(inst: FLAT) -> str:
   else: seg = ['flat', 'scratch', 'global'][inst.seg] if inst.seg < 3 else 'flat'
   instr = f"{seg}_{name.split('_', 1)[1] if '_' in name else name}"
   # Global/scratch uses 13-bit signed offset
-  offset = inst.ioffset if r4 else inst.offset
+  offset = inst.ioffset if r4 else inst.offset  # type: ignore[attr-defined]
   if seg != 'flat':
     if cdna:
       # CDNA: bit 12 is sign bit but not in offset field
@@ -327,19 +347,20 @@ def _disasm_flat(inst: FLAT) -> str:
   regs = inst.canonical_op_regs
   w = regs.get('data', regs.get('d', 1)) if 'store' in name or 'atomic' in name else regs.get('d', 1)
   off_s = f" offset:{off_val}" if off_val else ""
-  if cdna: mods = f"{off_s}{' sc0' if inst.sc0 else ''}{' nt' if inst.nt else ''}{' sc1' if getattr(inst, 'sc1', 0) else ''}"
-  elif r4: mods = f"{off_s}{' scope' if inst.scope else ''}{' th' if inst.th else ''}"
+  if cdna: mods = f"{off_s}{' sc0' if inst.sc0 else ''}{' nt' if inst.nt else ''}{' sc1' if getattr(inst, 'sc1', 0) else ''}"  # type: ignore[attr-defined]
+  elif r4: mods = f"{off_s}{' scope' if inst.scope else ''}{' th' if inst.th else ''}"  # type: ignore[attr-defined]
   else: mods = f"{off_s}{' glc' if inst.glc else ''}{' slc' if inst.slc else ''}{' dlc' if inst.dlc else ''}"
   if seg == 'flat': saddr_s = ""
   elif _unwrap(inst.saddr) in (0x7F, 124): saddr_s = ", off"
   elif seg == 'scratch': saddr_s = f", {decode_src(inst.saddr, cdna)}"
-  elif _unwrap(inst.saddr) in (SPECIAL_PAIRS_CDNA if cdna else SPECIAL_PAIRS): saddr_s = f", {(SPECIAL_PAIRS_CDNA if cdna else SPECIAL_PAIRS)[_unwrap(inst.saddr)]}"
+  elif _unwrap(inst.saddr) in (SPECIAL_PAIRS_CDNA if cdna else SPECIAL_PAIRS):
+    saddr_s = f", {(SPECIAL_PAIRS_CDNA if cdna else SPECIAL_PAIRS)[_unwrap(inst.saddr)]}"
   elif t := _ttmp(inst.saddr, 2): saddr_s = f", {t}"
   else: saddr_s = f", {_sreg(inst.saddr, 2) if _unwrap(inst.saddr) < 106 else decode_src(_unwrap(inst.saddr), cdna)}"
   if 'addtid' in name: return f"{instr} {reg_fn(inst.data if 'store' in name else inst.vdst)}{saddr_s}{mods}"
-  # RDNA4: vaddr instead of addr, vsrc instead of data
-  addr = inst.vaddr if r4 else inst.addr
-  data = inst.vsrc if r4 else inst.data
+   # RDNA4: vaddr instead of addr, vsrc instead of data
+  addr = inst.vaddr if r4 else inst.addr  # type: ignore[attr-defined]
+  data = inst.vsrc if r4 else inst.data  # type: ignore[attr-defined]
   # load_lds_* instructions: vaddr, saddr (no vdst, data goes to LDS)
   if 'load_lds' in name:
     addr_w = 1 if seg == 'scratch' or (_unwrap(inst.saddr) not in (0x7F, 124)) else 2
@@ -351,13 +372,14 @@ def _disasm_flat(inst: FLAT) -> str:
   addr_s = "off" if not inst.sve and seg == 'scratch' else _vreg(addr, addr_w)
   data_s, vdst_s = reg_fn(data, w), reg_fn(inst.vdst, w // 2 if 'cmpswap' in name else w)
   if 'atomic' in name:
-    glc_or_sc0 = inst.sc0 if cdna else inst.glc
-    return f"{instr} {vdst_s}, {addr_s}, {data_s}{saddr_s if seg != 'flat' else ''}{mods}" if glc_or_sc0 else f"{instr} {addr_s}, {data_s}{saddr_s if seg != 'flat' else ''}{mods}"
+    glc_or_sc0 = inst.sc0 if cdna else inst.glc  # type: ignore[attr-defined]
+    sfx = f"{saddr_s if seg != 'flat' else ''}{mods}"
+    return f"{instr} {vdst_s}, {addr_s}, {data_s}{sfx}" if glc_or_sc0 else f"{instr} {addr_s}, {data_s}{sfx}"
   if 'store' in name: return f"{instr} {addr_s}, {data_s}{saddr_s}{mods}"
   return f"{instr} {reg_fn(inst.vdst, w)}, {addr_s}{saddr_s}{mods}"
 
 def _disasm_ds(inst: DS) -> str:
-  op, name = inst.op, inst.op_name.lower()
+  name = inst.op_name.lower()
   acc = getattr(inst, 'acc', 0)
   reg_fn = _areg if acc else _vreg
   gds = " gds" if getattr(inst, 'gds', 0) else ""
@@ -386,7 +408,8 @@ def _disasm_ds(inst: DS) -> str:
   if 'write2' in name: return f"{name} {addr}, {d0}, {d1}{off2}{gds}"
   if 'read2' in name: return f"{name} {reg_fn(inst.vdst, regs.get('d', 1))}, {addr}{off2}{gds}"
   if 'xchg2' in name: return f"{name} {reg_fn(inst.vdst, regs.get('d', 1))}, {addr}, {d0}, {d1}{off2}{gds}"
-  if 'load' in name or ('read' in name and 'read2' not in name): return f"{name} {reg_fn(inst.vdst)}{off}{gds}" if 'addtid' in name else f"{name} {dst}, {addr}{off}{gds}"
+  if 'load' in name or ('read' in name and 'read2' not in name):
+    return f"{name} {reg_fn(inst.vdst)}{off}{gds}" if 'addtid' in name else f"{name} {dst}, {addr}{off}{gds}"
   if ('store' in name or 'write' in name) and not _has(name, 'cmp', 'xchg', 'write2'):
     return f"{name} {reg_fn(inst.data0)}{off}{gds}" if 'addtid' in name else f"{name} {addr}, {d0}{off}{gds}"
   if 'swizzle' in name or name == 'ds_ordered_count': return f"{name} {reg_fn(inst.vdst)}, {addr}{off}{gds}"
@@ -397,13 +420,15 @@ def _disasm_ds(inst: DS) -> str:
   return f"{name} {dst}, {addr}, {d0}{off}{gds}" if '_rtn' in name else f"{name} {addr}, {d0}{off}{gds}"
 
 def _disasm_vop3(inst: VOP3) -> str:
-  op, name = inst.op, inst.op_name.lower()
-  n_up = name.upper()
+  name = inst.op_name.lower()
   bits = inst.canonical_op_bits
 
   # RDNA4 v_s_* scalar VOP3 instructions - vdst is SGPR (VGPRField adds 256)
   if name.startswith('v_s_'):
-    src = _lit(inst, inst.src0) if _unwrap(inst.src0) == 255 else ("src_scc" if _unwrap(inst.src0) == 253 else _fmt_src(inst.src0, max(1, bits['s0'] // 32)))
+    s0v = _unwrap(inst.src0)
+    if s0v == 255: src = _lit(inst, inst.src0)
+    elif s0v == 253: src = "src_scc"
+    else: src = _fmt_src(inst.src0, max(1, bits['s0'] // 32))
     if inst.neg & 1: src = f"-{src}"
     if inst.abs & 1: src = f"|{src}|"
     clamp = getattr(inst, 'cm', None) or getattr(inst, 'clmp', 0)
@@ -412,7 +437,6 @@ def _disasm_vop3(inst: VOP3) -> str:
 
   # Use get_field_bits for register sizes and 16-bit detection
   r0, r1, r2 = max(1, bits['s0'] // 32), max(1, bits['s1'] // 32), max(1, bits['s2'] // 32)
-  dn = max(1, bits['d'] // 32)
   is16_d, is16_s, is16_s2 = bits['d'] == 16, bits['s0'] == 16, bits['s2'] == 16
 
   s0 = _vop3_src(inst, inst.src0, inst.neg&1, inst.abs&1, inst.opsel&1, r0, is16_s)
@@ -428,7 +452,8 @@ def _disasm_vop3(inst: VOP3) -> str:
 
   clamp = getattr(inst, 'cm', None) or getattr(inst, 'clmp', 0)
   cl, om = " clamp" if clamp else "", _omod(inst.omod)
-  nonvgpr_opsel = (inst.src0.offset < 256 and (inst.opsel & 1)) or (inst.src1.offset < 256 and (inst.opsel & 2)) or (inst.src2.offset < 256 and (inst.opsel & 4))
+  nonvgpr_opsel = ((inst.src0.offset < 256 and (inst.opsel & 1)) or (inst.src1.offset < 256 and (inst.opsel & 2))
+                   or (inst.src2.offset < 256 and (inst.opsel & 4)))
   need_opsel = nonvgpr_opsel or (inst.opsel and not is16_s)
 
   op_val = inst.op.value if hasattr(inst.op, 'value') else inst.op
@@ -478,7 +503,7 @@ def _disasm_vopd(inst: VOPD) -> str:
 
 def _disasm_vop3p(inst: VOP3P) -> str:
   name = inst.op_name.lower()
-  is_wmma, is_swmmac, n, is_fma_mix = 'wmma' in name, 'swmmac' in name, inst.num_srcs() or 2, 'fma_mix' in name
+  is_swmmac, n, is_fma_mix = 'swmmac' in name, inst.num_srcs() or 2, 'fma_mix' in name
   def get_src(reg):
     return _lit(inst, reg.offset) if reg.offset == 255 else reg.fmt()
   src0, src1, src2, dst = get_src(inst.src0), get_src(inst.src1), get_src(inst.src2), inst.vdst.fmt()
@@ -487,18 +512,22 @@ def _disasm_vop3p(inst: VOP3P) -> str:
   if is_fma_mix:
     def m(s, neg, abs_): return f"-{f'|{s}|' if abs_ else s}" if neg else (f"|{s}|" if abs_ else s)
     src0, src1, src2 = m(src0, inst.neg & 1, inst.neg_hi & 1), m(src1, inst.neg & 2, inst.neg_hi & 2), m(src2, inst.neg & 4, inst.neg_hi & 4)
-    mods = ([_fmt_bits("op_sel", inst.opsel, n)] if inst.opsel else []) + ([_fmt_bits("op_sel_hi", opsel_hi, n)] if opsel_hi else []) + (["clamp"] if clamp else [])
+    mods = (([_fmt_bits("op_sel", inst.opsel, n)] if inst.opsel else [])
+            + ([_fmt_bits("op_sel_hi", opsel_hi, n)] if opsel_hi else []) + (["clamp"] if clamp else []))
   elif is_swmmac:
     mods = ([f"index_key:{inst.opsel}"] if inst.opsel else []) + ([_fmt_bits("neg_lo", inst.neg, n)] if inst.neg else []) + \
            ([_fmt_bits("neg_hi", inst.neg_hi, n)] if inst.neg_hi else []) + (["clamp"] if clamp else [])
   else:
     opsel_hi_default = 7 if n == 3 else 3
-    mods = ([_fmt_bits("op_sel", inst.opsel, n)] if inst.opsel else []) + ([_fmt_bits("op_sel_hi", opsel_hi, n)] if opsel_hi != opsel_hi_default else []) + \
-           ([_fmt_bits("neg_lo", inst.neg, n)] if inst.neg else []) + ([_fmt_bits("neg_hi", inst.neg_hi, n)] if inst.neg_hi else []) + (["clamp"] if clamp else [])
-  return f"{name} {dst}, {src0}, {src1}, {src2}{' ' + ' '.join(mods) if mods else ''}" if n == 3 else f"{name} {dst}, {src0}, {src1}{' ' + ' '.join(mods) if mods else ''}"
+    mods = (([_fmt_bits("op_sel", inst.opsel, n)] if inst.opsel else [])
+            + ([_fmt_bits("op_sel_hi", opsel_hi, n)] if opsel_hi != opsel_hi_default else [])
+            + ([_fmt_bits("neg_lo", inst.neg, n)] if inst.neg else [])
+            + ([_fmt_bits("neg_hi", inst.neg_hi, n)] if inst.neg_hi else []) + (["clamp"] if clamp else []))
+  mod_s = ' ' + ' '.join(mods) if mods else ''
+  return f"{name} {dst}, {src0}, {src1}, {src2}{mod_s}" if n == 3 else f"{name} {dst}, {src0}, {src1}{mod_s}"
 
 def _disasm_sop1(inst: SOP1) -> str:
-  op, name, cdna = inst.op, inst.op_name.lower(), _is_cdna(inst)
+  name, cdna = inst.op_name.lower(), _is_cdna(inst)
   # Use get_field_bits for register sizes
   regs = inst.canonical_op_regs
   dst_regs, src_regs = regs.get('d', 1), regs.get('s0', 1)
@@ -512,8 +541,8 @@ def _disasm_sop1(inst: SOP1) -> str:
       try: msg_str = MSG(v).name if v != 255 else None  # MSG_RTN_ILLEGAL_MSG (255) not supported by LLVM
       except ValueError: msg_str = None
       return f"{name} {_fmt_sdst(inst.sdst, dst_regs)}, sendmsg({msg_str})" if msg_str else f"{name} {_fmt_sdst(inst.sdst, dst_regs)}, 0x{v:x}"
-  sop1_src_only = ('S_ALLOC_VGPR', 'S_SLEEP_VAR', 'S_BARRIER_SIGNAL', 'S_BARRIER_SIGNAL_ISFIRST', 'S_BARRIER_INIT', 'S_BARRIER_JOIN', 'S_SET_GPR_IDX_IDX',
-                   'S_CBRANCH_JOIN')
+  sop1_src_only = ('S_ALLOC_VGPR', 'S_SLEEP_VAR', 'S_BARRIER_SIGNAL', 'S_BARRIER_SIGNAL_ISFIRST',
+                   'S_BARRIER_INIT', 'S_BARRIER_JOIN', 'S_SET_GPR_IDX_IDX', 'S_CBRANCH_JOIN')
   if inst.op_name in sop1_src_only: return f"{name} {src}"
   if cdna:
     if 'getpc_b64' in name: return f"{name} {_fmt_sdst(inst.sdst, 2, cdna)}"
@@ -551,7 +580,7 @@ _HWREG_BLACKLIST_CDNA = {'HW_REG_PC_LO', 'HW_REG_PC_HI', 'HW_REG_IB_DBG1', 'HW_R
                          'HW_REG_SQ_SHADER_TMA_LO', 'HW_REG_SQ_SHADER_TMA_HI', 'HW_REG_SQ_PERF_SNAPSHOT_DATA', 'HW_REG_SQ_PERF_SNAPSHOT_DATA1',
                          'HW_REG_SQ_PERF_SNAPSHOT_PC_LO', 'HW_REG_SQ_PERF_SNAPSHOT_PC_HI', 'HW_REG_XCC_ID'}
 def _disasm_sopk(inst: SOPK) -> str:
-  op, name, cdna = inst.op, inst.op_name.lower(), _is_cdna(inst)
+  name, cdna = inst.op_name.lower(), _is_cdna(inst)
   is_rdna4 = _is_r4(inst)
   hw = HWREG_CDNA if cdna else (HWREG_RDNA4 if is_rdna4 else HWREG)
   blacklist = _HWREG_BLACKLIST_CDNA if cdna else _HWREG_BLACKLIST
@@ -574,12 +603,14 @@ def _disasm_sopk(inst: SOPK) -> str:
 
 def _disasm_vinterp(inst: VINTERP) -> str:
   mods = _mods((inst.waitexp, f"wait_exp:{inst.waitexp}"), (inst.clmp, "clamp"))
-  return f"{inst.op_name.lower()} {inst.vdst.fmt()}, {_lit(inst, inst.src0, inst.neg & 1)}, {_lit(inst, inst.src1, inst.neg & 2)}, {_lit(inst, inst.src2, inst.neg & 4)}" + (" " + mods if mods else "")
+  s0, s1, s2 = _lit(inst, inst.src0, inst.neg & 1), _lit(inst, inst.src1, inst.neg & 2), _lit(inst, inst.src2, inst.neg & 4)
+  return f"{inst.op_name.lower()} {inst.vdst.fmt()}, {s0}, {s1}, {s2}" + (" " + mods if mods else "")
 
 DISASM_HANDLERS: dict[type, Callable[..., str]] = {
   VOP1: _disasm_vop1, VOP1_SDST: _disasm_vop1, VOP1_SDST_LIT: _disasm_vop1, VOP1_LIT: _disasm_vop1,
   VOP2: _disasm_vop2, VOP2_LIT: _disasm_vop2, VOPC: _disasm_vopc, VOPC_LIT: _disasm_vopc,
-  VOP3: _disasm_vop3, VOP3_SDST: _disasm_vop3, VOP3_SDST_LIT: _disasm_vop3, VOP3_LIT: _disasm_vop3, VOP3SD: _disasm_vop3sd, VOP3SD_LIT: _disasm_vop3sd,
+  VOP3: _disasm_vop3, VOP3_SDST: _disasm_vop3, VOP3_SDST_LIT: _disasm_vop3, VOP3_LIT: _disasm_vop3,
+  VOP3SD: _disasm_vop3sd, VOP3SD_LIT: _disasm_vop3sd,
   VOPD: _disasm_vopd, VOPD_LIT: _disasm_vopd, VOP3P: _disasm_vop3p, VOP3P_LIT: _disasm_vop3p,
   VINTERP: _disasm_vinterp, SOPP: _disasm_sopp, SMEM: _disasm_smem, DS: _disasm_ds, FLAT: _disasm_flat, GLOBAL: _disasm_flat, SCRATCH: _disasm_flat,
   SOP1: _disasm_sop1, SOP1_LIT: _disasm_sop1, SOP2: _disasm_sop2, SOP2_LIT: _disasm_sop2,
@@ -634,7 +665,9 @@ def _disasm_vop3a(inst) -> str:
   else:
     regs = inst.canonical_op_regs
     dregs, r0, r1, r2 = regs['d'], regs['s0'], regs['s1'], regs['s2']
-    s0, s1, s2 = _cdna_src(inst, inst.src0, inst.neg&1, inst.abs&1, r0), _cdna_src(inst, inst.src1, inst.neg&2, inst.abs&2, r1), _cdna_src(inst, inst.src2, inst.neg&4, inst.abs&4, r2)
+    s0 = _cdna_src(inst, inst.src0, inst.neg&1, inst.abs&1, r0)
+    s1 = _cdna_src(inst, inst.src1, inst.neg&2, inst.abs&2, r1)
+    s2 = _cdna_src(inst, inst.src2, inst.neg&4, inst.abs&4, r2)
     dst = _vreg(inst.vdst, dregs) if dregs > 1 else _vreg(inst.vdst)
   if op_val >= 512:
     return f"{name} {dst}, {s0}, {s1}, {s2}{opsel}{cl}{om}" if n == 3 else f"{name} {dst}, {s0}, {s1}{opsel}{cl}{om}"
@@ -658,7 +691,9 @@ def _disasm_vop3b(inst) -> str:
   n = inst.num_srcs() or _num_srcs(inst)
   regs = inst.canonical_op_regs
   dregs, r0, r1, r2 = regs['d'], regs['s0'], regs['s1'], regs['s2']
-  s0, s1, s2 = _cdna_src(inst, inst.src0, inst.neg&1, n=r0), _cdna_src(inst, inst.src1, inst.neg&2, n=r1), _cdna_src(inst, inst.src2, inst.neg&4, n=r2)
+  s0 = _cdna_src(inst, inst.src0, inst.neg&1, n=r0)
+  s1 = _cdna_src(inst, inst.src1, inst.neg&2, n=r1)
+  s2 = _cdna_src(inst, inst.src2, inst.neg&4, n=r2)
   # CDNA VOP3_SDST uses vdst field for sdst (but vdst adds 256), RDNA uses separate sdst field
   sdst_val = getattr(inst, 'sdst', None)
   if sdst_val is None and hasattr(inst, 'vdst'):
@@ -680,7 +715,7 @@ def _disasm_cdna_vop3p(inst) -> str:
   name, n = inst.op_name.lower(), inst.num_srcs() or 2
   is_mfma = 'mfma' in name or 'smfmac' in name
   is_accvgpr = 'accvgpr' in name
-  get_src = lambda v, sc: _lit(inst, v) if v == 255 else _fmt_src(v, sc, cdna=True)
+  def get_src(v, sc): return _lit(inst, v) if v == 255 else _fmt_src(v, sc, cdna=True)
 
   # Handle accvgpr read/write (accumulator register operations)
   if is_accvgpr:
@@ -742,9 +777,12 @@ def _disasm_cdna_vop3p(inst) -> str:
   src0, src1, src2, dst = get_src(inst.src0, 1), get_src(inst.src1, 1), get_src(inst.src2, 1), _vreg(inst.vdst)
   opsel_hi = inst.opsel_hi  # CDNA VOP3P only has 2 bits for opsel_hi (no opsel_hi2)
   opsel_hi_default = 3  # CDNA default is 0b11 (2 bits), not 0b111 like RDNA
-  mods = ([_fmt_bits("op_sel", inst.opsel, n)] if inst.opsel else []) + ([_fmt_bits("op_sel_hi", opsel_hi, n)] if opsel_hi != opsel_hi_default else []) + \
-          ([_fmt_bits("neg_lo", inst.neg, n)] if inst.neg else []) + ([_fmt_bits("neg_hi", inst.neg_hi, n)] if inst.neg_hi else []) + (["clamp"] if inst.clmp else [])
-  return f"{name} {dst}, {src0}, {src1}, {src2}{' ' + ' '.join(mods) if mods else ''}" if n == 3 else f"{name} {dst}, {src0}, {src1}{' ' + ' '.join(mods) if mods else ''}"
+  mods = (([_fmt_bits("op_sel", inst.opsel, n)] if inst.opsel else [])
+          + ([_fmt_bits("op_sel_hi", opsel_hi, n)] if opsel_hi != opsel_hi_default else [])
+          + ([_fmt_bits("neg_lo", inst.neg, n)] if inst.neg else [])
+          + ([_fmt_bits("neg_hi", inst.neg_hi, n)] if inst.neg_hi else []) + (["clamp"] if inst.clmp else []))
+  mod_s = ' ' + ' '.join(mods) if mods else ''
+  return f"{name} {dst}, {src0}, {src1}, {src2}{mod_s}" if n == 3 else f"{name} {dst}, {src0}, {src1}{mod_s}"
 
 def _disasm_mubuf(inst) -> str:
   name = inst.op_name.lower()
@@ -903,5 +941,6 @@ DISASM_HANDLERS.update({CDNA_VOP1: _disasm_vop1, CDNA_VOP1_LIT: _disasm_vop1,
   CDNA_SOP1: _disasm_sop1, CDNA_SOP1_LIT: _disasm_sop1, CDNA_SOP2: _disasm_sop2, CDNA_SOP2_LIT: _disasm_sop2,
   CDNA_SOPC: _disasm_sopc, CDNA_SOPC_LIT: _disasm_sopc, CDNA_SOPK: _disasm_sopk, CDNA_SOPK_LIT: _disasm_sopk, CDNA_SOPP: _disasm_sopp,
   CDNA_SMEM: _disasm_smem, CDNA_DS: _disasm_ds, CDNA_FLAT: _disasm_flat, CDNA_GLOBAL: _disasm_flat, CDNA_SCRATCH: _disasm_flat,
-  CDNA_VOP3: _disasm_vop3a, CDNA_VOP3_SDST: _disasm_vop3b, CDNA_VOP3SD: _disasm_vop3b, CDNA_VOP3P: _disasm_cdna_vop3p, CDNA_VOP3P_MFMA: _disasm_cdna_vop3p,
+  CDNA_VOP3: _disasm_vop3a, CDNA_VOP3_SDST: _disasm_vop3b, CDNA_VOP3SD: _disasm_vop3b,
+  CDNA_VOP3P: _disasm_cdna_vop3p, CDNA_VOP3P_MFMA: _disasm_cdna_vop3p,
   CDNA_MUBUF: _disasm_mubuf, CDNA_VOP3PX2: _disasm_vop3px2})

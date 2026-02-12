@@ -94,12 +94,13 @@ def extract_cdna_packet_sizes():
   rw_base, rw_offset = _find_segment('rw-p')
   if not (head := ctypes.c_void_p.from_address(rw_base + (0x2d4f0 - rw_offset)).value if rw_base else None): return None
 
-  pkt_sizes, node, seen = {}, head, set()
+  pkt_sizes: dict[int, int] = {}
+  node, seen = head, set()
   while node and node not in seen and len(pkt_sizes) < 20:
     seen.add(node)
     key, val = ctypes.c_uint32.from_address(node + 8).value, ctypes.c_uint32.from_address(node + 12).value
     if key < 16 and val in (0x10, 0x20, 0x30, 0x40): pkt_sizes[key] = {0x10: 2, 0x20: 4, 0x30: 6, 0x40: 8}[val]
-    node = ctypes.c_void_p.from_address(node).value
+    node = ctypes.c_void_p.from_address(node).value  # type: ignore[assignment]
   return pkt_sizes if len(pkt_sizes) == 16 else None
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -127,14 +128,14 @@ class TestSQTTMatchesBinary(unittest.TestCase):
     for pkt_fmt, pkt_cls in PACKET_TYPES_CDNA.items():
       with self.subTest(packet=pkt_cls.__name__):
         self.assertEqual(pkt_cls.encoding.default, pkt_fmt)
-        self.assertEqual(CDNA_PKT_SIZES[pkt_fmt] * 2, pkt_cls._size_nibbles)
+        self.assertEqual(CDNA_PKT_SIZES[pkt_fmt] * 2, pkt_cls._size_nibbles)  # type: ignore[attr-defined]
 
   def _test_bit_counts(self, layout: int):
     if not (tables := extract_bit_tables()): self.skipTest("rocprof-trace-decoder not installed")
     from extra.assembly.amd.sqtt import PACKET_TYPES_RDNA3, PACKET_TYPES_RDNA4
     for type_id, pkt_cls in {3: PACKET_TYPES_RDNA3, 4: PACKET_TYPES_RDNA4}[layout].items():
       with self.subTest(packet=pkt_cls.__name__):
-        self.assertEqual(pkt_cls._size_nibbles * 4, tables[layout - 2][type_id])
+        self.assertEqual(pkt_cls._size_nibbles * 4, tables[layout - 2][type_id])  # type: ignore[attr-defined]
 
   def _test_encodings(self, layout: int):
     if not (encodings := extract_packet_encodings()): self.skipTest("rocprof-trace-decoder not installed")
@@ -164,14 +165,16 @@ if __name__ == "__main__":
 
   print("L2:", tables[0], "\nL3:", tables[1], "\nL4:", tables[2])
   if encodings and tables:
-    print(f"\n{'TypeID':>6} {'Name':>18} {'L2 enc':>12} {'L3 enc':>12} {'L4 enc':>12} {'L2':>4} {'L3':>4} {'L4':>4} {'L2 delta':>12} {'L3 delta':>12} {'L4 delta':>12}")
+    print(f"\n{'TypeID':>6} {'Name':>18} {'L2 enc':>12} {'L3 enc':>12} {'L4 enc':>12}"
+          f" {'L2':>4} {'L3':>4} {'L4':>4} {'L2 delta':>12} {'L3 delta':>12} {'L4 delta':>12}")
     print("-" * 140)
     for type_id in sorted(set(encodings[0]) | set(encodings[1]) | set(encodings[2])):
       name = TYPE_NAMES.get(type_id, f'UNK_{type_id}')
       bits = [tables[i][type_id] if type_id < len(tables[i]) else 0 for i in range(3)]
       enc_strs = [f"0x{encodings[i][type_id][0]:02x}/0x{encodings[i][type_id][1]:02x}" if type_id in encodings[i] else "-" for i in range(3)]
       delta_strs = [f"[{d[1]-1}:{d[0]}]" if (d := deltas[i].get(type_id, (0, 0)))[1] > d[0] else "-" for i in range(3)]
-      print(f"{type_id:6d} {name:>18} {enc_strs[0]:>12} {enc_strs[1]:>12} {enc_strs[2]:>12} {bits[0]:4d} {bits[1]:4d} {bits[2]:4d} {delta_strs[0]:>12} {delta_strs[1]:>12} {delta_strs[2]:>12}")
+      print(f"{type_id:6d} {name:>18} {enc_strs[0]:>12} {enc_strs[1]:>12} {enc_strs[2]:>12}"
+            f" {bits[0]:4d} {bits[1]:4d} {bits[2]:4d} {delta_strs[0]:>12} {delta_strs[1]:>12} {delta_strs[2]:>12}")
 
   cdna = extract_cdna_packet_sizes()
   if cdna: print(f"\nCDNA packet sizes: {cdna}")

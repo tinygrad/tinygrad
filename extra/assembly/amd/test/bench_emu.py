@@ -158,7 +158,7 @@ def get_tinygrad_kernel(op_name: str) -> tuple[bytes, tuple, tuple, list[int], d
             for i, buf in enumerate(lowered.bufs):
               if hasattr(buf, 'base') and buf.base is not None and hasattr(buf.base, '_buf'):
                 try: buf_data[i] = bytes(buf.base._buf)
-                except: pass
+                except Exception: pass
             # Extract rsrc2 from ELF (same as ops_amd.py)
             group_segment_size = image[rodata_entry:rodata_entry+4].cast("I")[0]
             lds_size = ((group_segment_size + 511) // 512) & 0x1FF
@@ -232,7 +232,8 @@ def main():
     total_work = n_insts * n_workgroups * n_threads
 
     print(f"{n_insts} insts ({n_compiled} unique) × {n_workgroups} WGs × {n_threads} threads = {total_work:,} ops")
-    rust_time = benchmark_emulator("Rust", rust_remu.run_asm, kernel, global_size, local_size, args_ptr, rsrc2, args.iterations) if rust_remu else None
+    rust_time = benchmark_emulator("Rust", rust_remu.run_asm, kernel, global_size, local_size,
+                                   args_ptr, rsrc2, args.iterations) if rust_remu else None
 
     if py_compile is not None:
       py_exec_rate = total_work / py_exec / 1e6

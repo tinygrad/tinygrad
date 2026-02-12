@@ -7,8 +7,7 @@ VOPD executes two operations simultaneously. Key behavior:
 - Op Y can use ops 0-18 (includes ADD_NC_U32, LSHLREV, AND)
 """
 import unittest
-from extra.assembly.amd.test.hw.helpers import run_program, run_program_emu, run_program_hw, compare_wave_states, \
-  v, s, v_mov_b32_e32, s_mov_b32
+from extra.assembly.amd.test.hw.helpers import run_program, v, v_mov_b32_e32
 from extra.assembly.amd.autogen.rdna3.ins import VOPD, VOPD_LIT, VOPDOp
 
 class TestVOPDBasic(unittest.TestCase):

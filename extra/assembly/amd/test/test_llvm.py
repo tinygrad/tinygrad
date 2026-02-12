@@ -127,15 +127,17 @@ def _make_test(f: str, arch: str, test_type: str):
       self.assertEqual(skipped, 0, f"{name}: {skipped} tests skipped, expected 0")
     elif test_type == "repr":
       # Test that eval(repr(inst)) reproduces the instruction
-      if arch == "rdna3": import extra.assembly.amd.autogen.rdna3.ins as ins
-      elif arch == "rdna4": import extra.assembly.amd.autogen.rdna4.ins as ins
-      elif arch == "cdna": import extra.assembly.amd.autogen.cdna.ins as ins
+      if arch == "rdna3": import extra.assembly.amd.autogen.rdna3.ins as ins  # type: ignore[no-redef]
+      elif arch == "rdna4": import extra.assembly.amd.autogen.rdna4.ins as ins  # type: ignore[no-redef]
+      elif arch == "cdna": import extra.assembly.amd.autogen.cdna.ins as ins  # type: ignore[no-redef]
       ns = {k: getattr(ins, k) for k in dir(ins) if not k.startswith('_')}
       passed, skipped = 0, 0
       for _, data in tests:
         try:
           decoded = detect_format(data, arch).from_bytes(data)
-          if decoded.to_bytes()[:len(data)] != data: skipped += 1; continue  # skip if binary roundtrip fails
+          if decoded.to_bytes()[:len(data)] != data:
+            skipped += 1
+            continue  # skip if binary roundtrip fails
           r = repr(decoded)
           try:
             decoded2 = eval(r, ns)  # noqa: S307
@@ -153,7 +155,7 @@ def _make_test(f: str, arch: str, test_type: str):
           enc = decoded.to_bytes()[:len(data)]
           # Skip if roundtrip fails, disasm fails, or op_name is missing (disasm starts with space)
           if enc == data and (d := disasm(decoded)) and not d.startswith(' '): to_test.append((enc, d))
-        except: pass
+        except Exception: pass
       skipped = len(tests) - len(to_test)
       print(f"{name}: {len(to_test)} passed, {skipped} skipped")
       self.assertEqual(skipped, 0, f"{name}: {skipped} tests skipped, expected 0")

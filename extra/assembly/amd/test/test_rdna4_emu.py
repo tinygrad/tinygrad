@@ -6,7 +6,7 @@ from tinygrad.device import Buffer, BufferSpec
 from tinygrad.dtype import dtypes
 
 class TestRDNA4Emu(unittest.TestCase):
-  def _run(self, insts: list, sgprs: dict[int, int] = None, vgprs: dict[tuple[int, int], int] = None) -> WaveState:
+  def _run(self, insts: list, sgprs: dict[int, int] | None = None, vgprs: dict[tuple[int, int], int] | None = None) -> WaveState:
     """Run instructions and return final WaveState."""
     # Add S_ENDPGM if not present
     if not any(isinstance(i, ir4.SOPP) and i.op == ir4.SOPPOp.S_ENDPGM for i in insts):

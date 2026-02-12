@@ -81,7 +81,9 @@ class RustEmulator:
     return snap.to_snapshot()
 
   def free(self):
-    if self.ctx: self.lib.wave_free(self.ctx); self.ctx = None
+    if self.ctx:
+      self.lib.wave_free(self.ctx)
+      self.ctx = None
 
 class PythonEmulator:
   def __init__(self):
@@ -114,8 +116,8 @@ class PythonEmulator:
     if pc == 0xFFFFFFFFFFFFFFFF or pc not in self.program: return -1
     name, fxn, globals_list, _runner = self.program[pc]
     if fxn is None: return 1  # unsupported instruction
-    buf_addrs = {0: self.state.sgpr_buf._buf.va_addr, 1: self.state.vgpr_buf._buf.va_addr,
-                 2: self.vmem_buf._buf.va_addr, 3: self.lds_buf._buf.va_addr}
+    buf_addrs = {0: self.state.sgpr_buf._buf.va_addr, 1: self.state.vgpr_buf._buf.va_addr,  # type: ignore[union-attr]
+                 2: self.vmem_buf._buf.va_addr, 3: self.lds_buf._buf.va_addr}  # type: ignore[union-attr]
     # Direct ctypes call - bypasses HCQ overhead
     fxn(*[ctypes.c_uint64(buf_addrs[g]) for g in globals_list], ctypes.c_int32(0))
     return -1 if self.state.pc == 0xFFFFFFFFFFFFFFFF else 0
@@ -178,6 +180,7 @@ def run_single_kernel(kernel: bytes, n_lanes: int, args_ptr: int, global_size: t
             rust_before = rust.get_snapshot()
             python_before = python.get_snapshot()
 
+            assert python.program is not None
             inst_info = python.program.get(python.lib_addr + python_before.pc * 4)  # Convert word offset to actual address
             inst_hex_name = inst_info[0] if inst_info else f"unknown at PC={python_before.pc}"
             # Decode the instruction to get mnemonic for sync_after checks
@@ -188,7 +191,7 @@ def run_single_kernel(kernel: bytes, n_lanes: int, args_ptr: int, global_size: t
               inst_bytes = bytes.fromhex(inst_bytes_hex) if inst_bytes_hex else b''
               decoded = decode_inst(inst_bytes) if inst_bytes else None
               inst_mnemonic = repr(decoded).split('(')[0] if decoded else ""
-            except:
+            except Exception:
               inst_mnemonic = ""
             # For generic instructions, use function name for sync_after check
             if not inst_mnemonic: inst_mnemonic = inst_hex_name
@@ -220,16 +223,18 @@ def run_single_kernel(kernel: bytes, n_lanes: int, args_ptr: int, global_size: t
                   python_diffs = pb.diff(next_pb, n_lanes, "->")
                   if rust_diffs: trace_lines.append(f"             rust:   {', '.join(rust_diffs[:5])}")
                   if python_diffs: trace_lines.append(f"             python: {', '.join(python_diffs[:5])}")
-                  elif rust_diffs: trace_lines.append(f"             python: (no changes)")
+                  elif rust_diffs: trace_lines.append("             python: (no changes)")
                 else:
                   # Last traced instruction - compare with current state
                   rust_diffs = rb.diff(rust_before, n_lanes, "->")
                   python_diffs = pb.diff(python_before, n_lanes, "->")
                   if rust_diffs: trace_lines.append(f"             rust:   {', '.join(rust_diffs[:5])}")
                   if python_diffs: trace_lines.append(f"             python: {', '.join(python_diffs[:5])}")
-                  elif rust_diffs: trace_lines.append(f"             python: (no changes)")
+                  elif rust_diffs: trace_lines.append("             python: (no changes)")
               trace_str = "\n".join(trace_lines)
-              return False, f"K{kernel_idx} WG({gidx},{gidy},{gidz}) Step {step} before inst '{inst_str}': states differ (rust vs python):\n  " + "\n  ".join(diffs[:10]) + f"\n  Recent instructions:\n{trace_str}", total_steps
+              msg = f"K{kernel_idx} WG({gidx},{gidy},{gidz}) Step {step} before inst '{inst_str}': states differ (rust vs python):\n  "
+              msg += "\n  ".join(diffs[:10]) + f"\n  Recent instructions:\n{trace_str}"
+              return False, msg, total_steps
 
             rust_result = rust.step()
             python_result = python.step()
@@ -239,7 +244,9 @@ def run_single_kernel(kernel: bytes, n_lanes: int, args_ptr: int, global_size: t
               if rust_result == 1 and python_result == 0:
                 raise unittest.SkipTest(f"Rust emulator doesn't support instruction: {inst_str}")
               trace_str = "\n".join(f"    step {s}: PC={pc:3d} {d}" for s, pc, d, _, _ in trace)
-              return False, f"K{kernel_idx} WG({gidx},{gidy},{gidz}) Step {step}: different return codes: rust={rust_result}, python={python_result}, inst={inst_str}\n  Recent instructions:\n{trace_str}", total_steps
+              msg = (f"K{kernel_idx} WG({gidx},{gidy},{gidz}) Step {step}: different return codes: "
+                     f"rust={rust_result}, python={python_result}, inst={inst_str}\n  Recent instructions:\n{trace_str}")
+              return False, msg, total_steps
 
             # Sync Python state to Rust after instructions with known Rust emulator differences
             if sync_after:
@@ -429,7 +436,8 @@ class TestTinygradKernels(unittest.TestCase):
   def test_cast(self): self._test_kernel(lambda T: T.empty(32).half().float() + T.empty(32).int().float())
 
   # Pooling - regression for VCC wave32 mode
-  def test_pool2d(self): self._test_kernel(lambda T: T.empty(1, 1, 8, 8).avg_pool2d(kernel_size=(4,4)) + T.empty(1, 1, 8, 8).max_pool2d(kernel_size=(4,4)))
+  def test_pool2d(self):
+    self._test_kernel(lambda T: T.empty(1, 1, 8, 8).avg_pool2d(kernel_size=(4,4)) + T.empty(1, 1, 8, 8).max_pool2d(kernel_size=(4,4)))
 
   # Convolution
   def test_conv2d(self): self._test_kernel(lambda T: T.empty(1, 2, 8, 8).conv2d(T.empty(2, 2, 3, 3)), max_steps=50000)

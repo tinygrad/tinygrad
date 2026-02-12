@@ -325,7 +325,7 @@ def sqtt_timeline(data:bytes, lib:bytes, target:int) -> list[ProfileEvent]:
       name, width = (op_name, 10 if "BARRIER" in op_name else 1)
       add(name, p, width=width, idx=int("OTHER" in name), info=info)
     if isinstance(p, (VALUINST, IMMEDIATE)): add(p.__class__.__name__, p, info=info)
-    if isinstance(p, IMMEDIATE_MASK): add("IMMEDIATE", p, wave=unwrap(info.wave), info=info)
+    if isinstance(p, IMMEDIATE_MASK): add("IMMEDIATE", p, wave=unwrap(info.wave), info=info)  # type: ignore[union-attr]
     if isinstance(p, (VMEMEXEC, ALUEXEC)):
       name = str(p.src).split('.')[1]
       if name == "VALU_SALU":

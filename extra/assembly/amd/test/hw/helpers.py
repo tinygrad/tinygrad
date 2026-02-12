@@ -47,7 +47,7 @@ def get_gpu_target() -> tuple[int, int, int]:
   """Get the GPU target as (major, minor, stepping) tuple."""
   if not USE_HW: return (0, 0, 0)
   from tinygrad.device import Device
-  return Device["AMD"].target
+  return Device["AMD"].target  # type: ignore[attr-defined]
 
 def skip_unless_gfx(min_major: int, min_minor: int = 0, reason: str = ""):
   """Skip test if GPU target is below the minimum required version."""
@@ -171,7 +171,7 @@ def run_program_hw(instructions: list, n_lanes: int = 1) -> WaveState:
   from tinygrad.helpers import flat_mv
 
   dev = Device["AMD"]
-  compiler = HIPCompiler(dev.arch)
+  compiler = HIPCompiler(dev.arch)  # type: ignore[attr-defined]
 
   prologue, epilogue = get_prologue_epilogue(n_lanes)
   code = assemble(prologue + instructions + epilogue)
@@ -218,7 +218,7 @@ amdhsa.kernels:
 """
 
   lib = compiler.compile(asm_src)
-  prg = AMDProgram(dev, "test", lib)
+  prg = AMDProgram(dev, "test", lib)  # type: ignore[arg-type]
 
   out_gpu = dev.allocator.alloc(OUT_BYTES)
   assert out_gpu.va_addr % 16 == 0, f"buffer not 16-byte aligned: 0x{out_gpu.va_addr:x}"
@@ -276,6 +276,6 @@ def run_program(instructions: list, n_lanes: int = 1, ulp_tolerance: int = 0) ->
     hw_st = run_program_hw(instructions, n_lanes)
     diffs = compare_wave_states(emu_st, hw_st, n_lanes, ulp_tolerance=ulp_tolerance)
     if diffs:
-      raise AssertionError(f"Emulator vs Hardware mismatch:\n" + "\n".join(diffs))
+      raise AssertionError("Emulator vs Hardware mismatch:\n" + "\n".join(diffs))
     return hw_st
   return emu_st
