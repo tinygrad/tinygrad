@@ -66,7 +66,6 @@ class TestJitFootguns(unittest.TestCase):
 
     This requires multiple kernels to trigger because single-kernel JITs don't get graphed ("only one kernel doesn't graph").
     """
-    from tinygrad import Device
     if Device[Device.DEFAULT].graph is None or JIT != 1:
       self.skipTest("test requires JIT graph support")
 
