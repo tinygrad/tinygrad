@@ -403,9 +403,7 @@ class Inst:
   @classmethod
   def _size(cls) -> int: return cls._base_size
   def size(self) -> int: return self._base_size
-  def disasm(self) -> str:
-    from extra.assembly.amd.disasm import disasm
-    return disasm(self)
+  def disasm(self) -> str: raise NotImplementedError("disasm is no longer supported")
 
   def to_bytes(self) -> bytes: return self._raw.to_bytes(self._base_size, 'little')
 

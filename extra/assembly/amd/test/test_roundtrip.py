@@ -4,6 +4,7 @@ import unittest, io, sys, re, subprocess, os
 from extra.assembly.amd.dsl import Inst
 from extra.assembly.amd import decode_inst, detect_format
 from extra.assembly.amd.test.helpers import get_llvm_mc, get_llvm_objdump, get_target, get_mattr
+from extra.assembly.amd.test.disasm import disasm
 
 def disassemble_lib(lib: bytes, compiler) -> list[tuple[str, bytes]]:
   """Disassemble ELF binary and return list of (instruction_text, machine_code_bytes)."""
@@ -113,7 +114,7 @@ class TestTinygradKernelRoundtrip(unittest.TestCase):
           size = decoded.size()  # actual size including literal
           orig_bytes = remaining[:size]
           reencoded = decoded.to_bytes()
-          our_disasm = decoded.disasm()
+          our_disasm = disasm(decoded)
           decode_ok = reencoded == orig_bytes
           decode_err: str | None = None if decode_ok else f"orig={orig_bytes.hex()} reenc={reencoded.hex()}"
           decoded_instrs.append((ki, offset, orig_bytes, decoded, our_disasm, decode_ok, decode_err))

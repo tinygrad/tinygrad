@@ -5,6 +5,7 @@ import unittest, struct
 from extra.assembly.amd.autogen.rdna3.ins import *
 from extra.assembly.amd.dsl import Inst
 from extra.assembly.amd.test.test_roundtrip import compile_asm
+from extra.assembly.amd.test.disasm import disasm
 
 class IntegrationTestBase(unittest.TestCase):
   inst: Inst
@@ -12,7 +13,7 @@ class IntegrationTestBase(unittest.TestCase):
   def tearDown(self):
     if not hasattr(self, 'inst'): return
     b = self.inst.to_bytes()
-    st = self.inst.disasm()
+    st = disasm(self.inst)
     # Test that the instruction can be compiled by LLVM and produces the same bytes
     desc = f"{st:25s} {self.inst} {b!r}"
     self.assertEqual(b, compile_asm(st, arch=self.arch), desc)
@@ -160,9 +161,9 @@ class TestRegisterSliceSyntax(unittest.TestCase):
     # Round-trip: DSL -> disasm -> DSL should preserve register count
     reg = s[4:7]  # 4 registers in AMD convention
     inst = s_load_b128(reg, s[0:1], NULL, 0)
-    disasm = inst.disasm()
+    d = disasm(inst)
     # Disasm shows s[4:7] - user should be able to copy this back
-    self.assertIn("s[4:7]", disasm)
+    self.assertIn("s[4:7]", d)
     # And s[4:7] in DSL should give the same 4 registers
     reg_from_disasm = s[4:7]
     self.assertEqual(reg_from_disasm.sz, 4, "s[4:7] from disasm should give 4 registers")
