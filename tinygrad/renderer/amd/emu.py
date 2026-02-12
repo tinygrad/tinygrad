@@ -9,37 +9,47 @@ from __future__ import annotations
 import ctypes, functools, re, platform, subprocess, tempfile
 from typing import Any, Callable
 
-# Set/restore DAZ+FTZ (denormals-are-zero + flush-to-zero) in MXCSR to match RDNA3 default float mode
+# Set/restore DAZ+FTZ (denormals-are-zero + flush-to-zero) to match RDNA3 default float mode
+# x86: MXCSR bits DAZ(6)+FTZ(15), ARM64: FPCR bit FZ(24)
 # Only applied during emulator execution, restored afterward to avoid breaking hypothesis tests
 @functools.cache
-def _get_mxcsr_lib():
-  if platform.machine() not in ('x86_64', 'AMD64'): return None
-  try:
+def _get_ftz_lib():
+  machine = platform.machine()
+  if machine in ('x86_64', 'AMD64'):
     src = b'''
-unsigned int get_mxcsr(void){unsigned int m;__asm__ __volatile__("stmxcsr %0":"=m"(m));return m;}
-void set_mxcsr(unsigned int m){__asm__ __volatile__("ldmxcsr %0"::"m"(m));}
+unsigned int get_fpcr(void){unsigned int m;__asm__ __volatile__("stmxcsr %0":"=m"(m));return m;}
+void set_fpcr(unsigned int m){__asm__ __volatile__("ldmxcsr %0"::"m"(m));}
 '''
+    ftz_bits = 0x8040  # DAZ (bit 6) + FTZ (bit 15)
+  elif machine in ('arm64', 'aarch64'):
+    src = b'''
+unsigned int get_fpcr(void){unsigned long long v;__asm__ __volatile__("mrs %0,fpcr":"=r"(v));return(unsigned int)v;}
+void set_fpcr(unsigned int m){unsigned long long v=m;__asm__ __volatile__("msr fpcr,%0"::"r"(v));}
+'''
+    ftz_bits = 1 << 24  # FZ (bit 24)
+  else: return None, 0
+  try:
     with tempfile.NamedTemporaryFile(suffix='.so', delete=False) as f:
       subprocess.check_output(['clang', '-shared', '-O2', '-x', 'c', '-', '-o', f.name], input=src)
       lib = ctypes.CDLL(f.name)
-      lib.get_mxcsr.restype = ctypes.c_uint32
-      lib.set_mxcsr.argtypes = [ctypes.c_uint32]
-      return lib
-  except Exception: return None
+      lib.get_fpcr.restype = ctypes.c_uint32
+      lib.set_fpcr.argtypes = [ctypes.c_uint32]
+      return lib, ftz_bits
+  except Exception: return None, 0
 
 class _MXCSRContext:
   """Context manager to set DAZ+FTZ during emulator execution and restore afterward."""
   __slots__ = ('_saved',)
   def __enter__(self):
-    lib = _get_mxcsr_lib()
+    lib, ftz_bits = _get_ftz_lib()
     if lib is None: return self
-    self._saved = lib.get_mxcsr()
-    lib.set_mxcsr(self._saved | 0x8040)  # DAZ (bit 6) + FTZ (bit 15)
+    self._saved = lib.get_fpcr()
+    lib.set_fpcr(self._saved | ftz_bits)
     return self
   def __exit__(self, *args):
-    lib = _get_mxcsr_lib()
+    lib, _ = _get_ftz_lib()
     if lib is None or not hasattr(self, '_saved'): return
-    lib.set_mxcsr(self._saved)
+    lib.set_fpcr(self._saved)
 
 from tinygrad.uop.ops import UOp, Ops, KernelInfo, AxisType
 from tinygrad.dtype import dtypes
