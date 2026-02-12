@@ -1,55 +1,102 @@
-import math, pathlib
+import math, pathlib, functools, time, struct
+
 from tinygrad import Device, Tensor
-from tinygrad.helpers import Context
+from tinygrad.dtype import DTypeLike, dtypes
+from tinygrad.engine.jit import TinyJit
+from tinygrad.helpers import Context, DEBUG
 from tinygrad.runtime.support.compiler_amd import HIPCCCompiler
 from tinygrad.runtime.support.elf import elf_loader
 from tinygrad.runtime.autogen import libc
+from tinygrad.uop.ops import UOp, Ops, KernelInfo, AxisType
+
 import numpy as np
 
-if __name__ == "__main__":
+def _sharded_empty(shape:Tensor, ref:Tensor, axis:int|None, dtype:DTypeLike|None=None) -> Tensor:
+  dtype = dtype or ref.dtype
+  if not isinstance(ref.device, tuple): return Tensor.empty(*shape, dtype=dtype, device=ref.device)
+  shape = tuple(s // len(ref.device) if i == ref.uop.axis else s for i, s in enumerate(shape))
+  axis = ref.uop.axis if axis is None else axis
+  return Tensor(Tensor.empty(*shape, dtype=dtype, device=ref.device).uop.multi(axis), dtype=dtype, device=ref.device)
+
+def _sharded_empty_like(ref:Tensor, axis:int|None=None) -> Tensor:
+  return _sharded_empty(ref.shape, ref, axis)
+
+def flash_attention(xq, xk, xv, attn_mask:Tensor|None=None, is_causal:bool=False):
+  assert attn_mask is None, "attn_mask not supported"
+  assert is_causal, "only causal attention supported"
+
+  B, N, H, D = xq.shape
+  H_KV = xk.shape[2]
+  assert D == 128, "only D=128 supported"
+
+  num_devices = len(xq.device) if isinstance(xq.device, tuple) else 1
+  B_local = B // num_devices
+  if DEBUG >= 2: print(f"Flash Attention {B=} {B_local=} {N=} {H=} {H_KV=} {D=}")
+
+  single_device = xq.device[0] if isinstance(xq.device, tuple) else xq.device
+  arch = Device[single_device].renderer.arch
+
+  attn = _sharded_empty_like(xq, axis=0)
+  l_vec = _sharded_empty((B, H, 1, N), xq, axis=0, dtype=dtypes.float32)
+
+  attn, l_vec = Tensor.custom_kernel(attn, l_vec, xq, xk, xv, fxn=functools.partial(custom_fa_forward, device=single_device, arch=arch))[:2]
+
+  return attn
+
+@functools.cache
+def custom_fa_forward(o:UOp, l_vec:UOp, q:UOp, k:UOp, v:UOp, device:str, arch:str):
+  B, N, H, _ = q.shape
+  H_KV = k.shape[2]
+
   code = (pathlib.Path(__file__).parent / "fa_fwd_causal.cpp").read_text()
-  device = Device["AMD"]
-  kitten_args = [f"-I{(pathlib.Path(__file__).parent / 'include').as_posix()}", "-std=c++20"]
-  lib = HIPCCCompiler(device.compiler.arch, kitten_args).compile(code)
+  compile_args = [f"-I{(pathlib.Path(__file__).parent / 'include').as_posix()}", "-std=c++20",
+                  f"-DATTN_B={B}", f"-DATTN_N={N}", f"-DATTN_H={H}", f"-DATTN_H_KV={H_KV}"]
 
-  # extract kernel name from ELF symbol table
-  _, sections, _ = elf_loader(lib)
-  symtab_sh = next(sh for sh in sections if sh.header.sh_type == libc.SHT_SYMTAB)
-  strtab_sh = sections[symtab_sh.header.sh_link]
-  syms = (libc.Elf64_Sym * (symtab_sh.header.sh_size // symtab_sh.header.sh_entsize)).from_buffer_copy(symtab_sh.content)
-  kernel_name = next(strtab_sh.content[s.st_name:strtab_sh.content.index(b'\x00', s.st_name)].decode()
-                     for s in syms if libc.ELF64_ST_TYPE(s.st_info) == libc.STT_FUNC and s.st_name != 0)
-  print("kernel name", kernel_name)
+  Q_BLOCK_SIZE = 32
+  NUM_WARPS = 8
+  NUM_THREADS = 64 * NUM_WARPS
+  gsz = (H, (math.ceil((N // Q_BLOCK_SIZE) / NUM_WARPS)), B)
+  lsz = (NUM_THREADS, 1, 1)
+  threadIdx_x = UOp.special(lsz[0], "lidx0")
+  blockIdx_x = UOp.special(gsz[0], "gidx0")
+  blockIdx_y = UOp.special(gsz[1], "gidx1")
+  blockIdx_z = UOp.special(gsz[2], "gidx2")
 
-  prg = device.runtime(kernel_name, lib)
+  sink = UOp.sink(o.base, l_vec.base, q.base, k.base, v.base,
+                  threadIdx_x, blockIdx_x, blockIdx_y, blockIdx_z,
+                  arg=KernelInfo(name="custom_fa_forward"))
+  lib = HIPCCCompiler(arch, compile_args).compile(code)
 
-  dynamic_smem = 160000
-  prg.group_segment_size = max(prg.group_segment_size, dynamic_smem)
-  lds_size = ((prg.group_segment_size + 511) // 512) & 0x1FF
-  prg.rsrc2 = (prg.rsrc2 & ~(0x1FF << 15)) | (lds_size << 15)
+  lib = bytearray(lib)
+  rodata_off = next(sh.header.sh_offset for sh in elf_loader(bytes(lib))[1] if sh.name == ".rodata")
+  struct.pack_into('<I', lib, rodata_off, 160000)
+  lib = bytes(lib)
 
+  return UOp(Ops.PROGRAM,
+             src=(sink, UOp(Ops.DEVICE, arg=device), UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=code), UOp(Ops.BINARY, arg=lib)))
+
+if __name__ == "__main__":
   B, N, H, H_KV, D = 16, 8192, 32, 8, 128
   q = Tensor.randn(B, N, H, D, device="AMD", dtype="bfloat16").contiguous()
   k = Tensor.randn(B, N, H_KV, D, device="AMD", dtype="bfloat16").contiguous()
   v = Tensor.randn(B, N, H_KV, D, device="AMD", dtype="bfloat16").contiguous()
-  out = Tensor.empty(B, N, H, D, device="AMD", dtype="bfloat16").contiguous()
-  L_vec = Tensor.empty(B, H, 1, N, device="AMD", dtype="float32").contiguous()
-  Tensor.realize(q, k, v, out, L_vec)
+  Tensor.realize(q, k, v)
 
   Q_BLOCK_SIZE = 32
   NUM_WARPS = 8
   NUM_THREADS = 64 * NUM_WARPS
 
-  gsz = (H, (math.ceil((N // Q_BLOCK_SIZE) / NUM_WARPS)), B)
-  lsz = (NUM_THREADS, 1, 1)
-  for _ in range(5):
-    et = prg(out.uop.buffer.ensure_allocated()._buf, q.uop.buffer._buf, k.uop.buffer._buf, v.uop.buffer._buf, L_vec.uop.buffer.ensure_allocated()._buf,
-             global_size=gsz, local_size=lsz, wait=True)
+  fa_jitted = TinyJit(flash_attention)
 
-    attn_flops = 2 * B * H * N * N * D + \
-                 4 * B * H * N * N + \
-                 2 * B * H * N * N * D
-    print(f"{attn_flops/(et*1e9):2f} GFLOPS")
+  attn_flops = 2 * B * H * N * N * D + \
+               4 * B * H * N * N + \
+               2 * B * H * N * N * D
+  for _ in range(5):
+    st = time.perf_counter()
+    out = fa_jitted(q, k, v, is_causal=True)
+    Device["AMD"].synchronize()
+    et = time.perf_counter() - st
+    print(f"{attn_flops/(et*1e12):2f} TFLOPS")
 
   with Context(DEBUG=2):
     ref = q.transpose(1,2).scaled_dot_product_attention(k.transpose(1,2), v.transpose(1,2), is_causal=True, enable_gqa=True).transpose(1,2)
