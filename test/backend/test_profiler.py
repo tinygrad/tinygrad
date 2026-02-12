@@ -198,7 +198,7 @@ class TestProfiler(unittest.TestCase):
   @unittest.skip("this test is flaky")
   @unittest.skipUnless(Device[Device.DEFAULT].graph is not None, "graph support required")
   def test_graph(self):
-    from test.test_graph import helper_alloc_rawbuffer, helper_exec_op, helper_test_graphs
+    from test.backend.test_graph import helper_alloc_rawbuffer, helper_exec_op, helper_test_graphs
     device = TestProfiler.d0.device
     bufs = [helper_alloc_rawbuffer(device, fill=True) for _ in range(5)]
     graphs = [[helper_exec_op(device, bufs[0], [bufs[1], bufs[2]]), helper_exec_op(device, bufs[0], [bufs[3], bufs[4]]),]]

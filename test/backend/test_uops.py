@@ -12,15 +12,8 @@ from tinygrad.engine.schedule import ExecItem
 from tinygrad.device import is_dtype_supported
 from tinygrad.codegen.opt import Opt, OptOps
 from tinygrad.renderer.ptx import PTXRenderer
-from test.helpers import get_uops
+from test.helpers import to_uops_list
 from dataclasses import replace
-
-def to_uops_list(u:list[UOp], ren=None) -> list[UOp]:
-  sink = UOp.group(*u)
-  for r in sink.ranges: sink = sink.end(r)
-  ret = get_uops(sink.sink(arg=KernelInfo(opts_to_apply=())), ren)
-  assert ret[-1].op is Ops.SINK
-  return ret
 
 def _uops_to_prg(uops_list):
   prg = get_program(UOp.sink(*uops_list, arg=KernelInfo()), Device[Device.DEFAULT].renderer)

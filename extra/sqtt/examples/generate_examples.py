@@ -6,7 +6,7 @@ EXAMPLES_DIR = Path(__file__).parent
 PROFILE_PATH = Path(temp("profile.pkl", append_user=True))
 
 EXAMPLES = [
-  "test.test_custom_kernel.TestCustomKernel.test_empty",
+  "test.backend.test_custom_kernel.TestCustomKernel.test_empty",
   "test.test_tiny.TestTiny.test_plus",
   "test.test_tiny.TestTiny.test_gemm",
 ]

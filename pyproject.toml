@@ -122,7 +122,7 @@ do_not_mutate = [
   "tinygrad/helpers.py",
   "tinygrad/tensor.py",
 ]
-tests_dir = ["test/test_tiny.py", "test/test_ops.py"]
+tests_dir = ["test/test_tiny.py", "test/backend/test_ops.py"]
 debug = true
 
 
