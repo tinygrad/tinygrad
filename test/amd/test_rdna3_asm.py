@@ -1,27 +1,14 @@
 #!/usr/bin/env python3
-import unittest, subprocess
+import unittest
 from tinygrad.runtime.autogen.amd.rdna3.ins import *
-from test.amd.helpers import get_llvm_mc
+from test.amd.helpers import llvm_assemble
 from test.amd.disasm import disasm
 
-def llvm_assemble(asm: str) -> bytes:
-  """Assemble using llvm-mc and return bytes."""
-  result = subprocess.run(
-    [get_llvm_mc(), "-triple=amdgcn", "-mcpu=gfx1100", "-show-encoding"],
-    input=asm, capture_output=True, text=True
-  )
-  out = b''
-  for line in result.stdout.split('\n'):
-    if 'encoding:' in line:
-      enc = line.split('encoding:')[1].strip()
-      enc = enc.strip('[]').replace('0x', '').replace(',', '')
-      out += bytes.fromhex(enc)
-  if not out: raise ValueError(f"no encoding found: {result.stdout} {result.stderr}")
-  return out
+def _asm(asm: str) -> bytes: return llvm_assemble(asm, 'gfx1100', '+real-true16,+wavefrontsize32')
 
 class TestRDNA3Asm(unittest.TestCase):
   def test_full_program(self):
-    """Test the full program from rdna3fun.py matches llvm-mc output."""
+    """Test the full program from rdna3fun.py matches LLVM output."""
     program = [
       v_bfe_u32(v[1], v[0], 10, 10),
       s_load_b128(s[4:7], s[0:1], NULL),
@@ -67,30 +54,26 @@ s_waitcnt vmcnt(0)
 global_store_b32 v[0:1], v2, off
 s_endpgm
 """
-    expected = llvm_assemble(asm)
+    expected = _asm(asm)
     for inst,rt in zip(program, asm.strip().split("\n")): print(f"{disasm(inst):50s} {rt}")
     actual = b''.join(inst.to_bytes() for inst in program)
     self.assertEqual(actual, expected)
 
   def test_sop2_s_add_u32(self):
     inst = SOP2(SOP2Op.S_ADD_U32, s[3], s[0], s[1])
-    expected = llvm_assemble("s_add_u32 s3, s0, s1")
-    self.assertEqual(inst.to_bytes(), expected)
+    self.assertEqual(inst.to_bytes(), _asm("s_add_u32 s3, s0, s1"))
 
   def test_vop2_v_and_b32_inline_const(self):
     inst = v_and_b32_e32(v[0], 10, v[0])
-    expected = llvm_assemble("v_and_b32_e32 v0, 10, v0")
-    self.assertEqual(inst.to_bytes(), expected)
+    self.assertEqual(inst.to_bytes(), _asm("v_and_b32_e32 v0, 10, v0"))
 
   def test_sopp_s_endpgm(self):
     inst = s_endpgm()
-    expected = llvm_assemble("s_endpgm")
-    self.assertEqual(inst.to_bytes(), expected)
+    self.assertEqual(inst.to_bytes(), _asm("s_endpgm"))
 
   def test_sop1_s_mov_b32(self):
     inst = s_mov_b32(s[0], s[1])
-    expected = llvm_assemble("s_mov_b32 s0, s1")
-    self.assertEqual(inst.to_bytes(), expected)
+    self.assertEqual(inst.to_bytes(), _asm("s_mov_b32 s0, s1"))
 
 if __name__ == "__main__":
   unittest.main()
