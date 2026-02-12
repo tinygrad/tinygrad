@@ -1215,7 +1215,7 @@ class Tensor(OpMixin):
     x = x.reshape(tuple(index['size'] for index in indices_parsed if not isinstance(index['index'], sint)))
 
     # tensor indexing
-    if tops := [(d,i) for d,i in enumerate(i_ for i_ in indices_parsed if not isinstance(i_['index'], int)) if isinstance(i['index'], Tensor)]:
+    if tops := [(d,i) for d,i in enumerate(i_ for i_ in indices_parsed if not isinstance(i_['index'], sint)) if isinstance(i['index'], Tensor)]:
       # unload the tensor object into actual tensors
       dims, tensors, masks = [d for d,_ in tops], cast(list[Tensor], [i['index'] for _,i in tops]), []
       big_shape = _broadcast_shape(*(t.shape for t in tensors))
