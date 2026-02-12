@@ -23,7 +23,7 @@ ERRORS RAISED (lower priority - at least users know):
 """
 import unittest
 import numpy as np
-from tinygrad import Tensor, TinyJit
+from tinygrad import Tensor, TinyJit, Device
 from tinygrad.engine.jit import JitError
 from tinygrad.helpers import JIT
 
@@ -110,6 +110,15 @@ class TestJitFootguns(unittest.TestCase):
       new_buf, first = f(buf, frame)
       self.assertEqual(first.numpy().item(), expected_first)
       buf = new_buf
+
+  def test_intra_kernel_output_input_aliasing(self):
+    """JIT must copy aliased input when output buffer is fed back as input (read-write race in same kernel)."""
+    N = 1 << 20
+    f = TinyJit(lambda buf, new: buf[N//2:].cat(new), prune=True)
+    buf = Tensor.zeros(N, dtype='int8').contiguous().realize()
+    for i in range(10):
+      buf = f(buf, Tensor(np.ones(N//2, dtype=np.int8)*(i+1)))
+      np.testing.assert_array_equal(buf[:N//2].numpy(), np.full(N//2, i, dtype=np.int8))
 
   def test_slice_assign_works_without_realize(self):
     """Slice assign then read from same buffer - pending assigns are side-realized."""
