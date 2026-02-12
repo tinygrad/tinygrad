@@ -33,6 +33,10 @@ def is_packed(dt:DType, odt:DType|None = None) -> bool:
   return dt.itemsize < 4 and dt.base != dtypes.half and (not isinstance(odt, PtrDType) or odt.addrspace != AddrSpace.REG)
 def _packed_size(dt:PtrDType): return dt.size // (4//dt.itemsize) if is_packed(dt) else dt.size
 
+def is_nan(a):
+  bs, (exp, mant) = a.dtype.bitsize, dtypes.finfo(a.dtype)
+  return (a.bitcast(getattr(dtypes, f"uint{bs}")) & ((1 << (bs - 1)) - 1)) > (((1 << exp) - 1) << mant)
+
 wgsl_matcher = PatternMatcher([
   (UPat((Ops.CMPLT, Ops.XOR), src=(UPat(name="a", dtype=dtypes.bool), UPat.var("b")), name="c"),
    lambda a,b,c: a.cast(dtypes.int).alu(c.op, b.cast(dtypes.int)).cast(dtypes.bool)),
@@ -44,6 +48,8 @@ wgsl_matcher = PatternMatcher([
    lambda bidx,var: packed_store(bidx,var) if is_packed(var.dtype, bidx.dtype) else None),
   (UPat.var("a") << UPat.var("b"),lambda a,b:(a.bitcast(dtypes.uint32)<<b.cast(dtypes.uint32)).bitcast(a.dtype) if b.dtype!=dtypes.uint32 else None),
   (UPat.var("x") >> UPat.var("y"), lambda x,y: UOp(Ops.SHR, x.dtype, (x,y.cast(dtypes.uint))) if y.dtype != dtypes.uint else None),
+  # fix nan check: 'a != a -> is_nan()'
+  (UPat.var("a") != UPat.var("a"), is_nan),
   ]) + extra_pm
 
 class WGSLRenderer(CStyleLanguage):
@@ -86,8 +92,6 @@ class WGSLRenderer(CStyleLanguage):
       else f"{ctx[b]} = {ctx[v]};"),
     (UPat(Ops.INDEX, src=(UPat.var("b"), UPat.var("idx")), allow_any_len=True),
      lambda ctx,b,idx: f"{ctx[b]}[{strip_parens(ctx[idx]) if idx.arg is Ops.ADD else ctx[idx]}]"),
-    # fix nan check: 'a != a -> is_nan()'
-    (UPat.var("a") != UPat.var("a"), lambda ctx,a: f"(min({ctx[a]}, 1.0) == 1.0 && max({ctx[a]}, -1.0) == -1.0)"),
   ]) + base_rewrite
 
   def render_cast(self, dt:DType, val: str) -> str: return f"{self.type_map[dt]}({val})"
