@@ -6,8 +6,8 @@ Run with: AMD=1 python -m pytest test/external/external_test_gpu_crash.py -v
 """
 import unittest, re
 from tinygrad.device import Device
-from extra.assembly.amd.autogen.rdna3.ins import *  # noqa: F403
-from extra.assembly.amd.dsl import s, v, Inst, NULL
+from tinygrad.runtime.autogen.amd.rdna3.ins import *  # noqa: F403
+from tinygrad.renderer.amd.dsl import s, v, Inst, NULL
 
 def assemble(code:str, name:str="test") -> str:
   kd = {"next_free_vgpr": 8, "next_free_sgpr": 8, "wavefront_size32": 1, "user_sgpr_kernarg_segment_ptr": 1, "kernarg_size": 8}
@@ -37,7 +37,7 @@ class TestGPUCrash(unittest.TestCase):
     prg(self.dev.allocator.alloc(64), global_size=(1,1,1), local_size=(1,1,1), wait=True)
 
   def _run_insts(self, insts: list[Inst]):
-    from extra.assembly.amd.test.disasm import disasm
+    from test.amd.disasm import disasm
     self._run("\n".join(disasm(i) for i in insts))
 
   def _assert_gpu_fault(self, func):

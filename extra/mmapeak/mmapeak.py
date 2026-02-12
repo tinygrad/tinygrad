@@ -5,7 +5,7 @@ os.environ["AMD_AQL"] = "1"
 
 from tinygrad.device import Device
 from tinygrad.runtime.support.compiler_amd import HIPCompiler
-from extra.assembly.amd.dsl import Reg, Inst, s, v
+from tinygrad.renderer.amd.dsl import Reg, Inst, s, v
 
 NUM_WORKGROUPS = 96
 WAVE_SIZE = 32
@@ -51,7 +51,7 @@ if __name__=="__main__":
 
   COMPILER = HIPCompiler(arch)
   if arch in {'gfx1100', 'gfx1103', 'gfx1151'}:
-    from extra.assembly.amd.autogen.rdna3.ins import *
+    from tinygrad.runtime.autogen.amd.rdna3.ins import *
     if arch == 'gfx1103': NUM_WORKGROUPS = 8
     if arch == 'gfx1151': NUM_WORKGROUPS = 32
     launchBenchmark(v_wmma_bf16_16x16x16_bf16, (7,8,15))
@@ -61,7 +61,7 @@ if __name__=="__main__":
     launchBenchmark(v_wmma_i32_16x16x16_iu4, (7,8,9))
     launchBenchmark(v_wmma_i32_16x16x16_iu8, (7,8,11))
   elif arch in {'gfx1200', 'gfx1201'}:
-    from extra.assembly.amd.autogen.rdna4.ins import *
+    from tinygrad.runtime.autogen.amd.rdna4.ins import *
     # this instruction does not exist in the rdna4 isa, use the co version
     s_sub_u32 = s_sub_co_u32
     NUM_WORKGROUPS = 64
@@ -90,7 +90,7 @@ if __name__=="__main__":
     FLOPS_PER_MATMUL = 16*16*64*2
     launchBenchmark(v_swmmac_i32_16x16x64_iu4, (7,8,9,10,13,14), False)
   elif arch == 'gfx950':
-    from extra.assembly.amd.autogen.cdna.ins import *
+    from tinygrad.runtime.autogen.amd.cdna.ins import *
     DIRECTIVE = ".amdhsa_accum_offset 4"
     NUM_WORKGROUPS = 256
     WAVE_SIZE = 64
