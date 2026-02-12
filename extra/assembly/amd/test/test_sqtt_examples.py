@@ -8,8 +8,8 @@ from tinygrad.runtime.support.elf import elf_loader
 from extra.assembly.amd import decode_inst
 from extra.assembly.amd.autogen.rdna3.ins import SOPP
 from extra.assembly.amd.autogen.rdna3.enum import SOPPOp
-from extra.assembly.amd.sqtt import (decode, LAYOUT_HEADER, WAVESTART, WAVESTART_L4, WAVEEND, INST, INST_L4, VALUINST, IMMEDIATE, IMMEDIATE_MASK,
-                                     ALUEXEC, VMEMEXEC, PACKET_TYPES_L3, PACKET_TYPES_L4, InstOp, InstOpL4, print_packets)
+from extra.assembly.amd.sqtt import (decode, LAYOUT_HEADER, WAVESTART, WAVESTART_RDNA4, WAVEEND, INST, INST_RDNA4, VALUINST, IMMEDIATE, IMMEDIATE_MASK,
+                                     ALUEXEC, VMEMEXEC, PACKET_TYPES_RDNA3, PACKET_TYPES_RDNA4, InstOp, InstOpRDNA4, print_packets)
 from extra.assembly.amd.test.helpers import TARGET_TO_ARCH
 
 EXAMPLES_DIR = Path(__file__).parent.parent.parent.parent / "sqtt/examples"
@@ -19,7 +19,7 @@ OTHER_SIMD_OPS = {InstOp.OTHER_LDS_LOAD, InstOp.OTHER_LDS_STORE, InstOp.OTHER_LD
                   InstOp.OTHER_FLAT_STORE_128, InstOp.OTHER_GLOBAL_LOAD, InstOp.OTHER_GLOBAL_LOAD_VADDR,
                   InstOp.OTHER_GLOBAL_STORE_64, InstOp.OTHER_GLOBAL_STORE_96, InstOp.OTHER_GLOBAL_STORE_128,
                   InstOp.OTHER_GLOBAL_STORE_VADDR_128}
-OTHER_SIMD_OPS_L4 = {InstOpL4.OTHER_VMEM, InstOpL4.UNK_60}
+OTHER_SIMD_OPS_RDNA4 = {InstOpRDNA4.OTHER_VMEM, InstOpRDNA4.UNK_60}
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # ROCPROF DECODER
@@ -120,12 +120,12 @@ class SQTTExamplesTestBase(unittest.TestCase):
           self.assertIsInstance(packets[0], LAYOUT_HEADER, f"first packet should be LAYOUT_HEADER in {name}")
 
   def test_packet_types_valid(self):
-    all_classes = set(PACKET_TYPES_L3.values()) | set(PACKET_TYPES_L4.values())
+    all_classes = set(PACKET_TYPES_RDNA3.values()) | set(PACKET_TYPES_RDNA4.values())
     for name, (events, *_) in self.examples.items():
       for i, event in enumerate(events):
         with self.subTest(example=name, event=i):
           for pkt in decode(event.blob):
-            # Use isinstance to handle layout-specific subclasses (e.g., WAVESTART_L4)
+            # Use isinstance to handle layout-specific subclasses (e.g., WAVESTART_RDNA4)
             self.assertTrue(any(isinstance(pkt, cls) for cls in all_classes), f"unknown packet type {type(pkt)} in {name}")
 
   def test_wave_lifecycle(self):
@@ -133,7 +133,7 @@ class SQTTExamplesTestBase(unittest.TestCase):
       if "empty" in name: continue
       with self.subTest(example=name):
         all_packets = [p for e in events for p in decode(e.blob)]
-        self.assertGreater(len([p for p in all_packets if isinstance(p, (WAVESTART, WAVESTART_L4))]), 0, f"no WAVESTART in {name}")
+        self.assertGreater(len([p for p in all_packets if isinstance(p, (WAVESTART, WAVESTART_RDNA4))]), 0, f"no WAVESTART in {name}")
         self.assertGreater(len([p for p in all_packets if isinstance(p, WAVEEND)]), 0, f"no WAVEEND in {name}")
 
   def test_time_monotonic(self):
@@ -148,7 +148,7 @@ class SQTTExamplesTestBase(unittest.TestCase):
       if "gemm" not in name: continue
       with self.subTest(example=name):
         all_packets = [p for e in events for p in decode(e.blob)]
-        self.assertGreater(len([p for p in all_packets if isinstance(p, (INST, INST_L4))]), 0, f"no INST packets in {name}")
+        self.assertGreater(len([p for p in all_packets if isinstance(p, (INST, INST_RDNA4))]), 0, f"no INST packets in {name}")
 
   expected: dict[str, list[int]] = {}  # override in subclasses
   def test_packet_counts(self):
@@ -176,7 +176,7 @@ class SQTTExamplesTestBase(unittest.TestCase):
         for event in events:
           wave_starts: dict[tuple[int, int, int], int] = {}
           for p in decode(event.blob):
-            if isinstance(p, (WAVESTART, WAVESTART_L4)): wave_starts[(p.wave, p.simd, p.cu)] = p._time
+            if isinstance(p, (WAVESTART, WAVESTART_RDNA4)): wave_starts[(p.wave, p.simd, p.cu)] = p._time
             elif isinstance(p, WAVEEND) and (key := (p.wave, p.simd, p.cu)) in wave_starts:
               our_waves.append((wave_starts[key], p._time))
         self.assertEqual(sorted(our_waves), sorted(roc_waves), f"wave times mismatch in {name}")
@@ -193,7 +193,7 @@ class SQTTExamplesTestBase(unittest.TestCase):
         for event in events:
           for p in decode(event.blob):
             if isinstance(p, INST) and p.op not in OTHER_SIMD_OPS: our_insts.append(p._time)
-            elif isinstance(p, INST_L4) and p.op not in OTHER_SIMD_OPS_L4: our_insts.append(p._time)
+            elif isinstance(p, INST_RDNA4) and p.op not in OTHER_SIMD_OPS_RDNA4: our_insts.append(p._time)
             elif isinstance(p, VALUINST): our_insts.append(p._time)
             elif isinstance(p, IMMEDIATE): our_insts.append(p._time)
             elif isinstance(p, IMMEDIATE_MASK):

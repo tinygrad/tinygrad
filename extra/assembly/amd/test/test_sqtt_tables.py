@@ -1,4 +1,4 @@
-"""Tests comparing sqtt.py PACKET_TYPES_L3/L4 against AMD's rocprof-trace-decoder binary."""
+"""Tests comparing sqtt.py PACKET_TYPES_RDNA3/RDNA4 against AMD's rocprof-trace-decoder binary."""
 import unittest, struct, ctypes, pickle
 from pathlib import Path
 
@@ -122,22 +122,22 @@ class TestSQTTMatchesBinary(unittest.TestCase):
 
   def _test_bit_counts(self, layout: int):
     if not (tables := extract_bit_tables()): self.skipTest("rocprof-trace-decoder not installed")
-    from extra.assembly.amd.sqtt import PACKET_TYPES_L3, PACKET_TYPES_L4
-    for type_id, pkt_cls in {3: PACKET_TYPES_L3, 4: PACKET_TYPES_L4}[layout].items():
+    from extra.assembly.amd.sqtt import PACKET_TYPES_RDNA3, PACKET_TYPES_RDNA4
+    for type_id, pkt_cls in {3: PACKET_TYPES_RDNA3, 4: PACKET_TYPES_RDNA4}[layout].items():
       with self.subTest(packet=pkt_cls.__name__):
         self.assertEqual(pkt_cls._size_nibbles * 4, tables[layout - 2][type_id])
 
   def _test_encodings(self, layout: int):
     if not (encodings := extract_packet_encodings()): self.skipTest("rocprof-trace-decoder not installed")
-    from extra.assembly.amd.sqtt import PACKET_TYPES_L3, PACKET_TYPES_L4
-    for type_id, pkt_cls in {3: PACKET_TYPES_L3, 4: PACKET_TYPES_L4}[layout].items():
+    from extra.assembly.amd.sqtt import PACKET_TYPES_RDNA3, PACKET_TYPES_RDNA4
+    for type_id, pkt_cls in {3: PACKET_TYPES_RDNA3, 4: PACKET_TYPES_RDNA4}[layout].items():
       with self.subTest(packet=pkt_cls.__name__):
         self.assertEqual((pkt_cls.encoding.mask, pkt_cls.encoding.default), encodings[layout - 2][type_id])
 
   def _test_delta_fields(self, layout: int):
     if not (deltas := extract_delta_fields()): self.skipTest("rocprof-trace-decoder not installed")
-    from extra.assembly.amd.sqtt import PACKET_TYPES_L3, PACKET_TYPES_L4
-    for type_id, pkt_cls in {3: PACKET_TYPES_L3, 4: PACKET_TYPES_L4}[layout].items():
+    from extra.assembly.amd.sqtt import PACKET_TYPES_RDNA3, PACKET_TYPES_RDNA4
+    for type_id, pkt_cls in {3: PACKET_TYPES_RDNA3, 4: PACKET_TYPES_RDNA4}[layout].items():
       if type_id not in deltas[layout - 2]: continue
       delta = getattr(pkt_cls, 'delta', None)
       actual = (0, 0) if delta is None else (delta.lo, delta.hi + 1)

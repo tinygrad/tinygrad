@@ -95,7 +95,7 @@ class InstOp(Enum):
   SALU_SAVEEXEC = 0x72    # s_*_saveexec_b32/b64
   VALU_CMPX = 0x73        # v_cmpx_*
 
-class InstOpL4(Enum):
+class InstOpRDNA4(Enum):
   """SQTT instruction operation types for RDNA4 (gfx1200). Different encoding from RDNA3."""
   # TODO: we need to do discovery of all of these from instructions
   SALU = 0x0
@@ -144,7 +144,7 @@ class TS_DELTA_S8_W3(PacketType):
   delta = bits[10:8]
   _padding = bits[63:11]
 
-class TS_DELTA_S8_W3_L4(PacketType):  # Layout 4: 64->72 bits
+class TS_DELTA_S8_W3_RDNA4(PacketType):  # Layout 4: 64->72 bits
   encoding = bits[6:0] == 0b0100001
   delta = bits[10:8]
   _padding = bits[71:11]
@@ -154,7 +154,7 @@ class TS_DELTA_S5_W3(PacketType):
   delta = bits[7:5]
   _padding = bits[51:8]
 
-class TS_DELTA_S5_W3_L4(PacketType):  # Layout 4: 52->56 bits
+class TS_DELTA_S5_W3_RDNA4(PacketType):  # Layout 4: 52->56 bits
   encoding = bits[4:0] == 0b00110
   delta = bits[9:7]
   _padding = bits[55:10]
@@ -171,7 +171,7 @@ class TS_DELTA_OR_MARK(PacketType):
   @property
   def is_marker(self) -> bool: return bool(self.bit9 and not self.bit8)
 
-class TS_DELTA_OR_MARK_L4(PacketType):  # Layout 4: 48->64 bits
+class TS_DELTA_OR_MARK_RDNA4(PacketType):  # Layout 4: 48->64 bits
   encoding = bits[6:0] == 0b0000001
   delta = bits[63:12]
   bit7 = bits[7:7]
@@ -185,7 +185,7 @@ class TS_DELTA_S5_W2(PacketType):
   delta = bits[6:5]
   _padding = bits[47:7]
 
-class TS_DELTA_S5_W2_L4(PacketType):  # Layout 4: 48->40 bits
+class TS_DELTA_S5_W2_RDNA4(PacketType):  # Layout 4: 48->40 bits
   encoding = bits[4:0] == 0b11100
   delta = bits[6:5]
   _padding = bits[39:7]
@@ -246,7 +246,7 @@ class WAVESTART(PacketType):  # exclude: 1 << 4
   @property
   def cu(self) -> int: return self.cu_lo | (self.flag7 << 3)
 
-class WAVESTART_L4(PacketType):  # Layout 4 has wave field at different position
+class WAVESTART_RDNA4(PacketType):  # Layout 4 has wave field at different position
   encoding = bits[4:0] == 0b01100
   delta = bits[6:5]
   flag7 = bits[7:7]
@@ -262,7 +262,7 @@ class WAVEALLOC(PacketType):  # exclude: 1 << 10
   delta = bits[7:5]
   _padding = bits[19:8]
 
-class WAVEALLOC_L4(PacketType):  # Layout 4: 20->24 bits
+class WAVEALLOC_RDNA4(PacketType):  # Layout 4: 20->24 bits
   encoding = bits[4:0] == 0b00101
   delta = bits[7:5]
   _padding = bits[23:8]
@@ -272,7 +272,7 @@ class PERF(PacketType):  # exclude: 1 << 11
   delta = bits[7:5]
   arg = bits[27:8]
 
-class PERF_L4(PacketType):  # Layout 4: 28->32 bits
+class PERF_RDNA4(PacketType):  # Layout 4: 28->32 bits
   encoding = bits[4:0] == 0b10110
   delta = bits[9:7]
   arg = bits[31:10]
@@ -335,13 +335,13 @@ class INST(PacketType):
   wave = bits[12:8]
   op = bits[19:13].enum(InstOp)
 
-class INST_L4(PacketType):  # Layout 4: different delta position and InstOp encoding
+class INST_RDNA4(PacketType):  # Layout 4: different delta position and InstOp encoding
   encoding = bits[2:0] == 0b010
   delta = bits[5:3]
   flag1 = bits[6:6]
   flag2 = bits[7:7]
   wave = bits[12:8]
-  op = bits[19:13].enum(InstOpL4)
+  op = bits[19:13].enum(InstOpRDNA4)
 
 class UTILCTR(PacketType):
   encoding = bits[6:0] == 0b0110001
@@ -349,15 +349,15 @@ class UTILCTR(PacketType):
   ctr = bits[47:9]
 
 # Packet types with rocprof type IDs as keys
-PACKET_TYPES_L3: dict[int, type[PacketType]] = {
+PACKET_TYPES_RDNA3: dict[int, type[PacketType]] = {
   1: VALUINST, 2: VMEMEXEC, 3: ALUEXEC, 4: IMMEDIATE, 5: IMMEDIATE_MASK, 6: WAVERDY, 7: TS_DELTA_S8_W3, 8: WAVEEND,
   9: WAVESTART, 10: TS_DELTA_S5_W2, 11: WAVEALLOC, 12: TS_DELTA_S5_W3, 13: PERF, 14: UTILCTR, 15: TS_DELTA_SHORT,
   16: NOP, 17: TS_WAVE_STATE, 18: EVENT, 19: EVENT_BIG, 20: REG, 21: SNAPSHOT, 22: TS_DELTA_OR_MARK, 23: LAYOUT_HEADER, 24: INST,
 }
-PACKET_TYPES_L4: dict[int, type[PacketType]] = {
-  **PACKET_TYPES_L3,
-  7: TS_DELTA_S8_W3_L4, 9: WAVESTART_L4, 10: TS_DELTA_S5_W2_L4, 11: WAVEALLOC_L4,
-  12: TS_DELTA_S5_W3_L4, 13: PERF_L4, 22: TS_DELTA_OR_MARK_L4, 24: INST_L4,
+PACKET_TYPES_RDNA4: dict[int, type[PacketType]] = {
+  **PACKET_TYPES_RDNA3,
+  7: TS_DELTA_S8_W3_RDNA4, 9: WAVESTART_RDNA4, 10: TS_DELTA_S5_W2_RDNA4, 11: WAVEALLOC_RDNA4,
+  12: TS_DELTA_S5_W3_RDNA4, 13: PERF_RDNA4, 22: TS_DELTA_OR_MARK_RDNA4, 24: INST_RDNA4,
 }
 def _build_decode_tables(packet_types: dict[int, type[PacketType]]) -> tuple[dict[int, tuple], bytes]:
   # Build state table: byte -> opcode. Sort by mask specificity (more bits first), NOP last
@@ -372,8 +372,8 @@ def _build_decode_tables(packet_types: dict[int, type[PacketType]]) -> tuple[dic
     decode_info[opcode] = (pkt_cls, pkt_cls._size_nibbles, delta_field.lo if delta_field else 0, delta_field.mask if delta_field else 0, special)
   return decode_info, state_table
 
-_DECODE_INFO_L3, _STATE_TABLE_L3 = _build_decode_tables(PACKET_TYPES_L3)
-_DECODE_INFO_L4, _STATE_TABLE_L4 = _build_decode_tables(PACKET_TYPES_L4)
+_DECODE_INFO_RDNA3, _STATE_TABLE_RDNA3 = _build_decode_tables(PACKET_TYPES_RDNA3)
+_DECODE_INFO_RDNA4, _STATE_TABLE_RDNA4 = _build_decode_tables(PACKET_TYPES_RDNA4)
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # DECODER
@@ -382,7 +382,7 @@ _DECODE_INFO_L4, _STATE_TABLE_L4 = _build_decode_tables(PACKET_TYPES_L4)
 def decode(data: bytes) -> Iterator[PacketType]:
   """Decode raw SQTT blob, yielding packet instances. Auto-detects layout from LAYOUT_HEADER."""
   n, reg, pos, nib_off, nib_count, time = len(data), 0, 0, 0, 16, 0
-  decode_info, state_table = _DECODE_INFO_L3, _STATE_TABLE_L3  # default to layout 3, will update after seeing LAYOUT_HEADER
+  decode_info, state_table = _DECODE_INFO_RDNA3, _STATE_TABLE_RDNA3  # default to layout 3, will update after seeing LAYOUT_HEADER
 
   while pos + ((nib_count + nib_off + 1) >> 1) <= n:
     need = nib_count - nib_off
@@ -407,7 +407,7 @@ def decode(data: bytes) -> Iterator[PacketType]:
     # detect layout from first LAYOUT_HEADER and switch decode tables if needed
     # NOTE: CDNA uses a completely different 16-bit header format, not nibbles - not supported here
     if pkt_cls is LAYOUT_HEADER and pkt.layout == 4:
-      decode_info, state_table = _DECODE_INFO_L4, _STATE_TABLE_L4
+      decode_info, state_table = _DECODE_INFO_RDNA4, _STATE_TABLE_RDNA4
     yield pkt
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -424,26 +424,26 @@ PACKET_COLORS = {
 def format_packet(p) -> str:
   from tinygrad.helpers import colored
   name = type(p).__name__
-  if isinstance(p, (INST, INST_L4)):
-    op_name = p.op.name if isinstance(p.op, (InstOp, InstOpL4)) else f"0x{p.op:02x}"
+  if isinstance(p, (INST, INST_RDNA4)):
+    op_name = p.op.name if isinstance(p.op, (InstOp, InstOpRDNA4)) else f"0x{p.op:02x}"
     fields = f"wave={p.wave} op={op_name}" + (" flag1" if p.flag1 else "") + (" flag2" if p.flag2 else "")
   elif isinstance(p, VALUINST): fields = f"wave={p.wave}" + (" flag" if p.flag else "")
   elif isinstance(p, ALUEXEC): fields = f"src={p.src.name if isinstance(p.src, AluSrc) else p.src}"
   elif isinstance(p, VMEMEXEC): fields = f"src={p.src.name if isinstance(p.src, MemSrc) else p.src}"
-  elif isinstance(p, (WAVESTART, WAVESTART_L4, WAVEEND)): fields = f"wave={p.wave} simd={p.simd} cu={p.cu}"
+  elif isinstance(p, (WAVESTART, WAVESTART_RDNA4, WAVEEND)): fields = f"wave={p.wave} simd={p.simd} cu={p.cu}"
   elif hasattr(p, '_fields'):
-    filt = {'delta', 'encoding'} if not isinstance(p, (TS_DELTA_OR_MARK, TS_DELTA_OR_MARK_L4)) else {'encoding'}
+    filt = {'delta', 'encoding'} if not isinstance(p, (TS_DELTA_OR_MARK, TS_DELTA_OR_MARK_RDNA4)) else {'encoding'}
     fields = " ".join(f"{k}=0x{getattr(p, k):x}" if k in {'snap', 'val32'} else f"{k}={getattr(p, k)}"
                       for k in p._fields if not k.startswith('_') and k not in filt)
   else: fields = ""
-  return f"{p._time:8}: {colored(f'{name:18}', PACKET_COLORS.get(name.replace('_L4', ''), 'white'))} {fields}"
+  return f"{p._time:8}: {colored(f'{name:18}', PACKET_COLORS.get(name.replace('_RDNA4', ''), 'white'))} {fields}"
 
 def print_packets(packets) -> None:
   from tinygrad.helpers import getenv
   skip = {"NOP", "TS_DELTA_SHORT", "TS_WAVE_STATE", "TS_DELTA_OR_MARK",
           "TS_DELTA_S5_W2", "TS_DELTA_S5_W3", "TS_DELTA_S8_W3", "REG", "EVENT"} if not getenv("NOSKIP") else {"NOP"}
   for p in packets:
-    if type(p).__name__.replace("_L4", "") not in skip: print(format_packet(p))
+    if type(p).__name__.replace("_RDNA4", "") not in skip: print(format_packet(p))
 
 if __name__ == "__main__":
   import sys, pickle
