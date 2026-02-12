@@ -853,16 +853,14 @@ jobs:
         key: osx-webgpu
         deps: testing
         webgpu: 'true'
-    - name: Test infinity math in WGSL
-      run: WEBGPU=1 python -m pytest -n=auto test/backend/test_renderer_failures.py::TestWGSLFailures::test_multiply_infinity --durations=20
     - name: Build WEBGPU Efficientnet
       run: WEBGPU=1 WEBGPU_BACKEND="WGPUBackendType_Metal" python3 -m examples.compile_efficientnet
     - name: Run selected webgpu tests
       run: WEBGPU=1 WEBGPU_BACKEND="WGPUBackendType_Metal" python3 -m pytest -n=auto test/backend --durations=20
-    - name: Clean npm cache
-      run: npm cache clean --force
-    - name: Install Puppeteer
-      run: npm install puppeteer
+    #- name: Clean npm cache
+    #  run: npm cache clean --force
+    #- name: Install Puppeteer
+    #  run: npm install puppeteer
     # this is also flaky
     #- name: Run WEBGPU Efficientnet
     #  run: node test/web/test_webgpu.js
