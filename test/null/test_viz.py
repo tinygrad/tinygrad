@@ -1,4 +1,4 @@
-import unittest, decimal, json, struct
+import unittest, decimal, json, struct, sys
 from dataclasses import dataclass
 from typing import Generator
 
@@ -437,6 +437,7 @@ class TestVizProfiler(BaseTestViz):
     # graph grouped with its device, memory at the end
     self.assertListEqual(list(j['layout']), ['NV', 'NV Graph', 'NV:SDMA:0', 'NV:1'])
 
+  @unittest.skipIf(sys.platform == 'win32', "TODO: ops_amd import fails on windows")
   def test_multi_sdma_ordering(self):
     props = {"gfx_target_version": 0}
     D, St, En = decimal.Decimal, decimal.Decimal(1000), decimal.Decimal(1010)
