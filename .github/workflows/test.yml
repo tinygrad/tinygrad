@@ -973,5 +973,5 @@ jobs:
         shell: bash
         run: |
           python -c "from tinygrad import Device; assert Device.DEFAULT == 'NULL'"
-          DEBUG=4 python3 test/test_tiny.py TestTiny.test_plus
+          DEBUG=4 python3 test/backend/test_ops.py TestOps.test_add
           python -m pytest -n=auto test/backend/test_ops.py --durations=20
