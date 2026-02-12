@@ -10,8 +10,8 @@ from tinygrad.device import Compiler
 from tinygrad.runtime.support.compiler_amd import HIPCompiler
 from tinygrad.viz.serve import amdgpu_cfg
 
-from extra.assembly.amd.autogen.rdna3.ins import *
-from extra.assembly.amd.dsl import s
+from tinygrad.runtime.autogen.amd.rdna3.ins import *
+from tinygrad.renderer.amd.dsl import s
 
 # TODO: this belongs to the dsl infrastructure
 from extra.gemm.amd_asm_matmul import Kernel
