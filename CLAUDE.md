@@ -41,10 +41,10 @@ Schedules are cached by graph structure. BIND nodes (variables with bound values
 python -m pytest test/unit/test_schedule_cache.py -xvs
 
 # Run with timeout
-python -m pytest test/test_symbolic_ops.py -x --timeout=60
+python -m pytest test/backend/test_symbolic_ops.py -x --timeout=60
 
 # Debug with print
-DEBUG=2 python -m pytest test/test_schedule.py::test_name -xvs
+DEBUG=2 python -m pytest test/backend/test_schedule.py::test_name -xvs
 
 # Visualize UOp graphs
 VIZ=1 python -c "from tinygrad import Tensor; Tensor.ones(10).sum().realize()"
