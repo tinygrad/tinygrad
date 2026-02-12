@@ -73,7 +73,8 @@ class Kernel:
     lines, pos = [], 0
     for inst in self.instructions:
       if (label := self.label_at_pos.get(pos)) is not None: lines.append(f"{label}:")
-      lines.append(f"  {inst.disasm()}" if inst._target is None else f" {inst.op_name.lower()} {inst._target}")
+      from extra.assembly.amd.test.disasm import disasm
+      lines.append(f"  {disasm(inst)}" if inst._target is None else f" {inst.op_name.lower()} {inst._target}")
       pos += inst.size()
     return "\n".join(lines)
 

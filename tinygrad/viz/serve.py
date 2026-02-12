@@ -316,7 +316,7 @@ def sqtt_timeline(data:bytes, lib:bytes, target:int) -> list[ProfileEvent]:
   def add(name:str, p:PacketType, idx=0, width=1, op_name=None, wave=None, info:InstructionInfo|None=None) -> None:
     if hasattr(p, "wave"): wave = p.wave
     rows.setdefault(r:=(f"WAVE:{wave}" if wave is not None else f"{p.__class__.__name__}:0 {name}"))
-    key = TracingKey(f"{op_name if op_name is not None else name} OP:{idx}", ret=info.inst.disasm() if info is not None else None)
+    key = TracingKey(f"{op_name if op_name is not None else name} OP:{idx}", ret=str(info.inst) if info is not None else None)
     ret.append(ProfileRangeEvent(r, key, Decimal(p._time), Decimal(p._time+width)))
   for p, info in map_insts(data, lib, target):
     if len(ret) > getenv("MAX_SQTT_PKTS", 50_000): break
@@ -344,7 +344,7 @@ def unpack_sqtt(key:tuple[str, int], data:list, p:ProfileProgramEvent) -> tuple[
   from extra.sqtt.roc import decode
   base = unwrap(p.base)
   addr_table = amd_decode(unwrap(p.lib), amdgpu_targets[p.device])
-  disasm:dict[int, tuple[str, int]] = {addr+base:(inst.disasm(), inst.size()) for addr, inst in addr_table.items()}
+  disasm:dict[int, tuple[str, int]] = {addr+base:(str(inst), inst.size()) for addr, inst in addr_table.items()}
   rctx = decode(data, {p.tag:disasm})
   cu_events:dict[str, list[ProfileEvent]] = {}
   # * INST waves
@@ -470,7 +470,7 @@ def amdgpu_cfg(lib:bytes, target:int) -> dict:
   blocks:dict[int, list[int]] = {}
   paths:dict[int, dict[int, int]] = {}
   lines:list[str] = []
-  disasm = {pc:inst.disasm() for pc,inst in pc_table.items()}
+  disasm = {pc:str(inst) for pc,inst in pc_table.items()}
   asm_width = max(len(asm) for asm in disasm.values())
   for pc, inst in pc_table.items():
     # skip instructions only used for padding
