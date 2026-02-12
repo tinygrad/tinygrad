@@ -1,4 +1,4 @@
-import glob, importlib, pathlib, shutil, subprocess, tarfile
+import glob, importlib, os, pathlib, shutil, subprocess, tarfile
 from tinygrad.helpers import fetch, flatten, system, getenv
 
 root = (here:=pathlib.Path(__file__).parent).parents[2]
@@ -23,12 +23,12 @@ def load(name, dll, files, **kwargs):
     if (srcs:=kwargs.pop('srcs', None)):
       shutil.rmtree(srcpath:=f"/tmp/tinyautogen-src-{name}/", ignore_errors=True)
       os.makedirs(srcpath)
-      for src in (srcs if isinstance(src, list) else [src]):
+      for src in (srcs if isinstance(srcs, list) else [srcs]):
         if 'tar' in src:
           # dangerous for arbitrary urls!
           with tarfile.open(fetch(src, gunzip=src.endswith("gz"))) as tf:
             tf.extractall(srcpath)
-            if not isinstance(srcs, list): srcpath += tf.getnames()[0]
+            if not isinstance(srcs, list): srcpath += tf.getnames()[0] # if we just have a single tarball, make this the root
         else: fetch(src, name=srcpath + src.split('/')[-1])
       files, kwargs['args'] = [str(f).format(srcpath) for f in files], [a.format(srcpath) for a in kwargs.get('args', [])]
       kwargs['anon_names'] = {k.format(srcpath):v for k,v in kwargs.get('anon_names', {}).items()}
