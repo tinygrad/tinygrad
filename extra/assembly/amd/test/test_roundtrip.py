@@ -98,13 +98,7 @@ class TestTinygradKernelRoundtrip(unittest.TestCase):
       code = next((s.content for s in elf_loader(compiler.compile(kernel.src))[1] if s.name == ".text"))
       while offset < len(code):
         remaining = code[offset:]
-        try:
-          fmt = detect_format(remaining, arch)
-        except ValueError:
-          decoded_instrs.append((ki, offset, None, None, None, False, "no format"))
-          offset += 4
-          continue
-
+        fmt = detect_format(remaining, arch)
         base_size = fmt._size()
         if len(remaining) < base_size:
           break
