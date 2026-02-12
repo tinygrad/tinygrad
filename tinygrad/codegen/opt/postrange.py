@@ -353,6 +353,7 @@ def apply_opts(ast:UOp, ren:Renderer) -> UOp:
       k = hand_coded_optimizations(k)
   return k.get_optimized_ast(name_override=ast.arg.name if ast.arg is not None and ast.arg.name != "test" else None)
 
+# max image width: 16384 * 4 = 65536. with real 2d images the real max size is 4 * 16384 ** 2
 def _valid_image_dt(dt): return dt.base in (dtypes.half, dtypes.float) and not isinstance(dt, ImageDType) and dt.size <= 65536 and dt.nbytes()%64 == 0
 def make_image(pa, off, idx):
   if (idx.tag is None or idx.tag) and _valid_image_dt(dt:=pa.dtype):
