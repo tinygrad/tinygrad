@@ -1200,9 +1200,8 @@ class Tensor(OpMixin):
     # movement op indexing
     if mops := [i for i in indices_parsed if i['index'] is not None]:
       # flip negative strides
-      shrinks, strides = zip(*((i['boundary'], i['stride']) for i in mops))
-      x = x.shrink(shrinks).flip(tuple(i for i,st in enumerate(strides) if st < 0))
-      strides = tuple(map(abs, strides))
+      x = x.shrink(tuple(m['boundary'] for m in mops)).flip(tuple(i for i, m in enumerate(mops) if m['stride'] < 0))
+      strides = tuple(abs(m['stride']) for m in mops)
       # apply stride
       if any(st != 1 for st in strides):
         # pad shape to multiple of stride
@@ -1211,13 +1210,13 @@ class Tensor(OpMixin):
         x = x.reshape(tuple(flatten((s // st, st) for s, st in zip(x.shape, strides))))
         x = x.shrink(tuple(flatten(((0, s), (0, 1)) for s in x.shape[::2]))).reshape(x.shape[::2])
 
-    # dim injection from None by including None dim size (which is 1) and dim collapse by skipping int dim size
-    x = x.reshape(tuple(index['size'] for index in indices_parsed if not isinstance(index['index'], sint)))
+    # dim injection from None (size 1) and dim collapse by skipping sint dims
+    x_dims = [p for p in indices_parsed if not isinstance(p['index'], sint)]
+    x = x.reshape(tuple(p['size'] for p in x_dims))
 
     # tensor indexing
-    if tops := [(d,i) for d,i in enumerate(i_ for i_ in indices_parsed if not isinstance(i_['index'], sint)) if isinstance(i['index'], Tensor)]:
-      # unload the tensor object into actual tensors
-      dims, tensors, masks = [d for d,_ in tops], cast(list[Tensor], [i['index'] for _,i in tops]), []
+    if tops := [(d, p) for d, p in enumerate(x_dims) if isinstance(p['index'], Tensor)]:
+      dims, tensors, masks = [d for d, _ in tops], cast(list[Tensor], [p['index'] for _, p in tops]), []
       big_shape = _broadcast_shape(*(t.shape for t in tensors))
 
       # consecutive tensor indices with int shapes: use linear indexing instead of one-hot masks
