@@ -79,33 +79,21 @@ def _extract_text(obj:bytes) -> bytes:
   """Extract .text section from ELF object bytes."""
   return next(s.content for s in elf_loader(obj)[1] if s.name == ".text")
 
-def _split_by_sentinel(text:bytes, n:int) -> list[bytes]:
-  """Split .text section by sentinel markers, returning n chunks."""
-  results, start = [], 0
-  for _ in range(n):
-    idx = text.find(_SENTINEL, start)
-    assert idx != -1, "sentinel not found in .text section"
-    results.append(bytes(text[start:idx]))
-    start = idx + len(_SENTINEL)
-  return results
-
-def llvm_assemble(asm:str, mcpu:str, mattr:str) -> bytes:
-  """Assemble a single instruction/block and return raw machine code bytes."""
-  src = f".text\n{asm}\n{_SENTINEL_ASM}\n"
-  return _split_by_sentinel(_extract_text(_emit_obj(src, mcpu, mattr)), 1)[0]
-
-def llvm_assemble_batch(instrs:list[str], mcpu:str, mattr:str) -> list[bytes]:
-  """Assemble multiple instructions in one LLVM emission, return per-instruction bytes."""
+def llvm_assemble(instrs:list[str], mcpu:str, mattr:str) -> list[bytes]:
+  """Assemble instructions in one LLVM emission, return per-instruction bytes."""
   if not instrs: return []
   parts = []
   for instr in instrs:
     parts.append(instr)
     parts.append(_SENTINEL_ASM)
-  return _split_by_sentinel(_extract_text(_emit_obj('.text\n' + '\n'.join(parts) + '\n', mcpu, mattr)), len(instrs))
-
-def llvm_assemble_to_obj(asm_text:str, mcpu:str, mattr:str) -> bytes:
-  """Assemble asm text to an ELF object."""
-  return _emit_obj(asm_text, mcpu, mattr)
+  text = _extract_text(_emit_obj('.text\n' + '\n'.join(parts) + '\n', mcpu, mattr))
+  results, start = [], 0
+  for _ in instrs:
+    idx = text.find(_SENTINEL, start)
+    assert idx != -1, "sentinel not found in .text section"
+    results.append(bytes(text[start:idx]))
+    start = idx + len(_SENTINEL)
+  return results
 
 @functools.cache
 def _get_disasm_context(mcpu:str, mattr:str) -> llvm.LLVMDisasmContextRef:
@@ -139,6 +127,11 @@ def llvm_filter_valid_asm(tests:list[tuple[str, bytes]], mcpu:str, mattr:str) ->
     parts.append(asm)
     parts.append(_SENTINEL_ASM)
   text = _extract_text(_emit_obj('.text\n' + '\n'.join(parts) + '\n', mcpu, mattr, diag_errors))
-  chunks = _split_by_sentinel(text, len(tests))
+  results, start = [], 0
+  for _ in tests:
+    idx = text.find(_SENTINEL, start)
+    assert idx != -1, "sentinel not found in .text section"
+    results.append(bytes(text[start:idx]))
+    start = idx + len(_SENTINEL)
   # Invalid instructions produce 0 bytes; also filter where LLVM roundtrip doesn't match original
-  return [(asm, data) for (asm, data), chunk in zip(tests, chunks) if len(chunk) > 0 and chunk == data]
+  return [(asm, data) for (asm, data), chunk in zip(tests, results) if len(chunk) > 0 and chunk == data]

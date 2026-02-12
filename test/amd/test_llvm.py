@@ -12,7 +12,7 @@ import unittest, re, functools
 from tinygrad.helpers import fetch
 from test.amd.disasm import disasm
 from tinygrad.renderer.amd import decode_inst, detect_format
-from test.amd.helpers import llvm_assemble_batch, llvm_filter_valid_asm, get_target, get_mattr
+from test.amd.helpers import llvm_assemble, llvm_filter_valid_asm, get_target, get_mattr
 
 LLVM_BASE = "https://raw.githubusercontent.com/llvm/llvm-project/llvmorg-21.1.0/llvm/test/MC/AMDGPU"
 
@@ -131,7 +131,7 @@ def _make_test(f: str, arch: str, test_type: str):
       print(f"{name}: {len(to_test)} passed, {skipped} skipped")
       self.assertEqual(skipped, 0, f"{name}: {skipped} tests skipped, expected 0")
       # Compare disasm->reassemble with original encoding (filter reserved bit cases where LLVM can't reproduce)
-      llvm_bytes = llvm_assemble_batch([t[1] for t in to_test], mcpu, get_mattr(arch))
+      llvm_bytes = llvm_assemble([t[1] for t in to_test], mcpu, get_mattr(arch))
       valid = [(enc, d, llvm) for (enc, d), llvm in zip(to_test, llvm_bytes) if llvm == enc]
       print(f"{name}: {len(valid)}/{len(to_test)} matched LLVM encoding")
       for enc, _, llvm in valid: self.assertEqual(llvm, enc)

@@ -3,7 +3,7 @@
 import unittest, io, sys, re
 from tinygrad import Device
 from tinygrad.renderer.amd import detect_format
-from test.amd.helpers import llvm_assemble, llvm_assemble_batch, llvm_disasm, get_target, get_mattr
+from test.amd.helpers import llvm_assemble, llvm_disasm, get_target, get_mattr
 from test.amd.disasm import disasm
 
 def disassemble_lib(lib: bytes, compiler) -> list[tuple[str, bytes]]:
@@ -31,17 +31,17 @@ def disassemble_lib(lib: bytes, compiler) -> list[tuple[str, bytes]]:
 
 def compile_asm(instr: str, arch: str = 'rdna3') -> bytes:
   """Compile a single instruction using LLVM."""
-  return llvm_assemble(instr, get_target(arch), get_mattr(arch))
+  return llvm_assemble([instr], get_target(arch), get_mattr(arch))[0]
 
 def compile_asm_batch(instrs: list[str], arch: str = 'rdna3') -> list[bytes]:
   """Compile multiple instructions with a single LLVM emission."""
-  return llvm_assemble_batch(instrs, get_target(arch), get_mattr(arch))
+  return llvm_assemble(instrs, get_target(arch), get_mattr(arch))
 
 def compile_and_disasm_batch(instrs: list[str], arch: str = 'rdna3') -> list[str]:
   """Compile instructions with LLVM and get LLVM's disassembly."""
   if not instrs: return []
   mcpu, mattr = get_target(arch), get_mattr(arch)
-  code = llvm_assemble('\n'.join(instrs), mcpu, mattr)
+  code = b''.join(llvm_assemble(instrs, mcpu, mattr))
   return llvm_disasm(code, mcpu, mattr)[:len(instrs)]
 
 @unittest.skipUnless(Device.DEFAULT == "AMD", "requires AMD device")
