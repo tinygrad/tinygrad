@@ -418,7 +418,7 @@ class TestWMMAF16(unittest.TestCase):
 
   def test_v_wmma_f16_16x16x16_f16_all_ones(self):
     """V_WMMA_F16_16X16X16_F16 with all ones produces 16.0 in f16."""
-    instructions = []
+    instructions: list[Inst] = []
     instructions.append(s_mov_b32(s[0], 0x3c003c00))  # packed f16 1.0
     # Initialize A matrix in v[16:23] (8 regs)
     for i in range(16, 24):
@@ -442,7 +442,7 @@ class TestWMMAF16(unittest.TestCase):
 
   def test_v_wmma_f16_16x16x16_f16_with_accumulator(self):
     """V_WMMA_F16_16X16X16_F16 with non-zero accumulator."""
-    instructions = []
+    instructions: list[Inst] = []
     instructions.append(s_mov_b32(s[0], 0x3c003c00))  # packed f16 1.0
     instructions.append(s_mov_b32(s[1], 0x4500))  # f16 5.0 in lo bits only
     # Initialize A matrix in v[16:23] (8 regs)
@@ -471,7 +471,7 @@ class TestWMMAF16(unittest.TestCase):
     Regression test: WMMA was using static register indices instead of dynamic.
     This test uses v[64:71] for A, v[80:87] for B, v[96:103] for C/D.
     """
-    instructions = []
+    instructions: list[Inst] = []
     instructions.append(s_mov_b32(s[0], 0x3c003c00))  # packed f16 1.0
     # Initialize A matrix in v[64:71] (8 regs)
     for i in range(64, 72):
@@ -502,7 +502,7 @@ class TestWMMA(unittest.TestCase):
 
   def test_v_wmma_f32_16x16x16_f16_all_ones(self):
     """V_WMMA_F32_16X16X16_F16 with all ones produces 16.0."""
-    instructions = []
+    instructions: list[Inst] = []
     instructions.append(s_mov_b32(s[0], 0x3c003c00))  # packed f16 1.0
     for i in range(16, 32):
       instructions.append(v_mov_b32_e32(v[i], s[0]))
@@ -518,7 +518,7 @@ class TestWMMA(unittest.TestCase):
 
   def test_v_wmma_f32_16x16x16_f16_with_accumulator(self):
     """V_WMMA_F32_16X16X16_F16 with non-zero accumulator."""
-    instructions = []
+    instructions: list[Inst] = []
     instructions.append(s_mov_b32(s[0], 0x3c003c00))
     instructions.append(s_mov_b32(s[1], f2i(5.0)))
     for i in range(16, 32):
@@ -540,7 +540,7 @@ class TestWMMA(unittest.TestCase):
     causing incorrect results when registers weren't at the default positions.
     This test uses v[64:71] for A, v[80:87] for B, v[96:103] for C/D.
     """
-    instructions = []
+    instructions: list[Inst] = []
     instructions.append(s_mov_b32(s[0], 0x3c003c00))  # packed f16 1.0
     # Initialize A matrix in v[64:71]
     for i in range(64, 72):
@@ -569,7 +569,7 @@ class TestWMMABF16(unittest.TestCase):
 
   def test_v_wmma_f32_16x16x16_bf16_all_ones(self):
     """V_WMMA_F32_16X16X16_BF16 with all ones produces 16.0."""
-    instructions = []
+    instructions: list[Inst] = []
     # BF16 1.0 = 0x3f80, packed = 0x3f803f80
     instructions.append(s_mov_b32(s[0], 0x3f803f80))
     for i in range(16, 32):
@@ -586,7 +586,7 @@ class TestWMMABF16(unittest.TestCase):
 
   def test_v_wmma_f32_16x16x16_bf16_with_accumulator(self):
     """V_WMMA_F32_16X16X16_BF16 with non-zero accumulator."""
-    instructions = []
+    instructions: list[Inst] = []
     # BF16 1.0 = 0x3f80, packed = 0x3f803f80
     instructions.append(s_mov_b32(s[0], 0x3f803f80))
     instructions.append(s_mov_b32(s[1], f2i(5.0)))

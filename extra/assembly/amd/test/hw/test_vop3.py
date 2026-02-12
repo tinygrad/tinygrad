@@ -725,7 +725,7 @@ class TestLaneOps(unittest.TestCase):
     # v[5] should have the value only in lane 1
     for lane in range(4):
       if lane == 1:
-        self.assertEqual(st.vgpr[lane][5], 0x12345678, f"v[5] lane 1 should have 0x12345678")
+        self.assertEqual(st.vgpr[lane][5], 0x12345678, "v[5] lane 1 should have 0x12345678")
       else:
         self.assertEqual(st.vgpr[lane][5], 0, f"v[5] lane {lane} should be 0")
 
@@ -1082,7 +1082,6 @@ class TestF64Ops(unittest.TestCase):
     """Full f64->i64 conversion sequence with negative value."""
     import struct
     val = f2i64(-8.0)
-    lit = 0xC1F00000  # high 32 bits of f64 -2^32
     instructions = [
       s_mov_b32(s[0], val & 0xffffffff),
       s_mov_b32(s[1], (val >> 32) & 0xffffffff),
@@ -1138,7 +1137,6 @@ class TestF64Ops(unittest.TestCase):
     # v_fma_f64 v[7:8], v[17:18], v[7:8], v[15:16]
     # We need to capture the exact input values and verify output matches hardware
     # v[7:8] before = 0x3f80fdf3_d69db28f (0.008296875941334462)
-    v78 = 0x3f80fdf3d69db28f
     # For the FMA to produce 0xbf457ef0_ab8c254d, we need v[17:18] and v[15:16]
     # Let's test with known precision-sensitive values
     a = 1.0000000001
@@ -1395,7 +1393,7 @@ class TestWMMAMore(unittest.TestCase):
 
   def test_v_wmma_f32_16x16x16_f16_basic(self):
     """V_WMMA_F32_16X16X16_F16 basic test - verify output is non-zero."""
-    instructions = []
+    instructions: list[Inst] = []
     instructions.append(s_mov_b32(s[0], 0x3c003c00))
     for i in range(16, 32):
       instructions.append(v_mov_b32_e32(v[i], s[0]))
@@ -1851,7 +1849,6 @@ class TestMed3(unittest.TestCase):
 
   def test_v_med3_f32_with_nan(self):
     """V_MED3_F32: NaN handling - returns min of non-NaN values."""
-    import math
     instructions = [
       s_mov_b32(s[0], 0x7fc00000),  # NaN
       v_mov_b32_e32(v[0], s[0]),
@@ -2490,7 +2487,6 @@ class TestDivScaleF64(unittest.TestCase):
     independently. This catches the bug where the emulator was setting VCC
     for all lanes to the same value.
     """
-    import math
     # Use lane-varying input: lane 0 gets 2.0, lane 1 gets 3.0, etc.
     # All normal values should result in VCC=0 for each lane
     instructions = [
@@ -2721,7 +2717,6 @@ class TestDivScaleFmasF64Integration(unittest.TestCase):
     This is the exact bug scenario: tan([2.0, 3.0, 4.0]) was failing because
     VCC from DIV_SCALE was being set incorrectly for all lanes.
     """
-    import math
     # Set up values like tan() would: different values per lane
     instructions = [
       # Create per-lane values: 2.0, 3.0, 4.0, 5.0

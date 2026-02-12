@@ -6,6 +6,10 @@ from extra.assembly.amd.generate import extract_pdf_text, extract_pcode, parse_x
 EXPECTED_PAGES = {"rdna3": 655, "rdna4": 711, "cdna": 610}
 
 class TestPcodePDF(unittest.TestCase):
+  pages: dict
+  enums: dict
+  pcode: dict
+
   @classmethod
   def setUpClass(cls):
     cls.pages = {arch: extract_pdf_text(cfg["pdf"]) for arch, cfg in ARCHS.items()}
@@ -33,7 +37,8 @@ class TestPcodePDF(unittest.TestCase):
       'tmp = MEM[ADDR].u64;\nsrc = DATA.u64;\nMEM[ADDR].u64 = src >= tmp ? src : tmp;\nRETURN_DATA.u64 = tmp')
     # GLOBAL_STORE_B128: should have 4 MEM stores (not truncated)
     self.assertEqual(pcode[('GLOBAL_STORE_B128', 29)],
-      'MEM[ADDR].b32 = VDATA[31 : 0];\nMEM[ADDR + 4U].b32 = VDATA[63 : 32];\nMEM[ADDR + 8U].b32 = VDATA[95 : 64];\nMEM[ADDR + 12U].b32 = VDATA[127 : 96]')
+      'MEM[ADDR].b32 = VDATA[31 : 0];\nMEM[ADDR + 4U].b32 = VDATA[63 : 32];\n'
+      'MEM[ADDR + 8U].b32 = VDATA[95 : 64];\nMEM[ADDR + 12U].b32 = VDATA[127 : 96]')
     # S_CMOVK_I32: should have full if/endif block
     self.assertEqual(pcode[('S_CMOVK_I32', 2)],
       "if SCC then\nD0.i32 = 32'I(signext(SIMM16.i16))\nendif")

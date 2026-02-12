@@ -8,8 +8,9 @@ from tinygrad.runtime.support.elf import elf_loader
 from extra.assembly.amd import decode_inst
 from extra.assembly.amd.autogen.rdna3.ins import SOPP
 from extra.assembly.amd.autogen.rdna3.enum import SOPPOp
-from extra.assembly.amd.sqtt import (decode, LAYOUT_HEADER, WAVESTART, WAVESTART_RDNA4, WAVEEND, INST, INST_RDNA4, VALUINST, IMMEDIATE, IMMEDIATE_MASK,
-                                     ALUEXEC, VMEMEXEC, PACKET_TYPES_RDNA3, PACKET_TYPES_RDNA4, InstOp, InstOpRDNA4, print_packets)
+from extra.assembly.amd.sqtt import (decode, LAYOUT_HEADER, WAVESTART, WAVESTART_RDNA4, WAVEEND, INST, INST_RDNA4, VALUINST,
+                                     IMMEDIATE, IMMEDIATE_MASK, PACKET_TYPES_RDNA3, PACKET_TYPES_RDNA4,
+                                     InstOp, InstOpRDNA4, print_packets)
 from extra.assembly.amd.test.helpers import TARGET_TO_ARCH
 
 EXAMPLES_DIR = Path(__file__).parent.parent.parent.parent / "sqtt/examples"
@@ -32,18 +33,18 @@ def run_rocprof_decoder(blobs: list[bytes], lib: bytes, base: int, target: str):
   assert text is not None, "no .text section found"
   text_off, text_size = text.header.sh_addr, text.header.sh_size
 
-  blob_iter, current_blob = iter(blobs), [None]
+  blob_iter, current_blob = iter(blobs), [None]  # type: ignore[var-annotated]
   occupancy_records: list[tuple[int, int, int, int, bool]] = []  # (wave_id, simd, cu, time, is_start)
   wave_insts: list[list[tuple[int, int]]] = []  # per-wave list of (time, stall)
 
   @rocprof.rocprof_trace_decoder_se_data_callback_t
-  def copy_cb(buf, buf_size, _):
+  def copy_cb(buf, buf_size, _):  # type: ignore[no-untyped-def]
     blob = next(blob_iter, None)
     if blob is None: return 0
-    current_blob[0] = (ctypes.c_ubyte * len(blob)).from_buffer_copy(blob)
-    buf[0] = ctypes.cast(current_blob[0], ctypes.POINTER(ctypes.c_ubyte))
-    buf_size[0] = len(current_blob[0])
-    return len(current_blob[0])
+    current_blob[0] = (ctypes.c_ubyte * len(blob)).from_buffer_copy(blob)  # type: ignore[call-overload]
+    buf[0] = ctypes.cast(current_blob[0], ctypes.POINTER(ctypes.c_ubyte))  # type: ignore[arg-type]
+    buf_size[0] = len(current_blob[0])  # type: ignore[arg-type]
+    return len(current_blob[0])  # type: ignore[arg-type]
 
   @rocprof.rocprof_trace_decoder_trace_callback_t
   def trace_cb(record_type, events_ptr, n, _):
@@ -94,6 +95,7 @@ def run_rocprof_decoder(blobs: list[bytes], lib: bytes, base: int, target: str):
 
 class SQTTExamplesTestBase(unittest.TestCase):
   target: str
+  examples: dict
 
   @classmethod
   def setUpClass(cls):
@@ -115,7 +117,9 @@ class SQTTExamplesTestBase(unittest.TestCase):
       for i, event in enumerate(events):
         with self.subTest(example=name, event=i):
           packets = list(decode(event.blob))
-          if DEBUG >= 2: print(f"\n=== {name} event {i} ==="); print_packets(packets)
+          if DEBUG >= 2:
+            print(f"\n=== {name} event {i} ===")
+            print_packets(packets)
           self.assertGreater(len(packets), 0, f"no packets decoded from {name} event {i}")
           self.assertIsInstance(packets[0], LAYOUT_HEADER, f"first packet should be LAYOUT_HEADER in {name}")
 

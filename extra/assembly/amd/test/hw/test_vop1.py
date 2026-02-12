@@ -373,7 +373,6 @@ class TestF64Conversions(unittest.TestCase):
 
   def test_v_cvt_f64_f32_pi(self):
     """V_CVT_F64_F32 converts f32 pi to f64."""
-    import math
     instructions = [
       s_mov_b32(s[0], f2i(3.14159265)),
       v_mov_b32_e32(v[0], s[0]),

@@ -44,11 +44,15 @@ class Reg:
   def fmt(self, sz=None, parens=False, upper=False) -> str:
     o, sz = self.offset, sz or self.sz
     l, r = ("[", "]") if parens or sz > 1 else ("", "")  # brackets for multi-reg or when parens=True
-    if 256 <= o < 512: idx = o - 256; base = f"v{l}{idx}{r}" if sz == 1 else f"v[{idx}:{idx + sz - 1}]"
+    if 256 <= o < 512:
+      idx = o - 256
+      base = f"v{l}{idx}{r}" if sz == 1 else f"v[{idx}:{idx + sz - 1}]"
     elif o < 106: base = f"s{l}{o}{r}" if sz == 1 else f"s[{o}:{o + sz - 1}]"
     elif sz == 2 and o in self._PAIRS: base = self._PAIRS[o] if upper else self._PAIRS[o].lower()
     elif o in self._NAMES: base = self._NAMES[o] if upper else self._NAMES[o].lower()  # special regs (any sz)
-    elif 108 <= o < 124: idx = o - 108; base = f"ttmp{l}{idx}{r}" if sz == 1 else f"ttmp[{idx}:{idx + sz - 1}]"
+    elif 108 <= o < 124:
+      idx = o - 108
+      base = f"ttmp{l}{idx}{r}" if sz == 1 else f"ttmp[{idx}:{idx + sz - 1}]"
     elif 128 <= o <= 192: base = str(o - 128)  # inline int constants (0-64)
     elif 193 <= o <= 208: base = str(-(o - 192))  # inline negative int constants (-1 to -16)
     else: raise RuntimeError(f"unknown register: offset={o}, sz={sz}")
@@ -151,7 +155,8 @@ class SrcField(BitField):
     expected_size = self._valid_range[1] - self._valid_range[0] + 1
     actual_size = 1 << (hi - lo + 1)
     if actual_size != expected_size:
-      raise RuntimeError(f"{self.__class__.__name__}: field size {hi - lo + 1} bits ({actual_size}) doesn't match range {self._valid_range} ({expected_size})")
+      raise RuntimeError(f"{self.__class__.__name__}: field size {hi - lo + 1} bits ({actual_size}) "
+                         f"doesn't match range {self._valid_range} ({expected_size})")
 
   def encode(self, val) -> int:
     """Encode value. Returns 255 (literal marker) for out-of-range values."""
@@ -271,7 +276,7 @@ class Inst:
     inherited = {}
     for base in reversed(cls.__mro__[1:]):
       if hasattr(base, '_fields'):
-        inherited.update({name: field for name, field in base._fields})
+        inherited.update(dict(base._fields))
     inherited.update({name: val for name, val in cls.__dict__.items() if isinstance(val, BitField)})
     cls._fields = list(inherited.items())
     cls._base_size = (max(f.hi for _, f in cls._fields) + 8) // 8

@@ -601,7 +601,6 @@ class TestDS2AddrStride64(unittest.TestCase):
     self.assertEqual(st.vgpr[0][6], 0xAAAAAAAA, "new val 0")
     self.assertEqual(st.vgpr[0][7], 0xBBBBBBBB, "new val 1")
 
-
   def test_ds_storexchg_rtn_b64(self):
     """DS_STOREXCHG_RTN_B64: exchange 64-bit value and return old."""
     instructions = [

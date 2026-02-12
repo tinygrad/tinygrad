@@ -1,7 +1,7 @@
 # AMD ISA code generator - generates enum.py, ins.py, operands.py, str_pcode.py
 # Sources: XML from https://gpuopen.com/download/machine-readable-isa/latest/
 #          PDF manuals from AMD documentation
-import re, zlib, xml.etree.ElementTree as ET, zipfile
+import re, zlib, xml.etree.ElementTree as ET, zipfile, pathlib
 from tinygrad.helpers import fetch
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -77,8 +77,13 @@ def parse_xml(filename: str):
   for ot in root.findall(".//OperandTypes/OperandType"):
     ot_name = ot.findtext("OperandTypeName")
     for field in ot.findall(".//Field"):
-      if (enum_name := op_enum_map.get((ot_name, field.findtext("FieldName")))):
-        enums[enum_name] = {int(pv.findtext("Value")): pv.findtext("Name").upper() for pv in field.findall(".//PredefinedValue")}
+      key = (ot_name, field.findtext("FieldName"))
+      if (enum_name := op_enum_map.get(key)):  # type: ignore[arg-type]
+        def _pv_val(pv: ET.Element) -> tuple[int, str]:
+          v, n = pv.findtext("Value"), pv.findtext("Name")
+          assert v is not None and n is not None
+          return int(v), n.upper()
+        enums[enum_name] = dict(_pv_val(pv) for pv in field.findall(".//PredefinedValue"))
   # Extract DataFormats with BitCount
   for df in root.findall("ISA/DataFormats/DataFormat"):
     name, bits = df.findtext("DataFormatName"), df.findtext("BitCount")
@@ -86,17 +91,26 @@ def parse_xml(filename: str):
   # Extract encoding definitions
   for enc in root.findall("ISA/Encodings/Encoding"):
     name = enc.findtext("EncodingName")
+    assert name is not None
     is_base = name.startswith("ENC_") or name in ("VOP3_SDST_ENC", "VOPDXY")
     is_variant = any(sfx in name for sfx in _ENC_SUFFIX_MAP)
     if not is_base and not is_variant: continue
     if any(s in name for s in _SKIP_ENCODINGS): continue
-    fields = [(_norm_field(f.findtext("FieldName").lower()), int(f.find("BitLayout/Range").findtext("BitOffset") or 0) + int(f.find("BitLayout/Range").findtext("BitCount") or 0) - 1,
-               int(f.find("BitLayout/Range").findtext("BitOffset") or 0))
-              for f in enc.findall(".//MicrocodeFormat/BitMap/Field") if f.find("BitLayout/Range") is not None]
-    ident = (enc.findall("EncodingIdentifiers/EncodingIdentifier") or [None])[0]
+    fields: list[tuple[str, int, int]] = []
+    for f in enc.findall(".//MicrocodeFormat/BitMap/Field"):
+      br = f.find("BitLayout/Range")
+      if br is None: continue
+      fn = f.findtext("FieldName")
+      assert fn is not None
+      fields.append((_norm_field(fn.lower()),
+        int(br.findtext("BitOffset") or 0) + int(br.findtext("BitCount") or 0) - 1, int(br.findtext("BitOffset") or 0)))
+    ident_list = enc.findall("EncodingIdentifiers/EncodingIdentifier")
+    ident = ident_list[0] if ident_list else None
     enc_field = next((f for f in fields if f[0] == "encoding"), None)
-    # For multi-dword formats, encoding field may be in higher dword but identifier pattern is always in dword0; use % 32
-    enc_bits = "".join(ident.text[len(ident.text)-1-b] for b in range(enc_field[1] % 32, (enc_field[2] % 32)-1, -1)) if ident is not None and enc_field else None
+    # For multi-dword formats, encoding field may be in higher dword but identifier is always in dword0; use % 32
+    enc_bits: str | None = None
+    if ident is not None and ident.text is not None and enc_field:
+      enc_bits = "".join(ident.text[len(ident.text)-1-b] for b in range(enc_field[1] % 32, (enc_field[2] % 32)-1, -1))
     base_name = _strip_enc(name)
     encodings[NAME_MAP.get(base_name, base_name)] = (fields, enc_bits)
   # Extract instruction opcodes and operand info
@@ -104,9 +118,12 @@ def parse_xml(filename: str):
   opcode_encs: dict[str, dict[int, set[str]]] = {}  # {base_fmt: {opcode: {enc_names}}}
   for instr in root.findall("ISA/Instructions/Instruction"):
     name = instr.findtext("InstructionName")
+    assert name is not None
     for enc in instr.findall("InstructionEncodings/InstructionEncoding"):
       if enc.findtext("EncodingCondition") != "default": continue
-      base, opcode = _map_flat(_strip_enc(enc.findtext("EncodingName")), name), int(enc.findtext("Opcode") or 0)
+      enc_enc_name = enc.findtext("EncodingName")
+      assert enc_enc_name is not None
+      base, opcode = _map_flat(_strip_enc(enc_enc_name), name), int(enc.findtext("Opcode") or 0)
       enc_name = NAME_MAP.get(base, base)
       # Encoding variants use the same Op enum as the base format
       base_enum = enc_name
@@ -120,8 +137,10 @@ def parse_xml(filename: str):
         elif base == "VGLOBAL": enums.setdefault("VFLAT", {})[opcode] = name
       enums.setdefault(base_enum, {})[opcode] = name
       # Extract operand info
-      op_info = {op.findtext("FieldName").lower(): (op.findtext("DataFormatName"), int(op.findtext("OperandSize") or 0), op.findtext("OperandType"))
-                 for op in enc.findall("Operands/Operand") if op.findtext("FieldName")}
+      op_info: dict[str, tuple[str | None, int, str | None]] = {}
+      for op in enc.findall("Operands/Operand"):
+        fn = op.findtext("FieldName")
+        if fn: op_info[fn.lower()] = (op.findtext("DataFormatName"), int(op.findtext("OperandSize") or 0), op.findtext("OperandType"))
       for fmt, _, otype in op_info.values():
         if fmt and fmt not in fmts: fmts[fmt] = 0
         if otype: op_types_set.add(otype)
@@ -143,7 +162,9 @@ def extract_pdf_text(url: str) -> list[list[tuple[float, float, str, str]]]:
   data = fetch(url).read_bytes()
   # Parse xref table to locate objects
   xref: dict[int, int] = {}
-  pos = int(re.search(rb'startxref\s+(\d+)', data).group(1)) + 4
+  xref_match = re.search(rb'startxref\s+(\d+)', data)
+  assert xref_match is not None
+  pos = int(xref_match.group(1)) + 4
   while data[pos:pos+7] != b'trailer':
     while data[pos:pos+1] in b' \r\n': pos += 1
     line_end = data.find(b'\n', pos)
@@ -164,14 +185,19 @@ def extract_pdf_text(url: str) -> list[list[tuple[float, float, str, str]]]:
     if not (m := re.search(rb'/Contents (\d+) 0 R', data[xref[n]:xref[n]+500])): continue
     stream = get_stream(int(m.group(1))).decode('latin-1')
     elements, font = [], ''
+    _RE_BT = (r'(/F[\d.]+) [\d.]+ Tf|([\d.+-]+) ([\d.+-]+) Td|[\d.+-]+ [\d.+-]+ [\d.+-]+ [\d.+-]+ ([\d.+-]+) ([\d.+-]+) Tm'
+              r'|<([0-9A-Fa-f]+)>.*?Tj|\[([^\]]+)\] TJ')
     for bt in re.finditer(r'BT(.*?)ET', stream, re.S):
       x, y = 0.0, 0.0
-      for m in re.finditer(r'(/F[\d.]+) [\d.]+ Tf|([\d.+-]+) ([\d.+-]+) Td|[\d.+-]+ [\d.+-]+ [\d.+-]+ [\d.+-]+ ([\d.+-]+) ([\d.+-]+) Tm|<([0-9A-Fa-f]+)>.*?Tj|\[([^\]]+)\] TJ', bt.group(1)):
-        if m.group(1): font = m.group(1)
-        elif m.group(2): x, y = x + float(m.group(2)), y + float(m.group(3))
-        elif m.group(4): x, y = float(m.group(4)), float(m.group(5))
-        elif m.group(6) and (t := bytes.fromhex(m.group(6)).decode('latin-1')).strip(): elements.append((x, y, t, font))
-        elif m.group(7) and (t := ''.join(bytes.fromhex(h).decode('latin-1') for h in re.findall(r'<([0-9A-Fa-f]+)>', m.group(7)))).strip(): elements.append((x, y, t, font))
+      for sm in re.finditer(_RE_BT, bt.group(1)):
+        if sm.group(1): font = sm.group(1)
+        elif sm.group(2): x, y = x + float(sm.group(2)), y + float(sm.group(3))
+        elif sm.group(4): x, y = float(sm.group(4)), float(sm.group(5))
+        elif sm.group(6) and (t := bytes.fromhex(sm.group(6)).decode('latin-1')).strip():
+          elements.append((x, y, t, font))
+        elif sm.group(7):
+          t = ''.join(bytes.fromhex(h).decode('latin-1') for h in re.findall(r'<([0-9A-Fa-f]+)>', sm.group(7)))
+          if t.strip(): elements.append((x, y, t, font))
     pages.append(sorted(elements, key=lambda e: (-e[1], e[0])))
   return pages
 
@@ -197,7 +223,7 @@ def extract_pcode(pages: list[list[tuple[float, float, str, str]]], name_to_op: 
     else:
       next_page, next_y = page_idx, 0
     # Collect F6 text from current position to next instruction (pseudocode is at x ≈ 69)
-    lines = []
+    lines: list[tuple[int, float, str]] = []
     for p in range(page_idx, next_page + 1):
       start_y = y if p == page_idx else 800
       end_y = next_y if p == next_page else 0
@@ -220,8 +246,8 @@ def extract_pcode(pages: list[list[tuple[float, float, str, str]]], name_to_op: 
 # Code generation
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def write_common(all_fmts, all_op_types, path):
-  lines = ["# autogenerated from AMD ISA XML - do not edit", "from enum import Enum, auto", ""]
+def write_common(all_fmts: dict[str, int], all_op_types: set[str], path: pathlib.Path) -> None:
+  lines: list[str] = ["# autogenerated from AMD ISA XML - do not edit", "from enum import Enum, auto", ""]
   lines.append("class ReprEnum(Enum):")
   lines.append('  """Enum with clean repr that roundtrips with eval()."""')
   lines.append('  def __repr__(self): return f"{type(self).__name__}.{self.name}"')
@@ -238,7 +264,8 @@ def write_common(all_fmts, all_op_types, path):
   with open(path, "w") as f: f.write("\n".join(lines))
 
 def write_enum(enums, path):
-  lines = ["# autogenerated from AMD ISA XML - do not edit", "from extra.assembly.amd.autogen.common import ReprEnum, Fmt, FMT_BITS, OpType  # noqa: F401", ""]
+  lines: list[str] = ["# autogenerated from AMD ISA XML - do not edit",
+    "from extra.assembly.amd.autogen.common import ReprEnum, Fmt, FMT_BITS, OpType  # noqa: F401", ""]
   for name, ops in sorted(enums.items()):
     if not ops: continue
     suffix = "_E32" if name in ("VOP1", "VOP2", "VOPC") else "_E64" if name == "VOP3" else ""
@@ -286,7 +313,7 @@ def write_ins(encodings, enums, suffix_only_ops, types, arch, path):
            'dpp', 'fi', 'bc', 'row_mask', 'bank_mask', 'src0_neg', 'src0_abs', 'src1_neg', 'src1_abs',
            'cbsz', 'abid', 'acc_cd', 'acc', 'blgp', 'lane_sel_0', 'lane_sel_1', 'lane_sel_2', 'lane_sel_3',
            'lane_sel_4', 'lane_sel_5', 'lane_sel_6', 'lane_sel_7', 'dst_sel', 'dst_unused', 'src0_sel', 'src1_sel']
-  sort_fields = lambda fields: sorted(fields, key=lambda f: (ORDER.index(f[0]) if f[0] in ORDER else 999, f[2]))
+  def sort_fields(fields): return sorted(fields, key=lambda f: (ORDER.index(f[0]) if f[0] in ORDER else 999, f[2]))
 
   # Separate base encodings from variants
   base_encodings, variant_encodings = {}, {}
@@ -296,15 +323,29 @@ def write_ins(encodings, enums, suffix_only_ops, types, arch, path):
     else: variant_encodings[enc_name] = data
 
   # Build sets of ops by their vdst type from operand metadata
-  sdst_opcodes = {}  # ops where vdst is OPR_SREG (writes to SGPR)
+  sdst_opcodes: dict[str, set[int]] = {}  # ops where vdst is OPR_SREG (writes to SGPR)
   for fmt, ops in enums.items():
     for op, name in ops.items():
       op_types = types.get((name, fmt), {})
       vdst_type = op_types.get("vdst", (None, None, None))[2]
       if vdst_type == "OPR_SREG": sdst_opcodes.setdefault(fmt, set()).add(op)
 
-  lines = ["# autogenerated from AMD ISA XML - do not edit", "# ruff: noqa: F401,F403",
-           "from extra.assembly.amd.dsl import *", f"from extra.assembly.amd.autogen.{arch}.enum import *", "import functools", ""]
+  # collect only the XxxOp enums that are actually referenced in this arch's instruction definitions
+  enum_names = sorted(f"{k}Op" for k in enums if enums[k] and k not in ("HWREG", "MSG"))
+  # also re-export HWREG/MSG enums (plain enums, not instruction format ops)
+  enum_names += sorted(k for k in enums if k in ("HWREG", "MSG") and enums[k])
+  # collect DSL field types actually used by scanning generated field definitions
+  all_field_defs = " ".join(field_def(fn, hi, lo, enc, eb) for enc, (flds, eb) in encodings.items() for fn, hi, lo in flds)
+  _ALL_DSL = ["BitField", "EnumBitField", "FixedBitField", "NULL", "SBaseField", "SGPRField", "SRsrcField",
+              "SSrcField", "SrcField", "VDSTYField", "VGPRField"]
+  dsl_names = ["Inst"] + [n for n in _ALL_DSL if n in all_field_defs]
+  # also re-export register names so `from ins import *` still provides them to downstream users
+  _DSL_REGS = ["s", "v", "src", "VCC_LO", "VCC_HI", "VCC", "EXEC_LO", "EXEC_HI", "EXEC", "NULL", "OFF", "M0",
+               "SCC", "VCCZ", "EXECZ", "ttmp", "INV_2PI", "SDWA", "DPP", "DPP16", "LIT", "SRC_LDS_DIRECT"]
+  dsl_reexport = sorted(set(dsl_names + _DSL_REGS))
+  lines: list[str] = ["# autogenerated from AMD ISA XML - do not edit", "# ruff: noqa: E501,F401",
+    f"from extra.assembly.amd.dsl import {', '.join(dsl_reexport)}",
+    f"from extra.assembly.amd.autogen.{arch}.enum import {', '.join(enum_names)}", "import functools", ""]
 
   def fmt_allowed(op_enum: str, ops: set[int]) -> str:
     """Format allowed ops as {EnumName.MEMBER, ...}."""
@@ -323,7 +364,9 @@ def write_ins(encodings, enums, suffix_only_ops, types, arch, path):
     has_seg_field = any(fn == "seg" for fn, _, _ in fields)
     if enc_name in ("FLAT", "VFLAT") and has_seg_field:
       prefix = "V" if enc_name == "VFLAT" else ""
-      for cls, seg, op_enum in [(f"{prefix}FLAT", 0, f"{prefix}FLATOp"), (f"{prefix}GLOBAL", 2, f"{prefix}GLOBALOp"), (f"{prefix}SCRATCH", 1, f"{prefix}SCRATCHOp")]:
+      flat_variants = [(f"{prefix}FLAT", 0, f"{prefix}FLATOp"), (f"{prefix}GLOBAL", 2, f"{prefix}GLOBALOp"),
+                       (f"{prefix}SCRATCH", 1, f"{prefix}SCRATCHOp")]
+      for cls, seg, op_enum in flat_variants:
         cls_ops = set(enums.get(cls, {}).keys())
         lines.append(f"class {cls}(Inst):")
         for fn, hi, lo in sort_fields(fields):
@@ -396,6 +439,8 @@ def write_ins(encodings, enums, suffix_only_ops, types, arch, path):
     op_to_suffix = {op:suffix for suffix,ops in suffix_only_ops.items() for op in ops.get(fmt, set())}
     fmt_sdst_ops = sdst_opcodes.get(fmt, set())
     for op, name in sorted(ops.items()):
+      # ADDTID ops are in both FLAT and GLOBAL enums (for pcode); only generate helper for GLOBAL/VGLOBAL
+      if "ADDTID" in name and fmt in ("FLAT", "VFLAT"): continue
       msuf = suffix if fmt != "VOP3" or op < 512 else ""
       # Determine class: SDST variants, suffix-specific variants (e.g., _MFMA, _LIT), or base
       if fmt == "VOP1" and op in fmt_sdst_ops: cls = "VOP1_SDST"
@@ -405,11 +450,14 @@ def write_ins(encodings, enums, suffix_only_ops, types, arch, path):
       lines.append(f"{name.lower()}{msuf.lower()} = functools.partial({cls}, {fmt}Op.{name}{msuf})")
   with open(path, "w") as f: f.write("\n".join(lines))
 
-def write_operands(types, enums, arch, path):
+def write_operands(types: dict, enums: dict, arch: str, path: pathlib.Path) -> None:
   valid = {(name, fmt) for fmt, ops in enums.items() for name in ops.values()}
-  lines = ["# autogenerated from AMD ISA XML - do not edit",
-           "from extra.assembly.amd.autogen.common import Fmt, OpType",
-           f"from extra.assembly.amd.autogen.{arch}.enum import *", ""]
+  # only import enums that are actually used as keys in OPERANDS
+  used_bases = {eb for (nm, eb) in types if (nm, eb) in valid}
+  enum_names = sorted(f"{k}Op" for k in used_bases)
+  lines: list[str] = ["# autogenerated from AMD ISA XML - do not edit",
+    "from extra.assembly.amd.autogen.common import Fmt, OpType",
+    f"from extra.assembly.amd.autogen.{arch}.enum import {', '.join(enum_names)}", ""]
   lines.append("# instruction operand info: {Op: {field: (Fmt, size_bits, OpType)}}")
   lines.append("OPERANDS = {")
   def fmt_val(v):
@@ -422,7 +470,7 @@ def write_operands(types, enums, arch, path):
   lines.append("}")
   with open(path, "w") as f: f.write("\n".join(lines))
 
-def write_pcode(pcode: dict[tuple[str, int], str], enums: dict[str, dict[int, str]], arch: str, path: str):
+def write_pcode(pcode: dict[tuple[str, int], str], enums: dict[str, dict[int, str]], arch: str, path: pathlib.Path) -> None:
   """Write str_pcode.py file from extracted pseudocode."""
   entries: list[tuple[str, str, int, str]] = []
   for fmt_name, ops in enums.items():
@@ -444,8 +492,9 @@ def write_pcode(pcode: dict[tuple[str, int], str], enums: dict[str, dict[int, st
 # ═══════════════════════════════════════════════════════════════════════════════
 
 if __name__ == "__main__":
-  import pathlib
-  all_fmts, all_op_types, arch_data = {}, set(), {}
+  all_fmts: dict[str, int] = {}
+  all_op_types: set[str] = set()
+  arch_data: dict[str, dict] = {}
   # First pass: parse XML for all architectures
   for arch, cfg in ARCHS.items():
     print(f"Parsing XML: {cfg['xml']} -> {arch}")

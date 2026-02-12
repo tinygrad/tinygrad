@@ -46,6 +46,7 @@ def rocprof_inst_traces_match(sqtt, prg, target):
 
 class TestSQTTMapBase(unittest.TestCase):
   target: str
+  examples: dict
 
   @classmethod
   def setUpClass(cls):

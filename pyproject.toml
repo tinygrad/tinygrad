@@ -128,7 +128,7 @@ debug = true
 
 [tool.mypy]
 warn_unused_configs = true
-files = ["tinygrad"]
+files = ["tinygrad", "extra/assembly/amd"]
 ignore_missing_imports = true
 check_untyped_defs = true
 explicit_package_bases = true
@@ -141,6 +141,10 @@ strict_equality = true
 [[tool.mypy.overrides]]
 module = "extra.*"
 follow_imports = "skip"
+
+[[tool.mypy.overrides]]
+module = "extra.assembly.amd.*"
+follow_imports = "normal"
 
 [tool.pytest.ini_options]
 norecursedirs = [
@@ -180,6 +184,7 @@ exclude = [
   ".git/",
   "docs/",
   "extra/",
+  "!extra/assembly/amd/",
   "test/external/mlperf_resnet",
   "test/external/mlperf_unet3d",
 ]
@@ -245,6 +250,8 @@ select = [
   "F841",
 ]
 "tinygrad/runtime/autogen/**/*.py" = ["E501", "F401", "E722", "E731", "F821", "A006", "A002", "F811"]
+"extra/assembly/amd/autogen/**/*.py" = ["E501"]
+"extra/assembly/amd/test/**/*.py" = ["F403", "F405"]
 
 [tool.ruff.format]
 exclude = ["*"]

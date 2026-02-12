@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """Roundtrip tests: generate tinygrad kernels, decode instructions, re-encode, verify match."""
 import unittest, io, sys, re, subprocess, os
-from extra.assembly.amd.dsl import Inst
-from extra.assembly.amd import decode_inst, detect_format
+from extra.assembly.amd import detect_format
 from extra.assembly.amd.test.helpers import get_llvm_mc, get_llvm_objdump, get_target, get_mattr
 from extra.assembly.amd.test.disasm import disasm
 
@@ -100,11 +99,6 @@ class TestTinygradKernelRoundtrip(unittest.TestCase):
       while offset < len(code):
         remaining = code[offset:]
         fmt = detect_format(remaining, arch)
-        if fmt is None:
-          decoded_instrs.append((ki, offset, None, None, None, False, "no format"))
-          offset += 4
-          continue
-
         base_size = fmt._size()
         if len(remaining) < base_size:
           break
@@ -190,8 +184,8 @@ class TestTinygradKernelRoundtrip(unittest.TestCase):
     print(f"[{arch}] decode roundtrip: {decode_passed} passed, {decode_failed} failed, {decode_skipped} skipped")
     print(f"[{arch}] asm via llvm: {asm_passed} passed, {asm_failed} failed, {asm_skipped} skipped")
     print(f"[{arch}] disasm vs llvm: {disasm_passed} passed, {disasm_failed} failed, {disasm_skipped} skipped")
-    self.assertEqual(decode_failed, 0, f"Decode failures:\n" + "\n".join(decode_failures[:20]))
-    self.assertEqual(asm_failed, 0, f"Asm failures:\n" + "\n".join(asm_failures[:20]))
+    self.assertEqual(decode_failed, 0, "Decode failures:\n" + "\n".join(decode_failures[:20]))
+    self.assertEqual(asm_failed, 0, "Asm failures:\n" + "\n".join(asm_failures[:20]))
     # Note: disasm string comparison is informational only - formatting differences between LLVM versions are expected
 
   # Basic unary ops

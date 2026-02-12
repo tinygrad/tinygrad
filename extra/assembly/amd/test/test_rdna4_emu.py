@@ -6,7 +6,7 @@ from tinygrad.device import Buffer, BufferSpec
 from tinygrad.dtype import dtypes
 
 class TestRDNA4Emu(unittest.TestCase):
-  def _run(self, insts: list, sgprs: dict[int, int] = None, vgprs: dict[tuple[int, int], int] = None) -> WaveState:
+  def _run(self, insts: list, sgprs: dict[int, int] | None = None, vgprs: dict[tuple[int, int], int] | None = None) -> WaveState:
     """Run instructions and return final WaveState."""
     # Add S_ENDPGM if not present
     if not any(isinstance(i, ir4.SOPP) and i.op == ir4.SOPPOp.S_ENDPGM for i in insts):
@@ -22,10 +22,8 @@ class TestRDNA4Emu(unittest.TestCase):
     # Setup wave state
     st = WaveState(n_lanes=1)
     st.pc = code_addr
-    if sgprs:
-      for idx, val in sgprs.items(): st._write_sgpr(idx, val)
-    if vgprs:
-      for (reg, lane), val in vgprs.items(): st._write_vgpr(reg, lane, val)
+    for idx, val in (sgprs or {}).items(): st._write_sgpr(idx, val)
+    for (reg, lane), val in (vgprs or {}).items(): st._write_vgpr(reg, lane, val)
 
     # Setup vmem buffer with external_ptr=0 (maps to address 0, allows any pointer access)
     vmem_buf = Buffer('CPU', 1 << 40, dtypes.uint32, options=BufferSpec(external_ptr=0)).ensure_allocated()
