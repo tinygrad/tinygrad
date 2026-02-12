@@ -3,7 +3,7 @@ from tinygrad import Device, Tensor, dtypes
 from tinygrad.codegen.opt import Opt, OptOps, KernelOptError
 
 # TODO: write a clean version of this
-from test.test_linearizer import helper_linearizer_opt
+from test.backend.test_linearizer import helper_linearizer_opt
 
 class TestKernelOpts(unittest.TestCase):
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")

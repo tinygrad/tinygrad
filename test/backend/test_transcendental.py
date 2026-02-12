@@ -2,8 +2,8 @@ import unittest
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.tensor import _to_np_dtype
 from tinygrad.helpers import Context, getenv, CI, OSX
-from test.test_schedule import check_schedule
-from test.test_dtype_alu import ht, dtypes_float
+from test.backend.test_schedule import check_schedule
+from test.backend.test_dtype_alu import ht, dtypes_float
 from tinygrad.device import is_dtype_supported
 import numpy as np
 import math
