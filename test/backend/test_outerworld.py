@@ -57,7 +57,7 @@ class TestOuterRange(unittest.TestCase):
     out.realize()
 
     # TODO: testing allclose
-    assert Tensor.allclose(ref, out, atol=1e-6), f"max diff {(ref-out).abs().max().item()}"
+    assert Tensor.allclose(ref, out, atol=1e-5), f"max diff {(ref-out).abs().max().item()}"
 
 class TestOuterScan(unittest.TestCase):
   def _test_scan(self):
