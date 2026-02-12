@@ -80,6 +80,7 @@ def extract_packet_encodings():
 
 def extract_cdna_packet_sizes():
   """Extract CDNA pkt_fmt -> size mapping by running rocprof decoder to populate its hash table."""
+  if not _load_lib(): return None
   from test.amd.test_sqtt_examples import run_rocprof_decoder
 
   if not (pkl_path := next((EXAMPLES_DIR / "gfx950").glob("*.pkl"), None)): return None
@@ -119,8 +120,7 @@ class TestSQTTMatchesBinary(unittest.TestCase):
   def test_cdna_packet_sizes(self):
     """Extract and verify CDNA pkt_fmt -> size mapping from rocprof's hash table."""
     if not (EXAMPLES_DIR / "gfx950").exists(): self.skipTest("no CDNA examples")
-    pkt_sizes = extract_cdna_packet_sizes()
-    self.assertIsNotNone(pkt_sizes, "failed to extract CDNA packet sizes")
+    if not (pkt_sizes := extract_cdna_packet_sizes()): self.skipTest("rocprof-trace-decoder not installed")
     for pkt_fmt, size in CDNA_PKT_SIZES.items():
       with self.subTest(pkt_fmt=pkt_fmt): self.assertEqual(pkt_sizes.get(pkt_fmt), size)
 
