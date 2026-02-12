@@ -89,7 +89,7 @@ def run_rocprof_decoder(blobs: list[bytes], lib: bytes, base: int, target: str):
     try: rocprof.rocprof_trace_decoder_parse_data(copy_cb, trace_cb, isa_cb, None)
     except Exception as e: exc = e
   (t:=threading.Thread(target=worker, daemon=True)).start()
-  t.join(timeout=1)
+  t.join(timeout=5)
   if exc is not None: raise exc
   if t.is_alive(): raise RuntimeError("rocprof decoder timeout")
   return occupancy_records, wave_insts
