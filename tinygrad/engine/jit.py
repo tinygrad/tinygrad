@@ -187,7 +187,11 @@ class CapturedJit(Generic[ReturnType]):
     # precompute read-after-write hazard detection
     self._output_to_writer = {b: j for j, ei in enumerate(self.jit_cache) for b in get_out_buffers_for_ei(ei)}
     self._input_to_max_reader: dict[int, int] = {}
-    for (j, _), idx in self.input_replace.items(): self._input_to_max_reader[idx] = max(self._input_to_max_reader.get(idx, -1), j)
+    for (j, i), idx in self.input_replace.items():
+      # skip write-only outputs: if a buffer is the same at capture time (e.g. assign), it's intentional in-place, not a hazard.
+      # only buffers that were different during capture but alias at jit time (e.g. feeding output back as input) need the copy.
+      if self.jit_cache[j].bufs[i] not in get_out_buffers_for_ei(self.jit_cache[j]):
+        self._input_to_max_reader[idx] = max(self._input_to_max_reader.get(idx, -1), j)
     self._clear_inputs()
 
   def _clear_inputs(self):
