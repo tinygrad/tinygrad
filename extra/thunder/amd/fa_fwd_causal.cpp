@@ -156,7 +156,7 @@ template<int D> struct attn_globals {
 };
 
 template<int D> __launch_bounds__(NUM_THREADS, 2)
-__global__ void attend_ker(bf16 *O_ptr, bf16 *Q_ptr, bf16 *K_ptr, bf16 *V_ptr, float *L_vec_ptr) {
+__global__ void attend_ker(bf16 *O_ptr, float *L_vec_ptr, bf16 *Q_ptr, bf16 *K_ptr, bf16 *V_ptr) {
     _gl_QKVO Og{O_ptr, ATTN_B, ATTN_N, ATTN_H, ATTN_D};
     _gl_QKVO Qg{Q_ptr, ATTN_B, ATTN_N, ATTN_H, ATTN_D};
     _gl_QKVO Kg{K_ptr, ATTN_B, ATTN_N, ATTN_H_KV, ATTN_D};
@@ -625,4 +625,4 @@ __global__ void attend_ker(bf16 *O_ptr, bf16 *Q_ptr, bf16 *K_ptr, bf16 *V_ptr, f
     store(g.L_vec, norm_vec, {batch_idx, head_idx, 0, tile_idx});
 }
 
-template __global__ void attend_ker<ATTN_D>(bf16*, bf16*, bf16*, bf16*, float*);
+template __global__ void attend_ker<ATTN_D>(bf16*, float*, bf16*, bf16*, bf16*);
