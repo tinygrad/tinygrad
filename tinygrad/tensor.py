@@ -7,7 +7,7 @@ if TYPE_CHECKING: import numpy
 from tinygrad.dtype import DType, DTypeLike, dtypes, ImageDType, ConstType, least_upper_float, least_upper_dtype, sum_acc_dtype, to_dtype, truncate
 from tinygrad.dtype import _from_np_dtype, _to_np_dtype, PyConst
 from tinygrad.helpers import argfix, make_tuple, flatten, prod, all_int, round_up, merge_dicts, argsort, getenv, all_same, fully_flatten
-from tinygrad.helpers import IMAGE, WINO, Metadata, TRACEMETA, ASM_GEMM, ceildiv, fetch, polyN, is_numpy_ndarray, TracingKey, cpu_profile
+from tinygrad.helpers import IMAGE, WINO, Metadata, TRACEMETA, ASM_GEMM, ASM_ATN, ceildiv, fetch, polyN, is_numpy_ndarray, TracingKey, cpu_profile
 from tinygrad.helpers import suppress_finalizing, disable_gc
 from tinygrad.gradient import compute_gradient
 from tinygrad.mixin import OpMixin
@@ -3595,6 +3595,10 @@ class Tensor(OpMixin):
     """
     # NOTE: it also works when `key` and `value` have symbolic shape.
     assert all_int(self.shape), f"does not support symbolic shape {self.shape}"
+
+    if ASM_ATN and is_causal and attn_mask is None and dropout_p == 0.0:
+      from extra.gemm.asm.cdna.atn import can_use_asm_atn, asm_sdpa
+      if can_use_asm_atn(self, key, value, is_causal): return asm_sdpa(self, key, value)
 
     if getenv("FLASH_ATTENTION"):
       from extra.thunder.tiny.fa import flash_attention

@@ -309,6 +309,9 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
   def ended_ranges(self):
     if self.op in range_start: return self.src[range_start[self.op]:]
     if self.op is Ops.AFTER: return tuple(flatten([x.ended_ranges for x in self.src[1:]]))
+    # CALL with PROGRAM is a prebuilt kernel - it should block all ranges from flowing through
+    if self.op is Ops.CALL and len(self.src) and self.src[0].op is Ops.PROGRAM:
+      return tuple(flatten([s.ranges.keys() for s in self.src]))
     # TODO: copy isn't using range properly and isn't ending the range it uses, remove this
     if self.op in {Ops.COPY, Ops.BUFFER_VIEW}: return self.src[0].ranges
     return ()
@@ -835,8 +838,11 @@ class KernelInfo:
   applied_opts: tuple = tuple()
   opts_to_apply: tuple|None = None
   estimates: Estimates|None = None
+  kernargs_builder: Callable|None = None  # for prebuilt kernels with custom arg layouts
   @property
   def function_name(self): return to_function_name(self.name)
+  # kernargs_builder can't be pickled
+  def __reduce__(self): return (KernelInfo, (self.name, self.axis_types, self.dont_use_locals, self.applied_opts, self.opts_to_apply, self.estimates))
 
 @dataclass(frozen=True)
 class CallInfo:

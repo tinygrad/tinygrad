@@ -77,6 +77,7 @@ class ProgramSpec:
   globals:list[int]=field(default_factory=list)
   outs:list[int]=field(default_factory=list)
   ins:list[int]=field(default_factory=list)
+  kernargs_builder:Callable|None=None  # for prebuilt kernels with custom arg layouts
 
   @functools.cached_property
   def estimates(self) -> Estimates:
@@ -130,8 +131,9 @@ class ProgramSpec:
         if special_size is not None: special_size[int(u.arg[-1])] = cast(int, u.src[0].ssimplify())
       if u.op is Ops.DEFINE_VAR and u.arg[0] == 'core_id': global_size[0] = u.arg[2] + 1
 
+    kernargs_builder = sink.arg.kernargs_builder if isinstance(sink.arg, KernelInfo) else None
     return ProgramSpec(sink.arg.name, source.arg, device.arg, sink, uops, lib, list(prg.arg) if prg.arg else [], global_size, local_size,
-                       sorted(_vars, key=lambda v: v.arg), sorted(dedup(_globals)), sorted(dedup(outs)), sorted(dedup(ins)))
+                       sorted(_vars, key=lambda v: v.arg), sorted(dedup(_globals)), sorted(dedup(outs)), sorted(dedup(ins)), kernargs_builder)
 
 class Renderer:
   device: str = ""
