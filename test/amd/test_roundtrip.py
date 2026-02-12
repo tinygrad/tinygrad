@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Roundtrip tests: generate tinygrad kernels, decode instructions, re-encode, verify match."""
 import unittest, io, sys, re, subprocess, os
+from tinygrad import Device
 from tinygrad.renderer.amd import detect_format
 from test.amd.helpers import get_llvm_mc, get_llvm_objdump, get_target, get_mattr
 from test.amd.disasm import disasm
@@ -70,6 +71,7 @@ def compile_and_disasm_batch(instrs: list[str], arch: str = 'rdna3') -> list[str
   finally:
     os.unlink(obj_path)
 
+@unittest.skipUnless(Device.DEFAULT == "AMD", "requires AMD device")
 class TestTinygradKernelRoundtrip(unittest.TestCase):
   """Test roundtrip on real tinygrad-generated kernels using get_kernels_from_tinygrad pattern."""
   arch = 'rdna3'
