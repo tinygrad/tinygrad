@@ -6,7 +6,7 @@ from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher, TrackedPatternMatch
 from tinygrad.uop.symbolic import sym
 from tinygrad.dtype import dtypes
 from tinygrad.helpers import PROFILE, colored, ansistrip, flatten, TracingKey, ProfileRangeEvent, ProfileEvent, Context, cpu_events, profile_marker
-from tinygrad.helpers import VIZ, cpu_profile
+from tinygrad.helpers import VIZ, cpu_profile, ProfilePointEvent
 from tinygrad.device import Buffer
 
 @track_rewrites(name=True)
@@ -408,8 +408,8 @@ class TestVizProfiler(BaseTestViz):
 
     tracks = list(j['layout'])
     self.assertEqual(tracks[0], 'NV')
-    self.assertEqual(tracks[1], 'NV:1:SDMA:0')
-    self.assertEqual(tracks[2], 'NV Graph')
+    self.assertEqual(tracks[1], 'NV Graph')
+    self.assertEqual(tracks[2], 'NV:1:SDMA:0')
 
     nv_events = j['layout']['NV']['events']
     self.assertEqual(nv_events[0]['name'], 'E_25_4n2')
@@ -434,13 +434,39 @@ class TestVizProfiler(BaseTestViz):
             ProfileGraphEvent(ents=[ProfileGraphEntry(device='NV', name='E_2', st_id=0, en_id=1)],
                               deps=[[]], sigs=[decimal.Decimal(1000), decimal.Decimal(1010)])]
     j = load_profile(prof)
-    tracks = list(j['layout'])
-    # block 0: devices, block 1: graphs, block 2: memory (only if non-empty)
-    devs = [t for t in tracks if not t.endswith(' Graph') and not t.endswith(' Memory')]
-    graphs = [t for t in tracks if t.endswith(' Graph')]
-    self.assertTrue(all(tracks.index(d) < tracks.index(g) for d in devs for g in graphs))
-    self.assertEqual(devs, ['NV', 'NV:SDMA:0', 'NV:1'])
-    self.assertEqual(graphs, ['NV Graph'])
+    # graph grouped with its device, memory at the end
+    self.assertListEqual(list(j['layout']), ['NV', 'NV Graph', 'NV:SDMA:0', 'NV:1'])
+
+  def test_multi_sdma_ordering(self):
+    props = {"gfx_target_version": 0}
+    D, St, En = decimal.Decimal, decimal.Decimal(1000), decimal.Decimal(1010)
+    prof = [# 2 AMD GPUs, 2 SDMA engines each
+            ProfileDeviceEvent(device='AMD', tdiff=D(-1000), props=props),
+            ProfileDeviceEvent(device='AMD:1', tdiff=D(-900), props=props),
+            ProfileDeviceEvent(device='AMD:SDMA:0', tdiff=D(-100), props=props),
+            ProfileDeviceEvent(device='AMD:SDMA:1', tdiff=D(-80), props=props),
+            ProfileDeviceEvent(device='AMD:1:SDMA:0', tdiff=D(-60), props=props),
+            ProfileDeviceEvent(device='AMD:1:SDMA:1', tdiff=D(-40), props=props),
+            # compute + copy events
+            ProfileRangeEvent(device='AMD', name='E_1', st=St, en=En),
+            ProfileRangeEvent(device='AMD:1', name='E_2', st=St, en=En),
+            ProfileRangeEvent(device='AMD:SDMA:0', name='COPY0', st=St, en=En),
+            ProfileRangeEvent(device='AMD:SDMA:1', name='COPY1', st=St, en=En),
+            ProfileRangeEvent(device='AMD:1:SDMA:0', name='COPY2', st=St, en=En),
+            ProfileRangeEvent(device='AMD:1:SDMA:1', name='COPY3', st=St, en=En),
+            # graph spanning compute + copy on GPU 0
+            ProfileGraphEvent(ents=[ProfileGraphEntry(device='AMD', name='E_1', st_id=0, en_id=1),
+                                    ProfileGraphEntry(device='AMD:SDMA:0', name='COPY0', st_id=2, en_id=3)],
+                              deps=[[], [0]], sigs=[St, En, St, En]),
+            # memory alloc on both GPUs
+            ProfilePointEvent(device='AMD', name='alloc', key=0, arg={"sz":1024, "dtype":dtypes.float}, ts=St),
+            ProfilePointEvent(device='AMD:1', name='alloc', key=1, arg={"sz":512, "dtype":dtypes.float}, ts=St)]
+    j = load_profile(prof)
+    # graph grouped with its device, memory at the end
+    self.assertListEqual(list(j['layout']),
+      ['AMD', 'AMD Graph', 'AMD:SDMA:0', 'AMD:SDMA:1',
+       'AMD:1', 'AMD:1:SDMA:0', 'AMD:1:SDMA:1',
+       'AMD Memory', 'AMD:1 Memory'])
 
   def test_bytes_per_kernel(self):
     step = 10

@@ -375,10 +375,10 @@ def unpack_sqtt(key:tuple[str, int], data:list, p:ProfileProgramEvent) -> tuple[
 
 def device_sort_fn(k:str) -> tuple:
   special = {"GC": 0, "USER": 1, "TINY": 2, "ALLDEVS":100, "DISK": 999}
-  block = 2 if k.endswith(" Memory") else 1 if k.endswith(" Graph") else 0
+  is_memory = k.endswith(" Memory")
   p = k.split(" ")[0].split(":")
   dev_base = p[0] if len(p) < 2 or not p[1].isdigit() else f"{p[0]}:{p[1]}"
-  return (block, special.get(p[0], special['ALLDEVS']), dev_base, k)
+  return (is_memory, special.get(p[0], special['ALLDEVS']), dev_base, k)
 
 def get_profile(profile:list[ProfileEvent], sort_fn:Callable[[str], Any]=device_sort_fn) -> bytes|None:
   # start by getting the time diffs
