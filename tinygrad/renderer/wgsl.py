@@ -87,7 +87,8 @@ class WGSLRenderer(CStyleLanguage):
     (UPat(Ops.INDEX, src=(UPat.var("b"), UPat.var("idx")), allow_any_len=True),
      lambda ctx,b,idx: f"{ctx[b]}[{strip_parens(ctx[idx]) if idx.arg is Ops.ADD else ctx[idx]}]"),
     # fix nan check: 'a != a -> is_nan()'
-    (UPat.var("a") != UPat.var("a"), lambda ctx,a: f"(min({ctx[a]}, 1.0) == 1.0 && max({ctx[a]}, -1.0) == -1.0)"),
+    (UPat.var("a", dtype=dtypes.half) != UPat.var("a"), lambda ctx,a: f"((bitcast<u32>(vec2<f16>({ctx[a]},0))&0x7FFFu)>0x7C00u)"),
+    (UPat.var("a", dtype=dtypes.float) != UPat.var("a"), lambda ctx,a: f"((bitcast<u32>({ctx[a]})&0x7FFFFFFFu)>0x7F800000u)"),
   ]) + base_rewrite
 
   def render_cast(self, dt:DType, val: str) -> str: return f"{self.type_map[dt]}({val})"
