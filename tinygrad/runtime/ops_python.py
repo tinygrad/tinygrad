@@ -3,26 +3,13 @@
 # works to test the tensor cores, and all the uops in general
 # this is the (living) definition of uops
 from typing import Any, TYPE_CHECKING
-import pickle, base64, itertools, time, struct, sys, functools
-from tinygrad.dtype import DType, dtypes, ImageDType, PtrDType, truncate, float_to_fp16, float_to_bf16, float_to_fp8, fp8_to_float
+import pickle, base64, itertools, time, sys, functools
+from tinygrad.dtype import DType, dtypes, ImageDType, PtrDType, truncate, storage_fmt_for_dtype, to_storage_scalar, from_storage_scalar
 from tinygrad.helpers import all_same, getenv, flatten, get_single_element, EMULATE
 from tinygrad.device import Compiled, Compiler, Allocator, CompilerSet
 from tinygrad.codegen.opt import tc
-from tinygrad.uop.ops import exec_alu, python_alu, Ops, UOp, GroupOp
+from tinygrad.uop.ops import exec_alu, python_alu, Ops, UOp, GroupOp, bitcast
 from tinygrad.renderer import Renderer
-
-def storage_fmt_for_dtype(dtype: DType): return 'H' if dtype == dtypes.bfloat16 else 'B' if dtype in dtypes.fp8s else dtype.fmt
-
-def to_storage_scalar(x, dtype: DType):
-  if dtype == dtypes.half: return float_to_fp16(x)
-  if dtype == dtypes.bfloat16: return (struct.unpack('I', struct.pack('f', float_to_bf16(x)))[0] >> 16) & 0xFFFF
-  if dtype in dtypes.fp8s: return float_to_fp8(float(x), dtype)
-  return x
-
-def from_storage_scalar(x, dtype: DType):
-  if dtype == dtypes.bfloat16: return struct.unpack('f', struct.pack('I', (x & 0xFFFF) << 16))[0]
-  if dtype in dtypes.fp8s: return fp8_to_float(int(x), dtype)
-  return x
 
 def _load(m, i, dtype: DType):
   if i is None: return 0.0
@@ -123,11 +110,7 @@ class PythonProgram:
             i = loop_ends[i] + 1
             continue
         elif uop is Ops.VECTORIZE: values[i] = src_values
-        elif uop is Ops.BITCAST:
-          packed = struct.pack(str(warp_size) + storage_fmt_for_dtype(src_dtypes[0].scalar()),
-                               *[to_storage_scalar(x, src_dtypes[0].scalar()) for x in src_values[0]])
-          values[i] = list(struct.unpack(str(warp_size) +  storage_fmt_for_dtype(dtype.scalar()), packed))
-          values[i] = [from_storage_scalar(x, dtype.scalar()) for x in values[i]]
+        elif uop is Ops.BITCAST: values[i] = [bitcast(x, src_dtypes[0], dtype) for x in src_values[0]]
         elif uop is Ops.CAST:
           values[i] = [truncate.get(dtype, lambda dt: dt)(dtypes.as_const(x, dtype)) for x in src_values[0]]
         elif uop is Ops.LOAD:
