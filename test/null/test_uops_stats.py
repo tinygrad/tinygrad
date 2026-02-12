@@ -72,6 +72,7 @@ class TestMemoryCount(unittest.TestCase):
     t = Tensor.empty(100, dtype=dtypes.int).realize()
     GlobalCounters.reset()
     t[20:50] = 3
+    t.realize()
     self.assertEqual(GlobalCounters.global_mem, 30*4)  # 30 elements written
 
   def test_setitem_slice_tensor(self):
@@ -79,12 +80,14 @@ class TestMemoryCount(unittest.TestCase):
     v = Tensor.empty(30, dtype=dtypes.int).realize()
     GlobalCounters.reset()
     t[20:50] = v
+    t.realize()
     self.assertEqual(GlobalCounters.global_mem, 30*4*2)  # 30 read + 30 written
 
   def test_setitem_full(self):
     t = Tensor.empty(100, dtype=dtypes.int).realize()
     GlobalCounters.reset()
     t[:] = 3
+    t.realize()
     self.assertEqual(GlobalCounters.global_mem, 100*4)  # full buffer written
 
   @unittest.skipIf(Device.DEFAULT == "CPU", "test copy to CPU from other device")
