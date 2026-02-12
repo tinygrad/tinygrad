@@ -7,7 +7,8 @@ from tinygrad.renderer.amd.sqtt import print_packets, map_insts
 from tinygrad.runtime.autogen.amd.rdna3.ins import s_endpgm
 from test.amd.disasm import disasm
 
-EXAMPLES_DIR = Path(__file__).parent.parent.parent.parent / "sqtt/examples"
+import tinygrad
+EXAMPLES_DIR = Path(tinygrad.__file__).parent.parent / "extra/sqtt/examples"
 
 def rocprof_inst_traces_match(sqtt, prg, target):
   from tinygrad.viz.serve import amd_decode

@@ -3,7 +3,8 @@ import unittest, struct, ctypes, pickle
 from pathlib import Path
 
 ROCPROF_LIB = Path("/usr/lib/librocprof-trace-decoder.so")
-EXAMPLES_DIR = Path(__file__).parent.parent.parent.parent / "sqtt/examples"
+import tinygrad
+EXAMPLES_DIR = Path(tinygrad.__file__).parent.parent / "extra/sqtt/examples"
 
 # CDNA pkt_fmt -> size in bytes (extracted from rocprof hash table)
 CDNA_PKT_SIZES = {0: 2, 1: 8, 2: 8, 3: 4, 4: 2, 5: 6, 6: 2, 7: 2, 8: 2, 9: 2, 10: 2, 11: 8, 12: 6, 13: 4, 14: 8, 15: 6}

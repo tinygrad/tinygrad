@@ -10,9 +10,11 @@ from tinygrad.renderer.amd.emu import run_asm as python_run_asm, decode_program
 from tinygrad.renderer.amd import decode_inst
 from tinygrad.runtime.autogen.amd.rdna3.ins import SOPP, SOPPOp
 
-REMU_PATH = Path(__file__).parents[3] / "remu/target/release/libremu.so"
+import tinygrad
+EXTRA_DIR = Path(tinygrad.__file__).parent.parent / "extra"
+REMU_PATH = EXTRA_DIR / "remu/target/release/libremu.so"
 if not REMU_PATH.exists():
-  REMU_PATH = Path(__file__).parents[3] / "remu/target/release/libremu.dylib"
+  REMU_PATH = EXTRA_DIR / "remu/target/release/libremu.dylib"
 
 def get_rust_remu():
   """Load the Rust libremu shared library."""

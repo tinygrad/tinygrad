@@ -13,7 +13,8 @@ from tinygrad.renderer.amd.sqtt import (decode, LAYOUT_HEADER, WAVESTART, WAVEST
                                      InstOp, InstOpRDNA4, print_packets)
 from test.amd.helpers import TARGET_TO_ARCH
 
-EXAMPLES_DIR = Path(__file__).parent.parent.parent.parent / "sqtt/examples"
+import tinygrad
+EXAMPLES_DIR = Path(tinygrad.__file__).parent.parent / "extra/sqtt/examples"
 # INST ops for non-traced SIMDs (excluded from instruction count)
 OTHER_SIMD_OPS = {InstOp.OTHER_LDS_LOAD, InstOp.OTHER_LDS_STORE, InstOp.OTHER_LDS_STORE_64, InstOp.OTHER_LDS_STORE_128,
                   InstOp.OTHER_FLAT_LOAD, InstOp.OTHER_FLAT_STORE, InstOp.OTHER_FLAT_STORE_64, InstOp.OTHER_FLAT_STORE_96,
