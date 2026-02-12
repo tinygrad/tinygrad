@@ -535,16 +535,65 @@ class TestAssign(unittest.TestCase):
     This is the KV cache pattern from llm.py.
     """
     v_pos = Variable("pos", 0, 3).bind(0)
-
-    # without .realize() after assign, the read doesn't see the assigned values
     cache = Tensor.zeros(4, 4).contiguous().realize()
     cache[v_pos:v_pos+1, :].assign(Tensor.ones(1, 4))
-    self.assertEqual(cache.sum().item(), 0.0)  # should be 4.0!
+    self.assertEqual(cache.sum().item(), 4.0)
 
-    # TODO: remove .realize() workaround once assign-read dependency is fixed
-    cache2 = Tensor.zeros(4, 4).contiguous().realize()
-    cache2[v_pos:v_pos+1, :].assign(Tensor.ones(1, 4)).realize()
-    self.assertEqual(cache2.sum().item(), 4.0)
+  def test_chained_assign_slice_then_read(self):
+    """Three caches with chained assign-then-read: each block writes to its cache and reads back,
+    feeding the result to the next block's assign. Without proper dependency tracking, block N's read
+    may see stale data from block N-1's cache (pre-assign zeros instead of the assigned values).
+    This is the multi-layer KV cache pattern from llm.py._attention.
+    """
+    D, max_ctx = 4, 8
+    cache1 = Tensor.zeros(max_ctx, D).contiguous().realize()
+    cache2 = Tensor.zeros(max_ctx, D).contiguous().realize()
+    cache3 = Tensor.zeros(max_ctx, D).contiguous().realize()
+    cache1[:3].assign(Tensor.ones(3, D)).realize()
+    cache2[:3].assign(Tensor.ones(3, D) * 2).realize()
+    cache3[:3].assign(Tensor.ones(3, D) * 3).realize()
+    # block 1: assign [10]*D at position 3, read sum -> c1=[13]*D
+    cache1[3:4].assign(Tensor.ones(1, D) * 10)
+    c1 = cache1[:4].sum(0, keepdim=True)
+    # block 2: assign c1 at position 3, read sum -> c2=[19]*D
+    cache2[3:4].assign(c1)
+    c2 = cache2[:4].sum(0, keepdim=True)
+    # block 3: assign c2 at position 3, read sum -> 112
+    cache3[3:4].assign(c2)
+    self.assertEqual(cache3[:4].sum().item(), 112.0)
+
+  def test_chained_assign_kernel_count(self):
+    """Chained pending assigns must not produce excessive kernels (tests recursive transitive processing)."""
+    D, N = 4, 5
+    caches = [Tensor.zeros(8, D).contiguous().realize() for _ in range(N)]
+    caches[0][0:1].assign(Tensor.ones(1, D) * 10)
+    x = caches[0][:1].sum(0, keepdim=True)
+    for i in range(1, N):
+      caches[i][0:1].assign(x)
+      x = caches[i][:1].sum(0, keepdim=True)
+    GlobalCounters.reset()
+    x.realize()
+    # N assigns (1 kernel each) producing N kernels total
+    self.assertEqual(GlobalCounters.kernel_count, N)
+
+  def test_shared_computation_assign_kernel_count(self):
+    """When a .contiguous() is shared between an assign value and the next layer's input (like QKV projection in LLM),
+    substitute optimization replaces already-realized sub-graphs in remaining pending assigns, preventing kernel escalation.
+    Without substitute, pending assign graphs grow linearly and produce 153 kernels instead of 48."""
+    D, N = 16, 16
+    caches = [Tensor.zeros(4, D).contiguous().realize() for _ in range(N)]
+    W = [Tensor.full((D, D*2), 0.01).contiguous().realize() for _ in range(N)]
+    x = Tensor.ones(1, D).contiguous().realize()
+    for i in range(N):
+      shared = (x @ W[i]).contiguous()  # .contiguous() UOp is shared between assign (k) and next layer (q)
+      k, q = shared[:, :D], shared[:, D:]
+      caches[i][0:1].assign(k)          # assign references the CONTIGUOUS
+      x = q + caches[i][:1]             # next layer also references the same CONTIGUOUS through q
+    GlobalCounters.reset()
+    caches[-1][:1].contiguous().realize()
+    # 2 kernels for first assign + 3 per remaining assign (matmul, contiguous, assign) + 1 final read = 3*N
+    self.assertEqual(GlobalCounters.kernel_count, 3*N)
+
 
 class TestAssignOrdering(unittest.TestCase):
   """Tests for complex assign orderings that could differ between lazy and eager execution.

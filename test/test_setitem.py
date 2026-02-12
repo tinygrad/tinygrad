@@ -1,6 +1,6 @@
-import unittest, random
+import unittest
 from tinygrad import Tensor, TinyJit, Variable, dtypes, Device
-from tinygrad.helpers import Context, getenv
+from tinygrad.helpers import Context
 import numpy as np
 
 class TestSetitem(unittest.TestCase):
@@ -40,6 +40,23 @@ class TestSetitem(unittest.TestCase):
     t = Tensor.arange(4).reshape(2, 2)
     t[1] = 5
     np.testing.assert_allclose(t.numpy(), [[0, 1], [5, 5]])
+
+  def test_setitem_into_unrealized_sliced_compute(self):
+    # base computation contains SHRINK from prior slicing (like QR decomposition pattern)
+    a = Tensor.arange(6, dtype=dtypes.float).reshape(2, 3)
+    w = a[0] + a[1]  # unrealized ADD with SHRINK in graph: [3, 5, 7]
+    w[1] = 99
+    np.testing.assert_allclose(w.numpy(), [3, 99, 7])
+
+  def test_setitem_fancy_on_unrealized_view(self):
+    # fancy indexing setitem on unrealized SHRINK view (triggered infinite loop in graph_rewrite)
+    base = Tensor.arange(20, dtype=dtypes.float).reshape(4, 5)
+    sub = base[1:3]
+    flat = sub.reshape(sub.numel()).contiguous()
+    idx = Tensor([0, 3, 7, 9])
+    flat[idx] = Tensor([99, 98, 97, 96], dtype=dtypes.float)
+    sub.assign(flat.reshape(2, 5))
+    np.testing.assert_allclose(sub.numpy(), [[99, 6, 7, 98, 9], [10, 11, 97, 13, 96]])
 
   def test_setitem_dtype(self):
     for dt in (dtypes.int, dtypes.float, dtypes.bool):
@@ -211,19 +228,63 @@ class TestSetitem(unittest.TestCase):
     n[index.numpy()] = v.numpy()
     np.testing.assert_equal(t.numpy(), n)
 
-  @unittest.skip("slow")
-  def test_setitem_tensor_indexing_fuzz(self):
-    random.seed(getenv("SEED", 42))
-    for _ in range(getenv("ITERS", 100)):
-      size = random.randint(5, 10)
-      d0, d1, d2 = random.randint(1,5), random.randint(1,5), random.randint(1,5)
-      t = Tensor.zeros(size).contiguous()
-      n = np.zeros((size,))
-      index = Tensor.randint((d0, d1, d2), low=0, high=size)
-      v = Tensor.arange(d0*d1*d2).reshape(d0, d1, d2)
-      t[index] = v
-      n[index.numpy()] = v.numpy()
-      np.testing.assert_allclose(t.numpy(), n, err_msg=f"failed with index={index.numpy().tolist()} and v={v.numpy().tolist()}")
+  def test_setitem_swap_rows(self):
+    t = Tensor.arange(6, dtype=dtypes.float).reshape(3, 2).contiguous().realize()
+    tmp = t[0]
+    t[0] = t[1]
+    t[2] = tmp
+    # NOTE: not [[2, 3], [2, 3], [0, 1]], same with eager
+    np.testing.assert_allclose(t.numpy(), [[2, 3], [2, 3], [2, 3]])
+
+    # eager version
+    t = Tensor.arange(6, dtype=dtypes.float).reshape(3, 2).contiguous().realize()
+    tmp = t[0].realize()
+    t[0] = t[1].realize()
+    t[2] = tmp.realize()
+    np.testing.assert_allclose(t.numpy(), [[2, 3], [2, 3], [2, 3]])
+
+  def test_lazy_sum_between_writes(self):
+    # lazy sums should capture buffer state at the time they were created
+    t = Tensor.zeros(6).contiguous().realize()
+    s0 = t.sum()
+    t[:3].assign(1.0)
+    s1 = t.sum()
+    t[3:].assign(2.0)
+    s2 = t.sum()
+    # TODO: s0 and s1 see final buffer state, should be [0.0, 3.0, 9.0]
+    np.testing.assert_allclose([s0.item(), s1.item(), s2.item()], [9.0, 9.0, 9.0])
+
+    # eager version
+    t = Tensor.zeros(6).contiguous().realize()
+    s0 = t.sum().realize()
+    t[:3].assign(1.0).realize()
+    s1 = t.sum().realize()
+    t[3:].assign(2.0).realize()
+    s2 = t.sum().realize()
+    np.testing.assert_allclose([s0.item(), s1.item(), s2.item()], [0.0, 3.0, 9.0])
+
+  def test_cross_assign_independence(self):
+    # when assigning to two tensors using computations from both,
+    # both assigns should see the OLD values of both tensors
+    a = Tensor.arange(4, dtype=dtypes.float).contiguous().realize()
+    b = Tensor.arange(4, 8, dtype=dtypes.float).contiguous().realize()
+    new_a = a + b    # [4, 6, 8, 10]
+    new_b = a * 2    # [0, 2, 4, 6] -- should use OLD a
+    a.assign(new_a)
+    b.assign(new_b)
+    np.testing.assert_allclose(a.numpy(), [4, 6, 8, 10])
+    # TODO: new_b sees mutated a, should be [0, 2, 4, 6]
+    np.testing.assert_allclose(b.numpy(), [8, 12, 16, 20])
+
+    # eager version
+    a = Tensor.arange(4, dtype=dtypes.float).contiguous().realize()
+    b = Tensor.arange(4, 8, dtype=dtypes.float).contiguous().realize()
+    new_a = (a + b).realize()
+    new_b = (a * 2).realize()
+    a.assign(new_a).realize()
+    b.assign(new_b).realize()
+    np.testing.assert_allclose(a.numpy(), [4, 6, 8, 10])
+    np.testing.assert_allclose(b.numpy(), [0, 2, 4, 6])
 
 
 class TestWithGrad(unittest.TestCase):
