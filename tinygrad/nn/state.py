@@ -279,12 +279,14 @@ def torch_load(t:Tensor) -> dict[str, Tensor]:
   elif passthrough_reset(tarfile.is_tarfile(fobj)): # NOTE: passthrough_reset required to support python < 3.11
     files = tar_extract(t)
     f = io.BufferedReader(TensorIO(files["storages"]), 1_000_000)
+    # slice source tensor t
     for _ in range(TorchPickle(f).load()):
       (key, _, storage_type), sz = TorchPickle(f).load(), struct.unpack('<q', f.read(8))[0]
       byte_offset = f.tell()
       storage_source[key] = files["storages"][byte_offset:byte_offset + sz * storage_type.itemsize]
       f.seek(sz * storage_type.itemsize, 1)
     f = io.BufferedReader(TensorIO(files["tensors"]), 1_000_000)
+    # get tensor metadata
     for _ in range(TorchPickle(f).load()):
       (key, storage_id, _), ndim, _ = TorchPickle(f).load(), struct.unpack('<i', f.read(4))[0], f.read(4)
       size, stride = struct.unpack(f'<{ndim}q', f.read(8 * ndim)), struct.unpack(f'<{ndim}q', f.read(8 * ndim))
