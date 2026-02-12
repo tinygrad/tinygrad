@@ -1,5 +1,5 @@
 """Shared test helpers for AMD tests."""
-import ctypes, functools
+import ctypes
 from dataclasses import dataclass
 from tinygrad.helpers import unwrap
 from tinygrad.runtime.autogen import llvm
@@ -36,24 +36,19 @@ def _expect(x, err, ret=None):
   if x: raise RuntimeError(unwrap(ctypes.cast(err.contents, ctypes.c_char_p).value).decode() if not isinstance(err, str) else err)
   return ret
 
-_llvm_initialized = False
 def _init_llvm():
-  global _llvm_initialized
-  if _llvm_initialized: return
   for component in ['Target', 'TargetInfo', 'TargetMC', 'AsmParser', 'AsmPrinter', 'Disassembler']:
     getattr(llvm, f'LLVMInitializeAMDGPU{component}')()
-  _llvm_initialized = True
 
-@functools.cache
-def _get_target_machine(mcpu:str, mattr:str) -> llvm.LLVMTargetMachineRef:
-  _init_llvm()
+def _create_target_machine(mcpu:str, mattr:str) -> llvm.LLVMTargetMachineRef:
   target = _expect(llvm.LLVMGetTargetFromTriple(b'amdgcn-amd-amdhsa', ctypes.pointer(tgt:=llvm.LLVMTargetRef()), err:=_cerr()), err, tgt)
   return llvm.LLVMCreateTargetMachine(target, b'amdgcn-amd-amdhsa', mcpu.encode(), mattr.encode(),
                                       llvm.LLVMCodeGenLevelDefault, llvm.LLVMRelocDefault, llvm.LLVMCodeModelDefault)
 
 def _emit_obj(asm_text:str, mcpu:str, mattr:str, diag_errors:list[str]|None=None) -> bytes:
   """Assemble raw asm text into an ELF object using LLVM in-process."""
-  tm = _get_target_machine(mcpu, mattr)
+  _init_llvm()
+  tm = _create_target_machine(mcpu, mattr)
   ctx = llvm.LLVMContextCreate()
   try:
     if diag_errors is not None:
@@ -74,6 +69,7 @@ def _emit_obj(asm_text:str, mcpu:str, mattr:str, diag_errors:list[str]|None=None
     return obj
   finally:
     llvm.LLVMContextDispose(ctx)
+    llvm.LLVMDisposeTargetMachine(tm)
 
 def _extract_text(obj:bytes) -> bytes:
   """Extract .text section from ELF object bytes."""
@@ -95,28 +91,26 @@ def llvm_assemble(instrs:list[str], mcpu:str, mattr:str) -> list[bytes]:
     start = idx + len(_SENTINEL)
   return results
 
-@functools.cache
-def _get_disasm_context(mcpu:str, mattr:str) -> llvm.LLVMDisasmContextRef:
+def llvm_disasm(code:bytes, mcpu:str, mattr:str) -> list[str]:
+  """Disassemble raw bytes into instruction strings using LLVM."""
   _init_llvm()
   dc = llvm.LLVMCreateDisasmCPUFeatures(b'amdgcn-amd-amdhsa', mcpu.encode(), mattr.encode(), None, 0,
                                          llvm.LLVMOpInfoCallback(0), llvm.LLVMSymbolLookupCallback(0))
   if not dc: raise RuntimeError(f"failed to create disasm context for {mcpu}")
   llvm.LLVMSetDisasmOptions(dc, 2 | 4)  # PrintImmHex | AsmPrinterVariant
-  return dc
-
-def llvm_disasm(code:bytes, mcpu:str, mattr:str) -> list[str]:
-  """Disassemble raw bytes into instruction strings using LLVM."""
-  dc = _get_disasm_context(mcpu, mattr)
-  buf = ctypes.create_string_buffer(256)
-  arr = (ctypes.c_uint8 * len(code)).from_buffer_copy(code)
-  results, offset = [], 0
-  while offset < len(code):
-    size = llvm.LLVMDisasmInstruction(dc, ctypes.cast(ctypes.addressof(arr) + offset, ctypes.POINTER(ctypes.c_uint8)),
-                                      len(code) - offset, 0, buf, 256)
-    if size == 0: break
-    results.append(buf.value.decode().strip())
-    offset += size
-  return results
+  try:
+    buf = ctypes.create_string_buffer(256)
+    arr = (ctypes.c_uint8 * len(code)).from_buffer_copy(code)
+    results, offset = [], 0
+    while offset < len(code):
+      size = llvm.LLVMDisasmInstruction(dc, ctypes.cast(ctypes.addressof(arr) + offset, ctypes.POINTER(ctypes.c_uint8)),
+                                        len(code) - offset, 0, buf, 256)
+      if size == 0: break
+      results.append(buf.value.decode().strip())
+      offset += size
+    return results
+  finally:
+    llvm.LLVMDisasmDispose(dc)
 
 def llvm_filter_valid_asm(tests:list[tuple[str, bytes]], mcpu:str, mattr:str) -> list[tuple[str, bytes]]:
   """Filter out tests where original ASM isn't valid on target, and where LLVM roundtrip doesn't match."""
