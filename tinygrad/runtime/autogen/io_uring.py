@@ -216,9 +216,7 @@ IORING_OP_EPOLL_WAIT = enum_io_uring_op.define('IORING_OP_EPOLL_WAIT', 59)
 IORING_OP_READV_FIXED = enum_io_uring_op.define('IORING_OP_READV_FIXED', 60)
 IORING_OP_WRITEV_FIXED = enum_io_uring_op.define('IORING_OP_WRITEV_FIXED', 61)
 IORING_OP_PIPE = enum_io_uring_op.define('IORING_OP_PIPE', 62)
-IORING_OP_NOP128 = enum_io_uring_op.define('IORING_OP_NOP128', 63)
-IORING_OP_URING_CMD128 = enum_io_uring_op.define('IORING_OP_URING_CMD128', 64)
-IORING_OP_LAST = enum_io_uring_op.define('IORING_OP_LAST', 65)
+IORING_OP_LAST = enum_io_uring_op.define('IORING_OP_LAST', 63)
 
 class enum_io_uring_msg_ring_flags(Annotated[int, ctypes.c_uint32], c.Enum): pass
 IORING_MSG_DATA = enum_io_uring_msg_ring_flags.define('IORING_MSG_DATA', 0)
@@ -298,8 +296,7 @@ IORING_REGISTER_ZCRX_IFQ = enum_io_uring_register_op.define('IORING_REGISTER_ZCR
 IORING_REGISTER_RESIZE_RINGS = enum_io_uring_register_op.define('IORING_REGISTER_RESIZE_RINGS', 33)
 IORING_REGISTER_MEM_REGION = enum_io_uring_register_op.define('IORING_REGISTER_MEM_REGION', 34)
 IORING_REGISTER_QUERY = enum_io_uring_register_op.define('IORING_REGISTER_QUERY', 35)
-IORING_REGISTER_ZCRX_CTRL = enum_io_uring_register_op.define('IORING_REGISTER_ZCRX_CTRL', 36)
-IORING_REGISTER_LAST = enum_io_uring_register_op.define('IORING_REGISTER_LAST', 37)
+IORING_REGISTER_LAST = enum_io_uring_register_op.define('IORING_REGISTER_LAST', 36)
 IORING_REGISTER_USE_REGISTERED_RING = enum_io_uring_register_op.define('IORING_REGISTER_USE_REGISTERED_RING', 2147483648)
 
 class enum_io_wq_type(Annotated[int, ctypes.c_uint32], c.Enum): pass
@@ -514,7 +511,6 @@ SOCKET_URING_OP_SIOCOUTQ = enum_io_uring_socket_op.define('SOCKET_URING_OP_SIOCO
 SOCKET_URING_OP_GETSOCKOPT = enum_io_uring_socket_op.define('SOCKET_URING_OP_GETSOCKOPT', 2)
 SOCKET_URING_OP_SETSOCKOPT = enum_io_uring_socket_op.define('SOCKET_URING_OP_SETSOCKOPT', 3)
 SOCKET_URING_OP_TX_TIMESTAMP = enum_io_uring_socket_op.define('SOCKET_URING_OP_TX_TIMESTAMP', 4)
-SOCKET_URING_OP_GETSOCKNAME = enum_io_uring_socket_op.define('SOCKET_URING_OP_GETSOCKNAME', 5)
 
 @c.record
 class struct_io_timespec(c.Struct):
@@ -546,9 +542,6 @@ class struct_io_uring_zcrx_area_reg(c.Struct):
   flags: Annotated[Annotated[int, ctypes.c_uint32], 24]
   dmabuf_fd: Annotated[Annotated[int, ctypes.c_uint32], 28]
   __resv2: Annotated[c.Array[Annotated[int, ctypes.c_uint64], Literal[2]], 32]
-class enum_zcrx_reg_flags(Annotated[int, ctypes.c_uint32], c.Enum): pass
-ZCRX_REG_IMPORT = enum_zcrx_reg_flags.define('ZCRX_REG_IMPORT', 1)
-
 @c.record
 class struct_io_uring_zcrx_ifq_reg(c.Struct):
   SIZE = 96
@@ -562,28 +555,6 @@ class struct_io_uring_zcrx_ifq_reg(c.Struct):
   zcrx_id: Annotated[Annotated[int, ctypes.c_uint32], 64]
   __resv2: Annotated[Annotated[int, ctypes.c_uint32], 68]
   __resv: Annotated[c.Array[Annotated[int, ctypes.c_uint64], Literal[3]], 72]
-class enum_zcrx_ctrl_op(Annotated[int, ctypes.c_uint32], c.Enum): pass
-ZCRX_CTRL_FLUSH_RQ = enum_zcrx_ctrl_op.define('ZCRX_CTRL_FLUSH_RQ', 0)
-ZCRX_CTRL_EXPORT = enum_zcrx_ctrl_op.define('ZCRX_CTRL_EXPORT', 1)
-__ZCRX_CTRL_LAST = enum_zcrx_ctrl_op.define('__ZCRX_CTRL_LAST', 2)
-
-@c.record
-class struct_zcrx_ctrl_flush_rq(c.Struct):
-  SIZE = 48
-  __resv: Annotated[c.Array[Annotated[int, ctypes.c_uint64], Literal[6]], 0]
-@c.record
-class struct_zcrx_ctrl_export(c.Struct):
-  SIZE = 48
-  zcrx_fd: Annotated[Annotated[int, ctypes.c_uint32], 0]
-  __resv1: Annotated[c.Array[Annotated[int, ctypes.c_uint32], Literal[11]], 4]
-@c.record
-class struct_zcrx_ctrl(c.Struct):
-  SIZE = 72
-  zcrx_id: Annotated[Annotated[int, ctypes.c_uint32], 0]
-  op: Annotated[Annotated[int, ctypes.c_uint32], 4]
-  __resv: Annotated[c.Array[Annotated[int, ctypes.c_uint64], Literal[2]], 8]
-  zc_export: Annotated[struct_zcrx_ctrl_export, 24]
-  zc_flush: Annotated[struct_zcrx_ctrl_flush_rq, 24]
 c.init_records()
 uring_unlikely = lambda cond: __builtin_expect( not  not (cond), 0) # type: ignore
 uring_likely = lambda cond: __builtin_expect( not  not (cond), 1) # type: ignore
@@ -619,7 +590,6 @@ IORING_SETUP_REGISTERED_FD_ONLY = (1 << 15) # type: ignore
 IORING_SETUP_NO_SQARRAY = (1 << 16) # type: ignore
 IORING_SETUP_HYBRID_IOPOLL = (1 << 17) # type: ignore
 IORING_SETUP_CQE_MIXED = (1 << 18) # type: ignore
-IORING_SETUP_SQE_MIXED = (1 << 19) # type: ignore
 IORING_URING_CMD_FIXED = (1 << 0) # type: ignore
 IORING_URING_CMD_MULTISHOT = (1 << 1) # type: ignore
 IORING_URING_CMD_MASK = (IORING_URING_CMD_FIXED | IORING_URING_CMD_MULTISHOT) # type: ignore
@@ -1036,8 +1006,7 @@ NR_removexattrat = 466 # type: ignore
 NR_open_tree_attr = 467 # type: ignore
 NR_file_getattr = 468 # type: ignore
 NR_file_setattr = 469 # type: ignore
-NR_listns = 470 # type: ignore
-NR_syscalls = 471 # type: ignore
+NR_syscalls = 470 # type: ignore
 NR_fcntl = NR3264_fcntl # type: ignore
 NR_statfs = NR3264_statfs # type: ignore
 NR_fstatfs = NR3264_fstatfs # type: ignore
