@@ -38,7 +38,6 @@ class Estimates:
         elif u.op is Ops.IF:
           dont_count = dont_count.union(u.src[0].toposort())
     for u in uops:
-      if u.op is Ops.SINK and isinstance(u.arg, KernelInfo) and u.arg.estimates is not None: return u.arg.estimates
       if u.op in {Ops.LOAD, Ops.STORE}:
         buf = u
         while len(buf.src): buf = buf.src[0]
@@ -82,6 +81,7 @@ class ProgramSpec:
 
   @functools.cached_property
   def estimates(self) -> Estimates:
+    if self.ast.op is Ops.SINK and isinstance(self.ast.arg, KernelInfo) and self.ast.arg.estimates is not None: return self.ast.arg.estimates
     return Estimates() if self.uops is None else Estimates.from_uops(self.uops, ignore_indexing=True)
 
   @functools.cached_property
@@ -118,7 +118,7 @@ class ProgramSpec:
     ins: list[int] = []
     global_size: list[int] = [1, 1, 1]
     local_size: list[int]|None = [1, 1, 1]
-    for u in uops:
+    for u in sink.toposort():
       if u.op is Ops.DEFINE_VAR: _vars.append(u)
       if u.op is Ops.PARAM: _globals.append(u.arg)
       if u.op in (Ops.STORE, Ops.LOAD):
