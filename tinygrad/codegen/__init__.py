@@ -150,13 +150,11 @@ def do_assemble(ctx:Renderer, prg:UOp, lin:UOp) -> UOp:
       elif val.offset < 106: max_sgpr = max(max_sgpr, val.offset + val.sz)
   src = "\n".join(str(inst) for inst in insts)
   code_bytes = b"".join(inst.to_bytes() for inst in insts)
-  arch = next(v for k, v in _arch_map.items() if ctx.arch.startswith(k))
+  arch = next(v for k, v in _arch_map.items() if getattr(ctx, 'arch', '').startswith(k))
   kd = {"kernarg_size":8, "user_sgpr_kernarg_segment_ptr":1, "user_sgpr_count":2, "wavefront_size32":1, "forward_progress":1,
         "next_free_vgpr":((max_vgpr + 7) // 8) * 8, "next_free_sgpr":((max_sgpr + 7) // 8) * 8}
   binary = create_elf(code_bytes, kd, arch)
-  sink = prg.src[0]
-  new_linear = UOp(Ops.LINEAR, src=(*sink.src, sink))
-  return prg.replace(src=(sink, prg.src[1], new_linear, UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=binary)))
+  return prg.replace(src=prg.src[:3]+(UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=binary)))
 
 def do_render(ctx:Renderer, prg:UOp, lin:UOp) -> UOp:
   src = ctx.render(list(lin.src))
