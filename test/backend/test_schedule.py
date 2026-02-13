@@ -11,7 +11,7 @@ from tinygrad import nn, dtypes, Device, Tensor, Variable
 from tinygrad.device import is_dtype_supported
 from tinygrad.dtype import DType, ImageDType
 from tinygrad.uop.ops import UOp, Ops, UPat
-from tinygrad.helpers import CI, DEBUG, SPLIT_REDUCEOP, GlobalCounters, Context, getenv, all_same, temp
+from tinygrad.helpers import CI, DEBUG, SPLIT_REDUCEOP, OSX, GlobalCounters, Context, getenv, all_same, temp
 from tinygrad.engine.realize import CompiledRunner, run_schedule
 
 class KernelCountException(Exception): pass
@@ -99,6 +99,7 @@ class TestSchedule(unittest.TestCase):
     self.assertListEqual(a.tolist(), [[15]])
 
   @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
+  @unittest.skipIf(Device.DEFAULT == "WEBGPU" and OSX, "WEBGPU Metal backend is not accurate enough")
   def test_expand_buffer_before_cast(self):
     a = Tensor.randn(4, 2, 1).realize().permute((1, 0, 2))
     b = a.cast(dtypes.half).expand((2, 4, 4))+2
