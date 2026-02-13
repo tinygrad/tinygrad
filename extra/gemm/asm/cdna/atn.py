@@ -1,6 +1,7 @@
-"""ASM SDPA (Scaled Dot-Product Attention) using aiter FMHA kernels."""
+# assembly attention kernels (forward and backward) using aiter FMHA kernels
 import pathlib, ctypes, struct, math, functools, atexit
 from tinygrad import Tensor, dtypes, Device
+from tinygrad.helpers import DEBUG
 from tinygrad.uop.ops import UOp, Ops, KernelInfo
 from tinygrad.renderer import Estimates
 
@@ -328,7 +329,7 @@ def asm_sdpa(q: Tensor, k: Tensor, v: Tensor) -> Tensor:
   """
   counters["used"] += 1
   B, H_q, S, D = q.shape
-  print("[asm_atn]", q.shape, k.shape, v.shape)
+  if DEBUG >= 2: print("[asm_atn]", q.shape, k.shape, v.shape)
   H_kv = k.shape[1]  # K/V may have fewer heads (GQA)
   dname = q.device[0] if isinstance(q.device, tuple) else q.device
 

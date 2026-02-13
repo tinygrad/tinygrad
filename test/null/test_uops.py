@@ -5,17 +5,10 @@ from tinygrad.tensor import Tensor
 from tinygrad.helpers import Timing, Context
 from tinygrad.dtype import dtypes, ConstFloat  # noqa: F401
 from tinygrad.device import Device
-from tinygrad.uop.ops import Ops, UOp, UPat, KernelInfo, exec_alu
+from tinygrad.uop.ops import Ops, UOp, UPat, exec_alu
 from tinygrad.uop.spec import shared_spec
 from tinygrad.uop.symbolic import sym
-from test.helpers import get_uops
-
-def to_uops_list(u:list[UOp], ren=None) -> list[UOp]:
-  sink = UOp.group(*u)
-  for r in sink.ranges: sink = sink.end(r)
-  ret = get_uops(sink.sink(arg=KernelInfo(opts_to_apply=())), ren)
-  assert ret[-1].op is Ops.SINK
-  return ret
+from test.helpers import to_uops_list
 
 class TestSafeCast(unittest.TestCase):
   def test_cast_folds(self):
