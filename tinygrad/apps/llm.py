@@ -91,7 +91,8 @@ class SimpleTokenizer:
     while len(parts) > 1:
       best_score, best_i = sys.maxsize, -1
       for i in range(len(parts)-1):
-        score = self._bpe_ranks.get((parts[i], parts[i+1]), sys.maxsize) if self._bpe_ranks else self._normal_tokens.get(parts[i]+parts[i+1], sys.maxsize)
+        if self._bpe_ranks: score = self._bpe_ranks.get((parts[i], parts[i+1]), sys.maxsize)
+        else: score = self._normal_tokens.get(parts[i]+parts[i+1], sys.maxsize)
         if score < best_score: best_score, best_i = score, i
       if best_i == -1: break
       parts[best_i:best_i+2] = [parts[best_i] + parts[best_i+1]]
@@ -234,8 +235,8 @@ class Transformer:
                n_shared_experts:int=0, moe_hidden_dim:int=0, leading_dense_blocks:int=0,
                expert_gating_func:int=0, expert_weights_norm:bool=False, expert_weights_scale:float=1.0,
                mscale:float=1.0, yarn_scaling_factor:float=1.0, yarn_params=None):
+    self.blk: list[TransformerBlock | MLATransformerBlock] = []
     if kv_lora_rank > 0:  # MLA architecture (use when kv_lora_rank is present, q_lora_rank is optional)
-      self.blk = []
       for i in range(num_blocks):
         # First leading_dense_blocks use dense FFN, rest use MoE
         is_dense = i < leading_dense_blocks
@@ -267,9 +268,7 @@ class Transformer:
   @staticmethod
   def from_gguf(gguf:Tensor, max_context:int|None=None, realize=True, quantized:bool=False) -> tuple[Transformer, dict]:
     # TODO: remove the need for copy to default device
-    # TODO: ugly, remove variable returns
-    if quantized: kv, state_dict, quantized_tensors = nn.state.gguf_load(gguf.to(None), quantized=True)
-    else: kv, state_dict, quantized_tensors = nn.state.gguf_load(gguf.to(None)), None
+    kv, state_dict, quantized_tensors = nn.state.gguf_load(gguf.to(None), quantized=quantized)  # type: ignore[call-arg,misc]
 
     # all state items should be float16, not float32
     state_dict = {k:v.cast('float16') if getenv("HALF", 1) else v for k,v in state_dict.items()}
@@ -281,7 +280,7 @@ class Transformer:
     # Remap GGUF exp_probs_b tensors to tinygrad exp_probs_b.bias naming
     for d in [state_dict] + ([quantized_tensors] if quantized_tensors else []):
       for k in list(d.keys()):
-        if re.match(r"blk\.\d+\.exp_probs_b$", k): d[f"{k}.bias"] = d.pop(k)
+        if re.match(r"blk\.\d+\.exp_probs_b$", k): d[f"{k}.bias"] = d.pop(k)  # type: ignore[assignment]
 
     # Extract architecture metadata
     arch = kv['general.architecture']

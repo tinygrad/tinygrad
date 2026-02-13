@@ -152,7 +152,7 @@ class GPT2:
     q_type = model_size[len("gpt2_gguf_"):].upper()
     fn = fetch(f"https://huggingface.co/PrunaAI/gpt2-GGUF-smashed/resolve/main/gpt2.{q_type}.gguf?download=true")
     gguf_tensor = Tensor.empty(os.stat(fn).st_size, dtype=dtypes.uint8, device=f"disk:{fn}").to(Device.DEFAULT)
-    kv_data, state_dict = gguf_load(gguf_tensor)
+    kv_data, state_dict = gguf_load(gguf_tensor)[:2]
 
     gpt2_params = {
       "dim": kv_data["gpt2.embedding_length"], "n_heads": kv_data["gpt2.attention.head_count"],

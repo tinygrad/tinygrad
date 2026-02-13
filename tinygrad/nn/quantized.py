@@ -10,8 +10,8 @@ class QuantizedLinear:
     self.out_features, self.in_features = shape
     self.ggml_type = ggml_type
     self._el_per_block, _, self._dequant_fn = GGML_QUANT_INFO[ggml_type]
-    self._dequant_cache = None
-    self._q4_0_blocks = None
+    self._dequant_cache: Tensor|None = None
+    self._q4_0_blocks: Tensor|None = None
 
   def _ensure_dequant_cache(self, device: str|tuple[str, ...]) -> None:
     if self._dequant_cache is not None and self._dequant_cache.device == device: return
@@ -32,6 +32,7 @@ class QuantizedLinear:
       self._ensure_q4_0_blocks(x.device)
       O, bpr = self.out_features, self.in_features // 32
       blocks = self._q4_0_blocks
+      assert blocks is not None
       scale = blocks[:, :, :2].bitcast(dtypes.float16)  # (O, bpr, 1)
       packed = blocks[:, :, 2:]  # (O, bpr, 16)
       x_fp16 = x.cast(dtypes.float16) if x.dtype != dtypes.float16 else x
@@ -43,6 +44,7 @@ class QuantizedLinear:
       # Scale and reduce in one pass over (bpr, 16)
       return (scale * (lo * x_lo + hi * x_hi)).reshape(-1, O, bpr * 16).sum(axis=-1).reshape(*x.shape[:-1], O)
     self._ensure_dequant_cache(x.device)
+    assert self._dequant_cache is not None
     return x.linear(self._dequant_cache.T, None)
 
 class QuantizedExpertWeights:
@@ -55,7 +57,7 @@ class QuantizedExpertWeights:
     self.blocks = blocks
     self.expert_first_in_memory = expert_first_in_memory
     self._blocks_per_expert = self.blocks.shape[0] // self.num_experts
-    self._expert_blocks = None
+    self._expert_blocks: Tensor|None = None
     assert self.blocks.shape[0] % self.num_experts == 0, f"blocks {self.blocks.shape[0]} not divisible by num_experts {self.num_experts}"
 
   def _ensure_expert_blocks(self, device: str|tuple[str, ...]) -> None:
@@ -77,6 +79,7 @@ class QuantizedExpertWeights:
     x_flat = xk.reshape(n_sel, self.in_features)
 
     self._ensure_expert_blocks(x.device)
+    assert self._expert_blocks is not None
     sel_blocks = self._expert_blocks[sel.reshape(-1)]  # (n_sel, bpe, bpb)
 
     # Q4_0 packed-dot: subtract 8 inline (matches QuantizedLinear path, avoids separate x_block_sum kernel)
@@ -117,7 +120,7 @@ def replace_quantized_modules(model, quantized_tensors: dict, state_dict: dict) 
       elif hasattr(obj, part): parent, attr, obj = obj, part, getattr(obj, part)
       else: break
     else: found = True
-    if found:
+    if found and parent is not None and attr is not None:
       if isinstance(obj, nn.Linear):
         del quantized_tensors[name]
         setattr(parent, attr, QuantizedLinear(blocks, shape, ggml_type))

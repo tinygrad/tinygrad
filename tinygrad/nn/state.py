@@ -435,15 +435,14 @@ def gguf_load(tensor: Tensor, quantized: bool = False) -> tuple[dict, dict[str, 
 
   ```python
   gguf_tensor = Tensor(pathlib.Path("Meta-Llama-3-8B-Instruct.Q4_0.gguf")).to(Device.DEFAULT)
-  kv_data, state_dict = nn.state.gguf_load(gguf_tensor)
+  kv_data, state_dict, quantized_tensors = nn.state.gguf_load(gguf_tensor)
   ```
   If quantized=True, returns a third dict mapping tensor names to (raw_blocks, shape, ggml_type, expert_first_in_memory) for Q4_K/Q5_K/Q6_K tensors.
   These tensors are NOT included in state_dict, allowing streamed dequantization during inference.
-  TODO: Variable return is ugly and should be changed.
   NOTE: The provided tensor must be on a device that supports execution.
   """
   reader, kv_data, state_dict = io.BufferedReader(TensorIO(tensor), 1_000_000), {}, {}
-  quantized_tensors: dict[str, tuple[Tensor, tuple, int, bool]] = {} if quantized else None
+  quantized_tensors: dict[str, tuple[Tensor, tuple, int, bool]]|None = {} if quantized else None
   def read_unpack(fmt: str, n: int): return struct.unpack(fmt, reader.read(n))[0]
   def read_str(): return str(reader.read(read_uint64()), "utf-8")
   def read_arr():
@@ -466,9 +465,8 @@ def gguf_load(tensor: Tensor, quantized: bool = False) -> tuple[dict, dict[str, 
 
   quantized_tensors = extract_quantized_blocks(tensor, t_infos, data_start) if quantized else None
   for name, dims, typ, off in t_infos:
-    if quantized and name in quantized_tensors: continue
+    if quantized and quantized_tensors is not None and name in quantized_tensors: continue
     n = prod(dims)
     state_dict[name] = ggml_data_to_tensor(tensor[data_start + off:], n, typ).reshape(*reversed(dims))
 
-  if quantized: return kv_data, state_dict, quantized_tensors
-  return kv_data, state_dict
+  return kv_data, state_dict, quantized_tensors

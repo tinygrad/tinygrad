@@ -123,7 +123,8 @@ class MLATransformerBlock:
   def _feed_forward(self, h: Tensor) -> Tensor:
     h_norm = self.ffn_norm(h)
     if hasattr(self, 'ffn_gate_up_exps'):
-      router_logits = h_norm.float() @ self.ffn_gate_inp_f32.T
+      gate_weight = self.ffn_gate_inp_f32 if hasattr(self, 'ffn_gate_inp_f32') else self.ffn_gate_inp.weight.float()
+      router_logits = h_norm.float() @ gate_weight.T
       if self.expert_gating_func == 2: gate_scores = router_logits.sigmoid()
       elif self.expert_gating_func == 3: gate_scores = router_logits
       else: gate_scores = router_logits.softmax(-1)

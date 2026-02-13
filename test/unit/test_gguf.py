@@ -107,7 +107,7 @@ class TestGGUF(unittest.TestCase):
     fp = fetch(url)
     model_size = os.stat(fp).st_size
     gguf_tensor = Tensor.empty(model_size, dtype=dtypes.uint8, device=f"disk:{fp}").to(Device.DEFAULT)
-    kv_data, tensors = gguf_load(gguf_tensor)
+    kv_data, tensors = gguf_load(gguf_tensor)[:2]
 
     gguf_params = ggml.gguf_init_params(ctx=self.ctx, no_alloc=False)
     gguf_ctx = ggml.gguf_init_from_file(str(fp).encode("utf8"), gguf_params)

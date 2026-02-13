@@ -16,14 +16,14 @@ def merge_gate_up_experts(block) -> None:
   if isinstance(gate, QuantizedExpertWeights) and isinstance(up, QuantizedExpertWeights):
     gate._ensure_expert_blocks(gate.blocks.device)
     up._ensure_expert_blocks(up.blocks.device)
+    assert gate._expert_blocks is not None and up._expert_blocks is not None
     merged_expert_blocks = gate._expert_blocks.cat(up._expert_blocks, dim=1)
-    merged = QuantizedExpertWeights(merged_expert_blocks.flatten(end_dim=1),
+    block.ffn_gate_up_exps = QuantizedExpertWeights(merged_expert_blocks.flatten(end_dim=1),
                                     (gate.num_experts, gate.out_features + up.out_features, gate.in_features), gate.ggml_type)
-    merged._expert_blocks = merged_expert_blocks
+    block.ffn_gate_up_exps._expert_blocks = merged_expert_blocks
   else:
-    merged = ExpertWeights(gate.weight.shape[0], gate.weight.shape[2], gate.weight.shape[1] + up.weight.shape[1])
-    merged.weight = gate.weight.cat(up.weight, dim=1)
-  block.ffn_gate_up_exps = merged
+    block.ffn_gate_up_exps = ExpertWeights(gate.weight.shape[0], gate.weight.shape[2], gate.weight.shape[1] + up.weight.shape[1])
+    block.ffn_gate_up_exps.weight = gate.weight.cat(up.weight, dim=1)
   del block.ffn_gate_exps, block.ffn_up_exps
 
 def merge_gate_up_shared_expert(block) -> None:
