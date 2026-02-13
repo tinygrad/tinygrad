@@ -147,7 +147,7 @@ class TestAsmAtn(unittest.TestCase):
 
   def test_sdpa_gqa_multi_layer(self):
     """Test multiple GQA layers like in LLaMA."""
-    B, S, D = 2, 128, 64  # smaller for debugging
+    B, S, D = 2, 512, 128
     H_q, H_kv = 4, 2  # GQA ratio of 2
     n_layers = 2
 
