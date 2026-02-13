@@ -33,6 +33,6 @@ class NullGraph(MultiGraphRunner):
 class NullDevice(Compiled):
   def __init__(self, device:str):
     def _name(ren): return ren.device + f":{shortname}" if (shortname:=ren.__name__.upper().removesuffix('RENDERER').removeprefix(ren.device)) else ""
-    renderers = {'': NullRenderer, **{_name(renderer):renderer for mod in (cstyle, nir, ptx, llvmir, wgsl) for renderer in mod.__dict__.values()
-                                      if inspect.isclass(renderer) and issubclass(renderer, Renderer) and renderer.device}}
+    renderers:dict[str, type[Renderer]] = {'':NullRenderer, **{_name(ren):ren for m in (cstyle, nir, ptx, llvmir, wgsl) for ren in m.__dict__.values()
+                                                               if inspect.isclass(ren) and issubclass(ren, Renderer) and ren.device}}
     super().__init__(device, NullAllocator(self), renderers, functools.partial(NullProgram, device), NullGraph, ctrl_var=NULL_CC)
