@@ -148,10 +148,13 @@ def do_assemble(ctx:Renderer, prg:UOp, lin:UOp) -> UOp:
       if not isinstance(val, Reg): continue
       if 256 <= val.offset < 512: max_vgpr = max(max_vgpr, (val.offset - 256) + val.sz)
       elif val.offset < 106: max_sgpr = max(max_sgpr, val.offset + val.sz)
+  sink = prg.src[0]
+  n_bufs = sum(1 for u in sink.toposort() if u.op is Ops.PARAM)
+  n_vars = sum(1 for u in sink.toposort() if u.op is Ops.DEFINE_VAR)
   src = "\n".join(str(inst) for inst in insts)
   code_bytes = b"".join(inst.to_bytes() for inst in insts)
   arch = next(v for k, v in _arch_map.items() if getattr(ctx, 'arch', '').startswith(k))
-  kd = {"kernarg_size":8, "user_sgpr_kernarg_segment_ptr":1, "user_sgpr_count":2, "wavefront_size32":1, "forward_progress":1,
+  kd = {"kernarg_size":n_bufs*8+n_vars*4, "user_sgpr_kernarg_segment_ptr":1, "user_sgpr_count":2, "wavefront_size32":1, "forward_progress":1,
         "next_free_vgpr":((max_vgpr + 7) // 8) * 8, "next_free_sgpr":((max_sgpr + 7) // 8) * 8}
   binary = create_elf(code_bytes, kd, arch)
   return prg.replace(src=prg.src[:3]+(UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=binary)))
