@@ -162,8 +162,8 @@ def enum_str(s, cache:dict[str, int]) -> int:
 
 def option(s:int|None) -> int: return 0 if s is None else s+1
 
-def rel_ts(ts:int, start_ts:int) -> int:
-  val = ts - start_ts
+def rel_ts(ts:int|Decimal, start_ts:int) -> int:
+  val = int(ts) - start_ts
   if val < 0 or val > 0xFFFFFFFF: raise ValueError(f"timestamp out of range: ts={ts} start={start_ts} {val}")
   return val
 
@@ -208,7 +208,7 @@ def timeline_layout(dev_events:list[tuple[int, int, float, DevEvent]], start_ts:
       name = e.name.display_name
       ref = next((v for k in e.name.keys if (v:=ref_map.get(k)) is not None), None)
       if isinstance(e.name.ret, str): fmt.append(e.name.ret)
-    events.append(struct.pack("<IIIIfI", enum_str(name, scache), option(ref), option(key), rel_ts(st, start_ts), dur, enum_str("\n".join(fmt), scache)))
+    events.append(struct.pack("<IIIIfI", enum_str(name, scache), option(ref), option(key), rel_ts(st,start_ts), dur, enum_str("\n".join(fmt),scache)))
   return struct.pack("<BI", 0, len(events))+b"".join(events) if events else None
 
 def encode_mem_free(key:int, ts:int, execs:list[ProfilePointEvent], scache:dict) -> bytes:
@@ -230,7 +230,7 @@ def mem_layout(dev_events:list[tuple[int, int, float, DevEvent]], start_ts:int, 
     if not isinstance(e, ProfilePointEvent): continue
     if e.name == "alloc":
       safe_sz = min(1_000_000_000_000, e.arg["sz"])
-      events.append(struct.pack("<BIIIQ", 1, rel_ts(int(e.ts), start_ts), e.key, enum_str(e.arg["dtype"].name, scache), safe_sz))
+      events.append(struct.pack("<BIIIQ", 1, rel_ts(e.ts, start_ts), e.key, enum_str(e.arg["dtype"].name, scache), safe_sz))
       dtype_size.setdefault(e.arg["dtype"].name, e.arg["dtype"].itemsize)
       temp[e.key] = nbytes = safe_sz*e.arg["dtype"].itemsize
       mem += nbytes
@@ -238,7 +238,7 @@ def mem_layout(dev_events:list[tuple[int, int, float, DevEvent]], start_ts:int, 
     if e.name == "exec" and e.arg["bufs"]:
       for b in e.arg["bufs"]: buf_ei.setdefault(b, []).append(e)
     if e.name == "free":
-      events.append(encode_mem_free(e.key, rel_ts(int(e.ts), start_ts), buf_ei.pop(e.key, []), scache))
+      events.append(encode_mem_free(e.key, rel_ts(e.ts, start_ts), buf_ei.pop(e.key, []), scache))
       mem -= temp.pop(e.key)
   for t in temp: events.append(encode_mem_free(t, rel_ts(end_ts, start_ts), buf_ei.pop(t, []), scache))
   peaks.append(peak)
@@ -413,7 +413,7 @@ def get_profile(profile:list[ProfileEvent], sort_fn:Callable[[str], Any]=device_
     layout[f"{k} Memory"] = mem_layout(v, start_ts, unwrap(end_ts), peaks, dtype_size, scache)
   sorted_layout = sorted([k for k,v in layout.items() if v is not None], key=sort_fn)
   ret = [b"".join([struct.pack("<B", len(k)), k.encode(), unwrap(layout[k])]) for k in sorted_layout]
-  index = json.dumps({"strings":list(scache), "dtypeSize":dtype_size, "markers":[{"ts":rel_ts(int(e.ts), start_ts), **e.arg} for e in markers]}).encode()
+  index = json.dumps({"strings":list(scache), "dtypeSize":dtype_size, "markers":[{"ts":rel_ts(e.ts, start_ts), **e.arg} for e in markers]}).encode()
   return struct.pack("<IQII", rel_ts(unwrap(end_ts), start_ts), max(peaks,default=0), len(index), len(ret))+index+b"".join(ret)
 
 # ** Assembly static analyzers
