@@ -144,31 +144,40 @@ assert ctypes.sizeof(BwdDqConvertArgs) == 208
 # FORWARD KERNEL
 # ============================================================================
 
-def build_fwd_kernargs(B, H, S, D, bufs, var_vals) -> bytes:
+def build_fwd_kernargs(B, H_q, H_kv, S, D, bufs, var_vals) -> bytes:
   """Build raw kernargs for the forward kernel from HCQ buffers."""
+  print(f"[build_fwd_kernargs] B={B}, H_q={H_q}, H_kv={H_kv}, S={S}, D={D}, num_bufs={len(bufs)}, buf_sizes={[b.size for b in bufs]}")
   args = FwdArgs()
   args.R, args.Q, args.K, args.V, args.LSE = bufs[0].va_addr, bufs[1].va_addr, bufs[2].va_addr, bufs[3].va_addr, bufs[4].va_addr
   args.ptr_qseq, args.ptr_kseq, args.ptr_qseq_padding, args.ptr_kseq_padding = 0, 0, 0, 0
   args.scalar, args.seq_len, args.kv_seq_len = float_to_u32(1.0 / math.sqrt(D)), S, S
-  args.qk_head_dim, args.v_head_dim, args.q_head_num, args.gqa = D, D, H, 1
+  args.qk_head_dim, args.v_head_dim, args.q_head_num, args.gqa = D, D, H_q, H_q // H_kv
   args.msk_opt, args.lse, args.lse_Hs = 5, 1, S * 4  # causal mask
   elem_size = 2
-  Seqs_stride, Hs_stride, Bs_stride = H * D * elem_size, D * elem_size, S * H * D * elem_size
-  args.Seqs, args.Ts, args.Hs, args.Bs = Seqs_stride, S * D // 2, Hs_stride, Bs_stride
-  args.k_Seqs, args.k_Hs, args.k_Bs = Seqs_stride, Hs_stride, Bs_stride
-  args.v_Seqs, args.v_Hs, args.v_Bs = Seqs_stride, Hs_stride, Bs_stride
-  args.r_Seqs, args.r_Hs, args.r_Bs = Seqs_stride, Hs_stride, Bs_stride
+  # Q/out strides (H_q heads)
+  q_Seqs, q_Hs, q_Bs = H_q * D * elem_size, D * elem_size, S * H_q * D * elem_size
+  args.Seqs, args.Ts, args.Hs, args.Bs = q_Seqs, S * D // 2, q_Hs, q_Bs
+  args.r_Seqs, args.r_Hs, args.r_Bs = q_Seqs, q_Hs, q_Bs
+  # K/V strides (H_kv heads)
+  kv_Seqs, kv_Hs, kv_Bs = H_kv * D * elem_size, D * elem_size, S * H_kv * D * elem_size
+  args.k_Seqs, args.k_Hs, args.k_Bs = kv_Seqs, kv_Hs, kv_Bs
+  args.v_Seqs, args.v_Hs, args.v_Bs = kv_Seqs, kv_Hs, kv_Bs
   return bytes(ctypes.string_at(ctypes.addressof(args), ctypes.sizeof(args)))
 
+_fwd_call_count = 0
 def aiter_fmha_fwd(out:UOp, q:UOp, k:UOp, v:UOp, lse:UOp, dname:str) -> UOp:
   """Create the PROGRAM UOp for aiter FMHA forward kernel."""
-  B, S, H, D = out.shape
+  global _fwd_call_count
+  _fwd_call_count += 1
+  B, S, H_q, D = out.shape
+  H_kv = k.shape[2]  # K/V may have fewer heads (GQA)
+  print(f"[aiter_fmha_fwd #{_fwd_call_count}] out.shape={out.shape}, q.shape={q.shape}, k.shape={k.shape}, H_q={H_q}, H_kv={H_kv}, dname={dname}")
   binary = (CO_DIR / "fwd_hd128_bf16_causal.co").read_bytes()
-  gidx0, gidx1, gidx2 = UOp.special(S // 512, "gidx0"), UOp.special(H, "gidx1"), UOp.special(B, "gidx2")
+  gidx0, gidx1, gidx2 = UOp.special(S // 512, "gidx0"), UOp.special(H_q, "gidx1"), UOp.special(B, "gidx2")
   lidx0 = UOp.special(512, "lidx0")
-  kernargs_builder = functools.partial(build_fwd_kernargs, B, H, S, D)
+  kernargs_builder = functools.partial(build_fwd_kernargs, B, H_q, H_kv, S, D)
   name = "aiter_fmha_fwd_hd128_bf16_causal"
-  ops, mem = B * H * S * S * D * 2, (out.size + q.size + k.size + v.size + lse.size) * 2
+  ops, mem = B * H_q * S * S * D * 2, (out.size + q.size + k.size + v.size + lse.size) * 2
   sink = UOp.sink(out.base, q.base, k.base, v.base, lse.base, gidx0, gidx1, gidx2, lidx0,
                   arg=KernelInfo(name=name, estimates=Estimates(ops=ops, mem=mem), kernargs_builder=kernargs_builder))
   src = f"; prebuilt aiter kernel: {name}"
@@ -205,7 +214,7 @@ def aiter_fmha_bwd_odo(delta:UOp, out:UOp, dout:UOp, dname:str) -> UOp:
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg=dname), UOp(Ops.LINEAR, src=(*sink.src, sink)),
                                UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=binary)))
 
-def build_main_kernargs(B, H, S, D, bufs, var_vals) -> bytes:
+def build_main_kernargs(B, H_q, H_kv, S, D, bufs, var_vals) -> bytes:
   """Build kernargs for the main backward kernel (computes dQ_acc, dK, dV)."""
   args = BwdMainArgs()
   elem_size = 2
@@ -214,14 +223,17 @@ def build_main_kernargs(B, H, S, D, bufs, var_vals) -> bytes:
   args.dO, args.Lse, args.D = bufs[6].va_addr, bufs[7].va_addr, bufs[8].va_addr
   args.scalar, args.log2e = float_to_u32(1.0 / math.sqrt(D)), float_to_u32(math.log2(math.e))
   args.seqlen_q, args.seqlen_k, args.head_dim_q, args.head_dim_k = S, S, D, D
-  args.nhead_q, args.ratio, args.Ts = H, 1, S * D // 2
-  Seqs_stride, Hs_stride, Bs_stride = H * D * elem_size, D * elem_size, S * H * D * elem_size
-  args.Seqs_q, args.Hs_q, args.BAs_q = Seqs_stride, Hs_stride, Bs_stride
-  args.Seqs_k, args.Hs_k, args.BAs_k = Seqs_stride, Hs_stride, Bs_stride
-  args.Seqs_v, args.Hs_v, args.BAs_v = Seqs_stride, Hs_stride, Bs_stride
-  args.Seqs_do, args.Hs_do, args.BAs_do = Seqs_stride, Hs_stride, Bs_stride
-  args.Seqs_dk, args.Hs_dk, args.BAs_dk = Seqs_stride, Hs_stride, Bs_stride
-  args.Seqs_dv, args.Hs_dv, args.BAs_dv = Seqs_stride, Hs_stride, Bs_stride
+  args.nhead_q, args.ratio, args.Ts = H_q, H_q // H_kv, S * D // 2
+  # Q/dO/dQ strides (H_q heads)
+  q_Seqs, q_Hs, q_Bs = H_q * D * elem_size, D * elem_size, S * H_q * D * elem_size
+  args.Seqs_q, args.Hs_q, args.BAs_q = q_Seqs, q_Hs, q_Bs
+  args.Seqs_do, args.Hs_do, args.BAs_do = q_Seqs, q_Hs, q_Bs
+  # K/V/dK/dV strides (H_kv heads)
+  kv_Seqs, kv_Hs, kv_Bs = H_kv * D * elem_size, D * elem_size, S * H_kv * D * elem_size
+  args.Seqs_k, args.Hs_k, args.BAs_k = kv_Seqs, kv_Hs, kv_Bs
+  args.Seqs_v, args.Hs_v, args.BAs_v = kv_Seqs, kv_Hs, kv_Bs
+  args.Seqs_dk, args.Hs_dk, args.BAs_dk = kv_Seqs, kv_Hs, kv_Bs
+  args.Seqs_dv, args.Hs_dv, args.BAs_dv = kv_Seqs, kv_Hs, kv_Bs
   args.Hs_lsed = S * 4
   args.ptr_seqstart_q, args.ptr_seqstart_k, args.ptr_seqstart_q_padded, args.ptr_seqstart_k_padded = 0, 0, 0, 0
   args.max_seq_len_dq, args.mask_x, args.mask_y = S, 0, 0
@@ -229,13 +241,14 @@ def build_main_kernargs(B, H, S, D, bufs, var_vals) -> bytes:
 
 def aiter_fmha_bwd_main(dq_acc:UOp, dk:UOp, dv:UOp, q:UOp, k:UOp, v:UOp, dout:UOp, lse:UOp, delta:UOp, dname:str) -> UOp:
   """Create PROGRAM UOp for main backward kernel."""
-  B, S, H, D = q.shape
+  B, S, H_q, D = q.shape
+  H_kv = k.shape[2]  # K/V may have fewer heads (GQA)
   binary = (CO_DIR / "bwd_hd128_bf16_causal_br_a32_psskddv.co").read_bytes()
-  gidx0, gidx1, gidx2 = UOp.special(S // 512, "gidx0"), UOp.special(H, "gidx1"), UOp.special(B, "gidx2")
+  gidx0, gidx1, gidx2 = UOp.special(S // 512, "gidx0"), UOp.special(H_q, "gidx1"), UOp.special(B, "gidx2")
   lidx0 = UOp.special(256, "lidx0")
-  kernargs_builder = functools.partial(build_main_kernargs, B, H, S, D)
+  kernargs_builder = functools.partial(build_main_kernargs, B, H_q, H_kv, S, D)
   name = "aiter_fmha_bwd_hd128_bf16_causal_br_a32_psskddv"
-  ops = B * H * S * S * D * 6
+  ops = B * H_q * S * S * D * 6
   mem = sum(u.size * (4 if u.dtype == dtypes.float32 else 2) for u in [dq_acc, dk, dv, q, k, v, dout, lse, delta])
   sink = UOp.sink(dq_acc.base, dk.base, dv.base, q.base, k.base, v.base, dout.base, lse.base, delta.base,
                   gidx0, gidx1, gidx2, lidx0,

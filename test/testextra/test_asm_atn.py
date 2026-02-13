@@ -311,6 +311,66 @@ class TestAsmAtn(unittest.TestCase):
     out.realize()
 
   @needs_second_gpu
+  def test_llama8b_gqa_3gpu_forward(self):
+    """Test 3-GPU sharding with LLaMA 8B GQA shapes."""
+    B, S, D = 3, 8192, 128
+    H_q, H_kv = 32, 8
+    GPUS = tuple(f'{Device.DEFAULT}:{i}' for i in range(3))
+
+    Tensor.manual_seed(0)
+    with Context(DEBUG=0):
+      q = Tensor.randn(B, H_q, S, D, dtype=dtypes.bfloat16).contiguous().realize()
+      k = Tensor.randn(B, H_kv, S, D, dtype=dtypes.bfloat16).contiguous().realize()
+      v = Tensor.randn(B, H_kv, S, D, dtype=dtypes.bfloat16).contiguous().realize()
+
+    q = q.shard(GPUS, axis=0)
+    k = k.shard(GPUS, axis=0)
+    v = v.shard(GPUS, axis=0)
+
+    out = asm_sdpa(q, k, v)
+    out.realize()
+
+  @needs_second_gpu
+  def test_llama8b_gqa_4gpu_forward(self):
+    """Test 4-GPU sharding with LLaMA 8B GQA shapes."""
+    B, S, D = 4, 8192, 128
+    H_q, H_kv = 32, 8
+    GPUS = tuple(f'{Device.DEFAULT}:{i}' for i in range(4))
+
+    Tensor.manual_seed(0)
+    with Context(DEBUG=0):
+      q = Tensor.randn(B, H_q, S, D, dtype=dtypes.bfloat16).contiguous().realize()
+      k = Tensor.randn(B, H_kv, S, D, dtype=dtypes.bfloat16).contiguous().realize()
+      v = Tensor.randn(B, H_kv, S, D, dtype=dtypes.bfloat16).contiguous().realize()
+
+    q = q.shard(GPUS, axis=0)
+    k = k.shard(GPUS, axis=0)
+    v = v.shard(GPUS, axis=0)
+
+    out = asm_sdpa(q, k, v)
+    out.realize()
+
+  @needs_second_gpu
+  def test_llama8b_gqa_2gpu_forward(self):
+    """Test 2-GPU sharding with LLaMA 8B GQA shapes."""
+    B, S, D = 2, 8192, 128
+    H_q, H_kv = 32, 8
+    GPUS = (f'{Device.DEFAULT}:0', f'{Device.DEFAULT}:1')
+
+    Tensor.manual_seed(0)
+    with Context(DEBUG=0):
+      q = Tensor.randn(B, H_q, S, D, dtype=dtypes.bfloat16).contiguous().realize()
+      k = Tensor.randn(B, H_kv, S, D, dtype=dtypes.bfloat16).contiguous().realize()
+      v = Tensor.randn(B, H_kv, S, D, dtype=dtypes.bfloat16).contiguous().realize()
+
+    q = q.shard(GPUS, axis=0)
+    k = k.shard(GPUS, axis=0)
+    v = v.shard(GPUS, axis=0)
+
+    out = asm_sdpa(q, k, v)
+    out.realize()
+
+  @needs_second_gpu
   def test_llama8b_gqa_8gpu_forward_tiny(self):
     """Test exact shapes from LLaMA 8B trainer - forward only, no reference."""
     B, S, D = 8, 8192, 128
@@ -319,9 +379,13 @@ class TestAsmAtn(unittest.TestCase):
 
     Tensor.manual_seed(0)
     with Context(DEBUG=0):
-      q = Tensor.randn(B, H_q, S, D, dtype=dtypes.bfloat16).shard(GPUS, axis=0)
-      k = Tensor.randn(B, H_kv, S, D, dtype=dtypes.bfloat16).shard(GPUS, axis=0)
-      v = Tensor.randn(B, H_kv, S, D, dtype=dtypes.bfloat16).shard(GPUS, axis=0)
+      q = Tensor.randn(B, H_q, S, D, dtype=dtypes.bfloat16).contiguous().realize()
+      k = Tensor.randn(B, H_kv, S, D, dtype=dtypes.bfloat16).contiguous().realize()
+      v = Tensor.randn(B, H_kv, S, D, dtype=dtypes.bfloat16).contiguous().realize()
+
+    q = q.shard(GPUS, axis=0)
+    k = k.shard(GPUS, axis=0)
+    v = v.shard(GPUS, axis=0)
 
     out = asm_sdpa(q, k, v)
     out.realize()
