@@ -288,13 +288,15 @@ class Compiled:
     self.device, self.allocator, self.runtime, self.graph, self.group_id = device, allocator, runtime, graph, group_id
 
     self.ctrl_var, self.renderers = ctrl_var, renderers or {'': Renderer}
-    self.cached_renderer:dict[type[Renderer], Renderer] = {}
+    self.cached_renderers:dict[type[Renderer], Renderer] = {}
 
   @property
   def renderer(self) -> Renderer:
-    if self.ctrl_var is not None and self.ctrl_var.value: return self.renderers[self.ctrl_var.value.upper()](CROSSARCH.value or self.arch)
+    if self.ctrl_var is not None and self.ctrl_var.value:
+      if (r:=self.renderers[self.ctrl_var.value.upper()]) in self.cached_renderers: return self.cached_renderers[r]
+      return self.cached_renderers.setdefault(r, r(CROSSARCH.value or self.arch))
     return select_first_inited([functools.partial(r, CROSSARCH.value or self.arch) for r in self.renderers.values()],
-                               f"No renderer for {self.device} is available", self.cached_renderer)
+                               f"No renderer for {self.device} is available", self.cached_renderers)
 
   @property
   def compiler(self) -> Compiler:
