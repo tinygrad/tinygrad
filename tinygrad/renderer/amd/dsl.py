@@ -99,7 +99,7 @@ bits = _Bits()
 
 class BitField:
   name: str | None
-  def __init__(self, hi: int, lo: int, default: int = 0):
+  def __init__(self, hi: int, lo: int, default = 0):
     self.hi, self.lo, self.default, self.name, self.mask = hi, lo, default, None, (1 << (hi - lo + 1)) - 1
   def __set_name__(self, owner, name: str): self.name = name
   def __eq__(self, other) -> 'FixedBitField':  # type: ignore[override]
