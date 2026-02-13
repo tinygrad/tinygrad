@@ -78,7 +78,7 @@ class TestSetitem(unittest.TestCase):
     t = Tensor.ones(4)
     with self.assertRaises(RuntimeError): t[1] = 5
 
-  def test_setitem_into_cont_alu(self):
+  def test_setitem_into_const_alu(self):
     # TODO: this is not consistent
     t = Tensor.ones(4) + Tensor.ones(4)
     t[1] = 5
@@ -86,7 +86,6 @@ class TestSetitem(unittest.TestCase):
 
     t = Tensor.ones(4) + Tensor.ones(4)
     t.realize()
-    t[1] = 5
     with self.assertRaises(RuntimeError): t[1] = 5
 
   def test_setitem_into_arange(self):
