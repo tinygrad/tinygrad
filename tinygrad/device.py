@@ -283,6 +283,8 @@ class Compiled:
 
   def __init__(self, device:str, allocator:Allocator, renderers:Mapping[str,type[Renderer]], runtime, graph=None, group_id=None,
                ctrl_var:ContextVar|None=None):
+    from tinygrad.renderer import Renderer
+
     self.device, self.allocator, self.runtime, self.graph, self.group_id = device, allocator, runtime, graph, group_id
 
     self.ctrl_var, self.renderers = ctrl_var, renderers or {'': Renderer}
