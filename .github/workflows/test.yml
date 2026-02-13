@@ -114,11 +114,11 @@ jobs:
     - name: Test one op in torch tests
       run: DEBUG=2 python3 extra/torch_backend/torch_tests.py TestTinyBackendPRIVATEUSE1.test_unary_log_tiny_float32
     - name: Test Ops with TINY_BACKEND
-      run: CPU=1 CPU_LLVM=1 LLVMOPT=0 TINY_BACKEND=1 python3 -m pytest -n auto test/backend/test_ops.py --durations=20
+      run: CPU=1 CPU_CC=LLVM LLVMOPT=0 TINY_BACKEND=1 python3 -m pytest -n auto test/backend/test_ops.py --durations=20
     - name: Test in-place operations on views
       run: TORCH_DEBUG=1 python3 extra/torch_backend/test_inplace.py
     - name: Test multi-gpu
-      run: CPU=1 CPU_LLVM=1 GPUS=4 TORCH_DEBUG=1 python3 extra/torch_backend/test_multigpu.py
+      run: CPU=1 CPU_CC=LLVM GPUS=4 TORCH_DEBUG=1 python3 extra/torch_backend/test_multigpu.py
     - name: Test kernel fusion
       run: python3 extra/torch_backend/test_kernel_fusion.py
 
@@ -407,7 +407,7 @@ jobs:
       - name: Test openpilot CL compile fp32 (test correctness)
         run: DEBUGCL=1 CL=1 IMAGE=2 SELFTEST=1 python examples/openpilot/compile3.py https://github.com/haraschax/filedump/raw/refs/heads/master/driving_vision_fp32.onnx
       - name: Test openpilot LLVM compile fp16
-        run: FLOAT16=1 CPU=1 CPU_LLVM=1 python examples/openpilot/compile3.py https://gitlab.com/commaai/openpilot-lfs.git/gitlab-lfs/objects/cf6376aa9a090f0da26c280ef69eabf9bbdd51d1faac9ed392919c3db69be916
+        run: FLOAT16=1 CPU=1 CPU_CC=LLVM python examples/openpilot/compile3.py https://gitlab.com/commaai/openpilot-lfs.git/gitlab-lfs/objects/cf6376aa9a090f0da26c280ef69eabf9bbdd51d1faac9ed392919c3db69be916
       - name: Run process replay tests
         uses: ./.github/actions/process-replay
 
@@ -428,16 +428,16 @@ jobs:
           deps: testing
           python-version: '3.12'
           llvm: 'true'
-      - name: Test ONNX (CPU)
-        run: CPU=1 CPU_LLVM=0 python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
+      - name: Test ONNX (CLANG)
+        run: CPU=1 CPU_CC=CLANG python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
       - name: Test ONNX (LLVM)
-        run: CPU=1 CPU_LLVM=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
-      - name: Test ONNX Runner (CPU)
-        run: CPU=1 CPU_LLVM=0 python3 test/external/external_test_onnx_runner.py
-      - name: Test Additional ONNX Ops (CPU)
-        run: CPU=1 CPU_LLVM=0 python3 test/external/external_test_onnx_ops.py
+        run: CPU=1 CPU_CC=LLVM python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
+      - name: Test ONNX Runner (CLANG)
+        run: CPU=1 CPU_CC=CLANG python3 test/external/external_test_onnx_runner.py
+      - name: Test Additional ONNX Ops (CLANG)
+        run: CPU=1 CPU_CC=CLANG python3 test/external/external_test_onnx_ops.py
       - name: Test Quantize ONNX
-        run: CPU=1 CPU_LLVM=0 python3 test/backend/test_quantize_onnx.py
+        run: CPU=1 CPU_CC=CLANG python3 test/backend/test_quantize_onnx.py
       - name: Run process replay tests
         uses: ./.github/actions/process-replay
 
@@ -508,11 +508,11 @@ jobs:
           opencl: 'true'
           llvm: 'true'
       - name: Test models (llvm)
-        run: CPU=1 CPU_LLVM=1 python -m pytest -n=auto test/models --durations=20
+        run: CPU=1 CPU_CC=LLVM python -m pytest -n=auto test/models --durations=20
       - name: Test models (opencl)
         run: CL=1 python -m pytest -n=auto test/models --durations=20
       - name: Test models (cpu)
-        run: CPU=1 CPU_LLVM=0 python -m pytest -n=auto test/models --durations=20
+        run: CPU=1 CPU_CC=CLANG python -m pytest -n=auto test/models --durations=20
       - name: Run process replay tests
         uses: ./.github/actions/process-replay
 
@@ -550,12 +550,12 @@ jobs:
         deps: testing_unit
         pydeps: "pillow"
         llvm: "true"
-    - name: Test LLVM=1 DEVECTORIZE=0
-      run: CPU=1 CPU_LLVM=1 DEVECTORIZE=0 python3 -m pytest -n auto test/test_tiny.py test/backend/test_ops.py
-    - name: Test LLVM=1 DEVECTORIZE=0 for model
-      run: CPU=1 CPU_LLVM=1 DEVECTORIZE=0 python3 test/models/test_efficientnet.py
-    - name: Test CPU=1 DEVECTORIZE=0
-      run: CPU=1 CPU_LLVM=0 DEVECTORIZE=0 python3 -m pytest -n auto test/test_tiny.py test/backend/test_ops.py
+    - name: Test LLVM DEVECTORIZE=0
+      run: CPU=1 CPU_CC=LLVM DEVECTORIZE=0 python3 -m pytest -n auto test/test_tiny.py test/backend/test_ops.py
+    - name: Test LLVM DEVECTORIZE=0 for model
+      run: CPU=1 CPU_CC=LLVM DEVECTORIZE=0 python3 test/models/test_efficientnet.py
+    - name: Test CLANG DEVECTORIZE=0
+      run: CPU=1 CPU_CC=CLANG DEVECTORIZE=0 python3 -m pytest -n auto test/test_tiny.py test/backend/test_ops.py
 
   testdsp:
     name: Linux (DSP)
@@ -695,17 +695,17 @@ jobs:
         run: cloc --by-file tinygrad/renderer/amd/*.py
       - name: Install rocprof-trace-decoder
         run: sudo PYTHONPATH="." ./extra/sqtt/install_sqtt_decoder.py
-      - name: Run RDNA3 emulator tests
-        run: AMD_LLVM=0 python -m pytest -n=auto test/amd/ --durations 20
-      - name: Run RDNA3 emulator tests (AMD_LLVM=1)
-        run: AMD_LLVM=1 python -m pytest -n=auto test/amd/ --durations 20
-      - name: Run RDNA3 dtype tests
-        run: AMD_LLVM=0 pytest -n=auto test/backend/test_dtype_alu.py test/backend/test_dtype.py --durations 20
-      - name: Run RDNA3 dtype tests (AMD_LLVM=1)
-        run: AMD_LLVM=1 pytest -n=auto test/backend/test_dtype_alu.py test/backend/test_dtype.py --durations 20
+      - name: Run RDNA3 emulator tests (HIP)
+        run: AMD_CC=HIP python -m pytest -n=auto test/amd/ --durations 20
+      - name: Run RDNA3 emulator tests (LLVM)
+        run: AMD_CC=LLVM python -m pytest -n=auto test/amd/ --durations 20
+      - name: Run RDNA3 dtype tests (HIP)
+        run: AMD_CC=HIP pytest -n=auto test/backend/test_dtype_alu.py test/backend/test_dtype.py --durations 20
+      - name: Run RDNA3 dtype tests (LLVM)
+        run: AMD_CC=LLVM pytest -n=auto test/backend/test_dtype_alu.py test/backend/test_dtype.py --durations 20
       # TODO: run all once emulator is faster
       - name: Run RDNA3 ops tests
-        run: SKIP_SLOW_TEST=1 AMD_LLVM=0 pytest -n=auto test/backend/test_ops.py -k "test_sparse_categorical_crossentropy or test_tril or test_nonzero or test_softmax_argmax" --durations 20
+        run: SKIP_SLOW_TEST=1 AMD_CC=HIP pytest -n=auto test/backend/test_ops.py -k "test_sparse_categorical_crossentropy or test_tril or test_nonzero or test_softmax_argmax" --durations 20
       - name: Run RDNA4 emulator tests
         run: MOCKGPU_ARCH=rdna4 python -m pytest test/test_tiny.py -v --durations 20
       - name: Run CDNA4 emulator tests
@@ -734,7 +734,7 @@ jobs:
           cuda: 'true'
           ocelot: 'true'
       - name: Set env
-        run: printf "${{ matrix.backend == 'PTX' && 'CUDA=1\nCUDA_PTX=1' || matrix.backend == 'nv' && 'NV=1\nSKIP_SLOW_TEST=1' }}" >> $GITHUB_ENV
+        run: printf "${{ matrix.backend == 'PTX' && 'CUDA=1\nCUDA_CC=PTX' || matrix.backend == 'nv' && 'NV=1\nSKIP_SLOW_TEST=1' }}" >> $GITHUB_ENV
       - name: Check Device.DEFAULT and print some source
         run: |
           python3 -c "from tinygrad import Device; assert Device.DEFAULT in ['CUDA','NV'], Device.DEFAULT"
@@ -768,7 +768,7 @@ jobs:
           llvm: ${{ matrix.backend == 'llvm' || matrix.backend == 'lvp' }}
           mesa: ${{ matrix.backend == 'lvp' && 'true' }}
       - name: Set env
-        run: printf "${{ matrix.backend == 'llvm' && 'CPU=1\nCPU_LLVM=1' || matrix.backend == 'cpu' && 'CPU=1\nCPU_LLVM=0\nCPU_COUNT=2' || matrix.backend == 'opencl' && 'CL=1' || matrix.backend == 'lvp' && 'CPU=1\nCPU_LVP=1' }}" >> $GITHUB_ENV
+        run: printf "${{ matrix.backend == 'llvm' && 'CPU=1\nCPU_CC=LLVM' || matrix.backend == 'cpu' && 'CPU=1\nCPU_CC=CLANG\nCPU_COUNT=2' || matrix.backend == 'opencl' && 'CL=1' || matrix.backend == 'lvp' && 'CPU=1\nCPU_CC=LVP' }}" >> $GITHUB_ENV
       - name: Check Device.DEFAULT and print some source
         run: |
           python3 -c "from tinygrad import Device; assert Device.DEFAULT in ['CPU','CL'], Device.DEFAULT"
@@ -898,7 +898,7 @@ jobs:
           llvm: ${{ matrix.backend == 'llvm' || matrix.backend == 'lvp' }}
           mesa: ${{ matrix.backend == 'lvp' && 'true' }}
       - name: Set env
-        run: printf "${{ matrix.backend == 'llvm' && 'CPU=1\nCPU_LLVM=1' || matrix.backend == 'cpu' && 'CPU=1\nCPU_LLVM=0\nCPU_COUNT=2' || matrix.backend == 'metal' && 'METAL=1' || matrix.backend == 'lvp' && 'CPU=1\nCPU_LVP=1' }}" >> $GITHUB_ENV
+        run: printf "${{ matrix.backend == 'llvm' && 'CPU=1\nCPU_CC=LLVM' || matrix.backend == 'cpu' && 'CPU=1\nCPU_CC=CLANG\nCPU_COUNT=2' || matrix.backend == 'metal' && 'METAL=1' || matrix.backend == 'lvp' && 'CPU=1\nCPU_CC=LVP' }}" >> $GITHUB_ENV
       - name: Check Device.DEFAULT and print some source
         run: |
           python -c "from tinygrad import Device; assert Device.DEFAULT == {'LLVM':'CPU','LVP':'CPU'}.get(x:='${{ matrix.backend }}'.upper(), x), Device.DEFAULT"
@@ -933,7 +933,7 @@ jobs:
           pydeps: ${{ matrix.backend == 'webgpu' && 'dawn-python' || '' }}
       - name: Set env
         shell: bash
-        run:  printf "${{ matrix.backend == 'llvm' && 'CPU=1\nCPU_LLVM=1' || matrix.backend == 'cpu' && 'CPU=1\nCPU_LLVM=0\nCPU_COUNT=2' || matrix.backend == 'webgpu' && 'WEBGPU=1'}}" >> $GITHUB_ENV
+        run:  printf "${{ matrix.backend == 'llvm' && 'CPU=1\nCPU_CC=LLVM' || matrix.backend == 'cpu' && 'CPU=1\nCPU_CC=CLANG\nCPU_COUNT=2' || matrix.backend == 'webgpu' && 'WEBGPU=1'}}" >> $GITHUB_ENV
       - name: Run unit tests
         if: matrix.backend=='llvm'
         # test_newton_schulz hits RecursionError
@@ -941,7 +941,7 @@ jobs:
       - name: Run NULL backend tests
         if: matrix.backend=='llvm'
         shell: bash
-        run: CPU=0 CPU_LLVM=0 NULL=1 python -m pytest -n=auto test/null/ --ignore=test/null/test_elf.py --durations=20
+        run: NULL=1 python -m pytest -n=auto test/null/ --ignore=test/null/test_elf.py --durations=20
       - name: Run pytest (${{ matrix.backend }})
         shell: bash
         run: |
