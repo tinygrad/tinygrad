@@ -67,7 +67,7 @@ from tinygrad.runtime.autogen.amd.rdna4 import ins as ir4
 from tinygrad.runtime.autogen.amd.cdna import ins as irc
 from tinygrad.renderer.amd.dsl import VCC_LO, EXEC_LO, SCC, ttmp
 from tinygrad.runtime.autogen.amd.common import Fmt, OpType
-from test.mockgpu.amd.pcode import parse_block, _FUNCS
+from test.mockgpu.amd.pcode import parse_block, _FUNCS, _set_bits, _val_to_bits
 
 MASK32 = 0xFFFFFFFF
 
@@ -160,6 +160,7 @@ _pcode_fixes = {
   'V_TRIG_PREOP_F64': ("result = 64'F((1201'B(2.0 / PI)[1200 : 0] << shift.u32) & 1201'0x1fffffffffffff)", "result = trig_preop_result(shift)"),
 }
 
+
 def _get_pcode_dict(op) -> dict:
   """Return the PCODE dictionary for the given opcode based on its architecture."""
   return PCODE_CDNA if 'cdna' in type(op).__module__ else PCODE_RDNA4 if 'rdna4' in type(op).__module__ else PCODE_RDNA3
@@ -168,7 +169,15 @@ def _get_pcode_dict(op) -> dict:
 @functools.cache
 def get_pcode(op) -> str:
   op_name = op.name
-  pcode = _get_pcode_dict(op)[op]
+  pcode_dict = _get_pcode_dict(op)
+  if op not in pcode_dict and op_name.endswith('_E64'):
+    # VOP3 ops ending in _E64 may share pcode with VOP1 _E32 equivalents
+    import importlib
+    enum_mod = importlib.import_module(type(op).__module__)
+    vop1_cls = getattr(enum_mod, 'VOP1Op', None)
+    e32_name = op_name.replace('_E64', '_E32')
+    if vop1_cls and hasattr(vop1_cls, e32_name): op = vop1_cls[e32_name]
+  pcode = pcode_dict[op]
   if op_name in _pcode_fixes: pcode = pcode.replace(*_pcode_fixes[op_name])
   if 'V_DIV_SCALE' in op_name:
     dt, exp_lim, ldexp_val = ('f32', '23', '64') if 'F32' in op_name else ('f64', '52', '128')
@@ -468,7 +477,10 @@ class _Ctx:
     vcc_reg = sdst_reg if sdst_reg is not None else VCC_LO.offset
     if 'VCC' not in srcs: srcs['VCC'] = self.rsgpr_dyn(_c(vcc_reg))
     srcs.update({'EXEC': exec_mask, 'SCC': self.rsgpr_dyn(_c(SCC.offset)), 'laneId': lane, 'VDST': vdst_reg,
-                 'ROUND_MODE': _c(0), 'ROUND_TOWARD_ZERO': _c(0), 'ROUND_NEAREST_EVEN': _c(0)})  # rounding mode constants
+                 'ROUND_MODE': _c(0), 'ROUND_TOWARD_ZERO': _c(0), 'ROUND_NEAREST_EVEN': _c(0), '_vgpr': self.vgpr,
+                 # CDNA SDWA byte/word select constants (E32 always uses BYTE0/WORD0 defaults)
+                 'SDWA_SRC0_SEL': _c(0), 'BYTE0': _c(0), 'BYTE1': _c(1), 'BYTE2': _c(2), 'BYTE3': _c(3),
+                 'WORD0': _c(0), 'WORD1': _c(1)})  # rounding mode and SDWA constants
     _, assigns = parse_pcode(pcode, srcs)
 
     # For integer ops with clamp, compute overflow using wide arithmetic
@@ -488,10 +500,31 @@ class _Ctx:
                  (to_wide(s1) - to_wide(s0)) if is_sub and 'SUBREV' in op.name else \
                  (to_wide(s0) - to_wide(s1)) if is_sub else (to_wide(s0) + to_wide(s1))
           int_saturate = full.clamp(narrow_min, narrow_max).cast(narrow_dt)
+    # V_SUB_U32 / V_ADD_U32 with clamp: unsigned saturate (SUB underflow->0, ADD overflow->0xFFFFFFFF)
+    if clmp and int_saturate is None and any(p in op.name for p in ('_SUB_U32', '_ADD_U32', '_SUB_U16', '_ADD_U16')):
+      s0, s1 = srcs.get('S0'), srcs.get('S1')
+      if s0 is not None and s1 is not None:
+        a, b = (s1.cast(dtypes.uint32), s0.cast(dtypes.uint32)) if 'SUBREV' in op.name else (s0.cast(dtypes.uint32), s1.cast(dtypes.uint32))
+        if 'SUB' in op.name:
+          int_saturate = (a < b).where(_c(0), a - b)  # underflow -> 0
+        else:
+          raw_sum = a + b
+          int_saturate = (raw_sum < a).where(_c(0xFFFFFFFF), raw_sum)  # overflow -> MAX
 
     raw_stores: list = []
     vcc_val, exec_val = None, None
     for dest, val in assigns:
+      # VGPR bit-slice assignment: VGPR[lane][reg][hi:lo] = (vgpr_idx, rhs_val, hi, lo[, cond]) -> read-modify-write
+      if dest.startswith('VGPR[') and re.search(r'\[\d+:\d+\]', dest):
+        vgpr_idx, rhs_val, hi_bit, lo_bit = val[:4]
+        branch_cond = val[4] if len(val) > 4 else None  # optional condition from if/else branch
+        width = hi_bit - lo_bit + 1
+        old = self.vgpr.index(vgpr_idx.cast(dtypes.int), ptr=True).load()
+        new_val = _set_bits(old, _val_to_bits(rhs_val), width, lo_bit).cast(dtypes.uint32)
+        active = _lane_active(exec_mask, lane)
+        if branch_cond is not None: active = active & _to_u32(branch_cond).ne(_c(0))
+        raw_stores.append(('vgpr_direct', self.vgpr.index(vgpr_idx.cast(dtypes.int), active).store(new_val)))
+        continue
       if 'D0' in dest and '[laneId]' in dest:
         raw_stores.append(('vcc', self.wsgpr_dyn(_c(VCC_LO.offset), _set_lane_bit(self.rsgpr_dyn(_c(VCC_LO.offset)), lane, val, exec_mask))))
       elif dest.startswith('D0'):
@@ -523,7 +556,7 @@ class _Ctx:
       elif dest.startswith('EXEC'): exec_val = val
       elif dest.startswith('SCC'): raw_stores.append(('scc', self.wsgpr_dyn(_c(SCC.offset), _to_u32(val))))
 
-    stores, lane_stores, scalar_stores = [], [s for t, s in raw_stores if t == 'vgpr'], [s for t, s in raw_stores if t == 'scc']
+    stores, lane_stores, scalar_stores = [], [s for t, s in raw_stores if t in ('vgpr', 'vgpr_direct')], [s for t, s in raw_stores if t == 'scc']
     slice_stores = [s for t, s in raw_stores if t == 'vgpr_slice']
     if slice_stores:
       result = self.rvgpr_dyn(vdst_reg, lane)
@@ -531,11 +564,12 @@ class _Ctx:
         mask = UOp.const(dtypes.uint32, ((1 << width) - 1) << lo_bit)
         result = (result & (mask ^ UOp.const(dtypes.uint32, 0xFFFFFFFF))) | (val_bits << UOp.const(dtypes.uint32, lo_bit))
       lane_stores.append(self.wvgpr_dyn(vdst_reg, lane, result, exec_mask))
-    if lane_stores: stores.append(UOp.sink(*lane_stores).end(lane))
+    # VCC/EXEC must be computed BEFORE VGPR writes (carry-out reads same source regs that destination may alias)
     for mask_val, reg in [(vcc_val, vcc_reg), (exec_val, EXEC_LO.offset)]:
       if mask_val is None: continue
       def get_bit(l, v=mask_val): return (_to_u32(v.substitute({lane: l})) & _c(1)).cast(dtypes.uint32)
       stores.append(self.wsgpr_dyn(_c(reg), self.unroll_lanes(get_bit, exec_mask, apply_exec=False)))
+    if lane_stores: stores.append(UOp.sink(*lane_stores).end(lane))
     stores.extend(scalar_stores)
     return UOp.sink(*stores, *self.inc_pc())
 
@@ -629,11 +663,122 @@ def _compile_sop(inst: ir3.SOP1|ir3.SOP2|ir3.SOPC|ir3.SOPK|ir4.SOP1|ir4.SOP2|ir4
 
   return ctx.compile_sop_pcode(inst.op, srcs, dst_off, dst_size)
 
+def _sdwa_select(val: UOp, sel: UOp, sext: UOp) -> UOp:
+  """Apply SDWA byte/word selection and optional sign extension to a 32-bit value."""
+  # sel: 0-3=BYTE_0..3, 4=WORD_0, 5=WORD_1, 6=DWORD
+  b0 = val & _c(0xFF)
+  b1 = (val >> _c(8)) & _c(0xFF)
+  b2 = (val >> _c(16)) & _c(0xFF)
+  b3 = (val >> _c(24)) & _c(0xFF)
+  w0 = val & _c(0xFFFF)
+  w1 = (val >> _c(16)) & _c(0xFFFF)
+  selected = sel.eq(_c(1)).where(b1, sel.eq(_c(2)).where(b2, sel.eq(_c(3)).where(b3,
+    sel.eq(_c(4)).where(w0, sel.eq(_c(5)).where(w1, sel.eq(_c(6)).where(val, b0))))))
+  # Sign extend when sext=1
+  is_byte = sel < _c(4)
+  byte_sext = (selected & _c(0x80)).ne(_c(0)).where(selected | _c(0xFFFFFF00), selected)
+  word_sext = (selected & _c(0x8000)).ne(_c(0)).where(selected | _c(0xFFFF0000), selected)
+  return sext.ne(_c(0)).where(is_byte.where(byte_sext, word_sext), selected)
+
+def _sdwa_write(old: UOp, val: UOp, dst_sel: UOp, dst_unused: UOp) -> UOp:
+  """Apply SDWA destination selection: write selected byte/word, handle unused bits."""
+  # dst_unused: 0=PAD(zero), 1=SEXT, 2=PRESERVE
+  # dst_sel: 0-3=BYTE, 4=WORD_0, 5=WORD_1, 6=DWORD
+  is_byte = dst_sel < _c(4)
+  is_word = (dst_sel >= _c(4)) & (dst_sel < _c(6))
+  shift = is_byte.where(dst_sel * _c(8), (dst_sel - _c(4)) * _c(16))
+  mask = is_byte.where(_c(0xFF), is_word.where(_c(0xFFFF), _c(0xFFFFFFFF)))
+  placed = (val & mask) << shift
+  preserve_mask = (mask << shift) ^ _c(0xFFFFFFFF)
+  preserved = (old & preserve_mask) | placed
+  # For PAD and SEXT, unused bits are zero (PAD) or sign-extended (SEXT). For DWORD, just return val.
+  return dst_sel.eq(_c(6)).where(val, dst_unused.eq(_c(2)).where(preserved, placed))
+
+def _compile_sdwa(inst: irc.VOP1_SDWA | irc.VOP2_SDWA | irc.VOP2_SDWA_SDST | irc.VOPC_SDWA_SDST, ctx: _Ctx) -> UOp:
+  """Compile CDNA SDWA (Sub-Dword Access) VOP1/VOP2/VOPC instructions."""
+  is_vopc = isinstance(inst, irc.VOPC_SDWA_SDST)
+  exec_mask, bits = ctx.rsgpr_dyn(_c(EXEC_LO.offset)), inst.canonical_op_bits
+  # sd=1 means use sdst register, sd=0 means use VCC (for VOPC_SDWA_SDST and VOP2_SDWA_SDST)
+  has_sdst = isinstance(inst, (irc.VOP2_SDWA_SDST, irc.VOPC_SDWA_SDST))
+  sdst_off = _c(inst.sdst.offset) if has_sdst and getattr(inst, 'sd', 0) else _c(VCC_LO.offset)
+  # Read SDWA fields (these are dynamic but shared across lanes)
+  src0_sel = ctx.inst_field(type(inst).src0_sel)
+  src0_sext = ctx.inst_field(type(inst).src0_sext)
+  vsrc0_reg = ctx.inst_field(type(inst).vsrc0)
+  pcode = get_pcode(inst.op)
+  if isinstance(inst, (irc.VOP2_SDWA, irc.VOP2_SDWA_SDST, irc.VOPC_SDWA_SDST)):
+    src1_sel = ctx.inst_field(type(inst).src1_sel)
+    src1_sext = ctx.inst_field(type(inst).src1_sext)
+    vsrc1_reg = ctx.inst_field(type(inst).vsrc1)
+
+  # For VOPC: use unroll_lanes to build the bitmask from scratch (no read-modify-write on stale data)
+  if is_vopc:
+    def get_cmp_bit(lane) -> UOp:
+      lc = lane.cast(dtypes.int) if isinstance(lane, UOp) else _c(lane, dtypes.int)
+      s0_raw = ctx.rsgpr_dyn(vsrc0_reg) if inst.s0 else ctx.rvgpr_dyn(vsrc0_reg, lc)
+      s0 = _sdwa_select(s0_raw, src0_sel, src0_sext)
+      s1_raw = ctx.rsgpr_dyn(vsrc1_reg) if inst.s1 else ctx.rvgpr_dyn(vsrc1_reg, lc)
+      s1 = _sdwa_select(s1_raw, src1_sel, src1_sext)
+      srcs: dict[str, UOp] = {'S0': s0, 'S1': s1, 'laneId': lc}
+      for dest, val in parse_pcode(pcode, srcs)[1]:
+        if '[laneId]' in dest and ('D0' in dest or 'EXEC' in dest): return val.cast(dtypes.uint32)
+      return _c(0)
+    new_result = ctx.unroll_lanes(get_cmp_bit, exec_mask, apply_exec=False) & exec_mask
+    stores = [ctx.wsgpr_dyn(sdst_off, new_result), ctx.wsgpr_dyn(sdst_off + _c(1), _c(0))]
+    return UOp.sink(*stores, *ctx.inc_pc())
+
+  # Non-VOPC path: VOP1_SDWA, VOP2_SDWA, VOP2_SDWA_SDST — uses lane loop
+  lane = ctx.range()
+  vdst_reg = ctx.inst_field(type(inst).vdst)
+  s0_raw = ctx.rsgpr_dyn(vsrc0_reg) if inst.s0 else ctx.rvgpr_dyn(vsrc0_reg, lane)
+  s0 = _sdwa_select(s0_raw, src0_sel, src0_sext)
+  if isinstance(inst, (irc.VOP2_SDWA, irc.VOP2_SDWA_SDST)):
+    s1_raw = ctx.rsgpr_dyn(vsrc1_reg) if inst.s1 else ctx.rvgpr_dyn(vsrc1_reg, lane)
+    s1 = _sdwa_select(s1_raw, src1_sel, src1_sext)
+    srcs: dict[str, UOp] = {'S0': s0, 'S1': s1, 'D0': ctx.rvgpr_dyn(vdst_reg, lane)}
+  else:
+    srcs = {'S0': s0}
+  # dst_sel and dst_unused
+  has_dst_sel = hasattr(type(inst), 'dst_sel')
+  if has_dst_sel:
+    dst_sel = ctx.inst_field(type(inst).dst_sel)
+    dst_unused = ctx.inst_field(type(inst).dst_unused)
+  srcs.update({'VCC': ctx.rsgpr_dyn(_c(VCC_LO.offset)), 'EXEC': exec_mask, 'SCC': ctx.rsgpr_dyn(_c(SCC.offset)),
+               'laneId': lane, 'VDST': vdst_reg, 'ROUND_MODE': _c(0), 'ROUND_TOWARD_ZERO': _c(0),
+               'ROUND_NEAREST_EVEN': _c(0), '_vgpr': ctx.vgpr,
+               'SDWA_SRC0_SEL': _c(0), 'BYTE0': _c(0), 'BYTE1': _c(1), 'BYTE2': _c(2), 'BYTE3': _c(3),
+               'WORD0': _c(0), 'WORD1': _c(1)})
+  _, assigns = parse_pcode(pcode, srcs)
+  stores: list[UOp] = []
+  vcc_val = None
+  for dest, val in assigns:
+    if 'D0' in dest and '[laneId]' in dest:
+      vcc_val = val
+    elif dest.startswith('D0'):
+      result = _val_to_u32(val)
+      if has_dst_sel:
+        old = ctx.rvgpr_dyn(vdst_reg, lane)
+        result = _sdwa_write(old, result, dst_sel, dst_unused)
+      stores.append(ctx.wvgpr_dyn(vdst_reg, lane, result, exec_mask))
+    elif dest.startswith('VCC'):
+      stores.append(ctx.wsgpr_dyn(_c(VCC_LO.offset), _set_lane_bit(ctx.rsgpr_dyn(_c(VCC_LO.offset)), lane, val, exec_mask)))
+  if vcc_val is not None:
+    # Initialize sdst to 0 before lane loop (old value may be unrelated data), then set lane bits in loop
+    init_stores = [ctx.wsgpr_dyn(sdst_off, _c(0)), ctx.wsgpr_dyn(sdst_off + _c(1), _c(0))]
+    stores.append(ctx.wsgpr_dyn(sdst_off, _set_lane_bit(ctx.rsgpr_dyn(sdst_off), lane, vcc_val, exec_mask)))
+    if stores:
+      return UOp.sink(*init_stores, UOp.sink(*stores).end(lane), *ctx.inc_pc())
+    return UOp.sink(*init_stores, *ctx.inc_pc())
+  if stores:
+    return UOp.sink(UOp.sink(*stores).end(lane), *ctx.inc_pc())
+  return UOp.sink(*ctx.inc_pc())
+
 def _compile_vop12(inst: ir3.VOP1 | ir3.VOP1_SDST | ir3.VOP2 | ir4.VOP1 | ir4.VOP1_SDST | ir4.VOP2 | irc.VOP1 | irc.VOP2, ctx: _Ctx) -> UOp:
   op_name = _op_name(inst)
   if op_name in ('V_READFIRSTLANE_B32_E32', 'V_PERMLANE64_B32_E32'): return ctx.compile_lane_pcode(inst.op, inst)
   lane, exec_mask, bits = ctx.range(), ctx.rsgpr_dyn(_c(EXEC_LO.offset)), inst.canonical_op_bits
   literal = ctx.inst_field(type(inst).literal) if hasattr(type(inst), 'literal') else None  # type: ignore[union-attr]
+  is_f64 = 'F64' in op_name and 'B64' not in op_name
   vdst_reg = ctx.inst_field(type(inst).vdst)
   write_hi_half = bits['d'] == 16 and (vdst_reg >= _c(128))
   if isinstance(write_hi_half, UOp): vdst_reg = write_hi_half.where(vdst_reg - _c(128), vdst_reg)
@@ -641,7 +786,7 @@ def _compile_vop12(inst: ir3.VOP1 | ir3.VOP1_SDST | ir3.VOP2 | ir4.VOP1 | ir4.VO
   if isinstance(inst, (ir3.VOP1, ir4.VOP1, irc.VOP1)):
     # Handle VOP1 hi-half source operand (src0 >= v[128] for 16-bit ops)
     src0_off = ctx.inst_field(type(inst).src0)
-    s0 = ctx.rsrc_dyn(src0_off, lane, bits['s0'], literal)
+    s0 = ctx.rsrc_dyn(src0_off, lane, bits['s0'], literal, is_f64)
     if bits['s0'] == 16:
       src0_hi = src0_off >= _c(384)
       # Only compute hi-half when src0_off >= 384, use guarded index to prevent OOB access
@@ -652,11 +797,15 @@ def _compile_vop12(inst: ir3.VOP1 | ir3.VOP1_SDST | ir3.VOP2 | ir4.VOP1 | ir4.VO
     vsrc1_reg = ctx.inst_field(type(inst).vsrc1)
     vsrc1_hi = bits['s0'] == 16 and (vsrc1_reg >= _c(128))
     vsrc1_actual = _cond(vsrc1_hi, vsrc1_reg - _c(128), vsrc1_reg)
-    s1 = _cond_hi16(vsrc1_hi, ctx.rvgpr_dyn(vsrc1_actual, lane))
-    d0 = _cond_hi16(write_hi_half, ctx.rvgpr_dyn(vdst_reg, lane))  # FMAC/FMAMK hi-half dest needs hi-half accumulator
+    if bits['s1'] == 64:
+      s1 = _u64(ctx.rvgpr_dyn(vsrc1_reg, lane), ctx.rvgpr_dyn(vsrc1_reg + _c(1), lane))
+      d0 = _u64(ctx.rvgpr_dyn(vdst_reg, lane), ctx.rvgpr_dyn(vdst_reg + _c(1), lane))
+    else:
+      s1 = _cond_hi16(vsrc1_hi, ctx.rvgpr_dyn(vsrc1_actual, lane))
+      d0 = _cond_hi16(write_hi_half, ctx.rvgpr_dyn(vdst_reg, lane))  # FMAC/FMAMK hi-half dest needs hi-half accumulator
     # Handle VOP2 hi-half src0 operand (src0 >= v[128] for 16-bit ops)
     src0_off = ctx.inst_field(type(inst).src0)
-    s0 = ctx.rsrc_dyn(src0_off, lane, bits['s0'], literal)
+    s0 = ctx.rsrc_dyn(src0_off, lane, bits['s0'], literal, is_f64)
     if bits['s0'] == 16:
       src0_hi = src0_off >= _c(384)
       # Only compute hi-half when src0_off >= 384, use guarded index to prevent OOB access
@@ -718,6 +867,27 @@ def _compile_vopc(inst: ir3.VOPC|ir3.VOP3|ir4.VOPC|ir4.VOP3|irc.VOPC|irc.VOP3, c
     stores = [ctx.wsgpr_dyn(dst_off, new_result)] if not is_vopc else [ctx.wsgpr_dyn(_c(VCC_LO.offset), new_result)]
   return UOp.sink(*stores, *ctx.inc_pc())
 
+
+def _compile_bitop3(inst, ctx: _Ctx, exec_mask: UOp, bits: dict, op_name: str) -> UOp:
+  """BITOP3: 3-input truth table. abs/neg/omod encode the truth table, not source modifiers."""
+  lane = ctx.range()
+  vdst_reg = ctx.inst_field(type(inst).vdst)
+  ops = inst.canonical_operands
+  src0 = ctx.rsrc_dyn(ctx.inst_field(type(inst).src0), lane, bits['s0'], None, 's0' in ops and ops['s0'][0] == Fmt.FMT_NUM_F64)
+  src1 = ctx.rsrc_dyn(ctx.inst_field(type(inst).src1), lane, bits['s1'], None, 's1' in ops and ops['s1'][0] == Fmt.FMT_NUM_F64)
+  src2 = ctx.rsrc_dyn(ctx.inst_field(type(inst).src2), lane, bits['s2'], None, 's2' in ops and ops['s2'][0] == Fmt.FMT_NUM_F64)
+  # Truth table: TTBL = { omod[1:0], abs[2:0], neg[2:0] } = 8-bit LUT
+  ttbl = ((getattr(inst, 'omod', 0) or 0) << 6) | ((getattr(inst, 'abs', 0) or 0) << 3) | (getattr(inst, 'neg', 0) or 0)
+  is_16 = 'B16' in op_name
+  dt, mask = (dtypes.uint16, 0xFFFF) if is_16 else (dtypes.uint32, 0xFFFFFFFF)
+  s0, s1, s2 = src0.cast(dt), src1.cast(dt), src2.cast(dt)
+  bnot = lambda v: v ^ UOp.const(dt, mask)
+  result = UOp.const(dt, 0)
+  for i in range(8):
+    if not (ttbl & (1 << i)): continue
+    result = result | ((s0 if i & 4 else bnot(s0)) & (s1 if i & 2 else bnot(s1)) & (s2 if i & 1 else bnot(s2)))
+  return UOp.sink(ctx.wvgpr_dyn(vdst_reg, lane, result.cast(dtypes.uint32), exec_mask).end(lane), *ctx.inc_pc())
+
 def _compile_vop3(inst: ir3.VOP3 | ir4.VOP3 | irc.VOP3, ctx: _Ctx) -> UOp:
   exec_mask = ctx.rsgpr_dyn(_c(EXEC_LO.offset))
   bits = inst.canonical_op_bits
@@ -731,9 +901,13 @@ def _compile_vop3(inst: ir3.VOP3 | ir4.VOP3 | irc.VOP3, ctx: _Ctx) -> UOp:
   if 'PERMLANE16' in op_name or 'PERMLANEX16' in op_name:
     return ctx.compile_lane_pcode(inst.op, inst)
 
-  # VOP3 VOPC (v_cmp_*_e64) - delegate to unified VOPC handler
+   # VOP3 VOPC (v_cmp_*_e64) - delegate to unified VOPC handler
   if 'V_CMP' in op_name or 'V_CMPX' in op_name:
     return _compile_vopc(inst, ctx, opsel=opsel, abs_bits=getattr(inst, 'abs', 0) or 0, neg_bits=getattr(inst, 'neg', 0) or 0)
+
+  # BITOP3: abs/neg/omod encode truth table, not source modifiers
+  if 'BITOP3' in op_name:
+    return _compile_bitop3(inst, ctx, exec_mask, bits, op_name)
 
   # Regular VOP3 - read operands dynamically
   lane = ctx.range()
@@ -751,7 +925,7 @@ def _compile_vop3(inst: ir3.VOP3 | ir4.VOP3 | irc.VOP3, ctx: _Ctx) -> UOp:
   src0 = _apply_src_mods(src0, 0, abs_bits, neg_bits, bits['s0'])
   src1 = _apply_src_mods(src1, 1, abs_bits, neg_bits, bits['s1'])
   src2 = _apply_src_mods(src2, 2, abs_bits, neg_bits, bits['s2'])
-  srcs = {'S0': src0, 'S1': src1, 'S2': src2}
+  srcs = {'S0': src0, 'S1': src1, 'S2': src2, 'OPSEL': UOp.const(dtypes.uint32, opsel)}
   if inst.op in (ir3.VOP3Op.V_CNDMASK_B32_E64, ir3.VOP3Op.V_CNDMASK_B16, irc.VOP3Op.V_CNDMASK_B32_E64) and src2 is not None: srcs['VCC'] = src2
   # FMAC instructions need D0 (accumulator) from destination register
   if 'FMAC' in op_name: srcs['D0'] = ctx.rvgpr_dyn(vdst_reg, lane)
@@ -889,7 +1063,7 @@ def _compile_vop3p(inst: ir3.VOP3P | ir4.VOP3P | irc.VOP3P, ctx: _Ctx) -> UOp:
     srcs = {'S0': build_pk_f32(src0, src_offs[0], opsel & 1, opsel_hi & 1, neg & 1, neg_hi & 1),
             'S1': build_pk_f32(src1, src_offs[1], opsel & 2, opsel_hi & 2, neg & 2, neg_hi & 2),
             'S2': build_pk_f32(src2, src_offs[2], opsel & 4, 1 if opsel_hi2 else 0, neg & 4, neg_hi & 4)}
-  elif 'FMA_MIX' in op_name:
+  elif 'FMA_MIX' in op_name or 'MAD_MIX' in op_name:
     combined_opsel_hi = (opsel_hi & 0x3) | ((opsel_hi2 & 0x1) << 2)
     # For FMA_MIX: neg_hi is ABS (not neg!), neg is actual negation
     def apply_abs(v, bit, opsel_hi_bit, opsel_bit):
@@ -1143,6 +1317,7 @@ _INST_HANDLERS: dict[type, Callable[..., UOp]] = {
   irc.SOPP: _compile_sopp, irc.SMEM: _compile_smem, irc.SOP1: _compile_sop, irc.SOP2: _compile_sop, irc.SOPC: _compile_sop, irc.SOPK: _compile_sop,
   irc.VOP1: _compile_vop12, irc.VOP2: _compile_vop12, irc.VOPC: _compile_vopc, irc.VOP3: _compile_vop3,
   irc.VOP3_SDST: _compile_vop3, irc.VOP3SD: _compile_vop3sd, irc.VOP3P: _compile_vop3p,
+  irc.VOP1_SDWA: _compile_sdwa, irc.VOP2_SDWA: _compile_sdwa, irc.VOP2_SDWA_SDST: _compile_sdwa, irc.VOPC_SDWA_SDST: _compile_sdwa,
   irc.DS: _compile_mem_op, irc.FLAT: _compile_mem_op, irc.GLOBAL: _compile_mem_op, irc.SCRATCH: _compile_mem_op,
 }
 
@@ -1150,7 +1325,7 @@ _INST_HANDLERS: dict[type, Callable[..., UOp]] = {
 # PROGRAM DECODE AND COMPILATION
 # ═══════════════════════════════════════════════════════════════════════════════
 
-_canonical_runner_cache: list[tuple[int, int, int, object]] = []  # [(base, mask, size, runner), ...]
+_canonical_runner_cache: list[tuple[type, int, int, int, object]] = []  # [(inst_type, base, mask, size, runner), ...]
 
 @functools.cache
 def _get_runner(inst_bytes: bytes, arch: str = "rdna3"):
@@ -1159,9 +1334,9 @@ def _get_runner(inst_bytes: bytes, arch: str = "rdna3"):
   inst_size = inst.size()
   inst_int = int.from_bytes(inst_bytes[:inst_size], 'little')
 
-  # Check if instruction matches any cached canonical pattern
-  for base, mask, size, runner in _canonical_runner_cache:
-    if inst_size == size and (inst_int & mask) == base: return runner
+  # Check if instruction matches any cached canonical pattern (must also match instruction type to avoid variant conflicts)
+  for inst_type, base, mask, size, runner in _canonical_runner_cache:
+    if type(inst) is inst_type and inst_size == size and (inst_int & mask) == base: return runner
 
   # Look up handler by type, falling back to base classes for _LIT variants
   handler = _INST_HANDLERS.get(type(inst))
@@ -1180,7 +1355,7 @@ def _get_runner(inst_bytes: bytes, arch: str = "rdna3"):
 
   with Context(NOOPT=1, CHECK_OOB=0, TUPLE_ORDER=0, EMULATED_DTYPES=""):
     runner = get_runner('CPU', sink)
-  _canonical_runner_cache.append((base, mask, size, runner))
+  _canonical_runner_cache.append((type(inst), base, mask, size, runner))
   return runner
 
 def _decode_at(pc: int, arch: str):
