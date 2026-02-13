@@ -318,17 +318,19 @@ def can_use_asm_atn(q: Tensor, k: Tensor, v: Tensor, is_causal: bool) -> bool:
   if not arch.startswith("gfx950"): return todo("arch!=gfx950")
   return True
 
-def _sharded_empty(shape, ref: Tensor, axis: int) -> Tensor:
+def _sharded_empty(shape, ref: Tensor, axis: int|None=None) -> Tensor:
   """Create an empty tensor with proper sharding for multi-device."""
   if not isinstance(ref.device, tuple): return Tensor.empty(*shape, dtype=ref.dtype, device=ref.device)
-  local_shape = tuple(s // len(ref.device) if i == axis else s for i, s in enumerate(shape))
-  return Tensor(Tensor.empty(*local_shape, dtype=ref.dtype, device=ref.device).uop.multi(axis), dtype=ref.dtype, device=ref.device)
+  axis = ref.uop.axis if axis is None else axis
+  shape = tuple(s // len(ref.device) if i == axis else s for i, s in enumerate(shape))
+  return Tensor(Tensor.empty(*shape, dtype=ref.dtype, device=ref.device).uop.multi(axis), dtype=ref.dtype, device=ref.device)
 
-def _sharded_empty_f32(shape, ref: Tensor, axis: int) -> Tensor:
+def _sharded_empty_f32(shape, ref: Tensor, axis: int|None=None) -> Tensor:
   """Create an empty f32 tensor with proper sharding for multi-device."""
   if not isinstance(ref.device, tuple): return Tensor.empty(*shape, dtype=dtypes.float32, device=ref.device)
-  local_shape = tuple(s // len(ref.device) if i == axis else s for i, s in enumerate(shape))
-  return Tensor(Tensor.empty(*local_shape, dtype=dtypes.float32, device=ref.device).uop.multi(axis), dtype=dtypes.float32, device=ref.device)
+  axis = ref.uop.axis if axis is None else axis
+  shape = tuple(s // len(ref.device) if i == axis else s for i, s in enumerate(shape))
+  return Tensor(Tensor.empty(*shape, dtype=dtypes.float32, device=ref.device).uop.multi(axis), dtype=dtypes.float32, device=ref.device)
 
 def asm_sdpa(q: Tensor, k: Tensor, v: Tensor) -> Tensor:
   """
@@ -373,7 +375,7 @@ def asm_sdpa(q: Tensor, k: Tensor, v: Tensor) -> Tensor:
     dq, *_ = Tensor.custom_kernel(dq, dq_acc, fxn=functools.partial(aiter_fmha_bwd_dq_convert, dname=dname))
     return (None, dq.uop, dk.uop, dv.uop, None)
 
-  out, *_ = Tensor.custom_kernel(out, q_perm, k_perm, v_perm, lse,
-                                  fxn=functools.partial(aiter_fmha_fwd, dname=dname),
-                                  grad_fxn=grad_fxn)
+  out, _, _, _, lse = Tensor.custom_kernel(out, q_perm, k_perm, v_perm, lse,
+                                           fxn=functools.partial(aiter_fmha_fwd, dname=dname),
+                                           grad_fxn=grad_fxn)
   return out.permute(0, 2, 1, 3)
