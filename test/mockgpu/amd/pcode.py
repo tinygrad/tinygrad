@@ -2,6 +2,7 @@
 from typing import Any, Callable
 from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import Ops, UOp
+from tinygrad.uop.decompositions import f2f, f2f_dt
 
 # Type alias for vars dict: stores UOps for variables and tuples for lambda definitions
 VarVal = UOp | tuple[str, list[str], str]
@@ -59,6 +60,34 @@ def _floor(x):
   t = UOp(Ops.TRUNC, x.dtype, (x,))
   return ((x < _const(x.dtype, 0)) & x.ne(t)).where(t - _const(x.dtype, 1), t)
 def _f16_extract(v): return (v & _u32(0xFFFF)).cast(dtypes.uint16).bitcast(dtypes.half) if v.dtype == dtypes.uint32 else v
+
+# ═════ FP8 (E4M3) and BF8 (E5M2) conversion helpers ═════
+# f32→fp8/bf8 uses f2f decomposition directly. fp8/bf8→f32 wraps f2f with subnormal handling
+# (f2f flushes denormals to zero, but AMD V_CVT_F32_FP8/BF8 preserves subnormals).
+def _fp8_to_f32(v: UOp) -> UOp:
+  b = (v.cast(dtypes.uint32) & _u32(0xFF)).cast(dtypes.uint8)
+  # E4M3 subnormal: exp==0, mant!=0 -> (-1)^sign * 2^(1-7) * (mant/8) = (-1)^sign * mant * 2^(-9)
+  bu = b.cast(dtypes.uint32)
+  sign, exp, mant = (bu >> _u32(7)) << _u32(31), (bu >> _u32(3)) & _u32(0xF), bu & _u32(0x7)
+  is_sub = exp.eq(_u32(0)) & mant.ne(_u32(0))
+  sub_f32 = (mant.cast(dtypes.float32) * _const(dtypes.float32, 1.0/512.0)).bitcast(dtypes.uint32) | sign
+  normal = f2f(b, dtypes.fp8e4m3, dtypes.float32)
+  return is_sub.where(sub_f32.bitcast(dtypes.float32), normal)
+
+def _bf8_to_f32(v: UOp) -> UOp:
+  b = (v.cast(dtypes.uint32) & _u32(0xFF)).cast(dtypes.uint8)
+  # E5M2 subnormal: exp==0, mant!=0 -> (-1)^sign * 2^(1-15) * (mant/4) = (-1)^sign * mant * 2^(-16)
+  bu = b.cast(dtypes.uint32)
+  sign, exp, mant = (bu >> _u32(7)) << _u32(31), (bu >> _u32(2)) & _u32(0x1F), bu & _u32(0x3)
+  is_sub = exp.eq(_u32(0)) & mant.ne(_u32(0))
+  sub_f32 = (mant.cast(dtypes.float32) * _const(dtypes.float32, 1.0/65536.0)).bitcast(dtypes.uint32) | sign
+  normal = f2f(b, dtypes.fp8e5m2, dtypes.float32)
+  return is_sub.where(sub_f32.bitcast(dtypes.float32), normal)
+
+def _f32_to_fp8(v: UOp) -> UOp:
+  return f2f((v.bitcast(dtypes.float32) if v.dtype != dtypes.float32 else v).bitcast(dtypes.uint32), dtypes.float32, dtypes.fp8e4m3).cast(dtypes.uint32)
+def _f32_to_bf8(v: UOp) -> UOp:
+  return f2f((v.bitcast(dtypes.float32) if v.dtype != dtypes.float32 else v).bitcast(dtypes.uint32), dtypes.float32, dtypes.fp8e5m2).cast(dtypes.uint32)
 
 def _check_nan(v: UOp, quiet: bool) -> UOp:
   if v.op == Ops.CAST and v.dtype == dtypes.float64: v = v.src[0]
@@ -119,7 +148,10 @@ def _abs(val: UOp) -> UOp:
   bt, ft = {10: (dtypes.uint16, dtypes.half), 23: (dtypes.uint32, dtypes.float32), 52: (dtypes.uint64, dtypes.float64)}[shift]
   return (val.bitcast(bt) & _const(bt, sign_mask)).bitcast(ft)
 
-def _f_to_u(f, dt): return UOp(Ops.TRUNC, f.dtype, ((f < _const(f.dtype, 0.0)).where(_const(f.dtype, 0.0), f),)).cast(dt)
+def _f_to_u(f, dt):
+  clamped = (f < _const(f.dtype, 0.0)).where(_const(f.dtype, 0.0), f)
+  truncated = UOp(Ops.TRUNC, f.dtype, (clamped,))
+  return (truncated >= _const(f.dtype, 2**(dt.itemsize*8))).where(_const(dt, dt.max), truncated.cast(dt))
 
 def _cvt_quiet(val: UOp) -> UOp:
   bits, _, _, qb, _ = _float_info(val)
@@ -288,7 +320,8 @@ _FUNCS: dict[str, Callable[..., UOp]] = {
   # Address calculation for memory operations
   'CalcDsAddr': lambda a, o, *r: a.cast(dtypes.uint32) + o.cast(dtypes.uint32),
   'CalcGlobalAddr': lambda v, s, *r: v.cast(dtypes.uint64) + s.cast(dtypes.uint64),
-  'CalcScratchAddr': lambda v, s, *r: v.cast(dtypes.uint64) + s.cast(dtypes.uint64),
+  # FP8/BF8 conversion functions
+  'fp8_to_f32': _fp8_to_f32, 'bf8_to_f32': _bf8_to_f32, 'f32_to_fp8': _f32_to_fp8, 'f32_to_bf8': _f32_to_bf8,
 }
 for is_max, name in [(False, 'min'), (True, 'max')]:
   for dt, sfx in [(dtypes.float32, 'f32'), (dtypes.int, 'i32'), (dtypes.uint32, 'u32'), (dtypes.int16, 'i16'), (dtypes.uint16, 'u16')]:
@@ -313,7 +346,8 @@ for is_max, name in [(False, 'min'), (True, 'max')]:
 
 DTYPES = {'u32': dtypes.uint32, 'i32': dtypes.int, 'f32': dtypes.float32, 'b32': dtypes.uint32, 'u64': dtypes.uint64, 'i64': dtypes.int64,
           'f64': dtypes.float64, 'b64': dtypes.uint64, 'u16': dtypes.uint16, 'i16': dtypes.short, 'f16': dtypes.half, 'b16': dtypes.uint16,
-          'u8': dtypes.uint8, 'i8': dtypes.int8, 'b8': dtypes.uint8, 'u4': dtypes.uint8, 'i4': dtypes.int8, 'u1': dtypes.uint32}
+          'u8': dtypes.uint8, 'i8': dtypes.int8, 'b8': dtypes.uint8, 'u4': dtypes.uint8, 'i4': dtypes.int8, 'u1': dtypes.uint32,
+          'fp8': dtypes.uint8, 'bf8': dtypes.uint8, 'b3': dtypes.uint8, 'b2': dtypes.uint8}
 _BITS_DT = {8: dtypes.uint8, 16: dtypes.uint16, 32: dtypes.uint32, 64: dtypes.uint64}
 _NUM_SUFFIXES = ('ULL', 'LL', 'UL', 'U', 'L', 'F', 'f')
 def _strip_suffix(num: str) -> tuple[str, str]:
@@ -769,6 +803,14 @@ class Parser:
       elif dt in (dtypes.uint8, dtypes.int8): val = (val >> ((addr & _const(adt, 3)).cast(dtypes.uint32) * _u32(8))) & _u32(0xFF)
       elif dt in (dtypes.uint16, dtypes.int16):
         val = (val >> (((addr >> _const(adt, 1)) & _const(adt, 1)).cast(dtypes.uint32) * _u32(16))) & _u32(0xFFFF)
+      else:
+        # Handle unaligned 32-bit loads: combine two consecutive dwords and shift
+        byte_off = (addr & _const(adt, 3)).cast(dtypes.uint32)
+        is_unaligned = byte_off.ne(_u32(0))
+        idx_hi = ((addr + _const(adt, 4)) >> _const(adt, 2)).cast(dtypes.int)
+        hi = mem.index(idx_hi, *gate)
+        combined = val.cast(dtypes.uint64) | (hi.cast(dtypes.uint64) << UOp.const(dtypes.uint64, 32))
+        val = is_unaligned.where((combined >> (byte_off.cast(dtypes.uint64) * UOp.const(dtypes.uint64, 8))).cast(dtypes.uint32), val)
     return val
 
   def _coerce_cmp(self, l: UOp, r: UOp) -> tuple[UOp, UOp]:
@@ -980,11 +1022,26 @@ def parse_block(lines: list[str], start: int, env: dict[str, VarVal], funcs: dic
       i += 1
       continue
 
-    # VGPR assignment: VGPR[lane][reg] = value
+    # VGPR assignment: VGPR[lane][reg] = value  or  VGPR[lane][reg][hi:lo].type = { ... }
     if first == 'vgpr' and toks[1].type == 'LBRACKET':
       j, lane_toks = _match_bracket(toks, 1)
       if j < len(toks) and toks[j].type == 'LBRACKET':
         j, reg_toks = _match_bracket(toks, j)
+        # Check for bit-slice: VGPR[lane][reg][hi:lo].type = value (read-modify-write)
+        if j < len(toks) and toks[j].type == 'LBRACKET':
+          j, slice_toks = _match_bracket(toks, j)
+          slice_str = _tok_str(slice_toks)
+          hi_str, lo_str = slice_str.split(':')
+          hi_val, lo_val = int(eval(hi_str.strip())), int(eval(lo_str.strip()))
+          if j < len(toks) and toks[j].type == 'DOT': j += 2  # skip .type suffix
+          if j < len(toks) and toks[j].type == 'EQUALS': j += 1
+          ln = parse_tokens(lane_toks, env, funcs)
+          rg, val = parse_tokens(reg_toks, env, funcs), parse_tokens(toks[j:], env, funcs)
+          vgpr_idx = _to_u32(rg) * _u32(32) + _to_u32(ln)
+          if assigns is not None:
+            assigns.append((f'VGPR[{_tok_str(lane_toks)}][{_tok_str(reg_toks)}][{hi_val}:{lo_val}]', (vgpr_idx, val, hi_val, lo_val)))
+          i += 1
+          continue
         if j < len(toks) and toks[j].type == 'DOT': j += 2  # skip .type suffix
         if j < len(toks) and toks[j].type == 'EQUALS': j += 1
         ln = parse_tokens(lane_toks, env, funcs)
@@ -1143,12 +1200,16 @@ def parse_block(lines: list[str], start: int, env: dict[str, VarVal], funcs: dic
       def is_const(c, v): return c.op == Ops.CONST and c.arg is v
       cond = parse_cond(line, 'if')
       conditions: list[tuple[UOp, UOp | dict[str, VarVal] | None]] = [(cond, None)] if not is_const(cond, False) else []
+      branch_assigns: list[tuple[UOp, list]] = []  # (cond, assigns_list) for side-effect merging
       else_branch: tuple[UOp | None, dict[str, VarVal]] = (None, {})
+      else_side_effects: list = []
       env_snap = dict(env)
       static_true = is_const(cond, True)  # track if any condition is statically true
       i += 1
-      i, branch, ret = parse_block(lines, i, env, funcs, assigns if not is_const(cond, False) else None)
+      if_side: list = [] if assigns is not None and not is_const(cond, False) else []
+      i, branch, ret = parse_block(lines, i, env, funcs, if_side if assigns is not None and not is_const(cond, False) else None)
       if conditions: conditions[0] = (cond, ret if ret is not None else branch)
+      if assigns is not None and not is_const(cond, False): branch_assigns.append((cond, if_side))
       env.clear()
       env.update(env_snap)
       while i < len(lines):
@@ -1159,16 +1220,21 @@ def parse_block(lines: list[str], start: int, env: dict[str, VarVal], funcs: dic
           c = parse_cond(lines[i], 'elsif')
           take = not static_true and not is_const(c, False)
           i += 1
-          i, branch, ret = parse_block(lines, i, env, funcs, assigns if take else None)
+          br_side: list = [] if assigns is not None and take else []
+          i, branch, ret = parse_block(lines, i, env, funcs, br_side if assigns is not None and take else None)
           if take:
             conditions.append((c, ret if ret is not None else branch))
             if is_const(c, True): static_true = True
+            if assigns is not None: branch_assigns.append((c, br_side))
           env.clear()
           env.update(env_snap)
         elif lf == 'else':
           i += 1
-          i, branch, ret = parse_block(lines, i, env, funcs, assigns if not static_true else None)
-          if not static_true: else_branch = (ret, branch)
+          el_side: list = [] if assigns is not None and not static_true else []
+          i, branch, ret = parse_block(lines, i, env, funcs, el_side if assigns is not None and not static_true else None)
+          if not static_true:
+            else_branch = (ret, branch)
+            if assigns is not None: else_side_effects = el_side
           env.clear()
           env.update(env_snap)
         elif lf == 'endif':
@@ -1188,6 +1254,10 @@ def parse_block(lines: list[str], start: int, env: dict[str, VarVal], funcs: dic
         ba = next((b for c, b in conditions if is_const(c, True) and isinstance(b, dict)), {})
         block_assigns.update(ba)
         env.update(ba)
+        # For static true, forward side effects unconditionally
+        if assigns is not None:
+          for bc, bse in branch_assigns:
+            if is_const(bc, True): assigns.extend(bse)
       else:
         else_assigns = else_branch[1]
         all_vars = set().union(*[ba.keys() for _, ba in conditions if isinstance(ba, dict)], else_assigns.keys())
@@ -1199,6 +1269,21 @@ def parse_block(lines: list[str], start: int, env: dict[str, VarVal], funcs: dic
               if isinstance(tv, UOp) and isinstance(res, UOp):
                 res = cond.where(tv, res.cast(tv.dtype) if tv.dtype != res.dtype and tv.dtype.itemsize == res.dtype.itemsize else res)
           block_assigns[var] = env[var] = res
+        # Merge side effects from branches with conditions
+        if assigns is not None:
+          def _cond_side_effect(cnd, dest, val):
+            if isinstance(val, tuple) and len(val) == 4:  # VGPR bit-slice: (idx, rhs, hi, lo) -> add condition
+              return (dest, (val[0], val[1], val[2], val[3], cnd))
+            if isinstance(val, tuple) and len(val) == 2:  # VGPR/MEM write: (addr, rhs) -> condition rhs
+              return (dest, (val[0], cnd.where(val[1], val[1])))
+            return (dest, val)
+          # Build combined condition: each branch fires when its cond is true AND no earlier cond was true
+          remaining = UOp.const(dtypes.bool, True)
+          for bc, bse in branch_assigns:
+            effective = remaining & bc if remaining.op != Ops.CONST else bc
+            for dest, val in bse: assigns.append(_cond_side_effect(effective, dest, val))
+            remaining = remaining & bc.logical_not() if remaining.op != Ops.CONST else bc.logical_not()
+          for dest, val in else_side_effects: assigns.append(_cond_side_effect(remaining, dest, val))
       continue
 
     # Regular assignment: var = value
