@@ -709,7 +709,7 @@ jobs:
       - name: Run RDNA4 emulator tests
         run: MOCKGPU_ARCH=rdna4 python -m pytest test/test_tiny.py -v --durations 20
       - name: Run CDNA4 emulator tests
-        run: MOCKGPU_ARCH=cdna4 python -m pytest test/test_tiny.py -v --durations 20
+        run: AMD_LLVM=1 MOCKGPU_ARCH=cdna4 python -m pytest test/test_tiny.py -v --durations 20
 
   testnvidia:
     strategy:
