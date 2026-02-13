@@ -1,12 +1,15 @@
 # Test to compare Python and Rust RDNA3 emulators by running real tinygrad kernels
 import unittest, ctypes
 from dataclasses import dataclass
+from pathlib import Path
 from tinygrad import Device
 
 from tinygrad.renderer.amd.emu import WaveState, _decode_at, WAVE_SIZE, VCC_LO, EXEC_LO, SCC
 from tinygrad.renderer.amd import decode_inst
 from test.amd.helpers import KernelInfo
-from test.amd.bench_emu import REMU_PATH
+import tinygrad
+REMU_PATH = Path(tinygrad.__file__).parent.parent / "extra/remu/target/release/libremu.so"
+if not REMU_PATH.exists(): REMU_PATH = Path(tinygrad.__file__).parent.parent / "extra/remu/target/release/libremu.dylib"
 
 def set_valid_mem_ranges(ranges): pass  # emu2 doesn't need this
 
