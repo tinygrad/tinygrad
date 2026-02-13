@@ -329,7 +329,7 @@ def asm_sdpa(q: Tensor, k: Tensor, v: Tensor) -> Tensor:
   """
   counters["used"] += 1
   B, H_q, S, D = q.shape
-  if DEBUG >= 2: print("[asm_atn]", q.shape, k.shape, v.shape)
+  if DEBUG >= 2: print("[asm_atn]", q.shape, q.uop.axis, k.shape, k.uop.axis, v.shape, v.uop.axis)
   H_kv = k.shape[1]  # K/V may have fewer heads (GQA)
   dname = q.device[0] if isinstance(q.device, tuple) else q.device
 

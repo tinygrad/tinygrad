@@ -291,5 +291,106 @@ class TestAsmAtn(unittest.TestCase):
     np.testing.assert_allclose(dk_asm.numpy(), dk_ref.numpy(), atol=atol, rtol=rtol)
     np.testing.assert_allclose(dv_asm.numpy(), dv_ref.numpy(), atol=atol, rtol=rtol)
 
+  # ============================================================================
+  # LLaMA 8B trainer exact shapes (8 GPUs, GQA with 32 query heads, 8 kv heads)
+  # q: (8, 32, 8192, 128) axis=0, k: (8, 8, 8192, 128) axis=0, v: (8, 8, 8192, 128) axis=0
+  # ============================================================================
+
+  @needs_second_gpu
+  def test_llama8b_gqa_8gpu_forward_tiny(self):
+    """Test exact shapes from LLaMA 8B trainer - forward only, no reference."""
+    B, S, D = 8, 8192, 128
+    H_q, H_kv = 32, 8
+    GPUS = tuple(f"{Device.DEFAULT}:{i}" for i in range(B))
+
+    Tensor.manual_seed(0)
+    with Context(DEBUG=0):
+      q = Tensor.randn(B, H_q, S, D, dtype=dtypes.bfloat16).shard(GPUS, axis=0)
+      k = Tensor.randn(B, H_kv, S, D, dtype=dtypes.bfloat16).shard(GPUS, axis=0)
+      v = Tensor.randn(B, H_kv, S, D, dtype=dtypes.bfloat16).shard(GPUS, axis=0)
+
+    out = asm_sdpa(q, k, v)
+    out.realize()
+
+  @needs_second_gpu
+  def test_llama8b_gqa_8gpu_backward_tiny(self):
+    """Test exact shapes from LLaMA 8B trainer - backward only, no reference."""
+    B, S, D = 8, 8192, 128
+    H_q, H_kv = 32, 8
+    GPUS = tuple(f"{Device.DEFAULT}:{i}" for i in range(B))
+
+    Tensor.manual_seed(0)
+    with Context(DEBUG=0):
+      q = Tensor.randn(B, H_q, S, D, dtype=dtypes.bfloat16, requires_grad=True).shard(GPUS, axis=0)
+      k = Tensor.randn(B, H_kv, S, D, dtype=dtypes.bfloat16, requires_grad=True).shard(GPUS, axis=0)
+      v = Tensor.randn(B, H_kv, S, D, dtype=dtypes.bfloat16, requires_grad=True).shard(GPUS, axis=0)
+
+    out = asm_sdpa(q, k, v)
+    loss = out.sum()
+    grads = Tensor.gradient(loss, q, k, v)
+    Tensor.realize(loss, *grads)
+
+  @needs_second_gpu
+  def test_llama8b_gqa_8gpu_forward(self):
+    """Test exact shapes from LLaMA 8B trainer - forward with reference."""
+    B, S, D = 8, 8192, 128
+    H_q, H_kv = 32, 8
+    GPUS = tuple(f"{Device.DEFAULT}:{i}" for i in range(B))
+
+    Tensor.manual_seed(0)
+    with Context(DEBUG=0):
+      base_q = Tensor.randn(B, H_q, S, D, dtype=dtypes.bfloat16).contiguous()
+      base_k = Tensor.randn(B, H_kv, S, D, dtype=dtypes.bfloat16).contiguous()
+      base_v = Tensor.randn(B, H_kv, S, D, dtype=dtypes.bfloat16).contiguous()
+      Tensor.realize(base_q, base_k, base_v)
+
+    q = base_q.shard(GPUS, axis=0)
+    k = base_k.shard(GPUS, axis=0)
+    v = base_v.shard(GPUS, axis=0)
+
+    out_asm = asm_sdpa(q, k, v)
+    out_ref = Tensor.scaled_dot_product_attention(base_q, base_k, base_v, is_causal=True)
+    Tensor.realize(out_asm, out_ref)
+
+    atol, rtol = 2e-2, 2e-2
+    np.testing.assert_allclose(out_asm.numpy(), out_ref.numpy(), atol=atol, rtol=rtol)
+
+  @needs_second_gpu
+  def test_llama8b_gqa_8gpu_backward(self):
+    """Test exact shapes from LLaMA 8B trainer - backward with reference."""
+    B, S, D = 8, 8192, 128
+    H_q, H_kv = 32, 8
+    GPUS = tuple(f"{Device.DEFAULT}:{i}" for i in range(B))
+
+    Tensor.manual_seed(0)
+    with Context(DEBUG=0):
+      base_q = Tensor.randn(B, H_q, S, D, dtype=dtypes.bfloat16).contiguous()
+      base_k = Tensor.randn(B, H_kv, S, D, dtype=dtypes.bfloat16).contiguous()
+      base_v = Tensor.randn(B, H_kv, S, D, dtype=dtypes.bfloat16).contiguous()
+      base_dout = Tensor.ones(B, H_q, S, D, dtype=dtypes.bfloat16).contiguous()
+      Tensor.realize(base_q, base_k, base_v, base_dout)
+
+    q = base_q.clone().requires_grad_(True).shard(GPUS, axis=0)
+    k = base_k.clone().requires_grad_(True).shard(GPUS, axis=0)
+    v = base_v.clone().requires_grad_(True).shard(GPUS, axis=0)
+    dout = base_dout.shard(GPUS, axis=0)
+
+    out_asm = asm_sdpa(q, k, v)
+    dq_asm, dk_asm, dv_asm = Tensor.gradient(out_asm, q, k, v, gradient=dout)
+
+    q_ref = base_q.clone().requires_grad_(True)
+    k_ref = base_k.clone().requires_grad_(True)
+    v_ref = base_v.clone().requires_grad_(True)
+    out_ref = Tensor.scaled_dot_product_attention(q_ref, k_ref, v_ref, is_causal=True)
+    dq_ref, dk_ref, dv_ref = Tensor.gradient(out_ref, q_ref, k_ref, v_ref, gradient=base_dout)
+
+    Tensor.realize(out_asm, out_ref, dq_asm, dk_asm, dv_asm, dq_ref, dk_ref, dv_ref)
+
+    atol, rtol = 2e-2, 2e-2
+    np.testing.assert_allclose(out_asm.numpy(), out_ref.numpy(), atol=atol, rtol=rtol)
+    np.testing.assert_allclose(dq_asm.numpy(), dq_ref.numpy(), atol=atol, rtol=rtol)
+    np.testing.assert_allclose(dk_asm.numpy(), dk_ref.numpy(), atol=atol, rtol=rtol)
+    np.testing.assert_allclose(dv_asm.numpy(), dv_ref.numpy(), atol=atol, rtol=rtol)
+
 if __name__ == "__main__":
   unittest.main()
