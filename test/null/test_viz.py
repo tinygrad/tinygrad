@@ -491,6 +491,12 @@ class TestVizProfiler(BaseTestViz):
     with self.assertRaises(struct.error):
       get_profile(prof)
 
+  def test_timestamp_out_of_range(self):
+    prof = [ProfileRangeEvent("CPU", name="k", st=decimal.Decimal(0), en=decimal.Decimal(10)),
+            ProfileRangeEvent("CPU", name="k", st=decimal.Decimal(5_000_000_000), en=decimal.Decimal(5_000_000_010))]
+    with self.assertRaisesRegex(ValueError, "timestamp out of range"):
+      get_profile(prof)
+
   def test_python_marker(self):
     with Context(VIZ=1):
       a = Tensor.empty(1, device="NULL")
