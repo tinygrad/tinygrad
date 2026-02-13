@@ -11,6 +11,7 @@ class TestLLMServer(unittest.TestCase):
     cls.mock_tok.encode = Mock(return_value=[200, 201, 202])
     cls.mock_tok.decode = Mock(return_value="Hello")
     cls.mock_tok.end_turn = Mock(return_value=[998])
+    cls.mock_tok.build_chat_ids = Mock(return_value=[100, 101, 200, 201, 202])
 
     cls.mock_model = Mock()
     cls.mock_model.generate = Mock(side_effect=lambda ids, **kwargs: iter([300, 301, 999]))
@@ -23,6 +24,7 @@ class TestLLMServer(unittest.TestCase):
     llm_module.tok = cls.mock_tok
     llm_module.bos_id = cls.bos_id
     llm_module.eos_id = cls.eos_id
+    llm_module.stop_tokens = [cls.eos_id]
 
     from tinygrad.apps.llm import Handler
     from tinygrad.viz.serve import TCPServerWithReuse
