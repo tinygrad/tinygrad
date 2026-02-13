@@ -1,5 +1,5 @@
 import functools
-from tinygrad.device import Compiled, Allocator, RendererList
+from tinygrad.device import Compiled, Allocator
 from tinygrad.engine.jit import MultiGraphRunner
 from tinygrad.renderer.cstyle import Renderer, CStyleLanguage, AMDHIPRenderer
 from tinygrad.uop.ops import Ops
@@ -32,13 +32,12 @@ class NullGraph(MultiGraphRunner):
 
 class NullDevice(Compiled):
   def __init__(self, device:str):
-    renderer:functools.partial|type[Renderer]
+    renderer:type[Renderer]
     match str(EMULATE.value):
-      case "AMD": renderer = functools.partial(AMDHIPRenderer, "gfx1100")
-      case "AMD_RDNA4": renderer = functools.partial(AMDHIPRenderer, "gfx1201")
-      case "AMD_CDNA4": renderer = functools.partial(AMDHIPRenderer, "gfx950")
+      case "AMD": renderer, self.arch = AMDHIPRenderer, "gfx1100"
+      case "AMD_RDNA4": renderer, self.arch = AMDHIPRenderer, "gfx1201"
+      case "AMD_CDNA4": renderer, self.arch = AMDHIPRenderer, "gfx950"
       case "": renderer = NullRenderer
       case _: raise RuntimeError(f"can't EMULATE device: {EMULATE.value}")
-    compilers:RendererList = [(renderer, None), (functools.partial(IR3Renderer, 0x6030001), NULL_IR3), # adreno 630
-                              (functools.partial(NAKRenderer, "sm_120", 48), NULL_NAK)] # 5090
-    super().__init__(device, NullAllocator(self), compilers, functools.partial(NullProgram, device), NullGraph)
+    renderers = {'': renderer, 'IR3': IR3Renderer, 'NAK': NAKRenderer}
+    super().__init__(device, NullAllocator(self), renderers, functools.partial(NullProgram, device), NullGraph)

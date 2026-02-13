@@ -146,10 +146,10 @@ class DSPCompiler(Compiler):
 
 class DSPDevice(Compiled):
   def __init__(self, device:str=""):
-    if getenv("MOCKDSP"): super().__init__(device, DSPAllocator(self), [(MockDSPRenderer, None)], MockDSPProgram)
+    if getenv("MOCKDSP"): super().__init__(device, DSPAllocator(self), {'': MockDSPRenderer}, MockDSPProgram)
     else:
       self.ion_fd = os.open('/dev/ion', os.O_RDONLY)
-      super().__init__(device, DSPAllocator(self), [(DSPRenderer, None)], functools.partial(DSPProgram, self))
+      super().__init__(device, DSPAllocator(self), {'': DSPRenderer}, functools.partial(DSPProgram, self))
       fastrpc_shell = memoryview(bytearray(pathlib.Path('/dsp/cdsp/fastrpc_shell_3').read_bytes()))
       self.shell_buf = self.allocator.alloc(round_up(fastrpc_shell.nbytes, 0x1000), BufferSpec(nolru=True))
       ctypes.memmove(self.shell_buf.va_addr, mv_address(fastrpc_shell), fastrpc_shell.nbytes)

@@ -2,7 +2,7 @@ from __future__ import annotations
 import os, ctypes, functools, mmap, struct, array, math, sys, weakref, contextlib
 assert sys.platform != 'win32'
 from typing import Any
-from tinygrad.device import BufferSpec, RendererList, Device
+from tinygrad.device import BufferSpec, Device
 from tinygrad.runtime.support.hcq import HCQBuffer, HWQueue, HCQProgram, HCQCompiled, HCQAllocatorBase, HCQSignal, HCQArgsState, BumpAllocator
 from tinygrad.runtime.support.hcq import FileIOInterface, MMIOInterface
 from tinygrad.runtime.autogen import kgsl, mesa
@@ -384,8 +384,8 @@ class QCOMDevice(HCQCompiled):
       System.write_sysfs("/sys/class/kgsl/kgsl-3d0/idle_timer", value="4000000000", msg="Failed to disable suspend mode", expected="4294967276")
 
     self.cl_dev = CLDevice(device)
-    compilers:RendererList = [(QCOMRenderer, None), (functools.partial(IR3Renderer, info.chip_id), QCOM_IR3)]
-    super().__init__(device, QCOMAllocator(self), compilers, functools.partial(QCOMProgram, self), QCOMSignal,
+    renderers = {'': QCOMRenderer, 'IR3': IR3Renderer}
+    super().__init__(device, QCOMAllocator(self), renderers, functools.partial(QCOMProgram, self), QCOMSignal,
                      functools.partial(QCOMComputeQueue, self), None, ctrl_var=QCOM_CC)
 
   def _gpu_alloc(self, size:int, flags:int=0, uncached=False, fill_zeroes=False, **kwargs) -> HCQBuffer:

@@ -1,15 +1,14 @@
 from __future__ import annotations
 from dataclasses import dataclass, replace
 from collections import defaultdict
-from typing import Any, Generic, TypeVar, Iterator, Generator, TypeAlias, TYPE_CHECKING
+from typing import Any, Generic, TypeVar, Iterator, Generator, Mapping, TYPE_CHECKING
 import importlib, inspect, functools, pathlib, os, platform, contextlib, sys, re, atexit, pickle, decimal
 from tinygrad.helpers import CI, OSX, LRU, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, flat_mv, PROFILE, temp, colored
 from tinygrad.helpers import Context, CCACHE, ALLOW_DEVICE_USAGE, MAX_BUFFER_SIZE, cpu_events, ProfileEvent, ProfilePointEvent, dedup, ContextVar
-from tinygrad.helpers import unwrap_class_type, suppress_finalizing, select_first_inited, VIZ, CPU_LLVM, CPU_LVP, NV_PTX, CUDA_PTX, NV_NAK
+from tinygrad.helpers import suppress_finalizing, select_first_inited, VIZ, CPU_LLVM, CPU_LVP, NV_PTX, CUDA_PTX, NV_NAK
 from tinygrad.helpers import EMULATED_DTYPES
 from tinygrad.dtype import DType, ImageDType, PtrDType, dtypes, _to_np_dtype
 if TYPE_CHECKING: from tinygrad.renderer import Renderer
-RendererList: TypeAlias = "list[tuple[type[Renderer]|functools.partial, ContextVar|None]]"
 
 # **************** Device ****************
 
@@ -280,45 +279,25 @@ class Compiler:
 
 class Compiled:
   profile_events:list[ProfileEvent] = [ProfileDeviceEvent("CPU")] # NOTE: CPU is the default device.
+  arch:str = ""
 
-  def __init__(self, device:str, allocator:Allocator, renderers:RendererList, runtime, graph=None, group_id=None, ctrl_var:ContextVar|None=None):
-    from tinygrad.renderer import Renderer
-
+  def __init__(self, device:str, allocator:Allocator, renderers:Mapping[str,type[Renderer]], runtime, graph=None, group_id=None,
+               ctrl_var:ContextVar|None=None):
     self.device, self.allocator, self.runtime, self.graph, self.group_id = device, allocator, runtime, graph, group_id
 
-    self.comps_ctrl_var = ctrl_var
-    self.comp_sets:dict[str, tuple[ContextVar|None, type[Renderer]|functools.partial]] = {}
-    self.cached_pair:dict[Any, Renderer] = {}
-    for ren, var in (renderers or [(Renderer, None)]):
-      self.comp_sets[var.key.split('_', 1)[-1] if var is not None else self._compiler_name(ren)] = (var, ren)
+    self.ctrl_var, self.renderers = ctrl_var, renderers or {'': Renderer}
+    self.cached_renderer:dict[type[Renderer], Renderer] = {}
 
   @property
-  def renderer(self) -> Renderer: return self._select_compiler_pair()
+  def renderer(self) -> Renderer:
+    if self.ctrl_var is not None and self.ctrl_var.value: return self.renderers[self.ctrl_var.value](**({'arch': self.arch} if self.arch else {}))
+    return select_first_inited([functools.partial(r, **({'arch': self.arch} if self.arch else {})) for r in self.renderers.values()],
+                               f"No renderer for {self.device} is available", self.cached_renderer)
 
   @property
   def compiler(self) -> Compiler:
     if (ret:=self.renderer.compiler) is None: raise RuntimeError(f"no compiler for {self.device}")
     return ret
-
-  def _compiler_name(self, r:type[Renderer]|functools.partial) -> str:
-    return unwrap_class_type(r).__name__.upper().removesuffix("RENDERER").removeprefix(devname:=self.device.split(':')[0].upper()) or devname
-
-  def _select_compiler_pair(self) -> Renderer:
-    # select forced compiler from global env var.
-    forced_comps = set([self.comp_sets[val][1]] if self.comps_ctrl_var is not None and (val:=self.comps_ctrl_var.value) else [])
-
-    # add forced compilers from individual env vars (only if global env var is not set, as it takes precedence).
-    if not forced_comps: forced_comps |= set(rc for en, rc in self.comp_sets.values() if en is not None and en.value == 1)
-    if len(forced_comps) > 1: raise RuntimeError(f"{self.device}: multiple compilers set in env {forced_comps}")
-
-    # select remaining compilers (all or forced only)
-    comps = list(rc for en, rc in self.comp_sets.values())
-
-    # remove disabled compilers
-    for en, rc in self.comp_sets.values():
-      if en is not None and en.value == 0 and rc in comps: comps.remove(rc)
-
-    return select_first_inited(list(forced_comps) if len(forced_comps)>0 else comps, f"No compiler for {self.device} is available", self.cached_pair)
 
   def synchronize(self):
     """
@@ -391,23 +370,23 @@ def enumerate_devices_str() -> Generator[str, None, None]:
     compilers_results, any_works = [], False
     try:
       d = Device[device]
-      default_comp_pairs, default_compiler, cc_ctrl_var = d.comp_sets, d.compiler, d.comps_ctrl_var
+      default_renderers, default_renderer, ctrl_var = d.renderers, d.renderer, d.ctrl_var
       try:
-        for k,(en,r) in default_comp_pairs.items():
-          d.comp_sets = {k:(None,r)} # env var set to None, so it doesn't interfere
-          d.comps_ctrl_var = None
+        d.ctrl_var = None # ensure that this doesn't interfere
+        for k,r in default_renderers.items():
+          d.renderers = {k:r}
           try:
             # d.renderer, d.compiler = r(), c()
             with Context(CACHELEVEL=0): test = (Tensor([1,2,3], device=device) * 2).tolist()
             if test != [2,4,6]: raise ValueError(f"got {test} instead of [2, 4, 6]")
-            set_text = f'({cc_ctrl_var.key}={d._compiler_name(r)} to make default)' if cc_ctrl_var is not None else ''
-            default_text = '(default)' if type(default_compiler) is type(d.compiler) else set_text
-            compilers_results.append(f"{colored('+', 'green')} {d._compiler_name(r)} {default_text}")
+            set_text = f'({ctrl_var.key}={k} to make default)' if ctrl_var is not None else ''
+            default_text = '(default)' if type(default_renderer) is type(d.renderer) else set_text
+            compilers_results.append(f"{colored('+', 'green')} {k} {default_text}")
             any_works = True
-          except Exception as e: compilers_results.append(f"{colored('-', 'yellow')} {d._compiler_name(r)}: {e}")
+          except Exception as e: compilers_results.append(f"{colored('-', 'yellow')} {k}: {e}")
       finally:
         # put the defaults back!
-        d.comp_sets, d.comps_ctrl_var = default_comp_pairs, cc_ctrl_var
+        d.renderers, d.ctrl_var = default_renderers, ctrl_var
       result = (colored('PASS', 'green') if any_works else f"{colored('FAIL', 'yellow')}") + ''.join([f'\n{" "*16} {x}' for x in compilers_results])
     except Exception as e:
       result = f"{colored('FAIL', 'red')} {e}"
