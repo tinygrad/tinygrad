@@ -21,13 +21,12 @@ def load(name, dll, files, **kwargs):
   if not (f:=(root/(path:=kwargs.pop("path", __name__)).replace('.','/')/f"{name}.py")).exists() or getenv('REGEN'):
     files, kwargs['args'] = files() if callable(files) else files, args() if callable(args:=kwargs.get('args', [])) else args
     if (srcs:=kwargs.pop('srcs', None)):
-      shutil.rmtree(srcpath:=f"/tmp/tinyautogen-src-{name}/", ignore_errors=True)
-      os.makedirs(srcpath)
+      srcpath = tempfile.TemporaryDirectory(f"autogen-src-{name}").name
       for src in (srcs if isinstance(srcs, list) else [srcs]):
         if 'tar' in src:
           # dangerous for arbitrary urls!
           with tarfile.open(fetch(src, gunzip=src.endswith("gz"))) as tf:
-            tf.extractall(srcpath)
+            tf.extractall(srcdir.name)
             if not isinstance(srcs, list): srcpath += tf.getnames()[0] # if we just have a single tarball, make this the root
         else: fetch(src, name=srcpath + src.split('/')[-1])
       files, kwargs['args'] = [str(f).format(srcpath) for f in files], [a.format(srcpath) for a in kwargs.get('args', [])]
@@ -36,7 +35,6 @@ def load(name, dll, files, **kwargs):
     files = flatten(sorted(glob.glob(p, recursive=True)) if isinstance(p, str) and '*' in p else [p] for p in files)
     kwargs['epilog'] = (epi(srcpath) if srcs else epi()) if callable(epi:=kwargs.get('epilog', [])) else epi
     f.write_text(importlib.import_module("tinygrad.runtime.support.autogen").gen(name, dll, files, **kwargs))
-    if srcs: shutil.rmtree(srcpath)
   return importlib.import_module(f"{path}.{name.replace('/', '.')}")
 
 def __getattr__(nm):
