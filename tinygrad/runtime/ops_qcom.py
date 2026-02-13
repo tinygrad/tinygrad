@@ -10,7 +10,7 @@ from tinygrad.runtime.ops_cl import CLDevice
 from tinygrad.renderer.cstyle import QCOMRenderer
 from tinygrad.renderer.nir import IR3Renderer
 from tinygrad.helpers import getenv, mv_address, to_mv, round_up, data64_le, ceildiv, prod, fromimport, cpu_profile, lo32, suppress_finalizing
-from tinygrad.helpers import next_power2, flatten, QCOM_IR3, QCOM_CC, PROFILE, DEBUG
+from tinygrad.helpers import next_power2, flatten, QCOM_CC, PROFILE, DEBUG
 from tinygrad.dtype import ImageDType, dtypes
 from tinygrad.runtime.support.system import System
 if getenv("IOCTL"): import extra.qcom_gpu_driver.opencl_ioctl  # noqa: F401  # pylint: disable=unused-import

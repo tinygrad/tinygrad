@@ -1,10 +1,10 @@
-import functools
+import functools, inspect
 from tinygrad.device import Compiled, Allocator
 from tinygrad.engine.jit import MultiGraphRunner
 from tinygrad.renderer.cstyle import Renderer, CStyleLanguage, AMDHIPRenderer
 from tinygrad.uop.ops import Ops
 from tinygrad.helpers import cpu_profile, EMULATE, NULL_CC, NULL_ALLOW_COPYOUT
-from tinygrad.renderer.nir import IR3Renderer, NAKRenderer
+from tinygrad.renderer import cstyle, nir, ptx, llvmir, wgsl
 
 class NullRenderer(CStyleLanguage):
   device = "NULL"
@@ -39,5 +39,7 @@ class NullDevice(Compiled):
       case "AMD_CDNA4": renderer, self.arch = AMDHIPRenderer, "gfx950"
       case "": renderer = NullRenderer
       case _: raise RuntimeError(f"can't EMULATE device: {EMULATE.value}")
-    renderers = {'': renderer, 'IR3': IR3Renderer, 'NAK': NAKRenderer}
+    def _name(ren): return ren.device + f":{shortname}" if (shortname:=ren.__name__.upper().removesuffix('RENDERER').removeprefix(ren.device)) else ""
+    renderers = {'': renderer, **{_name(renderer):renderer for mod in (cstyle, nir, ptx, llvmir, wgsl) for renderer in mod.__dict__.values()
+                                  if inspect.isclass(renderer) and issubclass(renderer, Renderer) and renderer.device}}
     super().__init__(device, NullAllocator(self), renderers, functools.partial(NullProgram, device), NullGraph, ctrl_var=NULL_CC)

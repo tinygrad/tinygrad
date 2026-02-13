@@ -1,6 +1,6 @@
 from __future__ import annotations
 import ctypes, functools
-from tinygrad.helpers import DEBUG, getenv, mv_address, suppress_finalizing, CUDA_CC, CUDA_PTX, CUDA_NVCC
+from tinygrad.helpers import DEBUG, getenv, mv_address, suppress_finalizing, CUDA_CC
 from tinygrad.device import Compiled, BufferSpec, LRUAllocator
 from tinygrad.renderer.cstyle import CUDARenderer
 from tinygrad.renderer.ptx import PTXRenderer

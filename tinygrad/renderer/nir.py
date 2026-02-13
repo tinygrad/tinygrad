@@ -1,6 +1,6 @@
 from typing import Callable, cast, Any
 from tinygrad.dtype import AddrSpace, DType, PtrDType, ImageDType, dtypes, truncate
-from tinygrad.helpers import DEBUG, OSX, unwrap, fromimport
+from tinygrad.helpers import DEBUG, OSX, unwrap
 from tinygrad.renderer import Renderer
 from tinygrad.renderer.cstyle import CUDARenderer
 from tinygrad.uop.ops import GroupOp, Ops, UOp, PatternMatcher, UPat, range_str
