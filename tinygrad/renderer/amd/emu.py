@@ -548,8 +548,8 @@ def _compile_sopp(inst: ir3.SOPP | ir4.SOPP, ctx: _Ctx) -> UOp:
   if inst.op in (ir3.SOPPOp.S_ENDPGM, ir4.SOPPOp.S_ENDPGM, irc.SOPPOp.S_ENDPGM):
     return UOp.sink(ctx.wsgpr_dyn(_c(PC_LO_IDX), UOp.const(dtypes.uint32, 0xFFFFFFFF)),
                           ctx.wsgpr_dyn(_c(PC_HI_IDX), UOp.const(dtypes.uint32, 0xFFFFFFFF)))
-  if inst.op in (ir3.SOPPOp.S_NOP, ir4.SOPPOp.S_NOP, irc.SOPPOp.S_NOP): return UOp.sink(*ctx.inc_pc())  # S_NOP is a no-op
-  if inst.op == irc.SOPPOp.S_WAITCNT: return UOp.sink(*ctx.inc_pc())  # S_WAITCNT is a no-op in emulator
+  # S_NOP and S_WAITCNT are no-ops in emulator (no pipeline/cache to wait on)
+  if inst.op in (ir3.SOPPOp.S_NOP, ir4.SOPPOp.S_NOP, irc.SOPPOp.S_NOP, irc.SOPPOp.S_WAITCNT): return UOp.sink(*ctx.inc_pc())
   # NOTE: we ignore SOPPs without PCODE
   if inst.op in _get_pcode_dict(inst.op):
     pcode = get_pcode(inst.op)
@@ -565,10 +565,7 @@ def _compile_sopp(inst: ir3.SOPP | ir4.SOPP, ctx: _Ctx) -> UOp:
 
 def _compile_smem(inst: ir3.SMEM | ir4.SMEM, ctx: _Ctx) -> UOp:
   # Cache invalidation instructions are no-ops in the emulator (we don't model caches)
-  cache_inv_ops = [ir3.SMEMOp.S_GL1_INV, ir3.SMEMOp.S_DCACHE_INV, ir4.SMEMOp.S_DCACHE_INV, irc.SMEMOp.S_DCACHE_INV]
-  if hasattr(ir4.SMEMOp, 'S_GL1_INV'): cache_inv_ops.append(ir4.SMEMOp.S_GL1_INV)
-  if inst.op in cache_inv_ops:
-    return UOp.sink(*ctx.inc_pc())
+  if 'INV' in inst.op.name: return UOp.sink(*ctx.inc_pc())
   # Dynamic sbase field (bits 5:0) - SGPR pair, field value * 2 = register offset
   sbase = ctx.inst_field(type(inst).sbase) * _c(2)
   # Dynamic sdata field (bits 12:6) - destination SGPR
@@ -672,7 +669,8 @@ def _compile_vop12(inst: ir3.VOP1 | ir3.VOP1_SDST | ir3.VOP2 | ir4.VOP1 | ir4.VO
       srcs['SIMM32'] = literal
   return ctx.compile_vop_pcode(inst.op, srcs, lane, vdst_reg, exec_mask, opsel_dst_hi=write_hi_half)
 
-def _compile_vopc(inst: ir3.VOPC|ir3.VOP3|ir4.VOPC|ir4.VOP3|irc.VOPC|irc.VOP3, ctx: _Ctx, opsel: int = 0, abs_bits: int = 0, neg_bits: int = 0) -> UOp:
+def _compile_vopc(inst: ir3.VOPC|ir3.VOP3|ir4.VOPC|ir4.VOP3|irc.VOPC|irc.VOP3, ctx: _Ctx,
+                  opsel: int = 0, abs_bits: int = 0, neg_bits: int = 0) -> UOp:
   exec_mask, op_name, bits = ctx.rsgpr_dyn(_c(EXEC_LO.offset)), _op_name(inst), inst.canonical_op_bits
   is_cmpx, is_vopc = 'CMPX' in op_name, hasattr(inst, 'vsrc1')  # is_vopc: e32 vs e64
 
@@ -819,7 +817,7 @@ def _compile_vop3sd(inst: ir3.VOP3SD | ir4.VOP3SD | irc.VOP3SD, ctx: _Ctx) -> UO
   else:
     return ctx.compile_vop_pcode(inst.op, srcs, lane, vdst_reg, exec_mask, sdst_reg=inst.sdst.offset)
 
-def _compile_wmma(inst: ir3.VOP3P | ir4.VOP3P, ctx: _Ctx) -> UOp:
+def _compile_wmma(inst: ir3.VOP3P | ir4.VOP3P | irc.VOP3P, ctx: _Ctx) -> UOp:
   op_name = _op_name(inst)
   exec_mask = ctx.rsgpr_dyn(_c(EXEC_LO.offset))
   vdst_reg = ctx.inst_field(type(inst).vdst)
@@ -961,7 +959,8 @@ def _compile_vopd(inst: ir3.VOPD | ir4.VOPD, ctx: _Ctx) -> UOp:
       if dest.startswith('D0'): all_stores.append(ctx.wvgpr_dyn(vdst_reg, lane, _val_to_u32(val), exec_mask, after=srcy1))
   return UOp.sink(UOp.group(*all_stores).end(lane), *ctx.inc_pc())
 
-def _compile_mem_op(inst: ir3.DS|ir3.FLAT|ir3.GLOBAL|ir3.SCRATCH|ir4.DS|ir4.VFLAT|ir4.VGLOBAL|ir4.VSCRATCH|irc.DS|irc.FLAT|irc.GLOBAL|irc.SCRATCH, ctx: _Ctx) -> UOp:
+def _compile_mem_op(inst: ir3.DS|ir3.FLAT|ir3.GLOBAL|ir3.SCRATCH|ir4.DS|ir4.VFLAT|ir4.VGLOBAL|ir4.VSCRATCH
+                    |irc.DS|irc.FLAT|irc.GLOBAL|irc.SCRATCH, ctx: _Ctx) -> UOp:
   """Unified memory operation compiler for DS, FLAT, GLOBAL, SCRATCH."""
   exec_mask, op_name = ctx.rsgpr_dyn(_c(EXEC_LO.offset)), _op_name(inst)
   pcode = get_pcode(inst.op)
@@ -1254,7 +1253,6 @@ class WaveState:
 def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, lz: int, args_ptr: int, rsrc2: int = 0x19c,
             scratch_size: int = 0, arch: str = "rdna3", user_data: list[int]|None = None) -> int:
   """Execute AMD assembly program. scratch_size is private_segment_fixed_size from kernel descriptor (per-lane)."""
-  wave_size = WAVE_SIZE  # Always use 32-lane waves in emulator (VGPR layout is hardcoded to 32 lanes)
   program_raw = decode_program(bytes((ctypes.c_char * lib_sz).from_address(lib).raw), arch)
   program = {lib + offset: val for offset, val in program_raw.items()}  # Remap to actual addresses
   lds_size = ((rsrc2 & hsa.AMD_COMPUTE_PGM_RSRC_TWO_GRANULATED_LDS_SIZE) >> hsa.AMD_COMPUTE_PGM_RSRC_TWO_GRANULATED_LDS_SIZE_SHIFT) * 512
@@ -1263,15 +1261,15 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
   # Use Buffer objects with external_ptr=0 for vmem
   vmem_buf = Buffer('CPU', 1 << 40, dtypes.uint32, options=BufferSpec(external_ptr=0)).ensure_allocated()
   lds_buf = Buffer('CPU', max(lds_size // 4, 1), dtypes.uint32).ensure_allocated()
-  scratch_buf = Buffer('CPU', scratch_size * wave_size, dtypes.uint8).ensure_allocated() if scratch_size else None
+  scratch_buf = Buffer('CPU', scratch_size * WAVE_SIZE, dtypes.uint8).ensure_allocated() if scratch_size else None
 
   # Set DAZ+FTZ during emulator execution, restore afterward to avoid breaking hypothesis tests
   with _MXCSRContext():
     for gidz in range(gz):
       for gidy in range(gy):
         for gidx in range(gx):
-          for wave_start in range(0, total_threads, wave_size):
-            n_lanes, st = min(wave_size, total_threads - wave_start), WaveState(min(wave_size, total_threads - wave_start))
+          for wave_start in range(0, total_threads, WAVE_SIZE):
+            n_lanes, st = min(WAVE_SIZE, total_threads - wave_start), WaveState(min(WAVE_SIZE, total_threads - wave_start))
             st.pc = lib  # Set PC to code base address
             # Initialize user SGPRs: hardware loads COMPUTE_USER_DATA registers directly into s[0:N]
             if user_data:
