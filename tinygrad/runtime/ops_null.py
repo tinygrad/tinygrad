@@ -19,6 +19,7 @@ class NullProgram:
                wait=False, raw_kernargs=None):
     with cpu_profile(self.name, self.device): return 1e-3
 
+# fake buffer for null returned by alloc, shouldn't be here once kernargs is gone
 class NullBuffer:
   def __init__(self, size): self.va_addr, self.size = 0x1000000, size
 
