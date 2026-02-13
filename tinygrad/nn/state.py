@@ -201,7 +201,7 @@ def tar_extract(t: Tensor) -> dict[str, Tensor]:
 
 # torch support!
 
-# TODO: this should use tar_extract and zip_extract
+# TODO: this should use tar_extract and zip_extract -> COMPLETED
 @accept_filename
 def torch_load(t:Tensor) -> dict[str, Tensor]:
   """
@@ -265,12 +265,11 @@ def torch_load(t:Tensor) -> dict[str, Tensor]:
   def passthrough_reset(v: bool): return fobj.seek(0, 0) or v
   # Serial format: https://docs.pytorch.org/docs/stable/notes/serialization.html 
   if passthrough_reset(zipfile.is_zipfile(fobj)): # NOTE: passthrough_reset required to support python < 3.14
-    myzip = zipfile.ZipFile(fobj, 'r')
-    base_name = myzip.filelist[0].filename.split('/', 1)[0]
     files = zip_extract(t)
+    base_name = next(iter(files)).split('/', 1)[0]
+    # keyed by persistent_id in pickle file
     storage_source = {fn.split("/")[-1]: data for fn, data in files.items() if fn.startswith(f"{base_name}/data/") and not fn.endswith(".pkl")}
-    with myzip.open(f'{base_name}/data.pkl') as myfile:
-      return TorchPickle(myfile).load()
+    return TorchPickle(io.BufferedReader(TensorIO(files[f"{base_name}/data.pkl"]), 1_000_000)).load()
   elif passthrough_reset(tarfile.is_tarfile(fobj)): # NOTE: passthrough_reset required to support python < 3.11
     files = tar_extract(t)
     f = io.BufferedReader(TensorIO(files["storages"]), 1_000_000)
@@ -291,11 +290,9 @@ def torch_load(t:Tensor) -> dict[str, Tensor]:
   else:
     pkl = TorchPickle(fobj)
     _, _, _, rwd, _, ids, base_offset = pkl.load(), pkl.load(), pkl.load(), fobj.tell(), pkl.load(), pkl.load(), fobj.tell()
-    # fobj.seek(rwd)
-    # TorchPickle(fobj).load()  # first pass: populate lens via _rebuild_tensor_v2 (returns None)
-    fobj.seek(base_offset)
+    # slice source tensor t
     for i in ids:
-      storage_source[i] = storage_source[str(i)] = t[base_offset + 8:base_offset + 8 + lens[i]]
+      storage_source[str(i)] = t[base_offset + 8:base_offset + 8 + lens[i]]
       base_offset += 8 + lens[i]
     fobj.seek(rwd)
     return TorchPickle(fobj).load()
