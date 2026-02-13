@@ -56,7 +56,7 @@ jobs:
     - name: Run pytest -nauto
       run: |
         source /tmp/tinygrad_pytest_ci/bin/activate
-        pytest -nauto --ignore test/amd/ --durations=20
+        pytest -nauto --durations=20
 
   testmacbenchmark:
     name: Mac Benchmark

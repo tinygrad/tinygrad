@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Roundtrip tests: generate tinygrad kernels, decode instructions, re-encode, verify match."""
-import unittest, io, sys, re, subprocess, os
+import unittest, io, sys, re
 from tinygrad import Device
 from tinygrad.renderer.amd import detect_format
-from test.amd.helpers import get_llvm_mc, get_llvm_objdump, get_target, get_mattr
+from test.amd.helpers import llvm_assemble, llvm_disasm, get_target, get_mattr
 from test.amd.disasm import disasm
 
 def disassemble_lib(lib: bytes, compiler) -> list[tuple[str, bytes]]:
@@ -31,45 +31,18 @@ def disassemble_lib(lib: bytes, compiler) -> list[tuple[str, bytes]]:
 
 def compile_asm(instr: str, arch: str = 'rdna3') -> bytes:
   """Compile a single instruction using LLVM."""
-  return compile_asm_batch([instr], arch)[0]
+  return llvm_assemble([instr], get_target(arch), get_mattr(arch))[0]
 
 def compile_asm_batch(instrs: list[str], arch: str = 'rdna3') -> list[bytes]:
-  """Compile multiple instructions with a single llvm-mc call."""
-  if not instrs: return []
-  result = subprocess.run([get_llvm_mc(), '-triple=amdgcn', f'-mcpu={get_target(arch)}', f'-mattr={get_mattr(arch)}', '-show-encoding'],
-                          input=".text\n" + "\n".join(instrs) + "\n", capture_output=True, text=True)
-  if result.returncode != 0: raise RuntimeError(f"llvm-mc batch failed: {result.stderr.strip()}")
-  encodings = []
-  for line in result.stdout.split('\n'):
-    if 'encoding:' in line:
-      enc = line.split('encoding:')[1].strip()
-      if enc.startswith('[') and enc.endswith(']'):
-        encodings.append(bytes.fromhex(enc[1:-1].replace('0x', '').replace(',', '').replace(' ', '')))
-  if len(encodings) != len(instrs): raise RuntimeError(f"expected {len(instrs)} encodings, got {len(encodings)}")
-  return encodings
+  """Compile multiple instructions with a single LLVM emission."""
+  return llvm_assemble(instrs, get_target(arch), get_mattr(arch))
 
 def compile_and_disasm_batch(instrs: list[str], arch: str = 'rdna3') -> list[str]:
   """Compile instructions with LLVM and get LLVM's disassembly."""
-  import tempfile
   if not instrs: return []
   mcpu, mattr = get_target(arch), get_mattr(arch)
-  src = ".text\n.globl test\n.p2align 8\n.type test,@function\ntest:\n" + "\n".join(f"  {instr}" for instr in instrs) + "\n"
-  with tempfile.NamedTemporaryFile(suffix='.o', delete=False) as f:
-    obj_path = f.name
-  try:
-    result = subprocess.run([get_llvm_mc(), '-triple=amdgcn', f'-mcpu={mcpu}', f'-mattr={mattr}', '-filetype=obj', '-o', obj_path],
-                            input=src, capture_output=True, text=True)
-    if result.returncode != 0: raise RuntimeError(f"llvm-mc failed: {result.stderr.strip()}")
-    result = subprocess.run([get_llvm_objdump(), '-d', f'--mcpu={mcpu}', obj_path], capture_output=True, text=True)
-    if result.returncode != 0: raise RuntimeError(f"llvm-objdump failed: {result.stderr.strip()}")
-    results: list[str] = []
-    for line in result.stdout.splitlines():
-      if '//' not in line: continue
-      instr = line.split('//')[0].strip()
-      if instr: results.append(instr)
-    return results[:len(instrs)]
-  finally:
-    os.unlink(obj_path)
+  code = b''.join(llvm_assemble(instrs, mcpu, mattr))
+  return llvm_disasm(code, mcpu, mattr)[:len(instrs)]
 
 @unittest.skipUnless(Device.DEFAULT == "AMD", "requires AMD device")
 class TestTinygradKernelRoundtrip(unittest.TestCase):
@@ -174,12 +147,12 @@ class TestTinygradKernelRoundtrip(unittest.TestCase):
       if our_disasm is None:
         disasm_skipped += 1
       elif idx in disasm_llvm_map:
-        llvm_disasm = disasm_llvm_map[idx]
-        if our_disasm == llvm_disasm:
+        llvm_disasm_str = disasm_llvm_map[idx]
+        if our_disasm == llvm_disasm_str:
           disasm_passed += 1
         else:
           disasm_failed += 1
-          disasm_failures.append(f"K{ki}@{offset}: ours='{our_disasm}' llvm='{llvm_disasm}'")
+          disasm_failures.append(f"K{ki}@{offset}: ours='{our_disasm}' llvm='{llvm_disasm_str}'")
       else:
         disasm_skipped += 1
 
