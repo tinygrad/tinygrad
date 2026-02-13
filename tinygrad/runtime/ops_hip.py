@@ -1,32 +1,13 @@
 import ctypes, functools
 from tinygrad.helpers import mv_address, getenv, suppress_finalizing
 from tinygrad.device import Compiled, LRUAllocator, BufferSpec, CompilerSet
-from tinygrad.runtime.autogen import hip, libc
+from tinygrad.runtime.autogen import hip
 from tinygrad.renderer.cstyle import HIPRenderer
 from tinygrad.runtime.support.c import init_c_var, init_c_struct_t
 if getenv("IOCTL"): import extra.hip_gpu_driver.hip_ioctl  # noqa: F401 # pylint: disable=unused-import
 
 def check(status):
   if status != 0: raise RuntimeError(f"HIP Error {status}, {ctypes.string_at(hip.hipGetErrorString(status)).decode()}")
-
-def get_elf_func_name(lib:bytes) -> str|None:
-  """Extract function name from ELF .dynsym section. Returns None if not found."""
-  if len(lib) < ctypes.sizeof(libc.Elf64_Ehdr) or lib[:4] != b'\x7fELF': return None
-  header = libc.Elf64_Ehdr.from_buffer_copy(lib)
-  section_headers = (libc.Elf64_Shdr * header.e_shnum).from_buffer_copy(lib[header.e_shoff:])
-  # find .dynsym and .dynstr sections
-  dynsym_sh, dynstr_sh = None, None
-  for sh in section_headers:
-    if sh.sh_type == libc.SHT_DYNSYM: dynsym_sh = sh
-    elif sh.sh_type == libc.SHT_STRTAB and dynstr_sh is None and sh.sh_flags & libc.SHF_ALLOC: dynstr_sh = sh
-  if dynsym_sh is None or dynstr_sh is None: return None
-  # parse dynsym entries to find FUNC symbol
-  dynstr = lib[dynstr_sh.sh_offset:dynstr_sh.sh_offset+dynstr_sh.sh_size]
-  syms = (libc.Elf64_Sym * (dynsym_sh.sh_size // dynsym_sh.sh_entsize)).from_buffer_copy(lib[dynsym_sh.sh_offset:])
-  for sym in syms:
-    if (sym.st_info & 0xf) == libc.STT_FUNC and sym.st_name < len(dynstr):
-      return dynstr[sym.st_name:dynstr.find(b'\x00', sym.st_name)].decode('utf-8')
-  return None
 
 class HIPDevice(Compiled):
   def __init__(self, device:str=""):
@@ -45,35 +26,26 @@ class HIPProgram:
     self.dev, self.name, self.lib = dev, name, lib
     check(hip.hipSetDevice(self.dev.device_id))
     self.module = init_c_var(hip.hipModule_t, lambda x: check(hip.hipModuleLoadData(ctypes.byref(x), lib)))
-    # for prebuilt .co files, extract the real function name from the ELF
-    func_name = get_elf_func_name(lib) or name
-    self.prg = init_c_var(hip.hipFunction_t, lambda x: check(hip.hipModuleGetFunction(ctypes.byref(x), self.module, func_name.encode("utf-8"))))
+    self.prg = init_c_var(hip.hipFunction_t, lambda x: check(hip.hipModuleGetFunction(ctypes.byref(x), self.module, name.encode("utf-8"))))
 
   @suppress_finalizing
   def __del__(self):
     if hasattr(self, 'module'): check(hip.hipModuleUnload(self.module))
 
-  def __call__(self, *args, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), vals:tuple[int, ...]=(),
-               wait=False, raw_kernargs:bytes|None=None):
+  def __call__(self, *args, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), vals:tuple[int, ...]=(), wait=False):
     check(hip.hipSetDevice(self.dev.device_id))
-    if raw_kernargs is not None:
-      # for prebuilt kernels with custom argument layouts
-      c_args = (ctypes.c_char * len(raw_kernargs)).from_buffer_copy(raw_kernargs)
-      vargs = (ctypes.c_void_p * 5)(1, ctypes.cast(ctypes.byref(c_args), ctypes.c_void_p), 2,
-                                    ctypes.cast(ctypes.pointer(ctypes.c_size_t(len(raw_kernargs))), ctypes.c_void_p), 3)
-    else:
-      if not hasattr(self, "vargs"):
-        fields = [(f'f{i}', hip.hipDeviceptr_t, i*8) for i in range(len(args))] + [(f'v{i}', ctypes.c_int, len(args)*8+i*4) for i in range(len(vals))]
-        self.c_args = init_c_struct_t(len(args)*8+len(vals)*4, tuple(fields))(*args, *vals)
-        self.vargs = (ctypes.c_void_p * 5)(1, ctypes.cast(ctypes.byref(self.c_args), ctypes.c_void_p), 2,
-                                           ctypes.cast(ctypes.pointer(ctypes.c_size_t(ctypes.sizeof(self.c_args))), ctypes.c_void_p), 3)
-      for i in range(len(args)): self.c_args.__setattr__(f'f{i}', args[i])
-      for i in range(len(vals)): self.c_args.__setattr__(f'v{i}', vals[i])
-      vargs = self.vargs
+    if not hasattr(self, "vargs"):
+      fields = [(f'f{i}', hip.hipDeviceptr_t, i*8) for i in range(len(args))] + [(f'v{i}', ctypes.c_int, len(args)*8+i*4) for i in range(len(vals))]
+      self.c_args = init_c_struct_t(len(args)*8+len(vals)*4, tuple(fields))(*args, *vals)
+      self.vargs = (ctypes.c_void_p * 5)(1, ctypes.cast(ctypes.byref(self.c_args), ctypes.c_void_p), 2,
+                                         ctypes.cast(ctypes.pointer(ctypes.c_size_t(ctypes.sizeof(self.c_args))), ctypes.c_void_p), 3)
+
+    for i in range(len(args)): self.c_args.__setattr__(f'f{i}', args[i])
+    for i in range(len(vals)): self.c_args.__setattr__(f'v{i}', vals[i])
 
     if wait: check(hip.hipEventRecord(self.dev.time_event_st, None))
 
-    check(hip.hipModuleLaunchKernel(self.prg, *global_size, *local_size, 0, None, None, vargs))
+    check(hip.hipModuleLaunchKernel(self.prg, *global_size, *local_size, 0, None, None, self.vargs))
 
     if wait:
       check(hip.hipEventRecord(self.dev.time_event_en, None))

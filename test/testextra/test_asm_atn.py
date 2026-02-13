@@ -1,7 +1,6 @@
 import unittest
 import numpy as np
 from tinygrad import Tensor, Device, dtypes, Context
-from tinygrad.helpers import ASM_ATN
 from extra.gemm.asm.cdna.atn import asm_sdpa, can_use_asm_atn
 from test.helpers import needs_second_gpu
 
@@ -11,10 +10,6 @@ class TestAsmAtn(unittest.TestCase):
   def setUp(self):
     if not is_cdna4():
       self.skipTest("ASM ATN only works on CDNA4 (MI350X)")
-    self.prev_atn = ASM_ATN.value
-    ASM_ATN.value = 1
-  def tearDown(self):
-    ASM_ATN.value = self.prev_atn
 
   def test_sdpa_forward(self):
     B, H, S, D = 8, 8, 8192, 128

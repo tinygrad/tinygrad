@@ -8,10 +8,6 @@ from tinygrad.renderer import Estimates
 def float_to_u32(f: float) -> int:
   return struct.unpack('I', struct.pack('f', f))[0]
 
-def buf_addr(buf) -> int:
-  """Get buffer address from either HCQBuffer (with .va_addr) or plain ctypes pointer."""
-  return buf.va_addr if hasattr(buf, 'va_addr') else ctypes.cast(buf, ctypes.c_void_p).value
-
 CO_DIR = pathlib.Path(__file__).parent / "atn" / "co"
 
 # ============================================================================
@@ -151,7 +147,7 @@ assert ctypes.sizeof(BwdDqConvertArgs) == 208
 def build_fwd_kernargs(B, H, S, D, bufs, var_vals) -> bytes:
   """Build raw kernargs for the forward kernel from HCQ buffers."""
   args = FwdArgs()
-  args.R, args.Q, args.K, args.V, args.LSE = buf_addr(bufs[0]), buf_addr(bufs[1]), buf_addr(bufs[2]), buf_addr(bufs[3]), buf_addr(bufs[4])
+  args.R, args.Q, args.K, args.V, args.LSE = bufs[0].va_addr, bufs[1].va_addr, bufs[2].va_addr, bufs[3].va_addr, bufs[4].va_addr
   args.ptr_qseq, args.ptr_kseq, args.ptr_qseq_padding, args.ptr_kseq_padding = 0, 0, 0, 0
   args.scalar, args.seq_len, args.kv_seq_len = float_to_u32(1.0 / math.sqrt(D)), S, S
   args.qk_head_dim, args.v_head_dim, args.q_head_num, args.gqa = D, D, H, 1
@@ -187,7 +183,7 @@ def build_odo_kernargs(B, H, S, D, bufs, var_vals) -> bytes:
   """Build kernargs for the ODO (rowsum(O * dO)) backward kernel."""
   args = BwdOdoArgs()
   elem_size = 2
-  args.D, args.O, args.dO = buf_addr(bufs[0]), buf_addr(bufs[1]), buf_addr(bufs[2])
+  args.D, args.O, args.dO = bufs[0].va_addr, bufs[1].va_addr, bufs[2].va_addr
   args.Hs_odo, args.BAs_odo, args.Seqs_odo = D * elem_size, S * H * D * elem_size, H * D * elem_size
   args.Hs_d, args.BAs_d, args.Seqs_d = S * 4, H * S * 4, 4
   args.seqlen_q, args.head_dim = S, D
@@ -213,9 +209,9 @@ def build_main_kernargs(B, H, S, D, bufs, var_vals) -> bytes:
   """Build kernargs for the main backward kernel (computes dQ_acc, dK, dV)."""
   args = BwdMainArgs()
   elem_size = 2
-  args.dQ, args.dK, args.dV = buf_addr(bufs[0]), buf_addr(bufs[1]), buf_addr(bufs[2])
-  args.Q, args.K, args.V = buf_addr(bufs[3]), buf_addr(bufs[4]), buf_addr(bufs[5])
-  args.dO, args.Lse, args.D = buf_addr(bufs[6]), buf_addr(bufs[7]), buf_addr(bufs[8])
+  args.dQ, args.dK, args.dV = bufs[0].va_addr, bufs[1].va_addr, bufs[2].va_addr
+  args.Q, args.K, args.V = bufs[3].va_addr, bufs[4].va_addr, bufs[5].va_addr
+  args.dO, args.Lse, args.D = bufs[6].va_addr, bufs[7].va_addr, bufs[8].va_addr
   args.scalar, args.log2e = float_to_u32(1.0 / math.sqrt(D)), float_to_u32(math.log2(math.e))
   args.seqlen_q, args.seqlen_k, args.head_dim_q, args.head_dim_k = S, S, D, D
   args.nhead_q, args.ratio, args.Ts = H, 1, S * D // 2
@@ -252,7 +248,7 @@ def build_dq_convert_kernargs(B, H, S, D, bufs, var_vals) -> bytes:
   """Build kernargs for the dQ convert kernel (fp32 -> bf16)."""
   args = BwdDqConvertArgs()
   elem_size = 2
-  args.dQ, args.dQ_acc = buf_addr(bufs[0]), buf_addr(bufs[1])
+  args.dQ, args.dQ_acc = bufs[0].va_addr, bufs[1].va_addr
   args.Seqs_dQ_acc, args.Hs_dQ_acc, args.BAs_dQ_acc = D * 4, S * D * 4, H * S * D * 4
   args.Seqs_dQ, args.Hs_dQ, args.BAs_dQ = H * D * elem_size, D * elem_size, S * H * D * elem_size
   args.seqlen_q, args.head_dim = S, D
