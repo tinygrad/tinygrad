@@ -162,6 +162,8 @@ class TestSetitem(unittest.TestCase):
     @TinyJit
     def f(t:Tensor, a:Tensor):
       t[2:4, 3:5] = a
+      # NOTE: without return t or an explicit realize, it's lazy and not captured
+      return t
 
     for i in range(1, 6):
       t = Tensor.zeros(6, 6).contiguous().realize()

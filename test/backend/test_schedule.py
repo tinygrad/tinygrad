@@ -1018,7 +1018,8 @@ class TestSchedule(unittest.TestCase):
     a = Tensor.arange(16).contiguous().realize()
     GlobalCounters.reset()
     a[4] = 3
-    # TODO: update when this becomes lazy
+    self.assertEqual(GlobalCounters.kernel_count, 0)
+    a.realize()
     self.assertEqual(GlobalCounters.kernel_count, 1)
     self.assertListEqual(a.tolist(), [0, 1, 2, 3, 3, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15])
 
