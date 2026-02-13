@@ -1,4 +1,4 @@
-import glob, importlib, os, pathlib, shutil, subprocess, tarfile
+import glob, importlib, os, pathlib, shutil, subprocess, tarfile, tempfile
 from tinygrad.helpers import fetch, flatten, system, getenv
 
 root = (here:=pathlib.Path(__file__).parent).parents[2]
@@ -6,7 +6,7 @@ nv_src = {"nv_570": "https://github.com/NVIDIA/open-gpu-kernel-modules/archive/8
           "nv_580": "https://github.com/NVIDIA/open-gpu-kernel-modules/archive/2af9f1f0f7de4988432d4ae875b5858ffdb09cc2.tar.gz"}
 ffmpeg_src = "https://ffmpeg.org/releases/ffmpeg-8.0.1.tar.gz"
 rocr_src = "https://github.com/ROCm/rocm-systems/archive/refs/tags/rocm-7.1.1.tar.gz"
-linux_src = "https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.19.tar.xz"
+linux_headers_deb = "https://snapshot.debian.org/archive/debian/20260207T145350Z/pool/main/l/linux/linux-libc-dev_6.18.9-1_all.deb"
 liburing_src = "https://raw.githubusercontent.com/axboe/liburing/refs/tags/liburing-2.14/src/include/liburing.h"
 macossdk = "/var/db/xcode_select_link/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk"
 
@@ -21,8 +21,7 @@ def load(name, dll, files, **kwargs):
   if not (f:=(root/(path:=kwargs.pop("path", __name__)).replace('.','/')/f"{name}.py")).exists() or getenv('REGEN'):
     files, kwargs['args'] = files() if callable(files) else files, args() if callable(args:=kwargs.get('args', [])) else args
     if (srcs:=kwargs.pop('srcs', None)):
-      shutil.rmtree(srcpath:=f"/tmp/tinyautogen-src-{name}/", ignore_errors=True)
-      os.makedirs(srcpath)
+      srcpath = (td:=tempfile.TemporaryDirectory(f"autogen-src-{name.replace('/','-')}")).name + "/"
       for src in (srcs if isinstance(srcs, list) else [srcs]):
         if 'tar' in src:
           # dangerous for arbitrary urls!
@@ -36,7 +35,7 @@ def load(name, dll, files, **kwargs):
     files = flatten(sorted(glob.glob(p, recursive=True)) if isinstance(p, str) and '*' in p else [p] for p in files)
     kwargs['epilog'] = (epi(srcpath) if srcs else epi()) if callable(epi:=kwargs.get('epilog', [])) else epi
     f.write_text(importlib.import_module("tinygrad.runtime.support.autogen").gen(name, dll, files, **kwargs))
-    if srcs: shutil.rmtree(srcpath)
+    if srcs: td.cleanup()
   return importlib.import_module(f"{path}.{name.replace('/', '.')}")
 
 def __getattr__(nm):
@@ -85,17 +84,17 @@ def __getattr__(nm):
     })
     # this defines all syscall numbers. should probably unify linux autogen?
     case "io_uring":
-      return load("io_uring", None, ["{}/liburing.h", "{}/linux-6.19/gen/include/linux/io_uring.h", "{}/linux-6.19/gen/include/asm-generic/unistd.h"],
-                  args=["-I{}/linux-6.19/gen"], srcs=[linux_src, liburing_src], rules=[('__NR', 'NR')],
-                  preprocess=lambda path: system("make headers_install INSTALL_HDR_PATH=./gen", cwd=path + 'linux-6.19'))
+      return load("io_uring", None, ["{}/liburing.h", "{}/usr/include/linux/io_uring.h", "{}/usr/include/asm-generic/unistd.h"],
+                  args=["-I{}/usr/include"], srcs=[linux_headers_deb, liburing_src], rules=[('__NR', 'NR')],
+                  preprocess=lambda path: subprocess.run(f"ar x {linux_headers_deb.split('/')[-1]} && tar xf data.tar.xz", cwd=path, shell=True, check=True))
     case "ib": return load("ib", "'ibverbs'", ["/usr/include/infiniband/verbs.h", "/usr/include/infiniband/verbs_api.h",
                                                "/usr/include/infiniband/ib_user_ioctl_verbs.h","/usr/include/rdma/ib_user_verbs.h"], errno=True)
     case "llvm": return load("llvm", llvm_lib, lambda: [system("llvm-config-20 --includedir")+"/llvm-c/**/*.h"],
                              args=lambda: system("llvm-config-20 --cflags").split(), recsym=True, prolog=["from tinygrad.helpers import WIN, OSX"])
-    case "pci": return load("pci", None, ["{}/gen/include/linux/pci_regs.h"], args=["-I{}/gen/include"], srcs=linux_src,
-                             preprocess=lambda path: system("make headers_install INSTALL_HDR_PATH=./gen", cwd=path))
-    case "vfio": return load("vfio", None, ["{}/gen/include/linux/vfio.h"], args=["-I{}/gen/include"], srcs=linux_src,
-                             preprocess=lambda path: system("make headers_install INSTALL_HDR_PATH=./gen", cwd=path))
+    case "pci": return load("pci", None, ["{}/usr/include/linux/pci_regs.h"], srcs=linux_headers_deb,
+                             preprocess=lambda path: subprocess.run(f"ar x {linux_headers_deb.split('/')[-1]} && tar xf data.tar.xz", cwd=path, shell=True, check=True))
+    case "vfio": return load("vfio", None, ["{}/usr/include/linux/vfio.h"], args=["-I{}/usr/include"], srcs=linux_headers_deb,
+                             preprocess=lambda path: subprocess.run(f"ar x {linux_headers_deb.split('/')[-1]} && tar xf data.tar.xz", cwd=path, shell=True, check=True))
     # could add rule: WGPU_COMMA -> ','
     case "webgpu": return load("webgpu", webgpu_lib, [root/"extra/webgpu/webgpu.h"],
                                prolog=["from tinygrad.helpers import WIN, OSX", "import sysconfig, os"])
