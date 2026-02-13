@@ -31,6 +31,7 @@ def create_elf(prg:bytes, kd:dict, arch:str) -> bytes:
   vgpr_granule = max(0, (kd["next_free_vgpr"] + 7) // 8 - 1)
   # CDNA: add 6 for VCC(2) + FLAT_SCRATCH(2) + XNACK_MASK(2)
   # next_free_sgpr is unused in RDNA
+  # NOTE: CU mode is the default, it seems faster and simpler
   sgpr_granule = max(0, ceildiv(kd["next_free_sgpr"] + 6, 8) - 1) if is_cdna else 0
   desc.compute_pgm_rsrc1 = (vgpr_granule << amdgpu_kd.COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT_SHIFT |
                             sgpr_granule << amdgpu_kd.COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT_SHIFT |
@@ -41,7 +42,7 @@ def create_elf(prg:bytes, kd:dict, arch:str) -> bytes:
                             kd.get("dx10_clamp", 0 if is_rdna4 else 1) << amdgpu_kd.COMPUTE_PGM_RSRC1_GFX6_GFX11_ENABLE_DX10_CLAMP_SHIFT |
                             kd.get("ieee_mode", 0 if is_rdna4 else 1) << amdgpu_kd.COMPUTE_PGM_RSRC1_GFX6_GFX11_ENABLE_IEEE_MODE_SHIFT |
                             kd.get("fp16_overflow", 0) << amdgpu_kd.COMPUTE_PGM_RSRC1_GFX9_PLUS_FP16_OVFL_SHIFT |
-                            (0 if is_cdna else kd.get("workgroup_processor_mode", 1)) << amdgpu_kd.COMPUTE_PGM_RSRC1_GFX10_PLUS_WGP_MODE_SHIFT |
+                            (0 if is_cdna else kd.get("workgroup_processor_mode", 0)) << amdgpu_kd.COMPUTE_PGM_RSRC1_GFX10_PLUS_WGP_MODE_SHIFT |
                             (0 if is_cdna else kd.get("memory_ordered", 1)) << amdgpu_kd.COMPUTE_PGM_RSRC1_GFX10_PLUS_MEM_ORDERED_SHIFT |
                             (0 if is_cdna else kd.get("forward_progress", 0)) << amdgpu_kd.COMPUTE_PGM_RSRC1_GFX10_PLUS_FWD_PROGRESS_SHIFT)
   # rsrc2
