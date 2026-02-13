@@ -3,7 +3,7 @@ from collections import OrderedDict
 from typing import Any, Callable, BinaryIO, Iterable, cast
 from tinygrad.tensor import Tensor
 from tinygrad.dtype import dtypes
-from tinygrad.helpers import prod, argsort, DEBUG, Timing, CI, unwrap, GlobalCounters, tqdm, round_up, T, strides_for_shape
+from tinygrad.helpers import prod, argsort, DEBUG, Timing, CI, GlobalCounters, tqdm, round_up, T, strides_for_shape
 
 class TensorIO(io.RawIOBase, BinaryIO):
   def __init__(self, t: Tensor):
@@ -263,7 +263,7 @@ def torch_load(t:Tensor) -> dict[str, Tensor]:
 
   fobj = io.BufferedReader(TensorIO(t))
   def passthrough_reset(v: bool): return fobj.seek(0, 0) or v
-  # Serial format: https://docs.pytorch.org/docs/stable/notes/serialization.html 
+  # Serial format: https://docs.pytorch.org/docs/stable/notes/serialization.html
   if passthrough_reset(zipfile.is_zipfile(fobj)): # NOTE: passthrough_reset required to support python < 3.14
     files = zip_extract(t)
     base_name = next(iter(files)).split('/', 1)[0]
@@ -286,7 +286,8 @@ def torch_load(t:Tensor) -> dict[str, Tensor]:
       size, stride = struct.unpack(f'<{ndim}q', f.read(8 * ndim)), struct.unpack(f'<{ndim}q', f.read(8 * ndim))
       storage_offset = struct.unpack('<q', f.read(8))[0]
       deserialized_objects[str(key)] = _rebuild_tensor_v2((None, storage_type, storage_id, None, -1), storage_offset, size, stride)
-    return {k: v.tensor if isinstance(v, Parameter) else v for k, v in TorchPickle(io.BufferedReader(TensorIO(files["pickle"]), 1_000_000)).load().items()}
+    pkl_data = TorchPickle(io.BufferedReader(TensorIO(files["pickle"]), 1_000_000)).load()
+    return {k: v.tensor if isinstance(v, Parameter) else v for k, v in pkl_data.items()}
   else:
     pkl = TorchPickle(fobj)
     _, _, _, rwd, _, ids, base_offset = pkl.load(), pkl.load(), pkl.load(), fobj.tell(), pkl.load(), pkl.load(), fobj.tell()
