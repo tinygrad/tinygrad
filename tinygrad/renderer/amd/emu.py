@@ -7,7 +7,7 @@
 #   arg=4: scratch - per-lane scratch memory
 from __future__ import annotations
 import ctypes, functools, re, platform, subprocess, tempfile
-from typing import Any, Callable
+from typing import Callable
 
 # Set/restore DAZ+FTZ (denormals-are-zero + flush-to-zero) to match RDNA3 default float mode
 # x86: MXCSR bits DAZ(6)+FTZ(15), ARM64: FPCR bit FZ(24)
@@ -1183,17 +1183,15 @@ def _get_runner(inst_bytes: bytes, arch: str = "rdna3"):
   _canonical_runner_cache.append((base, mask, size, runner))
   return runner
 
-def _decode_at(pc: int, arch: str) -> tuple[Callable, list[int]]:
-  """Decode and compile instruction at absolute address pc. Returns (fxn, globals)."""
+def _decode_at(pc: int, arch: str):
+  """Decode and compile instruction at absolute address pc. Returns CompiledRunner."""
   inst_bytes = bytes((ctypes.c_char * 16).from_address(pc).raw)
   inst = decode_inst(inst_bytes, arch)
-  try:
-    runner = _get_runner(bytes(inst_bytes[:inst.size() + 4]), arch)
+  try: return _get_runner(bytes(inst_bytes[:inst.size() + 4]), arch)
   except Exception as e:
     try: inst_str = repr(inst)
     except Exception: inst_str = f"<{type(inst).__name__}>"
     raise RuntimeError(f"[emu] Failed to compile {inst_str}: {type(e).__name__}: {e}") from e
-  return runner._prg.fxn, runner.p.globals
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # WAVE STATE
@@ -1242,7 +1240,7 @@ class WaveState:
 def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, lz: int, args_ptr: int, rsrc2: int = 0x19c,
             scratch_size: int = 0, arch: str = "rdna3", user_data: list[int]|None = None) -> int:
   """Execute AMD assembly program. scratch_size is private_segment_fixed_size from kernel descriptor (per-lane)."""
-  program: dict[int, tuple[Callable, list[int]]] = {}  # lazily populated: pc -> (fxn, globals)
+  program: dict[int, tuple[Callable, list[int]]] = {}  # lazily populated: pc -> (fxn, globals) extracted from runner
   lds_size = ((rsrc2 & hsa.AMD_COMPUTE_PGM_RSRC_TWO_GRANULATED_LDS_SIZE) >> hsa.AMD_COMPUTE_PGM_RSRC_TWO_GRANULATED_LDS_SIZE_SHIFT) * 512
   total_threads = lx * ly * lz
 
@@ -1295,7 +1293,8 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
               if (pc := st.pc) == 0xFFFFFFFFFFFFFFFF: break
               if pc not in program:
                 prev_len = len(_canonical_runner_cache)
-                program[pc] = _decode_at(pc, arch)
+                runner = _decode_at(pc, arch)
+                program[pc] = (runner._prg.fxn, runner.p.globals)
                 if DEBUG >= 3:
                   inst = decode_inst(bytes((ctypes.c_char * 16).from_address(pc).raw), arch)
                   msg = f"[emu] PC={pc - lib}: {inst!r}"

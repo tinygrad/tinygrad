@@ -1,7 +1,7 @@
 import unittest, ctypes
 from tinygrad.runtime.autogen.amd.rdna4 import ins as ir4
 from tinygrad.renderer.amd.dsl import v, s
-from tinygrad.renderer.amd.emu import WaveState, decode_program
+from tinygrad.renderer.amd.emu import WaveState, _decode_at
 from tinygrad.device import Buffer, BufferSpec
 from tinygrad.dtype import dtypes
 
@@ -12,12 +12,10 @@ class TestRDNA4Emu(unittest.TestCase):
     if not any(isinstance(i, ir4.SOPP) and i.op == ir4.SOPPOp.S_ENDPGM for i in insts):
       insts = list(insts) + [ir4.SOPP(ir4.SOPPOp.S_ENDPGM, simm=0)]
 
-    # Assemble and decode
+    # Assemble into ctypes buffer (must stay alive for _decode_at to read from memory)
     code = b''.join(i.to_bytes() for i in insts)
     code_buf = (ctypes.c_uint8 * len(code)).from_buffer_copy(code)
     code_addr = ctypes.addressof(code_buf)
-    program_raw = decode_program(code, "rdna4")
-    program = {code_addr + offset: val for offset, val in program_raw.items()}
 
     # Setup wave state
     st = WaveState(n_lanes=1)
@@ -28,12 +26,16 @@ class TestRDNA4Emu(unittest.TestCase):
     # Setup vmem buffer with external_ptr=0 (maps to address 0, allows any pointer access)
     vmem_buf = Buffer('CPU', 1 << 40, dtypes.uint32, options=BufferSpec(external_ptr=0)).ensure_allocated()
 
-    # Execute
+    # Execute with lazy decoding (same pattern as run_asm)
+    program: dict[int, tuple] = {}
     c_bufs = [ctypes.c_uint64(st.sgpr_buf._buf.va_addr), ctypes.c_uint64(st.vgpr_buf._buf.va_addr),
               ctypes.c_uint64(vmem_buf._buf.va_addr), ctypes.c_uint64(0), ctypes.c_uint64(0)]
     for _ in range(100):
-      if (pc := st.pc) == 0xFFFFFFFFFFFFFFFF or pc not in program: break
-      _, fxn, globals_list, _ = program[pc]
+      if (pc := st.pc) == 0xFFFFFFFFFFFFFFFF: break
+      if pc not in program:
+        runner = _decode_at(pc, "rdna4")
+        program[pc] = (runner._prg.fxn, runner.p.globals)
+      fxn, globals_list = program[pc]
       fxn(*[c_bufs[g] for g in globals_list])
     return st
 
