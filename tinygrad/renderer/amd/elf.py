@@ -108,13 +108,19 @@ def do_assemble_amd(ctx, prg:UOp, lin:UOp) -> UOp:
       if not isinstance(val, Reg): continue
       if 256 <= val.offset < 512: max_vgpr = max(max_vgpr, (val.offset - 256) + val.sz)
       elif val.offset < 106: max_sgpr = max(max_sgpr, val.offset + val.sz)
-  sink = prg.src[0]
-  n_bufs = sum(1 for u in sink.toposort() if u.op is Ops.PARAM)
-  n_vars = sum(1 for u in sink.toposort() if u.op is Ops.DEFINE_VAR)
+  # scan sink for metadata
+  sink, n_bufs, n_vars, lds_size, gids = prg.src[0], 0, 0, 0, set()
+  for u in sink.toposort():
+    if u.op is Ops.PARAM: n_bufs += 1
+    elif u.op is Ops.DEFINE_VAR: n_vars += 1
+    elif u.op is Ops.DEFINE_LOCAL: lds_size += u.ptrdtype.size * u.ptrdtype.base.itemsize
+    elif u.op is Ops.SPECIAL and u.arg.startswith("gidx"): gids.add(int(u.arg[-1]))
   src = "\n".join(str(inst) for inst in insts)
   code_bytes = b"".join(inst.to_bytes() for inst in insts)
   arch = next(v for k, v in _arch_map.items() if ctx.arch.startswith(k))
-  kd = {"kernarg_size":n_bufs*8+n_vars*4, "user_sgpr_kernarg_segment_ptr":1, "user_sgpr_count":2, "wavefront_size32":1, "forward_progress":1,
+  kd = {"kernarg_size":n_bufs*8+n_vars*4, "group_segment_fixed_size":lds_size,
+        "user_sgpr_kernarg_segment_ptr":1, "user_sgpr_count":2, "wavefront_size32":1, "forward_progress":1,
+        "system_sgpr_workgroup_id_x":int(0 in gids), "system_sgpr_workgroup_id_y":int(1 in gids), "system_sgpr_workgroup_id_z":int(2 in gids),
         "next_free_vgpr":round_up(max_vgpr, 8), "next_free_sgpr":round_up(max_sgpr, 8)}
   binary = create_elf(code_bytes, kd, arch)
   return prg.replace(src=prg.src[:3]+(UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=binary)))
