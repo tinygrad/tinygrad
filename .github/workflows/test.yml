@@ -970,7 +970,7 @@ jobs:
           python-version: '3.12'
       - name: Set env
         shell: bash
-        run: printf "NULL=1\nNULL_ALLOW_COPYOUT=1\n${{ matrix.backend == 'ir3' && 'NULL_IR3=1' || matrix.backend == 'nak' && 'NULL_NAK=1' }}" >> $GITHUB_ENV
+        run: printf "NULL=1\nNULL_ALLOW_COPYOUT=1\nNULL_CC=${{ matrix.backend}}\n${{ matrix.backend == 'ir3' && 'CROSSARCH=630' || matrix.backend == 'nak' && 'CROSSARCH=sm_120' }}" >> $GITHUB_ENV
       - name: Run test_ops
         shell: bash
         run: |

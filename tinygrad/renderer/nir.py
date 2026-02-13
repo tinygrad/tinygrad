@@ -160,14 +160,6 @@ class NIRRenderer(Renderer):
     (UPat(Ops.ENDIF, name="x"), lambda ctx,x: (lambda _: mesa.nir_def())(mesa.nir_pop_if(ctx.b, ctx.r[x.src[0]])))
   ])
 
-  def __reduce__(self): return self.__class__, self.args
-
-  def __init__(self, *args):
-    self.compiler = fromimport("tinygrad.runtime.support.compiler_mesa", self.__class__.__name__.replace("Renderer", "Compiler"))(*args)
-    self.args = args
-    if hasattr(self.compiler, "nir_options"): self.nir_options = self.compiler.nir_options
-    mesa.glsl_type_singleton_init_or_ref()
-
   def __del__(self):
     with contextlib.suppress(AttributeError): mesa.glsl_type_singleton_decref()
 
@@ -230,6 +222,13 @@ class NAKRenderer(NIRRenderer):
     intrins={"ALIGN_MUL":lambda sz:sz}, srcs=lambda self,b: [nsrc(nimm(b, 0, dtypes.int)), nsrc(nimm(b, self.param_idx, dtypes.int))])(
        lambda self, b, x, sz: mesa.nir_intrinsic_instr_create(b.shader, mesa.nir_intrinsic_ldc_nv))
 
+  def __init__(self, arch:str):
+    from tinygrad.runtime.support.compiler_mesa import NAKCompiler
+    self.compiler = NAKCompiler(arch)
+    self.nir_options = self.compiler.nir_options
+    mesa.glsl_type_singleton_init_or_ref()
+
+
 class LVPRenderer(NIRRenderer):
   device = "CPU"
   has_local = False
@@ -247,6 +246,11 @@ class LVPRenderer(NIRRenderer):
   def prerender(self, uops:list[UOp]):
     super().prerender(uops)
     self.param_sz = sum([8 if u.op == Ops.PARAM else u.dtype.itemsize for u in uops if u.op in (Ops.PARAM, Ops.DEFINE_VAR)])
+
+  def __init__(self, arch:str):
+    from tinygrad.runtime.support.compiler_mesa import LVPCompiler
+    self.compiler = LVPCompiler()
+    mesa.glsl_type_singleton_init_or_ref()
 
 # FIXME: this should be a rewrite rule
 def tovec(b, coord): return nalu(b, "vec4", nchannel(b, coord, 0), nchannel(b, coord, 1), nundef(b, dtypes.int), nundef(b, dtypes.int))
@@ -297,3 +301,8 @@ class IR3Renderer(NIRRenderer):
     self.b.shader.contents.info.num_images = texs() + imgs()
 
   def aux(self, uops:list[UOp]): return (tuple(u.dtype for u in uops if u.op == Ops.PARAM),)
+
+  def __init__(self, arch:str):
+    from tinygrad.runtime.support.compiler_mesa import IR3Compiler
+    self.compiler = IR3Compiler(arch)
+    mesa.glsl_type_singleton_init_or_ref()

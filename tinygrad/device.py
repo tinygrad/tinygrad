@@ -6,7 +6,7 @@ import importlib, inspect, functools, pathlib, os, platform, contextlib, sys, re
 from tinygrad.helpers import CI, OSX, LRU, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, flat_mv, PROFILE, temp, colored
 from tinygrad.helpers import Context, CCACHE, ALLOW_DEVICE_USAGE, MAX_BUFFER_SIZE, cpu_events, ProfileEvent, ProfilePointEvent, dedup, ContextVar
 from tinygrad.helpers import suppress_finalizing, select_first_inited, VIZ, CPU_LLVM, CPU_LVP, NV_PTX, CUDA_PTX, NV_NAK
-from tinygrad.helpers import EMULATED_DTYPES
+from tinygrad.helpers import EMULATED_DTYPES, CROSSARCH
 from tinygrad.dtype import DType, ImageDType, PtrDType, dtypes, _to_np_dtype
 if TYPE_CHECKING: from tinygrad.renderer import Renderer
 
@@ -290,8 +290,8 @@ class Compiled:
 
   @property
   def renderer(self) -> Renderer:
-    if self.ctrl_var is not None and self.ctrl_var.value: return self.renderers[self.ctrl_var.value](**({'arch': self.arch} if self.arch else {}))
-    return select_first_inited([functools.partial(r, **({'arch': self.arch} if self.arch else {})) for r in self.renderers.values()],
+    if self.ctrl_var is not None and self.ctrl_var.value: return self.renderers[self.ctrl_var.value.upper()](CROSSARCH.value or self.arch)
+    return select_first_inited([functools.partial(r, CROSSARCH.value or self.arch) for r in self.renderers.values()],
                                f"No renderer for {self.device} is available", self.cached_renderer)
 
   @property

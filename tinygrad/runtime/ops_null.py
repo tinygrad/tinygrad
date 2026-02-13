@@ -3,7 +3,7 @@ from tinygrad.device import Compiled, Allocator
 from tinygrad.engine.jit import MultiGraphRunner
 from tinygrad.renderer.cstyle import Renderer, CStyleLanguage, AMDHIPRenderer
 from tinygrad.uop.ops import Ops
-from tinygrad.helpers import cpu_profile, EMULATE, NULL_IR3, NULL_NAK, NULL_ALLOW_COPYOUT
+from tinygrad.helpers import cpu_profile, EMULATE, NULL_CC, NULL_ALLOW_COPYOUT
 from tinygrad.renderer.nir import IR3Renderer, NAKRenderer
 
 class NullRenderer(CStyleLanguage):
@@ -40,4 +40,4 @@ class NullDevice(Compiled):
       case "": renderer = NullRenderer
       case _: raise RuntimeError(f"can't EMULATE device: {EMULATE.value}")
     renderers = {'': renderer, 'IR3': IR3Renderer, 'NAK': NAKRenderer}
-    super().__init__(device, NullAllocator(self), renderers, functools.partial(NullProgram, device), NullGraph)
+    super().__init__(device, NullAllocator(self), renderers, functools.partial(NullProgram, device), NullGraph, ctrl_var=NULL_CC)
