@@ -193,7 +193,7 @@ class AMDev(PCIDevImplBase):
     if DEBUG >= 2: print(f"am {self.devfmt}: boot done")
 
   def init_sw(self, smi_dev=False):
-    self.smi_dev, self.is_err_state = smi_dev, False
+    self.smi_dev, self.is_err_state, self.has_aql_queue = smi_dev, False, False
 
     # Memory manager & firmware
     self.mm = AMMemoryManager(self, self.vram_size - self.reserved_vram_size, boot_size=(32 << 20), pt_t=AMPageTableEntry, va_shifts=[12, 21, 30, 39],
@@ -226,7 +226,7 @@ class AMDev(PCIDevImplBase):
     self.reg("regSCRATCH_REG6").write(self.is_err_state) # set finalized state.
 
   def recover(self) -> bool:
-    if self.is_hive() or not self.is_err_state: return False # TODO: support mi300
+    if (self.has_aql_queue and self.is_hive()) or not self.is_err_state: return False # TODO: support aql queue recovery on hive
     if DEBUG >= 2: print(f"am {self.devfmt}: Start recovery")
     self.ih.interrupt_handler()
     self.gfx.reset_mec()

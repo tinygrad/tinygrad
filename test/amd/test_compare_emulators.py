@@ -1,12 +1,15 @@
 # Test to compare Python and Rust RDNA3 emulators by running real tinygrad kernels
 import unittest, ctypes
 from dataclasses import dataclass
+from pathlib import Path
 from tinygrad import Device
 
-from tinygrad.renderer.amd.emu import WaveState, decode_program, WAVE_SIZE, VCC_LO, EXEC_LO, SCC
+from tinygrad.renderer.amd.emu import WaveState, _decode_at, WAVE_SIZE, VCC_LO, EXEC_LO, SCC
 from tinygrad.renderer.amd import decode_inst
 from test.amd.helpers import KernelInfo
-from test.amd.bench_emu import REMU_PATH
+import tinygrad
+REMU_PATH = Path(tinygrad.__file__).parent.parent / "extra/remu/target/release/libremu.so"
+if not REMU_PATH.exists(): REMU_PATH = Path(tinygrad.__file__).parent.parent / "extra/remu/target/release/libremu.dylib"
 
 def set_valid_mem_ranges(ranges): pass  # emu2 doesn't need this
 
@@ -89,7 +92,7 @@ class RustEmulator:
 class PythonEmulator:
   def __init__(self):
     self.state: WaveState | None = None
-    self.program: dict | None = None
+    self.program: dict[int, tuple] = {}  # lazily populated: pc -> (name, fxn, globals)
     self.vmem_buf = None
     self.lds_buf = None
     self.kernel_buf = None  # Keep kernel bytes alive
@@ -99,27 +102,29 @@ class PythonEmulator:
     import ctypes
     from tinygrad.device import Buffer, BufferSpec
     from tinygrad.dtype import dtypes
-    # Store kernel in a ctypes buffer so generic instructions can read from vmem at actual PC address
+    # Store kernel in a ctypes buffer so _decode_at can read from memory at actual PC address
     self.kernel_buf = (ctypes.c_char * len(kernel)).from_buffer_copy(kernel)
     self.lib_addr = ctypes.addressof(self.kernel_buf)
-    # Remap program dict to use actual addresses (like run_asm does)
-    program_raw = decode_program(kernel)
-    self.program = {self.lib_addr + offset: val for offset, val in program_raw.items()}
+    self.program = {}
     self.state = WaveState(n_lanes)
     self.state.pc = self.lib_addr  # Set PC to code base address
     self.vmem_buf = Buffer('CPU', 1 << 40, dtypes.uint32, options=BufferSpec(external_ptr=0)).ensure_allocated()
     self.lds_buf = Buffer('CPU', 65536 // 4, dtypes.uint32).ensure_allocated()
 
+  def _ensure_decoded(self, pc: int):
+    if pc not in self.program:
+      runner = _decode_at(pc, "rdna3")
+      self.program[pc] = (runner.p.function_name, runner._prg.fxn, runner.p.globals)
+
   def step(self) -> int:
     import ctypes
-    assert self.program is not None and self.state is not None
+    assert self.state is not None
     pc = self.state.pc
-    if pc == 0xFFFFFFFFFFFFFFFF or pc not in self.program: return -1
-    name, fxn, globals_list, _runner = self.program[pc]
-    if fxn is None: return 1  # unsupported instruction
+    if pc == 0xFFFFFFFFFFFFFFFF: return -1
+    self._ensure_decoded(pc)
+    name, fxn, globals_list = self.program[pc]
     buf_addrs = {0: self.state.sgpr_buf._buf.va_addr, 1: self.state.vgpr_buf._buf.va_addr,  # type: ignore[union-attr]
                  2: self.vmem_buf._buf.va_addr, 3: self.lds_buf._buf.va_addr}  # type: ignore[union-attr]
-    # Direct ctypes call - bypasses HCQ overhead
     fxn(*[ctypes.c_uint64(buf_addrs[g]) for g in globals_list], ctypes.c_int32(0))
     return -1 if self.state.pc == 0xFFFFFFFFFFFFFFFF else 0
 
@@ -140,7 +145,7 @@ class PythonEmulator:
                          exec_mask=sgpr[EXEC_LO.offset], sgpr=sgpr, vgpr=vgpr)
 
 def run_single_kernel(kernel: bytes, n_lanes: int, args_ptr: int, global_size: tuple[int, int, int],
-                      local_size: tuple[int, int, int], program, max_steps: int, debug: bool, trace_len: int,
+                      local_size: tuple[int, int, int], max_steps: int, debug: bool, trace_len: int,
                       kernel_idx: int = 0, max_workgroups: int = 8) -> tuple[bool, str, int]:
   """Run a single kernel through both emulators. Returns (success, message, total_steps)."""
   gx, gy, gz = global_size
@@ -181,9 +186,9 @@ def run_single_kernel(kernel: bytes, n_lanes: int, args_ptr: int, global_size: t
             rust_before = rust.get_snapshot()
             python_before = python.get_snapshot()
 
-            assert python.program is not None
-            inst_info = python.program.get(python.lib_addr + python_before.pc * 4)  # Convert word offset to actual address
-            inst_hex_name = inst_info[0] if inst_info else f"unknown at PC={python_before.pc}"
+            pc_addr = python.lib_addr + python_before.pc * 4  # Convert word offset to actual address
+            python._ensure_decoded(pc_addr)
+            inst_hex_name = python.program[pc_addr][0]
             # Decode the instruction to get mnemonic for sync_after checks
             try:
               # Format is mnemonic_hexbytes, e.g. v_exp_f32_e32_014b027e -> hex is 014b027e
@@ -310,12 +315,11 @@ def compare_emulators_multi_kernel(kernels: list[KernelInfo], buf_pool: dict[int
     kernel_ranges = ranges | {(args_ptr, ctypes.sizeof(args))}
     set_valid_mem_ranges(kernel_ranges)
 
-    program = decode_program(kernel.code)
     n_lanes = kernel.local_size[0] * kernel.local_size[1] * kernel.local_size[2]
 
     ok, msg, steps = run_single_kernel(
       kernel.code, min(n_lanes, 32), args_ptr, kernel.global_size,
-      kernel.local_size, program, max_steps, debug, trace_len, ki
+      kernel.local_size, max_steps, debug, trace_len, ki
     )
     total_steps += steps
     if not ok:
@@ -341,9 +345,8 @@ def compare_emulators_with_memory(kernel: bytes, n_lanes: int, buf_sizes: list, 
   ranges.add((args_ptr, ctypes.sizeof(args)))
   set_valid_mem_ranges(ranges)
 
-  program = decode_program(kernel)
   # Legacy wrapper assumes local_size = (n_lanes, 1, 1)
-  ok, msg, _ = run_single_kernel(kernel, n_lanes, args_ptr, global_size, (n_lanes, 1, 1), program, max_steps, debug, trace_len)
+  ok, msg, _ = run_single_kernel(kernel, n_lanes, args_ptr, global_size, (n_lanes, 1, 1), max_steps, debug, trace_len)
   return ok, msg
 
 def get_kernels_from_tinygrad(op_fn) -> tuple[list[KernelInfo], dict[int, int], dict[int, bytes]]:

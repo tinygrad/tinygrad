@@ -40,7 +40,10 @@ def _bitreverse(v: UOp, bits: int) -> UOp:
 
 def _extract_bits(val: UOp, hi: int, lo: int) -> UOp:
   dt = dtypes.uint64 if val.dtype in (dtypes.uint64, dtypes.int64) else dtypes.uint32
-  return ((val >> _const(dt, lo)) if lo > 0 else val) & _const(val.dtype, (1 << (hi - lo + 1)) - 1)
+  result = ((val >> _const(dt, lo)) if lo > 0 else val) & _const(val.dtype, (1 << (hi - lo + 1)) - 1)
+  # Downcast to uint32 when extracting <=32 bits from a 64-bit value, so .f32 bitcast works correctly
+  if dt == dtypes.uint64 and (hi - lo + 1) <= 32: result = result.cast(dtypes.uint32)
+  return result
 
 def _set_bit(old, pos, val):
   mask = _u32(1) << pos
@@ -554,7 +557,9 @@ class Parser:
       self.eat('LBRACKET')
       self.eat_val('laneId', 'IDENT')
       self.eat('RBRACKET')
-      result = (base >> _to_u32(self.vars['laneId'])) & _u32(1)
+      lane = self.vars['laneId']
+      shift = lane.cast(base.dtype) if base.dtype != dtypes.uint32 else _to_u32(lane)
+      result = (base >> shift) & _const(base.dtype, 1)
       if self.try_eat('DOT'):
         dt_name = self.eat('IDENT').val
         return result.cast(DTYPES.get(dt_name, dtypes.uint32))
@@ -806,6 +811,12 @@ def _subst_loop_var(line: str, loop_var: str, val: int) -> str:
 
 def _set_bits(old: UOp, val: UOp, width: int, offset: int) -> UOp:
   """Set bits [offset:offset+width) in old to val, masking and shifting appropriately."""
+  is64 = old.dtype in (dtypes.uint64, dtypes.int64) or offset + width > 32
+  if is64:
+    old = old.cast(dtypes.uint64) if old.dtype != dtypes.uint64 else old
+    mask = _u64(((1 << width) - 1) << offset)
+    v = (val.cast(dtypes.uint64) if val.dtype != dtypes.uint64 else val) & _u64((1 << width) - 1)
+    return (old & (mask ^ _u64(0xFFFFFFFFFFFFFFFF))) | (v << _u64(offset))
   mask = _u32(((1 << width) - 1) << offset)
   v = (val.cast(dtypes.uint32) if val.dtype != dtypes.uint32 else val) & _u32((1 << width) - 1)
   return (old & (mask ^ _u32(0xFFFFFFFF))) | (v << _u32(offset))

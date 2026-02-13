@@ -670,7 +670,8 @@ if __name__ == "__main__":
     sys.exit(1)
   with open(sys.argv[1], "rb") as f:
     data = pickle.load(f)
+  prg_names = {e.tag: e.name for e in data if type(e).__name__ == "ProfileProgramEvent" and e.tag is not None}
   sqtt_events = [e for e in data if type(e).__name__ == "ProfileSQTTEvent"]
   for i, event in enumerate(sqtt_events):
-    print(f"\n=== event {i} ===")
+    print(f"\n=== event {i} {prg_names.get(event.kern, '')} ===")
     print_packets(decode(event.blob))
