@@ -165,22 +165,20 @@ def load_state_dict(model, state_dict:dict[str, Tensor], strict=True, verbose=Tr
 @accept_filename
 def zip_extract(t: Tensor) -> dict[str, Tensor]:
   files: dict[str, Tensor] = {}
-  file_offsets: dict[str, tuple[int, int, int]] = {}
   with zipfile.ZipFile(TensorIO(t), "r") as myzip:
-    # Batch realize all header reads first
+    # sadly, the extra length needs to be read from the local header of each file.
+    # this is a limitation of the zip file format
     header_contents = [t[zi.header_offset+26:zi.header_offset+30].bitcast(dtypes.uint16).to('CPU') for zi in myzip.filelist]
     Tensor.realize(*header_contents)
     for zi, header_content in zip(myzip.filelist, header_contents):
       # header_offset + sizeFileHeader + File name length + Extra field length
-      file_offset_int = zi.header_offset + 30 + sum(cast(list[int], header_content.tolist()))
-      file_offsets[zi.filename] = (file_offset_int, zi.compress_size, zi.compress_type)
-  for filename, (file_offset_int, compress_size, compress_type) in file_offsets.items():
-    files[filename] = t[file_offset_int:file_offset_int+compress_size]
-    match compress_type:
-      case zipfile.ZIP_STORED: pass
-      # TODO: we need a zlib UOp so this can be lazy
-      case zipfile.ZIP_DEFLATED: files[filename] = Tensor(zlib.decompress(files[filename].data(), -15))
-      case _: raise NotImplementedError(f"compression {compress_type} not supported")
+      file_offset = zi.header_offset + 30 + sum(cast(list[int], header_content.tolist()))
+      files[zi.filename] = t[file_offset:file_offset+zi.compress_size]
+      match zi.compress_type:
+        case zipfile.ZIP_STORED: pass
+        # TODO: we need a zlib UOp so this can be lazy
+        case zipfile.ZIP_DEFLATED: files[zi.filename] = Tensor(zlib.decompress(files[zi.filename].data(), -15))
+        case _: raise NotImplementedError(f"compression {zi.compress_type} not supported")
   return files
 
 @accept_filename
@@ -201,7 +199,6 @@ def tar_extract(t: Tensor) -> dict[str, Tensor]:
 
 # torch support!
 
-# TODO: this should use tar_extract and zip_extract -> COMPLETED
 @accept_filename
 def torch_load(t:Tensor) -> dict[str, Tensor]:
   """
@@ -222,11 +219,9 @@ def torch_load(t:Tensor) -> dict[str, Tensor]:
     return _rebuild_tensor_v2(storage, storage_offset, size, stride)
 
   def _rebuild_tensor_v2(storage, storage_offset, size, stride, requires_grad=None, backward_hooks=None, metadata=None):
-    # print(storage, storage_offset, size, stride, requires_grad, backward_hooks, metadata)
+    #print(storage, storage_offset, size, stride, requires_grad, backward_hooks, metadata)
     lens[storage[2]] = storage[4] * storage[1].itemsize
-    if storage[2] not in storage_source:
-      return None
-
+    if storage[2] not in storage_source: return None
     ret = storage_source[storage[2]].bitcast(storage[1])
 
     # 7 lines to deal with permuted tensors. NOTE: this currently requires reading off the disk
@@ -263,7 +258,6 @@ def torch_load(t:Tensor) -> dict[str, Tensor]:
 
   fobj = io.BufferedReader(TensorIO(t))
   def passthrough_reset(v: bool): return fobj.seek(0, 0) or v
-  # Serial format: https://docs.pytorch.org/docs/stable/notes/serialization.html
   if passthrough_reset(zipfile.is_zipfile(fobj)): # NOTE: passthrough_reset required to support python < 3.14
     files = zip_extract(t)
     base_name = next(iter(files)).split('/', 1)[0]
