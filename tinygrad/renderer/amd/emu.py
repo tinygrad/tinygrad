@@ -565,7 +565,7 @@ def _compile_sopp(inst: ir3.SOPP | ir4.SOPP, ctx: _Ctx) -> UOp:
 
 def _compile_smem(inst: ir3.SMEM | ir4.SMEM, ctx: _Ctx) -> UOp:
   # Cache invalidation instructions are no-ops in the emulator (we don't model caches)
-  if 'INV' in inst.op.name: return UOp.sink(*ctx.inc_pc())
+  if '_INV' in inst.op.name: return UOp.sink(*ctx.inc_pc())
   # Dynamic sbase field (bits 5:0) - SGPR pair, field value * 2 = register offset
   sbase = ctx.inst_field(type(inst).sbase) * _c(2)
   # Dynamic sdata field (bits 12:6) - destination SGPR
