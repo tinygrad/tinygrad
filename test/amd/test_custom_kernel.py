@@ -47,7 +47,7 @@ def custom_add_var(A:UOp, B:UOp) -> UOp:
 class TestCustomKernel(unittest.TestCase):
   def test_simple(self):
     a = Tensor.full((16, 16), 1.).contiguous().realize()
-    a = Tensor.custom_kernel(a, fxn=custom_add_one)[0]  # type: ignore[attr-defined]
+    a = Tensor.custom_kernel(a, fxn=custom_add_one)[0]
     ei = a.schedule()[-1].lower()
     self.assertEqual(ei.prg.estimates.ops, a.numel())
     self.assertEqual(ei.prg.estimates.mem, a.nbytes()*2)
@@ -57,7 +57,7 @@ class TestCustomKernel(unittest.TestCase):
   def test_variable(self):
     b = Tensor.full((16, 16), 1, dtype=dtypes.uint32).contiguous().realize()
     a = Tensor.zeros_like(b).contiguous().realize()
-    a = Tensor.custom_kernel(a, b, fxn=custom_add_var)[0]  # type: ignore[attr-defined]
+    a = Tensor.custom_kernel(a, b, fxn=custom_add_var)[0]
     ei = a.schedule()[-1].lower()
     for i in range(4):
       ei.run({"var":i})
