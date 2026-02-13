@@ -305,4 +305,5 @@ class IR3Renderer(NIRRenderer):
   def __init__(self, arch:str):
     from tinygrad.runtime.support.compiler_mesa import IR3Compiler
     self.compiler = IR3Compiler(arch)
+    self.nir_options = self.compiler.nir_options
     mesa.glsl_type_singleton_init_or_ref()
