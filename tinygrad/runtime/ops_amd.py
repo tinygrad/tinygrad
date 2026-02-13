@@ -315,6 +315,8 @@ class AMDComputeQueue(HWQueue):
     return self
 
   def exec(self, prg:AMDProgram, args_state:CLikeArgsState, global_size:tuple[sint, ...], local_size:tuple[sint, ...]):
+    assert not any(g == 0 for g in global_size)
+    assert not any(l == 0 for l in local_size)
     self.bind_args_state(args_state)
 
     self.acquire_mem(gli=0, gl2=0)
