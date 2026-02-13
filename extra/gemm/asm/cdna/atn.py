@@ -363,7 +363,9 @@ def asm_sdpa(q: Tensor, k: Tensor, v: Tensor) -> Tensor:
 
     # dq_acc has extra leading dim of 1, B axis is at index 1
     dq_acc = _sharded_empty_f32((1, B, H_q, S, D), q, axis=1)
-    dq_acc = Tensor.custom_kernel(dq_acc, fxn=_zero_kernel)[0]
+    # TODO: this needs to be zero for the output to be correct, but it MMU faults
+    # to repro: AMD=1 PYTHONPATH=. python test/testextra/test_asm_atn.py TestAsmAtn.test_llama8b_gqa_8gpu_backward_tiny
+    #dq_acc = Tensor.custom_kernel(dq_acc, fxn=_zero_kernel)[0]
 
     # dk/dv use K/V head count (H_kv), not Q head count (H_q)
     dk = _sharded_empty((B, S, H_kv, D), k, axis=0)
