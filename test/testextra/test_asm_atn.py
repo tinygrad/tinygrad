@@ -296,6 +296,20 @@ class TestAsmAtn(unittest.TestCase):
   # q: (8, 32, 8192, 128) axis=0, k: (8, 8, 8192, 128) axis=0, v: (8, 8, 8192, 128) axis=0
   # ============================================================================
 
+  def test_llama8b_gqa_single_shard_forward(self):
+    """Test single-shard shape from LLaMA 8B trainer (B=1)."""
+    B, S, D = 1, 8192, 128
+    H_q, H_kv = 32, 8
+
+    Tensor.manual_seed(0)
+    with Context(DEBUG=0):
+      q = Tensor.randn(B, H_q, S, D, dtype=dtypes.bfloat16).contiguous().realize()
+      k = Tensor.randn(B, H_kv, S, D, dtype=dtypes.bfloat16).contiguous().realize()
+      v = Tensor.randn(B, H_kv, S, D, dtype=dtypes.bfloat16).contiguous().realize()
+
+    out = asm_sdpa(q, k, v)
+    out.realize()
+
   @needs_second_gpu
   def test_llama8b_gqa_8gpu_forward_tiny(self):
     """Test exact shapes from LLaMA 8B trainer - forward only, no reference."""
