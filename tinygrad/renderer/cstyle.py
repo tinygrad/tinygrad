@@ -384,12 +384,15 @@ class CUDARenderer(CStyleLanguage):
   local_max = (1024, 1024, 64)
   shared_max = 49152
 
+  @staticmethod
+  def get_tensor_cores(arch): return tc.cuda_sm89 if (ver:=int(arch[3:])) >= 89 else tc.cuda_sm80 if ver >= 80 else tc.cuda_sm75 if ver >= 75 else []
+
   def __init__(self, arch:str, device:str="NV", use_nvcc=False):
     from tinygrad.runtime.support.compiler_cuda import NVRTCCompiler, NVCCCompiler
     from tinygrad.runtime.support.hcq import MOCKGPU
     self.device, self.arch, self.use_nvcc = device, arch, use_nvcc
     self.compiler = (NVCCCompiler if use_nvcc else NVRTCCompiler)(arch, ptx=bool(MOCKGPU) or device == "CUDA", cache_key=device.lower())
-    self.tensor_cores = tc.cuda_sm89 if (ver:=int(arch[3:])) >= 89 else tc.cuda_sm80 if ver >= 80 else tc.cuda_sm75 if ver >= 75 else []
+    self.tensor_cores = self.get_tensor_cores(arch)
   def __reduce__(self): return self.__class__, (self.arch, self.device, self.use_nvcc)
 
   # language options
