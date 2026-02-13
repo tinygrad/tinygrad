@@ -4,8 +4,8 @@ from tinygrad.helpers import ceildiv, round_up
 from tinygrad.runtime.autogen import amdgpu_kd, hsa, libc
 
 # instructions used for padding
-from extra.assembly.amd.autogen.rdna3.ins import s_code_end # same encoding as RDNA4
-from extra.assembly.amd.autogen.cdna.ins import s_nop as s_nop_cdna
+from tinygrad.runtime.autogen.amd.rdna3.ins import s_code_end # same encoding as RDNA4
+from tinygrad.runtime.autogen.amd.cdna.ins import s_nop as s_nop_cdna
 
 def put(dst:bytearray, off:int, data:bytes) -> None:
   end = off + len(data)

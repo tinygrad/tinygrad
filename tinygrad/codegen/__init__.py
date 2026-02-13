@@ -134,6 +134,30 @@ def do_linearize(prg:UOp, sink:UOp) -> UOp:
   if SPEC: type_verify(lst, program_spec)
   return prg.replace(src=prg.src + (UOp(Ops.LINEAR, src=tuple(lst)),))
 
+_arch_map = {"gfx9": "cdna", "gfx10": "rdna3", "gfx11": "rdna3", "gfx12": "rdna4"}
+def do_assemble(ctx:Renderer, prg:UOp, lin:UOp) -> UOp:
+  from tinygrad.renderer.amd.elf import create_elf
+  from tinygrad.renderer.amd.dsl import Reg, FixedBitField
+  insts = [u.arg for u in lin.src]
+  # scan for max vgpr/sgpr
+  max_vgpr, max_sgpr = 0, 0
+  for inst in insts:
+    for name, field in inst._fields:
+      if isinstance(field, FixedBitField): continue
+      val = getattr(inst, name)
+      if not isinstance(val, Reg): continue
+      if 256 <= val.offset < 512: max_vgpr = max(max_vgpr, (val.offset - 256) + val.sz)
+      elif val.offset < 106: max_sgpr = max(max_sgpr, val.offset + val.sz)
+  src = "\n".join(str(inst) for inst in insts)
+  code_bytes = b"".join(inst.to_bytes() for inst in insts)
+  arch = next(v for k, v in _arch_map.items() if ctx.arch.startswith(k))
+  kd = {"kernarg_size":8, "user_sgpr_kernarg_segment_ptr":1, "user_sgpr_count":2, "wavefront_size32":1, "forward_progress":1,
+        "next_free_vgpr":((max_vgpr + 7) // 8) * 8, "next_free_sgpr":((max_sgpr + 7) // 8) * 8}
+  binary = create_elf(code_bytes, kd, arch)
+  sink = prg.src[0]
+  new_linear = UOp(Ops.LINEAR, src=(*sink.src, sink))
+  return prg.replace(src=(sink, prg.src[1], new_linear, UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=binary)))
+
 def do_render(ctx:Renderer, prg:UOp, lin:UOp) -> UOp:
   src = ctx.render(list(lin.src))
   return prg.replace(src=prg.src + (UOp(Ops.SOURCE, arg=src),), arg=ctx.aux(list(lin.src)) if ctx.has_aux else prg.arg)
@@ -144,6 +168,7 @@ def do_compile(ctx:Renderer, prg:UOp, source:UOp) -> UOp|None:
 
 pm_to_program = PatternMatcher([
   (UPat(Ops.PROGRAM, src=(UPat(Ops.SINK, name="sink"), UPat(Ops.DEVICE)), name="prg"), do_linearize),
+  (UPat(Ops.PROGRAM, src=(UPat(), UPat(Ops.DEVICE), UPat(Ops.LINEAR, src=UPat(Ops.INS), name="lin")), name="prg"), do_assemble),
   (UPat(Ops.PROGRAM, src=(UPat(), UPat(Ops.DEVICE), UPat(Ops.LINEAR, name="lin")), name="prg"), do_render),
   (UPat(Ops.PROGRAM, src=(UPat(), UPat(Ops.DEVICE), UPat(Ops.LINEAR), UPat(Ops.SOURCE, name="source")), name="prg"), do_compile),
 ])
