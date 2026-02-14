@@ -208,6 +208,7 @@ class CPULLVMRenderer(LLVMRenderer):
   def __init__(self, arch:str):
     from tinygrad.runtime.support.compiler_cpu import CPULLVMCompiler
     self.compiler = CPULLVMCompiler()
+    Renderer.__init__(self, arch)
 
 barrier = 'fence syncscope("workgroup") release\ntail call void @llvm.amdgcn.s.barrier()\nfence syncscope("workgroup") acquire\n'
 code_for_workitem = {"g": lambda x: f"tail call i32 @llvm.amdgcn.workgroup.id.{chr(120+int(x))}()",
@@ -292,4 +293,4 @@ exit: %packed = phi i32 [%packed_bf8, %do_bf8], [%packed_fp8, %do_fp8]\n  %trunc
           lambda x: UOp(Ops.WMMA, dtypes.float.vec(8), (x.src[0].bitcast(dtypes.uint16.vec(8)), x.src[1].bitcast(dtypes.uint16.vec(8)),
             x.src[2]), (*x.arg,)) if x.src[0].dtype == dtypes.bfloat16.vec(8) else None)
       ])
-  def __reduce__(self): return self.__class__, (self.arch,)
+    Renderer.__init__(self, arch)

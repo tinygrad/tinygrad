@@ -227,6 +227,7 @@ class NAKRenderer(NIRRenderer):
     self.compiler = NAKCompiler(arch)
     self.nir_options = self.compiler.nir_options
     mesa.glsl_type_singleton_init_or_ref()
+    Renderer.__init__(self, arch)
 
 
 class LVPRenderer(NIRRenderer):
@@ -251,6 +252,7 @@ class LVPRenderer(NIRRenderer):
     from tinygrad.runtime.support.compiler_mesa import LVPCompiler
     self.compiler = LVPCompiler()
     mesa.glsl_type_singleton_init_or_ref()
+    Renderer.__init__(self, arch)
 
 # FIXME: this should be a rewrite rule
 def tovec(b, coord): return nalu(b, "vec4", nchannel(b, coord, 0), nchannel(b, coord, 1), nundef(b, dtypes.int), nundef(b, dtypes.int))
@@ -307,3 +309,4 @@ class IR3Renderer(NIRRenderer):
     self.compiler = IR3Compiler(arch)
     self.nir_options = self.compiler.nir_options
     mesa.glsl_type_singleton_init_or_ref()
+    Renderer.__init__(self, arch)

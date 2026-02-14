@@ -278,6 +278,7 @@ class ClangRenderer(CStyleLanguage):
   def __init__(self, arch:str):
     from tinygrad.runtime.support.compiler_cpu import ClangJITCompiler
     self.compiler = ClangJITCompiler()
+    Renderer.__init__(self, arch)
 
 class OpenCLRenderer(CStyleLanguage):
   device = "CL"
@@ -339,6 +340,7 @@ class MetalRenderer(CStyleLanguage):
   def __init__(self, arch:str):
     from tinygrad.runtime.ops_metal import MetalCompiler
     self.compiler, self.tensor_cores = MetalCompiler(), tc.metal if hasattr(os, 'uname') and os.uname().machine == "arm64" else []
+    Renderer.__init__(self, arch)
 
   # language options
   kernel_typedef = "kernel void"
@@ -393,7 +395,7 @@ class CUDARenderer(CStyleLanguage):
     self.device, self.arch, self.use_nvcc = device, arch, use_nvcc
     self.compiler = (NVCCCompiler if use_nvcc else NVRTCCompiler)(arch, ptx=bool(MOCKGPU) or device == "CUDA", cache_key=device.lower())
     self.tensor_cores = self.get_tensor_cores(arch)
-  def __reduce__(self): return self.__class__, (self.arch, self.device, self.use_nvcc)
+    Renderer.__init__(self, arch)
 
   # language options
   # https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html
@@ -483,7 +485,7 @@ class AMDHIPRenderer(CStyleLanguage):
         (UPat(Ops.CAST, dtypes.float, (UPat.var("y", dtypes.fp8s),), name="x",),
           lambda ctx,x,y: f"__builtin_amdgcn_cvt_f32_{('fp8', 'bf8')[fp8_index(y.dtype)]}((unsigned int){ctx[x.src[0]]}, 0)"),
       ]) + base_rewrite
-  def __reduce__(self): return self.__class__, (self.arch,)
+    Renderer.__init__(self, arch)
 
   # https://clang.llvm.org/docs/AttributeReference.html#amdgpu-flat-work-group-size
   # NOTE: this makes hlb_cifar10 twice as fast, there may be more gains in tweaking these parameters

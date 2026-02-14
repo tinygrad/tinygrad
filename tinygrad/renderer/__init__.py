@@ -155,7 +155,7 @@ class Renderer:
 
   compiler: Compiler = Compiler()
 
-  def __init__(self, arch:str=""): pass
-  def __reduce__(self): return self.__class__, ()
+  def __init__(self, arch:str): self.arch = arch
+  def __reduce__(self): return self.__class__, (self.arch,)
   def render(self, uops:list[UOp]) -> str: raise NotImplementedError("needs a renderer")
   def aux(self, uops:list[UOp]) -> dict: raise NotImplementedError("needs aux")
