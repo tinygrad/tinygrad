@@ -5,7 +5,7 @@ from typing import Any, Generic, TypeVar, Iterator, Generator, Mapping, TYPE_CHE
 import importlib, inspect, functools, pathlib, os, platform, contextlib, sys, re, atexit, pickle, decimal
 from tinygrad.helpers import CI, OSX, LRU, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, flat_mv, PROFILE, temp, colored
 from tinygrad.helpers import Context, CCACHE, ALLOW_DEVICE_USAGE, MAX_BUFFER_SIZE, cpu_events, ProfileEvent, ProfilePointEvent, dedup, ContextVar
-from tinygrad.helpers import suppress_finalizing, select_first_inited, VIZ, EMULATED_DTYPES, CROSSARCH, CUDA_CC, NV_CC, CPU_CC
+from tinygrad.helpers import suppress_finalizing, select_first_inited, VIZ, EMULATED_DTYPES, CROSSARCH, CUDA_CC, NV_CC, CPU_CC, NULL_CC
 from tinygrad.dtype import DType, ImageDType, PtrDType, dtypes, _to_np_dtype
 if TYPE_CHECKING: from tinygrad.renderer import Renderer
 
@@ -349,7 +349,7 @@ def is_dtype_supported(dtype:DType, device:str|None=None) -> bool:
     if device in ["CUDA", "NV"]: return not CI
     if device == "CPU" and CPU_CC.value == 'LLVM': return OSX
     if device == "PYTHON": return sys.version_info >= (3, 12)
-  if dtype == dtypes.float64: return (device not in {"METAL", "QCOM"} and not (OSX and device == "CL") and not getenv("NULL_IR3")
+  if dtype == dtypes.float64: return (device not in {"METAL", "QCOM"} and not (OSX and device == "CL") and NULL_CC.value != "IR3"
                                       and dtypes.long not in EMULATED_DTYPES.tolist(dtypes))
   return True
 
