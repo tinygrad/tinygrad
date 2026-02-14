@@ -222,11 +222,8 @@ def torch_load(t:Tensor) -> dict[str, Tensor]:
     #print(storage, storage_offset, size, stride, requires_grad, backward_hooks, metadata)
     lens[storage[2]] = storage[4] * storage[1].itemsize
     if storage[2] not in storage_source: return None
-    if storage_offset > 0 or storage_source[storage[2]].numel() > prod(size) * storage[1].itemsize:
-      byte_offset = storage_offset*storage[1].itemsize
-      ret = storage_source[storage[2]][byte_offset:byte_offset+prod(size)*storage[1].itemsize].bitcast(storage[1])
-    else:
-      ret = storage_source[storage[2]].bitcast(storage[1])
+    byte_start, byte_end = storage_offset*storage[1].itemsize, (storage_offset + prod(size))*storage[1].itemsize
+    ret = storage_source[storage[2]][byte_start:byte_end].bitcast(storage[1])
 
     # 7 lines to deal with permuted tensors. NOTE: this currently requires reading off the disk
     shape_strides = [(s, st) for s,st in zip(size, stride) if s != 1]
