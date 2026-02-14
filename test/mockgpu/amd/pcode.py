@@ -41,9 +41,11 @@ def _bitreverse(v: UOp, bits: int) -> UOp:
 
 def _extract_bits(val: UOp, hi: int, lo: int) -> UOp:
   dt = dtypes.uint64 if val.dtype in (dtypes.uint64, dtypes.int64) else dtypes.uint32
-  result = ((val >> _const(dt, lo)) if lo > 0 else val) & _const(val.dtype, (1 << (hi - lo + 1)) - 1)
-  # Downcast to uint32 when extracting <=32 bits from a 64-bit value, so .f32 bitcast works correctly
-  if dt == dtypes.uint64 and (hi - lo + 1) <= 32: result = result.cast(dtypes.uint32)
+  width = hi - lo + 1
+  result = ((val >> _const(dt, lo)) if lo > 0 else val) & _const(val.dtype, (1 << width) - 1)
+  # Downcast to narrowest fitting type so { hi, lo } concatenation computes correct shift
+  narrow = {8: dtypes.uint8, 16: dtypes.uint16, 32: dtypes.uint32, 64: dtypes.uint64}.get(width)
+  if narrow and narrow != dt: result = result.cast(narrow)
   return result
 
 def _set_bit(old, pos, val):
@@ -536,7 +538,8 @@ class Parser:
         self.eat('RBRACKET')
         vgpr = self.vars.get('_vgpr')
         if vgpr is None: return _u32(0)
-        return vgpr.index(_to_u32(reg) * _u32(32) + _to_u32(lane), ptr=True).load()
+        ws = self.vars.get('_wave_size', 32)
+        return vgpr.index(_to_u32(reg) * _u32(ws) + _to_u32(lane), ptr=True).load()
       if self.try_eat('LPAREN'):
         args = self._parse_args()
         self.eat('RPAREN')
@@ -548,8 +551,8 @@ class Parser:
       if name == 'OVERFLOW_F32': return _const(dtypes.uint32, 0x7F7FFFFF).bitcast(dtypes.float32)
       if name == 'UNDERFLOW_F64': return _const(dtypes.uint64, 1).bitcast(dtypes.float64)
       if name == 'OVERFLOW_F64': return _const(dtypes.uint64, 0x7FEFFFFFFFFFFFFF).bitcast(dtypes.float64)
-      if name == 'WAVE32': return _const(dtypes.bool, True)
-      if name == 'WAVE64': return _const(dtypes.bool, False)
+      if name == 'WAVE32': return _const(dtypes.bool, self.vars.get('_wave_size', 32) <= 32)
+      if name == 'WAVE64': return _const(dtypes.bool, self.vars.get('_wave_size', 32) > 32)
       if name == 'WAVE_MODE' and self.try_eat('DOT') and self.try_eat_val('IEEE', 'IDENT'): return _u32(1)
       if self.try_eat('LBRACE'):
         idx = self.eat('NUM').val
@@ -561,7 +564,8 @@ class Parser:
           self.eat('RBRACKET')
           vgpr = self.vars.get('_vgpr')
           if vgpr is None: return _u32(0)
-          return vgpr.index(_to_u32(reg) * _u32(32) + _u32(int(idx)), ptr=True).load()
+          ws = self.vars.get('_wave_size', 32)
+          return vgpr.index(_to_u32(reg) * _u32(ws) + _u32(int(idx)), ptr=True).load()
         elem = self.vars.get(f'{name}@{idx}', self.vars.get(f'{name}{idx}'))
         if elem is None:
           # Extract bit idx from base variable (like var[idx])
@@ -1036,7 +1040,8 @@ def parse_block(lines: list[str], start: int, env: dict[str, VarVal], funcs: dic
           if j < len(toks) and toks[j].type == 'EQUALS': j += 1
           ln = parse_tokens(lane_toks, env, funcs)
           rg, val = parse_tokens(reg_toks, env, funcs), parse_tokens(toks[j:], env, funcs)
-          vgpr_idx = _to_u32(rg) * _u32(32) + _to_u32(ln)
+          ws = env.get('_wave_size', 32)
+          vgpr_idx = _to_u32(rg) * _u32(ws) + _to_u32(ln)
           if assigns is not None:
             assigns.append((f'VGPR[{_tok_str(lane_toks)}][{_tok_str(reg_toks)}][{hi_val}:{lo_val}]', (vgpr_idx, val, hi_val, lo_val)))
           i += 1
@@ -1046,7 +1051,8 @@ def parse_block(lines: list[str], start: int, env: dict[str, VarVal], funcs: dic
         ln = parse_tokens(lane_toks, env, funcs)
         rg, val = parse_tokens(reg_toks, env, funcs), parse_tokens(toks[j:], env, funcs)
         if assigns is not None:
-          assigns.append((f'VGPR[{_tok_str(lane_toks)}][{_tok_str(reg_toks)}]', (_to_u32(rg) * _u32(32) + _to_u32(ln), val)))
+          ws = env.get('_wave_size', 32)
+          assigns.append((f'VGPR[{_tok_str(lane_toks)}][{_tok_str(reg_toks)}]', (_to_u32(rg) * _u32(ws) + _to_u32(ln), val)))
         i += 1
         continue
 
