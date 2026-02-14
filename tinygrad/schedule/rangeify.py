@@ -602,15 +602,15 @@ def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
                         name="bufferize to store")
   tsink = graph_rewrite(tsink, pm_gate_kernel_sink+split_kernels, ctx=uop_list, bottom_up=True, name="split kernels")
 
-  # if a kernel depends on a buffer, and that buffer is later assigned to, make the assign depend on the kernel's assign
-  kernel_assign: dict[UOp, UOp] = {}
+  # WAR deps: if kernel U reads buffer S, and S is also written by another kernel, S's write must wait for U to finish
+  afters = [u for u in tsink.toposort() if u.op is Ops.AFTER]
+  kernel_assign: dict[UOp, UOp] = {u.buf_uop:u for u in afters}
   assign_rep: dict[UOp, UOp] = {}
-  for u in tsink.toposort():
-    if u.op is not Ops.AFTER: continue
-    kernel_assign[u.buf_uop] = u
+  for u in afters:
     for s in u.src[1].src:
       # TODO: this is probably broken for MSELECT/MSTACK
       if s.op not in {Ops.BUFFER, Ops.PARAM} or s is u.buf_uop or (a:=kernel_assign.get(s)) is None: continue
+      if a.src[1] is u.src[1]: continue  # same kernel (multi-output custom kernels)
       if any(x.op is Ops.AFTER and x.buf_uop is s for x in u.toposort()):
         raise RuntimeError(f"cycle detected in graph, kernel for {u.buf_uop} must either depend on AFTER or BUFFER")
       assign_rep[a] = kernel_assign[s] = a.replace(src=a.src+(u,))
