@@ -412,7 +412,7 @@ def flash_attention(xq, xk, xv, attn_mask:Tensor|None=None, is_causal:bool=False
 
   use_asm = ASM_ATN and is_causal and D == 128
   if use_asm:
-    from extra.gemm.asm.cdna.atn import aiter_fmha_fwd, aiter_fmha_bwd_odo, aiter_fmha_bwd_main, aiter_fmha_bwd_dq_convert, _zero_kernel
+    from extra.gemm.asm.cdna.atn import aiter_fmha_fwd, aiter_fmha_bwd_odo, aiter_fmha_bwd_main, aiter_fmha_bwd_dq_convert, zero_kernel
     q,k,v = orig_inputs
     q_perm, k_perm, v_perm = q.permute(0, 2, 1, 3).contiguous(), k.permute(0, 2, 1, 3).contiguous(), v.permute(0, 2, 1, 3).contiguous()
     # asm uses float32 LSE with shape (B, H, S)
@@ -431,7 +431,7 @@ def flash_attention(xq, xk, xv, attn_mask:Tensor|None=None, is_causal:bool=False
       delta, *_ = Tensor.custom_kernel(delta, attn_asm, dout, fxn=functools.partial(aiter_fmha_bwd_odo, dname=single_device))
 
       dq_acc = _sharded_empty((1, B_, H_, S_, D_), q_perm, axis=1, dtype=dtypes.float32)
-      dq_acc = Tensor.custom_kernel(dq_acc, fxn=_zero_kernel)[0]
+      dq_acc = Tensor.custom_kernel(dq_acc, fxn=zero_kernel)[0]
 
       dk = _sharded_empty_like(k_perm, axis=0)
       dv = _sharded_empty_like(k_perm, axis=0)

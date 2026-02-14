@@ -264,7 +264,7 @@ def aiter_fmha_bwd_dq_convert(dq:UOp, dq_acc:UOp, dname:str) -> UOp:
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg=dname), UOp(Ops.LINEAR, src=(*sink.src, sink)),
                                UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=binary)))
 
-def _zero_kernel(out:UOp) -> UOp:
+def zero_kernel(out:UOp) -> UOp:
   # Create a simple store of zeros - use base dtype (element type) for the constant
   i = UOp.range(out.size, 0)
   zero = UOp.const(out.dtype.base, 0)
