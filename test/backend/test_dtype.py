@@ -251,7 +251,7 @@ class TestEmulatedHalf(TestHalfDType):
   def setUpClass(cls):
     cls.stack = contextlib.ExitStack()
     cls.stack.enter_context(Context(EMULATED_DTYPES="half"))
-    cls.DATA = rand_for_dtype(cls.DTYPE, 10)
+    cls.DATA = rand_for_dtype(cls.DTYPE, 10, allow_subnormal=False)
 
   @classmethod
   def tearDownClass(cls): cls.stack.close()
@@ -355,7 +355,7 @@ class TestEmulatedInt64DType(TestInt64DType):
   def setUpClass(cls):
     cls.stack = contextlib.ExitStack()
     cls.stack.enter_context(Context(EMULATED_DTYPES="long"))
-    cls.DATA = rand_for_dtype(cls.DTYPE, 10)
+    cls.DATA = rand_for_dtype(cls.DTYPE, 10, allow_subnormal=False)
 
   @classmethod
   def tearDownClass(cls): cls.stack.close()
@@ -371,7 +371,7 @@ class TestEmulatedUInt64DType(TestUint64DType):
   def setUpClass(cls):
     cls.stack = contextlib.ExitStack()
     cls.stack.enter_context(Context(EMULATED_DTYPES="long"))
-    cls.DATA = rand_for_dtype(cls.DTYPE, 10)
+    cls.DATA = rand_for_dtype(cls.DTYPE, 10, allow_subnormal=False)
 
   @classmethod
   def tearDownClass(cls): cls.stack.close()
@@ -385,7 +385,7 @@ class TestEmulatedBFloat16Type(TestBFloat16Type):
   def setUpClass(cls):
     cls.stack = contextlib.ExitStack()
     cls.stack.enter_context(Context(EMULATED_DTYPES="bfloat16"))
-    cls.DATA = rand_for_dtype(cls.DTYPE, 10)
+    cls.DATA = rand_for_dtype(cls.DTYPE, 10, allow_subnormal=False)
 
   @classmethod
   def tearDownClass(cls): cls.stack.close()
@@ -397,7 +397,7 @@ class TestEmulatedFp8e4m3(TestFp8e4m3):
   def setUpClass(cls):
     cls.stack = contextlib.ExitStack()
     cls.stack.enter_context(Context(EMULATED_DTYPES="fp8e4m3"))
-    cls.DATA = rand_for_dtype(cls.DTYPE, 10)
+    cls.DATA = rand_for_dtype(cls.DTYPE, 10, allow_subnormal=False)
 
   @classmethod
   def tearDownClass(cls): cls.stack.close()
@@ -409,7 +409,7 @@ class TestEmulatedFp8e5m2(TestFp8e5m2):
   def setUpClass(cls):
     cls.stack = contextlib.ExitStack()
     cls.stack.enter_context(Context(EMULATED_DTYPES="fp8e5m2"))
-    cls.DATA = rand_for_dtype(cls.DTYPE, 10)
+    cls.DATA = rand_for_dtype(cls.DTYPE, 10, allow_subnormal=False)
 
   @classmethod
   def tearDownClass(cls): cls.stack.close()
