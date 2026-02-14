@@ -67,7 +67,7 @@ from tinygrad.runtime.autogen.amd.rdna4 import ins as ir4
 from tinygrad.runtime.autogen.amd.cdna import ins as irc
 from tinygrad.renderer.amd.dsl import VCC_LO, EXEC_LO, SCC, ttmp
 from tinygrad.runtime.autogen.amd.common import Fmt, OpType
-from tinygrad.renderer.amd.pcode import parse_block, _FUNCS
+from test.mockgpu.amd.pcode import parse_block, _FUNCS
 
 MASK32 = 0xFFFFFFFF
 

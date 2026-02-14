@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from tinygrad import Device
 
-from tinygrad.renderer.amd.emu import WaveState, _decode_at, WAVE_SIZE, VCC_LO, EXEC_LO, SCC
+from test.mockgpu.amd.emu import WaveState, _decode_at, WAVE_SIZE, VCC_LO, EXEC_LO, SCC
 from tinygrad.renderer.amd import decode_inst
 from test.amd.helpers import KernelInfo
 import tinygrad
