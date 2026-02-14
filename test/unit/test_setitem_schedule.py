@@ -105,5 +105,33 @@ class TestSetitemInto(unittest.TestCase):
     self.assertEqual(GlobalCounters.kernel_count, 2)
     self.assertListEqual(t.tolist(), [0, 5, 2, 3])
 
+  def test_setitem_slice_const(self):
+    t = Tensor.zeros(100, dtype=dtypes.int32).contiguous().realize()
+    GlobalCounters.reset()
+    t[20:50] = 3
+    self.assertEqual(GlobalCounters.kernel_count, 0)
+    t.realize()
+    self.assertEqual(GlobalCounters.kernel_count, 1)
+    self.assertEqual(GlobalCounters.global_mem, 30*4)  # 30 elements written
+
+  def test_setitem_slice_tensor(self):
+    t = Tensor.zeros(100, dtype=dtypes.int32).contiguous().realize()
+    v = Tensor.zeros(30, dtype=dtypes.int32).contiguous().realize()
+    GlobalCounters.reset()
+    t[20:50] = v
+    self.assertEqual(GlobalCounters.kernel_count, 0)
+    t.realize()
+    self.assertEqual(GlobalCounters.kernel_count, 1)
+    self.assertEqual(GlobalCounters.global_mem, 30*4*2)  # 30 read + 30 written
+
+  def test_setitem_full(self):
+    t = Tensor.zeros(100, dtype=dtypes.int32).contiguous().realize()
+    GlobalCounters.reset()
+    t[:] = 3
+    self.assertEqual(GlobalCounters.kernel_count, 0)
+    t.realize()
+    self.assertEqual(GlobalCounters.kernel_count, 1)
+    self.assertEqual(GlobalCounters.global_mem, 100*4)  # full buffer written
+
 if __name__ == '__main__':
   unittest.main()
