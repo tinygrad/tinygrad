@@ -275,7 +275,7 @@ class ClangRenderer(CStyleLanguage):
     defines = '\n'.join(self._render_defines(uops))
     return defines + "\n" + self._render_body(function_name, kernel, bufs, uops, prefix) + "\n" + self._render_entry(function_name, bufs)
 
-  def __init__(self, arch:str=""):
+  def __init__(self, arch:str):
     from tinygrad.runtime.support.compiler_cpu import ClangJITCompiler
     self.compiler = ClangJITCompiler()
 
@@ -336,7 +336,7 @@ class IntelRenderer(OpenCLRenderer):
 class MetalRenderer(CStyleLanguage):
   device = "METAL"
   shared_max = 32768
-  def __init__(self):
+  def __init__(self, arch:str):
     from tinygrad.runtime.ops_metal import MetalCompiler
     self.compiler, self.tensor_cores = MetalCompiler(), tc.metal if hasattr(os, 'uname') and os.uname().machine == "arm64" else []
 
