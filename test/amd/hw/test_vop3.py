@@ -83,7 +83,7 @@ class TestFmacE64(unittest.TestCase):
     self.assertAlmostEqual(i2f(st.vgpr[0][2]), 7.0, places=5)
 
   def test_v_fmac_f32_e64_with_sgpr_sources(self):
-    """V_FMAC_F32_E64 with SGPR sources (common in AMD_LLVM output).
+    """V_FMAC_F32_E64 with SGPR sources (common in AMD_CC=LLVM output).
 
     This tests the exact pattern that was failing: v_fmac_f32_e64(v[0], s[4], 0)
     where src0 is SGPR and src1 is inline constant 0.
@@ -936,7 +936,7 @@ class TestF16Modifiers(unittest.TestCase):
   def test_v_fmac_f16_hi_dest(self):
     """v_fmac_f16 with .h destination: dst.h = src0 * src1 + dst.h.
 
-    This tests the case from AMD_LLVM sin(0) where V_FMAC_F16 writes to v0.h.
+    This tests the case from AMD_CC=LLVM sin(0) where V_FMAC_F16 writes to v0.h.
     """
     instructions = [
       s_mov_b32(s[0], 0x38003c00),  # v0 = {hi=0.5, lo=1.0}

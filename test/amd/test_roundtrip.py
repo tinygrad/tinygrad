@@ -60,11 +60,11 @@ class TestTinygradKernelRoundtrip(unittest.TestCase):
     from test.amd.test_compare_emulators import get_kernels_from_tinygrad
     from tinygrad.runtime.support.elf import elf_loader
     from tinygrad.runtime.support.compiler_amd import HIPCompiler, AMDLLVMCompiler
-    from tinygrad.helpers import AMD_LLVM
+    from tinygrad.helpers import AMD_CC
 
     kernels, _, _ = get_kernels_from_tinygrad(op_fn)
     # rendered source can be C or llvmir
-    compiler = (AMDLLVMCompiler if AMD_LLVM else HIPCompiler)(get_target(arch))
+    compiler = (AMDLLVMCompiler if AMD_CC.value == 'LLVM' else HIPCompiler)(get_target(arch))
 
     # First pass: decode all instructions and collect info
     decoded_instrs: list[tuple] = []  # list of (ki, offset, orig_bytes, decoded, our_disasm, decode_ok, decode_err)
