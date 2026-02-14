@@ -15,16 +15,12 @@ class NullRenderer(CStyleLanguage):
 
 class NullProgram:
   def __init__(self, device:str, name:str, lib:bytes, *args, **kwargs): self.device, self.name = device, name
-  def __call__(self, *bufs, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), vals:tuple[int, ...]=(),
-               wait=False, raw_kernargs=None):
+  def __call__(self, *bufs, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), vals:tuple[int, ...]=(), wait=False,
+               raw_kernargs=None):
     with cpu_profile(self.name, self.device): return 1e-3
 
-# fake buffer for null returned by alloc, shouldn't be here once kernargs is gone
-class NullBuffer:
-  def __init__(self, size): self.va_addr, self.size = 0x1000000, size
-
 class NullAllocator(Allocator['NullDevice']):
-  def _alloc(self, size, options): return NullBuffer(size)
+  def _alloc(self, size, options): pass
   def _copyin(self, dest, src:memoryview): pass
   def _copyout(self, dest:memoryview, src):
     if not NULL_ALLOW_COPYOUT: raise RuntimeError("no copyout on NULL")

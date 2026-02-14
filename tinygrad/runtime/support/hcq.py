@@ -331,7 +331,6 @@ class HCQProgram(Generic[HCQDeviceType]):
       local_size: Specifies the local work size for kernel execution (equivalent to CUDA's block size).
       vals: Value arguments to execute the kernel with.
       wait: If True, waits for the kernel to complete execution.
-      raw_kernargs: Raw kernargs bytes for prebuilt kernels with custom argument layouts.
 
     Returns:
       Execution time of the kernel if 'wait' is True, otherwise None.

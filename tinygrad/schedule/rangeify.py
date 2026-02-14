@@ -516,7 +516,11 @@ pm_add_range_tags = PatternMatcher([
 
 def split_store(ctx:list[UOp], x:UOp) -> UOp|None:
   # if we have any non-outer ranges open here, we don't split
-  if any(r.arg[-1] != AxisType.OUTER for r in x.ranges): return None
+  # EXCEPTION: if the STORE reads from a kernel output (AFTER) or multi-device (MSELECT/MSTACK), it needs to be processed
+  if any(r.arg[-1] != AxisType.OUTER for r in x.ranges):
+    # Check if this STORE loads from a kernel output or multi-device source
+    has_kernel_input = any(u.op in {Ops.AFTER, Ops.MSELECT, Ops.MSTACK} for u in x.toposort())
+    if not has_kernel_input: return None
 
   # ends of outer range don't go in kernels
   if x.op is Ops.END and x.src[1].op is Ops.RANGE and x.src[1].arg[-1] == AxisType.OUTER: return None

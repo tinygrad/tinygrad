@@ -35,8 +35,6 @@ if __name__ == "__main__":
   g_rewrites = parser.add_argument_group("rewrites options")
   g_rewrites.add_argument("--select", type=str, default=None, metavar="NAME",
                           help="Select an item within the chosen kernel (optional name, default: only list names)")
-  g_rewrites.add_argument("--select-idx", type=int, default=0, metavar="IDX",
-                          help="When multiple steps have the same name, select this index (default: 0)")
   g_common = parser.add_argument_group("common options")
   g_common.add_argument("--kernel", type=str, default=None, metavar="NAME", help="Select a kernel by name (optional name, default: only list names)")
   parser.add_argument("--profile-path", type=pathlib.Path, metavar="PATH", help="Path to profile (optional file, default: latest profile)",
@@ -87,10 +85,7 @@ if __name__ == "__main__":
     if not optional_eq(k, args.kernel): continue
     print(k["name"])
     if args.kernel is None: continue
-    match_idx = 0
     for s in k["steps"]:
       if not optional_eq(s, args.select): continue
-      print(f" [{match_idx}] "*s["depth"]+s['name']+(f" - {s['match_count']}" if s.get('match_count') is not None else ''))
-      if args.select is not None and match_idx == args.select_idx:
-        print_data(viz.get_render(s['query']))
-      match_idx += 1
+      print(" "*s["depth"]+s['name']+(f" - {s['match_count']}" if s.get('match_count') is not None else ''))
+      if args.select is not None: print_data(viz.get_render(s['query']))

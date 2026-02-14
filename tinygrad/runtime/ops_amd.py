@@ -315,8 +315,6 @@ class AMDComputeQueue(HWQueue):
     return self
 
   def exec(self, prg:AMDProgram, args_state:CLikeArgsState, global_size:tuple[sint, ...], local_size:tuple[sint, ...]):
-    assert not any(g == 0 for g in global_size)
-    assert not any(l == 0 for l in local_size)
     self.bind_args_state(args_state)
 
     self.acquire_mem(gli=0, gl2=0)
@@ -600,8 +598,8 @@ class AMDProgram(HCQProgram):
                      base=self.lib_gpu.va_addr)
     weakref.finalize(self, self._fini, self.dev, self.lib_gpu, buf_spec)
 
-  def __call__(self, *bufs, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), vals:tuple[int|None, ...]=(),
-               wait=False, raw_kernargs:bytes|None=None):
+  def __call__(self, *bufs, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), vals:tuple[int|None, ...]=(), wait=False,
+               raw_kernargs:bytes|None=None):
     if self.dev.sqtt_enabled: cast(AMDComputeQueue, self.dev.hw_compute_queue_t()).sqtt_start(self.dev.sqtt_buffers).submit(self.dev)
     res = super().__call__(*bufs, global_size=global_size, local_size=local_size, vals=vals, wait=wait, raw_kernargs=raw_kernargs)
     if self.dev.pmc_enabled:

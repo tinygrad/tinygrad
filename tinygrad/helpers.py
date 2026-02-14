@@ -209,10 +209,8 @@ ALLOW_TF32 = ContextVar("ALLOW_TF32", 0)
 SCACHE = ContextVar("SCACHE", 1)
 # allow use of atomics for embedding backward
 USE_ATOMICS = ContextVar("USE_ATOMICS", 0)
-# allow use of assembly for gemm
-ASM_GEMM = ContextVar("ASM_GEMM", 0)
-# allow use of assembly for attention
-ASM_ATN = ContextVar("ASM_ATN", 0)
+# allow use of assembly for gemm or attention
+ASM_GEMM, ASM_ATN = ContextVar("ASM_GEMM", 0), ContextVar("ASM_ATN", 0)
 
 @dataclass(frozen=True)
 class Metadata:

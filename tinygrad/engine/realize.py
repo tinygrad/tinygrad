@@ -59,7 +59,7 @@ class CompiledRunner(Runner):
       self.p = replace(self.p, global_size=global_size, local_size=local_size)
     # for prebuilt kernels with custom argument layouts, use kernargs_builder to construct raw kernargs
     if self.p.kernargs_builder is not None:
-      raw_kernargs = self.p.kernargs_builder([unwrap(x.ensure_allocated()._buf) for x in rawbufs], var_vals)
+      raw_kernargs = self.p.kernargs_builder([x._buf for x in rawbufs], var_vals)
       return self._prg(global_size=tuple(global_size), local_size=tuple(local_size) if local_size else None, wait=wait, raw_kernargs=raw_kernargs)
     return self._prg(*[x._buf for x in rawbufs], global_size=tuple(global_size), local_size=tuple(local_size) if local_size else None,
                      vals=tuple(var_vals[k.expr] if k.expr not in self.p.runtimevars else None for k in self.p.vars), wait=wait)

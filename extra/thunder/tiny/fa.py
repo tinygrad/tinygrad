@@ -1,7 +1,7 @@
-import math
+import math, functools
 
 from tinygrad import Tensor, dtypes
-from tinygrad.helpers import DEBUG
+from tinygrad.helpers import DEBUG, ASM_ATN
 from tinygrad.uop.ops import UOp, Ops
 
 from extra.thunder.tiny.tk import WARP_THREADS
@@ -12,17 +12,21 @@ NUM_WORKERS = 1
 Q_BLOCK_SIZE = 32
 KV_BLOCK_SIZE = 32
 
-def _sharded_empty(shape:Tensor, ref:Tensor, axis:int|None) -> Tensor:
-  if not isinstance(ref.device, tuple): return Tensor.empty(*shape, dtype=ref.dtype, device=ref.device)
-  shape = tuple(s // len(ref.device) if i == ref.uop.axis else s for i, s in enumerate(shape))
+def _sharded_empty(shape:Tensor, ref:Tensor, axis:int|None, dtype=None) -> Tensor:
+  dtype = dtype if dtype is not None else ref.dtype
+  if not isinstance(ref.device, tuple): return Tensor.empty(*shape, dtype=dtype, device=ref.device)
   axis = ref.uop.axis if axis is None else axis
-  return Tensor(Tensor.empty(*shape, dtype=ref.dtype, device=ref.device).uop.multi(axis), dtype=ref.dtype, device=ref.device)
+  shape = tuple(s // len(ref.device) if i == axis else s for i, s in enumerate(shape))
+  return Tensor(Tensor.empty(*shape, dtype=dtype, device=ref.device).uop.multi(axis), dtype=dtype, device=ref.device)
+
 
 def _sharded_empty_like(ref:Tensor, axis:int|None=None) -> Tensor:
   return _sharded_empty(ref.shape, ref, axis)
 
 def flash_attention(xq, xk, xv, attn_mask:Tensor|None=None, is_causal:bool=False):
   if len(xq.shape) == 3: xq, xk, xv = xq.unsqueeze(0), xk.unsqueeze(0), xv.unsqueeze(0)
+  # pre tiny kittens permutations
+  orig_inputs = [xq, xk, xv]
 
   odtype = xq.dtype
   xq, xk, xv = xq.transpose(1, 2).cast(dtypes.bfloat16), xk.transpose(1, 2).cast(dtypes.bfloat16), xv.transpose(1, 2).cast(dtypes.bfloat16)
@@ -366,7 +370,6 @@ def flash_attention(xq, xk, xv, attn_mask:Tensor|None=None, is_causal:bool=False
     return _custom_backward_kv_impl(dku, dvu, dou, qu, ku, vu, masku, l_vecu, delta_vecu)
 
   single_device = xq.device[0] if isinstance(xq.device, tuple) else xq.device
-
   if is_causal:
     if attn_mask is not None: raise RuntimeError("cannot set attn_mask when is_causal=True")
   elif attn_mask is not None:
@@ -407,7 +410,43 @@ def flash_attention(xq, xk, xv, attn_mask:Tensor|None=None, is_causal:bool=False
     grad_k, grad_v = Tensor.custom_kernel(grad_k, grad_v, grad, xq, xk, xv, attn_mask, l_vec, delta_vec, fxn=custom_backward_kv_masked)[:2]
     return (None, None, grad_q.uop, grad_k.uop, grad_v.uop, None)
 
-  if is_causal:
+  use_asm = ASM_ATN and is_causal and D == 128
+  if use_asm:
+    from extra.gemm.asm.cdna.atn import aiter_fmha_fwd, aiter_fmha_bwd_odo, aiter_fmha_bwd_main, aiter_fmha_bwd_dq_convert, _zero_kernel
+    q,k,v = orig_inputs
+    q_perm, k_perm, v_perm = q.permute(0, 2, 1, 3).contiguous(), k.permute(0, 2, 1, 3).contiguous(), v.permute(0, 2, 1, 3).contiguous()
+    # asm uses float32 LSE with shape (B, H, S)
+    if isinstance(xq.device, tuple):
+      lse_shape = (B // num_devices, H, N)
+      lse_asm = Tensor(Tensor.empty(*lse_shape, dtype=dtypes.float32, device=xq.device).uop.multi(0), dtype=dtypes.float32, device=xq.device)
+    else:
+      lse_asm = Tensor.empty((B, H, N), dtype=dtypes.float32, device=single_device)
+    attn_asm = _sharded_empty_like(q_perm, axis=0)
+
+    def grad_asm(gradu:UOp, _) -> tuple[None, None, UOp, UOp, UOp]:
+      B_, S_, H_, D_ = q_perm.shape
+      dout = Tensor(gradu, device=gradu.device).cast(dtypes.bfloat16)
+
+      delta = _sharded_empty((B_, H_, S_), q_perm, axis=0, dtype=dtypes.float32)
+      delta, *_ = Tensor.custom_kernel(delta, attn_asm, dout, fxn=functools.partial(aiter_fmha_bwd_odo, dname=single_device))
+
+      dq_acc = _sharded_empty((1, B_, H_, S_, D_), q_perm, axis=1, dtype=dtypes.float32)
+      dq_acc = Tensor.custom_kernel(dq_acc, fxn=_zero_kernel)[0]
+
+      dk = _sharded_empty_like(k_perm, axis=0)
+      dv = _sharded_empty_like(k_perm, axis=0)
+      dq_acc, dk, dv, *_ = Tensor.custom_kernel(dq_acc, dk, dv, q_perm, k_perm, v_perm, dout, lse_asm, delta,
+                                                 fxn=functools.partial(aiter_fmha_bwd_main, dname=single_device))
+
+      dq = _sharded_empty_like(q_perm, axis=0)
+      dq, *_ = Tensor.custom_kernel(dq, dq_acc, fxn=functools.partial(aiter_fmha_bwd_dq_convert, dname=single_device))
+
+      return (None, None, dq.uop, dk.uop, dv.uop)
+
+    attn_asm, lse_asm = Tensor.custom_kernel(attn_asm, lse_asm, q_perm, k_perm, v_perm, fxn=functools.partial(aiter_fmha_fwd, write_lse=1, dname=single_device), grad_fxn=grad_asm)[:2]
+    attn = attn_asm.transpose(1, 2)
+    l_vec = lse_asm
+  elif is_causal:
     attn, l_vec = Tensor.custom_kernel(attn, l_vec, xq, xk, xv, fxn=custom_forward_causal, grad_fxn=grad_causal)[:2]
   else:
     attn, l_vec = Tensor.custom_kernel(attn, l_vec, xq, xk, xv, attn_mask, fxn=custom_forward_masked, grad_fxn=grad_masked)[:2]
