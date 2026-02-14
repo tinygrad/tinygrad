@@ -287,7 +287,7 @@ def torch_load(t:Tensor) -> dict[str, Tensor]:
     _, _, _, rwd, _, ids, base_offset = pkl.load(), pkl.load(), pkl.load(), fobj.tell(), pkl.load(), pkl.load(), fobj.tell()
     # slice source tensor t
     for i in ids:
-      storage_source[str(i)] = t[base_offset + 8:base_offset + 8 + lens[i]]
+      storage_source[i] = t[base_offset + 8:base_offset + 8 + lens[i]]
       base_offset += 8 + lens[i]
     fobj.seek(rwd)
     return TorchPickle(fobj).load()
