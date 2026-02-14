@@ -222,10 +222,10 @@ class ClangRenderer(CStyleLanguage):
   gep_arr_threshold = 0
   has_local = False
   has_threads = bool(getenv("THREADS", 1))
-  global_max = (CPU_COUNT.value, 0, 0)
+  global_max = property(lambda self: (CPU_COUNT.value, 0, 0))
   infinity = "__builtin_inff()"
   nan = '__builtin_nanf("")'
-  if AMX: tensor_cores = tc.amx
+  tensor_cores = property(lambda self: tc.amx if AMX else [])
 
   # language options
   buffer_suffix = " restrict"
@@ -275,10 +275,10 @@ class ClangRenderer(CStyleLanguage):
     defines = '\n'.join(self._render_defines(uops))
     return defines + "\n" + self._render_body(function_name, kernel, bufs, uops, prefix) + "\n" + self._render_entry(function_name, bufs)
 
-class ClangJITRenderer(ClangRenderer):
-  def __init__(self):
+  def __init__(self, arch:str):
     from tinygrad.runtime.support.compiler_cpu import ClangJITCompiler
     self.compiler = ClangJITCompiler()
+    Renderer.__init__(self, arch)
 
 class OpenCLRenderer(CStyleLanguage):
   device = "CL"
@@ -337,9 +337,10 @@ class IntelRenderer(OpenCLRenderer):
 class MetalRenderer(CStyleLanguage):
   device = "METAL"
   shared_max = 32768
-  def __init__(self):
+  def __init__(self, arch:str):
     from tinygrad.runtime.ops_metal import MetalCompiler
     self.compiler, self.tensor_cores = MetalCompiler(), tc.metal if hasattr(os, 'uname') and os.uname().machine == "arm64" else []
+    Renderer.__init__(self, arch)
 
   # language options
   kernel_typedef = "kernel void"
@@ -385,13 +386,16 @@ class CUDARenderer(CStyleLanguage):
   local_max = (1024, 1024, 64)
   shared_max = 49152
 
+  @staticmethod
+  def get_tensor_cores(arch): return tc.cuda_sm89 if (ver:=int(arch[3:])) >= 89 else tc.cuda_sm80 if ver >= 80 else tc.cuda_sm75 if ver >= 75 else []
+
   def __init__(self, arch:str, device:str="NV", use_nvcc=False):
     from tinygrad.runtime.support.compiler_cuda import NVRTCCompiler, NVCCCompiler
     from tinygrad.runtime.support.hcq import MOCKGPU
     self.device, self.arch, self.use_nvcc = device, arch, use_nvcc
     self.compiler = (NVCCCompiler if use_nvcc else NVRTCCompiler)(arch, ptx=bool(MOCKGPU) or device == "CUDA", cache_key=device.lower())
-    self.tensor_cores = tc.cuda_sm89 if (ver:=int(arch[3:])) >= 89 else tc.cuda_sm80 if ver >= 80 else tc.cuda_sm75 if ver >= 75 else []
-  def __reduce__(self): return self.__class__, (self.arch, self.device, self.use_nvcc)
+    self.tensor_cores = self.get_tensor_cores(arch)
+    Renderer.__init__(self, arch)
 
   # language options
   # https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html
@@ -481,7 +485,7 @@ class AMDHIPRenderer(CStyleLanguage):
         (UPat(Ops.CAST, dtypes.float, (UPat.var("y", dtypes.fp8s),), name="x",),
           lambda ctx,x,y: f"__builtin_amdgcn_cvt_f32_{('fp8', 'bf8')[fp8_index(y.dtype)]}((unsigned int){ctx[x.src[0]]}, 0)"),
       ]) + base_rewrite
-  def __reduce__(self): return self.__class__, (self.arch,)
+    Renderer.__init__(self, arch)
 
   # https://clang.llvm.org/docs/AttributeReference.html#amdgpu-flat-work-group-size
   # NOTE: this makes hlb_cifar10 twice as fast, there may be more gains in tweaking these parameters

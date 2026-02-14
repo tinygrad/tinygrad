@@ -2,7 +2,8 @@
 
 export PYTHONPATH="."
 export DEV=${DEV:-AMD}
-export EMULATE="AMD_CDNA4"
+[[ "$DEV" == "NULL" ]] && export NULL_CC="AMD" CROSSARCH="gfx950"
+[[ "$DEV" == "PYTHON" ]] && export PYTHON_CC="AMD" CROSSARCH="gfx950"
 export CHECK_OOB=0
 export REWRITE_STACK_LIMIT=5000000 HCQDEV_WAIT_TIMEOUT_MS=240000
 

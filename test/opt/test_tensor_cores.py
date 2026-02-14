@@ -7,7 +7,7 @@ from tinygrad.tensor import _to_np_dtype
 from tinygrad.uop.ops import Ops
 from tinygrad.dtype import DType
 from tinygrad.device import is_dtype_supported
-from tinygrad.helpers import AMX, AMD_LLVM, CPU_LLVM, Context
+from tinygrad.helpers import AMX, AMD_CC, CPU_CC, Context
 from test.helpers import slow
 from tinygrad.engine.realize import CompiledRunner, get_program
 from tinygrad.codegen.opt import Opt, OptOps, KernelOptError
@@ -75,9 +75,9 @@ class TestTensorCores(unittest.TestCase):
       a, b = Tensor.rand(m, k, dtype=tc.dtype_in), Tensor.rand(k, n, dtype=tc.dtype_in)
       r = a.matmul(b, dtype=tc.dtype_out)
       prg = get_program(r.schedule()[-1].ast, Device[Device.DEFAULT].renderer, opts=[Opt(op=OptOps.TC, axis=0, arg=(-1, 2, 1))])
-      if Device.DEFAULT == "CPU" and CPU_LLVM:
+      if Device.DEFAULT == "CPU" and CPU_CC.value == 'LLVM':
         assert "0x201000" in prg.src
-      elif Device.DEFAULT == "AMD" and AMD_LLVM:
+      elif Device.DEFAULT == "AMD" and AMD_CC.value == 'LLVM':
         assert "@llvm.amdgcn.wmma" in prg.src
       elif Device[Device.DEFAULT].renderer.suffix == "PTX":
         assert "mma.sync.aligned" in prg.src

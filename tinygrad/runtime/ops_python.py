@@ -5,11 +5,12 @@
 from typing import Any, TYPE_CHECKING
 import pickle, base64, itertools, time, sys, functools
 from tinygrad.dtype import DType, dtypes, ImageDType, PtrDType, truncate, storage_fmt_for_dtype, to_storage_scalar, from_storage_scalar
-from tinygrad.helpers import all_same, getenv, flatten, get_single_element, EMULATE
-from tinygrad.device import Compiled, Compiler, Allocator, CompilerSet
+from tinygrad.helpers import all_same, getenv, flatten, get_single_element, PYTHON_CC
+from tinygrad.device import Compiled, Compiler, Allocator
 from tinygrad.codegen.opt import tc
 from tinygrad.uop.ops import exec_alu, python_alu, Ops, UOp, GroupOp, bitcast
 from tinygrad.renderer import Renderer
+from tinygrad.renderer.cstyle import AMDHIPRenderer, CUDARenderer
 
 def _load(m, i, dtype: DType):
   if i is None: return 0.0
@@ -205,24 +206,26 @@ class PythonRenderer(Renderer):
   code_for_op = python_alu
   compiler = PythonCompiler()
 
-  def __init__(self):
-    match EMULATE.value:
-      case "METAL": self.device, self.tensor_cores = "METAL", tc.metal
-      case "AMD": self.device, self.tensor_cores = "AMD", tc.amd_rdna3
-      case "AMD_MFMA": self.device, self.tensor_cores = "AMD", tc.amd_cdna4
-      case "AMD_RDNA4": self.device, self.tensor_cores = "AMD", tc.amd_rdna4
-      case "CUDA": self.device, self.tensor_cores = "CUDA", tc.cuda_sm80
-      case "CUDA_SM75": self.device, self.tensor_cores = "CUDA", tc.cuda_sm75
-      case "CUDA_SM89": self.device, self.tensor_cores = "CUDA", tc.cuda_sm89
-      case "INTEL": self.device, self.suffix, self.tensor_cores = "INTEL", "INTEL", tc.intel
-      case "AMX": self.device, self.tensor_cores = "CPU", tc.amx
-      case "": pass
-      case _: raise RuntimeError(f"can't EMULATE device: {EMULATE.value}")
-
   def render(self, uops:list[UOp]) -> str:
     # the value of SPECIAL comes from local/global_size, not form its source
     lops = [(u.op, u.dtype, [uops.index(v) for v in u.src if u.op is not Ops.SPECIAL], u.arg) for u in uops]
     return base64.b64encode(pickle.dumps(lops)).decode()
+
+class MetalPythonRenderer(PythonRenderer): device, tensor_cores = "METAL", tc.metal
+class IntelPythonRenderer(PythonRenderer): device, suffix, tensor_cores = "INTEL", "INTEL", tc.intel
+class AMXPythonRenderer(PythonRenderer): device, tensor_cores = "CPU", tc.amx
+
+class AMDPythonRenderer(PythonRenderer):
+  device = "AMD"
+  def __init__(self, arch:str):
+    self.tensor_cores = AMDHIPRenderer.get_tensor_cores(arch)
+    Renderer.__init__(self, arch)
+
+class CUDAPythonRenderer(PythonRenderer):
+  device = "CUDA"
+  def __init__(self, arch:str):
+    self.tensor_cores = CUDARenderer.get_tensor_cores(arch)
+    Renderer.__init__(self, arch)
 
 class PythonAllocator(Allocator['PythonDevice']):
   def _alloc(self, size, options): return memoryview(bytearray(size))
@@ -231,4 +234,6 @@ class PythonAllocator(Allocator['PythonDevice']):
 
 class PythonDevice(Compiled):
   def __init__(self, device:str):
-    super().__init__(device, PythonAllocator(self), CompilerSet([(PythonRenderer, None)]), PythonProgram)
+    renderers = {'': PythonRenderer, 'METAL': MetalPythonRenderer, 'INTEL': IntelPythonRenderer, 'AMX': AMXPythonRenderer, 'AMD': AMDPythonRenderer,
+                 'CUDA': CUDAPythonRenderer}
+    super().__init__(device, PythonAllocator(self), renderers, PythonProgram, ctrl_var=PYTHON_CC)

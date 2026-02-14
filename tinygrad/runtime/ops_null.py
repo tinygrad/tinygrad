@@ -1,10 +1,10 @@
-import functools
-from tinygrad.device import Compiled, Allocator, CompilerSet
+import functools, inspect
+from tinygrad.device import Compiled, Allocator
 from tinygrad.engine.jit import MultiGraphRunner
-from tinygrad.renderer.cstyle import Renderer, CStyleLanguage, AMDHIPRenderer
+from tinygrad.renderer.cstyle import Renderer, CStyleLanguage
 from tinygrad.uop.ops import Ops
-from tinygrad.helpers import cpu_profile, EMULATE, NULL_IR3, NULL_NAK, NULL_ALLOW_COPYOUT
-from tinygrad.renderer.nir import IR3Renderer, NAKRenderer
+from tinygrad.helpers import cpu_profile, NULL_CC, NULL_ALLOW_COPYOUT
+from tinygrad.renderer import cstyle, nir, ptx, llvmir, wgsl
 
 class NullRenderer(CStyleLanguage):
   device = "NULL"
@@ -32,13 +32,7 @@ class NullGraph(MultiGraphRunner):
 
 class NullDevice(Compiled):
   def __init__(self, device:str):
-    renderer:functools.partial|type[Renderer]
-    match str(EMULATE.value):
-      case "AMD": renderer = functools.partial(AMDHIPRenderer, "gfx1100")
-      case "AMD_RDNA4": renderer = functools.partial(AMDHIPRenderer, "gfx1201")
-      case "AMD_CDNA4": renderer = functools.partial(AMDHIPRenderer, "gfx950")
-      case "": renderer = NullRenderer
-      case _: raise RuntimeError(f"can't EMULATE device: {EMULATE.value}")
-    compilers = CompilerSet([(renderer, None), (functools.partial(IR3Renderer, 0x6030001), NULL_IR3), # adreno 630
-                             (functools.partial(NAKRenderer, "sm_120", 48), NULL_NAK)]) # 5090
-    super().__init__(device, NullAllocator(self), compilers, functools.partial(NullProgram, device), NullGraph)
+    def _name(ren): return ren.device + f":{shortname}" if (shortname:=ren.__name__.upper().removesuffix('RENDERER').removeprefix(ren.device)) else ""
+    renderers:dict[str, type[Renderer]] = {'':NullRenderer, **{_name(ren):ren for m in (cstyle, nir, ptx, llvmir, wgsl) for ren in m.__dict__.values()
+                                                               if inspect.isclass(ren) and issubclass(ren, Renderer) and ren.device}}
+    super().__init__(device, NullAllocator(self), renderers, functools.partial(NullProgram, device), NullGraph, ctrl_var=NULL_CC)

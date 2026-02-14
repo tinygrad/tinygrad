@@ -51,15 +51,17 @@ class LVPCompiler(CPULLVMCompiler):
   def disassemble(self, lib: bytes): cpu_objdump(lib)
 
 class NAKCompiler(Compiler):
-  def __init__(self, arch, warps_per_sm, cache_key="nak"):
-    self.arch, self.warps_per_sm = arch, warps_per_sm
-    self.cc = mesa.nak_compiler_create(mesa.struct_nv_device_info(sm=int(arch[3:]), max_warps_per_mp=warps_per_sm))
+  def __init__(self, arch, cache_key="nak"):
+    self.arch = arch
+    # https://elixir.bootlin.com/mesa/mesa-25.3.3/source/src/nouveau/winsys/nouveau_device.c#L116
+    warps_per_sm = 24 if (sm:=int(arch[3:])) in (10, 11) else 32 if sm in (12, 13, 75) else 48 if sm in (20, 21, 86, 87, 89, 120) else 64
+    self.cc = mesa.nak_compiler_create(mesa.struct_nv_device_info(sm=sm, max_warps_per_mp=warps_per_sm))
     self.nir_options = bytes(mesa.nak_nir_options(self.cc).contents)
     super().__init__(f"compile_{cache_key}_{arch}")
 
   def __del__(self): mesa.nak_compiler_destroy(self.cc)
 
-  def __reduce__(self): return NAKCompiler, (self.arch, self.warps_per_sm)
+  def __reduce__(self): return NAKCompiler, (self.arch,)
 
   def compile(self, src) -> bytes:
     shader = deserialize(src, self.nir_options)
@@ -89,8 +91,8 @@ def disas_adreno(lib:bytes, gpu_id=630):
     print(tf.read())
 
 class IR3Compiler(Compiler):
-  def __init__(self, chip_id, cache_key="ir3"):
-    self.dev_id = mesa.struct_fd_dev_id(((chip_id >> 24) & 0xFF) * 100 + ((chip_id >> 16) & 0xFF) * 10 + ((chip_id >>  8) & 0xFF), chip_id)
+  def __init__(self, arch, cache_key="ir3"):
+    self.dev_id = mesa.struct_fd_dev_id(iarch:=int(arch), (iarch // 100) << 24 | ((iarch // 10) % 10) << 16 | (iarch % 10) << 8)
     self.cc = mesa.ir3_compiler_create(None, self.dev_id, mesa.fd_dev_info(self.dev_id),
                                        mesa.struct_ir3_compiler_options(disable_cache=True)).contents
     self.cc.has_preamble = False

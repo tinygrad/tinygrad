@@ -1,6 +1,6 @@
 import unittest
 from tinygrad import Tensor
-from tinygrad.helpers import getenv, GlobalCounters, EMULATE
+from tinygrad.helpers import getenv, GlobalCounters, PYTHON_CC
 from tinygrad.engine.realize import get_program
 from tinygrad.renderer import ProgramSpec
 from tinygrad.renderer import Estimates
@@ -110,7 +110,7 @@ class TestUOpsStatsMatmulHalf(unittest.TestCase):
     expected_ops = N ** 3 * 2
     self.assertEqual(expected_ops, GlobalCounters.global_ops)
 
-  @unittest.skipIf(EMULATE.value=="INTEL", "intel gets 524288 != 524352")
+  @unittest.skipIf(PYTHON_CC.value=="INTEL", "intel gets 524288 != 524352")
   def test_bigger_matmul_half(self): self.test_simple_matmul_half(64)
 
   def test_batched_matmul_half(self, N=16):

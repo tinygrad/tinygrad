@@ -1,7 +1,7 @@
 import unittest
 import numpy as np
 from tinygrad import Tensor, GlobalCounters, dtypes, nn, Device, Variable
-from tinygrad.helpers import Context, getenv, EMULATE
+from tinygrad.helpers import Context, getenv, NULL_CC
 from tinygrad.engine.realize import run_schedule
 from tinygrad.engine.realize import CompiledRunner, get_program
 from tinygrad.engine.schedule import ExecItem
@@ -189,7 +189,7 @@ class TestIndexing(unittest.TestCase):
     np.testing.assert_allclose(emb.weight.grad.numpy(), expected_grad, rtol=1e-5, atol=1e-5)
 
   # ~10x overhead in fused matmul bw with rope in bf16 vs float16
-  @unittest.skipUnless(Device.DEFAULT == "AMD" or (Device.DEFAULT == "NULL" and EMULATE.value.startswith("AMD")), "tests AMD bf16 cast overhead")
+  @unittest.skipUnless(Device.DEFAULT == "AMD" or (Device.DEFAULT == "NULL" and NULL_CC.value.startswith("AMD")), "tests AMD bf16 cast overhead")
   def base_test_llama_8b_rope_backward(self, dtype, ops_scale):
     from extra.models.llama import precompute_freqs_cis, apply_rotary_emb
     Tensor.training = True

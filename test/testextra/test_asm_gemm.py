@@ -6,7 +6,7 @@ from extra.gemm.asm.cdna.gemm import asm_gemm
 from test.helpers import needs_second_gpu
 
 # On non CDNA4 it will only validate the Tensor.custom_kernel integration
-# Use NULL=1 EMULATE=AMD_CDNA4 to also test the assembly
+# Use NULL=1 CROSSARCH=AMD_CDNA4 to also test the assembly
 def is_cdna4(): return getattr(Device[Device.DEFAULT].renderer, "arch", "").startswith("gfx950")
 
 def run_asm_gemm(a_shape, b_shape, dtype=dtypes.float16, a_shard=None, b_shard=None, gpus:int=1) -> None:
