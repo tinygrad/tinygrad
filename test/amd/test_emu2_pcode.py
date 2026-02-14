@@ -4,8 +4,8 @@ from collections import defaultdict
 from tinygrad.helpers import DEBUG
 from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import UOp, Ops
-from tinygrad.renderer.amd.emu import parse_pcode
-from tinygrad.renderer.amd.pcode import parse_expr
+from test.mockgpu.amd.emu import parse_pcode
+from test.mockgpu.amd.pcode import parse_expr
 from tinygrad.runtime.autogen.amd.rdna3.str_pcode import PCODE
 from tinygrad.runtime.autogen.amd.rdna3.enum import VOP1Op, VOP2Op, SOP2Op, DSOp
 
