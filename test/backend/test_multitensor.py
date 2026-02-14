@@ -1324,6 +1324,55 @@ class TestMultiAssign(unittest.TestCase):
     self.assertListEqual(out.tolist(), [[0,1,2,3,4,0]]*4)
 
 @unittest.skipIf(not_support_multi_device(), "need multi")
+class TestMultiSetitem(unittest.TestCase):
+  device = tuple(f"{Device.DEFAULT}:{i}" for i in range(4))
+
+  @needs_second_gpu
+  def setUp(self): pass
+
+  def _t(self, axis): return Tensor.arange(16).contiguous().realize().shard(self.device, axis=axis)
+
+  def test_setitem_scalar_axis0(self):
+    t = self._t(0)
+    t[1] = 99
+    self.assertListEqual(t.tolist(), [0,99,2,3,4,5,6,7,8,9,10,11,12,13,14,15])
+
+  def test_setitem_scalar_axis_none(self):
+    t = self._t(None)
+    t[1] = 99
+    self.assertListEqual(t.tolist(), [0,99,2,3,4,5,6,7,8,9,10,11,12,13,14,15])
+
+  def test_setitem_slice_cross_shard(self):
+    t = self._t(0)
+    t[2:6] = 99
+    self.assertListEqual(t.tolist(), [0,1,99,99,99,99,6,7,8,9,10,11,12,13,14,15])
+
+  def test_setitem_full_slice(self):
+    t = self._t(0)
+    t[:] = 42
+    self.assertListEqual(t.tolist(), [42]*16)
+
+  def test_setitem_stride(self):
+    t = self._t(0)
+    t[::4] = 0
+    self.assertListEqual(t.tolist(), [0,1,2,3,0,5,6,7,0,9,10,11,0,13,14,15])
+
+  def test_setitem_single_shard(self):
+    t = self._t(0)
+    t[13] = 99
+    self.assertListEqual(t.tolist(), [0,1,2,3,4,5,6,7,8,9,10,11,12,99,14,15])
+
+  def test_setitem_tensor_value_replicated(self):
+    t = self._t(0)
+    t[2:6] = Tensor([90, 91, 92, 93]).shard(self.device)
+    self.assertListEqual(t.tolist(), [0,1,90,91,92,93,6,7,8,9,10,11,12,13,14,15])
+
+  def test_setitem_tensor_value_sharded_aligned(self):
+    t = self._t(0)
+    t[::4] = Tensor([90, 91, 92, 93]).shard(self.device, axis=0)
+    self.assertListEqual(t.tolist(), [90,1,2,3,91,5,6,7,92,9,10,11,93,13,14,15])
+
+@unittest.skipIf(not_support_multi_device(), "need multi")
 class TestMultiTransformer(unittest.TestCase):
   @needs_second_gpu
   def test_transformer(self):

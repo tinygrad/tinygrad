@@ -43,7 +43,6 @@ def assign_to_contiguous(assign:UOp, target:UOp, src:UOp):
   if target is not t and target.op_in_backward_slice_with_self(Ops.SHRINK):
     # base already realized: copy src only if it reads from the same buffer (overlapping read/write hazard)
     if t.op is Ops.CONTIGUOUS: return assign.replace(src=(target, src.contiguous())) if t in src.toposort() else None
-    if t.op is Ops.CONST: raise RuntimeError("setitem target must be a writable view backed by a buffer")
     mops: list[UOp] = []
     while target.op in GroupOp.Movement:
       mops.append(target)
