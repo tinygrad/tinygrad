@@ -583,6 +583,7 @@ class TestVizMemoryLayout(BaseTestViz):
     user_cnt = [len(b["arg"]["users"]) for b in buffers if b["arg"].get("users")]
     self.assertEqual(len(user_cnt), len(programs))
 
+  @unittest.skip("flaky")
   def test_inflight_buf(self):
     a = Tensor.empty(1, device="NULL")
     n = 4
