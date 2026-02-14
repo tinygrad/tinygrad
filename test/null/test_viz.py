@@ -364,6 +364,15 @@ def load_profile(lst:list[ProfileEvent]) -> dict:
   return {"dur":total_dur, "peak":global_peak, "layout":layout, "markers":markers}
 
 class TestVizProfiler(BaseTestViz):
+  def test_transfer_uses_copy_device(self):
+    a = Tensor.ones(1, device="NULL").contiguous().realize()
+    a.to("NULL:1").realize()
+    range_events = [e for e in cpu_events if isinstance(e, ProfileRangeEvent)]
+    compute_events = [e for e in range_events if e.device == "NULL"]
+    copy_events = [e for e in range_events if e.device.endswith(":COPY")]
+    self.assertGreater(len(compute_events), 0, "expected compute events on base device")
+    self.assertGreater(len(copy_events), 0, "transfer must produce events with ':COPY' device suffix")
+
   def test_node(self):
     prof = [ProfileRangeEvent(device='NV', name='E_2', st=decimal.Decimal(1000), en=decimal.Decimal(1010)),
             ProfileDeviceEvent(device='NV', tdiff=decimal.Decimal(-1000))]
