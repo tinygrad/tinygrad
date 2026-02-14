@@ -24,7 +24,7 @@ class PythonRemu:
   user_data: list[int] = []  # All COMPUTE_USER_DATA registers (loaded into s[0:N])
 
   def run_asm(self, lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, lz: int, args_ptr: int) -> int:
-    from tinygrad.renderer.amd.emu import run_asm
+    from test.mockgpu.amd.emu import run_asm
     return run_asm(lib, lib_sz, gx, gy, gz, lx, ly, lz, args_ptr, self.rsrc2, self.scratch_size, self.arch, self.user_data)
 
 def _try_dlopen_remu():
