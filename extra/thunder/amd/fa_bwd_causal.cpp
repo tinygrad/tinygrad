@@ -38,16 +38,14 @@ template<int D> struct attn_bwd_combined_globals {
   gl<bf16, -1, -1, -1, -1> Q, K, V;
   gl<bf16, -1, -1, -1, -1> dOg, dQg, dKg, dVg;
   gl<float, -1, -1, -1, -1> L_vec, delta_vec;
-  hipStream_t stream;
-  dim3 grid() { return dim3(ATTN_H_KV, ATTN_B, (ATTN_N / BLOCK_SIZE_KV)); }
+  dim3 grid() { return dim3(ATTN_H_KV, (ATTN_N / BLOCK_SIZE_KV), ATTN_B); }
   dim3 block() { return dim3(NUM_THREADS); }
   size_t dynamic_shared_memory() { return MAX_SHARED_MEMORY; }
 };
 
-
 template<int D> __launch_bounds__(NUM_THREADS, 1)
-__global__ __attribute__((amdgpu_num_vgpr(29))) void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr, bf16 *dO_ptr, bf16 *Q_ptr, bf16 *K_ptr, bf16 *V_ptr, float *L_vec_ptr, float *delta_vec_ptr) {
-  gl<bf16, -1, -1, -1, -1> dQg{dQ_ptr, ATTN_B, ATTN_N, ATTN_H, ATTN_D};
+__global__  void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr, bf16 *dO_ptr, bf16 *Q_ptr, bf16 *K_ptr, bf16 *V_ptr, float *L_vec_ptr, float *delta_vec_ptr) {
+  gl<bf16, -1, -1, -1, -1> dQg{dQ_ptr, ATTN_B, ATTN_H, ATTN_N, ATTN_D};
   gl<bf16, -1, -1, -1, -1> dKg{dK_ptr, ATTN_B, ATTN_N, ATTN_H_KV, ATTN_D};
   gl<bf16, -1, -1, -1, -1> dVg{dV_ptr, ATTN_B, ATTN_N, ATTN_H_KV, ATTN_D};
   gl<bf16, -1, -1, -1, -1> dOg{dO_ptr, ATTN_B, ATTN_N, ATTN_H, ATTN_D};
@@ -59,8 +57,8 @@ __global__ __attribute__((amdgpu_num_vgpr(29))) void attend_bwd_combined_ker(bf1
   attn_bwd_combined_globals<D> g{Q, K, V, dOg, dQg, dKg, dVg, L_vec, delta_vec};
 
   const int kv_head_idx = blockIdx.x;  // This is the KV head index
-  const int seq_idx = blockIdx.z;
-  const int batch_idx = blockIdx.y;
+  const int seq_idx = blockIdx.y;
+  const int batch_idx = blockIdx.z;
   const int first_q_head = kv_head_idx * GROUP_SIZE;
 
   const int warpid = kittens::warpid();
