@@ -13,7 +13,7 @@ from extra.thunder.tiny.tk.tiles import ST_16X32, RT_16X32, RT_16X16, TileLayout
 
 class TestTK(unittest.TestCase):
   def setUp(self):
-    arch = getattr(Device[Device.DEFAULT], "renderer").arch
+    arch = getattr(Device[Device.DEFAULT].renderer, "arch", "")
     if not arch.startswith("gfx9"):
       self.skipTest(f"arch {arch} not supported")
 
