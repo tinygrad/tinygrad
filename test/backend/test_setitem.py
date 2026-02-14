@@ -71,56 +71,80 @@ class TestSetitem(unittest.TestCase):
 
   def test_setitem_into_empty(self):
     GlobalCounters.reset()
-    t = Tensor.empty(4)
+    t = Tensor.empty(4, dtype=dtypes.int32)
     self.assertEqual(GlobalCounters.kernel_count, 0)
     t[1] = 5
     self.assertEqual(GlobalCounters.kernel_count, 1)
+    self.assertEqual(GlobalCounters.global_mem, 4)
     t[1].realize()
-    self.assertEqual(GlobalCounters.kernel_count, 1)
     t.realize()
     self.assertEqual(GlobalCounters.kernel_count, 1)
     self.assertEqual(t[1].item(), 5)
 
-  def test_setitem_into_tensor(self):
-    t = Tensor([1, 2, 3, 4]).realize()
+  def test_setitem_into_empty_alu(self):
     GlobalCounters.reset()
+    t = Tensor.empty(4, dtype=dtypes.int32) + 1
     self.assertEqual(GlobalCounters.kernel_count, 0)
+    t[1] = 5
+    self.assertEqual(GlobalCounters.kernel_count, 2)
+    self.assertEqual(GlobalCounters.global_mem, 4*4*2+4)
+    t[1].realize()
+    t.realize()
+    self.assertEqual(GlobalCounters.kernel_count, 2)
+    self.assertEqual(t[1].item(), 5)
+
+  def test_setitem_into_tensor(self):
+    t = Tensor([1, 2, 3, 4], dtype=dtypes.int32).realize()
+    GlobalCounters.reset()
     t[1] = 5
     self.assertEqual(GlobalCounters.kernel_count, 0)
     t[1].realize()
     self.assertEqual(GlobalCounters.kernel_count, 1)
+    self.assertEqual(GlobalCounters.global_mem, 4)
     t.realize()
     self.assertEqual(GlobalCounters.kernel_count, 1)
     self.assertListEqual(t.tolist(), [1, 5, 3, 4])
 
+  def test_setitem_into_tensor_alu(self):
+    t = Tensor([1, 2, 3, 4], dtype=dtypes.int32).realize() + 1
+    GlobalCounters.reset()
+    t[1] = 5
+    self.assertEqual(GlobalCounters.kernel_count, 2)
+    self.assertEqual(GlobalCounters.global_mem, 4*4*2+4)
+    t[1].realize()
+    t.realize()
+    self.assertEqual(GlobalCounters.kernel_count, 2)
+    self.assertListEqual(t.tolist(), [2, 5, 4, 5])
+
   def test_setitem_into_cont(self):
-    t = Tensor.ones(4)
+    t = Tensor.ones(4, dtype=dtypes.int32)
     with self.assertRaises(RuntimeError): t[1] = 5
 
   def test_setitem_into_const_alu(self):
     # TODO: this is not consistent
     GlobalCounters.reset()
-    t = Tensor.ones(4) + Tensor.ones(4)
+    t = Tensor.ones(4, dtype=dtypes.int32) + 1
     self.assertEqual(GlobalCounters.kernel_count, 0)
     t[1] = 5
     self.assertEqual(GlobalCounters.kernel_count, 2)
+    self.assertEqual(GlobalCounters.global_mem, 4*4+4)
     t[1].realize()
-    self.assertEqual(GlobalCounters.kernel_count, 2)
     t.realize()
     self.assertEqual(GlobalCounters.kernel_count, 2)
     self.assertListEqual(t.tolist(), [2, 5, 2, 2])
 
-    t = Tensor.ones(4) + Tensor.ones(4)
+    t = Tensor.ones(4, dtype=dtypes.int32) + 1
     t.realize()
     with self.assertRaises(RuntimeError): t[1] = 5
 
   def test_setitem_into_arange(self):
     # NOTE: arange has no real buffer, but assigning to it is fine
     GlobalCounters.reset()
-    t = Tensor.arange(4)
+    t = Tensor.arange(4, dtype=dtypes.int32)
     self.assertEqual(GlobalCounters.kernel_count, 0)
     t[1] = 5
     self.assertEqual(GlobalCounters.kernel_count, 2)
+    t[1].realize()
     t.realize()
     self.assertEqual(GlobalCounters.kernel_count, 2)
     self.assertListEqual(t.tolist(), [0, 5, 2, 3])
