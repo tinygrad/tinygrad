@@ -1,8 +1,12 @@
-from tinygrad import dtypes, getenv, Device
+from tinygrad import dtypes, getenv, Device, Tensor, TinyJit
 from tinygrad.helpers import trange, colored, DEBUG, temp
 from tinygrad.nn.datasets import mnist
 import torch
 from torch import nn, optim
+
+from extra.torch_backend.backend import unwrap, wrap
+from torch._dynamo.backends.registry import register_backend
+from torch._functorch.aot_autograd import aot_module_simplified
 
 class Model(nn.Module):
   def __init__(self):
@@ -25,10 +29,47 @@ class Model(nn.Module):
     x = self.m2(self.bn2(x))
     return self.lin(torch.flatten(x, 1))
 
+
+@register_backend
+def tiny(gm:torch.fx.GraphModule, sample_inputs):
+  def forward_compiler(gm:torch.fx.GraphModule, sample_inputs):
+    # We're doing the same compilation that TinyJit does, just letting torch.compile handle the caching.
+    # Using @TinyJit here breaks training because it caches batch norm buffer updates incorrectly.
+    def tiny_function(*args:Tensor):
+      outs = gm(*[wrap(x) for x in args])
+      for x in outs:
+        if x is not None: unwrap(x).realize()
+      return outs
+    # TODO: this should be able to pass in .tiny() Tensors, not need to convert them. it tries to access Storage if you pass in.
+    def torch_function(*args:torch.Tensor): return tiny_function(*[unwrap(x.tiny()) for x in args])
+    return torch_function
+
+  def backward_compiler_with_device_conversion(gm:torch.fx.GraphModule, sample_inputs):
+    # Backward pass needs separate handling: we compile the graph but also convert gradients back to CPU
+    # so they match the device where model parameters live (CPU, since we can't trace on "tiny" device).
+    def tiny_function(*args:Tensor):
+      outs = gm(*[wrap(x) for x in args])
+      for x in outs:
+        if x is not None: unwrap(x).realize()
+      return outs
+    def torch_function(*args:torch.Tensor):
+      result = tiny_function(*[unwrap(x.tiny()) for x in args])
+      if isinstance(result, (list, tuple)):
+        return type(result)(r.to('cpu') if r is not None and hasattr(r, 'to') else r for r in result)
+      return result.to('cpu') if result is not None and hasattr(result, 'to') else result
+    return torch_function
+
+  return aot_module_simplified(gm, sample_inputs, decompositions={}, fw_compiler=forward_compiler, bw_compiler=backward_compiler_with_device_conversion)
+
+
+
 if __name__ == "__main__":
   if getenv("TINY_BACKEND"):
     import tinygrad.nn.torch  # noqa: F401
-    device = torch.device("tiny")
+    # When using torch.compile with tiny backend, keep everything on CPU
+    # The backend will handle conversion to tinygrad internally
+    device = torch.device("cpu")  # Using CPU (tracing on "tiny" doesn't work)
+    # device = torch.device("tiny")  # TESTED: doesn't work - can't trace OpaqueTensorImpl
   else:
     device = torch.device({"METAL":"mps","NV":"cuda"}.get(Device.DEFAULT, "cpu"))
   if DEBUG >= 1: print(f"using torch backend {device}")
@@ -43,11 +84,20 @@ if __name__ == "__main__":
   optimizer = optim.Adam(model.parameters(), 1e-3)
 
   loss_fn = nn.CrossEntropyLoss()
-  #@torch.compile
-  def step(samples):
-    X,Y = X_train[samples], Y_train[samples]
+
+  # Use "tiny" if we have "TINY_BACKEND" otherwise the default PyTorch's "inductor"
+  compile_backend = "tiny" if getenv("TINY_BACKEND") else "inductor"
+
+  # Compile only the forward pass computation
+  @torch.compile(backend=compile_backend)
+  def forward_and_loss(X, Y):
     out = model(X)
     loss = loss_fn(out, Y)
+    return loss
+
+  def step(samples):
+    X,Y = X_train[samples], Y_train[samples]
+    loss = forward_and_loss(X, Y)
     optimizer.zero_grad()
     loss.backward()
     optimizer.step()
