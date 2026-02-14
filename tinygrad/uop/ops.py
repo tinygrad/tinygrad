@@ -836,10 +836,9 @@ class KernelInfo:
   applied_opts: tuple = tuple()
   opts_to_apply: tuple|None = None
   estimates: Estimates|None = None
-  kernargs_builder: Callable|None = None  # for prebuilt kernels with custom arg layouts
+  kernargs_builder: Callable|None = None
   @property
   def function_name(self): return to_function_name(self.name)
-  # kernargs_builder can't be pickled
   def __reduce__(self): return (KernelInfo, (self.name, self.axis_types, self.dont_use_locals, self.applied_opts, self.opts_to_apply, self.estimates))
 
 @dataclass(frozen=True)

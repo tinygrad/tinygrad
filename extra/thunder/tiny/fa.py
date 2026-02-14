@@ -370,6 +370,7 @@ def flash_attention(xq, xk, xv, attn_mask:Tensor|None=None, is_causal:bool=False
     return _custom_backward_kv_impl(dku, dvu, dou, qu, ku, vu, masku, l_vecu, delta_vecu)
 
   single_device = xq.device[0] if isinstance(xq.device, tuple) else xq.device
+
   if is_causal:
     if attn_mask is not None: raise RuntimeError("cannot set attn_mask when is_causal=True")
   elif attn_mask is not None:

@@ -337,12 +337,10 @@ class HCQProgram(Generic[HCQDeviceType]):
     """
 
     if raw_kernargs is not None:
-      # use raw kernargs for prebuilt kernels with custom argument layouts
       argsbuf = self.dev.kernargs_buf.offset(offset=self.dev.kernargs_offset_allocator.alloc(len(raw_kernargs), 8), size=len(raw_kernargs))
       argsbuf.cpu_view()[:len(raw_kernargs)] = raw_kernargs
       kernargs = HCQArgsState(argsbuf, self, bufs, vals)
-    else:
-      kernargs = self.fill_kernargs(bufs, vals)
+    else: kernargs = self.fill_kernargs(bufs, vals)
     q = self.dev.hw_compute_queue_t().wait(self.dev.timeline_signal, self.dev.timeline_value - 1).memory_barrier()
 
     self.dev.prof_exec_counter += 1

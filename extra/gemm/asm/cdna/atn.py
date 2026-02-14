@@ -3,11 +3,14 @@ import pathlib, struct, ctypes, atexit, functools, math
 from tinygrad import Tensor, dtypes
 from tinygrad.uop.ops import UOp, Ops, KernelInfo
 from tinygrad.renderer import Estimates
-from tinygrad.runtime.support.compiler_amd import amdgpu_disassemble
-from tinygrad.viz.serve import get_stdout
 
-def float_to_u32(f:float) -> int:
-  return struct.unpack('I', struct.pack('f', f))[0]
+def f32_to_u32(f:float) -> int: return struct.unpack('I', struct.pack('f', f))[0]
+
+# TODO: something in our dsl to read the ELF table for naming labels could replace this
+def get_disasm(binary:bytes) -> str:
+  from tinygrad.runtime.support.compiler_amd import amdgpu_disassemble
+  from tinygrad.viz.serve import get_stdout
+  return get_stdout(lambda: amdgpu_disassemble(binary))
 
 counters = {"used":0}
 atexit.register(lambda: print(f'asm_atn: {counters["used"]} used'))
@@ -148,7 +151,7 @@ def build_fwd_kernargs(B, H, H_KV, S, D, write_lse, bufs, var_vals) -> bytes:
   args = FwdArgs()
   args.R, args.LSE, args.Q, args.K, args.V = vaddr(bufs[0]), vaddr(bufs[1]), vaddr(bufs[2]), vaddr(bufs[3]), vaddr(bufs[4])
   args.ptr_qseq, args.ptr_kseq, args.ptr_qseq_padding, args.ptr_kseq_padding = 0, 0, 0, 0
-  args.scalar, args.seq_len, args.kv_seq_len = float_to_u32(1.0 / math.sqrt(D)), S, S
+  args.scalar, args.seq_len, args.kv_seq_len = f32_to_u32(1.0 / math.sqrt(D)), S, S
   args.qk_head_dim, args.v_head_dim, args.q_head_num, args.gqa = D, D, H, H // H_KV
   args.msk_opt, args.lse, args.lse_Hs = 5, write_lse, S * 4  # causal mask
   elem_size = 2 # bfloat16
@@ -171,9 +174,8 @@ def aiter_fmha_fwd(out:UOp, lse:UOp, q:UOp, k:UOp, v:UOp, write_lse:bool, dname:
   ops, mem = B * H * S * S * D * 2, (out.size + q.size + k.size + v.size + lse.size) * 2
   sink = UOp.sink(out.base, lse.base, q.base, k.base, v.base, gidx0, gidx1, gidx2, lidx0,
                   arg=KernelInfo(name="aiter_fmha_fwd_hd128_bf16_causal", estimates=Estimates(ops=ops, mem=mem), kernargs_builder=kernargs_builder))
-  src = get_stdout(lambda: amdgpu_disassemble(binary))
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg=dname), UOp(Ops.LINEAR, src=(*sink.src, sink)),
-                               UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=binary)))
+                               UOp(Ops.SOURCE, arg=get_disasm(binary)), UOp(Ops.BINARY, arg=binary)))
 
 # backward kernels
 
@@ -197,9 +199,8 @@ def aiter_fmha_bwd_odo(delta:UOp, out:UOp, dout:UOp, dname:str) -> UOp:
   ops, mem = B * H * S * D * 2, (delta.size * 4 + out.size * 2 + dout.size * 2)
   sink = UOp.sink(delta.base, out.base, dout.base, gidx0, gidx1, gidx2, lidx0,
                   arg=KernelInfo(name=name, estimates=Estimates(ops=ops, mem=mem), kernargs_builder=kernargs_builder))
-  src = f"; prebuilt aiter kernel: {name}"
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg=dname), UOp(Ops.LINEAR, src=(*sink.src, sink)),
-                               UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=binary)))
+                               UOp(Ops.SOURCE, arg=get_disasm(binary)), UOp(Ops.BINARY, arg=binary)))
 
 def build_main_kernargs(B, H, H_KV, S, D, bufs, var_vals) -> bytes:
   args = BwdMainArgs()
@@ -207,7 +208,7 @@ def build_main_kernargs(B, H, H_KV, S, D, bufs, var_vals) -> bytes:
   args.dQ, args.dK, args.dV = vaddr(bufs[0]), vaddr(bufs[1]), vaddr(bufs[2])
   args.Q, args.K, args.V = vaddr(bufs[3]), vaddr(bufs[4]), vaddr(bufs[5])
   args.dO, args.Lse, args.D = vaddr(bufs[6]), vaddr(bufs[7]), vaddr(bufs[8])
-  args.scalar, args.log2e = float_to_u32(1.0 / math.sqrt(D)), float_to_u32(math.log2(math.e))
+  args.scalar, args.log2e = f32_to_u32(1.0 / math.sqrt(D)), f32_to_u32(math.log2(math.e))
   args.seqlen_q, args.seqlen_k, args.head_dim_q, args.head_dim_k = S, S, D, D
   args.nhead_q, args.ratio, args.Ts = H, H // H_KV, S * D // 2
   Seqs_stride, Hs_stride, Bs_stride = H * D * elem_size, D * elem_size, S * H * D * elem_size
@@ -236,9 +237,8 @@ def aiter_fmha_bwd_main(dq_acc:UOp, dk:UOp, dv:UOp, q:UOp, k:UOp, v:UOp, dout:UO
   sink = UOp.sink(dq_acc.base, dk.base, dv.base, q.base, k.base, v.base, dout.base, lse.base, delta.base,
                   gidx0, gidx1, gidx2, lidx0,
                   arg=KernelInfo(name=name, estimates=Estimates(ops=ops, mem=mem), kernargs_builder=kernargs_builder))
-  src = f"; prebuilt aiter kernel: {name}"
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg=dname), UOp(Ops.LINEAR, src=(*sink.src, sink)),
-                               UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=binary)))
+                               UOp(Ops.SOURCE, arg=get_disasm(binary)), UOp(Ops.BINARY, arg=binary)))
 
 def build_dq_convert_kernargs(B, H, S, D, bufs, var_vals) -> bytes:
   args = BwdDqConvertArgs()
@@ -260,12 +260,11 @@ def aiter_fmha_bwd_dq_convert(dq:UOp, dq_acc:UOp, dname:str) -> UOp:
   ops, mem = B * H * S * D, (dq.size * 2 + dq_acc.size * 4)
   sink = UOp.sink(dq.base, dq_acc.base, gidx0, gidx1, gidx2, lidx0,
                   arg=KernelInfo(name=name, estimates=Estimates(ops=ops, mem=mem), kernargs_builder=kernargs_builder))
-  src = f"; prebuilt aiter kernel: {name}"
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg=dname), UOp(Ops.LINEAR, src=(*sink.src, sink)),
-                               UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=binary)))
+                               UOp(Ops.SOURCE, arg=get_disasm(binary)), UOp(Ops.BINARY, arg=binary)))
 
+# this is used to initialize the acc buffer
 def zero_kernel(out:UOp) -> UOp:
-  # Create a simple store of zeros - use base dtype (element type) for the constant
   i = UOp.range(out.size, 0)
   zero = UOp.const(out.dtype.base, 0)
   return out.flatten()[i].store(zero).end(i).sink(arg=KernelInfo(name="zero"))

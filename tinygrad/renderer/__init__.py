@@ -78,7 +78,7 @@ class ProgramSpec:
   globals:list[int]=field(default_factory=list)
   outs:list[int]=field(default_factory=list)
   ins:list[int]=field(default_factory=list)
-  kernargs_builder:Callable|None=None  # for prebuilt kernels with custom arg layouts
+  kernargs_builder:Callable|None=None
 
   @functools.cached_property
   def estimates(self) -> Estimates:
