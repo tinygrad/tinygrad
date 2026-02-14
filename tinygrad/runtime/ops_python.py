@@ -217,11 +217,15 @@ class AMXPythonRenderer(PythonRenderer): device, tensor_cores = "CPU", tc.amx
 
 class AMDPythonRenderer(PythonRenderer):
   device = "AMD"
-  def __init__(self, arch:str): self.tensor_cores = AMDHIPRenderer.get_tensor_cores(arch)
+  def __init__(self, arch:str):
+    self.tensor_cores = AMDHIPRenderer.get_tensor_cores(arch)
+    Renderer.__init__(self, arch)
 
 class CUDAPythonRenderer(PythonRenderer):
   device = "CUDA"
-  def __init__(self, arch:str): self.tensor_cores = CUDARenderer.get_tensor_cores(arch)
+  def __init__(self, arch:str):
+    self.tensor_cores = CUDARenderer.get_tensor_cores(arch)
+    Renderer.__init__(self, arch)
 
 class PythonAllocator(Allocator['PythonDevice']):
   def _alloc(self, size, options): return memoryview(bytearray(size))
