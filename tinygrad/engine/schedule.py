@@ -29,7 +29,9 @@ def create_schedule(sched_sink:UOp) -> tuple[list[ExecItem], UOp]:
       assert k.op in {Ops.CALL, Ops.END}, f"AFTER src[1] should be KERNEL or END, not {k.op}"
       in_degree.setdefault(k, 0)
       if k.op is Ops.END: assert k.src[0].op is Ops.CALL, f"END src[0] should be KERNEL, not {k.src[0].op}"
-      for s in k.src[0].src[1:] if k.op is Ops.END else k.src[1:]:
+      # WAR deps from rangeify are stored in AFTER src[2:]
+      kernel_deps = k.src[0].src[1:] if k.op is Ops.END else k.src[1:]
+      for s in kernel_deps + u.src[2:]:
         match (s := _unwrap_src(s)).op:
           case Ops.AFTER:
             children.setdefault(s.src[1], []).append(k)

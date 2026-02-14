@@ -756,8 +756,6 @@ class TestAssignOrdering(unittest.TestCase):
     self.assertEqual(buf[0:1, :].sum().item(), 4)
     self.assertEqual(buf[1:2, :].sum().item(), 8)
 
-  # TODO: fix this, see https://github.com/tinygrad/tinygrad/issues/13600
-  @unittest.expectedFailure
   def test_multi_step_assign_read_write_same_buffer(self):
     """Assign to m and param reading b, then update b, across multiple steps.
     This is the optimizer bias-correction pattern from issue #13600: m accumulates,
