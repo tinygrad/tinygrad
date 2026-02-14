@@ -248,6 +248,16 @@ class RT(TileMathMixin):
     uop = ker.alloc((height, width, base_shape.elements_per_thread), dtype, AddrSpace.REG)
     return cls(uop, layout, base_shape, ker)
 
+  @property
+  def reductions(self):
+    return self.base_shape.rows if self.layout == TileLayout.COL else self.base_shape.cols
+  @property
+  def threads_per_reduction(self):
+    return self.reductions // self.base_shape.elements_per_thread
+  @property
+  def elements_per_stride_group(self):
+    return self.threads_per_reduction * self.base_shape.stride
+
 @autowrap(UOp)
 class RV(TileMathMixin):
   def __init__(self, uop:UOp, length:int, layout:VecLayout, base_shape:RTBaseShape, ker):
