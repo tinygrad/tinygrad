@@ -5,7 +5,6 @@ from tinygrad.uop.ops import UOp, Ops
 from tinygrad.engine.realize import get_runner
 from tinygrad.engine.schedule import ExecItem
 from tinygrad.engine.jit import TinyJit
-from tinygrad.helpers import CI
 import numpy as np
 
 from extra.thunder.tiny.tk import WARP_THREADS
