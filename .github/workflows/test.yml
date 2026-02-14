@@ -29,9 +29,9 @@ jobs:
         deps: testing_unit
         llvm: 'true'
     - name: Speed Test
-      run: CPU=1 CPU_LLVM=1 THREADS=0 python3 test/speed/external_test_speed_v_torch.py
+      run: CPU=1 CPU_CC=LLVM THREADS=0 python3 test/speed/external_test_speed_v_torch.py
     - name: Speed Test (BEAM=2)
-      run: BEAM=2 CPU=1 CPU_LLVM=1 THREADS=0 python3 test/speed/external_test_speed_v_torch.py
+      run: BEAM=2 CPU=1 CPU_CC=LLVM THREADS=0 python3 test/speed/external_test_speed_v_torch.py
 
   docs:
     name: Docs
@@ -83,7 +83,7 @@ jobs:
       run: DEBUG=100 python3 -c "from tinygrad import Tensor; N = 1024; a, b = Tensor.rand(N, N), Tensor.rand(N, N); c = (a.reshape(N, 1, N) * b.T.reshape(1, N, N)).sum(axis=2); print((c.numpy() - (a.numpy() @ b.numpy())).mean())"
     - name: Compile EfficientNet to C and test it
       run: |
-        CPU=1 CPU_LLVM=0 python examples/compile_efficientnet.py > recognize.c
+        CPU=1 CPU_CC=CLANG python examples/compile_efficientnet.py > recognize.c
         clang -O2 recognize.c -lm -o recognize
         cat test/models/efficientnet/Chicken.jpg | ./recognize | grep cock
 
@@ -628,7 +628,7 @@ jobs:
       AMD: 1
       MOCKGPU: 1
       FORWARD_ONLY: 1
-      AMD_LLVM: ${{ matrix.backend == 'amdllvm' && '1' || matrix.backend != 'amdllvm' && '0' }}
+      AMD_CC: ${{ matrix.backend == 'amdllvm' && 'LLVM' || matrix.backend != 'amdllvm' && 'HIP' }}
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -819,7 +819,7 @@ jobs:
       env:
         MOCKGPU: 1
         AMD: 1
-        AMD_LLVM: 0
+        AMD_CC: HIP
         FORWARD_ONLY: 1
       run: |
         python3 -m pytest -n=auto test/device/test_hcq.py test/test_tiny.py --durations=20
@@ -827,14 +827,14 @@ jobs:
       env:
         MOCKGPU: 1
         AMD: 1
-        AMD_LLVM: 1
+        AMD_CC: LLVM
         FORWARD_ONLY: 1
       run: |
         python -m pytest -n=auto test/device/test_hcq.py test/test_tiny.py test/device/test_amd_llvm.py --durations=20
     - name: Run pytest (ptx)
       env:
         MOCKGPU: 1
-        NV_PTX: 1
+        NV_CC: PTX
         NV: 1
         FORWARD_ONLY: 1
       run: |
