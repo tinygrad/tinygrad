@@ -1082,6 +1082,14 @@ class TestSchedule(unittest.TestCase):
     new_uop = a.reshape(4,1).realize().uop
     assert new_uop.base.op is Ops.BUFFER
 
+  def test_self_assign_no_empty_kernel(self):
+    for shape in [(3, 3), (4, 4)]:
+      a = Tensor.ones(*shape).contiguous().realize()
+      a.assign(a / 1)
+      run_schedule(check_schedule(a, 0, filter_sink=False))
+      self.assertListEqual(a.tolist(), [[1.]*shape[1]]*shape[0])
+
+class TestLimitBufs(unittest.TestCase):
   @unittest.skipIf(CI and Device.DEFAULT == "NV", "crashes on NV CI")
   def test_limit_bufs_with_var(self):
     N = 31
@@ -1094,12 +1102,16 @@ class TestSchedule(unittest.TestCase):
     for X in range(1,N): root = root + bufs[X][vi] + bufs[X][vj]
     self.assertEqual(root.item(), N * 2)
 
-  def test_self_assign_no_empty_kernel(self):
-    for shape in [(3, 3), (4, 4)]:
-      a = Tensor.ones(*shape).contiguous().realize()
-      a.assign(a / 1)
-      run_schedule(check_schedule(a, 0, filter_sink=False))
-      self.assertListEqual(a.tolist(), [[1.]*shape[1]]*shape[0])
+  def test_limit_bufs_arange_condition(self):
+    # WHERE with arange-based condition (pure index math, no device) and many buffer loads should not crash limit_bufs
+    with Context(MAX_KERNEL_BUFFERS=8):
+      N = 8
+      idx = Tensor.arange(N)
+      base = Tensor.zeros(N)
+      for i in range(4):
+        a, b = Tensor.rand(N).realize(), Tensor.rand(N).realize()
+        base = (idx >= i).where(a + b, base)
+      assert all(x > 0 for x in base.tolist())
 
 class TestSwizzle(unittest.TestCase):
   def test_swizzle_simple(self):
