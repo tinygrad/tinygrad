@@ -222,10 +222,10 @@ class ClangRenderer(CStyleLanguage):
   gep_arr_threshold = 0
   has_local = False
   has_threads = bool(getenv("THREADS", 1))
-  global_max = (CPU_COUNT.value, 0, 0)
+  global_max = property(lambda self: (CPU_COUNT.value, 0, 0))
   infinity = "__builtin_inff()"
   nan = '__builtin_nanf("")'
-  if AMX: tensor_cores = tc.amx
+  tensor_cores = property(lambda self: tc.amx if AMX else [])
 
   # language options
   buffer_suffix = " restrict"
