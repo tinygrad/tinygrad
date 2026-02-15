@@ -614,14 +614,15 @@ class Tensor(OpMixin):
     print(t.numpy())
     ```
     """
-    if not dtypes.is_float(dtype := to_dtype(dtype or dtypes.default_float)): raise ValueError(f"rand only supports float dtypes, got {dtype}")
+    dt = to_dtype(dtype or dtypes.default_float)
+    if not dtypes.is_float(dt): raise ValueError(f"rand only supports float dtypes, got {dt}")
     if not all_int(shape:=argfix(*shape)) or not all(s >= 0 for s in shape): raise ValueError(f"invalid input {shape=}")
     if device is not None and not isinstance(device, str): raise ValueError(f"rand only supports single device, got {device=}")
     device = cast(str, canonicalize_device(device))
 
     # if shape has 0, return zero tensor
-    if (numel := prod(shape)) == 0: return Tensor.zeros(shape, device=device, dtype=dtype, **kwargs)
-    num = ceildiv(numel * dtype.itemsize, 4)
+    if (numel := prod(shape)) == 0: return Tensor.zeros(shape, device=device, dtype=dt, **kwargs)
+    num = ceildiv(numel * dt.itemsize, 4)
 
     # generate per device seeds and rng counter if we haven't seen this device yet
     if device not in Tensor._device_seeds:
@@ -639,14 +640,14 @@ class Tensor(OpMixin):
     bits = Tensor._threefry_random_bits(Tensor._device_seeds[device], counts0, counts1)[:num]
 
     # bitcast to uint with same number of bits
-    _, nmant = dtypes.finfo(dtype)
-    uint_dtype = {1: dtypes.uint8, 2: dtypes.uint16, 4: dtypes.uint32, 8: dtypes.uint64}[dtype.itemsize]
+    _, nmant = dtypes.finfo(dt)
+    uint_dtype = {1: dtypes.uint8, 2: dtypes.uint16, 4: dtypes.uint32, 8: dtypes.uint64}[dt.itemsize]
     bits = bits.bitcast(uint_dtype)
     # only randomize the mantissa bits and set the exponent to 1
-    one = Tensor.ones_like(bits, device=bits.device, dtype=dtype).bitcast(uint_dtype)
-    bits = bits.rshift(dtype.bitsize - nmant).bitwise_or(one)
+    one = Tensor.ones_like(bits, device=bits.device, dtype=dt).bitcast(uint_dtype)
+    bits = bits.rshift(dt.bitsize - nmant).bitwise_or(one)
     # bitcast back to the original dtype and reshape
-    out = bits.bitcast(dtype)[:numel].sub(1).reshape(shape).requires_grad_(kwargs.get("requires_grad"))
+    out = bits.bitcast(dt)[:numel].sub(1).reshape(shape).requires_grad_(kwargs.get("requires_grad"))
     return out.contiguous() if contiguous else out
 
   # ***** creation helper functions *****
@@ -770,8 +771,9 @@ class Tensor(OpMixin):
     print(Tensor.eye(2, 4).numpy())
     ```
     """
-    if n < 0 or ((m := n if m is None else m) < 0): raise ValueError(f"cannot have negative {n=}, {m=}")
-    t = (Tensor.arange(n, device=device).unsqueeze(-1) == Tensor.arange(m, device=device))
+    m_ = n if m is None else m
+    if n < 0 or m_ < 0: raise ValueError(f"cannot have negative {n=}, {m_=}")
+    t = (Tensor.arange(n, device=device).unsqueeze(-1) == Tensor.arange(m_, device=device))
     return t.cast(dtype or dtypes.default_float).requires_grad_(requires_grad)
 
   def _multi_like(self, fxn, *args, **kwargs) -> Tensor:
@@ -1214,6 +1216,26 @@ class Tensor(OpMixin):
     x_dims = [p for p in indices_parsed if not isinstance(p['index'], sint)]
     x = x.reshape(tuple(p['size'] for p in x_dims))
 
+    # basic setitem: construct result with view region replaced by v using arange masks
+    if v is not None and not any(isinstance(p['index'], Tensor) for p in indices_parsed):
+      # broadcast v to getitem shape, reshape to self.ndim (squeeze None dims, unsqueeze int dims — all are size 1)
+      vb = v.cast(self.dtype)._broadcast_to(x.shape)
+      vb = vb.reshape(tuple(1 if isinstance(p['index'], sint) else p['size'] for p in indices_parsed if p['index'] is not None))
+      # undo movement ops per-dim and build boolean mask
+      per_dim = []
+      for d, m in enumerate(mops):
+        (s, e), st = m['boundary'], abs(m['stride'])
+        if st != 1 and vb.shape[d] > 1:  # un-stride: interleave with zeros
+          vb = vb.unsqueeze(d+1)
+          vb = vb.pad_to(tuple(st if j == d+1 else None for j in range(vb.ndim)))
+          vb = vb.reshape(vb.shape[:d] + (vb.shape[d]*vb.shape[d+1],) + vb.shape[d+2:])
+          vb = vb.shrink_to(tuple(e-s if j == d else None for j in range(self.ndim)))
+        idx = Tensor.arange(self.shape[d], device=self.device).reshape([1]*d + [self.shape[d]] + [1]*(self.ndim - d - 1))
+        per_dim.append((idx >= s) & (idx < e) & (((e-1-idx) if m['stride'] < 0 else (idx-s)) % st == 0))
+      vb = vb.flip(tuple(d for d, m in enumerate(mops) if m['stride'] < 0))
+      vb = vb.pad(tuple((m['boundary'][0], self.shape[d] - m['boundary'][1]) for d, m in enumerate(mops)))
+      return (functools.reduce(lambda a, b: a & b, per_dim) if per_dim else Tensor(True, dtype=dtypes.bool, device=self.device)).where(vb, self)
+
     # tensor indexing
     if tops := [(d, p) for d, p in enumerate(x_dims) if isinstance(p['index'], Tensor)]:
       dims, tensors, masks = [d for d, _ in tops], cast(list[Tensor], [p['index'] for _, p in tops]), []
@@ -1309,10 +1331,13 @@ class Tensor(OpMixin):
       if is_disk: raise RuntimeError("advanced setitem is not supported for DISK tensors")
       if not isinstance(v, Tensor): v = Tensor(v, device=self.device, dtype=self.dtype)
       self.assign(self._getitem(indices, v))
-    else: # basic setitem
-      if is_disk: self[indices].assign(v)
-      else:
-        self[indices].assign(v).realize()
+    elif is_disk or self.uop.is_realized: # basic setitem, self is realized. TODO: disk uop.base is a COPY and not realized
+      self[indices].assign(v)
+    else: # basic setitem, self is not realized
+      if not isinstance(v, Tensor): v = Tensor(v, device=self.device, dtype=self.dtype)
+      # __iadd__/__isub__ on unrealized views creates a no-op ASSIGN; unwrap to get the computed value
+      if v.uop.op is Ops.ASSIGN: v = v._apply_uop(lambda x: x.src[1])
+      self.replace(self._getitem(indices, v))
 
   def __delitem__(self, indices) -> None:
     raise TypeError("Tensor does not support deleting items")
@@ -3883,10 +3908,7 @@ class Tensor(OpMixin):
     print(t.dtype, t.numpy())
     ```
     """
-    if (dt:=to_dtype(dtype)) in {dtypes.uint8, dtypes.uint16} and dtypes.is_float(self.dtype):
-      # NOTE: values within the int32 range and outside the unsigned dtype range will cause values to wrap around
-      return self._apply_uop(UOp.cast, dtype=dtypes.int32)._apply_uop(UOp.cast, dtype=dt)
-    return self if self.dtype == dt else self._apply_uop(UOp.cast, dtype=dt)
+    return self if self.dtype == (dt:=to_dtype(dtype)) else self._apply_uop(UOp.cast, dtype=dt)
 
   def bitcast(self, dtype:DTypeLike) -> Tensor:
     """

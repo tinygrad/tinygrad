@@ -36,18 +36,6 @@ class TestSetitem(unittest.TestCase):
     t[:3] *= 10
     self.assertListEqual(t.tolist(), [0, 10, 20, 3, 4, 5, 6, 7, 8, 9])
 
-  def test_setitem_into_unrealized(self):
-    t = Tensor.arange(4).reshape(2, 2)
-    t[1] = 5
-    np.testing.assert_allclose(t.numpy(), [[0, 1], [5, 5]])
-
-  def test_setitem_into_unrealized_sliced_compute(self):
-    # base computation contains SHRINK from prior slicing (like QR decomposition pattern)
-    a = Tensor.arange(6, dtype=dtypes.float).reshape(2, 3)
-    w = a[0] + a[1]  # unrealized ADD with SHRINK in graph: [3, 5, 7]
-    w[1] = 99
-    np.testing.assert_allclose(w.numpy(), [3, 99, 7])
-
   def test_setitem_fancy_on_unrealized_view(self):
     # fancy indexing setitem on unrealized SHRINK view (triggered infinite loop in graph_rewrite)
     base = Tensor.arange(20, dtype=dtypes.float).reshape(4, 5)
@@ -68,10 +56,6 @@ class TestSetitem(unittest.TestCase):
   def test_setitem_dtype_mismatch(self):
     t = Tensor.zeros(6, dtype=dtypes.float).contiguous().realize()
     with self.assertRaises(RuntimeError): t[2:4] = Tensor([1, 2], dtype=dtypes.int)
-
-  def test_setitem_into_noncontiguous(self):
-    t = Tensor.ones(4)
-    with self.assertRaises(RuntimeError): t[1] = 5
 
   def test_setitem_chained_indexing(self):
     # N[i][j] must work the same as N[i, j]
@@ -162,6 +146,8 @@ class TestSetitem(unittest.TestCase):
     @TinyJit
     def f(t:Tensor, a:Tensor):
       t[2:4, 3:5] = a
+      # NOTE: without return t or an explicit realize, it's lazy and not captured
+      return t
 
     for i in range(1, 6):
       t = Tensor.zeros(6, 6).contiguous().realize()

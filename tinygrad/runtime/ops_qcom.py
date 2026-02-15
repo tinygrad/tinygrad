@@ -329,7 +329,7 @@ class QCOMAllocator(HCQAllocatorBase):
     return self.dev._gpu_map(opts.external_ptr, size, image=opts.image) if opts.external_ptr else self.dev._gpu_alloc(size, image=opts.image)
 
   def _do_copy(self, src_addr, dest_addr, src_size, real_size, src_stride, dest_stride, prof_text, dest_off=0, src_off=0):
-    with cpu_profile(prof_text, self.dev.device):
+    with cpu_profile(prof_text, f"{self.dev.device}:COPY"):
       while src_off < src_size:
         ctypes.memmove(dest_addr+dest_off, src_addr+src_off, real_size)
         src_off, dest_off = src_off+src_stride, dest_off+dest_stride

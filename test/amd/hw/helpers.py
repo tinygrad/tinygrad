@@ -6,7 +6,7 @@ Set USE_HW=1 to run on both emulator and hardware, comparing results.
 import ctypes, math, os, struct
 from tinygrad.runtime.autogen.amd.rdna3.ins import *
 
-from tinygrad.renderer.amd.emu import run_asm
+from test.mockgpu.amd.emu import run_asm
 from tinygrad.renderer.amd.dsl import NULL, SCC, VCC_LO, VCC_HI, EXEC_LO, EXEC_HI, M0
 
 def _i32(f: float) -> int: return struct.unpack('<I', struct.pack('<f', f))[0]
@@ -75,7 +75,7 @@ def i642f(i: int) -> float: return struct.unpack('<d', struct.pack('<Q', i))[0]
 def assemble(instructions: list) -> bytes:
   return b''.join(inst.to_bytes() for inst in instructions)
 
-# Simple WaveState class for test output parsing (mirrors emu.py interface for tests)
+# Simple WaveState class for test output parsing (mirrors test/mockgpu/amd/emu.py interface for tests)
 class WaveState:
   def __init__(self):
     self.vgpr = [[0] * 256 for _ in range(32)]  # vgpr[lane][reg]

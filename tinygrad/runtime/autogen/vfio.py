@@ -278,19 +278,6 @@ class struct_vfio_device_feature_bus_master(c.Struct):
   SIZE = 4
   op: Annotated[Annotated[int, ctypes.c_uint32], 0]
 @c.record
-class struct_vfio_region_dma_range(c.Struct):
-  SIZE = 16
-  offset: Annotated[Annotated[int, ctypes.c_uint64], 0]
-  length: Annotated[Annotated[int, ctypes.c_uint64], 8]
-@c.record
-class struct_vfio_device_feature_dma_buf(c.Struct):
-  SIZE = 16
-  region_index: Annotated[Annotated[int, ctypes.c_uint32], 0]
-  open_flags: Annotated[Annotated[int, ctypes.c_uint32], 4]
-  flags: Annotated[Annotated[int, ctypes.c_uint32], 8]
-  nr_ranges: Annotated[Annotated[int, ctypes.c_uint32], 12]
-  dma_ranges: Annotated[c.Array[struct_vfio_region_dma_range, Literal[0]], 16]
-@c.record
 class struct_vfio_iommu_type1_info(c.Struct):
   SIZE = 24
   argsz: Annotated[Annotated[int, ctypes.c_uint32], 0]
@@ -548,7 +535,6 @@ VFIO_DEVICE_FEATURE_MIG_DATA_SIZE = 9 # type: ignore
 VFIO_DEVICE_FEATURE_CLEAR_MASTER = 0 # type: ignore
 VFIO_DEVICE_FEATURE_SET_MASTER = 1 # type: ignore
 VFIO_DEVICE_FEATURE_BUS_MASTER = 10 # type: ignore
-VFIO_DEVICE_FEATURE_DMA_BUF = 11 # type: ignore
 VFIO_IOMMU_INFO_PGSIZES = (1 << 0) # type: ignore
 VFIO_IOMMU_INFO_CAPS = (1 << 1) # type: ignore
 VFIO_IOMMU_TYPE1_INFO_CAP_IOVA_RANGE = 1 # type: ignore

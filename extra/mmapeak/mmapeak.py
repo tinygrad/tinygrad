@@ -4,15 +4,16 @@ import os
 os.environ["AMD_AQL"] = "1"
 
 from tinygrad import Tensor, Device
+from tinygrad.helpers import getenv
 from tinygrad.uop.ops import UOp, Ops, KernelInfo
 from tinygrad.renderer import Estimates
 from tinygrad.renderer.amd.dsl import Reg, Inst, s, v
 
 NUM_WORKGROUPS = 96
 WAVE_SIZE = 32
-NUM_WAVES = 2
+NUM_WAVES = 4
 FLOPS_PER_MATMUL = 16*16*16*2
-INTERNAL_LOOP = 1_000_00
+INTERNAL_LOOP = getenv("LOOP", 10_000)
 INSTRUCTIONS_PER_LOOP = 200
 
 def repeat(insts:list[Inst], n:int, counter_sreg:Reg) -> list[Inst]:
@@ -22,15 +23,6 @@ def repeat(insts:list[Inst], n:int, counter_sreg:Reg) -> list[Inst]:
   branch_inst = s_cbranch_scc1(simm16=-((loop_sz // 4) + 1) & 0xFFFF)
   return [s_mov_b32(counter_sreg, n)] + insts + [sub_inst, cmp_inst, branch_inst, s_endpgm()]
 
-def make_kernel(insts:list[Inst]):
-  def fxn(A:UOp) -> UOp:
-    threads = UOp.special(WAVE_SIZE * NUM_WAVES, "lidx0")
-    gidx = UOp.special(NUM_WORKGROUPS, "gidx0")
-    FLOPs = FLOPS_PER_MATMUL * NUM_WAVES * NUM_WORKGROUPS * INTERNAL_LOOP * INSTRUCTIONS_PER_LOOP
-    sink = UOp.sink(A.base, threads, gidx, arg=KernelInfo("mmapeak", estimates=Estimates(ops=FLOPs, mem=0)))
-    return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg="AMD"), UOp(Ops.LINEAR, src=tuple([UOp(Ops.INS, arg=x) for x in insts]))))
-  return fxn
-
 def launchBenchmark(instruction, vgprIndices, dense=True, accum=False, **kwargs):
   if accum:
     inst = instruction(v[0:vgprIndices[0]], v[vgprIndices[1]:vgprIndices[2]], v[vgprIndices[1]:vgprIndices[2]], 1, acc_cd=1, **kwargs)
@@ -39,7 +31,12 @@ def launchBenchmark(instruction, vgprIndices, dense=True, accum=False, **kwargs)
   else:
     inst = instruction(v[0:vgprIndices[0]], v[vgprIndices[1]:vgprIndices[2]], v[vgprIndices[3]:vgprIndices[4]], v[vgprIndices[5]])
   insts = repeat([inst for _ in range(INSTRUCTIONS_PER_LOOP)], n=INTERNAL_LOOP, counter_sreg=s[1])
-  fxn = make_kernel(insts)
+  def fxn(A:UOp) -> UOp:
+    threads = UOp.special(WAVE_SIZE * NUM_WAVES, "lidx0")
+    gidx = UOp.special(NUM_WORKGROUPS, "gidx0")
+    FLOPs = FLOPS_PER_MATMUL * NUM_WAVES * NUM_WORKGROUPS * INTERNAL_LOOP * INSTRUCTIONS_PER_LOOP
+    sink = UOp.sink(A.base, threads, gidx, arg=KernelInfo(inst.op.name.lower(), estimates=Estimates(ops=FLOPs, mem=0)))
+    return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg="AMD"), UOp(Ops.LINEAR, src=tuple([UOp(Ops.INS, arg=x) for x in insts]))))
   dummy = Tensor.zeros(1).contiguous().realize()
   out = Tensor.custom_kernel(dummy, fxn=fxn)[0]
   ei = out.schedule()[-1].lower()

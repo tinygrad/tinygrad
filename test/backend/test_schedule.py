@@ -11,7 +11,7 @@ from tinygrad import nn, dtypes, Device, Tensor, Variable
 from tinygrad.device import is_dtype_supported
 from tinygrad.dtype import DType, ImageDType
 from tinygrad.uop.ops import UOp, Ops, UPat
-from tinygrad.helpers import CI, DEBUG, SPLIT_REDUCEOP, GlobalCounters, Context, getenv, all_same, temp
+from tinygrad.helpers import CI, DEBUG, SPLIT_REDUCEOP, OSX, GlobalCounters, Context, getenv, all_same, temp
 from tinygrad.engine.realize import CompiledRunner, run_schedule
 
 class KernelCountException(Exception): pass
@@ -99,6 +99,7 @@ class TestSchedule(unittest.TestCase):
     self.assertListEqual(a.tolist(), [[15]])
 
   @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
+  @unittest.skipIf(Device.DEFAULT == "WEBGPU" and OSX, "WEBGPU Metal backend is not accurate enough")
   def test_expand_buffer_before_cast(self):
     a = Tensor.randn(4, 2, 1).realize().permute((1, 0, 2))
     b = a.cast(dtypes.half).expand((2, 4, 4))+2
@@ -1017,7 +1018,8 @@ class TestSchedule(unittest.TestCase):
     a = Tensor.arange(16).contiguous().realize()
     GlobalCounters.reset()
     a[4] = 3
-    # TODO: update when this becomes lazy
+    self.assertEqual(GlobalCounters.kernel_count, 0)
+    a.realize()
     self.assertEqual(GlobalCounters.kernel_count, 1)
     self.assertListEqual(a.tolist(), [0, 1, 2, 3, 3, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15])
 
@@ -1080,6 +1082,14 @@ class TestSchedule(unittest.TestCase):
     new_uop = a.reshape(4,1).realize().uop
     assert new_uop.base.op is Ops.BUFFER
 
+  def test_self_assign_no_empty_kernel(self):
+    for shape in [(3, 3), (4, 4)]:
+      a = Tensor.ones(*shape).contiguous().realize()
+      a.assign(a / 1)
+      run_schedule(check_schedule(a, 0, filter_sink=False))
+      self.assertListEqual(a.tolist(), [[1.]*shape[1]]*shape[0])
+
+class TestLimitBufs(unittest.TestCase):
   @unittest.skipIf(CI and Device.DEFAULT == "NV", "crashes on NV CI")
   def test_limit_bufs_with_var(self):
     N = 31
@@ -1092,12 +1102,16 @@ class TestSchedule(unittest.TestCase):
     for X in range(1,N): root = root + bufs[X][vi] + bufs[X][vj]
     self.assertEqual(root.item(), N * 2)
 
-  def test_self_assign_no_empty_kernel(self):
-    for shape in [(3, 3), (4, 4)]:
-      a = Tensor.ones(*shape).contiguous().realize()
-      a.assign(a / 1)
-      run_schedule(check_schedule(a, 0, filter_sink=False))
-      self.assertListEqual(a.tolist(), [[1.]*shape[1]]*shape[0])
+  def test_limit_bufs_arange_condition(self):
+    # WHERE with arange-based condition (pure index math, no device) and many buffer loads should not crash limit_bufs
+    with Context(MAX_KERNEL_BUFFERS=8):
+      N = 8
+      idx = Tensor.arange(N)
+      base = Tensor.zeros(N)
+      for i in range(4):
+        a, b = Tensor.rand(N).realize(), Tensor.rand(N).realize()
+        base = (idx >= i).where(a + b, base)
+      assert all(x > 0 for x in base.tolist())
 
 class TestSwizzle(unittest.TestCase):
   def test_swizzle_simple(self):

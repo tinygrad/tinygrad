@@ -756,6 +756,26 @@ class TestAssignOrdering(unittest.TestCase):
     self.assertEqual(buf[0:1, :].sum().item(), 4)
     self.assertEqual(buf[1:2, :].sum().item(), 8)
 
+  def test_multi_step_assign_read_write_same_buffer(self):
+    """Assign to m and param reading b, then update b, across multiple steps.
+    This is the optimizer bias-correction pattern from issue #13600: m accumulates,
+    param is updated using m/(1-b), and b is updated via *= after the reads."""
+    b = Tensor([0.5]).contiguous().realize()
+    m = Tensor([0.0]).contiguous().realize()
+    param = Tensor([1.0]).contiguous().realize()
+    for _ in range(10):
+      m.assign(0.9 * m + 0.1)
+      param.assign(param - m / (1 - b))
+      b *= 0.9
+      Tensor.realize(param, m, b)
+    # numpy reference
+    b_np, m_np, p_np = 0.5, 0.0, 1.0
+    for _ in range(10):
+      m_np = 0.9 * m_np + 0.1
+      p_np = p_np - m_np / (1 - b_np)
+      b_np *= 0.9
+    np.testing.assert_allclose(param.item(), p_np, atol=1e-5)
+
   def test_multiple_slice_assigns_then_read(self):
     """Multiple non-overlapping slice assigns then read."""
     buf = Tensor.zeros(4).contiguous().realize()
