@@ -1,7 +1,7 @@
 import math
 from typing import Self
 from tinygrad.uop import Ops
-from tinygrad.dtype import dtypes, ConstType
+from tinygrad.dtype import dtypes, ConstType, least_upper_float
 from tinygrad.mixin.dtype import DTypeMixin
 
 
@@ -251,8 +251,17 @@ class MathMixin(DTypeMixin):
   def threefry(self, seed: Self) -> Self:
     return self.alu(Ops.THREEFRY, seed)
 
+  def _float_cast(self) -> Self: return self.cast(least_upper_float(self.dtype)) if self.dtype != dtypes.void else self
+
   def reciprocal(self) -> Self:
-    return self.alu(Ops.RECIPROCAL)
+    """
+    Computes `1/x` element-wise.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([1., 2., 3., 4.]).reciprocal().numpy())
+    ```
+    """
+    return self._float_cast().alu(Ops.RECIPROCAL)
 
   def trunc(self) -> Self:
     """
@@ -265,16 +274,48 @@ class MathMixin(DTypeMixin):
     return self.alu(Ops.TRUNC)
 
   def sqrt(self) -> Self:
-    return self.alu(Ops.SQRT)
+    """
+    Computes the square root of the tensor element-wise.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([1., 2., 3., 4.]).sqrt().numpy())
+    ```
+    """
+    return self._float_cast().alu(Ops.SQRT)
 
   def sin(self) -> Self:
-    return self.alu(Ops.SIN)
+    """
+    Computes the sine of the tensor element-wise.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([0., math.pi/2, math.pi, 3*math.pi/2, 2*math.pi]).sin().numpy())
+    ```
+    """
+    return self._float_cast().alu(Ops.SIN)
 
   def log2(self) -> Self:
-    return self.alu(Ops.LOG2)
+    """
+    Computes the base-2 logarithm element-wise.
+
+    See: https://en.wikipedia.org/wiki/Logarithm
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([1., 2., 4., 8.]).log2().numpy())
+    ```
+    """
+    return self._float_cast().alu(Ops.LOG2)
 
   def exp2(self) -> Self:
-    return self.alu(Ops.EXP2)
+    """
+    Computes the base-2 exponential function element-wise.
+
+    See: https://en.wikipedia.org/wiki/Exponential_function
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([0., 1., 2., 3.]).exp2().numpy())
+    ```
+    """
+    return self._float_cast().alu(Ops.EXP2)
 
   def pow(self, x: Self | ConstType) -> Self:
     return self.alu(Ops.POW, self.ufix(x))
