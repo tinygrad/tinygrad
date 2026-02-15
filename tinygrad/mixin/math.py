@@ -195,10 +195,10 @@ class MathMixin(DTypeMixin):
     return self.mod(x, True)
 
   def __lt__(self, x: Self | ConstType) -> Self:
-    return self.alu(Ops.CMPLT, self.ufix(x))
+    return self._binop(Ops.CMPLT, x, False)
 
   def __gt__(self, x: Self | ConstType) -> Self:
-    return self.ufix(x).alu(Ops.CMPLT, self)
+    return self._binop(Ops.CMPLT, x, True)
 
   def __ge__(self, x: Self | ConstType) -> Self:
     return (self < x).logical_not()
@@ -207,7 +207,7 @@ class MathMixin(DTypeMixin):
     return (self > x).logical_not()
 
   def ne(self, x: Self | ConstType) -> Self:
-    return self.alu(Ops.CMPNE, self.ufix(x))
+    return self._binop(Ops.CMPNE, x, False)
 
   def eq(self, x: Self | ConstType) -> Self:
     return self.ne(x).logical_not()
@@ -236,7 +236,17 @@ class MathMixin(DTypeMixin):
     return self.rshift(x, True)
 
   def maximum(self, x: Self | ConstType) -> Self:
-    return self.alu(Ops.MAX, self.ufix(x))
+    """
+    Computes element-wise maximum of `self` and `x`.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([-1, 2, 3]).maximum(1).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([-1, 2, 3]).maximum(Tensor([-4, -2, 9])).numpy())
+    ```
+    """
+    return self._binop(Ops.MAX, x, False)
 
   def minimum(self, x: Self | ConstType) -> Self:
     return -(-self).maximum(-self.ufix(x))
