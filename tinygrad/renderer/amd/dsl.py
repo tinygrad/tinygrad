@@ -444,6 +444,9 @@ class Inst:
 
   def __eq__(self, other): return type(self) is type(other) and self._raw == other._raw
   def __hash__(self): return hash((type(self), self._raw))
+  def __lt__(self, other):
+    if not isinstance(other, Inst): return NotImplemented
+    return (type(self).__name__, self._raw) < (type(other).__name__, other._raw)
 
   def __repr__(self):
     # collect (repr, is_default) pairs, strip trailing defaults so repr roundtrips with eval
