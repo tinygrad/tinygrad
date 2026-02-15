@@ -771,8 +771,9 @@ class Tensor(OpMixin):
     print(Tensor.eye(2, 4).numpy())
     ```
     """
-    if n < 0 or ((m := n if m is None else m) < 0): raise ValueError(f"cannot have negative {n=}, {m=}")
-    t = (Tensor.arange(n, device=device).unsqueeze(-1) == Tensor.arange(m, device=device))
+    m_ = n if m is None else m
+    if n < 0 or m_ < 0: raise ValueError(f"cannot have negative {n=}, {m_=}")
+    t = (Tensor.arange(n, device=device).unsqueeze(-1) == Tensor.arange(m_, device=device))
     return t.cast(dtype or dtypes.default_float).requires_grad_(requires_grad)
 
   def _multi_like(self, fxn, *args, **kwargs) -> Tensor:
