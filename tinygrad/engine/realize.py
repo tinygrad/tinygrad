@@ -57,6 +57,9 @@ class CompiledRunner(Runner):
       local_size = optimize_local_size(self._prg, global_size, rawbufs)
       global_size = [g//l if g%l == 0 else g/l for g,l in zip(global_size, local_size)]
       self.p = replace(self.p, global_size=global_size, local_size=local_size)
+    if self.p.kernargs_builder is not None:
+      raw_kernargs = self.p.kernargs_builder([x._buf for x in rawbufs], var_vals)
+      return self._prg(global_size=tuple(global_size), local_size=tuple(local_size) if local_size else None, wait=wait, raw_kernargs=raw_kernargs)
     return self._prg(*[x._buf for x in rawbufs], global_size=tuple(global_size), local_size=tuple(local_size) if local_size else None,
                      vals=tuple(var_vals[k.expr] if k.expr not in self.p.runtimevars else None for k in self.p.vars), wait=wait)
 

@@ -321,7 +321,7 @@ class HCQProgram(Generic[HCQDeviceType]):
     return self.args_state_t(argsbuf, self, bufs, vals=vals)
 
   def __call__(self, *bufs:HCQBuffer, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1),
-               vals:tuple[int|None, ...]=(), wait:bool=False) -> float|None:
+               vals:tuple[int|None, ...]=(), wait:bool=False, raw_kernargs:bytes|None=None) -> float|None:
     """
     Enqueues the program for execution with the given arguments and dimensions.
 
@@ -336,7 +336,11 @@ class HCQProgram(Generic[HCQDeviceType]):
       Execution time of the kernel if 'wait' is True, otherwise None.
     """
 
-    kernargs = self.fill_kernargs(bufs, vals)
+    if raw_kernargs is not None:
+      argsbuf = self.dev.kernargs_buf.offset(offset=self.dev.kernargs_offset_allocator.alloc(len(raw_kernargs), 8), size=len(raw_kernargs))
+      argsbuf.cpu_view()[:len(raw_kernargs)] = raw_kernargs
+      kernargs = HCQArgsState(argsbuf, self, bufs, vals)
+    else: kernargs = self.fill_kernargs(bufs, vals)
     q = self.dev.hw_compute_queue_t().wait(self.dev.timeline_signal, self.dev.timeline_value - 1).memory_barrier()
 
     self.dev.prof_exec_counter += 1

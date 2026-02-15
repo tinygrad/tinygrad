@@ -220,8 +220,10 @@ multi_pm = PatternMatcher([
     UOp(root.op, root.dtype, tuple(x.src[0] if x.op is Ops.MULTI else x for x in root.src), root.arg)),
   (UPat((Ops.CAST, Ops.BITCAST, Ops.CONTIGUOUS, Ops.DETACH, Ops.CONTIGUOUS_BACKWARD),
         src=(UPat(Ops.MULTI, name="multi"), ), name="root"), passthrough_multi),
-  # after CALL
+  # after CALL or END
   (UPat(Ops.AFTER, src=(UPat(Ops.MULTI, name="multi"), UPat(Ops.CALL)), name="a"),
+    lambda multi,a: a.replace(src=(multi.src[0],)+a.src[1:]).multi(multi.axis)),
+  (UPat(Ops.AFTER, src=(UPat(Ops.MULTI, name="multi"), UPat(Ops.END)), name="a"),
     lambda multi,a: a.replace(src=(multi.src[0],)+a.src[1:]).multi(multi.axis)),
 ])+replace_allreduce
 
