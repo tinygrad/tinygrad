@@ -922,7 +922,7 @@ class TestTK(unittest.TestCase):
     Tensor.manual_seed(42)
 
     B, N, H, H_KV, D = 2, 1024, 32, 32, 128
-    GPUS = tuple(f"AMD:{i}" for i in range(B))
+    GPUS = tuple(f"{Device.DEFAULT}:{i}" for i in range(B))
 
     with Context(DEBUG=0):
       base_q = Tensor.randn(B, N, H, D, dtype=dtypes.bfloat16, requires_grad=True).contiguous()
