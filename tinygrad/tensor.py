@@ -3743,17 +3743,6 @@ class Tensor(OpMixin):
 
   # ***** Tensor Properties *****
 
-  def element_size(self) -> int:
-    """
-    Returns the size in bytes of an individual element in the tensor.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor([5], dtype=dtypes.int16)
-    print(t.element_size())
-    ```
-    """
-    return self.dtype.itemsize
-
   def nbytes(self) -> int:
     """
     Returns the total number of bytes of all elements in the tensor.
@@ -3764,18 +3753,6 @@ class Tensor(OpMixin):
     ```
     """
     return int(self.numel()) * self.element_size()
-
-  def is_floating_point(self) -> bool:
-    """
-    Returns `True` if the tensor contains floating point types, i.e. is one of `dtypes.float64`, `dtypes.float32`,
-    `dtypes.float16`, `dtypes.bfloat16`.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor([8, 9], dtype=dtypes.float32)
-    print(t.is_floating_point())
-    ```
-    """
-    return dtypes.is_float(self.dtype)
 
   def size(self, dim:int|None=None) -> sint|tuple[sint, ...]:
     """

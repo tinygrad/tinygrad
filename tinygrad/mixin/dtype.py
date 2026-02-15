@@ -8,11 +8,26 @@ class DTypeMixin:
   def cast(self, dtype:DType) -> Self: raise NotImplementedError
 
   def element_size(self) -> int:
-    """Returns the number of bytes of a single element in the tensor."""
+    """
+    Returns the size in bytes of an individual element in the tensor.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([5], dtype=dtypes.int16)
+    print(t.element_size())
+    ```
+    """
     return self.dtype.itemsize
 
   def is_floating_point(self) -> bool:
-    """Returns `True` if the tensor contains floating point types, i.e. is one of `bool`, `float16`, `bfloat16`, `float32`, `float64`."""
+    """
+    Returns `True` if the tensor contains floating point types, i.e. is one of `dtypes.float64`, `dtypes.float32`,
+    `dtypes.float16`, `dtypes.bfloat16`.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([8, 9], dtype=dtypes.float32)
+    print(t.is_floating_point())
+    ```
+    """
     return dtypes.is_float(self.dtype)
 
   def float(self) -> Self:
