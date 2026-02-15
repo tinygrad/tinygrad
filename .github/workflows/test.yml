@@ -716,9 +716,9 @@ jobs:
       - name: Run RDNA4 ops tests (AMD_LLVM=1)
         run: SKIP_SLOW_TEST=1 AMD_LLVM=1 MOCKGPU_ARCH=rdna4 pytest -n=auto test/backend/test_ops.py -k "test_sparse_categorical_crossentropy or test_tril or test_nonzero or test_softmax_argmax" --durations 20
       - name: Run RDNA4 dtype tests
-        run: AMD_LLVM=0 MOCKGPU_ARCH=rdna4 pytest -n=auto test/test_dtype_alu.py test/backend/test_dtype.py --durations 20
+        run: AMD_LLVM=0 MOCKGPU_ARCH=rdna4 pytest -n=auto test/backend/test_dtype_alu.py test/backend/test_dtype.py --durations 20
       - name: Run RDNA4 dtype tests (AMD_LLVM=1)
-        run: AMD_LLVM=1 MOCKGPU_ARCH=rdna4 pytest -n=auto test/test_dtype_alu.py test/backend/test_dtype.py --durations 20
+        run: AMD_LLVM=1 MOCKGPU_ARCH=rdna4 pytest -n=auto test/backend/test_dtype_alu.py test/backend/test_dtype.py --durations 20
       # CDNA 4
       - name: Run CDNA4 emulator tests
         run: AMD_LLVM=1 MOCKGPU_ARCH=cdna4 python -m pytest test/test_tiny.py -v --durations 20
