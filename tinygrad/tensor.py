@@ -7,7 +7,7 @@ if TYPE_CHECKING: import numpy
 from tinygrad.dtype import DType, DTypeLike, dtypes, ImageDType, ConstType, least_upper_float, least_upper_dtype, sum_acc_dtype, to_dtype, truncate
 from tinygrad.dtype import _from_np_dtype, _to_np_dtype, PyConst
 from tinygrad.helpers import argfix, make_tuple, flatten, prod, all_int, round_up, merge_dicts, argsort, getenv, all_same, fully_flatten
-from tinygrad.helpers import IMAGE, WINO, Metadata, TRACEMETA, ASM_GEMM, ceildiv, fetch, polyN, is_numpy_ndarray, TracingKey, cpu_profile
+from tinygrad.helpers import IMAGE, WINO, Metadata, TRACEMETA, ASM_GEMM, ceildiv, fetch, is_numpy_ndarray, TracingKey, cpu_profile
 from tinygrad.helpers import suppress_finalizing, disable_gc
 from tinygrad.gradient import compute_gradient
 from tinygrad.mixin import OpMixin
@@ -193,9 +193,10 @@ class Tensor(OpMixin):
     lhs,rhs = self._broadcasted(x, reverse)
     return lhs._apply_uop(fxn, rhs)
 
-  # _binop and alu are used by MathMixin
+  # _binop, alu, and const_like are used by MathMixin
   def _binop(self, op, x, reverse): return self._apply_broadcasted_uop(lambda *u: UOp.alu(u[0], op, *u[1:]), x, reverse)
   def alu(self, op: Ops, *src: Tensor) -> Tensor: return self._apply_uop(lambda *u: u[0].alu(op, *u[1:]), *src)
+  def const_like(self, b): return Tensor(dtypes.as_const(b, self.dtype), self.device, self.dtype, requires_grad=False)
 
   def requires_grad_(self, requires_grad=True) -> Tensor:
     # make the UOp unique if it's a CONST to prevent gradient accumulation bugs with cached const UOps
@@ -1573,24 +1574,6 @@ class Tensor(OpMixin):
                              for i, s in enumerate(self.shape)], dim=-1)
     return indices.masked_select(mask.unsqueeze(-1).expand(*mask.shape, self.ndim)).reshape(-1, self.ndim)
 
-  def masked_fill(self:Tensor, mask:Tensor, value:Tensor|PyConst) -> Tensor:
-    """
-    Replaces `self` with `value` wherever the elements of `mask` are True.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor([1, 2, 3, 4, 5])
-    mask = Tensor([True, False, True, False, False])
-    print(t.masked_fill(mask, -12).numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor([1, 2, 3, 4, 5])
-    mask = Tensor([True, False, True, False, False])
-    value = Tensor([-1, -2, -3, -4, -5])
-    print(t.masked_fill(mask, value).numpy())
-    ```
-    """
-    return mask.where(value, self)
-
   # ***** reduce ops *****
 
   def _reduce(self, op:Ops, axis:int|Sequence[int]|None=None, keepdim=False) -> Tensor:
@@ -1675,8 +1658,6 @@ class Tensor(OpMixin):
     """
     return self._reduce(Ops.MAX, axis, keepdim)
 
-  def _inverse(self) -> Tensor: return -self if self.is_floating_point() else ~self if dtypes.is_int(self.dtype) else self.logical_not()
-
   def min(self, axis:int|Sequence[int]|None=None, keepdim=False) -> Tensor:
     """
     Returns the minimum value of the tensor along the specified axis or axes.
@@ -1743,26 +1724,6 @@ class Tensor(OpMixin):
     ```
     """
     return self.logical_not().any(axis, keepdim).logical_not()
-
-  def isclose(self, other:Tensor, rtol:float=1e-05, atol:float=1e-08, equal_nan=False) -> Tensor:
-    """
-    Returns a new tensor with element-wise comparison of closeness to `other` within a tolerance.
-
-    The `rtol` and `atol` keyword arguments control the relative and absolute tolerance of the comparison.
-
-    By default, two `NaN` values are not close to each other. If `equal_nan` is `True`, two `NaN` values are considered close.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([1e-7, 1e-8, 1e-9, float('nan')]).isclose(Tensor([0.0, 0.0, 0.0, float('nan')])).numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([float('nan')]).isclose(Tensor([float('nan')]), equal_nan=True).numpy())
-    ```
-    """
-    is_finite_close = self.isfinite() & other.isfinite() & ((self - other).abs() <= atol + rtol * other.abs())
-    is_infinite_close = (self.isinf() | other.isinf()) & (self == other)
-    is_nan_close = (self.isnan() & other.isnan()) & equal_nan
-    return is_finite_close | is_infinite_close | is_nan_close
 
   def allclose(self, other:Tensor, rtol:float=1e-05, atol:float=1e-08, equal_nan=False) -> bool:
     """
@@ -2846,21 +2807,6 @@ class Tensor(OpMixin):
     """
     return self._apply_uop(UOp.contiguous_backward)
 
-  def exp(self) -> Tensor:
-    """
-    Computes the exponential function element-wise.
-
-    See: https://en.wikipedia.org/wiki/Exponential_function
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([0., 1., 2., 3.]).exp().numpy())
-    ```
-    """
-    # TODO: make it generic, and same thing to log and cos
-    if self.is_floating_point(): return self.cast(least_upper_dtype(self.dtype, dtypes.float32)).mul(1/math.log(2)).exp2().cast(self.dtype)
-    # TODO: behavior when DEFAULT_FLOAT is bfloat16 and input is int32?
-    return self.mul(1/math.log(2)).exp2()
-
   def logsigmoid(self) -> Tensor:
     """
     Applies the LogSigmoid function element-wise.
@@ -2873,120 +2819,7 @@ class Tensor(OpMixin):
     """
     return -(-self).softplus()
 
-  def cos(self) -> Tensor:
-    """
-    Computes the cosine of the tensor element-wise.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([0., math.pi/2, math.pi, 3*math.pi/2, 2*math.pi]).cos().numpy())
-    ```
-    """
-    if self.is_floating_point(): return ((math.pi/2)-self.cast(least_upper_dtype(self.dtype, dtypes.float32))).sin().cast(self.dtype)
-    return ((math.pi/2)-self).sin()
-
-  def tan(self) -> Tensor:
-    """
-    Computes the tangent of the tensor element-wise.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([0., math.pi/4, math.pi/2, 3*math.pi/4, math.pi]).tan().numpy())
-    ```
-    """
-    return self.sin() / self.cos()
-
-  def asin(self) -> Tensor:
-    """
-    Computes the inverse sine (arcsine) of the tensor element-wise.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-0.9, -0.6, -0.3, 0., 0.3, 0.6, 0.9]).asin().numpy())
-    ```
-    """
-    # https://personal.math.ubc.ca/~cbm/aands/page_81.htm 4.4.46
-    coefficients = [-0.0012624911, 0.0066700901, -0.0170881256, 0.0308918810, -0.0501743046, 0.0889789874, -0.2145988016, 1.5707963050]
-    x = math.pi / 2 - (1.0 - self.abs()).sqrt() * polyN(self.abs(), coefficients)
-    return self.sign() * x
-
-  def acos(self) -> Tensor:
-    """
-    Computes the inverse cosine (arccosine) of the tensor element-wise.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-0.9, -0.6, -0.3, 0., 0.3, 0.6, 0.9]).acos().numpy())
-    ```
-    """
-    return math.pi / 2 - self.asin()
-
-  def atan(self) -> Tensor:
-    """
-    Computes the inverse tangent (arctan) of the tensor element-wise.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).atan().numpy())
-    ```
-    """
-    return (self / (1 + self * self).sqrt()).asin()
-
-  # ***** math functions *****
-
-  def lerp(self, end:Tensor, weight:Tensor|float) -> Tensor:
-    """
-    Linearly interpolates between `self` and `end` by `weight`.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([1., 2., 3.]).lerp(Tensor([4., 5., 6.]), 0.5).numpy())
-    ```
-    """
-    if self.dtype == dtypes.uint8 and isinstance(weight, Tensor):
-      w_i = (weight * (1<<(W_PREC:=7)) + 0.5).cast(dtypes.int16)
-      return (self+(((end - self).cast(dtypes.int8) * w_i + (1<<W_PREC-1)).cast(dtypes.uint16) >> W_PREC)).cast(dtypes.uint8)
-    return self + (end - self) * weight
-
-  def sign(self) -> Tensor:
-    """
-    Returns the sign of the tensor element-wise.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).sign().numpy())
-    ```
-    """
-    return self.ne(0).where((self<0).where(self.full_like(-1), self.full_like(1)), self.full_like(0)) + self*0
-
-  def abs(self) -> Tensor:
-    """
-    Computes the absolute value of the tensor element-wise.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).abs().numpy())
-    ```
-    """
-    return self * self.sign()
-
   # ***** activation functions *****
-
-  def elu(self, alpha=1.0) -> Tensor:
-    """
-    Applies the Exponential Linear Unit (ELU) function element-wise.
-
-    - Paper: https://arxiv.org/abs/1511.07289v5
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).elu().numpy())
-    ```
-    """
-    return self.relu() - alpha*(1-self.exp()).relu()
-
-  def celu(self, alpha=1.0) -> Tensor:
-    """
-    Applies the Continuously differentiable Exponential Linear Unit (CELU) function element-wise.
-
-    - Paper: https://arxiv.org/abs/1704.07483
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).celu().numpy())
-    ```
-    """
-    return self.maximum(0) + (alpha * ((self / alpha).exp() - 1)).minimum(0)
 
   def selu(self, alpha=1.67326, gamma=1.0507) -> Tensor:
     """
@@ -2999,44 +2832,6 @@ class Tensor(OpMixin):
     ```
     """
     return gamma * (self >= 0).detach().where(self, alpha * (self.exp() - 1))
-
-  def sinh(self) -> Tensor:
-    """
-    Applies the Hyperbolic Sine (sinh) function element-wise.
-
-    - Described: https://en.wikipedia.org/wiki/Hyperbolic_functions#Sinh
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).sinh().numpy())
-    ```
-    """
-    return (self.exp() - self.neg().exp()) / 2
-
-  def cosh(self) -> Tensor:
-    """
-    Applies the Hyperbolic Cosine (cosh) function element-wise.
-
-    - Described: https://en.wikipedia.org/wiki/Hyperbolic_functions#Cosh
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).cosh().numpy())
-    ```
-    """
-    return (self.exp() + self.neg().exp()) / 2
-
-  def erf(self) -> Tensor:
-    """
-    Applies error function element-wise.
-
-    - Described: https://en.wikipedia.org/wiki/Error_function
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-1.5, -1.0, -0.5, 0., 0.5, 1.0, 1.5]).erf().numpy())
-    ```
-    """
-    # https://personal.math.ubc.ca/~cbm/aands/page_299.htm 7.1.26
-    t = 1.0 / (1.0 + 0.3275911 * self.abs())
-    return self.sign() * (1.0 - t * polyN(t, [1.061405429, -1.453152027, 1.421413741, -0.284496736, 0.254829592]) * (-self.square()).exp())
 
   def mish(self) -> Tensor:
     """
@@ -3059,16 +2854,6 @@ class Tensor(OpMixin):
     ```
     """
     return (1/beta) * (self*beta).logaddexp(0.0)
-
-  def softsign(self) -> Tensor:
-    """
-    Applies the Softsign function element-wise.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).softsign().numpy())
-    ```
-    """
-    return self / (1 + self.abs())
 
   # ***** broadcasted elementwise ops *****
 
@@ -3163,20 +2948,6 @@ class Tensor(OpMixin):
     """
     a, b = self._broadcasted(x, reverse)
     return a - a.div(b, rounding_mode="floor") * b
-
-  def bitwise_not(self) -> Tensor:
-    """
-    Computes the bitwise NOT of `self`.
-    Equivalent to `~self`.
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([0, 2, 5, 255], dtype="int8").bitwise_not().numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([True, False]).bitwise_not().numpy())
-    ```
-    """
-    if self.dtype != dtypes.bool and not dtypes.is_int(self.dtype): raise RuntimeError(f"{self.dtype} is not supported")
-    return self.logical_not() if self.dtype == dtypes.bool else self ^ -1
 
   def lshift(self, x:Tensor|int, reverse=False) -> Tensor:
     """
@@ -3294,8 +3065,6 @@ class Tensor(OpMixin):
     return ((self-m).exp() + (self._broadcasted(other)[1]-m).exp()).log() + m
 
   # ***** op wrappers *****
-
-  def __invert__(self) -> Tensor: return self.bitwise_not()
 
   # TODO: combine with UOps __floordiv__
   def __floordiv__(self, x): return self.div(x, rounding_mode="floor")
