@@ -3,7 +3,7 @@ from tinygrad import dtypes, Variable
 from tinygrad.dtype import AddrSpace
 from tinygrad.helpers import Context
 from tinygrad.uop.ops import Ops, UOp, AxisType
-from test.test_uops import to_uops_list
+from test.helpers import to_uops_list
 
 class TestValidateOOB(unittest.TestCase):
   """Test z3 validation of index bounds for different ALU ops and patterns."""

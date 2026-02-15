@@ -1,4 +1,4 @@
-from extra.assembly.amd.autogen.cdna.ins import *
+from tinygrad.runtime.autogen.amd.cdna.ins import *
 from tinygrad.dtype import dtypes
 
 # M0 is encoded with 124 (NULL in RDNA) in CDNA
@@ -14,7 +14,12 @@ GEMM_ARGS = {
   (8192, 8192, 8192): (256, 128, 131072),
   (4096, 4096, 4096): (256, 64, 16384),
   (4096, 14336, 4096): (256, 64, 57344),
+  (4096, 14336, 8192): (256, 128, 114688),
   (4096, 4096, 14336): (256, 224, 57344),
+  (14336, 4096, 8192): (256, 128, 114688),
+  (4096, 8192, 14336): (256, 224, 114688),
+  (4096, 4096, 8192): (256, 128, 32768),
+  (4096, 8192, 4096): (256, 64, 32768),
 }
 ITERS_ARGS = {64: (67108864, 0), 128: (33554432, 0), 224: (613566757, 2147483656)}
 
@@ -68,7 +73,8 @@ class Kernel:
     lines, pos = [], 0
     for inst in self.instructions:
       if (label := self.label_at_pos.get(pos)) is not None: lines.append(f"{label}:")
-      lines.append(f"  {inst.disasm()}" if inst._target is None else f" {inst.op_name.lower()} {inst._target}")
+      from test.amd.disasm import disasm
+      lines.append(f"  {disasm(inst)}" if inst._target is None else f" {inst.op_name.lower()} {inst._target}")
       pos += inst.size()
     return "\n".join(lines)
 

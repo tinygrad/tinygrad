@@ -2,7 +2,7 @@ from __future__ import annotations
 import ctypes, time, array, struct, itertools, dataclasses
 from typing import cast, Any
 from tinygrad.runtime.autogen import nv, nv_570 as nv_gpu, pci
-from tinygrad.helpers import to_mv, lo32, hi32, DEBUG, round_up, round_down, mv_address, fetch, wait_cond
+from tinygrad.helpers import to_mv, lo32, hi32, DEBUG, round_up, round_down, mv_address, fetch, wait_cond, ceildiv
 from tinygrad.runtime.support.system import System
 from tinygrad.runtime.support.elf import elf_loader
 
@@ -31,22 +31,28 @@ class NVRpcQueue:
     for offset in range(0, len(data), 8): checksum ^= struct.unpack_from('Q', data, offset)[0]
     return hi32(checksum) ^ lo32(checksum)
 
-  def send_rpc(self, func:int, msg:bytes, wait=False):
+  def _send_rpc_record(self, func:int, msg:bytes):
     header = nv.rpc_message_header_v(signature=nv.NV_VGPU_MSG_SIGNATURE_VALID, rpc_result=nv.NV_VGPU_MSG_RESULT_RPC_PENDING,
       rpc_result_private=nv.NV_VGPU_MSG_RESULT_RPC_PENDING, header_version=(3<<24), function=func, length=len(msg) + 0x20)
 
     msg = bytes(header) + msg
-    phdr = nv.GSP_MSG_QUEUE_ELEMENT(elemCount=round_up(len(msg), self.tx.msgSize) // self.tx.msgSize, seqNum=self.seq)
+    phdr = nv.GSP_MSG_QUEUE_ELEMENT(elemCount=ceildiv(len(msg) + ctypes.sizeof(nv.GSP_MSG_QUEUE_ELEMENT), self.tx.msgSize), seqNum=self.seq)
     phdr.checkSum = self._checksum(bytes(phdr) + msg)
-    msg = bytes(phdr) + msg
+    msg = (bytes(phdr) + msg).ljust(phdr.elemCount * self.tx.msgSize, b'\x00')
 
-    off = self.tx.writePtr * self.tx.msgSize
-    self.queue_mv[off:off+len(msg)] = msg
-    self.tx.writePtr = (self.tx.writePtr + round_up(len(msg), self.tx.msgSize) // self.tx.msgSize) % self.tx.msgCount
+    off, first = self.tx.writePtr * self.tx.msgSize, min(len(msg), len(self.queue_mv) - self.tx.writePtr * self.tx.msgSize)
+    self.queue_mv[off:off+first] = msg[:first]
+    if first < len(msg): self.queue_mv[:len(msg)-first] = msg[first:]
+    self.tx.writePtr = (self.tx.writePtr + phdr.elemCount) % self.tx.msgCount
     System.memory_barrier()
 
     self.seq += 1
     self.gsp.nvdev.NV_PGSP_QUEUE_HEAD[0].write(0x0)
+
+  def send_rpc(self, func:int, msg:bytes):
+    max_payload = self.tx.msgSize * 16 - ctypes.sizeof(nv.GSP_MSG_QUEUE_ELEMENT) - ctypes.sizeof(nv.rpc_message_header_v)
+    self._send_rpc_record(func, msg[:max_payload])
+    for off in range(max_payload, len(msg), max_payload): self._send_rpc_record(nv.NV_VGPU_MSG_FUNCTION_CONTINUATION_RECORD, msg[off:off+max_payload])
 
   def read_resp(self):
     System.memory_barrier()
@@ -497,6 +503,18 @@ class NV_GSP(NV_IP):
 
   ### RPCs
 
+  def rpc_alloc_memory(self, hDevice:int, hClass:int, paddrs:list[tuple[int,int]], length:int, flags:int, client:int|None=None) -> int:
+    assert all(sz == 0x1000 for _, sz in paddrs), f"all pages must be 4KB, got {[(hex(p), hex(sz)) for p, sz in paddrs]}"
+
+    rpc = nv.rpc_alloc_memory_v(hClient=(client:=client or self.priv_root), hDevice=hDevice, hMemory=(handle:=next(self.handle_gen)),
+      hClass=hClass, flags=flags, pteAdjust=0, format=6, length=length, pageCount=len(paddrs))
+    rpc.pteDesc.idr, rpc.pteDesc.length = nv.NV_VGPU_PTEDESC_IDR_NONE, (len(paddrs) & 0xffff)
+
+    payload = bytes(rpc) + b''.join(bytes(nv.struct_pte_desc_pte_pde(pte=(paddr >> 12))) for paddr, _ in paddrs)
+    self.cmd_q.send_rpc(nv.NV_VGPU_MSG_FUNCTION_ALLOC_MEMORY, bytes(payload))
+    self.stat_q.wait_resp(nv.NV_VGPU_MSG_FUNCTION_ALLOC_MEMORY)
+    return handle
+
   def rpc_rm_alloc(self, hParent:int, hClass:int, params:Any, client=None) -> int:
     if hClass == self.gpfifo_class:
       ramfc_alloc = self.nvdev.mm.valloc(0x1000, contiguous=True)
@@ -517,13 +535,24 @@ class NV_GSP(NV_IP):
 
     if hClass == nv_gpu.FERMI_VASPACE_A and client != self.priv_root:
       self.rpc_set_page_directory(device=hParent, hVASpace=obj, pdir_paddr=self.nvdev.mm.root_page_table.paddr, client=client)
+    if hClass == nv_gpu.NV01_DEVICE_0 and client != self.priv_root: self.device = obj # save user device handle
     if hClass == nv_gpu.NV20_SUBDEVICE_0: self.subdevice = obj # save subdevice handle
     if hClass == self.compute_class and client != self.priv_root:
       phys_gr_ctx = self.promote_ctx(client, self.subdevice, hParent, {k:v for k,v in self.grctx_bufs.items() if k in [0, 1, 2]}, virt=False)
       self.promote_ctx(client, self.subdevice, hParent, {k:v for k,v in self.grctx_bufs.items() if k in [0, 1, 2]}, phys_gr_ctx, phys=False)
     return obj if hClass != nv_gpu.NV1_ROOT else client
 
-  def rpc_rm_control(self, hObject:int, cmd:int, params:Any, client=None):
+  def rpc_rm_control(self, hObject:int, cmd:int, params:Any, client=None, extra=None):
+    if cmd == nv_gpu.NVB0CC_CTRL_CMD_POWER_REQUEST_FEATURES:
+      self.rpc_rm_control(hObject, nv_gpu.NVB0CC_CTRL_CMD_INTERNAL_PERMISSIONS_INIT, nv_gpu.NVB0CC_CTRL_INTERNAL_PERMISSIONS_INIT_PARAMS(
+        bAdminProfilingPermitted=1, bDevProfilingPermitted=1, bCtxProfilingPermitted=1, bVideoMemoryProfilingPermitted=1,
+        bSysMemoryProfilingPermitted=1), client=client)
+    elif cmd == nv_gpu.NVB0CC_CTRL_CMD_ALLOC_PMA_STREAM:
+      params.hMemPmaBuffer = self.rpc_alloc_memory(self.device, nv_gpu.NV01_MEMORY_LIST_SYSTEM, extra[0].meta.mapping.paddrs, extra[0].size,
+        pma_flags:=(nv_gpu.NVOS02_FLAGS_PHYSICALITY_NONCONTIGUOUS << 4 | nv_gpu.NVOS02_FLAGS_MAPPING_NO_MAP << 30), client=client)
+      params.hMemPmaBytesAvailable = self.rpc_alloc_memory(self.device, nv_gpu.NV01_MEMORY_LIST_SYSTEM, extra[1].meta.mapping.paddrs, extra[1].size,
+        pma_flags | nv_gpu.NVOS02_FLAGS_ALLOC_USER_READ_ONLY_YES << 21, client=client)
+
     control_args = nv.rpc_gsp_rm_control_v(hClient=(client:=client or self.priv_root), hObject=hObject, cmd=cmd, flags=0x0,
       paramsSize=ctypes.sizeof(params) if params is not None else 0x0)
     self.cmd_q.send_rpc(nv.NV_VGPU_MSG_FUNCTION_GSP_RM_CONTROL, bytes(control_args) + (bytes(params) if params is not None else b''))

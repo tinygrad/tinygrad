@@ -164,6 +164,8 @@ class CStyleLanguage(Renderer):
     self.r = r
 
     child_count = Counter(v for ru in uops for v in ru.src)
+    # find which PARAMs are stored to with a single toposort
+    writable_params = {u for u in UOp.sink(*[u.src[0] for u in uops if u.op is Ops.STORE]).toposort() if u.op is Ops.PARAM}
     bufs: dict[UOp, tuple[str, tuple[DType, bool]]] = {}
     kernel = []
     depth = 1
@@ -179,13 +181,8 @@ class CStyleLanguage(Renderer):
         continue
       if u.op in (Ops.PARAM, Ops.DEFINE_VAR):
         r[u] = (f"data{u.arg}_{sz}" if (sz:=u.ptrdtype.size) > 0 else f"data{u.arg}") if u.op is Ops.PARAM else u.arg[0]
-        bufs[u] = (r[u], (u.dtype, False))
+        bufs[u] = (r[u], (u.dtype, u in writable_params))
         continue
-
-      # mark buffers that we store to writable
-      if u.op is Ops.STORE:
-        for up in u.src[0].toposort():
-          if up.op is Ops.PARAM: bufs[up] = (bufs[up][0], (bufs[up][1][0], True))
 
       # naming
       prefix = None
@@ -340,7 +337,9 @@ class IntelRenderer(OpenCLRenderer):
 class MetalRenderer(CStyleLanguage):
   device = "METAL"
   shared_max = 32768
-  def __init__(self): self.tensor_cores = tc.metal if hasattr(os, 'uname') and os.uname().machine == "arm64" else []
+  def __init__(self):
+    from tinygrad.runtime.ops_metal import MetalCompiler
+    self.compiler, self.tensor_cores = MetalCompiler(), tc.metal if hasattr(os, 'uname') and os.uname().machine == "arm64" else []
 
   # language options
   kernel_typedef = "kernel void"
@@ -382,15 +381,17 @@ class MetalRenderer(CStyleLanguage):
 _nms = list("xyzwabcdefghijkl") + [f'v{i}' for i in range(16, 32)]
 
 class CUDARenderer(CStyleLanguage):
-  device = "CUDA"
   global_max = (2147483647, 65535, 65535)
   local_max = (1024, 1024, 64)
   shared_max = 49152
 
-  def __init__(self, arch:str):
-    self.arch, arch_ver = arch, int(arch[3:])
-    self.tensor_cores = tc.cuda_sm89 if arch_ver >= 89 else tc.cuda_sm80 if arch_ver >= 80 else tc.cuda_sm75 if arch_ver >= 75 else []
-  def __reduce__(self): return self.__class__, (self.arch,)
+  def __init__(self, arch:str, device:str="NV", use_nvcc=False):
+    from tinygrad.runtime.support.compiler_cuda import NVRTCCompiler, NVCCCompiler
+    from tinygrad.runtime.support.hcq import MOCKGPU
+    self.device, self.arch, self.use_nvcc = device, arch, use_nvcc
+    self.compiler = (NVCCCompiler if use_nvcc else NVRTCCompiler)(arch, ptx=bool(MOCKGPU) or device == "CUDA", cache_key=device.lower())
+    self.tensor_cores = tc.cuda_sm89 if (ver:=int(arch[3:])) >= 89 else tc.cuda_sm80 if ver >= 80 else tc.cuda_sm75 if ver >= 75 else []
+  def __reduce__(self): return self.__class__, (self.arch, self.device, self.use_nvcc)
 
   # language options
   # https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html
@@ -547,7 +548,6 @@ class AMDHIPRenderer(CStyleLanguage):
   for (int n = 0; n < 8; n++) { d[n] = c_frag[n*2]; } return d;\n}""")
     return super().render_kernel(function_name, kernel, bufs, uops, prefix)
 
-class NVRenderer(CUDARenderer): device = "NV"
 class HIPRenderer(AMDHIPRenderer): device = "HIP"
 class AMDHIPCCRenderer(AMDHIPRenderer):
   def __init__(self, arch:str):

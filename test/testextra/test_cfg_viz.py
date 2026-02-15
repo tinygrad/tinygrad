@@ -2,38 +2,28 @@
 # allow define from star imports
 
 import unittest
-import functools
 
 from tinygrad import Device, Tensor
 from tinygrad.uop.ops import UOp, Ops, KernelInfo
-from tinygrad.device import Compiler
-from tinygrad.runtime.support.compiler_amd import HIPCompiler
 from tinygrad.viz.serve import amdgpu_cfg
 
-from extra.assembly.amd.autogen.rdna3.ins import *
-from extra.assembly.amd.dsl import s
+from tinygrad.runtime.autogen.amd.rdna3.ins import *
+from tinygrad.renderer.amd.dsl import s
 
 # TODO: this belongs to the dsl infrastructure
 from extra.gemm.amd_asm_matmul import Kernel
 
-# TODO: shouldn't need compiler once we can output ELF
-# outputs a text disassembly for humans and a machine readable binary
-def assemble(name:str, k:Kernel, compiler:Compiler) -> tuple[str, bytes]:
-  src = k.to_asm()
-  return (src, compiler.compile(src))
-
-def asm_kernel(out:UOp, k:Kernel, name:str, device:str, compiler:Compiler, n_threads:int=1, n_workgroups:int=1) -> UOp:
-  lidx = UOp.special(n_threads, "lidx0")
-  gidx = UOp.special(n_workgroups, "gidx0")
-  sink = UOp.sink(out, lidx, gidx, arg=KernelInfo(name=name))
-  src, lib = assemble(name, k, compiler)
-  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg=device), UOp(Ops.LINEAR, src=(*sink.src, sink)),
-                               UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=lib)))
-
-def run_asm(name:str, k:Kernel) -> None:
-  fxn = functools.partial(asm_kernel, k=k, name=name, device=Device.DEFAULT, compiler=HIPCompiler(Device[Device.DEFAULT].renderer.arch))
+def run_asm(name:str, k:Kernel):
+  insts = k.finalize()
+  def fxn(out:UOp) -> UOp:
+    lidx = UOp.special(1, "lidx0")
+    gidx = UOp.special(1, "gidx0")
+    sink = UOp.sink(out.base, lidx, gidx, arg=KernelInfo(name=name))
+    return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg="AMD"), UOp(Ops.LINEAR, src=tuple([UOp(Ops.INS, arg=x) for x in insts]))))
   out = Tensor.custom_kernel(Tensor.empty(1), fxn=fxn)[0]
-  out.realize()
+  ei = out.schedule()[-1].lower()
+  ei.run()
+  return ei
 
 @unittest.skipUnless(Device.DEFAULT == "AMD", "only on AMD")
 class TestCfg(unittest.TestCase):
@@ -67,9 +57,8 @@ class TestCfg(unittest.TestCase):
     k.label("end")
     k.emit(s_endpgm())
     k.emit(s_code_end())
-    run_asm("diamond", k)
-    _, lib = assemble("diamond", k, HIPCompiler(Device[Device.DEFAULT].arch))
-    cfg = amdgpu_cfg(lib, Device[Device.DEFAULT].device_props()["gfx_target_version"])["data"]
+    ei = run_asm("diamond", k)
+    cfg = amdgpu_cfg(ei.prg.p.lib, Device[Device.DEFAULT].device_props()["gfx_target_version"])["data"]
     self.assertEqual(len(cfg["blocks"]), 5)
     edge_count = sum(len(v) for v in cfg["paths"].values())
     self.assertEqual(edge_count, 5)

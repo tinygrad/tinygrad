@@ -14,7 +14,7 @@ from tinygrad.codegen.opt import Opt, OptOps, KernelOptError
 from tinygrad.codegen.opt.tc import amd_cdna_1616128
 
 # TODO: write a clean version of this
-from test.test_linearizer import helper_realized_ast, helper_linearizer_opt
+from test.backend.test_linearizer import helper_realized_ast, helper_linearizer_opt
 
 # NOTE: get_program always passes in Device[Device.DEFAULT].renderer explicitly for process_replay!!!
 

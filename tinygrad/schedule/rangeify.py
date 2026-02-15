@@ -4,7 +4,7 @@ from tinygrad.dtype import dtypes, PtrDType, ImageDType, AddrSpace
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, _substitute, KernelInfo, pm_gate_kernel_sink
 from tinygrad.uop.ops import graph_rewrite, identity_element, sint, AxisType, BottomUpGate, _remove_all_tags, range_str
 from tinygrad.uop.symbolic import symbolic
-from tinygrad.helpers import argsort, prod, all_same, getenv, flatten, dedup, all_int, DEBUG, SPLIT_REDUCEOP, DEBUG_RANGEIFY, VIZ
+from tinygrad.helpers import argsort, prod, all_same, getenv, flatten, dedup, all_int, DEBUG, SPLIT_REDUCEOP, DEBUG_RANGEIFY, VIZ, MAX_KERNEL_BUFFERS
 from tinygrad.helpers import PCONTIG, partition, get_single_element
 from tinygrad.codegen.simplify import pm_flatten_range, pm_reduce_simplify
 from tinygrad.codegen.opt import Opt
@@ -33,8 +33,23 @@ pm_mops = PatternMatcher([
 # *****************
 # 0. do some cleanup rewrites, mostly copied from the old stuff
 
+def collapse_nested_assign(assign:UOp, target:UOp, src:UOp):
+  """nested ASSIGN to the same buffer (e.g. __iadd__ in __setitem__): collapse the redundant outer ASSIGN"""
+  if src.src[0].base is target.base: return src if src.src[0] is target else assign.replace(src=(target, src.src[1]))
+
 def assign_to_contiguous(assign:UOp, target:UOp, src:UOp):
-  if (t := target.base).op is Ops.BUFFER or (t.op is Ops.MSTACK and all(s.op is Ops.BUFFER for s in t.src)): return None
+  if (t := target.base).op is Ops.PARAM or (t.op is Ops.MSTACK and all(s.op is Ops.PARAM for s in t.src)): return None
+  # partial view of unrealized graph: insert CONTIGUOUS at base to realize it
+  if target is not t and target.op_in_backward_slice_with_self(Ops.SHRINK):
+    # base already realized: copy src only if it reads from the same buffer (overlapping read/write hazard)
+    if t.op is Ops.CONTIGUOUS: return assign.replace(src=(target, src.contiguous())) if t in src.toposort() else None
+    mops: list[UOp] = []
+    while target.op in GroupOp.Movement:
+      mops.append(target)
+      target = target.src[0]
+    new_target = t.f(Ops.CONTIGUOUS, tag=t.tag)
+    for m in reversed(mops): new_target = m.replace(src=(new_target,)+m.src[1:])
+    return assign.replace(src=(new_target, src))
   return src.f(Ops.CONTIGUOUS, tag=assign.tag)
 
 def fix_assign_hazard(assign:UOp, target:UOp, src:UOp):
@@ -42,7 +57,7 @@ def fix_assign_hazard(assign:UOp, target:UOp, src:UOp):
   unsafe = {Ops.PERMUTE, Ops.FLIP} | ({Ops.SHRINK} if target.op_in_backward_slice_with_self(Ops.SHRINK) else set())
   if not (hazards:=[s for s in src.toposort(gate=lambda s:s.op not in ALWAYS_CONTIGUOUS) if s.op in unsafe]): return
   for h in hazards:
-    if any(s is target.base for s in h.toposort(gate=lambda s:s.op not in ALWAYS_CONTIGUOUS-{Ops.BUFFER})):
+    if any(s is target.base for s in h.toposort(gate=lambda s:s.op not in ALWAYS_CONTIGUOUS-{Ops.PARAM})):
       return assign.replace(src=(target, src.contiguous()))
 
 def split_reduceop(reduce:UOp, x:UOp):
@@ -95,8 +110,8 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
   # resolve calls
   (UPat(Ops.CALL, name="c"), resolve_call),
 
-  # remove CONTIGUOUS if the BUFFER is already contiguous
-  (UPat(Ops.RESHAPE, src=(UPat(Ops.BUFFER), UPat()), name="r").f(Ops.CONTIGUOUS, name="c"), lambda r,c: r.replace(tag=c.tag)),
+  # remove CONTIGUOUS if the source is already contiguous
+  (UPat(Ops.RESHAPE, src=(UPat((Ops.PARAM, Ops.CONTIGUOUS)), UPat()), name="r").f(Ops.CONTIGUOUS, name="c"), lambda r,c: r.replace(tag=c.tag)),
 
   # split_reduceop
   (UPat(Ops.REDUCE_AXIS, name="reduce", src=(UPat.var("x"),)), split_reduceop),
@@ -132,12 +147,15 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
 
   # ** assign rules **
 
+  # collapse nested ASSIGN to the same buffer (e.g. __iadd__ in __setitem__)
+  (UPat(Ops.ASSIGN, src=(UPat(name="target"), UPat(Ops.ASSIGN, name="src")), name="assign"), collapse_nested_assign),
+
   # move bitcast from assign target to source: a.bitcast(X).assign(src) -> a.assign(src.bitcast(a.dtype))
   (UPat(Ops.ASSIGN, src=(UPat(Ops.BITCAST, src=(UPat(name="target"),)), UPat(name="src")), name="assign"),
    lambda assign, target, src: target.assign(src.bitcast(target.dtype)).replace(tag=assign.tag)),
 
   # assign only to buffer, otherwise make it a CONTIGUOUS
-  (UPat(Ops.ASSIGN, src=(UPat(GroupOp.All-{Ops.BUFFER}, name="target"), UPat(name="src")), name="assign"), assign_to_contiguous),
+  (UPat(Ops.ASSIGN, src=(UPat(GroupOp.All-{Ops.PARAM}, name="target"), UPat(name="src")), name="assign"), assign_to_contiguous),
 
    # make source contiguous if it has hazardous movement ops on the dest buffer
    (UPat(Ops.ASSIGN, src=(UPat.var("target"), UPat.var("src")), name="assign"), fix_assign_hazard),
@@ -195,7 +213,7 @@ def remove_bufferize(src:UOp, buf:UOp, idx:UOp):
       if (x.op is Ops.BUFFERIZE and x.arg.addrspace == AddrSpace.GLOBAL) or x.op is Ops.MSTACK:
         accessed_buffers.append(x)
         return False
-      if x.op is Ops.BUFFER:
+      if x.op is Ops.PARAM:
         accessed_buffers.append(x)
       if x.op is Ops.INDEX:
         indexes.append(x)
@@ -212,7 +230,7 @@ def remove_bufferize(src:UOp, buf:UOp, idx:UOp):
     buffer_in_reduce = False
     def buf_gate(x:UOp):
       nonlocal buffer_in_reduce
-      if x.op in {Ops.BUFFER, Ops.BUFFERIZE}: buffer_in_reduce = True
+      if x.op in {Ops.PARAM, Ops.BUFFERIZE}: buffer_in_reduce = True
       return not buffer_in_reduce
     UOp.sink(*[x.src[0] for x in reduces]).toposort(gate=buf_gate)
     del buf_gate
@@ -246,7 +264,7 @@ def remove_noop_bufferize(idx,b2):
 
 pm_const_buffer_folding = pm_mops+PatternMatcher([
   (UPat(Ops.BUFFERIZE, name="b"), cleanup_dead_axes),
-  (UPat(GroupOp.All-{Ops.BUFFERIZE, Ops.BUFFER}, name="x"), lambda x: x.replace(dtype=x.dtype.base) if isinstance(x.dtype, ImageDType) else None),
+  (UPat(GroupOp.All-{Ops.BUFFERIZE, Ops.PARAM}, name="x"), lambda x: x.replace(dtype=x.dtype.base) if isinstance(x.dtype, ImageDType) else None),
   (UPat((Ops.BUFFERIZE), name="x"), lambda x: x.replace(dtype=x.dtype.base) if isinstance(x.dtype, ImageDType)
     and (resolve(prod(x.dtype.shape)!=prod(x.shape)) or x.shape[-1]%4!=0) else None),
   # remove noop buffers. if we look at the next index we can remove even more of these
@@ -294,19 +312,19 @@ DEVICE_MAX_BUFS = {"METAL": 31, "WEBGPU": 8} # TODO: get from device?
 def limit_bufs(ctx:IndexingContext, root:UOp):
   if (device:=root._device) is None: return None # no device, index related calculations
   device = device if isinstance(device, str) else device[0].split(":")[0]
-  if not (MAX_BUFS:=getenv("MAX_KERNEL_BUFFERS", DEVICE_MAX_BUFS.get(device, 0))): return None
+  if not (MAX_BUFS:=MAX_KERNEL_BUFFERS.value or DEVICE_MAX_BUFS.get(device, 0)): return None
 
   bufs: set[UOp] = set()
   def gate_input(u:UOp):
     # TODO: add cache to fix n^2
-    if is_load:=(u.op in {Ops.BUFFERIZE, Ops.AFTER, Ops.BUFFER, Ops.MSELECT, Ops.MSTACK, Ops.DEFINE_VAR}): bufs.add(u)
+    if is_load:=(u.op in {Ops.BUFFERIZE, Ops.AFTER, Ops.PARAM, Ops.MSELECT, Ops.MSTACK, Ops.DEFINE_VAR}): bufs.add(u)
     return not is_load
   root.toposort(gate=gate_input)
 
   if len(bufs) > MAX_BUFS - 1: # NOTE: this -1 is for the output buffer
     srcs = []
     for s in root.src:
-      if s.op in GroupOp.Elementwise:
+      if s.op in GroupOp.Elementwise and s._device is not None:
         # Insert bufferize: all AxisType.REDUCE before bufferize are AxisType.LOOP
         orig_ranges, end_ranges = s.ranges, [x.replace(arg=(next(ctx.range_idx), AxisType.LOOP)) if x.op is Ops.RANGE else x for x in s.ranges]
         s = s.substitute(dict(zip(orig_ranges, end_ranges))).bufferize(*end_ranges, arg=BufferizeOpts(device=s.device)).index(*orig_ranges)
@@ -332,9 +350,11 @@ def bufferize_to_store(ctx:itertools.count, x:UOp, idx:UOp, allow_locals=True):
   if (assign := x.src[0]).op is Ops.ASSIGN:
     assign_target, assign_src = assign.src[0], assign.src[1]
     assert assign_target.op is Ops.INDEX, f"{assign_target.op} is not index"
+    while assign_src.op is Ops.NOOP: assign_src = assign_src.src[0]
+    # skip self-assign from same-device copy, otherwise create the store
     # in assign, this is the buffer size, not the bufferize size
-    do_store = assign_target.replace(dtype=sdtype).store(assign_src, tag=x.tag).end(*rngs)
-    ret = assign_target.src[0].after(do_store)
+    if assign_src is assign_target: ret = assign_target.src[0]
+    else: ret = assign_target.src[0].after(assign_target.replace(dtype=sdtype).store(assign_src, tag=x.tag).end(*rngs))
     for op, marg in reversed(assign.arg or ()): ret = ret._mop(op, marg)
     return ret
 
@@ -402,7 +422,7 @@ class LocalAddBufferContext:
   opts:tuple|None = None
 
 def debuf(ctx:LocalAddBufferContext, buf:UOp):
-  ret = UOp(Ops.PARAM, buf.dtype.ptr(buf.arg), arg=ctx.dg)
+  ret = UOp(Ops.PARAM, buf.dtype.ptr(buf.size), arg=ctx.dg)
   if buf not in ctx.map: ctx.map[buf] = buf
   ctx.dg += 1
   return ret
@@ -432,12 +452,13 @@ def renumber_range(ctx:LocalAddBufferContext, r:UOp):
 def find_bufs(x:UOp):
   idxs = [s for s in x.toposort(gate=lambda x: x.op is not Ops.AFTER) if s.op is Ops.INDEX]
   read_from: dict[UOp, Ops] = {}
-  if any((buf:=idx.buf_uop).op is Ops.BUFFER and read_from.setdefault(buf, op:=idx.src[0].op) is not op for idx in idxs):
+  if any((buf:=idx.buf_uop).op in {Ops.BUFFER, Ops.PARAM} and read_from.setdefault(buf, op:=idx.src[0].op) is not op for idx in idxs):
     raise RuntimeError(f"cycle detected while indexing {buf}")
 
 to_define_global = PatternMatcher([
   (UPat(Ops.STORE, name="x"), find_bufs),
   (UPat(Ops.BUFFER, name="buf"), debuf),
+  (UPat(Ops.PARAM, src=(UPat(), UPat(Ops.DEVICE)), name="buf"), debuf),
   (UPat(Ops.BIND, name="b"), unbind_kernel),
   (UPat((Ops.MSTACK, Ops.MSELECT, Ops.AFTER), name="after"), handle_after),
 
@@ -533,9 +554,9 @@ def tag_uop(ctx:tuple[list[UOp], set[UOp]], x:UOp):
   return x.replace(tag=(len(ctx[0])-1,))
 add_tags = pm_gate_kernel_sink+PatternMatcher([
   # don't tag BUFFERs, they are global
-  (UPat(GroupOp.All-{Ops.BUFFER, Ops.CONST, Ops.DEVICE, Ops.UNIQUE, Ops.LUNIQUE, Ops.DEFINE_VAR, Ops.BIND, Ops.CALL, Ops.END,
+  (UPat(GroupOp.All-{Ops.PARAM, Ops.CONST, Ops.DEVICE, Ops.UNIQUE, Ops.LUNIQUE, Ops.DEFINE_VAR, Ops.BIND, Ops.END,
                      Ops.MSTACK, Ops.MSELECT, Ops.RANGE}.union(GroupOp.Movement), name="x"), tag_uop),
-  (UPat({Ops.MSTACK, Ops.MSELECT}, name="x"), lambda ctx,x: None if all(s.op is Ops.BUFFER for s in x.src) else tag_uop(ctx, x)),
+  (UPat({Ops.MSTACK, Ops.MSELECT}, name="x"), lambda ctx,x: None if all(s.op is Ops.PARAM for s in x.src) else tag_uop(ctx, x)),
 ])
 
 # support for using a contiguous permuted view instead of the parent view if one exists
@@ -569,7 +590,7 @@ def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
   # rebuild the sink with all the BUFFERIZEs with tags, this is what's ending up in the tensor graph
   # MSTACK stacks multiple BUFFERIZEs in one tagged tensor
   # if it's not tagged by here, it's out
-  tsink = UOp.sink(*[x for x in tsink.backward_slice if x.base.op in {Ops.BUFFERIZE, Ops.MSTACK, Ops.CONST, Ops.BUFFER, Ops.AFTER} and \
+  tsink = UOp.sink(*[x for x in tsink.backward_slice if x.base.op in {Ops.BUFFERIZE, Ops.MSTACK, Ops.CONST, Ops.PARAM, Ops.AFTER} and \
                      x.tag is not None and len(x.tag)])
 
   if VIZ: graph_rewrite(tsink, PatternMatcher([]), name="View Tagged Rangeify")
@@ -580,15 +601,15 @@ def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
                         name="bufferize to store")
   tsink = graph_rewrite(tsink, pm_gate_kernel_sink+split_kernels, ctx=uop_list, bottom_up=True, name="split kernels")
 
-  # if a kernel depends on a buffer, and that buffer is later assigned to, make the assign depend on the kernel's assign
-  kernel_assign: dict[UOp, UOp] = {}
+  # WAR deps: if kernel U reads buffer S, and S is also written by another kernel, S's write must wait for U to finish
+  afters = [u for u in tsink.toposort() if u.op is Ops.AFTER]
+  kernel_assign: dict[UOp, UOp] = {u.buf_uop:u for u in afters}
   assign_rep: dict[UOp, UOp] = {}
-  for u in tsink.toposort():
-    if u.op is not Ops.AFTER: continue
-    kernel_assign[u.buf_uop] = u
+  for u in afters:
     for s in u.src[1].src:
       # TODO: this is probably broken for MSELECT/MSTACK
-      if s.op is not Ops.BUFFER or s is u.buf_uop or (a:=kernel_assign.get(s)) is None: continue
+      if s.op not in {Ops.BUFFER, Ops.PARAM} or s is u.buf_uop or (a:=kernel_assign.get(s)) is None: continue
+      if a.src[1] is u.src[1]: continue  # same kernel (multi-output custom kernels)
       if any(x.op is Ops.AFTER and x.buf_uop is s for x in u.toposort()):
         raise RuntimeError(f"cycle detected in graph, kernel for {u.buf_uop} must either depend on AFTER or BUFFER")
       assign_rep[a] = kernel_assign[s] = a.replace(src=a.src+(u,))
