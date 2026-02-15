@@ -1447,30 +1447,6 @@ class Tensor(OpMixin):
     assert chunks > 0, f"expect chunks to be greater than 0, got: {chunks}"
     return list(self.split(ceildiv(dim_sz, chunks) if dim_sz else [0]*chunks, dim=dim))
 
-  def unfold(self, dim:int, size:sint, step:int) -> Tensor:
-    """
-    Unfolds the tensor along dimension `dim` into overlapping windows.
-
-    Each window has length `size` and begins every `step` elements of `self`.
-    Returns the input tensor with dimension `dim` replaced by dims `(n_windows, size)`
-    where `n_windows = (self.shape[dim] - size) // step + 1`.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    unfolded = Tensor.arange(8).unfold(0,2,2)
-    print("\\n".join([repr(x.numpy()) for x in unfolded]))
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    unfolded = Tensor.arange(27).reshape(3,3,3).unfold(-1,2,3)
-    print("\\n".join([repr(x.numpy()) for x in unfolded]))
-    ```
-    """
-    if size < 0: raise RuntimeError(f'size must be >= 0 but got {size=}')
-    if step <= 0: raise RuntimeError(f'step must be > 0 but got {step=}')
-    if size > self.shape[dim]: raise RuntimeError(f'maximum size for tensor at dimension {dim} is {self.shape[dim]} but size is {size}')
-    dim = self._resolve_dim(dim)
-    perm_to_last = tuple(i for i in range(self.ndim) if i != dim) + (dim,)
-    return self.permute(perm_to_last)._pool((size,), step).permute(argsort(perm_to_last) + (self.ndim,))
-
   def meshgrid(self:Tensor, *args:Tensor, indexing:str="ij") -> tuple[Tensor, ...]:
     """
     Generates coordinate matrices from coordinate vectors.
@@ -2870,30 +2846,6 @@ class Tensor(OpMixin):
     """
     return self._apply_uop(UOp.contiguous_backward)
 
-  def log(self) -> Tensor:
-    """
-    Computes the natural logarithm element-wise.
-
-    See: https://en.wikipedia.org/wiki/Logarithm
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([1., 2., 4., 8.]).log().numpy())
-    ```
-    """
-    return self.log2()*math.log(2)
-
-  def log10(self) -> Tensor:
-    """
-    Computes the base-10 logarithm element-wise.
-
-    See: https://en.wikipedia.org/wiki/Logarithm
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([1., 2., 4., 8.]).log10().numpy())
-    ```
-    """
-    return self.log2()*math.log10(2)
-
   def log2(self) -> Tensor:
     """
     Computes the base-2 logarithm element-wise.
@@ -3021,16 +2973,6 @@ class Tensor(OpMixin):
 
   # ***** math functions *****
 
-  def round(self: Tensor) -> Tensor:
-    """
-    Rounds the tensor element-wise with rounding half to even.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-3.5, -2.5, -1.5, -0.5, 0.5, 1.5, 2.5, 3.5]).round().numpy())
-    ```
-    """
-    return ((self > 0) == ((b := self.trunc() / 2.0).trunc() == b)).where((self - 0.5).ceil(), (self + 0.5).floor())
-
   def lerp(self, end:Tensor, weight:Tensor|float) -> Tensor:
     """
     Linearly interpolates between `self` and `end` by `weight`.
@@ -3135,42 +3077,6 @@ class Tensor(OpMixin):
     ```
     """
     return (self.exp() + self.neg().exp()) / 2
-
-  def atanh(self) -> Tensor:
-    """
-    Applies the Inverse Hyperbolic Tangent (atanh) function element-wise.
-
-    - Described: https://en.wikipedia.org/wiki/Inverse_hyperbolic_functions#atanh
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-0.9, -0.6, -0.3, 0., 0.3, 0.6, 0.9]).atanh().numpy())
-    ```
-    """
-    return ((1 + self)/(1 - self)).log() / 2
-
-  def asinh(self) -> Tensor:
-    """
-    Applies the Inverse Hyperbolic Sine (asinh) function element-wise.
-
-    - Described: https://en.wikipedia.org/wiki/Inverse_hyperbolic_functions#asinh
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).asinh().numpy())
-    ```
-    """
-    return (self + (self.square() + 1).sqrt()).log()
-
-  def acosh(self) -> Tensor:
-    """
-    Applies the Inverse Hyperbolic Cosine (acosh) function element-wise.
-
-    - Described: https://en.wikipedia.org/wiki/Inverse_hyperbolic_functions#acosh
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).acosh().numpy())
-    ```
-    """
-    return (self + (self.square() - 1).sqrt()).log()
 
   def erf(self) -> Tensor:
     """
