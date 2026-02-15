@@ -225,7 +225,7 @@ jobs:
       uses: ./.github/actions/setup-tinygrad
       with:
         key: linting-only
-        python-version: '3.11'
+        python-version: '3.12'
         deps: linting
     - name: Lint bad-indentation and trailing-whitespace with pylint
       run: python -m pylint --disable=all -e W0311 -e C0303 --jobs=0 --indent-string='  ' --recursive=y .
