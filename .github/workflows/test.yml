@@ -691,7 +691,7 @@ jobs:
           echo "deb http://apt.llvm.org/$(lsb_release -cs)/ llvm-toolchain-$(lsb_release -cs)-21 main" | sudo tee /etc/apt/sources.list.d/llvm.list
           sudo apt-get update
           sudo apt-get install llvm-21 llvm-21-tools cloc
-      - name: RDNA3 Line Count
+      - name: RDNA3/RDNA4 Line Count
         run: cloc --by-file tinygrad/renderer/amd/*.py
       - name: Install rocprof-trace-decoder
         run: sudo PYTHONPATH="." ./extra/sqtt/install_sqtt_decoder.py
@@ -707,6 +707,10 @@ jobs:
       - name: Run RDNA3 ops tests
         run: SKIP_SLOW_TEST=1 AMD_LLVM=0 pytest -n=auto test/test_ops.py -k "test_sparse_categorical_crossentropy or test_tril or test_nonzero or test_softmax_argmax" --durations 20
       # RDNA 4
+      # - name: Run RDNA4 emulator tests
+      #   run: AMD_LLVM=0 MOCKGPU_ARCH=rdna4 python -m pytest -n=auto test/amd/ --durations 20
+      # - name: Run RDNA4 emulator tests (AMD_LLVM=1)
+      #   run: AMD_LLVM=1 MOCKGPU_ARCH=rdna4 python -m pytest -n=auto test/amd/ --durations 20
       - name: Run RDNA4 ops tests
         run: SKIP_SLOW_TEST=1 AMD_LLVM=0 MOCKGPU_ARCH=rdna4 pytest -n=auto test/test_ops.py -k "test_sparse_categorical_crossentropy or test_tril or test_nonzero or test_softmax_argmax" --durations 20
       - name: Run RDNA4 ops tests (AMD_LLVM=1)
@@ -715,8 +719,7 @@ jobs:
         run: AMD_LLVM=0 MOCKGPU_ARCH=rdna4 pytest -n=auto test/test_dtype_alu.py test/test_dtype.py --durations 20
       - name: Run RDNA4 dtype tests (AMD_LLVM=1)
         run: AMD_LLVM=1 MOCKGPU_ARCH=rdna4 pytest -n=auto test/test_dtype_alu.py test/test_dtype.py --durations 20
-        run: SKIP_SLOW_TEST=1 AMD_LLVM=0 pytest -n=auto test/backend/test_ops.py -k "test_sparse_categorical_crossentropy or test_tril or test_nonzero or test_softmax_argmax" --durations 20
-
+      # CDNA 4
       - name: Run CDNA4 emulator tests
         run: AMD_LLVM=1 MOCKGPU_ARCH=cdna4 python -m pytest test/test_tiny.py -v --durations 20
 
