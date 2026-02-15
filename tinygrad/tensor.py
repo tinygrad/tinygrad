@@ -3539,7 +3539,7 @@ class Tensor(OpMixin):
     # handle attention mask
     if is_causal:
       if attn_mask is not None: raise RuntimeError("cannot set attn_mask when is_causal=True")
-      attn_mask = qk.ones_like(requires_grad=False, device=self.device, dtype=dtypes.bool).tril()
+      attn_mask = qk.ones_like(requires_grad=False, dtype=dtypes.bool).tril()
     if attn_mask is not None:
       if attn_mask.dtype == dtypes.bool: attn_mask = attn_mask.where(0, -float("inf"))
       qk = qk + attn_mask
