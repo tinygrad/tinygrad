@@ -53,8 +53,9 @@ template<int D> struct attn_prep_globals {
 };
 
 template<int D> __launch_bounds__(NUM_THREADS, 1)
-__global__ void attend_prep_ker(float *delta_ptr, bf16 *O_ptr, bf16 *dO_ptr) {
+__global__ void attend_prep_ker(float *delta_ptr, bf16 *dq_ptr, bf16 *O_ptr, bf16 *dO_ptr) {
     gl<float, -1, -1, -1, -1> delta{delta_ptr, ATTN_B, ATTN_H, 1, ATTN_N};
+    gl<bf16, -1, -1, -1, -1> dQg{dq_ptr, ATTN_B, ATTN_H, ATTN_N, ATTN_D};
     gl<bf16, -1, -1, -1, -1> Og{O_ptr, ATTN_B, ATTN_N, ATTN_H, ATTN_D};
     gl<bf16, -1, -1, -1, -1> dOg{dO_ptr, ATTN_B, ATTN_N, ATTN_H, ATTN_D};
     attn_prep_globals<D> g{Og, dOg, delta};
@@ -74,10 +75,15 @@ __global__ void attend_prep_ker(float *delta_ptr, bf16 *O_ptr, bf16 *dO_ptr) {
     copy(O_float, O);
     copy(dO_float, dO);
 
-    // Δ_i = row_sum(dO ⊙ O) 
+    // Δ_i = row_sum(dO ⊙ O)
     mul(dO_float, dO_float, O_float);
-    row_sum(delta_vec, dO_float); 
+    row_sum(delta_vec, dO_float);
     store(g.delta, delta_vec, {batch_idx, head_idx, 0, seq_idx * NUM_WARPS + warpid});
+
+    // Zero out dq
+    qo_tile<D, bf16, row_l, rt_16x32_s> dQ_zero;
+    zero(dQ_zero);
+    store<2>(dQg, dQ_zero, {batch_idx, head_idx, seq_idx * NUM_WARPS + warpid, 0});
 }
 
-template __global__ void attend_prep_ker<ATTN_D>(float *delta_ptr, bf16 *O_ptr, bf16 *dO_ptr);
+template __global__ void attend_prep_ker<ATTN_D>(float *delta_ptr, bf16 *dq_ptr, bf16 *O_ptr, bf16 *dO_ptr);
