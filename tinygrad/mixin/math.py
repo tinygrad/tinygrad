@@ -2,9 +2,10 @@ import math
 from typing import Self
 from tinygrad.uop import Ops
 from tinygrad.dtype import dtypes, ConstType
+from tinygrad.mixin.dtype import DTypeMixin
 
 
-class MathMixin:
+class MathMixin(DTypeMixin):
   # required to implement
   def alu(self, op: Ops, *src: Self) -> Self:
     raise NotImplementedError
@@ -23,16 +24,11 @@ class MathMixin:
     return self.ne(True)
 
   def neg(self) -> Self:
-    if (dtype := getattr(self, "dtype")) is None:
-      raise TypeError(f"MathTraits __neg__ requires a dtype, {self=}")
-    return self.logical_not() if dtype.scalar() == dtypes.bool else self * (-1)
+    return self.logical_not() if self.dtype.scalar() == dtypes.bool else self * (-1)
 
   def _check_dtype(self) -> None:
-    if (dtype := getattr(self, "dtype")) is not None:
-      if isinstance(dtype, tuple):
-        dtype = dtype[0]
-      if not (dtypes.is_bool(dtype) or dtypes.is_int(dtype)):
-        raise RuntimeError(f"{dtype} is not supported")
+    if not (dtypes.is_bool(self.dtype) or dtypes.is_int(self.dtype)):
+      raise RuntimeError(f"{self.dtype} is not supported")
 
   def add(self, x: Self | ConstType, reverse: bool = False) -> Self:
     """
