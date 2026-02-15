@@ -18,13 +18,6 @@ def _sharded_empty(shape:Tensor, ref:Tensor, axis:int|None, dtype:DTypeLike|None
   axis = ref.uop.axis if axis is None else axis
   return Tensor(Tensor.empty(*shape, dtype=dtype, device=ref.device).uop.multi(axis), dtype=dtype, device=ref.device)
 
-def _sharded_zeros(shape:Tensor, ref:Tensor, axis:int|None, dtype:DTypeLike|None=None) -> Tensor:
-  dtype = dtype or ref.dtype
-  if not isinstance(ref.device, tuple): return Tensor.zeros(*shape, dtype=dtype, device=ref.device)
-  shape = tuple(s // len(ref.device) if i == ref.uop.axis else s for i, s in enumerate(shape))
-  axis = ref.uop.axis if axis is None else axis
-  return Tensor(Tensor.zeros(*shape, dtype=dtype, device=ref.device).uop.multi(axis), dtype=dtype, device=ref.device)
-
 def _sharded_empty_like(ref:Tensor, axis:int|None=None) -> Tensor:
   return _sharded_empty(ref.shape, ref, axis)
 
