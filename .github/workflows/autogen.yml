@@ -43,10 +43,10 @@ jobs:
       run: sudo apt-get install -y --no-install-recommends libclang-20-dev llvm-20-dev hip-dev libusb-1.0-0-dev libdrm-dev
     - name: Regenerate autogen files
       run: |
-        find tinygrad/runtime/autogen -type f -name "*.py" -not -path "*/amd/*" -not -name "__init__.py" -not -name "comgr_3.py" -not -name "metal.py" -not -name "iokit.py" -not -name "corefoundation.py" -not -name "libclang.py" -delete
+        find tinygrad/runtime/autogen -type f -name "*.py" -not -path "*/amd/*" -not -name "__init__.py" -not -name "comgr.py" -not -name "metal.py" -not -name "iokit.py" -not -name "corefoundation.py" -not -name "libclang.py" -delete
         python3 -c "from tinygrad.runtime.autogen import opencl"
         python3 -c "from tinygrad.runtime.autogen import cuda, nvrtc, nvjitlink, nv_570, nv_580, nv"
-        python3 -c "from tinygrad.runtime.autogen import comgr, hsa, hip, amd_gpu, sqtt, rocprof, amdgpu_kd, amdgpu_drm"
+        python3 -c "from tinygrad.runtime.autogen import comgr_3, hsa, hip, amd_gpu, sqtt, rocprof, amdgpu_kd, amdgpu_drm"
         python3 -c "from tinygrad.runtime.autogen.am import am, pm4_soc15, pm4_nv, sdma_4_0_0, sdma_5_0_0, sdma_6_0_0, smu_v13_0_0, smu_v13_0_6, smu_v14_0_2"
         python3 -c "from tinygrad.runtime.autogen import libc, kfd, io_uring, ib, pci, vfio"
         python3 -c "from tinygrad.runtime.autogen import llvm"
@@ -59,8 +59,9 @@ jobs:
     - name: Check for differences
       run: |
         if ! git diff --quiet; then
+          git diff
           git diff > autogen-ubuntu.patch
-          echo "Autogen files out of date. Apply patch from: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}#artifacts"
+          echo "Autogen mismatch detected. Patch available at: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}#artifacts"
           exit 1
         fi
     - name: Upload patch artifact
@@ -88,8 +89,9 @@ jobs:
     - name: Check for differences
       run: |
         if ! git diff --quiet; then
+          git diff
           git diff > autogen-macos.patch
-          echo "Autogen files out of date. Apply patch from: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}#artifacts"
+          echo "Autogen mismatch detected. Patch available at: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}#artifacts"
           exit 1
         fi
     - name: Upload patch artifact
@@ -99,8 +101,8 @@ jobs:
         name: autogen-macos-patch
         path: autogen-macos.patch
 
-  autogen-comgr-3:
-    name: In-tree Autogen (comgr 3)
+  autogen-comgr-2:
+    name: In-tree Autogen (comgr 2)
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -112,25 +114,26 @@ jobs:
       run: |
         wget https://repo.radeon.com/rocm/rocm.gpg.key -O - | gpg --dearmor | sudo tee /etc/apt/keyrings/rocm.gpg > /dev/null
         sudo tee /etc/apt/sources.list.d/rocm.list <<EOF
-        deb [arch=amd64 signed-by=/etc/apt/keyrings/rocm.gpg] https://repo.radeon.com/rocm/apt/6.4 $(lsb_release -cs) main
+        deb [arch=amd64 signed-by=/etc/apt/keyrings/rocm.gpg] https://repo.radeon.com/rocm/apt/6.2 $(lsb_release -cs) main
         EOF
         echo -e 'Package: *\nPin: release o=repo.radeon.com\nPin-Priority: 600' | sudo tee /etc/apt/preferences.d/rocm-pin-600
         sudo apt -qq update || true
         sudo apt-get install -y --no-install-recommends libclang-20-dev comgr
     - name: Regenerate autogen files
       run: |
-        rm tinygrad/runtime/autogen/comgr_3.py
-        python3 -c "from tinygrad.runtime.autogen import comgr_3"
+        rm tinygrad/runtime/autogen/comgr.py
+        python3 -c "from tinygrad.runtime.autogen import comgr"
     - name: Check for differences
       run: |
         if ! git diff --quiet; then
-          git diff > autogen-comgr3.patch
-          echo "Autogen files out of date. Apply patch from: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}#artifacts"
+          git diff
+          git diff > autogen-comgr2.patch
+          echo "Autogen mismatch detected. Patch available at: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}#artifacts"
           exit 1
         fi
     - name: Upload patch artifact
       if: failure()
       uses: actions/upload-artifact@v4
       with:
-        name: autogen-comgr3-patch
-        path: autogen-comgr3.patch
+        name: autogen-comgr2-patch
+        path: autogen-comgr2.patch
