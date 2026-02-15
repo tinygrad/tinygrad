@@ -49,8 +49,6 @@ class TestTorchLoad(TempDirTestCase):
     torch.save({"a": (a := torch.randn(100)), "b": a[5:]}, fn)
     compare_weights_both(fn)
 
-
-
 test_fn = pathlib.Path(__file__).parents[2] / "weights/LLaMA/7B/consolidated.00.pth"
 #test_size = test_fn.stat().st_size
 test_size = 1024*1024*1024*2
