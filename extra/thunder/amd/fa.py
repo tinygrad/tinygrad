@@ -44,6 +44,7 @@ def flash_attention(xq, xk, xv, attn_mask:Tensor|None=None, is_causal:bool=False
   def grad(dou:UOp, _) -> tuple[None, None, UOp, UOp, UOp]:
     do = Tensor(dou, device=dou.device)
     dq_in = _sharded_empty((B, H, N, D), xq, axis=0)
+    dq = _sharded_empty_like(xq, axis=0)
     dk = _sharded_empty_like(xk, axis=0)
     dv = _sharded_empty_like(xv, axis=0)
 
@@ -54,7 +55,6 @@ def flash_attention(xq, xk, xv, attn_mask:Tensor|None=None, is_causal:bool=False
     dq_in, dk, dv = Tensor.custom_kernel(dq_in, dk, dv, do, xq, xk, xv, l_vec, delta_vec, fxn=functools.partial(custom_fa_backward, device=single_device, arch=arch))[:3]
 
     # unshuffle dq
-    dq = _sharded_empty_like(xq, axis=0)
     dq = Tensor.custom_kernel(dq, dq_in, fxn=functools.partial(custom_fa_backward_post, device=single_device, arch=arch))[0]
 
     return None, None, dq.uop, dk.uop, dv.uop
@@ -184,69 +184,3 @@ def custom_fa_backward_post(dq_out:UOp, dq_in:UOp, device:str, arch:str):
 
   return UOp(Ops.PROGRAM,
              src=(sink, UOp(Ops.DEVICE, arg=device), UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=code), UOp(Ops.BINARY, arg=lib)))
-
-if __name__ == "__main__":
-  B, N, H, H_KV, D = 1, 8192, 32, 8, 128
-  # q = Tensor.randn(B, N, H, D, device="AMD", dtype="bfloat16").contiguous()
-  # k = Tensor.randn(B, N, H_KV, D, device="AMD", dtype="bfloat16").contiguous()
-  # v = Tensor.randn(B, N, H_KV, D, device="AMD", dtype="bfloat16").contiguous()
-  # Tensor.realize(q, k, v)
-  #
-  # Q_BLOCK_SIZE = 32
-  # NUM_WARPS = 8
-  # NUM_THREADS = 64 * NUM_WARPS
-  #
-  # fa_jitted = TinyJit(flash_attention)
-  #
-  attn_flops = 2 * B * H * N * N * D + \
-               4 * B * H * N * N + \
-               2 * B * H * N * N * D
-  # for _ in range(5):
-  #   st = time.perf_counter()
-  #   out = fa_jitted(q, k, v, is_causal=True)
-  #   Device["AMD"].synchronize()
-  #   et = time.perf_counter() - st
-  #   print(f"{attn_flops/(et*1e12):2f} TFLOPS")
-  #
-  # ref = q.transpose(1,2).scaled_dot_product_attention(k.transpose(1,2), v.transpose(1,2), is_causal=True, enable_gqa=True).transpose(1,2)
-  #
-  # ref_np, out_np = ref.float().numpy(), out.float().numpy()
-  # np.testing.assert_allclose(ref_np, out_np, atol=2e-2, rtol=1e-2)
-
-  # backward pass
-  q2 = Tensor.randn(B, N, H, D, dtype=dtypes.bfloat16, requires_grad=True).contiguous()
-  k2 = Tensor.randn(B, N, H_KV, D, dtype=dtypes.bfloat16, requires_grad=True).contiguous()
-  v2 = Tensor.randn(B, N, H_KV, D, dtype=dtypes.bfloat16, requires_grad=True).contiguous()
-  Tensor.realize(q2, k2, v2)
-  do = Tensor.ones(B, N, H, D, dtype=dtypes.bfloat16).contiguous()
-
-  bwd_flops = attn_flops * 5 // 2  # backward is ~2.5x forward flops
-
-  @TinyJit
-  def fa_bwd(q, k, v, do):
-    out = flash_attention(q, k, v, is_causal=True)
-    out.backward(do)
-    Tensor.realize(out, q.grad, k.grad, v.grad)
-    return q.grad, k.grad, v.grad
-
-  for _ in range(5):
-    st = time.perf_counter()
-    q2.grad, k2.grad, v2.grad = fa_bwd(q2, k2, v2, do)
-    Device["AMD"].synchronize()
-    et = time.perf_counter() - st
-    print(f"bwd: {bwd_flops/(et*1e12):2f} TFLOPS")
-
-  # reference backward
-  q_ref = q2.detach().clone().requires_grad_(True)
-  k_ref = k2.detach().clone().requires_grad_(True)
-  v_ref = v2.detach().clone().requires_grad_(True)
-  Tensor.realize(q_ref, k_ref, v_ref)
-
-  q_ref_, k_ref_, v_ref_ = q_ref.transpose(1, 2), k_ref.transpose(1, 2), v_ref.transpose(1, 2)
-  ref = q_ref_.scaled_dot_product_attention(k_ref_, v_ref_, is_causal=True, enable_gqa=True).float().transpose(1, 2)
-  ref.sum().backward()
-  Tensor.realize(q_ref.grad, k_ref.grad, v_ref.grad)
-
-  np.testing.assert_allclose(q2.grad.numpy(), q_ref.grad.numpy(), atol=2e-2, rtol=2e-2)
-  np.testing.assert_allclose(v2.grad.numpy(), v_ref.grad.numpy(), atol=2e-2, rtol=2e-2)
-  np.testing.assert_allclose(k2.grad.numpy(), k_ref.grad.numpy(), atol=2e-2, rtol=2e-2)
