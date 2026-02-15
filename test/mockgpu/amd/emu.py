@@ -573,15 +573,15 @@ def _compile_smem(inst: ir3.SMEM | ir4.SMEM, ctx: _Ctx) -> UOp:
   # RDNA4 uses 'ioffset', RDNA3 uses 'offset' - use type(inst) to get correct field
   offset_field = type(inst).ioffset if hasattr(type(inst), 'ioffset') else type(inst).offset  # type: ignore[union-attr]
   offset = ctx.inst_field_signed(offset_field)  # signed immediate
-  # Dynamic soffset field - SGPR for additional offset (NULL=124 reads as 0)
-  soffset = ctx.inst_field(type(inst).soffset)
-  addr = _u64(ctx.rsgpr_dyn(sbase), ctx.rsgpr_dyn(sbase + _c(1))) + offset.cast(dtypes.uint64) + ctx.rsgpr_dyn(soffset).cast(dtypes.uint64)
-  # S_LOAD_(DTYPE) series
+  # Dynamic soffset field - SGPR for additional offset (NULL=124 reads as 0, CDNA soffset_en=0 means no soffset)
+  soffset_val = _c(0).cast(dtypes.uint64)
+  if not (isinstance(inst, irc.SMEM) and not inst.soffset_en):
+    soffset_val = ctx.rsgpr_dyn(ctx.inst_field(type(inst).soffset)).cast(dtypes.uint64)
+  addr = _u64(ctx.rsgpr_dyn(sbase), ctx.rsgpr_dyn(sbase + _c(1))) + offset.cast(dtypes.uint64) + soffset_val
+  # S_LOAD_(DTYPE) series: B32/DWORD=1, B64/DWORDX2=2, U8=0.25, I8=-0.25, etc.
   assert (op_name:=_op_name(inst)).startswith('S_LOAD_'), f"unexpected SMEM op: {op_name}"
-    # irc.SMEMOp.S_LOAD_DWORD: 1, irc.SMEMOp.S_LOAD_DWORDX2: 2, irc.SMEMOp.S_LOAD_DWORDX4: 4,
-    # irc.SMEMOp.S_LOAD_DWORDX8: 8, irc.SMEMOp.S_LOAD_DWORDX16: 16}
-  part = op_name.rsplit('_', 1)[1]  # B32, B64, U8, I8, U16, I16, etc.
-  nval = int(part[1:]) / 32 * (-1 if part[0] == 'I' else 1)
+  part = op_name.rsplit('_', 1)[1]  # B32, DWORD, DWORDX2, U8, I8, etc.
+  nval = int(part.removeprefix('DWORD').removeprefix('X') or '1') if 'DWORD' in part else int(part[1:]) / 32 * (-1 if part[0] == 'I' else 1)
   ndwords = max(1, int(abs(nval)))
   dword_base = addr >> UOp.const(dtypes.uint64, 2)
   vals = [ctx.vmem.index((dword_base + UOp.const(dtypes.uint64, i)).cast(dtypes.int)) for i in range(ndwords)]
@@ -603,14 +603,12 @@ def _compile_sop(inst: ir3.SOP1|ir3.SOP2|ir3.SOPC|ir3.SOPK|ir4.SOP1|ir4.SOP2|ir4
     # Sign-extend simm16
     simm16_sext = simm16.cast(dtypes.int16).cast(dtypes.int32)
     # RDNA4 pcodes use S0.i16 for the immediate (e.g., S_MULK_I32), RDNA3 uses S0 for the register (e.g., S_CMPK_*)
-    s0 = simm16 if isinstance(inst, ir4.SOPK) else ctx.rsgpr_dyn(sdst_off)
-    srcs = {'S0': s0, 'SIMM16': simm16_sext, 'D0': ctx.rsgpr_dyn(sdst_off)}
-    # CDNA pcode uses S0 for the immediate in MOVK/MULK/ADDK/CMOVK (where RDNA uses SIMM16),
-    # but S0 = register for CMPK/SETREG. S1 is always the immediate for CDNA CMPK ops.
-    # op_name = inst.op.name if hasattr(inst.op, 'name') else ''
-    # s0_is_imm = isinstance(inst, irc.SOPK) and 'CMPK' not in op_name and 'SETREG' not in op_name
-    # s0_val = simm16_sext if s0_is_imm else ctx.rsgpr_dyn(sdst_off)
-    # srcs = {'S0': s0_val, 'SIMM16': simm16_sext, 'S1': simm16_sext, 'D0': ctx.rsgpr_dyn(sdst_off)}
+    # CDNA pcode uses S0 for the immediate in MOVK/MULK/ADDK/CMOVK, but S0 = register for CMPK/SETREG
+    op_name = _op_name(inst)
+    if isinstance(inst, ir4.SOPK): s0 = simm16
+    elif isinstance(inst, irc.SOPK) and 'CMPK' not in op_name and 'SETREG' not in op_name: s0 = simm16_sext
+    else: s0 = ctx.rsgpr_dyn(sdst_off)
+    srcs = {'S0': s0, 'S1': simm16_sext, 'SIMM16': simm16_sext, 'D0': ctx.rsgpr_dyn(sdst_off)}
     dst_off, dst_size = sdst_off, 1
   elif isinstance(inst, (ir3.SOP1, ir4.SOP1, irc.SOP1)):
     sdst_off = ctx.inst_field(type(inst).sdst)
@@ -673,7 +671,7 @@ def _compile_vop12(inst: ir3.VOP1 | ir3.VOP1_SDST | ir3.VOP2 | ir4.VOP1 | ir4.VO
       s0 = src0_hi.where(_hi16(ctx.rvgpr_dyn(src0_reg, lane)), s0)
     srcs = {'S0': s0, 'S1': s1, 'D0': d0}
     # FMAAK_(DTYPE)_E32 series
-    if 'V_FMA' in _op_name(inst):
+    if 'V_FMAA' in _op_name(inst) or 'V_FMAM' in _op_name(inst):
       assert literal is not None
       srcs['SIMM32'] = literal
   return ctx.compile_vop_pcode(inst.op, srcs, lane, vdst_reg, exec_mask, opsel_dst_hi=write_hi_half)
@@ -1111,25 +1109,19 @@ def _compile_mem_op(inst: ir3.DS|ir3.FLAT|ir3.GLOBAL|ir3.SCRATCH|ir4.DS|ir4.VFLA
     vaddr_lo = ctx.rvgpr_dyn(addr_reg, lane).cast(dtypes.uint64)
     vaddr_base = use_saddr.where(vaddr_lo + ioffset64, vaddr_full + ioffset64)
     if is_atomic:
-      return {'ADDR': addr, 'DATA': _u64(ctx.rvgpr_dyn(vdata_reg, lane), ctx.rvgpr_dyn(vdata_reg + _c(1), lane)) if data_bits_mem == 64 else ctx.rvgpr_dyn(vdata_reg, lane),
-              '_vmem': mem, '_active': active, 'laneId': lane, 'v_addr': vaddr_base, 's_saddr': saddr_base}
-    vdata = ctx.rvgpr_dyn(vdata_reg, lane).cast(dtypes.uint64) if 'STORE' in op_name else ctx.rvgpr_dyn(vdst_reg, lane) if 'D16' in op_name else UOp.const(dtypes.uint32, 0)
-    if 'STORE' in op_name and data_bits_mem >= 64: vdata = vdata | (ctx.rvgpr_dyn(vdata_reg + _c(1), lane).cast(dtypes.uint64) << UOp.const(dtypes.uint64, 32))
-    srcs = {'ADDR': addr, 'VDATA': vdata, '_vmem': mem, '_active': active, 'laneId': lane, 'v_addr': vaddr_base, 's_saddr': saddr_base,
-            'v_addr_off': addr, 's_saddr_off': UOp.const(dtypes.uint64, 0)}
-    for i in range(data_bits_mem // 32): srcs[f'VDATA{i}'] = ctx.rvgpr_dyn(vdata_reg + _c(i), lane) if 'STORE' in op_name else UOp.const(dtypes.uint32, 0)
-    #   atomic_data = _u64(ctx.rvgpr_dyn(vdata_reg, lane), ctx.rvgpr_dyn(vdata_reg + _c(1), lane)) \
-    #     if data_bits_mem == 64 else ctx.rvgpr_dyn(vdata_reg, lane)
-    #   return {'ADDR': addr, 'DATA': atomic_data, '_vmem': mem, '_active': active,
-    #           'laneId': lane, 'v_addr': vaddr_base, 's_saddr': saddr_base}
-    # vdata = ctx.rvgpr_dyn(vdata_reg, lane).cast(dtypes.uint64) if 'STORE' in op_name \
-    #   else ctx.rvgpr_dyn(vdst_reg, lane) if 'D16' in op_name else UOp.const(dtypes.uint32, 0)
-    # if 'STORE' in op_name and data_bits_mem >= 64:
-    #   vdata = vdata | (ctx.rvgpr_dyn(vdata_reg + _c(1), lane).cast(dtypes.uint64) << UOp.const(dtypes.uint64, 32))
-    # srcs = {'ADDR': addr, 'VDATA': vdata, '_vmem': mem, '_active': active,
-    #         'laneId': lane, 'v_addr': vaddr_base, 's_saddr': saddr_base, 'SADDR': saddr_base, 'OFFSET': offset}
-    # for i in range(data_bits_mem // 32):
-    #   srcs[f'VDATA{i}'] = ctx.rvgpr_dyn(vdata_reg + _c(i), lane) if 'STORE' in op_name else UOp.const(dtypes.uint32, 0)
+      atomic_data = _u64(ctx.rvgpr_dyn(vdata_reg, lane), ctx.rvgpr_dyn(vdata_reg + _c(1), lane)) \
+        if data_bits_mem == 64 else ctx.rvgpr_dyn(vdata_reg, lane)
+      return {'ADDR': addr, 'DATA': atomic_data, '_vmem': mem, '_active': active,
+              'laneId': lane, 'v_addr': vaddr_base, 's_saddr': saddr_base}
+    vdata = ctx.rvgpr_dyn(vdata_reg, lane).cast(dtypes.uint64) if 'STORE' in op_name \
+      else ctx.rvgpr_dyn(vdst_reg, lane) if 'D16' in op_name else UOp.const(dtypes.uint32, 0)
+    if 'STORE' in op_name and data_bits_mem >= 64:
+      vdata = vdata | (ctx.rvgpr_dyn(vdata_reg + _c(1), lane).cast(dtypes.uint64) << UOp.const(dtypes.uint64, 32))
+    srcs = {'ADDR': addr, 'VDATA': vdata, '_vmem': mem, '_active': active,
+            'laneId': lane, 'v_addr': vaddr_base, 's_saddr': saddr_base, 'SADDR': saddr_base, 
+            'v_addr_off': addr, 's_saddr_off': UOp.const(dtypes.uint64, 0), 'OFFSET': offset}
+    for i in range(data_bits_mem // 32):
+      srcs[f'VDATA{i}'] = ctx.rvgpr_dyn(vdata_reg + _c(i), lane) if 'STORE' in op_name else UOp.const(dtypes.uint32, 0)
     return srcs
 
   def make_stores(dest: str, val: UOp, lane: UOp, active: UOp, writes_return_data: bool) -> list[UOp]:
