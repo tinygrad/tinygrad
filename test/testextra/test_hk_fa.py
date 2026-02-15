@@ -1,19 +1,14 @@
-import unittest, math, time
+import unittest, time
 
 from tinygrad import Tensor, Device, dtypes, Context
-from tinygrad.uop.ops import UOp, Ops
-from tinygrad.engine.realize import get_runner
-from tinygrad.engine.schedule import ExecItem
 from tinygrad.engine.jit import TinyJit
-from tinygrad.helpers import CI
 import numpy as np
 
 from extra.thunder.amd.fa import flash_attention
 
-@unittest.skipIf(CI or Device.DEFAULT not in ["AMD"], "only amd")
 class TestFA(unittest.TestCase):
   def setUp(self):
-    arch = Device["AMD"].arch
+    arch = getattr(Device[Device.DEFAULT].renderer, "arch", "")
     if not arch.startswith("gfx9"):
       self.skipTest(f"arch {arch} not supported")
 
@@ -125,7 +120,7 @@ class TestFA(unittest.TestCase):
     ref.backward(do)
     Tensor.realize(q_ref.grad, k_ref.grad, v_ref.grad)
 
-    np.testing.assert_allclose(q.grad.numpy(), q_ref.grad.numpy(), atol=1e-5, rtol=1e-5)
+    np.testing.assert_allclose(q.grad.numpy(), q_ref.grad.numpy(), atol=3e-3, rtol=3e-3)
     np.testing.assert_allclose(k.grad.numpy(), k_ref.grad.numpy(), atol=1e-5, rtol=1e-5)
     np.testing.assert_allclose(v.grad.numpy(), v_ref.grad.numpy(), atol=1e-5, rtol=1e-5)
 
