@@ -34,27 +34,26 @@ using G = kittens::group<NUM_WARPS>;
 
 using namespace kittens;
 
-template<int D> struct attn_bwd_combined_globals { 
-  gl<bf16, -1, -1, -1, -1> Q, K, V;
-  gl<bf16, -1, -1, -1, -1> dOg, dQg, dKg, dVg;
-  gl<float, -1, -1, -1, -1> L_vec, delta_vec;
+using _gl_QdO  = gl<bf16, ATTN_B, ATTN_N, ATTN_H, ATTN_D>;
+using _gl_KV   = gl<bf16, ATTN_B, ATTN_N, ATTN_H_KV, ATTN_D>;
+using _gl_dQ   = gl<bf16, ATTN_B, ATTN_H, ATTN_N, ATTN_D>;
+using _gl_dKV  = gl<bf16, ATTN_B, ATTN_N, ATTN_H_KV, ATTN_D>;
+using _gl_Lvec = gl<float, ATTN_B, ATTN_H, 1, ATTN_N>;
+
+template<int D> struct attn_bwd_combined_globals {
+  _gl_QdO Q;
+  _gl_KV K, V;
+  _gl_QdO dOg;
+  _gl_dQ dQg;
+  _gl_dKV dKg, dVg;
+  _gl_Lvec L_vec, delta_vec;
   dim3 grid() { return dim3(ATTN_H_KV, (ATTN_N / BLOCK_SIZE_KV), ATTN_B); }
   dim3 block() { return dim3(NUM_THREADS); }
   size_t dynamic_shared_memory() { return MAX_SHARED_MEMORY; }
 };
 
 template<int D> __launch_bounds__(NUM_THREADS, 1)
-__global__  void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr, bf16 *dO_ptr, bf16 *Q_ptr, bf16 *K_ptr, bf16 *V_ptr, float *L_vec_ptr, float *delta_vec_ptr) {
-  gl<bf16, -1, -1, -1, -1> dQg{dQ_ptr, ATTN_B, ATTN_H, ATTN_N, ATTN_D};
-  gl<bf16, -1, -1, -1, -1> dKg{dK_ptr, ATTN_B, ATTN_N, ATTN_H_KV, ATTN_D};
-  gl<bf16, -1, -1, -1, -1> dVg{dV_ptr, ATTN_B, ATTN_N, ATTN_H_KV, ATTN_D};
-  gl<bf16, -1, -1, -1, -1> dOg{dO_ptr, ATTN_B, ATTN_N, ATTN_H, ATTN_D};
-  gl<bf16, -1, -1, -1, -1> Q{Q_ptr, ATTN_B, ATTN_N, ATTN_H, ATTN_D};
-  gl<bf16, -1, -1, -1, -1> K{K_ptr, ATTN_B, ATTN_N, ATTN_H_KV, ATTN_D};
-  gl<bf16, -1, -1, -1, -1> V{V_ptr, ATTN_B, ATTN_N, ATTN_H_KV, ATTN_D};
-  gl<float, -1, -1, -1, -1> L_vec{L_vec_ptr, ATTN_B, ATTN_H, 1, ATTN_N};
-  gl<float, -1, -1, -1, -1> delta_vec{delta_vec_ptr, ATTN_B, ATTN_H, 1, ATTN_N};
-  attn_bwd_combined_globals<D> g{Q, K, V, dOg, dQg, dKg, dVg, L_vec, delta_vec};
+__global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr, bf16 *dO_ptr, bf16 *Q_ptr, bf16 *K_ptr, bf16 *V_ptr, float *L_vec_ptr, float *delta_vec_ptr) {
 
   const int kv_head_idx = blockIdx.x;  // This is the KV head index
   const int seq_idx = blockIdx.y;
@@ -153,6 +152,18 @@ __global__  void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_pt
 
   // This is used for both dK_j_T and dV_j_T
   art<float, WARP_SIZE_KV, D, row_l, rt_32x32_s, ducks::art::transpose_2d<dV_ranges, 4, 2>> dV_j;
+
+  // Construct gl objects with compile-time dims AFTER clobbers so compiler knows which VGPRs are taken
+  _gl_dQ  dQg{dQ_ptr, nullptr, nullptr, nullptr, nullptr};
+  _gl_dKV dKg{dK_ptr, nullptr, nullptr, nullptr, nullptr};
+  _gl_dKV dVg{dV_ptr, nullptr, nullptr, nullptr, nullptr};
+  _gl_QdO dOg{dO_ptr, nullptr, nullptr, nullptr, nullptr};
+  _gl_QdO Q{Q_ptr, nullptr, nullptr, nullptr, nullptr};
+  _gl_KV  K{K_ptr, nullptr, nullptr, nullptr, nullptr};
+  _gl_KV  V{V_ptr, nullptr, nullptr, nullptr, nullptr};
+  _gl_Lvec L_vec_gl{L_vec_ptr, nullptr, nullptr, nullptr, nullptr};
+  _gl_Lvec delta_vec_gl{delta_vec_ptr, nullptr, nullptr, nullptr, nullptr};
+  attn_bwd_combined_globals<D> g{Q, K, V, dOg, dQg, dKg, dVg, L_vec_gl, delta_vec_gl};
 
   // Swizzled offsets for Q and dO
   constexpr int bytes_per_thread = st_16x32_s::template bytes_per_thread<bf16>();
@@ -317,7 +328,7 @@ __global__  void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_pt
         load<0, 3>(dO_i_col, subtile_inplace<DOT_SLICE_QO, D>(dO_i_smem[tic][0], {0, 0}), dO_i_col_addr);
         mma_ABt<0, 3, 3>(P_ij, Q_i, K_j, P_ij);
         // Dot slice 0
-        if constexpr (causal) {
+        kittens::macros::v_mov_b32<neg_inf_v>(0xff800000); if constexpr (causal) {
           // If the query position is less than the key position, set P_ij to -inf
           if (q_pos < k_pos) {
             mov<neg_inf_v>(P_ij);
@@ -575,7 +586,7 @@ __global__  void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_pt
         load<0, 3>(dO_i_col, subtile_inplace<DOT_SLICE_QO, D>(dO_i_smem[tic][0], {0, 0}), dO_i_col_addr);
         mma_ABt<0, 3, 3>(P_ij, Q_i, K_j, P_ij);
         // Dot slice 1
-        if constexpr (causal) {
+        kittens::macros::v_mov_b32<neg_inf_v>(0xff800000); if constexpr (causal) {
           // If the query position is less than the key position, set P_ij to -inf
           if (q_pos < k_pos) {
             mov<neg_inf_v>(P_ij);
@@ -832,7 +843,7 @@ __global__  void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_pt
         load<0, 3>(dO_i_col, subtile_inplace<DOT_SLICE_QO, D>(dO_i_smem[tic][0], {0, 0}), dO_i_col_addr);
         mma_ABt<0, 3, 3>(P_ij, Q_i, K_j, P_ij);
         // Dot slice 2
-        if constexpr (causal) {
+        kittens::macros::v_mov_b32<neg_inf_v>(0xff800000); if constexpr (causal) {
           // If the query position is less than the key position, set P_ij to -inf
           if (q_pos < k_pos) {
             mov<neg_inf_v>(P_ij);
@@ -1088,7 +1099,7 @@ __global__  void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_pt
         load<0, 3>(dO_i_col, subtile_inplace<DOT_SLICE_QO, D>(dO_i_smem[tic][0], {0, 0}), dO_i_col_addr);
         mma_ABt<0, 3, 3>(P_ij, Q_i, K_j, P_ij);
         // Dot slice 3
-        if constexpr (causal) {
+        kittens::macros::v_mov_b32<neg_inf_v>(0xff800000); if constexpr (causal) {
           // If the query position is less than the key position, set P_ij to -inf
           if (q_pos < k_pos) {
             mov<neg_inf_v>(P_ij);
@@ -1358,7 +1369,7 @@ __global__  void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_pt
         load<0, 3>(dO_i_col, subtile_inplace<DOT_SLICE_QO, D>(dO_i_smem[tic][0], {0, 0}), dO_i_col_addr);
         mma_ABt<0, 3, 3>(P_ij, Q_i, K_j, P_ij);
         // Dot slice 0
-        if constexpr (causal) {
+        kittens::macros::v_mov_b32<neg_inf_v>(0xff800000); if constexpr (causal) {
           // If the query position is less than the key position, set P_ij to -inf
           if (q_pos < k_pos) {
             mov<neg_inf_v>(P_ij);
@@ -1619,7 +1630,7 @@ __global__  void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_pt
         load<0, 3>(dO_i_col, subtile_inplace<DOT_SLICE_QO, D>(dO_i_smem[tic][0], {0, 0}), dO_i_col_addr);
         mma_ABt<0, 3, 3>(P_ij, Q_i, K_j, P_ij);
         // Dot slice 1
-        if constexpr (causal) {
+        kittens::macros::v_mov_b32<neg_inf_v>(0xff800000); if constexpr (causal) {
           // If the query position is less than the key position, set P_ij to -inf
           if (q_pos < k_pos) {
             mov<neg_inf_v>(P_ij);
@@ -1876,7 +1887,7 @@ __global__  void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_pt
         load<0, 3>(dO_i_col, subtile_inplace<DOT_SLICE_QO, D>(dO_i_smem[tic][0], {0, 0}), dO_i_col_addr);
         mma_ABt<0, 3, 3>(P_ij, Q_i, K_j, P_ij);
         // Dot slice 2
-        if constexpr (causal) {
+        kittens::macros::v_mov_b32<neg_inf_v>(0xff800000); if constexpr (causal) {
           // If the query position is less than the key position, set P_ij to -inf
           if (q_pos < k_pos) {
             mov<neg_inf_v>(P_ij);
@@ -2132,7 +2143,7 @@ __global__  void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_pt
         load<0, 3>(dO_i_col, subtile_inplace<DOT_SLICE_QO, D>(dO_i_smem[tic][0], {0, 0}), dO_i_col_addr);
         mma_ABt<0, 3, 3>(P_ij, Q_i, K_j, P_ij);
         // Dot slice 3
-        if constexpr (causal) {
+        kittens::macros::v_mov_b32<neg_inf_v>(0xff800000); if constexpr (causal) {
           // If the query position is less than the key position, set P_ij to -inf
           if (q_pos < k_pos) {
             mov<neg_inf_v>(P_ij);
@@ -2397,7 +2408,7 @@ __global__  void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_pt
       load<0, 3>(dO_i_col, subtile_inplace<DOT_SLICE_QO, D>(dO_i_smem[tic][0], {0, 0}), dO_i_col_addr);
       mma_ABt<0, 3, 3>(P_ij, Q_i, K_j, P_ij);
       // Dot slice 0
-      if constexpr (causal) {
+      kittens::macros::v_mov_b32<neg_inf_v>(0xff800000); if constexpr (causal) {
         // If the query position is less than the key position, set P_ij to -inf
         if (q_pos < k_pos) {
           mov<neg_inf_v>(P_ij);
@@ -2658,7 +2669,7 @@ __global__  void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_pt
       load<0, 3>(dO_i_col, subtile_inplace<DOT_SLICE_QO, D>(dO_i_smem[tic][0], {0, 0}), dO_i_col_addr);
       mma_ABt<0, 3, 3>(P_ij, Q_i, K_j, P_ij);
       // Dot slice 1
-      if constexpr (causal) {
+      kittens::macros::v_mov_b32<neg_inf_v>(0xff800000); if constexpr (causal) {
         // If the query position is less than the key position, set P_ij to -inf
         if (q_pos < k_pos) {
           mov<neg_inf_v>(P_ij);
@@ -2914,7 +2925,7 @@ __global__  void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_pt
       load<0, 3>(dO_i_col, subtile_inplace<DOT_SLICE_QO, D>(dO_i_smem[tic][0], {0, 0}), dO_i_col_addr);
       mma_ABt<0, 3, 3>(P_ij, Q_i, K_j, P_ij);
       // Dot slice 2
-      if constexpr (causal) {
+      kittens::macros::v_mov_b32<neg_inf_v>(0xff800000); if constexpr (causal) {
         // If the query position is less than the key position, set P_ij to -inf
         if (q_pos < k_pos) {
           mov<neg_inf_v>(P_ij);
@@ -3170,7 +3181,7 @@ __global__  void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_pt
       load<0, 3>(dO_i_col, subtile_inplace<DOT_SLICE_QO, D>(dO_i_smem[tic][0], {0, 0}), dO_i_col_addr);
       mma_ABt<0, 3, 3>(P_ij, Q_i, K_j, P_ij);
       // Dot slice 3
-      if constexpr (causal) {
+      kittens::macros::v_mov_b32<neg_inf_v>(0xff800000); if constexpr (causal) {
         // If the query position is less than the key position, set P_ij to -inf
         if (q_pos < k_pos) {
           mov<neg_inf_v>(P_ij);
