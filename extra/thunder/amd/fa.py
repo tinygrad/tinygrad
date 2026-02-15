@@ -1,15 +1,11 @@
-import math, pathlib, functools, time, struct
+import math, pathlib, functools, struct
 
 from tinygrad import Device, Tensor
 from tinygrad.dtype import DTypeLike, dtypes
-from tinygrad.engine.jit import TinyJit
-from tinygrad.helpers import Context, DEBUG
+from tinygrad.helpers import DEBUG
 from tinygrad.runtime.support.compiler_amd import HIPCCCompiler
 from tinygrad.runtime.support.elf import elf_loader
-from tinygrad.runtime.autogen import libc
-from tinygrad.uop.ops import UOp, Ops, KernelInfo, AxisType
-
-import numpy as np
+from tinygrad.uop.ops import UOp, Ops, KernelInfo
 
 def _sharded_empty(shape:Tensor, ref:Tensor, axis:int|None, dtype:DTypeLike|None=None) -> Tensor:
   dtype = dtype or ref.dtype
