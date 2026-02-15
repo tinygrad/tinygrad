@@ -465,6 +465,19 @@ class TestMultiTensor(unittest.TestCase):
     y_shard = norm_sharded(x_sharded).realize()
     np.testing.assert_allclose(y.numpy(), y_shard.numpy(), atol=1e-6, rtol=1e-6)
 
+  def test_sdpa_causal_shard_batch(self):
+    B, H, T, D = 4, 2, 10, 16
+    q = Tensor.rand(B, H, T, D)
+    k = Tensor.rand(B, H, T, D)
+    v = Tensor.rand(B, H, T, D)
+    q_shard = q.shard(devices_2, axis=0)
+    k_shard = k.shard(devices_2, axis=0)
+    v_shard = v.shard(devices_2, axis=0)
+    Tensor.realize(q, k, v, q_shard, k_shard, v_shard)
+    y = Tensor.scaled_dot_product_attention(q, k, v, is_causal=True).realize()
+    y_shard = Tensor.scaled_dot_product_attention(q_shard, k_shard, v_shard, is_causal=True).realize()
+    np.testing.assert_allclose(y_shard.numpy(), y.numpy(), atol=1e-6, rtol=1e-6)
+
   # NOTE: this is failing on LLVM CI, no idea why. Works locally.
   @slow
   def test_data_parallel_resnet(self):
