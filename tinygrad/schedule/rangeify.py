@@ -33,9 +33,6 @@ pm_mops = PatternMatcher([
 # *****************
 # 0. do some cleanup rewrites, mostly copied from the old stuff
 
-def collapse_nested_assign(assign:UOp, target:UOp, src:UOp):
-  """nested ASSIGN to the same buffer (e.g. __iadd__ in __setitem__): collapse the redundant outer ASSIGN"""
-  if src.src[0].base is target.base: return src if src.src[0] is target else assign.replace(src=(target, src.src[1]))
 
 def assign_to_contiguous(assign:UOp, target:UOp, src:UOp):
   if (t := target.base).op is Ops.PARAM or (t.op is Ops.MSTACK and all(s.op is Ops.PARAM for s in t.src)): return None
@@ -148,7 +145,7 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
   # ** assign rules **
 
   # collapse nested ASSIGN to the same buffer (e.g. __iadd__ in __setitem__)
-  (UPat(Ops.ASSIGN, src=(UPat(name="target"), UPat(Ops.ASSIGN, name="src")), name="assign"), collapse_nested_assign),
+  (UPat(Ops.ASSIGN, src=(UPat(name="target"), UPat(Ops.ASSIGN, src=(UPat(name="target"), UPat()), name="src"))), lambda target, src: src),
 
   # move bitcast from assign target to source: a.bitcast(X).assign(src) -> a.assign(src.bitcast(a.dtype))
   (UPat(Ops.ASSIGN, src=(UPat(Ops.BITCAST, src=(UPat(name="target"),)), UPat(name="src")), name="assign"),
