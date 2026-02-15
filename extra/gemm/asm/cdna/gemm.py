@@ -10,6 +10,7 @@ from extra.gemm.asm.cdna.asm import build_kernel, GEMM_ARGS
 
 WORKGROUP_SIZE = 256
 
+@functools.cache
 def custom_asm_gemm(C:UOp, A:UOp, B:UOp, dname:str, arch:str, wg:int) -> UOp:
   batch, M, K = A.shape
   K2, N = B.shape[(1 if B.ndim == 3 else 0):]
@@ -19,6 +20,7 @@ def custom_asm_gemm(C:UOp, A:UOp, B:UOp, dname:str, arch:str, wg:int) -> UOp:
   k = build_kernel(batch, M, N, K, A.dtype.base)
   sink = UOp.sink(C.base, A.base, B.base, lidx, gidx,
                   arg=KernelInfo(name=k.name, estimates=Estimates(ops=2*batch*M*N*K, mem=(batch*M*K + K*N + batch*M*N)*2)))
+  # TODO: you shouldn't have to call the compiler here, BINARY should be auto-added
   binary = HIPCompiler(arch).compile(k.to_asm())
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg=dname), UOp(Ops.LINEAR, src=(*sink.src, sink)),
                                UOp(Ops.SOURCE, arg=k.to_text()), UOp(Ops.BINARY, arg=binary)))

@@ -5,7 +5,7 @@ from tinygrad.runtime.autogen import opencl as cl
 from tinygrad.runtime.support import c
 from tinygrad.helpers import to_char_p_p, from_mv, OSX, DEBUG, mv_address, suppress_finalizing
 from tinygrad.renderer.cstyle import OpenCLRenderer, IntelRenderer
-from tinygrad.device import BufferSpec, LRUAllocator, Compiled, Compiler, CompileError, CompilerPair, CompilerSet
+from tinygrad.device import BufferSpec, LRUAllocator, Compiled, Compiler, CompileError, CompilerSet
 from tinygrad.dtype import ImageDType
 
 CC_CB = c.CFUNCTYPE[None, [c.POINTER[ctypes.c_char], c.POINTER[None], cl.size_t, c.POINTER[None]]]
@@ -39,9 +39,9 @@ class CLCompiler(Compiler):
 
 class CLProgram:
   def __init__(self, device:CLDevice, name:str, lib:bytes, buf_dtypes=[], **kwargs):
-    self.dev, self.name, self.lib, self.buf_dtypes = device, name, lib, buf_dtypes
-    self.program = checked(cl.clCreateProgramWithBinary(device.context, 1, device.device_id, (ctypes.c_size_t * 1)(len(lib)),
-                                                        to_char_p_p([lib], ctypes.c_ubyte), binary_status := ctypes.c_int32(),
+    self.dev, self.name, self.lib, self.buf_dtypes = device, name, device.cl_compiler.compile_cached(lib.decode()), buf_dtypes
+    self.program = checked(cl.clCreateProgramWithBinary(device.context, 1, device.device_id, (ctypes.c_size_t * 1)(len(self.lib)),
+                                                        to_char_p_p([self.lib], ctypes.c_ubyte), binary_status := ctypes.c_int32(),
                                                         errcode_ret := ctypes.c_int32()), errcode_ret)
     check(binary_status.value)
     check(cl.clBuildProgram(self.program, 1, device.device_id, None, BP_CB(), None)) # NOTE: OSX requires this
@@ -125,8 +125,9 @@ class CLDevice(Compiled):
                                            ctypes.string_at(buf, size=total.value).decode())[1]
 
     renderer = IntelRenderer if "cl_intel_subgroup_matrix_multiply_accumulate" in self.device_exts else OpenCLRenderer
-    compiler = functools.partial(CLCompiler, self, f"{hashlib.md5(self.device_name.encode() + self.driver_version.encode()).hexdigest()}")
-    super().__init__(device, CLAllocator(self), CompilerSet([CompilerPair(renderer, compiler)]), functools.partial(CLProgram, self))
+    self.cl_compiler = CLCompiler(self, f"{hashlib.md5(self.device_name.encode() + self.driver_version.encode()).hexdigest()}")
+    super().__init__(device, CLAllocator(self), CompilerSet([(renderer, None)]), functools.partial(CLProgram, self))
+
   def synchronize(self):
     check(cl.clFinish(self.queue))
     self.pending_copyin.clear()

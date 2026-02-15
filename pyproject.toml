@@ -27,9 +27,14 @@ packages = [
   'tinygrad.mixin',
   'tinygrad.nn',
   'tinygrad.renderer',
+  'tinygrad.renderer.amd',
   'tinygrad.runtime',
   'tinygrad.runtime.autogen',
   'tinygrad.runtime.autogen.am',
+  'tinygrad.runtime.autogen.amd',
+  'tinygrad.runtime.autogen.amd.rdna3',
+  'tinygrad.runtime.autogen.amd.rdna4',
+  'tinygrad.runtime.autogen.amd.cdna',
   'tinygrad.runtime.graph',
   'tinygrad.runtime.support',
   'tinygrad.runtime.support.am',
@@ -122,7 +127,7 @@ do_not_mutate = [
   "tinygrad/helpers.py",
   "tinygrad/tensor.py",
 ]
-tests_dir = ["test/test_tiny.py", "test/test_ops.py"]
+tests_dir = ["test/test_tiny.py", "test/backend/test_ops.py"]
 debug = true
 
 
@@ -141,6 +146,8 @@ strict_equality = true
 [[tool.mypy.overrides]]
 module = "extra.*"
 follow_imports = "skip"
+
+
 
 [tool.pytest.ini_options]
 norecursedirs = [
@@ -245,6 +252,8 @@ select = [
   "F841",
 ]
 "tinygrad/runtime/autogen/**/*.py" = ["E501", "F401", "E722", "E731", "F821", "A006", "A002", "F811"]
+"tinygrad/runtime/autogen/amd/**/*.py" = ["E501"]
+"test/amd/**/*.py" = ["F403", "F405"]
 
 [tool.ruff.format]
 exclude = ["*"]

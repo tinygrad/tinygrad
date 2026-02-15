@@ -3,10 +3,9 @@ import os, math, sys, struct
 from collections import defaultdict, Counter
 from tinygrad.codegen.opt import tc
 from tinygrad.uop.ops import GroupOp, Ops, UOp, PatternMatcher, UPat, range_str, axis_letters
-from tinygrad.helpers import strip_parens, getenv, prod, dedup, select_first_inited, AMX, CPU_COUNT
+from tinygrad.helpers import strip_parens, getenv, prod, dedup, AMX, CPU_COUNT
 from tinygrad.dtype import ImageDType, dtypes, DType, PtrDType, AddrSpace, truncate, float_to_bf16
 from tinygrad.renderer import Renderer
-from tinygrad.device import Compiler
 from tinygrad.codegen.late.devectorizer import no_vectorized_alu
 
 
@@ -165,6 +164,8 @@ class CStyleLanguage(Renderer):
     self.r = r
 
     child_count = Counter(v for ru in uops for v in ru.src)
+    # find which PARAMs are stored to with a single toposort
+    writable_params = {u for u in UOp.sink(*[u.src[0] for u in uops if u.op is Ops.STORE]).toposort() if u.op is Ops.PARAM}
     bufs: dict[UOp, tuple[str, tuple[DType, bool]]] = {}
     kernel = []
     depth = 1
@@ -180,13 +181,8 @@ class CStyleLanguage(Renderer):
         continue
       if u.op in (Ops.PARAM, Ops.DEFINE_VAR):
         r[u] = (f"data{u.arg}_{sz}" if (sz:=u.ptrdtype.size) > 0 else f"data{u.arg}") if u.op is Ops.PARAM else u.arg[0]
-        bufs[u] = (r[u], (u.dtype, False))
+        bufs[u] = (r[u], (u.dtype, u in writable_params))
         continue
-
-      # mark buffers that we store to writable
-      if u.op is Ops.STORE:
-        for up in u.src[0].toposort():
-          if up.op is Ops.PARAM: bufs[up] = (bufs[up][0], (bufs[up][1][0], True))
 
       # naming
       prefix = None
@@ -343,8 +339,7 @@ class MetalRenderer(CStyleLanguage):
   shared_max = 32768
   def __init__(self):
     from tinygrad.runtime.ops_metal import MetalCompiler
-    self.compiler = select_first_inited([MetalCompiler, Compiler], "No compiler for METAL is available")
-    self.tensor_cores = tc.metal if hasattr(os, 'uname') and os.uname().machine == "arm64" else []
+    self.compiler, self.tensor_cores = MetalCompiler(), tc.metal if hasattr(os, 'uname') and os.uname().machine == "arm64" else []
 
   # language options
   kernel_typedef = "kernel void"

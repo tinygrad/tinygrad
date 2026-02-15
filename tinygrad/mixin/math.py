@@ -2,9 +2,10 @@ import math
 from typing import Self
 from tinygrad.uop import Ops
 from tinygrad.dtype import dtypes, ConstType
+from tinygrad.mixin.dtype import DTypeMixin
 
 
-class MathMixin:
+class MathMixin(DTypeMixin):
   # required to implement
   def alu(self, op: Ops, *src: Self) -> Self:
     raise NotImplementedError
@@ -23,16 +24,11 @@ class MathMixin:
     return self.ne(True)
 
   def neg(self) -> Self:
-    if (dtype := getattr(self, "dtype")) is None:
-      raise TypeError(f"MathTraits __neg__ requires a dtype, {self=}")
-    return self.logical_not() if dtype.scalar() == dtypes.bool else self * (-1)
+    return self.logical_not() if self.dtype.scalar() == dtypes.bool else self * (-1)
 
   def _check_dtype(self) -> None:
-    if (dtype := getattr(self, "dtype")) is not None:
-      if isinstance(dtype, tuple):
-        dtype = dtype[0]
-      if not (dtypes.is_bool(dtype) or dtypes.is_int(dtype)):
-        raise RuntimeError(f"{dtype} is not supported")
+    if not (dtypes.is_bool(self.dtype) or dtypes.is_int(self.dtype)):
+      raise RuntimeError(f"{self.dtype} is not supported")
 
   def add(self, x: Self | ConstType, reverse: bool = False) -> Self:
     """
@@ -199,10 +195,10 @@ class MathMixin:
     return self.mod(x, True)
 
   def __lt__(self, x: Self | ConstType) -> Self:
-    return self.alu(Ops.CMPLT, self.ufix(x))
+    return self._binop(Ops.CMPLT, x, False)
 
   def __gt__(self, x: Self | ConstType) -> Self:
-    return self.ufix(x).alu(Ops.CMPLT, self)
+    return self._binop(Ops.CMPLT, x, True)
 
   def __ge__(self, x: Self | ConstType) -> Self:
     return (self < x).logical_not()
@@ -211,7 +207,7 @@ class MathMixin:
     return (self > x).logical_not()
 
   def ne(self, x: Self | ConstType) -> Self:
-    return self.alu(Ops.CMPNE, self.ufix(x))
+    return self._binop(Ops.CMPNE, x, False)
 
   def eq(self, x: Self | ConstType) -> Self:
     return self.ne(x).logical_not()
@@ -240,7 +236,17 @@ class MathMixin:
     return self.rshift(x, True)
 
   def maximum(self, x: Self | ConstType) -> Self:
-    return self.alu(Ops.MAX, self.ufix(x))
+    """
+    Computes element-wise maximum of `self` and `x`.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([-1, 2, 3]).maximum(1).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([-1, 2, 3]).maximum(Tensor([-4, -2, 9])).numpy())
+    ```
+    """
+    return self._binop(Ops.MAX, x, False)
 
   def minimum(self, x: Self | ConstType) -> Self:
     return -(-self).maximum(-self.ufix(x))
@@ -514,3 +520,73 @@ class MathMixin:
     ```
     """
     return self.sqrt().reciprocal()
+
+  def log(self) -> Self:
+    """
+    Computes the natural logarithm element-wise.
+
+    See: https://en.wikipedia.org/wiki/Logarithm
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([1., 2., 4., 8.]).log().numpy())
+    ```
+    """
+    return self.log2()*math.log(2)
+
+  def log10(self) -> Self:
+    """
+    Computes the base-10 logarithm element-wise.
+
+    See: https://en.wikipedia.org/wiki/Logarithm
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([1., 2., 4., 8.]).log10().numpy())
+    ```
+    """
+    return self.log2()*math.log10(2)
+
+  def atanh(self) -> Self:
+    """
+    Applies the Inverse Hyperbolic Tangent (atanh) function element-wise.
+
+    - Described: https://en.wikipedia.org/wiki/Inverse_hyperbolic_functions#atanh
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([-0.9, -0.6, -0.3, 0., 0.3, 0.6, 0.9]).atanh().numpy())
+    ```
+    """
+    return ((1 + self)/(1 - self)).log() / 2
+
+  def asinh(self) -> Self:
+    """
+    Applies the Inverse Hyperbolic Sine (asinh) function element-wise.
+
+    - Described: https://en.wikipedia.org/wiki/Inverse_hyperbolic_functions#asinh
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).asinh().numpy())
+    ```
+    """
+    return (self + (self.square() + 1).sqrt()).log()
+
+  def acosh(self) -> Self:
+    """
+    Applies the Inverse Hyperbolic Cosine (acosh) function element-wise.
+
+    - Described: https://en.wikipedia.org/wiki/Inverse_hyperbolic_functions#acosh
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).acosh().numpy())
+    ```
+    """
+    return (self + (self.square() - 1).sqrt()).log()
+
+  def round(self) -> Self:
+    """
+    Rounds the tensor element-wise with rounding half to even.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([-3.5, -2.5, -1.5, -0.5, 0.5, 1.5, 2.5, 3.5]).round().numpy())
+    ```
+    """
+    return ((self > 0).eq((b := self.trunc() / 2.0).trunc().eq(b))).where((self - 0.5).ceil(), (self + 0.5).floor())

@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+import os
+os.environ["VIZ"] = "0"
 import argparse, pathlib
 from typing import Iterator
 from tinygrad.viz import serve as viz

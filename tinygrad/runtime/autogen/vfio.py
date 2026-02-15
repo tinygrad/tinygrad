@@ -137,7 +137,8 @@ VFIO_CCW_NUM_IRQS = _anonenum3.define('VFIO_CCW_NUM_IRQS', 3)
 
 class _anonenum4(Annotated[int, ctypes.c_uint32], c.Enum): pass
 VFIO_AP_REQ_IRQ_INDEX = _anonenum4.define('VFIO_AP_REQ_IRQ_INDEX', 0)
-VFIO_AP_NUM_IRQS = _anonenum4.define('VFIO_AP_NUM_IRQS', 1)
+VFIO_AP_CFG_CHG_IRQ_INDEX = _anonenum4.define('VFIO_AP_CFG_CHG_IRQ_INDEX', 1)
+VFIO_AP_NUM_IRQS = _anonenum4.define('VFIO_AP_NUM_IRQS', 2)
 
 @c.record
 class struct_vfio_pci_dependent_device(c.Struct):
@@ -198,22 +199,25 @@ class struct_vfio_device_feature(c.Struct):
   data: Annotated[c.Array[Annotated[int, ctypes.c_ubyte], Literal[0]], 8]
 @c.record
 class struct_vfio_device_bind_iommufd(c.Struct):
-  SIZE = 16
+  SIZE = 24
   argsz: Annotated[Annotated[int, ctypes.c_uint32], 0]
   flags: Annotated[Annotated[int, ctypes.c_uint32], 4]
   iommufd: Annotated[Annotated[int, ctypes.c_int32], 8]
   out_devid: Annotated[Annotated[int, ctypes.c_uint32], 12]
+  token_uuid_ptr: Annotated[Annotated[int, ctypes.c_uint64], 16]
 @c.record
 class struct_vfio_device_attach_iommufd_pt(c.Struct):
-  SIZE = 12
+  SIZE = 16
   argsz: Annotated[Annotated[int, ctypes.c_uint32], 0]
   flags: Annotated[Annotated[int, ctypes.c_uint32], 4]
   pt_id: Annotated[Annotated[int, ctypes.c_uint32], 8]
+  pasid: Annotated[Annotated[int, ctypes.c_uint32], 12]
 @c.record
 class struct_vfio_device_detach_iommufd_pt(c.Struct):
-  SIZE = 8
+  SIZE = 12
   argsz: Annotated[Annotated[int, ctypes.c_uint32], 0]
   flags: Annotated[Annotated[int, ctypes.c_uint32], 4]
+  pasid: Annotated[Annotated[int, ctypes.c_uint32], 8]
 @c.record
 class struct_vfio_device_feature_migration(c.Struct):
   SIZE = 8
@@ -398,7 +402,7 @@ VFIO_SPAPR_TCE_IOMMU = 2 # type: ignore
 VFIO_TYPE1v2_IOMMU = 3 # type: ignore
 VFIO_DMA_CC_IOMMU = 4 # type: ignore
 VFIO_EEH = 5 # type: ignore
-VFIO_TYPE1_NESTING_IOMMU = 6 # type: ignore
+__VFIO_RESERVED_TYPE1_NESTING_IOMMU = 6 # type: ignore
 VFIO_SPAPR_TCE_v2_IOMMU = 7 # type: ignore
 VFIO_NOIOMMU_IOMMU = 8 # type: ignore
 VFIO_UNMAP_ALL = 9 # type: ignore
@@ -508,8 +512,11 @@ VFIO_DEVICE_FEATURE_GET = (1 << 16) # type: ignore
 VFIO_DEVICE_FEATURE_SET = (1 << 17) # type: ignore
 VFIO_DEVICE_FEATURE_PROBE = (1 << 18) # type: ignore
 VFIO_DEVICE_FEATURE = _IO(VFIO_TYPE, VFIO_BASE + 17) # type: ignore
+VFIO_DEVICE_BIND_FLAG_TOKEN = (1 << 0) # type: ignore
 VFIO_DEVICE_BIND_IOMMUFD = _IO(VFIO_TYPE, VFIO_BASE + 18) # type: ignore
+VFIO_DEVICE_ATTACH_PASID = (1 << 0) # type: ignore
 VFIO_DEVICE_ATTACH_IOMMUFD_PT = _IO(VFIO_TYPE, VFIO_BASE + 19) # type: ignore
+VFIO_DEVICE_DETACH_PASID = (1 << 0) # type: ignore
 VFIO_DEVICE_DETACH_IOMMUFD_PT = _IO(VFIO_TYPE, VFIO_BASE + 20) # type: ignore
 VFIO_DEVICE_FEATURE_PCI_VF_TOKEN = (0) # type: ignore
 VFIO_MIGRATION_STOP_COPY = (1 << 0) # type: ignore
