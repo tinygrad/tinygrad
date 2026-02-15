@@ -1447,30 +1447,6 @@ class Tensor(OpMixin):
     assert chunks > 0, f"expect chunks to be greater than 0, got: {chunks}"
     return list(self.split(ceildiv(dim_sz, chunks) if dim_sz else [0]*chunks, dim=dim))
 
-  def unfold(self, dim:int, size:sint, step:int) -> Tensor:
-    """
-    Unfolds the tensor along dimension `dim` into overlapping windows.
-
-    Each window has length `size` and begins every `step` elements of `self`.
-    Returns the input tensor with dimension `dim` replaced by dims `(n_windows, size)`
-    where `n_windows = (self.shape[dim] - size) // step + 1`.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    unfolded = Tensor.arange(8).unfold(0,2,2)
-    print("\\n".join([repr(x.numpy()) for x in unfolded]))
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    unfolded = Tensor.arange(27).reshape(3,3,3).unfold(-1,2,3)
-    print("\\n".join([repr(x.numpy()) for x in unfolded]))
-    ```
-    """
-    if size < 0: raise RuntimeError(f'size must be >= 0 but got {size=}')
-    if step <= 0: raise RuntimeError(f'step must be > 0 but got {step=}')
-    if size > self.shape[dim]: raise RuntimeError(f'maximum size for tensor at dimension {dim} is {self.shape[dim]} but size is {size}')
-    dim = self._resolve_dim(dim)
-    perm_to_last = tuple(i for i in range(self.ndim) if i != dim) + (dim,)
-    return self.permute(perm_to_last)._pool((size,), step).permute(argsort(perm_to_last) + (self.ndim,))
-
   def meshgrid(self:Tensor, *args:Tensor, indexing:str="ij") -> tuple[Tensor, ...]:
     """
     Generates coordinate matrices from coordinate vectors.
@@ -2870,30 +2846,6 @@ class Tensor(OpMixin):
     """
     return self._apply_uop(UOp.contiguous_backward)
 
-  def log(self) -> Tensor:
-    """
-    Computes the natural logarithm element-wise.
-
-    See: https://en.wikipedia.org/wiki/Logarithm
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([1., 2., 4., 8.]).log().numpy())
-    ```
-    """
-    return self.log2()*math.log(2)
-
-  def log10(self) -> Tensor:
-    """
-    Computes the base-10 logarithm element-wise.
-
-    See: https://en.wikipedia.org/wiki/Logarithm
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([1., 2., 4., 8.]).log10().numpy())
-    ```
-    """
-    return self.log2()*math.log10(2)
-
   def log2(self) -> Tensor:
     """
     Computes the base-2 logarithm element-wise.
@@ -3021,16 +2973,6 @@ class Tensor(OpMixin):
 
   # ***** math functions *****
 
-  def round(self: Tensor) -> Tensor:
-    """
-    Rounds the tensor element-wise with rounding half to even.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-3.5, -2.5, -1.5, -0.5, 0.5, 1.5, 2.5, 3.5]).round().numpy())
-    ```
-    """
-    return ((self > 0) == ((b := self.trunc() / 2.0).trunc() == b)).where((self - 0.5).ceil(), (self + 0.5).floor())
-
   def lerp(self, end:Tensor, weight:Tensor|float) -> Tensor:
     """
     Linearly interpolates between `self` and `end` by `weight`.
@@ -3135,42 +3077,6 @@ class Tensor(OpMixin):
     ```
     """
     return (self.exp() + self.neg().exp()) / 2
-
-  def atanh(self) -> Tensor:
-    """
-    Applies the Inverse Hyperbolic Tangent (atanh) function element-wise.
-
-    - Described: https://en.wikipedia.org/wiki/Inverse_hyperbolic_functions#atanh
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-0.9, -0.6, -0.3, 0., 0.3, 0.6, 0.9]).atanh().numpy())
-    ```
-    """
-    return ((1 + self)/(1 - self)).log() / 2
-
-  def asinh(self) -> Tensor:
-    """
-    Applies the Inverse Hyperbolic Sine (asinh) function element-wise.
-
-    - Described: https://en.wikipedia.org/wiki/Inverse_hyperbolic_functions#asinh
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).asinh().numpy())
-    ```
-    """
-    return (self + (self.square() + 1).sqrt()).log()
-
-  def acosh(self) -> Tensor:
-    """
-    Applies the Inverse Hyperbolic Cosine (acosh) function element-wise.
-
-    - Described: https://en.wikipedia.org/wiki/Inverse_hyperbolic_functions#acosh
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).acosh().numpy())
-    ```
-    """
-    return (self + (self.square() - 1).sqrt()).log()
 
   def erf(self) -> Tensor:
     """
@@ -3633,7 +3539,7 @@ class Tensor(OpMixin):
     # handle attention mask
     if is_causal:
       if attn_mask is not None: raise RuntimeError("cannot set attn_mask when is_causal=True")
-      attn_mask = qk.ones_like(requires_grad=False, device=self.device, dtype=dtypes.bool).tril()
+      attn_mask = qk.ones_like(requires_grad=False, dtype=dtypes.bool).tril()
     if attn_mask is not None:
       if attn_mask.dtype == dtypes.bool: attn_mask = attn_mask.where(0, -float("inf"))
       qk = qk + attn_mask
@@ -3936,71 +3842,6 @@ class Tensor(OpMixin):
         return functools.reduce(Tensor.add, (tmp.shrink(nones + ((i, i+1),)).cast(new_uint)<<8*i*os for i in range(rate))).squeeze(-1).bitcast(dtype)
       return Tensor.stack(*(tmp>>8*i*ns for i in range(os//ns)), dim=-1).flatten(-2).cast(new_uint).bitcast(dtype)
     return self._apply_uop(UOp.bitcast, dtype=dt) if self.dtype != dt else self
-
-  def float(self) -> Tensor:
-    """
-    Convenience method to cast `self` to a `float32` Tensor.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor([-1, 2, 3], dtype=dtypes.int32)
-    print(t.dtype, t.numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = t.float()
-    print(t.dtype, t.numpy())
-    ```
-    """
-    return self.cast(dtypes.float32)
-
-  def half(self) -> Tensor:
-    """
-    Convenience method to cast `self` to a `float16` Tensor.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor([-1, 2, 3], dtype=dtypes.int32)
-    print(t.dtype, t.numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = t.half()
-    print(t.dtype, t.numpy())
-    ```
-    """
-    return self.cast(dtypes.float16)
-
-  def int(self) -> Tensor:
-    """
-    Convenience method to cast `self` to a `int32` Tensor.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor([-1.5, -0.5, 0.0, 0.5, 1.5])
-    print(t.dtype, t.numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = t.int()
-    print(t.dtype, t.numpy())
-    ```
-    """
-    return self.cast(dtypes.int32)
-
-  def bool(self) -> Tensor:
-    """
-    Convenience method to cast `self` to a `bool` Tensor.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor([-1, 0, 1])
-    print(t.dtype, t.numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = t.bool()
-    print(t.dtype, t.numpy())
-    ```
-    """
-    return self.cast(dtypes.bool)
-
-  def bfloat16(self) -> Tensor: return self.cast(dtypes.bfloat16)
-  def double(self) -> Tensor: return self.cast(dtypes.double)
-  def long(self) -> Tensor: return self.cast(dtypes.long)
-  def short(self) -> Tensor: return self.cast(dtypes.short)
 
   # *** image Tensor function replacements ***
 
