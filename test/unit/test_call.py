@@ -13,7 +13,7 @@ class TestCall(unittest.TestCase):
     # we define a plus function
     plus_fxn = UOp.param(0, dtypes.float, (10,10)) + UOp.param(1, dtypes.float, (10,10))
 
-    c = Tensor.call(a, b, fxn=plus_fxn)
+    c = Tensor.call(a, b, fxn=plus_fxn, inline=True)
     np.testing.assert_equal(c.numpy(), (a+b).numpy())
 
   def test_call_plus_backward(self):
@@ -30,7 +30,7 @@ class TestCall(unittest.TestCase):
 
     # we define a plus function
     plus_fxn = UOp.param(0, dtypes.float, (10,10)) + UOp.param(1, dtypes.float, (10,10))
-    c = Tensor.call(a, b, fxn=plus_fxn, grad_fxn=grad_fxn)
+    c = Tensor.call(a, b, fxn=plus_fxn, grad_fxn=grad_fxn, inline=True)
     c.mean().backward()
 
     np.testing.assert_allclose(a.grad.numpy(), gt_a_grad, rtol=1e-5)
@@ -46,7 +46,7 @@ class TestCall(unittest.TestCase):
     a.grad, b.grad = None, None
 
     plus_fxn = UOp.param(0, dtypes.float, (10,10)) + UOp.param(1, dtypes.float, (10,10))
-    c = Tensor.call(a, b, fxn=plus_fxn)
+    c = Tensor.call(a, b, fxn=plus_fxn, inline=True)
     c.mean().backward()
 
     np.testing.assert_allclose(a.grad.numpy(), gt_a_grad, rtol=1e-5)
@@ -57,7 +57,7 @@ class TestCall(unittest.TestCase):
     a = Tensor.randn(M, K)
     b = Tensor.randn(K, N)
     Tensor.realize(a, b)
-    c = Tensor.call(a, b, fxn=a.as_param(0) @ b.as_param(1))
+    c = Tensor.call(a, b, fxn=a.as_param(0) @ b.as_param(1), inline=True)
     np.testing.assert_allclose(c.numpy(), a.numpy() @ b.numpy(), rtol=1e-5, atol=1e-6)
 
   @unittest.skip("needs GEMM on mixins")
@@ -70,7 +70,7 @@ class TestCall(unittest.TestCase):
     # we define a gemm function
     x = UOp.param(0, dtypes.float, shape=(M, K))
     y = UOp.param(1, dtypes.float, shape=(K, N))
-    c = Tensor.call(a, b, fxn=x@y)
+    c = Tensor.call(a, b, fxn=x@y, inline=True)
 
     np.testing.assert_allclose(c.numpy(), a.numpy() @ b.numpy(), rtol=1e-5, atol=1e-6)
 
@@ -86,7 +86,7 @@ class TestCall(unittest.TestCase):
 
     p0, p1 = UOp.param(0, dtypes.float, (10,10)), UOp.param(1, dtypes.float, (10,10))
     complex_fxn = (p0*p1 + p0).exp2() * p1.reciprocal()
-    c = Tensor.call(a, b, fxn=complex_fxn)
+    c = Tensor.call(a, b, fxn=complex_fxn, inline=True)
     c.mean().backward()
 
     np.testing.assert_allclose(a.grad.numpy(), gt_a_grad, rtol=1e-5)
