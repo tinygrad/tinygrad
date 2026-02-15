@@ -112,6 +112,7 @@ VOPD_TO_VOP2 = {
   ir4.VOPDOp.V_DUAL_FMAAK_F32: ir3.VOP2Op.V_FMAAK_F32_E32, ir4.VOPDOp.V_DUAL_FMAMK_F32: ir3.VOP2Op.V_FMAMK_F32_E32,
 }
 def _wave_size(arch: str) -> int: return 64 if arch.startswith("cdna") else 32
+WAVE_SIZE = 32  # default wave size for RDNA (exported for test_compare_emulators)
 # Special registers stored after inline constants (256-259)
 PC_LO_IDX, PC_HI_IDX, SCRATCH_STRIDE_IDX = 256, 257, 259
 # SGPR buffer: 0-127 = SGPRs, 128-255 = inline constants, 256-259 = special registers
@@ -753,7 +754,7 @@ def _sdwa_write(old: UOp, val: UOp, dst_sel: UOp, dst_unused: UOp) -> UOp:
 def _compile_sdwa(inst: irc.VOP1_SDWA | irc.VOP2_SDWA | irc.VOP2_SDWA_SDST | irc.VOPC_SDWA_SDST, ctx: _Ctx) -> UOp:
   """Compile CDNA SDWA (Sub-Dword Access) VOP1/VOP2/VOPC instructions."""
   is_vopc = isinstance(inst, irc.VOPC_SDWA_SDST)
-  exec_mask, bits = ctx.rexec(), inst.canonical_op_bits
+  exec_mask = ctx.rexec()
   # sd=1 means use sdst register, sd=0 means use VCC (for VOPC_SDWA_SDST and VOP2_SDWA_SDST)
   has_sdst = isinstance(inst, (irc.VOP2_SDWA_SDST, irc.VOPC_SDWA_SDST))
   sdst_off = _c(inst.sdst.offset) if has_sdst and getattr(inst, 'sd', 0) else _c(VCC_LO.offset)
@@ -946,7 +947,7 @@ def _compile_bitop3(inst, ctx: _Ctx, exec_mask: UOp, bits: dict, op_name: str) -
   is_16 = 'B16' in op_name
   dt, mask = (dtypes.uint16, 0xFFFF) if is_16 else (dtypes.uint32, 0xFFFFFFFF)
   s0, s1, s2 = src0.cast(dt), src1.cast(dt), src2.cast(dt)
-  bnot = lambda v: v ^ UOp.const(dt, mask)
+  def bnot(v): return v ^ UOp.const(dt, mask)
   result = UOp.const(dt, 0)
   for i in range(8):
     if not (ttbl & (1 << i)): continue
@@ -1078,7 +1079,6 @@ def _compile_mfma(inst: irc.VOP3P, ctx: _Ctx) -> UOp:
   cvt = _FUNCS['bf16_to_f32'] if is_bf16 else _FUNCS['f16_to_f32']
   vpg = 4 if is_fp8 else 2
   k_per_grp = K // 4
-  n_regs = k_per_grp // vpg
   n_elems = 16 * K  # total input elements per matrix
 
   # src2 can be VGPR (>=256) or inline constant/SGPR (<256)
