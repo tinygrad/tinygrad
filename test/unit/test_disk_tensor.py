@@ -42,13 +42,12 @@ class TestTorchLoad(TempDirTestCase):
   # pytorch tar format
   def test_load_resnet(self): compare_weights_both('https://download.pytorch.org/models/resnet50-19c8e357.pth')
 
+  # shared storage (mixtral-8x7b-32kseqlen)
   def test_shared_storage(self):
     import torch
     fn = self.tmp("shared_storage.pth")
-    a = torch.randn(2000, 64)
-    b = a[1000:]  # view with storage_offset
-    torch.save({"a": a, "b": b}, fn)
-    compare_weights_both(pathlib.Path(fn).as_posix())
+    torch.save({"a": (a := torch.randn(100)), "b": a[5:]}, fn)
+    compare_weights_both(fn)
 
 
 
