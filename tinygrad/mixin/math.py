@@ -514,3 +514,73 @@ class MathMixin:
     ```
     """
     return self.sqrt().reciprocal()
+
+  def log(self) -> Self:
+    """
+    Computes the natural logarithm element-wise.
+
+    See: https://en.wikipedia.org/wiki/Logarithm
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([1., 2., 4., 8.]).log().numpy())
+    ```
+    """
+    return self.log2()*math.log(2)
+
+  def log10(self) -> Self:
+    """
+    Computes the base-10 logarithm element-wise.
+
+    See: https://en.wikipedia.org/wiki/Logarithm
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([1., 2., 4., 8.]).log10().numpy())
+    ```
+    """
+    return self.log2()*math.log10(2)
+
+  def atanh(self) -> Self:
+    """
+    Applies the Inverse Hyperbolic Tangent (atanh) function element-wise.
+
+    - Described: https://en.wikipedia.org/wiki/Inverse_hyperbolic_functions#atanh
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([-0.9, -0.6, -0.3, 0., 0.3, 0.6, 0.9]).atanh().numpy())
+    ```
+    """
+    return ((1 + self)/(1 - self)).log() / 2
+
+  def asinh(self) -> Self:
+    """
+    Applies the Inverse Hyperbolic Sine (asinh) function element-wise.
+
+    - Described: https://en.wikipedia.org/wiki/Inverse_hyperbolic_functions#asinh
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).asinh().numpy())
+    ```
+    """
+    return (self + (self.square() + 1).sqrt()).log()
+
+  def acosh(self) -> Self:
+    """
+    Applies the Inverse Hyperbolic Cosine (acosh) function element-wise.
+
+    - Described: https://en.wikipedia.org/wiki/Inverse_hyperbolic_functions#acosh
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).acosh().numpy())
+    ```
+    """
+    return (self + (self.square() - 1).sqrt()).log()
+
+  def round(self) -> Self:
+    """
+    Rounds the tensor element-wise with rounding half to even.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([-3.5, -2.5, -1.5, -0.5, 0.5, 1.5, 2.5, 3.5]).round().numpy())
+    ```
+    """
+    return ((self > 0).eq((b := self.trunc() / 2.0).trunc().eq(b))).where((self - 0.5).ceil(), (self + 0.5).floor())
