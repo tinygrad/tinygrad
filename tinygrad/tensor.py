@@ -2775,26 +2775,6 @@ class Tensor(OpMixin):
 
   # ***** unary ops *****
 
-  def logical_not(self) -> Tensor:
-    """
-    Computes the logical NOT of the tensor element-wise.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([False, True]).logical_not().numpy())
-    ```
-    """
-    return self.cast(dtypes.bool)._apply_broadcasted_uop(UOp.ne, True)
-
-  def neg(self) -> Tensor:
-    """
-    Negates the tensor element-wise.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).neg().numpy())
-    ```
-    """
-    return self*-1 if self.dtype != dtypes.bool else self.logical_not()
-
   def contiguous(self, *args, **kwargs) -> Tensor:
     """
     Returns a contiguous tensor.
@@ -2806,18 +2786,6 @@ class Tensor(OpMixin):
     Inserts a contiguous operation in the backward pass.
     """
     return self._apply_uop(UOp.contiguous_backward)
-
-  def logsigmoid(self) -> Tensor:
-    """
-    Applies the LogSigmoid function element-wise.
-
-    - See: https://docs.pytorch.org/docs/stable/generated/torch.nn.functional.logsigmoid.html
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).logsigmoid().numpy())
-    ```
-    """
-    return -(-self).softplus()
 
   # ***** activation functions *****
 
@@ -2832,28 +2800,6 @@ class Tensor(OpMixin):
     ```
     """
     return gamma * (self >= 0).detach().where(self, alpha * (self.exp() - 1))
-
-  def mish(self) -> Tensor:
-    """
-    Applies the Mish function element-wise.
-
-    - Paper: https://arxiv.org/abs/1908.08681v3
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).mish().numpy())
-    ```
-    """
-    return self * self.softplus().tanh()
-
-  def softplus(self, beta=1.0) -> Tensor:
-    """
-    Applies the Softplus function element-wise.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).softplus().numpy())
-    ```
-    """
-    return (1/beta) * (self*beta).logaddexp(0.0)
 
   # ***** broadcasted elementwise ops *****
 
@@ -2996,33 +2942,6 @@ class Tensor(OpMixin):
     # NOTE: pow(int, float) -> int
     return ret.round().cast(self.dtype) if not reverse and not dtypes.is_float(self.dtype) and dtypes.is_float(exponent.dtype) else ret
 
-  def maximum(self, x:Tensor|ConstType) -> Tensor:
-    """
-    Computes element-wise maximum of `self` and `x`.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-1, 2, 3]).maximum(1).numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-1, 2, 3]).maximum(Tensor([-4, -2, 9])).numpy())
-    ```
-    """
-    return self._apply_broadcasted_uop(UOp.maximum, x)
-
-  def minimum(self, x:Tensor|ConstType) -> Tensor:
-    """
-    Computes element-wise minimum of `self` and `x`.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-1, 2, 3]).minimum(1).numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-1, 2, 3]).minimum(Tensor([-4, -2, 9])).numpy())
-    ```
-    """
-    t, x = self._broadcasted(x)
-    return t._inverse().maximum(x._inverse())._inverse()
-
   def where(self:Tensor, x:Tensor|ConstType|sint, y:Tensor|ConstType|sint) -> Tensor:
     """
     Returns a tensor of elements selected from either `x` or `y`, depending on `self`.
@@ -3046,23 +2965,6 @@ class Tensor(OpMixin):
     cond, x = self._broadcasted(x, match_dtype=False)
     cond, y = cond._broadcasted(y, match_dtype=False)
     return cond.cast(dtypes.bool)._apply_uop(UOp.where, *x._broadcasted(y))
-
-  def copysign(self, other) -> Tensor:
-    """
-    Returns a tensor of with the magnitude of `self` and the sign of `other`, elementwise.
-    """
-    # NOTE: torch always return in float, we return based on the broadcasting rule.
-    other = self._broadcasted(other)[1]
-    # TODO: remove other.sign()*0?
-    # other.sign()*0 keeps other in the gradient graph (gradient=0) without affecting forward (works for inf unlike other*0)
-    return self.abs() * ((other < 0) | (other.reciprocal() < 0)).where(-1, 1) + other.sign()*0
-
-  def logaddexp(self, other) -> Tensor:
-    """
-    Calculates (self.exp()+other.exp()).log(), elementwise.
-    """
-    m = self.maximum(other)
-    return ((self-m).exp() + (self._broadcasted(other)[1]-m).exp()).log() + m
 
   # ***** op wrappers *****
 
@@ -3090,10 +2992,6 @@ class Tensor(OpMixin):
   def __ixor__(self, x) -> Tensor: return self.assign(self.bitwise_xor(x)) # type: ignore[misc]
   def __ilshift__(self, x) -> Tensor: return self.assign(self.lshift(x)) # type: ignore[misc]
   def __irshift__(self, x) -> Tensor: return self.assign(self.rshift(x)) # type: ignore[misc]
-
-  def __lt__(self, x) -> Tensor: return self._apply_broadcasted_uop(UOp.__lt__, x, False)
-  def __gt__(self, x) -> Tensor: return self._apply_broadcasted_uop(UOp.__lt__, x, True)
-  def ne(self, x) -> Tensor: return self._apply_broadcasted_uop(UOp.ne, x, False)
 
   def __eq__(self, x) -> Tensor: return self.eq(x)                      # type: ignore[override]
 
@@ -3458,17 +3356,6 @@ class Tensor(OpMixin):
 
   # ***** Tensor Properties *****
 
-  def element_size(self) -> int:
-    """
-    Returns the size in bytes of an individual element in the tensor.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor([5], dtype=dtypes.int16)
-    print(t.element_size())
-    ```
-    """
-    return self.dtype.itemsize
-
   def nbytes(self) -> int:
     """
     Returns the total number of bytes of all elements in the tensor.
@@ -3479,18 +3366,6 @@ class Tensor(OpMixin):
     ```
     """
     return int(self.numel()) * self.element_size()
-
-  def is_floating_point(self) -> bool:
-    """
-    Returns `True` if the tensor contains floating point types, i.e. is one of `dtypes.float64`, `dtypes.float32`,
-    `dtypes.float16`, `dtypes.bfloat16`.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor([8, 9], dtype=dtypes.float32)
-    print(t.is_floating_point())
-    ```
-    """
-    return dtypes.is_float(self.dtype)
 
   def size(self, dim:int|None=None) -> sint|tuple[sint, ...]:
     """

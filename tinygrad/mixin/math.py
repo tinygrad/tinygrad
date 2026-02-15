@@ -18,13 +18,32 @@ class MathMixin(DTypeMixin):
   def ufix(self, x: Self | ConstType) -> Self:
     return self.const_like(x) if not isinstance(x, MathMixin) else x
 
+  def _broadcasted(self, y: Self | ConstType, reverse: bool = False, match_dtype: bool = True, backward_cast: bool = True) -> tuple[Self, Self]:
+    x, y = self, self.ufix(y)
+    if reverse: x, y = y, x
+    return x, y
+
   def _binop(self, op: Ops, x: Self | ConstType, reverse: bool) -> Self:
     return self.ufix(x).alu(op, self) if reverse else self.alu(op, self.ufix(x))
 
   def logical_not(self) -> Self:
-    return self.ne(True)
+    """
+    Computes the logical NOT of the tensor element-wise.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([False, True]).logical_not().numpy())
+    ```
+    """
+    return self.cast(dtypes.bool).ne(True)
 
   def neg(self) -> Self:
+    """
+    Negates the tensor element-wise.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).neg().numpy())
+    ```
+    """
     return self.logical_not() if self.dtype.scalar() == dtypes.bool else self * (-1)
 
   def _check_dtype(self) -> None:
@@ -196,10 +215,10 @@ class MathMixin(DTypeMixin):
     return self.mod(x, True)
 
   def __lt__(self, x: Self | ConstType) -> Self:
-    return self.alu(Ops.CMPLT, self.ufix(x))
+    return self._binop(Ops.CMPLT, x, False)
 
   def __gt__(self, x: Self | ConstType) -> Self:
-    return self.ufix(x).alu(Ops.CMPLT, self)
+    return self._binop(Ops.CMPLT, x, True)
 
   def __ge__(self, x: Self | ConstType) -> Self:
     return (self < x).logical_not()
@@ -208,7 +227,7 @@ class MathMixin(DTypeMixin):
     return (self > x).logical_not()
 
   def ne(self, x: Self | ConstType) -> Self:
-    return self.alu(Ops.CMPNE, self.ufix(x))
+    return self._binop(Ops.CMPNE, x, False)
 
   def eq(self, x: Self | ConstType) -> Self:
     return self.ne(x).logical_not()
@@ -237,10 +256,31 @@ class MathMixin(DTypeMixin):
     return self.rshift(x, True)
 
   def maximum(self, x: Self | ConstType) -> Self:
-    return self.alu(Ops.MAX, self.ufix(x))
+    """
+    Computes element-wise maximum of `self` and `x`.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([-1, 2, 3]).maximum(1).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([-1, 2, 3]).maximum(Tensor([-4, -2, 9])).numpy())
+    ```
+    """
+    return self._binop(Ops.MAX, x, False)
 
   def minimum(self, x: Self | ConstType) -> Self:
-    return -(-self).maximum(-self.ufix(x))
+    """
+    Computes element-wise minimum of `self` and `x`.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([-1, 2, 3]).minimum(1).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([-1, 2, 3]).minimum(Tensor([-4, -2, 9])).numpy())
+    ```
+    """
+    t, x = self._broadcasted(x)
+    return t._inverse().maximum(x._inverse())._inverse()
 
   def where(self, x: Self | ConstType, y: Self | ConstType) -> Self:
     if isinstance(x, type(self)):
@@ -856,3 +896,54 @@ class MathMixin(DTypeMixin):
     ```
     """
     return self / (1 + self.abs())
+
+  def copysign(self, other: Self | ConstType) -> Self:
+    """
+    Returns a tensor of with the magnitude of `self` and the sign of `other`, elementwise.
+    """
+    # NOTE: torch always return in float, we return based on the broadcasting rule.
+    other = self._broadcasted(other)[1]
+    # TODO: remove other.sign()*0?
+    # other.sign()*0 keeps other in the gradient graph (gradient=0) without affecting forward (works for inf unlike other*0)
+    return self.abs() * ((other < 0) | (other.reciprocal() < 0)).where(-1, 1) + other.sign()*0
+
+  def logaddexp(self, other: Self | ConstType) -> Self:
+    """
+    Calculates (self.exp()+other.exp()).log(), elementwise.
+    """
+    m = self.maximum(other)
+    return ((self-m).exp() + (self._broadcasted(other)[1]-m).exp()).log() + m
+
+  def softplus(self, beta: float = 1.0) -> Self:
+    """
+    Applies the Softplus function element-wise.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).softplus().numpy())
+    ```
+    """
+    return (1/beta) * (self*beta).logaddexp(0.0)
+
+  def mish(self) -> Self:
+    """
+    Applies the Mish function element-wise.
+
+    - Paper: https://arxiv.org/abs/1908.08681v3
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).mish().numpy())
+    ```
+    """
+    return self * self.softplus().tanh()
+
+  def logsigmoid(self) -> Self:
+    """
+    Applies the LogSigmoid function element-wise.
+
+    - See: https://docs.pytorch.org/docs/stable/generated/torch.nn.functional.logsigmoid.html
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).logsigmoid().numpy())
+    ```
+    """
+    return -(-self).softplus()
