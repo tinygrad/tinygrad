@@ -87,9 +87,9 @@ def _bf8_to_f32(v: UOp) -> UOp:
   return is_sub.where(sub_f32.bitcast(dtypes.float32), normal)
 
 def _f32_to_fp8(v: UOp) -> UOp:
-  return f2f((v.bitcast(dtypes.float32) if v.dtype != dtypes.float32 else v).bitcast(dtypes.uint32), dtypes.float32, dtypes.fp8e4m3).cast(dtypes.uint32)
+  return f2f((v.bitcast(dtypes.float32) if v.dtype != dtypes.float32 else v).bitcast(dtypes.uint32), dtypes.float32, dtypes.fp8e4m3)
 def _f32_to_bf8(v: UOp) -> UOp:
-  return f2f((v.bitcast(dtypes.float32) if v.dtype != dtypes.float32 else v).bitcast(dtypes.uint32), dtypes.float32, dtypes.fp8e5m2).cast(dtypes.uint32)
+  return f2f((v.bitcast(dtypes.float32) if v.dtype != dtypes.float32 else v).bitcast(dtypes.uint32), dtypes.float32, dtypes.fp8e5m2)
 
 def _check_nan(v: UOp, quiet: bool) -> UOp:
   if v.op == Ops.CAST and v.dtype == dtypes.float64: v = v.src[0]
@@ -452,7 +452,7 @@ class Parser:
       case '||' | '|': return left | right
       case '&&' | '&': return left & right
       case '^': return left ^ right
-      case '==' | '<>': return left.eq(right) if op == '==' else left.ne(right)
+      case '==' | '<>': return left.eq(right) if op == '==' else self._cmp_nan(left, right, lambda a,b: a.ne(b))
       case '!=': return left.ne(right)
       case '>=' | '<=' | '>' | '<':
         ops = {'>=':(lambda a,b:a>=b),'<=':(lambda a,b:a<=b),'>':(lambda a,b:a>b),'<':(lambda a,b:a<b)}
