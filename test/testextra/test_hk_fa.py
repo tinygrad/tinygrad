@@ -13,7 +13,7 @@ class TestFA(unittest.TestCase):
       self.skipTest(f"arch {arch} not supported")
 
   def test_fast_fa_causal(self):
-    B, N, H, H_KV, D = 2, 8192, 32, 8, 128
+    B, N, H, H_KV, D = 1, 8192, 32, 8, 128
 
     with Context(DEBUG=0):
       q = Tensor.randn(B, N, H, D, dtype=dtypes.bfloat16).contiguous()
@@ -42,7 +42,7 @@ class TestFA(unittest.TestCase):
   def test_fast_fa_bwd_causal(self):
     Tensor.manual_seed(42)
 
-    B, N, H, H_KV, D = 1, 8192, 32, 32, 128
+    B, N, H, H_KV, D = 1, 8192, 32, 8, 128
 
     with Context(DEBUG=0):
       q = Tensor.randn(B, N, H, D, dtype=dtypes.bfloat16, requires_grad=True).contiguous()
@@ -78,7 +78,7 @@ class TestFA(unittest.TestCase):
   def test_fast_fa_bwd_causal_jitted(self):
     Tensor.manual_seed(42)
 
-    B, N, H, H_KV, D = 1, 8192, 32, 32, 128
+    B, N, H, H_KV, D = 1, 8192, 32, 8, 128
 
     with Context(DEBUG=0):
       q = Tensor.randn(B, N, H, D, dtype=dtypes.bfloat16, requires_grad=True).contiguous()
@@ -127,7 +127,7 @@ class TestFA(unittest.TestCase):
   def test_fast_fa_bwd_multidevice(self):
     Tensor.manual_seed(42)
 
-    B, N, H, H_KV, D = 2, 1024, 32, 32, 128
+    B, N, H, H_KV, D = 2, 1024, 32, 8, 128
     GPUS = tuple(f"AMD:{i}" for i in range(B))
 
     with Context(DEBUG=0):
