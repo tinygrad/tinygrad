@@ -1214,6 +1214,26 @@ class Tensor(OpMixin):
     x_dims = [p for p in indices_parsed if not isinstance(p['index'], sint)]
     x = x.reshape(tuple(p['size'] for p in x_dims))
 
+    # basic setitem: construct result with view region replaced by v using arange masks
+    if v is not None and not any(isinstance(p['index'], Tensor) for p in indices_parsed):
+      # broadcast v to getitem shape, reshape to self.ndim (squeeze None dims, unsqueeze int dims — all are size 1)
+      vb = v.cast(self.dtype)._broadcast_to(x.shape)
+      vb = vb.reshape(tuple(1 if isinstance(p['index'], sint) else p['size'] for p in indices_parsed if p['index'] is not None))
+      # undo movement ops per-dim and build boolean mask
+      per_dim = []
+      for d, m in enumerate(mops):
+        (s, e), st = m['boundary'], abs(m['stride'])
+        if st != 1 and vb.shape[d] > 1:  # un-stride: interleave with zeros
+          vb = vb.unsqueeze(d+1)
+          vb = vb.pad_to(tuple(st if j == d+1 else None for j in range(vb.ndim)))
+          vb = vb.reshape(vb.shape[:d] + (vb.shape[d]*vb.shape[d+1],) + vb.shape[d+2:])
+          vb = vb.shrink_to(tuple(e-s if j == d else None for j in range(self.ndim)))
+        idx = Tensor.arange(self.shape[d], device=self.device).reshape([1]*d + [self.shape[d]] + [1]*(self.ndim - d - 1))
+        per_dim.append((idx >= s) & (idx < e) & (((e-1-idx) if m['stride'] < 0 else (idx-s)) % st == 0))
+      vb = vb.flip(tuple(d for d, m in enumerate(mops) if m['stride'] < 0))
+      vb = vb.pad(tuple((m['boundary'][0], self.shape[d] - m['boundary'][1]) for d, m in enumerate(mops)))
+      return (functools.reduce(lambda a, b: a & b, per_dim) if per_dim else Tensor(True, dtype=dtypes.bool, device=self.device)).where(vb, self)
+
     # tensor indexing
     if tops := [(d, p) for d, p in enumerate(x_dims) if isinstance(p['index'], Tensor)]:
       dims, tensors, masks = [d for d, _ in tops], cast(list[Tensor], [p['index'] for _, p in tops]), []
@@ -1312,7 +1332,10 @@ class Tensor(OpMixin):
     elif is_disk or self.uop.is_realized: # basic setitem, self is realized. TODO: disk uop.base is a COPY and not realized
       self[indices].assign(v)
     else: # basic setitem, self is not realized
-      self[indices].assign(v).realize()
+      if not isinstance(v, Tensor): v = Tensor(v, device=self.device, dtype=self.dtype)
+      # __iadd__/__isub__ on unrealized views creates a no-op ASSIGN; unwrap to get the computed value
+      if v.uop.op is Ops.ASSIGN: v = v._apply_uop(lambda x: x.src[1])
+      self.replace(self._getitem(indices, v))
 
   def __delitem__(self, indices) -> None:
     raise TypeError("Tensor does not support deleting items")
