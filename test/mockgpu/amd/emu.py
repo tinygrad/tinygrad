@@ -8,6 +8,7 @@
 from __future__ import annotations
 import ctypes, functools, re, platform, subprocess, tempfile
 from typing import Callable
+from dataclasses import dataclass
 
 # Set/restore DAZ+FTZ (denormals-are-zero + flush-to-zero) to match RDNA3 default float mode
 # x86: MXCSR bits DAZ(6)+FTZ(15), ARM64: FPCR bit FZ(24)
@@ -70,6 +71,108 @@ from tinygrad.runtime.autogen.amd.common import Fmt, OpType
 from test.mockgpu.amd.pcode import parse_block, _FUNCS
 
 MASK32 = 0xFFFFFFFF
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# SQTT TRACE COLLECTION
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@dataclass
+class SQTTInst:
+  """A single traced instruction for SQTT output."""
+  pc_offset: int        # PC offset from program base
+  inst_type: type       # instruction class (e.g. ir3.SOP1, ir3.GLOBAL, etc.)
+  wave_id: int          # wave index within workgroup
+  inst_op: int = 0      # the op enum value (e.g. SOPPOp, GLOBALOp, DSOp, etc.)
+  inst_op_name: str = "" # the op enum name (e.g. "GLOBAL_STORE_B32", "S_WAITCNT")
+  branch_taken: bool|None = None  # for branches: True if taken, False if not, None if not a branch
+
+# Global trace storage: populated by run_asm, consumed by amdgpu.py for SQTT encoding
+# Each entry is a list of SQTTInst for one kernel dispatch
+sqtt_traces: list[list[SQTTInst]] = []
+
+def encode_sqtt(trace: list[SQTTInst]) -> bytes:
+  """Encode a list of SQTTInst trace events into an SQTT binary blob (RDNA3 layout=3).
+
+  Each trace entry should have .wave_id, .inst_type, and .inst_op attributes.
+  inst_type is an AMD ISA instruction class (e.g. ir3.SOP1, ir3.GLOBAL, etc.).
+  inst_op is the SOPPOp value for SOPP instructions, 0 otherwise."""
+  from tinygrad.renderer.amd.sqtt import _emit_nibbles, _nibbles_to_bytes, LAYOUT_HEADER, WAVESTART, WAVEEND, INST, IMMEDIATE, InstOp
+  from tinygrad.runtime.autogen.amd.rdna3.enum import SOPPOp as SOPPOp3
+  from tinygrad.runtime.autogen.amd.rdna4.enum import SOPPOp as SOPPOp4
+
+  _SOPP = (ir3.SOPP, ir4.SOPP, irc.SOPP)
+  _SMEM = (ir3.SMEM, ir4.SMEM, irc.SMEM)
+  _VALU = (ir3.VOP1, ir3.VOP2, ir3.VOP3, ir3.VOP3P, ir3.VOPC, ir3.VOPD, ir3.VOP3SD, ir3.VOP3_SDST, ir3.VOP1_SDST,
+           ir4.VOP1, ir4.VOP2, ir4.VOP3, ir4.VOP3P, ir4.VOPC, ir4.VOPD, ir4.VOP3SD, ir4.VOP3_SDST, ir4.VOP1_SDST,
+           irc.VOP1, irc.VOP2, irc.VOP3, irc.VOP3P, irc.VOPC, irc.VOP3SD, irc.VOP3_SDST)
+  _DS = (ir3.DS, ir4.DS, irc.DS)
+  _GLOBAL = (ir3.GLOBAL, ir4.VGLOBAL, irc.GLOBAL)
+  _FLAT = (ir3.FLAT, ir4.VFLAT, irc.FLAT)
+  _SCRATCH = (ir3.SCRATCH, ir4.VSCRATCH, irc.SCRATCH)
+
+  # SOPP ops that produce no SQTT packet (handled by WAVEEND or invisible to trace)
+  _SOPP_SKIP = {SOPPOp3.S_ENDPGM.value, SOPPOp3.S_ENDPGM_SAVED.value, SOPPOp3.S_ENDPGM_ORDERED_PS_DONE.value,
+                SOPPOp3.S_DELAY_ALU.value}
+  # SOPP ops that produce IMMEDIATE packets (scheduling/wait hints, not real execution)
+  _SOPP_IMMEDIATE = {SOPPOp3.S_NOP.value, SOPPOp3.S_CLAUSE.value, SOPPOp3.S_WAITCNT.value, SOPPOp3.S_WAITCNT_DEPCTR.value,
+                     SOPPOp3.S_WAIT_IDLE.value, SOPPOp3.S_WAIT_EVENT.value, SOPPOp3.S_SLEEP.value,
+                     SOPPOp3.S_SET_INST_PREFETCH_DISTANCE.value}
+  # Add RDNA4-specific wait ops
+  for _op in (SOPPOp4.S_WAIT_ALU, SOPPOp4.S_WAIT_LOADCNT, SOPPOp4.S_WAIT_STORECNT, SOPPOp4.S_WAIT_SAMPLECNT,
+              SOPPOp4.S_WAIT_BVHCNT, SOPPOp4.S_WAIT_EXPCNT, SOPPOp4.S_WAIT_DSCNT, SOPPOp4.S_WAIT_KMCNT,
+              SOPPOp4.S_WAIT_LOADCNT_DSCNT, SOPPOp4.S_WAIT_STORECNT_DSCNT):
+    _SOPP_IMMEDIATE.add(_op.value)
+  # SOPP ops that produce INST BARRIER packets
+  _SOPP_BARRIER = {SOPPOp3.S_BARRIER.value}
+  if hasattr(SOPPOp4, 'S_BARRIER_WAIT'): _SOPP_BARRIER.add(SOPPOp4.S_BARRIER_WAIT.value)
+  if hasattr(SOPPOp4, 'S_BARRIER_LEAVE'): _SOPP_BARRIER.add(SOPPOp4.S_BARRIER_LEAVE.value)
+  # SOPP branch ops: produce INST JUMP (emulator always takes since it resolves the branch)
+  _SOPP_BRANCH = {SOPPOp3.S_BRANCH.value, SOPPOp3.S_CBRANCH_SCC0.value, SOPPOp3.S_CBRANCH_SCC1.value,
+                  SOPPOp3.S_CBRANCH_VCCZ.value, SOPPOp3.S_CBRANCH_VCCNZ.value,
+                  SOPPOp3.S_CBRANCH_EXECZ.value, SOPPOp3.S_CBRANCH_EXECNZ.value}
+
+  def inst_op(t, op_name: str = "") -> InstOp:
+    is_store = "STORE" in op_name
+    if issubclass(t, _SMEM): return InstOp.SMEM
+    if issubclass(t, _VALU): return InstOp.VALU_TRANS
+    if issubclass(t, _DS): return InstOp.LDS_STORE if is_store else InstOp.LDS_LOAD
+    if issubclass(t, _GLOBAL): return InstOp.GLOBAL_STORE if is_store else InstOp.GLOBAL_LOAD
+    if issubclass(t, _FLAT): return InstOp.FLAT_STORE if is_store else InstOp.FLAT_LOAD
+    if issubclass(t, _SCRATCH): return InstOp.FLAT_STORE if is_store else InstOp.FLAT_LOAD
+    return InstOp.SALU  # SOP1/SOP2/SOPC/SOPK/unknown
+
+  nibbles: list[int] = []
+  _emit_nibbles(nibbles, LAYOUT_HEADER, layout=3, sel_a=6)
+
+  wave_ids = sorted(set(t.wave_id for t in trace))
+  for wave_id in wave_ids:
+    wave_insts = [t for t in trace if t.wave_id == wave_id]
+    if not wave_insts: continue
+    _emit_nibbles(nibbles, WAVESTART, delta=1, simd=0, cu_lo=0, wave=wave_id & 0x1F, id7=wave_id)
+    for t in wave_insts:
+      w = wave_id & 0x1F
+      if issubclass(t.inst_type, _SOPP):
+        if t.inst_op in _SOPP_SKIP: continue
+        if t.inst_op in _SOPP_IMMEDIATE:
+          _emit_nibbles(nibbles, IMMEDIATE, delta=1, wave=w)
+          continue
+        if t.inst_op in _SOPP_BARRIER:
+          _emit_nibbles(nibbles, INST, delta=1, wave=w, op=InstOp.BARRIER)
+          continue
+        if t.inst_op in _SOPP_BRANCH:
+          _emit_nibbles(nibbles, INST, delta=1, wave=w, op=InstOp.JUMP if getattr(t, 'branch_taken', True) else InstOp.JUMP_NO)
+          continue
+        # Other SOPP (s_sendmsg, etc.) → INST SALU
+        _emit_nibbles(nibbles, INST, delta=1, wave=w, op=InstOp.SALU)
+      else:
+        _emit_nibbles(nibbles, INST, delta=1, wave=w, op=inst_op(t.inst_type, getattr(t, 'inst_op_name', '')))
+    _emit_nibbles(nibbles, WAVEEND, delta=1, simd=0, cu_lo=0, wave=wave_id & 0x1F)
+
+  # Pad to byte boundary + decoder lookahead, then align to 32 bytes (wptr granularity)
+  while len(nibbles) % 2 != 0: nibbles.append(0)
+  nibbles.extend([0] * 32)
+  while len(nibbles) % 64 != 0: nibbles.append(0)  # 64 nibbles = 32 bytes
+  return _nibbles_to_bytes(nibbles)
 
 def _c(val, dtype=dtypes.uint32): return UOp.const(dtype, val)
 
@@ -1239,6 +1342,8 @@ def _get_runner(inst_bytes: bytes, arch: str = "rdna3"):
 
 _BARRIER_OPS = {ir3.SOPPOp.S_BARRIER, irc.SOPPOp.S_BARRIER}
 if hasattr(ir4.SOPPOp, 'S_BARRIER_WAIT'): _BARRIER_OPS.add(ir4.SOPPOp.S_BARRIER_WAIT)
+_BRANCH_OPS: set[int] = {op.value for op in (ir3.SOPPOp.S_BRANCH, ir3.SOPPOp.S_CBRANCH_SCC0, ir3.SOPPOp.S_CBRANCH_SCC1,
+  ir3.SOPPOp.S_CBRANCH_VCCZ, ir3.SOPPOp.S_CBRANCH_VCCNZ, ir3.SOPPOp.S_CBRANCH_EXECZ, ir3.SOPPOp.S_CBRANCH_EXECNZ)}
 
 def _decode_at(pc: int, arch: str):
   """Decode and compile instruction at absolute address pc. Returns (runner, decoded_inst)."""
@@ -1295,8 +1400,8 @@ class WaveState:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def _init_wave(lib: int, wave_start: int, total_threads: int, lx: int, ly: int, lz: int, args_ptr: int, rsrc2: int,
-               scratch_size: int, arch: str, gidx: int, gidy: int, gidz: int, user_data: list[int]|None) -> tuple[WaveState, list]:
-  """Initialize a single wavefront and return (WaveState, c_bufs placeholder). c_bufs filled in by caller."""
+               scratch_size: int, arch: str, gidx: int, gidy: int, gidz: int, user_data: list[int]|None) -> WaveState:
+  """Initialize a single wavefront and return WaveState."""
   n_lanes = min(WAVE_SIZE, total_threads - wave_start)
   st = WaveState(n_lanes)
   st.pc = lib
@@ -1324,7 +1429,7 @@ def _init_wave(lib: int, wave_start: int, total_threads: int, lx: int, ly: int, 
 def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, lz: int, args_ptr: int, rsrc2: int = 0x19c,
             scratch_size: int = 0, arch: str = "rdna3", user_data: list[int]|None = None) -> int:
   """Execute AMD assembly program. scratch_size is private_segment_fixed_size from kernel descriptor (per-lane)."""
-  program: dict[int, tuple[Callable, list[int], bool]] = {}  # pc -> (fxn, globals, is_barrier)
+  program: dict[int, tuple[Callable, list[int], bool, type, int, str]] = {}  # pc -> (fxn, globals, is_barrier, inst_type, inst_op, inst_op_name)
   lds_size = ((rsrc2 & hsa.AMD_COMPUTE_PGM_RSRC_TWO_GRANULATED_LDS_SIZE) >> hsa.AMD_COMPUTE_PGM_RSRC_TWO_GRANULATED_LDS_SIZE_SHIFT) * 512
   total_threads = lx * ly * lz
 
@@ -1333,18 +1438,25 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
   lds_buf = Buffer('CPU', max(lds_size // 4, 1), dtypes.uint32).ensure_allocated()
   scratch_buf = Buffer('CPU', scratch_size * WAVE_SIZE, dtypes.uint8).ensure_allocated() if scratch_size else None
 
-  def _ensure_compiled(pc: int) -> tuple[Callable, list[int], bool]:
+  # Collect SQTT trace events for this dispatch
+  trace: list[SQTTInst] = []
+
+  def _ensure_compiled(pc: int) -> tuple[Callable, list[int], bool, type, int, str]:
     if pc not in program:
       prev_len = len(_canonical_runner_cache)
       runner, inst = _decode_at(pc, arch)
       is_barrier = isinstance(inst, (ir3.SOPP, ir4.SOPP, irc.SOPP)) and inst.op in _BARRIER_OPS
-      program[pc] = (runner._prg.fxn, runner.p.globals, is_barrier)
+      inst_op = inst.op.value if hasattr(inst, 'op') else 0
+      inst_op_name = inst.op.name if hasattr(inst, 'op') else ""
+      program[pc] = (runner._prg.fxn, runner.p.globals, is_barrier, type(inst), inst_op, inst_op_name)
       if DEBUG >= 3:
         msg = f"[emu] PC={pc - lib}: {inst!r}"
         print(colored(msg, 'green') if len(_canonical_runner_cache) > prev_len else msg)
     return program[pc]
 
   # Set DAZ+FTZ during emulator execution, restore afterward to avoid breaking hypothesis tests
+  # Only trace the first workgroup (like real HW traces one CU/SIMD), subsequent workgroups run but don't add to trace
+  tracing = True
   with _MXCSRContext():
     for gidz in range(gz):
       for gidy in range(gy):
@@ -1371,13 +1483,21 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
                 if pc == ENDPGM_PC:
                   done[wi] = True
                   break
-                fxn, globals_list, is_barrier = _ensure_compiled(pc)
+                fxn, globals_list, is_barrier, inst_type, inst_op, inst_op_name = _ensure_compiled(pc)
                 fxn(*[c_bufs[g] for g in globals_list])
+                if tracing:
+                  branch_taken = (st.pc != ENDPGM_PC and st.pc != pc + 4) if issubclass(inst_type, (ir3.SOPP, ir4.SOPP, irc.SOPP)) \
+                    and inst_op in _BRANCH_OPS else None
+                  trace.append(SQTTInst(pc - lib, inst_type, wi, inst_op, inst_op_name, branch_taken))
                 if is_barrier: break  # s_barrier hit: PC already advanced past it, pause this wave
               else: raise RuntimeError("exceeded 1M instructions in single wave, likely infinite loop")
             # All waves have either hit barrier or endpgm — release barrier waves for next round
           else: raise RuntimeError("exceeded 10M total scheduling rounds")
+          tracing = False  # only trace the first workgroup
 
           # Reset LDS for next workgroup
           if lds_size > 0: ctypes.memset(lds_buf._buf.va_addr, 0, max(lds_size, 4))
+
+  # Store trace for SQTT encoding
+  sqtt_traces.append(trace)
   return 0

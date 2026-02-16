@@ -566,6 +566,31 @@ def decode(data: bytes) -> Iterator[PacketType]:
     yield pkt
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# ENCODER
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# nibble counts per packet class (from decode tables)
+_NIB_COUNTS: dict[type[PacketType], int] = {cls: nc for _, (cls, nc, *_) in _build_decode_tables(PACKET_TYPES_RDNA3)[0].items()}
+
+def _encode_raw(pkt_cls: type[PacketType], **kwargs) -> tuple[int, int]:
+  """Build raw packet value and return (raw, nibble_count)."""
+  raw = pkt_cls.encoding.default
+  for k, v in kwargs.items():
+    raw = pkt_cls.__dict__[k].set(raw, v)
+  return raw, _NIB_COUNTS[pkt_cls]
+
+def _emit_nibbles(nibbles: list[int], pkt_cls: type[PacketType], **kwargs):
+  """Encode a packet and append its nibbles to the list."""
+  raw, nc = _encode_raw(pkt_cls, **kwargs)
+  for i in range(nc): nibbles.append((raw >> (i * 4)) & 0xF)
+
+def _nibbles_to_bytes(nibbles: list[int]) -> bytes:
+  result = bytearray()
+  for i in range(0, len(nibbles), 2):
+    result.append(nibbles[i] | ((nibbles[i + 1] if i + 1 < len(nibbles) else 0) << 4))
+  return bytes(result)
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # MAPPER
 # ═══════════════════════════════════════════════════════════════════════════════
 
