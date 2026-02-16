@@ -263,7 +263,7 @@ class ElementwiseMixin(DTypeMixin):
     return self.alu(Ops.THREEFRY, seed)
 
   def _ensure_float(self) -> Self:
-    return self if self.dtype == dtypes.void or dtypes.is_float(self.dtype) else self.cast(least_upper_float(self.dtype))
+    return self.cast(least_upper_float(self.dtype))
 
   def reciprocal(self) -> Self:
     """
@@ -326,7 +326,9 @@ class ElementwiseMixin(DTypeMixin):
     print(Tensor([0., 1., 2., 3.]).exp().numpy())
     ```
     """
-    return self._ensure_float().mul(1/math.log(2)).exp2().cast(self.dtype)
+    if self.is_floating_point():
+      return self.cast(least_upper_dtype(self.dtype, dtypes.float32)).mul(1/math.log(2)).exp2().cast(self.dtype)
+    return self.mul(1/math.log(2)).exp2()
 
   def log2(self) -> Self:
     """
