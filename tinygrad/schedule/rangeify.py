@@ -33,13 +33,11 @@ pm_mops = PatternMatcher([
 # *****************
 # 0. do some cleanup rewrites, mostly copied from the old stuff
 
-
 def assign_to_contiguous(assign:UOp, target:UOp, src:UOp):
   if (t := target.base).op is Ops.PARAM or (t.op is Ops.MSTACK and all(s.op is Ops.PARAM for s in t.src)): return None
   # partial view of unrealized graph: insert CONTIGUOUS at base to realize it
   if target is not t and target.op_in_backward_slice_with_self(Ops.SHRINK):
-    # base already realized: copy src only if it reads from the same buffer (overlapping read/write hazard)
-    if t.op is Ops.CONTIGUOUS: return assign.replace(src=(target, src.contiguous())) if t in src.toposort() else None
+    if t.op is Ops.CONTIGUOUS: return None
     mops: list[UOp] = []
     while target.op in GroupOp.Movement:
       mops.append(target)
