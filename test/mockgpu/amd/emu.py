@@ -745,7 +745,7 @@ def _compile_vop3(inst: ir3.VOP3 | ir4.VOP3 | irc.VOP3, ctx: _Ctx) -> UOp:
 
   # VOP3 specific fields
   vdst_reg = ctx.inst_field(type(inst).vdst)
-  literal = ctx.inst_field(type(inst).literal) if hasattr(type(inst), 'literal') else None
+  literal = ctx.inst_field(type(inst).literal) if hasattr(type(inst), 'literal') else None  # type: ignore[union-attr]
   abs_bits, neg_bits = getattr(inst, 'abs', 0) or 0, getattr(inst, 'neg', 0) or 0
 
   # VOP3_SDST: v_s_* instructions goes to SGPR
