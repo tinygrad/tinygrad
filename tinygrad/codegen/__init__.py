@@ -183,7 +183,7 @@ def get_program(ast:UOp, renderer:Renderer, opts:list[Opt]|None=None) -> Program
     raise RuntimeError(f"can't call get_program on {ast.op}")
 
   prg = graph_rewrite(prg, pm_to_program, ctx=renderer, name="linearize/render")
-  if VIZ: graph_rewrite(prg, PatternMatcher([]), name="View Final Program")
+  if VIZ: graph_rewrite(prg, PatternMatcher([]), name="View Program")
 
   # create the ProgramSpec
   return ProgramSpec.from_uop(prg)
