@@ -660,6 +660,9 @@ class _Ctx:
     if 'VCC' not in srcs: srcs['VCC'] = self.read_vcc() if vcc_reg == VCC_LO.offset else self.read_mask_at(_c(vcc_reg))
     srcs.update({'EXEC': exec_mask, 'SCC': self.rsgpr_dyn(_c(SCC.offset)), 'laneId': lane, 'VDST': vdst_reg,
                  'ROUND_MODE': _c(0), 'ROUND_TOWARD_ZERO': _c(0), 'ROUND_NEAREST_EVEN': _c(0), **self.wave_vars()})
+    # CDNA 16-bit pcode uses OPSEL for destination half selection; ensure D0 (accumulator) is available for read-modify-write
+    srcs.setdefault('OPSEL', _c(0))
+    srcs.setdefault('D0', self.rvgpr_dyn(vdst_reg, lane))
     _, assigns = parse_pcode(pcode, srcs)
 
     # For integer ops with clamp, compute overflow using wide arithmetic
@@ -980,7 +983,7 @@ def _compile_vop3(inst: ir3.VOP3 | ir4.VOP3 | irc.VOP3, ctx: _Ctx) -> UOp:
     src0 = _apply_src_mods(src0, 0, abs_bits, neg_bits, bits['s0'])
     src1 = _apply_src_mods(src1, 1, abs_bits, neg_bits, bits['s1'])
     src2 = _apply_src_mods(src2, 2, abs_bits, neg_bits, bits['s2'])
-  srcs = {'S0': src0, 'S1': src1, 'S2': src2}
+  srcs = {'S0': src0, 'S1': src1, 'S2': src2, 'OPSEL': _c(opsel)}
   if is_bitop3: srcs['INST'] = _c((omod_bits & 3) << 6 | (abs_bits & 7) << 3 | (neg_bits & 7))
   #irx_CNDMASK series
   if 'CNDMASK' in op_name and src2 is not None: srcs['VCC'] = src2
@@ -1124,8 +1127,9 @@ def _compile_mfma(inst: irc.VOP3P, ctx: _Ctx) -> UOp:
   kpg = (K // 8) * 2  # k-values per lane group
 
   lane = ctx.range()  # symbolic lane 0..63
-  col = lane & _c(15)  # lane % 16
-  row_base = (lane >> _c(4)) * _c(4)  # (lane // 16) * 4
+  lane_u = lane.cast(dtypes.uint32)  # uint32 for bitwise ops
+  col = lane_u & _c(15)  # lane % 16
+  row_base = (lane_u >> _c(4)) * _c(4)  # (lane // 16) * 4
 
   def read_f16(src: UOp, l: UOp, vgpr: int, half: int) -> UOp:
     v = ctx.rvgpr_dyn(src + _c(vgpr), l)
