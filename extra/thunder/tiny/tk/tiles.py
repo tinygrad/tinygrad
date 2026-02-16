@@ -3,7 +3,7 @@ import functools
 from typing import Callable
 from dataclasses import dataclass
 from tinygrad.dtype import AddrSpace, DType
-from tinygrad.mixin import MathMixin
+from tinygrad.mixin import ElementwiseMixin
 from tinygrad.uop.ops import UOp, Ops
 
 from extra.thunder.tiny.tk import WARP_THREADS
@@ -58,7 +58,7 @@ def autowrap(source_cls, blacklist=None):
     return cls
   return decorator
 
-class TileMathMixin(MathMixin):
+class TileMathMixin(ElementwiseMixin):
   def alu(self, op, *src, inner_op=lambda x:x):
     assert isinstance(self, (RT, RV))
     if len(src) == 0:
