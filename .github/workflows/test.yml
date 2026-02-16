@@ -677,7 +677,7 @@ jobs:
       AMD: 1
       MOCKGPU: 1
       MOCKGPU_ARCH: ${{ matrix.arch }}
-      FORWARD_ONLY: 1
+      SKIP_SLOW_TEST: 1
       AMD_LLVM: ${{ matrix.backend == 'amdllvm' && '1' || matrix.backend != 'amdllvm' && '0' }}
     steps:
       - name: Checkout Code
