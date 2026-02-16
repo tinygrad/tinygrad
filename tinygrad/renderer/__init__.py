@@ -3,7 +3,7 @@ from typing import Callable, cast
 import functools
 from dataclasses import dataclass, field
 from tinygrad.helpers import to_function_name, dedup, prod, DEBUG
-from tinygrad.uop.ops import Ops, UOp, sym_infer, sint, Variable, ssimplify, smin, GroupOp, PatternMatcher, print_uops, KernelInfo
+from tinygrad.uop.ops import Ops, UOp, sym_infer, sint, Variable, ssimplify, smin, GroupOp, PatternMatcher, print_uops
 from tinygrad.dtype import AddrSpace, PtrDType
 from tinygrad.codegen.opt.tc import TensorCore
 from tinygrad.codegen.opt import Opt
@@ -79,7 +79,7 @@ class ProgramSpec:
   outs:list[int]=field(default_factory=list)
   ins:list[int]=field(default_factory=list)
 
-  @functools.cached_property
+  @property
   def estimates(self) -> Estimates: return self.ast.arg.estimates
 
   @functools.cached_property
