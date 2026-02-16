@@ -41,6 +41,13 @@ class Kernel:
     waitcnt = (vmcnt & 0xF) | ((expcnt & 0x7) << 4) | ((lgkmcnt & 0xF) << 8) | (((vmcnt >> 4) & 0x3) << 14)
     self.emit(s_waitcnt(waitcnt))
 
+  def finalize(self):
+    """Patch branch offsets and return the finalized instruction list."""
+    for inst in self.instructions:
+      if inst._target is None: continue
+      inst.simm16 = (self.labels[inst._target] - inst._pos - inst.size()) // 4
+    return self.instructions
+
   def to_asm(self):
     # patch branches
     for inst in self.instructions:
