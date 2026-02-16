@@ -262,6 +262,105 @@ def compare_wave_states(emu_st: WaveState, hw_st: WaveState, n_lanes: int, n_vgp
     diffs.append(f"scc: emu={emu_st.scc} hw={hw_st.scc}")
   return diffs
 
+def run_multiwave_emu(code: bytes, n_threads: int, lds_size: int = 65536) -> bytes:
+  """Run a self-contained multi-wave kernel via emulator, return output buffer bytes.
+
+  The kernel receives: s[0:1] = output buffer pointer via kernarg.
+  v[0] = packed workitem ID. The output buffer is n_threads * 4 bytes.
+  """
+  out_size = n_threads * 4
+  out_buf = (ctypes.c_uint8 * out_size)(*([0] * out_size))
+  out_addr = ctypes.addressof(out_buf)
+
+  args = (ctypes.c_uint64 * 1)(out_addr)
+  args_ptr = ctypes.addressof(args)
+  kernel_buf = (ctypes.c_char * len(code)).from_buffer_copy(code)
+  lib_ptr = ctypes.addressof(kernel_buf)
+
+  # rsrc2: USER_SGPR_COUNT=2, ENABLE_SGPR_WORKGROUP_ID_X=1, LDS_SIZE granules
+  lds_granules = lds_size // 512
+  rsrc2 = 0x19c | (lds_granules << 15)
+  result = run_asm(lib_ptr, len(code), 1, 1, 1, n_threads, 1, 1, args_ptr, rsrc2, 0)
+  assert result == 0, f"run_asm failed with {result}"
+  return bytes(out_buf)
+
+def run_multiwave_hw(code: bytes, n_threads: int, lds_size: int = 65536) -> bytes:
+  """Run a self-contained multi-wave kernel on real hardware, return output buffer bytes."""
+  from tinygrad.device import Device
+  from tinygrad.runtime.ops_amd import AMDProgram
+  from tinygrad.runtime.support.compiler_amd import HIPCompiler
+  from tinygrad.helpers import flat_mv
+
+  dev = Device["AMD"]
+  compiler = HIPCompiler(dev.arch)  # type: ignore[attr-defined]
+
+  byte_str = ', '.join(f'0x{b:02x}' for b in code)
+  asm_src = f""".text
+.globl test
+.p2align 8
+.type test,@function
+test:
+.byte {byte_str}
+
+.rodata
+.p2align 6
+.amdhsa_kernel test
+  .amdhsa_next_free_vgpr 256
+  .amdhsa_next_free_sgpr 96
+  .amdhsa_wavefront_size32 1
+  .amdhsa_user_sgpr_kernarg_segment_ptr 1
+  .amdhsa_kernarg_size 8
+  .amdhsa_group_segment_fixed_size {lds_size}
+  .amdhsa_private_segment_fixed_size 0
+.end_amdhsa_kernel
+
+.amdgpu_metadata
+---
+amdhsa.version:
+  - 1
+  - 0
+amdhsa.kernels:
+  - .name: test
+    .symbol: test.kd
+    .kernarg_segment_size: 8
+    .group_segment_fixed_size: {lds_size}
+    .private_segment_fixed_size: 0
+    .kernarg_segment_align: 8
+    .wavefront_size: 32
+    .sgpr_count: 96
+    .vgpr_count: 256
+    .max_flat_workgroup_size: 1024
+...
+.end_amdgpu_metadata
+"""
+  lib = compiler.compile(asm_src)
+  prg = AMDProgram(dev, "test", lib)  # type: ignore[arg-type]
+
+  out_size = n_threads * 4
+  out_gpu = dev.allocator.alloc(out_size)
+  prg(out_gpu, global_size=(1, 1, 1), local_size=(n_threads, 1, 1), wait=True)
+
+  out_buf = bytearray(out_size)
+  dev.allocator._copyout(flat_mv(memoryview(out_buf)), out_gpu)
+  return bytes(out_buf)
+
+def run_multiwave(code: bytes, n_threads: int, lds_size: int = 65536) -> bytes:
+  """Run multi-wave kernel on emu (and hw if USE_HW=1), comparing results. Returns output bytes."""
+  emu_out = run_multiwave_emu(code, n_threads, lds_size)
+  if USE_HW:
+    hw_out = run_multiwave_hw(code, n_threads, lds_size)
+    if emu_out != hw_out:
+      diffs = []
+      for i in range(n_threads):
+        emu_val = struct.unpack_from('<I', emu_out, i * 4)[0]
+        hw_val = struct.unpack_from('<I', hw_out, i * 4)[0]
+        if emu_val != hw_val:
+          diffs.append(f"  thread {i}: emu=0x{emu_val:08x} hw=0x{hw_val:08x}")
+      if diffs:
+        raise AssertionError("Emulator vs Hardware mismatch:\n" + "\n".join(diffs[:20]))
+    return hw_out
+  return emu_out
+
 def run_program(instructions: list, n_lanes: int = 1, ulp_tolerance: int = 0) -> WaveState:
   """Run instructions and return WaveState.
 

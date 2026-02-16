@@ -932,5 +932,156 @@ class Test64BitSOPLiterals(unittest.TestCase):
     self.assertEqual(st.vgpr[0][1], 0)  # zero-extended, not sign-extended
 
 
+class TestBarrier(unittest.TestCase):
+  """Tests for S_BARRIER - workgroup barrier synchronization across waves."""
+
+  def test_s_barrier_cross_wave_lds(self):
+    """Two waves write to LDS, barrier, then read each other's data."""
+    N_THREADS = 64  # 2 waves of 32
+
+    # Kernel: each thread writes (0xAA000000 | tid) to LDS[tid*4], barriers,
+    # then reads LDS[((tid+32)%64)*4] (the other wave's data) and stores to output.
+    instructions = [
+      # s[0:1] = kernarg ptr, load output buffer address into s[2:3]
+      s_load_b64(s[2:3], s[0:1], 0, soffset=NULL),
+      # v[1] = thread_id = v[0] & 0x3FF (extract workitem x from packed ID)
+      v_and_b32_e32(v[1], 0x3FF, v[0]),
+      # v[2] = lds_addr = thread_id * 4
+      v_lshlrev_b32_e32(v[2], 2, v[1]),
+      # v[3] = write_val = 0xAA000000 | thread_id
+      s_mov_b32(s[10], 0xAA00),
+      v_lshl_or_b32(v[3], s[10], 16, v[1]),
+      # Write to LDS[thread_id * 4]
+      ds_store_b32(addr=v[2], data0=v[3], offset0=0),
+      s_waitcnt(lgkmcnt=0),
+      # Barrier: wait for all waves in workgroup
+      s_barrier(),
+      # v[4] = read_addr = ((thread_id + 32) % 64) * 4
+      v_add_nc_u32_e32(v[4], 32, v[1]),
+      v_and_b32_e32(v[4], 63, v[4]),
+      v_lshlrev_b32_e32(v[4], 2, v[4]),
+      # Read from LDS
+      ds_load_b32(vdst=v[5], addr=v[4], offset0=0),
+      s_waitcnt(lgkmcnt=0),
+      # Store v[5] to output[thread_id * 4]
+      s_waitcnt(lgkmcnt=0),
+      v_lshlrev_b32_e32(v[6], 2, v[1]),
+      global_store_b32(addr=v[6], data=v[5], saddr=s[2:3], offset=0),
+      s_sendmsg(simm16=3),
+      s_endpgm(),
+    ]
+    code = assemble(instructions)
+    out = run_multiwave(code, N_THREADS)
+
+    # Verify: thread i should have read (0xAA000000 | ((i+32)%64))
+    for tid in range(N_THREADS):
+      val = struct.unpack_from('<I', out, tid * 4)[0]
+      expected = 0xAA000000 | ((tid + 32) % 64)
+      self.assertEqual(val, expected, f"thread {tid}: got 0x{val:08x}, expected 0x{expected:08x}")
+
+  def test_s_barrier_multi_iteration(self):
+    """Barrier used in a loop: write, barrier, read, barrier, repeat."""
+    N_THREADS = 64  # 2 waves of 32
+
+    # Round 1: write tid to LDS, barrier, read other wave's tid
+    # Round 2: write (read_val + 1000) to LDS, barrier, read other wave's value
+    # Final result should be ((other_tid) + 1000) for each thread
+    instructions = [
+      s_load_b64(s[2:3], s[0:1], 0, soffset=NULL),
+      v_and_b32_e32(v[1], 0x3FF, v[0]),          # v[1] = tid
+      v_lshlrev_b32_e32(v[2], 2, v[1]),           # v[2] = tid * 4 (my LDS addr)
+      v_add_nc_u32_e32(v[7], 32, v[1]),           # v[7] = (tid + 32)
+      v_and_b32_e32(v[7], 63, v[7]),              # v[7] = (tid + 32) % 64
+      v_lshlrev_b32_e32(v[8], 2, v[7]),           # v[8] = other LDS addr
+
+      # Round 1: write tid to LDS
+      ds_store_b32(addr=v[2], data0=v[1], offset0=0),
+      s_waitcnt(lgkmcnt=0),
+      s_barrier(),
+
+      # Round 1: read other wave's data
+      ds_load_b32(vdst=v[5], addr=v[8], offset0=0),
+      s_waitcnt(lgkmcnt=0),
+
+      # Round 2: write (read_val + 1000) to LDS
+      v_add_nc_u32_e32(v[6], 1000, v[5]),
+      s_barrier(),  # ensure all reads from round 1 complete before overwriting LDS
+      ds_store_b32(addr=v[2], data0=v[6], offset0=0),
+      s_waitcnt(lgkmcnt=0),
+      s_barrier(),
+
+      # Round 2: read other wave's data
+      ds_load_b32(vdst=v[5], addr=v[8], offset0=0),
+      s_waitcnt(lgkmcnt=0),
+
+      # Store result to output
+      s_waitcnt(lgkmcnt=0),
+      v_lshlrev_b32_e32(v[9], 2, v[1]),
+      global_store_b32(addr=v[9], data=v[5], saddr=s[2:3], offset=0),
+      s_sendmsg(simm16=3),
+      s_endpgm(),
+    ]
+    code = assemble(instructions)
+    out = run_multiwave(code, N_THREADS)
+
+    # Thread i reads other wave's round-2 value.
+    # other_tid = (tid + 32) % 64
+    # other wrote: (other's round-1 read + 1000) = (((other_tid + 32) % 64) + 1000) = (tid + 1000)
+    for tid in range(N_THREADS):
+      val = struct.unpack_from('<I', out, tid * 4)[0]
+      expected = tid + 1000
+      self.assertEqual(val, expected, f"thread {tid}: got {val}, expected {expected}")
+
+  def test_s_barrier_four_waves(self):
+    """Four waves share LDS data via barrier."""
+    N_THREADS = 128  # 4 waves of 32
+
+    # Each thread writes (wave_id * 0x1000 + lane_id) to LDS[tid*4]
+    # After barrier, each thread reads from LDS[((tid + 32) % 128) * 4] — next wave's data
+    instructions = [
+      s_load_b64(s[2:3], s[0:1], 0, soffset=NULL),
+      v_and_b32_e32(v[1], 0x3FF, v[0]),           # v[1] = tid
+      v_lshlrev_b32_e32(v[2], 2, v[1]),           # v[2] = tid * 4
+
+      # v[3] = wave_id = tid >> 5
+      v_lshrrev_b32_e32(v[3], 5, v[1]),
+      # v[4] = lane_id = tid & 31
+      v_and_b32_e32(v[4], 31, v[1]),
+      # v[5] = wave_id * 0x1000 + lane_id
+      v_lshlrev_b32_e32(v[5], 12, v[3]),
+      v_add_nc_u32_e32(v[5], v[5], v[4]),
+
+      # Write to LDS
+      ds_store_b32(addr=v[2], data0=v[5], offset0=0),
+      s_waitcnt(lgkmcnt=0),
+      s_barrier(),
+
+      # Read from next wave: addr = ((tid + 32) % 128) * 4
+      v_add_nc_u32_e32(v[6], 32, v[1]),
+      v_and_b32_e32(v[6], 127, v[6]),
+      v_lshlrev_b32_e32(v[6], 2, v[6]),
+      ds_load_b32(vdst=v[7], addr=v[6], offset0=0),
+      s_waitcnt(lgkmcnt=0),
+
+      # Store to output
+      s_waitcnt(lgkmcnt=0),
+      v_lshlrev_b32_e32(v[8], 2, v[1]),
+      global_store_b32(addr=v[8], data=v[7], saddr=s[2:3], offset=0),
+      s_sendmsg(simm16=3),
+      s_endpgm(),
+    ]
+    code = assemble(instructions)
+    out = run_multiwave(code, N_THREADS)
+
+    # Verify: thread tid reads ((tid+32)%128)'s data
+    for tid in range(N_THREADS):
+      val = struct.unpack_from('<I', out, tid * 4)[0]
+      other_tid = (tid + 32) % 128
+      other_wave = other_tid >> 5
+      other_lane = other_tid & 31
+      expected = other_wave * 0x1000 + other_lane
+      self.assertEqual(val, expected, f"thread {tid}: got 0x{val:08x}, expected 0x{expected:08x}")
+
+
 if __name__ == '__main__':
   unittest.main()

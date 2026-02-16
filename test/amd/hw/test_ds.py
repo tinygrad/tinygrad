@@ -760,5 +760,110 @@ class TestDsPermute(unittest.TestCase):
     self.assertEqual(st.vgpr[0][2], 0x11111111)
 
 
+class TestDSLargeOffset(unittest.TestCase):
+  """Tests for DS instructions with offsets > 255 (offset1 > 0).
+
+  The DS offset is a 16-bit value encoded as (offset1 << 8) | offset0.
+  These tests verify that offset1 is used correctly, not just offset0.
+  """
+
+  def test_ds_store_load_b32_offset_256(self):
+    """DS_STORE_B32/DS_LOAD_B32 with offset=256 (offset0=0, offset1=1)."""
+    instructions = [
+      v_mov_b32_e32(v[10], 0),
+      s_mov_b32(s[0], 0xDEADBEEF),
+      v_mov_b32_e32(v[0], s[0]),
+      ds_store_b32(addr=v[10], data0=v[0], offset0=0, offset1=1),  # offset = 256
+      s_waitcnt(lgkmcnt=0),
+      ds_load_b32(addr=v[10], vdst=v[1], offset0=0, offset1=1),  # offset = 256
+      s_waitcnt(lgkmcnt=0),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][1], 0xDEADBEEF)
+
+  def test_ds_store_load_b32_offset_300(self):
+    """DS_STORE_B32/DS_LOAD_B32 with offset=300 (offset0=44, offset1=1)."""
+    instructions = [
+      v_mov_b32_e32(v[10], 0),
+      s_mov_b32(s[0], 0xCAFEBABE),
+      v_mov_b32_e32(v[0], s[0]),
+      ds_store_b32(addr=v[10], data0=v[0], offset0=44, offset1=1),  # offset = 300
+      s_waitcnt(lgkmcnt=0),
+      ds_load_b32(addr=v[10], vdst=v[1], offset0=44, offset1=1),  # offset = 300
+      s_waitcnt(lgkmcnt=0),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][1], 0xCAFEBABE)
+
+  def test_ds_store_load_b64_offset_512(self):
+    """DS_STORE_B64/DS_LOAD_B64 with offset=512 (offset0=0, offset1=2)."""
+    instructions = [
+      v_mov_b32_e32(v[10], 0),
+      s_mov_b32(s[0], 0x11111111),
+      v_mov_b32_e32(v[0], s[0]),
+      s_mov_b32(s[0], 0x22222222),
+      v_mov_b32_e32(v[1], s[0]),
+      ds_store_b64(addr=v[10], data0=v[0:1], offset0=0, offset1=2),  # offset = 512
+      s_waitcnt(lgkmcnt=0),
+      ds_load_b64(addr=v[10], vdst=v[2:3], offset0=0, offset1=2),  # offset = 512
+      s_waitcnt(lgkmcnt=0),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][2], 0x11111111)
+    self.assertEqual(st.vgpr[0][3], 0x22222222)
+
+  def test_ds_large_offset_distinct_from_small(self):
+    """Verify offset=256 and offset=0 address different LDS locations."""
+    instructions = [
+      v_mov_b32_e32(v[10], 0),
+      s_mov_b32(s[0], 0xAAAAAAAA),
+      v_mov_b32_e32(v[0], s[0]),
+      s_mov_b32(s[0], 0xBBBBBBBB),
+      v_mov_b32_e32(v[1], s[0]),
+      # Store 0xAAAAAAAA at offset=0, 0xBBBBBBBB at offset=256
+      ds_store_b32(addr=v[10], data0=v[0], offset0=0, offset1=0),  # offset = 0
+      ds_store_b32(addr=v[10], data0=v[1], offset0=0, offset1=1),  # offset = 256
+      s_waitcnt(lgkmcnt=0),
+      # Read back both
+      ds_load_b32(addr=v[10], vdst=v[2], offset0=0, offset1=0),  # offset = 0
+      ds_load_b32(addr=v[10], vdst=v[3], offset0=0, offset1=1),  # offset = 256
+      s_waitcnt(lgkmcnt=0),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][2], 0xAAAAAAAA, "offset=0 should read 0xAAAAAAAA")
+    self.assertEqual(st.vgpr[0][3], 0xBBBBBBBB, "offset=256 should read 0xBBBBBBBB")
+
+  def test_ds_store_load_b32_offset_448(self):
+    """DS_STORE_B32/DS_LOAD_B32 with offset=448 (offset0=192, offset1=1) - matches matmul B tile."""
+    instructions = [
+      v_mov_b32_e32(v[10], 0),
+      s_mov_b32(s[0], 0x12345678),
+      v_mov_b32_e32(v[0], s[0]),
+      ds_store_b32(addr=v[10], data0=v[0], offset0=192, offset1=1),  # offset = 448
+      s_waitcnt(lgkmcnt=0),
+      ds_load_b32(addr=v[10], vdst=v[1], offset0=192, offset1=1),  # offset = 448
+      s_waitcnt(lgkmcnt=0),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][1], 0x12345678)
+
+  def test_ds_load_b64_offset_392(self):
+    """DS_LOAD_B64 with offset=392 (offset0=136, offset1=1) - matches matmul B tile load."""
+    instructions = [
+      v_mov_b32_e32(v[10], 0),
+      s_mov_b32(s[0], 0xAABBCCDD),
+      v_mov_b32_e32(v[0], s[0]),
+      s_mov_b32(s[0], 0x11223344),
+      v_mov_b32_e32(v[1], s[0]),
+      ds_store_b64(addr=v[10], data0=v[0:1], offset0=136, offset1=1),  # offset = 392
+      s_waitcnt(lgkmcnt=0),
+      ds_load_b64(addr=v[10], vdst=v[2:3], offset0=136, offset1=1),  # offset = 392
+      s_waitcnt(lgkmcnt=0),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][2], 0xAABBCCDD)
+    self.assertEqual(st.vgpr[0][3], 0x11223344)
+
+
 if __name__ == '__main__':
   unittest.main()

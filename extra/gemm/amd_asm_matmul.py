@@ -474,7 +474,23 @@ def test_matmul():
     with Context(DEBUG=2): tc = (a @ b).realize()
     with Context(DEBUG=0): err = (c - tc).square().mean().item()
     print(f"mean squared error {err}")
-    if err != err or err > 1e-06: raise RuntimeError("matmul is wrong!")
+    if err != err or err > 1e-06:
+      c_np, tc_np = c.numpy(), tc.numpy()
+      for bi in range(N // 128):
+        for bj in range(N // 128):
+          blk_c = c_np[bi*128:(bi+1)*128, bj*128:(bj+1)*128]
+          blk_ref = tc_np[bi*128:(bi+1)*128, bj*128:(bj+1)*128]
+          blk_diff = blk_c - blk_ref
+          zero_rows = [i for i in range(128) if np.all(np.abs(blk_c[i,:]) < 1e-10)]
+          nz_rows = [i for i in range(128) if i not in zero_rows]
+          nz_mse = float(np.mean(blk_diff[nz_rows,:]**2)) if nz_rows else 0
+          print(f"Block ({bi},{bj}): zero_rows={zero_rows}, nz_rows_mse={nz_mse:.2e}")
+          # show first few non-zero row comparisons
+          if nz_rows and nz_mse > 1e-6:
+            for r in nz_rows[:3]:
+              print(f"  row {r} asm[0:8]:  {blk_c[r,:8]}")
+              print(f"  row {r} ref[0:8]:  {blk_ref[r,:8]}")
+      raise RuntimeError("matmul is wrong!")
 
 if __name__ == "__main__":
   test_matmul()
