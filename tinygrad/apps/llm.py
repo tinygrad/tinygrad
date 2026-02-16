@@ -83,21 +83,39 @@ def apply_rope(x:Tensor, freqs_cis:Tensor) -> Tensor:
 
 class TransformerBlock:
   def __init__(self, dim:int, hidden_dim:int, n_heads:int, n_kv_heads:int, norm_eps:float, head_dim:int, rope_theta:float,
-               max_context:int=0, qk_norm:int=0, num_experts:int=0, num_experts_per_tok:int=0):
+               max_context:int=0, qk_norm:int=0, num_experts:int=0, num_experts_per_tok:int=0,q_lora_rank:int=0, kv_lora_rank:int=0,qk_nope_head_dim:int=0, qk_rope_head_dim:int=0, v_head_dim:int=0):
     self.n_heads      = n_heads
     self.n_kv_heads   = n_kv_heads
     self.head_dim     = head_dim
     self.rope_theta   = rope_theta
     self.max_context  = max_context
     self.qk_norm      = qk_norm
+    # for MLA
+    self.q_lora_rank  = q_lora_rank
+    self.kv_lora_rank = kv_lora_rank
+    self.qk_nope_head_dim = qk_nope_head_dim
+    self.qk_rope_head_dim = qk_rope_head_dim
+    self.v_head_dim = v_head_dim
 
     # --- attention projections (all linear, bias-free) ------------------
-    q_proj_out       = self.head_dim * n_heads
-    kv_proj_out      = self.head_dim * n_kv_heads
-    self.attn_q      = nn.Linear(dim, q_proj_out,  bias=False)
-    self.attn_k      = nn.Linear(dim, kv_proj_out, bias=False)
-    self.attn_v      = nn.Linear(dim, kv_proj_out, bias=False)
-    self.attn_output = nn.Linear(q_proj_out, dim,  bias=False)
+    if kv_lora_rank:
+      if q_lora_rank:
+        self.attn_q_a = nn.Linear(dim, q_lora_rank, bias=False)
+        self.attn_q_a_norm = nn.RMSNorm(q_lora_rank, norm_eps)
+        self.attn_q_b = nn.Linear(q_lora_rank, n_heads * (qk_nope_head_dim + qk_rope_head_dim), bias=False)
+      else:
+        self.attn_q = nn.Linear(dim, n_heads * (qk_nope_head_dim + qk_rope_head_dim), bias=False)
+      self.attn_kv_a = nn.Linear(dim, kv_lora_rank + qk_rope_head_dim, bias=False)
+      self.attn_kv_a_norm = nn.RMSNorm(kv_lora_rank, norm_eps)
+      self.attn_kv_b = nn.Linear(kv_lora_rank, n_heads * (qk_nope_head_dim + v_head_dim), bias=False)
+      self.attn_output = nn.Linear(n_heads * v_head_dim, dim, bias=False)
+    else:
+      q_proj_out       = self.head_dim * n_heads
+      kv_proj_out      = self.head_dim * n_kv_heads
+      self.attn_q      = nn.Linear(dim, q_proj_out,  bias=False)
+      self.attn_k      = nn.Linear(dim, kv_proj_out, bias=False)
+      self.attn_v      = nn.Linear(dim, kv_proj_out, bias=False)
+      self.attn_output = nn.Linear(q_proj_out, dim,  bias=False)
 
     # --- RMSNorms --------------------------------------------------------
     self.attn_norm   = nn.RMSNorm(dim, norm_eps)
@@ -144,6 +162,43 @@ class TransformerBlock:
     attn = self.attn_output(attn)
     return x + attn
 
+  def _mla(self, x:Tensor, start_pos:int|UOp) -> Tensor:
+    x_norm = self.attn_norm(x)
+    B, T, _ = x.shape
+
+    if self.q_lora_rank:
+      q = self.attn_q_b(self.attn_q_a_norm(self.attn_q_a(x_norm)))
+    else:
+      q = self.attn_q(x_norm)
+    q = q.reshape(B, T, self.n_heads, self.qk_nope_head_dim + self.qk_rope_head_dim).transpose(1, 2)
+    q_nope, q_pe = q.split([self.qk_nope_head_dim, self.qk_rope_head_dim], dim=-1)
+
+    kv = self.attn_kv_a(x_norm)
+    kv_latent, k_pe = kv.split([self.kv_lora_rank, self.qk_rope_head_dim], dim=-1)
+    k_pe = k_pe.reshape(B, T, 1, self.qk_rope_head_dim).transpose(1, 2)
+
+    kv_b = self.attn_kv_b(self.attn_kv_a_norm(kv_latent))
+    kv_b = kv_b.reshape(B, T, self.n_heads, self.qk_nope_head_dim + self.v_head_dim).transpose(1, 2)
+    k_nope, v = kv_b.split([self.qk_nope_head_dim, self.v_head_dim], dim=-1)
+
+    freqs_cis = precompute_freqs_cis(self.qk_rope_head_dim, self.max_context, self.rope_theta)[start_pos:start_pos+T]
+    q_pe, k_pe = apply_rope(q_pe, freqs_cis), apply_rope(k_pe, freqs_cis)
+
+    q = q_nope.cat(q_pe, dim=-1)
+    k = k_nope.cat(k_pe.expand(-1, self.n_heads, -1, -1), dim=-1)
+
+    if not hasattr(self, "cache_k"):
+      self.cache_k = Tensor.zeros(B, self.n_heads, self.max_context, self.qk_nope_head_dim + self.qk_rope_head_dim, dtype=k.dtype, device=k.device).contiguous().realize()
+      self.cache_v = Tensor.zeros(B, self.n_heads, self.max_context, self.v_head_dim, dtype=v.dtype, device=v.device).contiguous().realize()
+
+    self.cache_k[:, :, start_pos:start_pos+T, :].assign(k)
+    self.cache_v[:, :, start_pos:start_pos+T, :].assign(v)
+    k, v = self.cache_k[:, :, :start_pos+T, :], self.cache_v[:, :, :start_pos+T, :]
+
+    mask = Tensor.full((1, 1, T, start_pos+T), float("-inf"), dtype=x.dtype, device=x.device).triu(int(start_pos)+1) if T > 1 else None
+    attn = q.scaled_dot_product_attention(k, v, attn_mask=mask)
+    return x + self.attn_output(attn.transpose(1, 2).reshape(B, T, -1))
+
   def _feed_forward(self, h: Tensor) -> Tensor:
     h_norm = self.ffn_norm(h)
     if hasattr(self, 'ffn_gate_exps'):
@@ -156,13 +211,14 @@ class TransformerBlock:
     return h + self.ffn_down(gated)
 
   def __call__(self, x: Tensor, start_pos: int|UOp):
-    return self._feed_forward(self._attention(x, start_pos)).contiguous()
+    attn = self._mla(x, start_pos) if self.kv_lora_rank else self._attention(x, start_pos)
+    return self._feed_forward(attn).contiguous()
 
 class Transformer:
   def __init__(self, *, num_blocks, dim, hidden_dim, n_heads, n_kv_heads, norm_eps, vocab_size, head_dim:int, rope_theta:float,
-               max_context:int=0, qk_norm:int=0, num_experts:int=0, num_experts_per_tok:int=0):
-    self.blk = [TransformerBlock(dim, hidden_dim, n_heads, n_kv_heads, norm_eps, head_dim, rope_theta, max_context, qk_norm,
-                                 num_experts, num_experts_per_tok) for _ in range(num_blocks)]
+               max_context:int=0, qk_norm:int=0, num_experts:int=0, num_experts_per_tok:int=0,q_lora_rank:int=0, kv_lora_rank:int=0,qk_nope_head_dim:int=0, qk_rope_head_dim:int=0, v_head_dim:int=0):
+    self.blk = [TransformerBlock(dim, hidden_dim, n_heads, n_kv_heads, norm_eps, head_dim, rope_theta, max_context, qk_norm,num_experts, num_experts_per_tok, q_lora_rank, kv_lora_rank, qk_nope_head_dim, qk_rope_head_dim, v_head_dim) for _ in range(num_blocks)]
+
     self.token_embd  = nn.Embedding(vocab_size, dim)
     self.output_norm = nn.RMSNorm(dim, norm_eps)
     self.output = nn.Linear(dim, vocab_size, bias=False)
@@ -207,7 +263,13 @@ class Transformer:
                         head_dim=kv.get(f'{arch}.attention.key_length', kv[f'{arch}.embedding_length'] // n_heads),
                         rope_theta=kv[f'{arch}.rope.freq_base'], max_context=max_context,
                         qk_norm=int(state_dict['blk.0.attn_q_norm.weight'].shape[0]) if 'blk.0.attn_q_norm.weight' in state_dict else 0,
-                        num_experts=kv.get(f'{arch}.expert_count', 0), num_experts_per_tok=kv.get(f'{arch}.expert_used_count', 0))
+                        num_experts=kv.get(f'{arch}.expert_count', 0), num_experts_per_tok=kv.get(f'{arch}.expert_used_count', 0),
+                        q_lora_rank=kv.get(f'{arch}.attention.q_lora_rank', 0),
+                        kv_lora_rank=kv.get(f'{arch}.attention.kv_lora_rank', 0),
+                        qk_nope_head_dim=kv.get(f'{arch}.attention.qk_nope_head_dim', 0),
+                        qk_rope_head_dim=kv.get(f'{arch}.attention.qk_rope_head_dim', 0),
+                        v_head_dim=kv.get(f'{arch}.attention.v_head_dim', 0),
+                        )
     nn.state.load_state_dict(model, state_dict, verbose=False, consume=True, realize=False)  # NOTE: rope_freqs.weight (32,) is unused
     # NOTE: without this contiguous, it unpacks the weights from the model every time. we shouldn't need this, but for now it's faster
     for s in (params:=nn.state.get_parameters(model)): s.replace(s.contiguous())
