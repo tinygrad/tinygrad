@@ -191,7 +191,6 @@ class TestIndexing(unittest.TestCase):
   @unittest.skipUnless(Device.DEFAULT == "AMD" or (Device.DEFAULT == "NULL" and EMULATE.value.startswith("AMD")), "tests AMD bf16 cast overhead")
   def base_test_llama_8b_rope_backward(self, dtype):
     from extra.models.llama import precompute_freqs_cis, apply_rotary_emb
-    Tensor.training = True
     bs, seqlen, dim, n_heads = 1, 512, 256, 4
     head_dim = dim // n_heads
     x = Tensor.randn(bs, seqlen, dim, dtype=dtype)
