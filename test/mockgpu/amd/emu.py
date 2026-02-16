@@ -8,7 +8,6 @@
 from __future__ import annotations
 import ctypes, functools, re, platform, subprocess, tempfile
 from typing import Callable
-from dataclasses import dataclass
 
 # Set/restore DAZ+FTZ (denormals-are-zero + flush-to-zero) to match RDNA3 default float mode
 # x86: MXCSR bits DAZ(6)+FTZ(15), ARM64: FPCR bit FZ(24)
@@ -56,7 +55,7 @@ from tinygrad.uop.ops import UOp, Ops, KernelInfo, AxisType
 from tinygrad.dtype import dtypes
 from tinygrad.device import Buffer, BufferSpec
 from tinygrad.runtime.autogen import hsa
-from tinygrad.helpers import Context, DEBUG, colored
+from tinygrad.helpers import Context, DEBUG, PROFILE, colored
 from tinygrad.engine.realize import get_runner
 
 from tinygrad.renderer.amd import decode_inst
@@ -76,26 +75,11 @@ MASK32 = 0xFFFFFFFF
 # SQTT TRACE COLLECTION
 # ═══════════════════════════════════════════════════════════════════════════════
 
-@dataclass
-class SQTTInst:
-  """A single traced instruction for SQTT output."""
-  pc_offset: int        # PC offset from program base
-  inst_type: type       # instruction class (e.g. ir3.SOP1, ir3.GLOBAL, etc.)
-  wave_id: int          # wave index within workgroup
-  inst_op: int = 0      # the op enum value (e.g. SOPPOp, GLOBALOp, DSOp, etc.)
-  inst_op_name: str = "" # the op enum name (e.g. "GLOBAL_STORE_B32", "S_WAITCNT")
-  branch_taken: bool|None = None  # for branches: True if taken, False if not, None if not a branch
+# Global trace storage: populated by run_asm as raw SQTT blobs, consumed by amdgpu.py
+sqtt_traces: list[bytes] = []
 
-# Global trace storage: populated by run_asm, consumed by amdgpu.py for SQTT encoding
-# Each entry is a list of SQTTInst for one kernel dispatch
-sqtt_traces: list[list[SQTTInst]] = []
-
-def encode_sqtt(trace: list[SQTTInst]) -> bytes:
-  """Encode a list of SQTTInst trace events into an SQTT binary blob (RDNA3 layout=3).
-
-  Each trace entry should have .wave_id, .inst_type, and .inst_op attributes.
-  inst_type is an AMD ISA instruction class (e.g. ir3.SOP1, ir3.GLOBAL, etc.).
-  inst_op is the SOPPOp value for SOPP instructions, 0 otherwise."""
+def _init_sqtt_encoder():
+  """Initialize and return SQTT encoder state. Called once per dispatch with tracing enabled."""
   from tinygrad.renderer.amd.sqtt import _emit_nibbles, _nibbles_to_bytes, LAYOUT_HEADER, WAVESTART, WAVEEND, INST, IMMEDIATE, VALUINST, InstOp
   from tinygrad.runtime.autogen.amd.rdna3.enum import SOPPOp as SOPPOp3
   from tinygrad.runtime.autogen.amd.rdna4.enum import SOPPOp as SOPPOp4
@@ -111,43 +95,38 @@ def encode_sqtt(trace: list[SQTTInst]) -> bytes:
   _FLAT = (ir3.FLAT, ir4.VFLAT, irc.FLAT)
   _SCRATCH = (ir3.SCRATCH, ir4.VSCRATCH, irc.SCRATCH)
 
-  # SOPP ops that produce no SQTT packet (handled by WAVEEND or invisible to trace)
+  # SOPP classification sets
   _SOPP_SKIP = {SOPPOp3.S_ENDPGM.value, SOPPOp3.S_ENDPGM_SAVED.value, SOPPOp3.S_ENDPGM_ORDERED_PS_DONE.value,
                 SOPPOp3.S_DELAY_ALU.value}
-  # SOPP ops that produce IMMEDIATE packets (scheduling/wait hints, not real execution)
   _SOPP_IMMEDIATE = {SOPPOp3.S_NOP.value, SOPPOp3.S_CLAUSE.value, SOPPOp3.S_WAITCNT.value, SOPPOp3.S_WAITCNT_DEPCTR.value,
                      SOPPOp3.S_WAIT_IDLE.value, SOPPOp3.S_WAIT_EVENT.value, SOPPOp3.S_SLEEP.value,
                      SOPPOp3.S_SET_INST_PREFETCH_DISTANCE.value}
-  # Add RDNA4-specific wait ops
   for _op in (SOPPOp4.S_WAIT_ALU, SOPPOp4.S_WAIT_LOADCNT, SOPPOp4.S_WAIT_STORECNT, SOPPOp4.S_WAIT_SAMPLECNT,
               SOPPOp4.S_WAIT_BVHCNT, SOPPOp4.S_WAIT_EXPCNT, SOPPOp4.S_WAIT_DSCNT, SOPPOp4.S_WAIT_KMCNT,
               SOPPOp4.S_WAIT_LOADCNT_DSCNT, SOPPOp4.S_WAIT_STORECNT_DSCNT):
     _SOPP_IMMEDIATE.add(_op.value)
-  # SOPP ops that produce INST BARRIER packets
   _SOPP_BARRIER = {SOPPOp3.S_BARRIER.value}
   if hasattr(SOPPOp4, 'S_BARRIER_WAIT'): _SOPP_BARRIER.add(SOPPOp4.S_BARRIER_WAIT.value)
   if hasattr(SOPPOp4, 'S_BARRIER_LEAVE'): _SOPP_BARRIER.add(SOPPOp4.S_BARRIER_LEAVE.value)
-  # SOPP branch ops: produce INST JUMP (emulator always takes since it resolves the branch)
   _SOPP_BRANCH = {SOPPOp3.S_BRANCH.value, SOPPOp3.S_CBRANCH_SCC0.value, SOPPOp3.S_CBRANCH_SCC1.value,
                   SOPPOp3.S_CBRANCH_VCCZ.value, SOPPOp3.S_CBRANCH_VCCNZ.value,
                   SOPPOp3.S_CBRANCH_EXECZ.value, SOPPOp3.S_CBRANCH_EXECNZ.value}
 
-  # VALU sub-classification patterns (op_name based)
+  # VALU sub-classification patterns
   _VALU_TRANS_RE = re.compile(r'V_(EXP|LOG|RCP|RSQ|SQRT|SIN|COS|CEIL|FLOOR|TRUNC|RNDNE|FRACT|FREXP)_')
   _VALU_64_SHIFT_RE = re.compile(r'V_(LSHLREV|LSHRREV|ASHRREV)_(B|I)64')
   _VALU_MAD64_RE = re.compile(r'V_MAD_(U|I)64')
   _VALU_64_RE = re.compile(r'V_\w+_F64')
 
-  def valu_op(op_name: str) -> InstOp|None:
-    """Classify VALU instruction into InstOp subtype. Returns None for regular VALU (VALUINST packet)."""
+  def _valu_op(op_name: str) -> InstOp|None:
     if 'CMPX' in op_name: return InstOp.VALU_CMPX
     if _VALU_64_SHIFT_RE.search(op_name): return InstOp.VALU_64_SHIFT
     if _VALU_MAD64_RE.search(op_name): return InstOp.VALU_MAD64
     if _VALU_64_RE.search(op_name): return InstOp.VALU_64
     if _VALU_TRANS_RE.search(op_name): return InstOp.VALU_TRANS
-    return None  # regular 32-bit VALU → VALUINST packet
+    return None
 
-  def mem_op(t, op_name: str) -> InstOp:
+  def _mem_op(t, op_name: str) -> InstOp:
     is_store = "STORE" in op_name
     if issubclass(t, _DS): return InstOp.LDS_STORE if is_store else InstOp.LDS_LOAD
     if issubclass(t, _GLOBAL): return InstOp.GLOBAL_STORE if is_store else InstOp.GLOBAL_LOAD
@@ -156,43 +135,41 @@ def encode_sqtt(trace: list[SQTTInst]) -> bytes:
     return InstOp.SALU
 
   nibbles: list[int] = []
+  started: set[int] = set()
   _emit_nibbles(nibbles, LAYOUT_HEADER, layout=3, sel_a=6)
 
-  wave_ids = sorted(set(t.wave_id for t in trace))
-  for wave_id in wave_ids:
-    wave_insts = [t for t in trace if t.wave_id == wave_id]
-    if not wave_insts: continue
-    _emit_nibbles(nibbles, WAVESTART, delta=1, simd=0, cu_lo=0, wave=wave_id & 0x1F, id7=wave_id)
-    for t in wave_insts:
-      w = wave_id & 0x1F
-      if issubclass(t.inst_type, _SOPP):
-        if t.inst_op in _SOPP_SKIP: continue
-        if t.inst_op in _SOPP_IMMEDIATE:
-          _emit_nibbles(nibbles, IMMEDIATE, delta=1, wave=w)
-          continue
-        if t.inst_op in _SOPP_BARRIER:
-          _emit_nibbles(nibbles, INST, delta=1, wave=w, op=InstOp.BARRIER)
-          continue
-        if t.inst_op in _SOPP_BRANCH:
-          _emit_nibbles(nibbles, INST, delta=1, wave=w, op=InstOp.JUMP if getattr(t, 'branch_taken', True) else InstOp.JUMP_NO)
-          continue
-        # Other SOPP (s_sendmsg, etc.) → INST SALU
-        _emit_nibbles(nibbles, INST, delta=1, wave=w, op=InstOp.SALU)
-      elif issubclass(t.inst_type, _VALU):
-        op = valu_op(t.inst_op_name)
-        if op is None: _emit_nibbles(nibbles, VALUINST, delta=1, wave=w)  # regular 32-bit VALU
-        else: _emit_nibbles(nibbles, INST, delta=1, wave=w, op=op)        # special VALU (transcendental, 64-bit, cmpx)
-      elif issubclass(t.inst_type, _SMEM):
-        _emit_nibbles(nibbles, INST, delta=1, wave=w, op=InstOp.SMEM)
-      else:
-        _emit_nibbles(nibbles, INST, delta=1, wave=w, op=mem_op(t.inst_type, t.inst_op_name))
-    _emit_nibbles(nibbles, WAVEEND, delta=1, simd=0, cu_lo=0, wave=wave_id & 0x1F)
+  def emit(wave_id: int, inst_type: type, inst_op: int, inst_op_name: str, branch_taken: bool|None):
+    """Emit an SQTT packet for one executed instruction."""
+    w = wave_id & 0x1F
+    if wave_id not in started:
+      _emit_nibbles(nibbles, WAVESTART, delta=1, simd=0, cu_lo=0, wave=w, id7=wave_id)
+      started.add(wave_id)
+    if issubclass(inst_type, _SOPP):
+      if inst_op in _SOPP_SKIP: return
+      elif inst_op in _SOPP_IMMEDIATE: _emit_nibbles(nibbles, IMMEDIATE, delta=1, wave=w)
+      elif inst_op in _SOPP_BARRIER: _emit_nibbles(nibbles, INST, delta=1, wave=w, op=InstOp.BARRIER)
+      elif inst_op in _SOPP_BRANCH:
+        _emit_nibbles(nibbles, INST, delta=1, wave=w, op=InstOp.JUMP if branch_taken else InstOp.JUMP_NO)
+      else: _emit_nibbles(nibbles, INST, delta=1, wave=w, op=InstOp.SALU)
+    elif issubclass(inst_type, _VALU):
+      op = _valu_op(inst_op_name)
+      if op is None: _emit_nibbles(nibbles, VALUINST, delta=1, wave=w)
+      else: _emit_nibbles(nibbles, INST, delta=1, wave=w, op=op)
+    elif issubclass(inst_type, _SMEM): _emit_nibbles(nibbles, INST, delta=1, wave=w, op=InstOp.SMEM)
+    else: _emit_nibbles(nibbles, INST, delta=1, wave=w, op=_mem_op(inst_type, inst_op_name))
 
-  # Pad to byte boundary + decoder lookahead, then align to 32 bytes (wptr granularity)
-  while len(nibbles) % 2 != 0: nibbles.append(0)
-  nibbles.extend([0] * 32)
-  while len(nibbles) % 64 != 0: nibbles.append(0)  # 64 nibbles = 32 bytes
-  return _nibbles_to_bytes(nibbles)
+  def finish(wave_id: int):
+    """Emit WAVEEND for a completed wave."""
+    if wave_id in started: _emit_nibbles(nibbles, WAVEEND, delta=1, simd=0, cu_lo=0, wave=wave_id & 0x1F)
+
+  def finalize() -> bytes:
+    """Pad and return the encoded SQTT blob."""
+    while len(nibbles) % 2 != 0: nibbles.append(0)
+    nibbles.extend([0] * 32)
+    while len(nibbles) % 64 != 0: nibbles.append(0)
+    return _nibbles_to_bytes(nibbles)
+
+  return emit, finish, finalize
 
 def _c(val, dtype=dtypes.uint32): return UOp.const(dtype, val)
 
@@ -1458,8 +1435,9 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
   lds_buf = Buffer('CPU', max(lds_size // 4, 1), dtypes.uint32).ensure_allocated()
   scratch_buf = Buffer('CPU', scratch_size * WAVE_SIZE, dtypes.uint8).ensure_allocated() if scratch_size else None
 
-  # Collect SQTT trace events for this dispatch
-  trace: list[SQTTInst] = []
+  # Initialize SQTT encoder — emits packets inline as instructions execute (only when profiling)
+  if PROFILE:
+    sqtt_emit, sqtt_finish, sqtt_finalize = _init_sqtt_encoder()
 
   def _ensure_compiled(pc: int) -> tuple[Callable, list[int], bool, type, int, str]:
     if pc not in program:
@@ -1476,7 +1454,7 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
 
   # Set DAZ+FTZ during emulator execution, restore afterward to avoid breaking hypothesis tests
   # Only trace the first workgroup (like real HW traces one CU/SIMD), subsequent workgroups run but don't add to trace
-  tracing = True
+  tracing = bool(PROFILE)
   with _MXCSRContext():
     for gidz in range(gz):
       for gidy in range(gy):
@@ -1502,13 +1480,14 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
                 pc = st.pc
                 if pc == ENDPGM_PC:
                   done[wi] = True
+                  if tracing: sqtt_finish(wi)
                   break
                 fxn, globals_list, is_barrier, inst_type, inst_op, inst_op_name = _ensure_compiled(pc)
                 fxn(*[c_bufs[g] for g in globals_list])
                 if tracing:
                   branch_taken = (st.pc != ENDPGM_PC and st.pc != pc + 4) if issubclass(inst_type, (ir3.SOPP, ir4.SOPP, irc.SOPP)) \
                     and inst_op in _BRANCH_OPS else None
-                  trace.append(SQTTInst(pc - lib, inst_type, wi, inst_op, inst_op_name, branch_taken))
+                  sqtt_emit(wi, inst_type, inst_op, inst_op_name, branch_taken)
                 if is_barrier: break  # s_barrier hit: PC already advanced past it, pause this wave
               else: raise RuntimeError("exceeded 1M instructions in single wave, likely infinite loop")
             # All waves have either hit barrier or endpgm — release barrier waves for next round
@@ -1518,6 +1497,5 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
           # Reset LDS for next workgroup
           if lds_size > 0: ctypes.memset(lds_buf._buf.va_addr, 0, max(lds_size, 4))
 
-  # Store trace for SQTT encoding
-  sqtt_traces.append(trace)
+  if PROFILE: sqtt_traces.append(sqtt_finalize())
   return 0
