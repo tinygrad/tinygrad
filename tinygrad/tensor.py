@@ -2845,45 +2845,6 @@ class Tensor(OpMixin):
     """
     return self._apply_uop(UOp.contiguous_backward)
 
-  def log2(self) -> Tensor:
-    """
-    Computes the base-2 logarithm element-wise.
-
-    See: https://en.wikipedia.org/wiki/Logarithm
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([1., 2., 4., 8.]).log2().numpy())
-    ```
-    """
-    return self.cast(least_upper_float(self.dtype))._apply_uop(UOp.log2)
-
-  def exp(self) -> Tensor:
-    """
-    Computes the exponential function element-wise.
-
-    See: https://en.wikipedia.org/wiki/Exponential_function
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([0., 1., 2., 3.]).exp().numpy())
-    ```
-    """
-    # TODO: make it generic, and same thing to log and cos
-    if self.is_floating_point(): return self.cast(least_upper_dtype(self.dtype, dtypes.float32)).mul(1/math.log(2)).exp2().cast(self.dtype)
-    # TODO: behavior when DEFAULT_FLOAT is bfloat16 and input is int32?
-    return self.mul(1/math.log(2)).exp2()
-
-  def exp2(self) -> Tensor:
-    """
-    Computes the base-2 exponential function element-wise.
-
-    See: https://en.wikipedia.org/wiki/Exponential_function
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([0., 1., 2., 3.]).exp2().numpy())
-    ```
-    """
-    return self.cast(least_upper_float(self.dtype))._apply_uop(UOp.exp2)
-
   def logsigmoid(self) -> Tensor:
     """
     Applies the LogSigmoid function element-wise.
@@ -2895,37 +2856,6 @@ class Tensor(OpMixin):
     ```
     """
     return -(-self).softplus()
-
-  def sqrt(self) -> Tensor:
-    """
-    Computes the square root of the tensor element-wise.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([1., 2., 3., 4.]).sqrt().numpy())
-    ```
-    """
-    return self.cast(least_upper_float(self.dtype))._apply_uop(UOp.sqrt)
-
-  def sin(self) -> Tensor:
-    """
-    Computes the sine of the tensor element-wise.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([0., math.pi/2, math.pi, 3*math.pi/2, 2*math.pi]).sin().numpy())
-    ```
-    """
-    return self.cast(least_upper_float(self.dtype))._apply_uop(UOp.sin)
-
-  def cos(self) -> Tensor:
-    """
-    Computes the cosine of the tensor element-wise.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([0., math.pi/2, math.pi, 3*math.pi/2, 2*math.pi]).cos().numpy())
-    ```
-    """
-    if self.is_floating_point(): return ((math.pi/2)-self.cast(least_upper_dtype(self.dtype, dtypes.float32))).sin().cast(self.dtype)
-    return ((math.pi/2)-self).sin()
 
   # ***** math functions *****
 
@@ -2941,16 +2871,6 @@ class Tensor(OpMixin):
       w_i = (weight * (1<<(W_PREC:=7)) + 0.5).cast(dtypes.int16)
       return (self+(((end - self).cast(dtypes.int8) * w_i + (1<<W_PREC-1)).cast(dtypes.uint16) >> W_PREC)).cast(dtypes.uint8)
     return self + (end - self) * weight
-
-  def reciprocal(self) -> Tensor:
-    """
-    Computes `1/x` element-wise.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([1., 2., 3., 4.]).reciprocal().numpy())
-    ```
-    """
-    return self.cast(least_upper_float(self.dtype))._apply_uop(UOp.reciprocal)
 
   # ***** activation functions *****
 
