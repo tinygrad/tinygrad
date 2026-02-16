@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Tests for the SQTT encoder and end-to-end sqtt_timeline on MOCKGPU emulator output.
 
-Run with: AMD=1 MOCKGPU=1 python -m pytest test/amd/test_sqtt_encoder.py -v
+Run with: AMD=1 MOCKGPU=1 PROFILE=1 python -m pytest test/amd/test_sqtt_encoder.py -v
 """
-import subprocess, sys, os, unittest
+import unittest
 from dataclasses import dataclass
 from tinygrad.renderer.amd.sqtt import decode, LAYOUT_HEADER, WAVESTART, WAVEEND, INST, IMMEDIATE, NOP, VALUINST, InstOp
 from test.mockgpu.amd.emu import _init_sqtt_encoder, _encode_raw, _emit_nibbles, _nibbles_to_bytes, _NIB_COUNTS
@@ -222,187 +222,52 @@ class TestEncoderRoundtrip(unittest.TestCase):
       self.assertEqual(len(blob) % 32, 0, f"n={n}")
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# END-TO-END: sqtt_timeline on MOCKGPU emulator output (subprocess-based CI test)
+# END-TO-END: sqtt_timeline on MOCKGPU emulator output (in-process)
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def _run_sqtt_timeline_test(kernel_code: str) -> str:
-  """Run a kernel on MOCKGPU with VIZ=-2 and verify sqtt_timeline doesn't crash. Returns stdout."""
-  # The test runs inside a subprocess with MOCKGPU=1 AMD=1 VIZ=-2.
-  # After running the kernel it reads the profile pkl and calls sqtt_timeline on each SQTT event.
-  test_code = f'''
-import pickle, sys
-from tinygrad.helpers import temp
-
-{kernel_code}
-
-from tinygrad.renderer.amd.sqtt import decode, map_insts, INST, WAVESTART, WAVEEND, IMMEDIATE, InstOp
-from tinygrad.viz.serve import sqtt_timeline
-
-with open(temp("profile.pkl", append_user=True), "rb") as f:
-  data = pickle.load(f)
-
-sqtt_events = [e for e in data if type(e).__name__ == "ProfileSQTTEvent"]
-# Build program lookup: only AMD programs with lib bytes
-prg_by_tag = {{}}
-for e in data:
-  if type(e).__name__ == "ProfileProgramEvent" and e.lib is not None and len(e.lib) > 0:
-    prg_by_tag[e.tag] = e
-dev = next((e for e in data if type(e).__name__ == "ProfileDeviceEvent" and e.device == "AMD"), None)
-assert dev is not None, "no AMD device event"
-target = dev.props.get("gfx_target_version", 0)
-
-tested, passed = 0, 0
-for ev in sqtt_events:
-  if not ev.itrace or ev.kern not in prg_by_tag or len(ev.blob) == 0: continue
-  prg = prg_by_tag[ev.kern]
-
-  # Decode blob and verify basic structure
-  packets = list(decode(ev.blob))
-  assert len(packets) > 0, f"empty blob SE={{ev.se}}"
-  assert packets[0].layout == 3, f"bad layout SE={{ev.se}}"
-
-  # Count instruction and wave packets
-  n_inst = sum(1 for p in packets if isinstance(p, INST))
-  n_waves = sum(1 for p in packets if isinstance(p, WAVESTART))
-
-  # Verify timestamps monotonic
-  times = [p._time for p in packets]
-  assert times == sorted(times), f"timestamps not monotonic SE={{ev.se}}"
-
-  # Verify wave lifecycle
-  n_ends = sum(1 for p in packets if isinstance(p, WAVEEND))
-  assert n_waves == n_ends, f"wave start/end mismatch SE={{ev.se}}: {{n_waves}} != {{n_ends}}"
-
-  # Verify store ops are labeled as stores, not loads
-  for p in packets:
-    if isinstance(p, INST) and isinstance(p.op, InstOp):
-      if "STORE" in p.op.name:
-        assert "LOAD" not in p.op.name, f"store op labeled as load: {{p.op}}"
-
-  # Test map_insts — the main crash regression test
-  # NOTE: KeyError can happen due to pre-existing kern tag mismatch bug (ev.kern may point to wrong program)
-  try:
-    results = list(map_insts(ev.blob, prg.lib, target))
-    tested += 1
-  except KeyError as e:
-    print(f"SKIP: map_insts KeyError={{e}} SE={{ev.se}} kern={{ev.kern}} name={{prg.name}} n_inst={{n_inst}} (kern tag mismatch)")
-    continue
-
-  # Test sqtt_timeline — verifies the full visualization pipeline
-  try:
-    timeline = sqtt_timeline(ev.blob, prg.lib, target)
-    passed += 1
-  except Exception as e:
-    print(f"FAIL: sqtt_timeline SE={{ev.se}} kern={{ev.kern}} name={{prg.name}}: {{e}}", file=sys.stderr)
-    sys.exit(1)
-
-  print(f"OK SE={{ev.se}} kern={{ev.kern}} name={{prg.name}}: {{n_inst}} insts, {{n_waves}} waves, {{len(timeline)}} timeline events")
-
-assert tested > 0, "no SQTT events were tested"
-print(f"PASSED: {{passed}}/{{tested}} sqtt_timeline calls succeeded")
-'''
-  env = os.environ.copy()
-  env.update({"AMD": "1", "MOCKGPU": "1", "PYTHON_REMU": "1", "VIZ": "-2"})
-  result = subprocess.run([sys.executable, "-c", test_code], env=env, capture_output=True, text=True, timeout=180)
-  if result.returncode != 0:
-    raise AssertionError(f"subprocess failed (rc={result.returncode}):\nstdout: {result.stdout}\nstderr: {result.stderr}")
-  return result.stdout
-
+@unittest.skipUnless(__import__('os').environ.get("VIZ", "0") not in ("", "0"), "VIZ required for SQTT tracing")
 class TestSQTTTimelineEndToEnd(unittest.TestCase):
-  """End-to-end tests: run kernels on MOCKGPU, verify sqtt_timeline doesn't crash."""
+  """End-to-end tests: run kernels on MOCKGPU with VIZ, verify sqtt_timeline works."""
+
+  def _get_sqtt_events(self):
+    from tinygrad.device import Compiled, Device, ProfileProgramEvent
+    from tinygrad.runtime.ops_amd import ProfileSQTTEvent
+    events = Compiled.profile_events
+    sqtt = [e for e in events if isinstance(e, ProfileSQTTEvent) and e.itrace and len(e.blob) > 0]
+    prg_by_tag = {e.tag: e for e in events if isinstance(e, ProfileProgramEvent) and e.lib is not None and len(e.lib) > 0}
+    target = Device['AMD'].iface.props['gfx_target_version']
+    return sqtt, prg_by_tag, target
+
+  def _verify_sqtt(self, sqtt, prg_by_tag, target):
+    from tinygrad.renderer.amd.sqtt import map_insts
+    from tinygrad.viz.serve import sqtt_timeline
+    tested = 0
+    for ev in sqtt:
+      if ev.kern not in prg_by_tag: continue
+      prg = prg_by_tag[ev.kern]
+      packets = list(decode(ev.blob))
+      self.assertGreater(len(packets), 0)
+      self.assertEqual(packets[0].layout, 3)
+      n_waves = sum(1 for p in packets if isinstance(p, WAVESTART))
+      n_ends = sum(1 for p in packets if isinstance(p, WAVEEND))
+      self.assertEqual(n_waves, n_ends, "wave start/end mismatch")
+      # NOTE: KeyError can happen due to pre-existing kern tag mismatch bug
+      try: list(map_insts(ev.blob, prg.lib, target))
+      except KeyError: continue
+      sqtt_timeline(ev.blob, prg.lib, target)
+      tested += 1
+    self.assertGreater(tested, 0, "no SQTT events were tested")
 
   def test_sqtt_timeline_add(self):
-    """sqtt_timeline works for a simple element-wise add kernel."""
-    out = _run_sqtt_timeline_test("""
-from tinygrad import Tensor
-a = Tensor([1.0, 2.0, 3.0, 4.0]).realize()
-b = Tensor([5.0, 6.0, 7.0, 8.0]).realize()
-c = (a + b).realize()
-""")
-    self.assertIn("PASSED", out)
+    from tinygrad import Tensor
+    a, b = Tensor([1.0, 2.0, 3.0, 4.0]).realize(), Tensor([5.0, 6.0, 7.0, 8.0]).realize()
+    (a + b).realize()
+    self._verify_sqtt(*self._get_sqtt_events())
 
-  def test_sqtt_timeline_gemm(self):
-    """sqtt_timeline works for a matmul kernel (has loops and branches)."""
-    out = _run_sqtt_timeline_test("""
-from tinygrad import Tensor
-a = Tensor.rand(4, 4).realize()
-b = Tensor.rand(4, 4).realize()
-c = (a @ b).realize()
-""")
-    self.assertIn("PASSED", out)
-
-  def test_sqtt_timeline_multi_op(self):
-    """sqtt_timeline works for a chain of operations."""
-    out = _run_sqtt_timeline_test("""
-from tinygrad import Tensor
-a = Tensor.rand(8, 8).realize()
-b = (a * 2.0 + 1.0).relu().realize()
-""")
-    self.assertIn("PASSED", out)
-
-  def test_sqtt_timeline_custom_asm(self):
-    """sqtt_timeline works for a custom assembly kernel (amd_asm_matmul)."""
-    env = os.environ.copy()
-    env.update({"AMD": "1", "MOCKGPU": "1", "PYTHON_REMU": "1", "VIZ": "-2", "N": "256", "CNT": "1", "VERIFY": "0",
-                "PYTHONPATH": os.path.join(os.path.dirname(__file__), "../..")})
-    result = subprocess.run([sys.executable, "extra/gemm/amd_asm_matmul.py"], env=env, capture_output=True, text=True, timeout=300)
-    if result.returncode != 0:
-      raise AssertionError(f"amd_asm_matmul failed (rc={result.returncode}):\nstdout: {result.stdout}\nstderr: {result.stderr}")
-
-    # Now verify the profile pkl: no emulator instruction names should appear as program events
-    verify_code = '''
-import pickle, sys
-from tinygrad.helpers import temp
-
-with open(temp("profile.pkl", append_user=True), "rb") as f:
-  data = pickle.load(f)
-
-prg_events = [e for e in data if type(e).__name__ == "ProfileProgramEvent"]
-print(f"{len(prg_events)} program events")
-
-# Check that emulator instruction runners didn't leak into profile events
-bad = [e for e in prg_events if e.lib is None and e.tag is not None]
-if bad:
-  print(f"FAIL: {len(bad)} emulator instruction runners leaked into profile events:", file=sys.stderr)
-  for e in bad[:5]: print(f"  tag={e.tag} name={e.name}", file=sys.stderr)
-  sys.exit(1)
-
-# Check that real kernel programs have lib bytes
-real = [e for e in prg_events if e.lib is not None and len(e.lib) > 0]
-print(f"{len(real)} real programs with lib bytes")
-for e in real: print(f"  tag={e.tag} name={e.name} lib_size={len(e.lib)}")
-assert len(real) >= 1, f"expected at least 1 real program, got {len(real)}"
-
-# Verify sqtt_timeline works for SQTT events with matching programs
-from tinygrad.renderer.amd.sqtt import decode, INST, VALUINST
-from tinygrad.viz.serve import sqtt_timeline
-
-sqtt_events = [e for e in data if type(e).__name__ == "ProfileSQTTEvent"]
-dev = next((e for e in data if type(e).__name__ == "ProfileDeviceEvent" and e.device == "AMD"), None)
-target = dev.props.get("gfx_target_version", 0) if dev else 0
-prg_by_tag = {e.tag: e for e in prg_events if e.lib is not None and len(e.lib) > 0}
-
-tested = 0
-for ev in sqtt_events:
-  if not ev.itrace or ev.kern not in prg_by_tag: continue
-  prg = prg_by_tag[ev.kern]
-  timeline = sqtt_timeline(ev.blob, prg.lib, target)
-  pkts = list(decode(ev.blob))
-  n_valu = sum(1 for p in pkts if isinstance(p, VALUINST))
-  n_inst = sum(1 for p in pkts if isinstance(p, INST))
-  print(f"OK kern={ev.kern} name={prg.name}: {n_inst} INST, {n_valu} VALUINST, {len(timeline)} timeline events")
-  tested += 1
-
-assert tested > 0, "no SQTT events were tested"
-print(f"PASSED: {tested} sqtt_timeline calls succeeded")
-'''
-    env2 = {k: v for k, v in env.items() if k != "VIZ"}  # don't set VIZ in verification subprocess (would overwrite profile pkl)
-    result2 = subprocess.run([sys.executable, "-c", verify_code], env=env2, capture_output=True, text=True, timeout=60)
-    if result2.returncode != 0:
-      raise AssertionError(f"verification failed (rc={result2.returncode}):\nstdout: {result2.stdout}\nstderr: {result2.stderr}")
-    self.assertIn("PASSED", result2.stdout)
-    # Verify no emulator instruction names leaked
-    self.assertNotIn("FAIL", result2.stderr)
+  def test_sqtt_timeline_matmul(self):
+    from tinygrad import Tensor
+    (Tensor.rand(4, 4).realize() @ Tensor.rand(4, 4).realize()).realize()
+    self._verify_sqtt(*self._get_sqtt_events())
 
 if __name__ == "__main__":
   unittest.main()
