@@ -294,11 +294,21 @@ def _get_pcode_dict(op) -> dict:
   """Return the PCODE dictionary for the given opcode based on its architecture."""
   return PCODE_CDNA if 'cdna' in type(op).__module__ else PCODE_RDNA4 if 'rdna4' in type(op).__module__ else PCODE_RDNA3
 
+# Fallback pcode for CDNA instructions missing from auto-generated PCODE dict
+# V_ACCVGPR_READ/WRITE: accumulator VGPRs are same as arch VGPRs in emulator
+# V_CVT_*_E64: VOP3 encodings of VOP1 conversions with identical semantics
+_pcode_fallback: dict[str, str] = {
+  'V_ACCVGPR_READ': 'D0.b32 = S0.b32', 'V_ACCVGPR_WRITE': 'D0.b32 = S0.b32',
+  'V_CVT_I32_F32_E64': 'D0.i32 = f32_to_i32(S0.f32)', 'V_CVT_I32_F32': 'D0.i32 = f32_to_i32(S0.f32)',
+  'V_CVT_F32_F16_E64': 'D0.f32 = f16_to_f32(S0.f16)', 'V_CVT_F32_F16': 'D0.f32 = f16_to_f32(S0.f16)',
+}
+
 # Pcode parser
 @functools.cache
 def get_pcode(op) -> str:
   op_name = op.name
-  pcode = _get_pcode_dict(op)[op]
+  pcode_dict = _get_pcode_dict(op)
+  pcode = pcode_dict[op] if op in pcode_dict else _pcode_fallback[op_name]
   if op_name in _pcode_fixes: pcode = pcode.replace(*_pcode_fixes[op_name])
   if 'V_DIV_SCALE' in op_name:
     dt, exp_lim, ldexp_val = ('f32', '23', '64') if 'F32' in op_name else ('f64', '52', '128')
@@ -1121,7 +1131,7 @@ def _compile_vop3p(inst: ir3.VOP3P | ir4.VOP3P | irc.VOP3P, ctx: _Ctx) -> UOp:
     srcs = {'S0': build_pk_f32(src0, src_offs[0], opsel & 1, opsel_hi & 1, neg & 1, neg_hi & 1),
             'S1': build_pk_f32(src1, src_offs[1], opsel & 2, opsel_hi & 2, neg & 2, neg_hi & 2),
             'S2': build_pk_f32(src2, src_offs[2], opsel & 4, 1 if opsel_hi2 else 0, neg & 4, neg_hi & 4)}
-  elif 'FMA_MIX' in op_name:
+  elif 'FMA_MIX' in op_name or 'MAD_MIX' in op_name:
     combined_opsel_hi = (opsel_hi & 0x3) | ((opsel_hi2 & 0x1) << 2)
     # For FMA_MIX: neg_hi is ABS (not neg!), neg is actual negation
     def apply_abs(v, bit, opsel_hi_bit, opsel_bit):
