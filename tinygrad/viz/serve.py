@@ -477,8 +477,6 @@ def amdgpu_cfg(lib:bytes, target:str) -> dict:
   disasm = {pc:str(inst) for pc,inst in pc_table.items()}
   asm_width = max(len(asm) for asm in disasm.values())
   for pc, inst in pc_table.items():
-    # skip instructions only used for padding
-    if (asm:=disasm[pc]) == "s_code_end": continue
     lines.append(f"  {asm:<{asm_width}}  // {pc:012X}")
     if pc in leaders:
       paths[curr:=pc] = {}
