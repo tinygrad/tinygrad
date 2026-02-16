@@ -80,15 +80,15 @@ class ExpertWeights:
     return (x.unsqueeze(-2) @ self.weight[sel].transpose(-1, -2)).squeeze(-2)
 
 class QuantizedExpertWeights:
-  """Dequantizes weights at inference time to fit model in memory."""
+  """Dequantizes weights at inference time."""
   def __init__(self, num_experts:int, in_features:int, out_features:int, ggml_type:int):
     self.in_features, self.out_features, self.ggml_type = in_features, out_features, ggml_type
     epb, bpb = GGML_BLOCK_SIZES[ggml_type]
-    self.expert_blocks = Tensor.empty(num_experts, out_features * in_features // epb, bpb, dtype=dtypes.uint8)
+    self.weight = Tensor.empty(num_experts, out_features * in_features // epb, bpb, dtype=dtypes.uint8)
 
   def __call__(self, sel:Tensor, x:Tensor) -> Tensor:
     n = int(sel.numel())
-    w = ggml_data_to_tensor(self.expert_blocks[sel.reshape(-1)].flatten(), n * self.out_features * self.in_features, self.ggml_type)
+    w = ggml_data_to_tensor(self.weight[sel.reshape(-1)].flatten(), n * self.out_features * self.in_features, self.ggml_type)
     w = w.reshape(n, self.out_features, self.in_features)
     if getenv("HALF", 1): w = w.half()
     return (x.expand(*sel.shape, -1).reshape(n, 1, -1) @ w.transpose(-1, -2)).reshape(*sel.shape, self.out_features)
@@ -267,7 +267,7 @@ class TransformerBlock:
 class Transformer:
   def __init__(self, *, num_blocks, dim, hidden_dim, n_heads, n_kv_heads, norm_eps, vocab_size, head_dim:int, rope_theta:float,
                max_context:int=0, qk_norm:int=0, num_experts:int=0, num_experts_per_tok:int=0,
-               expert_ggml_types:list[tuple[int,int,int]]|None=None, leading_dense_blocks:int=0,
+               leading_dense_blocks:int=0, expert_ggml_types:list[tuple[int,int,int]]|None=None,
                kv_lora_rank:int=0, q_lora_rank:int=0, qk_nope_head_dim:int=0, qk_rope_head_dim:int=0, v_head_dim:int=0,
                n_shared_experts:int=0, moe_hidden_dim:int=0, expert_weights_norm:bool=False, expert_weights_scale:float=1.0):
     self.blk: list[MLATransformerBlock]|list[TransformerBlock]
@@ -301,26 +301,24 @@ class Transformer:
 
   @staticmethod
   def from_gguf(gguf:Tensor, max_context:int|None=None, realize=True) -> tuple[Transformer, dict]:
-    keep_quantized = (lambda name, shape, typ: '_exps.' in name) if args.model == "glm-4.7-flash:30B" else None  # for GLM, keep MOE quantized
+    keep_quantized = (lambda name: '_exps.' in name) if args.model == "glm-4.7-flash:30B" else None
     kv, state_dict = nn.state.gguf_load(gguf if keep_quantized else gguf.to(None), keep_quantized=keep_quantized)
-    quantized_keys = {k for k, v in state_dict.items() if v.dtype == dtypes.uint8}
 
-    # all state items should be float16, not float32
-    state_dict = {k:v.cast('float16') if getenv("HALF", 1) and k not in quantized_keys else v for k,v in state_dict.items()}
+    # extract ggml types from kept-quantized (tensor, ggml_type) tuples, cast rest to float16
+    ggml_types = {}
+    for k, v in state_dict.items():
+      if keep_quantized and keep_quantized(k): state_dict[k], ggml_types[k] = v
+      elif getenv("HALF", 1): state_dict[k] = v.half()
+
+    arch = kv['general.architecture']
+    # per-block ggml types for quantized expert weights
+    def quantt(i, w): return ggml_types.get(f'blk.{i}.ffn_{w}_exps.weight', 0)
+    expert_ggml_types = [(quantt(i,'gate'), quantt(i,'up'), quantt(i,'down')) for i in range(kv[f'{arch}.block_count'])] if keep_quantized else None
     # some models like Llama 3.2 don't have an output.weight, they just tie to the token_embd.weight
     if 'output.weight' not in state_dict: state_dict['output.weight'] = state_dict['token_embd.weight']
 
-    arch = kv['general.architecture']
     max_context = min(max_context, kv[f'{arch}.context_length']) if max_context is not None else kv[f'{arch}.context_length']
     n_heads, n_kv_heads = kv[f'{arch}.attention.head_count'], kv[f'{arch}.attention.head_count_kv']
-
-    # reshape quantized expert weights from (E*rows, bpb) to (E, rows, bpb) and detect ggml types
-    n_experts = kv.get(f'{arch}.expert_count', 0)
-    bpb_to_type = {v[1]: k for k, v in GGML_BLOCK_SIZES.items()}
-    for k in list(quantized_keys):
-      state_dict[k.replace('.weight', '.expert_blocks')] = (b:=state_dict.pop(k)).reshape(n_experts, b.shape[0] // n_experts, b.shape[1])
-    def ggml_type(i, k): return bpb_to_type[int(state_dict[n].shape[-1])] if (n:=f'blk.{i}.ffn_{k}_exps.expert_blocks') in state_dict else 0
-    expert_ggml_types = [(ggml_type(i, 'gate'), ggml_type(i, 'up'), ggml_type(i, 'down')) for i in range(kv[f'{arch}.block_count'])]
 
     # Permute Q/K weights from interleaved to half-split RoPE layout (llama-style models only)
     if arch == 'llama':
@@ -330,15 +328,14 @@ class Transformer:
 
     model = Transformer(num_blocks=kv[f'{arch}.block_count'], dim=kv[f'{arch}.embedding_length'],
                         hidden_dim=kv[f'{arch}.feed_forward_length'] if kv.get(f'{arch}.attention.kv_lora_rank') else
-                          kv.get(f'{arch}.expert_feed_forward_length', kv.get(f'{arch}.feed_forward_length', 0)),
+                          kv.get(f'{arch}.expert_feed_forward_length', kv[f'{arch}.feed_forward_length']),
                         n_heads=n_heads, n_kv_heads=n_kv_heads, norm_eps=kv[f'{arch}.attention.layer_norm_rms_epsilon'],
                         vocab_size=len(kv['tokenizer.ggml.tokens']),
                         head_dim=kv.get(f'{arch}.attention.key_length', kv[f'{arch}.embedding_length'] // n_heads),
                         rope_theta=kv[f'{arch}.rope.freq_base'], max_context=max_context,
                         qk_norm=int(state_dict['blk.0.attn_q_norm.weight'].shape[0]) if 'blk.0.attn_q_norm.weight' in state_dict else 0,
                         num_experts=kv.get(f'{arch}.expert_count', 0), num_experts_per_tok=kv.get(f'{arch}.expert_used_count', 0),
-                        expert_ggml_types=expert_ggml_types,
-                        leading_dense_blocks=kv.get(f'{arch}.leading_dense_block_count', 0),
+                        leading_dense_blocks=kv.get(f'{arch}.leading_dense_block_count', 0), expert_ggml_types=expert_ggml_types,
                         kv_lora_rank=kv.get(f'{arch}.attention.kv_lora_rank', 0), q_lora_rank=kv.get(f'{arch}.attention.q_lora_rank', 0),
                         qk_nope_head_dim=(klm-kv.get(f'{arch}.rope.dimension_count', 0) if
                                           (klm:=kv.get(f'{arch}.attention.key_length_mla', kv.get(f'{arch}.attention.key_length', 0))) > 0 else 0),

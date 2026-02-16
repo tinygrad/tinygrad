@@ -352,16 +352,17 @@ def ggml_data_to_tensor(t: Tensor, n: int, ggml_type: int) -> Tensor:
   raise ValueError(f"GGML type '{ggml_type}' is not supported!")
 
 @accept_filename
-def gguf_load(tensor: Tensor, keep_quantized: Callable|None = None) -> tuple[dict, dict[str, Tensor]]:
+def gguf_load(tensor: Tensor, keep_quantized: Callable|None = None) -> tuple[dict, dict]:
   """
   Loads a .gguf file, returning the `kv_data` and `state_dict`.
-  keep_quantized: optional callable(name, shape, ggml_type) -> bool. Matching tensors stay as raw uint8 blocks in state_dict.
+  keep_quantized: optional callable(name) -> bool. Matching tensors stay as (raw_uint8_tensor, ggml_type) tuples in state_dict.
 
   ```python
   kv_data, state_dict = nn.state.gguf_load(Tensor(pathlib.Path("Meta-Llama-3-8B-Instruct.Q4_0.gguf")))
   ```
   """
-  reader, kv_data, state_dict = io.BufferedReader(TensorIO(tensor), 1_000_000), {}, {}
+  state_dict: dict = {}
+  reader, kv_data = io.BufferedReader(TensorIO(tensor), 1_000_000), {}
   def read_unpack(fmt: str, n: int): return struct.unpack(fmt, reader.read(n))[0]
   def read_str(): return str(reader.read(read_uint64()), "utf-8")
   def read_arr():
@@ -387,7 +388,8 @@ def gguf_load(tensor: Tensor, keep_quantized: Callable|None = None) -> tuple[dic
     nbytes = (n // bs[0]) * bs[1] if bs else {0:4, 1:2, 16:1, 17:2, 18:4}[typ] * n
     data = tensor[data_start + off:data_start + off + nbytes]
     if isinstance(tensor.device, str) and tensor.device.startswith("DISK"): data = data.to(None)
-    if bs is not None and keep_quantized is not None and keep_quantized(name, tuple(reversed(dims)), typ): state_dict[name] = data.reshape(-1, bs[1])
+    if bs is not None and keep_quantized is not None and keep_quantized(name):
+      state_dict[name] = (data.reshape(dims[-1], -1, bs[1]) if len(dims) >= 3 else data.reshape(-1, bs[1]), typ)
     else: state_dict[name] = ggml_data_to_tensor(data, n, typ).reshape(*reversed(dims))  # dequant
 
   return kv_data, state_dict
