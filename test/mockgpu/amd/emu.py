@@ -96,9 +96,10 @@ def encode_sqtt(trace: list[SQTTInst]) -> bytes:
   Each trace entry should have .wave_id, .inst_type, and .inst_op attributes.
   inst_type is an AMD ISA instruction class (e.g. ir3.SOP1, ir3.GLOBAL, etc.).
   inst_op is the SOPPOp value for SOPP instructions, 0 otherwise."""
-  from tinygrad.renderer.amd.sqtt import _emit_nibbles, _nibbles_to_bytes, LAYOUT_HEADER, WAVESTART, WAVEEND, INST, IMMEDIATE, InstOp
+  from tinygrad.renderer.amd.sqtt import _emit_nibbles, _nibbles_to_bytes, LAYOUT_HEADER, WAVESTART, WAVEEND, INST, IMMEDIATE, VALUINST, InstOp
   from tinygrad.runtime.autogen.amd.rdna3.enum import SOPPOp as SOPPOp3
   from tinygrad.runtime.autogen.amd.rdna4.enum import SOPPOp as SOPPOp4
+  import re
 
   _SOPP = (ir3.SOPP, ir4.SOPP, irc.SOPP)
   _SMEM = (ir3.SMEM, ir4.SMEM, irc.SMEM)
@@ -131,15 +132,28 @@ def encode_sqtt(trace: list[SQTTInst]) -> bytes:
                   SOPPOp3.S_CBRANCH_VCCZ.value, SOPPOp3.S_CBRANCH_VCCNZ.value,
                   SOPPOp3.S_CBRANCH_EXECZ.value, SOPPOp3.S_CBRANCH_EXECNZ.value}
 
-  def inst_op(t, op_name: str = "") -> InstOp:
+  # VALU sub-classification patterns (op_name based)
+  _VALU_TRANS_RE = re.compile(r'V_(EXP|LOG|RCP|RSQ|SQRT|SIN|COS|CEIL|FLOOR|TRUNC|RNDNE|FRACT|FREXP)_')
+  _VALU_64_SHIFT_RE = re.compile(r'V_(LSHLREV|LSHRREV|ASHRREV)_(B|I)64')
+  _VALU_MAD64_RE = re.compile(r'V_MAD_(U|I)64')
+  _VALU_64_RE = re.compile(r'V_\w+_F64')
+
+  def valu_op(op_name: str) -> InstOp|None:
+    """Classify VALU instruction into InstOp subtype. Returns None for regular VALU (VALUINST packet)."""
+    if 'CMPX' in op_name: return InstOp.VALU_CMPX
+    if _VALU_64_SHIFT_RE.search(op_name): return InstOp.VALU_64_SHIFT
+    if _VALU_MAD64_RE.search(op_name): return InstOp.VALU_MAD64
+    if _VALU_64_RE.search(op_name): return InstOp.VALU_64
+    if _VALU_TRANS_RE.search(op_name): return InstOp.VALU_TRANS
+    return None  # regular 32-bit VALU → VALUINST packet
+
+  def mem_op(t, op_name: str) -> InstOp:
     is_store = "STORE" in op_name
-    if issubclass(t, _SMEM): return InstOp.SMEM
-    if issubclass(t, _VALU): return InstOp.VALU_TRANS
     if issubclass(t, _DS): return InstOp.LDS_STORE if is_store else InstOp.LDS_LOAD
     if issubclass(t, _GLOBAL): return InstOp.GLOBAL_STORE if is_store else InstOp.GLOBAL_LOAD
     if issubclass(t, _FLAT): return InstOp.FLAT_STORE if is_store else InstOp.FLAT_LOAD
     if issubclass(t, _SCRATCH): return InstOp.FLAT_STORE if is_store else InstOp.FLAT_LOAD
-    return InstOp.SALU  # SOP1/SOP2/SOPC/SOPK/unknown
+    return InstOp.SALU
 
   nibbles: list[int] = []
   _emit_nibbles(nibbles, LAYOUT_HEADER, layout=3, sel_a=6)
@@ -164,8 +178,14 @@ def encode_sqtt(trace: list[SQTTInst]) -> bytes:
           continue
         # Other SOPP (s_sendmsg, etc.) → INST SALU
         _emit_nibbles(nibbles, INST, delta=1, wave=w, op=InstOp.SALU)
+      elif issubclass(t.inst_type, _VALU):
+        op = valu_op(t.inst_op_name)
+        if op is None: _emit_nibbles(nibbles, VALUINST, delta=1, wave=w)  # regular 32-bit VALU
+        else: _emit_nibbles(nibbles, INST, delta=1, wave=w, op=op)        # special VALU (transcendental, 64-bit, cmpx)
+      elif issubclass(t.inst_type, _SMEM):
+        _emit_nibbles(nibbles, INST, delta=1, wave=w, op=InstOp.SMEM)
       else:
-        _emit_nibbles(nibbles, INST, delta=1, wave=w, op=inst_op(t.inst_type, getattr(t, 'inst_op_name', '')))
+        _emit_nibbles(nibbles, INST, delta=1, wave=w, op=mem_op(t.inst_type, t.inst_op_name))
     _emit_nibbles(nibbles, WAVEEND, delta=1, simd=0, cu_lo=0, wave=wave_id & 0x1F)
 
   # Pad to byte boundary + decoder lookahead, then align to 32 bytes (wptr granularity)
@@ -1334,8 +1354,8 @@ def _get_runner(inst_bytes: bytes, arch: str = "rdna3"):
   canonical_name = f"{_op_name(inst).lower()}_{base.to_bytes(size, 'little').hex()}"
   sink = sink.replace(arg=KernelInfo(name=canonical_name)).rtag(1)
 
-  # NOTE: renderer output is not reproducible because of _MXCSRContext
-  with Context(NOOPT=1, CHECK_OOB=0, TUPLE_ORDER=0, EMULATED_DTYPES="", CAPTURE_PROCESS_REPLAY=0):
+  # NOTE: renderer output is not reproducible because of _MXCSRContext. PROFILE=0 prevents emulator instruction runners from polluting profiling.
+  with Context(NOOPT=1, CHECK_OOB=0, TUPLE_ORDER=0, EMULATED_DTYPES="", CAPTURE_PROCESS_REPLAY=0, PROFILE=0):
     runner = get_runner('CPU', sink)
   _canonical_runner_cache.append((base, mask, size, runner))
   return runner

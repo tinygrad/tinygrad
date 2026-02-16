@@ -314,8 +314,9 @@ def load_counters(profile:list[ProfileEvent]) -> None:
       steps.append(create_step("SQTT", ("/prg-sqtt", len(ctxs), len(steps)), ((k, tag), sqtt, prg_events[k])))
     ctxs.append({"name":f"Exec {name}"+(f" n{run_number[k]}" if run_number[k] > 1 else ""), "steps":steps})
 
-def sqtt_timeline(data:bytes, lib:bytes, target:int) -> list[ProfileEvent]:
+def sqtt_timeline(data:bytes, lib:bytes|None, target:int) -> list[ProfileEvent]:
   from tinygrad.renderer.amd.sqtt import map_insts, InstructionInfo, PacketType, INST, InstOp, VALUINST, IMMEDIATE, IMMEDIATE_MASK, VMEMEXEC, ALUEXEC
+  if lib is None: return []
   ret:list[ProfileEvent] = []
   rows:dict[str, None] = {}
   trace:dict[str, set[int]] = {}

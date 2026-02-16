@@ -6,7 +6,7 @@ Run with: AMD=1 MOCKGPU=1 python -m pytest test/amd/test_sqtt_encoder.py -v
 import subprocess, sys, os, unittest
 from dataclasses import dataclass
 from tinygrad.renderer.amd.sqtt import (decode, _encode_raw, _emit_nibbles, _nibbles_to_bytes,
-                                         LAYOUT_HEADER, WAVESTART, WAVEEND, INST, IMMEDIATE, NOP,
+                                         LAYOUT_HEADER, WAVESTART, WAVEEND, INST, IMMEDIATE, NOP, VALUINST,
                                          InstOp, _NIB_COUNTS)
 from test.mockgpu.amd.emu import encode_sqtt
 from tinygrad.runtime.autogen.amd.rdna3 import ins as ir3
@@ -67,7 +67,7 @@ class TestEncoderRoundtrip(unittest.TestCase):
       self.assertNotIsInstance(p, (WAVESTART, WAVEEND, INST))
 
   def test_single_wave_single_inst(self):
-    trace = [FakeSQTTInst(0, ir3.VOP3, 0)]
+    trace = [FakeSQTTInst(0, ir3.SOP1, 0)]
     packets = list(decode(encode_sqtt(trace)))
     types = [type(p) for p in packets if not isinstance(p, NOP)]
     self.assertIn(LAYOUT_HEADER, types)
@@ -75,8 +75,47 @@ class TestEncoderRoundtrip(unittest.TestCase):
     self.assertIn(INST, types)
     self.assertIn(WAVEEND, types)
 
+  def test_regular_valu_emits_valuinst(self):
+    """Regular 32-bit VALU ops (no special op_name) emit VALUINST, not INST."""
+    trace = [FakeSQTTInst(0, ir3.VOP3, 0, inst_op_name="V_ADD_F32_E64")]
+    packets = list(decode(encode_sqtt(trace)))
+    valu_pkts = [p for p in packets if isinstance(p, VALUINST)]
+    inst_pkts = [p for p in packets if isinstance(p, INST)]
+    self.assertEqual(len(valu_pkts), 1, "regular VALU should emit VALUINST")
+    self.assertEqual(len(inst_pkts), 0, "regular VALU should not emit INST")
+
+  def test_valu_transcendental_emits_inst(self):
+    """Transcendental VALU ops emit INST(VALU_TRANS)."""
+    for op_name in ["V_EXP_F32_E32", "V_LOG_F32_E32", "V_RCP_F32_E64", "V_SQRT_F32_E32", "V_SIN_F32_E32"]:
+      with self.subTest(op=op_name):
+        trace = [FakeSQTTInst(0, ir3.VOP1, 0, inst_op_name=op_name)]
+        pkts = [p for p in decode(encode_sqtt(trace)) if isinstance(p, INST)]
+        self.assertEqual(len(pkts), 1)
+        self.assertEqual(pkts[0].op, InstOp.VALU_TRANS)
+
+  def test_valu_64_shift_emits_inst(self):
+    """64-bit shift VALU ops emit INST(VALU_64_SHIFT)."""
+    trace = [FakeSQTTInst(0, ir3.VOP3, 0, inst_op_name="V_LSHLREV_B64")]
+    pkts = [p for p in decode(encode_sqtt(trace)) if isinstance(p, INST)]
+    self.assertEqual(len(pkts), 1)
+    self.assertEqual(pkts[0].op, InstOp.VALU_64_SHIFT)
+
+  def test_valu_64_emits_inst(self):
+    """64-bit arithmetic VALU ops emit INST(VALU_64)."""
+    trace = [FakeSQTTInst(0, ir3.VOP3, 0, inst_op_name="V_ADD_F64")]
+    pkts = [p for p in decode(encode_sqtt(trace)) if isinstance(p, INST)]
+    self.assertEqual(len(pkts), 1)
+    self.assertEqual(pkts[0].op, InstOp.VALU_64)
+
+  def test_valu_cmpx_emits_inst(self):
+    """v_cmpx_* ops emit INST(VALU_CMPX)."""
+    trace = [FakeSQTTInst(0, ir3.VOPC, 0, inst_op_name="V_CMPX_LT_F32_E32")]
+    pkts = [p for p in decode(encode_sqtt(trace)) if isinstance(p, INST)]
+    self.assertEqual(len(pkts), 1)
+    self.assertEqual(pkts[0].op, InstOp.VALU_CMPX)
+
   def test_inst_op_mapping(self):
-    cases = [(ir3.VOP3, InstOp.VALU_TRANS), (ir3.SMEM, InstOp.SMEM), (ir3.SOP1, InstOp.SALU), (ir3.SOP2, InstOp.SALU)]
+    cases = [(ir3.SMEM, InstOp.SMEM), (ir3.SOP1, InstOp.SALU), (ir3.SOP2, InstOp.SALU)]
     for inst_type, expected_op in cases:
       with self.subTest(t=inst_type.__name__):
         blob = encode_sqtt([FakeSQTTInst(0, inst_type, 0)])
@@ -155,21 +194,23 @@ class TestEncoderRoundtrip(unittest.TestCase):
     packets = list(decode(encode_sqtt(trace)))
     self.assertEqual(len([p for p in packets if isinstance(p, WAVESTART)]), 2)
     self.assertEqual(len([p for p in packets if isinstance(p, WAVEEND)]), 2)
-    self.assertEqual(len([p for p in packets if isinstance(p, INST)]), 3)
+    # VOP3 (no op_name) → VALUINST, SOP2 → INST(SALU), SMEM → INST(SMEM)
+    self.assertEqual(len([p for p in packets if isinstance(p, INST)]), 2)
+    self.assertEqual(len([p for p in packets if isinstance(p, VALUINST)]), 1)
 
   def test_wave_ids_preserved(self):
-    trace = [FakeSQTTInst(0, ir3.VOP3, 3), FakeSQTTInst(0, ir3.SMEM, 7)]
+    trace = [FakeSQTTInst(0, ir3.SOP1, 3), FakeSQTTInst(0, ir3.SMEM, 7)]
     packets = list(decode(encode_sqtt(trace)))
     self.assertEqual(sorted(p.wave for p in packets if isinstance(p, WAVESTART)), [3, 7])
 
   def test_timestamps_monotonic(self):
-    trace = [FakeSQTTInst(i*4, ir3.VOP3, 0) for i in range(5)]
+    trace = [FakeSQTTInst(i*4, ir3.SOP1, 0) for i in range(5)]
     times = [p._time for p in decode(encode_sqtt(trace))]
     self.assertEqual(times, sorted(times))
 
   def test_blob_32byte_aligned(self):
     for n in [0, 1, 5, 10, 50]:
-      blob = encode_sqtt([FakeSQTTInst(i*4, ir3.VOP3, 0) for i in range(n)])
+      blob = encode_sqtt([FakeSQTTInst(i*4, ir3.SOP1, 0) for i in range(n)])
       self.assertEqual(len(blob) % 32, 0, f"n={n}")
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -289,6 +330,70 @@ a = Tensor.rand(8, 8).realize()
 b = (a * 2.0 + 1.0).relu().realize()
 """)
     self.assertIn("PASSED", out)
+
+  def test_sqtt_timeline_custom_asm(self):
+    """sqtt_timeline works for a custom assembly kernel (amd_asm_matmul)."""
+    env = os.environ.copy()
+    env.update({"AMD": "1", "MOCKGPU": "1", "PYTHON_REMU": "1", "VIZ": "-2", "N": "256", "CNT": "1", "VERIFY": "0",
+                "PYTHONPATH": os.path.join(os.path.dirname(__file__), "../..")})
+    result = subprocess.run([sys.executable, "extra/gemm/amd_asm_matmul.py"], env=env, capture_output=True, text=True, timeout=300)
+    if result.returncode != 0:
+      raise AssertionError(f"amd_asm_matmul failed (rc={result.returncode}):\nstdout: {result.stdout}\nstderr: {result.stderr}")
+
+    # Now verify the profile pkl: no emulator instruction names should appear as program events
+    verify_code = '''
+import pickle, sys
+from tinygrad.helpers import temp
+
+with open(temp("profile.pkl", append_user=True), "rb") as f:
+  data = pickle.load(f)
+
+prg_events = [e for e in data if type(e).__name__ == "ProfileProgramEvent"]
+print(f"{len(prg_events)} program events")
+
+# Check that emulator instruction runners didn't leak into profile events
+bad = [e for e in prg_events if e.lib is None and e.tag is not None]
+if bad:
+  print(f"FAIL: {len(bad)} emulator instruction runners leaked into profile events:", file=sys.stderr)
+  for e in bad[:5]: print(f"  tag={e.tag} name={e.name}", file=sys.stderr)
+  sys.exit(1)
+
+# Check that real kernel programs have lib bytes
+real = [e for e in prg_events if e.lib is not None and len(e.lib) > 0]
+print(f"{len(real)} real programs with lib bytes")
+for e in real: print(f"  tag={e.tag} name={e.name} lib_size={len(e.lib)}")
+assert len(real) >= 1, f"expected at least 1 real program, got {len(real)}"
+
+# Verify sqtt_timeline works for SQTT events with matching programs
+from tinygrad.renderer.amd.sqtt import decode, INST, VALUINST
+from tinygrad.viz.serve import sqtt_timeline
+
+sqtt_events = [e for e in data if type(e).__name__ == "ProfileSQTTEvent"]
+dev = next((e for e in data if type(e).__name__ == "ProfileDeviceEvent" and e.device == "AMD"), None)
+target = dev.props.get("gfx_target_version", 0) if dev else 0
+prg_by_tag = {e.tag: e for e in prg_events if e.lib is not None and len(e.lib) > 0}
+
+tested = 0
+for ev in sqtt_events:
+  if not ev.itrace or ev.kern not in prg_by_tag: continue
+  prg = prg_by_tag[ev.kern]
+  timeline = sqtt_timeline(ev.blob, prg.lib, target)
+  pkts = list(decode(ev.blob))
+  n_valu = sum(1 for p in pkts if isinstance(p, VALUINST))
+  n_inst = sum(1 for p in pkts if isinstance(p, INST))
+  print(f"OK kern={ev.kern} name={prg.name}: {n_inst} INST, {n_valu} VALUINST, {len(timeline)} timeline events")
+  tested += 1
+
+assert tested > 0, "no SQTT events were tested"
+print(f"PASSED: {tested} sqtt_timeline calls succeeded")
+'''
+    env2 = {k: v for k, v in env.items() if k != "VIZ"}  # don't set VIZ in verification subprocess (would overwrite profile pkl)
+    result2 = subprocess.run([sys.executable, "-c", verify_code], env=env2, capture_output=True, text=True, timeout=60)
+    if result2.returncode != 0:
+      raise AssertionError(f"verification failed (rc={result2.returncode}):\nstdout: {result2.stdout}\nstderr: {result2.stderr}")
+    self.assertIn("PASSED", result2.stdout)
+    # Verify no emulator instruction names leaked
+    self.assertNotIn("FAIL", result2.stderr)
 
 if __name__ == "__main__":
   unittest.main()
