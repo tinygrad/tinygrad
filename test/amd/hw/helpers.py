@@ -60,11 +60,12 @@ def skip_unless_gfx(min_major: int, min_minor: int = 0, reason: str = ""):
     return test_func
   return decorator
 
-# Output buffer layout: vgpr[16][32], sgpr[16], vcc, scc, exec
+# Output buffer layout: vgpr[N_VGPRS][n_lanes], sgpr[N_SGPRS], vcc, scc, exec
 N_VGPRS, N_SGPRS, WAVE_SIZE = 16, 16, 32
-VGPR_BYTES = N_VGPRS * WAVE_SIZE * 4  # 16 regs * 32 lanes * 4 bytes = 2048
 SGPR_BYTES = N_SGPRS * 4  # 16 regs * 4 bytes = 64
-OUT_BYTES = VGPR_BYTES + SGPR_BYTES + 12  # + vcc + scc + exec
+_VGPR_REGION = N_VGPRS * WAVE_SIZE * 4  # minimum vgpr region size (tests may use as scratch)
+def _out_bytes(n_lanes: int) -> int: return max(N_VGPRS * n_lanes * 4, _VGPR_REGION) + SGPR_BYTES + 12
+OUT_BYTES = _out_bytes(WAVE_SIZE)  # default for single-wave (backward compat)
 
 # Float conversion helpers
 def f2i(f: float) -> int: return _i32(f)
@@ -77,8 +78,8 @@ def assemble(instructions: list) -> bytes:
 
 # Simple WaveState class for test output parsing (mirrors test/mockgpu/amd/emu.py interface for tests)
 class WaveState:
-  def __init__(self):
-    self.vgpr = [[0] * 256 for _ in range(32)]  # vgpr[lane][reg]
+  def __init__(self, n_lanes: int = 32):
+    self.vgpr = [[0] * 256 for _ in range(n_lanes)]  # vgpr[lane][reg]
     self.sgpr = [0] * 128
     self.vcc = 0
     self.scc = 0
@@ -102,49 +103,53 @@ def get_prologue_epilogue(n_lanes: int) -> tuple[list, list]:
     # Save EXEC early (before we modify it for VGPR stores)
     s_mov_b32(s[95], EXEC_LO),
     # Restore EXEC to all active lanes for VGPR stores (test may have modified EXEC)
-    s_mov_b32(EXEC_LO, (1 << n_lanes) - 1),
+    s_mov_b32(EXEC_LO, (1 << min(n_lanes, WAVE_SIZE)) - 1),
     s_load_b64(s[92:93], s[80:81], 0, soffset=NULL),
     s_waitcnt(0),  # simm16=0 waits for all
     v_lshlrev_b32_e32(v[240], 2, v[255]),
   ]
+  vgpr_bytes = N_VGPRS * n_lanes * 4
   for i in range(N_VGPRS):
-    epilogue.append(global_store_b32(addr=v[240], data=v[i], saddr=s[92:93], offset=i * WAVE_SIZE * 4))
+    epilogue.append(global_store_b32(addr=v[240], data=v[i], saddr=s[92:93], offset=i * n_lanes * 4))
   epilogue.append(v_mov_b32_e32(v[241], 0))
   epilogue.append(v_cmp_eq_u32_e32(v[255], v[241]))
   epilogue.append(s_and_saveexec_b32(s[94], VCC_LO))
-  epilogue.append(v_mov_b32_e32(v[240], 0))
+  # Scalar stores: only thread 0. Use v[240]=vgpr_bytes as base offset so immediate offsets stay small.
+  epilogue.append(v_mov_b32_e32(v[240], vgpr_bytes))
   for i in range(N_SGPRS):
     epilogue.append(v_mov_b32_e32(v[243], s[i]))
-    epilogue.append(global_store_b32(addr=v[240], data=v[243], saddr=s[92:93], offset=VGPR_BYTES + i * 4))
+    epilogue.append(global_store_b32(addr=v[240], data=v[243], saddr=s[92:93], offset=i * 4))
   epilogue.append(v_mov_b32_e32(v[243], s[90]))
-  epilogue.append(global_store_b32(addr=v[240], data=v[243], saddr=s[92:93], offset=VGPR_BYTES + SGPR_BYTES))
+  epilogue.append(global_store_b32(addr=v[240], data=v[243], saddr=s[92:93], offset=SGPR_BYTES))
   epilogue.append(v_mov_b32_e32(v[243], s[91]))
-  epilogue.append(global_store_b32(addr=v[240], data=v[243], saddr=s[92:93], offset=VGPR_BYTES + SGPR_BYTES + 4))
+  epilogue.append(global_store_b32(addr=v[240], data=v[243], saddr=s[92:93], offset=SGPR_BYTES + 4))
   # Store EXEC (saved earlier in s[95])
   epilogue.append(v_mov_b32_e32(v[243], s[95]))
-  epilogue.append(global_store_b32(addr=v[240], data=v[243], saddr=s[92:93], offset=VGPR_BYTES + SGPR_BYTES + 8))
+  epilogue.append(global_store_b32(addr=v[240], data=v[243], saddr=s[92:93], offset=SGPR_BYTES + 8))
   epilogue.append(s_mov_b32(EXEC_LO, s[94]))
   epilogue.append(s_endpgm())
   return prologue, epilogue
 
 def parse_output(out_buf: bytes, n_lanes: int) -> WaveState:
   """Parse output buffer into WaveState."""
-  st = WaveState()
+  vgpr_bytes = N_VGPRS * n_lanes * 4
+  st = WaveState(n_lanes)
   for i in range(N_VGPRS):
     for lane in range(n_lanes):
-      off = i * WAVE_SIZE * 4 + lane * 4
+      off = i * n_lanes * 4 + lane * 4
       st.vgpr[lane][i] = struct.unpack_from('<I', out_buf, off)[0]
   for i in range(N_SGPRS):
-    st.sgpr[i] = struct.unpack_from('<I', out_buf, VGPR_BYTES + i * 4)[0]
-  st.vcc = struct.unpack_from('<I', out_buf, VGPR_BYTES + SGPR_BYTES)[0]
-  st.scc = struct.unpack_from('<I', out_buf, VGPR_BYTES + SGPR_BYTES + 4)[0]
+    st.sgpr[i] = struct.unpack_from('<I', out_buf, vgpr_bytes + i * 4)[0]
+  st.vcc = struct.unpack_from('<I', out_buf, vgpr_bytes + SGPR_BYTES)[0]
+  st.scc = struct.unpack_from('<I', out_buf, vgpr_bytes + SGPR_BYTES + 4)[0]
   # Store EXEC in its proper location (index 126)
-  st.sgpr[EXEC_LO.offset] = struct.unpack_from('<I', out_buf, VGPR_BYTES + SGPR_BYTES + 8)[0]
+  st.sgpr[EXEC_LO.offset] = struct.unpack_from('<I', out_buf, vgpr_bytes + SGPR_BYTES + 8)[0]
   return st
 
 def run_program_emu(instructions: list, n_lanes: int = 1) -> WaveState:
   """Run instructions via emulator run_asm, dump state to memory, return WaveState."""
-  out_buf = (ctypes.c_uint8 * OUT_BYTES)(*([0] * OUT_BYTES))
+  buf_sz = _out_bytes(n_lanes)
+  out_buf = (ctypes.c_uint8 * buf_sz)(*([0] * buf_sz))
   out_addr = ctypes.addressof(out_buf)
 
   prologue, epilogue = get_prologue_epilogue(n_lanes)
@@ -220,11 +225,12 @@ amdhsa.kernels:
   lib = compiler.compile(asm_src)
   prg = AMDProgram(dev, "test", lib)  # type: ignore[arg-type]
 
-  out_gpu = dev.allocator.alloc(OUT_BYTES)
+  buf_sz = _out_bytes(n_lanes)
+  out_gpu = dev.allocator.alloc(buf_sz)
   assert out_gpu.va_addr % 16 == 0, f"buffer not 16-byte aligned: 0x{out_gpu.va_addr:x}"
   prg(out_gpu, global_size=(1, 1, 1), local_size=(n_lanes, 1, 1), wait=True)
 
-  out_buf = bytearray(OUT_BYTES)
+  out_buf = bytearray(buf_sz)
   dev.allocator._copyout(flat_mv(memoryview(out_buf)), out_gpu)
 
   return parse_output(bytes(out_buf), n_lanes)

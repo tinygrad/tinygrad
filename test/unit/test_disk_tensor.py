@@ -28,7 +28,7 @@ def compare_weights_both(url):
     np.testing.assert_equal(tg_weights[k].numpy(), torch_weights[k].numpy(), err_msg=f"mismatch at {k}, {tg_weights[k].shape}")
   print(f"compared {len(tg_weights)} weights")
 
-class TestTorchLoad(unittest.TestCase):
+class TestTorchLoad(TempDirTestCase):
   # pytorch pkl format
   def test_load_enet(self): compare_weights_both("https://github.com/lukemelas/EfficientNet-PyTorch/releases/download/1.0/efficientnet-b0-355c32eb.pth")
   # pytorch zip format
@@ -41,6 +41,13 @@ class TestTorchLoad(unittest.TestCase):
 
   # pytorch tar format
   def test_load_resnet(self): compare_weights_both('https://download.pytorch.org/models/resnet50-19c8e357.pth')
+
+  # shared storage (mixtral-8x7b-32kseqlen)
+  def test_shared_storage(self):
+    import torch
+    fn = self.tmp("shared_storage.pth")
+    torch.save({"a": (a := torch.randn(100)), "b": a[5:]}, fn)
+    compare_weights_both(fn)
 
 test_fn = pathlib.Path(__file__).parents[2] / "weights/LLaMA/7B/consolidated.00.pth"
 #test_size = test_fn.stat().st_size

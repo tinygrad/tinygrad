@@ -1579,5 +1579,55 @@ class TestPermlane64(unittest.TestCase):
     self.assertEqual(st.vgpr[0][1], 0x12345678)
 
 
+class TestSwap(unittest.TestCase):
+  """Tests for V_SWAP_B32 - swap two VGPRs."""
+
+  def test_v_swap_b32_basic(self):
+    """V_SWAP_B32 swaps two VGPR values."""
+    instructions = [
+      v_mov_b32_e32(v[0], 42),
+      v_mov_b32_e32(v[1], 99),
+      v_swap_b32_e32(v[0], v[1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][0], 99)
+    self.assertEqual(st.vgpr[0][1], 42)
+
+  def test_v_swap_b32_same_reg(self):
+    """V_SWAP_B32 with same src and dst is a no-op."""
+    instructions = [
+      v_mov_b32_e32(v[0], 0xDEADBEEF),
+      v_swap_b32_e32(v[0], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][0], 0xDEADBEEF)
+
+  def test_v_swap_b32_multi_lane(self):
+    """V_SWAP_B32 swaps per-lane values independently."""
+    instructions = [
+      # v[0] = lane_id * 10, v[1] = lane_id * 100
+      v_lshlrev_b32_e32(v[0], 1, v[255]),       # v[0] = lane_id * 2
+      v_add_nc_u32_e32(v[0], v[0], v[255]),      # v[0] = lane_id * 3
+      v_mul_u32_u24_e32(v[1], 100, v[255]),      # v[1] = lane_id * 100
+      v_swap_b32_e32(v[0], v[1]),
+    ]
+    st = run_program(instructions, n_lanes=4)
+    for lane in range(4):
+      self.assertEqual(st.vgpr[lane][0], lane * 100)
+      self.assertEqual(st.vgpr[lane][1], lane * 3)
+
+  def test_v_swap_b32_chain(self):
+    """Two swaps in sequence restore original values."""
+    instructions = [
+      v_mov_b32_e32(v[0], 0xAAAAAAAA),
+      v_mov_b32_e32(v[1], 0x55555555),
+      v_swap_b32_e32(v[0], v[1]),
+      v_swap_b32_e32(v[0], v[1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][0], 0xAAAAAAAA)
+    self.assertEqual(st.vgpr[0][1], 0x55555555)
+
+
 if __name__ == '__main__':
   unittest.main()
