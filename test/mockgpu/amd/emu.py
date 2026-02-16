@@ -308,7 +308,13 @@ _pcode_fallback: dict[str, str] = {
 def get_pcode(op) -> str:
   op_name = op.name
   pcode_dict = _get_pcode_dict(op)
-  pcode = pcode_dict[op] if op in pcode_dict else _pcode_fallback[op_name]
+  if op in pcode_dict: pcode = pcode_dict[op]
+  elif op_name in _pcode_fallback: pcode = _pcode_fallback[op_name]
+  else:
+    # VOP3 E64 encoding of VOP1 instructions: look up E32 version by name in same pcode dict
+    e32_name = op_name.replace('_E64', '_E32')
+    pcode = next((v for k, v in pcode_dict.items() if k.name == e32_name), None)
+    if pcode is None: raise KeyError(op_name)
   if op_name in _pcode_fixes: pcode = pcode.replace(*_pcode_fixes[op_name])
   if 'V_DIV_SCALE' in op_name:
     dt, exp_lim, ldexp_val = ('f32', '23', '64') if 'F32' in op_name else ('f64', '52', '128')
