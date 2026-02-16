@@ -413,7 +413,7 @@ class TestVizProfiler(BaseTestViz):
     j = load_profile(prof)
     event = j['layout']['NV:SDMA:0']['events'][0]
     gbs = sz/(dur*1e-6)*1e-9
-    self.assertEqual(event['fmt'], f"{gbs:.2f} GB/s")
+    self.assertEqual(event['fmt'], f"{gbs:.0f} GB/s")
 
   def test_graph(self):
     prof = [ProfileDeviceEvent(device='NV', tdiff=decimal.Decimal(-1000)),
