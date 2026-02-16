@@ -113,7 +113,7 @@ class PythonEmulator:
 
   def _ensure_decoded(self, pc: int):
     if pc not in self.program:
-      runner = _decode_at(pc, "rdna3")
+      runner, _ = _decode_at(pc, "rdna3")
       self.program[pc] = (runner.p.function_name, runner._prg.fxn, runner.p.globals)
 
   def step(self) -> int:

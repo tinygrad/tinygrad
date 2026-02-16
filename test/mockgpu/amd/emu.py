@@ -1241,11 +1241,10 @@ _BARRIER_OPS = {ir3.SOPPOp.S_BARRIER, irc.SOPPOp.S_BARRIER}
 if hasattr(ir4.SOPPOp, 'S_BARRIER_WAIT'): _BARRIER_OPS.add(ir4.SOPPOp.S_BARRIER_WAIT)
 
 def _decode_at(pc: int, arch: str):
-  """Decode and compile instruction at absolute address pc. Returns (CompiledRunner, is_barrier)."""
+  """Decode and compile instruction at absolute address pc. Returns (runner, decoded_inst)."""
   inst_bytes = bytes((ctypes.c_char * 16).from_address(pc).raw)
   inst = decode_inst(inst_bytes, arch)
-  is_barrier = isinstance(inst, (ir3.SOPP, ir4.SOPP, irc.SOPP)) and inst.op in _BARRIER_OPS
-  try: return _get_runner(bytes(inst_bytes[:inst.size() + 4]), arch), is_barrier
+  try: return _get_runner(bytes(inst_bytes[:inst.size() + 4]), arch), inst
   except Exception as e:
     try: inst_str = repr(inst)
     except Exception: inst_str = f"<{type(inst).__name__}>"
@@ -1337,10 +1336,10 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
   def _ensure_compiled(pc: int) -> tuple[Callable, list[int], bool]:
     if pc not in program:
       prev_len = len(_canonical_runner_cache)
-      runner, is_barrier = _decode_at(pc, arch)
+      runner, inst = _decode_at(pc, arch)
+      is_barrier = isinstance(inst, (ir3.SOPP, ir4.SOPP, irc.SOPP)) and inst.op in _BARRIER_OPS
       program[pc] = (runner._prg.fxn, runner.p.globals, is_barrier)
       if DEBUG >= 3:
-        inst = decode_inst(bytes((ctypes.c_char * 16).from_address(pc).raw), arch)
         msg = f"[emu] PC={pc - lib}: {inst!r}"
         print(colored(msg, 'green') if len(_canonical_runner_cache) > prev_len else msg)
     return program[pc]
