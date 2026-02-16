@@ -5,7 +5,7 @@ from tinygrad.dtype import dtypes, ConstType
 from tinygrad.mixin.dtype import DTypeMixin
 
 
-class MathMixin(DTypeMixin):
+class ElementwiseMixin(DTypeMixin):
   # required to implement
   def alu(self, op: Ops, *src: Self) -> Self:
     raise NotImplementedError
@@ -15,7 +15,7 @@ class MathMixin(DTypeMixin):
 
   # great functions you get!
   def ufix(self, x: Self | ConstType) -> Self:
-    return self.const_like(x) if not isinstance(x, MathMixin) else x
+    return self.const_like(x) if not isinstance(x, ElementwiseMixin) else x
 
   def _binop(self, op: Ops, x: Self | ConstType, reverse: bool) -> Self:
     return self.ufix(x).alu(op, self) if reverse else self.alu(op, self.ufix(x))

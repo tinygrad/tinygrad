@@ -467,10 +467,13 @@ class AMDHIPRenderer(CStyleLanguage):
     return {"gfx942": tc.amd_cdna3, "gfx950": tc.amd_cdna4, "gfx1200": tc.amd_rdna4, "gfx1201": tc.amd_rdna4}.get(arch.split(":")[0], tc.amd_rdna3)
   @staticmethod
   def is_cdna(arch): return arch.split(":")[0] in {"gfx942", "gfx950"}
+  @staticmethod
+  def is_cdna4(arch): return arch.split(":")[0] == "gfx950"
   def __init__(self, arch:str): # gfx942 => MI300, gfx1100 => RX 7900, gfx1201 => RX 9700
     from tinygrad.runtime.support.compiler_amd import HIPCompiler
     self.arch, self.compiler = arch, HIPCompiler(arch)
     self.tensor_cores = self.get_tensor_cores(arch)
+    if not self.is_cdna4(self.arch): self.extra_matcher += pm_manual_bf16_cast + extra_pm
     if self.is_cdna(self.arch):
       self.string_rewrite = PatternMatcher([
         (UPat(Ops.WMMA, name="x"), lambda ctx,x: f"__{x.arg[0]}({ctx[x.src[0]]}, {ctx[x.src[1]]}, {ctx[x.src[2]]},"
@@ -502,7 +505,7 @@ class AMDHIPRenderer(CStyleLanguage):
         x.src[2]), (*x.arg,)) if x.src[0].dtype in (dtypes.fp8e4m3.vec(8), dtypes.fp8e5m2.vec(8)) else None),
     # bfloat16 constant casting
     (UPat.cvar('x', dtypes.bfloat16), lambda x: cast_float_to_bf16(UOp.const(dtypes.float, x.arg))),
-  ]) + pm_manual_bf16_cast + extra_pm
+  ])
 
   def render_vector_prefix(self, dtype:DType) -> str:
     vec, scal = self.render_dtype(dtype), self.render_dtype(dtype.scalar())
@@ -521,7 +524,8 @@ class AMDHIPRenderer(CStyleLanguage):
     ocml_ops = {Ops.EXP2: ("exp2", "pure"), Ops.LOG2: ("log2", "pure"), Ops.SQRT: ("sqrt", "const"), Ops.SIN: ("sin", ""), Ops.TRUNC: ("trunc", "")}
     ocml = [(f"__ocml_{ocml_ops[op][0]}_f{dt.bitsize}", dt.name, dt.name, ocml_ops[op][1])
       for op, dt in dedup((u.op, u.dtype.scalar()) for u in uops) if op in ocml_ops and dt in (dtypes.half, dtypes.float, dtypes.double)]
-    if any(dt.scalar() == dtypes.bfloat16 for dt in used_dtypes): prefix.append("typedef unsigned short hip_bfloat16;")
+    if any(dt.scalar() == dtypes.bfloat16 for dt in used_dtypes):
+      prefix.append(f"typedef {'__bf16' if self.is_cdna4(self.arch) else 'unsigned short'} hip_bfloat16;")
     if any(dt.scalar() == dtypes.half for dt in used_dtypes): prefix.append("#define half _Float16")
     if any(dt.scalar() in dtypes.fp8s for dt in used_dtypes):
       prefix += ["typedef unsigned char hip_bf8;", "typedef unsigned char hip_fp8;"]
