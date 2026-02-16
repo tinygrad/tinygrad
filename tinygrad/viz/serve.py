@@ -72,7 +72,7 @@ def get_rewrites(t:RewriteTrace) -> list[dict]:
     if (prg_idx:=next((j for j,s in enumerate(v) if s.name == "View Final Program"), None)) is not None:
       _, device, lin, src, binary = _reconstruct(trace.rewrites[i][prg_idx].sink).src
       steps.append(create_step("View UOp List", ("/uops", i, len(steps)), lin.src))
-      steps.append(create_step("View Program", ("/code", i, len(steps)), src.arg))
+      steps.append(create_step("View Source", ("/code", i, len(steps)), src.arg))
       steps.append(create_step("View Disassembly", ("/asm", i, len(steps)), (device.arg, binary.arg)))
     for key in k.keys: ref_map[key] = i
     ret.append({"name":k.display_name, "steps":steps})
