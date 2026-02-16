@@ -472,6 +472,19 @@ class _Ctx:
     lo, hi = _split64(val)
     return [self.wsgpr_dyn(_c(VCC_LO.offset), lo), self.wsgpr_dyn(_c(VCC_LO.offset + 1), hi)]
 
+  def read_mask_at(self, off: UOp) -> UOp:
+    """Read wave-size-aware mask from SGPR pair at given offset."""
+    lo = self.rsgpr_dyn(off)
+    if self.wave_size <= 32: return lo
+    hi = self.rsgpr_dyn(off + _c(1))
+    return lo.cast(dtypes.uint64) | (hi.cast(dtypes.uint64) << _c(32, dtypes.uint64))
+
+  def write_mask_at(self, off: UOp, val: UOp) -> list[UOp]:
+    """Write wave-size-aware mask to SGPR pair at given offset."""
+    if self.wave_size <= 32: return [self.wsgpr_dyn(off, _to_u32(val))]
+    lo, hi = _split64(val)
+    return [self.wsgpr_dyn(off, lo), self.wsgpr_dyn(off + _c(1), hi)]
+
   def wave_vars(self) -> dict[str, UOp]:
     """Return wave-size-dependent variables for pcode parser."""
     d: dict[str, UOp] = {'_vgpr_stride': _c(self.wave_size)}
@@ -644,7 +657,7 @@ class _Ctx:
     """Compile VOP instruction. Returns sink with stores and inc_pc."""
     pcode = get_pcode(op)
     vcc_reg = sdst_reg if sdst_reg is not None else VCC_LO.offset
-    if 'VCC' not in srcs: srcs['VCC'] = self.read_vcc() if vcc_reg == VCC_LO.offset else self.rsgpr_dyn(_c(vcc_reg))
+    if 'VCC' not in srcs: srcs['VCC'] = self.read_vcc() if vcc_reg == VCC_LO.offset else self.read_mask_at(_c(vcc_reg))
     srcs.update({'EXEC': exec_mask, 'SCC': self.rsgpr_dyn(_c(SCC.offset)), 'laneId': lane, 'VDST': vdst_reg,
                  'ROUND_MODE': _c(0), 'ROUND_TOWARD_ZERO': _c(0), 'ROUND_NEAREST_EVEN': _c(0), **self.wave_vars()})
     _, assigns = parse_pcode(pcode, srcs)
@@ -720,7 +733,7 @@ class _Ctx:
       def get_bit(l, v=mask_val): return v.substitute({lane: l}).cast(dt) & _c(1, dt)
       full_mask = self.unroll_lanes(get_bit, exec_mask, apply_exec=False)
       stores.extend(self.write_exec(full_mask) if is_exec else self.write_vcc(full_mask) if vcc_reg == VCC_LO.offset
-                    else [self.wsgpr_dyn(_c(vcc_reg), _to_u32(full_mask))])
+                    else self.write_mask_at(_c(vcc_reg), full_mask))
     stores.extend(scalar_stores)
     return UOp.sink(*stores, *self.inc_pc())
 
@@ -913,9 +926,9 @@ def _compile_vopc(inst: ir3.VOPC|ir3.VOP3|ir4.VOPC|ir4.VOP3|irc.VOPC|irc.VOP3, c
   # CMPX e32: writes EXEC only; CMPX e64: writes both EXEC and SDST; non-CMPX: writes dst only
   if is_cmpx:
     stores = list(ctx.write_exec(new_result))
-    if not is_vopc: stores.append(ctx.wsgpr_dyn(dst_off, _to_u32(new_result)))
+    if not is_vopc: stores.extend(ctx.write_mask_at(dst_off, new_result))
   else:
-    stores = [ctx.wsgpr_dyn(dst_off, _to_u32(new_result))] if not is_vopc else list(ctx.write_vcc(new_result))
+    stores = list(ctx.write_mask_at(dst_off, new_result)) if not is_vopc else list(ctx.write_vcc(new_result))
   return UOp.sink(*stores, *ctx.inc_pc())
 
 def _compile_vop3(inst: ir3.VOP3 | ir4.VOP3 | irc.VOP3, ctx: _Ctx) -> UOp:
@@ -989,7 +1002,7 @@ def _compile_vop3sd(inst: ir3.VOP3SD | ir4.VOP3SD | irc.VOP3SD, ctx: _Ctx) -> UO
   vcc_in_off = src2_off if has_carry_in else sdst_off
 
   def load_srcs(lane_uop):
-    ret = {'VCC': ctx.rsgpr_dyn(vcc_in_off), 'EXEC': exec_mask, 'SCC': ctx.rsgpr_dyn(_c(SCC.offset)), 'laneId': lane_uop}
+    ret = {'VCC': ctx.read_mask_at(vcc_in_off), 'EXEC': exec_mask, 'SCC': ctx.rsgpr_dyn(_c(SCC.offset)), 'laneId': lane_uop}
     ret['S0'] = ctx.rsrc_dyn(src0_off, lane_uop, bits['s0'], literal, ops['s0'][0] == Fmt.FMT_NUM_F64)
     ret['S1'] = ctx.rsrc_dyn(src1_off, lane_uop, bits['s1'], literal, ops['s1'][0] == Fmt.FMT_NUM_F64)
     if 's2' in ops: ret['S2'] = ctx.rsrc_dyn(src2_off, lane_uop, bits['s2'], literal, ops['s2'][0] == Fmt.FMT_NUM_F64)
