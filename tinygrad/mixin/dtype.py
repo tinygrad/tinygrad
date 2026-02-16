@@ -28,7 +28,7 @@ class DTypeMixin:
     print(t.is_floating_point())
     ```
     """
-    return dtypes.is_float(self.dtype)
+    return dtypes.is_float(self.dtype.base)
 
   def float(self) -> Self:
     """
