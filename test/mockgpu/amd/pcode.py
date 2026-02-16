@@ -40,9 +40,12 @@ def _bitreverse(v: UOp, bits: int) -> UOp:
 
 def _extract_bits(val: UOp, hi: int, lo: int) -> UOp:
   dt = dtypes.uint64 if val.dtype in (dtypes.uint64, dtypes.int64) else dtypes.uint32
-  result = ((val >> _const(dt, lo)) if lo > 0 else val) & _const(val.dtype, (1 << (hi - lo + 1)) - 1)
-  # Downcast to uint32 when extracting <=32 bits from a 64-bit value, so .f32 bitcast works correctly
-  if dt == dtypes.uint64 and (hi - lo + 1) <= 32: result = result.cast(dtypes.uint32)
+  width = hi - lo + 1
+  result = ((val >> _const(dt, lo)) if lo > 0 else val) & _const(val.dtype, (1 << width) - 1)
+  # Downcast to smallest standard type, so brace concat {hi, lo} and .type bitcasts work correctly
+  if width <= 8: return result.cast(dtypes.uint8)
+  if width <= 16: return result.cast(dtypes.uint16)
+  if width <= 32 and dt == dtypes.uint64: return result.cast(dtypes.uint32)
   return result
 
 def _set_bit(old, pos, val):
@@ -1189,7 +1192,10 @@ def parse_block(lines: list[str], start: int, env: dict[str, VarVal], funcs: dic
         result = else_branch[0]
         for c, rv in reversed(conditions):
           if isinstance(rv, UOp) and isinstance(result, UOp):
-            if rv.dtype != result.dtype and rv.dtype.itemsize == result.dtype.itemsize: result = result.cast(rv.dtype)
+            if rv.dtype != result.dtype:
+              if rv.dtype.itemsize == result.dtype.itemsize: result = result.cast(rv.dtype)
+              elif rv.dtype.itemsize > result.dtype.itemsize: result = result.cast(rv.dtype)
+              else: rv = rv.cast(result.dtype)
             result = c.where(rv, result)
         return i, block_assigns, result
       # If statically true, use that branch directly; otherwise merge with WHERE
@@ -1206,7 +1212,11 @@ def parse_block(lines: list[str], start: int, env: dict[str, VarVal], funcs: dic
             if isinstance(ba, dict) and var in ba:
               tv = ba[var]
               if isinstance(tv, UOp) and isinstance(res, UOp):
-                res = cond.where(tv, res.cast(tv.dtype) if tv.dtype != res.dtype and tv.dtype.itemsize == res.dtype.itemsize else res)
+                if tv.dtype != res.dtype:
+                  if tv.dtype.itemsize == res.dtype.itemsize: res = res.cast(tv.dtype)
+                  elif tv.dtype.itemsize > res.dtype.itemsize: res = res.cast(tv.dtype)
+                  else: tv = tv.cast(res.dtype)
+                res = cond.where(tv, res)
           block_assigns[var] = env[var] = res
       continue
 
