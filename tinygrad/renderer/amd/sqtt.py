@@ -575,7 +575,7 @@ class InstructionInfo:
   wave: int
   inst: Inst
 
-def map_insts(data:bytes, lib:bytes, target:int) -> Iterator[tuple[PacketType, InstructionInfo|None]]:
+def map_insts(data:bytes, lib:bytes, target:str) -> Iterator[tuple[PacketType, InstructionInfo|None]]:
   """maps SQTT packets to instructions, yields (packet, instruction_info or None)"""
   # map pcs to insts
   from tinygrad.viz.serve import amd_decode

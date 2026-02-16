@@ -55,7 +55,7 @@ from tinygrad.uop.ops import UOp, Ops, KernelInfo, AxisType
 from tinygrad.dtype import dtypes
 from tinygrad.device import Buffer, BufferSpec
 from tinygrad.runtime.autogen import hsa
-from tinygrad.helpers import Context, DEBUG, colored
+from tinygrad.helpers import Context, DEBUG, PROFILE, colored
 from tinygrad.engine.realize import get_runner
 
 from tinygrad.renderer.amd import decode_inst
@@ -70,6 +70,125 @@ from tinygrad.runtime.autogen.amd.common import Fmt, OpType
 from test.mockgpu.amd.pcode import parse_block, _FUNCS
 
 MASK32 = 0xFFFFFFFF
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# SQTT TRACE COLLECTION
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Global trace storage: populated by run_asm as raw SQTT blobs, consumed by amdgpu.py
+sqtt_traces: list[bytes] = []
+
+# Encoder primitives
+from tinygrad.renderer.amd.sqtt import _build_decode_tables, PACKET_TYPES_RDNA3, LAYOUT_HEADER, WAVESTART, WAVEEND, INST, IMMEDIATE, VALUINST, InstOp
+
+_NIB_COUNTS: dict = {cls: nc for _, (cls, nc, *_) in _build_decode_tables(PACKET_TYPES_RDNA3)[0].items()}
+
+def _encode_raw(pkt_cls, **kwargs) -> tuple[int, int]:
+  raw = pkt_cls.encoding.default
+  for k, v in kwargs.items(): raw = pkt_cls.__dict__[k].set(raw, v)
+  return raw, _NIB_COUNTS[pkt_cls]
+
+def _emit_nibbles(nibbles: list[int], pkt_cls, **kwargs):
+  raw, nc = _encode_raw(pkt_cls, **kwargs)
+  for i in range(nc): nibbles.append((raw >> (i * 4)) & 0xF)
+
+def _nibbles_to_bytes(nibbles: list[int]) -> bytes:
+  result = bytearray()
+  for i in range(0, len(nibbles), 2): result.append(nibbles[i] | ((nibbles[i + 1] if i + 1 < len(nibbles) else 0) << 4))
+  return bytes(result)
+
+def _init_sqtt_encoder():
+  """Initialize and return SQTT encoder state. Called once per dispatch with tracing enabled."""
+  from tinygrad.runtime.autogen.amd.rdna3.enum import SOPPOp as SOPPOp3
+  from tinygrad.runtime.autogen.amd.rdna4.enum import SOPPOp as SOPPOp4
+  import re
+
+  _SOPP = (ir3.SOPP, ir4.SOPP, irc.SOPP)
+  _SMEM = (ir3.SMEM, ir4.SMEM, irc.SMEM)
+  _VALU = (ir3.VOP1, ir3.VOP2, ir3.VOP3, ir3.VOP3P, ir3.VOPC, ir3.VOPD, ir3.VOP3SD, ir3.VOP3_SDST, ir3.VOP1_SDST,
+           ir4.VOP1, ir4.VOP2, ir4.VOP3, ir4.VOP3P, ir4.VOPC, ir4.VOPD, ir4.VOP3SD, ir4.VOP3_SDST, ir4.VOP1_SDST,
+           irc.VOP1, irc.VOP2, irc.VOP3, irc.VOP3P, irc.VOPC, irc.VOP3SD, irc.VOP3_SDST)
+  _DS = (ir3.DS, ir4.DS, irc.DS)
+  _GLOBAL = (ir3.GLOBAL, ir4.VGLOBAL, irc.GLOBAL)
+  _FLAT = (ir3.FLAT, ir4.VFLAT, irc.FLAT)
+  _SCRATCH = (ir3.SCRATCH, ir4.VSCRATCH, irc.SCRATCH)
+
+  # SOPP classification sets
+  _SOPP_SKIP = {SOPPOp3.S_ENDPGM.value, SOPPOp3.S_ENDPGM_SAVED.value, SOPPOp3.S_ENDPGM_ORDERED_PS_DONE.value,
+                SOPPOp3.S_DELAY_ALU.value}
+  _SOPP_IMMEDIATE = {SOPPOp3.S_NOP.value, SOPPOp3.S_CLAUSE.value, SOPPOp3.S_WAITCNT.value, SOPPOp3.S_WAITCNT_DEPCTR.value,
+                     SOPPOp3.S_WAIT_IDLE.value, SOPPOp3.S_WAIT_EVENT.value, SOPPOp3.S_SLEEP.value,
+                     SOPPOp3.S_SET_INST_PREFETCH_DISTANCE.value}
+  for _op in (SOPPOp4.S_WAIT_ALU, SOPPOp4.S_WAIT_LOADCNT, SOPPOp4.S_WAIT_STORECNT, SOPPOp4.S_WAIT_SAMPLECNT,
+              SOPPOp4.S_WAIT_BVHCNT, SOPPOp4.S_WAIT_EXPCNT, SOPPOp4.S_WAIT_DSCNT, SOPPOp4.S_WAIT_KMCNT,
+              SOPPOp4.S_WAIT_LOADCNT_DSCNT, SOPPOp4.S_WAIT_STORECNT_DSCNT):
+    _SOPP_IMMEDIATE.add(_op.value)
+  _SOPP_BARRIER = {SOPPOp3.S_BARRIER.value}
+  if hasattr(SOPPOp4, 'S_BARRIER_WAIT'): _SOPP_BARRIER.add(SOPPOp4.S_BARRIER_WAIT.value)
+  if hasattr(SOPPOp4, 'S_BARRIER_LEAVE'): _SOPP_BARRIER.add(SOPPOp4.S_BARRIER_LEAVE.value)
+  _SOPP_BRANCH = {SOPPOp3.S_BRANCH.value, SOPPOp3.S_CBRANCH_SCC0.value, SOPPOp3.S_CBRANCH_SCC1.value,
+                  SOPPOp3.S_CBRANCH_VCCZ.value, SOPPOp3.S_CBRANCH_VCCNZ.value,
+                  SOPPOp3.S_CBRANCH_EXECZ.value, SOPPOp3.S_CBRANCH_EXECNZ.value}
+
+  # VALU sub-classification patterns
+  _VALU_TRANS_RE = re.compile(r'V_(EXP|LOG|RCP|RSQ|SQRT|SIN|COS|CEIL|FLOOR|TRUNC|RNDNE|FRACT|FREXP)_')
+  _VALU_64_SHIFT_RE = re.compile(r'V_(LSHLREV|LSHRREV|ASHRREV)_(B|I)64')
+  _VALU_MAD64_RE = re.compile(r'V_MAD_(U|I)64')
+  _VALU_64_RE = re.compile(r'V_\w+_F64')
+
+  def _valu_op(op_name: str) -> InstOp|None:
+    if 'CMPX' in op_name: return InstOp.VALU_CMPX
+    if _VALU_64_SHIFT_RE.search(op_name): return InstOp.VALU_64_SHIFT
+    if _VALU_MAD64_RE.search(op_name): return InstOp.VALU_MAD64
+    if _VALU_64_RE.search(op_name): return InstOp.VALU_64
+    if _VALU_TRANS_RE.search(op_name): return InstOp.VALU_TRANS
+    return None
+
+  def _mem_op(t, op_name: str) -> InstOp:
+    is_store = "STORE" in op_name
+    if issubclass(t, _DS): return InstOp.LDS_STORE if is_store else InstOp.LDS_LOAD
+    if issubclass(t, _GLOBAL): return InstOp.GLOBAL_STORE if is_store else InstOp.GLOBAL_LOAD
+    if issubclass(t, _FLAT): return InstOp.FLAT_STORE if is_store else InstOp.FLAT_LOAD
+    if issubclass(t, _SCRATCH): return InstOp.FLAT_STORE if is_store else InstOp.FLAT_LOAD
+    return InstOp.SALU
+
+  nibbles: list[int] = []
+  started: set[int] = set()
+  _emit_nibbles(nibbles, LAYOUT_HEADER, layout=3, sel_a=6)
+
+  def emit(wave_id: int, inst, branch_taken: bool|None):
+    """Emit an SQTT packet for one executed instruction."""
+    w = wave_id & 0x1F
+    if wave_id not in started:
+      _emit_nibbles(nibbles, WAVESTART, delta=1, simd=0, cu_lo=0, wave=w, id7=wave_id)
+      started.add(wave_id)
+    inst_type, inst_op, op_name = type(inst), inst.op.value if hasattr(inst, 'op') else 0, inst.op.name if hasattr(inst, 'op') else ""
+    if issubclass(inst_type, _SOPP):
+      if inst_op in _SOPP_SKIP: return
+      elif inst_op in _SOPP_IMMEDIATE: _emit_nibbles(nibbles, IMMEDIATE, delta=1, wave=w)
+      elif inst_op in _SOPP_BARRIER: _emit_nibbles(nibbles, INST, delta=1, wave=w, op=InstOp.BARRIER)
+      elif inst_op in _SOPP_BRANCH:
+        _emit_nibbles(nibbles, INST, delta=1, wave=w, op=InstOp.JUMP if branch_taken else InstOp.JUMP_NO)
+      else: _emit_nibbles(nibbles, INST, delta=1, wave=w, op=InstOp.SALU)
+    elif issubclass(inst_type, _VALU):
+      op = _valu_op(op_name)
+      if op is None: _emit_nibbles(nibbles, VALUINST, delta=1, wave=w)
+      else: _emit_nibbles(nibbles, INST, delta=1, wave=w, op=op)
+    elif issubclass(inst_type, _SMEM): _emit_nibbles(nibbles, INST, delta=1, wave=w, op=InstOp.SMEM)
+    else: _emit_nibbles(nibbles, INST, delta=1, wave=w, op=_mem_op(inst_type, op_name))
+
+  def finish(wave_id: int):
+    """Emit WAVEEND for a completed wave."""
+    if wave_id in started: _emit_nibbles(nibbles, WAVEEND, delta=1, simd=0, cu_lo=0, wave=wave_id & 0x1F)
+
+  def finalize() -> bytes:
+    """Pad and return the encoded SQTT blob."""
+    while len(nibbles) % 2 != 0: nibbles.append(0)
+    nibbles.extend([0] * 32)
+    while len(nibbles) % 64 != 0: nibbles.append(0)
+    return _nibbles_to_bytes(nibbles)
+
+  return emit, finish, finalize
 
 def _c(val, dtype=dtypes.uint32): return UOp.const(dtype, val)
 
@@ -116,6 +235,8 @@ WAVE_SIZE = 32
 PC_LO_IDX, PC_HI_IDX, SCRATCH_STRIDE_IDX = 256, 257, 259
 # SGPR buffer: 0-127 = SGPRs, 128-255 = inline constants, 256-259 = special registers
 SGPR_COUNT, VGPR_SIZE = 260, 256 * 32
+# Sentinel PC value for s_endpgm
+ENDPGM_PC = 0xFFFFFFFFFFFFFFFF
 
 def _op_name(inst) -> str:
   if hasattr(inst, 'opx'): return f"{inst.opx.name}_{inst.opy.name}"  # VOPD has opx/opy not op
@@ -210,7 +331,7 @@ def parse_pcode(pcode: str, srcs: dict[str, UOp] | None = None) -> tuple[dict, l
   _, final, _ = parse_block(lines, 0, env, assigns=assigns)
   sliced = set(d.split('[')[0] for d, _ in assigns if '[' in d)
   for var, val in final.items():
-    if var in ['D0', 'SCC', 'VCC', 'EXEC', 'PC', 'RETURN_DATA', 'VDATA'] and isinstance(val, UOp):
+    if var in ['D0', 'S0', 'SCC', 'VCC', 'EXEC', 'PC', 'RETURN_DATA', 'VDATA'] and isinstance(val, UOp):
       if var in sliced and not any(re.match(rf'{var}\.\w+\s*=', l) for l in lines): continue
       for l in lines:
         if (m := re.match(rf'{var}\.(\w+(?:\[\w+\])?)', l)):
@@ -425,7 +546,7 @@ class _Ctx:
         if sdst_size == 2:
           lo, hi = _split64(val)
           stores.extend([self.wsgpr_dyn(sdst_reg, lo), self.wsgpr_dyn(sdst_reg + _c(1), hi)])
-        else: stores.append(self.wsgpr_dyn(sdst_reg, _to_u32(val)))
+        else: stores.append(self.wsgpr_dyn(sdst_reg, _val_to_u32(val)))
       elif dest.startswith('SCC'): stores.append(self.wsgpr_dyn(_c(SCC.offset), _to_u32(val)))
       elif dest.startswith('EXEC'): stores.append(self.wsgpr_dyn(_c(EXEC_LO.offset), _to_u32(val)))
       elif dest.startswith('VCC'): stores.append(self.wsgpr_dyn(_c(VCC_LO.offset), _to_u32(val)))
@@ -462,7 +583,8 @@ class _Ctx:
     return UOp.sink(*stores, *self.inc_pc())
 
   def compile_vop_pcode(self, op, srcs: dict[str, UOp], lane: UOp, vdst_reg: UOp, exec_mask: UOp,
-                        opsel_dst_hi: bool | UOp = False, sdst_reg: int | None = None, clmp: int = 0) -> UOp:
+                        opsel_dst_hi: bool | UOp = False, sdst_reg: int | None = None, clmp: int = 0,
+                        src0_off: UOp | None = None) -> UOp:
     """Compile VOP instruction. Returns sink with stores and inc_pc."""
     pcode = get_pcode(op)
     vcc_reg = sdst_reg if sdst_reg is not None else VCC_LO.offset
@@ -519,11 +641,15 @@ class _Ctx:
           result = opsel_dst_hi.where(hi_result, lo_result) if isinstance(opsel_dst_hi, UOp) else hi_result if opsel_dst_hi else lo_result
           raw_stores.append(('vgpr', self.wvgpr_dyn(vdst_reg, lane, result, exec_mask)))
         else: raw_stores.append(('vgpr', self.wvgpr_dyn(vdst_reg, lane, _val_to_u32(val), exec_mask)))
+      elif dest.startswith('S0') and src0_off is not None:
+        # Write back to src0 VGPR (e.g. v_swap_b32). src0_off is raw encoding (256+ = VGPR)
+        src0_vgpr = src0_off - _c(256)
+        raw_stores.append(('vgpr_s0', self.wvgpr_dyn(src0_vgpr, lane, _val_to_u32(val), exec_mask)))
       elif dest.startswith('VCC'): vcc_val = val
       elif dest.startswith('EXEC'): exec_val = val
       elif dest.startswith('SCC'): raw_stores.append(('scc', self.wsgpr_dyn(_c(SCC.offset), _to_u32(val))))
 
-    stores, lane_stores, scalar_stores = [], [s for t, s in raw_stores if t == 'vgpr'], [s for t, s in raw_stores if t == 'scc']
+    stores, lane_stores, scalar_stores = [], [s for t, s in raw_stores if t in ('vgpr', 'vgpr_s0')], [s for t, s in raw_stores if t == 'scc']
     slice_stores = [s for t, s in raw_stores if t == 'vgpr_slice']
     if slice_stores:
       result = self.rvgpr_dyn(vdst_reg, lane)
@@ -548,6 +674,10 @@ def _compile_sopp(inst: ir3.SOPP | ir4.SOPP, ctx: _Ctx) -> UOp:
   if inst.op in (ir3.SOPPOp.S_ENDPGM, ir4.SOPPOp.S_ENDPGM, irc.SOPPOp.S_ENDPGM):
     return UOp.sink(ctx.wsgpr_dyn(_c(PC_LO_IDX), UOp.const(dtypes.uint32, 0xFFFFFFFF)),
                           ctx.wsgpr_dyn(_c(PC_HI_IDX), UOp.const(dtypes.uint32, 0xFFFFFFFF)))
+  # S_BARRIER: advance PC past the barrier instruction. The execution loop detects barriers before executing and handles synchronization.
+  barrier_ops = {ir3.SOPPOp.S_BARRIER, irc.SOPPOp.S_BARRIER}
+  if hasattr(ir4.SOPPOp, 'S_BARRIER_WAIT'): barrier_ops.add(ir4.SOPPOp.S_BARRIER_WAIT)
+  if inst.op in barrier_ops: return UOp.sink(*ctx.inc_pc())
   # S_NOP and S_WAITCNT are no-ops in emulator (no pipeline/cache to wait on)
   if inst.op in (ir3.SOPPOp.S_NOP, ir4.SOPPOp.S_NOP, irc.SOPPOp.S_NOP, irc.SOPPOp.S_WAITCNT): return UOp.sink(*ctx.inc_pc())
   # NOTE: we ignore SOPPs without PCODE
@@ -576,17 +706,22 @@ def _compile_smem(inst: ir3.SMEM | ir4.SMEM, ctx: _Ctx) -> UOp:
   # Dynamic soffset field - SGPR for additional offset (NULL=124 reads as 0, CDNA soffset_en=0 means no soffset)
   soffset_val = _c(0).cast(dtypes.uint64)
   if not (isinstance(inst, irc.SMEM) and not inst.soffset_en):
-    soffset_val = ctx.inst_field(type(inst).soffset)
-    soffset_val = ctx.rsgpr_dyn(soffset_val).cast(dtypes.uint64)
+    soffset_val = ctx.rsgpr_dyn(ctx.inst_field(type(inst).soffset)).cast(dtypes.uint64)
   addr = _u64(ctx.rsgpr_dyn(sbase), ctx.rsgpr_dyn(sbase + _c(1))) + offset.cast(dtypes.uint64) + soffset_val
-  _SMEM_NDWORDS = {ir3.SMEMOp.S_LOAD_B32: 1, ir3.SMEMOp.S_LOAD_B64: 2, ir3.SMEMOp.S_LOAD_B128: 4,
-    ir3.SMEMOp.S_LOAD_B256: 8, ir3.SMEMOp.S_LOAD_B512: 16, ir4.SMEMOp.S_LOAD_B32: 1, ir4.SMEMOp.S_LOAD_B64: 2,
-    ir4.SMEMOp.S_LOAD_B96: 3, ir4.SMEMOp.S_LOAD_B128: 4, ir4.SMEMOp.S_LOAD_B256: 8, ir4.SMEMOp.S_LOAD_B512: 16,
-    irc.SMEMOp.S_LOAD_DWORD: 1, irc.SMEMOp.S_LOAD_DWORDX2: 2, irc.SMEMOp.S_LOAD_DWORDX4: 4,
-    irc.SMEMOp.S_LOAD_DWORDX8: 8, irc.SMEMOp.S_LOAD_DWORDX16: 16}
-  ndwords = _SMEM_NDWORDS[inst.op]
-  stores = [ctx.wsgpr_dyn(sdata_reg + _c(i), ctx.vmem.index((addr + UOp.const(dtypes.uint64, i * 4) >> UOp.const(dtypes.uint64, 2)).cast(dtypes.int)))
-            for i in range(ndwords)]
+  # S_LOAD_(DTYPE) series: B32/DWORD=1, B64/DWORDX2=2, U8=0.25, I8=-0.25, etc.
+  op_name = _op_name(inst)
+  assert (op_name).startswith('S_LOAD_'), f"unexpected SMEM op: {op_name}"
+  part = op_name.rsplit('_', 1)[1]  # B32, DWORD, DWORDX2, U8, I8, etc.
+  nval = int(part.removeprefix('DWORD').removeprefix('X') or '1') if 'DWORD' in part else int(part[1:]) / 32 * (-1 if part[0] == 'I' else 1)
+  ndwords = max(1, int(abs(nval)))
+  dword_base = addr >> UOp.const(dtypes.uint64, 2)
+  vals = [ctx.vmem.index((dword_base + UOp.const(dtypes.uint64, i)).cast(dtypes.int)) for i in range(ndwords)]
+  if abs(nval) < 1:
+    nbits = int(abs(nval) * 32)
+    byte_off = (addr & UOp.const(dtypes.uint64, 3)).cast(dtypes.uint32) * UOp.const(dtypes.uint32, 8)
+    extracted = (vals[0] >> byte_off) & UOp.const(dtypes.uint32, (1 << nbits) - 1)
+    vals[0] = extracted.cast({8: dtypes.int8, 16: dtypes.int16}[nbits]).cast(dtypes.int32).bitcast(dtypes.uint32) if nval < 0 else extracted
+  stores = [ctx.wsgpr_dyn(sdata_reg + _c(i), vals[i]) for i in range(ndwords)]
   return UOp.sink(*stores, *ctx.inc_pc())
 
 def _compile_sop(inst: ir3.SOP1|ir3.SOP2|ir3.SOPC|ir3.SOPK|ir4.SOP1|ir4.SOP2|ir4.SOPC|ir4.SOPK|irc.SOP1|irc.SOP2|irc.SOPC|irc.SOPK, ctx: _Ctx) -> UOp:
@@ -598,12 +733,13 @@ def _compile_sop(inst: ir3.SOP1|ir3.SOP2|ir3.SOPC|ir3.SOPK|ir4.SOP1|ir4.SOP2|ir4
     simm16 = ctx.inst_field(type(inst).simm16)
     # Sign-extend simm16
     simm16_sext = simm16.cast(dtypes.int16).cast(dtypes.int32)
-    # CDNA pcode uses S0 for the immediate in MOVK/MULK/ADDK/CMOVK (where RDNA uses SIMM16),
-    # but S0 = register for CMPK/SETREG. S1 is always the immediate for CDNA CMPK ops.
-    op_name = inst.op.name if hasattr(inst.op, 'name') else ''
-    s0_is_imm = isinstance(inst, irc.SOPK) and 'CMPK' not in op_name and 'SETREG' not in op_name
-    s0_val = simm16_sext if s0_is_imm else ctx.rsgpr_dyn(sdst_off)
-    srcs = {'S0': s0_val, 'SIMM16': simm16_sext, 'S1': simm16_sext, 'D0': ctx.rsgpr_dyn(sdst_off)}
+    # RDNA4 pcodes use S0.i16 for the immediate (e.g., S_MULK_I32), RDNA3 uses S0 for the register (e.g., S_CMPK_*)
+    # CDNA pcode uses S0 for the immediate in MOVK/MULK/ADDK/CMOVK, but S0 = register for CMPK/SETREG
+    op_name = _op_name(inst)
+    if isinstance(inst, ir4.SOPK): s0 = simm16
+    elif isinstance(inst, irc.SOPK) and 'CMPK' not in op_name and 'SETREG' not in op_name: s0 = simm16_sext
+    else: s0 = ctx.rsgpr_dyn(sdst_off)
+    srcs = {'S0': s0, 'S1': simm16_sext, 'SIMM16': simm16_sext, 'D0': ctx.rsgpr_dyn(sdst_off)}
     dst_off, dst_size = sdst_off, 1
   elif isinstance(inst, (ir3.SOP1, ir4.SOP1, irc.SOP1)):
     sdst_off = ctx.inst_field(type(inst).sdst)
@@ -647,12 +783,15 @@ def _compile_vop12(inst: ir3.VOP1 | ir3.VOP1_SDST | ir3.VOP2 | ir4.VOP1 | ir4.VO
       # Only compute hi-half when src0_off >= 384, use guarded index to prevent OOB access
       src0_reg = src0_hi.where(src0_off - _c(384), _c(0))
       s0 = src0_hi.where(_hi16(ctx.rvgpr_dyn(src0_reg, lane)), s0)
-    srcs = {'S0': s0}
+    d0 = _cond_hi16(write_hi_half, ctx.rvgpr_dyn(vdst_reg, lane))
+    srcs = {'S0': s0, 'D0': d0}
   else:
     vsrc1_reg = ctx.inst_field(type(inst).vsrc1)
     vsrc1_hi = bits['s0'] == 16 and (vsrc1_reg >= _c(128))
     vsrc1_actual = _cond(vsrc1_hi, vsrc1_reg - _c(128), vsrc1_reg)
-    s1 = _cond_hi16(vsrc1_hi, ctx.rvgpr_dyn(vsrc1_actual, lane))
+    # 64 bit
+    s1 = _u64(ctx.rvgpr_dyn(vsrc1_actual, lane), ctx.rvgpr_dyn(vsrc1_actual + _c(1), lane)) if bits.get('s1', 32) == 64 \
+      else _cond_hi16(vsrc1_hi, ctx.rvgpr_dyn(vsrc1_actual, lane))
     d0 = _cond_hi16(write_hi_half, ctx.rvgpr_dyn(vdst_reg, lane))  # FMAC/FMAMK hi-half dest needs hi-half accumulator
     # Handle VOP2 hi-half src0 operand (src0 >= v[128] for 16-bit ops)
     src0_off = ctx.inst_field(type(inst).src0)
@@ -663,11 +802,11 @@ def _compile_vop12(inst: ir3.VOP1 | ir3.VOP1_SDST | ir3.VOP2 | ir4.VOP1 | ir4.VO
       src0_reg = src0_hi.where(src0_off - _c(384), _c(0))
       s0 = src0_hi.where(_hi16(ctx.rvgpr_dyn(src0_reg, lane)), s0)
     srcs = {'S0': s0, 'S1': s1, 'D0': d0}
-    if inst.op in (ir3.VOP2Op.V_FMAAK_F32_E32, ir3.VOP2Op.V_FMAMK_F32_E32, ir3.VOP2Op.V_FMAAK_F16_E32,
-                   ir3.VOP2Op.V_FMAMK_F16_E32, irc.VOP2Op.V_FMAAK_F32_E32, irc.VOP2Op.V_FMAMK_F32_E32):
+    # FMAAK_(DTYPE)_E32 series
+    if 'V_FMAA' in _op_name(inst) or 'V_FMAM' in _op_name(inst):
       assert literal is not None
       srcs['SIMM32'] = literal
-  return ctx.compile_vop_pcode(inst.op, srcs, lane, vdst_reg, exec_mask, opsel_dst_hi=write_hi_half)
+  return ctx.compile_vop_pcode(inst.op, srcs, lane, vdst_reg, exec_mask, opsel_dst_hi=write_hi_half, src0_off=src0_off)
 
 def _compile_vopc(inst: ir3.VOPC|ir3.VOP3|ir4.VOPC|ir4.VOP3|irc.VOPC|irc.VOP3, ctx: _Ctx,
                   opsel: int = 0, abs_bits: int = 0, neg_bits: int = 0) -> UOp:
@@ -735,10 +874,22 @@ def _compile_vop3(inst: ir3.VOP3 | ir4.VOP3 | irc.VOP3, ctx: _Ctx) -> UOp:
   if 'V_CMP' in op_name or 'V_CMPX' in op_name:
     return _compile_vopc(inst, ctx, opsel=opsel, abs_bits=getattr(inst, 'abs', 0) or 0, neg_bits=getattr(inst, 'neg', 0) or 0)
 
-  # Regular VOP3 - read operands dynamically
-  lane = ctx.range()
+  # VOP3 specific fields
   vdst_reg = ctx.inst_field(type(inst).vdst)
   literal = ctx.inst_field(type(inst).literal) if hasattr(type(inst), 'literal') else None  # type: ignore[union-attr]
+  abs_bits, neg_bits = getattr(inst, 'abs', 0) or 0, getattr(inst, 'neg', 0) or 0
+
+  # VOP3_SDST: v_s_* instructions goes to SGPR
+  if 'V_S_' in op_name:
+    src0 = _apply_src_mods(ctx.rsrc_dyn(ctx.inst_field(type(inst).src0), _c(0, dtypes.int), bits['s0'], literal), 0, abs_bits, neg_bits, bits['s0'])
+    srcs = {'S0': src0, 'EXEC': exec_mask, 'SCC': ctx.rsgpr_dyn(_c(SCC.offset)), 'laneId': _c(0, dtypes.int),
+            'ROUND_MODE': _c(0), 'ROUND_TOWARD_ZERO': _c(0)}
+    _, assigns = parse_pcode(get_pcode(inst.op), srcs)
+    stores = [ctx.wsgpr_dyn(vdst_reg, _val_to_u32(val)) for dest, val in assigns if dest.startswith('D0')]
+    return UOp.sink(*stores, *ctx.inc_pc())
+
+  # Regular VOP3 - read operands dynamically
+  lane = ctx.range()
   ops = inst.canonical_operands
   src0 = ctx.rsrc_dyn(ctx.inst_field(type(inst).src0), lane, bits['s0'], literal, 's0' in ops and ops['s0'][0] == Fmt.FMT_NUM_F64)
   src1 = ctx.rsrc_dyn(ctx.inst_field(type(inst).src1), lane, bits['s1'], literal, 's1' in ops and ops['s1'][0] == Fmt.FMT_NUM_F64)
@@ -747,12 +898,12 @@ def _compile_vop3(inst: ir3.VOP3 | ir4.VOP3 | irc.VOP3, ctx: _Ctx) -> UOp:
     src0 = _apply_opsel(src0, 0, opsel)
     src1 = _apply_opsel(src1, 1, opsel)
     src2 = _apply_opsel(src2, 2, opsel)
-  abs_bits, neg_bits = getattr(inst, 'abs', 0) or 0, getattr(inst, 'neg', 0) or 0
   src0 = _apply_src_mods(src0, 0, abs_bits, neg_bits, bits['s0'])
   src1 = _apply_src_mods(src1, 1, abs_bits, neg_bits, bits['s1'])
   src2 = _apply_src_mods(src2, 2, abs_bits, neg_bits, bits['s2'])
   srcs = {'S0': src0, 'S1': src1, 'S2': src2}
-  if inst.op in (ir3.VOP3Op.V_CNDMASK_B32_E64, ir3.VOP3Op.V_CNDMASK_B16, irc.VOP3Op.V_CNDMASK_B32_E64) and src2 is not None: srcs['VCC'] = src2
+  #irx_CNDMASK series
+  if 'CNDMASK' in op_name and src2 is not None: srcs['VCC'] = src2
   # FMAC instructions need D0 (accumulator) from destination register
   if 'FMAC' in op_name: srcs['D0'] = ctx.rvgpr_dyn(vdst_reg, lane)
   opsel_dst_hi = bool(opsel & 0b1000) and bits['d'] == 16
@@ -827,27 +978,47 @@ def _compile_wmma(inst: ir3.VOP3P | ir4.VOP3P | irc.VOP3P, ctx: _Ctx) -> UOp:
   is_f16_output = 'F16_16X16X16_F16' in op_name or 'BF16_16X16X16_BF16' in op_name  # F16/BF16 output vs F32 output
   is_bf16 = 'BF16' in op_name
   cvt = _FUNCS['bf16_to_f32'] if is_bf16 else _FUNCS['f16_to_f32']
+  is_rdna4 = isinstance(inst, ir4.VOP3P)
+  # read 16x16 F16/BF16 matrix from VGPRs → flat f32 array[row*16+k]
+  def read_f16_val(src, lane, vgpr, half):
+    v = ctx.rvgpr_dyn(src + _c(vgpr), UOp.const(dtypes.int, lane))
+    return cvt((v >> UOp.const(dtypes.uint32, 16)) if half else (v & UOp.const(dtypes.uint32, 0xFFFF)))
+
+  # RDNA3: 16 lanes × 8 VGPRs × 2 halves, k maps linearly
+  # RDNA4: 32 lanes × 4 VGPRs × 2 halves, k bits are scrambled (k[2] goes to lane bit 4)
   def read_f16_mat(src):
-    return [f for l in range(16) for r in range(8) for v in [ctx.rvgpr_dyn(src + _c(r), UOp.const(dtypes.int, l))]
-            for f in [cvt(v & UOp.const(dtypes.uint32, 0xFFFF)), cvt(v >> UOp.const(dtypes.uint32, 16))]]
+  # (row, k) → (lane, vgpr, half)
+    def ab_map(i, k):
+      elem, lane = ((k & 3) | ((k >> 1) & 4), i + ((k >> 2) & 1) * 16) if is_rdna4 else (k, i)
+      return lane, elem // 2, elem % 2
+    return [read_f16_val(src, *ab_map(row, k)) for row in range(16) for k in range(16)]
   mat_a, mat_b = read_f16_mat(src0_r), read_f16_mat(src1_r)
+  # (row, col) -> (lane, vgpr)
+  def d_map(m, n):
+    lane_bit, vgpr = (m >> 3, m & 7) if is_rdna4 else (m & 1, m >> 1)
+    return n + lane_bit * 16, vgpr
   if is_f16_output:
-    # RDNA3 F16/BF16 output: uses 8 VGPRs (same as F32), f16/bf16 values in lo 16 bits of each VGPR
-    # Layout: half16 per lane where even indices (0,2,4,...,14) = lo halves of VGPRs 0-7
-    # Read accumulator: 8 regs × 32 lanes, each VGPR's lo 16 bits holds one f16/bf16
-    mat_c = [cvt(ctx.rvgpr_dyn(src2_r + _c(i // 32), UOp.const(dtypes.int, i % 32)) & UOp.const(dtypes.uint32, 0xFFFF))
-              for i in range(256)]
-    mat_d = [sum(mat_a[row*16+k] * mat_b[col*16+k] for k in range(16)) + mat_c[row*16+col] for row in range(16) for col in range(16)]
-    # Write f16/bf16 results to lo 16 bits of each VGPR
+    # read accumulator C with f16 layout: for RDNA4, pairs of f32 vgprs pack into one f16 vgpr
+    # for RDNA3, same layout as f32 but only lo 16 bits used
+    mat_c = [read_f16_val(src2_r, *((lane, vgpr // 2, vgpr % 2) if is_rdna4 else (lane, vgpr, 0)))
+             for m in range(16) for n in range(16) for lane, vgpr in [d_map(m, n)]]
+    mat_d = [sum(mat_a[r*16+k] * mat_b[c*16+k] for k in range(16)) + mat_c[r*16+c] for r in range(16) for c in range(16)]
     def f32_to_f16_bits(v: UOp) -> UOp: return v.cast(dtypes.half).bitcast(dtypes.uint16).cast(dtypes.uint32)
     def f32_to_bf16_bits(v: UOp) -> UOp: return (v.bitcast(dtypes.uint32) >> UOp.const(dtypes.uint32, 16)) & UOp.const(dtypes.uint32, 0xFFFF)
     out_cvt = f32_to_bf16_bits if is_bf16 else f32_to_f16_bits
-    stores = [ctx.wvgpr_dyn(vdst_reg + _c(i // 32), UOp.const(dtypes.int, i % 32), out_cvt(mat_d[i]), exec_mask) for i in range(256)]
-  else:
-    # F32 output: accumulator and output are f32
-    mat_c = [ctx.rvgpr_dyn(src2_r + _c(i // 32), UOp.const(dtypes.int, i % 32)).bitcast(dtypes.float32) for i in range(256)]
-    mat_d = [sum(mat_a[row*16+k] * mat_b[col*16+k] for k in range(16)) + mat_c[row*16+col] for row in range(16) for col in range(16)]
-    stores = [ctx.wvgpr_dyn(vdst_reg + _c(i // 32), UOp.const(dtypes.int, i % 32), mat_d[i].bitcast(dtypes.uint32), exec_mask) for i in range(256)]
+    if is_rdna4:  # pack 2 f16 per VGPR: adjacent m values share (lane, vgpr) since vgpr=m&7, half=m&1
+      stores = [ctx.wvgpr_dyn(vdst_reg + _c(d_map(m, n)[1] // 2), UOp.const(dtypes.int, d_map(m, n)[0]),
+                out_cvt(mat_d[m*16+n]) | (out_cvt(mat_d[(m+1)*16+n]) << UOp.const(dtypes.uint32, 16)), exec_mask)
+                for n in range(16) for m in range(0, 16, 2)]
+    else:  # (rdna3) 1 f16 per VGPR (lo half only)
+      stores = [ctx.wvgpr_dyn(vdst_reg + _c(d_map(m, n)[1]), UOp.const(dtypes.int, d_map(m, n)[0]), out_cvt(mat_d[m*16+n]), exec_mask)
+                for m in range(16) for n in range(16)]
+  else: # f32
+    mat_c = [ctx.rvgpr_dyn(src2_r + _c(d_map(m, n)[1]), UOp.const(dtypes.int, d_map(m, n)[0])).bitcast(dtypes.float32)
+             for m in range(16) for n in range(16)]
+    mat_d = [sum(mat_a[r*16+k] * mat_b[c*16+k] for k in range(16)) + mat_c[r*16+c] for r in range(16) for c in range(16)]
+    stores = [ctx.wvgpr_dyn(vdst_reg + _c(d_map(m, n)[1]), UOp.const(dtypes.int, d_map(m, n)[0]), mat_d[m*16+n].bitcast(dtypes.uint32), exec_mask)
+              for m in range(16) for n in range(16)]
   return UOp.sink(*stores, *ctx.inc_pc())
 
 def _compile_vop3p(inst: ir3.VOP3P | ir4.VOP3P | irc.VOP3P, ctx: _Ctx) -> UOp:
@@ -949,7 +1120,8 @@ def _compile_vopd(inst: ir3.VOPD | ir4.VOPD, ctx: _Ctx) -> UOp:
     assert vop is not None, f"no VOP mapping for VOPD {label}: {op}"
     if label == 'Y': srcs = {'S0': srcy0, 'S1': srcy1, 'D0': ctx.rvgpr_dyn(vdst_reg, lane)}
     else: srcs = {'S0': ctx.rsrc_dyn(src0_off, lane, literal=literal), 'S1': ctx.rvgpr_dyn(vsrc1_reg, lane), 'D0': ctx.rvgpr_dyn(vdst_reg, lane)}
-    if op in (ir3.VOPDOp.V_DUAL_FMAAK_F32, ir3.VOPDOp.V_DUAL_FMAMK_F32, ir4.VOPDOp.V_DUAL_FMAAK_F32, ir4.VOPDOp.V_DUAL_FMAMK_F32):
+    # VOP2_FMAAK/FMAMK_(DTYPE)_E32
+    if vop in (ir3.VOP2Op.V_FMAAK_F32_E32, ir3.VOP2Op.V_FMAMK_F32_E32, ir3.VOP2Op.V_FMAAK_F32_E32, ir3.VOP2Op.V_FMAMK_F32_E32):
       assert literal is not None
       srcs['SIMM32'] = literal
     if op in (ir3.VOPDOp.V_DUAL_CNDMASK_B32, ir4.VOPDOp.V_DUAL_CNDMASK_B32): srcs['VCC'] = ctx.rsgpr_dyn(_c(VCC_LO.offset))
@@ -981,7 +1153,7 @@ def _compile_mem_op(inst: ir3.DS|ir3.FLAT|ir3.GLOBAL|ir3.SCRATCH|ir4.DS|ir4.VFLA
     vdst_reg = ctx.inst_field(type(inst).vdst)
     offset0 = ctx.inst_field(type(inst).offset0)  # type: ignore[union-attr]
     offset1 = ctx.inst_field(type(inst).offset1)  # type: ignore[union-attr]
-    offset = offset0  # DS uses offset0 as primary offset
+    offset = (offset1 << _c(8)) | offset0  # DS offset is 16-bit: (offset1 << 8) | offset0
     saddr_reg = None
   elif isinstance(inst, (ir4.VGLOBAL, ir4.VSCRATCH, ir4.VFLAT)):  # RDNA4: vaddr, vsrc, ioffset
     addr_reg = ctx.inst_field(type(inst).vaddr)
@@ -1077,8 +1249,8 @@ def _compile_mem_op(inst: ir3.DS|ir3.FLAT|ir3.GLOBAL|ir3.SCRATCH|ir4.DS|ir4.VFLA
       else ctx.rvgpr_dyn(vdst_reg, lane) if 'D16' in op_name else UOp.const(dtypes.uint32, 0)
     if 'STORE' in op_name and data_bits_mem >= 64:
       vdata = vdata | (ctx.rvgpr_dyn(vdata_reg + _c(1), lane).cast(dtypes.uint64) << UOp.const(dtypes.uint64, 32))
-    srcs = {'ADDR': addr, 'VDATA': vdata, '_vmem': mem, '_active': active,
-            'laneId': lane, 'v_addr': vaddr_base, 's_saddr': saddr_base, 'SADDR': saddr_base, 'OFFSET': offset}
+    srcs = {'ADDR': addr, 'laneId': lane, 'VDATA': vdata, 'v_addr': vaddr_base, 'v_addr_off': addr, '_vmem': mem,
+            's_saddr': saddr_base, 'SADDR': saddr_base,'s_saddr_off': UOp.const(dtypes.uint64, 0), '_active': active, 'OFFSET': offset}
     for i in range(data_bits_mem // 32):
       srcs[f'VDATA{i}'] = ctx.rvgpr_dyn(vdata_reg + _c(i), lane) if 'STORE' in op_name else UOp.const(dtypes.uint32, 0)
     return srcs
@@ -1178,17 +1350,22 @@ def _get_runner(inst_bytes: bytes, arch: str = "rdna3"):
   canonical_name = f"{_op_name(inst).lower()}_{base.to_bytes(size, 'little').hex()}"
   sink = sink.replace(arg=KernelInfo(name=canonical_name)).rtag(1)
 
-  # NOTE: renderer output is not reproducible because of _MXCSRContext
-  with Context(NOOPT=1, CHECK_OOB=0, TUPLE_ORDER=0, EMULATED_DTYPES="", CAPTURE_PROCESS_REPLAY=0):
+  # NOTE: renderer output is not reproducible because of _MXCSRContext. PROFILE=0 prevents emulator instruction runners from polluting profiling.
+  with Context(NOOPT=1, CHECK_OOB=0, TUPLE_ORDER=0, EMULATED_DTYPES="", CAPTURE_PROCESS_REPLAY=0, PROFILE=0):
     runner = get_runner('CPU', sink)
   _canonical_runner_cache.append((base, mask, size, runner))
   return runner
 
+_BARRIER_OPS = {ir3.SOPPOp.S_BARRIER, irc.SOPPOp.S_BARRIER}
+if hasattr(ir4.SOPPOp, 'S_BARRIER_WAIT'): _BARRIER_OPS.add(ir4.SOPPOp.S_BARRIER_WAIT)
+_BRANCH_OPS: set[int] = {op.value for op in (ir3.SOPPOp.S_BRANCH, ir3.SOPPOp.S_CBRANCH_SCC0, ir3.SOPPOp.S_CBRANCH_SCC1,
+  ir3.SOPPOp.S_CBRANCH_VCCZ, ir3.SOPPOp.S_CBRANCH_VCCNZ, ir3.SOPPOp.S_CBRANCH_EXECZ, ir3.SOPPOp.S_CBRANCH_EXECNZ)}
+
 def _decode_at(pc: int, arch: str):
-  """Decode and compile instruction at absolute address pc. Returns CompiledRunner."""
+  """Decode and compile instruction at absolute address pc. Returns (runner, decoded_inst)."""
   inst_bytes = bytes((ctypes.c_char * 16).from_address(pc).raw)
   inst = decode_inst(inst_bytes, arch)
-  try: return _get_runner(bytes(inst_bytes[:inst.size() + 4]), arch)
+  try: return _get_runner(bytes(inst_bytes[:inst.size() + 4]), arch), inst
   except Exception as e:
     try: inst_str = repr(inst)
     except Exception: inst_str = f"<{type(inst).__name__}>"
@@ -1238,10 +1415,38 @@ class WaveState:
 # EXECUTION
 # ═══════════════════════════════════════════════════════════════════════════════
 
+def _init_wave(lib: int, wave_start: int, total_threads: int, lx: int, ly: int, lz: int, args_ptr: int, rsrc2: int,
+               scratch_size: int, arch: str, gidx: int, gidy: int, gidz: int, user_data: list[int]|None) -> WaveState:
+  """Initialize a single wavefront and return WaveState."""
+  n_lanes = min(WAVE_SIZE, total_threads - wave_start)
+  st = WaveState(n_lanes)
+  st.pc = lib
+  if user_data:
+    for i, val in enumerate(user_data): st._write_sgpr(i, val)
+  else:
+    st._write_sgpr(0, args_ptr & MASK32)
+    st._write_sgpr(1, (args_ptr >> 32) & MASK32)
+  sgpr_idx = (rsrc2 & hsa.AMD_COMPUTE_PGM_RSRC_TWO_USER_SGPR_COUNT) >> hsa.AMD_COMPUTE_PGM_RSRC_TWO_USER_SGPR_COUNT_SHIFT
+  for enabled, gid in [(hsa.AMD_COMPUTE_PGM_RSRC_TWO_ENABLE_SGPR_WORKGROUP_ID_X, gidx),
+                       (hsa.AMD_COMPUTE_PGM_RSRC_TWO_ENABLE_SGPR_WORKGROUP_ID_Y, gidy),
+                       (hsa.AMD_COMPUTE_PGM_RSRC_TWO_ENABLE_SGPR_WORKGROUP_ID_Z, gidz)]:
+    if rsrc2 & enabled:
+      st._write_sgpr(sgpr_idx, gid)
+      sgpr_idx += 1
+  if arch == "rdna4":
+    st._write_sgpr(ttmp[7].offset, (gidy & 0xFFFF) | ((gidz & 0xFFFF) << 16))
+    st._write_sgpr(ttmp[9].offset, gidx)
+  for lane in range(n_lanes):
+    tid = wave_start + lane
+    st._write_vgpr(0, lane, ((tid // (lx * ly)) << 20) | (((tid // lx) % ly) << 10) | (tid % lx))
+  st._write_sgpr(SCRATCH_STRIDE_IDX, scratch_size)
+  return st
+
 def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, lz: int, args_ptr: int, rsrc2: int = 0x19c,
             scratch_size: int = 0, arch: str = "rdna3", user_data: list[int]|None = None) -> int:
   """Execute AMD assembly program. scratch_size is private_segment_fixed_size from kernel descriptor (per-lane)."""
-  program: dict[int, tuple[Callable, list[int]]] = {}  # lazily populated: pc -> (fxn, globals) extracted from runner
+  from tinygrad.renderer.amd.dsl import Inst
+  program: dict[int, tuple[Callable, list[int], bool, Inst]] = {}  # pc -> (fxn, globals, is_barrier, inst)
   lds_size = ((rsrc2 & hsa.AMD_COMPUTE_PGM_RSRC_TWO_GRANULATED_LDS_SIZE) >> hsa.AMD_COMPUTE_PGM_RSRC_TWO_GRANULATED_LDS_SIZE_SHIFT) * 512
   total_threads = lx * ly * lz
 
@@ -1250,57 +1455,64 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
   lds_buf = Buffer('CPU', max(lds_size // 4, 1), dtypes.uint32).ensure_allocated()
   scratch_buf = Buffer('CPU', scratch_size * WAVE_SIZE, dtypes.uint8).ensure_allocated() if scratch_size else None
 
+  # Initialize SQTT encoder — emits packets inline as instructions execute (only when profiling)
+  if PROFILE:
+    sqtt_emit, sqtt_finish, sqtt_finalize = _init_sqtt_encoder()
+
+  def _ensure_compiled(pc: int) -> tuple[Callable, list[int], bool, Inst]:
+    if pc not in program:
+      prev_len = len(_canonical_runner_cache)
+      runner, inst = _decode_at(pc, arch)
+      is_barrier = isinstance(inst, (ir3.SOPP, ir4.SOPP, irc.SOPP)) and inst.op in _BARRIER_OPS
+      program[pc] = (runner._prg.fxn, runner.p.globals, is_barrier, inst)
+      if DEBUG >= 3:
+        msg = f"[emu] PC={pc - lib}: {inst!r}"
+        print(colored(msg, 'green') if len(_canonical_runner_cache) > prev_len else msg)
+    return program[pc]
+
   # Set DAZ+FTZ during emulator execution, restore afterward to avoid breaking hypothesis tests
+  # Only trace the first workgroup (like real HW traces one CU/SIMD), subsequent workgroups run but don't add to trace
+  tracing = bool(PROFILE)
   with _MXCSRContext():
     for gidz in range(gz):
       for gidy in range(gy):
         for gidx in range(gx):
+          # Initialize all wavefronts for this workgroup
+          waves: list[tuple[WaveState, list]] = []
           for wave_start in range(0, total_threads, WAVE_SIZE):
-            n_lanes, st = min(WAVE_SIZE, total_threads - wave_start), WaveState(min(WAVE_SIZE, total_threads - wave_start))
-            st.pc = lib  # Set PC to code base address
-            # Initialize user SGPRs: hardware loads COMPUTE_USER_DATA registers directly into s[0:N]
-            if user_data:
-              for i, val in enumerate(user_data): st._write_sgpr(i, val)
-            else:
-              st._write_sgpr(0, args_ptr & MASK32)
-              st._write_sgpr(1, (args_ptr >> 32) & MASK32)
-
-            # Workgroup IDs in SGPRs after user SGPRs
-            sgpr_idx = (rsrc2 & hsa.AMD_COMPUTE_PGM_RSRC_TWO_USER_SGPR_COUNT) >> hsa.AMD_COMPUTE_PGM_RSRC_TWO_USER_SGPR_COUNT_SHIFT
-            for enabled, gid in [(hsa.AMD_COMPUTE_PGM_RSRC_TWO_ENABLE_SGPR_WORKGROUP_ID_X, gidx),
-                                 (hsa.AMD_COMPUTE_PGM_RSRC_TWO_ENABLE_SGPR_WORKGROUP_ID_Y, gidy),
-                                 (hsa.AMD_COMPUTE_PGM_RSRC_TWO_ENABLE_SGPR_WORKGROUP_ID_Z, gidz)]:
-              if rsrc2 & enabled:
-                st._write_sgpr(sgpr_idx, gid)
-                sgpr_idx += 1
-
-            # RDNA4 uses TTMP registers for workgroup IDs: ttmp[9]=gidx, ttmp[10]=gidy, ttmp[11]=gidz
-            if arch == "rdna4":
-              st._write_sgpr(ttmp[9].offset, gidx)
-              st._write_sgpr(ttmp[10].offset, gidy)
-              st._write_sgpr(ttmp[11].offset, gidz)
-
-            # v0 = packed workitem IDs, scratch stride in secret SGPR
-            for lane in range(n_lanes):
-              tid = wave_start + lane
-              st._write_vgpr(0, lane, ((tid // (lx * ly)) << 20) | (((tid // lx) % ly) << 10) | (tid % lx))
-            st._write_sgpr(SCRATCH_STRIDE_IDX, scratch_size)
-
-            # Pass buffer addresses via ctypes (pre-create to avoid allocation in loop)
+            st = _init_wave(lib, wave_start, total_threads, lx, ly, lz, args_ptr, rsrc2, scratch_size, arch, gidx, gidy, gidz, user_data)
             c_bufs = [ctypes.c_uint64(st.sgpr_buf._buf.va_addr), ctypes.c_uint64(st.vgpr_buf._buf.va_addr),
                       ctypes.c_uint64(vmem_buf._buf.va_addr), ctypes.c_uint64(lds_buf._buf.va_addr),
                       ctypes.c_uint64(scratch_buf._buf.va_addr if scratch_buf else 0)]
-            for inst_count in range(1_000_000):
-              if (pc := st.pc) == 0xFFFFFFFFFFFFFFFF: break
-              if pc not in program:
-                prev_len = len(_canonical_runner_cache)
-                runner = _decode_at(pc, arch)
-                program[pc] = (runner._prg.fxn, runner.p.globals)
-                if DEBUG >= 3:
-                  inst = decode_inst(bytes((ctypes.c_char * 16).from_address(pc).raw), arch)
-                  msg = f"[emu] PC={pc - lib}: {inst!r}"
-                  print(colored(msg, 'green') if len(_canonical_runner_cache) > prev_len else msg)
-              fxn, globals_list = program[pc]
-              fxn(*[c_bufs[g] for g in globals_list])
-            else: raise RuntimeError("exceeded 1M instructions, likely infinite loop")
+            waves.append((st, c_bufs))
+
+          # Execute wavefronts with barrier synchronization
+          # Each wave runs until it hits s_barrier or s_endpgm. When all waves have stopped, release barrier waves.
+          done = [False] * len(waves)
+          for total_inst in range(10_000_000):
+            if all(done): break
+            for wi, (st, c_bufs) in enumerate(waves):
+              if done[wi]: continue
+              # Run this wave until barrier or endpgm
+              for _ in range(1_000_000):
+                pc = st.pc
+                if pc == ENDPGM_PC:
+                  done[wi] = True
+                  if tracing: sqtt_finish(wi)
+                  break
+                fxn, globals_list, is_barrier, inst = _ensure_compiled(pc)
+                fxn(*[c_bufs[g] for g in globals_list])
+                if tracing:
+                  inst_op = inst.op.value if hasattr(inst, 'op') else 0
+                  sqtt_emit(wi, inst, (st.pc != ENDPGM_PC and st.pc != pc + inst.size()) if inst_op in _BRANCH_OPS else None)
+                if is_barrier: break  # s_barrier hit: PC already advanced past it, pause this wave
+              else: raise RuntimeError("exceeded 1M instructions in single wave, likely infinite loop")
+            # All waves have either hit barrier or endpgm — release barrier waves for next round
+          else: raise RuntimeError("exceeded 10M total scheduling rounds")
+          tracing = False  # only trace the first workgroup
+
+          # Reset LDS for next workgroup
+          if lds_size > 0: ctypes.memset(lds_buf._buf.va_addr, 0, max(lds_size, 4))
+
+  if PROFILE: sqtt_traces.append(sqtt_finalize())
   return 0

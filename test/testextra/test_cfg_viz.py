@@ -28,8 +28,8 @@ def run_asm(name:str, k:Kernel):
 @unittest.skipUnless(Device.DEFAULT == "AMD", "only on AMD")
 class TestCfg(unittest.TestCase):
   def setUp(self):
-    arch = Device["AMD"].arch
-    if not any(arch.startswith(a) for a in {"gfx11", "gfx12"}):
+    self.arch = Device["AMD"].arch
+    if not any(self.arch.startswith(a) for a in {"gfx11", "gfx12"}):
       self.skipTest(f"tests written for RDNA, got arch {arch}")
 
   def test_simple(self):
@@ -58,7 +58,7 @@ class TestCfg(unittest.TestCase):
     k.emit(s_endpgm())
     k.emit(s_code_end())
     ei = run_asm("diamond", k)
-    cfg = amdgpu_cfg(ei.prg.p.lib, Device[Device.DEFAULT].device_props()["gfx_target_version"])["data"]
+    cfg = amdgpu_cfg(ei.prg.p.lib, self.arch)["data"]
     self.assertEqual(len(cfg["blocks"]), 5)
     edge_count = sum(len(v) for v in cfg["paths"].values())
     self.assertEqual(edge_count, 5)

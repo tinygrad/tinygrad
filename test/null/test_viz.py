@@ -405,6 +405,16 @@ class TestVizProfiler(BaseTestViz):
 
     self.assertEqual(j["dur"], (event2["st"]+event2["dur"])-event["st"])
 
+  def test_copy_node_bandwidth(self):
+    sz = 256*1024*1024
+    dur = 10_000
+    prof = [ProfileRangeEvent(device='NV:SDMA:0', name=TracingKey("NV -> NV:1", ret=sz), st=decimal.Decimal(1000), en=decimal.Decimal(1000+dur)),
+            ProfileDeviceEvent(device='NV:SDMA:0', tdiff=decimal.Decimal(-1000))]
+    j = load_profile(prof)
+    event = j['layout']['NV:SDMA:0']['events'][0]
+    gbs = sz/(dur*1e-6)*1e-9
+    self.assertEqual(event['fmt'], f"{gbs:.0f} GB/s")
+
   def test_graph(self):
     prof = [ProfileDeviceEvent(device='NV', tdiff=decimal.Decimal(-1000)),
             ProfileDeviceEvent(device='NV:1:SDMA:0', tdiff=decimal.Decimal(-50)),
@@ -432,6 +442,20 @@ class TestVizProfiler(BaseTestViz):
     graph_events = j['layout']['NV Graph']['events']
     self.assertEqual(graph_events[0]['st'], nv_events[0]['st'])
     self.assertEqual(graph_events[0]['st']+graph_events[0]['dur'], sdma_events[0]['st']+sdma_events[0]['dur'])
+
+  def test_graph_copy_bandwidth(self):
+    sz = 256*1024*1024
+    dur = 10_000
+    prof = [ProfileDeviceEvent(device='NV', tdiff=decimal.Decimal(-1000)),
+            ProfileDeviceEvent(device='NV:1:SDMA:0', tdiff=decimal.Decimal(-50)),
+            ProfileGraphEvent(ents=[ProfileGraphEntry(device='NV:1:SDMA:0', name=TracingKey("NV -> NV:1", ret=sz), st_id=0, en_id=1)],
+                              deps=[[]],
+                              sigs=[decimal.Decimal(1004), decimal.Decimal(1004+dur)])]
+
+    j = load_profile(prof)
+    sdma_events = j['layout']['NV:1:SDMA:0']['events']
+    gbs = sz/(dur*1e-6)*1e-9
+    self.assertEqual(sdma_events[0]['fmt'], f"{gbs:.0f} GB/s")
 
   def test_block_ordering(self):
     prof = [ProfileDeviceEvent(device='NV', tdiff=decimal.Decimal(-1000)),

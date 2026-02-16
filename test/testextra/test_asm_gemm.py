@@ -18,14 +18,14 @@ def run_asm_gemm(a_shape, b_shape, dtype=dtypes.float16, a_shard=None, b_shard=N
 
   devs = tuple(f"{Device.DEFAULT}:{i}" for i in range(gpus)) if (multi:=gpus>1) else None
 
-  a, b = Tensor(a_rand.numpy(), requires_grad=True).cast(dtype), Tensor(b_rand.numpy(), requires_grad=True).cast(dtype)
+  a, b = a_rand.clone().requires_grad_(), b_rand.clone().requires_grad_()
   if multi: a, b = a.shard(devs, axis=a_shard), b.shard(devs, axis=b_shard)
   with Context(ASM_GEMM=1):
     tst = asm_gemm(a, b)
     tst.sum().backward()
   Tensor.realize(tst, a.grad, b.grad)
 
-  a_ref, b_ref = Tensor(a_rand.numpy(), requires_grad=True).cast(dtype), Tensor(b_rand.numpy(), requires_grad=True).cast(dtype)
+  a_ref, b_ref = a_rand.clone().requires_grad_(), b_rand.clone().requires_grad_()
   if multi: a_ref, b_ref = a_ref.shard(devs, axis=a_shard), b_ref.shard(devs, axis=b_shard)
   with Context(ASM_GEMM=0):
     ref = asm_gemm(a_ref, b_ref)

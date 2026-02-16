@@ -188,11 +188,9 @@ class TestIndexing(unittest.TestCase):
     for i in idx.flatten().numpy(): expected_grad[i] += 2
     np.testing.assert_allclose(emb.weight.grad.numpy(), expected_grad, rtol=1e-5, atol=1e-5)
 
-  # ~10x overhead in fused matmul bw with rope in bf16 vs float16
   @unittest.skipUnless(Device.DEFAULT == "AMD" or (Device.DEFAULT == "NULL" and EMULATE.value.startswith("AMD")), "tests AMD bf16 cast overhead")
-  def base_test_llama_8b_rope_backward(self, dtype, ops_scale):
+  def base_test_llama_8b_rope_backward(self, dtype):
     from extra.models.llama import precompute_freqs_cis, apply_rotary_emb
-    Tensor.training = True
     bs, seqlen, dim, n_heads = 1, 512, 256, 4
     head_dim = dim // n_heads
     x = Tensor.randn(bs, seqlen, dim, dtype=dtype)
@@ -209,12 +207,15 @@ class TestIndexing(unittest.TestCase):
     assert len(sched) == 1, f"expected one kernel for backward, got: {len(sched)}"
     prg = sched[0].lower().prg.p
     bwd_ops = prg.estimates.ops
+    # bfloat16 on non CDNA4 has ~10x ops overhead because of the software emulation
+    if dtype == dtypes.bfloat16 and not Device[Device.DEFAULT].renderer.arch.startswith("gfx950"): ops_scale = 10
+    else: ops_scale = 1
     expected_ops = bs*seqlen*dim*dim*ops_scale
     print(f"rope matmul bwd ({dtype}): {GlobalCounters.kernel_count} kernels, {bwd_ops:,} ops")
     self.assertLess(bwd_ops, expected_ops, f"rope bwd ops {bwd_ops:,} should be < {ops_scale} per (got {bwd_ops/(bs*seqlen*dim*dim):.1f})")
 
-  def test_llama_8b_rope_backward_f16(self): self.base_test_llama_8b_rope_backward(dtypes.float16, 1)
-  def test_llama_8b_rope_backward_bf16(self): self.base_test_llama_8b_rope_backward(dtypes.bfloat16, 11)
+  def test_llama_8b_rope_backward_f16(self): self.base_test_llama_8b_rope_backward(dtypes.float16)
+  def test_llama_8b_rope_backward_bf16(self): self.base_test_llama_8b_rope_backward(dtypes.bfloat16)
 
 if __name__ == "__main__":
   unittest.main()

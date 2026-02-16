@@ -228,13 +228,21 @@ class PM4Executor(AMDQueue):
     event_dw = self._next_dword()
     match (event_dw & 0xFF): # event type
       case SQTT_EVENTS.THREAD_TRACE_FINISH:
+        # Get the most recent trace from the emulator (if available)
+        from test.mockgpu.amd.emu import sqtt_traces
+        blob = sqtt_traces.pop(0) if sqtt_traces else b''
         old_idx = self.gpu.regs.grbm_index
         for se in range(self.gpu.regs.n_se):
           self.gpu.regs.grbm_index = 0b011 << 29 | se << 16 # select se, broadcast sa and instance
           self.gpu.regs[regSQ_THREAD_TRACE_STATUS] = 1 << 12 # FINISH_PENDING==0 FINISH_DONE==1 BUSY==0
-          buf = ((self.gpu.regs[regSQ_THREAD_TRACE_BUF0_SIZE]&0xf)<<32|self.gpu.regs[regSQ_THREAD_TRACE_BUF0_BASE])<<12 # per page addressing
-          fake_used = 0x1000 # fake one page long trace
-          self.gpu.regs[regSQ_THREAD_TRACE_WPTR] = ((buf+fake_used)//32) & 0x1FFFFFFF
+          buf_addr = ((self.gpu.regs[regSQ_THREAD_TRACE_BUF0_SIZE]&0xf)<<32|self.gpu.regs[regSQ_THREAD_TRACE_BUF0_BASE])<<12
+
+          # Use real trace blob for SE 0 (which has itrace enabled), empty blob for other SEs
+          se_blob = blob if se == 0 else b''
+
+          # Write blob to trace buffer
+          if se_blob: ctypes.memmove(buf_addr, se_blob, len(se_blob))
+          self.gpu.regs[regSQ_THREAD_TRACE_WPTR] = ((buf_addr + len(se_blob)) // 32) & 0x1FFFFFFF
         self.gpu.regs.grbm_index = old_idx
       case _: pass # NOTE: for now most events aren't emulated
 

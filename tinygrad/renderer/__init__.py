@@ -3,7 +3,7 @@ from typing import Callable, cast
 import functools
 from dataclasses import dataclass, field
 from tinygrad.helpers import to_function_name, dedup, prod, DEBUG
-from tinygrad.uop.ops import Ops, UOp, sym_infer, sint, Variable, ssimplify, smin, GroupOp, PatternMatcher, print_uops, KernelInfo
+from tinygrad.uop.ops import Ops, UOp, sym_infer, sint, Variable, ssimplify, smin, GroupOp, PatternMatcher, print_uops
 from tinygrad.dtype import AddrSpace, PtrDType
 from tinygrad.codegen.opt.tc import TensorCore
 from tinygrad.codegen.opt import Opt
@@ -20,7 +20,7 @@ class Estimates:
   def __add__(self, o:Estimates): return Estimates(self.ops + o.ops, self.lds + o.lds, self.mem + o.mem)
   def simplify(self): return Estimates(ssimplify(self.ops), ssimplify(self.lds), ssimplify(self.mem))
   @staticmethod
-  def from_uops(uops:list[UOp], ignore_indexing=False) -> Estimates:
+  def from_uops(uops:tuple[UOp, ...], ignore_indexing=False) -> Estimates:
     flops: sint = 0
     lds: sint = 0
     mem: dict[tuple[UOp, Ops], sint] = {}
@@ -79,10 +79,8 @@ class ProgramSpec:
   outs:list[int]=field(default_factory=list)
   ins:list[int]=field(default_factory=list)
 
-  @functools.cached_property
-  def estimates(self) -> Estimates:
-    if self.ast.op is Ops.SINK and isinstance(self.ast.arg, KernelInfo) and self.ast.arg.estimates is not None: return self.ast.arg.estimates
-    return Estimates() if self.uops is None else Estimates.from_uops(self.uops, ignore_indexing=True)
+  @property
+  def estimates(self) -> Estimates: return self.ast.arg.estimates
 
   @functools.cached_property
   def function_name(self) -> str: return to_function_name(self.name)

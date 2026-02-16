@@ -69,10 +69,11 @@ def get_rewrites(t:RewriteTrace) -> list[dict]:
   for i,(k,v) in enumerate(zip(t.keys, t.rewrites)):
     steps = [create_step(s.name, ("/graph-rewrites", i, j), loc=s.loc, match_count=len(s.matches), code_line=printable(s.loc),
                          trace=k.tb if j==0 else None, depth=s.depth) for j,s in enumerate(v)]
-    if isinstance(k.ret, ProgramSpec):
-      steps.append(create_step("View UOp List", ("/uops", i, len(steps)), k.ret))
-      steps.append(create_step("View Program", ("/code", i, len(steps)), k.ret))
-      steps.append(create_step("View Disassembly", ("/asm", i, len(steps)), k.ret))
+    if (prg_idx:=next((j for j,s in enumerate(v) if s.name == "View Program"), None)) is not None:
+      _, device, lin, src, binary = _reconstruct(trace.rewrites[i][prg_idx].sink).src
+      steps.append(create_step("View UOp List", ("/uops", i, len(steps)), lin.src))
+      steps.append(create_step("View Source", ("/code", i, len(steps)), src.arg))
+      steps.append(create_step("View Disassembly", ("/asm", i, len(steps)), (device.arg, binary.arg)))
     for key in k.keys: ref_map[key] = i
     ret.append({"name":k.display_name, "steps":steps})
   return ret
@@ -172,7 +173,7 @@ def rel_ts(ts:int|Decimal, start_ts:int) -> int:
 device_ts_diffs:dict[str, Decimal] = {}
 def cpu_ts_diff(device:str) -> Decimal: return device_ts_diffs.get(device, Decimal(0))
 
-amdgpu_targets:dict[str, int] = {}
+amdgpu_targets:dict[str, str] = {}
 
 DevEvent = ProfileRangeEvent|ProfileGraphEntry|ProfilePointEvent
 def flatten_events(profile:list[ProfileEvent]) -> Generator[tuple[Decimal, Decimal, DevEvent], None, None]:
@@ -208,6 +209,9 @@ def timeline_layout(dev_events:list[tuple[int, int, float, DevEvent]], start_ts:
       name = e.name.display_name
       ref = next((v for k in e.name.keys if (v:=ref_map.get(k)) is not None), None)
       if isinstance(e.name.ret, str): fmt.append(e.name.ret)
+      elif isinstance(e.name.ret, int):
+        membw = e.name.ret / (dur * 1e-6)
+        fmt.append(f"{membw*1e-9:.0f} GB/s" if membw < 1e13 else f"{membw*1e-12:.0f} TB/s")
     events.append(struct.pack("<IIIIfI", enum_str(name, scache), option(ref), option(key), rel_ts(st,start_ts), dur, enum_str("\n".join(fmt),scache)))
   return struct.pack("<BI", 0, len(events))+b"".join(events) if events else None
 
@@ -313,7 +317,7 @@ def load_counters(profile:list[ProfileEvent]) -> None:
       steps.append(create_step("SQTT", ("/prg-sqtt", len(ctxs), len(steps)), ((k, tag), sqtt, prg_events[k])))
     ctxs.append({"name":f"Exec {name}"+(f" n{run_number[k]}" if run_number[k] > 1 else ""), "steps":steps})
 
-def sqtt_timeline(data:bytes, lib:bytes, target:int) -> list[ProfileEvent]:
+def sqtt_timeline(data:bytes, lib:bytes, target:str) -> list[ProfileEvent]:
   from tinygrad.renderer.amd.sqtt import map_insts, InstructionInfo, PacketType, INST, InstOp, VALUINST, IMMEDIATE, IMMEDIATE_MASK, VMEMEXEC, ALUEXEC
   ret:list[ProfileEvent] = []
   rows:dict[str, None] = {}
@@ -388,7 +392,7 @@ def get_profile(profile:list[ProfileEvent], sort_fn:Callable[[str], Any]=device_
       device_ts_diffs[ev.device] = ev.tdiff
       if (d:=ev.device.split(":")[0]) == "AMD":
         device_decoders[d] = load_counters
-        amdgpu_targets[d] = unwrap(ev.props)["gfx_target_version"]
+        amdgpu_targets[d] = f"gfx{unwrap(ev.props)['gfx_target_version']//1000}"
   # load device specific counters
   for fxn in device_decoders.values(): fxn(profile)
   # map events per device
@@ -435,7 +439,7 @@ def amd_readelf(lib:bytes) -> list[dict]:
   return [{"label":f"{resource} Alloc", "value":val} for resource,val in [("VGPR", (vgpr_gran+1)*8-7), ("LDS",kd.group_segment_fixed_size),
                                                                           ("Scratch", kd.private_segment_fixed_size)] if val > 0]
 
-def amd_decode(lib:bytes, target:int) -> dict[int, Any]: # Any is the Inst class from tinygrad.renderer.amd.dsl
+def amd_decode(lib:bytes, target:str) -> dict[int, Any]: # Any is the Inst class from tinygrad.renderer.amd.dsl
   from tinygrad.runtime.support.elf import elf_loader
   from tinygrad.renderer.amd import detect_format
   from tinygrad.renderer.amd.dsl import Inst
@@ -443,7 +447,7 @@ def amd_decode(lib:bytes, target:int) -> dict[int, Any]: # Any is the Inst class
   text = next((sh for sh in sections if sh.name == ".text"), None)
   assert text is not None, "no .text section found in ELF"
   off, buf = text.header.sh_addr, text.content
-  arch = {11:"rdna3", 12:"rdna4"}.get(target//10000, "cdna")
+  arch = "rdna3" if target.startswith("gfx11") else "rdna4" if target.startswith("gfx12") else "cdna"
   addr_table:dict[int, Inst] = {}
   offset = 0
   while offset < len(buf):
@@ -461,7 +465,7 @@ def parse_branch(inst) -> int|None:
   return None
 
 COND_TAKEN, COND_NOT_TAKEN, UNCOND = range(3)
-def amdgpu_cfg(lib:bytes, target:int) -> dict:
+def amdgpu_cfg(lib:bytes, target:str) -> dict:
   # decode
   pc_table = amd_decode(lib, target)
   # get leaders
@@ -476,9 +480,7 @@ def amdgpu_cfg(lib:bytes, target:int) -> dict:
   disasm = {pc:str(inst) for pc,inst in pc_table.items()}
   asm_width = max(len(asm) for asm in disasm.values())
   for pc, inst in pc_table.items():
-    # skip instructions only used for padding
-    if (asm:=disasm[pc]) == "s_code_end": continue
-    lines.append(f"  {asm:<{asm_width}}  // {pc:012X}")
+    lines.append(f"  {disasm[pc]:<{asm_width}}  // {pc:012X}")
     if pc in leaders:
       paths[curr:=pc] = {}
       blocks[pc] = []
@@ -507,14 +509,15 @@ def get_render(query:str) -> dict:
   i, j, fmt = get_int(qs:=parse_qs(url.query), "ctx"), get_int(qs, "step"), url.path.lstrip("/")
   data = ctxs[i]["steps"][j]["data"]
   if fmt == "graph-rewrites": return {"value":get_full_rewrite(trace.rewrites[i][j]), "content_type":"text/event-stream"}
-  if fmt == "uops": return {"src":get_stdout(lambda: print_uops(data.uops or [])), "lang":"txt"}
-  if fmt == "code": return {"src":data.src, "lang":"cpp"}
+  if fmt == "uops": return {"src":get_stdout(lambda: print_uops(data)), "lang":"txt"}
+  if fmt == "code": return {"src":data, "lang":"cpp"}
   if fmt == "asm":
     ret:dict = {"metadata":[]}
-    if data.device.startswith("AMD") and data.lib is not None:
-      with soft_err(lambda err: ret.update(err)): ret.update(amdgpu_cfg(data.lib, amdgpu_targets[data.device]))
-      with soft_err(lambda err: ret["metadata"].append(err)): ret["metadata"].append(amd_readelf(data.lib))
-    else: ret["src"] = get_stdout(lambda: (compiler:=Device[data.device].compiler).disassemble(compiler.compile(data.src)))
+    device, lib = data
+    if device.startswith("AMD"):
+      with soft_err(lambda err: ret.update(err)): ret.update(amdgpu_cfg(lib, amdgpu_targets[device]))
+      with soft_err(lambda err: ret["metadata"].append(err)): ret["metadata"].append(amd_readelf(lib))
+    else: ret["src"] = get_stdout(lambda: Device[device].compiler.disassemble(lib))
     return ret
   if fmt == "all-pmc":
     durations, pmc = data
