@@ -514,7 +514,7 @@ def get_render(query:str) -> dict:
     ret:dict = {"metadata":[]}
     device, lib = data
     if device.startswith("AMD"):
-      with soft_err(lambda err: ret.update(err)): ret.update(amdgpu_cfg(data.lib, amdgpu_targets[device]))
+      with soft_err(lambda err: ret.update(err)): ret.update(amdgpu_cfg(lib, amdgpu_targets[device]))
       with soft_err(lambda err: ret["metadata"].append(err)): ret["metadata"].append(amd_readelf(lib))
     else: ret["src"] = get_stdout(lambda: (compiler:=Device[device].compiler).disassemble(lib))
     return ret
