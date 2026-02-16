@@ -172,7 +172,7 @@ function formatCycles(cycles) {
   const M = Math.floor(cycles / 1e6), K = Math.floor((cycles % 1e6) / 1e3), s = Math.round(cycles % 1e3);
   const parts = [];
   if (M) parts.push(`${M}M`);
-  if (K || (!M && s)) parts.push(`${K}K`);
+  if (K) parts.push(`${K}K`);
   if (s || (!M && !K)) parts.push(`${s}`);
   return parts.join(" ");
 }
@@ -527,6 +527,7 @@ async function renderProfiler(path, unit, opts) {
     drawLine(ctx, xscale.range(), [0, 0]);
     let lastLabelEnd = -Infinity;
     for (const tick of xscale.ticks()) {
+      if (!Number.isInteger(tick)) continue;
       const x = xscale(tick);
       drawLine(ctx, [x, x], [0, tickSize]);
       const labelX = x+ctx.lineWidth+2;
