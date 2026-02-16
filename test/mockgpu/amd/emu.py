@@ -1107,6 +1107,7 @@ def _compile_wmma(inst: ir3.VOP3P | ir4.VOP3P | irc.VOP3P, ctx: _Ctx) -> UOp:
 
 def _compile_mfma(inst: irc.VOP3P, ctx: _Ctx) -> UOp:
   """CDNA MFMA (Matrix Fused Multiply-Add) for 16x16 F16/BF16 → F32 variants.
+  Uses per-lane range loop to keep UOp graph small (~500 nodes vs ~9000 for flat approach).
   Lane mapping (from AMD matrix instruction calculator, CDNA3):
     D[row,col]: vgpr=row%4, lane=col+(row//4)*16
     A[row,k]:   lane=row+(k//kpg)*16, vgpr=(k%kpg)//2, half=k%2  (kpg = n_src_vgprs*2)
@@ -1120,22 +1121,27 @@ def _compile_mfma(inst: irc.VOP3P, ctx: _Ctx) -> UOp:
   is_bf16 = 'BF16' in op_name
   cvt = _FUNCS['bf16_to_f32'] if is_bf16 else _FUNCS['f16_to_f32']
   K = 32 if '16X16X32' in op_name else 16
-  n_src_vgprs = K // 8  # VGPRs per lane for A/B: 4 for K=32, 2 for K=16
-  kpg = n_src_vgprs * 2  # k-values per lane group
+  kpg = (K // 8) * 2  # k-values per lane group
 
-  def read_f16_val(src, lane, vgpr, half):
-    v = ctx.rvgpr_dyn(src + _c(vgpr), UOp.const(dtypes.int, lane))
+  lane = ctx.range()  # symbolic lane 0..63
+  col = lane & _c(15)  # lane % 16
+  row_base = (lane >> _c(4)) * _c(4)  # (lane // 16) * 4
+
+  def read_f16(src: UOp, l: UOp, vgpr: int, half: int) -> UOp:
+    v = ctx.rvgpr_dyn(src + _c(vgpr), l)
     return cvt((v >> UOp.const(dtypes.uint32, 16)) if half else (v & UOp.const(dtypes.uint32, 0xFFFF)))
-  # Read matrices A (M×K) and B (K×N) using CDNA lane mapping
-  mat_a = [read_f16_val(src0_r, row + (k // kpg) * 16, (k % kpg) // 2, k & 1) for row in range(16) for k in range(K)]
-  mat_b = [read_f16_val(src1_r, col + (k // kpg) * 16, (k % kpg) // 2, k & 1) for col in range(16) for k in range(K)]
-  # Read accumulator C and compute D = A*B + C
-  mat_c = [ctx.rvgpr_dyn(src2_r + _c(row % 4), UOp.const(dtypes.int, col + (row // 4) * 16)).bitcast(dtypes.float32)
-           for row in range(16) for col in range(16)]
-  mat_d = [sum(mat_a[r * K + k] * mat_b[c * K + k] for k in range(K)) + mat_c[r * 16 + c] for r in range(16) for c in range(16)]
-  stores = [ctx.wvgpr_dyn(vdst_reg + _c(row % 4), UOp.const(dtypes.int, col + (row // 4) * 16),
-            mat_d[row * 16 + col].bitcast(dtypes.uint32), exec_mask) for row in range(16) for col in range(16)]
-  return UOp.sink(*stores, *ctx.inc_pc())
+
+  stores = []
+  for vi in range(4):  # 4 output VGPRs per lane
+    row = row_base + _c(vi)
+    acc = ctx.rvgpr_dyn(src2_r + _c(vi), lane).bitcast(dtypes.float32)
+    for k in range(K):
+      kq, kr = k // kpg, k % kpg
+      a_val = read_f16(src0_r, row + _c(kq * 16), kr // 2, kr & 1)
+      b_val = read_f16(src1_r, col + _c(kq * 16), kr // 2, kr & 1)
+      acc = acc + a_val * b_val
+    stores.append(ctx.wvgpr_dyn(vdst_reg + _c(vi), lane, acc.bitcast(dtypes.uint32), exec_mask))
+  return UOp.sink(UOp.group(*stores).end(lane), *ctx.inc_pc())
 
 def _compile_vop3p(inst: ir3.VOP3P | ir4.VOP3P | irc.VOP3P, ctx: _Ctx) -> UOp:
   op_name = _op_name(inst)
