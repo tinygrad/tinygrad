@@ -262,8 +262,18 @@ class ElementwiseMixin(DTypeMixin):
   def threefry(self, seed: Self) -> Self:
     return self.alu(Ops.THREEFRY, seed)
 
+  def _ensure_float(self) -> Self:
+    return self if self.dtype == dtypes.void or dtypes.is_float(self.dtype) else self.cast(least_upper_float(self.dtype))
+
   def reciprocal(self) -> Self:
-    return self.alu(Ops.RECIPROCAL)
+    """
+    Computes `1/x` element-wise.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([1., 2., 3., 4.]).reciprocal().numpy())
+    ```
+    """
+    return self._ensure_float().alu(Ops.RECIPROCAL)
 
   def trunc(self) -> Self:
     """
@@ -274,9 +284,6 @@ class ElementwiseMixin(DTypeMixin):
     ```
     """
     return self.alu(Ops.TRUNC)
-
-  def _ensure_float(self) -> Self:
-    return self if self.dtype == dtypes.void or dtypes.is_float(self.dtype) else self.cast(least_upper_float(self.dtype))
 
   def sqrt(self) -> Self:
     """
@@ -310,13 +317,40 @@ class ElementwiseMixin(DTypeMixin):
     return ((math.pi/2)-self).sin()
 
   def exp(self) -> Self:
-    return self.mul(1 / math.log(2)).exp2()
+    """
+    Computes the exponential function element-wise.
+
+    See: https://en.wikipedia.org/wiki/Exponential_function
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([0., 1., 2., 3.]).exp().numpy())
+    ```
+    """
+    return self._ensure_float().mul(1/math.log(2)).exp2().cast(self.dtype)
 
   def log2(self) -> Self:
-    return self.alu(Ops.LOG2)
+    """
+    Computes the base-2 logarithm element-wise.
+
+    See: https://en.wikipedia.org/wiki/Logarithm
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([1., 2., 4., 8.]).log2().numpy())
+    ```
+    """
+    return self._ensure_float().alu(Ops.LOG2)
 
   def exp2(self) -> Self:
-    return self.alu(Ops.EXP2)
+    """
+    Computes the base-2 exponential function element-wise.
+
+    See: https://en.wikipedia.org/wiki/Exponential_function
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([0., 1., 2., 3.]).exp2().numpy())
+    ```
+    """
+    return self._ensure_float().alu(Ops.EXP2)
 
   def pow(self, x: Self | ConstType) -> Self:
     return self.alu(Ops.POW, self.ufix(x))
