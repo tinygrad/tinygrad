@@ -3,6 +3,7 @@ import math, pathlib, functools, struct
 from tinygrad import Device, Tensor
 from tinygrad.dtype import DTypeLike, dtypes
 from tinygrad.helpers import DEBUG
+from tinygrad.renderer import Estimates
 from tinygrad.runtime.support.compiler_amd import HIPCCCompiler
 from tinygrad.runtime.support.elf import elf_loader
 from tinygrad.uop.ops import UOp, Ops, KernelInfo
@@ -61,7 +62,7 @@ def flash_attention(xq, xk, xv, attn_mask:Tensor|None=None, is_causal:bool=False
 
 @functools.cache
 def custom_fa_forward(o:UOp, l_vec:UOp, q:UOp, k:UOp, v:UOp, device:str, arch:str):
-  B, N, H, _ = q.shape
+  B, N, H, D = q.shape
   H_KV = k.shape[2]
 
   code = (pathlib.Path(__file__).parent / "fa_fwd_causal.cpp").read_text()
@@ -76,9 +77,12 @@ def custom_fa_forward(o:UOp, l_vec:UOp, q:UOp, k:UOp, v:UOp, device:str, arch:st
   threadIdx_x = UOp.special(lsz[0], "lidx0")
   blockIdx_x, blockIdx_y, blockIdx_z = UOp.special(gsz[0], "gidx0"), UOp.special(gsz[1], "gidx1"), UOp.special(gsz[2], "gidx2")
 
+  el = q.dtype.itemsize
+  mem = (2*B*N*H*D + 2*B*N*H_KV*D) * el + B*H*N * l_vec.dtype.itemsize
+  estimates = Estimates(ops=2*B*H*N*N*D, lds=mem, mem=mem)
   sink = UOp.sink(o.base, l_vec.base, q.base, k.base, v.base,
                   threadIdx_x, blockIdx_x, blockIdx_y, blockIdx_z,
-                  arg=KernelInfo(name="custom_fa_forward"))
+                  arg=KernelInfo(name="custom_fa_forward", estimates=estimates))
 
   lib = HIPCCCompiler(arch, compile_args).compile_cached(code)
 
@@ -92,7 +96,7 @@ def custom_fa_forward(o:UOp, l_vec:UOp, q:UOp, k:UOp, v:UOp, device:str, arch:st
 
 @functools.cache
 def custom_fa_backward_pre(delta_vec:UOp, dq:UOp, o:UOp, do:UOp, device:str, arch:str):
-  B, N, H, _ = o.shape
+  B, N, H, D = o.shape
 
   code = (pathlib.Path(__file__).parent / "fa_bwd_pre.cpp").read_text()
   compile_args = [f"-I{(pathlib.Path(__file__).parent / 'include').as_posix()}", "-std=c++20", "-DKITTENS_CDNA4", "-DHIP_ENABLE_WARP_SYNC_BUILTINS", "-ffast-math",
@@ -106,9 +110,12 @@ def custom_fa_backward_pre(delta_vec:UOp, dq:UOp, o:UOp, do:UOp, device:str, arc
   threadIdx_x = UOp.special(lsz[0], "lidx0")
   blockIdx_x, blockIdx_y, blockIdx_z = UOp.special(gsz[0], "gidx0"), UOp.special(gsz[1], "gidx1"), UOp.special(gsz[2], "gidx2")
 
+  el = o.dtype.itemsize
+  mem = 3*B*H*N*D * el + B*H*N * delta_vec.dtype.itemsize
+  estimates = Estimates(ops=2*B*H*N*D, lds=mem, mem=mem)
   sink = UOp.sink(delta_vec.base, dq.base, o.base, do.base,
                   threadIdx_x, blockIdx_x, blockIdx_y, blockIdx_z,
-                  arg=KernelInfo(name="custom_fa_backward_pre"))
+                  arg=KernelInfo(name="custom_fa_backward_pre", estimates=estimates))
 
   lib = HIPCCCompiler(arch, compile_args).compile_cached(code)
 
@@ -122,7 +129,7 @@ def custom_fa_backward_pre(delta_vec:UOp, dq:UOp, o:UOp, do:UOp, device:str, arc
 
 @functools.cache
 def custom_fa_backward(dq:UOp, dk:UOp, dv:UOp, do:UOp, q:UOp, k:UOp, v:UOp, l_vec:UOp, delta_vec:UOp, device:str, arch:str):
-  B, N, H, _ = q.shape
+  B, N, H, D = q.shape
   H_KV = k.shape[2]
 
   code = (pathlib.Path(__file__).parent / "fa_bwd_causal.cpp").read_text()
@@ -137,9 +144,12 @@ def custom_fa_backward(dq:UOp, dk:UOp, dv:UOp, do:UOp, q:UOp, k:UOp, v:UOp, l_ve
   threadIdx_x = UOp.special(lsz[0], "lidx0")
   blockIdx_x, blockIdx_y, blockIdx_z = UOp.special(gsz[0], "gidx0"), UOp.special(gsz[1], "gidx1"), UOp.special(gsz[2], "gidx2")
 
+  el = q.dtype.itemsize
+  mem = (3*B*H*N*D + 4*B*H_KV*N*D) * el + 2*B*H*N * l_vec.dtype.itemsize
+  estimates = Estimates(ops=5*B*H*N*N*D, lds=mem, mem=mem)
   sink = UOp.sink(dq.base, dk.base, dv.base, do.base, q.base, k.base, v.base, l_vec.base, delta_vec.base,
                   threadIdx_x, blockIdx_x, blockIdx_y, blockIdx_z,
-                  arg=KernelInfo(name="custom_fa_backward"))
+                  arg=KernelInfo(name="custom_fa_backward", estimates=estimates))
 
   lib = HIPCCCompiler(arch, compile_args).compile_cached(code)
 
@@ -153,7 +163,7 @@ def custom_fa_backward(dq:UOp, dk:UOp, dv:UOp, do:UOp, q:UOp, k:UOp, v:UOp, l_ve
 
 @functools.cache
 def custom_fa_backward_post(dq_out:UOp, dq_in:UOp, device:str, arch:str):
-  B, N, H, _ = dq_out.shape
+  B, N, H, D = dq_out.shape
 
   code = (pathlib.Path(__file__).parent / "fa_bwd_post.cpp").read_text()
   compile_args = [f"-I{(pathlib.Path(__file__).parent / 'include').as_posix()}", "-std=c++20", "-DKITTENS_CDNA4", "-DHIP_ENABLE_WARP_SYNC_BUILTINS", "-ffast-math",
@@ -167,9 +177,12 @@ def custom_fa_backward_post(dq_out:UOp, dq_in:UOp, device:str, arch:str):
   threadIdx_x = UOp.special(lsz[0], "lidx0")
   blockIdx_x, blockIdx_y, blockIdx_z = UOp.special(gsz[0], "gidx0"), UOp.special(gsz[1], "gidx1"), UOp.special(gsz[2], "gidx2")
 
+  el = dq_out.dtype.itemsize
+  mem = 2*B*H*N*D * el
+  estimates = Estimates(lds=mem, mem=mem)
   sink = UOp.sink(dq_out.base, dq_in.base,
                   threadIdx_x, blockIdx_x, blockIdx_y, blockIdx_z,
-                  arg=KernelInfo(name="custom_fa_backward_post"))
+                  arg=KernelInfo(name="custom_fa_backward_post", estimates=estimates))
 
   lib = HIPCCCompiler(arch, compile_args).compile_cached(code)
 
