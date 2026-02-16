@@ -24,7 +24,7 @@ GEMM_ARGS = {
 ITERS_ARGS = {64: (67108864, 0), 128: (33554432, 0), 224: (613566757, 2147483656)}
 
 class Kernel:
-  def __init__(self, name="gemm"): self.name, self.instructions, self.labels, self.label_at_pos, self.pos = name, [], {}, {}, 0
+  def __init__(self): self.instructions, self.labels, self.label_at_pos, self.pos = [], {}, {}, 0
 
   def label(self, name):
     self.labels[name] = self.pos
@@ -55,7 +55,7 @@ def build_kernel(batch, M, N, K, dtype):
   v_mfma_16x16x32 = {dtypes.half:v_mfma_f32_16x16x32_f16, dtypes.bfloat16:v_mfma_f32_16x16x32_bf16}[dtype]
   v_cvt_pk = {dtypes.half:v_cvt_pk_f16_f32, dtypes.bfloat16:v_cvt_pk_bf16_f32}[dtype]
   v_cvt = {dtypes.half:v_cvt_f32_f16_e32, dtypes.bfloat16:v_cvt_f32_bf16_e32}[dtype]
-  k = Kernel(f"gemm_{batch}_{M}_{N}_{K}")
+  k = Kernel()
   # load D, A, B pointers
   k.emit(s_load_dwordx2(s[24:25], s[0:1], s[0], 0, 0, 0, 0, 1))
   k.emit(s_load_dwordx2(s[30:31], s[0:1], s[0], 8, 0, 0, 0, 1))
@@ -11491,4 +11491,4 @@ def build_kernel(batch, M, N, K, dtype):
   k.emit(s_branch(), target='PersistentLoopStart')
   k.label('KernelEnd')
   k.emit(s_endpgm())
-  return k
+  return k.finalize()

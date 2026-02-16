@@ -17,12 +17,12 @@ def custom_asm_gemm(C:UOp, A:UOp, B:UOp, dname:str, arch:str, wg:int) -> UOp:
   assert K == K2
   lidx = UOp.special(WORKGROUP_SIZE, "lidx0")
   gidx = UOp.special(wg, "gidx0")
-  k = build_kernel(batch, M, N, K, A.dtype.base)
-  lds = UOp(Ops.DEFINE_LOCAL, dtypes.uint8.ptr(size=133120, addrspace=AddrSpace.LOCAL), (), 'lds')
+  insts = build_kernel(batch, M, N, K, A.dtype.base)
+  lds = UOp(Ops.DEFINE_LOCAL, dtypes.uint8.ptr(size=133_120, addrspace=AddrSpace.LOCAL), (), 'lds')
   sink = UOp.sink(C.base, A.base, B.base, lds, lidx, gidx,
-                  arg=KernelInfo(name=k.name, estimates=Estimates(ops=2*batch*M*N*K, mem=(batch*M*K + K*N + batch*M*N)*2)))
+                  arg=KernelInfo(name=f"gemm_{batch}_{M}_{N}_{K}", estimates=Estimates(ops=2*batch*M*N*K, mem=(batch*M*K + K*N + batch*M*N)*2)))
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg=dname),
-                                UOp(Ops.LINEAR, src=tuple([UOp(Ops.INS, arg=x) for x in k.finalize()]))))
+                                UOp(Ops.LINEAR, src=tuple([UOp(Ops.INS, arg=x) for x in insts]))))
 
 counters = {"used":0, "todos":[]}
 def todo(msg:str) -> bool: counters["todos"].append(msg); return False
