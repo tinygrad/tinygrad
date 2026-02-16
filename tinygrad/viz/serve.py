@@ -69,7 +69,7 @@ def get_rewrites(t:RewriteTrace) -> list[dict]:
   for i,(k,v) in enumerate(zip(t.keys, t.rewrites)):
     steps = [create_step(s.name, ("/graph-rewrites", i, j), loc=s.loc, match_count=len(s.matches), code_line=printable(s.loc),
                          trace=k.tb if j==0 else None, depth=s.depth) for j,s in enumerate(v)]
-    if (prg_idx:=next((j for j,s in enumerate(v) if s.name == "View Final Program"), None)) is not None:
+    if (prg_idx:=next((j for j,s in enumerate(v) if s.name == "View Program"), None)) is not None:
       _, device, lin, src, binary = _reconstruct(trace.rewrites[i][prg_idx].sink).src
       steps.append(create_step("View UOp List", ("/uops", i, len(steps)), lin.src))
       steps.append(create_step("View Source", ("/code", i, len(steps)), src.arg))
