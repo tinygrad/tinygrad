@@ -247,11 +247,11 @@ class AMDComputeQueue(HWQueue):
         self.set_grbm(se=se, sh=0)
 
         buf0_lo, buf0_hi = data64_le(buf0s[se].va_addr >> 12)
-        if self.dev.target >= (12,0,0):
+        if self.dev.target >= (12,0,0): # RDNA4
           self.wreg(self.gc.regSQ_THREAD_TRACE_BUF0_SIZE, size=buf0s[se].size >> 12)
           self.wreg(self.gc.regSQ_THREAD_TRACE_BUF0_BASE_LO, base_lo=buf0_lo)
           self.wreg(self.gc.regSQ_THREAD_TRACE_BUF0_BASE_HI, base_hi=buf0_hi)
-        else:
+        else: # RDNA3
           self.wreg(self.gc.regSQ_THREAD_TRACE_BUF0_SIZE, base_hi=buf0_hi, size=buf0s[se].size >> 12)
           self.wreg(self.gc.regSQ_THREAD_TRACE_BUF0_BASE, base_lo=buf0_lo)
         # NOTE: SQTT can only trace instructions on one simd per se, this selects the simd in first wgp in first sa.
