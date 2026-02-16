@@ -58,9 +58,8 @@ class TestSQTTMapBase(unittest.TestCase):
         data = pickle.load(f)
       sqtt_events = [e for e in data if type(e).__name__ == "ProfileSQTTEvent"]
       kern_events = {e.tag:e for e in data if type(e).__name__ == "ProfileProgramEvent"}
-      dev = next((e for e in data if type(e).__name__ == "ProfileDeviceEvent" and e.device.startswith("AMD")), None)
-      if sqtt_events and kern_events and dev:
-        cls.examples[pkl_path.stem] = (sqtt_events, kern_events, dev.props["gfx_target_version"])
+      if sqtt_events and kern_events:
+        cls.examples[pkl_path.stem] = (sqtt_events, kern_events, cls.target)
 
   def test_rocprof_inst_traces_match(self):
     for name, (events, kern_events, target) in self.examples.items():

@@ -389,7 +389,7 @@ def get_profile(profile:list[ProfileEvent], sort_fn:Callable[[str], Any]=device_
       device_ts_diffs[ev.device] = ev.tdiff
       if (d:=ev.device.split(":")[0]) == "AMD":
         device_decoders[d] = load_counters
-        amdgpu_targets[d] = f"gfx{unwrap(ev.props)["gfx_target_version"]//1000}"
+        amdgpu_targets[d] = f"gfx{unwrap(ev.props)['gfx_target_version']//1000}"
   # load device specific counters
   for fxn in device_decoders.values(): fxn(profile)
   # map events per device
@@ -477,7 +477,7 @@ def amdgpu_cfg(lib:bytes, target:str) -> dict:
   disasm = {pc:str(inst) for pc,inst in pc_table.items()}
   asm_width = max(len(asm) for asm in disasm.values())
   for pc, inst in pc_table.items():
-    lines.append(f"  {asm:<{asm_width}}  // {pc:012X}")
+    lines.append(f"  {disasm[pc]:<{asm_width}}  // {pc:012X}")
     if pc in leaders:
       paths[curr:=pc] = {}
       blocks[pc] = []
