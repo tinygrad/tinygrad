@@ -173,7 +173,7 @@ def rel_ts(ts:int|Decimal, start_ts:int) -> int:
 device_ts_diffs:dict[str, Decimal] = {}
 def cpu_ts_diff(device:str) -> Decimal: return device_ts_diffs.get(device, Decimal(0))
 
-amdgpu_targets:dict[str, int] = {}
+amdgpu_targets:dict[str, str] = {}
 
 DevEvent = ProfileRangeEvent|ProfileGraphEntry|ProfilePointEvent
 def flatten_events(profile:list[ProfileEvent]) -> Generator[tuple[Decimal, Decimal, DevEvent], None, None]:
@@ -389,7 +389,7 @@ def get_profile(profile:list[ProfileEvent], sort_fn:Callable[[str], Any]=device_
       device_ts_diffs[ev.device] = ev.tdiff
       if (d:=ev.device.split(":")[0]) == "AMD":
         device_decoders[d] = load_counters
-        amdgpu_targets[d] = unwrap(ev.props)["gfx_target_version"]
+        amdgpu_targets[d] = f"gfx{unwrap(ev.props)["gfx_target_version"]//1000}"
   # load device specific counters
   for fxn in device_decoders.values(): fxn(profile)
   # map events per device
@@ -436,7 +436,7 @@ def amd_readelf(lib:bytes) -> list[dict]:
   return [{"label":f"{resource} Alloc", "value":val} for resource,val in [("VGPR", (vgpr_gran+1)*8-7), ("LDS",kd.group_segment_fixed_size),
                                                                           ("Scratch", kd.private_segment_fixed_size)] if val > 0]
 
-def amd_decode(lib:bytes, target:int) -> dict[int, Any]: # Any is the Inst class from tinygrad.renderer.amd.dsl
+def amd_decode(lib:bytes, target:str) -> dict[int, Any]: # Any is the Inst class from tinygrad.renderer.amd.dsl
   from tinygrad.runtime.support.elf import elf_loader
   from tinygrad.renderer.amd import detect_format
   from tinygrad.renderer.amd.dsl import Inst
@@ -444,7 +444,7 @@ def amd_decode(lib:bytes, target:int) -> dict[int, Any]: # Any is the Inst class
   text = next((sh for sh in sections if sh.name == ".text"), None)
   assert text is not None, "no .text section found in ELF"
   off, buf = text.header.sh_addr, text.content
-  arch = {11:"rdna3", 12:"rdna4"}.get(target//10000, "cdna")
+  arch = "rdna3" if target.startswith("gfx11") else "rdna4" if target.startswith("gfx12") else "cdna"
   addr_table:dict[int, Inst] = {}
   offset = 0
   while offset < len(buf):
@@ -462,7 +462,7 @@ def parse_branch(inst) -> int|None:
   return None
 
 COND_TAKEN, COND_NOT_TAKEN, UNCOND = range(3)
-def amdgpu_cfg(lib:bytes, target:int) -> dict:
+def amdgpu_cfg(lib:bytes, target:str) -> dict:
   # decode
   pc_table = amd_decode(lib, target)
   # get leaders
