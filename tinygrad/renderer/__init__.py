@@ -20,7 +20,7 @@ class Estimates:
   def __add__(self, o:Estimates): return Estimates(self.ops + o.ops, self.lds + o.lds, self.mem + o.mem)
   def simplify(self): return Estimates(ssimplify(self.ops), ssimplify(self.lds), ssimplify(self.mem))
   @staticmethod
-  def from_uops(uops:list[UOp], ignore_indexing=False) -> Estimates:
+  def from_uops(uops:tuple[UOp, ...], ignore_indexing=False) -> Estimates:
     flops: sint = 0
     lds: sint = 0
     mem: dict[tuple[UOp, Ops], sint] = {}
