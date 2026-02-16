@@ -6,6 +6,10 @@ import numpy as np
 
 from extra.thunder.amd.fa import flash_attention
 
+def assert_allclose(cmp:Tensor, ref:Tensor, **kwargs) -> None:
+  if Device.DEFAULT == "NULL": Tensor.realize(cmp, ref)
+  else: np.testing.assert_allclose(cmp.numpy(), ref.numpy(), **kwargs)
+
 class TestFA(unittest.TestCase):
   def setUp(self):
     arch = getattr(Device[Device.DEFAULT].renderer, "arch", "")
@@ -37,7 +41,7 @@ class TestFA(unittest.TestCase):
 
     ref = q.scaled_dot_product_attention(k, v, is_causal=True, enable_gqa=True).float().transpose(1, 2)
 
-    np.testing.assert_allclose(out.numpy(), ref.numpy(), atol=2e-2, rtol=2e-2)
+    assert_allclose(out, ref, atol=2e-2, rtol=2e-2)
 
   def test_fast_fa_bwd_causal(self):
     Tensor.manual_seed(42)
@@ -71,9 +75,9 @@ class TestFA(unittest.TestCase):
     ref.backward(do)
     Tensor.realize(q_ref.grad, k_ref.grad, v_ref.grad)
 
-    np.testing.assert_allclose(q.grad.numpy(), q_ref.grad.numpy(), atol=2e-2, rtol=2e-2)
-    np.testing.assert_allclose(v.grad.numpy(), v_ref.grad.numpy(), atol=2e-2, rtol=2e-2)
-    np.testing.assert_allclose(k.grad.numpy(), k_ref.grad.numpy(), atol=6e-2, rtol=2e-2)
+    assert_allclose(q.grad, q_ref.grad, atol=2e-2, rtol=2e-2)
+    assert_allclose(v.grad, v_ref.grad, atol=2e-2, rtol=2e-2)
+    assert_allclose(k.grad, k_ref.grad, atol=6e-2, rtol=2e-2)
 
   def test_fast_fa_bwd_causal_jitted(self):
     Tensor.manual_seed(42)
@@ -120,9 +124,9 @@ class TestFA(unittest.TestCase):
     ref.backward(do)
     Tensor.realize(q_ref.grad, k_ref.grad, v_ref.grad)
 
-    np.testing.assert_allclose(q.grad.numpy(), q_ref.grad.numpy(), atol=3e-3, rtol=3e-3)
-    np.testing.assert_allclose(k.grad.numpy(), k_ref.grad.numpy(), atol=1e-5, rtol=1e-5)
-    np.testing.assert_allclose(v.grad.numpy(), v_ref.grad.numpy(), atol=1e-5, rtol=1e-5)
+    assert_allclose(q.grad, q_ref.grad, atol=3e-3, rtol=3e-3)
+    assert_allclose(k.grad, k_ref.grad, atol=1e-5, rtol=1e-5)
+    assert_allclose(v.grad, v_ref.grad, atol=1e-5, rtol=1e-5)
 
   def test_fast_fa_bwd_multidevice(self):
     Tensor.manual_seed(42)
@@ -167,9 +171,9 @@ class TestFA(unittest.TestCase):
     ref.backward(do_ref)
     Tensor.realize(q_ref.grad, k_ref.grad, v_ref.grad)
 
-    np.testing.assert_allclose(q.grad.numpy(), q_ref.grad.numpy(), atol=1e-5, rtol=1e-5)
-    np.testing.assert_allclose(v.grad.numpy(), v_ref.grad.numpy(), atol=1e-5, rtol=1e-5)
-    np.testing.assert_allclose(k.grad.numpy(), k_ref.grad.numpy(), atol=1e-5, rtol=1e-5)
+    assert_allclose(q.grad, q_ref.grad, atol=1e-5, rtol=1e-5)
+    assert_allclose(v.grad, v_ref.grad, atol=1e-5, rtol=1e-5)
+    assert_allclose(k.grad, k_ref.grad, atol=1e-5, rtol=1e-5)
 
 if __name__ == "__main__":
   unittest.main()
