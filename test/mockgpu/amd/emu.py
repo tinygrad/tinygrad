@@ -78,9 +78,27 @@ MASK32 = 0xFFFFFFFF
 # Global trace storage: populated by run_asm as raw SQTT blobs, consumed by amdgpu.py
 sqtt_traces: list[bytes] = []
 
+# Encoder primitives
+from tinygrad.renderer.amd.sqtt import _build_decode_tables, PACKET_TYPES_RDNA3, LAYOUT_HEADER, WAVESTART, WAVEEND, INST, IMMEDIATE, VALUINST, InstOp
+
+_NIB_COUNTS: dict = {cls: nc for _, (cls, nc, *_) in _build_decode_tables(PACKET_TYPES_RDNA3)[0].items()}
+
+def _encode_raw(pkt_cls, **kwargs) -> tuple[int, int]:
+  raw = pkt_cls.encoding.default
+  for k, v in kwargs.items(): raw = pkt_cls.__dict__[k].set(raw, v)
+  return raw, _NIB_COUNTS[pkt_cls]
+
+def _emit_nibbles(nibbles: list[int], pkt_cls, **kwargs):
+  raw, nc = _encode_raw(pkt_cls, **kwargs)
+  for i in range(nc): nibbles.append((raw >> (i * 4)) & 0xF)
+
+def _nibbles_to_bytes(nibbles: list[int]) -> bytes:
+  result = bytearray()
+  for i in range(0, len(nibbles), 2): result.append(nibbles[i] | ((nibbles[i + 1] if i + 1 < len(nibbles) else 0) << 4))
+  return bytes(result)
+
 def _init_sqtt_encoder():
   """Initialize and return SQTT encoder state. Called once per dispatch with tracing enabled."""
-  from tinygrad.renderer.amd.sqtt import _emit_nibbles, _nibbles_to_bytes, LAYOUT_HEADER, WAVESTART, WAVEEND, INST, IMMEDIATE, VALUINST, InstOp
   from tinygrad.runtime.autogen.amd.rdna3.enum import SOPPOp as SOPPOp3
   from tinygrad.runtime.autogen.amd.rdna4.enum import SOPPOp as SOPPOp4
   import re
@@ -1485,8 +1503,7 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
                 fxn, globals_list, is_barrier, inst_type, inst_op, inst_op_name = _ensure_compiled(pc)
                 fxn(*[c_bufs[g] for g in globals_list])
                 if tracing:
-                  branch_taken = (st.pc != ENDPGM_PC and st.pc != pc + 4) if issubclass(inst_type, (ir3.SOPP, ir4.SOPP, irc.SOPP)) \
-                    and inst_op in _BRANCH_OPS else None
+                  branch_taken = (st.pc != ENDPGM_PC and st.pc != pc + 4) if inst_op in _BRANCH_OPS else None
                   sqtt_emit(wi, inst_type, inst_op, inst_op_name, branch_taken)
                 if is_barrier: break  # s_barrier hit: PC already advanced past it, pause this wave
               else: raise RuntimeError("exceeded 1M instructions in single wave, likely infinite loop")

@@ -5,10 +5,8 @@ Run with: AMD=1 MOCKGPU=1 python -m pytest test/amd/test_sqtt_encoder.py -v
 """
 import subprocess, sys, os, unittest
 from dataclasses import dataclass
-from tinygrad.renderer.amd.sqtt import (decode, _encode_raw, _emit_nibbles, _nibbles_to_bytes,
-                                         LAYOUT_HEADER, WAVESTART, WAVEEND, INST, IMMEDIATE, NOP, VALUINST,
-                                         InstOp, _NIB_COUNTS)
-from test.mockgpu.amd.emu import _init_sqtt_encoder
+from tinygrad.renderer.amd.sqtt import decode, LAYOUT_HEADER, WAVESTART, WAVEEND, INST, IMMEDIATE, NOP, VALUINST, InstOp
+from test.mockgpu.amd.emu import _init_sqtt_encoder, _encode_raw, _emit_nibbles, _nibbles_to_bytes, _NIB_COUNTS
 from tinygrad.runtime.autogen.amd.rdna3 import ins as ir3
 from tinygrad.runtime.autogen.amd.rdna3.enum import SOPPOp
 
