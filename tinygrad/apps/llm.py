@@ -82,8 +82,12 @@ def apply_rope(x:Tensor, freqs_cis:Tensor) -> Tensor:
   return (x1 * cos - x2 * sin).cat(x2 * cos + x1 * sin, dim=-1)
 
 class TransformerBlock:
-  def __init__(self, dim:int, hidden_dim:int, n_heads:int, n_kv_heads:int, norm_eps:float, head_dim:int, rope_theta:float,
-               max_context:int=0, qk_norm:int=0, num_experts:int=0, num_experts_per_tok:int=0,q_lora_rank:int=0, kv_lora_rank:int=0,qk_nope_head_dim:int=0, qk_rope_head_dim:int=0, v_head_dim:int=0):
+  def __init__(self, dim:int, hidden_dim:int, n_heads:int,
+               n_kv_heads:int, norm_eps:float,head_dim:int,
+               rope_theta:float,max_context:int=0, qk_norm:int=0,
+               num_experts:int=0, num_experts_per_tok:int=0,q_lora_rank:int=0,
+               kv_lora_rank:int=0,qk_nope_head_dim:int=0, qk_rope_head_dim:int=0,
+               v_head_dim:int=0):
     self.n_heads      = n_heads
     self.n_kv_heads   = n_kv_heads
     self.head_dim     = head_dim
@@ -188,8 +192,14 @@ class TransformerBlock:
     k = k_nope.cat(k_pe.expand(-1, self.n_heads, -1, -1), dim=-1)
 
     if not hasattr(self, "cache_k"):
-      self.cache_k = Tensor.zeros(B, self.n_heads, self.max_context, self.qk_nope_head_dim + self.qk_rope_head_dim, dtype=k.dtype, device=k.device).contiguous().realize()
-      self.cache_v = Tensor.zeros(B, self.n_heads, self.max_context, self.v_head_dim, dtype=v.dtype, device=v.device).contiguous().realize()
+      self.cache_k = Tensor.zeros(B, self.n_heads,
+                                  self.max_context,
+                                  self.qk_nope_head_dim + self.qk_rope_head_dim,
+                                  dtype=k.dtype, device=k.device).contiguous().realize()
+      self.cache_v = Tensor.zeros(B, self.n_heads,
+                                  self.max_context,
+                                  self.v_head_dim,
+                                  dtype=v.dtype, device=v.device).contiguous().realize()
 
     self.cache_k[:, :, start_pos:start_pos+T, :].assign(k)
     self.cache_v[:, :, start_pos:start_pos+T, :].assign(v)
@@ -215,10 +225,20 @@ class TransformerBlock:
     return self._feed_forward(attn).contiguous()
 
 class Transformer:
-  def __init__(self, *, num_blocks, dim, hidden_dim, n_heads, n_kv_heads, norm_eps, vocab_size, head_dim:int, rope_theta:float,
-               max_context:int=0, qk_norm:int=0, num_experts:int=0, num_experts_per_tok:int=0,q_lora_rank:int=0, kv_lora_rank:int=0,qk_nope_head_dim:int=0, qk_rope_head_dim:int=0, v_head_dim:int=0):
-    self.blk = [TransformerBlock(dim, hidden_dim, n_heads, n_kv_heads, norm_eps, head_dim, rope_theta, max_context, qk_norm,num_experts, num_experts_per_tok, q_lora_rank, kv_lora_rank, qk_nope_head_dim, qk_rope_head_dim, v_head_dim) for _ in range(num_blocks)]
-
+  def __init__(self, *, num_blocks, dim, hidden_dim,
+               n_heads, n_kv_heads, norm_eps, vocab_size,
+               head_dim:int, rope_theta:float,max_context:int=0,
+               qk_norm:int=0, num_experts:int=0, num_experts_per_tok:int=0,
+               q_lora_rank:int=0, kv_lora_rank:int=0,qk_nope_head_dim:int=0,
+               qk_rope_head_dim:int=0, v_head_dim:int=0):
+    self.blk = [
+        TransformerBlock(
+            dim, hidden_dim, n_heads, n_kv_heads, norm_eps, head_dim,
+            rope_theta, max_context, qk_norm, num_experts, num_experts_per_tok,
+            q_lora_rank, kv_lora_rank, qk_nope_head_dim, qk_rope_head_dim, v_head_dim
+        )
+        for _ in range(num_blocks)
+    ]
     self.token_embd  = nn.Embedding(vocab_size, dim)
     self.output_norm = nn.RMSNorm(dim, norm_eps)
     self.output = nn.Linear(dim, vocab_size, bias=False)
