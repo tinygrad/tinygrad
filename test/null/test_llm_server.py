@@ -23,6 +23,7 @@ class TestLLMServer(unittest.TestCase):
     llm_module.tok = cls.mock_tok
     llm_module.bos_id = cls.bos_id
     llm_module.eos_id = cls.eos_id
+    llm_module.stop_tokens = {cls.eos_id}
 
     from tinygrad.apps.llm import Handler
     from tinygrad.viz.serve import TCPServerWithReuse
