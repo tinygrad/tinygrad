@@ -77,6 +77,17 @@ class TestSQTTEncoder(unittest.TestCase):
     self.assertEqual(sum(1 for p in packets if isinstance(p, WAVESTART)), 2)
     self.assertEqual(sum(1 for p in packets if isinstance(p, WAVEEND)), 2)
 
+  def test_branch_taken_and_not_taken(self):
+    """A loop with s_cbranch_scc1 emits JUMP when taken, JUMP_NO on final iteration."""
+    # s[0] = 2; loop: s[0] -= 1; cmp s[0] != 0 (SCC=1 if true); cbranch_scc1 loop; endpgm
+    # iteration 1: s[0]=2→1, SCC=1 (1!=0), branch taken (JUMP)
+    # iteration 2: s[0]=1→0, SCC=0 (0==0), branch not taken (JUMP_NO)
+    blob = _run_kernel([s_mov_b32(s[0], 2), s_sub_u32(s[0], s[0], 1), s_cmp_lg_u32(s[0], 0), s_cbranch_scc1(simm16=-3), s_endpgm()])
+    inst_pkts = [p for p in decode(blob) if isinstance(p, INST)]
+    ops = [p.op for p in inst_pkts]
+    self.assertIn(InstOp.JUMP, ops)
+    self.assertIn(InstOp.JUMP_NO, ops)
+
   def test_timestamps_monotonic(self):
     """Timestamps are monotonically non-decreasing."""
     blob = _run_kernel([s_mov_b32(s[0], 0), s_mov_b32(s[1], 1), s_mov_b32(s[2], 2), s_endpgm()])

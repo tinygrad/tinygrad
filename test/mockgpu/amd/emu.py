@@ -156,12 +156,13 @@ def _init_sqtt_encoder():
   started: set[int] = set()
   _emit_nibbles(nibbles, LAYOUT_HEADER, layout=3, sel_a=6)
 
-  def emit(wave_id: int, inst_type: type, inst_op: int, inst_op_name: str, branch_taken: bool|None):
+  def emit(wave_id: int, inst, branch_taken: bool|None):
     """Emit an SQTT packet for one executed instruction."""
     w = wave_id & 0x1F
     if wave_id not in started:
       _emit_nibbles(nibbles, WAVESTART, delta=1, simd=0, cu_lo=0, wave=w, id7=wave_id)
       started.add(wave_id)
+    inst_type, inst_op, op_name = type(inst), inst.op.value if hasattr(inst, 'op') else 0, inst.op.name if hasattr(inst, 'op') else ""
     if issubclass(inst_type, _SOPP):
       if inst_op in _SOPP_SKIP: return
       elif inst_op in _SOPP_IMMEDIATE: _emit_nibbles(nibbles, IMMEDIATE, delta=1, wave=w)
@@ -170,11 +171,11 @@ def _init_sqtt_encoder():
         _emit_nibbles(nibbles, INST, delta=1, wave=w, op=InstOp.JUMP if branch_taken else InstOp.JUMP_NO)
       else: _emit_nibbles(nibbles, INST, delta=1, wave=w, op=InstOp.SALU)
     elif issubclass(inst_type, _VALU):
-      op = _valu_op(inst_op_name)
+      op = _valu_op(op_name)
       if op is None: _emit_nibbles(nibbles, VALUINST, delta=1, wave=w)
       else: _emit_nibbles(nibbles, INST, delta=1, wave=w, op=op)
     elif issubclass(inst_type, _SMEM): _emit_nibbles(nibbles, INST, delta=1, wave=w, op=InstOp.SMEM)
-    else: _emit_nibbles(nibbles, INST, delta=1, wave=w, op=_mem_op(inst_type, inst_op_name))
+    else: _emit_nibbles(nibbles, INST, delta=1, wave=w, op=_mem_op(inst_type, op_name))
 
   def finish(wave_id: int):
     """Emit WAVEEND for a completed wave."""
@@ -1444,7 +1445,8 @@ def _init_wave(lib: int, wave_start: int, total_threads: int, lx: int, ly: int, 
 def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, lz: int, args_ptr: int, rsrc2: int = 0x19c,
             scratch_size: int = 0, arch: str = "rdna3", user_data: list[int]|None = None) -> int:
   """Execute AMD assembly program. scratch_size is private_segment_fixed_size from kernel descriptor (per-lane)."""
-  program: dict[int, tuple[Callable, list[int], bool, type, int, str]] = {}  # pc -> (fxn, globals, is_barrier, inst_type, inst_op, inst_op_name)
+  from tinygrad.renderer.amd.dsl import Inst
+  program: dict[int, tuple[Callable, list[int], bool, Inst]] = {}  # pc -> (fxn, globals, is_barrier, inst)
   lds_size = ((rsrc2 & hsa.AMD_COMPUTE_PGM_RSRC_TWO_GRANULATED_LDS_SIZE) >> hsa.AMD_COMPUTE_PGM_RSRC_TWO_GRANULATED_LDS_SIZE_SHIFT) * 512
   total_threads = lx * ly * lz
 
@@ -1457,14 +1459,12 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
   if PROFILE:
     sqtt_emit, sqtt_finish, sqtt_finalize = _init_sqtt_encoder()
 
-  def _ensure_compiled(pc: int) -> tuple[Callable, list[int], bool, type, int, str]:
+  def _ensure_compiled(pc: int) -> tuple[Callable, list[int], bool, Inst]:
     if pc not in program:
       prev_len = len(_canonical_runner_cache)
       runner, inst = _decode_at(pc, arch)
       is_barrier = isinstance(inst, (ir3.SOPP, ir4.SOPP, irc.SOPP)) and inst.op in _BARRIER_OPS
-      inst_op = inst.op.value if hasattr(inst, 'op') else 0
-      inst_op_name = inst.op.name if hasattr(inst, 'op') else ""
-      program[pc] = (runner._prg.fxn, runner.p.globals, is_barrier, type(inst), inst_op, inst_op_name)
+      program[pc] = (runner._prg.fxn, runner.p.globals, is_barrier, inst)
       if DEBUG >= 3:
         msg = f"[emu] PC={pc - lib}: {inst!r}"
         print(colored(msg, 'green') if len(_canonical_runner_cache) > prev_len else msg)
@@ -1500,11 +1500,11 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
                   done[wi] = True
                   if tracing: sqtt_finish(wi)
                   break
-                fxn, globals_list, is_barrier, inst_type, inst_op, inst_op_name = _ensure_compiled(pc)
+                fxn, globals_list, is_barrier, inst = _ensure_compiled(pc)
                 fxn(*[c_bufs[g] for g in globals_list])
                 if tracing:
-                  branch_taken = (st.pc != ENDPGM_PC and st.pc != pc + 4) if inst_op in _BRANCH_OPS else None
-                  sqtt_emit(wi, inst_type, inst_op, inst_op_name, branch_taken)
+                  inst_op = inst.op.value if hasattr(inst, 'op') else 0
+                  sqtt_emit(wi, inst, (st.pc != ENDPGM_PC and st.pc != pc + inst.size()) if inst_op in _BRANCH_OPS else None)
                 if is_barrier: break  # s_barrier hit: PC already advanced past it, pause this wave
               else: raise RuntimeError("exceeded 1M instructions in single wave, likely infinite loop")
             # All waves have either hit barrier or endpgm — release barrier waves for next round
