@@ -279,6 +279,8 @@ _pcode_fixes = {
   'V_DIV_FIXUP_F64': ('D0.f64 = sign_out ? -abs(S0.f64) : abs(S0.f64)',
     'D0.f64 = isNAN(S0.f64) ? (sign_out ? -INF : +INF) : (sign_out ? -abs(S0.f64) : abs(S0.f64))'),
   'V_TRIG_PREOP_F64': ("result = 64'F((1201'B(2.0 / PI)[1200 : 0] << shift.u32) & 1201'0x1fffffffffffff)", "result = trig_preop_result(shift)"),
+  'V_BITOP3_B32': ("TTBL = { INST.OMOD[1 : 0], INST.ABS[2 : 0], INST.NEG[2 : 0] }", "TTBL = INST"),
+  'V_BITOP3_B16': ("TTBL = { INST.OMOD[1 : 0], INST.ABS[2 : 0], INST.NEG[2 : 0] }", "TTBL = INST"),
 }
 
 def _get_pcode_dict(op) -> dict:
@@ -878,6 +880,10 @@ def _compile_vop3(inst: ir3.VOP3 | ir4.VOP3 | irc.VOP3, ctx: _Ctx) -> UOp:
   vdst_reg = ctx.inst_field(type(inst).vdst)
   literal = ctx.inst_field(type(inst).literal) if hasattr(type(inst), 'literal') else None  # type: ignore[union-attr]
   abs_bits, neg_bits = getattr(inst, 'abs', 0) or 0, getattr(inst, 'neg', 0) or 0
+  omod_bits = getattr(inst, 'omod', 0) or 0
+
+  # V_BITOP3: abs/neg/omod encode the truth table, not source modifiers
+  is_bitop3 = 'BITOP3' in op_name
 
   # VOP3_SDST: v_s_* instructions goes to SGPR
   if 'V_S_' in op_name:
@@ -898,10 +904,12 @@ def _compile_vop3(inst: ir3.VOP3 | ir4.VOP3 | irc.VOP3, ctx: _Ctx) -> UOp:
     src0 = _apply_opsel(src0, 0, opsel)
     src1 = _apply_opsel(src1, 1, opsel)
     src2 = _apply_opsel(src2, 2, opsel)
-  src0 = _apply_src_mods(src0, 0, abs_bits, neg_bits, bits['s0'])
-  src1 = _apply_src_mods(src1, 1, abs_bits, neg_bits, bits['s1'])
-  src2 = _apply_src_mods(src2, 2, abs_bits, neg_bits, bits['s2'])
+  if not is_bitop3:
+    src0 = _apply_src_mods(src0, 0, abs_bits, neg_bits, bits['s0'])
+    src1 = _apply_src_mods(src1, 1, abs_bits, neg_bits, bits['s1'])
+    src2 = _apply_src_mods(src2, 2, abs_bits, neg_bits, bits['s2'])
   srcs = {'S0': src0, 'S1': src1, 'S2': src2}
+  if is_bitop3: srcs['INST'] = _c((omod_bits & 3) << 6 | (abs_bits & 7) << 3 | (neg_bits & 7))
   #irx_CNDMASK series
   if 'CNDMASK' in op_name and src2 is not None: srcs['VCC'] = src2
   # FMAC instructions need D0 (accumulator) from destination register

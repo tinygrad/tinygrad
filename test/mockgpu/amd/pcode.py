@@ -248,6 +248,8 @@ _FUNCS: dict[str, Callable[..., UOp]] = {
   'i16_to_f16': lambda a: a.cast(dtypes.int16).cast(dtypes.half),
   'u16_to_f16': lambda a: a.cast(dtypes.uint16).cast(dtypes.half),
   'bf16_to_f32': lambda a: (((a.cast(dtypes.uint32) if a.dtype != dtypes.uint32 else a) & _u32(0xFFFF)) << _u32(16)).bitcast(dtypes.float32),
+  'f32_to_bf16': lambda a: ((a.bitcast(dtypes.uint32) if a.dtype == dtypes.float32 else a.cast(dtypes.uint32)) + _u32(0x7FFF) +
+    (((a.bitcast(dtypes.uint32) if a.dtype == dtypes.float32 else a.cast(dtypes.uint32)) >> _u32(16)) & _u32(1))) >> _u32(16),
   'isNAN': _isnan, 'isSignalNAN': lambda a: _check_nan(a, False),
   'isQuietNAN': lambda a: _check_nan(a, True), 'cvtToQuietNAN': _cvt_quiet,
   'isDENORM': _is_denorm, 'exponent': _exponent, 'divWouldBeDenorm': _div_would_be_denorm, 'sign': _sign,
