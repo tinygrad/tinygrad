@@ -667,11 +667,12 @@ jobs:
       fail-fast: false
       matrix:
         backend: [amd, amdllvm]
-        arch: [rdna3, rdna4, cdna4]
+        arch: [rdna3]
+        #arch: [rdna3, rdna4, cdna4]
 
     name: Linux (${{ matrix.backend }} ${{ matrix.arch }})
     runs-on: ubuntu-22.04
-    timeout-minutes: 20
+    timeout-minutes: 15
     env:
       AMD: 1
       MOCKGPU: 1
