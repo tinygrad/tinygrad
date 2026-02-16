@@ -36,22 +36,24 @@ class TestAssign(unittest.TestCase):
     np.testing.assert_allclose(b.numpy(), 0)
 
   def test_assign_add(self):
-    def f(x):
-      x += 1
-      x.realize()
-    x = Tensor([0])
-    f(x)
+    x = Tensor([0]).realize()
+    buf = x.uop.base.realized
+    x += 1
+    x.realize()
     assert x.item() == 1
+    assert x.uop.base.realized is buf
 
   def test_assign_add_twice(self):
     # NOTE: this has two kernels
-    def f(x):
-      x += 1
-      x += 1
-      x.realize()
-    x = Tensor([0])
-    f(x)
+    x = Tensor([0]).realize()
+    buf = x.uop.base.realized
+    x += 1
+    x += 1
+    x.realize()
     assert x.item() == 2
+    # TODO: both assigns should write to the original buffer, not create a new one
+    with self.assertRaises(AssertionError):
+      assert x.uop.base.realized is buf
 
   def test_assign_add_double(self):
     def f(x):
