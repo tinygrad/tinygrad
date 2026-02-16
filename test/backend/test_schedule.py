@@ -11,7 +11,7 @@ from tinygrad import nn, dtypes, Device, Tensor, Variable
 from tinygrad.device import is_dtype_supported
 from tinygrad.dtype import DType, ImageDType
 from tinygrad.uop.ops import UOp, Ops, UPat
-from tinygrad.helpers import CI, DEBUG, SPLIT_REDUCEOP, OSX, GlobalCounters, Context, getenv, all_same, temp
+from tinygrad.helpers import CI, DEBUG, OSX, GlobalCounters, Context, getenv, all_same, temp
 from tinygrad.engine.realize import CompiledRunner, run_schedule
 
 class KernelCountException(Exception): pass
@@ -61,6 +61,12 @@ def _test_conv2d(allowed:int, dtype:DType=dtypes.float):
     np.testing.assert_allclose(w.grad.numpy(), ref_w.grad.detach().numpy(), atol=1e-6 if dtype == dtypes.float else 1e-2)
 
 class TestSchedule(unittest.TestCase):
+  def setUp(self):
+    self.ctx = Context(SPLIT_REDUCEOP=0)
+    self.ctx.__enter__()
+  def tearDown(self):
+    self.ctx.__exit__(None, None, None)
+
   def test_arange_avgpool2d(self, kcount=1):
     x = Tensor.arange(25).reshape(1,1,5,5).cast(dtypes.float32)
     t = x.avg_pool2d(padding=1)
@@ -223,12 +229,12 @@ class TestSchedule(unittest.TestCase):
     run_schedule(check_schedule(out, 1))
     self.assertEqual(out.item(), 4.)
 
-  @unittest.skipUnless(SPLIT_REDUCEOP, "Testing split reducop requires SPLIT_REDUCEOP")
   def test_preserve_multistage_reduce(self):
     big_enough = getenv("REDUCEOP_SPLIT_THRESHOLD", 32768)
     x = Tensor.randn(big_enough).realize()
-    out = (x - x.max(keepdim=True)).max()
-    run_schedule(check_schedule(out, 4))
+    with Context(SPLIT_REDUCEOP=1):
+      out = (x - x.max(keepdim=True)).max()
+      run_schedule(check_schedule(out, 4))
     np.testing.assert_allclose(out.numpy(), (x.numpy() - x.numpy().max(keepdims=True)).max())
 
   @unittest.skip("these two Tensors are the same")
@@ -372,7 +378,7 @@ class TestSchedule(unittest.TestCase):
     out0 = a.sum() + 2
     out1 = a.sum() + b
     # run_schedule(check_schedule([out0, out1], 2))
-    run_schedule(check_schedule([out0, out1], 4))
+    run_schedule(check_schedule([out0, out1], 3))
     np.testing.assert_allclose(out0.numpy(), a.numpy().sum()+2, atol=1e-4, rtol=1e-4)
     np.testing.assert_allclose(out1.numpy(), a.numpy().sum()+b.numpy(), atol=1e-4, rtol=1e-4)
 
@@ -760,14 +766,14 @@ class TestSchedule(unittest.TestCase):
     b = a.alu(Ops.ADD, b)
     check_schedule(b, 1)
 
-  def test_conv2d(self): _test_conv2d(5 if SPLIT_REDUCEOP else 4)
-  def test_conv2d_fused(self): _test_conv2d(5 if SPLIT_REDUCEOP else 4)
+  def test_conv2d(self): _test_conv2d(4)
+  def test_conv2d_fused(self): _test_conv2d(4)
 
   @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
-  def test_conv2d_half(self): _test_conv2d(5 if SPLIT_REDUCEOP else 4, dtype=dtypes.half)
+  def test_conv2d_half(self): _test_conv2d(4, dtype=dtypes.half)
   @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
   @unittest.skipIf(Device.DEFAULT == "WEBGPU", "Causes other tests to fail")
-  def test_conv2d_fused_half(self): _test_conv2d(5 if SPLIT_REDUCEOP else 4, dtype=dtypes.half)
+  def test_conv2d_fused_half(self): _test_conv2d(4, dtype=dtypes.half)
 
   @unittest.skip("TODO: this is consistently creating non reproducible failures")
   def test_schedule_mem_used_with_inputs(self):
@@ -1059,10 +1065,9 @@ class TestSchedule(unittest.TestCase):
     _, Y_train, _, _ = mnist()
     samples = Tensor.randint(BS:=getenv("BS", 512), high=cast(int,Y_train.shape[-1])).realize()
     yt = Tensor.randn(BS, 10).realize()
-    with Context(SPLIT_REDUCEOP=0):
-      loss = yt.sparse_categorical_crossentropy(Y_train[samples])
-      run_schedule(check_schedule(loss, 4))
-      loss_fused = loss.numpy()
+    loss = yt.sparse_categorical_crossentropy(Y_train[samples])
+    run_schedule(check_schedule(loss, 4))
+    loss_fused = loss.numpy()
     loss_ref = torch.nn.CrossEntropyLoss()(torch.tensor(yt.numpy()), torch.tensor(Y_train.numpy())[torch.tensor(samples.numpy())])
     np.testing.assert_allclose(loss_fused, loss_ref.numpy(), atol=1e-6, rtol=1e-6)
 
