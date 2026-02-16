@@ -7,7 +7,7 @@ if TYPE_CHECKING: import numpy
 from tinygrad.dtype import DType, DTypeLike, dtypes, ImageDType, ConstType, least_upper_float, least_upper_dtype, sum_acc_dtype, to_dtype, truncate
 from tinygrad.dtype import _from_np_dtype, _to_np_dtype, PyConst
 from tinygrad.helpers import argfix, make_tuple, flatten, prod, all_int, round_up, merge_dicts, argsort, getenv, all_same, fully_flatten
-from tinygrad.helpers import IMAGE, WINO, Metadata, TRACEMETA, ASM_GEMM, ceildiv, fetch, polyN, is_numpy_ndarray, TracingKey, cpu_profile
+from tinygrad.helpers import IMAGE, WINO, Metadata, TRACEMETA, ASM_GEMM, ceildiv, fetch, is_numpy_ndarray, TracingKey, cpu_profile
 from tinygrad.helpers import suppress_finalizing, disable_gc
 from tinygrad.gradient import compute_gradient
 from tinygrad.mixin import OpMixin
@@ -189,11 +189,12 @@ class Tensor(OpMixin):
     all_tensors[weakref.ref(ret)] = None
     return ret
 
-  # _binop and alu are used by MathMixin
+  # _binop, alu, and const_like are used by the mixins
   def _binop(self, op, x, reverse):
     lhs,rhs = self._broadcasted(x, reverse)
     return lhs._apply_uop(lambda *u: u[0].alu(op, *u[1:]), rhs)
   def alu(self, op: Ops, *src: Tensor) -> Tensor: return self._apply_uop(lambda *u: u[0].alu(op, *u[1:]), *src)
+  def const_like(self, b:ConstType) -> Tensor: return Tensor(dtypes.as_const(b, self.dtype), self.device, self.dtype, requires_grad=False)
 
   def requires_grad_(self, requires_grad=True) -> Tensor:
     # make the UOp unique if it's a CONST to prevent gradient accumulation bugs with cached const UOps
@@ -2883,18 +2884,6 @@ class Tensor(OpMixin):
     """
     return self.cast(least_upper_float(self.dtype))._apply_uop(UOp.exp2)
 
-  def logsigmoid(self) -> Tensor:
-    """
-    Applies the LogSigmoid function element-wise.
-
-    - See: https://docs.pytorch.org/docs/stable/generated/torch.nn.functional.logsigmoid.html
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).logsigmoid().numpy())
-    ```
-    """
-    return -(-self).softplus()
-
   def sqrt(self) -> Tensor:
     """
     Computes the square root of the tensor element-wise.
@@ -2926,49 +2915,6 @@ class Tensor(OpMixin):
     if self.is_floating_point(): return ((math.pi/2)-self.cast(least_upper_dtype(self.dtype, dtypes.float32))).sin().cast(self.dtype)
     return ((math.pi/2)-self).sin()
 
-  def tan(self) -> Tensor:
-    """
-    Computes the tangent of the tensor element-wise.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([0., math.pi/4, math.pi/2, 3*math.pi/4, math.pi]).tan().numpy())
-    ```
-    """
-    return self.sin() / self.cos()
-
-  def asin(self) -> Tensor:
-    """
-    Computes the inverse sine (arcsine) of the tensor element-wise.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-0.9, -0.6, -0.3, 0., 0.3, 0.6, 0.9]).asin().numpy())
-    ```
-    """
-    # https://personal.math.ubc.ca/~cbm/aands/page_81.htm 4.4.46
-    coefficients = [-0.0012624911, 0.0066700901, -0.0170881256, 0.0308918810, -0.0501743046, 0.0889789874, -0.2145988016, 1.5707963050]
-    x = math.pi / 2 - (1.0 - self.abs()).sqrt() * polyN(self.abs(), coefficients)
-    return self.sign() * x
-
-  def acos(self) -> Tensor:
-    """
-    Computes the inverse cosine (arccosine) of the tensor element-wise.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-0.9, -0.6, -0.3, 0., 0.3, 0.6, 0.9]).acos().numpy())
-    ```
-    """
-    return math.pi / 2 - self.asin()
-
-  def atan(self) -> Tensor:
-    """
-    Computes the inverse tangent (arctan) of the tensor element-wise.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).atan().numpy())
-    ```
-    """
-    return (self / (1 + self * self).sqrt()).asin()
-
   # ***** math functions *****
 
   def lerp(self, end:Tensor, weight:Tensor|float) -> Tensor:
@@ -2984,26 +2930,6 @@ class Tensor(OpMixin):
       return (self+(((end - self).cast(dtypes.int8) * w_i + (1<<W_PREC-1)).cast(dtypes.uint16) >> W_PREC)).cast(dtypes.uint8)
     return self + (end - self) * weight
 
-  def sign(self) -> Tensor:
-    """
-    Returns the sign of the tensor element-wise.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).sign().numpy())
-    ```
-    """
-    return self.ne(0).where((self<0).where(self.full_like(-1), self.full_like(1)), self.full_like(0)) + self*0
-
-  def abs(self) -> Tensor:
-    """
-    Computes the absolute value of the tensor element-wise.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).abs().numpy())
-    ```
-    """
-    return self * self.sign()
-
   def reciprocal(self) -> Tensor:
     """
     Computes `1/x` element-wise.
@@ -3016,30 +2942,6 @@ class Tensor(OpMixin):
 
   # ***** activation functions *****
 
-  def elu(self, alpha=1.0) -> Tensor:
-    """
-    Applies the Exponential Linear Unit (ELU) function element-wise.
-
-    - Paper: https://arxiv.org/abs/1511.07289v5
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).elu().numpy())
-    ```
-    """
-    return self.relu() - alpha*(1-self.exp()).relu()
-
-  def celu(self, alpha=1.0) -> Tensor:
-    """
-    Applies the Continuously differentiable Exponential Linear Unit (CELU) function element-wise.
-
-    - Paper: https://arxiv.org/abs/1704.07483
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).celu().numpy())
-    ```
-    """
-    return self.maximum(0) + (alpha * ((self / alpha).exp() - 1)).minimum(0)
-
   def selu(self, alpha=1.67326, gamma=1.0507) -> Tensor:
     """
     Applies the Scaled Exponential Linear Unit (SELU) function element-wise.
@@ -3051,76 +2953,6 @@ class Tensor(OpMixin):
     ```
     """
     return gamma * (self >= 0).detach().where(self, alpha * (self.exp() - 1))
-
-  def sinh(self) -> Tensor:
-    """
-    Applies the Hyperbolic Sine (sinh) function element-wise.
-
-    - Described: https://en.wikipedia.org/wiki/Hyperbolic_functions#Sinh
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).sinh().numpy())
-    ```
-    """
-    return (self.exp() - self.neg().exp()) / 2
-
-  def cosh(self) -> Tensor:
-    """
-    Applies the Hyperbolic Cosine (cosh) function element-wise.
-
-    - Described: https://en.wikipedia.org/wiki/Hyperbolic_functions#Cosh
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).cosh().numpy())
-    ```
-    """
-    return (self.exp() + self.neg().exp()) / 2
-
-  def erf(self) -> Tensor:
-    """
-    Applies error function element-wise.
-
-    - Described: https://en.wikipedia.org/wiki/Error_function
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-1.5, -1.0, -0.5, 0., 0.5, 1.0, 1.5]).erf().numpy())
-    ```
-    """
-    # https://personal.math.ubc.ca/~cbm/aands/page_299.htm 7.1.26
-    t = 1.0 / (1.0 + 0.3275911 * self.abs())
-    return self.sign() * (1.0 - t * polyN(t, [1.061405429, -1.453152027, 1.421413741, -0.284496736, 0.254829592]) * (-self.square()).exp())
-
-  def mish(self) -> Tensor:
-    """
-    Applies the Mish function element-wise.
-
-    - Paper: https://arxiv.org/abs/1908.08681v3
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).mish().numpy())
-    ```
-    """
-    return self * self.softplus().tanh()
-
-  def softplus(self, beta=1.0) -> Tensor:
-    """
-    Applies the Softplus function element-wise.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).softplus().numpy())
-    ```
-    """
-    return (1/beta) * (self*beta).logaddexp(0.0)
-
-  def softsign(self) -> Tensor:
-    """
-    Applies the Softsign function element-wise.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).softsign().numpy())
-    ```
-    """
-    return self / (1 + self.abs())
 
   # ***** broadcasted elementwise ops *****
 
@@ -3215,20 +3047,6 @@ class Tensor(OpMixin):
     """
     a, b = self._broadcasted(x, reverse)
     return a - a.div(b, rounding_mode="floor") * b
-
-  def bitwise_not(self) -> Tensor:
-    """
-    Computes the bitwise NOT of `self`.
-    Equivalent to `~self`.
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([0, 2, 5, 255], dtype="int8").bitwise_not().numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([True, False]).bitwise_not().numpy())
-    ```
-    """
-    if self.dtype != dtypes.bool and not dtypes.is_int(self.dtype): raise RuntimeError(f"{self.dtype} is not supported")
-    return self.logical_not() if self.dtype == dtypes.bool else self ^ -1
 
   def lshift(self, x:Tensor|int, reverse=False) -> Tensor:
     """
