@@ -55,6 +55,24 @@ class TestAssign(unittest.TestCase):
     with self.assertRaises(AssertionError):
       assert x.uop.base.realized is buf
 
+  def test_assign_slice_add(self):
+    x = Tensor([0, 0]).realize()
+    buf = x.uop.base.realized
+    x[0] += 1
+    x.realize()
+    assert x.tolist() == [1, 0]
+    assert x.uop.base.realized is buf
+
+  def test_assign_slice_add_twice(self):
+    # NOTE: this has two kernels
+    x = Tensor([0, 0]).realize()
+    buf = x.uop.base.realized
+    x[0] += 1
+    x[0] += 1
+    x.realize()
+    assert x.tolist() == [2, 0]
+    assert x.uop.base.realized is buf
+
   def test_assign_add_double(self):
     def f(x):
       x += 1
