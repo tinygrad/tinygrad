@@ -209,6 +209,9 @@ def timeline_layout(dev_events:list[tuple[int, int, float, DevEvent]], start_ts:
       name = e.name.display_name
       ref = next((v for k in e.name.keys if (v:=ref_map.get(k)) is not None), None)
       if isinstance(e.name.ret, str): fmt.append(e.name.ret)
+      elif isinstance(e.name.ret, int):
+        membw = e.name.ret / (dur * 1e-6)
+        fmt.append(f"{membw*1e-9:6.2f} GB/s" if membw < 1e13 else f"{membw*1e-12:.0f} TB/s")
     events.append(struct.pack("<IIIIfI", enum_str(name, scache), option(ref), option(key), rel_ts(st,start_ts), dur, enum_str("\n".join(fmt),scache)))
   return struct.pack("<BI", 0, len(events))+b"".join(events) if events else None
 

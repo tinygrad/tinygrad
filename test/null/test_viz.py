@@ -405,6 +405,16 @@ class TestVizProfiler(BaseTestViz):
 
     self.assertEqual(j["dur"], (event2["st"]+event2["dur"])-event["st"])
 
+  def test_copy_node_bandwidth(self):
+    sz = 256*1024*1024
+    dur = 10_000
+    prof = [ProfileRangeEvent(device='NV:SDMA:0', name=TracingKey("NV -> NV:1", ret=sz), st=decimal.Decimal(1000), en=decimal.Decimal(1000+dur)),
+            ProfileDeviceEvent(device='NV:SDMA:0', tdiff=decimal.Decimal(-1000))]
+    j = load_profile(prof)
+    event = j['layout']['NV:SDMA:0']['events'][0]
+    gbs = sz/(dur*1e-6)*1e-9
+    self.assertEqual(event['fmt'], f"{gbs:6.2f} GB/s")
+
   def test_graph(self):
     prof = [ProfileDeviceEvent(device='NV', tdiff=decimal.Decimal(-1000)),
             ProfileDeviceEvent(device='NV:1:SDMA:0', tdiff=decimal.Decimal(-50)),
