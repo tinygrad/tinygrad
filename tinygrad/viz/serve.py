@@ -69,10 +69,11 @@ def get_rewrites(t:RewriteTrace) -> list[dict]:
   for i,(k,v) in enumerate(zip(t.keys, t.rewrites)):
     steps = [create_step(s.name, ("/graph-rewrites", i, j), loc=s.loc, match_count=len(s.matches), code_line=printable(s.loc),
                          trace=k.tb if j==0 else None, depth=s.depth) for j,s in enumerate(v)]
-    if isinstance(k.ret, ProgramSpec):
-      steps.append(create_step("View UOp List", ("/uops", i, len(steps)), k.ret))
-      steps.append(create_step("View Program", ("/code", i, len(steps)), k.ret))
-      steps.append(create_step("View Disassembly", ("/asm", i, len(steps)), k.ret))
+    if (prg_idx:=next((j for j,s in enumerate(v) if s.name == "View Final Program"), None)) is not None:
+      _, device, lin, src, binary = _reconstruct(trace.rewrites[i][prg_idx].sink).src
+      steps.append(create_step("View UOp List", ("/uops", i, len(steps)), lin.src))
+      steps.append(create_step("View Program", ("/code", i, len(steps)), src.arg))
+      steps.append(create_step("View Disassembly", ("/asm", i, len(steps)), (device.arg, binary.arg)))
     for key in k.keys: ref_map[key] = i
     ret.append({"name":k.display_name, "steps":steps})
   return ret
@@ -507,14 +508,15 @@ def get_render(query:str) -> dict:
   i, j, fmt = get_int(qs:=parse_qs(url.query), "ctx"), get_int(qs, "step"), url.path.lstrip("/")
   data = ctxs[i]["steps"][j]["data"]
   if fmt == "graph-rewrites": return {"value":get_full_rewrite(trace.rewrites[i][j]), "content_type":"text/event-stream"}
-  if fmt == "uops": return {"src":get_stdout(lambda: print_uops(data.uops or [])), "lang":"txt"}
-  if fmt == "code": return {"src":data.src, "lang":"cpp"}
+  if fmt == "uops": return {"src":get_stdout(lambda: print_uops(data)), "lang":"txt"}
+  if fmt == "code": return {"src":data, "lang":"cpp"}
   if fmt == "asm":
     ret:dict = {"metadata":[]}
-    if data.device.startswith("AMD") and data.lib is not None:
-      with soft_err(lambda err: ret.update(err)): ret.update(amdgpu_cfg(data.lib, amdgpu_targets[data.device]))
-      with soft_err(lambda err: ret["metadata"].append(err)): ret["metadata"].append(amd_readelf(data.lib))
-    else: ret["src"] = get_stdout(lambda: (compiler:=Device[data.device].compiler).disassemble(compiler.compile(data.src)))
+    device, lib = data
+    if device.startswith("AMD"):
+      with soft_err(lambda err: ret.update(err)): ret.update(amdgpu_cfg(data.lib, amdgpu_targets[device]))
+      with soft_err(lambda err: ret["metadata"].append(err)): ret["metadata"].append(amd_readelf(lib))
+    else: ret["src"] = get_stdout(lambda: (compiler:=Device[device].compiler).disassemble(lib))
     return ret
   if fmt == "all-pmc":
     durations, pmc = data
