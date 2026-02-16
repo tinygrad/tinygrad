@@ -1,7 +1,7 @@
 import math
 from typing import Self
 from tinygrad.uop import Ops
-from tinygrad.dtype import dtypes, ConstType
+from tinygrad.dtype import dtypes, ConstType, least_upper_dtype, least_upper_float
 from tinygrad.helpers import polyN
 from tinygrad.mixin.dtype import DTypeMixin
 
@@ -275,14 +275,39 @@ class ElementwiseMixin(DTypeMixin):
     """
     return self.alu(Ops.TRUNC)
 
+  def _ensure_float(self) -> Self:
+    return self if self.dtype == dtypes.void or dtypes.is_float(self.dtype) else self.cast(least_upper_float(self.dtype))
+
   def sqrt(self) -> Self:
-    return self.alu(Ops.SQRT)
+    """
+    Computes the square root of the tensor element-wise.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([1., 2., 3., 4.]).sqrt().numpy())
+    ```
+    """
+    return self._ensure_float().alu(Ops.SQRT)
 
   def sin(self) -> Self:
-    return self.alu(Ops.SIN)
+    """
+    Computes the sine of the tensor element-wise.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([0., math.pi/2, math.pi, 3*math.pi/2, 2*math.pi]).sin().numpy())
+    ```
+    """
+    return self._ensure_float().alu(Ops.SIN)
 
   def cos(self) -> Self:
-    return ((math.pi / 2) - self).sin()
+    """
+    Computes the cosine of the tensor element-wise.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([0., math.pi/2, math.pi, 3*math.pi/2, 2*math.pi]).cos().numpy())
+    ```
+    """
+    if self.is_floating_point(): return ((math.pi/2)-self.cast(least_upper_dtype(self.dtype, dtypes.float32))).sin().cast(self.dtype)
+    return ((math.pi/2)-self).sin()
 
   def exp(self) -> Self:
     return self.mul(1 / math.log(2)).exp2()

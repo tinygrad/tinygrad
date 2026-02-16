@@ -2896,37 +2896,6 @@ class Tensor(OpMixin):
     """
     return -(-self).softplus()
 
-  def sqrt(self) -> Tensor:
-    """
-    Computes the square root of the tensor element-wise.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([1., 2., 3., 4.]).sqrt().numpy())
-    ```
-    """
-    return self.cast(least_upper_float(self.dtype))._apply_uop(UOp.sqrt)
-
-  def sin(self) -> Tensor:
-    """
-    Computes the sine of the tensor element-wise.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([0., math.pi/2, math.pi, 3*math.pi/2, 2*math.pi]).sin().numpy())
-    ```
-    """
-    return self.cast(least_upper_float(self.dtype))._apply_uop(UOp.sin)
-
-  def cos(self) -> Tensor:
-    """
-    Computes the cosine of the tensor element-wise.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([0., math.pi/2, math.pi, 3*math.pi/2, 2*math.pi]).cos().numpy())
-    ```
-    """
-    if self.is_floating_point(): return ((math.pi/2)-self.cast(least_upper_dtype(self.dtype, dtypes.float32))).sin().cast(self.dtype)
-    return ((math.pi/2)-self).sin()
-
   # ***** math functions *****
 
   def lerp(self, end:Tensor, weight:Tensor|float) -> Tensor:
