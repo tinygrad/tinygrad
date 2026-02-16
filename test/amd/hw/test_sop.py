@@ -932,5 +932,76 @@ class Test64BitSOPLiterals(unittest.TestCase):
     self.assertEqual(st.vgpr[0][1], 0)  # zero-extended, not sign-extended
 
 
+class TestBarrier(unittest.TestCase):
+  """Tests for s_barrier — workgroup synchronization across wavefronts."""
+
+  def test_barrier_cross_wave_lds(self):
+    """Wave 0 writes to LDS, s_barrier, wave 1 reads — verifies cross-wave synchronization.
+
+    64 threads (2 waves of 32). Each thread writes (tid+1) to LDS[tid*4], then after
+    s_barrier, reads LDS[(tid^32)*4] — the value written by the other wave. Without barrier
+    support, wave 1 would read stale/zero LDS values.
+    """
+    instructions = [
+      # v[255] = tid (saved by prologue), copy to v[1]
+      v_mov_b32_e32(v[1], v[255]),
+      # v[2] = tid + 1
+      v_add_nc_u32_e32(v[2], 1, v[1]),
+      # v[3] = tid * 4
+      v_lshlrev_b32_e32(v[3], 2, v[1]),
+      # Store (tid+1) to LDS[tid*4]
+      ds_store_b32(addr=v[3], data0=v[2]),
+      s_waitcnt(lgkmcnt=0),
+      s_barrier(),
+      # Read from the other wave's slot: LDS[(tid^32)*4]
+      v_xor_b32_e32(v[4], 32, v[1]),
+      v_lshlrev_b32_e32(v[5], 2, v[4]),
+      ds_load_b32(addr=v[5], vdst=v[0]),
+      s_waitcnt(lgkmcnt=0),
+    ]
+    st = run_program(instructions, n_lanes=64)
+    for tid in range(64):
+      self.assertEqual(st.vgpr[tid][0], (tid ^ 32) + 1, f"tid={tid}")
+
+  def test_barrier_two_phases(self):
+    """Two barriers with three phases — tests multiple barriers in sequence.
+
+    Phase 1: all threads write (tid+100) to LDS[tid*4], barrier.
+    Phase 2: all threads read other wave's value, add 1000, write to LDS[(tid+64)*4], barrier.
+    Phase 3: all threads read the other wave's phase-2 output into v[0].
+    """
+    instructions = [
+      # v[255] = tid (saved by prologue), copy to v[1]
+      v_mov_b32_e32(v[1], v[255]),
+      # v[2] = tid + 100
+      v_add_nc_u32_e32(v[2], 100, v[1]),
+      # v[3] = tid * 4
+      v_lshlrev_b32_e32(v[3], 2, v[1]),
+      # Phase 1: write (tid+100) to LDS[tid*4]
+      ds_store_b32(addr=v[3], data0=v[2]),
+      s_waitcnt(lgkmcnt=0),
+      s_barrier(),
+      # Phase 2: read from other wave, add 1000, write to separate LDS region
+      v_xor_b32_e32(v[4], 32, v[1]),
+      v_lshlrev_b32_e32(v[5], 2, v[4]),
+      ds_load_b32(addr=v[5], vdst=v[6]),
+      s_waitcnt(lgkmcnt=0),
+      v_add_nc_u32_e32(v[7], 0x3e8, v[6]),
+      v_add_nc_u32_e32(v[8], 64, v[1]),
+      v_lshlrev_b32_e32(v[9], 2, v[8]),
+      ds_store_b32(addr=v[9], data0=v[7]),
+      s_waitcnt(lgkmcnt=0),
+      s_barrier(),
+      # Phase 3: read other wave's phase-2 output into v[0]
+      v_add_nc_u32_e32(v[10], 64, v[4]),
+      v_lshlrev_b32_e32(v[11], 2, v[10]),
+      ds_load_b32(addr=v[11], vdst=v[0]),
+      s_waitcnt(lgkmcnt=0),
+    ]
+    st = run_program(instructions, n_lanes=64)
+    for tid in range(64):
+      self.assertEqual(st.vgpr[tid][0], tid + 100 + 1000, f"tid={tid}")
+
+
 if __name__ == '__main__':
   unittest.main()

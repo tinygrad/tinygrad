@@ -116,6 +116,8 @@ WAVE_SIZE = 32
 PC_LO_IDX, PC_HI_IDX, SCRATCH_STRIDE_IDX = 256, 257, 259
 # SGPR buffer: 0-127 = SGPRs, 128-255 = inline constants, 256-259 = special registers
 SGPR_COUNT, VGPR_SIZE = 260, 256 * 32
+# Sentinel PC value for s_endpgm
+ENDPGM_PC = 0xFFFFFFFFFFFFFFFF
 
 def _op_name(inst) -> str:
   if hasattr(inst, 'opx'): return f"{inst.opx.name}_{inst.opy.name}"  # VOPD has opx/opy not op
@@ -210,7 +212,7 @@ def parse_pcode(pcode: str, srcs: dict[str, UOp] | None = None) -> tuple[dict, l
   _, final, _ = parse_block(lines, 0, env, assigns=assigns)
   sliced = set(d.split('[')[0] for d, _ in assigns if '[' in d)
   for var, val in final.items():
-    if var in ['D0', 'SCC', 'VCC', 'EXEC', 'PC', 'RETURN_DATA', 'VDATA'] and isinstance(val, UOp):
+    if var in ['D0', 'S0', 'SCC', 'VCC', 'EXEC', 'PC', 'RETURN_DATA', 'VDATA'] and isinstance(val, UOp):
       if var in sliced and not any(re.match(rf'{var}\.\w+\s*=', l) for l in lines): continue
       for l in lines:
         if (m := re.match(rf'{var}\.(\w+(?:\[\w+\])?)', l)):
@@ -462,7 +464,8 @@ class _Ctx:
     return UOp.sink(*stores, *self.inc_pc())
 
   def compile_vop_pcode(self, op, srcs: dict[str, UOp], lane: UOp, vdst_reg: UOp, exec_mask: UOp,
-                        opsel_dst_hi: bool | UOp = False, sdst_reg: int | None = None, clmp: int = 0) -> UOp:
+                        opsel_dst_hi: bool | UOp = False, sdst_reg: int | None = None, clmp: int = 0,
+                        src0_off: UOp | None = None) -> UOp:
     """Compile VOP instruction. Returns sink with stores and inc_pc."""
     pcode = get_pcode(op)
     vcc_reg = sdst_reg if sdst_reg is not None else VCC_LO.offset
@@ -519,11 +522,15 @@ class _Ctx:
           result = opsel_dst_hi.where(hi_result, lo_result) if isinstance(opsel_dst_hi, UOp) else hi_result if opsel_dst_hi else lo_result
           raw_stores.append(('vgpr', self.wvgpr_dyn(vdst_reg, lane, result, exec_mask)))
         else: raw_stores.append(('vgpr', self.wvgpr_dyn(vdst_reg, lane, _val_to_u32(val), exec_mask)))
+      elif dest.startswith('S0') and src0_off is not None:
+        # Write back to src0 VGPR (e.g. v_swap_b32). src0_off is raw encoding (256+ = VGPR)
+        src0_vgpr = src0_off - _c(256)
+        raw_stores.append(('vgpr_s0', self.wvgpr_dyn(src0_vgpr, lane, _val_to_u32(val), exec_mask)))
       elif dest.startswith('VCC'): vcc_val = val
       elif dest.startswith('EXEC'): exec_val = val
       elif dest.startswith('SCC'): raw_stores.append(('scc', self.wsgpr_dyn(_c(SCC.offset), _to_u32(val))))
 
-    stores, lane_stores, scalar_stores = [], [s for t, s in raw_stores if t == 'vgpr'], [s for t, s in raw_stores if t == 'scc']
+    stores, lane_stores, scalar_stores = [], [s for t, s in raw_stores if t in ('vgpr', 'vgpr_s0')], [s for t, s in raw_stores if t == 'scc']
     slice_stores = [s for t, s in raw_stores if t == 'vgpr_slice']
     if slice_stores:
       result = self.rvgpr_dyn(vdst_reg, lane)
@@ -548,6 +555,10 @@ def _compile_sopp(inst: ir3.SOPP | ir4.SOPP, ctx: _Ctx) -> UOp:
   if inst.op in (ir3.SOPPOp.S_ENDPGM, ir4.SOPPOp.S_ENDPGM, irc.SOPPOp.S_ENDPGM):
     return UOp.sink(ctx.wsgpr_dyn(_c(PC_LO_IDX), UOp.const(dtypes.uint32, 0xFFFFFFFF)),
                           ctx.wsgpr_dyn(_c(PC_HI_IDX), UOp.const(dtypes.uint32, 0xFFFFFFFF)))
+  # S_BARRIER: advance PC past the barrier instruction. The execution loop detects barriers before executing and handles synchronization.
+  barrier_ops = {ir3.SOPPOp.S_BARRIER, irc.SOPPOp.S_BARRIER}
+  if hasattr(ir4.SOPPOp, 'S_BARRIER_WAIT'): barrier_ops.add(ir4.SOPPOp.S_BARRIER_WAIT)
+  if inst.op in barrier_ops: return UOp.sink(*ctx.inc_pc())
   # S_NOP and S_WAITCNT are no-ops in emulator (no pipeline/cache to wait on)
   if inst.op in (ir3.SOPPOp.S_NOP, ir4.SOPPOp.S_NOP, irc.SOPPOp.S_NOP, irc.SOPPOp.S_WAITCNT): return UOp.sink(*ctx.inc_pc())
   # NOTE: we ignore SOPPs without PCODE
@@ -653,7 +664,8 @@ def _compile_vop12(inst: ir3.VOP1 | ir3.VOP1_SDST | ir3.VOP2 | ir4.VOP1 | ir4.VO
       # Only compute hi-half when src0_off >= 384, use guarded index to prevent OOB access
       src0_reg = src0_hi.where(src0_off - _c(384), _c(0))
       s0 = src0_hi.where(_hi16(ctx.rvgpr_dyn(src0_reg, lane)), s0)
-    srcs = {'S0': s0}
+    d0 = _cond_hi16(write_hi_half, ctx.rvgpr_dyn(vdst_reg, lane))
+    srcs = {'S0': s0, 'D0': d0}
   else:
     vsrc1_reg = ctx.inst_field(type(inst).vsrc1)
     vsrc1_hi = bits['s0'] == 16 and (vsrc1_reg >= _c(128))
@@ -675,7 +687,7 @@ def _compile_vop12(inst: ir3.VOP1 | ir3.VOP1_SDST | ir3.VOP2 | ir4.VOP1 | ir4.VO
     if 'V_FMAA' in _op_name(inst) or 'V_FMAM' in _op_name(inst):
       assert literal is not None
       srcs['SIMM32'] = literal
-  return ctx.compile_vop_pcode(inst.op, srcs, lane, vdst_reg, exec_mask, opsel_dst_hi=write_hi_half)
+  return ctx.compile_vop_pcode(inst.op, srcs, lane, vdst_reg, exec_mask, opsel_dst_hi=write_hi_half, src0_off=src0_off)
 
 def _compile_vopc(inst: ir3.VOPC|ir3.VOP3|ir4.VOPC|ir4.VOP3|irc.VOPC|irc.VOP3, ctx: _Ctx,
                   opsel: int = 0, abs_bits: int = 0, neg_bits: int = 0) -> UOp:
@@ -1022,7 +1034,7 @@ def _compile_mem_op(inst: ir3.DS|ir3.FLAT|ir3.GLOBAL|ir3.SCRATCH|ir4.DS|ir4.VFLA
     vdst_reg = ctx.inst_field(type(inst).vdst)
     offset0 = ctx.inst_field(type(inst).offset0)  # type: ignore[union-attr]
     offset1 = ctx.inst_field(type(inst).offset1)  # type: ignore[union-attr]
-    offset = offset0  # DS uses offset0 as primary offset
+    offset = (offset1 << _c(8)) | offset0  # DS offset is 16-bit: (offset1 << 8) | offset0
     saddr_reg = None
   elif isinstance(inst, (ir4.VGLOBAL, ir4.VSCRATCH, ir4.VFLAT)):  # RDNA4: vaddr, vsrc, ioffset
     addr_reg = ctx.inst_field(type(inst).vaddr)
@@ -1225,11 +1237,14 @@ def _get_runner(inst_bytes: bytes, arch: str = "rdna3"):
   _canonical_runner_cache.append((base, mask, size, runner))
   return runner
 
+_BARRIER_OPS = {ir3.SOPPOp.S_BARRIER, irc.SOPPOp.S_BARRIER}
+if hasattr(ir4.SOPPOp, 'S_BARRIER_WAIT'): _BARRIER_OPS.add(ir4.SOPPOp.S_BARRIER_WAIT)
+
 def _decode_at(pc: int, arch: str):
-  """Decode and compile instruction at absolute address pc. Returns CompiledRunner."""
+  """Decode and compile instruction at absolute address pc. Returns (runner, decoded_inst)."""
   inst_bytes = bytes((ctypes.c_char * 16).from_address(pc).raw)
   inst = decode_inst(inst_bytes, arch)
-  try: return _get_runner(bytes(inst_bytes[:inst.size() + 4]), arch)
+  try: return _get_runner(bytes(inst_bytes[:inst.size() + 4]), arch), inst
   except Exception as e:
     try: inst_str = repr(inst)
     except Exception: inst_str = f"<{type(inst).__name__}>"
@@ -1279,10 +1294,37 @@ class WaveState:
 # EXECUTION
 # ═══════════════════════════════════════════════════════════════════════════════
 
+def _init_wave(lib: int, wave_start: int, total_threads: int, lx: int, ly: int, lz: int, args_ptr: int, rsrc2: int,
+               scratch_size: int, arch: str, gidx: int, gidy: int, gidz: int, user_data: list[int]|None) -> tuple[WaveState, list]:
+  """Initialize a single wavefront and return (WaveState, c_bufs placeholder). c_bufs filled in by caller."""
+  n_lanes = min(WAVE_SIZE, total_threads - wave_start)
+  st = WaveState(n_lanes)
+  st.pc = lib
+  if user_data:
+    for i, val in enumerate(user_data): st._write_sgpr(i, val)
+  else:
+    st._write_sgpr(0, args_ptr & MASK32)
+    st._write_sgpr(1, (args_ptr >> 32) & MASK32)
+  sgpr_idx = (rsrc2 & hsa.AMD_COMPUTE_PGM_RSRC_TWO_USER_SGPR_COUNT) >> hsa.AMD_COMPUTE_PGM_RSRC_TWO_USER_SGPR_COUNT_SHIFT
+  for enabled, gid in [(hsa.AMD_COMPUTE_PGM_RSRC_TWO_ENABLE_SGPR_WORKGROUP_ID_X, gidx),
+                       (hsa.AMD_COMPUTE_PGM_RSRC_TWO_ENABLE_SGPR_WORKGROUP_ID_Y, gidy),
+                       (hsa.AMD_COMPUTE_PGM_RSRC_TWO_ENABLE_SGPR_WORKGROUP_ID_Z, gidz)]:
+    if rsrc2 & enabled:
+      st._write_sgpr(sgpr_idx, gid)
+      sgpr_idx += 1
+  if arch == "rdna4":
+    st._write_sgpr(ttmp[7].offset, (gidy & 0xFFFF) | ((gidz & 0xFFFF) << 16))
+    st._write_sgpr(ttmp[9].offset, gidx)
+  for lane in range(n_lanes):
+    tid = wave_start + lane
+    st._write_vgpr(0, lane, ((tid // (lx * ly)) << 20) | (((tid // lx) % ly) << 10) | (tid % lx))
+  st._write_sgpr(SCRATCH_STRIDE_IDX, scratch_size)
+  return st
+
 def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, lz: int, args_ptr: int, rsrc2: int = 0x19c,
             scratch_size: int = 0, arch: str = "rdna3", user_data: list[int]|None = None) -> int:
   """Execute AMD assembly program. scratch_size is private_segment_fixed_size from kernel descriptor (per-lane)."""
-  program: dict[int, tuple[Callable, list[int]]] = {}  # lazily populated: pc -> (fxn, globals) extracted from runner
+  program: dict[int, tuple[Callable, list[int], bool]] = {}  # pc -> (fxn, globals, is_barrier)
   lds_size = ((rsrc2 & hsa.AMD_COMPUTE_PGM_RSRC_TWO_GRANULATED_LDS_SIZE) >> hsa.AMD_COMPUTE_PGM_RSRC_TWO_GRANULATED_LDS_SIZE_SHIFT) * 512
   total_threads = lx * ly * lz
 
@@ -1291,56 +1333,51 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
   lds_buf = Buffer('CPU', max(lds_size // 4, 1), dtypes.uint32).ensure_allocated()
   scratch_buf = Buffer('CPU', scratch_size * WAVE_SIZE, dtypes.uint8).ensure_allocated() if scratch_size else None
 
+  def _ensure_compiled(pc: int) -> tuple[Callable, list[int], bool]:
+    if pc not in program:
+      prev_len = len(_canonical_runner_cache)
+      runner, inst = _decode_at(pc, arch)
+      is_barrier = isinstance(inst, (ir3.SOPP, ir4.SOPP, irc.SOPP)) and inst.op in _BARRIER_OPS
+      program[pc] = (runner._prg.fxn, runner.p.globals, is_barrier)
+      if DEBUG >= 3:
+        msg = f"[emu] PC={pc - lib}: {inst!r}"
+        print(colored(msg, 'green') if len(_canonical_runner_cache) > prev_len else msg)
+    return program[pc]
+
   # Set DAZ+FTZ during emulator execution, restore afterward to avoid breaking hypothesis tests
   with _MXCSRContext():
     for gidz in range(gz):
       for gidy in range(gy):
         for gidx in range(gx):
+          # Initialize all wavefronts for this workgroup
+          waves: list[tuple[WaveState, list]] = []
           for wave_start in range(0, total_threads, WAVE_SIZE):
-            n_lanes, st = min(WAVE_SIZE, total_threads - wave_start), WaveState(min(WAVE_SIZE, total_threads - wave_start))
-            st.pc = lib  # Set PC to code base address
-            # Initialize user SGPRs: hardware loads COMPUTE_USER_DATA registers directly into s[0:N]
-            if user_data:
-              for i, val in enumerate(user_data): st._write_sgpr(i, val)
-            else:
-              st._write_sgpr(0, args_ptr & MASK32)
-              st._write_sgpr(1, (args_ptr >> 32) & MASK32)
-
-            # Workgroup IDs in SGPRs after user SGPRs
-            sgpr_idx = (rsrc2 & hsa.AMD_COMPUTE_PGM_RSRC_TWO_USER_SGPR_COUNT) >> hsa.AMD_COMPUTE_PGM_RSRC_TWO_USER_SGPR_COUNT_SHIFT
-            for enabled, gid in [(hsa.AMD_COMPUTE_PGM_RSRC_TWO_ENABLE_SGPR_WORKGROUP_ID_X, gidx),
-                                 (hsa.AMD_COMPUTE_PGM_RSRC_TWO_ENABLE_SGPR_WORKGROUP_ID_Y, gidy),
-                                 (hsa.AMD_COMPUTE_PGM_RSRC_TWO_ENABLE_SGPR_WORKGROUP_ID_Z, gidz)]:
-              if rsrc2 & enabled:
-                st._write_sgpr(sgpr_idx, gid)
-                sgpr_idx += 1
-
-            # RDNA4 uses TTMP registers for workgroup IDs (16 bit) ttmp[9:7] -> gidx-gidz
-            if arch == "rdna4":
-              st._write_sgpr(ttmp[7].offset, (gidy & 0xFFFF) | ((gidz & 0xFFFF) << 16))
-              st._write_sgpr(ttmp[9].offset, gidx)
-
-            # v0 = packed workitem IDs, scratch stride in secret SGPR
-            for lane in range(n_lanes):
-              tid = wave_start + lane
-              st._write_vgpr(0, lane, ((tid // (lx * ly)) << 20) | (((tid // lx) % ly) << 10) | (tid % lx))
-            st._write_sgpr(SCRATCH_STRIDE_IDX, scratch_size)
-
-            # Pass buffer addresses via ctypes (pre-create to avoid allocation in loop)
+            st = _init_wave(lib, wave_start, total_threads, lx, ly, lz, args_ptr, rsrc2, scratch_size, arch, gidx, gidy, gidz, user_data)
             c_bufs = [ctypes.c_uint64(st.sgpr_buf._buf.va_addr), ctypes.c_uint64(st.vgpr_buf._buf.va_addr),
                       ctypes.c_uint64(vmem_buf._buf.va_addr), ctypes.c_uint64(lds_buf._buf.va_addr),
                       ctypes.c_uint64(scratch_buf._buf.va_addr if scratch_buf else 0)]
-            for inst_count in range(1_000_000):
-              if (pc := st.pc) == 0xFFFFFFFFFFFFFFFF: break
-              if pc not in program:
-                prev_len = len(_canonical_runner_cache)
-                runner = _decode_at(pc, arch)
-                program[pc] = (runner._prg.fxn, runner.p.globals)
-                if DEBUG >= 3:
-                  inst = decode_inst(bytes((ctypes.c_char * 16).from_address(pc).raw), arch)
-                  msg = f"[emu] PC={pc - lib}: {inst!r}"
-                  print(colored(msg, 'green') if len(_canonical_runner_cache) > prev_len else msg)
-              fxn, globals_list = program[pc]
-              fxn(*[c_bufs[g] for g in globals_list])
-            else: raise RuntimeError("exceeded 1M instructions, likely infinite loop")
+            waves.append((st, c_bufs))
+
+          # Execute wavefronts with barrier synchronization
+          # Each wave runs until it hits s_barrier or s_endpgm. When all waves have stopped, release barrier waves.
+          done = [False] * len(waves)
+          for total_inst in range(10_000_000):
+            if all(done): break
+            for wi, (st, c_bufs) in enumerate(waves):
+              if done[wi]: continue
+              # Run this wave until barrier or endpgm
+              for _ in range(1_000_000):
+                pc = st.pc
+                if pc == ENDPGM_PC:
+                  done[wi] = True
+                  break
+                fxn, globals_list, is_barrier = _ensure_compiled(pc)
+                fxn(*[c_bufs[g] for g in globals_list])
+                if is_barrier: break  # s_barrier hit: PC already advanced past it, pause this wave
+              else: raise RuntimeError("exceeded 1M instructions in single wave, likely infinite loop")
+            # All waves have either hit barrier or endpgm — release barrier waves for next round
+          else: raise RuntimeError("exceeded 10M total scheduling rounds")
+
+          # Reset LDS for next workgroup
+          if lds_size > 0: ctypes.memset(lds_buf._buf.va_addr, 0, max(lds_size, 4))
   return 0

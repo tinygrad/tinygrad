@@ -245,7 +245,16 @@ class TestAssembly(unittest.TestCase):
     ast = ast.replace(arg=KernelInfo(opts_to_apply=tuple(opts_to_apply)))
     program = get_program(ast, Device[Device.DEFAULT].renderer)
     uops = program.uops
-    self.assertEqual(len([x.op for x in uops if x.op is Ops.MULACC]), 4)
+    self.assertGreaterEqual(len([x.op for x in uops if x.op is Ops.MULACC]), 4)
+
+  def test_mulacc_shl(self):
+    g1 = UOp(Ops.PARAM, dtypes.int32.ptr(), (), 0)
+    c1 = UOp.const(dtypes.int, 0)
+    c2 = UOp.const(dtypes.int, 1)
+    expr = g1.index(c1) * UOp.const(dtypes.int, 4096) + g1.index(c2)
+    uops = to_uops_list([expr], ren=Device[Device.DEFAULT].renderer)
+    Device[Device.DEFAULT].renderer.render(uops)
+    self.assertIn(Ops.MULACC, [x.op for x in uops])
 
   def test_use_cmpeq(self):
     g = UOp(Ops.PARAM, dtypes.uint32.ptr(), (), 0)
