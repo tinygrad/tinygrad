@@ -620,6 +620,7 @@ jobs:
       fail-fast: false
       matrix:
         backend: [amd, amdllvm]
+        arch: [rdna3, rdna4, cdna4]
 
     name: Linux (${{ matrix.backend }})
     runs-on: ubuntu-22.04
@@ -627,6 +628,7 @@ jobs:
     env:
       AMD: 1
       MOCKGPU: 1
+      MOCKGPU_ARCH: ${{ matrix.arch }}
       FORWARD_ONLY: 1
       AMD_LLVM: ${{ matrix.backend == 'amdllvm' && '1' || matrix.backend != 'amdllvm' && '0' }}
     steps:
