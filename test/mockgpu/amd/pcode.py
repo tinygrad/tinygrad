@@ -288,6 +288,7 @@ _FUNCS: dict[str, Callable[..., UOp]] = {
   # Address calculation for memory operations
   'CalcDsAddr': lambda a, o, *r: a.cast(dtypes.uint32) + o.cast(dtypes.uint32),
   'CalcGlobalAddr': lambda v, s, *r: v.cast(dtypes.uint64) + s.cast(dtypes.uint64),
+  'CalcScratchAddr': lambda v, s, *r: v.cast(dtypes.uint64) + s.cast(dtypes.uint64),
 }
 for is_max, name in [(False, 'min'), (True, 'max')]:
   for dt, sfx in [(dtypes.float32, 'f32'), (dtypes.int, 'i32'), (dtypes.uint32, 'u32'), (dtypes.int16, 'i16'), (dtypes.uint16, 'u16')]:
@@ -811,6 +812,7 @@ def _subst_loop_var(line: str, loop_var: str, val: int) -> str:
 
 def _set_bits(old: UOp, val: UOp, width: int, offset: int) -> UOp:
   """Set bits [offset:offset+width) in old to val, masking and shifting appropriately."""
+  if old.dtype in (dtypes.half, dtypes.float32): old = _val_to_bits(old)
   is64 = old.dtype in (dtypes.uint64, dtypes.int64) or offset + width > 32
   if is64:
     old = old.cast(dtypes.uint64) if old.dtype != dtypes.uint64 else old
