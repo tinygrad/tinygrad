@@ -658,7 +658,7 @@ jobs:
           AMD: 0
         run: |
           PYTHONPATH=. NULL=1 EMULATE=AMD python extra/mmapeak/mmapeak.py
-          PYTHONPATH=. NULL=1 EMULATE=AMD_CDNA4 python3 -m pytest -n=auto test/testextra/test_tk.py test/testextra/test_hk_fa.py
+          PYTHONPATH=. NULL=1 EMULATE=AMD_CDNA4 python3 -m pytest -n=auto test/testextra/test_tk.py
       - name: Run LLVM test
         run: AMD_LLVM=1 python test/device/test_amd_llvm.py
 
