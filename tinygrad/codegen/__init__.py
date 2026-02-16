@@ -136,8 +136,8 @@ def do_linearize(prg:UOp, sink:UOp) -> UOp:
   return prg.replace(src=prg.src + (UOp(Ops.LINEAR, src=tuple(lst)),))
 
 def do_estimates(prg:UOp, sink:UOp, lin:UOp) -> UOp|None:
-  if sink.arg.estimates is None:
-    return prg.replace(src=(sink.replace(arg=replace(sink.arg, estimates=Estimates.from_uops(lin.src, ignore_indexing=True))),)+prg.src[1:])
+  if sink.arg.estimates is not None: return None
+  return prg.replace(src=(sink.replace(arg=replace(sink.arg, estimates=Estimates.from_uops(lin.src, ignore_indexing=True))),)+prg.src[1:])
 
 def do_render(ctx:Renderer, prg:UOp, lin:UOp) -> UOp:
   src = ctx.render(list(lin.src))
