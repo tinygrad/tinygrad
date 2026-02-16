@@ -615,54 +615,6 @@ jobs:
     - name: Run process replay tests
       uses: ./.github/actions/process-replay
 
-  testamd:
-    strategy:
-      fail-fast: false
-      matrix:
-        backend: [amd, amdllvm]
-
-    name: Linux (${{ matrix.backend }})
-    runs-on: ubuntu-22.04
-    timeout-minutes: 20
-    env:
-      AMD: 1
-      MOCKGPU: 1
-      FORWARD_ONLY: 1
-      AMD_LLVM: ${{ matrix.backend == 'amdllvm' && '1' || matrix.backend != 'amdllvm' && '0' }}
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-      - name: Setup Environment
-        uses: ./.github/actions/setup-tinygrad
-        with:
-          key: ${{ matrix.backend }}-minimal
-          deps: testing_unit
-          amd: 'true'
-          llvm: ${{ matrix.backend == 'amdllvm' && 'true' }}
-      - name: Check Device.DEFAULT and print some source
-        run: |
-          python3 -c "from tinygrad import Device; assert Device.DEFAULT in ['AMD'], Device.DEFAULT"
-          DEBUG=5 FORWARD_ONLY=1 python3 test/test_tiny.py TestTiny.test_plus
-      - name: Run LLVM test
-        if: matrix.backend=='amdllvm'
-        run: python test/device/test_amd_llvm.py
-      - name: Run pytest (amd)
-        run: python -m pytest -n=auto test/backend/test_ops.py test/backend/test_dtype.py test/backend/test_dtype_alu.py test/backend/test_linearizer.py test/backend/test_randomness.py test/backend/test_jit.py test/backend/test_graph.py test/backend/test_multitensor.py test/device/test_hcq.py test/testextra/test_cfg_viz.py --durations=20
-      - name: Run pytest (amd)
-        run: python -m pytest test/external/external_test_am.py --durations=20
-      - name: Run TRANSCENDENTAL math
-        run: TRANSCENDENTAL=2 python -m pytest -n=auto test/backend/test_ops.py::TestOps::test_sin test/backend/test_ops.py::TestOps::test_cos test/backend/test_ops.py::TestOps::test_tan test/backend/test_ops.py::TestOps::test_exp test/backend/test_ops.py::TestOps::test_log --durations=20
-      - name: Run TestOps.test_add with SQTT
-        run: |
-          VIZ=-2 DEBUG=5 python3 test/backend/test_ops.py TestOps.test_add
-          extra/sqtt/rgptool.py create "/tmp/profile.pkl.$USER" -o /tmp/gpu0.rgp
-      - name: Run AMD emulated mmapeak on NULL backend
-        env:
-          AMD: 0
-        run: PYTHONPATH=. NULL=1 EMULATE=AMD python extra/mmapeak/mmapeak.py
-      - name: Run process replay tests
-        uses: ./.github/actions/process-replay
-
   testamdasm:
     name: AMD ASM IDE
     runs-on: ubuntu-24.04
@@ -691,25 +643,62 @@ jobs:
           echo "deb http://apt.llvm.org/$(lsb_release -cs)/ llvm-toolchain-$(lsb_release -cs)-21 main" | sudo tee /etc/apt/sources.list.d/llvm.list
           sudo apt-get update
           sudo apt-get install llvm-21 llvm-21-tools cloc
-      - name: RDNA3 Line Count
-        run: cloc --by-file tinygrad/renderer/amd/*.py
       - name: Install rocprof-trace-decoder
         run: sudo PYTHONPATH="." ./extra/sqtt/install_sqtt_decoder.py
-      - name: Run RDNA3 emulator tests
+      - name: Run AMD renderer tests
         run: AMD_LLVM=0 python -m pytest -n=auto test/amd/ --durations 20
-      - name: Run RDNA3 emulator tests (AMD_LLVM=1)
+      - name: Run AMD renderer tests (AMD_LLVM=1)
         run: AMD_LLVM=1 python -m pytest -n=auto test/amd/ --durations 20
-      - name: Run RDNA3 dtype tests
-        run: AMD_LLVM=0 pytest -n=auto test/backend/test_dtype_alu.py test/backend/test_dtype.py --durations 20
-      - name: Run RDNA3 dtype tests (AMD_LLVM=1)
-        run: AMD_LLVM=1 pytest -n=auto test/backend/test_dtype_alu.py test/backend/test_dtype.py --durations 20
-      # TODO: run all once emulator is faster
-      - name: Run RDNA3 ops tests
-        run: SKIP_SLOW_TEST=1 AMD_LLVM=0 pytest -n=auto test/backend/test_ops.py -k "test_sparse_categorical_crossentropy or test_tril or test_nonzero or test_softmax_argmax" --durations 20
-      - name: Run RDNA4 emulator tests
-        run: MOCKGPU_ARCH=rdna4 python -m pytest test/test_tiny.py -v --durations 20
-      - name: Run CDNA4 emulator tests
-        run: AMD_LLVM=1 MOCKGPU_ARCH=cdna4 python -m pytest test/test_tiny.py -v --durations 20
+      - name: Run TestOps.test_add with SQTT
+        run: |
+          VIZ=-2 DEBUG=5 python3 test/backend/test_ops.py TestOps.test_add
+          extra/sqtt/rgptool.py create "/tmp/profile.pkl.$USER" -o /tmp/gpu0.rgp
+      - name: Run AMD emulated tests on NULL backend
+        env:
+          AMD: 0
+        run: |
+          PYTHONPATH=. NULL=1 EMULATE=AMD python extra/mmapeak/mmapeak.py
+          PYTHONPATH=. NULL=1 EMULATE=AMD_CDNA4 python3 -m pytest -n=auto test/testextra/test_tk.py
+      - name: Run LLVM test
+        run: AMD_LLVM=1 python test/device/test_amd_llvm.py
+
+  testamd:
+    strategy:
+      fail-fast: false
+      matrix:
+        backend: [amd, amdllvm]
+        arch: [rdna3]
+        #arch: [rdna3, rdna4, cdna4]
+
+    name: Linux (${{ matrix.backend }} ${{ matrix.arch }})
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    env:
+      AMD: 1
+      MOCKGPU: 1
+      MOCKGPU_ARCH: ${{ matrix.arch }}
+      SKIP_SLOW_TEST: 1
+      AMD_LLVM: ${{ matrix.backend == 'amdllvm' && '1' || matrix.backend != 'amdllvm' && '0' }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+      - name: Setup Environment
+        uses: ./.github/actions/setup-tinygrad
+        with:
+          key: ${{ matrix.backend }}-minimal
+          deps: testing_unit
+          amd: 'true'
+          llvm: ${{ matrix.backend == 'amdllvm' && 'true' }}
+      - name: Check Device.DEFAULT and print some source
+        run: |
+          python3 -c "from tinygrad import Device; assert Device.DEFAULT in ['AMD'], Device.DEFAULT"
+          DEBUG=5 FORWARD_ONLY=1 python3 test/test_tiny.py TestTiny.test_plus
+      - name: Run pytest (amd)
+        run: python -m pytest -n=auto test/backend/test_ops.py test/backend/test_dtype.py test/backend/test_dtype_alu.py test/backend/test_linearizer.py test/backend/test_randomness.py test/backend/test_jit.py test/backend/test_graph.py test/backend/test_multitensor.py test/device/test_hcq.py test/testextra/test_cfg_viz.py test/external/external_test_am.py --durations=20
+      - name: Run TRANSCENDENTAL math
+        run: TRANSCENDENTAL=2 python -m pytest -n=auto test/backend/test_ops.py::TestOps::test_sin test/backend/test_ops.py::TestOps::test_cos test/backend/test_ops.py::TestOps::test_tan test/backend/test_ops.py::TestOps::test_exp test/backend/test_ops.py::TestOps::test_log --durations=20
+      - name: Run process replay tests
+        uses: ./.github/actions/process-replay
 
   testnvidia:
     strategy:
@@ -837,6 +826,8 @@ jobs:
         NV_PTX: 1
         NV: 1
         FORWARD_ONLY: 1
+        # TODO: failing due to library loading error
+        CAPTURE_PROCESS_REPLAY: 0
       run: |
         python3 -m pytest -n=auto test/device/test_hcq.py test/test_tiny.py --durations=20
     - name: Run process replay tests

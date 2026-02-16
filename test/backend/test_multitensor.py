@@ -465,6 +465,19 @@ class TestMultiTensor(unittest.TestCase):
     y_shard = norm_sharded(x_sharded).realize()
     np.testing.assert_allclose(y.numpy(), y_shard.numpy(), atol=1e-6, rtol=1e-6)
 
+  def test_sdpa_causal_shard_batch(self):
+    B, H, T, D = 4, 2, 10, 16
+    q = Tensor.rand(B, H, T, D)
+    k = Tensor.rand(B, H, T, D)
+    v = Tensor.rand(B, H, T, D)
+    q_shard = q.shard(devices_2, axis=0)
+    k_shard = k.shard(devices_2, axis=0)
+    v_shard = v.shard(devices_2, axis=0)
+    Tensor.realize(q, k, v, q_shard, k_shard, v_shard)
+    y = Tensor.scaled_dot_product_attention(q, k, v, is_causal=True).realize()
+    y_shard = Tensor.scaled_dot_product_attention(q_shard, k_shard, v_shard, is_causal=True).realize()
+    np.testing.assert_allclose(y_shard.numpy(), y.numpy(), atol=1e-6, rtol=1e-6)
+
   # NOTE: this is failing on LLVM CI, no idea why. Works locally.
   @slow
   def test_data_parallel_resnet(self):
@@ -503,7 +516,6 @@ class TestMultiTensor(unittest.TestCase):
     np.testing.assert_allclose(grad, shard_grad, atol=1e-5, rtol=1e-5)
 
   @slow
-  @unittest.skip("TODO: pm_rangeify hangs")
   def test_data_parallel_resnet_train_step(self):
     from extra.models.resnet import ResNet18
     fake_image = Tensor.rand((2, 3, 224//16, 224//16))
@@ -511,7 +523,6 @@ class TestMultiTensor(unittest.TestCase):
     m = ResNet18()
     self._test_model_train_step(m, fake_image, labels)
 
-  @unittest.skip("TODO: pm_rangeify hangs")
   def test_data_parallel_simple_train_step(self):
     class Model:
       def __init__(self): self.conv1 = nn.Linear(128,128)
@@ -1322,6 +1333,55 @@ class TestMultiAssign(unittest.TestCase):
       GlobalCounters.reset()
       f(out, vi.bind(i))
     self.assertListEqual(out.tolist(), [[0,1,2,3,4,0]]*4)
+
+@unittest.skipIf(not_support_multi_device(), "need multi")
+class TestMultiSetitem(unittest.TestCase):
+  device = tuple(f"{Device.DEFAULT}:{i}" for i in range(4))
+
+  @needs_second_gpu
+  def setUp(self): pass
+
+  def _t(self, axis): return Tensor.arange(16).contiguous().realize().shard(self.device, axis=axis)
+
+  def test_setitem_scalar_axis0(self):
+    t = self._t(0)
+    t[1] = 99
+    self.assertListEqual(t.tolist(), [0,99,2,3,4,5,6,7,8,9,10,11,12,13,14,15])
+
+  def test_setitem_scalar_axis_none(self):
+    t = self._t(None)
+    t[1] = 99
+    self.assertListEqual(t.tolist(), [0,99,2,3,4,5,6,7,8,9,10,11,12,13,14,15])
+
+  def test_setitem_slice_cross_shard(self):
+    t = self._t(0)
+    t[2:6] = 99
+    self.assertListEqual(t.tolist(), [0,1,99,99,99,99,6,7,8,9,10,11,12,13,14,15])
+
+  def test_setitem_full_slice(self):
+    t = self._t(0)
+    t[:] = 42
+    self.assertListEqual(t.tolist(), [42]*16)
+
+  def test_setitem_stride(self):
+    t = self._t(0)
+    t[::4] = 0
+    self.assertListEqual(t.tolist(), [0,1,2,3,0,5,6,7,0,9,10,11,0,13,14,15])
+
+  def test_setitem_single_shard(self):
+    t = self._t(0)
+    t[13] = 99
+    self.assertListEqual(t.tolist(), [0,1,2,3,4,5,6,7,8,9,10,11,12,99,14,15])
+
+  def test_setitem_tensor_value_replicated(self):
+    t = self._t(0)
+    t[2:6] = Tensor([90, 91, 92, 93]).shard(self.device)
+    self.assertListEqual(t.tolist(), [0,1,90,91,92,93,6,7,8,9,10,11,12,13,14,15])
+
+  def test_setitem_tensor_value_sharded_aligned(self):
+    t = self._t(0)
+    t[::4] = Tensor([90, 91, 92, 93]).shard(self.device, axis=0)
+    self.assertListEqual(t.tolist(), [90,1,2,3,91,5,6,7,92,9,10,11,93,13,14,15])
 
 @unittest.skipIf(not_support_multi_device(), "need multi")
 class TestMultiTransformer(unittest.TestCase):

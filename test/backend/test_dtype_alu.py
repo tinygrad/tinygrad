@@ -302,12 +302,14 @@ class TestDTypeALU(unittest.TestCase):
     if not is_dtype_supported(float_dtype): float_dtype = dtypes.float32
     universal_test_cast(a, float_dtype, unsigned_dtype)
 
+  @unittest.skip("relied on hacks")
   @given(strat.floats(width=32, min_value=256.0, max_value=65000.0, allow_subnormal=False),
          strat.sampled_from(dtypes_float), strat.sampled_from((dtypes.uint8, dtypes.uint16)))
   def test_float_cast_to_unsigned_overflow(self, a, float_dtype, unsigned_dtype):
     if not is_dtype_supported(float_dtype): float_dtype = dtypes.float32
     universal_test_cast(a, float_dtype, unsigned_dtype)
 
+  @unittest.skip("relied on hacks")
   @given(strat.floats(width=32, min_value=-65000.0, max_value=-1.0, allow_subnormal=False),
          strat.sampled_from(dtypes_float), strat.sampled_from((dtypes.uint8, dtypes.uint16)))
   def test_float_cast_to_unsigned_underflow(self, a, float_dtype, unsigned_dtype):

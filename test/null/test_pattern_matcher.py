@@ -203,7 +203,7 @@ class TestPatternMatcher(unittest.TestCase):
 
   def _assert_eq_upat(self, a:UPat, b:UPat):
     assert (sorted(map(str,a.op)) if a.op else [] == (sorted(map(str,b.op)) if b.op else []))
-    assert (sorted(a.dtype) if a.dtype else [] == (sorted(b.dtype) if b.dtype else []))
+    assert (sorted(a.match_dtype) if a.match_dtype else [] == (sorted(b.match_dtype) if b.match_dtype else []))
     assert (a.name, type(a.src)) == (b.name, type(b.src))
     def simple_src(u:UPat):
       if u.src is None: return []
