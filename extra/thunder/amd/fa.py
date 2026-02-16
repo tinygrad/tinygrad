@@ -80,7 +80,7 @@ def custom_fa_forward(o:UOp, l_vec:UOp, q:UOp, k:UOp, v:UOp, device:str, arch:st
                   threadIdx_x, blockIdx_x, blockIdx_y, blockIdx_z,
                   arg=KernelInfo(name="custom_fa_forward"))
 
-  lib = HIPCCCompiler(arch, compile_args).compile(code)
+  lib = HIPCCCompiler(arch, compile_args).compile_cached(code)
 
   lib = bytearray(lib)
   rodata_off = next(sh.header.sh_offset for sh in elf_loader(bytes(lib))[1] if sh.name == ".rodata")
@@ -110,7 +110,7 @@ def custom_fa_backward_pre(delta_vec:UOp, dq:UOp, o:UOp, do:UOp, device:str, arc
                   threadIdx_x, blockIdx_x, blockIdx_y, blockIdx_z,
                   arg=KernelInfo(name="custom_fa_backward_pre"))
 
-  lib = HIPCCCompiler(arch, compile_args).compile(code)
+  lib = HIPCCCompiler(arch, compile_args).compile_cached(code)
 
   lib = bytearray(lib)
   rodata_off = next(sh.header.sh_offset for sh in elf_loader(bytes(lib))[1] if sh.name == ".rodata")
@@ -141,7 +141,7 @@ def custom_fa_backward(dq:UOp, dk:UOp, dv:UOp, do:UOp, q:UOp, k:UOp, v:UOp, l_ve
                   threadIdx_x, blockIdx_x, blockIdx_y, blockIdx_z,
                   arg=KernelInfo(name="custom_fa_backward"))
 
-  lib = HIPCCCompiler(arch, compile_args).compile(code)
+  lib = HIPCCCompiler(arch, compile_args).compile_cached(code)
 
   lib = bytearray(lib)
   rodata_off = next(sh.header.sh_offset for sh in elf_loader(bytes(lib))[1] if sh.name == ".rodata")
@@ -171,7 +171,7 @@ def custom_fa_backward_post(dq_out:UOp, dq_in:UOp, device:str, arch:str):
                   threadIdx_x, blockIdx_x, blockIdx_y, blockIdx_z,
                   arg=KernelInfo(name="custom_fa_backward_post"))
 
-  lib = HIPCCCompiler(arch, compile_args).compile(code)
+  lib = HIPCCCompiler(arch, compile_args).compile_cached(code)
 
   lib = bytearray(lib)
   rodata_off = next(sh.header.sh_offset for sh in elf_loader(bytes(lib))[1] if sh.name == ".rodata")
