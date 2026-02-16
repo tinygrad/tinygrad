@@ -673,7 +673,7 @@ jobs:
 
     name: Linux (${{ matrix.backend }} ${{ matrix.arch }})
     runs-on: ubuntu-22.04
-    timeout-minutes: 15
+    timeout-minutes: ${{ matrix.arch == 'cdna4' && 35 || 15 }}
     env:
       AMD: 1
       MOCKGPU: 1

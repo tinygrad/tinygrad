@@ -504,7 +504,8 @@ class Parser:
         self.eat('RBRACKET')
         vgpr = self.vars.get('_vgpr')
         if vgpr is None: return _u32(0)
-        return vgpr.index(_to_u32(reg) * _u32(32) + _to_u32(lane), ptr=True).load()
+        stride = self.vars.get('_vgpr_stride', _u32(32))
+        return vgpr.index(_to_u32(reg) * stride + _to_u32(lane), ptr=True).load()
       if self.try_eat('LPAREN'):
         args = self._parse_args()
         self.eat('RPAREN')
@@ -516,8 +517,12 @@ class Parser:
       if name == 'OVERFLOW_F32': return _const(dtypes.uint32, 0x7F7FFFFF).bitcast(dtypes.float32)
       if name == 'UNDERFLOW_F64': return _const(dtypes.uint64, 1).bitcast(dtypes.float64)
       if name == 'OVERFLOW_F64': return _const(dtypes.uint64, 0x7FEFFFFFFFFFFFFF).bitcast(dtypes.float64)
-      if name == 'WAVE32': return _const(dtypes.bool, True)
-      if name == 'WAVE64': return _const(dtypes.bool, False)
+      if name == 'WAVE32':
+        w64 = self.vars.get('_wave64')
+        return _const(dtypes.bool, not (isinstance(w64, UOp) and w64.arg is True))
+      if name == 'WAVE64':
+        w64 = self.vars.get('_wave64')
+        return _const(dtypes.bool, isinstance(w64, UOp) and w64.arg is True)
       if name == 'WAVE_MODE' and self.try_eat('DOT') and self.try_eat_val('IEEE', 'IDENT'): return _u32(1)
       if self.try_eat('LBRACE'):
         idx = self.eat('NUM').val
@@ -529,7 +534,8 @@ class Parser:
           self.eat('RBRACKET')
           vgpr = self.vars.get('_vgpr')
           if vgpr is None: return _u32(0)
-          return vgpr.index(_to_u32(reg) * _u32(32) + _u32(int(idx)), ptr=True).load()
+          stride = self.vars.get('_vgpr_stride', _u32(32))
+          return vgpr.index(_to_u32(reg) * stride + _u32(int(idx)), ptr=True).load()
         elem = self.vars.get(f'{name}@{idx}', self.vars.get(f'{name}{idx}'))
         if elem is None:
           # Extract bit idx from base variable (like var[idx])
@@ -992,7 +998,8 @@ def parse_block(lines: list[str], start: int, env: dict[str, VarVal], funcs: dic
         ln = parse_tokens(lane_toks, env, funcs)
         rg, val = parse_tokens(reg_toks, env, funcs), parse_tokens(toks[j:], env, funcs)
         if assigns is not None:
-          assigns.append((f'VGPR[{_tok_str(lane_toks)}][{_tok_str(reg_toks)}]', (_to_u32(rg) * _u32(32) + _to_u32(ln), val)))
+          stride = env.get('_vgpr_stride', _u32(32))
+          assigns.append((f'VGPR[{_tok_str(lane_toks)}][{_tok_str(reg_toks)}]', (_to_u32(rg) * stride + _to_u32(ln), val)))
         i += 1
         continue
 
