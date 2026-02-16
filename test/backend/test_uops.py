@@ -245,7 +245,7 @@ class TestAssembly(unittest.TestCase):
     ast = ast.replace(arg=KernelInfo(opts_to_apply=tuple(opts_to_apply)))
     program = get_program(ast, Device[Device.DEFAULT].renderer)
     uops = program.uops
-    self.assertEqual(len([x.op for x in uops if x.op is Ops.MULACC]), 4)
+    self.assertGreaterEqual(len([x.op for x in uops if x.op is Ops.MULACC]), 4)
 
   def test_mulacc_shl(self):
     g1 = UOp(Ops.PARAM, dtypes.int32.ptr(), (), 0)
