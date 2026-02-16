@@ -275,7 +275,7 @@ class TestSubstitute(unittest.TestCase):
     self.assertIs(ret, a.sqrt().sin())
 
   def test_double_sin_to_sqrt(self):
-    a = UOp.variable('a', 0, 10)
+    a = UOp.variable('a', 0, 10, dtype=dtypes.float)
     n1 = a.sin()
     ret = n1.sin()
     # NOTE: this would work if it had gone in the opposite order
