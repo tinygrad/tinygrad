@@ -1,5 +1,5 @@
 # RDNA3 128x128 tiled GEMM kernel - DSL version
-# Computes C = A @ B for 4096x4096 float32 matrices using 128x128 tiles
+# Computes C = A @ B for NxN float32 matrices using 128x128 tiles
 #
 # Architecture: RDNA3 (gfx1100)
 # Tile size: 128x128 (each workgroup computes one tile of C)
@@ -21,7 +21,6 @@ from tinygrad.runtime.autogen.amd.rdna3.ins import *
 # Kernel constants
 # =============================================================================
 LDS_SIZE = 8320       # Local data share size in bytes
-MATRIX_DIM = 4096     # Matrix dimension N (assumes square NxN matrices)
 LDS_A_STRIDE = 0x210  # LDS stride for A tile (528 bytes)
 LDS_B_STRIDE = 0x200  # LDS stride for B tile (512 bytes)
 LDS_BASE_OFFSET = 0x1080  # Base LDS offset for tiles
@@ -62,7 +61,7 @@ S_TILE_Y = 15             # workgroup_y << 7
 # Kernarg load destinations
 S_KERNARG_A = (20, 21)    # A pointer from kernarg
 S_KERNARG_B = (22, 23)    # B pointer from kernarg
-# Prefetch base pointers (8 pairs each, 16KB/256KB apart)
+# Prefetch base pointers (8 pairs each, B: N*4 bytes apart, A: N*64 bytes apart)
 S_PREFETCH_B = 24         # s[24:39] - 8 B tile pointers
 S_PREFETCH_A = 40         # s[40:55] - 8 A tile pointers
 
@@ -197,7 +196,9 @@ class Kernel:
 # Kernel builder
 # =============================================================================
 
-def build_kernel(arch='gfx1100'):
+def build_kernel(N, arch='gfx1100'):
+  assert N % 128 == 0, f"N must be a multiple of 128 (tile size), got {N}"
+  assert N >= 256, f"N must be >= 256 (prefetch pipeline requires at least 2 K-blocks), got {N}"
   k = Kernel(arch)
 
   # ===========================================================================
@@ -205,7 +206,7 @@ def build_kernel(arch='gfx1100'):
   # ===========================================================================
   k.emit(s_load_b128(sdata=s[S_KERNARG_A[0]:S_KERNARG_B[1]], sbase=s[0:1], offset=0x0, soffset=NULL))
   k.emit(s_load_b64(sdata=s[S_OUT_PTR[0]:S_OUT_PTR[1]], sbase=s[0:1], offset=0x10, soffset=NULL))
-  k.emit(s_mov_b32(s[S_DIM_N], MATRIX_DIM))
+  k.emit(s_mov_b32(s[S_DIM_N], N))
   k.emit(s_mov_b32(s[S_LOOP_CTR], 0))  # used by LDS swizzle, always 0 for valid workgroups
   k.emit(s_lshl_b32(s[S_TILE_X], s[S_WORKGROUP_X], 7))
   k.emit(s_lshl_b32(s[S_TILE_Y], s[S_WORKGROUP_Y], 7))
@@ -220,19 +221,20 @@ def build_kernel(arch='gfx1100'):
 
   # Compute 8 A and B matrix tile base pointers for prefetch
   k.emit(s_mov_b64(s[S_PREFETCH_B:S_PREFETCH_B+1], s[S_KERNARG_B[0]:S_KERNARG_B[1]]))  # B[0]: no offset
-  for i in range(1, 8):  # B: 16KB apart
-    k.emit(s_add_u32(s[S_PREFETCH_B+i*2], s[S_KERNARG_B[0]], i * 0x4000))
+  for i in range(1, 8):  # B: each pointer 1 row of B apart (N*4 bytes)
+    k.emit(s_add_u32(s[S_PREFETCH_B+i*2], s[S_KERNARG_B[0]], i * N * 4))
     k.emit(s_addc_u32(s[S_PREFETCH_B+i*2+1], s[S_KERNARG_B[1]], 0))
   k.emit(s_mov_b64(s[S_PREFETCH_A:S_PREFETCH_A+1], s[S_KERNARG_A[0]:S_KERNARG_A[1]]))  # A[0]: no offset
-  for i in range(1, 8):  # A: 256KB apart
-    k.emit(s_add_u32(s[S_PREFETCH_A+i*2], s[S_KERNARG_A[0]], i * 0x40000))
+  for i in range(1, 8):  # A: each pointer 16 rows of A apart (16*N*4 bytes)
+    k.emit(s_add_u32(s[S_PREFETCH_A+i*2], s[S_KERNARG_A[0]], i * N * 64))
     k.emit(s_addc_u32(s[S_PREFETCH_A+i*2+1], s[S_KERNARG_A[1]], 0))
 
-  # Global prefetch addresses: B = (tile_x + lane_id) * 4, A = ((tile_y << 12) + (lane_id/8)*4K + lane_id%8) * 4
+  # Global prefetch addresses: B = (tile_x + lane_id) * 4, A = (tile_y*N + (lane_id/8)*N + lane_id%8) * 4
   k.emit(v_add_nc_u32_e32(v[V_GLOBAL_B_ADDR], s[S_TILE_X], v[V_LANE_ID]))
   k.emit(v_lshlrev_b32_e32(v[V_GLOBAL_B_ADDR], 2, v[V_GLOBAL_B_ADDR]))
-  k.emit(s_lshl_b32(s[19], s[S_TILE_Y], 12))
-  k.emit(v_lshl_add_u32(v[V_GLOBAL_A_ADDR], v[4], 12, v[V_LANE_ID_MOD8]))  # (lane_id/8)*4K + lane_id%8
+  k.emit(s_mul_i32(s[19], s[S_TILE_Y], N))
+  k.emit(v_mul_lo_u32(v[V_GLOBAL_A_ADDR], v[4], N))                          # (lane_id/8)*N
+  k.emit(v_add_nc_u32_e32(v[V_GLOBAL_A_ADDR], v[V_LANE_ID_MOD8], v[V_GLOBAL_A_ADDR]))  # + lane_id%8
   k.emit(v_add_nc_u32_e32(v[V_GLOBAL_A_ADDR], s[19], v[V_GLOBAL_A_ADDR]))
   k.emit(v_lshlrev_b32_e32(v[V_GLOBAL_A_ADDR], 2, v[V_GLOBAL_A_ADDR]))
 
@@ -303,13 +305,13 @@ def build_kernel(arch='gfx1100'):
 
   if not NO_GLOBAL:
     # Advance prefetch pointers (VGPR)
-    #k.emit(v_add_nc_u32_e32(v[V_GLOBAL_B_ADDR], 0x20000, v[V_GLOBAL_B_ADDR]))
+    #k.emit(v_add_nc_u32_e32(v[V_GLOBAL_B_ADDR], N * 32, v[V_GLOBAL_B_ADDR]))
     #k.emit(v_add_nc_u32_e32(v[V_GLOBAL_A_ADDR], 0x20, v[V_GLOBAL_A_ADDR]))
 
-    # Advance prefetch pointers (64-bit adds)
+    # Advance prefetch pointers (64-bit adds): B advances 8 rows (8*N*4 bytes), A advances 8 cols (8*4 bytes)
     k.emit(s_clause(simm16=31))
     for i in range(8):
-      k.emit(s_add_u32(s[S_PREFETCH_B+i*2], s[S_PREFETCH_B+i*2], 0x20000))
+      k.emit(s_add_u32(s[S_PREFETCH_B+i*2], s[S_PREFETCH_B+i*2], N * 32))
       k.emit(s_addc_u32(s[S_PREFETCH_B+i*2+1], s[S_PREFETCH_B+i*2+1], 0))
     for i in range(8):
       k.emit(s_add_u32(s[S_PREFETCH_A+i*2], s[S_PREFETCH_A+i*2], 0x20))
@@ -440,7 +442,7 @@ def test_matmul():
   dev = Device[Device.DEFAULT]
   print(f"Device arch: {dev.renderer.arch}")
 
-  insts = build_kernel(dev.renderer.arch)
+  insts = build_kernel(N, dev.renderer.arch)
 
   rng = np.random.default_rng(42)
   a = Tensor(rng.random((N, N), dtype=np.float32) - 0.5)
@@ -472,33 +474,23 @@ def test_matmul():
     with Context(DEBUG=2): tc = (a @ b).realize()
     with Context(DEBUG=0): err = (c - tc).square().mean().item()
     print(f"mean squared error {err}")
-    if err != err or err > 1e-06: raise RuntimeError("matmul is wrong!")
-
-def run_sqtt():
-  """Run with SQTT profiling and write trace files."""
-  import subprocess, os
-
-  # Run test_matmul in a subprocess with SQTT enabled from the start (no verify)
-  env = {**os.environ, "AMD": "1", "SQTT": "1", "CNT": "1", "PROFILE": "1", "PYTHONPATH": ".", "VERIFY": "0"}
-  result = subprocess.run(
-    ["python", "-c", "from extra.gemm.amd_asm_matmul import test_matmul; test_matmul()"],
-    capture_output=True, text=True, env=env, timeout=120
-  )
-  print(result.stdout)
-
-  # Run roc.py to extract trace data
-  result = subprocess.run(
-    ["python", "extra/sqtt/roc.py", "--profile", "/tmp/profile.pkl.tiny", "--kernel", "kernel"],
-    capture_output=True, text=True, env={**os.environ, "DEBUG": "5"}, timeout=60
-  )
-  output = result.stdout + result.stderr
-
-  # Write full output to trace file
-  with open("/tmp/sqtt_trace.txt", "w") as f:
-    f.write(output)
-  print(f"Wrote {len(output)} bytes to /tmp/sqtt_trace.txt")
+    if err != err or err > 1e-06:
+      c_np, tc_np = c.numpy(), tc.numpy()
+      for bi in range(N // 128):
+        for bj in range(N // 128):
+          blk_c = c_np[bi*128:(bi+1)*128, bj*128:(bj+1)*128]
+          blk_ref = tc_np[bi*128:(bi+1)*128, bj*128:(bj+1)*128]
+          blk_diff = blk_c - blk_ref
+          zero_rows = [i for i in range(128) if np.all(np.abs(blk_c[i,:]) < 1e-10)]
+          nz_rows = [i for i in range(128) if i not in zero_rows]
+          nz_mse = float(np.mean(blk_diff[nz_rows,:]**2)) if nz_rows else 0
+          print(f"Block ({bi},{bj}): zero_rows={zero_rows}, nz_rows_mse={nz_mse:.2e}")
+          # show first few non-zero row comparisons
+          if nz_rows and nz_mse > 1e-6:
+            for r in nz_rows[:3]:
+              print(f"  row {r} asm[0:8]:  {blk_c[r,:8]}")
+              print(f"  row {r} ref[0:8]:  {blk_ref[r,:8]}")
+      raise RuntimeError("matmul is wrong!")
 
 if __name__ == "__main__":
-  if getenv("ASM", 0): print("\n".join(str(inst) for inst in build_kernel(Device[Device.DEFAULT].renderer.arch)))
-  elif getenv("SQTT", 0): run_sqtt()
-  else: test_matmul()
+  test_matmul()
