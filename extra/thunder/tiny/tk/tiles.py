@@ -78,6 +78,10 @@ class TileMathMixin(MathMixin):
     return self.ruop(uop)
   def const_like(self, b): return b
 
+  @property
+  def dtype(self): return self._uop.dtype
+  def cast(self, dtype:DType): return self.ruop(self._uop.cast(dtype))
+
   # override ops that do compute on the src uop
   def sub(self, x, reverse=False):
     return self.ufix(x).alu(Ops.ADD, self, inner_op=lambda y: -y) if reverse else self.alu(Ops.ADD, self.ufix(x), inner_op=lambda y: -y)

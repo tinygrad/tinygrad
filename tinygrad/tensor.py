@@ -3660,9 +3660,9 @@ class Tensor(OpMixin):
     assert self.ndim > 1, f"expected two or more dimensions, got {self.ndim}"
     b_shape, m, n = self.shape[:-2], int(self.shape[-2]), int(self.shape[-1])
     R = self.clone()
-    Q = Tensor.eye(m, dtype=self.dtype).reshape((1,) * len(b_shape) + (m, m)).expand(b_shape + (m, m)).contiguous()
+    Q = Tensor.eye(m, dtype=self.dtype).reshape((1,) * len(b_shape) + (m, m)).expand(b_shape + (m, m))
     for i in range(min(m, n)):
-      x = R[..., i:m, i].contiguous()  # TODO: without contigous this can silently be wrong, should at least assert
+      x = R[..., i:m, i]
       norm = x.square().sum(-1).sqrt()
       s = (x[..., 0] != 0).where(-x[..., 0].sign(), -1)
       u1 = x[..., 0] - s * norm
@@ -3681,10 +3681,10 @@ class Tensor(OpMixin):
     #preprocess the matrix
     Q, R = (self.qr() if m >= n else self.transpose(-2, -1).qr())
     num, q_num = min(m, n), max(m, n)
-    U = R.shrink(tuple([None] * len(b_shape) + [(0, num), (0, num)])).contiguous()
-    V = Tensor.eye(num, dtype=self.dtype).reshape((1,) * len(b_shape) + (num, num)).expand(b_shape + (num, num)).contiguous()
+    U = R.shrink(tuple([None] * len(b_shape) + [(0, num), (0, num)]))
+    V = Tensor.eye(num, dtype=self.dtype).reshape((1,) * len(b_shape) + (num, num)).expand(b_shape + (num, num))
     #prepare round robin pairing
-    permute, inverse_permute = Tensor.arange(0, num, dtype=dtypes.int), Tensor.zeros(num, dtype=dtypes.int).contiguous()
+    permute, inverse_permute = Tensor.arange(0, num, dtype=dtypes.int), Tensor.zeros(num, dtype=dtypes.int)
     permute[num//2:num] = permute[num//2:num].flip(0)
     inverse_permute[permute] = Tensor.arange(num, dtype=dtypes.int)
     def one_round_jacobi(U, V,permute,inverse_permute):
@@ -3720,7 +3720,7 @@ class Tensor(OpMixin):
     U = U.gather(-1, new_indices) / (S != 0).where(S, 1).unsqueeze(-2)
     V = V.gather(-1, new_indices)
 
-    padded_u = Tensor.eye(q_num, dtype=U.dtype).reshape((1,) * len(b_shape) + (q_num, q_num)).expand(b_shape + (q_num, q_num)).contiguous()
+    padded_u = Tensor.eye(q_num, dtype=U.dtype).reshape((1,) * len(b_shape) + (q_num, q_num)).expand(b_shape + (q_num, q_num))
     padded_u[..., 0:num, 0:num] = U
     U = Q @ padded_u
     if not full_matrices: U, V = U[..., 0:num], V[..., 0:num]
