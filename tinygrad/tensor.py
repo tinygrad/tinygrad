@@ -255,7 +255,7 @@ class Tensor(OpMixin):
 
     NOTE: A Tensor can only be scheduled once.
     """
-    big_sink = UOp.sink(*[x.uop for x in (self,)+lst])
+    big_sink = UOp.sink(*[x.uop.base for x in (self,)+lst])
 
     # this is where the schedule cache should go
     becomes_map, schedule, var_vals = complete_create_schedule_with_vars(big_sink)
