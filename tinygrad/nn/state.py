@@ -302,13 +302,9 @@ def ggml_data_to_tensor(t: Tensor, n: int, ggml_type: int) -> Tensor:
   """
   # https://github.com/ggerganov/ggml/blob/323951f1bdcdfbd5b5ff3a9a7c3770e63b1a560e/include/ggml.h#L356
 
-  is_disk = isinstance(t.device, str) and t.device.startswith("DISK")
-
   # native types
   if (dtype := { 0: dtypes.float32, 1: dtypes.float16, 16: dtypes.int8, 17: dtypes.int16, 18: dtypes.int32 }.get(ggml_type)) is not None:
-    data = t[:dtype.itemsize * n]
-    if is_disk: data = data.to(None)
-    return data.bitcast(dtype)
+    return t[:dtype.itemsize * n].bitcast(dtype)
 
   def q_to_uint8(t: Tensor, b: int) -> Tensor:
     # TODO: rewrite with arange?
@@ -316,10 +312,9 @@ def ggml_data_to_tensor(t: Tensor, n: int, ggml_type: int) -> Tensor:
     return t.unsqueeze(-1).expand((*t.shape,8//b)).idiv(shift_tensor).bitwise_and(bitmask).transpose(-1, -2).flatten(-2)
 
   # map to (number of elements, number of bytes)
-  if (nelements_nbytes := { 2: (32, 18), 3: (32, 20), 8: (32, 34), 12: (256, 144), 13: (256, 176), 14: (256, 210), 39: (32, 17) }.get(ggml_type)) is not None:
-    blocks = t[:(n//nelements_nbytes[0])*nelements_nbytes[1]]
-    if is_disk: blocks = blocks.to(None)
-    blocks = blocks.reshape((-1, nelements_nbytes[1]))
+  QUANTIZED_TYPES = { 2: (32, 18), 3: (32, 20), 8: (32, 34), 12: (256, 144), 13: (256, 176), 14: (256, 210), 39: (32, 17) }
+  if (nelements_nbytes := QUANTIZED_TYPES.get(ggml_type)) is not None:
+    blocks = t[:(n//nelements_nbytes[0])*nelements_nbytes[1]].reshape((-1, nelements_nbytes[1]))
     if ggml_type == 2: return (q_to_uint8(blocks[:,2:], 4).bitcast(dtypes.int8) - 8) * blocks[:,:2].bitcast(dtypes.float16).cast(dtypes.float32)
     if ggml_type == 3:
       d, m = (blocks[:,s:s+2].bitcast(dtypes.float16).cast(dtypes.float32) for s in [ 0, 2 ])
