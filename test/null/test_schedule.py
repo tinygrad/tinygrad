@@ -198,6 +198,14 @@ class TestSchedule(unittest.TestCase):
     d = a+b+c
     check_schedule(d, 1)
 
+  def test_basic_binop_fusion_assign(self):
+    a = Tensor.empty(10)
+    b = Tensor.empty(10)
+    c = Tensor.empty(10)
+    d = a+b+c
+    e = Tensor.empty(10).assign(d)
+    check_schedule(e, 1)
+
   def test_basic_binop_fusion_deep(self):
     a = Tensor.empty(10)
     b = Tensor.empty(10)
