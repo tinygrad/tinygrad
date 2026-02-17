@@ -32,7 +32,7 @@ def compute_gemm_args(M:int, N:int, K:int, batch:int) -> tuple[int, int, int, in
   return NUM_WG, iters, total, magic, shift
 
 class Kernel:
-  def __init__(self, name="gemm"): self.name, self.instructions, self.labels, self.label_at_pos, self.pos = name, [], {}, {}, 0
+  def __init__(self): self.instructions, self.labels, self.label_at_pos, self.pos = [], {}, {}, 0
 
   def label(self, name):
     self.labels[name] = self.pos
@@ -49,42 +49,12 @@ class Kernel:
     waitcnt = (vmcnt & 0xF) | ((expcnt & 0x7) << 4) | ((lgkmcnt & 0xF) << 8) | (((vmcnt >> 4) & 0x3) << 14)
     self.emit(s_waitcnt(waitcnt))
 
-  def to_asm(self):
-    # patch branches
+  def finalize(self):
+    """Patch branch offsets and return the finalized instruction list."""
     for inst in self.instructions:
       if inst._target is None: continue
       inst.simm16 = (self.labels[inst._target] - inst._pos - inst.size()) // 4
-    # convert instructions to bytes, pack hsa
-    inst_bytes = b"".join(inst.to_bytes() for inst in self.instructions)
-    body = "\n".join("  .byte " + ",".join(f"0x{b:02x}" for b in inst_bytes[i:i+16]) for i in range(0, len(inst_bytes), 16))
-    hsa = [('group_segment_fixed_size', 133120), ('private_segment_fixed_size', 0), ('kernarg_size', 24),
-           ('next_free_vgpr', 512), ('next_free_sgpr', 96), ('system_sgpr_workgroup_id_x', 1),
-           ('system_sgpr_workgroup_id_y', 1), ('system_sgpr_workgroup_id_z', 1), ('user_sgpr_kernarg_segment_ptr', 1),
-           ('user_sgpr_count', 2), ('user_sgpr_kernarg_preload_length', 0), ('user_sgpr_kernarg_preload_offset', 0),
-           ('accum_offset', 256), ('uses_dynamic_stack', 0), ('tg_split', 0), ('float_round_mode_32', 0),
-           ('float_round_mode_16_64', 0), ('float_denorm_mode_32', 3), ('float_denorm_mode_16_64', 3),
-           ('ieee_mode', 1), ('fp16_overflow', 0), ('dx10_clamp', 1)]
-    args = '\n'.join(f'      - .address_space: generic\n        .name: {n}\n        .offset: {i*8}\n'
-                     f'        .size: 8\n        .value_kind: global_buffer' for i,n in enumerate(['C', 'A', 'B']))
-    n = self.name
-    return '\n'.join(['.text', '.section\t.text.', f'.global\t{n}', '.p2align\t8', f'.type\t{n},@function', '', f'{n}:',
-      body, '', '.section .rodata,"a",@progbits', '.p2align 6, 0x0', f'.amdhsa_kernel {n}',
-      *[f'  .amdhsa_{k} {v}' for k, v in hsa], '.end_amdhsa_kernel', '', '.amdgpu_metadata', '---', 'amdhsa.kernels:',
-      '  - .args:', args, '    .group_segment_fixed_size: 133120', '    .kernarg_segment_align: 8',
-      '    .kernarg_segment_size: 24', '    .max_flat_workgroup_size: 256', f'    .name: {n}',
-      '    .private_segment_fixed_size: 0', '    .sgpr_count: 95', '    .sgpr_spill_count: 0', f'    .symbol: {n}.kd',
-      '    .vgpr_count: 249', '    .vgpr_spill_count: 0', '    .wavefront_size: 64', 'amdhsa.version:', '  - 1',
-      '  - 1', '...', '.end_amdgpu_metadata', ''])
-
-  # outputs readable source code for this kernel
-  def to_text(self) -> str:
-    lines, pos = [], 0
-    for inst in self.instructions:
-      if (label := self.label_at_pos.get(pos)) is not None: lines.append(f"{label}:")
-      from test.amd.disasm import disasm
-      lines.append(f"  {disasm(inst)}" if inst._target is None else f" {inst.op_name.lower()} {inst._target}")
-      pos += inst.size()
-    return "\n".join(lines)
+    return self.instructions
 
 def build_kernel(batch, M, N, K, dtype):
   numWG, iters, total, magic, shift = compute_gemm_args(M, N, K, batch)
@@ -92,7 +62,7 @@ def build_kernel(batch, M, N, K, dtype):
   v_mfma_16x16x32 = {dtypes.half:v_mfma_f32_16x16x32_f16, dtypes.bfloat16:v_mfma_f32_16x16x32_bf16}[dtype]
   v_cvt_pk = {dtypes.half:v_cvt_pk_f16_f32, dtypes.bfloat16:v_cvt_pk_bf16_f32}[dtype]
   v_cvt = {dtypes.half:v_cvt_f32_f16_e32, dtypes.bfloat16:v_cvt_f32_bf16_e32}[dtype]
-  k = Kernel(f"gemm_{batch}_{M}_{N}_{K}")
+  k = Kernel()
   # load D, A, B pointers
   k.emit(s_load_dwordx2(s[24:25], s[0:1], s[0], 0, 0, 0, 0, 1))
   k.emit(s_load_dwordx2(s[30:31], s[0:1], s[0], 8, 0, 0, 0, 1))
@@ -11528,4 +11498,4 @@ def build_kernel(batch, M, N, K, dtype):
   k.emit(s_branch(), target='PersistentLoopStart')
   k.label('KernelEnd')
   k.emit(s_endpgm())
-  return k
+  return k.finalize()
