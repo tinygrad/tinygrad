@@ -43,11 +43,7 @@ class TestAssign(unittest.TestCase):
         x += 1
       x.realize()
       assert x.item() == T
-      if T == 1:
-        assert x.uop.base.realized is buf
-      else:
-        # TODO: this is wrong, it should always return the same buffer
-        assert x.uop.base.realized is not buf
+      assert x.uop.base.realized is buf
 
   def test_assign_slice_add(self):
     for T in (1, 2, 10, 100):
