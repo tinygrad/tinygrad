@@ -266,6 +266,13 @@ class TestAssembly(unittest.TestCase):
     self.assertIn(Ops.CMPEQ, ops)
     self.assertNotIn(Ops.CMPNE, ops)
 
+  def test_float_cmpne_unordered(self):
+    # float CMPNE must use setp.neu (unordered) for NaN correctness, fixes #14095
+    g = UOp(Ops.PARAM, dtypes.float32.ptr(), (), 0)
+    comp = g.index(UOp.const(dtypes.int, 0)).ne(UOp.const(dtypes.float, 3.14))
+    uops = to_uops_list([comp], ren=Device[Device.DEFAULT].renderer)
+    self.assertIn("setp.neu.f32", Device[Device.DEFAULT].renderer.render(uops))
+
 class TestZeroRange(unittest.TestCase):
   def test_reduce_variable(self):
     for i in range(3,-1,-1):
