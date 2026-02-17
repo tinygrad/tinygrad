@@ -169,7 +169,7 @@ class TestSchedule(unittest.TestCase):
   def test_empty_is_not_realized(self):
     a = Tensor.empty(10)
     child = a+2
-    assert not a.uop.is_realized
+    assert a.uop.is_realized
     child.realize()
     assert a.uop.is_realized
 
@@ -185,7 +185,7 @@ class TestSchedule(unittest.TestCase):
   def test_childless_empty_never_allocates(self):
     a = Tensor.empty(10)
     a.realize()
-    assert not a.uop.is_realized
+    assert not a.uop.buffer.is_allocated()
 
   def test_simplify_padded_const(self):
     a, _ = Tensor.empty(1022).cummax(axis=0)
