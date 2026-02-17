@@ -2,6 +2,7 @@ import os, unittest, ctypes
 from tinygrad import dtypes, Tensor, fetch, Device
 from tinygrad.nn.state import ggml_data_to_tensor, gguf_load
 from tinygrad.device import is_dtype_supported
+from tinygrad.helpers import Context
 import numpy as np
 import ggml
 
@@ -103,6 +104,7 @@ class TestGGUF(unittest.TestCase):
 
     np.testing.assert_equal(dq_tensor.numpy(), np.frombuffer(c_dq_data, dtype=np.float32))
 
+  @Context(LRU=0)
   def _test_gguf_load(self, url: str):
     fp = fetch(url)
     model_size = os.stat(fp).st_size
