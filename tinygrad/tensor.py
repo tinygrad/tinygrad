@@ -255,15 +255,36 @@ class Tensor(OpMixin):
 
     NOTE: A Tensor can only be scheduled once.
     """
-    # allocate buffers for all outputs, insert the buffers in the tensor graph
+    # allocate buffers for all non-contiguous explict outputs
     explicit_outputs = [x.uop.base for x in (self,)+lst]
-    allocated_buffers = [UOp.new_buffer(x.device, x.size, x.dtype).reshape(x.shape) for x in explicit_outputs]
-    _apply_map_to_tensors(dict(zip(explicit_outputs, allocated_buffers)), name="Apply Preallocated Buffers")
-    big_sink = UOp.sink(*[x.assign(y) for x,y in zip(allocated_buffers, explicit_outputs)])
+    buffer_map = {}
+    sink = []
+    for x in explicit_outputs:
+      # if it's already contiguous the next rewrite will handle it
+      if x.op is Ops.CONTIGUOUS:
+        sink.append(x)
+        continue
+      allocated_buffer = UOp.new_buffer(x.device, x.size, x.dtype).reshape(x.shape)
+      buffer_map[x] = allocated_buffer
+      sink.append(allocated_buffer.assign(x))
+    big_sink = UOp.sink(*sink)
+
+    # rewrite all contiguous to assign
+    from tinygrad.uop.ops import graph_rewrite, PatternMatcher, UPat
+    def contig_to_assign(ctx, x:UOp):
+      # not for symbolic shape
+      if any([not isinstance(s, int) for s in x.shape]): return None
+      ctx[x] = buffer = UOp.new_buffer(x.device, x.size, x.dtype).reshape(x.shape)
+      return buffer.assign(x.src[0])
+    pm_contig_to_assign = PatternMatcher([
+      (UPat(Ops.CONTIGUOUS, name="x"), contig_to_assign),
+    ])
+    big_sink = graph_rewrite(big_sink, pm_contig_to_assign, ctx=buffer_map, bottom_up=True)
+
+    _apply_map_to_tensors(buffer_map, name="Apply Preallocated Buffers")
 
     # this is where the schedule cache should go
     becomes_map, schedule, var_vals = complete_create_schedule_with_vars(big_sink)
-
     #_apply_map_to_tensors(becomes_map, name="Apply Schedule Map")
     return schedule, var_vals
 
