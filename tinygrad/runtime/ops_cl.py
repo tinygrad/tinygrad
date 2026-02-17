@@ -55,6 +55,7 @@ class CLProgram:
 
   def __call__(self, *bufs:tuple[cl.cl_mem, BufferSpec], global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]|None=None,
                vals:tuple[int, ...]=(), wait=False) -> float|None:
+    i = 0
     for i,(b,_) in enumerate(bufs):
       for real_i, dt in self.arg_dtypes[i]:
         if isinstance(dt, ImageDType):
