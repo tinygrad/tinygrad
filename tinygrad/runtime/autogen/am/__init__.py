@@ -22,6 +22,8 @@ def __getattr__(nm):
                                     +[root/"extra/amdpci/headers/amdgpu_smu.h"], args=inc, srcs=am_src)
     case "smu_v13_0_6": return load("am/smu_v13_0_6",[],[f"{AMD}/pm/swsmu/inc/pmfw_if/{s}.h" for s in ["smu_v13_0_6_ppsmc","smu_v13_0_6_pmfw", \
       "smu13_driver_if_v13_0_6"]] +[root/"extra/amdpci/headers/amdgpu_smu.h"], args=inc, srcs=am_src)
+    case "smu_v13_0_12": return load("am/smu_v13_0_12",[],[f"{AMD}/pm/swsmu/inc/pmfw_if/{s}.h" for s in ["smu_v13_0_12_ppsmc","smu_v13_0_12_pmfw",
+      "smu13_driver_if_v13_0_6"]] +[root/"extra/amdpci/headers/amdgpu_smu.h"], args=inc, srcs=am_src)
     case "smu_v14_0_2": return load("am/smu_v14_0_2", [], [f"{AMD}/pm/swsmu/inc/pmfw_if/{s}.h" for s in ["smu_v14_0_0_pmfw", "smu_v14_0_2_ppsmc",
                                     "smu14_driver_if_v14_0"]]+[root/"extra/amdpci/headers/amdgpu_smu.h"], args=inc, srcs=am_src)
     case _: raise AttributeError(f"no such autogen: {nm}")

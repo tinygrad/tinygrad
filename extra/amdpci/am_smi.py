@@ -154,7 +154,7 @@ class SMICtx:
     for dev in self.devs:
       match dev.ip_ver[am.MP1_HWIP]:
         case (13,0,6): table_t = dev.smu.smu_mod.MetricsTableV0_t
-        case (13,0,12): table_t = dev.smu.smu_mod.MetricsTableV2_t
+        case (13,0,12): table_t = dev.smu.smu_mod.MetricsTable_t
         case _: table_t = dev.smu.smu_mod.SmuMetricsExternal_t
       tables[dev] = dev.smu.read_table(table_t, dev.smu.smu_mod.SMU_TABLE_SMU_METRICS) if dev.pci_state == "D0" else None
     return tables
@@ -231,7 +231,8 @@ class SMICtx:
 
   def get_power(self, dev, metrics):
     match dev.ip_ver[am.MP1_HWIP]:
-      case (13,0,6)|(13,0,12): return self._smuq10_round(metrics.SocketPower), self._smuq10_round(metrics.MaxSocketPowerLimit)
+      case (13,0,6): return self._smuq10_round(metrics.SocketPower), self._smuq10_round(metrics.MaxSocketPowerLimit)
+      case (13,0,12): return self._smuq10_round(metrics.SocketPower), self._smuq10_round(metrics.SocketPowerLimit)
       case _: return metrics.SmuMetrics.AverageSocketPower, metrics.SmuMetrics.dGPU_W_MAX
 
   def get_mem_usage(self, dev):

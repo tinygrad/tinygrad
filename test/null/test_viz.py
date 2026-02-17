@@ -188,6 +188,20 @@ class TestViz(BaseTestViz):
     self.assertEqual(list(graphs[0]), [id(a), id(alu)])
     self.assertEqual(list(graphs[1]), [id(z)])
 
+  def test_const_reshape_expand_folded(self):
+    # CONST->RESHAPE->EXPAND should be folded into the ALU node, not shown as separate RESHAPE/EXPAND nodes
+    c = UOp.const(dtypes.float, 1.0, device="CPU", shape=(3,4))  # creates CONST->RESHAPE->EXPAND chain
+    a = UOp(Ops.DEFINE_VAR, dtypes.float, arg=("a", 0.0, 10.0))
+    alu = a + c
+    graph = uop_to_json(alu)
+    # the RESHAPE and EXPAND nodes from the const should not appear in the graph
+    labels = {v["label"].split("\n")[0] for v in graph.values()}
+    self.assertNotIn("RESHAPE", labels)
+    self.assertNotIn("EXPAND", labels)
+    # the CONST should be inlined into the ALU node's label
+    alu_label = graph[id(alu)]["label"]
+    self.assertIn("CONST", alu_label)
+
 # VIZ displays nested graph_rewrites in a tree view
 
 def leaf_rewrite(x:UOp): return x.rtag(1) if x.tag is None else None
@@ -405,6 +419,16 @@ class TestVizProfiler(BaseTestViz):
 
     self.assertEqual(j["dur"], (event2["st"]+event2["dur"])-event["st"])
 
+  def test_copy_node_bandwidth(self):
+    sz = 256*1024*1024
+    dur = 10_000
+    prof = [ProfileRangeEvent(device='NV:SDMA:0', name=TracingKey("NV -> NV:1", ret=sz), st=decimal.Decimal(1000), en=decimal.Decimal(1000+dur)),
+            ProfileDeviceEvent(device='NV:SDMA:0', tdiff=decimal.Decimal(-1000))]
+    j = load_profile(prof)
+    event = j['layout']['NV:SDMA:0']['events'][0]
+    gbs = sz/(dur*1e-6)*1e-9
+    self.assertEqual(event['fmt'], f"{gbs:.0f} GB/s")
+
   def test_graph(self):
     prof = [ProfileDeviceEvent(device='NV', tdiff=decimal.Decimal(-1000)),
             ProfileDeviceEvent(device='NV:1:SDMA:0', tdiff=decimal.Decimal(-50)),
@@ -432,6 +456,20 @@ class TestVizProfiler(BaseTestViz):
     graph_events = j['layout']['NV Graph']['events']
     self.assertEqual(graph_events[0]['st'], nv_events[0]['st'])
     self.assertEqual(graph_events[0]['st']+graph_events[0]['dur'], sdma_events[0]['st']+sdma_events[0]['dur'])
+
+  def test_graph_copy_bandwidth(self):
+    sz = 256*1024*1024
+    dur = 10_000
+    prof = [ProfileDeviceEvent(device='NV', tdiff=decimal.Decimal(-1000)),
+            ProfileDeviceEvent(device='NV:1:SDMA:0', tdiff=decimal.Decimal(-50)),
+            ProfileGraphEvent(ents=[ProfileGraphEntry(device='NV:1:SDMA:0', name=TracingKey("NV -> NV:1", ret=sz), st_id=0, en_id=1)],
+                              deps=[[]],
+                              sigs=[decimal.Decimal(1004), decimal.Decimal(1004+dur)])]
+
+    j = load_profile(prof)
+    sdma_events = j['layout']['NV:1:SDMA:0']['events']
+    gbs = sz/(dur*1e-6)*1e-9
+    self.assertEqual(sdma_events[0]['fmt'], f"{gbs:.0f} GB/s")
 
   def test_block_ordering(self):
     prof = [ProfileDeviceEvent(device='NV', tdiff=decimal.Decimal(-1000)),
