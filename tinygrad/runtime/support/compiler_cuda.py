@@ -60,7 +60,7 @@ class NVRTCCompiler(Compiler):
 class NVCCCompiler(Compiler):
   def __init__(self, arch:str, ptx:bool=True, cache_key:str="cuda", extra_options:list[str]=[]):
     self.ptx, self.arch, self.extra_options = ptx, arch, extra_options
-    super().__init__(f"compile_nvcc_{'ptx' if ptx else 'cubin'}_{cache_key}_{self.arch}_{hashlib.sha256(' '.join(extra_options).encode()).hexdigest()[:8]}")
+    super().__init__(f"compile_nvcc_{cache_key+'ptx' if ptx else ''}_{self.arch}_{hashlib.sha256(' '.join(extra_options).encode()).hexdigest()[:8]}")
   def compile(self, src:str) -> bytes:
     mode, suffix = ("-ptx", ".ptx") if self.ptx else ("-cubin", ".cubin")
     with tempfile.NamedTemporaryFile(suffix=".cu") as srcf, tempfile.NamedTemporaryFile(suffix=suffix) as libf:
