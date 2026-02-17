@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 import unittest, os, subprocess
-from tinygrad import Tensor
+from tinygrad import Tensor, GlobalCounters
 from tinygrad.device import Device, Compiler, enumerate_devices_str
 from tinygrad.helpers import diskcache_get, diskcache_put, getenv, Context, WIN, CI
 
@@ -104,6 +104,27 @@ class TestRunAsModule(unittest.TestCase):
   def test_module_runs(self):
     cpu_line = [l for l in enumerate_devices_str() if "CPU" in l][0]
     self.assertIn("PASS", cpu_line, f"expected CPU to PASS, got: {cpu_line}")
+
+class TestPeakMemUsed(unittest.TestCase):
+  def test_peak_not_reset(self):
+    Tensor.zeros(1024).contiguous().realize()
+    peak_before = GlobalCounters.peak_mem_used
+    GlobalCounters.reset()
+    self.assertEqual(GlobalCounters.peak_mem_used, peak_before)
+
+  def test_peak_increases_with_more_allocs(self):
+    mem_0, peak_0 = GlobalCounters.mem_used, GlobalCounters.peak_mem_used
+    a = Tensor.zeros(1024).contiguous().realize()
+    mem_a, peak_a = GlobalCounters.mem_used, GlobalCounters.peak_mem_used
+    self.assertGreater(mem_a, mem_0)
+    self.assertGreater(peak_a, peak_0)
+    b = Tensor.zeros(1024).contiguous().realize()
+    mem_b, peak_b = GlobalCounters.mem_used, GlobalCounters.peak_mem_used
+    self.assertGreater(mem_b, mem_a)
+    self.assertGreater(peak_b, peak_a)
+    del a, b
+    self.assertGreater(mem_b, GlobalCounters.mem_used)
+    self.assertEqual(peak_b, GlobalCounters.peak_mem_used)
 
 if __name__ == "__main__":
   unittest.main()
