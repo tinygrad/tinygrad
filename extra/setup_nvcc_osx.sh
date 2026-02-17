@@ -22,7 +22,15 @@ docker build --platform=linux/amd64 -t cuda-nvcc:12.8 "$tmpdir"
 mkdir -p "$install_loc"
 tee "$install_loc/nvccshim" >/dev/null <<'EOF'
 #!/bin/sh
-exec docker run --rm --platform=linux/amd64 -v "$PWD":/work -w /work cuda-nvcc:12.8 "$(basename "$0")" "$@"
+cmd=$(basename "$0")
+if [ "$cmd" = "nvdisasm" ]; then
+  docker run --rm --platform=linux/amd64 -i cuda-nvcc:12.8 sh -c 'cat>/tmp/d;nvdisasm /tmp/d' <"$1"
+else
+  while [ $# -gt 1 ]; do
+    [ "$1" = "-o" ] && { o="$2"; shift 2; } || { f="$f $1"; shift; }
+  done
+  docker run --rm --platform=linux/amd64 -i cuda-nvcc:12.8 sh -c "cat>/tmp/s.cu;$cmd$f -o /tmp/o /tmp/s.cu;cat /tmp/o" <"$1" >"$o"
+fi
 EOF
 chmod +x "$install_loc/nvccshim"
 for t in nvcc nvdisasm ptxas cuobjdump nvlink; do
