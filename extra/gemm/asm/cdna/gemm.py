@@ -1,6 +1,6 @@
 import atexit, functools
-from tinygrad.runtime.support.compiler_amd import HIPCompiler
 from tinygrad import Tensor, Device, dtypes
+from tinygrad.dtype import AddrSpace
 from tinygrad.uop.ops import UOp, Ops, KernelInfo, AxisType
 from tinygrad.renderer import Estimates
 from tinygrad.helpers import getenv, all_same, dedup
@@ -17,13 +17,12 @@ def custom_asm_gemm(C:UOp, A:UOp, B:UOp, dname:str, arch:str, wg:int) -> UOp:
   assert K == K2
   lidx = UOp.special(WORKGROUP_SIZE, "lidx0")
   gidx = UOp.special(wg, "gidx0")
-  k = build_kernel(batch, M, N, K, A.dtype.base)
-  sink = UOp.sink(C.base, A.base, B.base, lidx, gidx,
-                  arg=KernelInfo(name=k.name, estimates=Estimates(ops=2*batch*M*N*K, mem=(batch*M*K + K*N + batch*M*N)*2)))
-  # TODO: you shouldn't have to call the compiler here, BINARY should be auto-added
-  binary = HIPCompiler(arch).compile(k.to_asm())
-  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg=dname), UOp(Ops.LINEAR, src=(*sink.src, sink)),
-                               UOp(Ops.SOURCE, arg=k.to_text()), UOp(Ops.BINARY, arg=binary)))
+  insts = build_kernel(batch, M, N, K, A.dtype.base)
+  lds = UOp(Ops.DEFINE_LOCAL, dtypes.uint8.ptr(size=133_120, addrspace=AddrSpace.LOCAL), (), 'lds')
+  sink = UOp.sink(C.base, A.base, B.base, lds, lidx, gidx,
+                  arg=KernelInfo(name=f"gemm_{batch}_{M}_{N}_{K}", estimates=Estimates(ops=2*batch*M*N*K, mem=(batch*M*K + K*N + batch*M*N)*2)))
+  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg=dname),
+                                UOp(Ops.LINEAR, src=tuple([UOp(Ops.INS, arg=x) for x in insts]))))
 
 counters = {"used":0, "todos":[]}
 def todo(msg:str) -> bool: counters["todos"].append(msg); return False
