@@ -7,22 +7,20 @@ M0 = NULL
 TILE_M, TILE_N, TILE_K, NUM_WG = 256, 256, 64, 256
 
 def _magicgu_mulhi(d:int, vmax:int) -> tuple[int,int]:
-  """Compute magic number and shift for mul_hi-based unsigned division by d, valid for 0 <= n <= vmax.
+  """Compute magic number and shift for mul_hi-based unsigned division by d, valid for all 32-bit n.
   Adapted from magicgu in tinygrad.uop.decompositions (Hacker's Delight, Chapter 10) but targeting the mul_hi encoding:
     - If shift bit 31 is clear: result = mul_hi(n, magic) >> shift
     - If shift bit 31 is set:   result = (mul_hi(n, magic) + n) >> (shift & 0x7FFFFFFF)   (wrapping 32-bit add)
   """
   if d == 1: return 0, (1 << 31)  # (mul_hi(n, 0) + n) >> 0 = n
-  effective_vmax = max(vmax, d << 16)  # ensure nbits is large enough for s >= 32 solutions
-  nc = (effective_vmax + 1) // d * d - 1
-  for s in range(32, 2 * effective_vmax.bit_length() + 1):
+  nc = (1 << 32) // d * d - 1
+  for s in range(32, 65):
     if 2**s > nc * (d - 1 - (2**s - 1) % d):
       m = (2**s + d - 1 - (2**s - 1) % d) // d
       shift = s - 32
       if m < (1 << 32): return m, shift
       if m < (1 << 33):
         m_enc = m - (1 << 32)
-        # verify the wrapping 32-bit add doesn't corrupt the result at vmax
         if ((((vmax * m_enc) >> 32) + vmax) & 0xFFFFFFFF) >> shift == vmax // d: return m_enc, shift | (1 << 31)
   raise AssertionError(f"cannot compute magic for d={d}, vmax={vmax}")
 

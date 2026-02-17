@@ -90,6 +90,12 @@ class TestGemmLarge(unittest.TestCase):
     with self.assertRaisesRegex(AssertionError, "not a multiple"):
       verify_asm_gemm(1, 1024, 1024, 100)
   def test_gemm_previously_unsupported(self): verify_asm_gemm(8, 1024, 1024, 4096, gpus=8)
+  def test_magicgu_matches_old(self):
+    from extra.gemm.asm.cdna.asm import _magicgu_mulhi
+    old_iters_args = {64: (67108864, 0), 128: (33554432, 0), 224: (613566757, 2147483656)}
+    for iters, (old_magic, old_shift) in old_iters_args.items():
+      magic, shift = _magicgu_mulhi(iters, 229376)
+      self.assertEqual((magic, shift), (old_magic, old_shift), f"mismatch for iters={iters}")
 
 if __name__ == "__main__":
   unittest.main()
