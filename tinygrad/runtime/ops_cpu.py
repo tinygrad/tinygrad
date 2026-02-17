@@ -36,6 +36,9 @@ class CPUWorker(threading.Thread):
           for th in range(threads - 1): self.push_task(th, cmd, args)
           cmd(self.thread_id, *args)
           for th in range(threads - 1): self.pool[th].join()
+      except Exception as e:
+        print(f"cpu {self.thread_id} exception:", e)
+        raise
       finally: self.tasks.task_done()
 
 class CPUComputeQueue(HWQueue):
