@@ -92,17 +92,21 @@ const drawGraph = (data) => {
   }).join("text").style("font-family", g.graph().font).selectAll("tspan").data(d => d).join("tspan").attr("x", "0").attr("dy", g.graph().lh)
     .selectAll("tspan").data(d => d).join("tspan").attr("dx", (d, i) => i > 0 && d.st !== "," ? textSpace: 0).text(d => d.st).classed("token", true)
     .attr("xml:space", "preserve").attr("fill", d => d.color);
-  const tokensBg = rectGroup.selectAll("rect.bg").data((d, i, nodes) => {
-    const ret = [];
-    d3.select(nodes[i].parentElement).select("g.text-group").selectAll("tspan.token").each((d, i, nodes) => {
-      if (!d.keys?.length) return;
-      const b = nodes[i].getBBox(); ret.push({ keys:d.keys, x:b.x, y:b.y, width:b.width, height:b.height });
+  // wait for fonts to fully load before setting backgrounds
+  const setTokensBg = () => {
+    const tokensBg = rectGroup.selectAll("rect.bg").data((d, i, nodes) => {
+      const ret = [];
+      d3.select(nodes[i].parentElement).select("g.text-group").selectAll("tspan.token").each((d, i, nodes) => {
+        if (!d.keys?.length) return;
+        const b = nodes[i].getBBox(); ret.push({ keys:d.keys, x:b.x, y:b.y, width:b.width, height:b.height });
+      });
+      return ret;
+    }).join("rect").attr("class", "bg").attr("x", d => d.x).attr("y", d => d.y).attr("width", d => d.width).attr("height", d => d.height);
+    tokens.on("click", (e, { keys }) => {
+      tokensBg.classed("highlight", (d, i, nodes) => !nodes[i].classList.contains("highlight") && d.keys.some(k => keys?.includes(k)));
     });
-    return ret;
-  }).join("rect").attr("class", "bg").attr("x", d => d.x).attr("y", d => d.y).attr("width", d => d.width).attr("height", d => d.height);
-  tokens.on("click", (e, { keys }) => {
-    tokensBg.classed("highlight", (d, i, nodes) => !nodes[i].classList.contains("highlight") && d.keys.some(k => keys?.includes(k)));
-  });
+  }
+  document.fonts.load(`14px ${g.graph().font}`).then(() => requestAnimationFrame(setTokensBg));
   addTags(nodes.selectAll("g.tag").data(d => d.tag != null ? [d] : []).join("g").attr("class", "tag")
     .attr("transform", d => `translate(${-d.width/2+8}, ${-d.height/2+8})`).datum(e => e.tag));
   // draw edges
