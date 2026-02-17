@@ -54,7 +54,7 @@ class SimpleTokenizer:
 
   def decode(self, ids:list[int]) -> str: return b''.join(self._tok2bytes[tid] for tid in ids).decode(errors='replace')
   def role(self, role:str):
-    if self.preset in ('olmo', 'glm4'): return self.encode("<|" + role + "|>\n")  # OLMoE/GLM Instruct format
+    if self.preset in ('olmo', 'glm4'): return self.encode("<|" + role + "|>" + ("\n" if self.preset == "olmo" else ""))
     if self.preset == 'qwen2': return self.encode("<|im_start|>" + role + "\n")
     return self.encode("<|start_header_id|>" + role + "<|end_header_id|>\n\n")
   def end_turn(self, eos_id:int):
@@ -75,8 +75,8 @@ class ExpertWeights:
     self.weight = Tensor.zeros(num_experts, out_features, in_features)
   def __call__(self, sel:Tensor, x:Tensor) -> Tensor:
     # sel: (B, T, k), x: (B, T, 1, in) or (B, T, k, in) -> output: (B, T, k, out)
-    return (x.unsqueeze(-2) @ self.weight[sel].transpose(-1, -2)).squeeze(-2)
-
+    # contiguous here after [sel]  60% speedup on GLM, break off dequant+gather
+    return (x.unsqueeze(-2) @ self.weight[sel].contiguous().transpose(-1, -2)).squeeze(-2)
 
 def apply_rope(x:Tensor, freqs_cis:Tensor, interleaved:bool=False) -> Tensor:
   assert x.shape[-1] % 2 == 0
@@ -87,107 +87,38 @@ def apply_rope(x:Tensor, freqs_cis:Tensor, interleaved:bool=False) -> Tensor:
   x1, x2 = x.chunk(2, dim=-1)
   return (x1 * cos - x2 * sin).cat(x2 * cos + x1 * sin, dim=-1)
 
-class MLATransformerBlock:
-  def __init__(self, dim:int, hidden_dim:int, n_heads:int, norm_eps:float, max_context:int, rope_theta:float,
-               q_lora_rank:int, kv_lora_rank:int, qk_nope_head_dim:int, qk_rope_head_dim:int, v_head_dim:int,
-               num_experts:int=0, num_experts_per_tok:int=0,
-               n_shared_experts:int=0, moe_hidden_dim:int=0, expert_weights_norm:bool=False, expert_weights_scale:float=1.0):
-    self.n_heads = n_heads
-    self.qk_nope_head_dim, self.qk_rope_head_dim = qk_nope_head_dim, qk_rope_head_dim
-    self.q_head_dim, self.kv_lora_rank, self.max_context = qk_nope_head_dim + qk_rope_head_dim, kv_lora_rank, max_context
-    self.attn_scale, self.rope_theta = self.q_head_dim ** -0.5, rope_theta
-
-    # --- MLA attention projections ---
-    self.attn_norm = nn.RMSNorm(dim, norm_eps)
-    self.attn_q_a = nn.Linear(dim, q_lora_rank, bias=False)
-    self.attn_q_a_norm = nn.RMSNorm(q_lora_rank, norm_eps)
-    self.attn_q_b = nn.Linear(q_lora_rank, n_heads * self.q_head_dim, bias=False)
-    self.attn_kv_a_mqa = nn.Linear(dim, kv_lora_rank + qk_rope_head_dim, bias=False)
-    self.attn_kv_a_norm = nn.RMSNorm(kv_lora_rank, norm_eps)
-    self.attn_k_b = SimpleNamespace(weight=Tensor.empty(n_heads, kv_lora_rank, qk_nope_head_dim))
-    self.attn_v_b = SimpleNamespace(weight=Tensor.empty(n_heads, v_head_dim, kv_lora_rank))
-    self.attn_output = nn.Linear(n_heads * v_head_dim, dim, bias=False)
-
-    # --- feed-forward (MoE or dense) ---
-    self.ffn_norm = nn.RMSNorm(dim, norm_eps)
-    if num_experts > 0:
-      self.num_experts_per_tok = num_experts_per_tok
-      self.expert_weights_norm = expert_weights_norm
-      self.expert_weights_scale = expert_weights_scale
-      self.ffn_gate_inp = nn.Linear(dim, num_experts, bias=False)
-      self.exp_probs_b = SimpleNamespace(bias=Tensor.empty(num_experts))
-      self.ffn_gate_exps = ExpertWeights(num_experts, dim, moe_hidden_dim or hidden_dim)
-      self.ffn_up_exps = ExpertWeights(num_experts, dim, moe_hidden_dim or hidden_dim)
-      self.ffn_down_exps = ExpertWeights(num_experts, moe_hidden_dim or hidden_dim, dim)
-      if n_shared_experts > 0:
-        shexp_hidden = n_shared_experts * moe_hidden_dim
-        self.ffn_gate_shexp = nn.Linear(dim, shexp_hidden, bias=False)
-        self.ffn_up_shexp = nn.Linear(dim, shexp_hidden, bias=False)
-        self.ffn_down_shexp = nn.Linear(shexp_hidden, dim, bias=False)
-    else:
-      self.ffn_gate = nn.Linear(dim, hidden_dim, bias=False)
-      self.ffn_up   = nn.Linear(dim, hidden_dim, bias=False)
-      self.ffn_down = nn.Linear(hidden_dim, dim, bias=False)
-
-  def _attention(self, x:Tensor, start_pos:int|UOp) -> Tensor:
-    h = self.attn_norm(x)
-    B, T = h.shape[:2]
-    q = self.attn_q_b(self.attn_q_a_norm(self.attn_q_a(h)))
-    kv_out = self.attn_kv_a_mqa(h)
-    q = q.reshape(B, T, self.n_heads, self.q_head_dim).transpose(1, 2)
-    q_nope, q_pe = q.split([self.qk_nope_head_dim, self.qk_rope_head_dim], dim=-1)
-    compressed_kv, k_pe = kv_out.split([self.kv_lora_rank, self.qk_rope_head_dim], dim=-1)
-    freqs_cis = precompute_freqs_cis(self.qk_rope_head_dim, self.max_context, self.rope_theta)[start_pos:start_pos+T].half()
-    q_pe = apply_rope(q_pe, freqs_cis, interleaved=True)
-    k_pe = apply_rope(k_pe.reshape(B, T, 1, self.qk_rope_head_dim).transpose(1, 2), freqs_cis, interleaved=True)
-    q = (q_nope @ self.attn_k_b.weight.transpose(-1, -2)).cat(q_pe, dim=-1)
-    kv_normed = self.attn_kv_a_norm(compressed_kv).unsqueeze(1)
-    k_new = kv_normed.cat(k_pe, dim=-1)
-    if not hasattr(self, "cache_k") or start_pos == 0:
-      self.cache_k = Tensor.empty((B, 1, self.max_context, self.kv_lora_rank + self.qk_rope_head_dim), dtype=kv_normed.dtype, device=kv_normed.device)
-    self.cache_k[:, :, start_pos:start_pos+T, :].assign(k_new).realize()
-    k = self.cache_k[:, :, 0:start_pos+T, :]
-    qk = q.matmul(k.transpose(-2, -1)) * self.attn_scale
-    mask = Tensor.full((1, 1, T, start_pos+T), float("-inf"), dtype=x.dtype, device=x.device).triu(int(start_pos)+1) if T > 1 else None
-    if mask is not None: qk = qk + mask
-    attn_val = (qk.softmax(-1).matmul(k[:, :, :, :self.kv_lora_rank]) @ self.attn_v_b.weight.transpose(-1, -2)).transpose(1, 2).reshape(B, T, -1)
-    return x + self.attn_output(attn_val)
-
-  def _feed_forward(self, h:Tensor) -> Tensor:
-    h_norm = self.ffn_norm(h)
-    if hasattr(self, 'ffn_gate_exps'):
-      gate_scores = (h_norm.float() @ self.ffn_gate_inp.weight.float().T).sigmoid()
-      _, sel = (gate_scores + self.exp_probs_b.bias).topk(self.num_experts_per_tok)
-      probs = gate_scores.gather(-1, sel)
-      if self.expert_weights_norm: probs = probs / probs.sum(axis=-1, keepdim=True).maximum(2**-14)
-      x_exp = h_norm.unsqueeze(2)
-      gated = self.ffn_gate_exps(sel, x_exp).silu() * self.ffn_up_exps(sel, x_exp)
-      down = self.ffn_down_exps(sel, gated * probs.unsqueeze(-1).cast(gated.dtype))
-      out = down.sum(axis=2) * self.expert_weights_scale
-      if hasattr(self, 'ffn_gate_shexp'): out = out + self.ffn_down_shexp(self.ffn_gate_shexp(h_norm).silu() * self.ffn_up_shexp(h_norm))
-      return h + out.cast(h.dtype)
-    gated = self.ffn_gate(h_norm).silu() * self.ffn_up(h_norm)
-    return h + self.ffn_down(gated)
-
-  def __call__(self, x:Tensor, start_pos:int|UOp) -> Tensor: return self._feed_forward(self._attention(x, start_pos)).contiguous()
-
 class TransformerBlock:
   def __init__(self, dim:int, hidden_dim:int, n_heads:int, n_kv_heads:int, norm_eps:float, head_dim:int, rope_theta:float,
-               max_context:int=0, qk_norm:int=0, num_experts:int=0, num_experts_per_tok:int=0):
+               max_context:int=0, qk_norm:int=0, num_experts:int=0, num_experts_per_tok:int=0, kv_lora_rank:int=0, q_lora_rank:int=0,
+               qk_nope_head_dim:int=0, qk_rope_head_dim:int=0, v_head_dim:int=0, n_shared_experts:int=0,
+               expert_weights_norm:bool=False, expert_weights_scale:float=1.0):
     self.n_heads      = n_heads
     self.n_kv_heads   = n_kv_heads
     self.head_dim     = head_dim
     self.rope_theta   = rope_theta
     self.max_context  = max_context
     self.qk_norm      = qk_norm
+    self.kv_lora_rank = kv_lora_rank
 
-    # --- attention projections (all linear, bias-free) ------------------
-    q_proj_out       = self.head_dim * n_heads
-    kv_proj_out      = self.head_dim * n_kv_heads
-    self.attn_q      = nn.Linear(dim, q_proj_out,  bias=False)
-    self.attn_k      = nn.Linear(dim, kv_proj_out, bias=False)
-    self.attn_v      = nn.Linear(dim, kv_proj_out, bias=False)
-    self.attn_output = nn.Linear(q_proj_out, dim,  bias=False)
+    # --- attention projections ---
+    if not kv_lora_rank:
+      q_proj_out       = self.head_dim * n_heads
+      kv_proj_out      = self.head_dim * n_kv_heads
+      self.attn_q      = nn.Linear(dim, q_proj_out,  bias=False)
+      self.attn_k      = nn.Linear(dim, kv_proj_out, bias=False)
+      self.attn_v      = nn.Linear(dim, kv_proj_out, bias=False)
+      self.attn_output = nn.Linear(q_proj_out, dim,  bias=False)
+    else:  # MLA
+      self.qk_nope_head_dim, self.qk_rope_head_dim = qk_nope_head_dim, qk_rope_head_dim
+      self.q_head_dim, self.attn_scale = qk_nope_head_dim + qk_rope_head_dim, (qk_nope_head_dim + qk_rope_head_dim) ** -0.5
+      self.attn_q_a = nn.Linear(dim, q_lora_rank, bias=False)
+      self.attn_q_a_norm = nn.RMSNorm(q_lora_rank, norm_eps)
+      self.attn_q_b = nn.Linear(q_lora_rank, n_heads * self.q_head_dim, bias=False)
+      self.attn_kv_a_mqa = nn.Linear(dim, kv_lora_rank + qk_rope_head_dim, bias=False)
+      self.attn_kv_a_norm = nn.RMSNorm(kv_lora_rank, norm_eps)
+      self.attn_k_b = SimpleNamespace(weight=Tensor.empty(n_heads, kv_lora_rank, qk_nope_head_dim))
+      self.attn_v_b = SimpleNamespace(weight=Tensor.empty(n_heads, v_head_dim, kv_lora_rank))
+      self.attn_output = nn.Linear(n_heads * v_head_dim, dim, bias=False)
 
     # --- RMSNorms --------------------------------------------------------
     self.attn_norm   = nn.RMSNorm(dim, norm_eps)
@@ -201,13 +132,36 @@ class TransformerBlock:
       self.ffn_gate_exps = ExpertWeights(num_experts, dim, hidden_dim)
       self.ffn_up_exps = ExpertWeights(num_experts, dim, hidden_dim)
       self.ffn_down_exps = ExpertWeights(num_experts, hidden_dim, dim)
+      self.expert_weights_scale = expert_weights_scale
+      self.expert_weights_norm = expert_weights_norm
+      if kv_lora_rank: self.exp_probs_b = SimpleNamespace(bias=Tensor.empty(num_experts))
+      if n_shared_experts > 0:
+        shexp_hidden = n_shared_experts * (hidden_dim)
+        self.ffn_gate_shexp = nn.Linear(dim, shexp_hidden, bias=False)
+        self.ffn_up_shexp = nn.Linear(dim, shexp_hidden, bias=False)
+        self.ffn_down_shexp = nn.Linear(shexp_hidden, dim, bias=False)
     else:
       self.ffn_gate    = nn.Linear(dim, hidden_dim, bias=False)
       self.ffn_up      = nn.Linear(dim, hidden_dim, bias=False)
       self.ffn_down    = nn.Linear(hidden_dim, dim, bias=False)
 
   def _attention(self, x:Tensor, start_pos:int|UOp) -> Tensor:
-    x_norm = self.attn_norm(x)                       # (B,T,D)
+    x_norm, (B, T, _) = self.attn_norm(x), x.shape  # (B,T,D)
+    if self.kv_lora_rank:  # MLA
+      q = self.attn_q_b(self.attn_q_a_norm(self.attn_q_a(x_norm))).reshape(B, T, self.n_heads, self.q_head_dim).transpose(1, 2)
+      q_nope, q_pe = q.split([self.qk_nope_head_dim, self.qk_rope_head_dim], dim=-1)
+      compressed_kv, k_pe = self.attn_kv_a_mqa(x_norm).split([self.kv_lora_rank, self.qk_rope_head_dim], dim=-1)
+      freqs_cis = precompute_freqs_cis(self.qk_rope_head_dim, self.max_context, self.rope_theta)[start_pos:start_pos+T].half()
+      q_pe, k_pe = [apply_rope(w, freqs_cis, interleaved=True) for w in [q_pe, k_pe.unsqueeze(1)]]
+      k_new = self.attn_kv_a_norm(compressed_kv).unsqueeze(1).cat(k_pe, dim=-1)
+      if not hasattr(self, "cache_k") or start_pos == 0:
+        self.cache_k = Tensor.empty(B, 1, self.max_context, self.kv_lora_rank + self.qk_rope_head_dim, dtype=k_new.dtype, device=k_new.device)
+      self.cache_k[:, :, start_pos:start_pos+T, :].assign(k_new).realize()
+      k_nope, k_rope = self.cache_k[:, :, :start_pos+T, :].split([self.kv_lora_rank, self.qk_rope_head_dim], dim=-1)
+      qk = (q_nope @ self.attn_k_b.weight.transpose(-1, -2) @ k_nope.transpose(-2, -1) + q_pe @ k_rope.transpose(-2, -1)) * self.attn_scale
+      if T > 1: qk = qk + Tensor.full((1, 1, T, start_pos+T), float("-inf"), dtype=x.dtype, device=x.device).triu(int(start_pos)+1)
+      attn = (qk.softmax(-1) @ k_nope @ self.attn_v_b.weight.transpose(-1, -2)).transpose(1, 2).reshape(B, T, -1)
+      return x + self.attn_output(attn)
     q, k, v = self.attn_q(x_norm), self.attn_k(x_norm), self.attn_v(x_norm)
     if self.qk_norm and self.qk_norm != self.head_dim: q, k = self.attn_q_norm(q), self.attn_k_norm(k)
 
@@ -234,6 +188,15 @@ class TransformerBlock:
     attn = self.attn_output(attn)
     return x + attn
 
+  def _feed_forward_glm(self, h: Tensor) -> Tensor:
+    gate_scores = ((h_norm:=self.ffn_norm(h)).float() @ self.ffn_gate_inp.weight.float().T).sigmoid()
+    _, sel = (gate_scores + self.exp_probs_b.bias).topk(self.num_experts_per_tok)
+    probs = (g:=gate_scores.gather(-1, sel)) / (g.sum(-1, keepdim=True).maximum(2**-14) if self.expert_weights_norm else 1)
+    gated = self.ffn_gate_exps(sel, (x:=h_norm.unsqueeze(2))).silu() * self.ffn_up_exps(sel, x)
+    out = (self.ffn_down_exps(sel, gated).contiguous()  * probs.unsqueeze(-1).cast(gated.dtype)).sum(2) * self.expert_weights_scale
+    if hasattr(self, 'ffn_gate_shexp'): out = out+ self.ffn_down_shexp(self.ffn_gate_shexp(h_norm).silu() * self.ffn_up_shexp(h_norm))
+    return h + out.cast(h.dtype)
+
   def _feed_forward(self, h: Tensor) -> Tensor:
     h_norm = self.ffn_norm(h)
     if hasattr(self, 'ffn_gate_exps'):
@@ -246,26 +209,20 @@ class TransformerBlock:
     return h + self.ffn_down(gated)
 
   def __call__(self, x: Tensor, start_pos: int|UOp):
-    return self._feed_forward(self._attention(x, start_pos)).contiguous()
+    return ((self._feed_forward_glm if hasattr(self, 'exp_probs_b') else self._feed_forward)(self._attention(x, start_pos))).contiguous()
 
 class Transformer:
   def __init__(self, *, num_blocks, dim, hidden_dim, n_heads, n_kv_heads, norm_eps, vocab_size, head_dim:int, rope_theta:float,
-               max_context:int=0, qk_norm:int=0, num_experts:int=0, num_experts_per_tok:int=0,
-               leading_dense_blocks:int=0,
+               max_context:int=0, qk_norm:int=0, num_experts:int=0, num_experts_per_tok:int=0, leading_dense_blocks:int=0,
                kv_lora_rank:int=0, q_lora_rank:int=0, qk_nope_head_dim:int=0, qk_rope_head_dim:int=0, v_head_dim:int=0,
-               n_shared_experts:int=0, moe_hidden_dim:int=0, expert_weights_norm:bool=False, expert_weights_scale:float=1.0):
-    self.blk: list[MLATransformerBlock]|list[TransformerBlock]
-    if kv_lora_rank > 0:
-      self.blk = [MLATransformerBlock(dim, hidden_dim, n_heads, norm_eps, max_context, rope_theta,
-                                       q_lora_rank, kv_lora_rank, qk_nope_head_dim, qk_rope_head_dim, v_head_dim,
-                                       num_experts=0 if i < leading_dense_blocks else num_experts,
-                                       num_experts_per_tok=num_experts_per_tok,
-                                       n_shared_experts=n_shared_experts, moe_hidden_dim=moe_hidden_dim,
-                                       expert_weights_norm=expert_weights_norm, expert_weights_scale=expert_weights_scale)
-                   for i in range(num_blocks)]
-    else:
-      self.blk = [TransformerBlock(dim, hidden_dim, n_heads, n_kv_heads, norm_eps, head_dim, rope_theta, max_context, qk_norm,
-                                   num_experts, num_experts_per_tok) for _ in range(num_blocks)]
+               n_shared_experts:int=0, feed_forward_length:int=0, expert_weights_norm:bool=False, expert_weights_scale:float=1.0):
+    self.blk = [TransformerBlock(dim, (feed_forward_length or hidden_dim) if i < leading_dense_blocks else hidden_dim,
+                                 n_heads, n_kv_heads, norm_eps, head_dim, rope_theta, max_context, qk_norm,
+                                 num_experts=0 if i < leading_dense_blocks else num_experts, num_experts_per_tok=num_experts_per_tok,
+                                 kv_lora_rank=kv_lora_rank, q_lora_rank=q_lora_rank, qk_nope_head_dim=qk_nope_head_dim,
+                                 qk_rope_head_dim=qk_rope_head_dim, v_head_dim=v_head_dim, n_shared_experts=n_shared_experts,
+                                 expert_weights_norm=expert_weights_norm,
+                                 expert_weights_scale=expert_weights_scale) for i in range(num_blocks)]
     self.token_embd  = nn.Embedding(vocab_size, dim)
     self.output_norm = nn.RMSNorm(dim, norm_eps)
     self.output = nn.Linear(dim, vocab_size, bias=False)
@@ -284,7 +241,8 @@ class Transformer:
 
   @staticmethod
   def from_gguf(gguf:Tensor, max_context:int|None=None, realize=True) -> tuple[Transformer, dict]:
-    kv, state_dict = nn.state.gguf_load(gguf)
+    # TODO: remove the need for copy to default device
+    kv, state_dict = nn.state.gguf_load(gguf.to(None))
 
     # all state items should be float16, not float32
     state_dict = {k:v.cast('float16') if getenv("HALF", 1) else v for k,v in state_dict.items()}
@@ -303,8 +261,7 @@ class Transformer:
         if 'attn_k.weight' in name: state_dict[name] = state_dict[name].rearrange("(n h two) d -> (n two h) d", n=n_kv_heads, two=2)
 
     model = Transformer(num_blocks=kv[f'{arch}.block_count'], dim=kv[f'{arch}.embedding_length'],
-                        hidden_dim=kv[f'{arch}.feed_forward_length'] if kv.get(f'{arch}.attention.kv_lora_rank') else
-                          kv.get(f'{arch}.expert_feed_forward_length', kv[f'{arch}.feed_forward_length']),
+                        hidden_dim=kv.get(f'{arch}.expert_feed_forward_length', kv[f'{arch}.feed_forward_length']),
                         n_heads=n_heads, n_kv_heads=n_kv_heads, norm_eps=kv[f'{arch}.attention.layer_norm_rms_epsilon'],
                         vocab_size=len(kv['tokenizer.ggml.tokens']),
                         head_dim=kv.get(f'{arch}.attention.key_length', kv[f'{arch}.embedding_length'] // n_heads),
@@ -313,18 +270,17 @@ class Transformer:
                         num_experts=kv.get(f'{arch}.expert_count', 0), num_experts_per_tok=kv.get(f'{arch}.expert_used_count', 0),
                         leading_dense_blocks=kv.get(f'{arch}.leading_dense_block_count', 0),
                         kv_lora_rank=kv.get(f'{arch}.attention.kv_lora_rank', 0), q_lora_rank=kv.get(f'{arch}.attention.q_lora_rank', 0),
-                        qk_nope_head_dim=(klm-kv.get(f'{arch}.rope.dimension_count', 0) if
-                                          (klm:=kv.get(f'{arch}.attention.key_length_mla', kv.get(f'{arch}.attention.key_length', 0))) > 0 else 0),
+                        qk_nope_head_dim=max(kv.get(f'{arch}.attention.key_length_mla', 0) - kv.get(f'{arch}.rope.dimension_count', 0), 0),
                         qk_rope_head_dim=kv.get(f'{arch}.rope.dimension_count', 0),
                         v_head_dim=kv.get(f'{arch}.attention.value_length_mla', kv.get(f'{arch}.attention.value_length', 0)),
-                        n_shared_experts=kv.get(f'{arch}.expert_shared_count', 0), moe_hidden_dim=kv.get(f'{arch}.expert_feed_forward_length', 0),
+                        n_shared_experts=kv.get(f'{arch}.expert_shared_count', 0),
+                        feed_forward_length=kv[f'{arch}.feed_forward_length'],
                         expert_weights_norm=kv.get(f'{arch}.expert_weights_norm', False),
                         expert_weights_scale=kv.get(f'{arch}.expert_weights_scale', 1.0))
     nn.state.load_state_dict(model, state_dict, verbose=False, consume=True, realize=False)  # NOTE: rope_freqs.weight (32,) is unused
     expert_params = {id(v) for k, v in nn.state.get_state_dict(model).items() if '_exps.' in k}
     params = nn.state.get_parameters(model)
-    for s in params:
-      if id(s) not in expert_params: s.replace(s.contiguous())
+    for s in [p for p in params if id(p) not in expert_params]: s.replace(s.contiguous())
     if realize: Tensor.realize(*[p for p in params if id(p) not in expert_params])
     return model, kv
 
@@ -401,7 +357,7 @@ class Handler(HTTPRequestHandler):
     st = time.perf_counter()
     for next_id in model.generate(ids):
       if len(out) == 0: stderr_log(f"prefill:{len(ids)/((pt:=time.perf_counter())-st):4.0f} tok/s  {colored('--', 'BLACK')}  ")
-      if next_id in stop_tokens: break
+      if next_id == eos_id or next_id == eot_id: break
       out.append(next_id)
       yield {"choices": [{"index":0, "delta":{"content":tok.decode([next_id])}, "finish_reason":None}], **tmpl}
     yield {"choices": [{"index":0, "delta":{},"finish_reason":"stop"}], **tmpl}
@@ -415,8 +371,7 @@ class Handler(HTTPRequestHandler):
     if DEBUG >= 1: print(json.dumps(body, indent=2))
     if self.path == "/v1/chat/completions":
       # extract tokens
-      ids: list[int] = [bos_id] if bos_id is not None else []
-      if tok.preset == 'glm4': ids += tok.encode("<sop>")
+      ids: list[int] = ([bos_id] if bos_id is not None else []) + (tok.encode("<sop>") if tok.preset == 'glm4' else [])
       for msg in body["messages"]:
         ids += tok.role(msg["role"])
         # content can be a str or a list
@@ -428,8 +383,7 @@ class Handler(HTTPRequestHandler):
             else: raise RuntimeError(f"unhandled type: {c['type']}")
         else: raise RuntimeError(f"unknown content type: {type(content)}")
         ids += tok.end_turn(eos_id)
-      ids += tok.role("assistant")
-      if tok.preset == 'glm4': ids += tok.encode("<think>")
+      ids += tok.role("assistant") + (tok.encode("<think>") if tok.preset == 'glm4' else [])
 
       # reply
       chunks = self.run_model(ids, body["model"], not body.get("stream") or body.get("stream_options",{}).get("include_usage", False))
@@ -467,21 +421,20 @@ if __name__ == "__main__":
   tok = SimpleTokenizer.from_gguf_kv(kv)
   bos_id: int|None = kv.get('tokenizer.ggml.bos_token_id') if kv.get('tokenizer.ggml.add_bos_token', True) else None
   eos_id: int = kv['tokenizer.ggml.eos_token_id']
-  stop_tokens = {eos_id} | ({tok.encode("<|user|>")[0]} if tok.preset == 'glm4' else set())
+  eot_id = kv.get('tokenizer.ggml.eot_token_id')
 
   # start server
   if args.serve: TCPServerWithReuse(('', args.serve), Handler).serve_forever()
 
-  ids: list[int] = [bos_id] if bos_id is not None else []
-  if tok.preset == 'glm4': ids += tok.encode("<sop>")
+  ids: list[int] = ([bos_id] if bos_id is not None else []) + (tok.encode("<sop>") if tok.preset == 'glm4' else [])
   while 1:
     start_pos = max(len(ids) - 1, 0)
     try:
-      ids += tok.role("user") + tok.encode(input('>>> ')) + tok.end_turn(eos_id) + tok.role("assistant")
-      if tok.preset == 'glm4': ids += tok.encode("<think>")
+      ids += tok.role("user") + tok.encode(input('>>> ')) + tok.end_turn(eos_id) + tok.role("assistant") + \
+             (tok.encode("<think>") if tok.preset == 'glm4' else [])
     except EOFError:
       break
     for next_id in model.generate(ids, start_pos):
-      sys.stdout.write(tok.decode([next_id]) if next_id not in stop_tokens else "\n\n")
+      sys.stdout.write(tok.decode([next_id]) if next_id != eos_id and next_id != eot_id else "\n\n")
       sys.stdout.flush()
-      if next_id in stop_tokens: break
+      if next_id == eos_id or next_id == eot_id: break
