@@ -1543,13 +1543,14 @@ class Tensor(OpMixin):
     x, mask = self.flatten(), mask._broadcast_to(self.shape).flatten()
     mask_cumsum = mask.cumsum()
     if x.shape[0] == 0 or (k := mask_cumsum[-1].item()) == 0: return Tensor([], dtype=self.dtype, device=self.device)
-    if x.shape[0] < 500_000:
+    n = cast(int, x.shape[0])
+    if n < 500_000:
       idxs = Tensor.zeros(k, dtype=dtypes.int32).scatter(0, mask_cumsum, 1, reduce='add').cumsum()
     else:
       # binary search over mask_cumsum to avoid O(N*K) scatter for large tensors
       target = Tensor.arange(k, dtype=dtypes.int32, device=self.device) + 1
-      lo, hi = Tensor.zeros(k, dtype=dtypes.int32, device=self.device), Tensor.full((k,), x.shape[0] - 1, dtype=dtypes.int32, device=self.device)
-      for _ in range((x.shape[0] - 1).bit_length() if x.shape[0] > 1 else 1):
+      lo, hi = Tensor.zeros(k, dtype=dtypes.int32, device=self.device), Tensor.full((k,), n - 1, dtype=dtypes.int32, device=self.device)
+      for _ in range((n - 1).bit_length() if n > 1 else 1):
         mid = (lo + hi) // 2
         lo, hi = (mask_cumsum[mid] < target).where(mid + 1, lo).contiguous(), (mask_cumsum[mid] >= target).where(mid, hi).contiguous()
       idxs = lo
