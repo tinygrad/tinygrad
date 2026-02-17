@@ -10,7 +10,7 @@ from tinygrad.renderer import Renderer
 
 # ***** image load valid simplification *****
 
-def _drop_valid_stmts(valid:UOp, x:UOp, y:UOp, height:int, width:int) -> list[UOp]:
+def _drop_valid_stmts(valid:UOp, idx:UOp, height:int, width:int) -> list[UOp]:
   # can drop valid if idx is out of bound when valid is False
   drop_stmt = []
   for stmt in valid.split_uop(Ops.AND):
@@ -19,16 +19,15 @@ def _drop_valid_stmts(valid:UOp, x:UOp, y:UOp, height:int, width:int) -> list[UO
 
     # for X0 + X1 + ... >= 1, check if it's out of bound when Xi = 0 for all i
     if not is_upper_bound and c == 1 and all(u.op in GroupOp.Irreducible and u.vmin == 0 for u in X.split_uop(Ops.ADD)):
-      testx = functools.reduce(lambda nowidx,u: nowidx.substitute({u:u.const_like(0)}), X.split_uop(Ops.ADD), x)
-      testy = functools.reduce(lambda nowidx,u: nowidx.substitute({u:u.const_like(0)}), X.split_uop(Ops.ADD), y)
-      if testx.vmax < 0 or testy.vmax < 0:
+      testidx = functools.reduce(lambda nowidx,u: nowidx.substitute({u:u.const_like(0)}), X.split_uop(Ops.ADD), idx)
+      if testidx.gep(0).vmax < 0 or testidx.gep(1).vmax < 0:
         drop_stmt.append(stmt)
         continue
 
     # if X <= c, check if it's out of bound when X = c+1
     # if X >= c, check if it's out of bound when X = c-1
     test_value = c + 1 if is_upper_bound else c - 1
-    for i,b in ((x, width), (y, height)):
+    for i,b in zip(idx.src, (width, height)):
       if i.is_increasing():
         rw = i.substitute({X:X.const_like(test_value)})
         if rw.vmin >= b or rw.vmax < 0:
@@ -43,7 +42,7 @@ def simplify_valid_load(buf:UOp, start_idx:UOp, valid:UOp) -> UOp|None:
   # wait for it to be image indexed before running simplification
   if start_idx.dtype.count != 2: return None
 
-  drop_stmt = _drop_valid_stmts(valid, idx.src[0], idx.src[1], buf.dtype.shape[0], buf.dtype.shape[1])
+  drop_stmt = _drop_valid_stmts(valid, idx, buf.dtype.shape[0], buf.dtype.shape[1])
 
   if not drop_stmt and idx is start_idx: return None
   new_valid = UOp.prod(*ss) if (ss:=[s for s in valid.split_uop(Ops.AND) if s not in drop_stmt]) else None
@@ -190,7 +189,7 @@ def _do_image_fixup(dt:ImageDType, idx:UOp) -> tuple[UOp, UOp, int, int]:
   height, width = dt.shape[0], dt.shape[1]
   if IMAGE == 1 and valid is not None and (tp:=dt.size // 4) // 64:
     h, w = max(([(1, tp)] * (tp < 16384)) + [(tp//64//k, 64*k) for k in range(ceildiv(tp//64, 16384), min(tp//64, 256)+1) if (tp//64) % k == 0],
-               key=lambda hw: len(_drop_valid_stmts(valid, (x//4)%hw[1], x//(4*hw[1]), *hw)))
+               key=lambda hw: len(_drop_valid_stmts(valid, UOp.vectorize((x//4)%hw[1], x//(4*hw[1])), *hw)))
     buf = buf.replace(dtype=(dtypes.imageh if dt.itemsize == 2 else dtypes.imagef)((h, w, 4), w * 4 * dt.itemsize))
   oidx = UOp(Ops.VECTORIZE, dtypes.index.vec(2), ((x // 4) % width, (x // (4*width))))
   return x, idx.replace(src=(buf, oidx.valid(valid))), width, height
