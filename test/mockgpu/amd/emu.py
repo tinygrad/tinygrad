@@ -6,13 +6,10 @@
 #   arg=3: lds - local data share
 #   arg=4: scratch - per-lane scratch memory
 from __future__ import annotations
-import ctypes, functools, re, platform, subprocess, tempfile, resource
+import ctypes, functools, re, platform, subprocess, tempfile
 from typing import Callable
 
-# Increase main thread stack size to 64MB for deep C recursion in compiled UOp graphs (e.g. cdna4 MFMA)
-_STACK_SIZE = 64 * 1024 * 1024
-_soft, _hard = resource.getrlimit(resource.RLIMIT_STACK)
-if _soft != resource.RLIM_INFINITY and _soft < _STACK_SIZE: resource.setrlimit(resource.RLIMIT_STACK, (min(_STACK_SIZE, _hard) if _hard != resource.RLIM_INFINITY else _STACK_SIZE, _hard))
+
 
 # Set/restore DAZ+FTZ (denormals-are-zero + flush-to-zero) to match RDNA3 default float mode
 # x86: MXCSR bits DAZ(6)+FTZ(15), ARM64: FPCR bit FZ(24)
@@ -752,7 +749,7 @@ class _Ctx:
       elif dest.startswith('EXEC'): exec_val = val
       elif dest.startswith('SCC'): raw_stores.append(('scc', self.wsgpr_dyn(_c(SCC.offset), _to_u32(val))))
 
-    stores, lane_stores, scalar_stores = [], [s for t, s in raw_stores if t in ('vgpr', 'vgpr_direct')], [s for t, s in raw_stores if t == 'scc']
+    stores, lane_stores, scalar_stores = [], [s for t, s in raw_stores if t in ('vgpr', 'vgpr_s0', 'vgpr_direct')], [s for t, s in raw_stores if t == 'scc']
     slice_stores = [s for t, s in raw_stores if t == 'vgpr_slice']
     if slice_stores:
       result = self.rvgpr_dyn(vdst_reg, lane)
@@ -760,12 +757,11 @@ class _Ctx:
         mask = UOp.const(dtypes.uint32, ((1 << width) - 1) << lo_bit)
         result = (result & (mask ^ UOp.const(dtypes.uint32, 0xFFFFFFFF))) | (val_bits << UOp.const(dtypes.uint32, lo_bit))
       lane_stores.append(self.wvgpr_dyn(vdst_reg, lane, result, exec_mask))
-    # VCC/EXEC must be computed BEFORE VGPR writes (carry-out reads same source regs that destination may alias)
+    if lane_stores: stores.append(UOp.sink(*lane_stores).end(lane))
     for mask_val, reg in [(vcc_val, vcc_reg), (exec_val, EXEC_LO.offset)]:
       if mask_val is None: continue
       def get_bit(l, v=mask_val): return (_to_u32(v.substitute({lane: l})) & _c(1)).cast(dtypes.uint32)
       stores.extend(self.wmask(_c(reg), self.unroll_lanes(get_bit, exec_mask, apply_exec=False)))
-    if lane_stores: stores.append(UOp.sink(*lane_stores).end(lane))
     stores.extend(scalar_stores)
     return UOp.sink(*stores, *self.inc_pc())
 
@@ -1881,7 +1877,6 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
   # Set DAZ+FTZ during emulator execution, restore afterward to avoid breaking hypothesis tests
   # Only trace the first workgroup (like real HW traces one CU/SIMD), subsequent workgroups run but don't add to trace
   tracing = bool(PROFILE)
-
   with _MXCSRContext():
     for gidz in range(gz):
       for gidy in range(gy):
