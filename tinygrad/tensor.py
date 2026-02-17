@@ -255,11 +255,16 @@ class Tensor(OpMixin):
 
     NOTE: A Tensor can only be scheduled once.
     """
-    big_sink = UOp.sink(*[x.uop.base for x in (self,)+lst])
+    # allocate buffers for all outputs, insert the buffers in the tensor graph
+    explicit_outputs = [x.uop.base for x in (self,)+lst]
+    allocated_buffers = [UOp.new_buffer(x.device, x.size, x.dtype).reshape(x.shape) for x in explicit_outputs]
+    _apply_map_to_tensors(dict(zip(explicit_outputs, allocated_buffers)), name="Apply Preallocated Buffers")
+    big_sink = UOp.sink(*[x.assign(y) for x,y in zip(allocated_buffers, explicit_outputs)])
 
     # this is where the schedule cache should go
     becomes_map, schedule, var_vals = complete_create_schedule_with_vars(big_sink)
-    _apply_map_to_tensors(becomes_map, name="Apply Schedule Map")
+
+    #_apply_map_to_tensors(becomes_map, name="Apply Schedule Map")
     return schedule, var_vals
 
   def schedule(self, *lst:Tensor) -> list[ExecItem]:
