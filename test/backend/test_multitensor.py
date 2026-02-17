@@ -752,7 +752,7 @@ class TestMultiTensor(unittest.TestCase):
 
     # test no left join
     with self.assertRaises((AssertionError, ValueError)):
-      t0.reshape((26*15,7)).schedule()
+      t0.reshape((26*15,7)).contiguous().schedule()
 
   @unittest.skip("no longer supports uneven shard")
   def test_reshape_on_axis_uneven(self):
@@ -982,18 +982,18 @@ class TestShrinkMultiTensorShardedAxis(unittest.TestCase):
     with self.assertRaises(AssertionError):
       # sharded axis shrink on non-device boundry is not allowed
       a = t.shrink(((0, 3), (0, 8)))
-      a.schedule()
+      a.contiguous().schedule()
     with self.assertRaises(AssertionError):
       # cannot shrink sharded and non-sharded axis at the same time
       a = t.shrink(((0, 2), (2, 4)))
-      a.schedule()
+      a.contiguous().schedule()
 
     a = t.shrink(((0, 2), (0, 8)))
-    a.schedule()
+    a.contiguous().schedule()
     assert a.shape == (2, 8)
 
     p = a.pad(((0, 6), (0, 0)))
-    p.schedule()
+    p.contiguous().schedule()
     assert p.shape == (8, 8)
 
   @given(strat.sampled_from([dtypes.float, dtypes.int, dtypes.int64, dtypes.int16]))
