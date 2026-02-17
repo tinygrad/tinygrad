@@ -289,7 +289,7 @@ class TestJit(unittest.TestCase):
       with_jit.add(o1.numpy()[0][0])
       with_jit.add(o2.numpy()[0][0])
     assert len(with_jit) == 10, "All values should be different."
-    assert with_jit != without_jit, "TODO: fix. jit and non-jit should produce the same random values with the same seed"
+    assert with_jit == without_jit, "jit and non-jit should produce the same random values with the same seed"
 
   def test_jit_multiple_random_regen(self):
     def f(a, b):
