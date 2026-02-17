@@ -87,7 +87,8 @@ class TransformerBlock:
                rope_theta:float,max_context:int=0, qk_norm:int=0,
                num_experts:int=0, num_experts_per_tok:int=0,q_lora_rank:int=0,
                kv_lora_rank:int=0,qk_nope_head_dim:int=0, qk_rope_head_dim:int=0,
-               v_head_dim:int=0, num_shared_experts:int=0, shared_hidden_dim:int =0, routed_scaling_factor:float=1.0, norm_topk_prob:bool=False,expert_hidden_dim:int=0):
+               v_head_dim:int=0, num_shared_experts:int=0,
+               shared_hidden_dim:int =0, routed_scaling_factor:float=1.0, norm_topk_prob:bool=False,expert_hidden_dim:int=0):
     self.n_heads      = n_heads
     self.n_kv_heads   = n_kv_heads
     self.head_dim     = head_dim
@@ -245,13 +246,15 @@ class Transformer:
                head_dim:int, rope_theta:float,max_context:int=0,
                qk_norm:int=0, num_experts:int=0, num_experts_per_tok:int=0,
                q_lora_rank:int=0, kv_lora_rank:int=0, qk_nope_head_dim:int=0,
-               qk_rope_head_dim:int=0, v_head_dim:int=0, num_shared_experts:int=0, shared_hidden_dim:int=0, routed_scaling_factor:float=1.0, norm_topk_prob:bool=False,
+               qk_rope_head_dim:int=0, v_head_dim:int=0, num_shared_experts:int=0,
+               shared_hidden_dim:int=0, routed_scaling_factor:float=1.0, norm_topk_prob:bool=False,
                expert_hidden_dim:int=0, leading_dense_block_count:int=0):
     self.blk = [
         TransformerBlock(
             dim, hidden_dim, n_heads, n_kv_heads, norm_eps, head_dim,
-            rope_theta, max_context, qk_norm, 
-            num_experts if i >= leading_dense_block_count else 0, num_experts_per_tok,q_lora_rank, kv_lora_rank, qk_nope_head_dim, qk_rope_head_dim, v_head_dim, 
+            rope_theta, max_context, qk_norm,
+            num_experts if i >= leading_dense_block_count else 0, num_experts_per_tok,q_lora_rank, kv_lora_rank,
+            qk_nope_head_dim, qk_rope_head_dim, v_head_dim,
             num_shared_experts if i >= leading_dense_block_count else 0, shared_hidden_dim, routed_scaling_factor, norm_topk_prob, expert_hidden_dim
         )
         for i in range(num_blocks)
