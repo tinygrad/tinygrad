@@ -116,6 +116,10 @@ class TestGemmLarge(unittest.TestCase):
   def test_shape_k128(self): verify_asm_gemm(1, 256, 256, 128)
   def test_shape_k192(self): verify_asm_gemm(1, 256, 256, 192)
 
+  def test_llama3_out1(self): verify_asm_gemm(1, 8192, 128256, 4096)
+  def test_llama3_out2(self): verify_asm_gemm(1, 8192, 4096, 128256)
+  def test_llama3_out3(self): verify_asm_gemm(1, 4096, 128256, 8192)
+
 class TestMagicGu(unittest.TestCase):
   def test_magicgu_matches_old(self):
     from extra.gemm.asm.cdna.asm import _magicgu_mulhi, TILE_M, TILE_N, TILE_K
