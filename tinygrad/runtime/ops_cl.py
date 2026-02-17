@@ -57,13 +57,12 @@ class CLProgram:
                vals:tuple[int, ...]=(), wait=False) -> float|None:
     for i,bv in enumerate(tuple(b[0] for b in bufs) + vals):
       for real_i, dt in self.arg_dtypes[i]:
-        if isinstance(dt, PtrDType):
-          if isinstance(dt, ImageDType):
-            fmt = cl.cl_image_format(cl.CL_RGBA, {2:cl.CL_HALF_FLOAT, 4:cl.CL_FLOAT}[dt.itemsize])
-            desc = cl.cl_image_desc(cl.CL_MEM_OBJECT_IMAGE2D, dt.shape[1], dt.shape[0], image_row_pitch=dt.pitch, buffer=bv)
-            bv = checked(cl.clCreateImage(self.dev.context, cl.CL_MEM_READ_WRITE, fmt, desc, None, status:=ctypes.c_int32()), status)
-          check(cl.clSetKernelArg(self.kernel, real_i, ctypes.sizeof(bv), ctypes.byref(bv)))
-        else: check(cl.clSetKernelArg(self.kernel, real_i, 4, ctypes.byref(ctypes.c_int32(bv))))
+        if isinstance(dt, ImageDType):
+          fmt = cl.cl_image_format(cl.CL_RGBA, {2:cl.CL_HALF_FLOAT, 4:cl.CL_FLOAT}[dt.itemsize])
+          desc = cl.cl_image_desc(cl.CL_MEM_OBJECT_IMAGE2D, dt.shape[1], dt.shape[0], image_row_pitch=dt.pitch, buffer=bv)
+          bv = checked(cl.clCreateImage(self.dev.context, cl.CL_MEM_READ_WRITE, fmt, desc, None, status:=ctypes.c_int32()), status)
+        check(cl.clSetKernelArg(self.kernel, real_i, ctypes.sizeof(bv), ctypes.byref(bv)))
+    for i,v in enumerate(vals,start=i): check(cl.clSetKernelArg(self.kernel, i, 4, ctypes.byref(ctypes.c_int32(v))))
     if local_size is not None: global_size = cast(tuple[int,int,int], tuple(int(g*l) for g,l in zip(global_size, local_size)))
     event = cl.cl_event() if wait else None
     check(cl.clEnqueueNDRangeKernel(self.dev.queue, self.kernel, len(global_size), None, (ctypes.c_size_t * len(global_size))(*global_size),
