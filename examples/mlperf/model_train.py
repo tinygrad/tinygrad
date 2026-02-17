@@ -1377,7 +1377,7 @@ def train_llama3():
   # init grads
   for p in optim.params:
     p.grad = p.zeros_like().contiguous().realize()
-  grads = [p.grad for p in optim.params]
+  grads: list[Tensor] = [p.grad for p in optim.params]
 
   scheduler = CosineAnnealingLRWithWarmup(optim, opt_base_learning_rate, opt_end_learning_rate, opt_learning_rate_warmup_steps, opt_learning_rate_decay_steps)
 
