@@ -258,7 +258,7 @@ class Tensor(OpMixin):
     big_sink = UOp.sink(*[x.uop for x in (self,)+lst])
 
     # rewrite all contiguous to assign
-    buffer_map = {x.base:None for x in big_sink.src}
+    buffer_map: dict[UOp, UOp|None] = {x.base:None for x in big_sink.src}
     from tinygrad.uop.ops import graph_rewrite, PatternMatcher, UPat, GroupOp, _remove_all_tags
     def contig_to_assign(ctx:dict[UOp,UOp|None], x:UOp):
       # for contiguous or in buffer_map explicitly
@@ -272,13 +272,13 @@ class Tensor(OpMixin):
     pm_contig_to_assign = PatternMatcher([ (UPat(GroupOp.All, name="x"), contig_to_assign), ])
     big_sink = graph_rewrite(big_sink, pm_contig_to_assign, ctx=buffer_map, bottom_up=True, name="contig to assign")
     big_sink = graph_rewrite(big_sink, _remove_all_tags)
-    assert all(x is not None for x in buffer_map.values())
 
-    _apply_map_to_tensors(buffer_map, name="Apply Preallocated Buffers")
+    assert all(x is not None for x in buffer_map.values())
+    _apply_map_to_tensors(cast(dict[UOp, UOp], buffer_map), name="Apply Preallocated Buffers")
 
     # this is where the schedule cache should go
     becomes_map, schedule, var_vals = complete_create_schedule_with_vars(big_sink)
-    _apply_map_to_tensors(becomes_map, name="Apply Schedule Map")
+    #_apply_map_to_tensors(becomes_map, name="Apply Schedule Map")
     return schedule, var_vals
 
   def schedule(self, *lst:Tensor) -> list[ExecItem]:
