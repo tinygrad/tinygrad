@@ -417,7 +417,6 @@ class TestAssign(unittest.TestCase):
 
   # TODO: is there a way to sneak in a permute such that it returns the wrong answer?
 
-  @unittest.skip("this test is crashing!")
   def test_overlapping_shrink_assignment_forward(self):
     # Forward shift: read index > write index in overlap
     N = 100000
@@ -428,7 +427,6 @@ class TestAssign(unittest.TestCase):
     with Context(NOOPT=1): a[0:N-shift].assign(a[shift:N]).realize()
     np.testing.assert_allclose(a.numpy(), expected)
 
-  @unittest.skip("this test is crashing!")
   def test_overlapping_shrink_assignment_reverse(self):
     # Reverse shift: write index > read index in overlap
     N = 100000
@@ -439,7 +437,6 @@ class TestAssign(unittest.TestCase):
     with Context(NOOPT=1): a[shift:N].assign(a[0:N-shift]).realize()
     np.testing.assert_allclose(a.numpy(), expected)
 
-  @unittest.skip("this test is crashing!")
   def test_nonoverlapping_shrink_assignment(self):
     # TODO: non-overlapping shrinks don't actually need contiguous, could be 1 kernel with smarter range analysis
     a = Tensor.arange(100).float().contiguous().realize()
@@ -531,7 +528,6 @@ class TestAssign(unittest.TestCase):
     a = Tensor.empty(5, device=f"disk:{temp('disk_assignment')}").assign(Tensor.ones(5)).numpy()
     np.testing.assert_equal(a, np.ones(5))
 
-  @unittest.skip("this test is crashing!")
   def test_assign_slice_then_read(self):
     """Assign to slice then read from buffer - read should see the assigned values.
     This is the KV cache pattern from llm.py.
