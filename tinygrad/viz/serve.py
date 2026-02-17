@@ -7,7 +7,7 @@ from urllib.parse import parse_qs, urlparse
 from http.server import BaseHTTPRequestHandler
 from typing import Any, TypedDict, TypeVar, Generator, Callable
 from tinygrad.helpers import colored, getenv, tqdm, unwrap, word_wrap, TRACEMETA, ProfileEvent, ProfileRangeEvent, TracingKey, ProfilePointEvent, temp
-from tinygrad.helpers import printable
+from tinygrad.helpers import printable, Context
 
 # NOTE: using HTTPServer forces a potentially slow socket.getfqdn
 class TCPServerWithReuse(socketserver.TCPServer):
@@ -38,7 +38,7 @@ class HTTPRequestHandler(BaseHTTPRequestHandler):
 
 from tinygrad.uop.ops import TrackedGraphRewrite, RewriteTrace, UOp, Ops, GroupOp, srender, sint, sym_infer, range_str, pyrender
 from tinygrad.uop.ops import print_uops, range_start, multirange_str
-from tinygrad.device import ProfileDeviceEvent, ProfileGraphEvent, ProfileGraphEntry, Device, ProfileProgramEvent
+from tinygrad.device import ProfileDeviceEvent, ProfileGraphEvent, ProfileGraphEntry, ProfileProgramEvent
 from tinygrad.dtype import dtypes
 
 uops_colors = {Ops.LOAD: "#ffc0c0", Ops.STORE: "#87CEEB", Ops.CONST: "#e0e0e0", Ops.VCONST: "#e0e0e0", Ops.REDUCE: "#FF5B5B",
@@ -69,10 +69,10 @@ def get_rewrites(t:RewriteTrace) -> list[dict]:
     steps = [create_step(s.name, ("/graph-rewrites", i, j), loc=s.loc, match_count=len(s.matches), code_line=printable(s.loc),
                          trace=k.tb if j==0 else None, depth=s.depth) for j,s in enumerate(v)]
     if (p:=get_prg_uop(i)) is not None:
-      _, device, lin, src, binary = p.src
+      _, __, lin, src, binary = p.src
       steps.append(create_step("View UOp List", ("/uops", i, len(steps)), lin.src))
       steps.append(create_step("View Source", ("/code", i, len(steps)), src.arg))
-      steps.append(create_step("View Disassembly", ("/asm", i, len(steps)), (device.arg, binary.arg)))
+      steps.append(create_step("View Disassembly", ("/asm", i, len(steps)), (k.ret, binary.arg)))
     for key in k.keys: ref_map[key] = i
     ret.append({"name":k.display_name, "steps":steps})
   return ret
@@ -524,11 +524,11 @@ def get_render(query:str) -> dict:
   if fmt == "code": return {"src":data, "lang":"cpp"}
   if fmt == "asm":
     ret:dict = {"metadata":[]}
-    device, lib = data
-    if device.startswith("AMD"):
-      with soft_err(lambda err: ret.update(err)): ret.update(amdgpu_cfg(lib, amdgpu_targets[device]))
+    renderer, lib = data
+    if renderer.device.startswith("AMD"):
+      with soft_err(lambda err: ret.update(err)): ret.update(amdgpu_cfg(lib, renderer.arch))
       with soft_err(lambda err: ret["metadata"].append(err)): ret["metadata"].append(amd_readelf(lib))
-    else: ret["src"] = get_stdout(lambda: Device[device].compiler.disassemble(lib))
+    else: ret["src"] = get_stdout(lambda: renderer.compiler.disassemble(lib))
     return ret
   if fmt == "all-pmc":
     durations, pmc = data
@@ -642,7 +642,8 @@ if __name__ == "__main__":
     if s.connect_ex(((HOST:="http://127.0.0.1").replace("http://", ""), PORT:=getenv("PORT", 8000))) == 0:
       raise RuntimeError(f"{HOST}:{PORT} is occupied! use PORT= to change.")
   stop_reloader = threading.Event()
-  multiprocessing.current_process().name = "VizProcess"    # disallow opening of devices
+  multiprocessing.current_process().name = "VizProcess"
+  Context(ALLOW_DEVICE_USAGE=0).__enter__()                # disallow opening of devices
   st = time.perf_counter()
   print("*** viz is starting")
 
