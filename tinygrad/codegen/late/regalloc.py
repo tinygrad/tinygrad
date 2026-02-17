@@ -12,7 +12,6 @@ class Register:
   cons: tuple[Register, ...] = field(default_factory=tuple)
 
   def __str__(self): return self.name
-  def __lt__(self, other): return self.index < other.index if other is not None else False
 
 # loosely based on: https://bernsteinbear.com/assets/img/register-spilling-range-splitting-ssa.pdf
 class RegallocContext:
@@ -27,19 +26,14 @@ class RegallocContext:
     self.isel = isel
     self.stack_ptr = stack_ptr
     self.stack_size = stack_size
-    # live ranges, first pass builds ranges
-    for i,u in enumerate(uops):
-      if u.op in (Ops.NOOP, Ops.AFTER): continue
-      if isinstance(u.arg, Register): self.live_range[u.arg] = [i]
-      for v in set([s.arg for s in u.src if s.arg in self.live_range]): self.live_range[v].append(i)
-    # second pass updates end of range, a var defined before a range and used inside it is needed for the whole range
-    ranges: list[Register] = []
+    # compute live ranges
+    lr, ranges = self.live_range, []
     for i,u in enumerate(reversed(uops)):
-      for v in [s.arg for s in u.src if s.arg in self.live_range]:
-        end = next((self.live_range[rng][-1] for rng in ranges if self.live_range[v][0] < self.live_range[rng][0]), 0)
-        if end > self.live_range[v][-1]: self.live_range[v].append(end)
-      if u.op is Ops.END: ranges.append(u.src[1].arg)
-      if u.op is Ops.RANGE: ranges.pop()
+      if u.op in (Ops.NOOP, Ops.AFTER): continue
+      for v in {s.arg for s in (u,) + u.src if isinstance(s.arg, Register)}: lr.setdefault(v, []).insert(0, len(uops) - 1 - i)
+      # a var defined before a range and used inside it is needed for the whole range
+      if u.arg in lr and (n:=max((lr[rng][-1] for rng in ranges if lr[rng][0] < lr[u.arg][-1] < lr[rng][-1]), default=None)): lr[u.arg].append(n)
+      if u.op is Ops.RANGE: ranges.append(u.arg)
 
 # TODO: rm pointers
 # nasty hacks to deal with pointers
@@ -94,12 +88,14 @@ def regalloc(ctx:RegallocContext, x:UOp, i:int) -> tuple[UOp, list[UOp]]:
     # two address instructions (src is used in dest) can only coalesce reused src. reused src goes first to get priority in case of a tiebreak
     # TODO: make this backend independent
     if x.op in X86GroupOp.TwoAddress1st:
-      cons = (ctx.live[ctx.rewrite_to_vreg[x.src[0]]],) + \
-        tuple(r for r in cons if r not in tuple(ctx.live.get(ctx.rewrite_to_vreg[s]) for s in x.src))
+      ins = tuple(ctx.live.get(ctx.rewrite_to_vreg[s]) for s in x.src)
+      cons = ((ins[0],) if ins[0] in cons else ()) + tuple(r for r in cons if r not in ins)
+      assert cons
     ctx.live[v] = alloc(ctx, cons, i+1)
 
   nx = x.replace(src=tuple(nsrc), arg=ctx.live.get(v, v))
-  ctx.rewrite_to_vreg[nx] = v
+  # TODO: this check exists because of a hack in x86, rm once multiple outputs are supported
+  if nx not in ctx.rewrite_to_vreg: ctx.rewrite_to_vreg[nx] = v
   if v not in ctx.vreg_to_rewrite: ctx.vreg_to_rewrite[v] = nx
   return nx, loads + [nx]
 
