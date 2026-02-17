@@ -29,10 +29,9 @@ extra_matcher = PatternMatcher([
   (UPat.var("y", (dtypes.bool,)+dtypes.int8s+dtypes.int16s).cast(dtypes.floats, name="x"), lambda y,x: y.cast(dtypes.int32).cast(x.dtype)),
   # int/float casts only for signed int
   (UPat.var("y", dtypes.uint32).cast(dtypes.floats, name="x"), lambda y,x: y.cast(dtypes.int64).cast(x.dtype)),
-  # casting uint64 to float requires special handling if msb is 1
-  (UPat(Ops.CAST, dtype=dtypes.floats, src=(UPat(dtype=dtypes.uint64),), name="c"),
-   lambda c: ((c.src[0] >> 63) != 0).where((c.src[0] & 0x7FFFFFFFFFFFFFFF).cast(dtypes.int64).cast(c.dtype) * 2, \
-                                               c.src[0].cast(dtypes.int64).cast(c.dtype))),
+  # casting uint64 to float requires special handling
+  (UPat.var("y", dtypes.uint64).cast(dtypes.floats, name="x"), lambda y,x:
+   (y >> 1).cast(dtypes.int64).cast(x.dtype) * 2 + (y & 1).cast(dtypes.int64).cast(x.dtype)),
   # TODO: these should be removed once max is canonicalized
   # no max for scalar ints
   (UPat(Ops.MAX, dtypes.ints, name="m"), lambda m: (m.src[0] < m.src[1]).where(m.src[1], m.src[0]) if m.dtype.count == 1 else None),
@@ -156,11 +155,15 @@ def div(ctx:IselContext, x:UOp):
   div = UOp(X86Ops.DIV, x.dtype, (move2, zero, move1), ctx.vreg(RAX))
   return UOp(X86Ops.MOV, x.dtype, (div,))
 
+# TODO: you don't want to call ctx.vreg here because it can duplicate instructions, you instead assign the tuple of valid registers
+# for the instruction and a rewrite will add the vreg, this ensures a duplicate isn't created.
+# However vreg(RDX) is assigned here because IDIV also writes to RDX and regalloc isn't aware of that,
+# the correct fix is to model IDIV as multi output (RAX, RDX) so regalloc is aware of RDX being overwritten and rm vreg from here
 def idiv(ctx:IselContext, x:UOp):
-  cdq_op = {1: X86Ops.CBW, 2: X86Ops.CWD, 4: X86Ops.CDQ, 8: X86Ops.CQO}[x.dtype.itemsize]
-  cdq = UOp(cdq_op, x.dtype, (UOp(X86Ops.MOV, x.dtype, (x.src[0],), ctx.vreg(RAX)),), ctx.vreg(RDX))
-  move = UOp(X86Ops.MOV, x.dtype, (x.src[1],), ctx.vreg(tuple(r for r in WGPR if r not in (RAX, RDX))))
-  idiv = UOp(X86Ops.IDIV, x.dtype, (move, cdq), ctx.vreg(RAX))
+  ext = UOp(X86Ops.MOVSX, dtypes.int16, (x.src[0],), ctx.vreg(RAX)) if x.dtype is dtypes.int8 else \
+        UOp(X86Ops.SARi, x.dtype, (x.src[0], imm(dtypes.uint8, x.dtype.itemsize * 8 - 1)), ctx.vreg(RDX))
+  move = UOp(X86Ops.MOV, x.dtype, (x.src[1],), tuple(r for r in WGPR if r not in (RAX, RDX)))
+  idiv = UOp(X86Ops.IDIV, x.dtype, (x.src[0], move, ext), (RAX,))
   # this move "cleanses" the register constraint (rax) of idiv, this is because the constraint only applies on definition and not on the uses of idiv
   return UOp(X86Ops.MOV, x.dtype, (idiv,))
 
@@ -378,14 +381,17 @@ isel_matcher = PatternMatcher([
   (UPat(Ops.STORE, src=(UPat(), UPat(dtype=dt_64bit)), name="x"), lambda x: x.replace(op=X86Ops.VMOVSDm, src=fuse_address(x.src[0]) + (x.src[1],))),
   (UPat(Ops.STORE, src=(UPat(), UPat(dtype=dt_32bit)), name="x"), lambda x: x.replace(op=X86Ops.VMOVSSm, src=fuse_address(x.src[0]) + (x.src[1],))),
   (UPat(Ops.STORE, src=(UPat(), UPat(dtype=dt_16bit)), name="x"), lambda x: x.replace(op=X86Ops.VPEXTRW, src=fuse_address(x.src[0]) + (x.src[1], imm(dtypes.uint8, 0)))), # noqa: E501
-  (UPat(Ops.STORE, src=(UPat(), UPat(dtype=dtypes.ints+(dtypes.bool,))), name="x"),
-   lambda x: x.replace(op=X86Ops.MOVm, src=fuse_address(x.src[0]) + (x.src[1],)) if (i:=to_imm(x.src[1])) is None else x.replace(op=X86Ops.MOVi, src=fuse_address(x.src[0]) + (i,))), # noqa: E501
+  (UPat(Ops.STORE, src=(UPat(), UPat(dtype=dtypes.ints+(dtypes.bool,))), name="x"), lambda x:
+   x.replace(op=X86Ops.MOVm, src=fuse_address(x.src[0]) + (x.src[1],)) if (i:=to_imm(x.src[1])) is None else x.replace(op=X86Ops.MOVi, src=fuse_address(x.src[0]) + (i,))), # noqa: E501
   # **** X86Op -> X86Op ****
   # fuse loads into X86Ops that allow it, if beneficial
   (UPat(X86GroupOp.ReadMem1st, src=(UPat(Ops.LOAD),), allow_any_len=True, name="x"), lambda ctx,x: fuse_load(ctx, x, 0)),
   (UPat(X86GroupOp.ReadMem2nd, src=(UPat(), UPat(Ops.LOAD)), allow_any_len=True, name="x"), lambda ctx,x: fuse_load(ctx, x, 1)),
   (UPat(X86GroupOp.ReadMem3rd, src=(UPat(), UPat(), UPat(Ops.LOAD)), name="x"), lambda ctx,x: fuse_load(ctx, x, 2)),
-  # allocate virtual register to X86Op, ones with specific constraints have already been allocated
+  # allocate virtual register to X86Op with special constaints
+  (UPat(X86GroupOp.All, dtypes.ints+dtypes.floats+(dtypes.bool,), name="x"), lambda ctx,x:
+   x.replace(arg=ctx.vreg(x.arg)) if isinstance(x.arg, tuple) else None),
+  # allocate virtual register to X86Op without special constraints
   (UPat(X86GroupOp.All, name="x"), lambda ctx,x:
    x.replace(arg=ctx.vreg(XMM if x.dtype in dtypes.floats or x.dtype.count > 1 else WGPR)) if x.arg is None and x.dtype != dtypes.void else None),
 ])
@@ -414,8 +420,6 @@ post_regalloc_matcher = PatternMatcher([
   # fixup div, zero rdx again because scheduling constraint isn't being respected
   (UPat(X86Ops.DIV, name="x"), lambda x:
    (nx:=x.replace(src=x.src[:1]), [UOp(X86Ops.MOVi, x.dtype, (imm(min(dtypes.uint32, x.dtype), 0),), RDX), nx])),
-  # remove cdq from idiv
-  (UPat(X86Ops.IDIV, name="x"), lambda x: (nx:=x.replace(src=x.src[:-1]), [nx])),
   # rewrite two address instructions to two address form, if reused src wasn't coalesced insert a move
   (UPat(X86GroupOp.TwoAddress1st, name="x"), lambda ctx,x:
    (nx:=x.replace(src=x.src[1:]), [assign(ctx, x.src[0], x.arg), nx] if x.arg != x.src[0].arg else [nx])),
@@ -557,8 +561,6 @@ encodings = PatternMatcher([
   (UPat(X86Ops.VCVTTSS2SI, name="x"), lambda x: encode(x, 0x2C, pp=2, sel=1, we=x.dtype in dtypes.int64s)),
   (UPat(X86Ops.VCVTTSD2SI, name="x"), lambda x: encode(x, 0x2C, pp=3, sel=1, we=x.dtype in dtypes.int64s)),
   # int division
-  (UPat(X86Ops.CBW), lambda: bytes([0x66, 0x98])), (UPat(X86Ops.CWD), lambda: bytes([0x66, 0x99])),
-  (UPat(X86Ops.CDQ), lambda: bytes([0x99])), (UPat(X86Ops.CQO), lambda: bytes([0x48, 0x99])),
   (UPat(X86Ops.IDIV, name="x"), lambda x: encode(x, 0xF7, reg=7)), (UPat(X86Ops.DIV, name="x"), lambda x: encode(x, 0xF7, reg=6)),
   # scalar int binary
   (UPat(X86Ops.SHLi, name="x"), lambda x: encode(x, 0xC1, reg=4)),
