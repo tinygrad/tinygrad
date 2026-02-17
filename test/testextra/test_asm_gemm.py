@@ -87,8 +87,9 @@ class TestGemmLarge(unittest.TestCase):
   def test_k_sharded_2(self): verify_asm_gemm_k_sharded(4096, 14336, 8*8192, gpus=8)
   def test_k_sharded_3(self): verify_asm_gemm_k_sharded(4096, 4096, 8*8192, gpus=8)
   def test_gemm_unsupported(self):
-    with self.assertRaisesRegex(AssertionError, "shape not supported"):
-      verify_asm_gemm(8, 1024, 1024, 4096, gpus=8)
+    with self.assertRaisesRegex(AssertionError, "not a multiple"):
+      verify_asm_gemm(1, 1024, 1024, 100)
+  def test_gemm_previously_unsupported(self): verify_asm_gemm(8, 1024, 1024, 4096, gpus=8)
 
 if __name__ == "__main__":
   unittest.main()
