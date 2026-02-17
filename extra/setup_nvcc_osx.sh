@@ -10,19 +10,19 @@ RUN apt-get update && apt-get install -y wget gnupg && \
     dpkg -i cuda-keyring_1.1-1_all.deb && \
     apt-get update && \
     apt-get install -y --no-install-recommends \
-        cuda-nvcc-12-3 \
-        cuda-nvdisasm-12-3 \
-        cuda-cuobjdump-12-3 \
+        cuda-nvcc-12-8 \
+        cuda-nvdisasm-12-8 \
+        cuda-cuobjdump-12-8 \
     && rm -rf /var/lib/apt/lists/*
 
 ENV PATH=/usr/local/cuda/bin:$PATH
 EOF
-docker build --platform=linux/amd64 -t cuda-nvcc:12.3 "$tmpdir"
+docker build --platform=linux/amd64 -t cuda-nvcc:12.8 "$tmpdir"
 
 mkdir -p "$install_loc"
 tee "$install_loc/nvccshim" >/dev/null <<'EOF'
 #!/bin/sh
-exec docker run --rm --platform=linux/amd64 -v "$PWD":/work -w /work cuda-nvcc:12.3 "$(basename "$0")" "$@"
+exec docker run --rm --platform=linux/amd64 -v "$PWD":/work -w /work cuda-nvcc:12.8 "$(basename "$0")" "$@"
 EOF
 chmod +x "$install_loc/nvccshim"
 for t in nvcc nvdisasm ptxas cuobjdump nvlink; do
