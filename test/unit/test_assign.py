@@ -8,6 +8,8 @@ from tinygrad.helpers import temp, CI, CPU_LVP, Context
 N = 200  # has to be bigger than the cache to fail
 
 class TestAssign(unittest.TestCase):
+  def setUp(self): self._ctx = Context(CHECK_OOB=0); self._ctx.__enter__()
+  def tearDown(self): self._ctx.__exit__(None, None, None)
   def test_simple_assignment(self):
     a = Tensor(np.arange(N*N, dtype=np.float32)).reshape(N,N)
     b = Tensor(np.arange(N*N, dtype=np.float32)).reshape(N,N)
@@ -604,6 +606,8 @@ class TestAssignOrdering(unittest.TestCase):
   - Lost writes (write ordering reversed)
   - Race conditions (concurrent access to same buffer)
   """
+  def setUp(self): self._ctx = Context(CHECK_OOB=0); self._ctx.__enter__()
+  def tearDown(self): self._ctx.__exit__(None, None, None)
 
   def test_overlapping_slice_assigns(self):
     """Overlapping slice assigns - later write should win for overlapping elements."""
