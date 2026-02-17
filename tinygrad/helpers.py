@@ -188,7 +188,7 @@ CAPTURE_PROCESS_REPLAY = ContextVar("CAPTURE_PROCESS_REPLAY", 0)
 CPU_COUNT = ContextVar("CPU_COUNT", max(1, len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else (os.cpu_count() or 1)))
 # Compilers
 CPU_CC, CPU_LLVM, CPU_LVP = ContextVar("CPU_CC", ""), ContextVar("CPU_LLVM", 0), ContextVar("CPU_LVP", 0)
-NV_CC, NV_PTX, NV_NAK = ContextVar("NV_CC", ""), ContextVar("NV_PTX", 0), ContextVar("NV_NAK", 0)
+NV_CC, NV_PTX, NV_NAK, NV_NVCC = ContextVar("NV_CC", ""), ContextVar("NV_PTX", 0), ContextVar("NV_NAK", 0), ContextVar("NV_NVCC", 0)
 CUDA_CC, CUDA_PTX, CUDA_NVCC = ContextVar("CUDA_CC", ""), ContextVar("CUDA_PTX", 0), ContextVar("CUDA_NVCC", 0)
 NULL_IR3, NULL_NAK, NULL_ALLOW_COPYOUT = ContextVar("NULL_IR3", 0), ContextVar("NULL_NAK", 0), ContextVar("NULL_ALLOW_COPYOUT", 0)
 AMD_CC, AMD_LLVM, AMD_HIPCC  = ContextVar("AMD_CC", ""), ContextVar("AMD_LLVM", 0), ContextVar("AMD_HIPCC", 0)
