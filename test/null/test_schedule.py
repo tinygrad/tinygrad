@@ -212,6 +212,13 @@ class TestSchedule(unittest.TestCase):
     c = (a*b).sum()
     check_schedule(c, 1)
 
+  def test_mulacc_fusion_assign(self):
+    a = Tensor.empty(10)
+    b = Tensor.empty(10)
+    c = (a*b).sum()
+    d = Tensor.empty(1).assign(c)
+    check_schedule(d, 1)
+
   def test_mulacc_relu_fusion(self):
     a = Tensor.empty(10)
     b = Tensor.empty(10)
