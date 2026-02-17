@@ -315,14 +315,7 @@ class Tensor(OpMixin):
     if is_disk:
       self._buffer().copyin(x._data())
       return self
-    # chained full-buffer assign should keep writing into the original target buffer
-    # TODO: move this to rangeify, currently pm_remove_bufferize drops some tags
-    if self.uop.op is Ops.ASSIGN and (target:=self.uop.src[0]).has_buffer_identity():
-      if self.uop in x.uop.toposort():
-        # break assign-in-source cycle lazily through a temporary
-        result = self._apply_uop(lambda _self, val: target.assign(val.contiguous()), x)
-      else: result = self._apply_uop(lambda _self, val: target.assign(val), x)
-    else: result = self._apply_uop(UOp.assign, x)
+    result = self._apply_uop(UOp.assign, x)
     # track view assigns (not full-buffer or assign-chain) so they can be side-realized when the buffer is read
     if (buf_uop:=self.uop.base).op is Ops.BUFFER and self.uop.op is not Ops.ASSIGN and not self.uop.has_buffer_identity():
       # deduplicate: if the value is already a pending assign for this buffer (e.g. __iadd__ in __setitem__), remove it
