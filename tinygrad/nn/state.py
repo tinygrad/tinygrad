@@ -34,10 +34,9 @@ safe_dtypes = {"BOOL":dtypes.bool, "I8":dtypes.int8, "U8":dtypes.uint8, "I16":dt
                "I64":dtypes.int64, "U64":dtypes.uint64, "F16":dtypes.float16, "BF16":dtypes.bfloat16, "F32":dtypes.float32, "F64":dtypes.float64}
 inverse_safe_dtypes = {v:k for k,v in safe_dtypes.items()}
 
-def accept_filename(func: Callable[..., T]) -> Callable[..., T]:
+def accept_filename(func: Callable[[Tensor], T]) -> Callable[[Tensor|str|pathlib.Path], T]:
   @functools.wraps(func)
-  def wrapper(fn: Tensor|str|pathlib.Path, *args, **kwargs) -> T:
-    return func(Tensor(pathlib.Path(fn)) if not isinstance(fn, Tensor) else fn, *args, **kwargs)
+  def wrapper(fn: Tensor|str|pathlib.Path) -> T: return func(Tensor(pathlib.Path(fn)) if not isinstance(fn, Tensor) else fn)
   return wrapper
 
 @accept_filename
@@ -294,8 +293,6 @@ def torch_load(t:Tensor) -> dict[str, Tensor]:
     fobj.seek(rwd)
     return TorchPickle(fobj).load()
 
-GGML_BLOCK_SIZES: dict[int, tuple[int, int]] = { 2: (32, 18), 3: (32, 20), 8: (32, 34), 12: (256, 144), 13: (256, 176), 14: (256, 210), 39: (32, 17) }
-
 def ggml_data_to_tensor(t: Tensor, n: int, ggml_type: int) -> Tensor:
   """
   Converts ggml tensor data to a tinygrad tensor.
@@ -305,9 +302,13 @@ def ggml_data_to_tensor(t: Tensor, n: int, ggml_type: int) -> Tensor:
   """
   # https://github.com/ggerganov/ggml/blob/323951f1bdcdfbd5b5ff3a9a7c3770e63b1a560e/include/ggml.h#L356
 
+  is_disk = isinstance(t.device, str) and t.device.startswith("DISK")
+
   # native types
   if (dtype := { 0: dtypes.float32, 1: dtypes.float16, 16: dtypes.int8, 17: dtypes.int16, 18: dtypes.int32 }.get(ggml_type)) is not None:
-    return t[:dtype.itemsize * n].bitcast(dtype)
+    data = t[:dtype.itemsize * n]
+    if is_disk: data = data.to(None)
+    return data.bitcast(dtype)
 
   def q_to_uint8(t: Tensor, b: int) -> Tensor:
     # TODO: rewrite with arange?
@@ -315,8 +316,10 @@ def ggml_data_to_tensor(t: Tensor, n: int, ggml_type: int) -> Tensor:
     return t.unsqueeze(-1).expand((*t.shape,8//b)).idiv(shift_tensor).bitwise_and(bitmask).transpose(-1, -2).flatten(-2)
 
   # map to (number of elements, number of bytes)
-  if (nelements_nbytes := GGML_BLOCK_SIZES.get(ggml_type)) is not None:
-    blocks = t[:(n//nelements_nbytes[0])*nelements_nbytes[1]].reshape((-1, nelements_nbytes[1]))
+  if (nelements_nbytes := { 2: (32, 18), 3: (32, 20), 8: (32, 34), 12: (256, 144), 13: (256, 176), 14: (256, 210), 39: (32, 17) }.get(ggml_type)) is not None:
+    blocks = t[:(n//nelements_nbytes[0])*nelements_nbytes[1]]
+    if is_disk: blocks = blocks.to(None)
+    blocks = blocks.reshape((-1, nelements_nbytes[1]))
     if ggml_type == 2: return (q_to_uint8(blocks[:,2:], 4).bitcast(dtypes.int8) - 8) * blocks[:,:2].bitcast(dtypes.float16).cast(dtypes.float32)
     if ggml_type == 3:
       d, m = (blocks[:,s:s+2].bitcast(dtypes.float16).cast(dtypes.float32) for s in [ 0, 2 ])
@@ -332,7 +335,7 @@ def ggml_data_to_tensor(t: Tensor, n: int, ggml_type: int) -> Tensor:
       qs_off = 48 if ggml_type == 13 else 16
       q = Tensor.stack((qs:=blocks[:,qs_off:qs_off+128].reshape(-1,4,32)).bitwise_and(0xF), qs.rshift(4), dim=2).reshape(-1,8,32)
       if ggml_type == 13: q = q + q_to_uint8(blocks[:,16:48], 1).reshape(-1, 8, 32) * 16
-      return (d * sc.unsqueeze(-1) * q.cast(dtypes.float32) - dmin * mn.unsqueeze(-1)).flatten(-2)
+      return (d * sc.unsqueeze(-1) * q.float() - dmin * mn.unsqueeze(-1)).flatten(-2)
     if ggml_type == 14:
       xl, xh = q_to_uint8(blocks[:,:128].reshape((-1, 2, 64)), 4), q_to_uint8(blocks[:,128:192].reshape((-1, 2, 32)), 2).lshift(4)
       scales = blocks[:,192:208].bitcast(dtypes.int8).unsqueeze(-1).expand((-1, 16, 16)).reshape((-1, 256))
@@ -352,17 +355,18 @@ def ggml_data_to_tensor(t: Tensor, n: int, ggml_type: int) -> Tensor:
   raise ValueError(f"GGML type '{ggml_type}' is not supported!")
 
 @accept_filename
-def gguf_load(tensor: Tensor, keep_quantized: Callable|None = None) -> tuple[dict, dict]:
+def gguf_load(tensor: Tensor) -> tuple[dict, dict[str, Tensor]]:
   """
   Loads a .gguf file, returning the `kv_data` and `state_dict`.
-  keep_quantized: optional callable(name) -> bool. Matching tensors stay as (raw_uint8_tensor, ggml_type) tuples in state_dict.
 
   ```python
-  kv_data, state_dict = nn.state.gguf_load(Tensor(pathlib.Path("Meta-Llama-3-8B-Instruct.Q4_0.gguf")))
+  gguf_tensor = Tensor(pathlib.Path("Meta-Llama-3-8B-Instruct.Q4_0.gguf")).to(Device.DEFAULT)
+  kv_data, state_dict = nn.state.gguf_load(gguf_tensor)
   ```
+
+  NOTE: The provided tensor must be on a device that supports execution.
   """
-  state_dict: dict = {}
-  reader, kv_data = io.BufferedReader(TensorIO(tensor), 1_000_000), {}
+  reader, kv_data, state_dict = io.BufferedReader(TensorIO(tensor), 1_000_000), {}, {}
   def read_unpack(fmt: str, n: int): return struct.unpack(fmt, reader.read(n))[0]
   def read_str(): return str(reader.read(read_uint64()), "utf-8")
   def read_arr():
@@ -383,13 +387,6 @@ def gguf_load(tensor: Tensor, keep_quantized: Callable|None = None) -> tuple[dic
   alignment, pos = kv_data.get("general.alignment", 32), reader.tell()
   data_start = round_up(pos, alignment)
 
-  for name, dims, typ, off in t_infos:
-    n, bs = prod(dims), GGML_BLOCK_SIZES.get(typ)
-    nbytes = (n // bs[0]) * bs[1] if bs else {0:4, 1:2, 16:1, 17:2, 18:4}[typ] * n
-    data = tensor[data_start + off:data_start + off + nbytes]
-    if isinstance(tensor.device, str) and tensor.device.startswith("DISK"): data = data.to(None)
-    if bs is not None and keep_quantized is not None and keep_quantized(name):
-      state_dict[name] = (data.reshape(dims[-1], -1, bs[1]) if len(dims) >= 3 else data.reshape(-1, bs[1]), typ)
-    else: state_dict[name] = ggml_data_to_tensor(data, n, typ).reshape(*reversed(dims))  # dequant
+  for name, dims, typ, off in t_infos: state_dict[name] = ggml_data_to_tensor(tensor[data_start + off:], prod(dims), typ).reshape(*reversed(dims))
 
   return kv_data, state_dict
