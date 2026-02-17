@@ -116,12 +116,23 @@ class TestGemmLarge(unittest.TestCase):
   def test_shape_k128(self): verify_asm_gemm(1, 256, 256, 128)
   def test_shape_k192(self): verify_asm_gemm(1, 256, 256, 192)
 
+class TestMagicGu(unittest.TestCase):
   def test_magicgu_matches_old(self):
-    from extra.gemm.asm.cdna.asm import _magicgu_mulhi
+    from extra.gemm.asm.cdna.asm import _magicgu_mulhi, TILE_M, TILE_N, TILE_K
     old_iters_args = {64: (67108864, 0), 128: (33554432, 0), 224: (613566757, 2147483656)}
-    for iters, (old_magic, old_shift) in old_iters_args.items():
-      magic, shift = _magicgu_mulhi(iters, 229376)
-      self.assertEqual((magic, shift), (old_magic, old_shift), f"mismatch for iters={iters}")
+    old_gemm_shapes = [
+      (8192, 4096, 4096), (8192, 14336, 4096), (8192, 4096, 14336),
+      (8192, 8192, 8192), (4096, 4096, 4096), (4096, 14336, 4096),
+      (4096, 14336, 8192), (4096, 4096, 14336), (14336, 4096, 8192),
+      (4096, 8192, 14336), (4096, 4096, 8192), (4096, 8192, 4096),
+    ]
+    for M, N, K in old_gemm_shapes:
+      iters = K // TILE_K
+      total = (M // TILE_M) * (N // TILE_N) * iters
+      for batch in [1, 2]:
+        magic, shift = _magicgu_mulhi(iters, total * batch)
+        old_magic, old_shift = old_iters_args[iters]
+        self.assertEqual((magic, shift), (old_magic, old_shift), f"mismatch for ({M},{N},{K}) batch={batch} iters={iters}")
 
 if __name__ == "__main__":
   unittest.main()
