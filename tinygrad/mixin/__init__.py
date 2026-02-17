@@ -1,6 +1,6 @@
-from tinygrad.mixin.math import MathMixin
+from tinygrad.mixin.elementwise import ElementwiseMixin
 from tinygrad.mixin.movement import MovementMixin
 
 
-class OpMixin(MathMixin, MovementMixin):
+class OpMixin(ElementwiseMixin, MovementMixin):
   pass

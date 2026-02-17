@@ -885,6 +885,20 @@ class TestSymInfer(unittest.TestCase):
     var_vals = {a.expr: 1, b.expr: -1000}
     assert sym_infer(a%b, var_vals) == 1
     assert sym_infer(a//b, var_vals) == 0
+  def test_sym_infer_with_bitcast(self):
+    a = Variable("a", 1, 10, dtypes.int)
+    expr = ((a.bitcast(dtypes.uint) << UOp.const(dtypes.uint, 1)).bitcast(dtypes.int) + 2)
+    ret = sym_infer(expr, {a.expr: 2})
+    assert isinstance(ret, int)
+    assert ret == 6
+
+    b = Variable("b", -5, 5, dtypes.int)
+    assert sym_infer(b.bitcast(dtypes.uint), {b.expr: -1}) == 0xFFFFFFFF
+
+    c = Variable("c", 0, 0xFFFFFFFF, dtypes.uint)
+    assert sym_infer(c.bitcast(dtypes.int), {c.expr: 0xFFFFFFFF}) == -1
+
+    assert sym_infer(UOp.const(dtypes.float, 1.5).bitcast(dtypes.uint), {}) == 1069547520
 
 """
 @unittest.skip("not supported on uops yet")

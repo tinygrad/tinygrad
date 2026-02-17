@@ -41,14 +41,18 @@ def assert_jit_cache_len(fxn, expected_len):
     assert type(fxn.jit_cache[0].prg).__name__.endswith('Graph')
     assert len(fxn.jit_cache[0].prg.jit_cache) == expected_len
 
-def rand_for_dtype(dt:DType, size:int):
+def rand_for_dtype(dt:DType, size:int, allow_subnormal=True):
   if dtypes.is_unsigned(dt):
     return np.random.randint(0, 100, size=size, dtype=_to_np_dtype(dt))
   elif dtypes.is_int(dt):
     return np.random.randint(-100, 100, size=size, dtype=_to_np_dtype(dt))
   elif dt == dtypes.bool:
     return np.random.choice([True, False], size=size)
-  return np.random.uniform(-10, 10, size=size).astype(_to_np_dtype(dt))
+  ret = np.random.uniform(-10, 10, size=size).astype(_to_np_dtype(dt))
+  if not allow_subnormal:
+    min_normal = 2.0 ** (2 - (1 << (dtypes.finfo(dt)[0] - 1)))
+    ret = np.where(np.abs(ret) < min_normal, 0, ret)
+  return ret
 
 def timeit(fxn:Callable[..., T], *args, **kwargs) -> tuple[T, float]:
   st = time.perf_counter_ns()
@@ -66,6 +70,13 @@ def eval_uop(uop:UOp, inputs:list[tuple[DType, list[Any]]]|None=None):
   prog = PythonProgram("run", PythonCompiler().compile(prg.src))
   prog(out_buf:=allocator.alloc(uop.dtype.itemsize), *bufs)
   return out_buf.cast(uop.dtype.fmt or "").tolist()[0]
+
+def to_uops_list(u:list[UOp], ren=None) -> list[UOp]:
+  sink = UOp.group(*u)
+  for r in sink.ranges: sink = sink.end(r)
+  ret = get_uops(sink.sink(arg=KernelInfo(opts_to_apply=())), ren)
+  assert ret[-1].op is Ops.SINK
+  return ret
 
 def not_support_multi_device():
   # CL and CUDA don't support multi device if in CI

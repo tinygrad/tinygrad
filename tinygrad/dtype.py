@@ -348,6 +348,19 @@ def fp8_to_float(x: int, dtype: DType) -> float:
   float32_val = struct.unpack('e', half_bytes)[0]
   return float(float32_val)
 
+def storage_fmt_for_dtype(dtype:DType): return 'H' if dtype == dtypes.bfloat16 else 'B' if dtype in dtypes.fp8s else dtype.fmt
+
+def to_storage_scalar(x, dtype:DType):
+  if dtype == dtypes.half: return float_to_fp16(x)
+  if dtype == dtypes.bfloat16: return (struct.unpack('I', struct.pack('f', float_to_bf16(x)))[0] >> 16) & 0xFFFF
+  if dtype in dtypes.fp8s: return float_to_fp8(float(x), dtype)
+  return x
+
+def from_storage_scalar(x, dtype:DType):
+  if dtype == dtypes.bfloat16: return struct.unpack('f', struct.pack('I', (x & 0xFFFF) << 16))[0]
+  if dtype in dtypes.fp8s: return fp8_to_float(int(x), dtype)
+  return x
+
 truncate: dict[DType, Callable] = {dtypes.bool: bool,
   dtypes.float16: float_to_fp16, dtypes.bfloat16: lambda x: float_to_bf16(float(x)),
   **{fp8: (lambda x, dtype=fp8: fp8_to_float(float_to_fp8(x, dtype), dtype)) for fp8 in dtypes.fp8s},

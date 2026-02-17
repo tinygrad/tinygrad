@@ -172,7 +172,7 @@ function formatCycles(cycles) {
   const M = Math.floor(cycles / 1e6), K = Math.floor((cycles % 1e6) / 1e3), s = Math.round(cycles % 1e3);
   const parts = [];
   if (M) parts.push(`${M}M`);
-  if (K || (!M && s)) parts.push(`${K}K`);
+  if (K) parts.push(`${K}K`);
   if (s || (!M && !K)) parts.push(`${s}`);
   return parts.join(" ");
 }
@@ -184,8 +184,9 @@ const WAVE_COLORS = {VALU:"#ffffc0", SALU:"#cef263", LOAD:"#ffc0c0", STORE:"#4fa
 const waveColor = (op) => {
   const cat = op.includes("VALU") || op === "VINTERP" ? "VALU" : op.includes("SALU") ? "SALU" : op.includes("VMEM") ? "VMEM"
             : op.includes("LOAD") || op === "SMEM" ? "LOAD" : op.includes("STORE") ? "STORE" : op;
-  ret = WAVE_COLORS[cat] ?? "#ffffff";
+  let ret = WAVE_COLORS[cat] ?? "#ffffff";
   if (op.includes("OTHER_") || op.includes("_ALT")) { ret = darkenHex(ret, 75) }
+  if (op.includes("LDS_")) { ret = darkenHex(ret, 25) }
   return ret
 };
 const colorScheme = {TINY:new Map([["Schedule","#1b5745"],["get_program","#1d2e62"],["compile","#63b0cd"],["DEFAULT","#354f52"]]),
@@ -352,7 +353,11 @@ async function renderProfiler(path, unit, opts) {
           colorMap.set(colorKey, d3.rgb(color));
         }
         const fillColor = colorMap.get(colorKey).brighter(0.3*depth).toString();
-        const label = parseColors(e.name).map(({ color, st }) => ({ color, st, width:ctx.measureText(st).width }));
+        const label = parseColors(e.name).flatMap(({ color, st }) => {
+          const parts = [];
+          for (let i=0; i<st.length; i+=4) { const part = st.slice(i, i+4); parts.push({ color, st:part, width:ctx.measureText(part).width }); }
+          return parts;
+        });
         let shapeRef = e.ref;
         if (shapeRef != null) { ref = {ctx:e.ref, step:0}; shapeRef = ref; }
         else if (ref != null) {
@@ -526,6 +531,7 @@ async function renderProfiler(path, unit, opts) {
     drawLine(ctx, xscale.range(), [0, 0]);
     let lastLabelEnd = -Infinity;
     for (const tick of xscale.ticks()) {
+      if (!Number.isInteger(tick)) continue;
       const x = xscale(tick);
       drawLine(ctx, [x, x], [0, tickSize]);
       const labelX = x+ctx.lineWidth+2;

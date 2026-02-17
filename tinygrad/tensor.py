@@ -7,7 +7,7 @@ if TYPE_CHECKING: import numpy
 from tinygrad.dtype import DType, DTypeLike, dtypes, ImageDType, ConstType, least_upper_float, least_upper_dtype, sum_acc_dtype, to_dtype, truncate
 from tinygrad.dtype import _from_np_dtype, _to_np_dtype, PyConst
 from tinygrad.helpers import argfix, make_tuple, flatten, prod, all_int, round_up, merge_dicts, argsort, getenv, all_same, fully_flatten
-from tinygrad.helpers import IMAGE, WINO, Metadata, TRACEMETA, ASM_GEMM, ceildiv, fetch, polyN, is_numpy_ndarray, TracingKey, cpu_profile
+from tinygrad.helpers import IMAGE, WINO, Metadata, TRACEMETA, ASM_GEMM, ceildiv, fetch, is_numpy_ndarray, TracingKey, cpu_profile
 from tinygrad.helpers import suppress_finalizing, disable_gc
 from tinygrad.gradient import compute_gradient
 from tinygrad.mixin import OpMixin
@@ -189,13 +189,12 @@ class Tensor(OpMixin):
     all_tensors[weakref.ref(ret)] = None
     return ret
 
-  def _apply_broadcasted_uop(self, fxn:Callable, x:Tensor|ConstType, reverse=False) -> Tensor:
+  # _binop, alu, and const_like are used by the mixins
+  def _binop(self, op, x, reverse):
     lhs,rhs = self._broadcasted(x, reverse)
-    return lhs._apply_uop(fxn, rhs)
-
-  # _binop and alu are used by MathMixin
-  def _binop(self, op, x, reverse): return self._apply_broadcasted_uop(lambda *u: UOp.alu(u[0], op, *u[1:]), x, reverse)
+    return lhs._apply_uop(lambda *u: u[0].alu(op, *u[1:]), rhs)
   def alu(self, op: Ops, *src: Tensor) -> Tensor: return self._apply_uop(lambda *u: u[0].alu(op, *u[1:]), *src)
+  def const_like(self, b:ConstType) -> Tensor: return Tensor(dtypes.as_const(b, self.dtype), self.device, self.dtype, requires_grad=False)
 
   def requires_grad_(self, requires_grad=True) -> Tensor:
     # make the UOp unique if it's a CONST to prevent gradient accumulation bugs with cached const UOps
@@ -274,11 +273,20 @@ class Tensor(OpMixin):
     """Triggers the computation needed to create these Tensor(s)."""
     # side-realize pending assigns for buffers referenced by these tensors
     if _pending_assigns:
-      for buf in {u for t in (self,)+lst for u in t.uop.toposort() if u.op is Ops.BUFFER}:
+      def _realize_pending(buf):
         for assign_uop in _pending_assigns.pop(buf, []):
+          # recursively realize pending assigns that this assign's value depends on
+          for u in assign_uop.toposort():
+            if u.op is Ops.BUFFER and u in _pending_assigns: _realize_pending(u)
           becomes_map, schedule, var_vals = complete_create_schedule_with_vars(UOp.sink(assign_uop))
           _apply_map_to_tensors(becomes_map, name="Apply Pending Assign")
           run_schedule(schedule, var_vals, do_update_stats=do_update_stats)
+          # update remaining pending assigns so they reference realized buffers instead of stale lazy graphs
+          if becomes_map:
+            for assigns in _pending_assigns.values():
+              for i in range(len(assigns)): assigns[i] = assigns[i].substitute(becomes_map)
+      for buf in {u for t in (self,)+lst for u in t.uop.toposort() if u.op is Ops.BUFFER}:
+        if buf in _pending_assigns: _realize_pending(buf)
     if len(to_realize:=[x for x in (self,)+lst if not x.uop.has_buffer_identity()]):
       run_schedule(*Tensor.schedule_with_vars(*to_realize), do_update_stats=do_update_stats)
     return self
@@ -310,6 +318,8 @@ class Tensor(OpMixin):
     result = self._apply_uop(UOp.assign, x)
     # track view assigns (not full-buffer or assign-chain) so they can be side-realized when the buffer is read
     if (buf_uop:=self.uop.base).op is Ops.BUFFER and self.uop.op is not Ops.ASSIGN and not self.uop.has_buffer_identity():
+      # deduplicate: if the value is already a pending assign for this buffer (e.g. __iadd__ in __setitem__), remove it
+      if x.uop in _pending_assigns.get(buf_uop, []): _pending_assigns[buf_uop].remove(x.uop)
       _pending_assigns.setdefault(buf_uop, []).append(result.uop)
     return self.replace(result)
 
@@ -603,14 +613,15 @@ class Tensor(OpMixin):
     print(t.numpy())
     ```
     """
-    if not dtypes.is_float(dtype := to_dtype(dtype or dtypes.default_float)): raise ValueError(f"rand only supports float dtypes, got {dtype}")
+    dt = to_dtype(dtype or dtypes.default_float)
+    if not dtypes.is_float(dt): raise ValueError(f"rand only supports float dtypes, got {dt}")
     if not all_int(shape:=argfix(*shape)) or not all(s >= 0 for s in shape): raise ValueError(f"invalid input {shape=}")
     if device is not None and not isinstance(device, str): raise ValueError(f"rand only supports single device, got {device=}")
     device = cast(str, canonicalize_device(device))
 
     # if shape has 0, return zero tensor
-    if (numel := prod(shape)) == 0: return Tensor.zeros(shape, device=device, dtype=dtype, **kwargs)
-    num = ceildiv(numel * dtype.itemsize, 4)
+    if (numel := prod(shape)) == 0: return Tensor.zeros(shape, device=device, dtype=dt, **kwargs)
+    num = ceildiv(numel * dt.itemsize, 4)
 
     # generate per device seeds and rng counter if we haven't seen this device yet
     if device not in Tensor._device_seeds:
@@ -628,14 +639,14 @@ class Tensor(OpMixin):
     bits = Tensor._threefry_random_bits(Tensor._device_seeds[device], counts0, counts1)[:num]
 
     # bitcast to uint with same number of bits
-    _, nmant = dtypes.finfo(dtype)
-    uint_dtype = {1: dtypes.uint8, 2: dtypes.uint16, 4: dtypes.uint32, 8: dtypes.uint64}[dtype.itemsize]
+    _, nmant = dtypes.finfo(dt)
+    uint_dtype = {1: dtypes.uint8, 2: dtypes.uint16, 4: dtypes.uint32, 8: dtypes.uint64}[dt.itemsize]
     bits = bits.bitcast(uint_dtype)
     # only randomize the mantissa bits and set the exponent to 1
-    one = Tensor.ones_like(bits, device=bits.device, dtype=dtype).bitcast(uint_dtype)
-    bits = bits.rshift(dtype.bitsize - nmant).bitwise_or(one)
+    one = Tensor.ones_like(bits, device=bits.device, dtype=dt).bitcast(uint_dtype)
+    bits = bits.rshift(dt.bitsize - nmant).bitwise_or(one)
     # bitcast back to the original dtype and reshape
-    out = bits.bitcast(dtype)[:numel].sub(1).reshape(shape).requires_grad_(kwargs.get("requires_grad"))
+    out = bits.bitcast(dt)[:numel].sub(1).reshape(shape).requires_grad_(kwargs.get("requires_grad"))
     return out.contiguous() if contiguous else out
 
   # ***** creation helper functions *****
@@ -759,8 +770,9 @@ class Tensor(OpMixin):
     print(Tensor.eye(2, 4).numpy())
     ```
     """
-    if n < 0 or ((m := n if m is None else m) < 0): raise ValueError(f"cannot have negative {n=}, {m=}")
-    t = (Tensor.arange(n, device=device).unsqueeze(-1) == Tensor.arange(m, device=device))
+    m_ = n if m is None else m
+    if n < 0 or m_ < 0: raise ValueError(f"cannot have negative {n=}, {m_=}")
+    t = (Tensor.arange(n, device=device).unsqueeze(-1) == Tensor.arange(m_, device=device))
     return t.cast(dtype or dtypes.default_float).requires_grad_(requires_grad)
 
   def _multi_like(self, fxn, *args, **kwargs) -> Tensor:
@@ -1189,24 +1201,43 @@ class Tensor(OpMixin):
     # movement op indexing
     if mops := [i for i in indices_parsed if i['index'] is not None]:
       # flip negative strides
-      shrinks, strides = zip(*((i['boundary'], i['stride']) for i in mops))
-      x = x.shrink(shrinks).flip(tuple(i for i,st in enumerate(strides) if st < 0))
-      strides = tuple(map(abs, strides))
+      x = x.shrink(tuple(m['boundary'] for m in mops)).flip(tuple(i for i, m in enumerate(mops) if m['stride'] < 0))
+      strides = tuple(abs(m['stride']) for m in mops)
       # apply stride
       if any(st != 1 for st in strides):
         # pad shape to multiple of stride
         if not all_int(x.shape): raise RuntimeError("symbolic shape not supported")
-        x = x.pad(tuple((0, round_up(s, st) - s) for s, st in zip(x.shape, strides)))
+        x = x.pad_to(tuple(round_up(s, st) for s, st in zip(x.shape, strides)))
         x = x.reshape(tuple(flatten((s // st, st) for s, st in zip(x.shape, strides))))
         x = x.shrink(tuple(flatten(((0, s), (0, 1)) for s in x.shape[::2]))).reshape(x.shape[::2])
 
-    # dim injection from None by including None dim size (which is 1) and dim collapse by skipping int dim size
-    x = x.reshape(tuple(index['size'] for index in indices_parsed if not isinstance(index['index'], sint)))
+    # dim injection from None (size 1) and dim collapse by skipping sint dims
+    x_dims = [p for p in indices_parsed if not isinstance(p['index'], sint)]
+    x = x.reshape(tuple(p['size'] for p in x_dims))
+
+    # basic setitem: construct result with view region replaced by v using arange masks
+    if v is not None and not any(isinstance(p['index'], Tensor) for p in indices_parsed):
+      # broadcast v to getitem shape, reshape to self.ndim (squeeze None dims, unsqueeze int dims — all are size 1)
+      vb = v.cast(self.dtype)._broadcast_to(x.shape)
+      vb = vb.reshape(tuple(1 if isinstance(p['index'], sint) else p['size'] for p in indices_parsed if p['index'] is not None))
+      # undo movement ops per-dim and build boolean mask
+      per_dim = []
+      for d, m in enumerate(mops):
+        (s, e), st = m['boundary'], abs(m['stride'])
+        if st != 1 and vb.shape[d] > 1:  # un-stride: interleave with zeros
+          vb = vb.unsqueeze(d+1)
+          vb = vb.pad_to(tuple(st if j == d+1 else None for j in range(vb.ndim)))
+          vb = vb.reshape(vb.shape[:d] + (vb.shape[d]*vb.shape[d+1],) + vb.shape[d+2:])
+          vb = vb.shrink_to(tuple(e-s if j == d else None for j in range(self.ndim)))
+        idx = Tensor.arange(self.shape[d], device=self.device).reshape([1]*d + [self.shape[d]] + [1]*(self.ndim - d - 1))
+        per_dim.append((idx >= s) & (idx < e) & (((e-1-idx) if m['stride'] < 0 else (idx-s)) % st == 0))
+      vb = vb.flip(tuple(d for d, m in enumerate(mops) if m['stride'] < 0))
+      vb = vb.pad(tuple((m['boundary'][0], self.shape[d] - m['boundary'][1]) for d, m in enumerate(mops)))
+      return (functools.reduce(lambda a, b: a & b, per_dim) if per_dim else Tensor(True, dtype=dtypes.bool, device=self.device)).where(vb, self)
 
     # tensor indexing
-    if tops := [(d,i) for d,i in enumerate(i_ for i_ in indices_parsed if not isinstance(i_['index'], int)) if isinstance(i['index'], Tensor)]:
-      # unload the tensor object into actual tensors
-      dims, tensors, masks = [d for d,_ in tops], cast(list[Tensor], [i['index'] for _,i in tops]), []
+    if tops := [(d, p) for d, p in enumerate(x_dims) if isinstance(p['index'], Tensor)]:
+      dims, tensors, masks = [d for d, _ in tops], cast(list[Tensor], [p['index'] for _, p in tops]), []
       big_shape = _broadcast_shape(*(t.shape for t in tensors))
 
       # consecutive tensor indices with int shapes: use linear indexing instead of one-hot masks
@@ -1299,12 +1330,13 @@ class Tensor(OpMixin):
       if is_disk: raise RuntimeError("advanced setitem is not supported for DISK tensors")
       if not isinstance(v, Tensor): v = Tensor(v, device=self.device, dtype=self.dtype)
       self.assign(self._getitem(indices, v))
-    else: # basic setitem
-      if is_disk: self[indices].assign(v)
-      else:
-        self.realize()
-        if not self.uop.is_writable_view(): raise RuntimeError("setitem target must be a writable view backed by a buffer")
-        self[indices].assign(v).realize()
+    elif is_disk or self.uop.is_realized: # basic setitem, self is realized. TODO: disk uop.base is a COPY and not realized
+      self[indices].assign(v)
+    else: # basic setitem, self is not realized
+      if not isinstance(v, Tensor): v = Tensor(v, device=self.device, dtype=self.dtype)
+      # __iadd__/__isub__ on unrealized views creates a no-op ASSIGN; unwrap to get the computed value
+      if v.uop.op is Ops.ASSIGN: v = v._apply_uop(lambda x: x.src[1])
+      self.replace(self._getitem(indices, v))
 
   def __delitem__(self, indices) -> None:
     raise TypeError("Tensor does not support deleting items")
@@ -1325,7 +1357,7 @@ class Tensor(OpMixin):
     dim = self._resolve_dim(dim)
     assert all(s >= i for d,(s,i) in enumerate(zip(self.shape, index.shape)) if d != dim), "requires self.shape[d] >= index.shape[d] for all d != dim"
     index = index.to(self.device)
-    x = self.shrink(tuple((0, i) if d != dim else None for d,i in enumerate(index.shape))).unsqueeze(-1).transpose(-1, dim)
+    x = self.shrink_to(tuple(i if d != dim else None for d,i in enumerate(index.shape))).unsqueeze(-1).transpose(-1, dim)
     return (index.unsqueeze(-1)._one_hot_along_dim(self.shape[dim]).where(x, 0)).sum(-1, dtype=self.dtype)
 
   def cat(self:Tensor, *args:Tensor, dim:int=0) -> Tensor:
@@ -1413,30 +1445,6 @@ class Tensor(OpMixin):
     assert isinstance(dim_sz, int), f"does not support symbolic shape in split dimension {dim}: {self.shape}"
     assert chunks > 0, f"expect chunks to be greater than 0, got: {chunks}"
     return list(self.split(ceildiv(dim_sz, chunks) if dim_sz else [0]*chunks, dim=dim))
-
-  def unfold(self, dim:int, size:sint, step:int) -> Tensor:
-    """
-    Unfolds the tensor along dimension `dim` into overlapping windows.
-
-    Each window has length `size` and begins every `step` elements of `self`.
-    Returns the input tensor with dimension `dim` replaced by dims `(n_windows, size)`
-    where `n_windows = (self.shape[dim] - size) // step + 1`.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    unfolded = Tensor.arange(8).unfold(0,2,2)
-    print("\\n".join([repr(x.numpy()) for x in unfolded]))
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    unfolded = Tensor.arange(27).reshape(3,3,3).unfold(-1,2,3)
-    print("\\n".join([repr(x.numpy()) for x in unfolded]))
-    ```
-    """
-    if size < 0: raise RuntimeError(f'size must be >= 0 but got {size=}')
-    if step <= 0: raise RuntimeError(f'step must be > 0 but got {step=}')
-    if size > self.shape[dim]: raise RuntimeError(f'maximum size for tensor at dimension {dim} is {self.shape[dim]} but size is {size}')
-    dim = self._resolve_dim(dim)
-    perm_to_last = tuple(i for i in range(self.ndim) if i != dim) + (dim,)
-    return self.permute(perm_to_last)._pool((size,), step).permute(argsort(perm_to_last) + (self.ndim,))
 
   def meshgrid(self:Tensor, *args:Tensor, indexing:str="ij") -> tuple[Tensor, ...]:
     """
@@ -2378,7 +2386,7 @@ class Tensor(OpMixin):
     # interleave tyx and HWO: (bs, groups, rcout, oy, HO, ox, WO)
     ret = ret.permute([*range(len(HW), len(ret.shape)-len(HW)), *[i+o for i in range(len(HW)) for o in [len(ret.shape)-len(HW),0]]])
     # merge groups and rcout, tyx and HWO: (bs, groups, cout, *yx), shrink to final
-    ret = ret.reshape(bs, cout, *[c * HWO[i] for i, c in enumerate(tyx)]).shrink(tuple((0, s) for s in [bs, cout, *oyx]))
+    ret = ret.reshape(bs, cout, *[c * HWO[i] for i, c in enumerate(tyx)]).shrink_to(bs, cout, *oyx)
 
     return (ret if bias is None else ret.add(bias.reshape(1, -1, *[1 for _ in range(len(HW))]))).contiguous().contiguous_backward()
 
@@ -2417,7 +2425,7 @@ class Tensor(OpMixin):
       x = x.reshape(None, None, *flatten((k,1) for k in x.shape[2:]))
       x = x.pad((None, None, *flatten((None,(0,s-1)) for s in stride)))
       x = x.reshape(None, None, *[k*s for k,s in zip(x.shape[2::2], stride)])
-      x = x.shrink((None, None, *[(0,k-(s-1)) for k,s in zip(x.shape[2:], stride)]))
+      x = x.shrink_to(None, None, *[k-(s-1) for k,s in zip(x.shape[2:], stride)])
     padding = flatten((((k-1)*d-pB,(k-1)*d-pA+op) for k,d,(pB,pA),op in reversed(list(zip(HW, dilation, padding, output_padding)))))
     return x.conv2d(w.flatten(end_dim=1), groups=groups, bias=bias, dilation=dilation, padding=padding)
 
@@ -2637,13 +2645,12 @@ class Tensor(OpMixin):
       f"All dimensions of {index.shape=} should be <= to all dimensions of {src.shape=} and all dimensions except dimension {dim} of {self.shape=}"
     if self.dtype != src.dtype: raise RuntimeError(f"expect {self.dtype=} to be equal to {src.dtype=}")
     # shrink src to index shape to shrink away the unused values
-    src = src.shrink(tuple((0,s) for s in index.shape))
+    src = src.shrink_to(index.shape)
     # prepare src and mask for reduce with respect to dim
     src = src.unsqueeze(-1).expand(*src.shape, self.shape[dim]).transpose(-1, dim)
     mask = index.unsqueeze(-1)._one_hot_along_dim(self.shape[dim]).transpose(-1, dim)
     # pad src and mask to self.shape so that reduce can be done with padded values as no-ops
-    src, mask = (x.pad(tuple((0, self.shape[i] - x.shape[i]) if i != dim else None for i in range(self.ndim)) + (None,)) for x in (src, mask))
-    return src, mask
+    return src.pad_to(*self.shape, None), mask.pad_to(*self.shape, None)
 
   def scatter(self, dim:int, index:Tensor, src:Tensor|PyConst, reduce:Literal['multiply', 'add']|None=None) -> Tensor:
     """
@@ -2761,7 +2768,7 @@ class Tensor(OpMixin):
         # flip wires back to undo the crossover
         blue_box, flipped_green_box = x.split(1, crossover_dim)
         x = blue_box.cat(flipped_green_box.flip(flip_dims), dim=crossover_dim)
-    x = x.flatten(dim, dim+n_stages-1).shrink(tuple((0, s) for s in self.shape))
+    x = x.flatten(dim, dim+n_stages-1).shrink_to(self.shape)
     # compute indices for sorted values
     mask = Tensor.ones(orig_len, orig_len, dtype=dtypes.bool, device=self.device).tril().reshape((None, None) + (1,)*(self.ndim-dim-1))
     def compute_counts(t:Tensor): return (mask & (t.unsqueeze(dim) == t.unsqueeze(dim+1))).sum(dim+1)
@@ -2801,8 +2808,8 @@ class Tensor(OpMixin):
     if not sorted_: raise NotImplementedError("topk with sorted_=False is not supported")
     if k > self.shape[dim:=self._resolve_dim(dim)]: raise ValueError(f"selected index {k=} is out of range")
     x, idx = self.sort(dim, descending=largest)
-    shrink_to_k = tuple((0, k) if i == dim else None for i in range(self.ndim))
-    return x.shrink(shrink_to_k), idx.shrink(shrink_to_k)
+    topk_shape = tuple(k if i == dim else None for i in range(self.ndim))
+    return x.shrink_to(topk_shape), idx.shrink_to(topk_shape)
 
   # ***** unary ops *****
 
@@ -2814,7 +2821,7 @@ class Tensor(OpMixin):
     print(Tensor([False, True]).logical_not().numpy())
     ```
     """
-    return self.cast(dtypes.bool)._apply_broadcasted_uop(UOp.ne, True)
+    return self.cast(dtypes.bool).ne(True)
 
   def neg(self) -> Tensor:
     """
@@ -2838,69 +2845,6 @@ class Tensor(OpMixin):
     """
     return self._apply_uop(UOp.contiguous_backward)
 
-  def log(self) -> Tensor:
-    """
-    Computes the natural logarithm element-wise.
-
-    See: https://en.wikipedia.org/wiki/Logarithm
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([1., 2., 4., 8.]).log().numpy())
-    ```
-    """
-    return self.log2()*math.log(2)
-
-  def log10(self) -> Tensor:
-    """
-    Computes the base-10 logarithm element-wise.
-
-    See: https://en.wikipedia.org/wiki/Logarithm
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([1., 2., 4., 8.]).log10().numpy())
-    ```
-    """
-    return self.log2()*math.log10(2)
-
-  def log2(self) -> Tensor:
-    """
-    Computes the base-2 logarithm element-wise.
-
-    See: https://en.wikipedia.org/wiki/Logarithm
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([1., 2., 4., 8.]).log2().numpy())
-    ```
-    """
-    return self.cast(least_upper_float(self.dtype))._apply_uop(UOp.log2)
-
-  def exp(self) -> Tensor:
-    """
-    Computes the exponential function element-wise.
-
-    See: https://en.wikipedia.org/wiki/Exponential_function
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([0., 1., 2., 3.]).exp().numpy())
-    ```
-    """
-    # TODO: make it generic, and same thing to log and cos
-    if self.is_floating_point(): return self.cast(least_upper_dtype(self.dtype, dtypes.float32)).mul(1/math.log(2)).exp2().cast(self.dtype)
-    # TODO: behavior when DEFAULT_FLOAT is bfloat16 and input is int32?
-    return self.mul(1/math.log(2)).exp2()
-
-  def exp2(self) -> Tensor:
-    """
-    Computes the base-2 exponential function element-wise.
-
-    See: https://en.wikipedia.org/wiki/Exponential_function
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([0., 1., 2., 3.]).exp2().numpy())
-    ```
-    """
-    return self.cast(least_upper_float(self.dtype))._apply_uop(UOp.exp2)
-
   def logsigmoid(self) -> Tensor:
     """
     Applies the LogSigmoid function element-wise.
@@ -2913,91 +2857,7 @@ class Tensor(OpMixin):
     """
     return -(-self).softplus()
 
-  def sqrt(self) -> Tensor:
-    """
-    Computes the square root of the tensor element-wise.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([1., 2., 3., 4.]).sqrt().numpy())
-    ```
-    """
-    return self.cast(least_upper_float(self.dtype))._apply_uop(UOp.sqrt)
-
-  def sin(self) -> Tensor:
-    """
-    Computes the sine of the tensor element-wise.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([0., math.pi/2, math.pi, 3*math.pi/2, 2*math.pi]).sin().numpy())
-    ```
-    """
-    return self.cast(least_upper_float(self.dtype))._apply_uop(UOp.sin)
-
-  def cos(self) -> Tensor:
-    """
-    Computes the cosine of the tensor element-wise.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([0., math.pi/2, math.pi, 3*math.pi/2, 2*math.pi]).cos().numpy())
-    ```
-    """
-    if self.is_floating_point(): return ((math.pi/2)-self.cast(least_upper_dtype(self.dtype, dtypes.float32))).sin().cast(self.dtype)
-    return ((math.pi/2)-self).sin()
-
-  def tan(self) -> Tensor:
-    """
-    Computes the tangent of the tensor element-wise.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([0., math.pi/4, math.pi/2, 3*math.pi/4, math.pi]).tan().numpy())
-    ```
-    """
-    return self.sin() / self.cos()
-
-  def asin(self) -> Tensor:
-    """
-    Computes the inverse sine (arcsine) of the tensor element-wise.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-0.9, -0.6, -0.3, 0., 0.3, 0.6, 0.9]).asin().numpy())
-    ```
-    """
-    # https://personal.math.ubc.ca/~cbm/aands/page_81.htm 4.4.46
-    coefficients = [-0.0012624911, 0.0066700901, -0.0170881256, 0.0308918810, -0.0501743046, 0.0889789874, -0.2145988016, 1.5707963050]
-    x = math.pi / 2 - (1.0 - self.abs()).sqrt() * polyN(self.abs(), coefficients)
-    return self.sign() * x
-
-  def acos(self) -> Tensor:
-    """
-    Computes the inverse cosine (arccosine) of the tensor element-wise.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-0.9, -0.6, -0.3, 0., 0.3, 0.6, 0.9]).acos().numpy())
-    ```
-    """
-    return math.pi / 2 - self.asin()
-
-  def atan(self) -> Tensor:
-    """
-    Computes the inverse tangent (arctan) of the tensor element-wise.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).atan().numpy())
-    ```
-    """
-    return (self / (1 + self * self).sqrt()).asin()
-
   # ***** math functions *****
-
-  def round(self: Tensor) -> Tensor:
-    """
-    Rounds the tensor element-wise with rounding half to even.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-3.5, -2.5, -1.5, -0.5, 0.5, 1.5, 2.5, 3.5]).round().numpy())
-    ```
-    """
-    return ((self > 0) == ((b := self.trunc() / 2.0).trunc() == b)).where((self - 0.5).ceil(), (self + 0.5).floor())
 
   def lerp(self, end:Tensor, weight:Tensor|float) -> Tensor:
     """
@@ -3012,61 +2872,7 @@ class Tensor(OpMixin):
       return (self+(((end - self).cast(dtypes.int8) * w_i + (1<<W_PREC-1)).cast(dtypes.uint16) >> W_PREC)).cast(dtypes.uint8)
     return self + (end - self) * weight
 
-  def sign(self) -> Tensor:
-    """
-    Returns the sign of the tensor element-wise.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).sign().numpy())
-    ```
-    """
-    return self.ne(0).where((self<0).where(self.full_like(-1), self.full_like(1)), self.full_like(0)) + self*0
-
-  def abs(self) -> Tensor:
-    """
-    Computes the absolute value of the tensor element-wise.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).abs().numpy())
-    ```
-    """
-    return self * self.sign()
-
-  def reciprocal(self) -> Tensor:
-    """
-    Computes `1/x` element-wise.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([1., 2., 3., 4.]).reciprocal().numpy())
-    ```
-    """
-    return self.cast(least_upper_float(self.dtype))._apply_uop(UOp.reciprocal)
-
   # ***** activation functions *****
-
-  def elu(self, alpha=1.0) -> Tensor:
-    """
-    Applies the Exponential Linear Unit (ELU) function element-wise.
-
-    - Paper: https://arxiv.org/abs/1511.07289v5
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).elu().numpy())
-    ```
-    """
-    return self.relu() - alpha*(1-self.exp()).relu()
-
-  def celu(self, alpha=1.0) -> Tensor:
-    """
-    Applies the Continuously differentiable Exponential Linear Unit (CELU) function element-wise.
-
-    - Paper: https://arxiv.org/abs/1704.07483
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).celu().numpy())
-    ```
-    """
-    return self.maximum(0) + (alpha * ((self / alpha).exp() - 1)).minimum(0)
 
   def selu(self, alpha=1.67326, gamma=1.0507) -> Tensor:
     """
@@ -3079,80 +2885,6 @@ class Tensor(OpMixin):
     ```
     """
     return gamma * (self >= 0).detach().where(self, alpha * (self.exp() - 1))
-
-  def sinh(self) -> Tensor:
-    """
-    Applies the Hyperbolic Sine (sinh) function element-wise.
-
-    - Described: https://en.wikipedia.org/wiki/Hyperbolic_functions#Sinh
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).sinh().numpy())
-    ```
-    """
-    return (self.exp() - self.neg().exp()) / 2
-
-  def cosh(self) -> Tensor:
-    """
-    Applies the Hyperbolic Cosine (cosh) function element-wise.
-
-    - Described: https://en.wikipedia.org/wiki/Hyperbolic_functions#Cosh
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).cosh().numpy())
-    ```
-    """
-    return (self.exp() + self.neg().exp()) / 2
-
-  def atanh(self) -> Tensor:
-    """
-    Applies the Inverse Hyperbolic Tangent (atanh) function element-wise.
-
-    - Described: https://en.wikipedia.org/wiki/Inverse_hyperbolic_functions#atanh
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-0.9, -0.6, -0.3, 0., 0.3, 0.6, 0.9]).atanh().numpy())
-    ```
-    """
-    return ((1 + self)/(1 - self)).log() / 2
-
-  def asinh(self) -> Tensor:
-    """
-    Applies the Inverse Hyperbolic Sine (asinh) function element-wise.
-
-    - Described: https://en.wikipedia.org/wiki/Inverse_hyperbolic_functions#asinh
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).asinh().numpy())
-    ```
-    """
-    return (self + (self.square() + 1).sqrt()).log()
-
-  def acosh(self) -> Tensor:
-    """
-    Applies the Inverse Hyperbolic Cosine (acosh) function element-wise.
-
-    - Described: https://en.wikipedia.org/wiki/Inverse_hyperbolic_functions#acosh
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).acosh().numpy())
-    ```
-    """
-    return (self + (self.square() - 1).sqrt()).log()
-
-  def erf(self) -> Tensor:
-    """
-    Applies error function element-wise.
-
-    - Described: https://en.wikipedia.org/wiki/Error_function
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-1.5, -1.0, -0.5, 0., 0.5, 1.0, 1.5]).erf().numpy())
-    ```
-    """
-    # https://personal.math.ubc.ca/~cbm/aands/page_299.htm 7.1.26
-    t = 1.0 / (1.0 + 0.3275911 * self.abs())
-    return self.sign() * (1.0 - t * polyN(t, [1.061405429, -1.453152027, 1.421413741, -0.284496736, 0.254829592]) * (-self.square()).exp())
 
   def mish(self) -> Tensor:
     """
@@ -3175,16 +2907,6 @@ class Tensor(OpMixin):
     ```
     """
     return (1/beta) * (self*beta).logaddexp(0.0)
-
-  def softsign(self) -> Tensor:
-    """
-    Applies the Softsign function element-wise.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).softsign().numpy())
-    ```
-    """
-    return self / (1 + self.abs())
 
   # ***** broadcasted elementwise ops *****
 
@@ -3259,7 +2981,7 @@ class Tensor(OpMixin):
       numerator, denominator = numerator.cast(dt), denominator.cast(dt)
       if rounding_mode == "trunc": return numerator.idiv(denominator)
       if rounding_mode == "floor":
-        truncate_div, truncate_mod = numerator.idiv(denominator), numerator._apply_broadcasted_uop(UOp.mod, denominator)
+        truncate_div, truncate_mod = numerator.idiv(denominator), numerator._binop(Ops.MOD, denominator, False)
         opposite_sign = ((numerator>0)&(denominator<0)) | ((numerator<0)&(denominator>0))
         return (opposite_sign&(truncate_mod!=0)).where(truncate_div-1, truncate_div)
     if rounding_mode == "trunc": return d.trunc().cast(output_dtype)
@@ -3279,20 +3001,6 @@ class Tensor(OpMixin):
     """
     a, b = self._broadcasted(x, reverse)
     return a - a.div(b, rounding_mode="floor") * b
-
-  def bitwise_not(self) -> Tensor:
-    """
-    Computes the bitwise NOT of `self`.
-    Equivalent to `~self`.
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([0, 2, 5, 255], dtype="int8").bitwise_not().numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([True, False]).bitwise_not().numpy())
-    ```
-    """
-    if self.dtype != dtypes.bool and not dtypes.is_int(self.dtype): raise RuntimeError(f"{self.dtype} is not supported")
-    return self.logical_not() if self.dtype == dtypes.bool else self ^ -1
 
   def lshift(self, x:Tensor|int, reverse=False) -> Tensor:
     """
@@ -3340,19 +3048,6 @@ class Tensor(OpMixin):
     ret = base._apply_uop(UOp.pow, exponent)
     # NOTE: pow(int, float) -> int
     return ret.round().cast(self.dtype) if not reverse and not dtypes.is_float(self.dtype) and dtypes.is_float(exponent.dtype) else ret
-
-  def maximum(self, x:Tensor|ConstType) -> Tensor:
-    """
-    Computes element-wise maximum of `self` and `x`.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-1, 2, 3]).maximum(1).numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-1, 2, 3]).maximum(Tensor([-4, -2, 9])).numpy())
-    ```
-    """
-    return self._apply_broadcasted_uop(UOp.maximum, x)
 
   def minimum(self, x:Tensor|ConstType) -> Tensor:
     """
@@ -3437,10 +3132,6 @@ class Tensor(OpMixin):
   def __ixor__(self, x) -> Tensor: return self.assign(self.bitwise_xor(x)) # type: ignore[misc]
   def __ilshift__(self, x) -> Tensor: return self.assign(self.lshift(x)) # type: ignore[misc]
   def __irshift__(self, x) -> Tensor: return self.assign(self.rshift(x)) # type: ignore[misc]
-
-  def __lt__(self, x) -> Tensor: return self._apply_broadcasted_uop(UOp.__lt__, x, False)
-  def __gt__(self, x) -> Tensor: return self._apply_broadcasted_uop(UOp.__lt__, x, True)
-  def ne(self, x) -> Tensor: return self._apply_broadcasted_uop(UOp.ne, x, False)
 
   def __eq__(self, x) -> Tensor: return self.eq(x)                      # type: ignore[override]
 
@@ -3591,6 +3282,10 @@ class Tensor(OpMixin):
       from extra.thunder.tiny.fa import flash_attention
       return flash_attention(self, key, value, attn_mask=attn_mask, is_causal=is_causal)
 
+    if getenv("HK_FLASH_ATTENTION"):
+      from extra.thunder.amd.fa import flash_attention
+      return flash_attention(self, key, value, attn_mask=attn_mask, is_causal=is_causal)
+
     # GQA: https://docs.pytorch.org/docs/stable/generated/torch.nn.functional.scaled_dot_product_attention.html
     if enable_gqa:
       key = key.repeat_interleave(int(self.shape[-3] // key.shape[-3]), dim=-3)
@@ -3601,7 +3296,7 @@ class Tensor(OpMixin):
     # handle attention mask
     if is_causal:
       if attn_mask is not None: raise RuntimeError("cannot set attn_mask when is_causal=True")
-      attn_mask = qk.ones_like(requires_grad=False, device=self.device, dtype=dtypes.bool).tril()
+      attn_mask = qk.ones_like(requires_grad=False, dtype=dtypes.bool).tril()
     if attn_mask is not None:
       if attn_mask.dtype == dtypes.bool: attn_mask = attn_mask.where(0, -float("inf"))
       qk = qk + attn_mask
@@ -3737,9 +3432,9 @@ class Tensor(OpMixin):
     assert self.ndim > 1, f"expected two or more dimensions, got {self.ndim}"
     b_shape, m, n = self.shape[:-2], int(self.shape[-2]), int(self.shape[-1])
     R = self.clone()
-    Q = Tensor.eye(m, dtype=self.dtype).reshape((1,) * len(b_shape) + (m, m)).expand(b_shape + (m, m)).contiguous()
+    Q = Tensor.eye(m, dtype=self.dtype).reshape((1,) * len(b_shape) + (m, m)).expand(b_shape + (m, m))
     for i in range(min(m, n)):
-      x = R[..., i:m, i].contiguous()  # TODO: without contigous this can silently be wrong, should at least assert
+      x = R[..., i:m, i]
       norm = x.square().sum(-1).sqrt()
       s = (x[..., 0] != 0).where(-x[..., 0].sign(), -1)
       u1 = x[..., 0] - s * norm
@@ -3758,10 +3453,10 @@ class Tensor(OpMixin):
     #preprocess the matrix
     Q, R = (self.qr() if m >= n else self.transpose(-2, -1).qr())
     num, q_num = min(m, n), max(m, n)
-    U = R.shrink(tuple([None] * len(b_shape) + [(0, num), (0, num)])).contiguous()
-    V = Tensor.eye(num, dtype=self.dtype).reshape((1,) * len(b_shape) + (num, num)).expand(b_shape + (num, num)).contiguous()
+    U = R.shrink(tuple([None] * len(b_shape) + [(0, num), (0, num)]))
+    V = Tensor.eye(num, dtype=self.dtype).reshape((1,) * len(b_shape) + (num, num)).expand(b_shape + (num, num))
     #prepare round robin pairing
-    permute, inverse_permute = Tensor.arange(0, num, dtype=dtypes.int), Tensor.zeros(num, dtype=dtypes.int).contiguous()
+    permute, inverse_permute = Tensor.arange(0, num, dtype=dtypes.int), Tensor.zeros(num, dtype=dtypes.int)
     permute[num//2:num] = permute[num//2:num].flip(0)
     inverse_permute[permute] = Tensor.arange(num, dtype=dtypes.int)
     def one_round_jacobi(U, V,permute,inverse_permute):
@@ -3797,24 +3492,13 @@ class Tensor(OpMixin):
     U = U.gather(-1, new_indices) / (S != 0).where(S, 1).unsqueeze(-2)
     V = V.gather(-1, new_indices)
 
-    padded_u = Tensor.eye(q_num, dtype=U.dtype).reshape((1,) * len(b_shape) + (q_num, q_num)).expand(b_shape + (q_num, q_num)).contiguous()
+    padded_u = Tensor.eye(q_num, dtype=U.dtype).reshape((1,) * len(b_shape) + (q_num, q_num)).expand(b_shape + (q_num, q_num))
     padded_u[..., 0:num, 0:num] = U
     U = Q @ padded_u
     if not full_matrices: U, V = U[..., 0:num], V[..., 0:num]
     return (U, S, V.transpose(-2,-1)) if m >= n else (V, S, U.transpose(-2, -1))
 
   # ***** Tensor Properties *****
-
-  def element_size(self) -> int:
-    """
-    Returns the size in bytes of an individual element in the tensor.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor([5], dtype=dtypes.int16)
-    print(t.element_size())
-    ```
-    """
-    return self.dtype.itemsize
 
   def nbytes(self) -> int:
     """
@@ -3826,18 +3510,6 @@ class Tensor(OpMixin):
     ```
     """
     return int(self.numel()) * self.element_size()
-
-  def is_floating_point(self) -> bool:
-    """
-    Returns `True` if the tensor contains floating point types, i.e. is one of `dtypes.float64`, `dtypes.float32`,
-    `dtypes.float16`, `dtypes.bfloat16`.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor([8, 9], dtype=dtypes.float32)
-    print(t.is_floating_point())
-    ```
-    """
-    return dtypes.is_float(self.dtype)
 
   def size(self, dim:int|None=None) -> sint|tuple[sint, ...]:
     """
@@ -3872,10 +3544,7 @@ class Tensor(OpMixin):
     print(t.dtype, t.numpy())
     ```
     """
-    if (dt:=to_dtype(dtype)) in {dtypes.uint8, dtypes.uint16} and dtypes.is_float(self.dtype):
-      # NOTE: values within the int32 range and outside the unsigned dtype range will cause values to wrap around
-      return self._apply_uop(UOp.cast, dtype=dtypes.int32)._apply_uop(UOp.cast, dtype=dt)
-    return self if self.dtype == dt else self._apply_uop(UOp.cast, dtype=dt)
+    return self if self.dtype == (dt:=to_dtype(dtype)) else self._apply_uop(UOp.cast, dtype=dt)
 
   def bitcast(self, dtype:DTypeLike) -> Tensor:
     """
@@ -3908,71 +3577,6 @@ class Tensor(OpMixin):
       return Tensor.stack(*(tmp>>8*i*ns for i in range(os//ns)), dim=-1).flatten(-2).cast(new_uint).bitcast(dtype)
     return self._apply_uop(UOp.bitcast, dtype=dt) if self.dtype != dt else self
 
-  def float(self) -> Tensor:
-    """
-    Convenience method to cast `self` to a `float32` Tensor.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor([-1, 2, 3], dtype=dtypes.int32)
-    print(t.dtype, t.numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = t.float()
-    print(t.dtype, t.numpy())
-    ```
-    """
-    return self.cast(dtypes.float32)
-
-  def half(self) -> Tensor:
-    """
-    Convenience method to cast `self` to a `float16` Tensor.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor([-1, 2, 3], dtype=dtypes.int32)
-    print(t.dtype, t.numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = t.half()
-    print(t.dtype, t.numpy())
-    ```
-    """
-    return self.cast(dtypes.float16)
-
-  def int(self) -> Tensor:
-    """
-    Convenience method to cast `self` to a `int32` Tensor.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor([-1.5, -0.5, 0.0, 0.5, 1.5])
-    print(t.dtype, t.numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = t.int()
-    print(t.dtype, t.numpy())
-    ```
-    """
-    return self.cast(dtypes.int32)
-
-  def bool(self) -> Tensor:
-    """
-    Convenience method to cast `self` to a `bool` Tensor.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor([-1, 0, 1])
-    print(t.dtype, t.numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = t.bool()
-    print(t.dtype, t.numpy())
-    ```
-    """
-    return self.cast(dtypes.bool)
-
-  def bfloat16(self) -> Tensor: return self.cast(dtypes.bfloat16)
-  def double(self) -> Tensor: return self.cast(dtypes.double)
-  def long(self) -> Tensor: return self.cast(dtypes.long)
-  def short(self) -> Tensor: return self.cast(dtypes.short)
-
   # *** image Tensor function replacements ***
 
   def image_dot(self, w:Tensor, dtype:DTypeLike|None=None) -> Tensor:
@@ -3991,7 +3595,7 @@ class Tensor(OpMixin):
     return cx.image_conv2d(cw, groups=groups, dtype=dtype).reshape(out_shape_t).transpose(self.ndim-1, self.ndim-2)
 
   def image_conv2d(self, weight:Tensor, bias:Tensor|None=None, groups=1, stride=1, dilation=1, padding=0, dtype=None) -> Tensor:
-    base_image_type, dtsz = (dtypes.imageh, 2) if getenv("FLOAT16", 0) else (dtypes.imagef, 4)
+    base_image_type, dtsz = (dtypes.imageh, 2) if (FLOAT16:=getenv("FLOAT16", 0)) else (dtypes.imagef, 4)
 
     (bs,_,iy,ix), (cout,cin,H,W) = self.shape, weight.shape
     x, w = self, weight.reshape(groups, (rcout := cout//groups), cin, H, W)
@@ -4036,7 +3640,8 @@ class Tensor(OpMixin):
 
     # contiguous creates the image, and early realize static weights (TODO: test for the static weight)
     if IMAGE >= 2: x,w = x.cast(base_image_type((bs*iy, ix*groups*cin//4, 4))), w.cast(base_image_type((cout//4, H*W*cin, 4)))
-    x, w = x.contiguous(), w.contiguous()
+    if IMAGE == 1 and FLOAT16: x, w = x.cast(dtypes.half).contiguous().cast(dtypes.float), w.cast(dtypes.half).contiguous().cast(dtypes.float)
+    else: x, w = x.contiguous(), w.contiguous()
 
     if IMAGE == 1 and added_weight: w, H = w[:, :-added_weight, ...], H - added_weight
 
