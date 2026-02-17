@@ -43,9 +43,9 @@ def _extract_bits(val: UOp, hi: int, lo: int) -> UOp:
   dt = dtypes.uint64 if val.dtype in (dtypes.uint64, dtypes.int64) else dtypes.uint32
   width = hi - lo + 1
   result = ((val >> _const(dt, lo)) if lo > 0 else val) & _const(val.dtype, (1 << width) - 1)
-  # Downcast to narrowest fitting type so { hi, lo } concatenation computes correct shift
-  narrow = {8: dtypes.uint8, 16: dtypes.uint16, 32: dtypes.uint32, 64: dtypes.uint64}.get(width)
-  if narrow and narrow != dt: result = result.cast(narrow)
+  # Downcast to match extracted bit width so brace-concat { hi, lo } computes correct output dtype
+  target_dt = _BITS_DT.get(width) or (dtypes.uint32 if width <= 32 else dtypes.uint64 if width <= 64 else dt)
+  if result.dtype != target_dt: result = result.cast(target_dt)
   return result
 
 def _set_bit(old, pos, val):
@@ -90,6 +90,20 @@ def _f32_to_fp8(v: UOp) -> UOp:
   return f2f((v.bitcast(dtypes.float32) if v.dtype != dtypes.float32 else v).bitcast(dtypes.uint32), dtypes.float32, dtypes.fp8e4m3)
 def _f32_to_bf8(v: UOp) -> UOp:
   return f2f((v.bitcast(dtypes.float32) if v.dtype != dtypes.float32 else v).bitcast(dtypes.uint32), dtypes.float32, dtypes.fp8e5m2)
+def _f32_to_bf16(v: UOp) -> UOp:
+  """Convert f32 to bf16 with round-to-nearest-even. BF16 is the upper 16 bits of F32 with rounding."""
+  bits = (v.bitcast(dtypes.float32) if v.dtype != dtypes.float32 else v).bitcast(dtypes.uint32)
+  # Round-to-nearest-even: add rounding bias. If the bit just below the truncation point is 1 and the rest are 0, round to even.
+  round_bit = (bits >> _u32(16)) & _u32(1)  # bit 16 (LSB of kept part)
+  rounding = _u32(0x7FFF) + round_bit  # 0x7FFF + bit16: rounds to even
+  rounded = bits + rounding
+  return (rounded >> _u32(16)).cast(dtypes.uint16)
+def _f32_to_bf16_sr(v: UOp, stoch: UOp) -> UOp:
+  """Convert f32 to bf16 with stochastic rounding."""
+  bits = (v.bitcast(dtypes.float32) if v.dtype != dtypes.float32 else v).bitcast(dtypes.uint32)
+  # Stochastic rounding: add lower 16 bits of stochastic value to lower 16 bits of f32
+  rounded = bits + (stoch & _u32(0xFFFF))
+  return (rounded >> _u32(16)).cast(dtypes.uint16)
 
 def _check_nan(v: UOp, quiet: bool) -> UOp:
   if v.op == Ops.CAST and v.dtype == dtypes.float64: v = v.src[0]
@@ -322,8 +336,10 @@ _FUNCS: dict[str, Callable[..., UOp]] = {
   # Address calculation for memory operations
   'CalcDsAddr': lambda a, o, *r: a.cast(dtypes.uint32) + o.cast(dtypes.uint32),
   'CalcGlobalAddr': lambda v, s, *r: v.cast(dtypes.uint64) + s.cast(dtypes.uint64),
-  # FP8/BF8 conversion functions
+  'CalcScratchAddr': lambda v, s, *r: v.cast(dtypes.uint64) + s.cast(dtypes.uint64),
+  # FP8/BF8/BF16 conversion functions
   'fp8_to_f32': _fp8_to_f32, 'bf8_to_f32': _bf8_to_f32, 'f32_to_fp8': _f32_to_fp8, 'f32_to_bf8': _f32_to_bf8,
+  'f32_to_bf16': _f32_to_bf16, 'f32_to_bf16_SR': _f32_to_bf16_sr, 'f32_to_bf16_sr': _f32_to_bf16_sr,
 }
 for is_max, name in [(False, 'min'), (True, 'max')]:
   for dt, sfx in [(dtypes.float32, 'f32'), (dtypes.int, 'i32'), (dtypes.uint32, 'u32'), (dtypes.int16, 'i16'), (dtypes.uint16, 'u16')]:
