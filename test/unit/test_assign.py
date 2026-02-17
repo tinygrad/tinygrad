@@ -745,7 +745,6 @@ class TestAssignOrdering(unittest.TestCase):
     np.testing.assert_equal(a.numpy(), [5, 6, 7, 8])
     np.testing.assert_equal(b.numpy(), [1, 2, 3, 4])
 
-  @unittest.expectedFailure  # NOTE: we don't support binding to two different values in one schedule
   def test_variable_slice_ordering(self):
     """Variable-indexed slices - tests symbolic dependency tracking."""
     v_i = Variable("i", 0, 3)
