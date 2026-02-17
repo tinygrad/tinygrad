@@ -86,9 +86,57 @@ class TestGemmLarge(unittest.TestCase):
   def test_k_sharded_1(self): verify_asm_gemm_k_sharded(14336, 4096, 8*8192, gpus=8)
   def test_k_sharded_2(self): verify_asm_gemm_k_sharded(4096, 14336, 8*8192, gpus=8)
   def test_k_sharded_3(self): verify_asm_gemm_k_sharded(4096, 4096, 8*8192, gpus=8)
-  def test_gemm_unsupported(self):
-    with self.assertRaisesRegex(AssertionError, "shape not supported"):
-      verify_asm_gemm(8, 1024, 1024, 4096, gpus=8)
+  def test_unsupported_k(self):
+    with self.assertRaisesRegex(AssertionError, "not a multiple"):
+      verify_asm_gemm(1, 1024, 1024, 100)
+  def test_unsupported_m(self):
+    with self.assertRaisesRegex(AssertionError, "not a multiple"):
+      verify_asm_gemm(1, 1000, 256, 256)
+  def test_unsupported_n(self):
+    with self.assertRaisesRegex(AssertionError, "not a multiple"):
+      verify_asm_gemm(1, 256, 1000, 256)
+  def test_unsupported_batch(self):
+    with self.assertRaisesRegex(AssertionError, "batch size"):
+      verify_asm_gemm(3, 256, 256, 256)
+  def test_gemm_previously_unsupported(self): verify_asm_gemm(8, 1024, 1024, 4096, gpus=8)
+
+  # more shapes: vary M, N, K independently
+  def test_shape_small_square(self): verify_asm_gemm(1, 256, 256, 256)
+  def test_shape_small_rect_m(self): verify_asm_gemm(1, 512, 256, 256)
+  def test_shape_small_rect_n(self): verify_asm_gemm(1, 256, 512, 256)
+  def test_shape_small_rect_k(self): verify_asm_gemm(1, 256, 256, 512)
+  def test_shape_tall(self): verify_asm_gemm(1, 2048, 256, 256)
+  def test_shape_wide(self): verify_asm_gemm(1, 256, 2048, 256)
+  def test_shape_deep(self): verify_asm_gemm(1, 256, 256, 4096)
+  def test_shape_non_square(self): verify_asm_gemm(1, 1024, 2048, 512)
+  def test_shape_batched_small(self): verify_asm_gemm(2, 256, 256, 256)
+  def test_shape_batched_rect(self): verify_asm_gemm(2, 512, 1024, 256)
+  # K edge cases: iters=1,2,3 exercise different loop paths
+  def test_shape_k64(self): verify_asm_gemm(1, 256, 256, 64)
+  def test_shape_k128(self): verify_asm_gemm(1, 256, 256, 128)
+  def test_shape_k192(self): verify_asm_gemm(1, 256, 256, 192)
+
+  def test_llama3_out1(self): verify_asm_gemm(1, 8192, 128256, 4096)
+  def test_llama3_out2(self): verify_asm_gemm(1, 8192, 4096, 128256)
+  def test_llama3_out3(self): verify_asm_gemm(1, 4096, 128256, 8192)
+
+class TestMagicGu(unittest.TestCase):
+  def test_magicgu_matches_old(self):
+    from extra.gemm.asm.cdna.asm import _magicgu_mulhi, TILE_M, TILE_N, TILE_K
+    old_iters_args = {64: (67108864, 0), 128: (33554432, 0), 224: (613566757, 2147483656)}
+    old_gemm_shapes = [
+      (8192, 4096, 4096), (8192, 14336, 4096), (8192, 4096, 14336),
+      (8192, 8192, 8192), (4096, 4096, 4096), (4096, 14336, 4096),
+      (4096, 14336, 8192), (4096, 4096, 14336), (14336, 4096, 8192),
+      (4096, 8192, 14336), (4096, 4096, 8192), (4096, 8192, 4096),
+    ]
+    for M, N, K in old_gemm_shapes:
+      iters = K // TILE_K
+      total = (M // TILE_M) * (N // TILE_N) * iters
+      for batch in [1, 2]:
+        magic, shift = _magicgu_mulhi(iters, total * batch)
+        old_magic, old_shift = old_iters_args[iters]
+        self.assertEqual((magic, shift), (old_magic, old_shift), f"mismatch for ({M},{N},{K}) batch={batch} iters={iters}")
 
 if __name__ == "__main__":
   unittest.main()
