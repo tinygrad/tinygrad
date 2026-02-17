@@ -255,39 +255,30 @@ class Tensor(OpMixin):
 
     NOTE: A Tensor can only be scheduled once.
     """
-    # allocate buffers for all non-contiguous explict outputs
-    explicit_outputs = [x.uop.base for x in (self,)+lst]
-    buffer_map = {}
-    sink = []
-    for x in explicit_outputs:
-      # if it's already contiguous the next rewrite will handle it
-      if x.op is Ops.CONTIGUOUS:
-        sink.append(x)
-        continue
-      allocated_buffer = UOp.new_buffer(x.device, x.size, x.dtype).reshape(x.shape)
-      buffer_map[x] = allocated_buffer
-      sink.append(allocated_buffer.assign(x))
-    big_sink = UOp.sink(*sink)
+    big_sink = UOp.sink(*[x.uop for x in (self,)+lst])
 
     # rewrite all contiguous to assign
-    from tinygrad.uop.ops import graph_rewrite, PatternMatcher, UPat
-    def contig_to_assign(ctx, x:UOp):
+    buffer_map = {x.base:None for x in big_sink.src}
+    from tinygrad.uop.ops import graph_rewrite, PatternMatcher, UPat, GroupOp, _remove_all_tags
+    def contig_to_assign(ctx:dict[UOp,UOp|None], x:UOp):
+      # for contiguous or in buffer_map explicitly
+      if not (x.op is Ops.CONTIGUOUS or (x in ctx and ctx[x] is None)): return None
       # not for symbolic shape
       if any([not isinstance(s, int) for s in x.shape]): return None
+      # not sure why the ctx isn't enough, but tag fixes it
       ctx[x] = buffer = UOp.new_buffer(x.device, x.size, x.dtype).reshape(x.shape)
-      return buffer.assign(x.src[0])
-    pm_contig_to_assign = PatternMatcher([
-      (UPat(Ops.CONTIGUOUS, name="x"), contig_to_assign),
-    ])
-    big_sink = graph_rewrite(big_sink, pm_contig_to_assign, ctx=buffer_map, bottom_up=True)
+      return buffer.assign(x.src[0] if x.op is Ops.CONTIGUOUS else x.rtag())
+
+    pm_contig_to_assign = PatternMatcher([ (UPat(GroupOp.All, name="x"), contig_to_assign), ])
+    big_sink = graph_rewrite(big_sink, pm_contig_to_assign, ctx=buffer_map, bottom_up=True, name="contig to assign")
+    big_sink = graph_rewrite(big_sink, _remove_all_tags)
+    assert all(x is not None for x in buffer_map.values())
 
     _apply_map_to_tensors(buffer_map, name="Apply Preallocated Buffers")
 
-    #big_sink = UOp.sink(*[x.uop for x in (self,)+lst])
-
     # this is where the schedule cache should go
     becomes_map, schedule, var_vals = complete_create_schedule_with_vars(big_sink)
-    #_apply_map_to_tensors(becomes_map, name="Apply Schedule Map")
+    _apply_map_to_tensors(becomes_map, name="Apply Schedule Map")
     return schedule, var_vals
 
   def schedule(self, *lst:Tensor) -> list[ExecItem]:
