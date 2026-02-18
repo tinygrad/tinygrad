@@ -249,7 +249,7 @@ function getMetadata(key) {
     for (const b of e.arg.bufs.sort((a, b) => a.num - b.num)) {
       group.append("p").text(`${Modes[b.mode]}@data${b.num} ${formatUnit(b.nbytes, 'B')}`).style("cursor", "pointer").on("click", () => {
         const row = document.getElementById(b.k); if (!isExpanded(row)) { row.click(); }
-        focusShape(b.key);
+        setFocus(b.key);
       });
     }
     if (e.arg.ctx != null) {
@@ -270,13 +270,13 @@ function getMetadata(key) {
       const p = kernels.append("p").append(() => colored(`[${u}] ${repr} ${Modes[mode]}@data${num}`));
       const shapeInfo = selectShape(shape).e?.arg?.tooltipText?.split("\n");
       if (shapeInfo?.length > 5) p.append("span").text(" "+shapeInfo[5]);
-      if (shape != null) p.style("cursor", "pointer").on("click", () => focusShape(shape));
+      if (shape != null) p.style("cursor", "pointer").on("click", () => setFocus(shape));
     }
   }
   return html.node();
 }
 
-function focusShape(shape) {
+function setFocus(shape) {
   saveToHistory({ shape:focusedShape });
   focusedShape = shape; d3.select("#timeline").call(canvasZoom.transform, zoomLevel);
   return metadata.replaceChildren(getMetadata(focusedShape));
@@ -608,7 +608,7 @@ async function renderProfiler(path, unit, opts) {
     e.preventDefault();
     const foundRect = findRectAtPosition(e.clientX, e.clientY);
     if (foundRect?.step != null && (foundRect?.key == null || e.type == "dblclick")) { return switchCtx(foundRect.ctx, foundRect.step); }
-    if (foundRect?.key != focusedShape) { focusShape(foundRect?.key); }
+    if (foundRect?.key != focusedShape) { setFocus(foundRect?.key); }
   }
   canvas.addEventListener("click", clickShape);
   canvas.addEventListener("dblclick", clickShape);
@@ -741,7 +741,7 @@ function saveToHistory(ns) {
 const switchCtx = (newCtx, step) => setState({ expandSteps:true, currentCtx:newCtx+1, currentStep:step ?? 0, currentRewrite:0 });
 
 window.addEventListener("popstate", (e) => {
-  if (e.state?.shape != null) return focusShape(e.state?.shape);
+  if (e.state?.shape != null) return setFocus(e.state?.shape);
   if (e.state != null) setState(e.state);
 });
 
