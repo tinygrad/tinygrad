@@ -511,6 +511,8 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     if self.op in GroupOp.ALU: return axes[-1] if (axes := dedup([x.axis for x in self.src if x.axis is not None])) else None
     if len(self.src) == 0: return None
     src_axis = self.src[0].axis
+    if self.op is Ops.SHRINK and src_axis is not None and self.marg[src_axis] != (0, self.src[0].shape[src_axis]):
+      return None # SHRINK will remove the sharding if it's on axis
     if self.op is Ops.REDUCE_AXIS: return None if src_axis is not None and src_axis in self.arg[1] else src_axis
     if self.op is Ops.RESHAPE:
       if src_axis is None: return None
