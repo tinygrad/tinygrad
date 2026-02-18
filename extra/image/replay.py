@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
 import pickle, sys
-from tinygrad.helpers import temp
 from tinygrad.uop.ops import RewriteTrace
 from tinygrad.codegen import get_program
 from tinygrad.renderer.cstyle import QCOMRenderer
 
-KERNEL_NAME = sys.argv[1] if len(sys.argv) > 1 else "r_64_32_16_4_4_6_3_3_4"
+PKL = sys.argv[1] if len(sys.argv) > 1 else "rewrites.pkl"
+KERNEL_NAME = sys.argv[2] if len(sys.argv) > 2 else "r_64_32_16_4_4_6_3_3_4"
 
-with open(temp("rewrites.pkl", append_user=True), "rb") as f:
-  trace: RewriteTrace = pickle.load(f)
+with open(PKL, "rb") as f: trace: RewriteTrace = pickle.load(f)
 
 # find the kernel by display_name
 for key in trace.keys:
