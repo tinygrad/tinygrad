@@ -310,6 +310,21 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
   @property
   def size(self) -> int: return prod(self.max_shape)
 
+  @property
+  def shard_size(self):
+    if self.axis is None: return self.size
+    return self.size // len(self.device)
+
+  @property
+  def shard_shape(self):
+    if self.axis is None: return self.shape
+    return tuple(x//len(self.device) if i == self.axis else x for i,x in enumerate(self.shape))
+
+  @property
+  def max_shard_shape(self):
+    if self.axis is None: return self.max_shape
+    return tuple(x//len(self.device) if i == self.axis else x for i,x in enumerate(self.max_shape))
+
   @functools.cached_property
   def ended_ranges(self):
     if self.op in range_start: return self.src[range_start[self.op]:]
@@ -809,11 +824,6 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
   def pyrender(self): return pyrender(self)
 
   # *** uop high level syntactic sugar ***
-
-  @property
-  def shard_shape(self):
-    if self.axis is None: return self.shape
-    return tuple(x//len(self.device) if i == self.axis else x for i,x in enumerate(self.shape))
 
   @staticmethod
   def placeholder(shape:tuple[int, ...], dtype:DType, slot:int, addrspace=AddrSpace.GLOBAL):
