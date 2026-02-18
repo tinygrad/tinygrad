@@ -30,14 +30,13 @@ class CPUWorker(threading.Thread):
   def run(self):
     while True:
       cmd_iter = iter(self.tasks.get())
-      try:
-        for cmd in cmd_iter:
-          threads, args_cnt = next(cmd_iter), next(cmd_iter)
-          args = [next(cmd_iter) for _ in range(args_cnt)]
-          for th in range(threads - 1): self.push_task(th, cmd, args)
-          cmd(self.thread_id, *args)
-          for th in range(threads - 1): self.pool[th].join()
-      finally: self.tasks.task_done()
+      for cmd in cmd_iter:
+        threads, args_cnt = next(cmd_iter), next(cmd_iter)
+        args = [next(cmd_iter) for _ in range(args_cnt)]
+        for th in range(threads - 1): self.push_task(th, cmd, args)
+        cmd(self.thread_id, *args)
+        for th in range(threads - 1): self.pool[th].join()
+      self.tasks.task_done()
 
 class CPUComputeQueue(HWQueue):
   def _exec(self, tid, prg, bufs, *args):
