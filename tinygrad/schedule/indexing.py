@@ -25,7 +25,7 @@ pm_generate_realize_map = pm_gate_kernel_sink+PatternMatcher([
   # always realize REDUCE on outer ranges
   (UPat(Ops.REDUCE, name="r"), lambda ctx,r: realize(ctx, r) if any(tr.arg[-1] == AxisType.OUTER for tr in r.src[1:]) else None),
   # realize srcs of these
-  (UPat((Ops.COPY, Ops.MSELECT, Ops.MSTACK, Ops.ASSIGN, Ops.ENCDEC), name="rb"), realize_srcs),
+  (UPat((Ops.COPY, Ops.MSELECT, Ops.MSTACK, Ops.ENCDEC), name="rb"), realize_srcs),
 ])
 
 @dataclass(frozen=True)
