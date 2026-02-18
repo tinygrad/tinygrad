@@ -264,18 +264,20 @@ class TestDiskTensor(TempDirTestCase):
   def test_strided_read(self):
     # test non-contiguous (strided) read - should read elements at indices 0, 2, 4
     dt = Tensor([0, 1, 2, 3, 4, 5]).to(f"disk:{self.tmp('dt_strided_read')}")
-    result = dt[::2].tolist()
-    # TODO: dt[::2] selects indices 0, 2, 4, so result should be [0, 2, 4]
-    # self.assertEqual(result, [0, 2, 4])
-    self.assertEqual(result, [0, 1, 2])  # wrong!
+    with self.assertRaises(RuntimeError):
+      result = dt[::2].tolist()
+      # TODO: dt[::2] selects indices 0, 2, 4, so result should be [0, 2, 4]
+      # self.assertEqual(result, [0, 2, 4])
+      self.assertEqual(result, [0, 1, 2])  # wrong!
 
   def test_permuted_read(self):
     # test non-contiguous (permuted) read - should read transposed
     dt = Tensor([[0, 1, 2], [3, 4, 5]]).to(f"disk:{self.tmp('dt_permuted_read')}")
-    result = dt.T.tolist()
-    # TODO: transpose should give [[0, 3], [1, 4], [2, 5]]
-    # self.assertEqual(result, [[0, 3], [1, 4], [2, 5]])
-    self.assertEqual(result, [[0, 1], [2, 3], [4, 5]])  # wrong!
+    with self.assertRaises(RuntimeError):
+      result = dt.T.tolist()
+      # TODO: transpose should give [[0, 3], [1, 4], [2, 5]]
+      # self.assertEqual(result, [[0, 3], [1, 4], [2, 5]])
+      self.assertEqual(result, [[0, 1], [2, 3], [4, 5]])  # wrong!
 
   def test_write_ones(self):
     out = Tensor.ones(10, 10, device="CPU").contiguous()
@@ -303,10 +305,11 @@ class TestDiskTensor(TempDirTestCase):
   def test_strided_setitem(self):
     # test non-contiguous (strided) setitem - should set elements at indices 0, 2, 4
     dt = Tensor([1, 2, 3, 4, 5, 6]).to(f"disk:{self.tmp('dt_strided_setitem')}")
-    dt[::2] = Tensor([10, 20, 30])
-    # TODO: dt[::2] selects indices 0, 2, 4, so result should be [10, 2, 20, 4, 30, 6]
-    # self.assertEqual(dt.tolist(), [10, 2, 20, 4, 30, 6])
-    self.assertEqual(dt.tolist(), [10, 20, 30, 4, 5, 6])  # wrong!
+    with self.assertRaises(RuntimeError):
+      dt[::2] = Tensor([10, 20, 30])
+      # TODO: dt[::2] selects indices 0, 2, 4, so result should be [10, 2, 20, 4, 30, 6]
+      # self.assertEqual(dt.tolist(), [10, 2, 20, 4, 30, 6])
+      self.assertEqual(dt.tolist(), [10, 20, 30, 4, 5, 6])  # wrong!
 
   def test_advanced_setitem_not_supported(self):
     dt = Tensor.arange(12).reshape(3, 4).to(f"disk:{self.tmp('dt_advanced_setitem')}")
