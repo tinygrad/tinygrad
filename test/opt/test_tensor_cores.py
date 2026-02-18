@@ -29,7 +29,7 @@ def helper_tc_ensure_uops_and_opts_count(N: int, M:int, K:int, dtype_in:DType, d
   if ensure_triggered:
     program = get_program(realized_ast, Device[Device.DEFAULT].renderer, opts=opts_to_apply)
     wmmas = len([uop for uop in program.uops if uop.op is Ops.WMMA])
-    tcs = len([x for x in program.applied_opts if x.op is OptOps.TC])
+    tcs = len([x for x in program.ast.arg.applied_opts if x.op is OptOps.TC])
     assert wmmas > 0, "tensor core not triggered"
     assert tcs == 1, "tensor core opt not included"
   else:
@@ -47,7 +47,7 @@ def helper_tc_allclose(N:int, M:int, K:int, dtype_in:DType, dtype_out:DType, axi
   opts = [Opt(op=OptOps.TC, axis=axis, arg=(tc_select, tc_opt, use_tensor_cores))]
   prg = CompiledRunner(replace(get_program(realized_ast, Device[Device.DEFAULT].renderer, opts=opts), device=Device.DEFAULT))
   if use_tensor_cores == 1: assert len([uop for uop in prg.p.uops if uop.op is Ops.WMMA]) > 0, "wmma not triggered"
-  assert len([x for x in prg.p.uops[-1].arg.applied_opts if x.op is OptOps.TC]) == 1, "tensor core opt not included"
+  assert len([x for x in prg.p.ast.arg.applied_opts if x.op is OptOps.TC]) == 1, "tensor core opt not included"
   prg.exec(bufs)
   if dtype_in == dtypes.half: tc_atol, tc_rtol = 1e-2, 1e-3
   elif dtype_in == dtypes.bfloat16: tc_atol, tc_rtol = (1e-1, 2e-2) if dtype_out == dtypes.bfloat16 else (1e-2, 1e-2)
@@ -142,7 +142,7 @@ class TestTensorCores(unittest.TestCase):
 
         program = get_program(realized_ast, Device[Device.DEFAULT].renderer, opts=[Opt(OptOps.TC, axis, (-1, 2, 1))])
         assert len([uop for uop in program.uops if uop.op is Ops.WMMA]) > 0, "tensor core not triggered"
-        assert len([x for x in program.applied_opts if x.op is OptOps.TC]) == 1, "tensor core opt not included"
+        assert len([x for x in program.ast.arg.applied_opts if x.op is OptOps.TC]) == 1, "tensor core opt not included"
 
         prg = CompiledRunner(program)
         # TODO: support this even if numpy doesn't
