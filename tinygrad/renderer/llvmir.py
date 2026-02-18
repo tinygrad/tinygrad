@@ -136,7 +136,7 @@ class LLVMRenderer(Renderer):
   supports_float4 = True
   abi: str | None
   string_rewrite: PatternMatcher
-  code_for_op = {Ops.FDIV: lambda: None, Ops.CMPLT: lambda: None}
+  code_for_op = {k:lambda:None for v in lop.values() for k in v.keys()}
   if AMX: tensor_cores = tc.amx
 
   extra_matcher = create_non_native_float_pats((dtypes.bfloat16,)) + pm_manual_bf16_cast
