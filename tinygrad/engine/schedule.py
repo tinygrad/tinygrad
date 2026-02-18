@@ -2,6 +2,7 @@ import time
 from typing import cast
 from collections import deque
 from tinygrad.uop.ops import UOp, Ops, buffers, UOpMetaClass, track_rewrites, PatternMatcher, UPat, graph_rewrite, graph_rewrite_map, gate_kernel_sink
+from tinygrad.uop.ops import _remove_all_tags, GroupOp
 from tinygrad.uop.spec import type_verify, tensor_spec
 from tinygrad.device import Buffer, MultiBuffer
 from tinygrad.helpers import DEBUG, cpu_profile, TracingKey, SPEC, flatten, pluralize, SCACHE, Metadata
@@ -144,11 +145,28 @@ pm_post_sched_cache = PatternMatcher([
   (UPat(Ops.BIND, src=(UPat(Ops.DEFINE_VAR),), name="b"), lambda ctx,b: ctx.get(b)),
 ])
 
+# rewrite all contiguous to assign
+def contig_to_assign(ctx:dict[UOp,UOp|None], x:UOp):
+  # for contiguous or in buffer_map explicitly
+  if not (x.op is Ops.CONTIGUOUS or (x in ctx and ctx[x] is None)): return None
+  # not for symbolic shape
+  if any([not isinstance(s, int) for s in x.shape]): return None
+  # not sure why the ctx isn't enough, but tag fixes it
+  ctx[x] = buffer = UOp.new_buffer(x.device, x.size, x.dtype).reshape(x.shape)
+  return buffer.assign(x.src[0] if x.op is Ops.CONTIGUOUS else x.rtag())
+
 schedule_cache: dict[bytes, tuple[list[ExecItem], UOp]] = {}
 @track_rewrites(lambda _,ret: f"Schedule {pluralize('Kernel', len(ret[1]))}")
 def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[dict[UOp, UOp], list[ExecItem], dict[str, int]]:
   # big_sink srcs are all the Tensors
   st = time.perf_counter()
+
+  # new preschedule stuff
+  buffer_map: dict[UOp, UOp|None] = {x.base:None for x in big_sink.src if x.base.op is not Ops.CONST}
+  pm_contig_to_assign = PatternMatcher([ (UPat(GroupOp.All, name="x"), contig_to_assign), ])
+  big_sink = graph_rewrite(big_sink, pm_contig_to_assign, ctx=buffer_map, bottom_up=True, name="contig to assign")
+  big_sink = graph_rewrite(big_sink, _remove_all_tags)
+  assert all(x is not None for x in buffer_map.values())
 
   # replace BUFFERs with PARAMs, CONSTs UNIQUE with LUNIQUE, strip BIND values for cache key, extract var_vals
   input_buffers: dict[UOp, UOp] = {}
@@ -219,4 +237,6 @@ def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[dict[UOp, UOp], li
           f" | {len(UOpMetaClass.ucache)} uops in cache")
 
   used_vars = set().union(*[{v.arg[0] for v in si.ast.variables()} for si in schedule])
-  return tensor_map, schedule, {k:v for k,v in var_vals.items() if k in used_vars}
+  #return tensor_map, schedule, {k:v for k,v in var_vals.items() if k in used_vars}
+  # tensor_map isn't used anymore
+  return cast(dict[UOp, UOp], buffer_map), schedule, {k:v for k,v in var_vals.items() if k in used_vars}
