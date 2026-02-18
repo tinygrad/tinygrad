@@ -6,6 +6,7 @@ from tinygrad.helpers import to_function_name, dedup, prod, DEBUG
 from tinygrad.uop.ops import Ops, UOp, sym_infer, sint, Variable, ssimplify, smin, GroupOp, PatternMatcher, print_uops
 from tinygrad.dtype import AddrSpace, PtrDType
 from tinygrad.codegen.opt.tc import TensorCore
+from tinygrad.codegen.opt import Opt
 from tinygrad.device import Compiler
 
 @dataclass(frozen=True)
@@ -79,13 +80,16 @@ class ProgramSpec:
   ins:list[int]=field(default_factory=list)
 
   @property
-  def estimates(self) -> Estimates: return self.ast.arg.estimates
+  def estimates(self) -> Estimates: return self.ast.arg.estimates if self.ast.arg is not None and self.ast.arg.estimates is not None else Estimates()
 
   @functools.cached_property
   def function_name(self) -> str: return to_function_name(self.name)
 
   @functools.cached_property
   def runtimevars(self) -> dict[str, int]: return {v.arg[0]: i for i, v in enumerate(self.vars) if v.arg[0] == 'core_id'}
+
+  @property
+  def applied_opts(self) -> tuple[Opt, ...]|None: return self.ast.arg.applied_opts if self.ast.arg is not None else None
 
   def launch_dims(self, var_vals:dict[str, int]):
     global_size = [sym_infer(sz, var_vals) for sz in self.global_size]

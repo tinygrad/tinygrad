@@ -41,7 +41,7 @@ if __name__ == "__main__":
     sched = a.matmul(b, dtype=acc_dtype).schedule()
     ei = get_single_element(sched)
     ei.lower()
-    assert any(opt.op is OptOps.TC for opt in ei.prg.p.ast.arg.applied_opts), f"TC not triggered, {ei.prg.p.ast.arg.applied_opts}"
+    assert any(opt.op is OptOps.TC for opt in ei.prg.p.applied_opts), f"TC not triggered, {ei.prg.p.applied_opts}"
 
   ref = a.numpy().astype(np.float32) @ b.numpy().astype(np.float32)
   res = c.numpy()
