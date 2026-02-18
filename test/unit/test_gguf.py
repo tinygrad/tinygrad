@@ -68,7 +68,7 @@ class TestGGUF(unittest.TestCase):
       sign = -1.0 if (code & 0b1000) else 1.0
       exp = (code >> 1) & 0b11
       mant = code & 0b1
-      val = (1.0 + 0.5 * mant) * np.exp2(exp - 1) if exp else 0.5 * mant
+      val = 2 * ((1.0 + 0.5 * mant) * np.exp2(exp - 1) if exp else 0.5 * mant)
       scale = np.exp2(E - 128) if E >= 2 else np.exp2(-127 if E == 1 else -128)
       return sign * val * scale
 
