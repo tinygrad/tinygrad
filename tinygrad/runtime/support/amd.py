@@ -1,4 +1,4 @@
-import functools, re, urllib, tinygrad.runtime.autogen
+import functools, pathlib, re, urllib, tinygrad.runtime.autogen
 from collections import defaultdict
 from dataclasses import dataclass
 from tinygrad.helpers import getbits, fetch
@@ -46,11 +46,13 @@ def fixup_ip_version(ip:str, version:tuple[int, ...]) -> list[tuple[int, ...]]:
 
 def header_download(file, name=None, subdir="defines", url=AMDGPU_URL) -> str: return fetch(f"{url}/{file}", name=name, subdir=subdir).read_text()
 
-def import_header(path:str, url=AMDGPU_URL):
-  t = re.sub(r'//.*|/\*.*?\*/','', header_download(path, subdir="defines", url=url), flags=re.S)
+def _parse_header_defs(txt:str) -> dict[str, int]:
+  t = re.sub(r'//.*|/\*.*?\*/', '', txt, flags=re.S)
   # TODO: refactor when clang2py is replaced
-  return {k:int(v,0) for k,v in re.findall(r'\b([A-Za-z_]\w*)\s*=\s*(0x[0-9A-Fa-f]+|\d+)', t) + \
+  return {k:int(v,0) for k,v in re.findall(r'\b([A-Za-z_]\w*)\s*=\s*(0x[0-9A-Fa-f]+|\d+)', t) +
                                 re.findall(r'^\s*#\s*define\s+([A-Za-z_0-9]\w*)\s+(0x[0-9A-Fa-f]+|\d+)', t, re.M)}
+
+def import_header(path:str, url=AMDGPU_URL): return _parse_header_defs(header_download(path, subdir="defines", url=url))
 
 def import_module(name:str, version:tuple[int, ...], version_prefix:str=""):
   for ver in fixup_ip_version(name, version):
@@ -60,9 +62,22 @@ def import_module(name:str, version:tuple[int, ...], version_prefix:str=""):
 
 def import_soc(ip):
   # rocm soc headers have more profiling enums than upstream linux
-  return type("SOC", (object,), import_header(f"aqlprofile/linux/{({9: 'vega10', 10: 'navi10', 11: 'soc21', 12: 'soc24'}[ip[0]])}_enum.h", ROCM_URL))
+  soc_name = f"{({9: 'vega10', 10: 'navi10', 11: 'soc21', 12: 'soc24'}[ip[0]])}_enum.h"
+  try: return type("SOC", (object,), import_header(f"aqlprofile/linux/{soc_name}", ROCM_URL))
+  except urllib.error.URLError:
+    # Offline fallback: use bundled ROCm enums.
+    if (local_path := pathlib.Path(__file__).resolve().parents[3] / "extra" / "hip_gpu_driver" / "soc21_enum.h").exists():
+      return type("SOC", (object,), _parse_header_defs(local_path.read_text()))
+    raise
 
-def import_ip_offsets(ip): return type("IPOFF", (object,), import_header(f"include/{('sienna_cichlid' if ip[0] > 9 else 'vega20')}_ip_offset.h"))
+def import_ip_offsets(ip):
+  header_name = f"{'sienna_cichlid' if ip[0] > 9 else 'vega20'}_ip_offset.h"
+  try: return type("IPOFF", (object,), import_header(f"include/{header_name}"))
+  except urllib.error.URLError:
+    # Offline fallback: use bundled headers when running without network access.
+    if (local_path := pathlib.Path(__file__).resolve().parents[3] / "extra" / "hip_gpu_driver" / "sienna_cichlid_ip_offset.h").exists():
+      return type("IPOFF", (object,), _parse_header_defs(local_path.read_text()))
+    raise
 
 def import_pmc(ip) -> dict[str, tuple[str, int]]:
   res:dict[str, tuple[str, int]] = {}
