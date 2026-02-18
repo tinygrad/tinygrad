@@ -70,7 +70,7 @@ class TestGGUF(unittest.TestCase):
       mant = code & 0b1
       val = 2 * ((1.0 + 0.5 * mant) * np.exp2(exp - 1) if exp else 0.5 * mant)
       scale = np.exp2(E - 128) if E >= 2 else np.exp2(-127 if E == 1 else -128)
-      return sign * val * scale
+      return np.float32(sign * val * scale)
 
     blocks, expected = [], []
     rng = np.random.default_rng(42)
@@ -81,8 +81,7 @@ class TestGGUF(unittest.TestCase):
       expected.extend(decode(c, E) for c in codes)
     tensor = Tensor(np.concatenate(blocks))
     out = ggml_data_to_tensor(tensor, len(expected), MXFP4)
-    # TODO: should this be exact equal? somehow failed on CI
-    np.testing.assert_allclose(out.numpy(), expected, atol=0.0, rtol=1e-6)
+    np.testing.assert_equal(out.numpy(), expected)
 
   def test_expected_failure_unknown_type(self):
     with self.assertRaises(ValueError):
