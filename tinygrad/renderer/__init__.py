@@ -88,12 +88,6 @@ class ProgramSpec:
   @functools.cached_property
   def runtimevars(self) -> dict[str, int]: return {v.arg[0]: i for i, v in enumerate(self.vars) if v.arg[0] == 'core_id'}
 
-  @property
-  def applied_opts(self) -> tuple[Opt, ...]|None:
-    if self.uops is None: return None
-    assert self.uops[-1].op is Ops.SINK, self.uops[-1].op
-    return self.uops[-1].arg.applied_opts
-
   def launch_dims(self, var_vals:dict[str, int]):
     global_size = [sym_infer(sz, var_vals) for sz in self.global_size]
     local_size = [sym_infer(sz, var_vals) for sz in self.local_size] if self.local_size is not None else None
