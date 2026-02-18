@@ -116,7 +116,7 @@ def contig_to_assign(ctx:dict[UOp,UOp|None], x:UOp):
   if x.op is Ops.ASSIGN and x.src[0].base.op is Ops.BUFFER:
     ctx[x] = x.src[0]
     return None
-  if isinstance(x._device, str) and x.device.startswith("DISK"):
+  if isinstance(x._device, str) and x._device.startswith("DISK"):
     # we can't realize any disk tensors
     if x in ctx: del ctx[x]
     # all copies are assumed to have finished and are now just the buffer
