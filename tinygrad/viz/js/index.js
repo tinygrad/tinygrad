@@ -259,8 +259,8 @@ function setFocus(key) {
     if (e.arg.ctx != null) {
       const i = e.arg.ctx; s = e.arg.step;
       html.append("a").text(ctxs[i+1].steps[s].name).on("click", () => switchCtx(i, s));
-      const prgSrc = ctxs[i+1].steps.findIndex(s => s.name === "View Program");
-      if (prgSrc !== -1) html.append("a").text("View program").on("click", () => switchCtx(i, prgSrc));
+      const prgSrc = ctxs[i+1].steps.findIndex(s => s.name === "View Source");
+      if (prgSrc !== -1) html.append("a").text("View Source").on("click", () => switchCtx(i, prgSrc));
     }
   }
   if (eventType === EventTypes.BUF) {
@@ -872,7 +872,7 @@ async function main() {
     }
     if (ret.ref != null) {
       const disasmIdx = ctxs[ret.ref+1].steps.findIndex(s => s.name === "View Disassembly")
-      metadata.appendChild(d3.create("a").text("View Program Graph").on("click", () => switchCtx(ret.ref, disasmIdx)).node());
+      metadata.appendChild(d3.create("a").text("View Disassembly").on("click", () => switchCtx(ret.ref, disasmIdx)).node());
     }
     if (ret.cols != null) renderTable(root, ret);
     else if (ret.src != null) root.append(() => codeBlock(ret.src, ret.lang));
