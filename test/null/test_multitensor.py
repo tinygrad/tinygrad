@@ -54,5 +54,18 @@ class TestMultiRamUsage(unittest.TestCase):
   def test_matmul_half(self): self._test_matmul_half(dev_count=2)
   def test_matmul_half_alt(self): self._test_matmul_half(dev_count=4)
 
+class TestMultiAxis(unittest.TestCase):
+  def test_reshape_shard_invalid(self):
+    devices = ("NULL:0", "NULL:1")
+    t = Tensor.ones(4, 3).shard(devices, axis=0)
+    with self.assertRaises(RuntimeError, msg="reshape cannot move items between shards"):
+      t.reshape(3, 4).uop.axis
+
+  def test_reshape_shard_valid(self):
+    devices = ("NULL:0", "NULL:1")
+    t = Tensor.ones(4, 8).shard(devices, axis=0)
+    self.assertEqual(t.reshape(2, 16).uop.axis, 0)
+    self.assertEqual(t.reshape(2, 2, 8).uop.axis, 0)
+
 if __name__ == '__main__':
   unittest.main()
