@@ -826,7 +826,7 @@ async function main() {
     }
     // timeline with cycles on the x axis
     if (ret instanceof ArrayBuffer) {
-      opts = {heightScale:0.5, hideLabels:true, levelKey:(e) => parseInt(e.name.split(" ")[1].split(":")[1]), colorByName:step.name.includes("PKTS")};
+      opts = {heightScale:0.5, hideLabels:true, levelKey:step.name.includes("PKTS") ? (e) => parseInt(e.name.split(" ")[1].split(":")[1]) : null, colorByName:ckey.includes("pkts")};
       return renderProfiler(ckey, "clk", opts);
     }
     metadata.innerHTML = "";
