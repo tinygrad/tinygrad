@@ -41,9 +41,13 @@ class Attention:
     self.n_rep = self.n_heads // self.n_kv_heads
     self.max_context = max_context
 
-    self.wq = linear(dim, self.n_heads * self.head_dim, bias=False)
-    self.wk = linear(dim, self.n_kv_heads * self.head_dim, bias=False)
-    self.wv = linear(dim, self.n_kv_heads * self.head_dim, bias=False)
+    if getenv("WQKV"):
+      self.wqkv = linear(dim, self.n_heads * self.head_dim + self.n_kv_heads * self.head_dim * 2, bias=False)
+    else:
+      self.wq = linear(dim, self.n_heads * self.head_dim, bias=False)
+      self.wk = linear(dim, self.n_kv_heads * self.head_dim, bias=False)
+      self.wv = linear(dim, self.n_kv_heads * self.head_dim, bias=False)
+
     self.wo = linear(self.n_heads * self.head_dim, dim, bias=False)
 
     self.q_norm = nn.RMSNorm(dim, qk_norm) if qk_norm is not None else None
@@ -51,9 +55,8 @@ class Attention:
 
   def __call__(self, x:Tensor, start_pos:Union[Variable,int], freqs_cis:Tensor, mask:Optional[Tensor]=None) -> Tensor:
     if getenv("WQKV"):
-      if not hasattr(self, 'wqkv'): self.wqkv = Tensor.cat(self.wq.weight, self.wk.weight, self.wv.weight)
-      xqkv = x @ self.wqkv.T
-      xq, xk, xv = xqkv.split([self.wq.weight.shape[0], self.wk.weight.shape[0], self.wv.weight.shape[0]], dim=2)
+      xqkv = self.wqkv(x)
+      xq, xk, xv = xqkv.split([self.n_heads * self.head_dim, self.n_kv_heads * self.head_dim, self.n_kv_heads * self.head_dim], dim=2)
     else:
       xq, xk, xv = self.wq(x), self.wk(x.contiguous_backward()), self.wv(x)
 
@@ -200,14 +203,14 @@ class Transformer:
 
   def forward(self, tokens:Tensor, start_pos:Union[Variable,int], temperature:float, top_k:int, top_p:float, alpha_f:float, alpha_p:float):
     _bsz, seqlen = tokens.shape
-    h = self.tok_embeddings(tokens)
+    h = self.tok_embeddings(tokens).contiguous()
     freqs_cis = self.freqs_cis.cast(h.dtype)[:, start_pos:start_pos+seqlen, :, :, :]
 
     if self.max_context != 0 and seqlen > 1:
       mask = Tensor.full((1, 1, seqlen, start_pos+seqlen), float("-inf"), dtype=h.dtype, device=h.device).triu(start_pos+1)
     else: mask = None
     for layer in self.layers: h = layer(h, start_pos, freqs_cis, mask)
-    logits = self.output(self.norm(h))
+    logits = self.output(self.norm(h).contiguous().contiguous_backward()).contiguous_backward()
     if math.isnan(temperature): return logits
 
     return sample(logits[:, -1, :].flatten(), temperature, top_k, top_p, alpha_f, alpha_p)

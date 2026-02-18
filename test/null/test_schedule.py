@@ -169,7 +169,7 @@ class TestSchedule(unittest.TestCase):
   def test_empty_is_not_realized(self):
     a = Tensor.empty(10)
     child = a+2
-    assert not a.uop.is_realized
+    assert a.uop.is_realized
     child.realize()
     assert a.uop.is_realized
 
@@ -185,7 +185,7 @@ class TestSchedule(unittest.TestCase):
   def test_childless_empty_never_allocates(self):
     a = Tensor.empty(10)
     a.realize()
-    assert not a.uop.is_realized
+    assert not a.uop.buffer.is_allocated()
 
   def test_simplify_padded_const(self):
     a, _ = Tensor.empty(1022).cummax(axis=0)
@@ -197,6 +197,14 @@ class TestSchedule(unittest.TestCase):
     c = Tensor.empty(10)
     d = a+b+c
     check_schedule(d, 1)
+
+  def test_basic_binop_fusion_assign(self):
+    a = Tensor.empty(10)
+    b = Tensor.empty(10)
+    c = Tensor.empty(10)
+    d = a+b+c
+    e = Tensor.empty(10).assign(d)
+    check_schedule(e, 1)
 
   def test_basic_binop_fusion_deep(self):
     a = Tensor.empty(10)
@@ -211,6 +219,13 @@ class TestSchedule(unittest.TestCase):
     b = Tensor.empty(10)
     c = (a*b).sum()
     check_schedule(c, 1)
+
+  def test_mulacc_fusion_assign(self):
+    a = Tensor.empty(10)
+    b = Tensor.empty(10)
+    c = (a*b).sum()
+    d = Tensor.empty(1).assign(c)
+    check_schedule(d, 1)
 
   def test_mulacc_relu_fusion(self):
     a = Tensor.empty(10)

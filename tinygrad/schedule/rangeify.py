@@ -55,6 +55,13 @@ def fix_assign_hazard(assign:UOp, target:UOp, src:UOp):
     if any(s is target.base for s in h.toposort(gate=lambda s:s.op not in ALWAYS_CONTIGUOUS-{Ops.PARAM})):
       return assign.replace(src=(target, src.contiguous()))
 
+def normalize_assign_target_chain(assign:UOp, target:UOp, src:UOp):
+  root_target = target
+  while root_target.op is Ops.ASSIGN: root_target = root_target.src[0]
+  # when RHS depends on the previous assign result, break with contiguous
+  if target in src.toposort(): src = src.contiguous()
+  return assign.replace(src=(root_target, src))
+
 def split_reduceop(reduce:UOp, x:UOp):
   if prod(reduce.shape) == 0: return None
   if not SPLIT_REDUCEOP or not all_int(x.shape) or (prod(x.shape)//prod(reduce.shape))<getenv("REDUCEOP_SPLIT_THRESHOLD", 32768): return None
@@ -148,6 +155,9 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
   # move bitcast from assign target to source: a.bitcast(X).assign(src) -> a.assign(src.bitcast(a.dtype))
   (UPat(Ops.ASSIGN, src=(UPat(Ops.BITCAST, src=(UPat(name="target"),)), UPat(name="src")), name="assign"),
    lambda assign, target, src: target.assign(src.bitcast(target.dtype)).replace(tag=assign.tag)),
+
+  # if assign target is itself an ASSIGN chain, canonicalize to the original buffer target
+  (UPat(Ops.ASSIGN, src=(UPat(Ops.ASSIGN, name="target"), UPat(name="src")), allow_any_len=True, name="assign"), normalize_assign_target_chain),
 
   # assign only to buffer, otherwise make it a CONTIGUOUS
   (UPat(Ops.ASSIGN, src=(UPat(GroupOp.All-{Ops.PARAM}, name="target"), UPat(name="src")), name="assign"), assign_to_contiguous),
