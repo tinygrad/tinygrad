@@ -73,10 +73,10 @@ class ExpertWeights:
   """Like nn.Linear but with num_experts dimension. Weight shape: (num_experts, out_features, in_features)."""
   def __init__(self, num_experts:int, in_features:int, out_features:int):
     self.weight = Tensor.zeros(num_experts, out_features, in_features)
-  def __call__(self, sel:Tensor, x:Tensor) -> Tensor:
+  def __call__(self, sel:Tensor, x:Tensor, contiguous_gather:bool=False) -> Tensor:
     # sel: (B, T, k), x: (B, T, 1, in) or (B, T, k, in) -> output: (B, T, k, out)
-    # contiguous here after [sel]  60% speedup on GLM, break off dequant+gather
-    return (x.unsqueeze(-2) @ self.weight[sel].contiguous().transpose(-1, -2)).squeeze(-2)
+    w = self.weight[sel].contiguous() if contiguous_gather else self.weight[sel]
+    return (x.unsqueeze(-2) @ w.transpose(-1, -2)).squeeze(-2)
 
 def apply_rope(x:Tensor, freqs_cis:Tensor, interleaved:bool=False) -> Tensor:
   assert x.shape[-1] % 2 == 0
@@ -192,9 +192,10 @@ class TransformerBlock:
     gate_scores = ((h_norm:=self.ffn_norm(h)).float() @ self.ffn_gate_inp.weight.float().T).sigmoid()
     _, sel = (gate_scores + self.exp_probs_b.bias).topk(self.num_experts_per_tok)
     probs = (g:=gate_scores.gather(-1, sel)) / (g.sum(-1, keepdim=True).maximum(2**-14) if self.expert_weights_norm else 1)
-    gated = self.ffn_gate_exps(sel, (x:=h_norm.unsqueeze(2))).silu() * self.ffn_up_exps(sel, x)
-    out = (self.ffn_down_exps(sel, gated).contiguous()  * probs.unsqueeze(-1).cast(gated.dtype)).sum(2) * self.expert_weights_scale
-    if hasattr(self, 'ffn_gate_shexp'): out = out+ self.ffn_down_shexp(self.ffn_gate_shexp(h_norm).silu() * self.ffn_up_shexp(h_norm))
+    gated = self.ffn_gate_exps(sel, (x:=h_norm.unsqueeze(2)), contiguous_gather=True).silu() * self.ffn_up_exps(sel, x, contiguous_gather=True)
+    out = (self.ffn_down_exps(sel, gated, contiguous_gather=True) * probs.unsqueeze(-1).cast(gated.dtype)).sum(2) * self.expert_weights_scale
+    if hasattr(self, 'ffn_gate_shexp'):
+      out = out.contiguous() + self.ffn_down_shexp(self.ffn_gate_shexp(h_norm).silu() * self.ffn_up_shexp(h_norm))
     return h + out.cast(h.dtype)
 
   def _feed_forward(self, h: Tensor) -> Tensor:
@@ -278,10 +279,10 @@ class Transformer:
                         expert_weights_norm=kv.get(f'{arch}.expert_weights_norm', False),
                         expert_weights_scale=kv.get(f'{arch}.expert_weights_scale', 1.0))
     nn.state.load_state_dict(model, state_dict, verbose=False, consume=True, realize=False)  # NOTE: rope_freqs.weight (32,) is unused
-    expert_params = {id(v) for k, v in nn.state.get_state_dict(model).items() if '_exps.' in k}
-    params = nn.state.get_parameters(model)
-    for s in [p for p in params if id(p) not in expert_params]: s.replace(s.contiguous())
-    if realize: Tensor.realize(*[p for p in params if id(p) not in expert_params])
+    # NOTE: without this contiguous, it unpacks the weights from the model every time. we shouldn't need this, but for now it's faster
+    for s in (params:=[v for k, v in nn.state.get_state_dict(model).items() if '_exps.' not in k] if kv.get('tokenizer.ggml.pre') == "glm4"
+              else nn.state.get_parameters(model)): s.replace(s.contiguous())
+    if realize: Tensor.realize(*params)
     return model, kv
 
   def generate(self, tokens:list[int], start_pos=0):
