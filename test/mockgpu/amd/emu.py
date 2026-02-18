@@ -9,8 +9,6 @@ from __future__ import annotations
 import ctypes, functools, re, platform, subprocess, tempfile
 from typing import Callable
 
-
-
 # Set/restore DAZ+FTZ (denormals-are-zero + flush-to-zero) to match RDNA3 default float mode
 # x86: MXCSR bits DAZ(6)+FTZ(15), ARM64: FPCR bit FZ(24)
 # Only applied during emulator execution, restored afterward to avoid breaking hypothesis tests
@@ -757,11 +755,16 @@ class _Ctx:
         mask = UOp.const(dtypes.uint32, ((1 << width) - 1) << lo_bit)
         result = (result & (mask ^ UOp.const(dtypes.uint32, 0xFFFFFFFF))) | (val_bits << UOp.const(dtypes.uint32, lo_bit))
       lane_stores.append(self.wvgpr_dyn(vdst_reg, lane, result, exec_mask))
-    if lane_stores: stores.append(UOp.sink(*lane_stores).end(lane))
+    # VCC/EXEC mask writes must be computed BEFORE VGPR stores to avoid reading modified VGPRs.
+    # When vdst overlaps with src operands (e.g. v_add_co_u32 v[0], vcc, s[8], v[0]), the carry
+    # computation reads the original source values only if its range loop runs before the VGPR write loop.
+    mask_stores: list[UOp] = []
     for mask_val, reg in [(vcc_val, vcc_reg), (exec_val, EXEC_LO.offset)]:
       if mask_val is None: continue
       def get_bit(l, v=mask_val): return (_to_u32(v.substitute({lane: l})) & _c(1)).cast(dtypes.uint32)
-      stores.extend(self.wmask(_c(reg), self.unroll_lanes(get_bit, exec_mask, apply_exec=False)))
+      mask_stores.extend(self.wmask(_c(reg), self.unroll_lanes(get_bit, exec_mask, apply_exec=False)))
+    stores.extend(mask_stores)
+    if lane_stores: stores.append(UOp.sink(*lane_stores).end(lane))
     stores.extend(scalar_stores)
     return UOp.sink(*stores, *self.inc_pc())
 
@@ -1877,6 +1880,7 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
   # Set DAZ+FTZ during emulator execution, restore afterward to avoid breaking hypothesis tests
   # Only trace the first workgroup (like real HW traces one CU/SIMD), subsequent workgroups run but don't add to trace
   tracing = bool(PROFILE)
+
   with _MXCSRContext():
     for gidz in range(gz):
       for gidy in range(gy):
@@ -1907,6 +1911,7 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
                   if tracing: sqtt_finish(wi)
                   break
                 fxn, globals_list, is_barrier, inst = _ensure_compiled(pc)
+                if DEBUG >= 5: print(f"  exec gid=({gidx},{gidy},{gidz}) w={wi} PC={pc - lib}: {inst!r}", flush=True)
                 fxn(*[c_bufs[g] for g in globals_list])
                 if tracing:
                   inst_op = inst.op.value if hasattr(inst, 'op') else 0

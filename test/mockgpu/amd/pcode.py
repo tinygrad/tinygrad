@@ -824,11 +824,15 @@ class Parser:
       elif dt in (dtypes.uint16, dtypes.int16):
         val = (val >> (((addr >> _const(adt, 1)) & _const(adt, 1)).cast(dtypes.uint32) * _u32(16))) & _u32(0xFFFF)
       else:
-        # Handle unaligned 32-bit loads: combine two consecutive dwords and shift
+        # Handle unaligned 32-bit loads: combine two consecutive dwords and shift.
+        # To avoid OOB at buffer boundaries for aligned loads, clamp idx_hi to idx (safe).
+        # Use int64 for the WHERE to avoid 32-bit int overflow in C pointer arithmetic (addr can be >8GB).
         byte_off = (addr & _const(adt, 3)).cast(dtypes.uint32)
         is_unaligned = byte_off.ne(_u32(0))
-        idx_hi = ((addr + _const(adt, 4)) >> _const(adt, 2)).cast(dtypes.int)
-        hi = mem.index(idx_hi, *gate)
+        idx_native = (addr >> _const(adt, 2)).cast(dtypes.int64)
+        idx_hi_native = ((addr + _const(adt, 4)) >> _const(adt, 2)).cast(dtypes.int64)
+        safe_idx_hi = is_unaligned.where(idx_hi_native, idx_native)
+        hi = mem.index(safe_idx_hi, *gate)
         combined = val.cast(dtypes.uint64) | (hi.cast(dtypes.uint64) << UOp.const(dtypes.uint64, 32))
         val = is_unaligned.where((combined >> (byte_off.cast(dtypes.uint64) * UOp.const(dtypes.uint64, 8))).cast(dtypes.uint32), val)
     return val
