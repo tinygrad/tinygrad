@@ -50,7 +50,7 @@ else:
     def __setattr__(cls, k, v):
       super().__setattr__(k, v)
       if k in ("_methods_", "_classmethods_"):
-        for m in v: cls._addmeth(m, clsmeth=(v=="_classmethods_"))
+        for m in v: cls._addmeth(m, clsmeth=(k=="_classmethods_"))
         for c in cls._children_: c._inherit(cls)
       if k == "_bases_":
         for b in v:
