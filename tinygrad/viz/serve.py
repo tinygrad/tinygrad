@@ -669,6 +669,7 @@ if __name__ == "__main__":
 
   ctxs:list[dict] = get_rewrites(trace:=load_pickle(args.kernels, default=RewriteTrace([], [], {})))
   profile_ret = get_profile(load_pickle(args.profile, default=[]))
+  if not getenv("SERVE", 0): exit(0)
 
   server = TCPServerWithReuse(('', PORT), Handler)
   reloader_thread = threading.Thread(target=reloader)
