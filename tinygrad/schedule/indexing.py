@@ -19,7 +19,7 @@ def realize_srcs(ctx:dict[UOp, None], rb:UOp) -> None:
 
 def realize_assign_src(ctx:dict[UOp, None], buf:UOp, x:UOp):
   # you don't usually have to do this for assign unless there's a WAR hazard like TestAssign.test_assign_double_diamond_reduce
-  if buf in x.backward_slice: ctx[x] = None
+  if buf.base in x.backward_slice_with_self: ctx[x] = None
 
 pm_generate_realize_map = pm_gate_kernel_sink+PatternMatcher([
   # always realize SINK src
