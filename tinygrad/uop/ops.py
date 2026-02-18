@@ -621,9 +621,17 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
   @property
   def buffer(self) -> Buffer|MultiBuffer:
     from tinygrad.device import Buffer, MultiBuffer
+    if self.op in {Ops.CONTIGUOUS, Ops.RESHAPE}: return self.src[0].buffer
+    # this buffer can process disk tensors and simple movement ops
     if self is not self.base:
-      assert self.op is Ops.RESHAPE, f"can only be RESHAPE {self}"
-      return self.src[0].buffer
+      from tinygrad.schedule.rangeify import pm_mops
+      out = graph_rewrite(self.flatten().index(UOp.range(self.size, 0)), pm_mops)
+      assert out.op is Ops.INDEX and out.src[0].op is Ops.BUFFER, "couldn't collapse to a single INDEX"
+      if out.src[1].op is Ops.CONST:
+        return out.src[0].buffer.view(1, out.dtype, out.src[1].arg*out.dtype.itemsize)
+      if out.src[1].op is Ops.ADD and out.src[1].src[0].op is Ops.RANGE and out.src[1].src[1].op is Ops.CONST:
+        return out.src[0].buffer.view(out.src[1].src[0].src[0].arg, out.dtype, out.src[1].src[1].arg*out.dtype.itemsize)
+      raise RuntimeError(f"INDEX {out} invalid for buffer")
     if self.op is Ops.MSELECT:
       ret = self.src[0].buffer
       assert isinstance(ret, MultiBuffer)
