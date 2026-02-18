@@ -404,6 +404,7 @@ def get_profile(profile:list[ProfileEvent], sort_fn:Callable[[str], Any]=device_
       if (d:=ev.device.split(":")[0]) == "AMD":
         device_decoders[d] = load_counters
         amdgpu_targets[d] = f"gfx{unwrap(ev.props)['gfx_target_version']//1000}"
+      if d == "NV": device_decoders[d] = load_pma_counters
   # load device specific counters
   for fxn in device_decoders.values(): fxn(profile)
   # map events per device
@@ -430,6 +431,24 @@ def get_profile(profile:list[ProfileEvent], sort_fn:Callable[[str], Any]=device_
   ret = [b"".join([struct.pack("<B", len(k)), k.encode(), unwrap(layout[k])]) for k in sorted_layout]
   index = json.dumps({"strings":list(scache), "dtypeSize":dtype_size, "markers":[{"ts":rel_ts(e.ts, start_ts), **e.arg} for e in markers]}).encode()
   return struct.pack("<IQII", rel_ts(unwrap(end_ts), start_ts), max(peaks,default=0), len(index), len(ret))+index+b"".join(ret)
+
+# ** PMA counters
+
+def load_pma_counters(profile:list[ProfileEvent]) -> None:
+  from tinygrad.runtime.ops_nv import ProfilePMAEvent
+  steps:list[dict] = []
+  sm_version = {e.device:unwrap(e.props).get("sm_version", 0x800) for e in profile if isinstance(e, ProfileDeviceEvent) and e.device.startswith("NV")}
+  run_number:dict[str, int] = {}
+  for e in profile:
+    if isinstance(e, ProfilePMAEvent):
+      run_number[e.kern] = run_num = run_number.get(e.kern, 0)+1
+      steps.append(create_step(f"PMA {e.kern}"+(f"n{run_num}" if run_num>1 else ""), ("/pma", len(ctxs), len(steps)),
+                               data=(e.blob, sm_version[e.device])))
+  ctxs.append({"name":"All Counters", "steps":steps})
+
+def render_pma(blob:bytes, sm_version:int) -> dict:
+  from extra.nv_pma.decode import print_samples
+  return {"src":get_stdout(lambda: print_samples(blob, sm_version))}
 
 # ** Assembly static analyzers
 
@@ -585,6 +604,7 @@ def get_render(query:str) -> dict:
     summary = [{"label":"Total Cycles", "value":w.end_time-w.begin_time}, {"label":"SE", "value":w.se}, {"label":"CU", "value":w.cu},
                {"label":"SIMD", "value":w.simd}, {"label":"Wave ID", "value":w.wave_id}, {"label":"Run number", "value":data["run_number"]}]
     return {"rows":[tuple(v.values()) for v in rows.values()], "cols":columns, "metadata":[summary], "ref":ref_map.get(data["prg"].name)}
+  if fmt == "pma": return render_pma(*data)
   return data
 
 # ** HTTP server

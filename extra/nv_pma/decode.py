@@ -154,6 +154,16 @@ def print_aggregated(samples:list[tuple[PMASample, int]]) -> None:
     stall_str = colored(f"{reason.name:17}", STALL_COLORS.get(reason, "white"))
     print(f"  pc=0x{pc - base_pc:06x} {stall_str} samples={cnt:4d}")
 
+def print_samples(data:bytes, sm_version:int=0x800):
+  samples = []
+  for s, tpc_id in decode(data, sm_version):
+    gpc, tpc, sm = decode_tpc_id(tpc_id)
+    stall_str = colored(f"{s.stall_reason.name:17}", STALL_COLORS.get(s.stall_reason, "white"))
+    print(f"pc=0x{s.pc_offset:06x} {stall_str} ev={s.stall_key:2d} active={s.active} wave={s.wave_id:2d} gpc={gpc} tpc={tpc} sm={sm}")
+    samples.append((s, tpc_id))
+  print(f"\nDecoded {len(samples)} samples:")
+  print_aggregated(samples)
+
 if __name__ == "__main__":
   import sys, pickle
 
@@ -178,12 +188,4 @@ if __name__ == "__main__":
   for dump_idx, raw, sm_ver in dumps:
     print(f"\n{'='*60}\nDump {dump_idx} ({len(raw)} bytes, {len(raw)//32} packets)\n{'='*60}")
     if "--raw" in sys.argv: print_packets(raw, sm_ver)
-    else:
-      samples = []
-      for s, tpc_id in decode(raw, sm_ver):
-        gpc, tpc, sm = decode_tpc_id(tpc_id)
-        stall_str = colored(f"{s.stall_reason.name:17}", STALL_COLORS.get(s.stall_reason, "white"))
-        print(f"pc=0x{s.pc_offset:06x} {stall_str} ev={s.stall_key:2d} active={s.active} wave={s.wave_id:2d} gpc={gpc} tpc={tpc} sm={sm}")
-        samples.append((s, tpc_id))
-      print(f"\nDecoded {len(samples)} samples:")
-      print_aggregated(samples)
+    else: print_samples(raw, sm_ver)
