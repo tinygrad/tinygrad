@@ -4,13 +4,10 @@ from collections import deque
 from tinygrad.uop.ops import UOp, Ops, buffers, UOpMetaClass, track_rewrites, PatternMatcher, UPat, graph_rewrite, graph_rewrite_map, gate_kernel_sink
 from tinygrad.uop.spec import type_verify, tensor_spec
 from tinygrad.device import Buffer, MultiBuffer
-from tinygrad.helpers import DEBUG, cpu_profile, TracingKey, SPEC, flatten, pluralize, SCACHE, Metadata
+from tinygrad.helpers import DEBUG, cpu_profile, TracingKey, SPEC, flatten, pluralize, SCACHE
 from tinygrad.engine.realize import ExecItem
 
 # **** schedule linearizer
-
-# ScheduleItem = tuple[AST, buffer UOps, metadata, bound_ranges]
-ScheduleItem = tuple[UOp, tuple[UOp, ...], tuple[Metadata, ...], tuple[UOp, ...]]
 
 # unwrap VIEW/CAST/etc to find the actual data source (kernel output, buffer, or multi-device op)
 def _unwrap_src(s: UOp) -> UOp:
@@ -23,9 +20,8 @@ def create_schedule(sched_sink:UOp) -> tuple[list[ExecItem], UOp]:
     children: dict[UOp, list[UOp]] = {}
     in_degree: dict[UOp, int] = {}
     for u in sched_sink.toposort(gate_kernel_sink):
-      if u.op is Ops.RANGE: in_degree.setdefault(u, 0)
       if u.op is not Ops.AFTER: continue
-      if (k:=u.src[1]).op is Ops.RANGE: continue  # RANGEs are scheduled directly, not through dependency graph
+      k = u.src[1]
       assert k.op in {Ops.CALL, Ops.END}, f"AFTER src[1] should be KERNEL or END, not {k.op}"
       in_degree.setdefault(k, 0)
       if k.op is Ops.END: assert k.src[0].op is Ops.CALL, f"END src[0] should be KERNEL, not {k.src[0].op}"
@@ -50,51 +46,20 @@ def create_schedule(sched_sink:UOp) -> tuple[list[ExecItem], UOp]:
 
   with cpu_profile(TracingKey("linearize schedule")):
     queue: deque[UOp] = deque(k for k,v in in_degree.items() if v == 0)
-
-    schedule: list[UOp] = []  # RANGE, KERNEL, or END UOps
-    sched_item: dict[UOp, ScheduleItem] = {}
+    pre_schedule: list[ExecItem] = []
+    buf_uops_list: list[UOp] = []
     while len(queue):
-      k = rk = queue.popleft()
-      if k.op is Ops.END: k = k.src[0]
-      assert k.op in {Ops.RANGE, Ops.CALL}, f"unexpected op in queue: {k.op}"
-      if k.op is Ops.RANGE: schedule.append(k)
-      elif k.op is Ops.CALL:
-        ast = k.src[0]
-        buf_uops = tuple(_unwrap_src(s).buf_uop for s in k.src[1:] if s.op is not Ops.BIND)
-        bound_ranges = tuple(s for s in k.src[1:] if s.op is Ops.BIND and len(s.src) > 1 and s.src[1].op is Ops.RANGE)
-        sched_item[k] = (ast, buf_uops, k.arg.metadata, bound_ranges)
-        schedule.append(k)
-        if rk.op is Ops.END: schedule.append(rk)
+      rk = queue.popleft()
+      k = rk.src[0] if rk.op is Ops.END else rk
+      assert k.op is Ops.CALL, f"unexpected op in queue: {k.op}"
+      buf_uops = tuple(_unwrap_src(s).buf_uop for s in k.src[1:] if s.op is not Ops.BIND)
+      pre_schedule.append(ExecItem(k.src[0], [], k.arg.metadata))
+      buf_uops_list.append(UOp.sink(*buf_uops))
       for x in children.get(rk, []):
         in_degree[x] -= 1
         if in_degree[x] == 0: queue.append(x)
 
-  with cpu_profile(TracingKey("unroll outer ranges")):
-    pre_schedule, buf_uops_list = unroll_outer_ranges(schedule, sched_item)
   return pre_schedule, UOp.sink(*buf_uops_list)
-
-def unroll_outer_ranges(schedule:list[UOp], sched_item:dict[UOp, ScheduleItem]) -> tuple[list[ExecItem], list[UOp]]:
-  pre_schedule: list[ExecItem] = []
-  buf_uops_list: list[UOp] = []
-  sched_ptr, in_ranges, range_ptrs = 0, dict[UOp, int](), dict[UOp, int]()
-  while sched_ptr < len(schedule):
-    si = schedule[sched_ptr]
-    if si.op is Ops.RANGE:
-      in_ranges[si] = 0
-      range_ptrs[si] = sched_ptr + 1
-    elif si.op is Ops.END:
-      if in_ranges[si.src[1]] < si.src[1].vmax:
-        in_ranges[si.src[1]] += 1
-        sched_ptr = range_ptrs[si.src[1]]
-        continue
-    else:
-      assert si.op is Ops.CALL, f"unexpected op in schedule: {si.op}"
-      ast, buf_uops, metadata, bound_ranges = sched_item[si]
-      fixedvars = {s.src[0].arg[0]:in_ranges[s.src[1]] for s in bound_ranges}
-      pre_schedule.append(ExecItem(ast, [], metadata, fixedvars))
-      buf_uops_list.append(UOp.sink(*buf_uops))
-    sched_ptr += 1
-  return pre_schedule, buf_uops_list
 
 from tinygrad.engine.memory import memory_planner
 from tinygrad.schedule.rangeify import get_rangeify_map
