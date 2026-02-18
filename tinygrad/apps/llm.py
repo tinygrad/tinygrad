@@ -280,6 +280,7 @@ class Transformer:
                         expert_weights_scale=kv.get(f'{arch}.expert_weights_scale', 1.0))
     nn.state.load_state_dict(model, state_dict, verbose=False, consume=True, realize=False)  # NOTE: rope_freqs.weight (32,) is unused
     # NOTE: without this contiguous, it unpacks the weights from the model every time. we shouldn't need this, but for now it's faster
+    # NOTE: do not realize the expert weights for glm4 to allow 30B model to run in 20GB RAM
     for s in (params:=[v for k, v in nn.state.get_state_dict(model).items() if '_exps.' not in k] if kv.get('tokenizer.ggml.pre') == "glm4"
               else nn.state.get_parameters(model)): s.replace(s.contiguous())
     if realize: Tensor.realize(*params)
