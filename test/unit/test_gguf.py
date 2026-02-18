@@ -50,7 +50,7 @@ class TestGGUF(unittest.TestCase):
   def test_load_tinyllama_q4_0(self): self._test_gguf_load("https://huggingface.co/ggml-org/models/resolve/main/tinyllamas/stories15M-q4_0.gguf?download=true")
   def test_load_gpt2_q4_1(self): self._test_gguf_load("https://huggingface.co/PrunaAI/gpt2-GGUF-smashed/resolve/main/gpt2.Q4_1.gguf?download=true")
   def test_load_sample_q6_k(self): self._test_gguf_load("https://huggingface.co/Isotr0py/test-gguf-sample/resolve/main/Quant_Q6_K_1024.gguf?download=true")
-  def test_load_sample_mxfp4(self): self._test_gguf_load("https://huggingface.co/ngxson/boring-testing-tiny/resolve/main/stories260K-mxfp4.gguf?download=true")
+  def test_load_sample_mxfp4(self): self._test_gguf_load("https://huggingface.co/unsloth/GLM-4.7-Flash-GGUF/resolve/main/GLM-4.7-Flash-MXFP4_MOE.gguf?download=true")
 
   def test_dequantization_q4_0(self): self._test_dequantization(ggml.GGML_TYPE_Q4_0)
   def test_dequantization_q4_1(self): self._test_dequantization(ggml.GGML_TYPE_Q4_1)
@@ -83,6 +83,21 @@ class TestGGUF(unittest.TestCase):
     out = ggml_data_to_tensor(tensor, len(expected), MXFP4)
     # TODO: should this be exact equal? somehow failed on CI
     np.testing.assert_allclose(out.numpy(), expected, atol=0.0, rtol=1e-6)
+
+    def test_dequantization_mxfp4_block(self):
+      MXFP4 = 39
+      block = np.array([0x7a, 0x29, 0xab, 0x61, 0x10, 0x21, 0x02, 0x4a,
+                        0x15, 0xca, 0x05, 0x01, 0x9b, 0x39, 0x0b, 0x0b, 0x1c], dtype=np.uint8)
+      expected = np.array([-0.01562500, -0.04687500, 0.01562500, 0.00000000,
+                            0.01562500,  0.03125000, -0.03125000, 0.09375000,
+                           -0.03125000,  0.09375000, 0.01562500, -0.04687500,
+                           -0.01562500, -0.04687500, -0.04687500, -0.06250000,
+                            0.03125000, -0.03125000, 0.12500000,  0.01562500,
+                            0.03125000,  0.00000000, 0.06250000,  0.01562500,
+                           -0.06250000,  0.00000000, 0.00000000, -0.01562500,
+                            0.04687500,  0.00000000, 0.00000000,  0.01562500], dtype=np.float32)
+      out = ggml_data_to_tensor(Tensor(block), 32, MXFP4)
+      np.testing.assert_equal(out.numpy(), expected)
 
   def test_expected_failure_unknown_type(self):
     with self.assertRaises(ValueError):
