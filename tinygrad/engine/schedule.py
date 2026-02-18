@@ -148,7 +148,7 @@ pm_post_sched_cache = PatternMatcher([
 # rewrite all contiguous to assign
 def contig_to_assign(ctx:dict[UOp,UOp|None], x:UOp):
   # existing ASSIGN already has a target buffer, add it to the map
-  if x.op is Ops.ASSIGN:
+  if x.op is Ops.ASSIGN and x.src[0].base.op is Ops.BUFFER:
     ctx[x] = x.src[0]
     return None
   # for contiguous or in buffer_map explicitly
