@@ -431,7 +431,5 @@ def train_cifar():
       raise ValueError(colored(f"{eval_acc_pct=} < {target}", "red"))
 
 if __name__ == "__main__":
-  # enable fused optimizer by default for speed
-  Context(FUSE_OPTIM=1).__enter__()
   with WallTimeEvent(BenchEvent.FULL):
     train_cifar()
