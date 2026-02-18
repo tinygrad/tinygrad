@@ -315,6 +315,7 @@ def train_cifar():
 
   opt_bias     = optim.SGD(params_bias,     lr=0.01, momentum=hyp['opt']['momentum'], nesterov=True, weight_decay=hyp['opt']['bias_decay'])
   opt_non_bias = optim.SGD(params_non_bias, lr=0.01, momentum=hyp['opt']['momentum'], nesterov=True, weight_decay=hyp['opt']['non_bias_decay'])
+  optimizer = optim.OptimizerGroup(opt_bias, opt_non_bias)
 
   # NOTE taken from the hlb_CIFAR repository, might need to be tuned
   initial_div_factor = hyp['opt']['initial_div_factor']
@@ -329,12 +330,10 @@ def train_cifar():
     loss = cross_entropy(out, Y, reduction='none', label_smoothing=hyp['opt']['label_smoothing']).mul(hyp['opt']['loss_scale_scaler']*loss_batchsize_scaler).sum().div(hyp['opt']['loss_scale_scaler'])
 
     if not getenv("DISABLE_BACKWARD"):
-      # index 0 for bias and 1 for non-bias
       optimizer.zero_grad()
       loss.backward()
-      optimizer.step()
-      lr_scheduler[0].step()
-      lr_scheduler[1].step()
+      # batch optimizer step + lr scheduler updates in a single realize for better fusion
+      return loss.realize(*optimizer.schedule_step(), *lr_scheduler[0].schedule_step(), *lr_scheduler[1].schedule_step())
     return loss.realize()
 
   train_step_jitted = TinyJit(train_step)
@@ -403,7 +402,7 @@ def train_cifar():
           Y.shard_(GPUS, axis=0)
 
         with Context(BEAM=getenv("LATEBEAM", BEAM.value), WINO=getenv("LATEWINO", WINO.value)):
-          loss = train_step_jitted(model, optim.OptimizerGroup(opt_bias, opt_non_bias), [lr_sched_bias, lr_sched_non_bias], X, Y)
+          loss = train_step_jitted(model, optimizer, [lr_sched_bias, lr_sched_non_bias], X, Y)
           et = time.monotonic()
           loss_cpu = loss.numpy()
         # EMA for network weights
@@ -432,5 +431,7 @@ def train_cifar():
       raise ValueError(colored(f"{eval_acc_pct=} < {target}", "red"))
 
 if __name__ == "__main__":
+  # enable fused optimizer by default for speed
+  Context(FUSE_OPTIM=1).__enter__()
   with WallTimeEvent(BenchEvent.FULL):
     train_cifar()
