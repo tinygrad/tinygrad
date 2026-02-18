@@ -73,10 +73,9 @@ class ExpertWeights:
   """Like nn.Linear but with num_experts dimension. Weight shape: (num_experts, out_features, in_features)."""
   def __init__(self, num_experts:int, in_features:int, out_features:int):
     self.weight = Tensor.zeros(num_experts, out_features, in_features)
-  def __call__(self, sel:Tensor, x:Tensor, contiguous_gather:bool=False) -> Tensor:
+  def __call__(self, sel:Tensor, x:Tensor) -> Tensor:
     # sel: (B, T, k), x: (B, T, 1, in) or (B, T, k, in) -> output: (B, T, k, out)
-    w = self.weight[sel].contiguous() if contiguous_gather else self.weight[sel]
-    return (x.unsqueeze(-2) @ w.transpose(-1, -2)).squeeze(-2)
+    return (x.unsqueeze(-2) @ self.weight[sel].transpose(-1, -2)).squeeze(-2)
 
 def apply_rope(x:Tensor, freqs_cis:Tensor, interleaved:bool=False) -> Tensor:
   assert x.shape[-1] % 2 == 0
@@ -192,8 +191,8 @@ class TransformerBlock:
     gate_scores = ((h_norm:=self.ffn_norm(h)).float() @ self.ffn_gate_inp.weight.float().T).sigmoid()
     _, sel = (gate_scores + self.exp_probs_b.bias).topk(self.num_experts_per_tok)
     probs = (g:=gate_scores.gather(-1, sel)) / (g.sum(-1, keepdim=True).maximum(2**-14) if self.expert_weights_norm else 1)
-    gated = self.ffn_gate_exps(sel, (x:=h_norm.unsqueeze(2)), contiguous_gather=True).silu() * self.ffn_up_exps(sel, x, contiguous_gather=True)
-    out = (self.ffn_down_exps(sel, gated, contiguous_gather=True) * probs.unsqueeze(-1).cast(gated.dtype)).sum(2) * self.expert_weights_scale
+    gated = self.ffn_gate_exps(sel, (x:=h_norm.unsqueeze(2))).silu() * self.ffn_up_exps(sel, x)
+    out = (self.ffn_down_exps(sel, gated) * probs.unsqueeze(-1).cast(gated.dtype)).sum(2) * self.expert_weights_scale
     if hasattr(self, 'ffn_gate_shexp'):
       out = out.contiguous() + self.ffn_down_shexp(self.ffn_gate_shexp(h_norm).silu() * self.ffn_up_shexp(h_norm))
     return h + out.cast(h.dtype)
