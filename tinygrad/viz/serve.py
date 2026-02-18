@@ -439,7 +439,7 @@ def load_pma_counters(profile:list) -> None:
   sm_version = {e.device:e.props.get("sm_version", 0x800) for e in profile if isinstance(e, ProfileDeviceEvent) and e.props is not None}
   run_number:dict[str, int] = {}
   for e in profile:
-    if type(e).__name__ == "ProfileDeviceEvent":
+    if type(e).__name__ == "ProfilePMAEvent":
       run_number[e.kern] = run_num = run_number.get(e.kern, 0)+1
       steps.append(create_step(f"PMA {e.kern}"+(f"n{run_num}" if run_num>1 else ""), ("/prg-pma-pkts", len(ctxs), len(steps)),
                                data=(e.blob, sm_version[e.device])))
