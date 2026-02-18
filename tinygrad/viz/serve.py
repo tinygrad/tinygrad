@@ -454,6 +454,7 @@ def pma_timeline(blob:bytes, sm_version:int) -> list[ProfileEvent]:
   # assume every sample is 32 cycles
   cycles_per_sample = 32
   for s, tpc_id in decode(blob, sm_version):
+    if len(ret) > getenv("MAX_SQTT_PKTS", 50_000): break
     gpc, tpc, sm = decode_tpc_id(tpc_id)
     tpc_count[tpc_id] = (n:=tpc_count.get(tpc_id,0)) + 1
     rows.setdefault(row:=f"GPC:{gpc} TPC:{tpc} SM:{sm} WAVE:{s.wave_id}")
