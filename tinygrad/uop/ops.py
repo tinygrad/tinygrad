@@ -644,16 +644,20 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     if self is not self.base:
       from tinygrad.schedule.rangeify import pm_mops
       out = graph_rewrite(self.flatten().index(UOp.range(self.size, 0)), pm_mops).simplify()
+      buf = out.src[0].buffer
+      assert isinstance(buf, Buffer), "must be a Buffer for movement ops"
       assert out.op is Ops.INDEX, "couldn't collapse to a single INDEX"
       if out.src[1].op is Ops.CONST:
-        return out.src[0].buffer.view(1, out.dtype, out.src[1].arg*out.dtype.itemsize)
+        return buf.view(1, out.dtype, out.src[1].arg*out.dtype.itemsize)
       if out.src[1].op is Ops.RANGE:
-        return out.src[0].buffer.view(self.size, out.dtype, 0)
+        return buf.view(self.size, out.dtype, 0)
       if out.src[1].op is Ops.ADD and out.src[1].src[0].op is Ops.RANGE and out.src[1].src[1].op is Ops.CONST:
-        return out.src[0].buffer.view(self.size, out.dtype, out.src[1].src[1].arg*out.dtype.itemsize)
+        return buf.view(self.size, out.dtype, out.src[1].src[1].arg*out.dtype.itemsize)
       raise RuntimeError(f"cannot collapse INDEX {out} to a single size/offset")
     if self.op is Ops.BITCAST:
-      return self.src[0].buffer.view(self.size, self.dtype, 0)
+      buf = self.src[0].buffer
+      assert isinstance(buf, Buffer), "must be a Buffer for BITCAST"
+      return buf.view(self.size, self.dtype, 0)
     if self.op is Ops.MSELECT:
       ret = self.src[0].buffer
       assert isinstance(ret, MultiBuffer)
