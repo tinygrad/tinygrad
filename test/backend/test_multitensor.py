@@ -813,7 +813,7 @@ class TestMultiTensor(unittest.TestCase):
     t = Tensor.ones(16, 16, dtype=dtypes.int).shard(devices_2, axis=0)
     out = Tensor.full_like(t, 2)[:, :8]
     sched = out.schedule()
-    self.assertEqual(len(sched), 2)
+    self.assertEqual(len(sched), 2) # TODO: 0. fix mstack_early_shrink
     run_schedule(sched)
     self.assertEqual(out.tolist(), [[2]*8]*16)
 
