@@ -308,22 +308,20 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     return tuple([int(x.vmax) if isinstance(x, UOp) else x for x in self.shape])
 
   @property
-  def size(self) -> int: return prod(self.max_shape)
-
-  @property
-  def shard_size(self):
-    if self.axis is None: return self.size
-    return self.size // len(self.device)
-
-  @property
-  def shard_shape(self):
-    if self.axis is None: return self.shape
+  def shard_shape(self) -> tuple[sint, ...]:
+    if not isinstance(self.device, tuple) or self.axis is None: return self.shape
     return tuple(x//len(self.device) if i == self.axis else x for i,x in enumerate(self.shape))
 
   @property
-  def max_shard_shape(self):
-    if self.axis is None: return self.max_shape
+  def max_shard_shape(self) -> tuple[int, ...]:
+    if not isinstance(self.device, tuple) or self.axis is None: return self.max_shape
     return tuple(x//len(self.device) if i == self.axis else x for i,x in enumerate(self.max_shape))
+
+  @property
+  def size(self) -> int: return prod(self.max_shape)
+
+  @property
+  def shard_size(self) -> int: return prod(self.max_shard_shape)
 
   @functools.cached_property
   def ended_ranges(self):
