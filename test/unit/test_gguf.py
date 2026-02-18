@@ -51,7 +51,7 @@ class TestGGUF(unittest.TestCase):
   def test_load_gpt2_q4_1(self): self._test_gguf_load("https://huggingface.co/PrunaAI/gpt2-GGUF-smashed/resolve/main/gpt2.Q4_1.gguf?download=true")
   def test_load_sample_q6_k(self): self._test_gguf_load("https://huggingface.co/Isotr0py/test-gguf-sample/resolve/main/Quant_Q6_K_1024.gguf?download=true")
   def test_load_sample_mxfp4(self): self._test_gguf_load("https://huggingface.co/ngxson/boring-testing-tiny/resolve/main/stories260K-mxfp4.gguf?download=true")
-
+  # NOTE: The test above does not actually test mxfp4 correctness because all the weights in that file are F32
   def test_dequantization_q4_0(self): self._test_dequantization(ggml.GGML_TYPE_Q4_0)
   def test_dequantization_q4_1(self): self._test_dequantization(ggml.GGML_TYPE_Q4_1)
   def test_dequantization_q8_0(self): self._test_dequantization(ggml.GGML_TYPE_Q8_0)
@@ -68,7 +68,7 @@ class TestGGUF(unittest.TestCase):
       sign = -1.0 if (code & 0b1000) else 1.0
       exp = (code >> 1) & 0b11
       mant = code & 0b1
-      val = (1.0 + 0.5 * mant) * np.exp2(exp - 1) if exp else 0.5 * mant
+      val = 2 * ((1.0 + 0.5 * mant) * np.exp2(exp - 1) if exp else 0.5 * mant)
       scale = np.exp2(E - 128) if E >= 2 else np.exp2(-127 if E == 1 else -128)
       return sign * val * scale
 
@@ -82,6 +82,26 @@ class TestGGUF(unittest.TestCase):
     tensor = Tensor(np.concatenate(blocks))
     out = ggml_data_to_tensor(tensor, len(expected), MXFP4)
     # TODO: should this be exact equal? somehow failed on CI
+    np.testing.assert_allclose(out.numpy(), expected, atol=0.0, rtol=1e-6)
+
+  def test_dequantization_mxfp4_block(self):
+    MXFP4 = 39
+    # https://gist.github.com/Ananta-Ranganathan/3317b6ed51a3b033e9c2564fafb4e043
+    # used the above script to download the first block of blk.0.attn_k_b.weight from
+    # https://huggingface.co/unsloth/GLM-4.7-Flash-GGUF/blob/main/GLM-4.7-Flash-MXFP4_MOE.gguf
+    # and compute the canonical expected dequantized output with the GGUF PY implementation
+    block = np.array([0x7a, 0x29, 0xab, 0x61, 0x10, 0x21, 0x02, 0x4a,
+                    0x15, 0xca, 0x05, 0x01, 0x9b, 0x39, 0x0b, 0x0b, 0x1c], dtype=np.uint8)
+    expected = np.array([-0.01562500, -0.04687500, 0.01562500, 0.00000000,
+                        0.01562500,  0.03125000, -0.03125000, 0.09375000,
+                        -0.03125000,  0.09375000, 0.01562500, -0.04687500,
+                        -0.01562500, -0.04687500, -0.04687500, -0.06250000,
+                        0.03125000, -0.03125000, 0.12500000,  0.01562500,
+                        0.03125000,  0.00000000, 0.06250000,  0.01562500,
+                        -0.06250000,  0.00000000, 0.00000000, -0.01562500,
+                        0.04687500,  0.00000000, 0.00000000,  0.01562500], dtype=np.float32)
+    out = ggml_data_to_tensor(Tensor(block), 32, MXFP4)
+    # TODO: similar to previous test fails on Mac CI with assert_equal for unclear reason
     np.testing.assert_allclose(out.numpy(), expected, atol=0.0, rtol=1e-6)
 
   def test_expected_failure_unknown_type(self):
