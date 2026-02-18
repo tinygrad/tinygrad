@@ -37,6 +37,7 @@ def optimize_local_size(_prg:Callable, global_size:list[int], rawbufs:list[Buffe
 
 class CompiledRunner(Runner):
   def __init__(self, p:ProgramSpec, prg=None):
+    # TODO: this goes after full_rewrite_to_sink?
     #if DEBUG >= 3 and p.applied_opts: print(p.applied_opts)
     if DEBUG >= 4: print(p.src)
     if p.lib is None:

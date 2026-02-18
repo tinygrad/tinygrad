@@ -6,7 +6,6 @@ from tinygrad.helpers import to_function_name, dedup, prod, DEBUG
 from tinygrad.uop.ops import Ops, UOp, sym_infer, sint, Variable, ssimplify, smin, GroupOp, PatternMatcher, print_uops
 from tinygrad.dtype import AddrSpace, PtrDType
 from tinygrad.codegen.opt.tc import TensorCore
-from tinygrad.codegen.opt import Opt
 from tinygrad.device import Compiler
 
 @dataclass(frozen=True)
