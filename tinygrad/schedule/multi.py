@@ -1,7 +1,7 @@
 from typing import cast
 import functools, itertools
 from tinygrad.helpers import all_same, all_int, prod, DEBUG, RING, ALL2ALL, VIZ, getenv
-from tinygrad.uop.ops import Ops, UOp, sint, PatternMatcher, UPat, GroupOp, graph_rewrite_map, graph_rewrite
+from tinygrad.uop.ops import Ops, UOp, PatternMatcher, UPat, GroupOp, graph_rewrite_map, graph_rewrite
 from tinygrad.dtype import dtypes
 from tinygrad.device import Device
 
@@ -149,21 +149,15 @@ def reduce_multi(root:UOp, multi:UOp):
   # reduce on non sharded axes, piecewise is fine. if axis is None this is also correct
   return multi.src[0].r(op, axis).multi(axis=multi.axis)
 
-def _shape_to_single_shard(axis, shape:tuple[sint, ...], lb:UOp) -> tuple[sint, ...]:
-  return tuple(lb.shape[axis] if a == axis else s for a,s in enumerate(shape))
-
 def reshape_multi(root:UOp, multi:UOp):
-  arg = root.marg
-  if (new_axis:=root.axis) is None: return multi.src[0].reshape(arg).multi(new_axis)
-  assert prod(multi.shape) == prod(arg), "reshape must maintain prod(shape)"
-  assert prod(multi.src[0].shape[multi.axis:])%prod(arg[new_axis+1:]) == 0, f"reshape cannot move items between shards {multi.shape} -> {arg=}"
-  new_shape_axis = prod(multi.src[0].shape[multi.axis:]) // prod(arg[new_axis+1:])
-  return multi.src[0].reshape(tuple(s if a!=new_axis else new_shape_axis for a,s in enumerate(arg))).multi(new_axis)
+  if prod(multi.shape) != prod(new_shape:=root.marg): raise RuntimeError("reshape must maintain prod(shape)")
+  if (new_axis:=root.axis) is not None: new_shape = tuple(s//len(multi.device) if a==new_axis else s for a,s in enumerate(new_shape))
+  return multi.src[0].reshape(new_shape).multi(new_axis)
 
 def expand_multi(root:UOp, multi:UOp):
-  # NOTE: this assert isn't needed, sharded axis can have dim 1
-  assert multi.axis is None or root.marg[multi.axis] == multi.shape[multi.axis], f"expand not supported on sharded axis {root.marg=}"
-  return multi.src[0].expand(_shape_to_single_shard(multi.axis, root.marg, multi.src[0])).multi(multi.axis)
+  if multi.axis is None: new_shape = root.marg
+  else: new_shape = tuple(multi.src[0].shape[multi.axis] if a == multi.axis else s for a,s in enumerate(root.marg))
+  return multi.src[0].expand(new_shape).multi(multi.axis)
 
 def pad_multi(root:UOp, multi:UOp):
   assert multi.axis is None or root.marg[multi.axis] == (0,0), f"padding not supported for {root.marg=}"

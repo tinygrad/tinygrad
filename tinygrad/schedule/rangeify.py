@@ -2,7 +2,7 @@ from dataclasses import dataclass, field, replace
 import itertools
 from tinygrad.dtype import dtypes, PtrDType, ImageDType, AddrSpace
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, _substitute, KernelInfo, pm_gate_kernel_sink
-from tinygrad.uop.ops import graph_rewrite, identity_element, sint, AxisType, BottomUpGate, _remove_all_tags, range_str
+from tinygrad.uop.ops import graph_rewrite, identity_element, sint, AxisType, BottomUpGate, _remove_all_tags
 from tinygrad.uop.symbolic import symbolic
 from tinygrad.helpers import argsort, prod, all_same, getenv, flatten, dedup, all_int, DEBUG, SPLIT_REDUCEOP, DEBUG_RANGEIFY, VIZ, MAX_KERNEL_BUFFERS
 from tinygrad.helpers import PCONTIG, partition, get_single_element
@@ -54,6 +54,13 @@ def fix_assign_hazard(assign:UOp, target:UOp, src:UOp):
   for h in hazards:
     if any(s is target.base for s in h.toposort(gate=lambda s:s.op not in ALWAYS_CONTIGUOUS-{Ops.PARAM})):
       return assign.replace(src=(target, src.contiguous()))
+
+def normalize_assign_target_chain(assign:UOp, target:UOp, src:UOp):
+  root_target = target
+  while root_target.op is Ops.ASSIGN: root_target = root_target.src[0]
+  # when RHS depends on the previous assign result, break with contiguous
+  if target in src.toposort(): src = src.contiguous()
+  return assign.replace(src=(root_target, src))
 
 def split_reduceop(reduce:UOp, x:UOp):
   if prod(reduce.shape) == 0: return None
@@ -148,6 +155,9 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
   # move bitcast from assign target to source: a.bitcast(X).assign(src) -> a.assign(src.bitcast(a.dtype))
   (UPat(Ops.ASSIGN, src=(UPat(Ops.BITCAST, src=(UPat(name="target"),)), UPat(name="src")), name="assign"),
    lambda assign, target, src: target.assign(src.bitcast(target.dtype)).replace(tag=assign.tag)),
+
+  # if assign target is itself an ASSIGN chain, canonicalize to the original buffer target
+  (UPat(Ops.ASSIGN, src=(UPat(Ops.ASSIGN, name="target"), UPat(name="src")), allow_any_len=True, name="assign"), normalize_assign_target_chain),
 
   # assign only to buffer, otherwise make it a CONTIGUOUS
   (UPat(Ops.ASSIGN, src=(UPat(GroupOp.All-{Ops.PARAM}, name="target"), UPat(name="src")), name="assign"), assign_to_contiguous),
@@ -353,18 +363,6 @@ def bufferize_to_store(ctx:itertools.count, x:UOp, idx:UOp, allow_locals=True):
     for op, marg in reversed(assign.arg or ()): ret = ret._mop(op, marg)
     return ret
 
-  # lower outerworld reduce here
-  if x.src[0].op is Ops.REDUCE and len(x.src[0].src) == 2 and x.src[0].src[1].arg[-1] == AxisType.OUTER:
-    assert sdtype.addrspace == AddrSpace.GLOBAL
-    outer_range = x.src[0].src[1]
-    buf = UOp(Ops.BUFFER, x.dtype, (UOp(Ops.LUNIQUE, arg=next(ctx)), UOp(Ops.DEVICE, arg=x.arg.device)), size)
-    # NOTE: this has the same number as the outer range, we need string ranges!
-    zero_range = outer_range.replace(src=(UOp.const(dtypes.index, size),), arg=outer_range.arg[:-1]+(AxisType.LOOP,))
-    buf = buf.after(buf.index(zero_range).store(0).end(zero_range))
-    bufi = buf.index(idx, dtype=sdtype)
-    do_store = bufi.store(bufi.load() + x.src[0].src[0], tag=x.tag).end(*rngs).end(outer_range)
-    return buf.after(do_store)
-
   # NOTE: the DEFINE_LOCAL needs to be disambiguated here
   if sdtype.addrspace == AddrSpace.GLOBAL:
     buf = UOp(Ops.BUFFER, x.dtype, (UOp(Ops.LUNIQUE, arg=next(ctx)), UOp(Ops.DEVICE, arg=x.arg.device)), size)
@@ -437,9 +435,6 @@ def handle_after(ctx:LocalAddBufferContext, after:UOp):
 
 def renumber_range(ctx:LocalAddBufferContext, r:UOp):
   if r.tag != (): return None
-  if r.arg[-1] == AxisType.OUTER:
-    # for outer range, we replace with a bound variable
-    return UOp.variable("range_"+range_str(r), r.vmin, r.vmax).bind(r.replace(tag=None))
   ret = r.replace(arg=(ctx.range,)+r.arg[1:], tag=None)
   ctx.range += 1
   return ret
@@ -509,11 +504,8 @@ pm_add_range_tags = PatternMatcher([
 ])
 
 def split_store(ctx:list[UOp], x:UOp) -> UOp|None:
-  # if we have any non-outer ranges open here, we don't split
-  if any(r.arg[-1] != AxisType.OUTER for r in x.ranges): return None
-
-  # ends of outer range don't go in kernels
-  if x.op is Ops.END and x.src[1].op is Ops.RANGE and x.src[1].arg[-1] == AxisType.OUTER: return None
+  # if we have any open ranges here, we don't split
+  if x.ranges: return None
 
   # local kernel rewrite
   lctx = LocalAddBufferContext()
