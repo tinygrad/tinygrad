@@ -161,7 +161,7 @@ def contig_to_assign(ctx:dict[UOp,UOp|None], x:UOp):
   if not (x.op is Ops.CONTIGUOUS or (x in ctx and ctx[x] is None)): return None
   # not sure why the ctx isn't enough, but tag fixes it
   buffer = UOp.new_buffer(x.device, x.shard_size, x.dtype).reshape(x.max_shard_shape).shrink_to(x.shard_shape)
-  if isinstance(x.device, tuple): buffer = buffer.multi(x.axis)
+  if isinstance(x.device, tuple) and x.axis is not None: buffer = buffer.multi(x.axis)
   ctx[x] = buffer
   return buffer.assign(x.src[0] if x.op is Ops.CONTIGUOUS else x.rtag())
 pm_build_buffer_map = PatternMatcher([ (UPat(GroupOp.All, name="x"), contig_to_assign), ])
