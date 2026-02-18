@@ -55,11 +55,8 @@ class Attention:
 
   def __call__(self, x:Tensor, start_pos:Union[Variable,int], freqs_cis:Tensor, mask:Optional[Tensor]=None) -> Tensor:
     if getenv("WQKV"):
-      # if not hasattr(self, 'wqkv'): self.wqkv = Tensor.cat(self.wq.weight, self.wk.weight, self.wv.weight)
-      # xqkv = x @ self.wqkv.T
       xqkv = self.wqkv(x)
       xq, xk, xv = xqkv.split([self.n_heads * self.head_dim, self.n_kv_heads * self.head_dim, self.n_kv_heads * self.head_dim], dim=2)
-      # xq, xk, xv = xqkv.split([self.wq.weight.shape[0], self.wk.weight.shape[0], self.wv.weight.shape[0]], dim=2)
     else:
       xq, xk, xv = self.wq(x), self.wk(x.contiguous_backward()), self.wv(x)
 
