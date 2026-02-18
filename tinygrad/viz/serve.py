@@ -437,29 +437,29 @@ def get_profile(profile:list[ProfileEvent], sort_fn:Callable[[str], Any]=device_
 def load_pma_counters(profile:list[ProfileEvent]) -> None:
   from tinygrad.runtime.ops_nv import ProfilePMAEvent
   steps:list[dict] = []
-  sm_version = {e.device:unwrap(e.props).get("sm_version", 0x800) for e in profile if isinstance(e, ProfileDeviceEvent) and e.device.startswith("NV")}
+  sm_version = {e.device:e.props.get("sm_version", 0x800) for e in profile if isinstance(e, ProfileDeviceEvent) and e.props is not None}
   run_number:dict[str, int] = {}
   for e in profile:
     if isinstance(e, ProfilePMAEvent):
       run_number[e.kern] = run_num = run_number.get(e.kern, 0)+1
       steps.append(create_step(f"PMA {e.kern}"+(f"n{run_num}" if run_num>1 else ""), ("/prg-pma-pkts", len(ctxs), len(steps)),
                                data=(e.blob, sm_version[e.device])))
-  ctxs.append({"name":"All Counters", "steps":steps})
+  if steps: ctxs.append({"name":"All Counters", "steps":steps})
 
-def pma_timeline(blob:bytes, sm_version:int, cycles_per_sample:int=32) -> list[ProfileEvent]:
+def pma_timeline(blob:bytes, sm_version:int) -> list[ProfileEvent]:
   from extra.nv_pma.decode import decode, decode_tpc_id
   ret:list[ProfileEvent] = []
   rows:dict[str, None] = {}
   tpc_count:dict[int, int] = {}
+  # assume every sample is 32 cycles
+  cycles_per_sample = 32
   for s, tpc_id in decode(blob, sm_version):
     gpc, tpc, sm = decode_tpc_id(tpc_id)
-    n = tpc_count.get(tpc_id, 0)
-    tpc_count[tpc_id] = n + 1
-    row = f"GPC:{gpc} TPC:{tpc} SM:{sm} WAVE:{s.wave_id}"
-    rows.setdefault(row)
-    key = TracingKey(s.stall_reason.name, ret=f"pc=0x{s.pc_offset:06x} active={s.active}")
-    ret.append(ProfileRangeEvent(row, key, Decimal(n * cycles_per_sample), Decimal((n+1) * cycles_per_sample)))
-  return [ProfilePointEvent(r, "start", r, ts=Decimal(0)) for r in rows] + ret
+    tpc_count[tpc_id] = (n:=tpc_count.get(tpc_id,0)) + 1
+    rows.setdefault(row:=f"GPC:{gpc} TPC:{tpc} SM:{sm} WAVE:{s.wave_id}")
+    ret.append(ProfileRangeEvent(row, TracingKey(s.stall_reason.name, ret=f"pc=0x{s.pc_offset:06x} active={s.active}"),
+                                 Decimal(n*cycles_per_sample), Decimal((n+1)*cycles_per_sample)))
+  return [ProfilePointEvent(r, "start", r, ts=Decimal(0)) for r in rows]+ret
 
 # ** Assembly static analyzers
 
@@ -618,8 +618,7 @@ def get_render(query:str) -> dict:
   if fmt == "prg-pma-pkts":
     ret = {}
     with soft_err(lambda err:ret.update(err)):
-      if (events:=get_profile(pma_timeline(*data, cycles_per_sample=getenv("PMA_CYCLES", 32)), sort_fn=row_tuple)):
-        ret = {"value":events, "content_type":"application/octet-stream"}
+      if (events:=get_profile(pma_timeline(*data), sort_fn=row_tuple)): ret = {"value":events, "content_type":"application/octet-stream"}
       else: ret = {"src":"No PMA samples found."}
     return ret
   return data
