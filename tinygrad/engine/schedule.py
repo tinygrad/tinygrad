@@ -159,10 +159,8 @@ def contig_to_assign(ctx:dict[UOp,UOp|None], x:UOp):
     return None
   # for contiguous or in buffer_map explicitly
   if not (x.op is Ops.CONTIGUOUS or (x in ctx and ctx[x] is None)): return None
-  # not for symbolic shape
-  if any([not isinstance(s, int) for s in x.shape]): return None
   # not sure why the ctx isn't enough, but tag fixes it
-  ctx[x] = buffer = UOp.new_buffer(x.device, x.size, x.dtype).reshape(x.shape)
+  ctx[x] = buffer = UOp.new_buffer(x.device, x.size, x.dtype).reshape(x.max_shape).shrink_to(x.shape)
   return buffer.assign(x.src[0] if x.op is Ops.CONTIGUOUS else x.rtag())
 pm_build_buffer_map = PatternMatcher([ (UPat(GroupOp.All, name="x"), contig_to_assign), ])
 

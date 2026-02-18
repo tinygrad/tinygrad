@@ -304,7 +304,11 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     return ret
 
   @property
-  def size(self) -> int: return prod([int(x.vmax) if isinstance(x, UOp) else x for x in self.shape])
+  def max_shape(self) -> tuple[int, ...]:
+    return tuple([int(x.vmax) if isinstance(x, UOp) else x for x in self.shape])
+
+  @property
+  def size(self) -> int: return prod(self.max_shape)
 
   @functools.cached_property
   def ended_ranges(self):
@@ -553,6 +557,8 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
       case _: raise RuntimeError(f"{self.op} is not a MovementOp")
 
   def _mop(self, op:Ops, arg, same_shape_noop:bool=False) -> UOp:
+    # early NOOP
+    if op in {Ops.SHRINK, Ops.PAD, Ops.EXPAND} and len(arg) == 0: return self
     match op:
       case Ops.RESHAPE | Ops.EXPAND: src_args = [arg]
       case Ops.PAD | Ops.SHRINK: src_args = list(zip(*arg))
