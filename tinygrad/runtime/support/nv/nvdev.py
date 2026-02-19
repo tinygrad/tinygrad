@@ -77,7 +77,7 @@ class NVDev(PCIDevImplBase):
     self._early_ip_init()
     self._early_mmu_init()
 
-    # Turn the booting early, gsp client is loaded from the clean.
+    # No booting state, gsp client is reinited every run.
     self.is_booting = False
 
     for ip in [self.flcn, self.gsp]: ip.init_sw()
