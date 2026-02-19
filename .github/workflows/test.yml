@@ -695,7 +695,7 @@ jobs:
           python3 -c "from tinygrad import Device; assert Device.DEFAULT in ['AMD'], Device.DEFAULT"
           DEBUG=5 FORWARD_ONLY=1 python3 test/test_tiny.py TestTiny.test_plus
       - name: Run pytest (amd)
-        run: python -m pytest -n=auto test/backend/test_ops.py test/backend/test_dtype.py test/backend/test_dtype_alu.py test/backend/test_linearizer.py test/backend/test_randomness.py test/backend/test_jit.py test/backend/test_graph.py test/backend/test_multitensor.py test/device/test_hcq.py test/testextra/test_cfg_viz.py test/external/external_test_am.py --durations=20
+        run: python -m pytest -n=auto test/backend/test_ops.py test/backend/test_dtype.py test/backend/test_dtype_alu.py test/backend/test_linearizer.py test/backend/test_randomness.py test/backend/test_jit.py test/backend/test_graph.py test/backend/test_multitensor.py test/device/test_hcq.py test/testextra/test_cfg_viz.py test/external/external_test_am.py test/testextra/test_tk.py::TestTKSmall --durations=20
       - name: Run TRANSCENDENTAL math
         run: TRANSCENDENTAL=2 python -m pytest -n=auto test/backend/test_ops.py::TestOps::test_sin test/backend/test_ops.py::TestOps::test_cos test/backend/test_ops.py::TestOps::test_tan test/backend/test_ops.py::TestOps::test_exp test/backend/test_ops.py::TestOps::test_log --durations=20
       - name: Run process replay tests

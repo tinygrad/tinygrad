@@ -1,13 +1,31 @@
-"""Test infrastructure for hardware-validated RDNA3 emulator tests.
+"""Test infrastructure for hardware-validated RDNA3/CDNA emulator tests.
 
 Uses run_asm() with memory output, so tests can run on both emulator and real hardware.
 Set USE_HW=1 to run on both emulator and hardware, comparing results.
 """
 import ctypes, math, os, struct
+from dataclasses import dataclass
+from types import ModuleType
 from tinygrad.runtime.autogen.amd.rdna3.ins import *
+from tinygrad.runtime.autogen.amd.rdna3 import ins as _rdna3_ins
+from tinygrad.runtime.autogen.amd.cdna import ins as _cdna_ins
 
 from test.mockgpu.amd.emu import run_asm
 from tinygrad.renderer.amd.dsl import NULL, SCC, VCC_LO, VCC_HI, EXEC_LO, EXEC_HI, M0
+
+@dataclass
+class ArchConfig:
+  arch: str              # "rdna3" or "cdna"
+  wave_size: int         # 32 or 64
+  ins: ModuleType        # instruction module (rdna3.ins or cdna.ins)
+  global_store_b32: object   # instruction partial (global_store_b32 vs global_store_dword)
+  s_load_b64: object         # s_load_b64 vs s_load_dwordx2
+  s_and_saveexec: object     # s_and_saveexec_b32 vs s_and_saveexec_b64
+
+RDNA3_CONFIG = ArchConfig(arch="rdna3", wave_size=32, ins=_rdna3_ins,
+  global_store_b32=_rdna3_ins.global_store_b32, s_load_b64=_rdna3_ins.s_load_b64, s_and_saveexec=_rdna3_ins.s_and_saveexec_b32)
+CDNA_CONFIG = ArchConfig(arch="cdna", wave_size=64, ins=_cdna_ins,
+  global_store_b32=_cdna_ins.global_store_dword, s_load_b64=_cdna_ins.s_load_dwordx2, s_and_saveexec=_cdna_ins.s_and_saveexec_b64)
 
 def _i32(f: float) -> int: return struct.unpack('<I', struct.pack('<f', f))[0]
 def _f32(i: int) -> float: return struct.unpack('<f', struct.pack('<I', i & 0xFFFFFFFF))[0]
@@ -84,50 +102,70 @@ class WaveState:
     self.vcc = 0
     self.scc = 0
 
-def get_prologue_epilogue(n_lanes: int) -> tuple[list, list]:
+def get_prologue_epilogue(n_lanes: int, arch: str = 'rdna3') -> tuple[list, list]:
   """Generate prologue and epilogue instructions for state capture."""
-  prologue = [
-    s_mov_b32(s[80], s[0]),
-    s_mov_b32(s[81], s[1]),
-    v_mov_b32_e32(v[255], v[0]),
-  ]
-  for i in range(N_VGPRS):
-    prologue.append(v_mov_b32_e32(v[i], 0))
-  for i in range(N_SGPRS):
-    prologue.append(s_mov_b32(s[i], 0))
-  prologue.append(s_mov_b32(VCC_LO, 0))
+  cfg = RDNA3_CONFIG if arch == 'rdna3' else CDNA_CONFIG
+  i, ws = cfg.ins, cfg.wave_size
 
-  epilogue = [
-    s_mov_b32(s[90], VCC_LO),
-    s_cselect_b32(s[91], 1, 0),
-    # Save EXEC early (before we modify it for VGPR stores)
-    s_mov_b32(s[95], EXEC_LO),
-    # Restore EXEC to all active lanes for VGPR stores (test may have modified EXEC)
-    s_mov_b32(EXEC_LO, (1 << min(n_lanes, WAVE_SIZE)) - 1),
-    s_load_b64(s[92:93], s[80:81], 0, soffset=NULL),
-    s_waitcnt(0),  # simm16=0 waits for all
-    v_lshlrev_b32_e32(v[240], 2, v[255]),
+  prologue = [
+    i.s_mov_b32(s[80], s[0]),
+    i.s_mov_b32(s[81], s[1]),
+    i.v_mov_b32_e32(v[255], v[0]),
   ]
+  for r in range(N_VGPRS):
+    prologue.append(i.v_mov_b32_e32(v[r], 0))
+  for r in range(N_SGPRS):
+    prologue.append(i.s_mov_b32(s[r], 0))
+  prologue.append(i.s_mov_b32(VCC_LO, 0))
+  if ws == 64:
+    prologue.append(i.s_mov_b32(VCC_HI, 0))
+
+  exec_lo_val = (1 << min(n_lanes, 32)) - 1
+  epilogue = [
+    i.s_mov_b32(s[90], VCC_LO),
+    i.s_cselect_b32(s[91], 1, 0),
+    # Save EXEC early (before we modify it for VGPR stores)
+    i.s_mov_b32(s[95], EXEC_LO),
+  ]
+  if ws == 64:
+    epilogue.append(i.s_mov_b32(s[96], EXEC_HI))
+  # Restore EXEC to all active lanes for VGPR stores (test may have modified EXEC)
+  epilogue.append(i.s_mov_b32(EXEC_LO, exec_lo_val))
+  if ws == 64:
+    exec_hi_val = (1 << max(0, min(n_lanes - 32, 32))) - 1
+    epilogue.append(i.s_mov_b32(EXEC_HI, exec_hi_val))
+  epilogue.extend([
+    cfg.s_load_b64(s[92:93], s[80:81], 0, soffset=NULL),
+    i.s_waitcnt(0),  # simm16=0 waits for all
+    i.v_lshlrev_b32_e32(v[240], 2, v[255]),
+  ])
   vgpr_bytes = N_VGPRS * n_lanes * 4
-  for i in range(N_VGPRS):
-    epilogue.append(global_store_b32(addr=v[240], data=v[i], saddr=s[92:93], offset=i * n_lanes * 4))
-  epilogue.append(v_mov_b32_e32(v[241], 0))
-  epilogue.append(v_cmp_eq_u32_e32(v[255], v[241]))
-  epilogue.append(s_and_saveexec_b32(s[94], VCC_LO))
+  for r in range(N_VGPRS):
+    epilogue.append(cfg.global_store_b32(addr=v[240], data=v[r], saddr=s[92:93], offset=r * n_lanes * 4))
+  epilogue.append(i.v_mov_b32_e32(v[241], 0))
+  epilogue.append(i.v_cmp_eq_u32_e32(v[255], v[241]))
+  if ws == 64:
+    epilogue.append(cfg.s_and_saveexec(s[88:89], VCC_LO))
+  else:
+    epilogue.append(cfg.s_and_saveexec(s[94], VCC_LO))
   # Scalar stores: only thread 0. Use v[240]=vgpr_bytes as base offset so immediate offsets stay small.
-  epilogue.append(v_mov_b32_e32(v[240], vgpr_bytes))
-  for i in range(N_SGPRS):
-    epilogue.append(v_mov_b32_e32(v[243], s[i]))
-    epilogue.append(global_store_b32(addr=v[240], data=v[243], saddr=s[92:93], offset=i * 4))
-  epilogue.append(v_mov_b32_e32(v[243], s[90]))
-  epilogue.append(global_store_b32(addr=v[240], data=v[243], saddr=s[92:93], offset=SGPR_BYTES))
-  epilogue.append(v_mov_b32_e32(v[243], s[91]))
-  epilogue.append(global_store_b32(addr=v[240], data=v[243], saddr=s[92:93], offset=SGPR_BYTES + 4))
+  epilogue.append(i.v_mov_b32_e32(v[240], vgpr_bytes))
+  for r in range(N_SGPRS):
+    epilogue.append(i.v_mov_b32_e32(v[243], s[r]))
+    epilogue.append(cfg.global_store_b32(addr=v[240], data=v[243], saddr=s[92:93], offset=r * 4))
+  epilogue.append(i.v_mov_b32_e32(v[243], s[90]))
+  epilogue.append(cfg.global_store_b32(addr=v[240], data=v[243], saddr=s[92:93], offset=SGPR_BYTES))
+  epilogue.append(i.v_mov_b32_e32(v[243], s[91]))
+  epilogue.append(cfg.global_store_b32(addr=v[240], data=v[243], saddr=s[92:93], offset=SGPR_BYTES + 4))
   # Store EXEC (saved earlier in s[95])
-  epilogue.append(v_mov_b32_e32(v[243], s[95]))
-  epilogue.append(global_store_b32(addr=v[240], data=v[243], saddr=s[92:93], offset=SGPR_BYTES + 8))
-  epilogue.append(s_mov_b32(EXEC_LO, s[94]))
-  epilogue.append(s_endpgm())
+  epilogue.append(i.v_mov_b32_e32(v[243], s[95]))
+  epilogue.append(cfg.global_store_b32(addr=v[240], data=v[243], saddr=s[92:93], offset=SGPR_BYTES + 8))
+  if ws == 64:
+    epilogue.append(i.s_mov_b32(EXEC_LO, s[88]))
+    epilogue.append(i.s_mov_b32(EXEC_HI, s[89]))
+  else:
+    epilogue.append(i.s_mov_b32(EXEC_LO, s[94]))
+  epilogue.append(i.s_endpgm())
   return prologue, epilogue
 
 def parse_output(out_buf: bytes, n_lanes: int) -> WaveState:
@@ -146,13 +184,13 @@ def parse_output(out_buf: bytes, n_lanes: int) -> WaveState:
   st.sgpr[EXEC_LO.offset] = struct.unpack_from('<I', out_buf, vgpr_bytes + SGPR_BYTES + 8)[0]
   return st
 
-def run_program_emu(instructions: list, n_lanes: int = 1) -> WaveState:
+def run_program_emu(instructions: list, n_lanes: int = 1, arch: str = 'rdna3') -> WaveState:
   """Run instructions via emulator run_asm, dump state to memory, return WaveState."""
   buf_sz = _out_bytes(n_lanes)
   out_buf = (ctypes.c_uint8 * buf_sz)(*([0] * buf_sz))
   out_addr = ctypes.addressof(out_buf)
 
-  prologue, epilogue = get_prologue_epilogue(n_lanes)
+  prologue, epilogue = get_prologue_epilogue(n_lanes, arch=arch)
   code = assemble(prologue + instructions + epilogue)
 
   args = (ctypes.c_uint64 * 1)(out_addr)
@@ -163,25 +201,27 @@ def run_program_emu(instructions: list, n_lanes: int = 1) -> WaveState:
   # rsrc2: USER_SGPR_COUNT=2, ENABLE_SGPR_WORKGROUP_ID_X/Y/Z=1, LDS_SIZE=128 (64KB)
   rsrc2 = 0x19c | (128 << 15)
   scratch_size = 0x10000  # 64KB per lane, matches .amdhsa_private_segment_fixed_size in run_program_hw
-  result = run_asm(lib_ptr, len(code), 1, 1, 1, n_lanes, 1, 1, args_ptr, rsrc2, scratch_size)
+  result = run_asm(lib_ptr, len(code), 1, 1, 1, n_lanes, 1, 1, args_ptr, rsrc2, scratch_size, arch=arch)
   assert result == 0, f"run_asm failed with {result}"
 
   return parse_output(bytes(out_buf), n_lanes)
 
-def run_program_hw(instructions: list, n_lanes: int = 1) -> WaveState:
+def run_program_hw(instructions: list, n_lanes: int = 1, arch: str = 'rdna3') -> WaveState:
   """Run instructions on real AMD hardware via HIPCompiler and AMDProgram."""
   from tinygrad.device import Device
   from tinygrad.runtime.ops_amd import AMDProgram
   from tinygrad.runtime.support.compiler_amd import HIPCompiler
   from tinygrad.helpers import flat_mv
 
+  cfg = RDNA3_CONFIG if arch == 'rdna3' else CDNA_CONFIG
   dev = Device["AMD"]
   compiler = HIPCompiler(dev.arch)  # type: ignore[attr-defined]
 
-  prologue, epilogue = get_prologue_epilogue(n_lanes)
+  prologue, epilogue = get_prologue_epilogue(n_lanes, arch=arch)
   code = assemble(prologue + instructions + epilogue)
 
   byte_str = ', '.join(f'0x{b:02x}' for b in code)
+  wavefront_directive = "  .amdhsa_wavefront_size32 1\n" if cfg.wave_size == 32 else ""
   asm_src = f""".text
 .globl test
 .p2align 8
@@ -194,8 +234,7 @@ test:
 .amdhsa_kernel test
   .amdhsa_next_free_vgpr 256
   .amdhsa_next_free_sgpr 96
-  .amdhsa_wavefront_size32 1
-  .amdhsa_user_sgpr_kernarg_segment_ptr 1
+{wavefront_directive}  .amdhsa_user_sgpr_kernarg_segment_ptr 1
   .amdhsa_kernarg_size 8
   .amdhsa_group_segment_fixed_size 65536
   .amdhsa_private_segment_fixed_size 65536
@@ -214,7 +253,7 @@ amdhsa.kernels:
     .group_segment_fixed_size: 65536
     .private_segment_fixed_size: 65536
     .kernarg_segment_align: 8
-    .wavefront_size: 32
+    .wavefront_size: {cfg.wave_size}
     .sgpr_count: 96
     .vgpr_count: 256
     .max_flat_workgroup_size: 1024
@@ -268,7 +307,7 @@ def compare_wave_states(emu_st: WaveState, hw_st: WaveState, n_lanes: int, n_vgp
     diffs.append(f"scc: emu={emu_st.scc} hw={hw_st.scc}")
   return diffs
 
-def run_program(instructions: list, n_lanes: int = 1, ulp_tolerance: int = 0) -> WaveState:
+def run_program(instructions: list, n_lanes: int = 1, ulp_tolerance: int = 0, arch: str = 'rdna3') -> WaveState:
   """Run instructions and return WaveState.
 
   If USE_HW=1, runs on both emulator and hardware, compares results, and raises if they differ.
@@ -276,10 +315,11 @@ def run_program(instructions: list, n_lanes: int = 1, ulp_tolerance: int = 0) ->
 
   Args:
     ulp_tolerance: Allow up to this many ULPs difference for float comparisons (0 = exact match required)
+    arch: Target architecture ('rdna3' or 'cdna')
   """
-  emu_st = run_program_emu(instructions, n_lanes)
+  emu_st = run_program_emu(instructions, n_lanes, arch=arch)
   if USE_HW:
-    hw_st = run_program_hw(instructions, n_lanes)
+    hw_st = run_program_hw(instructions, n_lanes, arch=arch)
     diffs = compare_wave_states(emu_st, hw_st, n_lanes, ulp_tolerance=ulp_tolerance)
     if diffs:
       raise AssertionError("Emulator vs Hardware mismatch:\n" + "\n".join(diffs))
