@@ -121,7 +121,7 @@ def apply_buffer_map(ctx:dict[UOp,UOp|None], x:UOp):
     while target.op is Ops.ASSIGN: target = target.src[0]
     if target.base.op is Ops.BUFFER or target in ctx:
       ctx[x] = ctx[target] if target in ctx is not None else target
-    return None
+      return None
   if x not in ctx: return None
   return ctx[x].assign(x.src[0] if x.op is Ops.CONTIGUOUS else x.rtag())
 pm_apply_buffer_map = PatternMatcher([ (UPat(GroupOp.All, name="x"), apply_buffer_map), ])
