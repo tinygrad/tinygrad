@@ -88,6 +88,12 @@ class TestGroupedDims(unittest.TestCase):
   def test_split_2d_to_3d(self):
     self._check_grouped_dims("gidx", (128,128), (16,16,256), False, [16,16,64], False)
 
+  def test_grouped_direct_dims_are_special(self):
+    # when (2,3) are merged into 6, the unmerged dims (4,5) should map directly to SPECIAL ops (no div/mod)
+    idxs = get_grouped_dims("gidx", (2,3,4,5), (16,16,16), False)
+    assert idxs[2].op is Ops.SPECIAL, f"expected SPECIAL for direct-mapped dim, got {idxs[2].op}"
+    assert idxs[3].op is Ops.SPECIAL, f"expected SPECIAL for direct-mapped dim, got {idxs[3].op}"
+
   def test_max_sizes_none(self):
     self._check_grouped_dims("gidx", (2,3,4), None, False, [2,3,4])
     self._check_grouped_dims("gidx", (100,), None, False, [100])

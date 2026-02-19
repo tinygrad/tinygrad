@@ -1,6 +1,6 @@
 import math
 from tinygrad.uop.ops import UOp, Ops, sint, PatternMatcher, UPat, KernelInfo, ssimplify, AxisType, sint_to_uop
-from tinygrad.helpers import all_int, dedup, get_contraction
+from tinygrad.helpers import all_int, dedup
 from tinygrad.dtype import dtypes, AddrSpace, Invalid
 from tinygrad.renderer import Renderer
 
@@ -23,7 +23,8 @@ def _split_dims(dims, max_sizes):
       div = next((d for d in range(2, math.ceil(math.sqrt(_dims[i])) + 1) if (_dims[i] % d) == 0), 1)
       if div == 1: raise RuntimeError(f"cannot limit dim {dims=}, {max_sizes=}")
       _dims[i], _dims[(i+1)%len(_dims)] = _dims[i]//div, _dims[(i+1)%len(_dims)]*div
-  return tuple(_dims[:2] if _dims[2] == 1 else _dims[0] if _dims[1:3] == [1,1] else _dims)
+  while len(_dims) > 1 and _dims[-1] == 1: _dims.pop()
+  return tuple(_dims)
 
 def get_grouped_dims(prefix, dims:tuple[sint, ...], max_sizes:tuple[int, ...]|None, reverse=False) -> list[UOp]:
   if reverse: return get_grouped_dims(prefix, dims[::-1], max_sizes)[::-1]
@@ -36,24 +37,29 @@ def get_grouped_dims(prefix, dims:tuple[sint, ...], max_sizes:tuple[int, ...]|No
     # try to split up dims: (a,) -> (b, c)
     if limited == dims: limited = _split_dims(dims, max_sizes)
   raw_idxs = [UOp(Ops.SPECIAL, dtypes.index, (sint_to_uop(s),), (f"{prefix}{i}")) for i,s in enumerate(limited)]
+  if limited == dims: return raw_idxs
   if len(limited) < len(dims):
-    ret = []
-    if (contraction:=get_contraction(dims, limited)) is None: raise RuntimeError(f"get_contraction should not be None {dims=} {limited=}")
-    for idx, contraction_group in zip(raw_idxs, contraction):
-      for c in contraction_group[:-1]:
-        ret.append(idx % dims[c])
-        idx //= dims[c]
-      ret.append(idx)
+    # per-group decomposition: each limited dim is a product of consecutive original dims
+    j, ret = 0, []
+    for raw_idx, l in zip(raw_idxs, limited):
+      group_start: int = j
+      prod: sint = 1
+      while prod < l:
+        prod *= dims[j]
+        j += 1
+      for k in range(group_start, j-1):
+        ret.append(raw_idx % dims[k])
+        raw_idx = raw_idx // dims[k]
+      ret.append(raw_idx)
     return ret
-  elif (a:=len(limited)) > (b:=len(dims)):
-    if a == 2 and b == 1: return [raw_idxs[0] * limited[1] + raw_idxs[1]]
-    if a == 3 and b == 1: return [(raw_idxs[0] * limited[1] + raw_idxs[1]) * limited[2] + raw_idxs[2]]
-  if limited != dims:
-    # Convert to 1D
-    flat = raw_idxs[0]*limited[1]+raw_idxs[1] if len(limited) == 2 else raw_idxs[0]*(limited[1]*limited[2])+raw_idxs[1]*limited[2]+raw_idxs[2]
-    # Get back original indices from 1D
-    return [flat//dims[1], flat%dims[1]] if len(dims) == 2 else [flat//(dims[2]*dims[1]), (flat//dims[2])%dims[1], flat%dims[2]]
-  return raw_idxs
+  # flatten limited indices to 1D, then extract original dims
+  flat = raw_idxs[0]
+  for i in range(1, len(limited)): flat = flat * limited[i] + raw_idxs[i]
+  ret = []
+  for i in range(len(dims)-1, 0, -1):
+    ret.append(flat % dims[i])
+    flat = flat // dims[i]
+  return [flat] + ret[::-1]
 
 def add_gpudims(ctx:Renderer, s:UOp):
   if s.arg is None: return None
