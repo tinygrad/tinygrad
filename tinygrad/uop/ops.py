@@ -506,6 +506,8 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
 
   @functools.cached_property
   def axis(self) -> int|None:
+    # COPY removes axis. TODO: add more tests for this, and consider MSELECT/MSTACK
+    if self.op is Ops.COPY: return None
     if self.op is Ops.MULTI: return self.arg
     # NOTE: they all have to share an axis, we always choose [-1]
     if self.op in GroupOp.ALU: return axes[-1] if (axes := dedup([x.axis for x in self.src if x.axis is not None])) else None
