@@ -839,34 +839,33 @@ class TestSymbolicNumeric(unittest.TestCase):
   def test_times_2_plus_3_div_4(self): self.helper_test_numeric(lambda x: (x*2 + 3)//4)
   def test_times_2_plus_3_div_4_mod_4(self): self.helper_test_numeric(lambda x: ((x*2 + 3)//4)%4)
 
-class TestSymbolicVars(unittest.TestCase):
+class TestSymbolicVariables(unittest.TestCase):
   def test_simple(self):
     z = uconst(0)
     a = Variable("a", 0, 10)
     b = Variable("b", 0, 10)
     c = Variable("c", 0, 10)
-    assert z.vars() == z.vars() == set()
-    print(a.vars())
-    assert a.vars() == a.vars() == {a}
+    assert z.variables() == []
+    assert a.variables() == [a]
     m = a * 3
-    assert m.vars() == {a}
+    assert m.variables() == [a]
     s = usum([a, b, c])
-    assert s.vars() == {a, b, c}
+    assert s.variables() == [a, b, c]
 
   def test_compound(self):
     a = Variable("a", 0, 10)
     b = Variable("b", 0, 10)
     c = Variable("c", 0, 10)
-    assert (a + b * c).vars() == {a, b, c}
-    assert (a % 3 + b // 5).vars() == {a, b}
+    assert (a + b * c).variables() == [a, b, c]
+    assert (a % 3 + b // 5).variables() == [a, b]
     # TODO: fix me
     with self.assertRaises(AssertionError):
-      assert (a + b + c - a).vars() == {b, c}
+      assert (a + b + c - a).variables() == [b, c]
 
   def test_dedup(self):
     a = Variable("a", 0, 10)
-    assert (a * a).vars() == {a}
-    assert (a//4 + a//6).vars() == {a}
+    assert (a * a).variables() == [a]
+    assert (a//4 + a//6).variables() == [a]
 
 class TestSymInfer(unittest.TestCase):
   def test_sym_infer(self):
