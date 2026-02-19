@@ -147,7 +147,7 @@ def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[dict[UOp, UOp], li
 
   # new preschedule stuff
   # we assign for any contiguous or anything on the sink that's not a BUFFER or a CONST
-  buffer_map: dict[UOp, UOp|None] = {x.base:None for x in big_sink.src if x.base.op not in {Ops.CONST, Ops.BUFFER}}
+  buffer_map: dict[UOp, UOp|None] = {x.base:None for x in big_sink.src if x.base.op not in {Ops.CONST, Ops.BUFFER, Ops.BIND, Ops.DEFINE_VAR}}
   big_sink = graph_rewrite(big_sink, pm_build_buffer_map, ctx=buffer_map, bottom_up=True, name="contig to assign")
   big_sink = graph_rewrite(big_sink, _remove_all_tags)
   assert all(x is not None for x in buffer_map.values())
