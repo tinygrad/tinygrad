@@ -1,5 +1,5 @@
 # schedule tests that pass on NULL backend (no copyout needed)
-import unittest, time
+import gc, unittest, time
 from tinygrad import nn, dtypes, Device, Tensor
 from tinygrad.device import is_dtype_supported
 from tinygrad.uop.ops import UOp, Ops, GroupOp, UPat
@@ -59,7 +59,7 @@ class TestBufferUOp(unittest.TestCase):
 
   def test_buffer_view_not_allowed(self):
     permuted_view = Tensor.empty(1, 2, 3).permute(0, 2, 1)
-    with self.assertRaisesRegex(AssertionError, "can only be RESHAPE"):
+    with self.assertRaises(RuntimeError):
       permuted_view.uop.buffer # cannot access Buffer of a non contiguous VIEW
 
   def test_buffer_only_after_realize(self):
@@ -895,9 +895,11 @@ class TestSchedule(unittest.TestCase):
     check_schedule(out, 2)
 
   def test_schedule_mem_used(self):
+    gc.collect()
     base = GlobalCounters.mem_used
     Tensor.ones(256).contiguous().realize()
     Tensor.ones(5, 5).contiguous().schedule()
+    gc.collect()
     self.assertEqual(GlobalCounters.mem_used-base, 0)
 
   def test_const_schedule(self):

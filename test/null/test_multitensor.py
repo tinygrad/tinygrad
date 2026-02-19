@@ -1,11 +1,13 @@
-import unittest
+import gc, unittest
 from tinygrad import Tensor, GlobalCounters, dtypes
 
 class TestMultiRamUsage(unittest.TestCase):
   def setUp(self):
+    gc.collect()
     self.baseline = GlobalCounters.mem_used
     self.N = 100
   def assertUsed(self, amt, strict=True):
+    gc.collect()
     used = GlobalCounters.mem_used - self.baseline
     print(f"used {used} bytes")
     if strict: self.assertEqual(used, amt)
@@ -20,20 +22,17 @@ class TestMultiRamUsage(unittest.TestCase):
     del _
     self.assertUsed(0)
 
-  @unittest.skip("flaky")
   def test_zeros_copy(self):
     devices_2 = ("NULL:1", "NULL:2")
     _ = Tensor.zeros(self.N, self.N).contiguous().to(devices_2).realize()
     # NOTE: the first one on the DEFAULT device should be freed
     self.assertUsed(self.N*self.N*4*2)
 
-  @unittest.skip("flaky")
   def test_zeros_shard(self, devices=("NULL:1", "NULL:2")):
     _ = Tensor.zeros(self.N, self.N).contiguous().shard(devices, axis=0).realize()
     self.assertUsed(self.N*self.N*4) # sharding should not increase total ram usage
   def test_zeros_shard_self(self): self.test_zeros_shard(("NULL:0", "NULL:1"))
 
-  @unittest.skip("flaky")
   def test_zeros_contiguous_shard(self):
     devices_2 = ("NULL:1", "NULL:2")
     _ = Tensor.zeros(self.N, self.N).contiguous().shard(devices_2, axis=0).contiguous().realize()
