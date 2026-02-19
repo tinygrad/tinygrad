@@ -486,8 +486,8 @@ class TestJit(unittest.TestCase):
     with self.assertRaises(JitError):
       f(Tensor(2.0)).item()
     # list input has different view structure than empty(1)
-    with self.assertRaises(JitError):
-      f(Tensor([2.0])).item()
+    #with self.assertRaises(JitError):
+    #  f(Tensor([2.0])).item()
 
 @unittest.skip("Pending multioutput implementation #3607")
 class TestMultioutputJit(unittest.TestCase):

@@ -120,10 +120,13 @@ def apply_buffer_map(ctx:dict[UOp,UOp|None], x:UOp):
     target = x.src[0]
     while target.op is Ops.ASSIGN: target = target.src[0]
     if target.base.op is Ops.BUFFER or target in ctx:
-      ctx[x] = ctx[target] if target in ctx is not None else target
+      ctx[x] = ctx.get(target, target)
       return None
   if x not in ctx: return None
-  return ctx[x].assign(x.src[0] if x.op is Ops.CONTIGUOUS else x.rtag())
+  # assign target uses the buffer with max shape (no shrink) — rangeify handles symbolic indexing
+  buffer = ctx[x].buf_uop.base.reshape(x.max_shard_shape)
+  if isinstance(x.device, tuple) and x.axis is not None: buffer = buffer.multi(x.axis)
+  return buffer.assign(x.src[0] if x.op is Ops.CONTIGUOUS else x.rtag())
 pm_apply_buffer_map = PatternMatcher([ (UPat(GroupOp.All, name="x"), apply_buffer_map), ])
 
 schedule_cache: dict[bytes, tuple[list[ExecItem], UOp]] = {}
@@ -133,19 +136,19 @@ def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[dict[UOp, UOp], li
   st = time.perf_counter()
 
   # precreate all buffers
-  buffer_map: dict[UOp, UOp|None] = {}
+  buffer_map: dict[UOp, UOp] = {}
   bases = set([x.base for x in big_sink.src if x.base.op not in {Ops.CONST, Ops.BUFFER, Ops.BIND, Ops.DEFINE_VAR, Ops.AFTER}])
   for u in big_sink.toposort():
     is_disk = isinstance(u._device, str) and u._device.startswith("DISK")
     if ((u.op is Ops.CONTIGUOUS or u in bases) and not is_disk) or (u.op is Ops.COPY and is_disk):
       buffer = UOp.new_buffer(u.device, u.shard_size, u.dtype).reshape(u.max_shard_shape)
       if isinstance(u.device, tuple) and u.axis is not None: buffer = buffer.multi(u.axis)
-      buffer_map[u] = buffer.shrink_to(u.shape)
+      # buffer_map value needs symbolic shrink to preserve tensor shape, but assign target uses max shape
+      buffer_map[u] = buffer.shrink_to(u.shard_shape)
 
   # apply buffer map, do a few simple rewrites
   big_sink = graph_rewrite(big_sink, pm_apply_buffer_map, ctx=buffer_map, bottom_up=True, name="apply buffer map")
   big_sink = graph_rewrite(big_sink, _remove_all_tags)
-  assert all(x is not None for x in buffer_map.values())
 
   # replace BUFFERs with PARAMs, CONSTs UNIQUE with LUNIQUE, strip BIND values for cache key, extract var_vals
   input_buffers: dict[UOp, UOp] = {}
