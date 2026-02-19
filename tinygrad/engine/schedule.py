@@ -142,7 +142,7 @@ def _get_apply_buffer_map(big_sink:UOp) -> tuple[UOp, dict[UOp, UOp]]:
       if u.op is not Ops.CONTIGUOUS and u not in bases: continue
     # fall through creates buffers — strip invalid ImageDType (mirrors pm_const_buffer_folding in rangeify)
     dtype = u.dtype
-    if isinstance(dtype, ImageDType) and (prod(dtype.shape) != prod(u.max_shard_shape) or [x for x in u.max_shard_shape if x != 1][-1] % 4 != 0):
+    if isinstance(dtype, ImageDType) and (prod(dtype.shape) != prod(u.max_shard_shape) or ([x for x in u.max_shard_shape if x != 1] or [1])[-1] % 4 != 0):
       if DEBUG >= 1: print(f"demoting Image {dtype} with shape {u.max_shard_shape}")
       dtype = dtype.base
     buffer = UOp.new_buffer(u.device, u.shard_size, dtype).reshape(u.max_shard_shape)
