@@ -1255,6 +1255,7 @@ class TestView(unittest.TestCase):
     s = check_schedule([late_mul, other_child], 3)
     # the arange becomes a BUFFER
     self.assertIs(b.uop.base.op, Ops.BUFFER)
+    # NOTE: no longer checked
     # mul still collapses
     #self.assertIs(late_mul.uop.base.op, Ops.CONST)
     run_schedule(s)
