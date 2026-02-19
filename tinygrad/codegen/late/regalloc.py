@@ -30,10 +30,10 @@ class RegallocContext:
     lr, ranges = self.live_range, []
     for i,u in enumerate(reversed(uops)):
       if u.op in (Ops.NOOP, Ops.AFTER): continue
-      for v in {s.arg for s in (u,) + u.src if isinstance(s.arg, Register)}: lr.setdefault(v, []).insert(0, len(uops) - 1 - i)
+      for v in {s.tag for s in (u,) + u.src if isinstance(s.tag, Register)}: lr.setdefault(v, []).insert(0, len(uops) - 1 - i)
       # a var defined before a range and used inside it is needed for the whole range
-      if u.arg in lr and (n:=max((lr[rng][-1] for rng in ranges if lr[rng][0] < lr[u.arg][-1] < lr[rng][-1]), default=None)): lr[u.arg].append(n)
-      if u.op is Ops.RANGE: ranges.append(u.arg)
+      if u.tag in lr and (n:=max((lr[rng][-1] for rng in ranges if lr[rng][0] < lr[u.tag][-1] < lr[rng][-1]), default=None)): lr[u.tag].append(n)
+      if u.op is Ops.RANGE: ranges.append(u.tag)
 
 # TODO: rm pointers
 # nasty hacks to deal with pointers
@@ -44,7 +44,7 @@ def assign(ctx:RegallocContext, x:UOp, reg:Register):
   return ret.replace(dtype=x.dtype)
 def load(ctx:RegallocContext, dt:DType, disp:UOp, reg:Register):
   ndt = dtypes.uint64 if isinstance(dt, PtrDType) else dt
-  ret = ctx.isel.rewrite(ctx.stack_ptr.index(disp).load(dtype=ndt, arg=reg))
+  ret = ctx.isel.rewrite(ctx.stack_ptr.index(disp).load(dtype=ndt, tag=reg))
   assert ret is not None
   return ret.replace(dtype=dt)
 def store(ctx:RegallocContext, disp:UOp, x:UOp):
@@ -71,7 +71,7 @@ def regalloc(ctx:RegallocContext, x:UOp, i:int) -> tuple[UOp, list[UOp]]:
   nsrc, loads = [], []
   for s in x.src:
     # allocate srcs, if src was spilled it's replaced by a load, if it's live the load was already emited otherwise alloc and emit one
-    if isinstance(s.arg, Register) and (v:=ctx.rewrite_to_vreg[s]) in ctx.spills:
+    if isinstance(s.tag, Register) and (v:=ctx.rewrite_to_vreg[s]) in ctx.spills:
       # TODO: the constraints only apply to the definition, you need to insert moves in the graph to "cleanse" the constraint
       # then those moves are removed after regalloc if they move to the same register. I think this is the llvm approach
       # alternatively you could beef up the register class to include constraints on the srcs, then you check those here
@@ -82,7 +82,7 @@ def regalloc(ctx:RegallocContext, x:UOp, i:int) -> tuple[UOp, list[UOp]]:
       else: s = load(ctx, s.dtype, ctx.spills[v], ctx.live[v])
     nsrc.append(s)
   # allocate destination
-  if isinstance(v:=x.arg, Register) and v not in ctx.live:
+  if isinstance(v:=x.tag, Register) and v not in ctx.live:
     # if no cons it's a real register, so it can only be assigned to itself
     cons = v.cons or (v,)
     # two address instructions (src is used in dest) can only coalesce reused src. reused src goes first to get priority in case of a tiebreak
@@ -93,7 +93,7 @@ def regalloc(ctx:RegallocContext, x:UOp, i:int) -> tuple[UOp, list[UOp]]:
       assert cons
     ctx.live[v] = alloc(ctx, cons, i+1)
 
-  nx = x.replace(src=tuple(nsrc), arg=ctx.live.get(v, v))
+  nx = x.replace(src=tuple(nsrc), tag=ctx.live.get(v, v))
   # TODO: this check exists because of a hack in x86, rm once multiple outputs are supported
   if nx not in ctx.rewrite_to_vreg: ctx.rewrite_to_vreg[nx] = v
   if v not in ctx.vreg_to_rewrite: ctx.vreg_to_rewrite[v] = nx
@@ -101,10 +101,10 @@ def regalloc(ctx:RegallocContext, x:UOp, i:int) -> tuple[UOp, list[UOp]]:
 
 # move uops to registers before the loop to avoid loading inside the loop
 def loop_prologue(ctx:RegallocContext, x:UOp, i:int):
-  assert isinstance(x.arg, Register)
+  assert isinstance(x.tag, Register)
   nx, lst = regalloc(ctx, x, i)
   # we move to register vars used in the loop sorted by next use, vars not used in the loop will not be reloaded in the epilogue
-  used_in_loop = [v for v in ctx.live.keys() | ctx.spills.keys() if any(i <= l < ctx.live_range[x.arg][-1] for l in ctx.live_range[v])]
+  used_in_loop = [v for v in ctx.live.keys() | ctx.spills.keys() if any(i <= l < ctx.live_range[x.tag][-1] for l in ctx.live_range[v])]
   sorted_uses = sorted(used_in_loop, key=lambda k: next(l-i for l in ctx.live_range[k] if l >= i))
   live_in: dict[Register, Register] = {}
   loads = []
@@ -135,12 +135,12 @@ def loop_epilogue(ctx:RegallocContext, x:UOp, i:int):
 pm_regalloc = PatternMatcher([
   (UPat(Ops.RANGE, name="x"), lambda ctx,x: loop_prologue(ctx, x, next(ctx.idx))),
   (UPat(Ops.END, name="x"), lambda ctx,x: loop_epilogue(ctx, x, next(ctx.idx))),
-  (UPat(X86GroupOp.All | {Ops.NOOP, Ops.GROUP, Ops.AFTER, Ops.BARRIER}, name="x"), lambda ctx,x: regalloc(ctx, x, next(ctx.idx))),
+  (UPat({Ops.INS, Ops.NOOP, Ops.GROUP, Ops.AFTER, Ops.BARRIER}, name="x"), lambda ctx,x: regalloc(ctx, x, next(ctx.idx))),
 ])
 
 # annoying that this is another pm
 pm_insert_spills = PatternMatcher([
   # insert spill after definition
-  (UPat(X86GroupOp.All | {Ops.RANGE}, name="x"), lambda ctx,x:
+  (UPat({Ops.INS, Ops.RANGE}, name="x"), lambda ctx,x:
    (x, [x, store(ctx, y, x)]) if (y:=ctx.spills.get(ctx.rewrite_to_vreg.get(x))) is not None else None),
 ])

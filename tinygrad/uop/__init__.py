@@ -1,14 +1,9 @@
 # flake8: noqa: E702
 # allow semicolons to put multiple ops on one line
-from enum import auto, IntEnum, Enum, EnumType
-
-# wrapper around EnumType to allow extending enums with members
-class ExtensibleEnumType(EnumType):
-  @classmethod
-  def _check_for_existing_members_(mcls, class_name, bases): return
+from enum import auto, IntEnum, Enum
 
 # wrapper around IntEnum that preserves Enum.__str__ and makes auto() unique across all FastEnum subclasses
-class FastEnum(IntEnum, metaclass=ExtensibleEnumType):
+class FastEnum(IntEnum):
   def __str__(self): return Enum.__str__(self)
   def __repr__(x): return str(x)
   @staticmethod
