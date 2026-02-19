@@ -144,7 +144,7 @@ def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[dict[UOp, UOp], li
       buffer = UOp.new_buffer(u.device, u.shard_size, u.dtype).reshape(u.max_shard_shape)
       if isinstance(u.device, tuple) and u.axis is not None: buffer = buffer.multi(u.axis)
       # buffer_map value needs symbolic shrink to preserve tensor shape, but assign target uses max shape
-      buffer_map[u] = buffer.shrink_to(u.shard_shape)
+      buffer_map[u] = buffer.shrink_to(u.shape)
 
   # apply buffer map, do a few simple rewrites
   big_sink = graph_rewrite(big_sink, pm_apply_buffer_map, ctx=buffer_map, bottom_up=True, name="apply buffer map")
