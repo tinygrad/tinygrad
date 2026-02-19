@@ -2,7 +2,7 @@
 # schedule confirms the right things are capable of fusing
 # NOTE: this has overlap with external_test_opt.py
 
-import unittest, functools
+import gc, unittest, functools
 import numpy as np
 from typing import cast
 from hypothesis import assume, given, settings, strategies as strat
@@ -775,11 +775,12 @@ class TestSchedule(unittest.TestCase):
   @unittest.skipIf(Device.DEFAULT == "WEBGPU", "Causes other tests to fail")
   def test_conv2d_fused_half(self): _test_conv2d(4, dtype=dtypes.half)
 
-  @unittest.skip("TODO: this is consistently creating non reproducible failures")
   def test_schedule_mem_used_with_inputs(self):
+    gc.collect()
     base = GlobalCounters.mem_used
     x = Tensor.ones(256).contiguous().realize()
     (x+Tensor.ones(256).contiguous()).schedule()
+    gc.collect()
     self.assertEqual(GlobalCounters.mem_used-base, 1024)
 
   @unittest.skipIf(Device.DEFAULT != "CL", "image only supported on CL")

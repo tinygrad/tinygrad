@@ -1,5 +1,5 @@
 # schedule tests that pass on NULL backend (no copyout needed)
-import unittest, time
+import gc, unittest, time
 from tinygrad import nn, dtypes, Device, Tensor
 from tinygrad.device import is_dtype_supported
 from tinygrad.uop.ops import UOp, Ops, GroupOp, UPat
@@ -897,9 +897,11 @@ class TestSchedule(unittest.TestCase):
     check_schedule(out, 2)
 
   def test_schedule_mem_used(self):
+    gc.collect()
     base = GlobalCounters.mem_used
     Tensor.ones(256).contiguous().realize()
     Tensor.ones(5, 5).contiguous().schedule()
+    gc.collect()
     self.assertEqual(GlobalCounters.mem_used-base, 0)
 
   def test_const_schedule(self):
