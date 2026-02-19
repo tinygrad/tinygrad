@@ -303,7 +303,24 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     return ret
 
   @property
-  def size(self) -> int: return prod([int(x.vmax) if isinstance(x, UOp) else x for x in self.shape])
+  def max_shape(self) -> tuple[int, ...]:
+    return tuple([int(x.vmax) if isinstance(x, UOp) else x for x in self.shape])
+
+  @property
+  def shard_shape(self) -> tuple[sint, ...]:
+    if not isinstance(self.device, tuple) or self.axis is None: return self.shape
+    return tuple(x//len(self.device) if i == self.axis else x for i,x in enumerate(self.shape))
+
+  @property
+  def max_shard_shape(self) -> tuple[int, ...]:
+    if not isinstance(self.device, tuple) or self.axis is None: return self.max_shape
+    return tuple(x//len(self.device) if i == self.axis else x for i,x in enumerate(self.max_shape))
+
+  @property
+  def size(self) -> int: return prod(self.max_shape)
+
+  @property
+  def shard_size(self) -> int: return prod(self.max_shard_shape)
 
   @functools.cached_property
   def ended_ranges(self):
@@ -494,6 +511,8 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     if self.op in GroupOp.ALU: return axes[-1] if (axes := dedup([x.axis for x in self.src if x.axis is not None])) else None
     if len(self.src) == 0: return None
     src_axis = self.src[0].axis
+    if self.op is Ops.SHRINK and src_axis is not None and self.marg[src_axis] != (0, self.src[0].shape[src_axis]):
+      return None # SHRINK will remove the sharding if it's on axis
     if self.op is Ops.REDUCE_AXIS: return None if src_axis is not None and src_axis in self.arg[1] else src_axis
     if self.op is Ops.RESHAPE:
       if src_axis is None: return None
@@ -553,6 +572,8 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
       case _: raise RuntimeError(f"{self.op} is not a MovementOp")
 
   def _mop(self, op:Ops, arg, same_shape_noop:bool=False) -> UOp:
+    # early NOOP
+    if op in {Ops.SHRINK, Ops.PAD, Ops.EXPAND} and len(arg) == 0: return self
     match op:
       case Ops.RESHAPE | Ops.EXPAND: src_args = [arg]
       case Ops.PAD | Ops.SHRINK: src_args = list(zip(*arg))
@@ -621,9 +642,25 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
   @property
   def buffer(self) -> Buffer|MultiBuffer:
     from tinygrad.device import Buffer, MultiBuffer
+    if self.op in {Ops.CONTIGUOUS, Ops.RESHAPE}: return self.src[0].buffer
+    # this buffer can process disk tensors and simple movement ops
     if self is not self.base:
-      assert self.op is Ops.RESHAPE, f"can only be RESHAPE {self}"
-      return self.src[0].buffer
+      from tinygrad.schedule.rangeify import pm_mops
+      out = graph_rewrite(self.flatten().index(UOp.range(self.size, 0)), pm_mops).simplify()
+      buf = out.src[0].buffer
+      assert isinstance(buf, Buffer), "must be a Buffer for movement ops"
+      assert out.op is Ops.INDEX, "couldn't collapse to a single INDEX"
+      if out.src[1].op is Ops.CONST:
+        return buf.view(1, out.dtype, out.src[1].arg*out.dtype.itemsize)
+      if out.src[1].op is Ops.RANGE:
+        return buf.view(self.size, out.dtype, 0)
+      if out.src[1].op is Ops.ADD and out.src[1].src[0].op is Ops.RANGE and out.src[1].src[1].op is Ops.CONST:
+        return buf.view(self.size, out.dtype, out.src[1].src[1].arg*out.dtype.itemsize)
+      raise RuntimeError(f"cannot collapse INDEX {out} to a single size/offset")
+    if self.op is Ops.BITCAST:
+      buf = self.src[0].buffer
+      assert isinstance(buf, Buffer), "must be a Buffer for BITCAST"
+      return buf.view(self.size, self.dtype, 0)
     if self.op is Ops.MSELECT:
       ret = self.src[0].buffer
       assert isinstance(ret, MultiBuffer)
@@ -792,11 +829,6 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
 
   # *** uop high level syntactic sugar ***
 
-  @property
-  def shard_shape(self):
-    if self.axis is None: return self.shape
-    return tuple(x//len(self.device) if i == self.axis else x for i,x in enumerate(self.shape))
-
   @staticmethod
   def placeholder(shape:tuple[int, ...], dtype:DType, slot:int, addrspace=AddrSpace.GLOBAL):
     lookup = {AddrSpace.GLOBAL: Ops.PARAM, AddrSpace.LOCAL: Ops.DEFINE_LOCAL, AddrSpace.REG: Ops.DEFINE_REG}
@@ -805,7 +837,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     return ret
   def placeholder_like(self, slot:int):
     assert all_int(self.shape), "no placeholder-like on symbolic shape"
-    return UOp.placeholder(self.shard_shape, self.dtype, slot)
+    return UOp.placeholder(self.max_shard_shape, self.dtype, slot)
 
   # set is store+end+after
   def set(self:UOp, val:UOp|ConstType, end:UOp|tuple[UOp, ...]|list[UOp]=()) -> UOp:
