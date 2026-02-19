@@ -5,7 +5,8 @@ from tinygrad.uop.ops import UOp, Ops, buffers, UOpMetaClass, track_rewrites, Pa
 from tinygrad.uop.ops import _remove_all_tags, GroupOp
 from tinygrad.uop.spec import type_verify, tensor_spec
 from tinygrad.device import Buffer, MultiBuffer
-from tinygrad.helpers import DEBUG, cpu_profile, TracingKey, SPEC, flatten, pluralize, SCACHE
+from tinygrad.dtype import ImageDType
+from tinygrad.helpers import DEBUG, cpu_profile, TracingKey, SPEC, flatten, pluralize, SCACHE, prod
 from tinygrad.engine.realize import ExecItem
 
 # **** schedule linearizer
@@ -139,8 +140,10 @@ def _get_apply_buffer_map(big_sink:UOp) -> tuple[UOp, dict[UOp, UOp]]:
       if u.op is not Ops.COPY: continue
     else:
       if u.op is not Ops.CONTIGUOUS and u not in bases: continue
-    # fall through creates buffers
-    buffer = UOp.new_buffer(u.device, u.shard_size, u.dtype).reshape(u.max_shard_shape)
+    # fall through creates buffers — strip invalid ImageDType (mirrors pm_const_buffer_folding in rangeify)
+    dtype = u.dtype
+    if isinstance(dtype, ImageDType) and (prod(dtype.shape) != prod(u.max_shard_shape) or u.max_shard_shape[-1] % 4 != 0): dtype = dtype.base
+    buffer = UOp.new_buffer(u.device, u.shard_size, dtype).reshape(u.max_shard_shape)
     if isinstance(u.device, tuple) and u.axis is not None: buffer = buffer.multi(u.axis)
     # buffer_map value needs symbolic shrink to preserve tensor shape, but assign target uses max shape
     buffer_map[u] = buffer.shrink_to(u.shape)
