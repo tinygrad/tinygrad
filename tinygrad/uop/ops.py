@@ -557,6 +557,12 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     if self.op is Ops.DETACH: return self.src[0].base  # DETACH can't change base
     return self
 
+  @property
+  def multibase(self) -> UOp:
+    if self.op in GroupOp.Movement: return self.src[0].base
+    if self.op is Ops.DETACH: return self.src[0].base  # DETACH can't change base
+    return self
+
   # like gep, but might return an integer
   def sgep(self, i:int) -> sint:
     match self.op:

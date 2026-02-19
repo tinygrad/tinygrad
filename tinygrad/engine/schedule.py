@@ -138,7 +138,7 @@ def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[dict[UOp, UOp], li
   # precreate all buffers
   buffer_map: dict[UOp, UOp] = {}
   dont_realize = {Ops.CONST, Ops.BUFFER, Ops.BIND, Ops.DEFINE_VAR, Ops.AFTER}
-  bases = set([x.base if x.base.shard_size <= x.shard_size else x for x in big_sink.src if x.base.op not in dont_realize])
+  bases = set([x.multibase for x in big_sink.src if x.base.op not in dont_realize])
   for u in big_sink.toposort():
     if isinstance(u._device, str) and u._device.startswith("DISK"):
       if u.op is not Ops.COPY: continue
