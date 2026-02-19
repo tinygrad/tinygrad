@@ -375,7 +375,7 @@ async function renderProfiler(path, unit, opts) {
         // tiny device events go straight to the rewrite rule
         const key = k.startsWith("TINY") ? null : `${k}-${j}`;
         const labelHTML = label.map(l=>`<span style="color:${l.color}">${l.st}</span>`).join("");
-        const arg = { tooltipText:labelHTML+"\n"+formatTime(e.dur)+(e.info != null ? "\n"+e.info : ""), bufs:[], key,
+        const arg = { tooltipText:labelHTML+" N:"+shapes.length+"\n"+formatTime(e.dur)+(e.info != null ? "\n"+e.info : ""), bufs:[], key,
                       ctx:shapeRef?.ctx, step:shapeRef?.step };
         if (e.key != null) shapeMap.set(e.key, key);
         // offset y by depth
