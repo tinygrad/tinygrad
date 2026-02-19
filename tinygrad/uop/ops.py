@@ -573,7 +573,9 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
 
   def _mop(self, op:Ops, arg, same_shape_noop:bool=False) -> UOp:
     # early NOOP
-    if op in {Ops.SHRINK, Ops.PAD, Ops.EXPAND} and len(arg) == 0: return self
+    if op in {Ops.SHRINK, Ops.PAD, Ops.EXPAND} and len(arg) == 0:
+      assert len(self.shape) == 0, "0 len arg only valid on zero length shape"
+      return self
     match op:
       case Ops.RESHAPE | Ops.EXPAND: src_args = [arg]
       case Ops.PAD | Ops.SHRINK: src_args = list(zip(*arg))

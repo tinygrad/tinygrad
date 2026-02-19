@@ -897,10 +897,10 @@ class TestShrinkMultiTensorShardedAxis(unittest.TestCase):
       # sharded axis shrink on non-device boundry is not allowed
       a = t.shrink(((0, 3), (0, 8)))
       a.schedule()
-    with self.assertRaises(AssertionError):
-      # cannot shrink sharded and non-sharded axis at the same time
-      a = t.shrink(((0, 2), (2, 4)))
-      a.schedule()
+    a = t.shrink(((0, 2), (2, 4)))
+    assert a.shape == (2, 2)
+    ref = Tensor.arange(64).reshape(8, 8).shrink(((0, 2), (2, 4)))
+    np.testing.assert_equal(a.numpy(), ref.numpy())
 
     a = t.shrink(((0, 2), (0, 8)))
     a.schedule()
