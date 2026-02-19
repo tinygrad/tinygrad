@@ -97,18 +97,18 @@ def alu_multi(root:UOp):
 
   srcs:list[UOp] = []
   for mlb in msrcs:
-    if mlb.axis == axis:
-      # same axis, just copy through
-      assert mlb.op is Ops.MULTI
-      srcs.append(mlb.src[0])
-    elif mlb.axis is None:
+    if mlb.axis is None:
       # no axis, shard it
       assert mlb.op is not Ops.MULTI
       srcs.append(mlb._shard(axis))
     else:
-      # axis mismatch, unshard it, send it to all devices, and shard it correctly
       assert mlb.op is Ops.MULTI
-      srcs.append(mlb.src[0]._unshard(mlb.axis).allreduce(Ops.ADD, mlb.device)._shard(axis))
+      if mlb.axis == axis:
+        # same axis, just copy through
+        srcs.append(mlb.src[0])
+      else:
+        # axis mismatch, unshard it, send it to all devices, and shard it correctly
+        srcs.append(mlb.src[0]._unshard(mlb.axis).allreduce(Ops.ADD, mlb.device)._shard(axis))
   return srcs[0].alu(root.op, *srcs[1:]).multi(axis)
 
 def reduce_multi(root:UOp, multi:UOp):
