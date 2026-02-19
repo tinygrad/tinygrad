@@ -539,6 +539,16 @@ def batch_load_train_stable_diffusion(urls:str, BS:int):
     assert all(isinstance(caption, str) for caption in x["txt"])
     yield x
 
+def batch_load_llama2_lora(*, data_dir, batch_size, max_length=8192, split="train"):
+  from examples.mlperf.llama2_70b_lora.dataset import load_data, batch_iter, get_tokenizer
+  tok = get_tokenizer()
+  data = load_data(data_dir, split)
+  for batch in batch_iter(data, tok, batch_size, max_length, shuffle=(split=="train")):
+    assert isinstance(batch, dict) and all(isinstance(k, str) for k in batch.keys()) and all(isinstance(v, Tensor) for v in batch.values())
+    assert all(t.shape[0]==batch_size for t in batch.values())
+    assert batch["input_ids"].shape == batch["attention_mask"].shape == batch["labels"].shape == (batch_size, max_length)
+    yield batch
+
 # llama3
 
 class BinIdxDataset:
@@ -826,6 +836,14 @@ if __name__ == "__main__":
     print(f"max seq length: {max_}")
     print(f"min seq length: {min_}")
 
-  load_fn_name = f"load_{getenv('MODEL', 'resnet')}"
-  if load_fn_name in globals():
-    globals()[load_fn_name](getenv("VAL", 1))
+  def load_llama2_lora(val):
+    bs, data_dir, maxlen = getenv("BS", 1), getenv("DATADIR", "./dataset/govreport"), getenv("MAX_LENGTH", 8192)
+    split = "validation" if val else "train"
+    print(f"loading llama2 lora {split}: bs={bs}, maxlen={maxlen}")
+    loaded = 0
+    for loaded,_ in enumerate(tqdm(batch_load_llama2_lora(data_dir=data_dir, batch_size=bs, max_length=maxlen, split=split)), start=1):
+      if loaded >= 10: break
+    print(f"loaded {loaded} batches from {split}")
+
+  load_fn = f"load_{getenv('MODEL', 'resnet')}"
+  if load_fn in globals(): globals()[load_fn](getenv("VAL", 1))
