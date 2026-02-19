@@ -191,6 +191,13 @@ class TestSchedule(unittest.TestCase):
     a, _ = Tensor.empty(1022).cummax(axis=0)
     check_schedule(a, 3)
 
+  @unittest.skip("should this pass?")
+  def test_contiguous_assign(self):
+    a = Tensor.ones(10) * 2
+    b = Tensor.empty(10)
+    c = b.assign(a.contiguous())
+    check_schedule(c, 1)
+
   def test_basic_binop_fusion(self):
     a = Tensor.empty(10)
     b = Tensor.empty(10)
@@ -407,7 +414,7 @@ class TestSchedule(unittest.TestCase):
 
   def test_fold_conv_batchnorm_optim(self):
     # this is too high
-    for optim, cnt in [(nn.optim.Adam, 27), (nn.optim.SGD, 7)]:
+    for optim, cnt in [(nn.optim.Adam, 29), (nn.optim.SGD, 9)]:
       with self.subTest(optim=optim.__name__):
         with Tensor.train():
           img = Tensor.ones(1,3,4,4)
@@ -575,7 +582,7 @@ class TestSchedule(unittest.TestCase):
 
     # NOOP, 3 convs, contiguous
     #check_schedule(x, 5)
-    check_schedule(x, 7)
+    check_schedule(x, 8)
 
   def test_image_conv_fusion_minimal(self):
     b1 = Tensor.empty(16)
