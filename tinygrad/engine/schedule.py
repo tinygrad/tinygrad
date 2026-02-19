@@ -117,6 +117,9 @@ def _buffer_like(x:UOp):
 
 # rewrite all contiguous to assign
 def contig_to_assign(ctx:dict[UOp,UOp|None], x:UOp):
+  if x.op is Ops.AFTER:
+    ctx[x] = x.src[0]
+    return None
   # existing ASSIGN already has a target buffer, walk the chain to the root and add it to the map
   if x.op is Ops.ASSIGN:
     target = x.src[0]
@@ -147,7 +150,8 @@ def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[dict[UOp, UOp], li
 
   # new preschedule stuff
   # we assign for any contiguous or anything on the sink that's not a BUFFER or a CONST
-  buffer_map: dict[UOp, UOp|None] = {x.base:None for x in big_sink.src if x.base.op not in {Ops.CONST, Ops.BUFFER, Ops.BIND, Ops.DEFINE_VAR}}
+  unrealized_ops = {Ops.CONST, Ops.BUFFER, Ops.BIND, Ops.DEFINE_VAR, Ops.AFTER}
+  buffer_map: dict[UOp, UOp|None] = {x.base:None for x in big_sink.src if x.base.op not in unrealized_ops}
   big_sink = graph_rewrite(big_sink, pm_build_buffer_map, ctx=buffer_map, bottom_up=True, name="contig to assign")
   big_sink = graph_rewrite(big_sink, _remove_all_tags)
   assert all(x is not None for x in buffer_map.values())
