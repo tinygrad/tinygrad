@@ -110,24 +110,30 @@ pm_post_sched_cache = PatternMatcher([
   (UPat(Ops.BIND, src=(UPat(Ops.DEFINE_VAR),), name="b"), lambda ctx,b: ctx.get(b)),
 ])
 
+def _buffer_like(x:UOp):
+  buffer = UOp.new_buffer(x.device, x.shard_size, x.dtype).reshape(x.max_shard_shape).shrink_to(x.shard_shape)
+  if isinstance(x.device, tuple) and x.axis is not None: buffer = buffer.multi(x.axis)
+  return buffer
+
 # rewrite all contiguous to assign
 def contig_to_assign(ctx:dict[UOp,UOp|None], x:UOp):
-  # existing ASSIGN already has a target buffer, add it to the map
-  if x.op is Ops.ASSIGN and x.src[0].base.op is Ops.BUFFER:
-    ctx[x] = x.src[0]
-    return None
+  # existing ASSIGN already has a target buffer, walk the chain to the root and add it to the map
+  if x.op is Ops.ASSIGN:
+    target = x.src[0]
+    while target.op is Ops.ASSIGN: target = target.src[0]
+    if target.base.op is Ops.BUFFER:
+      ctx[x] = target
+      return None
   if isinstance(x._device, str) and x._device.startswith("DISK"):
     # we can't realize any disk tensors
     if x in ctx: del ctx[x]
     # all copies are assumed to have finished and are now just the buffer
-    if x.op is Ops.COPY: ctx[x] = UOp.new_buffer(x.device, x.size, x.dtype).reshape(x.shape)
+    if x.op is Ops.COPY: ctx[x] = _buffer_like(x)
     return None
   # for contiguous or in buffer_map explicitly
   if not (x.op is Ops.CONTIGUOUS or (x in ctx and ctx[x] is None)): return None
   # not sure why the ctx isn't enough, but tag fixes it
-  buffer = UOp.new_buffer(x.device, x.shard_size, x.dtype).reshape(x.max_shard_shape).shrink_to(x.shard_shape)
-  if isinstance(x.device, tuple) and x.axis is not None: buffer = buffer.multi(x.axis)
-  ctx[x] = buffer
+  ctx[x] = buffer = _buffer_like(x)
   return buffer.assign(x.src[0] if x.op is Ops.CONTIGUOUS else x.rtag())
 pm_build_buffer_map = PatternMatcher([ (UPat(GroupOp.All, name="x"), contig_to_assign), ])
 
