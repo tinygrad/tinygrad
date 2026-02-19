@@ -13,10 +13,11 @@ from examples.mlperf.llama2_70b_lora.lora import apply_lora, get_lora_params
 from examples.mlperf.llama2_70b_lora.dataset import load_data, batch_iter, get_tokenizer
 
 try:
-  import mlperf_logging.mllog as mllog
+  import mlperf_logging.mllog as mllog_mod
   import mlperf_logging.mllog.constants as mlc
   MLPERF = True
-except ImportError: MLPERF = False
+except ImportError:
+  mllog_mod, MLPERF = None, False
 
 #ROUGE scoring (simple implementation for MLPerf - avoids external deps)
 #ref: https://aclanthology.org/W04-1013.pdf
@@ -30,12 +31,15 @@ def rouge_n(p_toks, r_toks, n):
   return {"p": prec, "r": rec, "f": (2*prec*rec)/max(prec+rec, 1e-8)}
 def rouge_l(p_toks, r_toks):
   def lcs_len(x, y):
-    m, n = len(x), len(y)
-    if m==0 or n==0: return 0
-    dp = [[0]*(n+1) for _ in range(m+1)]
-    for i in range(1,m+1):
-      for j in range(1,n+1): dp[i][j] = dp[i-1][j-1]+1 if x[i-1]==y[j-1] else max(dp[i-1][j], dp[i][j-1])
-    return dp[m][n]
+    if len(x)==0 or len(y)==0: return 0
+    if len(y) > len(x): x, y = y, x
+    prev = [0]*(len(y)+1)
+    for x_tok in x:
+      curr = [0]
+      for j,y_tok in enumerate(y, start=1):
+        curr.append(prev[j-1]+1 if x_tok==y_tok else max(prev[j], curr[j-1]))
+      prev = curr
+    return prev[-1]
   if not r_toks: return {"p": 0.0, "r": 0.0, "f": 0.0}
   lcs = lcs_len(p_toks, r_toks)
   prec, rec = lcs/max(len(p_toks),1), lcs/len(r_toks)
@@ -51,18 +55,17 @@ def compute_rouge(preds, refs):
 @TinyJit
 def train_step(inp, labels, model, opt):
   opt.zero_grad()
-  logits = model.forward(inp, start_pos=0, temperature=1.0, top_k=0, top_p=0.9, alpha_f=1.0, alpha_p=0.0)
+  logits = model.forward(inp, start_pos=0, temperature=float('nan'), top_k=0, top_p=0.0, alpha_f=0.0, alpha_p=0.0)
   sl, slabels = logits[..., :-1, :].contiguous(), labels[..., 1:].contiguous()
   sl_flat, slabels_flat = sl.reshape(-1, sl.shape[-1]), slabels.reshape(-1)
-  valid = slabels_flat != -100
-  if valid.sum() == 0: return Tensor([0.0])
-  loss = (sl_flat.log_softmax(axis=-1) * slabels_flat.one_hot(sl_flat.shape[-1])).sum(axis=-1).neg()
-  loss = (loss * valid.cast(loss.dtype)).sum() / valid.sum().cast(loss.dtype)
+  valid = (slabels_flat != -100).cast(sl_flat.dtype)
+  safe_labels = (slabels_flat * valid.cast(slabels_flat.dtype)).cast('int32')
+  token_nll = -sl_flat.log_softmax(axis=-1).gather(1, safe_labels.unsqueeze(1)).squeeze(1)
+  loss = (token_nll * valid).sum() / valid.sum().maximum(1)
   loss.backward()
   opt.step()
-  loss_cpu = loss.detach().to("CPU")
-  Tensor.realize(loss_cpu)
-  return loss_cpu
+  Tensor.realize(loss)
+  return loss.detach()
 
 @Tensor.train(mode=False)
 def evaluate(model, data, tok, bs, maxlen, max_eval):
@@ -72,12 +75,11 @@ def evaluate(model, data, tok, bs, maxlen, max_eval):
     if i >= max_eval: break
     with Tensor.no_grad():
       inp, labels = batch['input_ids'], batch['labels']
-      logits = model.forward(inp, start_pos=0, temperature=float('nan'))
+      logits = model.forward(inp, start_pos=0, temperature=float('nan'), top_k=0, top_p=0.0, alpha_f=0.0, alpha_p=0.0)
       sl, slabels = logits[..., :-1, :].contiguous(), labels[..., 1:].contiguous()
       sl_flat, slabels_flat = sl.reshape(-1, sl.shape[-1]), slabels.reshape(-1)
-      valid = slabels_flat != -100
-      if valid.sum() > 0:
-        loss = sl_flat[valid].sparse_categorical_crossentropy(slabels_flat[valid])
+      if int((slabels_flat != -100).sum().item()) > 0:
+        loss = sl_flat.sparse_categorical_crossentropy(slabels_flat, ignore_index=-100)
         tot_loss += loss.item()
         nb += 1
       pred_ids = logits.argmax(axis=-1).numpy()
@@ -106,16 +108,20 @@ def train():
   MODELDIR = Path(getenv("MODELDIR", "./models/llama-2-70b"))
   CKPTDIR = Path(getenv("CKPTDIR", "./checkpoints"))
   LORA_R, LORA_ALPHA = getenv("LORA_R", 16), getenv("LORA_ALPHA", 32.0)
+  MAX_STEPS = getenv("MAX_STEPS", 0)  # 0 = unlimited
+  DEFAULT_CFG = (8192, 28672, 64, 8, 80)
 
   print(f"training on {GPUS}, bs={BS}, lr={LR}")
   for d in GPUS: Device[d]
   Tensor.manual_seed(SEED)
+  Tensor.training = True
 
   #mlperf logging
   mllog = None
   if getenv("LOGMLPERF") and MLPERF:
-    mllog.config(filename=f"result_llama2_lora_{SEED}.txt", root_dir=Path(__file__).parents[3].as_posix())
-    mllog = mllog.get_mllogger()
+    mllog_mod.config(filename=f"result_llama2_lora_{SEED}.txt")
+    mllog_mod.config(root_dir=Path(__file__).parents[3].as_posix())
+    mllog = mllog_mod.get_mllogger()
   if mllog and getenv("INITMLPERF"):
     mllog.event(key=mlc.SUBMISSION_ORG, value="tinycorp")
     mllog.event(key=mlc.SUBMISSION_PLATFORM, value=getenv("SUBMISSION_PLATFORM", "tinybox"))
@@ -126,10 +132,14 @@ def train():
     mllog.event(key=mlc.CACHE_CLEAR, value=True)
     mllog.start(key=mlc.INIT_START)
 
-  # load model
-  print("loading llama2 70b...")
-  model = Transformer(dim=8192, hidden_dim=28672, n_heads=64, n_kv_heads=8, n_layers=80,
-                      norm_eps=1e-5, vocab_size=32000, max_context=MAXLEN, jit=False)
+  # load model (dims configurable via env for smoke testing)
+  DIM, HIDDEN_DIM = getenv("DIM", 8192), getenv("HIDDEN_DIM", 28672)
+  N_HEADS, N_KV_HEADS, N_LAYERS = getenv("N_HEADS", 64), getenv("N_KV_HEADS", 8), getenv("N_LAYERS", 80)
+  cfg = (DIM, HIDDEN_DIM, N_HEADS, N_KV_HEADS, N_LAYERS)
+  smoke_mode = MAX_STEPS > 0 or cfg != DEFAULT_CFG
+  print(f"loading llama2 (dim={DIM}, layers={N_LAYERS})...")
+  model = Transformer(dim=DIM, hidden_dim=HIDDEN_DIM, n_heads=N_HEADS, n_kv_heads=N_KV_HEADS, n_layers=N_LAYERS,
+                      norm_eps=1e-5, vocab_size=32000, max_context=MAXLEN, jit=False, disable_kv_cache=True)
   if MODELDIR.exists():
     if MODELDIR.is_dir():
       st_single, st_index = MODELDIR/"model.safetensors", MODELDIR/"model.safetensors.index.json"
@@ -143,16 +153,25 @@ def train():
       else: weights = None
     else: weights = safe_load(MODELDIR)
     if weights:
-      weights = fix_bf16(weights)
-      if any('model.layers' in k for k in weights.keys()): weights = convert_from_huggingface(weights, 80, 64, 8)
-      load_state_dict(model, weights)
-      print(f"loaded weights from {MODELDIR}")
+      try:
+        weights = fix_bf16(weights)
+        if any('model.layers' in k for k in weights.keys()): weights = convert_from_huggingface(weights, N_LAYERS, N_HEADS, N_KV_HEADS)
+        load_state_dict(model, weights)
+        print(f"loaded weights from {MODELDIR}")
+      except Exception as e:
+        if not smoke_mode: raise
+        print(f"warn: failed to load weights in smoke mode ({type(e).__name__}: {e}), using random weights")
   else: print(f"warn: {MODELDIR} not found, using random weights")
 
+  # freeze base model
+  for p in get_parameters(model): p.requires_grad_(False)
+
   print("applying lora...")
-  apply_lora(model, LORA_R, LORA_ALPHA, target=["wq","wv","wk","wo"])
+  lora_target = [x.strip() for x in getenv("LORA_TARGET", "wq,wv,wk,wo,w1,w2,w3").split(",") if x.strip()]
+  apply_lora(model, LORA_R, LORA_ALPHA, target=lora_target)
   lora_params = get_lora_params(model)
-  print(f"lora params: {len(lora_params)}")
+  for p in lora_params: p.requires_grad_(True)
+  print(f"lora target: {lora_target}, params: {len(lora_params)}")
 
   if len(GPUS) > 1:
     params = get_parameters(model)
@@ -172,20 +191,27 @@ def train():
 
   print("training...")
   best_rouge, achieved, gstep = 0.0, False, 0
+  stop_training = False
   for epoch in range(EPOCHS):
     print(f"\nepoch {epoch+1}/{EPOCHS}")
     for batch in batch_iter(train_data, tok, BS, MAXLEN, shuffle=True):
       gstep += 1
-      GlobalCounters.reset()
-      t1 = time.perf_counter()
+      do_log = gstep%10 == 0 or MAX_STEPS
+      if do_log:
+        GlobalCounters.reset()
+        t1 = time.perf_counter()
       inp, labels = batch['input_ids'], batch['labels']
       if len(GPUS)>1: inp.shard_(GPUS, axis=0), labels.shard_(GPUS, axis=0)
       loss = train_step(inp, labels, model, opt)
-      loss_v = loss.item()
-      t2 = time.perf_counter()
-      if gstep%10 == 0:
+      if do_log:
+        loss_v = loss.item()
+        t2 = time.perf_counter()
         gf = GlobalCounters.global_ops * 1e-9 / (t2-t1)
         print(f"step {gstep}: {gf:9.2f} GFLOPS, loss: {loss_v:.5f}")
+      if MAX_STEPS and gstep >= MAX_STEPS:
+        print(f"reached MAX_STEPS={MAX_STEPS}, stopping.")
+        stop_training = True
+        break
       if gstep % EVAL_STEPS == 0:
         print(f"\neval @ {gstep}...")
         eloss, rouge = evaluate(model, val_data, tok, BS, MAXLEN, MAX_EVAL)
@@ -203,6 +229,7 @@ def train():
           save_ckpt(model, opt, CKPTDIR/f"best_{gstep}.safetensors")
       if gstep % CKPT_STEPS == 0:
         save_ckpt(model, opt, CKPTDIR/f"ckpt_{gstep}.safetensors")
+    if stop_training: break
   print(f"\ntraining done! best rouge-l: {best_rouge:.4f}, target achieved: {achieved}")
   if mllog and not achieved: mllog.end(key=mlc.RUN_STOP, metadata={"status": "aborted", "step": gstep})
 

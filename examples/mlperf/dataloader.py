@@ -840,9 +840,10 @@ if __name__ == "__main__":
     bs, data_dir, maxlen = getenv("BS", 1), getenv("DATADIR", "./dataset/govreport"), getenv("MAX_LENGTH", 8192)
     split = "validation" if val else "train"
     print(f"loading llama2 lora {split}: bs={bs}, maxlen={maxlen}")
-    for i,_ in enumerate(tqdm(batch_load_llama2_lora(data_dir=data_dir, batch_size=bs, max_length=maxlen, split=split))):
-      if i >= 10: break
-    print(f"loaded {i+1} batches from {split}")
+    loaded = 0
+    for loaded,_ in enumerate(tqdm(batch_load_llama2_lora(data_dir=data_dir, batch_size=bs, max_length=maxlen, split=split)), start=1):
+      if loaded >= 10: break
+    print(f"loaded {loaded} batches from {split}")
 
   load_fn = f"load_{getenv('MODEL', 'resnet')}"
   if load_fn in globals(): globals()[load_fn](getenv("VAL", 1))

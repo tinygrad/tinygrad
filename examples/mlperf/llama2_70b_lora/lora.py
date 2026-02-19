@@ -12,27 +12,31 @@ class LoRALinear:
     out = self.linear(x)
     return out if self.lora_A is None else out + self.lora_B(self.lora_A(x)) * self.scale
 
+def _replace_linear_with_lora(module, name, r, alpha):
+  if not hasattr(module, name): return
+  lin = getattr(module, name)
+  if isinstance(lin, LoRALinear): return
+  inf, outf, bias = lin.weight.shape[1], lin.weight.shape[0], lin.bias is not None
+  lora = LoRALinear(inf, outf, r, alpha, bias)
+  lora.linear.weight.assign(lin.weight.detach())
+  lora.linear.weight.requires_grad = False
+  if bias and lin.bias is not None:
+    lora.linear.bias.assign(lin.bias.detach())
+    lora.linear.bias.requires_grad = False
+  setattr(module, name, lora)
+
 def apply_lora(model, r=16, alpha=32.0, target=None, layers=None):
-  target = target or ["wq", "wv", "wk", "wo"]
+  target = target or ["wq", "wv", "wk", "wo", "w1", "w2", "w3"]
   for i,layer in enumerate(model.layers):
     if layers is not None and i not in layers: continue
     for name in target:
-      if hasattr(layer.attention, name):
-        lin = getattr(layer.attention, name)
-        inf, outf, bias = lin.weight.shape[1], lin.weight.shape[0], lin.bias is not None
-        lora = LoRALinear(inf, outf, r, alpha, bias)
-        lora.linear.weight.assign(lin.weight.detach())
-        lora.linear.weight.requires_grad = False
-        if bias and lin.bias is not None:
-          lora.linear.bias.assign(lin.bias.detach())
-          lora.linear.bias.requires_grad = False
-        setattr(layer.attention, name, lora)
+      _replace_linear_with_lora(layer.attention, name, r, alpha)
+      _replace_linear_with_lora(layer.feed_forward, name, r, alpha)
 
 def get_lora_params(model):
   ret = []
   for layer in model.layers:
-    for name in ["wq", "wv", "wk", "wo"]:
-      if hasattr(layer.attention, name) and isinstance(getattr(layer.attention, name), LoRALinear):
-        m = getattr(layer.attention, name)
-        if m.lora_A: ret += [m.lora_A.weight, m.lora_B.weight]
+    for module in (layer.attention, layer.feed_forward):
+      for mod in module.__dict__.values():
+        if isinstance(mod, LoRALinear) and mod.lora_A: ret += [mod.lora_A.weight, mod.lora_B.weight]
   return ret

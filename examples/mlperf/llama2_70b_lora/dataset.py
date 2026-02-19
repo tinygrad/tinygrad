@@ -11,7 +11,7 @@ def load_data(path, split="train"):
   f = p / f"{split}.json"
   if not f.exists():
     p.mkdir(parents=True, exist_ok=True)
-    dummy = [{"input": "Sample government policy report. "*50, "output": "Policy implementation summary.", "id": f"d{i}"} for i in range(10)]
+    dummy = [{"input": "Sample government policy report. "*5, "output": "This is a detailed policy implementation summary with many words to ensure enough target tokens for training loss computation. "*5, "id": f"d{i}"} for i in range(10)]
     for s in ["train", "validation", "test"]: json.dump(dummy, open(p/f"{s}.json",'w'), indent=2)
     print(f"created dummy data: {len(dummy)} examples/split")
   data = json.load(open(f))
@@ -53,7 +53,10 @@ def get_tokenizer(mp=None):
     if tok_model.exists():
       sp = spm.SentencePieceProcessor(model_file=str(tok_model))
       class SPTok:
-        def __init__(self, sp): self.sp, self.pad_token_id, self.bos_token_id, self.eos_token_id = sp, sp.pad_id(), sp.bos_id(), sp.eos_id()
+        def __init__(self, sp):
+          self.sp = sp
+          self.pad_token_id = sp.pad_id() if sp.pad_id() >= 0 else 0
+          self.bos_token_id, self.eos_token_id = sp.bos_id(), sp.eos_id()
         def encode(self, t): return self.sp.encode(t, out_type=int)
         def decode(self, ids): return self.sp.decode(ids)
       return SPTok(sp)
