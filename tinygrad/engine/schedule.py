@@ -111,7 +111,7 @@ pm_post_sched_cache = PatternMatcher([
 ])
 
 def _buffer_like(x:UOp):
-  buffer = UOp.new_buffer(x.device, x.shard_size, x.dtype).reshape(x.max_shard_shape).shrink_to(x.shard_shape)
+  buffer = UOp.new_buffer(x.device, x.shard_size, x.dtype).reshape(x.max_shard_shape)
   if isinstance(x.device, tuple) and x.axis is not None: buffer = buffer.multi(x.axis)
   return buffer
 
@@ -128,12 +128,14 @@ def contig_to_assign(ctx:dict[UOp,UOp|None], x:UOp):
     # we can't realize any disk tensors
     if x in ctx: del ctx[x]
     # all copies are assumed to have finished and are now just the buffer
-    if x.op is Ops.COPY: ctx[x] = _buffer_like(x)
+    if x.op is Ops.COPY: ctx[x] = _buffer_like(x).shrink_to(x.shard_shape)
     return None
   # for contiguous or in buffer_map explicitly
   if not (x.op is Ops.CONTIGUOUS or (x in ctx and ctx[x] is None)): return None
   # not sure why the ctx isn't enough, but tag fixes it
-  ctx[x] = buffer = _buffer_like(x)
+  buffer = _buffer_like(x)
+  # buffer_map value needs symbolic shrink to preserve tensor shape, but assign target uses max shape (rangeify handles symbolic indexing)
+  ctx[x] = buffer.shrink_to(x.shard_shape)
   return buffer.assign(x.src[0] if x.op is Ops.CONTIGUOUS else x.rtag())
 pm_build_buffer_map = PatternMatcher([ (UPat(GroupOp.All, name="x"), contig_to_assign), ])
 
