@@ -137,14 +137,18 @@ def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[dict[UOp, UOp], li
 
   # precreate all buffers
   buffer_map: dict[UOp, UOp] = {}
-  bases = set([x.base for x in big_sink.src if x.base.op not in {Ops.CONST, Ops.BUFFER, Ops.BIND, Ops.DEFINE_VAR, Ops.AFTER}])
+  dont_realize = {Ops.CONST, Ops.BUFFER, Ops.BIND, Ops.DEFINE_VAR, Ops.AFTER}
+  bases = set([x.base if x.base.shard_size <= x.shard_size else x for x in big_sink.src if x.base.op not in dont_realize])
   for u in big_sink.toposort():
-    is_disk = isinstance(u._device, str) and u._device.startswith("DISK")
-    if ((u.op is Ops.CONTIGUOUS or u in bases) and not is_disk) or (u.op is Ops.COPY and is_disk):
-      buffer = UOp.new_buffer(u.device, u.shard_size, u.dtype).reshape(u.max_shard_shape)
-      if isinstance(u.device, tuple) and u.axis is not None: buffer = buffer.multi(u.axis)
-      # buffer_map value needs symbolic shrink to preserve tensor shape, but assign target uses max shape
-      buffer_map[u] = buffer.shrink_to(u.shape)
+    if isinstance(u._device, str) and u._device.startswith("DISK"):
+      if u.op is not Ops.COPY: continue
+    else:
+      if u.op is not Ops.CONTIGUOUS and u not in bases: continue
+    # fall through creates buffers
+    buffer = UOp.new_buffer(u.device, u.shard_size, u.dtype).reshape(u.max_shard_shape)
+    if isinstance(u.device, tuple) and u.axis is not None: buffer = buffer.multi(u.axis)
+    # buffer_map value needs symbolic shrink to preserve tensor shape, but assign target uses max shape
+    buffer_map[u] = buffer.shrink_to(u.shape)
 
   # apply buffer map, do a few simple rewrites
   big_sink = graph_rewrite(big_sink, pm_apply_buffer_map, ctx=buffer_map, bottom_up=True, name="apply buffer map")
