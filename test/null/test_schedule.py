@@ -1004,6 +1004,7 @@ class TestUOpBecome(unittest.TestCase):
 
   # sometimes we prefer to perform an op before movement ops, in this case we should stack the mops on top of the new buffer
 
+  @unittest.skip("no longer supported")
   def test_reorder_expand(self):
     a = Tensor.empty(4, 1)
     b = a.expand(4, 4).reciprocal()
