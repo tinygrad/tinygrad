@@ -14,7 +14,7 @@ from tinygrad.uop.ops import sint
 class CPUSignal(HCQSignal):
   def _sleep(self, time_spent_since_last_sleep_ms:int):
     if self.is_timeline and self.owner is not None:
-      with self.owner.tasks.all_tasks_done: self.owner.tasks.all_tasks_done.wait(timeout=3)
+      with self.owner.tasks.all_tasks_done: self.owner.tasks.all_tasks_done.wait(timeout=1)
 
 class CPUWorker(threading.Thread):
   def __init__(self, dev, tasks, thread_id):
@@ -30,13 +30,14 @@ class CPUWorker(threading.Thread):
   def run(self):
     while True:
       cmd_iter = iter(self.tasks.get())
-      for cmd in cmd_iter:
-        threads, args_cnt = next(cmd_iter), next(cmd_iter)
-        args = [next(cmd_iter) for _ in range(args_cnt)]
-        for th in range(threads - 1): self.push_task(th, cmd, args)
-        cmd(self.thread_id, *args)
-        for th in range(threads - 1): self.pool[th].join()
-      self.tasks.task_done()
+      try:
+        for cmd in cmd_iter:
+          threads, args_cnt = next(cmd_iter), next(cmd_iter)
+          args = [next(cmd_iter) for _ in range(args_cnt)]
+          for th in range(threads - 1): self.push_task(th, cmd, args)
+          cmd(self.thread_id, *args)
+          for th in range(threads - 1): self.pool[th].join()
+      finally: self.tasks.task_done()
 
 class CPUComputeQueue(HWQueue):
   def _exec(self, tid, prg, bufs, *args):
