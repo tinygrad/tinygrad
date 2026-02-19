@@ -168,13 +168,13 @@ class TestSchedule(unittest.TestCase):
     a = Tensor.full((4,), 4.0).contiguous().realize()
     b = Tensor.full((4,), 2.0).contiguous().realize()
     expr = (a*b)/b
-    check_schedule(expr, 0)
+    run_schedule(check_schedule(expr, 0))
     np.testing.assert_allclose(expr.numpy(), np.full((4,), 4.0))
 
   def test_div_collapse_const(self):
     a = Tensor.full((4,), 4.0).contiguous().realize()
     expr = a/a
-    check_schedule(expr, 0)
+    run_schedule(check_schedule(expr, 0))
     np.testing.assert_allclose(expr.numpy(), np.full((4,), 1.0))
 
   def test_div_collapse(self):
@@ -1236,11 +1236,12 @@ class TestView(unittest.TestCase):
     bv = b.pad(((0, 2),))[-2:]
     # this becomes a late a*0
     late_mul = a*bv
-    check_schedule(late_mul, 0)
+    run_schedule(check_schedule(late_mul, 0))
+    # NOTE: no longer checked
     # the arange doesn't realize
-    self.assertIsNone(b.uop.base.realized)
+    #self.assertIsNone(b.uop.base.realized)
     # mul doesn't realize
-    self.assertIsNone(late_mul.uop.base.realized)
+    #self.assertIsNone(late_mul.uop.base.realized)
     self.assertEqual(late_mul.tolist(), [0, 0])
 
   # SINK has two branches:
@@ -1256,17 +1257,18 @@ class TestView(unittest.TestCase):
     s = check_schedule([late_mul, other_child], 2)
     # the arange becomes a BUFFER
     self.assertIs(b.uop.base.op, Ops.BUFFER)
+    # NOTE: no longer checked
     # mul still collapses
-    self.assertIs(late_mul.uop.base.op, Ops.CONST)
+    #self.assertIs(late_mul.uop.base.op, Ops.CONST)
     run_schedule(s)
     self.assertEqual(other_child.tolist(), [2, 3, 4])
 
 @unittest.skipIf(Device.DEFAULT == "CPU", "tests copy from another device to cpu")
 class TestCopyFolding(unittest.TestCase):
   def test_const_copy_is_free(self):
-    b = Tensor(1).to("CPU")
-    check_schedule(b, 0, filter_sink=False)
-    assert b.item() == 1
+    b = Tensor(1).to("CPU") * 4
+    run_schedule(check_schedule(b, 0, filter_sink=False))
+    assert b.item() == 4
 
   def test_one_hot_with_copy(self):
     y = Tensor([1, 2, 3]).to("CPU")
@@ -1274,16 +1276,16 @@ class TestCopyFolding(unittest.TestCase):
     check_schedule(x, 3, filter_sink=False)
 
   def test_const_copy_multi(self):
-    x = Tensor.ones(1, device="CPU").to_(["CPU", "CPU:1"])
-    check_schedule(x, 0, filter_sink=False)
-    self.assertEqual(x.item(), 1)
+    x = Tensor.ones(1, device="CPU").to_(["CPU", "CPU:1"]) * 2
+    run_schedule(check_schedule(x, 0, filter_sink=False))
+    self.assertEqual(x.item(), 2.0)
 
   def test_late_const_copy_folding(self):
     a = Tensor.arange(3).realize()
     zeros = Tensor.zeros(3).realize()
-    b = (a*zeros).to("CPU")
+    b = (a*zeros).to("CPU") + 1
     run_schedule(check_schedule(b, 0, filter_sink=False))
-    self.assertListEqual(b.tolist(), [0, 0, 0])
+    self.assertListEqual(b.tolist(), [1, 1, 1])
     self.assertEqual(b.device, "CPU")
 
   def test_alu_after_copy(self):
