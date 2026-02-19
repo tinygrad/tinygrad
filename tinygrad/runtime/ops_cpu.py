@@ -1,6 +1,6 @@
 from __future__ import annotations
 import platform, sys, ctypes, functools, time, mmap, threading, queue
-from tinygrad.helpers import to_mv, OSX, WIN, mv_address, suppress_finalizing, unwrap, data64_le
+from tinygrad.helpers import to_mv, OSX, WIN, mv_address, wait_cond, suppress_finalizing, unwrap, data64_le, getenv
 from tinygrad.helpers import CPU_CC, CPU_LVP, CPU_LLVM
 from tinygrad.device import BufferSpec, DMACPURef, CompilerSet
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, HWQueue, HCQArgsState, HCQSignal, HCQProgram, MMIOInterface
@@ -44,8 +44,7 @@ class CPUComputeQueue(HWQueue):
     if 'core_id' in prg.runtimevars: vals[prg.runtimevars['core_id']] = tid
     prg.fxn(*map(ctypes.c_uint64, args[:bufs]), *map(ctypes.c_int64 if platform.machine() == "arm64" else ctypes.c_int32, vals))
   def _signal(self, tid, signal_addr, value): to_mv(signal_addr, 4).cast('I')[0] = value
-  def _wait(self, tid, signal_addr, value):
-    while to_mv(signal_addr, 4).cast('I')[0] < value: time.sleep(0.001)
+  def _wait(self, tid, signal_addr, value): wait_cond(lambda: to_mv(signal_addr, 4).cast('I')[0] >= value, timeout_ms=getenv("HCQDEV_WAIT_TIMEOUT_MS", 30000))
   def _timestamp(self, tid, timestamp_addr): to_mv(timestamp_addr, 8).cast('Q')[0] = time.perf_counter_ns()
   def cmd(self, cmd, *args, threads=1):
     self.q(cmd, threads, len(args), *args)
