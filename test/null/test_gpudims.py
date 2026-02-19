@@ -51,6 +51,7 @@ class TestGroupedDims(unittest.TestCase):
     self._check_grouped_dims("gidx", (64,3,4), (16,16,16), True, [16,3,16])
     self._check_grouped_dims("gidx", (128,3,4), (16,4,256), False, [16,3,32])
     self._check_grouped_dims("gidx", (4,4,512), (16,4,256), False, [8,4,256])
+    self._check_grouped_dims("gidx", (5,12,7), (8,4,16), False, [10,3,14])
 
     # prefer group_dim strategy when possible
     self._check_grouped_dims("gidx", (512,4,2), (8192,2,2), False, [2048,2])
