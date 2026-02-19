@@ -85,10 +85,7 @@ class TestGroupedDims(unittest.TestCase):
     with self.assertRaises(RuntimeError):
       get_grouped_dims("gidx", (2,3,4,5,6), (16,16,16))
 
-  @unittest.expectedFailure
-  def test_split_2d_to_3d_bug(self):
-    # TODO: fix get_grouped_dims a=3,b=2 path: _split_dims redistributes factors across all dims,
-    # but line 51 assumes limited[0]*limited[1]==dims[0]. triggers on WebGPU with 2D shapes > 65535.
+  def test_split_2d_to_3d(self):
     self._check_grouped_dims("gidx", (128,128), (16,16,256), False, [16,16,64], False)
 
   def test_max_sizes_none(self):
