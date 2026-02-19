@@ -1,37 +1,10 @@
 from typing import cast
 import functools, itertools
 from tinygrad.helpers import all_same, all_int, prod, DEBUG, RING, ALL2ALL, VIZ, getenv
-from tinygrad.uop.ops import Ops, UOp, sint, PatternMatcher, UPat, GroupOp, graph_rewrite_map, graph_rewrite
+from tinygrad.uop.ops import Ops, UOp, PatternMatcher, UPat, GroupOp, graph_rewrite_map, graph_rewrite
 from tinygrad.dtype import dtypes
-from tinygrad.device import Device
 
 # *** allreduce implementation ***
-def handle_allreduce_multirank(buf:UOp, red:UOp) -> UOp|None:
-  if not isinstance(buf.device, tuple): return None
-
-  # Group buffers
-  groups: dict[int|None, list[UOp]] = {}
-  for i,dev in enumerate(buf.device):
-    groups.setdefault(Device[dev].group_id, []).append(buf.mselect(i))
-
-  # Put reduce leader of each group first
-  reduce_leaders = set(getenv("REDUCE_LEADERS", "").split(","))
-  groups = {gid: sorted(bufs, key=lambda x: (x.device not in reduce_leaders, x.device)) for gid,bufs in groups.items()}
-
-  # Skip if only one group or if every group has only one buffer
-  if len(groups) <= 1 or not any(len(g) > 1 for g in groups.values()): return None
-
-  # Reduce inside each group
-  inner = [UOp(Ops.MSTACK, buf.dtype, tuple(bufs)).allreduce(red.arg, (cast(str, bufs[0].device),)).mselect(0) for bufs in groups.values()]
-
-  # Allreduce across groups
-  outer = UOp(Ops.MSTACK, buf.dtype, tuple(inner)).allreduce(red.arg, tuple(buf.device for buf in inner))
-
-  # Broadcast back to all devices in the group
-  gid2bid = {Device[device].group_id: i for i,device in enumerate(outer.device)}
-  return outer.mselect(gid2bid[Device[red.device].group_id]).copy_to_device(red.device) if not isinstance(red.device, tuple) else \
-         UOp(Ops.MSTACK, buf.dtype, tuple(outer.mselect(gid2bid[Device[device].group_id]).copy_to_device(device) for device in red.device))
-
 def handle_allreduce(buf:UOp, red:UOp) -> UOp|None:
   if not isinstance(buf.device, tuple): return None
   assert all_int(buf.shape), f"does not support symbolic shape {buf.shape}"
@@ -100,7 +73,6 @@ def mstack_early_shrink(ms:UOp, shrink:UOp):
   return ms.replace(src=tuple(ret))
 
 replace_allreduce = PatternMatcher([
-  (UPat(Ops.ALLREDUCE, src=(UPat.var("buf"), UPat()), name="red"), handle_allreduce_multirank),
   (UPat(Ops.ALLREDUCE, src=(UPat.var("buf"), UPat()), name="red"), handle_allreduce),
   # BROADCAST: explicitly expand broadcast copies and combine with MSTACK
   (UPat(Ops.COPY, name="c", src=(UPat(GroupOp.All-{Ops.CONST}, name="x"), UPat(Ops.DEVICE))), lambda c,x:
@@ -149,21 +121,15 @@ def reduce_multi(root:UOp, multi:UOp):
   # reduce on non sharded axes, piecewise is fine. if axis is None this is also correct
   return multi.src[0].r(op, axis).multi(axis=multi.axis)
 
-def _shape_to_single_shard(axis, shape:tuple[sint, ...], lb:UOp) -> tuple[sint, ...]:
-  return tuple(lb.shape[axis] if a == axis else s for a,s in enumerate(shape))
-
 def reshape_multi(root:UOp, multi:UOp):
-  arg = root.marg
-  if (new_axis:=root.axis) is None: return multi.src[0].reshape(arg).multi(new_axis)
-  assert prod(multi.shape) == prod(arg), "reshape must maintain prod(shape)"
-  assert prod(multi.src[0].shape[multi.axis:])%prod(arg[new_axis+1:]) == 0, f"reshape cannot move items between shards {multi.shape} -> {arg=}"
-  new_shape_axis = prod(multi.src[0].shape[multi.axis:]) // prod(arg[new_axis+1:])
-  return multi.src[0].reshape(tuple(s if a!=new_axis else new_shape_axis for a,s in enumerate(arg))).multi(new_axis)
+  if prod(multi.shape) != prod(new_shape:=root.marg): raise RuntimeError("reshape must maintain prod(shape)")
+  if (new_axis:=root.axis) is not None: new_shape = tuple(s//len(multi.device) if a==new_axis else s for a,s in enumerate(new_shape))
+  return multi.src[0].reshape(new_shape).multi(new_axis)
 
 def expand_multi(root:UOp, multi:UOp):
-  # NOTE: this assert isn't needed, sharded axis can have dim 1
-  assert multi.axis is None or root.marg[multi.axis] == multi.shape[multi.axis], f"expand not supported on sharded axis {root.marg=}"
-  return multi.src[0].expand(_shape_to_single_shard(multi.axis, root.marg, multi.src[0])).multi(multi.axis)
+  if multi.axis is None: new_shape = root.marg
+  else: new_shape = tuple(multi.src[0].shape[multi.axis] if a == multi.axis else s for a,s in enumerate(root.marg))
+  return multi.src[0].expand(new_shape).multi(multi.axis)
 
 def pad_multi(root:UOp, multi:UOp):
   assert multi.axis is None or root.marg[multi.axis] == (0,0), f"padding not supported for {root.marg=}"
@@ -177,11 +143,10 @@ def shrink_multi(root:UOp, multi:UOp):
   assert multi.axis is None or root.marg[multi.axis] == (0, multi.shape[multi.axis]) or root.marg[multi.axis] in multi.bounds, \
     f"shrinking not supported for {root.marg=}"
   if multi.axis is not None and root.marg[multi.axis] in multi.bounds and root.marg[multi.axis] != (0, multi.shape[multi.axis]):
-    assert all(root.marg[i] == (0, s) or i == multi.axis for i,s in enumerate(multi.shape)), \
-      "cannot shrink sharded and non-sharded axis at the same time"
     # NOTE: shrink on the shard axis is only allowed when result is a single partition, denoted by the new real
     # we just copy it to all the devices, no real. this will be optimized out later
-    return multi.src[0].copy_to_device(multi.device, arg=multi.bounds.index(root.marg[multi.axis]))
+    non_shard_shrink = tuple((0, multi.src[0].shape[i]) if i == multi.axis else s for i, s in enumerate(root.marg))
+    return multi.src[0].copy_to_device(multi.device, arg=multi.bounds.index(root.marg[multi.axis])).shrink(non_shard_shrink)
   return multi.src[0].shrink(tuple((0, multi.src[0].shape[multi.axis]) if a == multi.axis else s for a,s in enumerate(root.marg))).multi(multi.axis)
 
 def flip_multi(root:UOp, multi:UOp):
