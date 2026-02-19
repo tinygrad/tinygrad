@@ -110,13 +110,8 @@ pm_post_sched_cache = PatternMatcher([
   (UPat(Ops.BIND, src=(UPat(Ops.DEFINE_VAR),), name="b"), lambda ctx,b: ctx.get(b)),
 ])
 
-def _buffer_like(x:UOp):
-  buffer = UOp.new_buffer(x.device, x.shard_size, x.dtype).reshape(x.max_shard_shape)
-  if isinstance(x.device, tuple) and x.axis is not None: buffer = buffer.multi(x.axis)
-  return buffer
-
 # rewrite all contiguous to assign
-def contig_to_assign(ctx:dict[UOp,UOp|None], x:UOp):
+def apply_buffer_map(ctx:dict[UOp,UOp|None], x:UOp):
   if x.op is Ops.AFTER:
     ctx[x] = x.src[0]
     return None
@@ -124,23 +119,12 @@ def contig_to_assign(ctx:dict[UOp,UOp|None], x:UOp):
   if x.op is Ops.ASSIGN:
     target = x.src[0]
     while target.op is Ops.ASSIGN: target = target.src[0]
-    if target.base.op is Ops.BUFFER:
-      ctx[x] = target
-      return None
-  if isinstance(x._device, str) and x._device.startswith("DISK"):
-    # we can't realize any disk tensors
-    if x in ctx: del ctx[x]
-    # all copies are assumed to have finished and are now just the buffer
-    if x.op is Ops.COPY: ctx[x] = _buffer_like(x).shrink_to(x.shard_shape)
+    if target.base.op is Ops.BUFFER or target in ctx:
+      ctx[x] = ctx[target] if target in ctx is not None else target
     return None
-  # for contiguous or in buffer_map explicitly
-  if not (x.op is Ops.CONTIGUOUS or (x in ctx and ctx[x] is None)): return None
-  # not sure why the ctx isn't enough, but tag fixes it
-  buffer = _buffer_like(x)
-  # buffer_map value needs symbolic shrink to preserve tensor shape, but assign target uses max shape (rangeify handles symbolic indexing)
-  ctx[x] = buffer.shrink_to(x.shard_shape)
-  return buffer.assign(x.src[0] if x.op is Ops.CONTIGUOUS else x.rtag())
-pm_build_buffer_map = PatternMatcher([ (UPat(GroupOp.All, name="x"), contig_to_assign), ])
+  if x not in ctx: return None
+  return ctx[x].assign(x.src[0] if x.op is Ops.CONTIGUOUS else x.rtag())
+pm_apply_buffer_map = PatternMatcher([ (UPat(GroupOp.All, name="x"), apply_buffer_map), ])
 
 schedule_cache: dict[bytes, tuple[list[ExecItem], UOp]] = {}
 @track_rewrites(lambda _,ret: f"Schedule {pluralize('Kernel', len(ret[1]))}")
@@ -148,11 +132,18 @@ def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[dict[UOp, UOp], li
   # big_sink srcs are all the Tensors
   st = time.perf_counter()
 
-  # new preschedule stuff
-  # we assign for any contiguous or anything on the sink that's not a BUFFER or a CONST
-  unrealized_ops = {Ops.CONST, Ops.BUFFER, Ops.BIND, Ops.DEFINE_VAR, Ops.AFTER}
-  buffer_map: dict[UOp, UOp|None] = {x.base:None for x in big_sink.src if x.base.op not in unrealized_ops}
-  big_sink = graph_rewrite(big_sink, pm_build_buffer_map, ctx=buffer_map, bottom_up=True, name="contig to assign")
+  # precreate all buffers
+  buffer_map: dict[UOp, UOp|None] = {}
+  bases = set([x.base for x in big_sink.src if x.base.op not in {Ops.CONST, Ops.BUFFER, Ops.BIND, Ops.DEFINE_VAR, Ops.AFTER}])
+  for u in big_sink.toposort():
+    is_disk = isinstance(u._device, str) and u._device.startswith("DISK")
+    if ((u.op is Ops.CONTIGUOUS or u in bases) and not is_disk) or (u.op is Ops.COPY and is_disk):
+      buffer = UOp.new_buffer(u.device, u.shard_size, u.dtype).reshape(u.max_shard_shape)
+      if isinstance(u.device, tuple) and u.axis is not None: buffer = buffer.multi(u.axis)
+      buffer_map[u] = buffer.shrink_to(u.shape)
+
+  # apply buffer map, do a few simple rewrites
+  big_sink = graph_rewrite(big_sink, pm_apply_buffer_map, ctx=buffer_map, bottom_up=True, name="apply buffer map")
   big_sink = graph_rewrite(big_sink, _remove_all_tags)
   assert all(x is not None for x in buffer_map.values())
 

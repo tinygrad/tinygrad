@@ -747,7 +747,7 @@ class TestSchedule(unittest.TestCase):
     p = P[0]
     p = p.pad(((1, 0), ))
     p = p.repeat([2])
-    run_schedule(check_schedule(p, 5))  # TODO: this is high
+    run_schedule(check_schedule(p, 4))  # TODO: this is high
     tiny_ret = p.numpy()
 
     P = np.ones((3, 3), dtype=np.float32)
@@ -1036,7 +1036,7 @@ class TestSchedule(unittest.TestCase):
     idx = Tensor([1,2,5,6], dtype=dtypes.int32)
     flat_base[idx] = Tensor([99,99,99,99])
     base.assign(flat_base.reshape(4, 4))
-    sched = check_schedule(base, 7)  # TODO: this is high
+    sched = check_schedule(base, 6)  # TODO: this is high
     run_schedule(sched)
     expected = list(range(16))
     for i, v in zip([1,2,5,6], [99,99,99,99]): expected[i] = v
