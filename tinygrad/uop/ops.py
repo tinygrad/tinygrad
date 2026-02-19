@@ -816,7 +816,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
   @functools.cached_property
   def _sym_fxn(self):
     sself = self.simplify()
-    varnames = tuple(x.arg[0] for x in sself.toposort() if x.op is Ops.DEFINE_VAR)
+    varnames = tuple(x.expr for x in sself.toposort() if x.op is Ops.DEFINE_VAR)
     # TODO: sanitize varnames, or don't use naked eval while staying fast
     return eval("lambda "+','.join(varnames)+": "+sself.render(pm=renderer_infer)), varnames  # pylint: disable=eval-used
 
@@ -1383,7 +1383,7 @@ def bitcast(x, in_dtype:DType, out_dtype:DType):
   return ret[0] if out_count == 1 else ret
 
 renderer = PatternMatcher([
-  (UPat((Ops.DEFINE_VAR,), name="x"), lambda x: x.arg[0]),
+  (UPat((Ops.DEFINE_VAR,), name="x"), lambda x: x.expr),
   (UPat((Ops.SPECIAL), name="x"), lambda x: x.arg),
   (UPat(Ops.RANGE, name="x"), lambda x: f"r{range_str(x)}"),
   (UPat((Ops.CONST, Ops.VCONST), name="x"), lambda x: str(x.arg)),

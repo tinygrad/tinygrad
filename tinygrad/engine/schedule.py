@@ -170,7 +170,7 @@ def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[dict[UOp, UOp], li
     ubufs = tuple(b.buffer for b in buf_uops)
     if any(isinstance(x, MultiBuffer) for x in ubufs):
       assert all(isinstance(x, MultiBuffer) for x in ubufs), "kernel must all be multibuffer"
-      dnums = [x for x in si.ast.variables() if x.arg[0] == '_device_num']
+      dnums = [x for x in si.ast.variables() if x.expr == '_device_num']
       for j, bufs in enumerate(zip(*[x.bufs for x in cast(tuple[MultiBuffer, ...], ubufs)])):
         schedule.append(ExecItem(si.ast, list(bufs), si.metadata, si.fixedvars | ({dnums[0].expr:j} if len(dnums) else {})))
     else:
@@ -183,5 +183,5 @@ def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[dict[UOp, UOp], li
           f" | {' cache hit' if SCACHE and sc_ret is not None else 'CACHE MISS'} {sched_cache_key.hex()[:8]}"+\
           f" | {len(UOpMetaClass.ucache)} uops in cache")
 
-  used_vars = set().union(*[{v.arg[0] for v in si.ast.variables()} for si in schedule])
+  used_vars = set().union(*[{v.expr for v in si.ast.variables()} for si in schedule])
   return tensor_map, schedule, {k:v for k,v in var_vals.items() if k in used_vars}
