@@ -113,16 +113,9 @@ int register_hook() {
 int temp_register_hook = register_hook();
 
 at::Tensor wrap_tensor(py::object &py_obj, c10::ScalarType dtype, c10::DeviceIndex device_index) {
-  // TODO: we have to get the dtype and the shape from the tinygrad Tensor
   std::vector<int64_t> sizes = py_obj.attr("shape").cast<std::vector<int64_t>>();
-
-  py::list views = py_obj.attr("uop").attr("st").attr("views");
-  std::vector<int64_t> strides = views[views.size() - 1].attr("strides").cast<std::vector<int64_t>>();
-  int64_t storage_offset = 0;
-  for (auto& v: views) {
-    storage_offset += v.attr("offset").cast<int64_t>(); // TODO: is this correct?
-  }
-
+  std::vector<int64_t> strides = py_obj.attr("_strides").cast<std::vector<int64_t>>();
+  int64_t storage_offset = py_obj.attr("_storage_offset").cast<int64_t>();
   return at::detail::make_tensor<at::TinyOpaqueTensorImpl<std::shared_ptr<c10::SafePyObject>>>(
     at::DispatchKeySet(at::DispatchKey::PrivateUse1),
     c10::scalarTypeToTypeMeta(dtype),
@@ -138,7 +131,15 @@ py::object unwrap_tensor(const at::Tensor &tensor) {
   return py::reinterpret_borrow<py::object>(tiny->ptr(getPyInterpreter()));
 }
 
+void update_metadata(const at::Tensor &tensor, const std::vector<int64_t> &sizes,
+                     const std::vector<int64_t> &strides, int64_t storage_offset) {
+  auto* impl = tensor.unsafeGetTensorImpl();
+  impl->set_allow_tensor_metadata_change(true);
+  impl->set_sizes_and_strides(sizes, strides, storage_offset);
+}
+
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("wrap", &wrap_tensor);
   m.def("unwrap", &unwrap_tensor);
+  m.def("update_metadata", &update_metadata);
 }

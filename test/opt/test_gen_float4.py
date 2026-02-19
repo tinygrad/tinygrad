@@ -2,7 +2,6 @@ import unittest
 from tinygrad import Device, Tensor, dtypes
 from tinygrad.uop.ops import UOp, Ops
 from tinygrad.codegen.opt import Opt, OptOps
-from tinygrad.shape.shapetracker import ShapeTracker, View
 from tinygrad.engine.realize import get_program
 from tinygrad.helpers import AMX
 
@@ -25,7 +24,7 @@ class TestFloat4(unittest.TestCase):
     s = c.schedule()[0]
     realized_ast = s.ast
     opts_to_apply = [Opt(op=OptOps.UPCAST, axis=0, arg=4)]
-    program = get_program(realized_ast, Device[Device.DEFAULT].renderer, opts=opts_to_apply)
+    program = get_program(realized_ast, renderer=Device[Device.DEFAULT].renderer, opts=opts_to_apply)
 
     assert TestFloat4.count_float4(program.uops) == (2, 1)
 
@@ -36,7 +35,8 @@ class TestFloat4(unittest.TestCase):
     c = a + b
 
     s = c.schedule()[0]
-    uops = get_program(s.ast, opts=[Opt(op=OptOps.UPCAST, axis=0, arg=4), Opt(op=OptOps.UPCAST, axis=0, arg=2)]).uops
+    uops = get_program(s.ast, renderer=Device[Device.DEFAULT].renderer,
+                       opts=[Opt(op=OptOps.UPCAST, axis=0, arg=4), Opt(op=OptOps.UPCAST, axis=0, arg=2)]).uops
     assert TestFloat4.count_float4(uops) == (4, 2)
 
   @unittest.skipUnless(Device.DEFAULT in {"CPU"} and AMX, "Only CPU with AMX upcasts float up to size 16")
@@ -47,7 +47,8 @@ class TestFloat4(unittest.TestCase):
       c = a + b
 
       s = c.schedule()[0]
-      return get_program(s.ast, opts=[Opt(op=OptOps.UPCAST, axis=0, arg=4), Opt(op=OptOps.UPCAST, axis=0, arg=shift)]).uops
+      return get_program(s.ast, renderer=Device[Device.DEFAULT].renderer,
+                         opts=[Opt(op=OptOps.UPCAST, axis=0, arg=4), Opt(op=OptOps.UPCAST, axis=0, arg=shift)]).uops
 
     sizes = [12, 8, 16]
     shifts = [3, 2, 4]
@@ -65,7 +66,7 @@ class TestFloat4(unittest.TestCase):
     s = c.schedule()[0]
     realized_ast = s.ast
     opts_to_apply = [Opt(op=OptOps.UPCAST, axis=0, arg=4)]
-    program = get_program(realized_ast, Device[Device.DEFAULT].renderer, opts=opts_to_apply)
+    program = get_program(realized_ast, renderer=Device[Device.DEFAULT].renderer, opts=opts_to_apply)
 
     assert TestFloat4.count_float4(program.uops) == (0, 1)
 
@@ -76,7 +77,8 @@ class TestFloat4(unittest.TestCase):
     c = a + b
 
     s = c.schedule()[0]
-    uops = get_program(s.ast, opts=[Opt(op=OptOps.UPCAST, axis=1, arg=4), Opt(op=OptOps.UPCAST, axis=1, arg=2)]).uops
+    uops = get_program(s.ast, renderer=Device[Device.DEFAULT].renderer,
+                       opts=[Opt(op=OptOps.UPCAST, axis=1, arg=4), Opt(op=OptOps.UPCAST, axis=1, arg=2)]).uops
 
     assert TestFloat4.count_float4(uops) == (0, 2)
 
@@ -88,7 +90,8 @@ class TestFloat4(unittest.TestCase):
       c = a + b
 
       s = c.schedule()[0]
-      return get_program(s.ast, opts=[Opt(op=OptOps.UPCAST, axis=1, arg=4), Opt(op=OptOps.UPCAST, axis=1, arg=shift)]).uops
+      return get_program(s.ast, renderer=Device[Device.DEFAULT].renderer,
+                         opts=[Opt(op=OptOps.UPCAST, axis=1, arg=4), Opt(op=OptOps.UPCAST, axis=1, arg=shift)]).uops
 
     sizes = [13, 9, 17]
     shifts = [3, 2, 4]
@@ -106,7 +109,7 @@ class TestFloat4(unittest.TestCase):
     # float4 should be emitted (the reduce axis of size 4 is the float4 axis here)
 
     s = c.schedule()[0]
-    uops = get_program(s.ast, opts=[Opt(op=OptOps.UNROLL, axis=0, arg=4)]).uops
+    uops = get_program(s.ast, renderer=Device[Device.DEFAULT].renderer, opts=[Opt(op=OptOps.UNROLL, axis=0, arg=4)]).uops
 
     assert TestFloat4.count_float4(uops) == (0, 0)
 
@@ -120,7 +123,8 @@ class TestFloat4(unittest.TestCase):
     # UPDATE: now we do this fusion
 
     s = c.schedule()[0]
-    uops = get_program(s.ast, opts=[Opt(op=OptOps.UPCAST, axis=0, arg=0), Opt(op=OptOps.UNROLL, axis=0, arg=0)]).uops
+    uops = get_program(s.ast, renderer=Device[Device.DEFAULT].renderer,
+                       opts=[Opt(op=OptOps.UPCAST, axis=0, arg=0), Opt(op=OptOps.UNROLL, axis=0, arg=0)]).uops
 
     assert TestFloat4.count_float4(uops) in {(0,1), (1,1)}
 
@@ -133,7 +137,7 @@ class TestFloat4(unittest.TestCase):
     # since the top axis is not contiguous.
 
     s = c.schedule()[0]
-    uops = get_program(s.ast, opts=[Opt(op=OptOps.UPCAST, axis=0, arg=4)]).uops
+    uops = get_program(s.ast, renderer=Device[Device.DEFAULT].renderer, opts=[Opt(op=OptOps.UPCAST, axis=0, arg=4)]).uops
 
     assert TestFloat4.count_float4(uops) == (0, 1)
 
@@ -145,37 +149,9 @@ class TestFloat4(unittest.TestCase):
     # should float4 b but not a
 
     s = c.schedule()[0]
-    uops = get_program(s.ast, opts=[Opt(op=OptOps.UPCAST, axis=0, arg=4)]).uops
+    uops = get_program(s.ast, renderer=Device[Device.DEFAULT].renderer, opts=[Opt(op=OptOps.UPCAST, axis=0, arg=4)]).uops
 
     assert TestFloat4.count_float4(uops) == (1, 1)
-
-  @unittest.skip("Ops.VIEW no longer exists")
-  def test_half4_load_unrolled(self):
-    # from llama 7B shard 4 gpus
-    ast = UOp(Ops.SINK, dtypes.void, arg=None, src=(
-      UOp(Ops.STORE, dtypes.void, arg=None, src=(
-        UOp(Ops.VIEW, dtypes.float.ptr(96000), arg=ShapeTracker(views=(View(shape=(1, 3, 32000, 1), strides=(0, 32000, 1, 0), offset=0, mask=None, contiguous=True),)), src=( # noqa: E501
-          UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(96000), arg=0, src=()),)),
-        UOp(Ops.REDUCE_AXIS, dtypes.float, arg=(Ops.ADD, (3,)), src=(
-          UOp(Ops.CAST, dtypes.float, arg=None, src=(
-            UOp(Ops.MUL, dtypes.half, arg=None, src=(
-              UOp(Ops.LOAD, dtypes.half, arg=None, src=(
-                UOp(Ops.VIEW, dtypes.half.ptr(9216), arg=ShapeTracker(views=(View(shape=(1, 3, 32000, 1024), strides=(0, 4096, 0, 1), offset=0, mask=None, contiguous=False),)), src=( # noqa: E501
-                  UOp(Ops.DEFINE_GLOBAL, dtypes.half.ptr(9216), arg=1, src=()),)),)),
-              UOp(Ops.LOAD, dtypes.half, arg=None, src=(
-                UOp(Ops.VIEW, dtypes.half.ptr(32768000), arg=ShapeTracker(views=(View(shape=(1, 3, 32000, 1024), strides=(0, 0, 1024, 1), offset=0, mask=None, contiguous=False),)), src=( # noqa: E501
-                  UOp(Ops.DEFINE_GLOBAL, dtypes.half.ptr(32768000), arg=2, src=()),)),)),)),)),)),)),))
-
-    # TODO: fix this, expected might change but should be positive
-    for expected, opts in [
-      ((7, 0), [Opt(op=OptOps.UPCAST, axis=1, arg=4), Opt(op=OptOps.UPCAST, axis=0, arg=3), Opt(op=OptOps.UNROLL, axis=0, arg=4)]),
-      ((5, 0), [Opt(op=OptOps.UPCAST, axis=1, arg=4), Opt(op=OptOps.UNROLL, axis=0, arg=4)]),
-      ((2, 0), [Opt(op=OptOps.UNROLL, axis=0, arg=4)]),
-    ]:
-      program = get_program(ast, Device[Device.DEFAULT].renderer, opts=opts)
-
-      count = TestFloat4.count_half4(program.uops)
-      assert count == expected, f"{count=}, {expected=}"
 
 if __name__ == '__main__':
   unittest.main()

@@ -65,6 +65,8 @@
 #define NVCEC0_QMDV05_00_GRID_HEIGHT_RESUME                        MW(271:256)
 #define NVCEC0_QMDV05_00_GRID_DEPTH_RESUME                         MW(287:272)
 #define NVCEC0_QMDV05_00_RELEASE_ENABLE(i)                         MW((288+(i)*16):(288+(i)*16))
+#define NVCEC0_QMDV05_00_RELEASE0_ENABLE                           NVCEC0_QMDV05_00_RELEASE_ENABLE(0)
+#define NVCEC0_QMDV05_00_RELEASE1_ENABLE                           NVCEC0_QMDV05_00_RELEASE_ENABLE(1)
 #define NVCEC0_QMDV05_00_RELEASE_ENABLE_FALSE                      0x00000000
 #define NVCEC0_QMDV05_00_RELEASE_ENABLE_TRUE                       0x00000001
 #define NVCEC0_QMDV05_00_RELEASE_STRUCTURE_SIZE(i)                 MW((290+(i)*16):(289+(i)*16))

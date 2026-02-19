@@ -1,8 +1,8 @@
 from __future__ import annotations
-import os, functools, platform, time, re, contextlib, operator, hashlib, pickle, sqlite3, tempfile, pathlib, string, ctypes, sys, gzip, getpass
-import urllib.request, subprocess, shutil, math, types, copyreg, inspect, importlib, decimal
+import os, functools, platform, time, re, contextlib, operator, hashlib, pickle, sqlite3, tempfile, pathlib, string, ctypes, sys, gzip, getpass, gc
+import subprocess, shutil, math, types, copyreg, inspect, importlib, decimal, itertools
 from dataclasses import dataclass, field
-from typing import ClassVar, Iterable, Any, TypeVar, Callable, Sequence, TypeGuard, Iterator, Generic, Generator
+from typing import ClassVar, Iterable, Any, TypeVar, Callable, Sequence, TypeGuard, Iterator, Generic, Generator, cast, overload
 
 T = TypeVar("T")
 U = TypeVar("U")
@@ -23,10 +23,13 @@ def argfix(*x):
     if len(x) != 1: raise ValueError(f"bad arg {x}")
     return tuple(x[0])
   return x
-def argsort(x): return type(x)(sorted(range(len(x)), key=x.__getitem__)) # https://stackoverflow.com/questions/3382352/equivalent-of-numpy-argsort-in-basic-python
-def all_same(items:tuple[T, ...]|list[T]): return all(x == items[0] for x in items)
+# https://stackoverflow.com/questions/3382352/equivalent-of-numpy-argsort-in-basic-python
+def argsort(x): return type(x)(sorted(range(len(x)), key=x.__getitem__))
+def all_same(items:Sequence): return all(x == items[0] for x in items)  # works for empty input
 def all_int(t: Sequence[Any]) -> TypeGuard[tuple[int, ...]]: return all(isinstance(s, int) for s in t)
-def colored(st, color:str|None, background=False): return f"\u001b[{10*background+60*(color.upper() == color)+30+['black', 'red', 'green', 'yellow', 'blue', 'magenta', 'cyan', 'white'].index(color.lower())}m{st}\u001b[0m" if color is not None else st  # replace the termcolor library with one line  # noqa: E501
+def colored(st, color:str|None, background=False): # replace the termcolor library
+  colors = ['black', 'red', 'green', 'yellow', 'blue', 'magenta', 'cyan', 'white']
+  return f"\u001b[{10*background+60*(color.upper() == color)+30+colors.index(color.lower())}m{st}\u001b[0m" if color is not None else st
 def colorize_float(x: float): return colored(f"{x:7.2f}x", 'green' if x < 0.75 else 'red' if x > 1.15 else 'yellow')
 def time_to_str(t:float, w=8) -> str: return next((f"{t * d:{w}.2f}{pr}" for d,pr in [(1, "s "),(1e3, "ms")] if t > 10/d), f"{t * 1e6:{w}.2f}us")
 def ansistrip(s:str): return re.sub('\x1b\\[(K|.*?m)', '', s)
@@ -34,17 +37,18 @@ def ansilen(s:str): return len(ansistrip(s))
 def make_tuple(x:int|Sequence[int], cnt:int) -> tuple[int, ...]: return (x,)*cnt if isinstance(x, int) else tuple(x)
 def flatten(l:Iterable[Iterable[T]]): return [item for sublist in l for item in sublist]
 def fully_flatten(l):
-  if hasattr(l, "__len__") and hasattr(l, "__getitem__") and not isinstance(l, str):
-    if hasattr(l, "shape") and l.shape == (): return [l[()]]
-    flattened = []
-    for li in l: flattened.extend(fully_flatten(li))
-    return flattened
-  return [l]
+  if not (hasattr(l, "__len__") and hasattr(l, "__getitem__")) or isinstance(l, str): return [l]
+  return [l[()]] if hasattr(l, "shape") and l.shape == () else [x for li in l for x in fully_flatten(li)]
 def fromimport(mod, frm): return getattr(__import__(mod, fromlist=[frm]), frm)
-def strip_parens(fst:str): return fst[1:-1] if fst[0] == '(' and fst[-1] == ')' and fst[1:-1].find('(') <= fst[1:-1].find(')') else fst
-def ceildiv(num, amt): return int(ret) if isinstance((ret:=-(num//-amt)), float) else ret
+def _is_balanced(s:str) -> bool: return (d := 0, all((d := d + (c == '(') - (c == ')')) >= 0 for c in s))[1] and d == 0
+def strip_parens(fst:str) -> str: return fst[1:-1] if fst[:1]=='(' and fst[-1:]==')' and _is_balanced(fst[1:-1]) else fst
+def ceildiv(num, amt):
+  # use (num + amt - 1) // amt when num is a UOp and non-negative to avoid C/Python division mismatch
+  if hasattr(num, 'vmin') and num.vmin >= 0 and (amt > 0 if isinstance(amt, int) else amt.vmin > 0): return (num + amt - 1) // amt
+  return int(ret) if isinstance((ret:=-(num//-amt)), float) else ret
 def round_up(num:int, amt:int) -> int: return (num+amt-1)//amt * amt
 def round_down(num:int, amt:int) -> int: return -round_up(-num, amt)
+def next_power2(x): return 1 if x == 0 else 1 << (x - 1).bit_length()
 # cstyle div and mod
 def cdiv(x:int, y:int) -> int: return abs(x)//abs(y)*(1,-1)[x*y<0] if y != 0 else 0
 def cmod(x:int, y:int) -> int: return x-cdiv(x,y)*y
@@ -81,6 +85,27 @@ def word_wrap(x, wrap=80):
   i = 0
   while len(ansistrip(x[:i])) < wrap and i < len(x): i += 1
   return x[:i] + "\n" + word_wrap(x[i:], wrap)
+def pad_bytes(b:bytes, align:int) -> bytes: return b + b'\x00' * ((align - (len(b) % align)) % align)
+
+# NOTE: you must create the exception inside the function where it's raised or you will get a GC cycle!
+def panic(e:type[Exception]|None=None, *arg): raise e(*arg) if e is not None else RuntimeError("PANIC!")
+
+@functools.cache
+def canonicalize_strides(shape:tuple[T, ...], strides:tuple[T, ...]) -> tuple[T, ...]:
+  return tuple(cast(T, 0) if s == 1 else st for s, st in zip(shape, strides))
+
+@functools.cache
+def strides_for_shape(shape:tuple[T, ...]) -> tuple[T, ...]:
+  if not shape: return ()
+  strides = tuple(itertools.accumulate(reversed(shape[1:]), operator.mul, initial=1))[::-1]
+  return canonicalize_strides(shape, strides)
+
+# returns the axes to create new_shape if new_shape can be created by combining axis from old_shape
+def get_contraction(old_shape:tuple[T, ...], new_shape:tuple[T, ...]) -> list[list[int]]|None: # T is sint
+  acc_old, acc_new = list(itertools.accumulate(old_shape, operator.mul)), list(itertools.accumulate(new_shape, operator.mul))
+  try: split = [acc_old.index(acc)+1 if acc != 1 else 0 for acc in acc_new]
+  except ValueError: return None
+  return [list(range(st,ed)) for st,ed in zip([0]+split[:-1], split[:-1]+[len(old_shape)])]
 
 def suppress_finalizing(func):
   def wrapper(*args, **kwargs):
@@ -89,66 +114,105 @@ def suppress_finalizing(func):
       if not getattr(sys, 'is_finalizing', lambda: True)(): raise # re-raise if not finalizing
   return wrapper
 
-def unwrap_class_type(cls_t:T): return cls_t.func if isinstance(cls_t, functools.partial) else cls_t
+def select_first_inited(candidates:Sequence[Callable[...,T]|Sequence[Callable[...,T]|None]], err_msg:str, cache:dict|None=None):
+  excs = []
+  for typ in candidates:
+    if cache is not None and typ in cache: return cache[typ]
+    try:
+      x = tuple([cast(Callable, t)() if t is not None else None for t in typ]) if isinstance(typ, Sequence) else cast(Callable, typ)()
+      if cache is not None: cache[typ] = x
+      return x
+    except Exception as e: excs.append(e)
+  raise ExceptionGroup(err_msg, excs)
+
+def unwrap_class_type(cls_t): return cls_t.func if isinstance(cls_t, functools.partial) else cls_t
 
 def pluralize(st:str, cnt:int): return f"{cnt} {st}"+('' if cnt == 1 else 's')
-
-class LazySeq(Generic[T]): # NOTE: Mapping requires __iter__ and __len__, Sequence requires supporting __len__ and slicing in __getitem__
-  def __init__(self, gen:Callable[[int], T]): self.gen = gen
-  def __getitem__(self, idx:int) -> T: return self.gen(idx)
 
 # for length N coefficients `p`, returns p[0] * x**(N-1) + p[1] * x**(N-2) + ... + p[-2] * x + p[-1]
 def polyN(x:T, p:list[float]) -> T: return functools.reduce(lambda acc,c: acc*x+c, p, 0.0)  # type: ignore
 
 @functools.cache
 def to_function_name(s:str): return ''.join([c if c in (string.ascii_letters+string.digits+'_') else f'{ord(c):02X}' for c in ansistrip(s)])
+@overload
+def getenv(key:str) -> int: ...
+@overload
+def getenv(key:str, default:T) -> T: ...
 @functools.cache
-def getenv(key:str, default=0): return type(default)(os.getenv(key, default))
+def getenv(key:str, default:Any=0): return type(default)(os.getenv(key, default))
+
 def temp(x:str, append_user:bool=False) -> str:
   return (pathlib.Path(tempfile.gettempdir()) / (f"{x}.{getpass.getuser()}" if append_user else x)).as_posix()
+
+def stderr_log(msg:str): print(msg, end='', file=sys.stderr, flush=True)
 
 class Context(contextlib.ContextDecorator):
   def __init__(self, **kwargs): self.kwargs = kwargs
   def __enter__(self):
-    self.old_context:dict[str, int] = {k:v.value for k,v in ContextVar._cache.items()}
+    self.old_context:dict[str, Any] = {k: ContextVar._cache[k].value for k in self.kwargs}
     for k,v in self.kwargs.items(): ContextVar._cache[k].value = v
   def __exit__(self, *args):
     for k,v in self.old_context.items(): ContextVar._cache[k].value = v
 
-class ContextVar:
+class ContextVar(Generic[T]):
   _cache: ClassVar[dict[str, ContextVar]] = {}
-  value: int
+  value: T
   key: str
-  def __init__(self, key, default_value):
+  def __init__(self, key: str, default_value: T):
     if key in ContextVar._cache: raise RuntimeError(f"attempt to recreate ContextVar {key}")
     ContextVar._cache[key] = self
     self.value, self.key = getenv(key, default_value), key
   def __bool__(self): return bool(self.value)
+  def __eq__(self, x): return self.value == x
   def __ge__(self, x): return self.value >= x
   def __gt__(self, x): return self.value > x
   def __lt__(self, x): return self.value < x
+  def tolist(self, obj=None):
+    assert isinstance(self.value, str)
+    return [getattr(obj, x) if obj else x for x in self.value.split(',') if x]
 
 DEBUG, IMAGE, BEAM, NOOPT = ContextVar("DEBUG", 0), ContextVar("IMAGE", 0), ContextVar("BEAM", 0), ContextVar("NOOPT", 0)
 JIT, JIT_BATCH_SIZE = ContextVar("JIT", 2 if OSX and ARCH_X86 else 1), ContextVar("JIT_BATCH_SIZE", 32)
 WINO, CAPTURING, TRACEMETA = ContextVar("WINO", 0), ContextVar("CAPTURING", 1), ContextVar("TRACEMETA", 1)
 USE_TC, TC_SELECT, TC_OPT, AMX = ContextVar("TC", 1), ContextVar("TC_SELECT", -1), ContextVar("TC_OPT", 0), ContextVar("AMX", 0)
 TRANSCENDENTAL, NOLOCALS = ContextVar("TRANSCENDENTAL", 1), ContextVar("NOLOCALS", 0)
-SPLIT_REDUCEOP, NO_MEMORY_PLANNER, RING = ContextVar("SPLIT_REDUCEOP", 1), ContextVar("NO_MEMORY_PLANNER", 0), ContextVar("RING", 1)
-PICKLE_BUFFERS, LRU = ContextVar("PICKLE_BUFFERS", 1), ContextVar("LRU", 1)
+SPLIT_REDUCEOP, NO_MEMORY_PLANNER, LRU = ContextVar("SPLIT_REDUCEOP", 1), ContextVar("NO_MEMORY_PLANNER", 0), ContextVar("LRU", 1)
+RING, ALL2ALL = ContextVar("RING", 1), ContextVar("ALL2ALL", 0)
 CACHELEVEL, IGNORE_BEAM_CACHE, DEVECTORIZE = ContextVar("CACHELEVEL", 2), ContextVar("IGNORE_BEAM_CACHE", 0), ContextVar("DEVECTORIZE", 1)
-DISABLE_COMPILER_CACHE, BLOCK_REORDER = ContextVar("DISABLE_COMPILER_CACHE", 0), ContextVar("BLOCK_REORDER", 1)
-DONT_REALIZE_EXPAND, DONT_GROUP_REDUCES = ContextVar("DONT_REALIZE_EXPAND", 0), ContextVar("DONT_GROUP_REDUCES", 0)
-QUANTIZE, VALIDATE_WITH_CPU, DISABLE_FAST_IDIV = ContextVar("QUANTIZE", 0), ContextVar("VALIDATE_WITH_CPU", 0), ContextVar("DISABLE_FAST_IDIV", 0)
+VALIDATE_WITH_CPU, DISABLE_FAST_IDIV = ContextVar("VALIDATE_WITH_CPU", 0), ContextVar("DISABLE_FAST_IDIV", 0)
 CORRECT_DIVMOD_FOLDING, FUSE_OPTIM = ContextVar("CORRECT_DIVMOD_FOLDING", 0), ContextVar("FUSE_OPTIM", 0)
 ALLOW_DEVICE_USAGE, MAX_BUFFER_SIZE = ContextVar("ALLOW_DEVICE_USAGE", 1), ContextVar("MAX_BUFFER_SIZE", 0)
-RANGEIFY, FUSE_ATTENTION = ContextVar("RANGEIFY", 1), ContextVar("FUSE_ATTENTION", 0)
-EMULATE = ContextVar("EMULATE", "")
-CPU_COUNT = ContextVar("CPU_COUNT", max(1, (os.cpu_count() or 1) // (4 if ARCH_X86 else 2))) # take 1/2 of the cores, accounting HT
-CPU_LLVM, AMD_LLVM = ContextVar("CPU_LLVM", 0), ContextVar("AMD_LLVM", 1)
-VIZ = PROFILE = ContextVar("VIZ", 0)
-SPEC = ContextVar("SPEC", 0)
+MAX_KERNEL_BUFFERS = ContextVar("MAX_KERNEL_BUFFERS", 0)
+EMULATE, EMULATED_DTYPES = ContextVar("EMULATE", ""), ContextVar("EMULATED_DTYPES", "")
+CAPTURE_PROCESS_REPLAY = ContextVar("CAPTURE_PROCESS_REPLAY", 0)
+CPU_COUNT = ContextVar("CPU_COUNT", max(1, len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else (os.cpu_count() or 1)))
+# Compilers
+CPU_CC, CPU_LLVM, CPU_LVP = ContextVar("CPU_CC", ""), ContextVar("CPU_LLVM", 0), ContextVar("CPU_LVP", 0)
+NV_CC, NV_PTX, NV_NAK, NV_NVCC = ContextVar("NV_CC", ""), ContextVar("NV_PTX", 0), ContextVar("NV_NAK", 0), ContextVar("NV_NVCC", 0)
+CUDA_CC, CUDA_PTX, CUDA_NVCC = ContextVar("CUDA_CC", ""), ContextVar("CUDA_PTX", 0), ContextVar("CUDA_NVCC", 0)
+NULL_IR3, NULL_NAK, NULL_ALLOW_COPYOUT = ContextVar("NULL_IR3", 0), ContextVar("NULL_NAK", 0), ContextVar("NULL_ALLOW_COPYOUT", 0)
+AMD_CC, AMD_LLVM, AMD_HIPCC  = ContextVar("AMD_CC", ""), ContextVar("AMD_LLVM", 0), ContextVar("AMD_HIPCC", 0)
+QCOM_CC, QCOM_IR3 = ContextVar("QCOM_CC", ""), ContextVar("QCOM_IR3", 0)
+# VIZ implies PROFILE, but you can run PROFILE without VIZ
+VIZ = ContextVar("VIZ", 0)
+PROFILE = ContextVar("PROFILE", abs(VIZ.value))
+SPEC = ContextVar("SPEC", 1)
 # TODO: disable by default due to speed
-IGNORE_OOB = ContextVar("IGNORE_OOB", 1)
+CHECK_OOB = ContextVar("CHECK_OOB", 0)
+PCONTIG = ContextVar("PCONTIG", 0)  # partial contiguous in rangeify
+DEBUG_RANGEIFY = ContextVar("DEBUG_RANGEIFY", 0)
+# set to 1, this uses tuplize in the linearizer sort order
+TUPLE_ORDER = ContextVar("TUPLE_ORDER", 1)
+# set to 0 to disable the compiler cache
+CCACHE = ContextVar("CCACHE", 1)
+# allow tf32 to be used on NVIDIA GPUs
+ALLOW_TF32 = ContextVar("ALLOW_TF32", 0)
+# set to 0 to disable the scheduler cache
+SCACHE = ContextVar("SCACHE", 1)
+# allow use of atomics for embedding backward
+USE_ATOMICS = ContextVar("USE_ATOMICS", 0)
+# allow use of assembly for gemm
+ASM_GEMM = ContextVar("ASM_GEMM", 0)
 
 @dataclass(frozen=True)
 class Metadata:
@@ -156,7 +220,6 @@ class Metadata:
   caller: str
   backward: bool = False
   def __hash__(self): return hash(self.name)
-  def __repr__(self): return str(self) + (f" - {self.caller}" if self.caller else "")
   def __str__(self): return self.name + (" bw" if self.backward else "")
 
 # **************** global state Counters ****************
@@ -202,25 +265,43 @@ class Profiling(contextlib.ContextDecorator):
 
 def perf_counter_us() -> decimal.Decimal: return decimal.Decimal(time.perf_counter_ns())/1000
 
+@functools.cache
+def lines(fn) -> list[str]:
+  try:
+    with open(fn, encoding="utf-8") as f: return f.readlines()
+  except (FileNotFoundError, OSError): return []
+
+def printable(loc:tuple[str, int]) -> str:
+  try: return lines(loc[0])[loc[1]-1].strip()
+  except IndexError: return "<missing>"
+
+def get_stacktrace(frm, max_frames=30) -> tuple[tuple, ...]:
+  ret:list[tuple] = []
+  for i in range(max_frames):
+    if (frm:=frm.f_back) is None: break
+    ret.append(((fc:=frm.f_code).co_filename, frm.f_lineno, fc.co_name, printable((fc.co_filename, frm.f_lineno))))
+  return tuple(ret)
+
 @dataclass(frozen=True)
 class TracingKey:
   display_name:str                       # display name of this trace event
   keys:tuple[Any, ...]=()                # optional keys to search for related traces
   ret:Any=None
+  tb:tuple[tuple, ...]|None=field(default_factory=lambda: get_stacktrace(sys._getframe(1)) if VIZ else None)
 
 class ProfileEvent: pass
 
 @dataclass
-class ProfileRangeEvent(ProfileEvent): device:str; name:str|TracingKey; st:decimal.Decimal; en:decimal.Decimal|None=None; is_copy:bool=False # noqa: E702
+class ProfileRangeEvent(ProfileEvent): device:str; name:str|TracingKey; st:decimal.Decimal; en:decimal.Decimal|None=None # noqa: E702
 
 @dataclass(frozen=True)
-class ProfilePointEvent(ProfileEvent): device:str; name:str; key:Any; arg:dict=field(default_factory=dict); \
-    ts:decimal.Decimal=field(default_factory=perf_counter_us) # noqa: E702
+class ProfilePointEvent(ProfileEvent):
+  device:str; name:str; key:Any; arg:dict=field(default_factory=dict); ts:decimal.Decimal=field(default_factory=perf_counter_us) # noqa: E702
 
 cpu_events:list[ProfileEvent] = []
 @contextlib.contextmanager
-def cpu_profile(name:str|TracingKey, device="CPU", is_copy=False, display=True) -> Generator[ProfileRangeEvent, None, None]:
-  res = ProfileRangeEvent(device, name, perf_counter_us(), is_copy=is_copy)
+def cpu_profile(name:str|TracingKey, device="TINY", display=True) -> Generator[ProfileRangeEvent, None, None]:
+  res = ProfileRangeEvent(device, name, perf_counter_us())
   try: yield res
   finally:
     res.en = perf_counter_us()
@@ -228,6 +309,15 @@ def cpu_profile(name:str|TracingKey, device="CPU", is_copy=False, display=True) 
 
 def profile_marker(name:str, color="gray") -> None:
   cpu_events.append(ProfilePointEvent("TINY", "marker", None, {"name":name, "color":color}))
+
+if getenv("DEBUG_GC"):
+  gc_start: decimal.Decimal = perf_counter_us()
+  def my_gc_callback(phase, info):
+    global gc_start
+    if phase == 'start': gc_start = perf_counter_us()
+    elif phase == "stop":
+      cpu_events.append(ProfileRangeEvent("GC", f"collected: {info['collected']} (gen {info['generation']})", gc_start, perf_counter_us()))
+  if PROFILE: gc.callbacks.append(my_gc_callback)
 
 # *** universal database cache ***
 
@@ -274,7 +364,8 @@ def diskcache_put(table:str, key:dict|str|int, val:Any, prepickled=False):
     ltypes = ', '.join(f"{k} {TYPES[type(key[k])]}" for k in key.keys())
     cur.execute(f"CREATE TABLE IF NOT EXISTS '{table}_{VERSION}' ({ltypes}, val blob, PRIMARY KEY ({', '.join(key.keys())}))")
     _db_tables.add(table)
-  cur.execute(f"REPLACE INTO '{table}_{VERSION}' ({', '.join(key.keys())}, val) VALUES ({', '.join(['?']*len(key))}, ?)", tuple(key.values()) + (val if prepickled else pickle.dumps(val), ))  # noqa: E501
+  cur.execute(f"REPLACE INTO '{table}_{VERSION}' ({', '.join(key.keys())}, val) VALUES ({', '.join(['?']*len(key))}, ?)",
+              tuple(key.values()) + (val if prepickled else pickle.dumps(val),))
   conn.commit()
   cur.close()
   return val
@@ -300,14 +391,17 @@ def _ensure_downloads_dir() -> pathlib.Path:
   return pathlib.Path(cache_dir) / "downloads"
 
 def fetch(url:str, name:pathlib.Path|str|None=None, subdir:str|None=None, gunzip:bool=False,
-          allow_caching=not getenv("DISABLE_HTTP_CACHE")) -> pathlib.Path:
+          allow_caching=not getenv("DISABLE_HTTP_CACHE"), headers:dict[str, str]={}) -> pathlib.Path:
+  import urllib.request
   if url.startswith(("/", ".")): return pathlib.Path(url)
   if name is not None and (isinstance(name, pathlib.Path) or '/' in name): fp = pathlib.Path(name)
-  else: fp = _ensure_downloads_dir() / (subdir or "") / ((name or hashlib.md5(url.encode('utf-8')).hexdigest()) + (".gunzip" if gunzip else ""))
+  else:
+    hh = "_"+hashlib.md5(("\n".join(f"{k.strip()}:{v.strip()}" for k,v in sorted(headers.items()))).encode("utf-8")).hexdigest() if headers else ""
+    fp = _ensure_downloads_dir() / (subdir or "") / ((name or hashlib.md5(url.encode('utf-8')).hexdigest()) + hh + (".gunzip" if gunzip else ""))
   if not fp.is_file() or not allow_caching:
     (_dir := fp.parent).mkdir(parents=True, exist_ok=True)
-    with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "tinygrad 0.11.0"}), timeout=10) as r:
-      assert r.status == 200, r.status
+    with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "tinygrad 0.12.0", **headers}), timeout=10) as r:
+      assert r.status in {200, 206}, r.status
       length = int(r.headers.get('content-length', 0)) if not gunzip else None
       readfile = gzip.GzipFile(fileobj=r) if gunzip else r
       progress_bar:tqdm = tqdm(total=length, unit='B', unit_scale=True, desc=f"{url}", disable=CI)
@@ -321,10 +415,16 @@ def fetch(url:str, name:pathlib.Path|str|None=None, subdir:str|None=None, gunzip
 
 # *** Exec helpers
 
+def system(cmd:str, **kwargs) -> str:
+  st = time.perf_counter()
+  ret = subprocess.check_output(cmd.split(), **kwargs).decode().strip()
+  if DEBUG >= 1: print(f"system: '{cmd}' returned {len(ret)} bytes in {(time.perf_counter() - st)*1e3:.2f} ms")
+  return ret
+
 def cpu_objdump(lib, objdump_tool='objdump'):
   with tempfile.NamedTemporaryFile(delete=True) as f:
     pathlib.Path(f.name).write_bytes(lib)
-    print(subprocess.check_output([objdump_tool, '-d', f.name]).decode('utf-8'))
+    print(system(f"{objdump_tool} -d {f.name}"))
 
 def capstone_flatdump(lib: bytes):
   try: import capstone
@@ -340,10 +440,10 @@ def capstone_flatdump(lib: bytes):
     print(f"{instr.address:#08x}: {instr.mnemonic}\t{instr.op_str}")
   sys.stdout.flush()
 
-def wait_cond(cb, value=True, timeout_ms=10000, msg="") -> bool:
+def wait_cond(cb, *args, value=True, timeout_ms=10000, msg="") -> bool:
   start_time = int(time.perf_counter() * 1000)
   while int(time.perf_counter() * 1000) - start_time < timeout_ms:
-    if (val:=cb()) == value: return val
+    if (val:=cb(*args)) == value: return val
   raise TimeoutError(f"{msg}. Timed out after {timeout_ms} ms, condition not met: {val} != {value}")
 
 # *** ctypes helpers
@@ -355,12 +455,6 @@ def to_mv(ptr:int, sz:int) -> memoryview: return memoryview((ctypes.c_uint8 * sz
 def mv_address(mv): return ctypes.addressof(ctypes.c_char.from_buffer(mv))
 def to_char_p_p(options: list[bytes], to_type=ctypes.c_char):
   return (ctypes.POINTER(to_type) * len(options))(*[ctypes.cast(ctypes.create_string_buffer(o), ctypes.POINTER(to_type)) for o in options])
-@functools.cache
-def init_c_struct_t(fields: tuple[tuple[str, type[ctypes._SimpleCData]], ...]):
-  class CStruct(ctypes.Structure):
-    _pack_, _fields_ = 1, fields
-  return CStruct
-def init_c_var(ctypes_var, creat_cb): return (creat_cb(ctypes_var), ctypes_var)[1]
 def flat_mv(mv:memoryview): return mv if len(mv) == 0 else mv.cast("B", shape=(mv.nbytes,))
 
 # *** tqdm
@@ -388,7 +482,9 @@ class tqdm(Generic[T]):
     if elapsed and self.i/elapsed > self.rate and self.i: self.skip = max(int(self.i/elapsed)//self.rate,1)
     def HMS(t): return ':'.join(f'{x:02d}' if i else str(x) for i,x in enumerate([int(t)//3600,int(t)%3600//60,int(t)%60]) if i or x)
     def SI(x):
-      return (f"{x/1000**int(g:=round(math.log(x,1000),6)):.{int(3-3*math.fmod(g,1))}f}"[:4].rstrip('.')+' kMGTPEZY'[int(g)].strip()) if x else '0.00'
+      if not x: return '0.00'
+      v = f"{x/1000**int(g:=round(math.log(x,1000),6)):.{int(3-3*math.fmod(g,1))}f}"[:4].rstrip('.')
+      return (f"{x/1000**(int(g)+1):.3f}"[:4].rstrip('.')+' kMGTPEZY'[int(g)+1]) if v == "1000" else v+' kMGTPEZY'[int(g)].strip()
     prog_text = f'{SI(self.n)}{f"/{SI(self.t)}" if self.t else self.unit}' if self.unit_scale else f'{self.n}{f"/{self.t}" if self.t else self.unit}'
     est_text = f'<{HMS(elapsed/prog-elapsed) if self.n else "?"}' if self.t else ''
     it_text = (SI(self.n/elapsed) if self.unit_scale else f"{self.n/elapsed:5.2f}") if self.n else "?"
@@ -399,8 +495,14 @@ class tqdm(Generic[T]):
   @classmethod
   def write(cls, s:str): print(f"\r\033[K{s}", flush=True, file=sys.stderr)
 
-class trange(tqdm):
-  def __init__(self, n:int, **kwargs): super().__init__(iterable=range(n), total=n, **kwargs)
+def trange(n:int, **kwargs) -> tqdm[int]: return tqdm(range(n), total=n, **kwargs)
+
+class disable_gc(contextlib.ContextDecorator):
+  def __enter__(self):
+    self._was_enabled = gc.isenabled()
+    if self._was_enabled: gc.disable()
+  def __exit__(self, *exc):
+    if self._was_enabled: gc.enable()
 
 # *** universal support for code object pickling
 
@@ -412,3 +514,11 @@ copyreg.pickle(types.CodeType, _serialize_code)
 
 def _serialize_module(module:types.ModuleType): return importlib.import_module, (module.__name__,)
 copyreg.pickle(types.ModuleType, _serialize_module)
+
+class count:
+  def __init__(self, start:int=0, step:int=1):
+    self.n, self.step = start, step
+  def __next__(self) -> int:
+    cur = self.n
+    self.n += self.step
+    return cur

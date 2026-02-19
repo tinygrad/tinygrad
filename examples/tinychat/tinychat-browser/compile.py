@@ -48,7 +48,7 @@ def prepare_browser_chunks(model):
         weight_metadata = metadata.get(name, default)
         weight_metadata["parts"][part_num] = {"file": i, "file_start_pos": cursor, "size": size}
         metadata[name] = weight_metadata
-        data = bytes(state_dict[name].uop.base.realized.as_buffer())
+        data = bytes(state_dict[name].uop.base.realized.as_memoryview())
         data = data if not offsets else data[offsets[0]:offsets[1]]
         writer.write(data)
         cursor += size

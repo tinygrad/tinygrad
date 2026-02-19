@@ -1,5 +1,5 @@
 import unittest, functools
-from tinygrad import Tensor
+from tinygrad import Tensor, Context
 import numpy as np
 
 def orthogonality_helper(A:Tensor, tolerance=1e-5):
@@ -26,9 +26,8 @@ class TestLinAlg(unittest.TestCase):
       orthogonality_helper(V)
       reconstruction_helper([U,s_diag,V],a)
 
-  def test_svd_nonfull(self):
-    sizes = [(2,2),(5,3),(3,5),(2,2,2,2,3)]
-    for size in sizes:
+  def _test_svd_nonfull(self, size):
+    with Context(CHECK_OOB=0):  # sometimes this is slow in CI
       a = Tensor.randn(size).realize()
       U,S,V = a.svd(full_matrices=False)
       b_shape,m,n = size[0:-2],size[-2],size[-1]
@@ -38,6 +37,12 @@ class TestLinAlg(unittest.TestCase):
       if (m < n): orthogonality_helper(U),orthogonality_helper(V)
       else: orthogonality_helper(U.transpose(-2,-1)),orthogonality_helper(V.transpose(-2,-1))
       reconstruction_helper([U,s_diag,V],a)
+
+  # faster for parallel pytest
+  def test_svd_nonfull_2_2(self): self._test_svd_nonfull((2,2))
+  def test_svd_nonfull_5_3(self): self._test_svd_nonfull((5,3))
+  def test_svd_nonfull_3_5(self): self._test_svd_nonfull((3,5))
+  def test_svd_nonfull_2_2_2_2_3(self): self._test_svd_nonfull((2,2,2,2,3))
 
   @unittest.skip("very big. recommend wrapping with TinyJit around inner function")
   def test_svd_large(self):
@@ -59,6 +64,30 @@ class TestLinAlg(unittest.TestCase):
       Q,R = a.qr()
       orthogonality_helper(Q)
       reconstruction_helper([Q,R],a)
+
+  def test_qr_zero_column(self):
+    a = Tensor([[0.0, 1.0], [0.0, 2.0]]).realize()
+    Q,R = a.qr()
+    assert not np.isnan(Q.numpy()).any()
+    assert not np.isnan(R.numpy()).any()
+    orthogonality_helper(Q)
+    reconstruction_helper([Q,R], a)
+
+  def test_svd_identity(self):
+    for a in (Tensor.eye(2), Tensor.zeros(2, 2)):
+      a = a.realize()
+      U,S,V = a.svd()
+      assert not np.isnan(U.numpy()).any()
+      assert not np.isnan(S.numpy()).any()
+      assert not np.isnan(V.numpy()).any()
+      s_diag = (S.unsqueeze(-2) * Tensor.eye(2))
+      reconstruction_helper([U, s_diag, V], a)
+
+  def test_svd_rank1(self):
+    a = Tensor([[1.0, 1.0], [2.0, 2.0]]).realize()
+    U, S, V = a.svd()
+    np.testing.assert_allclose(S.numpy(), [np.sqrt(10), 0.0], atol=1e-4, rtol=1e-4)
+    reconstruction_helper([U, S.unsqueeze(-2) * Tensor.eye(2), V], a)
 
   def test_newton_schulz(self):
     coefficients = [(2, -1.5, 0.5), (2.0, -1.4, 0.2, 0.2)]#these params map to the sign function

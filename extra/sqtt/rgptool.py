@@ -4,7 +4,7 @@ import argparse, ctypes, struct, hashlib, pickle, code, typing, functools
 import tinygrad.runtime.autogen.sqtt as sqtt
 from tinygrad.device import ProfileEvent, ProfileDeviceEvent, ProfileProgramEvent
 from tinygrad.runtime.ops_amd import ProfileSQTTEvent
-from tinygrad.helpers import round_up, flatten, all_same
+from tinygrad.helpers import round_up, flatten, all_same, temp
 from dataclasses import dataclass
 
 CHUNK_CLASSES = {
@@ -145,7 +145,8 @@ class RGP:
   @staticmethod
   def from_profile(profile_pickled, device:str|None=None):
     profile: list[ProfileEvent] = pickle.loads(profile_pickled)
-    device_events = {x.device:x for x in profile if isinstance(x, ProfileDeviceEvent) and x.device.startswith('AMD')}
+    def _is_base_dev(d): return all(p.isdigit() for p in d.split(":")[1:])
+    device_events = {x.device:x for x in profile if isinstance(x, ProfileDeviceEvent) and x.device.startswith('AMD') and _is_base_dev(x.device)}
     if device is None:
       if len(device_events) == 0: raise RuntimeError('No supported devices found in profile')
       if len(device_events) > 1: raise RuntimeError(f"More than one supported device found, select which one to export: {', '.join(device_events.keys())}")
@@ -154,7 +155,26 @@ class RGP:
       if device not in device_events: raise RuntimeError(f"Device {device} not found in profile, devices in profile: {', '.join(device_events.keys())} ")
       device_event = device_events[device]
     sqtt_events = [x for x in profile if isinstance(x, ProfileSQTTEvent) and x.device == device_event.device]
+    device_props = device_event.props
+    # merge events per SE
+    merged_sqtt_events:dict[int, ProfileSQTTEvent] = {}
+    for ev in sqtt_events:
+      if ev.se not in merged_sqtt_events: merged_sqtt_events[ev.se] = ev
+      else:
+        merged_sqtt_events[ev.se] = ProfileSQTTEvent(
+          device=ev.device,
+          kern=ev.kern,
+          se=ev.se,
+          itrace=merged_sqtt_events[ev.se].itrace or ev.itrace,
+          blob=merged_sqtt_events[ev.se].blob + ev.blob,
+          exec_tag=0,
+        )
+    sqtt_events = list(merged_sqtt_events.values())
+
     if len(sqtt_events) == 0: raise RuntimeError(f"Device {device_event.device} doesn't contain SQTT data")
+    gfx_ver = device_props['gfx_target_version'] // 10000
+    gfx_iplvl = getattr(sqtt, f"SQTT_GFXIP_LEVEL_GFXIP_{device_props['gfx_target_version']//10000}_{(device_props['gfx_target_version']//100)%100}",
+                        getattr(sqtt, f"SQTT_GFXIP_LEVEL_GFXIP_{device_props['gfx_target_version']//10000}", None))
     sqtt_itrace_enabled = any([event.itrace for event in sqtt_events])
     sqtt_itrace_masked = not all_same([event.itrace for event in sqtt_events])
     sqtt_itrace_se_mask = functools.reduce(lambda a,b: a|b, [int(event.itrace) << event.se for event in sqtt_events], 0) if sqtt_itrace_masked else 0
@@ -167,9 +187,7 @@ class RGP:
       magic_number=sqtt.SQTT_FILE_MAGIC_NUMBER,
       version_major=sqtt.SQTT_FILE_VERSION_MAJOR,
       version_minor=sqtt.SQTT_FILE_VERSION_MINOR,
-      flags=sqtt.struct_sqtt_file_header_flags(
-        _0=sqtt.union_sqtt_file_header_flags_0(value=1),
-      ),
+      flags=sqtt.struct_sqtt_file_header_flags(value=1,),
       chunk_offset=ctypes.sizeof(sqtt.struct_sqtt_file_header),
     )
     chunks = [
@@ -192,21 +210,21 @@ class RGP:
         flags=0,
         trace_shader_core_clock=0x93f05080,
         trace_memory_clock=0x4a723a40,
-        device_id=0x744c,
+        device_id={110000: 0x744c, 110003: 0x7480, 120001: 0x7550, 120000: 0x7550}[device_props['gfx_target_version']],
         device_revision_id=0xc8,
         vgprs_per_simd=1536,
         sgprs_per_simd=128*16,
-        shader_engines=6,
-        compute_unit_per_shader_engine=16,
-        simd_per_compute_unit=2,
-        wavefronts_per_simd=16,
+        shader_engines=device_props['array_count'] // device_props['simd_arrays_per_engine'],
+        compute_unit_per_shader_engine=device_props['simd_count'] // device_props['simd_per_cu'] // (device_props['array_count'] // device_props['simd_arrays_per_engine']),
+        simd_per_compute_unit=device_props['simd_per_cu'],
+        wavefronts_per_simd=device_props['max_waves_per_simd'],
         minimum_vgpr_alloc=4,
         vgpr_alloc_granularity=8,
         minimum_sgpr_alloc=128,
         sgpr_alloc_granularity=128,
         hardware_contexts=8,
         gpu_type=sqtt.SQTT_GPU_TYPE_DISCRETE,
-        gfxip_level=sqtt.SQTT_GFXIP_LEVEL_GFXIP_11_0,
+        gfxip_level=gfx_iplvl,
         gpu_index=0,
         gds_size=0,
         gds_per_shader_engine=0,
@@ -218,7 +236,7 @@ class RGP:
         vram_bus_width=384, # 384-bit
         l2_cache_size=6 * 1024 * 1024, # 6 MB
         l1_cache_size=32 * 1024, # 32 KB per SIMD (?)
-        lds_size=65536, # 64 KB per CU
+        lds_size=device_props['lds_size_in_kb'] * 1024,
         gpu_name=b'NAVI31',
         alu_per_clock=0,
         texture_per_clock=0,
@@ -247,7 +265,7 @@ class RGP:
         profiling_mode=sqtt.SQTT_PROFILING_MODE_PRESENT,
         instruction_trace_mode=sqtt.SQTT_INSTRUCTION_TRACE_FULL_FRAME if sqtt_itrace_enabled else sqtt.SQTT_INSTRUCTION_TRACE_DISABLED,
         instruction_trace_data=sqtt.union_sqtt_instruction_trace_data(
-          shader_engine_filter=sqtt.struct_sqtt_instruction_trace_data_shader_engine_filter(mask=sqtt_itrace_se_mask),
+          shader_engine_filter=sqtt.union_sqtt_instruction_trace_data_shader_engine_filter(mask=sqtt_itrace_se_mask),
         ),
       )),
       *flatten([(
@@ -257,14 +275,12 @@ class RGP:
             major_version=0, minor_version=2,
           ),
           shader_engine_index=sqtt_event.se,
-          sqtt_version=sqtt.SQTT_VERSION_3_2,
-          _0=sqtt.union_sqtt_file_chunk_sqtt_desc_0(
-            v1=sqtt.struct_sqtt_file_chunk_sqtt_desc_0_v1(
-              instrumentation_spec_version=1,
-              instrumentation_api_version=0,
-              compute_unit_index=0,
-            )
-          ),
+          sqtt_version={11: sqtt.SQTT_VERSION_3_2, 12: sqtt.SQTT_VERSION_3_3}.get(gfx_ver),
+          v1=sqtt.struct_sqtt_file_chunk_sqtt_desc_v1(
+            instrumentation_spec_version=1,
+            instrumentation_api_version=0,
+            compute_unit_index=0,
+          )
         )),
         RGPChunk(sqtt.struct_sqtt_file_chunk_sqtt_data(
           header=sqtt.struct_sqtt_file_chunk_header(
@@ -306,7 +322,7 @@ class RGP:
 if __name__ == '__main__':
   parser = argparse.ArgumentParser(prog='rgptool', description='A tool to create (from pickled tinygrad profile), inspect and modify Radeon GPU Profiler files')
   parser.add_argument('command')
-  parser.add_argument('input')
+  parser.add_argument('input', nargs='?', default=temp("profile.pkl", append_user=True))
   parser.add_argument('-d', '--device')
   parser.add_argument('-o', '--output')
   args = parser.parse_args()
@@ -328,3 +344,4 @@ if __name__ == '__main__':
 
   if args.output is not None:
     with open(args.output, 'wb+') as fd: fd.write(rgp.to_bytes())
+    print(f"Saved to {args.output}")

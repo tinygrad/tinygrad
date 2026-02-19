@@ -13,8 +13,7 @@ try:
   from tinygrad.engine.realize import get_program
   from tinygrad.uop.ops import UOp, Ops, KernelInfo
   from tinygrad.codegen.opt import Opt
-  from tinygrad.helpers import VERSION, Context, ContextVar, colored, db_connection, getenv, tqdm
-  from tinygrad.device import Device
+  from tinygrad.helpers import VERSION, Context, ContextVar, colored, db_connection, getenv, tqdm, BEAM
 except ImportError as e:
   print(repr(e))
   exit(int(ASSERT_DIFF))
@@ -37,25 +36,27 @@ def trunc_log(x):
 
 # user config
 SKIP_PROCESS_REPLAY = (k:="[skip_process_replay]") in os.getenv("COMMIT_MESSAGE", "") or k in os.getenv("PR_TITLE", "")
+# uncomment this to disable by default
+#SKIP_PROCESS_REPLAY = not ASSERT_DIFF and not ((k:="[p]") in os.getenv("COMMIT_MESSAGE", "") or k in os.getenv("PR_TITLE", ""))
 if REF == "master": SKIP_PROCESS_REPLAY = True
 class ProcessReplayWarning(Warning): pass
 
 # *** replay the function and convert return values to string
 
-def replay_kernelize(ret:dict[UOp, UOp], big_sink:UOp) -> tuple[str, str, tuple[Any, ...]]:
+def replay_get_rangeify_map(ret:dict[UOp, UOp], big_sink:UOp) -> tuple[str, str, tuple[Any, ...]]:
   UOp.unique_num = itertools.count(max([u.arg for u in big_sink.toposort() if u.op is Ops.UNIQUE], default=0)+1)
   new_sink = big_sink.substitute(get_rangeify_map(big_sink))
   def to_str(ret:UOp) -> str:
-    asts = [repr(u.arg.ast) for u in ret.toposort() if u.op is Ops.KERNEL]
+    asts = [repr(u.arg.ast) for u in ret.toposort() if u.op is Ops.CALL]
     return "\n".join([f"{len(asts)} kernels", *asts])
-  return to_str(new_sink), to_str(ret[big_sink]), (big_sink,)
+  return to_str(new_sink), to_str(big_sink.substitute(ret)), (big_sink,)
 
-def replay_get_program(p:ProgramSpec, ast:UOp, renderer:Renderer|None=None, opts:list[Opt]|None=None) -> tuple[str, str, tuple[Any, ...]]:
-  # NOTE: this always uses the opts_to_apply path
-  sink_arg = ast.arg or KernelInfo(opts_to_apply=p.applied_opts)
-  input_ast = ast.replace(arg=replace(sink_arg, name=p.name))
-  # if no renderer was provided, open the device to get it
-  if renderer is None: renderer = Device[p.device].renderer
+def replay_get_program(p:ProgramSpec, ast:UOp, renderer:Renderer, opts:list[Opt]|None=None) -> tuple[str, str, tuple[Any, ...]]:
+  # the ast.arg is non None if we are inside of search.py
+  sink_arg = ast.arg or KernelInfo()
+  if opts is not None: sink_arg = replace(sink_arg, opts_to_apply=tuple(opts))
+  elif BEAM >= 1 and sink_arg.opts_to_apply is None: sink_arg = replace(sink_arg, opts_to_apply=p.applied_opts)
+  input_ast = ast if ast.op is Ops.PROGRAM else ast.replace(arg=replace(sink_arg, name=p.name))
   p2 = get_program(input_ast, renderer=renderer)
   def to_str(ret:ProgramSpec) -> str:
     # PYTHON renderer pickles UOps, first unpickle and decode here
@@ -65,7 +66,10 @@ def replay_get_program(p:ProgramSpec, ast:UOp, renderer:Renderer|None=None, opts
   ast_repr = codecs.decode(str(input_ast), "unicode_escape")
   return to_str(p2), to_str(p), (ast_repr, renderer)
 
-replayers: dict[str, Callable[..., tuple[str, str, tuple[Any, ...]]]] = {"get_kernelize_map":replay_kernelize, "get_program":replay_get_program}
+replayers: dict[str, Callable[..., tuple[str, str, tuple[Any, ...]]]] = {}
+replayers["get_program"] = replay_get_program
+# disable this for speed, does it ever find things?
+#replayers["get_rangeify_map"] = replay_get_rangeify_map
 
 # *** run replayers on captured rows and print diffs
 
@@ -84,7 +88,8 @@ def diff(offset:int, fxns:dict[str, Callable[..., tuple|None]]) -> None:
     name, loc = "", ""
     try:
       name, args, kwargs, ctx_vals, loc, ret = pickle.loads(row[0])
-      ctx_vars = {k:v.value for k,v in ctx_vals.items() if k != "DEBUG" and (var:=ContextVar._cache.get(k)) is not None and var.value != v.value}
+      ctx_vars = {k:v.value for k,v in ctx_vals.items() if k not in ("DEBUG", "CAPTURE_PROCESS_REPLAY")
+                  and (var:=ContextVar._cache.get(k)) is not None and var.value != v.value}
       if (replayer:=fxns.get(name)) is None: continue
       with Context(**ctx_vars):
         if (ret:=replayer(ret, *args, **kwargs)) is None: continue
@@ -114,7 +119,7 @@ def _pmap(fxns:dict[str, Callable]) -> None:
 
   with multiprocessing.get_context("spawn").Pool(multiprocessing.cpu_count()) as pool:
     bar = tqdm(total=row_count)
-    for _ in pool.imap_unordered(functools.partial(diff, fxns=fxns), range(0, row_count, PAGE_SIZE)): bar.update(PAGE_SIZE)
+    for _ in pool.imap_unordered(functools.partial(diff, fxns=fxns), range(0, row_count, s:=min(PAGE_SIZE, row_count))): bar.update(s)
     pool.close()
     pool.join()
     pool.terminate()

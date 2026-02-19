@@ -2,6 +2,7 @@
 <html>
 <head>
   <title>tinygrad viz</title>
+  <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <link rel="icon" href="data:;base64,iVBORw0KGgo=">
   <script src="assets/d3js.org/d3.v7.min.js" charset="utf-8"></script>
@@ -10,7 +11,6 @@
   <script src="assets/cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/highlight.min.js"></script>
   <script src="assets/cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/languages/python.min.js"></script>
   <script src="assets/cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/languages/cpp.min.js"></script>
-  <script src="assets/cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/languages/x86asm.min.js"></script>
   <link rel="stylesheet" href="assets/unpkg.com/@highlightjs/cdn-assets@11.10.0/styles/tokyo-night-dark.min.css" />
   <style>
   * {
@@ -32,35 +32,61 @@
     font-size: 14px;
     overflow: hidden;
     background-color: #08090e;
+    scrollbar-color: #686977 #151720;
   }
+  ::-webkit-scrollbar-track { background: #151720; }
+  ::-webkit-scrollbar-thumb { background: #686977; }
   a {
     color: #4a90e2;
+    text-decoration: underline;
+    cursor: pointer;
+    display: block;
   }
   ul {
     padding: 0;
-    opacity: 0.6;
     white-space: nowrap;
     cursor: pointer;
   }
-  ul.active {
+  ul > p {
+    opacity: 0.6;
+  }
+  ul.active > p {
     opacity: 1;
   }
   ul > ul {
     display: none;
+    margin-left: 6px;
+  }
+  ul.has-children ul {
+    margin-left: calc(6px + 1ch);
+  }
+  ul.has-children > p::before {
+    content:"▸ ";
+  }
+  ul.has-children.expanded > p::before {
+    content:"▾ ";
   }
   ul.expanded > ul {
     display: block;
   }
-  ul.disabled {
+  ul.disabled > p {
     opacity: 0.4;
+  }
+  ul.disabled {
     pointer-events: none;
   }
   label {
     display: inline-flex;
     align-items: center;
     gap: 4px;
+    line-height: 1;
+    user-select: none;
+    cursor: pointer;
   }
-  .graph svg {
+  input {
+    outline: none;
+  }
+  #graph svg {
     width: 100%;
     height: 100%;
   }
@@ -98,14 +124,20 @@
     fill: rgba(26, 27, 38, 0.5);
   }
   .edgePath {
-    stroke: #4a4b57;
     fill: none;
     stroke-width: 1.4px;
   }
-  g.node.highlight rect, .edgePath.highlight, g.port circle {
+  g.label rect.bg {
+    fill: transparent;
+    stroke: none;
+  }
+  g.label rect.bg.highlight {
+    fill: #5f0059;
+  }
+  g.node.highlight rect.node, .edgePath.highlight, g.port circle {
     stroke: #89C9A2;
   }
-  g.highlight.child rect, .edgePath.highlight.child {
+  g.highlight.child rect.node, .edgePath.highlight.child {
     stroke: #C888B0;
   }
   #edge-labels g.port.highlight {
@@ -131,18 +163,18 @@
     position: relative;
     height: 100%;
   }
-  .metadata > * + *, .rewrite-container > * + *, .ctx-list > * + * {
+  .metadata > * + *, .info > * + *, .rewrite-container > * + *, .ctx-list > * + * {
     margin-top: 12px;
   }
-  .ctx-list > ul > * + * {
+  ul > * + *, .args > * + * {
     margin-top: 4px;
   }
-  .graph {
+  #graph {
     position: absolute;
     inset: 0;
     z-index: 1;
   }
-  .profiler, .disasm {
+  #profiler, #custom {
     flex: 1 1 auto;
     min-width: 0;
     width: 100%;
@@ -223,6 +255,9 @@
     max-height: 30vh;
     padding: 8px;
   }
+  pre.full-height code.hljs {
+    max-height: none;
+  }
   #progress-message {
     position: absolute;
     z-index: 2;
@@ -243,12 +278,11 @@
     font-size: 10px;
   }
   #device-list > div {
-    min-height: 32px;
-    width: 132px;
     overflow-x: auto;
     overflow-y: hidden;
     white-space: nowrap;
     display: flex;
+    min-height: 32px;
   }
   #device-list > div:hover {
     background-color: rgba(20, 23, 35, 0.3);
@@ -257,11 +291,15 @@
     height: fit-content;
   }
   .raw-text {
-    padding: 0 8px;
+    padding-left: 15px;
     width: 100%;
     height: 100%;
     max-height: 100vh;
     overflow-x: auto;
+  }
+  .raw-text > pre {
+    display: inline-block;
+    min-width: 100%;
   }
   .raw-text code {
     max-height: none !important;
@@ -281,25 +319,14 @@
   table tr:last-child > td {
      border-bottom: none;
   }
-  tr.main-row:hover {
+  tr.main-row:hover, tr.main-row.expanded, tr.nested-row > td > table, tr.nested-row thead {
     background-color: #2a2d3a;
   }
-  tr.sub-row {
-    max-width: 150px;
-  }
-  tr.main-row > td, tr.sub-row > td {
+  tr.main-row > td {
     padding: 8px 12px;
   }
-  tr.code-row > td:first-child {
+  td.Instruction {
     font-family: monospace;
-  }
-  td.pct-row > div {
-    height: 12px;
-    width: 100%;
-    display: flex;
-  }
-  td.pct-row > div > div {
-    height: 100%;
   }
   thead {
     position: sticky;
@@ -315,14 +342,22 @@
     font-size: 0.95em;
     letter-spacing: 0.03em;
   }
-  .legend {
-    display: flex;
-    align-items: center;
+  tr.nested-row > td {
+    border-bottom: none;
   }
-  .legend > div {
-    width: 0.95em;
-    height: 0.95em;
-    margin-right: 4px;
+  tr.nested-row table tr.main-row:hover {
+    background-color: unset;
+  }
+  tr.main-row.has-children > td:first-child > p {
+    display: inline-block;
+  }
+  tr.main-row.has-children > td:first-child::before {
+    content: "▸ ";
+    width: 1em;
+    margin-left: -0.25em;
+  }
+  tr.main-row.has-children.expanded > td:first-child::before {
+    content: "▾ ";
   }
   </style>
 </head>
@@ -340,9 +375,8 @@
     </div>
     <div id="progress-message"></div>
     <div class="container ctx-list-parent"><div class="ctx-list"></div></div>
-    <div class="view profiler"></div>
-    <div class="view disasm"></div>
-    <div class="view graph">
+    <div class="view" id="profiler"></div>
+    <div class="view" id="graph">
       <svg id="graph-svg" preserveAspectRatio="xMidYMid meet">
         <g id="render">
           <g id="edges"></g>
@@ -356,6 +390,7 @@
         </defs>
       </svg>
     </div>
+    <div class="view" id="custom"></div>
     <div class="container metadata-parent"><div class="metadata"></div></div>
   </div>
   <div id="tooltip" class="wrap"></div>

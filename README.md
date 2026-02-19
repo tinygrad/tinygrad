@@ -21,17 +21,38 @@ tinygrad: For something between [PyTorch](https://github.com/pytorch/pytorch) an
 
 ---
 
-Despite tinygrad's size, it is a fully featured deep learning framework.
+tinygrad is an end-to-end deep learning stack:
 
-Due to its extreme simplicity, it is the easiest framework to add new accelerators to, with support for both inference and training. If XLA is CISC, tinygrad is RISC.
+- **Tensor library** with autograd
+- **IR and compiler** that fuse and lower kernels
+- **JIT + graph execution**
+- **nn / optim / datasets** for real training
 
-tinygrad is now beta software, we [raised some money](https://geohot.github.io/blog/jekyll/update/2023/05/24/the-tiny-corp-raised-5M.html) to make it good. Someday, we will tape out chips.
+It’s inspired by PyTorch (ergonomics), JAX (functional transforms and IR-based AD), and TVM (scheduling and codegen), but stays intentionally tiny and hackable.
 
-## Features
+---
 
-### LLaMA and Stable Diffusion
+## How tinygrad compares
 
-tinygrad can run [LLaMA](/docs/showcase.md#llama) and [Stable Diffusion](/docs/showcase.md#stable-diffusion)!
+**PyTorch**
+
+- ✅ Similar: eager `Tensor` API, autograd, `optim`, basic datasets and layers.
+- ✅ You can write familiar training loops.
+- 🔁 Unlike PyTorch, the entire compiler and IR are visible and hackable.
+
+**JAX**
+
+- ✅ IR-based autodiff over primitives (like JAXPR + XLA).
+- ✅ Function-level JIT (`TinyJit`) that captures and replays kernels.
+- 🔁 Fewer functional transforms (no full `vmap`/`pmap` yet), but far easier to read.
+
+**TVM**
+
+- ✅ Multiple lowering passes, scheduling, and BEAM search over kernels.
+- ✅ Device “graphs” for batched execution.
+- 🔁 tinygrad also ships the **front-end framework** (tensors, nn, optim), not just the compiler.
+
+---
 
 ### Laziness
 
@@ -171,7 +192,7 @@ For more examples on how to run the full test suite please refer to the [CI work
 Some examples of running tests locally:
 ```sh
 python3 -m pip install -e '.[testing]'  # install extra deps for testing
-python3 test/test_ops.py                # just the ops tests
+python3 test/backend/test_ops.py        # just the ops tests
 python3 -m pytest test/                 # whole test suite
 ```
 

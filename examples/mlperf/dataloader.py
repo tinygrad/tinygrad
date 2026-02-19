@@ -72,7 +72,7 @@ def loader_process(q_in, q_out, X:Tensor, seed):
       #storage_tensor._copyin(img_tensor.numpy())
 
       # faster
-      X[idx].contiguous().realize().uop.base.realized.as_buffer(force_zero_copy=True)[:] = img.tobytes()
+      X[idx].contiguous().realize().uop.base.realized.as_memoryview(force_zero_copy=True)[:] = img.tobytes()
 
       # ideal
       #X[idx].assign(img.tobytes())   # NOTE: this is slow!
@@ -213,12 +213,13 @@ class InterleavedDataset:
     self.queues[queue_index].queue.extend(load_file(file))
 
 # Reference: https://github.com/mlcommons/training/blob/1c8a098ae3e70962a4f7422c0b0bd35ae639e357/language_model/tensorflow/bert/run_pretraining.py, Line 394
-def batch_load_train_bert(BS:int):
+def batch_load_train_bert(BS:int, seed:int|None=None):
   from extra.datasets.wikipedia import get_wiki_train_files
+  rng = random.Random(seed)
   fs = sorted(get_wiki_train_files())
   train_files = []
   while fs: # TF shuffle
-    random.shuffle(fs)
+    rng.shuffle(fs)
     train_files.append(fs.pop(0))
 
   cycle_length = min(getenv("NUM_CPU_THREADS", min(os.cpu_count(), 8)), len(train_files))
@@ -263,8 +264,8 @@ def load_unet3d_data(preprocessed_dataset_dir, seed, queue_in, queue_out, X:Tens
       x = random_brightness_augmentation(x)
       x = gaussian_noise(x)
 
-    X[idx].contiguous().realize().uop.base.realized.as_buffer(force_zero_copy=True)[:] = x.tobytes()
-    Y[idx].contiguous().realize().uop.base.realized.as_buffer(force_zero_copy=True)[:] = y.tobytes()
+    X[idx].contiguous().realize().uop.base.realized.as_memoryview(force_zero_copy=True)[:] = x.tobytes()
+    Y[idx].contiguous().realize().uop.base.realized.as_memoryview(force_zero_copy=True)[:] = y.tobytes()
 
     queue_out.put(idx)
   queue_out.put(None)
@@ -378,12 +379,12 @@ def load_retinanet_data(base_dir:Path, val:bool, queue_in:Queue, queue_out:Queue
       clipped_match_idxs = np.clip(match_idxs, 0, None)
       clipped_boxes, clipped_labels = tgt["boxes"][clipped_match_idxs], tgt["labels"][clipped_match_idxs]
 
-      boxes[idx].contiguous().realize().uop.base.realized.as_buffer(force_zero_copy=True)[:] = clipped_boxes.tobytes()
-      labels[idx].contiguous().realize().uop.base.realized.as_buffer(force_zero_copy=True)[:] = clipped_labels.tobytes()
-      matches[idx].contiguous().realize().uop.base.realized.as_buffer(force_zero_copy=True)[:] = match_idxs.tobytes()
-      anchors[idx].contiguous().realize().uop.base.realized.as_buffer(force_zero_copy=True)[:] = anchor.tobytes()
+      boxes[idx].contiguous().realize().uop.base.realized.as_memoryview(force_zero_copy=True)[:] = clipped_boxes.tobytes()
+      labels[idx].contiguous().realize().uop.base.realized.as_memoryview(force_zero_copy=True)[:] = clipped_labels.tobytes()
+      matches[idx].contiguous().realize().uop.base.realized.as_memoryview(force_zero_copy=True)[:] = match_idxs.tobytes()
+      anchors[idx].contiguous().realize().uop.base.realized.as_memoryview(force_zero_copy=True)[:] = anchor.tobytes()
 
-    imgs[idx].contiguous().realize().uop.base.realized.as_buffer(force_zero_copy=True)[:] = img.tobytes()
+    imgs[idx].contiguous().realize().uop.base.realized.as_memoryview(force_zero_copy=True)[:] = img.tobytes()
 
     queue_out.put(idx)
   queue_out.put(None)
@@ -551,7 +552,7 @@ class BinIdxDataset:
     version, = struct.unpack("<Q", self.idx.read(8))
     assert version == 1, "unsupported index version"
     dtype_code, = struct.unpack("<B", self.idx.read(1))
-    self.dtype = {1:dtypes.uint8, 2:dtypes.int8, 3:dtypes.int16, 4:dtypes.int32, 5:dtypes.int64, 6:dtypes.float64, 7:dtypes.double, 8:dtypes.uint16}[dtype_code]
+    self.dtype = {1:np.dtype(np.uint8), 2:np.dtype(np.int8), 3:np.dtype(np.int16), 4:np.dtype(np.int32), 5:np.dtype(np.int64), 6:np.dtype(np.float64), 7:np.dtype(np.double), 8:np.dtype(np.uint16)}[dtype_code]
     self.count, = struct.unpack("<Q", self.idx.read(8))
     doc_count, = struct.unpack("<Q", self.idx.read(8))
 
@@ -568,7 +569,7 @@ class BinIdxDataset:
     self.doc_idx = self.idx_t[start:end].bitcast(dtypes.int64).numpy()
 
     # bin file
-    self.bin_t = Tensor(base_path.with_name(f"{base_path.name}.bin"))
+    self.bin_t = Tensor(base_path.with_name(f"{base_path.name}.bin")).numpy()
 
   def _index(self, idx) -> tuple[int, int]:
     return int(self.pointers[idx]), int(self.sizes[idx])
@@ -577,7 +578,7 @@ class BinIdxDataset:
     ptr, size = self._index(idx)
     if length is None: length = size - offset
     ptr += offset * self.dtype.itemsize
-    return self.bin_t[ptr:ptr+length*self.dtype.itemsize].bitcast(self.dtype).to(None)
+    return self.bin_t[ptr:ptr+length*self.dtype.itemsize].view(self.dtype)
 
 # https://docs.nvidia.com/megatron-core/developer-guide/latest/api-guide/datasets.html
 class GPTDataset:
@@ -636,7 +637,7 @@ class GPTDataset:
         sample_parts.append(self.indexed_dataset.get(int(self.doc_idx[i]), offset=int(offset), length=length))
 
     # concat all parts
-    text = Tensor.cat(*sample_parts)
+    text = np.concatenate(sample_parts, axis=0)
 
     return text
 
@@ -763,48 +764,27 @@ class BlendedGPTDataset:
 
     return dataset_idx, dataset_sample_idx
 
-def batch_load_llama3(bs:int, samples:int, seqlen:int, base_dir:Path, seed:int=0, val:bool=True):
+def get_llama3_dataset(samples:int, seqlen:int, base_dir:Path, seed:int=0, val:bool=True, small:bool=False) -> BlendedGPTDataset:
+  if small:
+    if val:
+      return BlendedGPTDataset(
+        [base_dir / "c4-validation-91205-samples.en_text_document"], [1.0], samples, seqlen, seed, shuffle=False)
+    return BlendedGPTDataset(
+      [base_dir / "c4-train.en_6_text_document"], [1.0], samples, seqlen, seed, shuffle=True)
   if val:
-    dataset = BlendedGPTDataset([
-      base_dir / "validation" / "c4-validationn-91205-samples.en_text_document",
-    ], [
-      1.0
-    ], samples, seqlen, seed, False)
-  else:
-    dataset = BlendedGPTDataset([
-      base_dir / "c4-train.en_6_text_document",
-      base_dir / "c4-train.en_7_text_document",
-    ], [
-      1.0, 1.0
-    ], samples, seqlen, seed, True)
+    return BlendedGPTDataset(
+      [base_dir / "validation" / "c4-validationn-91205-samples.en_text_document"], [1.0], samples, seqlen, seed, shuffle=False)
+  return BlendedGPTDataset(
+    [base_dir / "c4-train.en_6_text_document", base_dir / "c4-train.en_7_text_document"], [1.0, 1.0], samples, seqlen, seed, shuffle=True)
 
-  for b in range(math.ceil(samples / bs)):
-    batch = []
-    for i in range(bs):
-      tokens = dataset.get(b * bs + i)
-      batch.append(tokens)
-    yield Tensor.stack(batch, dim=0)
+def iterate_llama3_dataset(dataset:BlendedGPTDataset, bs:int):
+  for b in range(math.ceil(dataset.samples / bs)):
+    batch = [dataset.get(b * bs + i) for i in range(bs)]
+    stacked = np.stack(batch, axis=0)
+    yield Tensor(stacked, device="NPY")
 
-def batch_load_llama3_small(bs:int, samples:int, seqlen:int, base_dir:Path, seed:int=0, val:bool=True):
-  if val:
-    dataset = BlendedGPTDataset([
-      base_dir / "c4-validation-91205-samples.en_text_document",
-    ], [
-      1.0
-    ], samples, seqlen, seed, False)
-  else:
-    dataset = BlendedGPTDataset([
-      base_dir / "c4-train.en_6_text_document",
-    ], [
-      1.0
-    ], samples, seqlen, seed, True)
-
-  for b in range(math.ceil(samples / bs)):
-    batch = []
-    for i in range(bs):
-      tokens = dataset.get(b * bs + i)
-      batch.append(tokens)
-    yield Tensor.stack(batch, dim=0)
+def batch_load_llama3(bs:int, samples:int, seqlen:int, base_dir:Path, seed:int=0, val:bool=True, small:bool=False):
+  return iterate_llama3_dataset(get_llama3_dataset(samples, seqlen, base_dir, seed, val, small), bs)
 
 if __name__ == "__main__":
   def load_unet3d(val):

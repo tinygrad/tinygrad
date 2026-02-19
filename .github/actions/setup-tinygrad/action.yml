@@ -41,6 +41,10 @@ inputs:
     description: "Install LLVM?"
     required: false
     default: 'false'
+  mesa:
+    description: "Install mesa"
+    required: false
+    default: 'false'
 runs:
   using: "composite"
   steps:
@@ -52,32 +56,40 @@ runs:
 
     # **** Caching packages ****
 
+    - name: Cache Python packages (PR)
+      if: github.event_name == 'pull_request'
+      id: restore-venv-pr
+      uses: actions/cache/restore@v4
+      with:
+        path: ${{ github.workspace }}/.venv
+        key: venv-${{ runner.os }}-python-${{ steps.setup-python.outputs.python-version }}-${{ inputs.deps }}-${{ inputs.pydeps }}-${{ env.CACHE_VERSION }}
     - name: Cache Python packages
+      if: github.event_name != 'pull_request'
       id: restore-venv
       uses: actions/cache@v4
       with:
         path: ${{ github.workspace }}/.venv
-        key: venv-${{ runner.os }}-python-${{ steps.setup-python.outputs.python-version }}-${{ inputs.deps }}-${{ inputs.pydeps }}-${{ hashFiles('**/setup.py') }}-${{ env.PYTHON_CACHE_VERSION }}
+        key: venv-${{ runner.os }}-python-${{ steps.setup-python.outputs.python-version }}-${{ inputs.deps }}-${{ inputs.pydeps }}-${{ env.CACHE_VERSION }}
 
     # **** Caching downloads ****
 
-    - name: Cache downloads (Linux)
-      if: inputs.key != '' && runner.os == 'Linux'
+    - name: Cache downloads (PR)
+      if: inputs.key != '' && github.event_name == 'pull_request'
+      uses: actions/cache/restore@v4
+      with:
+        path: ${{ runner.os == 'Linux' && '~/.cache/tinygrad/downloads/' || '~/Library/Caches/tinygrad/downloads/' }}
+        key: downloads-${{ github.job }}-${{ inputs.key }}-${{ env.CACHE_VERSION }}
+    - name: Cache downloads
+      if: inputs.key != '' && github.event_name != 'pull_request'
       uses: actions/cache@v4
       with:
-        path: ~/.cache/tinygrad/downloads/
-        key: downloads-cache-${{ inputs.key }}-${{ env.DOWNLOAD_CACHE_VERSION }}
-    - name: Cache downloads (macOS)
-      if: inputs.key != '' && runner.os == 'macOS'
-      uses: actions/cache@v4
-      with:
-        path: ~/Library/Caches/tinygrad/downloads/
-        key: osx-downloads-cache-${{ inputs.key }}-${{ env.DOWNLOAD_CACHE_VERSION }}
+        path: ${{ runner.os == 'Linux' && '~/.cache/tinygrad/downloads/' || '~/Library/Caches/tinygrad/downloads/' }}
+        key: downloads-${{ github.job }}-${{ inputs.key }}-${{ env.CACHE_VERSION }}
 
     # **** Python deps ****
 
     - name: Install dependencies in venv (with extra)
-      if: inputs.deps != '' && steps.restore-venv.outputs.cache-hit != 'true'
+      if: inputs.deps != '' && steps.restore-venv-pr.outputs.cache-hit != 'true' && steps.restore-venv.outputs.cache-hit != 'true'
       shell: bash
       run: |
         python -m venv .venv
@@ -88,7 +100,7 @@ runs:
         fi
         python -m pip install -e ".[${{ inputs.deps }}]" ${{ inputs.pydeps }} --extra-index-url https://download.pytorch.org/whl/cpu --extra-index-url https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/Triton-Nightly/pypi/simple/
     - name: Install dependencies in venv (without extra)
-      if: inputs.deps == '' && steps.restore-venv.outputs.cache-hit != 'true'
+      if: inputs.deps == '' && steps.restore-venv-pr.outputs.cache-hit != 'true' && steps.restore-venv.outputs.cache-hit != 'true'
       shell: bash
       run: |
         python -m venv .venv
@@ -133,7 +145,7 @@ runs:
       run: |
         wget https://repo.radeon.com/rocm/rocm.gpg.key -O - | gpg --dearmor | sudo tee /etc/apt/keyrings/rocm.gpg > /dev/null
         sudo tee /etc/apt/sources.list.d/rocm.list <<EOF
-        deb [arch=amd64 signed-by=/etc/apt/keyrings/rocm.gpg] https://repo.radeon.com/rocm/apt/6.2 $(lsb_release -cs) main
+        deb [arch=amd64 signed-by=/etc/apt/keyrings/rocm.gpg] https://repo.radeon.com/rocm/apt/7.1 $(lsb_release -cs) main
         EOF
         echo -e 'Package: *\nPin: release o=repo.radeon.com\nPin-Priority: 600' | sudo tee /etc/apt/preferences.d/rocm-pin-600
 
@@ -178,12 +190,18 @@ runs:
         echo "pkgs=$pkgs" >> "$GITHUB_OUTPUT"
         echo "hash=$(echo -n "$pkgs" | sha256sum | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
 
+    - name: Cache apt (PR)
+      if: runner.os == 'Linux' && (inputs.opencl == 'true' || inputs.amd == 'true' || inputs.cuda == 'true' || inputs.webgpu == 'true' || inputs.llvm == 'true') && github.event_name == 'pull_request'
+      uses: actions/cache/restore@v4
+      with:
+        path: /var/cache/apt/archives/
+        key: ${{ runner.os }}-apt-${{ steps.apt-pkgs.outputs.hash }}-${{ env.CACHE_VERSION }}
     - name: Cache apt
-      if: runner.os == 'Linux' && (inputs.opencl == 'true' || inputs.amd == 'true' || inputs.cuda == 'true' || inputs.webgpu == 'true' || inputs.llvm == 'true')
+      if: runner.os == 'Linux' && (inputs.opencl == 'true' || inputs.amd == 'true' || inputs.cuda == 'true' || inputs.webgpu == 'true' || inputs.llvm == 'true') && github.event_name != 'pull_request'
       uses: actions/cache@v4
       with:
         path: /var/cache/apt/archives/
-        key: ${{ runner.os }}-apt-${{ steps.apt-pkgs.outputs.hash }}-${{ env.APT_CACHE_VERSION }}
+        key: ${{ runner.os }}-apt-${{ steps.apt-pkgs.outputs.hash }}-${{ env.CACHE_VERSION }}
 
     - name: Run apt Update + Install
       if: runner.os == 'Linux' && (inputs.opencl == 'true' || inputs.amd == 'true' || inputs.cuda == 'true' || inputs.webgpu == 'true' || inputs.llvm == 'true')
@@ -217,7 +235,7 @@ runs:
         sudo mkdir -p /usr/local/lib
         curl -s -H "Authorization: token $GH_TOKEN" curl -s https://api.github.com/repos/nimlgen/amdcomgr_dylib/releases/latest | \
           jq -r '.assets[] | select(.name == "libamd_comgr.dylib").browser_download_url' | \
-          sudo xargs curl -L -o /usr/local/lib/libamd_comgr.dylib
+          sudo xargs curl -fL -o /usr/local/lib/libamd_comgr.dylib
         cargo build --release --manifest-path ./extra/remu/Cargo.toml
 
     # **** gpuocelot ****
@@ -235,17 +253,26 @@ runs:
         ln -s /opt/homebrew/opt/boost@1.85 /opt/homebrew/opt/boost || true
         ln -s /opt/homebrew/opt/boost/lib/libboost_atomic-mt.dylib /opt/homebrew/opt/boost/lib/libboost_atomic.dylib || true
         ln -s /opt/homebrew/opt/boost/lib/libboost_thread-mt.dylib /opt/homebrew/opt/boost/lib/libboost_thread.dylib || true
+    - name: Cache gpuocelot (PR)
+      if: inputs.ocelot == 'true' && github.event_name == 'pull_request'
+      id: cache-build-pr
+      uses: actions/cache/restore@v4
+      env:
+        cache-name: cache-gpuocelot-build-1
+      with:
+        path: ${{ github.workspace }}/gpuocelot/ocelot
+        key: ${{ runner.os }}-gpuocelot-b16039dc940dc6bc4ea0a98380495769ff35ed99-rebuild-${{ env.CACHE_VERSION }}
     - name: Cache gpuocelot
-      if: inputs.ocelot == 'true'
+      if: inputs.ocelot == 'true' && github.event_name != 'pull_request'
       id: cache-build
       uses: actions/cache@v4
       env:
         cache-name: cache-gpuocelot-build-1
       with:
         path: ${{ github.workspace }}/gpuocelot/ocelot
-        key: ${{ runner.os }}-gpuocelot-b16039dc940dc6bc4ea0a98380495769ff35ed99-rebuild-${{ env.BUILD_CACHE_VERSION }}
+        key: ${{ runner.os }}-gpuocelot-b16039dc940dc6bc4ea0a98380495769ff35ed99-rebuild-${{ env.CACHE_VERSION }}
     - name: Clone/compile gpuocelot
-      if: inputs.ocelot == 'true' && steps.cache-build.outputs.cache-hit != 'true'
+      if: inputs.ocelot == 'true' && steps.cache-build-pr.outputs.cache-hit != 'true' && steps.cache-build.outputs.cache-hit != 'true'
       shell: bash
       run: |
         git clone --recurse-submodules https://github.com/gpuocelot/gpuocelot.git ${{ github.workspace }}/gpuocelot
@@ -274,7 +301,7 @@ runs:
       if: inputs.webgpu == 'true' && runner.os == 'Linux'
       shell: bash
       run: |
-        sudo curl -L https://github.com/wpmed92/pydawn/releases/download/v0.1.6/libwebgpu_dawn.so -o /usr/local/lib/libwebgpu_dawn.so
+        sudo curl -fL https://github.com/wpmed92/pydawn/releases/download/v0.1.6/libwebgpu_dawn.so -o /usr/local/lib/libwebgpu_dawn.so
         sudo ldconfig
     - name: Install WebGPU dawn (macOS)
       if: inputs.webgpu == 'true' && runner.os == 'macOS'
@@ -289,3 +316,13 @@ runs:
       if: inputs.llvm == 'true' && runner.os == 'macOS'
       shell: bash
       run: brew install llvm@20
+
+    # **** mesa ****
+    - name: Install mesa (linux)
+      if: inputs.mesa == 'true' && runner.os == 'Linux'
+      shell: bash
+      run: sudo curl -fL https://github.com/sirhcm/tinymesa/releases/download/v1/libtinymesa_cpu-mesa-25.2.7-linux-amd64.so -o /usr/lib/libtinymesa_cpu.so
+    - name: Install mesa (macOS)
+      if: inputs.mesa == 'true' && runner.os == 'macOS'
+      shell: bash
+      run: brew install sirhcm/tinymesa/tinymesa_cpu

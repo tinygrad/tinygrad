@@ -73,7 +73,7 @@ class TestHuggingFaceOnnxModels(unittest.TestCase):
     onnx_model_path = snapshot_download_with_retry(
       repo_id=repo_id,
       allow_patterns=["*.onnx", "*.onnx_data"],
-      cache_dir=str(DOWNLOADS_DIR)
+      local_dir=DOWNLOADS_DIR / repo_id
     )
     onnx_model_path = onnx_model_path / model_file
     file_size = onnx_model_path.stat().st_size

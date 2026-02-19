@@ -1,891 +1,579 @@
-# mypy: ignore-errors
-# -*- coding: utf-8 -*-
-#
-# TARGET arch is: []
-# WORD_SIZE is: 8
-# POINTER_SIZE is: 8
-# LONGDOUBLE_SIZE is: 16
-#
+# mypy: disable-error-code="empty-body"
+from __future__ import annotations
 import ctypes
-
-
-from tinygrad.runtime.support.hcq import FileIOInterface
-import functools
-
-def _do_ioctl_io(__idir, __base, __nr, __fd:FileIOInterface, val=0, __len=0):
-  return __fd.ioctl((__idir<<30) | (__len<<16) | (__base<<8) | __nr, val)
-
-def _do_ioctl(__idir, __base, __nr, __user_struct, __fd:FileIOInterface, __val=None, **kwargs):
-  ret = __fd.ioctl((__idir<<30) | (ctypes.sizeof(made := (__made or __user_struct(**kwargs)))<<16) | (__base<<8) | __nr, made)
-  if ret != 0: raise RuntimeError(f"ioctl returned {ret}")
-  return made
-
-def _IO(base, nr): return functools.partial(_do_ioctl_io, 0, ord(base) if isinstance(base, str) else base, nr)
-def _IOW(base, nr, type): return functools.partial(_do_ioctl, 1, ord(base) if isinstance(base, str) else base, nr, type)
-def _IOR(base, nr, type): return functools.partial(_do_ioctl, 2, ord(base) if isinstance(base, str) else base, nr, type)
-def _IOWR(base, nr, type): return functools.partial(_do_ioctl, 3, ord(base) if isinstance(base, str) else base, nr, type)
-
-class AsDictMixin:
-    @classmethod
-    def as_dict(cls, self):
-        result = {}
-        if not isinstance(self, AsDictMixin):
-            # not a structure, assume it's already a python object
-            return self
-        if not hasattr(cls, "_fields_"):
-            return result
-        # sys.version_info >= (3, 5)
-        # for (field, *_) in cls._fields_:  # noqa
-        for field_tuple in cls._fields_:  # noqa
-            field = field_tuple[0]
-            if field.startswith('PADDING_'):
-                continue
-            value = getattr(self, field)
-            type_ = type(value)
-            if hasattr(value, "_length_") and hasattr(value, "_type_"):
-                # array
-                if not hasattr(type_, "as_dict"):
-                    value = [v for v in value]
-                else:
-                    type_ = type_._type_
-                    value = [type_.as_dict(v) for v in value]
-            elif hasattr(value, "contents") and hasattr(value, "_type_"):
-                # pointer
-                try:
-                    if not hasattr(type_, "as_dict"):
-                        value = value.contents
-                    else:
-                        type_ = type_._type_
-                        value = type_.as_dict(value.contents)
-                except ValueError:
-                    # nullptr
-                    value = None
-            elif isinstance(value, AsDictMixin):
-                # other structure
-                value = type_.as_dict(value)
-            result[field] = value
-        return result
-
-
-class Structure(ctypes.Structure, AsDictMixin):
-
-    def __init__(self, *args, **kwds):
-        # We don't want to use positional arguments fill PADDING_* fields
-
-        args = dict(zip(self.__class__._field_names_(), args))
-        args.update(kwds)
-        super(Structure, self).__init__(**args)
-
-    @classmethod
-    def _field_names_(cls):
-        if hasattr(cls, '_fields_'):
-            return (f[0] for f in cls._fields_ if not f[0].startswith('PADDING'))
-        else:
-            return ()
-
-    @classmethod
-    def get_type(cls, field):
-        for f in cls._fields_:
-            if f[0] == field:
-                return f[1]
-        return None
-
-    @classmethod
-    def bind(cls, bound_fields):
-        fields = {}
-        for name, type_ in cls._fields_:
-            if hasattr(type_, "restype"):
-                if name in bound_fields:
-                    if bound_fields[name] is None:
-                        fields[name] = type_()
-                    else:
-                        # use a closure to capture the callback from the loop scope
-                        fields[name] = (
-                            type_((lambda callback: lambda *args: callback(*args))(
-                                bound_fields[name]))
-                        )
-                    del bound_fields[name]
-                else:
-                    # default callback implementation (does nothing)
-                    try:
-                        default_ = type_(0).restype().value
-                    except TypeError:
-                        default_ = None
-                    fields[name] = type_((
-                        lambda default_: lambda *args: default_)(default_))
-            else:
-                # not a callback function, use default initialization
-                if name in bound_fields:
-                    fields[name] = bound_fields[name]
-                    del bound_fields[name]
-                else:
-                    fields[name] = type_()
-        if len(bound_fields) != 0:
-            raise ValueError(
-                "Cannot bind the following unknown callback(s) {}.{}".format(
-                    cls.__name__, bound_fields.keys()
-            ))
-        return cls(**fields)
-
-
-class Union(ctypes.Union, AsDictMixin):
-    pass
-
-
-
-
-
-VFIO_H = True # macro
-VFIO_API_VERSION = 0 # macro
-VFIO_TYPE1_IOMMU = 1 # macro
-VFIO_SPAPR_TCE_IOMMU = 2 # macro
-VFIO_TYPE1v2_IOMMU = 3 # macro
-VFIO_DMA_CC_IOMMU = 4 # macro
-VFIO_EEH = 5 # macro
-VFIO_TYPE1_NESTING_IOMMU = 6 # macro
-VFIO_SPAPR_TCE_v2_IOMMU = 7 # macro
-VFIO_NOIOMMU_IOMMU = 8 # macro
-VFIO_UNMAP_ALL = 9 # macro
-VFIO_UPDATE_VADDR = 10 # macro
-VFIO_TYPE = (';') # macro
-VFIO_BASE = 100 # macro
-VFIO_GET_API_VERSION = _IO ( ( ';' ) , 100 + 0 ) # macro (from list)
-VFIO_CHECK_EXTENSION = _IO ( ( ';' ) , 100 + 1 ) # macro (from list)
-VFIO_SET_IOMMU = _IO ( ( ';' ) , 100 + 2 ) # macro (from list)
-VFIO_GROUP_FLAGS_VIABLE = (1<<0) # macro
-VFIO_GROUP_FLAGS_CONTAINER_SET = (1<<1) # macro
-VFIO_GROUP_GET_STATUS = _IO ( ( ';' ) , 100 + 3 ) # macro (from list)
-VFIO_GROUP_SET_CONTAINER = _IO ( ( ';' ) , 100 + 4 ) # macro (from list)
-VFIO_GROUP_UNSET_CONTAINER = _IO ( ( ';' ) , 100 + 5 ) # macro (from list)
-VFIO_GROUP_GET_DEVICE_FD = _IO ( ( ';' ) , 100 + 6 ) # macro (from list)
-VFIO_DEVICE_FLAGS_RESET = (1<<0) # macro
-VFIO_DEVICE_FLAGS_PCI = (1<<1) # macro
-VFIO_DEVICE_FLAGS_PLATFORM = (1<<2) # macro
-VFIO_DEVICE_FLAGS_AMBA = (1<<3) # macro
-VFIO_DEVICE_FLAGS_CCW = (1<<4) # macro
-VFIO_DEVICE_FLAGS_AP = (1<<5) # macro
-VFIO_DEVICE_FLAGS_FSL_MC = (1<<6) # macro
-VFIO_DEVICE_FLAGS_CAPS = (1<<7) # macro
-VFIO_DEVICE_GET_INFO = _IO ( ( ';' ) , 100 + 7 ) # macro (from list)
-VFIO_DEVICE_API_PCI_STRING = "vfio-pci" # macro
-VFIO_DEVICE_API_PLATFORM_STRING = "vfio-platform" # macro
-VFIO_DEVICE_API_AMBA_STRING = "vfio-amba" # macro
-VFIO_DEVICE_API_CCW_STRING = "vfio-ccw" # macro
-VFIO_DEVICE_API_AP_STRING = "vfio-ap" # macro
-VFIO_DEVICE_INFO_CAP_ZPCI_BASE = 1 # macro
-VFIO_DEVICE_INFO_CAP_ZPCI_GROUP = 2 # macro
-VFIO_DEVICE_INFO_CAP_ZPCI_UTIL = 3 # macro
-VFIO_DEVICE_INFO_CAP_ZPCI_PFIP = 4 # macro
-VFIO_REGION_INFO_FLAG_READ = (1<<0) # macro
-VFIO_REGION_INFO_FLAG_WRITE = (1<<1) # macro
-VFIO_REGION_INFO_FLAG_MMAP = (1<<2) # macro
-VFIO_REGION_INFO_FLAG_CAPS = (1<<3) # macro
-VFIO_DEVICE_GET_REGION_INFO = _IO ( ( ';' ) , 100 + 8 ) # macro (from list)
-VFIO_REGION_INFO_CAP_SPARSE_MMAP = 1 # macro
-VFIO_REGION_INFO_CAP_TYPE = 2 # macro
-VFIO_REGION_TYPE_PCI_VENDOR_TYPE = (1<<31) # macro
-VFIO_REGION_TYPE_PCI_VENDOR_MASK = (0xffff) # macro
-VFIO_REGION_TYPE_GFX = (1) # macro
-VFIO_REGION_TYPE_CCW = (2) # macro
-VFIO_REGION_TYPE_MIGRATION = (3) # macro
-VFIO_REGION_SUBTYPE_INTEL_IGD_OPREGION = (1) # macro
-VFIO_REGION_SUBTYPE_INTEL_IGD_HOST_CFG = (2) # macro
-VFIO_REGION_SUBTYPE_INTEL_IGD_LPC_CFG = (3) # macro
-VFIO_REGION_SUBTYPE_NVIDIA_NVLINK2_RAM = (1) # macro
-VFIO_REGION_SUBTYPE_IBM_NVLINK2_ATSD = (1) # macro
-VFIO_REGION_SUBTYPE_GFX_EDID = (1) # macro
-VFIO_DEVICE_GFX_LINK_STATE_UP = 1 # macro
-VFIO_DEVICE_GFX_LINK_STATE_DOWN = 2 # macro
-VFIO_REGION_SUBTYPE_CCW_ASYNC_CMD = (1) # macro
-VFIO_REGION_SUBTYPE_CCW_SCHIB = (2) # macro
-VFIO_REGION_SUBTYPE_CCW_CRW = (3) # macro
-VFIO_REGION_SUBTYPE_MIGRATION = (1) # macro
-VFIO_DEVICE_STATE_STOP = (0) # macro
-VFIO_DEVICE_STATE_RUNNING = (1<<0) # macro
-VFIO_DEVICE_STATE_SAVING = (1<<1) # macro
-VFIO_DEVICE_STATE_RESUMING = (1<<2) # macro
-VFIO_DEVICE_STATE_MASK = ((1<<0)|(1<<1)|(1<<2)) # macro
-# def VFIO_DEVICE_STATE_VALID(state):  # macro
-#    return (state&(1<<2)?(state&((1<<0)|(1<<1)|(1<<2)))==(1<<2):1)
-def VFIO_DEVICE_STATE_IS_ERROR(state):  # macro
-   return ((state&((1<<0)|(1<<1)|(1<<2)))==((1<<1)|(1<<2)))
-# def VFIO_DEVICE_STATE_SET_ERROR(state):  # macro
-#    return ((state&~((1<<0)|(1<<1)|(1<<2)))|VFIO_DEVICE_SATE_SAVING|(1<<2))
-VFIO_REGION_INFO_CAP_MSIX_MAPPABLE = 3 # macro
-VFIO_REGION_INFO_CAP_NVLINK2_SSATGT = 4 # macro
-VFIO_REGION_INFO_CAP_NVLINK2_LNKSPD = 5 # macro
-VFIO_IRQ_INFO_EVENTFD = (1<<0) # macro
-VFIO_IRQ_INFO_MASKABLE = (1<<1) # macro
-VFIO_IRQ_INFO_AUTOMASKED = (1<<2) # macro
-VFIO_IRQ_INFO_NORESIZE = (1<<3) # macro
-VFIO_DEVICE_GET_IRQ_INFO = _IO ( ( ';' ) , 100 + 9 ) # macro (from list)
-VFIO_IRQ_SET_DATA_NONE = (1<<0) # macro
-VFIO_IRQ_SET_DATA_BOOL = (1<<1) # macro
-VFIO_IRQ_SET_DATA_EVENTFD = (1<<2) # macro
-VFIO_IRQ_SET_ACTION_MASK = (1<<3) # macro
-VFIO_IRQ_SET_ACTION_UNMASK = (1<<4) # macro
-VFIO_IRQ_SET_ACTION_TRIGGER = (1<<5) # macro
-VFIO_DEVICE_SET_IRQS = _IO ( ( ';' ) , 100 + 10 ) # macro (from list)
-VFIO_IRQ_SET_DATA_TYPE_MASK = ((1<<0)|(1<<1)|(1<<2)) # macro
-VFIO_IRQ_SET_ACTION_TYPE_MASK = ((1<<3)|(1<<4)|(1<<5)) # macro
-VFIO_DEVICE_RESET = _IO ( ( ';' ) , 100 + 11 ) # macro (from list)
-VFIO_DEVICE_GET_PCI_HOT_RESET_INFO = _IO ( ( ';' ) , 100 + 12 ) # macro (from list)
-VFIO_DEVICE_PCI_HOT_RESET = _IO ( ( ';' ) , 100 + 13 ) # macro (from list)
-VFIO_GFX_PLANE_TYPE_PROBE = (1<<0) # macro
-VFIO_GFX_PLANE_TYPE_DMABUF = (1<<1) # macro
-VFIO_GFX_PLANE_TYPE_REGION = (1<<2) # macro
-VFIO_DEVICE_QUERY_GFX_PLANE = _IO ( ( ';' ) , 100 + 14 ) # macro (from list)
-VFIO_DEVICE_GET_GFX_DMABUF = _IO ( ( ';' ) , 100 + 15 ) # macro (from list)
-VFIO_DEVICE_IOEVENTFD_8 = (1<<0) # macro
-VFIO_DEVICE_IOEVENTFD_16 = (1<<1) # macro
-VFIO_DEVICE_IOEVENTFD_32 = (1<<2) # macro
-VFIO_DEVICE_IOEVENTFD_64 = (1<<3) # macro
-VFIO_DEVICE_IOEVENTFD_SIZE_MASK = (0xf) # macro
-VFIO_DEVICE_IOEVENTFD = _IO ( ( ';' ) , 100 + 16 ) # macro (from list)
-VFIO_DEVICE_FEATURE_MASK = (0xffff) # macro
-VFIO_DEVICE_FEATURE_GET = (1<<16) # macro
-VFIO_DEVICE_FEATURE_SET = (1<<17) # macro
-VFIO_DEVICE_FEATURE_PROBE = (1<<18) # macro
-VFIO_DEVICE_FEATURE = _IO ( ( ';' ) , 100 + 17 ) # macro (from list)
-VFIO_DEVICE_FEATURE_PCI_VF_TOKEN = (0) # macro
-VFIO_IOMMU_INFO_PGSIZES = (1<<0) # macro
-VFIO_IOMMU_INFO_CAPS = (1<<1) # macro
-VFIO_IOMMU_TYPE1_INFO_CAP_IOVA_RANGE = 1 # macro
-VFIO_IOMMU_TYPE1_INFO_CAP_MIGRATION = 2 # macro
-VFIO_IOMMU_TYPE1_INFO_DMA_AVAIL = 3 # macro
-VFIO_IOMMU_GET_INFO = _IO ( ( ';' ) , 100 + 12 ) # macro (from list)
-VFIO_DMA_MAP_FLAG_READ = (1<<0) # macro
-VFIO_DMA_MAP_FLAG_WRITE = (1<<1) # macro
-VFIO_DMA_MAP_FLAG_VADDR = (1<<2) # macro
-VFIO_IOMMU_MAP_DMA = _IO ( ( ';' ) , 100 + 13 ) # macro (from list)
-VFIO_DMA_UNMAP_FLAG_GET_DIRTY_BITMAP = (1<<0) # macro
-VFIO_DMA_UNMAP_FLAG_ALL = (1<<1) # macro
-VFIO_DMA_UNMAP_FLAG_VADDR = (1<<2) # macro
-VFIO_IOMMU_UNMAP_DMA = _IO ( ( ';' ) , 100 + 14 ) # macro (from list)
-VFIO_IOMMU_ENABLE = _IO ( ( ';' ) , 100 + 15 ) # macro (from list)
-VFIO_IOMMU_DISABLE = _IO ( ( ';' ) , 100 + 16 ) # macro (from list)
-VFIO_IOMMU_DIRTY_PAGES_FLAG_START = (1<<0) # macro
-VFIO_IOMMU_DIRTY_PAGES_FLAG_STOP = (1<<1) # macro
-VFIO_IOMMU_DIRTY_PAGES_FLAG_GET_BITMAP = (1<<2) # macro
-VFIO_IOMMU_DIRTY_PAGES = _IO ( ( ';' ) , 100 + 17 ) # macro (from list)
-VFIO_IOMMU_SPAPR_INFO_DDW = (1<<0) # macro
-VFIO_IOMMU_SPAPR_TCE_GET_INFO = _IO ( ( ';' ) , 100 + 12 ) # macro (from list)
-VFIO_EEH_PE_DISABLE = 0 # macro
-VFIO_EEH_PE_ENABLE = 1 # macro
-VFIO_EEH_PE_UNFREEZE_IO = 2 # macro
-VFIO_EEH_PE_UNFREEZE_DMA = 3 # macro
-VFIO_EEH_PE_GET_STATE = 4 # macro
-VFIO_EEH_PE_STATE_NORMAL = 0 # macro
-VFIO_EEH_PE_STATE_RESET = 1 # macro
-VFIO_EEH_PE_STATE_STOPPED = 2 # macro
-VFIO_EEH_PE_STATE_STOPPED_DMA = 4 # macro
-VFIO_EEH_PE_STATE_UNAVAIL = 5 # macro
-VFIO_EEH_PE_RESET_DEACTIVATE = 5 # macro
-VFIO_EEH_PE_RESET_HOT = 6 # macro
-VFIO_EEH_PE_RESET_FUNDAMENTAL = 7 # macro
-VFIO_EEH_PE_CONFIGURE = 8 # macro
-VFIO_EEH_PE_INJECT_ERR = 9 # macro
-VFIO_EEH_PE_OP = _IO ( ( ';' ) , 100 + 21 ) # macro (from list)
-VFIO_IOMMU_SPAPR_REGISTER_MEMORY = _IO ( ( ';' ) , 100 + 17 ) # macro (from list)
-VFIO_IOMMU_SPAPR_UNREGISTER_MEMORY = _IO ( ( ';' ) , 100 + 18 ) # macro (from list)
-VFIO_IOMMU_SPAPR_TCE_CREATE = _IO ( ( ';' ) , 100 + 19 ) # macro (from list)
-VFIO_IOMMU_SPAPR_TCE_REMOVE = _IO ( ( ';' ) , 100 + 20 ) # macro (from list)
-class struct_vfio_info_cap_header(Structure):
-    pass
-
-struct_vfio_info_cap_header._pack_ = 1 # source:False
-struct_vfio_info_cap_header._fields_ = [
-    ('id', ctypes.c_uint16),
-    ('version', ctypes.c_uint16),
-    ('next', ctypes.c_uint32),
-]
-
-class struct_vfio_group_status(Structure):
-    pass
-
-struct_vfio_group_status._pack_ = 1 # source:False
-struct_vfio_group_status._fields_ = [
-    ('argsz', ctypes.c_uint32),
-    ('flags', ctypes.c_uint32),
-]
-
-class struct_vfio_device_info(Structure):
-    pass
-
-struct_vfio_device_info._pack_ = 1 # source:False
-struct_vfio_device_info._fields_ = [
-    ('argsz', ctypes.c_uint32),
-    ('flags', ctypes.c_uint32),
-    ('num_regions', ctypes.c_uint32),
-    ('num_irqs', ctypes.c_uint32),
-    ('cap_offset', ctypes.c_uint32),
-]
-
-class struct_vfio_region_info(Structure):
-    pass
-
-struct_vfio_region_info._pack_ = 1 # source:False
-struct_vfio_region_info._fields_ = [
-    ('argsz', ctypes.c_uint32),
-    ('flags', ctypes.c_uint32),
-    ('index', ctypes.c_uint32),
-    ('cap_offset', ctypes.c_uint32),
-    ('size', ctypes.c_uint64),
-    ('offset', ctypes.c_uint64),
-]
-
-class struct_vfio_region_sparse_mmap_area(Structure):
-    pass
-
-struct_vfio_region_sparse_mmap_area._pack_ = 1 # source:False
-struct_vfio_region_sparse_mmap_area._fields_ = [
-    ('offset', ctypes.c_uint64),
-    ('size', ctypes.c_uint64),
-]
-
-class struct_vfio_region_info_cap_sparse_mmap(Structure):
-    pass
-
-struct_vfio_region_info_cap_sparse_mmap._pack_ = 1 # source:False
-struct_vfio_region_info_cap_sparse_mmap._fields_ = [
-    ('header', struct_vfio_info_cap_header),
-    ('nr_areas', ctypes.c_uint32),
-    ('reserved', ctypes.c_uint32),
-    ('areas', struct_vfio_region_sparse_mmap_area * 0),
-]
-
-class struct_vfio_region_info_cap_type(Structure):
-    pass
-
-struct_vfio_region_info_cap_type._pack_ = 1 # source:False
-struct_vfio_region_info_cap_type._fields_ = [
-    ('header', struct_vfio_info_cap_header),
-    ('type', ctypes.c_uint32),
-    ('subtype', ctypes.c_uint32),
-]
-
-class struct_vfio_region_gfx_edid(Structure):
-    pass
-
-struct_vfio_region_gfx_edid._pack_ = 1 # source:False
-struct_vfio_region_gfx_edid._fields_ = [
-    ('edid_offset', ctypes.c_uint32),
-    ('edid_max_size', ctypes.c_uint32),
-    ('edid_size', ctypes.c_uint32),
-    ('max_xres', ctypes.c_uint32),
-    ('max_yres', ctypes.c_uint32),
-    ('link_state', ctypes.c_uint32),
-]
-
-class struct_vfio_device_migration_info(Structure):
-    pass
-
-struct_vfio_device_migration_info._pack_ = 1 # source:False
-struct_vfio_device_migration_info._fields_ = [
-    ('device_state', ctypes.c_uint32),
-    ('reserved', ctypes.c_uint32),
-    ('pending_bytes', ctypes.c_uint64),
-    ('data_offset', ctypes.c_uint64),
-    ('data_size', ctypes.c_uint64),
-]
-
-class struct_vfio_region_info_cap_nvlink2_ssatgt(Structure):
-    pass
-
-struct_vfio_region_info_cap_nvlink2_ssatgt._pack_ = 1 # source:False
-struct_vfio_region_info_cap_nvlink2_ssatgt._fields_ = [
-    ('header', struct_vfio_info_cap_header),
-    ('tgt', ctypes.c_uint64),
-]
-
-class struct_vfio_region_info_cap_nvlink2_lnkspd(Structure):
-    pass
-
-struct_vfio_region_info_cap_nvlink2_lnkspd._pack_ = 1 # source:False
-struct_vfio_region_info_cap_nvlink2_lnkspd._fields_ = [
-    ('header', struct_vfio_info_cap_header),
-    ('link_speed', ctypes.c_uint32),
-    ('__pad', ctypes.c_uint32),
-]
-
-class struct_vfio_irq_info(Structure):
-    pass
-
-struct_vfio_irq_info._pack_ = 1 # source:False
-struct_vfio_irq_info._fields_ = [
-    ('argsz', ctypes.c_uint32),
-    ('flags', ctypes.c_uint32),
-    ('index', ctypes.c_uint32),
-    ('count', ctypes.c_uint32),
-]
-
-class struct_vfio_irq_set(Structure):
-    pass
-
-struct_vfio_irq_set._pack_ = 1 # source:False
-struct_vfio_irq_set._fields_ = [
-    ('argsz', ctypes.c_uint32),
-    ('flags', ctypes.c_uint32),
-    ('index', ctypes.c_uint32),
-    ('start', ctypes.c_uint32),
-    ('count', ctypes.c_uint32),
-    ('data', ctypes.c_int * 1),
-]
-
-
-# values for enumeration 'c__Ea_VFIO_PCI_BAR0_REGION_INDEX'
-c__Ea_VFIO_PCI_BAR0_REGION_INDEX__enumvalues = {
-    0: 'VFIO_PCI_BAR0_REGION_INDEX',
-    1: 'VFIO_PCI_BAR1_REGION_INDEX',
-    2: 'VFIO_PCI_BAR2_REGION_INDEX',
-    3: 'VFIO_PCI_BAR3_REGION_INDEX',
-    4: 'VFIO_PCI_BAR4_REGION_INDEX',
-    5: 'VFIO_PCI_BAR5_REGION_INDEX',
-    6: 'VFIO_PCI_ROM_REGION_INDEX',
-    7: 'VFIO_PCI_CONFIG_REGION_INDEX',
-    8: 'VFIO_PCI_VGA_REGION_INDEX',
-    9: 'VFIO_PCI_NUM_REGIONS',
-}
-VFIO_PCI_BAR0_REGION_INDEX = 0
-VFIO_PCI_BAR1_REGION_INDEX = 1
-VFIO_PCI_BAR2_REGION_INDEX = 2
-VFIO_PCI_BAR3_REGION_INDEX = 3
-VFIO_PCI_BAR4_REGION_INDEX = 4
-VFIO_PCI_BAR5_REGION_INDEX = 5
-VFIO_PCI_ROM_REGION_INDEX = 6
-VFIO_PCI_CONFIG_REGION_INDEX = 7
-VFIO_PCI_VGA_REGION_INDEX = 8
-VFIO_PCI_NUM_REGIONS = 9
-c__Ea_VFIO_PCI_BAR0_REGION_INDEX = ctypes.c_uint32 # enum
-
-# values for enumeration 'c__Ea_VFIO_PCI_INTX_IRQ_INDEX'
-c__Ea_VFIO_PCI_INTX_IRQ_INDEX__enumvalues = {
-    0: 'VFIO_PCI_INTX_IRQ_INDEX',
-    1: 'VFIO_PCI_MSI_IRQ_INDEX',
-    2: 'VFIO_PCI_MSIX_IRQ_INDEX',
-    3: 'VFIO_PCI_ERR_IRQ_INDEX',
-    4: 'VFIO_PCI_REQ_IRQ_INDEX',
-    5: 'VFIO_PCI_NUM_IRQS',
-}
-VFIO_PCI_INTX_IRQ_INDEX = 0
-VFIO_PCI_MSI_IRQ_INDEX = 1
-VFIO_PCI_MSIX_IRQ_INDEX = 2
-VFIO_PCI_ERR_IRQ_INDEX = 3
-VFIO_PCI_REQ_IRQ_INDEX = 4
-VFIO_PCI_NUM_IRQS = 5
-c__Ea_VFIO_PCI_INTX_IRQ_INDEX = ctypes.c_uint32 # enum
-
-# values for enumeration 'c__Ea_VFIO_CCW_CONFIG_REGION_INDEX'
-c__Ea_VFIO_CCW_CONFIG_REGION_INDEX__enumvalues = {
-    0: 'VFIO_CCW_CONFIG_REGION_INDEX',
-    1: 'VFIO_CCW_NUM_REGIONS',
-}
-VFIO_CCW_CONFIG_REGION_INDEX = 0
-VFIO_CCW_NUM_REGIONS = 1
-c__Ea_VFIO_CCW_CONFIG_REGION_INDEX = ctypes.c_uint32 # enum
-
-# values for enumeration 'c__Ea_VFIO_CCW_IO_IRQ_INDEX'
-c__Ea_VFIO_CCW_IO_IRQ_INDEX__enumvalues = {
-    0: 'VFIO_CCW_IO_IRQ_INDEX',
-    1: 'VFIO_CCW_CRW_IRQ_INDEX',
-    2: 'VFIO_CCW_REQ_IRQ_INDEX',
-    3: 'VFIO_CCW_NUM_IRQS',
-}
-VFIO_CCW_IO_IRQ_INDEX = 0
-VFIO_CCW_CRW_IRQ_INDEX = 1
-VFIO_CCW_REQ_IRQ_INDEX = 2
-VFIO_CCW_NUM_IRQS = 3
-c__Ea_VFIO_CCW_IO_IRQ_INDEX = ctypes.c_uint32 # enum
-class struct_vfio_pci_dependent_device(Structure):
-    pass
-
-struct_vfio_pci_dependent_device._pack_ = 1 # source:False
-struct_vfio_pci_dependent_device._fields_ = [
-    ('group_id', ctypes.c_uint32),
-    ('segment', ctypes.c_uint16),
-    ('bus', ctypes.c_ubyte),
-    ('devfn', ctypes.c_ubyte),
-]
-
-class struct_vfio_pci_hot_reset_info(Structure):
-    pass
-
-struct_vfio_pci_hot_reset_info._pack_ = 1 # source:False
-struct_vfio_pci_hot_reset_info._fields_ = [
-    ('argsz', ctypes.c_uint32),
-    ('flags', ctypes.c_uint32),
-    ('count', ctypes.c_uint32),
-    ('devices', struct_vfio_pci_dependent_device * 0),
-]
-
-class struct_vfio_pci_hot_reset(Structure):
-    pass
-
-struct_vfio_pci_hot_reset._pack_ = 1 # source:False
-struct_vfio_pci_hot_reset._fields_ = [
-    ('argsz', ctypes.c_uint32),
-    ('flags', ctypes.c_uint32),
-    ('count', ctypes.c_uint32),
-    ('group_fds', ctypes.c_int32 * 0),
-]
-
-class struct_vfio_device_gfx_plane_info(Structure):
-    pass
-
-class union_vfio_device_gfx_plane_info_0(Union):
-    pass
-
-union_vfio_device_gfx_plane_info_0._pack_ = 1 # source:False
-union_vfio_device_gfx_plane_info_0._fields_ = [
-    ('region_index', ctypes.c_uint32),
-    ('dmabuf_id', ctypes.c_uint32),
-]
-
-struct_vfio_device_gfx_plane_info._pack_ = 1 # source:False
-struct_vfio_device_gfx_plane_info._anonymous_ = ('_0',)
-struct_vfio_device_gfx_plane_info._fields_ = [
-    ('argsz', ctypes.c_uint32),
-    ('flags', ctypes.c_uint32),
-    ('drm_plane_type', ctypes.c_uint32),
-    ('drm_format', ctypes.c_uint32),
-    ('drm_format_mod', ctypes.c_uint64),
-    ('width', ctypes.c_uint32),
-    ('height', ctypes.c_uint32),
-    ('stride', ctypes.c_uint32),
-    ('size', ctypes.c_uint32),
-    ('x_pos', ctypes.c_uint32),
-    ('y_pos', ctypes.c_uint32),
-    ('x_hot', ctypes.c_uint32),
-    ('y_hot', ctypes.c_uint32),
-    ('_0', union_vfio_device_gfx_plane_info_0),
-    ('PADDING_0', ctypes.c_ubyte * 4),
-]
-
-class struct_vfio_device_ioeventfd(Structure):
-    pass
-
-struct_vfio_device_ioeventfd._pack_ = 1 # source:False
-struct_vfio_device_ioeventfd._fields_ = [
-    ('argsz', ctypes.c_uint32),
-    ('flags', ctypes.c_uint32),
-    ('offset', ctypes.c_uint64),
-    ('data', ctypes.c_uint64),
-    ('fd', ctypes.c_int32),
-    ('PADDING_0', ctypes.c_ubyte * 4),
-]
-
-class struct_vfio_device_feature(Structure):
-    pass
-
-struct_vfio_device_feature._pack_ = 1 # source:False
-struct_vfio_device_feature._fields_ = [
-    ('argsz', ctypes.c_uint32),
-    ('flags', ctypes.c_uint32),
-    ('data', ctypes.c_ubyte * 0),
-]
-
-class struct_vfio_iommu_type1_info(Structure):
-    pass
-
-struct_vfio_iommu_type1_info._pack_ = 1 # source:False
-struct_vfio_iommu_type1_info._fields_ = [
-    ('argsz', ctypes.c_uint32),
-    ('flags', ctypes.c_uint32),
-    ('iova_pgsizes', ctypes.c_uint64),
-    ('cap_offset', ctypes.c_uint32),
-    ('PADDING_0', ctypes.c_ubyte * 4),
-]
-
-class struct_vfio_iova_range(Structure):
-    pass
-
-struct_vfio_iova_range._pack_ = 1 # source:False
-struct_vfio_iova_range._fields_ = [
-    ('start', ctypes.c_uint64),
-    ('end', ctypes.c_uint64),
-]
-
-class struct_vfio_iommu_type1_info_cap_iova_range(Structure):
-    pass
-
-struct_vfio_iommu_type1_info_cap_iova_range._pack_ = 1 # source:False
-struct_vfio_iommu_type1_info_cap_iova_range._fields_ = [
-    ('header', struct_vfio_info_cap_header),
-    ('nr_iovas', ctypes.c_uint32),
-    ('reserved', ctypes.c_uint32),
-    ('iova_ranges', struct_vfio_iova_range * 0),
-]
-
-class struct_vfio_iommu_type1_info_cap_migration(Structure):
-    pass
-
-struct_vfio_iommu_type1_info_cap_migration._pack_ = 1 # source:False
-struct_vfio_iommu_type1_info_cap_migration._fields_ = [
-    ('header', struct_vfio_info_cap_header),
-    ('flags', ctypes.c_uint32),
-    ('PADDING_0', ctypes.c_ubyte * 4),
-    ('pgsize_bitmap', ctypes.c_uint64),
-    ('max_dirty_bitmap_size', ctypes.c_uint64),
-]
-
-class struct_vfio_iommu_type1_info_dma_avail(Structure):
-    pass
-
-struct_vfio_iommu_type1_info_dma_avail._pack_ = 1 # source:False
-struct_vfio_iommu_type1_info_dma_avail._fields_ = [
-    ('header', struct_vfio_info_cap_header),
-    ('avail', ctypes.c_uint32),
-]
-
-class struct_vfio_iommu_type1_dma_map(Structure):
-    pass
-
-struct_vfio_iommu_type1_dma_map._pack_ = 1 # source:False
-struct_vfio_iommu_type1_dma_map._fields_ = [
-    ('argsz', ctypes.c_uint32),
-    ('flags', ctypes.c_uint32),
-    ('vaddr', ctypes.c_uint64),
-    ('iova', ctypes.c_uint64),
-    ('size', ctypes.c_uint64),
-]
-
-class struct_vfio_bitmap(Structure):
-    pass
-
-struct_vfio_bitmap._pack_ = 1 # source:False
-struct_vfio_bitmap._fields_ = [
-    ('pgsize', ctypes.c_uint64),
-    ('size', ctypes.c_uint64),
-    ('data', ctypes.POINTER(ctypes.c_uint64)),
-]
-
-class struct_vfio_iommu_type1_dma_unmap(Structure):
-    pass
-
-struct_vfio_iommu_type1_dma_unmap._pack_ = 1 # source:False
-struct_vfio_iommu_type1_dma_unmap._fields_ = [
-    ('argsz', ctypes.c_uint32),
-    ('flags', ctypes.c_uint32),
-    ('iova', ctypes.c_uint64),
-    ('size', ctypes.c_uint64),
-    ('data', ctypes.c_ubyte * 0),
-]
-
-class struct_vfio_iommu_type1_dirty_bitmap(Structure):
-    pass
-
-struct_vfio_iommu_type1_dirty_bitmap._pack_ = 1 # source:False
-struct_vfio_iommu_type1_dirty_bitmap._fields_ = [
-    ('argsz', ctypes.c_uint32),
-    ('flags', ctypes.c_uint32),
-    ('data', ctypes.c_ubyte * 0),
-]
-
-class struct_vfio_iommu_type1_dirty_bitmap_get(Structure):
-    pass
-
-struct_vfio_iommu_type1_dirty_bitmap_get._pack_ = 1 # source:False
-struct_vfio_iommu_type1_dirty_bitmap_get._fields_ = [
-    ('iova', ctypes.c_uint64),
-    ('size', ctypes.c_uint64),
-    ('bitmap', struct_vfio_bitmap),
-]
-
-class struct_vfio_iommu_spapr_tce_ddw_info(Structure):
-    pass
-
-struct_vfio_iommu_spapr_tce_ddw_info._pack_ = 1 # source:False
-struct_vfio_iommu_spapr_tce_ddw_info._fields_ = [
-    ('pgsizes', ctypes.c_uint64),
-    ('max_dynamic_windows_supported', ctypes.c_uint32),
-    ('levels', ctypes.c_uint32),
-]
-
-class struct_vfio_iommu_spapr_tce_info(Structure):
-    pass
-
-struct_vfio_iommu_spapr_tce_info._pack_ = 1 # source:False
-struct_vfio_iommu_spapr_tce_info._fields_ = [
-    ('argsz', ctypes.c_uint32),
-    ('flags', ctypes.c_uint32),
-    ('dma32_window_start', ctypes.c_uint32),
-    ('dma32_window_size', ctypes.c_uint32),
-    ('ddw', struct_vfio_iommu_spapr_tce_ddw_info),
-]
-
-class struct_vfio_eeh_pe_err(Structure):
-    pass
-
-struct_vfio_eeh_pe_err._pack_ = 1 # source:False
-struct_vfio_eeh_pe_err._fields_ = [
-    ('type', ctypes.c_uint32),
-    ('func', ctypes.c_uint32),
-    ('addr', ctypes.c_uint64),
-    ('mask', ctypes.c_uint64),
-]
-
-class struct_vfio_eeh_pe_op(Structure):
-    pass
-
-class union_vfio_eeh_pe_op_0(Union):
-    _pack_ = 1 # source:False
-    _fields_ = [
-    ('err', struct_vfio_eeh_pe_err),
-     ]
-
-struct_vfio_eeh_pe_op._pack_ = 1 # source:False
-struct_vfio_eeh_pe_op._anonymous_ = ('_0',)
-struct_vfio_eeh_pe_op._fields_ = [
-    ('argsz', ctypes.c_uint32),
-    ('flags', ctypes.c_uint32),
-    ('op', ctypes.c_uint32),
-    ('PADDING_0', ctypes.c_ubyte * 4),
-    ('_0', union_vfio_eeh_pe_op_0),
-]
-
-class struct_vfio_iommu_spapr_register_memory(Structure):
-    pass
-
-struct_vfio_iommu_spapr_register_memory._pack_ = 1 # source:False
-struct_vfio_iommu_spapr_register_memory._fields_ = [
-    ('argsz', ctypes.c_uint32),
-    ('flags', ctypes.c_uint32),
-    ('vaddr', ctypes.c_uint64),
-    ('size', ctypes.c_uint64),
-]
-
-class struct_vfio_iommu_spapr_tce_create(Structure):
-    pass
-
-struct_vfio_iommu_spapr_tce_create._pack_ = 1 # source:False
-struct_vfio_iommu_spapr_tce_create._fields_ = [
-    ('argsz', ctypes.c_uint32),
-    ('flags', ctypes.c_uint32),
-    ('page_shift', ctypes.c_uint32),
-    ('__resv1', ctypes.c_uint32),
-    ('window_size', ctypes.c_uint64),
-    ('levels', ctypes.c_uint32),
-    ('__resv2', ctypes.c_uint32),
-    ('start_addr', ctypes.c_uint64),
-]
-
-class struct_vfio_iommu_spapr_tce_remove(Structure):
-    pass
-
-struct_vfio_iommu_spapr_tce_remove._pack_ = 1 # source:False
-struct_vfio_iommu_spapr_tce_remove._fields_ = [
-    ('argsz', ctypes.c_uint32),
-    ('flags', ctypes.c_uint32),
-    ('start_addr', ctypes.c_uint64),
-]
-
-__all__ = \
-    ['VFIO_API_VERSION', 'VFIO_BASE', 'VFIO_CCW_CONFIG_REGION_INDEX',
-    'VFIO_CCW_CRW_IRQ_INDEX', 'VFIO_CCW_IO_IRQ_INDEX',
-    'VFIO_CCW_NUM_IRQS', 'VFIO_CCW_NUM_REGIONS',
-    'VFIO_CCW_REQ_IRQ_INDEX', 'VFIO_DEVICE_API_AMBA_STRING',
-    'VFIO_DEVICE_API_AP_STRING', 'VFIO_DEVICE_API_CCW_STRING',
-    'VFIO_DEVICE_API_PCI_STRING', 'VFIO_DEVICE_API_PLATFORM_STRING',
-    'VFIO_DEVICE_FEATURE_GET', 'VFIO_DEVICE_FEATURE_MASK',
-    'VFIO_DEVICE_FEATURE_PCI_VF_TOKEN', 'VFIO_DEVICE_FEATURE_PROBE',
-    'VFIO_DEVICE_FEATURE_SET', 'VFIO_DEVICE_FLAGS_AMBA',
-    'VFIO_DEVICE_FLAGS_AP', 'VFIO_DEVICE_FLAGS_CAPS',
-    'VFIO_DEVICE_FLAGS_CCW', 'VFIO_DEVICE_FLAGS_FSL_MC',
-    'VFIO_DEVICE_FLAGS_PCI', 'VFIO_DEVICE_FLAGS_PLATFORM',
-    'VFIO_DEVICE_FLAGS_RESET', 'VFIO_DEVICE_GFX_LINK_STATE_DOWN',
-    'VFIO_DEVICE_GFX_LINK_STATE_UP', 'VFIO_DEVICE_INFO_CAP_ZPCI_BASE',
-    'VFIO_DEVICE_INFO_CAP_ZPCI_GROUP',
-    'VFIO_DEVICE_INFO_CAP_ZPCI_PFIP',
-    'VFIO_DEVICE_INFO_CAP_ZPCI_UTIL', 'VFIO_DEVICE_IOEVENTFD_16',
-    'VFIO_DEVICE_IOEVENTFD_32', 'VFIO_DEVICE_IOEVENTFD_64',
-    'VFIO_DEVICE_IOEVENTFD_8', 'VFIO_DEVICE_IOEVENTFD_SIZE_MASK',
-    'VFIO_DEVICE_STATE_MASK', 'VFIO_DEVICE_STATE_RESUMING',
-    'VFIO_DEVICE_STATE_RUNNING', 'VFIO_DEVICE_STATE_SAVING',
-    'VFIO_DEVICE_STATE_STOP', 'VFIO_DMA_CC_IOMMU',
-    'VFIO_DMA_MAP_FLAG_READ', 'VFIO_DMA_MAP_FLAG_VADDR',
-    'VFIO_DMA_MAP_FLAG_WRITE', 'VFIO_DMA_UNMAP_FLAG_ALL',
-    'VFIO_DMA_UNMAP_FLAG_GET_DIRTY_BITMAP',
-    'VFIO_DMA_UNMAP_FLAG_VADDR', 'VFIO_EEH', 'VFIO_EEH_PE_CONFIGURE',
-    'VFIO_EEH_PE_DISABLE', 'VFIO_EEH_PE_ENABLE',
-    'VFIO_EEH_PE_GET_STATE', 'VFIO_EEH_PE_INJECT_ERR',
-    'VFIO_EEH_PE_RESET_DEACTIVATE', 'VFIO_EEH_PE_RESET_FUNDAMENTAL',
-    'VFIO_EEH_PE_RESET_HOT', 'VFIO_EEH_PE_STATE_NORMAL',
-    'VFIO_EEH_PE_STATE_RESET', 'VFIO_EEH_PE_STATE_STOPPED',
-    'VFIO_EEH_PE_STATE_STOPPED_DMA', 'VFIO_EEH_PE_STATE_UNAVAIL',
-    'VFIO_EEH_PE_UNFREEZE_DMA', 'VFIO_EEH_PE_UNFREEZE_IO',
-    'VFIO_GFX_PLANE_TYPE_DMABUF', 'VFIO_GFX_PLANE_TYPE_PROBE',
-    'VFIO_GFX_PLANE_TYPE_REGION', 'VFIO_GROUP_FLAGS_CONTAINER_SET',
-    'VFIO_GROUP_FLAGS_VIABLE', 'VFIO_H',
-    'VFIO_IOMMU_DIRTY_PAGES_FLAG_GET_BITMAP',
-    'VFIO_IOMMU_DIRTY_PAGES_FLAG_START',
-    'VFIO_IOMMU_DIRTY_PAGES_FLAG_STOP', 'VFIO_IOMMU_INFO_CAPS',
-    'VFIO_IOMMU_INFO_PGSIZES', 'VFIO_IOMMU_SPAPR_INFO_DDW',
-    'VFIO_IOMMU_TYPE1_INFO_CAP_IOVA_RANGE',
-    'VFIO_IOMMU_TYPE1_INFO_CAP_MIGRATION',
-    'VFIO_IOMMU_TYPE1_INFO_DMA_AVAIL', 'VFIO_IRQ_INFO_AUTOMASKED',
-    'VFIO_IRQ_INFO_EVENTFD', 'VFIO_IRQ_INFO_MASKABLE',
-    'VFIO_IRQ_INFO_NORESIZE', 'VFIO_IRQ_SET_ACTION_MASK',
-    'VFIO_IRQ_SET_ACTION_TRIGGER', 'VFIO_IRQ_SET_ACTION_TYPE_MASK',
-    'VFIO_IRQ_SET_ACTION_UNMASK', 'VFIO_IRQ_SET_DATA_BOOL',
-    'VFIO_IRQ_SET_DATA_EVENTFD', 'VFIO_IRQ_SET_DATA_NONE',
-    'VFIO_IRQ_SET_DATA_TYPE_MASK', 'VFIO_NOIOMMU_IOMMU',
-    'VFIO_PCI_BAR0_REGION_INDEX', 'VFIO_PCI_BAR1_REGION_INDEX',
-    'VFIO_PCI_BAR2_REGION_INDEX', 'VFIO_PCI_BAR3_REGION_INDEX',
-    'VFIO_PCI_BAR4_REGION_INDEX', 'VFIO_PCI_BAR5_REGION_INDEX',
-    'VFIO_PCI_CONFIG_REGION_INDEX', 'VFIO_PCI_ERR_IRQ_INDEX',
-    'VFIO_PCI_INTX_IRQ_INDEX', 'VFIO_PCI_MSIX_IRQ_INDEX',
-    'VFIO_PCI_MSI_IRQ_INDEX', 'VFIO_PCI_NUM_IRQS',
-    'VFIO_PCI_NUM_REGIONS', 'VFIO_PCI_REQ_IRQ_INDEX',
-    'VFIO_PCI_ROM_REGION_INDEX', 'VFIO_PCI_VGA_REGION_INDEX',
-    'VFIO_REGION_INFO_CAP_MSIX_MAPPABLE',
-    'VFIO_REGION_INFO_CAP_NVLINK2_LNKSPD',
-    'VFIO_REGION_INFO_CAP_NVLINK2_SSATGT',
-    'VFIO_REGION_INFO_CAP_SPARSE_MMAP', 'VFIO_REGION_INFO_CAP_TYPE',
-    'VFIO_REGION_INFO_FLAG_CAPS', 'VFIO_REGION_INFO_FLAG_MMAP',
-    'VFIO_REGION_INFO_FLAG_READ', 'VFIO_REGION_INFO_FLAG_WRITE',
-    'VFIO_REGION_SUBTYPE_CCW_ASYNC_CMD',
-    'VFIO_REGION_SUBTYPE_CCW_CRW', 'VFIO_REGION_SUBTYPE_CCW_SCHIB',
-    'VFIO_REGION_SUBTYPE_GFX_EDID',
-    'VFIO_REGION_SUBTYPE_IBM_NVLINK2_ATSD',
-    'VFIO_REGION_SUBTYPE_INTEL_IGD_HOST_CFG',
-    'VFIO_REGION_SUBTYPE_INTEL_IGD_LPC_CFG',
-    'VFIO_REGION_SUBTYPE_INTEL_IGD_OPREGION',
-    'VFIO_REGION_SUBTYPE_MIGRATION',
-    'VFIO_REGION_SUBTYPE_NVIDIA_NVLINK2_RAM', 'VFIO_REGION_TYPE_CCW',
-    'VFIO_REGION_TYPE_GFX', 'VFIO_REGION_TYPE_MIGRATION',
-    'VFIO_REGION_TYPE_PCI_VENDOR_MASK',
-    'VFIO_REGION_TYPE_PCI_VENDOR_TYPE', 'VFIO_SPAPR_TCE_IOMMU',
-    'VFIO_SPAPR_TCE_v2_IOMMU', 'VFIO_TYPE', 'VFIO_TYPE1_IOMMU',
-    'VFIO_TYPE1_NESTING_IOMMU', 'VFIO_TYPE1v2_IOMMU',
-    'VFIO_UNMAP_ALL', 'VFIO_UPDATE_VADDR', '_IO', '_IOR', '_IOW',
-    '_IOWR', 'c__Ea_VFIO_CCW_CONFIG_REGION_INDEX',
-    'c__Ea_VFIO_CCW_IO_IRQ_INDEX', 'c__Ea_VFIO_PCI_BAR0_REGION_INDEX',
-    'c__Ea_VFIO_PCI_INTX_IRQ_INDEX', 'struct_vfio_bitmap',
-    'struct_vfio_device_feature', 'struct_vfio_device_gfx_plane_info',
-    'struct_vfio_device_info', 'struct_vfio_device_ioeventfd',
-    'struct_vfio_device_migration_info', 'struct_vfio_eeh_pe_err',
-    'struct_vfio_eeh_pe_op', 'struct_vfio_group_status',
-    'struct_vfio_info_cap_header',
-    'struct_vfio_iommu_spapr_register_memory',
-    'struct_vfio_iommu_spapr_tce_create',
-    'struct_vfio_iommu_spapr_tce_ddw_info',
-    'struct_vfio_iommu_spapr_tce_info',
-    'struct_vfio_iommu_spapr_tce_remove',
-    'struct_vfio_iommu_type1_dirty_bitmap',
-    'struct_vfio_iommu_type1_dirty_bitmap_get',
-    'struct_vfio_iommu_type1_dma_map',
-    'struct_vfio_iommu_type1_dma_unmap',
-    'struct_vfio_iommu_type1_info',
-    'struct_vfio_iommu_type1_info_cap_iova_range',
-    'struct_vfio_iommu_type1_info_cap_migration',
-    'struct_vfio_iommu_type1_info_dma_avail',
-    'struct_vfio_iova_range', 'struct_vfio_irq_info',
-    'struct_vfio_irq_set', 'struct_vfio_pci_dependent_device',
-    'struct_vfio_pci_hot_reset', 'struct_vfio_pci_hot_reset_info',
-    'struct_vfio_region_gfx_edid', 'struct_vfio_region_info',
-    'struct_vfio_region_info_cap_nvlink2_lnkspd',
-    'struct_vfio_region_info_cap_nvlink2_ssatgt',
-    'struct_vfio_region_info_cap_sparse_mmap',
-    'struct_vfio_region_info_cap_type',
-    'struct_vfio_region_sparse_mmap_area',
-    'union_vfio_device_gfx_plane_info_0', 'union_vfio_eeh_pe_op_0']
+from typing import Annotated, Literal, TypeAlias
+from tinygrad.runtime.support.c import _IO, _IOW, _IOR, _IOWR
+from tinygrad.runtime.support import c
+@c.record
+class struct_vfio_info_cap_header(c.Struct):
+  SIZE = 8
+  id: Annotated[Annotated[int, ctypes.c_uint16], 0]
+  version: Annotated[Annotated[int, ctypes.c_uint16], 2]
+  next: Annotated[Annotated[int, ctypes.c_uint32], 4]
+__u16: TypeAlias = Annotated[int, ctypes.c_uint16]
+__u32: TypeAlias = Annotated[int, ctypes.c_uint32]
+@c.record
+class struct_vfio_group_status(c.Struct):
+  SIZE = 8
+  argsz: Annotated[Annotated[int, ctypes.c_uint32], 0]
+  flags: Annotated[Annotated[int, ctypes.c_uint32], 4]
+@c.record
+class struct_vfio_device_info(c.Struct):
+  SIZE = 24
+  argsz: Annotated[Annotated[int, ctypes.c_uint32], 0]
+  flags: Annotated[Annotated[int, ctypes.c_uint32], 4]
+  num_regions: Annotated[Annotated[int, ctypes.c_uint32], 8]
+  num_irqs: Annotated[Annotated[int, ctypes.c_uint32], 12]
+  cap_offset: Annotated[Annotated[int, ctypes.c_uint32], 16]
+  pad: Annotated[Annotated[int, ctypes.c_uint32], 20]
+@c.record
+class struct_vfio_device_info_cap_pci_atomic_comp(c.Struct):
+  SIZE = 16
+  header: Annotated[struct_vfio_info_cap_header, 0]
+  flags: Annotated[Annotated[int, ctypes.c_uint32], 8]
+  reserved: Annotated[Annotated[int, ctypes.c_uint32], 12]
+@c.record
+class struct_vfio_region_info(c.Struct):
+  SIZE = 32
+  argsz: Annotated[Annotated[int, ctypes.c_uint32], 0]
+  flags: Annotated[Annotated[int, ctypes.c_uint32], 4]
+  index: Annotated[Annotated[int, ctypes.c_uint32], 8]
+  cap_offset: Annotated[Annotated[int, ctypes.c_uint32], 12]
+  size: Annotated[Annotated[int, ctypes.c_uint64], 16]
+  offset: Annotated[Annotated[int, ctypes.c_uint64], 24]
+__u64: TypeAlias = Annotated[int, ctypes.c_uint64]
+@c.record
+class struct_vfio_region_sparse_mmap_area(c.Struct):
+  SIZE = 16
+  offset: Annotated[Annotated[int, ctypes.c_uint64], 0]
+  size: Annotated[Annotated[int, ctypes.c_uint64], 8]
+@c.record
+class struct_vfio_region_info_cap_sparse_mmap(c.Struct):
+  SIZE = 16
+  header: Annotated[struct_vfio_info_cap_header, 0]
+  nr_areas: Annotated[Annotated[int, ctypes.c_uint32], 8]
+  reserved: Annotated[Annotated[int, ctypes.c_uint32], 12]
+  areas: Annotated[c.Array[struct_vfio_region_sparse_mmap_area, Literal[0]], 16]
+@c.record
+class struct_vfio_region_info_cap_type(c.Struct):
+  SIZE = 16
+  header: Annotated[struct_vfio_info_cap_header, 0]
+  type: Annotated[Annotated[int, ctypes.c_uint32], 8]
+  subtype: Annotated[Annotated[int, ctypes.c_uint32], 12]
+@c.record
+class struct_vfio_region_gfx_edid(c.Struct):
+  SIZE = 24
+  edid_offset: Annotated[Annotated[int, ctypes.c_uint32], 0]
+  edid_max_size: Annotated[Annotated[int, ctypes.c_uint32], 4]
+  edid_size: Annotated[Annotated[int, ctypes.c_uint32], 8]
+  max_xres: Annotated[Annotated[int, ctypes.c_uint32], 12]
+  max_yres: Annotated[Annotated[int, ctypes.c_uint32], 16]
+  link_state: Annotated[Annotated[int, ctypes.c_uint32], 20]
+@c.record
+class struct_vfio_device_migration_info(c.Struct):
+  SIZE = 32
+  device_state: Annotated[Annotated[int, ctypes.c_uint32], 0]
+  reserved: Annotated[Annotated[int, ctypes.c_uint32], 4]
+  pending_bytes: Annotated[Annotated[int, ctypes.c_uint64], 8]
+  data_offset: Annotated[Annotated[int, ctypes.c_uint64], 16]
+  data_size: Annotated[Annotated[int, ctypes.c_uint64], 24]
+@c.record
+class struct_vfio_region_info_cap_nvlink2_ssatgt(c.Struct):
+  SIZE = 16
+  header: Annotated[struct_vfio_info_cap_header, 0]
+  tgt: Annotated[Annotated[int, ctypes.c_uint64], 8]
+@c.record
+class struct_vfio_region_info_cap_nvlink2_lnkspd(c.Struct):
+  SIZE = 16
+  header: Annotated[struct_vfio_info_cap_header, 0]
+  link_speed: Annotated[Annotated[int, ctypes.c_uint32], 8]
+  __pad: Annotated[Annotated[int, ctypes.c_uint32], 12]
+@c.record
+class struct_vfio_irq_info(c.Struct):
+  SIZE = 16
+  argsz: Annotated[Annotated[int, ctypes.c_uint32], 0]
+  flags: Annotated[Annotated[int, ctypes.c_uint32], 4]
+  index: Annotated[Annotated[int, ctypes.c_uint32], 8]
+  count: Annotated[Annotated[int, ctypes.c_uint32], 12]
+@c.record
+class struct_vfio_irq_set(c.Struct):
+  SIZE = 20
+  argsz: Annotated[Annotated[int, ctypes.c_uint32], 0]
+  flags: Annotated[Annotated[int, ctypes.c_uint32], 4]
+  index: Annotated[Annotated[int, ctypes.c_uint32], 8]
+  start: Annotated[Annotated[int, ctypes.c_uint32], 12]
+  count: Annotated[Annotated[int, ctypes.c_uint32], 16]
+  data: Annotated[c.Array[Annotated[int, ctypes.c_ubyte], Literal[0]], 20]
+__u8: TypeAlias = Annotated[int, ctypes.c_ubyte]
+class _anonenum0(Annotated[int, ctypes.c_uint32], c.Enum): pass
+VFIO_PCI_BAR0_REGION_INDEX = _anonenum0.define('VFIO_PCI_BAR0_REGION_INDEX', 0)
+VFIO_PCI_BAR1_REGION_INDEX = _anonenum0.define('VFIO_PCI_BAR1_REGION_INDEX', 1)
+VFIO_PCI_BAR2_REGION_INDEX = _anonenum0.define('VFIO_PCI_BAR2_REGION_INDEX', 2)
+VFIO_PCI_BAR3_REGION_INDEX = _anonenum0.define('VFIO_PCI_BAR3_REGION_INDEX', 3)
+VFIO_PCI_BAR4_REGION_INDEX = _anonenum0.define('VFIO_PCI_BAR4_REGION_INDEX', 4)
+VFIO_PCI_BAR5_REGION_INDEX = _anonenum0.define('VFIO_PCI_BAR5_REGION_INDEX', 5)
+VFIO_PCI_ROM_REGION_INDEX = _anonenum0.define('VFIO_PCI_ROM_REGION_INDEX', 6)
+VFIO_PCI_CONFIG_REGION_INDEX = _anonenum0.define('VFIO_PCI_CONFIG_REGION_INDEX', 7)
+VFIO_PCI_VGA_REGION_INDEX = _anonenum0.define('VFIO_PCI_VGA_REGION_INDEX', 8)
+VFIO_PCI_NUM_REGIONS = _anonenum0.define('VFIO_PCI_NUM_REGIONS', 9)
+
+class _anonenum1(Annotated[int, ctypes.c_uint32], c.Enum): pass
+VFIO_PCI_INTX_IRQ_INDEX = _anonenum1.define('VFIO_PCI_INTX_IRQ_INDEX', 0)
+VFIO_PCI_MSI_IRQ_INDEX = _anonenum1.define('VFIO_PCI_MSI_IRQ_INDEX', 1)
+VFIO_PCI_MSIX_IRQ_INDEX = _anonenum1.define('VFIO_PCI_MSIX_IRQ_INDEX', 2)
+VFIO_PCI_ERR_IRQ_INDEX = _anonenum1.define('VFIO_PCI_ERR_IRQ_INDEX', 3)
+VFIO_PCI_REQ_IRQ_INDEX = _anonenum1.define('VFIO_PCI_REQ_IRQ_INDEX', 4)
+VFIO_PCI_NUM_IRQS = _anonenum1.define('VFIO_PCI_NUM_IRQS', 5)
+
+class _anonenum2(Annotated[int, ctypes.c_uint32], c.Enum): pass
+VFIO_CCW_CONFIG_REGION_INDEX = _anonenum2.define('VFIO_CCW_CONFIG_REGION_INDEX', 0)
+VFIO_CCW_NUM_REGIONS = _anonenum2.define('VFIO_CCW_NUM_REGIONS', 1)
+
+class _anonenum3(Annotated[int, ctypes.c_uint32], c.Enum): pass
+VFIO_CCW_IO_IRQ_INDEX = _anonenum3.define('VFIO_CCW_IO_IRQ_INDEX', 0)
+VFIO_CCW_CRW_IRQ_INDEX = _anonenum3.define('VFIO_CCW_CRW_IRQ_INDEX', 1)
+VFIO_CCW_REQ_IRQ_INDEX = _anonenum3.define('VFIO_CCW_REQ_IRQ_INDEX', 2)
+VFIO_CCW_NUM_IRQS = _anonenum3.define('VFIO_CCW_NUM_IRQS', 3)
+
+class _anonenum4(Annotated[int, ctypes.c_uint32], c.Enum): pass
+VFIO_AP_REQ_IRQ_INDEX = _anonenum4.define('VFIO_AP_REQ_IRQ_INDEX', 0)
+VFIO_AP_CFG_CHG_IRQ_INDEX = _anonenum4.define('VFIO_AP_CFG_CHG_IRQ_INDEX', 1)
+VFIO_AP_NUM_IRQS = _anonenum4.define('VFIO_AP_NUM_IRQS', 2)
+
+@c.record
+class struct_vfio_pci_dependent_device(c.Struct):
+  SIZE = 8
+  group_id: Annotated[Annotated[int, ctypes.c_uint32], 0]
+  devid: Annotated[Annotated[int, ctypes.c_uint32], 0]
+  segment: Annotated[Annotated[int, ctypes.c_uint16], 4]
+  bus: Annotated[Annotated[int, ctypes.c_ubyte], 6]
+  devfn: Annotated[Annotated[int, ctypes.c_ubyte], 7]
+@c.record
+class struct_vfio_pci_hot_reset_info(c.Struct):
+  SIZE = 12
+  argsz: Annotated[Annotated[int, ctypes.c_uint32], 0]
+  flags: Annotated[Annotated[int, ctypes.c_uint32], 4]
+  count: Annotated[Annotated[int, ctypes.c_uint32], 8]
+  devices: Annotated[c.Array[struct_vfio_pci_dependent_device, Literal[0]], 12]
+@c.record
+class struct_vfio_pci_hot_reset(c.Struct):
+  SIZE = 12
+  argsz: Annotated[Annotated[int, ctypes.c_uint32], 0]
+  flags: Annotated[Annotated[int, ctypes.c_uint32], 4]
+  count: Annotated[Annotated[int, ctypes.c_uint32], 8]
+  group_fds: Annotated[c.Array[Annotated[int, ctypes.c_int32], Literal[0]], 12]
+__s32: TypeAlias = Annotated[int, ctypes.c_int32]
+@c.record
+class struct_vfio_device_gfx_plane_info(c.Struct):
+  SIZE = 64
+  argsz: Annotated[Annotated[int, ctypes.c_uint32], 0]
+  flags: Annotated[Annotated[int, ctypes.c_uint32], 4]
+  drm_plane_type: Annotated[Annotated[int, ctypes.c_uint32], 8]
+  drm_format: Annotated[Annotated[int, ctypes.c_uint32], 12]
+  drm_format_mod: Annotated[Annotated[int, ctypes.c_uint64], 16]
+  width: Annotated[Annotated[int, ctypes.c_uint32], 24]
+  height: Annotated[Annotated[int, ctypes.c_uint32], 28]
+  stride: Annotated[Annotated[int, ctypes.c_uint32], 32]
+  size: Annotated[Annotated[int, ctypes.c_uint32], 36]
+  x_pos: Annotated[Annotated[int, ctypes.c_uint32], 40]
+  y_pos: Annotated[Annotated[int, ctypes.c_uint32], 44]
+  x_hot: Annotated[Annotated[int, ctypes.c_uint32], 48]
+  y_hot: Annotated[Annotated[int, ctypes.c_uint32], 52]
+  region_index: Annotated[Annotated[int, ctypes.c_uint32], 56]
+  dmabuf_id: Annotated[Annotated[int, ctypes.c_uint32], 56]
+  reserved: Annotated[Annotated[int, ctypes.c_uint32], 60]
+@c.record
+class struct_vfio_device_ioeventfd(c.Struct):
+  SIZE = 32
+  argsz: Annotated[Annotated[int, ctypes.c_uint32], 0]
+  flags: Annotated[Annotated[int, ctypes.c_uint32], 4]
+  offset: Annotated[Annotated[int, ctypes.c_uint64], 8]
+  data: Annotated[Annotated[int, ctypes.c_uint64], 16]
+  fd: Annotated[Annotated[int, ctypes.c_int32], 24]
+  reserved: Annotated[Annotated[int, ctypes.c_uint32], 28]
+@c.record
+class struct_vfio_device_feature(c.Struct):
+  SIZE = 8
+  argsz: Annotated[Annotated[int, ctypes.c_uint32], 0]
+  flags: Annotated[Annotated[int, ctypes.c_uint32], 4]
+  data: Annotated[c.Array[Annotated[int, ctypes.c_ubyte], Literal[0]], 8]
+@c.record
+class struct_vfio_device_bind_iommufd(c.Struct):
+  SIZE = 24
+  argsz: Annotated[Annotated[int, ctypes.c_uint32], 0]
+  flags: Annotated[Annotated[int, ctypes.c_uint32], 4]
+  iommufd: Annotated[Annotated[int, ctypes.c_int32], 8]
+  out_devid: Annotated[Annotated[int, ctypes.c_uint32], 12]
+  token_uuid_ptr: Annotated[Annotated[int, ctypes.c_uint64], 16]
+@c.record
+class struct_vfio_device_attach_iommufd_pt(c.Struct):
+  SIZE = 16
+  argsz: Annotated[Annotated[int, ctypes.c_uint32], 0]
+  flags: Annotated[Annotated[int, ctypes.c_uint32], 4]
+  pt_id: Annotated[Annotated[int, ctypes.c_uint32], 8]
+  pasid: Annotated[Annotated[int, ctypes.c_uint32], 12]
+@c.record
+class struct_vfio_device_detach_iommufd_pt(c.Struct):
+  SIZE = 12
+  argsz: Annotated[Annotated[int, ctypes.c_uint32], 0]
+  flags: Annotated[Annotated[int, ctypes.c_uint32], 4]
+  pasid: Annotated[Annotated[int, ctypes.c_uint32], 8]
+@c.record
+class struct_vfio_device_feature_migration(c.Struct):
+  SIZE = 8
+  flags: Annotated[Annotated[int, ctypes.c_uint64], 0]
+@c.record
+class struct_vfio_device_feature_mig_state(c.Struct):
+  SIZE = 8
+  device_state: Annotated[Annotated[int, ctypes.c_uint32], 0]
+  data_fd: Annotated[Annotated[int, ctypes.c_int32], 4]
+class enum_vfio_device_mig_state(Annotated[int, ctypes.c_uint32], c.Enum): pass
+VFIO_DEVICE_STATE_ERROR = enum_vfio_device_mig_state.define('VFIO_DEVICE_STATE_ERROR', 0)
+VFIO_DEVICE_STATE_STOP = enum_vfio_device_mig_state.define('VFIO_DEVICE_STATE_STOP', 1)
+VFIO_DEVICE_STATE_RUNNING = enum_vfio_device_mig_state.define('VFIO_DEVICE_STATE_RUNNING', 2)
+VFIO_DEVICE_STATE_STOP_COPY = enum_vfio_device_mig_state.define('VFIO_DEVICE_STATE_STOP_COPY', 3)
+VFIO_DEVICE_STATE_RESUMING = enum_vfio_device_mig_state.define('VFIO_DEVICE_STATE_RESUMING', 4)
+VFIO_DEVICE_STATE_RUNNING_P2P = enum_vfio_device_mig_state.define('VFIO_DEVICE_STATE_RUNNING_P2P', 5)
+VFIO_DEVICE_STATE_PRE_COPY = enum_vfio_device_mig_state.define('VFIO_DEVICE_STATE_PRE_COPY', 6)
+VFIO_DEVICE_STATE_PRE_COPY_P2P = enum_vfio_device_mig_state.define('VFIO_DEVICE_STATE_PRE_COPY_P2P', 7)
+VFIO_DEVICE_STATE_NR = enum_vfio_device_mig_state.define('VFIO_DEVICE_STATE_NR', 8)
+
+@c.record
+class struct_vfio_precopy_info(c.Struct):
+  SIZE = 24
+  argsz: Annotated[Annotated[int, ctypes.c_uint32], 0]
+  flags: Annotated[Annotated[int, ctypes.c_uint32], 4]
+  initial_bytes: Annotated[Annotated[int, ctypes.c_uint64], 8]
+  dirty_bytes: Annotated[Annotated[int, ctypes.c_uint64], 16]
+@c.record
+class struct_vfio_device_low_power_entry_with_wakeup(c.Struct):
+  SIZE = 8
+  wakeup_eventfd: Annotated[Annotated[int, ctypes.c_int32], 0]
+  reserved: Annotated[Annotated[int, ctypes.c_uint32], 4]
+@c.record
+class struct_vfio_device_feature_dma_logging_control(c.Struct):
+  SIZE = 24
+  page_size: Annotated[Annotated[int, ctypes.c_uint64], 0]
+  num_ranges: Annotated[Annotated[int, ctypes.c_uint32], 8]
+  __reserved: Annotated[Annotated[int, ctypes.c_uint32], 12]
+  ranges: Annotated[Annotated[int, ctypes.c_uint64], 16]
+@c.record
+class struct_vfio_device_feature_dma_logging_range(c.Struct):
+  SIZE = 16
+  iova: Annotated[Annotated[int, ctypes.c_uint64], 0]
+  length: Annotated[Annotated[int, ctypes.c_uint64], 8]
+@c.record
+class struct_vfio_device_feature_dma_logging_report(c.Struct):
+  SIZE = 32
+  iova: Annotated[Annotated[int, ctypes.c_uint64], 0]
+  length: Annotated[Annotated[int, ctypes.c_uint64], 8]
+  page_size: Annotated[Annotated[int, ctypes.c_uint64], 16]
+  bitmap: Annotated[Annotated[int, ctypes.c_uint64], 24]
+@c.record
+class struct_vfio_device_feature_mig_data_size(c.Struct):
+  SIZE = 8
+  stop_copy_length: Annotated[Annotated[int, ctypes.c_uint64], 0]
+@c.record
+class struct_vfio_device_feature_bus_master(c.Struct):
+  SIZE = 4
+  op: Annotated[Annotated[int, ctypes.c_uint32], 0]
+@c.record
+class struct_vfio_iommu_type1_info(c.Struct):
+  SIZE = 24
+  argsz: Annotated[Annotated[int, ctypes.c_uint32], 0]
+  flags: Annotated[Annotated[int, ctypes.c_uint32], 4]
+  iova_pgsizes: Annotated[Annotated[int, ctypes.c_uint64], 8]
+  cap_offset: Annotated[Annotated[int, ctypes.c_uint32], 16]
+  pad: Annotated[Annotated[int, ctypes.c_uint32], 20]
+@c.record
+class struct_vfio_iova_range(c.Struct):
+  SIZE = 16
+  start: Annotated[Annotated[int, ctypes.c_uint64], 0]
+  end: Annotated[Annotated[int, ctypes.c_uint64], 8]
+@c.record
+class struct_vfio_iommu_type1_info_cap_iova_range(c.Struct):
+  SIZE = 16
+  header: Annotated[struct_vfio_info_cap_header, 0]
+  nr_iovas: Annotated[Annotated[int, ctypes.c_uint32], 8]
+  reserved: Annotated[Annotated[int, ctypes.c_uint32], 12]
+  iova_ranges: Annotated[c.Array[struct_vfio_iova_range, Literal[0]], 16]
+@c.record
+class struct_vfio_iommu_type1_info_cap_migration(c.Struct):
+  SIZE = 32
+  header: Annotated[struct_vfio_info_cap_header, 0]
+  flags: Annotated[Annotated[int, ctypes.c_uint32], 8]
+  pgsize_bitmap: Annotated[Annotated[int, ctypes.c_uint64], 16]
+  max_dirty_bitmap_size: Annotated[Annotated[int, ctypes.c_uint64], 24]
+@c.record
+class struct_vfio_iommu_type1_info_dma_avail(c.Struct):
+  SIZE = 12
+  header: Annotated[struct_vfio_info_cap_header, 0]
+  avail: Annotated[Annotated[int, ctypes.c_uint32], 8]
+@c.record
+class struct_vfio_iommu_type1_dma_map(c.Struct):
+  SIZE = 32
+  argsz: Annotated[Annotated[int, ctypes.c_uint32], 0]
+  flags: Annotated[Annotated[int, ctypes.c_uint32], 4]
+  vaddr: Annotated[Annotated[int, ctypes.c_uint64], 8]
+  iova: Annotated[Annotated[int, ctypes.c_uint64], 16]
+  size: Annotated[Annotated[int, ctypes.c_uint64], 24]
+@c.record
+class struct_vfio_bitmap(c.Struct):
+  SIZE = 24
+  pgsize: Annotated[Annotated[int, ctypes.c_uint64], 0]
+  size: Annotated[Annotated[int, ctypes.c_uint64], 8]
+  data: Annotated[c.POINTER[Annotated[int, ctypes.c_uint64]], 16]
+@c.record
+class struct_vfio_iommu_type1_dma_unmap(c.Struct):
+  SIZE = 24
+  argsz: Annotated[Annotated[int, ctypes.c_uint32], 0]
+  flags: Annotated[Annotated[int, ctypes.c_uint32], 4]
+  iova: Annotated[Annotated[int, ctypes.c_uint64], 8]
+  size: Annotated[Annotated[int, ctypes.c_uint64], 16]
+  data: Annotated[c.Array[Annotated[int, ctypes.c_ubyte], Literal[0]], 24]
+@c.record
+class struct_vfio_iommu_type1_dirty_bitmap(c.Struct):
+  SIZE = 8
+  argsz: Annotated[Annotated[int, ctypes.c_uint32], 0]
+  flags: Annotated[Annotated[int, ctypes.c_uint32], 4]
+  data: Annotated[c.Array[Annotated[int, ctypes.c_ubyte], Literal[0]], 8]
+@c.record
+class struct_vfio_iommu_type1_dirty_bitmap_get(c.Struct):
+  SIZE = 40
+  iova: Annotated[Annotated[int, ctypes.c_uint64], 0]
+  size: Annotated[Annotated[int, ctypes.c_uint64], 8]
+  bitmap: Annotated[struct_vfio_bitmap, 16]
+@c.record
+class struct_vfio_iommu_spapr_tce_ddw_info(c.Struct):
+  SIZE = 16
+  pgsizes: Annotated[Annotated[int, ctypes.c_uint64], 0]
+  max_dynamic_windows_supported: Annotated[Annotated[int, ctypes.c_uint32], 8]
+  levels: Annotated[Annotated[int, ctypes.c_uint32], 12]
+@c.record
+class struct_vfio_iommu_spapr_tce_info(c.Struct):
+  SIZE = 32
+  argsz: Annotated[Annotated[int, ctypes.c_uint32], 0]
+  flags: Annotated[Annotated[int, ctypes.c_uint32], 4]
+  dma32_window_start: Annotated[Annotated[int, ctypes.c_uint32], 8]
+  dma32_window_size: Annotated[Annotated[int, ctypes.c_uint32], 12]
+  ddw: Annotated[struct_vfio_iommu_spapr_tce_ddw_info, 16]
+@c.record
+class struct_vfio_eeh_pe_err(c.Struct):
+  SIZE = 24
+  type: Annotated[Annotated[int, ctypes.c_uint32], 0]
+  func: Annotated[Annotated[int, ctypes.c_uint32], 4]
+  addr: Annotated[Annotated[int, ctypes.c_uint64], 8]
+  mask: Annotated[Annotated[int, ctypes.c_uint64], 16]
+@c.record
+class struct_vfio_eeh_pe_op(c.Struct):
+  SIZE = 40
+  argsz: Annotated[Annotated[int, ctypes.c_uint32], 0]
+  flags: Annotated[Annotated[int, ctypes.c_uint32], 4]
+  op: Annotated[Annotated[int, ctypes.c_uint32], 8]
+  err: Annotated[struct_vfio_eeh_pe_err, 16]
+@c.record
+class struct_vfio_iommu_spapr_register_memory(c.Struct):
+  SIZE = 24
+  argsz: Annotated[Annotated[int, ctypes.c_uint32], 0]
+  flags: Annotated[Annotated[int, ctypes.c_uint32], 4]
+  vaddr: Annotated[Annotated[int, ctypes.c_uint64], 8]
+  size: Annotated[Annotated[int, ctypes.c_uint64], 16]
+@c.record
+class struct_vfio_iommu_spapr_tce_create(c.Struct):
+  SIZE = 40
+  argsz: Annotated[Annotated[int, ctypes.c_uint32], 0]
+  flags: Annotated[Annotated[int, ctypes.c_uint32], 4]
+  page_shift: Annotated[Annotated[int, ctypes.c_uint32], 8]
+  __resv1: Annotated[Annotated[int, ctypes.c_uint32], 12]
+  window_size: Annotated[Annotated[int, ctypes.c_uint64], 16]
+  levels: Annotated[Annotated[int, ctypes.c_uint32], 24]
+  __resv2: Annotated[Annotated[int, ctypes.c_uint32], 28]
+  start_addr: Annotated[Annotated[int, ctypes.c_uint64], 32]
+@c.record
+class struct_vfio_iommu_spapr_tce_remove(c.Struct):
+  SIZE = 16
+  argsz: Annotated[Annotated[int, ctypes.c_uint32], 0]
+  flags: Annotated[Annotated[int, ctypes.c_uint32], 4]
+  start_addr: Annotated[Annotated[int, ctypes.c_uint64], 8]
+c.init_records()
+VFIO_API_VERSION = 0 # type: ignore
+VFIO_TYPE1_IOMMU = 1 # type: ignore
+VFIO_SPAPR_TCE_IOMMU = 2 # type: ignore
+VFIO_TYPE1v2_IOMMU = 3 # type: ignore
+VFIO_DMA_CC_IOMMU = 4 # type: ignore
+VFIO_EEH = 5 # type: ignore
+__VFIO_RESERVED_TYPE1_NESTING_IOMMU = 6 # type: ignore
+VFIO_SPAPR_TCE_v2_IOMMU = 7 # type: ignore
+VFIO_NOIOMMU_IOMMU = 8 # type: ignore
+VFIO_UNMAP_ALL = 9 # type: ignore
+VFIO_UPDATE_VADDR = 10 # type: ignore
+VFIO_TYPE = (';') # type: ignore
+VFIO_BASE = 100 # type: ignore
+VFIO_GET_API_VERSION = _IO(VFIO_TYPE, VFIO_BASE + 0) # type: ignore
+VFIO_CHECK_EXTENSION = _IO(VFIO_TYPE, VFIO_BASE + 1) # type: ignore
+VFIO_SET_IOMMU = _IO(VFIO_TYPE, VFIO_BASE + 2) # type: ignore
+VFIO_GROUP_FLAGS_VIABLE = (1 << 0) # type: ignore
+VFIO_GROUP_FLAGS_CONTAINER_SET = (1 << 1) # type: ignore
+VFIO_GROUP_GET_STATUS = _IO(VFIO_TYPE, VFIO_BASE + 3) # type: ignore
+VFIO_GROUP_SET_CONTAINER = _IO(VFIO_TYPE, VFIO_BASE + 4) # type: ignore
+VFIO_GROUP_UNSET_CONTAINER = _IO(VFIO_TYPE, VFIO_BASE + 5) # type: ignore
+VFIO_GROUP_GET_DEVICE_FD = _IO(VFIO_TYPE, VFIO_BASE + 6) # type: ignore
+VFIO_DEVICE_FLAGS_RESET = (1 << 0) # type: ignore
+VFIO_DEVICE_FLAGS_PCI = (1 << 1) # type: ignore
+VFIO_DEVICE_FLAGS_PLATFORM = (1 << 2) # type: ignore
+VFIO_DEVICE_FLAGS_AMBA = (1 << 3) # type: ignore
+VFIO_DEVICE_FLAGS_CCW = (1 << 4) # type: ignore
+VFIO_DEVICE_FLAGS_AP = (1 << 5) # type: ignore
+VFIO_DEVICE_FLAGS_FSL_MC = (1 << 6) # type: ignore
+VFIO_DEVICE_FLAGS_CAPS = (1 << 7) # type: ignore
+VFIO_DEVICE_FLAGS_CDX = (1 << 8) # type: ignore
+VFIO_DEVICE_GET_INFO = _IO(VFIO_TYPE, VFIO_BASE + 7) # type: ignore
+VFIO_DEVICE_API_PCI_STRING = "vfio-pci" # type: ignore
+VFIO_DEVICE_API_PLATFORM_STRING = "vfio-platform" # type: ignore
+VFIO_DEVICE_API_AMBA_STRING = "vfio-amba" # type: ignore
+VFIO_DEVICE_API_CCW_STRING = "vfio-ccw" # type: ignore
+VFIO_DEVICE_API_AP_STRING = "vfio-ap" # type: ignore
+VFIO_DEVICE_INFO_CAP_ZPCI_BASE = 1 # type: ignore
+VFIO_DEVICE_INFO_CAP_ZPCI_GROUP = 2 # type: ignore
+VFIO_DEVICE_INFO_CAP_ZPCI_UTIL = 3 # type: ignore
+VFIO_DEVICE_INFO_CAP_ZPCI_PFIP = 4 # type: ignore
+VFIO_DEVICE_INFO_CAP_PCI_ATOMIC_COMP = 5 # type: ignore
+VFIO_PCI_ATOMIC_COMP32 = (1 << 0) # type: ignore
+VFIO_PCI_ATOMIC_COMP64 = (1 << 1) # type: ignore
+VFIO_PCI_ATOMIC_COMP128 = (1 << 2) # type: ignore
+VFIO_REGION_INFO_FLAG_READ = (1 << 0) # type: ignore
+VFIO_REGION_INFO_FLAG_WRITE = (1 << 1) # type: ignore
+VFIO_REGION_INFO_FLAG_MMAP = (1 << 2) # type: ignore
+VFIO_REGION_INFO_FLAG_CAPS = (1 << 3) # type: ignore
+VFIO_DEVICE_GET_REGION_INFO = _IO(VFIO_TYPE, VFIO_BASE + 8) # type: ignore
+VFIO_REGION_INFO_CAP_SPARSE_MMAP = 1 # type: ignore
+VFIO_REGION_INFO_CAP_TYPE = 2 # type: ignore
+VFIO_REGION_TYPE_PCI_VENDOR_TYPE = (1 << 31) # type: ignore
+VFIO_REGION_TYPE_PCI_VENDOR_MASK = (0xffff) # type: ignore
+VFIO_REGION_TYPE_GFX = (1) # type: ignore
+VFIO_REGION_TYPE_CCW = (2) # type: ignore
+VFIO_REGION_TYPE_MIGRATION_DEPRECATED = (3) # type: ignore
+VFIO_REGION_SUBTYPE_INTEL_IGD_OPREGION = (1) # type: ignore
+VFIO_REGION_SUBTYPE_INTEL_IGD_HOST_CFG = (2) # type: ignore
+VFIO_REGION_SUBTYPE_INTEL_IGD_LPC_CFG = (3) # type: ignore
+VFIO_REGION_SUBTYPE_NVIDIA_NVLINK2_RAM = (1) # type: ignore
+VFIO_REGION_SUBTYPE_IBM_NVLINK2_ATSD = (1) # type: ignore
+VFIO_REGION_SUBTYPE_GFX_EDID = (1) # type: ignore
+VFIO_DEVICE_GFX_LINK_STATE_UP = 1 # type: ignore
+VFIO_DEVICE_GFX_LINK_STATE_DOWN = 2 # type: ignore
+VFIO_REGION_SUBTYPE_CCW_ASYNC_CMD = (1) # type: ignore
+VFIO_REGION_SUBTYPE_CCW_SCHIB = (2) # type: ignore
+VFIO_REGION_SUBTYPE_CCW_CRW = (3) # type: ignore
+VFIO_REGION_SUBTYPE_MIGRATION_DEPRECATED = (1) # type: ignore
+VFIO_DEVICE_STATE_V1_STOP = (0) # type: ignore
+VFIO_DEVICE_STATE_V1_RUNNING = (1 << 0) # type: ignore
+VFIO_DEVICE_STATE_V1_SAVING = (1 << 1) # type: ignore
+VFIO_DEVICE_STATE_V1_RESUMING = (1 << 2) # type: ignore
+VFIO_DEVICE_STATE_MASK = (VFIO_DEVICE_STATE_V1_RUNNING | VFIO_DEVICE_STATE_V1_SAVING | VFIO_DEVICE_STATE_V1_RESUMING) # type: ignore
+VFIO_DEVICE_STATE_IS_ERROR = lambda state: ((state & VFIO_DEVICE_STATE_MASK) == (VFIO_DEVICE_STATE_V1_SAVING | VFIO_DEVICE_STATE_V1_RESUMING)) # type: ignore
+VFIO_DEVICE_STATE_SET_ERROR = lambda state: ((state & ~VFIO_DEVICE_STATE_MASK) | VFIO_DEVICE_STATE_V1_SAVING | VFIO_DEVICE_STATE_V1_RESUMING) # type: ignore
+VFIO_REGION_INFO_CAP_MSIX_MAPPABLE = 3 # type: ignore
+VFIO_REGION_INFO_CAP_NVLINK2_SSATGT = 4 # type: ignore
+VFIO_REGION_INFO_CAP_NVLINK2_LNKSPD = 5 # type: ignore
+VFIO_IRQ_INFO_EVENTFD = (1 << 0) # type: ignore
+VFIO_IRQ_INFO_MASKABLE = (1 << 1) # type: ignore
+VFIO_IRQ_INFO_AUTOMASKED = (1 << 2) # type: ignore
+VFIO_IRQ_INFO_NORESIZE = (1 << 3) # type: ignore
+VFIO_DEVICE_GET_IRQ_INFO = _IO(VFIO_TYPE, VFIO_BASE + 9) # type: ignore
+VFIO_IRQ_SET_DATA_NONE = (1 << 0) # type: ignore
+VFIO_IRQ_SET_DATA_BOOL = (1 << 1) # type: ignore
+VFIO_IRQ_SET_DATA_EVENTFD = (1 << 2) # type: ignore
+VFIO_IRQ_SET_ACTION_MASK = (1 << 3) # type: ignore
+VFIO_IRQ_SET_ACTION_UNMASK = (1 << 4) # type: ignore
+VFIO_IRQ_SET_ACTION_TRIGGER = (1 << 5) # type: ignore
+VFIO_DEVICE_SET_IRQS = _IO(VFIO_TYPE, VFIO_BASE + 10) # type: ignore
+VFIO_IRQ_SET_DATA_TYPE_MASK = (VFIO_IRQ_SET_DATA_NONE | VFIO_IRQ_SET_DATA_BOOL | VFIO_IRQ_SET_DATA_EVENTFD) # type: ignore
+VFIO_IRQ_SET_ACTION_TYPE_MASK = (VFIO_IRQ_SET_ACTION_MASK | VFIO_IRQ_SET_ACTION_UNMASK | VFIO_IRQ_SET_ACTION_TRIGGER) # type: ignore
+VFIO_DEVICE_RESET = _IO(VFIO_TYPE, VFIO_BASE + 11) # type: ignore
+VFIO_PCI_DEVID_OWNED = 0 # type: ignore
+VFIO_PCI_DEVID_NOT_OWNED = -1 # type: ignore
+VFIO_PCI_HOT_RESET_FLAG_DEV_ID = (1 << 0) # type: ignore
+VFIO_PCI_HOT_RESET_FLAG_DEV_ID_OWNED = (1 << 1) # type: ignore
+VFIO_DEVICE_GET_PCI_HOT_RESET_INFO = _IO(VFIO_TYPE, VFIO_BASE + 12) # type: ignore
+VFIO_DEVICE_PCI_HOT_RESET = _IO(VFIO_TYPE, VFIO_BASE + 13) # type: ignore
+VFIO_GFX_PLANE_TYPE_PROBE = (1 << 0) # type: ignore
+VFIO_GFX_PLANE_TYPE_DMABUF = (1 << 1) # type: ignore
+VFIO_GFX_PLANE_TYPE_REGION = (1 << 2) # type: ignore
+VFIO_DEVICE_QUERY_GFX_PLANE = _IO(VFIO_TYPE, VFIO_BASE + 14) # type: ignore
+VFIO_DEVICE_GET_GFX_DMABUF = _IO(VFIO_TYPE, VFIO_BASE + 15) # type: ignore
+VFIO_DEVICE_IOEVENTFD_8 = (1 << 0) # type: ignore
+VFIO_DEVICE_IOEVENTFD_16 = (1 << 1) # type: ignore
+VFIO_DEVICE_IOEVENTFD_32 = (1 << 2) # type: ignore
+VFIO_DEVICE_IOEVENTFD_64 = (1 << 3) # type: ignore
+VFIO_DEVICE_IOEVENTFD_SIZE_MASK = (0xf) # type: ignore
+VFIO_DEVICE_IOEVENTFD = _IO(VFIO_TYPE, VFIO_BASE + 16) # type: ignore
+VFIO_DEVICE_FEATURE_MASK = (0xffff) # type: ignore
+VFIO_DEVICE_FEATURE_GET = (1 << 16) # type: ignore
+VFIO_DEVICE_FEATURE_SET = (1 << 17) # type: ignore
+VFIO_DEVICE_FEATURE_PROBE = (1 << 18) # type: ignore
+VFIO_DEVICE_FEATURE = _IO(VFIO_TYPE, VFIO_BASE + 17) # type: ignore
+VFIO_DEVICE_BIND_FLAG_TOKEN = (1 << 0) # type: ignore
+VFIO_DEVICE_BIND_IOMMUFD = _IO(VFIO_TYPE, VFIO_BASE + 18) # type: ignore
+VFIO_DEVICE_ATTACH_PASID = (1 << 0) # type: ignore
+VFIO_DEVICE_ATTACH_IOMMUFD_PT = _IO(VFIO_TYPE, VFIO_BASE + 19) # type: ignore
+VFIO_DEVICE_DETACH_PASID = (1 << 0) # type: ignore
+VFIO_DEVICE_DETACH_IOMMUFD_PT = _IO(VFIO_TYPE, VFIO_BASE + 20) # type: ignore
+VFIO_DEVICE_FEATURE_PCI_VF_TOKEN = (0) # type: ignore
+VFIO_MIGRATION_STOP_COPY = (1 << 0) # type: ignore
+VFIO_MIGRATION_P2P = (1 << 1) # type: ignore
+VFIO_MIGRATION_PRE_COPY = (1 << 2) # type: ignore
+VFIO_DEVICE_FEATURE_MIGRATION = 1 # type: ignore
+VFIO_DEVICE_FEATURE_MIG_DEVICE_STATE = 2 # type: ignore
+VFIO_MIG_GET_PRECOPY_INFO = _IO(VFIO_TYPE, VFIO_BASE + 21) # type: ignore
+VFIO_DEVICE_FEATURE_LOW_POWER_ENTRY = 3 # type: ignore
+VFIO_DEVICE_FEATURE_LOW_POWER_ENTRY_WITH_WAKEUP = 4 # type: ignore
+VFIO_DEVICE_FEATURE_LOW_POWER_EXIT = 5 # type: ignore
+VFIO_DEVICE_FEATURE_DMA_LOGGING_START = 6 # type: ignore
+VFIO_DEVICE_FEATURE_DMA_LOGGING_STOP = 7 # type: ignore
+VFIO_DEVICE_FEATURE_DMA_LOGGING_REPORT = 8 # type: ignore
+VFIO_DEVICE_FEATURE_MIG_DATA_SIZE = 9 # type: ignore
+VFIO_DEVICE_FEATURE_CLEAR_MASTER = 0 # type: ignore
+VFIO_DEVICE_FEATURE_SET_MASTER = 1 # type: ignore
+VFIO_DEVICE_FEATURE_BUS_MASTER = 10 # type: ignore
+VFIO_IOMMU_INFO_PGSIZES = (1 << 0) # type: ignore
+VFIO_IOMMU_INFO_CAPS = (1 << 1) # type: ignore
+VFIO_IOMMU_TYPE1_INFO_CAP_IOVA_RANGE = 1 # type: ignore
+VFIO_IOMMU_TYPE1_INFO_CAP_MIGRATION = 2 # type: ignore
+VFIO_IOMMU_TYPE1_INFO_DMA_AVAIL = 3 # type: ignore
+VFIO_IOMMU_GET_INFO = _IO(VFIO_TYPE, VFIO_BASE + 12) # type: ignore
+VFIO_DMA_MAP_FLAG_READ = (1 << 0) # type: ignore
+VFIO_DMA_MAP_FLAG_WRITE = (1 << 1) # type: ignore
+VFIO_DMA_MAP_FLAG_VADDR = (1 << 2) # type: ignore
+VFIO_IOMMU_MAP_DMA = _IO(VFIO_TYPE, VFIO_BASE + 13) # type: ignore
+VFIO_DMA_UNMAP_FLAG_GET_DIRTY_BITMAP = (1 << 0) # type: ignore
+VFIO_DMA_UNMAP_FLAG_ALL = (1 << 1) # type: ignore
+VFIO_DMA_UNMAP_FLAG_VADDR = (1 << 2) # type: ignore
+VFIO_IOMMU_UNMAP_DMA = _IO(VFIO_TYPE, VFIO_BASE + 14) # type: ignore
+VFIO_IOMMU_ENABLE = _IO(VFIO_TYPE, VFIO_BASE + 15) # type: ignore
+VFIO_IOMMU_DISABLE = _IO(VFIO_TYPE, VFIO_BASE + 16) # type: ignore
+VFIO_IOMMU_DIRTY_PAGES_FLAG_START = (1 << 0) # type: ignore
+VFIO_IOMMU_DIRTY_PAGES_FLAG_STOP = (1 << 1) # type: ignore
+VFIO_IOMMU_DIRTY_PAGES_FLAG_GET_BITMAP = (1 << 2) # type: ignore
+VFIO_IOMMU_DIRTY_PAGES = _IO(VFIO_TYPE, VFIO_BASE + 17) # type: ignore
+VFIO_IOMMU_SPAPR_INFO_DDW = (1 << 0) # type: ignore
+VFIO_IOMMU_SPAPR_TCE_GET_INFO = _IO(VFIO_TYPE, VFIO_BASE + 12) # type: ignore
+VFIO_EEH_PE_DISABLE = 0 # type: ignore
+VFIO_EEH_PE_ENABLE = 1 # type: ignore
+VFIO_EEH_PE_UNFREEZE_IO = 2 # type: ignore
+VFIO_EEH_PE_UNFREEZE_DMA = 3 # type: ignore
+VFIO_EEH_PE_GET_STATE = 4 # type: ignore
+VFIO_EEH_PE_STATE_NORMAL = 0 # type: ignore
+VFIO_EEH_PE_STATE_RESET = 1 # type: ignore
+VFIO_EEH_PE_STATE_STOPPED = 2 # type: ignore
+VFIO_EEH_PE_STATE_STOPPED_DMA = 4 # type: ignore
+VFIO_EEH_PE_STATE_UNAVAIL = 5 # type: ignore
+VFIO_EEH_PE_RESET_DEACTIVATE = 5 # type: ignore
+VFIO_EEH_PE_RESET_HOT = 6 # type: ignore
+VFIO_EEH_PE_RESET_FUNDAMENTAL = 7 # type: ignore
+VFIO_EEH_PE_CONFIGURE = 8 # type: ignore
+VFIO_EEH_PE_INJECT_ERR = 9 # type: ignore
+VFIO_EEH_PE_OP = _IO(VFIO_TYPE, VFIO_BASE + 21) # type: ignore
+VFIO_IOMMU_SPAPR_REGISTER_MEMORY = _IO(VFIO_TYPE, VFIO_BASE + 17) # type: ignore
+VFIO_IOMMU_SPAPR_UNREGISTER_MEMORY = _IO(VFIO_TYPE, VFIO_BASE + 18) # type: ignore
+VFIO_IOMMU_SPAPR_TCE_CREATE = _IO(VFIO_TYPE, VFIO_BASE + 19) # type: ignore
+VFIO_IOMMU_SPAPR_TCE_REMOVE = _IO(VFIO_TYPE, VFIO_BASE + 20) # type: ignore

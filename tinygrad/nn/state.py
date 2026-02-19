@@ -1,10 +1,9 @@
-import json, pathlib, zipfile, pickle, tarfile, struct, functools, io
+import json, pathlib, zipfile, pickle, tarfile, struct, functools, io, zlib
 from collections import OrderedDict
-from typing import Any, Callable, BinaryIO, Iterable
+from typing import Any, Callable, BinaryIO, Iterable, cast
 from tinygrad.tensor import Tensor
 from tinygrad.dtype import dtypes
-from tinygrad.helpers import prod, argsort, DEBUG, Timing, CI, unwrap, GlobalCounters, tqdm, round_up, T
-from tinygrad.shape.view import strides_for_shape
+from tinygrad.helpers import prod, argsort, DEBUG, Timing, CI, GlobalCounters, tqdm, round_up, T, strides_for_shape
 
 class TensorIO(io.RawIOBase, BinaryIO):
   def __init__(self, t: Tensor):
@@ -79,7 +78,7 @@ def safe_save(tensors:dict[str, Tensor], fn:str, metadata:dict[str, Any]|None=No
   j += "\x20"*(round_up(len(j),8)-len(j))
   pathlib.Path(fn).unlink(missing_ok=True)
   t = Tensor.empty(8+len(j)+offset, dtype=dtypes.uint8, device=f"disk:{fn}")
-  t[0:8].bitcast(dtypes.int64).assign([len(j)])
+  t[0:8].assign(Tensor([len(j)], dtype=dtypes.int64, device="CPU").bitcast(dtypes.uint8))
   t[8:8+len(j)].assign(list(j.encode('utf-8')))
   for k,v in safe_load(t).items(): v.assign(tensors[k])
 
@@ -152,7 +151,8 @@ def load_state_dict(model, state_dict:dict[str, Tensor], strict=True, verbose=Tr
         if DEBUG >= 1: print(f"WARNING: not loading {k}")
         continue
       if v.shape != state_dict[k].shape:
-        raise ValueError(f'Shape mismatch in layer `{k}`: Expected shape {v.shape}, but found {state_dict[k].shape} in state dict.')
+        if {(), (1,)} == {state_dict[k].shape, v.shape}: state_dict[k] = state_dict[k].reshape(v.shape)
+        else: raise ValueError(f'Shape mismatch in layer `{k}`: Expected shape {v.shape}, but found {state_dict[k].shape} in state dict.')
       if isinstance(v.device, tuple):
         if isinstance(state_dict[k].device, tuple): v.replace(state_dict[k])
         else: v.replace(state_dict[k].shard(v.device, v.uop.axis))
@@ -161,6 +161,25 @@ def load_state_dict(model, state_dict:dict[str, Tensor], strict=True, verbose=Tr
       if consume: del state_dict[k]
       ret.append(v)
   return ret
+
+@accept_filename
+def zip_extract(t: Tensor) -> dict[str, Tensor]:
+  files: dict[str, Tensor] = {}
+  with zipfile.ZipFile(TensorIO(t), "r") as myzip:
+    # sadly, the extra length needs to be read from the local header of each file.
+    # this is a limitation of the zip file format
+    header_contents = [t[zi.header_offset+26:zi.header_offset+30].bitcast(dtypes.uint16).to('CPU') for zi in myzip.filelist]
+    Tensor.realize(*header_contents)
+    for zi, header_content in zip(myzip.filelist, header_contents):
+      # header_offset + sizeFileHeader + File name length + Extra field length
+      file_offset = zi.header_offset + 30 + sum(cast(list[int], header_content.tolist()))
+      files[zi.filename] = t[file_offset:file_offset+zi.compress_size]
+      match zi.compress_type:
+        case zipfile.ZIP_STORED: pass
+        # TODO: we need a zlib UOp so this can be lazy
+        case zipfile.ZIP_DEFLATED: files[zi.filename] = Tensor(zlib.decompress(files[zi.filename].data(), -15))
+        case _: raise NotImplementedError(f"compression {zi.compress_type} not supported")
+  return files
 
 @accept_filename
 def tar_extract(t: Tensor) -> dict[str, Tensor]:
@@ -193,14 +212,18 @@ def torch_load(t:Tensor) -> dict[str, Tensor]:
   state_dict = nn.state.torch_load("test.pth")
   ```
   """
-  offsets: dict[str|int, int] = {}
+  storage_source: dict[str|int, Tensor] = {}
   lens: dict[str|int, int] = {}
+
+  def _rebuild_tensor(storage, storage_offset, size, stride):
+    return _rebuild_tensor_v2(storage, storage_offset, size, stride)
+
   def _rebuild_tensor_v2(storage, storage_offset, size, stride, requires_grad=None, backward_hooks=None, metadata=None):
     #print(storage, storage_offset, size, stride, requires_grad, backward_hooks, metadata)
     lens[storage[2]] = storage[4] * storage[1].itemsize
-    if storage[2] not in offsets: return None
-    byte_offset = offsets[storage[2]]+storage_offset*storage[1].itemsize
-    ret = t[byte_offset:byte_offset+prod(size)*storage[1].itemsize].bitcast(storage[1])
+    if storage[2] not in storage_source: return None
+    byte_start, byte_end = storage_offset*storage[1].itemsize, (storage_offset + prod(size))*storage[1].itemsize
+    ret = storage_source[storage[2]][byte_start:byte_end].bitcast(storage[1])
 
     # 7 lines to deal with permuted tensors. NOTE: this currently requires reading off the disk
     shape_strides = [(s, st) for s,st in zip(size, stride) if s != 1]
@@ -210,7 +233,7 @@ def torch_load(t:Tensor) -> dict[str, Tensor]:
       assert tuple([shape_strides[i][1] for i in argsort(permute_indexes)]) == strides_for_shape(intermediate_shape), "nonpermutable strides"
       if DEBUG >= 3: print(f"WARNING: this torch load is slow. to permute {intermediate_shape} with {permute_indexes}")
       assert storage[1] != dtypes.bfloat16, "can't permute BF16"
-      # TODO: find a nice way to support all shapetracker on disktensors
+      # TODO: find a nice way to support all movement ops on disktensors
       ret = ret.to(None).reshape(intermediate_shape).permute(permute_indexes)
 
     return ret.reshape(size)
@@ -221,7 +244,8 @@ def torch_load(t:Tensor) -> dict[str, Tensor]:
   deserialized_objects: dict[str, Any] = {}
   intercept = {"HalfStorage": dtypes.float16, "FloatStorage": dtypes.float32, "BFloat16Storage": dtypes.bfloat16,
                "IntStorage": dtypes.int32, "BoolStorage": dtypes.bool,
-               "LongStorage": dtypes.int64, "_rebuild_tensor_v2": _rebuild_tensor_v2, "FloatTensor": None, "Parameter": Parameter}
+               "LongStorage": dtypes.int64, "_rebuild_tensor": _rebuild_tensor, "_rebuild_tensor_v2": _rebuild_tensor_v2,
+               "FloatTensor": None, "Parameter": Parameter}
   whitelist = {"torch", "collections", "numpy", "_codecs"}  # NOTE: this is not for security, only speed
   class Dummy: pass
   class TorchPickle(pickle.Unpickler):
@@ -235,36 +259,36 @@ def torch_load(t:Tensor) -> dict[str, Tensor]:
 
   fobj = io.BufferedReader(TensorIO(t))
   def passthrough_reset(v: bool): return fobj.seek(0, 0) or v
-
   if passthrough_reset(zipfile.is_zipfile(fobj)): # NOTE: passthrough_reset required to support python < 3.14
-    myzip = zipfile.ZipFile(fobj, 'r')
-    base_name = myzip.namelist()[0].split('/', 1)[0]
-    for n in myzip.namelist():
-      if n.startswith(f'{base_name}/data/'):
-        with myzip.open(n) as myfile:
-          offsets[n.split("/")[-1]] = myfile._orig_compress_start # type: ignore
-    with myzip.open(f'{base_name}/data.pkl') as myfile:
-      return TorchPickle(myfile).load()
+    files = zip_extract(t)
+    base_name = next(iter(files)).split('/', 1)[0]
+    # keyed by persistent_id in pickle file
+    storage_source = {fn.split("/")[-1]: data for fn, data in files.items() if fn.startswith(f"{base_name}/data/") and not fn.endswith(".pkl")}
+    return TorchPickle(io.BufferedReader(TensorIO(files[f"{base_name}/data.pkl"]), 1_000_000)).load()
   elif passthrough_reset(tarfile.is_tarfile(fobj)): # NOTE: passthrough_reset required to support python < 3.11
-    with tarfile.open(fileobj=fobj, mode="r") as tar:
-      storages_offset = tar.getmember('storages').offset_data
-      f = unwrap(tar.extractfile('storages'))
-      for i in range(TorchPickle(f).load()):  # num_storages
-        (key, _, storage_type), sz = TorchPickle(f).load(), struct.unpack('<q', f.read(8))[0]
-        offsets[key] = storages_offset + f.tell()
-        f.seek(sz*storage_type.itemsize, 1)
-      f = unwrap(tar.extractfile('tensors'))
-      for _ in range(TorchPickle(f).load()):  # num_tensors
-        (key, storage_id, _), ndim, _ = TorchPickle(f).load(), struct.unpack('<i', f.read(4))[0], f.read(4)
-        size, stride = struct.unpack(f'<{ndim}q', f.read(8 * ndim)), struct.unpack(f'<{ndim}q', f.read(8 * ndim))
-        storage_offset = struct.unpack('<q', f.read(8))[0]
-        deserialized_objects[str(key)] = _rebuild_tensor_v2((None, storage_type, storage_id, None, -1), storage_offset, size, stride)
-      return {k:v.tensor if isinstance(v, Parameter) else v for k,v in TorchPickle(unwrap(tar.extractfile('pickle'))).load().items()}
+    files = tar_extract(t)
+    f = io.BufferedReader(TensorIO(files["storages"]), 1_000_000)
+    # slice source tensor t
+    for _ in range(TorchPickle(f).load()):
+      (key, _, storage_type), sz = TorchPickle(f).load(), struct.unpack('<q', f.read(8))[0]
+      byte_offset = f.tell()
+      storage_source[key] = files["storages"][byte_offset:byte_offset + sz * storage_type.itemsize]
+      f.seek(sz * storage_type.itemsize, 1)
+    f = io.BufferedReader(TensorIO(files["tensors"]), 1_000_000)
+    # get tensor metadata
+    for _ in range(TorchPickle(f).load()):
+      (key, storage_id, _), ndim, _ = TorchPickle(f).load(), struct.unpack('<i', f.read(4))[0], f.read(4)
+      size, stride = struct.unpack(f'<{ndim}q', f.read(8 * ndim)), struct.unpack(f'<{ndim}q', f.read(8 * ndim))
+      storage_offset = struct.unpack('<q', f.read(8))[0]
+      deserialized_objects[str(key)] = _rebuild_tensor_v2((None, storage_type, storage_id, None, -1), storage_offset, size, stride)
+    pkl_data = TorchPickle(io.BufferedReader(TensorIO(files["pickle"]), 1_000_000)).load()
+    return {k: v.tensor if isinstance(v, Parameter) else v for k, v in pkl_data.items()}
   else:
     pkl = TorchPickle(fobj)
     _, _, _, rwd, _, ids, base_offset = pkl.load(), pkl.load(), pkl.load(), fobj.tell(), pkl.load(), pkl.load(), fobj.tell()
+    # slice source tensor t
     for i in ids:
-      offsets[i] = base_offset + 8
+      storage_source[i] = t[base_offset + 8:base_offset + 8 + lens[i]]
       base_offset += 8 + lens[i]
     fobj.seek(rwd)
     return TorchPickle(fobj).load()
@@ -274,7 +298,7 @@ def ggml_data_to_tensor(t: Tensor, n: int, ggml_type: int) -> Tensor:
   Converts ggml tensor data to a tinygrad tensor.
 
   Supported native types: float32 (id: 0), float16 (id: 1), int8 (id: 16), int16 (id: 17), int32 (id: 18)
-  Supported quantized types: Q4_0 (id: 2), Q4_1 (id: 3), Q8_0 (id: 8), Q6_K (id: 14), MXFP4 (id: 39)
+  Supported quantized types: Q4_0 (id: 2), Q4_1 (id: 3), Q8_0 (id: 8), Q4_K (id: 12), Q6_K (id: 14), MXFP4 (id: 39)
   """
   # https://github.com/ggerganov/ggml/blob/323951f1bdcdfbd5b5ff3a9a7c3770e63b1a560e/include/ggml.h#L356
 
@@ -288,13 +312,20 @@ def ggml_data_to_tensor(t: Tensor, n: int, ggml_type: int) -> Tensor:
     return t.unsqueeze(-1).expand((*t.shape,8//b)).idiv(shift_tensor).bitwise_and(bitmask).transpose(-1, -2).flatten(-2)
 
   # map to (number of elements, number of bytes)
-  if (nelements_nbytes := { 2: (32, 18), 3: (32, 20), 14: (256, 210), 8: (32, 34), 39: (32, 17) }.get(ggml_type)) is not None:
+  if (nelements_nbytes := { 2: (32, 18), 3: (32, 20), 8: (32, 34), 12: (256, 144), 14: (256, 210), 39: (32, 17) }.get(ggml_type)) is not None:
     blocks = t[:(n//nelements_nbytes[0])*nelements_nbytes[1]].reshape((-1, nelements_nbytes[1]))
     if ggml_type == 2: return (q_to_uint8(blocks[:,2:], 4).bitcast(dtypes.int8) - 8) * blocks[:,:2].bitcast(dtypes.float16).cast(dtypes.float32)
     if ggml_type == 3:
       d, m = (blocks[:,s:s+2].bitcast(dtypes.float16).cast(dtypes.float32) for s in [ 0, 2 ])
       return q_to_uint8(blocks[:,4:], 4).bitcast(dtypes.int8) * d + m
     if ggml_type == 8: return blocks[:,:2].bitcast(dtypes.float16).cast(dtypes.float32) * blocks[:,2:].bitcast(dtypes.int8)
+    if ggml_type == 12:  # Q4_K: 256 elements per 144-byte block (d:2, dmin:2, scales:12, qs:128)
+      d, dmin = (blocks[:,i:i+2].bitcast(dtypes.float16).cast(dtypes.float32).unsqueeze(-1) for i in [0, 2])
+      s = blocks[:,4:16]  # 12 bytes: 6-bit scales[0-3], 6-bit mins[0-3], high bits[4-7]
+      sc = s[:,0:4].bitwise_and(63).cat(s[:,8:12].bitwise_and(0xF).bitwise_or(s[:,0:4].rshift(6).lshift(4)), dim=-1)
+      mn = s[:,4:8].bitwise_and(63).cat(s[:,8:12].rshift(4).bitwise_or(s[:,4:8].rshift(6).lshift(4)), dim=-1)
+      q = Tensor.stack((qs:=blocks[:,16:144].reshape(-1,4,32)).bitwise_and(0xF), qs.rshift(4), dim=2).reshape(-1,8,32).cast(dtypes.float32)
+      return (d * sc.unsqueeze(-1) * q - dmin * mn.unsqueeze(-1)).flatten(-2)
     if ggml_type == 14:
       xl, xh = q_to_uint8(blocks[:,:128].reshape((-1, 2, 64)), 4), q_to_uint8(blocks[:,128:192].reshape((-1, 2, 32)), 2).lshift(4)
       scales = blocks[:,192:208].bitcast(dtypes.int8).unsqueeze(-1).expand((-1, 16, 16)).reshape((-1, 256))
@@ -308,8 +339,8 @@ def ggml_data_to_tensor(t: Tensor, n: int, ggml_type: int) -> Tensor:
       codes = q_to_uint8(blocks[:, 1:17], 4)
       sign = 1.0 - codes.rshift(3).cast(dtypes.float32) * 2.0
       exp, mant = codes.rshift(1).bitwise_and(0x3).cast(dtypes.float32), codes.bitwise_and(0x1).cast(dtypes.float32)
-      fp4_val = sign * ((exp != 0).cast(dtypes.float32) * (1.0 + 0.5 * mant) * (exp - 1.0).exp2() +
-                        (exp == 0).cast(dtypes.float32) * 0.5 * mant)
+      fp4_val = sign * 2.0 * ((exp != 0).cast(dtypes.float32) * (1.0 + 0.5 * mant) * (exp - 1.0).exp2() +
+                              (exp == 0).cast(dtypes.float32) * 0.5 * mant)
       return (fp4_val * d).flatten(-2)[:n]
   raise ValueError(f"GGML type '{ggml_type}' is not supported!")
 

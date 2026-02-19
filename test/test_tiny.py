@@ -32,12 +32,12 @@ class TestTiny(unittest.TestCase):
     self.assertListEqual(out.tolist(), [2]*16)
 
   def test_cat(self):
-    out = Tensor.cat(Tensor.ones(8).contiguous(), Tensor.ones(8).contiguous())
-    self.assertListEqual(out.tolist(), [1]*16)
+    out = Tensor.cat(Tensor.ones(8).contiguous(), Tensor.zeros(8).contiguous())
+    self.assertListEqual(out.tolist(), [1]*8+[0]*8)
 
-  def test_sum(self):
-    out = Tensor.ones(256).contiguous().sum()
-    self.assertEqual(out.item(), 256)
+  def test_sum(self, N=getenv("SUM_N", 256)):
+    out = Tensor.ones(N).contiguous().sum()
+    self.assertEqual(out.item(), N)
 
   def test_gemm(self, N=getenv("GEMM_N", 64), out_dtype=dtypes.float):
     a = Tensor.ones(N,N).contiguous()
@@ -62,7 +62,7 @@ class TestTiny(unittest.TestCase):
     out = Tensor.rand(10)
     for x in out.tolist():
       self.assertGreaterEqual(x, 0.0)
-      self.assertLessEqual(x, 1.0)
+      self.assertLess(x, 1.0)
 
   # *** JIT (for Python speed) ***
 
@@ -134,17 +134,15 @@ class TestTiny(unittest.TestCase):
   def test_mnist_backward(self):
     # NOTE: we don't have the whole model here for speed
     layers = [
-      nn.Conv2d(1, 32, 5), Tensor.relu,
-      nn.Conv2d(32, 32, 5), Tensor.relu]
+      nn.Conv2d(1, 8, 5), Tensor.relu,
+      nn.Conv2d(8, 8, 5), Tensor.relu]
 
     # replace random weights with ones
-    # TODO: there's a bug here where it's tying two of the biases together. we need UNIQUE const
-    #Tensor.realize(*[p.replace(Tensor.ones_like(p).contiguous()) for p in nn.state.get_parameters(layers)])
-    for p in nn.state.get_parameters(layers): p.replace(Tensor.empty(p.shape))
+    Tensor.realize(*[p.replace(Tensor.ones_like(p).contiguous()) for p in nn.state.get_parameters(layers)])
 
     # realize gradients
     for x in nn.state.get_parameters(layers): x.requires_grad_()
-    Tensor.empty(4, 1, 28, 28).sequential(layers).sum().backward()
+    Tensor.empty(4, 1, 14, 14).sequential(layers).sum().backward()
     Tensor.realize(*[x.grad for x in nn.state.get_parameters(layers) if x.grad is not None])
 
   # *** image ***

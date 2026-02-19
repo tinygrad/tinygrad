@@ -1,4 +1,6 @@
 #!/usr/bin/env python
+import os
+os.environ['USE_TF'] = '0'  # prevent transformers from importing tensorflow
 import unittest
 from tinygrad import Tensor
 import numpy as np
@@ -6,9 +8,9 @@ import torch
 
 def get_question_samp(bsz, seq_len, vocab_size, seed):
   np.random.seed(seed)
-  in_ids= np.random.randint(vocab_size, size=(bsz, seq_len))
+  in_ids = np.random.randint(vocab_size, size=(bsz, seq_len), dtype=np.int32)
   mask = np.random.choice([True, False], size=(bsz, seq_len))
-  seg_ids = np.random.randint(2, size=(bsz, seq_len))  # type_vocab_size
+  seg_ids = np.random.randint(2, size=(bsz, seq_len), dtype=np.int32)  # type_vocab_size
   return in_ids, mask, seg_ids
 
 def set_equal_weights(mdl, torch_mdl):

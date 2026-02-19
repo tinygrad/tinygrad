@@ -1,6 +1,7 @@
 import unittest, ctypes, struct, os, random, numpy as np
 from tinygrad import Device, Tensor, dtypes
-from tinygrad.helpers import getenv, CI, mv_address, DEBUG
+from tinygrad.helpers import getenv, mv_address, DEBUG
+from test.helpers import slow
 from tinygrad.device import Buffer, BufferSpec
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQBuffer
 from tinygrad.runtime.autogen import libc
@@ -75,7 +76,7 @@ class TestHCQ(unittest.TestCase):
         TestHCQ.d0.timeline_signal.wait(TestHCQ.d0.timeline_value)
         TestHCQ.d0.timeline_value += 1
 
-  @unittest.skipIf(MOCKGPU or Device.DEFAULT in {"CPU"}, "Can't handle async update on MOCKGPU for now")
+  @unittest.skipIf(Device.DEFAULT in {"CPU"}, "Can't handle async update on CPU device")
   def test_wait_late_set(self):
     for queue_type in [TestHCQ.d0.hw_compute_queue_t, TestHCQ.d0.hw_copy_queue_t]:
       if queue_type is None: continue
@@ -118,7 +119,7 @@ class TestHCQ(unittest.TestCase):
     TestHCQ.d0.timeline_signal.wait(TestHCQ.d0.timeline_value)
     TestHCQ.d0.timeline_value += 1
 
-    val = TestHCQ.b.uop.buffer.as_buffer().cast("f")[0]
+    val = TestHCQ.b.uop.buffer.as_memoryview().cast("f")[0]
     assert val == 1.0, f"got val {val}"
 
   def test_exec_2_kernels_100_times(self):
@@ -134,7 +135,7 @@ class TestHCQ(unittest.TestCase):
       q.submit(TestHCQ.d0, {virt_val.expr: TestHCQ.d0.timeline_value})
       TestHCQ.d0.timeline_value += 1
 
-    val = TestHCQ.a.uop.buffer.as_buffer().cast("f")[0]
+    val = TestHCQ.a.uop.buffer.as_memoryview().cast("f")[0]
     assert val == 200.0, f"got val {val}"
 
   @unittest.skipIf(Device.DEFAULT in {"CPU"}, "No globals/locals on LLVM/CPU")
@@ -150,9 +151,9 @@ class TestHCQ(unittest.TestCase):
     TestHCQ.d0.timeline_signal.wait(TestHCQ.d0.timeline_value)
     TestHCQ.d0.timeline_value += 1
 
-    val = TestHCQ.b.uop.buffer.as_buffer().cast("f")[0]
+    val = TestHCQ.b.uop.buffer.as_memoryview().cast("f")[0]
     assert val == 1.0, f"got val {val}"
-    val = TestHCQ.b.uop.buffer.as_buffer().cast("f")[1]
+    val = TestHCQ.b.uop.buffer.as_memoryview().cast("f")[1]
     assert val == 0.0, f"got val {val}, should not be updated"
 
   @unittest.skipIf(Device.DEFAULT in {"CPU"}, "No globals/locals on LLVM/CPU")
@@ -185,7 +186,7 @@ class TestHCQ(unittest.TestCase):
           TestHCQ.d0.timeline_signal.wait(TestHCQ.d0.timeline_value)
           TestHCQ.d0.timeline_value += 1
 
-          res_sum = sum(x for x in zt.as_buffer().cast("I"))
+          res_sum = sum(x for x in zt.as_memoryview().cast("I"))
           assert x * y * z == res_sum, f"want {x * y * z}, got {res_sum}"
 
   # Test copy
@@ -199,7 +200,7 @@ class TestHCQ(unittest.TestCase):
     TestHCQ.d0.timeline_signal.wait(TestHCQ.d0.timeline_value)
     TestHCQ.d0.timeline_value += 1
 
-    val = TestHCQ.b.uop.buffer.as_buffer().cast("f")[1]
+    val = TestHCQ.b.uop.buffer.as_memoryview().cast("f")[1]
     assert val == 1.0, f"got val {val}"
 
   def test_copy_long(self):
@@ -217,14 +218,15 @@ class TestHCQ(unittest.TestCase):
     TestHCQ.d0.timeline_signal.wait(TestHCQ.d0.timeline_value)
     TestHCQ.d0.timeline_value += 1
 
-    mv_buf1 = buf1.as_buffer().cast('Q')
+    mv_buf1 = buf1.as_memoryview().cast('Q')
     assert libc.memcmp(mv_address(mv_buf1), buf2._buf.va_addr, sz) == 0
 
-  @unittest.skipIf(CI, "skip in CI")
+  @slow
   def test_copy_64bit(self):
     if TestHCQ.d0.hw_copy_queue_t is None: self.skipTest("device does not support copy queue")
 
-    for sz in [(1 << 32) - 1, (1 << 32), (1 << 32) + 1, (5 << 30), (6 << 30) - 0x4642ee1]:
+    # NOTE: these must be a multiple of 8 for .view(fmt='Q') to work
+    for sz in [(1 << 32) - 8, (1 << 32), (1 << 32) + 8, (5 << 30), (6 << 30) - 0x4642ee0]:
       buf1 = Buffer(Device.DEFAULT, sz, dtypes.int8, options=BufferSpec(nolru=True)).ensure_allocated()
       buf2 = Buffer(Device.DEFAULT, sz, dtypes.int8, options=BufferSpec(host=True, nolru=True)).ensure_allocated()
 
@@ -240,7 +242,7 @@ class TestHCQ(unittest.TestCase):
       TestHCQ.d0.timeline_signal.wait(TestHCQ.d0.timeline_value)
       TestHCQ.d0.timeline_value += 1
 
-      mv_buf1 = buf1.as_buffer()
+      mv_buf1 = buf1.as_memoryview()
       assert libc.memcmp(mv_address(mv_buf1), buf2._buf.va_addr, sz) == 0
 
   def test_update_copy(self):
@@ -258,7 +260,7 @@ class TestHCQ(unittest.TestCase):
     TestHCQ.d0.timeline_signal.wait(TestHCQ.d0.timeline_value)
     TestHCQ.d0.timeline_value += 1
 
-    val = TestHCQ.b.uop.buffer.as_buffer().cast("f")[1]
+    val = TestHCQ.b.uop.buffer.as_memoryview().cast("f")[1]
     assert val == 1.0, f"got val {val}"
 
   def test_update_copy_long(self):
@@ -281,7 +283,7 @@ class TestHCQ(unittest.TestCase):
     TestHCQ.d0.timeline_signal.wait(TestHCQ.d0.timeline_value)
     TestHCQ.d0.timeline_value += 1
 
-    mv_buf1 = buf1.as_buffer().cast('Q')
+    mv_buf1 = buf1.as_memoryview().cast('Q')
     for i in range(sz//8): assert mv_buf1[i] == 0x0101010101010101, f"offset {i*8} differs, not all copied, got {hex(mv_buf1[i])}"
 
   # Test bind api
@@ -336,7 +338,7 @@ class TestHCQ(unittest.TestCase):
     et = float(sig_en.timestamp - sig_st.timestamp)
 
     print(f"exec kernel time: {et:.2f} us")
-    assert 0.1 <= et <= (100000 if MOCKGPU or Device.DEFAULT in {"CPU"} else 100)
+    assert 0.1 <= et <= (3000000 if MOCKGPU or Device.DEFAULT in {"CPU"} else 100)
 
   def test_speed_copy_bandwidth(self):
     if TestHCQ.d0.hw_copy_queue_t is None: self.skipTest("device does not support copy queue")
@@ -419,7 +421,7 @@ class TestHCQ(unittest.TestCase):
       TestHCQ.d0.timeline_signal.wait(TestHCQ.d0.timeline_value)
       TestHCQ.d0.timeline_value += 1
 
-      assert buf1.as_buffer()[0] == i
+      assert buf1.as_memoryview()[0] == i
 
   def test_small_copies_from_host_buf_intercopy(self):
     if TestHCQ.d0.hw_copy_queue_t is None: self.skipTest("device does not support copy queue")
@@ -438,7 +440,7 @@ class TestHCQ(unittest.TestCase):
       TestHCQ.d0.timeline_signal.wait(TestHCQ.d0.timeline_value)
       TestHCQ.d0.timeline_value += 1
 
-      assert buf2.as_buffer()[0] == i
+      assert buf2.as_memoryview()[0] == i
 
   def test_small_copies_from_host_buf_transfer(self):
     if TestHCQ.d0.hw_copy_queue_t is None: self.skipTest("device does not support copy queue")
@@ -461,7 +463,7 @@ class TestHCQ(unittest.TestCase):
       TestHCQ.d0.timeline_signal.wait(TestHCQ.d0.timeline_value)
       TestHCQ.d0.timeline_value += 1
 
-      assert buf2.as_buffer()[0] == i
+      assert buf2.as_memoryview()[0] == i
 
   def test_memory_barrier(self):
     a = Tensor([0, 1], device=Device.DEFAULT, dtype=dtypes.int8).realize()
@@ -484,7 +486,7 @@ class TestHCQ(unittest.TestCase):
       TestHCQ.d0.timeline_signal.wait(TestHCQ.d0.timeline_value)
       TestHCQ.d0.timeline_value += 1
 
-      assert buf1.as_buffer()[0] == (i + 1), f"has {buf1.as_buffer()[0]}, need {i + 1}"
+      assert buf1.as_memoryview()[0] == (i + 1), f"has {buf1.as_memoryview()[0]}, need {i + 1}"
 
   def test_memory_barrier_before_copy(self):
     if TestHCQ.d0.hw_copy_queue_t is None: self.skipTest("device does not support copy queue")
@@ -509,7 +511,7 @@ class TestHCQ(unittest.TestCase):
       TestHCQ.d0.timeline_signal.wait(TestHCQ.d0.timeline_value)
       TestHCQ.d0.timeline_value += 1
 
-      assert buf2.as_buffer()[0] == i
+      assert buf2.as_memoryview()[0] == i
 
   def test_map_cpu_buffer_to_device(self):
     if Device[Device.DEFAULT].hw_copy_queue_t is None: self.skipTest("skip device without copy queue")

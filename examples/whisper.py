@@ -3,10 +3,11 @@
 import sys, base64, multiprocessing, itertools, collections
 from typing import Optional, Union, Literal, List
 
-from tinygrad import Tensor, TinyJit, Variable, nn
+from tinygrad import Tensor, TinyJit, Variable, nn, dtypes
 from tinygrad.nn.state import torch_load, load_state_dict
 from tinygrad.helpers import getenv, fetch
 
+from examples.audio_helpers import mel
 import numpy as np
 import librosa
 
@@ -159,7 +160,7 @@ def prep_audio(waveforms: List[np.ndarray], batch_size: int, truncate=False) -> 
 
   stft = librosa.stft(waveforms, n_fft=N_FFT, hop_length=HOP_LENGTH, window='hann', dtype=np.csingle)
   magnitudes = np.absolute(stft[..., :-1]) ** 2
-  mel_spec = librosa.filters.mel(sr=RATE, n_fft=N_FFT, n_mels=N_MELS) @ magnitudes
+  mel_spec = mel(sr=RATE, n_fft=N_FFT, n_mels=N_MELS).numpy() @ magnitudes
 
   log_spec = np.log10(np.clip(mel_spec, 1e-10, None))
   log_spec = np.maximum(log_spec, log_spec.max((1,2), keepdims=True) - 8.0)
@@ -244,15 +245,16 @@ def transcribe_waveform(model: Whisper, enc, waveforms, truncate=False):
 
   log_spec = prep_audio(waveforms, model.batch_size, truncate)
   nsample = model.decoder.max_tokens_to_sample
+  nctx = model.decoder.max_self_attn_cache_len
 
   def inferloop(ctx: Union[np.ndarray, List[np.ndarray]], encoded_audio):
     pos, next_tokens = 0, ctx
-    for i in range((nsample-len(start_tokens))*2):
-      next_tokens = model.decoder(Tensor(next_tokens), pos, encoded_audio)[:, -1].argmax(axis=-1).numpy().astype(np.int32).reshape(-1, 1)
+    for i in range(nsample):
+      next_tokens = model.decoder(Tensor(next_tokens, dtype=dtypes.int32), pos, encoded_audio)[:, -1].argmax(axis=-1).numpy().astype(np.int32).reshape(-1, 1)
       next_tokens[ctx[:, -1] == eot] = eot
       ctx = np.concatenate((ctx, next_tokens), axis=1)
       pos = ctx.shape[-1] - 1
-      if (next_tokens == eot).all(): break
+      if (next_tokens == eot).all() or pos == nctx: break
     return ctx
 
   def gettexttoks(line): return [tok for tok in line if tok < eot or tok > enc._special_tokens["<|notimestamps|>"]][-nsample+len(start_tokens):]

@@ -7,7 +7,7 @@ if __name__ == "__main__":
   with open(fetch(sys.argv[1]), "rb") as f:
     run_onnx_jit = pickle.load(f)
   input_name = run_onnx_jit.captured.expected_names[0]
-  device = run_onnx_jit.captured.expected_st_vars_dtype_device[0][-1]
+  device = run_onnx_jit.captured.expected_input_info[0][-1]
   print(f"input goes into {input_name=} on {device=}")
   hit = 0
   for i,(img,y) in enumerate(imagenet_dataloader(cnt=getenv("CNT", 100))):
