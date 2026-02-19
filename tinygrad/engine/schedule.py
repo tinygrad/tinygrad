@@ -111,7 +111,7 @@ pm_post_sched_cache = PatternMatcher([
 ])
 
 # rewrite all contiguous to assign
-def apply_buffer_map(ctx:dict[UOp,UOp|None], x:UOp):
+def apply_buffer_map(ctx:dict[UOp,UOp], x:UOp):
   if x.op is Ops.AFTER:
     ctx[x] = x.src[0]
     return None
@@ -221,4 +221,4 @@ def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[dict[UOp, UOp], li
   used_vars = set().union(*[{v.arg[0] for v in si.ast.variables()} for si in schedule])
   #return tensor_map, schedule, {k:v for k,v in var_vals.items() if k in used_vars}
   # tensor_map isn't used anymore
-  return cast(dict[UOp, UOp], buffer_map), schedule, {k:v for k,v in var_vals.items() if k in used_vars}
+  return buffer_map, schedule, {k:v for k,v in var_vals.items() if k in used_vars}
