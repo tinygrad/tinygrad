@@ -1,18 +1,8 @@
 """Shared test helpers for AMD tests."""
 import ctypes
-from dataclasses import dataclass
 from tinygrad.helpers import unwrap
 from tinygrad.runtime.autogen import llvm
 from tinygrad.runtime.support.elf import elf_loader
-
-@dataclass
-class KernelInfo:
-  code: bytes
-  src: str
-  global_size: tuple[int, int, int]
-  local_size: tuple[int, int, int]
-  buf_idxs: list[int]  # indices into shared buffer pool
-  buf_sizes: list[int]  # sizes for each buffer index
 
 ARCH_TO_TARGET:dict[str, list[str]] = {
   "rdna3":["gfx1100"],
