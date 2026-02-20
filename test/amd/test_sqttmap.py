@@ -14,7 +14,7 @@ def rocprof_inst_traces_match(sqtt, prg, target):
   from tinygrad.viz.serve import amd_decode
   from extra.sqtt.roc import decode as roc_decode, InstExec
   addr_table = amd_decode(prg.lib, target)
-  disasm_map = {addr+prg.base:(disasm(inst), inst.size()) for addr,inst in addr_table.items()}
+  disasm_map = {addr+prg.base:inst for addr,inst in addr_table.items()}
   rctx = roc_decode([sqtt], {prg.tag:disasm_map})
   rwaves = rctx.inst_execs.get((sqtt.kern, sqtt.exec_tag), [])
   rwaves_iter:dict[int, list[Iterator[InstExec]]] = {} # wave unit (0-15) -> list of inst trace iterators for all executions on that unit

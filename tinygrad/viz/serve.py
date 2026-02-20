@@ -8,6 +8,8 @@ from http.server import BaseHTTPRequestHandler
 from typing import Any, TypedDict, TypeVar, Generator, Callable
 from tinygrad.helpers import colored, getenv, tqdm, unwrap, word_wrap, TRACEMETA, ProfileEvent, ProfileRangeEvent, TracingKey, ProfilePointEvent, temp
 from tinygrad.helpers import printable, Context
+from tinygrad.renderer.amd.dsl import Inst
+from tinygrad.renderer.amd import detect_format
 
 # NOTE: using HTTPServer forces a potentially slow socket.getfqdn
 class TCPServerWithReuse(socketserver.TCPServer):
@@ -366,7 +368,7 @@ def unpack_sqtt(key:tuple[str, int], data:list, p:ProfileProgramEvent,
   from extra.sqtt.roc import decode
   base = unwrap(p.base)
   addr_table = amd_decode(unwrap(p.lib), target)
-  disasm:dict[int, tuple[str, int]] = {addr+base:(str(inst), inst.size()) for addr, inst in addr_table.items()}
+  disasm:dict[int, Inst] = {addr+base:inst for addr, inst in addr_table.items()}
   rctx = decode(data, {p.tag:disasm})
   cu_events:dict[str, list[ProfileEvent]] = {}
   # * INST waves
@@ -480,10 +482,8 @@ def amd_readelf(lib:bytes) -> list[dict]:
   return [{"label":f"{resource} Alloc", "value":val} for resource,val in [("VGPR", (vgpr_gran+1)*8-7), ("LDS",kd.group_segment_fixed_size),
                                                                           ("Scratch", kd.private_segment_fixed_size)] if val > 0]
 
-def amd_decode(lib:bytes, target:str) -> dict[int, Any]: # Any is the Inst class from tinygrad.renderer.amd.dsl
+def amd_decode(lib:bytes, target:str) -> dict[int, Inst]:
   from tinygrad.runtime.support.elf import elf_loader
-  from tinygrad.renderer.amd import detect_format
-  from tinygrad.renderer.amd.dsl import Inst
   image, sections, _ = elf_loader(lib)
   text = next((sh for sh in sections if sh.name == ".text"), None)
   assert text is not None, "no .text section found in ELF"
@@ -602,9 +602,9 @@ def get_render(query:str) -> dict:
     pc_to_inst = data["disasm"]
     start_pc = None
     rows:dict[int, dict] = {}
-    for pc, (inst,_) in pc_to_inst.items():
+    for pc, inst in pc_to_inst.items():
       if start_pc is None: start_pc = pc
-      rows[pc] = {"pc":pc-start_pc, "inst":inst, "hit_count":0, "dur":0, "stall":0, "type":"", "hits":{"cols":inst_columns, "rows":[]}}
+      rows[pc] = {"pc":pc-start_pc, "inst":str(inst), "hit_count":0, "dur":0, "stall":0, "type":"", "hits":{"cols":inst_columns, "rows":[]}}
     for e in w.unpack_insts():
       if not (inst:=rows[e.pc]).get("type"): inst["type"] = str(e.typ).split("_")[-1]
       inst["hit_count"] += 1
