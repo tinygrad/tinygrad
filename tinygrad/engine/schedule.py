@@ -142,6 +142,13 @@ pm_post_sched_cache = PatternMatcher([
   (UPat(Ops.BIND, src=(UPat(Ops.DEFINE_VAR),), name="b"), lambda ctx,b: ctx.get(b)),
 ])
 
+def resolve_cached_call(c: UOp) -> UOp:
+  fxn, args = c.src[0], c.src[1:]
+  params = sorted((x for x in fxn.toposort(gate_kernel_sink) if x.op is Ops.PARAM), key=lambda x: x.arg)
+  assert len(params) == len(args), f"call mismatch: {len(params)} params vs {len(args)} args"
+  assert all(p.arg == i for i,p in enumerate(params)), "PARAM slots are not contiguous"
+  return fxn.substitute(dict(zip(params, args))).rtag(c.tag)
+
 schedule_cache: dict[bytes, UOp] = {}
 @track_rewrites(lambda _,ret: f"Schedule {pluralize('Kernel', len(ret[1]))}")
 def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[dict[UOp, UOp], list[ExecItem], dict[str, int]]:
@@ -182,7 +189,14 @@ def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[dict[UOp, UOp], li
 
   # replace all the PARAMs/LUNIQUEs back (single graph_rewrite for everything)
   input_buffers_inverse = {v:k for k,v in input_buffers.items()}
-  combined = graph_rewrite(combined_sink, pm_post_sched_cache, ctx=input_buffers_inverse, name="unrewrite combined")
+  call_args: list[UOp] = []
+  if (params:=[v for v in input_buffers.values() if v.op is Ops.PARAM]):
+    call_args = [None] * (max(p.arg for p in params)+1) 
+    for k,v in input_buffers.items():
+      if v.op is Ops.PARAM: call_args[v.arg] = k
+    assert all(x is not None for x in call_args)
+  combined = resolve_cached_call(combined_sink.call(*call_args))
+  combined = graph_rewrite(combined, pm_post_sched_cache, ctx=input_buffers_inverse, name="unrewrite combined")
   tensor_map_sink, big_sink = combined.src
   tm_src = tensor_map_sink.src
   tensor_map = {tm_src[i]:tm_src[i+1] for i in range(0, len(tm_src), 2)}
