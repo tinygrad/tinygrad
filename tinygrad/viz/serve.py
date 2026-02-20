@@ -8,7 +8,7 @@ from http.server import BaseHTTPRequestHandler
 from typing import Any, TypedDict, TypeVar, Generator, Callable
 from tinygrad.helpers import colored, getenv, tqdm, unwrap, word_wrap, TRACEMETA, ProfileEvent, ProfileRangeEvent, TracingKey, ProfilePointEvent, temp
 from tinygrad.helpers import printable, Context
-from tinygrad.render.amd.dsl import Inst
+from tinygrad.renderer.amd.dsl import Inst
 from tinygrad.renderer.amd import detect_format
 
 # NOTE: using HTTPServer forces a potentially slow socket.getfqdn
