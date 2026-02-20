@@ -599,7 +599,9 @@ def map_insts(data:bytes, lib:bytes, target:str) -> Iterator[tuple[PacketType, I
       yield (p, InstructionInfo(pc, p.wave, s_endpgm()))
       continue
     # skip OTHER_ instructions, they don't belong to this unit
-    if isinstance(p, INST) and p.op.name.startswith("OTHER_"): continue
+    if isinstance(p, (INST, INST_RDNA4)) and p.op.name.startswith("OTHER_"): continue
+    # NOTE: this is probably OTHER too
+    if isinstance(p, INST_RDNA4) and p.op == InstOpRDNA4.UNK_60: continue
     if isinstance(p, IMMEDIATE_MASK):
       # immediate mask may yield multiple times per packet
       for wave in range(16):
@@ -613,11 +615,12 @@ def map_insts(data:bytes, lib:bytes, target:str) -> Iterator[tuple[PacketType, I
     if isinstance(p, (VALUINST, INST, INST_RDNA4, IMMEDIATE)):
       inst = pc_map[pc:=wave_pc[p.wave]]
       # s_delay_alu doesn't get a packet?
-      if isinstance(inst, SOPP) and inst.op in {SOPPOp.S_DELAY_ALU}:
+      inst_op = getattr(inst, 'op_name', '')
+      if "S_DELAY_ALU" in inst_op:
         wave_pc[p.wave] += inst.size()
         inst = pc_map[pc:=wave_pc[p.wave]]
       # identify a branch instruction, only used for asserts
-      branch_inst = inst if isinstance(inst, SOPP) and "BRANCH" in inst.op_name else None
+      branch_inst = inst if "BRANCH" in inst_op else None
       if branch_inst is not None: assert isinstance(p, INST) and p.op in {InstOp.JUMP_NO, InstOp.JUMP}, f"branch can only be folowed by JUMP, got {p}"
       # JUMP handling
       if isinstance(p, INST) and p.op is InstOp.JUMP:
