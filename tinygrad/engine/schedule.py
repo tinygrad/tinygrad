@@ -142,7 +142,7 @@ pm_post_sched_cache = PatternMatcher([
   (UPat(Ops.BIND, src=(UPat(Ops.DEFINE_VAR),), name="b"), lambda ctx,b: ctx.get(b)),
 ])
 
-schedule_cache: dict[bytes, tuple[list[ExecItem], UOp]] = {}
+schedule_cache: dict[bytes, UOp] = {}
 @track_rewrites(lambda _,ret: f"Schedule {pluralize('Kernel', len(ret[1]))}")
 def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[dict[UOp, UOp], list[ExecItem], dict[str, int]]:
   # big_sink srcs are all the Tensors
@@ -153,8 +153,9 @@ def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[dict[UOp, UOp], li
   var_vals: dict[str, int] = {}
   big_sink_cache = graph_rewrite(big_sink, pm_pre_sched_cache, ctx=(input_buffers, var_vals, [0], [0]), name="rewrite for sched cache")
   sched_cache_key = big_sink_cache.key
-
-  if not SCACHE or (sc_ret:=schedule_cache.get(sched_cache_key, None)) is None:
+  sc_ret = schedule_cache.get(sched_cache_key, None) if SCACHE else None
+  cache_hit = sc_ret is not None
+  if sc_ret is None:
     # verify Tensors match the spec (on big_sink, we only need to do this if cache misses)
     if SPEC: type_verify(big_sink, tensor_spec)
 
@@ -170,26 +171,24 @@ def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[dict[UOp, UOp], li
       big_sink_cache = UOp.sink(*flatten([x.src if x.op is Ops.MULTI else [x] for x in big_sink_cache.src]))
 
     tensor_map |= get_rangeify_map(big_sink_cache)
-    big_sink = big_sink_cache.substitute(tensor_map, name="Apply Kernelize Map")
-
-    pre_schedule, buf_uops_sink = create_schedule(big_sink)
+    big_sink_templ = big_sink_cache.substitute(tensor_map, name="Apply Kernelize Map")
 
     # save in schedule cache (include AFTERs in tensor_map so we don't need big_sink)
-    after_map = [(u, u.buf_uop) for u in big_sink.toposort() if u.op is Ops.AFTER]
+    after_map = [(u, u.buf_uop) for u in big_sink_templ.toposort() if u.op is Ops.AFTER]
     tensor_map_sink = UOp.sink(*flatten([(k,v) for k,v in tensor_map.items()]), *flatten(after_map))
-    combined_sink = UOp.sink(tensor_map_sink, buf_uops_sink)
-    if SCACHE: schedule_cache[sched_cache_key] = (pre_schedule, combined_sink)
-  else:
-    # schedule cache hit
-    del big_sink_cache
-    pre_schedule, combined_sink = sc_ret
+    combined_sink = UOp.sink(tensor_map_sink, big_sink_templ)
+    if SCACHE: schedule_cache[sched_cache_key] = combined_sink
+  else: del big_sink_cache
 
   # replace all the PARAMs/LUNIQUEs back (single graph_rewrite for everything)
   input_buffers_inverse = {v:k for k,v in input_buffers.items()}
   combined = graph_rewrite(combined_sink, pm_post_sched_cache, ctx=input_buffers_inverse, name="unrewrite combined")
-  tensor_map_sink, buf_uops_sink = combined.src
+  tensor_map_sink, big_sink = combined.src
   tm_src = tensor_map_sink.src
   tensor_map = {tm_src[i]:tm_src[i+1] for i in range(0, len(tm_src), 2)}
+
+  # linearize the call graph
+  pre_schedule, buf_uops_sink = create_schedule(big_sink)
 
   # add bufs to pre_schedule
   schedule: list[ExecItem] = []
@@ -213,7 +212,7 @@ def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[dict[UOp, UOp], li
 
   if (DEBUG >= 1 and len(schedule) > 1) or DEBUG >= 3:
     print(f"scheduled {len(schedule):4d} kernels in {(time.perf_counter()-st)*1000:8.2f} ms"+\
-          f" | {' cache hit' if SCACHE and sc_ret is not None else 'CACHE MISS'} {sched_cache_key.hex()[:8]}"+\
+          f" | {' cache hit' if cache_hit else 'CACHE MISS'} {sched_cache_key.hex()[:8]}"+\
           f" | {len(UOpMetaClass.ucache)} uops in cache")
 
   used_vars = set().union(*[{v.arg[0] for v in si.ast.variables()} for si in schedule])
