@@ -105,6 +105,7 @@ class InstOpRDNA4(Enum):
   NEXT = 0x2
   MESSAGE = 0x4
   VALU_64 = 0x6
+  VALU_WMMA = 0x46
   VMEM = 0x10
   VMEM_128 = 0x11
   VMEM_STORE = 0x12
