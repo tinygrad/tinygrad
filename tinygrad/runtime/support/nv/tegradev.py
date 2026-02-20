@@ -212,6 +212,7 @@ class TegraIface:
 
     if cmd == nv_gpu.NV2080_CTRL_CMD_GR_GET_INFO:
       chars = TegraIface._chars
+      assert chars is not None
       info_map = {
         nv_gpu.NV2080_CTRL_GR_INFO_INDEX_LITTER_NUM_GPCS: chars.num_gpc,
         nv_gpu.NV2080_CTRL_GR_INFO_INDEX_LITTER_NUM_TPC_PER_GPC: chars.num_tpc_per_gpc,
@@ -249,7 +250,7 @@ class TegraIface:
   def setup_vm(self, vaspace): pass
   def setup_gpfifo_vm(self, gpfifo): pass
 
-  def alloc(self, size: int, host=False, uncached=False, cpu_access=False, **kwargs) -> HCQBuffer:
+  def alloc(self, size:int, host=False, uncached=False, cpu_access=False, **kwargs) -> HCQBuffer:
     alloc_align = mmap.PAGESIZE if (uncached or host) else ((2 << 20) if size >= (8 << 20) else mmap.PAGESIZE)
     size = round_up(size, alloc_align)
     cache = _NVMAP_WC if (uncached or host) else _NVMAP_CACHED
@@ -269,7 +270,7 @@ class TegraIface:
     self._allocs.append(meta)
     return HCQBuffer(va_addr=gpu_va, size=size, meta=meta, view=MMIOInterface(addr, size, fmt='B'), owner=self.dev)
 
-  def free(self, mem: HCQBuffer):
+  def free(self, mem:HCQBuffer):
     meta = mem.meta
     if meta.gpu_va and self._as_fd >= 0:
       with contextlib.suppress(OSError): NVGPU_AS_UNMAP_BUF(self._as_fd, offset=meta.gpu_va)
@@ -277,13 +278,13 @@ class TegraIface:
       with contextlib.suppress(Exception): FileIOInterface.munmap(meta.cpu_addr, meta.size)
     if meta.dmabuf_fd >= 0:
       with contextlib.suppress(OSError): os.close(meta.dmabuf_fd)
-    if meta.handle:
+    if meta.handle and self._nvmap_fd >= 0:
       h = meta.handle if meta.handle < 0x80000000 else meta.handle - 0x100000000
       with contextlib.suppress(OSError): fcntl.ioctl(self._nvmap_fd, _NVMAP_FREE, h)
     if meta in self._allocs: self._allocs.remove(meta)
 
-  def map(self, mem: HCQBuffer): pass
-  def sleep(self, tm: int): pass
+  def map(self, mem:HCQBuffer): pass
+  def sleep(self, tm:int): pass
 
   def device_fini(self):
     if TegraIface._ctrl_fd >= 0: os.close(TegraIface._ctrl_fd)
