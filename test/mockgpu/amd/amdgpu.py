@@ -190,24 +190,8 @@ class PM4Executor(AMDQueue):
       if (MOCKGPU_ARCH == "cdna4") and reg == regSQ_THREAD_TRACE_MODE and (val & 0b11) == 0:
         assert n == 1
         # force trigger sqtt
-        self._cdna_sqtt_finish()
+        self._sqtt_finish()
       reg += 1
-
-  def _cdna_sqtt_finish(self):
-    from test.mockgpu.amd.emu import sqtt_traces
-    blob = sqtt_traces.pop(0) if sqtt_traces else b''
-    old_idx = self.gpu.regs.grbm_index
-    for se in range(self.gpu.regs.n_se):
-      self.gpu.regs.grbm_index = 0b011 << 29 | se << 16
-      self.gpu.regs[regSQ_THREAD_TRACE_STATUS] = 1 << 16 # FINISH_DONE=1 BUSY=0
-      # skip SEs that don't have trace buffers configured
-      if (regSQ_THREAD_TRACE_BASE, se) not in self.gpu.regs.regs:
-        continue
-      buf_addr = ((self.gpu.regs[regSQ_THREAD_TRACE_BASE2]&0xf) << 32 | self.gpu.regs[regSQ_THREAD_TRACE_BASE]) << 12
-      se_blob = blob if se == 0 else b''
-      if se_blob: ctypes.memmove(buf_addr, se_blob, len(se_blob))
-      self.gpu.regs[regSQ_THREAD_TRACE_WPTR] = (len(se_blob) // 32) & 0x1FFFFFFF
-    self.gpu.regs.grbm_index = old_idx
 
   def _exec_dispatch_direct(self, n):
     assert n == 3
