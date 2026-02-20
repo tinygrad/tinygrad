@@ -59,7 +59,7 @@ def found_contiguous(ctx:dict[UOp, UOp], contig:UOp, src:UOp):
     x = x.src[0]
   ctx[src.base] = contig
 
-pm_replace_contig_with_assign = PatternMatcher([
+pm_early_transform_tensor_graph = PatternMatcher([
   # CONTIGUOUS replacement hack for openpilot
   (UPat(Ops.CONTIGUOUS, src=(UPat(GroupOp.Movement, name="src"),), name="contig"), found_contiguous),
   # replace ALU sources with contiguous versions found above
@@ -72,6 +72,8 @@ pm_replace_contig_with_assign = PatternMatcher([
   (UPat(Ops.ASSIGN, name="u"), replace_assign_with_contig),
   # replace CONTIGUOUS with ASSIGNs
   (UPat(Ops.CONTIGUOUS, name="u"), replace_contig_with_assign),
+  # just removing it works...
+  (UPat((Ops.DETACH, Ops.CONTIGUOUS_BACKWARD), name="x"), lambda x: x.src[0]),
 ])
 
 def allocate_global_buffers(big_sink:UOp) -> tuple[UOp, dict[UOp, UOp]]:
@@ -88,7 +90,7 @@ def allocate_global_buffers(big_sink:UOp) -> tuple[UOp, dict[UOp, UOp]]:
   big_sink = graph_rewrite(big_sink, add_tags, ctx=(uop_list, set(), buffer_map, bases), bottom_up=True, name="number the uops")
 
   # here we can break the tensor graph. this is the only place you need to maintain numbered tags
-  big_sink = graph_rewrite(big_sink, pm_replace_contig_with_assign, ctx={}, name="replace contig")
+  big_sink = graph_rewrite(big_sink, pm_early_transform_tensor_graph, ctx={}, name="early transform tensor graph")
 
   # here we construct the final buffer_map. this is everything that will go into the tensor map
   for s in big_sink.toposort():
