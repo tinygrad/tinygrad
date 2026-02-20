@@ -582,7 +582,7 @@ class TestSchedule(unittest.TestCase):
 
     # NOOP, 3 convs, contiguous
     #check_schedule(x, 5)
-    check_schedule(x, 8)
+    check_schedule(x, 7)
 
   def test_image_conv_fusion_minimal(self):
     b1 = Tensor.empty(16)
