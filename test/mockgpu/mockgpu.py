@@ -10,8 +10,7 @@ libc = ctypes.CDLL(ctypes.util.find_library("c"))
 libc.mmap.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_long]
 libc.mmap.restype = ctypes.c_void_p
 
-_am_driver = AMDriver()
-drivers = [AMDDriver(), NVDriver(), _am_driver]
+drivers = [NVDriver(), AMDriver() if os.environ.get("AMD_IFACE") == "PCI" else AMDDriver()]
 tracked_fds = {}
 
 original_memoryview = builtins.memoryview

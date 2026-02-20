@@ -682,6 +682,8 @@ jobs:
           amd: 'true'
       - name: Run test_tiny on MOCKAM
         run: python test/test_tiny.py
+      - name: Run test_hcq on MOCKAM
+        run: python -m pytest -n=auto test/device/test_hcq.py
 
   testamd:
     strategy:

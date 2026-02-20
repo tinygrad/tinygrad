@@ -1,4 +1,4 @@
-import ctypes, struct, functools, os, mmap
+import ctypes, ctypes.util, struct, functools, os, mmap
 from tinygrad.runtime.autogen.am import am
 from tinygrad.runtime.support.amd import AMDReg, import_asic_regs
 from test.mockgpu.amd.amdgpu import AMDGPU
@@ -7,15 +7,13 @@ libc = ctypes.CDLL(ctypes.util.find_library("c"))
 libc.mmap.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_long]
 libc.mmap.restype = ctypes.c_void_p
 
-VRAM_SIZE = 256 << 20  # 256MB
+VRAM_SIZE = 512 << 20
 
-# IP versions for GFX12
 IP_VERSIONS = {
   am.GC_HWIP: (12, 0, 0), am.SDMA0_HWIP: (7, 0, 0), am.MMHUB_HWIP: (4, 1, 0), am.NBIO_HWIP: (6, 3, 1),
   am.MP0_HWIP: (14, 0, 2), am.MP1_HWIP: (14, 0, 2), am.HDP_HWIP: (7, 0, 0), am.OSSSYS_HWIP: (7, 0, 0),
 }
 
-# Base addresses per IP (segment tuples, padded to 10 entries)
 def _pad(t, n=10): return t + (0,) * (n - len(t))
 IP_BASES = {
   am.GC_HWIP:     _pad((0x00001260, 0x0000A000, 0x0001C000, 0x02402C00)),
@@ -37,11 +35,7 @@ def _build_ip_regs(prefix, hwip) -> dict[str, AMDReg]:
   try: return import_asic_regs(prefix, IP_VERSIONS[hwip], cls=functools.partial(AMDReg, bases={0: IP_BASES[hwip]}))
   except Exception: return {}
 
-
-# *** MMU ***
-
 class MockMMU:
-  """GPU MMU emulation: walks real page tables in VRAM, translates addresses using apertures."""
   def __init__(self, gpu:'MockAMGPU'):
     self.gpu, self.tlb = gpu, {}
 
@@ -71,37 +65,15 @@ class MockMMU:
     return self.gpu._sysmem_map[page] + off
 
   def addr_to_host(self, addr:int) -> int:
-    """Translate GPU address to host address using apertures from GMC registers."""
     gmc = self.gpu.mmio.gmc
     sys_lo = self.gpu.mmio.regs.get(gmc.reg('regMMMC_VM_SYSTEM_APERTURE_LOW_ADDR'), 0) << 18
     sys_hi = self.gpu.mmio.regs.get(gmc.reg('regMMMC_VM_SYSTEM_APERTURE_HIGH_ADDR'), 0) << 18
     if sys_lo <= addr < sys_hi: return self.paddr_to_host(addr - self.gpu.mc_base)
-    # VM aperture: page table walk
     for tva, (pa, sz, is_sys) in self.tlb.items():
       if tva <= addr < tva + sz:
-        if not is_sys: return addr  # VRAM: GPU VA == host VA (MAP_FIXED)
+        if not is_sys: return addr
         return self.paddr_to_host(pa + (addr - tva))
     raise ValueError(f"addr {addr:#x} not mapped (sys_aperture=[{sys_lo:#x}, {sys_hi:#x}])")
-
-  def read_phys(self, paddr:int, size:int) -> memoryview:
-    return (ctypes.c_ubyte * size).from_address(self.paddr_to_host(paddr))
-
-  def write_phys(self, paddr:int, data:bytes):
-    ctypes.memmove(self.paddr_to_host(paddr), data, len(data))
-
-  def read_mc(self, mc_addr:int, size:int) -> memoryview:
-    return self.read_phys(mc_addr - self.gpu.mc_base, size)
-
-  def write_mc(self, mc_addr:int, data:bytes):
-    self.write_phys(mc_addr - self.gpu.mc_base, data)
-
-  def read_va(self, va:int, size:int) -> memoryview:
-    return (ctypes.c_ubyte * size).from_address(self.addr_to_host(va))
-
-  def write_va(self, va:int, data:bytes):
-    ctypes.memmove(self.addr_to_host(va), data, len(data))
-
-# *** IP block handlers ***
 
 class MockIPBlock:
   def __init__(self, gpu:'MockAMGPU', mmio:'MockMMIOInterface', regs:dict[str, AMDReg]):
@@ -127,9 +99,9 @@ class MockPSP(MockIPBlock):
     self._c2pmsg_69, self._c2pmsg_70, self._c2pmsg_81 = r(69), r(70), r(81)
 
   def read(self, reg:int) -> int:
-    if reg == self._c2pmsg_35: return 0x80000000                                    # bootloader ready
-    if reg == self._c2pmsg_81: return 0x1 if self._sos_alive else 0x0               # SOS alive
-    if reg == self._c2pmsg_64: return 0x80000000 if self._sos_alive else 0x0        # ring ready
+    if reg == self._c2pmsg_35: return 0x80000000
+    if reg == self._c2pmsg_81: return 0x1 if self._sos_alive else 0x0
+    if reg == self._c2pmsg_64: return 0x80000000 if self._sos_alive else 0x0
     if reg == self._c2pmsg_67: return self._ring_wptr
     return super().read(reg)
 
@@ -152,7 +124,7 @@ class MockPSP(MockIPBlock):
       struct.pack_into('<I', self.gpu.vram, fence_paddr, frame.fence_value)
     cmd_paddr = ((frame.cmd_buf_addr_hi << 32) | frame.cmd_buf_addr_lo) - self.gpu.mc_base
     if 0 <= cmd_paddr < len(self.gpu.vram):
-      struct.pack_into('<I', self.gpu.vram, cmd_paddr + 864, 0)  # resp.status = 0
+      struct.pack_into('<I', self.gpu.vram, cmd_paddr + 864, 0)
 
 class MockSMU(MockIPBlock):
   def __init__(self, gpu, mmio):
@@ -167,7 +139,6 @@ class MockSMU(MockIPBlock):
   def read(self, reg:int) -> int:
     if reg == self._c2pmsg_90 or reg == self._c2pmsg_54: return 0x1 if self._msg_pending else super().read(reg)
     if reg == self._c2pmsg_82: return self.mmio.regs.get(reg, 3)
-    if reg == self._c2pmsg_53: return super().read(reg)
     return super().read(reg)
 
   def write(self, reg:int, val:int):
@@ -224,9 +195,6 @@ class MockGFX(MockIPBlock):
     self.gpu.add_pm4_queue(self.gpu.mmu.addr_to_host(ring_addr), 4 << (queue_size + 1),
                            self.gpu.mmu.addr_to_host(rptr_addr), self.gpu.mmu.addr_to_host(wptr_addr))
 
-  def _read_pair(self, pair) -> int:
-    if pair[0] is None: return 0
-    return self.mmio.regs.get(pair[0], 0) | (self.mmio.regs.get(pair[1], 0) << 32)
   def get_pt_base(self) -> int: return self._read_pair(self._pt_base) & 0x0000FFFFFFFFF000
   def get_va_base(self) -> int: return self._read_pair(self._pt_start) << 12
 
@@ -251,8 +219,7 @@ class MockGMC(MockIPBlock):
 class MockNBIO(MockIPBlock):
   def __init__(self, gpu, mmio):
     regs = _build_ip_regs('nbif', am.NBIO_HWIP)
-    hdp_regs = _build_ip_regs('hdp', am.HDP_HWIP)
-    regs.update(hdp_regs)
+    regs.update(_build_ip_regs('hdp', am.HDP_HWIP))
     super().__init__(gpu, mmio, regs)
     self._remap_hdp = self.reg('regBIF_BX0_REMAP_HDP_MEM_FLUSH_CNTL')
     self._hdp_flush = self.reg('regHDP_MEM_FLUSH_CNTL')
@@ -261,10 +228,7 @@ class MockNBIO(MockIPBlock):
     if reg == self._remap_hdp and self._hdp_flush is not None: return self._hdp_flush * 4
     return super().read(reg)
 
-# *** MMIO router ***
-
 class MockMMIOInterface:
-  """Routes register reads/writes to IP block handlers."""
   def __init__(self, gpu:'MockAMGPU'):
     self.gpu, self.regs = gpu, {}
     gfx = MockGFX(gpu, self)
@@ -289,11 +253,6 @@ class MockMMIOInterface:
     if block := self._addr_block.get(index): block.write(index, val)
 
   def __len__(self): return 0x10000000
-  def view(self, offset:int=0, size:int|None=None, fmt=None): return self
-  @property
-  def nbytes(self): return len(self) * 4
-
-# *** Mock GPU ***
 
 class MockAMGPU(AMDGPU):
   def __init__(self, gpuid:int=0):
@@ -306,7 +265,7 @@ class MockAMGPU(AMDGPU):
     os.ftruncate(self.doorbell_fd, 0x2000)
     self.arch = "rdna4"
     self._sysmem_map:dict[int,int] = {}
-    self._next_sysmem_paddr = 0x100000000  # 4GB, above VRAM but within GPU address space
+    self._next_sysmem_paddr = 0x100000000
     self.mmu = MockMMU(self)
     self.mmio = MockMMIOInterface(self)
     self._preboot()
@@ -315,7 +274,6 @@ class MockAMGPU(AMDGPU):
     libc.mmap(va, size, mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_SHARED | 0x10, self.vram_fd, paddr)
 
   def _preboot(self):
-    """Build discovery table structs and flush to VRAM."""
     ip_data = bytearray()
     for hwip, (major, minor, rev) in IP_VERSIONS.items():
       ip = am.struct_ip_v4(hw_id=IP_HWIDS[hwip], num_base_address=len(IP_BASES[hwip]), major=major, minor=minor, revision=rev)
