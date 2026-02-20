@@ -613,8 +613,7 @@ def map_insts(data:bytes, lib:bytes, target:str) -> Iterator[tuple[PacketType, I
     if isinstance(p, (VALUINST, INST, INST_RDNA4, IMMEDIATE)):
       inst = pc_map[pc:=wave_pc[p.wave]]
       # s_delay_alu doesn't get a packet?
-      inst_op = getattr(inst, 'op_name', '')
-      if any(skip in inst_op for skip in {"S_DELAY_ALU", "S_WAIT_ALU"}):
+      while (inst_op:=getattr(inst, 'op_name', '')) in {"S_DELAY_ALU", "S_WAIT_ALU"}:
         wave_pc[p.wave] += inst.size()
         inst = pc_map[pc:=wave_pc[p.wave]]
       # identify a branch instruction, only used for asserts
