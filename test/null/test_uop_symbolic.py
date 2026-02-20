@@ -655,6 +655,24 @@ class TestSymbolic(unittest.TestCase):
     with self.assertRaises(AssertionError):
       self.helper_test_variable((31 * b + 1) % 18 + ((31 * b + 1) // 18) * 18, 1, 3101, "((b*31)+1)")
 
+  def test_div_mod_recombine_3level(self):
+    gidx = Variable("gidx", 0, 150527)
+    self.helper_test_variable(gidx//3%224*3 + gidx%3 + gidx//672*672, 0, 150527, "gidx")
+    # different shapes
+    x = Variable("x", 0, 5*7*11-1)
+    self.helper_test_variable(x//11%7*11 + x%11 + x//77*77, 0, 5*7*11-1, "x")
+    # result is x//a*c2 not just x
+    x2 = Variable("x2", 0, 5*6*7-1)
+    self.helper_test_variable(x2//7%6*14 + x2//42*84, 0, (5*6*7-1)//7*14, "(x2//7*14)")
+    # negative variable range
+    xn = Variable("x", -1000, 1000)
+    self.helper_test_variable(xn//3%224*3 + xn%3 + xn//672*672, -1000, 1000, "x")
+    self.helper_test_variable(xn//3%7*3 + xn//21*21, -999, 999, "(x//3*3)")
+    # should NOT simplify: a*c1 != b (3*224 != 600)
+    self.helper_test_variable(gidx//3%224*3 + gidx//600*600, 0, 150669, "(gidx//600*600+gidx//3%224*3)")
+    # should NOT simplify: c1*c2 != c3 (224*3 != 700)
+    self.helper_test_variable(gidx//3%224*3 + gidx//672*700, 0, 156769, "(gidx//672*700+gidx//3%224*3)")
+
   def test_div_mod_recombine_with_gcd(self):
     b = Variable("b", 0, 100)
     exp = (16 * b + 2) % 18 + ((16 * b + 2) // 18) * 18
