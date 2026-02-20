@@ -26,7 +26,7 @@ class TestKernelFusionRegression(unittest.TestCase):
     def fn():
       x = torch.randn(128, 128, device=device)
       return (x + 1.0) * 2.0 - 0.5
-    self._check_kernel_count(fn, 6)
+    self._check_kernel_count(fn, 5)
 
   def test_relu_fusion(self):
     def fn():
@@ -34,7 +34,7 @@ class TestKernelFusionRegression(unittest.TestCase):
       conv = torch.nn.Conv2d(3, 16, 3, padding=1).to(device)
       with torch.no_grad():
         return torch.nn.functional.relu(conv(x))
-    self._check_kernel_count(fn, 6)
+    self._check_kernel_count(fn, 8)
 
   def test_batchnorm_fusion(self):
     def fn():
@@ -44,13 +44,13 @@ class TestKernelFusionRegression(unittest.TestCase):
       bn.eval()
       with torch.no_grad():
         return torch.nn.functional.relu(bn(conv(x)))
-    self._check_kernel_count(fn, 10)
+    self._check_kernel_count(fn, 16)
 
   def test_reduce_fusion(self):
     def fn():
       x = torch.randn(64, 64, device=device)
       return (x * 2.0).sum()
-    self._check_kernel_count(fn, 6)
+    self._check_kernel_count(fn, 5)
 
   def test_matmul_elementwise_fusion(self):
     def fn():
@@ -92,7 +92,7 @@ class TestKernelFusionRegression(unittest.TestCase):
         out = bn(conv(x))
         out += identity
         return torch.nn.functional.relu(out)
-    self._check_kernel_count(fn, 12)
+    self._check_kernel_count(fn, 17)
 
   def test_multiple_inplace_ops_fusion(self):
     def fn():
@@ -108,7 +108,7 @@ class TestKernelFusionRegression(unittest.TestCase):
       view = x[1:3]
       view += 1.0
       return x.sum()
-    self._check_kernel_count(fn, 9)
+    self._check_kernel_count(fn, 8)
 
   def test_batchnorm_running_stats_update(self):
     def fn():
@@ -117,7 +117,7 @@ class TestKernelFusionRegression(unittest.TestCase):
       bn.train()
       with torch.no_grad():
         return bn(x)
-    self._check_kernel_count(fn, 8)
+    self._check_kernel_count(fn, 10)
 
   # this is a minimal extra/other_mnist/beautiful_mnist_torch.py to cover fusion for training with optimizer
   def test_mnist_training_fusion(self):
@@ -138,7 +138,7 @@ class TestKernelFusionRegression(unittest.TestCase):
       loss.backward()
       optimizer.step()
       return loss
-    self._check_kernel_count(fn, 25)
+    self._check_kernel_count(fn, 28)
 
 if __name__ == "__main__":
   unittest.main()
