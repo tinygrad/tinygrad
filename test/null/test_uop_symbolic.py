@@ -664,6 +664,10 @@ class TestSymbolic(unittest.TestCase):
     # result is x//a*c2 not just x
     x2 = Variable("x2", 0, 5*6*7-1)
     self.helper_test_variable(x2//7%6*14 + x2//42*84, 0, (5*6*7-1)//7*14, "(x2//7*14)")
+    # negative variable range
+    xn = Variable("x", -1000, 1000)
+    self.helper_test_variable(xn//3%224*3 + xn%3 + xn//672*672, -1000, 1000, "x")
+    self.helper_test_variable(xn//3%7*3 + xn//21*21, -999, 999, "(x//3*3)")
     # should NOT simplify: a*c1 != b (3*224 != 600)
     self.helper_test_variable(gidx//3%224*3 + gidx//600*600, 0, 150669, "(gidx//600*600+gidx//3%224*3)")
     # should NOT simplify: c1*c2 != c3 (224*3 != 700)
