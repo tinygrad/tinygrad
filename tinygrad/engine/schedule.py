@@ -1,11 +1,12 @@
 import time
 from typing import cast
 from collections import deque
-from tinygrad.uop.ops import UOp, Ops, buffers, UOpMetaClass, track_rewrites, PatternMatcher, UPat, graph_rewrite, graph_rewrite_map, gate_kernel_sink
+from tinygrad.uop.ops import UOp, Ops, buffers, UOpMetaClass, track_rewrites, PatternMatcher, UPat, graph_rewrite, gate_kernel_sink
 from tinygrad.uop.spec import type_verify, tensor_spec
 from tinygrad.device import Buffer, MultiBuffer
 from tinygrad.helpers import DEBUG, cpu_profile, TracingKey, SPEC, flatten, pluralize, SCACHE
 from tinygrad.engine.realize import ExecItem
+from tinygrad.engine.allocations import allocate_global_buffers
 
 # **** schedule linearizer
 
@@ -62,8 +63,8 @@ def create_schedule(sched_sink:UOp) -> tuple[list[ExecItem], UOp]:
   return pre_schedule, UOp.sink(*buf_uops_list)
 
 from tinygrad.engine.memory import memory_planner
-from tinygrad.schedule.rangeify import get_rangeify_map
-from tinygrad.schedule.multi import get_multi_map
+from tinygrad.schedule.rangeify import get_rangeify
+from tinygrad.schedule.multi import multi_pm
 
 def replace_input_buffer(ctx:tuple[dict[UOp, UOp], dict[str, int], list[int], list[int]], b:UOp):
   if (ret:=ctx[0].get(b, None)) is None:
@@ -115,6 +116,8 @@ def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[dict[UOp, UOp], li
   # big_sink srcs are all the Tensors
   st = time.perf_counter()
 
+  big_sink, buffer_map = allocate_global_buffers(big_sink)
+
   # replace BUFFERs with PARAMs, CONSTs UNIQUE with LUNIQUE, strip BIND values for cache key, extract var_vals
   input_buffers: dict[UOp, UOp] = {}
   var_vals: dict[str, int] = {}
@@ -125,38 +128,21 @@ def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[dict[UOp, UOp], li
     # verify Tensors match the spec (on big_sink, we only need to do this if cache misses)
     if SPEC: type_verify(big_sink, tensor_spec)
 
-    # hack to preserve metadata
-    graph_rewrite_map(big_sink, pm_pre_sched_cache, ctx=({}, {}, [0], [0]), name="preserve metadata")
-
-    # tensor map is what we return
-    tensor_map: dict[UOp, UOp] = {}
-
     if any(isinstance(x._device, tuple) for x in big_sink_cache.toposort()):
-      tensor_map |= get_multi_map(big_sink_cache)
-      big_sink_cache = big_sink_cache.substitute(tensor_map, name="Apply Multi Map")
+      big_sink_cache = graph_rewrite(big_sink_cache, multi_pm, name="multi_pm")
       big_sink_cache = UOp.sink(*flatten([x.src if x.op is Ops.MULTI else [x] for x in big_sink_cache.src]))
 
-    tensor_map |= get_rangeify_map(big_sink_cache)
-    big_sink = big_sink_cache.substitute(tensor_map, name="Apply Kernelize Map")
-
+    big_sink = get_rangeify(big_sink_cache)
     pre_schedule, buf_uops_sink = create_schedule(big_sink)
-
-    # save in schedule cache (include AFTERs in tensor_map so we don't need big_sink)
-    after_map = [(u, u.buf_uop) for u in big_sink.toposort() if u.op is Ops.AFTER]
-    tensor_map_sink = UOp.sink(*flatten([(k,v) for k,v in tensor_map.items()]), *flatten(after_map))
-    combined_sink = UOp.sink(tensor_map_sink, buf_uops_sink)
-    if SCACHE: schedule_cache[sched_cache_key] = (pre_schedule, combined_sink)
+    if SCACHE: schedule_cache[sched_cache_key] = (pre_schedule, buf_uops_sink)
   else:
     # schedule cache hit
-    del big_sink_cache
-    pre_schedule, combined_sink = sc_ret
+    pre_schedule, buf_uops_sink = sc_ret
+  del big_sink_cache
 
   # replace all the PARAMs/LUNIQUEs back (single graph_rewrite for everything)
   input_buffers_inverse = {v:k for k,v in input_buffers.items()}
-  combined = graph_rewrite(combined_sink, pm_post_sched_cache, ctx=input_buffers_inverse, name="unrewrite combined")
-  tensor_map_sink, buf_uops_sink = combined.src
-  tm_src = tensor_map_sink.src
-  tensor_map = {tm_src[i]:tm_src[i+1] for i in range(0, len(tm_src), 2)}
+  buf_uops_sink = graph_rewrite(buf_uops_sink, pm_post_sched_cache, ctx=input_buffers_inverse, name="unrewrite combined")
 
   # add bufs to pre_schedule
   schedule: list[ExecItem] = []
@@ -184,4 +170,4 @@ def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[dict[UOp, UOp], li
           f" | {len(UOpMetaClass.ucache)} uops in cache")
 
   used_vars = set().union(*[{v.expr for v in si.ast.variables()} for si in schedule])
-  return tensor_map, schedule, {k:v for k,v in var_vals.items() if k in used_vars}
+  return buffer_map, schedule, {k:v for k,v in var_vals.items() if k in used_vars}
