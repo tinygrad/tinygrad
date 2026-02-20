@@ -1,5 +1,6 @@
 from __future__ import annotations
 import os, ctypes, contextlib, fcntl, mmap
+from dataclasses import dataclass
 from tinygrad.runtime.autogen import nv_570 as nv_gpu
 from tinygrad.runtime.support.c import _IOW, _IOWR
 from tinygrad.runtime.support.hcq import HCQBuffer, MMIOInterface, FileIOInterface
@@ -99,12 +100,16 @@ _NVMAP_HEAP_IOVMM, _NVMAP_WC, _NVMAP_CACHED, _NVMAP_TAG = (1 << 30), 1, 2, 0x090
 def _nvmap_buf(nvmap_fd, size, cache_flags, align=4096):
   c = NVMAP_CREATE(nvmap_fd, size=size)
   NVMAP_ALLOC(nvmap_fd, handle=c.handle, heap_mask=_NVMAP_HEAP_IOVMM, flags=(_NVMAP_TAG << 16) | cache_flags, align=align)
-  g = NVMAP_GET_FD(nvmap_fd, handle=c.handle)
-  return c.handle, g.size  # g.size is the dmabuf fd
+  return c.handle, NVMAP_GET_FD(nvmap_fd, handle=c.handle).size  # .size is dmabuf fd (kernel struct union)
 
+@dataclass(eq=False)
 class TegraMem:
-  def __init__(self, handle, dmabuf_fd, gpu_va, size, cpu_addr=0, hMemory=0):
-    self.handle, self.dmabuf_fd, self.gpu_va, self.size, self.cpu_addr, self.hMemory = handle, dmabuf_fd, gpu_va, size, cpu_addr, hMemory
+  handle: int = 0
+  dmabuf_fd: int = -1
+  gpu_va: int = 0
+  size: int = 0
+  cpu_addr: int = 0
+  hMemory: int = 0
 
 class TegraIface:
   _nvmap_fd, _ctrl_fd, _chars = -1, -1, None
@@ -279,3 +284,8 @@ class TegraIface:
 
   def map(self, mem: HCQBuffer): pass
   def sleep(self, tm: int): pass
+
+  def device_fini(self):
+    if TegraIface._ctrl_fd >= 0: os.close(TegraIface._ctrl_fd)
+    if TegraIface._nvmap_fd >= 0: os.close(TegraIface._nvmap_fd)
+    TegraIface._ctrl_fd, TegraIface._nvmap_fd, TegraIface._chars = -1, -1, None
