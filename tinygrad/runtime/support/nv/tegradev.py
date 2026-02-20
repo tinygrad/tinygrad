@@ -1,13 +1,9 @@
 from __future__ import annotations
 import os, ctypes, contextlib, fcntl, mmap
-from typing import ClassVar
-from dataclasses import dataclass
 from tinygrad.runtime.autogen import nv_570 as nv_gpu
 from tinygrad.runtime.support.hcq import HCQBuffer, MMIOInterface, FileIOInterface
 from tinygrad.runtime.support.system import MAP_FIXED
 from tinygrad.helpers import round_up, to_mv
-
-# --- nvgpu / nvmap ctypes structs ---
 
 def _ct(fields):
   return type("_s", (ctypes.Structure,), {"_fields_": fields})
@@ -78,11 +74,8 @@ _nvgpu_setup_bind = _ct([("num_gpfifo_entries", ctypes.c_uint32), ("num_inflight
                           ("reserved", ctypes.c_uint32 * 9)])
 _nvgpu_channel_wdt = _ct([("wdt_status", ctypes.c_uint32), ("timeout_ms", ctypes.c_uint32)])
 
-# --- ioctl number helpers ---
-
 def _ioc(d, t, nr, size): return (d << 30) | (size << 16) | (ord(t) << 8) | nr
 def _io(t, nr): return _ioc(0, t, nr, 0)
-def _ior(t, nr, sz): return _ioc(2, t, nr, sz)
 def _iow(t, nr, sz): return _ioc(1, t, nr, sz)
 def _iowr(t, nr, sz): return _ioc(3, t, nr, sz)
 
@@ -104,8 +97,7 @@ _NVGPU_CH_ALLOC_OBJ = _iowr('H', 108, ctypes.sizeof(_nvgpu_alloc_obj_ctx))
 _NVGPU_CH_SETUP_BIND = _iowr('H', 128, ctypes.sizeof(_nvgpu_setup_bind))
 _NVGPU_CH_WDT = _iow('H', 119, ctypes.sizeof(_nvgpu_channel_wdt))
 
-_NVMAP_HEAP_IOVMM, _NVMAP_WC, _NVMAP_CACHED = (1 << 30), 1, 2
-_NVMAP_TAG = 0x0900
+_NVMAP_HEAP_IOVMM, _NVMAP_WC, _NVMAP_CACHED, _NVMAP_TAG = (1 << 30), 1, 2, 0x0900
 
 def _tioctl(fd, nr, buf):
   if fcntl.ioctl(fd, nr, buf) < 0: raise OSError(f"tegra ioctl 0x{nr:08x} failed")
@@ -119,41 +111,32 @@ def _nvmap_buf(nvmap_fd, size, cache_flags, align=4096):
   _tioctl(nvmap_fd, _NVMAP_GET_FD, g)
   return c.handle, g.size  # g.size is the dmabuf fd
 
-# --- Memory tracking ---
-
-@dataclass
 class TegraMem:
-  handle: int; dmabuf_fd: int; gpu_va: int; size: int; cpu_addr: int = 0; hMemory: int = 0 # noqa: E702
-
-# --- TegraIface ---
+  def __init__(self, handle, dmabuf_fd, gpu_va, size, cpu_addr=0, hMemory=0):
+    self.handle, self.dmabuf_fd, self.gpu_va, self.size, self.cpu_addr, self.hMemory = handle, dmabuf_fd, gpu_va, size, cpu_addr, hMemory
 
 class TegraIface:
-  _inited: ClassVar[bool] = False
-  _nvmap_fd: ClassVar[int] = -1
-  _ctrl_fd: ClassVar[int] = -1
-  _chars: ClassVar[_nvgpu_gpu_characteristics|None] = None
+  _nvmap_fd, _ctrl_fd, _chars = -1, -1, None
 
   def __init__(self, dev, device_id):
     if device_id != 0: raise RuntimeError("TegraIface only supports device 0 (single iGPU)")
-    if not TegraIface._inited:
+    if TegraIface._chars is None:
       if not os.path.exists("/dev/nvgpu/igpu0/ctrl"): raise FileNotFoundError("/dev/nvgpu/igpu0/ctrl")
       TegraIface._nvmap_fd = os.open("/dev/nvmap", os.O_RDWR | os.O_SYNC)
       TegraIface._ctrl_fd = os.open("/dev/nvgpu/igpu0/ctrl", os.O_RDWR)
       chars = _nvgpu_gpu_characteristics()
       req = _nvgpu_gpu_get_characteristics(buf_size=ctypes.sizeof(chars), buf_addr=ctypes.addressof(chars))
       _tioctl(TegraIface._ctrl_fd, _NVGPU_GET_CHARS, req)
-      TegraIface._chars, TegraIface._inited = chars, True
+      TegraIface._chars = chars
 
     self.dev, self.device_id = dev, device_id
     chars = TegraIface._chars
-    assert chars is not None
     self.compute_class, self.gpfifo_class, self.dma_class = chars.compute_class, chars.gpfifo_class, chars.dma_copy_class
     self.viddec_class = None
-    self._gpu_chars, self._sm_version = chars, chars.sm_arch_sm_version
-    self._hcnt, self._handles = 0x10000, {}
+    self._hcnt = 0x10000
     self._as_fd, self._tsg_fd, self._subctx_veid = -1, -1, 0
     self._ch_fds: dict[int, int] = {}
-    self._work_submit_tokens: dict[int, int] = {}
+    self._ws_tokens: dict[int, int] = {}
     self.root, self.gpu_instance = self._nh(), 0
     self._allocs: list[TegraMem] = []
 
@@ -220,7 +203,7 @@ class TegraIface:
       FileIOInterface._mmap(cpu_base + userd_off, 4096,
                             mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_SHARED | MAP_FIXED, userd_fd, 0)
 
-      self._ch_fds[handle], self._work_submit_tokens[handle] = ch_fd, setup.work_submit_token
+      self._ch_fds[handle], self._ws_tokens[handle] = ch_fd, setup.work_submit_token
       return handle
 
     if clss in (self.compute_class, nv_gpu.AMPERE_COMPUTE_B, self.dma_class, nv_gpu.AMPERE_DMA_COPY_B):
@@ -230,7 +213,7 @@ class TegraIface:
       _tioctl(ch_fd, _NVGPU_CH_ALLOC_OBJ, obj)
       return handle
 
-    return handle  # GT200_DEBUGGER and others are NOP on Tegra
+    return handle
 
   def rm_control(self, obj, cmd, params=None, **kwargs):
     if cmd == nv_gpu.NV2080_CTRL_CMD_PERF_BOOST:
@@ -241,11 +224,11 @@ class TegraIface:
       return params
 
     if cmd == nv_gpu.NVC36F_CTRL_CMD_GPFIFO_GET_WORK_SUBMIT_TOKEN:
-      if params is not None: params.workSubmitToken = self._work_submit_tokens.get(obj, 0)
+      if params is not None: params.workSubmitToken = self._ws_tokens.get(obj, 0)
       return params
 
     if cmd == nv_gpu.NV2080_CTRL_CMD_GR_GET_INFO:
-      chars = self._gpu_chars
+      chars = TegraIface._chars
       info_map = {getattr(nv_gpu, k, None): v for k, v in {
         'NV2080_CTRL_GR_INFO_INDEX_LITTER_NUM_GPCS': chars.num_gpc,
         'NV2080_CTRL_GR_INFO_INDEX_LITTER_NUM_TPC_PER_GPC': chars.num_tpc_per_gpc,
@@ -273,7 +256,7 @@ class TegraIface:
         for i in range(16): params.data[i] = (0x4A + i) & 0xFF
       return params
 
-    return params  # all other commands are NOP on Tegra
+    return params
 
   def setup_usermode(self):
     addr = FileIOInterface._mmap(0, 0x10000, mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_SHARED, self._ctrl_fd, 0)
@@ -306,7 +289,6 @@ class TegraIface:
 
   def free(self, mem: HCQBuffer):
     meta = mem.meta
-    if not isinstance(meta, TegraMem): return
     if meta.gpu_va and self._as_fd >= 0:
       with contextlib.suppress(OSError): _tioctl(self._as_fd, _NVGPU_AS_UNMAP_BUF, _nvgpu_as_unmap_buffer(offset=meta.gpu_va))
     if meta.cpu_addr:
