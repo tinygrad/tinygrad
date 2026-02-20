@@ -37,7 +37,8 @@ def _build_ip_regs(prefix, hwip) -> dict[str, AMDReg]:
 
 class MockMMU:
   def __init__(self, gpu:'MockAMGPU'):
-    self.gpu, self.tlb = gpu, {}
+    self.gpu = gpu
+    self.tlb: dict[int, tuple[int, int, bool]] = {}
 
   def invalidate(self, pt_base:int, va_base:int):
     new_tlb: dict[int, tuple[int, int, bool]] = {}
@@ -66,8 +67,8 @@ class MockMMU:
 
   def addr_to_host(self, addr:int) -> int:
     gmc = self.gpu.mmio.gmc
-    sys_lo = self.gpu.mmio.regs.get(gmc.reg('regMMMC_VM_SYSTEM_APERTURE_LOW_ADDR'), 0) << 18
-    sys_hi = self.gpu.mmio.regs.get(gmc.reg('regMMMC_VM_SYSTEM_APERTURE_HIGH_ADDR'), 0) << 18
+    sys_lo = self.gpu.mmio.regs.get(gmc.reg('regMMMC_VM_SYSTEM_APERTURE_LOW_ADDR') or 0, 0) << 18
+    sys_hi = self.gpu.mmio.regs.get(gmc.reg('regMMMC_VM_SYSTEM_APERTURE_HIGH_ADDR') or 0, 0) << 18
     if sys_lo <= addr < sys_hi: return self.paddr_to_host(addr - self.gpu.mc_base)
     for tva, (pa, sz, is_sys) in self.tlb.items():
       if tva <= addr < tva + sz:
@@ -230,7 +231,8 @@ class MockNBIO(MockIPBlock):
 
 class MockMMIOInterface:
   def __init__(self, gpu:'MockAMGPU'):
-    self.gpu, self.regs = gpu, {}
+    self.gpu = gpu
+    self.regs: dict[int, int] = {}
     gfx = MockGFX(gpu, self)
     self.gmc = MockGMC(gpu, self, gfx)
     self.blocks = [MockPSP(gpu, self), MockSMU(gpu, self), MockSDMA(gpu, self), gfx, self.gmc, MockNBIO(gpu, self)]
@@ -238,17 +240,18 @@ class MockMMIOInterface:
     for block in self.blocks:
       for addr in block.addrs: self._addr_block.setdefault(addr, block)
 
-  def __getitem__(self, index:int) -> int:
-    if isinstance(index, slice): return [self[i] for i in range(index.start or 0, index.stop or 0, index.step or 1)]
+  def __getitem__(self, index:int|slice) -> int|list[int]:
+    if isinstance(index, slice): return [self[i] for i in range(index.start or 0, index.stop or 0, index.step or 1)]  # type: ignore[misc]
     if index == 0xde3: return VRAM_SIZE >> 20
     if block := self._addr_block.get(index): return block.read(index)
     return self.regs.get(index, 0)
 
-  def __setitem__(self, index:int, val:int):
+  def __setitem__(self, index:int|slice, val:int|list[int]|tuple[int, ...]):
     if isinstance(index, slice):
-      vals = val if isinstance(val, (list, tuple)) else [val] * ((index.stop - index.start) // (index.step or 1))
+      vals = val if isinstance(val, (list, tuple)) else [val] * ((index.stop - index.start) // (index.step or 1))  # type: ignore[operator]
       for i, v in zip(range(index.start or 0, index.stop or 0, index.step or 1), vals): self[i] = v
       return
+    assert isinstance(val, int)
     self.regs[index] = val
     if block := self._addr_block.get(index): block.write(index, val)
 
@@ -297,9 +300,9 @@ class MockAMGPU(AMDGPU):
 
     tbl = bytes(bhdr) + bytes(ihdr) + bytes(dhdr) + ip_data + bytes(gc)
     tbl_offset = VRAM_SIZE - (64 << 10)
-    self.vram[tbl_offset:tbl_offset + len(tbl)] = tbl
+    self.vram[tbl_offset:tbl_offset + len(tbl)] = list(tbl)
 
   @property
   def mc_base(self) -> int:
-    fb_loc_base = self.mmio.gmc.reg('regMMMC_VM_FB_LOCATION_BASE')
+    fb_loc_base = self.mmio.gmc.reg('regMMMC_VM_FB_LOCATION_BASE') or 0
     return (self.mmio.regs.get(fb_loc_base, 0) & 0xFFFFFF) << 24
