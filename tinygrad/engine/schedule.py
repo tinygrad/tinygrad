@@ -123,8 +123,12 @@ def tag_uop(ctx:tuple[list[UOp], set[UOp], dict[UOp, UOp], set[UOp]], x:UOp):
   return x.replace(tag=(len(ctx[0])-1,))
 
 def disk_copy_is_buffer(ctx, u):
-  if isinstance(u._device, str) and u._device.startswith("DISK"):
-    ctx[2][u] = UOp.new_buffer(u.device, u.shard_size, u.dtype).reshape(u.max_shard_shape)
+  from_disk = isinstance(u.src[0]._device, str) and u.src[0]._device.startswith("DISK")
+  to_disk = isinstance(u._device, str) and u._device.startswith("DISK")
+  # copies to disk are replaced with the disk buffer
+  if to_disk: ctx[2][u] = UOp.new_buffer(u.device, u.shard_size, u.dtype).reshape(u.max_shard_shape)
+  # all copies from disk are realized into a real buffer
+  if from_disk: return tag_uop(ctx, u)
 
 def apply_after(ctx, u):
   ctx[2][u] = u.src[0]
