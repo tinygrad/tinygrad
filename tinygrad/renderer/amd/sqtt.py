@@ -102,14 +102,14 @@ class InstOpRDNA4(Enum):
   """SQTT instruction operation types for RDNA4 (gfx1200). Different encoding from RDNA3."""
   # TODO: we need to do discovery of all of these from instructions
   SALU = 0x0
-  SMEM = 0x1
-  UNK_02 = 0x2
-  JUMP_NO = 0x4
-  UNK_06 = 0x6
+  JUMP = 0x1
+  NEXT = 0x2
+  MESSAGE = 0x4
+  VALU_64 = 0x6
   VMEM = 0x10
-  UNK_11 = 0x11
-  VINTERP = 0x12
-  UNK_14 = 0x14
+  VMEM_128 = 0x11
+  VMEM_STORE = 0x12
+  VMEM_STORE_128 = 0x14
   OTHER_VMEM = 0x5e
   OTHER_VMEM_STORE = 0x60
 
@@ -606,7 +606,7 @@ def map_insts(data:bytes, lib:bytes, target:str) -> Iterator[tuple[PacketType, I
         if p.mask & (1 << wave):
           inst = pc_map[pc:=wave_pc[wave]]
           # can this assert be more strict?
-          assert isinstance(inst, SOPP), f"IMMEDIATE_MASK packet must map to SOPP, got {inst}"
+          assert type(inst).__name__ == "SOPP", f"IMMEDIATE_MASK packet must map to SOPP, got {inst}"
           wave_pc[wave] += inst.size()
           yield (p, InstructionInfo(pc, wave, inst))
       continue
@@ -619,14 +619,15 @@ def map_insts(data:bytes, lib:bytes, target:str) -> Iterator[tuple[PacketType, I
         inst = pc_map[pc:=wave_pc[p.wave]]
       # identify a branch instruction, only used for asserts
       branch_inst = inst if "BRANCH" in inst_op else None
-      if branch_inst is not None: assert isinstance(p, INST) and p.op in {InstOp.JUMP_NO, InstOp.JUMP}, f"branch can only be folowed by JUMP, got {p}"
+      if branch_inst is not None:
+        assert isinstance(p, (INST, INST_RDNA4)) and p.op.name in {"JUMP_NO", "JUMP", "NEXT"}, f"branch can only be folowed by JUMP, got {p}"
       # JUMP handling
-      if isinstance(p, INST) and p.op is InstOp.JUMP:
+      if (isinstance(p, INST) and p.op is InstOp.JUMP) or (isinstance(p, INST_RDNA4) and branch_inst is not None and p.flag3):
         assert branch_inst is not None, f"JUMP packet must map to a branch instruction, got {inst}"
         x = branch_inst.simm16 & 0xffff
         wave_pc[p.wave] += branch_inst.size() + (x - 0x10000 if x & 0x8000 else x)*4
       else:
-        if branch_inst is not None: assert branch_inst.op != SOPPOp.S_BRANCH, f"S_BRANCH must have a JUMP packet, got {p}"
+        if branch_inst is not None: assert inst_op != "S_BRANCH", f"S_BRANCH must have a JUMP packet, got {p}"
         wave_pc[p.wave] += inst.size()
       yield (p, InstructionInfo(pc, p.wave, inst))
       continue
