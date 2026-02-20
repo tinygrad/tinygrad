@@ -414,7 +414,7 @@ class TestSchedule(unittest.TestCase):
 
   def test_fold_conv_batchnorm_optim(self):
     # this is too high
-    for optim, cnt in [(nn.optim.Adam, 17), (nn.optim.SGD, 9)]:
+    for optim, cnt in [(nn.optim.Adam, 17), (nn.optim.SGD, 7)]:
       with self.subTest(optim=optim.__name__):
         with Tensor.train():
           img = Tensor.ones(1,3,4,4)
