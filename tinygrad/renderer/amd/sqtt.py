@@ -614,7 +614,7 @@ def map_insts(data:bytes, lib:bytes, target:str) -> Iterator[tuple[PacketType, I
         inst = pc_map[pc:=wave_pc[p.wave]]
       # identify a branch instruction, only used for asserts
       branch_inst = inst if isinstance(inst, SOPP) and "BRANCH" in inst.op_name else None
-      if branch_inst is not None: assert isinstance(p, INST) and p.op in {InstOp.JUMP_NO, InstOp.JUMP}, f"branch can only be folowed by jump packets, got {p}"
+      if branch_inst is not None: assert isinstance(p, INST) and p.op in {InstOp.JUMP_NO, InstOp.JUMP}, f"branch can only be folowed by JUMP, got {p}"
       # JUMP handling
       if isinstance(p, INST) and p.op is InstOp.JUMP:
         assert branch_inst is not None, f"JUMP packet must map to a branch instruction, got {inst}"
