@@ -45,9 +45,9 @@ class MockMMU:
     new_tlb: dict[int, tuple[int, int, bool]] = {}
     self._walk(pt_base, 0, 0, new_tlb, va_base)
     for va, (pa, sz, is_sys) in new_tlb.items():
-      if va not in self.tlb:
-        if not is_sys: self.gpu.map_vram_at(va, pa, sz)
-        self.gpu.map_range(va, sz)
+      old = self.tlb.get(va)
+      if not is_sys and (old is None or old[0] != pa): self.gpu.map_vram_at(va, pa, sz)
+      if old is None: self.gpu.map_range(va, sz)
     self.tlb = new_tlb
 
   def _walk(self, pt_paddr:int, level:int, va_acc:int, out:dict, va_base:int):
@@ -62,9 +62,10 @@ class MockMMU:
         self._walk(pa, level + 1, va, out, va_base)
 
   def paddr_to_host(self, paddr:int) -> int:
-    if paddr < VRAM_SIZE: return self.gpu.vram_addr + paddr
     page, off = paddr & ~0xFFF, paddr & 0xFFF
-    return self.gpu._sysmem_map[page] + off
+    if page in self.gpu._sysmem_map: return self.gpu._sysmem_map[page] + off
+    if paddr < VRAM_SIZE: return self.gpu.vram_addr + paddr
+    raise ValueError(f"paddr {paddr:#x} not found in sysmem_map or VRAM")
 
   def addr_to_host(self, addr:int) -> int:
     gmc = self.gpu.mmio.gmc
@@ -73,8 +74,9 @@ class MockMMU:
     if sys_lo <= addr < sys_hi: return self.paddr_to_host(addr - self.gpu.mc_base)
     for tva, (pa, sz, is_sys) in self.tlb.items():
       if tva <= addr < tva + sz:
-        if not is_sys: return addr
-        return self.paddr_to_host(pa + (addr - tva))
+        paddr = pa + (addr - tva)
+        if not is_sys: return self.gpu.vram_addr + paddr
+        return self.paddr_to_host(paddr)
     raise ValueError(f"addr {addr:#x} not mapped (sys_aperture=[{sys_lo:#x}, {sys_hi:#x}])")
 
 class MockIPBlock:
@@ -273,6 +275,8 @@ class MockAMGPU(AMDGPU):
     self.mmu = MockMMU(self)
     self.mmio = MockMMIOInterface(self)
     self._preboot()
+
+  def translate_addr(self, addr:int) -> int: return self.mmu.addr_to_host(addr)
 
   def map_vram_at(self, va:int, paddr:int, size:int):
     libc.mmap(va, size, mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_SHARED | 0x10, self.vram_fd, paddr)

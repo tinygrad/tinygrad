@@ -120,3 +120,10 @@ def _bar5_sync_write(mv, idx, mmio):
   if isinstance(idx, slice):
     for i in range(idx.start or 0, idx.stop or len(mv), idx.step or 1): mmio[i] = mv[i]
   else: mmio[idx] = mv[idx]
+
+class AMUSBDriver(AMDriver):
+  def __init__(self):
+    import test.mockgpu.usb as _musb
+    super().__init__()
+    self.state = _musb.MockASM24State(self.gpu, self, VRAM_SIZE, DOORBELL_SIZE, BAR5_SIZE)
+    _musb._mock_usb_state = self.state
