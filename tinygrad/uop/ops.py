@@ -368,7 +368,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     return vmin
   def __bool__(self): return self._eval((dtypes.bool,), bool)
   def __int__(self): return self._eval(dtypes.ints, int)
-  def __float__(self): return self._eval(dtypes.floats, float)
+  def __float__(self): return float(self._eval(dtypes.floats, float))
   def substitute(self, dvars:dict[UOp, UOp], name:str|None=None, extra_pm:PatternMatcher|None=None):
     dvars = {k:v for k,v in dvars.items() if k is not v}
     if len(dvars) == 0: return self
