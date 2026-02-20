@@ -183,7 +183,9 @@ def replace_contig_with_assign(u:UOp):
   return buffer.assign(u.src[0]).rtag(u.tag)
 
 def replace_assign_with_contig(u:UOp):
-  if u.src[0].base.op is not Ops.BUFFER:
+  assigned_to = u
+  while assigned_to.op is Ops.ASSIGN: assigned_to = assigned_to.src[0].base
+  if assigned_to.op is not Ops.BUFFER:
     return u.src[1].contiguous(tag=u.tag)
 
 pm_replace_contig_with_assign = PatternMatcher([
