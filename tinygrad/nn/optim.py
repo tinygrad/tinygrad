@@ -26,6 +26,8 @@ class Optimizer:
   def _new_optim_param(self) -> list[Tensor]:
     param_dtype = to_dtype(getenv("OPTIM_DTYPE", "float32"))
     if self.fused: return [Tensor.zeros(self.pos_params[-1], dtype=param_dtype, device=self.device, requires_grad=False).contiguous()]
+    if self.device is not None:
+      return [Tensor.zeros(t.shape, dtype=param_dtype, device=self.device, requires_grad=False).contiguous() for t in self.params]
     return [Tensor.zeros_like(t, dtype=param_dtype, requires_grad=False).contiguous() for t in self.params]
 
   def zero_grad(self):
@@ -52,13 +54,14 @@ class Optimizer:
       # NOTE: contiguous is for speed
       out, extra = self._step([Tensor.cat(*[t.flatten() for t in self.params], dim=0)],
                               [Tensor.cat(*[unwrap(t.grad).contiguous().flatten() for t in self.params], dim=0)])
-      deltas = [out[0][self.pos_params[i]:self.pos_params[i+1]].reshape(tt.shape) for i, tt in enumerate(self.params)]
+      updates = [out[0][self.pos_params[i]:self.pos_params[i+1]].reshape(tt.shape) for i, tt in enumerate(self.params)]
     else:
-      deltas, extra = self._step(self.params, [unwrap(t.grad) for t in self.params])
-    for i, tt in enumerate(self.params): tt.assign(tt.detach() - deltas[i].to(tt.device))
+      updates , extra = self._step(self.params, [unwrap(t.grad) for t in self.params])
+    for i, tt in enumerate(self.params): tt.assign(self._apply_update(tt, updates[i]))
     return extra+self.params+self.buffers
 
   def _step(self, params:list[Tensor], grads:list[Tensor]) -> tuple[list[Tensor], list[Tensor]]: raise NotImplementedError
+  def _apply_update(self, t:Tensor, up:Tensor) -> Tensor: return t.detach() - up.to(t.device)
 
 class OptimizerGroup(Optimizer):
   """
