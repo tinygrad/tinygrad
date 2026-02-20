@@ -218,7 +218,7 @@ class PM4Executor(AMDQueue):
     try: tmpring_size = self.gpu.regs[regCOMPUTE_TMPRING_SIZE]
     except KeyError: tmpring_size = 0
     wavesize = (tmpring_size >> 12) & 0x3FFF  # WAVESIZE field is bits 12:25 for gfx11
-    scratch_size = wavesize * 4 # per-thread scratch size in bytes
+    scratch_size = wavesize * 4 # This gives the scratch size per thread (lane)
 
     assert prg_sz > 0, "Invalid prg ptr (not found in mapped ranges)"
     # Pass valid memory ranges, rsrc2, scratch_size, arch, and user data registers to Python emulator
