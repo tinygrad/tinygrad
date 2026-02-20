@@ -354,7 +354,7 @@ def _copy_between_devices(src, dest, cast_dtype, to_device, non_blocking=False):
     dest.resize_(src.numel()).resize_(src.shape)
     dest.copy_(torch.from_numpy(unwrap(src).cast(cast_dtype).numpy()))
   elif src.is_cpu and dest.is_tiny:
-    unwrap(dest).replace(Tensor(src.numpy()).cast(cast_dtype).to(to_device))
+    unwrap(dest).assign(Tensor(src.numpy()).cast(cast_dtype).to(to_device))
   else:
     raise NotImplementedError(f"can't copy from {src.device} -> {dest.device}")
 

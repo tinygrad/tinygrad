@@ -18,8 +18,7 @@ class TestWinograd(unittest.TestCase):
   def test_forward_kernels(self):
     x,w = Tensor.rand(1,4,9,9).realize(), Tensor.rand(4,4,3,3).realize()
     out = Tensor.conv2d(x,w)
-    # TODO: this used to be 2
-    self.assertEqual(len(out.schedule()), 3)
+    self.assertEqual(len(out.schedule()), 2)
 
   def test_backward_kernels(self):
     x,w = Tensor.empty(1,4,9,9,requires_grad=True).realize(), Tensor.empty(4,4,3,3,requires_grad=True).realize()
