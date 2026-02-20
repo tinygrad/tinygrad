@@ -8,14 +8,42 @@ from tinygrad.helpers import round_up, to_mv
 def _ct(fields):
   return type("_s", (ctypes.Structure,), {"_fields_": fields})
 
-# struct nvgpu_gpu_characteristics (include/uapi/linux/nvgpu-ctrl.h), truncated to fields used by tinygrad
+# struct nvgpu_gpu_characteristics from include/uapi/linux/nvgpu-ctrl.h
 _nvgpu_gpu_characteristics = _ct([
-  ("_pad0", ctypes.c_uint8 * 12), ("num_gpc", ctypes.c_uint32),
-  ("_pad1", ctypes.c_uint8 * 24), ("num_tpc_per_gpc", ctypes.c_uint32),
-  ("_pad2", ctypes.c_uint8 * 36),
-  ("compute_class", ctypes.c_uint32), ("gpfifo_class", ctypes.c_uint32), ("_pad3", ctypes.c_uint32),
-  ("dma_copy_class", ctypes.c_uint32), ("_pad4", ctypes.c_uint32),
-  ("sm_arch_sm_version", ctypes.c_uint32), ("_pad5", ctypes.c_uint32), ("sm_arch_warp_count", ctypes.c_uint32)])
+  ("arch", ctypes.c_uint32), ("impl", ctypes.c_uint32), ("rev", ctypes.c_uint32), ("num_gpc", ctypes.c_uint32),
+  ("numa_domain_id", ctypes.c_int32),
+  ("L2_cache_size", ctypes.c_uint64), ("on_board_video_memory_size", ctypes.c_uint64),
+  ("num_tpc_per_gpc", ctypes.c_uint32), ("bus_type", ctypes.c_uint32), ("big_page_size", ctypes.c_uint32),
+  ("compression_page_size", ctypes.c_uint32), ("pde_coverage_bit_count", ctypes.c_uint32), ("available_big_page_sizes", ctypes.c_uint32),
+  ("flags", ctypes.c_uint64),
+  ("twod_class", ctypes.c_uint32), ("threed_class", ctypes.c_uint32), ("compute_class", ctypes.c_uint32),
+  ("gpfifo_class", ctypes.c_uint32), ("inline_to_memory_class", ctypes.c_uint32), ("dma_copy_class", ctypes.c_uint32),
+  ("gpc_mask", ctypes.c_uint32), ("sm_arch_sm_version", ctypes.c_uint32), ("sm_arch_spa_version", ctypes.c_uint32),
+  ("sm_arch_warp_count", ctypes.c_uint32),
+  ("gpu_ioctl_nr_last", ctypes.c_int16), ("tsg_ioctl_nr_last", ctypes.c_int16), ("dbg_gpu_ioctl_nr_last", ctypes.c_int16),
+  ("ioctl_channel_nr_last", ctypes.c_int16), ("as_ioctl_nr_last", ctypes.c_int16), ("gpu_va_bit_count", ctypes.c_uint8), ("reserved", ctypes.c_uint8),
+  ("max_fbps_count", ctypes.c_uint32), ("fbp_en_mask", ctypes.c_uint32), ("emc_en_mask", ctypes.c_uint32),
+  ("max_ltc_per_fbp", ctypes.c_uint32), ("max_lts_per_ltc", ctypes.c_uint32), ("max_tex_per_tpc", ctypes.c_uint32),
+  ("max_gpc_count", ctypes.c_uint32), ("rop_l2_en_mask_DEPRECATED", ctypes.c_uint32 * 2), ("chipname", ctypes.c_uint8 * 8),
+  ("gr_compbit_store_base_hw", ctypes.c_uint64),
+  ("gr_gobs_per_comptagline_per_slice", ctypes.c_uint32), ("num_ltc", ctypes.c_uint32), ("lts_per_ltc", ctypes.c_uint32),
+  ("cbc_cache_line_size", ctypes.c_uint32), ("cbc_comptags_per_line", ctypes.c_uint32), ("map_buffer_batch_limit", ctypes.c_uint32),
+  ("max_freq", ctypes.c_uint64),
+  ("graphics_preemption_mode_flags", ctypes.c_uint32), ("compute_preemption_mode_flags", ctypes.c_uint32),
+  ("default_graphics_preempt_mode", ctypes.c_uint32), ("default_compute_preempt_mode", ctypes.c_uint32),
+  ("local_video_memory_size", ctypes.c_uint64),
+  ("pci_vendor_id", ctypes.c_uint16), ("pci_device_id", ctypes.c_uint16), ("pci_subsystem_vendor_id", ctypes.c_uint16),
+  ("pci_subsystem_device_id", ctypes.c_uint16), ("pci_class", ctypes.c_uint16), ("pci_revision", ctypes.c_uint8),
+  ("vbios_oem_version", ctypes.c_uint8),
+  ("vbios_version", ctypes.c_uint32), ("reg_ops_limit", ctypes.c_uint32), ("reserved1", ctypes.c_uint32),
+  ("event_ioctl_nr_last", ctypes.c_int16), ("pad", ctypes.c_uint16), ("max_css_buffer_size", ctypes.c_uint32),
+  ("ctxsw_ioctl_nr_last", ctypes.c_int16), ("prof_ioctl_nr_last", ctypes.c_int16), ("nvs_ioctl_nr_last", ctypes.c_int16),
+  ("reserved2", ctypes.c_uint8 * 2),
+  ("max_ctxsw_ring_buffer_size", ctypes.c_uint32), ("reserved3", ctypes.c_uint32), ("per_device_identifier", ctypes.c_uint64),
+  ("num_ppc_per_gpc", ctypes.c_uint32), ("max_veid_count_per_tsg", ctypes.c_uint32),
+  ("num_sub_partition_per_fbpa", ctypes.c_uint32), ("gpu_instance_id", ctypes.c_uint32),
+  ("gr_instance_id", ctypes.c_uint32), ("max_gpfifo_entries", ctypes.c_uint32),
+  ("max_dbg_tsg_timeslice", ctypes.c_uint32), ("reserved5", ctypes.c_uint32), ("device_instance_id", ctypes.c_uint64)])
 _nvgpu_gpu_get_characteristics = _ct([("buf_size", ctypes.c_uint64), ("buf_addr", ctypes.c_uint64)])
 _nvmap_handle = _ct([("size", ctypes.c_uint32), ("handle", ctypes.c_uint32)])
 _nvmap_alloc = _ct([("handle", ctypes.c_uint32), ("heap_mask", ctypes.c_uint32), ("flags", ctypes.c_uint32),
