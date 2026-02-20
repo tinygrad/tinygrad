@@ -180,7 +180,7 @@ def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[dict[UOp, UOp], li
     tensor_map |= get_rangeify_map(big_sink_cache)
     big_sink_templ = big_sink_cache.substitute(tensor_map, name="Apply Kernelize Map")
 
-    # save in schedule cache (include AFTERs in tensor_map so we don't need big_sink)
+    # save in schedule cache (include AFTERs in tensor_map for Tensor remap)
     after_map = [(u, u.buf_uop) for u in big_sink_templ.toposort() if u.op is Ops.AFTER]
     tensor_map_sink = UOp.sink(*flatten([(k,v) for k,v in tensor_map.items()]), *flatten(after_map))
     combined_sink = UOp.sink(tensor_map_sink, big_sink_templ)
@@ -189,12 +189,9 @@ def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[dict[UOp, UOp], li
 
   # replace all the PARAMs/LUNIQUEs back (single graph_rewrite for everything)
   input_buffers_inverse = {v:k for k,v in input_buffers.items()}
-  call_args: list[UOp] = []
-  if (params:=[v for v in input_buffers.values() if v.op is Ops.PARAM]):
-    call_args = [None] * (max(p.arg for p in params)+1) 
-    for k,v in input_buffers.items():
-      if v.op is Ops.PARAM: call_args[v.arg] = k
-    assert all(x is not None for x in call_args)
+  param_pairs = sorted([(v.arg, k) for k,v in input_buffers.items() if v.op is Ops.PARAM])
+  call_args = [b for _,b in param_pairs]
+  assert all(slot == i for i,(slot,_) in enumerate(param_pairs)), "PARAM slots are not contiguous"
   combined = resolve_cached_call(combined_sink.call(*call_args))
   combined = graph_rewrite(combined, pm_post_sched_cache, ctx=input_buffers_inverse, name="unrewrite combined")
   tensor_map_sink, big_sink = combined.src
