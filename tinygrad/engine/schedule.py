@@ -165,9 +165,9 @@ def disk_copy_is_buffer(ctx, u):
 
 # CONTIGUOUS and ASSIGN + parents are the only nodes that get updated
 add_tags = pm_gate_kernel_sink+PatternMatcher([
+  (UPat(Ops.COPY, name="u"), disk_copy_is_buffer),
   (UPat({Ops.CONTIGUOUS, Ops.ASSIGN}, name="x"), tag_uop),
   (UPat(GroupOp.All, name="x"), lambda ctx,x: tag_uop(ctx,x) if x in ctx[3] else None),
-  (UPat(Ops.COPY, name="u"), disk_copy_is_buffer)
 ])
 
 def replace_contig_with_assign(u:UOp):
