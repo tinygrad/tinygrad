@@ -111,51 +111,6 @@ pm_post_sched_cache = PatternMatcher([
   (UPat(Ops.BIND, src=(UPat(Ops.DEFINE_VAR),), name="b"), lambda ctx,b: ctx.get(b)),
 ])
 
-# rewrite all contiguous to assign
-def _apply_buffer_map(ctx:dict[UOp,UOp], x:UOp):
-  if x.op is Ops.AFTER:
-    ctx[x] = x.src[0]
-    return None
-  # existing ASSIGN already has a target buffer, walk the chain to the root and add it to the map
-  if x.op is Ops.ASSIGN:
-    target = x.src[0]
-    while target.op is Ops.ASSIGN: target = target.src[0]
-    if target.base.op is Ops.BUFFER or target in ctx:
-      ctx[x] = ctx.get(target, target)
-      return None
-  if x not in ctx: return None
-  # assign target uses the buffer with max shape (no shrink) — rangeify handles symbolic indexing
-  buffer = ctx[x].buf_uop.base.reshape(x.max_shard_shape)
-  if isinstance(x.device, tuple) and x.axis is not None: buffer = buffer.multi(x.axis)
-  return buffer.assign(x.src[0] if x.op is Ops.CONTIGUOUS else x.rtag())
-pm_apply_buffer_map = PatternMatcher([ (UPat(GroupOp.All, name="x"), _apply_buffer_map), ])
-
-def _get_apply_buffer_map(big_sink:UOp) -> tuple[UOp, dict[UOp, UOp]]:
-  # precreate all buffers
-  buffer_map: dict[UOp, UOp] = {}
-  dont_realize = {Ops.CONST, Ops.BUFFER, Ops.BIND, Ops.DEFINE_VAR, Ops.AFTER}
-  bases = set([x.multibase for x in big_sink.src if x.base.op not in dont_realize])
-  for u in big_sink.toposort():
-    if isinstance(u._device, str) and u._device.startswith("DISK"):
-      if u.op is not Ops.COPY: continue
-    else:
-      if u.op is not Ops.CONTIGUOUS and u not in bases: continue
-    # fall through creates buffers — strip invalid ImageDType (mirrors pm_const_buffer_folding in rangeify)
-    dtype = u.dtype
-    if isinstance(dtype, ImageDType):
-      if prod(dtype.shape) != prod(u.max_shard_shape) or ([x for x in u.max_shard_shape if x != 1] or [1])[-1] % 4 != 0:
-        if DEBUG >= 1: print(f"demoting Image {dtype} with shape {u.max_shard_shape}")
-        dtype = dtype.base
-    buffer = UOp.new_buffer(u.device, u.shard_size, dtype).reshape(u.max_shard_shape)
-    if isinstance(u.device, tuple) and u.axis is not None: buffer = buffer.multi(u.axis)
-    # buffer_map value needs symbolic shrink to preserve tensor shape, but assign target uses max shape
-    buffer_map[u] = buffer.shrink_to(u.shape)
-
-  # apply buffer map, do a few simple rewrites
-  big_sink = graph_rewrite(big_sink, pm_apply_buffer_map, ctx=buffer_map, bottom_up=True, name="apply buffer map")
-  big_sink = graph_rewrite(big_sink, _remove_all_tags)
-  return big_sink, buffer_map
-
 # these are the only uops that can get replaced in the tensor graph
 from tinygrad.schedule.rangeify import pm_gate_kernel_sink, tag_uop
 
