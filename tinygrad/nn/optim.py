@@ -26,8 +26,6 @@ class Optimizer:
   def _new_optim_param(self) -> list[Tensor]:
     param_dtype = to_dtype(getenv("OPTIM_DTYPE", "float32"))
     if self.fused: return [Tensor.zeros(self.pos_params[-1], dtype=param_dtype, device=self.device, requires_grad=False).contiguous()]
-    if self.device is not None:
-      return [Tensor.zeros_like(t, dtype=param_dtype, device=self.device, requires_grad=False).contiguous() for t in self.params]
     return [Tensor.zeros_like(t, dtype=param_dtype, requires_grad=False).contiguous() for t in self.params]
 
   def zero_grad(self):
