@@ -664,6 +664,28 @@ jobs:
       - name: Run LLVM test
         run: AMD_LLVM=1 python test/device/test_amd_llvm.py
 
+  testmockam:
+    name: Linux (am)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      AMD: 1
+      MOCKGPU: 1
+      AMD_IFACE: PCI
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+      - name: Setup Environment
+        uses: ./.github/actions/setup-tinygrad
+        with:
+          key: mockam
+          deps: testing_unit
+          amd: 'true'
+      - name: Run test_tiny on MOCKAM
+        run: python test/test_tiny.py
+      - name: Run test_hcq on MOCKAM
+        run: python -m pytest test/device/test_hcq.py
+
   testamd:
     strategy:
       fail-fast: false

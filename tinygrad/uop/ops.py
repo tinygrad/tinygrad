@@ -368,7 +368,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     return vmin
   def __bool__(self): return self._eval((dtypes.bool,), bool)
   def __int__(self): return self._eval(dtypes.ints, int)
-  def __float__(self): return self._eval(dtypes.floats, float)
+  def __float__(self): return float(self._eval(dtypes.floats, float))
   def substitute(self, dvars:dict[UOp, UOp], name:str|None=None, extra_pm:PatternMatcher|None=None):
     dvars = {k:v for k,v in dvars.items() if k is not v}
     if len(dvars) == 0: return self
@@ -655,7 +655,8 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     if self.op in {Ops.CONTIGUOUS, Ops.RESHAPE}: return self.src[0].buffer
     # this buffer can process disk tensors and simple movement ops
     if self is not self.base:
-      from tinygrad.schedule.rangeify import pm_mops, symbolic
+      from tinygrad.schedule.rangeify import pm_mops
+      from tinygrad.uop.symbolic import symbolic
       out = graph_rewrite(self.flatten().index(UOp.range(self.size, 0)), pm_mops+symbolic)
       buf = out.src[0].buffer
       assert isinstance(buf, Buffer), "must be a Buffer for movement ops"
@@ -1309,18 +1310,6 @@ class RewriteContext:
 def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False, name=None, bpm=None) -> UOp:
   rewrite_ctx = RewriteContext(pm if not bottom_up else None, pm if bottom_up else bpm, ctx)
   return rewrite_ctx.unified_rewrite(sink)
-
-@profile_matches
-def graph_rewrite_map(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False, name=None, bpm=None,
-                      input_map:dict[UOp, UOp]|None=None, ) -> dict[UOp, UOp]:
-  rewrite_ctx = RewriteContext(pm if not bottom_up else None, pm if bottom_up else bpm, ctx)
-  new_map: dict[UOp, UOp] = {}
-  for k in (list(sink.toposort())[::-1] if bottom_up else sink.toposort()):
-    new_map[k] = v = rewrite_ctx.unified_rewrite(k)
-    if k is not v and k.metadata is not None: all_metadata[v] = tuple(dedup(all_metadata.get(v, ())))+k.metadata
-  if input_map is not None:
-    for k,v in input_map.items(): new_map[k] = new_map.get(v,v)
-  return new_map
 
 def sint_to_uop(x:sint, dtype=dtypes.index) -> UOp: return UOp.const(dtype, x) if isinstance(x, int) else x.cast(dtype)
 

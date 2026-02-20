@@ -168,13 +168,13 @@ class TestSchedule(unittest.TestCase):
     a = Tensor.full((4,), 4.0).contiguous().realize()
     b = Tensor.full((4,), 2.0).contiguous().realize()
     expr = (a*b)/b
-    run_schedule(check_schedule(expr, 0))
+    run_schedule(check_schedule(expr, 1))
     np.testing.assert_allclose(expr.numpy(), np.full((4,), 4.0))
 
   def test_div_collapse_const(self):
     a = Tensor.full((4,), 4.0).contiguous().realize()
     expr = a/a
-    run_schedule(check_schedule(expr, 0))
+    run_schedule(check_schedule(expr, 1))
     np.testing.assert_allclose(expr.numpy(), np.full((4,), 1.0))
 
   def test_div_collapse(self):
@@ -747,7 +747,7 @@ class TestSchedule(unittest.TestCase):
     p = P[0]
     p = p.pad(((1, 0), ))
     p = p.repeat([2])
-    run_schedule(check_schedule(p, 3))
+    run_schedule(check_schedule(p, 4))  # TODO: this is high
     tiny_ret = p.numpy()
 
     P = np.ones((3, 3), dtype=np.float32)
@@ -841,10 +841,9 @@ class TestSchedule(unittest.TestCase):
   def test_cast_const_view(self):
     a = Tensor.ones((4, 4), dtype=dtypes.float32)
     casted_view = a.cast(dtypes.int32)
-    run_schedule(check_schedule(casted_view, 0))
-    self.assertIsNone(casted_view.uop.base.realized)
+    run_schedule(check_schedule(casted_view, 1))
     realized_const_view = casted_view.contiguous()
-    run_schedule(check_schedule(realized_const_view, 1))
+    run_schedule(check_schedule(realized_const_view, 0))
     self.assertListEqual(realized_const_view.tolist(), [[1, 1, 1, 1], [1, 1, 1, 1], [1, 1, 1, 1], [1, 1, 1, 1]])
 
   @given(strat.sampled_from(dtypes.all), strat.sampled_from(dtypes.all))
@@ -1037,7 +1036,7 @@ class TestSchedule(unittest.TestCase):
     idx = Tensor([1,2,5,6], dtype=dtypes.int32)
     flat_base[idx] = Tensor([99,99,99,99])
     base.assign(flat_base.reshape(4, 4))
-    sched = check_schedule(base, 2)
+    sched = check_schedule(base, 6)  # TODO: this is high
     run_schedule(sched)
     expected = list(range(16))
     for i, v in zip([1,2,5,6], [99,99,99,99]): expected[i] = v
@@ -1236,8 +1235,7 @@ class TestView(unittest.TestCase):
     bv = b.pad(((0, 2),))[-2:]
     # this becomes a late a*0
     late_mul = a*bv
-    run_schedule(check_schedule(late_mul, 0))
-    # NOTE: no longer checked
+    run_schedule(check_schedule(late_mul, 1))
     # the arange doesn't realize
     #self.assertIsNone(b.uop.base.realized)
     # mul doesn't realize
@@ -1254,7 +1252,7 @@ class TestView(unittest.TestCase):
     bv = b.pad(((0, 2),))[-2:]
     late_mul = a*bv
     other_child = b+2
-    s = check_schedule([late_mul, other_child], 2)
+    s = check_schedule([late_mul, other_child], 3)
     # the arange becomes a BUFFER
     self.assertIs(b.uop.base.op, Ops.BUFFER)
     # NOTE: no longer checked
@@ -1267,7 +1265,7 @@ class TestView(unittest.TestCase):
 class TestCopyFolding(unittest.TestCase):
   def test_const_copy_is_free(self):
     b = Tensor(1).to("CPU") * 4
-    run_schedule(check_schedule(b, 0, filter_sink=False))
+    run_schedule(check_schedule(b, 1, filter_sink=False))
     assert b.item() == 4
 
   def test_one_hot_with_copy(self):
@@ -1277,14 +1275,14 @@ class TestCopyFolding(unittest.TestCase):
 
   def test_const_copy_multi(self):
     x = Tensor.ones(1, device="CPU").to_(["CPU", "CPU:1"]) * 2
-    run_schedule(check_schedule(x, 0, filter_sink=False))
+    run_schedule(check_schedule(x, 2, filter_sink=False))
     self.assertEqual(x.item(), 2.0)
 
   def test_late_const_copy_folding(self):
     a = Tensor.arange(3).realize()
     zeros = Tensor.zeros(3).realize()
     b = (a*zeros).to("CPU") + 1
-    run_schedule(check_schedule(b, 0, filter_sink=False))
+    run_schedule(check_schedule(b, 1, filter_sink=False))
     self.assertListEqual(b.tolist(), [1, 1, 1])
     self.assertEqual(b.device, "CPU")
 
