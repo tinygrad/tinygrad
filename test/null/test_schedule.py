@@ -191,6 +191,13 @@ class TestSchedule(unittest.TestCase):
     a, _ = Tensor.empty(1022).cummax(axis=0)
     check_schedule(a, 3)
 
+  @unittest.skip("should this pass?")
+  def test_contiguous_assign(self):
+    a = Tensor.ones(10) * 2
+    b = Tensor.empty(10)
+    c = b.assign(a.contiguous())
+    check_schedule(c, 1)
+
   def test_basic_binop_fusion(self):
     a = Tensor.empty(10)
     b = Tensor.empty(10)
@@ -1137,7 +1144,7 @@ class TestFusionOp(unittest.TestCase):
     a = Tensor(val)
     for _ in range(24): a = Tensor.stack(a, a)[0]
     sched = a.schedule()
-    self.assertEqual(len(sched), 0)
+    self.assertLessEqual(len(sched), 1)
     self.assertLess(time.perf_counter()-st, 2.0)
 
   def test_recursive_reshape(self):

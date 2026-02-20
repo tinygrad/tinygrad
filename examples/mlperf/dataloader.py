@@ -65,17 +65,7 @@ def loader_process(q_in, q_out, X:Tensor, seed):
       else:
         # pad data with training mean
         img = np.tile(np.array([[[123.68, 116.78, 103.94]]], dtype=np.uint8), (224, 224, 1))
-
-      # broken out
-      #img_tensor = Tensor(img.tobytes(), device='CPU')
-      #storage_tensor = X[idx].contiguous().realize().lazydata.base.realized
-      #storage_tensor._copyin(img_tensor.numpy())
-
-      # faster
-      X[idx].contiguous().realize().uop.base.realized.as_memoryview(force_zero_copy=True)[:] = img.tobytes()
-
-      # ideal
-      #X[idx].assign(img.tobytes())   # NOTE: this is slow!
+      X[idx].flatten().assign(img.tobytes())
       q_out.put(idx)
     q_out.put(None)
 
