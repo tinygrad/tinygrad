@@ -163,9 +163,13 @@ def disk_copy_is_buffer(ctx, u):
   if isinstance(u._device, str) and u._device.startswith("DISK"):
     ctx[2][u] = UOp.new_buffer(u.device, u.shard_size, u.dtype).reshape(u.max_shard_shape)
 
+def apply_after(ctx, u):
+  ctx[2][u] = u.src[0]
+
 # CONTIGUOUS and ASSIGN + parents are the only nodes that get updated
 add_tags = pm_gate_kernel_sink+PatternMatcher([
   (UPat(Ops.COPY, name="u"), disk_copy_is_buffer),
+  (UPat(Ops.AFTER, name="u"), apply_after),
   (UPat({Ops.CONTIGUOUS, Ops.ASSIGN}, name="x"), tag_uop),
   (UPat(GroupOp.All, name="x"), lambda ctx,x: tag_uop(ctx,x) if x in ctx[3] else None),
 ])
