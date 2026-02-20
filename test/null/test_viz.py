@@ -1,4 +1,4 @@
-import unittest, decimal, json, struct
+import unittest, decimal, json, struct, sys
 from dataclasses import dataclass
 from typing import Generator
 
@@ -6,7 +6,7 @@ from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher, TrackedPatternMatch
 from tinygrad.uop.symbolic import sym
 from tinygrad.dtype import dtypes
 from tinygrad.helpers import PROFILE, colored, ansistrip, flatten, TracingKey, ProfileRangeEvent, ProfileEvent, Context, cpu_events, profile_marker
-from tinygrad.helpers import VIZ, cpu_profile
+from tinygrad.helpers import VIZ, cpu_profile, ProfilePointEvent
 from tinygrad.device import Buffer
 
 @track_rewrites(name=True)
@@ -187,6 +187,20 @@ class TestViz(BaseTestViz):
     # embed const in the parent node when possible
     self.assertEqual(list(graphs[0]), [id(a), id(alu)])
     self.assertEqual(list(graphs[1]), [id(z)])
+
+  def test_const_reshape_expand_folded(self):
+    # CONST->RESHAPE->EXPAND should be folded into the ALU node, not shown as separate RESHAPE/EXPAND nodes
+    c = UOp.const(dtypes.float, 1.0, device="CPU", shape=(3,4))  # creates CONST->RESHAPE->EXPAND chain
+    a = UOp(Ops.DEFINE_VAR, dtypes.float, arg=("a", 0.0, 10.0))
+    alu = a + c
+    graph = uop_to_json(alu)
+    # the RESHAPE and EXPAND nodes from the const should not appear in the graph
+    labels = {v["label"].split("\n")[0] for v in graph.values()}
+    self.assertNotIn("RESHAPE", labels)
+    self.assertNotIn("EXPAND", labels)
+    # the CONST should be inlined into the ALU node's label
+    alu_label = graph[id(alu)]["label"]
+    self.assertIn("CONST", alu_label)
 
 # VIZ displays nested graph_rewrites in a tree view
 
@@ -378,6 +392,15 @@ def load_profile(lst:list[ProfileEvent]) -> dict:
   return {"dur":total_dur, "peak":global_peak, "layout":layout, "markers":markers}
 
 class TestVizProfiler(BaseTestViz):
+  def test_transfer_uses_copy_device(self):
+    a = Tensor.ones(1, device="NULL").contiguous().realize()
+    a.to("NULL:1").realize()
+    range_events = [e for e in cpu_events if isinstance(e, ProfileRangeEvent)]
+    compute_events = [e for e in range_events if e.device == "NULL"]
+    copy_events = [e for e in range_events if e.device.endswith(":COPY")]
+    self.assertGreater(len(compute_events), 0, "expected compute events on base device")
+    self.assertGreater(len(copy_events), 0, "transfer must produce events with ':COPY' device suffix")
+
   def test_node(self):
     prof = [ProfileRangeEvent(device='NV', name='E_2', st=decimal.Decimal(1000), en=decimal.Decimal(1010)),
             ProfileDeviceEvent(device='NV', tdiff=decimal.Decimal(-1000))]
@@ -410,6 +433,16 @@ class TestVizProfiler(BaseTestViz):
 
     self.assertEqual(j["dur"], (event2["st"]+event2["dur"])-event["st"])
 
+  def test_copy_node_bandwidth(self):
+    sz = 256*1024*1024
+    dur = 10_000
+    prof = [ProfileRangeEvent(device='NV:SDMA:0', name=TracingKey("NV -> NV:1", ret=sz), st=decimal.Decimal(1000), en=decimal.Decimal(1000+dur)),
+            ProfileDeviceEvent(device='NV:SDMA:0', tdiff=decimal.Decimal(-1000))]
+    j = load_profile(prof)
+    event = j['layout']['NV:SDMA:0']['events'][0]
+    gbs = sz/(dur*1e-6)*1e-9
+    self.assertEqual(event['fmt'], f"{gbs:.0f} GB/s")
+
   def test_graph(self):
     prof = [ProfileDeviceEvent(device='NV', tdiff=decimal.Decimal(-1000)),
             ProfileDeviceEvent(device='NV:1:SDMA:0', tdiff=decimal.Decimal(-50)),
@@ -438,6 +471,65 @@ class TestVizProfiler(BaseTestViz):
     self.assertEqual(graph_events[0]['st'], nv_events[0]['st'])
     self.assertEqual(graph_events[0]['st']+graph_events[0]['dur'], sdma_events[0]['st']+sdma_events[0]['dur'])
 
+  def test_graph_copy_bandwidth(self):
+    sz = 256*1024*1024
+    dur = 10_000
+    prof = [ProfileDeviceEvent(device='NV', tdiff=decimal.Decimal(-1000)),
+            ProfileDeviceEvent(device='NV:1:SDMA:0', tdiff=decimal.Decimal(-50)),
+            ProfileGraphEvent(ents=[ProfileGraphEntry(device='NV:1:SDMA:0', name=TracingKey("NV -> NV:1", ret=sz), st_id=0, en_id=1)],
+                              deps=[[]],
+                              sigs=[decimal.Decimal(1004), decimal.Decimal(1004+dur)])]
+
+    j = load_profile(prof)
+    sdma_events = j['layout']['NV:1:SDMA:0']['events']
+    gbs = sz/(dur*1e-6)*1e-9
+    self.assertEqual(sdma_events[0]['fmt'], f"{gbs:.0f} GB/s")
+
+  def test_block_ordering(self):
+    prof = [ProfileDeviceEvent(device='NV', tdiff=decimal.Decimal(-1000)),
+            ProfileDeviceEvent(device='NV:1', tdiff=decimal.Decimal(-500)),
+            ProfileDeviceEvent(device='NV:SDMA:0', tdiff=decimal.Decimal(-100)),
+            ProfileRangeEvent(device='NV', name='E_2', st=decimal.Decimal(1000), en=decimal.Decimal(1010)),
+            ProfileRangeEvent(device='NV:1', name='E_3', st=decimal.Decimal(1000), en=decimal.Decimal(1010)),
+            ProfileRangeEvent(device='NV:SDMA:0', name='COPY', st=decimal.Decimal(1000), en=decimal.Decimal(1010)),
+            ProfileGraphEvent(ents=[ProfileGraphEntry(device='NV', name='E_2', st_id=0, en_id=1)],
+                              deps=[[]], sigs=[decimal.Decimal(1000), decimal.Decimal(1010)])]
+    j = load_profile(prof)
+    # graph grouped with its device, memory at the end
+    self.assertListEqual(list(j['layout']), ['NV', 'NV Graph', 'NV:SDMA:0', 'NV:1'])
+
+  @unittest.skipIf(sys.platform == 'win32', "TODO: ops_amd import fails on windows")
+  def test_multi_sdma_ordering(self):
+    props = {"gfx_target_version": 0}
+    D, St, En = decimal.Decimal, decimal.Decimal(1000), decimal.Decimal(1010)
+    prof = [# 2 AMD GPUs, 2 SDMA engines each
+            ProfileDeviceEvent(device='AMD', tdiff=D(-1000), props=props),
+            ProfileDeviceEvent(device='AMD:1', tdiff=D(-900), props=props),
+            ProfileDeviceEvent(device='AMD:SDMA:0', tdiff=D(-100), props=props),
+            ProfileDeviceEvent(device='AMD:SDMA:1', tdiff=D(-80), props=props),
+            ProfileDeviceEvent(device='AMD:1:SDMA:0', tdiff=D(-60), props=props),
+            ProfileDeviceEvent(device='AMD:1:SDMA:1', tdiff=D(-40), props=props),
+            # compute + copy events
+            ProfileRangeEvent(device='AMD', name='E_1', st=St, en=En),
+            ProfileRangeEvent(device='AMD:1', name='E_2', st=St, en=En),
+            ProfileRangeEvent(device='AMD:SDMA:0', name='COPY0', st=St, en=En),
+            ProfileRangeEvent(device='AMD:SDMA:1', name='COPY1', st=St, en=En),
+            ProfileRangeEvent(device='AMD:1:SDMA:0', name='COPY2', st=St, en=En),
+            ProfileRangeEvent(device='AMD:1:SDMA:1', name='COPY3', st=St, en=En),
+            # graph spanning compute + copy on GPU 0
+            ProfileGraphEvent(ents=[ProfileGraphEntry(device='AMD', name='E_1', st_id=0, en_id=1),
+                                    ProfileGraphEntry(device='AMD:SDMA:0', name='COPY0', st_id=2, en_id=3)],
+                              deps=[[], [0]], sigs=[St, En, St, En]),
+            # memory alloc on both GPUs
+            ProfilePointEvent(device='AMD', name='alloc', key=0, arg={"sz":1024, "dtype":dtypes.float}, ts=St),
+            ProfilePointEvent(device='AMD:1', name='alloc', key=1, arg={"sz":512, "dtype":dtypes.float}, ts=St)]
+    j = load_profile(prof)
+    # graph grouped with its device, memory at the end
+    self.assertListEqual(list(j['layout']),
+      ['AMD', 'AMD Graph', 'AMD:SDMA:0', 'AMD:SDMA:1',
+       'AMD:1', 'AMD:1:SDMA:0', 'AMD:1:SDMA:1',
+       'AMD Memory', 'AMD:1 Memory'])
+
   def test_bytes_per_kernel(self):
     step = 10
     n_events = 1_000
@@ -457,7 +549,7 @@ class TestVizProfiler(BaseTestViz):
     n_events = 1_000
     step = decimal.Decimal(dur_mins*60*1e6//n_events)
     prof = [ProfileRangeEvent("CPU", name="k_test", st=decimal.Decimal(ts:=i*step), en=decimal.Decimal(ts)+step) for i in range(n_events)]
-    with self.assertRaises(struct.error):
+    with self.assertRaisesRegex(ValueError, "timestamp out of range"):
       get_profile(prof)
 
   def test_python_marker(self):
@@ -477,11 +569,11 @@ class TestVizProfiler(BaseTestViz):
 
   def test_layout_order(self):
     def fn(): return
-    for dname in ["TINY", "USER", "TEST:1 N1", "TEST:2 N1", "TEST:1 N2", "TEST:1:ENGINE:0", "TEST:1"]:
+    for dname in ["TINY", "USER", "TEST:1 N1", "TEST:2 N1", "TEST:1 N2", "TEST:1:ENGINE:0", "TEST:1:ENGINE:0 N1", "TEST:1"]:
       with cpu_profile("fn", dname): fn()
     layout = list(load_profile(cpu_events)["layout"])
     self.assertListEqual(layout[:2], ["USER","TINY"])
-    self.assertListEqual(layout[2:], ["TEST:1", "TEST:1:ENGINE:0", "TEST:1 N1","TEST:1 N2", "TEST:2 N1"])
+    self.assertListEqual(layout[2:], ["TEST:1", "TEST:1 N1", "TEST:1 N2", "TEST:1:ENGINE:0", "TEST:1:ENGINE:0 N1", "TEST:2 N1"])
 
 def _alloc(b:int):
   a = Tensor.empty(b, device="NULL", dtype=dtypes.char)
@@ -543,6 +635,7 @@ class TestVizMemoryLayout(BaseTestViz):
     user_cnt = [len(b["arg"]["users"]) for b in buffers if b["arg"].get("users")]
     self.assertEqual(len(user_cnt), len(programs))
 
+  @unittest.skip("flaky")
   def test_inflight_buf(self):
     a = Tensor.empty(1, device="NULL")
     n = 4

@@ -1,10 +1,10 @@
 from typing import cast
 from dataclasses import replace
 import itertools
-from tinygrad.helpers import DISABLE_FAST_IDIV, EMULATED_DTYPES, DEVECTORIZE, TRANSCENDENTAL, SPEC, DEBUG, VIZ, TracingKey, Context
+from tinygrad.helpers import DISABLE_FAST_IDIV, EMULATED_DTYPES, DEVECTORIZE, TRANSCENDENTAL, SPEC, DEBUG, VIZ, IMAGE, TracingKey, Context
 from tinygrad.uop.ops import PatternMatcher, graph_rewrite, UOp, pm_lower_index_dtype, Ops, UPat, track_rewrites, KernelInfo, pyrender
 from tinygrad.uop.spec import type_verify, program_spec, kernel_spec
-from tinygrad.renderer import Renderer, ProgramSpec
+from tinygrad.renderer import Renderer, ProgramSpec, Estimates
 from tinygrad.dtype import dtypes, promo_lattice
 from tinygrad.device import is_dtype_supported
 from tinygrad.helpers import panic
@@ -17,10 +17,11 @@ from tinygrad.uop.decompositions import get_late_rewrite_patterns, get_transcend
 from tinygrad.codegen.late.expander import expander, pm_pre_expander, pm_group_for_reduce
 from tinygrad.codegen.late.devectorizer import load_store_folding, load_store_indexing, devectorize, pm_reduce, \
   ReduceContext, correct_load_store, pm_render, pm_add_loads
-from tinygrad.codegen.opt.postrange import apply_opts, make_images
+from tinygrad.codegen.opt.postrange import apply_opts, pm_make_images
 from tinygrad.codegen.simplify import pm_simplify_ranges, pm_flatten_range, pm_split_ranges, pm_load_collapse
 from tinygrad.schedule.rangeify import pm_add_buffers_local, rangeify_codegen, pm_mops, pm_syntactic_sugar
 from tinygrad.codegen.late.linearizer import CFGContext, pm_split_ends, pm_add_control_flow, linearize
+from tinygrad.renderer.amd.elf import do_assemble_amd
 
 def full_rewrite_to_sink(sink:UOp, ren:Renderer|None=None, optimize:bool=True) -> UOp:
   if ren is None: ren = Renderer()
@@ -47,7 +48,7 @@ def full_rewrite_to_sink(sink:UOp, ren:Renderer|None=None, optimize:bool=True) -
     sink = graph_rewrite(sink, pm_simplify_ranges, name="simplify ranges")
 
     # create image buffers
-    sink = make_images(sink, ren)
+    if IMAGE == 1 and ren.device in {"QCOM", "CL"}: sink = graph_rewrite(sink, pm_make_images, name="create image buffers", bottom_up=True)
 
     # do postrange optimization, BEAM or hand_coded_optimizations
     sink = apply_opts(sink, ren)
@@ -134,23 +135,28 @@ def do_linearize(prg:UOp, sink:UOp) -> UOp:
   if SPEC: type_verify(lst, program_spec)
   return prg.replace(src=prg.src + (UOp(Ops.LINEAR, src=tuple(lst)),))
 
+def do_estimates(prg:UOp, sink:UOp, lin:UOp) -> UOp|None:
+  if sink.arg.estimates is not None: return None
+  return prg.replace(src=(sink.replace(arg=replace(sink.arg, estimates=Estimates.from_uops(lin.src, ignore_indexing=True))),)+prg.src[1:])
+
 def do_render(ctx:Renderer, prg:UOp, lin:UOp) -> UOp:
   src = ctx.render(list(lin.src))
   return prg.replace(src=prg.src + (UOp(Ops.SOURCE, arg=src),), arg=ctx.aux(list(lin.src)) if ctx.has_aux else prg.arg)
 
 def do_compile(ctx:Renderer, prg:UOp, source:UOp) -> UOp|None:
-  if ctx.compiler is None: return None
   lib = ctx.compiler.compile_cached(source.arg)
   return prg.replace(src=prg.src + (UOp(Ops.BINARY, arg=lib),))
 
 pm_to_program = PatternMatcher([
   (UPat(Ops.PROGRAM, src=(UPat(Ops.SINK, name="sink"), UPat(Ops.DEVICE)), name="prg"), do_linearize),
+  (UPat(Ops.PROGRAM, src=(UPat(Ops.SINK, name="sink"), UPat(Ops.DEVICE), UPat(Ops.LINEAR, name="lin")), name="prg"), do_estimates),
+  (UPat(Ops.PROGRAM, src=(UPat(), UPat(Ops.DEVICE), UPat(Ops.LINEAR, src=UPat(Ops.INS), name="lin")), name="prg"), do_assemble_amd),
   (UPat(Ops.PROGRAM, src=(UPat(), UPat(Ops.DEVICE), UPat(Ops.LINEAR, name="lin")), name="prg"), do_render),
   (UPat(Ops.PROGRAM, src=(UPat(), UPat(Ops.DEVICE), UPat(Ops.LINEAR), UPat(Ops.SOURCE, name="source")), name="prg"), do_compile),
 ])
 
 @Context(ALLOW_DEVICE_USAGE=0)
-@track_rewrites(name=lambda ast,*args,ret,**kwargs: TracingKey(ret.name, (ret.function_name, ast), ret=ret), replay=True)
+@track_rewrites(name=lambda ast,renderer,ret,**kwargs: TracingKey(ret.name, (ret.function_name, ast), ret=renderer), replay=True)
 def get_program(ast:UOp, renderer:Renderer, opts:list[Opt]|None=None) -> ProgramSpec:
   """
   Transform an AST into a ProgramSpec. May trigger BEAM search.
@@ -177,6 +183,7 @@ def get_program(ast:UOp, renderer:Renderer, opts:list[Opt]|None=None) -> Program
     raise RuntimeError(f"can't call get_program on {ast.op}")
 
   prg = graph_rewrite(prg, pm_to_program, ctx=renderer, name="linearize/render")
+  if VIZ: graph_rewrite(prg, PatternMatcher([]), name="View Program")
 
   # create the ProgramSpec
   return ProgramSpec.from_uop(prg)

@@ -88,7 +88,8 @@ def diff(offset:int, fxns:dict[str, Callable[..., tuple|None]]) -> None:
     name, loc = "", ""
     try:
       name, args, kwargs, ctx_vals, loc, ret = pickle.loads(row[0])
-      ctx_vars = {k:v.value for k,v in ctx_vals.items() if k != "DEBUG" and (var:=ContextVar._cache.get(k)) is not None and var.value != v.value}
+      ctx_vars = {k:v.value for k,v in ctx_vals.items() if k not in ("DEBUG", "CAPTURE_PROCESS_REPLAY")
+                  and (var:=ContextVar._cache.get(k)) is not None and var.value != v.value}
       if (replayer:=fxns.get(name)) is None: continue
       with Context(**ctx_vars):
         if (ret:=replayer(ret, *args, **kwargs)) is None: continue

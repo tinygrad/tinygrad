@@ -35,23 +35,33 @@ class TestAssign(unittest.TestCase):
     a.realize()
     np.testing.assert_allclose(b.numpy(), 0)
 
-  def test_assign_add(self):
-    def f(x):
-      x += 1
-      x.realize()
-    x = Tensor([0])
-    f(x)
-    assert x.item() == 1
+  def test_assign_copy(self):
+    a = Tensor([1.,2,3], device="PYTHON")
+    c = Tensor.empty(3).assign(a.to(None))
+    # it should copy into the empty buffer
+    GlobalCounters.reset()
+    c.realize()
+    self.assertEqual(GlobalCounters.kernel_count, 1)
 
-  def test_assign_add_twice(self):
-    # NOTE: this has two kernels
-    def f(x):
-      x += 1
-      x += 1
+  def test_assign_add(self):
+    for T in (1, 2, 10):#, 100): # this crashes in CI, not sure why
+      x = Tensor([0]).realize()
+      buf = x.uop.base.realized
+      for _ in range(T):
+        x += 1
       x.realize()
-    x = Tensor([0])
-    f(x)
-    assert x.item() == 2
+      assert x.item() == T
+      assert x.uop.base.realized is buf
+
+  def test_assign_slice_add(self):
+    for T in (1, 2, 10, 100):
+      x = Tensor([0, 0]).realize()
+      buf = x.uop.base.realized
+      for _ in range(T):
+        x[0] += 1
+      x.realize()
+      assert x.tolist() == [T, 0]
+      assert x.uop.base.realized is buf
 
   def test_assign_add_double(self):
     def f(x):
@@ -261,16 +271,16 @@ class TestAssign(unittest.TestCase):
   def test_assign_contiguous(self):
     b = Tensor.arange(16).reshape(4,4).contiguous().realize()
     a = (Tensor.arange(16).reshape(4,4).contiguous().realize() + 1)
-    kc = GlobalCounters.kernel_count
+    GlobalCounters.reset()
     b.assign(a.contiguous()).realize()
-    assert GlobalCounters.kernel_count - kc == 2
+    self.assertEqual(GlobalCounters.kernel_count, 2)
 
   def test_assign_contiguous_permute(self):
     b = Tensor.arange(16).reshape(4,4).contiguous().realize()
     a = (Tensor.arange(16).reshape(4,4).contiguous().realize() + 1).permute((1,0))
-    kc = GlobalCounters.kernel_count
+    GlobalCounters.reset()
     b.assign(a.contiguous()).realize()
-    assert GlobalCounters.kernel_count - kc == 2
+    self.assertEqual(GlobalCounters.kernel_count, 2)
 
   def test_permuted_assignment(self):
     a = Tensor(np.arange(N*N, dtype=np.float32)).reshape(N,N)
@@ -343,9 +353,9 @@ class TestAssign(unittest.TestCase):
     c.assign(r + c)
     d.assign(r + d)
 
-    kc = GlobalCounters.kernel_count
+    GlobalCounters.reset()
     Tensor.realize(b, c, d)
-    assert GlobalCounters.kernel_count - kc == 1
+    self.assertEqual(GlobalCounters.kernel_count, 1)
     np.testing.assert_allclose(b.numpy(), a.sum(1).numpy()+1)
     np.testing.assert_allclose(c.numpy(), a.sum(1).numpy()+2)
     np.testing.assert_allclose(d.numpy(), a.sum(1).numpy()+3)
@@ -387,13 +397,13 @@ class TestAssign(unittest.TestCase):
     b = Tensor.arange(32 * 32).reshape(32, 32).realize()
     c = Tensor.arange(32 * 32).reshape(32, 32).realize()
 
-    kc = GlobalCounters.kernel_count
+    GlobalCounters.reset()
     r = a.sum(axis=1)
     b_perm = b.permute(1, 0)
     b.assign(r + b)
     c.assign(r + b_perm.contiguous())
     Tensor.realize(b, c)
-    assert GlobalCounters.kernel_count - kc == 2
+    self.assertEqual(GlobalCounters.kernel_count, 2)
     np.testing.assert_equal(b.numpy(), a.numpy().sum(1) + np.arange(32 * 32).reshape(32, 32))
     np.testing.assert_equal(c.numpy(), a.numpy().sum(1) + np.arange(32 * 32).reshape(32, 32).transpose(1, 0))
 
@@ -401,9 +411,9 @@ class TestAssign(unittest.TestCase):
     a = Tensor.ones(4, 4).contiguous().realize()
     b = a.shrink((None, (0, 2))).pad((None, (0, 2)), value=2)
     a.assign(a + b)
-    kc = GlobalCounters.kernel_count
+    GlobalCounters.reset()
     a.realize()
-    assert GlobalCounters.kernel_count - kc == 1
+    self.assertEqual(GlobalCounters.kernel_count, 1)
     np.testing.assert_equal(a.numpy(), np.ones((4, 4))+np.pad(np.ones((4, 4))[:, 0:2], ((0, 0), (0, 2)), constant_values=2))
 
   def test_permuted_assignment_masked_view_not_contiguous(self):
@@ -415,7 +425,6 @@ class TestAssign(unittest.TestCase):
 
   # TODO: is there a way to sneak in a permute such that it returns the wrong answer?
 
-  @unittest.skip("this test is crashing!")
   def test_overlapping_shrink_assignment_forward(self):
     # Forward shift: read index > write index in overlap
     N = 100000
@@ -426,7 +435,6 @@ class TestAssign(unittest.TestCase):
     with Context(NOOPT=1): a[0:N-shift].assign(a[shift:N]).realize()
     np.testing.assert_allclose(a.numpy(), expected)
 
-  @unittest.skip("this test is crashing!")
   def test_overlapping_shrink_assignment_reverse(self):
     # Reverse shift: write index > read index in overlap
     N = 100000
@@ -437,15 +445,14 @@ class TestAssign(unittest.TestCase):
     with Context(NOOPT=1): a[shift:N].assign(a[0:N-shift]).realize()
     np.testing.assert_allclose(a.numpy(), expected)
 
-  @unittest.skip("this test is crashing!")
   def test_nonoverlapping_shrink_assignment(self):
     # TODO: non-overlapping shrinks don't actually need contiguous, could be 1 kernel with smarter range analysis
     a = Tensor.arange(100).float().contiguous().realize()
     expected = np.arange(100, dtype=np.float32)
     expected[0:10] = expected[50:60].copy()
-    kc = GlobalCounters.kernel_count
+    GlobalCounters.reset()
     a[0:10].assign(a[50:60]).realize()
-    assert GlobalCounters.kernel_count - kc == 2, "currently conservative, forces contiguous"
+    self.assertEqual(GlobalCounters.kernel_count, 2)  # currently conservative, forces contiguous
     np.testing.assert_allclose(a.numpy(), expected)
 
   @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
@@ -529,22 +536,70 @@ class TestAssign(unittest.TestCase):
     a = Tensor.empty(5, device=f"disk:{temp('disk_assignment')}").assign(Tensor.ones(5)).numpy()
     np.testing.assert_equal(a, np.ones(5))
 
-  @unittest.skip("this test is crashing!")
   def test_assign_slice_then_read(self):
     """Assign to slice then read from buffer - read should see the assigned values.
     This is the KV cache pattern from llm.py.
     """
     v_pos = Variable("pos", 0, 3).bind(0)
-
-    # without .realize() after assign, the read doesn't see the assigned values
     cache = Tensor.zeros(4, 4).contiguous().realize()
     cache[v_pos:v_pos+1, :].assign(Tensor.ones(1, 4))
-    self.assertEqual(cache.sum().item(), 0.0)  # should be 4.0!
+    self.assertEqual(cache.sum().item(), 4.0)
 
-    # TODO: remove .realize() workaround once assign-read dependency is fixed
-    cache2 = Tensor.zeros(4, 4).contiguous().realize()
-    cache2[v_pos:v_pos+1, :].assign(Tensor.ones(1, 4)).realize()
-    self.assertEqual(cache2.sum().item(), 4.0)
+  def test_chained_assign_slice_then_read(self):
+    """Three caches with chained assign-then-read: each block writes to its cache and reads back,
+    feeding the result to the next block's assign. Without proper dependency tracking, block N's read
+    may see stale data from block N-1's cache (pre-assign zeros instead of the assigned values).
+    This is the multi-layer KV cache pattern from llm.py._attention.
+    """
+    D, max_ctx = 4, 8
+    cache1 = Tensor.zeros(max_ctx, D).contiguous().realize()
+    cache2 = Tensor.zeros(max_ctx, D).contiguous().realize()
+    cache3 = Tensor.zeros(max_ctx, D).contiguous().realize()
+    cache1[:3].assign(Tensor.ones(3, D)).realize()
+    cache2[:3].assign(Tensor.ones(3, D) * 2).realize()
+    cache3[:3].assign(Tensor.ones(3, D) * 3).realize()
+    # block 1: assign [10]*D at position 3, read sum -> c1=[13]*D
+    cache1[3:4].assign(Tensor.ones(1, D) * 10)
+    c1 = cache1[:4].sum(0, keepdim=True)
+    # block 2: assign c1 at position 3, read sum -> c2=[19]*D
+    cache2[3:4].assign(c1)
+    c2 = cache2[:4].sum(0, keepdim=True)
+    # block 3: assign c2 at position 3, read sum -> 112
+    cache3[3:4].assign(c2)
+    self.assertEqual(cache3[:4].sum().item(), 112.0)
+
+  def test_chained_assign_kernel_count(self):
+    """Chained pending assigns must not produce excessive kernels (tests recursive transitive processing)."""
+    D, N = 4, 5
+    caches = [Tensor.zeros(8, D).contiguous().realize() for _ in range(N)]
+    caches[0][0:1].assign(Tensor.ones(1, D) * 10)
+    x = caches[0][:1].sum(0, keepdim=True)
+    for i in range(1, N):
+      caches[i][0:1].assign(x)
+      x = caches[i][:1].sum(0, keepdim=True)
+    GlobalCounters.reset()
+    x.realize()
+    # N assigns (1 kernel each) producing N kernels total
+    self.assertEqual(GlobalCounters.kernel_count, N)
+
+  def test_shared_computation_assign_kernel_count(self):
+    """When a .contiguous() is shared between an assign value and the next layer's input (like QKV projection in LLM),
+    substitute optimization replaces already-realized sub-graphs in remaining pending assigns, preventing kernel escalation.
+    Without substitute, pending assign graphs grow linearly and produce 153 kernels instead of 48."""
+    D, N = 16, 16
+    caches = [Tensor.zeros(4, D).contiguous().realize() for _ in range(N)]
+    W = [Tensor.full((D, D*2), 0.01).contiguous().realize() for _ in range(N)]
+    x = Tensor.ones(1, D).contiguous().realize()
+    for i in range(N):
+      shared = (x @ W[i]).contiguous()  # .contiguous() UOp is shared between assign (k) and next layer (q)
+      k, q = shared[:, :D], shared[:, D:]
+      caches[i][0:1].assign(k)          # assign references the CONTIGUOUS
+      x = q + caches[i][:1]             # next layer also references the same CONTIGUOUS through q
+    GlobalCounters.reset()
+    caches[-1][:1].contiguous().realize()
+    # 2 kernels for first assign + 3 per remaining assign (matmul, contiguous, assign) + 1 final read = 3*N
+    self.assertEqual(GlobalCounters.kernel_count, 3*N)
+
 
 class TestAssignOrdering(unittest.TestCase):
   """Tests for complex assign orderings that could differ between lazy and eager execution.
@@ -560,30 +615,16 @@ class TestAssignOrdering(unittest.TestCase):
 
   def test_overlapping_slice_assigns(self):
     """Overlapping slice assigns - later write should win for overlapping elements."""
-    # without .realize(): assigns not executed, buffer stays zeros
     buf = Tensor.zeros(8).contiguous().realize()
     buf[0:4].assign(Tensor.ones(4))
     buf[2:6].assign(Tensor.ones(4) * 2)
-    np.testing.assert_equal(buf.numpy(), [0,0,0,0,0,0,0,0])  # TODO: wrong! should be [1,1,2,2,2,2,0,0]
-
-    # with .realize(): assigns execute in order
-    buf = Tensor.zeros(8).contiguous().realize()
-    buf[0:4].assign(Tensor.ones(4)).realize()
-    buf[2:6].assign(Tensor.ones(4) * 2).realize()
     np.testing.assert_equal(buf.numpy(), [1,1,2,2,2,2,0,0])
 
   def test_overlapping_slice_assigns_reverse(self):
     """Overlapping slice assigns in reverse order."""
-    # without .realize(): assigns not executed
     buf = Tensor.zeros(8).contiguous().realize()
     buf[2:6].assign(Tensor.ones(4) * 2)
     buf[0:4].assign(Tensor.ones(4))
-    np.testing.assert_equal(buf.numpy(), [0,0,0,0,0,0,0,0])  # TODO: wrong! should be [1,1,1,1,2,2,0,0]
-
-    # with .realize(): assigns execute in order
-    buf = Tensor.zeros(8).contiguous().realize()
-    buf[2:6].assign(Tensor.ones(4) * 2).realize()
-    buf[0:4].assign(Tensor.ones(4)).realize()
     np.testing.assert_equal(buf.numpy(), [1,1,1,1,2,2,0,0])
 
   def test_read_between_writes(self):
@@ -619,26 +660,14 @@ class TestAssignOrdering(unittest.TestCase):
 
   def test_slice_write_then_full_read(self):
     """Write to slice, then read full buffer."""
-    # without .realize(): orphan slice assign not triggered by .numpy()
     buf = Tensor.zeros(4, dtype=dtypes.int32).contiguous().realize()
     buf[1:3].assign(Tensor([5, 6]))
-    np.testing.assert_equal(buf.numpy(), [0, 0, 0, 0])  # TODO: wrong! should be [0, 5, 6, 0]
-
-    # with .realize(): assign executes
-    buf = Tensor.zeros(4, dtype=dtypes.int32).contiguous().realize()
-    buf[1:3].assign(Tensor([5, 6])).realize()
     np.testing.assert_equal(buf.numpy(), [0, 5, 6, 0])
 
   def test_chained_slice_copies(self):
     """Copy from one slice to another within same buffer."""
-    # without .realize(): orphan slice assign not triggered
     buf = Tensor([1, 2, 3, 4, 5, 6, 7, 8]).contiguous().realize()
     buf[4:8].assign(buf[0:4].contiguous())
-    np.testing.assert_equal(buf.numpy(), [1, 2, 3, 4, 5, 6, 7, 8])  # TODO: wrong! should be [1,2,3,4,1,2,3,4]
-
-    # with .realize(): assign executes
-    buf = Tensor([1, 2, 3, 4, 5, 6, 7, 8]).contiguous().realize()
-    buf[4:8].assign(buf[0:4].contiguous()).realize()
     np.testing.assert_equal(buf.numpy(), [1, 2, 3, 4, 1, 2, 3, 4])
 
   def test_swap_slices(self):
@@ -661,15 +690,8 @@ class TestAssignOrdering(unittest.TestCase):
 
   def test_reduction_after_partial_assign(self):
     """Reduction over buffer after partial assign - must see the assigned values."""
-    # without .realize(): orphan slice assign not triggered by reduction
     buf = Tensor.zeros(4, 4).contiguous().realize()
     buf[0:2, :].assign(Tensor.ones(2, 4))  # top half = 1
-    total = buf.sum()
-    self.assertEqual(total.item(), 0)  # TODO: wrong! should be 8 (2*4 ones)
-
-    # with .realize(): assign executes before reduction
-    buf = Tensor.zeros(4, 4).contiguous().realize()
-    buf[0:2, :].assign(Tensor.ones(2, 4)).realize()
     total = buf.sum()
     self.assertEqual(total.item(), 8)
 
@@ -734,34 +756,38 @@ class TestAssignOrdering(unittest.TestCase):
   def test_variable_slice_ordering(self):
     """Variable-indexed slices - tests symbolic dependency tracking."""
     v_i = Variable("i", 0, 3)
-
-    # without .realize(): orphan slice assigns not triggered
     buf = Tensor.zeros(4, 4).contiguous().realize()
     buf[v_i.bind(0):v_i.bind(0)+1, :].assign(Tensor.ones(1, 4))
-    row0_sum = buf[0:1, :].sum()
-    self.assertEqual(row0_sum.item(), 0)  # TODO: wrong! should be 4
+    buf[v_i.bind(1):v_i.bind(1)+1, :].assign(Tensor.ones(1, 4) * 2)
+    self.assertEqual(buf[0:1, :].sum().item(), 4)
+    self.assertEqual(buf[1:2, :].sum().item(), 8)
 
-    # with .realize(): assigns execute
-    buf = Tensor.zeros(4, 4).contiguous().realize()
-    buf[v_i.bind(0):v_i.bind(0)+1, :].assign(Tensor.ones(1, 4)).realize()
-    row0_sum = buf[0:1, :].sum()
-    buf[v_i.bind(1):v_i.bind(1)+1, :].assign(Tensor.ones(1, 4) * 2).realize()
-    row1_sum = buf[1:2, :].sum()
-    self.assertEqual(row0_sum.item(), 4)
-    self.assertEqual(row1_sum.item(), 8)
+  def test_multi_step_assign_read_write_same_buffer(self):
+    """Assign to m and param reading b, then update b, across multiple steps.
+    This is the optimizer bias-correction pattern from issue #13600: m accumulates,
+    param is updated using m/(1-b), and b is updated via *= after the reads."""
+    b = Tensor([0.5]).contiguous().realize()
+    m = Tensor([0.0]).contiguous().realize()
+    param = Tensor([1.0]).contiguous().realize()
+    for _ in range(10):
+      m.assign(0.9 * m + 0.1)
+      param.assign(param - m / (1 - b))
+      b *= 0.9
+      Tensor.realize(param, m, b)
+    # numpy reference
+    b_np, m_np, p_np = 0.5, 0.0, 1.0
+    for _ in range(10):
+      m_np = 0.9 * m_np + 0.1
+      p_np = p_np - m_np / (1 - b_np)
+      b_np *= 0.9
+    np.testing.assert_allclose(param.item(), p_np, atol=1e-5)
 
   def test_multiple_slice_assigns_then_read(self):
-    """Multiple non-overlapping slice assigns then read - RAW dependencies must ensure all writes complete before read."""
+    """Multiple non-overlapping slice assigns then read."""
     buf = Tensor.zeros(4).contiguous().realize()
     buf[0:1].assign(Tensor.ones(1))
     buf[1:2].assign(Tensor.full((1,), 2.0))
     buf[2:3].assign(Tensor.full((1,), 3.0))
-    self.assertEqual(buf.sum().realize().item(), 0.0)  # TODO: wrong! should be 1 + 2 + 3 + 0 = 6
-
-    buf = Tensor.zeros(4).contiguous().realize()
-    buf[0:1].assign(Tensor.ones(1)).realize()
-    buf[1:2].assign(Tensor.full((1,), 2.0)).realize()
-    buf[2:3].assign(Tensor.full((1,), 3.0)).realize()
     self.assertEqual(buf.sum().realize().item(), 6.0)
 
 if __name__ == "__main__":
