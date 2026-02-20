@@ -585,7 +585,7 @@ def map_insts(data:bytes, lib:bytes, target:str) -> Iterator[tuple[PacketType, I
   def simd_select(p) -> bool: return getattr(p, "cu", 0) == 0 and getattr(p, "simd", 0) == 0
   for p in decode(data):
     if not simd_select(p): continue
-    if isinstance(p, (WAVESTART, WAVESTART_RDNA4, CDNA_WAVESTART)):
+    if isinstance(p, (WAVESTART, WAVESTART_RDNA4)):
       assert p.wave not in wave_pc, "only one inflight wave per unit"
       wave_pc[p.wave] = next(iter(pc_map))
       continue
@@ -594,7 +594,7 @@ def map_insts(data:bytes, lib:bytes, target:str) -> Iterator[tuple[PacketType, I
       yield (p, InstructionInfo(pc, p.wave, s_endpgm()))
       continue
     # skip OTHER_ instructions, they don't belong to this unit
-    if isinstance(p, (INST, INST_RDNA4 , CDNA_INST)) and p.op.name.startswith("OTHER_"): continue
+    if isinstance(p, (INST, INST_RDNA4)) and p.op.name.startswith("OTHER_"): continue
     if isinstance(p, IMMEDIATE_MASK):
       # immediate mask may yield multiple times per packet
       for wave in range(16):
@@ -605,7 +605,7 @@ def map_insts(data:bytes, lib:bytes, target:str) -> Iterator[tuple[PacketType, I
           wave_pc[wave] += inst.size()
           yield (p, InstructionInfo(pc, wave, inst))
       continue
-    if isinstance(p, (VALUINST, INST, INST_RDNA4, CDNA_INST, IMMEDIATE)):
+    if isinstance(p, (VALUINST, INST, INST_RDNA4, IMMEDIATE)):
       inst = pc_map[pc:=wave_pc[p.wave]]
       # s_delay_alu doesn't get a packet?
       while (inst_op:=getattr(inst, 'op_name', '')) in {"S_DELAY_ALU", "S_WAIT_ALU"}:
@@ -614,7 +614,7 @@ def map_insts(data:bytes, lib:bytes, target:str) -> Iterator[tuple[PacketType, I
       # identify a branch instruction, only used for asserts
       branch_inst = inst if "BRANCH" in inst_op else None
       if branch_inst is not None:
-        assert isinstance(p, (INST, INST_RDNA4, CDNA_INST)) and p.op.name in {"JUMP_NO", "JUMP", "NEXT"}, f"branch can only be folowed by JUMP, got {p}"
+        assert isinstance(p, (INST, INST_RDNA4)) and p.op.name in {"JUMP_NO", "JUMP", "NEXT"}, f"branch can only be folowed by JUMP, got {p}"
       # JUMP handling
       if (isinstance(p, INST) and p.op is InstOp.JUMP) or (isinstance(p, INST_RDNA4) and branch_inst is not None and p.flag3):
         simm16 = getattr(branch_inst, 'simm16')
