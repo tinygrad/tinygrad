@@ -72,6 +72,7 @@ class TestMultiAxis(unittest.TestCase):
     self.assertEqual(e.shape, t.shape)
     self.assertEqual(e.device, t.device)
     self.assertEqual(e.uop.axis, 0)
+    self.assertTrue(e.uop.has_buffer_identity())
 
 if __name__ == '__main__':
   unittest.main()
