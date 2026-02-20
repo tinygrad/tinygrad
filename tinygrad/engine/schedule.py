@@ -185,7 +185,9 @@ def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[dict[UOp, UOp], li
     tensor_map_sink = UOp.sink(*flatten([(k,v) for k,v in tensor_map.items()]), *flatten(after_map))
     combined_sink = UOp.sink(tensor_map_sink, big_sink_templ)
     if SCACHE: schedule_cache[sched_cache_key] = combined_sink
-  else: del big_sink_cache
+  else:
+    del big_sink_cache
+    combined_sink = sc_ret
 
   # replace all the PARAMs/LUNIQUEs back (single graph_rewrite for everything)
   input_buffers_inverse = {v:k for k,v in input_buffers.items()}
