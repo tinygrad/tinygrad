@@ -254,8 +254,8 @@ def load_unet3d_data(preprocessed_dataset_dir, seed, queue_in, queue_out, X:Tens
       x = random_brightness_augmentation(x)
       x = gaussian_noise(x)
 
-    X[idx].contiguous().realize().uop.base.realized.as_memoryview(force_zero_copy=True)[:] = x.tobytes()
-    Y[idx].contiguous().realize().uop.base.realized.as_memoryview(force_zero_copy=True)[:] = y.tobytes()
+    X[idx].flatten().assign(x.tobytes())
+    Y[idx].flatten().assign(y.tobytes())
 
     queue_out.put(idx)
   queue_out.put(None)
@@ -369,12 +369,12 @@ def load_retinanet_data(base_dir:Path, val:bool, queue_in:Queue, queue_out:Queue
       clipped_match_idxs = np.clip(match_idxs, 0, None)
       clipped_boxes, clipped_labels = tgt["boxes"][clipped_match_idxs], tgt["labels"][clipped_match_idxs]
 
-      boxes[idx].contiguous().realize().uop.base.realized.as_memoryview(force_zero_copy=True)[:] = clipped_boxes.tobytes()
-      labels[idx].contiguous().realize().uop.base.realized.as_memoryview(force_zero_copy=True)[:] = clipped_labels.tobytes()
-      matches[idx].contiguous().realize().uop.base.realized.as_memoryview(force_zero_copy=True)[:] = match_idxs.tobytes()
-      anchors[idx].contiguous().realize().uop.base.realized.as_memoryview(force_zero_copy=True)[:] = anchor.tobytes()
+      boxes[idx].flatten().assign(clipped_boxes.tobytes())
+      labels[idx].flatten().assign(clipped_labels.tobytes())
+      matches[idx].flatten().assign(match_idxs.tobytes())
+      anchors[idx].flatten().assign(anchor.tobytes())
 
-    imgs[idx].contiguous().realize().uop.base.realized.as_memoryview(force_zero_copy=True)[:] = img.tobytes()
+    imgs[idx].flatten().assign(img.tobytes())
 
     queue_out.put(idx)
   queue_out.put(None)
