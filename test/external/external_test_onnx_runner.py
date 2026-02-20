@@ -56,10 +56,12 @@ class TestOnnxRunner(unittest.TestCase):
     output = runner({'inp': Tensor([1, 2, 3, 4])})['output']
     _check_ast_count(0, output)
 
+  @unittest.skip("const folding is removed")
   def test_const_fold_from_disk(self):
     self._test_const_fold_unary_op(True)
     self._test_const_fold_binary_op(True)
 
+  @unittest.skip("const folding is removed")
   def test_const_fold_from_memory(self):
     self._test_const_fold_unary_op(False)
     # TODO: understand this and fix this, bitcast related

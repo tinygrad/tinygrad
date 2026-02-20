@@ -131,10 +131,9 @@ class TransformerBlock:
     q = apply_rope(q, freqs_cis)
     k = apply_rope(k, freqs_cis)
 
-    # TODO: remove these kv cache realizes
     if not hasattr(self, "cache_kv"):
       self.cache_kv = Tensor.zeros(2, B, self.n_kv_heads, self.max_context, self.head_dim, dtype=k.dtype, device=k.device).contiguous().realize()
-    self.cache_kv[:, :, :, start_pos:start_pos+T, :].assign(Tensor.stack(k, v)).realize()
+    self.cache_kv[:, :, :, start_pos:start_pos+T, :].assign(Tensor.stack(k, v))
     k = self.cache_kv[0, :, :, 0:start_pos+T, :]
     v = self.cache_kv[1, :, :, 0:start_pos+T, :]
 

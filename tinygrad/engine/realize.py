@@ -172,7 +172,6 @@ class ExecItem:
       if et is not None: GlobalCounters.time_sum_s += et
       if DEBUG >= 2:
         lds_est = sym_infer(self.prg.estimates.lds, var_vals)
-        mem_est = min(mem_est, lds_est)   # there can't be more memory accessed than loads/stores. remove this when symbolic is fixed
         header_color = 'magenta' if jit else ('green' if self.prg.first_run else None)
         ptm = colored(time_to_str(et, w=9), "yellow" if et > 0.01 else None) if et is not None else ""
         flops, membw, ldsbw = op_est/(et or 1e-20), mem_est/(et or 1e-20), lds_est/(et or 1e-20)

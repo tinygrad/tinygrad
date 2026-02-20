@@ -3,8 +3,7 @@
 import unittest, random, warnings
 import numpy as np
 
-from tinygrad import Tensor, dtypes, Device, TinyJit
-from tinygrad.device import is_dtype_supported
+from tinygrad import Tensor, dtypes, Device, TinyJit, Variable
 from tinygrad.helpers import all_same, prod
 from test.helpers import slow
 
@@ -525,7 +524,6 @@ class TestIndexing(unittest.TestCase):
     a = src[0].mul(src[1])
     self.assertEqual(a[0,1].item(), 2)
 
-  @unittest.skipUnless(is_dtype_supported(dtypes.int64), "need dtypes.int64")
   def test_getitem_scalars(self):
     zero = Tensor(0, dtype=dtypes.int64)
     one = Tensor(1, dtype=dtypes.int64)
@@ -649,7 +647,11 @@ class TestIndexing(unittest.TestCase):
     i, j = indices
     numpy_testing_assert_equal_helper(x[i:j], x[0:1])
 
-  @unittest.skipUnless(is_dtype_supported(dtypes.int64), "tensor indexing uses int64 internally")
+  def test_variable_with_tensor_index(self):
+    t = Tensor.arange(12).reshape(3, 4)
+    v = Variable("v", 0, 2).bind(1)
+    numpy_testing_assert_equal_helper(t[v, Tensor([0, 1, 2])], t[1, Tensor([0, 1, 2])])
+
   def test_ellipsis_tensor(self):
     x = Tensor.arange(0, 9).reshape(3, 3)
     idx = Tensor([0, 2])
@@ -998,7 +1000,7 @@ def assert_backward_eq(tensor: Tensor, indexer):
 def get_set_tensor(indexed: Tensor, indexer):
   set_size = indexed[indexer].shape
   set_count = indexed[indexer].numel()
-  set_tensor = Tensor.randint(set_count, high=set_count).reshape(set_size) #.cast(dtypes.float64)
+  set_tensor = Tensor.randint(set_count, high=set_count).reshape(set_size).cast(indexed.dtype)
   return set_tensor
 
 @slow

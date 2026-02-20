@@ -3,7 +3,7 @@ from __future__ import annotations
 import enum, collections
 from typing import Iterator
 from tinygrad.helpers import colored
-from extra.assembly.amd.sqtt import PacketType, bits
+from tinygrad.renderer.amd.sqtt import PacketType, bits
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # STALL REASONS
@@ -129,14 +129,6 @@ def decode_tpc_id(tpc_id:int) -> tuple[int, int, int]:
   # NOTE: valid only for ops_nv, cuda encoding is different
   return (tpc_id >> 5, (tpc_id >> 1) & 0xf, tpc_id & 1)
 
-def print_samples(samples:list[tuple[PMASample, int]]) -> None:
-  if not samples: return
-  base_pc = min(s.pc_offset for s, _ in samples)
-  for s, tpc_id in samples:
-    gpc, tpc, sm = decode_tpc_id(tpc_id)
-    stall_str = colored(f"{s.stall_reason.name:17}", STALL_COLORS.get(s.stall_reason, "white"))
-    print(f"pc=0x{s.pc_offset - base_pc:06x} {stall_str} ev={s.stall_key:2d} active={s.active} wave={s.wave_id:2d} gpc={gpc} tpc={tpc} sm={sm}")
-
 def print_packets(data:bytes, sm_version:int=0x800) -> None:
   record_size = 9 if sm_version >= 0x890 else 8
   tpc_state: dict[int, list[int]] = collections.defaultdict(list)
@@ -187,7 +179,11 @@ if __name__ == "__main__":
     print(f"\n{'='*60}\nDump {dump_idx} ({len(raw)} bytes, {len(raw)//32} packets)\n{'='*60}")
     if "--raw" in sys.argv: print_packets(raw, sm_ver)
     else:
-      samples = list(decode(raw, sm_ver))
+      samples = []
+      for s, tpc_id in decode(raw, sm_ver):
+        gpc, tpc, sm = decode_tpc_id(tpc_id)
+        stall_str = colored(f"{s.stall_reason.name:17}", STALL_COLORS.get(s.stall_reason, "white"))
+        print(f"pc=0x{s.pc_offset:06x} {stall_str} ev={s.stall_key:2d} active={s.active} wave={s.wave_id:2d} gpc={gpc} tpc={tpc} sm={sm}")
+        samples.append((s, tpc_id))
       print(f"\nDecoded {len(samples)} samples:")
-      print_samples(samples)
       print_aggregated(samples)

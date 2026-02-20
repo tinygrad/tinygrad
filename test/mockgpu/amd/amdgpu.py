@@ -5,7 +5,7 @@ from tinygrad.helpers import getbits, to_mv, getenv
 from tinygrad.runtime.support import c
 
 MOCKGPU_ARCH = getenv("MOCKGPU_ARCH", "rdna3")
-GFX_TARGET_VERSION = {"rdna3": 110000, "rdna4": 120000}[MOCKGPU_ARCH]
+GFX_TARGET_VERSION = {"rdna3": 110000, "rdna4": 120000, "cdna4": 90500}[MOCKGPU_ARCH]
 import tinygrad.runtime.autogen.amd_gpu as amd_gpu, tinygrad.runtime.autogen.am.pm4_nv as pm4
 
 SDMA_MAX_COPY_SIZE = 0x400000
@@ -17,12 +17,16 @@ regCOMPUTE_USER_DATA_0 = 0x1be0 + amd_gpu.GC_BASE__INST0_SEG0
 regCOMPUTE_NUM_THREAD_X = 0x1ba7 + amd_gpu.GC_BASE__INST0_SEG0
 regGRBM_GFX_INDEX = 0x2200 + amd_gpu.GC_BASE__INST0_SEG1
 regSQ_THREAD_TRACE_BUF0_BASE = 0x39e8 + amd_gpu.GC_BASE__INST0_SEG1
-regSQ_THREAD_TRACE_BUF0_SIZE = 0x39e9 + amd_gpu.GC_BASE__INST0_SEG1
+regSQ_THREAD_TRACE_BUF0_SIZE = {"rdna3": 0x39e9, "rdna4": 0x39e6}[MOCKGPU_ARCH] + amd_gpu.GC_BASE__INST0_SEG1
 regSQ_THREAD_TRACE_WPTR = 0x39ef + amd_gpu.GC_BASE__INST0_SEG1
 regSQ_THREAD_TRACE_STATUS = 0x39f4 + amd_gpu.GC_BASE__INST0_SEG1
 regCP_PERFMON_CNTL = 0x3808 + amd_gpu.GC_BASE__INST0_SEG1
 regCPG_PERFCOUNTER1_LO = 0x3000 + amd_gpu.GC_BASE__INST0_SEG1
 regGUS_PERFCOUNTER_HI = 0x3643 + amd_gpu.GC_BASE__INST0_SEG1
+
+# RDNA 4
+regSQ_THREAD_TRACE_BUF0_BASE_LO = 0x39e7 + amd_gpu.GC_BASE__INST0_SEG1
+regSQ_THREAD_TRACE_BUF0_BASE_HI = regSQ_THREAD_TRACE_BUF0_BASE
 
 class SQTT_EVENTS:
   THREAD_TRACE_FINISH = 0x00000037
@@ -106,8 +110,8 @@ class PM4Executor(AMDQueue):
     return (self.rptr[0] - prev_rptr) + executed_in_ib
 
   def _exec_acquire_mem(self, n):
-    assert n == 6
-    for _ in range(7): self._next_dword() # TODO: implement
+    assert n in (5, 6)
+    for _ in range(n + 1): self._next_dword() # TODO: implement
 
   def _exec_release_mem(self, n):
     assert n == 6
@@ -184,6 +188,12 @@ class PM4Executor(AMDQueue):
     args_addr = self.gpu.regs[regCOMPUTE_USER_DATA_0] + (self.gpu.regs[regCOMPUTE_USER_DATA_0 + 1] << 32)
     lc = [self.gpu.regs[i] for i in range(regCOMPUTE_NUM_THREAD_X, regCOMPUTE_NUM_THREAD_X+3)]
     rsrc2 = self.gpu.regs[regCOMPUTE_PGM_RSRC2]
+    # Read all user data registers (hardware loads these directly into s[0:N])
+    user_sgpr_count = (rsrc2 >> 1) & 0x1F  # USER_SGPR_COUNT is bits 1:5
+    user_data = []
+    for i in range(user_sgpr_count):
+      try: user_data.append(self.gpu.regs[regCOMPUTE_USER_DATA_0 + i])
+      except KeyError: user_data.append(0)
 
     prg_sz = 0
     for st,sz in self.gpu.mapped_ranges:
@@ -197,11 +207,12 @@ class PM4Executor(AMDQueue):
     scratch_size = wavesize * 4  # This gives the scratch size per thread (lane)
 
     assert prg_sz > 0, "Invalid prg ptr (not found in mapped ranges)"
-    # Pass valid memory ranges, rsrc2, scratch_size and arch to Python emulator
+    # Pass valid memory ranges, rsrc2, scratch_size, arch, and user data registers to Python emulator
     if hasattr(remu, 'valid_mem_ranges'): remu.valid_mem_ranges = self.gpu.mapped_ranges
     if hasattr(remu, 'rsrc2'): remu.rsrc2 = rsrc2
     if hasattr(remu, 'scratch_size'): remu.scratch_size = scratch_size
     if hasattr(remu, 'arch'): remu.arch = self.gpu.arch
+    if hasattr(remu, 'user_data'): remu.user_data = user_data
     err = remu.run_asm(prg_addr, prg_sz, *gl, *lc, args_addr)
     if err != 0: raise RuntimeError("remu does not support the new instruction introduced in this kernel")
 
@@ -221,13 +232,25 @@ class PM4Executor(AMDQueue):
     event_dw = self._next_dword()
     match (event_dw & 0xFF): # event type
       case SQTT_EVENTS.THREAD_TRACE_FINISH:
+        # Get the most recent trace from the emulator (if available)
+        from test.mockgpu.amd.emu import sqtt_traces
+        blob = sqtt_traces.pop(0) if sqtt_traces else b''
         old_idx = self.gpu.regs.grbm_index
         for se in range(self.gpu.regs.n_se):
           self.gpu.regs.grbm_index = 0b011 << 29 | se << 16 # select se, broadcast sa and instance
           self.gpu.regs[regSQ_THREAD_TRACE_STATUS] = 1 << 12 # FINISH_PENDING==0 FINISH_DONE==1 BUSY==0
-          buf = ((self.gpu.regs[regSQ_THREAD_TRACE_BUF0_SIZE]&0xf)<<32|self.gpu.regs[regSQ_THREAD_TRACE_BUF0_BASE])<<12 # per page addressing
-          fake_used = 0x1000 # fake one page long trace
-          self.gpu.regs[regSQ_THREAD_TRACE_WPTR] = ((buf+fake_used)//32) & 0x1FFFFFFF
+          if MOCKGPU_ARCH == "rdna3":
+            buf_addr = ((self.gpu.regs[regSQ_THREAD_TRACE_BUF0_SIZE]&0xf)<<32|self.gpu.regs[regSQ_THREAD_TRACE_BUF0_BASE])<<12
+          else:
+            buf_addr = ((self.gpu.regs[regSQ_THREAD_TRACE_BUF0_BASE_HI])<<32|self.gpu.regs[regSQ_THREAD_TRACE_BUF0_BASE_LO])<<12
+          # Use real trace blob for SE 0 (which has itrace enabled), empty blob for other SEs
+          se_blob = blob if se == 0 else b''
+
+          # Write blob to trace buffer
+          if se_blob: ctypes.memmove(buf_addr, se_blob, len(se_blob))
+          # RDNA3 has absolute address for wptr, RDNA4 has relative
+          wptr_val = (((buf_addr if MOCKGPU_ARCH == "rdna3" else 0) + len(se_blob)) // 32) & 0x1FFFFFFF
+          self.gpu.regs[regSQ_THREAD_TRACE_WPTR] = wptr_val
         self.gpu.regs.grbm_index = old_idx
       case _: pass # NOTE: for now most events aren't emulated
 
@@ -318,7 +341,7 @@ class AMDGPU(VirtGPU):
     self.regs = AMDGPURegisters()
     self.mapped_ranges = set()
     self.queues = []
-    self.arch = MOCKGPU_ARCH
+    self.arch = "cdna" if MOCKGPU_ARCH == "cdna4" else MOCKGPU_ARCH
 
   def map_range(self, vaddr, size): self.mapped_ranges.add((vaddr, size))
   def unmap_range(self, vaddr, size): self.mapped_ranges.remove((vaddr, size))
@@ -329,7 +352,7 @@ class AMDGPU(VirtGPU):
     self.queues.append(SDMAExecutor(self, base, size, rptr, wptr))
     return len(self.queues) - 1
 
-gpu_props = """cpu_cores_count 0
+_gpu_props_rdna = """cpu_cores_count 0
 simd_count 192
 mem_banks_count 1
 caches_count 206
@@ -367,3 +390,44 @@ sdma_fw_version 20
 unique_id 11673270660693242239
 num_xcc 1
 max_engine_clk_ccompute 2400"""
+
+_gpu_props_cdna = """cpu_cores_count 0
+simd_count 304
+mem_banks_count 1
+caches_count 206
+io_links_count 1
+p2p_links_count 5
+cpu_core_id_base 0
+simd_id_base 2147488032
+max_waves_per_simd 16
+lds_size_in_kb 128
+gds_size_in_kb 0
+num_gws 64
+wave_front_size 64
+array_count 16
+simd_arrays_per_engine 4
+cu_per_simd_array 19
+simd_per_cu 2
+max_slots_scratch_cu 32
+gfx_target_version {gfx_target_version}
+vendor_id 4098
+device_id 29772
+location_id 34304
+domain 0
+drm_render_minor {drm_render_minor}
+hive_id 0
+num_sdma_engines 2
+num_sdma_xgmi_engines 0
+num_sdma_queues_per_engine 6
+num_cp_queues 8
+max_engine_clk_fcompute 2100
+local_mem_size 0
+fw_version 2140
+capability 671588992
+debug_prop 1495
+sdma_fw_version 20
+unique_id 11673270660693242239
+num_xcc 1
+max_engine_clk_ccompute 2100"""
+
+gpu_props = _gpu_props_cdna if MOCKGPU_ARCH == "cdna4" else _gpu_props_rdna

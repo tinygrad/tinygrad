@@ -65,17 +65,7 @@ def loader_process(q_in, q_out, X:Tensor, seed):
       else:
         # pad data with training mean
         img = np.tile(np.array([[[123.68, 116.78, 103.94]]], dtype=np.uint8), (224, 224, 1))
-
-      # broken out
-      #img_tensor = Tensor(img.tobytes(), device='CPU')
-      #storage_tensor = X[idx].contiguous().realize().lazydata.base.realized
-      #storage_tensor._copyin(img_tensor.numpy())
-
-      # faster
-      X[idx].contiguous().realize().uop.base.realized.as_memoryview(force_zero_copy=True)[:] = img.tobytes()
-
-      # ideal
-      #X[idx].assign(img.tobytes())   # NOTE: this is slow!
+      X[idx].flatten().assign(img.tobytes())
       q_out.put(idx)
     q_out.put(None)
 
@@ -264,8 +254,8 @@ def load_unet3d_data(preprocessed_dataset_dir, seed, queue_in, queue_out, X:Tens
       x = random_brightness_augmentation(x)
       x = gaussian_noise(x)
 
-    X[idx].contiguous().realize().uop.base.realized.as_memoryview(force_zero_copy=True)[:] = x.tobytes()
-    Y[idx].contiguous().realize().uop.base.realized.as_memoryview(force_zero_copy=True)[:] = y.tobytes()
+    X[idx].flatten().assign(x.tobytes())
+    Y[idx].flatten().assign(y.tobytes())
 
     queue_out.put(idx)
   queue_out.put(None)
@@ -379,12 +369,12 @@ def load_retinanet_data(base_dir:Path, val:bool, queue_in:Queue, queue_out:Queue
       clipped_match_idxs = np.clip(match_idxs, 0, None)
       clipped_boxes, clipped_labels = tgt["boxes"][clipped_match_idxs], tgt["labels"][clipped_match_idxs]
 
-      boxes[idx].contiguous().realize().uop.base.realized.as_memoryview(force_zero_copy=True)[:] = clipped_boxes.tobytes()
-      labels[idx].contiguous().realize().uop.base.realized.as_memoryview(force_zero_copy=True)[:] = clipped_labels.tobytes()
-      matches[idx].contiguous().realize().uop.base.realized.as_memoryview(force_zero_copy=True)[:] = match_idxs.tobytes()
-      anchors[idx].contiguous().realize().uop.base.realized.as_memoryview(force_zero_copy=True)[:] = anchor.tobytes()
+      boxes[idx].flatten().assign(clipped_boxes.tobytes())
+      labels[idx].flatten().assign(clipped_labels.tobytes())
+      matches[idx].flatten().assign(match_idxs.tobytes())
+      anchors[idx].flatten().assign(anchor.tobytes())
 
-    imgs[idx].contiguous().realize().uop.base.realized.as_memoryview(force_zero_copy=True)[:] = img.tobytes()
+    imgs[idx].flatten().assign(img.tobytes())
 
     queue_out.put(idx)
   queue_out.put(None)
@@ -552,7 +542,7 @@ class BinIdxDataset:
     version, = struct.unpack("<Q", self.idx.read(8))
     assert version == 1, "unsupported index version"
     dtype_code, = struct.unpack("<B", self.idx.read(1))
-    self.dtype = {1:dtypes.uint8, 2:dtypes.int8, 3:dtypes.int16, 4:dtypes.int32, 5:dtypes.int64, 6:dtypes.float64, 7:dtypes.double, 8:dtypes.uint16}[dtype_code]
+    self.dtype = {1:np.dtype(np.uint8), 2:np.dtype(np.int8), 3:np.dtype(np.int16), 4:np.dtype(np.int32), 5:np.dtype(np.int64), 6:np.dtype(np.float64), 7:np.dtype(np.double), 8:np.dtype(np.uint16)}[dtype_code]
     self.count, = struct.unpack("<Q", self.idx.read(8))
     doc_count, = struct.unpack("<Q", self.idx.read(8))
 
@@ -569,7 +559,7 @@ class BinIdxDataset:
     self.doc_idx = self.idx_t[start:end].bitcast(dtypes.int64).numpy()
 
     # bin file
-    self.bin_t = Tensor(base_path.with_name(f"{base_path.name}.bin"))
+    self.bin_t = Tensor(base_path.with_name(f"{base_path.name}.bin")).numpy()
 
   def _index(self, idx) -> tuple[int, int]:
     return int(self.pointers[idx]), int(self.sizes[idx])
@@ -578,7 +568,7 @@ class BinIdxDataset:
     ptr, size = self._index(idx)
     if length is None: length = size - offset
     ptr += offset * self.dtype.itemsize
-    return self.bin_t[ptr:ptr+length*self.dtype.itemsize].bitcast(self.dtype).to(None)
+    return self.bin_t[ptr:ptr+length*self.dtype.itemsize].view(self.dtype)
 
 # https://docs.nvidia.com/megatron-core/developer-guide/latest/api-guide/datasets.html
 class GPTDataset:
@@ -637,7 +627,7 @@ class GPTDataset:
         sample_parts.append(self.indexed_dataset.get(int(self.doc_idx[i]), offset=int(offset), length=length))
 
     # concat all parts
-    text = Tensor.cat(*sample_parts)
+    text = np.concatenate(sample_parts, axis=0)
 
     return text
 
@@ -780,7 +770,8 @@ def get_llama3_dataset(samples:int, seqlen:int, base_dir:Path, seed:int=0, val:b
 def iterate_llama3_dataset(dataset:BlendedGPTDataset, bs:int):
   for b in range(math.ceil(dataset.samples / bs)):
     batch = [dataset.get(b * bs + i) for i in range(bs)]
-    yield Tensor.stack(batch, dim=0)
+    stacked = np.stack(batch, axis=0)
+    yield Tensor(stacked, device="NPY")
 
 def batch_load_llama3(bs:int, samples:int, seqlen:int, base_dir:Path, seed:int=0, val:bool=True, small:bool=False):
   return iterate_llama3_dataset(get_llama3_dataset(samples, seqlen, base_dir, seed, val, small), bs)
