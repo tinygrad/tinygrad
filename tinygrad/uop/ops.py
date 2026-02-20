@@ -1311,18 +1311,6 @@ def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False, name=N
   rewrite_ctx = RewriteContext(pm if not bottom_up else None, pm if bottom_up else bpm, ctx)
   return rewrite_ctx.unified_rewrite(sink)
 
-@profile_matches
-def graph_rewrite_map(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False, name=None, bpm=None,
-                      input_map:dict[UOp, UOp]|None=None, ) -> dict[UOp, UOp]:
-  rewrite_ctx = RewriteContext(pm if not bottom_up else None, pm if bottom_up else bpm, ctx)
-  new_map: dict[UOp, UOp] = {}
-  for k in (list(sink.toposort())[::-1] if bottom_up else sink.toposort()):
-    new_map[k] = v = rewrite_ctx.unified_rewrite(k)
-    if k is not v and k.metadata is not None: all_metadata[v] = tuple(dedup(all_metadata.get(v, ())))+k.metadata
-  if input_map is not None:
-    for k,v in input_map.items(): new_map[k] = new_map.get(v,v)
-  return new_map
-
 def sint_to_uop(x:sint, dtype=dtypes.index) -> UOp: return UOp.const(dtype, x) if isinstance(x, int) else x.cast(dtype)
 
 def select_dtype(u): return (dtypes.long if u.overflows(dtypes.int32) else dtypes.int).vec(u.dtype.count)
