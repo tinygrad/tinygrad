@@ -1,4 +1,4 @@
-import ctypes, ctypes.util, time, os, sys, builtins, fcntl
+import ctypes, ctypes.util, time, os, builtins, fcntl
 from tinygrad.runtime.support.hcq import FileIOInterface
 from test.mockgpu.nv.nvdriver import NVDriver
 from test.mockgpu.amd.amddriver import AMDDriver

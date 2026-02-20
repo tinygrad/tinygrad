@@ -94,7 +94,7 @@ class MockPSP(MockIPBlock):
     super().__init__(gpu, mmio, _build_ip_regs('mp', am.MP0_HWIP))
     self._sos_alive, self._ring_wptr = False, 0
     pref = "regMPASP_SMN_C2PMSG" if IP_VERSIONS[am.MP0_HWIP] >= (14,0,0) else "regMP0_SMN_C2PMSG"
-    r = lambda n: self.reg(f"{pref}_{n}")
+    def r(n): return self.reg(f"{pref}_{n}")
     self._c2pmsg_35, self._c2pmsg_64, self._c2pmsg_67 = r(35), r(64), r(67)
     self._c2pmsg_69, self._c2pmsg_70, self._c2pmsg_81 = r(69), r(70), r(81)
 
@@ -132,7 +132,7 @@ class MockSMU(MockIPBlock):
     except Exception: regs = {}
     super().__init__(gpu, mmio, regs)
     self._msg_pending = False
-    r = lambda n: self.reg(f"mmMP1_SMN_C2PMSG_{n}")
+    def r(n): return self.reg(f"mmMP1_SMN_C2PMSG_{n}")
     self._c2pmsg_53, self._c2pmsg_54, self._c2pmsg_66 = r(53), r(54), r(66)
     self._c2pmsg_75, self._c2pmsg_82, self._c2pmsg_90 = r(75), r(82), r(90)
 

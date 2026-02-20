@@ -665,10 +665,11 @@ jobs:
         run: AMD_LLVM=1 python test/device/test_amd_llvm.py
 
   testmockam:
-    name: Mock AM
+    name: Linux (am)
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     env:
+      AMD: 1
       MOCKGPU: 1
       AMD_IFACE: PCI
     steps:

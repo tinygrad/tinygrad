@@ -1,4 +1,4 @@
-import ctypes, ctypes.util, mmap, functools, os
+import ctypes, ctypes.util, mmap, functools
 from test.mockgpu.driver import VirtDriver, VirtFileDesc, TextFileDesc, DirFileDesc, VirtFile
 from test.mockgpu.am.amgpu import MockAMGPU, VRAM_SIZE
 
