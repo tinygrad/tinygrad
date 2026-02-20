@@ -214,8 +214,6 @@ def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[dict[UOp, UOp], li
         buffer_map[original_uop] = replace_uop.shrink_to(original_uop.shape)
   big_sink = graph_rewrite(big_sink, _remove_all_tags, name="remove tags")
 
-  #for k,v in buffer_map.items(): print(k.op, v.op)
-
   # replace BUFFERs with PARAMs, CONSTs UNIQUE with LUNIQUE, strip BIND values for cache key, extract var_vals
   input_buffers: dict[UOp, UOp] = {}
   var_vals: dict[str, int] = {}
