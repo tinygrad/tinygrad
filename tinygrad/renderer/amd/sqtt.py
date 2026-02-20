@@ -621,8 +621,9 @@ def map_insts(data:bytes, lib:bytes, target:str) -> Iterator[tuple[PacketType, I
         assert isinstance(p, (INST, INST_RDNA4)) and p.op.name in {"JUMP_NO", "JUMP", "NEXT"}, f"branch can only be folowed by JUMP, got {p}"
       # JUMP handling
       if (isinstance(p, INST) and p.op is InstOp.JUMP) or (isinstance(p, INST_RDNA4) and branch_inst is not None and p.flag3):
-        assert branch_inst is not None, f"JUMP packet must map to a branch instruction, got {inst}"
-        x = branch_inst.simm16 & 0xffff
+        simm16 = getattr(branch_inst, 'simm16')
+        assert branch_inst is not None and simm16 is not None, f"JUMP packet must map to a branch instruction, got {inst}"
+        x = simm16 & 0xffff
         wave_pc[p.wave] += branch_inst.size() + (x - 0x10000 if x & 0x8000 else x)*4
       else:
         if branch_inst is not None: assert inst_op != "S_BRANCH", f"S_BRANCH must have a JUMP packet, got {p}"
