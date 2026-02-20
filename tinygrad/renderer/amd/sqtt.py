@@ -111,7 +111,7 @@ class InstOpRDNA4(Enum):
   VINTERP = 0x12
   UNK_14 = 0x14
   OTHER_VMEM = 0x5e
-  UNK_60 = 0x60
+  OTHER_VMEM_STORE = 0x60
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # PACKET TYPE BASE CLASS
@@ -600,8 +600,6 @@ def map_insts(data:bytes, lib:bytes, target:str) -> Iterator[tuple[PacketType, I
       continue
     # skip OTHER_ instructions, they don't belong to this unit
     if isinstance(p, (INST, INST_RDNA4)) and p.op.name.startswith("OTHER_"): continue
-    # NOTE: this is probably OTHER too
-    if isinstance(p, INST_RDNA4) and p.op == InstOpRDNA4.UNK_60: continue
     if isinstance(p, IMMEDIATE_MASK):
       # immediate mask may yield multiple times per packet
       for wave in range(16):
