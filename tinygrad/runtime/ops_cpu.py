@@ -14,7 +14,8 @@ from tinygrad.uop.ops import sint
 class CPUSignal(HCQSignal):
   def _sleep(self, time_spent_since_last_sleep_ms:int):
     if self.is_timeline and self.owner is not None:
-      with self.owner.tasks.all_tasks_done: self.owner.tasks.all_tasks_done.wait(timeout=1)
+      with self.owner.tasks.all_tasks_done:
+        if self.owner.tasks.unfinished_tasks: self.owner.tasks.all_tasks_done.wait(timeout=1)
 
 class CPUWorker(threading.Thread):
   def __init__(self, dev, tasks, thread_id):
