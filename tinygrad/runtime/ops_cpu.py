@@ -142,7 +142,8 @@ class CPUDevice(HCQCompiled):
 
   def on_device_hang(self):
     self.tasks = queue.Queue()
-    (self.worker := CPUWorker(self, self.tasks, thread_id=0)).start()
+    self.worker = CPUWorker(self, self.tasks, thread_id=0)
+    self.worker.start()
     self.timeline_signal.value = self.timeline_value - 1
     self.error_state = None
     raise RuntimeError("CPU device hang detected")
