@@ -721,12 +721,8 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     return graph_rewrite(self, pm_unbind, ctx=ret), ret
   @property
   def val(self) -> int: return self.unbind()[1]
-  def vars(self) -> set[UOp]:
-    topo = self.toposort()
-    bound = {x.src[0]: x for x in topo if x.op is Ops.BIND and x.src[0].op is Ops.DEFINE_VAR}
-    return {bound.get(x, x) for x in topo if x.op is Ops.DEFINE_VAR}
   def variables(self) -> list[Variable]:
-    return sorted(set([x.unbind()[0] if x.op is not Ops.DEFINE_VAR else x for x in self.vars()]), key=lambda v: v.arg)
+    return sorted({x for x in self.backward_slice_with_self if x.op is Ops.DEFINE_VAR}, key=lambda v: v.arg)
 
   # *** uop symbolic stuff ***
 
@@ -820,7 +816,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
   @functools.cached_property
   def _sym_fxn(self):
     sself = self.simplify()
-    varnames = tuple(x.arg[0] for x in sself.toposort() if x.op is Ops.DEFINE_VAR)
+    varnames = tuple(x.expr for x in sself.toposort() if x.op is Ops.DEFINE_VAR)
     # TODO: sanitize varnames, or don't use naked eval while staying fast
     return eval("lambda "+','.join(varnames)+": "+sself.render(pm=renderer_infer)), varnames  # pylint: disable=eval-used
 
@@ -1387,7 +1383,7 @@ def bitcast(x, in_dtype:DType, out_dtype:DType):
   return ret[0] if out_count == 1 else ret
 
 renderer = PatternMatcher([
-  (UPat((Ops.DEFINE_VAR,), name="x"), lambda x: x.arg[0]),
+  (UPat((Ops.DEFINE_VAR,), name="x"), lambda x: x.expr),
   (UPat((Ops.SPECIAL), name="x"), lambda x: x.arg),
   (UPat(Ops.RANGE, name="x"), lambda x: f"r{range_str(x)}"),
   (UPat((Ops.CONST, Ops.VCONST), name="x"), lambda x: str(x.arg)),

@@ -134,7 +134,7 @@ string_rewrite = PatternMatcher([
   (UPat(Ops.ENDIF, name="x"), lambda ctx, x: f"IF_{ctx.r[x.src[0].src[0]][1:]}_{ctx.uops.index(x.src[0])}:"),
   (UPat(Ops.WMMA, name="x"), lambda ctx, x: list(render_wmma(ctx, x))),
   (UPat(Ops.BARRIER), lambda ctx: ctx.barrier),
-  (UPat(Ops.DEFINE_VAR, name="x"), lambda ctx, x: f"ld.param.{ctx.mem_types[x.dtype]} {ctx.r[x]}, [{x.arg[0]}+0];"),
+  (UPat(Ops.DEFINE_VAR, name="x"), lambda ctx, x: f"ld.param.{ctx.mem_types[x.dtype]} {ctx.r[x]}, [{x.expr}+0];"),
 ])
 
 class PTXRenderer(Renderer):
@@ -220,7 +220,7 @@ class PTXRenderer(Renderer):
         continue
       if u.op is Ops.INDEX: continue  # other index we can skip
       if u.op is Ops.SPECIAL: r[u] = "%" + u.arg
-      elif u.op is Ops.DEFINE_VAR: bufs.append((u.arg[0], u.dtype))
+      elif u.op is Ops.DEFINE_VAR: bufs.append((u.expr, u.dtype))
       elif u.op is Ops.LOAD:
         assert u.src[0].dtype == dtypes.int64, "load isn't int64"
         r[u] = [ssa('val', dtype=self.types[u.dtype.scalar()]) for _ in range(u.dtype.count)] if u.dtype.count > 1 else ssa('val', u)

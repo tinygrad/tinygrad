@@ -1,4 +1,3 @@
-from typing import cast
 import functools, itertools
 from tinygrad.helpers import all_same, all_int, prod, DEBUG, RING, ALL2ALL, VIZ, getenv
 from tinygrad.uop.ops import Ops, UOp, PatternMatcher, UPat, GroupOp, graph_rewrite_map, graph_rewrite
@@ -29,7 +28,7 @@ def handle_allreduce(buf:UOp, red:UOp) -> UOp|None:
   chunks = list(itertools.pairwise(itertools.accumulate([(base + 1) * factor] * left + [base * factor] * (ndev - left), initial=0)))
 
   # reduce-scatter
-  reduced_chunks = []
+  reduced_chunks:list[UOp] = []
   for i,(s,e) in enumerate(chunks):
     if use_all2all:
       chunks_on_i = [buf.mselect(j).reshape((numel,)).shrink(((s,e),)).copy_to_device(buf.device[i]) for j in range(ndev)]
@@ -43,16 +42,15 @@ def handle_allreduce(buf:UOp, red:UOp) -> UOp|None:
       reduced_chunks.append(reduced)
 
   # allgather
-  copied_chunks = []
+  copied_chunks:list[UOp] = []
   for i,rc in enumerate(reduced_chunks):
     if isinstance(red.src[1].arg, str): copied_chunks.append(rc.copy_to_device(red.src[1].arg))
     elif use_all2all: copied_chunks.append(UOp(Ops.MSTACK, buf.dtype, tuple(rc.copy_to_device(buf.device[j]) for j in range(ndev))))
     else:
-      this_chunk: list[UOp|None] = [None] * ndev
-      this_chunk[(i+ndev-1)%ndev] = rc
+      chain:list[UOp] = [rc]
       for step in range(ndev-1):
-        this_chunk[(i+step)%ndev] = rc = rc.copy_to_device(buf.device[(i+step)%ndev])
-      copied_chunks.append(UOp(Ops.MSTACK, buf.dtype, tuple(cast(list[UOp], this_chunk))))
+        chain.append(rc := rc.copy_to_device(buf.device[(i+step)%ndev]))
+      copied_chunks.append(UOp(Ops.MSTACK, buf.dtype, tuple(chain[(j-i+1)%ndev] for j in range(ndev))))
 
   # reassemble
   return UOp.sum(*[c.pad(((s,numel-e),)) for (s,e),c in zip(chunks, copied_chunks)]).reshape(shape)
@@ -63,7 +61,7 @@ def mstack_early_shrink(ms:UOp, shrink:UOp):
   ret:list[UOp] = []
   def apply_shrink(s:UOp, i:int) -> UOp:
     new_arg = [tuple([x.substitute({dvar[0]:dvar[0].const_like(i)}) if isinstance(x, UOp) and
-                      (dvar:=[v for v in x.vars() if v.op is Ops.DEFINE_VAR and v.arg[0]=='_device_num']) else x for x in ss]) for ss in shrink.marg]
+                      (dvar:=[v for v in x.variables() if v.expr=='_device_num']) else x for x in ss]) for ss in shrink.marg]
     return s.shrink(tuple(new_arg))
   for i, x in enumerate(ms.src):
     if x.op is Ops.COPY:
@@ -97,20 +95,20 @@ def alu_multi(root:UOp):
   axis = root.axis
   assert axis is not None
 
-  srcs = []
+  srcs:list[UOp] = []
   for mlb in msrcs:
-    if mlb.axis == axis:
-      # same axis, just copy through
-      assert mlb.op is Ops.MULTI
-      srcs.append(mlb.src[0])
-    elif mlb.axis is None:
+    if mlb.axis is None:
       # no axis, shard it
       assert mlb.op is not Ops.MULTI
       srcs.append(mlb._shard(axis))
     else:
-      # axis mismatch, unshard it, send it to all devices, and shard it correctly
       assert mlb.op is Ops.MULTI
-      srcs.append(mlb.src[0]._unshard(mlb.axis).allreduce(Ops.ADD, mlb.device)._shard(axis))
+      if mlb.axis == axis:
+        # same axis, just copy through
+        srcs.append(mlb.src[0])
+      else:
+        # axis mismatch, unshard it, send it to all devices, and shard it correctly
+        srcs.append(mlb.src[0]._unshard(mlb.axis).allreduce(Ops.ADD, mlb.device)._shard(axis))
   return srcs[0].alu(root.op, *srcs[1:]).multi(axis)
 
 def reduce_multi(root:UOp, multi:UOp):
