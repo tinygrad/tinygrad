@@ -138,7 +138,7 @@ class ImageDType(PtrDType):
     if OSX and (ptr.size // 4) % ALIGN: return [] # OSX has stricter requirements for height=1 images
     pxls: int = ptr.size // 4
     return ([(1, pxls)] * (pxls < MAXW) + [(pxls//ALIGN//k, ALIGN*k) for k in range(ceildiv(pxls//ALIGN, MAXW), min(pxls//ALIGN, MAXW//ALIGN)+1)
-                                           if (pxls//ALIGN)%k == 0] * bool(pxls//ALIGN))
+                                           if (pxls//ALIGN)%k == 0] if pxls//ALIGN else [])
 
 class dtypes:
   @staticmethod
