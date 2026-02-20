@@ -99,8 +99,7 @@ _NVGPU_CH_WDT = _iow('H', 119, ctypes.sizeof(_nvgpu_channel_wdt))
 
 _NVMAP_HEAP_IOVMM, _NVMAP_WC, _NVMAP_CACHED, _NVMAP_TAG = (1 << 30), 1, 2, 0x0900
 
-def _tioctl(fd, nr, buf):
-  if fcntl.ioctl(fd, nr, buf) < 0: raise OSError(f"tegra ioctl 0x{nr:08x} failed")
+def _tioctl(fd, nr, buf): fcntl.ioctl(fd, nr, buf)
 
 def _nvmap_buf(nvmap_fd, size, cache_flags, align=4096):
   c = _nvmap_handle(size=size)
@@ -148,8 +147,7 @@ class TegraIface:
     handle = self._nh()
 
     if clss in (nv_gpu.NV01_DEVICE_0, nv_gpu.NV20_SUBDEVICE_0, nv_gpu.FERMI_VASPACE_A, nv_gpu.NV01_ROOT_CLIENT, nv_gpu.NV01_ROOT,
-                getattr(nv_gpu, 'NV1_MEMORY_SYSTEM', 0), getattr(nv_gpu, 'NV1_MEMORY_USER', 0),
-                getattr(nv_gpu, 'NV01_MEMORY_SYSTEM_OS_DESCRIPTOR', 0)):
+                nv_gpu.NV1_MEMORY_SYSTEM, nv_gpu.NV1_MEMORY_USER, nv_gpu.NV01_MEMORY_SYSTEM_OS_DESCRIPTOR):
       return handle
 
     if clss == nv_gpu.NV01_MEMORY_VIRTUAL:
@@ -229,12 +227,13 @@ class TegraIface:
 
     if cmd == nv_gpu.NV2080_CTRL_CMD_GR_GET_INFO:
       chars = TegraIface._chars
-      info_map = {getattr(nv_gpu, k, None): v for k, v in {
-        'NV2080_CTRL_GR_INFO_INDEX_LITTER_NUM_GPCS': chars.num_gpc,
-        'NV2080_CTRL_GR_INFO_INDEX_LITTER_NUM_TPC_PER_GPC': chars.num_tpc_per_gpc,
-        'NV2080_CTRL_GR_INFO_INDEX_LITTER_NUM_SM_PER_TPC': 2,
-        'NV2080_CTRL_GR_INFO_INDEX_MAX_WARPS_PER_SM': chars.sm_arch_warp_count,
-        'NV2080_CTRL_GR_INFO_INDEX_SM_VERSION': chars.sm_arch_sm_version}.items() if getattr(nv_gpu, k, None) is not None}
+      info_map = {
+        nv_gpu.NV2080_CTRL_GR_INFO_INDEX_LITTER_NUM_GPCS: chars.num_gpc,
+        nv_gpu.NV2080_CTRL_GR_INFO_INDEX_LITTER_NUM_TPC_PER_GPC: chars.num_tpc_per_gpc,
+        nv_gpu.NV2080_CTRL_GR_INFO_INDEX_LITTER_NUM_SM_PER_TPC: 2,
+        nv_gpu.NV2080_CTRL_GR_INFO_INDEX_MAX_WARPS_PER_SM: chars.sm_arch_warp_count,
+        nv_gpu.NV2080_CTRL_GR_INFO_INDEX_SM_VERSION: chars.sm_arch_sm_version,
+      }
       if params is not None:
         for i in range(params.grInfoListSize):
           info = nv_gpu.NV2080_CTRL_GR_INFO.from_address(params.grInfoList + i * ctypes.sizeof(nv_gpu.NV2080_CTRL_GR_INFO))
