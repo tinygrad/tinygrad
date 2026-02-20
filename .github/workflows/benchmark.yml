@@ -50,6 +50,8 @@ jobs:
         pytest -nauto --durations=20
     - name: openpilot compile3 0.10.1 driving_vision
       run: FLOAT16=1 CL=1 IMAGE=2 python3.11 examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/720392c9a5b986981fdbed1bb8c47a6c5573a50e/selfdrive/modeld/models/driving_vision.onnx
+    - name: IMAGE=1 openpilot compile3 0.10.1 driving_vision
+      run: FLOAT16=1 CL=1 IMAGE=1 python3.11 examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/720392c9a5b986981fdbed1bb8c47a6c5573a50e/selfdrive/modeld/models/driving_vision.onnx
 
   testmacbenchmark:
     name: Mac Benchmark
