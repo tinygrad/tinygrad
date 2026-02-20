@@ -67,7 +67,7 @@ class TestSQTTMapBase(unittest.TestCase):
       for event in events:
         if not event.itrace: continue
         if event.kern not in kern_events: continue
-        if event.kern != 1: continue
+        if event.kern != 2: continue
         with self.subTest(example=name, kern=event.kern):
           passed_insts, n_waves, n_units = rocprof_inst_traces_match(event, kern_events[event.kern], target)
           if n_waves: print(f"{name}: passed for {passed_insts} instructions across {n_waves} waves scheduled on {n_units} wave units")
