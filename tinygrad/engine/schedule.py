@@ -210,7 +210,7 @@ def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[dict[UOp, UOp], li
   # uop list is a list in the original_sink graph and we can map to the tags later
   # here we build buffer map
   uop_list: list[UOp] = []
-  buffer_map = {}
+  buffer_map: dict[UOp, UOp] = {}
 
   dont_realize = {Ops.CONST, Ops.BUFFER, Ops.BIND, Ops.DEFINE_VAR, Ops.AFTER}
   bases = set([x.multibase for x in big_sink.src if x.base.op not in dont_realize])
