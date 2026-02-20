@@ -72,7 +72,6 @@ class TestSQTTMapBase(unittest.TestCase):
 
 class TestSQTTMapRDNA3(TestSQTTMapBase): target = "gfx1100"
 
-@unittest.skip("this doesn't work")
 class TestSQTTMapRDNA4(TestSQTTMapBase): target = "gfx1200"
 
 if __name__ == "__main__":
