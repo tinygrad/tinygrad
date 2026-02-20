@@ -343,7 +343,8 @@ class INST_RDNA4(PacketType):  # Layout 4: different delta position and InstOp e
   delta = bits[5:3]
   flag1 = bits[6:6]
   flag2 = bits[7:7]
-  wave = bits[12:8]
+  wave_pair = bits[11:8]
+  flag3 = bits[12:12]
   op = bits[19:13].enum(InstOpRDNA4)
 
 class UTILCTR(PacketType):
@@ -586,7 +587,7 @@ def map_insts(data:bytes, lib:bytes, target:str) -> Iterator[tuple[PacketType, I
   def simd_select(p) -> bool: return getattr(p, "cu", 0) == 0 and getattr(p, "simd", 0) == 0
   for p in decode(data):
     if not simd_select(p): continue
-    if isinstance(p, WAVESTART):
+    if isinstance(p, (WAVESTART, WAVESTART_RDNA4)):
       assert p.wave not in wave_pc, "only one inflight wave per unit"
       wave_pc[p.wave] = next(iter(pc_map))
       continue
@@ -644,7 +645,8 @@ def format_packet(p) -> str:
   name = type(p).__name__
   if isinstance(p, (INST, INST_RDNA4)):
     op_name = p.op.name if isinstance(p.op, (InstOp, InstOpRDNA4)) else f"0x{p.op:02x}"
-    fields = f"wave={p.wave} op={op_name}" + (" flag1" if p.flag1 else "") + (" flag2" if p.flag2 else "")
+    wave = p.wave_pair * 2 + p.flag2 if isinstance(p, INST_RDNA4) else p.wave
+    fields = f"wave={wave} op={op_name}" + (" flag1" if p.flag1 else "") + (" flag2" if p.flag2 else "")
   elif isinstance(p, VALUINST): fields = f"wave={p.wave}" + (" flag" if p.flag else "")
   elif isinstance(p, ALUEXEC): fields = f"src={p.src.name if isinstance(p.src, AluSrc) else p.src}"
   elif isinstance(p, VMEMEXEC): fields = f"src={p.src.name if isinstance(p.src, MemSrc) else p.src}"
