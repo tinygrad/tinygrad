@@ -1,3 +1,4 @@
+# mypy: ignore-errors
 import ctypes, ctypes.util, struct, functools, os, mmap
 from tinygrad.runtime.autogen.am import am
 from tinygrad.runtime.support.amd import AMDReg, import_asic_regs

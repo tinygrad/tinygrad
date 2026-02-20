@@ -655,7 +655,8 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     if self.op in {Ops.CONTIGUOUS, Ops.RESHAPE}: return self.src[0].buffer
     # this buffer can process disk tensors and simple movement ops
     if self is not self.base:
-      from tinygrad.schedule.rangeify import pm_mops, symbolic
+      from tinygrad.schedule.rangeify import pm_mops
+      from tinygrad.uop.symbolic import symbolic
       out = graph_rewrite(self.flatten().index(UOp.range(self.size, 0)), pm_mops+symbolic)
       buf = out.src[0].buffer
       assert isinstance(buf, Buffer), "must be a Buffer for movement ops"

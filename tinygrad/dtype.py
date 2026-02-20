@@ -121,7 +121,9 @@ class ImageDType(PtrDType):
     if self._pitch != -1: return self._pitch
     imgw, imgh, itemsize_log = self.shape[1], self.shape[0], int(math.log2(self.itemsize))
     if OSX: return round_up(imgw, 256) * 4 * self.itemsize
-    pitchalign = max(6, 11 - int(math.log2(imgh))) if imgh > 1 else 6
+    # needs to be IMAGE_PITCH_ALIGN=256 for AMD
+    min_pitchalign = int(math.log2(v)) if (v := getenv("IMAGE_PITCH_ALIGN", 0)) > 0 else 6
+    pitchalign = max(min_pitchalign, 11 - int(math.log2(imgh))) if imgh > 1 else min_pitchalign
     align_up = max(1, (8 // itemsize_log + 1) - imgh // 32) if pitchalign == 6 else (2 ** (pitchalign - itemsize_log - 2))
 
     granularity = 128 if self.itemsize == 4 else 256
