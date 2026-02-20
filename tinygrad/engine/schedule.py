@@ -112,7 +112,15 @@ pm_post_sched_cache = PatternMatcher([
 ])
 
 # these are the only uops that can get replaced in the tensor graph
-from tinygrad.schedule.rangeify import pm_gate_kernel_sink, tag_uop
+from tinygrad.schedule.rangeify import pm_gate_kernel_sink
+
+def tag_uop(ctx:tuple[list[UOp], set[UOp], dict[UOp, UOp], set[UOp]], x:UOp):
+  if x.tag is not None or x in ctx[1]: return None
+  if x.tag is None and x.op is Ops.CALL:
+    # don't tag anything in a CALL
+    for u in x.src[0].toposort(): ctx[1].add(u)
+  ctx[0].append(x)
+  return x.replace(tag=(len(ctx[0])-1,))
 
 def disk_copy_is_buffer(ctx, u):
   if isinstance(u._device, str) and u._device.startswith("DISK"):
