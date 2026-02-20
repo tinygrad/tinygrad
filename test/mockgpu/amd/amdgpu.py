@@ -193,6 +193,22 @@ class PM4Executor(AMDQueue):
         self._cdna_sqtt_finish()
       reg += 1
 
+  def _cdna_sqtt_finish(self):
+    from test.mockgpu.amd.emu import sqtt_traces
+    blob = sqtt_traces.pop(0) if sqtt_traces else b''
+    old_idx = self.gpu.regs.grbm_index
+    for se in range(self.gpu.regs.n_se):
+      self.gpu.regs.grbm_index = 0b011 << 29 | se << 16
+      self.gpu.regs[regSQ_THREAD_TRACE_STATUS] = 1 << 16 # FINISH_DONE=1 BUSY=0
+      # skip SEs that don't have trace buffers configured
+      if (regSQ_THREAD_TRACE_BASE, se) not in self.gpu.regs.regs:
+        continue
+      buf_addr = ((self.gpu.regs[regSQ_THREAD_TRACE_BASE2]&0xf) << 32 | self.gpu.regs[regSQ_THREAD_TRACE_BASE]) << 12
+      se_blob = blob if se == 0 else b''
+      if se_blob: ctypes.memmove(buf_addr, se_blob, len(se_blob))
+      self.gpu.regs[regSQ_THREAD_TRACE_WPTR] = (len(se_blob) // 32) & 0x1FFFFFFF
+    self.gpu.regs.grbm_index = old_idx
+
   def _exec_dispatch_direct(self, n):
     assert n == 3
     gl = [self._next_dword() for _ in range(3)]
@@ -248,11 +264,12 @@ class PM4Executor(AMDQueue):
     for se in range(self.gpu.regs.n_se):
       self.gpu.regs.grbm_index = 0b011 << 29 | se << 16 # select se, broadcast sa and instance
       self.gpu.regs[regSQ_THREAD_TRACE_STATUS] = 1 << (16 if MOCKGPU_ARCH=="cdna4" else 12)# FINISH_PENDING==0 FINISH_DONE==1 BUSY==0
+      if MOCKGPU_ARCH=="cdna4" and (regSQ_THREAD_TRACE_BASE, se) not in self.gpu.regs.regs: continue # TODO: why not use se_blob
       if MOCKGPU_ARCH == "rdna4":
         buf_addr = ((self.gpu.regs[regSQ_THREAD_TRACE_BUF0_BASE_HI])<<32|self.gpu.regs[regSQ_THREAD_TRACE_BUF0_BASE_LO])<<12
       elif MOCKGPU_ARCH == "rdna3": # CDNA4, RDNA3
         buf_addr = ((self.gpu.regs[regSQ_THREAD_TRACE_BUF0_SIZE]&0xf)<<32|self.gpu.regs[regSQ_THREAD_TRACE_BUF0_BASE])<<12
-      else: buf_addr = ((self.gpu.regs[regSQ_THREAD_TRACE_BASE2]&0xf)<< 32| self.gpu.regs[regSQ_THREAD_TRACE_BASE])<<12
+      else: buf_addr = ((self.gpu.regs[regSQ_THREAD_TRACE_BASE2]&0xf)<< 32| self.gpu.regs[regSQ_THREAD_TRACE_BASE]) << 12
       # Use real trace blob for SE 0 (which has itrace enabled), empty blob for other SEs
       se_blob = blob if se == 0 else b''
 
