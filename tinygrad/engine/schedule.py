@@ -159,12 +159,20 @@ def _get_apply_buffer_map(big_sink:UOp) -> tuple[UOp, dict[UOp, UOp]]:
 # these are the only uops that can get replaced in the tensor graph
 from tinygrad.schedule.rangeify import pm_gate_kernel_sink, tag_uop
 
+def disk_copy_is_buffer(ctx, u):
+  if isinstance(u._device, str) and u._device.startswith("DISK"):
+    ctx[2][u] = UOp.new_buffer(u.device, u.shard_size, u.dtype).reshape(u.max_shard_shape)
+
 # CONTIGUOUS and ASSIGN + parents are the only nodes that get updated
 add_tags = pm_gate_kernel_sink+PatternMatcher([
   (UPat({Ops.CONTIGUOUS, Ops.ASSIGN}, name="x"), tag_uop),
+  (UPat(GroupOp.All, name="x"), lambda ctx,x: tag_uop(ctx,x) if x in ctx[3] else None),
+  (UPat(Ops.COPY, name="u"), disk_copy_is_buffer)
 ])
 
 def replace_contig_with_assign(u:UOp):
+  # no real contig for DISK tensors, they are left alone
+  if isinstance(u._device, str) and u._device.startswith("DISK"): return u.rtag(None)
   dtype = u.dtype
   if isinstance(dtype, ImageDType):
     if prod(dtype.shape) != prod(u.max_shard_shape) or ([x for x in u.max_shard_shape if x != 1] or [1])[-1] % 4 != 0:
@@ -174,8 +182,10 @@ def replace_contig_with_assign(u:UOp):
   if isinstance(u.device, tuple) and u.axis is not None: buffer = buffer.multi(u.axis)
   return buffer.assign(u.src[0]).rtag(u.tag)
 
-# replace CONTIGUOUS with ASSIGNs
 pm_replace_contig_with_assign = PatternMatcher([
+  # add CONTIGUOUS to tagged UOps
+  (UPat(GroupOp.All-{Ops.CONTIGUOUS, Ops.ASSIGN}, name="x"), lambda x: x.rtag(None).contiguous(tag=x.tag) if x.tag is not None else None),
+  # replace CONTIGUOUS with ASSIGNs
   (UPat(Ops.CONTIGUOUS, name="u"), replace_contig_with_assign),
 ])
 
@@ -186,11 +196,21 @@ def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[dict[UOp, UOp], li
   st = time.perf_counter()
 
   # uop list is a list in the original_sink graph and we can map to the tags later
-  uop_list: list[UOp] = []
-  big_sink = graph_rewrite(big_sink, add_tags, ctx=(uop_list, set()), bottom_up=True, name="number the uops")
-  big_sink = graph_rewrite(big_sink, pm_replace_contig_with_assign, name="replace contig")
   # here we build buffer map
+  uop_list: list[UOp] = []
   buffer_map = {}
+
+  dont_realize = {Ops.CONST, Ops.BUFFER, Ops.BIND, Ops.DEFINE_VAR, Ops.AFTER}
+  bases = set([x.multibase for x in big_sink.src if x.base.op not in dont_realize])
+
+  # this rewrite is "read-only", it adds simple things to buffer_map and may sink things on big_sink, bottom_up
+  # this is the only one where we have to be careful to not break the tensor graph
+  big_sink = graph_rewrite(big_sink, add_tags, ctx=(uop_list, set(), buffer_map, bases), bottom_up=True, name="number the uops")
+
+  # here we can break the tensor graph
+  big_sink = graph_rewrite(big_sink, pm_replace_contig_with_assign, name="replace contig")
+
+  # here we construct the final buffer_map
   for s in big_sink.toposort():
     if s.tag is not None:
       assert s.op is Ops.ASSIGN
@@ -204,6 +224,8 @@ def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[dict[UOp, UOp], li
           buffer_map[original_uop.src[0]] = replace_uop
         buffer_map[original_uop] = replace_uop
   big_sink = graph_rewrite(big_sink, _remove_all_tags, name="remove tags")
+
+  #for k,v in buffer_map.items(): print(k.op, v.op)
 
   # replace BUFFERs with PARAMs, CONSTs UNIQUE with LUNIQUE, strip BIND values for cache key, extract var_vals
   input_buffers: dict[UOp, UOp] = {}
