@@ -185,11 +185,7 @@ def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[dict[UOp, UOp], li
         original_uop = uop_list[t]
         replace_uop = s
         while replace_uop.op is Ops.ASSIGN: replace_uop = replace_uop.src[0]
-        replace_uop = replace_uop.shrink_to(original_uop.shape)
-        if original_uop.op is Ops.CONTIGUOUS:
-          # contiguous parent
-          buffer_map[original_uop.src[0]] = replace_uop
-        buffer_map[original_uop] = replace_uop
+        buffer_map[original_uop] = replace_uop.shrink_to(original_uop.shape)
   big_sink = graph_rewrite(big_sink, _remove_all_tags, name="remove tags")
 
   #for k,v in buffer_map.items(): print(k.op, v.op)
