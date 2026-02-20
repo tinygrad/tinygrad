@@ -14,8 +14,7 @@ from tinygrad.uop.ops import sint
 class CPUSignal(HCQSignal):
   def _sleep(self, time_spent_since_last_sleep_ms:int):
     if self.is_timeline and self.owner is not None:
-      with self.owner.tasks.all_tasks_done:
-        if self.owner.tasks.unfinished_tasks: self.owner.tasks.all_tasks_done.wait(timeout=1)
+      with self.owner.tasks.all_tasks_done: self.owner.tasks.all_tasks_done.wait(timeout=1)
 
 class CPUWorker(threading.Thread):
   def __init__(self, dev, tasks, thread_id):
@@ -136,6 +135,14 @@ class CPUAllocator(HCQAllocator):
 class CPUDevice(HCQCompiled):
   def __init__(self, device:str=""):
     self.tasks:queue.Queue = queue.Queue()
-    CPUWorker(self, self.tasks, thread_id=0).start()
+    self.worker = CPUWorker(self, self.tasks, thread_id=0)
+    self.worker.start()
     compilers = CompilerSet([(ClangJITRenderer, None), (CPULLVMRenderer, CPU_LLVM), (LVPRenderer, CPU_LVP)], ctrl_var=CPU_CC)
     super().__init__(device, CPUAllocator(self), compilers, functools.partial(CPUProgram, self), CPUSignal, CPUComputeQueue)
+
+  def on_device_hang(self):
+    self.tasks = queue.Queue()
+    (self.worker := CPUWorker(self, self.tasks, thread_id=0)).start()
+    self.timeline_signal.value = self.timeline_value - 1
+    self.error_state = None
+    raise RuntimeError("CPU device hang detected")
