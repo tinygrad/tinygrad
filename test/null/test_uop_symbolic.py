@@ -655,6 +655,24 @@ class TestSymbolic(unittest.TestCase):
     with self.assertRaises(AssertionError):
       self.helper_test_variable((31 * b + 1) % 18 + ((31 * b + 1) // 18) * 18, 1, 3101, "((b*31)+1)")
 
+  def test_div_mod_recombine_3level(self):
+    gidx = Variable("gidx", 0, 150527)
+    self.helper_test_variable(gidx//3%224*3 + gidx%3 + gidx//672*672, 0, 150527, "gidx")
+    # different shapes
+    x = Variable("x", 0, 5*7*11-1)
+    self.helper_test_variable(x//11%7*11 + x%11 + x//77*77, 0, 5*7*11-1, "x")
+    # result is x//a*c2 not just x
+    x2 = Variable("x2", 0, 5*6*7-1)
+    self.helper_test_variable(x2//7%6*14 + x2//42*84, 0, (5*6*7-1)//7*14, "(x2//7*14)")
+    # negative variable range
+    xn = Variable("x", -1000, 1000)
+    self.helper_test_variable(xn//3%224*3 + xn%3 + xn//672*672, -1000, 1000, "x")
+    self.helper_test_variable(xn//3%7*3 + xn//21*21, -999, 999, "(x//3*3)")
+    # should NOT simplify: a*c1 != b (3*224 != 600)
+    self.helper_test_variable(gidx//3%224*3 + gidx//600*600, 0, 150669, "(gidx//600*600+gidx//3%224*3)")
+    # should NOT simplify: c1*c2 != c3 (224*3 != 700)
+    self.helper_test_variable(gidx//3%224*3 + gidx//672*700, 0, 156769, "(gidx//672*700+gidx//3%224*3)")
+
   def test_div_mod_recombine_with_gcd(self):
     b = Variable("b", 0, 100)
     exp = (16 * b + 2) % 18 + ((16 * b + 2) // 18) * 18
@@ -835,34 +853,33 @@ class TestSymbolicNumeric(unittest.TestCase):
   def test_times_2_plus_3_div_4(self): self.helper_test_numeric(lambda x: (x*2 + 3)//4)
   def test_times_2_plus_3_div_4_mod_4(self): self.helper_test_numeric(lambda x: ((x*2 + 3)//4)%4)
 
-class TestSymbolicVars(unittest.TestCase):
+class TestSymbolicVariables(unittest.TestCase):
   def test_simple(self):
     z = uconst(0)
     a = Variable("a", 0, 10)
     b = Variable("b", 0, 10)
     c = Variable("c", 0, 10)
-    assert z.vars() == z.vars() == set()
-    print(a.vars())
-    assert a.vars() == a.vars() == {a}
+    assert z.variables() == []
+    assert a.variables() == [a]
     m = a * 3
-    assert m.vars() == {a}
+    assert m.variables() == [a]
     s = usum([a, b, c])
-    assert s.vars() == {a, b, c}
+    assert s.variables() == [a, b, c]
 
   def test_compound(self):
     a = Variable("a", 0, 10)
     b = Variable("b", 0, 10)
     c = Variable("c", 0, 10)
-    assert (a + b * c).vars() == {a, b, c}
-    assert (a % 3 + b // 5).vars() == {a, b}
+    assert (a + b * c).variables() == [a, b, c]
+    assert (a % 3 + b // 5).variables() == [a, b]
     # TODO: fix me
     with self.assertRaises(AssertionError):
-      assert (a + b + c - a).vars() == {b, c}
+      assert (a + b + c - a).variables() == [b, c]
 
   def test_dedup(self):
     a = Variable("a", 0, 10)
-    assert (a * a).vars() == {a}
-    assert (a//4 + a//6).vars() == {a}
+    assert (a * a).variables() == [a]
+    assert (a//4 + a//6).variables() == [a]
 
 class TestSymInfer(unittest.TestCase):
   def test_sym_infer(self):

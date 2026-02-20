@@ -30,7 +30,7 @@ class TestCfg(unittest.TestCase):
   def setUp(self):
     self.arch = Device["AMD"].arch
     if not any(self.arch.startswith(a) for a in {"gfx11", "gfx12"}):
-      self.skipTest(f"tests written for RDNA, got arch {arch}")
+      self.skipTest(f"tests written for RDNA, got arch {self.arch}")
 
   def test_simple(self):
     k = Kernel(arch=Device["AMD"].arch)

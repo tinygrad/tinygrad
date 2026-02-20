@@ -180,7 +180,9 @@ class CStyleLanguage(Renderer):
         if u.arg is not None: name = u.arg.function_name
         continue
       if u.op in (Ops.PARAM, Ops.DEFINE_VAR):
-        r[u] = (f"data{u.arg}_{sz}" if (sz:=u.ptrdtype.size) > 0 else f"data{u.arg}") if u.op is Ops.PARAM else u.arg[0]
+        if u.op is not Ops.PARAM: r[u] = u.arg[0]
+        elif isinstance(u.dtype, ImageDType): r[u] = f"data{u.arg}_{u.dtype.shape[0]}x{u.dtype.shape[1]}"
+        else: r[u] = f"data{u.arg}_{sz}" if (sz:=u.ptrdtype.size) > 0 else f"data{u.arg}"
         bufs[u] = (r[u], (u.dtype, u in writable_params))
         continue
 
@@ -315,7 +317,12 @@ class OpenCLRenderer(CStyleLanguage):
     if any(uop.dtype.base == dtypes.half for uop in uops): prefix = (["#pragma OPENCL EXTENSION cl_khr_fp16 : enable"] + (prefix or []))
     return super().render_kernel(function_name, kernel, bufs, uops, prefix)
 
-  def aux(self, uops:list[UOp]): return (tuple(u.dtype for u in uops if u.op == Ops.PARAM),)
+  def aux(self, uops:list[UOp]):
+    arg_dtypes:list[list[tuple[int, DType]]] = []
+    for i,u in enumerate(u for u in uops if u.op is Ops.PARAM):
+      if len(arg_dtypes) >= u.arg: arg_dtypes.append([])
+      arg_dtypes[u.arg].append((i, u.dtype))
+    return tuple(tuple(a) for a in arg_dtypes),
 
 class IntelRenderer(OpenCLRenderer):
   device, suffix, kernel_typedef = "CL", "INTEL", "__attribute__((intel_reqd_sub_group_size(8)))\n" + "__kernel void"

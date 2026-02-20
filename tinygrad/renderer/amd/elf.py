@@ -4,6 +4,7 @@ from tinygrad.helpers import ceildiv, round_up
 from tinygrad.uop.ops import UOp, Ops
 from tinygrad.runtime.autogen import amdgpu_kd, hsa, libc
 from tinygrad.renderer.amd.dsl import Reg, FixedBitField
+from tinygrad.runtime.autogen.amd.common import OpType
 
 # instructions used for padding
 from tinygrad.runtime.autogen.amd.rdna3.ins import s_code_end # same encoding as RDNA4
@@ -13,14 +14,23 @@ _arch_map = {"gfx9": "cdna", "gfx10": "rdna3", "gfx11": "rdna3", "gfx12": "rdna4
 def do_assemble_amd(ctx, prg:UOp, lin:UOp) -> UOp:
   insts = [u.arg for u in lin.src]
 
-  # ** scan for max vgpr/sgpr
-  max_vgpr, max_sgpr = 0, 0
+  # ** scan for max vgpr/sgpr/accvgpr
+  max_vgpr, max_sgpr, max_accvgpr = 0, 0, 0
+  _ACCVGPR_TYPES = {OpType.OPR_ACCVGPR, OpType.OPR_SRC_ACCVGPR}
   for inst in insts:
+    # build set of field names that are AccVGPR for this instruction
+    accvgpr_fields: set[str] = set()
+    for opr_name, (_, _, opr_type) in inst.operands.items():
+      if opr_type in _ACCVGPR_TYPES: accvgpr_fields.add(opr_name)
+      elif opr_type in {OpType.OPR_VGPR_OR_ACCVGPR, OpType.OPR_SRC_VGPR_OR_ACCVGPR, OpType.OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST}:
+        if getattr(inst, 'acc_cd', 0) == 1: accvgpr_fields.add(opr_name)
     for name, field in inst._fields:
       if isinstance(field, FixedBitField): continue
       val = getattr(inst, name)
       if not isinstance(val, Reg): continue
-      if 256 <= val.offset < 512: max_vgpr = max(max_vgpr, (val.offset - 256) + val.sz)
+      if 256 <= val.offset < 512:
+        if name in accvgpr_fields: max_accvgpr = max(max_accvgpr, (val.offset - 256) + val.sz)
+        else: max_vgpr = max(max_vgpr, (val.offset - 256) + val.sz)
       elif val.offset < 106: max_sgpr = max(max_sgpr, val.offset + val.sz)
 
   # ** scan sink for metadata
@@ -41,7 +51,10 @@ def do_assemble_amd(ctx, prg:UOp, lin:UOp) -> UOp:
   text_offset = round_up(ctypes.sizeof(libc.Elf64_Ehdr), hsa.AMD_ISA_ALIGN_BYTES)
 
   # ** pack kernel descriptor (rodata)
-  next_free_vgpr, next_free_sgpr = round_up(max_vgpr, 8), round_up(max_sgpr, 8)
+  # CDNA: total VGPRs = regular VGPRs + AccVGPRs, each rounded to granularity of 4
+  accum_offset = round_up(max_vgpr, 4) if max_accvgpr > 0 else 0
+  next_free_vgpr = round_up(accum_offset + max_accvgpr, 8) if max_accvgpr > 0 else round_up(max_vgpr, 8)
+  next_free_sgpr = round_up(max_sgpr, 8)
   vgpr_granule = max(0, (next_free_vgpr + 7) // 8 - 1)
   # CDNA: add 6 for VCC(2) + FLAT_SCRATCH(2) + XNACK_MASK(2), next_free_sgpr is unused in RDNA.
   sgpr_granule = max(0, ceildiv(next_free_sgpr + 6, 8) - 1) if is_cdna else 0
@@ -64,6 +77,8 @@ def do_assemble_amd(ctx, prg:UOp, lin:UOp) -> UOp:
                             int(2 in gids) << amdgpu_kd.COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Z_SHIFT)
   desc.kernel_code_properties = (1 << amdgpu_kd.KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR_SHIFT |
                                  (0 if is_cdna else 1) << amdgpu_kd.KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32_SHIFT)
+  if is_cdna and max_accvgpr > 0:
+    desc.compute_pgm_rsrc3 = max(0, accum_offset // 4 - 1) << amdgpu_kd.COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET_SHIFT
   rodata = bytes(desc)
 
   # ** pack ELF

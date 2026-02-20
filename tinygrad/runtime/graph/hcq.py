@@ -246,7 +246,7 @@ class HCQGraph(MultiGraphRunner):
     if not all(issubclass(type(d), HCQCompiled) for d in all_devs): return False
 
     # If all of devices are mapped into CPU address space, can use CPU inside the peer group.
-    cpu_support = all(isinstance(d.timeline_signal.base_buf.view, MMIOInterface) for d in all_devs)
+    cpu_support = all(type(d.timeline_signal.base_buf.view) is MMIOInterface for d in all_devs)
 
     # Check if all devices are within the same peer group. If CPU is supported, don't count it as a separate peer group.
     if len(set(d.peer_group for d in all_devs if not (cpu_support and d._is_cpu()))) > 1: return False

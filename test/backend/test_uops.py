@@ -113,6 +113,12 @@ class TestFloatUOps(TestUOps):
   def test_max(self): self._test_bop_fxn(Ops.MAX, lambda a,b: max(a,b))
   def test_cmplt(self): self._test_bop_fxn(Ops.CMPLT, lambda a,b: a<b)
   def test_cmpne(self): self._test_bop_fxn(Ops.CMPNE, lambda a,b: a!=b)
+  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "WEBGPU doesn't support NaN comparison correctly")
+  def test_cmpne_nan(self):  # NaN != x for any x (IEEE 754), fixes #14095
+    for a, b in [(math.nan, 1.0), (1.0, math.nan), (math.nan, math.nan)]:
+      self.assertTrue(_test_single_value(
+        [dtypes.as_const(a, dtypes.float32), dtypes.as_const(b, dtypes.float32)],
+        Ops.CMPNE, (dtypes.float32, dtypes.float32)))
   # MOD isn't tested on floats
 
   def test_where(self):

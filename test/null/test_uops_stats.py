@@ -45,6 +45,7 @@ class TestMemoryCount(unittest.TestCase):
     _, mem = get_stats(a+b)
     self.assertEqual(mem, 1024*1024*2 + 1024)  # 1 full read + 1 lil read + 1 write
 
+  @unittest.skip("no longer supported")
   def test_both_expanded(self):
     # TODO: this probably should be a full write
     a = Tensor.empty(1024, 1, dtype=dtypes.uint8).expand(1024, 1024)

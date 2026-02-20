@@ -1,7 +1,7 @@
 name: Unit Tests
 env:
   # increment this when downloads substantially change to avoid the internet
-  CACHE_VERSION: '16'
+  CACHE_VERSION: '17'
   CAPTURE_PROCESS_REPLAY: 1
   GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   PYTHONPATH: ${{ github.workspace }}
@@ -658,11 +658,33 @@ jobs:
           AMD: 0
         run: |
           PYTHONPATH=. NULL=1 EMULATE=AMD python extra/mmapeak/mmapeak.py
-          PYTHONPATH=. NULL=1 EMULATE=AMD_CDNA4 python3 -m pytest -n=auto test/testextra/test_tk.py test/testextra/test_asm_gemm.py
+          PYTHONPATH=. NULL=1 EMULATE=AMD_CDNA4 python3 -m pytest -n=auto test/testextra/test_tk.py test/backend/test_asm_gemm.py
       - name: Run ASM matmul on MOCKGPU
         run: PYTHONPATH="." AMD=1 MOCKGPU=1 N=256 python3 extra/gemm/amd_asm_matmul.py
       - name: Run LLVM test
         run: AMD_LLVM=1 python test/device/test_amd_llvm.py
+
+  testmockam:
+    name: Linux (am)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      AMD: 1
+      MOCKGPU: 1
+      AMD_IFACE: PCI
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+      - name: Setup Environment
+        uses: ./.github/actions/setup-tinygrad
+        with:
+          key: mockam
+          deps: testing_unit
+          amd: 'true'
+      - name: Run test_tiny on MOCKAM
+        run: python test/test_tiny.py
+      - name: Run test_hcq on MOCKAM
+        run: python -m pytest test/device/test_hcq.py
 
   testamd:
     strategy:
