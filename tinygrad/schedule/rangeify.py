@@ -561,7 +561,7 @@ replace_contiguous = PatternMatcher([
   (UPat(GroupOp.ALU, name="alu"), lambda ctx,alu: alu.replace(src=new_src) if (new_src:=tuple(ctx.get(s, s) for s in alu.src)) != alu.src else None),
 ])
 
-def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
+def get_rangeify(sink:UOp) -> UOp:
   if VIZ: graph_rewrite(sink, PatternMatcher([]), name="View Input Graph")
   uop_list: list[UOp] = []
   tsink = graph_rewrite(sink, add_tags, ctx=(uop_list, set()), bottom_up=True, name="number the uops")
@@ -603,15 +603,6 @@ def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
   if assign_rep: tsink = graph_rewrite(tsink, _substitute, ctx=assign_rep, bottom_up=True, name="fix_assign")
 
   # TODO: we can probably get this earlier
-  sink_tags = [s.tag for s in tsink.src]
   tsink = graph_rewrite(tsink, _remove_all_tags, name="remove all tags")
-
   if VIZ: graph_rewrite(tsink, PatternMatcher([]), name="View Kernel Graph")
-
-  becomes_map: dict[UOp, UOp] = {}
-  for tag, s in zip(sink_tags, tsink.src):
-    assert tag is not None
-    for a in tag:
-      if a is None: continue
-      becomes_map[uop_list[int(a)]] = s
-  return becomes_map
+  return tsink
