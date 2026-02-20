@@ -537,12 +537,15 @@ class Tensor(OpMixin):
     device = canonicalize_device(device)
     return Tensor(UOp.new_buffer(device, size, dtype), device, dtype, **kwargs).shrink(((0,prod(shape)),)).reshape(shape)
 
-  def empty_like(self, **kwargs) -> Tensor:
+  def empty_like(self, dtype:DTypeLike|None=None, device:str|tuple[str, ...]|None=None, **kwargs) -> Tensor:
     """
     Creates an empty tensor with the same shape as `self`.
     If `dtype` is not specified, the dtype of `self` is used.
     """
-    return Tensor.empty(self.shape, dtype=kwargs.pop("dtype", self.dtype), device=kwargs.pop("device", self.device), **kwargs)
+    dtype, device = self.dtype if dtype is None else dtype, self.device if device is None else device
+    if isinstance(device, tuple) and (axis := self.uop.axis) is not None:
+      return Tensor.empty(self.shape, dtype=dtype, device=device[0], **kwargs).shard(device, axis)
+    return Tensor.empty(self.shape, dtype=dtype, device=device, **kwargs)
 
   @staticmethod
   def from_blob(ptr:int, shape:tuple[int, ...], **kwargs) -> Tensor:
