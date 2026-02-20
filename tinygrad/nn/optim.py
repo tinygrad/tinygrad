@@ -30,7 +30,6 @@ class Optimizer:
       return [Tensor.zeros(t.shape, dtype=param_dtype, device=self.device, requires_grad=False) for t in self.params]
     return [Tensor.zeros_like(t, dtype=param_dtype, requires_grad=False) for t in self.params]
 
-
   def zero_grad(self):
     """
     Zeroes the gradients of all the parameters.
