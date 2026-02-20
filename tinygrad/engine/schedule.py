@@ -184,7 +184,7 @@ def replace_contig_with_assign(u:UOp):
 
 def replace_assign_with_contig(u:UOp):
   assigned_to = u
-  while assigned_to.op is Ops.ASSIGN: assigned_to = assigned_to.src[0].base
+  while assigned_to.op in {Ops.ASSIGN, Ops.BITCAST}: assigned_to = assigned_to.src[0].base
   if assigned_to.op is not Ops.BUFFER:
     return u.src[1].contiguous(tag=u.tag)
 
