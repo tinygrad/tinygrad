@@ -182,9 +182,15 @@ def replace_contig_with_assign(u:UOp):
   if isinstance(u.device, tuple) and u.axis is not None: buffer = buffer.multi(u.axis)
   return buffer.assign(u.src[0]).rtag(u.tag)
 
+def replace_assign_with_contig(u:UOp):
+  if u.src[0].base.op is not Ops.BUFFER:
+    return u.src[1].contiguous(tag=u.tag)
+
 pm_replace_contig_with_assign = PatternMatcher([
   # add CONTIGUOUS to tagged UOps
   (UPat(GroupOp.All-{Ops.CONTIGUOUS, Ops.ASSIGN}, name="x"), lambda x: x.rtag(None).contiguous(tag=x.tag) if x.tag is not None else None),
+  # replace ASSIGN with CONTIGUOUS
+  (UPat(Ops.ASSIGN, name="u"), replace_assign_with_contig),
   # replace CONTIGUOUS with ASSIGNs
   (UPat(Ops.CONTIGUOUS, name="u"), replace_contig_with_assign),
 ])
