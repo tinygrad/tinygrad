@@ -4,7 +4,7 @@ from tinygrad.dtype import dtypes, PtrDType, ImageDType, AddrSpace
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, _substitute, KernelInfo, pm_gate_kernel_sink
 from tinygrad.uop.ops import graph_rewrite, identity_element, sint, AxisType, BottomUpGate, _remove_all_tags
 from tinygrad.uop.symbolic import symbolic
-from tinygrad.helpers import argsort, prod, all_same, getenv, flatten, dedup, all_int, DEBUG, SPLIT_REDUCEOP, DEBUG_RANGEIFY, VIZ, MAX_KERNEL_BUFFERS
+from tinygrad.helpers import argsort, prod, all_same, getenv, dedup, all_int, DEBUG, SPLIT_REDUCEOP, DEBUG_RANGEIFY, VIZ, MAX_KERNEL_BUFFERS
 from tinygrad.helpers import PCONTIG, partition, get_single_element
 from tinygrad.codegen.simplify import pm_flatten_range, pm_reduce_simplify
 from tinygrad.codegen.opt import Opt
@@ -503,16 +503,13 @@ pm_add_range_tags = PatternMatcher([
   (UPat(Ops.RANGE, name="x"), lambda x: x.rtag(())),
 ])
 
-def split_store(ctx:list[UOp], x:UOp) -> UOp|None:
+def split_store(x:UOp) -> UOp|None:
   # if we have any open ranges here, we don't split
   if x.ranges: return None
 
   # local kernel rewrite
   lctx = LocalAddBufferContext()
   ret = graph_rewrite(x, to_define_global+pm_flatten_range+rangeify_codegen+pm_remove_tags, ctx=lctx, name="kernel split", bottom_up=True)
-
-  # gather the metadata
-  metadatas = [ctx[y].metadata for y in lctx.parent_tags]
 
   # SINK requires all buffers on the same device, but COPY/BUFFER_VIEW/ENCDEC are cross-device or special hardware ops
   if ret.op is Ops.STORE: stored = ret.src[1]
@@ -521,8 +518,7 @@ def split_store(ctx:list[UOp], x:UOp) -> UOp|None:
   if stored.op in {Ops.COPY, Ops.BUFFER_VIEW, Ops.ENCDEC}: ret = stored
   else: ret = ret.sink(arg=KernelInfo(opts_to_apply=lctx.opts))
 
-  metadata = tuple(dedup(flatten([x for x in metadatas if x is not None])))[::-1]
-  kernel = ret.call(*lctx.map.values(), *lctx.vars.keys(), metadata=metadata)
+  kernel = ret.call(*lctx.map.values(), *lctx.vars.keys())
   if ret.op is Ops.SINK and not all_same([x.device for x in kernel.src[1:] if x.op is not Ops.BIND]):
     raise RuntimeError(f"all buffers must be on the same device: {tuple(b.buf_uop for b in kernel.src[1:])}")
   return kernel
@@ -586,7 +582,7 @@ def get_rangeify(sink:UOp) -> UOp:
   lunique_start: int = max([-1]+[x.arg for x in tsink.toposort() if x.op is Ops.LUNIQUE]) + 1
   tsink = graph_rewrite(tsink, pm_gate_kernel_sink+pm_add_buffers+pm_add_range_tags, ctx=itertools.count(lunique_start), bottom_up=True,
                         name="bufferize to store")
-  tsink = graph_rewrite(tsink, pm_gate_kernel_sink+split_kernels, ctx=uop_list, bottom_up=True, name="split kernels")
+  tsink = graph_rewrite(tsink, pm_gate_kernel_sink+split_kernels, bottom_up=True, name="split kernels")
 
   # WAR deps: if kernel U reads buffer S, and S is also written by another kernel, S's write must wait for U to finish
   afters = [u for u in tsink.toposort() if u.op is Ops.AFTER]
