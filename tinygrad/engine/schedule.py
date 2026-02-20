@@ -156,12 +156,54 @@ def _get_apply_buffer_map(big_sink:UOp) -> tuple[UOp, dict[UOp, UOp]]:
   big_sink = graph_rewrite(big_sink, _remove_all_tags)
   return big_sink, buffer_map
 
+# these are the only uops that can get replaced in the tensor graph
+from tinygrad.schedule.rangeify import pm_gate_kernel_sink, tag_uop
+
+# CONTIGUOUS and ASSIGN + parents are the only nodes that get updated
+add_tags = pm_gate_kernel_sink+PatternMatcher([
+  (UPat({Ops.CONTIGUOUS, Ops.ASSIGN}, name="x"), tag_uop),
+])
+
+def replace_contig_with_assign(u:UOp):
+  dtype = u.dtype
+  if isinstance(dtype, ImageDType):
+    if prod(dtype.shape) != prod(u.max_shard_shape) or ([x for x in u.max_shard_shape if x != 1] or [1])[-1] % 4 != 0:
+      if DEBUG >= 1: print(f"demoting Image {dtype} with shape {u.max_shard_shape}")
+      dtype = dtype.base
+  buffer = UOp.new_buffer(u.device, u.shard_size, dtype).reshape(u.max_shard_shape)
+  if isinstance(u.device, tuple) and u.axis is not None: buffer = buffer.multi(u.axis)
+  return buffer.assign(u.src[0]).rtag(u.tag)
+
+# replace CONTIGUOUS with ASSIGNs
+pm_replace_contig_with_assign = PatternMatcher([
+  (UPat(Ops.CONTIGUOUS, name="u"), replace_contig_with_assign),
+])
+
 schedule_cache: dict[bytes, tuple[list[ExecItem], UOp]] = {}
 @track_rewrites(lambda _,ret: f"Schedule {pluralize('Kernel', len(ret[1]))}")
 def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[dict[UOp, UOp], list[ExecItem], dict[str, int]]:
   # big_sink srcs are all the Tensors
   st = time.perf_counter()
-  big_sink, buffer_map = _get_apply_buffer_map(big_sink)
+
+  # uop list is a list in the original_sink graph and we can map to the tags later
+  uop_list: list[UOp] = []
+  big_sink = graph_rewrite(big_sink, add_tags, ctx=(uop_list, set()), bottom_up=True, name="number the uops")
+  big_sink = graph_rewrite(big_sink, pm_replace_contig_with_assign, name="replace contig")
+  # here we build buffer map
+  buffer_map = {}
+  for s in big_sink.toposort():
+    if s.tag is not None:
+      assert s.op is Ops.ASSIGN
+      for t in s.tag:
+        original_uop = uop_list[t]
+        replace_uop = s
+        while replace_uop.op is Ops.ASSIGN: replace_uop = replace_uop.src[0]
+        replace_uop = replace_uop.shrink_to(original_uop.shape)
+        if original_uop.op is Ops.CONTIGUOUS:
+          # contiguous parent
+          buffer_map[original_uop.src[0]] = replace_uop
+        buffer_map[original_uop] = replace_uop
+  big_sink = graph_rewrite(big_sink, _remove_all_tags, name="remove tags")
 
   # replace BUFFERs with PARAMs, CONSTs UNIQUE with LUNIQUE, strip BIND values for cache key, extract var_vals
   input_buffers: dict[UOp, UOp] = {}
