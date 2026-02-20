@@ -9,8 +9,7 @@ from dataclasses import dataclass
 from typing import Iterator
 from enum import Enum
 from tinygrad.renderer.amd.dsl import BitField, FixedBitField, Inst, bits
-from tinygrad.runtime.autogen.amd.rdna3.ins import SOPP, s_endpgm
-from tinygrad.runtime.autogen.amd.rdna3.enum import SOPPOp
+from tinygrad.runtime.autogen.amd.rdna3.ins import s_endpgm # same encoding as RDNA4
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # FIELD ENUMS
