@@ -360,7 +360,8 @@ class Embedding:
 
   def __call__(self, idx:Tensor) -> Tensor:
     if not dtypes.is_int(idx.dtype): raise TypeError(f"Expected integer dtype for index in embedding, got {idx.dtype}")
-    if USE_ATOMICS: return Tensor.call(self.weight, idx, fxn=_embedding_fwd(self.weight.as_param(0), idx.as_param(1)), grad_fxn=_embedding_bwd)
+    if USE_ATOMICS:
+      return Tensor.call(self.weight, idx, fxn=_embedding_fwd(self.weight.as_param(0), idx.as_param(1)), grad_fxn=_embedding_bwd, inline=True)
     return _embedding_fwd(self.weight, idx)
 
 class LSTMCell:
