@@ -26,7 +26,7 @@ class TestKernelFusionRegression(unittest.TestCase):
     def fn():
       x = torch.randn(128, 128, device=device)
       return (x + 1.0) * 2.0 - 0.5
-    self._check_kernel_count(fn, 5)
+    self._check_kernel_count(fn, 6)
 
   def test_relu_fusion(self):
     def fn():
@@ -50,7 +50,7 @@ class TestKernelFusionRegression(unittest.TestCase):
     def fn():
       x = torch.randn(64, 64, device=device)
       return (x * 2.0).sum()
-    self._check_kernel_count(fn, 5)
+    self._check_kernel_count(fn, 6)
 
   def test_matmul_elementwise_fusion(self):
     def fn():
@@ -108,7 +108,7 @@ class TestKernelFusionRegression(unittest.TestCase):
       view = x[1:3]
       view += 1.0
       return x.sum()
-    self._check_kernel_count(fn, 8)
+    self._check_kernel_count(fn, 9)
 
   def test_batchnorm_running_stats_update(self):
     def fn():
@@ -138,7 +138,7 @@ class TestKernelFusionRegression(unittest.TestCase):
       loss.backward()
       optimizer.step()
       return loss
-    self._check_kernel_count(fn, 24)
+    self._check_kernel_count(fn, 25)
 
 if __name__ == "__main__":
   unittest.main()

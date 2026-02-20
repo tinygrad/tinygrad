@@ -6,7 +6,7 @@ from tinygrad.uop.ops import _remove_all_tags, GroupOp
 from tinygrad.uop.spec import type_verify, tensor_spec
 from tinygrad.device import Buffer, MultiBuffer
 from tinygrad.dtype import ImageDType
-from tinygrad.helpers import DEBUG, cpu_profile, TracingKey, SPEC, flatten, pluralize, SCACHE, prod
+from tinygrad.helpers import DEBUG, cpu_profile, TracingKey, SPEC, flatten, pluralize, SCACHE, prod, argsort
 from tinygrad.engine.realize import ExecItem
 
 # **** schedule linearizer
@@ -159,7 +159,19 @@ def replace_assign_with_contig(u:UOp):
   if assigned_to.op is not Ops.BUFFER:
     return u.src[1].contiguous(tag=u.tag)
 
+def found_contiguous(ctx:dict[UOp, UOp], contig:UOp, src:UOp):
+  x = src
+  while x is not src.base:
+    if x.op is Ops.PERMUTE: contig = contig.permute(argsort(x.marg))
+    elif x.op is Ops.RESHAPE: contig = contig.reshape(x.src[0].shape)
+    else: return None
+    x = x.src[0]
+  ctx[src.base] = contig
 pm_replace_contig_with_assign = PatternMatcher([
+  # CONTIGUOUS replacement hack for openpilot
+  (UPat(Ops.CONTIGUOUS, src=(UPat(GroupOp.Movement, name="src"),), name="contig"), found_contiguous),
+  # replace ALU sources with contiguous versions found above
+  (UPat(GroupOp.ALU, name="alu"), lambda ctx,alu: alu.replace(src=new_src) if (new_src:=tuple(ctx.get(s, s) for s in alu.src)) != alu.src else None),
   # add CONTIGUOUS to tagged UOps
   (UPat(GroupOp.All-{Ops.CONTIGUOUS, Ops.ASSIGN}, name="x"), lambda x: x.rtag(None).contiguous(tag=x.tag) if x.tag is not None else None),
   # remove extra CONTIGUOUS on ASSIGN
@@ -189,7 +201,7 @@ def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[dict[UOp, UOp], li
   big_sink = graph_rewrite(big_sink, add_tags, ctx=(uop_list, set(), buffer_map, bases), bottom_up=True, name="number the uops")
 
   # here we can break the tensor graph
-  big_sink = graph_rewrite(big_sink, pm_replace_contig_with_assign, name="replace contig")
+  big_sink = graph_rewrite(big_sink, pm_replace_contig_with_assign, ctx={}, name="replace contig")
 
   # here we construct the final buffer_map
   for s in big_sink.toposort():
