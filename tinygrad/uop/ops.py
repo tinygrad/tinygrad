@@ -656,8 +656,8 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     # this buffer can process disk tensors and simple movement ops
     if self is not self.base:
       from tinygrad.schedule.rangeify import pm_mops
-      from tinygrad.uop.symbolic import symbolic, symbolic_div_add
-      out = graph_rewrite(self.flatten().index(UOp.range(self.size, 0)), pm_mops+symbolic+symbolic_div_add)
+      from tinygrad.uop.symbolic import symbolic
+      out = graph_rewrite(self.flatten().index(UOp.range(self.size, 0)), pm_mops+symbolic)
       buf = out.src[0].buffer
       assert isinstance(buf, Buffer), "must be a Buffer for movement ops"
       assert out.op is Ops.INDEX, "couldn't collapse to a single INDEX"

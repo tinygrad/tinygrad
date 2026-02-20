@@ -182,11 +182,6 @@ commutative = PatternMatcher([
   (UPat(GroupOp.Commutative, dtype=dtypes.index, name='x'), lambda x: x.replace(src=x.src[::-1]) if x.src[1].tuplize < x.src[0].tuplize else None),
 ])
 
-symbolic_div_add = PatternMatcher([
-  ((UPat.var("x")//UPat.cvar("a"))%UPat.cvar("b")*UPat.cvar("a")+UPat.var("x")%UPat.cvar("a"),
-    lambda x,a,b: x%(a*b)), # (x//a%b)*a + x%a = x%(a*b)
-])
-
 symbolic = symbolic_simple+commutative+PatternMatcher([
   # ** boolean algebra **
   # TODO: make a more general or folder like simplify_valid
