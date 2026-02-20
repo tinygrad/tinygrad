@@ -1,6 +1,7 @@
 from __future__ import annotations
 import os, ctypes, contextlib, fcntl, mmap
 from tinygrad.runtime.autogen import nv_570 as nv_gpu
+from tinygrad.runtime.support.c import _IOW, _IOWR
 from tinygrad.runtime.support.hcq import HCQBuffer, MMIOInterface, FileIOInterface
 from tinygrad.runtime.support.system import MAP_FIXED
 from tinygrad.helpers import round_up, to_mv
@@ -74,40 +75,31 @@ _nvgpu_setup_bind = _ct([("num_gpfifo_entries", ctypes.c_uint32), ("num_inflight
                           ("reserved", ctypes.c_uint32 * 9)])
 _nvgpu_channel_wdt = _ct([("wdt_status", ctypes.c_uint32), ("timeout_ms", ctypes.c_uint32)])
 
-def _ioc(d, t, nr, size): return (d << 30) | (size << 16) | (ord(t) << 8) | nr
-def _io(t, nr): return _ioc(0, t, nr, 0)
-def _iow(t, nr, sz): return _ioc(1, t, nr, sz)
-def _iowr(t, nr, sz): return _ioc(3, t, nr, sz)
-
-_NVGPU_GET_CHARS = _iowr('G', 5, ctypes.sizeof(_nvgpu_gpu_get_characteristics))
-_NVGPU_ALLOC_AS = _iowr('G', 8, ctypes.sizeof(_nvgpu_alloc_as))
-_NVGPU_OPEN_TSG = _iowr('G', 9, ctypes.sizeof(_nvgpu_open_tsg))
-_NVGPU_OPEN_CH = _iowr('G', 11, ctypes.sizeof(_nvgpu_open_channel))
-_NVMAP_CREATE = _iowr('N', 0, ctypes.sizeof(_nvmap_handle))
-_NVMAP_ALLOC = _iow('N', 3, ctypes.sizeof(_nvmap_alloc))
-_NVMAP_GET_FD = _iowr('N', 15, ctypes.sizeof(_nvmap_handle))
-_NVMAP_FREE = _io('N', 4)
-_NVGPU_AS_BIND_CH = _iowr('A', 1, ctypes.sizeof(_nvgpu_as_bind_channel))
-_NVGPU_AS_ALLOC_SPACE = _iowr('A', 6, ctypes.sizeof(_nvgpu_as_alloc_space))
-_NVGPU_AS_MAP_BUF = _iowr('A', 7, ctypes.sizeof(_nvgpu_as_map_buffer_ex))
-_NVGPU_AS_UNMAP_BUF = _iowr('A', 5, ctypes.sizeof(_nvgpu_as_unmap_buffer))
-_NVGPU_TSG_BIND_CH = _iowr('T', 11, ctypes.sizeof(_nvgpu_tsg_bind_channel_ex))
-_NVGPU_TSG_SUBCTX = _iowr('T', 18, ctypes.sizeof(_nvgpu_tsg_create_subctx))
-_NVGPU_CH_ALLOC_OBJ = _iowr('H', 108, ctypes.sizeof(_nvgpu_alloc_obj_ctx))
-_NVGPU_CH_SETUP_BIND = _iowr('H', 128, ctypes.sizeof(_nvgpu_setup_bind))
-_NVGPU_CH_WDT = _iow('H', 119, ctypes.sizeof(_nvgpu_channel_wdt))
+# ioctl callables: NAME(fd, **kwargs) -> struct  (see tinygrad/runtime/support/c.py _do_ioctl)
+NVGPU_GET_CHARS    = _IOWR('G', 5,   _nvgpu_gpu_get_characteristics)
+NVGPU_ALLOC_AS     = _IOWR('G', 8,   _nvgpu_alloc_as)
+NVGPU_OPEN_TSG     = _IOWR('G', 9,   _nvgpu_open_tsg)
+NVGPU_OPEN_CH      = _IOWR('G', 11,  _nvgpu_open_channel)
+NVMAP_CREATE       = _IOWR('N', 0,   _nvmap_handle)
+NVMAP_ALLOC        = _IOW ('N', 3,   _nvmap_alloc)
+NVMAP_GET_FD       = _IOWR('N', 15,  _nvmap_handle)
+NVGPU_AS_BIND_CH   = _IOWR('A', 1,   _nvgpu_as_bind_channel)
+NVGPU_AS_ALLOC_SP  = _IOWR('A', 6,   _nvgpu_as_alloc_space)
+NVGPU_AS_MAP_BUF   = _IOWR('A', 7,   _nvgpu_as_map_buffer_ex)
+NVGPU_AS_UNMAP_BUF = _IOWR('A', 5,   _nvgpu_as_unmap_buffer)
+NVGPU_TSG_BIND_CH  = _IOWR('T', 11,  _nvgpu_tsg_bind_channel_ex)
+NVGPU_TSG_SUBCTX   = _IOWR('T', 18,  _nvgpu_tsg_create_subctx)
+NVGPU_CH_ALLOC_OBJ = _IOWR('H', 108, _nvgpu_alloc_obj_ctx)
+NVGPU_CH_SETUP_BIND= _IOWR('H', 128, _nvgpu_setup_bind)
+NVGPU_CH_WDT       = _IOW ('H', 119, _nvgpu_channel_wdt)
+_NVMAP_FREE        = (ord('N') << 8) | 4  # _IO('N', 4): handle passed as integer value
 
 _NVMAP_HEAP_IOVMM, _NVMAP_WC, _NVMAP_CACHED, _NVMAP_TAG = (1 << 30), 1, 2, 0x0900
 
-def _tioctl(fd, nr, buf): fcntl.ioctl(fd, nr, buf)
-
 def _nvmap_buf(nvmap_fd, size, cache_flags, align=4096):
-  c = _nvmap_handle(size=size)
-  _tioctl(nvmap_fd, _NVMAP_CREATE, c)
-  a = _nvmap_alloc(handle=c.handle, heap_mask=_NVMAP_HEAP_IOVMM, flags=(_NVMAP_TAG << 16) | cache_flags, align=align)
-  _tioctl(nvmap_fd, _NVMAP_ALLOC, a)
-  g = _nvmap_handle(handle=c.handle)
-  _tioctl(nvmap_fd, _NVMAP_GET_FD, g)
+  c = NVMAP_CREATE(nvmap_fd, size=size)
+  NVMAP_ALLOC(nvmap_fd, handle=c.handle, heap_mask=_NVMAP_HEAP_IOVMM, flags=(_NVMAP_TAG << 16) | cache_flags, align=align)
+  g = NVMAP_GET_FD(nvmap_fd, handle=c.handle)
   return c.handle, g.size  # g.size is the dmabuf fd
 
 class TegraMem:
@@ -124,8 +116,7 @@ class TegraIface:
       TegraIface._nvmap_fd = os.open("/dev/nvmap", os.O_RDWR | os.O_SYNC)
       TegraIface._ctrl_fd = os.open("/dev/nvgpu/igpu0/ctrl", os.O_RDWR)
       chars = _nvgpu_gpu_characteristics()
-      req = _nvgpu_gpu_get_characteristics(buf_size=ctypes.sizeof(chars), buf_addr=ctypes.addressof(chars))
-      _tioctl(TegraIface._ctrl_fd, _NVGPU_GET_CHARS, req)
+      NVGPU_GET_CHARS(TegraIface._ctrl_fd, buf_size=ctypes.sizeof(chars), buf_addr=ctypes.addressof(chars))
       TegraIface._chars = chars
 
     self.dev, self.device_id = dev, device_id
@@ -151,33 +142,24 @@ class TegraIface:
       return handle
 
     if clss == nv_gpu.NV01_MEMORY_VIRTUAL:
-      args = _nvgpu_alloc_as(flags=2, va_range_start=(1 << 21), va_range_end=(1 << 40) - (1 << 21))
-      _tioctl(self._ctrl_fd, _NVGPU_ALLOC_AS, args)
-      self._as_fd = args.as_fd
+      self._as_fd = NVGPU_ALLOC_AS(self._ctrl_fd, flags=2, va_range_start=(1 << 21), va_range_end=(1 << 40) - (1 << 21)).as_fd
       for wva in [0xFD00000000, 0xFE00000000]:
-        rsv = _nvgpu_as_alloc_space(pages=0x40000000 // mmap.PAGESIZE, page_size=mmap.PAGESIZE, flags=1, offset=wva)
-        _tioctl(self._as_fd, _NVGPU_AS_ALLOC_SPACE, rsv)
+        NVGPU_AS_ALLOC_SP(self._as_fd, pages=0x40000000 // mmap.PAGESIZE, page_size=mmap.PAGESIZE, flags=1, offset=wva)
       return handle
 
     if clss == nv_gpu.KEPLER_CHANNEL_GROUP_A:
-      tsg = _nvgpu_open_tsg()
-      _tioctl(self._ctrl_fd, _NVGPU_OPEN_TSG, tsg)
-      self._tsg_fd = tsg.tsg_fd
+      self._tsg_fd = NVGPU_OPEN_TSG(self._ctrl_fd).tsg_fd
       return handle
 
     if clss == nv_gpu.FERMI_CONTEXT_SHARE_A:
-      subctx = _nvgpu_tsg_create_subctx(type=1, as_fd=self._as_fd)
-      _tioctl(self._tsg_fd, _NVGPU_TSG_SUBCTX, subctx)
-      self._subctx_veid = subctx.veid
+      self._subctx_veid = NVGPU_TSG_SUBCTX(self._tsg_fd, type=1, as_fd=self._as_fd).veid
       return handle
 
     if clss in (self.gpfifo_class, nv_gpu.AMPERE_CHANNEL_GPFIFO_A):
-      ch = _nvgpu_open_channel(channel_fd=-1)
-      _tioctl(self._ctrl_fd, _NVGPU_OPEN_CH, ch)
-      ch_fd = ch.channel_fd
-      _tioctl(self._as_fd, _NVGPU_AS_BIND_CH, _nvgpu_as_bind_channel(channel_fd=ch_fd))
-      _tioctl(self._tsg_fd, _NVGPU_TSG_BIND_CH, _nvgpu_tsg_bind_channel_ex(channel_fd=ch_fd, subcontext_id=self._subctx_veid))
-      _tioctl(ch_fd, _NVGPU_CH_WDT, _nvgpu_channel_wdt(wdt_status=1))
+      ch_fd = NVGPU_OPEN_CH(self._ctrl_fd, channel_fd=-1).channel_fd
+      NVGPU_AS_BIND_CH(self._as_fd, channel_fd=ch_fd)
+      NVGPU_TSG_BIND_CH(self._tsg_fd, channel_fd=ch_fd, subcontext_id=self._subctx_veid)
+      NVGPU_CH_WDT(ch_fd, wdt_status=1)
 
       gpfifo_entries, gpfifo_buf_handle, gpfifo_va, userd_off = 0x10000, 0, 0, 0
       if params is not None:
@@ -191,9 +173,8 @@ class TegraIface:
       _, ring_fd = _nvmap_buf(self._nvmap_fd, ring_sz, _NVMAP_WC)
       _, userd_fd = _nvmap_buf(self._nvmap_fd, 4096, _NVMAP_WC)
 
-      setup = _nvgpu_setup_bind(num_gpfifo_entries=gpfifo_entries, gpfifo_dmabuf_fd=ring_fd, userd_dmabuf_fd=userd_fd,
-                                flags=(1 << 3) | (1 << 1))
-      _tioctl(ch_fd, _NVGPU_CH_SETUP_BIND, setup)
+      setup = NVGPU_CH_SETUP_BIND(ch_fd, num_gpfifo_entries=gpfifo_entries, gpfifo_dmabuf_fd=ring_fd, userd_dmabuf_fd=userd_fd,
+                                  flags=(1 << 3) | (1 << 1))
 
       cpu_base = gpfifo_area_mem.cpu_addr
       FileIOInterface._mmap(cpu_base + (gpfifo_va - gpfifo_area_mem.gpu_va), ring_sz,
@@ -207,8 +188,7 @@ class TegraIface:
     if clss in (self.compute_class, nv_gpu.AMPERE_COMPUTE_B, self.dma_class, nv_gpu.AMPERE_DMA_COPY_B):
       ch_fd = self._ch_fds.get(parent, -1)
       if ch_fd == -1: raise RuntimeError(f"TegraIface: no channel fd for handle {parent}")
-      obj = _nvgpu_alloc_obj_ctx(class_num=self.compute_class if clss in (self.compute_class, nv_gpu.AMPERE_COMPUTE_B) else self.dma_class)
-      _tioctl(ch_fd, _NVGPU_CH_ALLOC_OBJ, obj)
+      NVGPU_CH_ALLOC_OBJ(ch_fd, class_num=self.compute_class if clss in (self.compute_class, nv_gpu.AMPERE_COMPUTE_B) else self.dma_class)
       return handle
 
     return handle
@@ -273,9 +253,7 @@ class TegraIface:
 
     gpu_va = 0
     if self._as_fd >= 0:
-      m = _nvgpu_as_map_buffer_ex(compr_kind=-1, dmabuf_fd=dmabuf_fd, page_size=mmap.PAGESIZE)
-      _tioctl(self._as_fd, _NVGPU_AS_MAP_BUF, m)
-      gpu_va = m.offset
+      gpu_va = NVGPU_AS_MAP_BUF(self._as_fd, compr_kind=-1, dmabuf_fd=dmabuf_fd, page_size=mmap.PAGESIZE).offset
 
     addr = FileIOInterface._mmap(gpu_va or 0, size, mmap.PROT_READ | mmap.PROT_WRITE,
                                  mmap.MAP_SHARED | (MAP_FIXED if gpu_va else 0), dmabuf_fd, 0)
@@ -289,7 +267,7 @@ class TegraIface:
   def free(self, mem: HCQBuffer):
     meta = mem.meta
     if meta.gpu_va and self._as_fd >= 0:
-      with contextlib.suppress(OSError): _tioctl(self._as_fd, _NVGPU_AS_UNMAP_BUF, _nvgpu_as_unmap_buffer(offset=meta.gpu_va))
+      with contextlib.suppress(OSError): NVGPU_AS_UNMAP_BUF(self._as_fd, offset=meta.gpu_va)
     if meta.cpu_addr:
       with contextlib.suppress(Exception): FileIOInterface.munmap(meta.cpu_addr, meta.size)
     if meta.dmabuf_fd >= 0:
