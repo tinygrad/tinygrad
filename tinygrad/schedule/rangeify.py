@@ -2,9 +2,9 @@ from dataclasses import dataclass, field, replace
 import itertools
 from tinygrad.dtype import dtypes, PtrDType, ImageDType, AddrSpace
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, _substitute, KernelInfo, pm_gate_kernel_sink
-from tinygrad.uop.ops import graph_rewrite, identity_element, sint, AxisType, BottomUpGate, _remove_all_tags, range_str
+from tinygrad.uop.ops import graph_rewrite, identity_element, sint, AxisType, BottomUpGate, _remove_all_tags
 from tinygrad.uop.symbolic import symbolic
-from tinygrad.helpers import argsort, prod, all_same, getenv, flatten, dedup, all_int, DEBUG, SPLIT_REDUCEOP, DEBUG_RANGEIFY, VIZ, MAX_KERNEL_BUFFERS
+from tinygrad.helpers import argsort, prod, all_same, getenv, dedup, all_int, DEBUG, SPLIT_REDUCEOP, DEBUG_RANGEIFY, VIZ, MAX_KERNEL_BUFFERS
 from tinygrad.helpers import PCONTIG, partition, get_single_element
 from tinygrad.codegen.simplify import pm_flatten_range, pm_reduce_simplify
 from tinygrad.codegen.opt import Opt
@@ -54,6 +54,13 @@ def fix_assign_hazard(assign:UOp, target:UOp, src:UOp):
   for h in hazards:
     if any(s is target.base for s in h.toposort(gate=lambda s:s.op not in ALWAYS_CONTIGUOUS-{Ops.PARAM})):
       return assign.replace(src=(target, src.contiguous()))
+
+def normalize_assign_target_chain(assign:UOp, target:UOp, src:UOp):
+  root_target = target
+  while root_target.op is Ops.ASSIGN: root_target = root_target.src[0]
+  # when RHS depends on the previous assign result, break with contiguous
+  if target in src.toposort(): src = src.contiguous()
+  return assign.replace(src=(root_target, src))
 
 def split_reduceop(reduce:UOp, x:UOp):
   if prod(reduce.shape) == 0: return None
@@ -148,6 +155,9 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
   # move bitcast from assign target to source: a.bitcast(X).assign(src) -> a.assign(src.bitcast(a.dtype))
   (UPat(Ops.ASSIGN, src=(UPat(Ops.BITCAST, src=(UPat(name="target"),)), UPat(name="src")), name="assign"),
    lambda assign, target, src: target.assign(src.bitcast(target.dtype)).replace(tag=assign.tag)),
+
+  # if assign target is itself an ASSIGN chain, canonicalize to the original buffer target
+  (UPat(Ops.ASSIGN, src=(UPat(Ops.ASSIGN, name="target"), UPat(name="src")), allow_any_len=True, name="assign"), normalize_assign_target_chain),
 
   # assign only to buffer, otherwise make it a CONTIGUOUS
   (UPat(Ops.ASSIGN, src=(UPat(GroupOp.All-{Ops.PARAM}, name="target"), UPat(name="src")), name="assign"), assign_to_contiguous),
@@ -353,18 +363,6 @@ def bufferize_to_store(ctx:itertools.count, x:UOp, idx:UOp, allow_locals=True):
     for op, marg in reversed(assign.arg or ()): ret = ret._mop(op, marg)
     return ret
 
-  # lower outerworld reduce here
-  if x.src[0].op is Ops.REDUCE and len(x.src[0].src) == 2 and x.src[0].src[1].arg[-1] == AxisType.OUTER:
-    assert sdtype.addrspace == AddrSpace.GLOBAL
-    outer_range = x.src[0].src[1]
-    buf = UOp(Ops.BUFFER, x.dtype, (UOp(Ops.LUNIQUE, arg=next(ctx)), UOp(Ops.DEVICE, arg=x.arg.device)), size)
-    # NOTE: this has the same number as the outer range, we need string ranges!
-    zero_range = outer_range.replace(src=(UOp.const(dtypes.index, size),), arg=outer_range.arg[:-1]+(AxisType.LOOP,))
-    buf = buf.after(buf.index(zero_range).store(0).end(zero_range))
-    bufi = buf.index(idx, dtype=sdtype)
-    do_store = bufi.store(bufi.load() + x.src[0].src[0], tag=x.tag).end(*rngs).end(outer_range)
-    return buf.after(do_store)
-
   # NOTE: the DEFINE_LOCAL needs to be disambiguated here
   if sdtype.addrspace == AddrSpace.GLOBAL:
     buf = UOp(Ops.BUFFER, x.dtype, (UOp(Ops.LUNIQUE, arg=next(ctx)), UOp(Ops.DEVICE, arg=x.arg.device)), size)
@@ -437,9 +435,6 @@ def handle_after(ctx:LocalAddBufferContext, after:UOp):
 
 def renumber_range(ctx:LocalAddBufferContext, r:UOp):
   if r.tag != (): return None
-  if r.arg[-1] == AxisType.OUTER:
-    # for outer range, we replace with a bound variable
-    return UOp.variable("range_"+range_str(r), r.vmin, r.vmax).bind(r.replace(tag=None))
   ret = r.replace(arg=(ctx.range,)+r.arg[1:], tag=None)
   ctx.range += 1
   return ret
@@ -508,19 +503,13 @@ pm_add_range_tags = PatternMatcher([
   (UPat(Ops.RANGE, name="x"), lambda x: x.rtag(())),
 ])
 
-def split_store(ctx:list[UOp], x:UOp) -> UOp|None:
-  # if we have any non-outer ranges open here, we don't split
-  if any(r.arg[-1] != AxisType.OUTER for r in x.ranges): return None
-
-  # ends of outer range don't go in kernels
-  if x.op is Ops.END and x.src[1].op is Ops.RANGE and x.src[1].arg[-1] == AxisType.OUTER: return None
+def split_store(x:UOp) -> UOp|None:
+  # if we have any open ranges here, we don't split
+  if x.ranges: return None
 
   # local kernel rewrite
   lctx = LocalAddBufferContext()
   ret = graph_rewrite(x, to_define_global+pm_flatten_range+rangeify_codegen+pm_remove_tags, ctx=lctx, name="kernel split", bottom_up=True)
-
-  # gather the metadata
-  metadatas = [ctx[y].metadata for y in lctx.parent_tags]
 
   # SINK requires all buffers on the same device, but COPY/BUFFER_VIEW/ENCDEC are cross-device or special hardware ops
   if ret.op is Ops.STORE: stored = ret.src[1]
@@ -529,8 +518,7 @@ def split_store(ctx:list[UOp], x:UOp) -> UOp|None:
   if stored.op in {Ops.COPY, Ops.BUFFER_VIEW, Ops.ENCDEC}: ret = stored
   else: ret = ret.sink(arg=KernelInfo(opts_to_apply=lctx.opts))
 
-  metadata = tuple(dedup(flatten([x for x in metadatas if x is not None])))[::-1]
-  kernel = ret.call(*lctx.map.values(), *lctx.vars.keys(), metadata=metadata)
+  kernel = ret.call(*lctx.map.values(), *lctx.vars.keys())
   if ret.op is Ops.SINK and not all_same([x.device for x in kernel.src[1:] if x.op is not Ops.BIND]):
     raise RuntimeError(f"all buffers must be on the same device: {tuple(b.buf_uop for b in kernel.src[1:])}")
   return kernel
@@ -569,7 +557,7 @@ replace_contiguous = PatternMatcher([
   (UPat(GroupOp.ALU, name="alu"), lambda ctx,alu: alu.replace(src=new_src) if (new_src:=tuple(ctx.get(s, s) for s in alu.src)) != alu.src else None),
 ])
 
-def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
+def get_rangeify(sink:UOp) -> UOp:
   if VIZ: graph_rewrite(sink, PatternMatcher([]), name="View Input Graph")
   uop_list: list[UOp] = []
   tsink = graph_rewrite(sink, add_tags, ctx=(uop_list, set()), bottom_up=True, name="number the uops")
@@ -594,7 +582,7 @@ def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
   lunique_start: int = max([-1]+[x.arg for x in tsink.toposort() if x.op is Ops.LUNIQUE]) + 1
   tsink = graph_rewrite(tsink, pm_gate_kernel_sink+pm_add_buffers+pm_add_range_tags, ctx=itertools.count(lunique_start), bottom_up=True,
                         name="bufferize to store")
-  tsink = graph_rewrite(tsink, pm_gate_kernel_sink+split_kernels, ctx=uop_list, bottom_up=True, name="split kernels")
+  tsink = graph_rewrite(tsink, pm_gate_kernel_sink+split_kernels, bottom_up=True, name="split kernels")
 
   # WAR deps: if kernel U reads buffer S, and S is also written by another kernel, S's write must wait for U to finish
   afters = [u for u in tsink.toposort() if u.op is Ops.AFTER]
@@ -611,15 +599,6 @@ def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
   if assign_rep: tsink = graph_rewrite(tsink, _substitute, ctx=assign_rep, bottom_up=True, name="fix_assign")
 
   # TODO: we can probably get this earlier
-  sink_tags = [s.tag for s in tsink.src]
   tsink = graph_rewrite(tsink, _remove_all_tags, name="remove all tags")
-
   if VIZ: graph_rewrite(tsink, PatternMatcher([]), name="View Kernel Graph")
-
-  becomes_map: dict[UOp, UOp] = {}
-  for tag, s in zip(sink_tags, tsink.src):
-    assert tag is not None
-    for a in tag:
-      if a is None: continue
-      becomes_map[uop_list[int(a)]] = s
-  return becomes_map
+  return tsink

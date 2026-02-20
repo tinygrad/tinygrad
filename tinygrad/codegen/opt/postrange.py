@@ -7,7 +7,7 @@ from tinygrad.uop.ops import axis_letters, axis_colors, axis_to_pos
 from tinygrad.device import Buffer
 from tinygrad.dtype import dtypes, ImageDType
 from tinygrad.helpers import colored, BEAM, getenv, DEBUG, to_function_name, NOOPT, argsort, round_up, prod, merge_dicts, get_single_element, flatten
-from tinygrad.helpers import ALLOW_TF32, count, Context
+from tinygrad.helpers import ALLOW_TF32, count, Context, ceildiv
 from tinygrad.codegen.opt import Opt, OptOps, KernelOptError, check
 from tinygrad.codegen.simplify import pm_flatten_range
 from tinygrad.renderer import Renderer
@@ -353,17 +353,30 @@ def apply_opts(ast:UOp, ren:Renderer) -> UOp:
       k = hand_coded_optimizations(k)
   return k.get_optimized_ast(name_override=ast.arg.name if ast.arg is not None and ast.arg.name != "test" else None)
 
-# max image width: 16384 * 4 = 65536. with real 2d images the real max size is 4 * 16384 ** 2
-def _valid_image_dt(dt): return dt.base in (dtypes.half, dtypes.float) and not isinstance(dt, ImageDType) and dt.size <= 65536 and dt.nbytes()%64 == 0
+# max image width (pixels): 16384. max image size: 4 * 16384 ** 2
+def _image_shape(dt):
+  if dt.base not in (dtypes.half, dtypes.float) or isinstance(dt, ImageDType) or dt.size > 4*16384*16384 or dt.nbytes()%64 != 0: return None
+  if dt.size <= 4 * 16384: return (1, dt.size // 4, 4)
+  if (pxls:=dt.size // 4) % 64: return None
+  # verify that a valid format exists
+  try: return next((pxls // 64 // k, 64 * k, 4) for k in range(ceildiv(pxls // 64, 16384), min(pxls // 64, 256)+1))
+  except StopIteration: return None
+
 def make_image(pa, off, idx):
-  if (idx.tag is None or idx.tag) and _valid_image_dt(dt:=pa.dtype):
-    return idx.replace(src=(pa.replace(dtype=(dtypes.imageh if dt.base==dtypes.half else dtypes.imagef)((1, dt.size // 4, 4), dt.nbytes())), off),
-                       dtype=dtypes.float if dt.base == dtypes.half else idx.dtype)
+  if (idx.tag is None or idx.tag) and (shape:=_image_shape(dt:=pa.dtype)):
+    new_idx = idx.replace(src=(pa.replace(dtype=(dtypes.imageh if dt.base==dtypes.half else dtypes.imagef)(shape, shape[1] * 4 * dt.itemsize)), off),
+                          dtype=dtypes.float if dt.base == dtypes.half else idx.dtype)
+    return new_idx if idx.tag or dt.base == dtypes.float else new_idx.cast(dtypes.half)
 
 pm_make_images = PatternMatcher([
   # ensure we dont create an unfoldable image store
   (UPat(Ops.STORE, src=(UPat.var("idx"),), allow_any_len=True, name="st"), lambda idx,st:
    st.replace(src=(idx.rtag(is_image:=any(c.op is Ops.RANGE and (c.vmax+1)%4 == 0 for c in idx.src[1].get_idx().split_uop(Ops.ADD))),
-                   st.src[1].cast(dtypes.float if is_image and _valid_image_dt(idx.src[0].dtype) else idx.dtype.base)))),
+                   st.src[1].cast(dtypes.float if is_image and _image_shape(idx.src[0].dtype) else idx.dtype.base)))),
   (UPat(Ops.INDEX, src=(UPat(Ops.PARAM, name="pa"), UPat.var("off")), name="idx"), make_image),
+  # remove double cast from image loads / stores
+  (UPat(Ops.INDEX, src=(UPat(Ops.PARAM, name="pa"),), allow_any_len=True, name="idx").cast(dtypes.half).cast(dtypes.float), lambda idx,pa:
+   idx if isinstance(pa.dtype, ImageDType) else None),
+  (UPat(Ops.STORE, src=(UPat(Ops.PARAM, name="pa").index(UPat()), UPat.var("val").cast(dtypes.half).cast(dtypes.float)), name="st"), lambda st,pa,val:
+   st.replace(src=(st.src[0], val)) if isinstance(pa.dtype, ImageDType) else None),
 ])
