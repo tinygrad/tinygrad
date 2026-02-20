@@ -28,16 +28,7 @@ class TestRealizeIsRealized(unittest.TestCase):
     t = Tensor.ones(8).contiguous().shard((d, d), axis=0).realize()
     assert all(u.is_realized for u in t.uop.src)
 
-  # TODO: these are not realized after .realize() because they stay as consts / don't allocate buffers
-  def test_const_not_realized(self):
-    t = Tensor(3.14).realize()
-    assert not t.uop.is_realized
-
-  def test_ones_not_realized(self):
-    t = Tensor.ones(4, 4).realize()
-    assert not t.uop.is_realized
-
-  def test_empty_not_realized(self):
+  def test_empty(self):
     t = Tensor.empty(4, 4).realize()
     assert t.uop.is_realized
 
@@ -47,6 +38,22 @@ class TestRealizeIsRealized(unittest.TestCase):
       f.flush()
       t = Tensor.empty(4, dtype=dtypes.float32, device=f"disk:{f.name}").realize()
       assert t.uop.is_realized
+
+  def test_assign(self):
+    t = Tensor([1, 2, 3])
+    t += 1
+    t.realize()
+    assert t.uop.is_realized
+
+  # TODO: these are not realized after .realize()
+
+  def test_const_not_realized(self):
+    t = Tensor(3.14).realize()
+    assert not t.uop.is_realized
+
+  def test_ones_not_realized(self):
+    t = Tensor.ones(4, 4).realize()
+    assert not t.uop.is_realized
 
   def test_none_not_realized(self):
     t = Tensor(None).realize()
