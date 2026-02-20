@@ -486,6 +486,7 @@ class TestJit(unittest.TestCase):
     with self.assertRaises(JitError):
       f(Tensor(2.0)).item()
     # list input has different view structure than empty(1)
+    # but okay if it's realized
     #with self.assertRaises(JitError):
     #  f(Tensor([2.0])).item()
 
