@@ -21,6 +21,9 @@ jobs:
   # the 3 minute timeout should not be raised
   testmacpytest:
     name: Mac pytest
+    env:
+      CI: ""
+      CAPTURE_PROCESS_REPLAY: "0"
     runs-on: [self-hosted, macOS]
     timeout-minutes: 3
     defaults:
