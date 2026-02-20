@@ -346,6 +346,9 @@ class INST_RDNA4(PacketType):  # Layout 4: different delta position and InstOp e
   wave_pair = bits[11:8]
   flag3 = bits[12:12]
   op = bits[19:13].enum(InstOpRDNA4)
+  # INST_RDNA4 wave_pair field (4 bits) addresses wave pairs, flag2 selects even/odd wave
+  @property
+  def wave(self): return self.wave_pair * 2 + self.flag2
 
 class UTILCTR(PacketType):
   encoding = bits[6:0] == 0b0110001
@@ -607,7 +610,7 @@ def map_insts(data:bytes, lib:bytes, target:str) -> Iterator[tuple[PacketType, I
           wave_pc[wave] += inst.size()
           yield (p, InstructionInfo(pc, wave, inst))
       continue
-    if isinstance(p, (VALUINST, INST, IMMEDIATE)):
+    if isinstance(p, (VALUINST, INST, INST_RDNA4, IMMEDIATE)):
       inst = pc_map[pc:=wave_pc[p.wave]]
       # s_delay_alu doesn't get a packet?
       if isinstance(inst, SOPP) and inst.op in {SOPPOp.S_DELAY_ALU}:
@@ -645,8 +648,7 @@ def format_packet(p) -> str:
   name = type(p).__name__
   if isinstance(p, (INST, INST_RDNA4)):
     op_name = p.op.name if isinstance(p.op, (InstOp, InstOpRDNA4)) else f"0x{p.op:02x}"
-    wave = p.wave_pair * 2 + p.flag2 if isinstance(p, INST_RDNA4) else p.wave
-    fields = f"wave={wave} op={op_name}" + (" flag1" if p.flag1 else "") + (" flag2" if p.flag2 else "")
+    fields = f"wave={p.wave} op={op_name}" + (" flag1" if p.flag1 else "") + (" flag2" if p.flag2 else "")
   elif isinstance(p, VALUINST): fields = f"wave={p.wave}" + (" flag" if p.flag else "")
   elif isinstance(p, ALUEXEC): fields = f"src={p.src.name if isinstance(p.src, AluSrc) else p.src}"
   elif isinstance(p, VMEMEXEC): fields = f"src={p.src.name if isinstance(p.src, MemSrc) else p.src}"
