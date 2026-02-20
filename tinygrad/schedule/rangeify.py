@@ -93,8 +93,7 @@ mop_cleanup = PatternMatcher([
 
 def resolve_call(c:UOp) -> UOp|None:
   # don't resolve real kernel calls, sink or program
-  if c.src[0].op is Ops.SINK and isinstance(c.src[0].arg, KernelInfo): return None
-  if c.src[0].op is Ops.PROGRAM: return None
+  if c.src[0].op in {Ops.SINK, Ops.PROGRAM}: return None
   params = sorted([x for x in c.src[0].toposort() if x.op == Ops.PARAM], key=lambda x: x.arg)
   args = c.src[1:]
   # TODO: this check belongs in spec, not here
