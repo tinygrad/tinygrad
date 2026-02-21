@@ -8,7 +8,7 @@ from tinygrad.dtype import ConstType, ImageDType, dtypes, DType, truncate, PtrDT
 from tinygrad.dtype import storage_fmt_for_dtype, to_storage_scalar, from_storage_scalar
 from tinygrad.helpers import ContextVar, all_int, prod, getenv, all_same, Context, partition, temp, unwrap, T, argfix, Metadata, flatten, TRACEMETA
 from tinygrad.helpers import PROFILE, dedup, cdiv, cmod, diskcache_put, to_function_name, cpu_profile, TracingKey, VIZ, SPEC, CAPTURE_PROCESS_REPLAY
-from tinygrad.helpers import strip_parens, colored, ansilen, printable, panic
+from tinygrad.helpers import strip_parens, colored, ansilen, printable
 if TYPE_CHECKING:
   from tinygrad.device import Buffer, MultiBuffer
   from tinygrad.renderer import Estimates
@@ -1347,7 +1347,6 @@ _substitute = PatternMatcher([(UPat(tuple(Ops), name="x"), lambda ctx,x: ctx.get
 _remove_all_tags = PatternMatcher([(UPat(GroupOp.All, name="x"), lambda x: x.replace(tag=None) if x.tag is not None else None)])
 
 def gate_kernel_sink(x:UOp) -> bool: return not (x.op is Ops.SINK and isinstance(x.arg, KernelInfo))
-pm_gate_kernel_sink = PatternMatcher([(UPat(Ops.SINK, name="sink"), lambda sink: None if gate_kernel_sink(sink) else panic(BottomUpGate))])
 
 def do_unbind(ctx:dict[Variable, int], x:UOp):
   v,i = x.unbind()
