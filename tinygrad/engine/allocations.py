@@ -15,7 +15,7 @@ def disk_copy_is_buffer(ctx, u):
   to_disk = isinstance(u._device, str) and u._device.startswith("DISK")
   if to_disk: ctx[2][u] = UOp.new_buffer(u.device, u.shard_size, u.dtype).reshape(u.max_shard_shape)
   # all copies from disk/numpy are realized into a real buffer
-  from_creation = isinstance(u.src[0]._device, str) and any(u.src[0]._device.startswith(x) for x in ["NPY", "DISK"])
+  from_creation = isinstance(u.src[0]._device, str) and any(u.src[0]._device.startswith(x) for x in ["NPY", "DISK", "PYTHON"])
   if from_creation: return tag_uop(ctx, u)
 
 def apply_after(ctx, u):
