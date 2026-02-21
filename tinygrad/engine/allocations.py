@@ -81,6 +81,8 @@ pm_early_transform_tensor_graph = PatternMatcher([
    lambda reduce,x: reduce.const_like(identity_element(reduce.arg[0], reduce.dtype)) if x.size == 0 and reduce.size != 0 else None),
   # handle size 0
   (UPat(GroupOp.All-{Ops.SINK}, name="x"), lambda x: x.const_like(0).rtag(x.tag) if x._shape is not None and x.size == 0 else None),
+  # early fixup const copy (TODO: is this wrong if there's a pad?)
+  (UPat(Ops.COPY, src=(UPat.var("s"), UPat()), name="c"), lambda c,s: c.const_like(ss.arg) if (ss:=s.base).op is Ops.CONST else None),
 ])
 
 def allocate_global_buffers(big_sink:UOp) -> tuple[UOp, dict[UOp, UOp]]:

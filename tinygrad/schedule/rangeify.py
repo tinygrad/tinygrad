@@ -33,20 +33,6 @@ pm_mops = PatternMatcher([
 # *****************
 # 0. do some cleanup rewrites, mostly copied from the old stuff
 
-def assign_to_contiguous(assign:UOp, target:UOp, src:UOp):
-  if (t := target.base).op is Ops.PARAM or (t.op is Ops.MSTACK and all(s.op is Ops.PARAM for s in t.src)): return None
-  # partial view of unrealized graph: insert CONTIGUOUS at base to realize it
-  if target is not t and target.op_in_backward_slice_with_self(Ops.SHRINK):
-    if t.op is Ops.CONTIGUOUS: return None
-    mops: list[UOp] = []
-    while target.op in GroupOp.Movement:
-      mops.append(target)
-      target = target.src[0]
-    new_target = t.f(Ops.CONTIGUOUS)
-    for m in reversed(mops): new_target = m.replace(src=(new_target,)+m.src[1:])
-    return assign.replace(src=(new_target, src))
-  return src.f(Ops.CONTIGUOUS)
-
 def fix_assign_hazard(assign:UOp, target:UOp, src:UOp):
   # PERMUTE and FLIP reorder indices, SHRINK can have overlapping regions when dest is also shrunk
   unsafe = {Ops.PERMUTE, Ops.FLIP} | ({Ops.SHRINK} if target.op_in_backward_slice_with_self(Ops.SHRINK) else set())
@@ -108,9 +94,6 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
   # resolve calls
   (UPat(Ops.CALL, name="c"), resolve_call),
 
-  # remove CONTIGUOUS if the source is already contiguous
-  (UPat(Ops.RESHAPE, src=(UPat((Ops.PARAM, Ops.CONTIGUOUS)), UPat()), name="r").f(Ops.CONTIGUOUS), lambda r: r),
-
   # split_reduceop
   (UPat(Ops.REDUCE_AXIS, name="reduce", src=(UPat.var("x"),)), split_reduceop),
 
@@ -123,9 +106,6 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
       if isinstance(x.device, str) and x.device.startswith("DISK") else None),
 
   # ** copy rules **
-
-  # early fixup const copy
-  (UPat(Ops.COPY, src=(UPat.var("s"), UPat()), name="c"), lambda c,s: c.const_like(ss.arg) if (ss:=s.base).op is Ops.CONST else None),
 
   # COPY and source size need to match
   # TODO: expand after copy creates issues with tagging
@@ -141,17 +121,14 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
   (UPat(Ops.ASSIGN, src=(UPat(name="target"), UPat(Ops.ASSIGN, src=(UPat(name="target"), UPat()), name="src"))), lambda target, src: src),
 
   # move bitcast from assign target to source: a.bitcast(X).assign(src) -> a.assign(src.bitcast(a.dtype))
-  (UPat(Ops.ASSIGN, src=(UPat(Ops.BITCAST, src=(UPat(name="target"),)), UPat(name="src")), name="assign"),
-   lambda assign, target, src: target.assign(src.bitcast(target.dtype))),
+  (UPat(Ops.ASSIGN, src=(UPat(Ops.BITCAST, src=(UPat(name="target"),)), UPat(name="src"))),
+   lambda target, src: target.assign(src.bitcast(target.dtype))),
 
   # if assign target is itself an ASSIGN chain, canonicalize to the original buffer target
   (UPat(Ops.ASSIGN, src=(UPat(Ops.ASSIGN, name="target"), UPat(name="src")), allow_any_len=True, name="assign"), normalize_assign_target_chain),
 
-  # assign only to buffer, otherwise make it a CONTIGUOUS
-  (UPat(Ops.ASSIGN, src=(UPat(GroupOp.All-{Ops.PARAM}, name="target"), UPat(name="src")), name="assign"), assign_to_contiguous),
-
-   # make source contiguous if it has hazardous movement ops on the dest buffer
-   (UPat(Ops.ASSIGN, src=(UPat.var("target"), UPat.var("src")), name="assign"), fix_assign_hazard),
+  # make source contiguous if it has hazardous movement ops on the dest buffer
+  (UPat(Ops.ASSIGN, src=(UPat.var("target"), UPat.var("src")), name="assign"), fix_assign_hazard),
 ])
 
 # *****************
