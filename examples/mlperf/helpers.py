@@ -229,7 +229,7 @@ def get_mlperf_bert_model():
           print(f"replacing linear with fp8: {fqn} {mod.weight.shape}")
           return True
       return False
-    convert_to_float8_training(model, module_filter_fn)
+    convert_to_float8_training(model, module_filter_fn, hybrid=getenv("FP8_HYBRID")>0)
   return model
 
 def get_fake_data_bert(BS:int):
