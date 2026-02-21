@@ -36,7 +36,8 @@ class TestSetitemInto(unittest.TestCase):
     self.assertEqual(GlobalCounters.kernel_count, 0)
     t.realize()
     self.assertEqual(GlobalCounters.kernel_count, 1)
-    self.assertEqual(GlobalCounters.global_mem, 4)
+    # TODO: this can be just 4 if empty goes through is_realized setitem path
+    self.assertEqual(GlobalCounters.global_mem, 4*(3*2+1)) # 3 elements had +1, 1 is assigned directly
     t[1].realize()
     t.realize()
     self.assertEqual(GlobalCounters.kernel_count, 1)
