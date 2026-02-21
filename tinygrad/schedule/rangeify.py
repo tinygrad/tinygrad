@@ -86,7 +86,7 @@ def split_reduceop(reduce:UOp, x:UOp):
   return splitted.r(*reduce.arg).contiguous().r(reduce.arg[0], (len(reduce.shape),)).reshape(reduce.shape)
 
 mop_cleanup = PatternMatcher([
-  # merge adjacent RESHAPES, safe because they are not tagged
+  # merge adjacent RESHAPES
   (UPat(Ops.RESHAPE, src=(UPat(Ops.RESHAPE, name="x2"), UPat()), name="x"), lambda x,x2: x.replace(src=(x2.src[0], x.src[1]))),
 ])
 
@@ -396,7 +396,6 @@ class LocalAddBufferContext:
   map:dict = field(default_factory=dict)
   vars:dict = field(default_factory=dict)
   range:int = 0
-  parent_tags:list = field(default_factory=list)
   opts:tuple|None = None
 
 def debuf(ctx:LocalAddBufferContext, buf:UOp):
@@ -475,15 +474,6 @@ rangeify_codegen = PatternMatcher([
       idx.replace(dtype=dg.dtype, arg=None).load(dtype=dg.dtype.base.scalar().vec(dg.dtype.vcount))),
 ])
 
-def remove_metadata_tags(ctx:LocalAddBufferContext, x:UOp):
-  if x.tag is None or x.tag == (): return None
-  if isinstance(x.tag, tuple): ctx.parent_tags += list(x.tag)
-  return x.replace(tag=None)
-
-pm_remove_tags = PatternMatcher([
-  (UPat(GroupOp.All, name="x"), remove_metadata_tags),
-])
-
 pm_add_range_tags = PatternMatcher([
   (UPat(Ops.RANGE, name="x"), lambda x: x.rtag(())),
 ])
@@ -494,7 +484,7 @@ def split_store(x:UOp) -> UOp|None:
 
   # local kernel rewrite
   lctx = LocalAddBufferContext()
-  ret = graph_rewrite(x, to_define_global+pm_flatten_range+rangeify_codegen+pm_remove_tags, ctx=lctx, name="kernel split", bottom_up=True)
+  ret = graph_rewrite(x, to_define_global+pm_flatten_range+rangeify_codegen, ctx=lctx, name="kernel split", bottom_up=True)
 
   # SINK requires all buffers on the same device, but COPY/BUFFER_VIEW/ENCDEC are cross-device or special hardware ops
   if ret.op is Ops.STORE: stored = ret.src[1]
