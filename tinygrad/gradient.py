@@ -25,7 +25,7 @@ def call_gradient(ctx:UOp, k:UOp):
     if (u:=queue.pop()) in seen: continue
     seen.add(u)
     if u.op is Ops.PARAM: params.append(u)
-    queue += u.src[1:] if u.op is Ops.CALL else u.src
+    if u.op is not Ops.CALL: queue += u.src
   params = sorted(params, key=lambda x: x.arg)
   grads = compute_gradient(fxn, ctx, set(params))
   subst = dict(zip(params, args))

@@ -102,7 +102,7 @@ def resolve_call(c:UOp) -> UOp|None:
     if (u:=queue.pop()) in seen: continue
     seen.add(u)
     if u.op is Ops.PARAM: params.append(u)
-    queue += u.src[1:] if u.op is Ops.CALL else u.src
+    if u.op is not Ops.CALL: queue += u.src
   params = sorted(params, key=lambda x: x.arg)
   args = c.src[1:]
   # TODO: this check belongs in spec, not here
