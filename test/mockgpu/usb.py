@@ -1,8 +1,5 @@
-import ctypes, ctypes.util, mmap, struct
-
-libc = ctypes.CDLL(ctypes.util.find_library("c"))
-libc.mmap.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_long]
-libc.mmap.restype = ctypes.c_void_p
+import ctypes, mmap, struct, sys
+if sys.platform != "win32": from tinygrad.runtime.autogen import libc
 
 class MockUSB:
   def __init__(self, mem):
