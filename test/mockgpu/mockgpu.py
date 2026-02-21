@@ -1,4 +1,5 @@
 import ctypes, ctypes.util, time, os, builtins, fcntl
+from tinygrad.helpers import getenv
 from tinygrad.runtime.support.hcq import FileIOInterface
 from test.mockgpu.nv.nvdriver import NVDriver
 from test.mockgpu.amd.amddriver import AMDDriver
@@ -10,7 +11,7 @@ libc = ctypes.CDLL(ctypes.util.find_library("c"))
 libc.mmap.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_long]
 libc.mmap.restype = ctypes.c_void_p
 
-_amd_iface = os.environ.get("AMD_IFACE")
+_amd_iface = getenv("AMD_IFACE", "")
 drivers = [NVDriver(), AMDriver() if _amd_iface == "PCI" else (AMUSBDriver() if _amd_iface == "USB" else AMDDriver())]
 tracked_fds = {}
 

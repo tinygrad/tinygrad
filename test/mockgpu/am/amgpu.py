@@ -1,4 +1,5 @@
 # mypy: ignore-errors
+from __future__ import annotations
 import ctypes, ctypes.util, struct, functools, os, mmap
 from tinygrad.runtime.autogen.am import am
 from tinygrad.runtime.support.amd import AMDReg, import_asic_regs
@@ -37,7 +38,7 @@ def _build_ip_regs(prefix, hwip) -> dict[str, AMDReg]:
   except Exception: return {}
 
 class MockMMU:
-  def __init__(self, gpu:'MockAMGPU'):
+  def __init__(self, gpu:MockAMGPU):
     self.gpu = gpu
     self.tlb: dict[int, tuple[int, int, bool]] = {}
 
@@ -80,7 +81,7 @@ class MockMMU:
     raise ValueError(f"addr {addr:#x} not mapped (sys_aperture=[{sys_lo:#x}, {sys_hi:#x}])")
 
 class MockIPBlock:
-  def __init__(self, gpu:'MockAMGPU', mmio:'MockMMIOInterface', regs:dict[str, AMDReg]):
+  def __init__(self, gpu:MockAMGPU, mmio:MockMMIOInterface, regs:dict[str, AMDReg]):
     self.gpu, self.mmio, self._regs = gpu, mmio, regs
     self._n2a = {n: r.addr[0] for n, r in regs.items()}
     self._a2n = {a: n for n, a in self._n2a.items()}
@@ -233,7 +234,7 @@ class MockNBIO(MockIPBlock):
     return super().read(reg)
 
 class MockMMIOInterface:
-  def __init__(self, gpu:'MockAMGPU'):
+  def __init__(self, gpu:MockAMGPU):
     self.gpu = gpu
     self.regs: dict[int, int] = {}
     gfx = MockGFX(gpu, self)
