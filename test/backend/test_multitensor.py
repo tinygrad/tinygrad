@@ -704,7 +704,7 @@ class TestMultiTensor(unittest.TestCase):
 
     # test no left join
     with self.assertRaises((AssertionError, ValueError)):
-      t0.reshape((26*15,7)).schedule()
+      t0.reshape((26*15,7)).contiguous().schedule()
 
   # it doesn't work like this anymore
   # NOTE: this never failed in assign_multi, it failed tensor spec because MULTI was never pushed in the graph
@@ -897,18 +897,18 @@ class TestShrinkMultiTensorShardedAxis(unittest.TestCase):
 
     with self.assertRaises(AssertionError):
       # sharded axis shrink on non-device boundry is not allowed
-      a = t.shrink(((0, 3), (0, 8)))
+      a = t.shrink(((0, 3), (0, 8))).contiguous()
       a.schedule()
     a = t.shrink(((0, 2), (2, 4)))
     assert a.shape == (2, 2)
     ref = Tensor.arange(64).reshape(8, 8).shrink(((0, 2), (2, 4)))
     np.testing.assert_equal(a.numpy(), ref.numpy())
 
-    a = t.shrink(((0, 2), (0, 8)))
+    a = t.shrink(((0, 2), (0, 8))).contiguous()
     a.schedule()
     assert a.shape == (2, 8)
 
-    p = a.pad(((0, 6), (0, 0)))
+    p = a.pad(((0, 6), (0, 0))).contiguous()
     p.schedule()
     assert p.shape == (8, 8)
 
