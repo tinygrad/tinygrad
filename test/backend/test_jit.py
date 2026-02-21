@@ -484,7 +484,7 @@ class TestJit(unittest.TestCase):
     # scalar const input is not allowed
     with self.assertRaises(JitError):
       f(Tensor(2.0)).item()
-    self.assertEqual(f(Tensor([2.0])).item(), 1.0) # TODO: wrong output, should be 3.0
+    # self.assertEqual(f(Tensor([2.0])).item(), 1.0) # TODO: wrong output, should be 3.0. currently depends on empty value
 
   def test_jit_init_empty_alt(self):
     @TinyJit
