@@ -154,6 +154,8 @@ def amd_comgr_action_info_get_bundle_entry_id_count(action_info:amd_comgr_action
 @dll.bind
 def amd_comgr_action_info_get_bundle_entry_id(action_info:amd_comgr_action_info_t, index:size_t, size:c.POINTER[size_t], bundle_entry_id:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> amd_comgr_status_t: ...
 @dll.bind
+def amd_comgr_action_info_set_vfs(action_info:amd_comgr_action_info_t, should_use_vfs:Annotated[bool, ctypes.c_bool]) -> amd_comgr_status_t: ...
+@dll.bind
 def amd_comgr_action_info_set_device_lib_linking(action_info:amd_comgr_action_info_t, should_link_device_libs:Annotated[bool, ctypes.c_bool]) -> amd_comgr_status_t: ...
 @dll.bind
 def amd_comgr_action_info_set_working_directory_path(action_info:amd_comgr_action_info_t, path:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> amd_comgr_status_t: ...
@@ -180,6 +182,7 @@ AMD_COMGR_ACTION_COMPILE_SOURCE_WITH_DEVICE_LIBS_TO_BC = amd_comgr_action_kind_s
 AMD_COMGR_ACTION_COMPILE_SOURCE_TO_RELOCATABLE = amd_comgr_action_kind_s.define('AMD_COMGR_ACTION_COMPILE_SOURCE_TO_RELOCATABLE', 13)
 AMD_COMGR_ACTION_COMPILE_SOURCE_TO_EXECUTABLE = amd_comgr_action_kind_s.define('AMD_COMGR_ACTION_COMPILE_SOURCE_TO_EXECUTABLE', 14)
 AMD_COMGR_ACTION_UNBUNDLE = amd_comgr_action_kind_s.define('AMD_COMGR_ACTION_UNBUNDLE', 15)
+AMD_COMGR_ACTION_COMPILE_SPIRV_TO_RELOCATABLE = amd_comgr_action_kind_s.define('AMD_COMGR_ACTION_COMPILE_SPIRV_TO_RELOCATABLE', 16)
 AMD_COMGR_ACTION_TRANSLATE_SPIRV_TO_BC = amd_comgr_action_kind_s.define('AMD_COMGR_ACTION_TRANSLATE_SPIRV_TO_BC', 19)
 AMD_COMGR_ACTION_LAST = amd_comgr_action_kind_s.define('AMD_COMGR_ACTION_LAST', 19)
 

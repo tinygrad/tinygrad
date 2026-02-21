@@ -7,8 +7,8 @@ import subprocess, struct, math, functools
 from tinygrad import Tensor, dtypes, Device
 from tinygrad.helpers import getenv
 
-from extra.assembly.amd.autogen.rdna3.ins import *
-from extra.assembly.amd.asm import waitcnt
+from tinygrad.runtime.autogen.amd.rdna3.ins import *
+from tinygrad.renderer.amd.asm import waitcnt
 
 from test.testextra.test_cfg_viz import asm_kernel
 

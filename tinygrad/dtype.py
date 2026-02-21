@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import Final, ClassVar, Callable, Literal
 import math, struct, ctypes, functools
 from dataclasses import dataclass, fields
-from tinygrad.helpers import getenv, prod, round_up, next_power2, OSX
+from tinygrad.helpers import ceildiv, getenv, prod, round_up, next_power2, OSX
 from enum import Enum, auto
 
 class ConstFloat(float):
@@ -121,12 +121,24 @@ class ImageDType(PtrDType):
     if self._pitch != -1: return self._pitch
     imgw, imgh, itemsize_log = self.shape[1], self.shape[0], int(math.log2(self.itemsize))
     if OSX: return round_up(imgw, 256) * 4 * self.itemsize
-    pitchalign = max(6, 11 - int(math.log2(imgh))) if imgh > 1 else 6
+    # needs to be IMAGE_PITCH_ALIGN=256 for AMD
+    min_pitchalign = int(math.log2(v)) if (v := getenv("IMAGE_PITCH_ALIGN", 0)) > 0 else 6
+    pitchalign = max(min_pitchalign, 11 - int(math.log2(imgh))) if imgh > 1 else min_pitchalign
     align_up = max(1, (8 // itemsize_log + 1) - imgh // 32) if pitchalign == 6 else (2 ** (pitchalign - itemsize_log - 2))
 
     granularity = 128 if self.itemsize == 4 else 256
     pitch_add = (1 << pitchalign) if min(next_power2(imgw), round_up(imgw, granularity)) - align_up + 1 <= imgw and imgw > granularity//2 else 0
     return round_up(imgw * 4 * self.itemsize, 1 << pitchalign) + pitch_add
+
+  # get list of (height, width) that do not require pitch padding
+  @staticmethod
+  def valid_dims(ptr:PtrDType) -> list[tuple[int,int]]:
+    ALIGN, MAXW = getenv("IMAGE_PITCH_ALIGN", 256 if OSX else 64), 16384
+    if ptr.base not in (dtypes.half, dtypes.float) or ptr.size > 4*MAXW*MAXW or (ptr.size if OSX else ptr.nbytes()) % ALIGN != 0: return []
+    if OSX and (ptr.size // 4) % ALIGN: return [] # OSX has stricter requirements for height=1 images
+    pxls: int = ptr.size // 4
+    return ([(1, pxls)] * (pxls < MAXW) + [(pxls//ALIGN//k, ALIGN*k) for k in range(ceildiv(pxls//ALIGN, MAXW), min(pxls//ALIGN, MAXW//ALIGN)+1)
+                                           if (pxls//ALIGN)%k == 0] if pxls//ALIGN else [])
 
 class dtypes:
   @staticmethod
@@ -347,6 +359,19 @@ def fp8_to_float(x: int, dtype: DType) -> float:
   half_bytes = struct.pack('<H', ur)
   float32_val = struct.unpack('e', half_bytes)[0]
   return float(float32_val)
+
+def storage_fmt_for_dtype(dtype:DType): return 'H' if dtype == dtypes.bfloat16 else 'B' if dtype in dtypes.fp8s else dtype.fmt
+
+def to_storage_scalar(x, dtype:DType):
+  if dtype == dtypes.half: return float_to_fp16(x)
+  if dtype == dtypes.bfloat16: return (struct.unpack('I', struct.pack('f', float_to_bf16(x)))[0] >> 16) & 0xFFFF
+  if dtype in dtypes.fp8s: return float_to_fp8(float(x), dtype)
+  return x
+
+def from_storage_scalar(x, dtype:DType):
+  if dtype == dtypes.bfloat16: return struct.unpack('f', struct.pack('I', (x & 0xFFFF) << 16))[0]
+  if dtype in dtypes.fp8s: return fp8_to_float(int(x), dtype)
+  return x
 
 truncate: dict[DType, Callable] = {dtypes.bool: bool,
   dtypes.float16: float_to_fp16, dtypes.bfloat16: lambda x: float_to_bf16(float(x)),

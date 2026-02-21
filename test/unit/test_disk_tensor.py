@@ -28,7 +28,7 @@ def compare_weights_both(url):
     np.testing.assert_equal(tg_weights[k].numpy(), torch_weights[k].numpy(), err_msg=f"mismatch at {k}, {tg_weights[k].shape}")
   print(f"compared {len(tg_weights)} weights")
 
-class TestTorchLoad(unittest.TestCase):
+class TestTorchLoad(TempDirTestCase):
   # pytorch pkl format
   def test_load_enet(self): compare_weights_both("https://github.com/lukemelas/EfficientNet-PyTorch/releases/download/1.0/efficientnet-b0-355c32eb.pth")
   # pytorch zip format
@@ -41,6 +41,13 @@ class TestTorchLoad(unittest.TestCase):
 
   # pytorch tar format
   def test_load_resnet(self): compare_weights_both('https://download.pytorch.org/models/resnet50-19c8e357.pth')
+
+  # shared storage (mixtral-8x7b-32kseqlen)
+  def test_shared_storage(self):
+    import torch
+    fn = self.tmp("shared_storage.pth")
+    torch.save({"a": (a := torch.randn(100)), "b": a[5:]}, fn)
+    compare_weights_both(fn)
 
 test_fn = pathlib.Path(__file__).parents[2] / "weights/LLaMA/7B/consolidated.00.pth"
 #test_size = test_fn.stat().st_size
@@ -78,7 +85,7 @@ class TestRawDiskBuffer(unittest.TestCase):
     _test_bitcasted(t, dtypes.uint32, 0x40490FDB)
     # doesn't suport normal cast
     with self.assertRaises(NotImplementedError):
-      Tensor.empty((4,), dtype=dtypes.int16, device=f"disk:{tmp}").cast(dtypes.float16).realize()
+      Tensor.empty((4,), dtype=dtypes.int16, device=f"disk:{tmp}").cast(dtypes.float16).to(None).realize()
 
     # Those two should be moved to test_dtype.py:test_shape_change_bitcast after bitcast works on non-disk
     with self.assertRaises(RuntimeError):
@@ -257,18 +264,20 @@ class TestDiskTensor(TempDirTestCase):
   def test_strided_read(self):
     # test non-contiguous (strided) read - should read elements at indices 0, 2, 4
     dt = Tensor([0, 1, 2, 3, 4, 5]).to(f"disk:{self.tmp('dt_strided_read')}")
-    result = dt[::2].tolist()
-    # TODO: dt[::2] selects indices 0, 2, 4, so result should be [0, 2, 4]
-    # self.assertEqual(result, [0, 2, 4])
-    self.assertEqual(result, [0, 1, 2])  # wrong!
+    with self.assertRaises(RuntimeError):
+      result = dt[::2].tolist()
+      # TODO: dt[::2] selects indices 0, 2, 4, so result should be [0, 2, 4]
+      # self.assertEqual(result, [0, 2, 4])
+      self.assertEqual(result, [0, 1, 2])  # wrong!
 
   def test_permuted_read(self):
     # test non-contiguous (permuted) read - should read transposed
     dt = Tensor([[0, 1, 2], [3, 4, 5]]).to(f"disk:{self.tmp('dt_permuted_read')}")
-    result = dt.T.tolist()
-    # TODO: transpose should give [[0, 3], [1, 4], [2, 5]]
-    # self.assertEqual(result, [[0, 3], [1, 4], [2, 5]])
-    self.assertEqual(result, [[0, 1], [2, 3], [4, 5]])  # wrong!
+    with self.assertRaises(RuntimeError):
+      result = dt.T.tolist()
+      # TODO: transpose should give [[0, 3], [1, 4], [2, 5]]
+      # self.assertEqual(result, [[0, 3], [1, 4], [2, 5]])
+      self.assertEqual(result, [[0, 1], [2, 3], [4, 5]])  # wrong!
 
   def test_write_ones(self):
     out = Tensor.ones(10, 10, device="CPU").contiguous()
@@ -296,10 +305,11 @@ class TestDiskTensor(TempDirTestCase):
   def test_strided_setitem(self):
     # test non-contiguous (strided) setitem - should set elements at indices 0, 2, 4
     dt = Tensor([1, 2, 3, 4, 5, 6]).to(f"disk:{self.tmp('dt_strided_setitem')}")
-    dt[::2] = Tensor([10, 20, 30])
-    # TODO: dt[::2] selects indices 0, 2, 4, so result should be [10, 2, 20, 4, 30, 6]
-    # self.assertEqual(dt.tolist(), [10, 2, 20, 4, 30, 6])
-    self.assertEqual(dt.tolist(), [10, 20, 30, 4, 5, 6])  # wrong!
+    with self.assertRaises(RuntimeError):
+      dt[::2] = Tensor([10, 20, 30])
+      # TODO: dt[::2] selects indices 0, 2, 4, so result should be [10, 2, 20, 4, 30, 6]
+      # self.assertEqual(dt.tolist(), [10, 2, 20, 4, 30, 6])
+      self.assertEqual(dt.tolist(), [10, 20, 30, 4, 5, 6])  # wrong!
 
   def test_advanced_setitem_not_supported(self):
     dt = Tensor.arange(12).reshape(3, 4).to(f"disk:{self.tmp('dt_advanced_setitem')}")
@@ -456,6 +466,7 @@ class TestDiskTensor(TempDirTestCase):
     np.testing.assert_equal(t1.numpy(), np.arange(128, dtype=np.uint8))
     np.testing.assert_equal(t2.numpy(), np.arange(64, dtype=np.uint8))
 
+  @unittest.skip("fails with setup_python_cap run")
   def test_disk_open_failure_state(self):
     from tinygrad.runtime.ops_disk import DiskDevice
     fn = pathlib.Path(self.tmp("dt_open_failure"))
@@ -476,6 +487,7 @@ class TestDiskTensor(TempDirTestCase):
     t2.to("CPU").realize()
     assert disk_device.size == 200
 
+  @unittest.skip("fails with setup_python_cap run")
   def test_disk_permission_error(self):
     fn = pathlib.Path(self.tmp("dt_permission"))
     fn.write_bytes(bytes(range(256)))

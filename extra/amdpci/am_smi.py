@@ -154,7 +154,7 @@ class SMICtx:
     for dev in self.devs:
       match dev.ip_ver[am.MP1_HWIP]:
         case (13,0,6): table_t = dev.smu.smu_mod.MetricsTableV0_t
-        case (13,0,12): table_t = dev.smu.smu_mod.MetricsTableV2_t
+        case (13,0,12): table_t = dev.smu.smu_mod.MetricsTable_t
         case _: table_t = dev.smu.smu_mod.SmuMetricsExternal_t
       tables[dev] = dev.smu.read_table(table_t, dev.smu.smu_mod.SMU_TABLE_SMU_METRICS) if dev.pci_state == "D0" else None
     return tables
@@ -231,12 +231,11 @@ class SMICtx:
 
   def get_power(self, dev, metrics):
     match dev.ip_ver[am.MP1_HWIP]:
-      case (13,0,6)|(13,0,12): return self._smuq10_round(metrics.SocketPower), self._smuq10_round(metrics.MaxSocketPowerLimit)
+      case (13,0,6): return self._smuq10_round(metrics.SocketPower), self._smuq10_round(metrics.MaxSocketPowerLimit)
+      case (13,0,12): return self._smuq10_round(metrics.SocketPower), self._smuq10_round(metrics.SocketPowerLimit)
       case _: return metrics.SmuMetrics.AverageSocketPower, metrics.SmuMetrics.dGPU_W_MAX
 
   def get_mem_usage(self, dev):
-    return 0
-
     usage = 0
     pt_stack = [dev.mm.root_page_table]
     while len(pt_stack) > 0:
@@ -245,8 +244,8 @@ class SMICtx:
         entry = pt.entries[i]
 
         if (entry & am.AMDGPU_PTE_VALID) == 0: continue
-        if pt.lv!=am.AMDGPU_VM_PTB and not dev.gmc.is_pte_huge_page(pt.lv, entry):
-          pt_stack.append(AMPageTableEntry(dev, entry & 0x0000FFFFFFFFF000, lv=pt.lv+1))
+        if pt.lv < am.AMDGPU_VM_PDB0 and not dev.gmc.is_pte_huge_page(pt.lv, entry):
+          pt_stack.append(AMPageTableEntry(dev, dev.xgmi2paddr(entry & 0x0000FFFFFFFFF000), lv=pt.lv+1))
           continue
         if (entry & am.AMDGPU_PTE_SYSTEM) != 0: continue
         usage += (1 << ((9 * (3-pt.lv)) + 12))

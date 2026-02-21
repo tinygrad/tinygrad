@@ -7,7 +7,7 @@ from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, H
 from tinygrad.runtime.support.hcq import MMIOInterface, FileIOInterface, MOCKGPU, hcq_filter_visible_devices, hcq_profile
 from tinygrad.uop.ops import sint
 from tinygrad.device import Compiled, BufferSpec, CompilerSet
-from tinygrad.helpers import getenv, mv_address, round_up, data64, data64_le, prod, OSX, to_mv, hi32, lo32, NV_CC, NV_PTX, NV_NAK, PROFILE
+from tinygrad.helpers import getenv, mv_address, round_up, data64, data64_le, prod, OSX, to_mv, hi32, lo32, NV_CC, NV_PTX, NV_NAK, NV_NVCC, PROFILE
 from tinygrad.helpers import ContextVar, VIZ, ProfileEvent
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.cstyle import CUDARenderer
@@ -621,7 +621,8 @@ class NVDevice(HCQCompiled[NVSignal]):
 
     compilers = CompilerSet(ctrl_var=NV_CC, cset=[(functools.partial(CUDARenderer, self.arch), None),
        (functools.partial(PTXRenderer, self.arch, device="NV"), NV_PTX),
-       (functools.partial(NAKRenderer, self.arch, self.max_warps_per_sm), NV_NAK)])
+       (functools.partial(NAKRenderer, self.arch, self.max_warps_per_sm), NV_NAK),
+       (functools.partial(CUDARenderer, self.arch, use_nvcc=True), NV_NVCC)])
     super().__init__(device, NVAllocator(self), compilers, functools.partial(NVProgram, self), NVSignal, NVComputeQueue, NVCopyQueue)
 
     self.pma_enabled = PMA.value > 0 and PROFILE >= 1
@@ -753,7 +754,7 @@ class NVDevice(HCQCompiled[NVSignal]):
     self.iface.rm_control(self.profiler, nv_gpu.NVB0CC_CTRL_CMD_POWER_REQUEST_FEATURES, power_params)
 
     self.pma_buf = self.iface.alloc(getenv("PMA_BUFFER_SIZE", 512) << 20, uncached=True, cpu_cached=True, cpu_access=True)
-    self.pma_bytes = self.iface.alloc(0x1000, uncached=True, cpu_cached=True, read_only=True)
+    self.pma_bytes = self.iface.alloc(0x1000, uncached=True, cpu_cached=True, cpu_access=self.is_nvd(), read_only=True)
     self.pma_rptr = 0
 
     pma_stream = nv_gpu.struct_NVB0CC_CTRL_ALLOC_PMA_STREAM_PARAMS(hMemPmaBuffer=self.pma_buf.meta.hMemory,

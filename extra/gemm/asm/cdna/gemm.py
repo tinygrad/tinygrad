@@ -1,10 +1,10 @@
 import atexit, functools
-from tinygrad.runtime.support.compiler_amd import HIPCompiler
 from tinygrad import Tensor, Device, dtypes
+from tinygrad.dtype import AddrSpace
 from tinygrad.uop.ops import UOp, Ops, KernelInfo, AxisType
 from tinygrad.renderer import Estimates
 from tinygrad.helpers import getenv, all_same, dedup
-from extra.gemm.asm.cdna.asm import build_kernel, GEMM_ARGS
+from extra.gemm.asm.cdna.asm import build_kernel, TILE_M, TILE_N, TILE_K, NUM_WG
 
 # ** CDNA4 assembly gemm
 
@@ -17,13 +17,12 @@ def custom_asm_gemm(C:UOp, A:UOp, B:UOp, dname:str, arch:str, wg:int) -> UOp:
   assert K == K2
   lidx = UOp.special(WORKGROUP_SIZE, "lidx0")
   gidx = UOp.special(wg, "gidx0")
-  k = build_kernel(batch, M, N, K, A.dtype.base)
-  sink = UOp.sink(C.base, A.base, B.base, lidx, gidx,
-                  arg=KernelInfo(name=k.name, estimates=Estimates(ops=2*batch*M*N*K, mem=(batch*M*K + K*N + batch*M*N)*2)))
-  # TODO: you shouldn't have to call the compiler here, BINARY should be auto-added
-  binary = HIPCompiler(arch).compile(k.to_asm())
-  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg=dname), UOp(Ops.LINEAR, src=(*sink.src, sink)),
-                               UOp(Ops.SOURCE, arg=k.to_text()), UOp(Ops.BINARY, arg=binary)))
+  insts = build_kernel(batch, M, N, K, A.dtype.base)
+  lds = UOp(Ops.DEFINE_LOCAL, dtypes.uint8.ptr(size=133_120, addrspace=AddrSpace.LOCAL), (), 'lds')
+  sink = UOp.sink(C.base, A.base, B.base, lds, lidx, gidx,
+                  arg=KernelInfo(name=f"gemm_{batch}_{M}_{N}_{K}", estimates=Estimates(ops=2*batch*M*N*K, mem=(batch*M*K + K*N + batch*M*N)*2)))
+  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg=dname),
+                                UOp(Ops.LINEAR, src=tuple([UOp(Ops.INS, arg=x) for x in insts]))))
 
 counters = {"used":0, "todos":[]}
 def todo(msg:str) -> bool: counters["todos"].append(msg); return False
@@ -43,7 +42,8 @@ def can_use_asm_gemm(a:Tensor, b:Tensor) -> bool:
   else: dname = a.device
   arch = getattr(Device[dname].renderer, "arch", "")
   if batch not in {1, 2}: return todo(f"GEMM batch size {batch}")
-  if (key:=(M, N, K)) not in GEMM_ARGS and arch == "gfx950": return todo(f"GEMM shape not supported {key} on {arch}")
+  if (M % TILE_M != 0 or N % TILE_N != 0 or K % TILE_K != 0) and arch == "gfx950":
+    return todo(f"GEMM shape ({M},{N},{K}) not a multiple of ({TILE_M},{TILE_N},{TILE_K})")
   return True
 
 # ** UOp gemm to test Tensor.custom_kernel multi and backward correctness on non cdna4
@@ -91,11 +91,10 @@ def asm_gemm(a:Tensor, b:Tensor) -> Tensor:
   else:
     out = Tensor.empty(batch, M, N, dtype=a.dtype, device=a.device)
 
-  dname = a.device[0] if is_multi else a.device
-  arch = getattr(Device[dname].renderer, "arch", "")
+  renderer = Device[a.device[0] if is_multi else a.device].renderer
+  dname, arch = renderer.device, getattr(renderer, "arch", "")
   if arch.startswith("gfx950") and getenv("USE_ASM", 1):
-    numWG = GEMM_ARGS[(M, N, K)][0]
-    out = Tensor.custom_kernel(out, a, b, fxn=functools.partial(custom_asm_gemm, dname=dname, wg=numWG, arch=arch), grad_fxn=custom_gemm_bw)[0]
+    out = Tensor.custom_kernel(out, a, b, fxn=functools.partial(custom_asm_gemm, dname=dname, wg=NUM_WG, arch=arch), grad_fxn=custom_gemm_bw)[0]
   else:
     out = Tensor.custom_kernel(out, a, b, fxn=custom_uop_gemm, grad_fxn=custom_gemm_bw)[0]
   if k_sharded: out = out.sum(0)

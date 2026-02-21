@@ -4,6 +4,8 @@ from typing import Generator
 from tinygrad.helpers import temp, unwrap, DEBUG
 from tinygrad.runtime.ops_amd import ProfileSQTTEvent
 from tinygrad.runtime.autogen import rocprof
+from tinygrad.renderer.amd.dsl import Inst
+from test.amd.disasm import disasm
 
 @dataclasses.dataclass(frozen=True)
 class InstExec:
@@ -44,8 +46,8 @@ class OccEvent(WaveSlot):
 RunKey = tuple[str, int]
 
 class _ROCParseCtx:
-  def __init__(self, sqtt_evs:list[ProfileSQTTEvent], disasms:dict[str, dict[int, tuple[str, int]]]):
-    self.sqtt_evs, self.disasms = iter(sqtt_evs), disasms
+  def __init__(self, sqtt_evs:list[ProfileSQTTEvent], disasms:dict[str, dict[int, Inst]]):
+    self.sqtt_evs, self.disasms = iter(sqtt_evs), {k:{k2:(disasm(v2), v2.size()) for k2,v2 in v.items()} for k,v in disasms.items()}
     self.inst_execs:dict[RunKey, list[WaveExec]] = {}
     self.occ_events:dict[RunKey, list[OccEvent]] = {}
 
@@ -71,7 +73,7 @@ class _ROCParseCtx:
     self.inst_execs.setdefault(unwrap(self.active_run), []).append(WaveExec(ev.wave_id, ev.cu, ev.simd, unwrap(self.active_se), ev.begin_time,
                                                                              ev.end_time, insts_blob))
 
-def decode(sqtt_evs:list[ProfileSQTTEvent], disasms:dict[str, dict[int, tuple[str, int]]]) -> _ROCParseCtx:
+def decode(sqtt_evs:list[ProfileSQTTEvent], disasms:dict[str, dict[int, Inst]]) -> _ROCParseCtx:
   ROCParseCtx = _ROCParseCtx(sqtt_evs, disasms)
 
   @rocprof.rocprof_trace_decoder_se_data_callback_t

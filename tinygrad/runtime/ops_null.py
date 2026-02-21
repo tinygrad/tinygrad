@@ -24,7 +24,7 @@ class NullAllocator(Allocator['NullDevice']):
   def _copyout(self, dest:memoryview, src):
     if not NULL_ALLOW_COPYOUT: raise RuntimeError("no copyout on NULL")
   def _transfer(self, dest, src, sz:int, src_dev, dest_dev):
-    with cpu_profile(f"{src_dev.device} -> {dest_dev.device}", self.dev.device): pass
+    with cpu_profile(f"{src_dev.device} -> {dest_dev.device}", f"{self.dev.device}:COPY"): pass
   def _offset(self, buf, offset:int, size:int): pass
 
 class NullGraph(MultiGraphRunner):

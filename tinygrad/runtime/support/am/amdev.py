@@ -193,7 +193,7 @@ class AMDev(PCIDevImplBase):
     if DEBUG >= 2: print(f"am {self.devfmt}: boot done")
 
   def init_sw(self, smi_dev=False):
-    self.smi_dev, self.is_err_state = smi_dev, False
+    self.smi_dev, self.is_err_state, self.has_aql_queue = smi_dev, False, False
 
     # Memory manager & firmware
     self.mm = AMMemoryManager(self, self.vram_size - self.reserved_vram_size, boot_size=(32 << 20), pt_t=AMPageTableEntry, va_shifts=[12, 21, 30, 39],
@@ -226,7 +226,7 @@ class AMDev(PCIDevImplBase):
     self.reg("regSCRATCH_REG6").write(self.is_err_state) # set finalized state.
 
   def recover(self) -> bool:
-    if self.is_hive() or not self.is_err_state: return False # TODO: support mi300
+    if (self.has_aql_queue and self.is_hive()) or not self.is_err_state: return False # TODO: support aql queue recovery on hive
     if DEBUG >= 2: print(f"am {self.devfmt}: Start recovery")
     self.ih.interrupt_handler()
     self.gfx.reset_mec()
@@ -314,6 +314,9 @@ class AMDev(PCIDevImplBase):
     gc_info = am.struct_gc_info_v1_0.from_address(gc_addr:=ctypes.addressof(self.bhdr) + self.bhdr.table_list[am.GC].offset)
     self.gc_info = getattr(am, f"struct_gc_info_v{gc_info.header.version_major}_{gc_info.header.version_minor}").from_address(gc_addr)
     self.reserved_vram_size = (384 << 20) if self.ip_ver[am.GC_HWIP][:2] in {(9,4), (9,5)} else (64 << 20)
+
+  @functools.cached_property
+  def hwid_names(self) -> dict[int, str]: return {v:k.removesuffix('_HWID') for k,v in vars(am).items() if k.endswith('_HWID') and isinstance(v, int)}
 
   def _ip_module(self, prefix:str, hwip, prever_prefix:str=""): return import_module(prefix, self.ip_ver[hwip], prever_prefix)
 
