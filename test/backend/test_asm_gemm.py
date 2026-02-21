@@ -67,6 +67,7 @@ class TestGemmLarge(unittest.TestCase):
     if not is_cdna4():
       self.skipTest("very slow on non mi350x")
 
+  def test_tiny(self): verify_asm_gemm(1, 256, 256, 64)
   def test_simple(self): verify_asm_gemm(1, N:=getenv("N", 4096), N, N, dtype=dtypes.half)
   def test_gemm(self): verify_asm_gemm(1, 8192, 4096, 14336)
   def test_gemm_batched(self): verify_asm_gemm(2, 8192, 4096, 4096)

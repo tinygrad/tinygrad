@@ -1,10 +1,10 @@
-import time
+import time, sys
 from typing import cast
 from collections import deque
 from tinygrad.uop.ops import UOp, Ops, buffers, UOpMetaClass, track_rewrites, PatternMatcher, UPat, graph_rewrite, gate_kernel_sink
 from tinygrad.uop.spec import type_verify, tensor_spec
 from tinygrad.device import Buffer, MultiBuffer
-from tinygrad.helpers import DEBUG, cpu_profile, TracingKey, SPEC, flatten, pluralize, SCACHE
+from tinygrad.helpers import DEBUG, cpu_profile, TracingKey, SPEC, pluralize, SCACHE, BASEDIR
 from tinygrad.engine.realize import ExecItem
 from tinygrad.engine.allocations import allocate_global_buffers
 
@@ -73,13 +73,6 @@ def replace_input_buffer(ctx:tuple[dict[UOp, UOp], dict[str, int], list[int], li
     ctx[2][0] += 1
   return ret
 
-def replace_input_const(ctx:tuple[dict[UOp, UOp], dict[str, int], list[int], list[int]], b:UOp):
-  if (ret:=ctx[0].get(b, None)) is None:
-    # replace UNIQUE with LUNIQUE for CONST cache key normalization
-    ctx[0][b] = ret = b.replace(src=(UOp(Ops.LUNIQUE, arg=ctx[3][0]), b.src[1]))
-    ctx[3][0] += 1
-  return ret
-
 def strip_bind(ctx:tuple[dict[UOp, UOp], dict[str, int], list[int], list[int]], b:UOp):
   var, val = b.src[0], b.src[1].arg
   assert var.expr not in ctx[1] or ctx[1][var.expr] == val, f"bind mismatch on {var}, {ctx[1][var.expr]} != {val}"
@@ -89,8 +82,6 @@ def strip_bind(ctx:tuple[dict[UOp, UOp], dict[str, int], list[int], list[int]], 
 pm_pre_sched_cache = PatternMatcher([
   # replace BUFFER with PARAM for cache key normalization
   (UPat(Ops.BUFFER, src=(UPat(Ops.UNIQUE), UPat(Ops.DEVICE)), name="b"), replace_input_buffer),
-  # replace UNIQUE with LUNIQUE for CONST cache key normalization
-  (UPat(Ops.CONST, src=(UPat(Ops.UNIQUE), UPat(Ops.DEVICE)), name="b"), replace_input_const),
   # strip value from BIND for cache key normalization, so different values hit same cache
   (UPat(Ops.BIND, src=(UPat(Ops.DEFINE_VAR), UPat(Ops.CONST)), name="b"), strip_bind),
 ])
@@ -102,8 +93,6 @@ def create_new_buffer(ctx:dict[UOp, UOp], b:UOp):
 pm_post_sched_cache = PatternMatcher([
   # create new BUFFERs for LUNIQUE BUFFERs from rangeify
   (UPat(Ops.BUFFER, src=(UPat(Ops.LUNIQUE), UPat(Ops.DEVICE)), name="b"), create_new_buffer),
-  # restore CONST back to original CONST
-  (UPat(Ops.CONST, src=(UPat(Ops.LUNIQUE), UPat(Ops.DEVICE)), name="b"), lambda ctx,b: ctx.get(b)),
   # restore PARAM back to original BUFFER
   (UPat(Ops.PARAM, src=(UPat(), UPat(Ops.DEVICE)), name="b"), lambda ctx,b: ctx.get(b)),
   # restore BIND value stripped in pm_pre_sched_cache
@@ -127,18 +116,13 @@ def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[dict[UOp, UOp], li
   if not SCACHE or (sc_ret:=schedule_cache.get(sched_cache_key, None)) is None:
     # verify Tensors match the spec (on big_sink, we only need to do this if cache misses)
     if SPEC: type_verify(big_sink, tensor_spec)
-
-    if any(isinstance(x._device, tuple) for x in big_sink_cache.toposort()):
-      big_sink_cache = graph_rewrite(big_sink_cache, multi_pm, name="multi_pm")
-      big_sink_cache = UOp.sink(*flatten([x.src if x.op is Ops.MULTI else [x] for x in big_sink_cache.src]))
-
-    big_sink = get_rangeify(big_sink_cache)
-    pre_schedule, buf_uops_sink = create_schedule(big_sink)
+    big_sink_cache = graph_rewrite(big_sink_cache, multi_pm, name="multi_pm", rewrite_into_calls=True)
+    pre_schedule, buf_uops_sink = create_schedule(get_rangeify(big_sink_cache))
     if SCACHE: schedule_cache[sched_cache_key] = (pre_schedule, buf_uops_sink)
   else:
     # schedule cache hit
     pre_schedule, buf_uops_sink = sc_ret
-  del big_sink_cache
+  del big_sink, big_sink_cache
 
   # replace all the PARAMs/LUNIQUEs back (single graph_rewrite for everything)
   input_buffers_inverse = {v:k for k,v in input_buffers.items()}
@@ -165,9 +149,11 @@ def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[dict[UOp, UOp], li
   with cpu_profile(TracingKey("memory planner")): schedule = memory_planner(schedule)
 
   if (DEBUG >= 1 and len(schedule) > 1) or DEBUG >= 3:
-    print(f"scheduled {len(schedule):4d} kernels in {(time.perf_counter()-st)*1000:8.2f} ms"+\
+    i = 6
+    while (frm:=sys._getframe(i)) and frm.f_code.co_filename.startswith(str(BASEDIR)): i += 1
+    print(f"scheduled {len(schedule):5d} kernels in {(time.perf_counter()-st)*1000:8.2f} ms"+\
           f" | {' cache hit' if SCACHE and sc_ret is not None else 'CACHE MISS'} {sched_cache_key.hex()[:8]}"+\
-          f" | {len(UOpMetaClass.ucache)} uops in cache")
+          f" | {len(UOpMetaClass.ucache):7d} uops in cache | {frm.f_code.co_filename}:{frm.f_lineno}")
 
   used_vars = set().union(*[{v.expr for v in si.ast.variables()} for si in schedule])
   return buffer_map, schedule, {k:v for k,v in var_vals.items() if k in used_vars}
