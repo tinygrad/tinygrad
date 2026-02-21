@@ -744,7 +744,7 @@ window.addEventListener("popstate", (e) => {
 });
 
 const createToggle = (id, text) => {
-  const label = d3.create("label").style("display", "block").text(text).node();
+  const label = d3.create("label").text(text).node();
   const toggle = d3.create("input").attr("type", "checkbox").attr("id", id).property("checked", true).node();
   label.prepend(toggle);
   return { toggle, label };
@@ -793,7 +793,7 @@ async function main() {
       }
       appendSteps(ul, i, steps);
     }
-    return setState({currentCtx: 2, currentStep: 25, currentRewrite: 0, expandSteps: true});
+    return setState({ currentCtx:-1 });
   }
   // ** center graph
   const { currentCtx, currentStep, currentRewrite, expandSteps } = state;

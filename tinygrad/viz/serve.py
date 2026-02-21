@@ -473,7 +473,7 @@ def get_stdout(f: Callable) -> str:
   except Exception: traceback.print_exc(file=buf)
   return buf.getvalue()
 
-def get_elf_section(lib:bytes, name:str) -> bytes:
+def get_elf_section(lib:bytes, name:str):
   from tinygrad.runtime.support.elf import elf_loader
   return next((sh for sh in elf_loader(lib)[1] if sh.name == name))
 
