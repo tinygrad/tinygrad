@@ -69,7 +69,7 @@ class Reg:
       idx = o - TTMP_BASE
       base = f"ttmp{l}{idx}{r}" if sz == 1 else f"ttmp[{idx}:{idx + sz - 1}]"
     elif INLINE_INT_START <= o <= INLINE_INT_START + INLINE_INT_COUNT - 1: base = str(o - INLINE_INT_START)
-    elif INLINE_NEG_START <= o <= INLINE_NEG_START + INLINE_NEG_COUNT: base = str(-(o - (INLINE_NEG_START - 1)))
+    elif INLINE_NEG_START + 1 <= o <= INLINE_NEG_START + INLINE_NEG_COUNT: base = str(-(o - INLINE_NEG_START))
     else: raise RuntimeError(f"unknown register: offset={o}, sz={sz}")
     if self.hi: base += ".h"
     if self.abs_: base = f"abs({base})" if upper else f"|{base}|"
