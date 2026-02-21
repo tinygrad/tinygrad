@@ -185,7 +185,7 @@ class dtypes:
     """(exponent, mantissa)"""
     if not dtypes.is_float(dtype): raise ValueError(f"{dtype} is not a floating point type")
     return {dtypes.float16: (5, 10), dtypes.bfloat16: (8, 7), dtypes.float32: (8, 23), dtypes.float64: (11, 52),
-            dtypes.fp8e5m2: (5, 2), dtypes.fp8e4m3: (4, 3)}[dtype]
+            dtypes.fp8e4m3: (4, 3), dtypes.fp8e5m2: (5, 2), dtypes.fp8e4m3fnuz: (4, 3), dtypes.fp8e5m2fnuz: (5, 2)}[dtype]
   void: Final[DType] = DType.new(-1, 0, "void", None)
   index: Final[DType] = DType.new(-1, 800, "index", None)
   bool: Final[DType] = DType.new(0, 1, "bool", '?')
@@ -201,6 +201,8 @@ class dtypes:
   _uint256: Final[DType] = DType.new(8, 256, "uint256", None)
   fp8e4m3: Final[DType] = DType.new(9, 8, "float8_e4m3", None)
   fp8e5m2: Final[DType] = DType.new(10, 8, "float8_e5m2", None)
+  fp8e4m3fnuz: Final[DType] = DType.new(9, 8, "float8_e4m3fnuz", None)
+  fp8e5m2fnuz: Final[DType] = DType.new(10, 8, "float8_e5m2fnuz", None)
   float16: Final[DType] = DType.new(11, 16, "half", 'e')
   # bfloat16 has higher priority than float16, so least_upper_dtype(dtypes.int64, dtypes.uint64) = dtypes.float16
   bfloat16: Final[DType] = DType.new(12, 16, "__bf16", None)
@@ -221,7 +223,9 @@ class dtypes:
   default_float: ClassVar[DType] = float32
   default_int: ClassVar[DType] = int32
 
-  fp8s = (fp8e4m3, fp8e5m2)
+  fp8_ocp = (fp8e4m3, fp8e5m2)
+  fp8_fnuz = (fp8e4m3fnuz, fp8e5m2fnuz)
+  fp8s = fp8_ocp + fp8_fnuz
   floats = fp8s + (float16, bfloat16, float32, float64)
   int8s = (uint8, int8)
   int16s = (uint16, int16)
@@ -243,8 +247,9 @@ def to_dtype(dtype:DTypeLike) -> DType: return dtype if isinstance(dtype, DType)
 # we don't support weak type and complex type
 promo_lattice = { dtypes.bool: [dtypes.int8, dtypes.uint8], dtypes.int8: [dtypes.int16], dtypes.int16: [dtypes.int32], dtypes.int32: [dtypes.int64],
   dtypes.int64: [dtypes.uint64], dtypes.uint8: [dtypes.int16, dtypes.uint16], dtypes.uint16: [dtypes.int32, dtypes.uint32],
-  dtypes.uint32: [dtypes.int64, dtypes.uint64], dtypes.uint64: [dtypes.fp8e4m3, dtypes.fp8e5m2],
-  dtypes.fp8e5m2: [dtypes.float16, dtypes.bfloat16], dtypes.fp8e4m3: [dtypes.float16, dtypes.bfloat16],
+  dtypes.uint32: [dtypes.int64, dtypes.uint64], dtypes.uint64: [dtypes.fp8e4m3, dtypes.fp8e5m2, dtypes.fp8e4m3fnuz, dtypes.fp8e5m2fnuz],
+  dtypes.fp8e4m3: [dtypes.float16, dtypes.bfloat16], dtypes.fp8e5m2: [dtypes.float16, dtypes.bfloat16],
+  dtypes.fp8e4m3fnuz: [dtypes.float16, dtypes.bfloat16], dtypes.fp8e5m2fnuz: [dtypes.float16, dtypes.bfloat16],
   dtypes.float16: [dtypes.float32], dtypes.bfloat16: [dtypes.float32], dtypes.float32: [dtypes.float64], }
 
 @functools.cache
@@ -295,70 +300,52 @@ def float_to_bf16(x):
   return struct.unpack('f', struct.pack('I', u))[0]
 
 # fp8-float conversions based on https://gitlab.com/nvidia/headers/cuda-individual/cudart/-/blob/main/cuda_fp8.hpp
+# (bias, sig_bits, mant_mask, min_denorm_half, ovf_threshold, max_norm, min_norm)
+_fp8_cfg = {
+  dtypes.fp8e4m3: (7, 4, 0x7, 0x3F50000000000000, 0x407D000000000000, 0x7E, 0x3F90000000000000),
+  dtypes.fp8e5m2: (15, 3, 0x3, 0x3EE0000000000000, 0x40EE000000000000-1, 0x7B, 0x3F10000000000000),
+  dtypes.fp8e4m3fnuz: (8, 4, 0x7, 0x3F40000000000000, 0x406F000000000000-1, 0x7F, 0x3F80000000000000),
+  dtypes.fp8e5m2fnuz: (16, 3, 0x3, 0x3ED0000000000000, 0x40EE000000000000-1, 0x7F, 0x3F00000000000000),
+}
+
 def float_to_fp8(x: float, dtype: DType) -> int:
   assert dtype in dtypes.fp8s, "Only for fp8s"
+  if dtype in dtypes.fp8_fnuz and not math.isfinite(x): return 0x80
+  if dtype in dtypes.fp8_fnuz and x == 0.0: return 0x00
   # e4m3 don't support inf, return 0x7f(+NaN) and 0xff(-NaN) to match jax
   # NaN is unordered, can't compare with zero, use math.copysign to get sign
   if dtype == dtypes.fp8e4m3 and not math.isfinite(x): return 0x7f if math.copysign(1, x) > 0 else 0xff
-  if dtype == dtypes.fp8e5m2 and math.isinf(x): return 0x7c if math.copysign(1, x) > 0 else 0xfc
-  config = {
-      dtypes.fp8e4m3: {"EXP_BIAS": 7, "SIGNIFICAND_BITS": 4, "MANTISSA_MASK": 0x7, "MINDENORM_O2": 0x3F50000000000000,
-              "OVERFLOW_THRESHOLD": 0x407D000000000000, "MAXNORM": 0x7E, "MINNORM": 0x3F90000000000000, "INF_VALUE": 0x7F},
-      dtypes.fp8e5m2: {"EXP_BIAS": 15, "SIGNIFICAND_BITS": 3, "MANTISSA_MASK": 0x3, "MINDENORM_O2": 0x3EE0000000000000,
-              "OVERFLOW_THRESHOLD": 0x40EE000000000000 - 1, "MAXNORM": 0x7B, "MINNORM": 0x3F10000000000000, "INF_VALUE": 0x7E}
-  }[dtype]
+  if dtype == dtypes.fp8e5m2 and not math.isfinite(x): return (0 if math.copysign(1, x) > 0 else 0x80) | (0x7c if math.isinf(x) else 0x7f)
+  bias, sig_bits, mant_mask, min_denorm_half, ovf_threshold, max_norm, min_norm = _fp8_cfg[dtype]
   xbits, = struct.unpack('Q', struct.pack('d', x))
-  FP8_DP_HALF_ULP = 1 << (53 - config["SIGNIFICAND_BITS"] - 1)
-  sign = ((xbits >> 63) & 1) << 7
-  exp = (((xbits >> 52) & 0x7FF) - 1023 + config["EXP_BIAS"])
-  mantissa = (xbits >> (53 - config["SIGNIFICAND_BITS"])) & config["MANTISSA_MASK"]
-  absx = xbits & 0x7FFFFFFFFFFFFFFF
-
-  if absx <= config["MINDENORM_O2"]: res = 0
-  elif absx > 0x7FF0000000000000: res = 0x7F if dtype == dtypes.fp8e4m3 else 0x7E | mantissa
-  elif absx > config["OVERFLOW_THRESHOLD"]: res = config["MAXNORM"]
-  elif absx >= config["MINNORM"]:
-    res = ((exp << (config["SIGNIFICAND_BITS"] - 1)) | mantissa)
-    round_bits = xbits & ((FP8_DP_HALF_ULP << 1) - 1)
-    if (round_bits > FP8_DP_HALF_ULP) or (round_bits == FP8_DP_HALF_ULP and (mantissa & 1)): res = res + 1
+  half_ulp = 1 << (52 - sig_bits)
+  sign, exp, mantissa, absx = ((xbits>>63)&1)<<7, ((xbits>>52)&0x7FF)-1023+bias, (xbits>>(53-sig_bits))&mant_mask, xbits&0x7FFFFFFFFFFFFFFF
+  if absx <= min_denorm_half: res = 0
+  elif absx > ovf_threshold: res = max_norm
+  elif absx >= min_norm:
+    res, round_bits = (exp << (sig_bits - 1)) | mantissa, xbits & ((half_ulp << 1) - 1)
+    if round_bits > half_ulp or (round_bits == half_ulp and mantissa & 1): res += 1
   else:
     shift = 1 - exp
-    mantissa |= 1 << (config["SIGNIFICAND_BITS"] - 1)
-    res = (mantissa >> shift)
-    round_bits = (xbits | (1 << (53 - 1))) & ((FP8_DP_HALF_ULP << (shift + 1)) - 1)
-    if (round_bits > (FP8_DP_HALF_ULP << shift)) or (round_bits == (FP8_DP_HALF_ULP << shift) and (res & 1)):
-      res = res + 1
-
-  res |= sign
-  return int(res)
+    mantissa |= 1 << (sig_bits - 1)
+    res, half = mantissa >> shift, half_ulp << shift
+    round_bits = (xbits | (1 << 52)) & ((half << 1) - 1)
+    if round_bits > half or (round_bits == half and res & 1): res += 1
+  return int(res | sign if (res or dtype not in dtypes.fp8_fnuz) else 0)
 
 def fp8_to_float(x: int, dtype: DType) -> float:
   assert dtype in dtypes.fp8s, "Only for fp8s"
-  ur = x << 8
-
-  if dtype == dtypes.fp8e5m2 and (ur & 0x7FFF) > 0x7C00: ur = 0x7FFF
-  elif dtype == dtypes.fp8e4m3:
-    sign = ur & 0x8000
-    exponent = ((ur & 0x7800) >> 1) + 0x2000
-    mantissa = (ur & 0x0700) >> 1
-    absx = x & 0x7F
-    if absx == 0x7F: ur = 0x7FFF
-    elif exponent == 0x2000:
-      if mantissa != 0:
-        mantissa <<= 1
-        while (mantissa & 0x0400) == 0:
-          mantissa <<= 1
-          exponent -= 0x0400
-        mantissa &= 0x03FF
-      else:
-        exponent = 0
-      ur = (sign | exponent) | mantissa
-    else:
-      ur = (sign | exponent) | mantissa
-
-  half_bytes = struct.pack('<H', ur)
-  float32_val = struct.unpack('e', half_bytes)[0]
-  return float(float32_val)
+  if dtype in dtypes.fp8_fnuz and x == 0x80: return math.nan
+  if (x & 0x7F) == 0: return -0.0 if x & 0x80 else 0.0
+  bias, sig_bits, *_ = _fp8_cfg[dtype]
+  mant_bits, exp_bits = sig_bits - 1, 8 - sig_bits
+  exp_max, mant_max = (1 << exp_bits) - 1, (1 << mant_bits) - 1
+  sign, exp, mantissa = (x >> 7) & 1, (x >> mant_bits) & exp_max, x & mant_max
+  if dtype not in dtypes.fp8_fnuz and exp == exp_max:
+    if dtype == dtypes.fp8e5m2: return math.copysign(math.nan if mantissa else math.inf, -1 if sign else 1)
+    if mantissa == mant_max: return math.nan
+  val = (mantissa / (mant_max + 1)) * 2 ** (1 - bias) if exp == 0 else (1 + mantissa / (mant_max + 1)) * 2 ** (exp - bias)
+  return -val if sign else val
 
 def storage_fmt_for_dtype(dtype:DType): return 'H' if dtype == dtypes.bfloat16 else 'B' if dtype in dtypes.fp8s else dtype.fmt
 

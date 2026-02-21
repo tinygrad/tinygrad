@@ -351,11 +351,12 @@ def is_dtype_supported(dtype:DType, device:str|None=None) -> bool:
     if device == "NV": return not CI and not NV_PTX and not NV_NAK
     if device in {"CPU"}: return not CI and platform.machine() in {"arm", "arm64", "aarch64", "x86_64", "amd64"} and not CPU_LVP
     return device in {"AMD", "CL", "PYTHON", "NULL"}
-  if dtype in dtypes.fp8s:
+  if dtype in dtypes.fp8_ocp:
     if device == "CUDA": return not CI and not CUDA_PTX
     if device == "NV": return not CI and not NV_PTX and not NV_NAK
-    if device == "AMD": return not CI and getattr(Device["AMD"], "target") in {(9,4,2), (9,5,0)}
+    if device == "AMD": return not CI and getattr(Device["AMD"], "target") == (9,5,0)
     return device in {"PYTHON", "NULL"}
+  if dtype in dtypes.fp8_fnuz: return device in {"PYTHON", "NULL"}
   if device == "WEBGPU": return dtype in [dtypes.bool, dtypes.char, dtypes.uchar, dtypes.short,
                                           dtypes.ushort, dtypes.float, dtypes.int32, dtypes.uint32, dtypes.half]
   # for CI GPU and OSX, cl_khr_fp16 isn't supported
