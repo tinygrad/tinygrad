@@ -402,7 +402,7 @@ p2p_links_count 5
 cpu_core_id_base 0
 simd_id_base 2147488032
 max_waves_per_simd 16
-lds_size_in_kb 128
+lds_size_in_kb 160
 gds_size_in_kb 0
 num_gws 64
 wave_front_size 64
