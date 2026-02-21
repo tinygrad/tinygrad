@@ -88,7 +88,7 @@ def isa_linearize(sink:UOp) -> list[UOp]:
       # loop boundries do clobber but we also don't want to insert stuff from outside the loop into the loop
       # if there's no loop we also don't want to add IMM and DEFINE_REG in the middle of the kernel
       elif u.arg in X86GroupOp.ReadFlags and lock is not u.src[-1] or u.arg in X86GroupOp.WriteFlags or \
-        u.arg in {Ops.RANGE, Ops.END, X86Ops.IMM, X86Ops.DEFINE_REG} or priorities[u][0] < stupid:
+        u.op in {Ops.RANGE, Ops.END} or u.arg in {X86Ops.IMM, X86Ops.DEFINE_REG} or priorities[u][0] < stupid:
         clobbers.add(u)
         continue
     # if there's no lock and this is a flag user its flag producer becomes the lock
