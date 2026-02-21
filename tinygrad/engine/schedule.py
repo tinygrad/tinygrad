@@ -1,10 +1,10 @@
-import time
+import time, sys
 from typing import cast
 from collections import deque
 from tinygrad.uop.ops import UOp, Ops, buffers, UOpMetaClass, track_rewrites, PatternMatcher, UPat, graph_rewrite, gate_kernel_sink
 from tinygrad.uop.spec import type_verify, tensor_spec
 from tinygrad.device import Buffer, MultiBuffer
-from tinygrad.helpers import DEBUG, cpu_profile, TracingKey, SPEC, pluralize, SCACHE
+from tinygrad.helpers import DEBUG, cpu_profile, TracingKey, SPEC, pluralize, SCACHE, BASEDIR
 from tinygrad.engine.realize import ExecItem
 from tinygrad.engine.allocations import allocate_global_buffers
 
@@ -152,9 +152,11 @@ def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[dict[UOp, UOp], li
   with cpu_profile(TracingKey("memory planner")): schedule = memory_planner(schedule)
 
   if (DEBUG >= 1 and len(schedule) > 1) or DEBUG >= 3:
-    print(f"scheduled {len(schedule):4d} kernels in {(time.perf_counter()-st)*1000:8.2f} ms"+\
+    i = 6
+    while (frm:=sys._getframe(i)) and frm.f_code.co_filename.startswith(str(BASEDIR)): i += 1
+    print(f"scheduled {len(schedule):5d} kernels in {(time.perf_counter()-st)*1000:8.2f} ms"+\
           f" | {' cache hit' if SCACHE and sc_ret is not None else 'CACHE MISS'} {sched_cache_key.hex()[:8]}"+\
-          f" | {len(UOpMetaClass.ucache)} uops in cache")
+          f" | {len(UOpMetaClass.ucache):7d} uops in cache | {frm.f_code.co_filename}:{frm.f_lineno}")
 
   used_vars = set().union(*[{v.expr for v in si.ast.variables()} for si in schedule])
   return buffer_map, schedule, {k:v for k,v in var_vals.items() if k in used_vars}
