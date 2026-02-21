@@ -3,6 +3,8 @@ from tinygrad.renderer.amd.dsl import *
 from tinygrad.renderer.amd.dsl import VDSTYField
 from tinygrad.runtime.autogen.amd.rdna3.enum import VOP1Op, VOP2Op
 from tinygrad.runtime.autogen.amd.rdna3.ins import VOP1
+from tinygrad.runtime.autogen.amd.cdna.enum import DSOp
+from tinygrad.runtime.autogen.amd.cdna.ins import DS
 
 class TestRegisters(unittest.TestCase):
   def test_vgpr_single(self):
@@ -165,6 +167,23 @@ class TestVDSTYField(unittest.TestCase):
     # decode returns raw value, actual vdsty computed with vdstx context
     self.assertEqual(f.decode(0), 0)
     self.assertEqual(f.decode(127), 127)
+
+class TestCDNA(unittest.TestCase):
+  def test_accvgpr_offset(self):
+    # acc is CDNA-only, encodes in 512-767 range in the DSL
+    self.assertEqual(acc[0].offset, 512)
+    self.assertEqual(acc[4].offset, 516)
+    self.assertEqual(acc[0:3].sz, 4)
+
+  def test_accvgpr_repr(self):
+    self.assertEqual(repr(acc[0]), "acc[0]")
+    self.assertEqual(repr(acc[0:3]), "acc[0:3]")
+
+  def test_is_cdna_by_module(self):
+    i = DS(DSOp.DS_READ_B32, v[0], v[1])
+    self.assertTrue(i._is_cdna())
+    i2 = VOP1(VOP1Op.V_MOV_B32_E32, v[5], v[6])
+    self.assertFalse(i2._is_cdna())
 
 if __name__ == "__main__":
   unittest.main()
