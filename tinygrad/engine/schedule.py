@@ -79,7 +79,10 @@ def strip_bind(ctx:tuple[dict[UOp, UOp], dict[str, int], list[int], list[int]], 
   ctx[1][var.expr] = val
   return ctx[0].setdefault(b, b.replace(src=(b.src[0],)))
 
+from tinygrad.schedule.rangeify import resolve_call
 pm_pre_sched_cache = PatternMatcher([
+  # resolve calls
+  (UPat(Ops.CALL, name="c"), resolve_call),
   # replace BUFFER with PARAM for cache key normalization
   (UPat(Ops.BUFFER, src=(UPat(Ops.UNIQUE), UPat(Ops.DEVICE)), name="b"), replace_input_buffer),
   # strip value from BIND for cache key normalization, so different values hit same cache
