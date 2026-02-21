@@ -266,7 +266,7 @@ class TestCustomKernel(unittest.TestCase):
     The custom_addmul kernel should be at index 3.
     """
     from tinygrad.engine.schedule import create_schedule
-    from tinygrad.schedule.rangeify import get_rangeify_map
+    from tinygrad.schedule.rangeify import get_rangeify
 
     A, B = Tensor.empty(4, 4), Tensor.empty(4, 4)
     A2 = (A + 1).contiguous()                      # kernel 0: depends on A
@@ -277,8 +277,7 @@ class TestCustomKernel(unittest.TestCase):
     result = (C + D + E).sum()                     # kernel 3: custom_addmul, then kernel 4: sum
 
     big_sink = result.uop.sink()
-    tensor_map = get_rangeify_map(big_sink)
-    sched_sink = big_sink.substitute(tensor_map)
+    sched_sink = get_rangeify(big_sink)
     schedule, _ = create_schedule(sched_sink)
 
     # Find the custom_addmul kernel position

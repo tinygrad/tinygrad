@@ -283,10 +283,10 @@ class CompilerSet: cset:list[tuple[type[Renderer]|functools.partial, ContextVar|
 class Compiled:
   profile_events:list[ProfileEvent] = [ProfileDeviceEvent("CPU")] # NOTE: CPU is the default device.
 
-  def __init__(self, device:str, allocator:Allocator, compilers:CompilerSet|None, runtime, graph=None, group_id=None):
+  def __init__(self, device:str, allocator:Allocator, compilers:CompilerSet|None, runtime, graph=None):
     from tinygrad.renderer import Renderer
 
-    self.device, self.allocator, self.runtime, self.graph, self.group_id = device, allocator, runtime, graph, group_id
+    self.device, self.allocator, self.runtime, self.graph = device, allocator, runtime, graph
 
     self.comps_ctrl_var = compilers.ctrl_var if compilers is not None else None
     self.comp_sets:dict[str, tuple[ContextVar|None, type[Renderer]|functools.partial]] = {}

@@ -13,6 +13,7 @@ def prod(x:Iterable[T]) -> T|int: return functools.reduce(operator.mul, x, 1)
 OSX, WIN = platform.system() == "Darwin", sys.platform == "win32"
 CI = os.getenv("CI", "") != ""
 ARCH_X86 = any(x in platform.processor() for x in ("Intel", "i386", "x86_64"))
+BASEDIR = pathlib.Path(__file__).parent
 
 # fix colors on Windows, https://stackoverflow.com/questions/12492810/python-how-can-i-make-the-ansi-escape-codes-to-work-also-in-windows
 if WIN: os.system("")

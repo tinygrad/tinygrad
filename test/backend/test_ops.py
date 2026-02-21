@@ -8,7 +8,8 @@ from tinygrad.tensor import _to_np_dtype
 from tinygrad.device import is_dtype_supported
 from tinygrad.renderer.nir import NIRRenderer
 
-if getenv("TINY_BACKEND"):
+TINY_BACKEND = getenv("TINY_BACKEND")
+if TINY_BACKEND:
   import tinygrad.nn.torch # noqa: F401 # pylint: disable=unused-import
   torch.set_default_device("tiny")
 
@@ -760,6 +761,7 @@ class TestOps(unittest.TestCase):
     data = [[1,-8,1],[32,1,6]]
     tor = torch.tensor(data, dtype=torch.int)
     ten = Tensor(data, dtype=dtypes.int32)
+    # NOTE: this breaks assigns because it's folded to 0!
     helper_test_op([], lambda: tor^tor, lambda: ten^ten, forward_only=True)
     helper_test_op([], lambda: tor^0x1337, lambda: ten^0x1337, forward_only=True)
     helper_test_op([], lambda: 0x1337^tor, lambda: 0x1337^ten, forward_only=True)

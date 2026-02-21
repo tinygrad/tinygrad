@@ -3,7 +3,7 @@ import functools, itertools
 from dataclasses import dataclass, field
 from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, graph_rewrite, sint, AxisType, profile_matches
-from tinygrad.uop.ops import consumer_map_from_toposort, gate_kernel_sink, pm_gate_kernel_sink
+from tinygrad.uop.ops import consumer_map_from_toposort, gate_kernel_sink
 from tinygrad.uop.symbolic import symbolic, pm_simplify_valid, pm_drop_and_clauses
 from tinygrad.helpers import argsort, all_same, cpu_profile, PCONTIG, colored
 
@@ -17,15 +17,19 @@ def realize_srcs(ctx:dict[UOp, None], rb:UOp) -> None:
   for s in rb.src:
     if s.base.op not in ALWAYS_CONTIGUOUS: ctx[s] = None
 
-pm_generate_realize_map = pm_gate_kernel_sink+PatternMatcher([
+def realize_assign_src(ctx:dict[UOp, None], buf:UOp, x:UOp):
+  # you don't usually have to do this for assign unless there's a WAR hazard like TestAssign.test_assign_double_diamond_reduce
+  if buf.base in x.backward_slice_with_self: ctx[x] = None
+
+pm_generate_realize_map = PatternMatcher([
   # always realize SINK src
   (UPat(Ops.SINK, name="s"), lambda ctx,s: ctx.update((x.base, None) for x in s.src if x.base.op not in ALWAYS_CONTIGUOUS)),
   # always realize
   (UPat({Ops.COPY, Ops.BUFFER_VIEW, Ops.CONTIGUOUS, Ops.STORE, Ops.ASSIGN, Ops.ENCDEC}, name="tr"), realize),
-  # always realize REDUCE on outer ranges
-  (UPat(Ops.REDUCE, name="r"), lambda ctx,r: realize(ctx, r) if any(tr.arg[-1] == AxisType.OUTER for tr in r.src[1:]) else None),
   # realize srcs of these
-  (UPat((Ops.COPY, Ops.MSELECT, Ops.MSTACK, Ops.ASSIGN, Ops.ENCDEC), name="rb"), realize_srcs),
+  (UPat((Ops.COPY, Ops.MSELECT, Ops.MSTACK, Ops.ENCDEC), name="rb"), realize_srcs),
+  # sometimes realize src of assign
+  (UPat(Ops.ASSIGN, src=(UPat.var("buf"), UPat.var("x"))), realize_assign_src),
 ])
 
 @dataclass(frozen=True)
@@ -68,7 +72,7 @@ def create_bufferize_and_index_based_on_ranges(ctx:IndexingContext, x:UOp):
         # None in the device assigns it a number later
         opts = BufferizeOpts(device=s.device, removable=removable) if len(ctx.range_map[s][1]) == len(realized_ranges) else \
                BufferizeOpts(device=s.device, addrspace=AddrSpace.LOCAL, removable=removable)
-        new_src = UOp(Ops.BUFFERIZE, s.dtype, src=(new_src,)+closed_ranges, arg=opts, tag=s.tag if opts.addrspace == AddrSpace.GLOBAL else None)
+        new_src = UOp(Ops.BUFFERIZE, s.dtype, src=(new_src,)+closed_ranges, arg=opts)
         if x in ctx.range_map: new_src = new_src.index(*[r for i,r in enumerate(ctx.range_map[x][0]) if i in realized_ranges])
     new_srcs.append(new_src)
   # NOTE: do we need this?
@@ -84,7 +88,7 @@ def convert_pad_to_where_to_keep_behavior_local(ctx:IndexingContext, x:UOp):
 def convert_reduce_axis_to_reduce_with_ranges(ctx:IndexingContext, x:UOp):
   # input ranges
   new_ranges = [r for i,r in enumerate(ctx.range_map[x][0]) if i in x.arg[1]]
-  ret = UOp(Ops.REDUCE, x.dtype, src=(x.src[0],)+tuple(new_ranges), arg=x.arg[0], tag=x.tag)
+  ret = UOp(Ops.REDUCE, x.dtype, src=(x.src[0],)+tuple(new_ranges), arg=x.arg[0])
   ctx.range_map[ret] = ctx.range_map[x]
   return ret
 
@@ -161,6 +165,11 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
 
   # get ops to realize
   graph_rewrite(tsink, pm_generate_realize_map, ctx=rctx.realize_map, bottom_up=True, name="get realize")
+  # don't realize COPY/BUFFER_VIEW/ENCDEC when they are the direct source of ASSIGN — the ASSIGN target buffer is the output
+  for u in tsink.toposort():
+    if u.op is Ops.ASSIGN and u.src[1].op in {Ops.COPY, Ops.BUFFER_VIEW, Ops.ENCDEC} and u.src[1] in rctx.realize_map \
+       and not u.src[0].op_in_backward_slice_with_self(Ops.SHRINK, Ops.PERMUTE, Ops.FLIP, Ops.PAD):
+      del rctx.realize_map[u.src[1]]
 
   # get the consumer map
   with cpu_profile("consumer map in rangeify", "TINY"):

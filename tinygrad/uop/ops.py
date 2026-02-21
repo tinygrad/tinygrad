@@ -8,7 +8,7 @@ from tinygrad.dtype import ConstType, ImageDType, dtypes, DType, truncate, PtrDT
 from tinygrad.dtype import storage_fmt_for_dtype, to_storage_scalar, from_storage_scalar
 from tinygrad.helpers import ContextVar, all_int, prod, getenv, all_same, Context, partition, temp, unwrap, T, argfix, Metadata, flatten, TRACEMETA
 from tinygrad.helpers import PROFILE, dedup, cdiv, cmod, diskcache_put, to_function_name, cpu_profile, TracingKey, VIZ, SPEC, CAPTURE_PROCESS_REPLAY
-from tinygrad.helpers import strip_parens, colored, ansilen, printable, panic
+from tinygrad.helpers import strip_parens, colored, ansilen, printable
 if TYPE_CHECKING:
   from tinygrad.device import Buffer, MultiBuffer
   from tinygrad.renderer import Estimates
@@ -16,16 +16,15 @@ if TYPE_CHECKING:
 class AxisType(Enum):
   def __repr__(self): return str(self)
   GLOBAL = auto(); WARP = auto(); LOCAL = auto(); LOOP = auto(); GROUP_REDUCE = auto(); REDUCE = auto(); UPCAST = auto(); UNROLL = auto() # noqa: E702
-  THREAD = auto(); OUTER = auto(); PLACEHOLDER = auto() # noqa: E702
+  THREAD = auto(); PLACEHOLDER = auto() # noqa: E702
 axis_letters = {AxisType.GLOBAL: "g", AxisType.THREAD: "t", AxisType.LOCAL: "l", AxisType.WARP: "w", AxisType.LOOP: "L", AxisType.UPCAST: "u",
-                AxisType.GROUP_REDUCE: "G", AxisType.REDUCE: "R", AxisType.UNROLL: "r", AxisType.OUTER: "O"}
+                AxisType.GROUP_REDUCE: "G", AxisType.REDUCE: "R", AxisType.UNROLL: "r"}
 axis_colors = {AxisType.GLOBAL: "blue", AxisType.THREAD: "BLUE", AxisType.LOCAL: "cyan", AxisType.WARP: "CYAN", AxisType.LOOP: "WHITE",
-               AxisType.UPCAST: "yellow", AxisType.GROUP_REDUCE: "RED", AxisType.REDUCE: "red", AxisType.UNROLL: "magenta",
-               AxisType.OUTER: "green"}
+               AxisType.UPCAST: "yellow", AxisType.GROUP_REDUCE: "RED", AxisType.REDUCE: "red", AxisType.UNROLL: "magenta"}
 
 # NOTE: LOCAL and GROUP_REDUCE have the same priority. the order here matters
 axis_to_pos = {AxisType.LOOP: -1, AxisType.THREAD: 0, AxisType.GLOBAL: 0, AxisType.WARP: 1, AxisType.LOCAL: 2, AxisType.UPCAST: 3,
-               AxisType.GROUP_REDUCE: 2, AxisType.REDUCE: 4, AxisType.UNROLL: 5, AxisType.OUTER: -2}
+               AxisType.GROUP_REDUCE: 2, AxisType.REDUCE: 4, AxisType.UNROLL: 5}
 
 range_start = {Ops.BUFFERIZE: 1, Ops.REDUCE: 1, Ops.STORE: 2, Ops.WMMA: 3, Ops.END: 1, Ops.CALL: 1}
 
@@ -304,7 +303,24 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     return ret
 
   @property
-  def size(self) -> int: return prod([int(x.vmax) if isinstance(x, UOp) else x for x in self.shape])
+  def max_shape(self) -> tuple[int, ...]:
+    return tuple([int(x.vmax) if isinstance(x, UOp) else x for x in self.shape])
+
+  @property
+  def shard_shape(self) -> tuple[sint, ...]:
+    if not isinstance(self.device, tuple) or self.axis is None: return self.shape
+    return tuple(x//len(self.device) if i == self.axis else x for i,x in enumerate(self.shape))
+
+  @property
+  def max_shard_shape(self) -> tuple[int, ...]:
+    if not isinstance(self.device, tuple) or self.axis is None: return self.max_shape
+    return tuple(x//len(self.device) if i == self.axis else x for i,x in enumerate(self.max_shape))
+
+  @property
+  def size(self) -> int: return prod(self.max_shape)
+
+  @property
+  def shard_size(self) -> int: return prod(self.max_shard_shape)
 
   @functools.cached_property
   def ended_ranges(self):
@@ -352,7 +368,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     return vmin
   def __bool__(self): return self._eval((dtypes.bool,), bool)
   def __int__(self): return self._eval(dtypes.ints, int)
-  def __float__(self): return self._eval(dtypes.floats, float)
+  def __float__(self): return float(self._eval(dtypes.floats, float))
   def substitute(self, dvars:dict[UOp, UOp], name:str|None=None, extra_pm:PatternMatcher|None=None):
     dvars = {k:v for k,v in dvars.items() if k is not v}
     if len(dvars) == 0: return self
@@ -491,18 +507,23 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
 
   @functools.cached_property
   def axis(self) -> int|None:
+    # COPY removes axis. TODO: add more tests for this, and consider MSELECT/MSTACK
+    if self.op is Ops.COPY: return None
     if self.op is Ops.MULTI: return self.arg
     # NOTE: they all have to share an axis, we always choose [-1]
     if self.op in GroupOp.ALU: return axes[-1] if (axes := dedup([x.axis for x in self.src if x.axis is not None])) else None
     if len(self.src) == 0: return None
     src_axis = self.src[0].axis
+    if self.op is Ops.SHRINK and src_axis is not None and self.marg[src_axis] != (0, self.src[0].shape[src_axis]):
+      return None # SHRINK will remove the sharding if it's on axis
     if self.op is Ops.REDUCE_AXIS: return None if src_axis is not None and src_axis in self.arg[1] else src_axis
     if self.op is Ops.RESHAPE:
       if src_axis is None: return None
       arg_acc:list[sint] = list(itertools.accumulate(self.marg, operator.mul, initial=1))
       # new_axis is the last one that preserves prod(prior to new_axis) and must not move items between shards
-      # TODO: what to do about shrinking to self.shape[self.axis]==1 len(self.real_lbs)==1?
-      return len(arg_acc) - arg_acc[::-1].index(prod(self.src[0].shape[:src_axis])) - 1
+      new_axis = len(arg_acc) - arg_acc[::-1].index(prod(self.src[0].shape[:src_axis])) - 1
+      if self.shape[new_axis] % len(self.device) != 0: raise RuntimeError(f"reshape {self.src[0].shape} -> {self.shape} moved items between shards")
+      return new_axis
     if self.op is Ops.PERMUTE: return self.marg.index(src_axis) if src_axis is not None else None
     return src_axis
 
@@ -537,6 +558,12 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     if self.op is Ops.DETACH: return self.src[0].base  # DETACH can't change base
     return self
 
+  @property
+  def multibase(self) -> UOp:
+    if self.op in GroupOp.Movement: return self.src[0].base
+    if self.op is Ops.DETACH: return self.src[0].base  # DETACH can't change base
+    return self
+
   # like gep, but might return an integer
   def sgep(self, i:int) -> sint:
     match self.op:
@@ -554,6 +581,10 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
       case _: raise RuntimeError(f"{self.op} is not a MovementOp")
 
   def _mop(self, op:Ops, arg, same_shape_noop:bool=False) -> UOp:
+    # early NOOP
+    if op in {Ops.SHRINK, Ops.PAD, Ops.EXPAND} and len(arg) == 0:
+      assert len(self.shape) == 0, "0 len arg only valid on zero length shape"
+      return self
     match op:
       case Ops.RESHAPE | Ops.EXPAND: src_args = [arg]
       case Ops.PAD | Ops.SHRINK: src_args = list(zip(*arg))
@@ -567,7 +598,6 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     return ret
 
   # in these four, if the shape doesn't change we can return self
-  def forced_reshape(self, arg:tuple[sint, ...]): return self._mop(Ops.RESHAPE, arg, same_shape_noop=False)
   #def reshape(self, arg:tuple[sint, ...]): return self._mop(Ops.RESHAPE, arg, same_shape_noop=True)
   #def expand(self, arg:tuple[sint, ...]): return self._mop(Ops.EXPAND, arg, same_shape_noop=True)
   #def shrink(self, arg:tuple[tuple[sint, sint], ...]): return self._mop(Ops.SHRINK, arg, same_shape_noop=True)
@@ -622,9 +652,26 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
   @property
   def buffer(self) -> Buffer|MultiBuffer:
     from tinygrad.device import Buffer, MultiBuffer
+    if self.op in {Ops.CONTIGUOUS, Ops.RESHAPE}: return self.src[0].buffer
+    # this buffer can process disk tensors and simple movement ops
     if self is not self.base:
-      assert self.op is Ops.RESHAPE, f"can only be RESHAPE {self}"
-      return self.src[0].buffer
+      from tinygrad.schedule.rangeify import pm_mops
+      from tinygrad.uop.symbolic import symbolic
+      out = graph_rewrite(self.flatten().index(UOp.range(self.size, 0)), pm_mops+symbolic)
+      buf = out.src[0].buffer
+      assert isinstance(buf, Buffer), "must be a Buffer for movement ops"
+      assert out.op is Ops.INDEX, "couldn't collapse to a single INDEX"
+      if out.src[1].op is Ops.CONST:
+        return buf.view(1, out.dtype, out.src[1].arg*out.dtype.itemsize)
+      if out.src[1].op is Ops.RANGE:
+        return buf.view(self.size, out.dtype, 0)
+      if out.src[1].op is Ops.ADD and out.src[1].src[0].op is Ops.RANGE and out.src[1].src[1].op is Ops.CONST:
+        return buf.view(self.size, out.dtype, out.src[1].src[1].arg*out.dtype.itemsize)
+      raise RuntimeError(f"cannot collapse INDEX {out.pyrender()} to a single size/offset")
+    if self.op is Ops.BITCAST:
+      buf = self.src[0].buffer
+      assert isinstance(buf, Buffer), "must be a Buffer for BITCAST"
+      return buf.view(self.size, self.dtype, 0)
     if self.op is Ops.MSELECT:
       ret = self.src[0].buffer
       assert isinstance(ret, MultiBuffer)
@@ -676,12 +723,8 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     return graph_rewrite(self, pm_unbind, ctx=ret), ret
   @property
   def val(self) -> int: return self.unbind()[1]
-  def vars(self) -> set[UOp]:
-    topo = self.toposort()
-    bound = {x.src[0]: x for x in topo if x.op is Ops.BIND and x.src[0].op is Ops.DEFINE_VAR}
-    return {bound.get(x, x) for x in topo if x.op is Ops.DEFINE_VAR}
   def variables(self) -> list[Variable]:
-    return sorted(set([x.unbind()[0] if x.op is not Ops.DEFINE_VAR else x for x in self.vars()]), key=lambda v: v.arg)
+    return sorted({x for x in self.backward_slice_with_self if x.op is Ops.DEFINE_VAR}, key=lambda v: v.arg)
 
   # *** uop symbolic stuff ***
 
@@ -775,7 +818,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
   @functools.cached_property
   def _sym_fxn(self):
     sself = self.simplify()
-    varnames = tuple(x.arg[0] for x in sself.toposort() if x.op is Ops.DEFINE_VAR)
+    varnames = tuple(x.expr for x in sself.toposort() if x.op is Ops.DEFINE_VAR)
     # TODO: sanitize varnames, or don't use naked eval while staying fast
     return eval("lambda "+','.join(varnames)+": "+sself.render(pm=renderer_infer)), varnames  # pylint: disable=eval-used
 
@@ -794,11 +837,6 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
 
   # *** uop high level syntactic sugar ***
 
-  @property
-  def shard_shape(self):
-    if self.axis is None: return self.shape
-    return tuple(x//len(self.device) if i == self.axis else x for i,x in enumerate(self.shape))
-
   @staticmethod
   def placeholder(shape:tuple[int, ...], dtype:DType, slot:int, addrspace=AddrSpace.GLOBAL):
     lookup = {AddrSpace.GLOBAL: Ops.PARAM, AddrSpace.LOCAL: Ops.DEFINE_LOCAL, AddrSpace.REG: Ops.DEFINE_REG}
@@ -807,7 +845,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     return ret
   def placeholder_like(self, slot:int):
     assert all_int(self.shape), "no placeholder-like on symbolic shape"
-    return UOp.placeholder(self.shard_shape, self.dtype, slot)
+    return UOp.placeholder(self.max_shard_shape, self.dtype, slot)
 
   # set is store+end+after
   def set(self:UOp, val:UOp|ConstType, end:UOp|tuple[UOp, ...]|list[UOp]=()) -> UOp:
@@ -1192,12 +1230,13 @@ if TRACK_MATCH_STATS or PROFILE:
 SENTINEL: Final[UOp] = cast(UOp, object())
 class BottomUpGate(Exception): pass
 class RewriteContext:
-  def __init__(self, pm, bpm, ctx=None):
+  def __init__(self, pm, bpm, ctx=None, rewrite_into_calls=False):
     self.pm: PatternMatcher|None = pm
     self.bpm: PatternMatcher|None = bpm
     self.bpm_cache: dict[UOp, UOp|None] = {}
     self.ctx = ctx
     self.replace: dict[UOp, UOp] = {}
+    self.rewrite_into_calls = rewrite_into_calls
 
   # no cache needed: pm_rewrite is called at most once per UOp due to the replace dict check in unified_rewrite
   def pm_rewrite(self, x:UOp) -> UOp|None: return unwrap(self.pm).rewrite(x, self.ctx)
@@ -1232,6 +1271,10 @@ class RewriteContext:
             if n in waitlist: stack.extend(waitlist.pop(n))
             continue
         stack.append((n, 1, new_n))
+        # NOTE: CALL is handled as a special case.
+        # The function that is called is not included in the graph_rewrite.
+        # If you want to graph_rewrite a call, you can
+        if new_n.op is Ops.CALL and not self.rewrite_into_calls: self.replace[new_n.src[0]] = new_n.src[0]
         for x in reversed(new_n.src):
           if x in on_stack: continue
           stack.append((x, 0, x))
@@ -1270,21 +1313,9 @@ class RewriteContext:
     return self.replace[root]
 
 @profile_matches
-def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False, name=None, bpm=None) -> UOp:
-  rewrite_ctx = RewriteContext(pm if not bottom_up else None, pm if bottom_up else bpm, ctx)
+def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False, name=None, bpm=None, rewrite_into_calls=False) -> UOp:
+  rewrite_ctx = RewriteContext(pm if not bottom_up else None, pm if bottom_up else bpm, ctx, rewrite_into_calls=rewrite_into_calls)
   return rewrite_ctx.unified_rewrite(sink)
-
-@profile_matches
-def graph_rewrite_map(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False, name=None, bpm=None,
-                      input_map:dict[UOp, UOp]|None=None, ) -> dict[UOp, UOp]:
-  rewrite_ctx = RewriteContext(pm if not bottom_up else None, pm if bottom_up else bpm, ctx)
-  new_map: dict[UOp, UOp] = {}
-  for k in (list(sink.toposort())[::-1] if bottom_up else sink.toposort()):
-    new_map[k] = v = rewrite_ctx.unified_rewrite(k)
-    if k is not v and k.metadata is not None: all_metadata[v] = tuple(dedup(all_metadata.get(v, ())))+k.metadata
-  if input_map is not None:
-    for k,v in input_map.items(): new_map[k] = new_map.get(v,v)
-  return new_map
 
 def sint_to_uop(x:sint, dtype=dtypes.index) -> UOp: return UOp.const(dtype, x) if isinstance(x, int) else x.cast(dtype)
 
@@ -1318,7 +1349,6 @@ _substitute = PatternMatcher([(UPat(tuple(Ops), name="x"), lambda ctx,x: ctx.get
 _remove_all_tags = PatternMatcher([(UPat(GroupOp.All, name="x"), lambda x: x.replace(tag=None) if x.tag is not None else None)])
 
 def gate_kernel_sink(x:UOp) -> bool: return not (x.op is Ops.SINK and isinstance(x.arg, KernelInfo))
-pm_gate_kernel_sink = PatternMatcher([(UPat(Ops.SINK, name="sink"), lambda sink: None if gate_kernel_sink(sink) else panic(BottomUpGate))])
 
 def do_unbind(ctx:dict[Variable, int], x:UOp):
   v,i = x.unbind()
@@ -1347,7 +1377,7 @@ def bitcast(x, in_dtype:DType, out_dtype:DType):
   return ret[0] if out_count == 1 else ret
 
 renderer = PatternMatcher([
-  (UPat((Ops.DEFINE_VAR,), name="x"), lambda x: x.arg[0]),
+  (UPat((Ops.DEFINE_VAR,), name="x"), lambda x: x.expr),
   (UPat((Ops.SPECIAL), name="x"), lambda x: x.arg),
   (UPat(Ops.RANGE, name="x"), lambda x: f"r{range_str(x)}"),
   (UPat((Ops.CONST, Ops.VCONST), name="x"), lambda x: str(x.arg)),
@@ -1409,8 +1439,6 @@ pm_pyrender_extra = PatternMatcher([
   (UPat(Ops.INDEX, src=(UPat(), UPat()), allow_any_len=True, name="x"), lambda ctx,x:
    f"{ctx[x.src[0]]}.index({ctx[x.src[1]]}, "+(f"{ctx[x.src[2]]}, " if len(x.src) > 2 else "")+
     (f"dtype={x.dtype})" if x.src[0].dtype != x.dtype else "ptr=True)") if x.src[0].dtype.base != x.dtype else None),
-  # TODO: fix forced_reshape
-  (UPat(Ops.RESHAPE, name="x"), lambda ctx,x: f"{ctx[x.src[0]]}.forced_reshape({render_marg(ctx,x)})" if x.src[0].shape == x.shape else None),
   (UPat(GroupOp.Movement, name="x"), lambda ctx,x: f"{ctx[x.src[0]]}.{x.op.name.lower()}({render_marg(ctx,x)})"),
   # NOTE: CMPNE doesn't work cause there's no __rne__
   # NOTE: only match CONSTs without UNIQUE (len(src)==1), unique_const needs explicit rendering

@@ -7,7 +7,8 @@ from tinygrad.runtime.support.hcq import FileIOInterface, MMIOInterface, HCQBuff
 from tinygrad.runtime.support.memory import MemoryManager, VirtMapping, AddrSpace
 from tinygrad.runtime.support.usb import ASM24Controller, USBMMIOInterface
 
-MAP_FIXED, MAP_LOCKED, MAP_POPULATE, MAP_NORESERVE = 0x10, 0 if OSX else 0x2000, getattr(mmap, "MAP_POPULATE", 0 if OSX else 0x008000), 0x400
+MAP_FIXED, MAP_FIXED_NOREPLACE = 0x10, 0x100000
+MAP_LOCKED, MAP_POPULATE, MAP_NORESERVE = 0 if OSX else 0x2000, getattr(mmap, "MAP_POPULATE", 0 if OSX else 0x008000), 0x400
 
 @dataclasses.dataclass(frozen=True)
 class PCIBarInfo: addr:int; size:int # noqa: E702
@@ -69,7 +70,7 @@ class _System:
         all_devs.append((int(FileIOInterface(f"/sys/bus/pci/devices/{pcibus}/vendor").read(), 16),
                          int(FileIOInterface(f"/sys/bus/pci/devices/{pcibus}/device").read(), 16), pcibus))
 
-    return sorted([val for vendor, device, val in all_devs if vendor == vendor and any((device & mask) in devlist for mask, devlist in devices)])
+    return sorted([val for vndr, device, val in all_devs if vndr == vendor and any((device & mask) in devlist for mask, devlist in devices)])
 
   def pci_setup_usb_bars(self, usb:ASM24Controller, gpu_bus:int, mem_base:int, pref_mem_base:int) -> dict[int, PCIBarInfo]:
     for bus in range(gpu_bus):
@@ -219,7 +220,7 @@ class LNXPCIIfaceBase:
       cls.gpus = hcq_filter_visible_devices(System.pci_scan_bus(vendor, devices, base_class))
 
       # Acquire va range to avoid collisions.
-      FileIOInterface.anon_mmap(va_start, va_size, 0, mmap.MAP_PRIVATE | mmap.MAP_ANONYMOUS | MAP_NORESERVE | MAP_FIXED, 0)
+      FileIOInterface.anon_mmap(va_start, va_size, 0, mmap.MAP_PRIVATE | mmap.MAP_ANONYMOUS | MAP_NORESERVE | MAP_FIXED_NOREPLACE, 0)
     self.pci_dev, self.dev, self.vram_bar = PCIDevice(dev.__class__.__name__[:2], cls.gpus[dev_id], bars=bars, resize_bars=[vram_bar]), dev, vram_bar
     self.p2p_base_addr = self.pci_dev.bar_info[vram_bar].addr
 
