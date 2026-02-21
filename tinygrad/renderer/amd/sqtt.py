@@ -528,7 +528,9 @@ _DECODE_INFO_CDNA, _STATE_TABLE_CDNA = _build_decode_tables(PACKET_TYPES_CDNA)
 def decode(data: bytes) -> Iterator[PacketType]:
   """Decode raw SQTT blob, yielding packet instances. Auto-detects RDNA (layout 3/4) vs CDNA."""
   n, reg, pos, nib_off, nib_count, time, ts_offset = len(data), 0, 0, 0, 16, 0, None
-  decode_info, state_table = _DECODE_INFO_RDNA3, _STATE_TABLE_RDNA3  # start RDNA3, auto-detect switches if needed
+  # auto-detect: RDNA traces start with LAYOUT_HEADER (bits[6:0]==0x11), CDNA traces don't
+  if n > 0 and (data[0] & 0x7F) != 0x11: decode_info, state_table = _DECODE_INFO_CDNA, _STATE_TABLE_CDNA
+  else: decode_info, state_table = _DECODE_INFO_RDNA3, _STATE_TABLE_RDNA3
 
   while pos + ((nib_count + nib_off + 1) >> 1) <= n:
     need = nib_count - nib_off
@@ -557,16 +559,9 @@ def decode(data: bytes) -> Iterator[PacketType]:
       delta = 0
     time += delta
     pkt = pkt_cls.from_raw(reg, time)
-    # auto-detect: first packet is always LAYOUT_HEADER (RDNA layout 3/4) or misdetected (CDNA)
-    if pkt_cls is LAYOUT_HEADER:
-      if pkt.layout == 4: decode_info, state_table = _DECODE_INFO_RDNA4, _STATE_TABLE_RDNA4
-      elif pkt.layout != 3:  # not a real LAYOUT_HEADER — switch to CDNA and re-decode first packet
-        decode_info, state_table = _DECODE_INFO_CDNA, _STATE_TABLE_CDNA
-        opcode = state_table[reg & 0xFF]
-        pkt_cls, nib_count, delta_lo, delta_mask, special = decode_info[opcode]
-        if special == 4 and (reg >> 4) & 0xfff == 0:  # CDNA_TIMESTAMP absolute
-          ts_offset = (reg >> 16) - time
-        pkt = pkt_cls.from_raw(reg, time)
+    # RDNA3/4 switch: first packet is LAYOUT_HEADER with layout field indicating version
+    if pkt_cls is LAYOUT_HEADER and pkt.layout == 4:
+      decode_info, state_table = _DECODE_INFO_RDNA4, _STATE_TABLE_RDNA4
     yield pkt
 
 # ═══════════════════════════════════════════════════════════════════════════════

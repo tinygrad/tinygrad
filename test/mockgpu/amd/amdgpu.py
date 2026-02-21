@@ -17,9 +17,9 @@ regCOMPUTE_USER_DATA_0 = 0x1be0 + amd_gpu.GC_BASE__INST0_SEG0
 regCOMPUTE_NUM_THREAD_X = 0x1ba7 + amd_gpu.GC_BASE__INST0_SEG0
 regGRBM_GFX_INDEX = 0x2200 + amd_gpu.GC_BASE__INST0_SEG1
 regSQ_THREAD_TRACE_BUF0_BASE = 0x39e8 + amd_gpu.GC_BASE__INST0_SEG1
-regSQ_THREAD_TRACE_BUF0_SIZE = {"rdna3": 0x39e9, "rdna4": 0x39e6}[MOCKGPU_ARCH] + amd_gpu.GC_BASE__INST0_SEG1
-regSQ_THREAD_TRACE_WPTR = 0x39ef + amd_gpu.GC_BASE__INST0_SEG1
-regSQ_THREAD_TRACE_STATUS = 0x39f4 + amd_gpu.GC_BASE__INST0_SEG1
+regSQ_THREAD_TRACE_BUF0_SIZE = {"rdna3": 0x39e9, "rdna4": 0x39e6, "cdna4": 0x39e9}[MOCKGPU_ARCH] + amd_gpu.GC_BASE__INST0_SEG1
+regSQ_THREAD_TRACE_WPTR = {"rdna3": 0x39ef, "rdna4": 0x39ef, "cdna4": 0x2339}[MOCKGPU_ARCH] + amd_gpu.GC_BASE__INST0_SEG1
+regSQ_THREAD_TRACE_STATUS = {"rdna3": 0x39f4, "rdna4": 0x39f4, "cdna4": 0x233a}[MOCKGPU_ARCH] + amd_gpu.GC_BASE__INST0_SEG1
 regCP_PERFMON_CNTL = 0x3808 + amd_gpu.GC_BASE__INST0_SEG1
 regCPG_PERFCOUNTER1_LO = 0x3000 + amd_gpu.GC_BASE__INST0_SEG1
 regGUS_PERFCOUNTER_HI = 0x3643 + amd_gpu.GC_BASE__INST0_SEG1
@@ -27,6 +27,11 @@ regGUS_PERFCOUNTER_HI = 0x3643 + amd_gpu.GC_BASE__INST0_SEG1
 # RDNA 4
 regSQ_THREAD_TRACE_BUF0_BASE_LO = 0x39e7 + amd_gpu.GC_BASE__INST0_SEG1
 regSQ_THREAD_TRACE_BUF0_BASE_HI = regSQ_THREAD_TRACE_BUF0_BASE
+
+# CDNA 4
+regSQ_THREAD_TRACE_BASE = 0x2330 + amd_gpu.GC_BASE__INST0_SEG1
+regSQ_THREAD_TRACE_BASE2 = 0x2337 + amd_gpu.GC_BASE__INST0_SEG1
+regSQ_THREAD_TRACE_MODE = 0x2336 + amd_gpu.GC_BASE__INST0_SEG1
 
 class SQTT_EVENTS:
   THREAD_TRACE_FINISH = 0x00000037
@@ -160,7 +165,10 @@ class PM4Executor(AMDQueue):
     _ = (info >> 8) & 0b1 # mem_engine
 
     if mem_space == 0 and mem_op == 1: mval = val # hack for memory barrier, should properly handle (req_req, reg_done)
-    elif mem_space == 0: mval = self.gpu.regs[addr_hi<<32|addr_lo]
+    elif mem_space == 0:
+      reg_addr = addr_hi<<32|addr_lo
+      if MOCKGPU_ARCH == "cdna4": reg_addr += pm4.PACKET3_SET_UCONFIG_REG_START  # GFX9 WAIT_REG_MEM uses UCONFIG-relative addresses
+      mval = self.gpu.regs[reg_addr]
     elif mem_space == 1: mval = to_mv(addr_lo + (addr_hi << 32), 4).cast('I')[0]
 
     mval &= mask
@@ -176,7 +184,13 @@ class PM4Executor(AMDQueue):
   def _exec_set_reg(self, n, off):
     reg = off + self._next_dword()
     for i in range(n):
-      self.gpu.regs[reg] = self._next_dword()
+      val = self._next_dword()
+      self.gpu.regs[reg] = val
+      # CDNA4: regSQ_THREAD_TRACE_MODE write with mode=0 triggers trace stop (RDNA uses THREAD_TRACE_FINISH event instead)
+      if (MOCKGPU_ARCH == "cdna4") and reg == regSQ_THREAD_TRACE_MODE and (val & 0b11) == 0:
+        assert n == 1
+        # force trigger sqtt
+        self._sqtt_finish()
       reg += 1
 
   def _exec_dispatch_direct(self, n):
@@ -204,7 +218,7 @@ class PM4Executor(AMDQueue):
     try: tmpring_size = self.gpu.regs[regCOMPUTE_TMPRING_SIZE]
     except KeyError: tmpring_size = 0
     wavesize = (tmpring_size >> 12) & 0x3FFF  # WAVESIZE field is bits 12:25 for gfx11
-    scratch_size = wavesize * 4  # This gives the scratch size per thread (lane)
+    scratch_size = wavesize * 4 # This gives the scratch size per thread (lane)
 
     assert prg_sz > 0, "Invalid prg ptr (not found in mapped ranges)"
     # Pass valid memory ranges, rsrc2, scratch_size, arch, and user data registers to Python emulator
@@ -227,31 +241,34 @@ class PM4Executor(AMDQueue):
     wptr[0] = buf_sz
     self.ib_executor = PM4Executor(self.gpu, (addr_hi << 32) | addr_lo, buf_sz * 4, rptr, wptr)
 
+  def _sqtt_finish(self):
+    from test.mockgpu.amd.emu import sqtt_traces
+    blob = sqtt_traces.pop(0) if sqtt_traces else b''
+    old_idx = self.gpu.regs.grbm_index
+    for se in range(self.gpu.regs.n_se):
+      self.gpu.regs.grbm_index = 0b011 << 29 | se << 16 # select se, broadcast sa and instance
+      self.gpu.regs[regSQ_THREAD_TRACE_STATUS] = 1 << (16 if MOCKGPU_ARCH=="cdna4" else 12)# FINISH_PENDING==0 FINISH_DONE==1 BUSY==0
+      if MOCKGPU_ARCH=="cdna4" and (regSQ_THREAD_TRACE_BASE, se) not in self.gpu.regs.regs: continue # TODO: why not use se_blob
+      if MOCKGPU_ARCH == "rdna4":
+        buf_addr = ((self.gpu.regs[regSQ_THREAD_TRACE_BUF0_BASE_HI])<<32|self.gpu.regs[regSQ_THREAD_TRACE_BUF0_BASE_LO])<<12
+      elif MOCKGPU_ARCH == "rdna3": # CDNA4, RDNA3
+        buf_addr = ((self.gpu.regs[regSQ_THREAD_TRACE_BUF0_SIZE]&0xf)<<32|self.gpu.regs[regSQ_THREAD_TRACE_BUF0_BASE])<<12
+      else: buf_addr = ((self.gpu.regs[regSQ_THREAD_TRACE_BASE2]&0xf)<< 32| self.gpu.regs[regSQ_THREAD_TRACE_BASE]) << 12
+      # Use real trace blob for SE 0 (which has itrace enabled), empty blob for other SEs
+      se_blob = blob if se == 0 else b''
+
+      # Write blob to trace buffer
+      if se_blob: ctypes.memmove(buf_addr, se_blob, len(se_blob))
+      # RDNA3 has absolute address for wptr, RDNA4 has relative
+      wptr_val = (((buf_addr if MOCKGPU_ARCH == "rdna3" else 0) + len(se_blob)) // 32) & 0x1FFFFFFF
+      self.gpu.regs[regSQ_THREAD_TRACE_WPTR] = wptr_val
+    self.gpu.regs.grbm_index = old_idx
+
   def _exec_event_write(self, n):
     assert n == 0
     event_dw = self._next_dword()
     match (event_dw & 0xFF): # event type
-      case SQTT_EVENTS.THREAD_TRACE_FINISH:
-        # Get the most recent trace from the emulator (if available)
-        from test.mockgpu.amd.emu import sqtt_traces
-        blob = sqtt_traces.pop(0) if sqtt_traces else b''
-        old_idx = self.gpu.regs.grbm_index
-        for se in range(self.gpu.regs.n_se):
-          self.gpu.regs.grbm_index = 0b011 << 29 | se << 16 # select se, broadcast sa and instance
-          self.gpu.regs[regSQ_THREAD_TRACE_STATUS] = 1 << 12 # FINISH_PENDING==0 FINISH_DONE==1 BUSY==0
-          if MOCKGPU_ARCH == "rdna3":
-            buf_addr = ((self.gpu.regs[regSQ_THREAD_TRACE_BUF0_SIZE]&0xf)<<32|self.gpu.regs[regSQ_THREAD_TRACE_BUF0_BASE])<<12
-          else:
-            buf_addr = ((self.gpu.regs[regSQ_THREAD_TRACE_BUF0_BASE_HI])<<32|self.gpu.regs[regSQ_THREAD_TRACE_BUF0_BASE_LO])<<12
-          # Use real trace blob for SE 0 (which has itrace enabled), empty blob for other SEs
-          se_blob = blob if se == 0 else b''
-
-          # Write blob to trace buffer
-          if se_blob: ctypes.memmove(buf_addr, se_blob, len(se_blob))
-          # RDNA3 has absolute address for wptr, RDNA4 has relative
-          wptr_val = (((buf_addr if MOCKGPU_ARCH == "rdna3" else 0) + len(se_blob)) // 32) & 0x1FFFFFFF
-          self.gpu.regs[regSQ_THREAD_TRACE_WPTR] = wptr_val
-        self.gpu.regs.grbm_index = old_idx
+      case SQTT_EVENTS.THREAD_TRACE_FINISH: self._sqtt_finish()
       case _: pass # NOTE: for now most events aren't emulated
 
 class SDMAExecutor(AMDQueue):
