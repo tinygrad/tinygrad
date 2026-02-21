@@ -1,6 +1,6 @@
 from tinygrad.uop.ops import UOp, UPat, PatternMatcher, Ops, GroupOp, graph_rewrite, identity_element
 from tinygrad.dtype import ImageDType
-from tinygrad.helpers import prod, DEBUG, argsort
+from tinygrad.helpers import prod, DEBUG, argsort, VIZ
 
 def tag_uop(ctx:tuple[list[UOp], dict[UOp, UOp], set[UOp]], x:UOp):
   if x.tag is not None: return None
@@ -100,6 +100,7 @@ def append_after(ctx:tuple[list[UOp], dict[UOp, UOp], list[UOp]], x:UOp):
 pm_finalize_call = PatternMatcher([
   (UPat(Ops.ASSIGN, name="x"), untag_and_append),
   (UPat(Ops.AFTER, name="x"), append_after),
+  (UPat(Ops.COPY, name="x"), lambda ctx,x: append_after(ctx,x) if isinstance(x.device, str) and x.device.startswith("DISK") else None),
   # replace UNIQUE with LUNIQUE for CONST cache key normalization
   (UPat(Ops.CONST, src=(UPat(Ops.UNIQUE), UPat(Ops.DEVICE, name="d")), name="b"), lambda b,d: b.replace(src=(d,))),
 ])
@@ -123,4 +124,6 @@ def allocate_global_buffers(big_sink:UOp) -> tuple[UOp, dict[UOp, UOp]]:
   # here we construct the final buffer_map. this is everything that will go into the tensor map
   assigns: list[UOp] = []
   graph_rewrite(big_sink, pm_finalize_call, ctx=(uop_list, buffer_map, assigns), name="finalize call")
-  return UOp.sink(*assigns), buffer_map
+  ret = UOp.sink(*assigns)
+  if VIZ: graph_rewrite(ret, PatternMatcher([]), name="*** Call")
+  return ret, buffer_map
