@@ -491,7 +491,14 @@ def get_rangeify(sink:UOp) -> UOp:
   tsink = graph_rewrite(tsink, split_kernels, bottom_up=True, name="split kernels")
 
   # WAR deps: if kernel U reads buffer S, and S is also written by another kernel, S's write must wait for U to finish
-  afters = [u for u in tsink.toposort() if u.op is Ops.AFTER]
+  nodes = tsink.toposort()
+  afters = [u for u in nodes if u.op is Ops.AFTER]
+  # precompute reachable AFTER buf_uops per node in toposort order
+  reachable_bufs: dict[UOp, set[UOp]] = {}
+  for node in nodes:
+    bufs = set().union(*(reachable_bufs.get(s, set()) for s in node.src))
+    if node.op is Ops.AFTER: bufs.add(node.buf_uop)
+    if bufs: reachable_bufs[node] = bufs
   kernel_assign: dict[UOp, UOp] = {u.buf_uop:u for u in afters}
   assign_rep: dict[UOp, UOp] = {}
   for u in afters:
@@ -499,7 +506,7 @@ def get_rangeify(sink:UOp) -> UOp:
       # TODO: this is probably broken for MSELECT/MSTACK
       if s.op not in {Ops.BUFFER, Ops.PARAM} or s is u.buf_uop or (a:=kernel_assign.get(s)) is None: continue
       if a.src[1] is u.src[1]: continue  # same kernel (multi-output custom kernels)
-      if any(x.op is Ops.AFTER and x.buf_uop is s for x in u.toposort()):
+      if s in reachable_bufs.get(u, set()):
         raise RuntimeError(f"cycle detected in graph, kernel for {u.buf_uop} must either depend on AFTER or BUFFER")
       assign_rep[a] = kernel_assign[s] = a.replace(src=a.src+(u,))
   if assign_rep: tsink = graph_rewrite(tsink, _substitute, ctx=assign_rep, bottom_up=True, name="fix_assign")
