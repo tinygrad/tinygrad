@@ -1,5 +1,5 @@
 from __future__ import annotations
-import ctypes, mmap, functools
+import mmap, functools
 from tinygrad.runtime.autogen import libc
 from test.mockgpu.driver import VirtDriver, VirtFileDesc, TextFileDesc, DirFileDesc, VirtFile
 from test.mockgpu.am.amgpu import MockAMGPU, VRAM_SIZE
