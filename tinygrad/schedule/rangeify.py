@@ -2,7 +2,7 @@ from dataclasses import dataclass, field, replace
 import itertools
 from tinygrad.dtype import dtypes, PtrDType, ImageDType, AddrSpace
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, _substitute, KernelInfo, pm_gate_kernel_sink
-from tinygrad.uop.ops import graph_rewrite, identity_element, sint, AxisType, BottomUpGate
+from tinygrad.uop.ops import graph_rewrite, sint, AxisType, BottomUpGate
 from tinygrad.uop.symbolic import symbolic
 from tinygrad.helpers import prod, all_same, getenv, dedup, all_int, DEBUG, SPLIT_REDUCEOP, DEBUG_RANGEIFY, VIZ, MAX_KERNEL_BUFFERS
 from tinygrad.helpers import PCONTIG, partition, get_single_element
@@ -26,7 +26,7 @@ pm_mops = PatternMatcher([
    lambda r,idx: r.src[0].index(*apply_movement_op(r.op, r.src[0].shape, r.marg, idx.src[1:]), dtype=idx.dtype, arg=idx.arg)),
   # move movement ops after AFTER
   (UPat(GroupOp.Movement, name="r").after(name="a", allow_any_len=True),
-   lambda r,a: UOp(r.op, r.dtype, (a.replace(src=(r.src[0],)+a.src[1:], tag=None),)+r.src[1:], r.arg, tag=a.tag)),
+   lambda r,a: UOp(r.op, r.dtype, (a.replace(src=(r.src[0],)+a.src[1:]),)+r.src[1:], r.arg)),
   (UPat(GroupOp.Movement, name="r").end(name="a", allow_any_len=True), lambda r,a: a.replace(src=(r.src[0],)+a.src[1:])),
 ])
 
@@ -42,10 +42,10 @@ def assign_to_contiguous(assign:UOp, target:UOp, src:UOp):
     while target.op in GroupOp.Movement:
       mops.append(target)
       target = target.src[0]
-    new_target = t.f(Ops.CONTIGUOUS, tag=t.tag)
+    new_target = t.f(Ops.CONTIGUOUS)
     for m in reversed(mops): new_target = m.replace(src=(new_target,)+m.src[1:])
     return assign.replace(src=(new_target, src))
-  return src.f(Ops.CONTIGUOUS, tag=assign.tag)
+  return src.f(Ops.CONTIGUOUS)
 
 def fix_assign_hazard(assign:UOp, target:UOp, src:UOp):
   # PERMUTE and FLIP reorder indices, SHRINK can have overlapping regions when dest is also shrunk
@@ -83,12 +83,11 @@ def split_reduceop(reduce:UOp, x:UOp):
   splitted = x.reshape(splitted_shape).permute(tuple([d for d in range(len(splitted_shape)) if d!=dim_to_split]+[dim_to_split]))
   if DEBUG >= 3: print(f"split {divisor}: {x.shape} -> {splitted.shape} -> {reduce.shape}")
   # reduce original axes, then split
-  return splitted.r(*reduce.arg).contiguous().r(reduce.arg[0], (len(reduce.shape),)).reshape(reduce.shape).replace(tag=reduce.tag)
+  return splitted.r(*reduce.arg).contiguous().r(reduce.arg[0], (len(reduce.shape),)).reshape(reduce.shape)
 
 mop_cleanup = PatternMatcher([
   # merge adjacent RESHAPES, safe because they are not tagged
-  (UPat(Ops.RESHAPE, src=(UPat(Ops.RESHAPE, name="x2"), UPat()), name="x"),
-   lambda x,x2: x.replace(src=(x2.src[0], x.src[1])) if x.tag is None and x2.tag is None else None),
+  (UPat(Ops.RESHAPE, src=(UPat(Ops.RESHAPE, name="x2"), UPat()), name="x"), lambda x,x2: x.replace(src=(x2.src[0], x.src[1]))),
 ])
 
 def resolve_call(c:UOp) -> UOp|None:
@@ -103,35 +102,24 @@ def resolve_call(c:UOp) -> UOp|None:
   for i, (p, a) in enumerate(zip(params, args)):
     if p.shape != a.shape: raise TypeError(f"arg {i} shape mismatch: expected {p.shape}, got {a.shape}")
     if p.dtype != a.dtype: raise TypeError(f"arg {i} dtype mismatch: expected {p.dtype}, got {a.dtype}")
-  return c.src[0].substitute(dict(zip(params, args))).rtag(c.tag)
+  return c.src[0].substitute(dict(zip(params, args)))
 
 earliest_rewrites = mop_cleanup+PatternMatcher([
-  # just removing it works...
-  (UPat((Ops.DETACH, Ops.CONTIGUOUS_BACKWARD), name="x"), lambda x: x.src[0]),
-
   # resolve calls
   (UPat(Ops.CALL, name="c"), resolve_call),
 
   # remove CONTIGUOUS if the source is already contiguous
-  (UPat(Ops.RESHAPE, src=(UPat((Ops.PARAM, Ops.CONTIGUOUS)), UPat()), name="r").f(Ops.CONTIGUOUS, name="c"), lambda r,c: r.replace(tag=c.tag)),
+  (UPat(Ops.RESHAPE, src=(UPat((Ops.PARAM, Ops.CONTIGUOUS)), UPat()), name="r").f(Ops.CONTIGUOUS), lambda r: r),
 
   # split_reduceop
   (UPat(Ops.REDUCE_AXIS, name="reduce", src=(UPat.var("x"),)), split_reduceop),
-
-  # preserve tags?
-  # reduce of size 0 is the identity element
-  (UPat(Ops.REDUCE_AXIS, name="reduce", src=(UPat.var("x"),)),
-   lambda reduce,x: reduce.const_like(identity_element(reduce.arg[0], reduce.dtype)) if x.size == 0 and reduce.size != 0 else None),
-
-  # handle size 0
-  (UPat(GroupOp.All-{Ops.SINK}, name="x"), lambda x: x.const_like(0).rtag(x.tag) if x._shape is not None and x.size == 0 else None),
 
   # remove contiguous on movement ops before a copy on disk
   (UPat(GroupOp.Movement-{Ops.SHRINK, Ops.RESHAPE}, name="x").f(Ops.CONTIGUOUS).f(Ops.COPY, allow_any_len=True, name="copy"),
    lambda x,copy: copy.replace(src=(x,)+copy.src[1:]) if isinstance(x.device, str) and x.device.startswith("DISK") else None),
   # push copy past movement ops to disk
   (UPat(GroupOp.Movement-{Ops.SHRINK, Ops.RESHAPE}, name="x").f(Ops.COPY, allow_any_len=True, name="copy"),
-   lambda x,copy: x.replace(src=(copy.replace(src=(x.src[0],)+copy.src[1:], tag=None),)+x.src[1:], tag=copy.tag) \
+   lambda x,copy: x.replace(src=(copy.replace(src=(x.src[0],)+copy.src[1:]),)+x.src[1:]) \
       if isinstance(x.device, str) and x.device.startswith("DISK") else None),
 
   # ** copy rules **
@@ -145,7 +133,7 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
    lambda c,r,d: c.replace(src=(r.contiguous(), d)) if r.size != r.base.size else None),
 
   # copy only to different device
-  (UPat(Ops.COPY, src=(UPat.var("x"), UPat()), name="copy"), lambda x,copy: x.f(Ops.NOOP, tag=copy.tag) if x.device == copy.device else None),
+  (UPat(Ops.COPY, src=(UPat.var("x"), UPat()), name="copy"), lambda x,copy: x.f(Ops.NOOP) if x.device == copy.device else None),
 
   # ** assign rules **
 
@@ -154,7 +142,7 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
 
   # move bitcast from assign target to source: a.bitcast(X).assign(src) -> a.assign(src.bitcast(a.dtype))
   (UPat(Ops.ASSIGN, src=(UPat(Ops.BITCAST, src=(UPat(name="target"),)), UPat(name="src")), name="assign"),
-   lambda assign, target, src: target.assign(src.bitcast(target.dtype)).replace(tag=assign.tag)),
+   lambda assign, target, src: target.assign(src.bitcast(target.dtype))),
 
   # if assign target is itself an ASSIGN chain, canonicalize to the original buffer target
   (UPat(Ops.ASSIGN, src=(UPat(Ops.ASSIGN, name="target"), UPat(name="src")), allow_any_len=True, name="assign"), normalize_assign_target_chain),
@@ -190,8 +178,7 @@ def cleanup_dead_axes(b:UOp):
       reshape.append(s)
       new_rng.append(rng)
   if hit:
-    # move the tag to the expand. NOTE: this expand tag might not survive
-    return b.replace(src=b.src[0:1]+tuple(new_rng), tag=None).reshape(tuple(reshape)).expand(b.shape).replace(tag=b.tag)
+    return b.replace(src=b.src[0:1]+tuple(new_rng)).reshape(tuple(reshape)).expand(b.shape)
 
 def gate_substitute(ctx, b:UOp) -> None:
   if not any(r in b.ranges for r in ctx.keys()): raise BottomUpGate()
@@ -264,8 +251,7 @@ def remove_bufferize(src:UOp, buf:UOp, idx:UOp):
 
 def remove_noop_bufferize(idx,b2):
   if idx.src[1:] != b2.src[1:] or idx.src[0].op is Ops.BUFFER_VIEW: return None
-  new_tag = (idx.src[0].tag or ()) + (b2.tag or ()) or None
-  return idx.src[0].rtag(new_tag).shrink(tuple((0, s) for s in b2.shape)) if b2.shape else idx.src[0].rtag(new_tag)
+  return idx.src[0].shrink(tuple((0, s) for s in b2.shape)) if b2.shape else idx.src[0]
 
 pm_const_buffer_folding = pm_mops+PatternMatcher([
   (UPat(Ops.BUFFERIZE, name="b"), cleanup_dead_axes),
@@ -275,13 +261,13 @@ pm_const_buffer_folding = pm_mops+PatternMatcher([
   # remove noop buffers. if we look at the next index we can remove even more of these
   (UPat(Ops.INDEX, name="idx").f(Ops.BUFFERIZE, allow_any_len=True, name="b2"), remove_noop_bufferize),
   # no buffers for const (ranges don't matter for const - it's the same value everywhere)
-  (UPat(Ops.CONST, name='c').f(Ops.BUFFERIZE, allow_any_len=True, name="b"), lambda c,b: b.const_like(c.arg).rtag(b.tag)),
+  (UPat(Ops.CONST, name='c').f(Ops.BUFFERIZE, allow_any_len=True, name="b"), lambda c,b: b.const_like(c.arg)),
   # indexing a const is a const
   (UPat(Ops.INDEX, src=(UPat(Ops.CONST, name="c"),),), lambda c: c),
   # copy on CONST is CONST
   (UPat(Ops.COPY, src=(UPat.cvar("x"), UPat()), name="copy"), lambda copy,x: copy.const_like(x.arg)),
   # hack if a noop turned to a const
-  (UPat(Ops.NOOP, src=(UPat.cvar("c"),), name="noop"), lambda c,noop: c.rtag(noop.tag)),
+  (UPat(Ops.NOOP, src=(UPat.cvar("c"),), name="noop"), lambda c,noop: c),
   # mstack on CONST is CONST
   (UPat(Ops.MSTACK, src=(UPat.var("s"),), allow_any_len=True).f(Ops.INDEX, allow_any_len=True),
    lambda s: UOp.const(c.dtype, c.arg) if (c:=s.base).op is Ops.CONST else None),
@@ -307,7 +293,7 @@ def late_buffer_view(t:UOp, b:UOp):
   if len(shape) == 0: offset = x.src[1].arg
   else: offset = max(sum(idx.vmin for idx in x.src[1:]), 0)
 
-  return b.replace(src=(UOp(Ops.BUFFER_VIEW, t.dtype, (x.base,), (size, offset), tag=t.tag), b.src[1]))
+  return b.replace(src=(UOp(Ops.BUFFER_VIEW, t.dtype, (x.base,), (size, offset)), b.src[1]))
 
 to_bufferview = PatternMatcher([
   (UPat(Ops.BUFFERIZE, src=(UPat((Ops.BITCAST, Ops.CONTIGUOUS), name="t"), UPat()), name="b"), late_buffer_view),
@@ -346,7 +332,6 @@ pm_limit_bufs = PatternMatcher([(UPat(set.union(GroupOp.Binary, GroupOp.Ternary)
 # NOTE: this has been fixed up a bit
 
 def bufferize_to_store(ctx:itertools.count, x:UOp, idx:UOp, allow_locals=True):
-  #assert isinstance(x.tag, Flat), "bufferize must be flat"
   size = prod(x.shape)
   rngs = sorted(idx.ranges, key=lambda x: x.arg)
   assert size > 0 and isinstance(size, int), f"no zero sized or symbolic sized buffers {size}"
@@ -359,14 +344,14 @@ def bufferize_to_store(ctx:itertools.count, x:UOp, idx:UOp, allow_locals=True):
     # skip self-assign from same-device copy, otherwise create the store
     # in assign, this is the buffer size, not the bufferize size
     if assign_src is assign_target: ret = assign_target.src[0]
-    else: ret = assign_target.src[0].after(assign_target.replace(dtype=sdtype).store(assign_src, tag=x.tag).end(*rngs))
+    else: ret = assign_target.src[0].after(assign_target.replace(dtype=sdtype).store(assign_src).end(*rngs))
     for op, marg in reversed(assign.arg or ()): ret = ret._mop(op, marg)
     return ret
 
   # NOTE: the DEFINE_LOCAL needs to be disambiguated here
   if sdtype.addrspace == AddrSpace.GLOBAL:
     buf = UOp(Ops.BUFFER, x.dtype, (UOp(Ops.LUNIQUE, arg=next(ctx)), UOp(Ops.DEVICE, arg=x.arg.device)), size)
-    do_store = buf.index(idx, dtype=sdtype).store(x.src[0], tag=x.tag).end(*rngs)
+    do_store = buf.index(idx, dtype=sdtype).store(x.src[0]).end(*rngs)
     return buf.after(do_store)
 
   if allow_locals:
@@ -377,14 +362,14 @@ def bufferize_to_store(ctx:itertools.count, x:UOp, idx:UOp, allow_locals=True):
 
 # collapse any BUFFERIZE to single input BUFFERIZE. move the tag to a reshape
 def flatten_bufferize(x:UOp):
-  if x.tag is None and len(x.src) == 2: return None
-  ret = x.replace(tag=None, src=(x.src[0], get_single_element(apply_movement_op(Ops.RESHAPE, (prod(x.shape),), x.shape, x.src[1:]))))
+  if len(x.src) == 2: return None
+  ret = x.replace(src=(x.src[0], get_single_element(apply_movement_op(Ops.RESHAPE, (prod(x.shape),), x.shape, x.src[1:]))))
   rngs = x.src[1:]
   ret = ret.forced_reshape(x.shape)
   if any(r.op is Ops.RANGE and r.src[0].op is not Ops.CONST for r in rngs):
     sym_shape = tuple([r.src[0] if r.op is not Ops.CONST else 1 for r in rngs])
     ret = ret.shrink(tuple([(0,x) for x in sym_shape]))
-  return ret.rtag(x.tag)
+  return ret
 pm_flatten_bufferize = PatternMatcher([(UPat(Ops.BUFFERIZE, name="x"), flatten_bufferize)])
 
 pm_add_buffers = pm_mops+pm_flatten_bufferize+to_bufferview+PatternMatcher([
@@ -392,7 +377,7 @@ pm_add_buffers = pm_mops+pm_flatten_bufferize+to_bufferview+PatternMatcher([
 
   # move RESHAPEs through MSELECT/MSTACK
   (UPat((Ops.MSELECT, Ops.MSTACK), src=UPat(Ops.RESHAPE), name="m"),
-   lambda m: m.replace(src=tuple([x.src[0].base for x in m.src]), tag=None).reshape(m.shape).rtag(m.tag)),
+   lambda m: m.replace(src=tuple([x.src[0].base for x in m.src])).reshape(m.shape)),
 
   # remove any RESHAPEs on KERNEL
   (UPat(Ops.CALL, name="k"), lambda k: k.replace(src=tuple(x.src[0] if x.op is Ops.RESHAPE else x for x in k.src))),
