@@ -6,10 +6,8 @@ from tinygrad.uop import FastEnum, auto
 
 class X86Ops(FastEnum):
   # NOTE: X86Ops with i suffix are variants that take an immediate, m suffix are variants that can write to memory instead of read from
-  # register, not an instruction. FRAME_INDEX is used when the function arg is on the stack and is rewritten to IMM when stack size is known
-  DEFINE_REG = auto(); FRAME_INDEX = auto()
-  # const
-  IMM = auto()
+  # these aren't real instructions
+  DEFINE_REG = auto(); IMM = auto(); FRAME_INDEX = auto(); LABEL = auto()
   # index
   LEA = auto()
   # register / memory / immediate moves
@@ -38,7 +36,7 @@ class X86Ops(FastEnum):
   CMOVNE = auto(); CMOVE = auto(); CMOVL = auto(); CMOVB = auto()
   VPBLENDVB = auto(); VBLENDVPS = auto(); VBLENDVPD = auto()
   # jumps
-  JNE = auto(); JE = auto(); JL = auto(); JB = auto()
+  JNE = auto(); JE = auto(); JL = auto(); JB = auto(); JGE = auto(); JMP = auto()
   # vectorize / gep
   VSHUFPS = auto(); VINSERTPS = auto()
   VPEXTRB = auto(); VPEXTRW = auto(); VPEXTRD = auto(); VPEXTRQ = auto()
@@ -113,7 +111,7 @@ class X86GroupOp:
 
   # X86Ops that read flags
   ReadFlags = {X86Ops.CMOVB, X86Ops.CMOVL, X86Ops.CMOVE, X86Ops.CMOVNE, X86Ops.SETB, X86Ops.SETL, X86Ops.SETE, X86Ops.SETNE, X86Ops.JB, X86Ops.JL,
-               X86Ops.JE, X86Ops.JNE}
+               X86Ops.JE, X86Ops.JNE, X86Ops.JGE}
 
   # X86Ops that write flags or can modify flags to undefined values
   WriteFlags = {X86Ops.CMP, X86Ops.CMPi, X86Ops.ADD, X86Ops.ADDi, X86Ops.SUB, X86Ops.SUBi, X86Ops.IMUL, X86Ops.IMULi, X86Ops.IDIV, X86Ops.DIV,

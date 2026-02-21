@@ -3,7 +3,7 @@ from typing import cast
 from tinygrad.dtype import dtypes, PtrDType, DType, truncate
 from tinygrad.uop.ops import Ops, GroupOp, UOp, UPat, PatternMatcher
 from tinygrad.renderer.isa import X86Ops, X86GroupOp
-from tinygrad.renderer.isa.isa import ISARenderer, IselContext
+from tinygrad.renderer.isa.isa import ISARenderer, IselContext, RegallocContext
 from tinygrad.codegen.late.regalloc import Register, assign
 from tinygrad.helpers import getenv, CPU_COUNT
 
@@ -183,7 +183,7 @@ def fuse_load(ctx:IselContext, x:UOp, i:int) -> UOp|None:
 def abi(ctx:IselContext, x:UOp):
   i = ctx.func_args.index(x)
   def _stack_arg(disp:int):
-    return x.ins(X86Ops.MOV, src=(def_reg(dtypes.uint64, RSP), UOp(Ops.NOOP), UOp(X86Ops.FRAME_INDEX, dtypes.int32, arg=disp)))
+    return x.ins(X86Ops.MOV, src=(def_reg(dtypes.uint64, RSP), UOp(Ops.NOOP), UOp(Ops.INS, arg=X86Ops.FRAME_INDEX, dtype=dtypes.int32, tag=disp)))
   if sys.platform == "win32": return def_reg(x.dtype, (RCX, RDX, GPR[8], GPR[9])[i]) if i < 4 else _stack_arg((i-3)*8+32)
   return def_reg(x.dtype, (RDI, RSI, RDX, RCX, GPR[8], GPR[9])[i]) if i < 6 else _stack_arg((i-5)*8)
 
@@ -200,7 +200,7 @@ isel_matcher = PatternMatcher([
   # TODO: RANGE and END is tricky. Both linearizer and regalloc need them so they stay as Ops and get rewritten post regalloc
   # control flow ops need a refactor in general
   (UPat(Ops.RANGE, src=(UPat.cvar("c"),), allow_any_len=True, name="x"), lambda c,x: x.replace(src=(imm(c.dtype, c.arg),) + x.src[1:])),
-  (UPat(Ops.RANGE, name="x"), lambda ctx,x: x.replace(arg=ctx.vreg(WGPR)) if not isinstance(x.arg, Register) else None),
+  (UPat(Ops.RANGE, name="x"), lambda ctx,x: x.replace(tag=ctx.vreg(WGPR)) if not isinstance(x.tag, Register) else None),
   # **** Op -> X86Op ****
   # add callee saved registers to the RET, these will be scheduled at the top of the kernel and will be saved/restored if they are used in regalloc
   # so regalloc builds the prologue/epilogue naturally
@@ -209,7 +209,7 @@ isel_matcher = PatternMatcher([
   (UPat((Ops.PARAM, Ops.DEFINE_VAR, Ops.SPECIAL), name="x"), abi),
   # these are treated the same for now
   (UPat((Ops.DEFINE_REG, Ops.DEFINE_LOCAL), name="x"), lambda ctx,x:
-   x.ins(X86Ops.LEA, src=(def_reg(dtypes.uint64, RSP), UOp(Ops.NOOP), imm(dtypes.int32, ctx.inc_stack(x.dtype.nbytes()))), arg=None)),
+   x.ins(X86Ops.LEA, src=(def_reg(dtypes.uint64, RSP), UOp(Ops.NOOP), imm(dtypes.int32, ctx.inc_stack(x.dtype.nbytes()))))),
   # constants that can't be immediates, move them to registers
   (UPat(Ops.CONST, dtypes.float16, name="x"), lambda x: x.ins(X86Ops.VPINSRW, src=(def_reg(x.dtype), UOp(Ops.INS, arg=X86Ops.MOVi, dtype=dtypes.int16, src=(imm(x.dtype, x.arg),)), imm(dtypes.uint8, 0)))), # noqa: E501
   (UPat(Ops.CONST, dtypes.float32, name="x"), lambda x: x.ins(X86Ops.VMOVD, src=(UOp(Ops.INS, arg=X86Ops.MOVi, dtype=dtypes.int32, src=(imm(x.dtype, x.arg),)),))), # noqa: E501
@@ -384,9 +384,9 @@ isel_matcher = PatternMatcher([
    x.ins(X86Ops.MOVm, src=fuse_address(x.src[0]) + (x.src[1],)) if (i:=to_imm(x.src[1])) is None else x.ins(X86Ops.MOVi, src=fuse_address(x.src[0]) + (i,))), # noqa: E501
   # **** X86Op -> X86Op ****
   # fuse loads into X86Ops that allow it, if beneficial
-  *[(UPat.ins(op, src=(UPat(Ops.LOAD),), allow_any_len=True, name="x"), lambda ctx,x: fuse_load(ctx, x, 0)) for op in X86GroupOp.ReadMem1st],
-  *[(UPat.ins(op, src=(UPat(), UPat(Ops.LOAD)), allow_any_len=True, name="x"), lambda ctx,x: fuse_load(ctx, x, 1)) for op in X86GroupOp.ReadMem2nd],
-  *[(UPat.ins(op, src=(UPat(), UPat(), UPat(Ops.LOAD)), allow_any_len=True, name="x"), lambda ctx,x: fuse_load(ctx, x, 2)) for op in X86GroupOp.ReadMem3rd], # noqa: E501
+  (UPat(Ops.INS, src=(UPat(Ops.LOAD),), allow_any_len=True, name="x"), lambda ctx,x: fuse_load(ctx, x, 0) if x.arg in X86GroupOp.ReadMem1st else None),
+  (UPat(Ops.INS, src=(UPat(), UPat(Ops.LOAD)), allow_any_len=True, name="x"), lambda ctx,x: fuse_load(ctx, x, 1) if x.arg in X86GroupOp.ReadMem2nd else None),
+  (UPat(Ops.INS, src=(UPat(), UPat(), UPat(Ops.LOAD)), allow_any_len=True, name="x"), lambda ctx,x: fuse_load(ctx, x, 2) if x.arg in X86GroupOp.ReadMem3rd else None), # noqa: E501
   # allocate virtual register to X86Op with special constaints
   (UPat(Ops.INS, dtypes.ints+dtypes.floats+(dtypes.bool,), name="x"), lambda ctx,x:
    x.replace(tag=ctx.vreg(x.tag)) if isinstance(x.tag, tuple) else None),
@@ -396,32 +396,37 @@ isel_matcher = PatternMatcher([
 ])
 
 # ***** post register allocation *****
+# TODO: control flow should be overhauled so that this isn't necessary
+def lower_range(ctx:RegallocContext, x:UOp) -> tuple[UOp, list[UOp]]:
+  acc = x.ins(X86Ops.MOVi, src=(imm(x.dtype, 0),) + x.src[1:])
+  label = UOp(Ops.INS, arg=X86Ops.LABEL, tag=f"LOOP_{x.arg[0]}")
+  cmp = UOp(Ops.INS, arg=X86Ops.CMPi if x.src[0].arg is X86Ops.IMM else X86Ops.CMP, src=(acc, x.src[0]))
+  jump_out = UOp(Ops.INS, arg=X86Ops.JGE, src=(cmp,), tag=f"LOOP_OUT_{x.arg[0]}")
+  ctx.loop_label[acc] = f"LOOP_{x.arg[0]}"
+  return (acc, [acc, label, cmp, jump_out])
 
-# TODO: rm after,group
 # final rewrite to match the isa spec
 post_regalloc_matcher = PatternMatcher([
   # alloc stack space
-  (UPat.ins(X86Ops.DEFINE_REG, dtype=dtypes.uint64, tag=RSP, name="x"), lambda ctx,x:
-   (x, [x, x.ins(X86Ops.SUBi, src=(imm(dtypes.uint32, ctx.stack_size),), tag=RSP)]) if ctx.stack_size > 0 else None),
+  (UPat(Ops.INS, arg=X86Ops.DEFINE_REG, dtype=dtypes.uint64, name="x"), lambda ctx,x:
+   (x, [x, x.ins(X86Ops.SUBi, src=(imm(dtypes.uint32, ctx.stack_size),), tag=RSP)]) if ctx.stack_size > 0 and x.tag is RSP else None),
   # dealloc stack space
-  (UPat.ins(X86Ops.RET, name="x"), lambda ctx,x:
-   (x, [UOp(X86Ops.ADDi, dtypes.uint64, (imm(dtypes.uint32, ctx.stack_size),), RSP), x]) if ctx.stack_size > 0 else None),
+  (UPat(Ops.INS, arg=X86Ops.RET, name="x"), lambda ctx,x:
+   (x, [UOp(Ops.INS, arg=X86Ops.ADDi, dtype=dtypes.uint64, src=(imm(dtypes.uint32, ctx.stack_size),), tag=RSP), x]) if ctx.stack_size > 0 else None),
   # rewrite FRAME_INDEX to IMM now that the stack size is known
-  (UPat(X86Ops.FRAME_INDEX, name="x"), lambda ctx,x: (nx:=x.replace(op=X86Ops.IMM, arg=ctx.stack_size + x.arg), [nx])),
-  # rewrite RANGE to MOV reg, 0. Terrible HACK to pass the CONST to the END
-  (UPat(Ops.RANGE, name="x"), lambda x: (nx:=x.ins(X86Ops.MOVi, src=(imm(x.dtype, 0),), tag=x.src[0].arg), [nx])),
-  # rewrite END to ADD 1 -> CMPLT -> JUMP
-  (UPat(Ops.END, name="x"), lambda x:
-   (jl:=x.replace(op=X86Ops.JL, src=(x.src[1], cmp:=UOp(X86Ops.CMPi if isinstance(x.src[1].tag, int) else X86Ops.CMP,
-    src=(add:=UOp(X86Ops.ADDi, x.src[1].dtype, (imm(x.src[1].dtype, 1),), x.src[1].arg),
-         imm(x.src[1].dtype, x.src[1].tag) if isinstance(x.src[1].tag, int) else def_reg(x.src[1].dtype, x.src[1].tag))))), [add, cmp, jl])),
+  (UPat(Ops.INS, arg=X86Ops.FRAME_INDEX, name="x"), lambda ctx,x: (nx:=x.ins(X86Ops.IMM, tag=ctx.stack_size + x.tag), [nx])),
+  # rewrite RANGE to ACC = 0 -> LABEL -> JUMP if ACC >= loop bound
+  (UPat(Ops.RANGE, name="x"), lambda ctx,x: lower_range(ctx, x)),
+  # rewrite END to ACC + 1 -> JUMP -> LABEL, also add the out of loop JUMP to the src so this becomes the jump target
+  (UPat(Ops.END, name="x"), lambda ctx,x: (jmp:=UOp(Ops.INS, arg=X86Ops.JMP, tag=ctx.loop_label[x.src[1]]),
+   [x.src[1].ins(X86Ops.ADDi, src=(imm(x.src[1].dtype, 1),)), jmp, UOp(Ops.INS, arg=X86Ops.LABEL, tag=f"LOOP_OUT_{ctx.loop_label[x.src[1]][-1]}")])),
   # TODO: need a generic way to model clobbers, idiv and flags should be handled the same way, maybe add clobber field to Register?
   # fixup div, zero rdx again because scheduling constraint isn't being respected
-  (UPat(X86Ops.DIV, name="x"), lambda x:
+  (UPat(Ops.INS, arg=X86Ops.DIV, name="x"), lambda x:
    (nx:=x.replace(src=x.src[:1]), [x.ins(X86Ops.MOVi, src=(imm(min(dtypes.uint32, x.dtype), 0),), tag=RDX), nx])),
   # rewrite two address instructions to two address form, if reused src wasn't coalesced insert a move
-  (UPat(X86GroupOp.TwoAddress1st, name="x"), lambda ctx,x:
-   (nx:=x.replace(src=x.src[1:]), [assign(ctx, x.src[0], x.arg), nx] if x.arg != x.src[0].arg else [nx])),
+  (UPat(Ops.INS, name="x"), lambda ctx,x:
+   (nx:=x.replace(src=x.src[1:]), [assign(ctx, x.src[0], x.tag), nx] if x.tag != x.src[0].tag else [nx]) if x.arg in X86GroupOp.TwoAddress1st else None),
 ])
 
 # ***** X86 spec *****
@@ -434,7 +439,7 @@ isa_spec = PatternMatcher([
   # lambda a,b,m,x: x.dtype == a.dtype == b.dtype and x.dtype.itemsize == m.dtype.itemsize),
   # cmoves take a flag producing instruction
   #(UPat((X86Ops.CMOVB, X86Ops.CMOVL, X86Ops.CMOVE, X86Ops.CMOVNE), dtypes.bool, (UPat(), UPat(), UPat(X86GroupOp.WriteFlags))), lambda: True),
-  (UPat(Ops.INS), lambda: True),
+  (UPat(Ops.INS, name="x"), lambda x: x.arg in X86GroupOp.All),
 ])
 
 # ***** X86 instruction encoding *****
@@ -471,6 +476,9 @@ def encode(x:UOp, opc:int, reg:int|None=None, pp:int=0, sel:int=0, we:int=0):
   imm_uop = rest[-1] if rest[-1].arg is X86Ops.IMM or len(rest) == 3 else None
   # TODO: another reason to get rid of ptrs, if we access memory the size should be in scale uop otherwise size is in rm
   rm_sz = 8 if isinstance(address[0].dtype, PtrDType) and disp_uop is None else address[0].dtype.itemsize
+
+  # HACK remove once control flow is fixed
+  if x.arg is X86Ops.MOVi and len(x.src) == 2: vvvv, imm_uop = 0, rest[0]
 
   # encode instruction
   inst = bytes([])
@@ -530,112 +538,113 @@ def encode(x:UOp, opc:int, reg:int|None=None, pp:int=0, sel:int=0, we:int=0):
 # NOTE: LEGACY prefix == VEX prefix
 # pp field: None == 0, 66 == 1, F3 == 2, F2 == 3
 # map select: 0F == 1, 0F38 == 2, 0F3A == 3
-encodings = PatternMatcher([
+encodings = {
   # moves
-  (UPat.ins(X86Ops.MOVABS, name="x"), lambda x:
-   bytes([0b0100 << 4 | 0b1 << 3 | 0b00 << 2 | x.arg.index >> 3, 0xB8 + (x.arg.index & 0b111)]) + to_bytes(x.src[0].dtype, x.src[0].arg)),
-  (UPat.ins(X86Ops.MOV, name="x"), lambda x: encode(x, 0x8B)), (UPat.ins(X86Ops.MOVi, name="x"), lambda x: encode(x, 0xC7, reg=0)),
-  (UPat.ins(X86Ops.MOVm, name="x"), lambda x: encode(x, 0x89)), (UPat.ins(X86Ops.LEA, name="x"), lambda x: encode(x, 0x8D)),
-  (UPat.ins(X86Ops.VMOVSS, name="x"), lambda x: encode(x, 0x10, pp=2, sel=1)), (UPat.ins(X86Ops.VMOVSSm, name="x"), lambda x: encode(x, 0x11, pp=2, sel=1)), # noqa: E501
-  (UPat.ins(X86Ops.VMOVSD, name="x"), lambda x: encode(x, 0x10, pp=3, sel=1)), (UPat.ins(X86Ops.VMOVSDm, name="x"), lambda x: encode(x, 0x11, pp=3, sel=1)), # noqa: E501
-  (UPat.ins(X86Ops.VMOVUPS, name="x"), lambda x: encode(x, 0x10, pp=0, sel=1)), (UPat.ins(X86Ops.VMOVUPSm, name="x"), lambda x: encode(x, 0x11, pp=0, sel=1)), # noqa: E501
-  (UPat.ins(X86Ops.VMOVD, name="x"), lambda x: encode(x, 0x6E, pp=1, sel=1)), (UPat.ins(X86Ops.VMOVQ, name="x"), lambda x: encode(x, 0x6E, pp=1, sel=1, we=1)), # noqa: E501
-  (UPat.ins(X86Ops.VMOVDm, name="x"), lambda x: encode(x, 0x7E, pp=1, sel=1)), (UPat.ins(X86Ops.VMOVQm, name="x"), lambda x: encode(x, 0x7E, pp=1, sel=1, we=1)), # noqa: E501
+  X86Ops.MOVABS: lambda x:
+   bytes([0b0100 << 4 | 0b1 << 3 | 0b00 << 2 | x.tag.index >> 3, 0xB8 + (x.tag.index & 0b111)]) + to_bytes(x.src[0].dtype, x.src[0].tag),
+  X86Ops.MOV: lambda x: encode(x, 0x8B), X86Ops.MOVi: lambda x: encode(x, 0xC7, reg=0),
+  X86Ops.MOVm: lambda x: encode(x, 0x89), X86Ops.LEA: lambda x: encode(x, 0x8D),
+  X86Ops.VMOVSS: lambda x: encode(x, 0x10, pp=2, sel=1), X86Ops.VMOVSSm: lambda x: encode(x, 0x11, pp=2, sel=1),
+  X86Ops.VMOVSD: lambda x: encode(x, 0x10, pp=3, sel=1), X86Ops.VMOVSDm: lambda x: encode(x, 0x11, pp=3, sel=1),
+  X86Ops.VMOVUPS: lambda x: encode(x, 0x10, pp=0, sel=1), X86Ops.VMOVUPSm: lambda x: encode(x, 0x11, pp=0, sel=1),
+  X86Ops.VMOVD: lambda x: encode(x, 0x6E, pp=1, sel=1), X86Ops.VMOVQ: lambda x: encode(x, 0x6E, pp=1, sel=1, we=1),
+  X86Ops.VMOVDm: lambda x: encode(x, 0x7E, pp=1, sel=1), X86Ops.VMOVQm: lambda x: encode(x, 0x7E, pp=1, sel=1, we=1),
   # casts
-  (UPat.ins(X86Ops.MOVZX, name="x"), lambda x: encode(x, 0x0FB7)),
-  (UPat.ins(X86Ops.MOVSX, name="x"), lambda x: encode(x, 0x0FBF)), (UPat.ins(X86Ops.MOVSXD, name="x"), lambda x: encode(x, 0x63)),
-  (UPat.ins(X86Ops.VPMOVZXBW, name="x"), lambda x: encode(x, 0x30, pp=1, sel=2)), (UPat.ins(X86Ops.VPMOVZXBD, name="x"), lambda x: encode(x, 0x31, pp=1, sel=2)), # noqa: E501
-  (UPat.ins(X86Ops.VPMOVZXBQ, name="x"), lambda x: encode(x, 0x32, pp=1, sel=2)), (UPat.ins(X86Ops.VPMOVZXWD, name="x"), lambda x: encode(x, 0x33, pp=1, sel=2)), # noqa: E501
-  (UPat.ins(X86Ops.VPMOVZXWQ, name="x"), lambda x: encode(x, 0x34, pp=1, sel=2)), (UPat.ins(X86Ops.VPMOVZXDQ, name="x"), lambda x: encode(x, 0x35, pp=1, sel=2)), # noqa: E501
-  (UPat.ins(X86Ops.VPMOVSXBW, name="x"), lambda x: encode(x, 0x20, pp=1, sel=2)), (UPat.ins(X86Ops.VPMOVSXBD, name="x"), lambda x: encode(x, 0x21, pp=1, sel=2)), # noqa: E501
-  (UPat.ins(X86Ops.VPMOVSXBQ, name="x"), lambda x: encode(x, 0x22, pp=1, sel=2)), (UPat.ins(X86Ops.VPMOVSXWD, name="x"), lambda x: encode(x, 0x23, pp=1, sel=2)), # noqa: E501
-  (UPat.ins(X86Ops.VPMOVSXWQ, name="x"), lambda x: encode(x, 0x24, pp=1, sel=2)), (UPat.ins(X86Ops.VPMOVSXDQ, name="x"), lambda x: encode(x, 0x25, pp=1, sel=2)), # noqa: E501
-  (UPat.ins(X86Ops.VCVTSS2SD, name="x"), lambda x: encode(x, 0x5A, pp=2, sel=1)), (UPat.ins(X86Ops.VCVTSD2SS, name="x"), lambda x: encode(x, 0x5A, pp=3, sel=1)), # noqa: E501
-  (UPat.ins(X86Ops.VCVTPH2PS, name="x"), lambda x: encode(x, 0x13, pp=1, sel=2)), (UPat.ins(X86Ops.VCVTPS2PH, name="x"), lambda x: encode(x, 0x1D, pp=1, sel=3)), # noqa: E501
-  (UPat.ins(X86Ops.VCVTDQ2PS, name="x"), lambda x: encode(x, 0x5B, pp=0, sel=1)), (UPat.ins(X86Ops.VCVTDQ2PD, name="x"), lambda x: encode(x, 0xE6, pp=2, sel=1)), # noqa: E501
-  (UPat.ins(X86Ops.VCVTPS2PD, name="x"), lambda x: encode(x, 0x5A, pp=0, sel=1)), (UPat.ins(X86Ops.VCVTPD2PS, name="x"), lambda x: encode(x, 0x5A, pp=1, sel=1)), # noqa: E501
-  (UPat.ins(X86Ops.VCVTTPS2DQ, name="x"), lambda x: encode(x, 0x5B, pp=2, sel=1)), (UPat.ins(X86Ops.VCVTTPD2DQ, name="x"), lambda x: encode(x, 0xE6, pp=1, sel=1)), # noqa: E501
-  (UPat.ins(X86Ops.VCVTSI2SS, name="x"), lambda x: encode(x, 0x2A, pp=2, sel=1, we=x.src[1].dtype.base is dtypes.int64)),
-  (UPat.ins(X86Ops.VCVTSI2SD, name="x"), lambda x: encode(x, 0x2A, pp=3, sel=1, we=x.src[1].dtype.base is dtypes.int64)),
-  (UPat.ins(X86Ops.VCVTTSS2SI, name="x"), lambda x: encode(x, 0x2C, pp=2, sel=1, we=x.dtype in dtypes.int64s)),
-  (UPat.ins(X86Ops.VCVTTSD2SI, name="x"), lambda x: encode(x, 0x2C, pp=3, sel=1, we=x.dtype in dtypes.int64s)),
+  X86Ops.MOVZX: lambda x: encode(x, 0x0FB7),
+  X86Ops.MOVSX: lambda x: encode(x, 0x0FBF), X86Ops.MOVSXD: lambda x: encode(x, 0x63),
+  X86Ops.VPMOVZXBW: lambda x: encode(x, 0x30, pp=1, sel=2), X86Ops.VPMOVZXBD: lambda x: encode(x, 0x31, pp=1, sel=2),
+  X86Ops.VPMOVZXBQ: lambda x: encode(x, 0x32, pp=1, sel=2), X86Ops.VPMOVZXWD: lambda x: encode(x, 0x33, pp=1, sel=2),
+  X86Ops.VPMOVZXWQ: lambda x: encode(x, 0x34, pp=1, sel=2), X86Ops.VPMOVZXDQ: lambda x: encode(x, 0x35, pp=1, sel=2),
+  X86Ops.VPMOVSXBW: lambda x: encode(x, 0x20, pp=1, sel=2), X86Ops.VPMOVSXBD: lambda x: encode(x, 0x21, pp=1, sel=2),
+  X86Ops.VPMOVSXBQ: lambda x: encode(x, 0x22, pp=1, sel=2), X86Ops.VPMOVSXWD: lambda x: encode(x, 0x23, pp=1, sel=2),
+  X86Ops.VPMOVSXWQ: lambda x: encode(x, 0x24, pp=1, sel=2), X86Ops.VPMOVSXDQ: lambda x: encode(x, 0x25, pp=1, sel=2),
+  X86Ops.VCVTSS2SD: lambda x: encode(x, 0x5A, pp=2, sel=1), X86Ops.VCVTSD2SS: lambda x: encode(x, 0x5A, pp=3, sel=1),
+  X86Ops.VCVTPH2PS: lambda x: encode(x, 0x13, pp=1, sel=2), X86Ops.VCVTPS2PH: lambda x: encode(x, 0x1D, pp=1, sel=3),
+  X86Ops.VCVTDQ2PS: lambda x: encode(x, 0x5B, pp=0, sel=1), X86Ops.VCVTDQ2PD: lambda x: encode(x, 0xE6, pp=2, sel=1),
+  X86Ops.VCVTPS2PD: lambda x: encode(x, 0x5A, pp=0, sel=1), X86Ops.VCVTPD2PS: lambda x: encode(x, 0x5A, pp=1, sel=1),
+  X86Ops.VCVTTPS2DQ: lambda x: encode(x, 0x5B, pp=2, sel=1), X86Ops.VCVTTPD2DQ: lambda x: encode(x, 0xE6, pp=1, sel=1),
+  X86Ops.VCVTSI2SS: lambda x: encode(x, 0x2A, pp=2, sel=1, we=x.src[1].dtype.base is dtypes.int64),
+  X86Ops.VCVTSI2SD: lambda x: encode(x, 0x2A, pp=3, sel=1, we=x.src[1].dtype.base is dtypes.int64),
+  X86Ops.VCVTTSS2SI: lambda x: encode(x, 0x2C, pp=2, sel=1, we=x.dtype in dtypes.int64s),
+  X86Ops.VCVTTSD2SI: lambda x: encode(x, 0x2C, pp=3, sel=1, we=x.dtype in dtypes.int64s),
   # int division
-  (UPat.ins(X86Ops.IDIV, name="x"), lambda x: encode(x, 0xF7, reg=7)), (UPat.ins(X86Ops.DIV, name="x"), lambda x: encode(x, 0xF7, reg=6)),
+  X86Ops.IDIV: lambda x: encode(x, 0xF7, reg=7), X86Ops.DIV: lambda x: encode(x, 0xF7, reg=6),
   # scalar int binary
-  (UPat.ins(X86Ops.SHLi, name="x"), lambda x: encode(x, 0xC1, reg=4)),
-  (UPat.ins(X86Ops.SHRi, name="x"), lambda x: encode(x, 0xC1, reg=5)), (UPat.ins(X86Ops.SARi, name="x"), lambda x: encode(x, 0xC1, reg=7)),
-  (UPat.ins(X86Ops.ADD, name="x"), lambda x: encode(x, 0x03)), (UPat.ins(X86Ops.ADDi, name="x"), lambda x: encode(x, 0x81, reg=0)),
-  (UPat.ins(X86Ops.SUB, name="x"), lambda x: encode(x, 0x2B)), (UPat.ins(X86Ops.SUBi, name="x"), lambda x: encode(x, 0x81, reg=5)),
-  (UPat.ins(X86Ops.AND, name="x"), lambda x: encode(x, 0x23)), (UPat.ins(X86Ops.ANDi, name="x"), lambda x: encode(x, 0x81, reg=4)),
-  (UPat.ins(X86Ops.XOR, name="x"), lambda x: encode(x, 0x33)), (UPat.ins(X86Ops.XORi, name="x"), lambda x: encode(x, 0x81, reg=6)),
-  (UPat.ins(X86Ops.OR, name="x"), lambda x: encode(x, 0x0B)), (UPat.ins(X86Ops.ORi, name="x"), lambda x: encode(x, 0x81, reg=1)),
-  (UPat.ins(X86Ops.CMP, name="x"), lambda x: encode(x, 0x3B)), (UPat.ins(X86Ops.CMPi, name="x"), lambda x: encode(x, 0x81, reg=7)),
-  (UPat.ins(X86Ops.IMUL, name="x"), lambda x: encode(x, 0x0FAF)), (UPat.ins(X86Ops.IMULi, name="x"), lambda x: encode(x, 0x69)),
-  (UPat.ins(X86Ops.SETB, name="x"), lambda x: encode(x, 0x0F92, reg=0)), (UPat.ins(X86Ops.SETL, name="x"), lambda x: encode(x, 0x0F9C, reg=0)),
-  (UPat.ins(X86Ops.SETE, name="x"), lambda x: encode(x, 0x0F94, reg=0)), (UPat.ins(X86Ops.SETNE, name="x"), lambda x: encode(x, 0x0F95, reg=0)),
+  X86Ops.SHLi: lambda x: encode(x, 0xC1, reg=4),
+  X86Ops.SHRi: lambda x: encode(x, 0xC1, reg=5), X86Ops.SARi: lambda x: encode(x, 0xC1, reg=7),
+  X86Ops.ADD: lambda x: encode(x, 0x03), X86Ops.ADDi: lambda x: encode(x, 0x81, reg=0),
+  X86Ops.SUB: lambda x: encode(x, 0x2B), X86Ops.SUBi: lambda x: encode(x, 0x81, reg=5),
+  X86Ops.AND: lambda x: encode(x, 0x23), X86Ops.ANDi: lambda x: encode(x, 0x81, reg=4),
+  X86Ops.XOR: lambda x: encode(x, 0x33), X86Ops.XORi: lambda x: encode(x, 0x81, reg=6),
+  X86Ops.OR: lambda x: encode(x, 0x0B), X86Ops.ORi: lambda x: encode(x, 0x81, reg=1),
+  X86Ops.CMP: lambda x: encode(x, 0x3B), X86Ops.CMPi: lambda x: encode(x, 0x81, reg=7),
+  X86Ops.IMUL: lambda x: encode(x, 0x0FAF), X86Ops.IMULi: lambda x: encode(x, 0x69),
+  X86Ops.SETB: lambda x: encode(x, 0x0F92, reg=0), X86Ops.SETL: lambda x: encode(x, 0x0F9C, reg=0),
+  X86Ops.SETE: lambda x: encode(x, 0x0F94, reg=0), X86Ops.SETNE: lambda x: encode(x, 0x0F95, reg=0),
   # packed bitwise NOTE: only bitwise and packed
-  (UPat.ins(X86Ops.VPAND, name="x"), lambda x: encode(x, 0xDB, pp=1, sel=1)), (UPat.ins(X86Ops.VPXOR, name="x"), lambda x: encode(x, 0xEF, pp=1, sel=1)), # noqa: E501
-  (UPat.ins(X86Ops.VPOR, name="x"), lambda x: encode(x, 0xEB, pp=1, sel=1)),
+  X86Ops.VPAND: lambda x: encode(x, 0xDB, pp=1, sel=1), X86Ops.VPXOR: lambda x: encode(x, 0xEF, pp=1, sel=1),
+  X86Ops.VPOR: lambda x: encode(x, 0xEB, pp=1, sel=1),
   # unary
-  (UPat.ins(X86Ops.VSQRTSS, name="x"), lambda x: encode(x, 0x51, pp=2, sel=1)), (UPat.ins(X86Ops.VSQRTPS, name="x"), lambda x: encode(x, 0x51, pp=0, sel=1)), # noqa: E501
-  (UPat.ins(X86Ops.VSQRTSD, name="x"), lambda x: encode(x, 0x51, pp=3, sel=1)), (UPat.ins(X86Ops.VSQRTPD, name="x"), lambda x: encode(x, 0x51, pp=1, sel=1)), # noqa: E501
-  (UPat.ins(X86Ops.VROUNDSS, name="x"), lambda x: encode(x, 0x0A, pp=1, sel=3)), (UPat.ins(X86Ops.VROUNDPS, name="x"), lambda x: encode(x, 0x08, pp=1, sel=3)), # noqa: E501
-  (UPat.ins(X86Ops.VROUNDSD, name="x"), lambda x: encode(x, 0x0B, pp=1, sel=3)), (UPat.ins(X86Ops.VROUNDPD, name="x"), lambda x: encode(x, 0x09, pp=1, sel=3)), # noqa: E501
+  X86Ops.VSQRTSS: lambda x: encode(x, 0x51, pp=2, sel=1), X86Ops.VSQRTPS: lambda x: encode(x, 0x51, pp=0, sel=1),
+  X86Ops.VSQRTSD: lambda x: encode(x, 0x51, pp=3, sel=1), X86Ops.VSQRTPD: lambda x: encode(x, 0x51, pp=1, sel=1),
+  X86Ops.VROUNDSS: lambda x: encode(x, 0x0A, pp=1, sel=3), X86Ops.VROUNDPS: lambda x: encode(x, 0x08, pp=1, sel=3),
+  X86Ops.VROUNDSD: lambda x: encode(x, 0x0B, pp=1, sel=3), X86Ops.VROUNDPD: lambda x: encode(x, 0x09, pp=1, sel=3),
   # packed int binary
-  (UPat.ins(X86Ops.VPSLLVD, name="x"), lambda x: encode(x, 0x47, pp=1, sel=2)), (UPat.ins(X86Ops.VPSLLVQ, name="x"), lambda x: encode(x, 0x47, pp=1, sel=2, we=1)), # noqa: E501
-  (UPat.ins(X86Ops.VPSRLVD, name="x"), lambda x: encode(x, 0x45, pp=1, sel=2)), (UPat.ins(X86Ops.VPSRLVQ, name="x"), lambda x: encode(x, 0x45, pp=1, sel=2, we=1)), # noqa: E501
-  (UPat.ins(X86Ops.VPCMPGTB, name="x"), lambda x: encode(x, 0x64, pp=1, sel=1)), (UPat.ins(X86Ops.VPCMPGTW, name="x"), lambda x: encode(x, 0x65, pp=1, sel=1)), # noqa: E501
-  (UPat.ins(X86Ops.VPCMPGTD, name="x"), lambda x: encode(x, 0x66, pp=1, sel=1)), (UPat.ins(X86Ops.VPCMPGTQ, name="x"), lambda x: encode(x, 0x37, pp=1, sel=2)), # noqa: E501
-  (UPat.ins(X86Ops.VPCMPEQB, name="x"), lambda x: encode(x, 0x74, pp=1, sel=1)), (UPat.ins(X86Ops.VPCMPEQW, name="x"), lambda x: encode(x, 0x75, pp=1, sel=1)), # noqa: E501
-  (UPat.ins(X86Ops.VPCMPEQD, name="x"), lambda x: encode(x, 0x76, pp=1, sel=1)), (UPat.ins(X86Ops.VPCMPEQQ, name="x"), lambda x: encode(x, 0x29, pp=1, sel=2)), # noqa: E501
-  (UPat.ins(X86Ops.VPMULLW, name="x"), lambda x: encode(x, 0xD5, pp=1, sel=1)), (UPat.ins(X86Ops.VPMULLD, name="x"), lambda x: encode(x, 0x40, pp=1, sel=2)), # noqa: E501
-  (UPat.ins(X86Ops.VPADDB, name="x"), lambda x: encode(x, 0xFC, pp=1, sel=1)), (UPat.ins(X86Ops.VPADDW, name="x"), lambda x: encode(x, 0xFD, pp=1, sel=1)), # noqa: E501
-  (UPat.ins(X86Ops.VPADDD, name="x"), lambda x: encode(x, 0xFE, pp=1, sel=1)), (UPat.ins(X86Ops.VPADDQ, name="x"), lambda x: encode(x, 0xD4, pp=1, sel=1)), # noqa: E501
-  (UPat.ins(X86Ops.VPSUBB, name="x"), lambda x: encode(x, 0xF8, pp=1, sel=1)), (UPat.ins(X86Ops.VPSUBW, name="x"), lambda x: encode(x, 0xF9, pp=1, sel=1)), # noqa: E501
-  (UPat.ins(X86Ops.VPSUBD, name="x"), lambda x: encode(x, 0xFA, pp=1, sel=1)), (UPat.ins(X86Ops.VPSUBQ, name="x"), lambda x: encode(x, 0xFB, pp=1, sel=1)), # noqa: E501
-  (UPat.ins(X86Ops.VPSRAVD, name="x"), lambda x: encode(x, 0x46, pp=1, sel=2)),
+  X86Ops.VPSLLVD: lambda x: encode(x, 0x47, pp=1, sel=2), X86Ops.VPSLLVQ: lambda x: encode(x, 0x47, pp=1, sel=2, we=1),
+  X86Ops.VPSRLVD: lambda x: encode(x, 0x45, pp=1, sel=2), X86Ops.VPSRLVQ: lambda x: encode(x, 0x45, pp=1, sel=2, we=1),
+  X86Ops.VPCMPGTB: lambda x: encode(x, 0x64, pp=1, sel=1), X86Ops.VPCMPGTW: lambda x: encode(x, 0x65, pp=1, sel=1),
+  X86Ops.VPCMPGTD: lambda x: encode(x, 0x66, pp=1, sel=1), X86Ops.VPCMPGTQ: lambda x: encode(x, 0x37, pp=1, sel=2),
+  X86Ops.VPCMPEQB: lambda x: encode(x, 0x74, pp=1, sel=1), X86Ops.VPCMPEQW: lambda x: encode(x, 0x75, pp=1, sel=1),
+  X86Ops.VPCMPEQD: lambda x: encode(x, 0x76, pp=1, sel=1), X86Ops.VPCMPEQQ: lambda x: encode(x, 0x29, pp=1, sel=2),
+  X86Ops.VPMULLW: lambda x: encode(x, 0xD5, pp=1, sel=1), X86Ops.VPMULLD: lambda x: encode(x, 0x40, pp=1, sel=2),
+  X86Ops.VPADDB: lambda x: encode(x, 0xFC, pp=1, sel=1), X86Ops.VPADDW: lambda x: encode(x, 0xFD, pp=1, sel=1),
+  X86Ops.VPADDD: lambda x: encode(x, 0xFE, pp=1, sel=1), X86Ops.VPADDQ: lambda x: encode(x, 0xD4, pp=1, sel=1),
+  X86Ops.VPSUBB: lambda x: encode(x, 0xF8, pp=1, sel=1), X86Ops.VPSUBW: lambda x: encode(x, 0xF9, pp=1, sel=1),
+  X86Ops.VPSUBD: lambda x: encode(x, 0xFA, pp=1, sel=1), X86Ops.VPSUBQ: lambda x: encode(x, 0xFB, pp=1, sel=1),
+  X86Ops.VPSRAVD: lambda x: encode(x, 0x46, pp=1, sel=2),
   # float cmp
-  (UPat.ins(X86Ops.VUCOMISS, name="x"), lambda x: encode(x, 0x2E, pp=0, sel=1)), (UPat.ins(X86Ops.VUCOMISD, name="x"), lambda x: encode(x, 0x2E, pp=1, sel=1)), # noqa: E501
+  X86Ops.VUCOMISS: lambda x: encode(x, 0x2E, pp=0, sel=1), X86Ops.VUCOMISD: lambda x: encode(x, 0x2E, pp=1, sel=1),
   # scalar / packed float binary
-  (UPat.ins(X86Ops.VADDSS, name="x"), lambda x: encode(x, 0x58, pp=2, sel=1)), (UPat.ins(X86Ops.VADDPS, name="x"), lambda x: encode(x, 0x58, pp=0, sel=1)), # noqa: E501
-  (UPat.ins(X86Ops.VADDSD, name="x"), lambda x: encode(x, 0x58, pp=3, sel=1)), (UPat.ins(X86Ops.VADDPD, name="x"), lambda x: encode(x, 0x58, pp=1, sel=1)), # noqa: E501
-  (UPat.ins(X86Ops.VSUBSS, name="x"), lambda x: encode(x, 0x5C, pp=2, sel=1)), (UPat.ins(X86Ops.VSUBPS, name="x"), lambda x: encode(x, 0x5C, pp=0, sel=1)), # noqa: E501
-  (UPat.ins(X86Ops.VSUBSD, name="x"), lambda x: encode(x, 0x5C, pp=3, sel=1)), (UPat.ins(X86Ops.VSUBPD, name="x"), lambda x: encode(x, 0x5C, pp=1, sel=1)), # noqa: E501
-  (UPat.ins(X86Ops.VMULSS, name="x"), lambda x: encode(x, 0x59, pp=2, sel=1)), (UPat.ins(X86Ops.VMULPS, name="x"), lambda x: encode(x, 0x59, pp=0, sel=1)), # noqa: E501
-  (UPat.ins(X86Ops.VMULSD, name="x"), lambda x: encode(x, 0x59, pp=3, sel=1)), (UPat.ins(X86Ops.VMULPD, name="x"), lambda x: encode(x, 0x59, pp=1, sel=1)), # noqa: E501
-  (UPat.ins(X86Ops.VDIVSS, name="x"), lambda x: encode(x, 0x5E, pp=2, sel=1)), (UPat.ins(X86Ops.VDIVPS, name="x"), lambda x: encode(x, 0x5E, pp=0, sel=1)), # noqa: E501
-  (UPat.ins(X86Ops.VDIVSD, name="x"), lambda x: encode(x, 0x5E, pp=3, sel=1)), (UPat.ins(X86Ops.VDIVPD, name="x"), lambda x: encode(x, 0x5E, pp=1, sel=1)), # noqa: E501
-  (UPat.ins(X86Ops.VCMPSS, name="x"), lambda x: encode(x, 0xC2, pp=2, sel=1)), (UPat.ins(X86Ops.VCMPPS, name="x"), lambda x: encode(x, 0xC2, pp=0, sel=1)), # noqa: E501
-  (UPat.ins(X86Ops.VCMPSD, name="x"), lambda x: encode(x, 0xC2, pp=3, sel=1)), (UPat.ins(X86Ops.VCMPPD, name="x"), lambda x: encode(x, 0xC2, pp=1, sel=1)), # noqa: E501
-  (UPat.ins(X86Ops.VMAXSS, name="x"), lambda x: encode(x, 0x5F, pp=2, sel=1)), (UPat.ins(X86Ops.VMAXPS, name="x"), lambda x: encode(x, 0x5F, pp=0, sel=1)), # noqa: E501
-  (UPat.ins(X86Ops.VMAXSD, name="x"), lambda x: encode(x, 0x5F, pp=3, sel=1)), (UPat.ins(X86Ops.VMAXPD, name="x"), lambda x: encode(x, 0x5F, pp=1, sel=1)), # noqa: E501
-  (UPat.ins(X86Ops.VMINSS, name="x"), lambda x: encode(x, 0x5D, pp=2, sel=1)), (UPat.ins(X86Ops.VMINPS, name="x"), lambda x: encode(x, 0x5D, pp=0, sel=1)), # noqa: E501
-  (UPat.ins(X86Ops.VMINSD, name="x"), lambda x: encode(x, 0x5D, pp=3, sel=1)), (UPat.ins(X86Ops.VMINPD, name="x"), lambda x: encode(x, 0x5D, pp=1, sel=1)), # noqa: E501
+  X86Ops.VADDSS: lambda x: encode(x, 0x58, pp=2, sel=1), X86Ops.VADDPS: lambda x: encode(x, 0x58, pp=0, sel=1),
+  X86Ops.VADDSD: lambda x: encode(x, 0x58, pp=3, sel=1), X86Ops.VADDPD: lambda x: encode(x, 0x58, pp=1, sel=1),
+  X86Ops.VSUBSS: lambda x: encode(x, 0x5C, pp=2, sel=1), X86Ops.VSUBPS: lambda x: encode(x, 0x5C, pp=0, sel=1),
+  X86Ops.VSUBSD: lambda x: encode(x, 0x5C, pp=3, sel=1), X86Ops.VSUBPD: lambda x: encode(x, 0x5C, pp=1, sel=1),
+  X86Ops.VMULSS: lambda x: encode(x, 0x59, pp=2, sel=1), X86Ops.VMULPS: lambda x: encode(x, 0x59, pp=0, sel=1),
+  X86Ops.VMULSD: lambda x: encode(x, 0x59, pp=3, sel=1), X86Ops.VMULPD: lambda x: encode(x, 0x59, pp=1, sel=1),
+  X86Ops.VDIVSS: lambda x: encode(x, 0x5E, pp=2, sel=1), X86Ops.VDIVPS: lambda x: encode(x, 0x5E, pp=0, sel=1),
+  X86Ops.VDIVSD: lambda x: encode(x, 0x5E, pp=3, sel=1), X86Ops.VDIVPD: lambda x: encode(x, 0x5E, pp=1, sel=1),
+  X86Ops.VCMPSS: lambda x: encode(x, 0xC2, pp=2, sel=1), X86Ops.VCMPPS: lambda x: encode(x, 0xC2, pp=0, sel=1),
+  X86Ops.VCMPSD: lambda x: encode(x, 0xC2, pp=3, sel=1), X86Ops.VCMPPD: lambda x: encode(x, 0xC2, pp=1, sel=1),
+  X86Ops.VMAXSS: lambda x: encode(x, 0x5F, pp=2, sel=1), X86Ops.VMAXPS: lambda x: encode(x, 0x5F, pp=0, sel=1),
+  X86Ops.VMAXSD: lambda x: encode(x, 0x5F, pp=3, sel=1), X86Ops.VMAXPD: lambda x: encode(x, 0x5F, pp=1, sel=1),
+  X86Ops.VMINSS: lambda x: encode(x, 0x5D, pp=2, sel=1), X86Ops.VMINPS: lambda x: encode(x, 0x5D, pp=0, sel=1),
+  X86Ops.VMINSD: lambda x: encode(x, 0x5D, pp=3, sel=1), X86Ops.VMINPD: lambda x: encode(x, 0x5D, pp=1, sel=1),
   # ternary
-  (UPat.ins(X86Ops.CMOVB, name="x"), lambda x: encode(x, 0x0F42)), (UPat.ins(X86Ops.CMOVL, name="x"), lambda x: encode(x, 0x0F4C)),
-  (UPat.ins(X86Ops.CMOVE, name="x"), lambda x: encode(x, 0x0F44)), (UPat.ins(X86Ops.CMOVNE, name="x"), lambda x: encode(x, 0x0F45)),
-  (UPat.ins(X86Ops.VFMADD213SS, name="x"), lambda x: encode(x, 0xA9, pp=1, sel=2)), (UPat.ins(X86Ops.VFMADD213SD, name="x"), lambda x: encode(x, 0xA9, pp=1, sel=2, we=1)), # noqa: E501
-  (UPat.ins(X86Ops.VFMADD213PS, name="x"), lambda x: encode(x, 0xA8, pp=1, sel=2)), (UPat.ins(X86Ops.VFMADD213PD, name="x"), lambda x: encode(x, 0xA8, pp=1, sel=2, we=1)), # noqa: E501
-  (UPat.ins(X86Ops.VBLENDVPS, name="x"), lambda x: encode(x, 0x4A, pp=1, sel=3)), (UPat.ins(X86Ops.VBLENDVPD, name="x"), lambda x: encode(x, 0x4B, pp=1, sel=3)), # noqa: E501
-  (UPat.ins(X86Ops.VPBLENDVB, name="x"), lambda x: encode(x, 0x4C, pp=1, sel=3)),
+  X86Ops.CMOVB: lambda x: encode(x, 0x0F42), X86Ops.CMOVL: lambda x: encode(x, 0x0F4C),
+  X86Ops.CMOVE: lambda x: encode(x, 0x0F44), X86Ops.CMOVNE: lambda x: encode(x, 0x0F45),
+  X86Ops.VFMADD213SS: lambda x: encode(x, 0xA9, pp=1, sel=2), X86Ops.VFMADD213SD: lambda x: encode(x, 0xA9, pp=1, sel=2, we=1),
+  X86Ops.VFMADD213PS: lambda x: encode(x, 0xA8, pp=1, sel=2), X86Ops.VFMADD213PD: lambda x: encode(x, 0xA8, pp=1, sel=2, we=1),
+  X86Ops.VBLENDVPS: lambda x: encode(x, 0x4A, pp=1, sel=3), X86Ops.VBLENDVPD: lambda x: encode(x, 0x4B, pp=1, sel=3),
+  X86Ops.VPBLENDVB: lambda x: encode(x, 0x4C, pp=1, sel=3),
   # shuffles
-  (UPat.ins(X86Ops.VPBROADCASTB, name="x"), lambda x: encode(x, 0x78, pp=1, sel=2)), (UPat.ins(X86Ops.VPBROADCASTW, name="x"), lambda x: encode(x, 0x79, pp=1, sel=2)), # noqa: E501
-  (UPat.ins(X86Ops.VPBROADCASTD, name="x"), lambda x: encode(x, 0x58, pp=1, sel=2)), (UPat.ins(X86Ops.VPBROADCASTQ, name="x"), lambda x: encode(x, 0x59, pp=1, sel=2)), # noqa: E501
-  (UPat.ins(X86Ops.VBROADCASTSS, name="x"), lambda x: encode(x, 0x18, pp=1, sel=2)),
-  (UPat.ins(X86Ops.VPINSRB, name="x"), lambda x: encode(x, 0x20, pp=1, sel=3)), (UPat.ins(X86Ops.VPINSRW, name="x"), lambda x: encode(x, 0xC4, pp=1, sel=1)), # noqa: E501
-  (UPat.ins(X86Ops.VPINSRD, name="x"), lambda x: encode(x, 0x22, pp=1, sel=3)), (UPat.ins(X86Ops.VPINSRQ, name="x"), lambda x: encode(x, 0x22, pp=1, sel=3, we=1)), # noqa: E501
-  (UPat.ins(X86Ops.VSHUFPS, name="x"), lambda x: encode(x, 0xC6, pp=0, sel=1)), (UPat.ins(X86Ops.VINSERTPS, name="x"), lambda x: encode(x, 0x21, pp=1, sel=3)), # noqa: E501
+  X86Ops.VPBROADCASTB: lambda x: encode(x, 0x78, pp=1, sel=2), X86Ops.VPBROADCASTW: lambda x: encode(x, 0x79, pp=1, sel=2),
+  X86Ops.VPBROADCASTD: lambda x: encode(x, 0x58, pp=1, sel=2), X86Ops.VPBROADCASTQ: lambda x: encode(x, 0x59, pp=1, sel=2),
+  X86Ops.VBROADCASTSS: lambda x: encode(x, 0x18, pp=1, sel=2),
+  X86Ops.VPINSRB: lambda x: encode(x, 0x20, pp=1, sel=3), X86Ops.VPINSRW: lambda x: encode(x, 0xC4, pp=1, sel=1),
+  X86Ops.VPINSRD: lambda x: encode(x, 0x22, pp=1, sel=3), X86Ops.VPINSRQ: lambda x: encode(x, 0x22, pp=1, sel=3, we=1),
+  X86Ops.VSHUFPS: lambda x: encode(x, 0xC6, pp=0, sel=1), X86Ops.VINSERTPS: lambda x: encode(x, 0x21, pp=1, sel=3),
   # extract
-  (UPat.ins(X86Ops.VPEXTRB, name="x"), lambda x: encode(x, 0x14, pp=1, sel=3)), (UPat.ins(X86Ops.VPEXTRW, name="x"), lambda x: encode(x, 0x15, pp=1, sel=3)), # noqa: E501
-  (UPat.ins(X86Ops.VPEXTRD, name="x"), lambda x: encode(x, 0x16, pp=1, sel=3)), (UPat.ins(X86Ops.VPEXTRQ, name="x"), lambda x: encode(x, 0x16, pp=1, sel=3, we=1)), # noqa: E501
+  X86Ops.VPEXTRB: lambda x: encode(x, 0x14, pp=1, sel=3), X86Ops.VPEXTRW: lambda x: encode(x, 0x15, pp=1, sel=3),
+  X86Ops.VPEXTRD: lambda x: encode(x, 0x16, pp=1, sel=3), X86Ops.VPEXTRQ: lambda x: encode(x, 0x16, pp=1, sel=3, we=1),
   # jumps are encoded with a placeholder which gets patched later once the real offset is known
-  (UPat.ins(X86Ops.JE), lambda: bytes([0x0F, 0x84]) + int(0).to_bytes(4, 'little', signed=True)),
-  (UPat.ins(X86Ops.JNE), lambda: bytes([0x0F, 0x85]) + int(0).to_bytes(4, 'little', signed=True)),
-  (UPat.ins(X86Ops.JL), lambda: bytes([0x0F, 0x8C]) + int(0).to_bytes(4, 'little', signed=True)),
-  (UPat.ins(X86Ops.JB), lambda: bytes([0x0F, 0x82]) + int(0).to_bytes(4, 'little', signed=True)),
-  # return
-  (UPat.ins(X86Ops.RET), lambda: bytes([0xC3])),
-])
+  X86Ops.JE: lambda x: bytes([0x0F, 0x84]) + int(0).to_bytes(4, 'little', signed=True),
+  X86Ops.JNE: lambda x: bytes([0x0F, 0x85]) + int(0).to_bytes(4, 'little', signed=True),
+  X86Ops.JL: lambda x: bytes([0x0F, 0x8C]) + int(0).to_bytes(4, 'little', signed=True),
+  X86Ops.JB: lambda x: bytes([0x0F, 0x82]) + int(0).to_bytes(4, 'little', signed=True),
+  X86Ops.JGE: lambda x: bytes([0x0F, 0x8D]) + int(0).to_bytes(4, 'little', signed=True),
+  X86Ops.JMP: lambda x: bytes([0xE9]) + int(0).to_bytes(4, 'little', signed=True),
+  X86Ops.RET: lambda x: bytes([0xC3]),
+}
 
 class X86Renderer(ISARenderer):
   device = "CPU"
@@ -652,20 +661,27 @@ class X86Renderer(ISARenderer):
     from tinygrad.runtime.support.compiler_cpu import X86Compiler
     self.compiler = X86Compiler()
   def stack_pointer(self) -> UOp: return UOp(Ops.INS, arg=X86Ops.DEFINE_REG, dtype=dtypes.uint64, tag=RSP)
+  def print_asm(self, uops:list[UOp]) -> str:
+    def _format_operands(ins:tuple[UOp, ...]) -> str: return [f"{s.tag}" for s in ins if s.tag is not None]
+    for u in uops:
+      if u.arg in (X86Ops.IMM, X86Ops.DEFINE_REG): continue
+      print(f"{str(u.arg)[7:].lower():15s} " f"{str(_format_operands((u,)+u.src))}")
   def render(self, uops:list[UOp], lower:bool=True) -> str:
     if lower: uops = self.lower(uops[-1])
-    targets: set[UOp] = set()
-    target_loc: list[int] = []
+    targets: dict[str, int] = {}
+    jumps: dict[UOp, int] = {}
     binary = bytearray()
     for u in uops:
-      if u.arg in (X86Ops.JL, X86Ops.JB, X86Ops.JE, X86Ops.JNE): targets.add(u.src[0])
-    for u in uops:
-      if u.arg in (Ops.GROUP, Ops.NOOP, Ops.AFTER, Ops.BARRIER): continue
+      if u.op in (Ops.GROUP, Ops.NOOP, Ops.AFTER, Ops.BARRIER): continue
       if u.arg in (X86Ops.IMM, X86Ops.DEFINE_REG): continue
-      if (l:=cast(bytes|None, encodings.rewrite(u))) is None:
+      if u.arg is X86Ops.LABEL:
+        targets[u.tag] = len(binary)
+        continue
+      if u.arg not in encodings or (l:=encodings[u.arg](u)) is None:
         raise RuntimeError(f"failed to encode {u.arg} with {u.dtype} srcs {[x.dtype for x in u.src]}")
       binary.extend(l)
-      if u in targets: target_loc.append(len(binary))
-      elif u.arg in (X86Ops.JL, X86Ops.JB, X86Ops.JE, X86Ops.JNE):
-        binary[-4:] = (target_loc.pop() - len(binary)).to_bytes(4, 'little', signed=True)
+      if u.arg in (X86Ops.JL, X86Ops.JB, X86Ops.JE, X86Ops.JNE, X86Ops.JGE, X86Ops.JMP): jumps[u] = len(binary)
+    # fixup jump targets now that encoding size is known
+    for u in uops:
+      if (t:=jumps.get(u)) is not None: binary[t-4:t] = (targets[u.tag] - t).to_bytes(4, 'little', signed=True)
     return binary.hex()

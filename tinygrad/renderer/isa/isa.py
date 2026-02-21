@@ -8,11 +8,6 @@ from tinygrad.codegen.late.regalloc import RegallocContext, pm_regalloc, pm_inse
 from tinygrad.uop.spec import type_verify
 from tinygrad.helpers import SPEC, DEBUG, prod
 
-def print_uop_asm(uops:list[UOp]):
-  for i,u in enumerate(uops):
-    formatted_srcs = [f"{x.arg}" for x in u.src if x.arg is not None]
-    print(f"{i:4d} {str(u.op):20s}: {str(u.dtype):40s} " f"{str(u.arg):32s} {str(formatted_srcs)}")
-
 class IselContext:
   def __init__(self, sink:UOp):
     self.uses = sink.get_consumer_map()
@@ -31,7 +26,7 @@ class IselContext:
 
 isel_fixup = PatternMatcher([
   # NOOP / AFTER have the same register as first src
-  (UPat((Ops.NOOP, Ops.AFTER), name="x"), lambda x: x.replace(arg=x.src[0].arg) if x.src and x.arg is None else None),
+  (UPat((Ops.NOOP, Ops.AFTER), name="x"), lambda x: x.replace(tag=x.src[0].tag) if x.src and x.tag is None else None),
 ])
 
 # TODO: this will eventually be a proper scheduler
@@ -54,10 +49,11 @@ def isa_linearize(sink:UOp) -> list[UOp]:
     match u.op:
       case Ops.RANGE: priority = 5    # placing RANGE is good
       case Ops.END: priority = -5     # placing END is bad
-      # stack pointer needs to be scheduled at the top of the kernel
-      case X86Ops.DEFINE_REG: priority = -21 if u.arg == RSP else -20
-      case X86Ops.IMM: priority = -10
       case _: priority = 0            # everything else has priority 0
+    match u.arg:
+      # stack pointer needs to be scheduled at the top of the kernel
+      case X86Ops.DEFINE_REG: priority = -21 if u.tag == RSP else -20
+      case X86Ops.IMM: priority = -10
     priorities[u] = (run_count, priority)
 
   # number the uops in "ideal" order
@@ -92,12 +88,12 @@ def isa_linearize(sink:UOp) -> list[UOp]:
       # if this is a loop boundry or has a lower run count than the flag user that introduced the lock we also don't schedule
       # loop boundries do clobber but we also don't want to insert stuff from outside the loop into the loop
       # if there's no loop we also don't want to add IMM and DEFINE_REG in the middle of the kernel
-      elif u.op in X86GroupOp.ReadFlags and lock is not u.src[-1] or u.op in X86GroupOp.WriteFlags or \
-        u.op in {Ops.RANGE, Ops.END, X86Ops.IMM, X86Ops.DEFINE_REG} or priorities[u][0] < stupid:
+      elif u.arg in X86GroupOp.ReadFlags and lock is not u.src[-1] or u.arg in X86GroupOp.WriteFlags or \
+        u.arg in {Ops.RANGE, Ops.END, X86Ops.IMM, X86Ops.DEFINE_REG} or priorities[u][0] < stupid:
         clobbers.add(u)
         continue
     # if there's no lock and this is a flag user its flag producer becomes the lock
-    elif u.op in X86GroupOp.ReadFlags: lock, stupid = u.src[-1], priorities[u][0]
+    elif u.arg in X86GroupOp.ReadFlags: lock, stupid = u.src[-1], priorities[u][0]
 
     newlst.append(u)
 
@@ -111,8 +107,8 @@ class ISARenderer(Renderer):
   pre_isel_matcher: PatternMatcher
   isel_matcher: PatternMatcher
   post_regalloc_matcher: PatternMatcher
-
   def stack_pointer(self) -> UOp: raise NotImplementedError("arch specific")
+  def print_asm(self, uops:list[UOp]) -> str: raise NotImplementedError("arch specific")
   # TODO: these should go with the other rewrites after we know what to do with ProgramSpec and Estimates
   def lower(self, sink:UOp):
     sink = graph_rewrite(sink, self.pre_isel_matcher, name="pre instruction selection", bottom_up=True)
@@ -121,11 +117,11 @@ class ISARenderer(Renderer):
     # TODO: remove, annoying needed for noops
     sink = graph_rewrite(sink, isel_fixup, name="instruction selection fixup")
     lst = isa_linearize(sink)
-    if DEBUG >= 8: print_uop_asm(lst)
+    if DEBUG >= 8: self.print_asm(lst)
     regalloc_ctx = RegallocContext(lst, self.isel_matcher, self.stack_pointer(), isel_ctx.stack_size)
     lst = line_rewrite(lst, pm_regalloc, regalloc_ctx)
     lst = line_rewrite(lst, pm_insert_spills, regalloc_ctx)
     lst = line_rewrite(lst, self.post_regalloc_matcher, regalloc_ctx)
-    if DEBUG >= 7: print_uop_asm(lst)
+    if DEBUG >= 7: self.print_asm(lst)
     if SPEC: type_verify(lst, self.isa_spec)
     return lst

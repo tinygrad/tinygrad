@@ -26,6 +26,8 @@ class RegallocContext:
     self.isel = isel
     self.stack_ptr = stack_ptr
     self.stack_size = stack_size
+    # the label associated with each loop NOTE: this is only used post regalloc and should be removed
+    self.loop_label: dict[UOp, str] = {}
     # compute live ranges
     lr, ranges = self.live_range, []
     for i,u in enumerate(reversed(uops)):
@@ -39,7 +41,7 @@ class RegallocContext:
 # nasty hacks to deal with pointers
 def assign(ctx:RegallocContext, x:UOp, reg:Register):
   dt = dtypes.uint64 if isinstance(x.dtype, PtrDType) else x.dtype
-  ret = ctx.isel.rewrite(UOp(Ops.ASSIGN, dt, (x,), reg))
+  ret = ctx.isel.rewrite(UOp(Ops.ASSIGN, dt, (x,), tag=reg))
   assert ret is not None
   return ret.replace(dtype=x.dtype)
 def load(ctx:RegallocContext, dt:DType, disp:UOp, reg:Register):
