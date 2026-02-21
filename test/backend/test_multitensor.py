@@ -1202,7 +1202,6 @@ class TestMultiAssign(unittest.TestCase):
     out[:, 2:3].assign(ones).realize()
     self.assertListEqual(out.tolist(), [[0,0,1,0], [0,0,1,0], [0,0,1,0], [0,0,1,0]])
 
-  @unittest.expectedFailure
   def test_multi_assign_piece_unrealized(self):
     out = Tensor.zeros(4,4).contiguous().realize().shard(self.device, 0)
     ones = Tensor.ones(4,1).shard(self.device, 0).contiguous().realize()
