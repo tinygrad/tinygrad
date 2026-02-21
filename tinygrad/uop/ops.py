@@ -694,7 +694,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     if self.op not in (Ops.BUFFER, Ops.MSTACK): return None
     # LUNIQUEs are never realized
     if self.op_in_backward_slice_with_self(Ops.LUNIQUE): return None
-    return self.buffer
+    return self.buffer if self.buffer.is_allocated() else None
   @property
   def is_realized(self) -> bool: return self.base.realized is not None
 
