@@ -111,8 +111,12 @@ class MockASM24State:
     address = addr_lo | (addr_hi << 32)
 
     size, offset, tmp = 0, 0, byte_en
-    while tmp and not (tmp & 1): offset += 1; tmp >>= 1
-    while tmp: size += tmp & 1; tmp >>= 1
+    while tmp and not (tmp & 1):
+      offset += 1
+      tmp >>= 1
+    while tmp:
+      size += tmp & 1
+      tmp >>= 1
 
     is_write, is_cfg = bool(fmt_type & 0x40), (fmt_type & 0xbe) == 0x04
 
