@@ -1112,5 +1112,33 @@ class TestCDNA_DS_Write_InactiveLaneGarbage(unittest.TestCase):
     for i, (got, expected) in enumerate(zip(results, magic)):
       self.assertEqual(got, expected, f"dword[{i}]: got 0x{got:08x}, expected 0x{expected:08x}")
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# Bug 12: GFX950 SMEM format 61 — comgr encodes s_load_dwordx4 at
+# bits[31:26]=0b111101 instead of ISA XML's 0b110000 (format 48).
+# Fix: SMEM_F61(SMEM) subclass in cdna/ins.py overriding only encoding.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestCDNA_SMEM_Format61(unittest.TestCase):
+  def test_decode_0xf4080500(self):
+    """The actual GEMM bytes that raised ValueError should decode as s_load_dwordx4."""
+    from tinygrad.renderer.amd import decode_inst
+    inst = decode_inst(b'\x00\x05\x08\xf4\x00\x00\x00\x00', 'cdna')
+    self.assertEqual(inst.op.name, 'S_LOAD_DWORDX4')
+
+  def test_s_load_dwordx2_format61(self):
+    """Format 61 s_load_dwordx2 loads kernel args and stores a sentinel — full emulator path."""
+    from tinygrad.runtime.autogen.amd.cdna.ins import SMEM_F61
+    from tinygrad.runtime.autogen.amd.cdna.enum import SMEMOp
+    instructions = [
+      SMEM_F61(SMEMOp.S_LOAD_DWORDX2, sdata=s[10:11], sbase=s[0:1], offset=0),
+      cdna.s_waitcnt(0),
+      cdna.v_mov_b32_e32(v[1], 0x12345678),
+      cdna.v_mov_b32_e32(v[0], 0),
+      cdna.global_store_dword(addr=v[0], data=v[1], saddr=s[10:11], offset=0),
+      cdna.s_endpgm(),
+    ]
+    out = run_cdna_program_raw(instructions, n_lanes=64)
+    self.assertEqual(struct.unpack_from('<I', out, 0)[0], 0x12345678)
+
 if __name__ == '__main__':
   unittest.main()

@@ -93,6 +93,28 @@ def _load_vmem_guard():
     except OSError: pass
   return None
 
+# JIT code page protection: mark compiled code pages as RX (non-writable) after compilation.
+# The emulator uses external_ptr=0, overlaying the entire host address space as GPU vmem. MUBUF stores
+# with large num_records (e.g., 2GB) can compute addresses landing on JIT code pages. If these pages
+# are RWX (as some JIT backends leave them), stores silently corrupt the code. By making them RX,
+# writes trigger SEGV_ACCERR, which vmem_guard.so catches and redirects to the trash page.
+_libc: ctypes.CDLL | None = None
+_protected_pages: set[int] = set()
+
+def _protect_jit_code_page(fxn_ptr: int) -> None:
+  """Mark the page containing fxn_ptr as PROT_READ|PROT_EXEC (non-writable)."""
+  global _libc
+  if platform.system() != 'Linux': return
+  page_size = 4096
+  page_addr = fxn_ptr & ~(page_size - 1)
+  if page_addr in _protected_pages: return
+  if _libc is None:
+    try: _libc = ctypes.CDLL("libc.so.6")
+    except OSError: return
+  # PROT_READ=1, PROT_EXEC=4 → 5 (non-writable)
+  ret = _libc.mprotect(ctypes.c_void_p(page_addr), ctypes.c_size_t(page_size), ctypes.c_int(5))
+  if ret == 0: _protected_pages.add(page_addr)
+
 from tinygrad.uop.ops import UOp, Ops, KernelInfo, AxisType
 from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.device import Buffer, BufferSpec
@@ -1956,7 +1978,8 @@ _INST_HANDLERS: dict[type, Callable[..., UOp]] = {
   ir4.VOP3_SDST: _compile_vop3, ir4.VOP3SD: _compile_vop3sd, ir4.VOP3P: _compile_vop3p, ir4.VOPD: _compile_vopd,
   ir4.DS: _compile_mem_op, ir4.VFLAT: _compile_mem_op, ir4.VGLOBAL: _compile_mem_op, ir4.VSCRATCH: _compile_mem_op,
   # CDNA instruction classes
-  irc.SOPP: _compile_sopp, irc.SMEM: _compile_smem, irc.SOP1: _compile_sop, irc.SOP2: _compile_sop, irc.SOPC: _compile_sop, irc.SOPK: _compile_sop,
+  irc.SOPP: _compile_sopp, irc.SMEM: _compile_smem, irc.SMEM_F61: _compile_smem,
+  irc.SOP1: _compile_sop, irc.SOP2: _compile_sop, irc.SOPC: _compile_sop, irc.SOPK: _compile_sop,
   irc.VOP1: _compile_vop12, irc.VOP2: _compile_vop12, irc.VOPC: _compile_vopc, irc.VOP3: _compile_vop3,
   irc.VOP3_SDST: _compile_vop3, irc.VOP3SD: _compile_vop3sd, irc.VOP3P: _compile_vop3p,
   irc.VOP1_SDWA: _compile_sdwa, irc.VOP2_SDWA: _compile_sdwa, irc.VOP2_SDWA_SDST: _compile_sdwa, irc.VOPC_SDWA_SDST: _compile_sdwa,
@@ -1999,6 +2022,9 @@ def _get_runner(inst_bytes: bytes, arch: str = "rdna3"):
   # NOTE: renderer output is not reproducible because of _MXCSRContext. PROFILE=0 prevents emulator instruction runners from polluting profiling.
   with Context(NOOPT=1, CHECK_OOB=0, TUPLE_ORDER=0, EMULATED_DTYPES="", CAPTURE_PROCESS_REPLAY=0, PROFILE=0):
     runner = get_runner('CPU', sink)
+  # Protect JIT code page from MUBUF store corruption (make RWX→RX so vmem_guard catches writes)
+  fxn_addr = ctypes.cast(runner._prg.fxn, ctypes.c_void_p).value
+  if fxn_addr: _protect_jit_code_page(fxn_addr)
   _canonical_runner_cache.append((type(inst), base, mask, size, runner))
   # DEBUG: dump C source for MFMA instructions
   if DEBUG >= 4 and 'MFMA' in _op_name(inst):
