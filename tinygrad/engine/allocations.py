@@ -81,6 +81,13 @@ pm_early_transform_tensor_graph = PatternMatcher([
    lambda reduce,x: reduce.const_like(identity_element(reduce.arg[0], reduce.dtype)) if x.size == 0 and reduce.size != 0 else None),
   # handle size 0
   (UPat(GroupOp.All-{Ops.SINK}, name="x"), lambda x: x.const_like(0).rtag(x.tag) if x._shape is not None and x.size == 0 else None),
+  # early fixup const copy (TODO: is this wrong if there's a pad?)
+  (UPat(Ops.COPY, src=(UPat.var("s"), UPat()), name="c"), lambda c,s: c.const_like(ss.arg) if (ss:=s.base).op is Ops.CONST else None),
+])
+
+pm_remove_unique_consts = PatternMatcher([
+  # replace UNIQUE with LUNIQUE for CONST cache key normalization
+  (UPat(Ops.CONST, src=(UPat(Ops.UNIQUE), UPat(Ops.DEVICE, name="d")), name="b"), lambda b,d: b.replace(src=(d,))),
 ])
 
 def allocate_global_buffers(big_sink:UOp) -> tuple[UOp, dict[UOp, UOp]]:
@@ -108,5 +115,5 @@ def allocate_global_buffers(big_sink:UOp) -> tuple[UOp, dict[UOp, UOp]]:
         replace_uop = s
         while replace_uop.op is Ops.ASSIGN: replace_uop = replace_uop.src[0]
         buffer_map[original_uop] = replace_uop.shrink_to(original_uop.shape)
-  big_sink = graph_rewrite(big_sink, _remove_all_tags, name="remove tags")
+  big_sink = graph_rewrite(big_sink, _remove_all_tags+pm_remove_unique_consts, name="remove tags")
   return big_sink, buffer_map

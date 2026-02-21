@@ -33,20 +33,6 @@ pm_mops = PatternMatcher([
 # *****************
 # 0. do some cleanup rewrites, mostly copied from the old stuff
 
-def assign_to_contiguous(assign:UOp, target:UOp, src:UOp):
-  if (t := target.base).op is Ops.PARAM or (t.op is Ops.MSTACK and all(s.op is Ops.PARAM for s in t.src)): return None
-  # partial view of unrealized graph: insert CONTIGUOUS at base to realize it
-  if target is not t and target.op_in_backward_slice_with_self(Ops.SHRINK):
-    if t.op is Ops.CONTIGUOUS: return None
-    mops: list[UOp] = []
-    while target.op in GroupOp.Movement:
-      mops.append(target)
-      target = target.src[0]
-    new_target = t.f(Ops.CONTIGUOUS)
-    for m in reversed(mops): new_target = m.replace(src=(new_target,)+m.src[1:])
-    return assign.replace(src=(new_target, src))
-  return src.f(Ops.CONTIGUOUS)
-
 def fix_assign_hazard(assign:UOp, target:UOp, src:UOp):
   # PERMUTE and FLIP reorder indices, SHRINK can have overlapping regions when dest is also shrunk
   unsafe = {Ops.PERMUTE, Ops.FLIP} | ({Ops.SHRINK} if target.op_in_backward_slice_with_self(Ops.SHRINK) else set())
@@ -86,7 +72,7 @@ def split_reduceop(reduce:UOp, x:UOp):
   return splitted.r(*reduce.arg).contiguous().r(reduce.arg[0], (len(reduce.shape),)).reshape(reduce.shape)
 
 mop_cleanup = PatternMatcher([
-  # merge adjacent RESHAPES, safe because they are not tagged
+  # merge adjacent RESHAPES
   (UPat(Ops.RESHAPE, src=(UPat(Ops.RESHAPE, name="x2"), UPat()), name="x"), lambda x,x2: x.replace(src=(x2.src[0], x.src[1]))),
 ])
 
@@ -108,9 +94,6 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
   # resolve calls
   (UPat(Ops.CALL, name="c"), resolve_call),
 
-  # remove CONTIGUOUS if the source is already contiguous
-  (UPat(Ops.RESHAPE, src=(UPat((Ops.PARAM, Ops.CONTIGUOUS)), UPat()), name="r").f(Ops.CONTIGUOUS), lambda r: r),
-
   # split_reduceop
   (UPat(Ops.REDUCE_AXIS, name="reduce", src=(UPat.var("x"),)), split_reduceop),
 
@@ -124,11 +107,7 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
 
   # ** copy rules **
 
-  # early fixup const copy
-  (UPat(Ops.COPY, src=(UPat.var("s"), UPat()), name="c"), lambda c,s: c.const_like(ss.arg) if (ss:=s.base).op is Ops.CONST else None),
-
   # COPY and source size need to match
-  # TODO: expand after copy creates issues with tagging
   (UPat(Ops.COPY, src=(UPat(GroupOp.Movement, name="r"), UPat(name="d")), name="c"),
    lambda c,r,d: c.replace(src=(r.contiguous(), d)) if r.size != r.base.size else None),
 
@@ -141,17 +120,14 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
   (UPat(Ops.ASSIGN, src=(UPat(name="target"), UPat(Ops.ASSIGN, src=(UPat(name="target"), UPat()), name="src"))), lambda target, src: src),
 
   # move bitcast from assign target to source: a.bitcast(X).assign(src) -> a.assign(src.bitcast(a.dtype))
-  (UPat(Ops.ASSIGN, src=(UPat(Ops.BITCAST, src=(UPat(name="target"),)), UPat(name="src")), name="assign"),
-   lambda assign, target, src: target.assign(src.bitcast(target.dtype))),
+  (UPat(Ops.ASSIGN, src=(UPat(Ops.BITCAST, src=(UPat(name="target"),)), UPat(name="src"))),
+   lambda target, src: target.assign(src.bitcast(target.dtype))),
 
   # if assign target is itself an ASSIGN chain, canonicalize to the original buffer target
   (UPat(Ops.ASSIGN, src=(UPat(Ops.ASSIGN, name="target"), UPat(name="src")), allow_any_len=True, name="assign"), normalize_assign_target_chain),
 
-  # assign only to buffer, otherwise make it a CONTIGUOUS
-  (UPat(Ops.ASSIGN, src=(UPat(GroupOp.All-{Ops.PARAM}, name="target"), UPat(name="src")), name="assign"), assign_to_contiguous),
-
-   # make source contiguous if it has hazardous movement ops on the dest buffer
-   (UPat(Ops.ASSIGN, src=(UPat.var("target"), UPat.var("src")), name="assign"), fix_assign_hazard),
+  # make source contiguous if it has hazardous movement ops on the dest buffer
+  (UPat(Ops.ASSIGN, src=(UPat.var("target"), UPat.var("src")), name="assign"), fix_assign_hazard),
 ])
 
 # *****************
@@ -396,7 +372,6 @@ class LocalAddBufferContext:
   map:dict = field(default_factory=dict)
   vars:dict = field(default_factory=dict)
   range:int = 0
-  parent_tags:list = field(default_factory=list)
   opts:tuple|None = None
 
 def debuf(ctx:LocalAddBufferContext, buf:UOp):
@@ -458,12 +433,6 @@ rangeify_codegen = PatternMatcher([
   # TODO: this can be moved into codegen?
   (UPat(Ops.NOOP, name="x"), lambda x: x.src[0]),
 
-  # add loads to non ptr indexes
-  # TODO: this can be moved into codegen?
-  #(UPat.any(UPat(Ops.DEFINE_GLOBAL, name="dg"), UPat(Ops.DEFINE_LOCAL).f(Ops.AFTER, allow_any_len=True, name="dg"))
-  # .f(Ops.INDEX, name="idx", allow_any_len=True),
-  #  lambda dg,idx: None if isinstance(idx.dtype, (PtrDType, ImageDType)) else idx.replace(dtype=dg.dtype, arg=None).load()),
-
   # fix broadcast dtype
   (UPat(Ops.AFTER, name="a").broadcast(name="b"), lambda a,b: a.broadcast(len(b.src))),
   (UPat(Ops.DEFINE_LOCAL).f(Ops.AFTER, allow_any_len=True).broadcast(name="dg").f(Ops.INDEX, name="idx", allow_any_len=True),
@@ -473,15 +442,6 @@ rangeify_codegen = PatternMatcher([
   (UPat(Ops.DEFINE_LOCAL).f(Ops.AFTER, allow_any_len=True).gep(name="dg").f(Ops.INDEX, name="idx", allow_any_len=True),
     lambda dg,idx: None if isinstance(idx.dtype, (PtrDType, ImageDType)) else
       idx.replace(dtype=dg.dtype, arg=None).load(dtype=dg.dtype.base.scalar().vec(dg.dtype.vcount))),
-])
-
-def remove_metadata_tags(ctx:LocalAddBufferContext, x:UOp):
-  if x.tag is None or x.tag == (): return None
-  if isinstance(x.tag, tuple): ctx.parent_tags += list(x.tag)
-  return x.replace(tag=None)
-
-pm_remove_tags = PatternMatcher([
-  (UPat(GroupOp.All, name="x"), remove_metadata_tags),
 ])
 
 pm_add_range_tags = PatternMatcher([
@@ -494,7 +454,7 @@ def split_store(x:UOp) -> UOp|None:
 
   # local kernel rewrite
   lctx = LocalAddBufferContext()
-  ret = graph_rewrite(x, to_define_global+pm_flatten_range+rangeify_codegen+pm_remove_tags, ctx=lctx, name="kernel split", bottom_up=True)
+  ret = graph_rewrite(x, to_define_global+pm_flatten_range+rangeify_codegen, ctx=lctx, name="kernel split", bottom_up=True)
 
   # SINK requires all buffers on the same device, but COPY/BUFFER_VIEW/ENCDEC are cross-device or special hardware ops
   if ret.op is Ops.STORE: stored = ret.src[1]
@@ -522,7 +482,7 @@ def get_rangeify(sink:UOp) -> UOp:
   tsink = graph_rewrite(tsink, symbolic+pm_reduce_simplify+pm_const_buffer_folding+pm_remove_bufferize, name="symbolic+reduce_collapse+debuf")
   tsink = graph_rewrite(tsink, pm_limit_bufs, ctx=rctx, name="limit buffers")
 
-  if VIZ: graph_rewrite(tsink, PatternMatcher([]), name="View Tagged Rangeify")
+  if VIZ: graph_rewrite(tsink, PatternMatcher([]), name="View Rangeify")
 
   # bufferize -> store
   lunique_start: int = max([-1]+[x.arg for x in tsink.toposort() if x.op is Ops.LUNIQUE]) + 1
