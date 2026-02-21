@@ -1235,7 +1235,7 @@ class TestView(unittest.TestCase):
     bv = b.pad(((0, 2),))[-2:]
     # this becomes a late a*0
     late_mul = a*bv
-    run_schedule(check_schedule(late_mul, 1))
+    run_schedule(check_schedule(late_mul, 2))
     # the arange doesn't realize
     #self.assertIsNone(b.uop.base.realized)
     # mul doesn't realize

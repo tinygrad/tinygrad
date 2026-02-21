@@ -1,6 +1,6 @@
-from tinygrad.uop.ops import UOp, UPat, PatternMatcher, Ops, GroupOp, graph_rewrite, _remove_all_tags, identity_element
+from tinygrad.uop.ops import UOp, UPat, PatternMatcher, Ops, GroupOp, graph_rewrite, identity_element
 from tinygrad.dtype import ImageDType
-from tinygrad.helpers import prod, DEBUG, argsort
+from tinygrad.helpers import prod, DEBUG, argsort, VIZ
 
 def tag_uop(ctx:tuple[list[UOp], dict[UOp, UOp], set[UOp]], x:UOp):
   if x.tag is not None: return None
@@ -12,7 +12,7 @@ def disk_copy_is_buffer(ctx, u):
   to_disk = isinstance(u._device, str) and u._device.startswith("DISK")
   if to_disk: ctx[1][u] = UOp.new_buffer(u.device, u.shard_size, u.dtype).reshape(u.max_shard_shape)
   # all copies from disk/numpy are realized into a real buffer
-  from_creation = isinstance(u.src[0]._device, str) and any(u.src[0]._device.startswith(x) for x in ["NPY", "DISK"])
+  from_creation = isinstance(u.src[0]._device, str) and any(u.src[0]._device.startswith(x) for x in ["NPY", "DISK", "PYTHON"])
   if from_creation: return tag_uop(ctx, u)
 
 def apply_after(ctx, u):
@@ -82,7 +82,25 @@ pm_early_transform_tensor_graph = PatternMatcher([
   (UPat(Ops.COPY, src=(UPat.var("s"), UPat()), name="c"), lambda c,s: c.const_like(ss.arg) if (ss:=s.base).op is Ops.CONST else None),
 ])
 
-pm_remove_unique_consts = PatternMatcher([
+def untag_and_append(ctx:tuple[list[UOp], dict[UOp, UOp], list[UOp]], x:UOp):
+  if x.tag is None: return None
+  uop_list, buffer_map, assigns = ctx
+  ret = x.replace(tag=None)
+  for t in x.tag:
+    original_uop: UOp = uop_list[t]
+    replace_uop = ret
+    while replace_uop.op is Ops.ASSIGN: replace_uop = replace_uop.src[0]
+    buffer_map[original_uop] = replace_uop.shrink_to(original_uop.shape)
+  assigns.append(ret)
+  return ret
+
+def append_after(ctx:tuple[list[UOp], dict[UOp, UOp], list[UOp]], x:UOp):
+  ctx[2].append(x)
+
+pm_finalize_call = PatternMatcher([
+  (UPat(Ops.ASSIGN, name="x"), untag_and_append),
+  (UPat(Ops.AFTER, name="x"), append_after),
+  (UPat(Ops.COPY, name="x"), lambda ctx,x: append_after(ctx,x) if isinstance(x.device, str) and x.device.startswith("DISK") else None),
   # replace UNIQUE with LUNIQUE for CONST cache key normalization
   (UPat(Ops.CONST, src=(UPat(Ops.UNIQUE), UPat(Ops.DEVICE, name="d")), name="b"), lambda b,d: b.replace(src=(d,))),
 ])
@@ -104,13 +122,8 @@ def allocate_global_buffers(big_sink:UOp) -> tuple[UOp, dict[UOp, UOp]]:
   big_sink = graph_rewrite(big_sink, pm_early_transform_tensor_graph, ctx={}, name="early transform tensor graph")
 
   # here we construct the final buffer_map. this is everything that will go into the tensor map
-  for s in big_sink.toposort():
-    if s.tag is not None:
-      assert s.op is Ops.ASSIGN
-      for t in s.tag:
-        original_uop = uop_list[t]
-        replace_uop = s
-        while replace_uop.op is Ops.ASSIGN: replace_uop = replace_uop.src[0]
-        buffer_map[original_uop] = replace_uop.shrink_to(original_uop.shape)
-  big_sink = graph_rewrite(big_sink, _remove_all_tags+pm_remove_unique_consts, name="remove tags")
-  return big_sink, buffer_map
+  assigns: list[UOp] = []
+  graph_rewrite(big_sink, pm_finalize_call, ctx=(uop_list, buffer_map, assigns), name="finalize call")
+  ret = UOp.sink(*assigns)
+  if VIZ: graph_rewrite(ret, PatternMatcher([]), name="*** Call")
+  return ret, buffer_map
