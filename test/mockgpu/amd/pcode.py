@@ -817,10 +817,11 @@ class Parser:
         val = _u32(0)
         for i in range(4): val = val | (mem.index(idx + _const(dtypes.int, i), *gate, ptr=True).load().cast(dtypes.uint32) << _u32(i * 8))
     else:
-      idx = (addr >> _const(addr.dtype, 2)).cast(dtypes.int)
+      idx_dt = dtypes.int64 if adt == dtypes.uint64 else dtypes.int  # vmem needs int64 for 48-bit GPU addresses
+      idx = (addr >> _const(addr.dtype, 2)).cast(idx_dt)
       val = mem.index(idx, *gate)
       if dt in (dtypes.uint64, dtypes.int64, dtypes.float64):
-        idx2 = ((addr + _const(adt, 4)) >> _const(adt, 2)).cast(dtypes.int)
+        idx2 = ((addr + _const(adt, 4)) >> _const(adt, 2)).cast(idx_dt)
         val = val.cast(dtypes.uint64) | (mem.index(idx2, *gate).cast(dtypes.uint64) << _u64(32))
       elif dt in (dtypes.uint8, dtypes.int8): val = (val >> ((addr & _const(adt, 3)).cast(dtypes.uint32) * _u32(8))) & _u32(0xFF)
       elif dt in (dtypes.uint16, dtypes.int16):
@@ -1039,10 +1040,11 @@ def parse_block(lines: list[str], start: int, env: dict[str, VarVal], funcs: dic
         mem = env.get('_vmem') if '_vmem' in env else env.get('_lds')
         if isinstance(mem, UOp):
           adt = dtypes.uint64 if addr.dtype == dtypes.uint64 else dtypes.uint32
-          idx = (addr >> _const(adt, 2)).cast(dtypes.int)
+          idx_dt = dtypes.int64 if adt == dtypes.uint64 else dtypes.int  # vmem needs int64 for 48-bit GPU addresses
+          idx = (addr >> _const(adt, 2)).cast(idx_dt)
           old = mem.index(idx)
           if dt in (dtypes.uint64, dtypes.int64, dtypes.float64):
-            old = old.cast(dtypes.uint64) | (mem.index(((addr + _const(adt, 4)) >> _const(adt, 2)).cast(dtypes.int)).cast(dtypes.uint64) << _u64(32))
+            old = old.cast(dtypes.uint64) | (mem.index(((addr + _const(adt, 4)) >> _const(adt, 2)).cast(idx_dt)).cast(dtypes.uint64) << _u64(32))
           rhs = (old + rhs) if compound_op == '+=' else (old - rhs)
       if assigns is not None: assigns.append((f'MEM[{_tok_str(addr_toks)}].{dt_name}', (addr, rhs)))
       i += 1
