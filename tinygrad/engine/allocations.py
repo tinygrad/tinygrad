@@ -1,4 +1,4 @@
-from tinygrad.uop.ops import UOp, UPat, PatternMatcher, Ops, GroupOp, graph_rewrite, _remove_all_tags
+from tinygrad.uop.ops import UOp, UPat, PatternMatcher, Ops, GroupOp, graph_rewrite, _remove_all_tags, identity_element
 from tinygrad.dtype import ImageDType
 from tinygrad.helpers import prod, DEBUG, argsort
 
@@ -33,6 +33,8 @@ add_tags = pm_gate_kernel_sink+PatternMatcher([
 ])
 
 def replace_contig_with_assign(u:UOp):
+  # if size is 0, remove the contig
+  if u.size == 0: return u.src[0]
   # no real contig for DISK tensors, they are left alone
   if isinstance(u._device, str) and u._device.startswith("DISK"): return u.rtag(None)
   dtype = u.dtype
@@ -72,8 +74,13 @@ pm_early_transform_tensor_graph = PatternMatcher([
   (UPat(Ops.ASSIGN, name="u"), replace_assign_with_contig),
   # replace CONTIGUOUS with ASSIGNs
   (UPat(Ops.CONTIGUOUS, name="u"), replace_contig_with_assign),
-  # just removing it works...
+  # remove DETACH/CONTIGUOUS_BACKWARD
   (UPat((Ops.DETACH, Ops.CONTIGUOUS_BACKWARD), name="x"), lambda x: x.src[0]),
+  # reduce of size 0 is the identity element
+  (UPat(Ops.REDUCE_AXIS, name="reduce", src=(UPat.var("x"),)),
+   lambda reduce,x: reduce.const_like(identity_element(reduce.arg[0], reduce.dtype)) if x.size == 0 and reduce.size != 0 else None),
+  # handle size 0
+  (UPat(GroupOp.All-{Ops.SINK}, name="x"), lambda x: x.const_like(0).rtag(x.tag) if x._shape is not None and x.size == 0 else None),
 ])
 
 def allocate_global_buffers(big_sink:UOp) -> tuple[UOp, dict[UOp, UOp]]:
