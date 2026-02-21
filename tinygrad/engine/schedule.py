@@ -113,8 +113,7 @@ def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[dict[UOp, UOp], li
   # replace BUFFERs with PARAMs, CONSTs UNIQUE with LUNIQUE, strip BIND values for cache key, extract var_vals
   input_buffers: dict[UOp, UOp] = {}
   var_vals: dict[str, int] = {}
-  big_sink_cache = graph_rewrite(big_sink, pm_pre_sched_cache, bottom_up=True,
-                                 ctx=(input_buffers, var_vals, [0], [0]), name="rewrite for sched cache")
+  big_sink_cache = graph_rewrite(big_sink, pm_pre_sched_cache, ctx=(input_buffers, var_vals, [0], [0]), name="rewrite for sched cache")
   sched_cache_key = big_sink_cache.key
 
   if not SCACHE or (sc_ret:=schedule_cache.get(sched_cache_key, None)) is None:
