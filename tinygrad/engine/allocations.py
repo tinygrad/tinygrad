@@ -2,31 +2,31 @@ from tinygrad.uop.ops import UOp, UPat, PatternMatcher, Ops, GroupOp, graph_rewr
 from tinygrad.dtype import ImageDType
 from tinygrad.helpers import prod, DEBUG, argsort
 
-def tag_uop(ctx:tuple[list[UOp], set[UOp], dict[UOp, UOp], set[UOp]], x:UOp):
-  if x.tag is not None or x in ctx[1]: return None
-  if x.tag is None and x.op is Ops.CALL:
-    # don't tag anything in a CALL
-    for u in x.src[0].toposort(): ctx[1].add(u)
+def tag_uop(ctx:tuple[list[UOp], dict[UOp, UOp], set[UOp]], x:UOp):
+  if x.tag is not None: return None
   ctx[0].append(x)
   return x.replace(tag=(len(ctx[0])-1,))
 
 def disk_copy_is_buffer(ctx, u):
   # copies to disk are replaced with the disk buffer
   to_disk = isinstance(u._device, str) and u._device.startswith("DISK")
-  if to_disk: ctx[2][u] = UOp.new_buffer(u.device, u.shard_size, u.dtype).reshape(u.max_shard_shape)
+  if to_disk: ctx[1][u] = UOp.new_buffer(u.device, u.shard_size, u.dtype).reshape(u.max_shard_shape)
   # all copies from disk/numpy are realized into a real buffer
   from_creation = isinstance(u.src[0]._device, str) and any(u.src[0]._device.startswith(x) for x in ["NPY", "DISK", "PYTHON"])
   if from_creation: return tag_uop(ctx, u)
 
 def apply_after(ctx, u):
-  ctx[2][u] = u.src[0]
+  ctx[1][u] = u.src[0]
 
 # CONTIGUOUS and ASSIGN + parents are the only nodes that get updated
 add_tags = PatternMatcher([
   (UPat(Ops.COPY, name="u"), disk_copy_is_buffer),
+  # no tag on copies that are assigned
+  (UPat(Ops.ASSIGN, src=(UPat(), UPat(Ops.COPY, name="c")), name="a"),
+   lambda a,c: a.replace(src=(a.src[0], c.rtag(())), tag=a.tag+c.tag) if a.tag and c.tag else None),
   (UPat(Ops.AFTER, name="u"), apply_after),
   (UPat({Ops.CONTIGUOUS, Ops.ASSIGN}, name="x"), tag_uop),
-  (UPat(GroupOp.All, name="x"), lambda ctx,x: tag_uop(ctx,x) if x in ctx[3] else None),
+  (UPat(GroupOp.All, name="x"), lambda ctx,x: tag_uop(ctx,x) if x in ctx[2] else None),
 ])
 
 def replace_contig_with_assign(u:UOp):
@@ -64,7 +64,7 @@ pm_early_transform_tensor_graph = PatternMatcher([
   # replace ALU sources with contiguous versions found above
   (UPat(GroupOp.ALU, name="alu"), lambda ctx,alu: alu.replace(src=new_src) if (new_src:=tuple(ctx.get(s, s) for s in alu.src)) != alu.src else None),
   # add CONTIGUOUS to tagged UOps
-  (UPat(GroupOp.All-{Ops.CONTIGUOUS, Ops.ASSIGN}, name="x"), lambda x: x.rtag(None).contiguous(tag=x.tag) if x.tag is not None else None),
+  (UPat(GroupOp.All-{Ops.CONTIGUOUS, Ops.ASSIGN}, name="x"), lambda x: x.rtag(None).contiguous(tag=x.tag) if x.tag else None),
   # remove extra CONTIGUOUS on ASSIGN
   (UPat(Ops.CONTIGUOUS, src=(UPat(Ops.ASSIGN, name="a"),), name="c"), lambda a,c: a.replace(tag=a.tag+c.tag)),
   # replace ASSIGN with CONTIGUOUS
@@ -98,14 +98,14 @@ def allocate_global_buffers(big_sink:UOp) -> tuple[UOp, dict[UOp, UOp]]:
 
   # this rewrite is "read-only", it adds simple things to buffer_map and may sink things on big_sink, bottom_up
   # this is the only one where we have to be careful to not break the tensor graph
-  big_sink = graph_rewrite(big_sink, add_tags, ctx=(uop_list, set(), buffer_map, bases), bottom_up=True, name="number the uops")
+  big_sink = graph_rewrite(big_sink, add_tags, ctx=(uop_list, buffer_map, bases), bottom_up=True, name="number the uops")
 
   # here we can break the tensor graph. this is the only place you need to maintain numbered tags
   big_sink = graph_rewrite(big_sink, pm_early_transform_tensor_graph, ctx={}, name="early transform tensor graph")
 
   # here we construct the final buffer_map. this is everything that will go into the tensor map
   for s in big_sink.toposort():
-    if s.tag is not None:
+    if s.tag:
       assert s.op is Ops.ASSIGN
       for t in s.tag:
         original_uop = uop_list[t]
