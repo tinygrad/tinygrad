@@ -360,12 +360,12 @@ def bufferize_to_store(ctx:itertools.count, x:UOp, idx:UOp, allow_locals=True):
     do_store = buf.broadcast(x.src[1].dtype.count).index(idx, dtype=sdtype).store(x.src[0]).end(*rngs)
     return buf.after(do_store.barrier())
 
-# collapse any BUFFERIZE to single input BUFFERIZE. move the tag to a reshape
+# collapse any BUFFERIZE to single input BUFFERIZE
 def flatten_bufferize(x:UOp):
   if len(x.src) == 2: return None
   ret = x.replace(src=(x.src[0], get_single_element(apply_movement_op(Ops.RESHAPE, (prod(x.shape),), x.shape, x.src[1:]))))
   rngs = x.src[1:]
-  ret = ret.forced_reshape(x.shape)
+  ret = ret.reshape(x.shape)
   if any(r.op is Ops.RANGE and r.src[0].op is not Ops.CONST for r in rngs):
     sym_shape = tuple([r.src[0] if r.op is not Ops.CONST else 1 for r in rngs])
     ret = ret.shrink(tuple([(0,x) for x in sym_shape]))
