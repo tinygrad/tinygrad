@@ -2,6 +2,7 @@
 import unittest
 import numpy as np
 from tinygrad import dtypes, Tensor, TinyJit, GlobalCounters, Variable
+from tinygrad.uop.ops import Ops
 from tinygrad.device import is_dtype_supported
 from tinygrad.helpers import temp, CI, CPU_LVP, Context
 
@@ -282,6 +283,26 @@ class TestAssign(unittest.TestCase):
     GlobalCounters.reset()
     b.assign(a.contiguous()).realize()
     self.assertEqual(GlobalCounters.kernel_count, 2)
+
+  # TODO: assigns into views of unrealized COPY/CONTIGUOUS are silently dropped
+  # because _pending_assigns only keys on BUFFER, not COPY or CONTIGUOUS
+  def test_assign_to_unrealized_copy_view(self):
+    t = Tensor.zeros(2,2).to("CPU:0").contiguous().realize()
+    c = t.to("CPU:1")  # unrealized COPY
+    self.assertIs(c.uop.base.op, Ops.COPY)
+    c[:, 1:2].assign(Tensor.ones(2,1).to("CPU:1").contiguous().realize())
+    result = c.tolist()
+    # TODO: should be [[0,1],[0,1]]
+    self.assertListEqual(result, [[0,0],[0,0]])
+
+  def test_assign_to_unrealized_contiguous_view(self):
+    t = Tensor([[1,2],[3,4]]).float().contiguous().realize()
+    c = t.permute(1,0).contiguous()  # unrealized CONTIGUOUS
+    self.assertIs(c.uop.base.op, Ops.CONTIGUOUS)
+    c[:, 1:2].assign(Tensor.ones(2,1).contiguous().realize())
+    result = c.tolist()
+    # TODO: should be [[1,1],[2,1]]
+    self.assertListEqual(result, [[1,3],[2,4]])
 
   def test_permuted_assignment(self):
     a = Tensor(np.arange(N*N, dtype=np.float32)).reshape(N,N)

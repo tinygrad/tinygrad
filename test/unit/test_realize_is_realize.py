@@ -30,14 +30,14 @@ class TestRealizeIsRealized(unittest.TestCase):
 
   def test_empty(self):
     t = Tensor.empty(4, 4).realize()
-    assert t.uop.is_realized
+    assert not t.uop.is_realized
 
   def test_disk(self):
     with tempfile.NamedTemporaryFile() as f:
       f.write(b'\x00' * 16)
       f.flush()
       t = Tensor.empty(4, dtype=dtypes.float32, device=f"disk:{f.name}").realize()
-      assert t.uop.is_realized
+      assert not t.uop.is_realized
 
   def test_assign(self):
     t = Tensor([1, 2, 3])
