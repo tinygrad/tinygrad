@@ -89,7 +89,7 @@ def regalloc(ctx:RegallocContext, x:UOp, i:int) -> tuple[UOp, list[UOp]]:
     cons = v.cons or (v,)
     # two address instructions (src is used in dest) can only coalesce reused src. reused src goes first to get priority in case of a tiebreak
     # TODO: make this backend independent
-    if x.op in X86GroupOp.TwoAddress1st:
+    if x.arg in X86GroupOp.TwoAddress1st:
       ins = tuple(ctx.live.get(ctx.rewrite_to_vreg[s]) for s in x.src)
       cons = ((ins[0],) if ins[0] in cons else ()) + tuple(r for r in cons if r not in ins)
       assert cons

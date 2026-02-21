@@ -1,5 +1,4 @@
 import itertools, heapq
-from typing import Any
 from collections import defaultdict
 from tinygrad.renderer import Renderer
 from tinygrad.uop.ops import PatternMatcher, graph_rewrite, UOp, UPat, Ops

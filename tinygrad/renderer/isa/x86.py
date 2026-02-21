@@ -147,6 +147,7 @@ def vpins(x:UOp) -> UOp:
   return functools.reduce(lambda ret,i: x.ins(op, src=(ret, x.src[i], imm(dtypes.uint8, i))), range(len(x.src)), def_reg(x.dtype))
 
 def div(ctx:IselContext, x:UOp):
+  assert False
   # zero extend or move src[0] to x
   move1 = UOp(X86Ops.MOV, x.dtype, (x.src[0],), ctx.vreg(RAX))
   zero = UOp(X86Ops.MOVi, x.dtype, (imm(min(dtypes.uint32, x.dtype), 0),), ctx.vreg(RDX))
@@ -159,6 +160,7 @@ def div(ctx:IselContext, x:UOp):
 # However vreg(RDX) is assigned here because IDIV also writes to RDX and regalloc isn't aware of that,
 # the correct fix is to model IDIV as multi output (RAX, RDX) so regalloc is aware of RDX being overwritten and rm vreg from here
 def idiv(ctx:IselContext, x:UOp):
+  assert False
   ext = UOp(X86Ops.MOVSX, dtypes.int16, (x.src[0],), ctx.vreg(RAX)) if x.dtype is dtypes.int8 else \
         UOp(X86Ops.SARi, x.dtype, (x.src[0], imm(dtypes.uint8, x.dtype.itemsize * 8 - 1)), ctx.vreg(RDX))
   move = UOp(X86Ops.MOV, x.dtype, (x.src[1],), tuple(r for r in WGPR if r not in (RAX, RDX)))
@@ -398,11 +400,12 @@ isel_matcher = PatternMatcher([
 # ***** post register allocation *****
 # TODO: control flow should be overhauled so that this isn't necessary
 def lower_range(ctx:RegallocContext, x:UOp) -> tuple[UOp, list[UOp]]:
+  loop_label = "_".join(str(i) for i in x.arg[:-1])
   acc = x.ins(X86Ops.MOVi, src=(imm(x.dtype, 0),) + x.src[1:])
-  label = UOp(Ops.INS, arg=X86Ops.LABEL, tag=f"LOOP_{x.arg[0]}")
+  label = UOp(Ops.INS, arg=X86Ops.LABEL, tag=f"LOOP_{loop_label}")
   cmp = UOp(Ops.INS, arg=X86Ops.CMPi if x.src[0].arg is X86Ops.IMM else X86Ops.CMP, src=(acc, x.src[0]))
-  jump_out = UOp(Ops.INS, arg=X86Ops.JGE, src=(cmp,), tag=f"LOOP_OUT_{x.arg[0]}")
-  ctx.loop_label[acc] = f"LOOP_{x.arg[0]}"
+  jump_out = UOp(Ops.INS, arg=X86Ops.JGE, src=(cmp,), tag=f"LOOP_OUT_{loop_label}")
+  ctx.loop_label[acc] = loop_label
   return (acc, [acc, label, cmp, jump_out])
 
 # final rewrite to match the isa spec
@@ -418,8 +421,8 @@ post_regalloc_matcher = PatternMatcher([
   # rewrite RANGE to ACC = 0 -> LABEL -> JUMP if ACC >= loop bound
   (UPat(Ops.RANGE, name="x"), lambda ctx,x: lower_range(ctx, x)),
   # rewrite END to ACC + 1 -> JUMP -> LABEL, also add the out of loop JUMP to the src so this becomes the jump target
-  (UPat(Ops.END, name="x"), lambda ctx,x: (jmp:=UOp(Ops.INS, arg=X86Ops.JMP, tag=ctx.loop_label[x.src[1]]),
-   [x.src[1].ins(X86Ops.ADDi, src=(imm(x.src[1].dtype, 1),)), jmp, UOp(Ops.INS, arg=X86Ops.LABEL, tag=f"LOOP_OUT_{ctx.loop_label[x.src[1]][-1]}")])),
+  (UPat(Ops.END, name="x"), lambda ctx,x: (jmp:=UOp(Ops.INS, arg=X86Ops.JMP, tag=f"LOOP_{ctx.loop_label[x.src[1]]}"),
+   [x.src[1].ins(X86Ops.ADDi, src=(imm(x.src[1].dtype, 1),)), jmp, UOp(Ops.INS, arg=X86Ops.LABEL, tag=f"LOOP_OUT_{ctx.loop_label[x.src[1]]}")])),
   # TODO: need a generic way to model clobbers, idiv and flags should be handled the same way, maybe add clobber field to Register?
   # fixup div, zero rdx again because scheduling constraint isn't being respected
   (UPat(Ops.INS, arg=X86Ops.DIV, name="x"), lambda x:
