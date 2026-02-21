@@ -10,7 +10,7 @@ TTMP_BASE = 108
 TTMP_COUNT = 16
 INLINE_INT_START = 128
 INLINE_INT_COUNT = 65
-INLINE_NEG_START = 193
+INLINE_NEG_START = 192
 INLINE_NEG_COUNT = 16
 
 # ══════════════════════════════════════════════════════════════
