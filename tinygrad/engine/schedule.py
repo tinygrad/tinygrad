@@ -1,10 +1,10 @@
-import time
+import time, sys
 from typing import cast
 from collections import deque
 from tinygrad.uop.ops import UOp, Ops, buffers, UOpMetaClass, track_rewrites, PatternMatcher, UPat, graph_rewrite, gate_kernel_sink
 from tinygrad.uop.spec import type_verify, tensor_spec
 from tinygrad.device import Buffer, MultiBuffer
-from tinygrad.helpers import DEBUG, cpu_profile, TracingKey, SPEC, pluralize, SCACHE
+from tinygrad.helpers import DEBUG, cpu_profile, TracingKey, SPEC, pluralize, SCACHE, BASEDIR
 from tinygrad.engine.realize import ExecItem
 from tinygrad.engine.allocations import allocate_global_buffers
 
@@ -116,7 +116,7 @@ def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[dict[UOp, UOp], li
   if not SCACHE or (sc_ret:=schedule_cache.get(sched_cache_key, None)) is None:
     # verify Tensors match the spec (on big_sink, we only need to do this if cache misses)
     if SPEC: type_verify(big_sink, tensor_spec)
-    big_sink_cache = graph_rewrite(big_sink_cache, multi_pm, name="multi_pm")
+    big_sink_cache = graph_rewrite(big_sink_cache, multi_pm, name="multi_pm", rewrite_into_calls=True)
     pre_schedule, buf_uops_sink = create_schedule(get_rangeify(big_sink_cache))
     if SCACHE: schedule_cache[sched_cache_key] = (pre_schedule, buf_uops_sink)
   else:
@@ -149,9 +149,11 @@ def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[dict[UOp, UOp], li
   with cpu_profile(TracingKey("memory planner")): schedule = memory_planner(schedule)
 
   if (DEBUG >= 1 and len(schedule) > 1) or DEBUG >= 3:
-    print(f"scheduled {len(schedule):4d} kernels in {(time.perf_counter()-st)*1000:8.2f} ms"+\
+    i = 6
+    while (frm:=sys._getframe(i)) and frm.f_code.co_filename.startswith(str(BASEDIR)): i += 1
+    print(f"scheduled {len(schedule):5d} kernels in {(time.perf_counter()-st)*1000:8.2f} ms"+\
           f" | {' cache hit' if SCACHE and sc_ret is not None else 'CACHE MISS'} {sched_cache_key.hex()[:8]}"+\
-          f" | {len(UOpMetaClass.ucache)} uops in cache")
+          f" | {len(UOpMetaClass.ucache):7d} uops in cache | {frm.f_code.co_filename}:{frm.f_lineno}")
 
   used_vars = set().union(*[{v.expr for v in si.ast.variables()} for si in schedule])
   return buffer_map, schedule, {k:v for k,v in var_vals.items() if k in used_vars}

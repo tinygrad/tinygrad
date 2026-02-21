@@ -490,6 +490,15 @@ class TestJit(unittest.TestCase):
     #with self.assertRaises(JitError):
     #  f(Tensor([2.0])).item()
 
+  def test_jit_init_empty_alt(self):
+    @TinyJit
+    def f(a:Tensor, b:Tensor) -> Tensor: return b.assign(a+1)
+    a = Tensor([1])
+    for _ in range(4):
+      b = Tensor.empty_like(a)
+      c = f(a, b)
+      self.assertEqual(c.item(), 2)
+
 @unittest.skip("Pending multioutput implementation #3607")
 class TestMultioutputJit(unittest.TestCase):
   def _test(self, f):

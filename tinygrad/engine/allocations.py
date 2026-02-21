@@ -2,9 +2,6 @@ from tinygrad.uop.ops import UOp, UPat, PatternMatcher, Ops, GroupOp, graph_rewr
 from tinygrad.dtype import ImageDType
 from tinygrad.helpers import prod, DEBUG, argsort
 
-# these are the only uops that can get replaced in the tensor graph
-from tinygrad.schedule.rangeify import pm_gate_kernel_sink
-
 def tag_uop(ctx:tuple[list[UOp], set[UOp], dict[UOp, UOp], set[UOp]], x:UOp):
   if x.tag is not None or x in ctx[1]: return None
   if x.tag is None and x.op is Ops.CALL:
@@ -25,7 +22,7 @@ def apply_after(ctx, u):
   ctx[2][u] = u.src[0]
 
 # CONTIGUOUS and ASSIGN + parents are the only nodes that get updated
-add_tags = pm_gate_kernel_sink+PatternMatcher([
+add_tags = PatternMatcher([
   (UPat(Ops.COPY, name="u"), disk_copy_is_buffer),
   (UPat(Ops.AFTER, name="u"), apply_after),
   (UPat({Ops.CONTIGUOUS, Ops.ASSIGN}, name="x"), tag_uop),
