@@ -44,7 +44,10 @@ class Reg:
   def fmt(self, sz=None, parens=False, upper=False) -> str:
     o, sz = self.offset, sz or self.sz
     l, r = ("[", "]") if parens or sz > 1 else ("", "")  # brackets for multi-reg or when parens=True
-    if 256 <= o < 512:
+    if 512 <= o < 768:
+      idx = o - 512
+      base = f"acc{l}{idx}{r}" if sz == 1 else f"acc[{idx}:{idx + sz - 1}]"
+    elif 256 <= o < 512:
       idx = o - 256
       base = f"v{l}{idx}{r}" if sz == 1 else f"v[{idx}:{idx + sz - 1}]"
     elif o < 106: base = f"s{l}{o}{r}" if sz == 1 else f"s[{o}:{o + sz - 1}]"
@@ -87,6 +90,7 @@ SCC = src[253]
 SRC_LDS_DIRECT = src[254]
 LIT = src[255]           # literal constant marker
 v = src[256:511]         # VGPR0-255
+acc = Reg(512, 256)      # ACCVGPR0-255 (CDNA only, encodes as 256-511 but uses separate register file)
 
 # ══════════════════════════════════════════════════════════════
 # BitField
@@ -144,7 +148,10 @@ class EnumBitField(BitField):
 # ══════════════════════════════════════════════════════════════
 
 import struct
+from tinygrad.runtime.autogen.amd.common import OpType
 def _f32(f: float) -> int: return struct.unpack('I', struct.pack('f', f))[0]
+# OpTypes that always mean ACCVGPR (not VGPR) when register is in VGPR range
+_ACCVGPR_OPTYPES = {OpType.OPR_ACCVGPR, OpType.OPR_SRC_ACCVGPR}
 
 class SrcField(BitField):
   _valid_range = (0, 511)  # inclusive
@@ -160,7 +167,7 @@ class SrcField(BitField):
 
   def encode(self, val) -> int:
     """Encode value. Returns 255 (literal marker) for out-of-range values."""
-    if isinstance(val, Reg): offset = val.offset
+    if isinstance(val, Reg): offset = val.offset - 256 if val.offset >= 512 else val.offset  # ACCVGPR (512-767) encodes as VGPR (256-511)
     elif isinstance(val, float): offset = self._FLOAT_ENC.get(val, 255)
     elif isinstance(val, int) and 0 <= val <= 64: offset = 128 + val
     elif isinstance(val, int) and -16 <= val < 0: offset = 192 - val
@@ -182,6 +189,9 @@ class SrcField(BitField):
       assert self.name is not None
       name = self.name[1:] if self.name.startswith('v') and self.name[1:] in obj.op_regs else self.name
       if sz := obj.op_regs.get(name, 1): reg = Reg(reg.offset, sz, neg=reg.neg, abs_=reg.abs_, hi=reg.hi)
+    # ACCVGPR: remap VGPR range (256-511) to ACCVGPR range (512-767) when operand type indicates ACCVGPR
+    if 256 <= reg.offset < 512 and (op_info := obj.operands.get(self.name)):
+      if op_info[2] in (_ACCVGPR_OPTYPES): reg = Reg(reg.offset + 256, reg.sz, neg=reg.neg, abs_=reg.abs_, hi=reg.hi)
     return reg
 
 class VGPRField(SrcField):
