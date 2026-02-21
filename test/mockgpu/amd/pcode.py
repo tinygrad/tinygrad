@@ -42,7 +42,8 @@ def _bitreverse(v: UOp, bits: int) -> UOp:
 def _extract_bits(val: UOp, hi: int, lo: int) -> UOp:
   dt = dtypes.uint64 if val.dtype in (dtypes.uint64, dtypes.int64) else dtypes.uint32
   width = hi - lo + 1
-  result = ((val >> _const(dt, lo)) if lo > 0 else val) & _const(val.dtype, (1 << width) - 1)
+  val_u = val.cast(dt) if val.dtype != dt else val  # ensure consistent type for shift/mask
+  result = ((val_u >> _const(dt, lo)) if lo > 0 else val_u) & _const(dt, (1 << width) - 1)
   # Downcast to match extracted bit width so brace-concat { hi, lo } computes correct output dtype
   target_dt = _BITS_DT.get(width) or (dtypes.uint32 if width <= 32 else dtypes.uint64 if width <= 64 else dt)
   if result.dtype != target_dt: result = result.cast(target_dt)
