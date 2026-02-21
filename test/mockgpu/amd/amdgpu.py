@@ -393,6 +393,8 @@ unique_id 11673270660693242239
 num_xcc 1
 max_engine_clk_ccompute 2400"""
 
+# MI350X (gfx950) CU has 160KB LDS — 64 banks × 2.5KB each (vs MI300X 32 banks × 2KB = 64KB).
+# GEMM asm kernel needs 130KB+ LDS, so 128KB (PR #14815 default) is insufficient.
 _gpu_props_cdna = """cpu_cores_count 0
 simd_count 304
 mem_banks_count 1

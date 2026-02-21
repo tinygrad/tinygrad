@@ -51,6 +51,48 @@ class _MXCSRContext:
     if lib is None or not hasattr(self, '_saved'): return
     lib.set_fpcr(self._saved)
 
+# Trash page: a dedicated read-write page for OOB vmem accesses.
+# The emulator uses external_ptr=0 to overlay host memory as GPU vmem. When a kernel computes
+# an OOB address (e.g., SRD wrap-around, inactive-lane garbage), the access would land on arbitrary
+# host memory — potentially non-writable pages (JIT code, .text sections), causing SEGV_ACCERR.
+# The trash page provides a safe RW target: OOB/inactive-lane vmem addresses are redirected here.
+import mmap as _mmap_module
+_trash_page_mmap: _mmap_module.mmap | None = None
+
+@functools.cache
+def _get_trash_page_addr() -> int:
+  """Allocate (once) an anonymous RW page and return its host address. Thread-safe via functools.cache."""
+  global _trash_page_mmap
+  _trash_page_mmap = _mmap_module.mmap(-1, 4096)  # anonymous RW page at kernel-chosen address
+  return ctypes.addressof(ctypes.c_char.from_buffer(_trash_page_mmap))
+
+# vmem write guard: SIGSEGV handler that redirects writes to non-writable pages to the trash page.
+# The emulator uses external_ptr=0, mapping the entire host address space as GPU vmem. MUBUF stores
+# may compute addresses that land on non-writable host pages (JIT code, .text). The CPU backend generates
+# `*ptr = active ? val : *ptr` which always touches the page, even for inactive lanes. When num_records
+# is large (e.g., 2GB), SRD-based bounds checking doesn't prevent this. The guard catches SEGV_ACCERR
+# and redirects the write to the trash page by modifying rax/rdx in the signal handler's ucontext.
+_vmem_guard_lib = None
+
+@functools.cache
+def _load_vmem_guard():
+  """Load vmem_guard.so if available. Returns the library handle or None."""
+  global _vmem_guard_lib
+  if platform.system() != 'Linux': return None
+  for path in ['/tmp/vmem_guard.so']:
+    try:
+      lib = ctypes.CDLL(path)
+      lib.vmem_guard_install.argtypes = [ctypes.c_uint64]
+      lib.vmem_guard_install.restype = None
+      lib.vmem_guard_remove.argtypes = []
+      lib.vmem_guard_remove.restype = None
+      lib.vmem_guard_redirects.argtypes = []
+      lib.vmem_guard_redirects.restype = ctypes.c_int
+      _vmem_guard_lib = lib
+      return lib
+    except OSError: pass
+  return None
+
 from tinygrad.uop.ops import UOp, Ops, KernelInfo, AxisType
 from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.device import Buffer, BufferSpec
@@ -819,7 +861,14 @@ def _compile_smem(inst: ir3.SMEM | ir4.SMEM, ctx: _Ctx) -> UOp:
   part = op_name.rsplit('_', 1)[1]  # B32, DWORD, DWORDX2, U8, I8, etc.
   nval = int(part.removeprefix('DWORD').removeprefix('X') or '1') if 'DWORD' in part else int(part[1:]) / 32 * (-1 if part[0] == 'I' else 1)
   ndwords = max(1, int(abs(nval)))
-  dword_base = addr >> UOp.const(dtypes.uint64, 2)
+  # Prevent non-canonical x86_64 faults: persistent kernels advance SGPR-pair address via s_add_u32 which can overflow,
+  # setting bit 47 and making the address non-canonical (CPU raises #GP → SIGSEGV with si_code=SI_KERNEL).
+  # Mask to 47 bits to ensure canonical user-space range, then clamp above mmap_min_addr.
+  _CANONICAL_MASK = UOp.const(dtypes.uint64, 0x7FFFFFFFFFFF)
+  safe_addr = addr & _CANONICAL_MASK
+  _TRASH = UOp.const(dtypes.uint64, _get_trash_page_addr())
+  safe_addr = (safe_addr >= UOp.const(dtypes.uint64, 0x10000)).where(safe_addr, _TRASH)
+  dword_base = safe_addr >> UOp.const(dtypes.uint64, 2)
   vals = [ctx.vmem.index((dword_base + UOp.const(dtypes.uint64, i)).cast(dtypes.int64)) for i in range(ndwords)]
   if abs(nval) < 1:
     nbits = int(abs(nval) * 32)
@@ -1285,8 +1334,10 @@ def _compile_mfma(inst: irc.VOP3P, ctx: _Ctx) -> UOp:
     b_raw = ctx.rvgpr_dyn(src1_r + _c(reg_idx), read_lane)
     if is_i8:
       # Extract I8 byte and sign-extend to I32
-      a_f = ((a_raw >> UOp.const(dtypes.uint32, sub_idx * 8)) & UOp.const(dtypes.uint32, 0xFF)).cast(dtypes.uint8).cast(dtypes.int8).cast(dtypes.int32)
-      b_f = ((b_raw >> UOp.const(dtypes.uint32, sub_idx * 8)) & UOp.const(dtypes.uint32, 0xFF)).cast(dtypes.uint8).cast(dtypes.int8).cast(dtypes.int32)
+      a_byte = ((a_raw >> UOp.const(dtypes.uint32, sub_idx * 8)) & UOp.const(dtypes.uint32, 0xFF))
+      a_f = a_byte.cast(dtypes.uint8).cast(dtypes.int8).cast(dtypes.int32)
+      b_byte = ((b_raw >> UOp.const(dtypes.uint32, sub_idx * 8)) & UOp.const(dtypes.uint32, 0xFF))
+      b_f = b_byte.cast(dtypes.uint8).cast(dtypes.int8).cast(dtypes.int32)
     elif is_fp8:
       a_f = ((a_raw >> UOp.const(dtypes.uint32, sub_idx * 8)) & UOp.const(dtypes.uint32, 0xFF)).cast(dtypes.uint32)
       b_f = ((b_raw >> UOp.const(dtypes.uint32, sub_idx * 8)) & UOp.const(dtypes.uint32, 0xFF)).cast(dtypes.uint32)
@@ -1623,7 +1674,7 @@ def _compile_mem_op(inst: ir3.DS|ir3.FLAT|ir3.GLOBAL|ir3.SCRATCH|ir4.DS|ir4.VFLA
     lane = ctx.range()
     active = _lane_active(exec_mask, lane)
     raw_addr = ctx.rvgpr_dyn(addr_reg, lane) + offset
-    lds_addr = raw_addr  # address must be valid for active lanes; compiler skips inactive lanes via branch
+    lds_addr = active.where(raw_addr, _c(0))  # clamp inactive lane addrs to 0 — CPU backend evaluates both branches of where()
     stores = []
     for i in range(ndwords):
       lds_idx = mem.index(((lds_addr + _c(i * 4)) >> _c(2)).cast(dtypes.int))
@@ -1658,14 +1709,25 @@ def _compile_mem_op(inst: ir3.DS|ir3.FLAT|ir3.GLOBAL|ir3.SCRATCH|ir4.DS|ir4.VFLA
     num_records = ctx.rsgpr_dyn(srsrc_reg + _c(2))
     m0_val = ctx.rsgpr_dyn(_c(125))  # M0 is SGPR index 125
     lane = ctx.range()
-    vaddr_val = ctx.rvgpr_dyn(addr_reg, lane).cast(dtypes.uint64)
+    # Clamp vaddr for EXEC-inactive lanes — CPU backend evaluates all lanes, garbage vaddr crashes
+    lane_active = _lane_active(exec_mask, lane)
+    vaddr_val = lane_active.where(ctx.rvgpr_dyn(addr_reg, lane).cast(dtypes.uint64), UOp.const(dtypes.uint64, 0))
     offen_contrib = (offen.ne(_c(0))).where(vaddr_val, UOp.const(dtypes.uint64, 0))
     idxen_contrib = (idxen.ne(_c(0))).where(vaddr_val * stride, UOp.const(dtypes.uint64, 0))
     byte_offset = offen_contrib + idxen_contrib + soff + offset.cast(dtypes.uint64)
-    src_addr = base_addr + byte_offset
+    # OOB: redirect to trash page (same rationale as make_addr MUBUF path)
+    num_records_u64 = num_records.cast(dtypes.uint64)
+    in_bounds = (byte_offset + UOp.const(dtypes.uint64, data_bytes)) < (num_records_u64 + UOp.const(dtypes.uint64, 1))
+    _TRASH = UOp.const(dtypes.uint64, _get_trash_page_addr())
+    src_addr = in_bounds.where(base_addr + byte_offset, _TRASH)
+    # Prevent non-canonical x86_64 faults: SRD base can overflow via s_add_u32, setting bit 47 → #GP.
+    # Mask to 47 bits for canonical user-space range, then clamp above mmap_min_addr.
+    _CANONICAL_MASK = UOp.const(dtypes.uint64, 0x7FFFFFFFFFFF)
+    src_addr = src_addr & _CANONICAL_MASK
+    src_addr = (src_addr >= UOp.const(dtypes.uint64, 0x10000)).where(src_addr, _TRASH)
     # OOB check: byte_offset + data_bytes <= num_records (real hardware silently drops OOB)
     num_records_u64 = num_records.cast(dtypes.uint64)
-    active = _lane_active(exec_mask, lane) & ((byte_offset + UOp.const(dtypes.uint64, data_bytes)) < (num_records_u64 + UOp.const(dtypes.uint64, 1)))
+    active = lane_active & ((byte_offset + UOp.const(dtypes.uint64, data_bytes)) < (num_records_u64 + UOp.const(dtypes.uint64, 1)))
     # LDS write address: M0 + lane_id * data_bytes (each lane writes to consecutive LDS slots)
     lds_base = m0_val + lane.cast(dtypes.uint32) * _c(data_bytes)
     stores = []
@@ -1675,10 +1737,12 @@ def _compile_mem_op(inst: ir3.DS|ir3.FLAT|ir3.GLOBAL|ir3.SCRATCH|ir4.DS|ir4.VFLA
       stores.append(lds_idx.store(active.where(vmem_idx, lds_idx.load())))
     return UOp.sink(UOp.group(*stores).end(lane), *ctx.inc_pc())
 
-
   _mubuf_info: dict = {}  # populated by make_addr for MUBUF OOB bounds checking
   def make_addr(lane: UOp) -> UOp:
-    if is_lds: return ctx.rvgpr_dyn(addr_reg, lane)
+    if is_lds:
+      # Clamp addr for EXEC-inactive lanes — CPU backend evaluates both branches of where(), garbage addrs crash
+      lane_active = _lane_active(exec_mask, lane)
+      return lane_active.where(ctx.rvgpr_dyn(addr_reg, lane), _c(0))
     offset64 = offset.cast(dtypes.uint64)
     if is_mubuf:
       # CalcBufferAddr: address from Buffer Resource Descriptor (SRD = 4 SGPRs)
@@ -1689,18 +1753,33 @@ def _compile_mem_op(inst: ir3.DS|ir3.FLAT|ir3.GLOBAL|ir3.SCRATCH|ir4.DS|ir4.VFLA
       stride = (srd1 >> UOp.const(dtypes.uint64, 16)) & UOp.const(dtypes.uint64, 0x3FFF)
       # Scalar offset: read SGPR if soffset < 124 (not NULL/OFF), else 0
       soff = (soffset_reg < _c(124)).where(ctx.rsgpr_dyn(soffset_reg).cast(dtypes.uint64), UOp.const(dtypes.uint64, 0))
-      vaddr_val = ctx.rvgpr_dyn(addr_reg, lane).cast(dtypes.uint64)
+      # Clamp vaddr for EXEC-inactive lanes — CPU backend evaluates all lanes, garbage vaddr crashes
+      lane_active = _lane_active(exec_mask, lane)
+      vaddr_val = lane_active.where(ctx.rvgpr_dyn(addr_reg, lane).cast(dtypes.uint64), UOp.const(dtypes.uint64, 0))
       # offen=1: vaddr is byte offset; idxen=1: vaddr is buffer index (multiply by stride)
       offen_contrib = (offen.ne(_c(0))).where(vaddr_val, UOp.const(dtypes.uint64, 0))
       idxen_contrib = (idxen.ne(_c(0))).where(vaddr_val * stride, UOp.const(dtypes.uint64, 0))
       byte_offset = offen_contrib + idxen_contrib + soff + offset64
-      # Clamp OOB addresses to base_addr to prevent segfault (CPU backend evaluates both branches of where())
-      # Real hardware silently drops OOB accesses; correctness ensured by mubuf_active in make_srcs
+      # OOB check: real hardware silently drops OOB accesses. Correctness is ensured by mubuf_active gating
+      # stores in make_srcs. However, the CPU backend still evaluates the address for inactive lanes
+      # (`*ptr = active ? val : *ptr` always touches the page), so OOB addresses must point to a writable page.
+      # Persistent GEMM kernels advance SRD bases past the buffer via s_add_u32, making base_addr point to
+      # arbitrary non-writable pages (JIT code, .text sections). Redirect OOB to the trash page, not base_addr.
       num_records_u64 = ctx.rsgpr_dyn(srsrc_reg + _c(2)).cast(dtypes.uint64)
       in_bounds = byte_offset < num_records_u64
       _mubuf_info['byte_offset'] = byte_offset
       _mubuf_info['num_records_u64'] = num_records_u64
-      return base_addr + in_bounds.where(byte_offset, UOp.const(dtypes.uint64, 0))
+      _TRASH = UOp.const(dtypes.uint64, _get_trash_page_addr())
+      addr = in_bounds.where(base_addr + byte_offset, _TRASH)
+      # Prevent non-canonical x86_64 faults: persistent GEMM kernels advance SRD bases via s_add_u32, which can
+      # overflow bit 47 making the address non-canonical (CPU #GP → SIGSEGV). Mask to 47 bits, then redirect
+      # low addresses to a dedicated RW trash page to avoid faulting on unmapped/non-writable host pages.
+      _CANONICAL_MASK = UOp.const(dtypes.uint64, 0x7FFFFFFFFFFF)
+      addr = addr & _CANONICAL_MASK
+      addr = (addr >= UOp.const(dtypes.uint64, 0x10000)).where(addr, _TRASH)
+      # Final gate: inactive lanes → trash. Even with vaddr clamping, base_addr + 0 can be non-writable
+      # after SRD advancement. Ensure inactive lanes never touch real addresses.
+      return lane_active.where(addr, _TRASH)
     # Dynamic saddr check: saddr < 124 means valid SGPR, otherwise use VGPR pair for address
     use_saddr = (saddr_reg < _c(124)) if saddr_reg is not None else UOp.const(dtypes.bool, False)
     if is_scratch:
@@ -1708,22 +1787,43 @@ def _compile_mem_op(inst: ir3.DS|ir3.FLAT|ir3.GLOBAL|ir3.SCRATCH|ir4.DS|ir4.VFLA
       base = lane.cast(dtypes.uint64) * scratch_stride
       # SVE (Scratch VGPR Enable): when SVE=1, VADDR is used as offset; when SVE=0, VADDR is ignored
       sve = getattr(inst, 'sve', 0)
-      vaddr = ctx.rvgpr_dyn(addr_reg, lane).cast(dtypes.uint64)
+      # Clamp VGPR offset for EXEC-inactive lanes — garbage offsets cause OOB scratch access
+      lane_active = _lane_active(exec_mask, lane)
+      vaddr = lane_active.where(ctx.rvgpr_dyn(addr_reg, lane).cast(dtypes.uint64), UOp.const(dtypes.uint64, 0))
       addr_offset = vaddr if sve == 1 else UOp.const(dtypes.uint64, 0)
       # Add saddr value only if use_saddr is true (saddr < 124)
       saddr_contrib = use_saddr.where(ctx.rsgpr_dyn(saddr_reg).cast(dtypes.uint64), UOp.const(dtypes.uint64, 0)) \
         if saddr_reg is not None else UOp.const(dtypes.uint64, 0)
       return base + addr_offset + saddr_contrib + offset64
     # FLAT/GLOBAL: choose between SGPR base (saddr) or VGPR pair (addr) based on saddr validity
+    # Clamp VGPR-derived address components for EXEC-inactive lanes — garbage VGPRs cause segfaults
+    lane_active = _lane_active(exec_mask, lane)
     saddr_base = _u64(ctx.rsgpr_dyn(saddr_reg), ctx.rsgpr_dyn(saddr_reg + _c(1))) if saddr_reg is not None else UOp.const(dtypes.uint64, 0)
-    vaddr_base = _u64(ctx.rvgpr_dyn(addr_reg, lane), ctx.rvgpr_dyn(addr_reg + _c(1), lane))
+    vaddr_lo = lane_active.where(ctx.rvgpr_dyn(addr_reg, lane), _c(0))
+    vaddr_hi = lane_active.where(ctx.rvgpr_dyn(addr_reg + _c(1), lane), _c(0))
+    vaddr_base = _u64(vaddr_lo, vaddr_hi)
     # When saddr is valid: base = saddr pair, vaddr is 32-bit offset; otherwise: base = 0, vaddr is 64-bit address
-    base_addr = use_saddr.where(saddr_base + ctx.rvgpr_dyn(addr_reg, lane).cast(dtypes.uint64), vaddr_base)
-    return base_addr + offset64
+    base_addr = use_saddr.where(saddr_base + vaddr_lo.cast(dtypes.uint64), vaddr_base)
+    addr = base_addr + offset64
+    # Prevent non-canonical x86_64 faults: VGPR-pair addresses can have bit 47 set → #GP. Mask to 47 bits, then redirect.
+    _CANONICAL_MASK = UOp.const(dtypes.uint64, 0x7FFFFFFFFFFF)
+    addr = addr & _CANONICAL_MASK
+    _TRASH = UOp.const(dtypes.uint64, _get_trash_page_addr())
+    return (addr >= UOp.const(dtypes.uint64, 0x10000)).where(addr, _TRASH)
 
   def wmem(addr: UOp, val: UOp, active: UOp) -> UOp:
     idx_dt = dtypes.int if is_lds or is_scratch else dtypes.int64  # vmem needs int64 for 48-bit GPU addresses
-    idx = mem.index((addr >> addr_shift).cast(idx_dt))
+    # Clamp inactive lane addresses to 0 — CPU backend evaluates both branches of where(), so garbage addrs crash
+    if is_lds or is_scratch:
+      clamped_addr = active.where(addr, addr.const_like(0))
+    else:
+      # vmem: mask to 47 bits for canonical x86_64 addresses, then redirect OOB to trash page.
+      # CPU backend unconditionally stores (even for inactive lanes), so wrapped/non-canonical addresses crash.
+      _CANONICAL_MASK = UOp.const(dtypes.uint64, 0x7FFFFFFFFFFF)
+      clamped_addr = addr & _CANONICAL_MASK
+      _TRASH = UOp.const(dtypes.uint64, _get_trash_page_addr())
+      clamped_addr = (clamped_addr >= UOp.const(dtypes.uint64, 0x10000)).where(clamped_addr, _TRASH)
+    idx = mem.index((clamped_addr >> addr_shift).cast(idx_dt))
     return idx.store(active.where(val, idx.load()))
 
   def make_srcs(lane: UOp) -> dict:
@@ -1900,6 +2000,13 @@ def _get_runner(inst_bytes: bytes, arch: str = "rdna3"):
   with Context(NOOPT=1, CHECK_OOB=0, TUPLE_ORDER=0, EMULATED_DTYPES="", CAPTURE_PROCESS_REPLAY=0, PROFILE=0):
     runner = get_runner('CPU', sink)
   _canonical_runner_cache.append((type(inst), base, mask, size, runner))
+  # DEBUG: dump C source for MFMA instructions
+  if DEBUG >= 4 and 'MFMA' in _op_name(inst):
+    import pathlib
+    src = getattr(runner.p, 'src', None) or getattr(runner, 'src', '')
+    dump_path = pathlib.Path(f"/tmp/emu_mfma_{canonical_name}.c")
+    dump_path.write_text(src if isinstance(src, str) else src.decode() if isinstance(src, bytes) else str(src))
+    print(f"  [emu] dumped MFMA C source to {dump_path} ({len(src)} bytes, globals={runner.p.globals})", flush=True)
   return runner
 
 _BARRIER_OPS = {ir3.SOPPOp.S_BARRIER, irc.SOPPOp.S_BARRIER}
@@ -2002,12 +2109,14 @@ def _init_wave(lib: int, wave_start: int, total_threads: int, lx: int, ly: int, 
   return st
 
 def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, lz: int, args_ptr: int, rsrc2: int = 0x19c,
-            scratch_size: int = 0, arch: str = "rdna3", user_data: list[int]|None = None) -> int:
+            scratch_size: int = 0, arch: str = "rdna3", user_data: list[int]|None = None,
+            valid_mem_ranges: set[tuple[int, int]]|None = None) -> int:
   """Execute AMD assembly program. scratch_size is private_segment_fixed_size from kernel descriptor (per-lane)."""
   from tinygrad.renderer.amd.dsl import Inst
   program: dict[int, tuple[Callable, list[int], bool, Inst]] = {}  # pc -> (fxn, globals, is_barrier, inst)
   lds_size = ((rsrc2 & hsa.AMD_COMPUTE_PGM_RSRC_TWO_GRANULATED_LDS_SIZE) >> hsa.AMD_COMPUTE_PGM_RSRC_TWO_GRANULATED_LDS_SIZE_SHIFT) * 512
-  if DEBUG >= 3: print(f"  [emu] lds_size={lds_size} scratch_size={scratch_size} arch={arch} grid=({gx},{gy},{gz}) local=({lx},{ly},{lz})", flush=True)
+  if DEBUG >= 3:
+    print(f"  [emu] lds_size={lds_size} scratch_size={scratch_size} arch={arch} grid=({gx},{gy},{gz}) local=({lx},{ly},{lz})", flush=True)
   total_threads = lx * ly * lz
   wave_size = _wave_size(arch)
 
@@ -2035,6 +2144,18 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
   # Only trace the first workgroup (like real HW traces one CU/SIMD), subsequent workgroups run but don't add to trace
   tracing = bool(PROFILE)
 
+  trash_addr = _get_trash_page_addr()  # ensure trash page is allocated before any vmem access
+
+  # Install vmem write guard: SIGSEGV handler that redirects writes to non-writable pages to trash.
+  # Persistent GEMM kernels advance SRD bases past allocated buffers. The CPU backend generates
+  # `*ptr = active ? val : *ptr` which always writes, even for inactive lanes. When the target
+  # page is non-writable (JIT code, .text), the handler catches SEGV_ACCERR and modifies RAX to
+  # point to the trash page, retrying the instruction harmlessly. Only a small number of faults
+  # occur (active lanes in the last few stores before SRD overshoot), so overhead is minimal.
+  guard = _load_vmem_guard()
+  if guard:
+    guard.vmem_guard_install(ctypes.c_uint64(trash_addr))
+    if DEBUG >= 3: print(f"  [emu] vmem_guard installed, trash=0x{trash_addr:x}", flush=True)
   with _MXCSRContext():
     for gidz in range(gz):
       for gidy in range(gy):
@@ -2078,6 +2199,12 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
 
           # Reset LDS for next workgroup
           if lds_size > 0: ctypes.memset(lds_buf._buf.va_addr, 0, max(lds_size, 4))
+
+  # Remove vmem write guard after kernel execution
+  if guard:
+    redirects = guard.vmem_guard_redirects()
+    guard.vmem_guard_remove()
+    if DEBUG >= 3: print(f"  [emu] vmem_guard removed, {redirects} redirects", flush=True)
 
   if PROFILE: sqtt_traces.append(sqtt_finalize())
   return 0

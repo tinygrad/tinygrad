@@ -1046,5 +1046,71 @@ class TestCDNA_BufferLoadStoreLoop(unittest.TestCase):
           self.assertEqual(got, exp,
             f"iter{i} lane{lane} dword[{j}] at offset {out_offset}: got 0x{got:08x}, expected 0x{exp:08x}")
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# Bug 11: DS_WRITE_B128 crashes when inactive lanes have garbage in address VGPR
+# ROOT CAUSE OF GEMM SEGFAULT: The CPU backend evaluates both branches of
+# where() — including lds_idx.load() for inactive lanes. If an inactive lane's
+# address VGPR contains garbage (e.g., MFMA output data), the LDS index is
+# out-of-bounds, causing a segfault.
+# Fix: clamp inactive lane addresses to 0 (same as DS_READ_B128 already does).
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestCDNA_DS_Write_InactiveLaneGarbage(unittest.TestCase):
+  def test_ds_write_b128_garbage_addr_inactive_lanes(self):
+    """ds_write_b128 must not crash when inactive lanes have garbage in address VGPR.
+
+    This reproduces the GEMM crash root cause:
+    1. Set v[82] = garbage (0xDEADBEEF) for ALL 64 lanes
+    2. Use s_and_saveexec_b64 to restrict EXEC to lanes 0-31
+    3. Set valid LDS addresses for active lanes (0-31 only)
+    4. Call ds_write_b128 — lanes 32-63 have garbage in v[82] but are inactive
+
+    Without the fix (missing inactive lane address clamping), this segfaults
+    because the CPU backend evaluates lds_idx.load() even for inactive lanes,
+    and the garbage address (0xDEADBEEF) causes an out-of-bounds LDS access.
+    """
+    magic = [0x11110001, 0x22220002, 0x33330003, 0x44440004]
+    instructions = [
+      cdna.s_load_dwordx2(sdata=s[10:11], sbase=s[0:1], offset=0),
+      cdna.s_waitcnt(0),
+      # Set data in v[18:21]
+      cdna.v_mov_b32_e32(v[18], magic[0]),
+      cdna.v_mov_b32_e32(v[19], magic[1]),
+      cdna.v_mov_b32_e32(v[20], magic[2]),
+      cdna.v_mov_b32_e32(v[21], magic[3]),
+      # Step 1: Set v[82] = 0xDEADBEEF for ALL 64 lanes (garbage address, simulates MFMA overwrite)
+      cdna.v_mov_b32_e32(v[82], 0xBEEF),
+      cdna.v_mov_b32_e32(v[83], 0xDEAD),
+      cdna.v_lshlrev_b32_e32(v[83], 16, v[83]),
+      cdna.v_or_b32_e32(v[82], v[82], v[83]),   # v[82] = 0xDEADBEEF for all 64 lanes
+      # Step 2: Restrict EXEC to lanes 0-31 only (saves old EXEC to s[60:61])
+      cdna.s_mov_b32(s[20], 0xFFFFFFFF),  # lo 32 bits = all 1s
+      cdna.s_mov_b32(s[21], 0),            # hi 32 bits = all 0s -> mask = 0x00000000_FFFFFFFF
+      cdna.s_and_saveexec_b64(s[60:61], s[20:21]),  # EXEC = EXEC & mask = lanes 0-31; save old to s[60:61]
+      # Step 3: Set valid LDS addresses for active lanes (0-31 only)
+      cdna.v_and_b32_e32(v[82], 63, v[0]),       # v[82] = lane_id & 63 (only for active lanes 0-31)
+      cdna.v_lshlrev_b32_e32(v[82], 4, v[82]),   # v[82] = lane_id * 16 (only for active lanes 0-31)
+      # NOW: lanes 0-31 have valid addr in v[82], lanes 32-63 still have 0xDEADBEEF
+      # Step 4: ds_write_b128 — EXEC = lanes 0-31, MUST NOT CRASH on inactive lanes 32-63
+      cdna.ds_write_b128(addr=v[82], data0=v[18:21]),
+      cdna.s_waitcnt(0),
+      # Step 5: Restore full EXEC via s_or_saveexec_b64 (EXEC = s[60:61] | EXEC = full mask)
+      cdna.s_or_saveexec_b64(s[62:63], s[60:61]),
+      # Step 6: Read back lane 0's data from LDS offset 0 and write to output
+      cdna.v_mov_b32_e32(v[82], 0),
+      cdna.ds_read_b128(vdst=v[8:11], addr=v[82]),
+      cdna.s_waitcnt(0),
+      cdna.v_mov_b32_e32(v[0], 0),
+      cdna.global_store_dword(addr=v[0], data=v[8], saddr=s[10:11], offset=0),
+      cdna.global_store_dword(addr=v[0], data=v[9], saddr=s[10:11], offset=4),
+      cdna.global_store_dword(addr=v[0], data=v[10], saddr=s[10:11], offset=8),
+      cdna.global_store_dword(addr=v[0], data=v[11], saddr=s[10:11], offset=12),
+      cdna.s_endpgm(),
+    ]
+    out = run_cdna_program_raw(instructions, n_lanes=64, lds_granules=128)
+    results = struct.unpack_from('<4I', out, 0)
+    for i, (got, expected) in enumerate(zip(results, magic)):
+      self.assertEqual(got, expected, f"dword[{i}]: got 0x{got:08x}, expected 0x{expected:08x}")
+
 if __name__ == '__main__':
   unittest.main()
