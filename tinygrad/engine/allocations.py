@@ -64,7 +64,7 @@ pm_early_transform_tensor_graph = PatternMatcher([
   # replace ALU sources with contiguous versions found above
   (UPat(GroupOp.ALU, name="alu"), lambda ctx,alu: alu.replace(src=new_src) if (new_src:=tuple(ctx.get(s, s) for s in alu.src)) != alu.src else None),
   # add CONTIGUOUS to tagged UOps
-  (UPat(GroupOp.All-{Ops.CONTIGUOUS, Ops.ASSIGN}, name="x"), lambda x: x.rtag(None).contiguous(tag=x.tag) if x.tag else None),
+  (UPat(GroupOp.All-{Ops.CONTIGUOUS, Ops.ASSIGN}, name="x"), lambda x: x.rtag(None).contiguous(tag=x.tag) if x.tag else x.replace(tag=None)),
   # remove extra CONTIGUOUS on ASSIGN
   (UPat(Ops.CONTIGUOUS, src=(UPat(Ops.ASSIGN, name="a"),), name="c"), lambda a,c: a.replace(tag=a.tag+c.tag)),
   # replace ASSIGN with CONTIGUOUS
@@ -82,14 +82,24 @@ pm_early_transform_tensor_graph = PatternMatcher([
   (UPat(Ops.COPY, src=(UPat.var("s"), UPat()), name="c"), lambda c,s: c.const_like(ss.arg) if (ss:=s.base).op is Ops.CONST else None),
 ])
 
-def untag_and_append(ctx:list[UOp], x:UOp):
-  if x.tag:
-    ret = x.replace(tag=None)
-    ctx.append(ret)
-    return ret
+def untag_and_append(ctx:tuple[list[UOp], dict[UOp, UOp], list[UOp]], x:UOp):
+  if x.tag is None: return None
+  uop_list, buffer_map, assigns = ctx
+  ret = x.replace(tag=None)
+  for t in x.tag:
+    original_uop: UOp = uop_list[t]
+    replace_uop = ret
+    while replace_uop.op is Ops.ASSIGN: replace_uop = replace_uop.src[0]
+    buffer_map[original_uop] = replace_uop.shrink_to(original_uop.shape)
+  assigns.append(ret)
+  return ret
+
+def append_after(ctx:tuple[list[UOp], dict[UOp, UOp], list[UOp]], x:UOp):
+  ctx[2].append(x)
 
 pm_finalize_call = PatternMatcher([
-  (UPat(GroupOp.All, name="x"), untag_and_append),
+  (UPat(Ops.ASSIGN, name="x"), untag_and_append),
+  (UPat(Ops.AFTER, name="x"), append_after),
   # replace UNIQUE with LUNIQUE for CONST cache key normalization
   (UPat(Ops.CONST, src=(UPat(Ops.UNIQUE), UPat(Ops.DEVICE, name="d")), name="b"), lambda b,d: b.replace(src=(d,))),
 ])
@@ -111,14 +121,6 @@ def allocate_global_buffers(big_sink:UOp) -> tuple[UOp, dict[UOp, UOp]]:
   big_sink = graph_rewrite(big_sink, pm_early_transform_tensor_graph, ctx={}, name="early transform tensor graph")
 
   # here we construct the final buffer_map. this is everything that will go into the tensor map
-  for s in big_sink.toposort():
-    if s.tag:
-      assert s.op is Ops.ASSIGN
-      for t in s.tag:
-        original_uop = uop_list[t]
-        replace_uop = s
-        while replace_uop.op is Ops.ASSIGN: replace_uop = replace_uop.src[0]
-        buffer_map[original_uop] = replace_uop.shrink_to(original_uop.shape)
   assigns: list[UOp] = []
-  graph_rewrite(big_sink, pm_finalize_call, ctx=assigns, name="remove tags")
+  graph_rewrite(big_sink, pm_finalize_call, ctx=(uop_list, buffer_map, assigns), name="finalize call")
   return UOp.sink(*assigns), buffer_map
