@@ -1,4 +1,5 @@
 # mypy: ignore-errors
+from __future__ import annotations
 import ctypes, ctypes.util, struct, functools, os, mmap
 from tinygrad.runtime.autogen.am import am
 from tinygrad.runtime.support.amd import AMDReg, import_asic_regs
@@ -37,7 +38,7 @@ def _build_ip_regs(prefix, hwip) -> dict[str, AMDReg]:
   except Exception: return {}
 
 class MockMMU:
-  def __init__(self, gpu:'MockAMGPU'):
+  def __init__(self, gpu:MockAMGPU):
     self.gpu = gpu
     self.tlb: dict[int, tuple[int, int, bool]] = {}
 
@@ -45,9 +46,9 @@ class MockMMU:
     new_tlb: dict[int, tuple[int, int, bool]] = {}
     self._walk(pt_base, 0, 0, new_tlb, va_base)
     for va, (pa, sz, is_sys) in new_tlb.items():
-      if va not in self.tlb:
-        if not is_sys: self.gpu.map_vram_at(va, pa, sz)
-        self.gpu.map_range(va, sz)
+      old = self.tlb.get(va)
+      if not is_sys and (old is None or old[0] != pa): self.gpu.map_vram_at(va, pa, sz)
+      if old is None: self.gpu.map_range(va, sz)
     self.tlb = new_tlb
 
   def _walk(self, pt_paddr:int, level:int, va_acc:int, out:dict, va_base:int):
@@ -62,9 +63,10 @@ class MockMMU:
         self._walk(pa, level + 1, va, out, va_base)
 
   def paddr_to_host(self, paddr:int) -> int:
-    if paddr < VRAM_SIZE: return self.gpu.vram_addr + paddr
     page, off = paddr & ~0xFFF, paddr & 0xFFF
-    return self.gpu._sysmem_map[page] + off
+    if page in self.gpu._sysmem_map: return self.gpu._sysmem_map[page] + off
+    if paddr < VRAM_SIZE: return self.gpu.vram_addr + paddr
+    raise ValueError(f"paddr {paddr:#x} not found in sysmem_map or VRAM")
 
   def addr_to_host(self, addr:int) -> int:
     gmc = self.gpu.mmio.gmc
@@ -73,12 +75,13 @@ class MockMMU:
     if sys_lo <= addr < sys_hi: return self.paddr_to_host(addr - self.gpu.mc_base)
     for tva, (pa, sz, is_sys) in self.tlb.items():
       if tva <= addr < tva + sz:
-        if not is_sys: return addr
-        return self.paddr_to_host(pa + (addr - tva))
+        paddr = pa + (addr - tva)
+        if not is_sys: return self.gpu.vram_addr + paddr
+        return self.paddr_to_host(paddr)
     raise ValueError(f"addr {addr:#x} not mapped (sys_aperture=[{sys_lo:#x}, {sys_hi:#x}])")
 
 class MockIPBlock:
-  def __init__(self, gpu:'MockAMGPU', mmio:'MockMMIOInterface', regs:dict[str, AMDReg]):
+  def __init__(self, gpu:MockAMGPU, mmio:MockMMIOInterface, regs:dict[str, AMDReg]):
     self.gpu, self.mmio, self._regs = gpu, mmio, regs
     self._n2a = {n: r.addr[0] for n, r in regs.items()}
     self._a2n = {a: n for n, a in self._n2a.items()}
@@ -231,7 +234,7 @@ class MockNBIO(MockIPBlock):
     return super().read(reg)
 
 class MockMMIOInterface:
-  def __init__(self, gpu:'MockAMGPU'):
+  def __init__(self, gpu:MockAMGPU):
     self.gpu = gpu
     self.regs: dict[int, int] = {}
     gfx = MockGFX(gpu, self)
@@ -273,6 +276,8 @@ class MockAMGPU(AMDGPU):
     self.mmu = MockMMU(self)
     self.mmio = MockMMIOInterface(self)
     self._preboot()
+
+  def translate_addr(self, addr:int) -> int: return self.mmu.addr_to_host(addr)
 
   def map_vram_at(self, va:int, paddr:int, size:int):
     libc.mmap(va, size, mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_SHARED | 0x10, self.vram_fd, paddr)

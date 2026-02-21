@@ -683,6 +683,8 @@ jobs:
           amd: 'true'
       - name: Run test_tiny on MOCKAM
         run: python test/test_tiny.py
+      - name: Run test_tiny on MOCKAM USB
+        run: AMD_IFACE=USB python test/test_tiny.py
       - name: Run test_hcq on MOCKAM
         run: python -m pytest test/device/test_hcq.py
 
