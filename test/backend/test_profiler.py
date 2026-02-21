@@ -175,13 +175,13 @@ class TestProfiler(unittest.TestCase):
       if err: raise Exception()
 
     with helper_collect_profile(dev:=TestProfiler.d0) as profile:
-      with cpu_profile("test_1", "CUSTOM"):
+      with cpu_profile("test_1", dev):
         test_fxn(err=False)
       with self.assertRaises(Exception):
-        with cpu_profile("test_2", "CUSTOM"):
+        with cpu_profile("test_2", dev):
           test_fxn(err=True)
 
-    range_events = [p for p in profile if isinstance(p, ProfileRangeEvent) and p.device == "CUSTOM"]
+    range_events = [p for p in profile if isinstance(p, ProfileRangeEvent) and p.device == dev]
     self.assertEqual(len(range_events), 2)
 
   @unittest.skip("this test is flaky")
