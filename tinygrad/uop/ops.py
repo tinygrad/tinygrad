@@ -1268,6 +1268,10 @@ class RewriteContext:
             if n in waitlist: stack.extend(waitlist.pop(n))
             continue
         stack.append((n, 1, new_n))
+        # NOTE: CALL is handled as a special case.
+        # The function that is called is not included in the graph_rewrite.
+        # If you want to graph_rewrite a call, you can
+        if new_n.op is Ops.CALL: self.replace[new_n.src[0]] = new_n.src[0]
         for x in reversed(new_n.src):
           if x in on_stack: continue
           stack.append((x, 0, x))

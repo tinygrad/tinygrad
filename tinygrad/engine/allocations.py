@@ -1,6 +1,6 @@
 from tinygrad.uop.ops import UOp, UPat, PatternMatcher, Ops, GroupOp, graph_rewrite, _remove_all_tags, identity_element
 from tinygrad.dtype import ImageDType
-from tinygrad.helpers import prod, DEBUG, argsort
+from tinygrad.helpers import prod, DEBUG, argsort, VIZ
 
 # these are the only uops that can get replaced in the tensor graph
 from tinygrad.schedule.rangeify import pm_gate_kernel_sink
@@ -85,7 +85,13 @@ pm_early_transform_tensor_graph = PatternMatcher([
   (UPat(Ops.COPY, src=(UPat.var("s"), UPat()), name="c"), lambda c,s: c.const_like(ss.arg) if (ss:=s.base).op is Ops.CONST else None),
 ])
 
+def replace_input_buffer(ctx:list[UOp], b:UOp):
+  ctx.append(b)
+  return UOp.param(len(ctx)-1, b.dtype, b.shape, b.device)
+
 pm_remove_unique_consts = PatternMatcher([
+  # replace BUFFER with PARAM for cache key normalization
+  (UPat(Ops.BUFFER, src=(UPat(Ops.UNIQUE), UPat(Ops.DEVICE)), name="b"), replace_input_buffer),
   # replace UNIQUE with LUNIQUE for CONST cache key normalization
   (UPat(Ops.CONST, src=(UPat(Ops.UNIQUE), UPat(Ops.DEVICE, name="d")), name="b"), lambda b,d: b.replace(src=(d,))),
 ])
@@ -115,5 +121,8 @@ def allocate_global_buffers(big_sink:UOp) -> tuple[UOp, dict[UOp, UOp]]:
         replace_uop = s
         while replace_uop.op is Ops.ASSIGN: replace_uop = replace_uop.src[0]
         buffer_map[original_uop] = replace_uop.shrink_to(original_uop.shape)
-  big_sink = graph_rewrite(big_sink, _remove_all_tags+pm_remove_unique_consts, name="remove tags")
+  replacements: list[UOp] = []
+  big_sink = graph_rewrite(big_sink, _remove_all_tags+pm_remove_unique_consts, ctx=replacements, name="remove tags")
+  big_sink = big_sink.call(*replacements)
+  if VIZ: graph_rewrite(big_sink, PatternMatcher([]), name="*** Compiled Call")
   return big_sink, buffer_map
