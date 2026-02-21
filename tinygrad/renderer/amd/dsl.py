@@ -56,10 +56,10 @@ class Reg:
   def fmt(self, sz=None, parens=False, upper=False) -> str:
     o, sz = self.offset, sz or self.sz
     l, r = ("[", "]") if parens or sz > 1 else ("", "")  # brackets for multi-reg or when parens=True
-    if ACCVGPR_BASE <= o < ACCVGPR_BASE + 256:
+    if o >= ACCVGPR_BASE:
       idx = o - ACCVGPR_BASE
       base = f"acc{l}{idx}{r}" if sz == 1 else f"acc[{idx}:{idx + sz - 1}]"
-    elif VGPR_BASE <= o < ACCVGPR_BASE:
+    elif o >= VGPR_BASE:
       idx = o - VGPR_BASE
       base = f"v{l}{idx}{r}" if sz == 1 else f"v[{idx}:{idx + sz - 1}]"
     elif o <= SGPR_MAX: base = f"s{l}{o}{r}" if sz == 1 else f"s[{o}:{o + sz - 1}]"
