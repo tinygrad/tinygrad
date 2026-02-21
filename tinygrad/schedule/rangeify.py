@@ -94,7 +94,16 @@ def resolve_call(c:UOp) -> UOp|None:
   # don't resolve real kernel calls, sink or program
   if c.src[0].op is Ops.SINK and isinstance(c.src[0].arg, KernelInfo): return None
   if c.src[0].op is Ops.PROGRAM: return None
-  params = sorted([x for x in c.src[0].toposort() if x.op == Ops.PARAM], key=lambda x: x.arg)
+  # NOTE: don't capture PARAMs in nested CALL bodies
+  seen: set[UOp] = set()
+  queue = [c.src[0]]
+  params: list[UOp] = []
+  while queue:
+    if (u:=queue.pop()) in seen: continue
+    seen.add(u)
+    if u.op is Ops.PARAM: params.append(u)
+    queue += u.src[1:] if u.op is Ops.CALL else u.src
+  params = sorted(params, key=lambda x: x.arg)
   args = c.src[1:]
   # TODO: this check belongs in spec, not here
   if [x.arg for x in params] != list(range(len(params))): raise RuntimeError(f"params not in order: {[x.arg for x in params]}")

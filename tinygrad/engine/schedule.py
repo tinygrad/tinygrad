@@ -143,8 +143,18 @@ pm_post_sched_cache = PatternMatcher([
 ])
 
 def resolve_cached_call(c: UOp) -> UOp:
+  # NOTE: this is a call for the schedule cache (PARAMs only) real kernels are left as CALLs
   fxn, args = c.src[0], c.src[1:]
-  params = sorted((x for x in fxn.toposort(gate_kernel_sink) if x.op is Ops.PARAM), key=lambda x: x.arg)
+  # NOTE: not capturing PARAMs in nested CALL bodies
+  seen: set[UOp] = set()
+  queue = [fxn]
+  params: list[UOp] = []
+  while queue:
+    if (u:=queue.pop()) in seen: continue
+    seen.add(u)
+    if u.op is Ops.PARAM: params.append(u)
+    queue += u.src[1:] if u.op is Ops.CALL else u.src
+  params = sorted(params, key=lambda x: x.arg)
   assert len(params) == len(args), f"call mismatch: {len(params)} params vs {len(args)} args"
   assert all(p.arg == i for i,p in enumerate(params)), "PARAM slots are not contiguous"
   return fxn.substitute(dict(zip(params, args))).rtag(c.tag)
