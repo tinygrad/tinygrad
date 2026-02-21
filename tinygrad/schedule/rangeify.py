@@ -76,11 +76,14 @@ mop_cleanup = PatternMatcher([
   (UPat(Ops.RESHAPE, src=(UPat(Ops.RESHAPE, name="x2"), UPat()), name="x"), lambda x,x2: x.replace(src=(x2.src[0], x.src[1]))),
 ])
 
+pm_gather_params = PatternMatcher([ (UPat(Ops.PARAM, name="p"), lambda ctx, p: ctx.append(p)), ])
 def resolve_call(c:UOp) -> UOp|None:
   # don't resolve real kernel calls, sink or program
   if c.src[0].op is Ops.SINK and isinstance(c.src[0].arg, KernelInfo): return None
   if c.src[0].op is Ops.PROGRAM: return None
-  params = sorted([x for x in c.src[0].toposort() if x.op == Ops.PARAM], key=lambda x: x.arg)
+  params: list[UOp] = []
+  graph_rewrite(c.src[0], pm_gather_params, bottom_up=True, ctx=params)
+  params = sorted(params, key=lambda x: x.arg)
   args = c.src[1:]
   # TODO: this check belongs in spec, not here
   if [x.arg for x in params] != list(range(len(params))): raise RuntimeError(f"params not in order: {[x.arg for x in params]}")
