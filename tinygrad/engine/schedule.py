@@ -4,7 +4,7 @@ from collections import deque
 from tinygrad.uop.ops import UOp, Ops, buffers, UOpMetaClass, track_rewrites, PatternMatcher, UPat, graph_rewrite, gate_kernel_sink
 from tinygrad.uop.spec import type_verify, tensor_spec
 from tinygrad.device import Buffer, MultiBuffer
-from tinygrad.helpers import DEBUG, cpu_profile, TracingKey, SPEC, flatten, pluralize, SCACHE
+from tinygrad.helpers import DEBUG, cpu_profile, TracingKey, SPEC, pluralize, SCACHE
 from tinygrad.engine.realize import ExecItem
 from tinygrad.engine.allocations import allocate_global_buffers
 
@@ -127,11 +127,7 @@ def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[dict[UOp, UOp], li
   if not SCACHE or (sc_ret:=schedule_cache.get(sched_cache_key, None)) is None:
     # verify Tensors match the spec (on big_sink, we only need to do this if cache misses)
     if SPEC: type_verify(big_sink, tensor_spec)
-
-    if any(isinstance(x._device, tuple) for x in big_sink_cache.toposort()):
-      big_sink_cache = graph_rewrite(big_sink_cache, multi_pm, name="multi_pm")
-      big_sink_cache = UOp.sink(*flatten([x.src if x.op is Ops.MULTI else [x] for x in big_sink_cache.src]))
-
+    big_sink_cache = graph_rewrite(big_sink_cache, multi_pm, name="multi_pm")
     big_sink = get_rangeify(big_sink_cache)
     pre_schedule, buf_uops_sink = create_schedule(big_sink)
     if SCACHE: schedule_cache[sched_cache_key] = (pre_schedule, buf_uops_sink)
