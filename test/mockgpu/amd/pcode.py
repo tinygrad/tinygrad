@@ -3,8 +3,13 @@ from typing import Any, Callable
 from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import Ops, UOp
 
+# takes string inputs from amd's manual per op, tokenizes them, then converts them to operands + uop buffers
 # Type alias for vars dict: stores UOps for variables and tuples for lambda definitions
 VarVal = UOp | tuple[str, list[str], str]
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# HELPERS
+# ═══════════════════════════════════════════════════════════════════════════════
 
 def _const(dt, v): return UOp.const(dt, v)
 def _u32(v): return _const(dtypes.uint32, v)
@@ -289,6 +294,10 @@ _FUNCS: dict[str, Callable[..., UOp]] = {
   'CalcDsAddr': lambda a, o, *r: a.cast(dtypes.uint32) + o.cast(dtypes.uint32),
   'CalcGlobalAddr': lambda v, s, *r: v.cast(dtypes.uint64) + s.cast(dtypes.uint64),
   'CalcScratchAddr': lambda v, s, *r: v.cast(dtypes.uint64) + s.cast(dtypes.uint64),
+  # found lambda functions
+  'ABSDIFF': lambda x, y: (x > y).where(x - y, y - x),
+  'SAT8': lambda x: (x <=16).where(8, (x >= 255).where(255, x)),
+  # TODO: implement BYTE_PERMUTE
 }
 for is_max, name in [(False, 'min'), (True, 'max')]:
   for dt, sfx in [(dtypes.float32, 'f32'), (dtypes.int, 'i32'), (dtypes.uint32, 'u32'), (dtypes.int16, 'i16'), (dtypes.uint16, 'u16')]:
@@ -726,17 +735,7 @@ class Parser:
     return args
 
   def _call_func(self, name: str, args: list[UOp]) -> UOp:
-    if name in self.vars and isinstance(self.vars[name], tuple) and self.vars[name][0] == 'lambda':
-      _, params, body = self.vars[name]
-      lv = {**self.vars, **dict(zip(params, args))}
-      if ';' in body or '\n' in body or 'return' in body.lower():
-        lines = [l.strip() for l in body.replace(';', '\n').split('\n') if l.strip() and not l.strip().startswith('//')]
-        _, _, result = parse_block(lines, 0, lv, self.funcs)
-        assert result is not None, f"lambda {name} must return a value"
-        return result
-      return parse_expr(body, lv, self.funcs)
-    if name in self.funcs:
-      return self.funcs[name](*args)
+    if name in self.funcs: return self.funcs[name](*args)
     raise RuntimeError(f"unknown function: {name}")
 
   def _handle_mem_load(self, addr: UOp, dt) -> UOp:
@@ -852,11 +851,6 @@ def parse_block(lines: list[str], start: int, env: dict[str, VarVal], funcs: dic
     # Block terminators
     if first in ('elsif', 'else', 'endif', 'endfor'): break
 
-    # return expr (lambda bodies)
-    if first == 'return':
-      rest = line[line.lower().find('return') + 6:].strip()
-      return i + 1, block_assigns, parse_expr(rest, env, funcs)
-
     # for loop
     if first == 'for':
       # Parse: for VAR in [SIZE']START : [SIZE']END do
@@ -925,34 +919,23 @@ def parse_block(lines: list[str], start: int, env: dict[str, VarVal], funcs: dic
       i += 1
       continue
 
-    # lambda definition
-    if first != '{' and '=' in line and 'lambda' in line and any(t.type == 'IDENT' and t.val == 'lambda' for t in toks):
+    # lambda function lookup
+    if 'lambda' in line:
       name = toks[0].val
+      # attempt to search for the function name
+      func = _FUNCS.get(name, None)
+      if func is None: raise RuntimeError("lambda function {name} not found ... check isa docs and write in FUNCS")
+      # grab the params
       body_start = line[line.find('(', line.find('lambda')):]
       params_end = _find_paren_end(body_start) + 1
       params = [p.strip() for p in body_start[1:params_end-1].split(',') if p.strip()]
-      rest = body_start[params_end:].strip()
-      if rest.startswith('('):
-        body_end = _find_paren_end(rest)
-        if body_end < len(rest):  # found matching paren on same line
-          body = rest[1:body_end].strip()
-          i += 1
-        else:  # multiline body
-          body_lines_lst, depth = [rest[1:]], 1
-          i += 1
-          while i < len(lines) and depth > 0:
-            for j, ch in enumerate(lines[i]):
-              if ch == '(': depth += 1
-              elif ch == ')':
-                depth -= 1
-                if depth == 0:
-                  body_lines_lst.append(lines[i][:j])
-                  break
-            else: body_lines_lst.append(lines[i])
-            i += 1
-          body = '\n'.join(body_lines_lst).strip()
-        env[name] = ('lambda', params, body)
-        continue
+      # jump lines to the end of lambda def
+      # AMD isa lambdas only: find closures by counting l/r parens. NOTE: amd has funcdef lambda(x,y...): (<func body>)
+      _paren_cnt = lambda line: sum(1 for x in line if x == '(') - sum(1 for x in line if x == ')')
+      _sum = 0
+      while (_sum:= _sum + _paren_cnt(lines[i])): i+=1
+      env[name] = (name, params)
+      continue
 
     # MEM assignment: MEM[addr].type (+|-)?= value
     if first == 'mem' and toks[1].type == 'LBRACKET':

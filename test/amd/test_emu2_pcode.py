@@ -7,7 +7,7 @@ from tinygrad.uop.ops import UOp, Ops
 from test.mockgpu.amd.emu import parse_pcode
 from test.mockgpu.amd.pcode import parse_expr
 from tinygrad.runtime.autogen.amd.rdna3.str_pcode import PCODE
-from tinygrad.runtime.autogen.amd.rdna3.enum import VOP1Op, VOP2Op, SOP2Op, DSOp
+from tinygrad.runtime.autogen.amd.rdna3.enum import VOP1Op, VOP2Op, SOP2Op, VOP3Op, DSOp
 
 def _srcs():
   """Create minimal source variables for pcode parsing."""
@@ -267,6 +267,19 @@ class TestDSPcodePatterns(unittest.TestCase):
     # DATA[31:0] should preserve the value
     self.assertEqual(assigns[0][1][1].simplify().arg, 0xAAAAAAAA)  # type: ignore[index]
     self.assertEqual(assigns[1][1][1].simplify().arg, 0xBBBBBBBB)  # type: ignore[index]
+
+  def test_lambda(self):
+    pcode = PCODE.get(VOP3Op.V_SAD_U8)
+    # ABSDIFF = lambda(x, y) (x > y ? x - y : y - x); = (x > y).where(x - y, y - x)
+    assert pcode is not None
+    srcs = {
+      'S0': UOp.const(dtypes.uint32, 0x000000000),
+      'S1': UOp.const(dtypes.uint32, 0x000000F0F),# 15, 15
+      'S2': UOp.const(dtypes.uint32, 0x000000000),
+      'D0': UOp.const(dtypes.uint32, 0)
+    }
+    _, assigns = parse_pcode(pcode, srcs)
+    self.assertEqual(assigns[0][1].simplify().arg, 30)
 
 class TestConditionalParsing(unittest.TestCase):
   """Test conditional (if/elsif/else) pcode parsing."""
