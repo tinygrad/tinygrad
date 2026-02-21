@@ -273,11 +273,17 @@ class Tensor(OpMixin):
     """Triggers the computation needed to create these Tensor(s)."""
     # side-realize pending assigns for buffers referenced by these tensors
     if _pending_assigns:
-      def _realize_pending(buf):
+      def _realize_pending(buf:UOp):
+        # realize non-BUFFER base (e.g. COPY, CONTIGUOUS) so the assign has a BUFFER target
+        if buf.op is not Ops.BUFFER:
+          bm, bs, bv = complete_create_schedule_with_vars(UOp.sink(buf))
+          _apply_map_to_tensors(bm, name="Apply Pending Base")
+          run_schedule(bs, bv, do_update_stats=do_update_stats)
         for assign_uop in _pending_assigns.pop(buf, []):
+          if buf.op is not Ops.BUFFER: assign_uop = assign_uop.substitute(bm)
           # recursively realize pending assigns that this assign's value depends on
           for u in assign_uop.toposort():
-            if u.op is Ops.BUFFER and u in _pending_assigns: _realize_pending(u)
+            if u.op in {Ops.BUFFER, Ops.COPY, Ops.CONTIGUOUS} and u in _pending_assigns: _realize_pending(u)
           becomes_map, schedule, var_vals = complete_create_schedule_with_vars(UOp.sink(assign_uop))
           _apply_map_to_tensors(becomes_map, name="Apply Pending Assign")
           run_schedule(schedule, var_vals, do_update_stats=do_update_stats)
@@ -285,7 +291,7 @@ class Tensor(OpMixin):
           if becomes_map:
             for assigns in _pending_assigns.values():
               for i in range(len(assigns)): assigns[i] = assigns[i].substitute(becomes_map)
-      for buf in {u for t in (self,)+lst for u in t.uop.toposort() if u.op is Ops.BUFFER}:
+      for buf in {u for t in (self,)+lst for u in t.uop.toposort() if u.op in {Ops.BUFFER, Ops.COPY, Ops.CONTIGUOUS}}:
         if buf in _pending_assigns: _realize_pending(buf)
     if len(to_realize:=[x for x in (self,)+lst if not x.uop.has_buffer_identity()]):
       run_schedule(*Tensor.schedule_with_vars(*to_realize), do_update_stats=do_update_stats)
@@ -317,7 +323,7 @@ class Tensor(OpMixin):
       return self
     result = self._apply_uop(UOp.assign, x)
     # track view assigns (not full-buffer or assign-chain) so they can be side-realized when the buffer is read
-    if (buf_uop:=self.uop.base).op is Ops.BUFFER and self.uop.op is not Ops.ASSIGN and not self.uop.has_buffer_identity():
+    if (buf_uop:=self.uop.base).op in {Ops.BUFFER, Ops.COPY, Ops.CONTIGUOUS} and self.uop.op is not Ops.ASSIGN and not self.uop.has_buffer_identity():
       # deduplicate: if the value is already a pending assign for this buffer (e.g. __iadd__ in __setitem__), remove it
       if x.uop in _pending_assigns.get(buf_uop, []): _pending_assigns[buf_uop].remove(x.uop)
       _pending_assigns.setdefault(buf_uop, []).append(result.uop)
@@ -1348,7 +1354,9 @@ class Tensor(OpMixin):
     else: # basic setitem, self is not realized
       if not isinstance(v, Tensor): v = Tensor(v, device=self.device, dtype=self.dtype)
       # __iadd__/__isub__ on unrealized views creates a no-op ASSIGN; unwrap to get the computed value
-      if v.uop.op is Ops.ASSIGN: v = v._apply_uop(lambda x: x.src[1])
+      if v.uop.op is Ops.ASSIGN:
+        if (pa:=_pending_assigns.get(v.uop.src[0].base)) is not None and v.uop in pa: pa.remove(v.uop)
+        v = v._apply_uop(lambda x: x.src[1])
       self.replace(self._getitem(indices, v))
 
   def __delitem__(self, indices) -> None:
