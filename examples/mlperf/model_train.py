@@ -1371,8 +1371,9 @@ def train_llama3():
       # prevents memory spike on device 0
       v.realize()
 
-  optim = GradAccClipAdamW(get_parameters(model), lr=0.0,
-                b1=opt_adamw_beta_1, b2=opt_adamw_beta_2, eps=opt_adamw_epsilon, weight_decay=opt_adamw_weight_decay, grad_acc=grad_acc)
+  optim_device = "CPU" if getenv("OFFLOAD_OPTIM") else None
+  optim = GradAccClipAdamW(get_parameters(model), lr=0.0, b1=opt_adamw_beta_1, b2=opt_adamw_beta_2,
+                           eps=opt_adamw_epsilon, weight_decay=opt_adamw_weight_decay, grad_acc=grad_acc, device=optim_device)
 
   # init grads
   for p in optim.params:

@@ -169,7 +169,7 @@ class TestSchedule(unittest.TestCase):
   def test_empty_is_not_realized(self):
     a = Tensor.empty(10)
     child = a+2
-    assert a.uop.is_realized
+    assert not a.uop.is_realized
     child.realize()
     assert a.uop.is_realized
 
@@ -185,7 +185,7 @@ class TestSchedule(unittest.TestCase):
   def test_childless_empty_never_allocates(self):
     a = Tensor.empty(10)
     a.realize()
-    assert not a.uop.buffer.is_allocated()
+    assert not a.uop.is_realized
 
   def test_simplify_padded_const(self):
     a, _ = Tensor.empty(1022).cummax(axis=0)
@@ -412,20 +412,20 @@ class TestSchedule(unittest.TestCase):
       out = bn(c1(img)).relu()
       check_schedule(out, 4, [c1.weight, c1.bias])
 
-  def test_fold_conv_batchnorm_optim(self):
-    # this is too high
-    for optim, cnt in [(nn.optim.Adam, 17), (nn.optim.SGD, 7)]:
-      with self.subTest(optim=optim.__name__):
-        with Tensor.train():
-          img = Tensor.ones(1,3,4,4)
-          c1 = nn.Conv2d(3,32,3)
-          bn = nn.BatchNorm2d(32, track_running_stats=False)
-          _realize_weights([c1, bn])
-          opt = optim(nn.state.get_parameters([c1, bn]))
-          img_bn = bn(c1(img)).elu().sum()
-          opt.zero_grad()
-          img_bn.backward()
-          check_schedule(opt.schedule_step(), cnt)
+  def test_fold_conv_batchnorm_optim(self, adam=False):
+    # 2 is too low?
+    optim, cnt = (nn.optim.Adam, 16) if adam else (nn.optim.SGD, 2)
+    with Tensor.train():
+      img = Tensor.ones(1,3,4,4)
+      c1 = nn.Conv2d(3,32,3)
+      bn = nn.BatchNorm2d(32, track_running_stats=False)
+      _realize_weights([c1, bn])
+      opt = optim(nn.state.get_parameters([c1, bn]))
+      img_bn = bn(c1(img)).elu().sum()
+      opt.zero_grad()
+      img_bn.backward()
+      check_schedule(opt.schedule_step(), cnt)
+  def test_fold_conv_batchnorm_optim_adam(self): self.test_fold_conv_batchnorm_optim(True)
 
   def test_fold_batchnorm_backward(self):
     with Tensor.train():

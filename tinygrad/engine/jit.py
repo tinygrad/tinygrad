@@ -348,6 +348,8 @@ class TinyJit(Generic[ReturnType]):
         update_depends(depends, jit_cache)
         pruned, onetime = partition(jit_cache, lambda ei: any(b in depends for b in get_out_buffers_for_ei(ei)))
         if DEBUG >= 1: print(f"pruned from {len(jit_cache)} -> {len(pruned)} kernels")
+        # sync before re-executing onetime kernels
+        for dev in set(Device[b.device] for ei in onetime for b in ei.bufs if b is not None): dev.synchronize()
         # run the onetime kernels here
         for ei in onetime:
           for b in ei.bufs: cast(Buffer, b).ensure_allocated()

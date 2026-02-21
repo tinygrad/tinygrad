@@ -704,7 +704,7 @@ class TestMultiTensor(unittest.TestCase):
 
     # test no left join
     with self.assertRaises((AssertionError, ValueError)):
-      t0.reshape((26*15,7)).schedule()
+      t0.reshape((26*15,7)).contiguous().schedule()
 
   # it doesn't work like this anymore
   # NOTE: this never failed in assign_multi, it failed tensor spec because MULTI was never pushed in the graph
@@ -840,13 +840,15 @@ class TestMultiTensor(unittest.TestCase):
     t.shard_(devices, axis=0).realize()
     assert all([lb is lb.base and lb.realized.base.size == 4 * 16 for lb in t.uop.src])
 
-  @unittest.skip("this is unreliable on OSX")
   def test_clone(self):
-    t = Tensor.rand(16, 16).shard(devices_2, axis=None)
-    np.testing.assert_allclose(t.numpy(), t.clone().numpy())
-
-    t = Tensor.rand(16, 16).shard(devices_2, axis=0)
-    np.testing.assert_allclose(t.numpy(), t.clone().numpy())
+    for axis in (None, 0):
+      t = Tensor.arange(16).reshape(4, 4).shard(devices_2, axis=axis).contiguous().realize()
+      t_clone = t.clone().realize()
+      self.assertEqual(t_clone.device, t.device)
+      self.assertEqual(t_clone.uop.axis, axis)
+      self.assertEqual(t_clone.tolist(), t.tolist())
+      t_clone += 1
+      self.assertNotEqual(t_clone.tolist(), t.tolist())
 
   @unittest.skip("RANGEIFY doesn't support multi const folding")
   def test_multi_const_folding(self):
@@ -895,18 +897,18 @@ class TestShrinkMultiTensorShardedAxis(unittest.TestCase):
 
     with self.assertRaises(AssertionError):
       # sharded axis shrink on non-device boundry is not allowed
-      a = t.shrink(((0, 3), (0, 8)))
+      a = t.shrink(((0, 3), (0, 8))).contiguous()
       a.schedule()
     a = t.shrink(((0, 2), (2, 4)))
     assert a.shape == (2, 2)
     ref = Tensor.arange(64).reshape(8, 8).shrink(((0, 2), (2, 4)))
     np.testing.assert_equal(a.numpy(), ref.numpy())
 
-    a = t.shrink(((0, 2), (0, 8)))
+    a = t.shrink(((0, 2), (0, 8))).contiguous()
     a.schedule()
     assert a.shape == (2, 8)
 
-    p = a.pad(((0, 6), (0, 0)))
+    p = a.pad(((0, 6), (0, 0))).contiguous()
     p.schedule()
     assert p.shape == (8, 8)
 

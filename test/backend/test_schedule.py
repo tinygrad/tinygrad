@@ -1235,7 +1235,7 @@ class TestView(unittest.TestCase):
     bv = b.pad(((0, 2),))[-2:]
     # this becomes a late a*0
     late_mul = a*bv
-    run_schedule(check_schedule(late_mul, 1))
+    run_schedule(check_schedule(late_mul, 2))
     # the arange doesn't realize
     #self.assertIsNone(b.uop.base.realized)
     # mul doesn't realize
@@ -1322,7 +1322,7 @@ class TestCopyFolding(unittest.TestCase):
     a = Tensor.ones(4, 4).contiguous().realize()
     # use copy_to_device to bypass Tensor.to() shortcircuit and force a real same-device COPY in the graph
     a.assign(Tensor(a.uop.copy_to_device(a.device), a.device))
-    run_schedule(check_schedule(a, 0, filter_sink=False))
+    run_schedule(check_schedule(a, 2, filter_sink=False))
     self.assertListEqual(a.tolist(), [[1.]*4]*4)
 
   def test_clone(self):

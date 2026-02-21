@@ -21,6 +21,9 @@ jobs:
   # the 3 minute timeout should not be raised
   testmacpytest:
     name: Mac pytest
+    env:
+      CI: ""
+      CAPTURE_PROCESS_REPLAY: "0"
     runs-on: [self-hosted, macOS]
     timeout-minutes: 3
     defaults:
@@ -41,22 +44,14 @@ jobs:
       run: |
         echo "CACHEDB=/tmp/pytest-db-ci.db" >> $GITHUB_ENV
         rm -f /tmp/pytest-db-ci*
-    # TODO: remove this step once all old caches are migrated
-    - name: Migrate old huggingface cache (symlinks break onnxruntime 1.24+)
-      run: |
-        cd ~/Library/Caches/tinygrad/downloads/models 2>/dev/null || exit 0
-        for old_dir in models--*; do
-          [ -d "$old_dir" ] || continue
-          repo_id=$(echo "$old_dir" | sed 's/models--//; s/--/\//g')
-          snapshot=$(ls -1 "$old_dir/snapshots" 2>/dev/null | head -1)
-          [ -n "$snapshot" ] || continue
-          mkdir -p "$repo_id"
-          cp -RLn "$old_dir/snapshots/$snapshot/"* "$repo_id/" 2>/dev/null || true
-        done
     - name: Run pytest -nauto
       run: |
         source /tmp/tinygrad_pytest_ci/bin/activate
         pytest -nauto --durations=20
+    - name: openpilot compile3 0.10.1 driving_vision
+      run: FLOAT16=1 CL=1 IMAGE=2 python3.11 examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/720392c9a5b986981fdbed1bb8c47a6c5573a50e/selfdrive/modeld/models/driving_vision.onnx
+    - name: IMAGE=1 openpilot compile3 0.10.1 driving_vision
+      run: FLOAT16=1 CL=1 IMAGE=1 python3.11 examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/720392c9a5b986981fdbed1bb8c47a6c5573a50e/selfdrive/modeld/models/driving_vision.onnx
 
   testmacbenchmark:
     name: Mac Benchmark

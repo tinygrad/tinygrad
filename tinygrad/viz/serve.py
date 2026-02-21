@@ -473,21 +473,12 @@ def get_stdout(f: Callable) -> str:
   except Exception: traceback.print_exc(file=buf)
   return buf.getvalue()
 
-def amd_readelf(lib:bytes) -> list[dict]:
-  from tinygrad.runtime.autogen import amdgpu_kd
+def get_elf_section(lib:bytes, name:str):
   from tinygrad.runtime.support.elf import elf_loader
-  image, sections, __ = elf_loader(lib)
-  rodata = next((s for s in sections if s.name == ".rodata")).content
-  kd = amdgpu_kd.llvm_amdhsa_kernel_descriptor_t.from_buffer_copy(bytearray(rodata))
-  vgpr_gran = kd.compute_pgm_rsrc1 & amdgpu_kd.COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT
-  return [{"label":f"{resource} Alloc", "value":val} for resource,val in [("VGPR", (vgpr_gran+1)*8-7), ("LDS",kd.group_segment_fixed_size),
-                                                                          ("Scratch", kd.private_segment_fixed_size)] if val > 0]
+  return next((sh for sh in elf_loader(lib)[1] if sh.name == name))
 
 def amd_decode(lib:bytes, target:str) -> dict[int, Inst]:
-  from tinygrad.runtime.support.elf import elf_loader
-  image, sections, _ = elf_loader(lib)
-  text = next((sh for sh in sections if sh.name == ".text"), None)
-  assert text is not None, "no .text section found in ELF"
+  text = get_elf_section(lib, ".text")
   off, buf = text.header.sh_addr, text.content
   arch = "rdna3" if target.startswith("gfx11") else "rdna4" if target.startswith("gfx12") else "cdna"
   addr_table:dict[int, Inst] = {}
@@ -542,7 +533,12 @@ def amdgpu_cfg(lib:bytes, target:str) -> dict:
       if isinstance(val:=getattr(inst, name), Reg): tokens.append({"st":val.fmt(), "keys":[f"r{val.offset+i}" for i in range(val.sz)], "kind":1})
       elif name in {"op","opx","opy"}: tokens.append({"st":(op_name:=val.name.lower()), "keys":[op_name], "kind":0})
       elif name != "encoding" and val != field.default: tokens.append({"st":(s:=repr(val)), "keys":[s], "kind":1})
-  return {"data":{"blocks":blocks, "paths":paths, "pc_tokens":pc_tokens}, "src":"\n".join(lines)}
+  from tinygrad.runtime.autogen import amdgpu_kd
+  kd = amdgpu_kd.llvm_amdhsa_kernel_descriptor_t.from_buffer_copy(bytearray(get_elf_section(lib, ".rodata").content))
+  vgpr_gran = kd.compute_pgm_rsrc1 & amdgpu_kd.COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT
+  return {"data":{"blocks":blocks, "paths":paths, "pc_tokens":pc_tokens}, "src":"\n".join(lines),
+          "metadata":[[{"label":f"{r} Alloc", "value":v} for r,v in [("VGPR", (vgpr_gran+1)*8-7), ("LDS", kd.group_segment_fixed_size),
+                                                                     ("Scratch", kd.private_segment_fixed_size)] if v>0]]}
 
 # ** Main render function to get the complete details about a trace event
 
@@ -554,11 +550,10 @@ def get_render(query:str) -> dict:
   if fmt == "uops": return {"src":get_stdout(lambda: print_uops(data)), "lang":"txt"}
   if fmt == "code": return {"src":data, "lang":"cpp"}
   if fmt == "asm":
-    ret:dict = {"metadata":[]}
+    ret:dict = {}
     renderer, lib = data
     if renderer.device.startswith("AMD"):
       with soft_err(lambda err: ret.update(err)): ret.update(amdgpu_cfg(lib, renderer.arch))
-      with soft_err(lambda err: ret["metadata"].append(err)): ret["metadata"].append(amd_readelf(lib))
     else: ret["src"] = get_stdout(lambda: renderer.compiler.disassemble(lib))
     return ret
   if fmt == "all-pmc":
