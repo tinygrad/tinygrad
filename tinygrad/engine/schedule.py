@@ -120,7 +120,7 @@ def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[dict[UOp, UOp], li
   if not SCACHE or (sc_ret:=schedule_cache.get(sched_cache_key, None)) is None:
     # verify Tensors match the spec (on big_sink, we only need to do this if cache misses)
     if SPEC: type_verify(big_sink, tensor_spec)
-    big_sink_cache = graph_rewrite(big_sink_cache, multi_pm, name="multi_pm")
+    big_sink_cache = graph_rewrite(big_sink_cache, multi_pm, name="multi_pm", rewrite_into_calls=True)
     pre_schedule, buf_uops_sink = create_schedule(get_rangeify(big_sink_cache))
     if SCACHE: schedule_cache[sched_cache_key] = (pre_schedule, buf_uops_sink)
   else:
