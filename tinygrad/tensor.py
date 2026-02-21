@@ -323,7 +323,9 @@ class Tensor(OpMixin):
       return self
     result = self._apply_uop(UOp.assign, x)
     # track view assigns (not full-buffer or assign-chain) so they can be side-realized when the buffer is read
-    if (buf_uop:=self.uop.base).op in {Ops.BUFFER, Ops.COPY, Ops.CONTIGUOUS} and self.uop.op is not Ops.ASSIGN and not self.uop.has_buffer_identity():
+    if (buf_uop:=self.uop.base).op in {Ops.BUFFER, Ops.COPY, Ops.CONTIGUOUS} and self.uop is not buf_uop \
+        and self.uop.op is not Ops.ASSIGN and not self.uop.has_buffer_identity() \
+        and (buf_uop.op is Ops.BUFFER or self.uop.op is not Ops.DETACH):
       # deduplicate: if the value is already a pending assign for this buffer (e.g. __iadd__ in __setitem__), remove it
       if x.uop in _pending_assigns.get(buf_uop, []): _pending_assigns[buf_uop].remove(x.uop)
       _pending_assigns.setdefault(buf_uop, []).append(result.uop)

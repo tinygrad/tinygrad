@@ -3,6 +3,7 @@ import unittest
 import numpy as np
 from tinygrad import dtypes, Tensor, TinyJit, GlobalCounters, Variable
 from tinygrad.uop.ops import Ops
+from tinygrad.tensor import _pending_assigns
 from tinygrad.device import is_dtype_supported
 from tinygrad.helpers import temp, CI, CPU_LVP, Context
 
@@ -297,6 +298,24 @@ class TestAssign(unittest.TestCase):
     self.assertIs(c.uop.base.op, Ops.CONTIGUOUS)
     c[:, 1:2].assign(Tensor.ones(2,1).contiguous().realize())
     self.assertListEqual(c.tolist(), [[1,1],[2,1]])
+
+  def test_full_buffer_assign_to_unrealized_contiguous(self):
+    # full-buffer assign to unrealized CONTIGUOUS should not be spuriously tracked in _pending_assigns
+    t = Tensor([[1,2],[3,4]]).float().contiguous().realize()
+    c = t.permute(1,0).contiguous()  # unrealized CONTIGUOUS
+    self.assertIs(c.uop.base.op, Ops.CONTIGUOUS)
+    c.assign(Tensor([[10,20],[30,40]]).float().contiguous().realize())
+    self.assertListEqual(c.tolist(), [[10,20],[30,40]])
+
+  def test_detach_copy_assign_not_tracked(self):
+    # DETACH(COPY).assign() is a full-buffer assign that should not be tracked in _pending_assigns
+    t = Tensor([1.0, 2.0]).to("CPU:0").contiguous().realize()
+    c = t.to("CPU:1").detach()  # DETACH(COPY)
+    self.assertIs(c.uop.op, Ops.DETACH)
+    self.assertIs(c.uop.base.op, Ops.COPY)
+    c.assign(c + 1)
+    self.assertNotIn(c.uop.base, _pending_assigns)
+    np.testing.assert_allclose(c.tolist(), [2.0, 3.0])
 
   def test_permuted_assignment(self):
     a = Tensor(np.arange(N*N, dtype=np.float32)).reshape(N,N)
