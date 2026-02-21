@@ -423,7 +423,7 @@ class _Ctx:
   __slots__ = ('inst_size', 'dyn_fields', '_axis_id', 'wave_size', 'vgpr', 'accvgpr')
   sgpr = UOp(Ops.PARAM, dtypes.uint32.ptr(SGPR_COUNT), arg=0)
   vmem = UOp(Ops.PARAM, dtypes.uint32.ptr(1 << 46), arg=2)
-  lds = UOp(Ops.PARAM, dtypes.uint32.ptr(16384), arg=3)
+  lds = UOp(Ops.PARAM, dtypes.uint32.ptr(1 << 18), arg=3)  # 1MB: covers max LDS (256KB / 4 = 64K elements)
   scratch = UOp(Ops.PARAM, dtypes.uint8.ptr(1 << 30), arg=4)
   # Cache PARAM UOps by wave_size so all _Ctx instances with same wave_size share identical UOp references
   _vgpr_cache: dict[int, UOp] = {}
@@ -1615,6 +1615,36 @@ def _compile_mem_op(inst: ir3.DS|ir3.FLAT|ir3.GLOBAL|ir3.SCRATCH|ir4.DS|ir4.VFLA
     stores = [ctx.vgpr.index(val[0].cast(dtypes.int)).store(val[1].cast(dtypes.uint32)) for dest, val in assigns if dest.startswith('VGPR[')]
     return UOp.sink(*stores, *ctx.inc_pc())
 
+  # CDNA DS_WRITE_B128/B96: pcode uses DATA[127:96] etc. on 32-bit DATA — generate stores directly to avoid UB shifts
+  if isinstance(inst, irc.DS) and op_name in ('DS_WRITE_B128', 'DS_WRITE_B96'):
+    if DEBUG >= 3: print(f"  [DS_WRITE_B128] addr=v[{inst.addr}] data0=v[{inst.data0}] vdst=v[{inst.vdst}] "
+                         f"offset0={inst.offset0} offset1={inst.offset1} data_bits={data_bits_mem}", flush=True)
+    ndwords = 4 if 'B128' in op_name else 3
+    lane = ctx.range()
+    active = _lane_active(exec_mask, lane)
+    raw_addr = ctx.rvgpr_dyn(addr_reg, lane) + offset
+    lds_addr = raw_addr  # address must be valid for active lanes; compiler skips inactive lanes via branch
+    stores = []
+    for i in range(ndwords):
+      lds_idx = mem.index(((lds_addr + _c(i * 4)) >> _c(2)).cast(dtypes.int))
+      val = ctx.rvgpr_dyn(vdata_reg + _c(i), lane)
+      stores.append(lds_idx.store(active.where(val, lds_idx.load())))
+    return UOp.sink(UOp.group(*stores).end(lane), *ctx.inc_pc())
+
+  # CDNA DS_READ_B128/B96: pcode uses RETURN_DATA[127:96] on 32-bit destination — generate loads directly
+  if isinstance(inst, irc.DS) and op_name in ('DS_READ_B128', 'DS_READ_B96'):
+    ndwords = 4 if 'B128' in op_name else 3
+    lane = ctx.range()
+    active = _lane_active(exec_mask, lane)
+    # Clamp inactive lane addresses to 0 — CPU backend evaluates both branches of where(), so invalid addrs crash
+    raw_addr = ctx.rvgpr_dyn(addr_reg, lane) + offset
+    lds_addr = active.where(raw_addr, _c(0))
+    stores = []
+    for i in range(ndwords):
+      lds_val = mem.index(((lds_addr + _c(i * 4)) >> _c(2)).cast(dtypes.int))  # pm_add_loads adds .load()
+      stores.append(ctx.wvgpr_dyn(vdst_reg + _c(i), lane, active.where(lds_val, ctx.rvgpr_dyn(vdst_reg + _c(i), lane)), exec_mask))
+    return UOp.sink(UOp.group(*stores).end(lane), *ctx.inc_pc())
+
   # MUBUF with lds=1: load from global memory, write directly to LDS at M0 + lane * load_size
   if is_mubuf and getattr(inst, 'lds', 0):
     ndwords = data_bits_mem // 32
@@ -1628,11 +1658,14 @@ def _compile_mem_op(inst: ir3.DS|ir3.FLAT|ir3.GLOBAL|ir3.SCRATCH|ir4.DS|ir4.VFLA
     num_records = ctx.rsgpr_dyn(srsrc_reg + _c(2))
     m0_val = ctx.rsgpr_dyn(_c(125))  # M0 is SGPR index 125
     lane = ctx.range()
-    active = _lane_active(exec_mask, lane) & num_records.ne(_c(0))
     vaddr_val = ctx.rvgpr_dyn(addr_reg, lane).cast(dtypes.uint64)
     offen_contrib = (offen.ne(_c(0))).where(vaddr_val, UOp.const(dtypes.uint64, 0))
     idxen_contrib = (idxen.ne(_c(0))).where(vaddr_val * stride, UOp.const(dtypes.uint64, 0))
-    src_addr = base_addr + offen_contrib + idxen_contrib + soff + offset.cast(dtypes.uint64)
+    byte_offset = offen_contrib + idxen_contrib + soff + offset.cast(dtypes.uint64)
+    src_addr = base_addr + byte_offset
+    # OOB check: byte_offset + data_bytes <= num_records (real hardware silently drops OOB)
+    num_records_u64 = num_records.cast(dtypes.uint64)
+    active = _lane_active(exec_mask, lane) & ((byte_offset + UOp.const(dtypes.uint64, data_bytes)) < (num_records_u64 + UOp.const(dtypes.uint64, 1)))
     # LDS write address: M0 + lane_id * data_bytes (each lane writes to consecutive LDS slots)
     lds_base = m0_val + lane.cast(dtypes.uint32) * _c(data_bytes)
     stores = []
@@ -1643,6 +1676,7 @@ def _compile_mem_op(inst: ir3.DS|ir3.FLAT|ir3.GLOBAL|ir3.SCRATCH|ir4.DS|ir4.VFLA
     return UOp.sink(UOp.group(*stores).end(lane), *ctx.inc_pc())
 
 
+  _mubuf_info: dict = {}  # populated by make_addr for MUBUF OOB bounds checking
   def make_addr(lane: UOp) -> UOp:
     if is_lds: return ctx.rvgpr_dyn(addr_reg, lane)
     offset64 = offset.cast(dtypes.uint64)
@@ -1659,7 +1693,14 @@ def _compile_mem_op(inst: ir3.DS|ir3.FLAT|ir3.GLOBAL|ir3.SCRATCH|ir4.DS|ir4.VFLA
       # offen=1: vaddr is byte offset; idxen=1: vaddr is buffer index (multiply by stride)
       offen_contrib = (offen.ne(_c(0))).where(vaddr_val, UOp.const(dtypes.uint64, 0))
       idxen_contrib = (idxen.ne(_c(0))).where(vaddr_val * stride, UOp.const(dtypes.uint64, 0))
-      return base_addr + offen_contrib + idxen_contrib + soff + offset64
+      byte_offset = offen_contrib + idxen_contrib + soff + offset64
+      # Clamp OOB addresses to base_addr to prevent segfault (CPU backend evaluates both branches of where())
+      # Real hardware silently drops OOB accesses; correctness ensured by mubuf_active in make_srcs
+      num_records_u64 = ctx.rsgpr_dyn(srsrc_reg + _c(2)).cast(dtypes.uint64)
+      in_bounds = byte_offset < num_records_u64
+      _mubuf_info['byte_offset'] = byte_offset
+      _mubuf_info['num_records_u64'] = num_records_u64
+      return base_addr + in_bounds.where(byte_offset, UOp.const(dtypes.uint64, 0))
     # Dynamic saddr check: saddr < 124 means valid SGPR, otherwise use VGPR pair for address
     use_saddr = (saddr_reg < _c(124)) if saddr_reg is not None else UOp.const(dtypes.bool, False)
     if is_scratch:
@@ -1705,9 +1746,12 @@ def _compile_mem_op(inst: ir3.DS|ir3.FLAT|ir3.GLOBAL|ir3.SCRATCH|ir4.DS|ir4.VFLA
     active = _lane_active(exec_mask, lane)
     # MUBUF: simplified source vars — address comes from CalcBufferAddr, no saddr/vaddr_full needed
     if is_mubuf:
-      # SRD word2 = num_records. When 0, buffer is empty/invalid — gate off accesses to avoid segfault
-      num_records = ctx.rsgpr_dyn(srsrc_reg + _c(2))
-      mubuf_active = active & num_records.ne(_c(0))
+      # Use byte_offset from make_addr for proper OOB bounds check: byte_offset + data_bytes <= num_records
+      # make_addr already clamped the address for OOB lanes; mubuf_active ensures correctness
+      byte_offset = _mubuf_info['byte_offset']
+      num_records_u64 = _mubuf_info['num_records_u64']
+      data_bytes_u64 = UOp.const(dtypes.uint64, data_bits_mem // 8)
+      mubuf_active = active & ((byte_offset + data_bytes_u64) < (num_records_u64 + UOp.const(dtypes.uint64, 1)))
       _rvdata = (lambda r, l, *a: ctx.raccvgpr_dyn(r, l)) if use_acc else ctx.rvgpr_dyn
       vdata = _rvdata(vdata_reg, lane).cast(dtypes.uint64) if 'STORE' in op_name else UOp.const(dtypes.uint32, 0)
       if 'STORE' in op_name and data_bits_mem >= 64:
@@ -1786,8 +1830,11 @@ def _compile_mem_op(inst: ir3.DS|ir3.FLAT|ir3.GLOBAL|ir3.SCRATCH|ir4.DS|ir4.VFLA
   writes_return_data = '_RTN' in op_name or (is_lds and (op_name.startswith('DS_LOAD') or op_name.startswith('DS_READ'))) or bool(is_atomic and glc)
   lane = ctx.range()
   active = _lane_active(exec_mask, lane)
-  pcode_vars, assigns = parse_pcode(pcode, make_srcs(lane))
-  stores = [s for dest, val in assigns for s in make_stores(dest, val, lane, active, writes_return_data)]
+  srcs = make_srcs(lane)
+  # MUBUF: propagate num_records bounds check to store active flag (real hardware silently drops OOB stores)
+  store_active = srcs.get('_active', active) if is_mubuf else active
+  pcode_vars, assigns = parse_pcode(pcode, srcs)
+  stores = [s for dest, val in assigns for s in make_stores(dest, val, lane, store_active, writes_return_data)]
 
   # FLAT/GLOBAL/SCRATCH: collect VDATA slices for loads
   if not is_lds and not is_atomic:
@@ -1960,6 +2007,7 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
   from tinygrad.renderer.amd.dsl import Inst
   program: dict[int, tuple[Callable, list[int], bool, Inst]] = {}  # pc -> (fxn, globals, is_barrier, inst)
   lds_size = ((rsrc2 & hsa.AMD_COMPUTE_PGM_RSRC_TWO_GRANULATED_LDS_SIZE) >> hsa.AMD_COMPUTE_PGM_RSRC_TWO_GRANULATED_LDS_SIZE_SHIFT) * 512
+  if DEBUG >= 3: print(f"  [emu] lds_size={lds_size} scratch_size={scratch_size} arch={arch} grid=({gx},{gy},{gz}) local=({lx},{ly},{lz})", flush=True)
   total_threads = lx * ly * lz
   wave_size = _wave_size(arch)
 
