@@ -5,15 +5,15 @@
 Adding CDNA4 (gfx950 / MI350X) support to tinygrad's MOCKGPU Python emulator.
 The emulator interprets GPU assembly instructions in Python -- no actual AMD GPU needed.
 
-## Current Status (2026-02-20)
+## Current Status (2026-02-21)
 
 ### Our Work
 
-**Core emulator: DONE.** 648 tests passing, 0 failures (350 test_ops + 298 test_dtype/alu).
+**Core emulator: DONE.** 648 tests passing, 0 failures. 26 regression tests in `test/amd/test_emu_cdna_bugs.py`.
 
-Branch `enable-cdna4-emulator` in `../repo` (16 commits). Working branch `cdna4-gemm-fa` (5 commits ahead, GEMM/FA exploration). Private fork: `npinto/tinygrad-cdna4-emu`.
+**Branch `cdna4-fa`** in `./` (this repo): 10 commits on top of `origin/master` (0255a64a2, Feb 21). Rebased clean.
 
-**Branch `cdna4-fa`** in `./` (this repo): PR #14815 emulator + ACCVGPR/DSL changes applied on top of master. 20/20 TK compile-only tests pass. Full MOCKGPU emulator tests running on cc50e.
+**GEMM status**: All emulator-side bugs fixed. `test_tiny` (M=N=256, K=64) runs without crashing on our 8-core VPS but times out due to slow `c.realize()` scheduling step. On qazalin's machine (cdna_emu_2 branch), same test completes in ~12s. Root cause: our rebased-on-master code has a scheduling regression — the `realize()` step hangs for 300+ seconds before the GEMM kernel even starts executing. The emulator execution itself is fast (<1s per kernel).
 
 ### Upstream
 
@@ -174,6 +174,8 @@ File: `tinygrad/renderer/amd/dsl.py` (453 lines, only 2 commits on master)
 
 | PR      | Title                                                         | Merged     |
 |---------|---------------------------------------------------------------|------------|
+| #14938  | update test_jit_init_empty                                    | Feb 21     |
+| #14925  | gemm/asm: smallest cdna4 asm gemm test (test_tiny)            | Feb 21     |
 | #14909  | start ripping out old scheduler -- no maps                    | Feb 20     |
 | #14904  | viz/sqtt: rdna4 wmma, cleanup inst rows                       | Feb 20     |
 | #14900  | viz/sqtt: decoder fixes pre rdna4/cdna4 work                  | Feb 20     |
@@ -228,24 +230,18 @@ AMD=1 MOCKGPU=1 MOCKGPU_ARCH=cdna4 SKIP_SLOW_TEST=1 AMD_LLVM=0 \
   test/device/test_hcq.py test/testextra/test_cfg_viz.py test/external/external_test_am.py
 ```
 
-## Our 16 Commits (on `enable-cdna4-emulator`)
+## Our 10 Commits (on `cdna4-fa`, rebased on master 0255a64a2)
 
-1. `7781c36b2` enable cdna4 emulator in CI test matrix
-2. `483521ac5` add f32_to_bf16 and fix v_bitop3_b32
-3. `d77db94c4` implement wave64 support
-4. `c2aa0e1c6` fix missing pcode and MAD_MIX path
-5. `dffd1dae1` fix wave64 mask truncation in VOPC/VOP3SD/VOP
-6. `a5683b279` add MFMA 16x16 handler and ACCVGPR_MOV pcode
-7. `18a95e381` rewrite MFMA to use per-lane range loop
-8. `8bf25fc64` fix MFMA dtype, add OPSEL support, fix test_cfg_viz typo
-9. `0fefbd400` add VOP3 E64->E32 pcode fallback
-10. `88a76b633` add SDWA (Sub-Dword Addressing) support
-11. `114cc6f0d` fix VOPC/VOP2 SDWA sd bit, div_fmas scale, add FP8
-12. `0b65acabb` fix V_PK_MOV_B32, f64 ops, VCC ordering, FP8 subnormal, unaligned loads
-13. `eedd17c0c` add cdna4 to regSQ_THREAD_TRACE_BUF0_SIZE dict
-14. `5d5605ff9` fix ACCVGPR register space, MFMA accumulator, LDS exec-mask
-15. `ce1cda9a4` add s_getpc_b64/s_setpc_b64/s_swappc_b64 support
-16. *(pending)* add `acc` bit handling for ACCVGPR scratch spills in _compile_mem_op
+1. `5c5f4183b` feat: apply PR #14815 CDNA4 emulator changes
+2. `9819865f5` fix: set CDNA4 mock GPU LDS size to 160KB (matching real MI350X)
+3. `c42ad9f47` docs: add CLAUDE.md and test script with CDNA4 findings
+4. `3a00c2d2a` docs: document GEMM emulator bugs (unknown instruction, missing MUBUF handler)
+5. `eb8b097cf` fix: upcast val to dt in _extract_bits before shift/mask ops
+6. `865d56f62` feat: add CDNA4 MFMA 32x32, MUBUF, and VOPC chained-assignment support
+7. `2e7b5f878` fix: use int64 vmem indices for 48-bit GPU address support
+8. `920565a7a` feat: add CDNA4 emulator bug fixes and 23 regression tests
+9. `9421eb845` fix: prevent SEGV from OOB MUBUF stores in persistent GEMM kernels
+10. `0103326be` fix: protect JIT code pages from MUBUF store corruption + add SMEM_F61
 
 ## PR #14815 vs Our Implementation
 
@@ -305,42 +301,81 @@ The emulator (`emu.py`) is slow by design — it interprets every GPU instructio
 - `pytest -n=auto` scales linearly with cores; single kernel is single-threaded
 - CDNA4 gets 40min CI timeout vs 15min for RDNA (emulator is slow)
 
-### Test Results (2026-02-20, cc50e 16-core Ubuntu, master f9536f3 + PR#14815)
+### Test Results (2026-02-21, cc50e/cc100e 8-core Ubuntu, master 0255a64a2 + 10 commits)
 
-| Test Suite                                    | Result                                          | Time  |
-|-----------------------------------------------|-------------------------------------------------|-------|
-| test_ops + test_dtype + test_dtype_alu (core) | **648 passed, 0 failed**, 99 skipped, 1 xfailed| 85s   |
-| Extended (linearizer/jit/graph/hcq/cfg_viz)   | **254 passed, 0 failed**, 29 skipped, 4 xfailed| 71s   |
-| TK non-FA (add/load_store/max/softmax/sum)    | 7/13 passed (killed matmul -- too slow)         | >25m  |
-| TK compile-only (DEV=NULL EMULATE=AMD_CDNA4)  | **20 passed, 0 failed**                         | 27s   |
-| GEMM asm (test_asm_gemm)                      | Was blocked by LDS size (fixed), then too slow  | >25m  |
+| Test Suite                                    | Result                                           | Time  |
+|-----------------------------------------------|--------------------------------------------------|-------|
+| test_ops + test_dtype + test_dtype_alu (core) | **648 passed, 0 failed**, 99 skipped, 1 xfailed | 35s   |
+| Regression tests (test_emu_cdna_bugs.py)      | **26 passed, 0 failed**                          | 3s    |
+| TK compile-only (DEV=NULL EMULATE=AMD_CDNA4)  | **20 passed, 0 failed**                          | 27s   |
+| GEMM test_tiny (M=N=256,K=64) emulator exec  | **No crash** (exit 124 timeout, not 139 SEGV)   | >300s |
+| GEMM test_tiny on cdna_emu_2 (qazalin)       | **PASS** (10 kernels, all complete)              | 12s   |
 
-**CI scope**: GitHub Actions runs test_ops/dtype/linearizer/jit/graph/multitensor/hcq/cfg_viz. **NOT test_tk.py or test_asm_gemm.py** -- those are testextra/backend tests for real hardware.
+**GEMM kernel execution is fast** (<1s per kernel on our 8-core VPS). The bottleneck is `c.realize()` — tinygrad's scheduling/compilation phase before the emulator runs. On `cdna_emu_2` branch this takes ~315ms ("scheduled 5 kernels in 315.28 ms"). On our rebased-on-master code, it hangs for 300+ seconds.
 
-**All CI tests pass: 902/902 (0 failures).**
+**CI scope**: GitHub Actions runs test_ops/dtype/linearizer/jit/graph/multitensor/hcq/cfg_viz. **NOT test_tk.py or test_asm_gemm.py**.
 
 ### Bug #3 (FIXED): MOCKGPU LDS Size Too Small for GEMM
 
 PR #14815 set `lds_size_in_kb = 128` in `_gpu_props_cdna`. Real MI350X has 160KB LDS per CU. The GEMM asm kernel needs 133,120 bytes (130KB) of LDS, exceeding 128KB. Fix: `lds_size_in_kb = 160`.
 
-### Bug #4 (FOUND, NOT FIXED): GEMM ASM Kernel Uses Unknown GFX950 Instruction
+### Bug #4 (FIXED): GEMM ASM Kernel Uses Unknown GFX950 SMEM Encoding
 
-The CDNA4 GEMM asm kernel (`extra/gemm/asm/cdna/asm.py`) compiles via `comgr` to machine code containing instruction word `0xf4080500`. bits[31:26] = `0b111101` = 61, which doesn't match any format in the autogenerated CDNA ISA (`ins.py`):
-- MUBUF: `0b111000` (56)
-- MTBUF: `0b111010` (58)
-- MIMG: `0b111100` (60)
+The CDNA4 GEMM asm kernel compiles via `comgr` to machine code containing instruction word `0xf4080500`. bits[31:26] = `0b111101` = 61. **This is NOT an unknown buffer load** — it's a GFX950-specific SMEM encoding. Standard SMEM uses format 48 (`0b110000`), but `comgr` for gfx950 emits format 61 (`0b111101`). Same fields, same opcodes, different prefix.
 
-This is likely a GFX950-specific buffer load variant not in the ISA XML used for autogeneration. The DSL's `buffer_load_dwordx4` generates standard MUBUF encoding (`0xe0...`), but the `comgr` compiler optimizes to this newer encoding.
+Fix: 3-line `SMEM_F61(SMEM)` subclass in `cdna/ins.py` overriding only the encoding field. Added `SMEM_F61` to decoder format list (before `SMEM` so it matches first) and to emulator dispatch table.
 
-Additionally, the emulator dispatch table (emu.py line 1712) has no MUBUF handler — only DS/FLAT/GLOBAL/SCRATCH. Even if decoded, MUBUF instructions can't be emulated.
+### Bug #5 (FIXED): MUBUF Handler Missing from Emulator Dispatch
 
-Impact: `N=256 AMD=1 MOCKGPU=1 python3 extra/gemm/amd_asm_matmul.py` fails with `ValueError: unknown cdna format word=0xf4080500`. This is the CI test at test.yml:663.
+The emulator dispatch table had no MUBUF handler. GEMM kernel uses `buffer_load/store_dwordx4` (MUBUF format). Fix: Added `irc.MUBUF: _compile_mem_op` to `_INST_HANDLERS`. The existing `_compile_mem_op` already handled MUBUF address computation (SRD base + vaddr + soffset + offset).
+
+### Bug #6 (FIXED): MUBUF OOB Stores Corrupt Host Memory
+
+**Root cause**: The emulator maps the entire host address space as GPU vmem (`external_ptr=0`). MUBUF stores with `num_records=0x80000000` (2GB) compute addresses that always pass bounds checks. When these addresses land on non-writable pages, the CPU backend's `*ptr = active ? val : *ptr` pattern triggers SEGV_ACCERR (always writes, even for inactive lanes).
+
+**Two-layer fix**:
+1. **Trash page + address clamping**: Allocate anonymous RW page. In MUBUF make_addr, redirect OOB addresses (below 0x10000 or beyond num_records) and inactive-lane addresses to trash page.
+2. **vmem_guard.so**: Custom SIGSEGV handler for Linux. On SEGV_ACCERR, modifies RAX in ucontext to trash page address, retrying the write harmlessly. Catches the remaining edge cases where JIT-compiled `*ptr = active ? val : *ptr` touches non-writable pages.
+
+### Bug #7 (FIXED): JIT Code Pages Silently Corrupted by MUBUF Stores
+
+**Symptom**: GEMM test crashes with SIGSEGV at NULL function pointer (DEBUG=0/2) but works with DEBUG=1/3. Different memory layout from debug prints prevents the overlap.
+
+**Root cause**: CPU JIT backend maps code pages as RWX. MUBUF stores with 2GB num_records compute addresses landing on these pages. Writes succeed silently (page is writable), corrupting the JIT code. Next function call jumps to garbage.
+
+**Fix**: `_protect_jit_code_page()` — after each instruction JIT-compiles via `_get_runner()`, call `mprotect(page, PROT_READ|PROT_EXEC)` to remove write permission. Now writes trigger SEGV_ACCERR, caught by vmem_guard.so and redirected to trash page. Each CPUProgram gets its own mmap region, so protecting one page doesn't affect later compilations.
 
 ### Test Scalability Issue
 
 test_fa has 32,768 workgroups × 512 KV iterations. At ~0.1-1ms per GPU instruction through the Python emulator, a single test takes 1-9 hours. test_simple_matmul (8192x8192) similarly has 16,384 workgroups. These tests are not designed for the emulator — they're for real GPU hardware.
 
 For emulator validation of MFMA/ACCVGPR/LDS correctness, the smaller TK tests (test_add, test_load_store, test_max) are sufficient and pass in seconds.
+
+## Local Repos
+
+All under `~/dev/tinygrad/`:
+
+| Repo                     | Branch              | Purpose                                                    |
+|--------------------------|---------------------|------------------------------------------------------------|
+| `repo/`                  | many                | Main working repo, many branches. Remotes: origin, fork, private-cdna4, tg-pub |
+| `tinygrad-cdna4/`        | `cdna4-fa`          | CDNA4 emulator work (PR #14815 + our 16 commits + GEMM/FA). 902/902 CI tests pass |
+| `tinygrad-cdna4-smem61/` | `cdna4-smem61`      | **SMEM F61 fix only.** Fresh master clone + 3-line decoder fix + 2 regression tests |
+| `tinygrad-cdna4-agent2/` | `cdna4-fa`          | Another agent's copy, behind on fixes                      |
+| `tinygrad-cdna4-pr-draft/`| `public-clean`     | PR draft repo, has `draft` remote                          |
+
+### SMEM F61 Fix (`tinygrad-cdna4-smem61/`)
+
+Minimal fix for `ValueError: unknown cdna format word=0xf4080500`. GFX950 `comgr` encodes SMEM at format 61 (0b111101) instead of ISA XML's format 48 (0b110000).
+
+**Files changed** (7 lines, 2 files):
+- `tinygrad/runtime/autogen/amd/cdna/ins.py` — 3-line `SMEM_F61(SMEM)` subclass (inherits all fields, overrides encoding)
+- `tinygrad/renderer/amd/__init__.py` — import + format list entry (before `C_SMEM` so it matches first)
+
+**No `emu.py` changes needed** — MRO fallback in dispatch table (lines 1340-1344) finds `SMEM` -> `_compile_smem` automatically.
+
+**Tests** (`test/amd/test_emu_cdna_bugs.py`, new file):
+- `test_decode_0xf4080500` — decoder test with actual crashing bytes
+- `test_s_load_dwordx2_format61` — full emulator pipeline test
 
 ## Infrastructure
 
@@ -358,6 +393,98 @@ For emulator validation of MFMA/ACCVGPR/LDS correctness, the smaller TK tests (t
 | Vultr    | vhp-8c-16gb-amd    | $0.143  | Proven setup, documented            |
 | Vultr    | vhp-12c-24gb-amd   | $0.214  | Max VHP, only 50% more cores        |
 | Hetzner  | cx53 16vCPU         | $0.027  | 5x cheaper, no API key set up       |
+
+## Next Steps (for next agent session)
+
+### 1. Fix test_tiny scheduling hang (HIGH PRIORITY)
+
+**Problem**: `verify_asm_gemm(1,256,256,64)` hangs in `c.realize()` for 300+ seconds before the emulator even runs. On qazalin's `cdna_emu_2` branch, the same call schedules in 315ms.
+
+**Root cause hypothesis**: The scheduler rework (PR #14909 "start ripping out old scheduler -- no maps") changed how `Ops.PROGRAM` / `Ops.LINEAR` / `Ops.INS` nodes are processed. `cdna_emu_2` is 109 commits behind master and uses the OLD scheduler. Our code is rebased on new master.
+
+**Investigation steps**:
+1. Profile the `realize()` call: `cProfile.run("c.realize()")` to see what function takes 300+ seconds
+2. Compare scheduler behavior: check if `Ops.PROGRAM` (used by custom_kernel/asm_gemm) is handled correctly by the new scheduler
+3. Try checking out `cdna_emu_2` branch temporarily and running `test_tiny` there to confirm it works
+4. Look at PR #14909 diff for changes affecting `Ops.PROGRAM` / `Ops.INS` scheduling
+5. Check if `build_kernel` returns 11,365 instruction UOps that are each being individually scheduled (instead of treated as opaque bytes)
+
+**Quick test**: `AMD=1 MOCKGPU=1 MOCKGPU_ARCH=cdna4 DEBUG=2 PYTHONPATH=. timeout 60 python3 -m pytest test/backend/test_asm_gemm.py::TestGemmLarge::test_tiny -v --tb=short 2>&1`
+
+### 2. Get test_tiny actually passing
+
+Once the scheduling hang is fixed, the GEMM kernel execution itself works:
+- No crashes (JIT page protection + vmem_guard + trash page all working)
+- 256 workgroups complete in <1s each (measured with instrumentation)
+- Need to verify numerical correctness (allclose with reference)
+
+### 3. Flash attention under emulator
+
+After GEMM passes:
+- `AMD=1 MOCKGPU=1 MOCKGPU_ARCH=cdna4 PYTHONPATH=. python test/testextra/test_tk.py`
+- Will be slow (thousands of workgroups) but should work with all the MUBUF/MFMA/ACCVGPR fixes
+- May find new emulator bugs (FA uses different instruction patterns than GEMM)
+
+### 4. Remove vmem_guard.so dependency
+
+Currently requires `/tmp/vmem_guard.so` on Linux for crash-free GEMM execution. This is a compiled C library with a custom SIGSEGV handler. For upstream PR, we need a pure-Python alternative:
+- Option A: Pre-map all possible vmem target pages as RW before kernel execution
+- Option B: Use Python signal handler (slower but no C dependency)
+- Option C: Improve address clamping in MUBUF make_addr to eliminate all OOB addresses
+
+### 5. Commit and prepare PR
+
+Current uncommitted state: clean (all changes committed after rebase). Branch has 10 commits on master.
+
+Files changed from master:
+- `test/mockgpu/amd/emu.py` — MUBUF handler, trash page, vmem_guard, JIT page protection, SMEM_F61 dispatch
+- `test/mockgpu/amd/amdgpu.py` — LDS 160KB
+- `test/mockgpu/helpers.py` — PythonRemu valid_mem_ranges
+- `tinygrad/runtime/autogen/amd/cdna/ins.py` — SMEM_F61 subclass
+- `tinygrad/renderer/amd/__init__.py` — SMEM_F61 in decoder
+- `test/amd/test_emu_cdna_bugs.py` — 26 regression tests
+
+## Key Reference: PR #14925 Screenshot (qazalin's working run)
+
+From qazalin's screenshot on `cdna_emu_2` branch with `DEBUG=2 MOCKGPU=1 AMD=1 MOCKGPU_ARCH="cdna4"`:
+- **Scheduled**: 5 kernels in 315ms, CACHE MISS, 7382 uops in cache
+- **Kernel 12** `gemm_1_256_256_64`: compile 2649ms, total 2868ms (the actual GEMM)
+- **Kernel 13** `r_2_16_32_4_4_64_4`: compile 91ms (epilog/conversion)
+- **Second batch** (backward): cache hit, GEMM 1791ms
+- **Total**: 11.882s, 10 kernels (5 per scheduling batch)
+- **Key**: "~2 seconds" in PR description refers to GEMM kernel emulator execution time (2.6s first, 1.8s cached), NOT total test time
+
+## vmem_guard.so
+
+Custom SIGSEGV handler. Source at `/tmp/vmem_guard.c` on both cc50e and cc100e. Compiled with `gcc -shared -fPIC -o /tmp/vmem_guard.so /tmp/vmem_guard.c`.
+
+```c
+// Catches SEGV_ACCERR with RDX==0 (vmem base pattern from CPU backend).
+// Modifies RAX to point to trash page, retries the faulting instruction.
+// install(trash_addr), remove(), redirects() -> count
+```
+
+Build: `ssh cc50e 'gcc -shared -fPIC -o /tmp/vmem_guard.so /tmp/vmem_guard.c'`
+
+## Sync Commands
+
+```bash
+# Local -> staging -> both nodes
+cd "/Users/npinto/dev/tinygrad/tinygrad-cdna4" && \
+  rsync -az --delete --exclude='.git' --exclude='__pycache__' \
+  "/Users/npinto/Nico Dropbox Dropbox/Nicolas Pinto/dev/tinygrad/tinygrad-cdna4/" . && \
+  rsync -az --delete --exclude='.git' --exclude='__pycache__' . cc50e:~/dev/tinygrad/tinygrad-cdna4/ && \
+  rsync -az --delete --exclude='.git' --exclude='__pycache__' . cc100e:~/dev/tinygrad/tinygrad-cdna4/
+
+# Regression tests (cc50e, 3s):
+ssh cc50e 'cd ~/dev/tinygrad/tinygrad-cdna4 && PYTHONPATH=. python3 -m pytest test/amd/test_emu_cdna_bugs.py -v --tb=short'
+
+# Core tests (cc100e, 35s):
+ssh cc100e 'cd ~/dev/tinygrad/tinygrad-cdna4 && AMD=1 MOCKGPU=1 MOCKGPU_ARCH=cdna4 SKIP_SLOW_TEST=1 AMD_LLVM=0 PYTHONPATH=. python3 -m pytest -n=auto test/backend/test_ops.py test/backend/test_dtype.py test/backend/test_dtype_alu.py --tb=line -q'
+
+# GEMM test_tiny (currently hangs in scheduling):
+ssh cc50e 'cd ~/dev/tinygrad/tinygrad-cdna4 && AMD=1 MOCKGPU=1 MOCKGPU_ARCH=cdna4 DEBUG=2 PYTHONPATH=. timeout 60 python3 -m pytest test/backend/test_asm_gemm.py::TestGemmLarge::test_tiny -v --tb=short 2>&1'
+```
 
 ## Dataset (refreshed 2026-02-20)
 
