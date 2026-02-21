@@ -55,8 +55,8 @@ class Reg:
   def fmt(self, sz=None, parens=False, upper=False) -> str:
     o, sz = self.offset, sz or self.sz
     l, r = ("[", "]") if parens or sz > 1 else ("", "")  # brackets for multi-reg or when parens=True
-    if 768 <= o < 1024:
-      idx = o - 768
+    if 512 <= o < 768:
+      idx = o - 512
       base = f"acc{l}{idx}{r}" if sz == 1 else f"acc[{idx}:{idx + sz - 1}]"
     elif VGPR_BASE <= o < 512:
       idx = o - VGPR_BASE
@@ -101,7 +101,7 @@ SCC = src[253]
 SRC_LDS_DIRECT = src[254]
 LIT = src[255]           # literal constant marker
 v = src[256:511]         # VGPR0-255
-acc = Reg(768, 256)      # ACCVGPR0-255 (CDNA only, logical offset 768-1023, encodes as VGPR 256-511)
+acc = Reg(512, 256)      # ACCVGPR0-255 (CDNA only, encodes as 256-511 but uses separate register file)
 
 # ══════════════════════════════════════════════════════════════
 # BitField
@@ -178,7 +178,7 @@ class SrcField(BitField):
 
   def encode(self, val) -> int:
     """Encode value. Returns LITERAL (255) for out-of-range values."""
-    if isinstance(val, Reg): offset = val.offset - 512 if val.offset >= 768 else val.offset
+    if isinstance(val, Reg): offset = val.offset - 256 if val.offset >= 512 else val.offset  # ACCVGPR (512-767) encodes as VGPR (256-511)
     elif isinstance(val, float): offset = self._FLOAT_ENC.get(val, LITERAL)
     elif isinstance(val, int) and 0 <= val <= 64: offset = INLINE_INT_START + val
     elif isinstance(val, int) and -16 <= val < 0: offset = INLINE_NEG_START - val
@@ -200,9 +200,9 @@ class SrcField(BitField):
       assert self.name is not None
       name = self.name[1:] if self.name.startswith('v') and self.name[1:] in obj.op_regs else self.name
       if sz := obj.op_regs.get(name, 1): reg = Reg(reg.offset, sz, neg=reg.neg, abs_=reg.abs_, hi=reg.hi)
-    # ACCVGPR: remap VGPR range to ACCVGPR range when operand type indicates ACCVGPR
-    if VGPR_BASE <= reg.offset < 512 and (op_info := obj.operands.get(self.name)):
-      if op_info[2] in (_ACCVGPR_OPTYPES): reg = Reg(reg.offset + 512, reg.sz, neg=reg.neg, abs_=reg.abs_, hi=reg.hi)
+    # ACCVGPR: remap VGPR range (256-511) to ACCVGPR range (512-767) when operand type indicates ACCVGPR
+    if 256 <= reg.offset < 512 and (op_info := obj.operands.get(self.name)):
+      if op_info[2] in (_ACCVGPR_OPTYPES): reg = Reg(reg.offset + 256, reg.sz, neg=reg.neg, abs_=reg.abs_, hi=reg.hi)
     return reg
 
 class VGPRField(SrcField):
