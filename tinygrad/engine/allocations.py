@@ -85,6 +85,11 @@ pm_early_transform_tensor_graph = PatternMatcher([
   (UPat(Ops.COPY, src=(UPat.var("s"), UPat()), name="c"), lambda c,s: c.const_like(ss.arg) if (ss:=s.base).op is Ops.CONST else None),
 ])
 
+pm_remove_unique_consts = PatternMatcher([
+  # replace UNIQUE with LUNIQUE for CONST cache key normalization
+  (UPat(Ops.CONST, src=(UPat(Ops.UNIQUE), UPat(Ops.DEVICE, name="d")), name="b"), lambda b,d: b.replace(src=(d,))),
+])
+
 def allocate_global_buffers(big_sink:UOp) -> tuple[UOp, dict[UOp, UOp]]:
   # uop list is a list in the original_sink graph and we can map to the tags later
   # here we build buffer map
@@ -110,5 +115,5 @@ def allocate_global_buffers(big_sink:UOp) -> tuple[UOp, dict[UOp, UOp]]:
         replace_uop = s
         while replace_uop.op is Ops.ASSIGN: replace_uop = replace_uop.src[0]
         buffer_map[original_uop] = replace_uop.shrink_to(original_uop.shape)
-  big_sink = graph_rewrite(big_sink, _remove_all_tags, name="remove tags")
+  big_sink = graph_rewrite(big_sink, _remove_all_tags+pm_remove_unique_consts, name="remove tags")
   return big_sink, buffer_map

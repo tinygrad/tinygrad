@@ -73,13 +73,6 @@ def replace_input_buffer(ctx:tuple[dict[UOp, UOp], dict[str, int], list[int], li
     ctx[2][0] += 1
   return ret
 
-def replace_input_const(ctx:tuple[dict[UOp, UOp], dict[str, int], list[int], list[int]], b:UOp):
-  if (ret:=ctx[0].get(b, None)) is None:
-    # replace UNIQUE with LUNIQUE for CONST cache key normalization
-    ctx[0][b] = ret = b.replace(src=(UOp(Ops.LUNIQUE, arg=ctx[3][0]), b.src[1]))
-    ctx[3][0] += 1
-  return ret
-
 def strip_bind(ctx:tuple[dict[UOp, UOp], dict[str, int], list[int], list[int]], b:UOp):
   var, val = b.src[0], b.src[1].arg
   assert var.expr not in ctx[1] or ctx[1][var.expr] == val, f"bind mismatch on {var}, {ctx[1][var.expr]} != {val}"
@@ -89,8 +82,6 @@ def strip_bind(ctx:tuple[dict[UOp, UOp], dict[str, int], list[int], list[int]], 
 pm_pre_sched_cache = PatternMatcher([
   # replace BUFFER with PARAM for cache key normalization
   (UPat(Ops.BUFFER, src=(UPat(Ops.UNIQUE), UPat(Ops.DEVICE)), name="b"), replace_input_buffer),
-  # replace UNIQUE with LUNIQUE for CONST cache key normalization
-  (UPat(Ops.CONST, src=(UPat(Ops.UNIQUE), UPat(Ops.DEVICE)), name="b"), replace_input_const),
   # strip value from BIND for cache key normalization, so different values hit same cache
   (UPat(Ops.BIND, src=(UPat(Ops.DEFINE_VAR), UPat(Ops.CONST)), name="b"), strip_bind),
 ])
@@ -102,8 +93,6 @@ def create_new_buffer(ctx:dict[UOp, UOp], b:UOp):
 pm_post_sched_cache = PatternMatcher([
   # create new BUFFERs for LUNIQUE BUFFERs from rangeify
   (UPat(Ops.BUFFER, src=(UPat(Ops.LUNIQUE), UPat(Ops.DEVICE)), name="b"), create_new_buffer),
-  # restore CONST back to original CONST
-  (UPat(Ops.CONST, src=(UPat(Ops.LUNIQUE), UPat(Ops.DEVICE)), name="b"), lambda ctx,b: ctx.get(b)),
   # restore PARAM back to original BUFFER
   (UPat(Ops.PARAM, src=(UPat(), UPat(Ops.DEVICE)), name="b"), lambda ctx,b: ctx.get(b)),
   # restore BIND value stripped in pm_pre_sched_cache
@@ -128,13 +117,12 @@ def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[dict[UOp, UOp], li
     # verify Tensors match the spec (on big_sink, we only need to do this if cache misses)
     if SPEC: type_verify(big_sink, tensor_spec)
     big_sink_cache = graph_rewrite(big_sink_cache, multi_pm, name="multi_pm")
-    big_sink = get_rangeify(big_sink_cache)
-    pre_schedule, buf_uops_sink = create_schedule(big_sink)
+    pre_schedule, buf_uops_sink = create_schedule(get_rangeify(big_sink_cache))
     if SCACHE: schedule_cache[sched_cache_key] = (pre_schedule, buf_uops_sink)
   else:
     # schedule cache hit
     pre_schedule, buf_uops_sink = sc_ret
-  del big_sink_cache
+  del big_sink, big_sink_cache
 
   # replace all the PARAMs/LUNIQUEs back (single graph_rewrite for everything)
   input_buffers_inverse = {v:k for k,v in input_buffers.items()}
