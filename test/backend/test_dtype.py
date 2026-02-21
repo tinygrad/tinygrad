@@ -10,7 +10,7 @@ from tinygrad.renderer.nir import NIRRenderer
 from tinygrad import Context, Device, Tensor, dtypes
 from hypothesis import given, settings, strategies as strat
 from test.helpers import rand_for_dtype
-from test.unit.test_dtype_spec import _assert_eq, core_dtypes, dtype_ints, dtype_floats, FP8E4M3_MAX, FP8E5M2_MAX
+from test.unit.test_dtype_spec import _assert_eq, core_dtypes, dtype_ints, dtype_floats, FP8E4M3_MAX, FP8E5M2_MAX, FP8E4M3FNUZ_MAX, FP8E5M2FNUZ_MAX
 import pytest
 pytestmark = pytest.mark.filterwarnings("ignore")
 
@@ -108,7 +108,7 @@ class TestDType(unittest.TestCase):
   def test_dtypes_DTYPES_DICT(self):
     self.assertIn("float", DTYPES_DICT)
     self.assertIn("float32", DTYPES_DICT)
-    self.assertEqual(len(DTYPES_DICT), 26)
+    self.assertEqual(len(DTYPES_DICT), 28)
     self.assertTrue(all(isinstance(value, DType) for value in DTYPES_DICT.values()))
     self.assertTrue(all(issubclass(_to_np_dtype(value), np.generic) for value in DTYPES_DICT.values() if _to_np_dtype(value) is not None))
 
@@ -143,6 +143,8 @@ def _test_ops(a_dtype:DType, b_dtype:DType, target_dtype=None):
 class TestFp8s(unittest.TestCase):
   def test_fp8e4m3_creation(self): assert Tensor([-1, 1, 2], dtype=dtypes.fp8e4m3).dtype == dtypes.fp8e4m3
   def test_fp8e5m2_creation(self): assert Tensor([-1, 1, 2], dtype=dtypes.fp8e5m2).dtype == dtypes.fp8e5m2
+  def test_fp8e4m3fnuz_creation(self): assert Tensor([-1, 1, 2], dtype=dtypes.fp8e4m3fnuz).dtype == dtypes.fp8e4m3fnuz
+  def test_fp8e5m2fnuz_creation(self): assert Tensor([-1, 1, 2], dtype=dtypes.fp8e5m2fnuz).dtype == dtypes.fp8e5m2fnuz
 
 class TestFp8sConversions(unittest.TestCase):
   @given(strat.floats(width=32, allow_subnormal=True, allow_nan=False, allow_infinity=False, min_value=-FP8E4M3_MAX, max_value=FP8E4M3_MAX))
@@ -150,28 +152,16 @@ class TestFp8sConversions(unittest.TestCase):
     np.testing.assert_equal(float_to_fp8(x, dtypes.fp8e4m3), torch.tensor(x, dtype=torch.float8_e4m3fn).view(torch.uint8).item())
 
   def test_float_to_fp8e4m3_extreme_values(self):
-    np.testing.assert_equal(float_to_fp8(FP8E4M3_MAX, dtypes.fp8e4m3), 126)
-    np.testing.assert_equal(float_to_fp8(FP8E4M3_MAX*1.01, dtypes.fp8e4m3), 126)
-    np.testing.assert_equal(float_to_fp8(math.inf, dtypes.fp8e4m3), 127)
-    np.testing.assert_equal(float_to_fp8(-FP8E4M3_MAX, dtypes.fp8e4m3), 254)
-    np.testing.assert_equal(float_to_fp8(-FP8E4M3_MAX*1.01, dtypes.fp8e4m3), 254)
-    np.testing.assert_equal(float_to_fp8(-math.inf, dtypes.fp8e4m3), 255)
-    np.testing.assert_equal(float_to_fp8(math.nan, dtypes.fp8e4m3), 127)
-    np.testing.assert_equal(float_to_fp8(-math.nan, dtypes.fp8e4m3), 255)
+    for x in [FP8E4M3_MAX, FP8E4M3_MAX*1.01, -FP8E4M3_MAX, -FP8E4M3_MAX*1.01, math.inf, -math.inf, math.nan, -math.nan]:
+      np.testing.assert_equal(float_to_fp8(x, dtypes.fp8e4m3), torch.tensor(x, dtype=torch.float8_e4m3fn).view(torch.uint8).item())
 
   @given(strat.floats(width=32, allow_subnormal=True, allow_nan=False, allow_infinity=False, min_value=-FP8E5M2_MAX, max_value=FP8E5M2_MAX))
   def test_float_to_fp8e5m2(self, x):
     np.testing.assert_equal(float_to_fp8(x, dtypes.fp8e5m2), torch.tensor(x, dtype=torch.float8_e5m2).view(torch.uint8).item())
 
   def test_float_to_fp8e5m2_extreme_values(self):
-    np.testing.assert_equal(float_to_fp8(FP8E5M2_MAX, dtypes.fp8e5m2), 123)
-    np.testing.assert_equal(float_to_fp8(FP8E5M2_MAX*1.01, dtypes.fp8e5m2), 123)
-    np.testing.assert_equal(float_to_fp8(math.inf, dtypes.fp8e5m2), 124)
-    np.testing.assert_equal(float_to_fp8(-FP8E5M2_MAX, dtypes.fp8e5m2), 251)
-    np.testing.assert_equal(float_to_fp8(-FP8E5M2_MAX*1.01, dtypes.fp8e5m2), 251)
-    np.testing.assert_equal(float_to_fp8(-math.inf, dtypes.fp8e5m2), 252)
-    np.testing.assert_equal(float_to_fp8(math.nan, dtypes.fp8e5m2), 126)
-    np.testing.assert_equal(float_to_fp8(-math.nan, dtypes.fp8e5m2), 254)
+    for x in [FP8E5M2_MAX, FP8E5M2_MAX*1.01, -FP8E5M2_MAX, -FP8E5M2_MAX*1.01, math.inf, -math.inf, math.nan, -math.nan]:
+      np.testing.assert_equal(float_to_fp8(x, dtypes.fp8e5m2), torch.tensor(x, dtype=torch.float8_e5m2).view(torch.uint8).item())
 
   @given(strat.integers(min_value=0, max_value=255))
   def test_fp8e4m3_to_float(self, x):
@@ -180,6 +170,30 @@ class TestFp8sConversions(unittest.TestCase):
   @given(strat.integers(min_value=0, max_value=255))
   def test_fp8e5m2_to_float(self, x):
     np.testing.assert_equal(fp8_to_float(x, dtypes.fp8e5m2), torch.tensor(x, dtype=torch.uint8).view(torch.float8_e5m2).float().item())
+
+  @given(strat.floats(width=32, allow_subnormal=True, allow_nan=False, allow_infinity=False, min_value=-FP8E4M3FNUZ_MAX, max_value=FP8E4M3FNUZ_MAX))
+  def test_float_to_fp8e4m3fnuz(self, x):
+    np.testing.assert_equal(float_to_fp8(x, dtypes.fp8e4m3fnuz), torch.tensor(x, dtype=torch.float8_e4m3fnuz).view(torch.uint8).item())
+
+  def test_float_to_fp8e4m3fnuz_extreme_values(self):
+    for x in [FP8E4M3FNUZ_MAX, FP8E4M3FNUZ_MAX*1.01, -FP8E4M3FNUZ_MAX, -FP8E4M3FNUZ_MAX*1.01, math.inf, -math.inf, math.nan, 0.0, -0.0]:
+      np.testing.assert_equal(float_to_fp8(x, dtypes.fp8e4m3fnuz), torch.tensor(x, dtype=torch.float8_e4m3fnuz).view(torch.uint8).item())
+
+  @given(strat.floats(width=32, allow_subnormal=True, allow_nan=False, allow_infinity=False, min_value=-FP8E5M2FNUZ_MAX, max_value=FP8E5M2FNUZ_MAX))
+  def test_float_to_fp8e5m2fnuz(self, x):
+    np.testing.assert_equal(float_to_fp8(x, dtypes.fp8e5m2fnuz), torch.tensor(x, dtype=torch.float8_e5m2fnuz).view(torch.uint8).item())
+
+  def test_float_to_fp8e5m2fnuz_extreme_values(self):
+    for x in [FP8E5M2FNUZ_MAX, FP8E5M2FNUZ_MAX*1.01, -FP8E5M2FNUZ_MAX, -FP8E5M2FNUZ_MAX*1.01, math.inf, -math.inf, math.nan, 0.0, -0.0]:
+      np.testing.assert_equal(float_to_fp8(x, dtypes.fp8e5m2fnuz), torch.tensor(x, dtype=torch.float8_e5m2fnuz).view(torch.uint8).item())
+
+  @given(strat.integers(min_value=0, max_value=255))
+  def test_fp8e4m3fnuz_to_float(self, x):
+    np.testing.assert_equal(fp8_to_float(x, dtypes.fp8e4m3fnuz), torch.tensor(x, dtype=torch.uint8).view(torch.float8_e4m3fnuz).float().item())
+
+  @given(strat.integers(min_value=0, max_value=255))
+  def test_fp8e5m2fnuz_to_float(self, x):
+    np.testing.assert_equal(fp8_to_float(x, dtypes.fp8e5m2fnuz), torch.tensor(x, dtype=torch.uint8).view(torch.float8_e5m2fnuz).float().item())
 
 @unittest.skipUnless(is_dtype_supported(dtypes.bfloat16), "bfloat16 not supported")
 class TestBFloat16(unittest.TestCase):
