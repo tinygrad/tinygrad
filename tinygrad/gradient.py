@@ -17,7 +17,16 @@ def call_gradient(ctx:UOp, k:UOp):
   if k.arg.grad_fxn is not None: return (None,) + k.arg.grad_fxn(ctx, k)
   # auto-differentiate the function
   fxn, args = k.src[0], k.src[1:]
-  params = sorted([x for x in fxn.toposort() if x.op == Ops.PARAM], key=lambda x: x.arg)
+  # NOTE: not capturing PARAMs in nested CALL bodies
+  seen: set[UOp] = set()
+  queue = [fxn]
+  params: list[UOp] = []
+  while queue:
+    if (u:=queue.pop()) in seen: continue
+    seen.add(u)
+    if u.op is Ops.PARAM: params.append(u)
+    queue += u.src[1:] if u.op is Ops.CALL else u.src
+  params = sorted(params, key=lambda x: x.arg)
   grads = compute_gradient(fxn, ctx, set(params))
   subst = dict(zip(params, args))
   return (None,) + tuple(grads[p].substitute(subst) if p in grads else None for p in params)
