@@ -1,4 +1,4 @@
-from tinygrad.uop.ops import UOp, UPat, PatternMatcher, Ops, GroupOp, graph_rewrite, _remove_all_tags, identity_element
+from tinygrad.uop.ops import UOp, UPat, PatternMatcher, Ops, GroupOp, graph_rewrite, identity_element
 from tinygrad.dtype import ImageDType
 from tinygrad.helpers import prod, DEBUG, argsort
 
@@ -82,7 +82,14 @@ pm_early_transform_tensor_graph = PatternMatcher([
   (UPat(Ops.COPY, src=(UPat.var("s"), UPat()), name="c"), lambda c,s: c.const_like(ss.arg) if (ss:=s.base).op is Ops.CONST else None),
 ])
 
-pm_remove_unique_consts = PatternMatcher([
+def untag_and_append(ctx:list[UOp], x:UOp):
+  if x.tag:
+    ret = x.replace(tag=None)
+    ctx.append(ret)
+    return ret
+
+pm_finalize_call = PatternMatcher([
+  (UPat(GroupOp.All, name="x"), untag_and_append),
   # replace UNIQUE with LUNIQUE for CONST cache key normalization
   (UPat(Ops.CONST, src=(UPat(Ops.UNIQUE), UPat(Ops.DEVICE, name="d")), name="b"), lambda b,d: b.replace(src=(d,))),
 ])
@@ -112,5 +119,6 @@ def allocate_global_buffers(big_sink:UOp) -> tuple[UOp, dict[UOp, UOp]]:
         replace_uop = s
         while replace_uop.op is Ops.ASSIGN: replace_uop = replace_uop.src[0]
         buffer_map[original_uop] = replace_uop.shrink_to(original_uop.shape)
-  big_sink = graph_rewrite(big_sink, _remove_all_tags+pm_remove_unique_consts, name="remove tags")
-  return big_sink, buffer_map
+  assigns: list[UOp] = []
+  graph_rewrite(big_sink, pm_finalize_call, ctx=assigns, name="remove tags")
+  return UOp.sink(*assigns), buffer_map

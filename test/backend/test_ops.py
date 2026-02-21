@@ -762,7 +762,7 @@ class TestOps(unittest.TestCase):
     tor = torch.tensor(data, dtype=torch.int)
     ten = Tensor(data, dtype=dtypes.int32)
     # NOTE: this breaks assigns because it's folded to 0!
-    #helper_test_op([], lambda: tor^tor, lambda: ten^ten, forward_only=True)
+    helper_test_op([], lambda: tor^tor, lambda: ten^ten, forward_only=True)
     helper_test_op([], lambda: tor^0x1337, lambda: ten^0x1337, forward_only=True)
     helper_test_op([], lambda: 0x1337^tor, lambda: 0x1337^ten, forward_only=True)
 
