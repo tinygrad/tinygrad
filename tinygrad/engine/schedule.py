@@ -95,7 +95,7 @@ def unroll_outer_ranges(schedule:list[UOp], sched_item:dict[UOp, ScheduleItem]) 
   return pre_schedule, buf_uops_list
 
 from tinygrad.engine.memory import memory_planner
-from tinygrad.schedule.rangeify import get_rangeify_map
+from tinygrad.schedule.rangeify import get_rangeify_map, resolve_call
 from tinygrad.schedule.multi import get_multi_map
 
 def replace_input_buffer(ctx:tuple[dict[UOp, UOp], dict[str, int], list[int], list[int]], b:UOp):
@@ -142,23 +142,6 @@ pm_post_sched_cache = PatternMatcher([
   (UPat(Ops.BIND, src=(UPat(Ops.DEFINE_VAR),), name="b"), lambda ctx,b: ctx.get(b)),
 ])
 
-def resolve_cached_call(c: UOp) -> UOp:
-  # NOTE: this is a call for the schedule cache (PARAMs only) real kernels are left as CALLs
-  fxn, args = c.src[0], c.src[1:]
-  # NOTE: not capturing PARAMs in nested CALL bodies
-  seen: set[UOp] = set()
-  queue = [fxn]
-  params: list[UOp] = []
-  while queue:
-    if (u:=queue.pop()) in seen: continue
-    seen.add(u)
-    if u.op is Ops.PARAM: params.append(u)
-    queue += u.src[1:] if u.op is Ops.CALL else u.src
-  params = sorted(params, key=lambda x: x.arg)
-  assert len(params) == len(args), f"call mismatch: {len(params)} params vs {len(args)} args"
-  assert all(p.arg == i for i,p in enumerate(params)), "PARAM slots are not contiguous"
-  return fxn.substitute(dict(zip(params, args))).rtag(c.tag)
-
 schedule_cache: dict[bytes, UOp] = {}
 @track_rewrites(lambda _,ret: f"Schedule {pluralize('Kernel', len(ret[1]))}")
 def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[dict[UOp, UOp], list[ExecItem], dict[str, int]]:
@@ -204,7 +187,8 @@ def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[dict[UOp, UOp], li
   param_pairs = sorted([(v.arg, k) for k,v in input_buffers.items() if v.op is Ops.PARAM])
   call_args = [b for _,b in param_pairs]
   assert all(slot == i for i,(slot,_) in enumerate(param_pairs)), "PARAM slots are not contiguous"
-  combined = resolve_cached_call(combined_sink.call(*call_args))
+  combined = resolve_call(combined_sink.call(*call_args))
+  assert combined is not None
   combined = graph_rewrite(combined, pm_post_sched_cache, ctx=input_buffers_inverse, name="unrewrite combined")
   tensor_map_sink, big_sink = combined.src
   tm_src = tensor_map_sink.src
