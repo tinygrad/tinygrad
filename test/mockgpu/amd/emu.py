@@ -1,7 +1,7 @@
 # RDNA3 emulator v2 - compiles pcode to UOps executed via tinygrad CPU backend
 # Each instruction is compiled to a kernel that operates on buffers:
 #   arg=0: sgpr - sgpr[0-127], inline constants[128-255], PC_LO=256, PC_HI=257, SCC=258, SCRATCH_STRIDE=259
-#   arg=1: vgpr - vgpr[reg * 32 + lane]
+#   arg=1: vgpr - vgpr[reg * WAVE_SIZE + lane]
 #   arg=2: vmem - base address 0, INDEX offsets directly to host memory
 #   arg=3: lds - local data share
 #   arg=4: scratch - per-lane scratch memory
@@ -65,7 +65,7 @@ from tinygrad.runtime.autogen.amd.cdna.str_pcode import PCODE as PCODE_CDNA
 from tinygrad.runtime.autogen.amd.rdna3 import ins as ir3
 from tinygrad.runtime.autogen.amd.rdna4 import ins as ir4
 from tinygrad.runtime.autogen.amd.cdna import ins as irc
-from tinygrad.renderer.amd.dsl import VCC_LO, EXEC_LO, SCC, ttmp
+from tinygrad.renderer.amd.dsl import VCC_LO, EXEC_LO, EXEC_HI, SCC, ttmp
 from tinygrad.runtime.autogen.amd.common import Fmt, OpType
 from test.mockgpu.amd.pcode import parse_block, _FUNCS
 
@@ -230,17 +230,33 @@ VOPD_TO_VOP2 = {
   ir4.VOPDOp.V_DUAL_MOV_B32: ir3.VOP1Op.V_MOV_B32_E32, ir4.VOPDOp.V_DUAL_CNDMASK_B32: ir3.VOP2Op.V_CNDMASK_B32_E32,
   ir4.VOPDOp.V_DUAL_FMAAK_F32: ir3.VOP2Op.V_FMAAK_F32_E32, ir4.VOPDOp.V_DUAL_FMAMK_F32: ir3.VOP2Op.V_FMAMK_F32_E32,
 }
-WAVE_SIZE = 32
+from test.mockgpu.amd.amdgpu import MOCKGPU_ARCH as _MOCKGPU_ARCH
+WAVE_SIZE = 32  # Internal kernel compilation width (always 32 for performance)
+HW_WAVE_SIZE = 64 if _MOCKGPU_ARCH == "cdna4" else 32  # Actual hardware wavefront size
 # Special registers stored after inline constants (256-259)
 PC_LO_IDX, PC_HI_IDX, SCRATCH_STRIDE_IDX = 256, 257, 259
 # SGPR buffer: 0-127 = SGPRs, 128-255 = inline constants, 256-259 = special registers
-SGPR_COUNT, VGPR_SIZE = 260, 256 * 32
+SGPR_COUNT, VGPR_SIZE = 260, 256 * HW_WAVE_SIZE
 # Sentinel PC value for s_endpgm
 ENDPGM_PC = 0xFFFFFFFFFFFFFFFF
 
 def _op_name(inst) -> str:
   if hasattr(inst, 'opx'): return f"{inst.opx.name}_{inst.opy.name}"  # VOPD has opx/opy not op
   return inst.op.name if hasattr(inst.op, 'name') else str(inst.op)
+
+_LANE_PCODE_OPS = {
+  'V_READLANE_B32',
+  'V_READFIRSTLANE_B32',
+  'V_READFIRSTLANE_B32_E32',
+  'V_READFIRSTLANE_B32_E64',
+  'V_WRITELANE_B32',
+  'V_PERMLANE64_B32_E32',
+}
+
+def _is_lane_pcode_op(op_name: str) -> bool:
+  return op_name in _LANE_PCODE_OPS or 'PERMLANE16' in op_name or 'PERMLANEX16' in op_name or 'PERMLANE32' in op_name
+
+def _is_lane_pcode_inst(inst) -> bool: return _is_lane_pcode_op(_op_name(inst))
 
 def _to_u32(val: UOp) -> UOp:
   if val.dtype == dtypes.uint32: return val
@@ -289,7 +305,15 @@ def _get_pcode_dict(op) -> dict:
 @functools.cache
 def get_pcode(op) -> str:
   op_name = op.name
-  pcode = _get_pcode_dict(op)[op]
+  pcode_dict = _get_pcode_dict(op)
+  pcode_op = op
+  if pcode_op not in pcode_dict and op_name.endswith('_E64'):
+    e32_name = op_name.replace('_E64', '_E32')
+    for cand in pcode_dict.keys():
+      if getattr(cand, 'name', None) == e32_name:
+        pcode_op = cand
+        break
+  pcode = pcode_dict[pcode_op]
   if op_name in _pcode_fixes: pcode = pcode.replace(*_pcode_fixes[op_name])
   if 'V_DIV_SCALE' in op_name:
     dt, exp_lim, ldexp_val = ('f32', '23', '64') if 'F32' in op_name else ('f64', '52', '128')
@@ -403,7 +427,7 @@ class _Ctx:
   """Context for instruction compilation - holds buffers and helpers."""
   __slots__ = ('inst_size', 'dyn_fields', '_axis_id')
   sgpr = UOp(Ops.PARAM, dtypes.uint32.ptr(SGPR_COUNT), arg=0)
-  vgpr = UOp(Ops.PARAM, dtypes.uint32.ptr(VGPR_SIZE), arg=1)
+  vgpr = UOp(Ops.PARAM, dtypes.uint32.ptr(256 * HW_WAVE_SIZE), arg=1)
   vmem = UOp(Ops.PARAM, dtypes.uint32.ptr(1 << 46), arg=2)
   lds = UOp(Ops.PARAM, dtypes.uint32.ptr(16384), arg=3)
   scratch = UOp(Ops.PARAM, dtypes.uint8.ptr(1 << 30), arg=4)
@@ -412,7 +436,7 @@ class _Ctx:
     self.inst_size, self._axis_id = inst_size, 0
     self.dyn_fields: list[tuple[int, int]] = []  # (lo, hi) of fields read dynamically
 
-  def range(self, n: int = 32) -> UOp:
+  def range(self, n: int = WAVE_SIZE) -> UOp:
     """Create a lane range UOp with unique axis ID."""
     self._axis_id += 1
     return UOp.range(n, self._axis_id, AxisType.LOOP, dtype=dtypes.int)
@@ -483,13 +507,13 @@ class _Ctx:
 
   def rvgpr_dyn(self, reg: UOp, lane: UOp, valid: UOp | None = None) -> UOp:
     """Read VGPR with dynamic register index."""
-    idx = reg.cast(dtypes.int) * _c(32, dtypes.int) + lane.cast(dtypes.int)
+    idx = reg.cast(dtypes.int) * _c(HW_WAVE_SIZE, dtypes.int) + lane.cast(dtypes.int)
     return self.vgpr.index(idx, valid, ptr=True).load() if valid is not None else self.vgpr.index(idx, ptr=True).load()
 
   def wvgpr_dyn(self, reg: UOp, lane: UOp, val: UOp, exec_mask: UOp, after: UOp | None = None) -> UOp:
     """Write VGPR with dynamic register index."""
     buf = self.vgpr.after(after) if after is not None else self.vgpr
-    offset = reg.cast(dtypes.int) * _c(32, dtypes.int) + lane.cast(dtypes.int)
+    offset = reg.cast(dtypes.int) * _c(HW_WAVE_SIZE, dtypes.int) + lane.cast(dtypes.int)
     return buf.index(offset, _lane_active(exec_mask, lane)).store(val.cast(dtypes.uint32))
 
   def rsrc_dyn(self, off: UOp, lane: UOp | None, bits: int = 32, literal: UOp | None = None, is_f64: bool = False, do_cast: bool = True) -> UOp:
@@ -569,8 +593,10 @@ class _Ctx:
     src1_off = self.inst_field(type(inst).src1) if hasattr(type(inst), 'src1') else None
     src2_off = self.inst_field(type(inst).src2) if hasattr(type(inst), 'src2') else None
     exec_lo = self.rsgpr_dyn(_c(EXEC_LO.offset))
+    exec_hi = self.rsgpr_dyn(_c(EXEC_HI.offset)) if HW_WAVE_SIZE > WAVE_SIZE else _c(0)
     srcs = {
-      'SRC0': src0_reg, 'VDST': vdst_off, 'EXEC_LO': exec_lo, 'EXEC': exec_lo.cast(dtypes.uint64), '_vgpr': self.vgpr,
+      'SRC0': src0_reg, 'VDST': vdst_off, 'EXEC_LO': exec_lo, 'EXEC': _u64(exec_lo, exec_hi), '_vgpr': self.vgpr,
+      'WAVE32': HW_WAVE_SIZE == 32, 'WAVE64': HW_WAVE_SIZE == 64, 'VGPR_STRIDE': _c(HW_WAVE_SIZE),
       'S0': self.rsrc_dyn(src0_off, _c(0, dtypes.int)) if 'WRITELANE' in op_name else src0_reg,
       'S1': self.rsrc_dyn(src1_off, _c(0, dtypes.int)) if src1_off is not None else _c(0),
       'S2': self.rsrc_dyn(src2_off, _c(0, dtypes.int)) if src2_off is not None else _c(0),
@@ -685,8 +711,17 @@ def _compile_sopp(inst: ir3.SOPP | ir4.SOPP, ctx: _Ctx) -> UOp:
     pcode = get_pcode(inst.op)
     pc_bytes = ctx.rpc()  # PC is already 64-bit byte address
     vcc, exec_lo = ctx.rsgpr_dyn(_c(VCC_LO.offset)), ctx.rsgpr_dyn(_c(EXEC_LO.offset))
+    # For CDNA4 (64-wide waves), EXECZ/VCCZ must check both LO and HI halves of the 64-bit masks
+    if HW_WAVE_SIZE > WAVE_SIZE:
+      from tinygrad.renderer.amd.dsl import EXEC_HI, VCC_HI
+      exec_hi, vcc_hi = ctx.rsgpr_dyn(_c(EXEC_HI.offset)), ctx.rsgpr_dyn(_c(VCC_HI.offset))
+      execz = (exec_lo | exec_hi).eq(UOp.const(dtypes.uint32, 0)).cast(dtypes.uint32)
+      vccz = (vcc | vcc_hi).eq(UOp.const(dtypes.uint32, 0)).cast(dtypes.uint32)
+    else:
+      execz = exec_lo.eq(UOp.const(dtypes.uint32, 0)).cast(dtypes.uint32)
+      vccz = vcc.eq(UOp.const(dtypes.uint32, 0)).cast(dtypes.uint32)
     srcs = {'PC': pc_bytes.cast(dtypes.int64), 'SIMM16': simm16, 'SCC': ctx.rsgpr_dyn(_c(SCC.offset)), 'VCC': vcc,
-            'VCCZ': vcc.eq(UOp.const(dtypes.uint32, 0)).cast(dtypes.uint32), 'EXECZ': exec_lo.eq(UOp.const(dtypes.uint32, 0)).cast(dtypes.uint32)}
+            'VCCZ': vccz, 'EXECZ': execz}
     for dest, val in parse_pcode(pcode, srcs)[1]:
       if dest == 'PC' or dest.startswith('PC.'):
         lo, hi = _split64(val.cast(dtypes.uint64))
@@ -767,7 +802,7 @@ def _compile_sop(inst: ir3.SOP1|ir3.SOP2|ir3.SOPC|ir3.SOPK|ir4.SOP1|ir4.SOP2|ir4
 
 def _compile_vop12(inst: ir3.VOP1 | ir3.VOP1_SDST | ir3.VOP2 | ir4.VOP1 | ir4.VOP1_SDST | ir4.VOP2 | irc.VOP1 | irc.VOP2, ctx: _Ctx) -> UOp:
   op_name = _op_name(inst)
-  if op_name in ('V_READFIRSTLANE_B32_E32', 'V_PERMLANE64_B32_E32'): return ctx.compile_lane_pcode(inst.op, inst)
+  if _is_lane_pcode_op(op_name): return ctx.compile_lane_pcode(inst.op, inst)
   lane, exec_mask, bits = ctx.range(), ctx.rsgpr_dyn(_c(EXEC_LO.offset)), inst.canonical_op_bits
   literal = ctx.inst_field(type(inst).literal) if hasattr(type(inst), 'literal') else None  # type: ignore[union-attr]
   vdst_reg = ctx.inst_field(type(inst).vdst)
@@ -863,12 +898,7 @@ def _compile_vop3(inst: ir3.VOP3 | ir4.VOP3 | irc.VOP3, ctx: _Ctx) -> UOp:
   opsel, op_name = getattr(inst, 'opsel', 0) or 0, _op_name(inst)
 
   # Lane operations
-  if op_name in ('V_READLANE_B32', 'V_READFIRSTLANE_B32', 'V_READFIRSTLANE_B32_E64', 'V_WRITELANE_B32'):
-    return ctx.compile_lane_pcode(inst.op, inst)
-
-  # V_PERMLANE16_B32 / V_PERMLANEX16_B32: cross-lane swizzle via pcode
-  if 'PERMLANE16' in op_name or 'PERMLANEX16' in op_name:
-    return ctx.compile_lane_pcode(inst.op, inst)
+  if _is_lane_pcode_op(op_name): return ctx.compile_lane_pcode(inst.op, inst)
 
   # VOP3 VOPC (v_cmp_*_e64) - delegate to unified VOPC handler
   if 'V_CMP' in op_name or 'V_CMPX' in op_name:
@@ -1401,8 +1431,8 @@ class WaveState:
 
   def _write_sgpr(self, idx: int, val: int): self._sgpr_mv[idx] = val & MASK32
   def _read_sgpr(self, idx: int) -> int: return self._sgpr_mv[idx]
-  def _write_vgpr(self, reg: int, lane: int, val: int): self._vgpr_mv[reg * 32 + lane] = val & MASK32
-  def _read_vgpr(self, reg: int, lane: int) -> int: return self._vgpr_mv[reg * 32 + lane]
+  def _write_vgpr(self, reg: int, lane: int, val: int): self._vgpr_mv[reg * HW_WAVE_SIZE + lane] = val & MASK32
+  def _read_vgpr(self, reg: int, lane: int) -> int: return self._vgpr_mv[reg * HW_WAVE_SIZE + lane]
 
   @property
   def pc(self) -> int: return self._read_sgpr(PC_LO_IDX) | (self._read_sgpr(PC_HI_IDX) << 32)
@@ -1418,8 +1448,13 @@ class WaveState:
 def _init_wave(lib: int, wave_start: int, total_threads: int, lx: int, ly: int, lz: int, args_ptr: int, rsrc2: int,
                scratch_size: int, arch: str, gidx: int, gidy: int, gidz: int, user_data: list[int]|None) -> WaveState:
   """Initialize a single wavefront and return WaveState."""
-  n_lanes = min(WAVE_SIZE, total_threads - wave_start)
-  st = WaveState(n_lanes)
+  n_lanes = min(HW_WAVE_SIZE, total_threads - wave_start)
+  # WaveState EXEC_LO is set for the first sub-wave (up to 32 lanes)
+  st = WaveState(min(WAVE_SIZE, n_lanes))
+  # For cdna4 (64-wide waves), set EXEC_HI for the second sub-wave (lanes 32-63)
+  if HW_WAVE_SIZE > WAVE_SIZE and n_lanes > WAVE_SIZE:
+    from tinygrad.renderer.amd.dsl import EXEC_HI
+    st._write_sgpr(EXEC_HI.offset, (1 << (n_lanes - WAVE_SIZE)) - 1)
   st.pc = lib
   if user_data:
     for i, val in enumerate(user_data): st._write_sgpr(i, val)
@@ -1453,7 +1488,7 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
   # Use Buffer objects with external_ptr=0 for vmem
   vmem_buf = Buffer('CPU', 1 << 40, dtypes.uint32, options=BufferSpec(external_ptr=0)).ensure_allocated()
   lds_buf = Buffer('CPU', max(lds_size // 4, 1), dtypes.uint32).ensure_allocated()
-  scratch_buf = Buffer('CPU', scratch_size * WAVE_SIZE, dtypes.uint8).ensure_allocated() if scratch_size else None
+  scratch_buf = Buffer('CPU', scratch_size * HW_WAVE_SIZE, dtypes.uint8).ensure_allocated() if scratch_size else None
 
   # Initialize SQTT encoder — emits packets inline as instructions execute (only when profiling)
   if PROFILE:
@@ -1478,13 +1513,25 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
       for gidy in range(gy):
         for gidx in range(gx):
           # Initialize all wavefronts for this workgroup
-          waves: list[tuple[WaveState, list]] = []
-          for wave_start in range(0, total_threads, WAVE_SIZE):
+          waves: list[tuple[WaveState, list[list]]] = []
+          for wave_start in range(0, total_threads, HW_WAVE_SIZE):
+            n_hw_lanes = min(HW_WAVE_SIZE, total_threads - wave_start)
             st = _init_wave(lib, wave_start, total_threads, lx, ly, lz, args_ptr, rsrc2, scratch_size, arch, gidx, gidy, gidz, user_data)
-            c_bufs = [ctypes.c_uint64(st.sgpr_buf._buf.va_addr), ctypes.c_uint64(st.vgpr_buf._buf.va_addr),
-                      ctypes.c_uint64(vmem_buf._buf.va_addr), ctypes.c_uint64(lds_buf._buf.va_addr),
-                      ctypes.c_uint64(scratch_buf._buf.va_addr if scratch_buf else 0)]
-            waves.append((st, c_bufs))
+            # For cdna4 (64-wide waves), create 2 sub-wave buffer sets pointing to different VGPR lane regions
+            # Sub-wave 0: lanes 0-31 (vgpr base), Sub-wave 1: lanes 32-63 (vgpr base + 32*4 bytes)
+            sub_wave_bufs = []
+            for sw in range(HW_WAVE_SIZE // WAVE_SIZE):
+              sw_n_lanes = min(WAVE_SIZE, n_hw_lanes - sw * WAVE_SIZE)
+              if sw_n_lanes <= 0: break
+              vgpr_addr = st.vgpr_buf._buf.va_addr + sw * WAVE_SIZE * 4  # offset by 32 lanes (32 * 4 bytes)
+              sub_wave_bufs.append([ctypes.c_uint64(st.sgpr_buf._buf.va_addr), ctypes.c_uint64(vgpr_addr),
+                        ctypes.c_uint64(vmem_buf._buf.va_addr), ctypes.c_uint64(lds_buf._buf.va_addr),
+                        ctypes.c_uint64(scratch_buf._buf.va_addr if scratch_buf else 0)])
+            waves.append((st, sub_wave_bufs))
+
+          # Import EXEC_HI/VCC_HI for sub-wave 1 save/restore (needed for CDNA4 dual sub-wave dispatch)
+          if HW_WAVE_SIZE > WAVE_SIZE:
+            from tinygrad.renderer.amd.dsl import EXEC_HI, VCC_HI
 
           # Execute wavefronts with barrier synchronization
           # Each wave runs until it hits s_barrier or s_endpgm. When all waves have stopped, release barrier waves.
@@ -1501,7 +1548,26 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
                   if tracing: sqtt_finish(wi)
                   break
                 fxn, globals_list, is_barrier, inst = _ensure_compiled(pc)
-                fxn(*[c_bufs[g] for g in globals_list])
+                # Run instruction on all sub-waves (1 for RDNA 32-lane, 2 for CDNA4 64-lane)
+                # Cross-lane pcode ops execute once with full-wave EXEC/VGPR context on cdna4.
+                run_single = HW_WAVE_SIZE > WAVE_SIZE and _is_lane_pcode_inst(inst)
+                for sw_idx, sw_bufs in enumerate(c_bufs[:1] if run_single else c_bufs):
+                  if sw_idx > 0:
+                    # Save sub-wave 0's full state (including advanced PC and scalar results)
+                    saved_sgpr_list = list(st._sgpr_mv)
+                    # Restore original PC so sub-wave 1 runs the SAME instruction as sub-wave 0
+                    st._sgpr_mv[PC_LO_IDX], st._sgpr_mv[PC_HI_IDX] = pc & MASK32, (pc >> 32) & MASK32
+                    # Swap EXEC_LO <-> EXEC_HI and VCC_LO <-> VCC_HI so sub-wave 1 uses HI masks
+                    for lo, hi in [(EXEC_LO.offset, EXEC_HI.offset), (VCC_LO.offset, VCC_HI.offset)]:
+                      st._sgpr_mv[lo], st._sgpr_mv[hi] = st._sgpr_mv[hi], st._sgpr_mv[lo]
+                  fxn(*[sw_bufs[g] for g in globals_list])
+                  if sw_idx > 0:
+                    # Capture EXEC and VCC results from sub-wave 1 (in swapped LO positions)
+                    new_exec_hi, new_vcc_hi = st._sgpr_mv[EXEC_LO.offset], st._sgpr_mv[VCC_LO.offset]
+                    # Restore sub-wave 0's state (advanced PC, scalar results, original EXEC/VCC)
+                    for i in range(SGPR_COUNT): st._sgpr_mv[i] = saved_sgpr_list[i]
+                    # Write back the HI mask values computed by sub-wave 1
+                    st._sgpr_mv[EXEC_HI.offset], st._sgpr_mv[VCC_HI.offset] = new_exec_hi, new_vcc_hi
                 if tracing:
                   inst_op = inst.op.value if hasattr(inst, 'op') else 0
                   sqtt_emit(wi, inst, (st.pc != ENDPGM_PC and st.pc != pc + inst.size()) if inst_op in _BRANCH_OPS else None)
