@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import cast, Callable, Type, TypeVar, Generic, Any
-import contextlib, decimal, statistics, time, ctypes, array, os, struct, collections, functools
+import contextlib, decimal, statistics, time, ctypes, array, os, struct, collections, functools, itertools
 try: import fcntl # windows misses that
 except ImportError: fcntl = None #type:ignore[assignment]
 from tinygrad.helpers import PROFILE, getenv, to_mv, from_mv, cpu_profile, ProfileRangeEvent, select_first_inited, unwrap, suppress_finalizing
@@ -301,8 +301,8 @@ class CLikeArgsState(HCQArgsState[ProgramType]):
 class HCQProgram(Generic[HCQDeviceType]):
   def __init__(self, args_state_t:Type[HCQArgsState], dev:HCQDeviceType, name:str, kernargs_alloc_size:int, lib:bytes|None=None, base:int|None=None):
     self.args_state_t, self.dev, self.name, self.kernargs_alloc_size = args_state_t, dev, name, kernargs_alloc_size
-    self.dev.prof_prg_counter += 1
-    if PROFILE: Compiled.profile_events += [ProfileProgramEvent(dev.device, name, lib, base, self.dev.prof_prg_counter)]
+    self.prof_prg_counter = next(self.dev.prof_prg_counter)
+    if PROFILE: Compiled.profile_events += [ProfileProgramEvent(dev.device, name, lib, base, self.prof_prg_counter)]
 
   @staticmethod
   def _fini(dev, buf, spec): dev.allocator.free(buf, buf.size, spec)
@@ -378,7 +378,7 @@ class HCQCompiled(Compiled, Generic[SignalType]):
     self.timeline_signal, self._shadow_timeline_signal = self.new_signal(value=0, is_timeline=True), self.new_signal(value=0, is_timeline=True)
     self.sig_prof_records:list[tuple[HCQSignal, HCQSignal, str|TracingKey, str]] = []
     self.prof_exec_counter:int = 0
-    self.prof_prg_counter:int = 0
+    self.prof_prg_counter = itertools.count(0)
 
     self.kernargs_buf:HCQBuffer = self.allocator.alloc(kernargs_size, BufferSpec(cpu_access=True))
     self.kernargs_offset_allocator:BumpAllocator = BumpAllocator(self.kernargs_buf.size, wrap=True)
