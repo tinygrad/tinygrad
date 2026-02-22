@@ -7,6 +7,7 @@ import unittest
 from tinygrad.runtime.autogen.amd.rdna3.ins import *
 from tinygrad.renderer.amd.dsl import VCC_HI, EXEC_LO, NULL
 OFF = NULL  # OFF is alias for NULL
+from tinygrad.runtime.autogen.amd.cdna.ins import SMEM as C_SMEM, s_load_dwordx4 as c_s_load_dwordx4
 from tinygrad.renderer.amd import detect_format
 
 
@@ -223,6 +224,17 @@ class TestDetectFormat(unittest.TestCase):
   def test_detect_vinterp(self):
     inst = VINTERP(VINTERPOp.V_INTERP_P10_F32, vdst=v[0], src0=v[1], src1=v[2], src2=v[3])
     self.assertEqual(detect_format(inst.to_bytes()), VINTERP)
+
+  def test_detect_cdna_smem(self):
+    self.assertEqual(detect_format(c_s_load_dwordx4(sdata=s[8:11], sbase=s[0:1], offset=0).to_bytes(), "cdna"), C_SMEM)
+
+  def test_detect_cdna_smem_f61(self):
+    # GFX950 comgr emits SMEM at format 61 (0b111101) instead of format 48 (0b110000)
+    data = bytearray(c_s_load_dwordx4(sdata=s[8:11], sbase=s[0:1], offset=0).to_bytes())
+    data[3] = (data[3] & 0x03) | (0b111101 << 2)  # patch encoding bits[31:26]
+    fmt = detect_format(bytes(data), "cdna")
+    self.assertNotEqual(fmt, C_SMEM)
+    self.assertEqual(fmt.from_bytes(bytes(data)).to_bytes(), bytes(data))
 
 
 if __name__ == "__main__":
