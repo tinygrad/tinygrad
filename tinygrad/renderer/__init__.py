@@ -1,13 +1,13 @@
 from __future__ import annotations
-from typing import Callable, cast, TYPE_CHECKING
+from typing import Callable, cast
 import functools
 from dataclasses import dataclass, field
 from tinygrad.helpers import to_function_name, dedup, prod, DEBUG
-from tinygrad.uop.ops import Ops, UOp, sym_infer, sint, Variable, ssimplify, GroupOp, PatternMatcher, print_uops, KernelInfo
+from tinygrad.uop.ops import Ops, UOp, sym_infer, sint, Variable, ssimplify, smin, GroupOp, PatternMatcher, print_uops
 from tinygrad.dtype import AddrSpace, PtrDType
 from tinygrad.codegen.opt.tc import TensorCore
 from tinygrad.codegen.opt import Opt
-if TYPE_CHECKING: from tinygrad.device import Compiler
+from tinygrad.device import Compiler
 
 @dataclass(frozen=True)
 class Estimates:
@@ -20,7 +20,7 @@ class Estimates:
   def __add__(self, o:Estimates): return Estimates(self.ops + o.ops, self.lds + o.lds, self.mem + o.mem)
   def simplify(self): return Estimates(ssimplify(self.ops), ssimplify(self.lds), ssimplify(self.mem))
   @staticmethod
-  def from_uops(uops:list[UOp], ignore_indexing=False) -> Estimates:
+  def from_uops(uops:tuple[UOp, ...], ignore_indexing=False) -> Estimates:
     flops: sint = 0
     lds: sint = 0
     mem: dict[tuple[UOp, Ops], sint] = {}
@@ -38,12 +38,13 @@ class Estimates:
         elif u.op is Ops.IF:
           dont_count = dont_count.union(u.src[0].toposort())
     for u in uops:
-      if u.op is Ops.SINK and isinstance(u.arg, KernelInfo) and u.arg.estimates is not None: return u.arg.estimates
       if u.op in {Ops.LOAD, Ops.STORE}:
         buf = u
         while len(buf.src): buf = buf.src[0]
-        if buf.op is Ops.PARAM: # assume all DEFINE_GLOBAL memory is accessed
-          mem[(buf, u.op)] = buf.ptrdtype.size * buf.dtype.itemsize
+        if buf.op is Ops.PARAM:
+          # u.src[0] is INDEX, cap at buffer size for re-reads (e.g. matmul)
+          accessed = mem.get((buf, u.op), 0) + u.src[0].dtype.base.itemsize * mults
+          mem[(buf, u.op)] = smin(accessed, buf.ptrdtype.nbytes()) if buf.ptrdtype.size != -1 else accessed
       if u.op is Ops.RANGE:
         mult_stack.append(mults)
         mults *= cast(sint, u.src[0].ssimplify())
@@ -78,21 +79,17 @@ class ProgramSpec:
   outs:list[int]=field(default_factory=list)
   ins:list[int]=field(default_factory=list)
 
-  @functools.cached_property
-  def estimates(self) -> Estimates:
-    return Estimates() if self.uops is None else Estimates.from_uops(self.uops, ignore_indexing=True)
+  @property
+  def estimates(self) -> Estimates: return self.ast.arg.estimates if self.ast.arg is not None and self.ast.arg.estimates is not None else Estimates()
 
   @functools.cached_property
   def function_name(self) -> str: return to_function_name(self.name)
 
   @functools.cached_property
-  def runtimevars(self) -> dict[str, int]: return {v.arg[0]: i for i, v in enumerate(self.vars) if v.arg[0] == 'core_id'}
+  def runtimevars(self) -> dict[str, int]: return {v.expr: i for i, v in enumerate(self.vars) if v.expr == 'core_id'}
 
   @property
-  def applied_opts(self) -> tuple[Opt, ...]|None:
-    if self.uops is None: return None
-    assert self.uops[-1].op is Ops.SINK, self.uops[-1].op
-    return self.uops[-1].arg.applied_opts
+  def applied_opts(self) -> tuple[Opt, ...]|None: return self.ast.arg.applied_opts if self.ast.arg is not None else None
 
   def launch_dims(self, var_vals:dict[str, int]):
     global_size = [sym_infer(sz, var_vals) for sz in self.global_size]
@@ -116,7 +113,7 @@ class ProgramSpec:
     ins: list[int] = []
     global_size: list[int] = [1, 1, 1]
     local_size: list[int]|None = [1, 1, 1]
-    for u in uops:
+    for u in sink.toposort():
       if u.op is Ops.DEFINE_VAR: _vars.append(u)
       if u.op is Ops.PARAM: _globals.append(u.arg)
       if u.op in (Ops.STORE, Ops.LOAD):
@@ -150,7 +147,8 @@ class Renderer:
   pre_matcher: PatternMatcher|None = None
   extra_matcher: PatternMatcher|None = None
   code_for_op: dict[Ops, Callable] = {}
-  compiler: Compiler|None = None
+
+  compiler: Compiler = Compiler()
 
   def __reduce__(self): return self.__class__, ()
   def render(self, uops:list[UOp]) -> str: raise NotImplementedError("needs a renderer")

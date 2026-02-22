@@ -385,5 +385,4 @@ class LSTMCell:
     i, f, g, o = gates.chunk(4, dim=1)
     i, f, g, o = i.sigmoid(), f.sigmoid(), g.tanh(), o.sigmoid()
     new_c = f * hc[1] + i * g
-    new_h = o * new_c.tanh()
-    return (new_h.contiguous(), new_c.contiguous())
+    return o * new_c.tanh(), new_c

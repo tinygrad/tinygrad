@@ -172,7 +172,7 @@ function formatCycles(cycles) {
   const M = Math.floor(cycles / 1e6), K = Math.floor((cycles % 1e6) / 1e3), s = Math.round(cycles % 1e3);
   const parts = [];
   if (M) parts.push(`${M}M`);
-  if (K || (!M && s)) parts.push(`${K}K`);
+  if (K) parts.push(`${K}K`);
   if (s || (!M && !K)) parts.push(`${s}`);
   return parts.join(" ");
 }
@@ -184,14 +184,17 @@ const WAVE_COLORS = {VALU:"#ffffc0", SALU:"#cef263", LOAD:"#ffc0c0", STORE:"#4fa
 const waveColor = (op) => {
   const cat = op.includes("VALU") || op === "VINTERP" ? "VALU" : op.includes("SALU") ? "SALU" : op.includes("VMEM") ? "VMEM"
             : op.includes("LOAD") || op === "SMEM" ? "LOAD" : op.includes("STORE") ? "STORE" : op;
-  ret = WAVE_COLORS[cat] ?? "#ffffff";
+  let ret = WAVE_COLORS[cat] ?? "#ffffff";
   if (op.includes("OTHER_") || op.includes("_ALT")) { ret = darkenHex(ret, 75) }
+  if (op.includes("LDS_")) { ret = darkenHex(ret, 25) }
   return ret
 };
 const colorScheme = {TINY:new Map([["Schedule","#1b5745"],["get_program","#1d2e62"],["compile","#63b0cd"],["DEFAULT","#354f52"]]),
   DEFAULT:["#2b2e39", "#2c2f3a", "#31343f", "#323544", "#2d303a", "#2e313c", "#343746", "#353847", "#3c4050", "#404459", "#444862", "#4a4e65"],
   BUFFER:["#342483", "#3E2E94", "#4938A4", "#5442B4", "#5E4CC2", "#674FCA"], SIMD:new Map([["OCC", "#101725"], ["INST", "#0A2042"]]),
-  WAVE:waveColor, VMEMEXEC:waveColor, ALUEXEC:waveColor}
+  GPC:new Map([["NONE","#1a7a2e"],["MEMORY_DEPENDENCY","#8b1a00"],["EXEC_DEPENDENCY","#006b6b"],["INST_FETCH","#7a7a00"],["SYNC","#6b006b"],
+    ["PIPE_BUSY","#7a4a00"],["MEMORY_THROTTLE","#5c0000"],["CONSTANT_MEMORY","#1a3d7a"],["NOT_SELECTED","#2e2e3a"],["OTHER","#4a4a55"],
+    ["SLEEPING","#1a1a2a"],["DEFAULT","#3a3a45"]]), WAVE:waveColor, VMEMEXEC:waveColor, ALUEXEC:waveColor}
 const cycleColors = (lst, i) => lst[i%lst.length];
 
 const rescaleTrack = (source, tid, k) => {
@@ -234,7 +237,11 @@ function selectShape(key) {
 
 const Modes = {0:'read', 1:'write', 2:'write+read'};
 
-function getMetadata(key) {
+function setFocus(key) {
+  if (key !== focusedShape) {
+    saveToHistory({ shape:focusedShape });
+    focusedShape = key; d3.select("#timeline").call(canvasZoom.transform, zoomLevel);
+  }
   const { eventType, e } = selectShape(key);
   const html = d3.create("div").classed("info", true);
   if (eventType === EventTypes.EXEC) {
@@ -246,14 +253,14 @@ function getMetadata(key) {
     for (const b of e.arg.bufs.sort((a, b) => a.num - b.num)) {
       group.append("p").text(`${Modes[b.mode]}@data${b.num} ${formatUnit(b.nbytes, 'B')}`).style("cursor", "pointer").on("click", () => {
         const row = document.getElementById(b.k); if (!isExpanded(row)) { row.click(); }
-        focusShape(b.key);
+        setFocus(b.key);
       });
     }
     if (e.arg.ctx != null) {
       const i = e.arg.ctx; s = e.arg.step;
       html.append("a").text(ctxs[i+1].steps[s].name).on("click", () => switchCtx(i, s));
-      const prgSrc = ctxs[i+1].steps.findIndex(s => s.name === "View Program");
-      if (prgSrc !== -1) html.append("a").text("View program").on("click", () => switchCtx(i, prgSrc));
+      const prgSrc = ctxs[i+1].steps.findIndex(s => s.name === "View Source");
+      if (prgSrc !== -1) html.append("a").text("View Source").on("click", () => switchCtx(i, prgSrc));
     }
   }
   if (eventType === EventTypes.BUF) {
@@ -267,16 +274,10 @@ function getMetadata(key) {
       const p = kernels.append("p").append(() => colored(`[${u}] ${repr} ${Modes[mode]}@data${num}`));
       const shapeInfo = selectShape(shape).e?.arg?.tooltipText?.split("\n");
       if (shapeInfo?.length > 5) p.append("span").text(" "+shapeInfo[5]);
-      if (shape != null) p.style("cursor", "pointer").on("click", () => focusShape(shape));
+      if (shape != null) p.style("cursor", "pointer").on("click", () => setFocus(shape));
     }
   }
-  return html.node();
-}
-
-function focusShape(shape) {
-  saveToHistory({ shape:focusedShape });
-  focusedShape = shape; d3.select("#timeline").call(canvasZoom.transform, zoomLevel);
-  return metadata.replaceChildren(getMetadata(focusedShape));
+  return metadata.replaceChildren(html.node());
 }
 
 const EventTypes = { EXEC:0, BUF:1 };
@@ -286,7 +287,7 @@ async function renderProfiler(path, unit, opts) {
   // support non realtime x axis units
   formatTime = unit === "realtime" ? formatMicroseconds : formatCycles;
   if (data?.path !== path) { data = {tracks:new Map(), axes:{}, path, first:null}; focusedDevice = null; focusedShape = null; }
-  metadata.replaceChildren(getMetadata(focusedShape));
+  setFocus(focusedShape);
   // layout once!
   if (data.tracks.size !== 0) return updateProgress(Status.COMPLETE);
   const profiler = d3.select("#profiler").html("");
@@ -352,7 +353,11 @@ async function renderProfiler(path, unit, opts) {
           colorMap.set(colorKey, d3.rgb(color));
         }
         const fillColor = colorMap.get(colorKey).brighter(0.3*depth).toString();
-        const label = parseColors(e.name).map(({ color, st }) => ({ color, st, width:ctx.measureText(st).width }));
+        const label = parseColors(e.name).flatMap(({ color, st }) => {
+          const parts = [];
+          for (let i=0; i<st.length; i+=4) { const part = st.slice(i, i+4); parts.push({ color, st:part, width:ctx.measureText(part).width }); }
+          return parts;
+        });
         let shapeRef = e.ref;
         if (shapeRef != null) { ref = {ctx:e.ref, step:0}; shapeRef = ref; }
         else if (ref != null) {
@@ -370,7 +375,7 @@ async function renderProfiler(path, unit, opts) {
         // tiny device events go straight to the rewrite rule
         const key = k.startsWith("TINY") ? null : `${k}-${j}`;
         const labelHTML = label.map(l=>`<span style="color:${l.color}">${l.st}</span>`).join("");
-        const arg = { tooltipText:labelHTML+"\n"+formatTime(e.dur)+(e.info != null ? "\n"+e.info : ""), bufs:[], key,
+        const arg = { tooltipText:labelHTML+" N:"+shapes.length+"\n"+formatTime(e.dur)+(e.info != null ? "\n"+e.info : ""), bufs:[], key,
                       ctx:shapeRef?.ctx, step:shapeRef?.step };
         if (e.key != null) shapeMap.set(e.key, key);
         // offset y by depth
@@ -526,6 +531,7 @@ async function renderProfiler(path, unit, opts) {
     drawLine(ctx, xscale.range(), [0, 0]);
     let lastLabelEnd = -Infinity;
     for (const tick of xscale.ticks()) {
+      if (!Number.isInteger(tick)) continue;
       const x = xscale(tick);
       drawLine(ctx, [x, x], [0, tickSize]);
       const labelX = x+ctx.lineWidth+2;
@@ -600,7 +606,7 @@ async function renderProfiler(path, unit, opts) {
     e.preventDefault();
     const foundRect = findRectAtPosition(e.clientX, e.clientY);
     if (foundRect?.step != null && (foundRect?.key == null || e.type == "dblclick")) { return switchCtx(foundRect.ctx, foundRect.step); }
-    if (foundRect?.key != focusedShape) { focusShape(foundRect?.key); }
+    if (foundRect?.key != focusedShape) { setFocus(foundRect?.key); }
   }
   canvas.addEventListener("click", clickShape);
   canvas.addEventListener("dblclick", clickShape);
@@ -733,7 +739,7 @@ function saveToHistory(ns) {
 const switchCtx = (newCtx, step) => setState({ expandSteps:true, currentCtx:newCtx+1, currentStep:step ?? 0, currentRewrite:0 });
 
 window.addEventListener("popstate", (e) => {
-  if (e.state?.shape != null) return focusShape(e.state?.shape);
+  if (e.state?.shape != null) return setFocus(e.state?.shape);
   if (e.state != null) setState(e.state);
 });
 
@@ -743,7 +749,8 @@ const createToggle = (id, text) => {
   label.prepend(toggle);
   return { toggle, label };
 }
-const { toggle, label:toggleLabel } = createToggle("show-indexing", "Show indexing (r)");
+const showIndexing = createToggle("show-indexing", "Show indexing (r)");
+const showCallSrc = createToggle("show-call-src", "Show CALL src (c)");
 const showGraph = createToggle("show-graph", "Show graph (g)");
 showGraph.toggle.onchange = () => displaySelection(rect("#graph").width > 0 ? "#custom" : "#graph");
 
@@ -819,7 +826,7 @@ async function main() {
     }
     // timeline with cycles on the x axis
     if (ret instanceof ArrayBuffer) {
-      opts = {heightScale:0.5, hideLabels:true, levelKey:(e) => parseInt(e.name.split(" ")[1].split(":")[1]), colorByName:step.name.includes("PKTS")};
+      opts = {heightScale:0.5, hideLabels:true, levelKey:step.name.includes("PKTS") ? (e) => parseInt(e.name.split(" ")[1].split(":")[1]) : null, colorByName:ckey.includes("pkts")};
       return renderProfiler(ckey, "clk", opts);
     }
     metadata.innerHTML = "";
@@ -865,7 +872,7 @@ async function main() {
     }
     if (ret.ref != null) {
       const disasmIdx = ctxs[ret.ref+1].steps.findIndex(s => s.name === "View Disassembly")
-      metadata.appendChild(d3.create("a").text("View Program Graph").on("click", () => switchCtx(ret.ref, disasmIdx)).node());
+      metadata.appendChild(d3.create("a").text("View Disassembly").on("click", () => switchCtx(ret.ref, disasmIdx)).node());
     }
     if (ret.cols != null) renderTable(root, ret);
     else if (ret.src != null) root.append(() => codeBlock(ret.src, ret.lang));
@@ -893,11 +900,13 @@ async function main() {
   // ** center graph
   const data = ret[currentRewrite];
   const render = (opts) => renderDag({ data, opts }, { recenter:currentRewrite === 0 });
-  render({ showIndexing:toggle.checked });
-  toggle.onchange = (e) => render({ showIndexing:e.target.checked });
+  const getOpts = () => ({ showIndexing:showIndexing.toggle.checked, showCallSrc:showCallSrc.toggle.checked });
+  render(getOpts());
+  showIndexing.toggle.onchange = () => render(getOpts());
+  showCallSrc.toggle.onchange = () => render(getOpts());
   // ** right sidebar metadata
   metadata.innerHTML = "";
-  if (ckey.includes("rewrites")) metadata.appendChild(toggleLabel);
+  if (ckey.includes("rewrites")) metadata.append(showIndexing.label, showCallSrc.label);
   if (step.code_line != null) metadata.appendChild(codeBlock(step.code_line, "python", { loc:step.loc, wrap:true }));
   if (step.trace) {
     const trace = d3.create("pre").append("code").classed("hljs", true);
@@ -1025,7 +1034,9 @@ document.addEventListener("keydown", (event) => {
     document.getElementById("zoom-to-fit-btn").click();
   }
   // r key toggles indexing
-  if (event.key === "r") toggle.click();
+  if (event.key === "r") showIndexing.toggle.click();
+  // c key toggles CALL src
+  if (event.key === "c") showCallSrc.toggle.click();
   // g key toggles graph
   if (event.key === "g") showGraph.toggle.click();
 });

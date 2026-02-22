@@ -70,7 +70,7 @@ class AM_GMC(AM_IP):
     self.trans_futher = self.adev.ip_ver[am.GC_HWIP] < (10, 0, 0)
 
     # mi3xx has 48-bit, others have 44-bit address space
-    self.address_space_mask = (1 << (48 if self.adev.ip_ver[am.GC_HWIP][:2] == (9,4) else 44)) - 1
+    self.address_space_mask = (1 << (48 if self.adev.ip_ver[am.GC_HWIP][:2] in {(9,4), (9,5)} else 44)) - 1
 
     self.memscratch_xgmi_paddr = self.adev.paddr2xgmi(self.adev.mm.palloc(0x1000, zero=False, boot=True))
     self.dummy_page_xgmi_paddr = self.adev.paddr2xgmi(self.adev.mm.palloc(0x1000, zero=False, boot=True))
@@ -174,7 +174,7 @@ class AM_GMC(AM_IP):
   def check_fault(self) -> str|None:
     va = (self.adev.reg('regGCVM_L2_PROTECTION_FAULT_ADDR_HI32').read()<<32) | self.adev.reg('regGCVM_L2_PROTECTION_FAULT_ADDR_LO32').read()
     if self.adev.reg(self.pf_status_reg("GC")).read():
-      return f"GCVM_L2_PROTECTION_FAULT_STATUS: {self.adev.reg(self.pf_status_reg('GC')).read_bitfields()} {va<<12:#x}"
+      return f"am {self.adev.devfmt}: GCVM_L2_PROTECTION_FAULT_STATUS: {self.adev.reg(self.pf_status_reg('GC')).read_bitfields()} {va<<12:#x}"
     return None
 
 class AM_SMU(AM_IP):
@@ -216,6 +216,16 @@ class AM_SMU(AM_IP):
     for clck, vals in self.read_clocks(clks).items():
       with contextlib.suppress(TimeoutError): self._send_msg(self.smu_mod.PPSMC_MSG_SetSoftMinByFreq, clck << 16 | (vals[level]), timeout=20)
       if self.adev.ip_ver[am.GC_HWIP] >= (10,0,0): self._send_msg(self.smu_mod.PPSMC_MSG_SetSoftMaxByFreq, clck << 16 | (vals[level]))
+
+  def _aca_read_reg(self, bank_idx:int, reg_idx:int, ue=True) -> int:
+    msg = self.smu_mod.PPSMC_MSG_McaBankDumpDW if ue else self.smu_mod.PPSMC_MSG_McaBankCeDumpDW
+    return (self._send_msg(msg, (bank_idx << 16) | (reg_idx * 8 + 4), read_back_arg=True) << 32) | \
+            self._send_msg(msg, (bank_idx << 16) | (reg_idx * 8), read_back_arg=True)
+
+  def _aca_read_banks(self, ue=True) -> list[list[int]]:
+    if not hasattr(self.smu_mod, 'PPSMC_MSG_QueryValidMcaCount'): return []
+    count_msg = self.smu_mod.PPSMC_MSG_QueryValidMcaCount if ue else self.smu_mod.PPSMC_MSG_QueryValidMcaCeCount
+    return [[self._aca_read_reg(idx, reg_idx, ue=ue) for reg_idx in range(16)] for idx in range(self._send_msg(count_msg, 0, read_back_arg=True))]
 
   def _smu_cmn_send_msg(self, msg:int, param=0, debug=False):
     (self.adev.mmMP1_SMN_C2PMSG_90 if not debug else self.adev.mmMP1_SMN_C2PMSG_54).write(0) # resp reg
@@ -264,7 +274,8 @@ class AM_GFX(AM_IP):
       self.adev.regGRBM_CNTL.update(read_timeout=0xff, inst=xcc)
       for i in range(0, 16):
         self._grbm_select(vmid=i, inst=xcc)
-        self.adev.regSH_MEM_CONFIG.write(**({'initial_inst_prefetch':3} if self.adev.ip_ver[am.GC_HWIP][0]>=10 else {'retry_disable':1, 'f8_mode':1}),
+        self.adev.regSH_MEM_CONFIG.write(**({'initial_inst_prefetch':3} if self.adev.ip_ver[am.GC_HWIP][0]>=10 else {'retry_disable':1}),
+          **({'f8_mode':1} if self.adev.ip_ver[am.GC_HWIP][:2]==(9,4) else {}),
           address_mode=self.adev.soc.module.SH_MEM_ADDRESS_MODE_64, alignment_mode=self.adev.soc.module.SH_MEM_ALIGNMENT_MODE_UNALIGNED, inst=xcc)
 
         # Configure apertures:
@@ -290,6 +301,7 @@ class AM_GFX(AM_IP):
     self._enable_mec()
 
   def setup_ring(self, ring_addr:int, ring_size:int, rptr_addr:int, wptr_addr:int, eop_addr:int, eop_size:int, idx:int, aql:bool) -> tuple[int, int]:
+    self.adev.has_aql_queue |= aql
     pipe, queue, doorbell = idx // 4, idx % 4, am.AMDGPU_NAVI10_DOORBELL_MEC_RING0
     self._grbm_select(me=1, pipe=pipe, queue=queue, inst=0)
     restore_queue = aql and self.xccs > 1 and self.adev.partial_boot and (self.adev.regCP_HQD_ACTIVE.read(inst=0) & 1)
@@ -459,6 +471,20 @@ class AM_IH(AM_IP):
       self.adev.reg(f"regIH_RB_CNTL{suf}").update(wptr_overflow_clear=0)
 
     self.adev.regIH_RB_RPTR.write(wptr['offset'] % (self.ring_size // 4))
+
+    bif_intr = self.adev.regBIF_BX0_BIF_DOORBELL_INT_CNTL.read_bitfields()
+    athub_err, cntlr_err = bif_intr['ras_athub_err_event_interrupt_status'], bif_intr['ras_cntlr_interrupt_status']
+    if athub_err or cntlr_err:
+      print(f"am {self.adev.devfmt}: fatal hardware error detected: {'RAS_ATHUB_ERR_EVENT ' if athub_err else ''}{'RAS_CNTLR' if cntlr_err else ''}")
+
+      acas = self.adev.smu._aca_read_banks(ue=True) + self.adev.smu._aca_read_banks(ue=False)
+      for regs in acas:
+        acatyp = 'Uncorrectable' if (regs[1] >> 61) & 1 and (regs[1] >> 57) & 1 else 'Correctable'
+        hwname = f'{self.adev.hwid_names.get((regs[5] >> 32) & 0xFFF, "")} ({(regs[5] >> 32) & 0xFFF:#03x})'
+        print(f"am {self.adev.devfmt}: {acatyp} ACA: {hwname} mcatype={(regs[5] >> 48) & 0xFFFF:#06x} regs=[{', '.join(f'{r:#x}' for r in regs)}]")
+
+      self.adev.regBIF_BX0_BIF_DOORBELL_INT_CNTL.write(ras_cntlr_interrupt_clear=cntlr_err, ras_athub_err_event_interrupt_clear=athub_err)
+      self.adev.is_err_state = True
 
 class AM_SDMA(AM_IP):
   def init_sw(self): self.sdma_reginst, self.sdma_name = [], "F32" if self.adev.ip_ver[am.SDMA0_HWIP] < (7,0,0) else "MCU"

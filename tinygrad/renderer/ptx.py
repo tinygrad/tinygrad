@@ -28,7 +28,8 @@ asm_for_op: dict[Ops, Callable] = {
   Ops.OR: lambda d,a,b,dt, name: f"or.pred {d}, {a}, {b};" if dt == dtypes.bool else f"or.b{name[1:]} {d}, {a}, {b};",
   Ops.IDIV: lambda d,a,b,dt,name: f"div.{name} {d}, {a}, {b};", Ops.MOD: lambda d,a,b,dt,name: f"rem.{name} {d}, {a}, {b};",
   Ops.MAX: lambda d,a,b,dt,name: f"max.{name} {d}, {a}, {b};", Ops.CMPEQ: lambda d,a,b,dt,name: f"setp.eq.{name} {d}, {a}, {b};",
-  Ops.CMPLT: lambda d,a,b,dt,name: f"setp.lt.{name} {d}, {a}, {b};", Ops.CMPNE: lambda d,a,b,dt,name: f"setp.ne.{name} {d}, {a}, {b};",
+  Ops.CMPLT: lambda d,a,b,dt,name: f"setp.lt.{name} {d}, {a}, {b};",
+  Ops.CMPNE: lambda d,a,b,dt,name: f"setp.{'neu' if dtypes.is_float(dt) else 'ne'}.{name} {d}, {a}, {b};",
   Ops.MULACC: lambda d,a,b,c,dt,name: f"{'fma.rn' if dtypes.is_float(dt) else 'mad.lo'}.{name} {d}, {a}, {b}, {c};",
   Ops.WHERE: lambda d,a,b,c,dt,name: [f"@{a} mov.{name} {d}, {b};", f"@!{a} mov.{name} {d}, {c};"] if dt == dtypes.bool else \
     f"selp.{'b16' if name == 'f16' else name} {d}, {b}, {c}, {a};"
@@ -132,7 +133,7 @@ string_rewrite = PatternMatcher([
   (UPat(Ops.ENDIF, name="x"), lambda ctx, x: f"IF_{ctx.r[x.src[0].src[0]][1:]}_{ctx.uops.index(x.src[0])}:"),
   (UPat(Ops.WMMA, name="x"), lambda ctx, x: list(render_wmma(ctx, x))),
   (UPat(Ops.BARRIER), lambda ctx: ctx.barrier),
-  (UPat(Ops.DEFINE_VAR, name="x"), lambda ctx, x: f"ld.param.{ctx.mem_types[x.dtype]} {ctx.r[x]}, [{x.arg[0]}+0];"),
+  (UPat(Ops.DEFINE_VAR, name="x"), lambda ctx, x: f"ld.param.{ctx.mem_types[x.dtype]} {ctx.r[x]}, [{x.expr}+0];"),
 ])
 
 class PTXRenderer(Renderer):
@@ -142,9 +143,11 @@ class PTXRenderer(Renderer):
   tc_sm80 = [x for x in tc.cuda_sm80 if x.dtype_in in [dtypes.half, dtypes.float]]
   code_for_op = asm_for_op
   extra_matcher = ptx_matcher
-  def __init__(self, arch:str, device="CUDA"):
-    self.device, self.arch, arch_ver = device, arch, int(arch[3:])
-    self.tensor_cores = PTXRenderer.tc_sm80 if arch_ver >= 80 else tc.cuda_sm75 if arch_ver >= 75 else []
+  def __init__(self, arch:str, device="NV"):
+    from tinygrad.runtime.support.compiler_cuda import NVPTXCompiler, PTXCompiler
+    from tinygrad.runtime.support.hcq import MOCKGPU
+    self.compiler, self.device, self.arch = (PTXCompiler if bool(MOCKGPU) or device == "CUDA" else NVPTXCompiler)(arch), device, arch
+    self.tensor_cores = PTXRenderer.tc_sm80 if (ver:=int(arch[3:])) >= 80 else tc.cuda_sm75 if ver >= 75 else []
   def __reduce__(self): return self.__class__, (self.arch, self.device)
 
   # language options
@@ -216,7 +219,7 @@ class PTXRenderer(Renderer):
         continue
       if u.op is Ops.INDEX: continue  # other index we can skip
       if u.op is Ops.SPECIAL: r[u] = "%" + u.arg
-      elif u.op is Ops.DEFINE_VAR: bufs.append((u.arg[0], u.dtype))
+      elif u.op is Ops.DEFINE_VAR: bufs.append((u.expr, u.dtype))
       elif u.op is Ops.LOAD:
         assert u.src[0].dtype == dtypes.int64, "load isn't int64"
         r[u] = [ssa('val', dtype=self.types[u.dtype.scalar()]) for _ in range(u.dtype.count)] if u.dtype.count > 1 else ssa('val', u)

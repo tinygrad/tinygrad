@@ -1170,7 +1170,6 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
     return ret.reshape(*x_shape[:batch_dims], *i_shape[batch_dims:-1], *ret.shape[indices.ndim-1:])
   def ScatterND(x:Tensor, indices:Tensor, updates:Tensor, reduction:Literal["none", "add", "mul", "max", "min"]='none'):
     assert updates.shape == indices.shape[:-1] + x.shape[cast(int, indices.shape[-1]):]
-    x = x.contiguous()
     for index, u in zip(indices.split(1, 0), updates.split(1, 0)):
       i = tuple(idx.squeeze(-1) for idx in index.squeeze(0).split(1, -1))
       u = u.squeeze(0)
