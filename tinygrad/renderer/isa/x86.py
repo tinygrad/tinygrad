@@ -392,7 +392,7 @@ isel_matcher = PatternMatcher([
    x.replace(tag=ctx.vreg(x.tag)) if isinstance(x.tag, tuple) else None),
   # allocate virtual register to X86Op without special constraints
   (UPat(Ops.INS, name="x"), lambda ctx,x: x.replace(tag=ctx.vreg(XMM if x.dtype in dtypes.floats or x.dtype.count > 1 else WGPR)) \
-   if not isinstance(x.tag, Register) and x.arg != X86Ops.IMM and x.dtype != dtypes.void else None),
+   if not isinstance(x.tag, Register) and x.arg not in (X86Ops.IMM, X86Ops.FRAME_INDEX) and x.dtype != dtypes.void else None),
 ])
 
 # ***** post register allocation *****
