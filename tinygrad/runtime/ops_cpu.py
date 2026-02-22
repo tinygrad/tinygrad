@@ -1,6 +1,6 @@
 from __future__ import annotations
 import platform, sys, ctypes, functools, time, mmap, threading, queue
-from tinygrad.helpers import to_mv, OSX, WIN, mv_address, wait_cond, suppress_finalizing, unwrap, data64_le
+from tinygrad.helpers import to_mv, OSX, WIN, mv_address, wait_cond, suppress_finalizing, unwrap, data64_le, getenv
 from tinygrad.helpers import CPU_CC, CPU_LVP, CPU_LLVM
 from tinygrad.device import BufferSpec, DMACPURef, CompilerSet
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, HWQueue, HCQArgsState, HCQSignal, HCQProgram, MMIOInterface
@@ -13,7 +13,8 @@ from tinygrad.uop.ops import sint
 
 class CPUSignal(HCQSignal):
   def _sleep(self, time_spent_since_last_sleep_ms:int):
-    if self.is_timeline and self.owner is not None: self.owner.tasks.join()
+    if self.is_timeline and self.owner is not None:
+      with self.owner.tasks.all_tasks_done: self.owner.tasks.all_tasks_done.wait(timeout=1)
 
 class CPUWorker(threading.Thread):
   def __init__(self, dev, tasks, thread_id):
@@ -29,13 +30,14 @@ class CPUWorker(threading.Thread):
   def run(self):
     while True:
       cmd_iter = iter(self.tasks.get())
-      for cmd in cmd_iter:
-        threads, args_cnt = next(cmd_iter), next(cmd_iter)
-        args = [next(cmd_iter) for _ in range(args_cnt)]
-        for th in range(threads - 1): self.push_task(th, cmd, args)
-        cmd(self.thread_id, *args)
-        for th in range(threads - 1): self.pool[th].join()
-      self.tasks.task_done()
+      try:
+        for cmd in cmd_iter:
+          threads, args_cnt = next(cmd_iter), next(cmd_iter)
+          args = [next(cmd_iter) for _ in range(args_cnt)]
+          for th in range(threads - 1): self.push_task(th, cmd, args)
+          cmd(self.thread_id, *args)
+          for th in range(threads - 1): self.pool[th].join()
+      finally: self.tasks.task_done()
 
 class CPUComputeQueue(HWQueue):
   def _exec(self, tid, prg, bufs, *args):
@@ -43,7 +45,8 @@ class CPUComputeQueue(HWQueue):
     if 'core_id' in prg.runtimevars: vals[prg.runtimevars['core_id']] = tid
     prg.fxn(*map(ctypes.c_uint64, args[:bufs]), *map(ctypes.c_int64 if platform.machine() == "arm64" else ctypes.c_int32, vals))
   def _signal(self, tid, signal_addr, value): to_mv(signal_addr, 4).cast('I')[0] = value
-  def _wait(self, tid, signal_addr, value): wait_cond(lambda: to_mv(signal_addr, 4).cast('I')[0] >= value, timeout_ms=60000)
+  def _wait(self, tid, signal_addr, value):
+    wait_cond(lambda: to_mv(signal_addr, 4).cast('I')[0] >= value, timeout_ms=getenv("HCQDEV_WAIT_TIMEOUT_MS", 30000))
   def _timestamp(self, tid, timestamp_addr): to_mv(timestamp_addr, 8).cast('Q')[0] = time.perf_counter_ns()
   def cmd(self, cmd, *args, threads=1):
     self.q(cmd, threads, len(args), *args)
@@ -132,6 +135,15 @@ class CPUAllocator(HCQAllocator):
 class CPUDevice(HCQCompiled):
   def __init__(self, device:str=""):
     self.tasks:queue.Queue = queue.Queue()
-    CPUWorker(self, self.tasks, thread_id=0).start()
+    self.worker = CPUWorker(self, self.tasks, thread_id=0)
+    self.worker.start()
     compilers = CompilerSet([(ClangJITRenderer, None), (CPULLVMRenderer, CPU_LLVM), (LVPRenderer, CPU_LVP)], ctrl_var=CPU_CC)
     super().__init__(device, CPUAllocator(self), compilers, functools.partial(CPUProgram, self), CPUSignal, CPUComputeQueue)
+
+  def on_device_hang(self):
+    self.tasks = queue.Queue()
+    self.worker = CPUWorker(self, self.tasks, thread_id=0)
+    self.worker.start()
+    self.timeline_signal.value = self.timeline_value - 1
+    self.error_state = None
+    raise RuntimeError("CPU device hang detected")
