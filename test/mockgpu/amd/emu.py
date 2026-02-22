@@ -1196,6 +1196,79 @@ def _compile_vop3sd(inst: ir3.VOP3SD | ir4.VOP3SD | irc.VOP3SD, ctx: _Ctx) -> UO
   else:
     return ctx.compile_vop_pcode(inst.op, srcs, lane, vdst_reg, exec_mask, sdst_reg=inst.sdst.offset)
 
+def _compile_mfma(inst: irc.VOP3P, ctx: _Ctx) -> UOp:
+  """CDNA MFMA MxNxK matrix multiply-accumulate (16x16 and 32x32). Uses temp arrays to avoid aliasing."""
+  op_name = _op_name(inst)
+  exec_mask = ctx.rexec()
+  vdst_reg = ctx.inst_field(type(inst).vdst)
+  src0_r = ctx.inst_field(type(inst).src0) - _c(256)
+  src1_r = ctx.inst_field(type(inst).src1) - _c(256)
+  src2_off = ctx.inst_field(type(inst).src2)
+  is_bf16 = 'BF16' in op_name
+  is_fp8 = 'FP8' in op_name or 'F8' in op_name
+  is_i8 = 'I8' in op_name
+  is_int_out = op_name.split('_')[2] == 'I32'
+  m = re.search(r'(\d+)X(\d+)X(\d+)', op_name)
+  assert m is not None, f"MFMA op name doesn't contain MxNxK dimensions: {op_name}"
+  M, N, K = int(m.group(1)), int(m.group(2)), int(m.group(3))
+  assert (M, N) in ((16, 16), (32, 32)), f"unsupported MFMA dimensions: {M}x{N}"
+  n_grps, k_per_grp, n_out_regs = 64 // M, K // (64 // M), (M * N) // 64
+  vpg = 4 if (is_i8 or is_fp8) else 2
+  if not is_i8 and not is_int_out: cvt = _FUNCS['bf16_to_f32'] if is_bf16 else _FUNCS['f16_to_f32']
+  n_elems = M * K
+  tmp_dtype = dtypes.int32 if is_int_out else dtypes.float32
+  src2_is_vgpr = src2_off >= _c(256)
+  src2_r = src2_off - _c(256)
+  acc_scalar = ctx.rsgpr_dyn(src2_off, src2_is_vgpr.ne(True)).bitcast(dtypes.int32 if is_int_out else dtypes.float32)
+
+  b_off = UOp.const(dtypes.int, n_elems)
+  tmp = UOp(Ops.DEFINE_LOCAL, tmp_dtype.ptr(n_elems * 2, addrspace=AddrSpace.LOCAL), arg=(n_elems * 2,))
+
+  read_lane = ctx.range()
+  read_row = read_lane % UOp.const(dtypes.int, M)
+  read_grp = read_lane // UOp.const(dtypes.int, M)
+
+  def _mfma_extract(raw, sub_idx):
+    bits = 8 if (is_i8 or is_fp8) else 16
+    v = (raw >> UOp.const(dtypes.uint32, sub_idx * bits)) & UOp.const(dtypes.uint32, (1 << bits) - 1)
+    if is_i8: return v.cast(dtypes.uint8).cast(dtypes.int8).cast(dtypes.int32)
+    return v.cast(dtypes.uint32) if is_fp8 else cvt(v)
+
+  read_stores = []
+  for kl in range(k_per_grp):
+    reg_idx, sub_idx = kl // vpg, kl % vpg
+    a_f = _mfma_extract(ctx.rvgpr_dyn(src0_r + _c(reg_idx), read_lane), sub_idx)
+    b_f = _mfma_extract(ctx.rvgpr_dyn(src1_r + _c(reg_idx), read_lane), sub_idx)
+    k_idx = read_grp * UOp.const(dtypes.int, k_per_grp) + UOp.const(dtypes.int, kl)
+    a_idx = read_row * UOp.const(dtypes.int, K) + k_idx
+    b_idx = b_off + read_row * UOp.const(dtypes.int, K) + k_idx
+    read_stores.extend([tmp.index(a_idx).store(a_f), tmp.index(b_idx).store(b_f)])
+
+  read_phase = UOp.group(*read_stores).end(read_lane)
+
+  tmp2 = tmp.after(read_phase)
+  compute_lane = ctx.range()
+
+  # ISA output mapping: 16x16/32x32 both use lane→col, VGPR→row (interleaved for 32x32)
+  col = compute_lane % UOp.const(dtypes.int, M)
+  grp = compute_lane // UOp.const(dtypes.int, M)
+  compute_stores = []
+  for out_reg in range(n_out_regs):
+    acc_v = ctx.raccvgpr_dyn(src2_r + _c(out_reg), compute_lane, src2_is_vgpr)
+    acc_v = acc_v.bitcast(dtypes.int32 if is_int_out else dtypes.float32)
+    acc = src2_is_vgpr.where(acc_v, acc_scalar)
+    # ISA row = (8*(GPR//4) % M) + 4*floor(lane/M) + GPR%4
+    row_base = (8 * (out_reg // 4) % M) + (out_reg % 4)
+    row = grp * UOp.const(dtypes.int, 4) + UOp.const(dtypes.int, row_base)
+    for k in range(K):
+      acc = acc + tmp2.index(row * UOp.const(dtypes.int, K) + UOp.const(dtypes.int, k)) \
+                * tmp2.index(b_off + col * UOp.const(dtypes.int, K) + UOp.const(dtypes.int, k))
+    out_val = acc.bitcast(dtypes.uint32) if not is_int_out else acc.cast(dtypes.uint32)
+    compute_stores.append(ctx.waccvgpr_dyn(vdst_reg + _c(out_reg), compute_lane, out_val, exec_mask))
+
+  compute_phase = UOp.group(*compute_stores).end(compute_lane)
+  return UOp.sink(read_phase, compute_phase, *ctx.inc_pc())
+
 def _compile_wmma(inst: ir3.VOP3P | ir4.VOP3P | irc.VOP3P, ctx: _Ctx) -> UOp:
   op_name = _op_name(inst)
   exec_mask = ctx.rexec()
@@ -1252,6 +1325,7 @@ def _compile_wmma(inst: ir3.VOP3P | ir4.VOP3P | irc.VOP3P, ctx: _Ctx) -> UOp:
 def _compile_vop3p(inst: ir3.VOP3P | ir4.VOP3P | irc.VOP3P, ctx: _Ctx) -> UOp:
   op_name = _op_name(inst)
   if 'WMMA' in op_name and ('16X16X16_F16' in op_name or '16X16X16_BF16' in op_name): return _compile_wmma(inst, ctx)
+  if 'MFMA' in op_name and isinstance(inst, irc.VOP3P): return _compile_mfma(inst, ctx)
 
   ops = inst.operands
   src0_is_acc = ops.get('src0', (None, None, None))[2] in (OpType.OPR_SRC_ACCVGPR, OpType.OPR_ACCVGPR)
