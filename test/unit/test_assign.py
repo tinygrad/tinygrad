@@ -233,7 +233,6 @@ class TestAssign(unittest.TestCase):
     np.testing.assert_equal(b0.numpy(), 128)
     np.testing.assert_equal(b1.numpy(), 608)
 
-  @unittest.skip("TODO: bring this assert back")
   def test_crossunder_assign(self):
     # NOTE: should *not* raise AssertionError from numpy
     with self.assertRaisesRegex(RuntimeError, "cycle"):
@@ -283,26 +282,6 @@ class TestAssign(unittest.TestCase):
     GlobalCounters.reset()
     b.assign(a.contiguous()).realize()
     self.assertEqual(GlobalCounters.kernel_count, 2)
-
-  # TODO: assigns into views of unrealized COPY/CONTIGUOUS are silently dropped
-  # because _pending_assigns only keys on BUFFER, not COPY or CONTIGUOUS
-  def test_assign_to_unrealized_copy_view(self):
-    t = Tensor.zeros(2,2).to("CPU:0").contiguous().realize()
-    c = t.to("CPU:1")  # unrealized COPY
-    self.assertIs(c.uop.base.op, Ops.COPY)
-    c[:, 1:2].assign(Tensor.ones(2,1).to("CPU:1").contiguous().realize())
-    result = c.tolist()
-    # TODO: should be [[0,1],[0,1]]
-    self.assertListEqual(result, [[0,0],[0,0]])
-
-  def test_assign_to_unrealized_contiguous_view(self):
-    t = Tensor([[1,2],[3,4]]).float().contiguous().realize()
-    c = t.permute(1,0).contiguous()  # unrealized CONTIGUOUS
-    self.assertIs(c.uop.base.op, Ops.CONTIGUOUS)
-    c[:, 1:2].assign(Tensor.ones(2,1).contiguous().realize())
-    result = c.tolist()
-    # TODO: should be [[1,1],[2,1]]
-    self.assertListEqual(result, [[1,3],[2,4]])
 
   def test_permuted_assignment(self):
     a = Tensor(np.arange(N*N, dtype=np.float32)).reshape(N,N)
@@ -812,6 +791,80 @@ class TestAssignOrdering(unittest.TestCase):
     buf[1:2].assign(Tensor.full((1,), 2.0))
     buf[2:3].assign(Tensor.full((1,), 3.0))
     self.assertEqual(buf.sum().realize().item(), 6.0)
+
+# TODO: assigns into views of unrealized non-BUFFER bases are silently dropped
+class TestAssignToUnrealizedView(unittest.TestCase):
+  def test_copy(self):
+    t = Tensor.zeros(2,2, dtype=dtypes.int).to("CPU:0").contiguous().realize()
+    c = t.to("CPU:1")  # unrealized COPY
+    self.assertIs(c.uop.base.op, Ops.COPY)
+    c[:, 1:2].assign(Tensor.ones(2,1, dtype=dtypes.int).to("CPU:1").contiguous().realize())
+    # TODO: should be [[0,1],[0,1]]
+    self.assertEqual(c.tolist(), [[0,0],[0,0]])
+
+  def test_contiguous(self):
+    t = Tensor([[1,2],[3,4]]).contiguous().realize()
+    c = t.permute(1,0).contiguous()  # unrealized CONTIGUOUS
+    self.assertIs(c.uop.base.op, Ops.CONTIGUOUS)
+    c[:, 1:2].assign(Tensor.ones(2,1, dtype=dtypes.int).contiguous().realize())
+    # TODO: should be [[1,1],[2,1]]
+    self.assertEqual(c.tolist(), [[1,3],[2,4]])
+
+  def test_contiguous_backward(self):
+    t = Tensor([[1,2],[3,4]]).contiguous().realize()
+    cb = t.contiguous_backward()  # unrealized CONTIGUOUS_BACKWARD
+    self.assertIs(cb.uop.base.op, Ops.CONTIGUOUS_BACKWARD)
+    cb[:, 1:2].assign(Tensor.ones(2,1, dtype=dtypes.int).contiguous().realize())
+    # TODO: should be [[1,1],[3,1]]
+    self.assertEqual(cb.tolist(), [[1,2],[3,4]])
+
+  def test_detach_copy(self):
+    t = Tensor.zeros(2,2, dtype=dtypes.int).to("CPU:0").contiguous().realize()
+    d = t.to("CPU:1").detach()  # DETACH(unrealized COPY)
+    self.assertIs(d.uop.base.op, Ops.COPY)
+    d[:, 1:2].assign(Tensor.ones(2,1, dtype=dtypes.int).to("CPU:1").contiguous().realize())
+    # TODO: should be [[0,1],[0,1]]
+    self.assertEqual(d.tolist(), [[0,0],[0,0]])
+
+  def test_detach_contiguous(self):
+    t = Tensor([[1,2],[3,4]]).contiguous().realize()
+    d = t.permute(1,0).contiguous().detach()  # DETACH(unrealized CONTIGUOUS)
+    self.assertIs(d.uop.base.op, Ops.CONTIGUOUS)
+    d[:, 1:2].assign(Tensor.ones(2,1, dtype=dtypes.int).contiguous().realize())
+    # TODO: should be [[1,1],[2,1]]
+    self.assertEqual(d.tolist(), [[1,3],[2,4]])
+
+  def test_alu(self):
+    a = Tensor([1,2,3,4]).contiguous().realize()
+    b = Tensor([5,6,7,8]).contiguous().realize()
+    c = a + b  # unrealized ADD
+    self.assertIs(c.uop.base.op, Ops.ADD)
+    c[:2].assign(Tensor([99, 99]).realize())
+    # TODO: silently dropped, should be [99,99,10,12] or raise an error
+    self.assertEqual(c.tolist(), [6,8,10,12])
+
+  def test_reduce(self):
+    a = Tensor([[1,2],[3,4]]).contiguous().realize()
+    r = a.sum(axis=0)  # unrealized REDUCE_AXIS
+    self.assertIs(r.uop.base.op, Ops.REDUCE_AXIS)
+    r[:1].assign(Tensor([99]).realize())
+    # TODO: silently dropped, should be [99,6] or raise an error
+    self.assertEqual(r.tolist(), [4,6])
+
+  def test_cast(self):
+    a = Tensor([1,2,3,4]).contiguous().realize()
+    c = a.float()  # unrealized CAST
+    self.assertIs(c.uop.base.op, Ops.CAST)
+    c[:2].assign(Tensor([99, 99], dtype=dtypes.float).realize())
+    # TODO: silently dropped, should be [99,99,3,4] or raise an error
+    self.assertEqual(c.tolist(), [1,2,3,4])
+
+  def test_const(self):
+    c = Tensor(5).reshape(1, 1).expand(2, 2)
+    self.assertIs(c.uop.base.op, Ops.CONST)
+    c[:, 1:2].assign(Tensor.ones(2,1, dtype=dtypes.int).contiguous().realize())
+    # TODO: silently dropped, should be [[5,1],[5,1]] or raise an error
+    self.assertEqual(c.tolist(), [[5,5],[5,5]])
 
 if __name__ == "__main__":
   unittest.main()
