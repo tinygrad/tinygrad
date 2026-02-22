@@ -268,7 +268,6 @@ class Tensor(OpMixin):
     assert len(var_vals) == 0
     return schedule
 
-  @disable_gc()
   def realize(self, *lst:Tensor, do_update_stats=True) -> Tensor:
     """Triggers the computation needed to create these Tensor(s)."""
     # collect and schedule pending assigns, then schedule main computation, run everything once
