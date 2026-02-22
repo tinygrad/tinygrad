@@ -1622,6 +1622,18 @@ def _compile_mem_op(inst: ir3.DS|ir3.FLAT|ir3.GLOBAL|ir3.SCRATCH|ir4.DS|ir4.VFLA
     stores = [ctx.vgpr.index(val[0].cast(dtypes.int)).store(val[1].cast(dtypes.uint32)) for dest, val in assigns if dest.startswith('VGPR[')]
     return UOp.sink(*stores, *ctx.inc_pc())
 
+  if isinstance(inst, irc.DS) and op_name in ('DS_WRITE_B128', 'DS_WRITE_B96', 'DS_READ_B128', 'DS_READ_B96'):
+    is_read, ndwords = 'READ' in op_name, 4 if 'B128' in op_name else 3
+    lane = ctx.range()
+    active = _lane_active(exec_mask, lane)
+    lds_addr = active.where(ctx.rvgpr_dyn(addr_reg, lane) + offset, _c(0))
+    stores = []
+    for i in range(ndwords):
+      lds_idx = mem.index(((lds_addr + _c(i * 4)) >> _c(2)).cast(dtypes.int))
+      if is_read: stores.append(ctx.wvgpr_dyn(vdst_reg + _c(i), lane, active.where(lds_idx, ctx.rvgpr_dyn(vdst_reg + _c(i), lane)), exec_mask))
+      else: stores.append(lds_idx.store(active.where(ctx.rvgpr_dyn(vdata_reg + _c(i), lane), lds_idx.load())))
+    return UOp.sink(UOp.group(*stores).end(lane), *ctx.inc_pc())
+
   def _mubuf_srd(lane: UOp):
     """Parse MUBUF buffer descriptor (SRD) and compute byte_offset, base_addr, num_records."""
     srd0 = ctx.rsgpr_dyn(srsrc_reg).cast(dtypes.uint64)
