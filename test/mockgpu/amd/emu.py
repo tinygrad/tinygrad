@@ -1552,19 +1552,22 @@ def _compile_vopd(inst: ir3.VOPD | ir4.VOPD, ctx: _Ctx) -> UOp:
   return UOp.sink(UOp.group(*all_stores).end(lane), *ctx.inc_pc())
 
 def _compile_mem_op(inst: ir3.DS|ir3.FLAT|ir3.GLOBAL|ir3.SCRATCH|ir4.DS|ir4.VFLAT|ir4.VGLOBAL|ir4.VSCRATCH
-                    |irc.DS|irc.FLAT|irc.GLOBAL|irc.SCRATCH, ctx: _Ctx) -> UOp:
-  """Unified memory operation compiler for DS, FLAT, GLOBAL, SCRATCH."""
+                    |irc.DS|irc.FLAT|irc.GLOBAL|irc.SCRATCH|irc.MUBUF, ctx: _Ctx) -> UOp:
+  """Unified memory operation compiler for DS, FLAT, GLOBAL, SCRATCH, MUBUF."""
   exec_mask, op_name = ctx.rexec(), _op_name(inst)
   pcode = get_pcode(inst.op)
   # CDNA pcode uses CalcGlobalAddr/CalcDsAddr to compute address from raw components, but make_addr already handles this.
   # Strip the addr computation line and use pre-computed ADDR directly (rename 'addr' -> 'ADDR' in remaining pcode).
-  if isinstance(inst, (irc.GLOBAL, irc.FLAT, irc.SCRATCH, irc.DS, ir4.VSCRATCH)) and 'Calc' in pcode and 'Addr' in pcode:
+  if isinstance(inst, (irc.GLOBAL, irc.FLAT, irc.SCRATCH, irc.DS, irc.MUBUF, ir4.VSCRATCH)) and 'Calc' in pcode and 'Addr' in pcode:
     pcode = re.sub(r'addr\s*=\s*Calc\w+Addr\([^)]*\)\s*;?\n?', '', pcode).replace('MEM[addr', 'MEM[ADDR')
 
   is_lds = isinstance(inst, (ir3.DS, ir4.DS, irc.DS))
   is_scratch = isinstance(inst, (ir3.SCRATCH, ir4.VSCRATCH, irc.SCRATCH))
-  # CDNA acc bit: when set, VGPR operands (vdst/vdata) target ACCVGPR file instead of VGPR
+  is_mubuf = isinstance(inst, irc.MUBUF)
   use_acc = bool(getattr(inst, 'acc', 0))
+  _rvdata = (lambda r, l, *a: ctx.raccvgpr_dyn(r, l)) if use_acc else ctx.rvgpr_dyn
+  _wdata = (lambda r, v, l, e: ctx.waccvgpr_dyn(r, l, v, e)) if use_acc else (lambda r, v, l, e: ctx.wvgpr_dyn(r, l, v, e))
+  _wdst = ctx.waccvgpr_dyn if use_acc else ctx.wvgpr_dyn
   mem = ctx.lds if is_lds else ctx.scratch if is_scratch else ctx.vmem
   addr_shift = UOp.const(dtypes.uint32 if is_lds else dtypes.uint64, 2)
 
@@ -1576,6 +1579,17 @@ def _compile_mem_op(inst: ir3.DS|ir3.FLAT|ir3.GLOBAL|ir3.SCRATCH|ir4.DS|ir4.VFLA
     offset0 = ctx.inst_field(type(inst).offset0)  # type: ignore[union-attr]
     offset1 = ctx.inst_field(type(inst).offset1)  # type: ignore[union-attr]
     offset = (offset1 << _c(8)) | offset0  # DS offset is 16-bit: (offset1 << 8) | offset0
+    saddr_reg = None
+  elif is_mubuf:
+    addr_reg = ctx.inst_field(type(inst).vaddr)
+    vdata_reg = ctx.inst_field(type(inst).vdata)
+    vdst_reg = vdata_reg
+    srsrc_reg = ctx.inst_field(type(inst).srsrc) << _c(2)
+    soffset_reg = ctx.inst_field(type(inst).soffset)
+    offset = ctx.inst_field(type(inst).offset)
+    offen = ctx.inst_field(type(inst).offen)
+    idxen = ctx.inst_field(type(inst).idxen)
+    offset0, offset1 = _c(0), _c(0)
     saddr_reg = None
   elif isinstance(inst, (ir4.VGLOBAL, ir4.VSCRATCH, ir4.VFLAT)):  # RDNA4: vaddr, vsrc, ioffset
     addr_reg = ctx.inst_field(type(inst).vaddr)
@@ -1608,11 +1622,48 @@ def _compile_mem_op(inst: ir3.DS|ir3.FLAT|ir3.GLOBAL|ir3.SCRATCH|ir4.DS|ir4.VFLA
     stores = [ctx.vgpr.index(val[0].cast(dtypes.int)).store(val[1].cast(dtypes.uint32)) for dest, val in assigns if dest.startswith('VGPR[')]
     return UOp.sink(*stores, *ctx.inc_pc())
 
+  def _mubuf_srd(lane: UOp):
+    """Parse MUBUF buffer descriptor (SRD) and compute byte_offset, base_addr, num_records."""
+    srd0 = ctx.rsgpr_dyn(srsrc_reg).cast(dtypes.uint64)
+    srd1 = ctx.rsgpr_dyn(srsrc_reg + _c(1)).cast(dtypes.uint64)
+    base = srd0 | ((srd1 & UOp.const(dtypes.uint64, 0xFFFF)) << UOp.const(dtypes.uint64, 32))
+    stride = (srd1 >> UOp.const(dtypes.uint64, 16)) & UOp.const(dtypes.uint64, 0x3FFF)
+    soff = (soffset_reg < _c(124)).where(ctx.rsgpr_dyn(soffset_reg).cast(dtypes.uint64), UOp.const(dtypes.uint64, 0))
+    la = _lane_active(exec_mask, lane)
+    va = la.where(ctx.rvgpr_dyn(addr_reg, lane).cast(dtypes.uint64), UOp.const(dtypes.uint64, 0))
+    boff = (offen.ne(_c(0))).where(va, UOp.const(dtypes.uint64, 0)) + (idxen.ne(_c(0))).where(va * stride, UOp.const(dtypes.uint64, 0)) \
+           + soff + offset.cast(dtypes.uint64)
+    nrec = ctx.rsgpr_dyn(srsrc_reg + _c(2)).cast(dtypes.uint64)
+    return base, boff, nrec, la
+
+  if is_mubuf and getattr(inst, 'lds', 0):
+    ndwords, data_bytes = data_bits_mem // 32, data_bits_mem // 8
+    base_addr, byte_offset, num_records_u64, lane_active = _mubuf_srd((lane := ctx.range()))
+    in_bounds = (byte_offset + UOp.const(dtypes.uint64, data_bytes)) < (num_records_u64 + UOp.const(dtypes.uint64, 1))
+    trash = UOp.const(dtypes.uint64, _get_trash_page_addr())
+    src_addr = _clamp_addr(in_bounds.where(base_addr + byte_offset, trash))
+    active = lane_active & in_bounds
+    m0_val = ctx.rsgpr_dyn(_c(124 if ctx.wave_size == 64 else 125))
+    lds_base = m0_val + lane.cast(dtypes.uint32) * _c(data_bytes)
+    stores = []
+    for i in range(ndwords):
+      vmem_idx = ctx.vmem.index(((src_addr + UOp.const(dtypes.uint64, i * 4)) >> UOp.const(dtypes.uint64, 2)).cast(dtypes.int64))
+      lds_idx = ctx.lds.index(((lds_base + _c(i * 4)) >> _c(2)).cast(dtypes.int))
+      stores.append(lds_idx.store(active.where(vmem_idx, lds_idx.load())))
+    return UOp.sink(UOp.group(*stores).end(lane), *ctx.inc_pc())
+
+  _mubuf_info: dict = {}
   def make_addr(lane: UOp) -> UOp:
     if is_lds:
       lane_active = _lane_active(exec_mask, lane)
       return lane_active.where(ctx.rvgpr_dyn(addr_reg, lane), _c(0))
     offset64 = offset.cast(dtypes.uint64)
+    if is_mubuf:
+      base_addr, byte_offset, num_records_u64, lane_active = _mubuf_srd(lane)
+      _mubuf_info['byte_offset'] = byte_offset
+      _mubuf_info['num_records_u64'] = num_records_u64
+      trash = UOp.const(dtypes.uint64, _get_trash_page_addr())
+      return lane_active.where(_clamp_addr((byte_offset < num_records_u64).where(base_addr + byte_offset, trash)), trash)
     # Dynamic saddr check: saddr < 124 means valid SGPR, otherwise use VGPR pair for address
     use_saddr = (saddr_reg < _c(124)) if saddr_reg is not None else UOp.const(dtypes.bool, False)
     if is_scratch:
@@ -1661,6 +1712,18 @@ def _compile_mem_op(inst: ir3.DS|ir3.FLAT|ir3.GLOBAL|ir3.SCRATCH|ir4.DS|ir4.VFLA
       return {'ADDR': addr, 'ADDR_BASE': addr, 'OFFSET': offset, 'OFFSET0': offset0, 'OFFSET1': offset1, '_lds': mem, 'laneId': lane,
               'vgpr_a': ctx.rvgpr_dyn(addr_reg, lane), 'offset': offset, **data}
     active = _lane_active(exec_mask, lane)
+    if is_mubuf:
+      byte_offset = _mubuf_info['byte_offset']
+      num_records_u64 = _mubuf_info['num_records_u64']
+      data_bytes_u64 = UOp.const(dtypes.uint64, data_bits_mem // 8)
+      mubuf_active = active & ((byte_offset + data_bytes_u64) < (num_records_u64 + UOp.const(dtypes.uint64, 1)))
+      vdata = _rvdata(vdata_reg, lane).cast(dtypes.uint64) if 'STORE' in op_name else UOp.const(dtypes.uint32, 0)
+      if 'STORE' in op_name and data_bits_mem >= 64:
+        vdata = vdata | (_rvdata(vdata_reg + _c(1), lane).cast(dtypes.uint64) << UOp.const(dtypes.uint64, 32))
+      srcs: dict = {'ADDR': addr, 'VDATA': vdata, '_vmem': mem, '_active': mubuf_active, 'laneId': lane, 'OFFSET': offset}
+      for i in range(data_bits_mem // 32):
+        srcs[f'VDATA{i}'] = _rvdata(vdata_reg + _c(i), lane) if 'STORE' in op_name else UOp.const(dtypes.uint32, 0)
+      return srcs
     # saddr < 124 means valid SGPR pair, otherwise use 0 (NULL means no saddr contribution)
     use_saddr = (saddr_reg < _c(124)) if saddr_reg is not None else UOp.const(dtypes.bool, False)
     saddr_raw = _u64(ctx.rsgpr_dyn(saddr_reg), ctx.rsgpr_dyn(saddr_reg + _c(1))) if saddr_reg is not None else UOp.const(dtypes.uint64, 0)
@@ -1676,8 +1739,6 @@ def _compile_mem_op(inst: ir3.DS|ir3.FLAT|ir3.GLOBAL|ir3.SCRATCH|ir4.DS|ir4.VFLA
         if data_bits_mem == 64 else ctx.rvgpr_dyn(vdata_reg, lane)
       return {'ADDR': addr, 'DATA': atomic_data, '_vmem': mem, '_active': active,
               'laneId': lane, 'v_addr': vaddr_base, 's_saddr': saddr_base}
-    # acc bit: read/write ACCVGPR instead of VGPR for data operands
-    _rvdata = (lambda r, l, *a: ctx.raccvgpr_dyn(r, l)) if use_acc else ctx.rvgpr_dyn
     vdata = _rvdata(vdata_reg, lane).cast(dtypes.uint64) if 'STORE' in op_name \
       else _rvdata(vdst_reg, lane) if 'D16' in op_name else UOp.const(dtypes.uint32, 0)
     if 'STORE' in op_name and data_bits_mem >= 64:
@@ -1697,8 +1758,12 @@ def _compile_mem_op(inst: ir3.DS|ir3.FLAT|ir3.GLOBAL|ir3.SCRATCH|ir4.DS|ir4.VFLA
       if is_scratch: return _mem_store_bytes(mem, val[0], val[1], active, data_bits)
       return _mem_store(mem, val[0], val[1], active, 64, data_bits)
     if dest.startswith('RETURN_DATA') and writes_return_data:
-      _wdata = (lambda r, v, l, e: ctx.waccvgpr_dyn(r, l, v, e)) if use_acc else (lambda r, v, l, e: ctx.wvgpr_dyn(r, l, v, e))
       if (m := re.match(r'RETURN_DATA\[(\d+)\s*:\s*(\d+)\]', dest)):
+        bit_width, dword_idx = int(m.group(1)) - int(m.group(2)) + 1, int(m.group(2)) // 32
+        return _write_val(bit_width, val, _wdata, vdst_reg + _c(dword_idx), lane, exec_mask)
+      return _write_val(data_bits, val, _wdata, vdst_reg, lane, exec_mask)
+    if is_mubuf and dest.startswith('VDATA['):
+      if (m := re.match(r'VDATA\[(\d+)\s*:\s*(\d+)\]', dest)):
         bit_width, dword_idx = int(m.group(1)) - int(m.group(2)) + 1, int(m.group(2)) // 32
         return _write_val(bit_width, val, _wdata, vdst_reg + _c(dword_idx), lane, exec_mask)
       return _write_val(data_bits, val, _wdata, vdst_reg, lane, exec_mask)
@@ -1724,12 +1789,13 @@ def _compile_mem_op(inst: ir3.DS|ir3.FLAT|ir3.GLOBAL|ir3.SCRATCH|ir4.DS|ir4.VFLA
   writes_return_data = '_RTN' in op_name or (is_lds and (op_name.startswith('DS_LOAD') or op_name.startswith('DS_READ'))) or bool(is_atomic and glc)
   lane = ctx.range()
   active = _lane_active(exec_mask, lane)
-  pcode_vars, assigns = parse_pcode(pcode, make_srcs(lane))
-  stores = [s for dest, val in assigns for s in make_stores(dest, val, lane, active, writes_return_data)]
+  srcs = make_srcs(lane)
+  store_active = srcs.get('_active', active) if is_mubuf else active
+  pcode_vars, assigns = parse_pcode(pcode, srcs)
+  stores = [s for dest, val in assigns for s in make_stores(dest, val, lane, store_active, writes_return_data)]
 
   # FLAT/GLOBAL/SCRATCH: collect VDATA slices for loads
   if not is_lds and not is_atomic:
-    _wdst = ctx.waccvgpr_dyn if use_acc else ctx.wvgpr_dyn
     for dword_idx, val in sorted(_collect_data_slices(assigns, 'VDATA', pcode_vars, op_name).items()):
       stores.append(_wdst(vdst_reg + _c(dword_idx), lane, val, exec_mask))
 
@@ -1752,6 +1818,7 @@ _INST_HANDLERS: dict[type, Callable[..., UOp]] = {
   irc.VOP3_SDST: _compile_vop3, irc.VOP3SD: _compile_vop3sd, irc.VOP3P: _compile_vop3p,
   irc.VOP1_SDWA: _compile_sdwa, irc.VOP2_SDWA: _compile_sdwa, irc.VOP2_SDWA_SDST: _compile_sdwa, irc.VOPC_SDWA_SDST: _compile_sdwa,
   irc.DS: _compile_mem_op, irc.FLAT: _compile_mem_op, irc.GLOBAL: _compile_mem_op, irc.SCRATCH: _compile_mem_op,
+  irc.MUBUF: _compile_mem_op,
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════
