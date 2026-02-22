@@ -51,6 +51,15 @@ class _MXCSRContext:
     if lib is None or not hasattr(self, '_saved'): return
     lib.set_fpcr(self._saved)
 
+import mmap as _mmap_module
+_trash_page_mmap: _mmap_module.mmap | None = None
+
+@functools.cache
+def _get_trash_page_addr() -> int:
+  global _trash_page_mmap
+  _trash_page_mmap = _mmap_module.mmap(-1, 4096)
+  return ctypes.addressof(ctypes.c_char.from_buffer(_trash_page_mmap))
+
 from tinygrad.uop.ops import UOp, Ops, KernelInfo, AxisType
 from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.device import Buffer, BufferSpec
@@ -70,6 +79,12 @@ from tinygrad.runtime.autogen.amd.common import Fmt, OpType
 from test.mockgpu.amd.pcode import parse_block, _FUNCS, _set_bits, _val_to_bits
 
 MASK32 = 0xFFFFFFFF
+
+def _clamp_addr(addr: UOp) -> UOp:
+  """Canonical-mask + low-address redirect to trash page (prevents SIGSEGV on OOB)."""
+  addr = addr & UOp.const(dtypes.uint64, 0x7FFFFFFFFFFF)
+  trash = UOp.const(dtypes.uint64, _get_trash_page_addr())
+  return (addr >= UOp.const(dtypes.uint64, 0x10000)).where(addr, trash)
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # SQTT TRACE COLLECTION
