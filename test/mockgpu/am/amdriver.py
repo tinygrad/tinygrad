@@ -1,20 +1,18 @@
-import ctypes, ctypes.util, mmap, functools
+from __future__ import annotations
+import mmap, functools
+from tinygrad.runtime.autogen import libc
 from test.mockgpu.driver import VirtDriver, VirtFileDesc, TextFileDesc, DirFileDesc, VirtFile
 from test.mockgpu.am.amgpu import MockAMGPU, VRAM_SIZE
 
 DOORBELL_SIZE = 0x2000
-BAR5_SIZE = (512 << 20)
+MMIO_SIZE = 2 << 20
 PCIBUS = "mock:am:0"
-
-libc = ctypes.CDLL(ctypes.util.find_library("c"))
-libc.mmap.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_long]
-libc.mmap.restype = ctypes.c_void_p
 
 _empty_bar = "0x0000000000000000 0x0000000000000000 0x0000000000000000"
 _resource_lines = [
   f"0x0000000000000000 0x{VRAM_SIZE-1:016x} 0x0000000000000000", _empty_bar,
   f"0x0000000000000000 0x{DOORBELL_SIZE-1:016x} 0x0000000000000000", _empty_bar, _empty_bar,
-  f"0x0000000000000000 0x{BAR5_SIZE-1:016x} 0x0000000000000000", _empty_bar,
+  f"0x0000000000000000 0x{MMIO_SIZE-1:016x} 0x0000000000000000", _empty_bar,
 ]
 
 class PagemapFileDesc(VirtFileDesc):
@@ -71,9 +69,9 @@ class AMDriver(VirtDriver):
     self.gpus[0] = self.gpu
     self.next_fd = 1 << 30
 
-    self._bar5_addr = libc.mmap(0, BAR5_SIZE, mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_SHARED | mmap.MAP_ANONYMOUS, -1, 0)
+    self._bar5_addr = libc.mmap(0, MMIO_SIZE, mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_SHARED | mmap.MAP_ANONYMOUS, -1, 0)
     mmio = self.gpu.mmio
-    self.track_address(self._bar5_addr, self._bar5_addr + BAR5_SIZE,
+    self.track_address(self._bar5_addr, self._bar5_addr + MMIO_SIZE,
       lambda mv, idx: _bar5_sync_read(mv, idx, mmio), lambda mv, idx: _bar5_sync_write(mv, idx, mmio))
 
     p = f"/sys/bus/pci/devices/{PCIBUS}"
@@ -120,3 +118,10 @@ def _bar5_sync_write(mv, idx, mmio):
   if isinstance(idx, slice):
     for i in range(idx.start or 0, idx.stop or len(mv), idx.step or 1): mmio[i] = mv[i]
   else: mmio[idx] = mv[idx]
+
+class AMUSBDriver(AMDriver):
+  def __init__(self):
+    import test.mockgpu.usb as _musb
+    super().__init__()
+    self.state = _musb.MockASM24State(self.gpu, self, VRAM_SIZE, DOORBELL_SIZE, MMIO_SIZE)
+    _musb._mock_usb_state = self.state
