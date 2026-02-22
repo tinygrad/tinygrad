@@ -19,7 +19,7 @@ from tinygrad.runtime.autogen.amd.rdna3.ins import v, s
 
 # CDNA instruction imports (for CDNA-specific bug tests)
 import tinygrad.runtime.autogen.amd.cdna.ins as cdna
-from tinygrad.renderer.amd.dsl import NULL
+from tinygrad.renderer.amd.dsl import M0, NULL
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Helpers
@@ -1118,6 +1118,58 @@ class TestCDNA_DS_Write_InactiveLaneGarbage(unittest.TestCase):
 # Fix: SMEM_F61(SMEM) subclass in cdna/ins.py overriding only encoding.
 # ═══════════════════════════════════════════════════════════════════════════════
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# Bug 8: SOPP branch int16 overflow for offsets > 32KB
+# The pcode uses `SIMM16.i16 * 16'4` which performs multiplication in int16.
+# For simm16 > 8191 (branch offset > 32KB), the result overflows int16,
+# causing branches to go to the wrong address (typically looping back).
+# Fix: compute branch targets directly in int64, bypassing pcode arithmetic.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestCDNA_BranchOverflow(unittest.TestCase):
+  def test_s_branch_over_32kb(self):
+    """S_BRANCH with simm16 > 8191 must jump forward, not wrap due to int16 overflow."""
+    # Create enough NOPs to require a branch offset > 32KB.
+    # Each s_nop is 4 bytes. 8200 NOPs = 32800 bytes > 32KB.
+    # s_branch simm16 is a signed word offset: target = PC + simm16*4 + 4.
+    # For 8200 NOPs (32800 bytes), simm16 = 8201 (skip NOPs + land on next instruction).
+    # 8201 * 4 = 32804, which overflows int16 (max 32767).
+    n_nops = 8200
+    instructions = [
+      # Load output buffer address from kernel args (s[0:1] -> s[10:11])
+      cdna.s_load_dwordx2(sdata=s[10:11], sbase=s[0:1], offset=0),
+      cdna.s_waitcnt(0),
+      cdna.s_branch(n_nops),  # jump over all the NOPs
+    ] + [cdna.s_nop(0)] * n_nops + [
+      # Landing pad: write sentinel and exit
+      cdna.v_mov_b32_e32(v[1], 0xBEEF),
+      cdna.v_mov_b32_e32(v[0], 0),
+      cdna.global_store_dword(addr=v[0], data=v[1], saddr=s[10:11], offset=0),
+      cdna.s_endpgm(),
+    ]
+    out = run_cdna_program_raw(instructions, n_lanes=1)
+    val = struct.unpack_from('<I', out, 0)[0]
+    self.assertEqual(val, 0xBEEF, f"branch landed at wrong target: got 0x{val:08x}, expected 0x0000BEEF")
+
+  def test_s_cbranch_scc1_over_32kb(self):
+    """Conditional S_CBRANCH_SCC1 with offset > 32KB must also work correctly."""
+    n_nops = 8200
+    instructions = [
+      cdna.s_load_dwordx2(sdata=s[10:11], sbase=s[0:1], offset=0),
+      cdna.s_waitcnt(0),
+      cdna.s_cmp_eq_u32(s[0], s[0]),  # SCC = 1 (s0 == s0 always)
+      cdna.s_cbranch_scc1(n_nops),  # conditional jump over NOPs
+    ] + [cdna.s_nop(0)] * n_nops + [
+      cdna.v_mov_b32_e32(v[1], 0xCAFE),
+      cdna.v_mov_b32_e32(v[0], 0),
+      cdna.global_store_dword(addr=v[0], data=v[1], saddr=s[10:11], offset=0),
+      cdna.s_endpgm(),
+    ]
+    out = run_cdna_program_raw(instructions, n_lanes=1)
+    val = struct.unpack_from('<I', out, 0)[0]
+    self.assertEqual(val, 0xCAFE, f"conditional branch landed at wrong target: got 0x{val:08x}, expected 0x0000CAFE")
+
+
 class TestCDNA_SMEM_Format61(unittest.TestCase):
   def test_decode_0xf4080500(self):
     """The actual GEMM bytes that raised ValueError should decode as s_load_dwordx4."""
@@ -1139,6 +1191,201 @@ class TestCDNA_SMEM_Format61(unittest.TestCase):
     ]
     out = run_cdna_program_raw(instructions, n_lanes=64)
     self.assertEqual(struct.unpack_from('<I', out, 0)[0], 0x12345678)
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Bug 13: MUBUF buffer_load_dwordx4 with lds=1 (global → LDS direct load)
+# The GEMM kernel uses buffer_load_dwordx4 with lds=1 to load matrix tiles
+# from global memory directly into LDS, bypassing VGPRs. This is the critical
+# data path: if lds=1 loads don't work, MFMA gets zero inputs → zero output.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestCDNA_BufferLoadLDS(unittest.TestCase):
+  def _make_input_buffer(self, data: list[int]) -> tuple:
+    buf = (ctypes.c_uint32 * len(data))(*data)
+    return buf, ctypes.addressof(buf)
+
+  def test_buffer_load_dwordx4_lds_basic(self):
+    """buffer_load_dwordx4 with lds=1: load 4 dwords from global to LDS, then read back.
+
+    This is the exact GEMM input loading path:
+    1. Set M0 = LDS destination offset (lane * 16 for GEMM)
+    2. buffer_load_dwordx4 with lds=1 → data goes from vmem directly to LDS at M0+lane*16
+    3. ds_read_b128 reads back from LDS
+    4. Store to output and verify
+
+    If this test fails, the GEMM kernel will produce all zeros because MFMA
+    reads zero inputs from LDS.
+    """
+    input_data = [0xAABB0001, 0xCCDD0002, 0xEEFF0003, 0x11220004]
+    in_buf, in_addr = self._make_input_buffer(input_data)
+    buf_sz = 4096
+    out_buf = (ctypes.c_uint8 * buf_sz)(*([0] * buf_sz))
+    out_addr = ctypes.addressof(out_buf)
+    instructions = [
+      cdna.s_load_dwordx2(sdata=s[10:11], sbase=s[0:1], offset=0),
+      cdna.s_waitcnt(0),
+      # SRD in s[4:7] pointing to input buffer
+      cdna.s_mov_b32(s[4], in_addr & 0xFFFFFFFF),
+      cdna.s_mov_b32(s[5], (in_addr >> 32) & 0xFFFF),
+      cdna.s_mov_b32(s[6], len(input_data) * 4),  # num_records in bytes
+      cdna.s_mov_b32(s[7], 0x20000),               # format (same as GEMM kernel)
+      # Set M0 = 0 (LDS destination base offset for lane 0)
+      cdna.s_mov_b32(M0, 0),
+      # vaddr = 0 (byte offset in buffer = 0, each lane reads same data)
+      cdna.v_mov_b32_e32(v[1], 0),
+      # buffer_load_dwordx4 with lds=1: loads from SRD to LDS at M0 + lane*data_bytes
+      # Args: vdata, vaddr, srsrc, soffset, offset, offen, idxen, acc, sc0, sc1, lds
+      cdna.buffer_load_dwordx4(v[0:3], v[1], s[4:7], NULL, 0, 1, 0, 0, 0, 0, 1),
+      cdna.s_waitcnt(0),
+      # Read back from LDS at offset 0 (lane 0's data)
+      cdna.v_mov_b32_e32(v[1], 0),
+      cdna.ds_read_b128(vdst=v[8:11], addr=v[1]),
+      cdna.s_waitcnt(0),
+      # Store to output
+      cdna.v_mov_b32_e32(v[0], 0),
+      cdna.global_store_dword(addr=v[0], data=v[8], saddr=s[10:11], offset=0),
+      cdna.global_store_dword(addr=v[0], data=v[9], saddr=s[10:11], offset=4),
+      cdna.global_store_dword(addr=v[0], data=v[10], saddr=s[10:11], offset=8),
+      cdna.global_store_dword(addr=v[0], data=v[11], saddr=s[10:11], offset=12),
+      cdna.s_endpgm(),
+    ]
+    code = assemble(instructions)
+    args = (ctypes.c_uint64 * 1)(out_addr)
+    args_ptr = ctypes.addressof(args)
+    kernel_buf = (ctypes.c_char * len(code)).from_buffer_copy(code)
+    lib_ptr = ctypes.addressof(kernel_buf)
+    rsrc2 = 0x19c | (128 << 15)
+    result = run_asm(lib_ptr, len(code), 1, 1, 1, 64, 1, 1, args_ptr, rsrc2, 0, arch="cdna")
+    self.assertEqual(result, 0, f"run_asm failed with {result}")
+    results = struct.unpack_from('<4I', bytes(out_buf), 0)
+    for i, (got, expected) in enumerate(zip(results, input_data)):
+      self.assertEqual(got, expected,
+        f"MUBUF lds=1 dword[{i}]: got 0x{got:08x}, expected 0x{expected:08x} — data not reaching LDS!")
+
+  def test_buffer_load_dwordx4_lds_per_lane(self):
+    """buffer_load_dwordx4 lds=1 with per-lane vaddr offsets (offen=1).
+
+    Each lane reads 16 bytes from a different offset in the input buffer.
+    Data goes to LDS at M0 + lane * 16. Verifies lane 0 and lane 1 data.
+    """
+    # 64 lanes * 4 dwords = 256 dwords
+    input_data = [0x10000 + i for i in range(256)]
+    in_buf, in_addr = self._make_input_buffer(input_data)
+    buf_sz = 4096
+    out_buf = (ctypes.c_uint8 * buf_sz)(*([0] * buf_sz))
+    out_addr = ctypes.addressof(out_buf)
+    instructions = [
+      cdna.s_load_dwordx2(sdata=s[10:11], sbase=s[0:1], offset=0),
+      cdna.s_waitcnt(0),
+      # SRD
+      cdna.s_mov_b32(s[4], in_addr & 0xFFFFFFFF),
+      cdna.s_mov_b32(s[5], (in_addr >> 32) & 0xFFFF),
+      cdna.s_mov_b32(s[6], len(input_data) * 4),
+      cdna.s_mov_b32(s[7], 0x20000),
+      # M0 = 0
+      cdna.s_mov_b32(M0, 0),
+      # vaddr = lane_id * 16 (each lane reads its own 16-byte chunk)
+      cdna.v_and_b32_e32(v[1], 63, v[0]),          # lane_id = v[0] & 63
+      cdna.v_lshlrev_b32_e32(v[1], 4, v[1]),       # vaddr = lane_id * 16
+      # buffer_load_dwordx4 lds=1
+      cdna.buffer_load_dwordx4(v[0:3], v[1], s[4:7], NULL, 0, 1, 0, 0, 0, 0, 1),
+      cdna.s_waitcnt(0),
+      # Read back lane 0's data from LDS offset 0
+      cdna.v_mov_b32_e32(v[1], 0),
+      cdna.ds_read_b128(vdst=v[8:11], addr=v[1]),
+      cdna.s_waitcnt(0),
+      # Also read lane 1's data from LDS offset 16
+      cdna.v_mov_b32_e32(v[1], 16),
+      cdna.ds_read_b128(vdst=v[12:15], addr=v[1]),
+      cdna.s_waitcnt(0),
+      # Store both to output
+      cdna.v_mov_b32_e32(v[0], 0),
+      cdna.global_store_dword(addr=v[0], data=v[8], saddr=s[10:11], offset=0),
+      cdna.global_store_dword(addr=v[0], data=v[9], saddr=s[10:11], offset=4),
+      cdna.global_store_dword(addr=v[0], data=v[10], saddr=s[10:11], offset=8),
+      cdna.global_store_dword(addr=v[0], data=v[11], saddr=s[10:11], offset=12),
+      cdna.global_store_dword(addr=v[0], data=v[12], saddr=s[10:11], offset=16),
+      cdna.global_store_dword(addr=v[0], data=v[13], saddr=s[10:11], offset=20),
+      cdna.global_store_dword(addr=v[0], data=v[14], saddr=s[10:11], offset=24),
+      cdna.global_store_dword(addr=v[0], data=v[15], saddr=s[10:11], offset=28),
+      cdna.s_endpgm(),
+    ]
+    code = assemble(instructions)
+    args = (ctypes.c_uint64 * 1)(out_addr)
+    args_ptr = ctypes.addressof(args)
+    kernel_buf = (ctypes.c_char * len(code)).from_buffer_copy(code)
+    lib_ptr = ctypes.addressof(kernel_buf)
+    rsrc2 = 0x19c | (128 << 15)
+    result = run_asm(lib_ptr, len(code), 1, 1, 1, 64, 1, 1, args_ptr, rsrc2, 0, arch="cdna")
+    self.assertEqual(result, 0, f"run_asm failed with {result}")
+    # Lane 0: input_data[0:4]
+    r0 = struct.unpack_from('<4I', bytes(out_buf), 0)
+    for i, (got, exp) in enumerate(zip(r0, input_data[0:4])):
+      self.assertEqual(got, exp, f"lane0 dword[{i}]: got 0x{got:08x}, expected 0x{exp:08x}")
+    # Lane 1: input_data[4:8]
+    r1 = struct.unpack_from('<4I', bytes(out_buf), 16)
+    for i, (got, exp) in enumerate(zip(r1, input_data[4:8])):
+      self.assertEqual(got, exp, f"lane1 dword[{i}]: got 0x{got:08x}, expected 0x{exp:08x}")
+
+class TestCDNA_M0_Register(unittest.TestCase):
+  """Bug: On CDNA, M0 is at encoding 124 (RDNA uses 125). The emulator was:
+  1. Discarding writes to SGPR 124 (treating it as NULL/read-only)
+  2. Reading M0 from SGPR 125 in buffer_load_lds (which was always 0)
+  This caused all buffer_load_dwordx4 lds=1 to write to LDS offset 0,
+  overwriting each other. The GEMM kernel output was all zeros.
+  """
+
+  def test_buffer_load_lds_m0_offset(self):
+    """buffer_load_dwordx4 lds=1 with non-zero M0: data goes to correct LDS offset.
+
+    Sets M0 to 1024 (via NULL register = encoding 124 on CDNA), loads 4 dwords
+    from global to LDS at M0+lane*16=1024, then reads back from LDS offset 1024.
+    Without the fix, M0 writes are discarded and data always goes to LDS offset 0.
+    """
+    input_data = [0xDEAD0001, 0xBEEF0002, 0xCAFE0003, 0xF00D0004]
+    in_buf = (ctypes.c_uint32 * len(input_data))(*input_data)
+    in_addr = ctypes.addressof(in_buf)
+    buf_sz = 4096
+    out_buf = (ctypes.c_uint8 * buf_sz)(*([0] * buf_sz))
+    out_addr = ctypes.addressof(out_buf)
+    # M0 on CDNA is NULL (encoding 124), see extra/gemm/asm/cdna/asm.py line 4-5
+    instructions = [
+      cdna.s_load_dwordx2(sdata=s[10:11], sbase=s[0:1], offset=0),
+      cdna.s_waitcnt(0),
+      # SRD in s[4:7]
+      cdna.s_mov_b32(s[4], in_addr & 0xFFFFFFFF),
+      cdna.s_mov_b32(s[5], (in_addr >> 32) & 0xFFFF),
+      cdna.s_mov_b32(s[6], len(input_data) * 4),
+      cdna.s_mov_b32(s[7], 0x20000),
+      # Set M0 = 1024 (on CDNA, M0 is NULL = encoding 124)
+      cdna.s_mov_b32(NULL, 1024),
+      cdna.v_mov_b32_e32(v[1], 0),
+      # buffer_load_dwordx4 lds=1: writes to LDS at M0+lane*16 = 1024+0 = 1024
+      cdna.buffer_load_dwordx4(v[0:3], v[1], s[4:7], NULL, 0, 1, 0, 0, 0, 0, 1),
+      cdna.s_waitcnt(0),
+      # Read from LDS offset 1024 (not 0!)
+      cdna.v_mov_b32_e32(v[1], 1024),
+      cdna.ds_read_b128(vdst=v[8:11], addr=v[1]),
+      cdna.s_waitcnt(0),
+      # Store to output
+      cdna.v_mov_b32_e32(v[0], 0),
+      cdna.global_store_dword(addr=v[0], data=v[8], saddr=s[10:11], offset=0),
+      cdna.global_store_dword(addr=v[0], data=v[9], saddr=s[10:11], offset=4),
+      cdna.global_store_dword(addr=v[0], data=v[10], saddr=s[10:11], offset=8),
+      cdna.global_store_dword(addr=v[0], data=v[11], saddr=s[10:11], offset=12),
+      cdna.s_endpgm(),
+    ]
+    code = assemble(instructions)
+    args = (ctypes.c_uint64 * 1)(out_addr)
+    args_ptr = ctypes.addressof(args)
+    kernel_buf = (ctypes.c_char * len(code)).from_buffer_copy(code)
+    lib_ptr = ctypes.addressof(kernel_buf)
+    rsrc2 = 0x19c | (128 << 15)  # 128 granules = 64KB LDS
+    result = run_asm(lib_ptr, len(code), 1, 1, 1, 64, 1, 1, args_ptr, rsrc2, 0, arch="cdna")
+    self.assertEqual(result, 0, f"run_asm failed with {result}")
+    r = struct.unpack_from('<4I', bytes(out_buf), 0)
+    for i, (got, exp) in enumerate(zip(r, input_data)):
+      self.assertEqual(got, exp, f"dword[{i}]: got 0x{got:08x}, expected 0x{exp:08x} — M0 write to encoding 124 was likely discarded")
 
 if __name__ == '__main__':
   unittest.main()

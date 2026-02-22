@@ -6,7 +6,7 @@
 #   arg=3: lds - local data share
 #   arg=4: scratch - per-lane scratch memory
 from __future__ import annotations
-import ctypes, functools, re, platform, subprocess, tempfile
+import ctypes, functools, os, re, platform, subprocess, tempfile
 from typing import Callable
 
 # Set/restore DAZ+FTZ (denormals-are-zero + flush-to-zero) to match RDNA3 default float mode
@@ -65,55 +65,6 @@ def _get_trash_page_addr() -> int:
   global _trash_page_mmap
   _trash_page_mmap = _mmap_module.mmap(-1, 4096)  # anonymous RW page at kernel-chosen address
   return ctypes.addressof(ctypes.c_char.from_buffer(_trash_page_mmap))
-
-# vmem write guard: SIGSEGV handler that redirects writes to non-writable pages to the trash page.
-# The emulator uses external_ptr=0, mapping the entire host address space as GPU vmem. MUBUF stores
-# may compute addresses that land on non-writable host pages (JIT code, .text). The CPU backend generates
-# `*ptr = active ? val : *ptr` which always touches the page, even for inactive lanes. When num_records
-# is large (e.g., 2GB), SRD-based bounds checking doesn't prevent this. The guard catches SEGV_ACCERR
-# and redirects the write to the trash page by modifying rax/rdx in the signal handler's ucontext.
-_vmem_guard_lib = None
-
-@functools.cache
-def _load_vmem_guard():
-  """Load vmem_guard.so if available. Returns the library handle or None."""
-  global _vmem_guard_lib
-  if platform.system() != 'Linux': return None
-  for path in ['/tmp/vmem_guard.so']:
-    try:
-      lib = ctypes.CDLL(path)
-      lib.vmem_guard_install.argtypes = [ctypes.c_uint64]
-      lib.vmem_guard_install.restype = None
-      lib.vmem_guard_remove.argtypes = []
-      lib.vmem_guard_remove.restype = None
-      lib.vmem_guard_redirects.argtypes = []
-      lib.vmem_guard_redirects.restype = ctypes.c_int
-      _vmem_guard_lib = lib
-      return lib
-    except OSError: pass
-  return None
-
-# JIT code page protection: mark compiled code pages as RX (non-writable) after compilation.
-# The emulator uses external_ptr=0, overlaying the entire host address space as GPU vmem. MUBUF stores
-# with large num_records (e.g., 2GB) can compute addresses landing on JIT code pages. If these pages
-# are RWX (as some JIT backends leave them), stores silently corrupt the code. By making them RX,
-# writes trigger SEGV_ACCERR, which vmem_guard.so catches and redirects to the trash page.
-_libc: ctypes.CDLL | None = None
-_protected_pages: set[int] = set()
-
-def _protect_jit_code_page(fxn_ptr: int) -> None:
-  """Mark the page containing fxn_ptr as PROT_READ|PROT_EXEC (non-writable)."""
-  global _libc
-  if platform.system() != 'Linux': return
-  page_size = 4096
-  page_addr = fxn_ptr & ~(page_size - 1)
-  if page_addr in _protected_pages: return
-  if _libc is None:
-    try: _libc = ctypes.CDLL("libc.so.6")
-    except OSError: return
-  # PROT_READ=1, PROT_EXEC=4 → 5 (non-writable)
-  ret = _libc.mprotect(ctypes.c_void_p(page_addr), ctypes.c_size_t(page_size), ctypes.c_int(5))
-  if ret == 0: _protected_pages.add(page_addr)
 
 from tinygrad.uop.ops import UOp, Ops, KernelInfo, AxisType
 from tinygrad.dtype import dtypes, AddrSpace
@@ -582,8 +533,9 @@ class _Ctx:
     return self.sgpr.index(reg.cast(dtypes.int), ptr=True).load()
 
   def wsgpr_dyn(self, reg: UOp, val: UOp) -> UOp:
-    """Write SGPR with dynamic register index. Writes to NULL (124) are discarded."""
-    return self.sgpr.index(reg.cast(dtypes.int), reg.ne(_c(124))).store(val.cast(dtypes.uint32))
+    """Write SGPR with dynamic register index. On RDNA writes to NULL (124) are discarded; on CDNA 124 is M0 (writable)."""
+    null_idx = 125 if self.wave_size == 64 else 124  # CDNA: NULL=125, M0=124; RDNA: NULL=124, M0=125
+    return self.sgpr.index(reg.cast(dtypes.int), reg.ne(_c(null_idx))).store(val.cast(dtypes.uint32))
 
   def wmask(self, reg: UOp, val: UOp) -> list[UOp]:
     """Write a lane mask (VCC/EXEC). Splits into lo/hi for wave64."""
@@ -838,7 +790,7 @@ class _Ctx:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def _compile_sopp(inst: ir3.SOPP | ir4.SOPP, ctx: _Ctx) -> UOp:
-  simm16 = ctx.inst_field_signed(type(inst).simm16).cast(dtypes.int16)
+  simm16 = ctx.inst_field_signed(type(inst).simm16)
   if inst.op in (ir3.SOPPOp.S_ENDPGM, ir4.SOPPOp.S_ENDPGM, irc.SOPPOp.S_ENDPGM):
     return UOp.sink(ctx.wsgpr_dyn(_c(PC_LO_IDX), UOp.const(dtypes.uint32, 0xFFFFFFFF)),
                           ctx.wsgpr_dyn(_c(PC_HI_IDX), UOp.const(dtypes.uint32, 0xFFFFFFFF)))
@@ -848,6 +800,43 @@ def _compile_sopp(inst: ir3.SOPP | ir4.SOPP, ctx: _Ctx) -> UOp:
   if inst.op in barrier_ops: return UOp.sink(*ctx.inc_pc())
   # S_NOP and S_WAITCNT are no-ops in emulator (no pipeline/cache to wait on)
   if inst.op in (ir3.SOPPOp.S_NOP, ir4.SOPPOp.S_NOP, irc.SOPPOp.S_NOP, irc.SOPPOp.S_WAITCNT): return UOp.sink(*ctx.inc_pc())
+
+  # Branch instructions: compute target directly in int64 to avoid int16 overflow in pcode.
+  # The pcode uses `SIMM16.i16 * 16'4` which overflows for branch offsets > 32KB (e.g., GEMM kernel's 81KB binary).
+  # Correct formula: target = PC + SIMM16 * 4 + 4 (SIMM16 is signed word offset from next instruction).
+  _branch_ops_all = {
+    ir3.SOPPOp.S_BRANCH, ir3.SOPPOp.S_CBRANCH_SCC0, ir3.SOPPOp.S_CBRANCH_SCC1,
+    ir3.SOPPOp.S_CBRANCH_VCCZ, ir3.SOPPOp.S_CBRANCH_VCCNZ, ir3.SOPPOp.S_CBRANCH_EXECZ, ir3.SOPPOp.S_CBRANCH_EXECNZ,
+    irc.SOPPOp.S_BRANCH, irc.SOPPOp.S_CBRANCH_SCC0, irc.SOPPOp.S_CBRANCH_SCC1,
+    irc.SOPPOp.S_CBRANCH_VCCZ, irc.SOPPOp.S_CBRANCH_VCCNZ, irc.SOPPOp.S_CBRANCH_EXECZ, irc.SOPPOp.S_CBRANCH_EXECNZ}
+  if hasattr(ir4.SOPPOp, 'S_BRANCH'):
+    _branch_ops_all.update({ir4.SOPPOp.S_BRANCH, ir4.SOPPOp.S_CBRANCH_SCC0, ir4.SOPPOp.S_CBRANCH_SCC1,
+      ir4.SOPPOp.S_CBRANCH_VCCZ, ir4.SOPPOp.S_CBRANCH_VCCNZ, ir4.SOPPOp.S_CBRANCH_EXECZ, ir4.SOPPOp.S_CBRANCH_EXECNZ})
+  if inst.op in _branch_ops_all:
+    pc_bytes = ctx.rpc().cast(dtypes.int64)
+    branch_target = pc_bytes + simm16.cast(dtypes.int64) * UOp.const(dtypes.int64, 4) + UOp.const(dtypes.int64, 4)
+    fall_through = pc_bytes + UOp.const(dtypes.int64, 4)
+    # Unconditional branch
+    op_name = inst.op.name
+    if op_name == 'S_BRANCH':
+      new_pc = branch_target
+    else:
+      # Conditional branches: determine condition
+      vcc, exec_val = ctx.rmask(_c(VCC_LO.offset)), ctx.rexec()
+      scc = ctx.rsgpr_dyn(_c(SCC.offset))
+      _zero32 = UOp.const(dtypes.uint32, 0)
+      _one32 = UOp.const(dtypes.uint32, 1)
+      if 'SCC0' in op_name: cond = scc.eq(_zero32)
+      elif 'SCC1' in op_name: cond = scc.eq(_one32)
+      elif 'VCCNZ' in op_name: cond = vcc.ne(UOp.const(vcc.dtype, 0))
+      elif 'VCCZ' in op_name: cond = vcc.eq(UOp.const(vcc.dtype, 0))
+      elif 'EXECNZ' in op_name: cond = exec_val.ne(UOp.const(exec_val.dtype, 0))
+      elif 'EXECZ' in op_name: cond = exec_val.eq(UOp.const(exec_val.dtype, 0))
+      else: cond = UOp.const(dtypes.bool, True)  # fallback: always branch
+      new_pc = cond.where(branch_target, fall_through)
+    lo, hi = _split64(new_pc.cast(dtypes.uint64))
+    return UOp.sink(ctx.wsgpr_dyn(_c(PC_LO_IDX), lo), ctx.wsgpr_dyn(_c(PC_HI_IDX), hi))
+
   # NOTE: we ignore SOPPs without PCODE
   if inst.op in _get_pcode_dict(inst.op):
     pcode = get_pcode(inst.op)
@@ -1729,7 +1718,7 @@ def _compile_mem_op(inst: ir3.DS|ir3.FLAT|ir3.GLOBAL|ir3.SCRATCH|ir4.DS|ir4.VFLA
     stride = (srd1 >> UOp.const(dtypes.uint64, 16)) & UOp.const(dtypes.uint64, 0x3FFF)
     soff = (soffset_reg < _c(124)).where(ctx.rsgpr_dyn(soffset_reg).cast(dtypes.uint64), UOp.const(dtypes.uint64, 0))
     num_records = ctx.rsgpr_dyn(srsrc_reg + _c(2))
-    m0_val = ctx.rsgpr_dyn(_c(125))  # M0 is SGPR index 125
+    m0_val = ctx.rsgpr_dyn(_c(124 if ctx.wave_size == 64 else 125))  # M0: CDNA=124, RDNA=125
     lane = ctx.range()
     # Clamp vaddr for EXEC-inactive lanes — CPU backend evaluates all lanes, garbage vaddr crashes
     lane_active = _lane_active(exec_mask, lane)
@@ -2022,9 +2011,6 @@ def _get_runner(inst_bytes: bytes, arch: str = "rdna3"):
   # NOTE: renderer output is not reproducible because of _MXCSRContext. PROFILE=0 prevents emulator instruction runners from polluting profiling.
   with Context(NOOPT=1, CHECK_OOB=0, TUPLE_ORDER=0, EMULATED_DTYPES="", CAPTURE_PROCESS_REPLAY=0, PROFILE=0):
     runner = get_runner('CPU', sink)
-  # Protect JIT code page from MUBUF store corruption (make RWX→RX so vmem_guard catches writes)
-  fxn_addr = ctypes.cast(runner._prg.fxn, ctypes.c_void_p).value
-  if fxn_addr: _protect_jit_code_page(fxn_addr)
   _canonical_runner_cache.append((type(inst), base, mask, size, runner))
   # DEBUG: dump C source for MFMA instructions
   if DEBUG >= 4 and 'MFMA' in _op_name(inst):
@@ -2139,6 +2125,7 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
             valid_mem_ranges: set[tuple[int, int]]|None = None) -> int:
   """Execute AMD assembly program. scratch_size is private_segment_fixed_size from kernel descriptor (per-lane)."""
   from tinygrad.renderer.amd.dsl import Inst
+  import time as _time_mod
   program: dict[int, tuple[Callable, list[int], bool, Inst]] = {}  # pc -> (fxn, globals, is_barrier, inst)
   lds_size = ((rsrc2 & hsa.AMD_COMPUTE_PGM_RSRC_TWO_GRANULATED_LDS_SIZE) >> hsa.AMD_COMPUTE_PGM_RSRC_TWO_GRANULATED_LDS_SIZE_SHIFT) * 512
   if DEBUG >= 3:
@@ -2171,21 +2158,14 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
   tracing = bool(PROFILE)
 
   trash_addr = _get_trash_page_addr()  # ensure trash page is allocated before any vmem access
-
-  # Install vmem write guard: SIGSEGV handler that redirects writes to non-writable pages to trash.
-  # Persistent GEMM kernels advance SRD bases past allocated buffers. The CPU backend generates
-  # `*ptr = active ? val : *ptr` which always writes, even for inactive lanes. When the target
-  # page is non-writable (JIT code, .text), the handler catches SEGV_ACCERR and modifies RAX to
-  # point to the trash page, retrying the instruction harmlessly. Only a small number of faults
-  # occur (active lanes in the last few stores before SRD overshoot), so overhead is minimal.
-  guard = _load_vmem_guard()
-  if guard:
-    guard.vmem_guard_install(ctypes.c_uint64(trash_addr))
-    if DEBUG >= 3: print(f"  [emu] vmem_guard installed, trash=0x{trash_addr:x}", flush=True)
+  _wg_t0 = _time_mod.time()
+  _total_inst_count = 0
   with _MXCSRContext():
     for gidz in range(gz):
       for gidy in range(gy):
         for gidx in range(gx):
+          _wg_inst_count = 0
+          _wg_start = _time_mod.perf_counter()
           # Initialize all wavefronts for this workgroup
           waves: list[tuple[WaveState, list]] = []
           for wave_start in range(0, total_threads, wave_size):
@@ -2198,14 +2178,12 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
             waves.append((st, c_bufs))
 
           # Execute wavefronts with barrier synchronization
-          # Each wave runs until it hits s_barrier or s_endpgm. When all waves have stopped, release barrier waves.
           done = [False] * len(waves)
           for total_inst in range(10_000_000):
             if all(done): break
             for wi, (st, c_bufs) in enumerate(waves):
               if done[wi]: continue
-              # Run this wave until barrier or endpgm
-              for _ in range(1_000_000):
+              for _inst_i in range(1_000_000):
                 pc = st.pc
                 if pc == ENDPGM_PC:
                   done[wi] = True
@@ -2214,23 +2192,22 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
                 fxn, globals_list, is_barrier, inst = _ensure_compiled(pc)
                 if DEBUG >= 5: print(f"  exec gid=({gidx},{gidy},{gidz}) w={wi} PC={pc - lib}: {inst!r}", flush=True)
                 fxn(*[c_bufs[g] for g in globals_list])
+                _wg_inst_count += 1
                 if tracing:
                   inst_op = inst.op.value if hasattr(inst, 'op') else 0
                   sqtt_emit(wi, inst, (st.pc != ENDPGM_PC and st.pc != pc + inst.size()) if inst_op in _BRANCH_OPS else None)
-                if is_barrier: break  # s_barrier hit: PC already advanced past it, pause this wave
+                if is_barrier: break
               else: raise RuntimeError("exceeded 1M instructions in single wave, likely infinite loop")
-            # All waves have either hit barrier or endpgm — release barrier waves for next round
           else: raise RuntimeError("exceeded 10M total scheduling rounds")
+          _total_inst_count += _wg_inst_count
+          _wg_elapsed = _time_mod.perf_counter() - _wg_start
+          if gidx < 5 or gidx % 50 == 0 or _wg_elapsed > 1.0:
+            print(f"  [emu] WG {gidx}: {_wg_inst_count} insts in {_wg_elapsed:.3f}s ({_wg_inst_count/_wg_elapsed:.0f} inst/s)" if _wg_elapsed > 0 else f"  [emu] WG {gidx}: {_wg_inst_count} insts", flush=True)
           tracing = False  # only trace the first workgroup
 
           # Reset LDS for next workgroup
           if lds_size > 0: ctypes.memset(lds_buf._buf.va_addr, 0, max(lds_size, 4))
-
-  # Remove vmem write guard after kernel execution
-  if guard:
-    redirects = guard.vmem_guard_redirects()
-    guard.vmem_guard_remove()
-    if DEBUG >= 3: print(f"  [emu] vmem_guard removed, {redirects} redirects", flush=True)
+  print(f"  [emu] TOTAL: {_total_inst_count} insts across {gx*gy*gz} WGs in {_time_mod.time()-_wg_t0:.2f}s", flush=True)
 
   if PROFILE: sqtt_traces.append(sqtt_finalize())
   return 0
