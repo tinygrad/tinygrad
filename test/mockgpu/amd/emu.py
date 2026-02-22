@@ -687,8 +687,17 @@ def _compile_sopp(inst: ir3.SOPP | ir4.SOPP, ctx: _Ctx) -> UOp:
     pcode = get_pcode(inst.op)
     pc_bytes = ctx.rpc()  # PC is already 64-bit byte address
     vcc, exec_lo = ctx.rsgpr_dyn(_c(VCC_LO.offset)), ctx.rsgpr_dyn(_c(EXEC_LO.offset))
+    # For CDNA4 (64-wide waves), EXECZ/VCCZ must check both LO and HI halves of the 64-bit masks
+    if HW_WAVE_SIZE > WAVE_SIZE:
+      from tinygrad.renderer.amd.dsl import EXEC_HI, VCC_HI
+      exec_hi, vcc_hi = ctx.rsgpr_dyn(_c(EXEC_HI.offset)), ctx.rsgpr_dyn(_c(VCC_HI.offset))
+      execz = (exec_lo | exec_hi).eq(UOp.const(dtypes.uint32, 0)).cast(dtypes.uint32)
+      vccz = (vcc | vcc_hi).eq(UOp.const(dtypes.uint32, 0)).cast(dtypes.uint32)
+    else:
+      execz = exec_lo.eq(UOp.const(dtypes.uint32, 0)).cast(dtypes.uint32)
+      vccz = vcc.eq(UOp.const(dtypes.uint32, 0)).cast(dtypes.uint32)
     srcs = {'PC': pc_bytes.cast(dtypes.int64), 'SIMM16': simm16, 'SCC': ctx.rsgpr_dyn(_c(SCC.offset)), 'VCC': vcc,
-            'VCCZ': vcc.eq(UOp.const(dtypes.uint32, 0)).cast(dtypes.uint32), 'EXECZ': exec_lo.eq(UOp.const(dtypes.uint32, 0)).cast(dtypes.uint32)}
+            'VCCZ': vccz, 'EXECZ': execz}
     for dest, val in parse_pcode(pcode, srcs)[1]:
       if dest == 'PC' or dest.startswith('PC.'):
         lo, hi = _split64(val.cast(dtypes.uint64))
@@ -1501,6 +1510,10 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
                         ctypes.c_uint64(scratch_buf._buf.va_addr if scratch_buf else 0)])
             waves.append((st, sub_wave_bufs))
 
+          # Import EXEC_HI/VCC_HI for sub-wave 1 save/restore (needed for CDNA4 dual sub-wave dispatch)
+          if HW_WAVE_SIZE > WAVE_SIZE:
+            from tinygrad.renderer.amd.dsl import EXEC_HI, VCC_HI
+
           # Execute wavefronts with barrier synchronization
           # Each wave runs until it hits s_barrier or s_endpgm. When all waves have stopped, release barrier waves.
           done = [False] * len(waves)
@@ -1517,17 +1530,23 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
                   break
                 fxn, globals_list, is_barrier, inst = _ensure_compiled(pc)
                 # Run instruction on all sub-waves (1 for RDNA 32-lane, 2 for CDNA4 64-lane)
-                for sw_idx, c_bufs in enumerate(sub_wave_bufs):
+                for sw_idx, sw_bufs in enumerate(c_bufs):
                   if sw_idx > 0:
+                    # Save sub-wave 0's full state (including advanced PC and scalar results)
+                    saved_sgpr_list = list(st._sgpr_mv)
+                    # Restore original PC so sub-wave 1 runs the SAME instruction as sub-wave 0
+                    st._sgpr_mv[PC_LO_IDX], st._sgpr_mv[PC_HI_IDX] = pc & MASK32, (pc >> 32) & MASK32
                     # Swap EXEC_LO <-> EXEC_HI and VCC_LO <-> VCC_HI so sub-wave 1 uses HI masks
-                    from tinygrad.renderer.amd.dsl import EXEC_HI, VCC_HI
                     for lo, hi in [(EXEC_LO.offset, EXEC_HI.offset), (VCC_LO.offset, VCC_HI.offset)]:
                       st._sgpr_mv[lo], st._sgpr_mv[hi] = st._sgpr_mv[hi], st._sgpr_mv[lo]
-                  fxn(*[c_bufs[g] for g in globals_list])
+                  fxn(*[sw_bufs[g] for g in globals_list])
                   if sw_idx > 0:
-                    # Swap back EXEC and VCC
-                    for lo, hi in [(EXEC_LO.offset, EXEC_HI.offset), (VCC_LO.offset, VCC_HI.offset)]:
-                      st._sgpr_mv[lo], st._sgpr_mv[hi] = st._sgpr_mv[hi], st._sgpr_mv[lo]
+                    # Capture EXEC and VCC results from sub-wave 1 (in swapped LO positions)
+                    new_exec_hi, new_vcc_hi = st._sgpr_mv[EXEC_LO.offset], st._sgpr_mv[VCC_LO.offset]
+                    # Restore sub-wave 0's state (advanced PC, scalar results, original EXEC/VCC)
+                    for i in range(SGPR_COUNT): st._sgpr_mv[i] = saved_sgpr_list[i]
+                    # Write back the HI mask values computed by sub-wave 1
+                    st._sgpr_mv[EXEC_HI.offset], st._sgpr_mv[VCC_HI.offset] = new_exec_hi, new_vcc_hi
                 if tracing:
                   inst_op = inst.op.value if hasattr(inst, 'op') else 0
                   sqtt_emit(wi, inst, (st.pc != ENDPGM_PC and st.pc != pc + inst.size()) if inst_op in _BRANCH_OPS else None)
