@@ -75,15 +75,13 @@ class TestSQTTProfiler(unittest.TestCase):
     for i,s in enumerate(sqtt[1:], start=1): self.assertEqual(s["name"], f"{kernel_name} n{i+1}")
 
   # TODO: can we trace SQTT for graphed kernels?
-  def test_jit_graph(self):
-    #@TinyJit
+  def test_jit_graph(self, kernel_count=3*2):
+    @TinyJit
     def f(a): return ((a + 1).contiguous() + 2).contiguous().sum()
     t = Tensor.empty(32)
     with save_sqtt() as sqtt:
-      for _ in range(N:=5):
+      for _ in range(5):
         f(t).realize()
-    # there's only 2 SQTT events per kernel, before they enter the graph
-    #self.assertEqual(len(sqtt), 3*2)
     names = [s["name"] for s in sqtt]
     k0, k1, k2 = names[:3]
     for i in range(3, len(sqtt), 3):
@@ -91,6 +89,10 @@ class TestSQTTProfiler(unittest.TestCase):
       self.assertEqual(names[i], f"{k0} n{n}")
       self.assertEqual(names[i+1], f"{k1} n{n}")
       self.assertEqual(names[i+2], f"{k2} n{n}")
+    self.assertEqual(len(sqtt), kernel_count)
+
+  @Context(JIT=2)
+  def test_jit_multiple_kernels(self): self.test_jit_graph(kernel_count=3*5)
 
 if __name__ == "__main__":
   unittest.main()
