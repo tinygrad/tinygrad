@@ -147,26 +147,24 @@ def vpins(x:UOp) -> UOp:
   return functools.reduce(lambda ret,i: x.ins(op, src=(ret, x.src[i], imm(dtypes.uint8, i))), range(len(x.src)), def_reg(x.dtype))
 
 def div(ctx:IselContext, x:UOp):
-  assert False
   # zero extend or move src[0] to x
-  move1 = UOp(X86Ops.MOV, x.dtype, (x.src[0],), ctx.vreg(RAX))
-  zero = UOp(X86Ops.MOVi, x.dtype, (imm(min(dtypes.uint32, x.dtype), 0),), ctx.vreg(RDX))
-  move2 = UOp(X86Ops.MOV, x.dtype, (x.src[1],), ctx.vreg(tuple(r for r in WGPR if r not in (RAX, RDX))))
-  div = UOp(X86Ops.DIV, x.dtype, (move2, zero, move1), ctx.vreg(RAX))
-  return UOp(X86Ops.MOV, x.dtype, (div,))
+  move1 = x.ins(X86Ops.MOV, src=(x.src[0],), tag=ctx.vreg(RAX))
+  zero = x.ins(X86Ops.MOVi, src=(imm(min(dtypes.uint32, x.dtype), 0),), tag=ctx.vreg(RDX))
+  move2 = x.ins(X86Ops.MOV, src=(x.src[1],), tag=ctx.vreg(tuple(r for r in WGPR if r not in (RAX, RDX))))
+  div = x.ins(X86Ops.DIV, src=(move2, zero, move1), tag=ctx.vreg(RAX))
+  return x.ins(X86Ops.MOV, src=(div,))
 
 # TODO: you don't want to call ctx.vreg here because it can duplicate instructions, you instead assign the tuple of valid registers
 # for the instruction and a rewrite will add the vreg, this ensures a duplicate isn't created.
 # However vreg(RDX) is assigned here because IDIV also writes to RDX and regalloc isn't aware of that,
 # the correct fix is to model IDIV as multi output (RAX, RDX) so regalloc is aware of RDX being overwritten and rm vreg from here
 def idiv(ctx:IselContext, x:UOp):
-  assert False
-  ext = UOp(X86Ops.MOVSX, dtypes.int16, (x.src[0],), ctx.vreg(RAX)) if x.dtype is dtypes.int8 else \
-        UOp(X86Ops.SARi, x.dtype, (x.src[0], imm(dtypes.uint8, x.dtype.itemsize * 8 - 1)), ctx.vreg(RDX))
-  move = UOp(X86Ops.MOV, x.dtype, (x.src[1],), tuple(r for r in WGPR if r not in (RAX, RDX)))
-  idiv = UOp(X86Ops.IDIV, x.dtype, (x.src[0], move, ext), (RAX,))
+  ext = UOp(Ops.INS, arg=X86Ops.MOVSX, dtype=dtypes.int16, src=(x.src[0],), tag=ctx.vreg(RAX)) if x.dtype is dtypes.int8 else \
+        x.ins(X86Ops.SARi, src=(x.src[0], imm(dtypes.uint8, x.dtype.itemsize * 8 - 1)), tag=ctx.vreg(RDX))
+  move = x.ins(X86Ops.MOV, src=(x.src[1],), tag=tuple(r for r in WGPR if r not in (RAX, RDX)))
+  idiv = x.ins(X86Ops.IDIV, src=(x.src[0], move, ext), tag=(RAX,))
   # this move "cleanses" the register constraint (rax) of idiv, this is because the constraint only applies on definition and not on the uses of idiv
-  return UOp(X86Ops.MOV, x.dtype, (idiv,))
+  return x.ins(X86Ops.MOV, src=(idiv,))
 
 def fuse_address(x:UOp) -> tuple[UOp, ...]:
   def _disp(v:int) -> UOp: return imm(dtypes.int32 if abs(v) > dtypes.max(dtypes.int8) else dtypes.int8, v)
@@ -393,8 +391,8 @@ isel_matcher = PatternMatcher([
   (UPat(Ops.INS, dtypes.ints+dtypes.floats+(dtypes.bool,), name="x"), lambda ctx,x:
    x.replace(tag=ctx.vreg(x.tag)) if isinstance(x.tag, tuple) else None),
   # allocate virtual register to X86Op without special constraints
-  (UPat(Ops.INS, name="x"), lambda ctx,x:
-   x.replace(tag=ctx.vreg(XMM if x.dtype in dtypes.floats or x.dtype.count > 1 else WGPR)) if x.tag is None and x.dtype != dtypes.void else None),
+  (UPat(Ops.INS, name="x"), lambda ctx,x: x.replace(tag=ctx.vreg(XMM if x.dtype in dtypes.floats or x.dtype.count > 1 else WGPR)) \
+   if not isinstance(x.tag, Register) and x.arg != X86Ops.IMM and x.dtype != dtypes.void else None),
 ])
 
 # ***** post register allocation *****
