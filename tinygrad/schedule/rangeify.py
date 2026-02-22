@@ -36,7 +36,7 @@ pm_mops = PatternMatcher([
 def fix_assign_hazard(assign:UOp, target:UOp, src:UOp):
   # PERMUTE and FLIP reorder indices, SHRINK can have overlapping regions when dest is also shrunk
   unsafe = {Ops.PERMUTE, Ops.FLIP} | ({Ops.SHRINK} if target.op_in_backward_slice_with_self(Ops.SHRINK) else set())
-  if any(s.op in unsafe and target.base in s.backward_slice_with_self for s in src.toposort(gate=lambda s:s.op not in ALWAYS_CONTIGUOUS)):
+  if any(s.op in unsafe and (target.base is s or target.base in s.backward_slice) for s in src.toposort(gate=lambda s:s.op not in ALWAYS_CONTIGUOUS)):
     return assign.replace(src=(target, src.contiguous()))
 
 def normalize_assign_target_chain(assign:UOp, target:UOp, src:UOp):
