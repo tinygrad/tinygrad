@@ -204,7 +204,7 @@ class Scheduler:
       replaces = {rng:replaced_rng}
       valid = replaced_rng < rng.vmax+1
       for b in self.bufs:
-        if rng in (i:=b.src[1].get_idx()).toposort():
+        if (i:=b.src[1].get_idx()).in_graph(rng):
           replaces[b] = b.replace(src=(b.src[0],(valid&b.src[1].get_valid()).where(i, UOp.invalid())))
       self.ast = self.ast.substitute(replaces, f"padto {rng.arg[:-1]} {opt.arg}")
     elif opt.op is OptOps.SWAP:
@@ -311,7 +311,7 @@ class Scheduler:
             tc_uop = UOp(Ops.UNROLL, tc.dtype_out, (wmma,), arg=tc_upcast_axes[2], tag=1)
 
             # preserve extra reduces
-            reduce_ranges = [x for x in UOp.sink(*reduceop.src[1:]).toposort() if x.op is Ops.RANGE and x.arg[0] not in tc_reduce_axes]
+            reduce_ranges = [x for x in UOp.sink(*reduceop.src[1:]).ranges if x.arg[0] not in tc_reduce_axes]
             if len(reduce_ranges): tc_uop = UOp(Ops.REDUCE, tc_uop.dtype, (tc_uop,)+tuple(reduce_ranges), Ops.ADD)
             self.ast = self.ast.substitute({reduceop: tc_uop})
           self.tensor_core = tc
@@ -354,7 +354,7 @@ def apply_opts(ast:UOp, ren:Renderer) -> UOp:
   elif not NOOPT and (ast.arg is None or ast.arg.applied_opts == ()):
     from tinygrad.codegen.opt.heuristic import hand_coded_optimizations
     # NOTE: hand_coded_optimizations doesn't support multiblock opts yet
-    if not any(u.op is Ops.BUFFERIZE for u in ast.toposort()):
+    if not ast.has_op(Ops.BUFFERIZE):
       k = hand_coded_optimizations(k)
   return k.get_optimized_ast(name_override=ast.arg.name if ast.arg is not None and ast.arg.name != "test" else None)
 
