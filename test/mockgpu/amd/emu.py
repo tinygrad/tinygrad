@@ -65,7 +65,7 @@ from tinygrad.runtime.autogen.amd.cdna.str_pcode import PCODE as PCODE_CDNA
 from tinygrad.runtime.autogen.amd.rdna3 import ins as ir3
 from tinygrad.runtime.autogen.amd.rdna4 import ins as ir4
 from tinygrad.runtime.autogen.amd.cdna import ins as irc
-from tinygrad.renderer.amd.dsl import VCC_LO, EXEC_LO, SCC, ttmp
+from tinygrad.renderer.amd.dsl import VCC_LO, EXEC_LO, EXEC_HI, SCC, ttmp
 from tinygrad.runtime.autogen.amd.common import Fmt, OpType
 from test.mockgpu.amd.pcode import parse_block, _FUNCS
 
@@ -243,6 +243,20 @@ ENDPGM_PC = 0xFFFFFFFFFFFFFFFF
 def _op_name(inst) -> str:
   if hasattr(inst, 'opx'): return f"{inst.opx.name}_{inst.opy.name}"  # VOPD has opx/opy not op
   return inst.op.name if hasattr(inst.op, 'name') else str(inst.op)
+
+_LANE_PCODE_OPS = {
+  'V_READLANE_B32',
+  'V_READFIRSTLANE_B32',
+  'V_READFIRSTLANE_B32_E32',
+  'V_READFIRSTLANE_B32_E64',
+  'V_WRITELANE_B32',
+  'V_PERMLANE64_B32_E32',
+}
+
+def _is_lane_pcode_op(op_name: str) -> bool:
+  return op_name in _LANE_PCODE_OPS or 'PERMLANE16' in op_name or 'PERMLANEX16' in op_name
+
+def _is_lane_pcode_inst(inst) -> bool: return _is_lane_pcode_op(_op_name(inst))
 
 def _to_u32(val: UOp) -> UOp:
   if val.dtype == dtypes.uint32: return val
@@ -571,8 +585,10 @@ class _Ctx:
     src1_off = self.inst_field(type(inst).src1) if hasattr(type(inst), 'src1') else None
     src2_off = self.inst_field(type(inst).src2) if hasattr(type(inst), 'src2') else None
     exec_lo = self.rsgpr_dyn(_c(EXEC_LO.offset))
+    exec_hi = self.rsgpr_dyn(_c(EXEC_HI.offset)) if HW_WAVE_SIZE > WAVE_SIZE else _c(0)
     srcs = {
-      'SRC0': src0_reg, 'VDST': vdst_off, 'EXEC_LO': exec_lo, 'EXEC': exec_lo.cast(dtypes.uint64), '_vgpr': self.vgpr,
+      'SRC0': src0_reg, 'VDST': vdst_off, 'EXEC_LO': exec_lo, 'EXEC': _u64(exec_lo, exec_hi), '_vgpr': self.vgpr,
+      'WAVE32': HW_WAVE_SIZE == 32, 'WAVE64': HW_WAVE_SIZE == 64, 'VGPR_STRIDE': _c(HW_WAVE_SIZE),
       'S0': self.rsrc_dyn(src0_off, _c(0, dtypes.int)) if 'WRITELANE' in op_name else src0_reg,
       'S1': self.rsrc_dyn(src1_off, _c(0, dtypes.int)) if src1_off is not None else _c(0),
       'S2': self.rsrc_dyn(src2_off, _c(0, dtypes.int)) if src2_off is not None else _c(0),
@@ -778,7 +794,7 @@ def _compile_sop(inst: ir3.SOP1|ir3.SOP2|ir3.SOPC|ir3.SOPK|ir4.SOP1|ir4.SOP2|ir4
 
 def _compile_vop12(inst: ir3.VOP1 | ir3.VOP1_SDST | ir3.VOP2 | ir4.VOP1 | ir4.VOP1_SDST | ir4.VOP2 | irc.VOP1 | irc.VOP2, ctx: _Ctx) -> UOp:
   op_name = _op_name(inst)
-  if op_name in ('V_READFIRSTLANE_B32_E32', 'V_PERMLANE64_B32_E32'): return ctx.compile_lane_pcode(inst.op, inst)
+  if _is_lane_pcode_op(op_name): return ctx.compile_lane_pcode(inst.op, inst)
   lane, exec_mask, bits = ctx.range(), ctx.rsgpr_dyn(_c(EXEC_LO.offset)), inst.canonical_op_bits
   literal = ctx.inst_field(type(inst).literal) if hasattr(type(inst), 'literal') else None  # type: ignore[union-attr]
   vdst_reg = ctx.inst_field(type(inst).vdst)
@@ -874,12 +890,7 @@ def _compile_vop3(inst: ir3.VOP3 | ir4.VOP3 | irc.VOP3, ctx: _Ctx) -> UOp:
   opsel, op_name = getattr(inst, 'opsel', 0) or 0, _op_name(inst)
 
   # Lane operations
-  if op_name in ('V_READLANE_B32', 'V_READFIRSTLANE_B32', 'V_READFIRSTLANE_B32_E64', 'V_WRITELANE_B32'):
-    return ctx.compile_lane_pcode(inst.op, inst)
-
-  # V_PERMLANE16_B32 / V_PERMLANEX16_B32: cross-lane swizzle via pcode
-  if 'PERMLANE16' in op_name or 'PERMLANEX16' in op_name:
-    return ctx.compile_lane_pcode(inst.op, inst)
+  if _is_lane_pcode_op(op_name): return ctx.compile_lane_pcode(inst.op, inst)
 
   # VOP3 VOPC (v_cmp_*_e64) - delegate to unified VOPC handler
   if 'V_CMP' in op_name or 'V_CMPX' in op_name:
@@ -1530,7 +1541,9 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
                   break
                 fxn, globals_list, is_barrier, inst = _ensure_compiled(pc)
                 # Run instruction on all sub-waves (1 for RDNA 32-lane, 2 for CDNA4 64-lane)
-                for sw_idx, sw_bufs in enumerate(c_bufs):
+                # Cross-lane pcode ops execute once with full-wave EXEC/VGPR context on cdna4.
+                run_single = HW_WAVE_SIZE > WAVE_SIZE and _is_lane_pcode_inst(inst)
+                for sw_idx, sw_bufs in enumerate(c_bufs[:1] if run_single else c_bufs):
                   if sw_idx > 0:
                     # Save sub-wave 0's full state (including advanced PC and scalar results)
                     saved_sgpr_list = list(st._sgpr_mv)

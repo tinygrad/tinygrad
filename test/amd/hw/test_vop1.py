@@ -5,6 +5,7 @@ Includes: v_mov_b32, v_cvt_*, v_sin_f32, v_rcp_f32, v_exp_f32, v_rndne_f32,
           v_readfirstlane_b32
 """
 import unittest
+import os
 from test.amd.hw.helpers import *
 
 class TestMov(unittest.TestCase):
@@ -686,6 +687,25 @@ class TestReadFirstLane(unittest.TestCase):
     st = run_program(instructions, n_lanes=4)
     for lane in range(4):
       self.assertEqual(st.vgpr[lane][8], 200)
+
+
+@unittest.skipUnless(os.environ.get("MOCKGPU_ARCH") == "cdna4", "requires MOCKGPU_ARCH=cdna4")
+class TestReadFirstLaneCDNA4(unittest.TestCase):
+  """CDNA4 wave64 regression tests for V_READFIRSTLANE_B32."""
+
+  def test_v_readfirstlane_b32_uses_exec_hi_lane_32(self):
+    instructions = [
+      v_add_nc_u32_e32(v[0], 1000, v[255]),  # lane i -> 1000 + i
+      s_mov_b32(EXEC_LO, 0),
+      s_mov_b32(EXEC_HI, 1),                 # only lane 32 active
+      v_readfirstlane_b32_e32(s[0], v[0]),
+      s_mov_b32(EXEC_LO, 0xFFFFFFFF),
+      s_mov_b32(EXEC_HI, 0xFFFFFFFF),
+      v_mov_b32_e32(v[1], s[0]),
+    ]
+    st = run_program(instructions, n_lanes=64)
+    for lane in range(64):
+      self.assertEqual(st.vgpr[lane][1], 1032)
 
 
 class TestCvtF16Modifiers(unittest.TestCase):
@@ -1560,6 +1580,7 @@ class TestCvtNormF16(unittest.TestCase):
     self.assertAlmostEqual(result, 32768, delta=1)
 
 
+@unittest.skipIf(os.environ.get("MOCKGPU_ARCH") == "cdna4", "wave64 behavior on cdna4 differs from wave32 NOP expectation")
 class TestPermlane64(unittest.TestCase):
   """Tests for V_PERMLANE64_B32 instruction (wave64 cross-half swap)."""
 

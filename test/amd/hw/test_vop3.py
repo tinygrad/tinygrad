@@ -4,6 +4,7 @@ Includes: v_fma_f32, v_div_scale_f32, v_div_fmas_f32, v_div_fixup_f32,
           v_alignbit_b32, v_bfe_i32, v_mad_u64_u32, v_readlane_b32, v_writelane_b32
 """
 import unittest
+import os
 from test.amd.hw.helpers import *
 
 class TestFMA(unittest.TestCase):
@@ -850,6 +851,47 @@ class TestLaneOps(unittest.TestCase):
     # Check the sum
     for lane in range(4):
       self.assertEqual(st.vgpr[lane][7], 100, f"Sum should be 100, got {st.vgpr[lane][7]}")
+
+
+@unittest.skipUnless(os.environ.get("MOCKGPU_ARCH") == "cdna4", "requires MOCKGPU_ARCH=cdna4")
+class TestLaneOpsCDNA4(unittest.TestCase):
+  """CDNA4 wave64 regression tests for cross-lane operations."""
+
+  def _readlane(self, sdst, vsrc, lane_idx):
+    return v_readlane_b32(sdst, vsrc, lane_idx)
+
+  def test_v_readlane_b32_lane_40_vgpr0_and_vgpr5(self):
+    instructions = [
+      v_add_nc_u32_e32(v[0], 1000, v[255]),   # lane i -> 1000 + i
+      v_lshlrev_b32_e32(v[5], 1, v[255]),     # lane i -> 2*i
+      v_add_nc_u32_e32(v[5], 2000, v[5]),     # lane i -> 2000 + 2*i
+      self._readlane(s[0], v[0], 40),         # expect 1040
+      self._readlane(s[1], v[5], 40),         # expect 2080
+      v_mov_b32_e32(v[1], s[0]),
+      v_mov_b32_e32(v[2], s[1]),
+    ]
+    st = run_program(instructions, n_lanes=64)
+    for lane in range(64):
+      self.assertEqual(st.vgpr[lane][1], 1040)
+      self.assertEqual(st.vgpr[lane][2], 2080)
+
+  def test_v_writelane_b32_lane_40_no_mirror_to_lane_8(self):
+    write_val = 0xA5A5A5A5
+    instructions = [
+      v_mov_b32_e32(v[0], 0),
+      s_mov_b32(s[0], write_val),
+      v_writelane_b32(v[0], s[0], 40),
+      self._readlane(s[1], v[0], 40),
+      self._readlane(s[2], v[0], 8),
+      v_mov_b32_e32(v[1], s[1]),
+      v_mov_b32_e32(v[2], s[2]),
+    ]
+    st = run_program(instructions, n_lanes=64)
+    self.assertEqual(st.vgpr[40][0], write_val)
+    self.assertEqual(st.vgpr[8][0], 0)
+    for lane in range(64):
+      self.assertEqual(st.vgpr[lane][1], write_val)
+      self.assertEqual(st.vgpr[lane][2], 0)
 
 
 class TestF16Modifiers(unittest.TestCase):
@@ -3615,6 +3657,7 @@ class TestPermlane(unittest.TestCase):
     for lane in range(4):
       self.assertEqual(st.vgpr[lane][1], 0xCAFEBABE)
 
+  @unittest.skipIf(os.environ.get("MOCKGPU_ARCH") == "cdna4", "wave64 permlanex16 semantics differ from wave32 expectation")
   def test_v_permlanex16_b32_identity(self):
     """V_PERMLANEX16_B32 cross-row read with identity selection."""
     # In wave32: row 0 (lanes 0-15) reads from row 1 (lanes 16-31) and vice versa
