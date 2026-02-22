@@ -112,10 +112,7 @@ class recursive_property(property):
   def __get__(self, x:UOp|None, owner=None):
     if x is None: return self
     if (nm := self.nm) in x.__dict__: return x.__dict__[nm]
-    # fast path: if all children already have this property cached, just compute for x
-    if all(nm in s.__dict__ for s in x.src):
-      x.__dict__[nm] = self.fxn(x)
-      return x.__dict__[nm]
+    if all(nm in s.__dict__ for s in x.src): return x.__dict__.setdefault(nm, self.fxn(x))
     for node in x._toposort_gated(lambda node: nm not in node.__dict__): node.__dict__[nm] = self.fxn(node)
     return x.__dict__[nm]
 
@@ -191,14 +188,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     return False
 
   def topovisit(self, visitor:Callable[[UOp], T], cache:dict[UOp, T]) -> T:
-    stack: list[tuple[UOp, bool]] = [(self, False)]
-    while stack:
-      node, visited = stack.pop()
-      if node in cache: continue
-      if not visited:
-        stack.append((node, True))
-        for s in reversed(node.src): stack.append((s, False))
-      else: cache[node] = visitor(node)
+    for node in self._toposort_gated(lambda node: node not in cache): cache[node] = visitor(node)
     return cache[self]
 
   # returns map of UOps to their consumers in the graph rooted by self
@@ -388,24 +378,8 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
   def substitute(self, dvars:dict[UOp, UOp], name:str|None=None, extra_pm:PatternMatcher|None=None):
     dvars = {k:v for k,v in dvars.items() if k is not v}
     if len(dvars) == 0: return self
-    if extra_pm is not None or name is not None:
-      with Context(TRACK_MATCH_STATS=(0 if name is None else TRACK_MATCH_STATS.value)):
-        return graph_rewrite(self, (extra_pm+_substitute) if extra_pm is not None else _substitute, dvars, bottom_up=True, name=name)
-    # fast path: single-pass substitution without graph_rewrite overhead
-    rep: dict[UOp, UOp] = {}
-    stack: list[tuple[UOp, bool]] = [(self, False)]
-    while stack:
-      u, visited = stack.pop()
-      if u in rep: continue
-      v = dvars.get(u, u)
-      if not visited:
-        stack.append((u, True))
-        for s in v.src:
-          if s not in rep: stack.append((s, False))
-      else:
-        new_src = tuple(rep.get(s, s) for s in v.src)
-        rep[u] = UOp(v.op, v.dtype, new_src, v.arg, v.tag) if new_src != v.src else v
-    return rep[self]
+    with Context(TRACK_MATCH_STATS=(0 if name is None else TRACK_MATCH_STATS.value)):
+      return graph_rewrite(self, (extra_pm+_substitute) if extra_pm is not None else _substitute, dvars, bottom_up=True, name=name)
   # NOTE: this is not called by Tensor slice (Tensor handles UOps directly), but satisfies SupportsIndex for type checking
   def __index__(self): return self.__int__()
 
@@ -667,12 +641,9 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     return None
   @recursive_property
   def _bufferize_cost(self) -> tuple[frozenset, bool]:
-    """(reachable_bufs, has_buf_in_reduce) for the remove_bufferize cost function.
-    reachable_bufs: PARAM/BUFFERIZE(global)/MSTACK reachable without crossing those boundaries.
-    has_buf_in_reduce: any REDUCE in subtree (within boundaries) has buffer-accessing sources."""
-    if (self.op is Ops.BUFFERIZE and self.arg.addrspace == AddrSpace.GLOBAL) or self.op is Ops.MSTACK:
+    """(reachable_bufs, has_buf_in_reduce) for remove_bufferize cost function."""
+    if (self.op is Ops.BUFFERIZE and self.arg.addrspace == AddrSpace.GLOBAL) or self.op in {Ops.MSTACK, Ops.PARAM}:
       return (frozenset({self}), False)
-    if self.op is Ops.PARAM: return (frozenset({self}), False)
     bufs: frozenset = frozenset()
     has_reduce_buf = False
     for s in self.src:
@@ -1306,6 +1277,7 @@ class RewriteContext:
       n, stage, new_n = stack.pop()
       if n in replace: continue  # skip any nodes we have seen
       if stage == 0:
+        # if bottom up, we rewrite this node early. in both cases, we add its srcs to the stack
         if self.bpm is not None:
           # apply rewrite rules until a fixed point is reached
           try:
@@ -1314,16 +1286,19 @@ class RewriteContext:
               new_n = test_n
             else: raise RuntimeError("infinite loop in fixed_point_rewrite")
           except BottomUpGate:
+            # if the bpm matching raised a gate, we are done with this node and dont continue down the srcs
             replace[n] = new_n
             if n in waitlist: stack.extend(waitlist.pop(n))
             continue
         stack.append((n, 1, new_n))
+        # NOTE: CALL is handled as a special case. The function that is called is not included in the graph_rewrite.
         if new_n.op is Ops.CALL and not self.rewrite_into_calls: replace[new_n.src[0]] = new_n.src[0]
         for x in reversed(new_n.src):
           if x in on_stack: continue
           stack.append((x, 0, x))
           on_stack.add(x)
       elif stage == 1:
+        # once all srcs are rewritten, rebuild (if changed) or run top-down rewrite
         changed = False
         for x in new_n.src:
           if (rx:=replace.get(x, SENTINEL)) is SENTINEL:
@@ -1337,10 +1312,13 @@ class RewriteContext:
               if n in waitlist: stack.extend(waitlist.pop(n))
               continue
           else:
+            # srcs changed from rewrites, construct a new UOp with the new srcs
             new_src_n = UOp(new_n.op, new_n.dtype, tuple(replace[x] for x in new_n.src), new_n.arg, new_n.tag)
+          # trigger a rewrite of new_src_n, then after that rewrite is done, link it back to n
           stack.append((n, 2, new_src_n))
           stack.append((new_src_n, 0, new_src_n))
       else:
+        # in stage 2, we link the result of new_n to the result of n
         if (replaced_new_n:=replace.get(new_n, SENTINEL)) is SENTINEL:
           waitlist.setdefault(new_n, []).append((n, 2, new_n))
         else:
