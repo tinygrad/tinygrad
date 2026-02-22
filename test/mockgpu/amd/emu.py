@@ -851,8 +851,9 @@ def _compile_smem(inst: ir3.SMEM | ir4.SMEM, ctx: _Ctx) -> UOp:
   part = op_name.rsplit('_', 1)[1]  # B32, DWORD, DWORDX2, U8, I8, etc.
   nval = int(part.removeprefix('DWORD').removeprefix('X') or '1') if 'DWORD' in part else int(part[1:]) / 32 * (-1 if part[0] == 'I' else 1)
   ndwords = max(1, int(abs(nval)))
-  dword_base = addr >> UOp.const(dtypes.uint64, 2)
-  vals = [ctx.vmem.index((dword_base + UOp.const(dtypes.uint64, i)).cast(dtypes.int)) for i in range(ndwords)]
+  safe_addr = _clamp_addr(addr)
+  dword_base = safe_addr >> UOp.const(dtypes.uint64, 2)
+  vals = [ctx.vmem.index((dword_base + UOp.const(dtypes.uint64, i)).cast(dtypes.int64)) for i in range(ndwords)]
   if abs(nval) < 1:
     nbits = int(abs(nval) * 32)
     byte_off = (addr & UOp.const(dtypes.uint64, 3)).cast(dtypes.uint32) * UOp.const(dtypes.uint32, 8)
@@ -1607,7 +1608,9 @@ def _compile_mem_op(inst: ir3.DS|ir3.FLAT|ir3.GLOBAL|ir3.SCRATCH|ir4.DS|ir4.VFLA
     return UOp.sink(*stores, *ctx.inc_pc())
 
   def make_addr(lane: UOp) -> UOp:
-    if is_lds: return ctx.rvgpr_dyn(addr_reg, lane)
+    if is_lds:
+      lane_active = _lane_active(exec_mask, lane)
+      return lane_active.where(ctx.rvgpr_dyn(addr_reg, lane), _c(0))
     offset64 = offset.cast(dtypes.uint64)
     # Dynamic saddr check: saddr < 124 means valid SGPR, otherwise use VGPR pair for address
     use_saddr = (saddr_reg < _c(124)) if saddr_reg is not None else UOp.const(dtypes.bool, False)
@@ -1616,21 +1619,27 @@ def _compile_mem_op(inst: ir3.DS|ir3.FLAT|ir3.GLOBAL|ir3.SCRATCH|ir4.DS|ir4.VFLA
       base = lane.cast(dtypes.uint64) * scratch_stride
       # SVE (Scratch VGPR Enable): when SVE=1, VADDR is used as offset; when SVE=0, VADDR is ignored
       sve = getattr(inst, 'sve', 0)
-      vaddr = ctx.rvgpr_dyn(addr_reg, lane).cast(dtypes.uint64)
+      lane_active = _lane_active(exec_mask, lane)
+      vaddr = lane_active.where(ctx.rvgpr_dyn(addr_reg, lane).cast(dtypes.uint64), UOp.const(dtypes.uint64, 0))
       addr_offset = vaddr if sve == 1 else UOp.const(dtypes.uint64, 0)
       # Add saddr value only if use_saddr is true (saddr < 124)
       saddr_contrib = use_saddr.where(ctx.rsgpr_dyn(saddr_reg).cast(dtypes.uint64), UOp.const(dtypes.uint64, 0)) \
         if saddr_reg is not None else UOp.const(dtypes.uint64, 0)
       return base + addr_offset + saddr_contrib + offset64
     # FLAT/GLOBAL: choose between SGPR base (saddr) or VGPR pair (addr) based on saddr validity
+    lane_active = _lane_active(exec_mask, lane)
     saddr_base = _u64(ctx.rsgpr_dyn(saddr_reg), ctx.rsgpr_dyn(saddr_reg + _c(1))) if saddr_reg is not None else UOp.const(dtypes.uint64, 0)
-    vaddr_base = _u64(ctx.rvgpr_dyn(addr_reg, lane), ctx.rvgpr_dyn(addr_reg + _c(1), lane))
+    vaddr_lo = lane_active.where(ctx.rvgpr_dyn(addr_reg, lane), _c(0))
+    vaddr_hi = lane_active.where(ctx.rvgpr_dyn(addr_reg + _c(1), lane), _c(0))
+    vaddr_base = _u64(vaddr_lo, vaddr_hi)
     # When saddr is valid: base = saddr pair, vaddr is 32-bit offset; otherwise: base = 0, vaddr is 64-bit address
-    base_addr = use_saddr.where(saddr_base + ctx.rvgpr_dyn(addr_reg, lane).cast(dtypes.uint64), vaddr_base)
-    return base_addr + offset64
+    base_addr = use_saddr.where(saddr_base + vaddr_lo.cast(dtypes.uint64), vaddr_base)
+    return _clamp_addr(base_addr + offset64)
 
   def wmem(addr: UOp, val: UOp, active: UOp) -> UOp:
-    idx = mem.index((addr >> addr_shift).cast(dtypes.int))
+    idx_dt = dtypes.int if is_lds or is_scratch else dtypes.int64
+    clamped_addr = active.where(addr, addr.const_like(0)) if is_lds or is_scratch else _clamp_addr(addr)
+    idx = mem.index((clamped_addr >> addr_shift).cast(idx_dt))
     return idx.store(active.where(val, idx.load()))
 
   def make_srcs(lane: UOp) -> dict:
@@ -1914,6 +1923,7 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
   # Only trace the first workgroup (like real HW traces one CU/SIMD), subsequent workgroups run but don't add to trace
   tracing = bool(PROFILE)
 
+  _get_trash_page_addr()
   with _MXCSRContext():
     for gidz in range(gz):
       for gidy in range(gy):
