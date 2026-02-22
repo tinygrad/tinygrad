@@ -12,6 +12,8 @@ SDMA_MAX_COPY_SIZE = 0x400000
 
 regCOMPUTE_PGM_LO = 0x1bac + amd_gpu.GC_BASE__INST0_SEG0
 regCOMPUTE_PGM_RSRC2 = 0x1bb3 + amd_gpu.GC_BASE__INST0_SEG0
+# gfx950 (cdna4) uses a different SH register address than the gfx11+ amd_gpu constant.
+regCOMPUTE_PGM_RSRC3 = ((0x1bcd if MOCKGPU_ARCH == "cdna4" else amd_gpu.regCOMPUTE_PGM_RSRC3) + amd_gpu.GC_BASE__INST0_SEG0)
 regCOMPUTE_TMPRING_SIZE = 0x1bb8 + amd_gpu.GC_BASE__INST0_SEG0
 regCOMPUTE_USER_DATA_0 = 0x1be0 + amd_gpu.GC_BASE__INST0_SEG0
 regCOMPUTE_NUM_THREAD_X = 0x1ba7 + amd_gpu.GC_BASE__INST0_SEG0
@@ -176,7 +178,10 @@ class PM4Executor(AMDQueue):
   def _exec_set_reg(self, n, off):
     reg = off + self._next_dword()
     for i in range(n):
-      self.gpu.regs[reg] = self._next_dword()
+      val = self._next_dword()
+      self.gpu.regs[reg] = val
+      if getenv("MOCKGPU_TRACE_SET_SH_REGS", 0) and off == pm4.PACKET3_SET_SH_REG_START and 0x2e00 <= reg <= 0x2e40:
+        print(f"[mockgpu] set_sh_reg 0x{reg:x}=0x{val:x}")
       reg += 1
 
   def _exec_dispatch_direct(self, n):
@@ -199,17 +204,24 @@ class PM4Executor(AMDQueue):
     for st,sz in self.gpu.mapped_ranges:
       if st <= prg_addr < st+sz: prg_sz = sz - (prg_addr - st)
 
-    # Get scratch size from COMPUTE_TMPRING_SIZE register
-    # For gfx11: WAVESIZE = ceildiv(64 * size_per_thread, 256), so size_per_thread ≈ WAVESIZE * 256 / 64 = WAVESIZE * 4
+    # Get scratch size from COMPUTE_TMPRING_SIZE register.
+    # WAVESIZE encodes wave_scratch = ceildiv(64 * size_per_thread, mem_alignment_size).
+    # gfx9 (cdna4): mem_alignment_size=1024 -> size_per_thread ~= WAVESIZE * 16
+    # gfx11/12 (rdna3/4): mem_alignment_size=256 -> size_per_thread ~= WAVESIZE * 4
     try: tmpring_size = self.gpu.regs[regCOMPUTE_TMPRING_SIZE]
     except KeyError: tmpring_size = 0
     wavesize = (tmpring_size >> 12) & 0x3FFF  # WAVESIZE field is bits 12:25 for gfx11
-    scratch_size = wavesize * 4  # This gives the scratch size per thread (lane)
+    scratch_size = wavesize * (16 if self.gpu.arch in {"cdna", "cdna4"} else 4)  # rounded per-lane private segment size
 
     assert prg_sz > 0, "Invalid prg ptr (not found in mapped ranges)"
     # Pass valid memory ranges, rsrc2, scratch_size, arch, and user data registers to Python emulator
     if hasattr(remu, 'valid_mem_ranges'): remu.valid_mem_ranges = self.gpu.mapped_ranges
     if hasattr(remu, 'rsrc2'): remu.rsrc2 = rsrc2
+    if hasattr(remu, 'rsrc3'):
+      try: remu.rsrc3 = self.gpu.regs[regCOMPUTE_PGM_RSRC3]
+      except KeyError: remu.rsrc3 = None
+    if getenv("MOCKGPU_TRACE_DISPATCH_RSRC", 0):
+      print(f"[mockgpu] dispatch rsrc2=0x{rsrc2:x} rsrc3={None if getattr(remu,'rsrc3',None) is None else hex(remu.rsrc3)}")
     if hasattr(remu, 'scratch_size'): remu.scratch_size = scratch_size
     if hasattr(remu, 'arch'): remu.arch = self.gpu.arch
     if hasattr(remu, 'user_data'): remu.user_data = user_data

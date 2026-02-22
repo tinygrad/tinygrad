@@ -480,6 +480,9 @@ class AMDHIPRenderer(CStyleLanguage):
     from tinygrad.runtime.support.compiler_amd import HIPCompiler
     self.arch, self.compiler = arch, HIPCompiler(arch)
     self.tensor_cores = self.get_tensor_cores(arch)
+    # MOCKGPU cdna4 emulator doesn't model ACCVGPR/MFMA instructions yet.
+    # Keep real gfx950 behavior unchanged; only disable tensor-core codegen in mockgpu.
+    if getenv("MOCKGPU") and self.is_cdna4(self.arch): self.tensor_cores = []
     if not self.is_cdna4(self.arch): self.extra_matcher += pm_manual_bf16_cast + extra_pm
     if self.is_cdna(self.arch):
       self.string_rewrite = PatternMatcher([

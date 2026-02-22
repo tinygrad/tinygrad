@@ -566,6 +566,11 @@ class Parser:
 
   def _handle_dot(self, base, field: str) -> UOp:
     assert isinstance(base, UOp), f"expected UOp for dot access, got {type(base)}"
+    if (var_name := self._find_var_name(base)) is not None:
+      dotted = self.vars.get(f'{var_name}.{field}')
+      if dotted is not None:
+        assert isinstance(dotted, UOp), f"expected UOp for {var_name}.{field}, got {type(dotted)}"
+        return dotted
     if field == 'u64' and self.at('LBRACKET') and self.peek(1).type == 'IDENT' and self.peek(1).val == 'laneId':
       self.eat('LBRACKET')
       self.eat_val('laneId', 'IDENT')

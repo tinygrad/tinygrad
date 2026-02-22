@@ -339,6 +339,8 @@ class AMDComputeQueue(HWQueue):
     user_regs += [*data64_le(args_state.buf.va_addr)]
 
     if prg.dev.sqtt_enabled: self.sqtt_setup_exec(prg, global_size)
+    if getenv("MOCKGPU_TRACE_PRG_DISPATCH", 0):
+      print(f"[ops_amd] dispatch {prg.name} priv={prg.private_segment_size} rsrc2=0x{prg.rsrc2:x} rsrc3=0x{prg.rsrc3:x} wave32={int(prg.wave32)}")
 
     self.wreg(self.gc.regCOMPUTE_PGM_LO, *data64_le(prg.prog_addr >> 8))
     self.wreg(self.gc.regCOMPUTE_PGM_RSRC1, prg.rsrc1, prg.rsrc2)

@@ -265,6 +265,7 @@ exit: %packed = phi i32 [%packed_bf8, %do_bf8], [%packed_fp8, %do_fp8]\n  %trunc
     from tinygrad.runtime.support.compiler_amd import AMDLLVMCompiler
     self.arch, self.compiler = arch, AMDLLVMCompiler(arch)
     self.tensor_cores = AMDHIPRenderer.get_tensor_cores(arch)
+    if getenv("MOCKGPU") and AMDHIPRenderer.is_cdna4(self.arch): self.tensor_cores = []
     self.is_cdna = AMDHIPRenderer.is_cdna(arch)
     self.string_rewrite += PatternMatcher([(UPat(Ops.WMMA, name="wmma"), lambda ctx, wmma, cdna=self.is_cdna: render_wmma_amd(ctx, wmma, cdna))])
     if self.is_cdna:
