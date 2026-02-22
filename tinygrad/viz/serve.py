@@ -512,6 +512,7 @@ def amdgpu_cfg(lib:bytes, target:str) -> dict:
   lines:list[str] = []
   disasm = {pc:str(inst) for pc,inst in pc_table.items()}
   asm_width = max(len(asm) for asm in disasm.values())
+  # TODO: have a smaller view for repeated padding instructions
   for pc, inst in pc_table.items():
     lines.append(f"  {disasm[pc]:<{asm_width}}  // {pc:012X}")
     if pc in leaders:
