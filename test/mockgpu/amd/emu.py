@@ -670,7 +670,7 @@ class _Ctx:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def _compile_sopp(inst: ir3.SOPP | ir4.SOPP, ctx: _Ctx) -> UOp:
-  simm16 = ctx.inst_field_signed(type(inst).simm16).cast(dtypes.int16)
+  simm16 = ctx.inst_field_signed(type(inst).simm16)
   if inst.op in (ir3.SOPPOp.S_ENDPGM, ir4.SOPPOp.S_ENDPGM, irc.SOPPOp.S_ENDPGM):
     return UOp.sink(ctx.wsgpr_dyn(_c(PC_LO_IDX), UOp.const(dtypes.uint32, 0xFFFFFFFF)),
                           ctx.wsgpr_dyn(_c(PC_HI_IDX), UOp.const(dtypes.uint32, 0xFFFFFFFF)))
@@ -680,6 +680,23 @@ def _compile_sopp(inst: ir3.SOPP | ir4.SOPP, ctx: _Ctx) -> UOp:
   if inst.op in barrier_ops: return UOp.sink(*ctx.inc_pc())
   # S_NOP and S_WAITCNT are no-ops in emulator (no pipeline/cache to wait on)
   if inst.op in (ir3.SOPPOp.S_NOP, ir4.SOPPOp.S_NOP, irc.SOPPOp.S_NOP, irc.SOPPOp.S_WAITCNT): return UOp.sink(*ctx.inc_pc())
+
+  # Branch instructions: use int64 arithmetic to avoid SIMM16*4 overflow (>32KB kernels)
+  op_name = inst.op.name
+  if op_name.startswith('S_BRANCH') or op_name.startswith('S_CBRANCH'):
+    pc_bytes = ctx.rpc().cast(dtypes.int64)
+    branch_target = pc_bytes + simm16.cast(dtypes.int64) * UOp.const(dtypes.int64, 4) + UOp.const(dtypes.int64, 4)
+    if op_name == 'S_BRANCH': new_pc = branch_target
+    else:
+      vcc, exec_lo, scc = ctx.rsgpr_dyn(_c(VCC_LO.offset)), ctx.rsgpr_dyn(_c(EXEC_LO.offset)), ctx.rsgpr_dyn(_c(SCC.offset))
+      z32, o32 = UOp.const(dtypes.uint32, 0), UOp.const(dtypes.uint32, 1)
+      conds = {'SCC0': scc.eq(z32), 'SCC1': scc.eq(o32), 'VCCNZ': vcc.ne(z32), 'VCCZ': vcc.eq(z32),
+               'EXECNZ': exec_lo.ne(z32), 'EXECZ': exec_lo.eq(z32)}
+      cond = next((c for suffix, c in conds.items() if suffix in op_name), UOp.const(dtypes.bool, True))
+      new_pc = cond.where(branch_target, pc_bytes + UOp.const(dtypes.int64, 4))
+    lo, hi = _split64(new_pc.cast(dtypes.uint64))
+    return UOp.sink(ctx.wsgpr_dyn(_c(PC_LO_IDX), lo), ctx.wsgpr_dyn(_c(PC_HI_IDX), hi))
+
   # NOTE: we ignore SOPPs without PCODE
   if inst.op in _get_pcode_dict(inst.op):
     pcode = get_pcode(inst.op)
@@ -1162,11 +1179,12 @@ def _compile_mem_op(inst: ir3.DS|ir3.FLAT|ir3.GLOBAL|ir3.SCRATCH|ir4.DS|ir4.VFLA
     offset = ctx.inst_field_signed(type(inst).ioffset)
     offset0, offset1 = _c(0), _c(0)
     saddr_reg = ctx.inst_field(type(inst).saddr) if hasattr(type(inst), 'saddr') else None
-  else:  # RDNA3: addr, data, offset
+  else:
     addr_reg = ctx.inst_field(type(inst).addr)  # type: ignore[union-attr]
     vdata_reg = ctx.inst_field(type(inst).data)  # type: ignore[union-attr]
     vdst_reg = ctx.inst_field(type(inst).vdst)
-    offset = ctx.inst_field_signed(type(inst).offset)  # type: ignore[union-attr]
+    _flat_types = tuple(t for t in [getattr(ir3, 'FLAT', None), getattr(irc, 'FLAT', None)] if t is not None)
+    offset = ctx.inst_field(type(inst).offset) if isinstance(inst, _flat_types) else ctx.inst_field_signed(type(inst).offset)  # type: ignore
     offset0, offset1 = _c(0), _c(0)
     saddr_reg = ctx.inst_field(type(inst).saddr) if hasattr(type(inst), 'saddr') else None  # type: ignore[union-attr]
 
