@@ -756,13 +756,12 @@ class TestAssignOrdering(unittest.TestCase):
     np.testing.assert_equal(b.numpy(), [1, 2, 3, 4])
 
   def test_variable_slice_ordering(self):
-    """Variable-indexed slices - tests symbolic dependency tracking."""
+    """Variable-indexed slices with conflicting bindings are not allowed."""
     v_i = Variable("i", 0, 3)
     buf = Tensor.zeros(4, 4).contiguous().realize()
     buf[v_i.bind(0):v_i.bind(0)+1, :].assign(Tensor.ones(1, 4))
     buf[v_i.bind(1):v_i.bind(1)+1, :].assign(Tensor.ones(1, 4) * 2)
-    self.assertEqual(buf[0:1, :].sum().item(), 4)
-    self.assertEqual(buf[1:2, :].sum().item(), 8)
+    with self.assertRaises(RuntimeError): buf.sum().realize()
 
   def test_multi_step_assign_read_write_same_buffer(self):
     """Assign to m and param reading b, then update b, across multiple steps.
