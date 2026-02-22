@@ -1584,11 +1584,12 @@ def _compile_mem_op(inst: ir3.DS|ir3.FLAT|ir3.GLOBAL|ir3.SCRATCH|ir4.DS|ir4.VFLA
     offset = ctx.inst_field_signed(type(inst).ioffset)
     offset0, offset1 = _c(0), _c(0)
     saddr_reg = ctx.inst_field(type(inst).saddr) if hasattr(type(inst), 'saddr') else None
-  else:  # RDNA3: addr, data, offset
+  else:
     addr_reg = ctx.inst_field(type(inst).addr)  # type: ignore[union-attr]
     vdata_reg = ctx.inst_field(type(inst).data)  # type: ignore[union-attr]
     vdst_reg = ctx.inst_field(type(inst).vdst)
-    offset = ctx.inst_field_signed(type(inst).offset)  # type: ignore[union-attr]
+    _flat_types = tuple(t for t in [getattr(ir3, 'FLAT', None), getattr(irc, 'FLAT', None)] if t is not None)
+    offset = ctx.inst_field(type(inst).offset) if isinstance(inst, _flat_types) else ctx.inst_field_signed(type(inst).offset)  # type: ignore
     offset0, offset1 = _c(0), _c(0)
     saddr_reg = ctx.inst_field(type(inst).saddr) if hasattr(type(inst), 'saddr') else None  # type: ignore[union-attr]
 
