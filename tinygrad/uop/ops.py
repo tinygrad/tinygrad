@@ -372,7 +372,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     if not tracked and '_simplified' in self.__dict__: return self.__dict__['_simplified']
     from tinygrad.uop.symbolic import symbolic
     with Context(TRACK_MATCH_STATS=0 if not tracked else TRACK_MATCH_STATS.value):
-      ret = graph_rewrite(self, symbolic, name="simplify")
+      ret = graph_rewrite(self, symbolic, spm=symbolic, name="simplify")
     if not tracked: self.__dict__['_simplified'] = ret
     return ret
   def ssimplify(self) -> UOp|ConstType: return ret.arg if (ret:=self.simplify()).op is Ops.CONST else ret
@@ -392,12 +392,20 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     if extra_pm is not None or name is not None:
       with Context(TRACK_MATCH_STATS=(0 if name is None else TRACK_MATCH_STATS.value)):
         return graph_rewrite(self, (extra_pm+_substitute) if extra_pm is not None else _substitute, dvars, bottom_up=True, name=name)
-    # fast path: direct substitution without graph_rewrite overhead
+    # fast path: single-pass substitution without graph_rewrite overhead
     rep: dict[UOp, UOp] = {}
-    for u in self.toposort():
+    stack: list[tuple[UOp, bool]] = [(self, False)]
+    while stack:
+      u, visited = stack.pop()
+      if u in rep: continue
       v = dvars.get(u, u)
-      new_src = tuple(rep.get(s, s) for s in v.src)
-      rep[u] = UOp(v.op, v.dtype, new_src, v.arg, v.tag) if new_src != v.src else v
+      if not visited:
+        stack.append((u, True))
+        for s in v.src:
+          if s not in rep: stack.append((s, False))
+      else:
+        new_src = tuple(rep.get(s, s) for s in v.src)
+        rep[u] = UOp(v.op, v.dtype, new_src, v.arg, v.tag) if new_src != v.src else v
     return rep[self]
   # NOTE: this is not called by Tensor slice (Tensor handles UOps directly), but satisfies SupportsIndex for type checking
   def __index__(self): return self.__int__()
@@ -658,6 +666,23 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     for x in self.src:
       if x._device is not None: return x._device
     return None
+  @recursive_property
+  def _bufferize_cost(self) -> tuple[frozenset, bool]:
+    """(reachable_bufs, has_buf_in_reduce) for the remove_bufferize cost function.
+    reachable_bufs: PARAM/BUFFERIZE(global)/MSTACK reachable without crossing those boundaries.
+    has_buf_in_reduce: any REDUCE in subtree (within boundaries) has buffer-accessing sources."""
+    if (self.op is Ops.BUFFERIZE and self.arg.addrspace == AddrSpace.GLOBAL) or self.op is Ops.MSTACK:
+      return (frozenset({self}), False)
+    if self.op is Ops.PARAM: return (frozenset({self}), False)
+    bufs: frozenset = frozenset()
+    has_reduce_buf = False
+    for s in self.src:
+      s_bufs, s_has = s._bufferize_cost
+      if s_bufs: bufs = bufs | s_bufs
+      has_reduce_buf = has_reduce_buf or s_has
+    if self.op is Ops.REDUCE and bufs: has_reduce_buf = True
+    return (bufs, has_reduce_buf)
+
   @property
   def buf_uop(self) -> UOp:
     if self.op in {Ops.BUFFER, Ops.PARAM}: return self
@@ -681,7 +706,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     if self is not self.base:
       from tinygrad.schedule.rangeify import pm_mops
       from tinygrad.uop.symbolic import symbolic
-      out = graph_rewrite(self.flatten().index(UOp.range(self.size, 0)), pm_mops+symbolic)
+      out = graph_rewrite(self.flatten().index(UOp.range(self.size, 0)), pm_mops, spm=symbolic)
       buf = out.src[0].buffer
       assert isinstance(buf, Buffer), "must be a Buffer for movement ops"
       assert out.op is Ops.INDEX, "couldn't collapse to a single INDEX"
@@ -1255,16 +1280,26 @@ if TRACK_MATCH_STATS or PROFILE:
 SENTINEL: Final[UOp] = cast(UOp, object())
 class BottomUpGate(Exception): pass
 class RewriteContext:
-  def __init__(self, pm, bpm, ctx=None, rewrite_into_calls=False):
-    self.pm: PatternMatcher|None = pm
+  def __init__(self, pm, bpm, ctx=None, rewrite_into_calls=False, spm=None):
     self.bpm: PatternMatcher|None = bpm
     self.bpm_cache: dict[UOp, UOp|None] = {}
     self.ctx = ctx
     self.replace: dict[UOp, UOp] = {}
     self.rewrite_into_calls = rewrite_into_calls
+    # spm: stable pattern matcher whose fixed-point status is cached per-node
+    self.spm_id: int = id(spm) if spm is not None else 0
+    if spm is not None:
+      self.full_pm: PatternMatcher|None = (spm + pm) if (pm is not None and pm is not spm) else spm
+      self.lite_pm: PatternMatcher|None = pm if (pm is not None and pm is not spm) else None
+    else:
+      self.full_pm = pm
+      self.lite_pm = None
 
   # no cache needed: pm_rewrite is called at most once per UOp due to the replace dict check in unified_rewrite
-  def pm_rewrite(self, x:UOp) -> UOp|None: return unwrap(self.pm).rewrite(x, self.ctx)
+  def pm_rewrite(self, x:UOp) -> UOp|None:
+    if self.spm_id and x.__dict__.get('_spm_stable') == self.spm_id:
+      return self.lite_pm.rewrite(x, self.ctx) if self.lite_pm is not None else None
+    return unwrap(self.full_pm).rewrite(x, self.ctx)
 
   def cached_bpm_rewrite(self, x:UOp) -> UOp|None:
     if (ret:=self.bpm_cache.get(x,SENTINEL)) is not SENTINEL: return ret
@@ -1308,7 +1343,7 @@ class RewriteContext:
           if rx is not x: changed = True
         else:
           if not changed:
-            if self.pm is None or (new_src_n:=self.pm_rewrite(new_n)) is None:
+            if self.full_pm is None or (new_src_n:=self.pm_rewrite(new_n)) is None:
               replace[n] = new_n
               if n in waitlist: stack.extend(waitlist.pop(n))
               continue
@@ -1322,11 +1357,15 @@ class RewriteContext:
         else:
           replace[n] = replaced_new_n
           if n in waitlist: stack.extend(waitlist.pop(n))
+    if self.spm_id:
+      spm_id = self.spm_id
+      for u in replace.values(): u.__dict__['_spm_stable'] = spm_id
     return replace[root]
 
 @profile_matches
-def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False, name=None, bpm=None, rewrite_into_calls=False) -> UOp:
-  rewrite_ctx = RewriteContext(pm if not bottom_up else None, pm if bottom_up else bpm, ctx, rewrite_into_calls=rewrite_into_calls)
+def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False, name=None, bpm=None, rewrite_into_calls=False, spm=None) -> UOp:
+  rewrite_ctx = RewriteContext(pm if not bottom_up else None, pm if bottom_up else bpm, ctx,
+                               rewrite_into_calls=rewrite_into_calls, spm=spm)
   return rewrite_ctx.unified_rewrite(sink)
 
 def sint_to_uop(x:sint, dtype=dtypes.index) -> UOp: return UOp.const(dtype, x) if isinstance(x, int) else x.cast(dtype)
