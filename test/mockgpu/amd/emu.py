@@ -806,6 +806,10 @@ def _compile_vop12(inst: ir3.VOP1 | ir3.VOP1_SDST | ir3.VOP2 | ir4.VOP1 | ir4.VO
     if 'V_FMAA' in _op_name(inst) or 'V_FMAM' in _op_name(inst):
       assert literal is not None
       srcs['SIMM32'] = literal
+    # MADAK/MADMK_(DTYPE)_E32 series (CDNA, uses SIMM16)
+    if 'V_MADA' in _op_name(inst) or 'V_MADM' in _op_name(inst):
+      assert literal is not None
+      srcs['SIMM16'] = literal
   return ctx.compile_vop_pcode(inst.op, srcs, lane, vdst_reg, exec_mask, opsel_dst_hi=write_hi_half, src0_off=src0_off)
 
 def _compile_vopc(inst: ir3.VOPC|ir3.VOP3|ir4.VOPC|ir4.VOP3|irc.VOPC|irc.VOP3, ctx: _Ctx,

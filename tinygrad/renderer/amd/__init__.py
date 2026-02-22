@@ -46,6 +46,8 @@ def _load_formats() -> dict[str, list[type[Inst]]]:
     VOP3 as C_VOP3, VOP3_SDST as C_VOP3_SDST, VOP3SD as C_VOP3SD, VOP3P as C_VOP3P, VOP3P_MFMA as C_VOP3P_MFMA, VOP3PX2 as C_VOP3PX2,
     SOP1 as C_SOP1, SOP2 as C_SOP2, SOPC as C_SOPC, SOPK as C_SOPK, SOPK_LIT as C_SOPK_LIT, SOPP as C_SOPP, SMEM as C_SMEM, DS as C_DS,
     FLAT as C_FLAT, GLOBAL as C_GLOBAL, SCRATCH as C_SCRATCH, MUBUF as C_MUBUF)
+  # GFX950 comgr emits SMEM at format 61 (0b111101) instead of standard format 48 (0b110000). Same fields/opcodes, different prefix.
+  class C_SMEM_F61(C_SMEM): encoding = FixedBitField(31, 26, 0b111101)
   # Order matters: more specific encodings first, catch-alls (SOP2, VOP2) last
   # Order: base before _LIT (base matches regular ops, _LIT catches lit-only ops excluded from base)
   _FORMATS = {
@@ -54,7 +56,7 @@ def _load_formats() -> dict[str, list[type[Inst]]]:
     "rdna4": [R4_VOPD, R4_VOP3P, R4_VINTERP, R4_VOP3SD, R4_VOP3_SDST, R4_VOP3, R4_DS, R4_GLOBAL, R4_SCRATCH, R4_FLAT, R4_SMEM,
               R4_SOP1, R4_SOP1_LIT, R4_SOPC, R4_SOPC_LIT, R4_SOPP, R4_SOPK, R4_SOPK_LIT, R4_VOPC, R4_VOP1_SDST, R4_VOP1, R4_VOP1_LIT,
               R4_SOP2, R4_SOP2_LIT, R4_VOP2, R4_VOP2_LIT],
-    "cdna": [C_VOP3PX2, C_VOP3P_MFMA, C_VOP3P, C_VOP3SD, C_VOP3_SDST, C_VOP3, C_DS, C_GLOBAL, C_SCRATCH, C_FLAT, C_MUBUF, C_SMEM,
+    "cdna": [C_VOP3PX2, C_VOP3P_MFMA, C_VOP3P, C_VOP3SD, C_VOP3_SDST, C_VOP3, C_DS, C_GLOBAL, C_SCRATCH, C_FLAT, C_MUBUF, C_SMEM_F61, C_SMEM,
               C_SOP1, C_SOPC, C_SOPP, C_SOPK, C_SOPK_LIT, C_VOPC_SDWA_SDST, C_VOPC,
               C_VOP1_DPP16, C_VOP1_SDWA, C_VOP1, C_VOP2_DPP16, C_VOP2_SDWA, C_SOP2, C_VOP2, C_VOP2_LIT],
   }
