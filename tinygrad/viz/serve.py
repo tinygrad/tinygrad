@@ -402,7 +402,7 @@ def device_sort_fn(k:str) -> tuple:
 
 def get_profile(profile:list[ProfileEvent], sort_fn:Callable[[str], Any]=device_sort_fn) -> bytes|None:
   # start by getting the time diffs
-  device_decoders:dict[str, Callable[[list[ProfileEvent]], None]] = {}
+  device_decoders:dict[str, Callable[[list[dict], list[ProfileEvent]], None]] = {}
   for ev in profile:
     if isinstance(ev, ProfileDeviceEvent):
       device_ts_diffs[ev.device] = ev.tdiff

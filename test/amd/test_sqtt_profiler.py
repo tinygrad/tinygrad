@@ -52,15 +52,6 @@ class TestSQTTProfiler(unittest.TestCase):
     for i,k in enumerate(sched):
       self.assertEqual(sqtt[i]["name"], f"Exec {k.lower().prg.p.function_name}")
 
-  def test_multiple_kernels(self):
-    t = ((Tensor.empty(1) + 1).contiguous() + 2)
-    sched = t.schedule()
-    with save_sqtt() as sqtt:
-      for si in sched: si.lower().run()
-    self.assertEqual(len(sqtt), len(sched))
-    for i,k in enumerate(sched):
-      self.assertEqual(sqtt[i]["name"], f"Exec {k.lower().prg.p.function_name}")
-
   def test_multiple_kernels_lower(self):
     t = ((Tensor.empty(1) + 1).contiguous() + 2)
     sched = t.schedule()
