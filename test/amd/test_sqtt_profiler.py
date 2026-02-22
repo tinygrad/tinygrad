@@ -5,9 +5,6 @@ from tinygrad.viz.serve import load_amd_counters
 
 @contextlib.contextmanager
 def save_sqtt():
-  from tinygrad.device import Compiled
-  Device[Device.DEFAULT].synchronize()
-  Compiled.profile_events[:] = [e for e in Compiled.profile_events if type(e).__name__ != "ProfileSQTTEvent"]
   yield (ret:=[])
   Device[Device.DEFAULT].synchronize()
   Device[Device.DEFAULT]._at_profile_finalize()
