@@ -707,6 +707,20 @@ class TestReadFirstLaneCDNA4(unittest.TestCase):
     for lane in range(64):
       self.assertEqual(st.vgpr[lane][1], 1032)
 
+  def test_v_readfirstlane_b32_e64_uses_exec_hi_lane_32(self):
+    instructions = [
+      v_add_nc_u32_e32(v[0], 1000, v[255]),  # lane i -> 1000 + i
+      s_mov_b32(EXEC_LO, 0),
+      s_mov_b32(EXEC_HI, 1),                 # only lane 32 active
+      v_readfirstlane_b32_e64(s[0], v[0]),
+      s_mov_b32(EXEC_LO, 0xFFFFFFFF),
+      s_mov_b32(EXEC_HI, 0xFFFFFFFF),
+      v_mov_b32_e32(v[1], s[0]),
+    ]
+    st = run_program(instructions, n_lanes=64)
+    for lane in range(64):
+      self.assertEqual(st.vgpr[lane][1], 1032)
+
 
 class TestCvtF16Modifiers(unittest.TestCase):
   """Tests for V_CVT_F32_F16 with VOP3 abs/neg modifiers."""

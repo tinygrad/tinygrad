@@ -254,7 +254,7 @@ _LANE_PCODE_OPS = {
 }
 
 def _is_lane_pcode_op(op_name: str) -> bool:
-  return op_name in _LANE_PCODE_OPS or 'PERMLANE16' in op_name or 'PERMLANEX16' in op_name
+  return op_name in _LANE_PCODE_OPS or 'PERMLANE16' in op_name or 'PERMLANEX16' in op_name or 'PERMLANE32' in op_name
 
 def _is_lane_pcode_inst(inst) -> bool: return _is_lane_pcode_op(_op_name(inst))
 
@@ -305,7 +305,15 @@ def _get_pcode_dict(op) -> dict:
 @functools.cache
 def get_pcode(op) -> str:
   op_name = op.name
-  pcode = _get_pcode_dict(op)[op]
+  pcode_dict = _get_pcode_dict(op)
+  pcode_op = op
+  if pcode_op not in pcode_dict and op_name.endswith('_E64'):
+    e32_name = op_name.replace('_E64', '_E32')
+    for cand in pcode_dict.keys():
+      if getattr(cand, 'name', None) == e32_name:
+        pcode_op = cand
+        break
+  pcode = pcode_dict[pcode_op]
   if op_name in _pcode_fixes: pcode = pcode.replace(*_pcode_fixes[op_name])
   if 'V_DIV_SCALE' in op_name:
     dt, exp_lim, ldexp_val = ('f32', '23', '64') if 'F32' in op_name else ('f64', '52', '128')
