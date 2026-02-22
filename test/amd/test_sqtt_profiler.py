@@ -1,13 +1,17 @@
 import unittest, contextlib
 from tinygrad import Device, Tensor, Context, TinyJit
+from tinygrad.device import Compiled, ProfileProgramEvent, ProfileDeviceEvent
 from tinygrad.viz.serve import load_amd_counters
 
 @contextlib.contextmanager
 def save_sqtt():
+  from tinygrad.device import Compiled
   Device[Device.DEFAULT].synchronize()
-  Device[Device.DEFAULT].profile_events.clear()
+  Compiled.profile_events[:] = [e for e in Compiled.profile_events if type(e).__name__ != "ProfileSQTTEvent"]
   yield (ret:=[])
-  load_amd_counters(ret, Device[Device.DEFAULT].profile_events)
+  Device[Device.DEFAULT].synchronize()
+  Device[Device.DEFAULT]._at_profile_finalize()
+  load_amd_counters(ret, Compiled.profile_events)
   ret[:] = [r for r in ret if r["name"].startswith("Exec")]
 
 @unittest.skipUnless(Device.DEFAULT == "AMD", "only runs on AMD")
@@ -16,6 +20,10 @@ class TestSQTTProfiler(unittest.TestCase):
   @classmethod
   def setUpClass(cls):
     if not Device[Device.DEFAULT].sqtt_enabled: raise unittest.SkipTest("device must be in SQTT profiling mode")
+
+  def setUp(self):
+    Device[Device.DEFAULT].synchronize()
+    Compiled.profile_events[:] = [e for e in Compiled.profile_events if isinstance(e, (ProfileProgramEvent, ProfileDeviceEvent))]
 
   def test_simple(self):
     t = Tensor.empty(1) + 1
