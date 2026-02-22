@@ -34,7 +34,7 @@ class RegallocContext:
       if u.op in (Ops.NOOP, Ops.AFTER): continue
       for v in {s.tag for s in (u,) + u.src if isinstance(s.tag, Register)}: lr.setdefault(v, []).insert(0, len(uops) - 1 - i)
       # a var defined before a range and used inside it is needed for the whole range
-      if u.tag in lr and (n:=max((lr[rng][-1] for rng in ranges if lr[rng][0] < lr[u.tag][-1] < lr[rng][-1]), default=None)): lr[u.tag].append(n)
+      if u.tag in lr and (n:=max((lr[rng][-1] for rng in ranges if lr[rng][0] <= lr[u.tag][-1] < lr[rng][-1]), default=None)): lr[u.tag].append(n)
       if u.op is Ops.RANGE: ranges.append(u.tag)
 
 # TODO: rm pointers
