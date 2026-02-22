@@ -218,13 +218,12 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
         rngs_valids.append((local_rngs, valids))
 
       # TODO: in RANGEIFY > 1 all_all_same isn't required
-      same_flags = [all_same(local_rngs) for local_rngs,_ in rngs_valids]
-      all_all_same = all(same_flags)
+      all_all_same = all(all_same(local_rngs) for local_rngs,_ in rngs_valids)
       _out_rngs = []
       _realize_axis = []
       for i,(local_rngs,valids) in enumerate(rngs_valids):
         # we compare the ranges without their valids
-        if all_all_same or (PCONTIG and same_flags[i]):
+        if all_all_same or (PCONTIG and all_same(local_rngs)):
           # the new valid is the OR of all the children valids
           minimum_valid = UOp.const(dtypes.bool, False).sum(*valids)
           _out_rngs.append(graph_rewrite(minimum_valid.where(local_rngs[0], UOp.invalid()), symbolic, name="minimum_valid"))
@@ -239,10 +238,9 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
     # if this element is a reduce and there's ended ranges, we might have to end some other ranges
     if len(ending_ranges[x]) and x.op in GroupOp.Elementwise.union({Ops.REDUCE_AXIS}):
       _realize_axis = rctx.realize_map.get(x, []) or []
-      max_ending_arg = max(e.arg for e in ending_ranges[x])
       for i,r in enumerate(out_rngs):
         if i in _realize_axis: continue
-        if not (PCONTIG > 1) or any(rr.arg > max_ending_arg for rr in r.ranges):
+        if not (PCONTIG > 1) or any(any(rr.arg > e.arg for e in ending_ranges[x]) for rr in r.ranges):
           _realize_axis.append(i)
       ending_ranges[x] = []
       if len(_realize_axis):

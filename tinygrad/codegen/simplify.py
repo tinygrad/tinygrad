@@ -26,9 +26,9 @@ def simplify_merge_adjacent(u:UOp) -> UOp|None:
       # check if the ranges to merge are in the same reduces
       if all((r0 in rngs) == (r1 in rngs) for rngs in reduce_ranges):
         s0, s1 = r0.src[0], r1.src[0]
-        # do the merge: substitute + simplify + flatten ranges
+        # do the merge
         new_range = r0.replace(src=(s0*s1,))
-        nidx = graph_rewrite(u.substitute({r0:new_range//s1, r1:new_range%s1}).simplify(), pm_flatten_range,
+        nidx = graph_rewrite(u, _substitute+symbolic+pm_flatten_range, ctx={r0:new_range//s1, r1:new_range%s1},
                              name=f"check_merge_{r0.arg[0]}_{r1.arg[0]}")
 
         # check if it simplifies
