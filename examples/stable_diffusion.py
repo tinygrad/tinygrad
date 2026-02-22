@@ -281,7 +281,10 @@ if __name__ == "__main__":
         if k.startswith("model"):
           v.replace(v.cast(dtypes.float16))
 
-    Tensor.realize(*get_state_dict(model).values())
+    if args.fakeweights:
+      for v in get_state_dict(model).values(): v.replace(Tensor.empty(v.shape, dtype=v.dtype, device=v.device))
+    else:
+      Tensor.realize(*get_state_dict(model).values())
 
   profile_marker("run clip (conditional)")
   tokenizer = Tokenizer.ClipTokenizer()

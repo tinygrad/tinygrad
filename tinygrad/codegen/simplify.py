@@ -16,9 +16,10 @@ pm_flatten_range = PatternMatcher([
   (UPat((Ops.REDUCE, Ops.STORE, Ops.END), name="r"), flatten_range),
 ])
 
-def count_divmod(x:UOp) -> int: return len([u for u in x.toposort() if u.op in {Ops.IDIV, Ops.MOD}])
+def count_divmod(x:UOp) -> int: return sum(1 for u in x.toposort() if u.op in {Ops.IDIV, Ops.MOD})
 def simplify_merge_adjacent(u:UOp) -> UOp|None:
-  reduce_ranges = [x.ranges for x in u.backward_slice_with_self if x.op is Ops.REDUCE]
+  reduce_ranges = [x.ranges for x in u.toposort() if x.op is Ops.REDUCE]
+  u_divmod = count_divmod(u)
   # on END we only want to merge adjacent ranges, on REDUCE we want to try all combinations
   for r0, r1 in (zip(u.ended_ranges, u.ended_ranges[1:]) if u.op is Ops.END else itertools.permutations(u.ended_ranges, 2)):
     # check same type
@@ -26,14 +27,15 @@ def simplify_merge_adjacent(u:UOp) -> UOp|None:
       # check if the ranges to merge are in the same reduces
       if all((r0 in rngs) == (r1 in rngs) for rngs in reduce_ranges):
         s0, s1 = r0.src[0], r1.src[0]
-        # do the merge
+        # do the merge: substitute + simplify + flatten ranges
         new_range = r0.replace(src=(s0*s1,))
-        nidx = graph_rewrite(u, _substitute+symbolic+pm_flatten_range, ctx={r0:new_range//s1, r1:new_range%s1},
+        nidx = graph_rewrite(u.substitute({r0:new_range//s1, r1:new_range%s1}).simplify(), pm_flatten_range,
                              name=f"check_merge_{r0.arg[0]}_{r1.arg[0]}")
 
         # check if it simplifies
-        if count_divmod(nidx) <= count_divmod(u):
+        if count_divmod(nidx) <= u_divmod:
           u = nidx
+          u_divmod = count_divmod(u)
   return u
 
 pm_simplify_ranges = PatternMatcher([
@@ -65,7 +67,7 @@ pm_split_ranges = PatternMatcher([
 
 # **** reduce simplification ****
 
-def no_range(u:UOp) -> bool: return not any(x.op is Ops.RANGE for x in u.backward_slice_with_self)
+def no_range(u:UOp) -> bool: return not u.has_op(Ops.RANGE)
 
 def reduce_unparented(red:UOp) -> UOp|None:
   if red.arg not in {Ops.ADD, Ops.MAX, Ops.MUL}: return None
@@ -121,7 +123,7 @@ pm_reduce_load_collapse = pm_reduce_collapse + PatternMatcher([
 
 def reduce_collapse(red:UOp, u:UOp, pm:PatternMatcher=pm_reduce_collapse) -> UOp|None:
   for r in red.src[1:]:
-    included = u.toposort(gate=lambda x: r in x.ranges)
+    included = u._toposort_gated(lambda x: r in x.ranges)
     if any(x.op in {Ops.STORE, Ops.REDUCE} for x in included): return None
     replaces: dict[UOp, UOp] = {}
     for u in included:
@@ -141,7 +143,7 @@ pm_reduce_simplify = pm_reduce_unparented + PatternMatcher([
   (UPat(Ops.REDUCE, src=(UPat.var("u"),), allow_any_len=True, arg=Ops.ADD, name="red"), reduce_collapse),
 ])
 # remove REDUCE on load, comes from indexing a tensor with another tensor
-def no_load(u:UOp) -> bool: return not any(x.op is Ops.INDEX for x in u.backward_slice_with_self)
+def no_load(u:UOp) -> bool: return not u.has_op(Ops.INDEX)
 pm_load_collapse = PatternMatcher([
   (UPat(Ops.REDUCE, arg=Ops.ADD, src=(UPat.var("u"), UPat()), name="red"), reduce_load_collapse),
   # we want to make sure we dont do math on a loaded index since that can cause overflow, this undoes the rule in pm_reduce_load_collapse

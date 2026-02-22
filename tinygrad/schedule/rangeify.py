@@ -35,15 +35,16 @@ pm_mops = PatternMatcher([
 
 def fix_assign_hazard(assign:UOp, target:UOp, src:UOp):
   # PERMUTE and FLIP reorder indices, SHRINK can have overlapping regions when dest is also shrunk
-  unsafe = {Ops.PERMUTE, Ops.FLIP} | ({Ops.SHRINK} if target.op_in_backward_slice_with_self(Ops.SHRINK) else set())
-  if any(s.op in unsafe and target.base in s.backward_slice for s in src.toposort(gate=lambda s:s.op not in ALWAYS_CONTIGUOUS)):
+  unsafe = {Ops.PERMUTE, Ops.FLIP} | ({Ops.SHRINK} if target.has_op(Ops.SHRINK) else set())
+  tb = target.base
+  if any(s.op in unsafe and s.in_graph(tb) for s in src._toposort_gated(lambda s:s.op not in ALWAYS_CONTIGUOUS)):
     return assign.replace(src=(target, src.contiguous()))
 
 def normalize_assign_target_chain(assign:UOp, target:UOp, src:UOp):
   root_target = target
   while root_target.op is Ops.ASSIGN: root_target = root_target.src[0]
   # when RHS depends on the previous assign result, break with contiguous
-  if target in src.toposort(): src = src.contiguous()
+  if src.in_graph(target): src = src.contiguous()
   return assign.replace(src=(root_target, src))
 
 def split_reduceop(reduce:UOp, x:UOp):
@@ -188,7 +189,7 @@ def remove_bufferize(src:UOp, buf:UOp, idx:UOp):
         indexes.append(x)
       if x.op is Ops.REDUCE: reduces.append(x)
       return True
-    src.toposort(gate=red_gate)
+    src._toposort_gated(red_gate)
     del red_gate
     accessed_buffers = dedup(accessed_buffers)
 
@@ -201,7 +202,7 @@ def remove_bufferize(src:UOp, buf:UOp, idx:UOp):
       nonlocal buffer_in_reduce
       if x.op in {Ops.PARAM, Ops.BUFFERIZE}: buffer_in_reduce = True
       return not buffer_in_reduce
-    UOp.sink(*[x.src[0] for x in reduces]).toposort(gate=buf_gate)
+    UOp.sink(*[x.src[0] for x in reduces])._toposort_gated(buf_gate)
     del buf_gate
     if buffer_in_reduce:
       if PCONTIG > 2:
@@ -287,7 +288,7 @@ def limit_bufs(ctx:IndexingContext, root:UOp):
     # TODO: add cache to fix n^2
     if is_load:=(u.op in {Ops.BUFFERIZE, Ops.AFTER, Ops.PARAM, Ops.MSELECT, Ops.MSTACK, Ops.DEFINE_VAR}): bufs.add(u)
     return not is_load
-  root.toposort(gate=gate_input)
+  root._toposort_gated(gate_input)
 
   if len(bufs) > MAX_BUFS - 1: # NOTE: this -1 is for the output buffer
     srcs = []
@@ -401,7 +402,7 @@ def renumber_range(ctx:LocalAddBufferContext, r:UOp):
   return ret
 
 def find_bufs(x:UOp):
-  idxs = [s for s in x.toposort(gate=lambda x: x.op is not Ops.AFTER) if s.op is Ops.INDEX]
+  idxs = [s for s in x._toposort_gated(lambda x: x.op is not Ops.AFTER) if s.op is Ops.INDEX]
   read_from: dict[UOp, Ops] = {}
   if any((buf:=idx.buf_uop).op in {Ops.BUFFER, Ops.PARAM} and read_from.setdefault(buf, op:=idx.src[0].op) is not op for idx in idxs):
     raise RuntimeError(f"cycle detected while indexing {buf}")
@@ -499,8 +500,8 @@ def get_rangeify(sink:UOp) -> UOp:
       # TODO: this is probably broken for MSELECT/MSTACK
       if s.op not in {Ops.BUFFER, Ops.PARAM} or s is u.buf_uop or (a:=kernel_assign.get(s)) is None: continue
       if a.src[1] is u.src[1]: continue  # same kernel (multi-output custom kernels)
-      if any(x.op is Ops.AFTER and x.buf_uop is s for x in kernel_assign[u.buf_uop].backward_slice):
-        raise RuntimeError(f"cycle detected in assign graph, buffers {s} and {u.buf_uop} have circular dependency")
+      if any(x.op is Ops.AFTER and x.buf_uop is s for x in u.toposort()):
+        raise RuntimeError(f"cycle detected in graph, kernel for {u.buf_uop} must either depend on AFTER or BUFFER")
       assign_rep[a] = kernel_assign[s] = a.replace(src=a.src+(u,))
   if assign_rep: tsink = graph_rewrite(tsink, _substitute, ctx=assign_rep, bottom_up=True, name="fix_assign")
   if VIZ: graph_rewrite(tsink, PatternMatcher([]), name="View Kernel Graph")

@@ -19,7 +19,7 @@ def realize_srcs(ctx:dict[UOp, None], rb:UOp) -> None:
 
 def realize_assign_src(ctx:dict[UOp, None], buf:UOp, x:UOp):
   # you don't usually have to do this for assign unless there's a WAR hazard like TestAssign.test_assign_double_diamond_reduce
-  if buf.base in x.backward_slice_with_self: ctx[x] = None
+  if x.in_graph(buf.base): ctx[x] = None
 
 pm_generate_realize_map = PatternMatcher([
   # always realize SINK src
@@ -168,12 +168,12 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
   # don't realize COPY/BUFFER_VIEW/ENCDEC when they are the direct source of ASSIGN — the ASSIGN target buffer is the output
   for u in tsink.toposort():
     if u.op is Ops.ASSIGN and u.src[1].op in {Ops.COPY, Ops.BUFFER_VIEW, Ops.ENCDEC} and u.src[1] in rctx.realize_map \
-       and not u.src[0].op_in_backward_slice_with_self(Ops.SHRINK, Ops.PERMUTE, Ops.FLIP, Ops.PAD):
+       and not u.src[0].has_op(Ops.SHRINK, Ops.PERMUTE, Ops.FLIP, Ops.PAD):
       del rctx.realize_map[u.src[1]]
 
   # get the consumer map
   with cpu_profile("consumer map in rangeify", "TINY"):
-    consumer_map = consumer_map_from_toposort(tsink_toposort:=tsink.toposort(gate_kernel_sink))
+    consumer_map = consumer_map_from_toposort(tsink_toposort:=tsink._toposort_gated(gate_kernel_sink))
 
   # explicit rangeify
   ending_ranges: dict[UOp, list[UOp]] = {}
@@ -184,7 +184,7 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
     if x.op is Ops.CALL: continue
 
     if x.dtype.scalar() == dtypes.index: continue  # TODO: why do I need this?
-    ending_ranges[x] = sum([ending_ranges.get(u, []) for u in consumer_map[x]], [])
+    ending_ranges[x] = list(itertools.chain.from_iterable(ending_ranges.get(u, []) for u in consumer_map[x]))
 
     # *** the ranges on the output are
     #  1. new if this op is realized
@@ -218,12 +218,13 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
         rngs_valids.append((local_rngs, valids))
 
       # TODO: in RANGEIFY > 1 all_all_same isn't required
-      all_all_same = all(all_same(local_rngs) for local_rngs,_ in rngs_valids)
+      same_flags = [all_same(local_rngs) for local_rngs,_ in rngs_valids]
+      all_all_same = all(same_flags)
       _out_rngs = []
       _realize_axis = []
       for i,(local_rngs,valids) in enumerate(rngs_valids):
         # we compare the ranges without their valids
-        if all_all_same or (PCONTIG and all_same(local_rngs)):
+        if all_all_same or (PCONTIG and same_flags[i]):
           # the new valid is the OR of all the children valids
           minimum_valid = UOp.const(dtypes.bool, False).sum(*valids)
           _out_rngs.append(graph_rewrite(minimum_valid.where(local_rngs[0], UOp.invalid()), symbolic, name="minimum_valid"))
@@ -238,9 +239,10 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
     # if this element is a reduce and there's ended ranges, we might have to end some other ranges
     if len(ending_ranges[x]) and x.op in GroupOp.Elementwise.union({Ops.REDUCE_AXIS}):
       _realize_axis = rctx.realize_map.get(x, []) or []
+      max_ending_arg = max(e.arg for e in ending_ranges[x])
       for i,r in enumerate(out_rngs):
         if i in _realize_axis: continue
-        if not (PCONTIG > 1) or any(any(rr.arg > e.arg for e in ending_ranges[x]) for rr in r.ranges):
+        if not (PCONTIG > 1) or any(rr.arg > max_ending_arg for rr in r.ranges):
           _realize_axis.append(i)
       ending_ranges[x] = []
       if len(_realize_axis):

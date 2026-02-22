@@ -324,7 +324,7 @@ def _valid_priority(v: UOp, valids:list[UOp]) -> int:
   return sum(-1 if (res:=parse_valid(v)) is not None and res[0] in other.toposort() else 0 for other in valids)
 
 def simplify_valid(valid:UOp) -> UOp|None:
-  if valid.op_in_backward_slice_with_self(Ops.INDEX): return None  # this should only be for indexing, skip if there's a INDEX
+  if valid.has_op(Ops.INDEX): return None  # this should only be for indexing, skip if there's a INDEX
   ret:list[UOp] = []
   valids = list(valid.split_uop(Ops.AND))
   valids = sorted(valids, key=lambda v: _valid_priority(v, valids))
@@ -355,10 +355,10 @@ pm_drop_and_clauses = PatternMatcher([(invalid_gate, drop_and_clauses)])
 def where_on_load(cond:UOp, buf:UOp, idx:UOp) -> UOp|None:
   where_clauses, load_valid = list(cond.split_uop(Ops.AND)), idx.get_valid()
   in_load = set(load_valid.split_uop(Ops.AND))
-  idx_index = {u for u in idx.backward_slice_with_self if u.op is Ops.INDEX}
+  idx_index = {u for u in idx.toposort() if u.op is Ops.INDEX}
   # can move if: condition's ranges are subset of idx's ranges, and no data dependent INDEX (only idx's INDEX allowed)
   def can_move(c:UOp) -> bool:
-    return c.ranges.keys() <= idx.ranges.keys() and all(u in idx_index for u in c.backward_slice_with_self if u.op is Ops.INDEX)
+    return c.ranges.keys() <= idx.ranges.keys() and all(u in idx_index for u in c.toposort() if u.op is Ops.INDEX)
   moved, keep = partition([c for c in where_clauses if c not in in_load], can_move)
   if len(keep) == len(where_clauses): return None
   return UOp.const(dtypes.bool, True).prod(*keep).where(buf.index(idx.get_idx().valid(functools.reduce(operator.and_, moved, load_valid))), 0)
@@ -371,7 +371,7 @@ pm_move_where_on_load = PatternMatcher([
 
 def gated_given_valid(cond:UOp, x:UOp, i:UOp) -> UOp|None:
   # Skip if x contains DIV/MOD AND IMAGE mode is enabled -> image index e.g. openpilot
-  if IMAGE.value > 0 and x.op_in_backward_slice_with_self(Ops.IDIV, Ops.MOD): return None
+  if IMAGE.value > 0 and x.has_op(Ops.IDIV, Ops.MOD): return None
   return cond.where(uop_given_valid(cond, x, try_simplex=False), i)
 
 # TODO: this is O(number of WHERE * number of node)

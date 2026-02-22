@@ -22,9 +22,14 @@ class Scheduler:
     self.opt_range = count(start=max([x.arg[0] for x in self.rngs], default=0)+1)
 
   @property
+  def topo(self) -> dict[UOp, None]:
+    if getattr(self, '_topo_ast', None) is not self.ast: self._topo_ast, self._topo = self.ast, self.ast.toposort()
+    return self._topo
+
+  @property
   def rngs(self):
     # always in order by axistype
-    return sorted([u for u in self.ast.backward_slice if u.op is Ops.RANGE and u.vmax > 0], key=lambda x: (axis_to_pos[x.arg[-1]],) + x.arg[0:-1])
+    return sorted([u for u in self.topo if u.op is Ops.RANGE and u.vmax > 0], key=lambda x: (axis_to_pos[x.arg[-1]],) + x.arg[0:-1])
   @property
   def shape_len(self) -> int: return len(self.rngs)
   @property
@@ -54,7 +59,7 @@ class Scheduler:
     if name_override is not None: name = name_override
     else:
       k_type = "r" if self.reduceop is not None else "E"
-      special_uops = sorted([x for x in self.ast.toposort() if x.op is Ops.SPECIAL], key=lambda x: x.arg)
+      special_uops = sorted([x for x in self.topo if x.op is Ops.SPECIAL], key=lambda x: x.arg)
       special_ops = [colored(str(x.vmax+1), "blue" if x.arg[0] == "g" else "cyan") for x in special_uops]
       name = k_type + colored('_', 'BLACK').join(['']+special_ops+[colored(x.src[0].render(), color) for x,color in zip(self.rngs, self.colors())])
       Scheduler.kernel_cnt[(function_name := to_function_name(name))] += 1
@@ -68,7 +73,7 @@ class Scheduler:
   def _globalizable_rngs(self) -> list[UOp]:
     ret = [r for r in self._output_rngs() if r.arg[-1] == AxisType.LOOP]
     # exclude any output ranges from global that don't appear in all BUFFERIZE
-    for x in self.ast.toposort():
+    for x in self.topo:
       if x.op is Ops.BUFFERIZE:
         ret = [r for r in ret if r in x.ranges]
     return ret
@@ -153,7 +158,7 @@ class Scheduler:
         check(smem_sz <= self.ren.shared_max, f"exceeds maximum shared memory size: needs {smem_sz}, max {self.ren.shared_max}")
       if self.reduceop is not None and (opt.op in {OptOps.GROUP, OptOps.GROUPTOP}):
         # We currently dont support a group within another rudece, TODO: fix if-contexts
-        reduce = [u for u in self.ast.backward_slice if u.op is Ops.REDUCE and rng in merge_dicts([r.ranges for r in u.src[1:]])][0]
+        reduce = [u for u in self.topo if u.op is Ops.REDUCE and rng in merge_dicts([r.ranges for r in u.src[1:]])][0]
         check(not any(u.arg[-1] in (AxisType.REDUCE, AxisType.UNROLL, AxisType.GROUP_REDUCE) for u in reduce.ranges),
           "cannot have a GROUP_REDUCE inside another reduce")
 
@@ -192,14 +197,14 @@ class Scheduler:
       check(rng.arg[-1] is not AxisType.THREAD, "cannot pad thread")
       # ok to pad SUM if all parent ALU ops have f(0) = 0
       if (r:=self.reduceop) is not None and rng.arg[-1] in (AxisType.GROUP_REDUCE, AxisType.REDUCE):
-        check(r.arg[0] is Ops.ADD and not r.op_in_backward_slice_with_self(*GroupOp.UnsafePad), f"cannot pad {r}")
+        check(r.arg[0] is Ops.ADD and not r.has_op(*GroupOp.UnsafePad), f"cannot pad {r}")
       new_sz = round_up(int(rng.vmax+1), cast(int, opt.arg))
       check(rng.vmax+1 > new_sz//4, "pad adds more than quadruple the work")
       replaced_rng = UOp.range(new_sz, *rng.arg)
       replaces = {rng:replaced_rng}
       valid = replaced_rng < rng.vmax+1
       for b in self.bufs:
-        if rng in (i:=b.src[1].get_idx()).backward_slice_with_self:
+        if rng in (i:=b.src[1].get_idx()).toposort():
           replaces[b] = b.replace(src=(b.src[0],(valid&b.src[1].get_valid()).where(i, UOp.invalid())))
       self.ast = self.ast.substitute(replaces, f"padto {rng.arg[:-1]} {opt.arg}")
     elif opt.op is OptOps.SWAP:
@@ -279,7 +284,7 @@ class Scheduler:
 
           if use_tensor_cores != 2:
             # fix the srcs
-            reduceop = get_single_element([x for x in self.ast.toposort() if x.op is Ops.REDUCE and x.tag == "TC"])
+            reduceop = get_single_element([x for x in self.topo if x.op is Ops.REDUCE and x.tag == "TC"])
             tne = [x.replace(tag=1) for x in ne]
             ret = reduceop.substitute(dict(zip(ne, tne)))
             srcs = list((ret.src[0] if ret.src[0].op is not Ops.CAST else ret.src[0].src[0]).src)
@@ -315,13 +320,13 @@ class Scheduler:
 
   # helpers for hand_coded_optimizations
   @property
-  def reduceops(self) -> list[UOp]: return [x for x in self.ast.backward_slice if x.op is Ops.REDUCE]
+  def reduceops(self) -> list[UOp]: return [x for x in self.topo if x.op is Ops.REDUCE]
   @property
   def reduceop(self) -> UOp|None:
     if not (red := self.reduceops): return None
     return UOp(Ops.REDUCE_AXIS, red[0].dtype, red[0].src, (red[0].arg, ()))
   @property
-  def bufs(self) -> list[UOp]: return [x for x in self.ast.toposort() if x.op is Ops.INDEX][::-1]
+  def bufs(self) -> list[UOp]: return [x for x in self.topo if x.op is Ops.INDEX][::-1]
   @property
   def output_shape(self):
     return [s if at not in {AxisType.REDUCE, AxisType.UNROLL, AxisType.GROUP_REDUCE} else 1 for s,at in zip(self.full_shape, self.axis_types)]
@@ -331,7 +336,7 @@ class Scheduler:
   def group_for_reduces(self) -> int: return len(self.axes_of(AxisType.GROUP_REDUCE))
 
 def bufs_from_ast(ast:UOp, dname:str) -> list[Buffer]:
-  glbls = sorted([x for x in ast.backward_slice if x.op is Ops.PARAM], key=lambda x: x.arg)
+  glbls = sorted([x for x in ast.toposort() if x.op is Ops.PARAM], key=lambda x: x.arg)
   return [Buffer(dname, x.ptrdtype.size, x.dtype.base if not isinstance(x.dtype, ImageDType) else x.dtype) for x in glbls]
 
 def apply_opts(ast:UOp, ren:Renderer) -> UOp:
@@ -349,7 +354,7 @@ def apply_opts(ast:UOp, ren:Renderer) -> UOp:
   elif not NOOPT and (ast.arg is None or ast.arg.applied_opts == ()):
     from tinygrad.codegen.opt.heuristic import hand_coded_optimizations
     # NOTE: hand_coded_optimizations doesn't support multiblock opts yet
-    if not any(u.op is Ops.BUFFERIZE for u in ast.backward_slice):
+    if not any(u.op is Ops.BUFFERIZE for u in ast.toposort()):
       k = hand_coded_optimizations(k)
   return k.get_optimized_ast(name_override=ast.arg.name if ast.arg is not None and ast.arg.name != "test" else None)
 
