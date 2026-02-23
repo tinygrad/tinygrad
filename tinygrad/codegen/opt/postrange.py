@@ -22,14 +22,9 @@ class Scheduler:
     self.opt_range = count(start=max([x.arg[0] for x in self.rngs], default=0)+1)
 
   @property
-  def topo(self) -> dict[UOp, None]:
-    if getattr(self, '_topo_ast', None) is not self.ast: self._topo_ast, self._topo = self.ast, self.ast.toposort()
-    return self._topo
-
-  @property
   def rngs(self):
     # always in order by axistype
-    return sorted([u for u in self.topo if u.op is Ops.RANGE and u.vmax > 0], key=lambda x: (axis_to_pos[x.arg[-1]],) + x.arg[0:-1])
+    return sorted([u for u in self.ast.toposort() if u.op is Ops.RANGE and u.vmax > 0], key=lambda x: (axis_to_pos[x.arg[-1]],) + x.arg[0:-1])
   @property
   def shape_len(self) -> int: return len(self.rngs)
   @property
@@ -59,7 +54,7 @@ class Scheduler:
     if name_override is not None: name = name_override
     else:
       k_type = "r" if self.reduceop is not None else "E"
-      special_uops = sorted([x for x in self.topo if x.op is Ops.SPECIAL], key=lambda x: x.arg)
+      special_uops = sorted([x for x in self.ast.toposort() if x.op is Ops.SPECIAL], key=lambda x: x.arg)
       special_ops = [colored(str(x.vmax+1), "blue" if x.arg[0] == "g" else "cyan") for x in special_uops]
       name = k_type + colored('_', 'BLACK').join(['']+special_ops+[colored(x.src[0].render(), color) for x,color in zip(self.rngs, self.colors())])
       Scheduler.kernel_cnt[(function_name := to_function_name(name))] += 1
@@ -73,7 +68,7 @@ class Scheduler:
   def _globalizable_rngs(self) -> list[UOp]:
     ret = [r for r in self._output_rngs() if r.arg[-1] == AxisType.LOOP]
     # exclude any output ranges from global that don't appear in all BUFFERIZE
-    for x in self.topo:
+    for x in self.ast.toposort():
       if x.op is Ops.BUFFERIZE:
         ret = [r for r in ret if r in x.ranges]
     return ret
@@ -158,7 +153,7 @@ class Scheduler:
         check(smem_sz <= self.ren.shared_max, f"exceeds maximum shared memory size: needs {smem_sz}, max {self.ren.shared_max}")
       if self.reduceop is not None and (opt.op in {OptOps.GROUP, OptOps.GROUPTOP}):
         # We currently dont support a group within another rudece, TODO: fix if-contexts
-        reduce = [u for u in self.topo if u.op is Ops.REDUCE and rng in merge_dicts([r.ranges for r in u.src[1:]])][0]
+        reduce = [u for u in self.ast.toposort() if u.op is Ops.REDUCE and rng in merge_dicts([r.ranges for r in u.src[1:]])][0]
         check(not any(u.arg[-1] in (AxisType.REDUCE, AxisType.UNROLL, AxisType.GROUP_REDUCE) for u in reduce.ranges),
           "cannot have a GROUP_REDUCE inside another reduce")
 
@@ -284,7 +279,7 @@ class Scheduler:
 
           if use_tensor_cores != 2:
             # fix the srcs
-            reduceop = get_single_element([x for x in self.topo if x.op is Ops.REDUCE and x.tag == "TC"])
+            reduceop = get_single_element([x for x in self.ast.toposort() if x.op is Ops.REDUCE and x.tag == "TC"])
             tne = [x.replace(tag=1) for x in ne]
             ret = reduceop.substitute(dict(zip(ne, tne)))
             srcs = list((ret.src[0] if ret.src[0].op is not Ops.CAST else ret.src[0].src[0]).src)
@@ -320,13 +315,13 @@ class Scheduler:
 
   # helpers for hand_coded_optimizations
   @property
-  def reduceops(self) -> list[UOp]: return [x for x in self.topo if x.op is Ops.REDUCE]
+  def reduceops(self) -> list[UOp]: return [x for x in self.ast.toposort() if x.op is Ops.REDUCE]
   @property
   def reduceop(self) -> UOp|None:
     if not (red := self.reduceops): return None
     return UOp(Ops.REDUCE_AXIS, red[0].dtype, red[0].src, (red[0].arg, ()))
   @property
-  def bufs(self) -> list[UOp]: return [x for x in self.topo if x.op is Ops.INDEX][::-1]
+  def bufs(self) -> list[UOp]: return [x for x in self.ast.toposort() if x.op is Ops.INDEX][::-1]
   @property
   def output_shape(self):
     return [s if at not in {AxisType.REDUCE, AxisType.UNROLL, AxisType.GROUP_REDUCE} else 1 for s,at in zip(self.full_shape, self.axis_types)]

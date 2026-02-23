@@ -98,7 +98,7 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
   # upcast leading axes first (hack-ish for winograd; we actually want to upcast masked axes with low stride first)
   for axis in k.upcastable_dims:
     # for Schedule, we check if the range is used in INDEX gates or WHERE gates
-    is_masked = any(k.rngs[axis] is not u.src[0] and k.rngs[axis] in u.src[0].toposort() for u in k.topo if u.op is Ops.WHERE)
+    is_masked = any(k.rngs[axis] is not u.src[0] and k.rngs[axis] in u.src[0].toposort() for u in k.ast.toposort() if u.op is Ops.WHERE)
     if k.full_shape[axis] <= 7 and is_masked and prod(k.full_shape[j] for j in to_upcast) * k.full_shape[axis] <= 7 * 7:
       if DEBUG >= 4: print(f"upcasting masked axis : {axis}")
       to_upcast.append(axis)
