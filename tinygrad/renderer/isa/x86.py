@@ -162,7 +162,7 @@ def idiv(ctx:IselContext, x:UOp):
   # need to sign extend al to ah for 8bit idiv
   divisor = UOp(Ops.INS, arg=X86Ops.MOVSX, dtype=dtypes.int16, src=(x.src[0],), tag=ctx.vreg(RAX)) if x.dtype is dtypes.int8 else x.src[0]
   # need to sign extend rax to rdx for > 8bit idiv
-  extend_rdx = () if x.dtype is dtypes.int8 else x.ins(X86Ops.SARi, src=(x.src[0], imm(dtypes.uint8, x.dtype.itemsize * 8 - 1)), tag=ctx.vreg(RDX))
+  extend_rdx = () if x.dtype is dtypes.int8 else (x.ins(X86Ops.SARi, src=(x.src[0], imm(dtypes.uint8, x.dtype.itemsize * 8 - 1)), tag=ctx.vreg(RDX)),)
   # dividend can't be in rax or rdx
   dividend = x.ins(X86Ops.MOV, src=(x.src[1],), tag=tuple(r for r in WGPR if r not in (RAX, RDX)))
   idiv = x.ins(X86Ops.IDIV, src=(divisor, dividend) + extend_rdx, tag=(RAX,))
