@@ -157,8 +157,8 @@ def split_load_store(ctx:Renderer|None, ls:UOp, idx:UOp):
   elif isinstance(buf.dtype, ImageDType):
     lengths = [4]
   elif ctx is not None and CPU_X86:
-    lengths = [4,2] if buf.dtype.base == dtypes.float32 else []
-    #must_divide = False
+    lengths = [8,4,2] if buf.dtype.base == dtypes.half else [4,2]
+    must_divide = False
   elif ctx is not None and ctx.supports_float4:
     # TODO: a better way to get this than ctx
     lengths = [8,4,2] if buf.dtype.base == dtypes.half and getenv("ALLOW_HALF8") else ([16,8,4,2] if AMX else [4,2])
