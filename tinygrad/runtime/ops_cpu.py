@@ -61,7 +61,7 @@ class CPUComputeQueue(HWQueue):
       self.bind_args_state(args_state)
       return self.cmd(self._exec, prg, 1, args_state.buf.va_addr)
     return self.cmd(self._exec, prg, len(args_state.bufs), *[x.va_addr for x in args_state.bufs], *args_state.vals, threads=(global_size or (1,))[0])
-  def wait(self, signal, value=0): return self.cmd(self._wait, type(signal)(signal.base_buf, value=None,owner=signal.owner), signal.value_addr, value)
+  def wait(self, signal, value=0): return self.cmd(self._wait, type(signal)(signal.base_buf, owner=signal.owner, virt=True), signal.value_addr, value)
   def timestamp(self, signal): return self.cmd(self._timestamp, signal.timestamp_addr)
   def signal(self, signal, value:sint=0): return self.cmd(self._signal, signal.value_addr, value)
   def _submit(self, dev): dev.tasks.put(self._q[:])
