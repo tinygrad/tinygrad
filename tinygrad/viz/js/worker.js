@@ -61,6 +61,12 @@ const layoutUOp = (g, { graph, change }, opts) => {
     if (change?.includes(parseInt(k))) g.setParent(k, "overlay");
   }
   // optionally hide nodes from the layout
+  if (!opts.showSink) {
+    for (const n of g.nodes()) {
+      const node = g.node(n);
+      if (node.label === "SINK" || node.label.startsWith("SINK\n")) g.removeNode(n);
+    }
+  }
   if (!opts.showIndexing) {
     for (const n of g.nodes()) {
       const node = g.node(n);

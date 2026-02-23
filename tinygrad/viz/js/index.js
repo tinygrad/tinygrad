@@ -756,6 +756,7 @@ const createToggle = (id, text) => {
 }
 const showIndexing = createToggle("show-indexing", "Show indexing (r)");
 const showCallSrc = createToggle("show-call-src", "Show CALL src (c)");
+const showSink = createToggle("show-sink", "Show SINK (s)");
 const showGraph = createToggle("show-graph", "Show graph (g)");
 showGraph.toggle.onchange = () => displaySelection(rect("#graph").width > 0 ? "#custom" : "#graph");
 
@@ -905,13 +906,14 @@ async function main() {
   // ** center graph
   const data = ret[currentRewrite];
   const render = (opts) => renderDag({ data, opts }, { recenter:currentRewrite === 0 });
-  const getOpts = () => ({ showIndexing:showIndexing.toggle.checked, showCallSrc:showCallSrc.toggle.checked });
+  const getOpts = () => ({ showIndexing:showIndexing.toggle.checked, showCallSrc:showCallSrc.toggle.checked, showSink:showSink.toggle.checked });
   render(getOpts());
   showIndexing.toggle.onchange = () => render(getOpts());
   showCallSrc.toggle.onchange = () => render(getOpts());
+  showSink.toggle.onchange = () => render(getOpts());
   // ** right sidebar metadata
   metadata.innerHTML = "";
-  if (ckey.includes("rewrites")) metadata.append(showIndexing.label, showCallSrc.label);
+  if (ckey.includes("rewrites")) metadata.append(showIndexing.label, showCallSrc.label, showSink.label);
   if (step.code_line != null) metadata.appendChild(codeBlock(step.code_line, "python", { loc:step.loc, wrap:true }));
   if (step.trace) {
     const trace = d3.create("pre").append("code").classed("hljs", true);
@@ -1042,6 +1044,8 @@ document.addEventListener("keydown", (event) => {
   if (event.key === "r") showIndexing.toggle.click();
   // c key toggles CALL src
   if (event.key === "c") showCallSrc.toggle.click();
+  // s key toggles SINK
+  if (event.key === "s") showSink.toggle.click();
   // g key toggles graph
   if (event.key === "g") showGraph.toggle.click();
 });
