@@ -85,7 +85,7 @@ def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[dict[UOp, UOp], li
 
   function = big_sink.src[0]
   if not SCACHE or (sc_ret:=schedule_cache.get(function.key, None)) is None:
-    if SPEC: type_verify(function, tensor_spec)
+    if SPEC: type_verify(big_sink, tensor_spec)
     pre_schedule, buf_uops_sink = create_schedule(get_kernel_graph(function))
     if SCACHE: schedule_cache[function.key] = (pre_schedule, buf_uops_sink)
   else:
