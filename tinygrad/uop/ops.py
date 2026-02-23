@@ -207,9 +207,14 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     match self.op:
       # late ops don't have shape
       case Ops.UNIQUE | Ops.LUNIQUE | Ops.DEVICE | Ops.RANGE | Ops.LOAD | Ops.IF | Ops.BARRIER | Ops.CUSTOM | Ops.CUSTOMI | \
-           Ops.VECTORIZE | Ops.VCONST | Ops.GEP | Ops.SPECIAL | Ops.UNROLL | Ops.CONTRACT | Ops.SINK | \
+           Ops.VECTORIZE | Ops.GEP | Ops.SPECIAL | Ops.UNROLL | Ops.CONTRACT | Ops.SINK | \
            Ops.LINEAR | Ops.PROGRAM | Ops.SOURCE | Ops.BINARY | Ops.INS:
         return None
+
+      case Ops.CAST:
+        # when PTX cases from ptr to non ptr, remove the shape
+        if isinstance(self.src[0].dtype, PtrDType) and not isinstance(self.src[0].dtype, ImageDType) and not isinstance(self.dtype, PtrDType):
+          return None
 
       case Ops.INDEX:
         # non pointer index doesn't have a shape
@@ -220,7 +225,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
         return self.src[0].shape[len(self.src[1:]):]
 
       # some ops init the shape
-      case Ops.CONST | Ops.DEFINE_VAR | Ops.BIND: return () if self._device is not None else None
+      case Ops.CONST | Ops.VCONST | Ops.DEFINE_VAR | Ops.BIND: return ()
       case Ops.BUFFER: return (self.arg,)
       case Ops.BUFFER_VIEW: return (self.arg[0],)
       case Ops.ENCDEC: return self.arg[0]
@@ -240,7 +245,8 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
       case Ops.BITCAST:
         ps = self.src[0]._shape
         if ps is None: return None
-        if (output_sz:=self.dtype.itemsize) != (input_sz:=self.src[0].dtype.itemsize): return ps[:-1]+(ssimplify((ps[-1]*input_sz) // output_sz),)
+        if (output_sz:=self.dtype.itemsize) != (input_sz:=self.src[0].dtype.itemsize):
+          return ps[:-1]+(ssimplify((ps[-1]*input_sz) // output_sz),) if len(ps) > 0 else ps
         return ps
 
       # TODO: disallow reshape from nothing. tested by TestOpenClip.test_multigpu_clip_score
