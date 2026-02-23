@@ -64,7 +64,7 @@ const layoutUOp = (g, { graph, change }, opts) => {
   if (!opts.showSink) {
     for (const n of g.nodes()) {
       const node = g.node(n);
-      if (node.label === "SINK" || node.label.startsWith("SINK\n")) g.removeNode(n);
+      if ((node.label === "SINK" || node.label.startsWith("SINK\n")) && (g.successors(n) || []).length === 0) g.removeNode(n);
     }
   }
   if (!opts.showIndexing) {
