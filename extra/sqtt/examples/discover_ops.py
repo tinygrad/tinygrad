@@ -109,13 +109,11 @@ def collect_instructions() -> tuple[list[Inst], list[Inst], list[str]]:
   return alu_insts, mem_insts, skipped
 
 if __name__ == "__main__":
-  if str(arch:=Device[Device.DEFAULT].renderer.arch).startswith("gfx11"):
-    from tinygrad.runtime.autogen.amd.rdna3.ins import *
-    import tinygrad.runtime.autogen.amd.rdna3.ins as all_insts
-  elif arch.startswith("gfx12"):
+  arch = Device[Device.DEFAULT].renderer.arch
+  if arch.startswith("gfx12"):
     from tinygrad.runtime.autogen.amd.rdna4.ins import *
     import tinygrad.runtime.autogen.amd.rdna4.ins as all_insts
-  else: raise RuntimeError("no CDNA support yet")
+  else: print(f"{arch} not supported yet")
   alu_insts, mem_insts, skipped = collect_instructions()
   print(f"collected {len(alu_insts)} ALU + {len(mem_insts)} memory instructions ({len(skipped)} skipped)")
   k = Kernel(arch)
