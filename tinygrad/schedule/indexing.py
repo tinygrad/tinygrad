@@ -173,7 +173,7 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
 
   # get the consumer map
   with cpu_profile("consumer map in rangeify", "TINY"):
-    consumer_map = consumer_map_from_toposort(tsink_toposort:=tsink._toposort_gated(gate_kernel_sink))
+    consumer_map = consumer_map_from_toposort(tsink_toposort:=tsink.toposort(gate=gate_kernel_sink))
 
   # explicit rangeify
   ending_ranges: dict[UOp, list[UOp]] = {}

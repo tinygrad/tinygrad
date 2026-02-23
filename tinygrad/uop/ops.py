@@ -113,7 +113,7 @@ class recursive_property(property):
     if x is None: return self
     if (nm := self.nm) in x.__dict__: return x.__dict__[nm]
     if all(nm in s.__dict__ for s in x.src): return x.__dict__.setdefault(nm, self.fxn(x))
-    for node in x._toposort_gated(lambda node: nm not in node.__dict__): node.__dict__[nm] = self.fxn(node)
+    for node in x.toposort(gate=lambda node: nm not in node.__dict__): node.__dict__[nm] = self.fxn(node)
     return x.__dict__[nm]
 
 # we import this late so we can use resolve/smax in mixins
@@ -153,25 +153,14 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
 
   def f(self, op, **kwargs): return UOp(op, dtype=kwargs.pop("dtype", self.dtype), src=(self,), **kwargs)
 
-  def toposort(self) -> dict[UOp, None]:
+  def toposort(self, gate:Callable|None=None) -> dict[UOp, None]:
     cache: dict[UOp, None] = {}
     stack: list[tuple[UOp, bool]] = [(self, False)]
     while stack:
       node, visited = stack.pop()
       if node in cache: continue
       if not visited:
-        stack.append((node, True))
-        for s in reversed(node.src): stack.append((s, False))
-      else: cache[node] = None
-    return cache
-  def _toposort_gated(self, gate:Callable) -> dict[UOp, None]:
-    cache: dict[UOp, None] = {}
-    stack: list[tuple[UOp, bool]] = [(self, False)]
-    while stack:
-      node, visited = stack.pop()
-      if node in cache: continue
-      if not visited:
-        if gate(node):
+        if gate is None or gate(node):
           stack.append((node, True))
           for s in reversed(node.src): stack.append((s, False))
       else: cache[node] = None
@@ -190,7 +179,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     return False
 
   def topovisit(self, visitor:Callable[[UOp], T], cache:dict[UOp, T]) -> T:
-    for node in self._toposort_gated(lambda node: node not in cache): cache[node] = visitor(node)
+    for node in self.toposort(gate=lambda node: node not in cache): cache[node] = visitor(node)
     return cache[self]
 
   # returns map of UOps to their consumers in the graph rooted by self

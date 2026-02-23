@@ -36,7 +36,7 @@ pm_mops = PatternMatcher([
 def fix_assign_hazard(assign:UOp, target:UOp, src:UOp):
   # PERMUTE and FLIP reorder indices, SHRINK can have overlapping regions when dest is also shrunk
   unsafe = {Ops.PERMUTE, Ops.FLIP} | ({Ops.SHRINK} if target.has_op(Ops.SHRINK) else set())
-  if any(s.op in unsafe and s.in_graph(target.base) for s in src._toposort_gated(lambda s:s.op not in ALWAYS_CONTIGUOUS)):
+  if any(s.op in unsafe and s.in_graph(target.base) for s in src.toposort(gate=lambda s:s.op not in ALWAYS_CONTIGUOUS)):
     return assign.replace(src=(target, src.contiguous()))
 
 def normalize_assign_target_chain(assign:UOp, target:UOp, src:UOp):
@@ -189,7 +189,7 @@ def remove_bufferize(src:UOp, buf:UOp, idx:UOp):
           if (x.op is Ops.BUFFERIZE and x.arg.addrspace == AddrSpace.GLOBAL) or x.op is Ops.MSTACK: return False
           if x.op is Ops.INDEX: indexes.append(x)
           return True
-        src._toposort_gated(collect_indexes)
+        src.toposort(gate=collect_indexes)
         local_indexes = [x for x in indexes if x.src[0].op is Ops.BUFFERIZE and x.src[0].arg.addrspace == AddrSpace.LOCAL]
         exclude_ranges = UOp.group(*[UOp.group(*x.src[1:]) for x in local_indexes]).ranges
         subs = [(k,v) for k,v in zip(buf.src[1:], idx.src[1:]) if k.op is not Ops.CONST]
@@ -269,7 +269,7 @@ def limit_bufs(ctx:IndexingContext, root:UOp):
     # TODO: add cache to fix n^2
     if is_load:=(u.op in {Ops.BUFFERIZE, Ops.AFTER, Ops.PARAM, Ops.MSELECT, Ops.MSTACK, Ops.DEFINE_VAR}): bufs.add(u)
     return not is_load
-  root._toposort_gated(gate_input)
+  root.toposort(gate=gate_input)
 
   if len(bufs) > MAX_BUFS - 1: # NOTE: this -1 is for the output buffer
     srcs = []
@@ -383,7 +383,7 @@ def renumber_range(ctx:LocalAddBufferContext, r:UOp):
   return ret
 
 def find_bufs(x:UOp):
-  idxs = [s for s in x._toposort_gated(lambda x: x.op is not Ops.AFTER) if s.op is Ops.INDEX]
+  idxs = [s for s in x.toposort(gate=lambda x: x.op is not Ops.AFTER) if s.op is Ops.INDEX]
   read_from: dict[UOp, Ops] = {}
   if any((buf:=idx.buf_uop).op in {Ops.BUFFER, Ops.PARAM} and read_from.setdefault(buf, op:=idx.src[0].op) is not op for idx in idxs):
     raise RuntimeError(f"cycle detected while indexing {buf}")

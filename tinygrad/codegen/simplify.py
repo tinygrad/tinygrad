@@ -121,7 +121,7 @@ pm_reduce_load_collapse = pm_reduce_collapse + PatternMatcher([
 
 def reduce_collapse(red:UOp, u:UOp, pm:PatternMatcher=pm_reduce_collapse) -> UOp|None:
   for r in red.src[1:]:
-    included = u._toposort_gated(lambda x: r in x.ranges)
+    included = u.toposort(gate=lambda x: r in x.ranges)
     if any(x.op in {Ops.STORE, Ops.REDUCE} for x in included): return None
     replaces: dict[UOp, UOp] = {}
     for u in included:
