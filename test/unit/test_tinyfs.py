@@ -45,37 +45,31 @@ class TestTinyFS(unittest.TestCase):
     cls._server.shutdown()
     cls._server.server_close()
 
-  @unittest.expectedFailure
   def test_store(self):
     h = Tensor([1.0, 2.0, 3.0, 4.0]).fs_store().realize()
     self.assertEqual(h.shape, (16,))
     self.assertEqual(h.dtype, dtypes.uint8)
 
-  @unittest.expectedFailure
   def test_store_deterministic(self):
     a = Tensor([1.0, 2.0, 3.0, 4.0]).fs_store().realize()
     b = Tensor([1.0, 2.0, 3.0, 4.0]).fs_store().realize()
     np.testing.assert_array_equal(a.numpy(), b.numpy())
 
-  @unittest.expectedFailure
   def test_store_different_data(self):
     a = Tensor([1.0, 2.0, 3.0, 4.0]).fs_store().realize()
     b = Tensor([5.0, 6.0, 7.0, 8.0]).fs_store().realize()
     self.assertNotEqual(a.tolist(), b.tolist())
 
-  @unittest.expectedFailure
   def test_roundtrip_uint8(self):
     arr = np.arange(256, dtype=np.uint8)
     loaded = Tensor(arr).fs_store().realize().fs_load(len(arr))
     np.testing.assert_array_equal(loaded.numpy(), arr)
 
-  @unittest.expectedFailure
   def test_roundtrip_multichunk_uint8(self):
     arr = np.random.default_rng(42).integers(0, 256, size=Tensor.CHUNK_SIZE + 1024, dtype=np.uint8)
     loaded = Tensor(arr).fs_store().realize().fs_load(len(arr))
     np.testing.assert_array_equal(loaded.numpy(), arr)
 
-  @unittest.expectedFailure
   def test_hash_matches_python_impl(self):
     arr = np.arange(256, dtype=np.uint8)
     h = Tensor(arr).fs_store().realize()
