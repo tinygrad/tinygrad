@@ -4,7 +4,7 @@ from collections import deque
 from tinygrad.uop.ops import UOp, Ops, buffers, UOpMetaClass, track_rewrites, PatternMatcher, UPat, graph_rewrite, gate_kernel_sink
 from tinygrad.uop.spec import type_verify, tensor_spec
 from tinygrad.device import Buffer, MultiBuffer
-from tinygrad.helpers import DEBUG, cpu_profile, TracingKey, SPEC, pluralize, SCACHE, BASEDIR
+from tinygrad.helpers import DEBUG, cpu_profile, TracingKey, SPEC, pluralize, SCACHE, BASEDIR, unwrap
 from tinygrad.engine.realize import ExecItem
 from tinygrad.engine.allocations import allocate_global_buffers
 
@@ -63,7 +63,7 @@ def create_schedule(sched_sink:UOp) -> tuple[list[ExecItem], UOp]:
   return pre_schedule, UOp.sink(*buf_uops_list)
 
 from tinygrad.engine.memory import memory_planner
-from tinygrad.schedule.rangeify import get_rangeify
+from tinygrad.schedule.rangeify import get_rangeify, resolve_call
 from tinygrad.schedule.multi import multi_pm
 
 def replace_input_buffer(ctx:tuple[dict[UOp, UOp], dict[str, int], list[int], list[int]], b:UOp):
@@ -106,6 +106,9 @@ def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[dict[UOp, UOp], li
   st = time.perf_counter()
 
   big_sink, buffer_map = allocate_global_buffers(big_sink)
+
+  # HACK: apply the call for now
+  big_sink = unwrap(resolve_call(big_sink))
 
   # replace BUFFERs with PARAMs, CONSTs UNIQUE with LUNIQUE, strip BIND values for cache key, extract var_vals
   input_buffers: dict[UOp, UOp] = {}
