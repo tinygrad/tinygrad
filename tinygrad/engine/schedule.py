@@ -67,7 +67,7 @@ from tinygrad.schedule.rangeify import get_rangeify
 from tinygrad.schedule.multi import multi_pm
 from tinygrad.uop.ops import PatternMatcher, UPat
 
-def create_new_buffer(ctx:tuple[dict[UOp, UOp], list[UOp]], b:UOp):
+def create_new_buffer(ctx:tuple[dict[UOp, UOp], tuple[UOp, ...]], b:UOp):
   if (ret:=ctx[0].get(b, None)) is None: ctx[0][b] = ret = UOp.new_buffer(b.device, b.arg, b.dtype)
   return ret
 
