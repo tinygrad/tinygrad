@@ -5,11 +5,16 @@ const canvas = new OffscreenCanvas(0, 0);
 const ctx = canvas.getContext("2d");
 
 onmessage = (e) => {
-  const { data, opts } = e.data;
-  const g = new dagre.graphlib.Graph({ compound: true }).setDefaultEdgeLabel(function() { return {}; });
-  (data.blocks != null ? layoutCfg : layoutUOp)(g, data, opts);
-  postMessage(dagre.graphlib.json.write(g));
-  self.close();
+  try {
+    const { data, opts } = e.data;
+    const g = new dagre.graphlib.Graph({ compound: true }).setDefaultEdgeLabel(function() { return {}; });
+    (data.blocks != null ? layoutCfg : layoutUOp)(g, data, opts);
+    postMessage({result: dagre.graphlib.json.write(g)});
+    self.close();
+  } catch (err) {
+    postMessage({error: err.stack || err.message || String(err)});
+    self.close();
+  }
 }
 
 const layoutCfg = (g, { blocks, paths, pc_tokens }) => {
@@ -56,6 +61,12 @@ const layoutUOp = (g, { graph, change }, opts) => {
     if (change?.includes(parseInt(k))) g.setParent(k, "overlay");
   }
   // optionally hide nodes from the layout
+  if (!opts.showSink) {
+    for (const n of g.nodes()) {
+      const node = g.node(n);
+      if ((node.label === "SINK" || node.label.startsWith("SINK\n")) && (g.successors(n) || []).length === 0) g.removeNode(n);
+    }
+  }
   if (!opts.showIndexing) {
     for (const n of g.nodes()) {
       const node = g.node(n);

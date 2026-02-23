@@ -859,7 +859,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
 
   # TODO: this should replace placeholder
   @staticmethod
-  def param(slot:int, dtype:DType, shape:tuple[sint, ...]|None=None, device=None, vmin_vmax:tuple[PyConst, PyConst]|None=None, name="None"):
+  def param(slot:int, dtype:DType, shape:tuple[sint, ...]|None=None, device=None, vmin_vmax:tuple[PyConst, PyConst]|None=None, name=None):
     src: tuple[UOp, ...] = (UOp(Ops.NOOP) if shape is None else shape_to_shape_arg(shape),) + \
                            (UOp(Ops.NOOP) if device is None else UOp(Ops.DEVICE, arg=device),)
     if vmin_vmax is not None: src += (UOp.const(dtype, vmin_vmax[0]), UOp.const(dtype.scalar(), vmin_vmax[1]))
