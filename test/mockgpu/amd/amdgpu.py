@@ -199,18 +199,13 @@ class PM4Executor(AMDQueue):
     for st,sz in self.gpu.mapped_ranges:
       if st <= prg_addr < st+sz: prg_sz = sz - (prg_addr - st)
 
-    # Get scratch size from COMPUTE_TMPRING_SIZE register
-    # WAVESIZE = ceildiv(lanes * size_per_thread, mem_alignment_size)
-    # GFX11+: mem_alignment_size=256, so size_per_thread = WAVESIZE * 256 / 64 = WAVESIZE * 4
-    # GFX9:   mem_alignment_size=1024, so size_per_thread = WAVESIZE * 1024 / 64 = WAVESIZE * 16
     try: tmpring_size = self.gpu.regs[regCOMPUTE_TMPRING_SIZE]
     except KeyError: tmpring_size = 0
-    wavesize = (tmpring_size >> 12) & 0x3FFF  # WAVESIZE field is bits 12:25
-    scratch_size = wavesize * (16 if self.gpu.arch == "cdna" else 4)  # per-thread scratch size in bytes
+    wavesize = (tmpring_size >> 12) & 0x3FFF
+    scratch_size = wavesize * (16 if self.gpu.arch == "cdna" else 4)
 
     assert prg_sz > 0, "Invalid prg ptr (not found in mapped ranges)"
-    # Pass valid memory ranges, rsrc2, scratch_size, arch, and user data registers to Python emulator
-    if hasattr(remu, 'valid_mem_ranges'): remu.valid_mem_ranges = self.gpu.mapped_ranges
+    # Pass rsrc2, scratch_size, arch, and user data registers to Python emulator
     if hasattr(remu, 'rsrc2'): remu.rsrc2 = rsrc2
     if hasattr(remu, 'scratch_size'): remu.scratch_size = scratch_size
     if hasattr(remu, 'arch'): remu.arch = self.gpu.arch
@@ -403,7 +398,7 @@ p2p_links_count 5
 cpu_core_id_base 0
 simd_id_base 2147488032
 max_waves_per_simd 16
-lds_size_in_kb 128
+lds_size_in_kb 160
 gds_size_in_kb 0
 num_gws 64
 wave_front_size 64

@@ -811,9 +811,6 @@ class Parser:
       elif dt in (dtypes.uint16, dtypes.int16):
         val = (val >> (((addr >> _const(adt, 1)) & _const(adt, 1)).cast(dtypes.uint32) * _u32(16))) & _u32(0xFFFF)
       else:
-        # Handle unaligned 32-bit loads: combine two consecutive dwords and shift.
-        # To avoid OOB at buffer boundaries for aligned loads, clamp idx_hi to idx (safe).
-        # Use int64 for the WHERE to avoid 32-bit int overflow in C pointer arithmetic (addr can be >8GB).
         byte_off = (addr & _const(adt, 3)).cast(dtypes.uint32)
         is_unaligned = byte_off.ne(_u32(0))
         idx_native = (addr >> _const(adt, 2)).cast(dtypes.int64)
@@ -1034,18 +1031,16 @@ def parse_block(lines: list[str], start: int, env: dict[str, VarVal], funcs: dic
       i += 1
       continue
 
-    # VGPR assignment: VGPR[lane][reg] = value  or  VGPR[lane][reg][hi:lo].type = { ... }
     if first == 'vgpr' and toks[1].type == 'LBRACKET':
       j, lane_toks = _match_bracket(toks, 1)
       if j < len(toks) and toks[j].type == 'LBRACKET':
         j, reg_toks = _match_bracket(toks, j)
-        # Check for bit-slice: VGPR[lane][reg][hi:lo].type = value (read-modify-write)
         if j < len(toks) and toks[j].type == 'LBRACKET':
           j, slice_toks = _match_bracket(toks, j)
           slice_str = _tok_str(slice_toks)
           hi_str, lo_str = slice_str.split(':')
           hi_val, lo_val = int(eval(hi_str.strip())), int(eval(lo_str.strip()))
-          if j < len(toks) and toks[j].type == 'DOT': j += 2  # skip .type suffix
+          if j < len(toks) and toks[j].type == 'DOT': j += 2
           if j < len(toks) and toks[j].type == 'EQUALS': j += 1
           ln = parse_tokens(lane_toks, env, funcs)
           rg, val = parse_tokens(reg_toks, env, funcs), parse_tokens(toks[j:], env, funcs)
@@ -1214,7 +1209,7 @@ def parse_block(lines: list[str], start: int, env: dict[str, VarVal], funcs: dic
       def is_const(c, v): return c.op == Ops.CONST and c.arg is v
       cond = parse_cond(line, 'if')
       conditions: list[tuple[UOp, UOp | dict[str, VarVal] | None]] = [(cond, None)] if not is_const(cond, False) else []
-      branch_assigns: list[tuple[UOp, list]] = []  # (cond, assigns_list) for side-effect merging
+      branch_assigns: list[tuple[UOp, list]] = []
       else_branch: tuple[UOp | None, dict[str, VarVal]] = (None, {})
       else_side_effects: list = []
       env_snap = dict(env)
@@ -1268,7 +1263,6 @@ def parse_block(lines: list[str], start: int, env: dict[str, VarVal], funcs: dic
         ba = next((b for c, b in conditions if is_const(c, True) and isinstance(b, dict)), {})
         block_assigns.update(ba)
         env.update(ba)
-        # For static true, forward side effects unconditionally
         if assigns is not None:
           for bc, bse in branch_assigns:
             if is_const(bc, True): assigns.extend(bse)
@@ -1283,15 +1277,11 @@ def parse_block(lines: list[str], start: int, env: dict[str, VarVal], funcs: dic
               if isinstance(tv, UOp) and isinstance(res, UOp):
                 res = cond.where(tv, res.cast(tv.dtype) if tv.dtype != res.dtype and tv.dtype.itemsize == res.dtype.itemsize else res)
           block_assigns[var] = env[var] = res
-        # Merge side effects from branches with conditions
         if assigns is not None:
           def _cond_side_effect(cnd, dest, val):
-            if isinstance(val, tuple) and len(val) == 4:  # VGPR bit-slice: (idx, rhs, hi, lo) -> add condition
-              return (dest, (val[0], val[1], val[2], val[3], cnd))
-            if isinstance(val, tuple) and len(val) == 2:  # VGPR/MEM write: (addr, rhs) -> condition rhs
-              return (dest, (val[0], cnd.where(val[1], val[1])))
+            if isinstance(val, tuple) and len(val) == 4: return (dest, (val[0], val[1], val[2], val[3], cnd))
+            if isinstance(val, tuple) and len(val) == 2: return (dest, val)  # MEM writes: condition not gated
             return (dest, val)
-          # Build combined condition: each branch fires when its cond is true AND no earlier cond was true
           remaining = UOp.const(dtypes.bool, True)
           for bc, bse in branch_assigns:
             effective = remaining & bc if remaining.op != Ops.CONST else bc
