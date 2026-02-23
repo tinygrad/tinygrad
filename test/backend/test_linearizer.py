@@ -11,7 +11,6 @@ from tinygrad.helpers import Context, flatten, dedup, TC_SELECT, TC_OPT, getenv
 from tinygrad.dtype import DType, dtypes, PtrDType, AddrSpace
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.cstyle import CUDARenderer
-from tinygrad.renderer.isa.x86 import X86Renderer
 MOCKGPU = getenv("MOCKGPU")
 
 from tinygrad.uop.ops import print_uops # noqa: F401 # pylint: disable=unused-import
@@ -282,7 +281,6 @@ class TestLinearizer(unittest.TestCase):
     np.testing.assert_equal(a.flatten().numpy(), [1.,1.,1.,1.,2.,2.,2.,2.,1.,1.,1.,1.,1.,1.,1.,1.])
 
   @unittest.skipIf(MOCKGPU and isinstance(Device[Device.DEFAULT].renderer, (PTXRenderer, CUDARenderer)), "PTX indexes differently. might be ok?")
-  @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, X86Renderer), "this will work once cast to bool becomes cmpne 0")
   def test_where_fold(self):
     a = Tensor.ones(4, 4).contiguous().realize()
     b = a.shrink(((1, 2), None)).pad(((1, 2), None))

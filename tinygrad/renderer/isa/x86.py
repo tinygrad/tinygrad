@@ -18,9 +18,6 @@ extra_matcher = PatternMatcher([
   # *** NOOP ***
   # cast to pointer is a noop
   (UPat.var("y").cast(name="x"), lambda y,x: y if isinstance(x.dtype, PtrDType) or y.dtype == dtypes.void else None),
-  # TODO: this should be removed when bool cast is canonicalized
-  # rewrite cast to bool to CMPNE 0
-  (UPat.var("y").cast(dtypes.bool), lambda y: y != y.const_like(0)),
   # can't cast from float16 to ints/float64 directly and vice versa
   (UPat.var("y", dtypes.float16).cast((dtypes.float64,)+dtypes.ints, name="x"), lambda y,x: y.cast(dtypes.float32).cast(x.dtype)),
   (UPat.var("y", (dtypes.float64,)+dtypes.ints).cast(dtypes.float16, name="x"), lambda y,x: y.cast(dtypes.float32).cast(x.dtype)),
