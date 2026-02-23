@@ -63,45 +63,29 @@ def _floor(x):
   return ((x < _const(x.dtype, 0)) & x.ne(t)).where(t - _const(x.dtype, 1), t)
 def _f16_extract(v): return (v & _u32(0xFFFF)).cast(dtypes.uint16).bitcast(dtypes.half) if v.dtype == dtypes.uint32 else v
 
-# ═════ FP8 (E4M3) and BF8 (E5M2) conversion helpers ═════
-# f32→fp8/bf8 uses f2f decomposition directly. fp8/bf8→f32 wraps f2f with subnormal handling
-# (f2f flushes denormals to zero, but AMD V_CVT_F32_FP8/BF8 preserves subnormals).
-def _fp8_to_f32(v: UOp) -> UOp:
+def _x8_to_f32(v: UOp, exp_shift: int, exp_mask: int, mant_mask: int, sub_scale: float, src_dt) -> UOp:
   b = (v.cast(dtypes.uint32) & _u32(0xFF)).cast(dtypes.uint8)
-  # E4M3 subnormal: exp==0, mant!=0 -> (-1)^sign * 2^(1-7) * (mant/8) = (-1)^sign * mant * 2^(-9)
   bu = b.cast(dtypes.uint32)
-  sign, exp, mant = (bu >> _u32(7)) << _u32(31), (bu >> _u32(3)) & _u32(0xF), bu & _u32(0x7)
+  sign, exp, mant = (bu >> _u32(7)) << _u32(31), (bu >> _u32(exp_shift)) & _u32(exp_mask), bu & _u32(mant_mask)
   is_sub = exp.eq(_u32(0)) & mant.ne(_u32(0))
-  sub_f32 = (mant.cast(dtypes.float32) * _const(dtypes.float32, 1.0/512.0)).bitcast(dtypes.uint32) | sign
-  normal = f2f(b, dtypes.fp8e4m3, dtypes.float32)
-  return is_sub.where(sub_f32.bitcast(dtypes.float32), normal)
-
-def _bf8_to_f32(v: UOp) -> UOp:
-  b = (v.cast(dtypes.uint32) & _u32(0xFF)).cast(dtypes.uint8)
-  # E5M2 subnormal: exp==0, mant!=0 -> (-1)^sign * 2^(1-15) * (mant/4) = (-1)^sign * mant * 2^(-16)
-  bu = b.cast(dtypes.uint32)
-  sign, exp, mant = (bu >> _u32(7)) << _u32(31), (bu >> _u32(2)) & _u32(0x1F), bu & _u32(0x3)
-  is_sub = exp.eq(_u32(0)) & mant.ne(_u32(0))
-  sub_f32 = (mant.cast(dtypes.float32) * _const(dtypes.float32, 1.0/65536.0)).bitcast(dtypes.uint32) | sign
-  normal = f2f(b, dtypes.fp8e5m2, dtypes.float32)
-  return is_sub.where(sub_f32.bitcast(dtypes.float32), normal)
+  sub_f32 = (mant.cast(dtypes.float32) * _const(dtypes.float32, sub_scale)).bitcast(dtypes.uint32) | sign
+  return is_sub.where(sub_f32.bitcast(dtypes.float32), f2f(b, src_dt, dtypes.float32))
+def _fp8_to_f32(v): return _x8_to_f32(v, 3, 0xF, 0x7, 1.0/512.0, dtypes.fp8e4m3)
+def _bf8_to_f32(v): return _x8_to_f32(v, 2, 0x1F, 0x3, 1.0/65536.0, dtypes.fp8e5m2)
 
 def _f32_to_fp8(v: UOp) -> UOp:
   return f2f((v.bitcast(dtypes.float32) if v.dtype != dtypes.float32 else v).bitcast(dtypes.uint32), dtypes.float32, dtypes.fp8e4m3)
 def _f32_to_bf8(v: UOp) -> UOp:
   return f2f((v.bitcast(dtypes.float32) if v.dtype != dtypes.float32 else v).bitcast(dtypes.uint32), dtypes.float32, dtypes.fp8e5m2)
 def _f32_to_bf16(v: UOp) -> UOp:
-  """Convert f32 to bf16 with round-to-nearest-even. BF16 is the upper 16 bits of F32 with rounding."""
   bits = (v.bitcast(dtypes.float32) if v.dtype != dtypes.float32 else v).bitcast(dtypes.uint32)
-  # Round-to-nearest-even: add rounding bias. If the bit just below the truncation point is 1 and the rest are 0, round to even.
-  round_bit = (bits >> _u32(16)) & _u32(1)  # bit 16 (LSB of kept part)
-  rounding = _u32(0x7FFF) + round_bit  # 0x7FFF + bit16: rounds to even
+  is_nan = (bits & _u32(0x7F800000)).eq(_u32(0x7F800000)) & (bits & _u32(0x7FFFFF)).ne(_u32(0))
+  round_bit = (bits >> _u32(16)) & _u32(1)
+  rounding = _u32(0x7FFF) + round_bit
   rounded = bits + rounding
-  return (rounded >> _u32(16)).cast(dtypes.uint16)
+  return is_nan.where(_u32(0x7FC0).cast(dtypes.uint16), (rounded >> _u32(16)).cast(dtypes.uint16))
 def _f32_to_bf16_sr(v: UOp, stoch: UOp) -> UOp:
-  """Convert f32 to bf16 with stochastic rounding."""
   bits = (v.bitcast(dtypes.float32) if v.dtype != dtypes.float32 else v).bitcast(dtypes.uint32)
-  # Stochastic rounding: add lower 16 bits of stochastic value to lower 16 bits of f32
   rounded = bits + (stoch & _u32(0xFFFF))
   return (rounded >> _u32(16)).cast(dtypes.uint16)
 
@@ -165,9 +149,11 @@ def _abs(val: UOp) -> UOp:
   return (val.bitcast(bt) & _const(bt, sign_mask)).bitcast(ft)
 
 def _f_to_u(f, dt):
+  is_nan = _isnan(f.cast(dtypes.float32) if f.dtype == dtypes.half else f)
   clamped = (f < _const(f.dtype, 0.0)).where(_const(f.dtype, 0.0), f)
   truncated = UOp(Ops.TRUNC, f.dtype, (clamped,))
-  return (truncated >= _const(f.dtype, 2**(dt.itemsize*8))).where(_const(dt, dt.max), truncated.cast(dt))
+  result = (truncated >= _const(f.dtype, 2**(dt.itemsize*8))).where(_const(dt, dt.max), truncated.cast(dt))
+  return is_nan.where(_const(dt, 0), result)
 
 def _cvt_quiet(val: UOp) -> UOp:
   bits, _, _, qb, _ = _float_info(val)
