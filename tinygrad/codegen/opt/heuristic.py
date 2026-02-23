@@ -98,7 +98,7 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
   # upcast leading axes first (hack-ish for winograd; we actually want to upcast masked axes with low stride first)
   for axis in k.upcastable_dims:
     # for Schedule, we check if the range is used in INDEX gates or WHERE gates
-    is_masked = any(u.src[0].in_graph(k.rngs[axis]) for u in k.topo if u.op is Ops.WHERE)
+    is_masked = any(k.rngs[axis] in u.src[0].toposort() for u in k.topo if u.op is Ops.WHERE)
     if k.full_shape[axis] <= 7 and is_masked and prod(k.full_shape[j] for j in to_upcast) * k.full_shape[axis] <= 7 * 7:
       if DEBUG >= 4: print(f"upcasting masked axis : {axis}")
       to_upcast.append(axis)
@@ -114,12 +114,12 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
       # if we haven't upcasted it, it mods, and buffer has stride 0 on axis while having no stride 0 in the upcasted axis already
       if axis in upcasted_axis or k.full_shape[axis]%upcast_amount != 0: continue
       rng = k.rngs[axis]
-      if any(not (idx_t:=b.src[1].get_idx()).in_graph(rng) and all(idx_t.in_graph(r2)
+      if any(rng not in (idx_t:=b.src[1].get_idx()).toposort() and all(r2 in idx_t.toposort()
           for r2 in k.ranges_of(AxisType.UPCAST, AxisType.UNROLL)) for b in k.bufs):
         num_strides, sum_strides = 0, 0
         for b in k.bufs:
           idx = b.src[1].get_idx()
-          if idx.in_graph(rng): num_strides += 1
+          if rng in idx.toposort(): num_strides += 1
           for c in idx.split_uop(Ops.ADD):
             if c is rng: sum_strides += 1
             if c.op is Ops.MUL and c.src[0] is rng and c.src[1].op is Ops.CONST: sum_strides += c.src[1].arg
@@ -160,7 +160,7 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
       k.apply_opt(Opt(OptOps.NOLOCALS))
     else:
       # prioritize making expand axes local
-      local_axis_ranking = [(any(not b.src[1].get_idx().in_graph(k.rngs[axis]) for b in k.bufs), axis) \
+      local_axis_ranking = [(any(k.rngs[axis] not in b.src[1].get_idx().toposort() for b in k.bufs), axis) \
                               for axis in k.axes_of(AxisType.GLOBAL, AxisType.LOOP) if k.rngs[axis].src[0].op is Ops.CONST]
       to_local: list[tuple[int, int]] = []
       for _, axis in sorted(local_axis_ranking, key=lambda x: (-x[0], -x[1])):

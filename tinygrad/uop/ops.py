@@ -343,8 +343,8 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
 
   # determine what ranges this is in
   @recursive_property
-  def ranges(self) -> dict[UOp, None]:
-    ret: dict[UOp, None] = {self:None} if self.op is Ops.RANGE else {}
+  def _ranges(self) -> dict[UOp, None]:
+    ret: dict[UOp, None] = {}
     for s in self.src: ret.update(s.ranges)
     for er in self.ended_ranges:
       if er.op is Ops.RANGE:
@@ -355,6 +355,11 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
         # technically we shouldn't flow through these ranges either, but this is pre pm_add_control_flow so it's the same.
         for s in er.ranges: ret.pop(s, None)
     return ret
+
+  @property
+  def ranges(self) -> dict[UOp, None]:
+    if self.op is Ops.RANGE: return {self:None} | self._ranges
+    return self._ranges
 
   # *** uop evaluation ***
 
@@ -641,10 +646,12 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
   @recursive_property
   def _bufferize_cost(self) -> tuple[frozenset, bool]:
     """(reachable_bufs, has_buf_in_reduce) for remove_bufferize cost function."""
-    if (self.op is Ops.BUFFERIZE and self.arg.addrspace == AddrSpace.GLOBAL) or self.op in {Ops.MSTACK, Ops.PARAM}:
-      return (frozenset({self}), False)
+    if (self.op is Ops.BUFFERIZE and self.arg.addrspace == AddrSpace.GLOBAL) or self.op is Ops.MSTACK:
+      return (frozenset(), False)
     costs = [s._bufferize_cost for s in self.src]
-    bufs = frozenset().union(*(c[0] for c in costs)) if costs else frozenset()
+    # parent adds buffer-type children to avoid self-reference cycle in __dict__
+    child_bufs = frozenset(s for s in self.src if (s.op is Ops.BUFFERIZE and s.arg.addrspace == AddrSpace.GLOBAL) or s.op in {Ops.MSTACK, Ops.PARAM})
+    bufs = child_bufs.union(*(c[0] for c in costs)) if costs else child_bufs
     return (bufs, any(c[1] for c in costs) or (self.op is Ops.REDUCE and bool(bufs)))
 
   @property
