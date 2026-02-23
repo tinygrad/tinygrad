@@ -1262,29 +1262,33 @@ def _compile_mfma(inst: irc.VOP3P, ctx: _Ctx) -> UOp:
   src2_off = ctx.inst_field(type(inst).src2)
   is_bf16 = 'BF16' in op_name
   is_fp8 = 'FP8' in op_name or 'F8' in op_name
+  is_i8 = 'I8' in op_name
+  is_int_out = op_name.split('_')[2] == 'I32'
   m = re.search(r'(\d+)X(\d+)X(\d+)', op_name)
   assert m is not None, f"MFMA op name doesn't contain MxNxK dimensions: {op_name}"
   M, N, K = int(m.group(1)), int(m.group(2)), int(m.group(3))
   assert (M, N) in ((16, 16), (32, 32)), f"unsupported MFMA dimensions: {M}x{N}"
   k_per_grp, n_out_regs = K // (64 // M), (M * N) // 64
-  vpg = 4 if is_fp8 else 2
-  cvt = _FUNCS['bf16_to_f32'] if is_bf16 else _FUNCS['f16_to_f32']
+  vpg = 4 if (is_i8 or is_fp8) else 2
+  if not is_i8 and not is_int_out: cvt = _FUNCS['bf16_to_f32'] if is_bf16 else _FUNCS['f16_to_f32']
   n_elems = M * K
+  tmp_dtype = dtypes.int32 if is_int_out else dtypes.float32
 
   src2_is_vgpr = src2_off >= _c(256)
   src2_r = src2_off - _c(256)
-  acc_scalar = ctx.rsgpr_dyn(src2_off, src2_is_vgpr.ne(True)).bitcast(dtypes.float32)
+  acc_scalar = ctx.rsgpr_dyn(src2_off, src2_is_vgpr.ne(True)).bitcast(dtypes.int32 if is_int_out else dtypes.float32)
 
   b_off = UOp.const(dtypes.int, n_elems)
-  tmp = UOp(Ops.DEFINE_LOCAL, dtypes.float32.ptr(n_elems * 2, addrspace=AddrSpace.LOCAL), arg=(n_elems * 2,))
+  tmp = UOp(Ops.DEFINE_LOCAL, tmp_dtype.ptr(n_elems * 2, addrspace=AddrSpace.LOCAL), arg=(n_elems * 2,))
 
   read_lane = ctx.range()
   read_row = read_lane % UOp.const(dtypes.int, M)
   read_grp = read_lane // UOp.const(dtypes.int, M)
 
   def _mfma_extract(raw, sub_idx):
-    bits = 8 if is_fp8 else 16
+    bits = 8 if (is_i8 or is_fp8) else 16
     v = (raw >> UOp.const(dtypes.uint32, sub_idx * bits)) & UOp.const(dtypes.uint32, (1 << bits) - 1)
+    if is_i8: return v.cast(dtypes.uint8).cast(dtypes.int8).cast(dtypes.int32)
     return v.cast(dtypes.uint32) if is_fp8 else cvt(v)
 
   read_stores = []
@@ -1307,7 +1311,8 @@ def _compile_mfma(inst: irc.VOP3P, ctx: _Ctx) -> UOp:
   grp = compute_lane // UOp.const(dtypes.int, M)
   compute_stores = []
   for out_reg in range(n_out_regs):
-    acc_v = ctx.raccvgpr_dyn(src2_r + _c(out_reg), compute_lane, src2_is_vgpr).bitcast(dtypes.float32)
+    acc_v = ctx.raccvgpr_dyn(src2_r + _c(out_reg), compute_lane, src2_is_vgpr)
+    acc_v = acc_v.bitcast(dtypes.int32 if is_int_out else dtypes.float32)
     acc = src2_is_vgpr.where(acc_v, acc_scalar)
     # ISA row = (8*(GPR//4) % M) + 4*floor(lane/M) + GPR%4
     row_base = (8 * (out_reg // 4) % M) + (out_reg % 4)
@@ -1315,7 +1320,8 @@ def _compile_mfma(inst: irc.VOP3P, ctx: _Ctx) -> UOp:
     for k in range(K):
       acc = acc + tmp2.index(row * UOp.const(dtypes.int, K) + UOp.const(dtypes.int, k)) \
                 * tmp2.index(b_off + col * UOp.const(dtypes.int, K) + UOp.const(dtypes.int, k))
-    compute_stores.append(ctx.waccvgpr_dyn(vdst_reg + _c(out_reg), compute_lane, acc.bitcast(dtypes.uint32), exec_mask))
+    out_val = acc.bitcast(dtypes.uint32) if not is_int_out else acc.cast(dtypes.uint32)
+    compute_stores.append(ctx.waccvgpr_dyn(vdst_reg + _c(out_reg), compute_lane, out_val, exec_mask))
 
   compute_phase = UOp.group(*compute_stores).end(compute_lane)
   return UOp.sink(read_phase, compute_phase, *ctx.inc_pc())
