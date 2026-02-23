@@ -644,14 +644,9 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     """(reachable_bufs, has_buf_in_reduce) for remove_bufferize cost function."""
     if (self.op is Ops.BUFFERIZE and self.arg.addrspace == AddrSpace.GLOBAL) or self.op in {Ops.MSTACK, Ops.PARAM}:
       return (frozenset({self}), False)
-    bufs: frozenset = frozenset()
-    has_reduce_buf = False
-    for s in self.src:
-      s_bufs, s_has = s._bufferize_cost
-      if s_bufs: bufs = bufs | s_bufs
-      has_reduce_buf = has_reduce_buf or s_has
-    if self.op is Ops.REDUCE and bufs: has_reduce_buf = True
-    return (bufs, has_reduce_buf)
+    costs = [s._bufferize_cost for s in self.src]
+    bufs = frozenset().union(*(c[0] for c in costs)) if costs else frozenset()
+    return (bufs, any(c[1] for c in costs) or (self.op is Ops.REDUCE and bool(bufs)))
 
   @property
   def buf_uop(self) -> UOp:
