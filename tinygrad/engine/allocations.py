@@ -125,7 +125,7 @@ pm_replace_buf = PatternMatcher([
   (UPat(Ops.BIND, src=(UPat(Ops.DEFINE_VAR), UPat(Ops.CONST)), name="b"), replace_input_buffer),
 ])
 
-def allocate_global_buffers(big_sink:UOp) -> tuple[UOp, dict[UOp, UOp]]:
+def transform_to_call(big_sink:UOp) -> tuple[UOp, dict[UOp, UOp]]:
   # uop list is a list in the original_sink graph and we can map to the tags later
   # here we build buffer map
   dont_realize = {Ops.CONST, Ops.BUFFER, Ops.BIND, Ops.DEFINE_VAR, Ops.AFTER}

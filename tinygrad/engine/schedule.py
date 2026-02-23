@@ -6,7 +6,7 @@ from tinygrad.uop.spec import type_verify, tensor_spec
 from tinygrad.device import Buffer, MultiBuffer
 from tinygrad.helpers import DEBUG, cpu_profile, TracingKey, SPEC, pluralize, SCACHE, BASEDIR
 from tinygrad.engine.realize import ExecItem
-from tinygrad.engine.allocations import allocate_global_buffers
+from tinygrad.engine.allocations import transform_to_call
 
 # **** schedule linearizer
 
@@ -82,7 +82,7 @@ schedule_cache: dict[bytes, tuple[list[ExecItem], UOp]] = {}
 def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[dict[UOp, UOp], list[ExecItem], dict[str, int]]:
   # big_sink srcs are all the Tensors
   st = time.perf_counter()
-  big_sink, buffer_map = allocate_global_buffers(big_sink)
+  big_sink, buffer_map = transform_to_call(big_sink)
 
   # get var_vals
   var_vals: dict[str, int] = {}
