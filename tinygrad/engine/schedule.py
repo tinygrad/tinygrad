@@ -63,8 +63,7 @@ def create_schedule(sched_sink:UOp) -> tuple[list[ExecItem], UOp]:
   return pre_schedule, UOp.sink(*buf_uops_list)
 
 from tinygrad.engine.memory import memory_planner
-from tinygrad.schedule.rangeify import get_rangeify
-from tinygrad.schedule.multi import multi_pm
+from tinygrad.schedule.rangeify import get_kernel_graph
 from tinygrad.uop.ops import PatternMatcher, UPat
 
 def create_new_buffer(ctx:tuple[dict[UOp, UOp], tuple[UOp, ...]], b:UOp):
@@ -84,27 +83,16 @@ def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[dict[UOp, UOp], li
   st = time.perf_counter()
   big_sink, buffer_map = transform_to_call(big_sink)
 
-  # get var_vals
-  var_vals: dict[str, int] = {}
-  for i,b in enumerate(big_sink.src[1:]):
-    if b.op is Ops.BIND:
-      nm = b.src[0].expr
-      val = b.src[1].arg
-      assert nm not in var_vals or var_vals[nm] == val, f"bind mismatch on {nm}, {var_vals[nm]} != {val}"
-      var_vals[nm] = val
-
-  big_sink_cache = big_sink.src[0]
-  sched_cache_key = big_sink_cache.key
-  if not SCACHE or (sc_ret:=schedule_cache.get(sched_cache_key, None)) is None:
-    if SPEC: type_verify(big_sink, tensor_spec)
-    big_sink_cache = graph_rewrite(big_sink_cache, multi_pm, name="multi_pm", rewrite_into_calls=True)
-    pre_schedule, buf_uops_sink = create_schedule(get_rangeify(big_sink_cache))
-    if SCACHE: schedule_cache[sched_cache_key] = (pre_schedule, buf_uops_sink)
+  function = big_sink.src[0]
+  if not SCACHE or (sc_ret:=schedule_cache.get(function.key, None)) is None:
+    if SPEC: type_verify(function, tensor_spec)
+    pre_schedule, buf_uops_sink = create_schedule(get_kernel_graph(function))
+    if SCACHE: schedule_cache[function.key] = (pre_schedule, buf_uops_sink)
   else:
     # schedule cache hit
     pre_schedule, buf_uops_sink = sc_ret
   # it's a call that we late apply
-  buf_uops_sink = graph_rewrite(buf_uops_sink, pm_post_sched_cache, ctx=({}, big_sink.src[1:]), name="apply buffers")
+  buf_uops_sink = graph_rewrite(buf_uops_sink, pm_post_sched_cache, ctx=({}, big_sink.src[1:]), name="params to buffers")
 
   # add bufs to pre_schedule
   schedule: list[ExecItem] = []
@@ -133,7 +121,18 @@ def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[dict[UOp, UOp], li
     else:
       frm = None
     print(f"scheduled {len(schedule):5d} kernels in {(time.perf_counter()-st)*1000:8.2f} ms"+\
-          f" | {' cache hit' if SCACHE and sc_ret is not None else 'CACHE MISS'} {sched_cache_key.hex()[:8]}"+\
+          f" | {' cache hit' if SCACHE and sc_ret is not None else 'CACHE MISS'} {function.key.hex()[:8]}"+\
           f" | {len(UOpMetaClass.ucache):7d} uops in cache"+("" if frm is None else f" | {frm.filename}:{frm.lineno}"))
+
+  # vars used in the schedule
   used_vars = set().union(*[{v.expr for v in si.ast.variables()} for si in schedule])
-  return buffer_map, schedule, {k:v for k,v in var_vals.items() if k in used_vars}
+  # get var_vals
+  var_vals: dict[str, int] = {}
+  for i,b in enumerate(big_sink.src[1:]):
+    if b.op is Ops.BIND:
+      nm = b.src[0].expr
+      if nm not in used_vars: continue
+      val = b.src[1].arg
+      assert nm not in var_vals or var_vals[nm] == val, f"bind mismatch on {nm}, {var_vals[nm]} != {val}"
+      var_vals[nm] = val
+  return buffer_map, schedule, var_vals

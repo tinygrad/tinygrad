@@ -2,7 +2,7 @@ import sys
 from tinygrad import Tensor
 from tinygrad.nn.onnx import OnnxRunner
 from tinygrad.helpers import fetch, Timing
-from tinygrad.engine.allocations import transform_to_call
+#from tinygrad.engine.allocations import transform_to_call
 
 # IMAGE_PITCH_ALIGN=256 CL=1 IMAGE=2 DEBUG=2 python3 examples/openpilot/compile4.py
 

@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from tinygrad.uop.ops import UOp, UPat, PatternMatcher, Ops, GroupOp, graph_rewrite, identity_element
+from tinygrad.uop.ops import UOp, UPat, PatternMatcher, Ops, GroupOp, graph_rewrite, identity_element, profile_matches
 from tinygrad.dtype import ImageDType
 from tinygrad.helpers import prod, DEBUG, argsort, VIZ
 
@@ -125,6 +125,7 @@ pm_replace_buf = PatternMatcher([
   (UPat(Ops.BIND, src=(UPat(Ops.DEFINE_VAR), UPat(Ops.CONST)), name="b"), replace_input_buffer),
 ])
 
+@profile_matches
 def transform_to_call(big_sink:UOp) -> tuple[UOp, dict[UOp, UOp]]:
   # uop list is a list in the original_sink graph and we can map to the tags later
   # here we build buffer map
@@ -141,5 +142,5 @@ def transform_to_call(big_sink:UOp) -> tuple[UOp, dict[UOp, UOp]]:
   # here we construct the final buffer_map. this is everything that will go into the tensor map
   graph_rewrite(big_sink, pm_finalize_call, ctx=ctx, name="finalize call")
   ret = graph_rewrite(UOp.sink(*ctx.assigns), pm_replace_buf, ctx=ctx, name="replace bufs").call(*ctx.replacements)
-  if VIZ: graph_rewrite(ret, PatternMatcher([]), name="*** Call")
+  if VIZ: graph_rewrite(ret, PatternMatcher([]), name="View Call")
   return ret, ctx.buffer_map
