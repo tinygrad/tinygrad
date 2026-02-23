@@ -213,7 +213,8 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
 
       case Ops.CAST:
         # when PTX cases from ptr to non ptr, remove the shape
-        if isinstance(self.src[0].dtype, PtrDType) and not isinstance(self.dtype, PtrDType): return None
+        if isinstance(self.src[0].dtype, PtrDType) and not isinstance(self.src[0].dtype, ImageDType) and not isinstance(self.dtype, PtrDType):
+          return None
 
       case Ops.INDEX:
         # non pointer index doesn't have a shape
