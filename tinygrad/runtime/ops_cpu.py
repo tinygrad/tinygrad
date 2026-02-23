@@ -141,8 +141,3 @@ class CPUDevice(HCQCompiled):
     CPUWorker(self, self.tasks, thread_id=0).start()
     compilers = CompilerSet([(ClangJITRenderer, None), (CPULLVMRenderer, CPU_LLVM), (LVPRenderer, CPU_LVP)], ctrl_var=CPU_CC)
     super().__init__(device, CPUAllocator(self), compilers, functools.partial(CPUProgram, self), CPUSignal, CPUComputeQueue)
-
-  def on_device_hang(self):
-    self.tasks = queue.Queue()
-    self.timeline_signal.value = self.timeline_value - 1
-    raise RuntimeError("CPU device hang detected")
