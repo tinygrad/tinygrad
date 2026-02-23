@@ -42,8 +42,8 @@ def _bitreverse(v: UOp, bits: int) -> UOp:
 def _extract_bits(val: UOp, hi: int, lo: int) -> UOp:
   dt = dtypes.uint64 if val.dtype in (dtypes.uint64, dtypes.int64) else dtypes.uint32
   width = hi - lo + 1
-  result = ((val >> _const(dt, lo)) if lo > 0 else val) & _const(val.dtype, (1 << width) - 1)
-  # Downcast to match extracted bit width so brace-concat { hi, lo } computes correct output dtype
+  val_u = val.cast(dt) if val.dtype != dt else val
+  result = ((val_u >> _const(dt, lo)) if lo > 0 else val_u) & _const(dt, (1 << width) - 1)
   target_dt = _BITS_DT.get(width) or (dtypes.uint32 if width <= 32 else dtypes.uint64 if width <= 64 else dt)
   if result.dtype != target_dt: result = result.cast(target_dt)
   return result
@@ -323,7 +323,6 @@ _FUNCS: dict[str, Callable[..., UOp]] = {
   'CalcDsAddr': lambda a, o, *r: a.cast(dtypes.uint32) + o.cast(dtypes.uint32),
   'CalcGlobalAddr': lambda v, s, *r: v.cast(dtypes.uint64) + s.cast(dtypes.uint64),
   'CalcScratchAddr': lambda v, s, *r: v.cast(dtypes.uint64) + s.cast(dtypes.uint64),
-  # FP8/BF8/BF16 conversion functions
   'fp8_to_f32': _fp8_to_f32, 'bf8_to_f32': _bf8_to_f32, 'f32_to_fp8': _f32_to_fp8, 'f32_to_bf8': _f32_to_bf8,
   'f32_to_bf16': _f32_to_bf16, 'f32_to_bf16_SR': _f32_to_bf16_sr, 'f32_to_bf16_sr': _f32_to_bf16_sr,
 }
