@@ -808,6 +808,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     # float has NAN issue and we use explicit NAN in transcendental
     if self.op is Ops.WHERE and dtypes.is_int(self.dtype): return min(self.src[1].vmin, self.src[2].vmin), max(self.src[1].vmax, self.src[2].vmax)
     # NOTE: returned UOp is assumed to be CONST
+    if self.op is Ops.PARAM and len(self.src) >= 4: return self.src[2].arg, self.src[3].arg
     if self.op is Ops.DEFINE_VAR and self.arg: return self.arg[1], self.arg[2]
     if self.op in (Ops.RANGE, Ops.SPECIAL): return 0, (self.src[0]-1).vmax
     if self.op is Ops.BIND: return self.src[0]._min_max # ignore the bound value
@@ -858,8 +859,11 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
 
   # TODO: this should replace placeholder
   @staticmethod
-  def param(slot:int, dtype:DType, shape:tuple[sint, ...]|None=None, device=None):
-    src = (UOp(Ops.NOOP) if shape is None else shape_to_shape_arg(shape),) + (() if device is None else (UOp(Ops.DEVICE, arg=device),))
+  def param(slot:int, dtype:DType, shape:tuple[sint, ...]|None=None, device=None, vmin_vmax:tuple[PyConst, PyConst]|None=None, name="None"):
+    src: tuple[UOp, ...] = (UOp(Ops.NOOP) if shape is None else shape_to_shape_arg(shape),) + \
+                           (UOp(Ops.NOOP) if device is None else UOp(Ops.DEVICE, arg=device),)
+    if vmin_vmax is not None: src += (UOp.const(dtype, vmin_vmax[0]), UOp.const(dtype.scalar(), vmin_vmax[1]))
+    if name is not None: src += (UOp(Ops.NOOP, arg=name),)
     return UOp(Ops.PARAM, dtype, src, arg=slot)
 
   def call(self, *srcs:UOp, grad_fxn:Callable|None=None, metadata:tuple[Metadata, ...]=()) -> UOp:
