@@ -107,7 +107,7 @@ class ISARenderer(Renderer):
   isel_matcher: PatternMatcher
   post_regalloc_matcher: PatternMatcher
   def stack_pointer(self) -> UOp: raise NotImplementedError("arch specific")
-  def print_asm(self, uops:list[UOp]) -> str: raise NotImplementedError("arch specific")
+  def asm(self, uops:list[UOp]) -> str: raise NotImplementedError("arch specific")
   # TODO: these should go with the other rewrites after we know what to do with ProgramSpec and Estimates
   def lower(self, sink:UOp):
     sink = graph_rewrite(sink, self.pre_isel_matcher, name="pre instruction selection", bottom_up=True)
@@ -116,11 +116,10 @@ class ISARenderer(Renderer):
     # TODO: remove, annoying needed for noops
     sink = graph_rewrite(sink, isel_fixup, name="instruction selection fixup")
     lst = isa_linearize(sink)
-    if DEBUG >= 8: self.print_asm(lst)
     regalloc_ctx = RegallocContext(lst, self.isel_matcher, self.stack_pointer(), isel_ctx.stack_size)
     lst = line_rewrite(lst, pm_regalloc, regalloc_ctx)
     lst = line_rewrite(lst, pm_insert_spills, regalloc_ctx)
     lst = line_rewrite(lst, self.post_regalloc_matcher, regalloc_ctx)
-    if DEBUG >= 7: self.print_asm(lst)
+    if DEBUG >= 4: print(self.asm(lst))
     if SPEC: type_verify(lst, self.isa_spec)
     return lst

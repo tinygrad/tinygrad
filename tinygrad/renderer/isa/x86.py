@@ -166,7 +166,7 @@ def idiv(ctx:IselContext, x:UOp):
   # this move "cleanses" the register constraint (rax) of idiv, this is because the constraint only applies on definition and not on the uses of idiv
   return x.ins(X86Ops.MOV, src=(idiv,))
 
-def fuse_address(x:UOp) -> tuple[UOp, ...]:
+def fuse_address(x:UOp) -> tuple[UOp, UOp, UOp]:
   def _disp(v:int) -> UOp: return imm(dtypes.int32 if abs(v) > dtypes.max(dtypes.int8) else dtypes.int8, v)
   def _cast(v:UOp) -> UOp: return v.cast(dtypes.int64) if v.vmin < 0 else v
   if x.op is not Ops.INDEX: return (x, UOp(Ops.NOOP), _disp(0))
@@ -400,9 +400,9 @@ isel_matcher = PatternMatcher([
 def lower_range(ctx:RegallocContext, x:UOp) -> tuple[UOp, list[UOp]]:
   loop_label = "_".join(str(i) for i in x.arg[:-1])
   acc = x.ins(X86Ops.MOVi, src=(imm(x.dtype, 0),) + x.src[1:])
-  label = UOp(Ops.INS, arg=X86Ops.LABEL, tag=f"LOOP_{loop_label}")
+  label = UOp(Ops.INS, arg=X86Ops.LABEL, tag=f".LOOP_{loop_label}")
   cmp = UOp(Ops.INS, arg=X86Ops.CMPi if x.src[0].arg is X86Ops.IMM else X86Ops.CMP, src=(acc, x.src[0]))
-  jump_out = UOp(Ops.INS, arg=X86Ops.JGE, src=(cmp,), tag=f"LOOP_OUT_{loop_label}")
+  jump_out = UOp(Ops.INS, arg=X86Ops.JGE, src=(cmp,), tag=f".LOOP_OUT_{loop_label}")
   ctx.loop_label[acc] = loop_label
   return (acc, [acc, label, cmp, jump_out])
 
@@ -419,8 +419,8 @@ post_regalloc_matcher = PatternMatcher([
   # rewrite RANGE to ACC = 0 -> LABEL -> JUMP if ACC >= loop bound
   (UPat(Ops.RANGE, name="x"), lambda ctx,x: lower_range(ctx, x)),
   # rewrite END to ACC + 1 -> JUMP -> LABEL, also add the out of loop JUMP to the src so this becomes the jump target
-  (UPat(Ops.END, name="x"), lambda ctx,x: (jmp:=UOp(Ops.INS, arg=X86Ops.JMP, tag=f"LOOP_{ctx.loop_label[x.src[1]]}"),
-   [x.src[1].ins(X86Ops.ADDi, src=(imm(x.src[1].dtype, 1),)), jmp, UOp(Ops.INS, arg=X86Ops.LABEL, tag=f"LOOP_OUT_{ctx.loop_label[x.src[1]]}")])),
+  (UPat(Ops.END, name="x"), lambda ctx,x: (jmp:=UOp(Ops.INS, arg=X86Ops.JMP, tag=f".LOOP_{ctx.loop_label[x.src[1]]}"),
+   [x.src[1].ins(X86Ops.ADDi, src=(imm(x.src[1].dtype, 1),)), jmp, UOp(Ops.INS, arg=X86Ops.LABEL, tag=f".LOOP_OUT_{ctx.loop_label[x.src[1]]}")])),
   # TODO: need a generic way to model clobbers, idiv and flags should be handled the same way, maybe add clobber field to Register?
   # fixup div, zero rdx again because scheduling constraint isn't being respected
   (UPat(Ops.INS, arg=X86Ops.DIV, name="x"), lambda x:
@@ -662,11 +662,38 @@ class X86Renderer(ISARenderer):
     from tinygrad.runtime.support.compiler_cpu import X86Compiler
     self.compiler = X86Compiler()
   def stack_pointer(self) -> UOp: return UOp(Ops.INS, arg=X86Ops.DEFINE_REG, dtype=dtypes.uint64, tag=RSP)
-  def print_asm(self, uops:list[UOp]) -> str:
-    def _format_operands(ins:tuple[UOp, ...]) -> str: return [f"{s.tag}" for s in ins if s.tag is not None]
+  def asm(self, uops:list[UOp]) -> str:
+    def _format_op(x:UOp) -> str: return f"    {(str(x.arg)[7:-1] if str(x.arg)[-1] in ("i", "m") else str(x.arg)[7:]).lower():7s}"
+    def _format_operands(x:UOp) -> str:
+      def _format(src:tuple[UOp, ...]) -> list[str]: return [str(s.tag) for s in src if s.tag is not None]
+      def _mem_adress(base:UOp, idx:UOp, disp:UOp) -> str:
+        if idx.tag is not None:
+          if disp.tag == 0: return f"[{base.tag} + {idx.tag}*{base.dtype.itemsize}]"
+          else: return f"[{base.tag} + {idx.tag}*{base.dtype.itemsize} + {disp.tag}]"
+        if disp.tag == 0: return f"[{base.tag}]"
+        return f"[{base.tag} + {disp.tag}]"
+
+      if len(x.src) > 3 and x.arg in X86GroupOp.WriteMem:
+        return ", ".join([_mem_adress(*x.src[:3])] + _format(x.src[3:]))
+      elif len(x.src) > 2 and (x.arg in X86GroupOp.ReadMem1st or x.arg in X86GroupOp.ReadMem2nd and x.arg in X86GroupOp.TwoAddress1st):
+        return ", ".join(_format((x,)) + [_mem_adress(*x.src[:3])] + _format(x.src[3:]))
+      elif len(x.src) > 3 and (x.arg in X86GroupOp.ReadMem2nd or x.arg in X86GroupOp.ReadMem3rd and x.arg in X86GroupOp.TwoAddress1st):
+        return ", ".join(_format((x, x.src[0])) + [_mem_adress(*x.src[1:4])] + _format(x.src[4:]))
+      return ", ".join(_format((x,) + x.src))
+
+    asm = []
     for u in uops:
+      if u.op in (Ops.GROUP, Ops.NOOP, Ops.AFTER, Ops.BARRIER): continue
       if u.arg in (X86Ops.IMM, X86Ops.DEFINE_REG): continue
-      print(f"{str(u.arg)[7:].lower():15s} " f"{str(_format_operands((u,)+u.src))}")
+      if u.arg is X86Ops.LABEL:
+        asm.append(f"{str(u.tag)}:")
+        continue
+      if u.arg is X86Ops.RET:
+        asm.append(_format_op(u))
+        continue
+      asm.append(_format_op(u) + f" {_format_operands(u)}")
+    return "\n".join(asm)
+
   def render(self, uops:list[UOp], lower:bool=True) -> str:
     if lower: uops = self.lower(uops[-1])
     targets: dict[str, int] = {}
