@@ -211,6 +211,10 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
            Ops.LINEAR | Ops.PROGRAM | Ops.SOURCE | Ops.BINARY | Ops.INS:
         return None
 
+      case Ops.CAST:
+        # when PTX cases from ptr to non ptr, remove the shape
+        if isinstance(self.src[0].dtype, PtrDType) and not isinstance(self.dtype, PtrDType): return None
+
       case Ops.INDEX:
         # non pointer index doesn't have a shape
         if not isinstance(self.dtype, PtrDType): return None
