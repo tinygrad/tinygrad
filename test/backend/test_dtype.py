@@ -150,28 +150,16 @@ class TestFp8sConversions(unittest.TestCase):
     np.testing.assert_equal(float_to_fp8(x, dtypes.fp8e4m3), torch.tensor(x, dtype=torch.float8_e4m3fn).view(torch.uint8).item())
 
   def test_float_to_fp8e4m3_extreme_values(self):
-    np.testing.assert_equal(float_to_fp8(FP8E4M3_MAX, dtypes.fp8e4m3), 126)
-    np.testing.assert_equal(float_to_fp8(FP8E4M3_MAX*1.01, dtypes.fp8e4m3), 126)
-    np.testing.assert_equal(float_to_fp8(math.inf, dtypes.fp8e4m3), 127)
-    np.testing.assert_equal(float_to_fp8(-FP8E4M3_MAX, dtypes.fp8e4m3), 254)
-    np.testing.assert_equal(float_to_fp8(-FP8E4M3_MAX*1.01, dtypes.fp8e4m3), 254)
-    np.testing.assert_equal(float_to_fp8(-math.inf, dtypes.fp8e4m3), 255)
-    np.testing.assert_equal(float_to_fp8(math.nan, dtypes.fp8e4m3), 127)
-    np.testing.assert_equal(float_to_fp8(-math.nan, dtypes.fp8e4m3), 255)
+    for x in [FP8E4M3_MAX, FP8E4M3_MAX*1.01, -FP8E4M3_MAX, -FP8E4M3_MAX*1.01, math.inf, -math.inf, math.nan, -math.nan]:
+      np.testing.assert_equal(float_to_fp8(x, dtypes.fp8e4m3), torch.tensor(x, dtype=torch.float8_e4m3fn).view(torch.uint8).item())
 
   @given(strat.floats(width=32, allow_subnormal=True, allow_nan=False, allow_infinity=False, min_value=-FP8E5M2_MAX, max_value=FP8E5M2_MAX))
   def test_float_to_fp8e5m2(self, x):
     np.testing.assert_equal(float_to_fp8(x, dtypes.fp8e5m2), torch.tensor(x, dtype=torch.float8_e5m2).view(torch.uint8).item())
 
   def test_float_to_fp8e5m2_extreme_values(self):
-    np.testing.assert_equal(float_to_fp8(FP8E5M2_MAX, dtypes.fp8e5m2), 123)
-    np.testing.assert_equal(float_to_fp8(FP8E5M2_MAX*1.01, dtypes.fp8e5m2), 123)
-    np.testing.assert_equal(float_to_fp8(math.inf, dtypes.fp8e5m2), 124)
-    np.testing.assert_equal(float_to_fp8(-FP8E5M2_MAX, dtypes.fp8e5m2), 251)
-    np.testing.assert_equal(float_to_fp8(-FP8E5M2_MAX*1.01, dtypes.fp8e5m2), 251)
-    np.testing.assert_equal(float_to_fp8(-math.inf, dtypes.fp8e5m2), 252)
-    np.testing.assert_equal(float_to_fp8(math.nan, dtypes.fp8e5m2), 126)
-    np.testing.assert_equal(float_to_fp8(-math.nan, dtypes.fp8e5m2), 254)
+    for x in [FP8E5M2_MAX, FP8E5M2_MAX*1.01, -FP8E5M2_MAX, -FP8E5M2_MAX*1.01, math.inf, -math.inf, math.nan, -math.nan]:
+      np.testing.assert_equal(float_to_fp8(x, dtypes.fp8e5m2), torch.tensor(x, dtype=torch.float8_e5m2).view(torch.uint8).item())
 
   @given(strat.integers(min_value=0, max_value=255))
   def test_fp8e4m3_to_float(self, x):
