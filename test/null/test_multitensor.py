@@ -38,6 +38,27 @@ class TestMultiRamUsage(unittest.TestCase):
     _ = Tensor.zeros(self.N, self.N).contiguous().shard(devices_2, axis=0).contiguous().realize()
     self.assertUsed(self.N*self.N*4) # sharding should not increase total ram usage
 
+  def test_sharded_memory_replicated(self):
+    devices_4 = tuple(f"NULL:{i+1}" for i in range(4))
+    X = Tensor.ones(256).contiguous().realize()
+    self.assertUsed(256 * 4)
+    X.shard_(devices_4).realize()
+    self.assertUsed(256 * 4 * 4)
+
+  def test_sharded_memory_replicated_const(self):
+    devices_4 = tuple(f"NULL:{i+1}" for i in range(4))
+    X = Tensor.ones(256).realize()
+    self.assertUsed(0)
+    X.shard_(devices_4).realize()
+    self.assertUsed(256 * 4 * 4)  # TODO: can be zero
+
+  def test_sharded_memory_axis_const(self):
+    devices_4 = tuple(f"NULL:{i+1}" for i in range(4))
+    X = Tensor.ones(256).realize()
+    self.assertUsed(0)
+    X.shard_(devices_4, axis=0).realize()
+    self.assertUsed(256 * 4)  # TODO: can be zero
+
   def _test_matmul_half(self, dev_count:int):
     N = 32
     total_mem = {}
@@ -65,6 +86,14 @@ class TestMultiAxis(unittest.TestCase):
     t = Tensor.ones(4, 8).shard(devices, axis=0)
     self.assertEqual(t.reshape(2, 16).uop.axis, 0)
     self.assertEqual(t.reshape(2, 2, 8).uop.axis, 0)
+
+  def test_empty_like_sharded(self):
+    t = Tensor.ones(4, 8).shard(("NULL:0", "NULL:1"), axis=0)
+    e = t.empty_like()
+    self.assertEqual(e.shape, t.shape)
+    self.assertEqual(e.device, t.device)
+    self.assertEqual(e.uop.axis, 0)
+    self.assertTrue(e.uop.has_buffer_identity())
 
 if __name__ == '__main__':
   unittest.main()

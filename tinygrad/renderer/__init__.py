@@ -86,7 +86,7 @@ class ProgramSpec:
   def function_name(self) -> str: return to_function_name(self.name)
 
   @functools.cached_property
-  def runtimevars(self) -> dict[str, int]: return {v.arg[0]: i for i, v in enumerate(self.vars) if v.arg[0] == 'core_id'}
+  def runtimevars(self) -> dict[str, int]: return {v.expr: i for i, v in enumerate(self.vars) if v.expr == 'core_id'}
 
   @property
   def applied_opts(self) -> tuple[Opt, ...]|None: return self.ast.arg.applied_opts if self.ast.arg is not None else None

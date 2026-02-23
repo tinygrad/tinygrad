@@ -8,6 +8,8 @@ from http.server import BaseHTTPRequestHandler
 from typing import Any, TypedDict, TypeVar, Generator, Callable
 from tinygrad.helpers import colored, getenv, tqdm, unwrap, word_wrap, TRACEMETA, ProfileEvent, ProfileRangeEvent, TracingKey, ProfilePointEvent, temp
 from tinygrad.helpers import printable, Context
+from tinygrad.renderer.amd.dsl import Inst
+from tinygrad.renderer.amd import detect_format
 
 # NOTE: using HTTPServer forces a potentially slow socket.getfqdn
 class TCPServerWithReuse(socketserver.TCPServer):
@@ -93,6 +95,8 @@ def pystr(u:UOp) -> str:
   try: return pyrender(u)
   except Exception: return str(u)
 
+# all the trace points, initialized after the trace loads
+ctxs:list[dict] = []
 def uop_to_json(x:UOp) -> dict[int, dict]:
   assert isinstance(x, UOp)
   graph: dict[int, dict] = {}
@@ -133,7 +137,7 @@ def uop_to_json(x:UOp) -> dict[int, dict]:
         label += "\n"+' '.join([f"{range_str(s, color=True)}({s.vmax+1})" for s in trngs])
     except Exception:
       label += "\n<ISSUE GETTING LABEL>"
-    if (ref:=ref_map.get(u.src[0]) if u.op is Ops.CALL else None) is not None: label += f"\ncodegen@{ctxs[ref]['name']}"
+    if (ref:=ref_map.get(u.src[0]) if u.op is Ops.CALL else None) is not None and ctxs: label += f"\ncodegen@{ctxs[ref]['name']}"
     # NOTE: kernel already has metadata in arg
     if TRACEMETA >= 2 and u.metadata is not None and u.op is not Ops.CALL: label += "\n"+str(u.metadata)
     # limit SOURCE labels line count
@@ -203,7 +207,7 @@ def timeline_layout(dev_events:list[tuple[int, int, float, DevEvent]], start_ts:
     if isinstance(e, ProfilePointEvent) and e.name == "exec": exec_points[e.arg["name"]] = e
     if dur == 0: continue
     name, fmt, key = e.name, [], None
-    if (ref:=ref_map.get(name)) is not None:
+    if (ref:=ref_map.get(name)) is not None and ctxs:
       name = ctxs[ref]["name"]
       if (p:=get_prg_uop(ref)) is not None and (ei:=exec_points.get(p.src[0].arg.name)) is not None:
         flops = sym_infer((estimates:=p.src[0].arg.estimates).ops, var_vals:=ei.arg['var_vals'])/(t:=dur*1e-6)
@@ -297,7 +301,7 @@ def unpack_pmc(e) -> dict:
 
 # ** on startup, list all the performance counter traces
 
-def load_amd_counters(profile:list[ProfileEvent]) -> None:
+def load_amd_counters(ctxs:list[dict], profile:list[ProfileEvent]) -> None:
   from tinygrad.runtime.ops_amd import ProfileSQTTEvent, ProfilePMCEvent
   counter_events:dict[tuple[int, int], dict] = {}
   durations:dict[str, list[float]] = {}
@@ -329,6 +333,7 @@ def load_amd_counters(profile:list[ProfileEvent]) -> None:
 
 def sqtt_timeline(data:bytes, lib:bytes, target:str) -> list[ProfileEvent]:
   from tinygrad.renderer.amd.sqtt import map_insts, InstructionInfo, PacketType, INST, InstOp, VALUINST, IMMEDIATE, IMMEDIATE_MASK, VMEMEXEC, ALUEXEC
+  from tinygrad.renderer.amd.sqtt import INST_RDNA4, InstOpRDNA4
   ret:list[ProfileEvent] = []
   rows:dict[str, None] = {}
   trace:dict[str, set[int]] = {}
@@ -339,12 +344,12 @@ def sqtt_timeline(data:bytes, lib:bytes, target:str) -> list[ProfileEvent]:
     ret.append(ProfileRangeEvent(r, key, Decimal(p._time), Decimal(p._time+width)))
   for p, info in map_insts(data, lib, target):
     if len(ret) > getenv("MAX_SQTT_PKTS", 50_000): break
-    if isinstance(p, INST):
-      op_name = p.op.name if isinstance(p.op, InstOp) else f"0x{p.op:02x}"
+    if isinstance(p, (INST, INST_RDNA4)):
+      op_name = p.op.name if isinstance(p.op, (InstOp, InstOpRDNA4)) else f"0x{p.op:02x}"
       name, width = (op_name, 10 if "BARRIER" in op_name else 1)
       add(name, p, width=width, idx=int("OTHER" in name), info=info)
     if isinstance(p, (VALUINST, IMMEDIATE)): add(p.__class__.__name__, p, info=info)
-    if isinstance(p, IMMEDIATE_MASK): add("IMMEDIATE", p, wave=unwrap(info.wave), info=info)  # type: ignore[union-attr]
+    if isinstance(p, IMMEDIATE_MASK): add("IMMEDIATE", p, wave=unwrap(info).wave, info=info)
     if isinstance(p, (VMEMEXEC, ALUEXEC)):
       name = str(p.src).split('.')[1]
       if name == "VALU_SALU":
@@ -364,7 +369,7 @@ def unpack_sqtt(key:tuple[str, int], data:list, p:ProfileProgramEvent,
   from extra.sqtt.roc import decode
   base = unwrap(p.base)
   addr_table = amd_decode(unwrap(p.lib), target)
-  disasm:dict[int, tuple[str, int]] = {addr+base:(str(inst), inst.size()) for addr, inst in addr_table.items()}
+  disasm:dict[int, Inst] = {addr+base:inst for addr, inst in addr_table.items()}
   rctx = decode(data, {p.tag:disasm})
   cu_events:dict[str, list[ProfileEvent]] = {}
   # * INST waves
@@ -397,14 +402,14 @@ def device_sort_fn(k:str) -> tuple:
 
 def get_profile(profile:list[ProfileEvent], sort_fn:Callable[[str], Any]=device_sort_fn) -> bytes|None:
   # start by getting the time diffs
-  device_decoders:dict[str, Callable[[list[ProfileEvent]], None]] = {}
+  device_decoders:dict[str, Callable[[list[dict], list[ProfileEvent]], None]] = {}
   for ev in profile:
     if isinstance(ev, ProfileDeviceEvent):
       device_ts_diffs[ev.device] = ev.tdiff
       if (d:=ev.device.split(":")[0]) == "AMD": device_decoders[d] = load_amd_counters
       if d == "NV": device_decoders[d] = load_nv_counters
   # load device specific counters
-  for fxn in device_decoders.values(): fxn(profile)
+  for fxn in device_decoders.values(): fxn(ctxs, profile)
   # map events per device
   dev_events:dict[str, list[tuple[int, int, float, DevEvent]]] = {}
   markers:list[ProfilePointEvent] = []
@@ -432,7 +437,7 @@ def get_profile(profile:list[ProfileEvent], sort_fn:Callable[[str], Any]=device_
 
 # ** PMA counters
 
-def load_nv_counters(profile:list) -> None:
+def load_nv_counters(ctxs:list[dict], profile:list) -> None:
   steps:list[dict] = []
   sm_version = {e.device:e.props.get("sm_version", 0x800) for e in profile if isinstance(e, ProfileDeviceEvent) and e.props is not None}
   run_number:dict[str, int] = {}
@@ -468,23 +473,12 @@ def get_stdout(f: Callable) -> str:
   except Exception: traceback.print_exc(file=buf)
   return buf.getvalue()
 
-def amd_readelf(lib:bytes) -> list[dict]:
-  from tinygrad.runtime.autogen import amdgpu_kd
+def get_elf_section(lib:bytes, name:str):
   from tinygrad.runtime.support.elf import elf_loader
-  image, sections, __ = elf_loader(lib)
-  rodata = next((s for s in sections if s.name == ".rodata")).content
-  kd = amdgpu_kd.llvm_amdhsa_kernel_descriptor_t.from_buffer_copy(bytearray(rodata))
-  vgpr_gran = kd.compute_pgm_rsrc1 & amdgpu_kd.COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT
-  return [{"label":f"{resource} Alloc", "value":val} for resource,val in [("VGPR", (vgpr_gran+1)*8-7), ("LDS",kd.group_segment_fixed_size),
-                                                                          ("Scratch", kd.private_segment_fixed_size)] if val > 0]
+  return next((sh for sh in elf_loader(lib)[1] if sh.name == name))
 
-def amd_decode(lib:bytes, target:str) -> dict[int, Any]: # Any is the Inst class from tinygrad.renderer.amd.dsl
-  from tinygrad.runtime.support.elf import elf_loader
-  from tinygrad.renderer.amd import detect_format
-  from tinygrad.renderer.amd.dsl import Inst
-  image, sections, _ = elf_loader(lib)
-  text = next((sh for sh in sections if sh.name == ".text"), None)
-  assert text is not None, "no .text section found in ELF"
+def amd_decode(lib:bytes, target:str) -> dict[int, Inst]:
+  text = get_elf_section(lib, ".text")
   off, buf = text.header.sh_addr, text.content
   arch = "rdna3" if target.startswith("gfx11") else "rdna4" if target.startswith("gfx12") else "cdna"
   addr_table:dict[int, Inst] = {}
@@ -539,7 +533,25 @@ def amdgpu_cfg(lib:bytes, target:str) -> dict:
       if isinstance(val:=getattr(inst, name), Reg): tokens.append({"st":val.fmt(), "keys":[f"r{val.offset+i}" for i in range(val.sz)], "kind":1})
       elif name in {"op","opx","opy"}: tokens.append({"st":(op_name:=val.name.lower()), "keys":[op_name], "kind":0})
       elif name != "encoding" and val != field.default: tokens.append({"st":(s:=repr(val)), "keys":[s], "kind":1})
-  return {"data":{"blocks":blocks, "paths":paths, "pc_tokens":pc_tokens}, "src":"\n".join(lines)}
+  # show a smaller view for repeated instructions in the graph
+  for pcs in blocks.values():
+    new_pcs:list[int] = []
+    i, n = 0, len(pcs)
+    while i < n:
+      j = i+1
+      while j<n and pc_table[pcs[j]] == pc_table[pcs[i]]: j += 1
+      new_pcs.append(pcs[i])
+      if j-i>1:
+        pc_tokens[pcs[i]].append({"st":f"({j-i}x)", "keys":[], "kind":0})
+        for k in range(i+1, j): del pc_tokens[pcs[k]]
+      i = j
+    pcs[:] = new_pcs
+  from tinygrad.runtime.autogen import amdgpu_kd
+  kd = amdgpu_kd.llvm_amdhsa_kernel_descriptor_t.from_buffer_copy(bytearray(get_elf_section(lib, ".rodata").content))
+  vgpr_gran = kd.compute_pgm_rsrc1 & amdgpu_kd.COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT
+  return {"data":{"blocks":blocks, "paths":paths, "pc_tokens":pc_tokens}, "src":"\n".join(lines),
+          "metadata":[[{"label":f"{r} Alloc", "value":v} for r,v in [("VGPR", (vgpr_gran+1)*8-7), ("LDS", kd.group_segment_fixed_size),
+                                                                     ("Scratch", kd.private_segment_fixed_size)] if v>0]]}
 
 # ** Main render function to get the complete details about a trace event
 
@@ -551,11 +563,10 @@ def get_render(query:str) -> dict:
   if fmt == "uops": return {"src":get_stdout(lambda: print_uops(data)), "lang":"txt"}
   if fmt == "code": return {"src":data, "lang":"cpp"}
   if fmt == "asm":
-    ret:dict = {"metadata":[]}
+    ret:dict = {}
     renderer, lib = data
     if renderer.device.startswith("AMD"):
       with soft_err(lambda err: ret.update(err)): ret.update(amdgpu_cfg(lib, renderer.arch))
-      with soft_err(lambda err: ret["metadata"].append(err)): ret["metadata"].append(amd_readelf(lib))
     else: ret["src"] = get_stdout(lambda: renderer.compiler.disassemble(lib))
     return ret
   if fmt == "all-pmc":
@@ -600,9 +611,9 @@ def get_render(query:str) -> dict:
     pc_to_inst = data["disasm"]
     start_pc = None
     rows:dict[int, dict] = {}
-    for pc, (inst,_) in pc_to_inst.items():
+    for pc, inst in pc_to_inst.items():
       if start_pc is None: start_pc = pc
-      rows[pc] = {"pc":pc-start_pc, "inst":inst, "hit_count":0, "dur":0, "stall":0, "type":"", "hits":{"cols":inst_columns, "rows":[]}}
+      rows[pc] = {"pc":pc-start_pc, "inst":str(inst), "hit_count":0, "dur":0, "stall":0, "type":"", "hits":{"cols":inst_columns, "rows":[]}}
     for e in w.unpack_insts():
       if not (inst:=rows[e.pc]).get("type"): inst["type"] = str(e.typ).split("_")[-1]
       inst["hit_count"] += 1
@@ -681,7 +692,7 @@ if __name__ == "__main__":
   st = time.perf_counter()
   print("*** viz is starting")
 
-  ctxs:list[dict] = get_rewrites(trace:=load_pickle(args.kernels, default=RewriteTrace([], [], {})))
+  ctxs = get_rewrites(trace:=load_pickle(args.kernels, default=RewriteTrace([], [], {})))
   profile_ret = get_profile(load_pickle(args.profile, default=[]))
 
   server = TCPServerWithReuse(('', PORT), Handler)

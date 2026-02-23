@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from tinygrad.dtype import dtypes, ImageDType, DType, AddrSpace, Invalid, PtrDType
 from tinygrad.uop.ops import UOp, Ops, UPat, PatternMatcher, GroupOp, identity_element
 from tinygrad.uop.symbolic import uop_given_valid, parse_valid, invalid_gate
-from tinygrad.helpers import getenv, flatten, AMX, prod, ceildiv, IMAGE
+from tinygrad.helpers import getenv, flatten, AMX, prod, IMAGE
 from tinygrad.renderer import Renderer
 
 # ***** image load valid simplification *****
@@ -187,8 +187,8 @@ def _do_image_fixup(dt:ImageDType, idx:UOp) -> tuple[UOp, UOp, int, int]:
   buf = idx.src[0]
   x, valid = idx.src[1].get_idx(), idx.src[1].get_valid()
   h, w = dt.shape[0], dt.shape[1]
-  if IMAGE == 1 and valid is not None and (tp:=dt.size // 4) // 64:
-    h, w = max(([(1, tp)] * (tp < 16384)) + [(tp//64//k, 64*k) for k in range(ceildiv(tp//64, 16384), min(tp//64, 256)+1) if (tp//64) % k == 0],
+  if IMAGE == 1 and valid is not None:
+    h, w = max(ImageDType.valid_dims(dt),
                key=lambda hw: len(_drop_valid_stmts(valid, uop_given_valid(valid, UOp.vectorize((x//4)%hw[1], x//(4*hw[1]))), *hw)))
     buf = buf.replace(dtype=(dtypes.imageh if dt.itemsize == 2 else dtypes.imagef)((h, w, 4), w * 4 * dt.itemsize))
   oidx = UOp(Ops.VECTORIZE, dtypes.index.vec(2), ((x // 4) % w, (x // (4*w))))

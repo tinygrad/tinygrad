@@ -30,7 +30,7 @@ class TestCfg(unittest.TestCase):
   def setUp(self):
     self.arch = Device["AMD"].arch
     if not any(self.arch.startswith(a) for a in {"gfx11", "gfx12"}):
-      self.skipTest(f"tests written for RDNA, got arch {arch}")
+      self.skipTest(f"tests written for RDNA, got arch {self.arch}")
 
   def test_simple(self):
     k = Kernel(arch=Device["AMD"].arch)
@@ -69,6 +69,8 @@ class TestCfg(unittest.TestCase):
     self.assertEqual(len(references["r0"]), 2)
     insts = [cfg["pc_tokens"][pc][0]["st"] for pc in references["r0"]]
     self.assertEqual(insts, ['s_mov_b32', 's_cmp_eq_u64'])
+    end_block_content = "\n".join(" ".join(t["st"] for t in cfg["pc_tokens"][pc]) for pc in list(cfg["blocks"].values())[-1])
+    self.assertEqual(end_block_content, "s_endpgm\ns_code_end (217x)")
 
   def test_loop(self):
     k = Kernel(arch=Device["AMD"].arch)

@@ -8,7 +8,7 @@ from tinygrad.dtype import ConstType, ImageDType, dtypes, DType, truncate, PtrDT
 from tinygrad.dtype import storage_fmt_for_dtype, to_storage_scalar, from_storage_scalar
 from tinygrad.helpers import ContextVar, all_int, prod, getenv, all_same, Context, partition, temp, unwrap, T, argfix, Metadata, flatten, TRACEMETA
 from tinygrad.helpers import PROFILE, dedup, cdiv, cmod, diskcache_put, to_function_name, cpu_profile, TracingKey, VIZ, SPEC, CAPTURE_PROCESS_REPLAY
-from tinygrad.helpers import strip_parens, colored, ansilen, printable, panic
+from tinygrad.helpers import strip_parens, colored, ansilen, printable
 if TYPE_CHECKING:
   from tinygrad.device import Buffer, MultiBuffer
   from tinygrad.renderer import Estimates
@@ -207,9 +207,14 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     match self.op:
       # late ops don't have shape
       case Ops.UNIQUE | Ops.LUNIQUE | Ops.DEVICE | Ops.RANGE | Ops.LOAD | Ops.IF | Ops.BARRIER | Ops.CUSTOM | Ops.CUSTOMI | \
-           Ops.VECTORIZE | Ops.VCONST | Ops.GEP | Ops.SPECIAL | Ops.UNROLL | Ops.CONTRACT | Ops.SINK | \
+           Ops.VECTORIZE | Ops.GEP | Ops.SPECIAL | Ops.UNROLL | Ops.CONTRACT | Ops.SINK | \
            Ops.LINEAR | Ops.PROGRAM | Ops.SOURCE | Ops.BINARY | Ops.INS:
         return None
+
+      case Ops.CAST:
+        # when PTX cases from ptr to non ptr, remove the shape
+        if isinstance(self.src[0].dtype, PtrDType) and not isinstance(self.src[0].dtype, ImageDType) and not isinstance(self.dtype, PtrDType):
+          return None
 
       case Ops.INDEX:
         # non pointer index doesn't have a shape
@@ -220,7 +225,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
         return self.src[0].shape[len(self.src[1:]):]
 
       # some ops init the shape
-      case Ops.CONST | Ops.DEFINE_VAR | Ops.BIND: return () if self._device is not None else None
+      case Ops.CONST | Ops.VCONST | Ops.DEFINE_VAR | Ops.BIND: return ()
       case Ops.BUFFER: return (self.arg,)
       case Ops.BUFFER_VIEW: return (self.arg[0],)
       case Ops.ENCDEC: return self.arg[0]
@@ -240,7 +245,8 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
       case Ops.BITCAST:
         ps = self.src[0]._shape
         if ps is None: return None
-        if (output_sz:=self.dtype.itemsize) != (input_sz:=self.src[0].dtype.itemsize): return ps[:-1]+(ssimplify((ps[-1]*input_sz) // output_sz),)
+        if (output_sz:=self.dtype.itemsize) != (input_sz:=self.src[0].dtype.itemsize):
+          return ps[:-1]+(ssimplify((ps[-1]*input_sz) // output_sz),) if len(ps) > 0 else ps
         return ps
 
       # TODO: disallow reshape from nothing. tested by TestOpenClip.test_multigpu_clip_score
@@ -368,7 +374,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     return vmin
   def __bool__(self): return self._eval((dtypes.bool,), bool)
   def __int__(self): return self._eval(dtypes.ints, int)
-  def __float__(self): return self._eval(dtypes.floats, float)
+  def __float__(self): return float(self._eval(dtypes.floats, float))
   def substitute(self, dvars:dict[UOp, UOp], name:str|None=None, extra_pm:PatternMatcher|None=None):
     dvars = {k:v for k,v in dvars.items() if k is not v}
     if len(dvars) == 0: return self
@@ -506,7 +512,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
 
   @functools.cached_property
   def axis(self) -> int|None:
-     # COPY removes axis. TODO: add more tests for this, and consider MSELECT/MSTACK
+    # COPY removes axis. TODO: add more tests for this, and consider MSELECT/MSTACK
     if self.op is Ops.COPY: return None
     if self.op is Ops.MULTI: return self.arg
     # NOTE: they all have to share an axis, we always choose [-1]
@@ -557,6 +563,12 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     if self.op is Ops.DETACH: return self.src[0].base  # DETACH can't change base
     return self
 
+  @property
+  def multibase(self) -> UOp:
+    if self.op in GroupOp.Movement: return self.src[0].base
+    if self.op is Ops.DETACH: return self.src[0].base  # DETACH can't change base
+    return self
+
   # like gep, but might return an integer
   def sgep(self, i:int) -> sint:
     match self.op:
@@ -591,7 +603,6 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     return ret
 
   # in these four, if the shape doesn't change we can return self
-  def forced_reshape(self, arg:tuple[sint, ...]): return self._mop(Ops.RESHAPE, arg, same_shape_noop=False)
   #def reshape(self, arg:tuple[sint, ...]): return self._mop(Ops.RESHAPE, arg, same_shape_noop=True)
   #def expand(self, arg:tuple[sint, ...]): return self._mop(Ops.EXPAND, arg, same_shape_noop=True)
   #def shrink(self, arg:tuple[tuple[sint, sint], ...]): return self._mop(Ops.SHRINK, arg, same_shape_noop=True)
@@ -650,7 +661,8 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     # this buffer can process disk tensors and simple movement ops
     if self is not self.base:
       from tinygrad.schedule.rangeify import pm_mops
-      out = graph_rewrite(self.flatten().index(UOp.range(self.size, 0)), pm_mops).simplify()
+      from tinygrad.uop.symbolic import symbolic
+      out = graph_rewrite(self.flatten().index(UOp.range(self.size, 0)), pm_mops+symbolic)
       buf = out.src[0].buffer
       assert isinstance(buf, Buffer), "must be a Buffer for movement ops"
       assert out.op is Ops.INDEX, "couldn't collapse to a single INDEX"
@@ -660,7 +672,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
         return buf.view(self.size, out.dtype, 0)
       if out.src[1].op is Ops.ADD and out.src[1].src[0].op is Ops.RANGE and out.src[1].src[1].op is Ops.CONST:
         return buf.view(self.size, out.dtype, out.src[1].src[1].arg*out.dtype.itemsize)
-      raise RuntimeError(f"cannot collapse INDEX {out} to a single size/offset")
+      raise RuntimeError(f"cannot collapse INDEX {out.pyrender()} to a single size/offset")
     if self.op is Ops.BITCAST:
       buf = self.src[0].buffer
       assert isinstance(buf, Buffer), "must be a Buffer for BITCAST"
@@ -688,7 +700,8 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     if self.op not in (Ops.BUFFER, Ops.MSTACK): return None
     # LUNIQUEs are never realized
     if self.op_in_backward_slice_with_self(Ops.LUNIQUE): return None
-    return self.buffer
+    # NOTE: this is used by the JIT to determine which inputs we capture
+    return self.buffer if self.buffer.is_allocated() else None
   @property
   def is_realized(self) -> bool: return self.base.realized is not None
 
@@ -715,12 +728,8 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     return graph_rewrite(self, pm_unbind, ctx=ret), ret
   @property
   def val(self) -> int: return self.unbind()[1]
-  def vars(self) -> set[UOp]:
-    topo = self.toposort()
-    bound = {x.src[0]: x for x in topo if x.op is Ops.BIND and x.src[0].op is Ops.DEFINE_VAR}
-    return {bound.get(x, x) for x in topo if x.op is Ops.DEFINE_VAR}
   def variables(self) -> list[Variable]:
-    return sorted(set([x.unbind()[0] if x.op is not Ops.DEFINE_VAR else x for x in self.vars()]), key=lambda v: v.arg)
+    return sorted({x for x in self.backward_slice_with_self if x.op is Ops.DEFINE_VAR}, key=lambda v: v.arg)
 
   # *** uop symbolic stuff ***
 
@@ -799,6 +808,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     # float has NAN issue and we use explicit NAN in transcendental
     if self.op is Ops.WHERE and dtypes.is_int(self.dtype): return min(self.src[1].vmin, self.src[2].vmin), max(self.src[1].vmax, self.src[2].vmax)
     # NOTE: returned UOp is assumed to be CONST
+    if self.op is Ops.PARAM and len(self.src) >= 4: return self.src[2].arg, self.src[3].arg
     if self.op is Ops.DEFINE_VAR and self.arg: return self.arg[1], self.arg[2]
     if self.op in (Ops.RANGE, Ops.SPECIAL): return 0, (self.src[0]-1).vmax
     if self.op is Ops.BIND: return self.src[0]._min_max # ignore the bound value
@@ -814,7 +824,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
   @functools.cached_property
   def _sym_fxn(self):
     sself = self.simplify()
-    varnames = tuple(x.arg[0] for x in sself.toposort() if x.op is Ops.DEFINE_VAR)
+    varnames = tuple(x.expr for x in sself.toposort() if x.op is Ops.DEFINE_VAR)
     # TODO: sanitize varnames, or don't use naked eval while staying fast
     return eval("lambda "+','.join(varnames)+": "+sself.render(pm=renderer_infer)), varnames  # pylint: disable=eval-used
 
@@ -849,8 +859,11 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
 
   # TODO: this should replace placeholder
   @staticmethod
-  def param(slot:int, dtype:DType, shape:tuple[sint, ...]|None=None, device=None):
-    src = (UOp(Ops.NOOP) if shape is None else shape_to_shape_arg(shape),) + (() if device is None else (UOp(Ops.DEVICE, arg=device),))
+  def param(slot:int, dtype:DType, shape:tuple[sint, ...]|None=None, device=None, vmin_vmax:tuple[PyConst, PyConst]|None=None, name=None):
+    src: tuple[UOp, ...] = (UOp(Ops.NOOP) if shape is None else shape_to_shape_arg(shape),) + \
+                           (UOp(Ops.NOOP) if device is None else UOp(Ops.DEVICE, arg=device),)
+    if vmin_vmax is not None: src += (UOp.const(dtype, vmin_vmax[0]), UOp.const(dtype.scalar(), vmin_vmax[1]))
+    if name is not None: src += (UOp(Ops.NOOP, arg=name),)
     return UOp(Ops.PARAM, dtype, src, arg=slot)
 
   def call(self, *srcs:UOp, grad_fxn:Callable|None=None, metadata:tuple[Metadata, ...]=()) -> UOp:
@@ -1226,12 +1239,13 @@ if TRACK_MATCH_STATS or PROFILE:
 SENTINEL: Final[UOp] = cast(UOp, object())
 class BottomUpGate(Exception): pass
 class RewriteContext:
-  def __init__(self, pm, bpm, ctx=None):
+  def __init__(self, pm, bpm, ctx=None, rewrite_into_calls=False):
     self.pm: PatternMatcher|None = pm
     self.bpm: PatternMatcher|None = bpm
     self.bpm_cache: dict[UOp, UOp|None] = {}
     self.ctx = ctx
     self.replace: dict[UOp, UOp] = {}
+    self.rewrite_into_calls = rewrite_into_calls
 
   # no cache needed: pm_rewrite is called at most once per UOp due to the replace dict check in unified_rewrite
   def pm_rewrite(self, x:UOp) -> UOp|None: return unwrap(self.pm).rewrite(x, self.ctx)
@@ -1266,6 +1280,10 @@ class RewriteContext:
             if n in waitlist: stack.extend(waitlist.pop(n))
             continue
         stack.append((n, 1, new_n))
+        # NOTE: CALL is handled as a special case.
+        # The function that is called is not included in the graph_rewrite.
+        # If you want to graph_rewrite a call, you can
+        if new_n.op is Ops.CALL and not self.rewrite_into_calls: self.replace[new_n.src[0]] = new_n.src[0]
         for x in reversed(new_n.src):
           if x in on_stack: continue
           stack.append((x, 0, x))
@@ -1304,21 +1322,9 @@ class RewriteContext:
     return self.replace[root]
 
 @profile_matches
-def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False, name=None, bpm=None) -> UOp:
-  rewrite_ctx = RewriteContext(pm if not bottom_up else None, pm if bottom_up else bpm, ctx)
+def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False, name=None, bpm=None, rewrite_into_calls=False) -> UOp:
+  rewrite_ctx = RewriteContext(pm if not bottom_up else None, pm if bottom_up else bpm, ctx, rewrite_into_calls=rewrite_into_calls)
   return rewrite_ctx.unified_rewrite(sink)
-
-@profile_matches
-def graph_rewrite_map(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False, name=None, bpm=None,
-                      input_map:dict[UOp, UOp]|None=None, ) -> dict[UOp, UOp]:
-  rewrite_ctx = RewriteContext(pm if not bottom_up else None, pm if bottom_up else bpm, ctx)
-  new_map: dict[UOp, UOp] = {}
-  for k in (list(sink.toposort())[::-1] if bottom_up else sink.toposort()):
-    new_map[k] = v = rewrite_ctx.unified_rewrite(k)
-    if k is not v and k.metadata is not None: all_metadata[v] = tuple(dedup(all_metadata.get(v, ())))+k.metadata
-  if input_map is not None:
-    for k,v in input_map.items(): new_map[k] = new_map.get(v,v)
-  return new_map
 
 def sint_to_uop(x:sint, dtype=dtypes.index) -> UOp: return UOp.const(dtype, x) if isinstance(x, int) else x.cast(dtype)
 
@@ -1352,7 +1358,6 @@ _substitute = PatternMatcher([(UPat(tuple(Ops), name="x"), lambda ctx,x: ctx.get
 _remove_all_tags = PatternMatcher([(UPat(GroupOp.All, name="x"), lambda x: x.replace(tag=None) if x.tag is not None else None)])
 
 def gate_kernel_sink(x:UOp) -> bool: return not (x.op is Ops.SINK and isinstance(x.arg, KernelInfo))
-pm_gate_kernel_sink = PatternMatcher([(UPat(Ops.SINK, name="sink"), lambda sink: None if gate_kernel_sink(sink) else panic(BottomUpGate))])
 
 def do_unbind(ctx:dict[Variable, int], x:UOp):
   v,i = x.unbind()
@@ -1381,7 +1386,7 @@ def bitcast(x, in_dtype:DType, out_dtype:DType):
   return ret[0] if out_count == 1 else ret
 
 renderer = PatternMatcher([
-  (UPat((Ops.DEFINE_VAR,), name="x"), lambda x: x.arg[0]),
+  (UPat((Ops.DEFINE_VAR,), name="x"), lambda x: x.expr),
   (UPat((Ops.SPECIAL), name="x"), lambda x: x.arg),
   (UPat(Ops.RANGE, name="x"), lambda x: f"r{range_str(x)}"),
   (UPat((Ops.CONST, Ops.VCONST), name="x"), lambda x: str(x.arg)),
@@ -1443,8 +1448,6 @@ pm_pyrender_extra = PatternMatcher([
   (UPat(Ops.INDEX, src=(UPat(), UPat()), allow_any_len=True, name="x"), lambda ctx,x:
    f"{ctx[x.src[0]]}.index({ctx[x.src[1]]}, "+(f"{ctx[x.src[2]]}, " if len(x.src) > 2 else "")+
     (f"dtype={x.dtype})" if x.src[0].dtype != x.dtype else "ptr=True)") if x.src[0].dtype.base != x.dtype else None),
-  # TODO: fix forced_reshape
-  (UPat(Ops.RESHAPE, name="x"), lambda ctx,x: f"{ctx[x.src[0]]}.forced_reshape({render_marg(ctx,x)})" if x.src[0].shape == x.shape else None),
   (UPat(GroupOp.Movement, name="x"), lambda ctx,x: f"{ctx[x.src[0]]}.{x.op.name.lower()}({render_marg(ctx,x)})"),
   # NOTE: CMPNE doesn't work cause there's no __rne__
   # NOTE: only match CONSTs without UNIQUE (len(src)==1), unique_const needs explicit rendering
