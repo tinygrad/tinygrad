@@ -4,7 +4,7 @@ from collections import deque
 from tinygrad.uop.ops import UOp, Ops, buffers, UOpMetaClass, track_rewrites, graph_rewrite, gate_kernel_sink
 from tinygrad.uop.spec import type_verify, tensor_spec
 from tinygrad.device import Buffer, MultiBuffer
-from tinygrad.helpers import DEBUG, cpu_profile, TracingKey, SPEC, pluralize, SCACHE, BASEDIR, unwrap
+from tinygrad.helpers import DEBUG, cpu_profile, TracingKey, SPEC, pluralize, SCACHE, BASEDIR
 from tinygrad.engine.realize import ExecItem
 from tinygrad.engine.allocations import allocate_global_buffers
 
@@ -88,7 +88,7 @@ def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[dict[UOp, UOp], li
   var_vals: dict[str, int] = {}
   for i,b in enumerate(big_sink.src[1:]):
     if b.op is Ops.BIND:
-      nm = f"p{i}" # b.src[0].expr
+      nm = b.src[0].expr
       val = b.src[1].arg
       assert nm not in var_vals or var_vals[nm] == val, f"bind mismatch on {nm}, {var_vals[nm]} != {val}"
       var_vals[nm] = val
