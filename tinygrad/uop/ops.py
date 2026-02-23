@@ -184,7 +184,9 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     stack = [self]
     while stack:
       if (n:=stack.pop()) is target: return True
-      if n not in seen: seen.add(n); stack.extend(n.src)
+      if n not in seen:
+        seen.add(n)
+        stack.extend(n.src)
     return False
 
   def topovisit(self, visitor:Callable[[UOp], T], cache:dict[UOp, T]) -> T:
