@@ -331,7 +331,7 @@ def float_to_fp8(x: float, dtype: DType) -> int:
     res, half = mantissa >> shift, half_ulp << shift
     round_bits = (xbits | (1 << 52)) & ((half << 1) - 1)
     if round_bits > half or (round_bits == half and res & 1): res += 1
-  return int(res | sign if (res or dtype not in dtypes.fp8_fnuz) else 0)
+  return 0 if dtype in dtypes.fp8_fnuz and res == 0 else int(res | sign)  # fnuz has no negative zero
 
 def fp8_to_float(x: int, dtype: DType) -> float:
   assert dtype in dtypes.fp8s, "Only for fp8s"
