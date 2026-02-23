@@ -115,6 +115,7 @@ class TestFloat16Log2(unittest.TestCase):
         np.testing.assert_allclose(result, expected, rtol=1e-3, err_msg=f"log2({val})")
 
   @unittest.skipUnless(is_dtype_supported(dtypes.float16, Device.DEFAULT), f"no float16 on {Device.DEFAULT}")
+  @unittest.skipIf(Device.DEFAULT == "WEBGPU" and CI, "Nan handling differs on Vulkan")
   def test_float16_log2_special(self):
     # special values: inf, -inf, nan, 0, negative
     with Context(TRANSCENDENTAL=2), np.errstate(all='ignore'):
