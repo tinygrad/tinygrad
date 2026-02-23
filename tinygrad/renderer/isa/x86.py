@@ -159,10 +159,13 @@ def div(ctx:IselContext, x:UOp):
 # However vreg(RDX) is assigned here because IDIV also writes to RDX and regalloc isn't aware of that,
 # the correct fix is to model IDIV as multi output (RAX, RDX) so regalloc is aware of RDX being overwritten and rm vreg from here
 def idiv(ctx:IselContext, x:UOp):
-  ext = UOp(Ops.INS, arg=X86Ops.MOVSX, dtype=dtypes.int16, src=(x.src[0],), tag=ctx.vreg(RAX)) if x.dtype is dtypes.int8 else \
-        x.ins(X86Ops.SARi, src=(x.src[0], imm(dtypes.uint8, x.dtype.itemsize * 8 - 1)), tag=ctx.vreg(RDX))
-  move = x.ins(X86Ops.MOV, src=(x.src[1],), tag=tuple(r for r in WGPR if r not in (RAX, RDX)))
-  idiv = x.ins(X86Ops.IDIV, src=(x.src[0], move, ext), tag=(RAX,))
+  # need to sign extend al to ah for 8bit idiv
+  divisor = UOp(Ops.INS, arg=X86Ops.MOVSX, dtype=dtypes.int16, src=(x.src[0],), tag=ctx.vreg(RAX)) if x.dtype is dtypes.int8 else x.src[0]
+  # need to sign extend rax to rdx for > 8bit idiv
+  extend_rdx = () if x.dtype is dtypes.int8 else x.ins(X86Ops.SARi, src=(x.src[0], imm(dtypes.uint8, x.dtype.itemsize * 8 - 1)), tag=ctx.vreg(RDX))
+  # dividend can't be in rax or rdx
+  dividend = x.ins(X86Ops.MOV, src=(x.src[1],), tag=tuple(r for r in WGPR if r not in (RAX, RDX)))
+  idiv = x.ins(X86Ops.IDIV, src=(divisor, dividend) + extend_rdx, tag=(RAX,))
   # this move "cleanses" the register constraint (rax) of idiv, this is because the constraint only applies on definition and not on the uses of idiv
   return x.ins(X86Ops.MOV, src=(idiv,))
 
@@ -435,11 +438,6 @@ post_regalloc_matcher = PatternMatcher([
 isa_spec = PatternMatcher([
   # these are the only non X86Ops allowed
   (UPat((Ops.NOOP, Ops.GROUP, Ops.AFTER, Ops.BARRIER)), lambda: True),
-  # vblends take a mask which is float or int dtype
-  #(UPat((X86Ops.VPBLENDVB, X86Ops.VBLENDVPS, X86Ops.VBLENDVPD), src=(UPat.var("a"), UPat.var("b"), UPat.var("m")), name="x"),
-  # lambda a,b,m,x: x.dtype == a.dtype == b.dtype and x.dtype.itemsize == m.dtype.itemsize),
-  # cmoves take a flag producing instruction
-  #(UPat((X86Ops.CMOVB, X86Ops.CMOVL, X86Ops.CMOVE, X86Ops.CMOVNE), dtypes.bool, (UPat(), UPat(), UPat(X86GroupOp.WriteFlags))), lambda: True),
   (UPat(Ops.INS, name="x"), lambda x: x.arg in X86GroupOp.All),
 ])
 
@@ -667,11 +665,7 @@ class X86Renderer(ISARenderer):
     def _format_operands(x:UOp) -> str:
       def _format(src:tuple[UOp, ...]) -> list[str]: return [str(s.tag) for s in src if s.tag is not None]
       def _mem_adress(base:UOp, idx:UOp, disp:UOp) -> str:
-        if idx.tag is not None:
-          if disp.tag == 0: return f"[{base.tag} + {idx.tag}*{base.dtype.itemsize}]"
-          else: return f"[{base.tag} + {idx.tag}*{base.dtype.itemsize} + {disp.tag}]"
-        if disp.tag == 0: return f"[{base.tag}]"
-        return f"[{base.tag} + {disp.tag}]"
+        return f"[{base.tag}" + (f" + {idx.tag}*{base.dtype.itemsize}" if idx.tag else "") + (f" + {disp.tag}" if disp.tag else "") + "]"
 
       if len(x.src) > 3 and x.arg in X86GroupOp.WriteMem:
         return ", ".join([_mem_adress(*x.src[:3])] + _format(x.src[3:]))
