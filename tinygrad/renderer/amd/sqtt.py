@@ -98,20 +98,33 @@ class InstOp(Enum):
   VALU_CMPX = 0x73        # v_cmpx_*
 
 class InstOpRDNA4(Enum):
-  """SQTT instruction operation types for RDNA4 (gfx1200). Different encoding from RDNA3."""
-  # TODO: we need to do discovery of all of these from instructions
-  SALU = 0x0
+  """SQTT instruction operation types for RDNA4 (gfx1200)."""
+  SMEM = 0x0
   JUMP = 0x1
   NEXT = 0x2
   MESSAGE = 0x4
   VALU_64 = 0x6
-  VALU_WMMA = 0x46
+  VALU_SHIFT = 0x7
   VMEM = 0x10
   VMEM_128 = 0x11
   VMEM_STORE = 0x12
+  VMEM_STORE_64 = 0x13
   VMEM_STORE_128 = 0x14
+  LDS = 0x15
+  LDS_STORE = 0x16
+  LDS_STORE_128 = 0x17
+  LDS_SPECIAL = 0x3b
+  PERMUTE = 0x3c
+  VALU_WMMA = 0x46
+  VALU = 0x49
+  SALU = 0x4d
+  SALU_ALT = 0x4c
+  SALU_HI = 0x4e
+  SALU_FLOAT = 0x50
   OTHER_VMEM = 0x5e
   OTHER_VMEM_STORE = 0x60
+  OTHER_LDS = 0x76
+  OTHER_LDS_STORE = 0x77
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # PACKET TYPE BASE CLASS
@@ -536,8 +549,9 @@ def decode(data: bytes) -> Iterator[PacketType]:
     if nib_off: reg, pos = (reg >> 4) | ((data[pos] >> 4) << 60), pos + 1
     # 2. read all full bytes at once
     if (byte_count := need >> 1):
-      chunk = int.from_bytes(data[pos:pos + byte_count], 'little')
-      reg, pos = (reg >> (byte_count * 8)) | (chunk << (64 - byte_count * 8)), pos + byte_count
+      read_bytes = min(byte_count, 8)
+      chunk = int.from_bytes(data[pos:pos + read_bytes], 'little')
+      reg, pos = (reg >> (read_bytes * 8)) | (chunk << (64 - read_bytes * 8)), pos + byte_count
     # 3. if odd, read low nibble
     if (nib_off := need & 1): reg = (reg >> 4) | ((data[pos] & 0xF) << 60)
 
