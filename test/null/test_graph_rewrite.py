@@ -251,8 +251,8 @@ class TestSubstitute(unittest.TestCase):
 
   # this works because there's nothing above the substituted node
   def test_sin(self):
-    a = UOp.variable('a', 0, 10)
-    b = UOp.variable('b', 0, 10)
+    a = UOp.variable('a', 0, 10, dtype=dtypes.float)
+    b = UOp.variable('b', 0, 10, dtype=dtypes.float)
     ret = a.sin().sin()
     ret = substitute(ret, {a.sin():b})
     self.assertIs(ret, b.sin())
@@ -268,14 +268,14 @@ class TestSubstitute(unittest.TestCase):
       ret = substitute(ret, {n1:n1.sqrt()})
 
   def test_sin_to_sqrt(self):
-    a = UOp.variable('a', 0, 10)
+    a = UOp.variable('a', 0, 10, dtype=dtypes.float)
     n1 = a.sin()
     ret = n1.sin()
     ret = substitute(ret, {a.sin():a.sqrt()})
     self.assertIs(ret, a.sqrt().sin())
 
   def test_double_sin_to_sqrt(self):
-    a = UOp.variable('a', 0, 10)
+    a = UOp.variable('a', 0, 10, dtype=dtypes.float)
     n1 = a.sin()
     ret = n1.sin()
     # NOTE: this would work if it had gone in the opposite order

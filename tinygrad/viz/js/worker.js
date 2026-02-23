@@ -5,11 +5,16 @@ const canvas = new OffscreenCanvas(0, 0);
 const ctx = canvas.getContext("2d");
 
 onmessage = (e) => {
-  const { data, opts } = e.data;
-  const g = new dagre.graphlib.Graph({ compound: true }).setDefaultEdgeLabel(function() { return {}; });
-  (data.blocks != null ? layoutCfg : layoutUOp)(g, data, opts);
-  postMessage(dagre.graphlib.json.write(g));
-  self.close();
+  try {
+    const { data, opts } = e.data;
+    const g = new dagre.graphlib.Graph({ compound: true }).setDefaultEdgeLabel(function() { return {}; });
+    (data.blocks != null ? layoutCfg : layoutUOp)(g, data, opts);
+    postMessage({result: dagre.graphlib.json.write(g)});
+    self.close();
+  } catch (err) {
+    postMessage({error: err.stack || err.message || String(err)});
+    self.close();
+  }
 }
 
 const layoutCfg = (g, { blocks, paths, pc_tokens }) => {
@@ -55,11 +60,46 @@ const layoutUOp = (g, { graph, change }, opts) => {
     for (const [port, s] of src) g.setEdge(s, k, { label: edgeCounts[s] > 1 ? {type:"tag", text:edgeCounts[s]} : {type:"port", text:port}});
     if (change?.includes(parseInt(k))) g.setParent(k, "overlay");
   }
-  // optionally hide nodes from the layuot
+  // optionally hide nodes from the layout
+  if (!opts.showSink) {
+    for (const n of g.nodes()) {
+      const node = g.node(n);
+      if ((node.label === "SINK" || node.label.startsWith("SINK\n")) && (g.successors(n) || []).length === 0) g.removeNode(n);
+    }
+  }
   if (!opts.showIndexing) {
     for (const n of g.nodes()) {
       const node = g.node(n);
       if (node.label.includes("dtypes.index")) g.removeNode(n);
+    }
+  }
+  if (!opts.showCallSrc) {
+    // remove edges from src[0] to CALL nodes, track affected nodes
+    const disconnected = new Set();
+    for (const n of g.nodes()) {
+      const node = g.node(n);
+      if (node.label.startsWith("CALL\n")) {
+        for (const pred of (g.predecessors(n) || [])) {
+          const edge = g.edge(pred, n);
+          if (edge?.label?.text === 0) {
+            g.removeEdge(pred, n);
+            disconnected.add(pred);
+          }
+        }
+      }
+    }
+    // remove nodes that are now disconnected (no successors), only from affected subtree
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (const n of disconnected) {
+        if (!g.hasNode(n)) continue;
+        if ((g.successors(n) || []).length === 0) {
+          for (const pred of (g.predecessors(n) || [])) disconnected.add(pred);
+          g.removeNode(n);
+          changed = true;
+        }
+      }
     }
   }
   dagre.layout(g);

@@ -14,12 +14,12 @@ def _lazy_map_numbers(x:UOp, inf:UOp, _inf:UOp, nan:UOp, ratio:UOp):
 
 # *** helper functions for bit manipulation ***
 def mantissa_bits(d:DType) -> int: return dtypes.finfo(d.scalar())[1]
-def exponent_bias(d:DType) -> int: return {dtypes.float64: 1023, dtypes.float32: 127, dtypes.float16: 15}[d.scalar()]
-def exponent_mask(d:DType) -> int: return {dtypes.float64: 2047, dtypes.float32: 255, dtypes.float16: 31}[d.scalar()]
+def exponent_bias(d:DType) -> int: return (1 << (dtypes.finfo(d.scalar())[0] - 1)) - 1
+def exponent_mask(d:DType) -> int: return (1 << dtypes.finfo(d.scalar())[0]) - 1
 
 # **** utils ****
-def shr(x:UOp|int, y:int) -> UOp: return x // (2**y)
-def shl(x:UOp|int, y:int) -> UOp: return x * (2**y)
+def shr(x:UOp|int, y:UOp|int) -> UOp: return x // (2**(y.simplify().arg) if isinstance(y, UOp) else 2**y)
+def shl(x:UOp|int, y:UOp|int) -> UOp: return x * (2**(y.simplify().arg) if isinstance(y, UOp) else 2**y)
 
 def rintk(d:UOp) -> UOp:
   """round d:float to int away from 0"""
@@ -318,7 +318,7 @@ def threefry2x32(x: UOp, key: UOp):
 # ***** long as 2 ints *****
 
 l2i_dt = {dtypes.long: dtypes.int, dtypes.ulong: dtypes.uint}
-def unpack32(v:UOp) -> tuple[UOp, UOp]: return v.bitcast(dtypes.uint) & 0xFFFF, v.bitcast(dtypes.uint) >> 16
+def unpack32(v:UOp) -> tuple[UOp, UOp]: return v.bitcast(dtypes.uint) & 0xFFFF, shr(v.bitcast(dtypes.uint), 16)
 def reindex(idx:UOp, off:int, mul=2) -> UOp: return idx.replace(src=(idx.src[0], idx.src[1]*mul+off))
 
 # 4.3.1 is the relevant section in TAOCP
@@ -335,20 +335,19 @@ def l2i(op: Ops, dt: DType, *uops:UOp):
     case Ops.CAST if dt in dtypes.floats:
       small = (a1.eq(0) & (a0 >= 0)) | (a1.eq(-1) & (a0 < 0))
       return small.where(a0.cast(dt), ((a1.cast(dtypes.float32) * (2**32)) + a0.bitcast(dtypes.uint).cast(dtypes.float32)).cast(dt))
-    case Ops.CAST if dt == dtypes.bool: return a0.ne(UOp.const(a0.dtype, 0)) | a1.ne(UOp.const(a1.dtype, 0))
     case Ops.CAST: return a0.bitcast(dtypes.uint).cast(dt)
     case Ops.BITCAST: return a0.bitcast(dt), a1.bitcast(dt)
     case Ops.SHL:
-      lo, hi = a0 << (b0_mod:=b0 & 31), (a1 << b0_mod) | ((a0 >> 1) >> (31 - b0_mod))
+      lo, hi = shl(a0, b0_mod:=b0 & 31), shl(a1, b0_mod) | shr(shr(a0, 1), 31 - b0_mod)
       return (b0 >= 32).where(zero, lo), (b0 >= 32).where(lo, hi)
     case Ops.SHR:
-      lo, hi = (a0 >> (b0_mod:=b0 & 31)) | ((a1 << 1) << (31 - b0_mod)), a1 >> b0_mod
+      lo, hi = shr(a0, b0_mod:=b0 & 31) | shl(shl(a1, 1), 31 - b0_mod), shr(a1, b0_mod)
       return (b0 >= 32).where(hi, lo), (b0 >= 32).where(zero, hi)
     case Ops.ADD: return (low:=a0+b0), (a1 + b1).replace(dtype=dt) + (low.bitcast(dtypes.uint) < a0.bitcast(dtypes.uint)).cast(dt)
     case Ops.SUB: return a0 - b0, a1 - b1 - (a0.bitcast(dtypes.uint) < b0.bitcast(dtypes.uint)).cast(dt)
     case Ops.MUL:
       (a00, a01), (b00, b01) = unpack32(a0), unpack32(b0)
-      mid = l2i(Ops.ADD, dt, ((a00*b01)<<16).bitcast(dt), ((a00*b01)>>16).bitcast(dt), ((a01*b00)<<16).bitcast(dt), ((a01*b00)>>16).bitcast(dt))
+      mid = l2i(Ops.ADD, dt, shl(a00*b01, 16).bitcast(dt), shr(a00*b01, 16).bitcast(dt), shl(a01*b00, 16).bitcast(dt), shr(a01*b00, 16).bitcast(dt))
       return l2i(Ops.ADD, dt, *mid, (a00*b00).bitcast(dt), (a01*b01).bitcast(dt) + a0*b1 + a1*b0)
     case Ops.IDIV | Ops.MOD:
       # TAOCP Algorithm 4.3.1D could be faster here, but must be parameterized over the width of b
@@ -362,7 +361,7 @@ def l2i(op: Ops, dt: DType, *uops:UOp):
         r = (r[0] | l2i(Ops.SHR, dtypes.uint, a0, a1, UOp.const(dtypes.uint, i), z)[0] & 1), r[1]
         cond = l2i(Ops.CMPLT, dtypes.uint, *r, b0, b1).logical_not()
         diff = l2i(Ops.SUB, dtypes.uint, *r, b0, b1)
-        q = ((q[0] | cond.cast(dtypes.uint) << (i % 32), q[1]) if i < 32 else (q[0], q[1] | cond.cast(dtypes.uint) << (i % 32)))
+        q = ((q[0] | shl(cond.cast(dtypes.uint), i % 32), q[1]) if i < 32 else (q[0], q[1] | shl(cond.cast(dtypes.uint), i % 32)))
         r = l2i(Ops.WHERE, dtypes.uint, cond, *diff, *r)
       if dt == dtypes.int:
         (nq0, nq1), (nr0, nr1) = l2i(Ops.BITCAST, dt, *l2i(Ops.NEG, dtypes.uint, *q)), l2i(Ops.BITCAST, dt, *l2i(Ops.NEG, dtypes.uint, *r))
@@ -378,33 +377,46 @@ def l2i(op: Ops, dt: DType, *uops:UOp):
     case _: raise NotImplementedError(f"long decomposition of {op} unsupported")
 
 # ***** floats *****
-f2f_dt = { dtypes.half: dtypes.ushort, dtypes.float: dtypes.uint }
+f2f_dt = { f:getattr(dtypes, f"uint{f.bitsize}") for f in dtypes.floats }
 
 def rne(v: UOp, s) -> UOp: return shr(v, s) + ((shr(v, s - 1) & 1) & ((v & ((1 << (s - 1)) - 1)).ne(0).cast(v.dtype) | (shr(v, s) & 1)))
 
 def f2f(v, fr:DType, to:DType):
   fs, fb, (fe, fm), ts, tb, (te, tm) = fr.bitsize, exponent_bias(fr), dtypes.finfo(fr), to.bitsize, exponent_bias(to), dtypes.finfo(to)
   # NB: denormals are zero!
-  if fe < te and fm < tm:
+  if fe <= te and fm < tm:
     sign, nosign = shl((v & shl(1, fs-1)).cast(f2f_dt[to]), ts - fs), (v & (shl(1, fs-1) - 1)).cast(f2f_dt[to])
     exp, norm = shr(nosign, fm), shl(nosign, tm - fm) + shl(tb - fb, tm)
-    inf_or_nan = shl(nosign, tm - fm) | shl((shl(1, te) - 1), tm)
-    return (sign | exp.eq(0).where(0, exp.eq(shl(1, fe) - 1).where(inf_or_nan, norm))).bitcast(to)
-  elif fe > te and fm > tm:
-    sign, nosign, exp = shr(v, fs - ts) & shl(1, ts - 1), v & (shl(1, fs - 1) - 1), shr(v, fm) & (shl(1, fe) - 1)
+    nan = shl(nosign, tm - fm) | shl((shl(1, te) - 1), tm)
+    # fp8e4m3 has only one nan
+    is_nan = (nosign.eq(shl(1, fm + fe) - 1) if fr == dtypes.fp8e4m3 else exp.eq(shl(1, fe) - 1))
+    return (sign | exp.eq(0).where(0, is_nan.where(nan, norm))).bitcast(to)
+  elif fe >= te and fm > tm:
+    v = f2f_clamp(v.bitcast(fr), to).bitcast(f2f_dt[fr])
+    sign, nosign = shr(v, fs - ts) & shl(1, ts - 1), v & (shl(1, fs - 1) - 1)
     norm = (rne(nosign, fm - tm) - shl(fb - tb, tm)).cast(f2f_dt[to])
-    infnan = (sign | (shr(nosign, fm - tm) & (shl(1, tm) - 1)) | shl(shl(1, te) - 1, tm)).cast(f2f_dt[to])
-    underflow, overflow = exp < (1 + fb - tb), exp > (shl(1, te) - 2 + (fb - tb))
-    return exp.eq(shl(1, fe) - 1).where(infnan, sign.cast(f2f_dt[to]) | underflow.where(0, overflow.where(shl(shl(1, te) - 1, tm), norm)))
+    underflow = (shr(v, fm) & (shl(1, fe) - 1)) < (1 + fb - tb)
+    nan_mantissa = (shl(1, tm) - 1) if to == dtypes.fp8e4m3 else (shr(nosign, fm - tm) & (shl(1, tm) - 1))
+    nan = (sign | nan_mantissa | shl(shl(1, te) - 1, tm)).cast(f2f_dt[to])
+    is_nan = (shr(v, fm) & (shl(1, fe) - 1)).eq(shl(1, fe) - 1)
+    return is_nan.where(nan, sign.cast(f2f_dt[to]) | underflow.where(0, norm))
   else: raise NotImplementedError(f"unsupported decomp {fr} -> {to}")
 
-def f2f_load(x: UOp) -> UOp:
-  if (n:=x.dtype.count) == 1: return f2f(x.replace(dtype=dtypes.ushort), dtypes.half, dtypes.float)
-  return UOp.vectorize(*(f2f(x.replace(dtype=dtypes.ushort, src=(reindex(x.src[0].src[0], i, 1),)), dtypes.half, dtypes.float) for i in range(n)))
+def f2f_clamp(val:UOp, dt:DType) -> UOp:
+  e, m = dtypes.finfo(dt)
+  max_exp, max_man = ((1 << e) - 1, (1 << m) - 2) if dt == dtypes.fp8e4m3 else ((1 << e) - 2, (1 << m) - 1)
+  mx = val.const_like(2.0**(max_exp - exponent_bias(dt)) * (1.0 + max_man / (1 << m)))
+  sat = mx if dt in dtypes.fp8s else val.const_like(float('inf'))
+  # FIXME: CMPLT of nan is undefined
+  return val.ne(val).where(val, (val < -mx).where(-sat, (mx < val).where(sat, val)))
 
-def f2f_store(st, idx, val):
-  if (n:=val.dtype.count) == 1: return st.replace(src=(idx, f2f(val.bitcast(dtypes.uint), dtypes.float, dtypes.half)))
-  return UOp.group(*(st.replace(src=(reindex(idx, i, 1), f2f(val.gep(i).bitcast(dtypes.uint), dtypes.float, dtypes.half))) for i in range(n)))
+def f2f_load(x: UOp, fr:DType, to:DType) -> UOp:
+  if (n:=x.dtype.count) == 1: return f2f(x.replace(dtype=f2f_dt[fr]), fr, to)
+  return UOp.vectorize(*(f2f(x.replace(dtype=f2f_dt[fr], src=(reindex(x.src[0].src[0], i, 1),)), fr, to) for i in range(n)))
+
+def f2f_store(st, idx, val, fr:DType, to:DType):
+  if (n:=val.dtype.count) == 1: return st.replace(src=(idx, f2f(val.bitcast(f2f_dt[to]), to, fr)))
+  return UOp.group(*(st.replace(src=(reindex(idx, i, 1), f2f(val.gep(i).bitcast(f2f_dt[to]), to, fr))) for i in range(n)))
 
 # ***** decomposition patterns *****
 
@@ -454,47 +466,54 @@ def get_late_rewrite_patterns(ops:tuple[Ops, ...], device:str, disable_fast_idiv
         lambda x,c1,c2: x.eq(c1+1) if c1.arg+1==c2.arg-1 else None),  # (c-1)<x & x<(c+1) -> x==c
     ]
   if Ops.CMPEQ in ops: pat += [(UPat.var('x').ne(UPat.var('y')).logical_not(), lambda x,y: x.alu(Ops.CMPEQ, y))]
-  if Ops.MULACC in ops: pat += [(UPat.var('a')*UPat.var('b')+UPat.var('c'), lambda a,b,c: a.alu(Ops.MULACC, b, c))]
+  if Ops.MULACC in ops:
+    pat += [(UPat.var('a')*UPat.var('b')+UPat.var('c'), lambda a,b,c: a.alu(Ops.MULACC, b, c))]
+    # also fuse (x << n) + c → MULACC(x, 2^n, c) since MUL→SHL may run first
+    if Ops.SHL in ops: pat += [(UPat.var('x').alu(Ops.SHL, UPat.cvar('n'))+UPat.var('c'), lambda x,n,c: x.alu(Ops.MULACC, x.const_like(1<<n.arg), c))]
   # some backends emit FDIV for RECIP, in that case: a*(1/b) -> a/b
   if Ops.FDIV in ops:
     pat += [(UPat.var("x").reciprocal(), lambda x: x.const_like(1).alu(Ops.FDIV, x))]
     pat += [(UPat.var("a", dtypes.floats) * UPat.const(dtypes.floats, 1).alu(Ops.FDIV, UPat.var("b")), lambda a,b: a.alu(Ops.FDIV, b))]
   return PatternMatcher(pat)
 
-@functools.cache
-def get_unsupported_dtypes_patterns(device:str, emulated_dtypes:tuple[DType, ...]) -> PatternMatcher:
-  pat: list[tuple[UPat, Callable]] = []
-  if not is_dtype_supported(dtypes.long, device) or dtypes.long in emulated_dtypes:
-    pat += [(UPat((*GroupOp.Defines, Ops.INDEX), name="x"), lambda x:
-             x.replace(dtype=l2i_dt[x.dtype.base].ptr(x.dtype.size * 2)) if hasattr(x.dtype, 'size') and x.dtype.base in l2i_dt else None)]
-    pat += [(UPat(Ops.INDEX, tuple(l2i_dt.keys()), name='x'), lambda x: reindex(x, x.tag).replace(dtype=l2i_dt[x.dtype]))]
-    pat += [(UPat(Ops.STORE, src=(UPat.var('idx'), UPat.var('val', tuple(l2i_dt.keys()))), name='st'), lambda st,idx,val:
-             st.replace(src=(reindex(idx, 0), val.rtag(0))).group(st.replace(src=(reindex(idx, 1), val.rtag(1)))) if val.tag is None else None)]
-    pat += [(UPat(GroupOp.Comparison, src=(UPat.var('a', tuple(l2i_dt.keys())), UPat.var('b', tuple(l2i_dt.keys()))), name="x"), lambda a,b,x:
-             l2i(x.op, dt:=l2i_dt[a.dtype], a.rtag(0).cast(dt), a.rtag(1).cast(dt), b.rtag(0).cast(dt), b.rtag(1).cast(dt)))]
-    pat += [(UPat(Ops.CAST, tuple(l2i_dt.keys()), src=(UPat.var('a'),), name="x"), lambda a,x:
-             l2i(x.op, x.dtype, a)[x.tag] if x.tag is not None and a.dtype not in l2i_dt else None)]
-    pat += [(UPat(Ops.CAST, tuple(l2i_dt.keys()), src=(UPat.var('a', tuple(l2i_dt.keys())),), name="x"), lambda a,x:
-             (a.rtag(0).cast(dt:=l2i_dt[a.dtype]).bitcast(xdt:=l2i_dt[x.dtype]), a.rtag(1).cast(dt).bitcast(xdt))[x.tag])]
-    pat += [(UPat(Ops.CAST, src=(UPat.var('a', tuple(l2i_dt.keys())),), name="x"), lambda a,x:
-             l2i(x.op, x.dtype, a.rtag(0).cast(dt:=l2i_dt[a.dtype]), a.rtag(1).cast(dt)) if x.dtype not in l2i_dt and a.tag is None else None)]
-    pat += [(UPat((*(GroupOp.ALU - GroupOp.Comparison), Ops.BITCAST), tuple(l2i_dt.keys()), name="x"), lambda x:
-             l2i(x.op, l2i_dt[x.dtype], *flatten((a.rtag(0).cast(dt:=l2i_dt[x.src[-1].dtype]), a.rtag(1).cast(dt))
-                                                                            if a.dtype in l2i_dt else (a,) for a in x.src))[x.tag])]
-    pat += [(UPat(Ops.LOAD, tuple(l2i_dt.keys()), src=(UPat.var('idx'),), name='x'), lambda x,idx:
-             x.replace(dtype=l2i_dt[x.dtype], src=(reindex(idx, x.tag),)))]
-    pat += [(UPat(Ops.CONST, tuple(l2i_dt.keys()), name='x'), lambda x:
-             UOp.const(dt:=l2i_dt[x.dtype], truncate[dt]((x.arg >> 32) if x.tag == 1 else (x.arg & 0xFFFFFFFF))))]
-  if dtypes.half in emulated_dtypes:
-    pat += [(UPat((*GroupOp.Defines, Ops.INDEX), name="x"), lambda x:
-             x.replace(dtype=dtypes.uint16.ptr(x.dtype.size), tag=dtypes.half) if x.dtype.base == dtypes.half else None)]
-    pat += [(UPat(Ops.LOAD, dtypes.half, name="x"), f2f_load)]
-    pat += [(UPat(Ops.BITCAST, src=(UPat(Ops.LOAD, dtypes.half, name="ld"),), name="bc"), lambda bc,ld:
-             ld.replace(dtype=dtypes.ushort).bitcast(bc.dtype))]
-    pat += [(UPat(Ops.BITCAST, (dtypes.ushort, dtypes.short, dtypes.bfloat16), src=(UPat.var("x", dtypes.float),), name="bc"), lambda bc,x:
-             bc.replace(src=(f2f(x.bitcast(dtypes.uint), dtypes.float, dtypes.half),)))]
-    pat += [(UPat(GroupOp.All, dtypes.half, name="x"), lambda x:
-             x.replace(dtype=dtypes.float.vec(x.dtype.count), src=tuple(s.cast(dtypes.float) if s.dtype == dtypes.half else s for s in x.src)))]
-    pat += [(UPat(Ops.STORE, src=(UPat.var("idx"), UPat.var("val", dtypes.float)), name='st'), lambda st,idx,val:
-             f2f_store(st, idx, val) if (idx:=idx.src[0] if idx.op == Ops.CAST else idx).tag == dtypes.half else None)]
-  return PatternMatcher(pat)
+pm_long_decomp = PatternMatcher([
+  (UPat((*GroupOp.Defines, Ops.INDEX), name="x"), lambda x:
+   x.replace(dtype=l2i_dt[x.dtype.base].ptr(x.dtype.size * 2)) if hasattr(x.dtype, 'size') and x.dtype.base in l2i_dt else None),
+  (UPat(Ops.INDEX, tuple(l2i_dt.keys()), name='x'), lambda x: reindex(x, x.tag).replace(dtype=l2i_dt[x.dtype])),
+  (UPat(Ops.STORE, src=(UPat.var('idx'), UPat.var('val', tuple(l2i_dt.keys()))), name='st'), lambda st,idx,val:
+   st.replace(src=(reindex(idx, 0), val.rtag(0))).group(st.replace(src=(reindex(idx, 1), val.rtag(1)))) if val.tag is None else None),
+  (UPat(GroupOp.Comparison, src=(UPat.var('a', tuple(l2i_dt.keys())), UPat.var('b', tuple(l2i_dt.keys()))), name="x"), lambda a,b,x:
+   l2i(x.op, dt:=l2i_dt[a.dtype], a.rtag(0).cast(dt), a.rtag(1).cast(dt), b.rtag(0).cast(dt), b.rtag(1).cast(dt))),
+  (UPat(Ops.CAST, tuple(l2i_dt.keys()), src=(UPat.var('a'),), name="x"), lambda a,x:
+   l2i(x.op, x.dtype, a)[x.tag] if x.tag is not None and a.dtype not in l2i_dt else None),
+  (UPat(Ops.CAST, tuple(l2i_dt.keys()), src=(UPat.var('a', tuple(l2i_dt.keys())),), name="x"), lambda a,x:
+   (a.rtag(0).cast(dt:=l2i_dt[a.dtype]).bitcast(xdt:=l2i_dt[x.dtype]), a.rtag(1).cast(dt).bitcast(xdt))[x.tag]),
+  (UPat(Ops.CAST, src=(UPat.var('a', tuple(l2i_dt.keys())),), name="x"), lambda a,x:
+   l2i(x.op, x.dtype, a.rtag(0).cast(dt:=l2i_dt[a.dtype]), a.rtag(1).cast(dt)) if x.dtype not in l2i_dt and a.tag is None else None),
+  (UPat((*(GroupOp.ALU - GroupOp.Comparison), Ops.BITCAST), tuple(l2i_dt.keys()), name="x"), lambda x:
+   l2i(x.op, l2i_dt[x.dtype], *flatten((a.rtag(0).cast(dt:=l2i_dt[x.src[-1].dtype]), a.rtag(1).cast(dt))
+                                       if a.dtype in l2i_dt else (a,) for a in x.src))[x.tag] if x.tag is not None else None),
+  (UPat(Ops.LOAD, tuple(l2i_dt.keys()), src=(UPat.var('idx'),), name='x'), lambda x,idx: x.replace(dtype=l2i_dt[x.dtype],src=(reindex(idx, x.tag),))),
+  (UPat(Ops.CONST, tuple(l2i_dt.keys()), name='x'), lambda x:
+   UOp.const(dt:=l2i_dt[x.dtype], truncate[dt]((x.arg >> 32) if x.tag == 1 else (x.arg & 0xFFFFFFFF))))
+])
+
+# float decomposition patterns - ctx is (fr, to) tuple
+pm_float_decomp = PatternMatcher([
+  (UPat((*GroupOp.Defines, Ops.INDEX), name="x"), lambda ctx,x:
+   x.replace(dtype=f2f_dt[ctx[0]].ptr(x.dtype.size), tag=ctx[0]) if x.dtype.base == ctx[0] else None),
+  (UPat(Ops.LOAD, dtypes.floats, name="x"), lambda ctx,x: f2f_load(x, *ctx) if x.dtype.scalar() == ctx[0] else None),
+  (UPat(Ops.BITCAST, src=(UPat(Ops.LOAD, name="ld"),), name="bc"), lambda ctx,bc,ld:
+   ld.replace(dtype=f2f_dt[ctx[0]]).bitcast(bc.dtype) if ld.dtype.bitsize == ctx[0].bitsize else None),
+  (UPat(Ops.BITCAST, src=(UPat.var("x", dtypes.floats),), name="bc"), lambda ctx,bc,x:
+   bc.replace(src=(f2f(x.bitcast(f2f_dt[ctx[1]]), ctx[1], ctx[0]),)) if x.dtype == ctx[1] and bc.dtype.bitsize == ctx[0].bitsize else None),
+  (UPat(Ops.CAST, dtypes.floats, src=(UPat.var("val"),), name="x"), lambda ctx,x,val:
+   f2f_clamp(val.cast(ctx[1]), ctx[0]) if x.dtype.scalar() == ctx[0] else None),
+  (UPat(GroupOp.All-{Ops.BITCAST}, dtypes.floats, name="x"), lambda ctx,x:
+   x.replace(dtype=ctx[1].vec(x.dtype.count), src=tuple(s.cast(ctx[1]) if s.dtype == ctx[0] else s for s in x.src))
+   if x.dtype.scalar() == ctx[0] else None),
+  (UPat(Ops.STORE, src=(UPat.var("idx"), UPat(Ops.BITCAST, dtypes.floats, name="val")), name='st'), lambda ctx,st,idx,val:
+   st.replace(src=(idx, val.replace(dtype=f2f_dt[ctx[0]]))) if val.dtype == ctx[0] and idx.tag == ctx[0] else None),
+  (UPat(Ops.STORE, src=(UPat.var("idx"), UPat.var("val", dtypes.floats)), name='st'), lambda ctx,st,idx,val:
+   f2f_store(st, idx, val, *ctx) if val.dtype.scalar() == ctx[1] and (idx:=idx.src[0] if idx.op == Ops.CAST else idx).tag == ctx[0] else None),
+])

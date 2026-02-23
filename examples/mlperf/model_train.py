@@ -1285,6 +1285,7 @@ def train_llama3():
   from extra.models.llama import Transformer
   from examples.llama3 import MODEL_PARAMS
   from examples.mlperf.lr_schedulers import CosineAnnealingLRWithWarmup
+  from examples.mlperf.optim import GradAccClipAdamW
 
   BENCHMARK = getenv("BENCHMARK")
 
@@ -1294,6 +1295,7 @@ def train_llama3():
   grad_acc           = config["GRADIENT_ACC_STEPS"]     = getenv("GRADIENT_ACC_STEPS", 1)
   GBS                = config["GLOBAL_BATCH_SIZE"]      = BS * grad_acc
   SEED               = config["SEED"]                   = getenv("SEED", 5760)
+  DATA_SEED          = config["DATA_SEED"]              = getenv("DATA_SEED", SEED)
   SEQLEN             = config["SEQLEN"]                 = getenv("SEQLEN", 8192)
   TRAIN_ON_VAL       = config["TRAIN_ON_VAL"]           = getenv("TRAIN_ON_VAL", 0)
   SMALL              = config["SMALL"]                  = getenv("SMALL", 0)
@@ -1369,13 +1371,14 @@ def train_llama3():
       # prevents memory spike on device 0
       v.realize()
 
-  optim = AdamW(get_parameters(model), lr=0.0,
-                b1=opt_adamw_beta_1, b2=opt_adamw_beta_2, eps=opt_adamw_epsilon, weight_decay=opt_adamw_weight_decay)
+  optim_device = "CPU" if getenv("OFFLOAD_OPTIM") else None
+  optim = GradAccClipAdamW(get_parameters(model), lr=0.0, b1=opt_adamw_beta_1, b2=opt_adamw_beta_2,
+                           eps=opt_adamw_epsilon, weight_decay=opt_adamw_weight_decay, grad_acc=grad_acc, device=optim_device)
 
   # init grads
   for p in optim.params:
     p.grad = p.zeros_like().contiguous().realize()
-  grads = [p.grad for p in optim.params]
+  grads: list[Tensor] = [p.grad for p in optim.params]
 
   scheduler = CosineAnnealingLRWithWarmup(optim, opt_base_learning_rate, opt_end_learning_rate, opt_learning_rate_warmup_steps, opt_learning_rate_decay_steps)
 
@@ -1390,6 +1393,7 @@ def train_llama3():
 
   @TinyJit
   def minibatch(tokens:Tensor):
+    tokens = tokens.to(None)
     if (DP := getenv("DP", 1)) > 1:
       device = tuple(f"{Device.DEFAULT}:{i}" for i in range(DP))
       tokens = tokens.shard(device, 0)
@@ -1401,38 +1405,25 @@ def train_llama3():
     loss.backward()
     assert all(p.grad is g for p,g in zip(optim.params, grads))
     Tensor.realize(loss, *grads)
-    return loss
+    return loss.flatten().float().to("CPU")
 
   @TinyJit
   def optim_step():
-    for p in optim.params:
-      p.grad.assign(p.grad / grad_acc)
-
-    # L2 norm grad clip
-    # https://github.com/NVIDIA/NeMo/blob/3368c3fc0b4a186ab33a1d68a504315100c0b2a6/nemo/collections/nlp/modules/common/megatron/clip_grads.py#L57
-    # https://docs.pytorch.org/docs/stable/generated/torch.nn.utils.clip_grad_norm_.html
-    if not getenv("DISABLE_GRAD_CLIP_NORM"):
-      total_norm = Tensor(0.0, dtype=dtypes.float32, device=optim.params[0].device)
-      for g in grads:
-        total_norm += g.float().square().sum()
-      total_norm = total_norm.sqrt().contiguous().realize()
-      for g in grads:
-        g.assign((g * (opt_gradient_clip_norm / (total_norm + 1e-6)).clamp(max_=1.0)).cast(g.dtype)).realize()
-
     optim.step()
     scheduler.step()
 
     for g in grads:
-      g.assign(g.zeros_like().contiguous()).realize()
+      g.assign(g.zeros_like())
 
     lr = optim.lr
     Tensor.realize(lr, *grads)
 
-    return lr
+    return lr.float().to("CPU")
 
   @TinyJit
   @Tensor.train(False)
   def eval_step(tokens:Tensor):
+    tokens = tokens.to(None)
     if (DP := getenv("DP", 1)) > 1:
       device = tuple(f"{Device.DEFAULT}:{i}" for i in range(DP))
       tokens = tokens.shard(device, 0)
@@ -1441,7 +1432,7 @@ def train_llama3():
       tokens = tokens.shard(device)
     logits:Tensor = model(tokens[:, :-1], start_pos=0, temperature=math.nan)
     loss = logits.sparse_categorical_crossentropy(tokens[:, 1:])
-    return loss.flatten().float()
+    return loss.flatten().float().to("CPU")
 
   # ** data iters **
   def fake_data(bs, samples):
@@ -1453,7 +1444,7 @@ def train_llama3():
       return fake_data(BS, SAMPLES)
     else:
       from examples.mlperf.dataloader import batch_load_llama3
-      return batch_load_llama3(BS, SAMPLES, SEQLEN, BASEDIR, seed=SEED, val=bool(TRAIN_ON_VAL), small=bool(SMALL))
+      return batch_load_llama3(BS, SAMPLES, SEQLEN, BASEDIR, seed=DATA_SEED, val=bool(TRAIN_ON_VAL), small=bool(SMALL))
 
   if getenv("FAKEDATA", 0):
     eval_dataset = None

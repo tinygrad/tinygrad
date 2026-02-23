@@ -1,11 +1,11 @@
 from __future__ import annotations
 import ctypes, functools
-from tinygrad.helpers import DEBUG, getenv, mv_address, suppress_finalizing, CUDA_CC, CUDA_PTX
-from tinygrad.device import Compiled, BufferSpec, LRUAllocator, CompilerPair, CompilerSet
+from tinygrad.helpers import DEBUG, getenv, mv_address, suppress_finalizing, CUDA_CC, CUDA_PTX, CUDA_NVCC
+from tinygrad.device import Compiled, BufferSpec, LRUAllocator, CompilerSet
 from tinygrad.renderer.cstyle import CUDARenderer
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.runtime.autogen import cuda
-from tinygrad.runtime.support.compiler_cuda import pretty_ptx, CUDACompiler, PTXCompiler, NVCCCompiler
+from tinygrad.runtime.support.compiler_cuda import pretty_ptx
 from tinygrad.runtime.support.c import init_c_struct_t, init_c_var
 if getenv("IOCTL"): import extra.nv_gpu_driver.nv_ioctl  # noqa: F401  # pylint: disable=unused-import
 if MOCKGPU:=getenv("MOCKGPU"): from test.mockgpu.cuda import cuda # type: ignore # pylint: disable=reimported
@@ -118,9 +118,9 @@ class CUDADevice(Compiled):
     CUDADevice.devices.append(self)
 
     from tinygrad.runtime.graph.cuda import CUDAGraph
-    compilers = CompilerSet([CompilerPair(functools.partial(CUDARenderer, self.arch), functools.partial(CUDACompiler, self.arch)),
-                             CompilerPair(functools.partial(PTXRenderer, self.arch), functools.partial(PTXCompiler, self.arch), CUDA_PTX),
-                             CompilerPair(functools.partial(CUDARenderer, self.arch), functools.partial(NVCCCompiler, self.arch))], ctrl_var=CUDA_CC)
+    compilers = CompilerSet([(functools.partial(CUDARenderer, self.arch, device="CUDA"), None),
+                             (functools.partial(PTXRenderer, self.arch, device="CUDA"), CUDA_PTX),
+                             (functools.partial(CUDARenderer, self.arch, device="CUDA", use_nvcc=True), CUDA_NVCC)], ctrl_var=CUDA_CC)
     super().__init__(device, CUDAAllocator(self), compilers, functools.partial(CUDAProgram, self), None if MOCKGPU else CUDAGraph)
 
   def synchronize(self):

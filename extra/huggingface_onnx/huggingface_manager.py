@@ -8,14 +8,14 @@ from tinygrad.helpers import _ensure_downloads_dir
 DOWNLOADS_DIR = _ensure_downloads_dir() / "models"
 from tinygrad.helpers import tqdm
 
-def snapshot_download_with_retry(*, repo_id: str, allow_patterns: list[str]|tuple[str, ...]|None=None, cache_dir: str|Path|None=None,
+def snapshot_download_with_retry(*, repo_id: str, allow_patterns: list[str]|tuple[str, ...]|None=None, local_dir: str|Path|None=None,
                                  tries: int=2, **kwargs) -> Path:
   for attempt in range(tries):
     try:
       return Path(snapshot_download(
         repo_id=repo_id,
         allow_patterns=allow_patterns,
-        cache_dir=str(cache_dir) if cache_dir is not None else None,
+        local_dir=str(local_dir) if local_dir is not None else None,
         **kwargs
       ))
     except Exception as e:
@@ -144,14 +144,14 @@ class HuggingFaceONNXManager:
         root_path = snapshot_download_with_retry(
           repo_id=model_id,
           allow_patterns=allow_patterns,
-          cache_dir=str(self.models_dir)
+          local_dir=str(self.models_dir / model_id)
         )
 
         # Download config files (usually small)
         snapshot_download_with_retry(
           repo_id=model_id,
           allow_patterns=["*config.json"],
-          cache_dir=str(self.models_dir)
+          local_dir=str(self.models_dir / model_id)
         )
 
         model_data["download_path"] = str(root_path)
