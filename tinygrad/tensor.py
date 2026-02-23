@@ -3073,7 +3073,7 @@ class Tensor(OpMixin):
     print(Tensor([-1, 2, 3]).maximum(Tensor([-4, -2, 9])).numpy())
     ```
     """
-    # NOTE: maximum has a unique gradient so requires an Ops.MAX, internally it's (x < y).where(y, x)
+    # NOTE: maximum has a unique gradient so requires an Ops.MAX, internally it becomes (self < x).where(x, self)
     return self._binop(Ops.MAX, x, False)
 
   def minimum(self, x:Tensor|ConstType) -> Tensor:
