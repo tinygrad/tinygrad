@@ -1,5 +1,5 @@
 import unittest
-from tinygrad.device import CompileError, Device
+from tinygrad.device import CompileError, Device, BufferSpec
 if Device.DEFAULT=="METAL":
   from tinygrad.runtime.ops_metal import MetalDevice, MetalCompiler, MetalProgram
 @unittest.skipIf(Device.DEFAULT!="METAL", "Metal support required")
@@ -49,3 +49,13 @@ kernel void r_5(device int* data0, const device int* data1, uint3 gid [[threadgr
     with self.assertRaises(RuntimeError):
       compiled = compiled[:40] # corrupt the compiled program
       MetalProgram(device, "r_5", compiled)
+
+  def test_free(self):
+    size = 2**16
+    device = Device['METAL']
+    before = device.sysdevice.currentAllocatedSize()
+
+    buf = device.allocator.alloc(size)
+    self.assertEqual(curr:=device.sysdevice.currentAllocatedSize(), before+size, msg=f"{curr=} - {before=}")
+    device.allocator.free(buf, buf.size, BufferSpec(nolru=True))
+    self.assertEqual(curr:=device.sysdevice.currentAllocatedSize(), before, msg=f"{curr=} - {before=}")
