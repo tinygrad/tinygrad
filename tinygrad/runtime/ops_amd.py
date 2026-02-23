@@ -45,7 +45,7 @@ class AMDSignal(HCQSignal):
 
   def _sleep(self, time_spent_since_last_sleep_ms:int):
     # Reasonable to sleep for long workloads (which take more than 200ms) and only timeline signals.
-    if time_spent_since_last_sleep_ms > 200 and self.is_timeline and self.owner is not None: self.owner.iface.sleep(200)
+    if time_spent_since_last_sleep_ms > 200 and self.owner is not None: self.owner.iface.sleep(200)
 
 class AMDComputeQueue(HWQueue):
   def __init__(self, dev:AMDDevice):
