@@ -99,14 +99,40 @@ pm_post_sched_cache = PatternMatcher([
   (UPat(Ops.BIND, src=(UPat(Ops.DEFINE_VAR),), name="b"), lambda ctx,b: ctx.get(b)),
 ])
 
+pm_params_to_bufs = PatternMatcher([
+  (UPat(Ops.PARAM, name="x"), lambda ctx,x: ctx[x.arg]),
+])
+
 schedule_cache: dict[bytes, tuple[list[ExecItem], UOp]] = {}
 @track_rewrites(lambda _,ret: f"Schedule {pluralize('Kernel', len(ret[1]))}")
 def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[dict[UOp, UOp], list[ExecItem], dict[str, int]]:
   # big_sink srcs are all the Tensors
   st = time.perf_counter()
-
   big_sink, buffer_map = allocate_global_buffers(big_sink)
 
+  # get var_vals
+  var_vals: dict[str, int] = {}
+  for b in big_sink.src[1:]:
+    if b.op is Ops.BIND:
+      var, val = b.src[0], b.src[1].arg
+      assert var.expr not in var_vals or var_vals[var.expr] == val, f"bind mismatch on {var}, {var_vals[var.expr]} != {val}"
+      var_vals[var.expr] = val
+
+  big_sink_cache = big_sink.src[0]
+  sched_cache_key = big_sink_cache.key
+  if not SCACHE or (sc_ret:=schedule_cache.get(sched_cache_key, None)) is None:
+    if SPEC: type_verify(big_sink, tensor_spec)
+    big_sink_cache = graph_rewrite(big_sink_cache, multi_pm, name="multi_pm", rewrite_into_calls=True)
+    pre_schedule, buf_uops_sink = create_schedule(get_rangeify(big_sink_cache))
+    if SCACHE: schedule_cache[sched_cache_key] = (pre_schedule, buf_uops_sink)
+  else:
+    # schedule cache hit
+    pre_schedule, buf_uops_sink = sc_ret
+  buf_uops_sink = graph_rewrite(buf_uops_sink, pm_params_to_bufs, ctx=big_sink.src[1:], name="params to bufs")
+
+  #graph_rewrite(buf_uops_sink, PatternMatcher([]), name="VIEW")
+
+  """
   # HACK: apply the call for now
   big_sink = unwrap(resolve_call(big_sink))
 
@@ -130,6 +156,7 @@ def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[dict[UOp, UOp], li
   # replace all the PARAMs/LUNIQUEs back (single graph_rewrite for everything)
   input_buffers_inverse = {v:k for k,v in input_buffers.items()}
   buf_uops_sink = graph_rewrite(buf_uops_sink, pm_post_sched_cache, ctx=input_buffers_inverse, name="unrewrite combined")
+  """
 
   # add bufs to pre_schedule
   schedule: list[ExecItem] = []

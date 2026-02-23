@@ -107,7 +107,7 @@ def append_after(ctx:AllocCtx, x:UOp):
 
 def replace_input_buffer(ctx:AllocCtx, b:UOp):
   ctx.replacements.append(b)
-  return UOp.param(len(ctx.replacements)-1, b.dtype, b.shape, b._device)
+  return UOp.param(len(ctx.replacements)-1, b.dtype, b.shape, b._device, b._min_max if b.op is Ops.BIND else None)
 
 pm_finalize_call = PatternMatcher([
   (UPat(Ops.ASSIGN, name="x"), untag_and_append),

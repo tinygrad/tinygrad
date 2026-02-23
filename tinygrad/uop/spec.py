@@ -58,6 +58,9 @@ shared_spec = PatternMatcher([
 
   # RANGE/SPECIAL define loops, END closes them
   (UPat(Ops.END, src=(UPat(), UPat(Ops.RANGE))), lambda: True),
+
+  # NOOP
+  (UPat(Ops.NOOP), lambda: True)
 ])
 
 # ***** UOp spec in the Tensor graph *****

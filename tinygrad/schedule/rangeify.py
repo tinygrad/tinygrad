@@ -432,7 +432,7 @@ rangeify_codegen = PatternMatcher([
 
   # no NOOP in the kernel graph
   # TODO: this can be moved into codegen?
-  (UPat(Ops.NOOP, name="x"), lambda x: x.src[0]),
+  (UPat(Ops.NOOP, name="x"), lambda x: x.src[0] if len(x.src) else None),
 
   # fix broadcast dtype
   (UPat(Ops.AFTER, name="a").broadcast(name="b"), lambda a,b: a.broadcast(len(b.src))),
