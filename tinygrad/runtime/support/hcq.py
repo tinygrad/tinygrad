@@ -221,7 +221,7 @@ class HCQSignal(Generic[HCQDeviceType]):
     if isinstance(self.base_buf.va_addr, int) and not virt: self.value = value
 
   def __del__(self):
-    if self.should_return: HCQCompiled.signal_pool[self.owner.peer_group].append(self.base_buf)
+    if self.should_return: HCQCompiled.signal_pool[unwrap(self.owner).peer_group].append(self.base_buf)
 
   @property
   def value_addr(self) -> sint: return self.base_buf.va_addr
