@@ -15,7 +15,7 @@ class CPUSignal(HCQSignal):
   def _sleep(self, time_spent_since_last_sleep_ms:int):
     if self.is_timeline and self.owner is not None:
       self.owner.tasks.join()
-      if self.dev.error_state is not None: raise self.dev.error_state
+      if self.owner.error_state is not None: raise self.owner.error_state
 
 class CPUWorker(threading.Thread):
   def __init__(self, dev, tasks, thread_id):
