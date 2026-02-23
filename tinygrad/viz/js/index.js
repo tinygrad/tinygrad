@@ -131,10 +131,15 @@ function renderDag(layoutSpec, { recenter }) {
   worker = new Worker(workerUrl);
   worker.postMessage(layoutSpec);
   worker.onmessage = (e) => {
+    if (e.data.error) {
+      updateProgress(Status.ERR, "Error in graph layout:\n"+e.data.error);
+      return;
+    }
+    const data = e.data.result;
     displaySelection("#graph");
     updateProgress(Status.COMPLETE);
-    drawGraph(e.data);
-    addTags(d3.select("#edge-labels").selectAll("g").data(e.data.edges).join("g").attr("transform", (e) => {
+    drawGraph(data);
+    addTags(d3.select("#edge-labels").selectAll("g").data(data.edges).join("g").attr("transform", (e) => {
       // get a point near the end
       const [p1, p2] = e.value.points.slice(-2);
       const dx = p2.x-p1.x;
