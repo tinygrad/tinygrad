@@ -649,10 +649,8 @@ jobs:
         run: AMD_LLVM=0 python -m pytest -n=auto test/amd/ --durations 20
       - name: Run AMD renderer tests (AMD_LLVM=1)
         run: AMD_LLVM=1 python -m pytest -n=auto test/amd/ --durations 20
-      - name: Run TestOps.test_add with SQTT
-        run: |
-          VIZ=-2 DEBUG=5 python3 test/backend/test_ops.py TestOps.test_add
-          extra/sqtt/rgptool.py create "/tmp/profile.pkl.$USER" -o /tmp/gpu0.rgp
+      - name: Run SQTT profiling tests
+        run: PROFILE=1 SQTT=1 python3 -m pytest -n=auto test/amd/test_sqtt_profiler.py
       - name: Run AMD emulated tests on NULL backend
         env:
           AMD: 0
@@ -683,6 +681,8 @@ jobs:
           amd: 'true'
       - name: Run test_tiny on MOCKAM
         run: python test/test_tiny.py
+      - name: Run test_tiny on MOCKAM USB
+        run: AMD_IFACE=USB python test/test_tiny.py
       - name: Run test_hcq on MOCKAM
         run: python -m pytest test/device/test_hcq.py
 

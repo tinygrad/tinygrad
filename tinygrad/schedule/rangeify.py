@@ -2,13 +2,14 @@ from dataclasses import dataclass, field, replace
 import itertools
 from tinygrad.dtype import dtypes, PtrDType, ImageDType, AddrSpace
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, _substitute, KernelInfo
-from tinygrad.uop.ops import graph_rewrite, sint, AxisType, BottomUpGate
+from tinygrad.uop.ops import graph_rewrite, sint, AxisType, BottomUpGate, profile_matches
 from tinygrad.uop.symbolic import symbolic
 from tinygrad.helpers import prod, all_same, getenv, dedup, all_int, DEBUG, SPLIT_REDUCEOP, DEBUG_RANGEIFY, VIZ, MAX_KERNEL_BUFFERS
 from tinygrad.helpers import PCONTIG, partition, get_single_element
 from tinygrad.codegen.simplify import pm_flatten_range, pm_reduce_simplify
 from tinygrad.codegen.opt import Opt
 from tinygrad.schedule.indexing import run_rangeify, BufferizeOpts, ALWAYS_CONTIGUOUS, IndexingContext, apply_movement_op
+from tinygrad.schedule.multi import multi_pm
 
 # creation can recurse a lot
 import sys
@@ -36,10 +37,8 @@ pm_mops = PatternMatcher([
 def fix_assign_hazard(assign:UOp, target:UOp, src:UOp):
   # PERMUTE and FLIP reorder indices, SHRINK can have overlapping regions when dest is also shrunk
   unsafe = {Ops.PERMUTE, Ops.FLIP} | ({Ops.SHRINK} if target.op_in_backward_slice_with_self(Ops.SHRINK) else set())
-  if not (hazards:=[s for s in src.toposort(gate=lambda s:s.op not in ALWAYS_CONTIGUOUS) if s.op in unsafe]): return
-  for h in hazards:
-    if any(s is target.base for s in h.toposort(gate=lambda s:s.op not in ALWAYS_CONTIGUOUS-{Ops.PARAM})):
-      return assign.replace(src=(target, src.contiguous()))
+  if any(s.op in unsafe and target.base in s.backward_slice for s in src.toposort(gate=lambda s:s.op not in ALWAYS_CONTIGUOUS)):
+    return assign.replace(src=(target, src.contiguous()))
 
 def normalize_assign_target_chain(assign:UOp, target:UOp, src:UOp):
   root_target = target
@@ -77,7 +76,7 @@ mop_cleanup = PatternMatcher([
 ])
 
 pm_gather_params = PatternMatcher([ (UPat(Ops.PARAM, name="p"), lambda ctx, p: ctx.append(p)), ])
-def resolve_call(c:UOp) -> UOp|None:
+def resolve_call(c:UOp, allow_param_mismatch=False) -> UOp|None:
   # don't resolve real kernel calls, sink or program
   if c.src[0].op is Ops.SINK and isinstance(c.src[0].arg, KernelInfo): return None
   if c.src[0].op is Ops.PROGRAM: return None
@@ -86,8 +85,9 @@ def resolve_call(c:UOp) -> UOp|None:
   params = sorted(params, key=lambda x: x.arg)
   args = c.src[1:]
   # TODO: this check belongs in spec, not here
-  if [x.arg for x in params] != list(range(len(params))): raise RuntimeError(f"params not in order: {[x.arg for x in params]}")
-  if len(params) != len(args): raise TypeError(f"expected {len(params)} args, got {len(args)}")
+  if not allow_param_mismatch:
+    if [x.arg for x in params] != list(range(len(params))): raise RuntimeError(f"params not in order: {[x.arg for x in params]}")
+    if len(params) != len(args): raise TypeError(f"expected {len(params)} args, got {len(args)}")
   for i, (p, a) in enumerate(zip(params, args)):
     if p.shape != a.shape: raise TypeError(f"arg {i} shape mismatch: expected {p.shape}, got {a.shape}")
     if p.dtype != a.dtype: raise TypeError(f"arg {i} dtype mismatch: expected {p.dtype}, got {a.dtype}")
@@ -412,6 +412,10 @@ to_define_global = PatternMatcher([
   (UPat(Ops.STORE, name="x"), find_bufs),
   (UPat(Ops.BUFFER, name="buf"), debuf),
   (UPat(Ops.PARAM, src=(UPat(), UPat(Ops.DEVICE)), name="buf"), debuf),
+  (UPat(Ops.PARAM, src=(UPat(), UPat(), UPat.cvar('vmin'), UPat.cvar('vmax'), UPat.var("nm")), name="v"),
+   lambda v, vmin, vmax, nm: UOp.variable(nm.arg, vmin.arg, vmax.arg, v.dtype)),
+  (UPat(Ops.INDEX, src=(UPat(Ops.DEFINE_VAR, name="v"),)), lambda v: v),
+
   (UPat(Ops.BIND, name="b"), unbind_kernel),
   (UPat((Ops.MSTACK, Ops.MSELECT, Ops.AFTER), name="after"), handle_after),
 
@@ -434,7 +438,7 @@ rangeify_codegen = PatternMatcher([
 
   # no NOOP in the kernel graph
   # TODO: this can be moved into codegen?
-  (UPat(Ops.NOOP, name="x"), lambda x: x.src[0]),
+  (UPat(Ops.NOOP, name="x"), lambda x: x.src[0] if len(x.src) else None),
 
   # fix broadcast dtype
   (UPat(Ops.AFTER, name="a").broadcast(name="b"), lambda a,b: a.broadcast(len(b.src))),
@@ -475,9 +479,10 @@ split_kernels = PatternMatcher([
   (UPat((Ops.STORE, Ops.END), name="x"), split_store),
 ])
 
-def get_rangeify(sink:UOp) -> UOp:
-  if VIZ: graph_rewrite(sink, PatternMatcher([]), name="View Input Graph")
-  tsink = graph_rewrite(sink, pm_syntactic_sugar+pm_mops+earliest_rewrites, bottom_up=True, name="earliest rewrites")
+@profile_matches
+def get_kernel_graph(sink:UOp) -> UOp:
+  tsink = graph_rewrite(sink, multi_pm, name="multi_pm", rewrite_into_calls=True)
+  tsink = graph_rewrite(tsink, pm_syntactic_sugar+pm_mops+earliest_rewrites, bottom_up=True, name="earliest rewrites")
 
   # convert movement ops to ranges
   tsink, rctx = run_rangeify(tsink, bool(DEBUG_RANGEIFY))
@@ -501,8 +506,8 @@ def get_rangeify(sink:UOp) -> UOp:
       # TODO: this is probably broken for MSELECT/MSTACK
       if s.op not in {Ops.BUFFER, Ops.PARAM} or s is u.buf_uop or (a:=kernel_assign.get(s)) is None: continue
       if a.src[1] is u.src[1]: continue  # same kernel (multi-output custom kernels)
-      if any(x.op is Ops.AFTER and x.buf_uop is s for x in u.toposort()):
-        raise RuntimeError(f"cycle detected in graph, kernel for {u.buf_uop} must either depend on AFTER or BUFFER")
+      if any(x.op is Ops.AFTER and x.buf_uop is s for x in kernel_assign[u.buf_uop].backward_slice):
+        raise RuntimeError(f"cycle detected in assign graph, buffers {s} and {u.buf_uop} have circular dependency")
       assign_rep[a] = kernel_assign[s] = a.replace(src=a.src+(u,))
   if assign_rep: tsink = graph_rewrite(tsink, _substitute, ctx=assign_rep, bottom_up=True, name="fix_assign")
   if VIZ: graph_rewrite(tsink, PatternMatcher([]), name="View Kernel Graph")

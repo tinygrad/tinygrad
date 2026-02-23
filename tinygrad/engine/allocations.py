@@ -1,22 +1,31 @@
-from tinygrad.uop.ops import UOp, UPat, PatternMatcher, Ops, GroupOp, graph_rewrite, identity_element
+from dataclasses import dataclass, field
+from tinygrad.uop.ops import UOp, UPat, PatternMatcher, Ops, GroupOp, graph_rewrite, identity_element, profile_matches
 from tinygrad.dtype import ImageDType
 from tinygrad.helpers import prod, DEBUG, argsort, VIZ
 
-def tag_uop(ctx:tuple[list[UOp], dict[UOp, UOp], set[UOp]], x:UOp):
-  if x.tag is not None: return None
-  ctx[0].append(x)
-  return x.replace(tag=(len(ctx[0])-1,))
+@dataclass
+class AllocCtx:
+  uop_list: list[UOp] = field(default_factory=list)
+  buffer_map: dict[UOp, UOp] = field(default_factory=dict)
+  bases: set[UOp] = field(default_factory=set)
+  assigns: list[UOp] = field(default_factory=list)
+  replacements: list[UOp] = field(default_factory=list)
 
-def disk_copy_is_buffer(ctx, u):
+def tag_uop(ctx:AllocCtx, x:UOp):
+  if x.tag is not None: return None
+  ctx.uop_list.append(x)
+  return x.replace(tag=(len(ctx.uop_list)-1,))
+
+def disk_copy_is_buffer(ctx:AllocCtx, u:UOp):
   # copies to disk are replaced with the disk buffer
   to_disk = isinstance(u._device, str) and u._device.startswith("DISK")
-  if to_disk: ctx[1][u] = UOp.new_buffer(u.device, u.shard_size, u.dtype).reshape(u.max_shard_shape)
+  if to_disk: ctx.buffer_map[u] = UOp.new_buffer(u.device, u.shard_size, u.dtype).reshape(u.max_shard_shape)
   # all copies from disk/numpy are realized into a real buffer
   from_creation = isinstance(u.src[0]._device, str) and any(u.src[0]._device.startswith(x) for x in ["NPY", "DISK", "PYTHON"])
   if from_creation: return tag_uop(ctx, u)
 
-def apply_after(ctx, u):
-  ctx[1][u] = u.src[0]
+def apply_after(ctx:AllocCtx, u:UOp):
+  ctx.buffer_map[u] = u.src[0]
 
 # CONTIGUOUS and ASSIGN + parents are the only nodes that get updated
 add_tags = PatternMatcher([
@@ -26,7 +35,7 @@ add_tags = PatternMatcher([
    lambda a,c: a.replace(src=(a.src[0], c.rtag(())), tag=a.tag+c.tag) if a.tag and c.tag else None),
   (UPat(Ops.AFTER, name="u"), apply_after),
   (UPat({Ops.CONTIGUOUS, Ops.ASSIGN}, name="x"), tag_uop),
-  (UPat(GroupOp.All, name="x"), lambda ctx,x: tag_uop(ctx,x) if x in ctx[2] else None),
+  (UPat(GroupOp.All, name="x"), lambda ctx,x: tag_uop(ctx,x) if x in ctx.bases else None),
 ])
 
 def replace_contig_with_assign(u:UOp):
@@ -82,20 +91,24 @@ pm_early_transform_tensor_graph = PatternMatcher([
   (UPat(Ops.COPY, src=(UPat.var("s"), UPat()), name="c"), lambda c,s: c.const_like(ss.arg) if (ss:=s.base).op is Ops.CONST else None),
 ])
 
-def untag_and_append(ctx:tuple[list[UOp], dict[UOp, UOp], list[UOp]], x:UOp):
+def untag_and_append(ctx:AllocCtx, x:UOp):
   if x.tag is None: return None
-  uop_list, buffer_map, assigns = ctx
   ret = x.replace(tag=None)
   for t in x.tag:
-    original_uop: UOp = uop_list[t]
+    original_uop: UOp = ctx.uop_list[t]
     replace_uop = ret
     while replace_uop.op is Ops.ASSIGN: replace_uop = replace_uop.src[0]
-    buffer_map[original_uop] = replace_uop.shrink_to(original_uop.shape)
-  assigns.append(ret)
+    ctx.buffer_map[original_uop] = replace_uop.shrink_to(original_uop.shape)
+  ctx.assigns.append(ret)
   return ret
 
-def append_after(ctx:tuple[list[UOp], dict[UOp, UOp], list[UOp]], x:UOp):
-  ctx[2].append(x)
+def append_after(ctx:AllocCtx, x:UOp):
+  ctx.assigns.append(x)
+
+def replace_input_buffer(ctx:AllocCtx, b:UOp):
+  ctx.replacements.append(b)
+  return UOp.param(len(ctx.replacements)-1, b.dtype, b.shape, b._device,
+                   b._min_max if b.op is Ops.BIND else None, b.src[0].arg[0] if b.op is Ops.BIND else None)
 
 pm_finalize_call = PatternMatcher([
   (UPat(Ops.ASSIGN, name="x"), untag_and_append),
@@ -105,25 +118,29 @@ pm_finalize_call = PatternMatcher([
   (UPat(Ops.CONST, src=(UPat(Ops.UNIQUE), UPat(Ops.DEVICE, name="d")), name="b"), lambda b,d: b.replace(src=(d,))),
 ])
 
-def allocate_global_buffers(big_sink:UOp) -> tuple[UOp, dict[UOp, UOp]]:
+pm_replace_buf = PatternMatcher([
+  # replace BUFFER with PARAM for cache key normalization
+  (UPat(Ops.BUFFER, src=(UPat(Ops.UNIQUE), UPat(Ops.DEVICE)), name="b"), replace_input_buffer),
+  # strip value from BIND for cache key normalization, so different values hit same cache
+  (UPat(Ops.BIND, src=(UPat(Ops.DEFINE_VAR), UPat(Ops.CONST)), name="b"), replace_input_buffer),
+])
+
+@profile_matches
+def transform_to_call(big_sink:UOp) -> tuple[UOp, dict[UOp, UOp]]:
   # uop list is a list in the original_sink graph and we can map to the tags later
   # here we build buffer map
-  uop_list: list[UOp] = []
-  buffer_map: dict[UOp, UOp] = {}
-
   dont_realize = {Ops.CONST, Ops.BUFFER, Ops.BIND, Ops.DEFINE_VAR, Ops.AFTER}
-  bases = set([x.multibase for x in big_sink.src if x.base.op not in dont_realize])
+  ctx = AllocCtx(bases=set([x.multibase for x in big_sink.src if x.base.op not in dont_realize]))
 
   # this rewrite is "read-only", it adds simple things to buffer_map and may sink things on big_sink, bottom_up
   # this is the only one where we have to be careful to not break the tensor graph
-  big_sink = graph_rewrite(big_sink, add_tags, ctx=(uop_list, buffer_map, bases), bottom_up=True, name="number the uops")
+  big_sink = graph_rewrite(big_sink, add_tags, ctx=ctx, bottom_up=True, name="number the uops")
 
   # here we can break the tensor graph. this is the only place you need to maintain numbered tags
   big_sink = graph_rewrite(big_sink, pm_early_transform_tensor_graph, ctx={}, name="early transform tensor graph")
 
   # here we construct the final buffer_map. this is everything that will go into the tensor map
-  assigns: list[UOp] = []
-  graph_rewrite(big_sink, pm_finalize_call, ctx=(uop_list, buffer_map, assigns), name="finalize call")
-  ret = UOp.sink(*assigns)
-  if VIZ: graph_rewrite(ret, PatternMatcher([]), name="*** Call")
-  return ret, buffer_map
+  graph_rewrite(big_sink, pm_finalize_call, ctx=ctx, name="finalize call")
+  ret = graph_rewrite(UOp.sink(*ctx.assigns), pm_replace_buf, ctx=ctx, name="replace bufs").call(*ctx.replacements)
+  if VIZ: graph_rewrite(ret, PatternMatcher([]), name="View Call")
+  return ret, ctx.buffer_map

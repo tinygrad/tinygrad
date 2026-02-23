@@ -301,7 +301,7 @@ def unpack_pmc(e) -> dict:
 
 # ** on startup, list all the performance counter traces
 
-def load_amd_counters(profile:list[ProfileEvent]) -> None:
+def load_amd_counters(ctxs:list[dict], profile:list[ProfileEvent]) -> None:
   from tinygrad.runtime.ops_amd import ProfileSQTTEvent, ProfilePMCEvent
   counter_events:dict[tuple[int, int], dict] = {}
   durations:dict[str, list[float]] = {}
@@ -402,14 +402,14 @@ def device_sort_fn(k:str) -> tuple:
 
 def get_profile(profile:list[ProfileEvent], sort_fn:Callable[[str], Any]=device_sort_fn) -> bytes|None:
   # start by getting the time diffs
-  device_decoders:dict[str, Callable[[list[ProfileEvent]], None]] = {}
+  device_decoders:dict[str, Callable[[list[dict], list[ProfileEvent]], None]] = {}
   for ev in profile:
     if isinstance(ev, ProfileDeviceEvent):
       device_ts_diffs[ev.device] = ev.tdiff
       if (d:=ev.device.split(":")[0]) == "AMD": device_decoders[d] = load_amd_counters
       if d == "NV": device_decoders[d] = load_nv_counters
   # load device specific counters
-  for fxn in device_decoders.values(): fxn(profile)
+  for fxn in device_decoders.values(): fxn(ctxs, profile)
   # map events per device
   dev_events:dict[str, list[tuple[int, int, float, DevEvent]]] = {}
   markers:list[ProfilePointEvent] = []
@@ -437,7 +437,7 @@ def get_profile(profile:list[ProfileEvent], sort_fn:Callable[[str], Any]=device_
 
 # ** PMA counters
 
-def load_nv_counters(profile:list) -> None:
+def load_nv_counters(ctxs:list[dict], profile:list) -> None:
   steps:list[dict] = []
   sm_version = {e.device:e.props.get("sm_version", 0x800) for e in profile if isinstance(e, ProfileDeviceEvent) and e.props is not None}
   run_number:dict[str, int] = {}
@@ -533,6 +533,19 @@ def amdgpu_cfg(lib:bytes, target:str) -> dict:
       if isinstance(val:=getattr(inst, name), Reg): tokens.append({"st":val.fmt(), "keys":[f"r{val.offset+i}" for i in range(val.sz)], "kind":1})
       elif name in {"op","opx","opy"}: tokens.append({"st":(op_name:=val.name.lower()), "keys":[op_name], "kind":0})
       elif name != "encoding" and val != field.default: tokens.append({"st":(s:=repr(val)), "keys":[s], "kind":1})
+  # show a smaller view for repeated instructions in the graph
+  for pcs in blocks.values():
+    new_pcs:list[int] = []
+    i, n = 0, len(pcs)
+    while i < n:
+      j = i+1
+      while j<n and pc_table[pcs[j]] == pc_table[pcs[i]]: j += 1
+      new_pcs.append(pcs[i])
+      if j-i>1:
+        pc_tokens[pcs[i]].append({"st":f"({j-i}x)", "keys":[], "kind":0})
+        for k in range(i+1, j): del pc_tokens[pcs[k]]
+      i = j
+    pcs[:] = new_pcs
   from tinygrad.runtime.autogen import amdgpu_kd
   kd = amdgpu_kd.llvm_amdhsa_kernel_descriptor_t.from_buffer_copy(bytearray(get_elf_section(lib, ".rodata").content))
   vgpr_gran = kd.compute_pgm_rsrc1 & amdgpu_kd.COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT

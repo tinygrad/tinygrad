@@ -259,7 +259,7 @@ class Tensor(OpMixin):
 
     # this is where the schedule cache should go
     becomes_map, schedule, var_vals = complete_create_schedule_with_vars(big_sink)
-    _apply_map_to_tensors(becomes_map, name="Apply Schedule Map")
+    _apply_map_to_tensors(becomes_map, name="buffers")
     return schedule, var_vals
 
   def schedule(self, *lst:Tensor) -> list[ExecItem]:
