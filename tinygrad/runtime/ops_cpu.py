@@ -30,14 +30,13 @@ class CPUWorker(threading.Thread):
   def run(self):
     while True:
       cmd_iter = iter(self.tasks.get())
-      try:
-        for cmd in cmd_iter:
-          threads, args_cnt = next(cmd_iter), next(cmd_iter)
-          args = [next(cmd_iter) for _ in range(args_cnt)]
-          for th in range(threads - 1): self.push_task(th, cmd, args)
-          cmd(self.thread_id, *args)
-          for th in range(threads - 1): self.pool[th].join()
-      finally: self.tasks.task_done()
+      for cmd in cmd_iter:
+        threads, args_cnt = next(cmd_iter), next(cmd_iter)
+        args = [next(cmd_iter) for _ in range(args_cnt)]
+        for th in range(threads - 1): self.push_task(th, cmd, args)
+        cmd(self.thread_id, *args)
+        for th in range(threads - 1): self.pool[th].join()
+      self.tasks.task_done()
 
 class CPUComputeQueue(HWQueue):
   def _exec(self, tid, prg, bufs, *args):
@@ -135,15 +134,11 @@ class CPUAllocator(HCQAllocator):
 class CPUDevice(HCQCompiled):
   def __init__(self, device:str=""):
     self.tasks:queue.Queue = queue.Queue()
-    self.worker = CPUWorker(self, self.tasks, thread_id=0)
-    self.worker.start()
+    CPUWorker(self, self.tasks, thread_id=0).start()
     compilers = CompilerSet([(ClangJITRenderer, None), (CPULLVMRenderer, CPU_LLVM), (LVPRenderer, CPU_LVP)], ctrl_var=CPU_CC)
     super().__init__(device, CPUAllocator(self), compilers, functools.partial(CPUProgram, self), CPUSignal, CPUComputeQueue)
 
   def on_device_hang(self):
     self.tasks = queue.Queue()
-    self.worker = CPUWorker(self, self.tasks, thread_id=0)
-    self.worker.start()
     self.timeline_signal.value = self.timeline_value - 1
-    self.error_state = None
     raise RuntimeError("CPU device hang detected")
