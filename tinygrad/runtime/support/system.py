@@ -346,6 +346,7 @@ class APLRemoteIfaceBase(LNXPCIIfaceBase):
       cls.gpus = System.pci_scan_bus(vendor, devices, base_class)
       if not cls.gpus: raise RuntimeError("No supported GPUs found")
       if not os.path.exists(APLRemotePCIDevice.APP_PATH): APLRemotePCIDevice.install_tinygpu()
+    if dev_id >= len(cls.gpus): raise RuntimeError(f"No device found for {dev_id}. Requesting more devices than the system has ({cls.gpus})?")
     self.pci_dev = APLRemotePCIDevice(dev.__class__.__name__[:2], f'remote:{dev_id}', bars)
     self.dev, self.vram_bar = dev, vram_bar
 
