@@ -675,10 +675,9 @@ class _Ctx:
     vcc_reg = sdst_reg if sdst_reg is not None else VCC_LO.offset
     if 'VCC' not in srcs: srcs['VCC'] = self.rmask(_c(vcc_reg))
     srcs.update({'EXEC': exec_mask, 'SCC': self.rsgpr_dyn(_c(SCC.offset)), 'laneId': lane, 'VDST': vdst_reg,
-                 'ROUND_MODE': _c(0), 'ROUND_TOWARD_ZERO': _c(0), 'ROUND_NEAREST_EVEN': _c(0), '_vgpr': self.vgpr, '_wave_size': self.wave_size,
-                 # CDNA SDWA byte/word select constants (E32 always uses BYTE0/WORD0 defaults)
-                 'SDWA_SRC0_SEL': _c(0), 'BYTE0': _c(0), 'BYTE1': _c(1), 'BYTE2': _c(2), 'BYTE3': _c(3),
-                 'WORD0': _c(0), 'WORD1': _c(1)})  # rounding mode and SDWA constants
+                 'ROUND_MODE': _c(0), 'ROUND_TOWARD_ZERO': _c(0), 'ROUND_NEAREST_EVEN': _c(0), '_vgpr': self.vgpr,
+                 '_wave_size': self.wave_size, 'SDWA_SRC0_SEL': _c(0),
+                 'BYTE0': _c(0), 'BYTE1': _c(1), 'BYTE2': _c(2), 'BYTE3': _c(3), 'WORD0': _c(4), 'WORD1': _c(5)})
     _, assigns = parse_pcode(pcode, srcs)
 
     # For integer ops with clamp, compute overflow using wide arithmetic
@@ -905,43 +904,34 @@ def _compile_sop(inst: ir3.SOP1|ir3.SOP2|ir3.SOPC|ir3.SOPK|ir4.SOP1|ir4.SOP2|ir4
 
 def _sdwa_select(val: UOp, sel: UOp, sext: UOp) -> UOp:
   """Apply SDWA byte/word selection and optional sign extension to a 32-bit value."""
-  # sel: 0-3=BYTE_0..3, 4=WORD_0, 5=WORD_1, 6=DWORD
-  b0 = val & _c(0xFF)
-  b1 = (val >> _c(8)) & _c(0xFF)
-  b2 = (val >> _c(16)) & _c(0xFF)
-  b3 = (val >> _c(24)) & _c(0xFF)
-  w0 = val & _c(0xFFFF)
-  w1 = (val >> _c(16)) & _c(0xFFFF)
-  selected = sel.eq(_c(1)).where(b1, sel.eq(_c(2)).where(b2, sel.eq(_c(3)).where(b3,
-    sel.eq(_c(4)).where(w0, sel.eq(_c(5)).where(w1, sel.eq(_c(6)).where(val, b0))))))
-  # Sign extend when sext=1
-  is_byte = sel < _c(4)
-  byte_sext = (selected & _c(0x80)).ne(_c(0)).where(selected | _c(0xFFFFFF00), selected)
-  word_sext = (selected & _c(0x8000)).ne(_c(0)).where(selected | _c(0xFFFF0000), selected)
-  return sext.ne(_c(0)).where(is_byte.where(byte_sext, word_sext), selected)
+  parts = [val & _c(0xFF), (val>>_c(8))&_c(0xFF), (val>>_c(16))&_c(0xFF), (val>>_c(24))&_c(0xFF),
+           val & _c(0xFFFF), (val>>_c(16))&_c(0xFFFF), val]
+  selected = parts[0]
+  for i in (6,5,4,3,2,1): selected = sel.eq(_c(i)).where(parts[i], selected)
+  bsext = (selected & _c(0x80)).ne(_c(0)).where(selected | _c(0xFFFFFF00), selected)
+  wsext = (selected & _c(0x8000)).ne(_c(0)).where(selected | _c(0xFFFF0000), selected)
+  return sext.ne(_c(0)).where((sel < _c(4)).where(bsext, wsext), selected)
 
 def _sdwa_write(old: UOp, val: UOp, dst_sel: UOp, dst_unused: UOp) -> UOp:
   """Apply SDWA destination selection: write selected byte/word, handle unused bits."""
-  # dst_unused: 0=PAD(zero), 1=SEXT, 2=PRESERVE
-  # dst_sel: 0-3=BYTE, 4=WORD_0, 5=WORD_1, 6=DWORD
-  is_byte = dst_sel < _c(4)
-  is_word = (dst_sel >= _c(4)) & (dst_sel < _c(6))
+  is_byte, is_word = dst_sel < _c(4), (dst_sel >= _c(4)) & (dst_sel < _c(6))
   shift = is_byte.where(dst_sel * _c(8), (dst_sel - _c(4)) * _c(16))
   mask = is_byte.where(_c(0xFF), is_word.where(_c(0xFFFF), _c(0xFFFFFFFF)))
   placed = (val & mask) << shift
-  preserve_mask = (mask << shift) ^ _c(0xFFFFFFFF)
-  preserved = (old & preserve_mask) | placed
-  # For PAD and SEXT, unused bits are zero (PAD) or sign-extended (SEXT). For DWORD, just return val.
-  return dst_sel.eq(_c(6)).where(val, dst_unused.eq(_c(2)).where(preserved, placed))
+  # UNUSED_SEXT(1): sign-extend sub-dword result to 32 bits; compute fill mask as complement of written region masked to upper bits
+  fill_mask = ((mask << shift) ^ _c(0xFFFFFFFF)) & (_c(0xFFFFFFFF) << shift)
+  bsext = (val & _c(0x80)).ne(_c(0)).where(placed | fill_mask, placed)
+  wsext = (val & _c(0x8000)).ne(_c(0)).where(placed | fill_mask, placed)
+  sext_result = is_byte.where(bsext, wsext)
+  preserve = (old & ((mask << shift) ^ _c(0xFFFFFFFF))) | placed
+  return dst_sel.eq(_c(6)).where(val, dst_unused.eq(_c(2)).where(preserve, dst_unused.eq(_c(1)).where(sext_result, placed)))
 
 def _compile_sdwa(inst: irc.VOP1_SDWA | irc.VOP2_SDWA | irc.VOP2_SDWA_SDST | irc.VOPC_SDWA_SDST, ctx: _Ctx) -> UOp:
   """Compile CDNA SDWA (Sub-Dword Access) VOP1/VOP2/VOPC instructions."""
   is_vopc = isinstance(inst, irc.VOPC_SDWA_SDST)
   exec_mask = ctx.rexec()
-  # sd=1 means use sdst register, sd=0 means use VCC (for VOPC_SDWA_SDST and VOP2_SDWA_SDST)
   has_sdst = isinstance(inst, (irc.VOP2_SDWA_SDST, irc.VOPC_SDWA_SDST))
   sdst_off = _c(inst.sdst.offset) if has_sdst and getattr(inst, 'sd', 0) else _c(VCC_LO.offset)
-  # Read SDWA fields (these are dynamic but shared across lanes)
   src0_sel = ctx.inst_field(type(inst).src0_sel)
   src0_sext = ctx.inst_field(type(inst).src0_sext)
   vsrc0_reg = ctx.inst_field(type(inst).vsrc0)
@@ -951,14 +941,23 @@ def _compile_sdwa(inst: irc.VOP1_SDWA | irc.VOP2_SDWA | irc.VOP2_SDWA_SDST | irc
     src1_sext = ctx.inst_field(type(inst).src1_sext)
     vsrc1_reg = ctx.inst_field(type(inst).vsrc1)
 
-  # For VOPC: use unroll_lanes to build the bitmask from scratch (no read-modify-write on stale data)
+  # Source modifiers: neg/abs applied after SDWA selection
+  s0_neg, s0_abs = getattr(inst, 'src0_neg', 0), getattr(inst, 'src0_abs', 0)
+  s1_neg, s1_abs = getattr(inst, 'src1_neg', 0), getattr(inst, 'src1_abs', 0)
+  def _sdwa_mod(v: UOp, neg: int, abs_: int) -> UOp:
+    if not neg and not abs_: return v
+    fv = v.bitcast(dtypes.float32)
+    if abs_: fv = (fv.bitcast(dtypes.uint32) & UOp.const(dtypes.uint32, 0x7FFFFFFF)).bitcast(dtypes.float32)
+    if neg: fv = fv.neg()
+    return fv.bitcast(dtypes.uint32)
+
   if is_vopc:
     def get_cmp_bit(lane) -> UOp:
       lc = lane.cast(dtypes.int) if isinstance(lane, UOp) else _c(lane, dtypes.int)
       s0_raw = ctx.rsgpr_dyn(vsrc0_reg) if inst.s0 else ctx.rvgpr_dyn(vsrc0_reg, lc)
-      s0 = _sdwa_select(s0_raw, src0_sel, src0_sext)
+      s0 = _sdwa_mod(_sdwa_select(s0_raw, src0_sel, src0_sext), s0_neg, s0_abs)
       s1_raw = ctx.rsgpr_dyn(vsrc1_reg) if inst.s1 else ctx.rvgpr_dyn(vsrc1_reg, lc)
-      s1 = _sdwa_select(s1_raw, src1_sel, src1_sext)
+      s1 = _sdwa_mod(_sdwa_select(s1_raw, src1_sel, src1_sext), s1_neg, s1_abs)
       srcs: dict[str, UOp] = {'S0': s0, 'S1': s1, 'laneId': lc}
       for dest, val in parse_pcode(pcode, srcs)[1]:
         if '[laneId]' in dest and ('D0' in dest or 'EXEC' in dest): return val.cast(dtypes.uint32)
@@ -967,53 +966,46 @@ def _compile_sdwa(inst: irc.VOP1_SDWA | irc.VOP2_SDWA | irc.VOP2_SDWA_SDST | irc
     stores = ctx.wmask(sdst_off, new_result)
     return UOp.sink(*stores, *ctx.inc_pc())
 
-  # Non-VOPC path: VOP1_SDWA, VOP2_SDWA, VOP2_SDWA_SDST — uses lane loop
   lane = ctx.range()
   vdst_reg = ctx.inst_field(type(inst).vdst)
   s0_raw = ctx.rsgpr_dyn(vsrc0_reg) if inst.s0 else ctx.rvgpr_dyn(vsrc0_reg, lane)
-  s0 = _sdwa_select(s0_raw, src0_sel, src0_sext)
+  s0 = _sdwa_mod(_sdwa_select(s0_raw, src0_sel, src0_sext), s0_neg, s0_abs)
   if isinstance(inst, (irc.VOP2_SDWA, irc.VOP2_SDWA_SDST)):
     s1_raw = ctx.rsgpr_dyn(vsrc1_reg) if inst.s1 else ctx.rvgpr_dyn(vsrc1_reg, lane)
-    s1 = _sdwa_select(s1_raw, src1_sel, src1_sext)
+    s1 = _sdwa_mod(_sdwa_select(s1_raw, src1_sel, src1_sext), s1_neg, s1_abs)
     srcs: dict[str, UOp] = {'S0': s0, 'S1': s1, 'D0': ctx.rvgpr_dyn(vdst_reg, lane)}
   else:
     srcs = {'S0': s0}
-  # dst_sel and dst_unused
   has_dst_sel = hasattr(type(inst), 'dst_sel')
   if has_dst_sel:
     dst_sel = ctx.inst_field(type(inst).dst_sel)
     dst_unused = ctx.inst_field(type(inst).dst_unused)
   srcs.update({'VCC': ctx.rmask(_c(VCC_LO.offset)), 'EXEC': exec_mask, 'SCC': ctx.rsgpr_dyn(_c(SCC.offset)),
                'laneId': lane, 'VDST': vdst_reg, 'ROUND_MODE': _c(0), 'ROUND_TOWARD_ZERO': _c(0),
-               'ROUND_NEAREST_EVEN': _c(0), '_vgpr': ctx.vgpr, '_wave_size': ctx.wave_size,
-               'SDWA_SRC0_SEL': _c(0), 'BYTE0': _c(0), 'BYTE1': _c(1), 'BYTE2': _c(2), 'BYTE3': _c(3),
-               'WORD0': _c(0), 'WORD1': _c(1)})
+               'ROUND_NEAREST_EVEN': _c(0), '_vgpr': ctx.vgpr, '_wave_size': ctx.wave_size, 'SDWA_SRC0_SEL': _c(0),
+               'BYTE0': _c(0), 'BYTE1': _c(1), 'BYTE2': _c(2), 'BYTE3': _c(3), 'WORD0': _c(4), 'WORD1': _c(5)})
+  omod, clmp = getattr(inst, 'omod', 0) or 0, getattr(inst, 'clmp', 0) or 0
   _, assigns = parse_pcode(pcode, srcs)
-  stores: list[UOp] = []
-  vcc_val = None
+  vgpr_stores, vcc_val = [], None
   for dest, val in assigns:
-    if 'D0' in dest and '[laneId]' in dest:
-      vcc_val = val
+    if 'D0' in dest and '[laneId]' in dest: vcc_val = val
     elif dest.startswith('D0'):
+      if omod and val.dtype == dtypes.float32:
+        val = val * UOp.const(dtypes.float32, [1.0, 2.0, 0.5, 1.0][omod])
+      if clmp and val.dtype in (dtypes.float32, dtypes.half):
+        val = val.maximum(UOp.const(val.dtype, 0.0)).minimum(UOp.const(val.dtype, 1.0))
       result = _val_to_u32(val)
       if has_dst_sel:
         old = ctx.rvgpr_dyn(vdst_reg, lane)
         result = _sdwa_write(old, result, dst_sel, dst_unused)
-      stores.append(ctx.wvgpr_dyn(vdst_reg, lane, result, exec_mask))
-    elif dest.startswith('VCC'):
-      old_vcc = ctx.rmask(_c(VCC_LO.offset))
-      stores.extend(ctx.wmask(_c(VCC_LO.offset), _set_lane_bit(old_vcc, lane, val, exec_mask)))
+      vgpr_stores.append(ctx.wvgpr_dyn(vdst_reg, lane, result, exec_mask))
+    elif dest.startswith('VCC'): vcc_val = val
+  stores: list[UOp] = []
+  if vgpr_stores: stores.append(UOp.group(*vgpr_stores).end(lane))
   if vcc_val is not None:
-    # Initialize sdst to 0 before lane loop (old value may be unrelated data), then set lane bits in loop
-    init_stores = [ctx.wsgpr_dyn(sdst_off, _c(0)), ctx.wsgpr_dyn(sdst_off + _c(1), _c(0))]
-    old_sdst = ctx.rmask(sdst_off)
-    stores.extend(ctx.wmask(sdst_off, _set_lane_bit(old_sdst, lane, vcc_val, exec_mask)))
-    if stores:
-      return UOp.sink(*init_stores, UOp.sink(*stores).end(lane), *ctx.inc_pc())
-    return UOp.sink(*init_stores, *ctx.inc_pc())
-  if stores:
-    return UOp.sink(UOp.sink(*stores).end(lane), *ctx.inc_pc())
-  return UOp.sink(*ctx.inc_pc())
+    def get_bit(l, v=vcc_val): return (_to_u32(v.substitute({lane: l})) & _c(1)).cast(dtypes.uint32)
+    stores.extend(ctx.wmask(sdst_off, ctx.unroll_lanes(get_bit, exec_mask, apply_exec=False)))
+  return UOp.sink(*stores, *ctx.inc_pc()) if stores else UOp.sink(*ctx.inc_pc())
 
 def _compile_vop12(inst: ir3.VOP1 | ir3.VOP1_SDST | ir3.VOP2 | ir4.VOP1 | ir4.VOP1_SDST | ir4.VOP2 | irc.VOP1 | irc.VOP2, ctx: _Ctx) -> UOp:
   op_name = _op_name(inst)
@@ -1092,6 +1084,8 @@ def _compile_vopc(inst: ir3.VOPC|ir3.VOP3|ir4.VOPC|ir4.VOP3|irc.VOPC|irc.VOP3, c
   literal = ctx.inst_field(type(inst).literal) if hasattr(type(inst), 'literal') else None  # type: ignore[union-attr]
 
   is_float, is_f64, pcode = any(x in op_name for x in ('_F32', '_F64', '_F16')), '_F64' in op_name, get_pcode(inst.op)
+  if isinstance(inst, (irc.VOPC, irc.VOP3, irc.VOP3_SDST)) and re.search(r'EXEC\.\w+\[laneId\]\s*=\s*D0\.\w+\[laneId\]\s*=', pcode):
+    pcode = re.sub(r'D0\.\w+\[laneId\]\s*=\s*', '', pcode)
   def get_cmp_bit(lane) -> UOp:
     lc = lane.cast(dtypes.int) if isinstance(lane, UOp) else _c(lane, dtypes.int)
     s0 = ctx.rsrc_dyn(src0_off, lc, bits['s0'], literal, is_f64)
@@ -1120,16 +1114,12 @@ def _compile_vopc(inst: ir3.VOPC|ir3.VOP3|ir4.VOPC|ir4.VOP3|irc.VOPC|irc.VOP3, c
 
 def _compile_bitop3(inst, ctx: _Ctx, exec_mask: UOp, bits: dict, op_name: str) -> UOp:
   """BITOP3: 3-input truth table. abs/neg/omod encode the truth table, not source modifiers."""
-  lane = ctx.range()
-  vdst_reg = ctx.inst_field(type(inst).vdst)
-  ops = inst.canonical_operands
+  lane, vdst_reg, ops = ctx.range(), ctx.inst_field(type(inst).vdst), inst.canonical_operands
   src0 = ctx.rsrc_dyn(ctx.inst_field(type(inst).src0), lane, bits['s0'], None, 's0' in ops and ops['s0'][0] == Fmt.FMT_NUM_F64)
   src1 = ctx.rsrc_dyn(ctx.inst_field(type(inst).src1), lane, bits['s1'], None, 's1' in ops and ops['s1'][0] == Fmt.FMT_NUM_F64)
   src2 = ctx.rsrc_dyn(ctx.inst_field(type(inst).src2), lane, bits['s2'], None, 's2' in ops and ops['s2'][0] == Fmt.FMT_NUM_F64)
-  # Truth table: TTBL = { omod[1:0], abs[2:0], neg[2:0] } = 8-bit LUT
   ttbl = ((getattr(inst, 'omod', 0) or 0) << 6) | ((getattr(inst, 'abs', 0) or 0) << 3) | (getattr(inst, 'neg', 0) or 0)
-  is_16 = 'B16' in op_name
-  dt, mask = (dtypes.uint16, 0xFFFF) if is_16 else (dtypes.uint32, 0xFFFFFFFF)
+  dt, mask = (dtypes.uint16, 0xFFFF) if 'B16' in op_name else (dtypes.uint32, 0xFFFFFFFF)
   s0, s1, s2 = src0.cast(dt), src1.cast(dt), src2.cast(dt)
   def bnot(v): return v ^ UOp.const(dt, mask)
   result = UOp.const(dt, 0)
