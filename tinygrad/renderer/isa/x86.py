@@ -384,8 +384,8 @@ isel_matcher = PatternMatcher([
    x.ins(X86Ops.MOVm, src=fuse_address(x.src[0]) + (x.src[1],)) if (i:=to_imm(x.src[1])) is None else x.ins(X86Ops.MOVi, src=fuse_address(x.src[0]) + (i,))), # noqa: E501
   # **** X86Op -> X86Op ****
   # fuse loads into X86Ops that allow it, if beneficial
-  (UPat(Ops.INS, src=(UPat(Ops.LOAD),), allow_any_len=True, name="x"), lambda ctx,x: fuse_load(ctx, x, 0) if x.arg in X86GroupOp.ReadMem1st else None),
-  (UPat(Ops.INS, src=(UPat(), UPat(Ops.LOAD)), allow_any_len=True, name="x"), lambda ctx,x: fuse_load(ctx, x, 1) if x.arg in X86GroupOp.ReadMem2nd else None),
+  (UPat(Ops.INS, src=(UPat(Ops.LOAD),), allow_any_len=True, name="x"), lambda ctx,x: fuse_load(ctx, x, 0) if x.arg in X86GroupOp.ReadMem1st else None), # noqa: E501
+  (UPat(Ops.INS, src=(UPat(), UPat(Ops.LOAD)), allow_any_len=True, name="x"), lambda ctx,x: fuse_load(ctx, x, 1) if x.arg in X86GroupOp.ReadMem2nd else None), # noqa: E501
   (UPat(Ops.INS, src=(UPat(), UPat(), UPat(Ops.LOAD)), allow_any_len=True, name="x"), lambda ctx,x: fuse_load(ctx, x, 2) if x.arg in X86GroupOp.ReadMem3rd else None), # noqa: E501
   # allocate virtual register to X86Op with special constaints
   (UPat(Ops.INS, dtypes.ints+dtypes.floats+(dtypes.bool,), name="x"), lambda ctx,x:
@@ -426,8 +426,8 @@ post_regalloc_matcher = PatternMatcher([
   (UPat(Ops.INS, arg=X86Ops.DIV, name="x"), lambda x:
    (nx:=x.replace(src=x.src[:1]), [x.ins(X86Ops.MOVi, src=(imm(min(dtypes.uint32, x.dtype), 0),), tag=RDX), nx])),
   # rewrite two address instructions to two address form, if reused src wasn't coalesced insert a move
-  (UPat(Ops.INS, name="x"), lambda ctx,x:
-   (nx:=x.replace(src=x.src[1:]), [assign(ctx, x.src[0], x.tag), nx] if x.tag != x.src[0].tag else [nx]) if x.arg in X86GroupOp.TwoAddress1st else None),
+  (UPat(Ops.INS, name="x"), lambda ctx,x: (nx:=x.replace(src=x.src[1:]),
+   [assign(ctx, x.src[0], x.tag), nx] if x.tag != x.src[0].tag else [nx]) if x.arg in X86GroupOp.TwoAddress1st else None),
 ])
 
 # ***** X86 spec *****
