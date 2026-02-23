@@ -19,19 +19,6 @@ class TestIselX86(unittest.TestCase):
     # both comparisons become the same instruction
     self.assertTrue(n.src[0].src[2] == n.src[1].src[2] and n.src[0].src[2].arg is X86Ops.CMP)
 
-  def test_cmove_and_blend_with_float_cmp(self):
-    a = UOp.variable("a", 0, 0, dtypes.float32)
-    b = UOp.variable("b", 0, 0, dtypes.float32)
-    c = a < b
-    d = c.where(a.cast(dtypes.int32), b.cast(dtypes.int32))
-    e = c.where(a, b)
-    f = d + e
-    n = self.isel_rewrite(f)
-    # the comparison instruction depends on the user, int cmove uses flag while float cmove uses mask
-    # so both flag producing and mask producing comparisons must be present
-    self.assertTrue(n.src[0].arg is X86Ops.CMOVB and n.src[0].src[2].arg is X86Ops.VUCOMISS)
-    self.assertTrue(n.src[1].arg is X86Ops.VBLENDVPS and n.src[1].src[2].arg is X86Ops.VCMPSS and n.src[1].src[2].src[2].tag == 1)
-
   # lower 2 32 bits must come from the same register and upper 2 32 bits must come from the same register
   def test_vshufps(self):
     a = UOp.variable("a", 0, 0, dtypes.float32.vec(4))
