@@ -63,8 +63,19 @@ def create_schedule(sched_sink:UOp) -> tuple[list[ExecItem], UOp]:
   return pre_schedule, UOp.sink(*buf_uops_list)
 
 from tinygrad.engine.memory import memory_planner
-from tinygrad.schedule.rangeify import get_rangeify, resolve_call
+from tinygrad.schedule.rangeify import get_rangeify
 from tinygrad.schedule.multi import multi_pm
+from tinygrad.uop.ops import PatternMatcher, UPat
+
+def create_new_buffer(ctx:tuple[dict[UOp, UOp], list[UOp]], b:UOp):
+  if (ret:=ctx[0].get(b, None)) is None: ctx[0][b] = ret = UOp.new_buffer(b.device, b.arg, b.dtype)
+  return ret
+
+pm_post_sched_cache = PatternMatcher([
+  (UPat(Ops.PARAM, name="x"), lambda ctx,x: ctx[1][x.arg]),
+  # create new BUFFERs for LUNIQUE BUFFERs from rangeify
+  (UPat(Ops.BUFFER, src=(UPat(Ops.LUNIQUE), UPat(Ops.DEVICE)), name="b"), create_new_buffer),
+])
 
 schedule_cache: dict[bytes, tuple[list[ExecItem], UOp]] = {}
 @track_rewrites(lambda _,ret: f"Schedule {pluralize('Kernel', len(ret[1]))}")
@@ -93,8 +104,7 @@ def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[dict[UOp, UOp], li
     # schedule cache hit
     pre_schedule, buf_uops_sink = sc_ret
   # it's a call that we late apply
-  big_sink = big_sink.replace(src=(buf_uops_sink,)+big_sink.src[1:])
-  buf_uops_sink = unwrap(resolve_call(big_sink, allow_param_mismatch=True))
+  buf_uops_sink = graph_rewrite(buf_uops_sink, pm_post_sched_cache, ctx=({}, big_sink.src[1:]), name="apply buffers")
 
   # add bufs to pre_schedule
   schedule: list[ExecItem] = []
