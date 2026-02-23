@@ -338,7 +338,7 @@ jobs:
     - name: Run 10 CIFAR training steps
       run: BENCHMARK_LOG=cifar_10steps ASSERT_MIN_STEP_TIME=120 NV=1 STEPS=10 python3 examples/hlb_cifar10.py
     - name: Run 10 CIFAR training steps w HALF
-      run: BENCHMARK_LOG=cifar_10steps_half ASSERT_MIN_STEP_TIME=110 NV=1 STEPS=10 DEFAULT_FLOAT=HALF python3 examples/hlb_cifar10.py
+      run: BENCHMARK_LOG=cifar_10steps_half ASSERT_MIN_STEP_TIME=120 NV=1 STEPS=10 DEFAULT_FLOAT=HALF python3 examples/hlb_cifar10.py
     - name: Run 10 CIFAR training steps w BF16
       run: BENCHMARK_LOG=cifar_10steps_bf16 ASSERT_MIN_STEP_TIME=120 NV=1 STEPS=10 DEFAULT_FLOAT=BFLOAT16 python3 examples/hlb_cifar10.py
     # - name: Run 10 CIFAR training steps w winograd

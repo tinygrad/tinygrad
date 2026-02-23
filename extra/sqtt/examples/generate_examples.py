@@ -18,7 +18,8 @@ if __name__ == "__main__":
   (EXAMPLES_DIR/arch).mkdir(exist_ok=True)
   for test in EXAMPLES:
     for i in range(2):
+      # AM_RESET=1 gets a clear trace, does not work on mi300 machines
       subprocess.run([sys.executable, *test.split()], cwd=EXAMPLES_DIR.parent.parent.parent,
-                     env={**os.environ, "AMD":"1", "AM_RESET":"1", "VIZ":"-2", "PYTHONPATH":"."})
+                     env={**os.environ, "AMD":"1", "AM_RESET":"1" if not arch.startswith("gfx9") else "0", "VIZ":"-2", "PYTHONPATH":"."})
       PROFILE_PATH.rename(dest:=EXAMPLES_DIR/arch/f"profile_{test.split('.')[-1].replace('test_', '')}_run_{i}.pkl")
       print(f"saved SQTT trace to {dest}")
