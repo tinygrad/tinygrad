@@ -159,10 +159,10 @@ def idiv(ctx:IselContext, x:UOp):
   # need to sign extend al to ah for 8bit idiv
   divisor = UOp(Ops.INS, arg=X86Ops.MOVSX, dtype=dtypes.int16, src=(x.src[0],), tag=ctx.vreg(RAX)) if x.dtype is dtypes.int8 else x.src[0]
   # need to sign extend rax to rdx for > 8bit idiv
-  extend_rdx = () if x.dtype is dtypes.int8 else (x.ins(X86Ops.SARi, src=(x.src[0], imm(dtypes.uint8, x.dtype.itemsize * 8 - 1)), tag=ctx.vreg(RDX)),)
+  ext_rdx = () if x.dtype is dtypes.int8 else (x.ins(X86Ops.SARi, src=(x.src[0], imm(dtypes.uint8, x.dtype.itemsize * 8 - 1)), tag=ctx.vreg(RDX)),)
   # dividend can't be in rax or rdx
   dividend = x.ins(X86Ops.MOV, src=(x.src[1],), tag=tuple(r for r in WGPR if r not in (RAX, RDX)))
-  idiv = x.ins(X86Ops.IDIV, src=(divisor, dividend) + extend_rdx, tag=(RAX,))
+  idiv = x.ins(X86Ops.IDIV, src=(divisor, dividend) + ext_rdx, tag=(RAX,))
   # this move "cleanses" the register constraint (rax) of idiv, this is because the constraint only applies on definition and not on the uses of idiv
   return x.ins(X86Ops.MOV, src=(idiv,))
 
@@ -441,12 +441,13 @@ isa_spec = PatternMatcher([
 # ***** X86 instruction encoding *****
 
 def to_bytes(dt:DType, v:int|float):
-  v = truncate[dt](v)
-  if dt in dtypes.floats: return struct.pack({dtypes.float16: "<e", dtypes.float32: "<f", dtypes.float64: "<d"}[dt], v)
-  return v.to_bytes(dt.itemsize, 'little', signed=dt in dtypes.sints)
+  n = truncate[dt](v)
+  if dt in dtypes.floats: return struct.pack({dtypes.float16: "<e", dtypes.float32: "<f", dtypes.float64: "<d"}[dt], n)
+  return n.to_bytes(dt.itemsize, 'little', signed=dt in dtypes.sints)
 
 def encode(x:UOp, opc:int, reg:int|None=None, pp:int=0, sel:int=0, we:int=0):
   # when a uop writes to memory it takes the form of a store, dtype is void, no definition
+  address:tuple[UOp|None, ...]
   if x.arg in X86GroupOp.WriteMem:
     if len(x.src) > 3: address, rest = x.src[:3], x.src[3:]
     else: address, rest = (x, None, None), x.src
@@ -658,7 +659,7 @@ class X86Renderer(ISARenderer):
     self.compiler = X86Compiler()
   def stack_pointer(self) -> UOp: return UOp(Ops.INS, arg=X86Ops.DEFINE_REG, dtype=dtypes.uint64, tag=RSP)
   def asm(self, uops:list[UOp]) -> str:
-    def _format_op(x:UOp) -> str: return f"    {(str(x.arg)[7:-1] if str(x.arg)[-1] in ("i", "m") else str(x.arg)[7:]).lower():7s}"
+    def _format_op(x:UOp) -> str: return f"    {(str(x.arg)[7:-1] if str(x.arg)[-1] in ('i', 'm') else str(x.arg)[7:]).lower():7s}"
     def _format_operands(x:UOp) -> str:
       def _format(src:tuple[UOp, ...]) -> list[str]: return [str(s.tag) for s in src if s.tag is not None]
       def _mem_adress(base:UOp, idx:UOp, disp:UOp) -> str:

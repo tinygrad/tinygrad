@@ -29,7 +29,8 @@ class RegallocContext:
     # the label associated with each loop NOTE: this is only used post regalloc and should be removed
     self.loop_label: dict[UOp, str] = {}
     # compute live ranges
-    lr, ranges = self.live_range, []
+    lr = self.live_range
+    ranges: list[Register] = []
     for i,u in enumerate(reversed(uops)):
       if u.op in (Ops.NOOP, Ops.AFTER): continue
       for v in {s.tag for s in (u,) + u.src if isinstance(s.tag, Register)}: lr.setdefault(v, []).insert(0, len(uops) - 1 - i)
