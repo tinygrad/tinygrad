@@ -757,6 +757,7 @@ const createToggle = (id, text) => {
 const showIndexing = createToggle("show-indexing", "Show indexing (r)");
 const showCallSrc = createToggle("show-call-src", "Show CALL src (c)");
 const showSink = createToggle("show-sink", "Show SINK (s)");
+showSink.toggle.checked = false;
 const showGraph = createToggle("show-graph", "Show graph (g)");
 showGraph.toggle.onchange = () => displaySelection(rect("#graph").width > 0 ? "#custom" : "#graph");
 
