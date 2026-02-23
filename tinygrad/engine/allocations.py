@@ -107,7 +107,7 @@ def append_after(ctx:AllocCtx, x:UOp):
 
 def replace_input_buffer(ctx:AllocCtx, b:UOp):
   ctx.replacements.append(b)
-  return UOp.param(len(ctx.replacements)-1, b.dtype, b.shape, b.device)
+  return UOp.param(len(ctx.replacements)-1, b.dtype, b.shape, b._device)
 
 pm_finalize_call = PatternMatcher([
   (UPat(Ops.ASSIGN, name="x"), untag_and_append),
@@ -120,6 +120,8 @@ pm_finalize_call = PatternMatcher([
 pm_replace_buf = PatternMatcher([
   # replace BUFFER with PARAM for cache key normalization
   (UPat(Ops.BUFFER, src=(UPat(Ops.UNIQUE), UPat(Ops.DEVICE)), name="b"), replace_input_buffer),
+  # strip value from BIND for cache key normalization, so different values hit same cache
+  (UPat(Ops.BIND, src=(UPat(Ops.DEFINE_VAR), UPat(Ops.CONST)), name="b"), replace_input_buffer),
 ])
 
 def allocate_global_buffers(big_sink:UOp) -> tuple[UOp, dict[UOp, UOp]]:
