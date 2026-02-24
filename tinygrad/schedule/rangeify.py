@@ -75,7 +75,6 @@ mop_cleanup = PatternMatcher([
   (UPat(Ops.RESHAPE, src=(UPat(Ops.RESHAPE, name="x2"), UPat()), name="x"), lambda x,x2: x.replace(src=(x2.src[0], x.src[1]))),
 ])
 
-
 pm_gather_params = PatternMatcher([ (UPat(Ops.PARAM, name="p"), lambda ctx, p: ctx.append(p)), ])
 def resolve_call(c:UOp, allow_param_mismatch=False) -> UOp|None:
   if not should_resolve_call(c): return None
