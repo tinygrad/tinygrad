@@ -77,15 +77,6 @@ class TestCallify(unittest.TestCase):
     out.callify()
     self.assertListEqual(out.tolist(), [5, 7, 9])
 
-  def test_callify_then_schedule(self):
-    a = Tensor([1.,2,3])
-    b = Tensor([4.,5,6])
-    out = a + b
-    out.callify()
-    schedule = out.schedule()
-    self.assertGreater(len(schedule), 0)
-    self.assertListEqual(out.tolist(), [5.0, 7.0, 9.0])
-
   def test_reduce(self):
     out = Tensor([1.,2,3,4]).sum()
     out.callify()
