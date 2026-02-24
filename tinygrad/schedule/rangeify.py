@@ -80,6 +80,7 @@ def resolve_call(c:UOp, allow_param_mismatch=False) -> UOp|None:
   # don't resolve real kernel calls, sink or program
   if c.src[0].op is Ops.SINK and isinstance(c.src[0].arg, KernelInfo): return None
   if c.src[0].op is Ops.PROGRAM: return None
+  if c.src[0].op is Ops.COPY: return None
   params: list[UOp] = []
   graph_rewrite(c.src[0], pm_gather_params, bottom_up=True, ctx=params)
   params = sorted(params, key=lambda x: x.arg)
@@ -481,7 +482,7 @@ split_kernels = PatternMatcher([
 
 @profile_matches
 def get_kernel_graph(sink:UOp) -> UOp:
-  tsink = graph_rewrite(sink, multi_pm, name="multi_pm", rewrite_into_calls=True)
+  tsink = graph_rewrite(sink, multi_pm, name="multi_pm")
   tsink = graph_rewrite(tsink, pm_syntactic_sugar+pm_mops+earliest_rewrites, bottom_up=True, name="earliest rewrites")
 
   # convert movement ops to ranges
