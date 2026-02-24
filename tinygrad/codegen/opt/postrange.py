@@ -370,7 +370,4 @@ pm_make_images = PatternMatcher([
    idx if isinstance(pa.dtype, ImageDType) else None),
   (UPat(Ops.STORE, src=(UPat(Ops.PARAM, name="pa").index(UPat()), UPat.var("val").cast(dtypes.half).cast(dtypes.float)), name="st"), lambda st,pa,val:
    st.replace(src=(st.src[0], val)) if isinstance(pa.dtype, ImageDType) else None),
-  (UPat(Ops.STORE, src=(UPat(Ops.PARAM, name="pa").index(UPat()),
-                        UPat(Ops.WHERE, src=(UPat.var('p'), UPat.var('x').cast(dtypes.half), UPat.var('y'))).cast(dtypes.float)), name="st"),
-   lambda st,pa,p,x,y: st.replace(src=(st.src[0], p.where(x, y.cast(dtypes.float)))) if isinstance(pa.dtype, ImageDType) else None),
 ])
