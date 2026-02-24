@@ -181,7 +181,7 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
     if x.op in {Ops.DEVICE, Ops.UNIQUE}: continue
 
     # no ranges on kernels, they are internal
-    if x.op is Ops.CALL: continue
+    if x.op in {Ops.CALL, Ops.LINEAR}: continue
 
     if x.dtype.scalar() == dtypes.index: continue  # TODO: why do I need this?
     ending_ranges[x] = sum([ending_ranges.get(u, []) for u in consumer_map[x]], [])
