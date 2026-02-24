@@ -76,7 +76,7 @@ def linear_to_schedule(linear:UOp) -> list[ExecItem]:
       for j, bufs in enumerate(zip(*[x.bufs for x in cast(tuple[MultiBuffer, ...], ubufs)])):
         schedule.append(ExecItem(ast, list(bufs), metadata, {dnums[0].expr:j} if len(dnums) else {}))
     else:
-      schedule.append(ExecItem(ast, list(ubufs), metadata))
+      schedule.append(ExecItem(ast, cast(list[Buffer|None], ubufs), metadata))
   return schedule
 
 from tinygrad.engine.memory import memory_planner
