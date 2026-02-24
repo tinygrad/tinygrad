@@ -1,12 +1,11 @@
 import time, inspect
 from typing import cast
 from collections import deque
-from tinygrad.uop.ops import UOp, Ops, buffers, UOpMetaClass, track_rewrites, graph_rewrite, gate_kernel_sink
+from tinygrad.uop.ops import UOp, Ops, KernelInfo, buffers, UOpMetaClass, track_rewrites, graph_rewrite, gate_kernel_sink
 from tinygrad.uop.spec import type_verify, tensor_spec
 from tinygrad.device import Buffer, MultiBuffer
 from tinygrad.helpers import DEBUG, cpu_profile, TracingKey, SPEC, pluralize, SCACHE, BASEDIR
 from tinygrad.engine.realize import ExecItem
-from tinygrad.engine.allocations import transform_to_call
 
 # **** schedule linearizer
 
@@ -74,37 +73,28 @@ pm_post_sched_cache = PatternMatcher([
 ])
 
 schedule_cache: dict[bytes, UOp] = {}
-@track_rewrites(lambda _,ret: f"Schedule {pluralize('Kernel', len(ret[1]))}")
-def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[dict[UOp, UOp], list[ExecItem], dict[str, int]]:
-  # big_sink srcs are all the Tensors
-  st = time.perf_counter()
-  big_sink, buffer_map = transform_to_call(big_sink)
-  function = big_sink.src[0]
 
-  if not SCACHE or (sc_ret:=schedule_cache.get(function.key, None)) is None:
-    if SPEC: type_verify(big_sink, tensor_spec)
+def rewrite_call_to_linear(ctx:list, call:UOp) -> UOp|None:
+  """Rewrite rule: CALL(SINK, *params) -> LINEAR(...) with caching. Only matches top-level CALLs from transform_to_call."""
+  function = call.src[0]
+  if function.op is not Ops.SINK or isinstance(function.arg, KernelInfo): return None
+  if not SCACHE or (linear:=schedule_cache.get(function.key, None)) is None:
+    if SPEC: type_verify(call, tensor_spec)
     linear = create_schedule(get_kernel_graph(function))
     if SCACHE: schedule_cache[function.key] = linear
-  else:
-    # schedule cache hit
-    linear = sc_ret
+  # late apply params to buffers
+  linear = graph_rewrite(linear, pm_post_sched_cache, ctx=({}, call.src[1:]), name="params to buffers")
+  ctx.append((call, linear))
+  return linear
 
-  # it's a call that we late apply
-  linear = graph_rewrite(linear, pm_post_sched_cache, ctx=({}, big_sink.src[1:]), name="params to buffers")
+pm_schedule = PatternMatcher([
+  (UPat(Ops.CALL, name="call"), rewrite_call_to_linear),
+  # strip AFTER(buf, LINEAR) -> buf after scheduling
+  (UPat(Ops.AFTER, src=(UPat(name="buf"), UPat(Ops.LINEAR))), lambda ctx,buf: buf),
+])
 
-  # vars used in the schedule
-  used_vars = set().union(*[{v.expr for v in si.src[0].variables()} for si in linear.src])
-  # get var_vals
-  var_vals: dict[str, int] = {}
-  for b in big_sink.src[1:]:
-    if b.op is Ops.BIND:
-      nm = b.src[0].expr
-      if nm not in used_vars: continue
-      val = b.src[1].arg
-      assert nm not in var_vals or var_vals[nm] == val, f"bind mismatch on {nm}, {var_vals[nm]} != {val}"
-      var_vals[nm] = val
-
-  # convert LINEAR to ExecItems
+def linear_to_schedule(linear:UOp) -> list[ExecItem]:
+  """Convert a LINEAR UOp to a list of ExecItems."""
   schedule: list[ExecItem] = []
   for si in linear.src:
     ast, buf_uops = si.src[0], si.src[1:]
@@ -122,6 +112,34 @@ def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[dict[UOp, UOp], li
         schedule.append(ExecItem(ast, list(bufs), metadata, {dnums[0].expr:j} if len(dnums) else {}))
     else:
       schedule.append(ExecItem(ast, list(ubufs), metadata))
+  return schedule
+
+# strip AFTER(buf, LINEAR) -> buf, used by _apply_map_to_tensors to clean up scope tensors after scheduling
+@track_rewrites(lambda _,ret: f"Schedule {pluralize('Kernel', len(ret[1]))}")
+def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[list[UOp], list[ExecItem], dict[str, int]]:
+  st = time.perf_counter()
+
+  # rewrite CALLs to LINEARs and strip AFTERs
+  call_linear_pairs: list[tuple[UOp, UOp]] = []
+  graph_rewrite(big_sink, pm_schedule, ctx=call_linear_pairs, name="schedule calls")
+
+  # collect ExecItems from all LINEARs
+  schedule: list[ExecItem] = []
+  for _, linear in call_linear_pairs:
+    schedule.extend(linear_to_schedule(linear))
+
+  # get var_vals from CALL params
+  used_vars = set().union(*[{v.expr for v in si.src[0].variables()} for _, linear in call_linear_pairs for si in linear.src])
+  var_vals: dict[str, int] = {}
+  for call, _ in call_linear_pairs:
+    for b in call.src[1:]:
+      if b.op is Ops.BIND:
+        nm = b.src[0].expr
+        if nm not in used_vars: continue
+        val = b.src[1].arg
+        assert nm not in var_vals or var_vals[nm] == val, f"bind mismatch on {nm}, {var_vals[nm]} != {val}"
+        var_vals[nm] = val
+
   with cpu_profile(TracingKey("memory planner")): schedule = memory_planner(schedule)
 
   if (DEBUG >= 1 and len(schedule) > 1) or DEBUG >= 3:
@@ -131,7 +149,6 @@ def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[dict[UOp, UOp], li
     else:
       frm = None
     print(f"scheduled {len(schedule):5d} kernels in {(time.perf_counter()-st)*1000:8.2f} ms"+\
-          f" | {' cache hit' if SCACHE and sc_ret is not None else 'CACHE MISS'} {function.key.hex()[:8]}"+\
           f" | {len(UOpMetaClass.ucache):7d} uops in cache"+("" if frm is None else f" | {frm.filename}:{frm.lineno}"))
 
-  return buffer_map, schedule, var_vals
+  return [call for call, _ in call_linear_pairs], schedule, var_vals

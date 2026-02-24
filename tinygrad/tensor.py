@@ -13,9 +13,11 @@ from tinygrad.gradient import compute_gradient
 from tinygrad.mixin import OpMixin
 from tinygrad.mixin.movement import _align_left
 from tinygrad.uop.ops import smax, smin, resolve, UOp, Ops, sint, identity_element, all_metadata, _index_to_concrete_int, sint_to_uop, Variable
+from tinygrad.uop.ops import PatternMatcher, UPat
 from tinygrad.engine.schedule import ExecItem, complete_create_schedule_with_vars
 from tinygrad.device import Device, Buffer
 from tinygrad.engine.realize import run_schedule
+from tinygrad.engine.allocations import transform_to_call
 
 # TODO: this should be the only usage of Device
 def canonicalize_device(device:str|tuple|list|None) -> str|tuple[str, ...]:
@@ -25,7 +27,8 @@ def canonicalize_device(device:str|tuple|list|None) -> str|tuple[str, ...]:
 
 all_tensors: dict[weakref.ref[Tensor], None] = {}
 _pending_assigns: dict[UOp, list[UOp]] = {}  # buffer_uop -> [assign_uops in insertion order]
-def _apply_map_to_tensors(applied_map:dict[UOp, UOp], name:str) -> None:
+_pm_strip_after_noop = PatternMatcher([(UPat(Ops.AFTER, src=(UPat(name="buf"), UPat(Ops.NOOP))), lambda ctx,buf: buf)])
+def _apply_map_to_tensors(applied_map:dict[UOp, UOp], name:str, extra_pm:PatternMatcher|None=None) -> None:
   with cpu_profile(TracingKey(name), "TINY"):
     # get tensors in scope
     in_scope: dict[UOp, bool] = {}
@@ -34,7 +37,7 @@ def _apply_map_to_tensors(applied_map:dict[UOp, UOp], name:str) -> None:
 
     # get all Tensors and apply the map
     sink = UOp.sink(*[t.uop for t in scope_tensors])
-    new_sink = sink.substitute(applied_map, name=f"substitute {name}")
+    new_sink = sink.substitute(applied_map, name=f"substitute {name}", extra_pm=extra_pm)
 
     # set the relevant uop to the realized UOps
     for t,s,ns in zip(scope_tensors, sink.src, new_sink.src):
@@ -250,8 +253,8 @@ class Tensor(OpMixin):
     return [Tensor(u, device=u.device) for u in UOp.custom_kernel(*[t.uop for t in (self,)+lst], fxn=fxn, grad_fxn=grad_fxn)]
 
   def callify(self, *lst:Tensor) -> Tensor:
-    from tinygrad.engine.allocations import transform_to_call
     big_sink = UOp.sink(*[x.uop for x in (self,)+lst])
+    if any(u.op is Ops.CALL and u.src[0].op is Ops.SINK and u.src[0].arg is None for u in big_sink.toposort()): return self
     big_sink, buffer_map = transform_to_call(big_sink)
     _apply_map_to_tensors({x:y.after(big_sink) for x,y in buffer_map.items()}, name="callify")
     return self
@@ -262,11 +265,10 @@ class Tensor(OpMixin):
 
     NOTE: A Tensor can only be scheduled once.
     """
-    big_sink = UOp.sink(*[x.uop for x in (self,)+lst])
-
-    # this is where the schedule cache should go
-    becomes_map, schedule, var_vals = complete_create_schedule_with_vars(big_sink)
-    _apply_map_to_tensors(becomes_map, name="buffers")
+    self.callify(*lst)
+    calls, schedule, var_vals = complete_create_schedule_with_vars(UOp.sink(*[x.uop for x in (self,)+lst]))
+    # replace scheduled CALLs with NOOP so AFTER(buf, CALL) -> AFTER(buf, NOOP) -> buf in scope tensors
+    _apply_map_to_tensors({c:UOp(Ops.NOOP) for c in calls}, name="buffers", extra_pm=_pm_strip_after_noop)
     return schedule, var_vals
 
   def schedule(self, *lst:Tensor) -> list[ExecItem]:
@@ -285,8 +287,12 @@ class Tensor(OpMixin):
           # recursively realize pending assigns that this assign's value depends on
           for u in assign_uop.toposort():
             if u.op is Ops.BUFFER and u in _pending_assigns: _realize_pending(u)
-          becomes_map, schedule, var_vals = complete_create_schedule_with_vars(UOp.sink(assign_uop))
-          _apply_map_to_tensors(becomes_map, name="Apply Pending Assign")
+          sink = UOp.sink(assign_uop)
+          call, buffer_map = transform_to_call(sink)
+          callified_sink = UOp.sink(*[buffer_map.get(s, s).after(call) for s in sink.src])
+          calls, schedule, var_vals = complete_create_schedule_with_vars(callified_sink)
+          becomes_map = {**buffer_map, **{c:UOp(Ops.NOOP) for c in calls}}
+          _apply_map_to_tensors(becomes_map, name="Apply Pending Assign", extra_pm=_pm_strip_after_noop)
           run_schedule(schedule, var_vals, do_update_stats=do_update_stats)
           # update remaining pending assigns so they reference realized buffers instead of stale lazy graphs
           if becomes_map:
