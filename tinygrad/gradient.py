@@ -62,7 +62,7 @@ def _deepwalk(root:UOp, targets:set[UOp]) -> list[UOp]:
   in_target_path: dict[UOp, bool] = {}
   for u in root.toposort(): in_target_path[u] = any(x in targets or in_target_path[x] for x in u.src)
   # don't flow through DETACH/ASSIGN or anything not in target path
-  return list(root.toposort(lambda node: node.op not in {Ops.DETACH, Ops.ASSIGN} and in_target_path[node]))
+  return list(root.toposort(gate=lambda node: node.op not in {Ops.DETACH, Ops.ASSIGN} and in_target_path[node]))
 
 def compute_gradient(root:UOp, root_grad:UOp, targets:set[UOp]) -> dict[UOp, UOp]:
   grads = {root: root_grad}
@@ -78,7 +78,7 @@ def compute_gradient(root:UOp, root_grad:UOp, targets:set[UOp]) -> dict[UOp, UOp
       if len(forward_metadata:=all_metadata.get(t0, ())):
         backward_metadata = tuple(dataclasses.replace(x, backward=True) for x in forward_metadata)
         # we add the backward metadata to everything new in the graph
-        for bw_uop in v.toposort(lambda x: x not in (t0, *t0.src, grads[t0])):
+        for bw_uop in v.toposort(gate=lambda x: x not in (t0, *t0.src, grads[t0])):
           all_metadata[bw_uop] = all_metadata.get(bw_uop, ())+backward_metadata
   # end any ranges on grads with a reduce sum
   for k,v in grads.items():

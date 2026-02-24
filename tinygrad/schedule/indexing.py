@@ -19,7 +19,7 @@ def realize_srcs(ctx:dict[UOp, None], rb:UOp) -> None:
 
 def realize_assign_src(ctx:dict[UOp, None], buf:UOp, x:UOp):
   # you don't usually have to do this for assign unless there's a WAR hazard like TestAssign.test_assign_double_diamond_reduce
-  if buf.base in x.backward_slice_with_self: ctx[x] = None
+  if x.in_graph(buf.base): ctx[x] = None
 
 pm_generate_realize_map = PatternMatcher([
   # always realize SINK src
@@ -168,12 +168,12 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
   # don't realize COPY/BUFFER_VIEW/ENCDEC when they are the direct source of ASSIGN — the ASSIGN target buffer is the output
   for u in tsink.toposort():
     if u.op is Ops.ASSIGN and u.src[1].op in {Ops.COPY, Ops.BUFFER_VIEW, Ops.ENCDEC} and u.src[1] in rctx.realize_map \
-       and not u.src[0].op_in_backward_slice_with_self(Ops.SHRINK, Ops.PERMUTE, Ops.FLIP, Ops.PAD):
+       and not u.src[0].has_op(Ops.SHRINK, Ops.PERMUTE, Ops.FLIP, Ops.PAD):
       del rctx.realize_map[u.src[1]]
 
   # get the consumer map
   with cpu_profile("consumer map in rangeify", "TINY"):
-    consumer_map = consumer_map_from_toposort(tsink_toposort:=tsink.toposort(gate_kernel_sink))
+    consumer_map = consumer_map_from_toposort(tsink_toposort:=tsink.toposort(gate=gate_kernel_sink))
 
   # explicit rangeify
   ending_ranges: dict[UOp, list[UOp]] = {}
@@ -184,7 +184,7 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
     if x.op in {Ops.CALL, Ops.LINEAR}: continue
 
     if x.dtype.scalar() == dtypes.index: continue  # TODO: why do I need this?
-    ending_ranges[x] = sum([ending_ranges.get(u, []) for u in consumer_map[x]], [])
+    ending_ranges[x] = list(itertools.chain.from_iterable(ending_ranges.get(u, []) for u in consumer_map[x]))
 
     # *** the ranges on the output are
     #  1. new if this op is realized

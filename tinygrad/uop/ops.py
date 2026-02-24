@@ -111,8 +111,10 @@ class recursive_property(property):
     self.__doc__ = fxn.__doc__
   def __get__(self, x:UOp|None, owner=None):
     if x is None: return self
-    for node in x.toposort(gate=lambda node: self.nm not in node.__dict__): node.__dict__[self.nm] = self.fxn(node)
-    return x.__dict__[self.nm]
+    if (nm := self.nm) in x.__dict__: return x.__dict__[nm]
+    if all(nm in s.__dict__ for s in x.src): return x.__dict__.setdefault(nm, self.fxn(x))
+    for node in x.toposort(gate=lambda node: nm not in node.__dict__): node.__dict__[nm] = self.fxn(node)
+    return x.__dict__[nm]
 
 # we import this late so we can use resolve/smax in mixins
 from tinygrad.mixin import OpMixin
@@ -151,41 +153,33 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
 
   def f(self, op, **kwargs): return UOp(op, dtype=kwargs.pop("dtype", self.dtype), src=(self,), **kwargs)
 
-  @functools.cached_property
-  def backward_slice(self:UOp) -> dict[UOp, None]:
-    res: dict[UOp, None] = self.toposort()
-    res.pop(self)
-    return res
-
-  @property
-  def backward_slice_with_self(self:UOp) -> dict[UOp, None]: return {self:None, **self.backward_slice}
-  def op_in_backward_slice_with_self(self, *ops:Ops) -> bool:
-    # Check self first, then iterate backward_slice (avoids creating intermediate dict)
-    return self.op in ops or any(x.op in ops for x in self.backward_slice)
-
   def toposort(self, gate:Callable|None=None) -> dict[UOp, None]:
     cache: dict[UOp, None] = {}
-    stack: list[tuple[UOp, bool]] = [(self, False)] # each stack entry is (node, visited_flag)
-    while stack:
-      node, visited = stack.pop()
-      if node in cache: continue
-      if not visited:
-        if gate is None or gate(node):
-          stack.append((node, True))  # push node back on stack to process after its srcs
-          for s in reversed(node.src): stack.append((s, False)) # push srcs on the stack
-      else: cache[node] = None # second time i'm seeing this node, add it to returned toposort
-    return cache
-
-  def topovisit(self, visitor:Callable[[UOp], T], cache:dict[UOp, T]) -> T:
-    # NOTE: this shares a lot of code with toposort
     stack: list[tuple[UOp, bool]] = [(self, False)]
     while stack:
       node, visited = stack.pop()
       if node in cache: continue
       if not visited:
-        stack.append((node, True))
-        for s in reversed(node.src): stack.append((s, False))
-      else: cache[node] = visitor(node)
+        if gate is None or gate(node):
+          stack.append((node, True))
+          for s in reversed(node.src): stack.append((s, False))
+      else: cache[node] = None
+    return cache
+  @functools.cached_property
+  def _ops_in_graph(self) -> frozenset[Ops]: return frozenset(x.op for x in self.toposort())
+  def has_op(self, *ops) -> bool: return not self._ops_in_graph.isdisjoint(ops)
+  def in_graph(self, target:UOp) -> bool:
+    seen: set[UOp] = set()
+    stack = [self]
+    while stack:
+      if (n:=stack.pop()) is target: return True
+      if n not in seen:
+        seen.add(n)
+        stack.extend(n.src)
+    return False
+
+  def topovisit(self, visitor:Callable[[UOp], T], cache:dict[UOp, T]) -> T:
+    for node in self.toposort(gate=lambda node: node not in cache): cache[node] = visitor(node)
     return cache[self]
 
   # returns map of UOps to their consumers in the graph rooted by self
@@ -358,7 +352,6 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
 
   def simplify(self, tracked=False):
     if self.op in {Ops.CONST, Ops.VCONST}: return self
-    # late import!
     from tinygrad.uop.symbolic import symbolic
     with Context(TRACK_MATCH_STATS=0 if not tracked else TRACK_MATCH_STATS.value):
       return graph_rewrite(self, symbolic, name="simplify")
@@ -637,6 +630,17 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     for x in self.src:
       if x._device is not None: return x._device
     return None
+  @recursive_property
+  def _bufferize_cost(self) -> tuple[frozenset, bool]:
+    """(reachable_bufs, has_buf_in_reduce) for remove_bufferize cost function."""
+    if (self.op is Ops.BUFFERIZE and self.arg.addrspace == AddrSpace.GLOBAL) or self.op is Ops.MSTACK:
+      return (frozenset(), False)
+    costs = [s._bufferize_cost for s in self.src]
+    # parent adds buffer-type children to avoid self-reference cycle in __dict__
+    child_bufs = frozenset(s for s in self.src if (s.op is Ops.BUFFERIZE and s.arg.addrspace == AddrSpace.GLOBAL) or s.op in {Ops.MSTACK, Ops.PARAM})
+    bufs = child_bufs.union(*(c[0] for c in costs)) if costs else child_bufs
+    return (bufs, any(c[1] for c in costs) or (self.op is Ops.REDUCE and bool(bufs)))
+
   @property
   def buf_uop(self) -> UOp:
     if self.op in {Ops.BUFFER, Ops.PARAM}: return self
@@ -697,7 +701,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     # only these can be realized
     if self.op not in (Ops.BUFFER, Ops.MSTACK): return None
     # LUNIQUEs are never realized
-    if self.op_in_backward_slice_with_self(Ops.LUNIQUE): return None
+    if self.has_op(Ops.LUNIQUE): return None
     # NOTE: this is used by the JIT to determine which inputs we capture
     return self.buffer if self.buffer.is_allocated() else None
   @property
@@ -726,8 +730,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     return graph_rewrite(self, pm_unbind, ctx=ret), ret
   @property
   def val(self) -> int: return self.unbind()[1]
-  def variables(self) -> list[Variable]:
-    return sorted({x for x in self.backward_slice_with_self if x.op is Ops.DEFINE_VAR}, key=lambda v: v.arg)
+  def variables(self) -> list[Variable]: return sorted({x for x in self.toposort() if x.op is Ops.DEFINE_VAR}, key=lambda v: v.arg)
 
   # *** uop symbolic stuff ***
 
@@ -1095,11 +1098,10 @@ class PatternMatcher:
   def __add__(self, more:PatternMatcher) -> PatternMatcher: return PatternMatcher(self.patterns+more.patterns)
 
   def rewrite(self, uop:UOp, ctx=None):
-    if len(pats:=self.pdict.get(uop.op, [])):
+    if (pats:=self.pdict.get(uop.op)):
       if (ler:=uop.__dict__.get('_src_ops')) is None: uop.__dict__['_src_ops'] = ler = {u.op for u in uop.src}
       for _,match,early_reject in pats:
-        if not early_reject.issubset(ler): continue
-        if (ret:=match(uop, ctx)) is not None and ret is not uop: return ret
+        if early_reject.issubset(ler) and (ret:=match(uop, ctx)) is not None and ret is not uop: return ret
     return None
 
 # *** tracking pattern matcher ***

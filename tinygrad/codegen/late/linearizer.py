@@ -78,7 +78,7 @@ class CFGContext:
       zipped = zip(order, order[1:]) if k.op is Ops.SINK else zip([k.src[1]] + order, order)
       for x,y in zipped:
         # TODO: this can happen! it causes infinite loop in shufflenet
-        assert y.src[1] not in x.backward_slice_with_self
+        assert not x.in_graph(y.src[1])
         self.edges[y.src[1]] = x
 
 pm_add_control_flow = PatternMatcher([

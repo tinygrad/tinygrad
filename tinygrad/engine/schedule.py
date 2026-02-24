@@ -20,7 +20,7 @@ def create_schedule(sched_sink:UOp) -> UOp:
     # build kernel dependency graph: edges from producer kernel to consumer kernels
     children: dict[UOp, list[UOp]] = {}
     in_degree: dict[UOp, int] = {}
-    for u in sched_sink.toposort(gate_kernel_sink):
+    for u in sched_sink.toposort(gate=gate_kernel_sink):
       if u.op is not Ops.AFTER: continue
       k = u.src[1]
       assert k.op in {Ops.CALL, Ops.END, Ops.LINEAR}, f"AFTER src[1] should be CALL or END, not {k.op}"

@@ -934,14 +934,14 @@ class TestSchedule(unittest.TestCase):
   def test_fuse_arange_avg_pool2d_ceil_mode(self):
     x = Tensor.avg_pool2d(Tensor.empty(1,1,6,6), kernel_size=(3,3), padding=1, stride=3, ceil_mode=True)
     sched = check_schedule(x, 1)
-    self.assertEqual(len([x for x in sched[0].ast.backward_slice_with_self if x.op is Ops.REDUCE]), 1)
+    self.assertEqual(len([x for x in sched[0].ast.toposort() if x.op is Ops.REDUCE]), 1)
 
   def test_fuse_arange_pad_circular_mode_bw(self):
     x = Tensor.empty(1,1,5,5,5)
     out = x.pad((1,2,3,5,1,2), mode="circular")
     g = out.sum().gradient(x)[0]
     sched = check_schedule(g, 1)
-    self.assertEqual(len([x for x in sched[0].ast.backward_slice_with_self if x.op is Ops.REDUCE]), 0)
+    self.assertEqual(len([x for x in sched[0].ast.toposort() if x.op is Ops.REDUCE]), 0)
 
   def test_resnet_block(self):
     with Tensor.train(False):
@@ -1110,7 +1110,7 @@ class TestUOpBecome(unittest.TestCase):
     b.realize()
     assert a.uop.is_realized
     assert a.uop.buffer._base is None
-    assert b.uop.op_in_backward_slice_with_self(Ops.SHRINK)
+    assert b.uop.has_op(Ops.SHRINK)
     assert b.uop.base is a.uop.base
 
 class TestFusionOp(unittest.TestCase):
