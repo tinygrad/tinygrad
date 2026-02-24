@@ -104,6 +104,20 @@ class TestCmpClass(unittest.TestCase):
     st = run_program(instructions, n_lanes=1)
     self.assertEqual(st.vcc & 1, 0, "Signaling NaN should not match quiet mask")
 
+  def test_v_cmp_lg_f32_nan(self):
+    quiet_nan = 0x7fc00000
+    one_f32 = 0x3f800000  # 1.0f
+    instructions = [
+      s_mov_b32(s[0], quiet_nan),
+      v_mov_b32_e32(v[0], s[0]),
+      s_mov_b32(s[1], one_f32),
+      v_mov_b32_e32(v[1], s[1]),
+      v_cmp_lg_f32_e32(v[0], v[1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    print(f"=== {(st.vcc&1)=}")
+    self.assertEqual(st.vcc & 1, 0, "v_cmp_lg_f32(NaN, 1.0) should be 0")
+
   def test_v_cmp_sets_vcc_bits(self):
     """V_CMP_EQ sets VCC bits based on per-lane comparison."""
     instructions = [
