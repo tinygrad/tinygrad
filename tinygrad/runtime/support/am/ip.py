@@ -181,6 +181,11 @@ class AM_SMU(AM_IP):
     self._send_msg(self.smu_mod.PPSMC_MSG_SetDriverDramAddrLow, lo32(self.adev.paddr2mc(self.driver_table_paddr)))
     self._send_msg(self.smu_mod.PPSMC_MSG_EnableAllSmuFeatures, 0)
 
+    # Enable thermal alert: unmask MP1 SMU→host interrupt for thermal throttling notifications (gfx9/11/12)
+    self.adev.regMP1_SMN_IH_SW_INT.write(id=0xFE, valid=0)
+    self.adev.regMP1_SMN_IH_SW_INT_CTRL.update(int_mask=0)
+    if hasattr(self.smu_mod, 'PPSMC_MSG_AllowIHHostInterrupt'): self._send_msg(self.smu_mod.PPSMC_MSG_AllowIHHostInterrupt, 0) # gfx11/12
+
   def is_smu_alive(self):
     with contextlib.suppress(TimeoutError): self._send_msg(self.smu_mod.PPSMC_MSG_GetSmuVersion, 0, timeout=100)
     return self.adev.mmMP1_SMN_C2PMSG_90.read() != 0
@@ -460,6 +465,9 @@ class AM_IH(AM_IP):
         va = (self.adev.reg('regGCVM_L2_PROTECTION_FAULT_ADDR_HI32').read()<<32) | self.adev.reg('regGCVM_L2_PROTECTION_FAULT_ADDR_LO32').read()
         print(f"am {self.adev.devfmt}: GCVM_L2_PROTECTION_FAULT_STATUS: {bf} {va<<12:#x}")
         self.adev.is_err_state = True
+      elif client in {am.SOC15_IH_CLIENTID_MP1, am.SOC21_IH_CLIENTID_MP1}:
+        self.adev.regMP1_SMN_IH_SW_INT_CTRL.update(int_ack=1)
+        if ctx[0] == 0x7: print(f"am {self.adev.devfmt}: thermal throttling, status={ctx[1]:#x}")
       else: self.adev.is_err_state = True
 
       rptr = (rptr + 8) % (self.ring_size // 4)
