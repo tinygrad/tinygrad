@@ -94,7 +94,7 @@ pm_post_sched_cache = PatternMatcher([
 ])
 
 schedule_cache: dict[bytes, UOp] = {}
-def lower_schedule_to_linear(big_sink:UOp) -> UOp:
+def lower_schedule_to_linear(big_sink:UOp) -> UOp|None:
   st = time.perf_counter()
   function = big_sink.src[0]
   if isinstance(function.arg, KernelInfo): return None

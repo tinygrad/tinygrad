@@ -279,7 +279,8 @@ class Tensor(OpMixin):
           # recursively realize pending assigns that this assign's value depends on
           for u in assign_uop.toposort():
             if u.op is Ops.BUFFER and u in _pending_assigns: _realize_pending(u)
-          becomes_map, schedule, var_vals = complete_create_schedule_with_vars(UOp.sink(assign_uop))
+          big_sink, becomes_map = transform_to_call(UOp.sink(assign_uop))
+          schedule, var_vals = complete_create_schedule_with_vars(big_sink)
           _apply_map_to_tensors(becomes_map, name="Apply Pending Assign")
           run_schedule(schedule, var_vals, do_update_stats=do_update_stats)
           # update remaining pending assigns so they reference realized buffers instead of stale lazy graphs
