@@ -1009,6 +1009,7 @@ def train_bert():
   config["TRAIN_BEAM"]    = TRAIN_BEAM = getenv("TRAIN_BEAM", BEAM.value)
   config["EVAL_BEAM"]     = EVAL_BEAM  = getenv("EVAL_BEAM", BEAM.value)
   config["FP8_TRAIN"]     = getenv("FP8_TRAIN", 0)
+  config["FP8_HYBRID"]     = getenv("FP8_HYBRID", 0)
 
   Tensor.manual_seed(seed)  # seed for weight initialization
 
