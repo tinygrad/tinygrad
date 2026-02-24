@@ -18,10 +18,10 @@ def tag_uop(ctx:AllocCtx, x:UOp):
 
 def disk_copy_is_buffer(ctx:AllocCtx, u:UOp):
   # copies to disk are replaced with the disk buffer
-  to_disk = isinstance(u._device, str) and u._device.startswith("DISK")
+  to_disk = isinstance(u._device, str) and u._device.startswith(("DISK", "TINYFS"))
   if to_disk: ctx.buffer_map[u] = UOp.new_buffer(u.device, u.shard_size, u.dtype).reshape(u.max_shard_shape)
   # all copies from disk/numpy are realized into a real buffer
-  from_creation = isinstance(u.src[0]._device, str) and any(u.src[0]._device.startswith(x) for x in ["NPY", "DISK", "PYTHON"])
+  from_creation = isinstance(u.src[0]._device, str) and any(u.src[0]._device.startswith(x) for x in ["NPY", "DISK", "PYTHON", "TINYFS"])
   if from_creation: return tag_uop(ctx, u)
 
 def apply_after(ctx:AllocCtx, u:UOp):
@@ -41,8 +41,8 @@ add_tags = PatternMatcher([
 def replace_contig_with_assign(u:UOp):
   # if size is 0, remove the contig
   if u.size == 0: return u.src[0]
-  # no real contig for DISK tensors, they are left alone
-  if isinstance(u._device, str) and u._device.startswith("DISK"): return u.rtag(None)
+  # no real contig for DISK/TINYFS tensors, they are left alone
+  if isinstance(u._device, str) and u._device.startswith(("DISK", "TINYFS")): return u.rtag(None)
   dtype = u.dtype
   if isinstance(dtype, ImageDType):
     if prod(dtype.shape) != prod(u.max_shard_shape) or ([x for x in u.max_shard_shape if x != 1] or [1])[-1] % 4 != 0:
@@ -113,7 +113,7 @@ def replace_input_buffer(ctx:AllocCtx, b:UOp):
 pm_finalize_call = PatternMatcher([
   (UPat(Ops.ASSIGN, name="x"), untag_and_append),
   (UPat(Ops.AFTER, name="x"), append_after),
-  (UPat(Ops.COPY, name="x"), lambda ctx,x: append_after(ctx,x) if isinstance(x.device, str) and x.device.startswith("DISK") else None),
+  (UPat(Ops.COPY, name="x"), lambda ctx,x: append_after(ctx,x) if isinstance(x.device, str) and x.device.startswith(("DISK", "TINYFS")) else None),
   # replace UNIQUE with LUNIQUE for CONST cache key normalization
   (UPat(Ops.CONST, src=(UPat(Ops.UNIQUE), UPat(Ops.DEVICE, name="d")), name="b"), lambda b,d: b.replace(src=(d,))),
 ])
