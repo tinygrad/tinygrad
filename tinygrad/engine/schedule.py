@@ -53,7 +53,7 @@ def create_schedule(sched_sink:UOp) -> UOp:
       k = rk.src[0] if rk.op is Ops.END else rk
       assert k.op is Ops.CALL, f"unexpected op in queue: {k.op}"
       buf_uops = tuple(_unwrap_src(s).buf_uop for s in k.src[1:] if s.op is not Ops.BIND)
-      linearized.append(k.src[0].call(*buf_uops))
+      linearized.append(k.src[0].call(*buf_uops, metadata=k.arg.metadata))
       for x in children.get(rk, []):
         in_degree[x] -= 1
         if in_degree[x] == 0: queue.append(x)
@@ -92,7 +92,19 @@ def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[dict[UOp, UOp], li
   # it's a call that we late apply
   linear = graph_rewrite(linear, pm_post_sched_cache, ctx=({}, big_sink.src[1:]), name="params to buffers")
 
-  # add bufs to pre_schedule
+  # vars used in the schedule
+  used_vars = set().union(*[{v.expr for v in si.src[0].variables()} for si in linear.src])
+  # get var_vals
+  var_vals: dict[str, int] = {}
+  for b in big_sink.src[1:]:
+    if b.op is Ops.BIND:
+      nm = b.src[0].expr
+      if nm not in used_vars: continue
+      val = b.src[1].arg
+      assert nm not in var_vals or var_vals[nm] == val, f"bind mismatch on {nm}, {var_vals[nm]} != {val}"
+      var_vals[nm] = val
+
+  # convert LINEAR to ExecItems
   schedule: list[ExecItem] = []
   for si in linear.src:
     ast, buf_uops = si.src[0], si.src[1:]
@@ -101,7 +113,7 @@ def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[dict[UOp, UOp], li
       base = buf_uops[1].buffer
       assert isinstance(base, Buffer), "base can't be MultiBuffer"
       buffers[buf_uops[0]] = base.view(buf_uops[0].arg, ast.dtype, ast.arg[1]*base.dtype.itemsize)
-    ubufs = tuple(b.buffer for b in buf_uops)
+    ubufs = [b.buffer for b in buf_uops]
     metadata = si.arg.metadata
     if any(isinstance(x, MultiBuffer) for x in ubufs):
       assert all(isinstance(x, MultiBuffer) for x in ubufs), "kernel must all be multibuffer"
@@ -109,7 +121,6 @@ def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[dict[UOp, UOp], li
       for j, bufs in enumerate(zip(*[x.bufs for x in cast(tuple[MultiBuffer, ...], ubufs)])):
         schedule.append(ExecItem(ast, list(bufs), metadata, {dnums[0].expr:j} if len(dnums) else {}))
     else:
-      # ONE -> ONE
       schedule.append(ExecItem(ast, list(ubufs), metadata))
   with cpu_profile(TracingKey("memory planner")): schedule = memory_planner(schedule)
 
@@ -123,15 +134,4 @@ def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[dict[UOp, UOp], li
           f" | {' cache hit' if SCACHE and sc_ret is not None else 'CACHE MISS'} {function.key.hex()[:8]}"+\
           f" | {len(UOpMetaClass.ucache):7d} uops in cache"+("" if frm is None else f" | {frm.filename}:{frm.lineno}"))
 
-  # vars used in the schedule
-  used_vars = set().union(*[{v.expr for v in si.ast.variables()} for si in schedule])
-  # get var_vals
-  var_vals: dict[str, int] = {}
-  for i,b in enumerate(big_sink.src[1:]):
-    if b.op is Ops.BIND:
-      nm = b.src[0].expr
-      if nm not in used_vars: continue
-      val = b.src[1].arg
-      assert nm not in var_vals or var_vals[nm] == val, f"bind mismatch on {nm}, {var_vals[nm]} != {val}"
-      var_vals[nm] = val
   return buffer_map, schedule, var_vals
