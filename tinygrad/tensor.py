@@ -16,6 +16,7 @@ from tinygrad.uop.ops import smax, smin, resolve, UOp, Ops, sint, identity_eleme
 from tinygrad.engine.schedule import ExecItem, complete_create_schedule_with_vars
 from tinygrad.device import Device, Buffer
 from tinygrad.engine.realize import run_schedule
+from tinygrad.engine.allocations import transform_to_call
 
 # TODO: this should be the only usage of Device
 def canonicalize_device(device:str|tuple|list|None) -> str|tuple[str, ...]:
@@ -255,11 +256,11 @@ class Tensor(OpMixin):
 
     NOTE: A Tensor can only be scheduled once.
     """
-    big_sink = UOp.sink(*[x.uop for x in (self,)+lst])
+    big_sink, becomes_map = transform_to_call(UOp.sink(*[x.uop for x in (self,)+lst]))
+    _apply_map_to_tensors(becomes_map, name="buffers")
 
     # this is where the schedule cache should go
-    becomes_map, schedule, var_vals = complete_create_schedule_with_vars(big_sink)
-    _apply_map_to_tensors(becomes_map, name="buffers")
+    schedule, var_vals = complete_create_schedule_with_vars(big_sink)
     return schedule, var_vals
 
   def schedule(self, *lst:Tensor) -> list[ExecItem]:
