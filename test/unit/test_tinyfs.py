@@ -62,12 +62,12 @@ class TestTinyFS(unittest.TestCase):
 
   def test_roundtrip_uint8(self):
     arr = np.arange(256, dtype=np.uint8)
-    loaded = Tensor(arr).fs_store().realize().fs_load(len(arr))
+    loaded = Tensor(arr).fs_store().realize().fs_load(len(arr)).to("CPU")
     np.testing.assert_array_equal(loaded.numpy(), arr)
 
   def test_roundtrip_multichunk_uint8(self):
     arr = np.random.default_rng(42).integers(0, 256, size=Tensor.CHUNK_SIZE + 1024, dtype=np.uint8)
-    loaded = Tensor(arr).fs_store().realize().fs_load(len(arr))
+    loaded = Tensor(arr).fs_store().realize().fs_load(len(arr)).to("CPU")
     np.testing.assert_array_equal(loaded.numpy(), arr)
 
   def test_hash_matches_python_impl(self):

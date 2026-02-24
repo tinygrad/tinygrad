@@ -480,7 +480,7 @@ class Tensor(OpMixin):
       else: pad_amt = Tensor.CHUNK_SIZE * level_chunks
       if (tsize := data.shape[0]) < pad_amt: data = data.pad((0, pad_amt - tsize))
       data = data[:pad_amt].contiguous()
-      data = data.to(self.device)
+      if i != 0: data = data.to(self.device)
 
     return data[:size]
 
