@@ -254,7 +254,6 @@ class Tensor(OpMixin):
 
   def callify(self, *lst:Tensor) -> Tensor:
     big_sink = UOp.sink(*[x.uop for x in (self,)+lst])
-    if any(u.op is Ops.CALL and u.src[0].op is Ops.SINK and u.src[0].arg is None for u in big_sink.toposort()): return self
     big_sink, buffer_map = transform_to_call(big_sink)
     _apply_map_to_tensors({x:y.after(big_sink) for x,y in buffer_map.items()}, name="callify")
     return self
@@ -265,10 +264,13 @@ class Tensor(OpMixin):
 
     NOTE: A Tensor can only be scheduled once.
     """
+    # collect existing CALLs before callify (so we can clean them up in other tensors that share them)
+    pre_calls = {u for t in (self,)+lst for u in t.uop.toposort() if u.op is Ops.CALL}
     self.callify(*lst)
     calls, schedule, var_vals = complete_create_schedule_with_vars(UOp.sink(*[x.uop for x in (self,)+lst]))
     # replace scheduled CALLs with NOOP so AFTER(buf, CALL) -> AFTER(buf, NOOP) -> buf in scope tensors
-    _apply_map_to_tensors({c:UOp(Ops.NOOP) for c in calls}, name="buffers", extra_pm=_pm_strip_after_noop)
+    # include pre-existing CALLs too (they were reconstructed inside callify, but other tensors still reference the originals)
+    _apply_map_to_tensors({c:UOp(Ops.NOOP) for c in set(calls) | pre_calls}, name="buffers", extra_pm=_pm_strip_after_noop)
     return schedule, var_vals
 
   def schedule(self, *lst:Tensor) -> list[ExecItem]:

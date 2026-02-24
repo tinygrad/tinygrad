@@ -67,23 +67,37 @@ def create_new_buffer(ctx:tuple[dict[UOp, UOp], tuple[UOp, ...]], b:UOp):
   return ret
 
 pm_post_sched_cache = PatternMatcher([
-  (UPat(Ops.PARAM, name="x"), lambda ctx,x: ctx[1][x.arg]),
+  # tag=True prevents re-matching after replacement (needed when PARAMs replace with PARAMs in nested callify)
+  (UPat(Ops.PARAM, name="x"), lambda ctx,x: ctx[1][x.arg].replace(tag=True) if x.tag is None else None),
   # create new BUFFERs for LUNIQUE BUFFERs from rangeify
   (UPat(Ops.BUFFER, src=(UPat(Ops.LUNIQUE), UPat(Ops.DEVICE)), name="b"), create_new_buffer),
 ])
 
 schedule_cache: dict[bytes, UOp] = {}
 
+def _resolve_params(linear:UOp, params:tuple[UOp, ...]) -> UOp:
+  """Replace PARAMs in a LINEAR with the given params (BUFFERs or outer PARAMs), also handling LUNIQUE BUFFERs."""
+  from tinygrad.uop.ops import _remove_all_tags
+  linear = graph_rewrite(linear, pm_post_sched_cache, ctx=({}, params), name="params to buffers")
+  return graph_rewrite(linear, _remove_all_tags, name="remove tags")
+
 def rewrite_call_to_linear(ctx:list, call:UOp) -> UOp|None:
   """Rewrite rule: CALL(SINK, *params) -> LINEAR(...) with caching. Only matches top-level CALLs from transform_to_call."""
   function = call.src[0]
   if function.op is not Ops.SINK or isinstance(function.arg, KernelInfo): return None
+  # recursively schedule any nested CALLs inside the function (from nested callify)
+  inner_start = len(ctx)
+  function = graph_rewrite(function, pm_schedule, ctx=ctx, name="schedule nested calls")
   if not SCACHE or (linear:=schedule_cache.get(function.key, None)) is None:
-    if SPEC: type_verify(call, tensor_spec)
+    if SPEC: type_verify(call.replace(src=(function,)+call.src[1:]), tensor_spec)
     linear = create_schedule(get_kernel_graph(function))
     if SCACHE: schedule_cache[function.key] = linear
-  # late apply params to buffers
-  linear = graph_rewrite(linear, pm_post_sched_cache, ctx=({}, call.src[1:]), name="params to buffers")
+  # late apply params to buffers (tag=True prevents PARAM->PARAM cycles in nested callify)
+  linear = _resolve_params(linear, call.src[1:])
+  # resolve remaining PARAMs in inner LINEARs from nested CALLs using this call's params
+  for i in range(inner_start, len(ctx)):
+    inner_call, inner_linear = ctx[i]
+    ctx[i] = (inner_call, _resolve_params(inner_linear, call.src[1:]))
   ctx.append((call, linear))
   return linear
 
