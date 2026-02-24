@@ -1,7 +1,6 @@
 from __future__ import annotations
 import itertools
 from tinygrad.uop.ops import UOp, Ops, PatternMatcher, UPat
-from tinygrad.renderer.isa import X86GroupOp
 from tinygrad.dtype import dtypes, DType, PtrDType
 from dataclasses import dataclass, field
 
@@ -90,6 +89,7 @@ def regalloc(ctx:RegallocContext, x:UOp, i:int) -> tuple[UOp, list[UOp]]:
     cons = v.cons or (v,)
     # two address instructions (src is used in dest) can only coalesce reused src. reused src goes first to get priority in case of a tiebreak
     # TODO: make this backend independent
+    from tinygrad.renderer.isa.x86 import X86GroupOp
     if x.arg in X86GroupOp.TwoAddress1st:
       ins = tuple(ctx.live.get(ctx.rewrite_to_vreg[s]) for s in x.src)
       cons = ((ins[0],) if ins[0] in cons else ()) + tuple(r for r in cons if r not in ins)

@@ -1,9 +1,8 @@
 import unittest
 from tinygrad.uop import Ops
 from tinygrad.uop.ops import UOp, dtypes, graph_rewrite
-from tinygrad.renderer.isa import X86Ops
-from tinygrad.renderer.isa.x86 import X86Renderer
-from tinygrad.renderer.isa.isa import IselContext, Register
+from tinygrad.renderer.isa.x86 import X86Renderer, X86Ops
+from tinygrad.renderer.isa import IselContext, Register
 
 class TestIselX86(unittest.TestCase):
   def isel_rewrite(self, x:UOp): return graph_rewrite(x, X86Renderer().isel_matcher, IselContext(x), bottom_up=True)
