@@ -173,7 +173,7 @@ shared_codegen_spec = PatternMatcher([
   # CUSTOM (inline and non inline)
   (UPat((Ops.CUSTOMI, Ops.CUSTOM)), lambda: True),
 
-  # assembly instruction
+  # machine instruction (ISel output)
   (UPat(Ops.INS), lambda: True),
 
   # INDEX (2-arg and 3-arg with bool gate)
