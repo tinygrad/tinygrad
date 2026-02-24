@@ -556,7 +556,8 @@ class Parser:
         self.eat('RBRACKET')
         vgpr = self.vars.get('_vgpr')
         if vgpr is None: return _u32(0)
-        return vgpr.index(_to_u32(reg) * _u32(32) + _to_u32(lane), ptr=True).load()
+        ws = int(self.vars.get('_wave_size', 32))
+        return vgpr.index(_to_u32(reg) * _u32(ws) + _to_u32(lane), ptr=True).load()
       if self.try_eat('LPAREN'):
         args = self._parse_args()
         self.eat('RPAREN')
@@ -581,7 +582,8 @@ class Parser:
           self.eat('RBRACKET')
           vgpr = self.vars.get('_vgpr')
           if vgpr is None: return _u32(0)
-          return vgpr.index(_to_u32(reg) * _u32(32) + _u32(int(idx)), ptr=True).load()
+          ws = int(self.vars.get('_wave_size', 32))
+          return vgpr.index(_to_u32(reg) * _u32(ws) + _u32(int(idx)), ptr=True).load()
         elem = self.vars.get(f'{name}@{idx}', self.vars.get(f'{name}{idx}'))
         if elem is None:
           # Extract bit idx from base variable (like var[idx])
@@ -714,7 +716,7 @@ class Parser:
     return None
 
   def _sized_literal(self, bits: int) -> UOp:
-    if self.at('IDENT') and self.peek().val in ('U', 'I', 'F', 'B'):
+    if self.at('IDENT') and self.peek().val in ('U', 'I', 'F', 'B', 'BF'):
       type_char = self.eat('IDENT').val
       self.eat('LPAREN')
       inner = self.parse()
@@ -818,25 +820,22 @@ class Parser:
     else:
       idx = (addr >> _const(addr.dtype, 2)).cast(dtypes.int)
       val = mem.index(idx, *gate)
-      if dt in (dtypes.uint32, dtypes.int, dtypes.float32):
-        byte_off = (addr & _const(adt, 3)).cast(dtypes.uint32)
-        is_unaligned = byte_off.ne(_u32(0))
-        idx_hi = is_unaligned.where(((addr + _const(adt, 4)).cast(dtypes.uint64) >> _const(adt, 2)).cast(dtypes.int64), idx.cast(dtypes.int64))
-        hi = mem.index(idx_hi, *gate).cast(dtypes.uint64)
-        combined = val.cast(dtypes.uint64) | (hi << UOp.const(dtypes.uint64, 32))
-        val = is_unaligned.where((combined >> (byte_off.cast(dtypes.uint64) * UOp.const(dtypes.uint64, 8))).cast(dtypes.uint32), val)
-      elif dt in (dtypes.uint64, dtypes.int64, dtypes.float64):
-        byte_off = (addr & _const(adt, 3)).cast(dtypes.uint32)
-        is_unaligned = byte_off.ne(_u32(0))
-        idx_hi = is_unaligned.where(((addr + _const(adt, 4)).cast(dtypes.uint64) >> _const(adt, 2), idx).cast(dtypes.int64), idx.cast(dtypes.int64))
-        lo = val.cast(dtypes.uint64)
-        hi = mem.index(idx_hi, *gate).cast(dtypes.uint64)
-        combined = lo | (hi << UOp.const(dtypes.uint64, 32))
-        val = is_unaligned.where((combined >> (byte_off.cast(dtypes.uint64) * UOp.const(dtypes.uint64, 8))).cast(dtypes.uint64), lo).cast(dtypes.uint64)
+      if dt in (dtypes.uint64, dtypes.int64, dtypes.float64):
+        idx2 = ((addr + _const(adt, 4)) >> _const(adt, 2)).cast(dtypes.int)
+        val = val.cast(dtypes.uint64) | (mem.index(idx2, *gate).cast(dtypes.uint64) << _u64(32))
       elif dt in (dtypes.uint8, dtypes.int8):
-        val = (val >> ((addr & _const(adt, 3)).cast(dtypes.uint32) * _u32(8))).cast(dtypes.uint32) & _u32(0xFF)
+        val = (val >> ((addr & _const(adt, 3)).cast(dtypes.uint32) * _u32(8)) ) & _u32(0xFF)
       elif dt in (dtypes.uint16, dtypes.int16):
-        val = (val >> (((addr >> _const(adt, 1)).cast(dtypes.uint32) & _u32(1) ) * _u32(16)) ) & _u32(0xFFFF)
+        val = (val >> (((addr >> _const(adt, 1)).cast(dtypes.uint32) & _u32(1)).cast(dtypes.uint32) * _u32(16)) ) & _u32(0xFFFF)
+    if dt == dtypes.float32: return val.cast(dtypes.float32) if val.dtype == dtypes.uint32 else val.bitcast(dtypes.float32)
+    if dt == dtypes.float64: return val.cast(dtypes.uint64).bitcast(dtypes.float64)
+    if dt in (dtypes.half,): return val.cast(dtypes.uint16).bitcast(dtypes.half)
+    if dt == dtypes.int: return val.cast(dtypes.int)
+    if dt == dtypes.int64: return val.cast(dtypes.int64)
+    if dt == dtypes.int16 or dt == dtypes.short: return val.cast(dtypes.int16)
+    if dt == dtypes.int8: return val.cast(dtypes.int8)
+    if dt == dtypes.uint16: return val.cast(dtypes.uint16)
+    if dt == dtypes.uint8: return val.cast(dtypes.uint8)
     return val
 
   def _coerce_cmp(self, l: UOp, r: UOp) -> tuple[UOp, UOp]:
@@ -1038,11 +1037,7 @@ def parse_block(lines: list[str], start: int, env: dict[str, VarVal], funcs: dic
       if compound_op:
         mem = env.get('_vmem') if '_vmem' in env else env.get('_lds')
         if isinstance(mem, UOp):
-          adt = dtypes.uint64 if addr.dtype == dtypes.uint64 else dtypes.uint32
-          idx = (addr >> _const(adt, 2)).cast(dtypes.int)
-          old = mem.index(idx)
-          if dt in (dtypes.uint64, dtypes.int64, dtypes.float64):
-            old = old.cast(dtypes.uint64) | (mem.index(((addr + _const(adt, 4)) >> _const(adt, 2)).cast(dtypes.int)).cast(dtypes.uint64) << _u64(32))
+          old = Parser([], env, funcs)._handle_mem_load(addr, dt)
           rhs = (old + rhs) if compound_op == '+=' else (old - rhs)
       if assigns is not None: assigns.append((f'MEM[{_tok_str(addr_toks)}].{dt_name}', (addr, rhs)))
       i += 1

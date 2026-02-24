@@ -197,16 +197,20 @@ class PM4Executor(AMDQueue):
 
     prg_sz = 0
     for st,sz in self.gpu.mapped_ranges:
-      if st <= prg_addr < st+sz: prg_sz = sz - (prg_addr - st)
+      if st <= prg_addr < st+sz:
+        prg_sz = sz - (prg_addr - st)
+        break
 
     # Get scratch size from COMPUTE_TMPRING_SIZE register
-    # WAVESIZE = ceildiv(lanes * size_per_thread, mem_alignment_size)
-    # gfx11+: mem_alignment_size=256, so size_per_thread = WAVESIZE * 256 / 64 = WAVESIZE * 4
-    # gfx9: mem_alignment_size=1024, so size_per_thread = WAVESIZE * 1024 / 64 = WAVESIZE * 16
+    #scratch size is per-thread bytes, using wave-size aware alignment:
+    # gfx9(CDNA): 1024-byte alignment, wave64
+    # gfx11+: 256-byte alignment, wave32
+    wave_sz = 64 if self.gpu.arch.startswith("cdna") else 32
+    align = 1024 if self.gpu.arch.startswith("cdna") else 256
     try: tmpring_size = self.gpu.regs[regCOMPUTE_TMPRING_SIZE]
     except KeyError: tmpring_size = 0
     wavesize = (tmpring_size >> 12) & 0x3FFF  # WAVESIZE field is bits 12:25
-    scratch_size = wavesize * (16 if self.gpu.arch == "cdna" else 4)  # per-thread scratch size in bytes
+    scratch_size = wavesize * (align // wave_sz)  # per-thread scratch size in bytes
 
     assert prg_sz > 0, "Invalid prg ptr (not found in mapped ranges)"
     # Pass valid memory ranges, rsrc2, scratch_size, arch, and user data registers to Python emulator
@@ -215,7 +219,10 @@ class PM4Executor(AMDQueue):
     if hasattr(remu, 'scratch_size'): remu.scratch_size = scratch_size
     if hasattr(remu, 'arch'): remu.arch = self.gpu.arch
     if hasattr(remu, 'user_data'): remu.user_data = user_data
-    err = remu.run_asm(prg_addr, prg_sz, *gl, *lc, args_addr)
+    try:
+      err = remu.run_asm(prg_addr, prg_sz, *gl, *lc, args_addr, rsrc2=rsrc2, scratch_size=scratch_size, arch=self.gpu.arch, user_data=user_data)
+    except TypeError:
+      err = remu.run_asm(prg_addr, prg_sz, *gl, *lc, args_addr)
     if err != 0: raise RuntimeError("remu does not support the new instruction introduced in this kernel")
 
   def _exec_indirect_buffer(self, n):
@@ -288,7 +295,9 @@ class SDMAExecutor(AMDQueue):
   def _execute_poll_regmem(self):
     struct = sdma_pkts.poll_regmem.from_address(self.base + self.rptr[0] % self.size)
 
-    if struct.mem_poll == 0: mval = struct.value & struct.mask
+    if struct.mem_poll == 0:
+      mval = self.gpu.regs[struct.addr] if hasattr(self.gpu, 'regs') else struct.value
+      mval &= struct.mask
     elif struct.mem_poll == 1: mval = to_mv(self.gpu.translate_addr(struct.addr), 4).cast('I')[0] & struct.mask
 
     if struct.func == WAIT_REG_MEM_FUNCTION_GEQ: can_cont = bool(mval >= struct.value)
@@ -331,7 +340,9 @@ class AMDGPURegisters:
       return addr << 16 | self.grbm_index
     return self.regs[(addr, getbits(self.grbm_index, 16, 23))]
   def __setitem__(self, addr:int, val:int):
-    if addr == regGRBM_GFX_INDEX: self.grbm_index = val
+    if addr == regGRBM_GFX_INDEX:
+      self.grbm_index = val
+      return
     if getbits(self.grbm_index, 31, 31):
       for se in range(self.n_se): self.regs[(addr, se)] = val
     else:
