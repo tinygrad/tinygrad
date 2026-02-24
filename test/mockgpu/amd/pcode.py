@@ -44,6 +44,7 @@ def _extract_bits(val: UOp, hi: int, lo: int) -> UOp:
   width = hi - lo + 1
   val_u = val.cast(dt) if val.dtype != dt else val
   result = ((val_u >> _const(dt, lo)) if lo > 0 else val_u) & _const(dt, (1 << width) - 1)
+  # Downcast to match extracted bit width so brace-concat { hi, lo } computes correct output dtype
   target_dt = _BITS_DT.get(width) or (dtypes.uint32 if width <= 32 else dtypes.uint64 if width <= 64 else dt)
   if result.dtype != target_dt: result = result.cast(target_dt)
   return result
@@ -63,6 +64,9 @@ def _floor(x):
   return ((x < _const(x.dtype, 0)) & x.ne(t)).where(t - _const(x.dtype, 1), t)
 def _f16_extract(v): return (v & _u32(0xFFFF)).cast(dtypes.uint16).bitcast(dtypes.half) if v.dtype == dtypes.uint32 else v
 
+# ═════ FP8 (E4M3) and BF8 (E5M2) conversion helpers ═════
+# f32→fp8/bf8 uses f2f decomposition directly. fp8/bf8→f32 wraps f2f with subnormal handling
+# (f2f flushes denormals to zero, but AMD V_CVT_F32_FP8/BF8 preserves subnormals).
 def _x8_to_f32(v: UOp, exp_shift: int, exp_mask: int, mant_mask: int, sub_scale: float, src_dt) -> UOp:
   b = (v.cast(dtypes.uint32) & _u32(0xFF)).cast(dtypes.uint8)
   bu = b.cast(dtypes.uint32)
@@ -70,8 +74,8 @@ def _x8_to_f32(v: UOp, exp_shift: int, exp_mask: int, mant_mask: int, sub_scale:
   is_sub = exp.eq(_u32(0)) & mant.ne(_u32(0))
   sub_f32 = (mant.cast(dtypes.float32) * _const(dtypes.float32, sub_scale)).bitcast(dtypes.uint32) | sign
   return is_sub.where(sub_f32.bitcast(dtypes.float32), f2f(b, src_dt, dtypes.float32))
-def _fp8_to_f32(v): return _x8_to_f32(v, 3, 0xF, 0x7, 1.0/512.0, dtypes.fp8e4m3)
-def _bf8_to_f32(v): return _x8_to_f32(v, 2, 0x1F, 0x3, 1.0/65536.0, dtypes.fp8e5m2)
+def _fp8_to_f32(v): return _x8_to_f32(v, 3, 0xF, 0x7, 1.0/512.0, dtypes.fp8e4m3)  # E4M3 subnormal: mant * 2^(-9)
+def _bf8_to_f32(v): return _x8_to_f32(v, 2, 0x1F, 0x3, 1.0/65536.0, dtypes.fp8e5m2)  # E5M2 subnormal: mant * 2^(-16)
 
 def _f32_to_fp8(v: UOp) -> UOp:
   return f2f((v.bitcast(dtypes.float32) if v.dtype != dtypes.float32 else v).bitcast(dtypes.uint32), dtypes.float32, dtypes.fp8e4m3)
@@ -80,11 +84,13 @@ def _f32_to_bf8(v: UOp) -> UOp:
 def _f32_to_bf16(v: UOp) -> UOp:
   bits = (v.bitcast(dtypes.float32) if v.dtype != dtypes.float32 else v).bitcast(dtypes.uint32)
   is_nan = (bits & _u32(0x7F800000)).eq(_u32(0x7F800000)) & (bits & _u32(0x7FFFFF)).ne(_u32(0))
-  round_bit = (bits >> _u32(16)) & _u32(1)
-  rounding = _u32(0x7FFF) + round_bit
+  # Round-to-nearest-even: add rounding bias. If the bit just below the truncation point is 1 and the rest are 0, round to even.
+  round_bit = (bits >> _u32(16)) & _u32(1)  # bit 16 (LSB of kept part)
+  rounding = _u32(0x7FFF) + round_bit  # 0x7FFF + bit16: rounds to even
   rounded = bits + rounding
   return is_nan.where(_u32(0x7FC0).cast(dtypes.uint16), (rounded >> _u32(16)).cast(dtypes.uint16))
 def _f32_to_bf16_sr(v: UOp, stoch: UOp) -> UOp:
+  # Stochastic rounding: add lower 16 bits of stochastic value to lower 16 bits of f32
   bits = (v.bitcast(dtypes.float32) if v.dtype != dtypes.float32 else v).bitcast(dtypes.uint32)
   rounded = bits + (stoch & _u32(0xFFFF))
   return (rounded >> _u32(16)).cast(dtypes.uint16)
@@ -323,6 +329,7 @@ _FUNCS: dict[str, Callable[..., UOp]] = {
   'CalcDsAddr': lambda a, o, *r: a.cast(dtypes.uint32) + o.cast(dtypes.uint32),
   'CalcGlobalAddr': lambda v, s, *r: v.cast(dtypes.uint64) + s.cast(dtypes.uint64),
   'CalcScratchAddr': lambda v, s, *r: v.cast(dtypes.uint64) + s.cast(dtypes.uint64),
+  # FP8/BF8/BF16 conversion functions
   'fp8_to_f32': _fp8_to_f32, 'bf8_to_f32': _bf8_to_f32, 'f32_to_fp8': _f32_to_fp8, 'f32_to_bf8': _f32_to_bf8,
   'f32_to_bf16': _f32_to_bf16, 'f32_to_bf16_SR': _f32_to_bf16_sr, 'f32_to_bf16_sr': _f32_to_bf16_sr,
 }
@@ -811,6 +818,9 @@ class Parser:
       elif dt in (dtypes.uint16, dtypes.int16):
         val = (val >> (((addr >> _const(adt, 1)) & _const(adt, 1)).cast(dtypes.uint32) * _u32(16))) & _u32(0xFFFF)
       else:
+        # Handle unaligned 32-bit loads: combine two consecutive dwords and shift.
+        # To avoid OOB at buffer boundaries for aligned loads, clamp idx_hi to idx (safe).
+        # Use int64 for the WHERE to avoid 32-bit int overflow in C pointer arithmetic (addr can be >8GB).
         byte_off = (addr & _const(adt, 3)).cast(dtypes.uint32)
         is_unaligned = byte_off.ne(_u32(0))
         idx_native = (addr >> _const(adt, 2)).cast(dtypes.int64)
@@ -1031,10 +1041,12 @@ def parse_block(lines: list[str], start: int, env: dict[str, VarVal], funcs: dic
       i += 1
       continue
 
+    # VGPR assignment: VGPR[lane][reg] = value  or  VGPR[lane][reg][hi:lo].type = { ... }
     if first == 'vgpr' and toks[1].type == 'LBRACKET':
       j, lane_toks = _match_bracket(toks, 1)
       if j < len(toks) and toks[j].type == 'LBRACKET':
         j, reg_toks = _match_bracket(toks, j)
+        # Check for bit-slice: VGPR[lane][reg][hi:lo].type = value (read-modify-write)
         if j < len(toks) and toks[j].type == 'LBRACKET':
           j, slice_toks = _match_bracket(toks, j)
           slice_str = _tok_str(slice_toks)
@@ -1209,7 +1221,7 @@ def parse_block(lines: list[str], start: int, env: dict[str, VarVal], funcs: dic
       def is_const(c, v): return c.op == Ops.CONST and c.arg is v
       cond = parse_cond(line, 'if')
       conditions: list[tuple[UOp, UOp | dict[str, VarVal] | None]] = [(cond, None)] if not is_const(cond, False) else []
-      branch_assigns: list[tuple[UOp, list]] = []
+      branch_assigns: list[tuple[UOp, list]] = []  # (cond, assigns_list) for side-effect merging
       else_branch: tuple[UOp | None, dict[str, VarVal]] = (None, {})
       else_side_effects: list = []
       env_snap = dict(env)
@@ -1263,6 +1275,7 @@ def parse_block(lines: list[str], start: int, env: dict[str, VarVal], funcs: dic
         ba = next((b for c, b in conditions if is_const(c, True) and isinstance(b, dict)), {})
         block_assigns.update(ba)
         env.update(ba)
+        # For static true, forward side effects unconditionally
         if assigns is not None:
           for bc, bse in branch_assigns:
             if is_const(bc, True): assigns.extend(bse)
@@ -1277,11 +1290,13 @@ def parse_block(lines: list[str], start: int, env: dict[str, VarVal], funcs: dic
               if isinstance(tv, UOp) and isinstance(res, UOp):
                 res = cond.where(tv, res.cast(tv.dtype) if tv.dtype != res.dtype and tv.dtype.itemsize == res.dtype.itemsize else res)
           block_assigns[var] = env[var] = res
+        # Merge side effects from branches with conditions
         if assigns is not None:
           def _cond_side_effect(cnd, dest, val):
-            if isinstance(val, tuple) and len(val) == 4: return (dest, (val[0], val[1], val[2], val[3], cnd))
-            if isinstance(val, tuple) and len(val) == 2: return (dest, val)  # MEM writes: condition not gated
+            if isinstance(val, tuple) and len(val) == 4: return (dest, (val[0], val[1], val[2], val[3], cnd))  # VGPR bit-slice: add condition
+            if isinstance(val, tuple) and len(val) == 2: return (dest, val)  # VGPR/MEM write: (addr, rhs) -> condition rhs
             return (dest, val)
+          # Build combined condition: each branch fires when its cond is true AND no earlier cond was true
           remaining = UOp.const(dtypes.bool, True)
           for bc, bse in branch_assigns:
             effective = remaining & bc if remaining.op != Ops.CONST else bc
