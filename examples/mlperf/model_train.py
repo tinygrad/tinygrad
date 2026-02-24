@@ -1359,6 +1359,7 @@ def train_llama3():
       elif '.attention.wq' in k: v.shard_(device, axis=0)
       elif '.attention.wk' in k: v.shard_(device, axis=0)
       elif '.attention.wv' in k: v.shard_(device, axis=0)
+      elif '.attention.wqkv' in k: v.shard_(device, axis=0)
       elif '.attention.wo' in k: v.shard_(device, axis=1)
       elif '.feed_forward.w1.' in k: v.shard_(device, axis=0)
       elif '.feed_forward.w2.' in k: v.shard_(device, axis=1)
