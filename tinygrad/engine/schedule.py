@@ -15,7 +15,7 @@ def _unwrap_src(s: UOp) -> UOp:
   while len(s.src) and s.op not in {Ops.AFTER, Ops.BUFFER, Ops.PARAM, Ops.MSELECT, Ops.MSTACK, Ops.BIND}: s = s.src[0]
   return s
 
-def create_schedule(sched_sink:UOp) -> UOp: #tuple[list[ExecItem], UOp]:
+def create_schedule(sched_sink:UOp) -> UOp:
   with cpu_profile(TracingKey("toposort sched_sink")):
     # build kernel dependency graph: edges from producer kernel to consumer kernels
     children: dict[UOp, list[UOp]] = {}
@@ -95,8 +95,6 @@ def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[dict[UOp, UOp], li
   # add bufs to pre_schedule
   schedule: list[ExecItem] = []
   for si in linear.src:
-  #for i, si in enumerate(pre_schedule):
-    #buf_uops = buf_uops_sink.src[i].src
     ast, buf_uops = si.src[0], si.src[1:]
     # create subbuffers if needed
     if ast.op is Ops.BUFFER_VIEW:
