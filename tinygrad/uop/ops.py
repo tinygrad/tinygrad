@@ -212,7 +212,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
         return None
 
       case Ops.CAST:
-        # when PTX cases from ptr to non ptr, remove the shape
+        # when PTX casts from ptr to non ptr, remove the shape
         if isinstance(self.src[0].dtype, PtrDType) and not isinstance(self.src[0].dtype, ImageDType) and not isinstance(self.dtype, PtrDType):
           return None
 
@@ -329,11 +329,11 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
   def shard_size(self) -> int: return prod(self.max_shard_shape)
 
   @functools.cached_property
-  def ended_ranges(self):
+  def ended_ranges(self) -> tuple[UOp]:
     if self.op in range_start: return self.src[range_start[self.op]:]
     if self.op is Ops.AFTER: return tuple(flatten([x.ended_ranges for x in self.src[1:]]))
     # TODO: copy isn't using range properly and isn't ending the range it uses, remove this
-    if self.op in {Ops.COPY, Ops.BUFFER_VIEW}: return self.src[0].ranges
+    if self.op in {Ops.COPY}: return self.src[0].ranges
     return ()
 
   # determine what ranges this is in
