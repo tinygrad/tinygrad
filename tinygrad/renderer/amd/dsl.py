@@ -197,15 +197,16 @@ class SrcField(BitField):
   def __get__(self, obj, objtype=None):
     if obj is None: return self
     reg = self.decode((obj._raw >> self.lo) & self.mask)
+    op_name = self.name
     # Resize register based on operand info (skip non-resizable special registers)
     # VCC/EXEC pairs (106, 126), NULL (124), M0 (125), float constants (240-255)
     if reg.offset not in (124, 125) and not 240 <= reg.offset <= 255:
       # Map variant field names (vsrc0->src0, vsrc1->src1, etc.) for DPP/SDWA classes
-      assert self.name is not None
-      name = self.name[1:] if self.name.startswith('v') and self.name[1:] in obj.op_regs else self.name
-      if sz := obj.op_regs.get(name, 1): reg = Reg(reg.offset, sz, neg=reg.neg, abs_=reg.abs_, hi=reg.hi)
+      assert op_name is not None
+      if op_name.startswith('v') and op_name[1:] in obj.op_regs: op_name = op_name[1:]
+      if sz := obj.op_regs.get(op_name, 1): reg = Reg(reg.offset, sz, neg=reg.neg, abs_=reg.abs_, hi=reg.hi)
     # remap VGPR range (256-511) to ACCVGPR range (512-767)
-    if VGPR_BASE <= reg.offset < ACCVGPR_BASE and (op_info := obj.operands.get(self.name)):
+    if VGPR_BASE <= reg.offset < ACCVGPR_BASE and (op_info := obj.operands.get(op_name)):
       if op_info[2] in _ACCVGPR_OPTYPES: reg = Reg(reg.offset + ACCVGPR_OFFSET, reg.sz, neg=reg.neg, abs_=reg.abs_, hi=reg.hi)
     return reg
 
@@ -292,6 +293,20 @@ def _canonical_name(name: str) -> str | None:
   if name in ('data', 'vdata', 'data0', 'vsrc'): return 'data'
   return None
 
+def _variant_suffix_by_offset(cls, off: int) -> str | None:
+  """Return variant suffix for the given source field offset, if any."""
+  if off == LITERAL:
+    return '_LIT' if _get_variant(cls, '_LIT') is not None else None
+  if off == 250:
+    return '_DPP16' if _get_variant(cls, '_DPP16') is not None else None
+  if off in (233, 234):
+    return '_DPP8' if _get_variant(cls, '_DPP8') is not None else None
+  if off == 249:
+    if _get_variant(cls, '_SDWA') is not None: return '_SDWA'
+    if _get_variant(cls, '_SDWA_SDST') is not None: return '_SDWA_SDST'
+    return '_DPP8' if _get_variant(cls, '_DPP8') is not None else None
+  return None
+
 class Inst:
   _fields: list[tuple[str, BitField]]
   _base_size: int
@@ -314,10 +329,8 @@ class Inst:
         if isinstance(field, FixedBitField): continue
         val = kwargs.get(name) if name in kwargs else next(args_iter, None)
         if not isinstance(field, SrcField): continue
-        if isinstance(val, Reg) and val.offset == 255 and (lit_cls := _get_variant(cls, '_LIT')): return lit_cls(*args, **kwargs)
-        if isinstance(val, Reg) and val.offset == 249:
-          if (sdwa_cls := _get_variant(cls, '_SDWA') or _get_variant(cls, '_SDWA_SDST')): return sdwa_cls(*args, **kwargs)
-        if isinstance(val, Reg) and val.offset == 250 and (dpp_cls := _get_variant(cls, '_DPP16')): return dpp_cls(*args, **kwargs)
+        if isinstance(val, Reg):
+          if (suffix := _variant_suffix_by_offset(cls, val.offset)) and (var_cls := _get_variant(cls, suffix)): return var_cls(*args, **kwargs)
         if _needs_literal(val) and (lit_cls := _get_variant(cls, '_LIT')): return lit_cls(*args, **kwargs)
     return object.__new__(cls)
 
@@ -446,16 +459,14 @@ class Inst:
     """Check if instruction needs a variant class (_LIT, _DPP8, _DPP16, _SDWA). Returns suffix or None."""
     cls_name = type(self).__name__
     # Don't check for variants if we're already a variant class
-    if any(s in cls_name for s in ('_LIT', '_DPP8', '_DPP16', '_SDWA')): return None
+    if any(s in cls_name for s in ('_LIT', '_DPP8', '_DPP16', '_SDWA', '_SDWA_SDST', '_MFMA')): return None
     # VOPD: FMAMK/FMAAK opcodes always require literal (check by name since enum may differ across archs)
     for name in ('opx', 'opy'):
       if hasattr(self, name) and any(x in getattr(self, name).name for x in ('FMAMK', 'FMAAK')): return '_LIT'
     for name, field in self._fields:
       if isinstance(field, SrcField):
         off = getattr(self, name).offset
-        if off == 255: return '_LIT'
-        if off == 249: return '_SDWA' if self._is_cdna() else '_DPP8'
-        if off == 250: return '_DPP16'
+        if (suffix := _variant_suffix_by_offset(type(self), off)): return suffix
     return None
 
   @classmethod

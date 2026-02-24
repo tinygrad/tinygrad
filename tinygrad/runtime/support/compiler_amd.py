@@ -1,5 +1,5 @@
 import ctypes, hashlib, tempfile, subprocess, pathlib, shutil
-from tinygrad.helpers import system
+from tinygrad.helpers import getenv, system
 from tinygrad.runtime.autogen import comgr
 try:
   comgr.amd_comgr_get_version(ctypes.byref(major:=ctypes.c_uint64()), ctypes.byref(minor:=ctypes.c_uint64()))
@@ -47,6 +47,8 @@ def set_options(action_info, options:bytes):
 
 # AMD_COMGR_SAVE_TEMPS=1 AMD_COMGR_REDIRECT_LOGS=stdout AMD_COMGR_EMIT_VERBOSE_LOGS=1
 def compile_hip(prg:str, arch="gfx1100", asm=False) -> bytes:
+  if getenv("MOCKGPU", 0):
+    raise RuntimeError("MOCKGPU mode: HIP compiler disabled")
   check(comgr.amd_comgr_create_action_info(ctypes.byref(action_info := comgr.amd_comgr_action_info_t())))
   check(comgr.amd_comgr_action_info_set_language(action_info, comgr.AMD_COMGR_LANGUAGE_HIP))
   check(comgr.amd_comgr_action_info_set_isa_name(action_info, b"amdgcn-amd-amdhsa--" + arch.encode()))

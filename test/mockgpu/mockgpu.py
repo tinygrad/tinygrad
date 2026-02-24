@@ -67,7 +67,8 @@ class MockFileIOInterface(FileIOInterface):
     if self.fd in tracked_fds:
       tracked_fds[self.fd].close(self.fd)
       tracked_fds.pop(self.fd)
-    else: os.close(self.fd)
+    elif self.fd is not None:
+      os.close(self.fd)
 
   def ioctl(self, request, arg):
     if self.fd in tracked_fds:
