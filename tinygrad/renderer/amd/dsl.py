@@ -182,7 +182,8 @@ class SrcField(BitField):
 
   def encode(self, val) -> int:
     """Encode value. Returns 255 (literal marker) for out-of-range values."""
-    if isinstance(val, Reg): offset = val.offset - ACCVGPR_OFFSET if val.offset >= ACCVGPR_BASE else val.offset  # ACCVGPR (512-767) encodes as VGPR (256-511)
+    # ACCVGPR (512-767) encodes as VGPR (256-511)
+    if isinstance(val, Reg): offset = val.offset - ACCVGPR_OFFSET if val.offset >= ACCVGPR_BASE else val.offset
     elif isinstance(val, float): offset = self._FLOAT_ENC.get(val, LITERAL)
     elif isinstance(val, int) and 0 <= val <= 64: offset = INLINE_INT_START + val
     elif isinstance(val, int) and -16 <= val < 0: offset = INLINE_NEG_START - val

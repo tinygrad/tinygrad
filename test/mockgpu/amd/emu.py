@@ -660,8 +660,9 @@ class _Ctx:
     vcc_reg = sdst_reg if sdst_reg is not None else VCC_LO.offset
     if 'VCC' not in srcs: srcs['VCC'] = self.rmask(_c(vcc_reg))
     srcs.update({'EXEC': exec_mask, 'SCC': self.rsgpr_dyn(_c(SCC.offset)), 'laneId': lane, 'VDST': vdst_reg,
-                 'ROUND_MODE': _c(0), 'ROUND_TOWARD_ZERO': _c(0), 'ROUND_NEAREST_EVEN': _c(0), '_vgpr': self.vgpr, '_wave_size': self.wave_size,
-                 'SDWA_SRC0_SEL': _c(0), 'BYTE0': _c(0), 'BYTE1': _c(1), 'BYTE2': _c(2), 'BYTE3': _c(3), 'WORD0': _c(0), 'WORD1': _c(1)})  # rounding mode and SDWA constants
+                 'ROUND_MODE': _c(0), 'ROUND_TOWARD_ZERO': _c(0), 'ROUND_NEAREST_EVEN': _c(0), '_vgpr': self.vgpr,
+                 '_wave_size': self.wave_size, 'SDWA_SRC0_SEL': _c(0), 'BYTE0': _c(0), 'BYTE1': _c(1),
+                 'BYTE2': _c(2), 'BYTE3': _c(3), 'WORD0': _c(0), 'WORD1': _c(1)})
     _, assigns = parse_pcode(pcode, srcs)
 
     # For integer ops with clamp, compute overflow using wide arithmetic
@@ -1262,7 +1263,10 @@ def _compile_wmma(inst: ir3.VOP3P | ir4.VOP3P | irc.VOP3P, ctx: _Ctx) -> UOp:
   return UOp.sink(*stores, *ctx.inc_pc())
 
 def _compile_mfma(inst: irc.VOP3P, ctx: _Ctx) -> UOp:
-  """CDNA MFMA 16x16: Fused multiply-accumulate for 16x16 matrices. Reads matrix tiles from VGPRs into a local buffer, multiplies, and writes the results to ACCVGPR."""
+  """CDNA MFMA 16x16 matrix multiply.
+
+  Reads matrix tiles from VGPRs into a local buffer, multiplies, and writes results to ACCVGPR.
+  """
   op_name = _op_name(inst)
   exec_mask = ctx.rexec()
   vdst_reg = ctx.inst_field(type(inst).vdst)

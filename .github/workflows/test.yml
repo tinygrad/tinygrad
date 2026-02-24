@@ -698,7 +698,6 @@ jobs:
     timeout-minutes: 15
     env:
       AMD: 1
-      MOCKGPU: 1
       MOCKGPU_ARCH: ${{ matrix.arch }}
       SKIP_SLOW_TEST: 1
       AMD_LLVM: ${{ matrix.backend == 'amdllvm' && '1' || matrix.backend != 'amdllvm' && '0' }}
