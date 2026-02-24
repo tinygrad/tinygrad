@@ -16,6 +16,7 @@ from tinygrad.uop.ops import smax, smin, resolve, UOp, Ops, sint, identity_eleme
 from tinygrad.engine.schedule import ExecItem, complete_create_schedule_with_vars
 from tinygrad.device import Device, Buffer
 from tinygrad.engine.realize import run_schedule
+from tinygrad.engine.allocations import transform_to_call
 
 # TODO: this should be the only usage of Device
 def canonicalize_device(device:str|tuple|list|None) -> str|tuple[str, ...]:
@@ -255,11 +256,11 @@ class Tensor(OpMixin):
 
     NOTE: A Tensor can only be scheduled once.
     """
-    big_sink = UOp.sink(*[x.uop for x in (self,)+lst])
+    big_sink, becomes_map = transform_to_call(UOp.sink(*[x.uop for x in (self,)+lst]))
+    _apply_map_to_tensors(becomes_map, name="buffers")
 
     # this is where the schedule cache should go
-    becomes_map, schedule, var_vals = complete_create_schedule_with_vars(big_sink)
-    _apply_map_to_tensors(becomes_map, name="buffers")
+    schedule, var_vals = complete_create_schedule_with_vars(big_sink)
     return schedule, var_vals
 
   def schedule(self, *lst:Tensor) -> list[ExecItem]:
@@ -278,7 +279,8 @@ class Tensor(OpMixin):
           # recursively realize pending assigns that this assign's value depends on
           for u in assign_uop.toposort():
             if u.op is Ops.BUFFER and u in _pending_assigns: _realize_pending(u)
-          becomes_map, schedule, var_vals = complete_create_schedule_with_vars(UOp.sink(assign_uop))
+          big_sink, becomes_map = transform_to_call(UOp.sink(assign_uop))
+          schedule, var_vals = complete_create_schedule_with_vars(big_sink)
           _apply_map_to_tensors(becomes_map, name="Apply Pending Assign")
           run_schedule(schedule, var_vals, do_update_stats=do_update_stats)
           # update remaining pending assigns so they reference realized buffers instead of stale lazy graphs

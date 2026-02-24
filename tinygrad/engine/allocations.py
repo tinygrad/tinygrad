@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field
-from tinygrad.uop.ops import UOp, UPat, PatternMatcher, Ops, GroupOp, graph_rewrite, identity_element, profile_matches
+from tinygrad.uop.ops import UOp, UPat, PatternMatcher, Ops, GroupOp, graph_rewrite, identity_element, track_rewrites
 from tinygrad.dtype import ImageDType
-from tinygrad.helpers import prod, DEBUG, argsort, VIZ
+from tinygrad.helpers import prod, DEBUG, argsort, VIZ, pluralize
 
 @dataclass
 class AllocCtx:
@@ -125,7 +125,7 @@ pm_replace_buf = PatternMatcher([
   (UPat(Ops.BIND, src=(UPat(Ops.DEFINE_VAR), UPat(Ops.CONST)), name="b"), replace_input_buffer),
 ])
 
-@profile_matches
+@track_rewrites(lambda _,ret: f"Process {pluralize('Buffer', len(ret[1]))}")
 def transform_to_call(big_sink:UOp) -> tuple[UOp, dict[UOp, UOp]]:
   # uop list is a list in the original_sink graph and we can map to the tags later
   # here we build buffer map

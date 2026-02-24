@@ -282,9 +282,10 @@ class TestVizIntegration(BaseTestViz):
     ast = Tensor.schedule(Tensor.empty(4)+Tensor.empty(4))[0].ast
     prg = get_program(ast, Device[Device.DEFAULT].renderer)
     lst = get_viz_list()
-    self.assertEqual(len(lst), 2)
-    self.assertEqual(lst[0]["name"], "Schedule 1 Kernel n1")
-    self.assertEqual(lst[1]["name"], prg.name)
+    self.assertEqual(len(lst), 3)
+    self.assertEqual(lst[0]["name"], "Process 1 Buffer n1")
+    self.assertEqual(lst[1]["name"], "Schedule 1 Kernel n1")
+    self.assertEqual(lst[2]["name"], prg.name)
 
   # schedule graph CALL nodes have a link to jump to codegen
   def test_link_sched_codegen(self):
@@ -293,8 +294,9 @@ class TestVizIntegration(BaseTestViz):
     sched = Tensor.schedule(c1, c2)
     prgs = [si.lower().prg.p.name for si in sched]
     lst = get_viz_list()
-    viz_kernel = next(i for i,s in enumerate(lst[0]["steps"]) if s["name"] == "View Kernel Graph")
-    graph = next(get_viz_details(0, viz_kernel))["graph"]
+    sched_idx = next(i for i,l in enumerate(lst) if l["name"].startswith("Schedule"))
+    viz_kernel = next(i for i,s in enumerate(lst[sched_idx]["steps"]) if s["name"] == "View Kernel Graph")
+    graph = next(get_viz_details(sched_idx, viz_kernel))["graph"]
     call_nodes = [n for n in graph.values() if n["label"].startswith("CALL")]
     for i,n in enumerate(call_nodes):
       assert n["ref"] is not None
