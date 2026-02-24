@@ -1,6 +1,6 @@
 import functools, itertools
 from tinygrad.helpers import all_same, all_int, prod, DEBUG, RING, ALL2ALL, getenv
-from tinygrad.uop.ops import Ops, UOp, PatternMatcher, UPat, GroupOp
+from tinygrad.uop.ops import Ops, UOp, PatternMatcher, UPat, GroupOp, graph_rewrite, should_resolve_call
 from tinygrad.dtype import dtypes
 
 # *** allreduce implementation ***
@@ -163,6 +163,8 @@ def assign_multi(dest:UOp, src:UOp):
 def passthrough_multi(root:UOp, multi:UOp):
   return UOp(root.op, root.dtype, (multi.src[0],)+tuple(x.src[0] if x.op is Ops.MULTI else x for x in root.src[1:]), root.arg).multi(multi.axis)
 
+def rewrite_into_call(call:UOp): return call.replace(src=(graph_rewrite(call.src[0], multi_pm),)+call.src[1:]) if should_resolve_call(call) else None
+
 # NOTE: this is the same pattern as Ops.UNROLL
 multi_pm = PatternMatcher([
   (UPat(GroupOp.ALU, name="root", custom_early_reject=set([Ops.MULTI])), alu_multi),
@@ -177,6 +179,8 @@ multi_pm = PatternMatcher([
   (UPat(Ops.COPY, src=(UPat(Ops.MULTI, name="multi"), UPat(Ops.DEVICE, name="device"))), copy_multi),
   (UPat(Ops.ALLREDUCE, src=(UPat(Ops.MULTI, name="multi"), UPat(Ops.DEVICE, name="device")), name="red"),
     lambda multi,device,red: multi.src[0].allreduce(red.arg, device).multi(axis=multi.axis)),
+  # rewrite into calls explicitly for MULTI
+  (UPat(Ops.CALL, name="call"), rewrite_into_call),
   (UPat(Ops.CALL, src=(UPat(Ops.MULTI, name="multi"), ), name="root", allow_any_len=True), passthrough_multi),
   # we just remove the MULTI from CALLs with dtypes.void and assume they are handled by the user for custom kernels
   (UPat(Ops.CALL, dtype=dtypes.void, name="root", custom_early_reject=set([Ops.MULTI])), lambda root:

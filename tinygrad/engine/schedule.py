@@ -2,6 +2,7 @@ import time, inspect
 from typing import cast
 from collections import deque
 from tinygrad.uop.ops import UOp, Ops, buffers, UOpMetaClass, track_rewrites, graph_rewrite, gate_kernel_sink, KernelInfo
+from tinygrad.uop.ops import _remove_all_tags
 from tinygrad.uop.spec import type_verify, tensor_spec
 from tinygrad.device import Buffer, MultiBuffer
 from tinygrad.helpers import DEBUG, cpu_profile, TracingKey, SPEC, pluralize, SCACHE, BASEDIR
@@ -22,7 +23,7 @@ def create_schedule(sched_sink:UOp) -> UOp:
     for u in sched_sink.toposort(gate_kernel_sink):
       if u.op is not Ops.AFTER: continue
       k = u.src[1]
-      assert k.op in {Ops.CALL, Ops.END}, f"AFTER src[1] should be KERNEL or END, not {k.op}"
+      assert k.op in {Ops.CALL, Ops.END, Ops.LINEAR}, f"AFTER src[1] should be CALL or END, not {k.op}"
       in_degree.setdefault(k, 0)
       if k.op is Ops.END: assert k.src[0].op is Ops.CALL, f"END src[0] should be KERNEL, not {k.src[0].op}"
       # WAR deps from rangeify are stored in AFTER src[2:]
@@ -49,10 +50,13 @@ def create_schedule(sched_sink:UOp) -> UOp:
     linearized: list[UOp] = []
     while len(queue):
       rk = queue.popleft()
-      k = rk.src[0] if rk.op is Ops.END else rk
-      assert k.op is Ops.CALL, f"unexpected op in queue: {k.op}"
-      buf_uops = tuple(_unwrap_src(s).buf_uop for s in k.src[1:] if s.op is not Ops.BIND)
-      linearized.append(k.src[0].call(*buf_uops, metadata=k.arg.metadata))
+      if rk.op is Ops.LINEAR:
+        linearized.extend(rk.src)
+      else:
+        k = rk.src[0] if rk.op is Ops.END else rk
+        assert k.op is Ops.CALL, f"unexpected op in queue: {k.op}"
+        buf_uops = tuple(_unwrap_src(s).buf_uop for s in k.src[1:] if s.op is not Ops.BIND)
+        linearized.append(k.src[0].call(*buf_uops, metadata=k.arg.metadata))
       for x in children.get(rk, []):
         in_degree[x] -= 1
         if in_degree[x] == 0: queue.append(x)
@@ -88,7 +92,7 @@ def create_new_buffer(ctx:tuple[dict[UOp, UOp], tuple[UOp, ...]], b:UOp):
   return ret
 
 pm_post_sched_cache = PatternMatcher([
-  (UPat(Ops.PARAM, name="x"), lambda ctx,x: ctx[1][x.arg]),
+  (UPat(Ops.PARAM, name="x"), lambda ctx,x: ctx[1][x.arg].rtag() if x.tag is None else None),
   # create new BUFFERs for LUNIQUE BUFFERs from rangeify
   (UPat(Ops.BUFFER, src=(UPat(Ops.LUNIQUE), UPat(Ops.DEVICE)), name="b"), create_new_buffer),
 ])
@@ -100,6 +104,8 @@ def lower_schedule_to_linear(big_sink:UOp) -> UOp|None:
   if isinstance(function.arg, KernelInfo): return None
   if not SCACHE or (sc_ret:=schedule_cache.get(function.key, None)) is None:
     if SPEC: type_verify(big_sink, tensor_spec)
+    # support recursive CALLs
+    function = graph_rewrite(function, pm_schedule, name="schedule to linear")
     linear = create_schedule(get_kernel_graph(function))
     if SCACHE: schedule_cache[function.key] = linear
   else:
@@ -115,7 +121,8 @@ def lower_schedule_to_linear(big_sink:UOp) -> UOp|None:
     print(f"scheduled {len(linear.src):5d} kernels in {(time.perf_counter()-st)*1000:8.2f} ms"+\
           f" | {' cache hit' if SCACHE and sc_ret is not None else 'CACHE MISS'} {function.key.hex()[:8]}"+\
           f" | {len(UOpMetaClass.ucache):7d} uops in cache"+("" if frm is None else f" | {frm.filename}:{frm.lineno}"))
-  return graph_rewrite(linear, pm_post_sched_cache, ctx=({}, big_sink.src[1:]), name="params to buffers")
+  linear = graph_rewrite(linear, pm_post_sched_cache, ctx=({}, big_sink.src[1:]), name="params to buffers")
+  return graph_rewrite(linear, _remove_all_tags, name="remove tags")
 
 pm_schedule = PatternMatcher([
   (UPat(Ops.CALL, src=(UPat(Ops.SINK),), allow_any_len=True, name="big_sink"), lower_schedule_to_linear),
