@@ -883,7 +883,7 @@ class PCIIface(PCIIfaceBase):
 
   def on_device_hang(self):
     self._collect_faults(reset=True)
-    raise RuntimeError(f"Device hang detected")
+    raise RuntimeError("Device hang detected")
 
   def device_fini(self): self.dev_impl.fini()
 
