@@ -60,8 +60,12 @@ const drawGraph = (data) => {
   // draw nodes
   d3.select("#graph-svg").on("click", () => d3.selectAll(".highlight").classed("highlight", false));
   const nodes = d3.select("#nodes").selectAll("g").data(g.nodes().map(id => g.node(id)), d => d).join("g").attr("class", d => d.className ?? "node")
-    .attr("transform", d => `translate(${d.x},${d.y})`).classed("clickable", d => d.ref != null).on("click", (e,d) => {
-      if (d.ref != null) return switchCtx(d.ref);
+    .attr("transform", d => `translate(${d.x},${d.y})`).on("click", (e,d) => {
+      // if (d.ref != null) return switchCtx(d.ref);
+      if (d.label.startsWith("CALL")) {
+        if (state.callSrcMask.has(d.id)) state.callSrcMask.delete(d.id); else state.callSrcMask.add(d.id);
+        return setState({});
+      }
       const parents = g.predecessors(d.id);
       const children = g.successors(d.id);
       if (parents == null && children == null) return;
@@ -707,7 +711,7 @@ const evtSources = [];
 // rewrite: a single UOp transformation
 // step: collection of rewrites
 // context: collection of steps
-const state = {currentCtx:-1, currentStep:0, currentRewrite:0, expandSteps:false};
+const state = {currentCtx:-1, currentStep:0, currentRewrite:0, expandSteps:false, callSrcMask:new Set()};
 function setState(ns) {
   saveToHistory(state);
   const { ctx:prevCtx, step:prevStep } = select(state.currentCtx, state.currentStep);
@@ -800,7 +804,7 @@ async function main() {
       }
       appendSteps(ul, i, steps);
     }
-    return setState({currentCtx: 3, currentStep: 19, currentRewrite: 0, expandSteps: true});
+    return setState({ currentCtx:-1 });
   }
   // ** center graph
   const { currentCtx, currentStep, currentRewrite, expandSteps } = state;
@@ -907,7 +911,7 @@ async function main() {
   // ** center graph
   const data = ret[currentRewrite];
   const render = (opts) => renderDag({ data, opts }, { recenter:currentRewrite === 0 });
-  const getOpts = () => ({ showIndexing:showIndexing.toggle.checked, showCallSrc:showCallSrc.toggle.checked, showSink:showSink.toggle.checked });
+  const getOpts = () => ({ showIndexing:showIndexing.toggle.checked, showCallSrc:showCallSrc.toggle.checked, showSink:showSink.toggle.checked, callSrcMask:state.callSrcMask });
   render(getOpts());
   showIndexing.toggle.onchange = () => render(getOpts());
   showCallSrc.toggle.onchange = () => render(getOpts());
