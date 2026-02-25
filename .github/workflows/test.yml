@@ -691,7 +691,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        backend: [amd, amdllvm]
+        backend: [amdllvm]
         arch: [rdna3, rdna4, cdna4]
 
     name: Linux (${{ matrix.backend }} ${{ matrix.arch }})
