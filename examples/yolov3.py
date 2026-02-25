@@ -122,7 +122,7 @@ def process_results(prediction, confidence=0.9, num_classes=80, nms_conf=0.4):
       # Get the IOUs of all boxes that come after the one we are looking at in the loop
       try:
         ious = bbox_iou(np.expand_dims(image_pred_class[i], axis=0), image_pred_class[i+1:])
-      except:
+      except Exception:
         break
       # Zero out all the detections that have IoU > threshold
       iou_mask = np.expand_dims((ious < nms_conf), axis=1)
@@ -215,7 +215,7 @@ class Darknet:
       if module_type == "convolutional":
         try:
           batch_normalize, bias = int(x["batch_normalize"]), False
-        except:
+        except Exception:
           batch_normalize, bias = 0, True
         # layer
         activation = x["activation"]
@@ -241,7 +241,7 @@ class Darknet:
         # End if it exists
         try:
           end = int(x["layers"][1])
-        except:
+        except Exception:
           end = 0
         if start > 0: start -= index
         if end > 0: end -= index

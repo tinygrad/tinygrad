@@ -16,7 +16,7 @@ def get_sample_count(samples_dir):
     v = samples_dir_count_file.readline()
     samples_dir_count_file.close()
     return int(v)
-  except:
+  except Exception:
     return 0
 
 def set_sample_count(samples_dir, sc):
@@ -135,7 +135,7 @@ elif cmd == "train":
     if sample_probs.shape[0] != samples_count:
       print("sample probs size != sample count - initializing")
       sample_probs = None
-  except:
+  except Exception:
     # it's fine
     print("sample probs could not be loaded - initializing")
 
@@ -157,7 +157,7 @@ elif cmd == "train":
     sample_idx = 0
     try:
       sample_idx = numpy.random.choice(samples_count, p = sample_probs / sample_probs.sum())
-    except:
+    except Exception:
       print("exception occurred (PROBABLY value-probabilities-dont-sum-to-1)")
       sample_idx = random.randint(0, samples_count - 1)
 

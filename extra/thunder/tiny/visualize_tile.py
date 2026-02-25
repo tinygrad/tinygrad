@@ -120,7 +120,7 @@ def visualize_tile(inst=INST):
     for r, c in rc_list:
       try:
         tile[r][c] = threadIdx_x
-      except:
+      except Exception:
         pass
 
   bank_conflicts = {}
