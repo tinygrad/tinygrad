@@ -105,7 +105,7 @@ def lower_schedule_to_linear(big_sink:UOp) -> UOp|None:
   if not SCACHE or (sc_ret:=schedule_cache.get(function.key, None)) is None:
     if SPEC: type_verify(big_sink, tensor_spec)
     # support recursive CALLs
-    function = graph_rewrite(function, pm_schedule, name="schedule to linear")
+    function = graph_rewrite(function, pm_schedule, name="inner schedule to linear")
     linear = create_schedule(get_kernel_graph(function))
     if SCACHE: schedule_cache[function.key] = linear
   else:
@@ -121,6 +121,7 @@ def lower_schedule_to_linear(big_sink:UOp) -> UOp|None:
     print(f"scheduled {len(linear.src):5d} kernels in {(time.perf_counter()-st)*1000:8.2f} ms"+\
           f" | {' cache hit' if SCACHE and sc_ret is not None else 'CACHE MISS'} {function.key.hex()[:8]}"+\
           f" | {len(UOpMetaClass.ucache):7d} uops in cache"+("" if frm is None else f" | {frm.filename}:{frm.lineno}"))
+  # TODO: use walk and avoid the remove tags
   linear = graph_rewrite(linear, pm_post_sched_cache, ctx=({}, big_sink.src[1:]), name="params to buffers")
   return graph_rewrite(linear, _remove_all_tags, name="remove tags")
 
