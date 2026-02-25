@@ -183,9 +183,10 @@ multi_pm = PatternMatcher([
   # rewrite into calls explicitly for MULTI
   (UPat(Ops.CALL, name="call"), rewrite_into_call),
   (UPat(Ops.CALL, src=(UPat(Ops.MULTI, name="multi"), ), name="root", allow_any_len=True), passthrough_multi),
-  # we just remove the MULTI from CALLs with dtypes.void and assume they are handled by the user for custom kernels
-  (UPat(Ops.CALL, dtype=dtypes.void, name="root", custom_early_reject=set([Ops.MULTI])), lambda root:
-    UOp(root.op, root.dtype, tuple(x.src[0] if x.op is Ops.MULTI else x for x in root.src), root.arg)),
+  # remove MULTI from CALL args when the body is not MULTI (body already handled sharding e.g. via allreduce)
+  (UPat(Ops.CALL, name="root", custom_early_reject=set([Ops.MULTI])), lambda root:
+    UOp(root.op, root.dtype, tuple(x.src[0] if x.op is Ops.MULTI else x for x in root.src), root.arg)
+    if root.src[0].op is not Ops.MULTI else None),
   (UPat((Ops.CAST, Ops.BITCAST, Ops.CONTIGUOUS, Ops.DETACH, Ops.CONTIGUOUS_BACKWARD),
         src=(UPat(Ops.MULTI, name="multi"), ), name="root"), passthrough_multi),
   # after CALL
