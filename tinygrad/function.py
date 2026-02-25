@@ -24,7 +24,7 @@ class function(Generic[ReturnType]):
   def __get__(self, obj, objtype=None): return functools.partial(self.__call__, obj) if obj is not None else self
 
   def __call__(self, *args, **kwargs) -> ReturnType:
-    input_uops: list[UOp] = [(t.uop if isinstance(t, Tensor) else t).multibase
+    input_uops: list[UOp] = [(t.uop if isinstance(t, Tensor) else t)
                              for name,t in list(enumerate(args))+sorted(kwargs.items()) if isinstance(t, (Tensor, UOp))]
 
     # deduplicate input_uops, keeping the first occurrence index for each unique uop
@@ -46,6 +46,6 @@ class function(Generic[ReturnType]):
 
     # replace the implicit BUFFER inputs with params using graph_rewrite
     ctx = _ImplicitBufCtx(offset=len(unique_uops))
-    uret = graph_rewrite(uret, pm_implicit, ctx=ctx)
+    uret = graph_rewrite(uret, pm_implicit, ctx=ctx, name="get function implicit buffers")
 
     return cast(ReturnType, Tensor(uret.call(*unique_uops, *ctx.bufs, name=self.fxn.__name__), device=ret.device))

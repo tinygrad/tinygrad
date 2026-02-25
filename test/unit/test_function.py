@@ -78,5 +78,17 @@ class TestFunction(unittest.TestCase):
     foo = Foo()
     np.testing.assert_equal(foo(Tensor([1,2,3])).numpy(), [11,22,33])
 
+  def test_grad_gemm(self):
+    @function
+    def f(a:Tensor, b:Tensor) -> Tensor: return a @ b
+
+    a = Tensor([[1.,2.],[3.,4.]], requires_grad=True)
+    b = Tensor([[5.,6.],[7.,8.]], requires_grad=True)
+    na, nb = a.numpy(), b.numpy()
+    (f(a, b).contiguous() * b).sum().backward()
+    # L = sum((a@b) * b), dL/d(a@b) = b, dL/da = b @ b^T, dL/db = a^T @ b + (a@b)
+    np.testing.assert_allclose(a.grad.numpy(), nb @ nb.T)
+    np.testing.assert_allclose(b.grad.numpy(), na.T @ nb + na @ nb)
+
 if __name__ == '__main__':
   unittest.main()
