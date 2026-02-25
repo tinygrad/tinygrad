@@ -10,7 +10,8 @@ from extra.gemm.amd_asm_matmul import Kernel
 
 # skip instructions that mutate wave state (PC, EXEC, allocations, signals)
 SKIP = {'S_SETPC_B64', 'S_SWAPPC_B64', 'S_RFE_B64', 'S_BARRIER_SIGNAL', 'S_BARRIER_SIGNAL_ISFIRST', 'S_GET_BARRIER_STATE', 'S_ALLOC_VGPR',
-                  'S_BARRIER_INIT', 'S_BARRIER_JOIN', 'S_SLEEP_VAR', 'S_SENDMSG_RTN_B32', 'S_SENDMSG_RTN_B64', 'S_GETPC_B64'}
+        'S_BARRIER_INIT', 'S_BARRIER_JOIN', 'S_SLEEP_VAR', 'S_SENDMSG_RTN_B32', 'S_SENDMSG_RTN_B64', 'S_GETPC_B64',
+        'S_FMAAK_F32', 'S_FMAMK_F32'}
 SKIP_SUBSTR = ['SAVEEXEC', 'WREXEC', 'MOVREL', 'ATOMIC', 'S_BUFFER_', 'S_ATC_PROBE', 'DS_CMPSTORE_RTN', 'GS_REG', 'BARRIER']
 
 ALU_FORMATS = {'VOP1', 'VOP1_LIT', 'VOP1_SDST', 'VOP2', 'VOP2_LIT', 'VOP3', 'VOP3_SDST', 'VOP3SD', 'VOP3P', 'VOP3P_MFMA', 'VOP3PX2',
@@ -180,6 +181,7 @@ if __name__ == "__main__":
   all_insts = mem_insts + alu_insts
 
   bad_i = find_first_faulting_index(all_insts)
-  print("bad_i =", bad_i)
+  if bad_i is not None:
+    print("bad_i =", bad_i)
   if bad_i is not None:
     print("faulting inst =", all_insts[bad_i])
