@@ -1621,13 +1621,13 @@ def _compile_mem_op(inst: ir3.DS|ir3.FLAT|ir3.GLOBAL|ir3.SCRATCH|ir4.DS|ir4.VFLA
       atomic_data = _u64(_rdata(vdata_reg, lane), _rdata(vdata_reg + _c(1), lane)) \
         if data_bits_mem == 64 else _rdata(vdata_reg, lane)
       return {'ADDR': addr, 'DATA': atomic_data, '_vmem': mem, '_active': active,
-              'laneId': lane, '_wave_size': ctx.wave_size, 'v_addr': vaddr_base, 's_saddr': saddr_base, 'SADDR': saddr_base}
+              'laneId': lane, '_wave_size': ctx.wave_size, 'v_addr': vaddr_base, 'v_addr_off': addr, 's_saddr': saddr_base, 'SADDR': saddr_base}
     vdata = _rdata(vdata_reg, lane).cast(dtypes.uint64) if 'STORE' in op_name \
       else _rdata(vdst_reg, lane) if 'D16' in op_name else UOp.const(dtypes.uint32, 0)
     if 'STORE' in op_name and data_bits_mem >= 64:
       vdata = vdata | (_rdata(vdata_reg + _c(1), lane).cast(dtypes.uint64) << UOp.const(dtypes.uint64, 32))
     srcs = {'ADDR': addr, 'VDATA': vdata, '_vmem': mem, '_active': active,
-            'laneId': lane, '_wave_size': ctx.wave_size, 'v_addr': vaddr_base, 's_saddr': saddr_base, 'SADDR': saddr_base,
+            'laneId': lane, '_wave_size': ctx.wave_size, 'v_addr': vaddr_base, 'v_addr_off': addr, 's_saddr': saddr_base, 'SADDR': saddr_base,
             's_saddr_off': UOp.const(dtypes.uint64, 0), 'OFFSET': offset}
     for i in range(data_bits_mem // 32):
       srcs[f'VDATA{i}'] = _rdata(vdata_reg + _c(i), lane) if 'STORE' in op_name else UOp.const(dtypes.uint32, 0)

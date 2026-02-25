@@ -55,7 +55,7 @@ class FileIOInterface:
   @staticmethod
   def eventfd(initval, flags=None): return FileIOInterface(fd=os.eventfd(initval, flags))  # type: ignore[attr-defined]
 
-if MOCKGPU:=getenv("MOCKGPU") and sys.platform == "linux": from test.mockgpu.mockgpu import MockFileIOInterface as FileIOInterface  # noqa: F401 # pylint: disable=unused-import
+if MOCKGPU:=getenv("MOCKGPU") and sys.platform != "win32": from test.mockgpu.mockgpu import MockFileIOInterface as FileIOInterface  # noqa: F401 # pylint: disable=unused-import
 
 # **************** for HCQ Compatible Devices ****************
 

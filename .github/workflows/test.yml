@@ -654,6 +654,7 @@ jobs:
       - name: Run AMD emulated tests on NULL backend
         env:
           AMD: 0
+          MOCKGPU: 0
         run: |
           PYTHONPATH=. NULL=1 EMULATE=AMD python extra/mmapeak/mmapeak.py
           PYTHONPATH=. NULL=1 EMULATE=AMD_CDNA4 python3 -m pytest -n=auto test/testextra/test_tk.py test/backend/test_asm_gemm.py
@@ -698,6 +699,7 @@ jobs:
     timeout-minutes: 15
     env:
       AMD: 1
+      MOCKGPU: 1
       MOCKGPU_ARCH: ${{ matrix.arch }}
       SKIP_SLOW_TEST: 1
       AMD_LLVM: ${{ matrix.backend == 'amdllvm' && '1' || matrix.backend != 'amdllvm' && '0' }}
