@@ -1470,29 +1470,28 @@ def train_llama3():
       st = time.perf_counter()
 
       stopped = False
+      losses, data_time, dev_time = [], 0, 0
       for _ in range(grad_acc):
         ist = time.perf_counter()
         try: tokens = next(train_iter)
         except StopIteration:
           stopped = True
           break
-        dt = time.perf_counter()
-        loss = minibatch(tokens)
+        mst = time.perf_counter()
+        data_time += mst - ist
+        losses.append(minibatch(tokens).item())
+        dev_time += time.perf_counter() - mst
       if stopped: break
 
       gt = time.perf_counter()
-      lr = optim_step()
-      ot = time.perf_counter()
-
-      loss = loss.float().item()
-      lr = lr.item()
-
+      lr = optim_step().item()
       et = time.perf_counter()
+
+      loss = sum(losses) / len(losses)
+      optim_time = et - gt
+      dev_time += optim_time
       step_time = et - st
       gbs_time = gt - st
-      optim_time = ot - gt
-      data_time = dt - ist
-      dev_time = step_time - data_time * grad_acc
       if BENCHMARK: step_times.append(step_time)
 
       i += 1
