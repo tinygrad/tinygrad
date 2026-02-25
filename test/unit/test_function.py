@@ -119,5 +119,16 @@ class TestFunction(unittest.TestCase):
     a = Tensor([1., 2., 3.])
     np.testing.assert_allclose(g(f(a)).numpy(), [110., 440., 990.])
 
+  def test_name(self):
+    @function
+    def f(a:Tensor) -> Tensor: return a + 1
+    assert f(Tensor([1])).uop.arg.name.endswith("f")
+
+  def test_method_name(self):
+    class Foo:
+      @function
+      def __call__(self, x:Tensor) -> Tensor: return x + 1
+    assert Foo()(Tensor([1])).uop.arg.name.endswith("Foo.__call__")
+
 if __name__ == '__main__':
   unittest.main()

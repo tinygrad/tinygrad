@@ -68,4 +68,4 @@ class function(Generic[ReturnType]):
       subs[imp] = UOp.param(len(unique_uops) + i, imp.dtype, imp._shape, imp._device)
     uret = ret.uop.substitute(subs)
 
-    return cast(ReturnType, Tensor(uret.call(*unique_uops, *implicit, name=self.fxn.__name__), device=ret.device))
+    return cast(ReturnType, Tensor(uret.call(*unique_uops, *implicit, name=self.fxn.__qualname__), device=ret.device))
