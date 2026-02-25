@@ -59,10 +59,12 @@ const drawGraph = (data) => {
   const g = dagre.graphlib.json.read(data);
   // draw nodes
   d3.select("#graph-svg").on("click", () => d3.selectAll(".highlight").classed("highlight", false));
+  const callCount = g.nodes().filter(n => g.node(n).label.startsWith("CALL\n")).length;
   const nodes = d3.select("#nodes").selectAll("g").data(g.nodes().map(id => g.node(id)), d => d).join("g").attr("class", d => d.className ?? "node")
     .attr("transform", d => `translate(${d.x},${d.y})`).on("click", (e,d) => {
       if (d.label.startsWith("CALL")) {
         if (state.callSrcMask.has(d.id)) state.callSrcMask.delete(d.id); else state.callSrcMask.add(d.id);
+        if (state.callSrcMask.size >= callCount) { showCallSrc.toggle.checked = !showCallSrc.toggle.checked; state.callSrcMask.clear(); }
         return setState({});
       }
       const parents = g.predecessors(d.id);
