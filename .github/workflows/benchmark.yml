@@ -681,6 +681,49 @@ jobs:
     - name: Run process replay tests
       run: cp test/external/process_replay/process_replay.py ./process_replay.py && git fetch origin master && git -c advice.detachedHead=false checkout origin/master && PYTHONPATH=. python3 process_replay.py
 
+  teststrixhalobenchmark:
+    name: AMD Benchmark (Strix Halo)
+    runs-on: [self-hosted, Linux, tinyf2]
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash -e -o pipefail {0}
+    if: github.repository_owner == 'tinygrad'
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+    - name: Setcap to python
+      run: ./extra/amdpci/setup_python_cap.sh
+    - name: Remove amd modules
+      run: PYTHONPATH=. ./extra/hcq/hcq_smi.py amd rmmod
+    - name: Kill stale pids
+      run: PYTHONPATH=. ./extra/hcq/hcq_smi.py amd kill_pids
+    - name: Symlink models and datasets
+      run: |
+        mkdir -p extra/datasets
+        ln -s ~/tinygrad/extra/datasets/cifar-10-python.tar.gz extra/datasets/cifar-10-python.tar.gz
+    - name: setup staging db
+      if: github.ref == 'refs/heads/update_benchmark_staging'
+      run: |
+        echo "CACHEDB=/tmp/staging.db" >> $GITHUB_ENV
+        rm -f /tmp/staging.db /tmp/staging.db-shm /tmp/staging.db-wal
+    - name: reset process replay
+      run: test/external/process_replay/reset.py
+    - name: Run Tensor Core GEMM (AMD)
+      run: AMD=1 SHOULD_USE_TC=1 HALF=1 DEBUG=2 ATOL=2e-2 python3 extra/gemm/simple_matmul.py
+    - name: Test AMD=1
+      run: DEBUG=2 AMD=1 python -m pytest -rA test/test_tiny.py
+    - name: Run GPT2
+      run: |
+        BENCHMARK_LOG=gpt2_nojit AMD=1 JIT=0 python3 examples/gpt2.py --prompt "Hello." --count 10 --temperature 0 --timing
+        BENCHMARK_LOG=gpt2 AMD=1 JIT=1 python3 examples/gpt2.py --prompt "Hello." --count 10 --temperature 0 --timing
+    - name: Run GPT2 w HALF
+      run: BENCHMARK_LOG=gpt2_half AMD=1 HALF=1 python3 examples/gpt2.py --count 10 --temperature 0 --timing
+    - name: Train MNIST
+      run: time PYTHONPATH=. AMD=1 TARGET_EVAL_ACC_PCT=96.0 python3 examples/beautiful_mnist.py
+    - name: Run process replay tests
+      run: cp test/external/process_replay/process_replay.py ./process_replay.py && git fetch origin master && git -c advice.detachedHead=false checkout origin/master && PYTHONPATH=. python3 process_replay.py
+
   testgreendriverbenchmark:
     name: NV Benchmark
     runs-on: [self-hosted, Linux, tinyboxrandom]
