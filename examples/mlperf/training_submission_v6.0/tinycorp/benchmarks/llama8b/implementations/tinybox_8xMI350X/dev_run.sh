@@ -11,10 +11,11 @@ export HK_FLASH_ATTENTION=${HK_FLASH_ATTENTION:-1}
 export ALL2ALL=${ALL2ALL:-1}
 export USE_ATOMICS=${USE_ATOMICS:-1}
 export ASM_GEMM=${ASM_GEMM:-1}
-export WQKV=${WQKV:-0}
+export WQKV=${WQKV:-1}
 
-export DEFAULT_FLOAT="bfloat16" OPTIM_DTYPE="bfloat16"
-export DP=${DP:-8} BS=${BS:-8} EVAL_BS=${EVAL_BS:-8} GRADIENT_ACC_STEPS=${GRADIENT_ACC_STEPS:-2}
+export DEFAULT_FLOAT="bfloat16" OPTIM_DTYPE="bfloat16" SUM_DTYPE="bfloat16"
+export DP=${DP:-1} MP=${MP:-8}
+export BS=${BS:-1} EVAL_BS=${EVAL_BS:-1} GRADIENT_ACC_STEPS=${GRADIENT_ACC_STEPS:-16}
 export GBS=$((BS * GRADIENT_ACC_STEPS))
 
 export MODEL="llama3"
