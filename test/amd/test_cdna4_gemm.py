@@ -7,16 +7,14 @@ def is_cdna4_mock(): return os.environ.get("MOCKGPU_ARCH", "") == "cdna4"
 
 @unittest.skipUnless(is_cdna4_mock(), "MOCKGPU_ARCH=cdna4 required")
 class TestCDNA4GEMM(unittest.TestCase):
-  DEVICE = "AMD"
-
   def _matmul_check(self, M, K, N, dtype=np.float32, atol=1e-4, rtol=1e-4):
     rng = np.random.default_rng(42)
     a_np = rng.standard_normal((M, K)).astype(dtype)
     b_np = rng.standard_normal((K, N)).astype(dtype)
     expected = a_np @ b_np
 
-    a = Tensor(a_np, device=self.DEVICE)
-    b = Tensor(b_np, device=self.DEVICE)
+    a = Tensor(a_np, device="AMD")
+    b = Tensor(b_np, device="AMD")
     result = (a @ b).numpy()
 
     np.testing.assert_allclose(result, expected, atol=atol, rtol=rtol,
@@ -39,8 +37,8 @@ class TestCDNA4GEMM(unittest.TestCase):
     a_np = rng.standard_normal((B,M,K)).astype(np.float32)
     b_np = rng.standard_normal((B,K,N)).astype(np.float32)
 
-    a = Tensor(a_np, device=self.DEVICE)
-    b = Tensor(b_np, device=self.DEVICE)
+    a = Tensor(a_np, device="AMD")
+    b = Tensor(b_np, device="AMD")
 
     np.testing.assert_allclose((a @ b).numpy(), a_np @ b_np, atol=1e-3, rtol=1e-3 )
 
