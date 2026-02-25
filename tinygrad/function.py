@@ -1,7 +1,7 @@
 import functools
 from typing import Generic, TypeVar, Callable, cast
 from dataclasses import dataclass, field
-from tinygrad.helpers import Context
+from tinygrad.helpers import Context, dedup
 from tinygrad.uop.ops import UOp, Ops, UPat, PatternMatcher, graph_rewrite
 from tinygrad.tensor import Tensor
 
@@ -27,22 +27,25 @@ class function(Generic[ReturnType]):
     input_uops: list[UOp] = [(t.uop if isinstance(t, Tensor) else t).multibase
                              for name,t in list(enumerate(args))+sorted(kwargs.items()) if isinstance(t, (Tensor, UOp))]
 
+    # deduplicate input_uops, keeping the first occurrence index for each unique uop
+    unique_uops: list[UOp] = dedup(input_uops)
+
     # disable realize/schedule while this is running
     # run it and do surgery later
     with Context(ALLOW_DEVICE_USAGE=0):
       ret = self.fxn(*args, **kwargs)
     assert isinstance(ret, Tensor), "only supports one tensor return for now"
 
-    # replace the known inputs with params
+    # replace the known inputs with params (using deduplicated slots)
     subs = {}
-    for i,x in enumerate(input_uops):
+    for i,x in enumerate(unique_uops):
       # TODO: this can be better
       if x.op is Ops.BIND: subs[x] = UOp.param(i, x.dtype, x._shape, x._device, x._min_max)
       else: subs[x] = UOp.param(i, x.dtype, x._shape, x._device)
     uret = ret.uop.substitute(subs)
 
     # replace the implicit BUFFER inputs with params using graph_rewrite
-    ctx = _ImplicitBufCtx(offset=len(input_uops))
+    ctx = _ImplicitBufCtx(offset=len(unique_uops))
     uret = graph_rewrite(uret, pm_implicit, ctx=ctx)
 
-    return cast(ReturnType, Tensor(uret.call(*input_uops, *ctx.bufs, name=self.fxn.__name__), device=ret.device))
+    return cast(ReturnType, Tensor(uret.call(*unique_uops, *ctx.bufs, name=self.fxn.__name__), device=ret.device))
