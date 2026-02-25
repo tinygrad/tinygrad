@@ -110,17 +110,7 @@ def collect_instructions() -> tuple[list[Inst], list[Inst], list[str]]:
     elif fmt in MEM_FORMATS: mem_insts.append(create_mem_inst(op_enum, builder))
   return alu_insts, mem_insts, skipped
 
-if __name__ == "__main__":
-  arch = Device[Device.DEFAULT].renderer.arch
-  if arch.startswith("gfx12"):
-    from tinygrad.runtime.autogen.amd.rdna4.ins import *
-    import tinygrad.runtime.autogen.amd.rdna4.ins as all_insts
-  elif arch.startswith("gfx11"):
-    from tinygrad.runtime.autogen.amd.rdna3.ins import *
-    import tinygrad.runtime.autogen.amd.rdna3.ins as all_insts
-  else: raise RuntimeError(f"{arch} not supported yet")
-  alu_insts, mem_insts, skipped = collect_instructions()
-  print(f"collected {len(alu_insts)} ALU + {len(mem_insts)} memory instructions ({len(skipped)} skipped)")
+def exec_insts(insts:list):
   k = Kernel(arch)
   # ** prologue for global memory
   k.emit(s_load_b64(sdata=s[S_BUF_PTR[0]:S_BUF_PTR[1]], sbase=s[S_KERNARG_PTR[0]:S_KERNARG_PTR[1]], soffset=NULL))
@@ -128,7 +118,7 @@ if __name__ == "__main__":
   k.emit(v_mov_b32_e32(v[V_VADDR[0]], 0))
   k.emit(v_mov_b32_e32(v[V_VADDR[1]], 0))
   # ** emit
-  for inst in mem_insts+alu_insts: k.emit(inst)
+  for inst in insts: k.emit(inst)
   k.emit(s_endpgm())
   # ** run
   NUM_THREADS, NUM_GRIDS, BUF_SIZE = 32, 1, 1024*1024
@@ -141,4 +131,18 @@ if __name__ == "__main__":
   B = Tensor.empty(1, dtype=dtypes.uint8)
   C = Tensor.empty(1, dtype=dtypes.uint8)
   Tensor.custom_kernel(A, B, C, fxn=fxn)[0].realize()
-  print(f"Ran {len(alu_insts) + len(mem_insts)} instructions.")
+  print(f"Ran {len(insts)} instructions.")
+
+if __name__ == "__main__":
+  arch = Device[Device.DEFAULT].renderer.arch
+  if arch.startswith("gfx12"):
+    from tinygrad.runtime.autogen.amd.rdna4.ins import *
+    import tinygrad.runtime.autogen.amd.rdna4.ins as all_insts
+  elif arch.startswith("gfx11"):
+    from tinygrad.runtime.autogen.amd.rdna3.ins import *
+    import tinygrad.runtime.autogen.amd.rdna3.ins as all_insts
+  else: raise RuntimeError(f"{arch} not supported yet")
+  alu_insts, mem_insts, skipped = collect_instructions()
+  print(f"collected {len(alu_insts)} ALU + {len(mem_insts)} memory instructions ({len(skipped)} skipped)")
+  all_insts = mem_insts+alu_insts
+  exec_insts(all_insts[:100])
