@@ -44,4 +44,5 @@ class function(Generic[ReturnType]):
         call_uops.append(x)
     uret = uret.substitute(subs)
 
-    return cast(ReturnType, Tensor(uret.call(*call_uops, name=self.fxn.__qualname__), device=ret.device))
+    name = getattr(self.fxn, '__qualname__', None) or type(self.fxn).__qualname__
+    return cast(ReturnType, Tensor(uret.call(*call_uops, name=name), device=ret.device))

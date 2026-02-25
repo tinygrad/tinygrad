@@ -131,5 +131,14 @@ class TestFunction(unittest.TestCase):
       def __call__(self, x:Tensor) -> Tensor: return x + 1
     assert Foo()(Tensor([1])).uop.arg.name.endswith("Foo.__call__")
 
+  def test_callable_instance(self):
+    class Foo:
+      def __init__(self): self.w = Tensor([10,20,30])
+      def __call__(self, x:Tensor) -> Tensor: return x + self.w
+    foo = Foo()
+    f = function(foo)
+    np.testing.assert_equal(f(Tensor([1,2,3])).numpy(), [11,22,33])
+    assert f(Tensor([1,2,3])).uop.arg.name.endswith("Foo")
+
 if __name__ == '__main__':
   unittest.main()
