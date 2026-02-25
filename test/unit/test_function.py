@@ -90,5 +90,15 @@ class TestFunction(unittest.TestCase):
     np.testing.assert_allclose(a.grad.numpy(), nb @ nb.T)
     np.testing.assert_allclose(b.grad.numpy(), na.T @ nb + na @ nb)
 
+  def test_symbolic_index(self):
+    from tinygrad.uop.ops import UOp
+    table = Tensor([10,20,30,40]).contiguous().realize()
+    @function
+    def f(x:Tensor, start_pos:int|UOp) -> Tensor:
+      return x + table[start_pos]
+
+    v = UOp.variable("start_pos", 0, 3)
+    np.testing.assert_equal(f(Tensor([1,2,3]), v.bind(0)).numpy(), [11,12,13])
+
 if __name__ == '__main__':
   unittest.main()
