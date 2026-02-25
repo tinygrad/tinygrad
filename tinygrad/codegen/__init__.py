@@ -92,10 +92,11 @@ def full_rewrite_to_sink(sink:UOp, ren:Renderer|None=None, optimize:bool=True) -
   pm_decomp = symbolic_simple+get_late_rewrite_patterns(supported_ops, ren.device, bool(DISABLE_FAST_IDIV))
   pm_transcendental = symbolic_simple+get_transcendental_patterns(supported_ops, TRANSCENDENTAL>=2)
   sink = graph_rewrite(sink, pm_decomp, ctx=ren.device, name="decompositions")
-  if not is_dtype_supported(dtypes.long, ren.device) or dtypes.long in EMULATED_DTYPES.tolist(dtypes):
-    sink = graph_rewrite(sink, pm_long_decomp, name="decomp long -> int", bottom_up=True)
-  for fr, to in [(fr, next((to for to in promo_lattice[fr] if is_dtype_supported(to, ren.device)), dtypes.float))
-                 for fr in EMULATED_DTYPES.tolist(dtypes) if fr in dtypes.floats]:
+
+  def _should_emulate(dt): return not is_dtype_supported(dt, ren.device) or dt in EMULATED_DTYPES.tolist(dtypes)
+  if _should_emulate(dtypes.long): sink = graph_rewrite(sink, pm_long_decomp, name="decomp long -> int", bottom_up=True)
+  for fr in filter(_should_emulate, dtypes.fp8s+(dtypes.half, dtypes.bfloat16)):
+    to = next(filter(lambda to: is_dtype_supported(to, ren.device), promo_lattice[fr]))
     sink = graph_rewrite(sink, pm_float_decomp, ctx=(fr, to), name=f"decomp {fr} -> {to}", bottom_up=True)
   sink = graph_rewrite(sink, pm_transcendental, ctx=ren.device, name="transcendental")
 
