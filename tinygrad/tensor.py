@@ -3658,7 +3658,7 @@ class Tensor(OpMixin):
 
     # contiguous creates the image, and early realize static weights (TODO: test for the static weight)
     if IMAGE >= 2: x,w = x.cast(base_image_type((bs*iy, ix*groups*cin//4, 4))), w.cast(base_image_type((cout//4, H*W*cin, 4)))
-    if IMAGE == 1 and FLOAT16: x, w = x.cast(dtypes.half).cast(dtypes.float), w.cast(dtypes.half).cast(dtypes.float)
+    if IMAGE == 1 and FLOAT16: x, w = x.contiguous().cast(dtypes.half).cast(dtypes.float), w.contiguous().cast(dtypes.half).cast(dtypes.float)
     else: x, w = x.contiguous(), w.contiguous()
 
     if IMAGE == 1 and added_weight: w, H = w[:, :-added_weight, ...], H - added_weight
