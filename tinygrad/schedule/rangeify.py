@@ -89,7 +89,7 @@ def resolve_call(c:UOp, allow_param_mismatch=False) -> UOp|None:
   for i, (p, a) in enumerate(zip(params, args)):
     if p.shape != a.shape: raise TypeError(f"arg {i} shape mismatch: expected {p.shape}, got {a.shape}")
     if p.dtype != a.dtype: raise TypeError(f"arg {i} dtype mismatch: expected {p.dtype}, got {a.dtype}")
-  return c.src[0].substitute(dict(zip(params, args)))
+  return c.src[0].substitute(dict(zip(params, args)), walk=True)
 
 earliest_rewrites = mop_cleanup+PatternMatcher([
   # resolve calls

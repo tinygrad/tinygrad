@@ -373,11 +373,12 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
   def __bool__(self): return self._eval((dtypes.bool,), bool)
   def __int__(self): return self._eval(dtypes.ints, int)
   def __float__(self): return float(self._eval(dtypes.floats, float))
-  def substitute(self, dvars:dict[UOp, UOp], name:str|None=None, extra_pm:PatternMatcher|None=None):
+  def substitute(self, dvars:dict[UOp, UOp], name:str|None=None, extra_pm:PatternMatcher|None=None, walk:bool=False):
     dvars = {k:v for k,v in dvars.items() if k is not v}
     if len(dvars) == 0: return self
     with Context(TRACK_MATCH_STATS=(0 if name is None else TRACK_MATCH_STATS.value)):
-      return graph_rewrite(self, (extra_pm+_substitute) if extra_pm is not None else _substitute, dvars, bottom_up=True, name=name)
+      return graph_rewrite(self, (extra_pm+_substitute) if extra_pm is not None else _substitute, dvars,
+                           bottom_up=True, walk=walk, name=name)
   # NOTE: this is not called by Tensor slice (Tensor handles UOps directly), but satisfies SupportsIndex for type checking
   def __index__(self): return self.__int__()
 
@@ -1259,6 +1260,30 @@ class RewriteContext:
     ret = self.bpm_cache[x] = unwrap(self.bpm).rewrite(x, self.ctx)
     return ret
 
+  def walk_rewrite(self, root:UOp) -> UOp:
+    """MLIR-style Walk Pattern Rewrite Driver: single-pass, no re-traversal into rewritten subtrees."""
+    stack: list[tuple[UOp, bool]] = [(root, False)]
+    while stack:
+      n, processed = stack.pop()
+      if n in self.replace: continue
+      if not processed:
+        # bottom-up: try bpm on original node first, if it rewrites, use result as-is (no traversal into replacement)
+        if self.bpm is not None and (rewritten:=self.cached_bpm_rewrite(n)) is not None:
+          self.replace[n] = rewritten
+          continue
+        # no rewrite, process children then come back to rebuild
+        stack.append((n, True))
+        for x in reversed(n.src):
+          if x not in self.replace: stack.append((x, False))
+      else:
+        # rebuild node with rewritten srcs
+        new_src = tuple(self.replace.get(x, x) for x in n.src)
+        new_n = UOp(n.op, n.dtype, new_src, n.arg, n.tag) if new_src != n.src else n
+        # top-down: try pm on rebuilt node, use result as-is (no re-traversal)
+        if self.pm is not None and (rewritten:=self.pm_rewrite(new_n)) is not None: new_n = rewritten
+        self.replace[n] = new_n
+    return self.replace.get(root, root)
+
   def unified_rewrite(self, root:UOp) -> UOp:
     stack: collections.deque[tuple[UOp, int, UOp]] = collections.deque([(root, 0, root)])
     on_stack = {root}  # all UOps either on the stack or in self.replace, i.e. dont have to be placed again
@@ -1326,9 +1351,9 @@ class RewriteContext:
     return self.replace[root]
 
 @profile_matches
-def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False, name=None, bpm=None) -> UOp:
+def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False, name=None, bpm=None, walk=False) -> UOp:
   rewrite_ctx = RewriteContext(pm if not bottom_up else None, pm if bottom_up else bpm, ctx)
-  return rewrite_ctx.unified_rewrite(sink)
+  return rewrite_ctx.walk_rewrite(sink) if walk else rewrite_ctx.unified_rewrite(sink)
 
 def sint_to_uop(x:sint, dtype=dtypes.index) -> UOp: return UOp.const(dtype, x) if isinstance(x, int) else x.cast(dtype)
 
