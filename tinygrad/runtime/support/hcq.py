@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import cast, Callable, Type, TypeVar, Generic, Any
-import contextlib, decimal, statistics, time, ctypes, array, os, struct, collections, functools, itertools
+import contextlib, decimal, statistics, time, ctypes, array, os, struct, collections, functools, itertools, sys
 try: import fcntl # windows misses that
 except ImportError: fcntl = None #type:ignore[assignment]
 from tinygrad.helpers import PROFILE, getenv, to_mv, from_mv, cpu_profile, ProfileRangeEvent, select_first_inited, unwrap, suppress_finalizing
@@ -55,7 +55,7 @@ class FileIOInterface:
   @staticmethod
   def eventfd(initval, flags=None): return FileIOInterface(fd=os.eventfd(initval, flags))  # type: ignore[attr-defined]
 
-if MOCKGPU:=getenv("MOCKGPU"): from test.mockgpu.mockgpu import MockFileIOInterface as FileIOInterface  # noqa: F401 # pylint: disable=unused-import
+if MOCKGPU:=getenv("MOCKGPU") and sys.platform == "linux": from test.mockgpu.mockgpu import MockFileIOInterface as FileIOInterface  # noqa: F401 # pylint: disable=unused-import
 
 # **************** for HCQ Compatible Devices ****************
 

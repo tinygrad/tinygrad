@@ -56,7 +56,8 @@ def _open(path, flags):
         virtfd = d.open(path, flags, 0o777, x)
         tracked_fds[virtfd.fd] = virtfd
         return virtfd.fd
-  return os.open(path, flags, 0o777) if os.path.exists(path) else None
+  if os.path.exists(path): return os.open(path, flags, 0o777)
+  raise FileNotFoundError(path)
 
 class MockFileIOInterface(FileIOInterface):
   def __init__(self, path:str="", flags:int=os.O_RDONLY, fd:int|None=None):
@@ -108,7 +109,12 @@ class MockFileIOInterface(FileIOInterface):
   def anon_mmap(start, sz, prot, flags, offset):
     return FileIOInterface._mmap(start, sz, prot, flags & ~0x4a000, -1, offset)  # strip MAP_LOCKED|MAP_POPULATE|MAP_HUGETLB
   @staticmethod
-  def exists(path): return _open(path, os.O_RDONLY) is not None
+  def exists(path):
+    for d in drivers:
+      for x in d.tracked_files:
+        if path == x.path:
+          return True
+    return os.path.exists(path)
   @staticmethod
   def readlink(path): raise NotImplementedError()
   @staticmethod
