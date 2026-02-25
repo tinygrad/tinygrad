@@ -163,7 +163,8 @@ def assign_multi(dest:UOp, src:UOp):
 def passthrough_multi(root:UOp, multi:UOp):
   return UOp(root.op, root.dtype, (multi.src[0],)+tuple(x.src[0] if x.op is Ops.MULTI else x for x in root.src[1:]), root.arg).multi(multi.axis)
 
-def rewrite_into_call(call:UOp): return call.replace(src=(graph_rewrite(call.src[0], multi_pm),)+call.src[1:]) if should_resolve_call(call) else None
+def rewrite_into_call(call:UOp):
+  return call.replace(src=(graph_rewrite(call.src[0], multi_pm, name="subcall"),)+call.src[1:]) if should_resolve_call(call) else None
 
 # NOTE: this is the same pattern as Ops.UNROLL
 multi_pm = PatternMatcher([

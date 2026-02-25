@@ -79,7 +79,7 @@ pm_gather_params = PatternMatcher([ (UPat(Ops.PARAM, name="p"), lambda ctx, p: c
 def resolve_call(c:UOp, allow_param_mismatch=False) -> UOp|None:
   if not should_resolve_call(c): return None
   params: list[UOp] = []
-  graph_rewrite(c.src[0], pm_gather_params, bottom_up=True, ctx=params)
+  graph_rewrite(c.src[0], pm_gather_params, bottom_up=True, ctx=params, name="gather params")
   params = sorted(params, key=lambda x: x.arg)
   args = c.src[1:]
   # TODO: this check belongs in spec, not here
