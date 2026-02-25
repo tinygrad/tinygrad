@@ -46,6 +46,7 @@ const layoutUOp = (g, { graph, change }, opts) => {
   g.setGraph({ rankdir: "LR", font:"sans-serif", lh:lineHeight });
   ctx.font = `350 ${lineHeight}px ${g.graph().font}`;
   if (change?.length) g.setNode("overlay", {label:"", labelWidth:0, labelHeight:0, className:"overlay"});
+  let callCount = 0;
   for (const [k, {label, src, ref, color, tag }] of Object.entries(graph)) {
     // adjust node dims by label size (excluding escape codes) + add padding
     let [width, height] = [0, 0];
@@ -53,6 +54,7 @@ const layoutUOp = (g, { graph, change }, opts) => {
       width = Math.max(width, ctx.measureText(line).width);
       height += lineHeight;
     }
+    if (label.startsWith("CALL\n")) callCount++;
     g.setNode(k, {...rectDims(width, height), label, ref, id:k, color, tag});
     // add edges
     const edgeCounts = {};
@@ -103,6 +105,7 @@ const layoutUOp = (g, { graph, change }, opts) => {
       }
     }
   }
+  g.graph().callCount = callCount;
   dagre.layout(g);
   // remove overlay node if it's empty
   if (!g.node("overlay")?.width) g.removeNode("overlay");
