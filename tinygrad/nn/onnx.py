@@ -5,7 +5,7 @@ from tinygrad.nn.state import TensorIO
 from tinygrad.tensor import Tensor, _broadcast_shape, ReductionStr
 from tinygrad.helpers import getenv, all_same, prod, flatten, make_tuple, argsort, is_numpy_ndarray, get_single_element, polyN
 from tinygrad.dtype import DType, ConstType, dtypes, _from_np_dtype, truncate, least_upper_dtype, DTYPES_DICT
-from tinygrad.device import is_dtype_supported, Device
+from tinygrad.device import Device
 from tinygrad.uop.ops import sint
 
 # ***** protobuf definitions ******
@@ -34,13 +34,6 @@ class OnnxDataType(enum.IntEnum):
   UINT64 = 13; BFLOAT16 = 16 # noqa: E702
 
   def to_dtype(self) -> DType: return DTYPES_DICT[self.name.lower()]
-
-def dtype_fallback(dtype: DType, fallback_context: str) -> DType:
-  if is_dtype_supported(dtype): return dtype
-  default_dtype = dtypes.default_int if dtypes.is_int(dtype) else dtypes.default_float
-  warnings.warn(f"dtype {dtype} on {Device.DEFAULT} from {fallback_context} is not supported, falling back to {default_dtype}")
-  assert is_dtype_supported(default_dtype), f"dtype {default_dtype} must be supported on {Device.DEFAULT}"
-  return default_dtype
 
 # ***** onnx spec definitions *****
 class Domain(enum.Enum):
@@ -239,7 +232,7 @@ class OnnxPBParser:
       obj["data_location"] = 0
 
     # parse tensor
-    to_dtype = dtype_fallback(true_dtype := OnnxDataType(obj['data_type']).to_dtype(), "buffer parse")
+    to_dtype = OnnxDataType(obj['data_type']).to_dtype()
     shape = tuple(obj['dims'])
     present_fields = [field for field in ['float_data', 'int32_data', 'int64_data', 'double_data', 'uint64_data', 'raw_data'] if field in obj]
     assert len(present_fields) == 1, f"only 1 data field is allowed from {obj=}"
@@ -248,8 +241,7 @@ class OnnxPBParser:
       obj["parsed_tensor"] = Tensor(data, dtype=to_dtype).reshape(shape)
       return obj
     assert isinstance(data, Tensor) and data.dtype == dtypes.uint8, data
-    data = data.bitcast(true_dtype).reshape(shape)
-    data = data.to(Device.DEFAULT) if true_dtype is to_dtype else data.to("cpu").cast(to_dtype).to(Device.DEFAULT)
+    data = data.bitcast(to_dtype).reshape(shape).to(Device.DEFAULT)
     # const folding
     if shape == ():
       if data.dtype == dtypes.float16 and sys.version_info < (3, 12): data = data.cast(dtypes.float32)
@@ -593,7 +585,7 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
     raise ValueError(f"pixel_format={pixel_format!r} is not supported.")
 
   def EyeLike(x:Tensor, dtype:int|None=None, k:int=0):
-    ret = Tensor.eye(cast(int, min(x.shape)), dtype=dtype_fallback(OnnxDataType(dtype).to_dtype(), "EyeLike op") if dtype is not None else x.dtype)
+    ret = Tensor.eye(cast(int, min(x.shape)), dtype=OnnxDataType(dtype).to_dtype() if dtype is not None else x.dtype)
     return ret if x.size(0) == x.size(1) else ret.pad(tuple(None if d == ret.size(0) else (k, d-ret.shape[0]-k) for d in x.shape))
 
   def OptionalHasElement(x:Tensor|None=None): return Tensor(x is not None and x.numel() > 0)
@@ -647,7 +639,7 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
 
   # ***** Casting Ops *****
   # NOTE: saturate only applies to FP8 types
-  def Cast(x:Tensor, to:int, saturate:int=1): return x.cast(dtype_fallback(OnnxDataType(to).to_dtype(), "Cast op"))
+  def Cast(x:Tensor, to:int, saturate:int=1): return x.cast(OnnxDataType(to).to_dtype())
   def CastLike(x:Tensor, target_type:Tensor, saturate:int=1): return x.cast(target_type.dtype)
 
   # ***** Reduce Ops *****
@@ -985,7 +977,7 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
     size = int(_resolve_const(size))
     N, n = (size if periodic else size - 1), Tensor.arange(size, requires_grad=False)
     w = a[0] - a[1] * (n * (2 * math.pi / N)).cos() + a[2] * (n * (4 * math.pi / N)).cos()
-    return w.cast(dtype_fallback(OnnxDataType(output_datatype).to_dtype(), "window op"))
+    return w.cast(OnnxDataType(output_datatype).to_dtype())
   def HannWindow(size, output_datatype:int=1, periodic:int=1): return _window(size, output_datatype, periodic, (0.5, 0.5, 0))
   def HammingWindow(size, output_datatype:int=1, periodic:int=1): return _window(size, output_datatype, periodic, (25/46, 21/46, 0))
   def BlackmanWindow(size, output_datatype:int=1, periodic:int=1): return _window(size, output_datatype, periodic, (0.42, 0.5, 0.08))
@@ -1211,7 +1203,7 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
   # ***** Quantization Ops *****
   def QuantizeLinear(x:Tensor, y_scale:Tensor, y_zero_point:Tensor|int=0, axis:int=1, block_size:int=0, output_dtype:int=0, saturate=1):
     if isinstance(y_zero_point, Tensor): out_dtype = y_zero_point.dtype
-    elif output_dtype != 0: out_dtype = dtype_fallback(OnnxDataType(output_dtype).to_dtype(), "QuantizeLinear op")
+    elif output_dtype != 0: out_dtype = OnnxDataType(output_dtype).to_dtype()
     else: out_dtype = dtypes.uint8
     y_scale, y_zero_point = _prepare_quantize(x, y_scale, y_zero_point, axis, block_size)
     if out_dtype == dtypes.uchar:
