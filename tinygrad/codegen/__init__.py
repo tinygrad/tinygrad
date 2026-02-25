@@ -96,7 +96,7 @@ def full_rewrite_to_sink(sink:UOp, ren:Renderer|None=None, optimize:bool=True) -
   def _should_emulate(dt): return not is_dtype_supported(dt, ren.device) or dt in EMULATED_DTYPES.tolist(dtypes)
   if _should_emulate(dtypes.long): sink = graph_rewrite(sink, pm_long_decomp, name="decomp long -> int", bottom_up=True)
   for fr in filter(_should_emulate, dtypes.fp8s+(dtypes.half, dtypes.bfloat16)):
-    to = next(filter(lambda to: is_dtype_supported(to, ren.device), promo_lattice[fr]))
+    to = next(filter(lambda to: is_dtype_supported(to, ren.device), promo_lattice[fr]), dtypes.float)
     sink = graph_rewrite(sink, pm_float_decomp, ctx=(fr, to), name=f"decomp {fr} -> {to}", bottom_up=True)
   sink = graph_rewrite(sink, pm_transcendental, ctx=ren.device, name="transcendental")
 
