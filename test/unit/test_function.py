@@ -61,6 +61,14 @@ class TestFunction(unittest.TestCase):
 
     np.testing.assert_equal(f(Tensor([10,20,30])).numpy(), [15,27,39])
 
+  def test_detach(self):
+    @function
+    def f(a:Tensor, b:Tensor) -> Tensor: return a.detach() + b
+
+    a = Tensor([1,2,3])
+    b = Tensor([4,5,6])
+    np.testing.assert_equal(f(a, b).numpy(), [5,7,9])
+
   def test_method(self):
     class Foo:
       def __init__(self): self.w = Tensor([10,20,30])
