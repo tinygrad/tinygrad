@@ -1,4 +1,5 @@
-from typing import Generic, TypeVar, Callable
+import functools
+from typing import Generic, TypeVar, Callable, cast
 from dataclasses import dataclass, field
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import Context
@@ -20,6 +21,8 @@ class function(Generic[ReturnType]):
   def __init__(self, fxn:Callable[..., ReturnType]):
     self.fxn = fxn
 
+  def __get__(self, obj, objtype=None): return functools.partial(self.__call__, obj) if obj is not None else self
+
   def __call__(self, *args, **kwargs) -> ReturnType:
     input_tensors: list[tuple[int|str, Tensor]] = [(name,t) for name,t in list(enumerate(args))+sorted(kwargs.items()) if t.__class__ is Tensor]
     input_uops = [x[1].uop.multibase for x in input_tensors]
@@ -37,5 +40,4 @@ class function(Generic[ReturnType]):
     ctx = _ImplicitBufCtx(offset=len(input_uops))
     uret = graph_rewrite(uret, pm_implicit, ctx=ctx)
 
-    return Tensor(uret.call(*[x.contiguous() for x in input_uops], *ctx.bufs, name=self.fxn.__name__), device=ret.device)
-
+    return cast(ReturnType, Tensor(uret.call(*input_uops, *ctx.bufs, name=self.fxn.__name__), device=ret.device))
