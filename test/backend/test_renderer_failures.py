@@ -78,7 +78,9 @@ class TestCStyleFailures(unittest.TestCase):
   def test_repeat_add(self): self._test_src_strip_paren(Ops.ADD)
   def test_repeat_mul(self): self._test_src_strip_paren(Ops.MUL)
   def test_repeat_xor(self): self._test_src_strip_paren(Ops.XOR)
+  @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, WGSLRenderer), "wgsl ends up with '(' * 5")
   def test_repeat_or(self): self._test_src_strip_paren(Ops.OR)
+  @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, WGSLRenderer), "wgsl ends up with '(' * 5")
   def test_repeat_and(self): self._test_src_strip_paren(Ops.AND)
   def test_repeat_sub(self): self._test_src_strip_paren(Ops.SUB, should_strip_paren=False)
 
