@@ -131,10 +131,15 @@ function renderDag(layoutSpec, { recenter }) {
   worker = new Worker(workerUrl);
   worker.postMessage(layoutSpec);
   worker.onmessage = (e) => {
+    if (e.data.error) {
+      updateProgress(Status.ERR, "Error in graph layout:\n"+e.data.error);
+      return;
+    }
+    const data = e.data.result;
     displaySelection("#graph");
     updateProgress(Status.COMPLETE);
-    drawGraph(e.data);
-    addTags(d3.select("#edge-labels").selectAll("g").data(e.data.edges).join("g").attr("transform", (e) => {
+    drawGraph(data);
+    addTags(d3.select("#edge-labels").selectAll("g").data(data.edges).join("g").attr("transform", (e) => {
       // get a point near the end
       const [p1, p2] = e.value.points.slice(-2);
       const dx = p2.x-p1.x;
@@ -744,13 +749,15 @@ window.addEventListener("popstate", (e) => {
 });
 
 const createToggle = (id, text) => {
-  const label = d3.create("label").style("display", "block").text(text).node();
+  const label = d3.create("label").text(text).node();
   const toggle = d3.create("input").attr("type", "checkbox").attr("id", id).property("checked", true).node();
   label.prepend(toggle);
   return { toggle, label };
 }
 const showIndexing = createToggle("show-indexing", "Show indexing (r)");
 const showCallSrc = createToggle("show-call-src", "Show CALL src (c)");
+const showSink = createToggle("show-sink", "Show SINK (s)");
+showSink.toggle.checked = false;
 const showGraph = createToggle("show-graph", "Show graph (g)");
 showGraph.toggle.onchange = () => displaySelection(rect("#graph").width > 0 ? "#custom" : "#graph");
 
@@ -900,13 +907,14 @@ async function main() {
   // ** center graph
   const data = ret[currentRewrite];
   const render = (opts) => renderDag({ data, opts }, { recenter:currentRewrite === 0 });
-  const getOpts = () => ({ showIndexing:showIndexing.toggle.checked, showCallSrc:showCallSrc.toggle.checked });
+  const getOpts = () => ({ showIndexing:showIndexing.toggle.checked, showCallSrc:showCallSrc.toggle.checked, showSink:showSink.toggle.checked });
   render(getOpts());
   showIndexing.toggle.onchange = () => render(getOpts());
   showCallSrc.toggle.onchange = () => render(getOpts());
+  showSink.toggle.onchange = () => render(getOpts());
   // ** right sidebar metadata
   metadata.innerHTML = "";
-  if (ckey.includes("rewrites")) metadata.append(showIndexing.label, showCallSrc.label);
+  if (ckey.includes("rewrites")) metadata.append(showIndexing.label, showCallSrc.label, showSink.label);
   if (step.code_line != null) metadata.appendChild(codeBlock(step.code_line, "python", { loc:step.loc, wrap:true }));
   if (step.trace) {
     const trace = d3.create("pre").append("code").classed("hljs", true);
@@ -1037,6 +1045,8 @@ document.addEventListener("keydown", (event) => {
   if (event.key === "r") showIndexing.toggle.click();
   // c key toggles CALL src
   if (event.key === "c") showCallSrc.toggle.click();
+  // s key toggles SINK
+  if (event.key === "s") showSink.toggle.click();
   // g key toggles graph
   if (event.key === "g") showGraph.toggle.click();
 });

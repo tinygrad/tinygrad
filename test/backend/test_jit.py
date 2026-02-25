@@ -332,7 +332,6 @@ class TestJit(unittest.TestCase):
     assert len(res3) == 10, "All values should be different, rand works in jit."
     assert res3 != res2, "Jit rand is diff with diff seeds"
 
-  #@unittest.expectedFailure # requires contiguous folding
   def test_jit_random_after_unrealized_random(self):
     @TinyJit
     def f(): return Tensor.rand()
@@ -476,7 +475,7 @@ class TestJit(unittest.TestCase):
     b = f(Tensor([2.0]))
     assert abs((a - b).item()) > 0.5
 
-  def test_jit_init_with_empty_different_size(self):
+  def test_jit_init_empty(self):
     @TinyJit
     def f(x:Tensor) -> Tensor: return (x + 1).realize()
 
@@ -485,10 +484,16 @@ class TestJit(unittest.TestCase):
     # scalar const input is not allowed
     with self.assertRaises(JitError):
       f(Tensor(2.0)).item()
-    # list input has different view structure than empty(1)
-    # but okay if it's realized
-    #with self.assertRaises(JitError):
-    #  f(Tensor([2.0])).item()
+    # self.assertEqual(f(Tensor([2.0])).item(), 1.0) # TODO: wrong output, should be 3.0. currently depends on empty value
+
+  def test_jit_init_empty_alt(self):
+    @TinyJit
+    def f(a:Tensor, b:Tensor) -> Tensor: return b.assign(a+1)
+    for i in range(4):
+      a = Tensor([i])
+      b = Tensor.empty_like(a)
+      c = f(a, b)
+      self.assertEqual(c.item(), i+1)
 
 @unittest.skip("Pending multioutput implementation #3607")
 class TestMultioutputJit(unittest.TestCase):

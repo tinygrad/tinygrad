@@ -1359,6 +1359,7 @@ def train_llama3():
       elif '.attention.wq' in k: v.shard_(device, axis=0)
       elif '.attention.wk' in k: v.shard_(device, axis=0)
       elif '.attention.wv' in k: v.shard_(device, axis=0)
+      elif '.attention.wqkv' in k: v.shard_(device, axis=0)
       elif '.attention.wo' in k: v.shard_(device, axis=1)
       elif '.feed_forward.w1.' in k: v.shard_(device, axis=0)
       elif '.feed_forward.w2.' in k: v.shard_(device, axis=1)
@@ -1371,8 +1372,9 @@ def train_llama3():
       # prevents memory spike on device 0
       v.realize()
 
-  optim = GradAccClipAdamW(get_parameters(model), lr=0.0,
-                b1=opt_adamw_beta_1, b2=opt_adamw_beta_2, eps=opt_adamw_epsilon, weight_decay=opt_adamw_weight_decay, grad_acc=grad_acc)
+  optim_device = "CPU" if getenv("OFFLOAD_OPTIM") else None
+  optim = GradAccClipAdamW(get_parameters(model), lr=0.0, b1=opt_adamw_beta_1, b2=opt_adamw_beta_2,
+                           eps=opt_adamw_epsilon, weight_decay=opt_adamw_weight_decay, grad_acc=grad_acc, device=optim_device)
 
   # init grads
   for p in optim.params:
