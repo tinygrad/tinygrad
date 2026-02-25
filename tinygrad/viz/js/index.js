@@ -50,9 +50,9 @@ function intersectRect(r1, r2) {
   return {x:r1.x+dx*scale, y:r1.y+dy*scale};
 }
 
-function addTags(root, dy) {
+function addTags(root) {
   root.selectAll("circle").data(d => [d]).join("circle").attr("r", 5);
-  root.selectAll("text").data(d => [d]).join("text").text(d => d).attr("dy", `${dy ?? 0.35}em`);
+  root.selectAll("text").data(d => [d]).join("text").text(d => d).attr("dy", "0.35em");
 }
 
 const drawGraph = (data) => {
@@ -112,7 +112,7 @@ const drawGraph = (data) => {
     .attr("transform", d => `translate(${-d.width/2+8}, ${-d.height/2+8})`).datum(e => e.tag));
   addTags(nodes.selectAll("g.type").data(d => d.label.startsWith("CALL\n") ? [d] : []).join("g")
     .attr("class", d => `tag ${d.collapsed ? 'collapsed' : 'expanded'}`)
-    .attr("transform", d => `translate(${-d.width/2}, ${0})`).datum(d => d.collapsed ? "+" : "−"), 0.25);
+    .attr("transform", d => `translate(${-d.width/2}, ${0})`).datum(d => d.collapsed ? "+" : "−"));
   // draw edges
   const line = d3.line().x(d => d.x).y(d => d.y).curve(d3.curveBasis), edges = g.edges();
   d3.select("#edges").selectAll("path.edgePath").data(edges).join("path").attr("class", "edgePath").attr("d", (e) => {
