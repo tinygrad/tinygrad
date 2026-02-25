@@ -1336,8 +1336,8 @@ def train_llama3():
   # vocab_size from the mixtral tokenizer
   if not SMALL: model_params |= {"vocab_size": 32000}
   real_vocab_size = model_params['vocab_size']
-  vocab_mask:Tensor = Tensor.arange(model_params['vocab_size']).reshape(1, 1, -1) >= real_vocab_size
   if (MP := getenv("MP", 1)) > 1: model_params['vocab_size'] = round_up(model_params['vocab_size'], 256 * MP)
+  vocab_mask:Tensor = Tensor.arange(model_params['vocab_size']).reshape(1, 1, -1) >= real_vocab_size
   if (llama_layers:=getenv("LLAMA_LAYERS")) != 0: model_params['n_layers'] = llama_layers
   print(f"model parameters: {model_params}")
 
