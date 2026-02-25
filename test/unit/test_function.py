@@ -92,6 +92,7 @@ class TestFunction(unittest.TestCase):
 
   def test_grad_implicit(self):
     w = Tensor([1., 2., 3.], requires_grad=True)
+    w.realize() # TODO: this is required
     @function
     def f(x:Tensor) -> Tensor: return x * w
 
