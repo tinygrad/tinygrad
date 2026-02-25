@@ -78,7 +78,8 @@ const layoutUOp = (g, { graph, change }, opts) => {
     const disconnected = new Set();
     for (const n of g.nodes()) {
       const node = g.node(n);
-      if (node.label.startsWith("CALL\n") && !opts.callSrcMask.has(n)) {
+      if (node.label.startsWith("CALL\n") && (opts.showCallSrc ? opts.callSrcMask.has(n) : !opts.callSrcMask.has(n))) {
+        node.collapsed = true;
         for (const pred of (g.predecessors(n) || [])) {
           const edge = g.edge(pred, n);
           if (edge?.label?.text === 0) {
