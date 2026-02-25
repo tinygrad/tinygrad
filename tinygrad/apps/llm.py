@@ -116,6 +116,7 @@ class TransformerBlock:
       self.ffn_up      = nn.Linear(dim, hidden_dim, bias=False)
       self.ffn_down    = nn.Linear(hidden_dim, dim, bias=False)
 
+  @function
   def _attention(self, x:Tensor, start_pos:int|UOp) -> Tensor:
     x_norm = self.attn_norm(x)                       # (B,T,D)
     q, k, v = self.attn_q(x_norm), self.attn_k(x_norm), self.attn_v(x_norm)
@@ -132,7 +133,7 @@ class TransformerBlock:
     k = apply_rope(k, freqs_cis)
 
     if not hasattr(self, "cache_kv"):
-      self.cache_kv = Tensor.zeros(2, B, self.n_kv_heads, self.max_context, self.head_dim, dtype=k.dtype, device=k.device).contiguous().realize()
+      self.cache_kv = Tensor.zeros(2, B, self.n_kv_heads, self.max_context, self.head_dim, dtype=k.dtype, device=k.device).contiguous()
     self.cache_kv[:, :, :, start_pos:start_pos+T, :].assign(Tensor.stack(k, v))
     k = self.cache_kv[0, :, :, 0:start_pos+T, :]
     v = self.cache_kv[1, :, :, 0:start_pos+T, :]

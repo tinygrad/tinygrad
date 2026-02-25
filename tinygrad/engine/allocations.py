@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from tinygrad.uop.ops import UOp, UPat, PatternMatcher, Ops, GroupOp, graph_rewrite, identity_element, track_rewrites
+from tinygrad.uop.ops import UOp, UPat, PatternMatcher, Ops, GroupOp, graph_rewrite, identity_element, track_rewrites, should_resolve_call
 from tinygrad.dtype import ImageDType
 from tinygrad.helpers import prod, DEBUG, argsort, VIZ, pluralize
 
@@ -67,6 +67,9 @@ def found_contiguous(ctx:dict[UOp, UOp], contig:UOp, src:UOp):
     x = x.src[0]
   ctx[src.base] = contig
 
+def rewrite_into_call(call:UOp):
+  return call.replace(src=(graph_rewrite(call.src[0], pm_early_transform_tensor_graph, ctx={}),)+call.src[1:]) if should_resolve_call(call) else None
+
 pm_early_transform_tensor_graph = PatternMatcher([
   # CONTIGUOUS replacement hack for openpilot
   (UPat(Ops.CONTIGUOUS, src=(UPat(GroupOp.Movement, name="src"),), name="contig"), found_contiguous),
@@ -89,6 +92,8 @@ pm_early_transform_tensor_graph = PatternMatcher([
   (UPat(GroupOp.All-{Ops.SINK}, name="x"), lambda x: x.const_like(0).rtag(x.tag) if x._shape is not None and x.size == 0 else None),
   # early fixup const copy (TODO: is this wrong if there's a pad?)
   (UPat(Ops.COPY, src=(UPat.var("s"), UPat()), name="c"), lambda c,s: c.const_like(ss.arg) if (ss:=s.base).op is Ops.CONST else None),
+  # rewrite into calls explicitly
+  (UPat(Ops.CALL, name="call"), rewrite_into_call),
 ])
 
 def untag_and_append(ctx:AllocCtx, x:UOp):
