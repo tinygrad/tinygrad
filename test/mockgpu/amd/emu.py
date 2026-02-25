@@ -234,7 +234,7 @@ WAVE_SIZE = 32
 # Special registers stored after inline constants (256-259)
 PC_LO_IDX, PC_HI_IDX, SCRATCH_STRIDE_IDX = 256, 257, 259
 # SGPR buffer: 0-127 = SGPRs, 128-255 = inline constants, 256-259 = special registers
-SGPR_COUNT, VGPR_SIZE = 260, 256 * 32
+SGPR_COUNT, VGPR_SIZE = 260, 256 * 64
 # Sentinel PC value for s_endpgm
 ENDPGM_PC = 0xFFFFFFFFFFFFFFFF
 
@@ -418,14 +418,15 @@ class _Ctx:
     self.inst_size, self._axis_id, self.wave_size = inst_size, 0, wave_size
     self.dyn_fields: list[tuple[int, int]] = []  # (lo, hi) of fields read dynamically
 
-  def range(self, n: int = 32) -> UOp:
+  def range(self, n: int | None = None) -> UOp:
     """Create a lane range UOp with unique axis ID."""
+    if n is None: n = self.wave_size
     self._axis_id += 1
     return UOp.range(n, self._axis_id, AxisType.LOOP, dtype=dtypes.int)
 
-  def unroll_lanes(self, get_lane_bit, exec_mask: UOp, apply_exec: bool = True) -> UOp:
-    """Combine 32 lane bits into a 32-bit mask using RANGE+REDUCE."""
-    lane = self.range()
+  def unroll_lanes(self, get_lane_bit, exec_mask: UOp, apply_exec: bool = True, n: int | None = None) -> UOp:
+    """Combine lane bits into a mask using RANGE+REDUCE."""
+    lane = self.range(n)
     dt = dtypes.uint64 if self.wave_size == 64 else dtypes.uint32
     bit = get_lane_bit(lane).cast(dt) << lane.cast(dt)
     result = bit.reduce(lane, arg=Ops.ADD)
@@ -695,7 +696,14 @@ class _Ctx:
     for mask_val, reg in [(vcc_val, vcc_reg), (exec_val, EXEC_LO.offset)]:
       if mask_val is None: continue
       def get_bit(l, v=mask_val): return (_to_u32(v.substitute({lane: l})) & _c(1)).cast(dtypes.uint32)
-      mask_result = self.unroll_lanes(get_bit, exec_mask, apply_exec=False)
+      # Compute per-lane mask for the lower 32 lanes.
+      mask_lo = self.unroll_lanes(lambda l: get_bit(l), exec_mask, apply_exec=False, n=32)
+      # For Wave64, also compute mask bits for lanes 32-63 and combine into a 64-bit mask.
+      if self.wave_size == 64:
+        mask_hi = self.unroll_lanes(lambda l: get_bit(l + _c(32)), exec_mask, apply_exec=False, n=32)
+        mask_result = (mask_lo.cast(dtypes.uint64) | (mask_hi.cast(dtypes.uint64) << _c(32)))
+      else:
+        mask_result = mask_lo
       # For Wave64, EXEC and VCC need to write to both LO and HI registers
       if reg == EXEC_LO.offset:
         stores.extend(self.write_exec(mask_result))
@@ -1099,10 +1107,22 @@ def _compile_mfma(inst: irc.VOP3P, ctx: _Ctx) -> UOp:
   
   # Read F16/BF16 values from packed VGPRs
   # CDNA packs 2 F16 values per VGPR lane (32 bits)
+  # The generic VGPR layout is reg * 32 + lane (Wave32), but MFMA uses Wave64 (lanes 0-63).
+  # Model each logical MFMA VGPR as two physical VGPRs: bank 0 for lanes 0-31, bank 1 for lanes 32-63.
+  def read_vgpr_wave64(src, lane):
+    bank = lane // 32
+    lane_in_bank = lane % 32
+    return ctx.rvgpr_dyn(src + _c(bank), UOp.const(dtypes.int, lane_in_bank))
+  
   def read_f16_val(src, lane, vgpr, half):
-    v = ctx.rvgpr_dyn(src + _c(vgpr), UOp.const(dtypes.int, lane))
+    v = read_vgpr_wave64(src + _c(vgpr * 2), lane)
     val = (v >> UOp.const(dtypes.uint32, 16)) if half else (v & UOp.const(dtypes.uint32, 0xFFFF))
     return cvt(val)
+  
+  def write_vgpr_wave64(dst, lane, val, exec_mask):
+    bank = lane // 32
+    lane_in_bank = lane % 32
+    return ctx.wvgpr_dyn(dst + _c(bank), UOp.const(dtypes.int, lane_in_bank), val, exec_mask)
   
   # MFMA VGPR layout for 16x16x16:
   # - 64 lanes distribute the 16x16 matrix
@@ -1133,15 +1153,15 @@ def _compile_mfma(inst: irc.VOP3P, ctx: _Ctx) -> UOp:
       vgpr = (n % 4)
       return lane % 64, vgpr
     
-    mat_c = [ctx.rvgpr_dyn(src2_r + _c(cd_map(m, n)[1]), UOp.const(dtypes.int, cd_map(m, n)[0])).bitcast(dtypes.float32)
+    mat_c = [read_vgpr_wave64(src2_r + _c(cd_map(m, n)[1] * 2), cd_map(m, n)[0]).bitcast(dtypes.float32)
              for m in range(M) for n in range(N)]
     
     # Compute D = A * B + C
     mat_d = [sum(mat_a[r*K+k] * mat_b[c*K+k] for k in range(K)) + mat_c[r*N+c] for r in range(M) for c in range(N)]
     
     # Write results to destination VGPRs
-    stores = [ctx.wvgpr_dyn(vdst_reg + _c(cd_map(m, n)[1]), UOp.const(dtypes.int, cd_map(m, n)[0]), 
-                            mat_d[m*N+n].bitcast(dtypes.uint32), exec_mask)
+    stores = [write_vgpr_wave64(vdst_reg + _c(cd_map(m, n)[1] * 2), cd_map(m, n)[0], 
+                                mat_d[m*N+n].bitcast(dtypes.uint32), exec_mask)
               for m in range(M) for n in range(N)]
   
   elif M == 32 and N == 32:
@@ -1161,13 +1181,13 @@ def _compile_mfma(inst: irc.VOP3P, ctx: _Ctx) -> UOp:
       vgpr = (n % 16)
       return lane % 64, vgpr
     
-    mat_c = [ctx.rvgpr_dyn(src2_r + _c(cd_map_32(m, n)[1]), UOp.const(dtypes.int, cd_map_32(m, n)[0])).bitcast(dtypes.float32)
+    mat_c = [read_vgpr_wave64(src2_r + _c(cd_map_32(m, n)[1] * 2), cd_map_32(m, n)[0]).bitcast(dtypes.float32)
              for m in range(M) for n in range(N)]
     
     mat_d = [sum(mat_a[r*K+k] * mat_b[c*K+k] for k in range(K)) + mat_c[r*N+c] for r in range(M) for c in range(N)]
     
-    stores = [ctx.wvgpr_dyn(vdst_reg + _c(cd_map_32(m, n)[1]), UOp.const(dtypes.int, cd_map_32(m, n)[0]),
-                            mat_d[m*N+n].bitcast(dtypes.uint32), exec_mask)
+    stores = [write_vgpr_wave64(vdst_reg + _c(cd_map_32(m, n)[1] * 2), cd_map_32(m, n)[0],
+                                mat_d[m*N+n].bitcast(dtypes.uint32), exec_mask)
               for m in range(M) for n in range(N)]
   else:
     # Fallback: use pseudocode compilation for other MFMA variants
@@ -1538,10 +1558,11 @@ F32_INLINE = {240: 0x3f000000, 241: 0xbf000000, 242: 0x3f800000, 243: 0xbf800000
               244: 0x40000000, 245: 0xc0000000, 246: 0x40800000, 247: 0xc0800000, 248: 0x3e22f983}  # 2.0, -2.0, 4.0, -4.0, 1/(2*pi)
 
 class WaveState:
-  __slots__ = ('vgpr_buf', 'sgpr_buf', '_vgpr_mv', '_sgpr_mv', 'n_lanes')
+  __slots__ = ('vgpr_buf', 'sgpr_buf', '_vgpr_mv', '_sgpr_mv', 'n_lanes', 'wave_size')
 
-  def __init__(self, n_lanes: int = WAVE_SIZE):
+  def __init__(self, n_lanes: int = WAVE_SIZE, wave_size: int = WAVE_SIZE):
     self.n_lanes = n_lanes
+    self.wave_size = wave_size
     self.vgpr_buf = Buffer('CPU', VGPR_SIZE, dtypes.uint32).ensure_allocated()
     self.sgpr_buf = Buffer('CPU', SGPR_COUNT, dtypes.uint32).ensure_allocated()
     self._vgpr_mv = self.vgpr_buf.as_memoryview(force_zero_copy=True).cast('I')
@@ -1579,8 +1600,11 @@ def _init_wave(lib: int, wave_start: int, total_threads: int, lx: int, ly: int, 
                scratch_size: int, arch: str, gidx: int, gidy: int, gidz: int, user_data: list[int]|None) -> WaveState:
   """Initialize a single wavefront and return WaveState."""
   wave_size = 64 if "cdna" in arch else 32
-  n_lanes = min(wave_size, total_threads - wave_start)
-  st = WaveState(n_lanes)
+  # NOTE: VGPR storage/indexing is hard-coded for 32 lanes (vgpr[reg * 32 + lane]),
+  # so we must not instantiate more than 32 lanes until the layout is wave-size-aware.
+  max_emulated_lanes = 32
+  n_lanes = min(wave_size, max_emulated_lanes, max(0, total_threads - wave_start))
+  st = WaveState(n_lanes, wave_size)
   st.pc = lib
   if user_data:
     for i, val in enumerate(user_data): st._write_sgpr(i, val)
