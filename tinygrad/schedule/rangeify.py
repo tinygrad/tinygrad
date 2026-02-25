@@ -2,7 +2,7 @@ from dataclasses import dataclass, field, replace
 import itertools
 from tinygrad.dtype import dtypes, PtrDType, ImageDType, AddrSpace
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, _substitute, KernelInfo
-from tinygrad.uop.ops import graph_rewrite, sint, AxisType, BottomUpGate, profile_matches, should_resolve_call
+from tinygrad.uop.ops import graph_rewrite, sint, AxisType, BottomUpGate, profile_matches, should_resolve_call, call_params
 from tinygrad.uop.symbolic import symbolic
 from tinygrad.helpers import prod, all_same, getenv, dedup, all_int, DEBUG, SPLIT_REDUCEOP, DEBUG_RANGEIFY, VIZ, MAX_KERNEL_BUFFERS
 from tinygrad.helpers import PCONTIG, partition, get_single_element
@@ -75,21 +75,8 @@ mop_cleanup = PatternMatcher([
   (UPat(Ops.RESHAPE, src=(UPat(Ops.RESHAPE, name="x2"), UPat()), name="x"), lambda x,x2: x.replace(src=(x2.src[0], x.src[1]))),
 ])
 
-def resolve_call(c:UOp, allow_param_mismatch=False) -> UOp|None:
-  if not should_resolve_call(c): return None
-  params: list[UOp] = []
-  seen: set[UOp] = set()
-  queue = [c.src[0]]
-  while queue:
-    if (u:=queue.pop()) in seen: continue
-    seen.add(u)
-    if u.op is Ops.PARAM:
-      params.append(u)
-      continue
-    # CALL is a scope boundary: don't inspect nested function bodies or args.
-    if u.op is Ops.CALL: continue
-    queue += list(u.src)
-  params = sorted(params, key=lambda x: x.arg)
+def bind_call(c:UOp, allow_param_mismatch=False) -> UOp:
+  params = call_params(c.src[0])
   args = c.src[1:]
   # TODO: this check belongs in spec, not here
   if not allow_param_mismatch:
@@ -100,10 +87,27 @@ def resolve_call(c:UOp, allow_param_mismatch=False) -> UOp|None:
     if p.dtype != a.dtype: raise TypeError(f"arg {i} dtype mismatch: expected {p.dtype}, got {a.dtype}")
   return c.src[0].substitute(dict(zip(params, args)))
 
-earliest_rewrites = mop_cleanup+PatternMatcher([
-  # resolve calls
-  (UPat(Ops.CALL, name="c"), resolve_call),
+def resolve_call(c:UOp, allow_param_mismatch=False) -> UOp|None:
+  if not should_resolve_call(c): return None
+  return bind_call(c, allow_param_mismatch=allow_param_mismatch)
 
+def rangeify_sink_call(c:UOp, sink:UOp) -> UOp|None:
+  if isinstance(sink.arg, KernelInfo): return None
+  return get_kernel_graph(bind_call(c))
+
+def inline_call(c:UOp) -> UOp|None:
+  # CALL with non-SINK target substituted
+  if c.src[0].op is Ops.SINK: return None
+  # LINEAR and PROGRAM are execution targets
+  if c.src[0].op is Ops.LINEAR: return None
+  return resolve_call(c)
+
+pm_call = PatternMatcher([
+  (UPat(Ops.CALL, src=(UPat(Ops.SINK, name="sink"),), allow_any_len=True, name="c"), rangeify_sink_call),
+  (UPat(Ops.CALL, name="c"), inline_call),
+])
+
+earliest_rewrites = mop_cleanup+pm_call+PatternMatcher([
   # split_reduceop
   (UPat(Ops.REDUCE_AXIS, name="reduce", src=(UPat.var("x"),)), split_reduceop),
 

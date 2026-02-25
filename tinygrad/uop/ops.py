@@ -900,6 +900,48 @@ def should_resolve_call(c:UOp) -> bool:
   if c.src[0].op is Ops.COPY: return False
   return True
 
+def call_params(fxn:UOp) -> list[UOp]:
+  # params visible in outer scope (including nested CALL args)
+  params: set[UOp] = set()
+  local_param_cache: dict[UOp, frozenset[UOp]] = {}
+
+  def local_call_params(local_fxn: UOp) -> frozenset[UOp]:
+    if (ret:=local_param_cache.get(local_fxn)) is not None: return ret
+    seen_local: set[UOp] = set()
+    stack_local: list[UOp] = [local_fxn]
+    local_params: set[UOp] = set()
+    while stack_local:
+      u = stack_local.pop()
+      if u in seen_local: continue
+      seen_local.add(u)
+      if u.op is Ops.PARAM:
+        local_params.add(u)
+        continue
+      # nested CALL bodies define their own scope
+      if u.op is Ops.CALL: continue
+      stack_local.extend(u.src)
+    local_param_cache[local_fxn] = ret = frozenset(local_params)
+    return ret
+
+  seen: set[tuple[UOp, bool, frozenset[UOp]]] = set()
+  stack: list[tuple[UOp, bool, frozenset[UOp]]] = [(fxn, False, frozenset())]
+  while stack:
+    u, in_nested_call_body, blocked = stack.pop()
+    if (u, in_nested_call_body, blocked) in seen: continue
+    seen.add((u, in_nested_call_body, blocked))
+    if u.op is Ops.PARAM and not in_nested_call_body and u not in blocked:
+      params.add(u)
+      continue
+    if u.op is Ops.CALL:
+      # callee/body is a new scope, args remain in current scope.
+      local = local_call_params(u.src[0])
+      stack.append((u.src[0], True, blocked))
+      blocked_for_args = blocked | local
+      stack.extend((a, in_nested_call_body, blocked_for_args) for a in u.src[1:])
+    else:
+      stack.extend((s, in_nested_call_body, blocked) for s in u.src)
+  return sorted(params, key=lambda x: x.arg)
+
 # ******** ops in python ********
 
 def safe_exp2(x):

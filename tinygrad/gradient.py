@@ -1,6 +1,6 @@
 from typing import cast
 import math, dataclasses
-from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, all_metadata
+from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, all_metadata, call_params
 from tinygrad.helpers import argsort
 
 def reduce_gradient(ctx:UOp, ret:UOp, op:Ops):
@@ -17,16 +17,7 @@ def call_gradient(ctx:UOp, k:UOp):
   if k.arg.grad_fxn is not None: return (None,) + k.arg.grad_fxn(ctx, k)
   # auto-differentiate the function
   fxn, args = k.src[0], k.src[1:]
-  # NOTE: not capturing PARAMs in nested CALL bodies
-  seen: set[UOp] = set()
-  queue = [fxn]
-  params: list[UOp] = []
-  while queue:
-    if (u:=queue.pop()) in seen: continue
-    seen.add(u)
-    if u.op is Ops.PARAM: params.append(u)
-    if u.op is not Ops.CALL: queue += u.src
-  params = sorted(params, key=lambda x: x.arg)
+  params = call_params(fxn)
   grads = compute_gradient(fxn, ctx, set(params))
   subst = dict(zip(params, args))
   return (None,) + tuple(grads[p].substitute(subst) if p in grads else None for p in params)
