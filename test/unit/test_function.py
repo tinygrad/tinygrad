@@ -140,5 +140,40 @@ class TestFunction(unittest.TestCase):
     np.testing.assert_equal(f(Tensor([1,2,3])).numpy(), [11,22,33])
     assert f(Tensor([1,2,3])).uop.arg.name.endswith("Foo")
 
+  def test_iadd(self):
+    @function
+    def f(x:Tensor) -> Tensor:
+      x += 1
+      return x
+
+    a = Tensor([1,2,3]).realize()
+    np.testing.assert_equal(f(a).numpy(), [2,3,4])
+    np.testing.assert_equal(a.numpy(), [3,4,5])  # TODO: should be [1,2,3]
+
+  def test_assign_input(self):
+    @function
+    def f(a:Tensor, b:Tensor) -> Tensor:
+      a.assign(b+1)
+      return a
+
+    a = Tensor([1,2,3]).realize()
+    b = Tensor([10,20,30]).realize()
+    np.testing.assert_equal(f(a,b).numpy(), [11,21,31])
+    np.testing.assert_equal(a.numpy(), [11,21,31])  # TODO: should be [1,2,3]
+    np.testing.assert_equal(b.numpy(), [10,20,30])
+
+  @unittest.expectedFailure
+  def test_assign_slice(self):
+    @function
+    def f(a:Tensor, b:Tensor) -> Tensor:
+      a[1:] = b[1:]+1
+      return a
+
+    a = Tensor([1,2,3]).realize()
+    b = Tensor([10,20,30]).realize()
+    np.testing.assert_equal(f(a,b).numpy(), [1,21,31])
+    np.testing.assert_equal(a.numpy(), [1,2,3])
+    np.testing.assert_equal(b.numpy(), [10,20,30])
+
 if __name__ == '__main__':
   unittest.main()
