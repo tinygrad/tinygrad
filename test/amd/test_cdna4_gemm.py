@@ -1,9 +1,10 @@
 # GEMM tests for the CDNA4 emulator
-import os, unittest
+import unittest
 import numpy as np
 from tinygrad import Tensor
+from tinygrad.helpers import getenv
 
-def is_cdna4_mock(): return os.environ.get("MOCKGPU_ARCH", "") == "cdna4"
+def is_cdna4_mock(): return getenv("MOCKGPU_ARCH", "") == "cdna4"
 
 @unittest.skipUnless(is_cdna4_mock(), "MOCKGPU_ARCH=cdna4 required")
 class TestCDNA4GEMM(unittest.TestCase):
