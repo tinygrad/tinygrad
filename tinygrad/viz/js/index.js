@@ -755,7 +755,7 @@ const createToggle = (id, text) => {
   return { toggle, label };
 }
 const showIndexing = createToggle("show-indexing", "Show indexing (r)");
-const showCallSrc = createToggle("show-call-src", "Show all CALL src (c)");
+const showCallSrc = createToggle("show-call-src", "Show all CALL src (c)"); showCallSrc.toggle.checked = false;
 const showSink = createToggle("show-sink", "Show SINK (s)");
 showSink.toggle.checked = false;
 const showGraph = createToggle("show-graph", "Show graph (g)");
