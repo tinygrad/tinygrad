@@ -755,7 +755,7 @@ const createToggle = (id, text) => {
   return { toggle, label };
 }
 const showIndexing = createToggle("show-indexing", "Show indexing (r)");
-const showCallSrc = createToggle("show-call-src", "Show CALL src (c)");
+const showCallSrc = createToggle("show-call-src", "Show all CALL src (c)");
 const showSink = createToggle("show-sink", "Show SINK (s)");
 showSink.toggle.checked = false;
 const showGraph = createToggle("show-graph", "Show graph (g)");
@@ -800,7 +800,7 @@ async function main() {
       }
       appendSteps(ul, i, steps);
     }
-    return setState({ currentCtx:-1 });
+    return setState({currentCtx: 3, currentStep: 19, currentRewrite: 0, expandSteps: true});
   }
   // ** center graph
   const { currentCtx, currentStep, currentRewrite, expandSteps } = state;
