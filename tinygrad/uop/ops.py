@@ -865,10 +865,10 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     if name is not None: src += (UOp(Ops.NOOP, arg=name),)
     return UOp(Ops.PARAM, dtype, src, arg=slot)
 
-  def call(self, *srcs:UOp, grad_fxn:Callable|None=None, metadata:tuple[Metadata, ...]=()) -> UOp:
+  def call(self, *srcs:UOp, grad_fxn:Callable|None=None, metadata:tuple[Metadata, ...]=(), name:str|None=None) -> UOp:
     # TODO: reenable this after ENCDEC is fixed
     #assert len(self.ranges) == 0, f"ranges {self.ranges} are leaking out of the call in {self.pyrender()}"
-    return UOp(Ops.CALL, self.dtype, (self,)+srcs, CallInfo(grad_fxn, metadata))
+    return UOp(Ops.CALL, self.dtype, (self,)+srcs, CallInfo(grad_fxn, metadata, name))
   def custom_kernel(*srcs:UOp, fxn:Callable, grad_fxn:Callable|None=None) -> list[UOp]:
     contig_srcs = tuple(x.contiguous() if x.op is not Ops.AFTER else x for x in srcs)
     placeholders = [UOp.placeholder_like(s, slot=i) for i,s in enumerate(contig_srcs)]
@@ -890,9 +890,10 @@ class KernelInfo:
 class CallInfo:
   grad_fxn: Callable|None = None
   metadata: tuple[Metadata, ...] = ()
+  name: str|None = None
   # grad_fxn can't be pickled, but metadata can
-  def __reduce__(self): return (CallInfo, (None, self.metadata))
-  def __repr__(self): return f"CallInfo({id(self.grad_fxn) if self.grad_fxn else None}, {self.metadata})"
+  def __reduce__(self): return (CallInfo, (None, self.metadata, self.name))
+  def __repr__(self): return f"CallInfo({id(self.grad_fxn) if self.grad_fxn else None}, {self.metadata}, {repr(self.name)})"
 
 def should_resolve_call(c:UOp) -> bool:
   # don't resolve real kernel calls, sink or program
