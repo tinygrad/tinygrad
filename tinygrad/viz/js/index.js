@@ -949,7 +949,7 @@ async function main() {
       metadata.appendChild(codeBlock(upat[1], "python", { loc:upat[0], wrap:true }));
       const diffCode = metadata.appendChild(document.createElement("pre")).appendChild(document.createElement("code"));
       for (const line of diff) {
-        diffCode.appendChild(colored([{st:line, color:line.startsWith("+") ? "#3aa56d" : line.startsWith("-") ? "#d14b4b" : "#f0f0f5"}]));
+        diffCode.appendChild(colored([{st:line, color:line.startsWith("+") ? "#3aa56d" : line.startsWith("−") ? "#d14b4b" : "#f0f0f5"}]));
         diffCode.appendChild(document.createElement("br"));
       }
       diffCode.className = "wrap";
