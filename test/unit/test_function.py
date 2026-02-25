@@ -54,6 +54,13 @@ class TestFunction(unittest.TestCase):
     np.testing.assert_equal(c.numpy(), [12,15,18])
     np.testing.assert_equal(d.numpy(), [12,15,19])
 
+  def test_implicit_unrealized(self):
+    inp = Tensor([1,2,3]) + Tensor([4,5,6])
+    @function
+    def f(a:Tensor) -> Tensor: return a + inp
+
+    np.testing.assert_equal(f(Tensor([10,20,30])).numpy(), [15,27,39])
+
   def test_method(self):
     class Foo:
       def __init__(self): self.w = Tensor([10,20,30])
