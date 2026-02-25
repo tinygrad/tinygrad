@@ -98,6 +98,9 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
   # split_reduceop
   (UPat(Ops.REDUCE_AXIS, name="reduce", src=(UPat.var("x"),)), split_reduceop),
 
+  # remove DETACH/CONTIGUOUS_BACKWARD (TODO: this is copied in allocations)
+  (UPat((Ops.DETACH, Ops.CONTIGUOUS_BACKWARD), name="x"), lambda x: x.src[0]),
+
   # remove contiguous on movement ops before a copy on disk
   (UPat(GroupOp.Movement-{Ops.SHRINK, Ops.RESHAPE}, name="x").f(Ops.CONTIGUOUS).f(Ops.COPY, allow_any_len=True, name="copy"),
    lambda x,copy: copy.replace(src=(x,)+copy.src[1:]) if isinstance(x.device, str) and x.device.startswith("DISK") else None),
