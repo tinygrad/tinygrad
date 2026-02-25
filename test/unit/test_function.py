@@ -90,6 +90,15 @@ class TestFunction(unittest.TestCase):
     np.testing.assert_allclose(a.grad.numpy(), nb @ nb.T)
     np.testing.assert_allclose(b.grad.numpy(), na.T @ nb + na @ nb)
 
+  def test_grad_implicit(self):
+    w = Tensor([1., 2., 3.], requires_grad=True)
+    @function
+    def f(x:Tensor) -> Tensor: return x * w
+
+    x = Tensor([4., 5., 6.])
+    f(x).sum().backward()
+    np.testing.assert_allclose(w.grad.numpy(), [4., 5., 6.])
+
   def test_symbolic_index(self):
     from tinygrad.uop.ops import UOp
     table = Tensor([10,20,30,40]).contiguous().realize()
@@ -99,6 +108,16 @@ class TestFunction(unittest.TestCase):
 
     v = UOp.variable("start_pos", 0, 3)
     np.testing.assert_equal(f(Tensor([1,2,3]), v.bind(0)).numpy(), [11,12,13])
+
+  def test_nested_calls(self):
+    w = Tensor([10., 20., 30.])
+    @function
+    def f(a:Tensor) -> Tensor: return a + w
+    @function
+    def g(a:Tensor) -> Tensor: return a * w
+
+    a = Tensor([1., 2., 3.])
+    np.testing.assert_allclose(g(f(a)).numpy(), [110., 440., 990.])
 
 if __name__ == '__main__':
   unittest.main()

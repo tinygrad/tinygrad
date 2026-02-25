@@ -1,6 +1,6 @@
 from typing import Union, Optional, Any
 import collections, math
-from tinygrad import Tensor, Variable, TinyJit, dtypes, nn, Device
+from tinygrad import Tensor, Variable, TinyJit, dtypes, nn, Device, function
 from tinygrad.helpers import getenv, DEBUG
 
 # https://github.com/facebookresearch/llama/blob/1076b9c51c77ad06e9d7ba8a4c6df775741732bd/llama/model.py#L47
@@ -124,6 +124,7 @@ class FeedForward:
     self.w2 = linear(hidden_dim, dim, bias=False)
     self.w3 = linear(dim, hidden_dim, bias=False) # the gate in Gated Linear Unit
 
+  @function
   def __call__(self, x:Tensor) -> Tensor:
     w1 = self.w1(x).silu()
     w3 = self.w3(x.contiguous_backward())  # this fixes a strange fusion that makes tensor cores miss
