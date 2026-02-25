@@ -970,7 +970,7 @@ class AMDDevice(HCQCompiled):
     self.sdma_queues:dict = {}
     self.has_sdma_queue = self.sdma_queue(0) is not None
 
-    if getenv("MOCKGPU") and OSX: AMD_LLVM.value = 1
+    if getenv("MOCKGPU"): AMD_LLVM.value = 1
     compilers = CompilerSet([(functools.partial(AMDHIPRenderer, self.arch), None),
                              (functools.partial(AMDLLVMRenderer, self.arch), AMD_LLVM),
                              (functools.partial(AMDHIPCCRenderer, self.arch), AMD_HIPCC)], ctrl_var=AMD_CC)
