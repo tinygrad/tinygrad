@@ -246,7 +246,19 @@ def _to_u32(val: UOp) -> UOp:
   if val.dtype == dtypes.uint32: return val
   if val.dtype.itemsize == 4: return val.bitcast(dtypes.uint32)  # same size: bitcast (float32->uint32)
   return val.cast(dtypes.uint32)  # different size: cast (bool, int16, etc)
-def _lane_active(exec_mask: UOp, lane: UOp) -> UOp: return ((exec_mask >> lane.cast(dtypes.uint32)) & _c(1)).ne(_c(0))
+def _lane_active(exec_mask: UOp, lane: UOp) -> UOp:
+  """Check if a lane is active in the exec mask."""
+  # For Wave64, exec_mask is uint64 and lane can be 0-63; for Wave32, exec_mask is uint32 and lane is 0-31
+  # Cast lane to uint32 (safe since max lane is 63), then shift and mask to check if active
+  lane_u32 = lane.cast(dtypes.uint32)
+  # For Wave64, only check lanes 0-31 since we cap emulation at 32 lanes
+  if exec_mask.dtype == dtypes.uint64:
+    # For lanes 0-31, check EXEC_LO (bits 0-31); for lanes 32-63, check EXEC_HI (bits 32-63)
+    # Since we cap at 32 lanes, only EXEC_LO is used, so extract it
+    exec_lo = exec_mask.cast(dtypes.uint32)
+    return ((exec_lo >> lane_u32) & _c(1)).ne(_c(0))
+  return ((exec_mask >> lane_u32) & _c(1)).ne(_c(0))
+
 def _hi16(v: UOp) -> UOp: return (v >> _c(16)) & _c(0xFFFF)
 def _cond(cond, if_true, if_false):
   """Select between values based on condition (works with UOp or bool)."""
