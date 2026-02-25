@@ -1,7 +1,6 @@
 import functools, itertools
 from tinygrad.helpers import all_same, all_int, prod, DEBUG, RING, ALL2ALL, getenv
 from tinygrad.uop.ops import Ops, UOp, PatternMatcher, UPat, GroupOp, graph_rewrite, should_resolve_call
-from tinygrad.dtype import dtypes
 
 # *** allreduce implementation ***
 def handle_allreduce(buf:UOp, red:UOp) -> UOp|None:
