@@ -133,6 +133,39 @@ def exec_insts(insts:list):
   Tensor.custom_kernel(A, B, C, fxn=fxn)[0].realize()
   print(f"Ran {len(insts)} instructions.")
 
+def find_first_faulting_index(all_insts):
+  def crashes(k):
+    try:
+      exec_insts(all_insts[:k])
+      return False
+    except Exception:
+      return True
+
+  n = len(all_insts)
+
+  # 1) Find an upper bound where it crashes: (lo, hi] with crash at hi
+  lo = 0
+  hi = 1
+  while hi <= n and not crashes(hi):
+    lo = hi
+    hi *= 2
+  if hi > n:
+    hi = n
+    if not crashes(hi):
+      return None  # never crashes
+
+  # 2) Binary search for first crashing prefix length
+  # invariant: crashes(lo) == False, crashes(hi) == True
+  while hi - lo > 1:
+    mid = (lo + hi) // 2
+    if crashes(mid):
+      hi = mid
+    else:
+      lo = mid
+
+  # hi is the first prefix length that crashes, so the bad instruction is hi-1
+  return hi - 1
+
 if __name__ == "__main__":
   arch = Device[Device.DEFAULT].renderer.arch
   if arch.startswith("gfx12"):
@@ -144,5 +177,9 @@ if __name__ == "__main__":
   else: raise RuntimeError(f"{arch} not supported yet")
   alu_insts, mem_insts, skipped = collect_instructions()
   print(f"collected {len(alu_insts)} ALU + {len(mem_insts)} memory instructions ({len(skipped)} skipped)")
-  all_insts = mem_insts+alu_insts
-  exec_insts(all_insts[:100])
+  all_insts = mem_insts + alu_insts
+
+  bad_i = find_first_faulting_index(all_insts)
+  print("bad_i =", bad_i)
+  if bad_i is not None:
+    print("faulting inst =", all_insts[bad_i])
