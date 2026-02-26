@@ -32,6 +32,7 @@ jobs:
     - name: Setup Environment
       uses: ./.github/actions/setup-tinygrad
       with:
+        key: 'autogen'
         opencl: 'true'
         amd: 'true'
         cuda: 'true'
@@ -81,6 +82,7 @@ jobs:
     - name: Setup Environment
       uses: ./.github/actions/setup-tinygrad
       with:
+        key: 'autogen-mac'
         llvm: 'true'
     - name: Regenerate autogen files
       run: |
@@ -110,6 +112,8 @@ jobs:
       uses: actions/checkout@v4
     - name: Setup Environment
       uses: ./.github/actions/setup-tinygrad
+      with:
+        key: 'autogen-comgr'
     - name: Install autogen support packages
       run: |
         wget https://repo.radeon.com/rocm/rocm.gpg.key -O - | gpg --dearmor | sudo tee /etc/apt/keyrings/rocm.gpg > /dev/null

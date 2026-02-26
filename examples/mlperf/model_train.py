@@ -1335,6 +1335,9 @@ def train_llama3():
   model_params = MODEL_PARAMS[getenv("LLAMA3_SIZE", "8B")]["args"]
   # vocab_size from the mixtral tokenizer
   if not SMALL: model_params |= {"vocab_size": 32000}
+  real_vocab_size = model_params['vocab_size']
+  if (MP := getenv("MP", 1)) > 1: model_params['vocab_size'] = round_up(model_params['vocab_size'], 256 * MP)
+  vocab_mask:Tensor = Tensor.arange(model_params['vocab_size']).reshape(1, 1, -1) >= real_vocab_size
   if (llama_layers:=getenv("LLAMA_LAYERS")) != 0: model_params['n_layers'] = llama_layers
   print(f"model parameters: {model_params}")
 
@@ -1351,6 +1354,8 @@ def train_llama3():
     device = tuple(f"{Device.DEFAULT}:{i}" for i in range(DP))
     for v in get_parameters(model):
       v.shard_(device, axis=None)
+
+    vocab_mask.shard_(device, axis=None)
 
   if (MP := getenv("MP", 1)) > 1:
     device = tuple(f"{Device.DEFAULT}:{i}" for i in range(MP))
@@ -1371,6 +1376,8 @@ def train_llama3():
         v.shard_(device, axis=None)
       # prevents memory spike on device 0
       v.realize()
+
+    vocab_mask.shard_(device, axis=2).realize()
 
   optim_device = "CPU" if getenv("OFFLOAD_OPTIM") else None
   optim = GradAccClipAdamW(get_parameters(model), lr=0.0, b1=opt_adamw_beta_1, b2=opt_adamw_beta_2,
@@ -1402,7 +1409,7 @@ def train_llama3():
       device = tuple(f"{Device.DEFAULT}:{i}" for i in range(MP))
       tokens = tokens.shard(device)
     logits:Tensor = model(tokens[:, :-1], start_pos=0, temperature=math.nan)
-    loss = logits.sparse_categorical_crossentropy(tokens[:, 1:])
+    loss = vocab_mask.where(-float("inf"), logits).sparse_categorical_crossentropy(tokens[:, 1:])
     loss.backward()
     assert all(p.grad is g for p,g in zip(optim.params, grads))
     Tensor.realize(loss, *grads)
@@ -1432,7 +1439,7 @@ def train_llama3():
       device = tuple(f"{Device.DEFAULT}:{i}" for i in range(MP))
       tokens = tokens.shard(device)
     logits:Tensor = model(tokens[:, :-1], start_pos=0, temperature=math.nan)
-    loss = logits.sparse_categorical_crossentropy(tokens[:, 1:])
+    loss = vocab_mask.where(-float("inf"), logits).sparse_categorical_crossentropy(tokens[:, 1:])
     return loss.flatten().float().to("CPU")
 
   # ** data iters **
@@ -1470,29 +1477,28 @@ def train_llama3():
       st = time.perf_counter()
 
       stopped = False
+      losses, data_time, dev_time = [], 0, 0
       for _ in range(grad_acc):
         ist = time.perf_counter()
         try: tokens = next(train_iter)
         except StopIteration:
           stopped = True
           break
-        dt = time.perf_counter()
-        loss = minibatch(tokens)
+        mst = time.perf_counter()
+        data_time += mst - ist
+        losses.append(minibatch(tokens).item())
+        dev_time += time.perf_counter() - mst
       if stopped: break
 
       gt = time.perf_counter()
-      lr = optim_step()
-      ot = time.perf_counter()
-
-      loss = loss.float().item()
-      lr = lr.item()
-
+      lr = optim_step().item()
       et = time.perf_counter()
+
+      loss = sum(losses) / len(losses)
+      optim_time = et - gt
+      dev_time += optim_time
       step_time = et - st
       gbs_time = gt - st
-      optim_time = ot - gt
-      data_time = dt - ist
-      dev_time = step_time - data_time * grad_acc
       if BENCHMARK: step_times.append(step_time)
 
       i += 1
