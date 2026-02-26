@@ -164,11 +164,6 @@ class TS_DELTA_S8_W3(PacketType):
   delta = bits[10:8]
   _padding = bits[63:11]
 
-class TS_DELTA_S8_W3_RDNA4(PacketType):  # Layout 4: 64->72 bits
-  encoding = bits[6:0] == 0b0100001
-  delta = bits[10:8]
-  _padding = bits[71:11]
-
 class TS_DELTA_S5_W3(PacketType):
   encoding = bits[4:0] == 0b00110
   delta = bits[7:5]
@@ -380,7 +375,7 @@ PACKET_TYPES_RDNA3: dict[int, type[PacketType]] = {
 }
 PACKET_TYPES_RDNA4: dict[int, type[PacketType]] = {
   **PACKET_TYPES_RDNA3,
-  7: TS_DELTA_S8_W3_RDNA4, 9: WAVESTART_RDNA4, 10: TS_DELTA_S5_W2_RDNA4, 11: WAVEALLOC_RDNA4,
+  9: WAVESTART_RDNA4, 10: TS_DELTA_S5_W2_RDNA4, 11: WAVEALLOC_RDNA4,
   12: TS_DELTA_S5_W3_RDNA4, 13: PERF_RDNA4, 22: TS_DELTA_OR_MARK_RDNA4, 24: INST_RDNA4,
 }
 
