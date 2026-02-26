@@ -2,6 +2,7 @@ import numpy as np
 import unittest
 from tinygrad.function import function
 from tinygrad import Tensor
+from tinygrad.uop.ops import UOp
 
 class TestFunction(unittest.TestCase):
   def test_simple(self):
@@ -102,7 +103,6 @@ class TestFunction(unittest.TestCase):
     np.testing.assert_allclose(w.grad.numpy(), [4., 5., 6.])
 
   def test_symbolic_index(self):
-    from tinygrad.uop.ops import UOp
     table = Tensor([10,20,30,40]).contiguous().realize()
     @function
     def f(x:Tensor, start_pos:int|UOp) -> Tensor:
@@ -110,6 +110,14 @@ class TestFunction(unittest.TestCase):
 
     v = UOp.variable("start_pos", 0, 3)
     np.testing.assert_equal(f(Tensor([1,2,3]), v.bind(0)).numpy(), [11,12,13])
+
+  def test_symbolic_shape_input(self):
+    table = Tensor([10,20,30,40]).contiguous().realize()
+    @function
+    def f(x:Tensor) -> Tensor: return x * 2
+    sz = UOp.variable("sz", 1, 3)
+    slic = table[:sz.bind(2)]
+    np.testing.assert_equal(f(slic)[:2].numpy(), [20,40])
 
   def test_nested_calls(self):
     w = Tensor([10., 20., 30.])
