@@ -119,7 +119,8 @@ def get_kernel_actions(s:Scheduler, include_0=True, max_up:int|None=None) -> dic
 beam_pool, BEAM_DEBUG = None, getenv("BEAM_DEBUG")
 def beam_search(s:Scheduler, rawbufs:list[Buffer], amt:int, allow_test_size=True, disable_cache=IGNORE_BEAM_CACHE.value):
   global beam_pool
-  key = {"ast": s.ast.key, "amt": amt, "allow_test_size": allow_test_size, "device": s.ren.device, "suffix": s.ren.suffix}
+  key = {"ast": s.ast.key, "amt": amt, "allow_test_size": allow_test_size, "device": s.ren.device, "suffix": s.ren.suffix,
+         "nolocals": getenv("NOLOCALS", 0), "tc": getenv("TC", 1), "tc_opt": getenv("TC_OPT", 0), "tc_select": getenv("TC_SELECT", -1)}
   if not disable_cache and CACHELEVEL >= 1 and (val:=diskcache_get("beam_search", key)) is not None:
     ret = s.copy()
     for o in val[len(s.applied_opts):]: ret.apply_opt(o)
