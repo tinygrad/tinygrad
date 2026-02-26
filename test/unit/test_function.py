@@ -84,9 +84,10 @@ class TestFunction(unittest.TestCase):
 
     a = Tensor([[1.,2.],[3.,4.]], requires_grad=True)
     b = Tensor([[5.,6.],[7.,8.]], requires_grad=True)
-    na, nb = a.numpy(), b.numpy()
     (f(a, b).contiguous() * b).sum().backward()
+    Tensor.realize(a, b, a.grad, b.grad)
     # L = sum((a@b) * b), dL/d(a@b) = b, dL/da = b @ b^T, dL/db = a^T @ b + (a@b)
+    na, nb = a.numpy(), b.numpy()
     np.testing.assert_allclose(a.grad.numpy(), nb @ nb.T)
     np.testing.assert_allclose(b.grad.numpy(), na.T @ nb + na @ nb)
 
@@ -149,6 +150,15 @@ class TestFunction(unittest.TestCase):
     a = Tensor([1,2,3]).realize()
     np.testing.assert_equal(f(a).numpy(), [2,3,4])
     np.testing.assert_equal(a.numpy(), [3,4,5])  # TODO: should be [1,2,3]
+
+  def test_implicit_assign(self):
+    a = Tensor([1,2,3])
+    a += 1
+    c = Tensor([2,2,2]).contiguous()
+    @function
+    def f(b:Tensor) -> Tensor: return a+b+c
+    b = Tensor([10,20,30]).realize()
+    np.testing.assert_equal(f(b).numpy(), [14,25,36])
 
   def test_assign_input(self):
     @function
