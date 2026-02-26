@@ -741,7 +741,8 @@ class TestSchedule(unittest.TestCase):
     out = x.softmax(dtype=dtypes.float)
     sched = out.schedule()
     self.assertEqual(len(sched), 3)
-    self.assertEqual(sched[0].bufs[0].dtype, dtypes.float)
+    self.assertEqual(sched[0].bufs[0].dtype, dtypes.half) # max is calculated in half
+    self.assertEqual(sched[1].bufs[0].dtype, dtypes.float) # cast happens in second kernel
 
     # input float, softmax in float
     Tensor.manual_seed(0)
