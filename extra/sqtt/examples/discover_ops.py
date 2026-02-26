@@ -10,15 +10,13 @@ from extra.gemm.amd_asm_matmul import Kernel
 
 # skip instructions that mutate wave state (PC, EXEC, allocations, signals)
 SKIP = {'S_SETPC_B64', 'S_SWAPPC_B64', 'S_RFE_B64', 'S_BARRIER_SIGNAL', 'S_BARRIER_SIGNAL_ISFIRST', 'S_GET_BARRIER_STATE', 'S_ALLOC_VGPR',
-        'S_BARRIER_INIT', 'S_BARRIER_JOIN', 'S_SLEEP_VAR', 'S_SENDMSG_RTN_B32', 'S_SENDMSG_RTN_B64', 'S_GETPC_B64',
-        'S_FMAAK_F32', 'S_FMAMK_F32'}
+        'S_BARRIER_INIT', 'S_BARRIER_JOIN', 'S_SLEEP_VAR', 'S_SENDMSG_RTN_B32', 'S_SENDMSG_RTN_B64', 'S_GETPC_B64'}
 SKIP_SUBSTR = ['SAVEEXEC', 'WREXEC', 'MOVREL', 'ATOMIC', 'S_BUFFER_', 'S_ATC_PROBE', 'DS_CMPSTORE_RTN', 'GS_REG', 'BARRIER', 'DS_GWS',
-               'DS_WRAP_RTN_B32']
+               'DS_WRAP_RTN_B32', 'DS_ORDERED_COUNT', 'GLOBAL_LOAD_LDS']
 
 ALU_FORMATS = {'VOP1', 'VOP1_LIT', 'VOP1_SDST', 'VOP2', 'VOP2_LIT', 'VOP3', 'VOP3_SDST', 'VOP3SD', 'VOP3P', 'VOP3P_MFMA', 'VOP3PX2',
                'VOPC', 'SOP1', 'SOP1_LIT', 'SOP2', 'SOP2_LIT', 'SOPC', 'SOPC_LIT', 'SOPK', 'SOPK_LIT', 'VINTERP'}
 # intentionally not testing scratch memory ops
-# TODO: add mem back
 MEM_FORMATS = {'VGLOBAL', 'GLOBAL', 'SMEM', 'DS'}
 
 def should_skip(op: Enum) -> bool: return (name:=op.name) in SKIP or any(sub in name for sub in SKIP_SUBSTR)
@@ -76,6 +74,7 @@ MEM_PRESET_REGS: dict[str, dict[str, Reg]] = {
 
 def create_mem_inst(op: Enum, builder: functools.partial[Inst]) -> Inst:
   inst_cls, operands, field_map = builder.func, OPERANDS.get(op, {}), MEM_PRESET_REGS.get(builder.func.__name__, {})
+  vgpr_base = MEM_VGPR_BASE
   kwargs: dict[str, Reg|int] = {}
   vslot, sslot = 0, 0
   for name, field in inst_cls._fields:
@@ -85,7 +84,7 @@ def create_mem_inst(op: Enum, builder: functools.partial[Inst]) -> Inst:
       continue
     nregs = max(1, operands[name][1] // 32) if name in operands else 1
     if isinstance(field, VGPRField):
-      vi = MEM_VGPR_BASE + vslot * MEM_VGPR_STRIDE
+      vi = vgpr_base + vslot * MEM_VGPR_STRIDE
       kwargs[name] = v[vi:vi+nregs-1] if nregs > 1 else v[vi]
       vslot += 1
     elif isinstance(field, (SGPRField, AlignedSGPRField, SBaseField)):
@@ -119,7 +118,10 @@ def exec_insts(insts:list):
   k.emit(v_mov_b32_e32(v[V_VADDR[0]], 0))
   k.emit(v_mov_b32_e32(v[V_VADDR[1]], 0))
   # ** emit
-  for inst in insts: k.emit(inst)
+  mem_fmts = {'DS', 'GLOBAL', 'VGLOBAL', 'FLAT', 'VFLAT', 'SCRATCH', 'VSCRATCH', 'SMEM'}
+  for inst in insts:
+    k.emit(inst)
+    if type(inst).__name__ in mem_fmts: k.emit(s_waitcnt(simm16=0))
   k.emit(s_endpgm())
   # ** run
   NUM_THREADS, NUM_GRIDS, BUF_SIZE = 32, 1, 1024*1024
@@ -132,40 +134,6 @@ def exec_insts(insts:list):
   B = Tensor.empty(1, dtype=dtypes.uint8)
   C = Tensor.empty(1, dtype=dtypes.uint8)
   Tensor.custom_kernel(A, B, C, fxn=fxn)[0].realize()
-  print(f"Ran {len(insts)} instructions.")
-
-def find_first_faulting_index(all_insts):
-  def crashes(k):
-    try:
-      exec_insts(all_insts[:k])
-      return False
-    except Exception:
-      return True
-
-  n = len(all_insts)
-
-  # 1) Find an upper bound where it crashes: (lo, hi] with crash at hi
-  lo = 0
-  hi = 1
-  while hi <= n and not crashes(hi):
-    lo = hi
-    hi *= 2
-  if hi > n:
-    hi = n
-    if not crashes(hi):
-      return None  # never crashes
-
-  # 2) Binary search for first crashing prefix length
-  # invariant: crashes(lo) == False, crashes(hi) == True
-  while hi - lo > 1:
-    mid = (lo + hi) // 2
-    if crashes(mid):
-      hi = mid
-    else:
-      lo = mid
-
-  # hi is the first prefix length that crashes, so the bad instruction is hi-1
-  return hi - 1
 
 if __name__ == "__main__":
   arch = Device[Device.DEFAULT].renderer.arch
@@ -175,13 +143,9 @@ if __name__ == "__main__":
   elif arch.startswith("gfx11"):
     from tinygrad.runtime.autogen.amd.rdna3.ins import *
     import tinygrad.runtime.autogen.amd.rdna3.ins as all_insts
-  else: raise RuntimeError(f"{arch} not supported yet")
+    # these don't exist in the RDNA3 cards, only RDNA3.5 and above
+    SKIP.update(['S_FMAAK_F32', 'S_FMAMK_F32'])
+  else: print(f"{arch} not supported yet"); exit(0)
   alu_insts, mem_insts, skipped = collect_instructions()
   print(f"collected {len(alu_insts)} ALU + {len(mem_insts)} memory instructions ({len(skipped)} skipped)")
-  all_insts = mem_insts + alu_insts
-
-  bad_i = find_first_faulting_index(all_insts)
-  if bad_i is not None:
-    print("bad_i =", bad_i)
-  if bad_i is not None:
-    print("faulting inst =", all_insts[bad_i])
+  exec_insts(mem_insts+alu_insts)
