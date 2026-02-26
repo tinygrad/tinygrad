@@ -84,9 +84,10 @@ class TestFunction(unittest.TestCase):
 
     a = Tensor([[1.,2.],[3.,4.]], requires_grad=True)
     b = Tensor([[5.,6.],[7.,8.]], requires_grad=True)
-    na, nb = a.numpy(), b.numpy()
     (f(a, b).contiguous() * b).sum().backward()
+    Tensor.realize(a, b, a.grad, b.grad)
     # L = sum((a@b) * b), dL/d(a@b) = b, dL/da = b @ b^T, dL/db = a^T @ b + (a@b)
+    na, nb = a.numpy(), b.numpy()
     np.testing.assert_allclose(a.grad.numpy(), nb @ nb.T)
     np.testing.assert_allclose(b.grad.numpy(), na.T @ nb + na @ nb)
 
@@ -123,13 +124,13 @@ class TestFunction(unittest.TestCase):
   def test_name(self):
     @function
     def f(a:Tensor) -> Tensor: return a + 1
-    assert f(Tensor([1])).uop.src[-1].arg.name.endswith("f")
+    assert f(Tensor([1])).uop.arg.name.endswith("f")
 
   def test_method_name(self):
     class Foo:
       @function
       def __call__(self, x:Tensor) -> Tensor: return x + 1
-    assert Foo()(Tensor([1])).uop.src[-1].arg.name.endswith("Foo.__call__")
+    assert Foo()(Tensor([1])).uop.arg.name.endswith("Foo.__call__")
 
   def test_callable_instance(self):
     class Foo:
@@ -138,7 +139,7 @@ class TestFunction(unittest.TestCase):
     foo = Foo()
     f = function(foo)
     np.testing.assert_equal(f(Tensor([1,2,3])).numpy(), [11,22,33])
-    assert f(Tensor([1,2,3])).uop.src[-1].arg.name.endswith("Foo")
+    assert f(Tensor([1,2,3])).uop.arg.name.endswith("Foo")
 
   def test_iadd(self):
     @function

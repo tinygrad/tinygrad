@@ -13,14 +13,20 @@ def reduce_gradient(ctx:UOp, ret:UOp, op:Ops):
     return ((mask/broadcast_to_input(count)) * broadcast_to_input(ctx),)
   if op == Ops.MUL: return (broadcast_to_input(ctx * ret) / ret.src[0],)
 
-def call_gradient(ctx:UOp, k:UOp):
+def call_gradient(ctx:UOp, k:UOp) -> tuple[UOp|None, ...]:
   if k.arg.grad_fxn is not None: return (None,) + k.arg.grad_fxn(ctx, k)
   # auto-differentiate the function
   fxn, args = k.src[0], k.src[1:]
   params = sorted([x for x in fxn.toposort() if x.op == Ops.PARAM], key=lambda x: x.arg)
-  grads = compute_gradient(fxn, ctx, set(params))
-  subst = dict(zip(params, args))
-  return (None,) + tuple(grads[p].substitute(subst) if p in grads else None for p in params)
+  grads = compute_gradient(fxn, ctx.param_like(len(args)), set(params))
+  ret: list[UOp|None] = [None]
+  for i,p in enumerate(params):
+    if p in grads:
+      # TODO: compact the args and remove unused ones
+      ret.append(grads[p].call(*args, ctx, name=k.arg.name+f"_backward_{i}"))
+    else:
+      ret.append(None)
+  return tuple(ret)
 
 # ctx is grad_output
 pm_gradient = PatternMatcher([

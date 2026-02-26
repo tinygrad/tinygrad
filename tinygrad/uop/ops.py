@@ -864,6 +864,10 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     if vmin_vmax is not None: src += (UOp.const(dtype, vmin_vmax[0]), UOp.const(dtype.scalar(), vmin_vmax[1]))
     if name is not None: src += (UOp(Ops.NOOP, arg=name),)
     return UOp(Ops.PARAM, dtype, src, arg=slot)
+  def param_like(self, slot:int):
+    if self.op is Ops.BIND:
+      return UOp.param(slot, self.dtype, self._shape, self._device, self._min_max, self.src[0].arg[0])
+    return UOp.param(slot, self.dtype, self._shape, self._device)
 
   def call(self, *srcs:UOp, grad_fxn:Callable|None=None, metadata:tuple[Metadata, ...]=(), name:str|None=None) -> UOp:
     # TODO: reenable this after ENCDEC is fixed
