@@ -32,7 +32,7 @@ class function(Generic[ReturnType]):
     subs = {}
     for i,x in enumerate(call_uops):
       # TODO: this can be better
-      if x.op is Ops.BIND: subs[x] = UOp.param(i, x.dtype, x._shape, x._device, x._min_max)
+      if x.op is Ops.BIND: subs[x] = UOp.param(i, x.dtype, x._shape, x._device, x._min_max, x.src[0].arg[0])
       else: subs[x] = UOp.param(i, x.dtype, x._shape, x._device)
     uret = ret.uop.substitute(subs)
 
