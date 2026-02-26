@@ -18,6 +18,16 @@ class TestIselX86(unittest.TestCase):
     # both comparisons become the same instruction
     self.assertTrue(n.src[0].src[2] == n.src[1].src[2] and n.src[0].src[2].arg is X86Ops.CMP)
 
+  def test_vpbroadcast(self):
+    a = UOp.variable("a", 0, 0, dtypes.int32)
+    n = self.isel_rewrite(a.broadcast(4))
+    # need to move src from gpr to xmm before broadcasting
+    self.assertTrue(n.arg is X86Ops.VPBROADCASTD and n.src[0].arg is X86Ops.VMOVD)
+    # if we can fuse a load we can skip the move and access memory directly
+    load = UOp(Ops.PARAM, dtypes.int32.ptr(), arg=0).index(UOp.const(dtypes.int32, 0), ptr=True).load()
+    n = self.isel_rewrite(load.broadcast(4))
+    self.assertTrue(n.arg is X86Ops.VPBROADCASTD and len(n.src) == 3)
+
   # lower 2 32 bits must come from the same register and upper 2 32 bits must come from the same register
   def test_vshufps(self):
     a = UOp.variable("a", 0, 0, dtypes.float32.vec(4))
@@ -81,15 +91,6 @@ class TestIselX86(unittest.TestCase):
     load = UOp(Ops.PARAM, dtypes.int32.ptr(), arg=0).index(UOp.const(dtypes.int32, 0), ptr=True).load()
     n = self.isel_rewrite(load * load)
     self.assertTrue(len(n.src) == 2)
-
-  # test noop has same reg as src, this is because noops aren't instructions but still need to be part of the graph
-  # as they may have different dtype from src and the correct dtype is required to encode the correct instruction
-  # by giving them the same reg as src we ensure they share the same live range
-  @unittest.skip("hmmm")
-  def test_noop(self):
-    noop = UOp(Ops.NOOP, dtypes.int32, (UOp(Ops.PARAM, dtypes.int32.ptr(), arg=0),))
-    n = self.isel_rewrite(noop)
-    self.assertTrue(isinstance(n.tag, Register) and n.tag == n.src[0].tag)
 
   # TODO: might want to check that load isn't part of another range when fusing
 

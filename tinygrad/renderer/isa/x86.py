@@ -69,7 +69,7 @@ class X86Ops(FastEnum):
   VPADDB = auto(); VPADDW = auto(); VPADDD = auto(); VPADDQ = auto()
   VPSUBB = auto(); VPSUBW = auto(); VPSUBD = auto(); VPSUBQ = auto()
   VPMULLW = auto(); VPMULLD = auto()
-  # packed bitwise TODO: might also want vandp cause of different execution ports
+  # packed bitwise
   VPAND = auto(); VPOR = auto(); VPXOR = auto()
   # packed variable shifts
   VPSLLVD = auto(); VPSLLVQ = auto(); VPSRLVD = auto(); VPSRLVQ = auto(); VPSRAVD = auto()
@@ -263,6 +263,14 @@ def vpins(x:UOp) -> UOp:
   op = {1: X86Ops.VPINSRB, 2: X86Ops.VPINSRW, 4: X86Ops.VPINSRD, 8: X86Ops.VPINSRQ}[x.dtype.scalar().itemsize]
   return functools.reduce(lambda ret,i: x.ins(op, src=(ret, x.src[i], imm(dtypes.uint8, i))), range(len(x.src)), def_reg(x.dtype))
 
+# vpbroadcastd xmm1, xmm0
+# inserts scalar int in xmm0 into all lanes of xmm1
+def vpbroadcast(ctx:IselContext, x:UOp, y:UOp) -> UOp:
+  n = x.ins({1: X86Ops.VPBROADCASTB, 2: X86Ops.VPBROADCASTW, 4: X86Ops.VPBROADCASTD, 8: X86Ops.VPBROADCASTQ}[y.dtype.itemsize], src=(y,))
+  if y.op is Ops.LOAD and (f:=fuse_load(ctx, n, 0)) is not None: return f
+  # if there isn't a load we can fuse we need to move y from gpr to xmm
+  return n.replace(src=(y.bitcast(dtypes.float32 if y.dtype.itemsize < 8 else dtypes.float64),))
+
 def div(ctx:IselContext, x:UOp):
   # zero extend or move src[0] to x
   move1 = x.ins(X86Ops.MOV, src=(x.src[0],), tag=ctx.vreg(RAX))
@@ -380,24 +388,18 @@ isel_matcher = PatternMatcher([
   (UPat.var("y", dtypes.float64).trunc().named("x"), lambda y,x: x.ins(X86Ops.VROUNDSD, src=(y, y, imm(dtypes.uint8, 3))) if x.dtype.count == 1 else None), # noqa: E501
   (UPat.var("y", dtypes.float32).trunc().named("x"), lambda y,x: x.ins(X86Ops.VROUNDPS, src=(y, imm(dtypes.uint8, 3)))),
   (UPat.var("y", dtypes.float64).trunc().named("x"), lambda y,x: x.ins(X86Ops.VROUNDPD, src=(y, imm(dtypes.uint8, 3)))),
-  # broadcasts TODO: not quite right, what about load fusion? Also, bitcast should be x86op and reg is xmm?
-  (UPat.var("y", dtypes.int8s+(dtypes.bool,)).broadcast(name="x"), lambda y,x: x.ins(X86Ops.VPBROADCASTB, src=(y.bitcast(dtypes.float32),))),
-  (UPat.var("y", dtypes.int16s).broadcast(name="x"), lambda y,x: x.ins(X86Ops.VPBROADCASTW, src=(y.bitcast(dtypes.float32),))),
-  (UPat.var("y", dtypes.int32s).broadcast(name="x"), lambda y,x: x.ins(X86Ops.VPBROADCASTD, src=(y.bitcast(dtypes.float32),))),
-  (UPat.var("y", dtypes.int64s).broadcast(name="x"), lambda y,x: x.ins(X86Ops.VPBROADCASTQ, src=(y.bitcast(dtypes.float64),))),
-  (UPat.var("y", dtypes.float32).broadcast(name="x"), lambda y,x: x.ins(X86Ops.VBROADCASTSS, src=(y,))),
   # shufles
-  (UPat.var("y", dtypes.int16s).bitcast(dtypes.float16).named("x"), lambda y,x: x.ins(X86Ops.VPINSRW, src=(def_reg(x.dtype), y, imm(dtypes.uint8, 0)))), # noqa: E501
-  (UPat(Ops.VECTORIZE, dtypes.ints+(dtypes.bool,), name="x"), vpins),
+  (UPat.var("y", dtypes.float32).broadcast(name="x"), lambda y,x: x.ins(X86Ops.VBROADCASTSS, src=(y,))),
   (UPat(Ops.VECTORIZE, dtypes.float32, name="x"), vshufps),
   (UPat(Ops.VECTORIZE, dtypes.float32, name="x"), vinsertps),
-  (UPat.var("y", dtypes.float32).gep(name="x"), lambda y,x: x.ins(X86Ops.VINSERTPS, src=(y, y, imm(dtypes.uint8, x.arg[0] << 6)))),
-  # extract
-  (UPat.var("y", dtypes.float16).bitcast(dtypes.int16s).named("x"), lambda y,x: x.ins(X86Ops.VPEXTRW, src=(y, imm(dtypes.uint8, 0)))),
+  (UPat.var("y", dtypes.ints+(dtypes.bool,)).broadcast(name="x"), vpbroadcast),
+  (UPat(Ops.VECTORIZE, dtypes.ints+(dtypes.bool,), name="x"), vpins),
+  # gep
   (UPat.var("y", dtypes.int8s).gep(name="x"), lambda y,x: x.ins(X86Ops.VPEXTRB, src=(y, imm(dtypes.uint8, x.arg[0])))),
   (UPat.var("y", dtypes.int16s).gep(name="x"), lambda y,x: x.ins(X86Ops.VPEXTRW, src=(y, imm(dtypes.uint8, x.arg[0])))),
   (UPat.var("y", dtypes.int32s).gep(name="x"), lambda y,x: x.ins(X86Ops.VPEXTRD, src=(y, imm(dtypes.uint8, x.arg[0])))),
   (UPat.var("y", dtypes.int64s).gep(name="x"), lambda y,x: x.ins(X86Ops.VPEXTRQ, src=(y, imm(dtypes.uint8, x.arg[0])))),
+  (UPat.var("y", dtypes.float32).gep(name="x"), lambda y,x: x.ins(X86Ops.VINSERTPS, src=(y, y, imm(dtypes.uint8, x.arg[0] << 6)))),
   # fused multiply add TODO: don't fuse if mul used several times
   (UPat.var('a', dtypes.float32) * UPat.var('b') + UPat.var('c'), lambda a,b,c: a.ins(X86Ops.VFMADD213SS if a.dtype.count == 1 else X86Ops.VFMADD213PS, src=(a, b, c))), # noqa: E501
   (UPat.var('a', dtypes.float64) * UPat.var('b') + UPat.var('c'), lambda a,b,c: a.ins(X86Ops.VFMADD213SD if a.dtype.count == 1 else X86Ops.VFMADD213PD, src=(a, b, c))), # noqa: E501
@@ -478,6 +480,8 @@ isel_matcher = PatternMatcher([
   (UPat(dtype=dtypes.int32).cast(dtypes.int64s, name="x"), lambda x: x.ins(X86Ops.MOVSXD)),
   (UPat(dtype=dtypes.sints).cast(dtypes.ints, name="x"), lambda x: x.ins(X86Ops.MOVSX)),
   # bitcasts
+  (UPat.var("y", dtypes.int16s).bitcast(dtypes.float16).named("x"), lambda y,x: x.ins(X86Ops.VPINSRW, src=(def_reg(x.dtype), y, imm(dtypes.uint8, 0)))), # noqa: E501
+  (UPat.var("y", dtypes.float16).bitcast(dtypes.int16s).named("x"), lambda y,x: x.ins(X86Ops.VPEXTRW, src=(y, imm(dtypes.uint8, 0)))),
   (UPat(dtype=dtypes.int32s).bitcast(dtypes.float32).named("x"), lambda x: x.ins(X86Ops.VMOVD)),
   (UPat(dtype=dtypes.int64s).bitcast(dtypes.float64).named("x"), lambda x: x.ins(X86Ops.VMOVQ)),
   (UPat(dtype=dtypes.float32).bitcast(dtypes.int32s).named("x"), lambda x: x.ins(X86Ops.VMOVDm)),

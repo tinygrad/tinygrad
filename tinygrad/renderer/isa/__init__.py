@@ -108,12 +108,12 @@ class ISARenderer(Renderer):
   post_regalloc_matcher: PatternMatcher
   def stack_pointer(self) -> UOp: raise NotImplementedError("arch specific")
   def asm(self, uops:list[UOp]) -> str: raise NotImplementedError("arch specific")
-  # TODO: these should go with the other rewrites after we know what to do with ProgramSpec and Estimates
+  # TODO: these should go with the other rewrites in codegen
   def lower(self, sink:UOp):
     sink = graph_rewrite(sink, self.pre_isel_matcher, name="pre instruction selection", bottom_up=True)
     isel_ctx = IselContext(sink)
     sink = graph_rewrite(sink, self.isel_matcher, ctx=isel_ctx, name="instruction selection", bottom_up=True)
-    # TODO: remove, annoying needed for noops
+    # TODO: is there a way to remove this?
     sink = graph_rewrite(sink, isel_fixup, name="instruction selection fixup")
     lst = isa_linearize(sink)
     regalloc_ctx = RegallocContext(lst, self.isel_matcher, self.stack_pointer(), isel_ctx.stack_size)
