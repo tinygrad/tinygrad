@@ -46,6 +46,7 @@ class InstOp(Enum):
   SMEM = 0x1
   JUMP = 0x3              # branch taken
   JUMP_NO = 0x4           # branch not taken
+  CALL = 0x5              # s_call_b64
   MESSAGE = 0x9
   VALU_TRANS = 0xb        # transcendental: exp, log, rcp, sqrt, sin, cos
   VALU_64_SHIFT = 0xd     # 64-bit shifts: lshl, lshr, ashr
@@ -72,8 +73,10 @@ class InstOp(Enum):
 
   # LDS ops on traced SIMD
   LDS_LOAD = 0x29
+  LDS_ATOMIC = 0x2a        # ds_append, ds_consume, ds_store_addtid_b32
   LDS_STORE = 0x2b
   LDS_STORE_64 = 0x2c
+  LDS_STORE_96 = 0x2d      # ds_store_b96
   LDS_STORE_128 = 0x2e
 
   # Memory ops on other SIMD (0x5x range)
@@ -96,35 +99,36 @@ class InstOp(Enum):
   # EXEC-modifying ops (0x7x range)
   SALU_SAVEEXEC = 0x72    # s_*_saveexec_b32/b64
   VALU_CMPX = 0x73        # v_cmpx_*
+  VALU_CMPX_64 = 0x74     # v_cmpx_class_f64_*
+  BVH = 0x76              # ds_bvh_stack_rtn_b32
 
 class InstOpRDNA4(Enum):
-  """SQTT instruction operation types for RDNA4 (gfx1200)."""
-  SMEM = 0x0
+  """SQTT instruction operation types for RDNA4 (gfx1200). Different encoding from RDNA3."""
+  SALU = 0x0
   JUMP = 0x1
   NEXT = 0x2
   MESSAGE = 0x4
   VALU_64 = 0x6
-  VALU_SHIFT = 0x7
+  VALU_64_SHIFT = 0x7     # v_lshrrev_b64, v_mad_co_i64_i32
   VMEM = 0x10
   VMEM_128 = 0x11
   VMEM_STORE = 0x12
-  VMEM_STORE_64 = 0x13
-  VMEM_STORE_128 = 0x14
-  LDS = 0x15
-  LDS_STORE = 0x16
-  LDS_STORE_128 = 0x17
-  LDS_SPECIAL = 0x3b
-  PERMUTE = 0x3c
+  VMEM_STORE_96 = 0x13    # global_store_b96, global_store_b128
+  LDS_LOAD = 0x14         # ds_load_*
+  LDS_STORE = 0x15        # ds 32-bit store/atomic ops
+  LDS_STORE_64 = 0x16     # ds 64-bit ops
+  LDS_STORE_128 = 0x17    # ds 128-bit ops
+  BVH = 0x3b              # ds_bvh_stack_push4_pop1_rtn_b32
+  BVH_128 = 0x3c          # ds_bvh_stack_push8_*
   VALU_WMMA = 0x46
-  VALU = 0x49
-  SALU = 0x4d
-  SALU_ALT = 0x4c
-  SALU_HI = 0x4e
-  SALU_FLOAT = 0x50
+  VALU_FP = 0x49          # v_add_f64, v_ceil_f64, v_div_scale, VOP3 f32
+  SALU_TRANS = 0x4c       # s_add_f16/f32, s_cvt_*, s_cmp_*, v_s_* transcendentals
+  SALU_MUL = 0x4d         # s_mul_f32, s_mul_hi_*, s_mul_u64
+  SALU_MUL_I32 = 0x4e     # s_mul_i32
+  SALU_CLS = 0x50         # s_cls_i32
   OTHER_VMEM = 0x5e
   OTHER_VMEM_STORE = 0x60
-  OTHER_LDS = 0x76
-  OTHER_LDS_STORE = 0x77
+  VMEM_BLOCK = 0x76       # global_store_block
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # PACKET TYPE BASE CLASS
