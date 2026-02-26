@@ -818,15 +818,23 @@ class Parser:
         val = _u32(0)
         for i in range(4): val = val | (mem.index(idx + _const(dtypes.int, i), *gate, ptr=True).load().cast(dtypes.uint32) << _u32(i * 8))
     else:
-      idx = (addr >> _const(addr.dtype, 2)).cast(dtypes.int)
-      val = mem.index(idx, *gate)
+      # Memory is stored in dwords but addresses are in bytes read byte-by-byte so offset loads
+      def _read_byte(byte_off: int) -> UOp:
+        baddr = addr + _const(adt, byte_off)
+        widx = (baddr >> _const(adt, 2)).cast(dtypes.int)
+        wval = mem.index(widx, *gate)
+        shift = (baddr & _const(adt, 3)).cast(dtypes.uint32) * _u32(8)
+        return ((wval >> shift) & _u32(0xFF)).cast(dtypes.uint32)
       if dt in (dtypes.uint64, dtypes.int64, dtypes.float64):
-        idx2 = ((addr + _const(adt, 4)) >> _const(adt, 2)).cast(dtypes.int)
-        val = val.cast(dtypes.uint64) | (mem.index(idx2, *gate).cast(dtypes.uint64) << _u64(32))
+        val = _u32(0).cast(dtypes.uint64)
+        for i in range(8): val = val | (_read_byte(i).cast(dtypes.uint64) << _u64(i * 8))
       elif dt in (dtypes.uint8, dtypes.int8):
-        val = (val >> ((addr & _const(adt, 3)).cast(dtypes.uint32) * _u32(8)) ) & _u32(0xFF)
-      elif dt in (dtypes.uint16, dtypes.int16):
-        val = (val >> (((addr >> _const(adt, 1)).cast(dtypes.uint32) & _u32(1)).cast(dtypes.uint32) * _u32(16)) ) & _u32(0xFFFF)
+        val = _read_byte(0)
+      elif dt in (dtypes.uint16, dtypes.int16, dtypes.short):
+        val = _read_byte(0) | (_read_byte(1) << _u32(8))
+      else:
+        val = _u32(0)
+        for i in range(4): val = val | (_read_byte(i) << _u32(i * 8))
     if dt == dtypes.float32: return val.cast(dtypes.float32) if val.dtype == dtypes.uint32 else val.bitcast(dtypes.float32)
     if dt == dtypes.float64: return val.cast(dtypes.uint64).bitcast(dtypes.float64)
     if dt in (dtypes.half,): return val.cast(dtypes.uint16).bitcast(dtypes.half)

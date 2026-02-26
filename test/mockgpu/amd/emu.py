@@ -888,7 +888,8 @@ def _compile_vop12(inst: ir3.VOP1 | ir3.VOP1_SDST | ir3.VOP2 | ir4.VOP1 | ir4.VO
       # Only compute hi-half when src0_off >= 384, use guarded index to prevent OOB access
       src0_reg = src0_hi.where(src0_off - _c(384), _c(0))
       s0 = src0_hi.where(_hi16(ctx.rvgpr_dyn(src0_reg, lane)), s0)
-    d0 = _cond_hi16(write_hi_half, ctx.rvgpr_dyn(vdst_reg, lane))
+    d0 = _u64(ctx.rvgpr_dyn(vdst_reg, lane), ctx.rvgpr_dyn(vdst_reg + _c(1), lane)) if bits['d'] == 64 \
+      else _cond_hi16(write_hi_half, ctx.rvgpr_dyn(vdst_reg, lane))
     srcs = {'S0': s0, 'D0': d0}
   else:
     vsrc1_reg = ctx.inst_field(type(inst).vsrc1)
@@ -897,7 +898,8 @@ def _compile_vop12(inst: ir3.VOP1 | ir3.VOP1_SDST | ir3.VOP2 | ir4.VOP1 | ir4.VO
     # 64 bit
     s1 = _u64(ctx.rvgpr_dyn(vsrc1_actual, lane), ctx.rvgpr_dyn(vsrc1_actual + _c(1), lane)) if bits.get('s1', 32) == 64 \
       else _cond_hi16(vsrc1_hi, ctx.rvgpr_dyn(vsrc1_actual, lane))
-    d0 = _cond_hi16(write_hi_half, ctx.rvgpr_dyn(vdst_reg, lane))  # FMAC/FMAMK hi-half dest needs hi-half accumulator
+    d0 = _u64(ctx.rvgpr_dyn(vdst_reg, lane), ctx.rvgpr_dyn(vdst_reg + _c(1), lane)) if bits['d'] == 64 \
+      else _cond_hi16(write_hi_half, ctx.rvgpr_dyn(vdst_reg, lane))  # FMAC/FMAMK hi-half dest needs hi-half accumulator
     # Handle VOP2 hi-half src0 operand (src0 >= v[128] for 16-bit ops)
     src0_off = ctx.inst_field(type(inst).src0)
     s0 = ctx.rsrc_dyn(src0_off, lane, bits['s0'], literal, is_f64)
@@ -1145,7 +1147,9 @@ def _compile_vop3(inst: ir3.VOP3 | ir4.VOP3 | irc.VOP3, ctx: _Ctx) -> UOp:
   #irx_CNDMASK series
   if 'CNDMASK' in op_name and src2 is not None: srcs['VCC'] = src2
   # FMAC instructions need D0 (accumulator) from destination register
-  if 'FMAC' in op_name: srcs['D0'] = ctx.rvgpr_dyn(vdst_reg, lane)
+  if 'FMAC' in op_name:
+    srcs['D0'] = _u64(ctx.rvgpr_dyn(vdst_reg, lane), ctx.rvgpr_dyn(vdst_reg + _c(1), lane)) if bits['d'] == 64 \
+      else ctx.rvgpr_dyn(vdst_reg, lane)
   opsel_dst_hi = bool(opsel & 0b1000) and bits['d'] == 16
   srcs['OPSEL'] = UOp.const(dtypes.uint32, opsel)
   return ctx.compile_vop_pcode(inst.op, srcs, lane, vdst_reg, exec_mask, opsel_dst_hi=opsel_dst_hi, clmp=getattr(inst, 'clmp', 0))
