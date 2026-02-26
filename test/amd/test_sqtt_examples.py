@@ -166,9 +166,6 @@ class SQTTExamplesTestBase(unittest.TestCase):
 
   def test_rocprof_wave_times_match(self):
     """Wave start/end times must match rocprof exactly."""
-    # temp for testing
-    for k in self.examples.copy():
-      if k != "profile_py_run_0": del self.examples[k]
     for name, (events, lib, base) in self.examples.items():
       with self.subTest(example=name):
         occupancy, _ = run_rocprof_decoder([e.blob for e in events], lib, base, self.target)
