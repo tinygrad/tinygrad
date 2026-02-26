@@ -62,7 +62,7 @@ def isa_linearize(sink:UOp) -> list[UOp]:
   heap = [(-nkey[sink], sink)]
   newlst = []
   lock: UOp|None = None
-  stupid: int = 0
+  prio: int = 0
   clobbers: set[UOp] = set()
   while heap or clobbers:
     # if heap is empty we have a cycle and the flag producer must be rematerialized
@@ -72,7 +72,7 @@ def isa_linearize(sink:UOp) -> list[UOp]:
       newlst.append(lock)
       for c in clobbers: heapq.heappush(heap, (-nkey[c],c))
       clobbers.clear()
-      lock, stupid = None, 0
+      lock, prio = None, 0
 
     u = heapq.heappop(heap)[1]
 
@@ -82,17 +82,17 @@ def isa_linearize(sink:UOp) -> list[UOp]:
       if lock is u:
         for c in clobbers: heapq.heappush(heap, (-nkey[c],c))
         clobbers.clear()
-        lock, stupid = None, 0
+        lock, prio = None, 0
       # if this is the user of or is another flag producer it can't be scheduled
       # if this is a loop boundry or has a lower run count than the flag user that introduced the lock we also don't schedule
       # loop boundries do clobber but we also don't want to insert stuff from outside the loop into the loop
       # if there's no loop we also don't want to add IMM and DEFINE_REG in the middle of the kernel
       elif u.arg in X86GroupOp.ReadFlags and lock is not u.src[-1] or u.arg in X86GroupOp.WriteFlags or \
-        u.op in {Ops.RANGE, Ops.END} or u.arg in {X86Ops.IMM, X86Ops.DEFINE_REG} or priorities[u][0] < stupid:
+        u.op in {Ops.RANGE, Ops.END} or u.arg in {X86Ops.IMM, X86Ops.DEFINE_REG} or priorities[u][0] < prio:
         clobbers.add(u)
         continue
     # if there's no lock and this is a flag user its flag producer becomes the lock
-    elif u.arg in X86GroupOp.ReadFlags: lock, stupid = u.src[-1], priorities[u][0]
+    elif u.arg in X86GroupOp.ReadFlags: lock, prio = u.src[-1], priorities[u][0]
 
     newlst.append(u)
 
