@@ -859,7 +859,8 @@ class PCIIface(PCIIfaceBase):
     if queue_type == kfd.KFD_IOC_QUEUE_TYPE_SDMA:
       pv, doorbell_index = self.dev_impl.sdma.setup_ring(*(rcvr_params:=(ring.va_addr, ring.size, gart.va_addr+rptr, gart.va_addr+wptr, idx)))
     else:
-      pv, doorbell_index = self.dev_impl.gfx.setup_ring(*(rcvr_params:=(ring.va_addr, ring.size, gart.va_addr+rptr, gart.va_addr+wptr,
+      setup_fn = self.dev_impl.gfx.setup_ring_kiq if self.dev_impl.gfx.kiq_ring_paddr is not None else self.dev_impl.gfx.setup_ring
+      pv, doorbell_index = setup_fn(*(rcvr_params:=(ring.va_addr, ring.size, gart.va_addr+rptr, gart.va_addr+wptr,
         eop_buffer.va_addr, eop_buffer.size, is_aql:=(queue_type==kfd.KFD_IOC_QUEUE_TYPE_COMPUTE_AQL), is_aql)))
 
     return AMDQueueDesc(ring=ring.cpu_view().view(fmt='I'), doorbell=self.dev_impl.doorbell64.view(doorbell_index * 8, 8, fmt='Q'), put_value=pv,
@@ -870,7 +871,8 @@ class PCIIface(PCIIfaceBase):
     for d in devs:
       d.iface.dev_impl.ih.interrupt_handler()
       if reset and d.iface.dev_impl.recover():
-        d.compute_queue.put_value, _ = d.iface.dev_impl.gfx.setup_ring(*d.compute_queue.params)
+        setup_fn = d.iface.dev_impl.gfx.setup_ring_kiq if d.iface.dev_impl.gfx.kiq_ring_paddr is not None else d.iface.dev_impl.gfx.setup_ring
+        d.compute_queue.put_value, _ = setup_fn(*d.compute_queue.params)
         d.compute_queue.read_ptr[0] = d.compute_queue.write_ptr[0] = d.compute_queue.put_value
         d.timeline_signal.value = d.timeline_value - 1
         d.error_state = None

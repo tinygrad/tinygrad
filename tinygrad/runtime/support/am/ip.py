@@ -1,7 +1,7 @@
 import ctypes, time, contextlib, functools
 from typing import cast, Literal
 from tinygrad.helpers import to_mv, data64, lo32, hi32, DEBUG, wait_cond, pad_bytes, getbits
-from tinygrad.runtime.autogen.am import am
+from tinygrad.runtime.autogen.am import am, pm4_soc15
 from tinygrad.runtime.support.amd import import_soc
 from tinygrad.runtime.support.memory import AddrSpace
 
@@ -235,111 +235,203 @@ class AM_SMU(AM_IP):
 class AM_GFX(AM_IP):
   def init_sw(self):
     self.xccs = len(self.adev.regs_offset[am.GC_HWIP])
-    self.mqd_paddr = [self.adev.mm.palloc(0x1000 * self.xccs, zero=False, boot=True) for i in range(2)]
+    self.mqd_paddr = [self.adev.mm.palloc(0x1000 * self.xccs, zero=False, boot=True) for i in range(3)]
     self.mqd_mc = [self.adev.paddr2mc(mqd_paddr) for mqd_paddr in self.mqd_paddr]
+    # KIQ/HIQ resources allocated as boot memory (stable across warm boots)
+    self.kiq_ring_paddr = self.adev.mm.palloc(0x800 * self.xccs, zero=False, boot=True)
+    self.kiq_gart_paddr = self.adev.mm.palloc(0x1000 * self.xccs, zero=False, boot=True)
+    self.kiq_eop_paddr = self.adev.mm.palloc(0x1000 * self.xccs, zero=False, boot=True)
+    self.kiq_fence_paddr = self.adev.mm.palloc(0x1000, zero=False, boot=True)
+    self.kiq_ib_paddr = self.adev.mm.palloc(0x1000 * self.xccs, zero=False, boot=True)
+    self.kiq_wptr = [0] * self.xccs
 
   def init_hw(self):
     # Wait for RLC autoload to complete
     while self.adev.regCP_STAT.read() != 0 and self.adev.regRLC_RLCS_BOOTLOAD_STATUS.read_bitfields()['bootload_complete'] != 0: pass
 
     self.adev.gmc.init_hub("GC", inst_cnt=self.xccs)
-    if self.adev.partial_boot: return
 
-    self._config_mec()
+    if not self.adev.partial_boot:
+      self._config_mec()
 
-    # NOTE: Golden reg for gfx11. No values for this reg provided. The kernel just ors 0x20000000 to this reg.
-    for xcc in range(self.xccs): self.adev.regTCP_CNTL.write(self.adev.regTCP_CNTL.read() | 0x20000000, inst=xcc)
+      # NOTE: Golden reg for gfx11. No values for this reg provided. The kernel just ors 0x20000000 to this reg.
+      for xcc in range(self.xccs): self.adev.regTCP_CNTL.write(self.adev.regTCP_CNTL.read() | 0x20000000, inst=xcc)
 
-    for xcc in range(self.xccs): self.adev.regRLC_CNTL.write(0x1, inst=xcc)
+      for xcc in range(self.xccs): self.adev.regRLC_CNTL.write(0x1, inst=xcc)
 
-    for xcc in range(self.xccs): self.adev.regRLC_SRM_CNTL.update(srm_enable=1, auto_incr_addr=1, inst=xcc)
+      for xcc in range(self.xccs): self.adev.regRLC_SRM_CNTL.update(srm_enable=1, auto_incr_addr=1, inst=xcc)
 
-    for xcc in range(self.xccs): self.adev.regRLC_SPM_MC_CNTL.write(0xf, inst=xcc)
+      for xcc in range(self.xccs): self.adev.regRLC_SPM_MC_CNTL.write(0xf, inst=xcc)
 
-    if self.adev.ip_ver[am.NBIO_HWIP][:2] != (7,9):
-      self.adev.soc.doorbell_enable(port=0, awid=0x3, awaddr_31_28_value=0x3)
-      self.adev.soc.doorbell_enable(port=3, awid=0x6, awaddr_31_28_value=0x3)
+      if self.adev.ip_ver[am.NBIO_HWIP][:2] != (7,9):
+        self.adev.soc.doorbell_enable(port=0, awid=0x3, awaddr_31_28_value=0x3)
+        self.adev.soc.doorbell_enable(port=3, awid=0x6, awaddr_31_28_value=0x3)
 
-    for xcc in range(self.xccs):
-      if self.adev.ip_ver[am.GC_HWIP] in {(9,4,3), (9,5,0)}:
-        self.adev.regGB_ADDR_CONFIG.write(0x2a114042, inst=xcc) # Golden value for mi300/mi350
-        self.adev.regTCP_UTCL1_CNTL2.update(spare=1, inst=xcc)
+      for xcc in range(self.xccs):
+        if self.adev.ip_ver[am.GC_HWIP] in {(9,4,3), (9,5,0)}:
+          self.adev.regGB_ADDR_CONFIG.write(0x2a114042, inst=xcc) # Golden value for mi300/mi350
+          self.adev.regTCP_UTCL1_CNTL2.update(spare=1, inst=xcc)
 
-      self.adev.regGRBM_CNTL.update(read_timeout=0xff, inst=xcc)
-      for i in range(0, 16):
-        self._grbm_select(vmid=i, inst=xcc)
-        self.adev.regSH_MEM_CONFIG.write(**({'initial_inst_prefetch':3} if self.adev.ip_ver[am.GC_HWIP][0]>=10 else {'retry_disable':1}),
-          **({'f8_mode':1} if self.adev.ip_ver[am.GC_HWIP][:2]==(9,4) else {}),
-          address_mode=self.adev.soc.module.SH_MEM_ADDRESS_MODE_64, alignment_mode=self.adev.soc.module.SH_MEM_ALIGNMENT_MODE_UNALIGNED, inst=xcc)
+        self.adev.regGRBM_CNTL.update(read_timeout=0xff, inst=xcc)
+        for i in range(0, 16):
+          self._grbm_select(vmid=i, inst=xcc)
+          self.adev.regSH_MEM_CONFIG.write(**({'initial_inst_prefetch':3} if self.adev.ip_ver[am.GC_HWIP][0]>=10 else {'retry_disable':1}),
+            **({'f8_mode':1} if self.adev.ip_ver[am.GC_HWIP][:2]==(9,4) else {}),
+            address_mode=self.adev.soc.module.SH_MEM_ADDRESS_MODE_64, alignment_mode=self.adev.soc.module.SH_MEM_ALIGNMENT_MODE_UNALIGNED, inst=xcc)
 
-        # Configure apertures:
-        # LDS:         0x10000000'00000000 - 0x10000001'00000000 (4GB)
-        # Scratch:     0x20000000'00000000 - 0x20000001'00000000 (4GB)
-        self.adev.regSH_MEM_BASES.write(shared_base=0x1, private_base=0x2, inst=xcc)
-      self._grbm_select(inst=xcc)
+          # Configure apertures:
+          # LDS:         0x10000000'00000000 - 0x10000001'00000000 (4GB)
+          # Scratch:     0x20000000'00000000 - 0x20000001'00000000 (4GB)
+          self.adev.regSH_MEM_BASES.write(shared_base=0x1, private_base=0x2, inst=xcc)
+        self._grbm_select(inst=xcc)
 
-      # Configure MEC doorbell range
-      self.adev.regCP_MEC_DOORBELL_RANGE_LOWER.write(0x100 * xcc, inst=xcc)
-      self.adev.regCP_MEC_DOORBELL_RANGE_UPPER.write(0x100 * xcc + 0xf8, inst=xcc)
+        # Configure MEC doorbell range
+        self.adev.regCP_MEC_DOORBELL_RANGE_LOWER.write(0x100 * xcc, inst=xcc)
+        self.adev.regCP_MEC_DOORBELL_RANGE_UPPER.write(0x100 * xcc + 0xf8, inst=xcc)
 
-    self._enable_mec()
+      self._init_kiq()
+      self._enable_mec()
+      for xcc in range(self.xccs): self._kiq_set_resources(xcc)
 
-    # Set 1 partition
-    if self.xccs > 1 and not self.adev.partial_boot: self.adev.psp._spatial_partition_cmd(1)
+      # Set 1 partition
+      if self.xccs > 1: self.adev.psp._spatial_partition_cmd(1)
+    else:
+      # Warm boot: KIQ is already running, just reclaim it
+      self._reclaim_kiq()
 
-  def fini_hw(self): self._dequeue_hqds()
+  def fini_hw(self):
+    # Unmap user queues via KIQ UNMAP_QUEUES (keeps KIQ alive for warm boot)
+    self._kiq_unmap_queues()
 
   def reset_mec(self):
     self._dequeue_hqds(reset=True)
     self._config_mec()
+    self._init_kiq()
     self._enable_mec()
+    for xcc in range(self.xccs): self._kiq_set_resources(xcc)
 
-  def setup_ring(self, ring_addr:int, ring_size:int, rptr_addr:int, wptr_addr:int, eop_addr:int, eop_size:int, idx:int, aql:bool) -> tuple[int, int]:
+  def setup_ring(self, ring_addr:int, ring_size:int, rptr_addr:int, wptr_addr:int, eop_addr:int, eop_size:int, idx:int, aql:bool, *,
+                 kiq=False, via_kiq=False) -> tuple[int, int]:
     self.adev.has_aql_queue |= aql
     pipe, queue, doorbell = idx // 4, idx % 4, am.AMDGPU_NAVI10_DOORBELL_MEC_RING0
-    self._grbm_select(me=1, pipe=pipe, queue=queue, inst=0)
-    restore_queue = aql and self.xccs > 1 and self.adev.partial_boot and (self.adev.regCP_HQD_ACTIVE.read(inst=0) & 1)
-    restore_ptr = (self.adev.regCP_HQD_PQ_WPTR_LO.read(inst=0) | (self.adev.regCP_HQD_PQ_WPTR_HI.read(inst=0) << 32)) if restore_queue else 0
-    if DEBUG >= 2 and restore_queue: print(f"am {self.adev.devfmt}: GFX queue already active, continuing from saved state {restore_ptr=:#x}.")
 
-    for xcc in range(self.xccs if aql else 1):
+    for xcc in range(self.xccs if (aql or kiq) else 1):
+      if kiq:
+        r_addr = self.adev.paddr2mc(self.kiq_ring_paddr) + ring_size * xcc
+        rp_addr = self.adev.paddr2mc(self.kiq_gart_paddr) + 0x1000 * xcc
+        wp_addr, e_addr, db = rp_addr + 8, self.adev.paddr2mc(self.kiq_eop_paddr) + 0x1000 * xcc, am.AMDGPU_NAVI10_DOORBELL_KIQ + 0x20 * xcc
+      else: r_addr, rp_addr, wp_addr, e_addr, db = ring_addr, rptr_addr, wptr_addr, eop_addr, doorbell
+
       struct_t = getattr(am, f"struct_v{self.adev.ip_ver[am.GC_HWIP][0]}{'_compute' if self.adev.ip_ver[am.GC_HWIP][0] >= 10 else ''}_mqd")
       mqd_struct = struct_t(header=0xC0310800, cp_mqd_base_addr_lo=lo32(self.mqd_mc[queue] + 0x1000*xcc),
         cp_mqd_base_addr_hi=hi32(self.mqd_mc[queue] + 0x1000*xcc), cp_hqd_pipe_priority=0x2, cp_hqd_queue_priority=0xf, cp_hqd_quantum=0x111,
         cp_hqd_persistent_state=self.adev.regCP_HQD_PERSISTENT_STATE.encode(preload_size=0x55, preload_req=1),
-        cp_hqd_pq_base_lo=lo32(ring_addr>>8), cp_hqd_pq_base_hi=hi32(ring_addr>>8),
-        cp_hqd_pq_rptr_report_addr_lo=lo32(rptr_addr), cp_hqd_pq_rptr_report_addr_hi=hi32(rptr_addr),
-        cp_hqd_pq_wptr_poll_addr_lo=lo32(wptr_addr), cp_hqd_pq_wptr_poll_addr_hi=hi32(wptr_addr),
-        cp_hqd_pq_doorbell_control=self.adev.regCP_HQD_PQ_DOORBELL_CONTROL.encode(doorbell_offset=doorbell*2, doorbell_en=1),
+        cp_hqd_pq_base_lo=lo32(r_addr>>8), cp_hqd_pq_base_hi=hi32(r_addr>>8),
+        cp_hqd_pq_rptr_report_addr_lo=lo32(rp_addr), cp_hqd_pq_rptr_report_addr_hi=hi32(rp_addr),
+        cp_hqd_pq_wptr_poll_addr_lo=lo32(wp_addr), cp_hqd_pq_wptr_poll_addr_hi=hi32(wp_addr),
+        cp_hqd_pq_doorbell_control=self.adev.regCP_HQD_PQ_DOORBELL_CONTROL.encode(doorbell_offset=db*2, doorbell_en=1),
         cp_hqd_pq_control=self.adev.regCP_HQD_PQ_CONTROL.encode(rptr_block_size=5, unord_dispatch=0, queue_size=(ring_size//4).bit_length()-2,
+          **({'priv_state':1, 'kmd_queue':1} if kiq else {}),
           **({'queue_full_en':1, 'slot_based_wptr':2, 'no_update_rptr':xcc!=0 or self.xccs==1} if aql else {})),
         cp_hqd_ib_control=self.adev.regCP_HQD_IB_CONTROL.encode(min_ib_avail_size=0x3), cp_hqd_hq_status0=0x20004000,
         cp_mqd_control=self.adev.regCP_MQD_CONTROL.encode(priv_state=1), cp_hqd_vmid=0, cp_hqd_aql_control=int(aql),
-        cp_hqd_eop_base_addr_lo=lo32(eop_addr>>8), cp_hqd_eop_base_addr_hi=hi32(eop_addr>>8),
+        cp_hqd_eop_base_addr_lo=lo32(e_addr>>8), cp_hqd_eop_base_addr_hi=hi32(e_addr>>8),
         cp_hqd_eop_control=self.adev.regCP_HQD_EOP_CONTROL.encode(eop_size=(eop_size//4).bit_length()-2),
         **({'compute_tg_chunk_size':1, 'compute_current_logic_xcc_id':xcc, 'cp_mqd_stride_size':0x1000} if aql and self.xccs > 1 else {}))
       for se in range(8 if self.adev.ip_ver[am.GC_HWIP][0] >= 10 else 4): setattr(mqd_struct, f'compute_static_thread_mgmt_se{se}', 0xffffffff)
 
       # Copy mqd into memory
       self._grbm_select(me=1, pipe=pipe, queue=queue, inst=xcc)
+      self.adev.vram.view(self.mqd_paddr[queue] + 0x1000*xcc, ctypes.sizeof(mqd_struct))[:] = memoryview(mqd_struct).cast('B')
+      self.adev.vram.view(self.mqd_paddr[queue] + 0x1000*xcc + 520, 4, fmt='I')[0] = 1  # cp_hqd_active=1 in VRAM MQD
 
-      if restore_queue:
-        for r in [self.adev.regCP_HQD_PQ_RPTR_REPORT_ADDR, self.adev.regCP_HQD_EOP_BASE_ADDR, self.adev.regCP_HQD_EOP_BASE_ADDR_HI,
-                  self.adev.regCP_HQD_PQ_RPTR_REPORT_ADDR_HI, self.adev.regCP_HQD_PQ_WPTR_POLL_ADDR, self.adev.regCP_HQD_PQ_WPTR_POLL_ADDR_HI]:
-          val = memoryview(bytes(mqd_struct)).cast('I')[0x80 + (off:=r.addr[xcc] - self.adev.regCP_MQD_BASE_ADDR.addr[xcc])]
-          self.adev.vram.view(self.mqd_paddr[queue] + 0x1000*xcc, ctypes.sizeof(mqd_struct), fmt='I')[0x80 + off] = val
-          r.write(val, inst=xcc)
-      else:
-        self.adev.vram.view(self.mqd_paddr[queue] + 0x1000*xcc, ctypes.sizeof(mqd_struct))[:] = memoryview(mqd_struct).cast('B')
-
+      if not via_kiq:
+        if kiq: self.adev.regCP_PQ_WPTR_POLL_CNTL.update(en=0, inst=xcc)
+        # Dequeue if already active (firmware/RLC may have left it active)
+        if self.adev.regCP_HQD_ACTIVE.read(inst=xcc) & 1:
+          self.adev.regCP_HQD_DEQUEUE_REQUEST.write(0x1, inst=xcc)
+          wait_cond(lambda: self.adev.regCP_HQD_ACTIVE.read(inst=xcc) & 1, value=0, timeout_ms=2000, msg="HQD dequeue timeout")
         mqd_st_mv = to_mv(ctypes.addressof(mqd_struct), ctypes.sizeof(mqd_struct)).cast('I')
         for i, reg in enumerate(range(self.adev.regCP_MQD_BASE_ADDR.addr[xcc], self.adev.regCP_HQD_PQ_WPTR_HI.addr[xcc] + 1)):
           self.adev.wreg(reg, mqd_st_mv[0x80 + i])
         self.adev.regCP_HQD_ACTIVE.write(0x1, inst=xcc)
+        if kiq: self.adev.regCP_PQ_STATUS.update(doorbell_enable=1, inst=xcc)
 
       self.adev.gmc.flush_hdp()
       self._grbm_select(inst=xcc)
-    return restore_ptr // 16, doorbell
+
+    # For via_kiq: map via direct MAP_QUEUES on each KIQ
+    if via_kiq: self._kiq_map_queues(pipe, queue, doorbell, wptr_addr)
+
+    return 0, doorbell
+
+  def setup_ring_kiq(self, *args, **kwargs): return self.setup_ring(*args, via_kiq=True, **kwargs)
+
+  # === KIQ/HIQ infrastructure ===
+
+  def _init_kiq(self):
+    self.kiq_wptr = [0] * self.xccs
+    # Tell RLC which queue is KIQ (me=1, pipe=0, queue=2)
+    for xcc in range(self.xccs): self.adev.regRLC_CP_SCHEDULERS.write(self.adev.regRLC_CP_SCHEDULERS.read(inst=xcc) & 0xffffff00 | 0xa2, inst=xcc)
+    self.setup_ring(0, 0x800, 0, 0, 0, 0x1000, 2, aql=False, kiq=True)
+
+  def _reclaim_kiq(self):
+    """On warm boot, reclaim already-running KIQ rings without MEC restart."""
+    self.kiq_wptr = [0] * self.xccs
+    for xcc in range(self.xccs):
+      self._grbm_select(me=1, pipe=0, queue=2, inst=xcc)
+      # Read current wptr from HQD register (in DWORDs)
+      wptr_lo = self.adev.regCP_HQD_PQ_WPTR_LO.read(inst=xcc)
+      wptr_hi = self.adev.regCP_HQD_PQ_WPTR_HI.read(inst=xcc)
+      self.kiq_wptr[xcc] = (wptr_hi << 32 | wptr_lo)
+      self._grbm_select(inst=xcc)
+
+  def _kiq_submit(self, xcc, *dwords):
+    ring = self.adev.vram.view(self.kiq_ring_paddr + 0x800 * xcc, 0x800, fmt='I')
+    for dw in dwords:
+      ring[self.kiq_wptr[xcc] % 512] = dw
+      self.kiq_wptr[xcc] += 1
+    self.adev.vram.view(self.kiq_gart_paddr + 0x1000 * xcc + 8, 8, fmt='Q')[0] = self.kiq_wptr[xcc]
+    self.adev.gmc.flush_hdp()
+    self.adev.doorbell64[am.AMDGPU_NAVI10_DOORBELL_KIQ + 0x20 * xcc] = self.kiq_wptr[xcc]
+
+  def _kiq_set_resources(self, xcc):
+    self._kiq_submit(xcc, pm4_soc15.PACKET3(pm4_soc15.PACKET3_SET_RESOURCES, 6),
+      pm4_soc15.PACKET3_SET_RESOURCES_QUEUE_TYPE(0), lo32(0xff & ~(1 << 2)), hi32(0xff & ~(1 << 2)), 0, 0, 0, 0)
+
+  def _kiq_map_queue(self, xcc, pipe, queue, doorbell, mqd_mc, wptr_addr):
+    self._kiq_submit(xcc, pm4_soc15.PACKET3(pm4_soc15.PACKET3_MAP_QUEUES, 5),
+      pm4_soc15.PACKET3_MAP_QUEUES_QUEUE_SEL(0) | pm4_soc15.PACKET3_MAP_QUEUES_VMID(0) |
+      pm4_soc15.PACKET3_MAP_QUEUES_QUEUE(queue) | pm4_soc15.PACKET3_MAP_QUEUES_PIPE(pipe) |
+      pm4_soc15.PACKET3_MAP_QUEUES_ME(0) | pm4_soc15.PACKET3_MAP_QUEUES_QUEUE_TYPE(0) |
+      pm4_soc15.PACKET3_MAP_QUEUES_ALLOC_FORMAT(0) | pm4_soc15.PACKET3_MAP_QUEUES_ENGINE_SEL(0) |
+      pm4_soc15.PACKET3_MAP_QUEUES_NUM_QUEUES(1),
+      pm4_soc15.PACKET3_MAP_QUEUES_DOORBELL_OFFSET(doorbell * 2),
+      lo32(mqd_mc), hi32(mqd_mc), lo32(wptr_addr), hi32(wptr_addr))
+
+  # === KIQ MAP/UNMAP via direct MAP_QUEUES/UNMAP_QUEUES (queue_type=0) ===
+
+  def _kiq_map_queues(self, pipe, queue, doorbell, wptr_addr):
+    """Map user queue on all XCCs via direct MAP_QUEUES on each KIQ. Per-XCC MQD addresses."""
+    for xcc in range(self.xccs):
+      self._kiq_map_queue(xcc, pipe, queue, doorbell, self.mqd_mc[queue] + 0x1000*xcc, wptr_addr)
+
+  def _kiq_unmap_queues(self):
+    """Unmap all non-static user queues via UNMAP_QUEUES on each KIQ, then poll CP_HQD_ACTIVE."""
+    for xcc in range(self.xccs):
+      self._kiq_submit(xcc,
+        pm4_soc15.PACKET3(pm4_soc15.PACKET3_UNMAP_QUEUES, 4),
+        pm4_soc15.PACKET3_UNMAP_QUEUES_ACTION(0) | pm4_soc15.PACKET3_UNMAP_QUEUES_QUEUE_SEL(3) |
+        pm4_soc15.PACKET3_UNMAP_QUEUES_ENGINE_SEL(0) | pm4_soc15.PACKET3_UNMAP_QUEUES_NUM_QUEUES(1),
+        0, 0, 0)
+    # Poll CP_HQD_ACTIVE for user queues (Q0, Q1)
+    for q in range(2):
+      for xcc in range(self.xccs):
+        self._grbm_select(me=1, pipe=0, queue=q, inst=xcc)
+        if self.adev.regCP_HQD_ACTIVE.read(inst=xcc) & 1:
+          wait_cond(lambda: self.adev.regCP_HQD_ACTIVE.read(inst=xcc) & 1, value=0, timeout_ms=2000,
+                    msg=f"KIQ unmap Q{q} XCC{xcc} timeout")
+    self._grbm_select()
 
   def set_clockgating_state(self):
     if hasattr(self.adev, 'regMM_ATC_L2_MISC_CG'): self.adev.regMM_ATC_L2_MISC_CG.write(enable=1, mem_ls_enable=1)
@@ -391,8 +483,8 @@ class AM_GFX(AM_IP):
         _config_helper(eng_name="MEC", cntl_reg="MEC_RS64", eng_reg="MEC_RS64", pipe_cnt=1, me=1, xcc=xcc)
 
   def _dequeue_hqds(self, reset=False):
-    # NOTE: For aqls with xccs (queue=1), will continue from the saved state.
-    for q in range(2 if self.xccs == 1 else 1):
+    queues = list(range(2)) + ([2] if self.kiq_ring_paddr is not None else [])
+    for q in queues:
       for xcc in range(self.xccs):
         self._grbm_select(me=1, pipe=0, queue=q, inst=xcc)
         if self.adev.regCP_HQD_ACTIVE.read(inst=xcc) & 1:
