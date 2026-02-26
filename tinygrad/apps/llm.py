@@ -217,10 +217,7 @@ class Transformer:
                         rope_theta=kv[f'{arch}.rope.freq_base'], max_context=max_context,
                         qk_norm=int(state_dict['blk.0.attn_q_norm.weight'].shape[0]) if 'blk.0.attn_q_norm.weight' in state_dict else 0,
                         num_experts=kv.get(f'{arch}.expert_count', 0), num_experts_per_tok=kv.get(f'{arch}.expert_used_count', 0))
-    nn.state.load_state_dict(model, state_dict, verbose=False, consume=True, realize=False)  # NOTE: rope_freqs.weight (32,) is unused
-    # NOTE: without this contiguous, it unpacks the weights from the model every time. we shouldn't need this, but for now it's faster
-    for s in (params:=nn.state.get_parameters(model)): s.replace(s.contiguous())
-    if realize: Tensor.realize(*params)
+    nn.state.load_state_dict(model, state_dict, verbose=False, consume=True, realize=realize)  # NOTE: rope_freqs.weight (32,) is unused
     return model, kv
 
   def generate(self, tokens:list[int], start_pos=0):
