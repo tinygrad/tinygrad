@@ -23,7 +23,7 @@ def call_gradient(ctx:UOp, k:UOp) -> tuple[UOp|None, ...]:
   for i,p in enumerate(params):
     if p in grads:
       # TODO: compact the args and remove unused ones
-      ret.append(grads[p].call(*args, ctx, name=k.arg.name+f"_backward_{i}"))
+      ret.append(grads[p].call(*args, ctx, name=(k.arg.name or "")+f"_backward_{i}"))
     else:
       ret.append(None)
   return tuple(ret)

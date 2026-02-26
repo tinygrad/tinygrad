@@ -151,6 +151,15 @@ class TestFunction(unittest.TestCase):
     np.testing.assert_equal(f(a).numpy(), [2,3,4])
     np.testing.assert_equal(a.numpy(), [3,4,5])  # TODO: should be [1,2,3]
 
+  def test_implicit_assign(self):
+    a = Tensor([1,2,3])
+    a += 1
+    c = Tensor([2,2,2]).contiguous()
+    @function
+    def f(b:Tensor) -> Tensor: return a+b+c
+    b = Tensor([10,20,30]).realize()
+    np.testing.assert_equal(f(b).numpy(), [14,25,36])
+
   def test_assign_input(self):
     @function
     def f(a:Tensor, b:Tensor) -> Tensor:

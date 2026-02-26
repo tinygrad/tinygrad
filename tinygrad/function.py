@@ -1,12 +1,19 @@
 import functools
 from typing import Generic, TypeVar, Callable, cast
 from tinygrad.helpers import Context, dedup, getenv
-from tinygrad.uop.ops import UOp, Ops
+from tinygrad.uop.ops import UOp, Ops, graph_rewrite, PatternMatcher, UPat
 from tinygrad.tensor import Tensor
 
-def _srcs(u:UOp) -> tuple[UOp, ...]:
-  """Get sources of a UOp, skipping src[0] of CALL nodes (other functions' bodies with their own PARAMs)."""
-  return u.src[1:] if u.op is Ops.CALL else u.src
+def add_to_ctx(ctx, x:UOp):
+  ret = x.param_like(len(ctx))
+  ctx.append(x)
+  return ret
+
+pm_ctx = PatternMatcher([
+  (UPat(Ops.BUFFER, name="x"), add_to_ctx),
+  (UPat((Ops.ASSIGN, Ops.CONTIGUOUS), name="x"),
+   lambda ctx,x: add_to_ctx(ctx,x) if not x.op_in_backward_slice_with_self(Ops.PARAM) else None),
+])
 
 ReturnType = TypeVar('ReturnType')
 class function(Generic[ReturnType]):
@@ -40,12 +47,7 @@ class function(Generic[ReturnType]):
     #call_uops = [x.contiguous() for x in call_uops]
 
     # the BUFFERs that are left are the implicit inputs
-    subs = {}
-    for x in uret.toposort():
-      if x.op is Ops.BUFFER:
-        subs[x] = x.param_like(len(call_uops))
-        call_uops.append(x)
-    uret = uret.substitute(subs)
+    uret = graph_rewrite(uret, pm_ctx, call_uops, bottom_up=True, name="get_implicit_inputs")
     name = getattr(self.fxn, '__qualname__', None) or type(self.fxn).__qualname__
 
     # assign output
