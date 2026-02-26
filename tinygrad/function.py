@@ -44,5 +44,14 @@ class function(Generic[ReturnType]):
         call_uops.append(x)
     uret = uret.substitute(subs)
 
+    pbuffer = UOp.param(len(call_uops), uret.dtype, uret._shape, uret._device)
+    uret = pbuffer.assign(uret).sink()
+
     name = getattr(self.fxn, '__qualname__', None) or type(self.fxn).__qualname__
-    return cast(ReturnType, Tensor(uret.call(*call_uops, name=name), device=ret.device))
+
+    buffer = UOp.new_buffer(pbuffer.device, pbuffer.size, pbuffer.dtype)
+    call = uret.call(*call_uops, buffer, name=name)
+    ret = buffer.after(call)
+
+    return cast(ReturnType, Tensor(ret, device=ret.device))
+
