@@ -375,8 +375,10 @@ async function renderProfiler(path, unit, opts) {
         if (shapeRef != null) { ref = {ctx:e.ref, step:0}; shapeRef = ref; }
         else if (ref != null) {
           const start = ref.step>0 ? ref.step+1 : 0;
-          const stepIdx = ctxs[ref.ctx+1].steps.findIndex((s, i) => i >= start && s.name == e.name);
-          if (stepIdx !== -1) { ref.step = stepIdx; shapeRef = ref; }
+          const steps = ctxs[ref.ctx+1].steps;
+          for (let si=start; si<steps.length; si++) {
+            if (steps[si].name == e.name) { ref.step = si; shapeRef = ref; break; }
+          }
         } else {
           const steps = ctxs[state.currentCtx].steps;
           for (let i=state.currentStep+1; i<steps.length; i++) {
