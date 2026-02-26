@@ -293,6 +293,8 @@ class OpenCLRenderer(CStyleLanguage):
   smem_prefix = "__local "
   barrier = "barrier(CLK_LOCAL_MEM_FENCE);"
   float4 = "(float4)"
+  code_for_op = { **CStyleLanguage.code_for_op,
+    Ops.SQRT: lambda x,dtype: f"sqrt((float){x})" if dtype == dtypes.half else f"sqrt({x})" }
   code_for_workitem = {"g": lambda x: f"get_group_id({x})", "l": lambda x: f"get_local_id({x})", "i": lambda x: f"get_global_id({x})"}
   type_map = { dtypes.int8: "char", dtypes.uint8: "uchar", dtypes.uint32: "uint", dtypes.uint16: "ushort", dtypes.uint64: "ulong",
               dtypes.bfloat16: "ushort" }
