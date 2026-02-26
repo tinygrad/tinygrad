@@ -45,12 +45,12 @@ class function(Generic[ReturnType]):
     uret = uret.substitute(subs)
 
     pbuffer = UOp.param(len(call_uops), uret.dtype, uret._shape, uret._device)
-    uret = pbuffer.assign(uret).sink()
+    assigned = pbuffer.assign(uret).sink()
 
     name = getattr(self.fxn, '__qualname__', None) or type(self.fxn).__qualname__
 
-    buffer = UOp.new_buffer(pbuffer.device, pbuffer.size, pbuffer.dtype)
-    call = uret.call(*call_uops, buffer, name=name)
+    buffer = UOp.new_buffer(pbuffer.device, pbuffer.size, pbuffer.dtype).reshape(uret.shape)
+    call = assigned.call(*call_uops, buffer, name=name)
     ret = buffer.after(call)
 
     return cast(ReturnType, Tensor(ret, device=ret.device))
