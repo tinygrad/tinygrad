@@ -407,17 +407,18 @@ def batch_load_retinanet(dataset, val:bool, base_dir:Path, batch_size:int=32, sh
   queue_in, queue_out = Queue(), Queue()
   procs, data_out_count = [], [0] * batch_count
 
-  shm_imgs, imgs = _setup_shared_mem("retinanet_imgs", (batch_size * batch_count, 800, 800, 3), dtypes.uint8)
+  shm_suffix = f"_{os.getpid()}"
+  shm_imgs, imgs = _setup_shared_mem(f"retinanet_imgs{shm_suffix}", (batch_size * batch_count, 800, 800, 3), dtypes.uint8)
 
   if val:
     boxes, labels, matches, anchors = None, None, None, None
     img_ids, img_sizes = [None] * (batch_size * batch_count), [None] * (batch_size * batch_count)
   else:
     img_ids, img_sizes = None, None
-    shm_boxes, boxes = _setup_shared_mem("retinanet_boxes", (batch_size * batch_count, 120087, 4), dtypes.float32)
-    shm_labels, labels = _setup_shared_mem("retinanet_labels", (batch_size * batch_count, 120087), dtypes.int64)
-    shm_matches, matches = _setup_shared_mem("retinanet_matches", (batch_size * batch_count, 120087), dtypes.int64)
-    shm_anchors, anchors = _setup_shared_mem("retinanet_anchors", (batch_size * batch_count, 120087, 4), dtypes.float64)
+    shm_boxes, boxes = _setup_shared_mem(f"retinanet_boxes{shm_suffix}", (batch_size * batch_count, 120087, 4), dtypes.float32)
+    shm_labels, labels = _setup_shared_mem(f"retinanet_labels{shm_suffix}", (batch_size * batch_count, 120087), dtypes.int64)
+    shm_matches, matches = _setup_shared_mem(f"retinanet_matches{shm_suffix}", (batch_size * batch_count, 120087), dtypes.int64)
+    shm_anchors, anchors = _setup_shared_mem(f"retinanet_anchors{shm_suffix}", (batch_size * batch_count, 120087, 4), dtypes.float64)
 
   shutdown = False
   class Cookie:
