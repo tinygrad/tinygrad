@@ -74,7 +74,6 @@ MEM_PRESET_REGS: dict[str, dict[str, Reg]] = {
 
 def create_mem_inst(op: Enum, builder: functools.partial[Inst]) -> Inst:
   inst_cls, operands, field_map = builder.func, OPERANDS.get(op, {}), MEM_PRESET_REGS.get(builder.func.__name__, {})
-  vgpr_base = MEM_VGPR_BASE
   kwargs: dict[str, Reg|int] = {}
   vslot, sslot = 0, 0
   for name, field in inst_cls._fields:
@@ -84,7 +83,7 @@ def create_mem_inst(op: Enum, builder: functools.partial[Inst]) -> Inst:
       continue
     nregs = max(1, operands[name][1] // 32) if name in operands else 1
     if isinstance(field, VGPRField):
-      vi = vgpr_base + vslot * MEM_VGPR_STRIDE
+      vi = MEM_VGPR_BASE + vslot * MEM_VGPR_STRIDE
       kwargs[name] = v[vi:vi+nregs-1] if nregs > 1 else v[vi]
       vslot += 1
     elif isinstance(field, (SGPRField, AlignedSGPRField, SBaseField)):
@@ -118,10 +117,7 @@ def exec_insts(insts:list):
   k.emit(v_mov_b32_e32(v[V_VADDR[0]], 0))
   k.emit(v_mov_b32_e32(v[V_VADDR[1]], 0))
   # ** emit
-  mem_fmts = {'DS', 'GLOBAL', 'VGLOBAL', 'FLAT', 'VFLAT', 'SCRATCH', 'VSCRATCH', 'SMEM'}
-  for inst in insts:
-    k.emit(inst)
-    if type(inst).__name__ in mem_fmts: k.emit(s_waitcnt(simm16=0))
+  for inst in insts: k.emit(inst)
   k.emit(s_endpgm())
   # ** run
   NUM_THREADS, NUM_GRIDS, BUF_SIZE = 32, 1, 1024*1024
