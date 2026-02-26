@@ -59,9 +59,14 @@ const drawGraph = (data) => {
   const g = dagre.graphlib.json.read(data);
   // draw nodes
   d3.select("#graph-svg").on("click", () => d3.selectAll(".highlight").classed("highlight", false));
+  const callCount = g.graph().callCount;
   const nodes = d3.select("#nodes").selectAll("g").data(g.nodes().map(id => g.node(id)), d => d).join("g").attr("class", d => d.className ?? "node")
-    .attr("transform", d => `translate(${d.x},${d.y})`).classed("clickable", d => d.ref != null).on("click", (e,d) => {
-      if (d.ref != null) return switchCtx(d.ref);
+    .attr("transform", d => `translate(${d.x},${d.y})`).on("click", (e,d) => {
+      if (d.label.startsWith("CALL")) {
+        if (state.callSrcMask.has(d.id)) state.callSrcMask.delete(d.id); else state.callSrcMask.add(d.id);
+        if (state.callSrcMask.size >= callCount) { showCallSrc.toggle.checked = !showCallSrc.toggle.checked; state.callSrcMask.clear(); }
+        return setState({});
+      }
       const parents = g.predecessors(d.id);
       const children = g.successors(d.id);
       if (parents == null && children == null) return;
@@ -105,6 +110,9 @@ const drawGraph = (data) => {
   });
   addTags(nodes.selectAll("g.tag").data(d => d.tag != null ? [d] : []).join("g").attr("class", "tag")
     .attr("transform", d => `translate(${-d.width/2+8}, ${-d.height/2+8})`).datum(e => e.tag));
+  addTags(nodes.selectAll("g.type").data(d => d.label.startsWith("CALL\n") ? [d] : []).join("g")
+    .attr("class", d => `tag ${d.collapsed ? 'collapsed' : 'expanded'}`)
+    .attr("transform", d => `translate(${-d.width/2}, ${0})`).datum(d => d.collapsed ? "+" : "−"));
   // draw edges
   const line = d3.line().x(d => d.x).y(d => d.y).curve(d3.curveBasis), edges = g.edges();
   d3.select("#edges").selectAll("path.edgePath").data(edges).join("path").attr("class", "edgePath").attr("d", (e) => {
@@ -131,10 +139,15 @@ function renderDag(layoutSpec, { recenter }) {
   worker = new Worker(workerUrl);
   worker.postMessage(layoutSpec);
   worker.onmessage = (e) => {
+    if (e.data.error) {
+      updateProgress(Status.ERR, "Error in graph layout:\n"+e.data.error);
+      return;
+    }
+    const data = e.data.result;
     displaySelection("#graph");
     updateProgress(Status.COMPLETE);
-    drawGraph(e.data);
-    addTags(d3.select("#edge-labels").selectAll("g").data(e.data.edges).join("g").attr("transform", (e) => {
+    drawGraph(data);
+    addTags(d3.select("#edge-labels").selectAll("g").data(data.edges).join("g").attr("transform", (e) => {
       // get a point near the end
       const [p1, p2] = e.value.points.slice(-2);
       const dx = p2.x-p1.x;
@@ -702,7 +715,7 @@ const evtSources = [];
 // rewrite: a single UOp transformation
 // step: collection of rewrites
 // context: collection of steps
-const state = {currentCtx:-1, currentStep:0, currentRewrite:0, expandSteps:false};
+const state = {currentCtx:-1, currentStep:0, currentRewrite:0, expandSteps:false, callSrcMask:new Set()};
 function setState(ns) {
   saveToHistory(state);
   const { ctx:prevCtx, step:prevStep } = select(state.currentCtx, state.currentStep);
@@ -750,7 +763,9 @@ const createToggle = (id, text) => {
   return { toggle, label };
 }
 const showIndexing = createToggle("show-indexing", "Show indexing (r)");
-const showCallSrc = createToggle("show-call-src", "Show CALL src (c)");
+const showCallSrc = createToggle("show-call-src", "Show all CALL src (c)"); showCallSrc.toggle.checked = false;
+const showSink = createToggle("show-sink", "Show SINK (s)");
+showSink.toggle.checked = false;
 const showGraph = createToggle("show-graph", "Show graph (g)");
 showGraph.toggle.onchange = () => displaySelection(rect("#graph").width > 0 ? "#custom" : "#graph");
 
@@ -900,13 +915,14 @@ async function main() {
   // ** center graph
   const data = ret[currentRewrite];
   const render = (opts) => renderDag({ data, opts }, { recenter:currentRewrite === 0 });
-  const getOpts = () => ({ showIndexing:showIndexing.toggle.checked, showCallSrc:showCallSrc.toggle.checked });
+  const getOpts = () => ({ showIndexing:showIndexing.toggle.checked, showCallSrc:showCallSrc.toggle.checked, showSink:showSink.toggle.checked, callSrcMask:state.callSrcMask });
   render(getOpts());
   showIndexing.toggle.onchange = () => render(getOpts());
-  showCallSrc.toggle.onchange = () => render(getOpts());
+  showCallSrc.toggle.onchange = () => { state.callSrcMask.clear(); render(getOpts()); }
+  showSink.toggle.onchange = () => render(getOpts());
   // ** right sidebar metadata
   metadata.innerHTML = "";
-  if (ckey.includes("rewrites")) metadata.append(showIndexing.label, showCallSrc.label);
+  if (ckey.includes("rewrites")) metadata.append(showIndexing.label, showCallSrc.label, showSink.label);
   if (step.code_line != null) metadata.appendChild(codeBlock(step.code_line, "python", { loc:step.loc, wrap:true }));
   if (step.trace) {
     const trace = d3.create("pre").append("code").classed("hljs", true);
@@ -934,7 +950,7 @@ async function main() {
       metadata.appendChild(codeBlock(upat[1], "python", { loc:upat[0], wrap:true }));
       const diffCode = metadata.appendChild(document.createElement("pre")).appendChild(document.createElement("code"));
       for (const line of diff) {
-        diffCode.appendChild(colored([{st:line, color:line.startsWith("+") ? "#3aa56d" : line.startsWith("-") ? "#d14b4b" : "#f0f0f5"}]));
+        diffCode.appendChild(colored([{st:line, color:line.startsWith("+") ? "#3aa56d" : line.startsWith("−") ? "#d14b4b" : "#f0f0f5"}]));
         diffCode.appendChild(document.createElement("br"));
       }
       diffCode.className = "wrap";
@@ -1037,6 +1053,8 @@ document.addEventListener("keydown", (event) => {
   if (event.key === "r") showIndexing.toggle.click();
   // c key toggles CALL src
   if (event.key === "c") showCallSrc.toggle.click();
+  // s key toggles SINK
+  if (event.key === "s") showSink.toggle.click();
   // g key toggles graph
   if (event.key === "g") showGraph.toggle.click();
 });

@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field
-from tinygrad.uop.ops import UOp, UPat, PatternMatcher, Ops, GroupOp, graph_rewrite, identity_element
+from tinygrad.uop.ops import UOp, UPat, PatternMatcher, Ops, GroupOp, graph_rewrite, identity_element, track_rewrites
 from tinygrad.dtype import ImageDType
-from tinygrad.helpers import prod, DEBUG, argsort, VIZ
+from tinygrad.helpers import prod, DEBUG, argsort, VIZ, pluralize
 
 @dataclass
 class AllocCtx:
@@ -18,10 +18,10 @@ def tag_uop(ctx:AllocCtx, x:UOp):
 
 def disk_copy_is_buffer(ctx:AllocCtx, u:UOp):
   # copies to disk are replaced with the disk buffer
-  to_disk = isinstance(u._device, str) and u._device.startswith("DISK")
+  to_disk = isinstance(u._device, str) and u._device.startswith(("DISK", "TINYFS"))
   if to_disk: ctx.buffer_map[u] = UOp.new_buffer(u.device, u.shard_size, u.dtype).reshape(u.max_shard_shape)
   # all copies from disk/numpy are realized into a real buffer
-  from_creation = isinstance(u.src[0]._device, str) and any(u.src[0]._device.startswith(x) for x in ["NPY", "DISK", "PYTHON"])
+  from_creation = isinstance(u.src[0]._device, str) and any(u.src[0]._device.startswith(x) for x in ["NPY", "DISK", "PYTHON", "TINYFS"])
   if from_creation: return tag_uop(ctx, u)
 
 def apply_after(ctx:AllocCtx, u:UOp):
@@ -41,8 +41,8 @@ add_tags = PatternMatcher([
 def replace_contig_with_assign(u:UOp):
   # if size is 0, remove the contig
   if u.size == 0: return u.src[0]
-  # no real contig for DISK tensors, they are left alone
-  if isinstance(u._device, str) and u._device.startswith("DISK"): return u.rtag(None)
+  # no real contig for DISK/TINYFS tensors, they are left alone
+  if isinstance(u._device, str) and u._device.startswith(("DISK", "TINYFS")): return u.rtag(None)
   dtype = u.dtype
   if isinstance(dtype, ImageDType):
     if prod(dtype.shape) != prod(u.max_shard_shape) or ([x for x in u.max_shard_shape if x != 1] or [1])[-1] % 4 != 0:
@@ -107,12 +107,13 @@ def append_after(ctx:AllocCtx, x:UOp):
 
 def replace_input_buffer(ctx:AllocCtx, b:UOp):
   ctx.replacements.append(b)
-  return UOp.param(len(ctx.replacements)-1, b.dtype, b.shape, b._device, b._min_max if b.op is Ops.BIND else None)
+  return UOp.param(len(ctx.replacements)-1, b.dtype, b.shape, b._device,
+                   b._min_max if b.op is Ops.BIND else None, b.src[0].arg[0] if b.op is Ops.BIND else None)
 
 pm_finalize_call = PatternMatcher([
   (UPat(Ops.ASSIGN, name="x"), untag_and_append),
   (UPat(Ops.AFTER, name="x"), append_after),
-  (UPat(Ops.COPY, name="x"), lambda ctx,x: append_after(ctx,x) if isinstance(x.device, str) and x.device.startswith("DISK") else None),
+  (UPat(Ops.COPY, name="x"), lambda ctx,x: append_after(ctx,x) if isinstance(x.device, str) and x.device.startswith(("DISK", "TINYFS")) else None),
   # replace UNIQUE with LUNIQUE for CONST cache key normalization
   (UPat(Ops.CONST, src=(UPat(Ops.UNIQUE), UPat(Ops.DEVICE, name="d")), name="b"), lambda b,d: b.replace(src=(d,))),
 ])
@@ -124,7 +125,9 @@ pm_replace_buf = PatternMatcher([
   (UPat(Ops.BIND, src=(UPat(Ops.DEFINE_VAR), UPat(Ops.CONST)), name="b"), replace_input_buffer),
 ])
 
-def allocate_global_buffers(big_sink:UOp) -> tuple[UOp, dict[UOp, UOp]]:
+@track_rewrites(lambda _,ret: f"Process {pluralize('Buffer', len(ret[1]))}")
+def transform_to_call(big_sink:UOp) -> tuple[UOp, dict[UOp, UOp]]:
+  if VIZ: graph_rewrite(big_sink, PatternMatcher([]), name="View Tensor Graph")
   # uop list is a list in the original_sink graph and we can map to the tags later
   # here we build buffer map
   dont_realize = {Ops.CONST, Ops.BUFFER, Ops.BIND, Ops.DEFINE_VAR, Ops.AFTER}
@@ -140,5 +143,5 @@ def allocate_global_buffers(big_sink:UOp) -> tuple[UOp, dict[UOp, UOp]]:
   # here we construct the final buffer_map. this is everything that will go into the tensor map
   graph_rewrite(big_sink, pm_finalize_call, ctx=ctx, name="finalize call")
   ret = graph_rewrite(UOp.sink(*ctx.assigns), pm_replace_buf, ctx=ctx, name="replace bufs").call(*ctx.replacements)
-  if VIZ: graph_rewrite(ret, PatternMatcher([]), name="*** Call")
+  if VIZ: graph_rewrite(ret, PatternMatcher([]), name="View Call")
   return ret, ctx.buffer_map
