@@ -2,7 +2,6 @@ from __future__ import annotations
 import math
 from tinygrad.tensor import Tensor
 from tinygrad.dtype import dtypes
-from tinygrad.device import is_dtype_supported as is_dtype_supported
 from tinygrad.helpers import prod, make_tuple, flatten, USE_ATOMICS
 from tinygrad.nn import optim, state, datasets  # noqa: F401
 
