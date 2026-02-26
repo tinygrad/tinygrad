@@ -692,12 +692,6 @@ jobs:
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
-    - name: Setcap to python
-      run: ./extra/amdpci/setup_python_cap.sh
-    - name: Remove amd modules
-      run: PYTHONPATH=. ./extra/hcq/hcq_smi.py amd rmmod
-    - name: Kill stale pids
-      run: PYTHONPATH=. ./extra/hcq/hcq_smi.py amd kill_pids
     - name: Symlink models and datasets
       run: |
         mkdir -p extra/datasets
