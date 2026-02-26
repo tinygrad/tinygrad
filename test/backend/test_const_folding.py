@@ -28,6 +28,8 @@ class TestMovedConstFolding(unittest.TestCase):
     _check_ast_count(1, Tensor([1.0, 2, 3, 4]) * Tensor.ones(2).pad(((1, 1),)))
 
   def test_copy_padded_const(self):
+    schedule = Tensor.ones(4, device="CPU:0").pad(((1, 1),)).to("CPU:1").schedule()
+    assert not any(si.ast.op is Ops.COPY for si in schedule), "const copy should be folded"
     # TODO: this is wrong, should be [0, 1, 1, 1, 1, 0]
     np.testing.assert_equal(Tensor.ones(4, device="CPU:0").pad(((1, 1),)).to("CPU:1").numpy(), [1, 1, 1, 1, 1, 1])
 
