@@ -62,7 +62,7 @@ const drawGraph = (data) => {
   const callCount = g.graph().callCount;
   const nodes = d3.select("#nodes").selectAll("g").data(g.nodes().map(id => g.node(id)), d => d).join("g").attr("class", d => d.className ?? "node")
     .attr("transform", d => `translate(${d.x},${d.y})`).on("click", (e,d) => {
-      if (d.label.startsWith("CALL")) {
+      if (d.callNode) {
         if (state.callSrcMask.has(d.id)) state.callSrcMask.delete(d.id); else state.callSrcMask.add(d.id);
         if (state.callSrcMask.size >= callCount) { showCallSrc.toggle.checked = !showCallSrc.toggle.checked; state.callSrcMask.clear(); }
         return setState({});
@@ -110,7 +110,7 @@ const drawGraph = (data) => {
   });
   addTags(nodes.selectAll("g.tag").data(d => d.tag != null ? [d] : []).join("g").attr("class", "tag")
     .attr("transform", d => `translate(${-d.width/2+8}, ${-d.height/2+8})`).datum(e => e.tag));
-  addTags(nodes.selectAll("g.type").data(d => d.label.startsWith("CALL\n") ? [d] : []).join("g")
+  addTags(nodes.selectAll("g.type").data(d => d.callNode ? [d] : []).join("g")
     .attr("class", d => `tag ${d.collapsed ? 'collapsed' : 'expanded'}`)
     .attr("transform", d => `translate(${-d.width/2}, ${0})`).datum(d => d.collapsed ? "+" : "−"));
   // draw edges
