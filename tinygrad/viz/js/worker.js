@@ -59,11 +59,8 @@ const layoutUOp = (g, { graph, change }, opts) => {
     // add edges
     const edgeCounts = {};
     for (const [_, s] of src) edgeCounts[s] = (edgeCounts[s] || 0)+1;
-    for (const [port, s] of src) {
-      const edge = { label: edgeCounts[s] > 1 ? {type:"tag", text:edgeCounts[s]} : {type:"port", text:port}};
-      if (label.startsWith("CALL\n") && port === 0) edge.color = "#8a8b9f";
-      g.setEdge(s, k, edge);
-    }
+    for (const [port, s] of src) g.setEdge(s, k, { label: edgeCounts[s] > 1 ? {type:"tag", text:edgeCounts[s]} : {type:"port", text:port},
+      ...(label.startsWith("CALL\n") && port === 0 && {color:"#8a8b9f"})});
     if (change?.includes(parseInt(k))) g.setParent(k, "overlay");
   }
   // optionally hide nodes from the layout
