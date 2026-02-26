@@ -275,12 +275,14 @@ class Tensor(OpMixin):
     assert len(var_vals) == 0
     return schedule
 
-  @disable_gc()
   def realize(self, *lst:Tensor, do_update_stats=True) -> Tensor:
     """Triggers the computation needed to create these Tensor(s)."""
-    # side-realize pending assigns for buffers referenced by these tensors
+    # collect and schedule pending assigns, then schedule main computation, run everything once
+    all_schedules: list[ExecItem] = []
+    all_var_vals: dict[str, int] = {}
     if _pending_assigns:
       def _realize_pending(buf):
+        nonlocal all_var_vals
         for assign_uop in _pending_assigns.pop(buf, []):
           # recursively realize pending assigns that this assign's value depends on
           for u in assign_uop.toposort():
@@ -288,7 +290,8 @@ class Tensor(OpMixin):
           big_sink, becomes_map = transform_to_call(UOp.sink(assign_uop))
           schedule, var_vals = complete_create_schedule_with_vars(big_sink)
           _apply_map_to_tensors(becomes_map, name="Apply Pending Assign")
-          run_schedule(schedule, var_vals, do_update_stats=do_update_stats)
+          all_schedules.extend(schedule)
+          all_var_vals = merge_dicts([all_var_vals, var_vals])
           # update remaining pending assigns so they reference realized buffers instead of stale lazy graphs
           if becomes_map:
             for assigns in _pending_assigns.values():
@@ -296,7 +299,10 @@ class Tensor(OpMixin):
       for buf in {u for t in (self,)+lst for u in t.uop.toposort() if u.op is Ops.BUFFER}:
         if buf in _pending_assigns: _realize_pending(buf)
     if len(to_realize:=[x for x in (self,)+lst if not x.uop.has_buffer_identity()]):
-      run_schedule(*Tensor.schedule_with_vars(*to_realize), do_update_stats=do_update_stats)
+      schedule, var_vals = Tensor.schedule_with_vars(*to_realize)
+      all_schedules.extend(schedule)
+      all_var_vals = merge_dicts([all_var_vals, var_vals])
+    if all_schedules: run_schedule(all_schedules, all_var_vals, do_update_stats=do_update_stats)
     return self
 
   def replace(self, x:Tensor) -> Tensor:
