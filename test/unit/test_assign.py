@@ -269,6 +269,16 @@ class TestAssign(unittest.TestCase):
     out = attn.cache_k.flatten().numpy()
     np.testing.assert_allclose(out, [1.,1.,1.,1.,1.,1.,0.,0.,1.,1.,1.,1.,1.,1.,0.,0.])
 
+  def test_assign_after(self):
+    t = Tensor.zeros(10).contiguous().realize()
+    t.uop = t.uop.after(t.uop.assign((t+1).uop))
+    np.testing.assert_allclose(t.numpy(), [1.,1.,1.,1.,1.,1.,1.,1.,1.,1.])
+
+  def test_assign_after_partial(self):
+    t = Tensor.zeros(10).contiguous().realize()
+    t.uop = t.uop.after(t[:5].uop.assign(Tensor.ones(5).uop))
+    np.testing.assert_allclose(t.numpy(), [1.,1.,1.,1.,1.,0.,0.,0.,0.,0.])
+
   def test_assign_contiguous(self):
     b = Tensor.arange(16).reshape(4,4).contiguous().realize()
     a = (Tensor.arange(16).reshape(4,4).contiguous().realize() + 1)
