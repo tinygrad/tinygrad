@@ -78,8 +78,8 @@ def universal_test_unary(a, dtype, op):
   if op[0] == Tensor.cos and abs(a) > 30: return
   if op[0] == Tensor.log and a <= 0: return
   if dtype in dtypes.fp8s:
-    # normals are zero
-    if dtype in EMULATED_DTYPES.tolist(dtypes) and abs(ta.numpy().item()) < 0.015625: return
+    # denormals are zero
+    if dtype in EMULATED_DTYPES.tolist(dtypes) or not is_dtype_supported(dtype) and abs(ta.numpy().item()) < 0.015625: return
     tensor_value = fp8_to_float(op[0](ta.realize()).bitcast(dtypes.uint8).item(), dtype)
     numpy_value = truncate[dtype](v:=op[1](ta.numpy()).item())
     # cuda cast f32 inf to f8 MAX, amd cast it to nan(E4M3)/inf(E5M2)
