@@ -433,6 +433,7 @@ def write_ins(encodings, enums, suffix_only_ops, types, arch, path):
         lines.append("")
 
   # Instruction helpers
+  _seen_helpers = set()
   lines.append("# instruction helpers")
   for fmt, ops in sorted(enums.items()):
     if fmt not in base_encodings and fmt not in ("GLOBAL", "SCRATCH", "VGLOBAL", "VSCRATCH"): continue
@@ -448,7 +449,10 @@ def write_ins(encodings, enums, suffix_only_ops, types, arch, path):
       elif fmt == "VOP3" and (op in fmt_sdst_ops or op < 256): cls = "VOP3_SDST"
       elif op_to_suffix.get(op): cls = f"{fmt}{op_to_suffix[op]}"
       else: cls = fmt
-      lines.append(f"{name.lower()}{msuf.lower()} = functools.partial({cls}, {fmt}Op.{name}{msuf})")
+      helper_name = f"{name.lower()}{msuf.lower()}"
+      if helper_name not in _seen_helpers:
+        _seen_helpers.add(helper_name)
+        lines.append(f"{helper_name} = functools.partial({cls}, {fmt}Op.{name}{msuf})")
   with open(path, "w") as f: f.write("\n".join(lines))
 
 def write_operands(types: dict, enums: dict, arch: str, path: pathlib.Path) -> None:
@@ -523,7 +527,12 @@ if __name__ == "__main__":
   # Second pass: parse PDFs and write pcode
   for arch, cfg in ARCHS.items():
     print(f"Parsing PDF: {arch}...")
-    pages = extract_pdf_text(cfg["pdf"])
+    try:
+      pages = extract_pdf_text(cfg["pdf"])
+    except (AssertionError, Exception) as e:
+      print(f"  {arch}: PDF parse failed ({e}), skipping pcode")
+      write_pcode({}, arch_data[arch]["enums"], arch, autogen_base / arch / "str_pcode.py")
+      continue
     name_to_op = {name: op for ops in arch_data[arch]["enums"].values() for op, name in ops.items()}
     pcode = extract_pcode(pages, name_to_op)
     base = autogen_base / arch
