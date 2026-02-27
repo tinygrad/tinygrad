@@ -184,10 +184,10 @@ class AMDev(PCIDevImplBase):
     self.is_booting = False
 
     # Re-initialize main blocks
-    self.init_hw(self.gfx, self.sdma)
-
-    self.smu.set_clocks(level=-1) # last level, max perf.
-    for ip in [self.soc, self.gfx]: ip.set_clockgating_state()
+    if not reset_mode:
+      self.init_hw(self.gfx, self.sdma)
+      self.smu.set_clocks(level=-1) # last level, max perf.
+      for ip in [self.soc, self.gfx]: ip.set_clockgating_state()
     self.reg("regSCRATCH_REG7").write(AMDev.Version)
     self.reg("regSCRATCH_REG6").write(1) # set initialized state.
     if DEBUG >= 2: print(f"am {self.devfmt}: boot done")

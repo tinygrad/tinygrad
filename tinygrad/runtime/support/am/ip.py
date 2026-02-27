@@ -1,6 +1,6 @@
 import ctypes, time, contextlib, functools
 from typing import cast, Literal
-from tinygrad.helpers import to_mv, data64, lo32, hi32, DEBUG, wait_cond, pad_bytes, getbits
+from tinygrad.helpers import to_mv, data64, lo32, hi32, DEBUG, wait_cond, pad_bytes, getbits, getenv
 from tinygrad.runtime.autogen.am import am, pm4_soc15
 from tinygrad.runtime.support.amd import import_soc
 from tinygrad.runtime.support.memory import AddrSpace
@@ -237,13 +237,25 @@ class AM_GFX(AM_IP):
     self.xccs = len(self.adev.regs_offset[am.GC_HWIP])
     self.mqd_paddr = [self.adev.mm.palloc(0x1000 * self.xccs, zero=False, boot=True) for i in range(3)]
     self.mqd_mc = [self.adev.paddr2mc(mqd_paddr) for mqd_paddr in self.mqd_paddr]
-    # KIQ/HIQ resources allocated as boot memory (stable across warm boots)
+    # KIQ resources allocated as boot memory (stable across warm boots)
     self.kiq_ring_paddr = self.adev.mm.palloc(0x800 * self.xccs, zero=False, boot=True)
     self.kiq_gart_paddr = self.adev.mm.palloc(0x1000 * self.xccs, zero=False, boot=True)
     self.kiq_eop_paddr = self.adev.mm.palloc(0x1000 * self.xccs, zero=False, boot=True)
     self.kiq_fence_paddr = self.adev.mm.palloc(0x1000, zero=False, boot=True)
     self.kiq_ib_paddr = self.adev.mm.palloc(0x1000 * self.xccs, zero=False, boot=True)
     self.kiq_wptr = [0] * self.xccs
+    # Keep KIQ on the legacy slot for now.
+    self.kiq_me, self.kiq_pipe, self.kiq_queue = 1, 0, 2
+    # HIQ slot on MEC1 pipe 0 queue 3 (same MEC as KIQ, known to work).
+    self.hiq_me, self.hiq_pipe, self.hiq_queue = 1, 0, 3
+    # HIQ resources: single shared ring, per-XCC MQDs
+    self.hiq_ring_paddr = self.adev.mm.palloc(0x1000, zero=False, boot=True)
+    self.hiq_gart_paddr = self.adev.mm.palloc(0x1000, zero=False, boot=True)
+    self.hiq_eop_paddr = self.adev.mm.palloc(0x1000, zero=False, boot=True)
+    self.hiq_mqd_paddr = self.adev.mm.palloc(0x1000 * self.xccs, zero=False, boot=True)
+    self.hiq_ib_paddr = self.adev.mm.palloc(0x1000, zero=False, boot=True)
+    self.hiq_fence_paddr = self.adev.mm.palloc(0x1000, zero=False, boot=True)
+    self.hiq_wptr, self.hiq_fence_val = 0, 0
 
   def init_hw(self):
     # Wait for RLC autoload to complete
@@ -253,6 +265,12 @@ class AM_GFX(AM_IP):
 
     if not self.adev.partial_boot:
       self._config_mec()
+
+      # Disable GPA mode for CPC UTCL2 (kernel: gfx_v9_4_3_xcc_disable_gpa_mode)
+      if self.adev.ip_ver[am.GC_HWIP][:2] in {(9,4), (9,5)}:
+        for xcc in range(self.xccs):
+          cpc_psp_debug_addr = self.adev.regs_offset[am.GC_HWIP][xcc][1] + 0x5c31
+          self.adev.wreg(cpc_psp_debug_addr, self.adev.rreg(cpc_psp_debug_addr) | 0x8)  # UTCL2IUGPAOVERRIDE
 
       # NOTE: Golden reg for gfx11. No values for this reg provided. The kernel just ors 0x20000000 to this reg.
       for xcc in range(self.xccs): self.adev.regTCP_CNTL.write(self.adev.regTCP_CNTL.read() | 0x20000000, inst=xcc)
@@ -289,43 +307,61 @@ class AM_GFX(AM_IP):
         self.adev.regCP_MEC_DOORBELL_RANGE_LOWER.write(0x100 * xcc, inst=xcc)
         self.adev.regCP_MEC_DOORBELL_RANGE_UPPER.write(0x100 * xcc + 0xf8, inst=xcc)
 
-      self._init_kiq()
-      self._enable_mec()
-      for xcc in range(self.xccs): self._kiq_set_resources(xcc)
+      self._init_kiq()   # Programs KIQ + enables MEC per-XCC
+      self._init_hiq()
+      self._kiq_set_resources()
+      if getenv("AM_HIQ_DIRECT", 0): self._load_hiq_direct()
+      else: self._kiq_map_hiq()
+      self._hiq_set_resources()
 
       # Set 1 partition
       if self.xccs > 1: self.adev.psp._spatial_partition_cmd(1)
     else:
-      # Warm boot: KIQ is already running, just reclaim it
+      # Warm boot: KIQ and HIQ are already running, just reclaim them
       self._reclaim_kiq()
+      self._reclaim_hiq()
 
   def fini_hw(self):
-    # Unmap user queues via KIQ UNMAP_QUEUES (keeps KIQ alive for warm boot)
+    # Unmap user queues via KIQ UNMAP_QUEUES
     self._kiq_unmap_queues()
 
   def reset_mec(self):
     self._dequeue_hqds(reset=True)
     self._config_mec()
-    self._init_kiq()
-    self._enable_mec()
-    for xcc in range(self.xccs): self._kiq_set_resources(xcc)
+    self._init_kiq()   # Programs KIQ + enables MEC per-XCC
+    self._init_hiq()
+    self._kiq_set_resources()
+    if getenv("AM_HIQ_DIRECT", 0): self._load_hiq_direct()
+    else: self._kiq_map_hiq()
+    self._hiq_set_resources()
 
   def setup_ring(self, ring_addr:int, ring_size:int, rptr_addr:int, wptr_addr:int, eop_addr:int, eop_size:int, idx:int, aql:bool, *,
-                 kiq=False, via_kiq=False) -> tuple[int, int]:
+                 kiq=False, via_kiq=False, xcc_range=None) -> tuple[int, int]:
     self.adev.has_aql_queue |= aql
+    mqd_idx = idx % 4  # MQD storage slot (decoupled from GRBM pipe/queue for KIQ)
     pipe, queue, doorbell = idx // 4, idx % 4, am.AMDGPU_NAVI10_DOORBELL_MEC_RING0
+    # KIQ slot is configured from IP defaults.
+    if kiq: me, pipe, queue = self.kiq_me, self.kiq_pipe, self.kiq_queue
+    else: me = 1
 
-    for xcc in range(self.xccs if (aql or kiq) else 1):
+    _xcc_range = xcc_range if xcc_range is not None else range(self.xccs if (aql or kiq) else 1)
+    for xcc in _xcc_range:
       if kiq:
         r_addr = self.adev.paddr2mc(self.kiq_ring_paddr) + ring_size * xcc
         rp_addr = self.adev.paddr2mc(self.kiq_gart_paddr) + 0x1000 * xcc
         wp_addr, e_addr, db = rp_addr + 8, self.adev.paddr2mc(self.kiq_eop_paddr) + 0x1000 * xcc, am.AMDGPU_NAVI10_DOORBELL_KIQ + 0x20 * xcc
       else: r_addr, rp_addr, wp_addr, e_addr, db = ring_addr, rptr_addr, wptr_addr, eop_addr, doorbell
 
+      # GRBM_SELECT before MQD construction to read HW defaults (matching kernel)
+      self._grbm_select(me=me, pipe=pipe, queue=queue, inst=xcc)
+      # Read HW default persistent_state and set PRELOAD_SIZE=0x53 (kernel: gfx_v9_4_3_xcc_mqd_init reads HW default)
+      hw_persistent = self.adev.regCP_HQD_PERSISTENT_STATE.read(inst=xcc)
+      persistent_state = (hw_persistent & ~0x0003FF00) | (0x53 << 8)
+
       struct_t = getattr(am, f"struct_v{self.adev.ip_ver[am.GC_HWIP][0]}{'_compute' if self.adev.ip_ver[am.GC_HWIP][0] >= 10 else ''}_mqd")
-      mqd_struct = struct_t(header=0xC0310800, cp_mqd_base_addr_lo=lo32(self.mqd_mc[queue] + 0x1000*xcc),
-        cp_mqd_base_addr_hi=hi32(self.mqd_mc[queue] + 0x1000*xcc), cp_hqd_pipe_priority=0x2, cp_hqd_queue_priority=0xf, cp_hqd_quantum=0x111,
-        cp_hqd_persistent_state=self.adev.regCP_HQD_PERSISTENT_STATE.encode(preload_size=0x55, preload_req=1),
+      mqd_struct = struct_t(header=0xC0310800, cp_mqd_base_addr_lo=lo32(self.mqd_mc[mqd_idx] + 0x1000*xcc),
+        cp_mqd_base_addr_hi=hi32(self.mqd_mc[mqd_idx] + 0x1000*xcc), cp_hqd_pipe_priority=0x2, cp_hqd_queue_priority=0xf, cp_hqd_quantum=0x111,
+        cp_hqd_persistent_state=persistent_state,
         cp_hqd_pq_base_lo=lo32(r_addr>>8), cp_hqd_pq_base_hi=hi32(r_addr>>8),
         cp_hqd_pq_rptr_report_addr_lo=lo32(rp_addr), cp_hqd_pq_rptr_report_addr_hi=hi32(rp_addr),
         cp_hqd_pq_wptr_poll_addr_lo=lo32(wp_addr), cp_hqd_pq_wptr_poll_addr_hi=hi32(wp_addr),
@@ -339,18 +375,17 @@ class AM_GFX(AM_IP):
         cp_hqd_eop_control=self.adev.regCP_HQD_EOP_CONTROL.encode(eop_size=(eop_size//4).bit_length()-2),
         **({'compute_tg_chunk_size':1, 'compute_current_logic_xcc_id':xcc, 'cp_mqd_stride_size':0x1000} if aql and self.xccs > 1 else {}))
       for se in range(8 if self.adev.ip_ver[am.GC_HWIP][0] >= 10 else 4): setattr(mqd_struct, f'compute_static_thread_mgmt_se{se}', 0xffffffff)
-
-      # Copy mqd into memory
-      self._grbm_select(me=1, pipe=pipe, queue=queue, inst=xcc)
-      self.adev.vram.view(self.mqd_paddr[queue] + 0x1000*xcc, ctypes.sizeof(mqd_struct))[:] = memoryview(mqd_struct).cast('B')
-      self.adev.vram.view(self.mqd_paddr[queue] + 0x1000*xcc + 520, 4, fmt='I')[0] = 1  # cp_hqd_active=1 in VRAM MQD
+      self.adev.vram.view(self.mqd_paddr[mqd_idx] + 0x1000*xcc, ctypes.sizeof(mqd_struct))[:] = memoryview(mqd_struct).cast('B')
+      self.adev.vram.view(self.mqd_paddr[mqd_idx] + 0x1000*xcc + 520, 4, fmt='I')[0] = 1  # cp_hqd_active=1 in VRAM MQD
 
       if not via_kiq:
         if kiq: self.adev.regCP_PQ_WPTR_POLL_CNTL.update(en=0, inst=xcc)
-        # Dequeue if already active (firmware/RLC may have left it active)
+        # Dequeue if already active. For KIQ, MEC is halted+pipe-reset so just force-clear; otherwise graceful dequeue.
         if self.adev.regCP_HQD_ACTIVE.read(inst=xcc) & 1:
-          self.adev.regCP_HQD_DEQUEUE_REQUEST.write(0x1, inst=xcc)
-          wait_cond(lambda: self.adev.regCP_HQD_ACTIVE.read(inst=xcc) & 1, value=0, timeout_ms=2000, msg="HQD dequeue timeout")
+          if kiq: self.adev.regCP_HQD_ACTIVE.write(0x0, inst=xcc)
+          else:
+            self.adev.regCP_HQD_DEQUEUE_REQUEST.write(0x1, inst=xcc)
+            wait_cond(lambda: self.adev.regCP_HQD_ACTIVE.read(inst=xcc) & 1, value=0, timeout_ms=2000, msg="HQD dequeue timeout")
         mqd_st_mv = to_mv(ctypes.addressof(mqd_struct), ctypes.sizeof(mqd_struct)).cast('I')
         for i, reg in enumerate(range(self.adev.regCP_MQD_BASE_ADDR.addr[xcc], self.adev.regCP_HQD_PQ_WPTR_HI.addr[xcc] + 1)):
           self.adev.wreg(reg, mqd_st_mv[0x80 + i])
@@ -360,8 +395,23 @@ class AM_GFX(AM_IP):
       self.adev.gmc.flush_hdp()
       self._grbm_select(inst=xcc)
 
-    # For via_kiq: map via direct MAP_QUEUES on each KIQ
-    if via_kiq: self._kiq_map_queues(pipe, queue, doorbell, wptr_addr)
+    # For via_kiq: map compute queue via KIQ MAP_QUEUES (engine_sel=0/compute)
+    if via_kiq:
+      for xcc in _xcc_range:
+        mqd_mc = self.mqd_mc[mqd_idx] + 0x1000 * xcc
+        self._grbm_select(me=me, pipe=pipe, queue=queue, inst=xcc)
+        self._kiq_submit(xcc, pm4_soc15.PACKET3(pm4_soc15.PACKET3_MAP_QUEUES, 5),
+          pm4_soc15.PACKET3_MAP_QUEUES_QUEUE_SEL(0) | pm4_soc15.PACKET3_MAP_QUEUES_VMID(0) |
+          pm4_soc15.PACKET3_MAP_QUEUES_QUEUE(queue) | pm4_soc15.PACKET3_MAP_QUEUES_PIPE(pipe) |
+          pm4_soc15.PACKET3_MAP_QUEUES_ME(me - 1) | pm4_soc15.PACKET3_MAP_QUEUES_QUEUE_TYPE(0) |
+          pm4_soc15.PACKET3_MAP_QUEUES_ALLOC_FORMAT(0) | pm4_soc15.PACKET3_MAP_QUEUES_ENGINE_SEL(0) |
+          pm4_soc15.PACKET3_MAP_QUEUES_NUM_QUEUES(1),
+          pm4_soc15.PACKET3_MAP_QUEUES_DOORBELL_OFFSET(doorbell * 2),
+          lo32(mqd_mc), hi32(mqd_mc), lo32(wptr_addr), hi32(wptr_addr))
+        self._grbm_select(inst=xcc)
+      for xcc in _xcc_range:
+        rptr_view = self.adev.vram.view(self.kiq_gart_paddr + 0x1000 * xcc, 8, fmt='Q')
+        wait_cond(lambda: rptr_view[0], value=self.kiq_wptr[xcc], timeout_ms=2000, msg=f"KIQ MAP_QUEUES(compute) timeout XCC{xcc}")
 
     return 0, doorbell
 
@@ -371,15 +421,26 @@ class AM_GFX(AM_IP):
 
   def _init_kiq(self):
     self.kiq_wptr = [0] * self.xccs
-    # Tell RLC which queue is KIQ (me=1, pipe=0, queue=2)
-    for xcc in range(self.xccs): self.adev.regRLC_CP_SCHEDULERS.write(self.adev.regRLC_CP_SCHEDULERS.read(inst=xcc) & 0xffffff00 | 0xa2, inst=xcc)
-    self.setup_ring(0, 0x800, 0, 0, 0, 0x1000, 2, aql=False, kiq=True)
+    # Zero out KIQ ring, gart (rptr/wptr reports), and eop for all XCCs (boot memory persists across sessions)
+    for paddr, sz in [(self.kiq_ring_paddr, 0x800 * self.xccs), (self.kiq_gart_paddr, 0x1000 * self.xccs),
+                      (self.kiq_eop_paddr, 0x1000 * self.xccs)]:
+      self.adev.vram.view(paddr, sz)[:] = bytes(sz)
+    for xcc in range(self.xccs):
+      # Tell RLC which queue is KIQ.
+      kiq_sched = 0x80 | (self.kiq_me << 5) | (self.kiq_pipe << 3) | self.kiq_queue
+      self.adev.regRLC_CP_SCHEDULERS.write(self.adev.regRLC_CP_SCHEDULERS.read(inst=xcc) & 0xffffff00 | kiq_sched, inst=xcc)
+      # Program KIQ HQD on this XCC
+      self.setup_ring(0, 0x800, 0, 0, 0, 0x1000, self.kiq_queue, aql=False, kiq=True, xcc_range=range(xcc, xcc+1))
+      # Enable MEC on this XCC immediately after KIQ programming (matching kernel per-XCC sequence)
+      if self.adev.ip_ver[am.GC_HWIP] >= (10,0,0): self.adev.regCP_MEC_RS64_CNTL.update(mec_pipe0_reset=0, mec_pipe0_active=1, mec_halt=0, inst=xcc)
+      else: self.adev.regCP_MEC_CNTL.write(0x0, inst=xcc)
+      time.sleep(0.01)
 
   def _reclaim_kiq(self):
     """On warm boot, reclaim already-running KIQ rings without MEC restart."""
     self.kiq_wptr = [0] * self.xccs
     for xcc in range(self.xccs):
-      self._grbm_select(me=1, pipe=0, queue=2, inst=xcc)
+      self._grbm_select(me=self.kiq_me, pipe=self.kiq_pipe, queue=self.kiq_queue, inst=xcc)
       # Read current wptr from HQD register (in DWORDs)
       wptr_lo = self.adev.regCP_HQD_PQ_WPTR_LO.read(inst=xcc)
       wptr_hi = self.adev.regCP_HQD_PQ_WPTR_HI.read(inst=xcc)
@@ -395,43 +456,151 @@ class AM_GFX(AM_IP):
     self.adev.gmc.flush_hdp()
     self.adev.doorbell64[am.AMDGPU_NAVI10_DOORBELL_KIQ + 0x20 * xcc] = self.kiq_wptr[xcc]
 
-  def _kiq_set_resources(self, xcc):
-    self._kiq_submit(xcc, pm4_soc15.PACKET3(pm4_soc15.PACKET3_SET_RESOURCES, 6),
-      pm4_soc15.PACKET3_SET_RESOURCES_QUEUE_TYPE(0), lo32(0xff & ~(1 << 2)), hi32(0xff & ~(1 << 2)), 0, 0, 0, 0)
-
-  def _kiq_map_queue(self, xcc, pipe, queue, doorbell, mqd_mc, wptr_addr):
-    self._kiq_submit(xcc, pm4_soc15.PACKET3(pm4_soc15.PACKET3_MAP_QUEUES, 5),
-      pm4_soc15.PACKET3_MAP_QUEUES_QUEUE_SEL(0) | pm4_soc15.PACKET3_MAP_QUEUES_VMID(0) |
-      pm4_soc15.PACKET3_MAP_QUEUES_QUEUE(queue) | pm4_soc15.PACKET3_MAP_QUEUES_PIPE(pipe) |
-      pm4_soc15.PACKET3_MAP_QUEUES_ME(0) | pm4_soc15.PACKET3_MAP_QUEUES_QUEUE_TYPE(0) |
-      pm4_soc15.PACKET3_MAP_QUEUES_ALLOC_FORMAT(0) | pm4_soc15.PACKET3_MAP_QUEUES_ENGINE_SEL(0) |
-      pm4_soc15.PACKET3_MAP_QUEUES_NUM_QUEUES(1),
-      pm4_soc15.PACKET3_MAP_QUEUES_DOORBELL_OFFSET(doorbell * 2),
-      lo32(mqd_mc), hi32(mqd_mc), lo32(wptr_addr), hi32(wptr_addr))
-
-  # === KIQ MAP/UNMAP via direct MAP_QUEUES/UNMAP_QUEUES (queue_type=0) ===
-
-  def _kiq_map_queues(self, pipe, queue, doorbell, wptr_addr):
-    """Map user queue on all XCCs via direct MAP_QUEUES on each KIQ. Per-XCC MQD addresses."""
+  def _kiq_set_resources(self):
+    """Send SET_RESOURCES(queue_type=0) on each XCC's KIQ to initialize MEC resource tracking."""
+    # Match amdgpu legacy path: expose full queue mask for KIQ resource setup.
+    queue_mask = 0xFFFFFFFFFFFFFFFF
     for xcc in range(self.xccs):
-      self._kiq_map_queue(xcc, pipe, queue, doorbell, self.mqd_mc[queue] + 0x1000*xcc, wptr_addr)
+      self._kiq_submit(xcc, pm4_soc15.PACKET3(pm4_soc15.PACKET3_SET_RESOURCES, 6),
+        pm4_soc15.PACKET3_SET_RESOURCES_QUEUE_TYPE(0) | pm4_soc15.PACKET3_SET_RESOURCES_VMID_MASK(0),
+        lo32(queue_mask), hi32(queue_mask), 0, 0, 0, 0)
+    # Wait for KIQ to process on all XCCs
+    for xcc in range(self.xccs):
+      rptr_view = self.adev.vram.view(self.kiq_gart_paddr + 0x1000 * xcc, 8, fmt='Q')
+      wait_cond(lambda: rptr_view[0], value=self.kiq_wptr[xcc], timeout_ms=2000, msg=f"KIQ SET_RESOURCES timeout XCC{xcc}")
+
+  # === HIQ (Hardware Interface Queue) for HWS ===
+
+  def _init_hiq(self):
+    """Initialize HIQ for HWS: build per-XCC MQDs in VRAM, set RLC_CP_SCHEDULERS. HQD loaded later via _kiq_map_hiq."""
+    self.hiq_wptr, self.hiq_fence_val = 0, 0
+    self.hiq_db = am.AMDGPU_NAVI10_DOORBELL_HIQ
+    self.hiq_ring_addr = self.adev.paddr2mc(self.hiq_ring_paddr)
+    self.hiq_gart_addr = self.adev.paddr2mc(self.hiq_gart_paddr)
+    self.hiq_eop_addr = self.adev.paddr2mc(self.hiq_eop_paddr)
+    self.hiq_mqd_addr = self.adev.paddr2mc(self.hiq_mqd_paddr)
+
+    # Zero out shared ring, gart, fence, eop
+    for paddr, sz in [(self.hiq_ring_paddr, 0x800), (self.hiq_gart_paddr, 0x1000), (self.hiq_fence_paddr, 0x1000), (self.hiq_eop_paddr, 0x1000)]:
+      self.adev.vram.view(paddr, sz)[:] = bytes(sz)
+
+    struct_t = getattr(am, f"struct_v{self.adev.ip_ver[am.GC_HWIP][0]}_mqd")
+    for xcc in range(self.xccs):
+      mqd = struct_t(header=0xC0310800, cp_mqd_base_addr_lo=lo32(self.hiq_mqd_addr + 0x1000*xcc), cp_mqd_base_addr_hi=hi32(self.hiq_mqd_addr + 0x1000*xcc),
+        cp_hqd_pipe_priority=0x0, cp_hqd_queue_priority=0x1, cp_hqd_quantum=0x111,
+        cp_hqd_persistent_state=self.adev.regCP_HQD_PERSISTENT_STATE.encode(preload_size=0x53, preload_req=1),
+        cp_hqd_pq_base_lo=lo32(self.hiq_ring_addr>>8), cp_hqd_pq_base_hi=hi32(self.hiq_ring_addr>>8),
+        cp_hqd_pq_rptr_report_addr_lo=lo32(self.hiq_gart_addr), cp_hqd_pq_rptr_report_addr_hi=hi32(self.hiq_gart_addr),
+        cp_hqd_pq_wptr_poll_addr_lo=lo32(self.hiq_gart_addr+8), cp_hqd_pq_wptr_poll_addr_hi=hi32(self.hiq_gart_addr+8),
+        cp_hqd_pq_doorbell_control=self.adev.regCP_HQD_PQ_DOORBELL_CONTROL.encode(doorbell_offset=self.hiq_db*2, doorbell_en=1),
+        cp_hqd_pq_control=self.adev.regCP_HQD_PQ_CONTROL.encode(rptr_block_size=5, unord_dispatch=1,
+          queue_size=(0x800//4).bit_length()-2, priv_state=1, kmd_queue=1, no_update_rptr=(1 if xcc != 0 else 0)),
+        cp_hqd_ib_control=self.adev.regCP_HQD_IB_CONTROL.encode(min_ib_avail_size=0x3, ib_exe_disable=1), cp_hqd_hq_status0=(1<<14),
+        cp_mqd_control=self.adev.regCP_MQD_CONTROL.encode(priv_state=1), cp_hqd_vmid=0,
+        cp_hqd_eop_base_addr_lo=lo32(self.hiq_eop_addr>>8), cp_hqd_eop_base_addr_hi=hi32(self.hiq_eop_addr>>8),
+        cp_hqd_eop_control=self.adev.regCP_HQD_EOP_CONTROL.encode(eop_size=(0x1000//4).bit_length()-2),
+        **({'cp_mqd_stride_size': 0x1000} if self.xccs > 1 else {}))
+      for se in range(8 if self.adev.ip_ver[am.GC_HWIP][0] >= 10 else 4):
+        setattr(mqd, f'compute_static_thread_mgmt_se{se}', 0xffffffff)
+
+      # Write MQD to VRAM
+      self.adev.vram.view(self.hiq_mqd_paddr + 0x1000*xcc, ctypes.sizeof(mqd))[:] = memoryview(mqd).cast('B')
+      self.adev.vram.view(self.hiq_mqd_paddr + 0x1000*xcc + 520, 4, fmt='I')[0] = 1  # cp_hqd_active=1
+
+    self.adev.gmc.flush_hdp()
+
+    # Set scheduler1 in RLC_CP_SCHEDULERS (kernel: kgd_gfx_v9_hiq_mqd_load)
+    hiq_sched = 1 | (self.hiq_pipe << 5) | (self.hiq_queue << 1) | ((self.hiq_me - 1) << 7)
+    for xcc in range(self.xccs):
+      old = self.adev.regRLC_CP_SCHEDULERS.read(inst=xcc)
+      self.adev.regRLC_CP_SCHEDULERS.write((old & 0xffff00ff) | (hiq_sched << 8), inst=xcc)
+
+  def _kiq_map_hiq(self):
+    """Load HIQ HQD on each XCC via KIQ MAP_QUEUES with ENGINE_SEL=1 (kernel HWS engine)."""
+    for xcc in range(self.xccs):
+      mqd_mc = self.hiq_mqd_addr + 0x1000 * xcc
+      wptr_mc = self.hiq_gart_addr + 8  # wptr poll address
+      # Kernel does acquire_queue (GRBM_SELECT to HIQ context) before MAP_QUEUES (kgd_gfx_v9_hiq_mqd_load)
+      self._grbm_select(me=self.hiq_me, pipe=self.hiq_pipe, queue=self.hiq_queue, inst=xcc)
+      self._kiq_submit(xcc, pm4_soc15.PACKET3(pm4_soc15.PACKET3_MAP_QUEUES, 5),
+        pm4_soc15.PACKET3_MAP_QUEUES_QUEUE_SEL(0) | pm4_soc15.PACKET3_MAP_QUEUES_VMID(0) |
+        pm4_soc15.PACKET3_MAP_QUEUES_QUEUE(self.hiq_queue) | pm4_soc15.PACKET3_MAP_QUEUES_PIPE(self.hiq_pipe) |
+        pm4_soc15.PACKET3_MAP_QUEUES_ME(self.hiq_me - 1) | pm4_soc15.PACKET3_MAP_QUEUES_QUEUE_TYPE(0) |
+        pm4_soc15.PACKET3_MAP_QUEUES_ALLOC_FORMAT(0) | pm4_soc15.PACKET3_MAP_QUEUES_ENGINE_SEL(1) |
+        pm4_soc15.PACKET3_MAP_QUEUES_NUM_QUEUES(1),
+        pm4_soc15.PACKET3_MAP_QUEUES_DOORBELL_OFFSET(self.hiq_db * 2),
+        lo32(mqd_mc), hi32(mqd_mc), lo32(wptr_mc), hi32(wptr_mc))
+      self._grbm_select(inst=xcc)
+    # Wait for KIQ to process MAP_QUEUES on all XCCs
+    for xcc in range(self.xccs):
+      rptr_view = self.adev.vram.view(self.kiq_gart_paddr + 0x1000 * xcc, 8, fmt='Q')
+      wait_cond(lambda: rptr_view[0], value=self.kiq_wptr[xcc], timeout_ms=2000, msg=f"KIQ MAP_QUEUES(HIQ) timeout XCC{xcc}")
+    # Verify HIQ HQD is active on all XCCs
+    for xcc in range(self.xccs):
+      self._grbm_select(me=self.hiq_me, pipe=self.hiq_pipe, queue=self.hiq_queue, inst=xcc)
+      if not (self.adev.regCP_HQD_ACTIVE.read(inst=xcc) & 1): raise RuntimeError(f"am {self.adev.devfmt}: HIQ HQD not active on XCC{xcc} after MAP_QUEUES")
+      self._grbm_select(inst=xcc)
+
+  def _load_hiq_direct(self):
+    """Load HIQ HQD directly from VRAM MQD registers (debug fallback for MAP_QUEUES issues)."""
+    for xcc in range(self.xccs):
+      self._grbm_select(me=self.hiq_me, pipe=self.hiq_pipe, queue=self.hiq_queue, inst=xcc)
+      if self.adev.regCP_HQD_ACTIVE.read(inst=xcc) & 1:
+        self.adev.regCP_HQD_DEQUEUE_REQUEST.write(0x1, inst=xcc)
+        wait_cond(lambda: self.adev.regCP_HQD_ACTIVE.read(inst=xcc) & 1, value=0, timeout_ms=2000, msg=f"HIQ direct dequeue timeout XCC{xcc}")
+      mqd_st_mv = self.adev.vram.view(self.hiq_mqd_paddr + 0x1000 * xcc, 0x1000, fmt='I')
+      for i, reg in enumerate(range(self.adev.regCP_MQD_BASE_ADDR.addr[xcc], self.adev.regCP_HQD_PQ_WPTR_HI.addr[xcc] + 1)):
+        self.adev.wreg(reg, mqd_st_mv[0x80 + i])
+      self.adev.regCP_HQD_EOP_RPTR.update(init_fetcher=1, inst=xcc)
+      self.adev.regCP_HQD_ACTIVE.write(0x1, inst=xcc)
+      self.adev.regCP_PQ_STATUS.update(doorbell_enable=1, inst=xcc)
+      self._grbm_select(inst=xcc)
+    self.adev.gmc.flush_hdp()
+
+  def _reclaim_hiq(self):
+    """On warm boot, reclaim already-running HIQ ring wptr."""
+    self._grbm_select(me=self.hiq_me, pipe=self.hiq_pipe, queue=self.hiq_queue, inst=0)
+    self.hiq_wptr = self.adev.regCP_HQD_PQ_WPTR_HI.read(inst=0) << 32 | self.adev.regCP_HQD_PQ_WPTR_LO.read(inst=0)
+    self._grbm_select(inst=0)
+    self.hiq_fence_val = self.adev.vram.view(self.hiq_fence_paddr, 4, fmt='I')[0]
+
+  def _hiq_submit(self, *dwords):
+    """Submit packets to the shared HIQ ring and ring the doorbell."""
+    ring = self.adev.vram.view(self.hiq_ring_paddr, 0x800, fmt='I')
+    for dw in dwords:
+      ring[self.hiq_wptr % 512] = dw
+      self.hiq_wptr += 1
+    self.adev.vram.view(self.hiq_gart_paddr + 8, 8, fmt='Q')[0] = self.hiq_wptr
+    self.adev.gmc.flush_hdp()
+    self.adev.doorbell64[self.hiq_db] = self.hiq_wptr
+
+  def _hiq_set_resources(self):
+    """Send SET_RESOURCES(queue_type=1/HIQ) on the HIQ."""
+    hiq_rptr = self.adev.vram.view(self.hiq_gart_paddr, 8, fmt='Q')
+
+    # Expose MEC1 queue slots and VMIDs 8-15 for HWS (matching kernel KFD configuration).
+    queue_mask = 0xFFFFFFFF
+    vmid_mask = 0xFF00
+    self._hiq_submit(pm4_soc15.PACKET3(pm4_soc15.PACKET3_SET_RESOURCES, 6),
+      pm4_soc15.PACKET3_SET_RESOURCES_QUEUE_TYPE(1) | pm4_soc15.PACKET3_SET_RESOURCES_VMID_MASK(vmid_mask) |
+      pm4_soc15.PACKET3_SET_RESOURCES_UNMAP_LATENTY(40),  # KFD_UNMAP_LATENCY_MS(4000) / 100
+      lo32(queue_mask), hi32(queue_mask), 0xFFFFFFFF, 0xFFFFFFFF, 0, 0)
+    wait_cond(lambda: hiq_rptr[0], value=self.hiq_wptr, timeout_ms=2000, msg="HIQ SET_RESOURCES timeout")
 
   def _kiq_unmap_queues(self):
-    """Unmap all non-static user queues via UNMAP_QUEUES on each KIQ, then poll CP_HQD_ACTIVE."""
+    """Unmap user compute queues via KIQ UNMAP_QUEUES (action=RESET_QUEUES, queue_sel=0, engine_sel=compute)."""
+    doorbell = am.AMDGPU_NAVI10_DOORBELL_MEC_RING0
     for xcc in range(self.xccs):
-      self._kiq_submit(xcc,
-        pm4_soc15.PACKET3(pm4_soc15.PACKET3_UNMAP_QUEUES, 4),
-        pm4_soc15.PACKET3_UNMAP_QUEUES_ACTION(0) | pm4_soc15.PACKET3_UNMAP_QUEUES_QUEUE_SEL(3) |
-        pm4_soc15.PACKET3_UNMAP_QUEUES_ENGINE_SEL(0) | pm4_soc15.PACKET3_UNMAP_QUEUES_NUM_QUEUES(1),
+      self._kiq_submit(xcc, pm4_soc15.PACKET3(pm4_soc15.PACKET3_UNMAP_QUEUES, 4),
+        pm4_soc15.PACKET3_UNMAP_QUEUES_ACTION(1) |  # RESET_QUEUES
+        pm4_soc15.PACKET3_UNMAP_QUEUES_QUEUE_SEL(0) |
+        pm4_soc15.PACKET3_UNMAP_QUEUES_ENGINE_SEL(0) |  # compute
+        pm4_soc15.PACKET3_UNMAP_QUEUES_NUM_QUEUES(1),
+        pm4_soc15.PACKET3_UNMAP_QUEUES_DOORBELL_OFFSET0(doorbell * 2),
         0, 0, 0)
-    # Poll CP_HQD_ACTIVE for user queues (Q0, Q1)
-    for q in range(2):
-      for xcc in range(self.xccs):
-        self._grbm_select(me=1, pipe=0, queue=q, inst=xcc)
-        if self.adev.regCP_HQD_ACTIVE.read(inst=xcc) & 1:
-          wait_cond(lambda: self.adev.regCP_HQD_ACTIVE.read(inst=xcc) & 1, value=0, timeout_ms=2000,
-                    msg=f"KIQ unmap Q{q} XCC{xcc} timeout")
-    self._grbm_select()
+    for xcc in range(self.xccs):
+      rptr_view = self.adev.vram.view(self.kiq_gart_paddr + 0x1000 * xcc, 8, fmt='Q')
+      wait_cond(lambda: rptr_view[0], value=self.kiq_wptr[xcc], timeout_ms=2000, msg=f"KIQ UNMAP_QUEUES timeout XCC{xcc}")
 
   def set_clockgating_state(self):
     if hasattr(self.adev, 'regMM_ATC_L2_MISC_CG'): self.adev.regMM_ATC_L2_MISC_CG.write(enable=1, mem_ls_enable=1)
@@ -458,12 +627,6 @@ class AM_GFX(AM_IP):
   def _grbm_select(self, me=0, pipe=0, queue=0, vmid=0, inst=0):
     self.adev.regGRBM_GFX_CNTL.write(meid=me, pipeid=pipe, vmid=vmid, queueid=queue, inst=inst)
 
-  def _enable_mec(self):
-    for xcc in range(self.xccs):
-      if self.adev.ip_ver[am.GC_HWIP] >= (10,0,0): self.adev.regCP_MEC_RS64_CNTL.update(mec_pipe0_reset=0, mec_pipe0_active=1, mec_halt=0, inst=xcc)
-      else: self.adev.regCP_MEC_CNTL.write(0x0, inst=xcc)
-    time.sleep(0.05)  # Wait for MEC to be ready
-
   def _config_mec(self):
     def _config_helper(eng_name, cntl_reg, eng_reg, pipe_cnt, me=0, xcc=0):
       for pipe in range(pipe_cnt):
@@ -475,7 +638,9 @@ class AM_GFX(AM_IP):
 
     for xcc in range(self.adev.gfx.xccs):
       if self.adev.ip_ver[am.GC_HWIP] < (10,0,0):
-        self.adev.regCP_MEC_CNTL.update(mec_invalidate_icache=1, mec_me1_pipe0_reset=1, mec_me2_pipe0_reset=1, mec_me1_halt=1,mec_me2_halt=1,inst=xcc)
+        # Halt MEC, reset ALL pipes, invalidate icache (matching kernel: gfx_v9_4_3_xcc_cp_compute_enable(false))
+        # MEC_INVALIDATE_ICACHE(4)|ME1_PIPE0-3_RESET(16-19)|ME2_PIPE0-1_RESET(20-21)|ME2_HALT(28)|ME1_HALT(30)
+        self.adev.regCP_MEC_CNTL.write(0x503F0010, inst=xcc)
       if self.adev.ip_ver[am.GC_HWIP] >= (12,0,0):
         _config_helper(eng_name="PFP", cntl_reg="ME", eng_reg="PFP", pipe_cnt=1, xcc=xcc)
         _config_helper(eng_name="ME", cntl_reg="ME", eng_reg="ME", pipe_cnt=1, xcc=xcc)
@@ -483,14 +648,29 @@ class AM_GFX(AM_IP):
         _config_helper(eng_name="MEC", cntl_reg="MEC_RS64", eng_reg="MEC_RS64", pipe_cnt=1, me=1, xcc=xcc)
 
   def _dequeue_hqds(self, reset=False):
-    queues = list(range(2)) + ([2] if self.kiq_ring_paddr is not None else [])
-    for q in queues:
+    # Dequeue user queues (0,1) on MEC1 pipe=0
+    for q in range(2):
       for xcc in range(self.xccs):
         self._grbm_select(me=1, pipe=0, queue=q, inst=xcc)
         if self.adev.regCP_HQD_ACTIVE.read(inst=xcc) & 1:
           self.adev.regCP_HQD_DEQUEUE_REQUEST.write(0x2, inst=xcc) # 1 - DRAIN_PIPE; 2 - RESET_WAVES
           if reset: self.adev.regSPI_COMPUTE_QUEUE_RESET.write(1, inst=xcc)
           else: wait_cond(lambda: self.adev.regCP_HQD_ACTIVE.read(inst=xcc) & 1, value=0, msg="HQD dequeue timeout")
+    # Dequeue HIQ
+    for xcc in range(self.xccs):
+      self._grbm_select(me=self.hiq_me, pipe=self.hiq_pipe, queue=self.hiq_queue, inst=xcc)
+      if self.adev.regCP_HQD_ACTIVE.read(inst=xcc) & 1:
+        self.adev.regCP_HQD_DEQUEUE_REQUEST.write(0x2, inst=xcc)
+        if reset: self.adev.regSPI_COMPUTE_QUEUE_RESET.write(1, inst=xcc)
+        else: wait_cond(lambda: self.adev.regCP_HQD_ACTIVE.read(inst=xcc) & 1, value=0, msg="HIQ dequeue timeout")
+    # Dequeue KIQ on MEC1 pipe=0, queue=2
+    if self.kiq_ring_paddr is not None:
+      for xcc in range(self.xccs):
+        self._grbm_select(me=self.kiq_me, pipe=self.kiq_pipe, queue=self.kiq_queue, inst=xcc)
+        if self.adev.regCP_HQD_ACTIVE.read(inst=xcc) & 1:
+          self.adev.regCP_HQD_DEQUEUE_REQUEST.write(0x2, inst=xcc)
+          if reset: self.adev.regSPI_COMPUTE_QUEUE_RESET.write(1, inst=xcc)
+          else: wait_cond(lambda: self.adev.regCP_HQD_ACTIVE.read(inst=xcc) & 1, value=0, msg="KIQ dequeue timeout")
     self._grbm_select()
 
 class AM_IH(AM_IP):
