@@ -10,10 +10,9 @@ from extra.gemm.amd_asm_matmul import Kernel
 
 # skip instructions that mutate wave state (PC, EXEC, allocations, signals)
 SKIP = {'S_SETPC_B64', 'S_SWAPPC_B64', 'S_RFE_B64', 'S_BARRIER_SIGNAL_ISFIRST', 'S_GET_BARRIER_STATE', 'S_ALLOC_VGPR', 'S_SLEEP_VAR', 'S_GETPC_B64',
-        'S_SENDMSG_RTN_B32', 'S_SENDMSG_RTN_B64',
-        # rocprof-trace-decoder can't handle SOPK split waitcnt SQTT trace tokens (s_waitcnt_expcnt works)
-        'S_WAITCNT_LGKMCNT', 'S_WAITCNT_VMCNT', 'S_WAITCNT_VSCNT'}
-SKIP_SUBSTR = ['SAVEEXEC', 'WREXEC', 'MOVREL', 'ATOMIC', 'S_BUFFER_', 'S_ATC_PROBE', 'BARRIER', 'DS_CMPSTORE_RTN', 'GS_REG',
+        'S_SENDMSG_RTN_B32', 'S_SENDMSG_RTN_B64'}
+# skip barriers, s_waits, wrap level atomics, and ray tracing (bvh)
+SKIP_SUBSTR = ['SAVEEXEC', 'WREXEC', 'MOVREL', 'ATOMIC', 'S_BUFFER_', 'S_ATC_PROBE', 'BARRIER', 'S_WAITCNT', 'BVH', 'DS_CMPSTORE_RTN', 'GS_REG',
                'DS_GWS', 'DS_WRAP_RTN_B32', 'DS_ORDERED_COUNT', 'GLOBAL_LOAD_LDS']
 
 ALU_FORMATS = {'VOP1', 'VOP1_LIT', 'VOP1_SDST', 'VOP2', 'VOP2_LIT', 'VOP3', 'VOP3_SDST', 'VOP3SD', 'VOP3P', 'VOP3P_MFMA', 'VOP3PX2',
