@@ -63,7 +63,6 @@ class TestSQTTMapBase(unittest.TestCase):
 
   def test_rocprof_inst_traces_match(self):
     for name, (events, kern_events, target) in self.examples.items():
-      if name != "profile_py_run_0": continue
       for event in events:
         if not event.itrace: continue
         if event.kern not in kern_events: continue
