@@ -25,7 +25,9 @@ def disk_copy_is_buffer(ctx:AllocCtx, u:UOp):
   if from_creation: return tag_uop(ctx, u)
 
 def apply_after(ctx:AllocCtx, u:UOp):
-  ctx.buffer_map[u] = u.src[0]
+  base = u.src[0]
+  while base.op is Ops.AFTER: base = base.src[0]
+  ctx.buffer_map[u] = base
 
 # CONTIGUOUS and ASSIGN + parents are the only nodes that get updated
 add_tags = PatternMatcher([
@@ -54,7 +56,7 @@ def replace_contig_with_assign(u:UOp):
 
 def replace_assign_with_contig(u:UOp):
   assigned_to = u
-  while assigned_to.op in {Ops.ASSIGN, Ops.BITCAST}: assigned_to = assigned_to.src[0].base
+  while assigned_to.op in {Ops.ASSIGN, Ops.BITCAST, Ops.AFTER}: assigned_to = assigned_to.src[0].base
   if assigned_to.op is not Ops.BUFFER:
     return u.src[1].contiguous(tag=u.tag)
 
@@ -74,8 +76,9 @@ pm_early_transform_tensor_graph = PatternMatcher([
   (UPat(GroupOp.ALU, name="alu"), lambda ctx,alu: alu.replace(src=new_src) if (new_src:=tuple(ctx.get(s, s) for s in alu.src)) != alu.src else None),
   # add CONTIGUOUS to tagged UOps
   (UPat(GroupOp.All-{Ops.CONTIGUOUS, Ops.ASSIGN}, name="x"), lambda x: x.rtag(None).contiguous(tag=x.tag) if x.tag else x.replace(tag=None)),
-  # remove extra CONTIGUOUS on ASSIGN
-  (UPat(Ops.CONTIGUOUS, src=(UPat(Ops.ASSIGN, name="a"),), name="c"), lambda a,c: a.replace(tag=a.tag+c.tag)),
+  # remove extra CONTIGUOUS on ASSIGN (only when assign target is contiguous)
+  (UPat(Ops.CONTIGUOUS, src=(UPat(Ops.ASSIGN, name="a"),), name="c"),
+   lambda a,c: a.replace(tag=a.tag+c.tag) if a.src[0].has_buffer_identity() else None),
   # replace ASSIGN with CONTIGUOUS
   (UPat(Ops.ASSIGN, name="u"), replace_assign_with_contig),
   # replace CONTIGUOUS with ASSIGNs
