@@ -74,18 +74,18 @@ class TestRawDiskBuffer(unittest.TestCase):
     _test_bitcasted(t, dtypes.float32, 0.0)
     _test_bitcasted(t, dtypes.uint32, 0)
     # pi in float16 stored via int16
-    t.assign(Tensor.full((128, 64), 0x4248, dtype=dtypes.uint16).bitcast(dtypes.uint8)).realize()
+    t.bitcast(dtypes.uint16).assign(Tensor.full((128, 64), 0x4248, dtype=dtypes.uint16)).realize()
     _test_bitcasted(t, dtypes.float16, 3.140625)
     _test_bitcasted(t, dtypes.float32, 50.064727)
     _test_bitcasted(t, dtypes.uint16, 0x4248)
     _test_bitcasted(t, dtypes.uint32, 0x42484248)
     # pi in float32 stored via float32
-    t.assign(Tensor.full((128, 32), 3.1415927, dtype=dtypes.float32).bitcast(dtypes.uint8)).realize()
+    t.bitcast(dtypes.float32).assign(Tensor.full((128, 32), 3.1415927, dtype=dtypes.float32)).realize()
     _test_bitcasted(t, dtypes.float32, 3.1415927)
     _test_bitcasted(t, dtypes.uint32, 0x40490FDB)
     # doesn't suport normal cast
     with self.assertRaises(NotImplementedError):
-      Tensor.empty((4,), dtype=dtypes.int16, device=f"disk:{tmp}").cast(dtypes.float16).realize()
+      Tensor.empty((4,), dtype=dtypes.int16, device=f"disk:{tmp}").cast(dtypes.float16).to(None).realize()
 
     # Those two should be moved to test_dtype.py:test_shape_change_bitcast after bitcast works on non-disk
     with self.assertRaises(RuntimeError):
@@ -178,6 +178,13 @@ class TestSafetensors(TempDirTestCase):
     import json
     assert json.loads(dat[8:8+sz])['__metadata__']['hello'] == 'world'
 
+  def test_safe_save_only_copy(self):
+    from tinygrad.helpers import GlobalCounters
+    t = Tensor.rand(10, 10).realize()
+    GlobalCounters.reset()
+    safe_save({"t": t}, self.tmp("test_copy.safetensors"))
+    assert GlobalCounters.global_ops == 0, f"safe_save should have no compute, got {GlobalCounters.global_ops} ops"
+
   def test_save_all_dtypes(self):
     for dtype in dedup(DTYPES_DICT.values()):
       if dtype in [dtypes.bfloat16]: continue # not supported in numpy
@@ -264,18 +271,20 @@ class TestDiskTensor(TempDirTestCase):
   def test_strided_read(self):
     # test non-contiguous (strided) read - should read elements at indices 0, 2, 4
     dt = Tensor([0, 1, 2, 3, 4, 5]).to(f"disk:{self.tmp('dt_strided_read')}")
-    result = dt[::2].tolist()
-    # TODO: dt[::2] selects indices 0, 2, 4, so result should be [0, 2, 4]
-    # self.assertEqual(result, [0, 2, 4])
-    self.assertEqual(result, [0, 1, 2])  # wrong!
+    with self.assertRaises(RuntimeError):
+      result = dt[::2].tolist()
+      # TODO: dt[::2] selects indices 0, 2, 4, so result should be [0, 2, 4]
+      # self.assertEqual(result, [0, 2, 4])
+      self.assertEqual(result, [0, 1, 2])  # wrong!
 
   def test_permuted_read(self):
     # test non-contiguous (permuted) read - should read transposed
     dt = Tensor([[0, 1, 2], [3, 4, 5]]).to(f"disk:{self.tmp('dt_permuted_read')}")
-    result = dt.T.tolist()
-    # TODO: transpose should give [[0, 3], [1, 4], [2, 5]]
-    # self.assertEqual(result, [[0, 3], [1, 4], [2, 5]])
-    self.assertEqual(result, [[0, 1], [2, 3], [4, 5]])  # wrong!
+    with self.assertRaises(RuntimeError):
+      result = dt.T.tolist()
+      # TODO: transpose should give [[0, 3], [1, 4], [2, 5]]
+      # self.assertEqual(result, [[0, 3], [1, 4], [2, 5]])
+      self.assertEqual(result, [[0, 1], [2, 3], [4, 5]])  # wrong!
 
   def test_write_ones(self):
     out = Tensor.ones(10, 10, device="CPU").contiguous()
@@ -303,10 +312,11 @@ class TestDiskTensor(TempDirTestCase):
   def test_strided_setitem(self):
     # test non-contiguous (strided) setitem - should set elements at indices 0, 2, 4
     dt = Tensor([1, 2, 3, 4, 5, 6]).to(f"disk:{self.tmp('dt_strided_setitem')}")
-    dt[::2] = Tensor([10, 20, 30])
-    # TODO: dt[::2] selects indices 0, 2, 4, so result should be [10, 2, 20, 4, 30, 6]
-    # self.assertEqual(dt.tolist(), [10, 2, 20, 4, 30, 6])
-    self.assertEqual(dt.tolist(), [10, 20, 30, 4, 5, 6])  # wrong!
+    with self.assertRaises(RuntimeError):
+      dt[::2] = Tensor([10, 20, 30])
+      # TODO: dt[::2] selects indices 0, 2, 4, so result should be [10, 2, 20, 4, 30, 6]
+      # self.assertEqual(dt.tolist(), [10, 2, 20, 4, 30, 6])
+      self.assertEqual(dt.tolist(), [10, 20, 30, 4, 5, 6])  # wrong!
 
   def test_advanced_setitem_not_supported(self):
     dt = Tensor.arange(12).reshape(3, 4).to(f"disk:{self.tmp('dt_advanced_setitem')}")
@@ -354,15 +364,10 @@ class TestDiskTensor(TempDirTestCase):
 
   def test_assign_with_bitcast(self):
     # bitcast assign is used in safe_save for writing header length
-    # bitcast on source side works, bitcast on target side raises
     t = Tensor.empty(16, device=f"disk:{self.tmp('dt_assign_bitcast')}", dtype=dtypes.uint8)
-    # correct way: bitcast the source to match target dtype
-    t[0:8].assign(Tensor([12345], dtype=dtypes.int64, device="CPU").bitcast(dtypes.uint8))
+    t[0:8].bitcast(dtypes.int64).assign([12345])
     val = int.from_bytes(t[0:8].data(), 'little')
     self.assertEqual(val, 12345)
-    # bitcast on target with non-broadcastable dtype raises
-    with self.assertRaises(RuntimeError):
-      t[0:4].bitcast(dtypes.int32).assign(Tensor([12345], dtype=dtypes.int64))
 
   def test_assign_to_bitcast_view(self):
     # assign float values to a float32 view of a uint8 disk buffer (used by safe_save)

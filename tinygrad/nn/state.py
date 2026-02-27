@@ -78,7 +78,7 @@ def safe_save(tensors:dict[str, Tensor], fn:str, metadata:dict[str, Any]|None=No
   j += "\x20"*(round_up(len(j),8)-len(j))
   pathlib.Path(fn).unlink(missing_ok=True)
   t = Tensor.empty(8+len(j)+offset, dtype=dtypes.uint8, device=f"disk:{fn}")
-  t[0:8].assign(Tensor([len(j)], dtype=dtypes.int64, device="CPU").bitcast(dtypes.uint8))
+  t[0:8].bitcast(dtypes.int64).assign([len(j)])
   t[8:8+len(j)].assign(list(j.encode('utf-8')))
   for k,v in safe_load(t).items(): v.assign(tensors[k])
 
@@ -339,8 +339,8 @@ def ggml_data_to_tensor(t: Tensor, n: int, ggml_type: int) -> Tensor:
       codes = q_to_uint8(blocks[:, 1:17], 4)
       sign = 1.0 - codes.rshift(3).cast(dtypes.float32) * 2.0
       exp, mant = codes.rshift(1).bitwise_and(0x3).cast(dtypes.float32), codes.bitwise_and(0x1).cast(dtypes.float32)
-      fp4_val = sign * ((exp != 0).cast(dtypes.float32) * (1.0 + 0.5 * mant) * (exp - 1.0).exp2() +
-                        (exp == 0).cast(dtypes.float32) * 0.5 * mant)
+      fp4_val = sign * 2.0 * ((exp != 0).cast(dtypes.float32) * (1.0 + 0.5 * mant) * (exp - 1.0).exp2() +
+                              (exp == 0).cast(dtypes.float32) * 0.5 * mant)
       return (fp4_val * d).flatten(-2)[:n]
   raise ValueError(f"GGML type '{ggml_type}' is not supported!")
 

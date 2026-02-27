@@ -14,7 +14,7 @@ def rocprof_inst_traces_match(sqtt, prg, target):
   from tinygrad.viz.serve import amd_decode
   from extra.sqtt.roc import decode as roc_decode, InstExec
   addr_table = amd_decode(prg.lib, target)
-  disasm_map = {addr+prg.base:(disasm(inst), inst.size()) for addr,inst in addr_table.items()}
+  disasm_map = {addr+prg.base:inst for addr,inst in addr_table.items()}
   rctx = roc_decode([sqtt], {prg.tag:disasm_map})
   rwaves = rctx.inst_execs.get((sqtt.kern, sqtt.exec_tag), [])
   rwaves_iter:dict[int, list[Iterator[InstExec]]] = {} # wave unit (0-15) -> list of inst trace iterators for all executions on that unit
@@ -30,7 +30,7 @@ def rocprof_inst_traces_match(sqtt, prg, target):
     rocprof_inst = next(rwaves_iter[info.wave][0])
     ref_pc = rocprof_inst.pc-prg.base
     # always check pc matches
-    assert ref_pc == info.pc, f"pc mismatch {ref_pc}:{disasm_map[rocprof_inst.pc][0]} != {info.pc}:{disasm(info.inst)}"
+    assert ref_pc == info.pc, f"pc mismatch {ref_pc}:{disasm_map[rocprof_inst.pc]} != {info.pc}:{disasm(info.inst)}"
     # special handling for s_endpgm, it marks the wave completion.
     if info.inst == s_endpgm():
       completed_wave = list(rwaves_iter[info.wave].pop(0))
@@ -72,7 +72,6 @@ class TestSQTTMapBase(unittest.TestCase):
 
 class TestSQTTMapRDNA3(TestSQTTMapBase): target = "gfx1100"
 
-@unittest.skip("this doesn't work")
 class TestSQTTMapRDNA4(TestSQTTMapBase): target = "gfx1200"
 
 if __name__ == "__main__":

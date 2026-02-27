@@ -254,8 +254,8 @@ class AMDev(PCIDevImplBase):
     else: self.mmio[reg] = val
 
   def wreg_pair(self, reg_base:str, lo_suffix:str, hi_suffix:str, val:int, inst:int=0):
-    self.reg(f"{reg_base}{lo_suffix}").write(val & 0xffffffff, inst=inst)
-    self.reg(f"{reg_base}{hi_suffix}").write(val >> 32, inst=inst)
+    self.reg(f"{reg_base}{lo_suffix}").write(lo32(val), inst=inst)
+    self.reg(f"{reg_base}{hi_suffix}").write(hi32(val), inst=inst)
 
   def indirect_rreg(self, reg:int) -> int:
     self.reg("regBIF_BX_PF0_RSMU_INDEX").write(reg * 4)
@@ -268,9 +268,9 @@ class AMDev(PCIDevImplBase):
   def indirect_wreg_pcie(self, reg:int, val:int, aid:int=0):
     reg_addr = reg * 4 + ((((aid & 0b11) << 32) | (1 << 34)) if aid > 0 else 0)
     self.reg("regBIF_BX0_PCIE_INDEX2").write(lo32(reg_addr))
-    if reg_addr >> 32: self.reg("regBIF_BX0_PCIE_INDEX2_HI").write(hi32(reg_addr) & 0xff)
+    if hi32(reg_addr) > 0: self.reg("regBIF_BX0_PCIE_INDEX2_HI").write(hi32(reg_addr) & 0xff)
     self.reg("regBIF_BX0_PCIE_DATA2").write(val)
-    if reg_addr >> 32: self.reg("regBIF_BX0_PCIE_INDEX2_HI").write(0)
+    if hi32(reg_addr) > 0: self.reg("regBIF_BX0_PCIE_INDEX2_HI").write(0)
 
   def _read_vram(self, addr, size) -> bytes:
     assert addr % 4 == 0 and size % 4 == 0, f"Invalid address {addr:#x} or size {size:#x}"
@@ -314,6 +314,9 @@ class AMDev(PCIDevImplBase):
     gc_info = am.struct_gc_info_v1_0.from_address(gc_addr:=ctypes.addressof(self.bhdr) + self.bhdr.table_list[am.GC].offset)
     self.gc_info = getattr(am, f"struct_gc_info_v{gc_info.header.version_major}_{gc_info.header.version_minor}").from_address(gc_addr)
     self.reserved_vram_size = (384 << 20) if self.ip_ver[am.GC_HWIP][:2] in {(9,4), (9,5)} else (64 << 20)
+
+  @functools.cached_property
+  def hwid_names(self) -> dict[int, str]: return {v:k.removesuffix('_HWID') for k,v in vars(am).items() if k.endswith('_HWID') and isinstance(v, int)}
 
   def _ip_module(self, prefix:str, hwip, prever_prefix:str=""): return import_module(prefix, self.ip_ver[hwip], prever_prefix)
 

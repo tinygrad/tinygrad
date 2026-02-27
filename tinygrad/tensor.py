@@ -16,6 +16,7 @@ from tinygrad.uop.ops import smax, smin, resolve, UOp, Ops, sint, identity_eleme
 from tinygrad.engine.schedule import ExecItem, complete_create_schedule_with_vars
 from tinygrad.device import Device, Buffer
 from tinygrad.engine.realize import run_schedule
+from tinygrad.engine.allocations import transform_to_call
 
 # TODO: this should be the only usage of Device
 def canonicalize_device(device:str|tuple|list|None) -> str|tuple[str, ...]:
@@ -24,8 +25,7 @@ def canonicalize_device(device:str|tuple|list|None) -> str|tuple[str, ...]:
 # *** all in scope Tensors are here. this gets relevant UOps ***
 
 all_tensors: dict[weakref.ref[Tensor], None] = {}
-_pending_assigns: dict[UOp, list[UOp]] = {}  # buffer_uop -> [assign_uops in insertion order]
-def _apply_map_to_tensors(applied_map:dict[UOp, UOp], name:str) -> None:
+def _apply_map_to_tensors(applied_map:dict[UOp, UOp], name:str, walk:bool=False) -> None:
   with cpu_profile(TracingKey(name), "TINY"):
     # get tensors in scope
     in_scope: dict[UOp, bool] = {}
@@ -34,7 +34,7 @@ def _apply_map_to_tensors(applied_map:dict[UOp, UOp], name:str) -> None:
 
     # get all Tensors and apply the map
     sink = UOp.sink(*[t.uop for t in scope_tensors])
-    new_sink = sink.substitute(applied_map, name=f"substitute {name}")
+    new_sink = sink.substitute(applied_map, name=f"substitute {name}", walk=walk)
 
     # set the relevant uop to the realized UOps
     for t,s,ns in zip(scope_tensors, sink.src, new_sink.src):
@@ -249,17 +249,23 @@ class Tensor(OpMixin):
     """
     return [Tensor(u, device=u.device) for u in UOp.custom_kernel(*[t.uop for t in (self,)+lst], fxn=fxn, grad_fxn=grad_fxn)]
 
+  def callify(self, *lst:Tensor) -> Tensor:
+    big_sink = UOp.sink(*[x.uop for x in (self,)+lst])
+    big_sink, buffer_map = transform_to_call(big_sink)
+    _apply_map_to_tensors({x:y.after(big_sink) for x,y in buffer_map.items()}, name="callify")
+    return self
+
   def schedule_with_vars(self, *lst:Tensor) -> tuple[list[ExecItem], dict[str, int]]:
     """
     Creates the schedule needed to realize these Tensor(s), with Variables.
 
     NOTE: A Tensor can only be scheduled once.
     """
-    big_sink = UOp.sink(*[x.uop for x in (self,)+lst])
+    big_sink, becomes_map = transform_to_call(UOp.sink(*[x.uop for x in (self,)+lst]))
+    _apply_map_to_tensors(becomes_map, name="buffers")
 
     # this is where the schedule cache should go
-    becomes_map, schedule, var_vals = complete_create_schedule_with_vars(big_sink)
-    _apply_map_to_tensors(becomes_map, name="Apply Schedule Map")
+    schedule, var_vals = complete_create_schedule_with_vars(big_sink)
     return schedule, var_vals
 
   def schedule(self, *lst:Tensor) -> list[ExecItem]:
@@ -271,22 +277,6 @@ class Tensor(OpMixin):
   @disable_gc()
   def realize(self, *lst:Tensor, do_update_stats=True) -> Tensor:
     """Triggers the computation needed to create these Tensor(s)."""
-    # side-realize pending assigns for buffers referenced by these tensors
-    if _pending_assigns:
-      def _realize_pending(buf):
-        for assign_uop in _pending_assigns.pop(buf, []):
-          # recursively realize pending assigns that this assign's value depends on
-          for u in assign_uop.toposort():
-            if u.op is Ops.BUFFER and u in _pending_assigns: _realize_pending(u)
-          becomes_map, schedule, var_vals = complete_create_schedule_with_vars(UOp.sink(assign_uop))
-          _apply_map_to_tensors(becomes_map, name="Apply Pending Assign")
-          run_schedule(schedule, var_vals, do_update_stats=do_update_stats)
-          # update remaining pending assigns so they reference realized buffers instead of stale lazy graphs
-          if becomes_map:
-            for assigns in _pending_assigns.values():
-              for i in range(len(assigns)): assigns[i] = assigns[i].substitute(becomes_map)
-      for buf in {u for t in (self,)+lst for u in t.uop.toposort() if u.op is Ops.BUFFER}:
-        if buf in _pending_assigns: _realize_pending(buf)
     if len(to_realize:=[x for x in (self,)+lst if not x.uop.has_buffer_identity()]):
       run_schedule(*Tensor.schedule_with_vars(*to_realize), do_update_stats=do_update_stats)
     return self
@@ -308,20 +298,20 @@ class Tensor(OpMixin):
     if self.shape != x.shape: x = x._broadcast_to(self.shape)
     if self.shape != x.shape: raise RuntimeError(f"assign shape mismatch {self.shape} != {x.shape}")
     if not is_disk and self.device != x.device: raise RuntimeError(f"assign device mismatch {self.device} != {x.device}")
-    if self.dtype != x.dtype: raise RuntimeError(f"assign dtype mismatch {self.dtype} != {x.dtype}")
+    if not is_disk and self.dtype != x.dtype: raise RuntimeError(f"assign dtype mismatch {self.dtype} != {x.dtype}")
     if isinstance(self.device, tuple) and self.uop.axis != x.uop.axis: raise RuntimeError(f"multi axis mismatch {self.uop.axis} != {x.uop.axis}")
 
     # TODO: this is a hack for writing to DISK. remove with working assign
     if is_disk:
       self._buffer().copyin(x._data())
       return self
-    result = self._apply_uop(UOp.assign, x)
-    # track view assigns (not full-buffer or assign-chain) so they can be side-realized when the buffer is read
-    if (buf_uop:=self.uop.base).op is Ops.BUFFER and self.uop.op is not Ops.ASSIGN and not self.uop.has_buffer_identity():
-      # deduplicate: if the value is already a pending assign for this buffer (e.g. __iadd__ in __setitem__), remove it
-      if x.uop in _pending_assigns.get(buf_uop, []): _pending_assigns[buf_uop].remove(x.uop)
-      _pending_assigns.setdefault(buf_uop, []).append(result.uop)
-    return self.replace(result)
+    # NOTE: assign_uop is created before AFTER embedding (uses original self.uop),
+    # but AFTER must be embedded before _apply_uop (so subsequent assigns see it)
+    assign_uop = self.uop.assign(x.uop)
+    base = self.uop.base
+    if base.op in {Ops.BUFFER, Ops.AFTER} and not self.uop.has_buffer_identity():
+      _apply_map_to_tensors({base: base.after(assign_uop)}, name="Embed View Assign", walk=True)
+    return self.replace(self._apply_uop(lambda *_: assign_uop, x))
 
   def detach(self) -> Tensor:
     """
@@ -336,7 +326,7 @@ class Tensor(OpMixin):
       raise JitError("cannot access tensor data during JIT capture, the value will be baked in")
     x = self.cast(self.dtype.base).contiguous()
     if isinstance(self.device, tuple): x = x.to("CPU")
-    return cast(Buffer, x.realize().uop.base.buffer).ensure_allocated()
+    return cast(Buffer, x.realize().uop.buffer).ensure_allocated()
   def _data(self) -> memoryview: return self._buffer().as_memoryview()
 
   def data(self) -> memoryview:
@@ -404,7 +394,7 @@ class Tensor(OpMixin):
     """
     Creates a clone of this tensor allocating a separate buffer for the data.
     """
-    ret = Tensor.empty(self.shape, device=self.device, dtype=self.dtype)
+    ret = self.empty_like()
     if self.grad is not None: ret.grad = self.grad.clone()
     return ret.assign(self)
 
@@ -537,12 +527,15 @@ class Tensor(OpMixin):
     device = canonicalize_device(device)
     return Tensor(UOp.new_buffer(device, size, dtype), device, dtype, **kwargs).shrink(((0,prod(shape)),)).reshape(shape)
 
-  def empty_like(self, **kwargs) -> Tensor:
+  def empty_like(self, dtype:DTypeLike|None=None, device:str|tuple[str, ...]|None=None, **kwargs) -> Tensor:
     """
     Creates an empty tensor with the same shape as `self`.
     If `dtype` is not specified, the dtype of `self` is used.
     """
-    return Tensor.empty(self.shape, dtype=kwargs.pop("dtype", self.dtype), device=kwargs.pop("device", self.device), **kwargs)
+    dtype, device = self.dtype if dtype is None else dtype, self.device if device is None else device
+    if isinstance(device, tuple) and (axis := self.uop.axis) is not None:
+      return Tensor(Tensor.empty(self.uop.max_shard_shape, dtype=dtype, device=device, **kwargs).uop.multi(axis), device=device)
+    return Tensor.empty(self.shape, dtype=dtype, device=device, **kwargs)
 
   @staticmethod
   def from_blob(ptr:int, shape:tuple[int, ...], **kwargs) -> Tensor:
@@ -628,7 +621,7 @@ class Tensor(OpMixin):
       Tensor._device_seeds[device] = Tensor(
         [int.from_bytes(hashlib.sha256(len(Tensor._device_seeds).to_bytes(4, "big")).digest(), "big"), Tensor._seed],
         device=device, dtype=dtypes.uint32, requires_grad=False)
-      Tensor._device_rng_counters[device] = Tensor([num], device=device, dtype=dtypes.uint32, requires_grad=False)
+      Tensor._device_rng_counters[device] = Tensor([num], device=device, dtype=dtypes.uint32, requires_grad=False).contiguous()
     # increment rng counter for devices
     else: Tensor._device_rng_counters[device].assign(Tensor._device_rng_counters[device] + num)
 
@@ -1075,6 +1068,34 @@ class Tensor(OpMixin):
 
   def _mop(self, op:Ops, arg) -> Tensor: return self._apply_uop(UOp._mop, extra_args=(op,), arg=arg)
 
+  def _pad_constant(self, pX:tuple[tuple[sint, sint], ...], value:float) -> Tensor:
+    # shrink first for negative pads, then pad with only non-negative values
+    has_neg = not all(resolve(p >= 0) for p in flatten(pX))
+    X = self.shrink(tuple((-smin(pB,0),smin(pA+s,s)) for (pB,pA),s in zip(pX, self.shape))) if has_neg else self
+    pads = tuple((smax(pB,0), smax(pA,0)) for pB,pA in pX) if has_neg else pX
+    if value == 0: return X._apply_uop(UOp.pad, arg=pads)
+    return X._apply_uop(UOp.pad, arg=pads) + Tensor.ones_like(X)._apply_uop(UOp.pad, arg=pads).where(0, value)
+
+  def _pad_circular(self, pX:tuple[tuple[sint, sint], ...]) -> Tensor:
+    if any(pB>sh or pA>sh for (pB,pA),sh in zip(pX, self.shape)): raise ValueError('Padding value causes wrapping around more than once.')
+    if any(pB<0 or pA<0 for pB,pA in pX): raise NotImplementedError("Negative pads with circular pads is not supported")
+    orig_shape, X = self.shape, self.repeat(tuple(1 + bool(pB) + bool(pA) for pB,pA in pX))
+    return X.shrink(tuple((0 if pB == 0 else osh-pB, xsh if pA == 0 else xsh-osh+pA) for (pB,pA),osh,xsh in zip(pX, orig_shape, X.shape)))
+
+  def _pad_reflect_replicate(self, pX:tuple[tuple[sint, sint], ...], mode:str) -> Tensor:
+    X, pads = self, tuple((smax(pB,0), smax(pA,0)) for pB,pA in pX)
+    for d,(pB,pA) in enumerate(pads):
+      if mode == "reflect":
+        if pB >= (s:=X.shape[d]) or pA>=s: raise ValueError(f"Padding ({pB}, {pA}) should be less than the input size={s} for dim={d}.")
+        slcB, slcA = slice(pB,0,-1), slice(s-2 if s-2>=0 else None, s-2-pA if s-2-pA>=0 else None, -1)
+        xB, xA = (X[[slc if i == d else slice(None) for i in range(X.ndim)]] if p > 0 else None for slc, p in ((slcB, pB), (slcA, pA)))
+      else:
+        shrB, shrA = tuple((0,1) if i==d else None for i in range(X.ndim)), tuple((X.shape[i]-1,X.shape[i]) if i==d else None for i in range(X.ndim))
+        xB, xA = (X.shrink(shr).expand(tuple(p if i==d else None for i in range(X.ndim))) if p > 0 else None for shr, p in ((shrB, pB), (shrA, pA)))
+      X = Tensor.cat(*(X_ for X_ in (xB, X, xA) if X_ is not None), dim=d)
+    # shrink after for negative pads (reflection/replication must see full data first)
+    return X.shrink(tuple((-min(pB,0), min(pA+s,s)) for (pB,pA),s in zip(pX, X.shape)))
+
   def pad(self, padding:Sequence[sint]|Sequence[tuple[sint, sint]|None], mode:str="constant", value:float=0.0) -> Tensor:
     """
     Returns a tensor with padding applied based on the input `padding`.
@@ -1107,36 +1128,18 @@ class Tensor(OpMixin):
     print(t.pad((1, 2, 0, -1), value=-float('inf')).numpy())
     ```
     """
-    if mode not in {"constant", "reflect", "replicate", "circular"}: raise NotImplementedError(f"{mode=} is not supported")
-    # flat padding
+    # normalize to grouped format
     if all(isinstance(p, (int,UOp)) for p in padding):
       if len(padding)%2 != 0: raise ValueError("Flat padding must have even number of pads")
       pX = _flat_to_grouped(tuple(cast(Sequence[sint], padding)) + (0,0)*(self.ndim - len(padding)//2))
-    # group padding
     else: pX = tuple((0,0) if p is None else p for p in cast(Sequence[tuple[sint, sint]|None], padding))
     if len(pX) != self.ndim: raise ValueError(f"padding length is improper, {padding=} {self.ndim=}")
-    X, pads = self, tuple((smax(pB,0), smax(pA,0)) for pB,pA in pX)
-    if mode == "constant":
-      def _constant(x:Tensor,px,v) -> Tensor:
-        return x._apply_uop(UOp.pad, arg=px) if v == 0 else (x._apply_uop(UOp.pad, arg=px)+Tensor.ones_like(x)._apply_uop(UOp.pad, arg=px).where(0,v))
-      return _constant(X, pX, value) if all(resolve(p >= 0) for p in flatten(pX)) else \
-             _constant(X.shrink(tuple((-smin(pB,0),smin(pA+s,s)) for (pB,pA),s in zip(pX, X.shape))), pads, value)
+    # dispatch
+    if mode == "constant": return self._pad_constant(pX, value)
     assert all_int(self.shape), f"does not support symbolic shape {self.shape}"
-    if mode == "circular":
-      if any(pB>sh or pA>sh for (pB,pA),sh in zip(pX, X.shape)): raise ValueError('Padding value causes wrapping around more than once.')
-      if any(pB<0 or pA<0 for pB,pA in pX): raise NotImplementedError("Negative pads with circular pads is not supported")
-      orig_shape, X = X.shape, X.repeat(tuple(1 + bool(pB) + bool(pA) for pB,pA in pads))
-      return X.shrink(tuple((0 if pB == 0 else osh-pB, xsh if pA == 0 else xsh-osh+pA) for (pB,pA),osh,xsh in zip(pads, orig_shape, X.shape)))
-    for d,(pB,pA) in enumerate(pads):
-      if mode == "reflect":
-        if pB >= (s:=X.shape[d]) or pA>=s: raise ValueError(f"Padding ({pB}, {pA}) should be less than the input size={s} for dim={d}.")
-        slcB, slcA, = slice(pB,0,-1), slice(s-2 if s-2>=0 else None, s-2-pA if s-2-pA>=0 else None, -1)
-        xB, xA = (X[[slc if i == d else slice(None) for i in range(X.ndim)]] if p > 0 else None for slc, p in ((slcB, pB), (slcA, pA)))
-      if mode == "replicate":
-        shrB, shrA, = tuple((0,1) if i==d else None for i in range(X.ndim)), tuple((X.shape[i]-1,X.shape[i]) if i==d else None for i in range(X.ndim))
-        xB, xA = (X.shrink(shr).expand(tuple(p if i==d else None for i in range(X.ndim))) if p > 0 else None for shr, p in ((shrB, pB), (shrA, pA)))
-      X = Tensor.cat(*(X_ for X_ in (xB, X, xA) if X_ is not None), dim=d)
-    return X.shrink(tuple((-min(pB,0), min(pA+s,s)) for (pB,pA),s in zip(pX, X.shape)))
+    if mode == "circular": return self._pad_circular(pX)
+    if mode in {"reflect", "replicate"}: return self._pad_reflect_replicate(pX, mode)
+    raise NotImplementedError(f"{mode=} is not supported")
 
   # convenience
   def pad_to(self, shape, *args):
@@ -1330,8 +1333,10 @@ class Tensor(OpMixin):
       if is_disk: raise RuntimeError("advanced setitem is not supported for DISK tensors")
       if not isinstance(v, Tensor): v = Tensor(v, device=self.device, dtype=self.dtype)
       self.assign(self._getitem(indices, v))
-    elif is_disk or self.uop.is_realized: # basic setitem, self is realized. TODO: disk uop.base is a COPY and not realized
-      self[indices].assign(v)
+    elif is_disk or self.uop.is_realized or self.uop.base.op is Ops.AFTER: # basic setitem, self is realized
+      view = self[indices]
+      if isinstance(v, Tensor) and v.uop.op is Ops.ASSIGN and v.uop in view.uop.base.src: return
+      view.assign(v)
     else: # basic setitem, self is not realized
       if not isinstance(v, Tensor): v = Tensor(v, device=self.device, dtype=self.dtype)
       # __iadd__/__isub__ on unrealized views creates a no-op ASSIGN; unwrap to get the computed value
@@ -3548,10 +3553,7 @@ class Tensor(OpMixin):
 
   def bitcast(self, dtype:DTypeLike) -> Tensor:
     """
-    Bitcasts `self` to the given `dtype`.
-
-    When the target dtype has the same itemsize, this is a view of the same memory.
-    When itemsizes differ, the last dimension is adjusted and a new Tensor is created.
+    Bitcasts `self` to the given `dtype` of the same itemsize.
 
     `self` must not require a gradient.
 

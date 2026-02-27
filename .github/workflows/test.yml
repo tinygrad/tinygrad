@@ -1,7 +1,7 @@
 name: Unit Tests
 env:
   # increment this when downloads substantially change to avoid the internet
-  CACHE_VERSION: '16'
+  CACHE_VERSION: '17'
   CAPTURE_PROCESS_REPLAY: 1
   GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   PYTHONPATH: ${{ github.workspace }}
@@ -649,10 +649,8 @@ jobs:
         run: AMD_LLVM=0 python -m pytest -n=auto test/amd/ --durations 20
       - name: Run AMD renderer tests (AMD_LLVM=1)
         run: AMD_LLVM=1 python -m pytest -n=auto test/amd/ --durations 20
-      - name: Run TestOps.test_add with SQTT
-        run: |
-          VIZ=-2 DEBUG=5 python3 test/backend/test_ops.py TestOps.test_add
-          extra/sqtt/rgptool.py create "/tmp/profile.pkl.$USER" -o /tmp/gpu0.rgp
+      - name: Run SQTT profiling tests
+        run: PROFILE=1 SQTT=1 python3 -m pytest -n=auto test/amd/test_sqtt_profiler.py
       - name: Run AMD emulated tests on NULL backend
         env:
           AMD: 0
@@ -663,6 +661,30 @@ jobs:
         run: PYTHONPATH="." AMD=1 MOCKGPU=1 N=256 python3 extra/gemm/amd_asm_matmul.py
       - name: Run LLVM test
         run: AMD_LLVM=1 python test/device/test_amd_llvm.py
+
+  testmockam:
+    name: Linux (am)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      AMD: 1
+      MOCKGPU: 1
+      AMD_IFACE: PCI
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+      - name: Setup Environment
+        uses: ./.github/actions/setup-tinygrad
+        with:
+          key: mockam
+          deps: testing_unit
+          amd: 'true'
+      - name: Run test_tiny on MOCKAM
+        run: python test/test_tiny.py
+      - name: Run test_tiny on MOCKAM USB
+        run: AMD_IFACE=USB python test/test_tiny.py
+      - name: Run test_hcq on MOCKAM
+        run: python -m pytest test/device/test_hcq.py
 
   testamd:
     strategy:
@@ -802,6 +824,8 @@ jobs:
       run: METAL=1 DEBUG=3 python test/backend/test_ops.py TestOps.test_big_gemm
     - name: Test Beam Search
       run: METAL=1 IGNORE_BEAM_CACHE=1 python3 -m pytest extra/optimization/test_beam_search.py
+    - name: Test Device Specific
+      run: METAL=1 python3 -m pytest test/device/test_metal.py
     #- name: Fuzz Test linearizer
     #  run: METAL=1 DEPTH=4 FUZZ_N=50 FUZZ_MAX_SIZE=1000000 python test/external/fuzz_linearizer.py
     - name: Run TRANSCENDENTAL math

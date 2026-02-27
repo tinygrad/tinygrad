@@ -97,9 +97,6 @@ base_rewrite = PatternMatcher([
                                                             f", {ldt(u.dtype)} {ctx[u]}, i32 {i}" for i,u in enumerate(x.src)])),
   # unary/binary/ternary ops
   (UPat(Ops.BITCAST, name="x"), lambda ctx,x: f"  {ctx[x]} = bitcast {ldt(x.src[0].dtype)} {ctx[x.src[0]]} to {ldt(x.dtype)}"),
-  # rewrite cast to bool to CMPNE 0
-  (UPat(Ops.CAST, name="x", dtype=dtypes.bool),
-   lambda ctx,x: f"  {ctx[x]} = {lop[x.src[0].dtype.scalar()][Ops.CMPNE]} {ldt(x.src[0].dtype)} {ctx[x.src[0]]}, zeroinitializer"),
   (UPat(Ops.CAST, name="x"), lambda ctx,x: f"  {ctx[x]} = {lcast(x.src[0].dtype, x.dtype)} {ldt(x.src[0].dtype)} {ctx[x.src[0]]} to {ldt(x.dtype)}"),
   (UPat(Ops.TRUNC, name="x"),
    lambda ctx,x: f"  {ctx[x]} = call {ldt(x.dtype)} @llvm.trunc.{ldt(x.dtype.scalar())}({ldt(x.src[0].dtype)} {ctx[x.src[0]]})"),
@@ -169,7 +166,7 @@ class LLVMRenderer(Renderer):
         if u.arg is not None: name = u.arg.function_name
         continue
       if u.op in (Ops.PARAM, Ops.DEFINE_VAR):
-        r[u] = f"%data{u.arg}" if u.op is Ops.PARAM else f"%{u.arg[0]}"
+        r[u] = f"%data{u.arg}" if u.op is Ops.PARAM else f"%{u.expr}"
         args.append((r[u], u.dtype))
       elif u.op in (Ops.DEFINE_LOCAL, Ops.DEFINE_REG):
         r[u] = f"%{'local' if u.op is Ops.DEFINE_LOCAL else 'reg'}_{str(u.arg).replace('(', '').replace(')', '').replace(',', '_').replace(' ', '')}"

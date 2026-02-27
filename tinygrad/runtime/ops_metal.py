@@ -156,7 +156,7 @@ class MetalAllocator(LRUAllocator[MetalDevice]):
     return MetalBuffer(ret, size)
   @suppress_finalizing
   def _free(self, opaque:MetalBuffer, options):
-    if not options.external_ptr: opaque.buf.release
+    if not options.external_ptr: opaque.buf.release()
   def _transfer(self, dest:MetalBuffer, src:MetalBuffer, sz:int, src_dev:MetalDevice, dest_dev:MetalDevice):
     dest_dev.synchronize()
     src_command_buffer = src_dev.mtl_queue.commandBuffer().retained()

@@ -45,7 +45,7 @@ class AMDSignal(HCQSignal):
 
   def _sleep(self, time_spent_since_last_sleep_ms:int):
     # Reasonable to sleep for long workloads (which take more than 200ms) and only timeline signals.
-    if time_spent_since_last_sleep_ms > 200 and self.is_timeline and self.owner is not None: self.owner.iface.sleep(200)
+    if time_spent_since_last_sleep_ms > 200 and self.owner is not None: self.owner.iface.sleep(200)
 
 class AMDComputeQueue(HWQueue):
   def __init__(self, dev:AMDDevice):
@@ -605,7 +605,7 @@ class AMDProgram(HCQProgram):
       cast(AMDComputeQueue, self.dev.hw_compute_queue_t()).pmc_read(self.dev.pmc_buffer, self.dev.pmc_sched) \
                                                           .signal(self.dev.timeline_signal, self.dev.next_timeline()).submit(self.dev)
       self.dev.allocator._copyout(pmc_buf:=memoryview(bytearray(self.dev.pmc_buffer.size)), self.dev.pmc_buffer)
-      Compiled.profile_events += [ProfilePMCEvent(self.dev.device, self.dev.prof_prg_counter, self.dev.pmc_sched, bytes(pmc_buf),
+      Compiled.profile_events += [ProfilePMCEvent(self.dev.device, self.prof_prg_counter, self.dev.pmc_sched, bytes(pmc_buf),
                                                   self.dev.prof_exec_counter)]
     if self.dev.sqtt_enabled:
       cast(AMDComputeQueue, self.dev.hw_compute_queue_t()).sqtt_stop(self.dev.sqtt_wptrs) \
@@ -625,7 +625,7 @@ class AMDProgram(HCQProgram):
 
         self.dev.allocator._copyout(sqtt_mv:=memoryview(bytearray(wptr)), buf)
         resbuf = (struct.pack('<Q', 0x11 | (4 << 13) | (0xf << 16) | (se << 24)) + bytes(sqtt_mv)) if self.dev.target[0] == 9 else bytes(sqtt_mv)
-        Compiled.profile_events += [ProfileSQTTEvent(self.dev.device, self.dev.prof_prg_counter, se, resbuf,
+        Compiled.profile_events += [ProfileSQTTEvent(self.dev.device, self.prof_prg_counter, se, resbuf,
                                                      bool((SQTT_ITRACE_SE_MASK.value >> se) & 1), self.dev.prof_exec_counter)]
     return res
 
@@ -865,23 +865,25 @@ class PCIIface(PCIIfaceBase):
     return AMDQueueDesc(ring=ring.cpu_view().view(fmt='I'), doorbell=self.dev_impl.doorbell64.view(doorbell_index * 8, 8, fmt='Q'), put_value=pv,
       read_ptr=gart.cpu_view().view(offset=rptr, size=8, fmt='Q'), write_ptr=gart.cpu_view().view(offset=wptr, size=8, fmt='Q'), params=rcvr_params)
 
-  def sleep(self, timeout):
-    if hasattr(self.pci_dev, 'irq_poller') and self.pci_dev.irq_poller is not None and (events_cnt:=len(self.pci_dev.irq_poller.poll(timeout))):
-      self.pci_dev.irq_fd.read(8 * events_cnt)
-    self.dev_impl.ih.interrupt_handler()
-    if self.dev_impl.is_err_state: raise RuntimeError("Device is in error state")
-
-  def on_device_hang(self):
+  def _collect_faults(self, reset=False):
     devs:list[AMDDevice] = [d for pg in HCQCompiled.peer_groups.values() for d in pg if isinstance(d, AMDDevice) and d.is_am()]
-    for d in devs: d.iface.dev_impl.ih.interrupt_handler()
-    faults = [f for d in devs if (f:=d.iface.dev_impl.gmc.check_fault())]
     for d in devs:
-      if d.iface.dev_impl.recover():
+      d.iface.dev_impl.ih.interrupt_handler()
+      if reset and d.iface.dev_impl.recover():
         d.compute_queue.put_value, _ = d.iface.dev_impl.gfx.setup_ring(*d.compute_queue.params)
         d.compute_queue.read_ptr[0] = d.compute_queue.write_ptr[0] = d.compute_queue.put_value
         d.timeline_signal.value = d.timeline_value - 1
         d.error_state = None
-    raise RuntimeError(f"Device hang detected: {'; '.join(faults)}" if faults else "Device hang detected")
+
+  def sleep(self, timeout):
+    if hasattr(self.pci_dev, 'irq_poller') and self.pci_dev.irq_poller is not None and (events_cnt:=len(self.pci_dev.irq_poller.poll(timeout))):
+      self.pci_dev.irq_fd.read(8 * events_cnt)
+    self._collect_faults()
+    if self.dev_impl.is_err_state: raise RuntimeError("Device is in error state")
+
+  def on_device_hang(self):
+    self._collect_faults(reset=True)
+    raise RuntimeError("Device hang detected")
 
   def device_fini(self): self.dev_impl.fini()
 

@@ -8,7 +8,8 @@ from tinygrad.tensor import _to_np_dtype
 from tinygrad.device import is_dtype_supported
 from tinygrad.renderer.nir import NIRRenderer
 
-if getenv("TINY_BACKEND"):
+TINY_BACKEND = getenv("TINY_BACKEND")
+if TINY_BACKEND:
   import tinygrad.nn.torch # noqa: F401 # pylint: disable=unused-import
   torch.set_default_device("tiny")
 
@@ -418,7 +419,6 @@ class TestOps(unittest.TestCase):
     helper_test_op(None, lambda x: x.round(), vals=[[1.499, 1.5, 1.501, 1.0, 2.1, 0.0, -5.0, -2.499, -2.5, -2.501]], forward_only=True)
     helper_test_op(None, lambda x: x.round(), vals=[[2.5, -1.5]], forward_only=True)
 
-  @unittest.skipIf(Device.DEFAULT == "WEBGPU" and CI, "isinf check of 'nan' fails on CI software-based vulkan")
   def test_isinf(self):
     val = [float('-inf'), 0., float('inf'), float('nan'), 1.1]
     helper_test_op(None, torch.isinf, Tensor.isinf, vals=[val], forward_only=True)
@@ -640,8 +640,6 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45,65), (45,65)], lambda x,y: x**y)
     helper_test_op([(45,65), (45,65)], lambda x,y: x.pow(y))
 
-  # TODO: WEBGPU NaN handling in pow operations
-  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "WEBGPU NaN handling differs")
   def test_pow(self):
     helper_test_op([(45,65)], lambda x: x**0)
     helper_test_op([(45,65)], lambda x: x**1)
@@ -760,6 +758,7 @@ class TestOps(unittest.TestCase):
     data = [[1,-8,1],[32,1,6]]
     tor = torch.tensor(data, dtype=torch.int)
     ten = Tensor(data, dtype=dtypes.int32)
+    # NOTE: this breaks assigns because it's folded to 0!
     helper_test_op([], lambda: tor^tor, lambda: ten^ten, forward_only=True)
     helper_test_op([], lambda: tor^0x1337, lambda: ten^0x1337, forward_only=True)
     helper_test_op([], lambda: 0x1337^tor, lambda: 0x1337^ten, forward_only=True)
@@ -1543,7 +1542,6 @@ class TestOps(unittest.TestCase):
     helper_test_op([(3, 4, 5, 6)], lambda x: x.isclose(x + 1e-9, rtol=0.01), forward_only=True)
     helper_test_op(None, lambda x,y: x.isclose(y), vals=[[1e-7, 1e-8, 1e-9], [0.0, 0.0, 0.0]], forward_only=True)
 
-  @unittest.skipIf(Device.DEFAULT == "WEBGPU" and CI, "isinf check of 'nan' fails on CI software-based vulkan")
   def test_isclose_edge_cases(self):
     for a in [math.inf, -math.inf, math.nan, 0.0]:
       for b in [math.inf, -math.inf, math.nan, 0.0]:

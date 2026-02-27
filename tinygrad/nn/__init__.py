@@ -2,7 +2,6 @@ from __future__ import annotations
 import math
 from tinygrad.tensor import Tensor
 from tinygrad.dtype import dtypes
-from tinygrad.device import is_dtype_supported
 from tinygrad.helpers import prod, make_tuple, flatten, USE_ATOMICS
 from tinygrad.nn import optim, state, datasets  # noqa: F401
 
@@ -36,7 +35,7 @@ class BatchNorm:
     self.weight: Tensor|None = Tensor.ones(sz) if affine else None
     self.bias: Tensor|None = Tensor.zeros(sz) if affine else None
 
-    self.num_batches_tracked = Tensor.zeros(dtype='long' if is_dtype_supported(dtypes.long) else 'int', requires_grad=False)
+    self.num_batches_tracked = Tensor.zeros(dtype='long', requires_grad=False)
     if track_running_stats: self.running_mean, self.running_var = Tensor.zeros(sz, requires_grad=False), Tensor.ones(sz, requires_grad=False)
 
   def calc_stats(self, x:Tensor) -> tuple[Tensor, Tensor]:

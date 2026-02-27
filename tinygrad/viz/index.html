@@ -76,7 +76,7 @@
     pointer-events: none;
   }
   label {
-    display: inline-flex;
+    display: flex;
     align-items: center;
     gap: 4px;
     line-height: 1;
@@ -102,6 +102,14 @@
     fill: #FFD700;
     stroke: #B8860B;
   }
+  g.tag.collapsed circle {
+    fill: #5CD68D;
+    stroke: #4a4b57;
+  }
+  g.tag.expanded circle {
+    fill: #9FDDE6;
+    stroke: #4a4b57;
+  }
   g.port circle {
     fill: #b3dcc2;
   }
@@ -109,6 +117,7 @@
     stroke-width: 0.8;
   }
   g.tag text, #edge-labels text {
+    font-family: monospace;
     text-anchor: middle;
     font-size: 6px;
     fill: #08090e;

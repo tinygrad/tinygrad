@@ -127,7 +127,7 @@ class PM4Executor(AMDQueue):
     val = val_lo + (val_hi << 32)
     _ = self._next_dword() # ev
 
-    ptr = to_mv(addr_lo + (addr_hi << 32), 8)
+    ptr = to_mv(self.gpu.translate_addr(addr_lo + (addr_hi << 32)), 8)
     if mem_data_sel == 1 or mem_data_sel == 2: ptr.cast('Q')[0] = val
     elif mem_data_sel == 3:
       if mem_event_type == CACHE_FLUSH_AND_INV_TS_EVENT: ptr.cast('Q')[0] = int(time.perf_counter() * 1e8)
@@ -143,7 +143,7 @@ class PM4Executor(AMDQueue):
     dst_addr_lo = self._next_dword()
     dst_addr_hi = self._next_dword()
     assert copy_data_flags in {0x100204, 0x000204}, hex(copy_data_flags) # better fail than silently do the wrong thing
-    to_mv(dst_addr_hi<<32|dst_addr_lo, 4).cast('I')[0] = self.gpu.regs[src_addr_lo]
+    to_mv(self.gpu.translate_addr(dst_addr_hi<<32|dst_addr_lo), 4).cast('I')[0] = self.gpu.regs[src_addr_lo]
 
   def _exec_wait_reg_mem(self, n):
     assert n == 5
@@ -161,7 +161,7 @@ class PM4Executor(AMDQueue):
 
     if mem_space == 0 and mem_op == 1: mval = val # hack for memory barrier, should properly handle (req_req, reg_done)
     elif mem_space == 0: mval = self.gpu.regs[addr_hi<<32|addr_lo]
-    elif mem_space == 1: mval = to_mv(addr_lo + (addr_hi << 32), 4).cast('I')[0]
+    elif mem_space == 1: mval = to_mv(self.gpu.translate_addr(addr_lo + (addr_hi << 32)), 4).cast('I')[0]
 
     mval &= mask
 
@@ -225,7 +225,7 @@ class PM4Executor(AMDQueue):
     wptr = memoryview(bytearray(8)).cast('Q')
     rptr[0] = 0
     wptr[0] = buf_sz
-    self.ib_executor = PM4Executor(self.gpu, (addr_hi << 32) | addr_lo, buf_sz * 4, rptr, wptr)
+    self.ib_executor = PM4Executor(self.gpu, self.gpu.translate_addr((addr_hi << 32) | addr_lo), buf_sz * 4, rptr, wptr)
 
   def _exec_event_write(self, n):
     assert n == 0
@@ -276,7 +276,7 @@ class SDMAExecutor(AMDQueue):
 
   def _execute_fence(self):
     struct = sdma_pkts.fence.from_address(self.base + self.rptr[0] % self.size)
-    to_mv(struct.addr, 8).cast('Q')[0] = struct.data
+    to_mv(self.gpu.translate_addr(struct.addr), 8).cast('Q')[0] = struct.data
     self.rptr[0] += ctypes.sizeof(struct)
 
   def _execute_trap(self):
@@ -287,7 +287,7 @@ class SDMAExecutor(AMDQueue):
     struct = sdma_pkts.poll_regmem.from_address(self.base + self.rptr[0] % self.size)
 
     if struct.mem_poll == 0: mval = struct.value & struct.mask
-    elif struct.mem_poll == 1: mval = to_mv(struct.addr, 4).cast('I')[0] & struct.mask
+    elif struct.mem_poll == 1: mval = to_mv(self.gpu.translate_addr(struct.addr), 4).cast('I')[0] & struct.mask
 
     if struct.func == WAIT_REG_MEM_FUNCTION_GEQ: can_cont = bool(mval >= struct.value)
     elif struct.func == WAIT_REG_MEM_FUNCTION_EQ: can_cont = bool(mval == struct.value)
@@ -302,7 +302,7 @@ class SDMAExecutor(AMDQueue):
   def _execute_timestamp(self):
     struct = sdma_pkts.timestamp.from_address(self.base + self.rptr[0] % self.size)
 
-    mem = to_mv(struct.addr, 8).cast('Q')
+    mem = to_mv(self.gpu.translate_addr(struct.addr), 8).cast('Q')
     mem[0] = int(time.perf_counter() * 1e8)
 
     self.rptr[0] += ctypes.sizeof(struct)
@@ -313,8 +313,8 @@ class SDMAExecutor(AMDQueue):
 
   def _execute_copy(self):
     struct = sdma_pkts.copy_linear.from_address(self.base + self.rptr[0] % self.size)
-    count_cnt = to_mv(self.base + self.rptr[0] + 4, 4).cast('I')[0] & 0x3FFFFFFF
-    ctypes.memmove(struct.dst_addr, struct.src_addr, count_cnt + 1)
+    count_cnt = to_mv(self.base + self.rptr[0] % self.size + 4, 4).cast('I')[0] & 0x3FFFFFFF
+    ctypes.memmove(self.gpu.translate_addr(struct.dst_addr), self.gpu.translate_addr(struct.src_addr), count_cnt + 1)
     self.rptr[0] += ctypes.sizeof(struct)
 
 class AMDGPURegisters:
@@ -343,6 +343,7 @@ class AMDGPU(VirtGPU):
     self.queues = []
     self.arch = "cdna" if MOCKGPU_ARCH == "cdna4" else MOCKGPU_ARCH
 
+  def translate_addr(self, addr:int) -> int: return addr
   def map_range(self, vaddr, size): self.mapped_ranges.add((vaddr, size))
   def unmap_range(self, vaddr, size): self.mapped_ranges.remove((vaddr, size))
   def add_pm4_queue(self, base, size, rptr, wptr):
