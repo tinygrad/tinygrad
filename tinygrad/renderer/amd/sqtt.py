@@ -46,6 +46,7 @@ class InstOp(Enum):
   SMEM = 0x1
   JUMP = 0x3              # branch taken
   JUMP_NO = 0x4           # branch not taken
+  CALL = 0x5              # s_call_b64
   MESSAGE = 0x9
   VALU_TRANS = 0xb        # transcendental: exp, log, rcp, sqrt, sin, cos
   VALU_64_SHIFT = 0xd     # 64-bit shifts: lshl, lshr, ashr
@@ -72,8 +73,10 @@ class InstOp(Enum):
 
   # LDS ops on traced SIMD
   LDS_LOAD = 0x29
+  LDS_ATOMIC = 0x2a        # ds_append, ds_consume, ds_store_addtid_b32
   LDS_STORE = 0x2b
   LDS_STORE_64 = 0x2c
+  LDS_STORE_96 = 0x2d
   LDS_STORE_128 = 0x2e
 
   # Memory ops on other SIMD (0x5x range)
@@ -99,17 +102,27 @@ class InstOp(Enum):
 
 class InstOpRDNA4(Enum):
   """SQTT instruction operation types for RDNA4 (gfx1200). Different encoding from RDNA3."""
-  # TODO: we need to do discovery of all of these from instructions
   SALU = 0x0
   JUMP = 0x1
   NEXT = 0x2
   MESSAGE = 0x4
+  VALU_TRANS = 0x5
   VALU_64 = 0x6
+  VALU_MAD64 = 0x7
+  VINTERP = 0x9
   VALU_WMMA = 0x46
   VMEM = 0x10
   VMEM_128 = 0x11
   VMEM_STORE = 0x12
-  VMEM_STORE_128 = 0x14
+  VMEM_STORE_G96 = 0x13   # global_store_[b96,b128]
+  LDS_LOAD = 0x14
+  LDS_STORE = 0x15
+  LDS_STORE_64 = 0x16
+  LDS_STORE_128 = 0x17
+  VALU_F64 = 0x49
+  SALU_TRANS = 0x4c       # transcendental with sgpr src/dst
+  SALU_MUL = 0x4d         # s_[mul,mulhi,mulk]
+  SALU_MUL64 = 0x4e
   OTHER_VMEM = 0x5e
   OTHER_VMEM_STORE = 0x60
 
@@ -146,11 +159,6 @@ class TS_DELTA_S8_W3(PacketType):
   encoding = bits[6:0] == 0b0100001
   delta = bits[10:8]
   _padding = bits[63:11]
-
-class TS_DELTA_S8_W3_RDNA4(PacketType):  # Layout 4: 64->72 bits
-  encoding = bits[6:0] == 0b0100001
-  delta = bits[10:8]
-  _padding = bits[71:11]
 
 class TS_DELTA_S5_W3(PacketType):
   encoding = bits[4:0] == 0b00110
@@ -363,7 +371,7 @@ PACKET_TYPES_RDNA3: dict[int, type[PacketType]] = {
 }
 PACKET_TYPES_RDNA4: dict[int, type[PacketType]] = {
   **PACKET_TYPES_RDNA3,
-  7: TS_DELTA_S8_W3_RDNA4, 9: WAVESTART_RDNA4, 10: TS_DELTA_S5_W2_RDNA4, 11: WAVEALLOC_RDNA4,
+  9: WAVESTART_RDNA4, 10: TS_DELTA_S5_W2_RDNA4, 11: WAVEALLOC_RDNA4,
   12: TS_DELTA_S5_W3_RDNA4, 13: PERF_RDNA4, 22: TS_DELTA_OR_MARK_RDNA4, 24: INST_RDNA4,
 }
 
