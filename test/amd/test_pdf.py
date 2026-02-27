@@ -12,13 +12,14 @@ class TestPcodePDF(unittest.TestCase):
 
   @classmethod
   def setUpClass(cls):
-    cls.pages = {arch: extract_pdf_text(cfg["pdf"]) for arch, cfg in ARCHS.items()}
+    pdf_archs = {arch: cfg for arch, cfg in ARCHS.items() if "pcode_from" not in cfg}
+    cls.pages = {arch: extract_pdf_text(cfg["pdf"]) for arch, cfg in pdf_archs.items()}
     cls.enums = {}
-    for arch, cfg in ARCHS.items():
+    for arch, cfg in pdf_archs.items():
       _, enums, _, _, _, _ = parse_xml(cfg["xml"])
       for fmt, ops in FIXES.get(arch, {}).items(): enums.setdefault(fmt, {}).update(ops)
       cls.enums[arch] = enums
-    cls.pcode = {arch: extract_pcode(cls.pages[arch], {n: op for ops in cls.enums[arch].values() for op, n in ops.items()}) for arch in ARCHS}
+    cls.pcode = {arch: extract_pcode(cls.pages[arch], {n: op for ops in cls.enums[arch].values() for op, n in ops.items()}) for arch in pdf_archs}
 
   def test_page_counts(self):
     for name, exp in EXPECTED_PAGES.items():
@@ -26,7 +27,7 @@ class TestPcodePDF(unittest.TestCase):
 
   def test_pcode_extracted(self):
     """Check we extracted a reasonable number of pcode entries."""
-    for name in ARCHS:
+    for name in self.pcode:
       self.assertGreater(len(self.pcode[name]), 500, f"{name} pcode count too low")
 
   def test_pcode_rdna3_tricky(self):
@@ -45,7 +46,7 @@ class TestPcodePDF(unittest.TestCase):
 
   def test_pcode_no_examples(self):
     """Pseudocode should not contain example lines with '=>'."""
-    for name in ARCHS:
+    for name in self.pcode:
       for (op_name, opcode), code in self.pcode[name].items():
         self.assertNotIn('=>', code, f"{name} {op_name} contains example line with '=>'")
 

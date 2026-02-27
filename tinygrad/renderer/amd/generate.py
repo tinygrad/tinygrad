@@ -9,6 +9,8 @@ from tinygrad.helpers import fetch
 # ═══════════════════════════════════════════════════════════════════════════════
 
 ARCHS = {
+  "rdna2": {"xml": "amdgpu_isa_rdna2.xml", "pcode_from": "rdna3",
+            "pdf": "https://www.amd.com/content/dam/amd/en/documents/radeon-tech-docs/instruction-set-architectures/rdna2-shader-instruction-set-architecture.pdf"},
   "rdna3": {"xml": "amdgpu_isa_rdna3_5.xml", "pdf": "https://docs.amd.com/api/khub/documents/UVVZM22UN7tMUeiW_4ShTQ/content"},
   "rdna4": {"xml": "amdgpu_isa_rdna4.xml", "pdf": "https://docs.amd.com/api/khub/documents/uQpkEvk3pv~kfAb2x~j4uw/content"},
   "cdna": {"xml": "amdgpu_isa_cdna4.xml", "pdf": "https://www.amd.com/content/dam/amd/en/documents/instinct-tech-docs/instruction-set-architectures/amd-instinct-cdna4-instruction-set-architecture.pdf"},
@@ -432,6 +434,7 @@ def write_ins(encodings, enums, suffix_only_ops, types, arch, path):
         lines.append("")
 
   # Instruction helpers
+  _seen_helpers = set()
   lines.append("# instruction helpers")
   for fmt, ops in sorted(enums.items()):
     if fmt not in base_encodings and fmt not in ("GLOBAL", "SCRATCH", "VGLOBAL", "VSCRATCH"): continue
@@ -447,7 +450,10 @@ def write_ins(encodings, enums, suffix_only_ops, types, arch, path):
       elif fmt == "VOP3" and (op in fmt_sdst_ops or op < 256): cls = "VOP3_SDST"
       elif op_to_suffix.get(op): cls = f"{fmt}{op_to_suffix[op]}"
       else: cls = fmt
-      lines.append(f"{name.lower()}{msuf.lower()} = functools.partial({cls}, {fmt}Op.{name}{msuf})")
+      helper_name = f"{name.lower()}{msuf.lower()}"
+      if helper_name not in _seen_helpers:
+        _seen_helpers.add(helper_name)
+        lines.append(f"{helper_name} = functools.partial({cls}, {fmt}Op.{name}{msuf})")
   with open(path, "w") as f: f.write("\n".join(lines))
 
 def write_operands(types: dict, enums: dict, arch: str, path: pathlib.Path) -> None:
@@ -487,6 +493,46 @@ def write_pcode(pcode: dict[tuple[str, int], str], enums: dict[str, dict[int, st
   lines.append("}")
   with open(path, "w") as f: f.write("\n".join(lines))
 
+_NAME_RENAMES = [
+  ("DS_WRITE2ST64_","DS_STORE2ST64_"), ("DS_WRITE2_","DS_STORE2_"), ("DS_WRITE_","DS_STORE_"),
+  ("DS_READ2ST64_","DS_LOAD2ST64_"), ("DS_READ2_","DS_LOAD2_"), ("DS_READ_","DS_LOAD_"),
+  ("DS_CMPST_","DS_CMPSTORE_"), ("DS_WRXCHG2ST64_","DS_STOREXCHG2ST64_"), ("DS_WRXCHG2_","DS_STOREXCHG2_"), ("DS_WRXCHG_","DS_STOREXCHG_"),
+  ("V_FFBH_U32","V_CLZ_I32_U32"), ("V_FFBH_I32","V_CLS_I32"), ("V_FFBL_B32","V_CTZ_I32_B32"),
+  ("V_CVT_FLR_I32_F32","V_CVT_FLOOR_I32_F32"), ("V_CVT_RPI_I32_F32","V_CVT_NEAREST_I32_F32"),
+  ("V_MUL_LEGACY_F32","V_MUL_DX9_ZERO_F32"), ("V_FMAC_LEGACY_F32","V_FMAC_DX9_ZERO_F32"),
+  ("V_CVT_PKRTZ_F16_F32","V_CVT_PK_RTZ_F16_F32"), ("V_DOT2C_F32_F16","V_DOT2ACC_F32_F16"),
+  ("V_CMP_TRU_","V_CMP_T_"), ("V_CMPX_TRU_","V_CMPX_T_"),
+  ("S_ANDN2_B","S_AND_NOT1_B"), ("S_ORN2_B","S_OR_NOT1_B"),
+  ("_DWORDX16","_B512"), ("_DWORDX8","_B256"), ("_DWORDX4","_B128"), ("_DWORDX3","_B96"), ("_DWORDX2","_B64"), ("_DWORD","_B32"),
+  ("_UBYTE_D16_HI","_D16_HI_U8"), ("_UBYTE_D16","_D16_U8"), ("_SBYTE_D16_HI","_D16_HI_I8"), ("_SBYTE_D16","_D16_I8"),
+  ("_SHORT_D16_HI","_D16_HI_B16"), ("_SHORT_D16","_D16_B16"),
+  ("_UBYTE","_U8"), ("_SBYTE","_I8"), ("_USHORT","_U16"), ("_SSHORT","_I16"), ("_SHORT","_B16"), ("_BYTE","_B8"),
+  ("_FCMPSWAP_X2","_FCMPSWAP_X2"), ("_CMPSWAP_X2","_CMPSWAP_B64"), ("_SUB_X2","_SUB_U64"),
+  ("_ADD_X2","_ADD_U64"), ("_AND_X2","_AND_B64"), ("_OR_X2","_OR_B64"), ("_XOR_X2","_XOR_B64"),
+  ("_SWAP_X2","_SWAP_B64"), ("_SMIN_X2","_SMIN_I64"), ("_SMAX_X2","_SMAX_I64"),
+  ("_UMIN_X2","_UMIN_U64"), ("_UMAX_X2","_UMAX_U64"), ("_INC_X2","_INC_U64"), ("_DEC_X2","_DEC_U64"),
+  ("_CMPSWAP","_CMPSWAP_B32"), ("_SWAP","_SWAP_B32"),
+  ("_SUB","_SUB_U32"), ("_ADD","_ADD_U32"), ("_AND","_AND_B32"), ("_OR","_OR_B32"), ("_XOR","_XOR_B32"),
+  ("_SMIN","_SMIN_I32"), ("_SMAX","_SMAX_I32"), ("_UMIN","_UMIN_U32"), ("_UMAX","_UMAX_U32"),
+  ("_INC","_INC_U32"), ("_DEC","_DEC_U32"), ("_STORE_BYTE_D16_HI","_STORE_D16_HI_B8"),
+]
+
+def _write_bridge_pcode(enums: dict, ref_arch: str, arch: str, path: pathlib.Path) -> None:
+  import importlib
+  ref_pcode = importlib.import_module(f"tinygrad.runtime.autogen.amd.{ref_arch}.str_pcode").PCODE
+  ref_by_name: dict[str, str] = {op.name.replace("_E32","").replace("_E64",""): p for op, p in ref_pcode.items()}
+  def _normalize(name: str) -> str:
+    for old, new in _NAME_RENAMES:
+      if old in name: return name.replace(old, new, 1)
+    return name
+  bridged: dict[tuple[str, int], str] = {}
+  for fmt_name, ops in enums.items():
+    for opcode, name in ops.items():
+      clean = name.replace("_E32","").replace("_E64","")
+      pcode = ref_by_name.get(clean) or ref_by_name.get(_normalize(clean))
+      if pcode: bridged[(name, opcode)] = pcode
+  write_pcode(bridged, enums, arch, path)
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # Main
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -522,6 +568,10 @@ if __name__ == "__main__":
   # Second pass: parse PDFs and write pcode
   for arch, cfg in ARCHS.items():
     print(f"Parsing PDF: {arch}...")
+    if (ref := cfg.get("pcode_from")):
+      print(f"  {arch}: bridging pcode from {ref}")
+      _write_bridge_pcode(arch_data[arch]["enums"], ref, arch, autogen_base / arch / "str_pcode.py")
+      continue
     pages = extract_pdf_text(cfg["pdf"])
     name_to_op = {name: op for ops in arch_data[arch]["enums"].values() for op, name in ops.items()}
     pcode = extract_pcode(pages, name_to_op)
