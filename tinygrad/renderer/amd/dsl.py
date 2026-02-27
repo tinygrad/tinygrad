@@ -34,7 +34,7 @@ class Reg:
   def __getitem__(self, key):
     if isinstance(key, slice):
       start, stop = key.start or 0, key.stop or (self.sz - 1)
-      if start < 0 or stop >= self.sz: raise RuntimeError(f"slice [{start}:{stop}] out of bounds for size {self.sz}")
+      if start < 0 or stop > self.sz: raise RuntimeError(f"slice [{start}:{stop}] out of bounds for size {self.sz}")
       return Reg(self.offset + start, stop - start + 1)
     if key < 0 or key >= self.sz: raise RuntimeError(f"index {key} out of bounds for size {self.sz}")
     return Reg(self.offset + key, 1)
@@ -77,7 +77,7 @@ class Reg:
   def __repr__(self): return self.fmt(parens=True, upper=True)
 
 # Full src encoding space
-src = Reg(0, 512)
+src = Reg(0, 768)
 
 # Slices for each region (inclusive end)
 s = src[0:105]           # SGPR0-105
@@ -101,7 +101,7 @@ SCC = src[253]
 SRC_LDS_DIRECT = src[254]
 LIT = src[255]           # literal constant marker
 v = src[256:511]         # VGPR0-255
-acc = src[512:768]       # ACCVGPR0-255 (CDNA only, encodes as 256-511 but uses separate register file)
+acc = src[512:768]       # ACCVGPR0-255 (CDNA only)
 
 # ══════════════════════════════════════════════════════════════
 # BitField
