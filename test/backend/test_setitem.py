@@ -205,7 +205,6 @@ class TestSetitem(unittest.TestCase):
     n[:, ind_1.numpy(), :, ind_2.numpy(), :] = v.numpy()
     np.testing.assert_equal(t.numpy(), n)
 
-  @unittest.expectedFailure # TODO: fix
   def test_setitem_tensor_int_indexing(self):
     t = Tensor.zeros(4, 3, dtype=dtypes.int).contiguous()
     t[Tensor([0, 2]), 0] = Tensor([99, 88], dtype=dtypes.int)
@@ -213,7 +212,6 @@ class TestSetitem(unittest.TestCase):
     n[[0, 2], 0] = [99, 88]
     np.testing.assert_equal(t.numpy(), n)
 
-  @unittest.expectedFailure # TODO: fix
   def test_setitem_tensor_slice_indexing(self):
     t = Tensor.zeros(4, 3, dtype=dtypes.int).contiguous()
     t[Tensor([0, 2]), :2] = Tensor([[10, 20], [30, 40]], dtype=dtypes.int)
