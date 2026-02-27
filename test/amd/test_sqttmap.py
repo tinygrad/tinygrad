@@ -2,7 +2,7 @@
 import unittest, pickle
 from typing import Iterator
 from pathlib import Path
-from tinygrad.helpers import DEBUG
+from tinygrad.helpers import DEBUG, OSX
 from tinygrad.renderer.amd.sqtt import print_packets, map_insts
 from tinygrad.runtime.autogen.amd.rdna3.ins import s_endpgm
 from test.amd.disasm import disasm
@@ -10,7 +10,7 @@ from test.amd.disasm import disasm
 import tinygrad
 EXAMPLES_DIR = Path(tinygrad.__file__).parent.parent / "extra/sqtt/examples"
 
-def rocprof_inst_traces_match(sqtt, prg, target):
+def rocprof_inst_traces_match(sqtt, prg, target, pass_rocprof_err=False):
   from tinygrad.viz.serve import amd_decode
   from extra.sqtt.roc import decode as roc_decode, InstExec
   addr_table = amd_decode(prg.lib, target)
@@ -30,7 +30,7 @@ def rocprof_inst_traces_match(sqtt, prg, target):
     rocprof_inst = next(rwaves_iter[info.wave][0])
     ref_pc = rocprof_inst.pc-prg.base
     # always check pc matches
-    assert ref_pc == info.pc, f"pc mismatch {ref_pc}:{disasm_map[rocprof_inst.pc]} != {info.pc}:{disasm(info.inst)}"
+    assert ref_pc == info.pc or pass_rocprof_err, f"pc mismatch {ref_pc}:{disasm_map[rocprof_inst.pc]} != {info.pc}:{disasm(info.inst)}"
     # special handling for s_endpgm, it marks the wave completion.
     if info.inst == s_endpgm():
       completed_wave = list(rwaves_iter[info.wave].pop(0))
@@ -67,7 +67,9 @@ class TestSQTTMapBase(unittest.TestCase):
         if not event.itrace: continue
         if event.kern not in kern_events: continue
         with self.subTest(example=name, kern=event.kern):
-          passed_insts, n_waves, n_units = rocprof_inst_traces_match(event, kern_events[event.kern], target)
+          # rocprof OSX has a bug for sopk decoding, linux rocprof works
+          pass_rocprof_err = OSX and target == "gfx1200" and name.startswith("profile_py")
+          passed_insts, n_waves, n_units = rocprof_inst_traces_match(event, kern_events[event.kern], target, pass_rocprof_err)
           if n_waves: print(f"{name}: passed for {passed_insts} instructions across {n_waves} waves scheduled on {n_units} wave units")
 
 class TestSQTTMapRDNA3(TestSQTTMapBase): target = "gfx1100"
