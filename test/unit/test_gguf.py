@@ -1,4 +1,4 @@
-import os, struct, tempfile, unittest
+import os, struct, unittest
 from tinygrad import dtypes, Tensor, fetch, Device
 from tinygrad.nn.state import ggml_data_to_tensor, gguf_load
 from tinygrad.device import is_dtype_supported
@@ -135,26 +135,22 @@ class TestGGUFGEMV(unittest.TestCase):
     q_data = q_data.flatten()
     ref = dequantize(q_data, qtype).reshape(rows, cols)
 
-    # build a minimal gguf: header + 1 tensor info + aligned data
-    with tempfile.NamedTemporaryFile(suffix=".gguf", delete=False) as f:
-      f.write(struct.pack("<4siqq", b"GGUF", 3, 1, 0))         # magic, version, n_tensors, n_kv
-      f.write(struct.pack("<Q", 6) + b"weight")                 # tensor name
-      f.write(struct.pack("<I", 2))                              # ndims
-      f.write(struct.pack("<QQ", cols, rows))                    # dims (gguf stores reversed)
-      f.write(struct.pack("<i", qtype.value))
-      f.write(struct.pack("<Q", 0))                              # offset
-      f.write(b"\x00" * ((32 - f.tell() % 32) % 32))            # pad to alignment=32
-      f.write(q_data.tobytes())
-      fp = f.name
+    # build a minimal gguf in memory: header + 1 tensor info + aligned data
+    buf = bytearray()
+    buf += struct.pack("<4siqq", b"GGUF", 3, 1, 0)              # magic, version, n_tensors, n_kv
+    buf += struct.pack("<Q", 6) + b"weight"                      # tensor name
+    buf += struct.pack("<I", 2)                                  # ndims
+    buf += struct.pack("<QQ", cols, rows)                        # dims (gguf stores reversed)
+    buf += struct.pack("<i", qtype.value)
+    buf += struct.pack("<Q", 0)                                  # offset
+    buf += b"\x00" * ((32 - len(buf) % 32) % 32)                # pad to alignment=32
+    buf += q_data.tobytes()
 
-    model_size = os.stat(fp).st_size
-    _, tensors = gguf_load(Tensor.empty(model_size, dtype=dtypes.uint8, device=f"disk:{fp}").to(Device.DEFAULT))
+    _, tensors = gguf_load(Tensor(np.frombuffer(buf, dtype=np.uint8)).to(None))
 
     x = rng.standard_normal(cols).astype(np.float32)
-    out = (tensors["weight"] @ Tensor(x)).numpy()
+    np.testing.assert_allclose((tensors["weight"] @ Tensor(x)).numpy(), ref @ x, atol=1e-2, rtol=1e-2)
     np.testing.assert_equal(tensors["weight"].numpy(), ref)
-    np.testing.assert_allclose(out, ref @ x, atol=1e-2, rtol=1e-2)
-    os.unlink(fp)
 
   def test_gguf_gemv_q8_0(self): self._test_gguf_gemv(GGMLQuantizationType.Q8_0)
   def test_gguf_gemv_q4_k(self): self._test_gguf_gemv(GGMLQuantizationType.Q4_K)
