@@ -1329,7 +1329,8 @@ class Tensor(OpMixin):
         raise RuntimeError("can't setitem on a tensor that already has other uses and requires grad")
       if not isinstance(v, Tensor): v = Tensor(v, device=self.device, dtype=self.dtype)
       if v.uop.op is Ops.ASSIGN: v = v._apply_uop(lambda x: x.src[1])
-      return self.replace(self._getitem(indices, v))
+      self.replace(self._getitem(indices, v))
+      return
     idx = [indices] if (isinstance(indices, list) and all_int(indices)) or not isinstance(indices, (tuple, list)) else list(indices)
     is_disk = isinstance(self.device, str) and self.device.startswith("DISK")
     if any(isinstance(i, (Tensor, list, tuple)) for i in idx): # advanced setitem
