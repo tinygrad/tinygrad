@@ -301,5 +301,31 @@ class TestFunctionMulti(unittest.TestCase):
     f(x, w).sum().backward()
     np.testing.assert_allclose(x.grad.numpy(), np.ones((8,2)) @ np.array([[1,3],[2,4]]))
 
+  def test_data_parallel_backward_implicit(self):
+    devices_4 = tuple(f"CPU:{i}" for i in range(4))
+    w = Tensor([[1.,2.],[3.,4.]], requires_grad=True).shard(devices_4, axis=None)
+    w.realize()
+    @function
+    def f(x:Tensor) -> Tensor: return x @ w
+
+    x = Tensor(np.arange(16).reshape(8,2).astype(np.float32), requires_grad=True).shard(devices_4, axis=0)
+    f(x).sum().backward()
+    np.testing.assert_allclose(x.grad.numpy(), np.ones((8,2)) @ np.array([[1,3],[2,4]]))
+
+  def test_data_parallel_backward_twice(self):
+    devices_4 = tuple(f"CPU:{i}" for i in range(4))
+    w = Tensor([[1.,2.],[3.,4.]], requires_grad=True).shard(devices_4, axis=None)
+    w.realize()
+    # pre-init grads like the training loop does
+    w.grad = w.zeros_like().contiguous().realize()
+    @function
+    def f(x:Tensor) -> Tensor: return x @ w
+
+    expected = np.ones((8,2)) @ np.array([[1,3],[2,4]])
+    for _ in range(2):
+      x = Tensor(np.arange(16).reshape(8,2).astype(np.float32), requires_grad=True).shard(devices_4, axis=0)
+      f(x).sum().backward()
+      np.testing.assert_allclose(x.grad.numpy(), expected)
+
 if __name__ == '__main__':
   unittest.main()

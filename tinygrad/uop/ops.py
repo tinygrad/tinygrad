@@ -254,6 +254,9 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
       case Ops.RESHAPE:
         if self.src[0]._shape is None: return self.marg
 
+      # MULTI marker (axis info in PARAM sources) has no shape
+      case Ops.MULTI if len(self.src) == 0: return None
+
     # movement ops change the shape
     # NOTE: ssimplify is required because the shape needs to be canonical for broadcasting and same shape checking
     if self.op in GroupOp.Movement.union({Ops.MULTI, Ops.REDUCE_AXIS, Ops.WMMA}):
@@ -515,6 +518,11 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     # COPY removes axis. TODO: add more tests for this, and consider MSELECT/MSTACK
     if self.op is Ops.COPY: return None
     if self.op is Ops.MULTI: return self.arg
+    # PARAM: axis is stored as a MULTI source
+    if self.op is Ops.PARAM:
+      for s in self.src:
+        if s.op is Ops.MULTI: return s.arg
+      return None
     # NOTE: they all have to share an axis, we always choose [-1]
     if self.op in GroupOp.ALU: return axes[-1] if (axes := dedup([x.axis for x in self.src if x.axis is not None])) else None
     if len(self.src) == 0: return None
@@ -868,9 +876,9 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
   def param_like(self, slot:int):
     if self.op is Ops.BIND:
       return UOp.param(slot, self.dtype, self._shape, self._device, self._min_max, self.src[0].arg[0])
-    if self.axis is not None:
-      return UOp.param(slot, self.dtype, self.shard_shape, self._device).multi(self.axis)
-    return UOp.param(slot, self.dtype, self._shape, self._device)
+    p = UOp.param(slot, self.dtype, self._shape, self._device)
+    if self.axis is not None: p = p.replace(src=p.src + (UOp(Ops.MULTI, arg=self.axis),))
+    return p
 
   def call(self, *srcs:UOp, grad_fxn:Callable|None=None, metadata:tuple[Metadata, ...]=(), name:str|None=None) -> UOp:
     # TODO: reenable this after ENCDEC is fixed
