@@ -18,6 +18,18 @@ class TestIselX86(unittest.TestCase):
     # both comparisons become the same instruction
     self.assertTrue(n.src[0].src[2] == n.src[1].src[2] and n.src[0].src[2].arg is X86Ops.CMP)
 
+  def test_vmax(self):
+    a = UOp.variable("a", 0, 0, dtypes.float32)
+    b = UOp.variable("b", 0, 0, dtypes.float32)
+    n = self.isel_rewrite((a < b).where(b, a))
+    self.assertTrue(n.arg is X86Ops.VMAXSS)
+
+  def test_vmin(self):
+    a = UOp.variable("a", 0, 0, dtypes.float32)
+    b = UOp.variable("b", 0, 0, dtypes.float32)
+    n = self.isel_rewrite((a < b).where(a, b))
+    self.assertTrue(n.arg is X86Ops.VMINSS)
+
   def test_vpbroadcast(self):
     a = UOp.variable("a", 0, 0, dtypes.int32)
     n = self.isel_rewrite(a.broadcast(4))
