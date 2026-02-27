@@ -73,13 +73,7 @@ def _f32_to_fp8(v: UOp) -> UOp:
 def _f32_to_bf8(v: UOp) -> UOp:
   return f2f((v.bitcast(dtypes.float32) if v.dtype != dtypes.float32 else v).bitcast(dtypes.uint32), dtypes.float32, dtypes.fp8e5m2)
 def _f32_to_bf16(v: UOp) -> UOp:
-  """Convert f32 to bf16 with round-to-nearest-even. BF16 is the upper 16 bits of F32 with rounding."""
-  bits = (v.bitcast(dtypes.float32) if v.dtype != dtypes.float32 else v).bitcast(dtypes.uint32)
-  # Round-to-nearest-even: add rounding bias. If the bit just below the truncation point is 1 and the rest are 0, round to even.
-  round_bit = (bits >> _u32(16)) & _u32(1)  # bit 16 (LSB of kept part)
-  rounding = _u32(0x7FFF) + round_bit  # 0x7FFF + bit16: rounds to even
-  rounded = bits + rounding
-  return (rounded >> _u32(16)).cast(dtypes.uint16)
+  return f2f((v.bitcast(dtypes.float32) if v.dtype != dtypes.float32 else v).bitcast(dtypes.uint32), dtypes.float32, dtypes.bfloat16).cast(dtypes.uint16)
 def _f32_to_bf16_sr(v: UOp, stoch: UOp) -> UOp:
   """Convert f32 to bf16 with stochastic rounding."""
   bits = (v.bitcast(dtypes.float32) if v.dtype != dtypes.float32 else v).bitcast(dtypes.uint32)
