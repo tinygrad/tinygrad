@@ -64,22 +64,21 @@ def _floor(x):
 def _f16_extract(v): return (v & _u32(0xFFFF)).cast(dtypes.uint16).bitcast(dtypes.half) if v.dtype == dtypes.uint32 else v
 
 # Using f2f decomposition
+def _as_f32(v: UOp) -> UOp: return v.bitcast(dtypes.float32) if v.dtype != dtypes.float32 else v
 def _fp8_to_f32(v: UOp) -> UOp:
   return f2f((v.cast(dtypes.uint32) & _u32(0xFF)).cast(dtypes.uint8), dtypes.fp8e4m3, dtypes.float32)
 def _bf8_to_f32(v: UOp) -> UOp:
   return f2f((v.cast(dtypes.uint32) & _u32(0xFF)).cast(dtypes.uint8), dtypes.fp8e5m2, dtypes.float32)
 def _f32_to_fp8(v: UOp) -> UOp:
-  return f2f((v.bitcast(dtypes.float32) if v.dtype != dtypes.float32 else v).bitcast(dtypes.uint32), dtypes.float32, dtypes.fp8e4m3)
+  return f2f(_as_f32(v).bitcast(dtypes.uint32), dtypes.float32, dtypes.fp8e4m3)
 def _f32_to_bf8(v: UOp) -> UOp:
-  return f2f((v.bitcast(dtypes.float32) if v.dtype != dtypes.float32 else v).bitcast(dtypes.uint32), dtypes.float32, dtypes.fp8e5m2)
+  return f2f(_as_f32(v).bitcast(dtypes.uint32), dtypes.float32, dtypes.fp8e5m2)
 def _f32_to_bf16(v: UOp) -> UOp:
-  return f2f((v.bitcast(dtypes.float32) if v.dtype != dtypes.float32 else v).bitcast(dtypes.uint32), dtypes.float32, dtypes.bfloat16).cast(dtypes.uint16)
+  return f2f(_as_f32(v).bitcast(dtypes.uint32), dtypes.float32, dtypes.bfloat16).cast(dtypes.uint16)
 def _f32_to_bf16_sr(v: UOp, stoch: UOp) -> UOp:
-  """Convert f32 to bf16 with stochastic rounding."""
-  bits = (v.bitcast(dtypes.float32) if v.dtype != dtypes.float32 else v).bitcast(dtypes.uint32)
   # Stochastic rounding: add lower 16 bits of stochastic value to lower 16 bits of f32
-  rounded = bits + (stoch & _u32(0xFFFF))
-  return (rounded >> _u32(16)).cast(dtypes.uint16)
+  bits = _as_f32(v).bitcast(dtypes.uint32)
+  return ((bits + (stoch & _u32(0xFFFF))) >> _u32(16)).cast(dtypes.uint16)
 
 def _check_nan(v: UOp, quiet: bool) -> UOp:
   if v.op == Ops.CAST and v.dtype == dtypes.float64: v = v.src[0]
