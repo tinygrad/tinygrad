@@ -170,7 +170,6 @@ class TestVDSTYField(unittest.TestCase):
 
 class TestCDNA(unittest.TestCase):
   def test_accvgpr_offset(self):
-    # acc is CDNA-only, encodes in 512-767 range in the DSL
     self.assertEqual(acc[0].offset, 512)
     self.assertEqual(acc[4].offset, 516)
     self.assertEqual(acc[0:3].sz, 4)

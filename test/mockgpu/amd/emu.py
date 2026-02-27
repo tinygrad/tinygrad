@@ -259,16 +259,12 @@ def _apply_opsel(val: UOp, sel_bit: int, opsel: int) -> UOp: return _hi16(val) i
 
 def _set_lane_bit(old: UOp, lane: UOp, val: UOp, exec_mask: UOp) -> UOp:
   """Set/clear a single bit in a mask based on lane index, respecting exec mask."""
-  if old.dtype in (dtypes.uint64, dtypes.int64):
-    dt = dtypes.uint64
-    mask = UOp.const(dt, 1) << lane.cast(dt)
-    new_bit = _to_u32(val).cast(dt) << lane.cast(dt)
-    cleared = old.cast(dt) & (mask ^ UOp.const(dt, 0xFFFFFFFFFFFFFFFF))
-    return _lane_active(exec_mask, lane).where(cleared | new_bit, old.cast(dt))
-  mask = _c(1) << lane.cast(dtypes.uint32)
-  new_bit = _to_u32(val) << lane.cast(dtypes.uint32)
-  cleared = old & (mask ^ _c(MASK32))
-  return _lane_active(exec_mask, lane).where(cleared | new_bit, old)
+  dt = dtypes.uint64 if old.dtype in (dtypes.uint64, dtypes.int64) else dtypes.uint32
+  mask_val = 0xFFFFFFFFFFFFFFFF if dt == dtypes.uint64 else MASK32
+  mask = UOp.const(dt, 1) << lane.cast(dt)
+  new_bit = _to_u32(val).cast(dt) << lane.cast(dt)
+  cleared = old.cast(dt) & (mask ^ UOp.const(dt, mask_val))
+  return _lane_active(exec_mask, lane).where(cleared | new_bit, old.cast(dt))
 
 def _val_to_u32(val: UOp) -> UOp:
   """Convert any value to uint32 for storage (bitcast floats, cast ints)."""
@@ -449,12 +445,9 @@ class _Ctx:
   def unroll_lanes(self, get_lane_bit, exec_mask: UOp, apply_exec: bool = True) -> UOp:
     """Combine lane bits into a mask using RANGE+REDUCE (32-bit for RDNA, 64-bit for CDNA)."""
     lane = self.range()
-    if self.wave_size <= 32:
-      bit = get_lane_bit(lane).cast(dtypes.uint32) << lane.cast(dtypes.uint32)
-      result = bit.reduce(lane, arg=Ops.ADD)
-    else:
-      bit = get_lane_bit(lane).cast(dtypes.uint64) << lane.cast(dtypes.uint64)
-      result = bit.reduce(lane, arg=Ops.ADD)
+    dt = dtypes.uint64 if self.wave_size > 32 else dtypes.uint32
+    bit = get_lane_bit(lane).cast(dt) << lane.cast(dt)
+    result = bit.reduce(lane, arg=Ops.ADD)
     return result & exec_mask if apply_exec else result
 
   def inst_word(self, dword_idx: int) -> UOp:
