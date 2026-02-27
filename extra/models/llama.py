@@ -137,12 +137,10 @@ class TransformerBlock:
     self.feed_forward = feed_forward(dim, hidden_dim, linear)
     self.attention_norm = nn.RMSNorm(dim, norm_eps)
     self.ffn_norm = nn.RMSNorm(dim, norm_eps)
-    self.attention_norm_fxn = function(self.attention_norm)
-    self.ffn_norm_fxn = function(self.ffn_norm)
 
   def __call__(self, x:Tensor, start_pos:Union[Variable,int], freqs_cis:Tensor, mask:Optional[Tensor]):
-    h = x + self.attention(self.attention_norm_fxn(x), start_pos, freqs_cis, mask)
-    return (h + self.feed_forward(self.ffn_norm_fxn(h))).contiguous().contiguous_backward()
+    h = x + self.attention(function(self.attention_norm)(x), start_pos, freqs_cis, mask)
+    return (h + self.feed_forward(function(self.ffn_norm)(h))).contiguous().contiguous_backward()
 
 # standard openai sampling
 def sample(logits: Tensor, temp: float, k: int, p: float, af: float, ap: float):
