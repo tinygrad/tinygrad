@@ -9,8 +9,8 @@ from tinygrad.helpers import fetch
 # ═══════════════════════════════════════════════════════════════════════════════
 
 ARCHS = {
-  "rdna2": {"xml": "amdgpu_isa_rdna2.xml", "pcode_from": "rdna3",
-            "pdf": "https://www.amd.com/content/dam/amd/en/documents/radeon-tech-docs/instruction-set-architectures/rdna2-shader-instruction-set-architecture.pdf"},
+  "rdna2": {"xml": "amdgpu_isa_rdna2.xml",
+            "pdf": "https://web.archive.org/web/20250719062008if_/https://www.amd.com/content/dam/amd/en/documents/radeon-tech-docs/instruction-set-architectures/rdna2-shader-instruction-set-architecture.pdf"},
   "rdna3": {"xml": "amdgpu_isa_rdna3_5.xml", "pdf": "https://docs.amd.com/api/khub/documents/UVVZM22UN7tMUeiW_4ShTQ/content"},
   "rdna4": {"xml": "amdgpu_isa_rdna4.xml", "pdf": "https://docs.amd.com/api/khub/documents/uQpkEvk3pv~kfAb2x~j4uw/content"},
   "cdna": {"xml": "amdgpu_isa_cdna4.xml", "pdf": "https://www.amd.com/content/dam/amd/en/documents/instinct-tech-docs/instruction-set-architectures/amd-instinct-cdna4-instruction-set-architecture.pdf"},
@@ -205,8 +205,10 @@ def extract_pdf_text(url: str) -> list[list[tuple[float, float, str, str]]]:
 
 def extract_pcode(pages: list[list[tuple[float, float, str, str]]], name_to_op: dict[str, int]) -> dict[tuple[str, int], str]:
   """Extract pseudocode for instructions. Returns {(name, opcode): pseudocode}."""
-  # First pass: find all instruction headers across all pages
-  all_instructions: list[tuple[int, float, str, int]] = []  # (page_idx, y, name, opcode)
+  name_hits_60 = sum(1 for page in pages[:30] for x, _, t, _ in page if 55 < x < 65 and t in name_to_op)
+  name_hits_120 = sum(1 for page in pages[:30] for x, _, t, _ in page if 105 < x < 135 and t in name_to_op)
+  if name_hits_120 > name_hits_60: return _extract_pcode_rdna2(pages, name_to_op)
+  all_instructions: list[tuple[int, float, str, int]] = []
   for page_idx, page in enumerate(pages):
     by_y: dict[int, list[tuple[float, str]]] = {}
     for x, y, t, _ in page:
@@ -217,14 +219,12 @@ def extract_pcode(pages: list[list[tuple[float, float, str, str]]], name_to_op: 
       if left and right and left[0][1] in name_to_op and right[0][1].isdigit():
         all_instructions.append((page_idx, y, left[0][1], int(right[0][1])))
 
-  # Second pass: extract pseudocode between consecutive instructions
   pcode: dict[tuple[str, int], str] = {}
   for i, (page_idx, y, name, opcode) in enumerate(all_instructions):
     if i + 1 < len(all_instructions):
       next_page, next_y = all_instructions[i + 1][0], all_instructions[i + 1][1]
     else:
       next_page, next_y = page_idx, 0
-    # Collect F6 text from current position to next instruction (pseudocode is at x ≈ 69)
     lines: list[tuple[int, float, str]] = []
     for p in range(page_idx, next_page + 1):
       start_y = y if p == page_idx else 800
@@ -232,7 +232,6 @@ def extract_pcode(pages: list[list[tuple[float, float, str, str]]], name_to_op: 
       lines.extend((p, y2, t) for x, y2, t, f in pages[p] if f in ('/F6.0', '/F7.0') and end_y < y2 < start_y and 60 < x < 80)
     if lines:
       sorted_lines = sorted(lines, key=lambda x: (x[0], -x[1]))
-      # Stop at large Y gaps (>30) - indicates section break
       filtered = [sorted_lines[0]]
       for j in range(1, len(sorted_lines)):
         prev_page, prev_y, _ = sorted_lines[j-1]
@@ -242,6 +241,48 @@ def extract_pcode(pages: list[list[tuple[float, float, str, str]]], name_to_op: 
         filtered.append(sorted_lines[j])
       pcode_lines = [t.replace('Ê', '').strip() for _, _, t in filtered]
       if pcode_lines: pcode[(name, opcode)] = '\n'.join(pcode_lines)
+  return pcode
+
+def _extract_pcode_rdna2(pages: list[list[tuple[float, float, str, str]]], name_to_op: dict[str, int]) -> dict[tuple[str, int], str]:
+  """Extract pseudocode from RDNA2 PDF (table layout with bullet-prefixed pcode)."""
+  BULLET = '\xca'
+  all_instructions: list[tuple[int, float, str, int]] = []
+  for page_idx, page in enumerate(pages):
+    by_y: dict[int, list[tuple[float, str, str]]] = {}
+    for x, y, t, f in page:
+      by_y.setdefault(round(y), []).append((x, t, f))
+    sorted_ys = sorted(by_y.keys(), reverse=True)
+    for yi, y_key in enumerate(sorted_ys):
+      items = by_y[y_key]
+      opcodes = [(x, t) for x, t, f in items if 65 < x < 90 and f == '/F1.0' and t.strip().isdigit()]
+      names = [(x, t) for x, t, f in items if 105 < x < 135 and f == '/F1.0' and not t.strip().isdigit()]
+      if not opcodes or not names: continue
+      name, opcode = names[0][1].strip(), int(opcodes[0][1].strip())
+      if name in name_to_op:
+        all_instructions.append((page_idx, float(y_key), name, opcode))
+      else:
+        for dy in range(1, min(5, len(sorted_ys) - yi)):
+          next_y = sorted_ys[yi + dy]
+          cont = [t for x, t, f in by_y[next_y] if 105 < x < 135 and f == '/F1.0']
+          if cont:
+            full = name + cont[0].strip()
+            if full in name_to_op: all_instructions.append((page_idx, float(y_key), full, opcode))
+            break
+
+  pcode: dict[tuple[str, int], str] = {}
+  for i, (page_idx, y, name, opcode) in enumerate(all_instructions):
+    next_page, next_y = (all_instructions[i+1][0], all_instructions[i+1][1]) if i+1 < len(all_instructions) else (page_idx, 0)
+    lines: list[str] = []
+    for p in range(page_idx, min(next_page + 1, len(pages))):
+      start_y = y if p == page_idx else 800
+      end_y = next_y if p == next_page else 0
+      elems = sorted([(y2, t) for x, y2, t, f in pages[p] if f == '/F8.0' and end_y < y2 < start_y and x > 180], key=lambda e: -e[0])
+      for _, t in elems:
+        if not t.startswith(BULLET) and 'Example' in t: break
+        if t.startswith(BULLET): lines.append(t[1:].strip())
+      else: continue
+      break
+    if lines: pcode[(name, opcode)] = '\n'.join(lines)
   return pcode
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -493,46 +534,6 @@ def write_pcode(pcode: dict[tuple[str, int], str], enums: dict[str, dict[int, st
   lines.append("}")
   with open(path, "w") as f: f.write("\n".join(lines))
 
-_NAME_RENAMES = [
-  ("DS_WRITE2ST64_","DS_STORE2ST64_"), ("DS_WRITE2_","DS_STORE2_"), ("DS_WRITE_","DS_STORE_"),
-  ("DS_READ2ST64_","DS_LOAD2ST64_"), ("DS_READ2_","DS_LOAD2_"), ("DS_READ_","DS_LOAD_"),
-  ("DS_CMPST_","DS_CMPSTORE_"), ("DS_WRXCHG2ST64_","DS_STOREXCHG2ST64_"), ("DS_WRXCHG2_","DS_STOREXCHG2_"), ("DS_WRXCHG_","DS_STOREXCHG_"),
-  ("V_FFBH_U32","V_CLZ_I32_U32"), ("V_FFBH_I32","V_CLS_I32"), ("V_FFBL_B32","V_CTZ_I32_B32"),
-  ("V_CVT_FLR_I32_F32","V_CVT_FLOOR_I32_F32"), ("V_CVT_RPI_I32_F32","V_CVT_NEAREST_I32_F32"),
-  ("V_MUL_LEGACY_F32","V_MUL_DX9_ZERO_F32"), ("V_FMAC_LEGACY_F32","V_FMAC_DX9_ZERO_F32"),
-  ("V_CVT_PKRTZ_F16_F32","V_CVT_PK_RTZ_F16_F32"), ("V_DOT2C_F32_F16","V_DOT2ACC_F32_F16"),
-  ("V_CMP_TRU_","V_CMP_T_"), ("V_CMPX_TRU_","V_CMPX_T_"),
-  ("S_ANDN2_B","S_AND_NOT1_B"), ("S_ORN2_B","S_OR_NOT1_B"),
-  ("_DWORDX16","_B512"), ("_DWORDX8","_B256"), ("_DWORDX4","_B128"), ("_DWORDX3","_B96"), ("_DWORDX2","_B64"), ("_DWORD","_B32"),
-  ("_UBYTE_D16_HI","_D16_HI_U8"), ("_UBYTE_D16","_D16_U8"), ("_SBYTE_D16_HI","_D16_HI_I8"), ("_SBYTE_D16","_D16_I8"),
-  ("_SHORT_D16_HI","_D16_HI_B16"), ("_SHORT_D16","_D16_B16"),
-  ("_UBYTE","_U8"), ("_SBYTE","_I8"), ("_USHORT","_U16"), ("_SSHORT","_I16"), ("_SHORT","_B16"), ("_BYTE","_B8"),
-  ("_FCMPSWAP_X2","_FCMPSWAP_X2"), ("_CMPSWAP_X2","_CMPSWAP_B64"), ("_SUB_X2","_SUB_U64"),
-  ("_ADD_X2","_ADD_U64"), ("_AND_X2","_AND_B64"), ("_OR_X2","_OR_B64"), ("_XOR_X2","_XOR_B64"),
-  ("_SWAP_X2","_SWAP_B64"), ("_SMIN_X2","_SMIN_I64"), ("_SMAX_X2","_SMAX_I64"),
-  ("_UMIN_X2","_UMIN_U64"), ("_UMAX_X2","_UMAX_U64"), ("_INC_X2","_INC_U64"), ("_DEC_X2","_DEC_U64"),
-  ("_CMPSWAP","_CMPSWAP_B32"), ("_SWAP","_SWAP_B32"),
-  ("_SUB","_SUB_U32"), ("_ADD","_ADD_U32"), ("_AND","_AND_B32"), ("_OR","_OR_B32"), ("_XOR","_XOR_B32"),
-  ("_SMIN","_SMIN_I32"), ("_SMAX","_SMAX_I32"), ("_UMIN","_UMIN_U32"), ("_UMAX","_UMAX_U32"),
-  ("_INC","_INC_U32"), ("_DEC","_DEC_U32"), ("_STORE_BYTE_D16_HI","_STORE_D16_HI_B8"),
-]
-
-def _write_bridge_pcode(enums: dict, ref_arch: str, arch: str, path: pathlib.Path) -> None:
-  import importlib
-  ref_pcode = importlib.import_module(f"tinygrad.runtime.autogen.amd.{ref_arch}.str_pcode").PCODE
-  ref_by_name: dict[str, str] = {op.name.replace("_E32","").replace("_E64",""): p for op, p in ref_pcode.items()}
-  def _normalize(name: str) -> str:
-    for old, new in _NAME_RENAMES:
-      if old in name: return name.replace(old, new, 1)
-    return name
-  bridged: dict[tuple[str, int], str] = {}
-  for fmt_name, ops in enums.items():
-    for opcode, name in ops.items():
-      clean = name.replace("_E32","").replace("_E64","")
-      pcode = ref_by_name.get(clean) or ref_by_name.get(_normalize(clean))
-      if pcode: bridged[(name, opcode)] = pcode
-  write_pcode(bridged, enums, arch, path)
-
 # ═══════════════════════════════════════════════════════════════════════════════
 # Main
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -568,10 +569,6 @@ if __name__ == "__main__":
   # Second pass: parse PDFs and write pcode
   for arch, cfg in ARCHS.items():
     print(f"Parsing PDF: {arch}...")
-    if (ref := cfg.get("pcode_from")):
-      print(f"  {arch}: bridging pcode from {ref}")
-      _write_bridge_pcode(arch_data[arch]["enums"], ref, arch, autogen_base / arch / "str_pcode.py")
-      continue
     pages = extract_pdf_text(cfg["pdf"])
     name_to_op = {name: op for ops in arch_data[arch]["enums"].values() for op, name in ops.items()}
     pcode = extract_pcode(pages, name_to_op)

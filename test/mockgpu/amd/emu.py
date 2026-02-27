@@ -105,15 +105,16 @@ def _init_sqtt_encoder():
   from tinygrad.runtime.autogen.amd.rdna4.enum import SOPPOp as SOPPOp4
   import re
 
-  _SOPP = (ir3.SOPP, ir4.SOPP, irc.SOPP)
-  _SMEM = (ir3.SMEM, ir4.SMEM, irc.SMEM)
-  _VALU = (ir3.VOP1, ir3.VOP2, ir3.VOP3, ir3.VOP3P, ir3.VOPC, ir3.VOPD, ir3.VOP3SD, ir3.VOP3_SDST, ir3.VOP1_SDST,
+  _SOPP = (ir2.SOPP, ir3.SOPP, ir4.SOPP, irc.SOPP)
+  _SMEM = (ir2.SMEM, ir3.SMEM, ir4.SMEM, irc.SMEM)
+  _VALU = (ir2.VOP1, ir2.VOP2, ir2.VOP3, ir2.VOP3P, ir2.VOPC, ir2.VOP3SD, ir2.VOP3_SDST, ir2.VOP1_SDST,
+           ir3.VOP1, ir3.VOP2, ir3.VOP3, ir3.VOP3P, ir3.VOPC, ir3.VOPD, ir3.VOP3SD, ir3.VOP3_SDST, ir3.VOP1_SDST,
            ir4.VOP1, ir4.VOP2, ir4.VOP3, ir4.VOP3P, ir4.VOPC, ir4.VOPD, ir4.VOP3SD, ir4.VOP3_SDST, ir4.VOP1_SDST,
            irc.VOP1, irc.VOP2, irc.VOP3, irc.VOP3P, irc.VOPC, irc.VOP3SD, irc.VOP3_SDST)
-  _DS = (ir3.DS, ir4.DS, irc.DS)
-  _GLOBAL = (ir3.GLOBAL, ir4.VGLOBAL, irc.GLOBAL)
-  _FLAT = (ir3.FLAT, ir4.VFLAT, irc.FLAT)
-  _SCRATCH = (ir3.SCRATCH, ir4.VSCRATCH, irc.SCRATCH)
+  _DS = (ir2.DS, ir3.DS, ir4.DS, irc.DS)
+  _GLOBAL = (ir2.GLOBAL, ir3.GLOBAL, ir4.VGLOBAL, irc.GLOBAL)
+  _FLAT = (ir2.FLAT, ir3.FLAT, ir4.VFLAT, irc.FLAT)
+  _SCRATCH = (ir2.SCRATCH, ir3.SCRATCH, ir4.VSCRATCH, irc.SCRATCH)
 
   # SOPP classification sets
   _SOPP_SKIP = {SOPPOp3.S_ENDPGM.value, SOPPOp3.S_ENDPGM_SAVED.value, SOPPOp3.S_ENDPGM_ORDERED_PS_DONE.value,

@@ -3,7 +3,8 @@
 import unittest
 from tinygrad.renderer.amd.generate import extract_pdf_text, extract_pcode, parse_xml, ARCHS, FIXES
 
-EXPECTED_PAGES = {"rdna3": 655, "rdna4": 711, "cdna": 610}
+pdf_archs = {arch: cfg for arch, cfg in ARCHS.items() if "pcode_from" not in cfg}
+EXPECTED_PAGES = {"rdna2": 293, "rdna3": 655, "rdna4": 711, "cdna": 610}
 
 class TestPcodePDF(unittest.TestCase):
   pages: dict
@@ -12,7 +13,6 @@ class TestPcodePDF(unittest.TestCase):
 
   @classmethod
   def setUpClass(cls):
-    pdf_archs = {arch: cfg for arch, cfg in ARCHS.items() if "pcode_from" not in cfg}
     cls.pages = {arch: extract_pdf_text(cfg["pdf"]) for arch, cfg in pdf_archs.items()}
     cls.enums = {}
     for arch, cfg in pdf_archs.items():

@@ -239,7 +239,7 @@ class PM4Executor(AMDQueue):
         for se in range(self.gpu.regs.n_se):
           self.gpu.regs.grbm_index = 0b011 << 29 | se << 16 # select se, broadcast sa and instance
           self.gpu.regs[regSQ_THREAD_TRACE_STATUS] = 1 << 12 # FINISH_PENDING==0 FINISH_DONE==1 BUSY==0
-          if MOCKGPU_ARCH == "rdna3":
+          if MOCKGPU_ARCH in ("rdna2", "rdna3"):
             buf_addr = ((self.gpu.regs[regSQ_THREAD_TRACE_BUF0_SIZE]&0xf)<<32|self.gpu.regs[regSQ_THREAD_TRACE_BUF0_BASE])<<12
           else:
             buf_addr = ((self.gpu.regs[regSQ_THREAD_TRACE_BUF0_BASE_HI])<<32|self.gpu.regs[regSQ_THREAD_TRACE_BUF0_BASE_LO])<<12
@@ -248,8 +248,8 @@ class PM4Executor(AMDQueue):
 
           # Write blob to trace buffer
           if se_blob: ctypes.memmove(buf_addr, se_blob, len(se_blob))
-          # RDNA3 has absolute address for wptr, RDNA4 has relative
-          wptr_val = (((buf_addr if MOCKGPU_ARCH == "rdna3" else 0) + len(se_blob)) // 32) & 0x1FFFFFFF
+          # RDNA2/RDNA3 has absolute address for wptr, RDNA4 has relative
+          wptr_val = (((buf_addr if MOCKGPU_ARCH in ("rdna2", "rdna3") else 0) + len(se_blob)) // 32) & 0x1FFFFFFF
           self.gpu.regs[regSQ_THREAD_TRACE_WPTR] = wptr_val
         self.gpu.regs.grbm_index = old_idx
       case _: pass # NOTE: for now most events aren't emulated
