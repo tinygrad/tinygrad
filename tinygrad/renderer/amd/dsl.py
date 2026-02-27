@@ -101,7 +101,7 @@ SCC = src[253]
 SRC_LDS_DIRECT = src[254]
 LIT = src[255]           # literal constant marker
 v = src[256:511]         # VGPR0-255
-acc = src[512:767]       # ACCVGPR0-255 (CDNA only, encodes as 256-511 but uses separate register file)
+acc = src[512:768]       # ACCVGPR0-255 (CDNA only, encodes as 256-511 but uses separate register file)
 
 # ══════════════════════════════════════════════════════════════
 # BitField
