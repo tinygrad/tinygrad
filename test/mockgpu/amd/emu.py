@@ -62,9 +62,11 @@ from tinygrad.renderer.amd import decode_inst
 from tinygrad.runtime.autogen.amd.rdna3.str_pcode import PCODE as PCODE_RDNA3
 from tinygrad.runtime.autogen.amd.rdna4.str_pcode import PCODE as PCODE_RDNA4
 from tinygrad.runtime.autogen.amd.cdna.str_pcode import PCODE as PCODE_CDNA
+from tinygrad.runtime.autogen.amd.rdna2.str_pcode import PCODE as PCODE_RDNA2
 from tinygrad.runtime.autogen.amd.rdna3 import ins as ir3
 from tinygrad.runtime.autogen.amd.rdna4 import ins as ir4
 from tinygrad.runtime.autogen.amd.cdna import ins as irc
+from tinygrad.runtime.autogen.amd.rdna2 import ins as ir2
 from tinygrad.renderer.amd.dsl import VCC_LO, EXEC_LO, SCC, ttmp
 from tinygrad.runtime.autogen.amd.common import Fmt, OpType
 from test.mockgpu.amd.pcode import parse_block, _FUNCS
@@ -283,7 +285,11 @@ _pcode_fixes = {
 
 def _get_pcode_dict(op) -> dict:
   """Return the PCODE dictionary for the given opcode based on its architecture."""
-  return PCODE_CDNA if 'cdna' in type(op).__module__ else PCODE_RDNA4 if 'rdna4' in type(op).__module__ else PCODE_RDNA3
+  mod = type(op).__module__
+  if 'cdna' in mod: return PCODE_CDNA
+  if 'rdna4' in mod: return PCODE_RDNA4
+  if 'rdna2' in mod: return PCODE_RDNA2
+  return PCODE_RDNA3
 
 # Pcode parser
 @functools.cache
@@ -1316,6 +1322,11 @@ _INST_HANDLERS: dict[type, Callable[..., UOp]] = {
   irc.VOP1: _compile_vop12, irc.VOP2: _compile_vop12, irc.VOPC: _compile_vopc, irc.VOP3: _compile_vop3,
   irc.VOP3_SDST: _compile_vop3, irc.VOP3SD: _compile_vop3sd, irc.VOP3P: _compile_vop3p,
   irc.DS: _compile_mem_op, irc.FLAT: _compile_mem_op, irc.GLOBAL: _compile_mem_op, irc.SCRATCH: _compile_mem_op,
+  # RDNA2 instruction classes
+  ir2.SOPP: _compile_sopp, ir2.SMEM: _compile_smem, ir2.SOP1: _compile_sop, ir2.SOP2: _compile_sop, ir2.SOPC: _compile_sop, ir2.SOPK: _compile_sop,
+  ir2.VOP1: _compile_vop12, ir2.VOP1_SDST: _compile_vop12, ir2.VOP2: _compile_vop12, ir2.VOPC: _compile_vopc, ir2.VOP3: _compile_vop3,
+  ir2.VOP3_SDST: _compile_vop3, ir2.VOP3SD: _compile_vop3sd, ir2.VOP3P: _compile_vop3p,
+  ir2.DS: _compile_mem_op, ir2.FLAT: _compile_mem_op, ir2.GLOBAL: _compile_mem_op, ir2.SCRATCH: _compile_mem_op,
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1356,7 +1367,7 @@ def _get_runner(inst_bytes: bytes, arch: str = "rdna3"):
   _canonical_runner_cache.append((base, mask, size, runner))
   return runner
 
-_BARRIER_OPS = {ir3.SOPPOp.S_BARRIER, irc.SOPPOp.S_BARRIER}
+_BARRIER_OPS = {ir3.SOPPOp.S_BARRIER, irc.SOPPOp.S_BARRIER, ir2.SOPPOp.S_BARRIER}
 if hasattr(ir4.SOPPOp, 'S_BARRIER_WAIT'): _BARRIER_OPS.add(ir4.SOPPOp.S_BARRIER_WAIT)
 _BRANCH_OPS: set[int] = {op.value for op in (ir3.SOPPOp.S_BRANCH, ir3.SOPPOp.S_CBRANCH_SCC0, ir3.SOPPOp.S_CBRANCH_SCC1,
   ir3.SOPPOp.S_CBRANCH_VCCZ, ir3.SOPPOp.S_CBRANCH_VCCNZ, ir3.SOPPOp.S_CBRANCH_EXECZ, ir3.SOPPOp.S_CBRANCH_EXECNZ)}

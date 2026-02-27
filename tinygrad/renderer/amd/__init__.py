@@ -46,6 +46,13 @@ def _load_formats() -> dict[str, list[type[Inst]]]:
     VOP3 as C_VOP3, VOP3_SDST as C_VOP3_SDST, VOP3SD as C_VOP3SD, VOP3P as C_VOP3P, VOP3P_MFMA as C_VOP3P_MFMA, VOP3PX2 as C_VOP3PX2,
     SOP1 as C_SOP1, SOP2 as C_SOP2, SOPC as C_SOPC, SOPK as C_SOPK, SOPK_LIT as C_SOPK_LIT, SOPP as C_SOPP, SMEM as C_SMEM, DS as C_DS,
     FLAT as C_FLAT, GLOBAL as C_GLOBAL, SCRATCH as C_SCRATCH, MUBUF as C_MUBUF)
+  from tinygrad.runtime.autogen.amd.rdna2.ins import (VOP1 as R2_VOP1, VOP1_SDST as R2_VOP1_SDST, VOP1_LIT as R2_VOP1_LIT,
+    VOP1_SDWA as R2_VOP1_SDWA, VOP2 as R2_VOP2, VOP2_LIT as R2_VOP2_LIT, VOP2_SDWA as R2_VOP2_SDWA,
+    VOPC as R2_VOPC, VOPC_SDWA_SDST as R2_VOPC_SDWA_SDST,
+    VOP3 as R2_VOP3, VOP3_SDST as R2_VOP3_SDST, VOP3SD as R2_VOP3SD, VOP3P as R2_VOP3P,
+    SOP1 as R2_SOP1, SOP1_LIT as R2_SOP1_LIT, SOP2 as R2_SOP2, SOP2_LIT as R2_SOP2_LIT,
+    SOPC as R2_SOPC, SOPC_LIT as R2_SOPC_LIT, SOPK as R2_SOPK, SOPK_LIT as R2_SOPK_LIT, SOPP as R2_SOPP,
+    SMEM as R2_SMEM, DS as R2_DS, FLAT as R2_FLAT, GLOBAL as R2_GLOBAL, SCRATCH as R2_SCRATCH)
   # Order matters: more specific encodings first, catch-alls (SOP2, VOP2) last
   # Order: base before _LIT (base matches regular ops, _LIT catches lit-only ops excluded from base)
   _FORMATS = {
@@ -57,6 +64,9 @@ def _load_formats() -> dict[str, list[type[Inst]]]:
     "cdna": [C_VOP3PX2, C_VOP3P_MFMA, C_VOP3P, C_VOP3SD, C_VOP3_SDST, C_VOP3, C_DS, C_GLOBAL, C_SCRATCH, C_FLAT, C_MUBUF, C_SMEM,
               C_SOP1, C_SOPC, C_SOPP, C_SOPK, C_SOPK_LIT, C_VOPC_SDWA_SDST, C_VOPC,
               C_VOP1_DPP16, C_VOP1_SDWA, C_VOP1, C_VOP2_DPP16, C_VOP2_SDWA, C_SOP2, C_VOP2, C_VOP2_LIT],
+    "rdna2": [R2_VOP3P, R2_VOP3SD, R2_VOP3_SDST, R2_VOP3, R2_DS, R2_GLOBAL, R2_SCRATCH, R2_FLAT, R2_SMEM,
+              R2_SOP1, R2_SOP1_LIT, R2_SOPC, R2_SOPC_LIT, R2_SOPP, R2_SOPK, R2_SOPK_LIT, R2_VOPC_SDWA_SDST, R2_VOPC,
+              R2_VOP1_SDWA, R2_VOP1_SDST, R2_VOP1, R2_VOP1_LIT, R2_VOP2_SDWA, R2_SOP2, R2_SOP2_LIT, R2_VOP2, R2_VOP2_LIT],
   }
   return _FORMATS
 
