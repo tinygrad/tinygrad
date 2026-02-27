@@ -17,11 +17,11 @@ def call_gradient(ctx:UOp, k:UOp) -> tuple[UOp|None, ...]:
   if k.arg.grad_fxn is not None: return (None,) + k.arg.grad_fxn(ctx, k)
   # auto-differentiate the function
   fxn, args = k.src[0], k.src[1:]
-  params = sorted([x for x in fxn.toposort() if x.op == Ops.PARAM], key=lambda x: x.arg)
-  grads = compute_gradient(fxn, ctx.param_like(len(args)), set(params))
+  params = {x.arg:x for x in fxn.toposort(enter_calls=False) if x.op == Ops.PARAM}
+  grads = compute_gradient(fxn, ctx.param_like(len(args)), set(params.values()))
   ret: list[UOp|None] = [None]
-  for i,p in enumerate(params):
-    if p in grads:
+  for i in range(len(args)):
+    if (p:=params.get(i, None)) is not None and p in grads:
       # TODO: compact the args and remove unused ones
       ret.append(grads[p].call(*args, ctx, name=(k.arg.name or "")+f"_backward_{i}"))
     else:

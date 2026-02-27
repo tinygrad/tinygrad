@@ -129,6 +129,31 @@ class TestFunction(unittest.TestCase):
     a = Tensor([1., 2., 3.])
     np.testing.assert_allclose(g(f(a)).numpy(), [110., 440., 990.])
 
+  def test_nested_calls_backward(self):
+    w = Tensor([[1., 2.], [3., 4.]]).contiguous().realize()
+    @function
+    def inner(x:Tensor) -> Tensor: return x + w
+    @function
+    def outer(a:Tensor, b:Tensor) -> Tensor: return inner(a.reshape(1,2) + b.reshape(1,2))
+
+    a = Tensor([1., 2.], requires_grad=True)
+    b = Tensor([3., 4.], requires_grad=True)
+    outer(a, b).sum().backward()
+    np.testing.assert_allclose(a.grad.numpy(), [2., 2.])
+    np.testing.assert_allclose(b.grad.numpy(), [2., 2.])
+
+  def test_unused_param_backward(self):
+    @function
+    def f(a:Tensor, b:Tensor, c:Tensor) -> Tensor: return a + c  # b is unused
+
+    a = Tensor([1., 2., 3.], requires_grad=True)
+    b = Tensor([4., 5., 6.], requires_grad=True)
+    c = Tensor([7., 8., 9.], requires_grad=True)
+    f(a, b, c).sum().backward()
+    np.testing.assert_allclose(a.grad.numpy(), [1., 1., 1.])
+    np.testing.assert_allclose(b.grad.numpy(), [0., 0., 0.])
+    np.testing.assert_allclose(c.grad.numpy(), [1., 1., 1.])
+
   def test_name(self):
     @function
     def f(a:Tensor) -> Tensor: return a + 1

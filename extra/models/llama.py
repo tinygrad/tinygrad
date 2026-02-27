@@ -1,6 +1,6 @@
 from typing import Union, Optional, Any
 import collections, math
-from tinygrad import Tensor, Variable, TinyJit, dtypes, nn, Device
+from tinygrad import Tensor, Variable, TinyJit, dtypes, nn, Device, function
 from tinygrad.helpers import getenv, DEBUG
 
 # https://github.com/facebookresearch/llama/blob/1076b9c51c77ad06e9d7ba8a4c6df775741732bd/llama/model.py#L47
@@ -124,6 +124,7 @@ class FeedForward:
     self.w2 = linear(hidden_dim, dim, bias=False)
     self.w3 = linear(dim, hidden_dim, bias=False) # the gate in Gated Linear Unit
 
+  @function
   def __call__(self, x:Tensor) -> Tensor:
     w1 = self.w1(x).silu()
     w3 = self.w3(x.contiguous_backward())  # this fixes a strange fusion that makes tensor cores miss
@@ -136,10 +137,12 @@ class TransformerBlock:
     self.feed_forward = feed_forward(dim, hidden_dim, linear)
     self.attention_norm = nn.RMSNorm(dim, norm_eps)
     self.ffn_norm = nn.RMSNorm(dim, norm_eps)
+    self.attention_norm_fxn = function(self.attention_norm)
+    self.ffn_norm_fxn = function(self.ffn_norm)
 
   def __call__(self, x:Tensor, start_pos:Union[Variable,int], freqs_cis:Tensor, mask:Optional[Tensor]):
-    h = x + self.attention(self.attention_norm(x), start_pos, freqs_cis, mask)
-    return (h + self.feed_forward(self.ffn_norm(h))).contiguous().contiguous_backward()
+    h = x + self.attention(self.attention_norm_fxn(x), start_pos, freqs_cis, mask)
+    return (h + self.feed_forward(self.ffn_norm_fxn(h))).contiguous().contiguous_backward()
 
 # standard openai sampling
 def sample(logits: Tensor, temp: float, k: int, p: float, af: float, ap: float):
