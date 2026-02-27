@@ -357,8 +357,7 @@ def _disasm_flat(inst: FLAT) -> str:
   if cdna: mods = f"{off_s}{' sc0' if inst.sc0 else ''}{' nt' if inst.nt else ''}{' sc1' if getattr(inst, 'sc1', 0) else ''}"  # type: ignore[attr-defined]
   elif r4:
     th_names = R4_TH_ATOMIC if 'atomic' in name else (R4_TH_STORE if 'store' in name else R4_TH_LOAD)
-    th_s = f" th:{th_names[inst.th]}" if inst.th in th_names else ""
-    mods = f"{off_s}{th_s}" + (f" scope:{R4_SCOPE[inst.scope]}" if inst.scope in R4_SCOPE else "")
+    mods = off_s + (f" th:{th_names[inst.th]}" if inst.th in th_names else "") + (f" scope:{R4_SCOPE[inst.scope]}" if inst.scope in R4_SCOPE else "")
   else: mods = f"{off_s}{' glc' if inst.glc else ''}{' slc' if inst.slc else ''}{' dlc' if inst.dlc else ''}"
   if seg == 'flat': saddr_s = ""
   elif _unwrap(inst.saddr) in (0x7F, 124): saddr_s = ", off"
@@ -367,9 +366,7 @@ def _disasm_flat(inst: FLAT) -> str:
     saddr_s = f", {(SPECIAL_PAIRS_CDNA if cdna else SPECIAL_PAIRS)[_unwrap(inst.saddr)]}"
   elif t := _ttmp(inst.saddr, 2): saddr_s = f", {t}"
   else: saddr_s = f", {_sreg(inst.saddr, 2) if _unwrap(inst.saddr) < 106 else decode_src(_unwrap(inst.saddr), cdna)}"
-  if 'addtid' in name:
-    addtid_data = (inst.vsrc if r4 else inst.data) if 'store' in name else inst.vdst  # type: ignore[attr-defined]
-    return f"{instr} {reg_fn(addtid_data)}{saddr_s}{mods}"
+  if 'addtid' in name: return f"{instr} {reg_fn((inst.vsrc if r4 else inst.data) if 'store' in name else inst.vdst)}{saddr_s}{mods}"
    # RDNA4: vaddr instead of addr, vsrc instead of data
   addr = inst.vaddr if r4 else inst.addr  # type: ignore[attr-defined]
   data = inst.vsrc if r4 else inst.data  # type: ignore[attr-defined]
