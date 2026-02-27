@@ -7,7 +7,7 @@ from tinygrad.uop import FastEnum, auto, Ops, GroupOp
 from tinygrad.uop.ops import UOp, UPat, PatternMatcher
 from tinygrad.renderer.isa import ISARenderer, IselContext, RegallocContext
 from tinygrad.codegen.late.regalloc import Register, assign
-from tinygrad.helpers import getenv, CPU_COUNT
+from tinygrad.helpers import getenv, CPU_COUNT, unwrap
 
 # ***** X86 Ops *****
 
@@ -665,11 +665,11 @@ def encode(x:UOp, opc:int, reg:int|None=None, pp:int=0, sel:int=0, we:int=0):
   # DISP byte
   if mod == 0b01 or mod == 0b10:
     assert disp_uop is not None
-    inst += struct.pack(disp_uop.dtype.fmt, disp_uop.tag)
+    inst += struct.pack(unwrap(disp_uop.dtype.fmt), disp_uop.tag)
   # IMM byte
   if imm_uop is not None:
     if isinstance(imm_uop.tag, Register): inst += bytes([(imm_uop.tag.index & 0b1111) << 4 | 0b0000])
-    else: inst += struct.pack(imm_uop.dtype.fmt, imm_uop.tag)
+    else: inst += struct.pack(unwrap(imm_uop.dtype.fmt), imm_uop.tag)
   return inst
 
 # https://www.felixcloutier.com/x86/
