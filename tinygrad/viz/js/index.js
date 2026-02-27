@@ -375,8 +375,10 @@ async function renderProfiler(path, unit, opts) {
         if (shapeRef != null) { ref = {ctx:e.ref, step:0}; shapeRef = ref; }
         else if (ref != null) {
           const start = ref.step>0 ? ref.step+1 : 0;
-          const stepIdx = ctxs[ref.ctx+1].steps.findIndex((s, i) => i >= start && s.name == e.name);
-          if (stepIdx !== -1) { ref.step = stepIdx; shapeRef = ref; }
+          const steps = ctxs[ref.ctx+1].steps;
+          for (let si=start; si<steps.length; si++) {
+            if (steps[si].name == e.name) { ref.step = si; shapeRef = ref; break; }
+          }
         } else {
           const steps = ctxs[state.currentCtx].steps;
           for (let i=state.currentStep+1; i<steps.length; i++) {
@@ -398,65 +400,74 @@ async function renderProfiler(path, unit, opts) {
       div.style("height", levelHeight*levels.length+padding+"px").style("pointerEvents", "none");
     } else {
       const peak = u64();
-      let x = 0, y = 0;
-      const buf_shapes = new Map(), temp = new Map();
       const timestamps = [], valueMap = new Map();
+      // start by unpacking the raw events
+      const memEvents = [];
+      let x = 0, y = 0, shapeIdx = 0;
+      const allocs = new Map();
       for (let j=0; j<eventsLen; j++) {
         const alloc = u8(), ts = u32(), key = u32();
         if (alloc) {
           const dtype = strings[u32()], sz = u64(), nbytes = dtypeSize[dtype]*sz;
-          const shape = {x:[x], y:[y], dtype, sz, nbytes, key};
-          buf_shapes.set(key, shape); temp.set(key, shape);
+          allocs.set(key, {nbytes, shapeKey:`${k}-${shapeIdx++}`});
+          memEvents.push({alloc, key, dtype, sz, nbytes});
           timestamps.push(ts);
           x += 1; y += nbytes; valueMap.set(ts, y);
         } else {
-          const free = buf_shapes.get(key);
-          free.users = Array.from({ length: u32() }, () => ({shape:shapeMap.get(u32()), repr:strings[u32()], num:u32(), mode:u8()}));
+          const users = Array.from({ length: u32() }, () => ({shape:shapeMap.get(u32()), repr:strings[u32()], num:u32(), mode:u8()}));
+          const {nbytes, shapeKey} = allocs.get(key); allocs.delete(key);
+          users?.forEach((u) => selectShape(u.shape).e?.arg.bufs.push({ key:shapeKey, nbytes, num:u.num, mode:u.mode, k }));
+          memEvents.push({alloc, key, users, nbytes});
           timestamps.push(ts); valueMap.set(ts, y);
-          x += 1; y -= free.nbytes;
-          free.x.push(x);
-          free.y.push(free.y.at(-1));
-          temp.delete(key);
-          for (const [k, v] of temp) {
-            if (k <= key) continue;
-            v.x.push(x, x);
-            v.y.push(v.y.at(-1), v.y.at(-1)-free.nbytes);
-          }
+          x += 1; y -= nbytes;
         }
       }
       timestamps.push(dur);
       const height = heightScale(peak);
       const yscale = d3.scaleLinear().domain([0, peak]).range([height, 0]);
-      for (const [num, {dtype, sz, nbytes, y, x:steps, users}] of buf_shapes) {
-        const x = steps.map(s => timestamps[s]);
-        const dur = x.at(-1)-x[0];
-        const arg = { tooltipText:`${dtype}\n${formatUnit(sz)}\n${formatUnit(nbytes, 'B')}\n${formatTime(dur)}`, users, key:`${k}-${shapes.length}` };
-        shapes.push({ x, y0:y.map(yscale), y1:y.map(y0 => yscale(y0+nbytes)), arg, fillColor:cycleColors(colorScheme.BUFFER, shapes.length) });
-        users?.forEach((u) => selectShape(u.shape).e?.arg.bufs.push({ key:arg.key, nbytes, num:u.num, mode:u.mode, k }));
-      }
       // generic polygon merger
       const base0 = yscale(0);
-      const allX = Array.from(new Set(shapes.flatMap(s => s.x))).sort((a,b)=>a-b);
-      const idxs = new Map(allX.map((x,i) => [x, i]));
-      const maxY = new Map(allX.map(x => [x, base0]));
-      // for every [a,b) update the max y at x
-      for (const sh of shapes) {
-        for (let i=0; i<sh.x.length-1; i++) {
-          const startIdx = idxs.get(sh.x[i]), endIdx = idxs.get(sh.x[i+1]);
-          const shapeY = sh.y1[i];
-          for (let k=startIdx; k<endIdx; k++) {
-            const x = allX[k]; maxY.set(x, Math.min(maxY.get(x), shapeY));
+      const sum = {x:[], y0:[], y1:[], fillColor:"#2B1B72"};
+      for (let i=0; i<timestamps.length-1; i++) {
+        const yv = yscale(valueMap.get(timestamps[i]));
+        sum.x.push(timestamps[i], timestamps[i+1]); sum.y1.push(yv, yv); sum.y0.push(base0, base0);
+      }
+      // build individual buffer shapes when user clicks to expand, this detailed layout is n²
+      let bufShapes = null;
+      const buildBufShapes = () => {
+        if (bufShapes != null) return bufShapes;
+        bufShapes = [];
+        const buf_shapes = new Map(), temp = new Map();
+        let x = 0, y = 0;
+        for (const e of memEvents) {
+          if (e.alloc) {
+            const shape = {x:[x], y:[y], dtype:e.dtype, sz:e.sz, nbytes:e.nbytes, key:e.key};
+            buf_shapes.set(e.key, shape); temp.set(e.key, shape);
+            x += 1; y += e.nbytes;
+          } else {
+            const free = buf_shapes.get(e.key);
+            free.users = e.users;
+            x += 1; y -= free.nbytes;
+            free.x.push(x); free.y.push(free.y.at(-1));
+            temp.delete(e.key);
+            for (const [k, v] of temp) {
+              if (k <= e.key) continue;
+              v.x.push(x, x);
+              v.y.push(v.y.at(-1), v.y.at(-1)-free.nbytes);
+            }
           }
         }
-      }
-      const sum = {x:[], y0:[], y1:[], fillColor:"#2B1B72"};
-      for (let i=0; i<allX.length-1; i++) {
-        sum.x.push(allX[i], allX[i+1]);
-        const y = maxY.get(allX[i]); sum.y1.push(y, y); sum.y0.push(base0, base0);
-      }
+        for (const [num, {dtype, sz, nbytes, y, x:steps, users}] of buf_shapes) {
+          const x = steps.map(s => timestamps[s]);
+          const dur = x.at(-1)-x[0];
+          const arg = { tooltipText:`${dtype}\n${formatUnit(sz)}\n${formatUnit(nbytes, 'B')}\n${formatTime(dur)}`, users, key:`${k}-${bufShapes.length}` };
+          bufShapes.push({ x, y0:y.map(yscale), y1:y.map(y0 => yscale(y0+nbytes)), arg, fillColor:cycleColors(colorScheme.BUFFER, bufShapes.length) });
+        }
+        return bufShapes;
+      };
       if (timestamps.length > 0) data.first = data.first == null ? timestamps[0] : Math.min(data.first, timestamps[0]);
       data.tracks.set(k, { shapes:[sum], eventType, visible, offsetY, pcolor:"#c9a8ff", height, peak, scaleFactor:maxheight*4/height,
-                           views:[[sum], shapes], valueMap, rowBorderColor });
+                           get views() { return [[sum], buildBufShapes()]; }, valueMap, rowBorderColor });
       div.style("height", height+padding+"px").style("cursor", "pointer").on("click", (e) => {
         const newFocus = e.currentTarget.id === focusedDevice ? null : e.currentTarget.id;
         let offset = 0;
