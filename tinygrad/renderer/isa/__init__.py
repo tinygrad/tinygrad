@@ -107,7 +107,7 @@ class ISARenderer(Renderer):
   isel_matcher: PatternMatcher
   post_regalloc_matcher: PatternMatcher
   def stack_pointer(self) -> UOp: raise NotImplementedError("arch specific")
-  def asm(self, uops:list[UOp]) -> str: raise NotImplementedError("arch specific")
+  def asm(self, uops:list[UOp], function_name:str) -> str: raise NotImplementedError("arch specific")
   # TODO: these should go with the other rewrites in codegen
   def lower(self, sink:UOp):
     function_name = sink.arg.function_name

@@ -148,11 +148,6 @@ extra_matcher = PatternMatcher([
   # casting uint64 to float requires special handling
   (UPat.var("y", dtypes.uint64).cast(dtypes.floats, name="x"), lambda y,x:
    (y >> 1).cast(dtypes.int64).cast(x.dtype) * 2 + (y & 1).cast(dtypes.int64).cast(x.dtype)),
-  # TODO: these should be removed once max is canonicalized
-  # no max for scalar ints
-  (UPat(Ops.MAX, dtypes.ints, name="m"), lambda m: (m.src[0] < m.src[1]).where(m.src[1], m.src[0]) if m.dtype.count == 1 else None),
-  # even with Ops.MAX in decompositions this pattern still hits
-  ((UPat.var("a") < UPat.var("b")).where(UPat.var("b", dtypes.floats), UPat.var("a")), lambda a,b: UOp(Ops.MAX, b.dtype, (a, b))),
   # no int8 mul or cmove, cast to int16
   (UPat.var("a", dtypes.int8s) * UPat.var("b"), lambda a,b: (a.cast(dtypes.int16) * b.cast(dtypes.int16)).cast(a.dtype)),
   (UPat.var("m").where(UPat.var("a", (dtypes.bool,)+dtypes.int8s), UPat.var("b")),
@@ -462,8 +457,10 @@ isel_matcher = PatternMatcher([
   (UPat(Ops.FDIV, dtypes.float32, name="x"), lambda x: x.ins(X86Ops.VDIVSS if x.dtype.count == 1 else X86Ops.VDIVPS)),
   (UPat(Ops.FDIV, dtypes.float64, name="x"), lambda x: x.ins(X86Ops.VDIVSD if x.dtype.count == 1 else X86Ops.VDIVPD)),
   # TODO: these should use a.maximum(b) / a.minimum(b)
-  (UPat(Ops.MAX, dtypes.float32, name="x"), lambda x: x.ins(X86Ops.VMAXSS if x.dtype.count == 1 else X86Ops.VMAXPS)),
-  (UPat(Ops.MAX, dtypes.float64, name="x"), lambda x: x.ins(X86Ops.VMAXSD if x.dtype.count == 1 else X86Ops.VMAXPD)),
+  ((UPat.var("a", dtypes.float32) < UPat.var("b")).where(UPat.var("b"), UPat.var("a")), lambda a,b:
+   a.ins(X86Ops.VMAXSS if a.dtype.count == 1 else X86Ops.VMAXPS, src=(a, b))),
+  ((UPat.var("a", dtypes.float64) < UPat.var("b")).where(UPat.var("b"), UPat.var("a")), lambda a,b:
+   a.ins(X86Ops.VMAXSD if a.dtype.count == 1 else X86Ops.VMAXPD, src=(a, b))),
   ((UPat.var("a", dtypes.float32) < UPat.var("b")).where(UPat.var("a"), UPat.var("b")), lambda a,b:
    a.ins(X86Ops.VMINSS if a.dtype.count == 1 else X86Ops.VMINPS, src=(a, b))),
   ((UPat.var("a", dtypes.float64) < UPat.var("b")).where(UPat.var("a"), UPat.var("b")), lambda a,b:
@@ -795,7 +792,7 @@ class X86Renderer(ISARenderer):
   isel_matcher = isel_matcher
   post_regalloc_matcher = post_regalloc_matcher
   isa_spec = isa_spec
-  code_for_op = {x: lambda: None for x in (Ops.SQRT, Ops.AND, Ops.OR, Ops.SHL, Ops.SHR, Ops.NEG, Ops.SUB, Ops.FDIV, Ops.CMPLT, Ops.CMPEQ, Ops.MAX)}
+  code_for_op = {x: lambda: None for x in (Ops.SQRT, Ops.AND, Ops.OR, Ops.SHL, Ops.SHR, Ops.NEG, Ops.SUB, Ops.FDIV, Ops.CMPLT, Ops.CMPEQ)}
   def __init__(self):
     from tinygrad.runtime.support.compiler_cpu import X86Compiler
     self.compiler = X86Compiler()
