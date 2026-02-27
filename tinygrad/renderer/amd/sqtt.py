@@ -107,7 +107,7 @@ class InstOpRDNA4(Enum):
   NEXT = 0x2
   MESSAGE = 0x4
   VALU_64 = 0x6
-  VALU_64_SHIFT = 0x7     # v_lshrrev_b64, v_mad_co_i64_i32
+  VALU_MAD64 = 0x7
   VALU_WMMA = 0x46
   VMEM = 0x10
   VMEM_128 = 0x11
