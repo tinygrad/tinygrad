@@ -134,7 +134,10 @@ class TestSQTTMatchesBinary(unittest.TestCase):
   def _test_bit_counts(self, layout: int):
     if not (tables := extract_bit_tables()): self.skipTest("rocprof-trace-decoder not installed")
     from tinygrad.renderer.amd.sqtt import PACKET_TYPES_RDNA3, PACKET_TYPES_RDNA4
+    # rocprof's bit table says L4 type 7 (TS_DELTA_S8_W3) is 72 bits, but the actual decoder uses 64 bits
+    skip = {(4, 7)}
     for type_id, pkt_cls in {3: PACKET_TYPES_RDNA3, 4: PACKET_TYPES_RDNA4}[layout].items():
+      if (layout, type_id) in skip: continue
       with self.subTest(packet=pkt_cls.__name__):
         self.assertEqual(pkt_cls._size_nibbles * 4, tables[layout - 2][type_id])  # type: ignore[attr-defined]
 

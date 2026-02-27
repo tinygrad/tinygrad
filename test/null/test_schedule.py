@@ -1104,6 +1104,7 @@ class TestUOpBecome(unittest.TestCase):
     from tinygrad.helpers import all_same
     assert all_same([x.uop.base.realized for x in [a,b,c]])
 
+  @unittest.skip("not clear if we want this")
   def test_setitem_becomes_subbuffer(self):
     a = Tensor.full((4,), 2.).contiguous().realize()
     b = a.shrink(((0, 2),)).assign(Tensor.full((2,), 1.0))

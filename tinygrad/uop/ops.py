@@ -868,6 +868,8 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
   def param_like(self, slot:int):
     if self.op is Ops.BIND:
       return UOp.param(slot, self.dtype, self._shape, self._device, self._min_max, self.src[0].arg[0])
+    if self.axis is not None:
+      return UOp.param(slot, self.dtype, self.shard_shape, self._device).multi(self.axis)
     return UOp.param(slot, self.dtype, self._shape, self._device)
 
   def call(self, *srcs:UOp, grad_fxn:Callable|None=None, metadata:tuple[Metadata, ...]=(), name:str|None=None) -> UOp:
@@ -1423,6 +1425,7 @@ def bitcast(x, in_dtype:DType, out_dtype:DType):
 
 renderer = PatternMatcher([
   (UPat((Ops.DEFINE_VAR,), name="x"), lambda x: x.expr),
+  (UPat(Ops.PARAM, src=(UPat(), UPat(), UPat(), UPat(), UPat(Ops.NOOP, name="x"))), lambda x: x.arg),
   (UPat((Ops.SPECIAL), name="x"), lambda x: x.arg),
   (UPat(Ops.RANGE, name="x"), lambda x: f"r{range_str(x)}"),
   (UPat((Ops.CONST, Ops.VCONST), name="x"), lambda x: str(x.arg)),
