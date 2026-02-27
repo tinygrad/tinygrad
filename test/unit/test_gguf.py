@@ -146,7 +146,7 @@ class TestGGUFGEMV(unittest.TestCase):
     buf += b"\x00" * ((32 - len(buf) % 32) % 32)                # pad to alignment=32
     buf += q_data.tobytes()
 
-    _, tensors = gguf_load(Tensor(np.frombuffer(buf, dtype=np.uint8).copy()))
+    _, tensors = gguf_load(Tensor(np.frombuffer(buf, dtype=np.uint8)).to(None))
 
     x = rng.standard_normal(cols).astype(np.float32)
     np.testing.assert_allclose((tensors["weight"] @ Tensor(x)).numpy(), ref @ x, atol=1e-2, rtol=1e-2)
