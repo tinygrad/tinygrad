@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field, replace
 import itertools
-from tinygrad.dtype import dtypes, PtrDType, ImageDType, AddrSpace
+from tinygrad.dtype import dtypes, PtrDType, ImageDType, AddrSpace, Invalid
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, _substitute, KernelInfo
 from tinygrad.uop.ops import graph_rewrite, sint, AxisType, BottomUpGate, profile_matches, should_resolve_call
 from tinygrad.uop.symbolic import symbolic
@@ -229,8 +229,9 @@ def remove_bufferize(src:UOp, buf:UOp, idx:UOp):
 
   # if it makes it here, the bufferize is removed
   # this is the ranges replaced
-  # NOTE: if buf src is a const, we don't replace it
-  return src.substitute({k:v for k,v in zip(buf.src[1:], idx.src[1:]) if k.op is not Ops.CONST}, extra_pm=pm_gate_substitute)
+  # NOTE: if buf src is a const, we don't replace it. if idx is Invalid (dead load), don't replace it either
+  subs = {k:v for k,v in zip(buf.src[1:], idx.src[1:]) if k.op is not Ops.CONST and not (v.op is Ops.CONST and v.arg is Invalid)}
+  return src.substitute(subs, extra_pm=pm_gate_substitute)
 
 def remove_noop_bufferize(idx,b2):
   if idx.src[1:] != b2.src[1:] or idx.src[0].op is Ops.BUFFER_VIEW: return None
