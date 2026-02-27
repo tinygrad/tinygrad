@@ -110,6 +110,7 @@ class ISARenderer(Renderer):
   def asm(self, uops:list[UOp]) -> str: raise NotImplementedError("arch specific")
   # TODO: these should go with the other rewrites in codegen
   def lower(self, sink:UOp):
+    function_name = sink.arg.function_name
     sink = graph_rewrite(sink, self.pre_isel_matcher, name="pre instruction selection", bottom_up=True)
     isel_ctx = IselContext(sink)
     sink = graph_rewrite(sink, self.isel_matcher, ctx=isel_ctx, name="instruction selection", bottom_up=True)
@@ -120,6 +121,6 @@ class ISARenderer(Renderer):
     lst = line_rewrite(lst, pm_regalloc, regalloc_ctx)
     lst = line_rewrite(lst, pm_insert_spills, regalloc_ctx)
     lst = line_rewrite(lst, self.post_regalloc_matcher, regalloc_ctx)
-    if DEBUG >= 4: print(self.asm(lst))
+    if DEBUG >= 4: print(self.asm(lst, function_name))
     if SPEC: type_verify(lst, self.isa_spec)
     return lst

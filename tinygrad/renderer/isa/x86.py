@@ -135,7 +135,6 @@ extra_matcher = PatternMatcher([
   (UPat.var('x', dtypes.bool).ne(UPat.var('y')), lambda x,y: x^y),
   (UPat.var('x', dtypes.bool).alu(Ops.CMPEQ, UPat.var('y')), lambda x,y: (x^y)^True),
   (UPat.var('x', dtypes.bool)<UPat.var('y'), lambda x,y: (x^True)&y),
-  # *** NOOP ***
   # cast to pointer is a noop
   (UPat.var("y").cast(name="x"), lambda y,x: y if isinstance(x.dtype, PtrDType) or y.dtype == dtypes.void else None),
   # can't cast from float16 to ints/float64 directly and vice versa
@@ -178,8 +177,6 @@ extra_matcher = PatternMatcher([
 
 # these must be done in a separate matcher because they violate the spec
 pre_isel_matcher = PatternMatcher([
-  # cast from pointer is a noop
-  (UPat.var("y").cast(name="x"), lambda y,x: x.replace(op=Ops.NOOP) if isinstance(y.dtype, PtrDType) else None),
   # zero extending scalar 32bit int is a noop
   (UPat.var("y", dtypes.uint32).cast(dtypes.int64s, name="x"), lambda y,x: x.replace(op=Ops.NOOP) if y.dtype.count == 1 else None),
   # cast between signed and unsigned int is a noop
@@ -211,24 +208,28 @@ pre_isel_matcher = PatternMatcher([
 
 # ***** X86 registers *****
 
-RAX = Register("rax", 0) # {4:"eax", 2:"ax", 1:"al"}
-RCX = Register("rcx", 1) # {4:"ecx", 2:"cx", 1:"cl"}
-RDX = Register("rdx", 2) # {4:"edx", 2:"dx", 1:"dl"}
-RBX = Register("rbx", 3) # {4:"ebx", 2:"bx", 1:"bl"}
-RSP = Register("rsp", 4) # {4:"esp", 2:"sp", 1:"spl"}
-RBP = Register("rbp", 5) # {4:"ebp", 2:"bp", 1:"bpl"}
-RSI = Register("rsi", 6) # {4:"esi", 2:"si", 1:"sil"}
-RDI = Register("rdi", 7) # {4:"edi", 2:"di", 1:"dil"}
+RAX = Register("rax", 0)
+RCX = Register("rcx", 1)
+RDX = Register("rdx", 2)
+RBX = Register("rbx", 3)
+RSP = Register("rsp", 4)
+RBP = Register("rbp", 5)
+RSI = Register("rsi", 6)
+RDI = Register("rdi", 7)
 GPR = (RAX, RCX, RDX, RBX, RSP, RBP, RSI, RDI) + tuple(Register(f"r{i}", i) for i in range(8, 16))
-XMM = tuple(Register(f"ymm{i}", i) for i in range(16))
+XMM = tuple(Register(f"xmm{i}", i) for i in range(16))
 # gprs you can write to
 WGPR = tuple(r for r in GPR if r != RSP)
+
+reg_strs = {"rax": {4:"eax", 2:"ax", 1:"al"}, "rcx": {4:"ecx", 2:"cx", 1:"cl"}, "rdx": {4:"edx", 2:"dx", 1:"dl"}, "rbx": {4:"ebx", 2:"bx", 1:"bl"},
+        "rsp": {4:"esp", 2:"sp", 1:"spl"}, "rbp": {4:"ebp", 2:"bp", 1:"bpl"}, "rsi": {4:"esi", 2:"si", 1:"sil"}, "rdi": {4:"edi", 2:"di", 1:"dil"},
+        **{f"r{i}": {4:f"r{i}d", 2:f"r{i}w", 1:f"r{i}b"} for i in range(8, 16)}, **{f"xmm{i}": {64:f"zmm{i}", 32:f"ymm{i}"} for i in range(16)}}
 
 # ***** X86 instruction selection *****
 
 def to_int(dt:DType): return {dtypes.float16: dtypes.int16, dtypes.float32: dtypes.int32, dtypes.float64: dtypes.int64}[dt]
 def def_reg(dt:DType, reg:Register|None=None) -> UOp: return UOp(Ops.INS, arg=X86Ops.DEFINE_REG, dtype=dt, tag=reg)
-def imm(dt:DType, v:int|float) -> UOp: return UOp(Ops.INS, arg=X86Ops.IMM, dtype=dt, tag=truncate[dt](v))
+def imm(dt:DType, v:int) -> UOp: return UOp(Ops.INS, arg=X86Ops.IMM, dtype=dt, tag=truncate[dt](v))
 def to_imm(c:UOp) -> UOp|None:
   if c.op is not Ops.CONST: return None
   if c.dtype is dtypes.int64: return imm(dtypes.int32, c.arg) if not c.overflows(dtypes.int32) else None
@@ -344,9 +345,9 @@ isel_matcher = PatternMatcher([
   (UPat((Ops.DEFINE_REG, Ops.DEFINE_LOCAL), name="x"), lambda ctx,x:
    x.ins(X86Ops.LEA, src=(def_reg(dtypes.uint64, RSP), UOp(Ops.NOOP), imm(dtypes.int32, ctx.inc_stack(x.dtype.nbytes()))))),
   # constants that can't be immediates, move them to registers
-  (UPat(Ops.CONST, dtypes.int64s, name="x"), lambda x: x.ins(X86Ops.MOVABS, src=(imm(x.dtype, x.arg),))),
-  (UPat(Ops.CONST, dtypes.ints+(dtypes.bool,), name="x"), lambda x: x.ins(X86Ops.MOVi, src=(imm(x.dtype, x.arg),))),
-  (UPat(Ops.CONST, (dtypes.float16, dtypes.float32, dtypes.float64), name="x"), lambda x:
+  (UPat.cvar("x", dtypes.int64s), lambda x: x.ins(X86Ops.MOVABS, src=(imm(x.dtype, x.arg),))),
+  (UPat.cvar("x", dtypes.ints+(dtypes.bool,)), lambda x: x.ins(X86Ops.MOVi, src=(imm(x.dtype, x.arg),))),
+  (UPat.cvar("x", dtypes.floats), lambda x:
    UOp.const(dt:=to_int(x.dtype), struct.unpack(dt.fmt, struct.pack(x.dtype.fmt, x.arg))[0]).bitcast(x.dtype)),
   # conditional moves that use masks NOTE: these currently assume a mask producing cmp exists
   (UPat.var("m").where(UPat.var("a", dtypes.ints), UPat.var("b")), lambda m,a,b:
@@ -799,10 +800,11 @@ class X86Renderer(ISARenderer):
     from tinygrad.runtime.support.compiler_cpu import X86Compiler
     self.compiler = X86Compiler()
   def stack_pointer(self) -> UOp: return UOp(Ops.INS, arg=X86Ops.DEFINE_REG, dtype=dtypes.uint64, tag=RSP)
-  def asm(self, uops:list[UOp]) -> str:
-    def _format_op(x:UOp) -> str: return f"    {(str(x.arg)[7:-1] if str(x.arg)[-1] in ('i', 'm') else str(x.arg)[7:]).lower():7s}"
+  def asm(self, uops:list[UOp], function_name:str) -> str:
+    def _format_op(x:UOp) -> str: return f"    {(o[7:-1] if (o:=str(x.arg))[-1] in ('i', 'm') else o[7:]).lower():7s}"
     def _format_operands(x:UOp) -> str:
-      def _format(src:tuple[UOp, ...]) -> list[str]: return [str(s.tag) for s in src if s.tag is not None]
+      def _format(src:tuple[UOp, ...]) -> list[str]:
+        return [reg_strs[o].get(s.dtype.itemsize, o) if (o:=str(s.tag)) in reg_strs else o for s in src if s.tag is not None]
       def _mem_adress(base:UOp, idx:UOp, disp:UOp) -> str:
         return f"[{base.tag}" + (f" + {idx.tag}*{base.dtype.itemsize}" if idx.tag else "") + (f" + {disp.tag}" if disp.tag else "") + "]"
 
@@ -814,7 +816,7 @@ class X86Renderer(ISARenderer):
         return ", ".join(_format((x, x.src[0])) + [_mem_adress(*x.src[1:4])] + _format(x.src[4:]))
       return ", ".join(_format((x,) + x.src))
 
-    asm = []
+    asm = [f".{function_name}:"]
     for u in uops:
       if u.op in (Ops.GROUP, Ops.NOOP, Ops.AFTER, Ops.BARRIER): continue
       if u.arg in (X86Ops.IMM, X86Ops.DEFINE_REG): continue

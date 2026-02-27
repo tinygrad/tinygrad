@@ -10,7 +10,7 @@ class Register:
   index: int
   cons: tuple[Register, ...] = field(default_factory=tuple)
 
-  def __str__(self): return self.name
+  def __repr__(self): return self.name
 
 # loosely based on: https://bernsteinbear.com/assets/img/register-spilling-range-splitting-ssa.pdf
 class RegallocContext:
