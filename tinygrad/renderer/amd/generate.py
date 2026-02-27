@@ -271,7 +271,7 @@ def _extract_pcode_rdna2(pages: list[list[tuple[float, float, str, str]]], name_
 
   pcode: dict[tuple[str, int], str] = {}
   for i, (page_idx, y, name, opcode) in enumerate(all_instructions):
-    next_page, next_y = (all_instructions[i+1][0], all_instructions[i+1][1]) if i+1 < len(all_instructions) else (page_idx, 0)
+    next_page, next_y = (all_instructions[i+1][0], all_instructions[i+1][1]) if i+1 < len(all_instructions) else (page_idx, 0.0)
     lines: list[str] = []
     for p in range(page_idx, min(next_page + 1, len(pages))):
       start_y = y if p == page_idx else 800
