@@ -53,6 +53,7 @@ class Attention:
     self.q_norm = nn.RMSNorm(dim, qk_norm) if qk_norm is not None else None
     self.k_norm = nn.RMSNorm(dim, qk_norm) if qk_norm is not None else None
 
+  @function
   def __call__(self, x:Tensor, start_pos:Union[Variable,int], freqs_cis:Tensor, mask:Optional[Tensor]=None) -> Tensor:
     if getenv("WQKV"):
       xqkv = self.wqkv(x)

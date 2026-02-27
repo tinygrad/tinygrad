@@ -1,6 +1,6 @@
 from typing import cast
 import math, dataclasses
-from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, all_metadata
+from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, all_metadata, graph_rewrite
 from tinygrad.helpers import argsort
 
 def reduce_gradient(ctx:UOp, ret:UOp, op:Ops):
@@ -22,8 +22,13 @@ def call_gradient(ctx:UOp, k:UOp) -> tuple[UOp|None, ...]:
   ret: list[UOp|None] = [None]
   for i in range(len(args)):
     if (p:=params.get(i, None)) is not None and p in grads:
+      uop = grads[p]
       # TODO: compact the args and remove unused ones
-      ret.append(grads[p].call(*args, ctx, name=(k.arg.name or "")+f"_backward_{i}"))
+      call_uops = list(args) + [ctx]
+      # sometimes there's (new) buffers in the gradient, we need to make these grads
+      from tinygrad.function import pm_ctx
+      uop = graph_rewrite(uop, pm_ctx, call_uops, bottom_up=True, name="get_implicit_inputs")
+      ret.append(uop.call(*call_uops, name=(k.arg.name or "")+f"_backward_{i}"))
     else:
       ret.append(None)
   return tuple(ret)
