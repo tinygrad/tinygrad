@@ -124,7 +124,6 @@ class FeedForward:
     self.w2 = linear(hidden_dim, dim, bias=False)
     self.w3 = linear(dim, hidden_dim, bias=False) # the gate in Gated Linear Unit
 
-  @function
   def __call__(self, x:Tensor) -> Tensor:
     w1 = self.w1(x).silu()
     w3 = self.w3(x.contiguous_backward())  # this fixes a strange fusion that makes tensor cores miss
@@ -138,9 +137,16 @@ class TransformerBlock:
     self.attention_norm = nn.RMSNorm(dim, norm_eps)
     self.ffn_norm = nn.RMSNorm(dim, norm_eps)
 
+  @function
+  def _attention(self, x:Tensor, start_pos:Union[Variable,int], freqs_cis:Tensor, mask:Optional[Tensor]):
+    return x + self.attention(self.attention_norm(x), start_pos, freqs_cis, mask)
+
+  @function
+  def _feed_forward(self, h:Tensor):
+    return h + self.feed_forward(self.ffn_norm(h))
+
   def __call__(self, x:Tensor, start_pos:Union[Variable,int], freqs_cis:Tensor, mask:Optional[Tensor]):
-    h = x + self.attention(function(self.attention_norm)(x), start_pos, freqs_cis, mask)
-    return (h + self.feed_forward(function(self.ffn_norm)(h))).contiguous().contiguous_backward()
+    return self._feed_forward(self._attention(x, start_pos, freqs_cis, mask)).contiguous().contiguous_backward()
 
 # standard openai sampling
 def sample(logits: Tensor, temp: float, k: int, p: float, af: float, ap: float):
