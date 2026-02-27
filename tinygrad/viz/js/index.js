@@ -509,10 +509,14 @@ async function renderProfiler(path, unit, opts) {
     const visibleX = xscale.range().map(zoomLevel.invertX, zoomLevel).map(xscale.invert, xscale);
     const st = visibleX[0], et = visibleX[1];
     xscale.domain([st, et]);
+    const profilerEl = profiler.node();
+    const visibleYStart = profilerEl.scrollTop-canvasTop + rect(profilerEl).top, visibleYEnd = visibleYStart+profilerEl.clientHeight;
     ctx.textBaseline = "middle";
     // draw shapes
     for (const [k, { shapes, eventType, visible, offsetY, valueMap, pcolor, scolor, rowBorderColor }] of data.tracks) {
       visible.length = 0;
+      const trackHeight = rect(document.getElementById(k)).height;
+      if (offsetY+trackHeight < visibleYStart || offsetY > visibleYEnd) continue;
       const addBorder = scolor != null ? (w) => { if (w > 10) { ctx.strokeStyle = scolor; ctx.stroke(); } } : null;
       for (const e of shapes) {
         if (eventType === EventTypes.BUF) { // generic polygon
@@ -546,7 +550,7 @@ async function renderProfiler(path, unit, opts) {
       }
       // draw row line
       if (rowBorderColor != null) {
-        const y = offsetY+rect(document.getElementById(k)).height-padding/2 - 0.5;
+        const y = offsetY+trackHeight-padding/2 - 0.5;
         drawLine(ctx, [0, canvasWidth], [y, y], { color:rowBorderColor });
       }
     }
@@ -610,6 +614,7 @@ async function renderProfiler(path, unit, opts) {
   document.addEventListener("contextmenu", e => e.ctrlKey && e.preventDefault());
 
   new ResizeObserver(([e]) => e.contentRect.width > 0 && resize()).observe(profiler.node());
+  profiler.on("scroll", () => render(zoomLevel));
 
   function findRectAtPosition(x, y) {
     let track = null;
