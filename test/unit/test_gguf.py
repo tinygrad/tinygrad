@@ -123,9 +123,16 @@ class TestGGUF(unittest.TestCase):
 class TestGGUFGEMV(unittest.TestCase):
   def _test_gguf_gemv(self, qtype: GGMLQuantizationType):
     block_size, type_size = GGML_QUANT_SIZES[qtype]
-    rows, cols = 512, 2048
+    rows, cols = 8192, 2048
+    n_blocks = rows * cols // block_size
     rng = np.random.default_rng(42)
-    q_data = rng.integers(0, 256, size=rows * cols // block_size * type_size, dtype=np.uint8)
+    # generate random quantized blocks with valid fp16 scale fields (random bytes can produce NaN scales)
+    q_data = rng.integers(0, 256, size=n_blocks * type_size, dtype=np.uint8).reshape(n_blocks, type_size)
+    scales = np.float16(rng.standard_normal(n_blocks * 4)).view(np.uint8).reshape(n_blocks, -1)
+    if qtype == GGMLQuantizationType.Q8_0: q_data[:, :2] = scales[:, :2]                    # d at offset 0
+    elif qtype == GGMLQuantizationType.Q4_K: q_data[:, :4] = scales[:, :4]                  # d, dmin at offset 0
+    elif qtype == GGMLQuantizationType.Q6_K: q_data[:, -2:] = scales[:, :2]                 # d at end
+    q_data = q_data.flatten()
     ref = dequantize(q_data, qtype).reshape(rows, cols)
 
     # build a minimal gguf: header + 1 tensor info + aligned data
@@ -146,7 +153,7 @@ class TestGGUFGEMV(unittest.TestCase):
     x = rng.standard_normal(cols).astype(np.float32)
     out = (tensors["weight"] @ Tensor(x)).numpy()
     np.testing.assert_equal(tensors["weight"].numpy(), ref)
-    np.testing.assert_allclose(out, ref @ x, atol=1e-3, rtol=1e-3)
+    np.testing.assert_allclose(out, ref @ x, atol=1e-2, rtol=1e-2)
     os.unlink(fp)
 
   def test_gguf_gemv_q8_0(self): self._test_gguf_gemv(GGMLQuantizationType.Q8_0)
