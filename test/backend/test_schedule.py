@@ -1406,5 +1406,37 @@ class TestFusionOp(unittest.TestCase):
     outd = out.tolist()
     assert all(x == 20.0 for x in outd)
 
+class TestBufferViewDedup(unittest.TestCase):
+  def test_subbuffers_share_kernel(self):
+    """Sub-buffers at different offsets into the same base should produce identical kernels (same compiled program)."""
+    from tinygrad.engine.realize import method_cache
+    from tinygrad.uop.ops import buffers
+    big = Tensor.arange(10000, dtype=dtypes.float32).contiguous().realize()
+    base_buf = big.uop.buffer
+    subs = []
+    for off in [100, 500]:
+      sub_uop = UOp.new_buffer(big.device, 100, big.dtype)
+      buffers[sub_uop] = base_buf.view(100, big.dtype, off * big.dtype.itemsize)
+      subs.append(Tensor(sub_uop, big.device, big.dtype).reshape(100).sum())
+    method_cache.clear()
+    sched = Tensor.schedule(*subs)
+    for si in sched: si.lower()
+    compiled = [si for si in sched if isinstance(si.prg, CompiledRunner)]
+    self.assertEqual(len({id(si.prg) for si in compiled}), 1)
+
+  def test_subbuffers_correct_values(self):
+    """Sub-buffers should read correct data from their respective offsets."""
+    from tinygrad.uop.ops import buffers
+    big = Tensor.arange(10000, dtype=dtypes.float32).contiguous().realize()
+    base_buf = big.uop.buffer
+    results = []
+    for off in [100, 500]:
+      sub_uop = UOp.new_buffer(big.device, 100, big.dtype)
+      buffers[sub_uop] = base_buf.view(100, big.dtype, off * big.dtype.itemsize)
+      results.append(Tensor(sub_uop, big.device, big.dtype).reshape(100).sum())
+    Tensor.realize(*results)
+    np.testing.assert_allclose(results[0].item(), np.arange(100, 200, dtype=np.float32).sum())
+    np.testing.assert_allclose(results[1].item(), np.arange(500, 600, dtype=np.float32).sum())
+
 if __name__ == '__main__':
   unittest.main(verbosity=2)
