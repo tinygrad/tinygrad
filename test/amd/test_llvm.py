@@ -40,7 +40,7 @@ RDNA4_FILES = ['gfx12_asm_sop1.s', 'gfx12_asm_sop2.s', 'gfx12_asm_sopp.s', 'gfx1
   'gfx12_asm_vop1.s', 'gfx12_asm_vop2.s', 'gfx12_asm_vopc.s', 'gfx12_asm_vopcx.s', 'gfx12_asm_vop3.s', 'gfx12_asm_vop3c.s',
   'gfx12_asm_vop3cx.s', 'gfx12_asm_vop3p.s', 'gfx12_asm_vop3_from_vop1.s', 'gfx12_asm_vop3_from_vop2.s',
   'gfx12_asm_vop3p_features.s', 'gfx12_asm_vopd.s', 'gfx12_asm_vopd_features.s',
-  'gfx12_asm_ds.s', 'gfx12_asm_smem.s',
+  'gfx12_asm_ds.s', 'gfx12_asm_smem.s', 'gfx12_asm_vflat.s',
   'gfx12_asm_wmma_w32.s']
 
 def _parse_llvm_tests(text: str, pattern: str) -> list[tuple[str, bytes]]:
