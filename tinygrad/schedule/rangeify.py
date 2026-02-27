@@ -92,6 +92,7 @@ def resolve_call(c:UOp, allow_param_mismatch=True) -> UOp|None:
   for i, (p, a) in enumerate(dict_map.items()):
     if p.max_shape != a.max_shape: raise TypeError(f"arg {i} shape mismatch: expected {p.shape}, got {a.shape}")
     if p.dtype != a.dtype: raise TypeError(f"arg {i} dtype mismatch: expected {p.dtype}, got {a.dtype}")
+    if p.axis != a.axis: raise TypeError(f"arg {i} axis mismatch: expected {p.axis}, got {a.axis}")
   return c.src[0].substitute(dict_map, walk=True)
 
 earliest_rewrites = mop_cleanup+PatternMatcher([

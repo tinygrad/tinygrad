@@ -255,5 +255,51 @@ class TestFunctionMulti(unittest.TestCase):
     f(x).sum().backward()
     np.testing.assert_allclose(w.grad.numpy(), [4., 5., 6., 7.])
 
+  def test_call_axis(self):
+    @function
+    def f(x:Tensor, w:Tensor) -> Tensor: return x @ w
+
+    x = Tensor([[1.,0.],[0.,1.],[1.,1.],[0.,0.]]).shard(self.devices_2, axis=0)
+    w = Tensor([[1.,2.],[3.,4.]]).shard(self.devices_2, axis=None)
+    result = f(x, w)
+    # CALL output should inherit axis=0 from the sharded input
+    self.assertEqual(result.uop.axis, 0)
+    # reduce on the sharded axis should remove it
+    self.assertIsNone(result.sum().uop.axis)
+
+  def test_call_axis_shard_inside(self):
+    @function
+    def f(x:Tensor, w:Tensor) -> Tensor:
+      return x.shard(self.devices_2, axis=0) @ w.shard(self.devices_2, axis=None)
+
+    x = Tensor([[1.,0.],[0.,1.],[1.,1.],[0.,0.]])
+    w = Tensor([[1.,2.],[3.,4.]])
+    result = f(x, w)
+    self.assertEqual(result.uop.axis, 0)
+    np.testing.assert_allclose(result.numpy(), x.numpy() @ w.numpy())
+
+  def test_data_parallel_backward(self):
+    @function
+    def f(x:Tensor, w:Tensor) -> Tensor: return x @ w
+
+    x = Tensor([[1.,0.],[0.,1.],[1.,1.],[0.,0.]], requires_grad=True).shard(self.devices_2, axis=0)
+    w = Tensor([[1.,2.],[3.,4.]], requires_grad=True).shard(self.devices_2, axis=None)
+    w.realize()
+    f(x, w).sum().backward()
+    # d/dx = ones @ w^T = [[1,3],[1,3],[1,3],[1,3]], but sum so ones(4,2) @ w^T? no:
+    # L = sum(x @ w), dL/dx = ones(4,2) @ w^T... actually dL/d(xw) = ones(4,2), dL/dx = ones(4,2) @ w^T
+    np.testing.assert_allclose(x.grad.numpy(), np.ones((4,2)) @ np.array([[1,3],[2,4]]))
+
+  def test_data_parallel_backward_4(self):
+    devices_4 = tuple(f"CPU:{i}" for i in range(4))
+    @function
+    def f(x:Tensor, w:Tensor) -> Tensor: return x @ w
+
+    x = Tensor(np.arange(16).reshape(8,2).astype(np.float32), requires_grad=True).shard(devices_4, axis=0)
+    w = Tensor([[1.,2.],[3.,4.]], requires_grad=True).shard(devices_4, axis=None)
+    w.realize()
+    f(x, w).sum().backward()
+    np.testing.assert_allclose(x.grad.numpy(), np.ones((8,2)) @ np.array([[1,3],[2,4]]))
+
 if __name__ == '__main__':
   unittest.main()
