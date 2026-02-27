@@ -64,10 +64,10 @@ def create_alu_inst(op:Enum, builder:functools.partial[Inst]) -> Inst:
 # ** create a memory instruction with pre set address registers
 
 MEM_PRESET_REGS:dict[str, dict[str, Reg]] = {
-  "VGLOBAL": {"saddr": s[S_BUF_PTR[0]:S_BUF_PTR[1]], "vaddr": v[V_VADDR[0]:V_VADDR[1]]},
-  "GLOBAL": {"saddr": s[S_BUF_PTR[0]:S_BUF_PTR[1]], "addr": v[V_DS_ADDR]},  # addr is 32-bit offset when saddr is valid SGPR
-  "DS": {"addr": v[V_DS_ADDR]},
-  "SMEM": {"sbase": s[S_KERNARG_PTR[0]:S_KERNARG_PTR[1]], "soffset": NULL},
+  "VGLOBAL":{"saddr":s[S_BUF_PTR[0]:S_BUF_PTR[1]], "vaddr":v[V_VADDR[0]:V_VADDR[1]]},
+  "GLOBAL":{"saddr":s[S_BUF_PTR[0]:S_BUF_PTR[1]], "addr":v[V_DS_ADDR]},  # addr is 32-bit offset when saddr is valid SGPR
+  "DS":{"addr":v[V_DS_ADDR]},
+  "SMEM":{"sbase":s[S_KERNARG_PTR[0]:S_KERNARG_PTR[1]], "soffset":NULL},
 }
 
 def create_mem_inst(op:Enum, builder:functools.partial[Inst]) -> Inst:
