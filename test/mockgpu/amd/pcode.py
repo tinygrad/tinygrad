@@ -63,29 +63,11 @@ def _floor(x):
   return ((x < _const(x.dtype, 0)) & x.ne(t)).where(t - _const(x.dtype, 1), t)
 def _f16_extract(v): return (v & _u32(0xFFFF)).cast(dtypes.uint16).bitcast(dtypes.half) if v.dtype == dtypes.uint32 else v
 
-# ═════ FP8 (E4M3) and BF8 (E5M2) conversion helpers ═════
-# f32→fp8/bf8 uses f2f decomposition directly. fp8/bf8→f32 wraps f2f with subnormal handling
-# (f2f flushes denormals to zero, but AMD V_CVT_F32_FP8/BF8 preserves subnormals).
+# Using f2f decomposition
 def _fp8_to_f32(v: UOp) -> UOp:
-  b = (v.cast(dtypes.uint32) & _u32(0xFF)).cast(dtypes.uint8)
-  # E4M3 subnormal: exp==0, mant!=0 -> (-1)^sign * 2^(1-7) * (mant/8) = (-1)^sign * mant * 2^(-9)
-  bu = b.cast(dtypes.uint32)
-  sign, exp, mant = (bu >> _u32(7)) << _u32(31), (bu >> _u32(3)) & _u32(0xF), bu & _u32(0x7)
-  is_sub = exp.eq(_u32(0)) & mant.ne(_u32(0))
-  sub_f32 = (mant.cast(dtypes.float32) * _const(dtypes.float32, 1.0/512.0)).bitcast(dtypes.uint32) | sign
-  normal = f2f(b, dtypes.fp8e4m3, dtypes.float32)
-  return is_sub.where(sub_f32.bitcast(dtypes.float32), normal)
-
+  return f2f((v.cast(dtypes.uint32) & _u32(0xFF)).cast(dtypes.uint8), dtypes.fp8e4m3, dtypes.float32)
 def _bf8_to_f32(v: UOp) -> UOp:
-  b = (v.cast(dtypes.uint32) & _u32(0xFF)).cast(dtypes.uint8)
-  # E5M2 subnormal: exp==0, mant!=0 -> (-1)^sign * 2^(1-15) * (mant/4) = (-1)^sign * mant * 2^(-16)
-  bu = b.cast(dtypes.uint32)
-  sign, exp, mant = (bu >> _u32(7)) << _u32(31), (bu >> _u32(2)) & _u32(0x1F), bu & _u32(0x3)
-  is_sub = exp.eq(_u32(0)) & mant.ne(_u32(0))
-  sub_f32 = (mant.cast(dtypes.float32) * _const(dtypes.float32, 1.0/65536.0)).bitcast(dtypes.uint32) | sign
-  normal = f2f(b, dtypes.fp8e5m2, dtypes.float32)
-  return is_sub.where(sub_f32.bitcast(dtypes.float32), normal)
-
+  return f2f((v.cast(dtypes.uint32) & _u32(0xFF)).cast(dtypes.uint8), dtypes.fp8e5m2, dtypes.float32)
 def _f32_to_fp8(v: UOp) -> UOp:
   return f2f((v.bitcast(dtypes.float32) if v.dtype != dtypes.float32 else v).bitcast(dtypes.uint32), dtypes.float32, dtypes.fp8e4m3)
 def _f32_to_bf8(v: UOp) -> UOp:
