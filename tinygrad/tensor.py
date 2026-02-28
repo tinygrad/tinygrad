@@ -2780,13 +2780,9 @@ class Tensor(OpMixin):
         # stable tie-break: for equal values, lower original index comes first
         top_goes_first = ((x_top > x_bottom) if descending else (x_top < x_bottom)) | ((x_top == x_bottom) & (idx_top < idx_bottom))
         idx_first, idx_second = top_goes_first.where(idx_top, idx_bottom), top_goes_first.where(idx_bottom, idx_top)
-        if descending:
-          x, idx = x_larger.cat(x_smaller, dim=partner_dim), idx_first.cat(idx_second, dim=partner_dim)
-        else:
-          x, idx = x_smaller.cat(x_larger, dim=partner_dim), idx_first.cat(idx_second, dim=partner_dim)
-        x = x.contiguous()
+        idx = idx_first.cat(idx_second, dim=partner_dim).contiguous()
+        x = Tensor.cat(*([x_larger, x_smaller] if descending else [x_smaller, x_larger]), dim=partner_dim).contiguous()
       if stage != n_stages:
-        idx = idx.contiguous()
         # flip wires back to undo the crossover
         blue_box, flipped_green_box = x.split(1, crossover_dim)
         blue_idx, flipped_green_idx = idx.split(1, crossover_dim)
