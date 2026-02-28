@@ -286,7 +286,6 @@ _pcode_fixes = {
   'V_TRIG_PREOP_F64': ("result = 64'F((1201'B(2.0 / PI)[1200 : 0] << shift.u32) & 1201'0x1fffffffffffff)", "result = trig_preop_result(shift)"),
 }
 
-
 def _get_pcode_dict(op) -> dict:
   """Return the PCODE dictionary for the given opcode based on its architecture."""
   return PCODE_CDNA if 'cdna' in type(op).__module__ else PCODE_RDNA4 if 'rdna4' in type(op).__module__ else PCODE_RDNA3
@@ -500,9 +499,7 @@ class _Ctx:
   def rexec(self) -> UOp:
     """Read full EXEC mask (32-bit for RDNA, 64-bit for CDNA)."""
     lo = self.rsgpr_dyn(_c(EXEC_LO.offset))
-    if self.wave_size <= 32: return lo
-    hi = self.rsgpr_dyn(_c(EXEC_LO.offset + 1))
-    return _u64(lo, hi)
+    return lo if self.wave_size <= 32 else _u64(lo, self.rsgpr_dyn(_c(EXEC_LO.offset + 1)))
 
   # Dynamic register access (takes UOp index instead of int)
   def rsgpr_dyn(self, reg: UOp, valid: UOp | None = None) -> UOp:
@@ -516,10 +513,9 @@ class _Ctx:
 
   def wmask(self, reg: UOp, val: UOp) -> list[UOp]:
     """Write a lane mask (VCC/EXEC). Splits into lo/hi for wave64."""
-    if self.wave_size > 32:
-      lo, hi = _split64(val)
-      return [self.wsgpr_dyn(reg, lo), self.wsgpr_dyn(reg + _c(1), hi)]
-    return [self.wsgpr_dyn(reg, val)]
+    if self.wave_size <= 32: return [self.wsgpr_dyn(reg, val)]
+    lo, hi = _split64(val)
+    return [self.wsgpr_dyn(reg, lo), self.wsgpr_dyn(reg + _c(1), hi)]
 
   def rmask(self, reg: UOp) -> UOp:
     """Read a lane mask (VCC/EXEC). Combines lo/hi for wave64."""
@@ -866,14 +862,10 @@ def _compile_sop(inst: ir3.SOP1|ir3.SOP2|ir3.SOPC|ir3.SOPK|ir4.SOP1|ir4.SOP2|ir4
 def _sdwa_select(val: UOp, sel: UOp, sext: UOp) -> UOp:
   """Apply SDWA byte/word selection and optional sign extension to a 32-bit value."""
   # sel: 0-3=BYTE_0..3, 4=WORD_0, 5=WORD_1, 6=DWORD
-  b0 = val & _c(0xFF)
-  b1 = (val >> _c(8)) & _c(0xFF)
-  b2 = (val >> _c(16)) & _c(0xFF)
-  b3 = (val >> _c(24)) & _c(0xFF)
-  w0 = val & _c(0xFFFF)
-  w1 = (val >> _c(16)) & _c(0xFFFF)
-  selected = sel.eq(_c(1)).where(b1, sel.eq(_c(2)).where(b2, sel.eq(_c(3)).where(b3,
-    sel.eq(_c(4)).where(w0, sel.eq(_c(5)).where(w1, sel.eq(_c(6)).where(val, b0))))))
+  b = [(val >> _c(i * 8)) & _c(0xFF) for i in range(4)]
+  w0, w1 = val & _c(0xFFFF), (val >> _c(16)) & _c(0xFFFF)
+  selected = sel.eq(_c(1)).where(b[1], sel.eq(_c(2)).where(b[2], sel.eq(_c(3)).where(b[3],
+    sel.eq(_c(4)).where(w0, sel.eq(_c(5)).where(w1, sel.eq(_c(6)).where(val, b[0]))))))
   # Sign extend when sext=1
   is_byte = sel < _c(4)
   byte_sext = (selected & _c(0x80)).ne(_c(0)).where(selected | _c(0xFFFFFF00), selected)
@@ -968,12 +960,8 @@ def _compile_sdwa(inst: irc.VOP1_SDWA | irc.VOP2_SDWA | irc.VOP2_SDWA_SDST | irc
     init_stores = [ctx.wsgpr_dyn(sdst_off, _c(0)), ctx.wsgpr_dyn(sdst_off + _c(1), _c(0))]
     old_sdst = ctx.rmask(sdst_off)
     stores.extend(ctx.wmask(sdst_off, _set_lane_bit(old_sdst, lane, vcc_val, exec_mask)))
-    if stores:
-      return UOp.sink(*init_stores, UOp.sink(*stores).end(lane), *ctx.inc_pc())
-    return UOp.sink(*init_stores, *ctx.inc_pc())
-  if stores:
-    return UOp.sink(UOp.sink(*stores).end(lane), *ctx.inc_pc())
-  return UOp.sink(*ctx.inc_pc())
+    return UOp.sink(*init_stores, *([UOp.sink(*stores).end(lane)] if stores else []), *ctx.inc_pc())
+  return UOp.sink(*([UOp.sink(*stores).end(lane)] if stores else []), *ctx.inc_pc())
 
 def _compile_vop12(inst: ir3.VOP1 | ir3.VOP1_SDST | ir3.VOP2 | ir4.VOP1 | ir4.VOP1_SDST | ir4.VOP2 | irc.VOP1 | irc.VOP2, ctx: _Ctx) -> UOp:
   op_name = _op_name(inst)
@@ -1077,7 +1065,6 @@ def _compile_vopc(inst: ir3.VOPC|ir3.VOP3|ir4.VOPC|ir4.VOP3|irc.VOPC|irc.VOP3, c
     stores = ctx.wmask(dst_off, new_result) if not is_vopc else ctx.wmask(_c(VCC_LO.offset), new_result)
   return UOp.sink(*stores, *ctx.inc_pc())
 
-
 def _compile_bitop3(inst, ctx: _Ctx, exec_mask: UOp, bits: dict, op_name: str) -> UOp:
   """BITOP3: 3-input truth table. abs/neg/omod encode the truth table, not source modifiers."""
   lane = ctx.range()
@@ -1111,7 +1098,7 @@ def _compile_vop3(inst: ir3.VOP3 | ir4.VOP3 | irc.VOP3, ctx: _Ctx) -> UOp:
   if 'PERMLANE16' in op_name or 'PERMLANEX16' in op_name:
     return ctx.compile_lane_pcode(inst.op, inst)
 
-   # VOP3 VOPC (v_cmp_*_e64) - delegate to unified VOPC handler
+  # VOP3 VOPC (v_cmp_*_e64) - delegate to unified VOPC handler
   if 'V_CMP' in op_name or 'V_CMPX' in op_name:
     return _compile_vopc(inst, ctx, opsel=opsel, abs_bits=getattr(inst, 'abs', 0) or 0, neg_bits=getattr(inst, 'neg', 0) or 0)
 
