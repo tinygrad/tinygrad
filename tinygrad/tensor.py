@@ -3058,6 +3058,20 @@ class Tensor(OpMixin):
     # NOTE: pow(int, float) -> int
     return ret.round().cast(self.dtype) if not reverse and not dtypes.is_float(self.dtype) and dtypes.is_float(exponent.dtype) else ret
 
+  def maximum(self, x:Tensor|ConstType) -> Tensor:
+    """
+    Computes element-wise maximum of `self` and `x`.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([-1, 2, 3]).maximum(1).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([-1, 2, 3]).maximum(Tensor([-4, -2, 9])).numpy())
+    ```
+    """
+    # NOTE: maximum has a unique gradient so requires an Ops.MAX, internally it becomes (self < x).where(x, self)
+    return self._binop(Ops.MAX, x, False)
+
   def minimum(self, x:Tensor|ConstType) -> Tensor:
     """
     Computes element-wise minimum of `self` and `x`.
