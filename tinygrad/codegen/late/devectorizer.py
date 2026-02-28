@@ -333,14 +333,14 @@ def reduce_to_acc(ctx:ReduceContext, red:UOp):
     ctx.acc_num += 1
   ret = functools.reduce(lambda x,y: x.alu(red.arg, y), lst)
   if len(reduce_range) == 0: return ret
-  end = acc.index(UOp.const(dtypes.int, 0)).store(ret).end(*reduce_range)
+  end = acc.index(UOp.const(dtypes.int, 0)).store(ret).end(*reduce_range).rtag("mergeable")
   return acc.after(end).index(UOp.const(dtypes.int, 0))
 
 def merge_reduce_ends(ctx:ReduceContext, sink:UOp):
-  # merge ENDs that share the same range
+  # merge ENDs that share the same range (only those created by reduce_to_acc)
   range_to_ends: dict[tuple[UOp, ...], list[UOp]] = {}
   for u in sink.backward_slice:
-    if u.op is Ops.END: range_to_ends.setdefault(u.src[1:], []).append(u)
+    if u.op is Ops.END and u.tag == "mergeable": range_to_ends.setdefault(u.src[1:], []).append(u)
   subs = {e: UOp.group(*(e.src[0] for e in ends)).end(*r) for r, ends in range_to_ends.items() if len(ends) > 1 for e in ends}
   return sink.substitute(subs) if subs else None
 
