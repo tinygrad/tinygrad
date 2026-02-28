@@ -258,6 +258,15 @@ pm_const_buffer_folding = pm_mops+PatternMatcher([
    lambda s: UOp.const(c.dtype, c.arg) if (c:=s.base).op is Ops.CONST else None),
 ])
 
+def move_enlarging_cast(cast:UOp, buf:UOp, idx:UOp):
+  if cast.src[0].dtype.itemsize >= cast.dtype.itemsize or not buf.arg.removable: return None
+  return cast.src[0].bufferize(*buf.src[1:], arg=buf.arg).index(*idx.src[1:]).cast(cast.dtype)
+
+pm_move_bufferize_cast = PatternMatcher([
+  # cast to larger dtype should happen after BUFFERIZE
+  (UPat(Ops.CAST, name="cast").f(Ops.BUFFERIZE, allow_any_len=True, name="buf").f(Ops.INDEX, allow_any_len=True, name="idx"), move_enlarging_cast),
+])
+
 pm_remove_bufferize = PatternMatcher([
   # remove reindexing with cost function
   (UPat.var("src").f(Ops.BUFFERIZE, allow_any_len=True, name="buf").f(Ops.INDEX, allow_any_len=True, name="idx"), remove_bufferize),
@@ -499,7 +508,8 @@ def get_kernel_graph(sink:UOp) -> UOp:
   # convert movement ops to ranges
   tsink, rctx = run_rangeify(tsink, bool(DEBUG_RANGEIFY))
 
-  tsink = graph_rewrite(tsink, symbolic+pm_reduce_simplify+pm_const_buffer_folding+pm_remove_bufferize, name="symbolic+reduce_collapse+debuf")
+  tsink = graph_rewrite(tsink, symbolic+pm_reduce_simplify+pm_const_buffer_folding+pm_remove_bufferize+pm_move_bufferize_cast,
+                        name="symbolic+reduce_collapse+debuf")
   tsink = graph_rewrite(tsink, pm_limit_bufs, ctx=rctx, name="limit buffers")
 
   if VIZ: graph_rewrite(tsink, PatternMatcher([]), name="View Rangeify")

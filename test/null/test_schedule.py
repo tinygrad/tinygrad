@@ -741,7 +741,8 @@ class TestSchedule(unittest.TestCase):
     out = x.softmax(dtype=dtypes.float)
     sched = out.schedule()
     self.assertEqual(len(sched), 3)
-    self.assertEqual(sched[0].bufs[0].dtype, dtypes.float)
+    self.assertEqual(sched[0].bufs[0].dtype, dtypes.half) # max is calculated in half
+    self.assertEqual(sched[1].bufs[0].dtype, dtypes.float) # cast happens in second kernel
 
     # input float, softmax in float
     Tensor.manual_seed(0)
@@ -1157,6 +1158,25 @@ class TestFusionOp(unittest.TestCase):
     sched = r.schedule()
     self.assertEqual(len(sched), 1)
     self.assertLess(time.perf_counter()-st, 2.0)
+
+class TestCastAfterBufferize(unittest.TestCase):
+  def test_cast_larger(self):
+    """cast(half).cast(float) should store intermediate buffers in half"""
+    a = Tensor.empty(4, 4, dtype=dtypes.float)
+    casted = a.sum(axis=0).cast(dtypes.half).cast(dtypes.float)
+    # two distinct consumers forces realization
+    sched = check_schedule([casted.sum(), casted.max()], 3)
+    half_bufs = [buf for si in sched for buf in si.bufs if buf is not None and buf.dtype == dtypes.half]
+    self.assertEqual(len(half_bufs), 3)
+
+  def test_cast_larger_contiguous(self):
+    """cast(half).cast(float).contiguous() should store into float"""
+    a = Tensor.empty(4, 4, dtype=dtypes.float)
+    casted = a.sum(axis=0).cast(dtypes.half).cast(dtypes.float).contiguous()
+    # two distinct consumers forces realization
+    sched = check_schedule([casted.sum(), casted.max()], 3)
+    half_bufs = [buf for si in sched for buf in si.bufs if buf is not None and buf.dtype == dtypes.half]
+    self.assertEqual(len(half_bufs), 0)
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)
