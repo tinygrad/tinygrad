@@ -1336,10 +1336,12 @@ def train_llama3():
   # vocab_size from the mixtral tokenizer
   if not SMALL: model_params |= {"vocab_size": 32000}
   real_vocab_size = model_params['vocab_size']
-  if (MP := getenv("MP", 1)) > 1: model_params['vocab_size'] = round_up(model_params['vocab_size'], 256 * MP)
-  vocab_mask:Tensor = Tensor.arange(model_params['vocab_size']).reshape(1, 1, -1) >= real_vocab_size
   if (llama_layers:=getenv("LLAMA_LAYERS")) != 0: model_params['n_layers'] = llama_layers
   print(f"model parameters: {model_params}")
+
+  # pad vocab
+  if (MP := getenv("MP", 1)) > 1: model_params['vocab_size'] = round_up(model_params['vocab_size'], 256 * MP)
+  vocab_mask:Tensor = Tensor.arange(model_params['vocab_size']).reshape(1, 1, -1) >= real_vocab_size
 
   model = Transformer(**model_params, max_context=SEQLEN, jit=False, disable_kv_cache=True)
   params = get_parameters(model)
@@ -1401,15 +1403,15 @@ def train_llama3():
 
   @TinyJit
   def minibatch(tokens:Tensor):
-    tokens = tokens.to(None)
     if (DP := getenv("DP", 1)) > 1:
       device = tuple(f"{Device.DEFAULT}:{i}" for i in range(DP))
       tokens = tokens.shard(device, 0)
     if (MP := getenv("MP", 1)) > 1:
       device = tuple(f"{Device.DEFAULT}:{i}" for i in range(MP))
       tokens = tokens.shard(device)
+    if MP == 1 and DP == 1: tokens = tokens.to(None)
     logits:Tensor = model(tokens[:, :-1], start_pos=0, temperature=math.nan)
-    loss = vocab_mask.where(-float("inf"), logits).sparse_categorical_crossentropy(tokens[:, 1:])
+    loss = vocab_mask.where(-1e9, logits).sparse_categorical_crossentropy(tokens[:, 1:])
     loss.backward()
     assert all(p.grad is g for p,g in zip(optim.params, grads))
     Tensor.realize(loss, *grads)
@@ -1431,21 +1433,23 @@ def train_llama3():
   @TinyJit
   @Tensor.train(False)
   def eval_step(tokens:Tensor):
-    tokens = tokens.to(None)
     if (DP := getenv("DP", 1)) > 1:
       device = tuple(f"{Device.DEFAULT}:{i}" for i in range(DP))
       tokens = tokens.shard(device, 0)
     if (MP := getenv("MP", 1)) > 1:
       device = tuple(f"{Device.DEFAULT}:{i}" for i in range(MP))
       tokens = tokens.shard(device)
+    if MP == 1 and DP == 1: tokens = tokens.to(None)
     logits:Tensor = model(tokens[:, :-1], start_pos=0, temperature=math.nan)
-    loss = vocab_mask.where(-float("inf"), logits).sparse_categorical_crossentropy(tokens[:, 1:])
+    loss = vocab_mask.where(-1e9, logits).sparse_categorical_crossentropy(tokens[:, 1:])
     return loss.flatten().float().to("CPU")
 
   # ** data iters **
   def fake_data(bs, samples):
+    import numpy as np
     for _ in range(samples // bs):
-      yield Tensor.randint(bs, SEQLEN + 1, low=0, high=model_params["vocab_size"], dtype=dtypes.int32, device=Device.DEFAULT)
+      fake_data_np = np.random.randint(0, model_params["vocab_size"], size=(bs, SEQLEN + 1), dtype=np.int32)
+      yield Tensor(fake_data_np, device="NPY")
 
   def get_train_iter():
     if getenv("FAKEDATA", 0):
@@ -1550,7 +1554,7 @@ def train_llama3():
       # run eval
       eval_losses = []
       eval_iter = get_eval_iter()
-      tqdm.write(f"evaluating {5760//EVAL_BS} batches of {EVAL_BS} sequences")
+      tqdm.write(f"evaluating {EVAL_SAMPLES//EVAL_BS} batches of {EVAL_BS} sequences")
 
       for j,tokens in tqdm(enumerate(eval_iter), total=EVAL_SAMPLES//EVAL_BS):
         eval_losses += eval_step(tokens).tolist()
