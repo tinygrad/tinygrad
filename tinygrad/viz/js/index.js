@@ -259,7 +259,7 @@ function setFocus(key) {
       const [x0, x1] = eventType === EventTypes.EXEC ? [e.x, e.x+e.width] : [e.x[0], e.x.at(-1)];
       const xscale = d3.scaleLinear().domain([data.first, data.dur]).range([0, document.getElementById("timeline").clientWidth]);
       const [st, et] = xscale.range().map(zoomLevel.invertX, zoomLevel).map(xscale.invert, xscale);
-      if (x0 < st || x1 > et) zoomLevel = d3.zoomIdentity.translate(-xscale((x0+x1)/2-(et-st)/2)*zoomLevel.k, 0).scale(zoomLevel.k);
+      if (x1 < st || x0 > et) zoomLevel = d3.zoomIdentity.translate(-xscale((x0+x1)/2-(et-st)/2)*zoomLevel.k, 0).scale(zoomLevel.k);
     }
     focusedShape = key; d3.select("#timeline").call(canvasZoom.transform, zoomLevel);
   }
