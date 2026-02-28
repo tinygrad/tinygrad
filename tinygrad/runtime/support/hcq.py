@@ -404,7 +404,7 @@ class HCQCompiled(Compiled, Generic[SignalType]):
     except RuntimeError as e:
       self.error_state = e
       if hasattr(self, 'on_device_hang'): self.on_device_hang()
-      else: raise e
+      raise e
 
     if self.timeline_value > (1 << 31): self._wrap_timeline_signal()
     if PROFILE:
