@@ -129,6 +129,31 @@ class TestFunction(unittest.TestCase):
     a = Tensor([1., 2., 3.])
     np.testing.assert_allclose(g(f(a)).numpy(), [110., 440., 990.])
 
+  def test_nested_calls_backward(self):
+    w = Tensor([[1., 2.], [3., 4.]]).contiguous().realize()
+    @function
+    def inner(x:Tensor) -> Tensor: return x + w
+    @function
+    def outer(a:Tensor, b:Tensor) -> Tensor: return inner(a.reshape(1,2) + b.reshape(1,2))
+
+    a = Tensor([1., 2.], requires_grad=True)
+    b = Tensor([3., 4.], requires_grad=True)
+    outer(a, b).sum().backward()
+    np.testing.assert_allclose(a.grad.numpy(), [2., 2.])
+    np.testing.assert_allclose(b.grad.numpy(), [2., 2.])
+
+  def test_unused_param_backward(self):
+    @function
+    def f(a:Tensor, b:Tensor, c:Tensor) -> Tensor: return a + c  # b is unused
+
+    a = Tensor([1., 2., 3.], requires_grad=True)
+    b = Tensor([4., 5., 6.], requires_grad=True)
+    c = Tensor([7., 8., 9.], requires_grad=True)
+    f(a, b, c).sum().backward()
+    np.testing.assert_allclose(a.grad.numpy(), [1., 1., 1.])
+    np.testing.assert_allclose(b.grad.numpy(), [0., 0., 0.])
+    np.testing.assert_allclose(c.grad.numpy(), [1., 1., 1.])
+
   def test_name(self):
     @function
     def f(a:Tensor) -> Tensor: return a + 1
@@ -229,6 +254,78 @@ class TestFunctionMulti(unittest.TestCase):
     x = Tensor([4., 5., 6., 7.]).shard(self.devices_2, axis=None)
     f(x).sum().backward()
     np.testing.assert_allclose(w.grad.numpy(), [4., 5., 6., 7.])
+
+  def test_call_axis(self):
+    @function
+    def f(x:Tensor, w:Tensor) -> Tensor: return x @ w
+
+    x = Tensor([[1.,0.],[0.,1.],[1.,1.],[0.,0.]]).shard(self.devices_2, axis=0)
+    w = Tensor([[1.,2.],[3.,4.]]).shard(self.devices_2, axis=None)
+    result = f(x, w)
+    # CALL output should inherit axis=0 from the sharded input
+    self.assertEqual(result.uop.axis, 0)
+    # reduce on the sharded axis should remove it
+    self.assertIsNone(result.sum().uop.axis)
+
+  def test_call_axis_shard_inside(self):
+    @function
+    def f(x:Tensor, w:Tensor) -> Tensor:
+      return x.shard(self.devices_2, axis=0) @ w.shard(self.devices_2, axis=None)
+
+    x = Tensor([[1.,0.],[0.,1.],[1.,1.],[0.,0.]])
+    w = Tensor([[1.,2.],[3.,4.]])
+    result = f(x, w)
+    self.assertEqual(result.uop.axis, 0)
+    np.testing.assert_allclose(result.numpy(), x.numpy() @ w.numpy())
+
+  def test_data_parallel_backward(self):
+    @function
+    def f(x:Tensor, w:Tensor) -> Tensor: return x @ w
+
+    x = Tensor([[1.,0.],[0.,1.],[1.,1.],[0.,0.]], requires_grad=True).shard(self.devices_2, axis=0)
+    w = Tensor([[1.,2.],[3.,4.]], requires_grad=True).shard(self.devices_2, axis=None)
+    w.realize()
+    f(x, w).sum().backward()
+    # d/dx = ones @ w^T = [[1,3],[1,3],[1,3],[1,3]], but sum so ones(4,2) @ w^T? no:
+    # L = sum(x @ w), dL/dx = ones(4,2) @ w^T... actually dL/d(xw) = ones(4,2), dL/dx = ones(4,2) @ w^T
+    np.testing.assert_allclose(x.grad.numpy(), np.ones((4,2)) @ np.array([[1,3],[2,4]]))
+
+  def test_data_parallel_backward_4(self):
+    devices_4 = tuple(f"CPU:{i}" for i in range(4))
+    @function
+    def f(x:Tensor, w:Tensor) -> Tensor: return x @ w
+
+    x = Tensor(np.arange(16).reshape(8,2).astype(np.float32), requires_grad=True).shard(devices_4, axis=0)
+    w = Tensor([[1.,2.],[3.,4.]], requires_grad=True).shard(devices_4, axis=None)
+    w.realize()
+    f(x, w).sum().backward()
+    np.testing.assert_allclose(x.grad.numpy(), np.ones((8,2)) @ np.array([[1,3],[2,4]]))
+
+  def test_data_parallel_backward_implicit(self):
+    devices_4 = tuple(f"CPU:{i}" for i in range(4))
+    w = Tensor([[1.,2.],[3.,4.]], requires_grad=True).shard(devices_4, axis=None)
+    w.realize()
+    @function
+    def f(x:Tensor) -> Tensor: return x @ w
+
+    x = Tensor(np.arange(16).reshape(8,2).astype(np.float32), requires_grad=True).shard(devices_4, axis=0)
+    f(x).sum().backward()
+    np.testing.assert_allclose(x.grad.numpy(), np.ones((8,2)) @ np.array([[1,3],[2,4]]))
+
+  def test_data_parallel_backward_twice(self):
+    devices_4 = tuple(f"CPU:{i}" for i in range(4))
+    w = Tensor([[1.,2.],[3.,4.]], requires_grad=True).shard(devices_4, axis=None)
+    w.realize()
+    # pre-init grads like the training loop does
+    w.grad = w.zeros_like().contiguous().realize()
+    @function
+    def f(x:Tensor) -> Tensor: return x @ w
+
+    expected = np.ones((8,2)) @ np.array([[1,3],[2,4]])
+    for _ in range(2):
+      x = Tensor(np.arange(16).reshape(8,2).astype(np.float32), requires_grad=True).shard(devices_4, axis=0)
+      f(x).sum().backward()
+      np.testing.assert_allclose(x.grad.numpy(), expected)
 
 if __name__ == '__main__':
   unittest.main()
