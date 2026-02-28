@@ -234,7 +234,7 @@ const drawLine = (ctx, x, y, opts) => {
 }
 
 function tabulate(rows) {
-  const root = d3.create("div").style("display", "grid").style("grid-template-columns", `${Math.max(...rows.map(x => x[0].length), 0)}ch 1fr`).style("gap", "0.2em");
+  const root = d3.create("div").style("display", "grid").style("grid-template-columns", `${Math.max(...rows.map(x => x[0].length), 0)}ch 1fr`).style("gap", "0.2em").style("white-space", "nowrap");
   for (const [k,v] of rows) { root.append("div").text(k); root.append("div").node().append(v); }
   return root;
 }
@@ -276,15 +276,20 @@ function setFocus(key) {
         setFocus(b.key);
       });
     }
-    d3.selectAll(".insts span").classed("highlight", false);
-    const pcInfo = rest.find(r => r.startsWith("PC:"));
-    if (pcInfo != null) { const el = document.getElementById(pcInfo.split(":")[1]); if (el) { el.classList.add("highlight"); el.scrollIntoView({ block:"nearest" }); } }
-
     if (e.arg.ctx != null) {
       const i = e.arg.ctx; s = e.arg.step;
       html.append("a").text(ctxs[i+1].steps[s].name).on("click", () => switchCtx(i, s));
       const prgSrc = ctxs[i+1].steps.findIndex(s => s.name === "View Source");
       if (prgSrc !== -1) html.append("a").text("View Source").on("click", () => switchCtx(i, prgSrc));
+    }
+    if (data.pcToShape.size > 0) {
+      const code = html.append("pre").append("code").classed("hljs", true).style("margin-top", "20px").classed("insts", true);
+      for (const [k, v] of data.pcToShape) {
+        const line = code.append("div").style("display", "flex").style("gap", "4px");
+        line.append("span").text("0x"+v.toString(16)).classed("highlight", k === key).style("cursor", "pointer").on("click", () => setFocus(k));
+        line.append("span").text(data.pcMap[v]+"\n");
+        if (k == key) line.node().scrollIntoView({ block:"nearest" })
+      }
     }
   }
   if (eventType === EventTypes.BUF) {
@@ -309,7 +314,7 @@ async function renderProfiler(path, unit, opts) {
   displaySelection("#profiler");
   // support non realtime x axis units
   formatTime = unit === "realtime" ? formatMicroseconds : formatCycles;
-  if (data?.path !== path) { data = {tracks:new Map(), axes:{}, path, first:null}; focusedDevice = null; focusedShape = null; }
+  if (data?.path !== path) { data = {tracks:new Map(), axes:{}, path, first:null, pcToShape:new Map()}; focusedDevice = null; focusedShape = null; }
   setFocus(focusedShape);
   // layout once!
   if (data.tracks.size !== 0) return updateProgress(Status.COMPLETE);
@@ -336,7 +341,7 @@ async function renderProfiler(path, unit, opts) {
   // color by key (name/device)
   const colorMap = new Map();
   // map shapes by event key
-  const shapeMap = new Map(), pcToShape = new Map();
+  const shapeMap = new Map();
   const heightScale = d3.scaleLinear().domain([0, tracePeak]).range([4,maxheight=100]);
   for (let i=0; i<layoutsLen; i++) {
     const nameLen = view.getUint8(offset, true); offset += 1;
@@ -400,7 +405,7 @@ async function renderProfiler(path, unit, opts) {
         // tiny device events go straight to the rewrite rule
         const key = k.startsWith("TINY") ? null : `${k}-${j}`;
         const labelHTML = label.map(l=>`<span style="color:${l.color}">${l.st}</span>`).join("");
-        if (e.info?.startsWith("PC:")) pcToShape.set(e.info.split(":")[1], key);
+        if (e.info?.startsWith("PC:")) data.pcToShape.set(key, e.info.split(":")[1]);
         const arg = { tooltipText:labelHTML+" N:"+shapes.length+"\n"+formatTime(e.dur)+(e.info != null ? "\n"+e.info : ""), bufs:[], key,
                       ctx:shapeRef?.ctx, step:shapeRef?.step };
         if (e.key != null) shapeMap.set(e.key, key);
@@ -495,11 +500,7 @@ async function renderProfiler(path, unit, opts) {
     }
   }
   for (const m of markers) m.label = m.name.split(/(\s+)/).map(st => ({ st, color:m.color, width:ctx.measureText(st).width }));
-  if (extData.pc_map != null) {
-    const code = selectMetadata("insts", "info").append("pre").append("code").classed("hljs", true);
-    for (const [k, v] of Object.entries(extData.pc_map)) code.append("span").attr("id", k).text(v+"\n")
-      .style("cursor", pcToShape.has(k) ? "pointer" : null).on("click", () => { const key = pcToShape.get(k); if (key) setFocus(key); });
-  }
+  if (extData.pc_map != null) data.pcMap = extData.pc_map; setFocus(focusedShape);
   updateProgress(Status.COMPLETE);
   // draw events on a timeline
   const dpr = window.devicePixelRatio || 1;
