@@ -362,7 +362,7 @@ def sqtt_timeline(data:bytes, lib:bytes, target:str) -> list[ProfileEvent]:
       if p._time in trace.setdefault(name, set()): raise AssertionError(f"packets overlap in shared resource! {name}")
       trace[name].add(p._time)
   pc_map = {addr:str(inst) for addr,inst in amd_decode(lib, target).items()}
-  return [ProfilePointEvent("VIZ", "JSON", "pc_map", pc_map, Decimal(0))]+[ProfilePointEvent(r, "start", r, ts=Decimal(0)) for r in rows]+ret
+  return [ProfilePointEvent(r, "JSON", "pc_map", pc_map, ts=Decimal(0)) for r in rows]+ret
 
 # ** SQTT OCC only unpacks wave start, end time and SIMD location
 

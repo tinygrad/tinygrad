@@ -251,13 +251,7 @@ function selectShape(key) {
 const selectMetadata = (cls, before) => {
   const root = d3.select(metadata), sel = root.select("."+cls);
   if (!sel.empty()) return sel.html("");
-  if (before) {
-    const ref = root.select("."+before);
-    return (ref.empty()
-      ? root.append("div")
-      : root.insert("div", "."+before)
-    ).classed(cls, true).html("");
-  }
+  if (before) return (root.select("."+before).empty() ? root.append("div") : root.insert("div", "."+before)).classed(cls, true).html("");
   return root.append("div").classed(cls, true).html("");
 }
 
