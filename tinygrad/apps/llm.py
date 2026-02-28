@@ -344,20 +344,19 @@ if __name__ == "__main__":
   args = parser.parse_args()
 
   # load the model
-  model, kv = Transformer.from_gguf(Tensor.from_url(models[args.model]), args.max_context)
-  if DEBUG >= 1: print(f"using model {args.model}")
+  raw_model = Tensor.from_url(models[args.model])
+  model, kv = Transformer.from_gguf(raw_model, args.max_context)
+  if DEBUG >= 1 or args.benchmark:
+    print(f"using model {args.model} with {raw_model.nbytes():,} bytes and {sum(x.numel() for x in nn.state.get_parameters(model)):,} params")
+  del raw_model
 
   # do benchmark
   if args.benchmark:
-    param_bytes = sum(x.nbytes() for x in nn.state.get_parameters(model))
-    for b in model.blk:
-      if hasattr(b, 'ffn_gate_exps'):
-        expert_bytes = b.ffn_gate_exps.weight.nbytes() + b.ffn_up_exps.weight.nbytes() + b.ffn_down_exps.weight.nbytes()
-        param_bytes -= int(expert_bytes * (1 - b.num_experts_per_tok / b.ffn_gate_exps.weight.shape[0]))
     gen = model.generate([0], 0)
     for _ in range(args.benchmark):
       GlobalCounters.reset()
-      with Timing(on_exit=lambda x: f", {1e9/x:6.2f} tok/s, {GlobalCounters.global_mem/x:7.2f} GB/s, param {param_bytes/x:7.2f} GB/s"): next(gen)
+      with Timing(on_exit=lambda x: f", {1e9/x:6.2f} tok/s, {GlobalCounters.global_mem/x:7.2f} GB/s,"
+                  f" {GlobalCounters.global_mem//1000000}/{GlobalCounters.mem_used//1000000} MB"): next(gen)
     exit(0)
 
   # extract some metadata
