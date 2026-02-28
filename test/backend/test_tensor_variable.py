@@ -1,6 +1,7 @@
 import unittest
 import numpy as np
 from tinygrad import Tensor, Variable
+from tinygrad.engine.realize import run_schedule
 
 class TestTensorVariable(unittest.TestCase):
   def test_add_tvar(self):
@@ -136,6 +137,35 @@ class TestTensorVariable(unittest.TestCase):
     with self.assertRaises(AssertionError):
       t.chunk(2, dim=0)  # can't split along symbolic dim
 
+  def test_symbolic_triu_rectangular(self):
+    vr, vc = Variable("r", 1, 10).bind(4), Variable("c", 1, 10).bind(6)
+    t = Tensor.arange(vr*vc).reshape(vr, vc)
+    out = t.triu().shrink(((0, 4), (0, 6))).numpy()
+    np.testing.assert_equal(out, np.triu(np.arange(24).reshape(4, 6)))
+
+  def test_symbolic_tril_rectangular(self):
+    vr, vc = Variable("r", 1, 10).bind(4), Variable("c", 1, 10).bind(6)
+    t = Tensor.arange(vr*vc).reshape(vr, vc)
+    out = t.tril().shrink(((0, 4), (0, 6))).numpy()
+    np.testing.assert_equal(out, np.tril(np.arange(24).reshape(4, 6)))
+
+  def test_symbolic_triu_extreme_diagonals(self):
+    vr, vc = Variable("r", 1, 10).bind(4), Variable("c", 1, 10).bind(6)
+    base = np.arange(24).reshape(4, 6)
+    t = Tensor.arange(vr*vc).reshape(vr, vc)
+    out_hi = t.triu(diagonal=10).shrink(((0, 4), (0, 6))).numpy()
+    out_lo = t.triu(diagonal=-10).shrink(((0, 4), (0, 6))).numpy()
+    np.testing.assert_equal(out_hi, np.triu(base, k=10))
+    np.testing.assert_equal(out_lo, np.triu(base, k=-10))
+
+  def test_symbolic_tril_extreme_diagonals(self):
+    vr, vc = Variable("r", 1, 10).bind(4), Variable("c", 1, 10).bind(6)
+    base = np.arange(24).reshape(4, 6)
+    t = Tensor.arange(vr*vc).reshape(vr, vc)
+    out_hi = t.tril(diagonal=10).shrink(((0, 4), (0, 6))).numpy()
+    out_lo = t.tril(diagonal=-10).shrink(((0, 4), (0, 6))).numpy()
+    np.testing.assert_equal(out_hi, np.tril(base, k=10))
+    np.testing.assert_equal(out_lo, np.tril(base, k=-10))
 
 if __name__ == '__main__':
   unittest.main()

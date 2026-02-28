@@ -2566,7 +2566,6 @@ class Tensor(OpMixin):
 
   @staticmethod
   def _tri(r:sint, c:sint, diagonal:int=0, device=None, requires_grad:bool|None=None) -> Tensor:
-    assert isinstance(r, int) and isinstance(c, int), f"does not support symbolic, getting {r=}, {c=}"
     return (Tensor.arange(r, device=device).unsqueeze(-1) + diagonal <= Tensor.arange(c, device=device)).requires_grad_(requires_grad)
 
   def triu(self, diagonal:int=0) -> Tensor:
