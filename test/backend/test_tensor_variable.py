@@ -1,7 +1,6 @@
 import unittest
 import numpy as np
 from tinygrad import Tensor, Variable
-from tinygrad.engine.realize import run_schedule
 
 class TestTensorVariable(unittest.TestCase):
   def test_add_tvar(self):
