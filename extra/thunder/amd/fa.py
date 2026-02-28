@@ -47,19 +47,24 @@ def flash_attention(xq, xk, xv, attn_mask:Tensor|None=None, is_causal:bool=False
 
   def grad(dou:UOp, _) -> tuple[None, None, UOp, UOp, UOp]:
     do = Tensor(dou, device=dou.device)
-    dq_in = _sharded_empty((B, H, N, D), xq, axis=shard_axis_t)
-    dq = _sharded_empty_like(xq, axis=shard_axis)
-    dk = _sharded_empty_like(xk, axis=shard_axis)
-    dv = _sharded_empty_like(xv, axis=shard_axis)
+    dq = _sharded_empty((B, H, N, D), xq, axis=shard_axis_t)
+    GROUP_SIZE = H_local // H_KV_local
+    dk_partial = _sharded_empty((B * GROUP_SIZE, N, H_KV, D), xk, axis=shard_axis)
+    dv_partial = _sharded_empty((B * GROUP_SIZE, N, H_KV, D), xv, axis=shard_axis)
 
     # delta_vec = (do * attn).sum(-1, dtype=dtypes.float32).transpose(1, 2).unsqueeze(-2).detach()
     delta_vec = _sharded_empty((B, H, 1, N), xq, dtype=dtypes.float32, axis=shard_axis_t)
-    delta_vec, dq_in = Tensor.custom_kernel(delta_vec, dq_in, attn, do, fxn=functools.partial(custom_fa_backward_pre, device=single_device, arch=arch, B=B_local, N=N, H=H_local, H_KV=H_KV_local, D=D))[:2]
+    delta_vec, dq = Tensor.custom_kernel(delta_vec, dq, attn, do, fxn=functools.partial(custom_fa_backward_pre, device=single_device, arch=arch, B=B_local, N=N, H=H_local, H_KV=H_KV_local, D=D))[:2]
 
-    dq_in, dk, dv = Tensor.custom_kernel(dq_in, dk, dv, do, xq, xk, xv, l_vec, delta_vec, fxn=functools.partial(custom_fa_backward, device=single_device, arch=arch, B=B_local, N=N, H=H_local, H_KV=H_KV_local, D=D))[:3]
+    dq, dk_partial, dv_partial = Tensor.custom_kernel(dq, dk_partial, dv_partial, do, xq, xk, xv, l_vec, delta_vec, fxn=functools.partial(custom_fa_backward, device=single_device, arch=arch, B=B_local, N=N, H=H_local, H_KV=H_KV_local, D=D))[:3]
 
-    # unshuffle dq
-    dq = Tensor.custom_kernel(dq, dq_in, fxn=functools.partial(custom_fa_backward_post, device=single_device, arch=arch, B=B_local, N=N, H=H_local, H_KV=H_KV_local, D=D))[0]
+    # unshuffle dq: atomic_pk_add_bf16_with_warpid creates a shuffled layout within each 16x128 tile
+    # decompose each tile into (j=4, a=2, b=2, d=4, e=4, k=4, c=2) and permute to (e, k, j, a, d, b, c) = standard row-major
+    dq = dq.reshape(B, H, N//16, 4, 2, 2, 4, 4, 4, 2).permute(0, 1, 2, 7, 8, 3, 4, 6, 5, 9).reshape(B, H, N, D).transpose(1, 2)
+
+    # reduce partial dK/dV across GROUP_SIZE query heads
+    dk = dk_partial.reshape(B, GROUP_SIZE, N, H_KV, D).sum(1)
+    dv = dv_partial.reshape(B, GROUP_SIZE, N, H_KV, D).sum(1)
 
     return None, None, dq.uop, dk.uop, dv.uop
 
@@ -89,7 +94,6 @@ def custom_fa_forward(o:UOp, l_vec:UOp, q:UOp, k:UOp, v:UOp, device:str, arch:st
                   arg=KernelInfo(name="custom_fa_forward", estimates=estimates))
 
   lib = HIPCCCompiler(arch, compile_args).compile_cached(code)
-
   lib = bytearray(lib)
   rodata_off = next(sh.header.sh_offset for sh in elf_loader(bytes(lib))[1] if sh.name == ".rodata")
   struct.pack_into('<I', lib, rodata_off, 160000)
@@ -120,7 +124,6 @@ def custom_fa_backward_pre(delta_vec:UOp, dq:UOp, o:UOp, do:UOp, device:str, arc
                   arg=KernelInfo(name="custom_fa_backward_pre", estimates=estimates))
 
   lib = HIPCCCompiler(arch, compile_args).compile_cached(code)
-
   lib = bytearray(lib)
   rodata_off = next(sh.header.sh_offset for sh in elf_loader(bytes(lib))[1] if sh.name == ".rodata")
   struct.pack_into('<I', lib, rodata_off, 160000)
@@ -138,7 +141,7 @@ def custom_fa_backward(dq:UOp, dk:UOp, dv:UOp, do:UOp, q:UOp, k:UOp, v:UOp, l_ve
   BLOCK_SIZE_KV = 256
   NUM_WARPS = 4
   NUM_THREADS = 64 * NUM_WARPS
-  gsz = (H_KV, N // BLOCK_SIZE_KV, B)
+  gsz = (H, N // BLOCK_SIZE_KV, B)
   lsz = (NUM_THREADS, 1, 1)
   threadIdx_x = UOp.special(lsz[0], "lidx0")
   blockIdx_x, blockIdx_y, blockIdx_z = UOp.special(gsz[0], "gidx0"), UOp.special(gsz[1], "gidx1"), UOp.special(gsz[2], "gidx2")
@@ -151,7 +154,6 @@ def custom_fa_backward(dq:UOp, dk:UOp, dv:UOp, do:UOp, q:UOp, k:UOp, v:UOp, l_ve
                   arg=KernelInfo(name="custom_fa_backward", estimates=estimates))
 
   lib = HIPCCCompiler(arch, compile_args).compile_cached(code)
-
   lib = bytearray(lib)
   rodata_off = next(sh.header.sh_offset for sh in elf_loader(bytes(lib))[1] if sh.name == ".rodata")
   struct.pack_into('<I', lib, rodata_off, 160000)
@@ -182,7 +184,6 @@ def custom_fa_backward_post(dq_out:UOp, dq_in:UOp, device:str, arch:str, B:int, 
                   arg=KernelInfo(name="custom_fa_backward_post", estimates=estimates))
 
   lib = HIPCCCompiler(arch, compile_args).compile_cached(code)
-
   lib = bytearray(lib)
   rodata_off = next(sh.header.sh_offset for sh in elf_loader(bytes(lib))[1] if sh.name == ".rodata")
   struct.pack_into('<I', lib, rodata_off, 160000)
