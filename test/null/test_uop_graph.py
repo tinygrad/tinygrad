@@ -410,7 +410,8 @@ class TestUOpGraph(unittest.TestCase):
       d0 = UOp(Ops.PARAM, dt.ptr(), arg=0)
       v = d0.index(UOp.const(dtypes.int, 0))
       uops = to_uops_list([v.bitcast(dt)])
-      self.assertEqual(len([x for x in uops if x.op is Ops.BITCAST]), 0, f"dtype = {dt}")
+      # decomps may create bitcasts to other types
+      self.assertEqual(len([x for x in uops if x.op is Ops.BITCAST and x.dtype is dt]), 0, f"dtype = {dt}")
 
   def test_sub_with_cast_folds(self):
     a = Variable("a", 0, 5)
