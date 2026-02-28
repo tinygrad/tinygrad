@@ -3602,6 +3602,7 @@ class Tensor(OpMixin):
 
   def image_conv2d(self, weight:Tensor, bias:Tensor|None=None, groups=1, stride=1, dilation=1, padding=0, dtype=None) -> Tensor:
     base_image_type, dtsz = (dtypes.imageh, 2) if (FLOAT16:=getenv("FLOAT16", 0)) else (dtypes.imagef, 4)
+    if IMAGE == 1 and FLOAT16: self, weight, bias = self.cast(dtypes.half), weight.cast(dtypes.half), None if bias is None else bias.cast(dtypes.half)
 
     (bs,_,iy,ix), (cout,cin,H,W) = self.shape, weight.shape
     x, w = self, weight.reshape(groups, (rcout := cout//groups), cin, H, W)
@@ -3646,7 +3647,7 @@ class Tensor(OpMixin):
 
     # contiguous creates the image, and early realize static weights (TODO: test for the static weight)
     if IMAGE >= 2: x,w = x.cast(base_image_type((bs*iy, ix*groups*cin//4, 4))), w.cast(base_image_type((cout//4, H*W*cin, 4)))
-    if IMAGE == 1 and FLOAT16: x, w = x.cast(dtypes.half).contiguous().cast(dtypes.float), w.cast(dtypes.half).contiguous().cast(dtypes.float)
+    if IMAGE == 1 and FLOAT16: x, w = x.contiguous().cast(dtypes.float), w.contiguous().cast(dtypes.float)
     else: x, w = x.contiguous(), w.contiguous()
 
     if IMAGE == 1 and added_weight: w, H = w[:, :-added_weight, ...], H - added_weight
@@ -3690,7 +3691,8 @@ class Tensor(OpMixin):
 
     # NCHW output
     ret = ret.reshape(bs, oy, ox, cout).permute(0,3,1,2)
-    return ret if bias is None else ret.add(bias.reshape(1, -1, 1, 1))
+    ret = ret if bias is None else ret.add(bias.reshape(1, -1, 1, 1))
+    return ret.cast(dtypes.half) if IMAGE == 1 and FLOAT16 else ret
 
 P = ParamSpec("P")
 T = TypeVar("T")

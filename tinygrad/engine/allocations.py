@@ -73,7 +73,8 @@ pm_early_transform_tensor_graph = PatternMatcher([
   # CONTIGUOUS replacement hack for openpilot
   (UPat(Ops.CONTIGUOUS, src=(UPat(GroupOp.Movement, name="src"),), name="contig"), found_contiguous),
   # replace ALU sources with contiguous versions found above
-  (UPat(GroupOp.ALU, name="alu"), lambda ctx,alu: alu.replace(src=new_src) if (new_src:=tuple(ctx.get(s, s) for s in alu.src)) != alu.src else None),
+  (UPat((*GroupOp.ALU, Ops.CAST), name="alu"), lambda ctx,alu:
+   alu.replace(src=new_src) if (new_src:=tuple(ctx.get(s, s) for s in alu.src)) != alu.src else None),
   # add CONTIGUOUS to tagged UOps
   (UPat(GroupOp.All-{Ops.CONTIGUOUS, Ops.ASSIGN}, name="x"), lambda x: x.rtag(None).contiguous(tag=x.tag) if x.tag else x.replace(tag=None)),
   # remove extra CONTIGUOUS on ASSIGN (only when assign target is contiguous)
