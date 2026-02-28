@@ -293,17 +293,43 @@ class TestWithGrad(unittest.TestCase):
     x = Tensor.rand(8)
     z[:3] = x
 
-  def test_set_into_requires_grad(self):
-    z = Tensor.rand(8, 8, requires_grad=True)
-    x = Tensor.rand(8)
-    with self.assertRaises(NotImplementedError):
-      z[:3] = x
-
   def test_set_with_requires_grad(self):
-    z = Tensor.rand(8, 8)
-    x = Tensor.rand(8, requires_grad=True)
-    with self.assertRaises(NotImplementedError):
-      z[:3] = x
+    z = Tensor.ones(8, 8)
+    x = Tensor.rand(8, 8, requires_grad=True)
+    z[:] = x
+    z.sum().backward()
+    np.testing.assert_allclose(x.grad.numpy(), np.ones((8, 8)))
+
+  def test_set_nonleaf_requires_grad(self):
+    x = Tensor([1.0, 2.0, 3.0, 4.0], requires_grad=True)
+    z = x * 2
+    z[:2] = Tensor([10.0, 20.0])
+    z.sum().backward()
+    np.testing.assert_allclose(x.grad.numpy(), [0, 0, 2, 2])
+
+  def test_set_overlapping_requires_grad(self):
+    z = Tensor.zeros(6, requires_grad=True)
+    x = Tensor.ones(4, requires_grad=True)
+    y = Tensor.ones(4, requires_grad=True) * 2
+    z[:4] = x
+    z[2:] = y
+    z.sum().backward()
+    np.testing.assert_allclose(x.grad.numpy(), [1, 1, 0, 0])
+    np.testing.assert_allclose(y.grad.numpy(), np.ones(4))
+
+  def test_set_iadd_requires_grad(self):
+    z = Tensor([1.0, 2.0, 3.0, 4.0], requires_grad=True)
+    x = Tensor([10.0, 20.0], requires_grad=True)
+    z[:2] += x
+    z.sum().backward()
+    np.testing.assert_allclose(z.grad.numpy(), np.ones(4))
+    np.testing.assert_allclose(x.grad.numpy(), np.ones(2))
+
+  def test_set_used_before_setitem(self):
+    z = Tensor([1.0, 2.0, 3.0, 4.0], requires_grad=True)
+    _ = z.sum()
+    with self.assertRaises(RuntimeError):
+      z[:2] = Tensor([0.0, 0.0])
 
 class TestSetitemLoop(unittest.TestCase):
   def test_arange(self):

@@ -1321,7 +1321,16 @@ class Tensor(OpMixin):
 
   def __setitem__(self, indices, v:Tensor|PyConst|list|tuple) -> None:
     if isinstance(v, Tensor) and v.dtype != self.dtype: raise RuntimeError(f"setitem dtype mismatch: {self.dtype=} != {v.dtype=}")
-    if self.requires_grad or (isinstance(v, Tensor) and v.requires_grad): raise NotImplementedError("setitem with requires_grad is not supported")
+    if self.requires_grad or (isinstance(v, Tensor) and v.requires_grad):
+      # for +=/-=, v's graph references self.uop through the view — exclude those from the stale-use check
+      v_uop, v_bw = (v.uop, v.uop.backward_slice) if isinstance(v, Tensor) else (None, {})
+      if any(self.uop in t.uop.backward_slice for tref in all_tensors
+             if (t:=tref()) is not None and t is not self and t.uop is not v_uop and t.uop not in v_bw):
+        raise RuntimeError("can't setitem on a tensor that already has other uses and requires grad")
+      if not isinstance(v, Tensor): v = Tensor(v, device=self.device, dtype=self.dtype)
+      if v.uop.op is Ops.ASSIGN: v = v._apply_uop(lambda x: x.src[1])
+      self.replace(self._getitem(indices, v))
+      return
     idx = [indices] if (isinstance(indices, list) and all_int(indices)) or not isinstance(indices, (tuple, list)) else list(indices)
     is_disk = isinstance(self.device, str) and self.device.startswith("DISK")
     if any(isinstance(i, (Tensor, list, tuple)) for i in idx): # advanced setitem
