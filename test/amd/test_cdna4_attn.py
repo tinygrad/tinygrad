@@ -21,9 +21,7 @@ def _test_attn_impl(B, H, S, D, dtype: Any = np.float32, atol=1e-4, rtol=1e-4):
   q_np = rng.standard_normal((B, H, S, D)).astype(dtype)
   k_np = rng.standard_normal((B, H, S, D)).astype(dtype)
   v_np = rng.standard_normal((B, H, S, D)).astype(dtype)
-
   expected = _ref_attention(q_np.astype(np.float32), k_np.astype(np.float32), v_np.astype(np.float32)).astype(dtype)
-
   q = Tensor(q_np, device="AMD")
   k = Tensor(k_np, device="AMD")
   v = Tensor(v_np, device="AMD")
@@ -36,10 +34,8 @@ def _test_causal_attn_impl(B, H, S, D, atol=1e-3, rtol=1e-3):
   q_np = rng.standard_normal((B, H, S, D)).astype(np.float32)
   k_np = rng.standard_normal((B, H, S, D)).astype(np.float32)
   v_np = rng.standard_normal((B, H, S, D)).astype(np.float32)
-
   causal = np.tril(np.ones((S, S), dtype=bool))
   expected = _ref_attention(q_np, k_np, v_np, mask=causal)
-
   q = Tensor(q_np, device="AMD")
   k = Tensor(k_np, device="AMD")
   v = Tensor(v_np, device="AMD")
