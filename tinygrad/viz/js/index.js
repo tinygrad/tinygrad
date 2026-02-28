@@ -248,13 +248,6 @@ function selectShape(key) {
   return { eventType:track?.eventType, e:track?.shapes[idx] };
 }
 
-const selectMetadata = (cls, before) => {
-  const root = d3.select(metadata), sel = root.select("."+cls);
-  if (!sel.empty()) return sel.html("");
-  if (before) return (root.select("."+before).empty() ? root.append("div") : root.insert("div", "."+before)).classed(cls, true).html("");
-  return root.append("div").classed(cls, true).html("");
-}
-
 const Modes = {0:'read', 1:'write', 2:'write+read'};
 
 function setFocus(key) {
@@ -271,7 +264,7 @@ function setFocus(key) {
     focusedShape = key; d3.select("#timeline").call(canvasZoom.transform, zoomLevel);
   }
   const { eventType, e } = selectShape(key);
-  const html = selectMetadata("info");
+  const html = d3.create("div").classed("info", true);
   if (eventType === EventTypes.EXEC) {
     const [n, _, ...rest] = e.arg.tooltipText.split("\n");
     html.append(() => tabulate([["Name", d3.create("p").html(n).node()], ["Duration", formatTime(e.width)], ["Start Time", formatTime(e.x)]]).node());
@@ -314,6 +307,7 @@ function setFocus(key) {
       if (shape != null) p.style("cursor", "pointer").on("click", () => setFocus(shape));
     }
   }
+  return metadata.replaceChildren(html.node());
 }
 
 const EventTypes = { EXEC:0, BUF:1 };
