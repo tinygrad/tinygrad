@@ -47,6 +47,18 @@ def verify_asm_gemm(batch:int, M:int, N:int, K:int, dtype=dtypes.float16, gpus:i
 def verify_asm_gemm_k_sharded(M:int, N:int, K:int, dtype=dtypes.float16, gpus:int=8) -> None:
   run_asm_gemm((M, K), (K, N), dtype=dtype, a_shard=1, b_shard=0, gpus=gpus)
 
+def verify_asm_gemm_n_sharded(batch:int, M:int, N:int, K:int, dtype=dtypes.float16, gpus:int=2) -> None:
+  run_asm_gemm((batch, M, K), (K, N), dtype=dtype, a_shard=None, b_shard=1, gpus=gpus)
+
+def verify_asm_gemm_m_sharded(M:int, N:int, K:int, dtype=dtypes.float16, gpus:int=2) -> None:
+  run_asm_gemm((M, K), (K, N), dtype=dtype, a_shard=0, b_shard=None, gpus=gpus)
+
+def verify_asm_gemm_n_sharded_2d(M:int, N:int, K:int, dtype=dtypes.float16, gpus:int=2) -> None:
+  run_asm_gemm((M, K), (K, N), dtype=dtype, a_shard=None, b_shard=1, gpus=gpus)
+
+def verify_asm_gemm_k_sharded_3d(batch:int, M:int, N:int, K:int, dtype=dtypes.float16, gpus:int=2) -> None:
+  run_asm_gemm((batch, M, K), (K, N), dtype=dtype, a_shard=2, b_shard=0, gpus=gpus)
+
 # 128x smaller than usual
 # uses the UOp GEMM, runs on non CDNA4 and CI
 @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
@@ -60,6 +72,14 @@ class TestGemm(unittest.TestCase):
   def test_gemm_multi(self): verify_asm_gemm(2, 64, 32, 32, gpus=2)
   @needs_second_gpu
   def test_gemm_k_sharded(self): verify_asm_gemm_k_sharded(64, 64, 2*64, gpus=2)
+  @needs_second_gpu
+  def test_gemm_m_sharded(self): verify_asm_gemm_m_sharded(2*64, 64, 32, gpus=2)
+  @needs_second_gpu
+  def test_gemm_n_sharded(self): verify_asm_gemm_n_sharded(1, 64, 64, 32, gpus=2)
+  @needs_second_gpu
+  def test_gemm_n_sharded_2d(self): verify_asm_gemm_n_sharded_2d(64, 2*64, 32, gpus=2)
+  @needs_second_gpu
+  def test_gemm_k_sharded_3d(self): verify_asm_gemm_k_sharded_3d(1, 64, 32, 2*64, gpus=2)
 
 # uses the Asm GEMM on CDNA4 only for speed reasons
 class TestGemmLarge(unittest.TestCase):
@@ -100,6 +120,20 @@ class TestGemmLarge(unittest.TestCase):
     with self.assertRaisesRegex(AssertionError, "batch size"):
       verify_asm_gemm(3, 256, 256, 256)
   def test_gemm_previously_unsupported(self): verify_asm_gemm(8, 1024, 1024, 4096, gpus=8)
+
+  # M-sharded 2D
+  def test_m_sharded_1(self): verify_asm_gemm_m_sharded(8*8192, 4096, 4096, dtype=dtypes.bfloat16, gpus=8)
+  def test_m_sharded_2(self): verify_asm_gemm_m_sharded(8*4096, 14336, 4096, dtype=dtypes.bfloat16, gpus=8)
+
+  # N-sharded 2D
+  def test_n_sharded_2d_1(self): verify_asm_gemm_n_sharded_2d(8192, 8*4096, 4096, dtype=dtypes.bfloat16, gpus=8)
+  def test_n_sharded_2d_2(self): verify_asm_gemm_n_sharded_2d(4096, 8*14336, 4096, dtype=dtypes.bfloat16, gpus=8)
+
+  # tensor parallel shapes (Llama 8B, MP=8)
+  def test_tp_n_sharded_wq(self): verify_asm_gemm_n_sharded(1, 8192, 4096, 4096, dtype=dtypes.bfloat16, gpus=8)
+  def test_tp_n_sharded_w1(self): verify_asm_gemm_n_sharded(1, 8192, 14336, 4096, dtype=dtypes.bfloat16, gpus=8)
+  def test_tp_k_sharded_wo(self): verify_asm_gemm_k_sharded_3d(1, 8192, 4096, 4096, dtype=dtypes.bfloat16, gpus=8)
+  def test_tp_k_sharded_w2(self): verify_asm_gemm_k_sharded_3d(1, 8192, 4096, 14336, dtype=dtypes.bfloat16, gpus=8)
 
   # more shapes: vary M, N, K independently
   def test_shape_small_square(self): verify_asm_gemm(1, 256, 256, 256)
