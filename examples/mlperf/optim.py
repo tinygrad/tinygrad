@@ -1,7 +1,7 @@
 from tinygrad.tensor import Tensor
 from tinygrad.dtype import dtypes
 from tinygrad.nn.optim import Optimizer
-from tinygrad.helpers import FUSE_OPTIM
+from tinygrad.helpers import unwrap, FUSE_OPTIM
 
 class GradAccClipAdamW(Optimizer):
   def __init__(self, params:list[Tensor], lr=0.001, b1=0.9, b2=0.999, eps=1e-6, weight_decay=0.0, grad_acc=1, clip_norm=1.0, device=None, fused=FUSE_OPTIM):
@@ -12,7 +12,20 @@ class GradAccClipAdamW(Optimizer):
     self.v = self._new_optim_param()
     self.grad_acc, self.clip_norm = grad_acc, clip_norm
 
+  def fstep(self, grads:list[Tensor]):
+    if self.fused:
+      out, extra = self._step([], grads)
+      updates = [out[0][self.pos_params[i]:self.pos_params[i+1]].reshape(tt.shape) for i, tt in enumerate(self.params)]
+    else:
+      updates, extra = self._step([], grads)
+    for i, tt in enumerate(self.params): tt.assign(self._apply_update(tt, updates[i]))
+    to_realize = extra+self.params+self.buffers
+
+    Tensor.realize(*to_realize)
+
   def _step(self, params:list[Tensor], grads:list[Tensor]) -> tuple[list[Tensor], list[Tensor]]:
+    grads = list(grads)
+
     for i in range(len(grads)):
       if grads[i].device != self.m[i].device: grads[i] = grads[i].to(self.m[i].device)
 
@@ -33,13 +46,13 @@ class GradAccClipAdamW(Optimizer):
     ret = []
     self.b1_t *= self.b1
     self.b2_t *= self.b2
-    for i, (t, g) in enumerate(zip(params, grads)):
+    for i, g in enumerate(grads):
       self.m[i].assign((self.b1 * self.m[i] + (1.0 - self.b1) * g).cast(self.m[i].dtype))
       self.v[i].assign((self.b2 * self.v[i] + (1.0 - self.b2) * (g * g)).cast(self.v[i].dtype))
       m_hat = self.m[i] / (1.0 - self.b1_t)
       v_hat = self.v[i] / (1.0 - self.b2_t)
       up = m_hat / (v_hat.sqrt() + self.eps)
-      ret.append((self.lr * up).cast(t.dtype))
+      ret.append((self.lr * up).cast(g.dtype))
     return ret, [self.b1_t, self.b2_t] + self.m + self.v
 
   def _apply_update(self, t:Tensor, up:Tensor) -> Tensor:
