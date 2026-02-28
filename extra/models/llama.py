@@ -1,7 +1,7 @@
 from typing import Union, Optional, Any
 import collections, math
-from tinygrad import Tensor, Variable, TinyJit, dtypes, nn, Device, function
-from tinygrad.helpers import getenv
+from tinygrad import Tensor, Variable, TinyJit, dtypes, nn, Device
+from tinygrad.helpers import getenv, DEBUG
 
 # https://github.com/facebookresearch/llama/blob/1076b9c51c77ad06e9d7ba8a4c6df775741732bd/llama/model.py#L47
 def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0) -> Tensor:
@@ -137,16 +137,9 @@ class TransformerBlock:
     self.attention_norm = nn.RMSNorm(dim, norm_eps)
     self.ffn_norm = nn.RMSNorm(dim, norm_eps)
 
-  @function
-  def _attention(self, x:Tensor, start_pos:Union[Variable,int], freqs_cis:Tensor, mask:Optional[Tensor]):
-    return x + self.attention(self.attention_norm(x), start_pos, freqs_cis, mask)
-
-  @function
-  def _feed_forward(self, h:Tensor):
-    return h + self.feed_forward(self.ffn_norm(h))
-
   def __call__(self, x:Tensor, start_pos:Union[Variable,int], freqs_cis:Tensor, mask:Optional[Tensor]):
-    return self._feed_forward(self._attention(x, start_pos, freqs_cis, mask)).contiguous().contiguous_backward()
+    h = x + self.attention(self.attention_norm(x), start_pos, freqs_cis, mask)
+    return (h + self.feed_forward(self.ffn_norm(h))).contiguous().contiguous_backward()
 
 # standard openai sampling
 def sample(logits: Tensor, temp: float, k: int, p: float, af: float, ap: float):
