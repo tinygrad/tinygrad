@@ -1050,13 +1050,15 @@ document.addEventListener("keydown", (event) => {
     if (expandSteps && getSubrewrites(step).length) return step.children[0].click();
     return setState({ expandSteps:!expandSteps });
   }
-  // left and right go through rewrites in a single UOp
-  if (event.key == "ArrowLeft") {
+  // left and right go through rewrites in a single UOp, in profiler go forward/backward in time
+  if (event.key == "ArrowLeft" || event.key == "ArrowRight") {
     event.preventDefault()
-    return setState({ currentRewrite:Math.max(0, currentRewrite-1) });
-  }
-  if (event.key == "ArrowRight") {
-    event.preventDefault()
+    if (profiler.style.display !== "none" && focusedShape != null) {
+      const [t, idx] = focusedShape.split("-");
+      const i = parseInt(idx), last = data.tracks.get(t).shapes.length-1;
+      return setFocus(`${t}-${event.key == "ArrowLeft" ? Math.max(0, i-1) : Math.min(last, i+1)}`);
+    }
+    if (event.key == "ArrowLeft") return setState({ currentRewrite:Math.max(0, currentRewrite-1) });
     const totalRewrites = ret.length-1;
     return setState({ currentRewrite:Math.min(totalRewrites, currentRewrite+1) });
   }
