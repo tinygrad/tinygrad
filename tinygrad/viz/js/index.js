@@ -248,6 +248,19 @@ function selectShape(key) {
   return { eventType:track?.eventType, e:track?.shapes[idx] };
 }
 
+const selectMetadata = (cls, before) => {
+  const root = d3.select(metadata), sel = root.select("."+cls);
+  if (!sel.empty()) return sel.html("");
+  if (before) {
+    const ref = root.select("."+before);
+    return (ref.empty()
+      ? root.append("div")
+      : root.insert("div", "."+before)
+    ).classed(cls, true).html("");
+  }
+  return root.append("div").classed(cls, true).html("");
+}
+
 const Modes = {0:'read', 1:'write', 2:'write+read'};
 
 function setFocus(key) {
@@ -256,7 +269,7 @@ function setFocus(key) {
     focusedShape = key; d3.select("#timeline").call(canvasZoom.transform, zoomLevel);
   }
   const { eventType, e } = selectShape(key);
-  const html = d3.create("div").classed("info", true);
+  const html = selectMetadata("info");
   if (eventType === EventTypes.EXEC) {
     const [n, _, ...rest] = e.arg.tooltipText.split("\n");
     html.append(() => tabulate([["Name", d3.create("p").html(n).node()], ["Duration", formatTime(e.width)], ["Start Time", formatTime(e.x)]]).node());
@@ -269,6 +282,10 @@ function setFocus(key) {
         setFocus(b.key);
       });
     }
+    d3.selectAll(".insts span").classed("highlight", false);
+    const pcInfo = rest.find(r => r.startsWith("PC:"));
+    if (pcInfo != null) { const el = document.getElementById(pcInfo.split(":")[1]); if (el) { el.classList.add("highlight"); el.scrollIntoView({ block:"nearest" }); } }
+
     if (e.arg.ctx != null) {
       const i = e.arg.ctx; s = e.arg.step;
       html.append("a").text(ctxs[i+1].steps[s].name).on("click", () => switchCtx(i, s));
@@ -290,7 +307,6 @@ function setFocus(key) {
       if (shape != null) p.style("cursor", "pointer").on("click", () => setFocus(shape));
     }
   }
-  return metadata.replaceChildren(html.node());
 }
 
 const EventTypes = { EXEC:0, BUF:1 };
@@ -314,7 +330,7 @@ async function renderProfiler(path, unit, opts) {
   const optional = (i) => i === 0 ? null : i-1;
   const dur = u32(), tracePeak = u64(), indexLen = u32(), layoutsLen = u32();
   const textDecoder = new TextDecoder("utf-8");
-  const { strings, dtypeSize, markers }  = JSON.parse(textDecoder.decode(new Uint8Array(buf, offset, indexLen))); offset += indexLen;
+  const { strings, dtypeSize, markers, ...extData } = JSON.parse(textDecoder.decode(new Uint8Array(buf, offset, indexLen))); offset += indexLen;
   // place devices on the y axis and set vertical positions
   const [tickSize, padding, baseOffset] = [10, 8, markers.length ? 14 : 0];
   const deviceList = profiler.append("div").attr("id", "device-list").style("padding-top", tickSize+padding+baseOffset+"px");
@@ -326,7 +342,7 @@ async function renderProfiler(path, unit, opts) {
   // color by key (name/device)
   const colorMap = new Map();
   // map shapes by event key
-  const shapeMap = new Map();
+  const shapeMap = new Map(), pcToShape = new Map();
   const heightScale = d3.scaleLinear().domain([0, tracePeak]).range([4,maxheight=100]);
   for (let i=0; i<layoutsLen; i++) {
     const nameLen = view.getUint8(offset, true); offset += 1;
@@ -390,6 +406,7 @@ async function renderProfiler(path, unit, opts) {
         // tiny device events go straight to the rewrite rule
         const key = k.startsWith("TINY") ? null : `${k}-${j}`;
         const labelHTML = label.map(l=>`<span style="color:${l.color}">${l.st}</span>`).join("");
+        if (e.info?.startsWith("PC:")) pcToShape.set(e.info.split(":")[1], key);
         const arg = { tooltipText:labelHTML+" N:"+shapes.length+"\n"+formatTime(e.dur)+(e.info != null ? "\n"+e.info : ""), bufs:[], key,
                       ctx:shapeRef?.ctx, step:shapeRef?.step };
         if (e.key != null) shapeMap.set(e.key, key);
@@ -484,6 +501,11 @@ async function renderProfiler(path, unit, opts) {
     }
   }
   for (const m of markers) m.label = m.name.split(/(\s+)/).map(st => ({ st, color:m.color, width:ctx.measureText(st).width }));
+  if (extData.pc_map != null) {
+    const code = selectMetadata("insts", "info").append("pre").append("code").classed("hljs", true);
+    for (const [k, v] of Object.entries(extData.pc_map)) code.append("span").attr("id", k).text(v+"\n")
+      .style("cursor", pcToShape.has(k) ? "pointer" : null).on("click", () => { const key = pcToShape.get(k); if (key) setFocus(key); });
+  }
   updateProgress(Status.COMPLETE);
   // draw events on a timeline
   const dpr = window.devicePixelRatio || 1;
@@ -829,6 +851,8 @@ async function main() {
   // ** center graph
   const { currentCtx, currentStep, currentRewrite, expandSteps } = state;
   if (currentCtx == -1) return;
+  // always have a new sidebar when view changes
+  metadata.innerHTML = "";
   const ctx = ctxs[currentCtx];
   const step = ctx.steps[currentStep];
   const ckey = step?.query;
@@ -860,7 +884,6 @@ async function main() {
       opts = {heightScale:0.5, hideLabels:true, levelKey:step.name.includes("PKTS") ? (e) => parseInt(e.name.split(" ")[1].split(":")[1]) : null, colorByName:ckey.includes("pkts")};
       return renderProfiler(ckey, "clk", opts);
     }
-    metadata.innerHTML = "";
     ret.metadata?.forEach(m => {
       if (Array.isArray(m)) return metadata.appendChild(tabulate(m.map(({ label, value }) => {
         return [label.trim(), typeof value === "string" ? value : formatUnit(value)];
