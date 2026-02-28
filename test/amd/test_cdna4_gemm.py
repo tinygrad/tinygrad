@@ -7,16 +7,16 @@ from tinygrad.helpers import getenv
 def is_cdna4_mock(): return getenv("MOCKGPU_ARCH", "") == "cdna4"
 
 def _matmul_check(M, K, N, dtype=np.float32, atol=1e-4, rtol=1e-4):
-    rng = np.random.default_rng(42)
-    a_np = rng.standard_normal((M, K)).astype(dtype)
-    b_np = rng.standard_normal((K, N)).astype(dtype)
-    expected = a_np @ b_np
-    a = Tensor(a_np, device="AMD")
-    b = Tensor(b_np, device="AMD")
-    result = (a @ b).numpy()
+  rng = np.random.default_rng(42)
+  a_np = rng.standard_normal((M, K)).astype(dtype)
+  b_np = rng.standard_normal((K, N)).astype(dtype)
+  expected = a_np @ b_np
+  a = Tensor(a_np, device="AMD")
+  b = Tensor(b_np, device="AMD")
+  result = (a @ b).numpy()
 
-    np.testing.assert_allclose(result, expected, atol=atol, rtol=rtol,
-      err_msg=f"GEMM({M},{K},{N}) dtype={dtype.__name__} failed")
+  np.testing.assert_allclose(result, expected, atol=atol, rtol=rtol,
+    err_msg=f"GEMM({M},{K},{N}) dtype={dtype.__name__} failed")
 
 @unittest.skipUnless(is_cdna4_mock(), "MOCKGPU_ARCH=cdna4 required")
 class TestCDNA4GEMM(unittest.TestCase):
