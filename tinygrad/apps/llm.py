@@ -350,6 +350,10 @@ if __name__ == "__main__":
     print(f"using model {args.model} with {raw_model.nbytes():,} bytes and {sum(x.numel() for x in nn.state.get_parameters(model)):,} params")
   del raw_model
 
+  # TODO: why this is required to free the RAM for the GGUF copy?
+  import gc
+  gc.collect()
+
   # do benchmark
   if args.benchmark:
     gen = model.generate([0], 0)
