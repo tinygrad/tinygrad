@@ -290,13 +290,11 @@ class AM_GFX(AM_IP):
   def fini_hw(self): self._dequeue_hqds()
 
   def reset_mec(self):
-    self._dequeue_hqds(reset=True)
+    self._dequeue_hqds()
 
-    # issue a soft reset to reset aql sync counter on multixcc systems.
-    if self.xccs > 1:
-      for xcc in range(self.xccs): self.adev.regGRBM_SOFT_RESET.write(soft_reset_cp=1, soft_reset_gfx=1, inst=xcc)
-      time.sleep(0.05)
-      for xcc in range(self.xccs): self.adev.regGRBM_SOFT_RESET.write(0x0, inst=xcc)
+    for xcc in range(self.xccs): self.adev.regGRBM_SOFT_RESET.write(soft_reset_cp=1, soft_reset_cpc=1, inst=xcc)
+    time.sleep(0.05)
+    for xcc in range(self.xccs): self.adev.regGRBM_SOFT_RESET.write(0x0, inst=xcc)
 
     self._config_mec()
     self._enable_mec()
@@ -384,13 +382,13 @@ class AM_GFX(AM_IP):
       if self.adev.ip_ver[am.GC_HWIP] >= (10,0,0):
         _config_helper(eng_name="MEC", cntl_reg="MEC_RS64", eng_reg="MEC_RS64", pipe_cnt=1, me=1, xcc=xcc)
 
-  def _dequeue_hqds(self, reset=False):
+  def _dequeue_hqds(self):
     for q in range(2):
       for xcc in range(self.xccs):
         self._grbm_select(me=1, pipe=0, queue=q, inst=xcc)
         if self.adev.regCP_HQD_ACTIVE.read(inst=xcc) & 1:
           self.adev.regCP_HQD_DEQUEUE_REQUEST.write(0x2, inst=xcc) # 1 - DRAIN_PIPE; 2 - RESET_WAVES
-          if not reset: wait_cond(lambda: self.adev.regCP_HQD_ACTIVE.read(inst=xcc) & 1, value=0, msg="HQD dequeue timeout")
+          if not self.adev.is_err_state: wait_cond(lambda: self.adev.regCP_HQD_ACTIVE.read(inst=xcc) & 1, value=0, msg="HQD dequeue timeout")
     self._grbm_select()
 
 class AM_IH(AM_IP):
