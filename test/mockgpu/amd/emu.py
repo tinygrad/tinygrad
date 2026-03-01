@@ -427,13 +427,9 @@ class _Ctx:
   def __init__(self, inst_size: int, wave_size: int = 32):
     self.inst_size, self._axis_id, self.wave_size = inst_size, 0, wave_size
     self.dyn_fields: list[tuple[int, int]] = []  # (lo, hi) of fields read dynamically
-    if wave_size not in _Ctx._vgpr_cache: _Ctx._vgpr_cache[wave_size] = UOp(Ops.PARAM, dtypes.uint32.ptr(256 * wave_size), arg=1)
-    self.vgpr = _Ctx._vgpr_cache[wave_size]
-    if wave_size == 64:
-      if wave_size not in _Ctx._accvgpr_cache: _Ctx._accvgpr_cache[wave_size] = UOp(Ops.PARAM, dtypes.uint32.ptr(256 * wave_size), arg=5)
-      self.accvgpr = _Ctx._accvgpr_cache[wave_size]
-    else:
-      self.accvgpr = self.vgpr
+    self.vgpr = _Ctx._vgpr_cache.setdefault(wave_size, UOp(Ops.PARAM, dtypes.uint32.ptr(256 * wave_size), arg=1))
+    acc = _Ctx._accvgpr_cache.setdefault(wave_size, UOp(Ops.PARAM, dtypes.uint32.ptr(256 * wave_size), arg=5))
+    self.accvgpr = acc if wave_size == 64 else self.vgpr
 
   def range(self, n: int | None = None) -> UOp:
     """Create a lane range UOp with unique axis ID."""
