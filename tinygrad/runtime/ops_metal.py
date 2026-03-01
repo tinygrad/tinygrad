@@ -37,6 +37,13 @@ class MetalDevice(Compiled):
     self.timeline_signal = self.sysdevice.newSharedEvent()
     self.timeline_value = 0
 
+    # probe GPU family: Apple9=M3/M4, Apple8=M2, Apple7=M1, etc. values are 1000+N.
+    self.gpu_family = 0
+    for i in range(15, 0, -1):
+      if self.sysdevice.supportsFamily(1000 + i):
+        self.gpu_family = i
+        break
+
     Compiled.profile_events += [ProfileDeviceEvent(device)]
 
     from tinygrad.runtime.graph.metal import MetalGraph
@@ -81,7 +88,7 @@ class MetalCompiler(Compiler):
 
     # no changes for compute in 2.0 - 2.4 specs, use 2.0 as default for old versions.
     macos_major = int(platform.mac_ver()[0].split('.')[0])
-    metal_version = "metal3.1" if macos_major >= 14 else "metal3.0" if macos_major >= 13 else "macos-metal2.0"
+    metal_version = "metal4.0" if macos_major >= 26 else "metal3.1" if macos_major >= 14 else "metal3.0" if macos_major >= 13 else "macos-metal2.0"
 
     # llvm will create modules.timestamp in cache path and cache compilation of metal stdlib (250ms => 8ms compilation time)
     # note that llvm won't necessarily create anything else here as apple has prebuilt versions of many standard libraries
