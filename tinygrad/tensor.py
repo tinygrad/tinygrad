@@ -2565,6 +2565,51 @@ class Tensor(OpMixin):
     return values._inverse(), indices
 
   @staticmethod
+  def associative_scan(combine_fn:Callable, xs:Tensor|tuple[Tensor, ...], axis:int=0, reverse:bool=False) -> Tensor|tuple[Tensor, ...]:
+    """
+    Performs a parallel prefix scan (associative scan) over `axis` using the given binary associative `combine_fn`.
+
+    This is equivalent to JAX's `jax.lax.associative_scan`. The scan runs in O(log n) parallel steps using the Hillis-Steele algorithm.
+
+    `combine_fn` takes two arguments of the same structure as `xs` and returns the same structure.
+    `xs` can be a single `Tensor` or a tuple of `Tensor`s (e.g. for linear recurrences like Mamba).
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([1, 2, 3, 4, 5])
+    print(Tensor.associative_scan(lambda a, b: a + b, t).numpy())
+    ```
+    """
+    is_tuple = isinstance(xs, tuple)
+    elems: tuple[Tensor, ...] = xs if isinstance(xs, tuple) else (xs,)
+    # validate inputs
+    assert len(elems) > 0, "associative_scan requires at least one tensor"
+    ref = elems[0]
+    axis = ref._resolve_dim(axis)
+    if ref.ndim == 0 or ref.shape[axis] <= 1: return xs
+    n = ref.shape[axis]
+    assert isinstance(n, int), f"associative_scan does not support symbolic shapes, got {n}"
+    # reverse by flipping before and after
+    if reverse: elems = tuple(e.flip(axis) for e in elems)
+    # Hillis-Steele parallel prefix scan
+    d = 0
+    while (1 << d) < n:
+      offset = 1 << d
+      # build shrink args for left (0:n-offset) and right (offset:n)
+      left_arg = tuple((0, s) if i != axis else (0, n - offset) for i, s in enumerate(ref.shape))
+      right_arg = tuple((0, s) if i != axis else (offset, n) for i, s in enumerate(ref.shape))
+      unchanged_arg = tuple((0, s) if i != axis else (0, offset) for i, s in enumerate(ref.shape))
+      lefts = tuple(e.shrink(left_arg) for e in elems)
+      rights = tuple(e.shrink(right_arg) for e in elems)
+      unchanged = tuple(e.shrink(unchanged_arg) for e in elems)
+      combined = combine_fn(lefts if is_tuple else lefts[0], rights if is_tuple else rights[0])
+      if not is_tuple: combined = (combined,)
+      assert isinstance(combined, tuple)
+      elems = tuple(u.cat(c, dim=axis).contiguous() for u, c in zip(unchanged, combined))
+      d += 1
+    if reverse: elems = tuple(e.flip(axis) for e in elems)
+    return elems if is_tuple else elems[0]
+
+  @staticmethod
   def _tri(r:sint, c:sint, diagonal:int=0, device=None, requires_grad:bool|None=None) -> Tensor:
     assert isinstance(r, int) and isinstance(c, int), f"does not support symbolic, getting {r=}, {c=}"
     return (Tensor.arange(r, device=device).unsqueeze(-1) + diagonal <= Tensor.arange(c, device=device)).requires_grad_(requires_grad)

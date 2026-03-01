@@ -1150,6 +1150,48 @@ class TestOps(unittest.TestCase):
     helper_test_op([(2,3,0)], lambda x: torch.cummin(x, dim=2).values, lambda x: Tensor.cummin(x, axis=2)[0])
     helper_test_op([(2,3,0)], lambda x: torch.cummin(x, dim=2).indices.int(), lambda x: Tensor.cummin(x, axis=2)[1], forward_only=True)
 
+  def test_associative_scan_add(self):
+    # 1D cumsum
+    helper_test_op([(10,)], lambda x: torch.cumsum(x, dim=0), lambda x: Tensor.associative_scan(lambda a, b: a + b, x, axis=0), forward_only=True)
+    # 2D cumsum along axis 0 and 1
+    helper_test_op([(5,6)], lambda x: torch.cumsum(x, dim=0), lambda x: Tensor.associative_scan(lambda a, b: a + b, x, axis=0), forward_only=True)
+    helper_test_op([(5,6)], lambda x: torch.cumsum(x, dim=1), lambda x: Tensor.associative_scan(lambda a, b: a + b, x, axis=1), forward_only=True)
+    # 3D cumsum
+    helper_test_op([(3,4,5)], lambda x: torch.cumsum(x, dim=2), lambda x: Tensor.associative_scan(lambda a, b: a + b, x, axis=2), forward_only=True)
+  def test_associative_scan_mul(self):
+    helper_test_op([(10,)], lambda x: torch.cumprod(x, dim=0), lambda x: Tensor.associative_scan(lambda a, b: a * b, x, axis=0), forward_only=True)
+    helper_test_op([(5,6)], lambda x: torch.cumprod(x, dim=1), lambda x: Tensor.associative_scan(lambda a, b: a * b, x, axis=1), forward_only=True)
+  def test_associative_scan_max(self):
+    helper_test_op([(10,)], lambda x: torch.cummax(x, dim=0).values, lambda x: Tensor.associative_scan(lambda a, b: a.maximum(b), x, axis=0),
+                   forward_only=True)
+    helper_test_op([(5,6)], lambda x: torch.cummax(x, dim=1).values, lambda x: Tensor.associative_scan(lambda a, b: a.maximum(b), x, axis=1),
+                   forward_only=True)
+  def test_associative_scan_reverse(self):
+    helper_test_op([(10,)], lambda x: torch.flip(torch.cumsum(torch.flip(x, [0]), dim=0), [0]),
+                   lambda x: Tensor.associative_scan(lambda a, b: a + b, x, axis=0, reverse=True), forward_only=True)
+  def test_associative_scan_single(self):
+    if not COMPILE_ONLY:
+      t = Tensor([42.0])
+      result = Tensor.associative_scan(lambda a, b: a + b, t, axis=0)
+      np.testing.assert_allclose(result.numpy(), [42.0])
+  def test_associative_scan_tuple(self):
+    if not COMPILE_ONLY:
+      # Mamba-style linear recurrence: h_t = A_t * h_{t-1} + Bu_t
+      np.random.seed(42)
+      n = 16
+      A_np = np.random.rand(n).astype(np.float32) * 0.5 + 0.5
+      Bu_np = np.random.rand(n).astype(np.float32)
+      # sequential reference
+      h = np.zeros(n, dtype=np.float32)
+      for i in range(n):
+        h[i] = A_np[i] * (h[i-1] if i > 0 else 0.0) + Bu_np[i]
+      # parallel scan
+      A_t, Bu_t = Tensor(A_np), Tensor(Bu_np)
+      def combine(left, right):
+        return (right[0] * left[0], right[0] * left[1] + right[1])
+      _, result = Tensor.associative_scan(combine, (A_t, Bu_t), axis=0)
+      np.testing.assert_allclose(result.numpy(), h, atol=1e-5, rtol=1e-5)
+
   def test_argmax(self):
     # check if it returns the first index for multiple occurrences
     helper_test_op(None, lambda x: x.argmax().type(torch.int32), lambda x: x.argmax(), forward_only=True, vals=[[2, 2]])
