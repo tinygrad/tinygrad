@@ -290,6 +290,7 @@ function setFocus(key) {
         const line = code.append("div").style("display", "flex").style("gap", "8px");
         const left = line.append("span").style("display", "flex").style("gap", "8px").classed("highlight", k === key).on("click", () => setFocus(k));
         // left.append("span").attr("class", "num").text(num++);
+        left.append("span").text(k.split("-")[0]);
         left.append("span").attr("class", "pc").text("0x"+parseInt(v).toString(16));
         line.append("span").text(data.pcMap[v]);
         if (k === key) line.node().scrollIntoView({ block:"nearest" });
