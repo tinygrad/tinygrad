@@ -1197,96 +1197,54 @@ def _compile_vop3sd(inst: ir3.VOP3SD | ir4.VOP3SD | irc.VOP3SD, ctx: _Ctx) -> UO
 
 def _compile_mfma(inst: irc.VOP3P, ctx: _Ctx) -> UOp:
   """CDNA MFMA 16x16xK matrix multiply-accumulate.
-
-  Uses local temp arrays to cache inputs, avoiding aliasing issues when vdst overlaps src0/src1.
-  Phase 1: Read all input f32 values from VGPRs into temp arrays (range loop over 64 lanes).
-  Phase 2: Compute 256 output values using temp arrays and write to VGPRs (range loop over 64 lanes).
+  Uses local temp array to cache inputs, avoiding aliasing when vdst overlaps src0/src1.
+  Phase 1: scatter A/B elements into tmp[0..n_elems-1] (A) and tmp[n_elems..2*n_elems-1] (B).
+  Phase 2: each lane accumulates 4 dot products D[m][n] += A[m]·B[n] and writes to ACCVGPR.
   """
-  op_name = _op_name(inst)
-  exec_mask = ctx.rexec()
+  op_name, exec_mask = _op_name(inst), ctx.rexec()
   vdst_reg = ctx.inst_field(type(inst).vdst)
-  src0_r = ctx.inst_field(type(inst).src0) - _c(256)
-  src1_r = ctx.inst_field(type(inst).src1) - _c(256)
-  src2_off = ctx.inst_field(type(inst).src2)
-  is_bf16 = 'BF16' in op_name
-  is_fp8 = 'FP8' in op_name or 'F8' in op_name
-  import re as _re
-  m = _re.search(r'(\d+)X(\d+)X(\d+)', op_name)
+  src0_r, src1_r = ctx.inst_field(type(inst).src0) - _c(256), ctx.inst_field(type(inst).src1) - _c(256)
+  src2_off = ctx.inst_field(type(inst).src2)  # VGPR (>=256) or SGPR/inline (<256)
+  is_bf16, is_fp8 = 'BF16' in op_name, 'FP8' in op_name or 'F8' in op_name
+  m = re.search(r'(\d+)X(\d+)X(\d+)', op_name)
   M, N, K = int(m.group(1)), int(m.group(2)), int(m.group(3))
   assert M == 16 and N == 16, f"only 16x16 MFMA supported, got {M}x{N}"
+  vpg, k_per_grp, n_elems = 4 if is_fp8 else 2, K // 4, 16 * K  # vpg: values packed per VGPR
   cvt = _FUNCS['bf16_to_f32'] if is_bf16 else _FUNCS['f16_to_f32']
-  vpg = 4 if is_fp8 else 2
-  k_per_grp = K // 4
-  n_elems = 16 * K  # total input elements per matrix
-
-  # src2 can be VGPR (>=256) or inline constant/SGPR (<256)
   src2_is_vgpr = src2_off >= _c(256)
-  src2_r = src2_off - _c(256)
   acc_scalar = ctx.rsgpr_dyn(src2_off, src2_is_vgpr.ne(True)).bitcast(dtypes.float32)
-
-  # Phase 1: Read inputs into a single temp array using a range loop.
-  # Layout: tmp[0..n_elems-1] = A[row][k], tmp[n_elems..2*n_elems-1] = B^T[col][k]
-  # Each lane holds k_per_grp elements. lane_in_grp = row/col, grp gives k offset.
-  b_off = UOp.const(dtypes.int, n_elems)
+  b_off, Ki, i16 = UOp.const(dtypes.int, n_elems), UOp.const(dtypes.int, K), UOp.const(dtypes.int, 16)
   tmp = UOp(Ops.DEFINE_LOCAL, dtypes.float32.ptr(n_elems * 2, addrspace=AddrSpace.LOCAL), arg=(n_elems * 2,))
 
-  read_lane = ctx.range()
-  read_row = read_lane % UOp.const(dtypes.int, 16)
-  read_grp = read_lane // UOp.const(dtypes.int, 16)
-
-  read_stores = []
-  for kl in range(k_per_grp):
+  def read_elem(src_r, raw_lane, kl):
+    """Extract k-element kl from src VGPR at raw_lane: unpack fp8 byte or f16/bf16 half-word."""
     reg_idx, sub_idx = kl // vpg, kl % vpg
-    # Read A: raw from src0 at this lane's VGPR
-    a_raw = ctx.rvgpr_dyn(src0_r + _c(reg_idx), read_lane)
-    if is_fp8:
-      a_f = ((a_raw >> UOp.const(dtypes.uint32, sub_idx * 8)) & UOp.const(dtypes.uint32, 0xFF)).cast(dtypes.uint32)
-    else:
-      a_f = cvt((a_raw >> UOp.const(dtypes.uint32, sub_idx * 16)) & UOp.const(dtypes.uint32, 0xFFFF))
-    # Store to tmp[row * K + grp * k_per_grp + kl]
-    a_idx = read_row * UOp.const(dtypes.int, K) + read_grp * UOp.const(dtypes.int, k_per_grp) + UOp.const(dtypes.int, kl)
-    read_stores.append(tmp.index(a_idx).store(a_f))
+    raw = ctx.rvgpr_dyn(src_r + _c(reg_idx), raw_lane)
+    return ((raw >> UOp.const(dtypes.uint32, sub_idx * 8)) & UOp.const(dtypes.uint32, 0xFF)).cast(dtypes.uint32) if is_fp8 \
+      else cvt((raw >> UOp.const(dtypes.uint32, sub_idx * 16)) & UOp.const(dtypes.uint32, 0xFFFF))
 
-    # Read B: raw from src1 at this lane's VGPR
-    b_raw = ctx.rvgpr_dyn(src1_r + _c(reg_idx), read_lane)
-    if is_fp8:
-      b_f = ((b_raw >> UOp.const(dtypes.uint32, sub_idx * 8)) & UOp.const(dtypes.uint32, 0xFF)).cast(dtypes.uint32)
-    else:
-      b_f = cvt((b_raw >> UOp.const(dtypes.uint32, sub_idx * 16)) & UOp.const(dtypes.uint32, 0xFFFF))
-    b_idx = b_off + read_row * UOp.const(dtypes.int, K) + read_grp * UOp.const(dtypes.int, k_per_grp) + UOp.const(dtypes.int, kl)
-    read_stores.append(tmp.index(b_idx).store(b_f))
-
+  # Phase 1: each lane (= row/col) writes its k_per_grp elements for A and B into tmp
+  read_lane = ctx.range()
+  read_row, read_grp = read_lane % i16, read_lane // i16  # lane_in_grp=row/col, grp=k-group
+  base_idx = read_row * Ki + read_grp * UOp.const(dtypes.int, k_per_grp)  # tmp offset for this lane
+  read_stores = [s for kl in range(k_per_grp) for s in (
+    tmp.index(base_idx + UOp.const(dtypes.int, kl)).store(read_elem(src0_r, read_lane, kl)),         # A[row][k]
+    tmp.index(b_off + base_idx + UOp.const(dtypes.int, kl)).store(read_elem(src1_r, read_lane, kl)), # B[col][k]
+  )]
   read_phase = UOp.group(*read_stores).end(read_lane)
 
-  # Phase 2: Compute dot products and write outputs using a range loop.
-  # Each lane computes 4 output values: D[m][n] where m = grp*4 + out_reg, n = n_idx.
-  tmp2 = tmp.after(read_phase)
-
+  # Phase 2: each lane computes 4 outputs D[m][n] = sum_k A[m][k]*B[n][k] + C[m][n]
+  tmp2 = tmp.after(read_phase)  # tmp view sequenced after read_phase
   compute_lane = ctx.range()
-  n_idx = compute_lane % UOp.const(dtypes.int, 16)
-  c_grp = compute_lane // UOp.const(dtypes.int, 16)
-
+  n_idx, c_grp = compute_lane % i16, compute_lane // i16  # n=col index, c_grp=output group
   compute_stores = []
-  for out_reg in range(4):
-    # Read accumulator from ACCVGPR (or scalar constant)
-    acc_v = ctx.raccvgpr_dyn(src2_r + _c(out_reg), compute_lane, src2_is_vgpr).bitcast(dtypes.float32)
-    acc = src2_is_vgpr.where(acc_v, acc_scalar)
-
-    # m = c_grp*4 + out_reg
+  for out_reg in range(4):  # each lane writes 4 ACCVGPR outputs (m = c_grp*4 + out_reg)
+    acc = src2_is_vgpr.where(ctx.raccvgpr_dyn(src2_off - _c(256) + _c(out_reg), compute_lane, src2_is_vgpr).bitcast(dtypes.float32), acc_scalar)
     m_base = c_grp * UOp.const(dtypes.int, 4) + UOp.const(dtypes.int, out_reg)
     for k in range(K):
-      # A[m][k] from tmp2[m * K + k] -- no .load(), pm_add_loads adds it
-      a_val = tmp2.index(m_base * UOp.const(dtypes.int, K) + UOp.const(dtypes.int, k))
-      # B[n][k] from tmp2[n_elems + n * K + k]
-      b_val = tmp2.index(b_off + n_idx * UOp.const(dtypes.int, K) + UOp.const(dtypes.int, k))
-      acc = acc + a_val * b_val
-
-    # Write output to ACCVGPR (MFMA destination is ACCVGPR)
+      acc = acc + tmp2.index(m_base * Ki + UOp.const(dtypes.int, k)) * tmp2.index(b_off + n_idx * Ki + UOp.const(dtypes.int, k))
     compute_stores.append(ctx.waccvgpr_dyn(vdst_reg + _c(out_reg), compute_lane, acc.bitcast(dtypes.uint32), exec_mask))
-
-  compute_phase = UOp.group(*compute_stores).end(compute_lane)
-
-  return UOp.sink(read_phase, compute_phase, *ctx.inc_pc())
+  return UOp.sink(read_phase, UOp.group(*compute_stores).end(compute_lane), *ctx.inc_pc())
 
 def _compile_wmma(inst: ir3.VOP3P | ir4.VOP3P | irc.VOP3P, ctx: _Ctx) -> UOp:
   op_name = _op_name(inst)
