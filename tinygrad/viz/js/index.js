@@ -263,8 +263,6 @@ function setFocus(key) {
     }
     focusedShape = key; d3.select("#timeline").call(canvasZoom.transform, zoomLevel);
   }
-  const instsEl = metadata.querySelector(".insts");
-  d3.select(instsEl).selectAll("span").classed("highlight", false);
   const { eventType, e } = selectShape(key);
   if (metadata.querySelector(".info") == null) d3.select(metadata).html("").append("div").classed("info", true);
   const html = d3.select(".info").html("");
@@ -286,17 +284,6 @@ function setFocus(key) {
       const prgSrc = ctxs[i+1].steps.findIndex(s => s.name === "View Source");
       if (prgSrc !== -1) html.append("a").text("View Source").on("click", () => switchCtx(i, prgSrc));
     }
-    if (data.pcToShape.size > 0 && instsEl == null) {
-      const code = d3.create("pre").append("code").classed("hljs", true).style("margin-top", "20px").classed("insts", true);
-      metadata.insertBefore(code.node().parentElement, html.node());
-      for (const [k, v] of data.pcToShape) {
-        const line = code.append("div").style("display", "flex").style("gap", "8px");
-        const left = line.append("span").style("display", "flex").style("gap", "8px").attr("id", `inst-${k}`).classed("highlight", k === key).on("click", (e) => setFocus(k));
-        left.append("span").attr("class", "num").text("W:"+k.split("-")[0].split(":")[1]);
-        left.append("span").attr("class", "pc").text("0x"+parseInt(v.pc).toString(16));
-        line.append("span").text(data.pcMap[v.pc]);
-      }
-    }
   }
   if (eventType === EventTypes.BUF) {
     const [dtype, sz, nbytes, dur] = e.arg.tooltipText.split("\n");
@@ -312,11 +299,25 @@ function setFocus(key) {
       if (shape != null) p.style("cursor", "pointer").on("click", () => setFocus(shape));
     }
   }
+  // external data metadata list
+  const instsEl = metadata.querySelector(".insts");
+  d3.select(instsEl).selectAll("span").classed("highlight", false);
+  if (data.pcToShape.size > 0 && instsEl == null) {
+    const code = d3.create("pre").append("code").classed("hljs", true).style("margin-top", "20px").classed("insts", true);
+    metadata.insertBefore(code.node().parentElement, html.node());
+    for (const [k, v] of data.pcToShape) {
+      const line = code.append("div").style("display", "flex").style("gap", "8px");
+      const left = line.append("span").style("display", "flex").style("gap", "8px").attr("id", `inst-${k}`).classed("highlight", k === key).on("click", (e) => setFocus(k));
+      left.append("span").attr("class", "num").text("W:"+k.split("-")[0].split(":")[1]);
+      left.append("span").attr("class", "pc").text("0x"+parseInt(v.pc).toString(16));
+      line.append("span").text(data.pcMap[v.pc]);
+    }
+  }
   const instSpan = document.getElementById(`inst-${key}`);
-  if (instSpan != null) {
+  if (instSpan != null && instsEl != null) {
     const r = rect(instSpan), c = rect(instsEl);
     const gap = Math.max(c.top-r.bottom, r.top-c.bottom);
-    if (gap >= -20) instSpan.scrollIntoView({ block:"nearest" });
+    if (gap >= -30) instSpan.scrollIntoView({ block:"nearest" });
     instSpan.classList.add("highlight");
   }
 }
