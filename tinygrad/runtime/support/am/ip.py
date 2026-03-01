@@ -451,6 +451,7 @@ class AM_IH(AM_IP):
         bf = self.adev.reg(self.adev.gmc.pf_status_reg('GC')).read_bitfields()
         va = (self.adev.reg('regGCVM_L2_PROTECTION_FAULT_ADDR_HI32').read()<<32) | self.adev.reg('regGCVM_L2_PROTECTION_FAULT_ADDR_LO32').read()
         print(f"am {self.adev.devfmt}: GCVM_L2_PROTECTION_FAULT_STATUS: {bf} {va<<12:#x}")
+        self.adev.reg('regGCVM_L2_PROTECTION_FAULT_CNTL').update(clear_protection_fault_status_addr=1)
         self.adev.is_err_state = True
       else: self.adev.is_err_state = True
 
