@@ -21,7 +21,7 @@ if __name__ == "__main__":
       c = a.matmul(b)
       c.realize()
     try: dev.synchronize(timeout=1)
-    except RuntimeError as e: print(e) 
+    except RuntimeError as e: print(e)
     with Context(DEBUG=0, BEAM=0):
       a = Tensor.ones(512, 512, device="AMD").contiguous().realize()
       b = Tensor.ones(512, 512, device="AMD").contiguous().realize()
