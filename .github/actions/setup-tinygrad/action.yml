@@ -233,7 +233,7 @@ runs:
       shell: bash
       run: |
         sudo mkdir -p /usr/local/lib
-        curl -s -H "Authorization: token $GH_TOKEN" curl -s https://api.github.com/repos/nimlgen/amdcomgr_dylib/releases/latest | \
+        curl -s -H "Authorization: token $GH_TOKEN" curl -s https://api.github.com/repos/tinygrad/amdcomgr_dylib/releases/latest | \
           jq -r '.assets[] | select(.name == "libamd_comgr.dylib").browser_download_url' | \
           sudo xargs curl -fL -o /usr/local/lib/libamd_comgr.dylib
         cargo build --release --manifest-path ./extra/remu/Cargo.toml
