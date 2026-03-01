@@ -292,11 +292,9 @@ class AM_GFX(AM_IP):
   def reset_mec(self):
     self._dequeue_hqds()
 
-    # issue a soft reset to reset aql sync counter on multixcc systems.
-    if self.xccs > 1:
-      for xcc in range(self.xccs): self.adev.regGRBM_SOFT_RESET.write(soft_reset_cp=1, soft_reset_gfx=1, inst=xcc)
-      time.sleep(0.05)
-      for xcc in range(self.xccs): self.adev.regGRBM_SOFT_RESET.write(0x0, inst=xcc)
+    for xcc in range(self.xccs): self.adev.regGRBM_SOFT_RESET.write(soft_reset_cp=1, soft_reset_cpc=1, inst=xcc)
+    time.sleep(0.05)
+    for xcc in range(self.xccs): self.adev.regGRBM_SOFT_RESET.write(0x0, inst=xcc)
 
     self._config_mec()
     self._enable_mec()
