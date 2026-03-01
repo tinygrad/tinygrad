@@ -4,6 +4,7 @@ from typing import Any, Callable, BinaryIO, Iterable, cast
 from tinygrad.tensor import Tensor
 from tinygrad.dtype import dtypes
 from tinygrad.helpers import prod, argsort, DEBUG, Timing, CI, GlobalCounters, tqdm, round_up, T, strides_for_shape
+from tinygrad.uop.ops import UOp, buffers
 
 class TensorIO(io.RawIOBase, BinaryIO):
   def __init__(self, t: Tensor):
@@ -377,6 +378,11 @@ def gguf_load(tensor: Tensor) -> tuple[dict, dict[str, Tensor]]:
   alignment, pos = kv_data.get("general.alignment", 32), reader.tell()
   data_start = round_up(pos, alignment)
 
-  for name, dims, typ, off in t_infos: state_dict[name] = ggml_data_to_tensor(tensor[data_start + off:], prod(dims), typ).reshape(*reversed(dims))
+  base_buf = tensor.uop.buffer
+  for name, dims, typ, off in t_infos:
+    sub_size = base_buf.size - (data_start + off)
+    sub_uop = UOp.new_buffer(tensor.device, sub_size, tensor.dtype)
+    buffers[sub_uop] = base_buf.view(sub_size, tensor.dtype, data_start + off)
+    state_dict[name] = ggml_data_to_tensor(Tensor(sub_uop, tensor.device, tensor.dtype), prod(dims), typ).reshape(*reversed(dims))
 
   return kv_data, state_dict
