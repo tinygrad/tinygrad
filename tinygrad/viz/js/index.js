@@ -286,27 +286,15 @@ function setFocus(key) {
       const prgSrc = ctxs[i+1].steps.findIndex(s => s.name === "View Source");
       if (prgSrc !== -1) html.append("a").text("View Source").on("click", () => switchCtx(i, prgSrc));
     }
-    // TODO: this needs to be cleaned up
-    const instSpan = document.getElementById(`inst-${key}`);
-    if (instSpan != null) {
-      const r = rect(instSpan), c = rect(instsEl);
-      const gap = Math.max(c.top-r.bottom, r.top-c.bottom);
-      if (gap >= -20) instSpan.scrollIntoView({ block:"nearest" });
-      instSpan.classList.add("highlight");
-    }
     if (data.pcToShape.size > 0 && instsEl == null) {
       const code = d3.create("pre").append("code").classed("hljs", true).style("margin-top", "20px").classed("insts", true);
       metadata.insertBefore(code.node().parentElement, html.node());
-      let num = 0;
       for (const [k, v] of data.pcToShape) {
         const line = code.append("div").style("display", "flex").style("gap", "8px");
-        const left = line.append("span").style("display", "flex").style("gap", "8px").attr("id", `inst-${k}`).classed("highlight", k === key).on("click", (e) => {
-          setFocus(k);
-        });
-        // left.append("span").attr("class", "num").text(num++);
-        left.append("span").text(k.split("-")[0]);
-        left.append("span").attr("class", "pc").text("0x"+parseInt(v).toString(16));
-        line.append("span").text(data.pcMap[v]);
+        const left = line.append("span").style("display", "flex").style("gap", "8px").attr("id", `inst-${k}`).classed("highlight", k === key).on("click", (e) => setFocus(k));
+        left.append("span").attr("class", "num").text("W:"+k.split("-")[0].split(":")[1]);
+        left.append("span").attr("class", "pc").text("0x"+parseInt(v.pc).toString(16));
+        line.append("span").text(data.pcMap[v.pc]);
       }
     }
   }
@@ -323,6 +311,13 @@ function setFocus(key) {
       if (shapeInfo?.length > 5) p.append("span").text(" "+shapeInfo[5]);
       if (shape != null) p.style("cursor", "pointer").on("click", () => setFocus(shape));
     }
+  }
+  const instSpan = document.getElementById(`inst-${key}`);
+  if (instSpan != null) {
+    const r = rect(instSpan), c = rect(instsEl);
+    const gap = Math.max(c.top-r.bottom, r.top-c.bottom);
+    if (gap >= -20) instSpan.scrollIntoView({ block:"nearest" });
+    instSpan.classList.add("highlight");
   }
 }
 
@@ -423,7 +418,7 @@ async function renderProfiler(path, unit, opts) {
         // tiny device events go straight to the rewrite rule
         const key = k.startsWith("TINY") ? null : `${k}-${j}`;
         const labelHTML = label.map(l=>`<span style="color:${l.color}">${l.st}</span>`).join("");
-        if (e.info?.startsWith("PC:")) data.pcToShape.set(key, e.info.split(":")[1]);
+        if (e.info?.startsWith("PC:")) data.pcToShape.set(key, {pc:e.info.split(":")[1], st:e.st});
         const arg = { tooltipText:labelHTML+" N:"+shapes.length+"\n"+formatTime(e.dur)+(e.info != null ? "\n"+e.info : ""), bufs:[], key,
                       ctx:shapeRef?.ctx, step:shapeRef?.step };
         if (e.key != null) shapeMap.set(e.key, key);
@@ -518,6 +513,7 @@ async function renderProfiler(path, unit, opts) {
     }
   }
   for (const m of markers) m.label = m.name.split(/(\s+)/).map(st => ({ st, color:m.color, width:ctx.measureText(st).width }));
+  data.pcToShape = new Map([...data.pcToShape].sort((a, b) => a[1].st - b[1].st));
   if (extData.pc_map != null) data.pcMap = extData.pc_map; setFocus(focusedShape);
   updateProgress(Status.COMPLETE);
   // draw events on a timeline
