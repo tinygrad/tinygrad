@@ -136,35 +136,21 @@ class TestTensorVariable(unittest.TestCase):
     with self.assertRaises(AssertionError):
       t.chunk(2, dim=0)  # can't split along symbolic dim
 
-  def test_symbolic_triu_rectangular(self):
-    vr, vc = Variable("r", 1, 10).bind(4), Variable("c", 1, 10).bind(6)
-    t = Tensor.arange(vr*vc).reshape(vr, vc)
-    out = t.triu().shrink(((0, 4), (0, 6))).numpy()
-    np.testing.assert_equal(out, np.triu(np.arange(24).reshape(4, 6)))
+  def test_symbolic_triu(self):
+    t = Variable("t", 1, 10).bind(4)
+    for start_pos in (0, 1, 3):
+      mask = Tensor.full((1, 1, t, start_pos+t), float("-inf")).triu(start_pos+1)
+      out = mask.shrink(((0, 1), (0, 1), (0, 4), (0, start_pos+4))).numpy()
+      expected = np.triu(np.full((1, 1, 4, start_pos+4), float("-inf")), k=start_pos+1)
+      np.testing.assert_equal(out, expected)
 
-  def test_symbolic_tril_rectangular(self):
-    vr, vc = Variable("r", 1, 10).bind(4), Variable("c", 1, 10).bind(6)
-    t = Tensor.arange(vr*vc).reshape(vr, vc)
-    out = t.tril().shrink(((0, 4), (0, 6))).numpy()
-    np.testing.assert_equal(out, np.tril(np.arange(24).reshape(4, 6)))
-
-  def test_symbolic_triu_extreme_diagonals(self):
-    vr, vc = Variable("r", 1, 10).bind(4), Variable("c", 1, 10).bind(6)
-    base = np.arange(24).reshape(4, 6)
-    t = Tensor.arange(vr*vc).reshape(vr, vc)
-    out_hi = t.triu(diagonal=10).shrink(((0, 4), (0, 6))).numpy()
-    out_lo = t.triu(diagonal=-10).shrink(((0, 4), (0, 6))).numpy()
-    np.testing.assert_equal(out_hi, np.triu(base, k=10))
-    np.testing.assert_equal(out_lo, np.triu(base, k=-10))
-
-  def test_symbolic_tril_extreme_diagonals(self):
-    vr, vc = Variable("r", 1, 10).bind(4), Variable("c", 1, 10).bind(6)
-    base = np.arange(24).reshape(4, 6)
-    t = Tensor.arange(vr*vc).reshape(vr, vc)
-    out_hi = t.tril(diagonal=10).shrink(((0, 4), (0, 6))).numpy()
-    out_lo = t.tril(diagonal=-10).shrink(((0, 4), (0, 6))).numpy()
-    np.testing.assert_equal(out_hi, np.tril(base, k=10))
-    np.testing.assert_equal(out_lo, np.tril(base, k=-10))
+  def test_symbolic_tril(self):
+    t = Variable("t", 1, 10).bind(4)
+    for start_pos in (0, 1, 3):
+      mask = Tensor.full((1, 1, t, start_pos+t), float("-inf")).tril(start_pos+1)
+      out = mask.shrink(((0, 1), (0, 1), (0, 4), (0, start_pos+4))).numpy()
+      expected = np.tril(np.full((1, 1, 4, start_pos+4), float("-inf")), k=start_pos+1)
+      np.testing.assert_equal(out, expected)
 
 if __name__ == '__main__':
   unittest.main()
