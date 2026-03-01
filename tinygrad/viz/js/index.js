@@ -288,8 +288,9 @@ function setFocus(key) {
       let num = 0;
       for (const [k, v] of data.pcToShape) {
         const line = code.append("div").style("display", "flex").style("gap", "8px").on("click", () => setFocus(k));
-        line.append("span").attr("class", "num").classed("highlight", k === key).text(num++);
-        line.append("span").attr("class", "pc").classed("highlight", k === key).text("0x"+parseInt(v).toString(16));
+        const left = line.append("span").style("display", "flex").style("gap", "8px").classed("highlight", k === key);
+        // left.append("span").attr("class", "num").text(num++);
+        left.append("span").attr("class", "pc").text("0x"+parseInt(v).toString(16));
         line.append("span").text(data.pcMap[v]);
         if (k === key) line.node().scrollIntoView({ block:"nearest" });
       }
