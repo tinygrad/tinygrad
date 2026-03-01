@@ -59,3 +59,8 @@ kernel void r_5(device int* data0, const device int* data1, uint3 gid [[threadgr
     self.assertEqual(curr:=device.sysdevice.currentAllocatedSize(), before+size, msg=f"{curr=} - {before=}")
     device.allocator.free(buf, buf.size, BufferSpec(nolru=True))
     self.assertEqual(curr:=device.sysdevice.currentAllocatedSize(), before, msg=f"{curr=} - {before=}")
+
+  def test_gpu_family(self):
+    device = Device['METAL']
+    self.assertGreater(device.gpu_family, 0)
+    self.assertLessEqual(device.gpu_family, 15)
