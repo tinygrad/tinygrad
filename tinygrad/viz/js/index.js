@@ -264,7 +264,7 @@ function setFocus(key) {
     focusedShape = key; d3.select("#timeline").call(canvasZoom.transform, zoomLevel);
   }
   const { eventType, e } = selectShape(key);
-  const html = d3.create("div").classed("info", true);
+  const html = d3.select(metadata).html("").append("div").classed("info", true);
   if (eventType === EventTypes.EXEC) {
     const [n, _, ...rest] = e.arg.tooltipText.split("\n");
     html.append(() => tabulate([["Name", d3.create("p").html(n).node()], ["Duration", formatTime(e.width)], ["Start Time", formatTime(e.x)]]).node());
@@ -285,11 +285,13 @@ function setFocus(key) {
     }
     if (data.pcToShape.size > 0) {
       const code = html.append("pre").append("code").classed("hljs", true).style("margin-top", "20px").classed("insts", true);
+      let num = 0;
       for (const [k, v] of data.pcToShape) {
-        const line = code.append("div").style("display", "flex").style("gap", "4px");
-        line.append("span").text("0x"+v.toString(16)).classed("highlight", k === key).style("cursor", "pointer").on("click", () => setFocus(k));
-        line.append("span").text(data.pcMap[v]+"\n");
-        if (k == key) line.node().scrollIntoView({ block:"nearest" })
+        const line = code.append("div").style("display", "flex").style("gap", "8px").on("click", () => setFocus(k));
+        line.append("span").attr("class", "num").classed("highlight", k === key).text(num++);
+        line.append("span").attr("class", "pc").classed("highlight", k === key).text("0x"+parseInt(v).toString(16));
+        line.append("span").text(data.pcMap[v]);
+        if (k === key) line.node().scrollIntoView({ block:"nearest" });
       }
     }
   }
@@ -307,7 +309,6 @@ function setFocus(key) {
       if (shape != null) p.style("cursor", "pointer").on("click", () => setFocus(shape));
     }
   }
-  return metadata.replaceChildren(html.node());
 }
 
 const EventTypes = { EXEC:0, BUF:1 };
