@@ -59,9 +59,11 @@ from tinygrad.helpers import Context, DEBUG, PROFILE, colored
 from tinygrad.engine.realize import get_runner
 
 from tinygrad.renderer.amd import decode_inst
+from tinygrad.runtime.autogen.amd.rdna2.str_pcode import PCODE as PCODE_RDNA2
 from tinygrad.runtime.autogen.amd.rdna3.str_pcode import PCODE as PCODE_RDNA3
 from tinygrad.runtime.autogen.amd.rdna4.str_pcode import PCODE as PCODE_RDNA4
 from tinygrad.runtime.autogen.amd.cdna.str_pcode import PCODE as PCODE_CDNA
+from tinygrad.runtime.autogen.amd.rdna2 import ins as ir2
 from tinygrad.runtime.autogen.amd.rdna3 import ins as ir3
 from tinygrad.runtime.autogen.amd.rdna4 import ins as ir4
 from tinygrad.runtime.autogen.amd.cdna import ins as irc
@@ -103,15 +105,16 @@ def _init_sqtt_encoder():
   from tinygrad.runtime.autogen.amd.rdna4.enum import SOPPOp as SOPPOp4
   import re
 
-  _SOPP = (ir3.SOPP, ir4.SOPP, irc.SOPP)
-  _SMEM = (ir3.SMEM, ir4.SMEM, irc.SMEM)
-  _VALU = (ir3.VOP1, ir3.VOP2, ir3.VOP3, ir3.VOP3P, ir3.VOPC, ir3.VOPD, ir3.VOP3SD, ir3.VOP3_SDST, ir3.VOP1_SDST,
+  _SOPP = (ir2.SOPP, ir3.SOPP, ir4.SOPP, irc.SOPP)
+  _SMEM = (ir2.SMEM, ir3.SMEM, ir4.SMEM, irc.SMEM)
+  _VALU = (ir2.VOP1, ir2.VOP2, ir2.VOP3, ir2.VOP3P, ir2.VOPC, ir2.VOP3SD, ir2.VOP3_SDST, ir2.VOP1_SDST,
+           ir3.VOP1, ir3.VOP2, ir3.VOP3, ir3.VOP3P, ir3.VOPC, ir3.VOPD, ir3.VOP3SD, ir3.VOP3_SDST, ir3.VOP1_SDST,
            ir4.VOP1, ir4.VOP2, ir4.VOP3, ir4.VOP3P, ir4.VOPC, ir4.VOPD, ir4.VOP3SD, ir4.VOP3_SDST, ir4.VOP1_SDST,
            irc.VOP1, irc.VOP2, irc.VOP3, irc.VOP3P, irc.VOPC, irc.VOP3SD, irc.VOP3_SDST)
-  _DS = (ir3.DS, ir4.DS, irc.DS)
-  _GLOBAL = (ir3.GLOBAL, ir4.VGLOBAL, irc.GLOBAL)
-  _FLAT = (ir3.FLAT, ir4.VFLAT, irc.FLAT)
-  _SCRATCH = (ir3.SCRATCH, ir4.VSCRATCH, irc.SCRATCH)
+  _DS = (ir2.DS, ir3.DS, ir4.DS, irc.DS)
+  _GLOBAL = (ir2.GLOBAL, ir3.GLOBAL, ir4.VGLOBAL, irc.GLOBAL)
+  _FLAT = (ir2.FLAT, ir3.FLAT, ir4.VFLAT, irc.FLAT)
+  _SCRATCH = (ir2.SCRATCH, ir3.SCRATCH, ir4.VSCRATCH, irc.SCRATCH)
 
   # SOPP classification sets
   _SOPP_SKIP = {SOPPOp3.S_ENDPGM.value, SOPPOp3.S_ENDPGM_SAVED.value, SOPPOp3.S_ENDPGM_ORDERED_PS_DONE.value,
@@ -282,8 +285,11 @@ _pcode_fixes = {
 }
 
 def _get_pcode_dict(op) -> dict:
-  """Return the PCODE dictionary for the given opcode based on its architecture."""
-  return PCODE_CDNA if 'cdna' in type(op).__module__ else PCODE_RDNA4 if 'rdna4' in type(op).__module__ else PCODE_RDNA3
+  mod = type(op).__module__
+  if 'cdna' in mod: return PCODE_CDNA
+  if 'rdna4' in mod: return PCODE_RDNA4
+  if 'rdna2' in mod: return PCODE_RDNA2
+  return PCODE_RDNA3
 
 # Pcode parser
 @functools.cache
@@ -1306,6 +1312,11 @@ _INST_HANDLERS: dict[type, Callable[..., UOp]] = {
   ir3.VOP1: _compile_vop12, ir3.VOP1_SDST: _compile_vop12, ir3.VOP2: _compile_vop12, ir3.VOPC: _compile_vopc, ir3.VOP3: _compile_vop3,
   ir3.VOP3_SDST: _compile_vop3, ir3.VOP3SD: _compile_vop3sd, ir3.VOP3P: _compile_vop3p, ir3.VOPD: _compile_vopd,
   ir3.DS: _compile_mem_op, ir3.FLAT: _compile_mem_op, ir3.GLOBAL: _compile_mem_op, ir3.SCRATCH: _compile_mem_op,
+  # RDNA2 instruction classes
+  ir2.SOPP: _compile_sopp, ir2.SMEM: _compile_smem, ir2.SOP1: _compile_sop, ir2.SOP2: _compile_sop, ir2.SOPC: _compile_sop, ir2.SOPK: _compile_sop,
+  ir2.VOP1: _compile_vop12, ir2.VOP1_SDST: _compile_vop12, ir2.VOP2: _compile_vop12, ir2.VOPC: _compile_vopc, ir2.VOP3: _compile_vop3,
+  ir2.VOP3_SDST: _compile_vop3, ir2.VOP3SD: _compile_vop3sd, ir2.VOP3P: _compile_vop3p,
+  ir2.DS: _compile_mem_op, ir2.FLAT: _compile_mem_op, ir2.GLOBAL: _compile_mem_op, ir2.SCRATCH: _compile_mem_op,
   # RDNA4 instruction classes
   ir4.SOPP: _compile_sopp, ir4.SMEM: _compile_smem, ir4.SOP1: _compile_sop, ir4.SOP2: _compile_sop, ir4.SOPC: _compile_sop, ir4.SOPK: _compile_sop,
   ir4.VOP1: _compile_vop12, ir4.VOP1_SDST: _compile_vop12, ir4.VOP2: _compile_vop12, ir4.VOPC: _compile_vopc, ir4.VOP3: _compile_vop3,
@@ -1356,7 +1367,7 @@ def _get_runner(inst_bytes: bytes, arch: str = "rdna3"):
   _canonical_runner_cache.append((base, mask, size, runner))
   return runner
 
-_BARRIER_OPS = {ir3.SOPPOp.S_BARRIER, irc.SOPPOp.S_BARRIER}
+_BARRIER_OPS = {ir2.SOPPOp.S_BARRIER, ir3.SOPPOp.S_BARRIER, irc.SOPPOp.S_BARRIER}
 if hasattr(ir4.SOPPOp, 'S_BARRIER_WAIT'): _BARRIER_OPS.add(ir4.SOPPOp.S_BARRIER_WAIT)
 _BRANCH_OPS: set[int] = {op.value for op in (ir3.SOPPOp.S_BRANCH, ir3.SOPPOp.S_CBRANCH_SCC0, ir3.SOPPOp.S_CBRANCH_SCC1,
   ir3.SOPPOp.S_CBRANCH_VCCZ, ir3.SOPPOp.S_CBRANCH_VCCNZ, ir3.SOPPOp.S_CBRANCH_EXECZ, ir3.SOPPOp.S_CBRANCH_EXECNZ)}
@@ -1463,7 +1474,7 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
     if pc not in program:
       prev_len = len(_canonical_runner_cache)
       runner, inst = _decode_at(pc, arch)
-      is_barrier = isinstance(inst, (ir3.SOPP, ir4.SOPP, irc.SOPP)) and inst.op in _BARRIER_OPS
+      is_barrier = isinstance(inst, (ir2.SOPP, ir3.SOPP, ir4.SOPP, irc.SOPP)) and inst.op in _BARRIER_OPS
       program[pc] = (runner._prg.fxn, runner.p.globals, is_barrier, inst)
       if DEBUG >= 3:
         msg = f"[emu] PC={pc - lib}: {inst!r}"
