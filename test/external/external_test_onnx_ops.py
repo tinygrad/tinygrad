@@ -152,6 +152,13 @@ class TestMainOnnxOps(TestOnnxOps):
     self._test_resize_scales([0.01, 0.25, 0.5, 0.51, 0.6, 1.0, 1.5, 2.0, 3.5, 20.0], mode="cubic", exclude_outside=1)
     self._test_resize_scales([0.01, 0.25, 0.5, 0.51, 0.6, 1.0, 1.5, 2.0, 3.5, 20.0], mode="cubic", exclude_outside=0)
 
+  def test_gridsample(self):
+    for mode in ["nearest", "linear"]:
+      for padding_mode in ["zeros", "border", "reflection"]:
+        for align_corners in [0, 1]:
+          inputs = {"X": np.random.randn(2, 3, 8, 8).astype(np.float32), "grid": (np.random.randn(2, 4, 4, 2) * 1.5).astype(np.float32)}
+          self.helper_test_single_op("GridSample", inputs, {"mode": mode, "padding_mode": padding_mode, "align_corners": align_corners}, ["Y"])
+
   def _test_if(self, then_value, else_value):
     then_out = onnx.helper.make_tensor_value_info("res", onnx.TensorProto.FLOAT, then_value.shape)
     else_out = onnx.helper.make_tensor_value_info("res", onnx.TensorProto.FLOAT, else_value.shape)
