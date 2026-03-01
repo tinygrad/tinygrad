@@ -8,6 +8,7 @@ from tinygrad.engine.schedule import ExecItem
 from tinygrad.uop.ops import Ops
 from tinygrad.renderer import Estimates
 from tinygrad.renderer.ptx import PTXRenderer
+from test.helpers import needs_second_gpu
 
 class TestArange(unittest.TestCase):
   def _get_flops(self, tensor, desired):
@@ -186,6 +187,33 @@ class TestIndexing(unittest.TestCase):
     # correctness check
     expected_grad = np.zeros((vocab_size, embed_size), dtype=np.float32)
     for i in idx.flatten().numpy(): expected_grad[i] += 2
+    np.testing.assert_allclose(emb.weight.grad.numpy(), expected_grad, rtol=1e-5, atol=1e-5)
+
+  @needs_second_gpu
+  @unittest.skipIf(Device.DEFAULT not in ("CPU", "AMD"), "atomics only on AMD/CPU")
+  @Context(USE_ATOMICS=1, SPEC=1)
+  def test_embedding_backward_vocab_sharded(self):
+    from tinygrad.renderer.cstyle import CStyleLanguage
+    if Device.DEFAULT == "CPU" and not isinstance(Device["CPU"].renderer, CStyleLanguage): self.skipTest("CPU needs Clang renderer")
+    devices = (f"{Device.DEFAULT}:0", f"{Device.DEFAULT}:1")
+    vocab_size, embed_size = 1000, 128
+    bs, seqlen = 4, 256
+    idx = Tensor.randint(bs, seqlen, high=vocab_size)
+    emb = nn.Embedding(vocab_size, embed_size)
+    emb.weight = Tensor.ones(vocab_size, embed_size, requires_grad=True)
+    gt = Tensor.zeros(bs, seqlen, embed_size)
+    Tensor.realize(idx, emb.weight, gt)
+    # compute expected grad on single device
+    expected_grad = np.zeros((vocab_size, embed_size), dtype=np.float32)
+    for i in idx.flatten().numpy(): expected_grad[i] += 2
+    # now shard the embedding weight on vocab axis and recompute
+    emb.weight = Tensor.ones(vocab_size, embed_size, requires_grad=True)
+    emb.weight.shard_(devices, axis=0)
+    idx = idx.shard(devices, axis=None)
+    gt = gt.shard(devices, axis=None)
+    Tensor.realize(idx, emb.weight, gt)
+    loss = (emb(idx)-gt).square().sum()
+    loss.backward()
     np.testing.assert_allclose(emb.weight.grad.numpy(), expected_grad, rtol=1e-5, atol=1e-5)
 
   @unittest.skipUnless(Device.DEFAULT == "AMD" or (Device.DEFAULT == "NULL" and EMULATE.value.startswith("AMD")), "tests AMD bf16 cast overhead")
