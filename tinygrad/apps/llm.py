@@ -263,7 +263,7 @@ CHAT_HTML = b'''<!DOCTYPE html><html><head><title>tinygrad chat</title><style>
 </style></head><body><div id="chat"></div>
 <textarea id="input" rows="1" placeholder="Ask anything"></textarea>
 <script>
-  input.onkeydown = (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() } }
+  input.onkeydown = (e) => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); send() } }
   const msgs = [];
   async function send() {
     if (!input.value.trim()) return;
