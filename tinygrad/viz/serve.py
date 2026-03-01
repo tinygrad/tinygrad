@@ -342,7 +342,7 @@ def sqtt_timeline(data:bytes, lib:bytes, target:str) -> list[ProfileEvent]:
   def add(name:str, p:PacketType, idx=0, width=1, op_name=None, wave=None, info:InstructionInfo|None=None) -> None:
     if hasattr(p, "wave"): wave = p.wave
     rows.setdefault(r:=(f"WAVE:{wave}" if wave is not None else f"{p.__class__.__name__}:0 {name}"))
-    key = TracingKey(f"{op_name if op_name is not None else name} OP:{idx}", ret=str(info.inst) if info is not None else None)
+    key = TracingKey(f"{op_name if op_name is not None else name} OP:{idx}", ret=f"PC:{info.pc}" if info is not None else None)
     ret.append(ProfileRangeEvent(r, key, Decimal(p._time), Decimal(p._time+width)))
   for p, info in map_insts(data, lib, target):
     if len(ret) > getenv("MAX_SQTT_PKTS", 50_000): break
@@ -361,7 +361,8 @@ def sqtt_timeline(data:bytes, lib:bytes, target:str) -> list[ProfileEvent]:
         add(name.replace("_ALT", ""), p, op_name=name)
       if p._time in trace.setdefault(name, set()): raise AssertionError(f"packets overlap in shared resource! {name}")
       trace[name].add(p._time)
-  return [ProfilePointEvent(r, "start", r, ts=Decimal(0)) for r in rows]+ret
+  pc_map = {addr:str(inst) for addr,inst in amd_decode(lib, target).items()}
+  return [ProfilePointEvent(r, "JSON", "pc_map", pc_map, ts=Decimal(0)) for r in rows]+ret
 
 # ** SQTT OCC only unpacks wave start, end time and SIMD location
 
@@ -415,6 +416,7 @@ def get_profile(profile:list[ProfileEvent], sort_fn:Callable[[str], Any]=device_
   # map events per device
   dev_events:dict[str, list[tuple[int, int, float, DevEvent]]] = {}
   markers:list[ProfilePointEvent] = []
+  ext_data:dict[str, Any] = {}
   start_ts:int|None = None
   end_ts:int|None = None
   for ts,en,e in flatten_events(profile):
@@ -422,6 +424,7 @@ def get_profile(profile:list[ProfileEvent], sort_fn:Callable[[str], Any]=device_
     if start_ts is None or st < start_ts: start_ts = st
     if end_ts is None or et > end_ts: end_ts = et
     if isinstance(e, ProfilePointEvent) and e.name == "marker": markers.append(e)
+    if isinstance(e, ProfilePointEvent) and e.name == "JSON": ext_data[e.key] = e.arg
   if start_ts is None: return None
   # return layout of per device events
   layout:dict[str, bytes|None] = {}
@@ -434,7 +437,8 @@ def get_profile(profile:list[ProfileEvent], sort_fn:Callable[[str], Any]=device_
     layout[f"{k} Memory"] = mem_layout(v, start_ts, unwrap(end_ts), peaks, dtype_size, scache)
   sorted_layout = sorted([k for k,v in layout.items() if v is not None], key=sort_fn)
   ret = [b"".join([struct.pack("<B", len(k)), k.encode(), unwrap(layout[k])]) for k in sorted_layout]
-  index = json.dumps({"strings":list(scache), "dtypeSize":dtype_size, "markers":[{"ts":rel_ts(e.ts, start_ts), **e.arg} for e in markers]}).encode()
+  index = json.dumps({"strings":list(scache), "dtypeSize":dtype_size, "markers":[{"ts":rel_ts(e.ts, start_ts), **e.arg} for e in markers],
+                      **ext_data}).encode()
   return struct.pack("<IQII", rel_ts(unwrap(end_ts), start_ts), max(peaks,default=0), len(index), len(ret))+index+b"".join(ret)
 
 # ** PMA counters
