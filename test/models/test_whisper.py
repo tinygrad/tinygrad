@@ -1,13 +1,14 @@
 import unittest
 import pathlib
 from examples.whisper import init_whisper, load_file_waveform, transcribe_file, transcribe_waveform
-from examples.audio_helpers import mel
+from examples.audio_helpers import hann_window, mel, stft_full
 import examples.mlperf.metrics as metrics
 from tinygrad.helpers import fetch
 from test.helpers import slow
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.device import is_dtype_supported
 import numpy as np
+import torch
 
 # Audio generated with the command on MacOS:
 # say "Could you please let me out of the box?" --file-format=WAVE  --data-format=LEUI8@16000 -o test
@@ -132,6 +133,14 @@ class TestWhisper(unittest.TestCase):
     reference = TRANSCRIPTION_3
     self.assertWER(reference[:len(reference)//2], reference, 0.524)
 
+  def test_hann_window_periodic(self):
+    reference = torch.hann_window(16, periodic=True)
+    np.testing.assert_allclose(hann_window(16, periodic=True).numpy(), reference.numpy(), atol=1e-6)
+
+  def test_hann_window_symmetric(self):
+    reference = torch.hann_window(16, periodic=False)
+    np.testing.assert_allclose(hann_window(16, periodic=False).numpy(), reference.numpy(), atol=1e-6)
+
   def test_mel_filters(self):
     # reference = librosa.filters.mel(sr=16000, n_fft=16, n_mels=16)
     reference = Tensor([[-0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
@@ -151,6 +160,21 @@ class TestWhisper(unittest.TestCase):
                         [0.0, 0.0, 0.0, 0.0, 0.0, 0.00040073052514344454, 0.0005822855746373534, 0.0, 0.0],
                         [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.00033081238507293165, 0.0006097797304391861, 0.0]])
     np.testing.assert_allclose(mel(sr=16000, n_fft=16, n_mels=16, dtype=dtypes.float32).numpy(), reference.numpy(), atol=1e-6)
+
+  def test_stft_tiny(self):
+    def osc(hz, sr):
+      return np.sin(np.linspace(0, np.pi*2, sr)*hz)
+
+    N = 32
+    syn = osc(4, N) + osc(3, N)
+
+    inp = syn.astype(np.float32)
+    hann_periodic = np.hanning(N+1)[:-1].astype(np.float32)
+    reference = np.absolute(np.fft.rfft(inp * hann_periodic))
+
+    actual = stft_full(Tensor(inp[None]), N, N, (0, 0), window="hann").numpy().squeeze()
+
+    np.testing.assert_allclose(actual, reference, atol=1e-5)
 
 if __name__ == '__main__':
   unittest.main()
