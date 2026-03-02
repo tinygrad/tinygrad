@@ -97,10 +97,10 @@ def swap_reshape_shrink(shrink:UOp, reshape:UOp):
 pm_early_transform_tensor_graph = PatternMatcher([
   # *** BUFFER_VIEW support (should only be here) ***
   # rewrite BUFFER/BUFFER_VIEW->RESHAPE->SHRINK to BUFFER/BUFFER_VIEW->SHRINK->RESHAPE so the SHRINK on BUFFER rule can fire
-  (UPat(Ops.SHRINK, src=(UPat(Ops.RESHAPE, src=(UPat((Ops.BUFFER, Ops.BUFFER_VIEW)),), allow_any_len=True, name="reshape"),),
-   allow_any_len=True, name="shrink"), swap_reshape_shrink),
+  (UPat(Ops.SHRINK, src=(UPat(Ops.RESHAPE, src=(UPat((Ops.BUFFER, Ops.BUFFER_VIEW)),), allow_any_len=True, name="reshape"),
+                         UPat.cvar(), UPat.cvar()), name="shrink"), swap_reshape_shrink),
   # replace SHRINK on BUFFER with BUFFER_VIEW (only on devices that support subbuffers)
-  (UPat(Ops.SHRINK, src=(UPat(Ops.BUFFER), UPat.cvar('s'), UPat.cvar('e')), name="x"),
+  (UPat(Ops.SHRINK, src=(UPat(Ops.BUFFER), UPat.cvar('s', vec=False), UPat.cvar('e', vec=False)), name="x"),
    lambda x,s,e: UOp(Ops.BUFFER_VIEW, x.dtype, (x.src[0],), (e.arg-s.arg, s.arg)) if _device_supports_view(x._device) else None),
   # merge SHRINK on BUFFER_VIEW into a single BUFFER_VIEW
   (UPat(Ops.SHRINK, src=(UPat(Ops.BUFFER_VIEW, name="bv"), UPat.cvar('s'), UPat.cvar('e'))),
