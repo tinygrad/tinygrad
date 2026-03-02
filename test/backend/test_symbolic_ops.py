@@ -302,5 +302,62 @@ class TestSymbolicOps(unittest.TestCase):
     expected = x_full[:, :, :val].conv2d(weight=weight, groups=1, stride=6, dilation=1, padding=(3, 3))
     np.testing.assert_allclose(result[:, :, :13].numpy(), expected.numpy(), atol=1e-5, rtol=1e-5)
 
+  def test_triu_symbolic(self):
+    a = Tensor.rand(10, 10).realize()
+    for i in range(2, 6):
+      vi = Variable("i", 1, 10).bind(i)
+      symbolic = a[:vi, :vi].triu()
+      # extract concrete-sized result from symbolic output
+      symbolic_np = symbolic[:i, :i].numpy()
+      expected = a[:i, :i].triu().numpy()
+      np.testing.assert_allclose(symbolic_np, expected, atol=1e-6, rtol=1e-6)
+
+  def test_tril_symbolic(self):
+    a = Tensor.rand(10, 10).realize()
+    for i in range(2, 6):
+      vi = Variable("i", 1, 10).bind(i)
+      symbolic = a[:vi, :vi].tril()
+      symbolic_np = symbolic[:i, :i].numpy()
+      expected = a[:i, :i].tril().numpy()
+      np.testing.assert_allclose(symbolic_np, expected, atol=1e-6, rtol=1e-6)
+
+  def test_triu_symbolic_diagonal(self):
+    a = Tensor.rand(10, 10).realize()
+    for i in range(3, 6):
+      vi = Variable("i", 1, 10).bind(i)
+      for diag in [-1, 0, 1, 2]:
+        symbolic = a[:vi, :vi].triu(diagonal=diag)
+        symbolic_np = symbolic[:i, :i].numpy()
+        expected = a[:i, :i].triu(diagonal=diag).numpy()
+        np.testing.assert_allclose(symbolic_np, expected, atol=1e-6, rtol=1e-6)
+
+  def test_triu_symbolic_nonsquare(self):
+    a = Tensor.rand(10, 8).realize()
+    for i in range(2, 6):
+      vi = Variable("i", 1, 10).bind(i)
+      symbolic = a[:vi, :].triu()
+      symbolic_np = symbolic[:i, :].numpy()
+      expected = a[:i, :].triu().numpy()
+      np.testing.assert_allclose(symbolic_np, expected, atol=1e-6, rtol=1e-6)
+
+  def test_full_triu_symbolic(self):
+    """Test the attention mask pattern: Tensor.full(symbolic_shape, -inf).triu(k)"""
+    for T in range(2, 6):
+      for sp in [0, 2, 5]:
+        vT = Variable("T", 1, 10).bind(T)
+        mask = Tensor.full((1, 1, vT, sp+vT), float("-inf")).triu(sp+1)
+        ref = Tensor.full((1, 1, T, sp+T), float("-inf")).triu(sp+1)
+        # compare element sums (counting -inf elements)
+        sym_finite = mask[:, :, :T, :sp+T].isnan().logical_not().cast(dtypes.int32).sum().item()
+        ref_finite = ref.isnan().logical_not().cast(dtypes.int32).sum().item()
+        self.assertEqual(sym_finite, ref_finite)
+
+  def test_arange_symbolic(self):
+    for i in range(1, 6):
+      vi = Variable("i", 1, 10).bind(i)
+      symbolic = Tensor.arange(vi)
+      expected = Tensor.arange(i)
+      np.testing.assert_allclose(symbolic[:i].numpy(), expected.numpy(), atol=1e-6, rtol=1e-6)
+
 if __name__ == '__main__':
   unittest.main()

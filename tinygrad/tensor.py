@@ -722,9 +722,10 @@ class Tensor(OpMixin):
     """
     if stop is None: stop, start = start, 0
     dtype = kwargs.pop("dtype", dtypes.default_float if any(isinstance(x, float) for x in (start, stop, step)) else dtypes.default_int)
-    if start < (dt:=to_dtype(dtype)).min or dt.max < (stop-step): raise ValueError(f"arange [{start}, {stop}) is not representable in dtype {dtype}")
+    if resolve(start < (dt:=to_dtype(dtype)).min, False) or resolve(dt.max < (stop-step), False):
+      raise ValueError(f"arange [{start}, {stop}) is not representable in dtype {dtype}")
     # NOTE: this matches numpy, torch raises RuntimeError if stop-start and step have different signs
-    if (output_len:=ceildiv(stop-start, step)) <= 0: return Tensor([], dtype=dtype, **kwargs)
+    if resolve((output_len:=ceildiv(stop-start, step)) <= 0, False): return Tensor([], dtype=dtype, **kwargs)
     return (Tensor.full((output_len,), step, dtype=dtype, **kwargs)._cumalu(0, Ops.ADD) + (start - step)).cast(dtype)
 
   @staticmethod
@@ -2566,7 +2567,6 @@ class Tensor(OpMixin):
 
   @staticmethod
   def _tri(r:sint, c:sint, diagonal:int=0, device=None, requires_grad:bool|None=None) -> Tensor:
-    assert isinstance(r, int) and isinstance(c, int), f"does not support symbolic, getting {r=}, {c=}"
     return (Tensor.arange(r, device=device).unsqueeze(-1) + diagonal <= Tensor.arange(c, device=device)).requires_grad_(requires_grad)
 
   def triu(self, diagonal:int=0) -> Tensor:
@@ -3284,8 +3284,8 @@ class Tensor(OpMixin):
     print(q.scaled_dot_product_attention(k, v).numpy())
     ```
     """
-    # NOTE: it also works when `key` and `value` have symbolic shape.
-    assert all_int(self.shape), f"does not support symbolic shape {self.shape}"
+    # NOTE: only n_heads (dim -3) and head_dim (dim -1) must be concrete; batch and sequence length dims can be symbolic.
+    assert all_int(self.shape[-1:]) and all_int(self.shape[-3:-2]), f"does not support symbolic shape {self.shape}"
 
     if getenv("FLASH_ATTENTION"):
       from extra.thunder.tiny.fa import flash_attention
