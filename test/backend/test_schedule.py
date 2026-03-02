@@ -2,7 +2,7 @@
 # schedule confirms the right things are capable of fusing
 # NOTE: this has overlap with external_test_opt.py
 
-import gc, unittest, functools
+import os, gc, unittest, functools
 import numpy as np
 from typing import cast
 from hypothesis import assume, given, settings, strategies as strat
@@ -794,6 +794,39 @@ class TestSchedule(unittest.TestCase):
       self.assertIsInstance(out.dtype, ImageDType)
       self.assertIsNotNone(out.uop.base.realized)
       self.assertIsInstance(out.uop.base.realized.dtype, ImageDType)
+
+  @unittest.skipIf(Device.DEFAULT != "CL", "image only supported on CL")
+  @unittest.expectedFailure
+  def test_image_dot_f16_fusion(self):
+    os.environ['FLOAT16'] = '1'
+
+    def cnt():
+      x, y, z = Tensor.empty((64, 64), dtype='float'), Tensor.empty((64, 64), dtype='float'), Tensor.empty((64, 64), dtype='float')
+      a = (x @ y).relu()
+      sched = ((a @ z).relu() + a).schedule()
+      for si in sched: si.lower()
+      return len([si for si in sched if isinstance(si.prg, CompiledRunner)])
+
+    with Context(IMAGE=1): cnt1 = cnt()
+    with Context(IMAGE=2): cnt2 = cnt()
+
+    self.assertEqual(cnt1, cnt2)
+
+  @unittest.skipIf(Device.DEFAULT != "CL", "image only supported on CL")
+  @unittest.expectedFailure
+  def test_image_conv_fusion(self):
+    def cnt():
+      x, y, z = Tensor.empty((1, 4, 3, 3)), Tensor.empty((4, 1, 3, 3)), Tensor.empty((4, 1, 7, 7))
+      a = x.conv2d(y, Tensor.empty(4), groups=4, padding=1)
+      b = a.conv2d(z, groups=4, padding=3)
+      sched = (a + b).schedule()
+      for si in sched: si.lower()
+      return len([si for si in sched if isinstance(si.prg, CompiledRunner)])
+
+    with Context(IMAGE=1): cnt1 = cnt()
+    with Context(IMAGE=2): cnt2 = cnt()
+
+    self.assertEqual(cnt1, cnt2)
 
   def _test_fusion(self, shapes, f, cnt):
     with Context(DEBUG=0, TRACK_MATCH_STATS=0): args = [Tensor.randn(s).realize() for s in shapes]
