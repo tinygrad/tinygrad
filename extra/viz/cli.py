@@ -8,22 +8,16 @@ from tinygrad.uop.ops import RewriteTrace
 from tinygrad.helpers import temp, ansistrip, colored, time_to_str, ansilen
 from test.null.test_viz import load_profile
 
-def optional_eq(val:dict, arg:str|None) -> bool: return arg is None or ansistrip(val["name"]) == arg
+def optional_eq(val:dict, arg:str|None) -> bool: return arg is None or ansistrip(val["name"]).lower() == arg
 
 def print_data(data:dict) -> None:
   if isinstance(data.get("value"), Iterator):
     for m in data["value"]:
-      if m.get("uop"):
-        print("Input UOp:")
-        print(m["uop"])
-      if not m["diff"]: continue
-      print("Rewrites:")
-      fp = pathlib.Path(m["upat"][0][0])
-      print(f"{fp.parent.name}/{fp.name}:{m['upat'][0][1]}")
-      print(m["upat"][1])
-      for line in m["diff"]:
-        color = "red" if line.startswith("-") else "green" if line.startswith("+") else None
-        print(colored(line, color))
+      if m.get("uop"): print(f"Input UOp:\n{m['uop']}")
+      if m.get("diff"):
+        loc = pathlib.Path(m["upat"][0][0])
+        print(f"Rewrite at {loc.parent.name}/{loc.name}:{m['upat'][0][1]}\n{m['upat'][1]}")
+        for line in m["diff"]: print(colored(line, "red" if line.startswith("-") else "green" if line.startswith("+") else None))
   if data.get("src") is not None: print(data["src"])
 
 if __name__ == "__main__":
@@ -31,14 +25,14 @@ if __name__ == "__main__":
   g_mode = parser.add_argument_group("mode")
   g_mode.add_argument("--profile", action="store_true", help="View profile trace")
   g_mode.add_argument("--rewrites", action="store_true", help="View rewrites trace")
+  g_common = parser.add_argument_group("common options")
+  g_common.add_argument("--kernel", type=str, default=None, metavar="NAME", help="Select a kernel by name (optional name, default: only list names)")
   g_profile = parser.add_argument_group("profile options")
   g_profile.add_argument("--device", type=str, default=None, metavar="NAME", help="Select a device (optional name, default: only list names)")
   g_profile.add_argument("--top", type=int, default=10, metavar="N", help="Number of top kernels to show (-1 for all, default: 10)")
   g_rewrites = parser.add_argument_group("rewrites options")
   g_rewrites.add_argument("--select", type=str, default=None, metavar="NAME",
                           help="Select an item within the chosen kernel (optional name, default: only list names)")
-  g_common = parser.add_argument_group("common options")
-  g_common.add_argument("--kernel", type=str, default=None, metavar="NAME", help="Select a kernel by name (optional name, default: only list names)")
   parser.add_argument("--profile-path", type=pathlib.Path, metavar="PATH", help="Path to profile (optional file, default: latest profile)",
                         default=pathlib.Path(temp("profile.pkl", append_user=True)))
   parser.add_argument("--rewrites-path", type=pathlib.Path, metavar="PATH", help="Path to rewrites (optional file, default: latest rewrites)",
