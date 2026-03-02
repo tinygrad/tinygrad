@@ -57,16 +57,8 @@ def replace_contig_with_assign(u:UOp):
 def replace_assign_with_contig(u:UOp):
   assigned_to = u
   while assigned_to.op in {Ops.ASSIGN, Ops.BITCAST, Ops.AFTER}: assigned_to = assigned_to.src[0].base
-  if assigned_to.op not in {Ops.BUFFER, Ops.BUFFER_VIEW}:
+  if assigned_to.op is not Ops.BUFFER:
     return u.src[1].contiguous(tag=u.tag)
-  # if target is BUFFER_VIEW, check if source base is an overlapping BUFFER_VIEW of the same buffer — force source contiguous to avoid WAR hazard
-  if assigned_to.op is Ops.BUFFER_VIEW:
-    source_base = u.src[1].base
-    if source_base.op is Ops.BUFFER_VIEW and source_base.src[0] is assigned_to.src[0]:
-      t_size, t_off = assigned_to.arg
-      s_size, s_off = source_base.arg
-      if s_off < t_off + t_size and t_off < s_off + s_size:
-        return u.src[0].assign(u.src[1].contiguous()).rtag(u.tag)
 
 def found_contiguous(ctx:dict[UOp, UOp], contig:UOp, src:UOp):
   x = src
@@ -77,22 +69,26 @@ def found_contiguous(ctx:dict[UOp, UOp], contig:UOp, src:UOp):
     x = x.src[0]
   ctx[src.base] = contig
 
-def _device_supports_view(device) -> bool:
-  if not isinstance(device, str): return False
-  from tinygrad.device import Device
-  return hasattr(Device[device].allocator, "_offset")
-
 def contiguous_mops_to_view(c:UOp):
   """CONTIGUOUS(MOPS(BUFFER)) → CONTIGUOUS(BUFFER_VIEW) when movement ops collapse to a contiguous range."""
-  if not _device_supports_view(c._device): return None
   src = c.src[0]
   buf = src.base
   if buf.op not in {Ops.BUFFER, Ops.BUFFER_VIEW}: return None
   if src.op is Ops.RESHAPE and src.src[0].op in {Ops.BUFFER, Ops.BUFFER_VIEW}: return None
+
+  # check if view is supported
+  if not isinstance(c.device, str): return None
+  from tinygrad.device import Device
+  if not hasattr(Device[c.device].allocator, "_offset"): return None
+
+  # see if this can be a view
   size_offset = src.contiguous_view_offset()
   if size_offset is None: return None
+
+  # merge BUFFER_VIEWs
   size, offset = size_offset
   if buf.op is Ops.BUFFER_VIEW: offset, buf = offset + buf.arg[1], buf.src[0]
+
   # NOTE: this contiguous is removed because this BUFFER_VIEW/RESHAPE has_buffer_identity
   return UOp(Ops.BUFFER_VIEW, src.dtype, (buf,), (size, offset)).reshape(src.shape).contiguous(tag=c.tag)
 

@@ -117,7 +117,7 @@ class TestContiguous(unittest.TestCase):
   def test_size_change_buffer_view(self):
     a = Tensor.empty(4)
     b = a.reshape((1, 1, 4)).shrink(((0, 1), (0, 1), (0, 3))).contiguous()
-    check_schedule(b, 1)
+    check_schedule(b, 0)  # contiguous shrink of a realized buffer is a zero-copy BUFFER_VIEW
 
   def test_double_contiguous_realizes_once(self):
     a = Tensor.empty(4, 1)
