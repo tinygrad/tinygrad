@@ -1406,5 +1406,19 @@ class TestFusionOp(unittest.TestCase):
     outd = out.tolist()
     assert all(x == 20.0 for x in outd)
 
+class TestBufferView(unittest.TestCase):
+  def test_shrink_contiguous_is_buffer_view(self):
+    # simple 1D shrink of a realized buffer should be BUFFER_VIEW, not a copy kernel
+    a = Tensor.arange(100).contiguous().realize()
+    b = a.shrink(((10, 50),)).contiguous()
+    run_schedule(check_schedule(b, 1))
+    assert b.tolist() == list(range(10,50))
+
+  def test_shrink_2d_contiguous_is_buffer_view(self):
+    a = Tensor.arange(100).reshape(10,10).contiguous().realize()
+    b = a.shrink(((1, 5),None)).contiguous()
+    run_schedule(check_schedule(b, 1))
+    assert b.flatten().tolist() == list(range(10,50))
+
 if __name__ == '__main__':
   unittest.main(verbosity=2)

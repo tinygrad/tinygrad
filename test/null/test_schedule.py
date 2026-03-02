@@ -119,19 +119,6 @@ class TestContiguous(unittest.TestCase):
     b = a.reshape((1, 1, 4)).shrink(((0, 1), (0, 1), (0, 3))).contiguous()
     check_schedule(b, 1)
 
-  def test_shrink_contiguous_is_buffer_view(self):
-    # simple 1D shrink of a realized buffer should be BUFFER_VIEW, not a copy kernel
-    a = Tensor.empty(100)
-    b = a.shrink(((10, 50),)).contiguous()
-    check_schedule(b, 1)
-
-  @unittest.expectedFailure
-  def test_shrink_contiguous_is_buffer_view_mul(self):
-    # shrink on first axis only (contiguous in memory) should be BUFFER_VIEW
-    a = Tensor.empty(10, 10)
-    b = a.shrink(((2, 5), (0, 10))).contiguous()
-    check_schedule(b, 0)
-
   def test_double_contiguous_realizes_once(self):
     a = Tensor.empty(4, 1)
     b = a.expand((4, 4)).contiguous().contiguous()
