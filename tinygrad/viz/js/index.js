@@ -307,7 +307,7 @@ function setFocus(key) {
     for (const [k, v] of data.pcToShape) {
       const line = code.append("div").style("display", "flex").style("gap", "8px").style("cursor", "pointer").on("click", (e) => setFocus(k));
       const left = line.append("span").style("display", "flex").style("gap", "4px").attr("id", `inst-${k}`);
-      left.append("span").attr("class", "num").text("W:"+k.split("-")[0].split(":")[1]);
+      left.append("span").attr("class", "num").text(k.split("-")[0].split(":")[1]);
       left.append("span").attr("class", "pc").text("0x"+parseInt(v.pc).toString(16));
       line.append("span").text(data.pcMap[v.pc]);
     }
@@ -417,9 +417,9 @@ async function renderProfiler(path, unit, opts) {
         // tiny device events go straight to the rewrite rule
         const key = k.startsWith("TINY") ? null : `${k}-${j}`;
         const labelHTML = label.map(l=>`<span style="color:${l.color}">${l.st}</span>`).join("");
-        if (e.info?.startsWith("PC:")) data.pcToShape.set(key, {pc:e.info.split(":")[1], st:e.st});
-        const arg = { tooltipText:labelHTML+" N:"+shapes.length+"\n"+formatTime(e.dur)+(e.info != null ? "\n"+e.info : ""), bufs:[], key,
-                      ctx:shapeRef?.ctx, step:shapeRef?.step };
+        let info = e.info != null ? "\n"+e.info : "";
+        if (info.startsWith("\nPC:")) data.pcToShape.set(key, {pc:e.info.split(":")[1], st:e.st}); info = "";
+        const arg = { tooltipText:labelHTML+" N:"+shapes.length+"\n"+formatTime(e.dur)+info, bufs:[], key, ctx:shapeRef?.ctx, step:shapeRef?.step };
         if (e.key != null) shapeMap.set(e.key, key);
         // offset y by depth
         shapes.push({x:e.st, y:levelHeight*depth, width:e.dur, height:levelHeight, arg, label:opts.hideLabels ? null : label, fillColor });
@@ -513,7 +513,7 @@ async function renderProfiler(path, unit, opts) {
   }
   for (const m of markers) m.label = m.name.split(/(\s+)/).map(st => ({ st, color:m.color, width:ctx.measureText(st).width }));
   data.pcToShape = new Map([...data.pcToShape].sort((a, b) => a[1].st - b[1].st));
-  if (extData.pc_map != null) data.pcMap = extData.pc_map; setFocus(focusedShape);
+  if (extData.pcMap != null) data.pcMap = extData.pcMap; setFocus(focusedShape);
   updateProgress(Status.COMPLETE);
   // draw events on a timeline
   const dpr = window.devicePixelRatio || 1;
