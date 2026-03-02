@@ -225,7 +225,7 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
         if all_all_same or (PCONTIG and all_same(local_rngs)):
           # the new valid is the OR of all the children valids
           minimum_valid = UOp.const(dtypes.bool, False).sum(*valids)
-          _out_rngs.append(graph_rewrite(minimum_valid.where(local_rngs[0], UOp.invalid()), symbolic))
+          _out_rngs.append(graph_rewrite(minimum_valid.where(local_rngs[0], UOp.invalid()), symbolic, name="minimum_valid"))
         else:
           _out_rngs.append(rctx.new_range(x.shape[i]))
           _realize_axis.append(i)
