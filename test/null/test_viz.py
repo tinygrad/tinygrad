@@ -1,4 +1,4 @@
-import unittest, decimal, json, struct, sys
+import unittest, decimal, sys
 from dataclasses import dataclass
 from typing import Generator
 

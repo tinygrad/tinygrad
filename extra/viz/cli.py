@@ -21,7 +21,7 @@ def print_data(data:dict) -> None:
         for line in m["diff"]: print(colored(line, "red" if line.startswith("-") else "green" if line.startswith("+") else None))
   if data.get("src") is not None: print(data["src"])
 
-# ** Profiler trace unpcker
+# ** Profiler trace decoder
 
 # 0 means None, otherwise it's an enum value
 def option(i:int) -> int|None: return None if i == 0 else i-1
