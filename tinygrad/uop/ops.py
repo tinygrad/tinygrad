@@ -663,7 +663,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     from tinygrad.uop.symbolic import symbolic
     out = graph_rewrite(self._mop(Ops.RESHAPE, (self.size,)).index(UOp.range(self.size, 0)), pm_mops+symbolic, name="contiguous_view_offset")
     if out.op is not Ops.INDEX: return None
-    if out.src[1].op is Ops.CONST: return (1, out.src[1].arg)
+    if out.src[1].op is Ops.CONST and self.size == 1: return (1, out.src[1].arg)
     if out.src[1].op is Ops.RANGE: return (self.size, 0)
     if out.src[1].op is Ops.ADD and out.src[1].src[0].op is Ops.RANGE and out.src[1].src[1].op is Ops.CONST:
       return (self.size, out.src[1].src[1].arg)
