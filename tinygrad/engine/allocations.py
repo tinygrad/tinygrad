@@ -70,6 +70,9 @@ def found_contiguous(ctx:dict[UOp, UOp], contig:UOp, src:UOp):
   ctx[src.base] = contig
 
 pm_early_transform_tensor_graph = PatternMatcher([
+  # replace SHRINK on BUFFER with BUFFER_VIEW
+  (UPat(Ops.SHRINK, src=(UPat(Ops.BUFFER), UPat.cvar('s'), UPat.cvar('e')), name="x"),
+   lambda x,s,e: UOp(Ops.BUFFER_VIEW, x.dtype, (x.src[0],), (e.arg-s.arg, s.arg))),
   # CONTIGUOUS replacement hack for openpilot
   (UPat(Ops.CONTIGUOUS, src=(UPat(GroupOp.Movement, name="src"),), name="contig"), found_contiguous),
   # replace ALU sources with contiguous versions found above
@@ -124,6 +127,8 @@ pm_finalize_call = PatternMatcher([
 pm_replace_buf = PatternMatcher([
   # replace BUFFER with PARAM for cache key normalization
   (UPat(Ops.BUFFER, src=(UPat(Ops.UNIQUE), UPat(Ops.DEVICE)), name="b"), replace_input_buffer),
+  # replace BUFFER_VIEW with PARAM. this rewrite is bottom up so BUFFERs we don't need won't be in the input
+  (UPat(Ops.BUFFER_VIEW, src=(UPat(Ops.BUFFER),), name="b"), replace_input_buffer),
   # strip value from BIND for cache key normalization, so different values hit same cache
   (UPat(Ops.BIND, src=(UPat(Ops.DEFINE_VAR), UPat(Ops.CONST)), name="b"), replace_input_buffer),
 ])
@@ -145,6 +150,6 @@ def transform_to_call(big_sink:UOp) -> tuple[UOp, dict[UOp, UOp]]:
 
   # here we construct the final buffer_map. this is everything that will go into the tensor map
   graph_rewrite(big_sink, pm_finalize_call, ctx=ctx, name="finalize call")
-  ret = graph_rewrite(UOp.sink(*ctx.assigns), pm_replace_buf, ctx=ctx, name="replace bufs").call(*ctx.replacements)
+  ret = graph_rewrite(UOp.sink(*ctx.assigns), pm_replace_buf, ctx=ctx, bottom_up=True, name="replace bufs").call(*ctx.replacements)
   if VIZ: graph_rewrite(ret, PatternMatcher([]), name="View Call")
   return ret, ctx.buffer_map

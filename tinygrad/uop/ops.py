@@ -685,6 +685,10 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
       buf = self.src[0].buffer
       assert isinstance(buf, Buffer), "must be a Buffer for BITCAST"
       return buf.view(self.size, self.dtype, 0)
+    if self.op is Ops.BUFFER_VIEW:
+      buf = self.src[0].buffer
+      assert isinstance(buf, Buffer), "must be a Buffer for BUFFER_VIEW"
+      return buf.view(self.size, self.dtype, self.arg[0])
     if self.op is Ops.MSELECT:
       ret = self.src[0].buffer
       assert isinstance(ret, MultiBuffer)
