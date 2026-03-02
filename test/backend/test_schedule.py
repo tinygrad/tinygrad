@@ -1411,13 +1411,13 @@ class TestBufferView(unittest.TestCase):
     # simple 1D shrink of a realized buffer should be BUFFER_VIEW, not a copy kernel
     a = Tensor.arange(100).contiguous().realize()
     b = a.shrink(((10, 50),)).contiguous()
-    run_schedule(check_schedule(b, 1))
+    run_schedule(check_schedule(b, 0))
     assert b.tolist() == list(range(10,50))
 
   def test_shrink_2d_contiguous_is_buffer_view(self):
     a = Tensor.arange(100).reshape(10,10).contiguous().realize()
     b = a.shrink(((1, 5),None)).contiguous()
-    run_schedule(check_schedule(b, 1))
+    run_schedule(check_schedule(b, 0))
     assert b.flatten().tolist() == list(range(10,50))
 
   def test_chained_shrink_is_buffer_view(self):

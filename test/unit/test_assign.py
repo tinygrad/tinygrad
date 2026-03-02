@@ -463,7 +463,8 @@ class TestAssign(unittest.TestCase):
     expected[0:10] = expected[50:60].copy()
     GlobalCounters.reset()
     a[0:10].assign(a[50:60]).realize()
-    self.assertEqual(GlobalCounters.kernel_count, 1)  # non-overlapping BUFFER_VIEWs don't need contiguous
+    # TODO: non-overlapping shrinks don't actually need contiguous, could be 1 kernel with smarter range analysis
+    self.assertEqual(GlobalCounters.kernel_count, 2)  # currently conservative, forces contiguous
     np.testing.assert_allclose(a.numpy(), expected)
 
   @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")

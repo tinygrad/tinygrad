@@ -82,29 +82,22 @@ def _device_supports_view(device) -> bool:
   from tinygrad.device import Device
   return hasattr(Device[device].allocator, "_offset")
 
-def swap_reshape_shrink(shrink:UOp, reshape:UOp):
-  if not _device_supports_view(shrink._device): return None
-  reshape_shape = reshape.shape
-  shrink_ranges = shrink.marg
-  # all inner dims must have full range for the shrink to be contiguous in memory
-  for i in range(1, len(shrink_ranges)):
-    if shrink_ranges[i] != (0, reshape_shape[i]): return None
-  s0, e0 = shrink_ranges[0]
-  inner_size = prod(reshape_shape[1:])
-  new_shape = (e0 - s0,) + tuple(reshape_shape[1:])
-  return reshape.src[0]._mop(Ops.SHRINK, ((s0 * inner_size, e0 * inner_size),))._mop(Ops.RESHAPE, new_shape)
+def contiguous_mops_to_view(c:UOp):
+  """CONTIGUOUS(MOPS(BUFFER)) → CONTIGUOUS(BUFFER_VIEW) when movement ops collapse to a contiguous range."""
+  if not _device_supports_view(c._device): return None
+  src = c.src[0]
+  buf = src.base
+  if buf.op not in {Ops.BUFFER, Ops.BUFFER_VIEW}: return None
+  if src.op is Ops.RESHAPE and src.src[0].op in {Ops.BUFFER, Ops.BUFFER_VIEW}: return None
+  size_offset = src.contiguous_view_offset()
+  if size_offset is None: return None
+  size, offset = size_offset
+  if buf.op is Ops.BUFFER_VIEW: offset, buf = offset + buf.arg[1], buf.src[0]
+  return UOp(Ops.BUFFER_VIEW, src.dtype, (buf,), (size, offset)).reshape(src.shape).rtag(c.tag)
 
 pm_early_transform_tensor_graph = PatternMatcher([
-  # *** BUFFER_VIEW support (should only be here) ***
-  # rewrite BUFFER/BUFFER_VIEW->RESHAPE->SHRINK to BUFFER/BUFFER_VIEW->SHRINK->RESHAPE so the SHRINK on BUFFER rule can fire
-  (UPat(Ops.SHRINK, src=(UPat(Ops.RESHAPE, src=(UPat((Ops.BUFFER, Ops.BUFFER_VIEW)),), allow_any_len=True, name="reshape"),
-                         UPat.cvar(), UPat.cvar()), name="shrink"), swap_reshape_shrink),
-  # replace SHRINK on BUFFER with BUFFER_VIEW (only on devices that support subbuffers)
-  (UPat(Ops.SHRINK, src=(UPat(Ops.BUFFER), UPat.cvar('s', vec=False), UPat.cvar('e', vec=False)), name="x"),
-   lambda x,s,e: UOp(Ops.BUFFER_VIEW, x.dtype, (x.src[0],), (e.arg-s.arg, s.arg)) if _device_supports_view(x._device) else None),
-  # merge SHRINK on BUFFER_VIEW into a single BUFFER_VIEW
-  (UPat(Ops.SHRINK, src=(UPat(Ops.BUFFER_VIEW, name="bv"), UPat.cvar('s'), UPat.cvar('e'))),
-   lambda bv,s,e: UOp(Ops.BUFFER_VIEW, bv.dtype, bv.src, (e.arg-s.arg, bv.arg[1]+s.arg))),
+  # CONTIGUOUS(MOPS(BUFFER/BUFFER_VIEW)) → CONTIGUOUS(BUFFER_VIEW) when movement ops collapse to contiguous range
+  (UPat(Ops.CONTIGUOUS, src=(UPat(GroupOp.Movement),), name="c"), contiguous_mops_to_view),
 
   # *** CONTIGUOUS replacement hack for openpilot ***
   (UPat(Ops.CONTIGUOUS, src=(UPat(GroupOp.Movement, name="src"),), name="contig"), found_contiguous),
@@ -112,7 +105,8 @@ pm_early_transform_tensor_graph = PatternMatcher([
   (UPat(GroupOp.ALU, name="alu"), lambda ctx,alu: alu.replace(src=new_src) if (new_src:=tuple(ctx.get(s, s) for s in alu.src)) != alu.src else None),
 
   # add CONTIGUOUS to tagged UOps
-  (UPat(GroupOp.All-{Ops.CONTIGUOUS, Ops.ASSIGN}, name="x"), lambda x: x.rtag(None).contiguous(tag=x.tag) if x.tag else x.replace(tag=None)),
+  (UPat(GroupOp.All-{Ops.CONTIGUOUS, Ops.ASSIGN}, name="x"),
+   lambda x: x.rtag(None).contiguous(tag=x.tag) if x.tag and not x.has_buffer_identity() else x.replace(tag=None)),
   # remove extra CONTIGUOUS on ASSIGN (only when assign target is contiguous)
   (UPat(Ops.CONTIGUOUS, src=(UPat(Ops.ASSIGN, name="a"),), name="c"),
    lambda a,c: a.replace(tag=a.tag+c.tag) if a.src[0].has_buffer_identity() else None),
