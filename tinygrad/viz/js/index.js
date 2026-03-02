@@ -300,24 +300,23 @@ function setFocus(key) {
     }
   }
   // instructions list renderer
-  const instsEl = metadata.querySelector(".insts");
-  d3.select(instsEl).selectAll("span").classed("highlight", false);
-  if (data.pcToShape.size > 0 && instsEl == null) {
-    const code = d3.create("pre").append("code").classed("hljs", true).style("margin-top", "20px").classed("insts", true);
+  let instList = document.getElementById("insts");
+  if (data.pcToShape.size > 0 && instList == null) {
+    const code = d3.create("pre").append("code").classed("hljs", true).style("margin-top", "20px").attr("id", "insts"); instList = code.node();
     metadata.insertBefore(code.node().parentElement, html.node());
     for (const [k, v] of data.pcToShape) {
       const line = code.append("div").style("display", "flex").style("gap", "8px").style("cursor", "pointer").on("click", (e) => setFocus(k));
-      const left = line.append("span").style("display", "flex").style("gap", "4px").attr("id", `inst-${k}`).classed("highlight", k === key);
+      const left = line.append("span").style("display", "flex").style("gap", "4px").attr("id", `inst-${k}`);
       left.append("span").attr("class", "num").text("W:"+k.split("-")[0].split(":")[1]);
       left.append("span").attr("class", "pc").text("0x"+parseInt(v.pc).toString(16));
       line.append("span").text(data.pcMap[v.pc]);
     }
   }
-  const instSpan = document.getElementById(`inst-${key}`);
-  if (instSpan != null && instsEl != null) {
-    const r = rect(instSpan), c = rect(instsEl);
-    if (Math.max(c.top-r.bottom, r.top-c.bottom)>=-30) instSpan.scrollIntoView({ block:"nearest" });
-    instSpan.classList.add("highlight");
+  d3.select(instList).selectAll("span").classed("highlight", false);
+  const instLine = document.getElementById(`inst-${key}`); instLine?.classList.add("highlight");
+  if (instLine != null && instList != null) {
+    const r = rect(instLine), c = rect(instList);
+    if (Math.max(c.top-r.bottom, r.top-c.bottom)>=-30) instLine.scrollIntoView({ block:"nearest" });
   }
 }
 
