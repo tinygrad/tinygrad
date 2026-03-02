@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field
 from tinygrad.uop.ops import UOp, UPat, PatternMatcher, Ops, GroupOp, graph_rewrite, identity_element, track_rewrites
-from tinygrad.dtype import ImageDType
-from tinygrad.helpers import prod, DEBUG, argsort, VIZ, pluralize
+from tinygrad.dtype import dtypes, ImageDType
+from tinygrad.helpers import prod, DEBUG, argsort, VIZ, pluralize, FLOAT16
 
 @dataclass
 class AllocCtx:
@@ -65,6 +65,7 @@ def found_contiguous(ctx:dict[UOp, UOp], contig:UOp, src:UOp):
   while x is not src.base:
     if x.op is Ops.PERMUTE: contig = contig.permute(argsort(x.marg))
     elif x.op is Ops.RESHAPE: contig = contig.reshape(x.src[0].shape)
+    elif x.op is Ops.PAD: contig = contig.shrink(tuple((l, s-r) for (l,r),s in zip(x.marg, x.shape)))
     else: return None
     x = x.src[0]
   ctx[src.base] = contig
@@ -124,6 +125,11 @@ pm_early_transform_tensor_graph = PatternMatcher([
   (UPat(Ops.COPY, src=(UPat.var("s"), UPat()), name="c"), lambda c,s: c.const_like(ss.arg) if (ss:=s.base).op is Ops.CONST else None),
 ])
 
+pm_float16 = PatternMatcher([
+  (UPat(Ops.ASSIGN, src=(UPat(Ops.RESHAPE, src=(UPat(Ops.BUFFER, dtypes.float, name="buf"),), allow_any_len=True, name="rs"), UPat(GroupOp.All-{Ops.COPY}, name="x")), name="a"),
+   lambda a,rs,buf,x: a.replace(dtype=dtypes.half, src=(rs.replace(src=(buf.replace(dtype=dtypes.half), *rs.src[1:])), x.cast(dtypes.half))).cast(dtypes.float))
+])
+
 def untag_and_append(ctx:AllocCtx, x:UOp):
   if x.tag is None: return None
   ret = x.replace(tag=None)
@@ -174,6 +180,8 @@ def transform_to_call(big_sink:UOp) -> tuple[UOp, dict[UOp, UOp]]:
 
   # here we can break the tensor graph. this is the only place you need to maintain numbered tags
   big_sink = graph_rewrite(big_sink, pm_early_transform_tensor_graph, ctx={}, name="early transform tensor graph")
+
+  if FLOAT16: big_sink = graph_rewrite(big_sink, pm_float16, name="float16 rewrite")
 
   # here we construct the final buffer_map. this is everything that will go into the tensor map
   graph_rewrite(big_sink, pm_finalize_call, ctx=ctx, name="finalize call")
