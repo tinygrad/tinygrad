@@ -2,11 +2,10 @@
 # schedule confirms the right things are capable of fusing
 # NOTE: this has overlap with external_test_opt.py
 
-import os, gc, unittest, functools
+import gc, unittest, functools
 import numpy as np
 from typing import cast
 from hypothesis import assume, given, settings, strategies as strat
-from unittest.mock import patch
 
 from tinygrad import nn, dtypes, Device, Tensor, Variable
 from tinygrad.device import is_dtype_supported
