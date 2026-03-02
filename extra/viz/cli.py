@@ -5,7 +5,7 @@ import argparse, pathlib, sys, struct, json
 from typing import Iterator
 from tinygrad.viz import serve as viz
 from tinygrad.uop.ops import RewriteTrace
-from tinygrad.helpers import temp, ansistrip, colored, time_to_str, ansilen, ProfileEvent
+from tinygrad.helpers import temp, ansistrip, colored, time_to_str, ansilen
 
 # ** generic helpers
 
@@ -30,13 +30,17 @@ def decode_profile(data:bytes) -> dict:
   ret, off = data, 0
   def u(fmt:str) -> tuple:
     nonlocal off
-    vals = struct.unpack_from(fmt, ret, off); off += struct.calcsize(fmt)
+    vals = struct.unpack_from(fmt, ret, off)
+    off += struct.calcsize(fmt)
     return vals
   total_dur, global_peak, index_len, layout_len = u("<IQII")
-  strings, dtypes, markers = json.loads(ret[off:off+index_len]).values(); off += index_len
+  strings, dtypes, markers = json.loads(ret[off:off+index_len]).values()
+  off += index_len
   layout:dict[str, dict] = {}
   for _ in range(layout_len):
-    klen = u("<B")[0]; k = ret[off:off+klen].decode(); off += klen
+    klen = u("<B")[0]
+    k = ret[off:off+klen].decode()
+    off += klen
     layout[k] = v = {"events":[]}
     event_type, event_count = u("<BI")
     if event_type == 0:
