@@ -302,9 +302,9 @@ function setFocus(key) {
   // instructions list renderer
   let instList = document.getElementById("insts");
   if (data.pcToShape.size > 0 && instList == null) {
-    let contents = "";
+    let contents = "", i = 0;
     for (const [k, v] of data.pcToShape) {
-      contents += `<div class="line" data-k="${k}"><span class="left" id="inst-${k}"><span class="num">${v.wave}</span>
+      contents += `<div class="line" data-k="${k}"><span class="left" id="inst-${k}"><span class="n">${i++}</span><span class="wave">${v.wave}</span>
         <span class="pc">${"0x"+v.pc.toString(16).padStart(12, "0")}</span></span><span class="label">${data.pcMap[v.pc]}</span></div>`;
     }
     instList = d3.create("pre").append("code").classed("hljs", true).style("margin-top", "20px").attr("id", "insts").html(contents)
@@ -315,7 +315,7 @@ function setFocus(key) {
   const instLine = document.getElementById(`inst-${key}`); instLine?.classList.add("highlight");
   if (instLine != null && instList != null) {
     const r = rect(instLine), c = rect(instList);
-    if (Math.max(c.top-r.bottom, r.top-c.bottom)>=-30) instLine.scrollIntoView({ block:"nearest" });
+    if (Math.max(c.top-r.bottom, r.top-c.bottom)>=-30) instLine.scrollIntoView({ block:"center" });
   }
 }
 
@@ -418,7 +418,7 @@ async function renderProfiler(path, unit, opts) {
         const key = k.startsWith("TINY") ? null : `${k}-${j}`;
         const labelHTML = label.map(l=>`<span style="color:${l.color}">${l.st}</span>`).join("");
         let info = e.info != null ? "\n"+e.info : "";
-        if (info.startsWith("\nPC:")) data.pcToShape.set(key, {wave:dnum, pc:parseInt(e.info.split(":")[1]), st:e.st}); info = "";
+        if (info.startsWith("\nPC:")) data.pcToShape.set(key, {wave:11, pc:parseInt(e.info.split(":")[1]), st:e.st}); info = "";
         const arg = { tooltipText:labelHTML+" N:"+shapes.length+"\n"+formatTime(e.dur)+info, bufs:[], key, ctx:shapeRef?.ctx, step:shapeRef?.step };
         if (e.key != null) shapeMap.set(e.key, key);
         // offset y by depth

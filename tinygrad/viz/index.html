@@ -144,23 +144,28 @@
     fill: #5f0059;
   }
   #insts span.highlight {
-    background-color: rgba(214, 51, 132, 0.3);
-  }
-  #insts .num {
-    color: #7aa2f7;
-    min-width: 2ch;
+    background-color: rgba(0, 199, 47, 0.2);
   }
   #insts .line {
     display: flex;
-    gap: 8px;
+    flex-direction: column;
     cursor: pointer;
+    margin-bottom: 8px;
   }
   #insts .left {
     display: flex;
-    gap: 4px;
+    gap: 8px;
+  }
+  #insts .n {
+    color: #787fa1;
+    min-width: 5ch;
+  }
+  #insts .wave {
+    color: #7aa2f7;
+    min-width: 2ch;
   }
   #insts .pc {
-    color: #bb9af7;
+    color: #73daca;
   }
   g.node.highlight rect.node, .edgePath.highlight, g.port circle {
     stroke: #89C9A2;
