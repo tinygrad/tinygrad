@@ -302,15 +302,14 @@ function setFocus(key) {
   // instructions list renderer
   let instList = document.getElementById("insts");
   if (data.pcToShape.size > 0 && instList == null) {
-    const code = d3.create("pre").append("code").classed("hljs", true).style("margin-top", "20px").attr("id", "insts"); instList = code.node();
-    metadata.insertBefore(code.node().parentElement, html.node());
+    let contents = "";
     for (const [k, v] of data.pcToShape) {
-      const line = code.append("div").style("display", "flex").style("gap", "8px").style("cursor", "pointer").on("click", (e) => setFocus(k));
-      const left = line.append("span").style("display", "flex").style("gap", "4px").attr("id", `inst-${k}`);
-      left.append("span").attr("class", "num").text(v.wave);
-      left.append("span").attr("class", "pc").text("0x"+v.pc.toString(16));
-      line.append("span").text(data.pcMap[v.pc]);
+      contents += `<div class="row" data-k="${k}"><span class="left" id="inst-${k}"><span class="num">${v.wave}</span>
+        <span class="pc">${"0x"+v.pc.toString(16)}</span></span><span class="label">${data.pcMap[v.pc]}</span></div>`;
     }
+    instList = d3.create("pre").append("code").classed("hljs", true).style("margin-top", "20px").attr("id", "insts").html(contents)
+      .on("click", e => { const row = e.target.closest(".row"); row && setFocus(row.dataset.k); }).node()
+    metadata.insertBefore(instList.parentElement, html.node());
   }
   d3.select(instList).selectAll("span").classed("highlight", false);
   const instLine = document.getElementById(`inst-${key}`); instLine?.classList.add("highlight");
@@ -360,7 +359,8 @@ async function renderProfiler(path, unit, opts) {
     const k = textDecoder.decode(new Uint8Array(buf, offset, nameLen)); offset += nameLen;
     const div = deviceList.append("div").attr("id", k).text(k).style("padding", padding+"px").style("width", opts.width);
     const { y:baseY, height:baseHeight } = rect(div.node());
-    const colors = colorScheme[k.split(":")[0]] ?? colorScheme.DEFAULT;
+    const [dname, dnum] = k.split(":", 2);
+    const colors = colorScheme[dname] ?? colorScheme.DEFAULT;
     const offsetY = baseY-canvasTop+padding/2;
     const shapes = [], visible = [];
     const eventType = u8(), eventsLen = u32();
@@ -418,7 +418,7 @@ async function renderProfiler(path, unit, opts) {
         const key = k.startsWith("TINY") ? null : `${k}-${j}`;
         const labelHTML = label.map(l=>`<span style="color:${l.color}">${l.st}</span>`).join("");
         let info = e.info != null ? "\n"+e.info : "";
-        if (info.startsWith("\nPC:")) data.pcToShape.set(key, {wave:k.split("-")[0].split(":")[1], pc:parseInt(e.info.split(":")[1]), st:e.st}); info = "";
+        if (info.startsWith("\nPC:")) data.pcToShape.set(key, {wave:dnum, pc:parseInt(e.info.split(":")[1]), st:e.st}); info = "";
         const arg = { tooltipText:labelHTML+" N:"+shapes.length+"\n"+formatTime(e.dur)+info, bufs:[], key, ctx:shapeRef?.ctx, step:shapeRef?.step };
         if (e.key != null) shapeMap.set(e.key, key);
         // offset y by depth
