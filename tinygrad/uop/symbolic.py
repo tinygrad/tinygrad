@@ -183,7 +183,13 @@ gep_pushing = PatternMatcher([
   (UPat(Ops.WMMA, name="wmma").f(Ops.GEP, name="gep"), gep_through_wmma),
 ])
 
-symbolic_no_commutative = symbolic_simple+PatternMatcher([
+commutative = PatternMatcher([
+  # ** COMMUTATIVE flipping (only for index) **
+  # NOTE: this can break merging vector math by only flipping some of them
+  (UPat(GroupOp.Commutative, dtype=dtypes.index, name='x'), lambda x: x.replace(src=x.src[::-1]) if x.src[1].tuplize < x.src[0].tuplize else None),
+])
+
+symbolic = symbolic_simple+commutative+PatternMatcher([
   # ** boolean algebra **
   # TODO: make a more general or folder like simplify_valid
   (UPat.var("x", dtype=dtypes.bool) | UPat.var("x").logical_not(), lambda x: x.const_like(True)),  # x|!x -> True
@@ -260,14 +266,6 @@ symbolic_no_commutative = symbolic_simple+PatternMatcher([
   (UPat(Ops.VECTORIZE, src=UPat(Ops.CONST), name="vec"),
     lambda vec: UOp.const(vec.dtype, tuple(x.arg for x in vec.src)) if len(vec.src) > 0 else None),
 ])+div_and_mod_symbolic+gep_pushing
-
-commutative = PatternMatcher([
-  # ** COMMUTATIVE flipping (only for index) **
-  # NOTE: this can break merging vector math by only flipping some of them
-  (UPat(GroupOp.Commutative, dtype=dtypes.index, name='x'), lambda x: x.replace(src=x.src[::-1]) if x.src[1].tuplize < x.src[0].tuplize else None),
-])
-
-symbolic = commutative+symbolic_no_commutative
 
 # ******** we take a small aside to "simplify_valid" to rewrite valids ********
 

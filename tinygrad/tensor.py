@@ -2565,7 +2565,7 @@ class Tensor(OpMixin):
     return values._inverse(), indices
 
   @staticmethod
-  def _tri(r:sint, c:sint, diagonal:sint=0, device=None, requires_grad:bool|None=None) -> Tensor:
+  def _tri(r:sint, c:sint, diagonal=0, device=None, requires_grad:bool|None=None) -> Tensor:
     return (Tensor.arange(r, device=device).unsqueeze(-1) + diagonal <= Tensor.arange(c, device=device)).requires_grad_(requires_grad)
 
   def triu(self, diagonal:sint=0) -> Tensor:
