@@ -93,7 +93,7 @@ class X86GroupOp:
                 X86Ops.VCVTDQ2PS, X86Ops.VCVTDQ2PD, X86Ops.VCVTTPS2DQ, X86Ops.VCVTTPD2DQ, X86Ops.VCVTTSS2SI, X86Ops.VCVTTSD2SI,
                 X86Ops.VCVTPH2PS, X86Ops.VCVTPS2PD, X86Ops.VCVTPD2PS, X86Ops.VROUNDPS, X86Ops.VROUNDPD, X86Ops.VSQRTPS, X86Ops.VSQRTPD,
                 X86Ops.VPBROADCASTB, X86Ops.VPBROADCASTW, X86Ops.VPBROADCASTD, X86Ops.VPBROADCASTQ, X86Ops.VBROADCASTSS,
-                X86Ops.CMPi, X86Ops.IMULi, X86Ops.DIV, X86Ops.LEA, X86Ops.VPSRLDQ}
+                X86Ops.CMPi, X86Ops.IMULi, X86Ops.DIV, X86Ops.LEA}
 
   # X86Ops whose second src can read from memory NOTE: some of these are TwoAddress1st so the second src is actually the first
   ReadMem2nd = {X86Ops.ADD, X86Ops.SUB, X86Ops.AND, X86Ops.OR, X86Ops.XOR, X86Ops.SHL, X86Ops.SHR, X86Ops.SAR, X86Ops.IMUL, X86Ops.CMP,
@@ -124,6 +124,12 @@ class X86GroupOp:
   WriteFlags = {X86Ops.CMP, X86Ops.CMPi, X86Ops.ADD, X86Ops.ADDi, X86Ops.SUB, X86Ops.SUBi, X86Ops.IMUL, X86Ops.IMULi, X86Ops.IDIV, X86Ops.DIV,
                 X86Ops.SHL, X86Ops.SHLi, X86Ops.SHR, X86Ops.SHRi, X86Ops.SAR, X86Ops.SARi, X86Ops.AND, X86Ops.ANDi, X86Ops.XOR, X86Ops.XORi,
                 X86Ops.OR, X86Ops.ORi, X86Ops.VUCOMISS, X86Ops.VUCOMISD}
+
+  # X86Ops whose first src is the rm field
+  Rm1st = ReadMem1st | (ReadMem2nd & TwoAddress1st) | {X86Ops.VPSRLDQ}
+
+  # X86Ops whose second src is the rm field
+  Rm2nd = ReadMem2nd | (ReadMem3rd & TwoAddress1st)
 
   All = set(X86Ops)
 
@@ -595,12 +601,12 @@ def encode(x:UOp, opc:int, reg:int|None=None, pp:int=0, sel:int=0, we:int=0) -> 
     if len(x.src) > 3: address, rest = x.src[:3], list(x.src[3:])
     else: address, rest = (x, None, None), list(x.src)
 
-  elif x.arg in X86GroupOp.ReadMem1st or x.arg in X86GroupOp.ReadMem2nd and x.arg in X86GroupOp.TwoAddress1st:
+  elif x.arg in X86GroupOp.Rm1st:
     if len(x.src) > 2: address, rest = x.src[:3], list(x.src[3:])
     else: address, rest = (x.src[0], None, None), list(x.src[1:])
     if x.dtype is not dtypes.void: rest = [x] + rest
 
-  elif x.arg in X86GroupOp.ReadMem2nd or x.arg in X86GroupOp.ReadMem3rd and x.arg in X86GroupOp.TwoAddress1st:
+  elif x.arg in X86GroupOp.Rm2nd:
     if len(x.src) > 3: address, rest = x.src[1:4], list(x.src[:1] + x.src[4:])
     else: address, rest = (x.src[1], None, None), list(x.src[:1] + x.src[2:])
     if x.dtype is not dtypes.void: rest = [x] + rest
@@ -808,9 +814,9 @@ class X86Renderer(ISARenderer):
 
       if len(x.src) > 3 and x.arg in X86GroupOp.WriteMem:
         return ", ".join([_mem_adress(*x.src[:3])] + _format(x.src[3:]))
-      elif len(x.src) > 2 and (x.arg in X86GroupOp.ReadMem1st or x.arg in X86GroupOp.ReadMem2nd and x.arg in X86GroupOp.TwoAddress1st):
+      elif len(x.src) > 2 and x.arg in X86GroupOp.Rm1st:
         return ", ".join(_format((x,)) + [_mem_adress(*x.src[:3])] + _format(x.src[3:]))
-      elif len(x.src) > 3 and (x.arg in X86GroupOp.ReadMem2nd or x.arg in X86GroupOp.ReadMem3rd and x.arg in X86GroupOp.TwoAddress1st):
+      elif len(x.src) > 3 and x.arg in X86GroupOp.Rm2nd:
         return ", ".join(_format((x, x.src[0])) + [_mem_adress(*x.src[1:4])] + _format(x.src[4:]))
       return ", ".join(_format((x,) + x.src))
 
