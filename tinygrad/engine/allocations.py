@@ -93,7 +93,8 @@ def contiguous_mops_to_view(c:UOp):
   if size_offset is None: return None
   size, offset = size_offset
   if buf.op is Ops.BUFFER_VIEW: offset, buf = offset + buf.arg[1], buf.src[0]
-  return UOp(Ops.BUFFER_VIEW, src.dtype, (buf,), (size, offset)).reshape(src.shape)
+  # NOTE: this contiguous is removed because this BUFFER_VIEW/RESHAPE has_buffer_identity
+  return UOp(Ops.BUFFER_VIEW, src.dtype, (buf,), (size, offset)).reshape(src.shape).contiguous(tag=c.tag)
 
 pm_early_transform_tensor_graph = PatternMatcher([
   # CONTIGUOUS(MOPS(BUFFER/BUFFER_VIEW)) → CONTIGUOUS(BUFFER_VIEW) when movement ops collapse to contiguous range
