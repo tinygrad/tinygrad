@@ -49,7 +49,7 @@ class X86Ops(FastEnum):
   VPEXTRB = auto(); VPEXTRW = auto(); VPEXTRD = auto(); VPEXTRQ = auto()
   VPINSRB = auto(); VPINSRW = auto(); VPINSRD = auto(); VPINSRQ = auto()
   VPBROADCASTB = auto(); VPBROADCASTW = auto(); VPBROADCASTD = auto(); VPBROADCASTQ = auto()
-  VBROADCASTSS = auto() # TODO: VBROADCASTSD is ymm only, add once they are supported
+  VBROADCASTSS = auto()
   # int binary
   IDIV = auto(); DIV = auto()
   ADD = auto(); ADDi = auto(); SUB = auto(); SUBi = auto(); IMUL = auto(); IMULi = auto()
@@ -163,9 +163,9 @@ extra_matcher = PatternMatcher([
   # float where expects a mask TODO: handle float64 cmp to float32 where
   (UPat.var("m", dtypes.bool).where(UPat.var("a", dtypes.floats), UPat.var("b")),
    lambda m,a,b: m.cast(a.dtype).ne(0).where(a, b) if m.src[0].dtype not in dtypes.floats else None),
-  # TODO: do we want this? Kinda not needed if DEVECTORIZE=0. If yes make it general
-  (UPat(Ops.VECTORIZE, dtypes.float16, name="x"), lambda x: x.replace(dtype=dtypes.float32.vec(x.dtype.count),
-    src=tuple(s.src[0] for s in x.src)).cast(x.dtype) if all(s.op is Ops.CAST for s in x.src) else None),
+  # TODO: do we want this? If yes make it general
+  #(UPat(Ops.VECTORIZE, dtypes.float16, name="x"), lambda x: x.replace(dtype=dtypes.float32.vec(x.dtype.count),
+  #  src=tuple(s.src[0] for s in x.src)).cast(x.dtype) if all(s.op is Ops.CAST for s in x.src) else None),
   # rewrite -x -> 0 - x
   (UPat(Ops.NEG, name="x"), lambda x: UOp(Ops.SUB, x.dtype, (x.const_like(0),) + x.src)),
 ])
@@ -569,7 +569,7 @@ post_regalloc_matcher = PatternMatcher([
   # rewrite END to ACC + 1 -> JUMP -> LABEL, also add the out of loop JUMP to the src so this becomes the jump target
   (UPat(Ops.END, name="x"), lambda ctx,x: (jmp:=UOp(Ops.INS, arg=X86Ops.JMP, tag=f".LOOP_{ctx.loop_label[x.src[1]]}"),
    [x.src[1].ins(X86Ops.ADDi, src=(imm(x.src[1].dtype, 1),)), jmp, UOp(Ops.INS, arg=X86Ops.LABEL, tag=f".LOOP_OUT_{ctx.loop_label[x.src[1]]}")])),
-  # TODO: need a generic way to model clobbers, idiv and flags should be handled the same way, maybe add clobber field to Register?
+  # TODO: rm this once multiple outputs are supported
   # fixup div, zero rdx again because scheduling constraint isn't being respected
   (UPat(Ops.INS, arg=X86Ops.DIV, name="x"), lambda x:
    (nx:=x.replace(src=x.src[:1]), [x.ins(X86Ops.MOVi, src=(imm(min(dtypes.uint32, x.dtype), 0),), tag=RDX), nx])),
