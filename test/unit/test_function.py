@@ -70,6 +70,14 @@ class TestFunction(unittest.TestCase):
     b = Tensor([4,5,6])
     np.testing.assert_equal(f(a, b).numpy(), [5,7,9])
 
+  def test_contiguous_backward(self):
+    @function
+    def f(a:Tensor, b:Tensor) -> Tensor: return (a + b).contiguous_backward()
+
+    a = Tensor([1,2,3])
+    b = Tensor([4,5,6])
+    np.testing.assert_equal(f(a, b).numpy(), [5,7,9])
+
   def test_method(self):
     class Foo:
       def __init__(self): self.w = Tensor([10,20,30])
