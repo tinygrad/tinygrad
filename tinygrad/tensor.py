@@ -310,6 +310,9 @@ class Tensor(OpMixin):
     assign_uop = self.uop.assign(x.uop)
     base = self.uop.base
     if base.op in {Ops.BUFFER, Ops.AFTER} and not self.uop.has_buffer_identity():
+      for tref in list(all_tensors):
+        if (t:=tref()) is None or t is self or t.uop.op is not Ops.CONTIGUOUS or t.uop.has_buffer_identity(): continue
+        if t.uop.src[0].base is base: t.realize()
       _apply_map_to_tensors({base: base.after(assign_uop)}, name="Embed View Assign", walk=True)
     return self.replace(self._apply_uop(lambda *_: assign_uop, x))
 
