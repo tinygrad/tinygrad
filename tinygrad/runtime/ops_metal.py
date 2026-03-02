@@ -128,8 +128,10 @@ class MetalProgram:
       exec_width = self.pipeline_state.threadExecutionWidth()
       memory_length = self.pipeline_state.staticThreadgroupMemoryLength()
       raise RuntimeError(f"local size {local_size} bigger than {self.max_total_threads} with exec width {exec_width} memory length {memory_length}")
-    command_buffer = self.dev.mtl_queue.commandBuffer().retained() # FIXME: is this really ARC?
-    encoder = command_buffer.computeCommandEncoder().retained() # FIXME: is this really ARC?
+    # commandBuffer/computeCommandEncoder returns +0 (autoreleased), so we can retain here.
+    # https://developer.apple.com/library/archive/documentation/Cocoa/Conceptual/MemoryMgmt/Articles/mmRules.html
+    command_buffer = self.dev.mtl_queue.commandBuffer().retained()
+    encoder = command_buffer.computeCommandEncoder().retained()
     encoder.setComputePipelineState(self.pipeline_state)
     for i,a in enumerate(bufs): encoder.setBuffer_offset_atIndex(a.buf, a.offset, i)
     for i,a in enumerate(vals, start=len(bufs)): encoder.setBytes_length_atIndex(bytes(ctypes.c_int(a)), 4, i)
