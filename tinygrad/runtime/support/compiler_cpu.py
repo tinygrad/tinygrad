@@ -91,3 +91,8 @@ class CPULLVMCompiler(LLVMCompiler):
     # +reserve-x18 here does the same thing as -ffixed-x18 in ops_cpu.py, see comments there for why it's needed on arm osx
     cpu, feats = ctypes.string_at(llvm.LLVMGetHostCPUName()), (b'+reserve-x18,' if OSX else b'') + ctypes.string_at(llvm.LLVMGetHostCPUFeatures())
     super().__init__(cpu.decode(), feats.decode(), cache_key)
+
+class X86Compiler(Compiler):
+  def __init__(self): super().__init__(None)
+  def compile(self, src:str) -> bytes: return bytes.fromhex(src)
+  def disassemble(self, lib:bytes): return capstone_flatdump(lib)
