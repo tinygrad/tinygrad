@@ -299,15 +299,15 @@ function setFocus(key) {
       if (shape != null) p.style("cursor", "pointer").on("click", () => setFocus(shape));
     }
   }
-  // external data metadata list
+  // instructions list renderer
   const instsEl = metadata.querySelector(".insts");
   d3.select(instsEl).selectAll("span").classed("highlight", false);
   if (data.pcToShape.size > 0 && instsEl == null) {
     const code = d3.create("pre").append("code").classed("hljs", true).style("margin-top", "20px").classed("insts", true);
     metadata.insertBefore(code.node().parentElement, html.node());
     for (const [k, v] of data.pcToShape) {
-      const line = code.append("div").style("display", "flex").style("gap", "8px");
-      const left = line.append("span").style("display", "flex").style("gap", "8px").attr("id", `inst-${k}`).classed("highlight", k === key).on("click", (e) => setFocus(k));
+      const line = code.append("div").style("display", "flex").style("gap", "8px").style("cursor", "pointer").on("click", (e) => setFocus(k));
+      const left = line.append("span").style("display", "flex").style("gap", "4px").attr("id", `inst-${k}`).classed("highlight", k === key);
       left.append("span").attr("class", "num").text("W:"+k.split("-")[0].split(":")[1]);
       left.append("span").attr("class", "pc").text("0x"+parseInt(v.pc).toString(16));
       line.append("span").text(data.pcMap[v.pc]);
@@ -316,8 +316,7 @@ function setFocus(key) {
   const instSpan = document.getElementById(`inst-${key}`);
   if (instSpan != null && instsEl != null) {
     const r = rect(instSpan), c = rect(instsEl);
-    const gap = Math.max(c.top-r.bottom, r.top-c.bottom);
-    if (gap >= -30) instSpan.scrollIntoView({ block:"nearest" });
+    if (Math.max(c.top-r.bottom, r.top-c.bottom)>=-30) instSpan.scrollIntoView({ block:"nearest" });
     instSpan.classList.add("highlight");
   }
 }
@@ -856,7 +855,8 @@ async function main() {
       }
       appendSteps(ul, i, steps);
     }
-    return setState({ currentCtx:-1 });
+    return setState({currentCtx: 45, currentStep: 1, currentRewrite: 0, expandSteps: true });
+    //return setState({ currentCtx:-1 });
   }
   // ** center graph
   const { currentCtx, currentStep, currentRewrite, expandSteps } = state;
