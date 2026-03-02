@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 import os
 os.environ["VIZ"] = "0"
-import argparse, pathlib
+import argparse, pathlib, sys
 from typing import Iterator
 from tinygrad.viz import serve as viz
 from tinygrad.uop.ops import RewriteTrace
@@ -40,7 +40,7 @@ if __name__ == "__main__":
   args = parser.parse_args()
   if not args.profile and not args.rewrites:
     parser.print_help()
-    exit(0)
+    sys.exit(0)
 
   viz.trace = viz.load_pickle(args.rewrites_path, default=RewriteTrace([], [], {}))
   viz.ctxs = viz.get_rewrites(viz.trace)
@@ -75,7 +75,7 @@ if __name__ == "__main__":
         other_t = total-sum(t for _, (t, _) in sel)
         table.append([f"Other ({len(other)} unique)", time_to_str(other_t, w=9), sum(c for _,(_,c) in other), f"{other_t/total*100.0:.2f}%"])
       print(tabulate(table, headers=["name", "total", "count", "pct"], tablefmt="github"))
-    exit(0)
+    sys.exit(0)
 
   for k in viz.ctxs:
     if not optional_eq(k, args.kernel): continue
