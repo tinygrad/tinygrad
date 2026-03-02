@@ -1750,7 +1750,7 @@ class Tensor(OpMixin):
     print(t.all(axis=1, keepdim=True).numpy())
     ```
     """
-    return self.logical_not().any(axis, keepdim).logical_not()
+    return self.bool().min(axis, keepdim)
 
   def isclose(self, other:Tensor, rtol:float=1e-05, atol:float=1e-08, equal_nan=False) -> Tensor:
     """
