@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, graph_rewrite, sint, AxisType, profile_matches
 from tinygrad.uop.ops import consumer_map_from_toposort, gate_kernel_sink
-from tinygrad.uop.symbolic import symbolic, pm_simplify_valid, pm_drop_and_clauses
+from tinygrad.uop.symbolic import symbolic_no_commutative, pm_simplify_valid, pm_drop_and_clauses
 from tinygrad.helpers import argsort, all_same, cpu_profile, PCONTIG, colored
 
 ALWAYS_CONTIGUOUS: set[Ops] = {Ops.CONTIGUOUS, Ops.ASSIGN, Ops.COPY, Ops.BUFFER, Ops.BUFFER_VIEW,
@@ -137,7 +137,7 @@ def _apply_reshape(in_shape:tuple[sint,...], out_shape:tuple[sint, ...], urngs:U
     axes_out.append(combined_axes % s)
     combined_axes //= s
   # this simplify is doing a lot of heavy lifting. this is the replacement for the reshape view merging code
-  return graph_rewrite(UOp.sink(*axes_out[::-1]), symbolic+pm_simplify_valid+pm_drop_and_clauses, name="reshape")
+  return graph_rewrite(UOp.sink(*axes_out[::-1]), symbolic_no_commutative+pm_simplify_valid+pm_drop_and_clauses, name="reshape")
 
 # this is the definition of the movement ops
 @functools.cache
@@ -151,7 +151,7 @@ def apply_movement_op(op:Ops, in_shape:tuple[sint,...], arg:tuple, rngs:tuple[UO
       # NOTE: the .where(r-s, i) is not inside the graph_rewrite so that `convert_pad_to_where_to_keep_behavior_local`
       #       wraps the pad with only the newly added valid
       rngs = tuple(r if (s == 0 and e == 0) else graph_rewrite((r >= s) & (r < (sh+s)),
-        symbolic+pm_simplify_valid, name="pad").where(r-s, UOp.invalid()) for r,sh,(s,e) in zip(rngs, in_shape, arg))
+        symbolic_no_commutative+pm_simplify_valid, name="pad").where(r-s, UOp.invalid()) for r,sh,(s,e) in zip(rngs, in_shape, arg))
     case Ops.RESHAPE:
       sink = UOp.sink(*rngs)
       sub_array = {r:UOp.range(r.src[0], i, AxisType.PLACEHOLDER) for i,r in enumerate(sink.ranges)}
@@ -225,7 +225,7 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
         if all_all_same or (PCONTIG and all_same(local_rngs)):
           # the new valid is the OR of all the children valids
           minimum_valid = UOp.const(dtypes.bool, False).sum(*valids)
-          _out_rngs.append(graph_rewrite(minimum_valid.where(local_rngs[0], UOp.invalid()), symbolic, name="minimum_valid"))
+          _out_rngs.append(graph_rewrite(minimum_valid.where(local_rngs[0], UOp.invalid()), symbolic_no_commutative, name="minimum_valid"))
         else:
           _out_rngs.append(rctx.new_range(x.shape[i]))
           _realize_axis.append(i)
