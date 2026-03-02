@@ -1158,5 +1158,23 @@ class TestFusionOp(unittest.TestCase):
     self.assertEqual(len(sched), 1)
     self.assertLess(time.perf_counter()-st, 2.0)
 
+# NOTE: the NULL backend supports BUFFER_VIEW
+class TestBufferView(unittest.TestCase):
+  def test_shrink_contiguous_is_buffer_view(self):
+    # simple 1D shrink of a realized buffer should be BUFFER_VIEW, not a copy kernel
+    a = Tensor.arange(100).contiguous().realize()
+    b = a.shrink(((10, 50),)).contiguous()
+    run_schedule(check_schedule(b, 0))
+
+  def test_shrink_2d_contiguous_is_buffer_view(self):
+    a = Tensor.arange(100).reshape(10,10).contiguous().realize()
+    b = a.shrink(((1, 5),None)).contiguous()
+    run_schedule(check_schedule(b, 0))
+
+  def test_chained_shrink_is_buffer_view(self):
+    a = Tensor.arange(1000).contiguous().realize()
+    b = a.shrink(((200, 800),)).shrink(((0, 300),)).reshape((30, 10)).shrink(((20, 25), (0, 10))).contiguous()
+    run_schedule(check_schedule(b, 0))
+
 if __name__ == '__main__':
   unittest.main(verbosity=2)
