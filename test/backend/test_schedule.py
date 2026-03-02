@@ -802,8 +802,8 @@ class TestSchedule(unittest.TestCase):
     with patch.dict(os.environ, {"FLOAT16": "1"}):
       def cnt():
         x, y, z = Tensor.empty((64, 64), dtype='float'), Tensor.empty((64, 64), dtype='float'), Tensor.empty((64, 64), dtype='float')
-        a = (x @ y).relu()
-        sched = ((a @ z).relu() + a).schedule()
+        a = x.image_dot(y).relu()
+        sched = (a.image_dot(z).relu() + a).schedule()
         for si in sched: si.lower()
         return len([si for si in sched if isinstance(si.prg, CompiledRunner)])
 
