@@ -136,6 +136,13 @@ class TestTensorVariable(unittest.TestCase):
     with self.assertRaises(AssertionError):
       t.chunk(2, dim=0)  # can't split along symbolic dim
 
+  def test_symbolic_var_sum(self, var_name="u"):
+    t = Variable("t", 1, 10).bind(4)
+    v = Variable(var_name, 1, 5).bind(1)
+    mask = (Tensor.full((1, 1, t, v+t), 1) + 1).contiguous()
+    mask.shrink(((0, 1), (0, 1), (0, 4), (0, 4))).numpy()
+  def test_symbolic_var_sum_alt_name(self): self.test_symbolic_var_sum("s")
+
   def test_symbolic_triu(self):
     t = Variable("t", 1, 10).bind(4)
     for start_pos in (0, 1, 3):
