@@ -57,7 +57,7 @@ def replace_contig_with_assign(u:UOp):
 def replace_assign_with_contig(u:UOp):
   assigned_to = u
   while assigned_to.op in {Ops.ASSIGN, Ops.BITCAST, Ops.AFTER}: assigned_to = assigned_to.src[0].base
-  if assigned_to.op is not Ops.BUFFER:
+  if assigned_to.op not in {Ops.BUFFER, Ops.BUFFER_VIEW}:
     return u.src[1].contiguous(tag=u.tag)
 
 def found_contiguous(ctx:dict[UOp, UOp], contig:UOp, src:UOp):
@@ -69,10 +69,27 @@ def found_contiguous(ctx:dict[UOp, UOp], contig:UOp, src:UOp):
     x = x.src[0]
   ctx[src.base] = contig
 
+def swap_reshape_shrink(shrink:UOp, reshape:UOp):
+  reshape_shape = reshape.shape
+  shrink_ranges = shrink.marg
+  # all inner dims must have full range for the shrink to be contiguous in memory
+  for i in range(1, len(shrink_ranges)):
+    if shrink_ranges[i] != (0, reshape_shape[i]): return None
+  s0, e0 = shrink_ranges[0]
+  inner_size = prod(reshape_shape[1:])
+  new_shape = (e0 - s0,) + tuple(reshape_shape[1:])
+  return reshape.src[0]._mop(Ops.SHRINK, ((s0 * inner_size, e0 * inner_size),))._mop(Ops.RESHAPE, new_shape)
+
 pm_early_transform_tensor_graph = PatternMatcher([
+  # rewrite BUFFER/BUFFER_VIEW->RESHAPE->SHRINK to BUFFER/BUFFER_VIEW->SHRINK->RESHAPE so the SHRINK on BUFFER rule can fire
+  (UPat(Ops.SHRINK, src=(UPat(Ops.RESHAPE, src=(UPat((Ops.BUFFER, Ops.BUFFER_VIEW)),), allow_any_len=True, name="reshape"),),
+   allow_any_len=True, name="shrink"), swap_reshape_shrink),
   # replace SHRINK on BUFFER with BUFFER_VIEW
   (UPat(Ops.SHRINK, src=(UPat(Ops.BUFFER), UPat.cvar('s'), UPat.cvar('e')), name="x"),
    lambda x,s,e: UOp(Ops.BUFFER_VIEW, x.dtype, (x.src[0],), (e.arg-s.arg, s.arg))),
+  # merge SHRINK on BUFFER_VIEW into a single BUFFER_VIEW
+  (UPat(Ops.SHRINK, src=(UPat(Ops.BUFFER_VIEW, name="bv"), UPat.cvar('s'), UPat.cvar('e'))),
+   lambda bv,s,e: UOp(Ops.BUFFER_VIEW, bv.dtype, bv.src, (e.arg-s.arg, bv.arg[1]+s.arg))),
   # CONTIGUOUS replacement hack for openpilot
   (UPat(Ops.CONTIGUOUS, src=(UPat(GroupOp.Movement, name="src"),), name="contig"), found_contiguous),
   # replace ALU sources with contiguous versions found above

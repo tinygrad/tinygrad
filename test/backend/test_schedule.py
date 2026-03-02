@@ -1420,5 +1420,11 @@ class TestBufferView(unittest.TestCase):
     run_schedule(check_schedule(b, 1))
     assert b.flatten().tolist() == list(range(10,50))
 
+  def test_chained_shrink_is_buffer_view(self):
+    a = Tensor.arange(1000).contiguous().realize()
+    b = a.shrink(((200, 800),)).shrink(((0, 300),)).reshape((30, 10)).shrink(((0, 30), (8, 10))).reshape((30, 1, 2)).contiguous()
+    run_schedule(check_schedule(b, 1))
+    assert b.flatten().tolist() == [a+b for a in range(208, 500, 10) for b in range(2)]
+
 if __name__ == '__main__':
   unittest.main(verbosity=2)
