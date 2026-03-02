@@ -6,6 +6,7 @@ import os, gc, unittest, functools
 import numpy as np
 from typing import cast
 from hypothesis import assume, given, settings, strategies as strat
+from unittest.mock import patch
 
 from tinygrad import nn, dtypes, Device, Tensor, Variable
 from tinygrad.device import is_dtype_supported
@@ -798,19 +799,18 @@ class TestSchedule(unittest.TestCase):
   @unittest.skipIf(Device.DEFAULT != "CL", "image only supported on CL")
   @unittest.expectedFailure
   def test_image_dot_f16_fusion(self):
-    os.environ['FLOAT16'] = '1'
+    with patch.dict(os.environ, {"FLOAT16": "1"}):
+      def cnt():
+        x, y, z = Tensor.empty((64, 64), dtype='float'), Tensor.empty((64, 64), dtype='float'), Tensor.empty((64, 64), dtype='float')
+        a = (x @ y).relu()
+        sched = ((a @ z).relu() + a).schedule()
+        for si in sched: si.lower()
+        return len([si for si in sched if isinstance(si.prg, CompiledRunner)])
 
-    def cnt():
-      x, y, z = Tensor.empty((64, 64), dtype='float'), Tensor.empty((64, 64), dtype='float'), Tensor.empty((64, 64), dtype='float')
-      a = (x @ y).relu()
-      sched = ((a @ z).relu() + a).schedule()
-      for si in sched: si.lower()
-      return len([si for si in sched if isinstance(si.prg, CompiledRunner)])
+      with Context(IMAGE=1): cnt1 = cnt()
+      with Context(IMAGE=2): cnt2 = cnt()
 
-    with Context(IMAGE=1): cnt1 = cnt()
-    with Context(IMAGE=2): cnt2 = cnt()
-
-    self.assertEqual(cnt1, cnt2)
+      self.assertEqual(cnt1, cnt2)
 
   @unittest.skipIf(Device.DEFAULT != "CL", "image only supported on CL")
   @unittest.expectedFailure
