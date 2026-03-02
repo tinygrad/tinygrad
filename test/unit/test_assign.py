@@ -690,7 +690,7 @@ class TestAssignOrdering(unittest.TestCase):
     left = buf[0:4].contiguous()  # lazy - not captured yet
     right = buf[4:8].contiguous()  # lazy - not captured yet
     buf[0:4].assign(right).realize()
-    buf[4:8].assign(left).realize() 
+    buf[4:8].assign(left).realize()
     np.testing.assert_equal(buf.numpy(), [5, 6, 7, 8, 1, 2, 3, 4])
 
     # with .realize() on temps: values captured before writes
