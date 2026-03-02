@@ -225,13 +225,13 @@ class AMDev(PCIDevImplBase):
     self.ih.interrupt_handler()
     self.reg("regSCRATCH_REG6").write(self.is_err_state) # set finalized state.
 
-  def recover(self) -> bool:
-    if not self.is_err_state: return False
-    if DEBUG >= 2: print(f"am {self.devfmt}: Start recovery")
+  def recover(self, force=False) -> bool:
+    if not force and not self.is_err_state: return False
+    if DEBUG >= 3: print(f"am {self.devfmt}: Start recovery")
     self.ih.interrupt_handler()
     self.gfx.reset_mec()
     self.is_err_state = False
-    if DEBUG >= 2: print(f"am {self.devfmt}: Recovery complete")
+    if DEBUG >= 3: print(f"am {self.devfmt}: Recovery complete")
     return True
 
   def is_hive(self) -> bool: return self.gmc.xgmi_seg_sz > 0
@@ -243,14 +243,14 @@ class AMDev(PCIDevImplBase):
   def reg(self, reg:str) -> AMRegister: return self.__dict__[reg]
 
   def rreg(self, reg:int) -> int:
-    val = self.indirect_rreg(reg) if reg > len(self.mmio) else self.mmio[reg]
+    val = self.indirect_rreg(reg) if reg >= len(self.mmio) else self.mmio[reg]
     if AM_DEBUG >= 4 and getattr(self, '_prev_rreg', None) != (reg, val): print(f"am {self.devfmt}: Reading register {reg:#x} with value {val:#x}")
     self._prev_rreg = (reg, val)
     return val
 
   def wreg(self, reg:int, val:int):
     if AM_DEBUG >= 4: print(f"am {self.devfmt}: Writing register {reg:#x} with value {val:#x}")
-    if reg > len(self.mmio): self.indirect_wreg(reg, val)
+    if reg >= len(self.mmio): self.indirect_wreg(reg, val)
     else: self.mmio[reg] = val
 
   def wreg_pair(self, reg_base:str, lo_suffix:str, hi_suffix:str, val:int, inst:int=0):

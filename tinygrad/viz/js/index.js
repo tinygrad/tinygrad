@@ -253,6 +253,14 @@ const Modes = {0:'read', 1:'write', 2:'write+read'};
 function setFocus(key) {
   if (key !== focusedShape) {
     saveToHistory({ shape:focusedShape });
+    // adjust zoom if the entire shape is off screen
+    const { eventType, e } = selectShape(key);
+    if (e != null) {
+      const [x0, x1] = eventType === EventTypes.EXEC ? [e.x, e.x+e.width] : [e.x[0], e.x.at(-1)];
+      const xscale = d3.scaleLinear().domain([data.first, data.dur]).range([0, document.getElementById("timeline").clientWidth]);
+      const [st, et] = xscale.range().map(zoomLevel.invertX, zoomLevel).map(xscale.invert, xscale);
+      if (x1 < st || x0 > et) zoomLevel = d3.zoomIdentity.translate(-xscale((x0+x1)/2-(et-st)/2)*zoomLevel.k, 0).scale(zoomLevel.k);
+    }
     focusedShape = key; d3.select("#timeline").call(canvasZoom.transform, zoomLevel);
   }
   const { eventType, e } = selectShape(key);
@@ -312,7 +320,7 @@ async function renderProfiler(path, unit, opts) {
   const u64 = () => { const ret = new Number(view.getBigUint64(offset, true)); offset += 8; return ret; }
   const f32 = () => { const ret = view.getFloat32(offset, true); offset += 4; return ret; }
   const optional = (i) => i === 0 ? null : i-1;
-  const dur = u32(), tracePeak = u64(), indexLen = u32(), layoutsLen = u32();
+  const dur = u32(), tracePeak = u64(), indexLen = u32(), layoutsLen = u32(); data.dur = dur;
   const textDecoder = new TextDecoder("utf-8");
   const { strings, dtypeSize, markers }  = JSON.parse(textDecoder.decode(new Uint8Array(buf, offset, indexLen))); offset += indexLen;
   // place devices on the y axis and set vertical positions
@@ -1050,13 +1058,15 @@ document.addEventListener("keydown", (event) => {
     if (expandSteps && getSubrewrites(step).length) return step.children[0].click();
     return setState({ expandSteps:!expandSteps });
   }
-  // left and right go through rewrites in a single UOp
-  if (event.key == "ArrowLeft") {
+  // left and right go through rewrites in a single UOp, in profiler go forward/backward in time
+  if (event.key == "ArrowLeft" || event.key == "ArrowRight") {
     event.preventDefault()
-    return setState({ currentRewrite:Math.max(0, currentRewrite-1) });
-  }
-  if (event.key == "ArrowRight") {
-    event.preventDefault()
+    if (profiler.style.display !== "none" && focusedShape != null) {
+      const [t, idx] = focusedShape.split("-");
+      const i = parseInt(idx), last = data.tracks.get(t).shapes.length-1;
+      return setFocus(`${t}-${event.key == "ArrowLeft" ? Math.max(0, i-1) : Math.min(last, i+1)}`);
+    }
+    if (event.key == "ArrowLeft") return setState({ currentRewrite:Math.max(0, currentRewrite-1) });
     const totalRewrites = ret.length-1;
     return setState({ currentRewrite:Math.min(totalRewrites, currentRewrite+1) });
   }
