@@ -76,6 +76,9 @@ def contiguous_mops_to_view(c:UOp):
   if buf.op not in {Ops.BUFFER, Ops.BUFFER_VIEW}: return None
   if src.op is Ops.RESHAPE and src.src[0].op in {Ops.BUFFER, Ops.BUFFER_VIEW}: return None
 
+  # no symbolic shape
+  if not all(isinstance(x, int) for x in c.shape): return None
+
   # check if view is supported
   if not isinstance(c.device, str): return None
   from tinygrad.device import Device
