@@ -116,8 +116,7 @@ def lower_schedule_to_linear(big_sink:UOp) -> UOp|None:
   else:
     # schedule cache hit
     linear = sc_ret
-  #if (DEBUG >= 1 and len(linear.src) > 1) or DEBUG >= 3:
-  if DEBUG >= 1:
+  if (DEBUG >= 1 and len(linear.src) > 1) or DEBUG >= 3:
     for frm in inspect.stack():
       if frm.filename == "<string>": continue
       if frm.filename.startswith(str(BASEDIR / "apps")): break

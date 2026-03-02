@@ -21,7 +21,7 @@ class TestLinearizer(unittest.TestCase):
     # without contiguous folding, rand.to("CPU") and rand.contiguous().to("CPU") are different UOps.
     # this test asserts they are the identical Buffer
     # having different buffers is fine for correctness, because the outputs match.
-    a, b = Tensor.randn(4).realize(), Tensor.randn(4).realize()
+    a, b = Tensor.randn(2,2).realize().permute(1,0).flatten(), Tensor.randn(2,2).realize().permute(1,0).flatten()
     np_a, np_b = a.numpy(), b.numpy()
     c = ((a.shrink(((0, 2),)) - a.shrink(((2, 4),))) - (b.shrink(((0, 2),)) - b.shrink(((2, 4),))))
     sched = c.schedule()
