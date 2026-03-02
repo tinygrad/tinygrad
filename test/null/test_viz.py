@@ -357,34 +357,9 @@ class TestVizIntegration(BaseTestViz):
 
 from tinygrad.device import ProfileDeviceEvent, ProfileGraphEvent, ProfileGraphEntry
 from tinygrad.viz.serve import get_profile
+from extra.viz.cli import decode_profile
 
-# 0 means None, otherwise it's an enum value
-def option(i:int) -> int|None: return None if i == 0 else i-1
-
-def load_profile(lst:list[ProfileEvent]) -> dict:
-  ret, off = get_profile(lst), 0
-  def u(fmt:str) -> tuple:
-    nonlocal off
-    vals = struct.unpack_from(fmt, ret, off); off += struct.calcsize(fmt)
-    return vals
-  total_dur, global_peak, index_len, layout_len = u("<IQII")
-  strings, dtypes, markers = json.loads(ret[off:off+index_len]).values(); off += index_len
-  layout:dict[str, dict] = {}
-  for _ in range(layout_len):
-    klen = u("<B")[0]; k = ret[off:off+klen].decode(); off += klen
-    layout[k] = v = {"events":[]}
-    event_type, event_count = u("<BI")
-    if event_type == 0:
-      for _ in range(event_count):
-        name, ref, key, st, dur, fmt = u("<IIIIfI")
-        v["events"].append({"name":strings[name], "ref":option(ref), "key":option(key), "st":st, "dur":dur, "fmt":strings[fmt]})
-    else:
-      v["peak"] = u("<Q")[0]
-      for _ in range(event_count):
-        alloc, ts, key = u("<BII")
-        if alloc: v["events"].append({"event":"alloc", "ts":ts, "key":key, "arg": {"dtype":strings[u("<I")[0]], "sz":u("<Q")[0]}})
-        else: v["events"].append({"event":"free", "ts":ts, "key":key, "arg": {"users":[u("<IIIB") for _ in range(u("<I")[0])]}})
-  return {"dur":total_dur, "peak":global_peak, "layout":layout, "markers":markers}
+def load_profile(lst:list[ProfileEvent]) -> dict: return decode_profile(get_profile(lst))
 
 class TestVizProfiler(BaseTestViz):
   def test_transfer_uses_copy_device(self):

@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 import os
 os.environ["VIZ"] = "0"
-import argparse, pathlib, sys
+import argparse, pathlib, sys, struct, json
 from typing import Iterator
 from tinygrad.viz import serve as viz
 from tinygrad.uop.ops import RewriteTrace
-from tinygrad.helpers import temp, ansistrip, colored, time_to_str, ansilen
-from test.null.test_viz import load_profile
+from tinygrad.helpers import temp, ansistrip, colored, time_to_str, ansilen, ProfileEvent
+
+# ** generic helpers
 
 def optional_eq(val:dict, arg:str|None) -> bool: return arg is None or ansistrip(val["name"]) == arg
 
@@ -19,6 +20,36 @@ def print_data(data:dict) -> None:
         print(f"Rewrite at {loc.parent.name}/{loc.name}:{m['upat'][0][1]}\n{m['upat'][1]}")
         for line in m["diff"]: print(colored(line, "red" if line.startswith("-") else "green" if line.startswith("+") else None))
   if data.get("src") is not None: print(data["src"])
+
+# ** Profiler trace unpcker
+
+# 0 means None, otherwise it's an enum value
+def option(i:int) -> int|None: return None if i == 0 else i-1
+
+def decode_profile(data:bytes) -> dict:
+  ret, off = data, 0
+  def u(fmt:str) -> tuple:
+    nonlocal off
+    vals = struct.unpack_from(fmt, ret, off); off += struct.calcsize(fmt)
+    return vals
+  total_dur, global_peak, index_len, layout_len = u("<IQII")
+  strings, dtypes, markers = json.loads(ret[off:off+index_len]).values(); off += index_len
+  layout:dict[str, dict] = {}
+  for _ in range(layout_len):
+    klen = u("<B")[0]; k = ret[off:off+klen].decode(); off += klen
+    layout[k] = v = {"events":[]}
+    event_type, event_count = u("<BI")
+    if event_type == 0:
+      for _ in range(event_count):
+        name, ref, key, st, dur, fmt = u("<IIIIfI")
+        v["events"].append({"name":strings[name], "ref":option(ref), "key":option(key), "st":st, "dur":dur, "fmt":strings[fmt]})
+    else:
+      v["peak"] = u("<Q")[0]
+      for _ in range(event_count):
+        alloc, ts, key = u("<BII")
+        if alloc: v["events"].append({"event":"alloc", "ts":ts, "key":key, "arg": {"dtype":strings[u("<I")[0]], "sz":u("<Q")[0]}})
+        else: v["events"].append({"event":"free", "ts":ts, "key":key, "arg": {"users":[u("<IIIB") for _ in range(u("<I")[0])]}})
+  return {"dur":total_dur, "peak":global_peak, "layout":layout, "markers":markers}
 
 if __name__ == "__main__":
   parser = argparse.ArgumentParser()
@@ -47,7 +78,7 @@ if __name__ == "__main__":
 
   if args.profile:
     from tabulate import tabulate
-    profile = load_profile(viz.load_pickle(args.profile_path, default=[]))
+    profile = decode_profile(viz.get_profile(viz.load_pickle(args.profile_path, default=[])))
     agg, total, n = {}, 0, 0
     if args.device is None: print("Select a device:")
     for k,v in profile["layout"].items():
