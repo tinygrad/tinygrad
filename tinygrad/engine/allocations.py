@@ -59,6 +59,14 @@ def replace_assign_with_contig(u:UOp):
   while assigned_to.op in {Ops.ASSIGN, Ops.BITCAST, Ops.AFTER}: assigned_to = assigned_to.src[0].base
   if assigned_to.op not in {Ops.BUFFER, Ops.BUFFER_VIEW}:
     return u.src[1].contiguous(tag=u.tag)
+  # if target is BUFFER_VIEW, check if source base is an overlapping BUFFER_VIEW of the same buffer — force source contiguous to avoid WAR hazard
+  if assigned_to.op is Ops.BUFFER_VIEW:
+    source_base = u.src[1].base
+    if source_base.op is Ops.BUFFER_VIEW and source_base.src[0] is assigned_to.src[0]:
+      t_size, t_off = assigned_to.arg
+      s_size, s_off = source_base.arg
+      if s_off < t_off + t_size and t_off < s_off + s_size:
+        return u.src[0].assign(u.src[1].contiguous()).rtag(u.tag)
 
 def found_contiguous(ctx:dict[UOp, UOp], contig:UOp, src:UOp):
   x = src

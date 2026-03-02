@@ -458,13 +458,12 @@ class TestAssign(unittest.TestCase):
     np.testing.assert_allclose(a.numpy(), expected)
 
   def test_nonoverlapping_shrink_assignment(self):
-    # TODO: non-overlapping shrinks don't actually need contiguous, could be 1 kernel with smarter range analysis
     a = Tensor.arange(100).float().contiguous().realize()
     expected = np.arange(100, dtype=np.float32)
     expected[0:10] = expected[50:60].copy()
     GlobalCounters.reset()
     a[0:10].assign(a[50:60]).realize()
-    self.assertEqual(GlobalCounters.kernel_count, 2)  # currently conservative, forces contiguous
+    self.assertEqual(GlobalCounters.kernel_count, 1)  # non-overlapping BUFFER_VIEWs don't need contiguous
     np.testing.assert_allclose(a.numpy(), expected)
 
   @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
