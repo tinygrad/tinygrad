@@ -304,11 +304,11 @@ function setFocus(key) {
   if (data.pcToShape.size > 0 && instList == null) {
     let contents = "";
     for (const [k, v] of data.pcToShape) {
-      contents += `<div class="row" data-k="${k}"><span class="left" id="inst-${k}"><span class="num">${v.wave}</span>
-        <span class="pc">${"0x"+v.pc.toString(16)}</span></span><span class="label">${data.pcMap[v.pc]}</span></div>`;
+      contents += `<div class="line" data-k="${k}"><span class="left" id="inst-${k}"><span class="num">${v.wave}</span>
+        <span class="pc">${"0x"+v.pc.toString(16).padStart(12, "0")}</span></span><span class="label">${data.pcMap[v.pc]}</span></div>`;
     }
     instList = d3.create("pre").append("code").classed("hljs", true).style("margin-top", "20px").attr("id", "insts").html(contents)
-      .on("click", e => { const row = e.target.closest(".row"); row && setFocus(row.dataset.k); }).node()
+      .on("click", e => { const line = e.target.closest(".line"); line && setFocus(line.dataset.k); }).node();
     metadata.insertBefore(instList.parentElement, html.node());
   }
   d3.select(instList).selectAll("span").classed("highlight", false);
