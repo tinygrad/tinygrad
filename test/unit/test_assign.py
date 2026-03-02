@@ -823,10 +823,9 @@ class TestAssignToUnrealizedView(unittest.TestCase):
   def test_contiguous_backward(self):
     t = Tensor([[1,2],[3,4]]).contiguous().realize()
     cb = t.contiguous_backward()  # unrealized CONTIGUOUS_BACKWARD
-    self.assertIs(cb.uop.base.op, Ops.CONTIGUOUS_BACKWARD)
+    self.assertIs(cb.uop.base.op, Ops.BUFFER)
     cb[:, 1:2].assign(Tensor.ones(2,1, dtype=dtypes.int).contiguous().realize())
-    # TODO: should be [[1,1],[3,1]]
-    self.assertEqual(cb.tolist(), [[1,2],[3,4]])
+    self.assertEqual(cb.tolist(), [[1,1],[3,1]])
 
   def test_detach_copy(self):
     t = Tensor.zeros(2,2, dtype=dtypes.int).to("CPU:0").contiguous().realize()
