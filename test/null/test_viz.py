@@ -358,27 +358,20 @@ class TestVizIntegration(BaseTestViz):
 from tinygrad.device import ProfileDeviceEvent, ProfileGraphEvent, ProfileGraphEntry
 from tinygrad.viz.serve import get_profile
 
-class TinyUnpacker:
-  def __init__(self, buf): self.buf, self.offset = buf, 0
-  def __call__(self, fmt:str) -> tuple:
-    ret = struct.unpack_from(fmt, self.buf, self.offset)
-    self.offset += struct.calcsize(fmt)
-    return ret
-
 # 0 means None, otherwise it's an enum value
 def option(i:int) -> int|None: return None if i == 0 else i-1
 
 def load_profile(lst:list[ProfileEvent]) -> dict:
-  ret = get_profile(lst)
-  u = TinyUnpacker(ret)
+  ret, off = get_profile(lst), 0
+  def u(fmt:str) -> tuple:
+    nonlocal off
+    vals = struct.unpack_from(fmt, ret, off); off += struct.calcsize(fmt)
+    return vals
   total_dur, global_peak, index_len, layout_len = u("<IQII")
-  strings, dtypes, markers = json.loads(ret[u.offset:u.offset+index_len]).values()
-  u.offset += index_len
+  strings, dtypes, markers = json.loads(ret[off:off+index_len]).values(); off += index_len
   layout:dict[str, dict] = {}
   for _ in range(layout_len):
-    klen = u("<B")[0]
-    k = ret[u.offset:u.offset+klen].decode()
-    u.offset += klen
+    klen = u("<B")[0]; k = ret[off:off+klen].decode(); off += klen
     layout[k] = v = {"events":[]}
     event_type, event_count = u("<BI")
     if event_type == 0:
