@@ -140,7 +140,7 @@ class TestTensorVariable(unittest.TestCase):
     t = Variable("t", 1, 10).bind(4)
     for start_pos in (0, 1, 3):
       var_start_pos = Variable("start_pos", 0, 5).bind(start_pos)
-      mask = Tensor.full((1, 1, t, start_pos+t), float("-inf")).triu(var_start_pos+1)
+      mask = Tensor.full((1, 1, t, var_start_pos+t), float("-inf")).triu(var_start_pos+1)
       out = mask.shrink(((0, 1), (0, 1), (0, 4), (0, start_pos+4))).numpy()
       expected = np.triu(np.full((1, 1, 4, start_pos+4), float("-inf")), k=start_pos+1)
       np.testing.assert_equal(out, expected)
@@ -149,7 +149,7 @@ class TestTensorVariable(unittest.TestCase):
     t = Variable("t", 1, 10).bind(4)
     for start_pos in (0, 1, 3):
       var_start_pos = Variable("start_pos", 0, 5).bind(start_pos)
-      mask = Tensor.full((1, 1, t, start_pos+t), float("-inf")).tril(var_start_pos+1)
+      mask = Tensor.full((1, 1, t, var_start_pos+t), float("-inf")).tril(var_start_pos+1)
       out = mask.shrink(((0, 1), (0, 1), (0, 4), (0, start_pos+4))).numpy()
       expected = np.tril(np.full((1, 1, 4, start_pos+4), float("-inf")), k=start_pos+1)
       np.testing.assert_equal(out, expected)
