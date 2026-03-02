@@ -8,7 +8,7 @@ from tinygrad.uop.ops import RewriteTrace
 from tinygrad.helpers import temp, ansistrip, colored, time_to_str, ansilen
 from test.null.test_viz import load_profile
 
-def optional_eq(val:dict, arg:str|None) -> bool: return arg is None or ansistrip(val["name"]).lower() == arg
+def optional_eq(val:dict, arg:str|None) -> bool: return arg is None or ansistrip(val["name"]) == arg
 
 def print_data(data:dict) -> None:
   if isinstance(data.get("value"), Iterator):
@@ -57,7 +57,7 @@ if __name__ == "__main__":
       for e in v.get("events", []):
         et = e["dur"]*1e-6
         if args.kernel is not None:
-          if ansistrip(e["name"]) == args.kernel and n < 10:
+          if optional_eq(e, args.kernel) and n < 10:
             ptm = colored(time_to_str(et, w=9), "yellow" if et > 0.01 else None) if et is not None else ""
             name = e["name"]+(" " * (46 - ansilen(e["name"])))
             print(f"{name} {ptm}/{(et or 0)*1e3:9.2f}ms  "+e['fmt'].replace('\n', ' | ')+"  ")
