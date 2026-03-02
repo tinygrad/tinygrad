@@ -307,8 +307,8 @@ function setFocus(key) {
     for (const [k, v] of data.pcToShape) {
       const line = code.append("div").style("display", "flex").style("gap", "8px").style("cursor", "pointer").on("click", (e) => setFocus(k));
       const left = line.append("span").style("display", "flex").style("gap", "4px").attr("id", `inst-${k}`);
-      left.append("span").attr("class", "num").text(k.split("-")[0].split(":")[1]);
-      left.append("span").attr("class", "pc").text("0x"+parseInt(v.pc).toString(16));
+      left.append("span").attr("class", "num").text(v.wave);
+      left.append("span").attr("class", "pc").text("0x"+v.pc.toString(16));
       line.append("span").text(data.pcMap[v.pc]);
     }
   }
@@ -418,7 +418,7 @@ async function renderProfiler(path, unit, opts) {
         const key = k.startsWith("TINY") ? null : `${k}-${j}`;
         const labelHTML = label.map(l=>`<span style="color:${l.color}">${l.st}</span>`).join("");
         let info = e.info != null ? "\n"+e.info : "";
-        if (info.startsWith("\nPC:")) data.pcToShape.set(key, {pc:e.info.split(":")[1], st:e.st}); info = "";
+        if (info.startsWith("\nPC:")) data.pcToShape.set(key, {wave:k.split("-")[0].split(":")[1], pc:parseInt(e.info.split(":")[1]), st:e.st}); info = "";
         const arg = { tooltipText:labelHTML+" N:"+shapes.length+"\n"+formatTime(e.dur)+info, bufs:[], key, ctx:shapeRef?.ctx, step:shapeRef?.step };
         if (e.key != null) shapeMap.set(e.key, key);
         // offset y by depth
