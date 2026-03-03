@@ -86,7 +86,7 @@ class TestMultiRamUsage(unittest.TestCase):
 
   def test_sharded_memory_replicated_per_device(self):
     devices_4 = tuple(f"NULL:{i+1}" for i in range(4))
-    X = Tensor.ones(256).contiguous().realize()
+    X = Tensor.ones(256, device="NULL").contiguous().realize()
     self.assertDeviceUsed({"NULL": 256*4})
     X.shard_(devices_4).realize()
     for d in devices_4:
