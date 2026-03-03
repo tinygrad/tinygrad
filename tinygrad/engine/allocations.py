@@ -65,7 +65,6 @@ def found_contiguous(ctx:dict[UOp, UOp], contig:UOp, src:UOp):
   while x is not src.base:
     if x.op is Ops.PERMUTE: contig = contig.permute(argsort(x.marg))
     elif x.op is Ops.RESHAPE: contig = contig.reshape(x.src[0].shape)
-    elif x.op is Ops.PAD: contig = contig.shrink(tuple((l, s-r) for (l,r),s in zip(x.marg, x.shape)))
     else: return None
     x = x.src[0]
   ctx[src.base] = contig
