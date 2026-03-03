@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field
 from tinygrad.uop.ops import UOp, UPat, PatternMatcher, Ops, GroupOp, graph_rewrite, identity_element, track_rewrites
 from tinygrad.dtype import dtypes, ImageDType
-from tinygrad.helpers import prod, DEBUG, argsort, VIZ, pluralize, IMAGE, FLOAT16
+from tinygrad.helpers import prod, DEBUG, argsort, VIZ, pluralize, FLOAT16
 
 @dataclass
 class AllocCtx:
