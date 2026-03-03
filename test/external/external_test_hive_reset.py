@@ -2,8 +2,9 @@
 import subprocess, sys
 from tinygrad.helpers import getenv
 
-LOOPS = getenv("LOOPS", 10)
+LOOPS = getenv("LOOPS", 50)
 BROKEN = getenv("BROKEN", 0)
+ONLY_RESET = getenv("ONLY_RESET", 0)
 
 BROKEN_KERNEL_SCRIPT = """
 from tinygrad.device import Device
@@ -36,7 +37,7 @@ for i in range(LOOPS):
     print(f"=== Running broken kernel ({i+1}/{LOOPS}) ===")
     ret = subprocess.run([sys.executable, "-c", BROKEN_KERNEL_SCRIPT])
     print(f"=== broken kernel exited with code {ret.returncode} ===")
-
-  print(f"=== Running test_tiny.py ({i+1}/{LOOPS}) ===")
-  ret = subprocess.run([sys.executable, "test/test_tiny.py", "TestTiny.test_plus"])
-  print(f"=== test_tiny.py exited with code {ret.returncode} ===")
+  elif not ONLY_RESET:
+    print(f"=== Running test_tiny.py ({i+1}/{LOOPS}) ===")
+    ret = subprocess.run([sys.executable, "test/test_tiny.py", "TestTiny.test_plus"])
+    print(f"=== test_tiny.py exited with code {ret.returncode} ===")

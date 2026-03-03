@@ -9,6 +9,7 @@ EXAMPLES = [
   "test/backend/test_custom_kernel.py TestCustomKernel.test_empty",
   "test/test_tiny.py TestTiny.test_plus",
   "test/test_tiny.py TestTiny.test_gemm",
+  "extra/sqtt/examples/discover_ops.py"
 ]
 
 if __name__ == "__main__":

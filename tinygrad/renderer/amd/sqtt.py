@@ -46,6 +46,7 @@ class InstOp(Enum):
   SMEM = 0x1
   JUMP = 0x3              # branch taken
   JUMP_NO = 0x4           # branch not taken
+  CALL = 0x5              # s_call_b64
   MESSAGE = 0x9
   VALU_TRANS = 0xb        # transcendental: exp, log, rcp, sqrt, sin, cos
   VALU_64_SHIFT = 0xd     # 64-bit shifts: lshl, lshr, ashr
@@ -72,8 +73,10 @@ class InstOp(Enum):
 
   # LDS ops on traced SIMD
   LDS_LOAD = 0x29
+  LDS_ATOMIC = 0x2a        # ds_append, ds_consume, ds_store_addtid_b32
   LDS_STORE = 0x2b
   LDS_STORE_64 = 0x2c
+  LDS_STORE_96 = 0x2d
   LDS_STORE_128 = 0x2e
 
   # Memory ops on other SIMD (0x5x range)
@@ -99,17 +102,27 @@ class InstOp(Enum):
 
 class InstOpRDNA4(Enum):
   """SQTT instruction operation types for RDNA4 (gfx1200). Different encoding from RDNA3."""
-  # TODO: we need to do discovery of all of these from instructions
   SALU = 0x0
   JUMP = 0x1
   NEXT = 0x2
   MESSAGE = 0x4
+  VALU_TRANS = 0x5
   VALU_64 = 0x6
+  VALU_MAD64 = 0x7
+  VINTERP = 0x9
   VALU_WMMA = 0x46
   VMEM = 0x10
   VMEM_128 = 0x11
   VMEM_STORE = 0x12
-  VMEM_STORE_128 = 0x14
+  VMEM_STORE_G96 = 0x13   # global_store_[b96,b128]
+  LDS_LOAD = 0x14
+  LDS_STORE = 0x15
+  LDS_STORE_64 = 0x16
+  LDS_STORE_128 = 0x17
+  VALU_F64 = 0x49
+  SALU_TRANS = 0x4c       # transcendental with sgpr src/dst
+  SALU_MUL = 0x4d         # s_[mul,mulhi,mulk]
+  SALU_MUL64 = 0x4e
   OTHER_VMEM = 0x5e
   OTHER_VMEM_STORE = 0x60
 
@@ -146,11 +159,6 @@ class TS_DELTA_S8_W3(PacketType):
   encoding = bits[6:0] == 0b0100001
   delta = bits[10:8]
   _padding = bits[63:11]
-
-class TS_DELTA_S8_W3_RDNA4(PacketType):  # Layout 4: 64->72 bits
-  encoding = bits[6:0] == 0b0100001
-  delta = bits[10:8]
-  _padding = bits[71:11]
 
 class TS_DELTA_S5_W3(PacketType):
   encoding = bits[4:0] == 0b00110
@@ -363,7 +371,7 @@ PACKET_TYPES_RDNA3: dict[int, type[PacketType]] = {
 }
 PACKET_TYPES_RDNA4: dict[int, type[PacketType]] = {
   **PACKET_TYPES_RDNA3,
-  7: TS_DELTA_S8_W3_RDNA4, 9: WAVESTART_RDNA4, 10: TS_DELTA_S5_W2_RDNA4, 11: WAVEALLOC_RDNA4,
+  9: WAVESTART_RDNA4, 10: TS_DELTA_S5_W2_RDNA4, 11: WAVEALLOC_RDNA4,
   12: TS_DELTA_S5_W3_RDNA4, 13: PERF_RDNA4, 22: TS_DELTA_OR_MARK_RDNA4, 24: INST_RDNA4,
 }
 
@@ -536,8 +544,9 @@ def decode(data: bytes) -> Iterator[PacketType]:
     if nib_off: reg, pos = (reg >> 4) | ((data[pos] >> 4) << 60), pos + 1
     # 2. read all full bytes at once
     if (byte_count := need >> 1):
-      chunk = int.from_bytes(data[pos:pos + byte_count], 'little')
-      reg, pos = (reg >> (byte_count * 8)) | (chunk << (64 - byte_count * 8)), pos + byte_count
+      read_bytes = min(byte_count, 8)
+      chunk = int.from_bytes(data[pos:pos + read_bytes], 'little')
+      reg, pos = (reg >> (read_bytes * 8)) | (chunk << (64 - read_bytes * 8)), pos + byte_count
     # 3. if odd, read low nibble
     if (nib_off := need & 1): reg = (reg >> 4) | ((data[pos] & 0xF) << 60)
 
@@ -666,8 +675,9 @@ def print_packets(packets) -> None:
   from tinygrad.helpers import getenv
   skip = {"NOP", "TS_DELTA_SHORT", "TS_WAVE_STATE", "TS_DELTA_OR_MARK",
           "TS_DELTA_S5_W2", "TS_DELTA_S5_W3", "TS_DELTA_S8_W3", "REG", "EVENT"} if not getenv("NOSKIP") else {"NOP"}
-  for p in packets:
-    if type(p).__name__.replace("_RDNA4", "") not in skip: print(format_packet(p))
+  for data in packets:
+    p, inst = data if isinstance(data, tuple) else (data, None)
+    if type(p).__name__.replace("_RDNA4", "") not in skip: print(format_packet(p), f"inst={inst.inst}" if inst is not None else '')
 
 if __name__ == "__main__":
   import sys, pickle
@@ -676,8 +686,10 @@ if __name__ == "__main__":
     sys.exit(1)
   with open(sys.argv[1], "rb") as f:
     data = pickle.load(f)
-  prg_names = {e.tag: e.name for e in data if type(e).__name__ == "ProfileProgramEvent" and e.tag is not None}
+  prg_events = {e.tag: e for e in data if type(e).__name__ == "ProfileProgramEvent" and e.tag is not None}
   sqtt_events = [e for e in data if type(e).__name__ == "ProfileSQTTEvent"]
+  dev_targets = {e.device:f"gfx{e.props['gfx_target_version']//1000}" for e in data if type(e).__name__ == "ProfileDeviceEvent" and e.props}
   for i, event in enumerate(sqtt_events):
-    print(f"\n=== event {i} {prg_names.get(event.kern, '')} ===")
-    print_packets(decode(event.blob))
+    prg = prg_events.get(event.kern)
+    print(f"\n=== event {i} {prg.name if prg is not None else ''} ===")
+    print_packets(map_insts(event.blob, prg.lib, dev_targets[prg.device]) if prg is not None else decode(event.blob))
