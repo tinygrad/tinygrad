@@ -300,7 +300,7 @@ class AM_GFX(AM_IP):
     self._config_mec()
     self._enable_mec()
 
-  def setup_ring(self, ring_addr:int, ring_size:int, rptr_addr:int, wptr_addr:int, eop_addr:int, eop_size:int, idx:int, aql:bool) -> tuple[int, int]:
+  def setup_ring(self, ring_addr:int, ring_size:int, rptr_addr:int, wptr_addr:int, eop_addr:int, eop_size:int, idx:int, aql:bool) -> int:
     pipe, queue, doorbell = idx // 4, idx % 4, am.AMDGPU_NAVI10_DOORBELL_MEC_RING0
 
     for xcc in range(self.xccs if aql else 1):
@@ -332,7 +332,7 @@ class AM_GFX(AM_IP):
 
       self.adev.gmc.flush_hdp()
       self._grbm_select(inst=xcc)
-    return 0, doorbell
+    return doorbell
 
   def set_clockgating_state(self):
     if hasattr(self.adev, 'regMM_ATC_L2_MISC_CG'): self.adev.regMM_ATC_L2_MISC_CG.write(enable=1, mem_ls_enable=1)
@@ -515,7 +515,7 @@ class AM_SDMA(AM_IP):
       time.sleep(0.01)
       self.adev.regGRBM_SOFT_RESET.write(0x0)
 
-  def setup_ring(self, ring_addr:int, ring_size:int, rptr_addr:int, wptr_addr:int, idx:int) -> tuple[int, int]:
+  def setup_ring(self, ring_addr:int, ring_size:int, rptr_addr:int, wptr_addr:int, idx:int) -> int:
     pipe, queue = idx // 4, idx % 4
     reg, inst = ("regSDMA_GFX", pipe+queue*4) if self.adev.ip_ver[am.SDMA0_HWIP][:2] == (4,4) else (f"regSDMA{pipe}_QUEUE{queue}", 0)
     doorbell = am.AMDGPU_NAVI10_DOORBELL_sDMA_ENGINE0 + (pipe+queue*4) * 0xA
@@ -533,7 +533,7 @@ class AM_SDMA(AM_IP):
     self.adev.reg(f"{reg}_RB_CNTL").write(**({f'{self.sdma_name.lower()}_wptr_poll_enable':1} if self.adev.ip_ver[am.SDMA0_HWIP][:2]!=(4,4) else {}),
       rb_vmid=0, rptr_writeback_enable=1, rptr_writeback_timer=4, rb_enable=1, rb_priv=1, rb_size=(ring_size//4).bit_length()-1, inst=inst)
     self.adev.reg(f"{reg}_IB_CNTL").update(ib_enable=1, inst=inst)
-    return 0, doorbell
+    return doorbell
 
 class AM_PSP(AM_IP):
   def init_sw(self):
