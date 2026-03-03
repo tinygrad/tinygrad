@@ -21,6 +21,8 @@ class function(Generic[ReturnType]):
     self.fxn = fxn
     self.precompile = precompile
 
+  def __get__(self, obj, objtype=None): return functools.partial(self.__call__, obj) if obj is not None else self
+
   def __call__(self, *args, **kwargs) -> ReturnType:
     # support @function(precompile=True) syntax: when fxn is not yet set, the first call provides it
     if self.fxn is None:
@@ -62,6 +64,3 @@ class function(Generic[ReturnType]):
 
     ret = uret.call(*call_uops, name=name, precompile=self.precompile)
     return cast(ReturnType, Tensor(ret, device=ret.device))
-
-  def __get__(self, obj, objtype=None): return functools.partial(self.__call__, obj) if obj is not None else self
-
