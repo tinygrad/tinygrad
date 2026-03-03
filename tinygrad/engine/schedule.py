@@ -120,7 +120,7 @@ def lower_schedule_to_linear(big_sink:UOp) -> UOp|None:
     print(f"scheduled {len(linear.src):5d} kernels in {(time.perf_counter()-st)*1000:8.2f} ms"+\
           f" | {' cache hit' if SCACHE and sc_ret is not None else 'CACHE MISS'} {function.key.hex()[:8]}"+\
           f" | {len(UOpMetaClass.ucache):7d} uops in cache"+("" if frm is None else f" | {frm.filename}:{frm.lineno}"))
-  return graph_rewrite(linear, pm_post_sched_cache, ctx=({}, big_sink.src[1:]), walk=True, name="params to buffers")
+  return big_sink.replace(src=(linear,)+big_sink.src[1:])
 
 pm_schedule = PatternMatcher([
   (UPat(Ops.CALL, src=(UPat(Ops.SINK),), allow_any_len=True, name="big_sink"), lower_schedule_to_linear),
@@ -129,7 +129,9 @@ pm_schedule = PatternMatcher([
 @track_rewrites(lambda _,ret: f"Schedule {pluralize('Kernel', len(ret[0]))}")
 def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[list[ExecItem], dict[str, int]]:
   # big_sink srcs are all the Tensors
-  linear = graph_rewrite(big_sink, pm_schedule, name="schedule to linear")
+  linear_call = graph_rewrite(big_sink, pm_schedule, name="schedule to linear")
+  linear = graph_rewrite(linear_call.src[0], pm_post_sched_cache,
+                         ctx=({}, linear_call.src[1:]), walk=True, name="params to buffers")
 
   # vars used in the schedule
   used_vars = set().union(*[{v.expr for v in si.src[0].variables()} for si in linear.src])
