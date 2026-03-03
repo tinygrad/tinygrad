@@ -256,7 +256,6 @@ jobs:
       uses: ./.github/actions/setup-tinygrad
       with:
         key: null-schedule
-        deps: testing_unit
     - name: Run NULL backend tests
       run: NULL=1 python -m pytest -n=auto test/null/ --durations=20
     - name: Run targetted tests on NULL backend
