@@ -24,7 +24,7 @@ def rocprof_inst_traces_match(sqtt, prg, target, pass_rocprof_err=False):
 
   passed_insts = 0
   for pkt, info in map_insts(sqtt.blob, prg.lib, target):
-    if DEBUG >= 2: print_packets([pkt])
+    if DEBUG >= 2: print_packets([(pkt, info)])
     if info is None: continue
     if DEBUG >= 2: print(f"{' '*29}{disasm(info.inst)}")
     rocprof_inst = next(rwaves_iter[info.wave][0])

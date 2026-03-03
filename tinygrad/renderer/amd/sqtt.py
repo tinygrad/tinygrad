@@ -630,8 +630,8 @@ def map_insts(data:bytes, lib:bytes, target:str) -> Iterator[tuple[PacketType, I
       # identify a branch instruction, only used for asserts
       branch_inst = inst if "BRANCH" in inst_op else None
       if branch_inst is not None:
-        assert isinstance(p, (INST, INST_RDNA4)) and "JUMP" in p.op.name, f"branch can only be followed by JUMP, got {p}"
-      # JUMP handling (branch taken)
+        assert isinstance(p, (INST, INST_RDNA4)) and p.op.name in {"JUMP_NO", "JUMP", "JUMP_UNCOND"}, f"branch can only be folowed by JUMP, got {p}"
+      # JUMP handling
       if (isinstance(p, INST) and p.op is InstOp.JUMP) or (isinstance(p, INST_RDNA4) and p.op is InstOpRDNA4.JUMP):
         simm16 = getattr(branch_inst, 'simm16')
         assert branch_inst is not None and simm16 is not None, f"JUMP packet must map to a branch instruction, got {inst}"
@@ -661,8 +661,7 @@ def format_packet(p) -> str:
   name = type(p).__name__
   if isinstance(p, (INST, INST_RDNA4)):
     op_name = p.op.name if isinstance(p.op, (InstOp, InstOpRDNA4)) else f"0x{p.op:02x}"
-    fields = f"wave={p.wave} op={op_name}"
-    if isinstance(p, INST): fields += (" flag1" if p.flag1 else "") + (" flag2" if p.flag2 else "")
+    fields = f"wave={p.wave} op={op_name}" + ((" flag1" if p.flag1 else "") + (" flag2" if p.flag2 else "") if isinstance(p, INST) else "")
   elif isinstance(p, VALUINST): fields = f"wave={p.wave}" + (" flag" if p.flag else "")
   elif isinstance(p, ALUEXEC): fields = f"src={p.src.name if isinstance(p.src, AluSrc) else p.src}"
   elif isinstance(p, VMEMEXEC): fields = f"src={p.src.name if isinstance(p.src, MemSrc) else p.src}"
