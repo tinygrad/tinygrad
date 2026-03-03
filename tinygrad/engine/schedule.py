@@ -4,8 +4,9 @@ from collections import deque
 from tinygrad.uop.ops import UOp, Ops, buffers, UOpMetaClass, track_rewrites, graph_rewrite, gate_kernel_sink, KernelInfo
 from tinygrad.uop.spec import type_verify, tensor_spec
 from tinygrad.device import Buffer, MultiBuffer
-from tinygrad.helpers import DEBUG, cpu_profile, TracingKey, SPEC, pluralize, SCACHE, BASEDIR
+from tinygrad.helpers import DEBUG, cpu_profile, TracingKey, SPEC, pluralize, SCACHE, BASEDIR, flatten
 from tinygrad.engine.realize import ExecItem
+from tinygrad.schedule.rangeify import resolve_call
 
 # **** schedule linearizer
 
@@ -22,7 +23,7 @@ def create_schedule(sched_sink:UOp) -> UOp:
     for u in sched_sink.toposort(gate_kernel_sink):
       if u.op is not Ops.AFTER: continue
       k = u.src[1]
-      assert k.op in {Ops.CALL, Ops.END, Ops.LINEAR}, f"AFTER src[1] should be CALL or END, not {k.op}"
+      assert k.op in {Ops.CALL, Ops.END}, f"AFTER src[1] should be CALL or END, not {k.op}"
       in_degree.setdefault(k, 0)
       if k.op is Ops.END: assert k.src[0].op is Ops.CALL, f"END src[0] should be KERNEL, not {k.src[0].op}"
       # WAR deps from rangeify are stored in AFTER src[2:]
@@ -94,6 +95,11 @@ pm_post_sched_cache = PatternMatcher([
   (UPat(Ops.PARAM, name="x"), lambda ctx,x: ctx[1][x.arg]),
   # create new BUFFERs for LUNIQUE BUFFERs from rangeify
   (UPat(Ops.BUFFER, src=(UPat(Ops.LUNIQUE), UPat(Ops.DEVICE)), name="b"), create_new_buffer),
+  # call LINEAR is resolved here
+  (UPat(Ops.CALL, src=(UPat(Ops.LINEAR),), name="c", allow_any_len=True), lambda c: resolve_call(c, allow_shape_mismatch=True)),
+  # LINEAR on LINEAR
+  (UPat(Ops.LINEAR, custom_early_reject={Ops.LINEAR}, name="x"),
+   lambda x: x.replace(src=tuple(flatten(x.src if x.op is Ops.LINEAR else (x,) for x in x.src)))),
 ])
 
 schedule_cache: dict[bytes, UOp] = {}

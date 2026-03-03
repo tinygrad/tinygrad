@@ -108,6 +108,12 @@ class TestCallSchedule(unittest.TestCase):
     def s(x): return x.sum(axis=0)
     (s(a)*3).realize()
 
+  def test_call_precompiled(self):
+    a = Tensor.empty(4, 8)
+    @function(precompile=True)
+    def s(x): return x*2
+    (s(a)*3).realize()
+
   def test_double_call(self):
     a = Tensor.empty(4, 8)
     @function(precompile=True)

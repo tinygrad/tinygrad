@@ -926,8 +926,7 @@ class CallInfo:
 def should_resolve_call(c:UOp) -> bool:
   # don't resolve real kernel calls, sink or program
   if c.src[0].op is Ops.SINK and isinstance(c.src[0].arg, KernelInfo): return False
-  if c.src[0].op is Ops.PROGRAM: return False
-  if c.src[0].op is Ops.COPY: return False
+  if c.src[0].op in {Ops.PROGRAM, Ops.LINEAR, Ops.COPY}: return False
   return True
 
 # ******** ops in python ********
@@ -1416,7 +1415,10 @@ def _index_to_concrete_int(u:UOp) -> UOp: return graph_rewrite(u.sink(), pm_lowe
 _substitute = PatternMatcher([(UPat(tuple(Ops), name="x"), lambda ctx,x: ctx.get(x,None))])
 _remove_all_tags = PatternMatcher([(UPat(GroupOp.All, name="x"), lambda x: x.replace(tag=None) if x.tag is not None else None)])
 
-def gate_kernel_sink(x:UOp) -> bool: return not (x.op is Ops.SINK and isinstance(x.arg, KernelInfo))
+def gate_kernel_sink(x:UOp) -> bool:
+  if x.op is Ops.LINEAR: return False
+  if x.op is Ops.SINK and isinstance(x.arg, KernelInfo): return False
+  return True
 
 def do_unbind(ctx:dict[Variable, int], x:UOp):
   v,i = x.unbind()
