@@ -12,7 +12,7 @@ def b(i, base=None, offset=0, pin=False, size=16):
   return global_map[i]
 
 def check_assign(buffers:list[list[Buffer]|tuple[Buffer, ...]]):
-  assigned = _internal_memory_planner(buffers, noopt_buffers=None)
+  assigned = _internal_memory_planner(buffers, copy_buffers=None)
 
   taken_parts = set()
   first_appearance, last_appearance = {}, {}

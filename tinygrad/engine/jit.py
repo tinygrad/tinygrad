@@ -114,9 +114,9 @@ class GraphRunner(Runner):
           assert ji.prg.p.local_size is not None
           self.launch_dims_base[j] = (tuple(ji.prg.p.global_size), tuple(ji.prg.p.local_size))
 
-    # used in MultiGraphRunner. the ints are id() of _bufs
-    self.w_dependency_map: dict[int, Any] = {}
-    self.r_dependency_map: dict[int, list[Any]] = collections.defaultdict(list)
+    # used in MultiGraphRunner. tracks (offset, end, dep) ranges per base buffer id to handle suballocated buffers correctly.
+    self.w_dependency_map: dict[int, list[tuple[int, int, Any]]] = collections.defaultdict(list)
+    self.r_dependency_map: dict[int, list[tuple[int, int, Any]]] = collections.defaultdict(list)
 
     assert jit_cache[0].prg is not None
     super().__init__(colored(f"<batched {len(jit_cache)}>", "cyan"), jit_cache[0].prg.device.split(":")[0], estimates.simplify())
@@ -134,16 +134,21 @@ class GraphRunner(Runner):
   def _access_resources(self, bufs:list[Buffer], write:list[int], new_dependency:Any):
     # To synchronize access to resources, we monitor the necessary prerequisites for accessing each resource,
     # whether for write or read operations. A resource can be accessed by either a single writer or multiple readers.
+    # Track by (base_buf_id, offset, end) ranges so suballocated buffers from the same global buffer are treated as independent resources.
     wait_nodes = []
 
     for i,buf in enumerate(bufs):
-      if id(buf.base._buf) in self.w_dependency_map: wait_nodes.append(self.w_dependency_map[id(buf.base._buf)])
+      key, s, e = id(buf.base._buf), buf.offset, buf.offset + buf.nbytes
+      wait_nodes += [d for ws,we,d in self.w_dependency_map[key] if ws < e and s < we]
       if i in write:
-        if id(buf.base._buf) in self.r_dependency_map: wait_nodes.extend(self.r_dependency_map.pop(id(buf.base._buf)))
+        wait_nodes += [d for rs,re,d in self.r_dependency_map[key] if rs < e and s < re]
+        self.r_dependency_map[key] = [(rs,re,d) for rs,re,d in self.r_dependency_map[key] if not (rs < e and s < re)]
 
     for i,buf in enumerate(bufs):
-      if i in write: self.w_dependency_map[id(buf.base._buf)] = new_dependency
-      else: self.r_dependency_map[id(buf.base._buf)].append(new_dependency)
+      key, s, e = id(buf.base._buf), buf.offset, buf.offset + buf.nbytes
+      if i in write:
+        self.w_dependency_map[key] = [(ws,we,d) for ws,we,d in self.w_dependency_map[key] if not (ws < e and s < we)] + [(s, e, new_dependency)]
+      else: self.r_dependency_map[key].append((s, e, new_dependency))
 
     return list({id(x):x for x in wait_nodes}.values())
 
@@ -357,9 +362,9 @@ class TinyJit(Generic[ReturnType]):
         jit_cache = pruned
 
       # memory planning (optional)
-      # Exclude buffers involved in transfer ops to preserve parallelism.
-      noopt_buffers = {b for ji in jit_cache if isinstance(ji.prg, (BufferXfer, BufferCopy, EncDec)) for b in ji.bufs}
-      assigned = _internal_memory_planner([cast(list[Buffer], item.bufs) for item in jit_cache], noopt_buffers, debug_prefix="JIT ")
+      # Copy buffers are optimized in a separate lane to preserve parallelism.
+      copy_buffers = {b for ji in jit_cache if isinstance(ji.prg, (BufferXfer, BufferCopy, EncDec)) for b in ji.bufs}
+      assigned = _internal_memory_planner([cast(list[Buffer], item.bufs) for item in jit_cache], copy_buffers, debug_prefix="JIT ")
       jit_cache = [replace(item, bufs=[assigned.get(b,b).ensure_allocated() for b in item.bufs if b is not None]) for item in jit_cache]
 
       input_replace = get_input_replace(jit_cache, input_buffers)

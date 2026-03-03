@@ -9,12 +9,12 @@ from tinygrad.runtime.support.memory import TLSFAllocator
 
 # **************** memory planning ****************
 
-def _internal_memory_planner(buffers:list[list[Buffer]], noopt_buffers=None, ignore_checks=False, debug_prefix="") -> dict[Buffer, Buffer]:
+def _internal_memory_planner(buffers:list[list[Buffer]], copy_buffers=None, ignore_checks=False, debug_prefix="") -> dict[Buffer, Buffer]:
   if NO_MEMORY_PLANNER: return {}
   first_appearance, last_appearance, buf_to_opt = {}, {}, set()
   for i,u in enumerate(buffers):
     for buf in u:
-      should_skip = buf.is_allocated() or buf.base.is_allocated() or buf.uop_refcount > 0 or (noopt_buffers is not None and buf.base in noopt_buffers)
+      should_skip = buf.is_allocated() or buf.base.is_allocated() or buf.uop_refcount > 0
       if not ignore_checks and should_skip: continue
       if buf.base not in first_appearance: first_appearance[buf.base] = i
       last_appearance[buf.base] = i
@@ -27,23 +27,28 @@ def _internal_memory_planner(buffers:list[list[Buffer]], noopt_buffers=None, ign
 
   # Try to suballocate from a shared buffer managed by global_planner using TLSFAllocator.
   # Also track buffer replacements for buffers that do not support suballocation.
+  # Copy buffers are optimized in a separate lane (keyed by is_copy) to preserve exec/copy parallelism.
   buffer_replace:dict[Buffer, tuple[Buffer|None, int|None]] = {}
   reuse_buffers:dict[tuple, list[Buffer]] = defaultdict(list)
-  global_planner:dict[str, tuple[int, TLSFAllocator]] = defaultdict(lambda: (0, TLSFAllocator(total_memory, block_size=min_block_size, lv2_cnt=32)))
+  global_planner:dict[tuple[str,bool], tuple[int, TLSFAllocator]] = defaultdict(lambda: (0, TLSFAllocator(total_memory, block_size=min_block_size, lv2_cnt=32)))
+  buf_gkey:dict[Buffer, tuple[str, bool]] = {}
   for (_, is_open_ev), buf in buffer_requests:
+    is_copy = copy_buffers is not None and buf in copy_buffers
+    gk = (buf.device, is_copy)
     # Check if suballocation is possible for the given buffer and device.
     if hasattr(Device[buf.device].allocator, "_offset") and not isinstance(buf.dtype, ImageDType):
-      if is_open_ev: buffer_replace[buf] = (None, global_planner[buf.device][1].alloc(round_up(buf.nbytes, 0x1000)))
-      else: global_planner[buf.device][1].free(cast(int, buffer_replace[buf][1]))
-      global_planner[buf.device] = (max(global_planner[buf.device][0], buffer_replace[buf][1] + buf.nbytes), global_planner[buf.device][1])
+      if is_open_ev: buffer_replace[buf] = (None, global_planner[gk][1].alloc(round_up(buf.nbytes, 0x1000)))
+      else: global_planner[gk][1].free(cast(int, buffer_replace[buf][1]))
+      global_planner[gk] = (max(global_planner[gk][0], buffer_replace[buf][1] + buf.nbytes), global_planner[gk][1])
+      buf_gkey[buf] = gk
     else:
-      key = (buf.device, buf.dtype, buf.options, buf.nbytes)
+      key = (buf.device, buf.dtype, buf.options, buf.nbytes, is_copy)
       if is_open_ev: buffer_replace[buf] = (reuse_buffers[key].pop(), None) if key in reuse_buffers and len(reuse_buffers[key]) > 0 else (buf, None)
       else: reuse_buffers[key].append(cast(Buffer, buffer_replace[buf][0]))
 
   # Allocate global buffers based on the memory planner.
-  global_buffers = {dev: Buffer(dev, round_up(sz, 0x1000), dtypes.int8) for dev, (sz, _) in global_planner.items()}
-  buffer_resolve:dict[Buffer, tuple[Buffer, int|None]] = {buf: (base or global_buffers[buf.device], off) for buf,(base,off) in buffer_replace.items()}
+  global_buffers = {key: Buffer(key[0], round_up(sz, 0x1000), dtypes.int8) for key, (sz, _) in global_planner.items()}
+  buffer_resolve:dict[Buffer, tuple[Buffer, int|None]] = {buf: (base or global_buffers[buf_gkey[buf]], off) for buf,(base,off) in buffer_replace.items()}
 
   # Assign buffers. First, assign full buffers (not sub-buffers).
   assigned:dict[Buffer, Buffer] = {}
@@ -66,5 +71,5 @@ def _internal_memory_planner(buffers:list[list[Buffer]], noopt_buffers=None, ign
 def memory_planner(schedule:list[ExecItem]) -> list[ExecItem]:
   # Exclude buffers involved in load ops (e.g transfers) to preserve parallelism in graphs.
   assigned = _internal_memory_planner([[b for b in si.bufs if b is not None] for si in schedule],
-                                      noopt_buffers={b for si in schedule if si.ast.op is not Ops.SINK for b in si.bufs if b is not None})
+                                      copy_buffers={b for si in schedule if si.ast.op is not Ops.SINK for b in si.bufs if b is not None})
   return [ExecItem(si.ast, [assigned.get(x, x) if x is not None else None for x in si.bufs], si.metadata, si.fixedvars) for si in schedule]
