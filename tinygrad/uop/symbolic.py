@@ -122,6 +122,10 @@ symbolic_simple = propagate_invalid + PatternMatcher([
   (UPat.cvar("gate", vec=False).where(UPat.var("c0"), UPat.var("c1")), lambda gate, c0, c1: c0 if gate.arg else c1),
   # a.where(b.where(c, d), d) -> (a & b).where(c, d)
   (UPat.var("a").where(UPat.var("b").where(UPat.var("c"), UPat.var("d")), UPat.var("d")), lambda a,b,c,d: (a&b).where(c,d)),
+  # a.where(a.where(b, _), c) -> a.where(b, c)   
+  (UPat.var("a").where(UPat.var("a").where(UPat.var("b"), UPat.var()), UPat.var("c")), lambda a, b, c: a.where(b, c)),
+  # a.where(b, a.where(_, c)) -> a.where(b, c)                                                                                      
+  (UPat.var("a").where(UPat.var("b"), UPat.var("a").where(UPat.var(), UPat.var("c"))), lambda a, b, c: a.where(b, c)),
 ])
 
 # ******** phase 2 builds on phase 1, it includes the old "symbolic", rules that match deeper ********
