@@ -617,6 +617,27 @@ jobs:
     - name: Run process replay tests
       run: cp test/external/process_replay/process_replay.py ./process_replay.py && git fetch origin master && git -c advice.detachedHead=false checkout origin/master && PYTHONPATH=. python3 process_replay.py
 
+  testcommausbgpubenchmark:
+    name: UsbGPU Benchmark (comma)
+    runs-on: [self-hosted, Linux, comma4]
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash -e -o pipefail {0}
+    if: github.repository_owner == 'tinygrad'
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+    - name: setup staging db
+      if: github.ref == 'refs/heads/update_benchmark_staging'
+      run: |
+        echo "CACHEDB=/tmp/staging.db" >> $GITHUB_ENV
+        rm -f /tmp/staging.db /tmp/staging.db-shm /tmp/staging.db-wal
+    - name: openpilot compile3 0.10.1 driving_vision
+      run: BENCHMARK_LOG=usbgpu_openpilot_0_10_1_vision PYTHONPATH="." DEV=AMD AMD_LLVM=1 AMD_IFACE=USB ASSERT_MIN_STEP_TIME=50 python3 examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/720392c9a5b986981fdbed1bb8c47a6c5573a50e/selfdrive/modeld/models/driving_vision.onnx
+    - name: openpilot load_pickle 0.10.1 driving_vision
+      run: BENCHMARK_LOG=usbgpu_openpilot_0_10_1_vision_load_pickle PYTHONPATH="." DEV=AMD AMD_IFACE=USB python3 examples/openpilot/load_pickle.py
+
   testreddriverbenchmark:
     name: AM Benchmark
     runs-on: [self-hosted, Linux, tinyboxrandom]
