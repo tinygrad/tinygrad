@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field
 from tinygrad.uop.ops import UOp, UPat, PatternMatcher, Ops, GroupOp, graph_rewrite, identity_element, track_rewrites
 from tinygrad.dtype import dtypes, ImageDType
-from tinygrad.helpers import prod, DEBUG, argsort, VIZ, pluralize, FLOAT16
+from tinygrad.helpers import prod, DEBUG, argsort, VIZ, pluralize, IMAGE, FLOAT16
 
 @dataclass
 class AllocCtx:
@@ -96,7 +96,7 @@ def contiguous_mops_to_view(c:UOp):
   return UOp(Ops.BUFFER_VIEW, src.dtype, (buf,), (size, offset)).reshape(src.shape).contiguous(tag=c.tag)
 
 def make_float16(assign:UOp, buf:UOp, val:UOp):
-  if not FLOAT16: return None
+  if IMAGE != 1 or not FLOAT16: return None
   new_buf = buf.replace(dtype=dtypes.half, src=(buf.src[0].replace(dtype=dtypes.half), *buf.src[1:]) if buf.op is Ops.RESHAPE else buf.src)
   return assign.replace(dtype=dtypes.half, src=(new_buf, val.cast(dtypes.half))).cast(dtypes.float)
 
