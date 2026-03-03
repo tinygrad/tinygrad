@@ -1,15 +1,15 @@
 import math
 from tinygrad.uop.ops import UOp, Ops, sint, PatternMatcher, UPat, KernelInfo, ssimplify, AxisType, sint_to_uop
-from tinygrad.helpers import all_int, dedup, get_contraction
+from tinygrad.helpers import dedup, get_contraction
 from tinygrad.dtype import dtypes, AddrSpace, Invalid
 from tinygrad.renderer import Renderer
 
+def _dim_max(d:sint) -> int: return d if isinstance(d, int) else int(d.vmax)
+
 def _group_dims(dims:tuple[sint, ...], max_sizes:tuple[int, ...]):
-  # TODO: symbolic shape
-  if not all_int(dims): return dims
   while len(dims) > len(max_sizes) or any(d > m for d,m in zip(dims, max_sizes)):
     for i,m in enumerate(max_sizes):
-      if i < (len(dims)-1) and dims[i] * dims[i+1] <= m:
+      if i < (len(dims)-1) and _dim_max(dims[i]) * _dim_max(dims[i+1]) <= m:
         dims = dims[:i] + (dims[i]*dims[i+1],) + dims[i+2:]
         break
     else: return None

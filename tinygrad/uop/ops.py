@@ -239,8 +239,21 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
         return None
 
       # passthrough ops
-      case Ops.REDUCE | Ops.MSTACK | Ops.MSELECT | Ops.DETACH | Ops.CONTIGUOUS | Ops.CONTIGUOUS_BACKWARD | Ops.AFTER | Ops.END | Ops.CALL:
+      case Ops.REDUCE | Ops.MSTACK | Ops.MSELECT | Ops.DETACH | Ops.CONTIGUOUS | Ops.CONTIGUOUS_BACKWARD | Ops.AFTER | Ops.END:
         return self.src[0]._shape
+
+      case Ops.CALL:
+        inner_shape = self.src[0]._shape
+        if inner_shape is None: return None
+        # substitute internal PARAMs in the shape with corresponding args
+        args = self.src[1:]
+        def _sub_param(s):
+          if isinstance(s, int): return s
+          if s.op is Ops.PARAM: return args[s.arg] if s.arg < len(args) else s
+          if not any(x.op is Ops.PARAM for x in s.toposort()): return s
+          subs = {x:args[x.arg] for x in s.toposort() if x.op is Ops.PARAM and x.arg < len(args)}
+          return s.substitute(subs) if subs else s
+        return tuple(_sub_param(s) for s in inner_shape)
 
       # TODO: disallow shape changing bitcast
       case Ops.BITCAST:
