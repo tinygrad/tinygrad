@@ -681,10 +681,8 @@ def print_packets(packets) -> None:
 
 if __name__ == "__main__":
   import sys, pickle
-  if len(sys.argv) < 2:
-    print("Usage: python sqtt.py <pkl_file>")
-    sys.exit(1)
-  with open(sys.argv[1], "rb") as f:
+  from tinygrad.helpers import temp
+  with open(temp("profile.pkl", append_user=True) if len(sys.argv) < 2 else sys.argv[1], "rb") as f:
     data = pickle.load(f)
   prg_events = {e.tag: e for e in data if type(e).__name__ == "ProfileProgramEvent" and e.tag is not None}
   sqtt_events = [e for e in data if type(e).__name__ == "ProfileSQTTEvent"]
