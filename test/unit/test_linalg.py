@@ -83,6 +83,15 @@ class TestLinAlg(unittest.TestCase):
       s_diag = (S.unsqueeze(-2) * Tensor.eye(2))
       reconstruction_helper([U, s_diag, V], a)
 
+  def test_svd_identity_4x4(self):
+    a = Tensor.eye(4)
+    U,S,V = a.svd()
+    assert not np.isnan(U.numpy()).any()
+    assert not np.isnan(S.numpy()).any()
+    assert not np.isnan(V.numpy()).any()
+    s_diag = (S.unsqueeze(-2) * Tensor.eye(4))
+    reconstruction_helper([U, s_diag, V], a)
+
   def test_svd_rank1(self):
     a = Tensor([[1.0, 1.0], [2.0, 2.0]]).realize()
     U, S, V = a.svd()

@@ -97,6 +97,11 @@ pm_post_sched_cache = PatternMatcher([
   (UPat(Ops.BUFFER, src=(UPat(Ops.LUNIQUE), UPat(Ops.DEVICE)), name="b"), create_new_buffer),
 ])
 
+# the AFTER structure is already in LINEAR
+pm_collapse_after = PatternMatcher([
+  (UPat(Ops.AFTER, name="x"), lambda x: x.src[0])
+])
+
 schedule_cache: dict[bytes, UOp] = {}
 def lower_schedule_to_linear(big_sink:UOp) -> UOp|None:
   st = time.perf_counter()
@@ -122,8 +127,8 @@ def lower_schedule_to_linear(big_sink:UOp) -> UOp|None:
           f" | {' cache hit' if SCACHE and sc_ret is not None else 'CACHE MISS'} {function.key.hex()[:8]}"+\
           f" | {len(UOpMetaClass.ucache):7d} uops in cache"+("" if frm is None else f" | {frm.filename}:{frm.lineno}"))
   # TODO: use walk and avoid the remove tags
-  linear = graph_rewrite(linear, pm_post_sched_cache, ctx=({}, big_sink.src[1:]), name="params to buffers")
-  return graph_rewrite(linear, _remove_all_tags, name="remove tags")
+  linear = graph_rewrite(linear, pm_post_sched_cache, ctx=({}, big_sink.src[1:]), walk=True, name="params to buffers")
+  return graph_rewrite(linear, pm_collapse_after+_remove_all_tags, name="remove tags/after")
 
 pm_schedule = PatternMatcher([
   (UPat(Ops.CALL, src=(UPat(Ops.SINK),), allow_any_len=True, name="big_sink"), lower_schedule_to_linear),
@@ -143,7 +148,7 @@ def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[list[ExecItem], di
       nm = b.src[0].expr
       if nm not in used_vars: continue
       val = b.src[1].arg
-      assert nm not in var_vals or var_vals[nm] == val, f"bind mismatch on {nm}, {var_vals[nm]} != {val}"
+      if var_vals.get(nm, val) != val: raise RuntimeError(f"bind mismatch on {nm}, {var_vals[nm]} != {val}")
       var_vals[nm] = val
 
   # convert LINEAR to ExecItems

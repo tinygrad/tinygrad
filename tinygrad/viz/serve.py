@@ -128,6 +128,8 @@ def uop_to_json(x:UOp) -> dict[int, dict]:
         label += f"\n({multirange_str(rngs, color=True)})"
       if u._shape is not None:
         label += f"\n{shape_to_str(u.shape)}"
+      if u.op is Ops.CALL:
+        label += f"\n{u.src[0].key.hex()[:8]}"
       if u.op in {Ops.INDEX, Ops.BUFFERIZE}:
         if len(u.toposort()) < 30: label += f"\n{u.render()}"
         ranges: list[UOp] = []

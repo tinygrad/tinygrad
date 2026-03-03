@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field, replace
 import itertools
-from tinygrad.dtype import dtypes, PtrDType, ImageDType, AddrSpace
+from tinygrad.dtype import dtypes, PtrDType, ImageDType, AddrSpace, Invalid
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, _substitute, KernelInfo
 from tinygrad.uop.ops import graph_rewrite, sint, AxisType, BottomUpGate, profile_matches, should_resolve_call
 from tinygrad.uop.symbolic import symbolic
@@ -76,20 +76,24 @@ mop_cleanup = PatternMatcher([
 ])
 
 pm_gather_params = PatternMatcher([ (UPat(Ops.PARAM, name="p"), lambda ctx, p: ctx.append(p)), ])
-def resolve_call(c:UOp, allow_param_mismatch=False) -> UOp|None:
+def resolve_call(c:UOp, allow_param_mismatch=True) -> UOp|None:
   if not should_resolve_call(c): return None
   params: list[UOp] = []
   graph_rewrite(c.src[0], pm_gather_params, bottom_up=True, ctx=params, name="gather params")
   params = sorted(params, key=lambda x: x.arg)
   args = c.src[1:]
-  # TODO: this check belongs in spec, not here
+
+  # NOTE: this isn't really needed. it's okay if there's unused args in the function
   if not allow_param_mismatch:
     if [x.arg for x in params] != list(range(len(params))): raise RuntimeError(f"params not in order: {[x.arg for x in params]}")
     if len(params) != len(args): raise TypeError(f"expected {len(params)} args, got {len(args)}")
-  for i, (p, a) in enumerate(zip(params, args)):
-    if p.shape != a.shape: raise TypeError(f"arg {i} shape mismatch: expected {p.shape}, got {a.shape}")
+
+  dict_map = {x:args[x.arg] for x in params}
+  for i, (p, a) in enumerate(dict_map.items()):
+    if p.axis != a.axis: raise TypeError(f"arg {i} axis mismatch: expected {p.axis}, got {a.axis}")
+    if p.max_shape != a.max_shape: raise TypeError(f"arg {i} shape mismatch: expected {p.shape}, got {a.shape}")
     if p.dtype != a.dtype: raise TypeError(f"arg {i} dtype mismatch: expected {p.dtype}, got {a.dtype}")
-  return c.src[0].substitute(dict(zip(params, args)), walk=True)
+  return c.src[0].substitute(dict_map, walk=True)
 
 earliest_rewrites = mop_cleanup+PatternMatcher([
   # resolve calls
@@ -97,6 +101,9 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
 
   # split_reduceop
   (UPat(Ops.REDUCE_AXIS, name="reduce", src=(UPat.var("x"),)), split_reduceop),
+
+  # remove DETACH/CONTIGUOUS_BACKWARD (TODO: this is copied in allocations)
+  (UPat((Ops.DETACH, Ops.CONTIGUOUS_BACKWARD), name="x"), lambda x: x.src[0]),
 
   # remove contiguous on movement ops before a copy on disk
   (UPat(GroupOp.Movement-{Ops.SHRINK, Ops.RESHAPE}, name="x").f(Ops.CONTIGUOUS).f(Ops.COPY, allow_any_len=True, name="copy"),
@@ -223,8 +230,9 @@ def remove_bufferize(src:UOp, buf:UOp, idx:UOp):
 
   # if it makes it here, the bufferize is removed
   # this is the ranges replaced
-  # NOTE: if buf src is a const, we don't replace it
-  return src.substitute({k:v for k,v in zip(buf.src[1:], idx.src[1:]) if k.op is not Ops.CONST}, extra_pm=pm_gate_substitute)
+  # NOTE: if buf src is a const, we don't replace it. if idx is Invalid (dead load), don't replace it either
+  replaced = {k:v for k,v in zip(buf.src[1:], idx.src[1:]) if k.op is not Ops.CONST and not (v.op is Ops.CONST and v.arg is Invalid)}
+  return src.substitute(replaced, extra_pm=pm_gate_substitute)
 
 def remove_noop_bufferize(idx,b2):
   if idx.src[1:] != b2.src[1:] or idx.src[0].op is Ops.BUFFER_VIEW: return None
@@ -358,6 +366,11 @@ pm_add_buffers = pm_mops+pm_flatten_bufferize+to_bufferview+PatternMatcher([
 
   # remove any RESHAPEs on KERNEL
   (UPat(Ops.CALL, name="k"), lambda k: k.replace(src=tuple(x.src[0] if x.op is Ops.RESHAPE else x for x in k.src))),
+
+  # remove MOP on AFTER
+  (UPat(Ops.AFTER, src=(UPat.var("x"), UPat(GroupOp.Movement, name="y"))), lambda x,y: x.after(y.src[0])),
+  # remove double AFTER
+  (UPat(Ops.AFTER, src=(UPat.var("x"), UPat(Ops.AFTER, name="y"))), lambda x,y: x.after(*y.src[1:]))
 ])
 
 pm_add_buffers_local = pm_mops+pm_flatten_bufferize+to_bufferview+PatternMatcher([

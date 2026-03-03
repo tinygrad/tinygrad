@@ -164,10 +164,18 @@ def passthrough_multi(root:UOp, multi:UOp):
   return UOp(root.op, root.dtype, (multi.src[0],)+tuple(x.src[0] if x.op is Ops.MULTI else x for x in root.src[1:]), root.arg).multi(multi.axis)
 
 def rewrite_into_call(call:UOp):
-  return call.replace(src=(graph_rewrite(call.src[0], multi_pm, name="subcall"),)+call.src[1:]) if should_resolve_call(call) else None
+  if not should_resolve_call(call): return None
+  new_body = graph_rewrite(call.src[0], multi_pm, name="subcall")
+  new_args = tuple(a.src[0] if a.op is Ops.MULTI else a for a in call.src[1:])
+  return call.replace(src=(new_body,)+new_args)
+
+def param_to_multi(p:UOp):
+  if p.axis is None: return None
+  return UOp.param(p.arg, p.dtype, p.shard_shape, p._device).multi(p.axis)
 
 # NOTE: this is the same pattern as Ops.UNROLL
 multi_pm = PatternMatcher([
+  (UPat(Ops.PARAM, name="p"), param_to_multi),
   (UPat(GroupOp.ALU, name="root", custom_early_reject=set([Ops.MULTI])), alu_multi),
   (UPat(Ops.REDUCE_AXIS, src=(UPat(Ops.MULTI, name="multi"), ), name="root"), reduce_multi),
   (UPat(Ops.RESHAPE, src=(UPat(Ops.MULTI, name="multi"), UPat()), name="root"), reshape_multi),
