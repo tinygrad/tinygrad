@@ -108,7 +108,7 @@ def transform_precompiled_call(c:UOp) -> UOp|None:
   if c.src[0].op is Ops.SINK: return None
   out = _buffer_like(c)
   fxn = out.param_like(len(c.src)-1).assign(c.src[0]).sink()
-  return out.after(c.replace(src=(fxn,)+tuple(x.contiguous() for x in c.src[1:])+(out,), dtype=dtypes.void, tag=None))
+  return out.after(c.replace(src=(fxn,)+tuple(x.contiguous() if x.op is not Ops.AFTER else x for x in c.src[1:])+(out,), dtype=dtypes.void, tag=None))
 
 pm_early_transform_tensor_graph = PatternMatcher([
   # transform precompiled CALLs
@@ -126,7 +126,7 @@ pm_early_transform_tensor_graph = PatternMatcher([
   (UPat(GroupOp.All-{Ops.CONTIGUOUS, Ops.ASSIGN}, name="x"), lambda x: x.rtag(None).contiguous(tag=x.tag) if x.tag else x.replace(tag=None)),
   # remove extra CONTIGUOUS on ASSIGN (only when assign target is contiguous)
   (UPat(Ops.CONTIGUOUS, src=(UPat(Ops.ASSIGN, name="a"),), name="c"),
-   lambda a,c: a.replace(tag=a.tag+c.tag) if a.src[0].has_buffer_identity() else None),
+   lambda a,c: a.replace(tag=(a.tag or ())+(c.tag or ())) if a.src[0].has_buffer_identity() else None),
   # replace ASSIGN with CONTIGUOUS
   (UPat(Ops.ASSIGN, name="u"), replace_assign_with_contig),
   # replace CONTIGUOUS with ASSIGNs

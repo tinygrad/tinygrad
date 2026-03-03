@@ -101,6 +101,19 @@ class TestCall(unittest.TestCase):
     np.testing.assert_equal(c.numpy(), 2 * np.ones((10, 10)))
 
 class TestCallSchedule(unittest.TestCase):
+  def test_reshape_precompile(self):
+    a = Tensor.empty(4, 8).realize()
+    a = a.reshape(4,4,2).assign(Tensor.empty(4,4,2)).reshape(8,4)
+    @function(precompile=True)
+    def s(x): return x.sum(axis=0)
+    (s(a)*3).realize()
+
+  def test_double_call(self):
+    a = Tensor.empty(4, 8)
+    @function(precompile=True)
+    def s(x): return x*2
+    s(s(a)).realize()
+
   def test_call_double_gemm(self):
     a = Tensor.randn(4, 8, requires_grad=True)
     b = Tensor.randn(8, 12, requires_grad=True)
