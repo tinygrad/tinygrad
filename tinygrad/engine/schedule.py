@@ -111,12 +111,13 @@ def lower_schedule_to_linear(ctx:bool, big_sink:UOp) -> UOp|None:
   st = time.perf_counter()
   function = big_sink.src[0]
   if isinstance(function.arg, KernelInfo): return None
-  if not SCACHE or (sc_ret:=schedule_cache.get(function.key, None)) is None:
+  cache_key = function.key
+  if not SCACHE or (sc_ret:=schedule_cache.get(cache_key, None)) is None:
     if SPEC: type_verify(big_sink, tensor_spec)
     # support recursive CALLs
-    function = graph_rewrite(function, pm_schedule, ctx=True, name="inner schedule to linear")
-    linear = create_schedule(get_kernel_graph(function))
-    if SCACHE: schedule_cache[function.key] = linear
+    function_linear = graph_rewrite(function, pm_schedule, ctx=True, name="inner schedule to linear")
+    linear = create_schedule(get_kernel_graph(function_linear))
+    if SCACHE: schedule_cache[cache_key] = linear
   else:
     # schedule cache hit
     linear = sc_ret
@@ -128,7 +129,7 @@ def lower_schedule_to_linear(ctx:bool, big_sink:UOp) -> UOp|None:
     else:
       frm = None
     print(f"{colored('scheduled', 'BLACK' if ctx else 'WHITE')} {len(linear.src):5d} kernels in {(time.perf_counter()-st)*1000:8.2f} ms"+\
-          f" | {' cache hit' if SCACHE and sc_ret is not None else 'CACHE MISS'} {function.key.hex()[:8]}"+\
+          f" | {' cache hit' if SCACHE and sc_ret is not None else 'CACHE MISS'} {cache_key.hex()[:8]}"+\
           f" | {len(UOpMetaClass.ucache):7d} uops in cache"+("" if frm is None else f" | {frm.filename}:{frm.lineno}"))
   return big_sink.replace(src=(linear,)+big_sink.src[1:])
 
@@ -140,6 +141,8 @@ pm_schedule = PatternMatcher([
 def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[list[ExecItem], dict[str, int]]:
   # big_sink srcs are all the Tensors
   linear_call = graph_rewrite(big_sink, pm_schedule, ctx=False, name="schedule to linear")
+
+  # this recursively resolves the linear_call and allocates buffers
   linear = graph_rewrite(linear_call, pm_resolve_linear_call, name="resolve linear call")
 
   # vars used in the schedule

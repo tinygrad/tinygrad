@@ -124,7 +124,7 @@ class FeedForward:
     self.w2 = linear(hidden_dim, dim, bias=False)
     self.w3 = linear(dim, hidden_dim, bias=False) # the gate in Gated Linear Unit
 
-  @function(precompile=True)
+  @function(precompile=bool(getenv("PRECOMPILE", 0)))
   def __call__(self, x:Tensor) -> Tensor:
     w1 = self.w1(x).silu()
     w3 = self.w3(x.contiguous_backward())  # this fixes a strange fusion that makes tensor cores miss
