@@ -114,6 +114,12 @@ class TestCallSchedule(unittest.TestCase):
     def s(x): return x*2
     s(s(a)).realize()
 
+  def test_double_call_contiguous(self):
+    a = Tensor.empty(4, 8)
+    @function(precompile=True)
+    def s(x): return x*2
+    s(s(a).contiguous()).realize()
+
   def test_call_double_gemm(self):
     a = Tensor.randn(4, 8, requires_grad=True)
     b = Tensor.randn(8, 12, requires_grad=True)

@@ -680,7 +680,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
   @property
   def buffer(self) -> Buffer|MultiBuffer:
     from tinygrad.device import Buffer, MultiBuffer
-    if self.op in {Ops.CONTIGUOUS, Ops.RESHAPE, Ops.DETACH}: return self.src[0].buffer
+    if self.op in {Ops.CONTIGUOUS, Ops.RESHAPE, Ops.DETACH, Ops.AFTER}: return self.src[0].buffer
     # this buffer can process disk tensors and simple movement ops
     if self is not self.base:
       size_offset = self.contiguous_view_offset()
