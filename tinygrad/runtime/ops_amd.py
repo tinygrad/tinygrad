@@ -598,9 +598,10 @@ class AMDProgram(HCQProgram):
                      base=self.lib_gpu.va_addr)
     weakref.finalize(self, self._fini, self.dev, self.lib_gpu, buf_spec)
 
-  def __call__(self, *bufs, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), vals:tuple[int|None, ...]=(), wait=False):
+  def __call__(self, *bufs, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), vals:tuple[int|None, ...]=(),
+               wait=False, timeout:int|None=None):
     if self.dev.sqtt_enabled: cast(AMDComputeQueue, self.dev.hw_compute_queue_t()).sqtt_start(self.dev.sqtt_buffers).submit(self.dev)
-    res = super().__call__(*bufs, global_size=global_size, local_size=local_size, vals=vals, wait=wait)
+    res = super().__call__(*bufs, global_size=global_size, local_size=local_size, vals=vals, wait=wait, timeout=timeout)
     if self.dev.pmc_enabled:
       cast(AMDComputeQueue, self.dev.hw_compute_queue_t()).pmc_read(self.dev.pmc_buffer, self.dev.pmc_sched) \
                                                           .signal(self.dev.timeline_signal, self.dev.next_timeline()).submit(self.dev)
@@ -869,7 +870,7 @@ class PCIIface(PCIIfaceBase):
     devs:list[AMDDevice] = [d for pg in HCQCompiled.peer_groups.values() for d in pg if isinstance(d, AMDDevice) and d.is_am()]
     for d in devs:
       d.iface.dev_impl.ih.interrupt_handler()
-      if reset and d.iface.dev_impl.recover():
+      if reset and d.iface.dev_impl.recover(force=d.error_state is not None):
         d.compute_queue.put_value, _ = d.iface.dev_impl.gfx.setup_ring(*d.compute_queue.params)
         d.compute_queue.read_ptr[0] = d.compute_queue.write_ptr[0] = d.compute_queue.put_value
         d.timeline_signal.value = d.timeline_value - 1
@@ -977,7 +978,8 @@ class AMDDevice(HCQCompiled):
     super().__init__(device, AMDAllocator(self), compilers, functools.partial(AMDProgram, self), AMDSignal,
                      functools.partial(AMDComputeAQLQueue if self.is_aql else AMDComputeQueue, self),
                      functools.partial(AMDCopyQueue, self, max_copy_size=self.max_copy_size) if self.has_sdma_queue else None,
-                     kernargs_size=(8 << 10) if self.is_usb() else (16 << 20), sigalloc_size=0x100 if self.is_usb() else 0x1000)
+                     kernargs_size=(8 << 10) if self.is_usb() else (16 << 20), sigalloc_size=0x100 if self.is_usb() else 0x1000,
+                     can_recover=self.is_am())
 
     # Scratch setup
     self.max_private_segment_size = 0

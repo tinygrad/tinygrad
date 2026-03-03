@@ -3,7 +3,7 @@ from pathlib import Path
 import multiprocessing
 
 from tinygrad import Device, GlobalCounters, Tensor, TinyJit, dtypes
-from tinygrad.helpers import getenv, BEAM, WINO, round_up, diskcache_clear, Profiling, profile_marker
+from tinygrad.helpers import getenv, BEAM, WINO, round_up, diskcache_clear, Profiling, profile_marker, DEBUG
 from tinygrad.nn.state import get_parameters, get_state_dict, load_state_dict, safe_load, safe_save
 from tinygrad.nn.optim import LAMB, LARS, SGD, OptimizerGroup, Adam, AdamW
 
@@ -1387,8 +1387,10 @@ def train_llama3():
 
   # init grads
   for p in optim.params:
-    p.grad = p.zeros_like().contiguous().realize()
+    p.grad = p.empty_like().realize()
   grads: list[Tensor] = [p.grad for p in optim.params]
+  for p in optim.params:
+    p.grad.assign(p.grad.zeros_like()).realize()
 
   scheduler = CosineAnnealingLRWithWarmup(optim, opt_base_learning_rate, opt_end_learning_rate, opt_learning_rate_warmup_steps, opt_learning_rate_decay_steps)
 
@@ -1405,11 +1407,11 @@ def train_llama3():
   def minibatch(tokens:Tensor):
     if (DP := getenv("DP", 1)) > 1:
       device = tuple(f"{Device.DEFAULT}:{i}" for i in range(DP))
-      tokens = tokens.shard(device, 0)
+      tokens = tokens.to(None).shard(device, 0)
     if (MP := getenv("MP", 1)) > 1:
       device = tuple(f"{Device.DEFAULT}:{i}" for i in range(MP))
       tokens = tokens.shard(device)
-    if MP == 1 and DP == 1: tokens = tokens.to(None)
+    if DP == 1 and MP == 1: tokens = tokens.to(None)
     logits:Tensor = model(tokens[:, :-1], start_pos=0, temperature=math.nan)
     loss = vocab_mask.where(-1e9, logits).sparse_categorical_crossentropy(tokens[:, 1:])
     loss.backward()
@@ -1419,27 +1421,27 @@ def train_llama3():
 
   @TinyJit
   def optim_step():
-    optim.step()
+    grad_norm = optim.fstep(grads)
     scheduler.step()
 
     for g in grads:
-      g.assign(g.zeros_like())
+      g.assign(g.zeros_like()).realize()
 
     lr = optim.lr
     Tensor.realize(lr, *grads)
 
-    return lr.float().to("CPU")
+    return lr.float().to("CPU"), grad_norm.float().to("CPU")
 
   @TinyJit
   @Tensor.train(False)
   def eval_step(tokens:Tensor):
     if (DP := getenv("DP", 1)) > 1:
       device = tuple(f"{Device.DEFAULT}:{i}" for i in range(DP))
-      tokens = tokens.shard(device, 0)
+      tokens = tokens.to(None).shard(device, 0)
     if (MP := getenv("MP", 1)) > 1:
       device = tuple(f"{Device.DEFAULT}:{i}" for i in range(MP))
       tokens = tokens.shard(device)
-    if MP == 1 and DP == 1: tokens = tokens.to(None)
+    if DP == 1 and MP == 1: tokens = tokens.to(None)
     logits:Tensor = model(tokens[:, :-1], start_pos=0, temperature=math.nan)
     loss = vocab_mask.where(-1e9, logits).sparse_categorical_crossentropy(tokens[:, 1:])
     return loss.flatten().float().to("CPU")
@@ -1482,7 +1484,7 @@ def train_llama3():
 
       stopped = False
       losses, data_time, dev_time = [], 0, 0
-      for _ in range(grad_acc):
+      for _ in range(grad_acc if i >= 3 else 1):
         ist = time.perf_counter()
         try: tokens = next(train_iter)
         except StopIteration:
@@ -1495,7 +1497,8 @@ def train_llama3():
       if stopped: break
 
       gt = time.perf_counter()
-      lr = optim_step().item()
+      ret = optim_step()
+      lr, grad_norm = ret[0].item(), ret[1].item()
       et = time.perf_counter()
 
       loss = sum(losses) / len(losses)
@@ -1513,11 +1516,14 @@ def train_llama3():
       mfu = ((6 * num_params * SEQLEN * GBS) / (dev_time * max(getenv("DP", 1), getenv("MP", 1)) * 2.3e15)) * 100
       tqdm.write(
           f"{i:5} {step_time:.3f} s step, {gbs_time:.3f} s gbs, {optim_time:.3f} s optim, {data_time:.3f} s data, {loss:.4f} loss, " \
-          f"{lr:.12f} LR, {mem_gb:.2f} GB used, {gflops:9.2f} GFLOPS, {mfu:5.2f}% MFU")
+          f"{lr:.12f} LR, {grad_norm:.6f} grad_norm, {mem_gb:.2f} GB used, {gflops:9.2f} GFLOPS, {mfu:5.2f}% MFU")
+      if DEBUG >= 1: tqdm.write("  mem per device: " + ', '.join(f"{dev}: {mem/1e9:.2f} GB" for dev, mem in sorted(GlobalCounters.mem_used_per_device.items())))
 
       if WANDB:
         wandb.log({
-          "lr": lr, "train/loss": loss,
+          "train/loss": loss,
+          "train/lr": lr,
+          "train/grad_norm": grad_norm,
           "train/step_time": step_time,
           "train/gbs_time": gbs_time,
           "train/optim_time": optim_time,
