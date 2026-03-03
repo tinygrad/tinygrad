@@ -244,33 +244,6 @@ jobs:
     - name: Run TYPED=1
       run: CHECK_OOB=0 DEV=CPU TYPED=1 python test/test_tiny.py
 
-  nullscheduletest:
-    name: Null Schedule Tests
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-
-    steps:
-    - name: Checkout Code
-      uses: actions/checkout@v4
-    - name: Setup Environment
-      uses: ./.github/actions/setup-tinygrad
-      with:
-        key: null-schedule
-    - name: Run NULL backend tests
-      run: NULL=1 python -m pytest -n=auto test/null/ --durations=20
-    - name: Run targetted tests on NULL backend
-      run: NULL=1 python3 -m unittest test.backend.test_multitensor.TestMultiTensor.test_data_parallel_resnet_train_step
-    # TODO: too slow
-    # - name: Run SDXL on NULL backend
-    #   run: NULL=1 DEBUG=1 python3 examples/sdxl.py --seed 0 --noshow --timing --fakeweights
-    - name: Run Clip tests for SD MLPerf on NULL backend
-      run: NULL=1 python -m pytest -n=auto test/external/mlperf_stable_diffusion/external_test_models.py::TestOpenClip --durations=20
-    - name: Run AMD emulated BERT training on NULL backend
-      run: EMULATE=AMD_RDNA4 NULL=1 NULL_ALLOW_COPYOUT=1 CAPTURE_PROCESS_REPLAY=0 DEFAULT_FLOAT=HALF BENCHMARK=10 BS=66 GPUS=1 BERT_LAYERS=2 MODEL=bert python3 examples/mlperf/model_train.py
-    # TODO: support fake weights
-    #- name: Run LLaMA 7B on 4 fake devices
-    #  run: NULL=1 python3 examples/llama.py --gen 1 --size 7B --shard 4 --prompt "Hello." --count 3 --temperature 0 --timing
-
   unittest:
     name: Unit Tests
     runs-on: ubuntu-latest
@@ -295,6 +268,20 @@ jobs:
       run: |
         CPU=1 python test/null/test_device.py TestRunAsModule.test_module_runs
         CPU=1 python -m pytest -n=auto test/unit/ --durations=20
+    - name: Run NULL backend tests
+      run: NULL=1 python -m pytest -n=auto test/null/ --durations=20
+    - name: Run targetted tests on NULL backend
+      run: NULL=1 python3 -m unittest test.backend.test_multitensor.TestMultiTensor.test_data_parallel_resnet_train_step
+    # TODO: too slow
+    # - name: Run SDXL on NULL backend
+    #   run: NULL=1 DEBUG=1 python3 examples/sdxl.py --seed 0 --noshow --timing --fakeweights
+    - name: Run Clip tests for SD MLPerf on NULL backend
+      run: NULL=1 python -m pytest -n=auto test/external/mlperf_stable_diffusion/external_test_models.py::TestOpenClip --durations=20
+    - name: Run AMD emulated BERT training on NULL backend
+      run: EMULATE=AMD_RDNA4 NULL=1 NULL_ALLOW_COPYOUT=1 CAPTURE_PROCESS_REPLAY=0 DEFAULT_FLOAT=HALF BENCHMARK=10 BS=66 GPUS=1 BERT_LAYERS=2 MODEL=bert python3 examples/mlperf/model_train.py
+    # TODO: support fake weights
+    #- name: Run LLaMA 7B on 4 fake devices
+    #  run: NULL=1 python3 examples/llama.py --gen 1 --size 7B --shard 4 --prompt "Hello." --count 3 --temperature 0 --timing
     - name: Run GC tests
       run: python test/external/external_uop_gc.py
     - name: External Benchmark Schedule
