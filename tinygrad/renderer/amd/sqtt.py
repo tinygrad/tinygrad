@@ -103,28 +103,35 @@ class InstOp(Enum):
 class InstOpRDNA4(Enum):
   """SQTT instruction operation types for RDNA4 (gfx1200). Different encoding from RDNA3."""
   SALU = 0x0
-  JUMP = 0x1
-  NEXT = 0x2
-  MESSAGE = 0x4
-  VALU_TRANS = 0x5
-  VALU_64 = 0x6
-  VALU_MAD64 = 0x7
-  VINTERP = 0x9
-  VALU_WMMA = 0x46
-  VMEM = 0x10
-  VMEM_128 = 0x11
-  VMEM_STORE = 0x12
-  VMEM_STORE_G96 = 0x13   # global_store_[b96,b128]
-  LDS_LOAD = 0x14
-  LDS_STORE = 0x15
-  LDS_STORE_64 = 0x16
-  LDS_STORE_128 = 0x17
-  VALU_F64 = 0x49
-  SALU_TRANS = 0x4c       # transcendental with sgpr src/dst
-  SALU_MUL = 0x4d         # s_[mul,mulhi,mulk]
-  SALU_MUL64 = 0x4e
-  OTHER_VMEM = 0x5e
-  OTHER_VMEM_STORE = 0x60
+  SMEM = 0x1
+  JUMP = 0x3
+  JUMP_NO = 0x4
+  JUMP_UNCOND = 0x5
+  MESSAGE = 0x9
+  VALU_TRANS = 0xb
+  VALU_B2 = 0xd
+  VALU_B4 = 0xe
+  VINTERP = 0x12
+  VMEM_RD_1 = 0x21
+  VMEM_WR_2 = 0x24
+  VMEM_WR_3 = 0x25
+  VMEM_WR_4 = 0x26
+  VMEM_WR_5 = 0x27
+  VMEM_WR_6 = 0x28
+  LDS_RD = 0x29
+  LDS_WR_1 = 0x2a
+  LDS_WR_2 = 0x2b
+  LDS_WR_3 = 0x2c
+  LDS_WR_4 = 0x2d
+  LDS_WR_5 = 0x2e
+  WMMA_8 = 0x8c
+  WMMA_16 = 0x8d
+  VALU_DPFP = 0x92
+  SALU_FLOAT3 = 0x98
+  VALU_SCL_TRANS = 0x99
+  SALU_2 = 0x9b
+  SALU_5 = 0x9c
+  OTHER_VMEM = 0xc1
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # PACKET TYPE BASE CLASS
@@ -349,14 +356,9 @@ class INST(PacketType):
 class INST_RDNA4(PacketType):  # Layout 4: different delta position and InstOp encoding
   encoding = bits[2:0] == 0b010
   delta = bits[5:3]
-  flag1 = bits[6:6]
-  flag2 = bits[7:7]
-  wave_pair = bits[11:8]
-  flag3 = bits[12:12]
-  op = bits[19:13].enum(InstOpRDNA4)
-  # INST_RDNA4 wave_pair field (4 bits) addresses wave pairs, flag2 selects even/odd wave
-  @property
-  def wave(self): return self.wave_pair * 2 + self.flag2
+  w64h = bits[6:6]
+  wave = bits[11:7]
+  op = bits[19:12].enum(InstOpRDNA4)
 
 class UTILCTR(PacketType):
   encoding = bits[6:0] == 0b0110001
@@ -628,9 +630,9 @@ def map_insts(data:bytes, lib:bytes, target:str) -> Iterator[tuple[PacketType, I
       # identify a branch instruction, only used for asserts
       branch_inst = inst if "BRANCH" in inst_op else None
       if branch_inst is not None:
-        assert isinstance(p, (INST, INST_RDNA4)) and p.op.name in {"JUMP_NO", "JUMP", "NEXT"}, f"branch can only be folowed by JUMP, got {p}"
+        assert isinstance(p, (INST, INST_RDNA4)) and p.op.name in {"JUMP_NO", "JUMP", "JUMP_UNCOND"}, f"branch can only be folowed by JUMP, got {p}"
       # JUMP handling
-      if (isinstance(p, INST) and p.op is InstOp.JUMP) or (isinstance(p, INST_RDNA4) and branch_inst is not None and p.flag3):
+      if (isinstance(p, INST) and p.op is InstOp.JUMP) or (isinstance(p, INST_RDNA4) and p.op is InstOpRDNA4.JUMP):
         simm16 = getattr(branch_inst, 'simm16')
         assert branch_inst is not None and simm16 is not None, f"JUMP packet must map to a branch instruction, got {inst}"
         x = simm16 & 0xffff
@@ -659,7 +661,7 @@ def format_packet(p) -> str:
   name = type(p).__name__
   if isinstance(p, (INST, INST_RDNA4)):
     op_name = p.op.name if isinstance(p.op, (InstOp, InstOpRDNA4)) else f"0x{p.op:02x}"
-    fields = f"wave={p.wave} op={op_name}" + (" flag1" if p.flag1 else "") + (" flag2" if p.flag2 else "")
+    fields = f"wave={p.wave} op={op_name}" + ((" flag1" if p.flag1 else "") + (" flag2" if p.flag2 else "") if isinstance(p, INST) else "")
   elif isinstance(p, VALUINST): fields = f"wave={p.wave}" + (" flag" if p.flag else "")
   elif isinstance(p, ALUEXEC): fields = f"src={p.src.name if isinstance(p.src, AluSrc) else p.src}"
   elif isinstance(p, VMEMEXEC): fields = f"src={p.src.name if isinstance(p.src, MemSrc) else p.src}"
