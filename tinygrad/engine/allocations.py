@@ -40,11 +40,7 @@ add_tags = PatternMatcher([
   (UPat(GroupOp.All, name="x"), lambda ctx,x: tag_uop(ctx,x) if x in ctx.bases else None),
 ])
 
-def replace_contig_with_assign(u:UOp):
-  # if size is 0, remove the contig
-  if u.size == 0: return u.src[0]
-  # no real contig for DISK/TINYFS tensors, they are left alone
-  if isinstance(u._device, str) and u._device.startswith(("DISK", "TINYFS")): return u.rtag(None)
+def _buffer_like(u:UOp) -> UOp:
   dtype = u.dtype
   if isinstance(dtype, ImageDType):
     if prod(dtype.shape) != prod(u.max_shard_shape) or ([x for x in u.max_shard_shape if x != 1] or [1])[-1] % 4 != 0:
@@ -52,7 +48,14 @@ def replace_contig_with_assign(u:UOp):
       dtype = dtype.base
   buffer = UOp.new_buffer(u.device, u.shard_size, dtype).reshape(u.max_shard_shape)
   if isinstance(u.device, tuple) and u.axis is not None: buffer = buffer.multi(u.axis)
-  return buffer.assign(u.src[0]).rtag(u.tag)
+  return buffer
+
+def replace_contig_with_assign(u:UOp):
+  # if size is 0, remove the contig
+  if u.size == 0: return u.src[0]
+  # no real contig for DISK/TINYFS tensors, they are left alone
+  if isinstance(u._device, str) and u._device.startswith(("DISK", "TINYFS")): return u.rtag(None)
+  return _buffer_like(u).assign(u.src[0]).rtag(u.tag)
 
 def replace_assign_with_contig(u:UOp):
   assigned_to = u
@@ -95,7 +98,18 @@ def contiguous_mops_to_view(c:UOp):
   # NOTE: this contiguous is removed because this BUFFER_VIEW/RESHAPE has_buffer_identity
   return UOp(Ops.BUFFER_VIEW, src.dtype, (buf,), (size, offset)).reshape(src.shape).contiguous(tag=c.tag)
 
+
+def transform_precompiled_call(c:UOp) -> UOp|None:
+  if not c.arg.precompile: return None
+  if c.src[0].op is Ops.SINK: return None
+  out = _buffer_like(c)
+  fxn = out.param_like(len(c.src)-1).assign(c.src[0]).sink()
+  return out.after(c.replace(src=(fxn,)+tuple(x.contiguous() if x.op is not Ops.AFTER else x for x in c.src[1:])+(out,), dtype=dtypes.void, tag=None))
+
 pm_early_transform_tensor_graph = PatternMatcher([
+  # transform precompiled CALLs
+  (UPat(Ops.CALL, name="c"), transform_precompiled_call),
+
   # CONTIGUOUS(MOPS(BUFFER/BUFFER_VIEW)) → CONTIGUOUS(BUFFER_VIEW) when movement ops collapse to contiguous range
   (UPat(Ops.CONTIGUOUS, src=(UPat(GroupOp.Movement),), name="c"), contiguous_mops_to_view),
 
@@ -108,7 +122,7 @@ pm_early_transform_tensor_graph = PatternMatcher([
   (UPat(GroupOp.All-{Ops.CONTIGUOUS, Ops.ASSIGN}, name="x"), lambda x: x.rtag(None).contiguous(tag=x.tag) if x.tag else x.replace(tag=None)),
   # remove extra CONTIGUOUS on ASSIGN (only when assign target is contiguous)
   (UPat(Ops.CONTIGUOUS, src=(UPat(Ops.ASSIGN, name="a"),), name="c"),
-   lambda a,c: a.replace(tag=a.tag+c.tag) if a.src[0].has_buffer_identity() else None),
+   lambda a,c: a.replace(tag=(a.tag or ())+(c.tag or ())) if a.src[0].has_buffer_identity() else None),
   # replace ASSIGN with CONTIGUOUS
   (UPat(Ops.ASSIGN, name="u"), replace_assign_with_contig),
   # replace CONTIGUOUS with ASSIGNs

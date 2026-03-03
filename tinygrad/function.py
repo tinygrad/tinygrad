@@ -1,5 +1,5 @@
 import functools
-from typing import Generic, TypeVar, Callable, cast
+from typing import Generic, TypeVar, Callable, cast, overload
 from tinygrad.helpers import Context, dedup, getenv
 from tinygrad.uop.ops import UOp, Ops, graph_rewrite, PatternMatcher, UPat
 from tinygrad.tensor import Tensor
@@ -16,9 +16,10 @@ pm_ctx = PatternMatcher([
 ])
 
 ReturnType = TypeVar('ReturnType')
-class function(Generic[ReturnType]):
-  def __init__(self, fxn:Callable[..., ReturnType]):
+class _function(Generic[ReturnType]):
+  def __init__(self, fxn:Callable[..., ReturnType], *, precompile:bool=False):
     self.fxn = fxn
+    self.precompile = precompile
 
   def __get__(self, obj, objtype=None): return functools.partial(self.__call__, obj) if obj is not None else self
 
@@ -57,6 +58,14 @@ class function(Generic[ReturnType]):
     #call = assigned.call(*call_uops, buffer, name=name)
     #ret = buffer.after(call)
 
-    ret = uret.call(*call_uops, name=name)
+    ret = uret.call(*call_uops, name=name, precompile=self.precompile)
     return cast(ReturnType, Tensor(ret, device=ret.device))
 
+# overload signatures support both @function and @function(precompile=True) syntax
+@overload
+def function(fxn:Callable[..., ReturnType], *, precompile:bool=False) -> _function[ReturnType]: ...
+@overload
+def function(fxn:None=None, *, precompile:bool=False) -> Callable[[Callable[..., ReturnType]], _function[ReturnType]]: ...
+def function(fxn=None, *, precompile:bool=False):
+  if fxn is None: return lambda f: _function(f, precompile=precompile)
+  return _function(fxn, precompile=precompile)
