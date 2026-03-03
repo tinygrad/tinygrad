@@ -1,7 +1,7 @@
 import unittest
 from tinygrad import Device, dtypes, Tensor
 from tinygrad.device import Buffer
-from tinygrad.helpers import Context
+from tinygrad.helpers import Context, getenv
 from test.helpers import needs_second_gpu
 
 @unittest.skipUnless(hasattr(Device[Device.DEFAULT].allocator, "_offset"), "subbuffer not supported")
@@ -42,7 +42,7 @@ class TestSubBuffer(unittest.TestCase):
     assert out == [102, 103]
 
   @needs_second_gpu
-  @unittest.skipIf(Device.DEFAULT not in {"CUDA", "NV", "AMD"}, "only NV, AMD, CUDA")
+  @unittest.skipIf(Device.DEFAULT not in {"CUDA", "NV", "AMD"} or getenv("MOCKGPU"), "only NV, AMD, CUDA")
   def test_subbuffer_transfer(self):
     t = Tensor.arange(0, 10, dtype=dtypes.uint8).realize()
     vt = t[2:5].contiguous().realize()

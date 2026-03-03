@@ -234,7 +234,7 @@ const drawLine = (ctx, x, y, opts) => {
 }
 
 function tabulate(rows) {
-  const root = d3.create("div").style("display", "grid").style("grid-template-columns", `${Math.max(...rows.map(x => x[0].length), 0)}ch 1fr`).style("gap", "0.2em");
+  const root = d3.create("div").style("display", "grid").style("grid-template-columns", `${Math.max(...rows.map(x => x[0].length), 0)}ch 1fr`).style("gap", "0.2em").style("white-space", "nowrap");
   for (const [k,v] of rows) { root.append("div").text(k); root.append("div").node().append(v); }
   return root;
 }
@@ -264,7 +264,8 @@ function setFocus(key) {
     focusedShape = key; d3.select("#timeline").call(canvasZoom.transform, zoomLevel);
   }
   const { eventType, e } = selectShape(key);
-  const html = d3.create("div").classed("info", true);
+  if (metadata.querySelector(".info") == null) d3.select(metadata).html("").append("div").classed("info", true);
+  const html = d3.select(".info").html("");
   if (eventType === EventTypes.EXEC) {
     const [n, _, ...rest] = e.arg.tooltipText.split("\n");
     html.append(() => tabulate([["Name", d3.create("p").html(n).node()], ["Duration", formatTime(e.width)], ["Start Time", formatTime(e.x)]]).node());
@@ -298,7 +299,24 @@ function setFocus(key) {
       if (shape != null) p.style("cursor", "pointer").on("click", () => setFocus(shape));
     }
   }
-  return metadata.replaceChildren(html.node());
+  // instructions list renderer
+  let instList = document.getElementById("insts");
+  if (data.pcToShape.size > 0 && instList == null) {
+    let contents = "", i = 0;
+    for (const [k, v] of data.pcToShape) {
+      contents += `<div class="line" data-k="${k}"><span class="left" id="inst-${k}"><span class="n">${i++}</span><span class="wave">${v.wave}</span>
+        <span class="pc">${"0x"+v.pc.toString(16).padStart(12, "0")}</span></span><span class="label">${data.pcMap[v.pc]}</span></div>`;
+    }
+    instList = d3.create("pre").append("code").classed("hljs", true).style("margin-top", "20px").attr("id", "insts").html(contents)
+      .on("click", e => { const line = e.target.closest(".line"); line && setFocus(line.dataset.k); }).node();
+    metadata.insertBefore(instList.parentElement, html.node());
+  }
+  d3.select(instList).selectAll("span").classed("highlight", false);
+  const instLine = document.getElementById(`inst-${key}`); instLine?.classList.add("highlight");
+  if (instLine != null && instList != null) {
+    const r = rect(instLine), c = rect(instList);
+    if (Math.max(c.top-r.bottom, r.top-c.bottom)>=-30) instLine.scrollIntoView({ block:"center" });
+  }
 }
 
 const EventTypes = { EXEC:0, BUF:1 };
@@ -307,7 +325,7 @@ async function renderProfiler(path, unit, opts) {
   displaySelection("#profiler");
   // support non realtime x axis units
   formatTime = unit === "realtime" ? formatMicroseconds : formatCycles;
-  if (data?.path !== path) { data = {tracks:new Map(), axes:{}, path, first:null}; focusedDevice = null; focusedShape = null; }
+  if (data?.path !== path) { data = {tracks:new Map(), axes:{}, path, first:null, pcToShape:new Map()}; focusedDevice = null; focusedShape = null; }
   setFocus(focusedShape);
   // layout once!
   if (data.tracks.size !== 0) return updateProgress(Status.COMPLETE);
@@ -322,7 +340,7 @@ async function renderProfiler(path, unit, opts) {
   const optional = (i) => i === 0 ? null : i-1;
   const dur = u32(), tracePeak = u64(), indexLen = u32(), layoutsLen = u32(); data.dur = dur;
   const textDecoder = new TextDecoder("utf-8");
-  const { strings, dtypeSize, markers }  = JSON.parse(textDecoder.decode(new Uint8Array(buf, offset, indexLen))); offset += indexLen;
+  const { strings, dtypeSize, markers, ...extData } = JSON.parse(textDecoder.decode(new Uint8Array(buf, offset, indexLen))); offset += indexLen;
   // place devices on the y axis and set vertical positions
   const [tickSize, padding, baseOffset] = [10, 8, markers.length ? 14 : 0];
   const deviceList = profiler.append("div").attr("id", "device-list").style("padding-top", tickSize+padding+baseOffset+"px");
@@ -341,7 +359,8 @@ async function renderProfiler(path, unit, opts) {
     const k = textDecoder.decode(new Uint8Array(buf, offset, nameLen)); offset += nameLen;
     const div = deviceList.append("div").attr("id", k).text(k).style("padding", padding+"px").style("width", opts.width);
     const { y:baseY, height:baseHeight } = rect(div.node());
-    const colors = colorScheme[k.split(":")[0]] ?? colorScheme.DEFAULT;
+    const [dname, dnum] = k.split(":", 2);
+    const colors = colorScheme[dname] ?? colorScheme.DEFAULT;
     const offsetY = baseY-canvasTop+padding/2;
     const shapes = [], visible = [];
     const eventType = u8(), eventsLen = u32();
@@ -398,8 +417,9 @@ async function renderProfiler(path, unit, opts) {
         // tiny device events go straight to the rewrite rule
         const key = k.startsWith("TINY") ? null : `${k}-${j}`;
         const labelHTML = label.map(l=>`<span style="color:${l.color}">${l.st}</span>`).join("");
-        const arg = { tooltipText:labelHTML+" N:"+shapes.length+"\n"+formatTime(e.dur)+(e.info != null ? "\n"+e.info : ""), bufs:[], key,
-                      ctx:shapeRef?.ctx, step:shapeRef?.step };
+        let info = e.info != null ? "\n"+e.info : "";
+        if (info.startsWith("\nPC:")) data.pcToShape.set(key, {wave:dnum, pc:parseInt(e.info.split(":")[1]), st:e.st}); info = "";
+        const arg = { tooltipText:labelHTML+" N:"+shapes.length+"\n"+formatTime(e.dur)+info, bufs:[], key, ctx:shapeRef?.ctx, step:shapeRef?.step };
         if (e.key != null) shapeMap.set(e.key, key);
         // offset y by depth
         shapes.push({x:e.st, y:levelHeight*depth, width:e.dur, height:levelHeight, arg, label:opts.hideLabels ? null : label, fillColor });
@@ -492,6 +512,8 @@ async function renderProfiler(path, unit, opts) {
     }
   }
   for (const m of markers) m.label = m.name.split(/(\s+)/).map(st => ({ st, color:m.color, width:ctx.measureText(st).width }));
+  data.pcToShape = new Map([...data.pcToShape].sort((a, b) => a[1].st - b[1].st));
+  if (extData.pcMap != null) data.pcMap = extData.pcMap; setFocus(focusedShape);
   updateProgress(Status.COMPLETE);
   // draw events on a timeline
   const dpr = window.devicePixelRatio || 1;
@@ -837,6 +859,8 @@ async function main() {
   // ** center graph
   const { currentCtx, currentStep, currentRewrite, expandSteps } = state;
   if (currentCtx == -1) return;
+  // always have a new sidebar when view changes
+  metadata.innerHTML = "";
   const ctx = ctxs[currentCtx];
   const step = ctx.steps[currentStep];
   const ckey = step?.query;
@@ -868,7 +892,6 @@ async function main() {
       opts = {heightScale:0.5, hideLabels:true, levelKey:step.name.includes("PKTS") ? (e) => parseInt(e.name.split(" ")[1].split(":")[1]) : null, colorByName:ckey.includes("pkts")};
       return renderProfiler(ckey, "clk", opts);
     }
-    metadata.innerHTML = "";
     ret.metadata?.forEach(m => {
       if (Array.isArray(m)) return metadata.appendChild(tabulate(m.map(({ label, value }) => {
         return [label.trim(), typeof value === "string" ? value : formatUnit(value)];
