@@ -17,12 +17,15 @@ pm_ctx = PatternMatcher([
 
 ReturnType = TypeVar('ReturnType')
 class function(Generic[ReturnType]):
-  def __init__(self, fxn:Callable[..., ReturnType]):
+  def __init__(self, fxn:Callable[..., ReturnType]|None=None, *, precompile:bool=False):
     self.fxn = fxn
-
-  def __get__(self, obj, objtype=None): return functools.partial(self.__call__, obj) if obj is not None else self
+    self.precompile = precompile
 
   def __call__(self, *args, **kwargs) -> ReturnType:
+    # support @function(precompile=True) syntax: when fxn is not yet set, the first call provides it
+    if self.fxn is None:
+      self.fxn = args[0]
+      return self  # type: ignore
     input_uops: list[UOp] = [(t.uop if isinstance(t, Tensor) else t)
                              for name,t in list(enumerate(args))+sorted(kwargs.items()) if isinstance(t, (Tensor, UOp))]
 
@@ -57,6 +60,8 @@ class function(Generic[ReturnType]):
     #call = assigned.call(*call_uops, buffer, name=name)
     #ret = buffer.after(call)
 
-    ret = uret.call(*call_uops, name=name)
+    ret = uret.call(*call_uops, name=name, precompile=self.precompile)
     return cast(ReturnType, Tensor(ret, device=ret.device))
+
+  def __get__(self, obj, objtype=None): return functools.partial(self.__call__, obj) if obj is not None else self
 

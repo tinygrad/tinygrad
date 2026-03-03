@@ -1,6 +1,6 @@
 import unittest
 import numpy as np
-from tinygrad import Tensor
+from tinygrad import Tensor, function
 from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import UOp
 
@@ -99,6 +99,19 @@ class TestCall(unittest.TestCase):
     Tensor.realize(a, b)
     c = Tensor.call(a, b, fxn=a.as_param(0) + b.as_param(1))
     np.testing.assert_equal(c.numpy(), 2 * np.ones((10, 10)))
+
+class TestCallSchedule(unittest.TestCase):
+  def test_call_double_gemm(self):
+    a = Tensor.randn(4, 8, requires_grad=True)
+    b = Tensor.randn(8, 12, requires_grad=True)
+    c = Tensor.randn(12, 16, requires_grad=True)
+    ref = Tensor.randn(4, 16)
+    Tensor.realize(a,b,c,ref)
+    @function(precompile=True)
+    def gemm(a:Tensor, b:Tensor, c:Tensor) -> Tensor: return (a@b)@c
+    out = gemm(a,b,c)
+    (out-ref).square().mean().backward()
+    out.realize(a.grad, b.grad, c.grad)
 
 if __name__ == '__main__':
   unittest.main()
