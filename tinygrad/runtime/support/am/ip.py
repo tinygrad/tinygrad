@@ -506,6 +506,8 @@ class AM_SDMA(AM_IP):
     for reg, inst in self.sdma_reginst:
       self.adev.reg(f"{reg}_RB_CNTL").update(rb_enable=0, inst=inst)
       self.adev.reg(f"{reg}_IB_CNTL").update(ib_enable=0, inst=inst)
+      self.adev.reg(f"{reg}_DOORBELL").update(enable=0, inst=inst)
+      self.adev.reg(f"{reg}_DOORBELL_OFFSET").update(offset=0, inst=inst)
 
     if self.adev.ip_ver[am.SDMA0_HWIP] >= (6,0,0):
       self.adev.regGRBM_SOFT_RESET.write(soft_reset_sdma0=1)
@@ -519,8 +521,8 @@ class AM_SDMA(AM_IP):
     self.sdma_reginst.append((reg, inst))
 
     self.adev.reg(f"{reg}_MINOR_PTR_UPDATE").write(0x1, inst=inst)
-    if not self.adev.partial_boot: self.adev.wreg_pair(f"{reg}_RB_RPTR", "", "_HI", 0, inst=inst)
-    if not self.adev.partial_boot: self.adev.wreg_pair(f"{reg}_RB_WPTR", "", "_HI", 0, inst=inst)
+    self.adev.wreg_pair(f"{reg}_RB_RPTR", "", "_HI", 0, inst=inst)
+    self.adev.wreg_pair(f"{reg}_RB_WPTR", "", "_HI", 0, inst=inst)
     self.adev.wreg_pair(f"{reg}_RB_BASE", "", "_HI", ring_addr >> 8, inst=inst)
     self.adev.wreg_pair(f"{reg}_RB_RPTR_ADDR", "_LO", "_HI", rptr_addr, inst=inst)
     self.adev.wreg_pair(f"{reg}_RB_WPTR_POLL_ADDR", "_LO", "_HI", wptr_addr, inst=inst)
@@ -530,7 +532,7 @@ class AM_SDMA(AM_IP):
     self.adev.reg(f"{reg}_RB_CNTL").write(**({f'{self.sdma_name.lower()}_wptr_poll_enable':1} if self.adev.ip_ver[am.SDMA0_HWIP][:2]!=(4,4) else {}),
       rb_vmid=0, rptr_writeback_enable=1, rptr_writeback_timer=4, rb_enable=1, rb_priv=1, rb_size=(ring_size//4).bit_length()-1, inst=inst)
     self.adev.reg(f"{reg}_IB_CNTL").update(ib_enable=1, inst=inst)
-    return self.adev.reg(f"{reg}_RB_WPTR").read(inst=inst) | (self.adev.reg(f"{reg}_RB_WPTR_HI").read(inst=inst) << 32), doorbell
+    return 0, doorbell
 
 class AM_PSP(AM_IP):
   def init_sw(self):
