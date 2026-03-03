@@ -796,7 +796,6 @@ class TestSchedule(unittest.TestCase):
       self.assertIsInstance(out.uop.base.realized.dtype, ImageDType)
 
   @unittest.skipIf(Device.DEFAULT != "CL", "image only supported on CL")
-  @unittest.expectedFailure
   def test_image_dot_f16_fusion(self):
     with Context(FLOAT16=1):
       def cnt():
@@ -809,7 +808,8 @@ class TestSchedule(unittest.TestCase):
       with Context(IMAGE=1): cnt1 = cnt()
       with Context(IMAGE=2): cnt2 = cnt()
 
-      self.assertEqual(cnt1, cnt2)
+      self.assertEqual(cnt1, 5)
+      self.assertEqual(cnt2, 5)
 
   @unittest.skipIf(Device.DEFAULT != "CL", "image only supported on CL")
   @unittest.expectedFailure
