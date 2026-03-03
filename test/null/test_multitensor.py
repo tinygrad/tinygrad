@@ -5,6 +5,7 @@ class TestMultiRamUsage(unittest.TestCase):
   def setUp(self):
     gc.collect()
     self.baseline = GlobalCounters.mem_used
+    self.baseline_per_device = dict(GlobalCounters.mem_used_per_device)
     self.N = 100
   def assertUsed(self, amt, strict=True):
     gc.collect()
@@ -12,6 +13,11 @@ class TestMultiRamUsage(unittest.TestCase):
     print(f"used {used} bytes")
     if strict: self.assertEqual(used, amt)
     else: self.assertLessEqual(used, amt)
+  def assertDeviceUsed(self, expected:dict[str, int]):
+    gc.collect()
+    for dev, amt in expected.items():
+      used = GlobalCounters.mem_used_per_device[dev] - self.baseline_per_device.get(dev, 0)
+      self.assertEqual(used, amt, f"device {dev}: expected {amt} bytes used, got {used}")
 
   def test_zeros(self):
     _ = Tensor.zeros(self.N, self.N).contiguous().realize()
@@ -58,6 +64,32 @@ class TestMultiRamUsage(unittest.TestCase):
     self.assertUsed(0)
     X.shard_(devices_4, axis=0).realize()
     self.assertUsed(256 * 4)  # TODO: can be zero
+
+  def test_zeros_per_device(self):
+    _ = Tensor.zeros(self.N, self.N).contiguous().realize()
+    self.assertDeviceUsed({"NULL": self.N*self.N*4})
+
+  def test_zeros_del_per_device(self):
+    _ = Tensor.zeros(self.N, self.N).contiguous().realize()
+    del _
+    self.assertDeviceUsed({"NULL": 0})
+
+  def test_zeros_copy_per_device(self):
+    _ = Tensor.zeros(self.N, self.N).contiguous().to(("NULL:1", "NULL:2")).realize()
+    self.assertDeviceUsed({"NULL:1": self.N*self.N*4, "NULL:2": self.N*self.N*4})
+
+  def test_zeros_shard_per_device(self):
+    devices_2 = ("NULL:1", "NULL:2")
+    _ = Tensor.zeros(self.N, self.N).contiguous().shard(devices_2, axis=0).realize()
+    self.assertDeviceUsed({"NULL:1": self.N*(self.N//2)*4, "NULL:2": self.N*(self.N//2)*4})
+
+  def test_sharded_memory_replicated_per_device(self):
+    devices_4 = tuple(f"NULL:{i+1}" for i in range(4))
+    X = Tensor.ones(256).contiguous().realize()
+    self.assertDeviceUsed({"NULL": 256*4})
+    X.shard_(devices_4).realize()
+    for d in devices_4:
+      self.assertDeviceUsed({d: 256*4})
 
   def _test_matmul_half(self, dev_count:int):
     N = 32
