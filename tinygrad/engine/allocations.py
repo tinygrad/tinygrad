@@ -96,6 +96,11 @@ def contiguous_mops_to_view(c:UOp):
   # NOTE: this contiguous is removed because this BUFFER_VIEW/RESHAPE has_buffer_identity
   return UOp(Ops.BUFFER_VIEW, src.dtype, (buf,), (size, offset)).reshape(src.shape).contiguous(tag=c.tag)
 
+def make_float16(assign:UOp, buf:UOp, val:UOp):
+  if not FLOAT16: return None
+  new_buf = buf.replace(dtype=dtypes.half, src=(buf.src[0].replace(dtype=dtypes.half), *buf.src[1:]) if buf.op is Ops.RESHAPE else buf.src)
+  return assign.replace(dtype=dtypes.half, src=(new_buf, val.cast(dtypes.half))).cast(dtypes.float)
+
 pm_early_transform_tensor_graph = PatternMatcher([
   # CONTIGUOUS(MOPS(BUFFER/BUFFER_VIEW)) → CONTIGUOUS(BUFFER_VIEW) when movement ops collapse to contiguous range
   (UPat(Ops.CONTIGUOUS, src=(UPat(GroupOp.Movement),), name="c"), contiguous_mops_to_view),
@@ -123,11 +128,8 @@ pm_early_transform_tensor_graph = PatternMatcher([
   (UPat(GroupOp.All-{Ops.SINK}, name="x"), lambda x: x.const_like(0).rtag(x.tag) if x._shape is not None and x.size == 0 else None),
   # early fixup const copy (TODO: is this wrong if there's a pad?)
   (UPat(Ops.COPY, src=(UPat.var("s"), UPat()), name="c"), lambda c,s: c.const_like(ss.arg) if (ss:=s.base).op is Ops.CONST else None),
-])
-
-pm_float16 = PatternMatcher([
-  (UPat(Ops.ASSIGN, src=(UPat(Ops.RESHAPE, src=(UPat(Ops.BUFFER, dtypes.float, name="buf"),), allow_any_len=True, name="rs"), UPat(GroupOp.All-{Ops.COPY}, name="x")), name="a"),
-   lambda a,rs,buf,x: a.replace(dtype=dtypes.half, src=(rs.replace(src=(buf.replace(dtype=dtypes.half), *rs.src[1:])), x.cast(dtypes.half))).cast(dtypes.float))
+  # IMAGE FLOAT16: use the texture sampler to store as half and automatically cast float load/store
+  (UPat(Ops.ASSIGN, dtypes.float, src=(UPat.var("buf"), UPat(GroupOp.All-{Ops.COPY}, name="val")), name="assign"), make_float16),
 ])
 
 def untag_and_append(ctx:AllocCtx, x:UOp):
@@ -180,8 +182,6 @@ def transform_to_call(big_sink:UOp) -> tuple[UOp, dict[UOp, UOp]]:
 
   # here we can break the tensor graph. this is the only place you need to maintain numbered tags
   big_sink = graph_rewrite(big_sink, pm_early_transform_tensor_graph, ctx={}, name="early transform tensor graph")
-
-  if FLOAT16: big_sink = graph_rewrite(big_sink, pm_float16, name="float16 rewrite")
 
   # here we construct the final buffer_map. this is everything that will go into the tensor map
   graph_rewrite(big_sink, pm_finalize_call, ctx=ctx, name="finalize call")
