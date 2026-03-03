@@ -1273,12 +1273,13 @@ if TRACK_MATCH_STATS or PROFILE:
 SENTINEL: Final[UOp] = cast(UOp, object())
 class BottomUpGate(Exception): pass
 class RewriteContext:
-  def __init__(self, pm, bpm, ctx=None):
+  def __init__(self, pm, bpm, ctx=None, enter_calls=False):
     self.pm: PatternMatcher|None = pm
     self.bpm: PatternMatcher|None = bpm
     self.bpm_cache: dict[UOp, UOp|None] = {}
     self.ctx = ctx
     self.replace: dict[UOp, UOp] = {}
+    self.enter_calls = enter_calls
 
   # no cache needed: pm_rewrite is called at most once per UOp due to the replace dict check in unified_rewrite
   def pm_rewrite(self, x:UOp) -> UOp|None: return unwrap(self.pm).rewrite(x, self.ctx)
@@ -1301,7 +1302,7 @@ class RewriteContext:
           continue
         # no rewrite, process children then come back to rebuild
         stack.append((n, True))
-        if n.op is Ops.CALL: self.replace[n.src[0]] = n.src[0]
+        if not self.enter_calls and n.op is Ops.CALL: self.replace[n.src[0]] = n.src[0]
         for x in reversed(n.src):
           if x not in self.replace: stack.append((x, False))
       else:
@@ -1341,7 +1342,7 @@ class RewriteContext:
         # NOTE: CALL is handled as a special case.
         # The function that is called is not included in the graph_rewrite.
         # If you want to graph_rewrite a call, you can
-        if new_n.op is Ops.CALL: self.replace[new_n.src[0]] = new_n.src[0]
+        if not self.enter_calls and new_n.op is Ops.CALL: self.replace[new_n.src[0]] = new_n.src[0]
         for x in reversed(new_n.src):
           if x in on_stack: continue
           stack.append((x, 0, x))
@@ -1380,8 +1381,8 @@ class RewriteContext:
     return self.replace[root]
 
 @profile_matches
-def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False, name=None, bpm=None, walk=False) -> UOp:
-  rewrite_ctx = RewriteContext(pm if not bottom_up else None, pm if bottom_up else bpm, ctx)
+def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False, name=None, bpm=None, walk=False, enter_calls=False) -> UOp:
+  rewrite_ctx = RewriteContext(pm if not bottom_up else None, pm if bottom_up else bpm, ctx, enter_calls)
   return rewrite_ctx.walk_rewrite(sink) if walk else rewrite_ctx.unified_rewrite(sink)
 
 def sint_to_uop(x:sint, dtype=dtypes.index) -> UOp: return UOp.const(dtype, x) if isinstance(x, int) else x.cast(dtype)

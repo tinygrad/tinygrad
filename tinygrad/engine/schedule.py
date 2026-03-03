@@ -4,7 +4,7 @@ from collections import deque
 from tinygrad.uop.ops import UOp, Ops, buffers, UOpMetaClass, track_rewrites, graph_rewrite, gate_kernel_sink, KernelInfo
 from tinygrad.uop.spec import type_verify, tensor_spec
 from tinygrad.device import Buffer, MultiBuffer
-from tinygrad.helpers import DEBUG, cpu_profile, TracingKey, SPEC, pluralize, SCACHE, BASEDIR, flatten, colored
+from tinygrad.helpers import DEBUG, cpu_profile, TracingKey, SPEC, pluralize, SCACHE, BASEDIR, flatten
 from tinygrad.engine.realize import ExecItem
 
 # **** schedule linearizer
@@ -107,16 +107,14 @@ pm_resolve_linear_call = PatternMatcher([
 
 schedule_cache: dict[bytes, UOp] = {}
 # ctx is just for DEBUG on inner
-def lower_schedule_to_linear(ctx:bool, big_sink:UOp) -> UOp|None:
+def lower_sink_to_linear(function:UOp) -> UOp|None:
   st = time.perf_counter()
-  function = big_sink.src[0]
   if isinstance(function.arg, KernelInfo): return None
   cache_key = function.key
   if not SCACHE or (sc_ret:=schedule_cache.get(cache_key, None)) is None:
-    if SPEC: type_verify(big_sink, tensor_spec)
+    if SPEC: type_verify(function, tensor_spec)
     # support recursive CALLs
-    function_linear = graph_rewrite(function, pm_schedule, ctx=True, name="inner schedule to linear")
-    linear = create_schedule(get_kernel_graph(function_linear))
+    linear = create_schedule(get_kernel_graph(function))
     if SCACHE: schedule_cache[cache_key] = linear
   else:
     # schedule cache hit
@@ -128,19 +126,19 @@ def lower_schedule_to_linear(ctx:bool, big_sink:UOp) -> UOp|None:
       if not frm.filename.startswith(str(BASEDIR)) and not frm.filename.endswith("/contextlib.py"): break
     else:
       frm = None
-    print(f"{colored('scheduled', 'BLACK' if ctx else 'WHITE')} {len(linear.src):5d} kernels in {(time.perf_counter()-st)*1000:8.2f} ms"+\
+    print(f"scheduled {len(linear.src):5d} kernels in {(time.perf_counter()-st)*1000:8.2f} ms"+\
           f" | {' cache hit' if SCACHE and sc_ret is not None else 'CACHE MISS'} {cache_key.hex()[:8]}"+\
           f" | {len(UOpMetaClass.ucache):7d} uops in cache"+("" if frm is None else f" | {frm.filename}:{frm.lineno}"))
-  return big_sink.replace(src=(linear,)+big_sink.src[1:])
+  return linear
 
 pm_schedule = PatternMatcher([
-  (UPat(Ops.CALL, src=(UPat(Ops.SINK),), allow_any_len=True, name="big_sink"), lower_schedule_to_linear),
+  (UPat(Ops.SINK, name="function"), lower_sink_to_linear),
 ])
 
 @track_rewrites(lambda _,ret: f"Schedule {pluralize('Kernel', len(ret[0]))}")
 def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[list[ExecItem], dict[str, int]]:
   # big_sink srcs are all the Tensors
-  linear_call = graph_rewrite(big_sink, pm_schedule, ctx=False, name="schedule to linear")
+  linear_call = graph_rewrite(big_sink, pm_schedule, name="schedule to linear", enter_calls=True)
 
   # this recursively resolves the linear_call and allocates buffers
   linear = graph_rewrite(linear_call, pm_resolve_linear_call, name="resolve linear call")
