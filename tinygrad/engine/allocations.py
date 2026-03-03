@@ -88,15 +88,14 @@ def contiguous_mops_to_view(c:UOp):
   if not hasattr(Device[c.device].allocator, "_offset"): return None
 
   # see if this can be a view
-  size_offset = src.contiguous_view_offset()
-  if size_offset is None: return None
+  offset = src.contiguous_view_offset()
+  if offset is None: return None
 
   # merge BUFFER_VIEWs
-  size, offset = size_offset
   if buf.op is Ops.BUFFER_VIEW: offset, buf = offset + buf.arg[1], buf.src[0]
 
   # NOTE: this contiguous is removed because this BUFFER_VIEW/RESHAPE has_buffer_identity
-  return UOp(Ops.BUFFER_VIEW, src.dtype, (buf,), (size, offset)).reshape(src.shape).contiguous(tag=c.tag)
+  return UOp(Ops.BUFFER_VIEW, src.dtype, (buf,), (src.size, offset)).reshape(src.shape).contiguous(tag=c.tag)
 
 
 def transform_precompiled_call(c:UOp) -> UOp|None:
