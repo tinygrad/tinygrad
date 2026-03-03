@@ -1750,7 +1750,7 @@ class Tensor(OpMixin):
     print(t.all(axis=1, keepdim=True).numpy())
     ```
     """
-    return self.logical_not().any(axis, keepdim).logical_not()
+    return self.bool().min(axis, keepdim)
 
   def isclose(self, other:Tensor, rtol:float=1e-05, atol:float=1e-08, equal_nan=False) -> Tensor:
     """
@@ -3265,7 +3265,7 @@ class Tensor(OpMixin):
     ```
     """
     if not dtypes.is_int(self.dtype): raise RuntimeError(f"expect integer dtype, getting {self.dtype=}")
-    if num_classes == -1: num_classes = int((self.max()+1).item())
+    if num_classes == -1: num_classes = int(self.max().item())+1
     return self[..., None]._one_hot_along_dim(num_classes).where(1, 0)
 
   def scaled_dot_product_attention(self, key:Tensor, value:Tensor, attn_mask:Tensor|None=None, dropout_p:float=0.0,

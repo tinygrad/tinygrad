@@ -243,14 +243,14 @@ class AMDev(PCIDevImplBase):
   def reg(self, reg:str) -> AMRegister: return self.__dict__[reg]
 
   def rreg(self, reg:int) -> int:
-    val = self.indirect_rreg(reg) if reg > len(self.mmio) else self.mmio[reg]
+    val = self.indirect_rreg(reg) if reg >= len(self.mmio) else self.mmio[reg]
     if AM_DEBUG >= 4 and getattr(self, '_prev_rreg', None) != (reg, val): print(f"am {self.devfmt}: Reading register {reg:#x} with value {val:#x}")
     self._prev_rreg = (reg, val)
     return val
 
   def wreg(self, reg:int, val:int):
     if AM_DEBUG >= 4: print(f"am {self.devfmt}: Writing register {reg:#x} with value {val:#x}")
-    if reg > len(self.mmio): self.indirect_wreg(reg, val)
+    if reg >= len(self.mmio): self.indirect_wreg(reg, val)
     else: self.mmio[reg] = val
 
   def wreg_pair(self, reg_base:str, lo_suffix:str, hi_suffix:str, val:int, inst:int=0):

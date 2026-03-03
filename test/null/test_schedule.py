@@ -234,6 +234,18 @@ class TestSchedule(unittest.TestCase):
     d = Tensor.empty(1).assign(c)
     check_schedule(d, 1)
 
+  def test_detach_assign(self):
+    a = Tensor.ones(4, 4).contiguous().realize()
+    buf1, buf2 = Tensor.empty(4, 4).contiguous(), Tensor.empty(4, 4).contiguous()
+    r = buf2.assign(buf1.assign(a + 1.0) * 2.0)
+    check_schedule(r.detach().contiguous(), 2)
+
+  def test_contiguous_backward_assign(self):
+    a = Tensor.ones(4, 4).contiguous().realize()
+    buf1, buf2 = Tensor.empty(4, 4).contiguous(), Tensor.empty(4, 4).contiguous()
+    r = buf2.assign(buf1.assign(a + 1.0) * 2.0)
+    check_schedule(r.contiguous_backward().contiguous(), 2)
+
   def test_mulacc_relu_fusion(self):
     a = Tensor.empty(10)
     b = Tensor.empty(10)
