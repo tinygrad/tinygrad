@@ -684,8 +684,7 @@ class TestAssignOrdering(unittest.TestCase):
     np.testing.assert_equal(buf.numpy(), [1, 2, 3, 4, 1, 2, 3, 4])
 
   def test_swap_slices(self):
-    """Swap two non-overlapping slices - requires reading both before writing."""
-    # without .realize() on temps: values not captured before overwriting
+    """Swap two non-overlapping slices"""
     buf = Tensor([1, 2, 3, 4, 5, 6, 7, 8]).contiguous().realize()
     left = buf[0:4].contiguous()  # lazy - not captured yet
     right = buf[4:8].contiguous()  # lazy - not captured yet
