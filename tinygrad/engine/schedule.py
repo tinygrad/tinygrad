@@ -6,7 +6,6 @@ from tinygrad.uop.spec import type_verify, tensor_spec
 from tinygrad.device import Buffer, MultiBuffer
 from tinygrad.helpers import DEBUG, cpu_profile, TracingKey, SPEC, pluralize, SCACHE, BASEDIR, flatten
 from tinygrad.engine.realize import ExecItem
-from tinygrad.schedule.rangeify import resolve_call
 
 # **** schedule linearizer
 
@@ -95,8 +94,12 @@ pm_post_sched_cache = PatternMatcher([
   (UPat(Ops.PARAM, name="x"), lambda ctx,x: ctx[1][x.arg]),
   # create new BUFFERs for LUNIQUE BUFFERs from rangeify
   (UPat(Ops.BUFFER, src=(UPat(Ops.LUNIQUE), UPat(Ops.DEVICE)), name="b"), create_new_buffer),
+])
+
+pm_resolve_linear_call = PatternMatcher([
   # call LINEAR is resolved here
-  (UPat(Ops.CALL, src=(UPat(Ops.LINEAR),), name="c", allow_any_len=True), lambda c: resolve_call(c, allow_shape_mismatch=True)),
+  (UPat(Ops.CALL, src=(UPat(Ops.LINEAR),), name="linear_call", allow_any_len=True), lambda linear_call:
+   graph_rewrite(linear_call.src[0], pm_post_sched_cache, ctx=({}, linear_call.src[1:]), walk=True, name="params to buffers")),
   # LINEAR on LINEAR
   (UPat(Ops.LINEAR, custom_early_reject={Ops.LINEAR}, name="x"),
    lambda x: x.replace(src=tuple(flatten(x.src if x.op is Ops.LINEAR else (x,) for x in x.src)))),
@@ -136,8 +139,7 @@ pm_schedule = PatternMatcher([
 def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[list[ExecItem], dict[str, int]]:
   # big_sink srcs are all the Tensors
   linear_call = graph_rewrite(big_sink, pm_schedule, name="schedule to linear")
-  linear = graph_rewrite(linear_call.src[0], pm_post_sched_cache,
-                         ctx=({}, linear_call.src[1:]), walk=True, name="params to buffers")
+  linear = graph_rewrite(linear_call, pm_resolve_linear_call, name="resolve linear call")
 
   # vars used in the schedule
   used_vars = set().union(*[{v.expr for v in si.src[0].variables()} for si in linear.src])
