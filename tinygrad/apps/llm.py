@@ -451,7 +451,7 @@ if __name__ == "__main__":
 
   # do benchmark
   if args.benchmark:
-    gen = model.generate(toks:=[bos_id or 0])
+    gen = model.generate(toks:=([bos_id or 0] + (tok.encode("<sop>") if tok.preset == 'glm4' else [])), 0)
     for _ in range(args.benchmark):
       GlobalCounters.reset()
       with Timing(on_exit=lambda x: f", {1e9/x:6.2f} tok/s, {GlobalCounters.global_mem/x:7.2f} GB/s,"
