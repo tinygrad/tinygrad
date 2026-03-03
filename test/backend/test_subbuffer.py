@@ -42,7 +42,7 @@ class TestSubBuffer(unittest.TestCase):
     assert out == [102, 103]
 
   @needs_second_gpu
-  @unittest.skipIf(Device.DEFAULT not in {"CUDA", "NV", "AMD"} and not getenv("MOCKGPU"), "only NV, AMD, CUDA")
+  @unittest.skipIf(Device.DEFAULT not in {"CUDA", "NV", "AMD"} or getenv("MOCKGPU"), "only NV, AMD, CUDA")
   def test_subbuffer_transfer(self):
     t = Tensor.arange(0, 10, dtype=dtypes.uint8).realize()
     vt = t[2:5].contiguous().realize()
