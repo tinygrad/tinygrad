@@ -687,16 +687,16 @@ class TestAssignOrdering(unittest.TestCase):
     """Swap two non-overlapping slices - requires reading both before writing."""
     # without .realize() on temps: values not captured before overwriting
     buf = Tensor([1, 2, 3, 4, 5, 6, 7, 8]).contiguous().realize()
-    left = buf[0:4].contiguous()  # lazy - not captured yet
-    right = buf[4:8].contiguous()  # lazy - not captured yet
+    left = buf[0:4].clone()  # lazy - not captured yet
+    right = buf[4:8].clone()  # lazy - not captured yet
     buf[0:4].assign(right).realize()  # this works
     buf[4:8].assign(left).realize()  # left now reads from modified buf!
     np.testing.assert_equal(buf.numpy(), [5, 6, 7, 8, 5, 6, 7, 8])  # TODO: wrong! should be [5,6,7,8,1,2,3,4]
 
     # with .realize() on temps: values captured before writes
     buf = Tensor([1, 2, 3, 4, 5, 6, 7, 8]).contiguous().realize()
-    left = buf[0:4].contiguous().realize()
-    right = buf[4:8].contiguous().realize()
+    left = buf[0:4].clone().realize()
+    right = buf[4:8].clone().realize()
     buf[0:4].assign(right).realize()
     buf[4:8].assign(left).realize()
     np.testing.assert_equal(buf.numpy(), [5, 6, 7, 8, 1, 2, 3, 4])

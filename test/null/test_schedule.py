@@ -117,7 +117,7 @@ class TestContiguous(unittest.TestCase):
   def test_size_change_buffer_view(self):
     a = Tensor.empty(4)
     b = a.reshape((1, 1, 4)).shrink(((0, 1), (0, 1), (0, 3))).contiguous()
-    check_schedule(b, 1)
+    check_schedule(b, 0)  # contiguous shrink of a realized buffer is a zero-copy BUFFER_VIEW
 
   def test_double_contiguous_realizes_once(self):
     a = Tensor.empty(4, 1)
@@ -233,6 +233,18 @@ class TestSchedule(unittest.TestCase):
     c = (a*b).sum()
     d = Tensor.empty(1).assign(c)
     check_schedule(d, 1)
+
+  def test_detach_assign(self):
+    a = Tensor.ones(4, 4).contiguous().realize()
+    buf1, buf2 = Tensor.empty(4, 4).contiguous(), Tensor.empty(4, 4).contiguous()
+    r = buf2.assign(buf1.assign(a + 1.0) * 2.0)
+    check_schedule(r.detach().contiguous(), 2)
+
+  def test_contiguous_backward_assign(self):
+    a = Tensor.ones(4, 4).contiguous().realize()
+    buf1, buf2 = Tensor.empty(4, 4).contiguous(), Tensor.empty(4, 4).contiguous()
+    r = buf2.assign(buf1.assign(a + 1.0) * 2.0)
+    check_schedule(r.contiguous_backward().contiguous(), 2)
 
   def test_mulacc_relu_fusion(self):
     a = Tensor.empty(10)
@@ -1157,6 +1169,24 @@ class TestFusionOp(unittest.TestCase):
     sched = r.schedule()
     self.assertEqual(len(sched), 1)
     self.assertLess(time.perf_counter()-st, 2.0)
+
+# NOTE: the NULL backend supports BUFFER_VIEW
+class TestBufferView(unittest.TestCase):
+  def test_shrink_contiguous_is_buffer_view(self):
+    # simple 1D shrink of a realized buffer should be BUFFER_VIEW, not a copy kernel
+    a = Tensor.arange(100).contiguous().realize()
+    b = a.shrink(((10, 50),)).contiguous()
+    run_schedule(check_schedule(b, 0))
+
+  def test_shrink_2d_contiguous_is_buffer_view(self):
+    a = Tensor.arange(100).reshape(10,10).contiguous().realize()
+    b = a.shrink(((1, 5),None)).contiguous()
+    run_schedule(check_schedule(b, 0))
+
+  def test_chained_shrink_is_buffer_view(self):
+    a = Tensor.arange(1000).contiguous().realize()
+    b = a.shrink(((200, 800),)).shrink(((0, 300),)).reshape((30, 10)).shrink(((20, 25), (0, 10))).contiguous()
+    run_schedule(check_schedule(b, 0))
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)
