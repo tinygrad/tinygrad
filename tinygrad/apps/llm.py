@@ -150,7 +150,7 @@ class TransformerBlock:
     attn = self.attn_output(attn)
     return x + attn
 
-  @function
+  @function(precompile=bool(getenv("PRECOMPILE", 0)))
   def _feed_forward(self, h: Tensor) -> Tensor:
     h_norm = self.ffn_norm(h)
     if hasattr(self, 'ffn_gate_exps'):
@@ -165,7 +165,8 @@ class TransformerBlock:
   def __call__(self, x: Tensor, start_pos: int|UOp):
     if not hasattr(self, "cache_kv"):
       # TODO: how is the dtype of this determined?
-      self.cache_kv = Tensor.zeros(2, x.shape[0], self.n_kv_heads, self.max_context, self.head_dim, device=x.device).contiguous().realize()
+      # NOTE: clone is used to promise the creation of a specific buffer
+      self.cache_kv = Tensor.zeros(2, x.shape[0], self.n_kv_heads, self.max_context, self.head_dim, device=x.device).clone()
     return self._feed_forward(self._attention(x, start_pos)).contiguous()
 
 class Transformer:
@@ -355,23 +356,25 @@ if __name__ == "__main__":
   import gc
   gc.collect()
 
-  # do benchmark
-  if args.benchmark:
-    gen = model.generate([0], 0)
-    for _ in range(args.benchmark):
-      GlobalCounters.reset()
-      with Timing(on_exit=lambda x: f", {1e9/x:6.2f} tok/s, {GlobalCounters.global_mem/x:7.2f} GB/s,"
-                  f" {GlobalCounters.global_mem//1000000}/{GlobalCounters.mem_used//1000000} MB"): next(gen)
-    exit(0)
-
   # extract some metadata
   tok = SimpleTokenizer.from_gguf_kv(kv)
   bos_id: int|None = kv.get('tokenizer.ggml.bos_token_id') if kv.get('tokenizer.ggml.add_bos_token', True) else None
   eos_id: int = kv['tokenizer.ggml.eos_token_id']
 
+  # do benchmark
+  if args.benchmark:
+    gen = model.generate(toks:=[bos_id or 0], 0)
+    for _ in range(args.benchmark):
+      GlobalCounters.reset()
+      with Timing(on_exit=lambda x: f", {1e9/x:6.2f} tok/s, {GlobalCounters.global_mem/x:7.2f} GB/s,"
+                  f" {GlobalCounters.global_mem//1000000}/{GlobalCounters.mem_used//1000000} MB  --  "+\
+                  tok.decode(toks).replace("\n", "\\n")): next(gen)
+    exit(0)
+
   # start server
   if args.serve: TCPServerWithReuse(('', args.serve), Handler).serve_forever()
 
+  # interactive chat
   ids: list[int] = [bos_id] if bos_id is not None else []
   while 1:
     start_pos = max(len(ids) - 1, 0)

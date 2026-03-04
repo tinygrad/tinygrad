@@ -661,7 +661,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install llvm-21 llvm-21-tools cloc
       - name: Install rocprof-trace-decoder
-        run: sudo PYTHONPATH="." ./extra/sqtt/install_sqtt_decoder.py
+        run: sudo PYTHONPATH="." ./extra/sqtt/install_rocprof_decoder.py
       - name: Run AMD renderer tests
         run: AMD_LLVM=0 python -m pytest -n=auto test/amd/ --durations 20
       - name: Run AMD renderer tests (AMD_LLVM=1)
