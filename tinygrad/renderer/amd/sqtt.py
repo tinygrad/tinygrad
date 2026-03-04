@@ -603,25 +603,19 @@ def decode_cdna(data: bytes) -> Iterator[PacketType]:
     if tok is None: break
     pkt_cls, raw, delta = tok
     globaltime += delta * 4
-
     if pkt_cls is CDNA_MISC:
       if ((raw >> 13) & 0x7) == 1: _patch_time()
-      continue
-    if pkt_cls is CDNA_TIMESTAMP: continue  # consumed by _patch_time
-
-    if pkt_cls is WAVESTART_CDNA:
+    elif pkt_cls is CDNA_TIMESTAMP: pass  # consumed by _patch_time
+    elif pkt_cls is WAVESTART_CDNA:
       p = WAVESTART_CDNA.from_raw(raw, globaltime)
       key = (p.wave, p.simd, p.cu)
-      if p.cu == target_cu and p.sh == 0:
-        if p.count > 64: continue  # trap-related restart
+      if p.cu == target_cu and p.sh == 0 and p.count <= 64:
         wave_active[p.simd][p.wave] = True
         wave_issued[p.simd][p.wave] = []
       if key not in running_waves:
         running_waves.add(key)
         yield p
-      continue
-
-    if pkt_cls is WAVEEND_CDNA:
+    elif pkt_cls is WAVEEND_CDNA:
       p = WAVEEND_CDNA.from_raw(raw, globaltime)
       key = (p.wave, p.simd, p.cu)
       if p.cu == target_cu and p.sh == 0:
@@ -630,9 +624,7 @@ def decode_cdna(data: bytes) -> Iterator[PacketType]:
       if key in running_waves:
         running_waves.discard(key)
         yield p
-      continue
-
-    if pkt_cls is CDNA_ISSUE:
+    elif pkt_cls is CDNA_ISSUE:
       p = CDNA_ISSUE.from_raw(raw, globaltime)
       for wave_id in range(10):
         status = p.wave_status(wave_id)
@@ -642,9 +634,7 @@ def decode_cdna(data: bytes) -> Iterator[PacketType]:
           pkt = CDNA_DECODED_IMMED.from_raw(0, globaltime + 4)
           pkt.wave, pkt.simd, pkt.cu = wave_id, p.simd, target_cu
           yield pkt
-      continue
-
-    if pkt_cls is CDNA_INST: # confirms queued ISSUE
+    elif pkt_cls is CDNA_INST: # confirms queued ISSUE
       p = CDNA_INST.from_raw(raw, globaltime)
       if wave_active[p.simd][p.wave] and wave_issued[p.simd][p.wave]:
         issue_time = wave_issued[p.simd][p.wave].pop(0)
@@ -655,7 +645,6 @@ def decode_cdna(data: bytes) -> Iterator[PacketType]:
       elif not wave_active[p.simd][p.wave] and p.wave < 10:
         wave_active[p.simd][p.wave] = True  # implicit wave start (lost packet recovery)
         wave_issued[p.simd][p.wave] = []
-      continue
 
 def decode(data: bytes) -> Iterator[PacketType]:
   """Decode raw SQTT blob, yielding packet instances. Auto-detects RDNA (layout 3/4) vs CDNA."""
