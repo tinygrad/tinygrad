@@ -580,21 +580,22 @@ class TestSchedule(unittest.TestCase):
 
   # this is the failing case in openpilot...it's very simple like this
   def test_image_conv_fusion(self):
-    w1 = Tensor.empty(16, 16, 1, 1)
-    b1 = Tensor.empty(16)
-    w2 = Tensor.empty(16, 16, 1, 1)
-    b2 = Tensor.empty(16)
-    w3 = Tensor.empty(16, 16, 1, 1)
-    b3 = Tensor.empty(16)
+    with Context(OPENPILOT_HACKS=1):
+      w1 = Tensor.empty(16, 16, 1, 1)
+      b1 = Tensor.empty(16)
+      w2 = Tensor.empty(16, 16, 1, 1)
+      b2 = Tensor.empty(16)
+      w3 = Tensor.empty(16, 16, 1, 1)
+      b3 = Tensor.empty(16)
 
-    x = Tensor.empty(1, 16, 32, 32)
-    x = base = x.image_conv2d(w1, b1)
-    x = x.image_conv2d(w2, b2) + base
-    x = x.image_conv2d(w3, b3)
+      x = Tensor.empty(1, 16, 32, 32)
+      x = base = x.image_conv2d(w1, b1)
+      x = x.image_conv2d(w2, b2) + base
+      x = x.image_conv2d(w3, b3)
 
-    # NOOP, 3 convs, contiguous
-    #check_schedule(x, 5)
-    check_schedule(x, 7)
+      # NOOP, 3 convs, contiguous
+      #check_schedule(x, 5)
+      check_schedule(x, 7)
 
   def test_image_conv_fusion_minimal(self):
     b1 = Tensor.empty(16)
