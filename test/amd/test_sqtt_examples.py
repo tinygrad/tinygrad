@@ -149,13 +149,14 @@ class SQTTExamplesTestBase(unittest.TestCase):
           self.assertEqual(times, sorted(times), f"timestamps not monotonic in {name}")
 
   def test_gemm_has_instructions(self):
-    # TODO: fix this
-    if self.target == "gfx950": self.skipTest("the GEMM trace is empty for cdna")
     for name, (events, *_) in self.examples.items():
+      # TODO: CDNA gemm second run should also output an inst trace
+      if self.target == "gfx950" and name == "profile_gemm_run_1": continue
       if "gemm" not in name: continue
       with self.subTest(example=name):
         all_packets = [p for e in events for p in decode(e.blob)]
-        self.assertGreater(len([p for p in all_packets if isinstance(p, (INST, INST_RDNA4))]), 0, f"no INST packets in {name}")
+        INST_TYPES = (INST, INST_RDNA4, CDNA_DECODED_INST, CDNA_DECODED_IMMED)
+        self.assertGreater(len([p for p in all_packets if isinstance(p, INST_TYPES)]), 0, f"no INST packets in {name}")
 
   expected: dict[str, list[int]] = {}  # override in subclasses
   def test_packet_counts(self):
@@ -195,6 +196,7 @@ class SQTTExamplesTestBase(unittest.TestCase):
         _, wave_insts = run_rocprof_decoder([e.blob for e in events], lib, base, self.target)
         # skip last inst per wave (s_endpgm) - it needs special handling (time + duration instead of time + stall)
         roc_insts = [time + stall for insts in wave_insts for time, stall in insts[:-1]]
+        if roc_insts: raise Exception(roc_insts)
         # extract from our decoder
         our_insts: list[int] = []
         for event in events:
