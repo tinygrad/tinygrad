@@ -8,7 +8,7 @@ PROFILE_PATH = Path(temp("profile.pkl", append_user=True))
 EXAMPLES = [
   "test/backend/test_custom_kernel.py TestCustomKernel.test_empty",
   "test/test_tiny.py TestTiny.test_plus",
-  "test/test_tiny.py TestTiny.test_gemm",
+  "-c \"from tinygrad import Tensor; Tensor.empty(N:=64, N)@Tensor.empty(N, N)\"",
   "extra/sqtt/examples/discover_ops.py"
 ]
 
