@@ -269,22 +269,16 @@ class TestDiskTensor(TempDirTestCase):
     assert tout == list([(x+1,x) for x in range(32,64,2)])
 
   def test_strided_read(self):
-    # test non-contiguous (strided) read - should read elements at indices 0, 2, 4
+    # test non-contiguous (strided) read raises
     dt = Tensor([0, 1, 2, 3, 4, 5]).to(f"disk:{self.tmp('dt_strided_read')}")
-    with self.assertRaises(RuntimeError):
-      result = dt[::2].tolist()
-      # TODO: dt[::2] selects indices 0, 2, 4, so result should be [0, 2, 4]
-      # self.assertEqual(result, [0, 2, 4])
-      self.assertEqual(result, [0, 1, 2])  # wrong!
+    with self.assertRaisesRegex(RuntimeError, "non-contiguous view is not supported"):
+      dt[::2].tolist()
 
   def test_permuted_read(self):
-    # test non-contiguous (permuted) read - should read transposed
+    # test non-contiguous (permuted) read raises
     dt = Tensor([[0, 1, 2], [3, 4, 5]]).to(f"disk:{self.tmp('dt_permuted_read')}")
-    with self.assertRaises(RuntimeError):
-      result = dt.T.tolist()
-      # TODO: transpose should give [[0, 3], [1, 4], [2, 5]]
-      # self.assertEqual(result, [[0, 3], [1, 4], [2, 5]])
-      self.assertEqual(result, [[0, 1], [2, 3], [4, 5]])  # wrong!
+    with self.assertRaisesRegex(RuntimeError, "non-contiguous view is not supported"):
+      dt.T.tolist()
 
   def test_write_ones(self):
     out = Tensor.ones(10, 10, device="CPU").contiguous()
@@ -310,13 +304,10 @@ class TestDiskTensor(TempDirTestCase):
     self.assertEqual(dt.tolist(), [[1], [3]])
 
   def test_strided_setitem(self):
-    # test non-contiguous (strided) setitem - should set elements at indices 0, 2, 4
+    # test non-contiguous (strided) setitem raises
     dt = Tensor([1, 2, 3, 4, 5, 6]).to(f"disk:{self.tmp('dt_strided_setitem')}")
-    with self.assertRaises(RuntimeError):
+    with self.assertRaisesRegex(RuntimeError, "non-contiguous view is not supported"):
       dt[::2] = Tensor([10, 20, 30])
-      # TODO: dt[::2] selects indices 0, 2, 4, so result should be [10, 2, 20, 4, 30, 6]
-      # self.assertEqual(dt.tolist(), [10, 2, 20, 4, 30, 6])
-      self.assertEqual(dt.tolist(), [10, 20, 30, 4, 5, 6])  # wrong!
 
   def test_advanced_setitem_not_supported(self):
     dt = Tensor.arange(12).reshape(3, 4).to(f"disk:{self.tmp('dt_advanced_setitem')}")

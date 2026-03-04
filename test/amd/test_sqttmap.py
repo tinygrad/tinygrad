@@ -5,6 +5,7 @@ from pathlib import Path
 from tinygrad.helpers import DEBUG, OSX
 from tinygrad.renderer.amd.sqtt import print_packets, map_insts
 from tinygrad.runtime.autogen.amd.rdna3.ins import s_endpgm
+from tinygrad.runtime.autogen.amd.cdna.ins import s_endpgm as s_endpgm_cdna
 from test.amd.disasm import disasm
 
 import tinygrad
@@ -32,7 +33,7 @@ def rocprof_inst_traces_match(sqtt, prg, target, pass_rocprof_err=False):
     # always check pc matches
     assert ref_pc == info.pc or pass_rocprof_err, f"pc mismatch {ref_pc}:{disasm_map[rocprof_inst.pc]} != {info.pc}:{disasm(info.inst)}"
     # special handling for s_endpgm, it marks the wave completion.
-    if info.inst == s_endpgm():
+    if info.inst in {s_endpgm(), s_endpgm_cdna()}:
       completed_wave = list(rwaves_iter[info.wave].pop(0))
       assert len(completed_wave) == 0, f"incomplete instructions in wave {info.wave}"
     # otherwise the packet timestamp is time + "stall"

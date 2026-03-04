@@ -683,10 +683,10 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     if self.op in {Ops.CONTIGUOUS, Ops.RESHAPE, Ops.DETACH, Ops.AFTER}: return self.src[0].buffer
     # this buffer can process disk tensors and simple movement ops
     if self is not self.base:
-      offset = self.contiguous_view_offset()
-      if offset is None: raise RuntimeError(f"cannot collapse movement ops on {self.base.op} to a contiguous view")
       buf = self.base.buffer
       assert isinstance(buf, Buffer), "must be a Buffer for movement ops"
+      offset = self.contiguous_view_offset()
+      if offset is None: raise RuntimeError(f"non-contiguous view is not supported for {buf.device} buffer")
       return buf.view(self.size, self.dtype, offset*self.dtype.itemsize)
     if self.op is Ops.BITCAST:
       buf = self.src[0].buffer
