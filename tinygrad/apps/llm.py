@@ -1,4 +1,5 @@
 from __future__ import annotations
+from typing import Optional
 import sys, argparse, typing, re, unicodedata, json, uuid, time, functools
 from tinygrad import Tensor, nn, UOp, TinyJit, getenv, function
 from tinygrad.helpers import partition, DEBUG, Timing, GlobalCounters, stderr_log, colored
@@ -80,6 +81,78 @@ def apply_rope(x:Tensor, freqs_cis:Tensor) -> Tensor:
   cos, sin = freqs_cis.reshape(1, 1, x.shape[2], -1).chunk(2, dim=-1)
   x1, x2 = x.chunk(2, dim=-1)
   return (x1 * cos - x2 * sin).cat(x2 * cos + x1 * sin, dim=-1)
+
+# https://github.com/NVlabs/GatedDeltaNet/blob/main/lit_gpt/gated_delta_net.py
+class GatedDeltaNet:
+    def __init__(self, hidden_dim: int, n_heads: int, head_dim: int, conv_kernel: int):
+        self.hidden_dim = hidden_dim
+        self.n_heads = n_heads
+        self.head_dim = head_dim
+        self.dim = head_dim * n_heads
+
+        # -- attention projection
+        self.qkv_proj = nn.Linear(hidden_dim, self.dim*3, bias=False)
+
+        self.alpha_proj = nn.Linear(hidden_dim, n_heads, bias=False)
+        self.beta_proj = nn.Linear(hidden_dim, n_heads, bias=False)
+
+        self.q_conv = nn.Conv1d(self.dim, self.dim, conv_kernel)
+        self.k_conv = nn.Conv1d(self.dim, self.dim, conv_kernel)
+        self.v_conv = nn.Conv1d(self.dim, self.dim, conv_kernel)
+
+        self.g_proj = nn.Linear(hidden_dim, self.dim, bias=False)
+        self.o_proj = nn.Linear(self.dim, hidden_dim, bias=False)
+        self.norm = nn.GroupNorm(n_heads, self.dim)
+    def __call__(self, x: Tensor, state: Optional[Tensor]):
+        H = self.n_heads
+        B, T, D = x.shape
+        q, k, v = self.qkv_proj(x).chunk(3, dim=-1)
+        q = self.q_conv(q.transpose(1, 2))[:, :, T].transpose(1, 2).silu().view(B, T, H, self.head_dim)
+        k = self.k_conv(k.transpose(1, 2))[:, :, T].transpose(1, 2).silu().view(B, T, H, self.head_dim)
+        v = self.v_conv(v.transpose(1, 2))[:, :, T].transpose(1, 2).silu().view(B, T, H, self.head_dim)
+
+        def l2_normalize(x: Tensor, eps=1e-12): return x / (x.pow(2).sum(axis=-1, keepdim=True).sqrt() + eps)
+        q, k = l2_normalize(q), l2_normalize(k)
+
+        # --- Compute gates
+        alpha = (-self.alpha_proj(x).softplus()).exp()
+        beta = self.beta_proj(x).sigmoid()
+        g = self.g_proj(x).silu().view(B, T, H, self.head_dim)
+
+        if state is None: state = Tensor.zeros(B, T, H, self.head_dim, device=x.device, dtype=x.dtype)
+        out = []
+        for t in range(T):
+            q_t = q[:, t]
+            k_t = k[:, t]
+            v_t = v[:, t]
+            alpha_t = alpha[:, t, :, None, None]
+            beta_t = beta[:, t, :, None, None]
+            pred = Tensor.einsum("bhij,bhj->bhi", state, k_t)
+            delta = v_t - pred
+            state = alpha_t * state + beta_t * Tensor.einsum("bhi,bhj->bhij", delta, k_t)
+            o_t = Tensor.einsum("bhij,bhj->bhi", state, q_t)
+            out.append(o_t)
+        o = out[0].stack(*out[1:], dim=1)
+        o = o * g
+        o = o.reshape(B, T, D)
+        o = self.norm(o.transpose(-1, 2)).transpose(-1, 2)
+        return self.o_proj(o), state
+
+class GatedAttention:
+    def __init__(self, hidden_dim: int, n_heads: int):
+        self.hidden_dim = hidden_dim
+        self.n_heads = n_heads
+        self.fused_proj = nn.Linear(hidden_dim, hidden_dim * 4, bias=False)
+        self.o_proj = nn.Linear(hidden_dim, hidden_dim)
+    def __call__(self, x: Tensor):
+        B, T, D = x.shape
+        H = self.n_heads
+        q, k, v, g = self.fused_proj(x).chunk(4, dim=-1)
+        q = q.view(B, T, H, self.hidden_dim).transpose(1, 2)
+        k = k.view(B, T, H, self.hidden_dim).transpose(1, 2)
+        v = v.view(B, T, H, self.hidden_dim).transpose(1, 2)
+        attn = q.scaled_dot_product_attention(k, v, is_causal=True).transpose(1, 2).reshape(B, T, D)
+        return self.o_proj(attn * g.sigmoid())
 
 class TransformerBlock:
   def __init__(self, dim:int, hidden_dim:int, n_heads:int, n_kv_heads:int, norm_eps:float, head_dim:int, rope_theta:float,
@@ -245,6 +318,10 @@ models = {
   "qwen3:1.7b": "https://huggingface.co/unsloth/Qwen3-1.7B-GGUF/resolve/main/Qwen3-1.7B-Q4_K_M.gguf",
   "qwen3:8b": "https://huggingface.co/Qwen/Qwen3-8B-GGUF/resolve/main/Qwen3-8B-Q4_K_M.gguf",
   "qwen3:30b-a3b": "https://huggingface.co/Qwen/Qwen3-30B-A3B-GGUF/resolve/main/Qwen3-30B-A3B-Q4_K_M.gguf",
+  "qwen3.5-0.8b": "https://huggingface.co/unsloth/Qwen3.5-0.8B-GGUF/resolve/main/Qwen3.5-0.8B-Q4_K_M.gguf",
+  "qwen3.5:4b" : "https://huggingface.co/unsloth/Qwen3.5-4B-GGUF/blob/main/Qwen3.5-4B-Q4_K_M.gguf",
+  "qwen3.5:27b": "https://huggingface.co/unsloth/Qwen3.5-27B-GGUF/resolve/main/Qwen3.5-27B-Q4_K_M.gguf",
+  "qwen3.5:35b-a3b" : "https://huggingface.co/unsloth/Qwen3.5-35B-A3B-GGUF/blob/main/Qwen3.5-35B-A3B-Q4_K_M.gguf",
   "olmoe": "https://huggingface.co/allenai/OLMoE-1B-7B-0924-Instruct-GGUF/resolve/main/olmoe-1b-7b-0924-instruct-q4_k_m.gguf",
 }
 
