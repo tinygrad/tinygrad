@@ -5,7 +5,7 @@ from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, _
 from tinygrad.uop.ops import graph_rewrite, sint, AxisType, BottomUpGate, profile_matches, should_resolve_call, identity_element
 from tinygrad.uop.symbolic import symbolic
 from tinygrad.helpers import prod, all_same, getenv, dedup, all_int, DEBUG, SPLIT_REDUCEOP, DEBUG_RANGEIFY, VIZ, MAX_KERNEL_BUFFERS
-from tinygrad.helpers import PCONTIG, FLOAT16, argsort, partition, get_single_element
+from tinygrad.helpers import PCONTIG, FLOAT16, OPENPILOT_HACKS, argsort, partition, get_single_element
 from tinygrad.codegen.simplify import pm_flatten_range, pm_reduce_simplify
 from tinygrad.codegen.opt import Opt
 from tinygrad.schedule.indexing import run_rangeify, BufferizeOpts, ALWAYS_CONTIGUOUS, IndexingContext, apply_movement_op
@@ -31,7 +31,7 @@ def found_assign(ctx:dict[UOp, UOp], assign:UOp, src:UOp):
     x = x.src[0]
   ctx[x] = assign
 
-pm_openpilot_hacks = PatternMatcher([
+pm_replace_assign = PatternMatcher([
   # *** ASSIGN replacement hack for openpilot ***
   (UPat(Ops.ASSIGN, src=(UPat(), UPat((*GroupOp.Movement, Ops.CAST), name="src")), name="assign"), found_assign),
   # replace ALU sources with assign versions found above
@@ -535,8 +535,8 @@ split_kernels = PatternMatcher([
 
 @profile_matches
 def get_kernel_graph(sink:UOp) -> UOp:
-  tsink = graph_rewrite(sink, pm_openpilot_hacks, ctx={}, name="openpilot hacks")
-  tsink = graph_rewrite(tsink, multi_pm, name="multi_pm")
+  tsink = graph_rewrite(sink, multi_pm, name="multi_pm")
+  if OPENPILOT_HACKS: tsink = graph_rewrite(tsink, pm_replace_assign, ctx={}, name="replace assign")
   tsink = graph_rewrite(tsink, pm_syntactic_sugar+pm_mops+earliest_rewrites, bottom_up=True, name="earliest rewrites")
 
   # convert movement ops to ranges
