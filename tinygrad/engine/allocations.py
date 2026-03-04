@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field
 from tinygrad.uop.ops import UOp, UPat, PatternMatcher, Ops, GroupOp, graph_rewrite, track_rewrites
 from tinygrad.dtype import dtypes, ImageDType
-from tinygrad.helpers import prod, DEBUG, argsort, VIZ, pluralize, FLOAT16
+from tinygrad.helpers import prod, DEBUG, VIZ, pluralize
 
 @dataclass
 class AllocCtx:
@@ -63,15 +63,6 @@ def replace_assign_with_contig(u:UOp):
   if assigned_to.op is not Ops.BUFFER:
     return u.src[1].contiguous(tag=u.tag)
 
-def found_contiguous(ctx:dict[UOp, UOp], contig:UOp, src:UOp):
-  if (x:=src).op is Ops.CAST and x.dtype == dtypes.half and FLOAT16: x, contig = x.src[0], contig.cast(dtypes.float)
-  while x is not x.base:
-    if x.op is Ops.PERMUTE: contig = contig.permute(argsort(x.marg))
-    elif x.op is Ops.RESHAPE: contig = contig.reshape(x.src[0].shape)
-    else: return None
-    x = x.src[0]
-  ctx[x] = contig
-
 def contiguous_mops_to_view(c:UOp):
   """CONTIGUOUS(MOPS(BUFFER)) → CONTIGUOUS(BUFFER_VIEW) when movement ops collapse to a contiguous range."""
   src = c.src[0]
@@ -111,11 +102,6 @@ pm_early_transform_tensor_graph = PatternMatcher([
 
   # CONTIGUOUS(MOPS(BUFFER/BUFFER_VIEW)) → CONTIGUOUS(BUFFER_VIEW) when movement ops collapse to contiguous range
   (UPat(Ops.CONTIGUOUS, src=(UPat(GroupOp.Movement),), name="c"), contiguous_mops_to_view),
-
-  # *** CONTIGUOUS replacement hack for openpilot ***
-  (UPat(Ops.CONTIGUOUS, src=(UPat((*GroupOp.Movement, Ops.CAST), name="src"),), name="contig"), found_contiguous),
-  # replace ALU sources with contiguous versions found above
-  (UPat(GroupOp.ALU, name="alu"), lambda ctx,alu: alu.replace(src=new_src) if (new_src:=tuple(ctx.get(s, s) for s in alu.src)) != alu.src else None),
 
   # add CONTIGUOUS to tagged UOps
   (UPat(GroupOp.All-{Ops.CONTIGUOUS, Ops.ASSIGN}, name="x"), lambda x: x.rtag(None).contiguous(tag=x.tag) if x.tag else x.replace(tag=None)),
@@ -179,7 +165,7 @@ def transform_to_call(big_sink:UOp) -> tuple[UOp, dict[UOp, UOp]]:
   big_sink = graph_rewrite(big_sink, add_tags, ctx=ctx, bottom_up=True, name="number the uops")
 
   # here we can break the tensor graph. this is the only place you need to maintain numbered tags
-  big_sink = graph_rewrite(big_sink, pm_early_transform_tensor_graph, ctx={}, name="early transform tensor graph")
+  big_sink = graph_rewrite(big_sink, pm_early_transform_tensor_graph, name="early transform tensor graph")
 
   # here we construct the final buffer_map. this is everything that will go into the tensor map
   graph_rewrite(big_sink, pm_finalize_call, ctx=ctx, name="finalize call")
