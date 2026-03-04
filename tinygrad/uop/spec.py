@@ -209,9 +209,11 @@ kernel_spec = PatternMatcher([
   # reduce must be on ranges
   (UPat(Ops.REDUCE, src=(UPat(),), allow_any_len=True, name="x"), lambda x: all(y.dtype in (dtypes.index, dtypes.int) for y in x.src[1:])),
 
-  # COPY/BUFFER_VIEW can have ranges appended
+  # COPY/ALLREDUCE/BUFFER_VIEW can have ranges appended
   (UPat(Ops.COPY, name="x", src=(UPat.var("s"), UPat(Ops.DEVICE)), allow_any_len=True, arg=None),
    lambda x,s: x.dtype == s.dtype and all(u.op is Ops.RANGE for u in x.src[2:])),
+  (UPat(Ops.ALLREDUCE, name="x", src=(UPat.var("s"), UPat(Ops.DEVICE)), allow_any_len=True),
+   lambda x,s: x.dtype == s.dtype and isinstance(x.arg, Ops) and all(u.op is Ops.RANGE for u in x.src[2:])),
   (UPat(Ops.BUFFER_VIEW, src=(UPat((Ops.INDEX, Ops.LOAD)),), allow_any_len=True, name="x"),
    lambda x: all(u.op is Ops.RANGE for u in x.src[1:])),
 ])+movement_ops+shared_codegen_spec+shared_spec

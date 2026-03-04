@@ -32,8 +32,8 @@ def apply_after(ctx:AllocCtx, u:UOp):
 # CONTIGUOUS and ASSIGN + parents are the only nodes that get updated
 add_tags = PatternMatcher([
   (UPat(Ops.COPY, name="u"), disk_copy_is_buffer),
-  # no tag on copies that are assigned
-  (UPat(Ops.ASSIGN, src=(UPat(), UPat(Ops.COPY, name="c")), name="a"),
+  # no tag on copies/allreduces that are assigned
+  (UPat(Ops.ASSIGN, src=(UPat(), UPat((Ops.COPY, Ops.ALLREDUCE), name="c")), name="a"),
    lambda a,c: a.replace(src=(a.src[0], c.rtag(())), tag=a.tag+c.tag) if a.tag and c.tag else None),
   (UPat(Ops.AFTER, name="u"), apply_after),
   (UPat({Ops.CONTIGUOUS, Ops.ASSIGN}, name="x"), tag_uop),

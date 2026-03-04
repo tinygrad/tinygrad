@@ -131,8 +131,17 @@ def lower_sink_to_linear(function:UOp) -> UOp|None:
           f" | {len(UOpMetaClass.ucache):7d} uops in cache"+("" if frm is None else f" | {frm.filename}:{frm.lineno}"))
   return linear
 
+def soft_allreduce(c:UOp, a:UOp):
+  from tinygrad.schedule.multi import handle_allreduce
+  to = c.src[1].param_like(0)
+  src = c.src[2].param_like(1)
+  red = UOp(Ops.ALLREDUCE, dtype=a.arg, src=(src, a.src[1]), arg=a.arg)
+  return handle_allreduce(src, red).assign(to).sink().call(*c.src[1:])
+
 pm_schedule = PatternMatcher([
   (UPat(Ops.SINK, name="function"), lower_sink_to_linear),
+  # soft handler of allreduce
+  (UPat(Ops.CALL, src=(UPat(Ops.ALLREDUCE, name="a"),), allow_any_len=True, name="c"), soft_allreduce),
 ])
 
 @track_rewrites(lambda _,ret: f"Schedule {pluralize('Kernel', len(ret[0]))}")
