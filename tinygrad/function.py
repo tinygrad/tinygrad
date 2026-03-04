@@ -14,6 +14,10 @@ pm_ctx = PatternMatcher([
   (UPat((Ops.ASSIGN, Ops.CONTIGUOUS), name="x"),
    lambda ctx,x: add_to_ctx(ctx,x) if not x.op_in_backward_slice_with_self(Ops.PARAM) else None),
 ])
+pm_make_pure = PatternMatcher([
+  (UPat(Ops.ASSIGN, src=(UPat(name="dst"), UPat(name="rhs")), name="x"),
+   lambda dst, rhs, x: rhs if dst.op not in {Ops.INDEX, Ops.PARAM, Ops.BUFFER, Ops.AFTER} else None),
+])
 
 ReturnType = TypeVar('ReturnType')
 class _function(Generic[ReturnType]):
@@ -43,6 +47,7 @@ class _function(Generic[ReturnType]):
     subs = {}
     for i,x in enumerate(call_uops): subs[x] = x.param_like(i)
     uret = ret.uop.substitute(subs)
+    uret = graph_rewrite(uret, pm_make_pure, bottom_up=True, name="impure_to_pure")
 
     # add contiguous to call_uops
     #call_uops = [x.contiguous() for x in call_uops]

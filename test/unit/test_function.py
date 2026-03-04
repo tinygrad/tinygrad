@@ -192,6 +192,40 @@ class TestFunction(unittest.TestCase):
     np.testing.assert_equal(f(a).numpy(), [2,3,4])
     np.testing.assert_equal(a.numpy(), [3,4,5])  # TODO: should be [1,2,3]
 
+  def test_impure_to_pure_unrealized_view_variants(self):
+    x = Tensor.randn(1,2,3)
+    g = Tensor.randn(1,3,2).sigmoid() + 1.0
+
+    @function
+    def f_add(x:Tensor, g:Tensor) -> Tensor:
+      y = x.transpose(1,2).reshape(x.shape[0], x.shape[2], -1)
+      y += g
+      return y
+
+    @function
+    def f_sub(x:Tensor, g:Tensor) -> Tensor:
+      y = x.transpose(1,2).reshape(x.shape[0], x.shape[2], -1)
+      y -= g
+      return y
+
+    @function
+    def f_mul(x:Tensor, g:Tensor) -> Tensor:
+      y = x.transpose(1,2).reshape(x.shape[0], x.shape[2], -1)
+      y *= g
+      return y
+
+    @function
+    def f_div(x:Tensor, g:Tensor) -> Tensor:
+      y = x.transpose(1,2).reshape(x.shape[0], x.shape[2], -1)
+      y /= g
+      return y
+
+    y = x.transpose(1,2).reshape(x.shape[0], x.shape[2], -1)
+    np.testing.assert_allclose(f_add(x, g).numpy(), (y + g).numpy(), rtol=1e-6, atol=1e-6)
+    np.testing.assert_allclose(f_sub(x, g).numpy(), (y - g).numpy(), rtol=1e-6, atol=1e-6)
+    np.testing.assert_allclose(f_mul(x, g).numpy(), (y * g).numpy(), rtol=1e-6, atol=1e-6)
+    np.testing.assert_allclose(f_div(x, g).numpy(), (y / g).numpy(), rtol=1e-6, atol=1e-6)
+
   def test_implicit_assign(self):
     a = Tensor([1,2,3])
     a += 1
