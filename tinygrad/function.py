@@ -1,7 +1,7 @@
 import functools
 from typing import Generic, TypeVar, Callable, cast, overload
 from tinygrad.helpers import Context, dedup, getenv
-from tinygrad.uop.ops import UOp, Ops, graph_rewrite, PatternMatcher, UPat
+from tinygrad.uop.ops import UOp, Ops, GroupOp, graph_rewrite, PatternMatcher, UPat
 from tinygrad.tensor import Tensor
 
 def add_to_ctx(ctx, x:UOp):
@@ -15,8 +15,8 @@ pm_ctx = PatternMatcher([
    lambda ctx,x: add_to_ctx(ctx,x) if not x.op_in_backward_slice_with_self(Ops.PARAM) else None),
 ])
 pm_make_pure = PatternMatcher([
-  (UPat(Ops.ASSIGN, src=(UPat(name="dst"), UPat(name="rhs")), name="x"),
-   lambda dst, rhs, x: rhs if dst.op not in {Ops.INDEX, Ops.PARAM, Ops.BUFFER, Ops.AFTER} else None),
+  (UPat(Ops.ASSIGN, src=(UPat((*GroupOp.Movement, Ops.CONTIGUOUS, Ops.CAST), name="dst"), UPat(name="rhs")), name="x"),
+   lambda dst, rhs, x: rhs if dst.op_in_backward_slice_with_self(Ops.PARAM) and dst in rhs.backward_slice_with_self else None),
 ])
 
 ReturnType = TypeVar('ReturnType')
