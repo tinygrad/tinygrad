@@ -140,7 +140,7 @@ class CDNAInstType(Enum):
   JUMP = 12; NEXT = 13; FLAT_RD = 14; OTHER_MSG = 15; SMEM_WR = 16; SALU_64 = 17; VALU_64 = 18; VALU_MAI = 28
 
 class CDNAToken(Enum):
-  MISC = 0; TIMESTAMP = 1; REG = 2; WAVE_START = 3; WAVE_ALLOC = 4; REG_CS = 5; WAVE_END = 6
+  MISC = 0; TIMESTAMP = 1; REG = 2; WAVESTART = 3; WAVE_ALLOC = 4; REG_CS = 5; WAVE_END = 6
   EVENT = 7; EVENT_CS = 8; EVENT_GFX1 = 9; INST = 10; INST_PC = 11; SHADERDATA = 12; ISSUE = 13; PERF = 14; REG_CS_PRIV = 15
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -413,7 +413,7 @@ class CDNA_REG(PacketType):
   regaddr = bits[31:16]
   regdata = bits[63:32]
 
-class CDNA_WAVESTART(PacketType):
+class WAVESTART_CDNA(PacketType):
   """type 3: 32-bit wave start (Wave/group_id)"""
   encoding = bits[3:0] == 3
   sh = bits[5:5]
@@ -442,7 +442,7 @@ class CDNA_REGCS(PacketType):
   regaddr = bits[15:9]
   regdata = bits[47:16]
 
-class CDNA_WAVEEND(PacketType):
+class WAVEEND_CDNA(PacketType):
   """type 6: 16-bit wave end (group_id)"""
   encoding = bits[3:0] == 6
   sh = bits[5:5]
@@ -528,8 +528,8 @@ class CDNA_DECODED_IMMED(PacketType):
   """Synthesized: immediate instruction (ISSUE status=3). wave/simd/cu set as attributes."""
 
 _CDNA_TOKEN_TYPES: dict[int, type[PacketType]] = {
-  0: CDNA_MISC, 1: CDNA_TIMESTAMP, 2: CDNA_REG, 3: CDNA_WAVESTART, 4: CDNA_WAVEALLOC, 5: CDNA_REGCS,
-  6: CDNA_WAVEEND, 7: CDNA_EVENT, 8: CDNA_EVENT_CS, 9: CDNA_EVENT_GFX1, 10: CDNA_INST, 11: CDNA_INST_PC,
+  0: CDNA_MISC, 1: CDNA_TIMESTAMP, 2: CDNA_REG, 3: WAVESTART_CDNA, 4: CDNA_WAVEALLOC, 5: CDNA_REGCS,
+  6: WAVEEND_CDNA, 7: CDNA_EVENT, 8: CDNA_EVENT_CS, 9: CDNA_EVENT_GFX1, 10: CDNA_INST, 11: CDNA_INST_PC,
   12: CDNA_SHADERDATA, 13: CDNA_ISSUE, 14: CDNA_PERF, 15: CDNA_REGCS_PRIV,
 }
 PACKET_TYPES_CDNA: dict[int, type[PacketType]] = {**_CDNA_TOKEN_TYPES, 16: CDNA_DECODED_INST, 17: CDNA_DECODED_IMMED}
@@ -573,7 +573,6 @@ def decode_cdna(data: bytes) -> Iterator[PacketType]:
   running_waves: set[tuple[int, int, int]] = set()  # (wave, simd, cu) for occupancy dedup
   wave_last_inst: dict[tuple[int, int], int] = {}  # (simd, wave) -> packet index, for removing last inst per wave
   remove_indices: set[int] = set()
-
 
   def _parse_one() -> tuple[int, int, int] | None:
     nonlocal pos
@@ -619,8 +618,8 @@ def decode_cdna(data: bytes) -> Iterator[PacketType]:
       continue
     if typ == CDNAToken.TIMESTAMP.value: continue  # consumed by _patch_time
 
-    if typ == CDNAToken.WAVE_START.value:
-      p = CDNA_WAVESTART.from_raw(raw, globaltime)
+    if typ == CDNAToken.WAVESTART.value:
+      p = WAVESTART_CDNA.from_raw(raw, globaltime)
       key = (p.wave, p.simd, p.cu)
       if p.cu == target_cu and p.sh == 0:
         if p.count > 64: continue  # trap-related restart
@@ -632,7 +631,7 @@ def decode_cdna(data: bytes) -> Iterator[PacketType]:
       continue
 
     if typ == CDNAToken.WAVE_END.value:
-      p = CDNA_WAVEEND.from_raw(raw, globaltime)
+      p = WAVEEND_CDNA.from_raw(raw, globaltime)
       key = (p.wave, p.simd, p.cu)
       if p.cu == target_cu and p.sh == 0:
         wave_active[p.simd][p.wave] = False
@@ -742,11 +741,11 @@ def map_insts(data:bytes, lib:bytes, target:str) -> Iterator[tuple[PacketType, I
     def simd_select(p) -> bool: return getattr(p, "cu", 0) == 0 and getattr(p, "simd", 0) == 0
   for p in decode(data):
     if not simd_select(p): continue
-    if isinstance(p, (WAVESTART, WAVESTART_RDNA4, CDNA_WAVESTART)):
+    if isinstance(p, (WAVESTART, WAVESTART_RDNA4, WAVESTART_CDNA)):
       assert p.wave not in wave_pc, "only one inflight wave per unit"
       wave_pc[p.wave] = next(iter(pc_map))
       continue
-    if isinstance(p, (WAVEEND, CDNA_WAVEEND)):
+    if isinstance(p, (WAVEEND, WAVEEND_CDNA)):
       pc = wave_pc.pop(p.wave)
       yield (p, InstructionInfo(pc, p.wave, s_endpgm()))
       continue
