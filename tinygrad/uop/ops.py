@@ -159,9 +159,14 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
 
   @property
   def backward_slice_with_self(self:UOp) -> dict[UOp, None]: return {self:None, **self.backward_slice}
-  def op_in_backward_slice_with_self(self, *ops:Ops) -> bool:
-    # Check self first, then iterate backward_slice (avoids creating intermediate dict)
-    return self.op in ops or any(x.op in ops for x in self.backward_slice)
+
+  # track ops in recursive property
+  @recursive_property
+  def _ops_in_backward_slice_with_self(self:UOp) -> dict[Ops, None]:
+    ret: dict[Ops, None] = {self.op:None}
+    for s in self.src: ret.update(s._ops_in_backward_slice_with_self)
+    return ret
+  def op_in_backward_slice_with_self(self, *ops:Ops) -> bool: return any(x in ops for x in self._ops_in_backward_slice_with_self)
 
   def toposort(self, gate:Callable|None=None, enter_calls=True) -> dict[UOp, None]:
     cache: dict[UOp, None] = {}

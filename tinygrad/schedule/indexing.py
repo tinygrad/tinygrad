@@ -33,7 +33,7 @@ pm_generate_realize_map = PatternMatcher([
   # realize srcs of these
   (UPat((Ops.COPY, Ops.MSELECT, Ops.MSTACK, Ops.ENCDEC), name="rb"), realize_srcs),
   # sometimes realize src of assign
-  (UPat(Ops.ASSIGN, src=(UPat.var("buf"), UPat.var("x"))), realize_assign_src),
+  #(UPat(Ops.ASSIGN, src=(UPat.var("buf"), UPat.var("x"))), realize_assign_src),
 ])
 
 @dataclass(frozen=True)
