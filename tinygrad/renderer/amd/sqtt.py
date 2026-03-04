@@ -133,6 +133,7 @@ class InstOpRDNA4(Enum):
   SALU_5 = 0x9c
   OTHER_VMEM = 0xc1
 
+class CDNAIssueStatus(Enum): NULL = 0; STALL = 1; INST = 2; IMMED = 3
 
 class CDNAInstType(Enum):
   SMEM = 0; SALU_32 = 1; VMEM_RD = 2; VMEM_WR = 3; FLAT_WR = 4; VALU_32 = 5; LDS = 6; PC = 7
@@ -608,10 +609,10 @@ def decode_cdna(data: bytes) -> Iterator[PacketType]:
       yield p
     elif pkt_cls is ISSUE_CDNA:
       for wave_id in range(10):
-        status = p.wave_status(wave_id)
-        if status == 0 or wave_issued[p.simd][wave_id] is None: continue
-        if status == 2: wave_issued[p.simd][wave_id].append(globaltime)  # queue issue time
-        elif status == 3:  # IMMED: emit immediately
+        status = CDNAIssueStatus(p.wave_status(wave_id))
+        if status is CDNAIssueStatus.NULL: continue
+        if status is CDNAIssueStatus.INST: wave_issued[p.simd][wave_id].append(globaltime)  # queue issue time
+        elif status is CDNAIssueStatus.IMMED:
           pkt = IMMEDIATE_CDNA.from_raw(0, globaltime + 4)
           pkt.wave, pkt.simd, pkt.cu = wave_id, p.simd, target_cu
           yield pkt
