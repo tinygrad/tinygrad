@@ -263,6 +263,8 @@ pm_const_buffer_folding = pm_mops+PatternMatcher([
   (UPat(Ops.INDEX, src=(UPat(Ops.CONST, name="c"),),), lambda c: c),
   # copy on CONST is CONST
   (UPat(Ops.COPY, src=(UPat.cvar("x"), UPat()), name="copy"), lambda copy,x: copy.const_like(x.arg)),
+  # allreduce on CONST is CONST
+  (UPat(Ops.ALLREDUCE, src=(UPat.cvar("x"), UPat()), name="copy", arg=Ops.ADD), lambda copy,x: copy.const_like(x.arg)*len(x.device)),
   # hack if a noop turned to a const
   (UPat(Ops.NOOP, src=(UPat.cvar("c"),), name="noop"), lambda c,noop: c),
   # mstack on CONST is CONST
