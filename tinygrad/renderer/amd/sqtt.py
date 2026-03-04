@@ -466,9 +466,7 @@ class INST_CDNA(PacketType):
   encoding = bits[3:0] == 10
   wave = bits[8:5]
   simd = bits[10:9]
-  inst_type = bits[15:11]
-  @property
-  def op(self): return CDNAInstType(self.inst_type)
+  op = bits[15:11].enum(CDNAInstType)
 
 class INST_PC_CDNA(PacketType):
   """type 11: 64-bit instruction PC (MsgInstPc)"""
@@ -613,7 +611,7 @@ def decode_cdna(data: bytes) -> Iterator[PacketType]:
           new_pkt.wave, new_pkt.simd = wave_id, p.simd
           yield new_pkt
     elif pkt_cls is INST_CDNA: # confirms queued ISSUE
-      if p.inst_type not in _CDNA_REPLAY_TYPES:
+      if p.op.value not in _CDNA_REPLAY_TYPES:
         p._time = wave_issued[p.simd][p.wave].pop(0)
         yield p
     else:
@@ -681,7 +679,9 @@ def map_insts(data:bytes, lib:bytes, target:str) -> Iterator[tuple[PacketType, I
   wave_pc:dict[int, int] = {}
   # only processing packets on one [CU, SIMD] unit
   if is_cdna:
-    def simd_select(p) -> bool: return getattr(p, "simd", -1) == 0
+    header_raw = int.from_bytes(data[:8], 'little')
+    target_cu = (header_raw >> 20) & 0x1f
+    def simd_select(p) -> bool: return getattr(p, "simd", -1) == 0 and getattr(p, "cu", target_cu) == target_cu
   else:
     def simd_select(p) -> bool: return getattr(p, "cu", 0) == 0 and getattr(p, "simd", 0) == 0
   for p in decode(data):
@@ -690,9 +690,9 @@ def map_insts(data:bytes, lib:bytes, target:str) -> Iterator[tuple[PacketType, I
       assert p.wave not in wave_pc, "only one inflight wave per unit"
       wave_pc[p.wave] = next(iter(pc_map))
       continue
-    if isinstance(p, WAVEEND):
+    if isinstance(p, (WAVEEND, WAVEEND_CDNA)):
       pc = wave_pc.pop(p.wave)
-      yield (p, InstructionInfo(pc, p.wave, s_endpgm()))
+      yield (p, InstructionInfo(pc, p.wave, s_endpgm()) if isinstance(p, WAVEEND) else None)
       continue
     # CDNA decoded instructions
     if isinstance(p, INST_CDNA):
@@ -767,13 +767,13 @@ def format_packet(p) -> str:
   elif isinstance(p, VALUINST): fields = f"wave={p.wave}" + (" flag" if p.flag else "")
   elif isinstance(p, ALUEXEC): fields = f"src={p.src.name if isinstance(p.src, AluSrc) else p.src}"
   elif isinstance(p, VMEMEXEC): fields = f"src={p.src.name if isinstance(p.src, MemSrc) else p.src}"
-  elif isinstance(p, (WAVESTART, WAVESTART_RDNA4, WAVEEND)): fields = f"wave={p.wave} simd={p.simd} cu={p.cu}"
+  elif isinstance(p, (WAVESTART, WAVESTART_RDNA4, WAVESTART_CDNA, WAVEEND_CDNA, WAVEEND)): fields = f"wave={p.wave} simd={p.simd} cu={p.cu}"
   elif hasattr(p, '_fields'):
     filt = {'delta', 'encoding'} if not isinstance(p, (TS_DELTA_OR_MARK, TS_DELTA_OR_MARK_RDNA4)) else {'encoding'}
     fields = " ".join(f"{k}=0x{getattr(p, k):x}" if k in {'snap', 'val32'} else f"{k}={getattr(p, k)}"
                       for k in p._fields if not k.startswith('_') and k not in filt)
   else: fields = ""
-  return f"{p._time:8}: {colored(f'{name:18}', PACKET_COLORS.get(name.replace('_RDNA4', ''), 'white'))} {fields}"
+  return f"{p._time:8}: {colored(f'{name:18}', PACKET_COLORS.get(name.replace('_RDNA4', '').replace('_CDNA', ''), 'white'))} {fields}"
 
 def print_packets(packets) -> None:
   from tinygrad.helpers import getenv
