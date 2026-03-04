@@ -195,8 +195,7 @@ class SQTTExamplesTestBase(unittest.TestCase):
       with self.subTest(example=name):
         _, wave_insts = run_rocprof_decoder([e.blob for e in events], lib, base, self.target)
         # skip last inst per wave (s_endpgm) - it needs special handling (time + duration instead of time + stall)
-        roc_insts = [time + stall for insts in wave_insts for time, stall in insts[:-1]]
-        if roc_insts: raise Exception(name, roc_insts)
+        roc_insts = [time + stall for insts in wave_insts for time, stall in insts]
         # extract from our decoder
         our_insts: list[int] = []
         for event in events:
@@ -208,6 +207,8 @@ class SQTTExamplesTestBase(unittest.TestCase):
             elif isinstance(p, IMMEDIATE_MASK):
               for _ in range(bin(p.mask).count('1')): our_insts.append(p._time)
             elif isinstance(p, (CDNA_DECODED_INST, CDNA_DECODED_IMMED)): our_insts.append(p._time)
+        print(our_insts)
+        print(roc_insts)
         self.assertEqual(sorted(our_insts), sorted(roc_insts), f"instruction times mismatch in {name}")
 
 class TestSQTTExamplesRDNA3(SQTTExamplesTestBase):

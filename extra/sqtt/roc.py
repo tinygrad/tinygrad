@@ -140,8 +140,9 @@ def print_data(data:dict, raw:bool=False) -> None:
         if nested is None: continue
         cols = nested["cols"]
         clk_idx = cols.index("Clk")
+        stall_idx = cols.index("Stall")
         rest = [c for i,c in enumerate(cols) if i != clk_idx]
-        all_rows.extend((nr[clk_idx], r[inst_idx], *(nr[i] for i in range(len(cols)) if i != clk_idx)) for nr in nested["rows"])
+        all_rows.extend((nr[clk_idx]+nr[stall_idx], r[inst_idx], *(nr[i] for i in range(len(cols)) if i != clk_idx and i != stall_idx)) for nr in nested["rows"])
       if all_rows: print(tabulate(sorted(all_rows, key=lambda x: x[0]), headers=["Clk", "Inst"]+rest, tablefmt="github"))
     else:
       print(tabulate([r[:len(data["cols"])] for r in data["rows"]], headers=data["cols"], tablefmt="github"))
