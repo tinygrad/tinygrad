@@ -700,9 +700,11 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
       assert isinstance(buf, Buffer), "must be a Buffer for BITCAST"
       return buf.view(self.size, self.dtype, 0)
     if self.op is Ops.BUFFER_VIEW:
+      if (cret:=buffers.get(self)) is not None: return cret
       buf = self.src[0].buffer
       assert isinstance(buf, Buffer), "must be a Buffer for BUFFER_VIEW"
-      return buf.view(self.size, self.dtype, self.arg[1] * self.dtype.itemsize)
+      buffers[self] = ret = buf.view(self.size, self.dtype, self.arg[1] * self.dtype.itemsize)
+      return ret
     if self.op is Ops.MSELECT:
       ret = self.src[0].buffer
       assert isinstance(ret, MultiBuffer)
@@ -723,7 +725,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
   @property
   def realized(self) -> Buffer|MultiBuffer|None:
     # only these can be realized
-    if self.op not in (Ops.BUFFER, Ops.MSTACK): return None
+    if self.op not in (Ops.BUFFER, Ops.BUFFER_VIEW, Ops.MSTACK): return None
     # LUNIQUEs are never realized
     if self.op_in_backward_slice_with_self(Ops.LUNIQUE): return None
     # NOTE: this is used by the JIT to determine which inputs we capture

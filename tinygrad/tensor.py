@@ -264,8 +264,16 @@ class Tensor(OpMixin):
     big_sink, becomes_map = transform_to_call(UOp.sink(*[x.uop for x in (self,)+lst]))
     _apply_map_to_tensors(becomes_map, name="buffers")
 
+    # collect external buffers: all buffers referenced by live tensors must not be memory-planned
+    external_bufs:set[UOp] = set()
+    for tref in list(all_tensors):
+      if (t:=tref()) is None: continue
+      b = t.uop.base
+      if b.op is Ops.BUFFER: external_bufs.add(b)
+
     # this is where the schedule cache should go
-    schedule, var_vals = complete_create_schedule_with_vars(big_sink)
+    schedule, var_vals, memory_replace_map = complete_create_schedule_with_vars(big_sink, external_bufs)
+    if memory_replace_map: _apply_map_to_tensors(memory_replace_map, name="memory plan", walk=True)
     return schedule, var_vals
 
   def schedule(self, *lst:Tensor) -> list[ExecItem]:

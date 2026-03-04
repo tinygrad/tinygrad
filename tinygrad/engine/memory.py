@@ -3,11 +3,64 @@ from collections import defaultdict
 from tinygrad.engine.realize import ExecItem
 from tinygrad.device import Device, Buffer
 from tinygrad.helpers import NO_MEMORY_PLANNER, dedup, DEBUG, round_up
-from tinygrad.uop.ops import Ops
+from tinygrad.uop.ops import UOp, Ops, PatternMatcher, UPat, graph_rewrite, buffers
 from tinygrad.dtype import dtypes, ImageDType
 from tinygrad.runtime.support.memory import TLSFAllocator
 
 # **************** memory planning ****************
+
+def memory_plan_rewrite(linear:UOp, external_bufs:set[UOp]=frozenset()) -> tuple[UOp, dict[UOp, UOp]]:
+  if NO_MEMORY_PLANNER: return linear, {}
+  # phase 1: identify internal buffers & compute lifetimes
+  first_appearance:dict[UOp, int] = {}
+  last_appearance:dict[UOp, int] = {}
+  # skip buffers in BUFFER_VIEW AST operations (view ops expect BUFFER arg format)
+  view_bufs:set[UOp] = set()
+  for si in linear.src:
+    if si.src[0].op is Ops.BUFFER_VIEW:
+      for b in si.src[1:]: view_bufs.add(b)
+  for i, si in enumerate(linear.src):
+    for buf_uop in si.src[1:]:
+      if buf_uop.op is not Ops.BUFFER: continue
+      if buf_uop in external_bufs: continue  # user-visible buffer, skip
+      if buf_uop in view_bufs: continue  # part of view op, skip
+      if buf_uop in buffers: continue  # already realized, skip
+      if isinstance(buf_uop.dtype, ImageDType): continue
+      if not hasattr(Device[buf_uop.device].allocator, "_offset"): continue
+      if buf_uop not in first_appearance: first_appearance[buf_uop] = i
+      last_appearance[buf_uop] = i
+  if not first_appearance: return linear, {}
+
+  # phase 2: TLSF allocation per device
+  min_block_size = 32
+  buffer_requests = sorted([((first_appearance[b], True), b) for b in first_appearance] +
+                           [((last_appearance[b] + 1, False), b) for b in first_appearance], key=lambda x: x[0])
+  total_memory = sum(round_up(b.arg * b.dtype.itemsize, min_block_size) for b in first_appearance) * 2
+  tlsf_offsets:dict[UOp, int] = {}
+  peaks:dict[str, tuple[int, TLSFAllocator]] = defaultdict(lambda: (0, TLSFAllocator(total_memory, block_size=min_block_size, lv2_cnt=32)))
+  for (_, is_open), buf_uop in buffer_requests:
+    dev = buf_uop.device
+    nbytes = buf_uop.arg * buf_uop.dtype.itemsize
+    if is_open: tlsf_offsets[buf_uop] = peaks[dev][1].alloc(round_up(nbytes, min_block_size))
+    else: peaks[dev][1].free(tlsf_offsets[buf_uop])
+    peaks[dev] = (max(peaks[dev][0], tlsf_offsets[buf_uop] + nbytes), peaks[dev][1])
+
+  # phase 3: build replace_map with BUFFER_VIEW into shared arenas
+  arenas = {dev: UOp.new_buffer(dev, round_up(peak, min_block_size), dtypes.int8) for dev, (peak, _) in peaks.items()}
+  replace_map:dict[UOp, UOp] = {}
+  for buf_uop, offset in tlsf_offsets.items():
+    # offset is in bytes, BUFFER_VIEW arg[1] is in elements
+    assert offset % buf_uop.dtype.itemsize == 0, f"offset {offset} not aligned to {buf_uop.dtype.itemsize}"
+    replace_map[buf_uop] = UOp(Ops.BUFFER_VIEW, buf_uop.dtype, (arenas[buf_uop.device],), (buf_uop.arg, offset // buf_uop.dtype.itemsize))
+
+  if DEBUG >= 1:
+    omem = sum(b.arg * b.dtype.itemsize for b in first_appearance) / 1e6
+    nmem = sum(round_up(peak, min_block_size) for peak, _ in peaks.values()) / 1e6
+    if omem != nmem: print(f"memory reduced from {omem:.2f} MB -> {nmem:.2f} MB, {len(first_appearance)} -> {len(arenas)} bufs")
+
+  # phase 4: apply via graph_rewrite
+  pm_memory_plan = PatternMatcher([(UPat(Ops.BUFFER, name="b"), lambda ctx, b: ctx.get(b))])
+  return graph_rewrite(linear, pm_memory_plan, ctx=replace_map, walk=True, name="memory plan"), replace_map
 
 def _internal_memory_planner(buffers:list[list[Buffer]], noopt_buffers=None, ignore_checks=False, debug_prefix="") -> dict[Buffer, Buffer]:
   if NO_MEMORY_PLANNER: return {}
@@ -63,8 +116,3 @@ def _internal_memory_planner(buffers:list[list[Buffer]], noopt_buffers=None, ign
 
   return assigned
 
-def memory_planner(schedule:list[ExecItem]) -> list[ExecItem]:
-  # Exclude buffers involved in load ops (e.g transfers) to preserve parallelism in graphs.
-  assigned = _internal_memory_planner([[b for b in si.bufs if b is not None] for si in schedule],
-                                      noopt_buffers={b for si in schedule if si.ast.op is not Ops.SINK for b in si.bufs if b is not None})
-  return [ExecItem(si.ast, [assigned.get(x, x) if x is not None else None for x in si.bufs], si.metadata, si.fixedvars) for si in schedule]
