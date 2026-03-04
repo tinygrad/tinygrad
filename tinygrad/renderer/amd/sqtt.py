@@ -596,7 +596,7 @@ def decode_cdna(data: bytes) -> Iterator[PacketType]:
   def _next_token() -> tuple[type[PacketType], int, int] | None:
     return lookahead.pop(0) if lookahead else _parse_one()
 
-  packets: list[PacketType] = [LAYOUT_HEADER.from_raw(0, 0)]  # synthetic header so first-packet checks pass
+  yield LAYOUT_HEADER.from_raw(0, 0)  # synthetic header so first-packet checks pass
 
   while True:
     tok = _next_token()
@@ -618,7 +618,7 @@ def decode_cdna(data: bytes) -> Iterator[PacketType]:
         wave_issued[p.simd][p.wave] = []
       if key not in running_waves:
         running_waves.add(key)
-        packets.append(p)
+        yield p
       continue
 
     if pkt_cls is WAVEEND_CDNA:
@@ -629,7 +629,7 @@ def decode_cdna(data: bytes) -> Iterator[PacketType]:
         wave_issued[p.simd][p.wave] = []
       if key in running_waves:
         running_waves.discard(key)
-        packets.append(p)
+        yield p
       continue
 
     if pkt_cls is CDNA_ISSUE:
@@ -641,7 +641,7 @@ def decode_cdna(data: bytes) -> Iterator[PacketType]:
         elif status == 3:  # IMMED: emit immediately
           pkt = CDNA_DECODED_IMMED.from_raw(0, globaltime + 4)
           pkt.wave, pkt.simd, pkt.cu = wave_id, p.simd, target_cu
-          packets.append(pkt)
+          yield pkt
       continue
 
     if pkt_cls is CDNA_INST: # confirms queued ISSUE
@@ -651,14 +651,11 @@ def decode_cdna(data: bytes) -> Iterator[PacketType]:
         if p.inst_type not in _CDNA_REPLAY_TYPES:
           pkt = CDNA_DECODED_INST.from_raw(0, issue_time)
           pkt.wave, pkt.simd, pkt.cu, pkt.inst_type = p.wave, p.simd, target_cu, p.inst_type
-          packets.append(pkt)
+          yield pkt
       elif not wave_active[p.simd][p.wave] and p.wave < 10:
         wave_active[p.simd][p.wave] = True  # implicit wave start (lost packet recovery)
         wave_issued[p.simd][p.wave] = []
       continue
-
-  packets.sort(key=lambda p: p._time)
-  yield from packets
 
 def decode(data: bytes) -> Iterator[PacketType]:
   """Decode raw SQTT blob, yielding packet instances. Auto-detects RDNA (layout 3/4) vs CDNA."""
