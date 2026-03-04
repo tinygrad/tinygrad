@@ -31,8 +31,8 @@ def found_assign(ctx:dict[UOp, UOp], assign:UOp, src:UOp):
     x = x.src[0]
   ctx[x] = assign
 
-pm_replace_assign = PatternMatcher([
-  # *** ASSIGN replacement hack for openpilot ***
+# *** fold moved ASSIGNs (hack for openpilot) ***
+pm_fold_moved_assign = PatternMatcher([
   (UPat(Ops.ASSIGN, src=(UPat(), UPat((*GroupOp.Movement, Ops.CAST), name="src")), name="assign"), found_assign),
   # replace ALU sources with assign versions found above
   (UPat(GroupOp.ALU, name="alu"), lambda ctx,alu: alu.replace(src=new_src) if (new_src:=tuple(ctx.get(s, s) for s in alu.src)) != alu.src else None),
@@ -536,7 +536,7 @@ split_kernels = PatternMatcher([
 @profile_matches
 def get_kernel_graph(sink:UOp) -> UOp:
   tsink = graph_rewrite(sink, multi_pm, name="multi_pm")
-  if OPENPILOT_HACKS: tsink = graph_rewrite(tsink, pm_replace_assign, ctx={}, name="replace assign")
+  if OPENPILOT_HACKS: tsink = graph_rewrite(tsink, pm_fold_moved_assign, ctx={}, name="fold moved assigns")
   tsink = graph_rewrite(tsink, pm_syntactic_sugar+pm_mops+earliest_rewrites, bottom_up=True, name="earliest rewrites")
 
   # convert movement ops to ranges
