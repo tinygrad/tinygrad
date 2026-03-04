@@ -309,6 +309,7 @@ class Tensor(OpMixin):
     # but AFTER must be embedded before _apply_uop (so subsequent assigns see it)
     assign_uop = self.uop.assign(x.uop)
     base = self.uop.base
+    if base.op not in {Ops.BUFFER, Ops.AFTER}: raise RuntimeError("can only assign to buffers")
     if base.op in {Ops.BUFFER, Ops.AFTER} and not self.uop.has_buffer_identity():
       _apply_map_to_tensors({base: base.after(assign_uop)}, name="Embed View Assign", walk=True)
     return self.replace(self._apply_uop(lambda *_: assign_uop, x))
