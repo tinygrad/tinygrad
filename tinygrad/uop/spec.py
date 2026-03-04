@@ -74,8 +74,8 @@ movement_ops = PatternMatcher([
   (UPat((Ops.VECTORIZE, Ops.VCONST), dtype=dtypes.index), lambda: True),
   (UPat({Ops.ADD, Ops.MUL, Ops.IDIV}, dtype=dtypes.index), lambda: True),
 
-  # AFTER on Movement Op
-  (UPat(Ops.AFTER, src=(UPat(GroupOp.Movement.union({Ops.MULTI, Ops.CONTIGUOUS})),), allow_any_len=True), lambda: True),
+  # AFTER on Movement Op or ASSIGN
+  (UPat(Ops.AFTER, src=(UPat(GroupOp.Movement.union({Ops.MULTI, Ops.CONTIGUOUS, Ops.ASSIGN})),), allow_any_len=True), lambda: True),
 ])
 
 _tensor_spec = PatternMatcher([

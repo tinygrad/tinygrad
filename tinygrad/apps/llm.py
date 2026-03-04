@@ -228,15 +228,19 @@ class Transformer:
 
   def generate(self, tokens:list[int], start_pos=0):
     v_start_pos = UOp.variable("start_pos", 0, self.max_context-1)
-    v_toks = UOp.variable("toks", 1, 256) # <-- max prefill (determines ram usage for activations)
-    t = Tensor([tokens[start_pos:]], dtype="int32")
+    max_prefill = 256
+    v_toks = UOp.variable("toks", 1, max_prefill) # <-- max prefill (determines ram usage for activations)
+    # NOTE: the input buffer must always be the same size so the schedule cache key is identical across calls
+    tok_data = tokens[start_pos:]
+    t = Tensor(tok_data + [0] * (max_prefill - len(tok_data)), dtype="int32").reshape(1, max_prefill)
     while len(tokens) < self.max_context:
-      t = self(t[:, :v_toks.bind(t.shape[1])], v_start_pos.bind(start_pos))
+      t = self(t[:, :v_toks.bind(len(tok_data))], v_start_pos.bind(start_pos))
       next_id = int(t.item())
       tokens.append(next_id)
       start_pos = len(tokens) - 1
       yield next_id
-      t = Tensor([[next_id]], dtype="int32")  # TODO: why do i need this?
+      tok_data = [next_id]
+      t = Tensor([next_id] + [0] * (max_prefill - 1), dtype="int32").reshape(1, max_prefill)
 
 models = {
   "llama3.2:1b": "https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF/resolve/main/Llama-3.2-1B-Instruct-Q6_K.gguf",
