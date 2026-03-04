@@ -196,7 +196,7 @@ class SQTTExamplesTestBase(unittest.TestCase):
         _, wave_insts = run_rocprof_decoder([e.blob for e in events], lib, base, self.target)
         # skip last inst per wave (s_endpgm) - it needs special handling (time + duration instead of time + stall)
         roc_insts = [time + stall for insts in wave_insts for time, stall in insts[:-1]]
-        if roc_insts: raise Exception(roc_insts)
+        if roc_insts: raise Exception(name, roc_insts)
         # extract from our decoder
         our_insts: list[int] = []
         for event in events:
