@@ -29,7 +29,6 @@ def found_assign(ctx:dict[UOp, UOp], assign:UOp, src:UOp):
     elif x.op is Ops.RESHAPE: assign = assign.reshape(x.src[0].shape)
     else: return None
     x = x.src[0]
-  print(f"{src.op} {x.op}")
   ctx[x] = assign
 
 pm_openpilot_hacks = PatternMatcher([
