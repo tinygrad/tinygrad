@@ -927,7 +927,7 @@ async function main() {
           }
           const td = tr.append("td").classed(ret.cols[i], true);
           // string format scalar values
-          td.append(() => typeof value === "string" ? colored(value) : d3.create("p").text(ret.cols[i] === "Duration" ? formatMicroseconds(value) : ret.cols[i] === "Clk" ? value  : formatUnit(value)).node());
+          td.append(() => typeof value === "string" ? colored(value) : d3.create("p").text(ret.cols[i] === "Duration" ? formatMicroseconds(value) : formatUnit(value)).node());
         }
       }
       return table;
