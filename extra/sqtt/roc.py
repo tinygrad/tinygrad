@@ -126,13 +126,25 @@ def decode(sqtt_evs:list[ProfileSQTTEvent], disasms:dict[str, dict[int, Inst]]) 
     raise exc
   return ROCParseCtx
 
-def print_data(data:dict) -> None:
+def print_data(data:dict, raw:bool=False) -> None:
   from tabulate import tabulate
   # plaintext
   if "src" in data: print(data["src"])
   # table format
   elif "cols" in data:
-    print(tabulate([r[:len(data["cols"])] for r in data["rows"]], headers=data["cols"], tablefmt="github"))
+    if raw and "Instruction" in data["cols"]:
+      all_rows, cols = [], None
+      inst_idx = data["cols"].index("Instruction")
+      for r in data["rows"]:
+        nested = next((c for c in r if isinstance(c, dict) and "cols" in c), None)
+        if nested is None: continue
+        cols = nested["cols"]
+        clk_idx = cols.index("Clk")
+        rest = [c for i,c in enumerate(cols) if i != clk_idx]
+        all_rows.extend((nr[clk_idx], r[inst_idx], *(nr[i] for i in range(len(cols)) if i != clk_idx)) for nr in nested["rows"])
+      if all_rows: print(tabulate(sorted(all_rows, key=lambda x: x[0]), headers=["Clk", "Inst"]+rest, tablefmt="github"))
+    else:
+      print(tabulate([r[:len(data["cols"])] for r in data["rows"]], headers=data["cols"], tablefmt="github"))
 
 def main() -> None:
   import tinygrad.viz.serve as viz
@@ -143,6 +155,7 @@ def main() -> None:
                       default=pathlib.Path(temp("profile.pkl", append_user=True)))
   parser.add_argument('--kernel', type=str, default=None, metavar="NAME", help='Kernel to focus on (optional name, default: all kernels)')
   parser.add_argument('-n', type=int, default=3, metavar="NUM", help='Max traces to print (optional number, default: 3 traces)')
+  parser.add_argument('--raw', action='store_true', help='Print nested per-execution tables (sorted by Clk) instead of aggregate')
   args = parser.parse_args()
 
   with args.profile.open("rb") as f: profile = pickle.load(f)
@@ -164,7 +177,7 @@ def main() -> None:
     if "PKTS" in s["name"]: continue
     print(s["name"])
     data = viz.get_render(s["query"])
-    print_data(data)
+    print_data(data, raw=args.raw)
     n += 1
     if n > args.n: break
 
