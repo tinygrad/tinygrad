@@ -1,20 +1,11 @@
-from __future__ import annotations
 import itertools
 from tinygrad.uop.ops import UOp, Ops, PatternMatcher, UPat
-from tinygrad.dtype import dtypes, DType, PtrDType
-from dataclasses import dataclass, field
-
-@dataclass(frozen=True)
-class Register:
-  name: str
-  index: int
-  cons: tuple[Register, ...] = field(default_factory=tuple)
-
-  def __repr__(self): return self.name
+from tinygrad.renderer.isa import ISARenderer, Register
+from tinygrad.dtype import dtypes, PtrDType
 
 # loosely based on: https://bernsteinbear.com/assets/img/register-spilling-range-splitting-ssa.pdf
 class RegallocContext:
-  def __init__(self, uops:list[UOp], isel:PatternMatcher, stack_ptr:UOp, stack_size:int=0):
+  def __init__(self, uops:list[UOp], ren:ISARenderer, stack_size:int=0):
     self.live_range: dict[Register, list[int]] = {}
     self.live: dict[Register, Register] = {}
     self.spills: dict[Register, UOp] = {}
@@ -22,8 +13,7 @@ class RegallocContext:
     self.vreg_to_rewrite: dict[Register, UOp] = {}
     self.live_ins: list[dict[Register, Register]] = []
     self.idx = itertools.count()
-    self.isel = isel
-    self.stack_ptr = stack_ptr
+    self.ren = ren
     self.stack_size = stack_size
     # the label associated with each loop NOTE: this is only used post regalloc and should be removed
     self.loop_label: dict[UOp, str] = {}
@@ -36,24 +26,6 @@ class RegallocContext:
       # a var defined before a range and used inside it is needed for the whole range
       if u.tag in lr and (n:=max((lr[rng][-1] for rng in ranges if lr[rng][0] <= lr[u.tag][-1] < lr[rng][-1]), default=None)): lr[u.tag].append(n)
       if u.op is Ops.RANGE: ranges.append(u.tag)
-
-# TODO: rm pointers
-# nasty hacks to deal with pointers
-def assign(ctx:RegallocContext, x:UOp, reg:Register):
-  dt = dtypes.uint64 if isinstance(x.dtype, PtrDType) else x.dtype
-  ret = ctx.isel.rewrite(UOp(Ops.ASSIGN, dt, (x,), tag=reg))
-  assert ret is not None
-  return ret.replace(dtype=x.dtype)
-def load(ctx:RegallocContext, dt:DType, disp:UOp, reg:Register):
-  ndt = dtypes.uint64 if isinstance(dt, PtrDType) else dt
-  ret = ctx.isel.rewrite(ctx.stack_ptr.index(disp).load(dtype=ndt, tag=reg))
-  assert ret is not None
-  return ret.replace(dtype=dt)
-def store(ctx:RegallocContext, disp:UOp, x:UOp):
-  nx = x.replace(dtype=dtypes.uint64 if isinstance(x.dtype, PtrDType) else x.dtype)
-  ret = ctx.isel.rewrite(ctx.stack_ptr.index(disp).store(nx))
-  assert ret is not None
-  return ret.replace(src=(s if s is not nx else x for s in ret.src))
 
 def alloc(ctx:RegallocContext, cons:tuple[Register, ...], i:int) -> Register:
   live_inv = {v:k for k,v in ctx.live.items()}
@@ -73,24 +45,20 @@ def regalloc(ctx:RegallocContext, x:UOp, i:int) -> tuple[UOp, list[UOp]]:
   nsrc, loads = [], []
   for s in x.src:
     # allocate srcs, if src was spilled it's replaced by a load, if it's live the load was already emited otherwise alloc and emit one
+    # TODO: constraints that only apply on definition are being applied on the uses too
     if isinstance(s.tag, Register) and (v:=ctx.rewrite_to_vreg[s]) in ctx.spills:
-      # TODO: the constraints only apply to the definition, you need to insert moves in the graph to "cleanse" the constraint
-      # then those moves are removed after regalloc if they move to the same register. I think this is the llvm approach
-      # alternatively you could beef up the register class to include constraints on the srcs, then you check those here
       if v not in ctx.live:
         ctx.live[v] = alloc(ctx, v.cons or (v,), i)
-        s = load(ctx, s.dtype, ctx.spills[v], ctx.live[v])
+        s = ctx.ren.fill(ctx.spills[v], s, ctx.live[v])
         loads.append(s)
-      else: s = load(ctx, s.dtype, ctx.spills[v], ctx.live[v])
+      else: s = ctx.ren.fill(ctx.spills[v], s, ctx.live[v])
     nsrc.append(s)
   # allocate destination
   if isinstance(v:=x.tag, Register) and v not in ctx.live:
     # if no cons it's a real register, so it can only be assigned to itself
     cons = v.cons or (v,)
     # two address instructions (src is used in dest) can only coalesce reused src. reused src goes first to get priority in case of a tiebreak
-    # TODO: make this backend independent
-    from tinygrad.renderer.isa.x86 import X86GroupOp
-    if x.arg in X86GroupOp.TwoAddress1st:
+    if ctx.ren.is_two_address(x):
       ins = tuple(ctx.live.get(ctx.rewrite_to_vreg[s]) for s in x.src)
       cons = ((ins[0],) if ins[0] in cons else ()) + tuple(r for r in cons if r not in ins)
       assert cons
@@ -117,7 +85,7 @@ def loop_prologue(ctx:RegallocContext, x:UOp, i:int):
     if v not in ctx.live:
       ctx.live[v] = alloc(ctx, v.cons or (v,), i)
       s = ctx.vreg_to_rewrite[v]
-      loads.append(load(ctx, s.dtype, ctx.spills[v], ctx.live[v]))
+      loads.append(ctx.ren.fill(ctx.spills[v], s, ctx.live[v]))
     assert ctx.live[v] not in live_in.values()
     live_in |= {v: ctx.live[v]}
   ctx.live_ins.append(live_in)
@@ -132,7 +100,7 @@ def loop_epilogue(ctx:RegallocContext, x:UOp, i:int):
     if k not in ctx.live or ctx.live[k] != v:
       ctx.live[k] = alloc(ctx, (v,), i)
       s = ctx.vreg_to_rewrite[k]
-      loads.append(load(ctx, s.dtype, ctx.spills[k], ctx.live[k]))
+      loads.append(ctx.ren.fill(ctx.spills[k], s, ctx.live[k]))
   return x, loads + [x]
 
 pm_regalloc = PatternMatcher([
@@ -145,5 +113,5 @@ pm_regalloc = PatternMatcher([
 pm_insert_spills = PatternMatcher([
   # insert spill after definition
   (UPat({Ops.INS, Ops.RANGE}, name="x"), lambda ctx,x:
-   (x, [x, store(ctx, y, x)]) if (y:=ctx.spills.get(ctx.rewrite_to_vreg.get(x))) is not None else None),
+   (x, [x, ctx.ren.spill(y, x)]) if (y:=ctx.spills.get(ctx.rewrite_to_vreg.get(x))) is not None else None),
 ])

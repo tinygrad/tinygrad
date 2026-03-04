@@ -1,11 +1,20 @@
+from __future__ import annotations
 import itertools, heapq
 from collections import defaultdict
+from dataclasses import dataclass, field
 from tinygrad.renderer import Renderer
 from tinygrad.uop.ops import PatternMatcher, graph_rewrite, UOp, UPat, Ops
 from tinygrad.codegen import line_rewrite
-from tinygrad.codegen.late.regalloc import RegallocContext, pm_regalloc, pm_insert_spills, Register
 from tinygrad.uop.spec import type_verify
 from tinygrad.helpers import SPEC, DEBUG, prod
+
+@dataclass(frozen=True)
+class Register:
+  name: str
+  index: int
+  cons: tuple[Register, ...] = field(default_factory=tuple)
+
+  def __repr__(self): return self.name
 
 class IselContext:
   def __init__(self, sink:UOp):
@@ -106,10 +115,16 @@ class ISARenderer(Renderer):
   pre_isel_matcher: PatternMatcher
   isel_matcher: PatternMatcher
   post_regalloc_matcher: PatternMatcher
-  def stack_pointer(self) -> UOp: raise NotImplementedError("arch specific")
+
+  def is_two_address(self, x:UOp) -> bool: return False
+  def is_foldable_load(self, x:UOp, s:UOp) -> bool: return False
+  def assign(self, x:UOp, reg:Register) -> UOp: raise NotImplementedError("arch specific")
+  def spill(self, disp:UOp, x:UOp) -> UOp: raise NotImplementedError("arch specific")
+  def fill(self, disp:UOp, x:UOp, reg:Register) -> UOp: raise NotImplementedError("arch specific")
   def asm(self, uops:list[UOp], function_name:str) -> str: raise NotImplementedError("arch specific")
   # TODO: these should go with the other rewrites in codegen
   def lower(self, sink:UOp):
+    from tinygrad.codegen.late.regalloc import RegallocContext, pm_regalloc, pm_insert_spills
     function_name = sink.arg.function_name
     sink = graph_rewrite(sink, self.pre_isel_matcher, name="pre instruction selection", bottom_up=True)
     isel_ctx = IselContext(sink)
@@ -117,7 +132,7 @@ class ISARenderer(Renderer):
     # TODO: is there a way to remove this?
     sink = graph_rewrite(sink, isel_fixup, name="instruction selection fixup")
     lst = isa_linearize(sink)
-    regalloc_ctx = RegallocContext(lst, self.isel_matcher, self.stack_pointer(), isel_ctx.stack_size)
+    regalloc_ctx = RegallocContext(lst, self, isel_ctx.stack_size)
     lst = line_rewrite(lst, pm_regalloc, regalloc_ctx)
     lst = line_rewrite(lst, pm_insert_spills, regalloc_ctx)
     lst = line_rewrite(lst, self.post_regalloc_matcher, regalloc_ctx)

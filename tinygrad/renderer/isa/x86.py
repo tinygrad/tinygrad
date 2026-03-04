@@ -5,8 +5,7 @@ from typing import cast
 from tinygrad.dtype import dtypes, PtrDType, DType, truncate
 from tinygrad.uop import FastEnum, auto, Ops, GroupOp
 from tinygrad.uop.ops import UOp, UPat, PatternMatcher
-from tinygrad.renderer.isa import ISARenderer, IselContext, RegallocContext
-from tinygrad.codegen.late.regalloc import Register, assign
+from tinygrad.renderer.isa import ISARenderer, IselContext, Register
 from tinygrad.helpers import getenv, CPU_COUNT, unwrap
 
 # ***** X86 Ops *****
@@ -81,10 +80,10 @@ class X86Ops(FastEnum):
 # TODO: add commutative groupop to fuse more loads
 class X86GroupOp:
   # X86Ops whose first src is also the destination
-  TwoAddress1st = {X86Ops.ADD, X86Ops.ADDi, X86Ops.AND, X86Ops.ANDi, X86Ops.XOR, X86Ops.XORi, X86Ops.OR, X86Ops.ORi, X86Ops.IMUL,
-                   X86Ops.SUB, X86Ops.SUBi, X86Ops.SHL, X86Ops.SHLi, X86Ops.SHR, X86Ops.SHRi, X86Ops.SAR, X86Ops.SARi,
-                   X86Ops.IDIV, X86Ops.VFMADD213SS, X86Ops.VFMADD213SD, X86Ops.VFMADD213PS, X86Ops.VFMADD213PD,
-                   X86Ops.CMOVNE, X86Ops.CMOVE, X86Ops.CMOVL, X86Ops.CMOVB}
+  TwoAddress = {X86Ops.ADD, X86Ops.ADDi, X86Ops.AND, X86Ops.ANDi, X86Ops.XOR, X86Ops.XORi, X86Ops.OR, X86Ops.ORi, X86Ops.IMUL,
+                X86Ops.SUB, X86Ops.SUBi, X86Ops.SHL, X86Ops.SHLi, X86Ops.SHR, X86Ops.SHRi, X86Ops.SAR, X86Ops.SARi,
+                X86Ops.IDIV, X86Ops.VFMADD213SS, X86Ops.VFMADD213SD, X86Ops.VFMADD213PS, X86Ops.VFMADD213PD,
+                X86Ops.CMOVNE, X86Ops.CMOVE, X86Ops.CMOVL, X86Ops.CMOVB}
 
   # X86Ops whose first src can read from memory
   ReadMem1st = {X86Ops.MOV, X86Ops.VMOVSS, X86Ops.VMOVSD, X86Ops.VMOVUPS, X86Ops.MOVZX, X86Ops.MOVSX, X86Ops.MOVSXD, X86Ops.VMOVD, X86Ops.VMOVQ,
@@ -95,7 +94,7 @@ class X86GroupOp:
                 X86Ops.VPBROADCASTB, X86Ops.VPBROADCASTW, X86Ops.VPBROADCASTD, X86Ops.VPBROADCASTQ, X86Ops.VBROADCASTSS,
                 X86Ops.CMPi, X86Ops.IMULi, X86Ops.DIV, X86Ops.LEA}
 
-  # X86Ops whose second src can read from memory NOTE: some of these are TwoAddress1st so the second src is actually the first
+  # X86Ops whose second src can read from memory NOTE: some of these are TwoAddress so the second src is actually the first
   ReadMem2nd = {X86Ops.ADD, X86Ops.SUB, X86Ops.AND, X86Ops.OR, X86Ops.XOR, X86Ops.SHL, X86Ops.SHR, X86Ops.SAR, X86Ops.IMUL, X86Ops.CMP,
                 X86Ops.VADDSS, X86Ops.VADDSD, X86Ops.VADDPS, X86Ops.VADDPD, X86Ops.VSUBSS, X86Ops.VSUBSD, X86Ops.VSUBPS, X86Ops.VSUBPD,
                 X86Ops.VMULSS, X86Ops.VMULSD, X86Ops.VMULPS, X86Ops.VMULPD, X86Ops.VDIVSS, X86Ops.VDIVSD, X86Ops.VDIVPS, X86Ops.VDIVPD,
@@ -108,7 +107,7 @@ class X86GroupOp:
                 X86Ops.VMAXSS, X86Ops.VMAXSD, X86Ops.VMAXPS, X86Ops.VMAXPD, X86Ops.VMINSS, X86Ops.VMINSD, X86Ops.VMINPS, X86Ops.VMINPD,
                 X86Ops.VCVTSI2SS, X86Ops.VCVTSI2SD, X86Ops.VCVTSS2SD, X86Ops.VCVTSD2SS, X86Ops.VUCOMISS, X86Ops.VUCOMISD, X86Ops.IDIV}
 
-  # X86Ops whose third src can read from memory NOTE: these are TwoAddress1st so the third src is actually the second
+  # X86Ops whose third src can read from memory NOTE: these are TwoAddress so the third src is actually the second
   ReadMem3rd = {X86Ops.VFMADD213SS, X86Ops.VFMADD213SD, X86Ops.VFMADD213PS, X86Ops.VFMADD213PD}
 
   # X86Ops that can write to memory
@@ -126,10 +125,10 @@ class X86GroupOp:
                 X86Ops.OR, X86Ops.ORi, X86Ops.VUCOMISS, X86Ops.VUCOMISD}
 
   # X86Ops whose first src is the rm field
-  Rm1st = ReadMem1st | (ReadMem2nd & TwoAddress1st) | {X86Ops.VPSRLDQ}
+  Rm1st = ReadMem1st | (ReadMem2nd & TwoAddress) | {X86Ops.VPSRLDQ}
 
   # X86Ops whose second src is the rm field
-  Rm2nd = ReadMem2nd | (ReadMem3rd & TwoAddress1st)
+  Rm2nd = ReadMem2nd | (ReadMem3rd & TwoAddress)
 
   All = set(X86Ops)
 
@@ -405,7 +404,7 @@ isel_matcher = PatternMatcher([
    x.ins(X86Ops.VROUNDSD, src=(y, y, imm(dtypes.uint8, 3))) if x.dtype.count == 1 else x.ins(X86Ops.VROUNDPD, src=(y, imm(dtypes.uint8, 3)))),
   # shufles
   (UPat.var("y", dtypes.float32).broadcast(name="x"), lambda y,x: x.ins(X86Ops.VBROADCASTSS, src=(y,))),
-  # for float16 we route the srcs through gprs unless we can fold them directly, this is suboptimal for values in xmms, in that case we want vpunpcklwd
+  # for float16 we route the srcs through gprs unless we can fold them, this is suboptimal for values in xmms, in that case we want vpunpcklwd
   (UPat(Ops.VECTORIZE, dtypes.float16, name="x"), lambda ctx,x:
    vpins(x.replace(src=tuple(s if is_foldable_load(ctx, x, s) else s.bitcast(dtypes.int16) for s in x.src)))),
   (UPat(Ops.VECTORIZE, dtypes.float32, name="x"), vshufps),
@@ -551,7 +550,7 @@ isel_matcher = PatternMatcher([
 
 # ***** post register allocation *****
 # TODO: control flow should be overhauled so that this isn't necessary
-def lower_range(ctx:RegallocContext, x:UOp) -> tuple[UOp, list[UOp]]:
+def lower_range(ctx, x:UOp) -> tuple[UOp, list[UOp]]:
   loop_label = "_".join(str(i) for i in x.arg[:-1])
   acc = x.ins(X86Ops.MOVi, src=(imm(x.dtype, 0),) + x.src[1:])
   label = UOp(Ops.INS, arg=X86Ops.LABEL, tag=f".LOOP_{loop_label}")
@@ -581,7 +580,7 @@ post_regalloc_matcher = PatternMatcher([
    (nx:=x.replace(src=x.src[:1]), [x.ins(X86Ops.MOVi, src=(imm(min(dtypes.uint32, x.dtype), 0),), tag=RDX), nx])),
   # rewrite two address instructions to two address form, if reused src wasn't coalesced insert a move
   (UPat(Ops.INS, name="x"), lambda ctx,x: (nx:=x.replace(src=x.src[1:]),
-   [assign(ctx, x.src[0], x.tag), nx] if x.tag != x.src[0].tag else [nx]) if x.arg in X86GroupOp.TwoAddress1st else None),
+   [ctx.ren.assign(x.src[0], x.tag), nx] if x.tag != x.src[0].tag else [nx]) if x.arg in X86GroupOp.TwoAddress else None),
 ])
 
 # ***** X86 spec *****
@@ -803,7 +802,26 @@ class X86Renderer(ISARenderer):
   def __init__(self):
     from tinygrad.runtime.support.compiler_cpu import X86Compiler
     self.compiler = X86Compiler()
-  def stack_pointer(self) -> UOp: return UOp(Ops.INS, arg=X86Ops.DEFINE_REG, dtype=dtypes.uint64, tag=RSP)
+  def is_two_address(self, x:UOp) -> bool: return x.arg in X86GroupOp.TwoAddress
+  # nasty hacks to deal with pointers TODO: rm pointers
+  def assign(self, x:UOp, reg:Register):
+    dt = dtypes.uint64 if isinstance(x.dtype, PtrDType) else x.dtype
+    ret = isel_matcher.rewrite(UOp(Ops.ASSIGN, dt, (x,), tag=reg))
+    assert ret is not None
+    return ret.replace(dtype=x.dtype)
+
+  def spill(self, disp:UOp, x:UOp) -> UOp:
+    nx = x.replace(dtype=dtypes.uint64 if isinstance(x.dtype, PtrDType) else x.dtype)
+    ret = isel_matcher.rewrite(def_reg(dtypes.uint64, RSP).index(disp).store(nx))
+    assert ret is not None
+    return ret.replace(src=(s if s is not nx else x for s in ret.src))
+
+  def fill(self, disp:UOp, x:UOp, reg:Register) -> UOp:
+    ndt = dtypes.uint64 if isinstance(x.dtype, PtrDType) else x.dtype
+    ret = isel_matcher.rewrite(def_reg(dtypes.uint64, RSP).index(disp).load(dtype=ndt, tag=reg))
+    assert ret is not None
+    return ret.replace(dtype=x.dtype)
+
   def asm(self, uops:list[UOp], function_name:str) -> str:
     def _format_op(x:UOp) -> str: return f"    {(o[7:-1] if (o:=str(x.arg))[-1] in ('i', 'm') else o[7:]).lower():7s}"
     def _format_operands(x:UOp) -> str:
@@ -812,12 +830,9 @@ class X86Renderer(ISARenderer):
       def _mem_adress(base:UOp, idx:UOp, disp:UOp) -> str:
         return f"[{base.tag}" + (f" + {idx.tag}*{base.dtype.itemsize}" if idx.tag else "") + (f" + {disp.tag}" if disp.tag else "") + "]"
 
-      if len(x.src) > 3 and x.arg in X86GroupOp.WriteMem:
-        return ", ".join([_mem_adress(*x.src[:3])] + _format(x.src[3:]))
-      elif len(x.src) > 2 and x.arg in X86GroupOp.Rm1st:
-        return ", ".join(_format((x,)) + [_mem_adress(*x.src[:3])] + _format(x.src[3:]))
-      elif len(x.src) > 3 and x.arg in X86GroupOp.Rm2nd:
-        return ", ".join(_format((x, x.src[0])) + [_mem_adress(*x.src[1:4])] + _format(x.src[4:]))
+      if len(x.src) > 3 and x.arg in X86GroupOp.WriteMem: return ", ".join([_mem_adress(*x.src[:3])] + _format(x.src[3:]))
+      elif len(x.src) > 2 and x.arg in X86GroupOp.Rm1st: return ", ".join(_format((x,)) + [_mem_adress(*x.src[:3])] + _format(x.src[3:]))
+      elif len(x.src) > 3 and x.arg in X86GroupOp.Rm2nd: return ", ".join(_format((x, x.src[0])) + [_mem_adress(*x.src[1:4])] + _format(x.src[4:]))
       return ", ".join(_format((x,) + x.src))
 
     asm = [f".{function_name}:"]
