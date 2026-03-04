@@ -164,7 +164,8 @@ class TransformerBlock:
   def __call__(self, x: Tensor, start_pos: int|UOp):
     if not hasattr(self, "cache_kv"):
       # TODO: how is the dtype of this determined?
-      self.cache_kv = Tensor.zeros(2, x.shape[0], self.n_kv_heads, self.max_context, self.head_dim, device=x.device).contiguous().realize()
+      # NOTE: clone is used to promise the creation of a specific buffer
+      self.cache_kv = Tensor.zeros(2, x.shape[0], self.n_kv_heads, self.max_context, self.head_dim, device=x.device).clone()
     # TODO: why couldn't this be in attention? it cache misses if you put in there. is it the unique const?
     mask = Tensor.full((1, 1, x.shape[1], start_pos+x.shape[1]), float("-inf"), dtype=x.dtype, device=x.device).triu(start_pos+1)
     return self._feed_forward(self._attention(x, mask, start_pos)).contiguous()
