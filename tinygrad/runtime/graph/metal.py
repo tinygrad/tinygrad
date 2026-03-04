@@ -13,11 +13,6 @@ class MetalGraph(GraphRunner):
   def __init__(self, jit_cache: list[ExecItem], input_buffers: list[Buffer], var_vals: dict[str, int],
                orig_valid_positions: dict[int, set[int]]|None = None):
     super().__init__(jit_cache, input_buffers, var_vals, orig_valid_positions)
-    if not all(isinstance(ji.prg, CompiledRunner) for ji in jit_cache): raise GraphException
-    # Metal ICB replay uint32 overflow for offsets. Refuse graphing this batch
-    # so apply_graph_to_jit falls back to normal kernel execution.
-    if any(b is not None and b._buf.offset > 0xFFFFFFFF for ji in jit_cache for b in ji.bufs):
-      raise GraphException("metal graph disabled: buffer offset exceeds 32-bit range")
 
     # create metal batch exec
     icb_descriptor = metal.MTLIndirectCommandBufferDescriptor.new()
@@ -113,3 +108,8 @@ class MetalGraph(GraphRunner):
     if PROFILE and self.command_buffer is not None:
       wait_check(self.command_buffer)
       self.collect_timestamps()
+
+  @staticmethod
+  def supports_exec_item(devs, ei:ExecItem) -> bool:
+    # Metal ICB replay encodes offsets as uint32; reject if any buffer offset exceeds 32-bit range.
+    return not any(b is not None and b._buf.offset > 0xFFFFFFFF for b in ei.bufs)
