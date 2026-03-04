@@ -237,20 +237,10 @@ class ElementwiseMixin(DTypeMixin):
     return self.rshift(x, True)
 
   def maximum(self, x: Self | ConstType) -> Self:
-    """
-    Computes element-wise maximum of `self` and `x`.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-1, 2, 3]).maximum(1).numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-1, 2, 3]).maximum(Tensor([-4, -2, 9])).numpy())
-    ```
-    """
-    return self._binop(Ops.MAX, x, False)
+    return (self < x).where(x, self)
 
   def minimum(self, x: Self | ConstType) -> Self:
-    return -(-self).maximum(-self.ufix(x))
+    return (self > x).where(x, self)
 
   def where(self, x: Self | ConstType, y: Self | ConstType) -> Self:
     if isinstance(x, type(self)):
