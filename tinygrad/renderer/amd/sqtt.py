@@ -135,7 +135,7 @@ class InstOpRDNA4(Enum):
 
 class CDNAIssueStatus(Enum): NULL = 0; STALL = 1; INST = 2; IMMED = 3
 
-class CDNAInstType(Enum):
+class InstOpCDNA(Enum):
   SMEM = 0; SALU_32 = 1; VMEM_RD = 2; VMEM_WR = 3; FLAT_WR = 4; VALU_32 = 5; LDS = 6; PC = 7
   EXPREQ_GDS = 8; EXPREQ_GFX = 9; EXPGNT_PAR_COL = 10; EXPGNT_POS_GDS = 11
   JUMP = 12; NEXT = 13; FLAT_RD = 14; OTHER_MSG = 15; SMEM_WR = 16; SALU_64 = 17; VALU_64 = 18; VALU_MAI = 28
@@ -466,7 +466,7 @@ class INST_CDNA(PacketType):
   encoding = bits[3:0] == 10
   wave = bits[8:5]
   simd = bits[10:9]
-  op = bits[15:11].enum(CDNAInstType)
+  op = bits[15:11].enum(InstOpCDNA)
 
 class INST_PC_CDNA(PacketType):
   """type 11: 64-bit instruction PC (MsgInstPc)"""
@@ -697,7 +697,7 @@ def map_insts(data:bytes, lib:bytes, target:str) -> Iterator[tuple[PacketType, I
     # CDNA decoded instructions
     if isinstance(p, INST_CDNA):
       inst = pc_map[pc:=wave_pc[p.wave]]
-      if isinstance(p.op, CDNAInstType) and p.op is CDNAInstType.JUMP:
+      if isinstance(p.op, InstOpCDNA) and p.op is InstOpCDNA.JUMP:
         simm16 = getattr(inst, 'simm16', None)
         assert simm16 is not None, f"CDNA JUMP must map to a branch instruction, got {inst}"
         x = simm16 & 0xffff
