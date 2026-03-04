@@ -551,11 +551,8 @@ def _build_decode_tables(packet_types: dict[int, type[PacketType]]) -> tuple[dic
 _DECODE_INFO_RDNA3, _STATE_TABLE_RDNA3 = _build_decode_tables(PACKET_TYPES_RDNA3)
 _DECODE_INFO_RDNA4, _STATE_TABLE_RDNA4 = _build_decode_tables(PACKET_TYPES_RDNA4)
 
-#_DECODE_INFO_CDNA, _STATE_TABLE_CDNA = _build_decode_tables(PACKET_TYPES_CDNA)
-# CDNA token sizes in bytes, indexed by type 0-15
-_CDNA_TOKEN_BYTES = [2, 8, 8, 4, 2, 6, 2, 2, 2, 2, 2, 8, 6, 4, 8, 6]
 # CDNA replay instruction types (erased, not real instructions)
-_CDNA_REPLAY_TYPES = frozenset({19, 20, 21, 22, 23, 24})
+_CDNA_REPLAY_TYPES = {19, 20, 21, 22, 23, 24}
 
 def decode_cdna(data: bytes) -> Iterator[PacketType]:
   """Decode CDNA (gfx9) SQTT blob. Byte-aligned tokens, matches rocprof-trace-decoder gfx9 logic."""
@@ -571,12 +568,11 @@ def decode_cdna(data: bytes) -> Iterator[PacketType]:
   def _parse_one() -> tuple[type[PacketType], int, int] | None:
     nonlocal pos
     if pos + 2 > n: return None
-    typ = data[pos] & 0xf
-    sz = _CDNA_TOKEN_BYTES[typ]
+    pkt_cls = _CDNA_TOKEN_TYPES[data[pos] & 0xf]
+    sz = pkt_cls._size_nibbles // 2
     if pos + sz > n: return None
     raw = int.from_bytes(data[pos:pos + sz], 'little')
     pos += sz
-    pkt_cls = _CDNA_TOKEN_TYPES[typ]
     return (pkt_cls, raw, ((raw >> 4) & 0xff) if pkt_cls is CDNA_MISC else ((raw >> 4) & 1))
 
   def _patch_time() -> None:
