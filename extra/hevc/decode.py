@@ -78,9 +78,9 @@ if __name__ == "__main__":
   with tm:
     images = list(hevc_decode(hevc_tensor, opaque_nv, frame_info, luma_h, luma_w, history=hist, preallocated_outputs=out_images))
     Device.default.synchronize()
-  if (assert_fps:=getenv("ASSERT_FPS", 0)) > 0:
-    fps = len(frame_info)/(tm.et/1e9)
-    assert fps >= assert_fps, f"HEVC decode too slow: {fps:.2f} fps < {assert_fps} fps"
+
+  fps = len(frame_info)/(tm.et/1e9)
+  assert fps >= getenv("ASSERT_FPS", 0), f"HEVC decode too slow: {fps:.2f} fps"
 
   # validation
   if getenv("VALIDATE", 0):
