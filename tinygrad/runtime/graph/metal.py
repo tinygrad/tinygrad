@@ -112,4 +112,5 @@ class MetalGraph(GraphRunner):
   @staticmethod
   def supports_exec_item(devs, ei:ExecItem) -> bool:
     # Metal ICB replay encodes offsets as uint32; reject if any buffer offset exceeds 32-bit range.
-    return not any(b is not None and b._buf.offset > 0xFFFFFFFF for b in ei.bufs)
+    if any(b is not None and b._buf.offset > 0xFFFFFFFF for b in ei.bufs): return False
+    return GraphRunner.supports_exec_item(devs, ei)
