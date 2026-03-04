@@ -725,24 +725,47 @@ class InstructionInfo:
   wave: int
   inst: Inst
 
+
 def map_insts(data:bytes, lib:bytes, target:str) -> Iterator[tuple[PacketType, InstructionInfo|None]]:
   """maps SQTT packets to instructions, yields (packet, instruction_info or None)"""
   # map pcs to insts
   from tinygrad.viz.serve import amd_decode
   pc_map = amd_decode(lib, target)
 
+  is_cdna = target.startswith("gfx9")
   wave_pc:dict[int, int] = {}
   # only processing packets on one [CU, SIMD] unit
-  def simd_select(p) -> bool: return getattr(p, "cu", 0) == 0 and getattr(p, "simd", 0) == 0
+  if is_cdna:
+    cdna_target_cu = (int.from_bytes(data[:8], 'little') >> 20) & 0x1f
+    def simd_select(p) -> bool: return getattr(p, "cu", -1) == cdna_target_cu and getattr(p, "simd", -1) == 0
+  else:
+    def simd_select(p) -> bool: return getattr(p, "cu", 0) == 0 and getattr(p, "simd", 0) == 0
   for p in decode(data):
     if not simd_select(p): continue
-    if isinstance(p, (WAVESTART, WAVESTART_RDNA4)):
+    if isinstance(p, (WAVESTART, WAVESTART_RDNA4, CDNA_WAVESTART)):
       assert p.wave not in wave_pc, "only one inflight wave per unit"
       wave_pc[p.wave] = next(iter(pc_map))
       continue
-    if isinstance(p, WAVEEND):
+    if isinstance(p, (WAVEEND, CDNA_WAVEEND)):
       pc = wave_pc.pop(p.wave)
       yield (p, InstructionInfo(pc, p.wave, s_endpgm()))
+      continue
+    # CDNA decoded instructions
+    if isinstance(p, CDNA_DECODED_INST):
+      inst = pc_map[pc:=wave_pc[p.wave]]
+      if isinstance(p.op, CDNAInstType) and p.op is CDNAInstType.JUMP:
+        simm16 = getattr(inst, 'simm16', None)
+        assert simm16 is not None, f"CDNA JUMP must map to a branch instruction, got {inst}"
+        x = simm16 & 0xffff
+        wave_pc[p.wave] += inst.size() + (x - 0x10000 if x & 0x8000 else x)*4
+      else:
+        wave_pc[p.wave] += inst.size()
+      yield (p, InstructionInfo(pc, p.wave, inst))
+      continue
+    if isinstance(p, CDNA_DECODED_IMMED):
+      inst = pc_map[pc:=wave_pc[p.wave]]
+      wave_pc[p.wave] += inst.size()
+      yield (p, InstructionInfo(pc, p.wave, inst))
       continue
     # skip OTHER_ instructions, they don't belong to this unit
     if isinstance(p, (INST, INST_RDNA4)) and p.op.name.startswith("OTHER_"): continue
