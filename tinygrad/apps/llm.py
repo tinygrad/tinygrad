@@ -83,12 +83,10 @@ def apply_rope(x:Tensor, freqs_cis:Tensor) -> Tensor:
   x1, x2 = x.chunk(2, dim=-1)
   return (x1 * cos - x2 * sin).cat(x2 * cos + x1 * sin, dim=-1)
 
-# Useful: https://sebastianraschka.com/llms-from-scratch/ch04/08_deltanet/
+# Great reference: https://sebastianraschka.com/llms-from-scratch/ch04/08_deltanet/
 # Official Qwen3 impl: https://github.com/huggingface/transformers/blob/0ed6d51ae8ed3f4fafca67a983b8d75bc76cd51b/src/transformers/models/qwen3_next/modular_qwen3_next.py#L835
-
-# https://github.com/NVlabs/GatedDeltaNet/blob/main/lit_gpt/gated_delta_net.py
-# https://github.com/ggml-org/llama.cpp/blob/master/src/models/qwen35.cpp
-# https://github.com/ggml-org/llama.cpp/blob/master/src/models/delta-net-base.cpp
+# Llama.cpp model: https://github.com/ggml-org/llama.cpp/blob/master/src/models/qwen35.cpp
+# LLama.cpp layers: https://github.com/ggml-org/llama.cpp/blob/master/src/models/delta-net-base.cpp
 class GatedDeltaNet:
     def __init__(self, hidden_dim: int, num_k_heads: int, num_v_heads: int, head_k_dim: int, head_v_dim: int, conv_kernel: int):
         self.hidden_dim = hidden_dim
@@ -116,7 +114,7 @@ class GatedDeltaNet:
     def recurrent_forward(self, q: Tensor, k: Tensor, v: Tensor, a: Tensor, b: Tensor, state: Tensor) -> Tuple[Tensor, Tensor]:
         # Input shapes":" (batch, seq_len, num_heads, head_dim | None)
         batch, seq_len, _, _ = q.shape
-        q, k, v  = [x.transpose(1, 2).contiguous() for x in (q, k, v, b, a)] # (batch, num_heads, seq_len, head_dim | None)
+        q, k, v, b, a  = [x.transpose(1, 2).contiguous() for x in (q, k, v, b, a)] # (batch, num_heads, seq_len, head_dim | None)
         q = q / (q.square().sum(-1, keepdim=True).sqrt() + 1e-6) # l2 normalize
         k = k / (k.square().sum(-1, keepdim=True).sqrt() + 1e-6)
         q = q * 1.0 / (self.head_k_dim ** 0.5)
@@ -126,9 +124,9 @@ class GatedDeltaNet:
             a_t = a[:, :, i, None, None]
             q_t, k_t, v_t, b_t = q[:, :, i], k[:, :, i], v[:, :, i], b[:, :, i]
 
-            state = state * a_t 
+            state = state * a_t.exp()
             kv_mem = (state * k_t[..., None]).sum(-2)
-            delta = (v_t - kv_mem) * b_t
+            delta = (v_t - kv_mem) * b_t[..., None]
             state = state + k_t[..., None] * delta[..., None, :]
             y_t = (state * q_t[..., None]).sum(-2)
             outputs.append(y_t)
@@ -152,8 +150,9 @@ class GatedDeltaNet:
         b, a = self.in_proj_ba(x).chunk(2, dim=-1)
         b, a = b.reshape(batch, seq_len, self.num_v_heads), a.reshape(batch, seq_len, self.num_v_heads)
         b = b.sigmoid()
-        a = -self.A_log.exp() * (a + self.dt_bias).softplus()
+        a = -self.A_log.float().exp() * (a.float() + self.dt_bias).softplus()
 
+        # TODO: implement chunk gated delta rule for prefill
         if recurrent_state is None: recurrent_state = Tensor.zeros(batch, self.num_v_heads, self.head_k_dim, self.head_v_dim)
         if self.num_v_heads // self.num_k_heads > 1:
             q = q.repeat_interleave(self.num_v_heads // self.num_k_heads, dim=2)
@@ -162,23 +161,9 @@ class GatedDeltaNet:
         attn = self.norm(attn.reshape(-1, self.head_v_dim)) * z.reshape(-1, self.head_v_dim).silu()
         return self.out_proj(attn.reshape(batch, seq_len, -1)), conv_state, recurrent_state
 
-"""
-class GatedAttention:
-    def __init__(self, hidden_dim: int, n_heads: int):
-        self.hidden_dim = hidden_dim
-        self.n_heads = n_heads
-        self.fused_proj = nn.Linear(hidden_dim, hidden_dim * 4, bias=False)
-        self.o_proj = nn.Linear(hidden_dim, hidden_dim)
-    def __call__(self, x: Tensor):
-        B, T, D = x.shape
-        H = self.n_heads
-        q, k, v, g = self.fused_proj(x).chunk(4, dim=-1)
-        q = q.view(B, T, H, self.hidden_dim).transpose(1, 2)
-        k = k.view(B, T, H, self.hidden_dim).transpose(1, 2)
-        v = v.view(B, T, H, self.hidden_dim).transpose(1, 2)
-        attn = q.scaled_dot_product_attention(k, v, is_causal=True).transpose(1, 2).reshape(B, T, D)
-        return self.o_proj(attn * g.sigmoid())
-"""
+class GatedMultiHeadAttention:
+    def __init__(self):
+        pass
 
 class TransformerBlock:
   def __init__(self, dim:int, hidden_dim:int, n_heads:int, n_kv_heads:int, norm_eps:float, head_dim:int, rope_theta:float,
