@@ -54,7 +54,7 @@ def handle_allreduce(buf:UOp, red:UOp) -> UOp|None:
   # reassemble
   return UOp.sum(*[c.pad(((s,numel-e),)) for (s,e),c in zip(chunks, copied_chunks)]).reshape(shape)
 
-def handle_allreduce_function(buf:UOp, red:UOp, output:UOp|None=None) -> UOp|None:
+def create_allreduce_function(buf:UOp, red:UOp, output:UOp|None=None) -> UOp|None:
   # BUFFER without unique have unique added later
   if output is None: output = UOp(Ops.BUFFER, red.dtype, (UOp(Ops.NOOP), red.src[1]), red.size).reshape(red.shape)
   to = red.param_like(0)

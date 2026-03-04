@@ -1,6 +1,7 @@
-from tinygrad.helpers import all_same, prod
+from tinygrad.helpers import all_same, prod, getenv
 from tinygrad.uop.ops import Ops, UOp, PatternMatcher, UPat, GroupOp, graph_rewrite, should_resolve_call
 from tinygrad.dtype import dtypes
+from tinygrad.schedule.allreduce import handle_allreduce
 
 # ***** multi rewrite MSELECT/MSTACK *****
 
@@ -32,6 +33,11 @@ replace_allreduce = PatternMatcher([
   (UPat(Ops.MSELECT, src=(UPat(GroupOp.Movement, src=(UPat.var("s"),), allow_any_len=True, name="v"),), name="ms"),
    lambda s,v,ms: v.replace(src=(s.mselect(ms.arg),)+v.src[1:])),
 ])
+
+_early_allreduce = PatternMatcher([
+  (UPat(Ops.ALLREDUCE, src=(UPat.var("buf"), UPat()), name="red"), handle_allreduce),
+])
+if not getenv("LATE_ALLREDUCE", 0): replace_allreduce = _early_allreduce + replace_allreduce
 
 # ***** multi functions *****
 

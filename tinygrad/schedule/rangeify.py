@@ -10,7 +10,7 @@ from tinygrad.codegen.simplify import pm_flatten_range, pm_reduce_simplify
 from tinygrad.codegen.opt import Opt
 from tinygrad.schedule.indexing import run_rangeify, BufferizeOpts, ALWAYS_CONTIGUOUS, IndexingContext, apply_movement_op
 from tinygrad.schedule.multi import multi_pm
-from tinygrad.schedule.allreduce import handle_allreduce_function
+from tinygrad.schedule.allreduce import create_allreduce_function
 
 # creation can recurse a lot
 import sys
@@ -105,8 +105,8 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
   (UPat(Ops.CALL, name="c"), resolve_call),
 
   # resolve allreduce (must be bottom up)
-  (UPat(Ops.ASSIGN, src=(UPat.var("output"), UPat(Ops.ALLREDUCE, src=(UPat.var("buf"), UPat()), name="red"))), handle_allreduce_function),
-  (UPat(Ops.ALLREDUCE, src=(UPat.var("buf"), UPat()), name="red"), handle_allreduce_function),
+  (UPat(Ops.ASSIGN, src=(UPat.var("output"), UPat(Ops.ALLREDUCE, src=(UPat.var("buf"), UPat()), name="red"))), create_allreduce_function),
+  (UPat(Ops.ALLREDUCE, src=(UPat.var("buf"), UPat()), name="red"), create_allreduce_function),
 
   # split_reduceop
   (UPat(Ops.REDUCE_AXIS, name="reduce", src=(UPat.var("x"),)), split_reduceop),
