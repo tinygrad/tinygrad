@@ -10,9 +10,9 @@ HEVC_ROUNDUP = getenv("DATA_ROUNDUP", 32)
 @functools.cache
 def _hevc_jitted_decoder(out_image_size:tuple[int, int], max_hist:int, inplace:bool):
   def hevc_decode_frame(pos:Variable, hevc_tensor:Tensor, offset:Variable, sz:Variable, opaque:Tensor, i:Variable, *hist:Tensor, outbuf:Tensor|None=None):
-    x = hevc_tensor[offset:offset+sz*HEVC_ROUNDUP].decode_hevc_frame(pos, out_image_size, opaque[i], hist)
+    x = hevc_tensor[offset:offset+sz*HEVC_ROUNDUP].decode_hevc_frame(pos, out_image_size, opaque[i], hist).realize()
     if outbuf is not None: outbuf.assign(x).realize()
-    return x.realize()
+    return x
   return TinyJit(hevc_decode_frame)
 
 def hevc_decode(hevc_tensor:Tensor, opaque:Tensor, frame_info:list, luma_h:int, luma_w:int,
@@ -74,9 +74,13 @@ if __name__ == "__main__":
   Device.default.synchronize()
 
   # decode all frames using the iterator
-  with Timing("decoding whole file: ", on_exit=(lambda et: f", {len(frame_info)} frames, {len(frame_info)/(et/1e9):.2f} fps")):
+  tm = Timing("decoding whole file: ", on_exit=(lambda et: f", {len(frame_info)} frames, {len(frame_info)/(et/1e9):.2f} fps"))
+  with tm:
     images = list(hevc_decode(hevc_tensor, opaque_nv, frame_info, luma_h, luma_w, history=hist, preallocated_outputs=out_images))
     Device.default.synchronize()
+  if (assert_fps:=getenv("ASSERT_FPS", 0)) > 0:
+    fps = len(frame_info)/(tm.et/1e9)
+    assert fps >= assert_fps, f"HEVC decode too slow: {fps:.2f} fps < {assert_fps} fps"
 
   # validation
   if getenv("VALIDATE", 0):
