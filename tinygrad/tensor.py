@@ -622,8 +622,7 @@ class Tensor(OpMixin):
       Tensor._device_seeds[device] = Tensor(
         [int.from_bytes(hashlib.sha256(len(Tensor._device_seeds).to_bytes(4, "big")).digest(), "big"), Tensor._seed],
         device=device, dtype=dtypes.uint32, requires_grad=False)
-      # we create this buffer on first rand
-      Tensor._device_rng_counters[device] = Tensor([num], device=device, dtype=dtypes.uint32, requires_grad=False).contiguous().realize()
+      Tensor._device_rng_counters[device] = Tensor([num], device=device, dtype=dtypes.uint32, requires_grad=False).clone()
     # increment rng counter for devices
     else: Tensor._device_rng_counters[device].assign(Tensor._device_rng_counters[device] + num)
 
