@@ -133,6 +133,16 @@ class InstOpRDNA4(Enum):
   SALU_5 = 0x9c
   OTHER_VMEM = 0xc1
 
+
+class CDNAInstType(Enum):
+  SMEM = 0; SALU_32 = 1; VMEM_RD = 2; VMEM_WR = 3; FLAT_WR = 4; VALU_32 = 5; LDS = 6; PC = 7
+  EXPREQ_GDS = 8; EXPREQ_GFX = 9; EXPGNT_PAR_COL = 10; EXPGNT_POS_GDS = 11
+  JUMP = 12; NEXT = 13; FLAT_RD = 14; OTHER_MSG = 15; SMEM_WR = 16; SALU_64 = 17; VALU_64 = 18; VALU_MAI = 28
+
+class CDNAToken(Enum):
+  MISC = 0; TIMESTAMP = 1; REG = 2; WAVE_START = 3; WAVE_ALLOC = 4; REG_CS = 5; WAVE_END = 6
+  EVENT = 7; EVENT_CS = 8; EVENT_GFX1 = 9; INST = 10; INST_PC = 11; SHADERDATA = 12; ISSUE = 13; PERF = 14; REG_CS_PRIV = 15
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # PACKET TYPE BASE CLASS
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -381,137 +391,148 @@ PACKET_TYPES_RDNA4: dict[int, type[PacketType]] = {
 # CDNA PACKET TYPE DEFINITIONS
 # ═══════════════════════════════════════════════════════════════════════════════
 
-class CDNA_DELTA(PacketType):
-  """pkt_fmt=0: 16-bit timestamp delta packet"""
+
+class CDNA_MISC(PacketType):
+  """type 0: 16-bit misc (timestamp delta, time reset, packet lost, etc.)"""
   encoding = bits[3:0] == 0
-  delta = bits[11:4]      # (data >> 4) & 0xff
-  unk_0 = bits[12:12]     # (data >> 0xc) & 1
-  unk_1 = bits[15:13]     # (data >> 0xd)
+  delta = bits[11:4]
+  sh = bits[12:12]
+  misc_type = bits[15:13]
 
 class CDNA_TIMESTAMP(PacketType):
-  """pkt_fmt=1: 64-bit timestamp packet (case 0x0)"""
+  """type 1: 64-bit absolute timestamp"""
   encoding = bits[3:0] == 1
-  unk_0 = bits[15:4]
-  timestamp = bits[63:16]   # stored as (data_word >> 0x10) in low 46 bits of local_58
+  _unk = bits[15:4]
+  timestamp = bits[63:16]
 
-class CDNA_PKT_2(PacketType):
-  """pkt_fmt=2: 64-bit packet (case 0x4)"""
+class CDNA_REG(PacketType):
+  """type 2: 64-bit register write (Reg)"""
   encoding = bits[3:0] == 2
-  unk_0 = bits[6:5]       # (data >> 5) & 3
-  unk_1 = bits[7:7]       # (data >> 7) + 1 & 1
-  unk_padding = bits[63:8]
+  pipe = bits[6:5]
+  _me_raw = bits[8:7]
+  regaddr = bits[31:16]
+  regdata = bits[63:32]
 
 class CDNA_WAVESTART(PacketType):
-  """pkt_fmt=3: 32-bit WAVESTART packet (case 0x8)"""
+  """type 3: 32-bit wave start (Wave/group_id)"""
   encoding = bits[3:0] == 3
-  unk_0 = bits[5:5]       # (data >> 5) & 1
-  unk_1 = bits[9:6]       # (data >> 6) & 0xf
-  wave = bits[13:10]      # (data >> 10) & 0xf
-  simd = bits[15:14]      # (data >> 0xe) & 3
-  cu = bits[17:16]        # (data >> 0x10) & 3
-  unk_5 = bits[19:18]     # (data >> 0x12) & 3
-  unk_6 = bits[28:22]     # (data >> 0x16) & 0x7f
-  unk_padding = bits[31:29]
+  sh = bits[5:5]
+  cu = bits[9:6]
+  wave = bits[13:10]
+  simd = bits[15:14]
+  pipe = bits[17:16]
+  me = bits[19:18]
+  _gap = bits[21:20]
+  count = bits[28:22]
+  _padding = bits[31:29]
 
-class CDNA_PKT_4(PacketType):
-  """pkt_fmt=4: 16-bit packet (case 0xc, same as 0x8/0x14)"""
+class CDNA_WAVEALLOC(PacketType):
+  """type 4: 16-bit wave alloc (group_id)"""
   encoding = bits[3:0] == 4
-  unk_0 = bits[5:5]       # (data_word >> 5) & 1
-  unk_1 = bits[9:6]       # (data_word >> 6) & 0xf
-  unk_2 = bits[13:10]     # (data_word >> 10) & 0xf
-  unk_3 = bits[15:14]     # (data_word >> 0xe)
+  sh = bits[5:5]
+  cu = bits[9:6]
+  wave = bits[13:10]
+  simd = bits[15:14]
 
-class CDNA_PKT_5(PacketType):
-  """pkt_fmt=5: 48-bit packet (case 0x10)"""
+class CDNA_REGCS(PacketType):
+  """type 5: 48-bit register CS write (RegCs)"""
   encoding = bits[3:0] == 5
-  unk_0 = bits[6:5]       # (data >> 5) & 3
-  unk_1 = bits[7:7]       # (data >> 7) + 1 & 1
-  unk_2 = bits[15:9]      # (data >> 9) & 0x7f
-  unk_padding = bits[47:16]
+  pipe = bits[6:5]
+  _me_raw = bits[8:7]
+  regaddr = bits[15:9]
+  regdata = bits[47:16]
 
 class CDNA_WAVEEND(PacketType):
-  """pkt_fmt=6: 16-bit WAVEEND packet (case 0x14, same as 0x8/0xc)"""
+  """type 6: 16-bit wave end (group_id)"""
   encoding = bits[3:0] == 6
-  unk_0 = bits[5:5]       # (data_word >> 5) & 1
-  unk_1 = bits[9:6]       # (data_word >> 6) & 0xf
-  wave = bits[13:10]      # (data_word >> 10) & 0xf
-  simd = bits[15:14]      # (data_word >> 0xe)
+  sh = bits[5:5]
+  cu = bits[9:6]
+  wave = bits[13:10]
+  simd = bits[15:14]
 
-class CDNA_EXEC(PacketType):
-  """pkt_fmt=10: 16-bit EXEC packet (case 0x24)"""
-  encoding = bits[3:0] == 10
-  unk_0 = bits[8:5]       # (data_word >> 5) & 0xf
-  unk_1 = bits[10:9]      # (data_word >> 9) & 3
-  unk_2 = bits[15:11]     # (data_word >> 0xb)
+class CDNA_EVENT(PacketType):
+  """type 7: 16-bit event"""
+  encoding = bits[3:0] == 7
+  _data = bits[15:4]
 
-class CDNA_PKT_11(PacketType):
-  """pkt_fmt=11: 64-bit packet (case 0x28)"""
-  encoding = bits[3:0] == 11
-  unk_0 = bits[8:5]       # (data_word >> 5) & 0xf
-  unk_1 = bits[10:9]      # (data_word >> 9) & 3
-  unk_2 = bits[15:15]     # (data_word >> 0xf) & 1
-  unk_padding = bits[63:16]
+class CDNA_EVENT_CS(PacketType):
+  """type 8: 16-bit event CS"""
+  encoding = bits[3:0] == 8
+  _data = bits[15:4]
+
+class CDNA_EVENT_GFX1(PacketType):
+  """type 9: 16-bit event GFX1"""
+  encoding = bits[3:0] == 9
+  _data = bits[15:4]
 
 class CDNA_INST(PacketType):
-  """pkt_fmt=13: 32-bit INST packet (case 0x30)"""
-  encoding = bits[3:0] == 13
-  unk_0 = bits[6:5]       # (data >> 5) & 3
-  unk_1 = bits[9:8]       # (data >> 8) & 3
-  unk_2 = bits[11:10]     # (data >> 10) & 3
-  unk_3 = bits[13:12]     # (data >> 0xc) & 3
-  unk_4 = bits[15:14]     # (data >> 0xe) & 3
-  unk_5 = bits[19:18]     # (data >> 0x12) & 3
-  unk_6 = bits[21:20]     # (data >> 0x14) & 3
-  unk_7 = bits[23:22]     # (data >> 0x16) & 3
-  unk_8 = bits[25:24]     # (data >> 0x18) & 3
-  unk_9 = bits[27:26]     # (data >> 0x1a) & 3
-  unk_padding = bits[31:28]
+  """type 10: 16-bit instruction classification (MsgInst/TOKEN_INST)"""
+  encoding = bits[3:0] == 10
+  wave = bits[8:5]
+  simd = bits[10:9]
+  inst_type = bits[15:11]
 
-class CDNA_PKT_14(PacketType):
-  """pkt_fmt=14: 64-bit packet (case 0x34)"""
-  encoding = bits[3:0] == 14
-  unk_0 = bits[5:5]       # (data >> 5) & 1
-  unk_1 = bits[9:6]       # (data >> 6) & 0xf
-  unk_2 = bits[11:10]     # (data >> 10) & 3
-  unk_3 = bits[24:12]     # (data >> 0xc) & 0x1fff
-  unk_4 = bits[37:25]     # (data >> 0x19) & 0x1fff
-  unk_5 = bits[50:38]     # (data >> 0x26) & 0x1fff
-  unk_6 = bits[51:51]     # (data >> 0x33) & 1
-  unk_padding = bits[63:52]
+class CDNA_INST_PC(PacketType):
+  """type 11: 64-bit instruction PC (MsgInstPc)"""
+  encoding = bits[3:0] == 11
+  wave = bits[8:5]
+  simd = bits[10:9]
+  err = bits[15:15]
+  pc = bits[63:16]
 
-class CDNA_PKT_7(PacketType):
-  """pkt_fmt=7: 16-bit packet"""
-  encoding = bits[3:0] == 7
-  unk_padding = bits[15:4]
-
-class CDNA_PKT_8(PacketType):
-  """pkt_fmt=8: 16-bit packet"""
-  encoding = bits[3:0] == 8
-  unk_padding = bits[15:4]
-
-class CDNA_PKT_9(PacketType):
-  """pkt_fmt=9: 16-bit packet"""
-  encoding = bits[3:0] == 9
-  unk_padding = bits[15:4]
-
-class CDNA_PKT_12(PacketType):
-  """pkt_fmt=12: 48-bit packet"""
+class CDNA_SHADERDATA(PacketType):
+  """type 12: 48-bit shader data (UserData/group_id)"""
   encoding = bits[3:0] == 12
-  unk_padding = bits[47:4]
+  sh = bits[5:5]
+  cu = bits[9:6]
+  wave = bits[13:10]
+  simd = bits[15:14]
+  data = bits[47:16]
 
-class CDNA_PKT_15(PacketType):
-  """pkt_fmt=15: 48-bit packet (case 0x38, same as 0x10)"""
+class CDNA_ISSUE(PacketType):
+  """type 13: 32-bit issue status (Issue/TOKEN_ISSUE). Per-wave 2-bit status: 0=null, 1=stall, 2=inst, 3=immed."""
+  encoding = bits[3:0] == 13
+  simd = bits[6:5]
+  _padding = bits[31:7]
+  def wave_status(self, wave_id: int) -> int: return (self._raw >> (2 * wave_id + 8)) & 3
+
+class CDNA_PERF(PacketType):
+  """type 14: 64-bit perf counter (MsgPerf)"""
+  encoding = bits[3:0] == 14
+  sh = bits[5:5]
+  cu = bits[9:6]
+  cntr_bank = bits[11:10]
+  cntr_0 = bits[24:12]
+  cntr_1 = bits[37:25]
+  cntr_2 = bits[50:38]
+  _flag = bits[51:51]
+  _padding = bits[63:52]
+
+class CDNA_REGCS_PRIV(PacketType):
+  """type 15: 48-bit register CS privileged (RegCs)"""
   encoding = bits[3:0] == 15
-  unk_0 = bits[6:5]       # (data >> 5) & 3
-  unk_1 = bits[7:7]       # (data >> 7) + 1 & 1
-  unk_2 = bits[15:9]      # (data >> 9) & 0x7f
-  unk_padding = bits[47:16]
+  pipe = bits[6:5]
+  _me_raw = bits[8:7]
+  regaddr = bits[15:9]
+  regdata = bits[47:16]
 
-PACKET_TYPES_CDNA: dict[int, type[PacketType]] = {
-  0: CDNA_DELTA, 1: CDNA_TIMESTAMP, 2: CDNA_PKT_2, 3: CDNA_WAVESTART, 4: CDNA_PKT_4, 5: CDNA_PKT_5, 6: CDNA_WAVEEND,
-  7: CDNA_PKT_7, 8: CDNA_PKT_8, 9: CDNA_PKT_9, 10: CDNA_EXEC, 11: CDNA_PKT_11, 12: CDNA_PKT_12,
-  13: CDNA_INST, 14: CDNA_PKT_14, 15: CDNA_PKT_15,
+# Synthesized instruction packets from ISSUE→INST correlation in decode_cdna
+class CDNA_DECODED_INST(PacketType):
+  """Synthesized: classified instruction (ISSUE status=2 confirmed by INST token). wave/simd/cu/inst_type set as attributes."""
+  @property
+  def op(self):
+    try: return CDNAInstType(self.inst_type)
+    except ValueError: return self.inst_type
+
+class CDNA_DECODED_IMMED(PacketType):
+  """Synthesized: immediate instruction (ISSUE status=3). wave/simd/cu set as attributes."""
+
+_CDNA_TOKEN_TYPES: dict[int, type[PacketType]] = {
+  0: CDNA_MISC, 1: CDNA_TIMESTAMP, 2: CDNA_REG, 3: CDNA_WAVESTART, 4: CDNA_WAVEALLOC, 5: CDNA_REGCS,
+  6: CDNA_WAVEEND, 7: CDNA_EVENT, 8: CDNA_EVENT_CS, 9: CDNA_EVENT_GFX1, 10: CDNA_INST, 11: CDNA_INST_PC,
+  12: CDNA_SHADERDATA, 13: CDNA_ISSUE, 14: CDNA_PERF, 15: CDNA_REGCS_PRIV,
 }
+PACKET_TYPES_CDNA: dict[int, type[PacketType]] = {**_CDNA_TOKEN_TYPES, 16: CDNA_DECODED_INST, 17: CDNA_DECODED_IMMED}
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # DECODER
@@ -523,7 +544,7 @@ def _build_decode_tables(packet_types: dict[int, type[PacketType]]) -> tuple[dic
   state_table = bytes(next((op for op, cls in sorted_types if (b & cls.encoding.mask) == cls.encoding.default), 16) for b in range(256))
   # Build decode info: opcode -> (pkt_cls, nib_count, delta_lo, delta_mask, special_case)
   # special_case: 0=none, 1=TS_DELTA_OR_MARK (check is_marker), 2=TS_DELTA_SHORT (add 8), 3=CDNA_DELTA (*4), 4=CDNA_TIMESTAMP (absolute)
-  _special = {TS_DELTA_OR_MARK: 1, TS_DELTA_OR_MARK_RDNA4: 1, TS_DELTA_SHORT: 2, CDNA_DELTA: 3, CDNA_TIMESTAMP: 4}
+  _special = {TS_DELTA_OR_MARK: 1, TS_DELTA_OR_MARK_RDNA4: 1, TS_DELTA_SHORT: 2,} # CDNA_DELTA: 3, CDNA_TIMESTAMP: 4}
   decode_info = {}
   for opcode, pkt_cls in packet_types.items():
     delta_field = getattr(pkt_cls, 'delta', None)
@@ -533,7 +554,125 @@ def _build_decode_tables(packet_types: dict[int, type[PacketType]]) -> tuple[dic
 
 _DECODE_INFO_RDNA3, _STATE_TABLE_RDNA3 = _build_decode_tables(PACKET_TYPES_RDNA3)
 _DECODE_INFO_RDNA4, _STATE_TABLE_RDNA4 = _build_decode_tables(PACKET_TYPES_RDNA4)
-_DECODE_INFO_CDNA, _STATE_TABLE_CDNA = _build_decode_tables(PACKET_TYPES_CDNA)
+
+#_DECODE_INFO_CDNA, _STATE_TABLE_CDNA = _build_decode_tables(PACKET_TYPES_CDNA)
+# CDNA token sizes in bytes, indexed by type 0-15
+_CDNA_TOKEN_BYTES = [2, 8, 8, 4, 2, 6, 2, 2, 2, 2, 2, 8, 6, 4, 8, 6]
+# CDNA replay instruction types (erased, not real instructions)
+_CDNA_REPLAY_TYPES = frozenset({19, 20, 21, 22, 23, 24})
+
+def decode_cdna(data: bytes) -> Iterator[PacketType]:
+  """Decode CDNA (gfx9) SQTT blob. Byte-aligned tokens, matches rocprof-trace-decoder gfx9 logic."""
+  header_raw = int.from_bytes(data[:8], 'little')
+  target_cu = (header_raw >> 20) & 0x1f
+
+  n, pos, globaltime, base_time = len(data), 8, 0, 0
+  lookahead: list[tuple[int, int, int]] = []  # (type, raw, delta) buffer for time patching
+  wave_issued: list[list[list[int]]] = [[[] for _ in range(10)] for _ in range(4)]  # per-simd per-wave issue time queue
+  wave_active: list[list[bool]] = [[False] * 10 for _ in range(4)]
+  running_waves: set[tuple[int, int, int]] = set()  # (wave, simd, cu) for occupancy dedup
+  wave_last_inst: dict[tuple[int, int], int] = {}  # (simd, wave) -> packet index, for removing last inst per wave
+  remove_indices: set[int] = set()
+
+
+  def _parse_one() -> tuple[int, int, int] | None:
+    nonlocal pos
+    if pos + 2 > n: return None
+    typ = data[pos] & 0xf
+    sz = _CDNA_TOKEN_BYTES[typ]
+    if pos + sz > n: return None
+    raw = int.from_bytes(data[pos:pos + sz], 'little')
+    pos += sz
+    return (typ, raw, ((raw >> 4) & 0xff) if typ == CDNAToken.MISC.value else ((raw >> 4) & 1))
+
+  def _patch_time() -> None:
+    """Scan ahead for TIMESTAMP to recalibrate globaltime after TIME_RESET. Matches MITokenGenerator::patch_time."""
+    nonlocal globaltime, base_time
+    def _update(ts):
+      nonlocal globaltime, base_time
+      if base_time == 0: base_time = ts - globaltime + 4
+      if ts > base_time: globaltime = (ts - base_time) & ~3
+    for i, (typ, raw, _) in enumerate(lookahead):
+      if typ == CDNAToken.TIMESTAMP.value: _update((raw >> 16) & ((1 << 48) - 1)); lookahead.pop(i); return
+      elif typ == CDNAToken.MISC.value and ((raw >> 13) & 0x7) == 1: return
+    while True:
+      tok = _parse_one()
+      if tok is None: return
+      typ, raw, _ = tok
+      if typ == CDNAToken.TIMESTAMP.value: _update((raw >> 16) & ((1 << 48) - 1)); return
+      if typ == CDNAToken.MISC.value and ((raw >> 13) & 0x7) == 1: return
+      lookahead.append(tok)
+
+  def _next_token() -> tuple[int, int, int] | None:
+    return lookahead.pop(0) if lookahead else _parse_one()
+
+  packets: list[PacketType] = [LAYOUT_HEADER.from_raw(0, 0)]  # synthetic header so first-packet checks pass
+
+  while True:
+    tok = _next_token()
+    if tok is None: break
+    typ, raw, delta = tok
+    globaltime += delta * 4
+
+    if typ == CDNAToken.MISC.value:
+      if ((raw >> 13) & 0x7) == 1: _patch_time()
+      continue
+    if typ == CDNAToken.TIMESTAMP.value: continue  # consumed by _patch_time
+
+    if typ == CDNAToken.WAVE_START.value:
+      p = CDNA_WAVESTART.from_raw(raw, globaltime)
+      key = (p.wave, p.simd, p.cu)
+      if p.cu == target_cu and p.sh == 0:
+        if p.count > 64: continue  # trap-related restart
+        wave_active[p.simd][p.wave] = True
+        wave_issued[p.simd][p.wave] = []
+      if key not in running_waves:
+        running_waves.add(key)
+        packets.append(p)
+      continue
+
+    if typ == CDNAToken.WAVE_END.value:
+      p = CDNA_WAVEEND.from_raw(raw, globaltime)
+      key = (p.wave, p.simd, p.cu)
+      if p.cu == target_cu and p.sh == 0:
+        wave_active[p.simd][p.wave] = False
+        wave_issued[p.simd][p.wave] = []
+        if (p.simd, p.wave) in wave_last_inst: remove_indices.add(wave_last_inst.pop((p.simd, p.wave)))
+      if key in running_waves:
+        running_waves.discard(key)
+        packets.append(p)
+      continue
+
+    if typ == CDNAToken.ISSUE.value:
+      p = CDNA_ISSUE.from_raw(raw, globaltime)
+      for wave_id in range(10):
+        status = p.wave_status(wave_id)
+        if status == 0 or not wave_active[p.simd][wave_id]: continue
+        if status == 2: wave_issued[p.simd][wave_id].append(globaltime)  # queue issue time
+        elif status == 3:  # IMMED: emit immediately
+          wave_last_inst[(p.simd, wave_id)] = len(packets)
+          pkt = CDNA_DECODED_IMMED.from_raw(0, globaltime + 4)
+          pkt.wave, pkt.simd, pkt.cu = wave_id, p.simd, target_cu
+          packets.append(pkt)
+      continue
+
+    if typ == CDNAToken.INST.value: # confirms queued ISSUE
+      p = CDNA_INST.from_raw(raw, globaltime)
+      if wave_active[p.simd][p.wave] and wave_issued[p.simd][p.wave]:
+        issue_time = wave_issued[p.simd][p.wave].pop(0)
+        if p.inst_type not in _CDNA_REPLAY_TYPES:
+          wave_last_inst[(p.simd, p.wave)] = len(packets)
+          pkt = CDNA_DECODED_INST.from_raw(0, issue_time)
+          pkt.wave, pkt.simd, pkt.cu, pkt.inst_type = p.wave, p.simd, target_cu, p.inst_type
+          packets.append(pkt)
+      elif not wave_active[p.simd][p.wave] and p.wave < 10:
+        wave_active[p.simd][p.wave] = True  # implicit wave start (lost packet recovery)
+        wave_issued[p.simd][p.wave] = []
+      continue
+
+  if remove_indices: packets = [p for i, p in enumerate(packets) if i not in remove_indices]
+  packets.sort(key=lambda p: p._time)
+  yield from packets
 
 def decode(data: bytes) -> Iterator[PacketType]:
   """Decode raw SQTT blob, yielding packet instances. Auto-detects RDNA (layout 3/4) vs CDNA."""
@@ -572,12 +711,8 @@ def decode(data: bytes) -> Iterator[PacketType]:
     if pkt_cls is LAYOUT_HEADER:
       if pkt.layout == 4: decode_info, state_table = _DECODE_INFO_RDNA4, _STATE_TABLE_RDNA4
       elif pkt.layout != 3:  # not a real LAYOUT_HEADER — switch to CDNA and re-decode first packet
-        decode_info, state_table = _DECODE_INFO_CDNA, _STATE_TABLE_CDNA
-        opcode = state_table[reg & 0xFF]
-        pkt_cls, nib_count, delta_lo, delta_mask, special = decode_info[opcode]
-        if special == 4 and (reg >> 4) & 0xfff == 0:  # CDNA_TIMESTAMP absolute
-          ts_offset = (reg >> 16) - time
-        pkt = pkt_cls.from_raw(reg, time)
+        yield from decode_cdna(data)
+        return
     yield pkt
 
 # ═══════════════════════════════════════════════════════════════════════════════
