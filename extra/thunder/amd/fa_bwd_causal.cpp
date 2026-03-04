@@ -37,7 +37,7 @@ using namespace kittens;
 using _gl_QdO  = gl<bf16, ATTN_B, ATTN_N, ATTN_H, ATTN_D>;
 using _gl_KV   = gl<bf16, ATTN_B, ATTN_N, ATTN_H_KV, ATTN_D>;
 using _gl_dQ   = gl<bf16, ATTN_B, ATTN_H, ATTN_N, ATTN_D>;
-using _gl_dKV  = gl<bf16, ATTN_B, ATTN_N, ATTN_H_KV, ATTN_D>;
+using _gl_dKV  = gl<bf16, ATTN_B * GROUP_SIZE, ATTN_N, ATTN_H_KV, ATTN_D>;
 using _gl_Lvec = gl<float, ATTN_B, ATTN_H, 1, ATTN_N>;
 
 template<int D> struct attn_bwd_combined_globals {
@@ -47,7 +47,7 @@ template<int D> struct attn_bwd_combined_globals {
   _gl_dQ dQg;
   _gl_dKV dKg, dVg;
   _gl_Lvec L_vec, delta_vec;
-  dim3 grid() { return dim3(ATTN_H_KV, (ATTN_N / BLOCK_SIZE_KV), ATTN_B); }
+  dim3 grid() { return dim3(ATTN_H, (ATTN_N / BLOCK_SIZE_KV), ATTN_B); }
   dim3 block() { return dim3(NUM_THREADS); }
   size_t dynamic_shared_memory() { return MAX_SHARED_MEMORY; }
 };
@@ -55,10 +55,12 @@ template<int D> struct attn_bwd_combined_globals {
 template<int D> __launch_bounds__(NUM_THREADS, 1)
 __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr, bf16 *dO_ptr, bf16 *Q_ptr, bf16 *K_ptr, bf16 *V_ptr, float *L_vec_ptr, float *delta_vec_ptr) {
 
-  const int kv_head_idx = blockIdx.x;  // This is the KV head index
+  const int q_head_idx_fixed = blockIdx.x;  // This is the query head index [0, ATTN_H)
+  const int kv_head_idx = q_head_idx_fixed / GROUP_SIZE;
+  const int q_head_in_group = q_head_idx_fixed % GROUP_SIZE;
   const int seq_idx = blockIdx.y;
   const int batch_idx = blockIdx.z;
-  const int first_q_head = kv_head_idx * GROUP_SIZE;
+  const int first_q_head = q_head_idx_fixed;
 
   const int warpid = kittens::warpid();
   const int j = seq_idx * NUM_WARPS + warpid;
@@ -70,7 +72,7 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
   // first Q step that can overlap this K_span:
   const int first_step = max(0, k_start_min / STEP_QO);
   const int num_steps_per_head = total_steps_per_head - first_step;
-  const int num_steps = num_steps_per_head * GROUP_SIZE;
+  const int num_steps = num_steps_per_head;
   const int k_pos = j * WARP_SIZE_KV;
 
   constexpr float L_SCALE_FACTOR = 1.44269504089f;
@@ -3355,14 +3357,14 @@ __global__ void attend_bwd_combined_ker(bf16 *dQ_ptr, bf16 *dK_ptr, bf16 *dV_ptr
     }
   }
 
-  store<1>(g.dVg, dV_j, {batch_idx, 0, kv_head_idx, 0}, {0, j, 0, 0});
+  store<1>(g.dVg, dV_j, {batch_idx * GROUP_SIZE + q_head_in_group, 0, kv_head_idx, 0}, {0, j, 0, 0});
   __builtin_amdgcn_s_waitcnt(0);
   __builtin_amdgcn_s_barrier();
 
   // We first copy dV_j_T from accumulator GPRs to vector GPRs and then perform the store
   accvgpr_read(dV_j_T, dK_j_T);
   mul(dV_j_T, dV_j_T, dP_SCALE_FACTOR);
-  store<1>(g.dKg, dV_j, {batch_idx, 0, kv_head_idx, 0}, {0, j, 0, 0});
+  store<1>(g.dKg, dV_j, {batch_idx * GROUP_SIZE + q_head_in_group, 0, kv_head_idx, 0}, {0, j, 0, 0});
 
   // Write out final dQ_i slice
   mul(dQ_i_T, dQ_i_T, dP_SCALE_FACTOR);
