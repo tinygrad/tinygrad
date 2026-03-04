@@ -668,7 +668,6 @@ class InstructionInfo:
   wave: int
   inst: Inst
 
-
 def map_insts(data:bytes, lib:bytes, target:str) -> Iterator[tuple[PacketType, InstructionInfo|None]]:
   """maps SQTT packets to instructions, yields (packet, instruction_info or None)"""
   # map pcs to insts
@@ -679,6 +678,7 @@ def map_insts(data:bytes, lib:bytes, target:str) -> Iterator[tuple[PacketType, I
   wave_pc:dict[int, int] = {}
   # only processing packets on one [CU, SIMD] unit
   if is_cdna:
+    # TODO: this is copied from decode_cdna
     header_raw = int.from_bytes(data[:8], 'little')
     target_cu = (header_raw >> 20) & 0x1f
     def simd_select(p) -> bool: return getattr(p, "simd", -1) == 0 and getattr(p, "cu", target_cu) == target_cu
