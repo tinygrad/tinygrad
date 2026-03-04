@@ -1174,7 +1174,6 @@ class TestFusionOp(unittest.TestCase):
 # NOTE: the NULL backend supports BUFFER_VIEW
 class TestBufferView(unittest.TestCase):
   def test_shrink_contiguous_is_buffer_view(self):
-    # simple 1D shrink of a realized buffer should be BUFFER_VIEW, not a copy kernel
     a = Tensor.arange(100).contiguous().realize()
     b = a.shrink(((10, 50),)).contiguous()
     run_schedule(check_schedule(b, 0))
