@@ -517,7 +517,7 @@ class DECODED_INST_CDNA(PacketType):
   @property
   def op(self): return CDNAInstType(self.inst_type)
 
-class DECODED_IMMED_CDNA(PacketType):
+class IMMEDIATE_CDNA(PacketType):
   """Synthesized: immediate instruction (ISSUE status=3). wave/simd/cu set as attributes."""
 
 _CDNA_TOKEN_TYPES: dict[int, type[PacketType]] = {
@@ -525,7 +525,7 @@ _CDNA_TOKEN_TYPES: dict[int, type[PacketType]] = {
   6: WAVEEND_CDNA, 7: EVENT_CDNA, 8: EVENT_CS_CDNA, 9: EVENT_GFX1_CDNA, 10: INST_CDNA, 11: INST_PC_CDNA,
   12: SHADERDATA_CDNA, 13: ISSUE_CDNA, 14: PERF_CDNA, 15: REGCS_PRIV_CDNA,
 }
-PACKET_TYPES_CDNA: dict[int, type[PacketType]] = {**_CDNA_TOKEN_TYPES, 16: DECODED_INST_CDNA, 17: DECODED_IMMED_CDNA}
+PACKET_TYPES_CDNA: dict[int, type[PacketType]] = {**_CDNA_TOKEN_TYPES, 16: DECODED_INST_CDNA, 17: IMMEDIATE_CDNA}
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # DECODER
@@ -592,35 +592,30 @@ def decode_cdna(data: bytes) -> Iterator[PacketType]:
     return lookahead.pop(0) if lookahead else _parse_one()
 
   while True:
-    tok = _next_token()
-    if tok is None: break
+    if (tok := _next_token()) is None: break
     pkt_cls, raw, delta = tok
     globaltime += delta * 4
+    p = pkt_cls.from_raw(raw, globaltime)
     if pkt_cls is MISC_CDNA:
       if ((raw >> 13) & 0x7) == 1: _patch_time()
-    elif pkt_cls is TIMESTAMP_CDNA: pass  # consumed by _patch_time
     elif pkt_cls is WAVESTART_CDNA:
-      p = WAVESTART_CDNA.from_raw(raw, globaltime)
       if p.cu == target_cu and p.sh == 0 and p.count <= 64:
         wave_issued[p.simd][p.wave] = []
       yield p
     elif pkt_cls is WAVEEND_CDNA:
-      p = WAVEEND_CDNA.from_raw(raw, globaltime)
       if p.cu == target_cu and p.sh == 0:
         wave_issued[p.simd][p.wave] = None
       yield p
     elif pkt_cls is ISSUE_CDNA:
-      p = ISSUE_CDNA.from_raw(raw, globaltime)
       for wave_id in range(10):
         status = p.wave_status(wave_id)
         if status == 0 or wave_issued[p.simd][wave_id] is None: continue
         if status == 2: wave_issued[p.simd][wave_id].append(globaltime)  # queue issue time
         elif status == 3:  # IMMED: emit immediately
-          pkt = DECODED_IMMED_CDNA.from_raw(0, globaltime + 4)
+          pkt = IMMEDIATE_CDNA.from_raw(0, globaltime + 4)
           pkt.wave, pkt.simd, pkt.cu = wave_id, p.simd, target_cu
           yield pkt
     elif pkt_cls is INST_CDNA: # confirms queued ISSUE
-      p = INST_CDNA.from_raw(raw, globaltime)
       issue_time = wave_issued[p.simd][p.wave].pop(0)
       if p.inst_type not in _CDNA_REPLAY_TYPES:
         pkt = DECODED_INST_CDNA.from_raw(0, issue_time)
@@ -717,7 +712,7 @@ def map_insts(data:bytes, lib:bytes, target:str) -> Iterator[tuple[PacketType, I
         wave_pc[p.wave] += inst.size()
       yield (p, InstructionInfo(pc, p.wave, inst))
       continue
-    if isinstance(p, DECODED_IMMED_CDNA):
+    if isinstance(p, IMMEDIATE_CDNA):
       inst = pc_map[pc:=wave_pc[p.wave]]
       wave_pc[p.wave] += inst.size()
       yield (p, InstructionInfo(pc, p.wave, inst))
