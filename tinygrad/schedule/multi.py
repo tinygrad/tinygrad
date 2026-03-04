@@ -37,7 +37,7 @@ replace_allreduce = PatternMatcher([
 _early_allreduce = PatternMatcher([
   (UPat(Ops.ALLREDUCE, src=(UPat.var("buf"), UPat()), name="red"), handle_allreduce),
 ])
-if not getenv("LATE_ALLREDUCE", 0): replace_allreduce = _early_allreduce + replace_allreduce
+if not getenv("LATE_ALLREDUCE", 1): replace_allreduce = _early_allreduce + replace_allreduce
 
 # ***** multi functions *****
 
