@@ -143,9 +143,6 @@
   g.label rect.bg.highlight {
     fill: #5f0059;
   }
-  #insts span.highlight {
-    background-color: rgba(0, 199, 47, 0.2);
-  }
   #insts .line {
     display: flex;
     flex-direction: column;
@@ -153,8 +150,12 @@
     margin-bottom: 8px;
   }
   #insts .left {
+    width: fit-content;
     display: flex;
-    gap: 8px;
+    gap: 4px;
+  }
+  #insts .left.highlight {
+    background-color: rgba(0, 199, 47, 0.2);
   }
   #insts .n {
     color: #787fa1;
