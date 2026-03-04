@@ -31,7 +31,7 @@ def compile(onnx_file):
   for i in range(3):
     GlobalCounters.reset()
     print(f"run {i}")
-    with Context(DEBUG=max(DEBUG.value, 2 if i == 2 else 1)):
+    with Context(DEBUG=max(DEBUG.value, 2 if i == 2 else 1), OPENPILOT_HACKS=1):
       ret = run_onnx_jit(**inputs).numpy()
     # copy i == 1 so use of JITBEAM is okay
     if i == 1: test_val = np.copy(ret)

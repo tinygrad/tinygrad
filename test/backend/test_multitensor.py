@@ -135,34 +135,6 @@ class TestMultiTensor(unittest.TestCase):
       si.run()
     self.assertEqual(len(set(names)), 1, "function was relinearized")
 
-  @unittest.skip("this doesn't fold because shard_ calls contiguous on all lbs")
-  def test_sharded_memory(self):
-    # Buffer may be stuck in track_cross_buffer
-    for x in (d0, d1, d2, d3, d4): Device[x].synchronize()
-    mem_base = GlobalCounters.mem_used
-
-    X = Tensor.ones(256).contiguous().realize()
-    assert GlobalCounters.mem_used-mem_base== X.dtype.itemsize * 256, GlobalCounters.mem_used-mem_base
-    X.shard_(devices_4).realize()
-    for x in (d0, d1, d2, d3, d4): Device[x].synchronize()
-    assert GlobalCounters.mem_used-mem_base == X.dtype.itemsize * 256 * 4, GlobalCounters.mem_used-mem_base
-
-    X = Tensor.ones(256).contiguous().realize()
-    assert GlobalCounters.mem_used-mem_base == X.dtype.itemsize * 256, GlobalCounters.mem_used-mem_base
-    X.shard_(devices_4, axis=0).realize()
-    for x in (d0, d1, d2, d3, d4): Device[x].synchronize()
-    assert GlobalCounters.mem_used-mem_base == X.dtype.itemsize * 256, GlobalCounters.mem_used-mem_base
-
-    X = Tensor.ones(256).realize()
-    assert GlobalCounters.mem_used-mem_base == 0
-    X.shard_(devices_4).realize()
-    assert GlobalCounters.mem_used-mem_base == 0
-
-    X = Tensor.ones(256).realize()
-    assert GlobalCounters.mem_used-mem_base == 0
-    X.shard_(devices_4, axis=0).realize()
-    assert GlobalCounters.mem_used-mem_base == 0
-
   def test_shard_same_device(self):
     X = Tensor.ones(256).contiguous().realize()
     X.shard_((d1, X.device), 0)
@@ -256,17 +228,17 @@ class TestMultiTensor(unittest.TestCase):
       a,b = _test_allreduce(Tensor.rand(256, 256))
       np.testing.assert_almost_equal(a.numpy(), b.numpy(), decimal=5)
 
-  def test_multiple_to_single_device_naive(self):
-    with Context(RING=0):
-      t = Tensor.arange(32).shard(devices_4, 0).to(Device.DEFAULT).realize()
-    self.assertEqual(t.device, Device.DEFAULT)
-    np.testing.assert_equal(t.numpy(), np.arange(32))
-
-  def test_multiple_to_single_device_ring(self):
-    with Context(RING=2):
-      t = Tensor.arange(32).shard(devices_4, 0).to(Device.DEFAULT).realize()
-    self.assertEqual(t.device, Device.DEFAULT)
-    np.testing.assert_equal(t.numpy(), np.arange(32))
+  def test_multiple_to_single_device(self):
+    kernel_counts = {}
+    for ring in (0, 2):
+      GlobalCounters.reset()
+      with Context(RING=ring, SCACHE=0):
+        t = Tensor.arange(32).contiguous().shard(devices_4, 0).to(Device.DEFAULT)
+        t.realize()
+      kernel_counts[ring] = GlobalCounters.kernel_count
+      self.assertEqual(t.device, Device.DEFAULT)
+      np.testing.assert_equal(t.numpy(), np.arange(32))
+    self.assertNotEqual(kernel_counts[0], kernel_counts[2])
 
   def test_allreduce_all2all(self):
     with Context(ALL2ALL=2):

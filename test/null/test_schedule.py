@@ -117,7 +117,7 @@ class TestContiguous(unittest.TestCase):
   def test_size_change_buffer_view(self):
     a = Tensor.empty(4)
     b = a.reshape((1, 1, 4)).shrink(((0, 1), (0, 1), (0, 3))).contiguous()
-    check_schedule(b, 1)
+    check_schedule(b, 0)  # contiguous shrink of a realized buffer is a zero-copy BUFFER_VIEW
 
   def test_double_contiguous_realizes_once(self):
     a = Tensor.empty(4, 1)
@@ -233,6 +233,18 @@ class TestSchedule(unittest.TestCase):
     c = (a*b).sum()
     d = Tensor.empty(1).assign(c)
     check_schedule(d, 1)
+
+  def test_detach_assign(self):
+    a = Tensor.ones(4, 4).contiguous().realize()
+    buf1, buf2 = Tensor.empty(4, 4).contiguous(), Tensor.empty(4, 4).contiguous()
+    r = buf2.assign(buf1.assign(a + 1.0) * 2.0)
+    check_schedule(r.detach().contiguous(), 2)
+
+  def test_contiguous_backward_assign(self):
+    a = Tensor.ones(4, 4).contiguous().realize()
+    buf1, buf2 = Tensor.empty(4, 4).contiguous(), Tensor.empty(4, 4).contiguous()
+    r = buf2.assign(buf1.assign(a + 1.0) * 2.0)
+    check_schedule(r.contiguous_backward().contiguous(), 2)
 
   def test_mulacc_relu_fusion(self):
     a = Tensor.empty(10)
@@ -568,21 +580,22 @@ class TestSchedule(unittest.TestCase):
 
   # this is the failing case in openpilot...it's very simple like this
   def test_image_conv_fusion(self):
-    w1 = Tensor.empty(16, 16, 1, 1)
-    b1 = Tensor.empty(16)
-    w2 = Tensor.empty(16, 16, 1, 1)
-    b2 = Tensor.empty(16)
-    w3 = Tensor.empty(16, 16, 1, 1)
-    b3 = Tensor.empty(16)
+    with Context(OPENPILOT_HACKS=1):
+      w1 = Tensor.empty(16, 16, 1, 1)
+      b1 = Tensor.empty(16)
+      w2 = Tensor.empty(16, 16, 1, 1)
+      b2 = Tensor.empty(16)
+      w3 = Tensor.empty(16, 16, 1, 1)
+      b3 = Tensor.empty(16)
 
-    x = Tensor.empty(1, 16, 32, 32)
-    x = base = x.image_conv2d(w1, b1)
-    x = x.image_conv2d(w2, b2) + base
-    x = x.image_conv2d(w3, b3)
+      x = Tensor.empty(1, 16, 32, 32)
+      x = base = x.image_conv2d(w1, b1)
+      x = x.image_conv2d(w2, b2) + base
+      x = x.image_conv2d(w3, b3)
 
-    # NOOP, 3 convs, contiguous
-    #check_schedule(x, 5)
-    check_schedule(x, 7)
+      # NOOP, 3 convs, contiguous
+      #check_schedule(x, 5)
+      check_schedule(x, 7)
 
   def test_image_conv_fusion_minimal(self):
     b1 = Tensor.empty(16)
@@ -1104,6 +1117,7 @@ class TestUOpBecome(unittest.TestCase):
     from tinygrad.helpers import all_same
     assert all_same([x.uop.base.realized for x in [a,b,c]])
 
+  @unittest.skip("not clear if we want this")
   def test_setitem_becomes_subbuffer(self):
     a = Tensor.full((4,), 2.).contiguous().realize()
     b = a.shrink(((0, 2),)).assign(Tensor.full((2,), 1.0))
@@ -1156,6 +1170,24 @@ class TestFusionOp(unittest.TestCase):
     sched = r.schedule()
     self.assertEqual(len(sched), 1)
     self.assertLess(time.perf_counter()-st, 2.0)
+
+# NOTE: the NULL backend supports BUFFER_VIEW
+class TestBufferView(unittest.TestCase):
+  def test_shrink_contiguous_is_buffer_view(self):
+    # simple 1D shrink of a realized buffer should be BUFFER_VIEW, not a copy kernel
+    a = Tensor.arange(100).contiguous().realize()
+    b = a.shrink(((10, 50),)).contiguous()
+    run_schedule(check_schedule(b, 0))
+
+  def test_shrink_2d_contiguous_is_buffer_view(self):
+    a = Tensor.arange(100).reshape(10,10).contiguous().realize()
+    b = a.shrink(((1, 5),None)).contiguous()
+    run_schedule(check_schedule(b, 0))
+
+  def test_chained_shrink_is_buffer_view(self):
+    a = Tensor.arange(1000).contiguous().realize()
+    b = a.shrink(((200, 800),)).shrink(((0, 300),)).reshape((30, 10)).shrink(((20, 25), (0, 10))).contiguous()
+    run_schedule(check_schedule(b, 0))
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)

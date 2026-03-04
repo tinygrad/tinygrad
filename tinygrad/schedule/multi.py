@@ -1,59 +1,7 @@
-import functools, itertools
-from tinygrad.helpers import all_same, all_int, prod, DEBUG, RING, ALL2ALL, getenv
-from tinygrad.uop.ops import Ops, UOp, PatternMatcher, UPat, GroupOp
+from tinygrad.helpers import all_same, prod, getenv
+from tinygrad.uop.ops import Ops, UOp, PatternMatcher, UPat, GroupOp, graph_rewrite, should_resolve_call
 from tinygrad.dtype import dtypes
-
-# *** allreduce implementation ***
-def handle_allreduce(buf:UOp, red:UOp) -> UOp|None:
-  if not isinstance(buf.device, tuple): return None
-  assert all_int(buf.shape), f"does not support symbolic shape {buf.shape}"
-  ndev, shape, numel = len(buf.device), buf.shape, prod(buf.shape)
-
-  # ring allreduce doesn't provide a benefit with only 2 nodes or where number of elements is less than 256k (empirically)
-  # fallback to naive allreduce to save on kernel dispatch, chunking and reassembling chunks.
-  use_all2all = (ALL2ALL >= 2 or (ndev > 2 and numel > getenv("RING_ALLREDUCE_THRESHOLD", 256_000) and ALL2ALL >= 1))
-  use_ring = not use_all2all and (RING >= 2 or (ndev > 2 and numel > getenv("RING_ALLREDUCE_THRESHOLD", 256_000) and RING >= 1))
-  if DEBUG >= 2: print(f"{'ALL2ALL' if use_all2all else 'RING' if use_ring else 'NAIVE'} ALLREDUCE {ndev}x{numel} | {buf.dtype}")
-
-  # contiguous before we copy it
-  buf = buf.contiguous()
-
-  # naive: copy to all devices. if you shrink later, that'll be handled
-  if not use_ring and not use_all2all:
-    return functools.reduce(lambda x,y: x.alu(red.arg, y), [UOp(Ops.COPY, buf.dtype, (buf.mselect(i), red.src[1])) for i in range(ndev)])
-
-  # chunk data into ndev pieces
-  factor = next((f for f in [32, 16, 8, 4, 2] if numel % f == 0), 1)
-  base, left = divmod(numel // factor,  ndev)
-  chunks = list(itertools.pairwise(itertools.accumulate([(base + 1) * factor] * left + [base * factor] * (ndev - left), initial=0)))
-
-  # reduce-scatter
-  reduced_chunks:list[UOp] = []
-  for i,(s,e) in enumerate(chunks):
-    if use_all2all:
-      chunks_on_i = [buf.mselect(j).reshape((numel,)).shrink(((s,e),)).copy_to_device(buf.device[i]) for j in range(ndev)]
-      reduced_chunks.append(functools.reduce(lambda x,y: x.alu(red.arg, y), chunks_on_i))
-    else:
-      chunk, reduced = buf.reshape((numel,)).shrink(((s,e),)), buf.reshape((numel,)).shrink(((s,e),))
-      for step in range(ndev-1):
-        src, dest = (i+step)%ndev, (i+step+1)%ndev
-        cp = reduced.copy_to_device(buf.device[dest], src if isinstance(reduced.device, tuple) else None)
-        reduced = cp.alu(red.arg, chunk.copy_to_device(buf.device[dest], dest))
-      reduced_chunks.append(reduced)
-
-  # allgather
-  copied_chunks:list[UOp] = []
-  for i,rc in enumerate(reduced_chunks):
-    if isinstance(red.src[1].arg, str): copied_chunks.append(rc.copy_to_device(red.src[1].arg))
-    elif use_all2all: copied_chunks.append(UOp(Ops.MSTACK, buf.dtype, tuple(rc.copy_to_device(buf.device[j]) for j in range(ndev))))
-    else:
-      chain:list[UOp] = [rc]
-      for step in range(ndev-1):
-        chain.append(rc := rc.copy_to_device(buf.device[(i+step)%ndev]))
-      copied_chunks.append(UOp(Ops.MSTACK, buf.dtype, tuple(chain[(j-i+1)%ndev] for j in range(ndev))))
-
-  # reassemble
-  return UOp.sum(*[c.pad(((s,numel-e),)) for (s,e),c in zip(chunks, copied_chunks)]).reshape(shape)
+from tinygrad.schedule.allreduce import handle_allreduce
 
 # ***** multi rewrite MSELECT/MSTACK *****
 
@@ -71,7 +19,6 @@ def mstack_early_shrink(ms:UOp, shrink:UOp):
   return ms.replace(src=tuple(ret))
 
 replace_allreduce = PatternMatcher([
-  (UPat(Ops.ALLREDUCE, src=(UPat.var("buf"), UPat()), name="red"), handle_allreduce),
   # BROADCAST: explicitly expand broadcast copies and combine with MSTACK
   (UPat(Ops.COPY, name="c", src=(UPat(GroupOp.All-{Ops.CONST}, name="x"), UPat(Ops.DEVICE))), lambda c,x:
     UOp(Ops.MSTACK, c.dtype, tuple(x.copy_to_device(d) for d in c.device)) if isinstance(c.device, tuple) and isinstance(x.device, str) else None),
@@ -86,6 +33,11 @@ replace_allreduce = PatternMatcher([
   (UPat(Ops.MSELECT, src=(UPat(GroupOp.Movement, src=(UPat.var("s"),), allow_any_len=True, name="v"),), name="ms"),
    lambda s,v,ms: v.replace(src=(s.mselect(ms.arg),)+v.src[1:])),
 ])
+
+_early_allreduce = PatternMatcher([
+  (UPat(Ops.ALLREDUCE, src=(UPat.var("buf"), UPat()), name="red"), handle_allreduce),
+])
+if not getenv("LATE_ALLREDUCE", 0): replace_allreduce = _early_allreduce + replace_allreduce
 
 # ***** multi functions *****
 
@@ -163,8 +115,19 @@ def assign_multi(dest:UOp, src:UOp):
 def passthrough_multi(root:UOp, multi:UOp):
   return UOp(root.op, root.dtype, (multi.src[0],)+tuple(x.src[0] if x.op is Ops.MULTI else x for x in root.src[1:]), root.arg).multi(multi.axis)
 
+def rewrite_into_call(call:UOp):
+  if not should_resolve_call(call): return None
+  new_body = graph_rewrite(call.src[0], multi_pm, name="subcall")
+  new_args = tuple(a.src[0] if a.op is Ops.MULTI else a for a in call.src[1:])
+  return call.replace(src=(new_body,)+new_args)
+
+def param_to_multi(p:UOp):
+  if p.axis is None: return None
+  return UOp.param(p.arg, p.dtype, p.shard_shape, p._device).multi(p.axis)
+
 # NOTE: this is the same pattern as Ops.UNROLL
 multi_pm = PatternMatcher([
+  (UPat(Ops.PARAM, name="p"), param_to_multi),
   (UPat(GroupOp.ALU, name="root", custom_early_reject=set([Ops.MULTI])), alu_multi),
   (UPat(Ops.REDUCE_AXIS, src=(UPat(Ops.MULTI, name="multi"), ), name="root"), reduce_multi),
   (UPat(Ops.RESHAPE, src=(UPat(Ops.MULTI, name="multi"), UPat()), name="root"), reshape_multi),
@@ -177,6 +140,8 @@ multi_pm = PatternMatcher([
   (UPat(Ops.COPY, src=(UPat(Ops.MULTI, name="multi"), UPat(Ops.DEVICE, name="device"))), copy_multi),
   (UPat(Ops.ALLREDUCE, src=(UPat(Ops.MULTI, name="multi"), UPat(Ops.DEVICE, name="device")), name="red"),
     lambda multi,device,red: multi.src[0].allreduce(red.arg, device).multi(axis=multi.axis)),
+  # rewrite into calls explicitly for MULTI
+  (UPat(Ops.CALL, name="call"), rewrite_into_call),
   (UPat(Ops.CALL, src=(UPat(Ops.MULTI, name="multi"), ), name="root", allow_any_len=True), passthrough_multi),
   # we just remove the MULTI from CALLs with dtypes.void and assume they are handled by the user for custom kernels
   (UPat(Ops.CALL, dtype=dtypes.void, name="root", custom_early_reject=set([Ops.MULTI])), lambda root:

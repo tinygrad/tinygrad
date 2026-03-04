@@ -265,8 +265,6 @@ class TestCustomKernel(unittest.TestCase):
     Expected schedule order: [A2, B2, E, custom_addmul, final_sum]
     The custom_addmul kernel should be at index 3.
     """
-    from tinygrad.engine.schedule import create_schedule
-    from tinygrad.schedule.rangeify import get_rangeify
 
     A, B = Tensor.empty(4, 4), Tensor.empty(4, 4)
     A2 = (A + 1).contiguous()                      # kernel 0: depends on A
@@ -275,10 +273,7 @@ class TestCustomKernel(unittest.TestCase):
     C, D, _, _ = Tensor.custom_kernel(C, D, A2, B2, fxn=custom_elementwise_addmul_kernel)  # depends on A2 AND B2
     E = (A2 * 3).contiguous()                      # kernel 2: depends only on A2
     result = (C + D + E).sum()                     # kernel 3: custom_addmul, then kernel 4: sum
-
-    big_sink = result.uop.sink()
-    sched_sink = get_rangeify(big_sink)
-    schedule, _ = create_schedule(sched_sink)
+    schedule = result.schedule()
 
     # Find the custom_addmul kernel position
     custom_idx = next((i for i, item in enumerate(schedule)

@@ -8,7 +8,7 @@ class TestDataset(unittest.TestCase):
     X_train[0].contiguous().realize()
     GlobalCounters.reset()
     X_train[0].contiguous().realize()
-    self.assertEqual(GlobalCounters.kernel_count, 1)
+    self.assertLessEqual(GlobalCounters.kernel_count, 1)  # 0 if BUFFER_VIEW (zero-copy), 1 otherwise
 
 if __name__ == '__main__':
   unittest.main()

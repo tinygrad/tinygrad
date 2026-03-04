@@ -46,6 +46,7 @@ class InstOp(Enum):
   SMEM = 0x1
   JUMP = 0x3              # branch taken
   JUMP_NO = 0x4           # branch not taken
+  CALL = 0x5              # s_call_b64
   MESSAGE = 0x9
   VALU_TRANS = 0xb        # transcendental: exp, log, rcp, sqrt, sin, cos
   VALU_64_SHIFT = 0xd     # 64-bit shifts: lshl, lshr, ashr
@@ -72,8 +73,10 @@ class InstOp(Enum):
 
   # LDS ops on traced SIMD
   LDS_LOAD = 0x29
+  LDS_ATOMIC = 0x2a        # ds_append, ds_consume, ds_store_addtid_b32
   LDS_STORE = 0x2b
   LDS_STORE_64 = 0x2c
+  LDS_STORE_96 = 0x2d
   LDS_STORE_128 = 0x2e
 
   # Memory ops on other SIMD (0x5x range)
@@ -99,19 +102,36 @@ class InstOp(Enum):
 
 class InstOpRDNA4(Enum):
   """SQTT instruction operation types for RDNA4 (gfx1200). Different encoding from RDNA3."""
-  # TODO: we need to do discovery of all of these from instructions
   SALU = 0x0
-  JUMP = 0x1
-  NEXT = 0x2
-  MESSAGE = 0x4
-  VALU_64 = 0x6
-  VALU_WMMA = 0x46
-  VMEM = 0x10
-  VMEM_128 = 0x11
-  VMEM_STORE = 0x12
-  VMEM_STORE_128 = 0x14
-  OTHER_VMEM = 0x5e
-  OTHER_VMEM_STORE = 0x60
+  SMEM = 0x1
+  JUMP = 0x3
+  JUMP_NO = 0x4
+  JUMP_UNCOND = 0x5
+  MESSAGE = 0x9
+  VALU_TRANS = 0xb
+  VALU_B2 = 0xd
+  VALU_B4 = 0xe
+  VINTERP = 0x12
+  VMEM_RD_1 = 0x21
+  VMEM_WR_2 = 0x24
+  VMEM_WR_3 = 0x25
+  VMEM_WR_4 = 0x26
+  VMEM_WR_5 = 0x27
+  VMEM_WR_6 = 0x28
+  LDS_RD = 0x29
+  LDS_WR_1 = 0x2a
+  LDS_WR_2 = 0x2b
+  LDS_WR_3 = 0x2c
+  LDS_WR_4 = 0x2d
+  LDS_WR_5 = 0x2e
+  WMMA_8 = 0x8c
+  WMMA_16 = 0x8d
+  VALU_DPFP = 0x92
+  SALU_FLOAT3 = 0x98
+  VALU_SCL_TRANS = 0x99
+  SALU_2 = 0x9b
+  SALU_5 = 0x9c
+  OTHER_VMEM = 0xc1
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # PACKET TYPE BASE CLASS
@@ -146,11 +166,6 @@ class TS_DELTA_S8_W3(PacketType):
   encoding = bits[6:0] == 0b0100001
   delta = bits[10:8]
   _padding = bits[63:11]
-
-class TS_DELTA_S8_W3_RDNA4(PacketType):  # Layout 4: 64->72 bits
-  encoding = bits[6:0] == 0b0100001
-  delta = bits[10:8]
-  _padding = bits[71:11]
 
 class TS_DELTA_S5_W3(PacketType):
   encoding = bits[4:0] == 0b00110
@@ -341,14 +356,9 @@ class INST(PacketType):
 class INST_RDNA4(PacketType):  # Layout 4: different delta position and InstOp encoding
   encoding = bits[2:0] == 0b010
   delta = bits[5:3]
-  flag1 = bits[6:6]
-  flag2 = bits[7:7]
-  wave_pair = bits[11:8]
-  flag3 = bits[12:12]
-  op = bits[19:13].enum(InstOpRDNA4)
-  # INST_RDNA4 wave_pair field (4 bits) addresses wave pairs, flag2 selects even/odd wave
-  @property
-  def wave(self): return self.wave_pair * 2 + self.flag2
+  w64h = bits[6:6]
+  wave = bits[11:7]
+  op = bits[19:12].enum(InstOpRDNA4)
 
 class UTILCTR(PacketType):
   encoding = bits[6:0] == 0b0110001
@@ -363,7 +373,7 @@ PACKET_TYPES_RDNA3: dict[int, type[PacketType]] = {
 }
 PACKET_TYPES_RDNA4: dict[int, type[PacketType]] = {
   **PACKET_TYPES_RDNA3,
-  7: TS_DELTA_S8_W3_RDNA4, 9: WAVESTART_RDNA4, 10: TS_DELTA_S5_W2_RDNA4, 11: WAVEALLOC_RDNA4,
+  9: WAVESTART_RDNA4, 10: TS_DELTA_S5_W2_RDNA4, 11: WAVEALLOC_RDNA4,
   12: TS_DELTA_S5_W3_RDNA4, 13: PERF_RDNA4, 22: TS_DELTA_OR_MARK_RDNA4, 24: INST_RDNA4,
 }
 
@@ -536,8 +546,9 @@ def decode(data: bytes) -> Iterator[PacketType]:
     if nib_off: reg, pos = (reg >> 4) | ((data[pos] >> 4) << 60), pos + 1
     # 2. read all full bytes at once
     if (byte_count := need >> 1):
-      chunk = int.from_bytes(data[pos:pos + byte_count], 'little')
-      reg, pos = (reg >> (byte_count * 8)) | (chunk << (64 - byte_count * 8)), pos + byte_count
+      read_bytes = min(byte_count, 8)
+      chunk = int.from_bytes(data[pos:pos + read_bytes], 'little')
+      reg, pos = (reg >> (read_bytes * 8)) | (chunk << (64 - read_bytes * 8)), pos + byte_count
     # 3. if odd, read low nibble
     if (nib_off := need & 1): reg = (reg >> 4) | ((data[pos] & 0xF) << 60)
 
@@ -619,9 +630,9 @@ def map_insts(data:bytes, lib:bytes, target:str) -> Iterator[tuple[PacketType, I
       # identify a branch instruction, only used for asserts
       branch_inst = inst if "BRANCH" in inst_op else None
       if branch_inst is not None:
-        assert isinstance(p, (INST, INST_RDNA4)) and p.op.name in {"JUMP_NO", "JUMP", "NEXT"}, f"branch can only be folowed by JUMP, got {p}"
+        assert isinstance(p, (INST, INST_RDNA4)) and p.op.name in {"JUMP_NO", "JUMP", "JUMP_UNCOND"}, f"branch can only be folowed by JUMP, got {p}"
       # JUMP handling
-      if (isinstance(p, INST) and p.op is InstOp.JUMP) or (isinstance(p, INST_RDNA4) and branch_inst is not None and p.flag3):
+      if (isinstance(p, INST) and p.op is InstOp.JUMP) or (isinstance(p, INST_RDNA4) and p.op is InstOpRDNA4.JUMP):
         simm16 = getattr(branch_inst, 'simm16')
         assert branch_inst is not None and simm16 is not None, f"JUMP packet must map to a branch instruction, got {inst}"
         x = simm16 & 0xffff
@@ -650,7 +661,7 @@ def format_packet(p) -> str:
   name = type(p).__name__
   if isinstance(p, (INST, INST_RDNA4)):
     op_name = p.op.name if isinstance(p.op, (InstOp, InstOpRDNA4)) else f"0x{p.op:02x}"
-    fields = f"wave={p.wave} op={op_name}" + (" flag1" if p.flag1 else "") + (" flag2" if p.flag2 else "")
+    fields = f"wave={p.wave} op={op_name}" + ((" flag1" if p.flag1 else "") + (" flag2" if p.flag2 else "") if isinstance(p, INST) else "")
   elif isinstance(p, VALUINST): fields = f"wave={p.wave}" + (" flag" if p.flag else "")
   elif isinstance(p, ALUEXEC): fields = f"src={p.src.name if isinstance(p.src, AluSrc) else p.src}"
   elif isinstance(p, VMEMEXEC): fields = f"src={p.src.name if isinstance(p.src, MemSrc) else p.src}"
@@ -666,18 +677,19 @@ def print_packets(packets) -> None:
   from tinygrad.helpers import getenv
   skip = {"NOP", "TS_DELTA_SHORT", "TS_WAVE_STATE", "TS_DELTA_OR_MARK",
           "TS_DELTA_S5_W2", "TS_DELTA_S5_W3", "TS_DELTA_S8_W3", "REG", "EVENT"} if not getenv("NOSKIP") else {"NOP"}
-  for p in packets:
-    if type(p).__name__.replace("_RDNA4", "") not in skip: print(format_packet(p))
+  for data in packets:
+    p, inst = data if isinstance(data, tuple) else (data, None)
+    if type(p).__name__.replace("_RDNA4", "") not in skip: print(format_packet(p), f"inst={inst.inst}" if inst is not None else '')
 
 if __name__ == "__main__":
   import sys, pickle
-  if len(sys.argv) < 2:
-    print("Usage: python sqtt.py <pkl_file>")
-    sys.exit(1)
-  with open(sys.argv[1], "rb") as f:
+  from tinygrad.helpers import temp
+  with open(temp("profile.pkl", append_user=True) if len(sys.argv) < 2 else sys.argv[1], "rb") as f:
     data = pickle.load(f)
-  prg_names = {e.tag: e.name for e in data if type(e).__name__ == "ProfileProgramEvent" and e.tag is not None}
+  prg_events = {e.tag: e for e in data if type(e).__name__ == "ProfileProgramEvent" and e.tag is not None}
   sqtt_events = [e for e in data if type(e).__name__ == "ProfileSQTTEvent"]
+  dev_targets = {e.device:f"gfx{e.props['gfx_target_version']//1000}" for e in data if type(e).__name__ == "ProfileDeviceEvent" and e.props}
   for i, event in enumerate(sqtt_events):
-    print(f"\n=== event {i} {prg_names.get(event.kern, '')} ===")
-    print_packets(decode(event.blob))
+    prg = prg_events.get(event.kern)
+    print(f"\n=== event {i} {prg.name if prg is not None else ''} ===")
+    print_packets(map_insts(event.blob, prg.lib, dev_targets[prg.device]) if prg is not None else decode(event.blob))

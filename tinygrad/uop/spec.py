@@ -58,6 +58,9 @@ shared_spec = PatternMatcher([
 
   # RANGE/SPECIAL define loops, END closes them
   (UPat(Ops.END, src=(UPat(), UPat(Ops.RANGE))), lambda: True),
+
+  # NOOP
+  (UPat(Ops.NOOP), lambda: True)
 ])
 
 # ***** UOp spec in the Tensor graph *****
@@ -83,6 +86,9 @@ _tensor_spec = PatternMatcher([
    isinstance(d.arg, str) or (isinstance(d.arg, tuple) and all(isinstance(s, str) for s in d.arg))),
   (UPat(Ops.BUFFER, src=(UPat((Ops.LUNIQUE, Ops.UNIQUE)), UPat(Ops.DEVICE)), name="buf"),
    lambda buf: isinstance(buf.arg, int) and isinstance(buf.dtype, (DType, ImageDType))),
+
+  # BUFFER_VIEW on BUFFER is allowed if BUFFER is
+  (UPat(Ops.BUFFER_VIEW, src=(UPat(Ops.BUFFER),)), lambda: True),
 
   # KERNEL can attach to an AFTER to describe the compute required to realize a BUFFER
   (UPat(Ops.CALL, src=UPat((Ops.BUFFER, Ops.AFTER, Ops.MSELECT, Ops.MSTACK, Ops.BIND))), lambda: True),
@@ -202,6 +208,12 @@ kernel_spec = PatternMatcher([
 
   # reduce must be on ranges
   (UPat(Ops.REDUCE, src=(UPat(),), allow_any_len=True, name="x"), lambda x: all(y.dtype in (dtypes.index, dtypes.int) for y in x.src[1:])),
+
+  # COPY/BUFFER_VIEW can have ranges appended
+  (UPat(Ops.COPY, name="x", src=(UPat.var("s"), UPat(Ops.DEVICE)), allow_any_len=True, arg=None),
+   lambda x,s: x.dtype == s.dtype and all(u.op is Ops.RANGE for u in x.src[2:])),
+  (UPat(Ops.BUFFER_VIEW, src=(UPat((Ops.INDEX, Ops.LOAD)),), allow_any_len=True, name="x"),
+   lambda x: all(u.op is Ops.RANGE for u in x.src[1:])),
 ])+movement_ops+shared_codegen_spec+shared_spec
 
 tensor_spec = PatternMatcher([

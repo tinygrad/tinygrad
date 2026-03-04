@@ -214,23 +214,26 @@ class HWQueue(Generic[SignalType, HCQDeviceType, ProgramType, ArgsStateType]):
   def _submit(self, dev:HCQDeviceType): raise NotImplementedError("need _submit")
 
 class HCQSignal(Generic[HCQDeviceType]):
-  def __init__(self, base_buf:HCQBuffer, value:int=0, owner:HCQDeviceType|None=None, is_timeline:bool=False, timestamp_divider=1000):
-    self.base_buf, self.value_addr, self.timestamp_addr, self.owner = base_buf, base_buf.va_addr+0, base_buf.va_addr+8, owner
-    self.is_timeline = is_timeline
+  def __init__(self, base_buf:HCQBuffer, value:int=0, owner:HCQDeviceType|None=None, is_timeline:bool=False, timestamp_divider=1000, virt=False):
+    self.base_buf, self.owner, self.is_timeline = base_buf, owner, is_timeline
+    self.should_return = isinstance(self.base_buf.va_addr, int) and self.owner is not None and not virt
     self.timestamp_divider:decimal.Decimal = decimal.Decimal(timestamp_divider)
-
-    if isinstance(self.base_buf.va_addr, int):
-      self.value_mv, self.timestamp_mv = self.base_buf.cpu_view().view(0, 8, 'Q'), self.base_buf.cpu_view().view(8, 8, 'Q')
-      self.value_mv[0] = value
+    if isinstance(self.base_buf.va_addr, int) and not virt: self.value = value
 
   def __del__(self):
-    if isinstance(self.base_buf.va_addr, int) and self.owner is not None: HCQCompiled.signal_pool[self.owner.peer_group].append(self.base_buf)
+    if self.should_return: HCQCompiled.signal_pool[unwrap(self.owner).peer_group].append(self.base_buf)
 
   @property
-  def value(self) -> int: return self.value_mv[0]
+  def value_addr(self) -> sint: return self.base_buf.va_addr
+
+  @property
+  def timestamp_addr(self) -> sint: return self.base_buf.va_addr + 8
+
+  @property
+  def value(self) -> int: return self.base_buf.cpu_view().view(0, 8, 'Q')[0]
 
   @value.setter
-  def value(self, new_value:int): self.value_mv[0] = new_value
+  def value(self, new_value:int): self.base_buf.cpu_view().view(0, 8, 'Q')[0] = new_value
 
   @property
   def timestamp(self) -> decimal.Decimal:
@@ -242,7 +245,7 @@ class HCQSignal(Generic[HCQDeviceType]):
     Returns:
       The timestamp in microseconds.
     """
-    return self.timestamp_mv[0] / self.timestamp_divider
+    return self.base_buf.cpu_view().view(8, 8, 'Q')[0] / self.timestamp_divider
 
   def _sleep(self, time_spent_since_last_sleep_ms:int):
     """
@@ -250,7 +253,7 @@ class HCQSignal(Generic[HCQDeviceType]):
     Raises RuntimeError if a fault is detected.
     """
 
-  def wait(self, value:int, timeout:int=getenv("HCQDEV_WAIT_TIMEOUT_MS", 30000)):
+  def wait(self, value:int, timeout:int|None=None):
     """
     Waits the signal is greater than or equal to a specific value.
 
@@ -258,6 +261,7 @@ class HCQSignal(Generic[HCQDeviceType]):
       value: The value to wait for.
       timeout: Maximum time to wait in milliseconds. Defaults to 30s.
     """
+    timeout = timeout or getenv("HCQDEV_WAIT_TIMEOUT_MS", 30000)
     start_time = int(time.perf_counter() * 1000)
     while (not_passed:=(prev_value:=self.value) < value) and (cur_time:=int(time.perf_counter() * 1000)) - start_time < timeout:
       self._sleep(cur_time - start_time)
@@ -322,7 +326,7 @@ class HCQProgram(Generic[HCQDeviceType]):
     return self.args_state_t(argsbuf, self, bufs, vals=vals)
 
   def __call__(self, *bufs:HCQBuffer, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1),
-               vals:tuple[int|None, ...]=(), wait:bool=False) -> float|None:
+               vals:tuple[int|None, ...]=(), wait:bool=False, timeout:int|None=None) -> float|None:
     """
     Enqueues the program for execution with the given arguments and dimensions.
 
@@ -346,7 +350,7 @@ class HCQProgram(Generic[HCQDeviceType]):
 
     q.signal(self.dev.timeline_signal, self.dev.next_timeline()).submit(self.dev)
 
-    if wait: self.dev.synchronize()
+    if wait: self.dev.synchronize(timeout=timeout)
     return (float(sig_en.timestamp - sig_st.timestamp) / 1e6) if wait else None
 
 class HCQCompiled(Compiled, Generic[SignalType]):
@@ -359,7 +363,8 @@ class HCQCompiled(Compiled, Generic[SignalType]):
   cpu_devices: list[HCQCompiled] = []
 
   def __init__(self, device:str, allocator:HCQAllocatorBase, compilers:CompilerSet, runtime, signal_t:Type[SignalType],
-               comp_queue_t:Callable[..., HWQueue], copy_queue_t:Callable[..., HWQueue]|None=None, kernargs_size=(16 << 20), sigalloc_size=0x1000):
+               comp_queue_t:Callable[..., HWQueue], copy_queue_t:Callable[..., HWQueue]|None=None, kernargs_size=(16 << 20), sigalloc_size=0x1000,
+               can_recover:bool=False):
     self.device_id:int = int(device.split(":")[1]) if ":" in device else 0
 
     from tinygrad.runtime.graph.hcq import HCQGraph
@@ -383,22 +388,23 @@ class HCQCompiled(Compiled, Generic[SignalType]):
     self.kernargs_buf:HCQBuffer = self.allocator.alloc(kernargs_size, BufferSpec(cpu_access=True))
     self.kernargs_offset_allocator:BumpAllocator = BumpAllocator(self.kernargs_buf.size, wrap=True)
 
+    self.can_recover = can_recover # Whether the device can recover from faults or timeouts
     self.error_state:Exception|None = None # Exception if error is unrecoverable and sync will always fail
 
     if self._is_cpu(): HCQCompiled.cpu_devices.append(self)
 
-  def synchronize(self):
+  def synchronize(self, timeout:int|None=None):
     if self.error_state is not None: raise self.error_state
 
     # If we have any work on CPU devices, need to synchronize them. This is just an optimization to release GIL allowing to finish faster.
     if not self._is_cpu():
       for dev in HCQCompiled.cpu_devices: dev.synchronize()
 
-    try: self.timeline_signal.wait(self.timeline_value - 1)
+    try: self.timeline_signal.wait(self.timeline_value - 1, timeout=timeout if timeout is not None and self.can_recover else None)
     except RuntimeError as e:
       self.error_state = e
       if hasattr(self, 'on_device_hang'): self.on_device_hang()
-      else: raise e
+      raise e
 
     if self.timeline_value > (1 << 31): self._wrap_timeline_signal()
     if PROFILE:

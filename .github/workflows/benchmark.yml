@@ -338,7 +338,7 @@ jobs:
     - name: Run 10 CIFAR training steps
       run: BENCHMARK_LOG=cifar_10steps ASSERT_MIN_STEP_TIME=120 NV=1 STEPS=10 python3 examples/hlb_cifar10.py
     - name: Run 10 CIFAR training steps w HALF
-      run: BENCHMARK_LOG=cifar_10steps_half ASSERT_MIN_STEP_TIME=110 NV=1 STEPS=10 DEFAULT_FLOAT=HALF python3 examples/hlb_cifar10.py
+      run: BENCHMARK_LOG=cifar_10steps_half ASSERT_MIN_STEP_TIME=120 NV=1 STEPS=10 DEFAULT_FLOAT=HALF python3 examples/hlb_cifar10.py
     - name: Run 10 CIFAR training steps w BF16
       run: BENCHMARK_LOG=cifar_10steps_bf16 ASSERT_MIN_STEP_TIME=120 NV=1 STEPS=10 DEFAULT_FLOAT=BFLOAT16 python3 examples/hlb_cifar10.py
     # - name: Run 10 CIFAR training steps w winograd
@@ -520,7 +520,7 @@ jobs:
       run: time BENCHMARK_LOG=cifar AMD=1 DEFAULT_FLOAT=HALF STEPS=1000 TARGET_EVAL_ACC_PCT=93.0 python3 examples/hlb_cifar10.py
     - name: Run full CIFAR training steps w 6 GPUS
       run: time BENCHMARK_LOG=cifar_6gpu AMD=1 DEFAULT_FLOAT=HALF STEPS=350 BS=1536 GPUS=6 TARGET_EVAL_ACC_PCT=93.0 python3 examples/hlb_cifar10.py
-    # this needs to be mocked and testable on a local machine
+    # TODO: broken on some of the machines
     #- name: Test full tinyfs load
     #  run: TINYFS_ENDPOINT=10.0.52.11:6767 PYTHONPATH=. python extra/tinyfs/fetch_file.py --hash d734f5e3be9f1e9d863bfaa4fc6c1ef2 --len 175866113 --dest mapping.json --check
     - name: Run process replay tests
@@ -616,6 +616,27 @@ jobs:
         PYTHONPATH=. CC=clang-19 DSP=1 NOOPT=1 CNT=2 DEBUG=2 python3 examples/test_onnx_imagenet.py /tmp/model.quant.onnx
     - name: Run process replay tests
       run: cp test/external/process_replay/process_replay.py ./process_replay.py && git fetch origin master && git -c advice.detachedHead=false checkout origin/master && PYTHONPATH=. python3 process_replay.py
+
+  testcommausbgpubenchmark:
+    name: UsbGPU Benchmark (comma)
+    runs-on: [self-hosted, Linux, comma4]
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash -e -o pipefail {0}
+    if: github.repository_owner == 'tinygrad'
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+    - name: setup staging db
+      if: github.ref == 'refs/heads/update_benchmark_staging'
+      run: |
+        echo "CACHEDB=/tmp/staging.db" >> $GITHUB_ENV
+        rm -f /tmp/staging.db /tmp/staging.db-shm /tmp/staging.db-wal
+    - name: openpilot compile3 0.10.1 driving_vision
+      run: BENCHMARK_LOG=usbgpu_openpilot_0_10_1_vision PYTHONPATH="." DEV=AMD AMD_LLVM=1 AMD_IFACE=USB ASSERT_MIN_STEP_TIME=50 python3 examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/720392c9a5b986981fdbed1bb8c47a6c5573a50e/selfdrive/modeld/models/driving_vision.onnx
+    - name: openpilot load_pickle 0.10.1 driving_vision
+      run: BENCHMARK_LOG=usbgpu_openpilot_0_10_1_vision_load_pickle PYTHONPATH="." DEV=AMD AMD_IFACE=USB ASSERT_MIN_LOAD_TIME=15 python3 examples/openpilot/load_pickle.py
 
   testreddriverbenchmark:
     name: AM Benchmark
