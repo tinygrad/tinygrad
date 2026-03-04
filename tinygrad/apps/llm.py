@@ -1,9 +1,10 @@
 from __future__ import annotations
-from typing import Optional
+from typing import Optional, Tuple
 import sys, argparse, typing, re, unicodedata, json, uuid, time, functools
 from tinygrad import Tensor, nn, UOp, TinyJit, getenv, function
 from tinygrad.helpers import partition, DEBUG, Timing, GlobalCounters, stderr_log, colored
-from tinygrad.viz.serve import TCPServerWithReuse, HTTPRequestHandler
+from tinygrad.viz.serve import TCPServerWithReuse, HTTPRequestHandler, unpack_sqtt
+import numpy as np
 
 class SimpleTokenizer:
   def __init__(self, normal_tokens:dict[str, int], special_tokens:dict[str, int], preset:str="llama3"):
@@ -82,62 +83,86 @@ def apply_rope(x:Tensor, freqs_cis:Tensor) -> Tensor:
   x1, x2 = x.chunk(2, dim=-1)
   return (x1 * cos - x2 * sin).cat(x2 * cos + x1 * sin, dim=-1)
 
+# Useful: https://sebastianraschka.com/llms-from-scratch/ch04/08_deltanet/
+# Official Qwen3 impl: https://github.com/huggingface/transformers/blob/0ed6d51ae8ed3f4fafca67a983b8d75bc76cd51b/src/transformers/models/qwen3_next/modular_qwen3_next.py#L835
+
 # https://github.com/NVlabs/GatedDeltaNet/blob/main/lit_gpt/gated_delta_net.py
+# https://github.com/ggml-org/llama.cpp/blob/master/src/models/qwen35.cpp
+# https://github.com/ggml-org/llama.cpp/blob/master/src/models/delta-net-base.cpp
 class GatedDeltaNet:
-    def __init__(self, hidden_dim: int, n_heads: int, head_dim: int, conv_kernel: int):
+    def __init__(self, hidden_dim: int, num_k_heads: int, num_v_heads: int, head_k_dim: int, head_v_dim: int, conv_kernel: int):
         self.hidden_dim = hidden_dim
-        self.n_heads = n_heads
-        self.head_dim = head_dim
-        self.dim = head_dim * n_heads
+        self.num_k_heads = num_k_heads
+        self.num_v_heads = num_v_heads
+        self.head_k_dim = head_k_dim
+        self.head_v_dim = head_v_dim
+        self.k_dim = num_k_heads * head_k_dim
+        self.v_dim = num_v_heads * head_v_dim
+        self.conv_kernel = conv_kernel
 
-        # -- attention projection
-        self.qkv_proj = nn.Linear(hidden_dim, self.dim*3, bias=False)
+        # Fused attention and delta projections
+        self.in_proj_qkv = nn.Linear(hidden_dim, self.k_dim * 2 + self.v_dim, bias=False)
+        self.in_proj_z = nn.Linear(hidden_dim, self.v_dim, bias=False)
+        self.in_proj_ba = nn.Linear(hidden_dim, self.num_v_heads * 2, bias=False)
+        conv_dim = self.k_dim * 2 + self.v_dim
+        self.conv = nn.Conv1d(conv_dim, conv_dim, conv_kernel, bias=False, groups=conv_dim, padding=conv_kernel-1)
 
-        self.alpha_proj = nn.Linear(hidden_dim, n_heads, bias=False)
-        self.beta_proj = nn.Linear(hidden_dim, n_heads, bias=False)
+        self.norm = nn.RMSNorm(self.head_v_dim, eps=1e-6)
+        self.out_proj = nn.Linear(self.v_dim, hidden_dim, bias=False)
 
-        self.q_conv = nn.Conv1d(self.dim, self.dim, conv_kernel)
-        self.k_conv = nn.Conv1d(self.dim, self.dim, conv_kernel)
-        self.v_conv = nn.Conv1d(self.dim, self.dim, conv_kernel)
+        self.A_log = Tensor.uniform(0, 16, num_v_heads)
+        self.dt_bias = Tensor.ones(num_v_heads)
+    # Recurrent (autoregressive) delta net chain
+    def recurrent_forward(self, q: Tensor, k: Tensor, v: Tensor, a: Tensor, b: Tensor, state: Tensor) -> Tuple[Tensor, Tensor]:
+        # Input shapes":" (batch, seq_len, num_heads, head_dim | None)
+        batch, seq_len, _, _ = q.shape
+        q, k, v  = [x.transpose(1, 2).contiguous() for x in (q, k, v, b, a)] # (batch, num_heads, seq_len, head_dim | None)
+        q = q / (q.square().sum(-1, keepdim=True).sqrt() + 1e-6) # l2 normalize
+        k = k / (k.square().sum(-1, keepdim=True).sqrt() + 1e-6)
+        q = q * 1.0 / (self.head_k_dim ** 0.5)
 
-        self.g_proj = nn.Linear(hidden_dim, self.dim, bias=False)
-        self.o_proj = nn.Linear(self.dim, hidden_dim, bias=False)
-        self.norm = nn.GroupNorm(n_heads, self.dim)
-    def __call__(self, x: Tensor, state: Optional[Tensor]):
-        H = self.n_heads
-        B, T, D = x.shape
-        q, k, v = self.qkv_proj(x).chunk(3, dim=-1)
-        q = self.q_conv(q.transpose(1, 2))[:, :, T].transpose(1, 2).silu().view(B, T, H, self.head_dim)
-        k = self.k_conv(k.transpose(1, 2))[:, :, T].transpose(1, 2).silu().view(B, T, H, self.head_dim)
-        v = self.v_conv(v.transpose(1, 2))[:, :, T].transpose(1, 2).silu().view(B, T, H, self.head_dim)
+        outputs = []
+        for i in range(seq_len):
+            a_t = a[:, :, i, None, None]
+            q_t, k_t, v_t, b_t = q[:, :, i], k[:, :, i], v[:, :, i], b[:, :, i]
 
-        def l2_normalize(x: Tensor, eps=1e-12): return x / (x.pow(2).sum(axis=-1, keepdim=True).sqrt() + eps)
-        q, k = l2_normalize(q), l2_normalize(k)
+            state = state * a_t 
+            kv_mem = (state * k_t[..., None]).sum(-2)
+            delta = (v_t - kv_mem) * b_t
+            state = state + k_t[..., None] * delta[..., None, :]
+            y_t = (state * q_t[..., None]).sum(-2)
+            outputs.append(y_t)
+        out = outputs[0].stack(*outputs[1:], dim=2).transpose(1, 2).contiguous()
+        return out.view(batch, seq_len, self.num_v_heads, self.head_v_dim), state
+    def __call__(self, x: Tensor, conv_state: Optional[Tensor], recurrent_state: Optional[Tensor]) -> Tuple[Tensor, Tensor, Tensor]:
+        batch, seq_len, _ = x.shape
+        qkv = self.in_proj_qkv(x).transpose(1,2)
+        z = self.in_proj_z(x).reshape(batch, seq_len, -1, self.head_v_dim)
 
-        # --- Compute gates
-        alpha = (-self.alpha_proj(x).softplus()).exp()
-        beta = self.beta_proj(x).sigmoid()
-        g = self.g_proj(x).silu().view(B, T, H, self.head_dim)
+        if conv_state is not None and seq_len == 1: # Decode mode
+            qkv_full = conv_state.cat(qkv, dim=-1)
+            conv_state = qkv_full[:, :, -(self.conv_kernel-1):]
+            qkv = (qkv_full * self.conv.weight.squeeze(1)).sum(-1, keepdim=True).silu()
+        else: # pre fill mode
+            conv_state = qkv[:, :, -(self.conv_kernel - 1):]
+            qkv = self.conv(qkv)[:, :, :seq_len].silu()
+        q, k, v = qkv.transpose(1, 2).split([self.k_dim, self.k_dim, self.v_dim], dim=-1) 
+        q, k, v = q.reshape(batch, seq_len, -1, self.head_k_dim), k.reshape(batch, seq_len, -1, self.head_k_dim), v.reshape(batch, seq_len, -1, self.head_v_dim)
 
-        if state is None: state = Tensor.zeros(B, T, H, self.head_dim, device=x.device, dtype=x.dtype)
-        out = []
-        for t in range(T):
-            q_t = q[:, t]
-            k_t = k[:, t]
-            v_t = v[:, t]
-            alpha_t = alpha[:, t, :, None, None]
-            beta_t = beta[:, t, :, None, None]
-            pred = Tensor.einsum("bhij,bhj->bhi", state, k_t)
-            delta = v_t - pred
-            state = alpha_t * state + beta_t * Tensor.einsum("bhi,bhj->bhij", delta, k_t)
-            o_t = Tensor.einsum("bhij,bhj->bhi", state, q_t)
-            out.append(o_t)
-        o = out[0].stack(*out[1:], dim=1)
-        o = o * g
-        o = o.reshape(B, T, D)
-        o = self.norm(o.transpose(-1, 2)).transpose(-1, 2)
-        return self.o_proj(o), state
+        b, a = self.in_proj_ba(x).chunk(2, dim=-1)
+        b, a = b.reshape(batch, seq_len, self.num_v_heads), a.reshape(batch, seq_len, self.num_v_heads)
+        b = b.sigmoid()
+        a = -self.A_log.exp() * (a + self.dt_bias).softplus()
 
+        if recurrent_state is None: recurrent_state = Tensor.zeros(batch, self.num_v_heads, self.head_k_dim, self.head_v_dim)
+        if self.num_v_heads // self.num_k_heads > 1:
+            q = q.repeat_interleave(self.num_v_heads // self.num_k_heads, dim=2)
+            k = k.repeat_interleave(self.num_v_heads // self.num_k_heads, dim=2)
+        attn, recurrent_state = self.recurrent_forward(q, k, v, a, b, recurrent_state)
+        attn = self.norm(attn.reshape(-1, self.head_v_dim)) * z.reshape(-1, self.head_v_dim).silu()
+        return self.out_proj(attn.reshape(batch, seq_len, -1)), conv_state, recurrent_state
+
+"""
 class GatedAttention:
     def __init__(self, hidden_dim: int, n_heads: int):
         self.hidden_dim = hidden_dim
@@ -153,6 +178,7 @@ class GatedAttention:
         v = v.view(B, T, H, self.hidden_dim).transpose(1, 2)
         attn = q.scaled_dot_product_attention(k, v, is_causal=True).transpose(1, 2).reshape(B, T, D)
         return self.o_proj(attn * g.sigmoid())
+"""
 
 class TransformerBlock:
   def __init__(self, dim:int, hidden_dim:int, n_heads:int, n_kv_heads:int, norm_eps:float, head_dim:int, rope_theta:float,
