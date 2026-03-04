@@ -10,7 +10,7 @@ from tinygrad.runtime.autogen.amd.rdna3.ins import SOPP
 from tinygrad.runtime.autogen.amd.rdna3.enum import SOPPOp
 from tinygrad.renderer.amd.sqtt import (decode, LAYOUT_HEADER, WAVESTART, WAVESTART_RDNA4, WAVESTART_CDNA, WAVEEND, INST, INST_RDNA4, VALUINST,
                                      IMMEDIATE, IMMEDIATE_MASK, PACKET_TYPES_RDNA3, PACKET_TYPES_RDNA4, PACKET_TYPES_CDNA, WAVEEND_CDNA,
-                                     InstOp, InstOpRDNA4, print_packets, DECODED_INST_CDNA, IMMEDIATE_CDNA, REGCS_CDNA)
+                                     InstOp, InstOpRDNA4, print_packets, INST_CDNA, IMMEDIATE_CDNA, REGCS_CDNA)
 from test.amd.helpers import TARGET_TO_ARCH
 
 import tinygrad
@@ -156,7 +156,7 @@ class SQTTExamplesTestBase(unittest.TestCase):
       if "gemm" not in name: continue
       with self.subTest(example=name):
         all_packets = [p for e in events for p in decode(e.blob)]
-        INST_TYPES = (INST, INST_RDNA4, DECODED_INST_CDNA, IMMEDIATE_CDNA)
+        INST_TYPES = (INST, INST_RDNA4, INST_CDNA, IMMEDIATE_CDNA)
         self.assertGreater(len([p for p in all_packets if isinstance(p, INST_TYPES)]), 0, f"no INST packets in {name}")
 
   expected: dict[str, list[int]] = {}  # override in subclasses
@@ -207,7 +207,7 @@ class SQTTExamplesTestBase(unittest.TestCase):
             elif isinstance(p, IMMEDIATE): our_insts.append(p._time)
             elif isinstance(p, IMMEDIATE_MASK):
               for _ in range(bin(p.mask).count('1')): our_insts.append(p._time)
-            elif isinstance(p, (DECODED_INST_CDNA, IMMEDIATE_CDNA)): our_insts.append(p._time)
+            elif isinstance(p, (INST_CDNA, IMMEDIATE_CDNA)): our_insts.append(p._time)
         # skip last inst per wave, cdna endpgm gets an inst packet, rdna doesn't
         if self.target == "gfx950": our_insts = our_insts[:-1]
         self.assertEqual(sorted(our_insts), sorted(roc_insts), f"instruction times mismatch in {name}")
