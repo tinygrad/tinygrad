@@ -61,7 +61,7 @@ def handle_allreduce_function(buf:UOp, red:UOp) -> UOp|None:
   to = red.param_like(0)
   src = buf.param_like(1)
   red = UOp(Ops.ALLREDUCE, dtype=red.dtype, src=(src, red.src[1]), arg=red.arg)
-  return output.after(to.assign(handle_allreduce(src, red)).sink().call(output, buf, name="allreduce", precompile=True))
+  return output.after(to.assign(handle_allreduce(src, red)).sink().call(output, buf.contiguous(), name="allreduce", precompile=True))
 
 # ***** multi rewrite MSELECT/MSTACK *****
 
