@@ -55,6 +55,14 @@ def handle_allreduce(buf:UOp, red:UOp) -> UOp|None:
   # reassemble
   return UOp.sum(*[c.pad(((s,numel-e),)) for (s,e),c in zip(chunks, copied_chunks)]).reshape(shape)
 
+def handle_allreduce_function(buf:UOp, red:UOp) -> UOp|None:
+  # BUFFER without unique have unique added later
+  output = UOp(Ops.BUFFER, red.dtype, (UOp(Ops.NOOP), red.src[1]), red.size).reshape(red.shape)
+  to = red.param_like(0)
+  src = buf.param_like(1)
+  red = UOp(Ops.ALLREDUCE, dtype=red.dtype, src=(src, red.src[1]), arg=red.arg)
+  return output.after(to.assign(handle_allreduce(src, red)).sink().call(output, buf, name="allreduce", precompile=True))
+
 # ***** multi rewrite MSELECT/MSTACK *****
 
 def mstack_early_shrink(ms:UOp, shrink:UOp):
@@ -71,7 +79,7 @@ def mstack_early_shrink(ms:UOp, shrink:UOp):
   return ms.replace(src=tuple(ret))
 
 replace_allreduce = PatternMatcher([
-  (UPat(Ops.ALLREDUCE, src=(UPat.var("buf"), UPat()), name="red"), handle_allreduce),
+  (UPat(Ops.ALLREDUCE, src=(UPat.var("buf"), UPat()), name="red"), handle_allreduce_function),
   # BROADCAST: explicitly expand broadcast copies and combine with MSTACK
   (UPat(Ops.COPY, name="c", src=(UPat(GroupOp.All-{Ops.CONST}, name="x"), UPat(Ops.DEVICE))), lambda c,x:
     UOp(Ops.MSTACK, c.dtype, tuple(x.copy_to_device(d) for d in c.device)) if isinstance(c.device, tuple) and isinstance(x.device, str) else None),
