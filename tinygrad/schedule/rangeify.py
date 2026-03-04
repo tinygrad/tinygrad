@@ -2,7 +2,7 @@ from dataclasses import dataclass, field, replace
 import itertools
 from tinygrad.dtype import dtypes, PtrDType, ImageDType, AddrSpace, Invalid
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, _substitute, KernelInfo
-from tinygrad.uop.ops import graph_rewrite, sint, AxisType, BottomUpGate, profile_matches, should_resolve_call
+from tinygrad.uop.ops import graph_rewrite, sint, AxisType, BottomUpGate, profile_matches, should_resolve_call, identity_element
 from tinygrad.uop.symbolic import symbolic
 from tinygrad.helpers import prod, all_same, getenv, dedup, all_int, DEBUG, SPLIT_REDUCEOP, DEBUG_RANGEIFY, VIZ, MAX_KERNEL_BUFFERS
 from tinygrad.helpers import PCONTIG, partition, get_single_element
@@ -96,6 +96,10 @@ def resolve_call(c:UOp, allow_param_mismatch=True) -> UOp|None:
   return c.src[0].substitute(dict_map, walk=True)
 
 earliest_rewrites = mop_cleanup+PatternMatcher([
+  # early fixup const copy
+  (UPat(Ops.COPY, src=(UPat.var("s"), UPat.var("d"))),
+   lambda s,d: s.substitute({UOp(Ops.DEVICE, arg=s.device):d}) if s.base.op is Ops.CONST else None),
+
   # resolve calls
   (UPat(Ops.CALL, name="c"), resolve_call),
 
@@ -136,6 +140,14 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
 
   # make source contiguous if it has hazardous movement ops on the dest buffer
   (UPat(Ops.ASSIGN, src=(UPat.var("target"), UPat.var("src")), name="assign"), fix_assign_hazard),
+
+  # ** size 0 **
+
+  # reduce of size 0 is the identity element
+  (UPat(Ops.REDUCE_AXIS, name="reduce", src=(UPat.var("x"),)),
+   lambda reduce,x: reduce.const_like(identity_element(reduce.arg[0], reduce.dtype)) if x.size == 0 and reduce.size != 0 else None),
+  # handle size 0
+  (UPat(GroupOp.All-{Ops.SINK}, name="x"), lambda x: x.const_like(0).rtag(x.tag) if x._shape is not None and x.size == 0 else None),
 ])
 
 # *****************
