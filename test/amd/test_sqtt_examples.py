@@ -153,9 +153,9 @@ class SQTTExamplesTestBase(unittest.TestCase):
       if "gemm" not in name: continue
       with self.subTest(example=name):
         all_packets = [p for e in events for p in decode(e.blob)]
-        insts = [p for p in all_packets if isinstance(p, (INST, INST_RDNA4))]
-        self.assertGreater(len(insts), 0, f"no INST packets in {name}")
-        self.assertGreater(len([p for p in insts if p.op.name.startswith("JUMP")]), 0, f"no JUMP packets in {name}")
+        inst_names = [p.op.name for p in all_packets if isinstance(p, (INST, INST_RDNA4))]
+        self.assertGreater(len(inst_names), 0, f"no INST packets in {name}")
+        self.assertGreater(len([n for n in inst_names if n.startswith("JUMP")]), 0, f"no JUMP packets in {name}")
 
   expected: dict[str, list[int]] = {}  # override in subclasses
   def test_packet_counts(self):
