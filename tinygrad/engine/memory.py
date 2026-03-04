@@ -32,19 +32,25 @@ def _internal_memory_planner(buffers:list[list[Buffer]], copy_buffers=None, igno
   reuse_buffers:dict[tuple, list[Buffer]] = defaultdict(list)
   global_planner:dict[tuple[str,bool], tuple[int, TLSFAllocator]] = defaultdict(lambda: (0, TLSFAllocator(total_memory, block_size=min_block_size, lv2_cnt=32)))
   buf_gkey:dict[Buffer, tuple[str, bool]] = {}
+  deferred_copy_frees:dict[tuple[str,bool], list[int]] = defaultdict(list)
   for (_, is_open_ev), buf in buffer_requests:
     is_copy = copy_buffers is not None and buf in copy_buffers
     gk = (buf.device, is_copy)
     # Check if suballocation is possible for the given buffer and device.
     if hasattr(Device[buf.device].allocator, "_offset") and not isinstance(buf.dtype, ImageDType):
-      if is_open_ev: buffer_replace[buf] = (None, global_planner[gk][1].alloc(round_up(buf.nbytes, 0x1000)))
+      if is_open_ev:
+        # Defer copy dest frees by ~2 copy allocs to avoid copy→compute→copy serialization in graphs.
+        if is_copy:
+          while len(deferred_copy_frees[gk]) > 8: global_planner[gk][1].free(deferred_copy_frees[gk].pop(0))
+        buffer_replace[buf] = (None, global_planner[gk][1].alloc(round_up(buf.nbytes, 0x1000)))
+      elif is_copy: deferred_copy_frees[gk].append(cast(int, buffer_replace[buf][1]))
       else: global_planner[gk][1].free(cast(int, buffer_replace[buf][1]))
       global_planner[gk] = (max(global_planner[gk][0], buffer_replace[buf][1] + buf.nbytes), global_planner[gk][1])
       buf_gkey[buf] = gk
     else:
       key = (buf.device, buf.dtype, buf.options, buf.nbytes, is_copy)
       if is_open_ev: buffer_replace[buf] = (reuse_buffers[key].pop(), None) if key in reuse_buffers and len(reuse_buffers[key]) > 0 else (buf, None)
-      else: reuse_buffers[key].append(cast(Buffer, buffer_replace[buf][0]))
+      elif not is_copy: reuse_buffers[key].append(cast(Buffer, buffer_replace[buf][0]))
 
   # Allocate global buffers based on the memory planner.
   global_buffers = {key: Buffer(key[0], round_up(sz, 0x1000), dtypes.int8) for key, (sz, _) in global_planner.items()}
