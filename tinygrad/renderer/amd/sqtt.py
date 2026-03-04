@@ -139,10 +139,6 @@ class CDNAInstType(Enum):
   EXPREQ_GDS = 8; EXPREQ_GFX = 9; EXPGNT_PAR_COL = 10; EXPGNT_POS_GDS = 11
   JUMP = 12; NEXT = 13; FLAT_RD = 14; OTHER_MSG = 15; SMEM_WR = 16; SALU_64 = 17; VALU_64 = 18; VALU_MAI = 28
 
-class CDNAToken(Enum):
-  MISC = 0; TIMESTAMP = 1; REG = 2; WAVESTART = 3; WAVE_ALLOC = 4; REG_CS = 5; WAVE_END = 6
-  EVENT = 7; EVENT_CS = 8; EVENT_GFX1 = 9; INST = 10; INST_PC = 11; SHADERDATA = 12; ISSUE = 13; PERF = 14; REG_CS_PRIV = 15
-
 # ═══════════════════════════════════════════════════════════════════════════════
 # PACKET TYPE BASE CLASS
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -567,12 +563,12 @@ def decode_cdna(data: bytes) -> Iterator[PacketType]:
   target_cu = (header_raw >> 20) & 0x1f
 
   n, pos, globaltime, base_time = len(data), 8, 0, 0
-  lookahead: list[tuple[int, int, int]] = []  # (type, raw, delta) buffer for time patching
+  lookahead: list[tuple[type[PacketType], int, int]] = []  # (pkt_cls, raw, delta) buffer for time patching
   wave_issued: list[list[list[int]]] = [[[] for _ in range(10)] for _ in range(4)]  # per-simd per-wave issue time queue
   wave_active: list[list[bool]] = [[False] * 10 for _ in range(4)]
   running_waves: set[tuple[int, int, int]] = set()  # (wave, simd, cu) for occupancy dedup
 
-  def _parse_one() -> tuple[int, int, int] | None:
+  def _parse_one() -> tuple[type[PacketType], int, int] | None:
     nonlocal pos
     if pos + 2 > n: return None
     typ = data[pos] & 0xf
@@ -580,7 +576,8 @@ def decode_cdna(data: bytes) -> Iterator[PacketType]:
     if pos + sz > n: return None
     raw = int.from_bytes(data[pos:pos + sz], 'little')
     pos += sz
-    return (typ, raw, ((raw >> 4) & 0xff) if typ == CDNAToken.MISC.value else ((raw >> 4) & 1))
+    pkt_cls = _CDNA_TOKEN_TYPES[typ]
+    return (pkt_cls, raw, ((raw >> 4) & 0xff) if pkt_cls is CDNA_MISC else ((raw >> 4) & 1))
 
   def _patch_time() -> None:
     """Scan ahead for TIMESTAMP to recalibrate globaltime after TIME_RESET. Matches MITokenGenerator::patch_time."""
@@ -589,18 +586,18 @@ def decode_cdna(data: bytes) -> Iterator[PacketType]:
       nonlocal globaltime, base_time
       if base_time == 0: base_time = ts - globaltime + 4
       if ts > base_time: globaltime = (ts - base_time) & ~3
-    for i, (typ, raw, _) in enumerate(lookahead):
-      if typ == CDNAToken.TIMESTAMP.value: _update((raw >> 16) & ((1 << 48) - 1)); lookahead.pop(i); return
-      elif typ == CDNAToken.MISC.value and ((raw >> 13) & 0x7) == 1: return
+    for i, (pkt_cls, raw, _) in enumerate(lookahead):
+      if pkt_cls is CDNA_TIMESTAMP: _update((raw >> 16) & ((1 << 48) - 1)); lookahead.pop(i); return
+      elif pkt_cls is CDNA_MISC and ((raw >> 13) & 0x7) == 1: return
     while True:
       tok = _parse_one()
       if tok is None: return
-      typ, raw, _ = tok
-      if typ == CDNAToken.TIMESTAMP.value: _update((raw >> 16) & ((1 << 48) - 1)); return
-      if typ == CDNAToken.MISC.value and ((raw >> 13) & 0x7) == 1: return
+      pkt_cls, raw, _ = tok
+      if pkt_cls is CDNA_TIMESTAMP: _update((raw >> 16) & ((1 << 48) - 1)); return
+      if pkt_cls is CDNA_MISC and ((raw >> 13) & 0x7) == 1: return
       lookahead.append(tok)
 
-  def _next_token() -> tuple[int, int, int] | None:
+  def _next_token() -> tuple[type[PacketType], int, int] | None:
     return lookahead.pop(0) if lookahead else _parse_one()
 
   packets: list[PacketType] = [LAYOUT_HEADER.from_raw(0, 0)]  # synthetic header so first-packet checks pass
@@ -608,15 +605,15 @@ def decode_cdna(data: bytes) -> Iterator[PacketType]:
   while True:
     tok = _next_token()
     if tok is None: break
-    typ, raw, delta = tok
+    pkt_cls, raw, delta = tok
     globaltime += delta * 4
 
-    if typ == CDNAToken.MISC.value:
+    if pkt_cls is CDNA_MISC:
       if ((raw >> 13) & 0x7) == 1: _patch_time()
       continue
-    if typ == CDNAToken.TIMESTAMP.value: continue  # consumed by _patch_time
+    if pkt_cls is CDNA_TIMESTAMP: continue  # consumed by _patch_time
 
-    if typ == CDNAToken.WAVESTART.value:
+    if pkt_cls is WAVESTART_CDNA:
       p = WAVESTART_CDNA.from_raw(raw, globaltime)
       key = (p.wave, p.simd, p.cu)
       if p.cu == target_cu and p.sh == 0:
@@ -628,7 +625,7 @@ def decode_cdna(data: bytes) -> Iterator[PacketType]:
         packets.append(p)
       continue
 
-    if typ == CDNAToken.WAVE_END.value:
+    if pkt_cls is WAVEEND_CDNA:
       p = WAVEEND_CDNA.from_raw(raw, globaltime)
       key = (p.wave, p.simd, p.cu)
       if p.cu == target_cu and p.sh == 0:
@@ -639,7 +636,7 @@ def decode_cdna(data: bytes) -> Iterator[PacketType]:
         packets.append(p)
       continue
 
-    if typ == CDNAToken.ISSUE.value:
+    if pkt_cls is CDNA_ISSUE:
       p = CDNA_ISSUE.from_raw(raw, globaltime)
       for wave_id in range(10):
         status = p.wave_status(wave_id)
@@ -651,7 +648,7 @@ def decode_cdna(data: bytes) -> Iterator[PacketType]:
           packets.append(pkt)
       continue
 
-    if typ == CDNAToken.INST.value: # confirms queued ISSUE
+    if pkt_cls is CDNA_INST: # confirms queued ISSUE
       p = CDNA_INST.from_raw(raw, globaltime)
       if wave_active[p.simd][p.wave] and wave_issued[p.simd][p.wave]:
         issue_time = wave_issued[p.simd][p.wave].pop(0)
