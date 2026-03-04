@@ -15,7 +15,7 @@ from test.helpers import needs_second_gpu
 np.random.seed(1337)
 Tensor.manual_seed(1337)
 BUF_SIZE = 4096
-RUN_CNT = 4
+RUN_CNT = 5
 
 cached_prgs = {}
 def helper_exec_op(device, outbuf, inbufs):
@@ -46,6 +46,17 @@ def helper_alloc_rawbuffer(device, fill=False):
 def helper_create_offset_rawbuffer(base, offset=0):
   x = Buffer(base.device, base.size-offset, base.dtype, base=base, offset=offset)
   return x.ensure_allocated()
+
+def helper_alloc_rawbuffer_sized(device, size, fill=False):
+  rawbuf = Buffer(device, size, dtypes.int).ensure_allocated()
+  if fill:
+    with Context(DEBUG=0):
+      data = np.random.randint(-10000, 10000, size=rawbuf.size, dtype=_to_np_dtype(rawbuf.dtype))
+      rawbuf.copyin(Tensor(data).realize().uop.base.realized.as_memoryview())
+  return rawbuf
+
+def helper_make_view(base, offset_elems, size_elems):
+  return Buffer(base.device, size_elems, base.dtype, base=base, offset=offset_elems * base.dtype.itemsize).ensure_allocated()
 
 def helper_run_jit(jis, bufs, out_buffers):
   for rawbuf in out_buffers:
@@ -80,6 +91,14 @@ def helper_test_graphs(graph_impl, graphs, runs=RUN_CNT):
 
 @unittest.skipUnless(Device[Device.DEFAULT].graph is not None, "graph support required")
 class TestGraph(unittest.TestCase):
+  def skip_if_no_offset(self):
+    if not hasattr(Device[Device.DEFAULT].allocator, "_offset"): self.skipTest("device does not support _offset")
+
+  def skip_if_not_multigraph(self):
+    graph = g.func if isinstance(g:=(d:=Device[Device.DEFAULT]).graph, functools.partial) else g
+    if not issubclass(graph, MultiGraphRunner): self.skipTest("graph is not supported (not MultiGraphRunner)")
+    if not hasattr(d.allocator, '_transfer') or not d.allocator.supports_transfer: self.skipTest("device is not supported (no transfers)")
+
   def test_order_2_writes_to_same_buf(self):
     d0 = Device.DEFAULT
     b0 = [helper_alloc_rawbuffer(d0, fill=True) for _ in range(5)]
@@ -109,11 +128,6 @@ class TestGraph(unittest.TestCase):
     ]
 
     helper_test_graphs(Device[d0].graph, graphs)
-
-  def skip_if_not_multigraph(self):
-    graph = g.func if isinstance(g:=(d:=Device[Device.DEFAULT]).graph, functools.partial) else g
-    if not issubclass(graph, MultiGraphRunner): self.skipTest("graph is not supported (not MultiGraphRunner)")
-    if not hasattr(d.allocator, '_transfer') or not d.allocator.supports_transfer: self.skipTest("device is not supported (no transfers)")
 
   def test_order_copy_writed(self):
     self.skip_if_not_multigraph()
@@ -263,6 +277,59 @@ class TestGraph(unittest.TestCase):
       [helper_copy_op(d0, b0[0], b0[2]), helper_exec_op(d0, b0[1], [b0[0], b0[2]])],
     ]
 
+    helper_test_graphs(Device[d0].graph, graphs)
+
+  def test_partial_write_preserves_write_dep(self):
+    self.skip_if_not_multigraph()
+    self.skip_if_no_offset()
+    d0 = Device.DEFAULT
+
+    base = helper_alloc_rawbuffer_sized(d0, BUF_SIZE * 2, fill=True)
+    copy_src_full = helper_alloc_rawbuffer_sized(d0, BUF_SIZE * 2, fill=True)
+    copy_src_lo = helper_alloc_rawbuffer(d0, fill=True)
+    v_lo = helper_make_view(base, 0, BUF_SIZE)
+    v_hi = helper_make_view(base, BUF_SIZE, BUF_SIZE)
+    a, c = [helper_alloc_rawbuffer(d0, fill=True) for _ in range(2)]
+
+    graphs = [
+      [helper_copy_op(d0, base, copy_src_full), helper_copy_op(d0, v_lo, copy_src_lo), helper_exec_op(d0, c, [v_hi, a])]
+    ]
+    helper_test_graphs(Device[d0].graph, graphs)
+
+  def test_partial_write_preserves_read_dep(self):
+    self.skip_if_not_multigraph()
+    self.skip_if_no_offset()
+    d0 = Device.DEFAULT
+
+    base = helper_alloc_rawbuffer_sized(d0, BUF_SIZE * 2, fill=True)
+    copy_dst = helper_alloc_rawbuffer_sized(d0, BUF_SIZE * 2, fill=True)
+    copy_src_lo = helper_alloc_rawbuffer(d0, fill=True)
+    v_lo = helper_make_view(base, 0, BUF_SIZE)
+    v_hi = helper_make_view(base, BUF_SIZE, BUF_SIZE)
+    a, b = [helper_alloc_rawbuffer(d0, fill=True) for _ in range(2)]
+
+    graphs = [
+      [helper_copy_op(d0, copy_dst, base), helper_copy_op(d0, v_lo, copy_src_lo), helper_exec_op(d0, v_hi, [a, b])]
+    ]
+    helper_test_graphs(Device[d0].graph, graphs)
+
+  def test_middle_write_splits_write_dep(self):
+    self.skip_if_not_multigraph()
+    self.skip_if_no_offset()
+    d0 = Device.DEFAULT
+
+    base = helper_alloc_rawbuffer_sized(d0, BUF_SIZE * 3, fill=True)
+    copy_src_full = helper_alloc_rawbuffer_sized(d0, BUF_SIZE * 3, fill=True)
+    copy_src_mid = helper_alloc_rawbuffer(d0, fill=True)
+    v_lo = helper_make_view(base, 0, BUF_SIZE)
+    v_mid = helper_make_view(base, BUF_SIZE, BUF_SIZE)
+    v_hi = helper_make_view(base, BUF_SIZE * 2, BUF_SIZE)
+    a, c, e = [helper_alloc_rawbuffer(d0, fill=True) for _ in range(3)]
+
+    graphs = [
+      [helper_copy_op(d0, base, copy_src_full), helper_copy_op(d0, v_mid, copy_src_mid),
+       helper_exec_op(d0, c, [v_lo, a]), helper_exec_op(d0, e, [v_hi, a])]
+    ]
     helper_test_graphs(Device[d0].graph, graphs)
 
 if __name__ == '__main__':
