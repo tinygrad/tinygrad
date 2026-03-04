@@ -571,8 +571,6 @@ def decode_cdna(data: bytes) -> Iterator[PacketType]:
   wave_issued: list[list[list[int]]] = [[[] for _ in range(10)] for _ in range(4)]  # per-simd per-wave issue time queue
   wave_active: list[list[bool]] = [[False] * 10 for _ in range(4)]
   running_waves: set[tuple[int, int, int]] = set()  # (wave, simd, cu) for occupancy dedup
-  wave_last_inst: dict[tuple[int, int], int] = {}  # (simd, wave) -> packet index, for removing last inst per wave
-  remove_indices: set[int] = set()
 
   def _parse_one() -> tuple[int, int, int] | None:
     nonlocal pos
@@ -636,7 +634,6 @@ def decode_cdna(data: bytes) -> Iterator[PacketType]:
       if p.cu == target_cu and p.sh == 0:
         wave_active[p.simd][p.wave] = False
         wave_issued[p.simd][p.wave] = []
-        if (p.simd, p.wave) in wave_last_inst: remove_indices.add(wave_last_inst.pop((p.simd, p.wave)))
       if key in running_waves:
         running_waves.discard(key)
         packets.append(p)
@@ -649,7 +646,6 @@ def decode_cdna(data: bytes) -> Iterator[PacketType]:
         if status == 0 or not wave_active[p.simd][wave_id]: continue
         if status == 2: wave_issued[p.simd][wave_id].append(globaltime)  # queue issue time
         elif status == 3:  # IMMED: emit immediately
-          wave_last_inst[(p.simd, wave_id)] = len(packets)
           pkt = CDNA_DECODED_IMMED.from_raw(0, globaltime + 4)
           pkt.wave, pkt.simd, pkt.cu = wave_id, p.simd, target_cu
           packets.append(pkt)
@@ -660,7 +656,6 @@ def decode_cdna(data: bytes) -> Iterator[PacketType]:
       if wave_active[p.simd][p.wave] and wave_issued[p.simd][p.wave]:
         issue_time = wave_issued[p.simd][p.wave].pop(0)
         if p.inst_type not in _CDNA_REPLAY_TYPES:
-          wave_last_inst[(p.simd, p.wave)] = len(packets)
           pkt = CDNA_DECODED_INST.from_raw(0, issue_time)
           pkt.wave, pkt.simd, pkt.cu, pkt.inst_type = p.wave, p.simd, target_cu, p.inst_type
           packets.append(pkt)
@@ -669,7 +664,6 @@ def decode_cdna(data: bytes) -> Iterator[PacketType]:
         wave_issued[p.simd][p.wave] = []
       continue
 
-  if remove_indices: packets = [p for i, p in enumerate(packets) if i not in remove_indices]
   packets.sort(key=lambda p: p._time)
   yield from packets
 
@@ -745,7 +739,7 @@ def map_insts(data:bytes, lib:bytes, target:str) -> Iterator[tuple[PacketType, I
       assert p.wave not in wave_pc, "only one inflight wave per unit"
       wave_pc[p.wave] = next(iter(pc_map))
       continue
-    if isinstance(p, (WAVEEND, WAVEEND_CDNA)):
+    if isinstance(p, WAVEEND):
       pc = wave_pc.pop(p.wave)
       yield (p, InstructionInfo(pc, p.wave, s_endpgm()))
       continue
