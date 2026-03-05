@@ -607,14 +607,12 @@ def map_insts(data:bytes, lib:bytes, target:str) -> Iterator[tuple[PacketType, I
     if isinstance(p, (WAVESTART, WAVESTART_RDNA4)):
       assert p.wave not in wave_pc, "only one inflight wave per unit"
       wave_pc[p.wave] = next(iter(pc_map))
-      continue
-    if isinstance(p, WAVEEND):
+    elif isinstance(p, WAVEEND):
       pc = wave_pc.pop(p.wave)
       yield (p, InstructionInfo(pc, p.wave, s_endpgm()))
-      continue
     # skip OTHER_ instructions, they don't belong to this unit
-    if isinstance(p, (INST, INST_RDNA4)) and p.op.name.startswith("OTHER_"): continue
-    if isinstance(p, IMMEDIATE_MASK):
+    elif isinstance(p, (INST, INST_RDNA4)) and p.op.name.startswith("OTHER_"): pass
+    elif isinstance(p, IMMEDIATE_MASK):
       # immediate mask may yield multiple times per packet
       for wave in range(16):
         if p.mask & (1 << wave):
@@ -623,8 +621,7 @@ def map_insts(data:bytes, lib:bytes, target:str) -> Iterator[tuple[PacketType, I
           assert type(inst).__name__ == "SOPP", f"IMMEDIATE_MASK packet must map to SOPP, got {inst}"
           wave_pc[wave] += inst.size()
           yield (p, InstructionInfo(pc, wave, inst))
-      continue
-    if isinstance(p, (VALUINST, INST, INST_RDNA4, IMMEDIATE)):
+    elif isinstance(p, (VALUINST, INST, INST_RDNA4, IMMEDIATE)):
       inst = pc_map[pc:=wave_pc[p.wave]]
       # s_delay_alu and s_wait_alu instructions are skipped
       while (inst_op:=getattr(inst, 'op_name', '')) in {"S_DELAY_ALU", "S_WAIT_ALU"}:
@@ -640,9 +637,8 @@ def map_insts(data:bytes, lib:bytes, target:str) -> Iterator[tuple[PacketType, I
       else:
         wave_pc[p.wave] += inst.size()
       yield (p, InstructionInfo(pc, p.wave, inst))
-      continue
     # for all other packets (VMEMEXEC, ALUEXEC, etc.), yield with None
-    yield (p, None)
+    else: yield (p, None)
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # PRINTER
