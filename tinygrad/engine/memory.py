@@ -19,16 +19,22 @@ def memory_plan_rewrite(linear:UOp, external_bufs:set[UOp]=frozenset()) -> tuple
   for si in linear.src:
     if si.src[0].op is Ops.BUFFER_VIEW:
       for b in si.src[1:]: view_bufs.add(b)
+  def _collect_bufs(u:UOp) -> list[UOp]:
+    """Recursively collect BUFFER UOps from MSELECT/MSTACK nodes."""
+    if u.op is Ops.BUFFER: return [u]
+    if u.op in {Ops.MSELECT, Ops.MSTACK}: return [b for s in u.src for b in _collect_bufs(s)]
+    return []
   for i, si in enumerate(linear.src):
-    for buf_uop in si.src[1:]:
-      if buf_uop.op is not Ops.BUFFER: continue
-      if buf_uop in external_bufs: continue  # user-visible buffer, skip
-      if buf_uop in view_bufs: continue  # part of view op, skip
-      if buf_uop in buffers: continue  # already realized, skip
-      if isinstance(buf_uop.dtype, ImageDType): continue
-      if not hasattr(Device[buf_uop.device].allocator, "_offset"): continue
-      if buf_uop not in first_appearance: first_appearance[buf_uop] = i
-      last_appearance[buf_uop] = i
+    for src_uop in si.src[1:]:
+      for buf_uop in _collect_bufs(src_uop):
+        if buf_uop in external_bufs: continue  # user-visible buffer, skip
+        if buf_uop in view_bufs: continue  # part of view op, skip
+        if buf_uop in buffers: continue  # already realized, skip
+        if isinstance(buf_uop.dtype, ImageDType): continue
+        if isinstance(buf_uop.device, tuple): continue  # multi-device buffers can't be memory planned
+        if not hasattr(Device[buf_uop.device].allocator, "_offset"): continue
+        if buf_uop not in first_appearance: first_appearance[buf_uop] = i
+        last_appearance[buf_uop] = i
   if not first_appearance: return linear, {}
 
   # phase 2: TLSF allocation per device
