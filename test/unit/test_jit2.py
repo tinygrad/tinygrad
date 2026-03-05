@@ -47,6 +47,36 @@ class TestJit2(unittest.TestCase):
     np.testing.assert_equal(outer(a).numpy(), [3,4,5])
     np.testing.assert_equal(outer(a).numpy(), [3,4,5])
 
+  def test_nested_inner_captured_first(self):
+    @jit
+    def inner(a:Tensor) -> Tensor: return (a+1).contiguous()
+    @jit
+    def outer(a:Tensor) -> Tensor: return inner(inner(a))
+    a = Tensor([1,2,3]).contiguous()
+    # capture inner first
+    inner(a); inner(a)
+    assert inner._captured is not None
+    # now outer calls captured inner
+    np.testing.assert_equal(outer(a).numpy(), [3,4,5])
+    np.testing.assert_equal(outer(a).numpy(), [3,4,5])
+    np.testing.assert_equal(outer(a).numpy(), [3,4,5])
+
+  def test_nested_both_captured(self):
+    @jit
+    def inner(a:Tensor) -> Tensor: return (a+1).contiguous()
+    @jit
+    def outer(a:Tensor) -> Tensor: return inner(inner(a))
+    a = Tensor([1,2,3]).contiguous()
+    # capture inner
+    inner(a); inner(a)
+    assert inner._captured is not None
+    # capture outer (inner is already captured, outer sees it as @function since ALLOW_DEVICE_USAGE=0)
+    outer(a); outer(a)
+    assert outer._captured is not None
+    # replay both
+    np.testing.assert_equal(outer(a).numpy(), [3,4,5])
+    np.testing.assert_equal(outer(a).numpy(), [3,4,5])
+
   def test_implicit(self):
     w = Tensor([10,20,30])
     @jit
@@ -135,6 +165,28 @@ class TestJit2(unittest.TestCase):
     np.testing.assert_equal(f(Tensor([10,20,30]), Tensor([1,1,1])).numpy(), [11,21,31])
     assert f._captured is not None
     np.testing.assert_equal(f(Tensor([100,200,300]), Tensor([1,2,3])).numpy(), [101,202,303])
+
+  def test_nested_functions_memory_planned(self):
+    @jit
+    def f1(x:Tensor) -> Tensor: return (x + 1).contiguous()
+    @jit
+    def f2(x:Tensor) -> Tensor: return (x + 2).contiguous()
+    @jit
+    def f3(x:Tensor) -> Tensor: return (x + 3).contiguous()
+    @jit
+    def f4(x:Tensor) -> Tensor: return (x + 4).contiguous()
+    @jit
+    def pipeline(x:Tensor) -> Tensor: return f4(f3(f2(f1(x))))
+    a = Tensor.ones(1024).contiguous()
+    pipeline(a); pipeline(a)
+    assert pipeline._captured is not None
+    # all internal buffers (between f1-f2, f2-f3, f3-f4) should share one arena
+    internal_bufs = [b for ei in pipeline.jit_cache for b in ei.bufs if b is not None and b._base is not None]
+    self.assertGreater(len(internal_bufs), 0)
+    bases = set(b._base for b in internal_bufs)
+    self.assertEqual(len(bases), 1)
+    # replay still produces correct results
+    np.testing.assert_equal(pipeline(a).numpy(), np.full(1024, 11.0))
 
 if __name__ == "__main__":
   unittest.main()
