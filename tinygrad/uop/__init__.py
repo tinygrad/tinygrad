@@ -76,7 +76,7 @@ class Ops(FastEnum):
   # CUSTOM/CUSTOMI are used to output strings into codegen. the I makes the string inline
   CUSTOM = auto(); CUSTOMI = auto()
 
-  # INS is a machine instruction
+  # machine instruction: arg=Inst object, tag=register assignment
   INS = auto()
 
   # ** 6 -- ops that don't exist in programs **
