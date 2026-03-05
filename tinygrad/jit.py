@@ -77,5 +77,3 @@ def jit(fxn:None=None, *, precompile:bool=False) -> Callable[[Callable[..., Retu
 def jit(fxn=None, *, precompile:bool=False):
   if fxn is None: return lambda f: _jit(f, precompile=precompile)
   return _jit(fxn, precompile=precompile)
-
-TinyJit = _jit  # noqa: F841  # NEW_JIT=1 swaps engine.jit.TinyJit with this

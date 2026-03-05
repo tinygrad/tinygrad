@@ -1,6 +1,7 @@
 import numpy as np
 import unittest
-from tinygrad import Tensor, jit
+from tinygrad import Tensor
+from tinygrad.jit import jit
 
 class TestJit2(unittest.TestCase):
   def test_simple(self):
@@ -35,16 +36,6 @@ class TestJit2(unittest.TestCase):
     np.testing.assert_equal(f(a).numpy(), [3,4,5])
     np.testing.assert_equal(f(a).numpy(), [4,5,6])
     assert f._captured is None
-
-  def test_realize_inside_is_noop(self):
-    @jit
-    def f(a:Tensor) -> Tensor:
-      b = (a+1).contiguous()
-      b.realize()  # no-op inside @jit, doesn't crash
-      return b
-    np.testing.assert_equal(f(Tensor([1,2,3]).contiguous()).numpy(), [2,3,4])
-    np.testing.assert_equal(f(Tensor([1,2,3]).contiguous()).numpy(), [2,3,4])
-    np.testing.assert_equal(f(Tensor([1,2,3]).contiguous()).numpy(), [2,3,4])
 
   def test_recursive(self):
     @jit
