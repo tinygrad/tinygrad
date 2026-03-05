@@ -103,8 +103,7 @@ def flip_multi(root:UOp, multi:UOp):
   assert multi.axis is None or not root.marg[multi.axis], "flipping not supported on sharded axis"
   return multi.src[0].flip([i for i,x in enumerate(root.marg) if x]).multi(multi.axis)
 
-# from multiple devices -> one
-def copy_multi(multi:UOp, device:UOp):
+def copy_multi(multi:UOp, device:str | tuple[str, ...] | UOp):
   assert multi.axis is not None, "all multi ops have axis"
   return multi.src[0]._unshard(multi.axis).allreduce(Ops.ADD, device)
 
