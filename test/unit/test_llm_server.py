@@ -1,6 +1,6 @@
 import unittest
 from unittest.mock import patch
-from tinygrad import Tensor, UOp, getenv
+from tinygrad import Tensor, UOp
 from tinygrad.engine.schedule import schedule_cache
 
 class TestTransformerGenerate(unittest.TestCase):

@@ -372,8 +372,8 @@ class TinyJit(Generic[ReturnType]):
       # jit exec
       assert self.captured is not None
       if self.captured.expected_names != names: raise JitError(f"args mismatch in JIT: {self.captured.expected_names=} != {names}")
-      #if self.captured.expected_input_info != expected_input_info:
-      #  raise JitError(f"args mismatch in JIT: {self.captured.expected_input_info=} != {expected_input_info=}")
+      if self.captured.expected_input_info != expected_input_info:
+        raise JitError(f"args mismatch in JIT: {self.captured.expected_input_info=} != {expected_input_info=}")
       ret = self.captured(input_buffers, var_vals)
 
     self.cnt += 1
