@@ -228,17 +228,22 @@ class Transformer:
   def get_start_pos(self, tokens:list[int]):
     return sum(1 for _ in itertools.takewhile(lambda ab: ab[0] == ab[1], zip(tokens, self._cached_tokens)))
 
-  def generate(self, tokens:list[int]):
+  def generate(self, tokens:list[int], chunk_size:int=32):
     v_start_pos = UOp.variable("start_pos", 0, self.max_context-1)
-    v_toks = UOp.variable("toks", 1, self.max_context)
+    v_toks = UOp.variable("toks", 1, chunk_size)
     # assign all input tokens once, then slice from start_pos for the model call
     t = Tensor(tokens + [0] * (self.max_context - len(tokens)), dtype="int32").reshape(1, self.max_context)
     # recompute start_pos from what's currently valid in the kv cache
     start_pos = self.get_start_pos(tokens)
     while len(tokens) < self.max_context:
-      sp, nt = v_start_pos.bind(start_pos), v_toks.bind(len(tokens) - start_pos)
-      t[:, sp+nt:sp+nt+1] = out = self(t[:, sp:sp+nt], sp)
-      start_pos = len(tokens)
+      sp, nt = v_start_pos.bind(start_pos), v_toks.bind(min(chunk_size, len(tokens) - start_pos))
+      out = self(t[:, sp:sp+nt], sp)
+      start_pos += nt.val
+      # chunked prefill: keep processing until all prompt tokens are consumed
+      if start_pos < len(tokens):
+        out.realize()
+        continue
+      t[:, sp+nt:sp+nt+1] = out
       tokens.append(int(out.item()))
       self._cached_tokens = tokens[:]
       yield tokens[-1]
