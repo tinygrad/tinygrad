@@ -3652,6 +3652,7 @@ class Tensor(OpMixin):
       x, w = x.reshape(bs*iy, ix*groups*cin), w.reshape(cout//4, H*W*cin*4)
 
       # hacks for pitch alignment
+      assert isinstance(x.shape[1], int) and isinstance(w.shape[1], int)
       x, w = x.pad_to(None, round_up(xw:=x.shape[1], 64 // dtsz)), w.pad_to(None, round_up(ww:=w.shape[1], 64 // dtsz))
 
       if FLOAT16: x, w = x.cast(dtypes.half).contiguous().cast(dtypes.float), w.cast(dtypes.half).contiguous().cast(dtypes.float)
