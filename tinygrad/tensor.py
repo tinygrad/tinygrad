@@ -3649,17 +3649,18 @@ class Tensor(OpMixin):
 
     # contiguous creates the image, and early realize static weights (TODO: test for the static weight)
     if IMAGE == 1:
-      x, w = x.reshape(bs*iy, ix*groups*cin), w.reshape(cout//4, H*W*cin*4)
-
       # hacks for pitch alignment
-      assert isinstance(x.shape[1], int) and isinstance(w.shape[1], int)
-      x, w = x.pad_to(None, round_up(xw:=x.shape[1], 64 // dtsz)), w.pad_to(None, round_up(ww:=w.shape[1], 64 // dtsz))
+      assert isinstance(ix, int) and isinstance(H, int)
+      ALIGN = 64 // dtsz
+      x = x.pad_to(None, None, round_up(ix, ALIGN // math.gcd(groups * cin, ALIGN)), None)
+      w = w.pad_to((None, round_up(H, ALIGN // math.gcd(W * cin * 4, ALIGN))) + (None,) * (w.ndim - 2))
 
       if FLOAT16: x, w = x.cast(dtypes.half).contiguous().cast(dtypes.float), w.cast(dtypes.half).contiguous().cast(dtypes.float)
       else: x, w = x.contiguous(), w.contiguous()
 
-      # undo pitch alignment
-      x, w = x[:, :xw], w[:, :ww]
+      # undo alignment hacks
+      x, w = x[:, :, :ix, :], w[:, :H, ...]
+
     elif IMAGE: x, w = x.cast(base_image_type((bs*iy, ix*groups*cin//4, 4))).contiguous(), w.cast(base_image_type((cout//4, H*W*cin, 4))).contiguous()
     else: x, w = x.contiguous(), w.contiguous()
 
