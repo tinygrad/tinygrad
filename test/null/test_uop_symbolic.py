@@ -929,6 +929,17 @@ class TestSymInfer(unittest.TestCase):
 
     assert sym_infer(UOp.const(dtypes.float, 1.5).bitcast(dtypes.uint), {}) == 1069547520
 
+  def test_sym_infer_deeply_nested(self):
+    # build an expression that exceeds Python's nested parentheses limit for eval
+    # max(x, negative_const) can't be simplified when x can be negative, so nesting compounds
+    a = Variable("a", 1, 8192)
+    b = Variable("b", 0, 8191)
+    expr = a
+    for _ in range(200):
+      expr = (expr * (b + a)).maximum(uconst(-33554432)) * uconst(-1) + a
+    result = sym_infer(expr, {"a": 1, "b": 0})
+    assert isinstance(result, int)
+
 """
 @unittest.skip("not supported on uops yet")
 class TestSymbolicSymbolicOps(unittest.TestCase):
