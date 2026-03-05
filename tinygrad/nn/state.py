@@ -312,7 +312,7 @@ def ggml_data_to_tensor(t: Tensor, n: int, ggml_type: int) -> Tensor:
     return t.unsqueeze(-1).expand((*t.shape,8//b)).idiv(shift_tensor).bitwise_and(bitmask).transpose(-1, -2).flatten(-2)
 
   # map to (number of elements, number of bytes)
-  if (nelements_nbytes := { 2: (32, 18), 3: (32, 20), 8: (32, 34), 12: (256, 144), 13: (256, 176), 14: (256, 210), 39: (32, 17) }.get(ggml_type)) is not None:
+  if (nelements_nbytes := { 2:(32,18), 3:(32,20), 8:(32,34), 12:(256,144), 13:(256,176), 14:(256,210), 39:(32,17) }.get(ggml_type)) is not None:
     blocks = t[:(n//nelements_nbytes[0])*nelements_nbytes[1]].reshape((-1, nelements_nbytes[1])).contiguous()
     if ggml_type == 2: return (q_to_uint8(blocks[:,2:], 4).bitcast(dtypes.int8) - 8) * blocks[:,:2].bitcast(dtypes.float16).cast(dtypes.float32)
     if ggml_type == 3:
@@ -334,7 +334,7 @@ def ggml_data_to_tensor(t: Tensor, n: int, ggml_type: int) -> Tensor:
       qh = blocks[:,16:48].reshape(-1, 1, 32)  # (nblocks, 1, 32) high bits
       ql = blocks[:,48:176].reshape(-1, 4, 32)  # (nblocks, 4, 32) low nibbles
       # for each of 4 groups of 64: low = ql & 0xF, high = ql >> 4; the 5th bit comes from qh with shifting masks
-      u = Tensor([1, 4, 16, 64], dtype=dtypes.uint8).reshape(1, 4, 1)  # bit masks for qh: 1,4,16,64 = bits 0,2,4,6
+      u = Tensor([1, 4, 16, 64], device=blocks.device, dtype=dtypes.uint8).reshape(1, 4, 1)  # bit masks for qh: 1,4,16,64 = bits 0,2,4,6
       qlo = Tensor.stack(ql.bitwise_and(0xF), ql.rshift(4), dim=2).reshape(-1, 8, 32)  # (nblocks, 8, 32) 4-bit values
       qhi = Tensor.stack(qh.bitwise_and(u), qh.bitwise_and(u.lshift(1)), dim=2).reshape(-1, 8, 32)  # high bits
       q = (qlo + (qhi != 0).where(16, 0)).cast(dtypes.float32)
