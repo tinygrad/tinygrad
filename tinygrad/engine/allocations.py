@@ -51,6 +51,8 @@ def _buffer_like(u:UOp) -> UOp:
   return buffer
 
 def replace_contig_with_assign(u:UOp):
+  # can't allocate a buffer without a device (e.g., inside a CALL function body with only PARAMs)
+  if u._device is None: return None
   # if size is 0, remove the contig
   if u.size == 0: return u.src[0]
   # no real contig for DISK/TINYFS tensors, they are left alone
@@ -93,7 +95,11 @@ def transform_precompiled_call(c:UOp) -> UOp|None:
   if c.src[0].op is Ops.SINK: return None
   out = _buffer_like(c)
   fxn = out.param_like(len(c.src)-1).assign(c.src[0]).sink()
-  return out.after(c.replace(src=(fxn,)+tuple(x.contiguous() if x.op is not Ops.AFTER else x for x in c.src[1:])+(out,), dtype=dtypes.void, tag=None))
+  ret = out.after(c.replace(src=(fxn,)+tuple(x.contiguous() if x.op not in {Ops.AFTER, Ops.BIND} else x for x in c.src[1:])+(out,),
+                            dtype=dtypes.void, tag=None))
+  # if the CALL has symbolic shapes, shrink the max-sized output to the actual symbolic shape
+  if any(isinstance(s, UOp) for s in c.shape): ret = ret.shrink(tuple((0, s) for s in c.shape))
+  return ret
 
 # NOTE: adding rules to here is bad. these all need to run before the schedule cache
 pm_early_transform_tensor_graph = PatternMatcher([

@@ -431,7 +431,9 @@ class LocalAddBufferContext:
   opts:tuple|None = None
 
 def debuf(ctx:LocalAddBufferContext, buf:UOp):
-  ret = UOp(Ops.PARAM, buf.dtype.ptr(buf.size), arg=ctx.dg).reshape(buf.shape)
+  ret = UOp(Ops.PARAM, buf.dtype.ptr(buf.size), arg=ctx.dg).reshape(buf.max_shape)
+  # if the buffer has symbolic shape, shrink the max-sized view to the actual shape
+  if buf.max_shape != buf.shape: ret = ret.shrink(tuple((0, s) for s in buf.shape))
   if buf not in ctx.map: ctx.map[buf] = buf
   ctx.dg += 1
   return ret
