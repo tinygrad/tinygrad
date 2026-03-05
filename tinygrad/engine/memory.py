@@ -1,6 +1,4 @@
-from typing import cast
 from collections import defaultdict
-from tinygrad.engine.realize import ExecItem
 from tinygrad.device import Device, Buffer
 from tinygrad.helpers import NO_MEMORY_PLANNER, dedup, DEBUG, round_up
 from tinygrad.uop.ops import UOp, Ops, PatternMatcher, UPat, graph_rewrite, buffers
@@ -9,64 +7,72 @@ from tinygrad.runtime.support.memory import TLSFAllocator
 
 # **************** memory planning ****************
 
+MIN_BLOCK_SIZE = 0x1000
+
+def _memory_plan(allocs:dict) -> tuple[dict, dict[str, int]]:
+  """TLSF suballocation given {buf: (first_step, last_step, device, nbytes)}. Returns (offsets {buf: byte_offset}, arena_sizes {dev: bytes})."""
+  buffer_requests = sorted([((f, True), b) for b, (f, _, _, _) in allocs.items()] +
+                           [((l + 1, False), b) for b, (_, l, _, _) in allocs.items()], key=lambda x: x[0])
+  total_memory = sum(round_up(nb, MIN_BLOCK_SIZE) for _, _, _, nb in allocs.values()) * 2
+
+  offsets:dict = {}
+  peaks:dict[str, tuple[int, TLSFAllocator]] = defaultdict(lambda: (0, TLSFAllocator(total_memory, block_size=MIN_BLOCK_SIZE, lv2_cnt=32)))
+  for (_, is_open), buf in buffer_requests:
+    _, _, dev, nb = allocs[buf]
+    if is_open: offsets[buf] = peaks[dev][1].alloc(round_up(nb, MIN_BLOCK_SIZE))
+    else: peaks[dev][1].free(offsets[buf])
+    peaks[dev] = (max(peaks[dev][0], offsets[buf] + nb), peaks[dev][1])
+
+  arena_sizes = {dev: round_up(peak, MIN_BLOCK_SIZE) for dev, (peak, _) in peaks.items()}
+  return offsets, arena_sizes
+
+# **************** UOp memory plan rewrite ****************
+
+def _collect_bufs(u:UOp) -> list[UOp]:
+  """Recursively collect BUFFER UOps, following through MSELECT/MSTACK for multi-device."""
+  if u.op is Ops.BUFFER: return [u]
+  if u.op in {Ops.MSELECT, Ops.MSTACK}: return [b for s in u.src for b in _collect_bufs(s)]
+  return []
+
+def _can_plan(b:UOp) -> bool:
+  return isinstance(b.device, str) and not isinstance(b.dtype, ImageDType) and hasattr(Device[b.device].allocator, "_offset")
+
 def memory_plan_rewrite(linear:UOp, external_bufs:set[UOp]=frozenset()) -> tuple[UOp, dict[UOp, UOp]]:
   if NO_MEMORY_PLANNER: return linear, {}
-  # phase 1: identify internal buffers & compute lifetimes
+
+  # buffers we must not touch: externally visible, already realized, or part of a BUFFER_VIEW op
+  skip = external_bufs | {b for si in linear.src if si.src[0].op is Ops.BUFFER_VIEW for b in si.src[1:]}
+
+  # compute lifetimes for all plannable internal buffers
   first_appearance:dict[UOp, int] = {}
   last_appearance:dict[UOp, int] = {}
-  # skip buffers in BUFFER_VIEW AST operations (view ops expect BUFFER arg format)
-  view_bufs:set[UOp] = set()
-  for si in linear.src:
-    if si.src[0].op is Ops.BUFFER_VIEW:
-      for b in si.src[1:]: view_bufs.add(b)
-  def _collect_bufs(u:UOp) -> list[UOp]:
-    """Recursively collect BUFFER UOps from MSELECT/MSTACK nodes."""
-    if u.op is Ops.BUFFER: return [u]
-    if u.op in {Ops.MSELECT, Ops.MSTACK}: return [b for s in u.src for b in _collect_bufs(s)]
-    return []
   for i, si in enumerate(linear.src):
-    for src_uop in si.src[1:]:
-      for buf_uop in _collect_bufs(src_uop):
-        if buf_uop in external_bufs: continue  # user-visible buffer, skip
-        if buf_uop in view_bufs: continue  # part of view op, skip
-        if buf_uop in buffers: continue  # already realized, skip
-        if isinstance(buf_uop.dtype, ImageDType): continue
-        if isinstance(buf_uop.device, tuple): continue  # multi-device buffers can't be memory planned
-        if not hasattr(Device[buf_uop.device].allocator, "_offset"): continue
-        if buf_uop not in first_appearance: first_appearance[buf_uop] = i
-        last_appearance[buf_uop] = i
+    for b in [b for src in si.src[1:] for b in _collect_bufs(src) if b not in skip and b not in buffers and _can_plan(b)]:
+      if b not in first_appearance: first_appearance[b] = i
+      last_appearance[b] = i
   if not first_appearance: return linear, {}
 
-  # phase 2: TLSF allocation per device
-  min_block_size = 0x1000
-  buffer_requests = sorted([((first_appearance[b], True), b) for b in first_appearance] +
-                           [((last_appearance[b] + 1, False), b) for b in first_appearance], key=lambda x: x[0])
-  total_memory = sum(round_up(b.arg * b.dtype.itemsize, min_block_size) for b in first_appearance) * 2
-  tlsf_offsets:dict[UOp, int] = {}
-  peaks:dict[str, tuple[int, TLSFAllocator]] = defaultdict(lambda: (0, TLSFAllocator(total_memory, block_size=min_block_size, lv2_cnt=32)))
-  for (_, is_open), buf_uop in buffer_requests:
-    dev = buf_uop.device
-    nbytes = buf_uop.arg * buf_uop.dtype.itemsize
-    if is_open: tlsf_offsets[buf_uop] = peaks[dev][1].alloc(round_up(nbytes, min_block_size))
-    else: peaks[dev][1].free(tlsf_offsets[buf_uop])
-    peaks[dev] = (max(peaks[dev][0], tlsf_offsets[buf_uop] + nbytes), peaks[dev][1])
+  # allocate
+  allocs = {b: (first_appearance[b], last_appearance[b], b.device, b.arg * b.dtype.itemsize) for b in first_appearance}
+  offsets, arena_sizes = _memory_plan(allocs)
 
-  # phase 3: build replace_map with BUFFER_VIEW into shared arenas
-  arenas = {dev: UOp.new_buffer(dev, round_up(peak, min_block_size), dtypes.int8) for dev, (peak, _) in peaks.items()}
+  # build replace_map: each buffer becomes a BUFFER_VIEW into a shared per-device arena
+  arenas = {dev: UOp.new_buffer(dev, sz, dtypes.int8) for dev, sz in arena_sizes.items()}
   replace_map:dict[UOp, UOp] = {}
-  for buf_uop, offset in tlsf_offsets.items():
-    # offset is in bytes, BUFFER_VIEW arg[1] is in elements
+  for buf_uop, offset in offsets.items():
     assert offset % buf_uop.dtype.itemsize == 0, f"offset {offset} not aligned to {buf_uop.dtype.itemsize}"
     replace_map[buf_uop] = UOp(Ops.BUFFER_VIEW, buf_uop.dtype, (arenas[buf_uop.device],), (buf_uop.arg, offset // buf_uop.dtype.itemsize))
 
   if DEBUG >= 1:
-    omem = sum(round_up(b.arg * b.dtype.itemsize, min_block_size) for b in first_appearance) / 1e6
-    nmem = sum(round_up(peak, min_block_size) for peak, _ in peaks.values()) / 1e6
+    omem = sum(round_up(nb, MIN_BLOCK_SIZE) for _, _, _, nb in allocs.values()) / 1e6
+    nmem = sum(arena_sizes.values()) / 1e6
     if omem != nmem: print(f"memory reduced from {omem:.2f} MB -> {nmem:.2f} MB, {len(first_appearance)} -> {len(arenas)} bufs")
 
-  # phase 4: apply via graph_rewrite
+  # apply
   pm_memory_plan = PatternMatcher([(UPat(Ops.BUFFER, name="b"), lambda ctx, b: ctx.get(b))])
   return graph_rewrite(linear, pm_memory_plan, ctx=replace_map, walk=True, name="memory plan"), replace_map
+
+# **************** Buffer memory planner ****************
 
 def _internal_memory_planner(buffers:list[list[Buffer]], noopt_buffers=None, ignore_checks=False, debug_prefix="") -> dict[Buffer, Buffer]:
   if NO_MEMORY_PLANNER: return {}
@@ -79,38 +85,34 @@ def _internal_memory_planner(buffers:list[list[Buffer]], noopt_buffers=None, ign
       last_appearance[buf.base] = i
       buf_to_opt.add(buf)
 
-  # Sort buffer operations in timeline order. Two events: buffer is allocated or buffer is freed.
-  buffer_requests = sorted([((first_appearance[buf], True), buf) for buf in first_appearance.keys()] + \
-                           [((last_appearance[buf] + 1, False), buf) for buf in first_appearance.keys()], key=lambda x: x[0])
-  total_memory = sum(round_up(buf.nbytes, min_block_size:=0x1000) for buf in first_appearance.keys()) * 2 # *2 for fragmentation (which is about 15%)
+  # split into suballocatable (TLSF) vs full-buffer reuse (images, etc)
+  def _can_suballoc(buf:Buffer) -> bool: return hasattr(Device[buf.device].allocator, "_offset") and not isinstance(buf.dtype, ImageDType)
+  suballoc = {b: (first_appearance[b], last_appearance[b], b.device, b.nbytes) for b in first_appearance if _can_suballoc(b)}
+  reuse_bufs = [b for b in first_appearance if not _can_suballoc(b)]
 
-  # Try to suballocate from a shared buffer managed by global_planner using TLSFAllocator.
-  # Also track buffer replacements for buffers that do not support suballocation.
-  buffer_replace:dict[Buffer, tuple[Buffer|None, int|None]] = {}
-  reuse_buffers:dict[tuple, list[Buffer]] = defaultdict(list)
-  global_planner:dict[str, tuple[int, TLSFAllocator]] = defaultdict(lambda: (0, TLSFAllocator(total_memory, block_size=min_block_size, lv2_cnt=32)))
-  for (_, is_open_ev), buf in buffer_requests:
-    # Check if suballocation is possible for the given buffer and device.
-    if hasattr(Device[buf.device].allocator, "_offset") and not isinstance(buf.dtype, ImageDType):
-      if is_open_ev: buffer_replace[buf] = (None, global_planner[buf.device][1].alloc(round_up(buf.nbytes, 0x1000)))
-      else: global_planner[buf.device][1].free(cast(int, buffer_replace[buf][1]))
-      global_planner[buf.device] = (max(global_planner[buf.device][0], buffer_replace[buf][1] + buf.nbytes), global_planner[buf.device][1])
-    else:
-      key = (buf.device, buf.dtype, buf.options, buf.nbytes)
-      if is_open_ev: buffer_replace[buf] = (reuse_buffers[key].pop(), None) if key in reuse_buffers and len(reuse_buffers[key]) > 0 else (buf, None)
-      else: reuse_buffers[key].append(cast(Buffer, buffer_replace[buf][0]))
+  # TLSF suballocation
+  offsets, arena_sizes = _memory_plan(suballoc)
+  global_buffers = {dev: Buffer(dev, sz, dtypes.int8) for dev, sz in arena_sizes.items()}
 
-  # Allocate global buffers based on the memory planner.
-  global_buffers = {dev: Buffer(dev, round_up(sz, 0x1000), dtypes.int8) for dev, (sz, _) in global_planner.items()}
-  buffer_resolve:dict[Buffer, tuple[Buffer, int|None]] = {buf: (base or global_buffers[buf.device], off) for buf,(base,off) in buffer_replace.items()}
+  # full-buffer reuse for non-suballocatable buffers
+  reuse_pool:dict[tuple, list[Buffer]] = defaultdict(list)
+  reuse_requests = sorted([((first_appearance[b], True), b) for b in reuse_bufs] +
+                          [((last_appearance[b] + 1, False), b) for b in reuse_bufs], key=lambda x: x[0])
+  reuse_map:dict[Buffer, Buffer] = {}
+  for (_, is_open), buf in reuse_requests:
+    key = (buf.device, buf.dtype, buf.options, buf.nbytes)
+    if is_open: reuse_map[buf] = reuse_pool[key].pop() if reuse_pool[key] else buf
+    else: reuse_pool[key].append(reuse_map[buf])
 
-  # Assign buffers. First, assign full buffers (not sub-buffers).
+  # assign base buffers
   assigned:dict[Buffer, Buffer] = {}
-  for buf, (base, off) in buffer_resolve.items():
-    if buf != base:
-      assigned[buf] = base if off is None else Buffer(buf.device, buf.size, buf.dtype, base=base, offset=off)
+  for buf in first_appearance:
+    if buf in offsets:
+      assigned[buf] = Buffer(buf.device, buf.size, buf.dtype, base=global_buffers[buf.device], offset=offsets[buf])
+    elif buf in reuse_map and reuse_map[buf] is not buf:
+      assigned[buf] = reuse_map[buf]
 
-  # Now assign sub-buffers.
+  # assign sub-buffers
   for buf in buf_to_opt:
     if buf._base is not None:
       assigned[buf] = Buffer(buf.device, buf.size, buf.dtype, base=(pbuf:=assigned.get(buf.base, buf.base)).base, offset=pbuf.offset+buf.offset)
@@ -121,4 +123,3 @@ def _internal_memory_planner(buffers:list[list[Buffer]], noopt_buffers=None, ign
     if omem != nmem: print(f"{debug_prefix}memory reduced from {omem:.2f} MB -> {nmem:.2f} MB,", f"{len(ak)} -> {len(av)} bufs")
 
   return assigned
-
