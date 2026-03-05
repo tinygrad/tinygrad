@@ -6,7 +6,7 @@ from tinygrad.viz.serve import TCPServerWithReuse, HTTPRequestHandler
 
 class SimpleTokenizer:
   def __init__(self, normal_tokens:dict[str, int], special_tokens:dict[str, int], preset:str="llama3"):
-    if preset not in ("llama3","llama-v3","llama-bpe","qwen2","olmo"): raise ValueError(f"Invalid tokenizer preset '{preset}'")
+    if preset not in ("llama3","llama-v3","llama-bpe","qwen2","qwen35","olmo"): raise ValueError(f"Invalid tokenizer preset '{preset}'")
     # https://github.com/openai/gpt-2/blob/9b63575ef42771a015060c964af2c3da4cf7c8ab/src/encoder.py#L9
     bs = [*range(33, 127), *range(161, 173), *range(174, 256)]  # bytes that map to themselves
     self._byte_decoder = {chr(b): b for b in bs} | {chr(256+i): b for i,b in enumerate(b for b in range(256) if b not in bs)}
@@ -54,11 +54,11 @@ class SimpleTokenizer:
   def decode(self, ids:list[int]) -> str: return b''.join(self._tok2bytes[tid] for tid in ids).decode(errors='replace')
   def role(self, role:str):
     if self.preset == 'olmo': return self.encode("<|" + role + "|>\n")  # OLMoE Instruct format
-    if self.preset == 'qwen2': return self.encode("<|im_start|>" + role + "\n")
+    if self.preset in ('qwen2', 'qwen35'): return self.encode("<|im_start|>" + role + "\n")
     return self.encode("<|start_header_id|>" + role + "<|end_header_id|>\n\n")
   def end_turn(self, eos_id:int):
     if self.preset == 'olmo': return self.encode("\n")
-    if self.preset == 'qwen2': return [eos_id] + self.encode("\n")
+    if self.preset in ('qwen2', 'qwen35'): return [eos_id] + self.encode("\n")
     return [eos_id]
 
 @functools.cache
@@ -75,29 +75,36 @@ class ExpertWeights:
     # sel: (B, T, k), x: (B, T, 1, in) or (B, T, k, in) -> output: (B, T, k, out)
     return (x.unsqueeze(-2) @ self.weight[sel].transpose(-1, -2)).squeeze(-2)
 
-def apply_rope(x:Tensor, freqs_cis:Tensor) -> Tensor:
-  assert x.shape[-1] % 2 == 0
+def apply_rope(x:Tensor, freqs_cis:Tensor, rope_dim:int=0) -> Tensor:
+  x_rot, x_pass = (x[..., :rope_dim], x[..., rope_dim:]) if rope_dim and rope_dim < x.shape[-1] else (x, None)
   cos, sin = freqs_cis.reshape(1, 1, x.shape[2], -1).chunk(2, dim=-1)
-  x1, x2 = x.chunk(2, dim=-1)
-  return (x1 * cos - x2 * sin).cat(x2 * cos + x1 * sin, dim=-1)
+  x1, x2 = x_rot.chunk(2, dim=-1)
+  rot = (x1 * cos - x2 * sin).cat(x2 * cos + x1 * sin, dim=-1)
+  return rot.cat(x_pass, dim=-1) if x_pass is not None else rot
+
+def write_after(dst:Tensor, val:Tensor, result:Tensor) -> Tensor:
+  """Return result, but ensure dst.assign(val) happens first."""
+  return Tensor((x:=result.uop.after(dst.uop.assign(val.uop))), device=x.device)
 
 class TransformerBlock:
   def __init__(self, dim:int, hidden_dim:int, n_heads:int, n_kv_heads:int, norm_eps:float, head_dim:int, rope_theta:float,
-               max_context:int=0, qk_norm:int=0, num_experts:int=0, num_experts_per_tok:int=0):
+               max_context:int=0, qk_norm:int=0, num_experts:int=0, num_experts_per_tok:int=0, rope_dim:int=0, attn_gate:bool=False):
     self.n_heads      = n_heads
     self.n_kv_heads   = n_kv_heads
     self.head_dim     = head_dim
     self.rope_theta   = rope_theta
     self.max_context  = max_context
     self.qk_norm      = qk_norm
+    self.rope_dim     = rope_dim
+    self.attn_gate    = attn_gate
 
     # --- attention projections (all linear, bias-free) ------------------
-    q_proj_out       = self.head_dim * n_heads
+    q_proj_out       = self.head_dim * n_heads * (2 if attn_gate else 1)
     kv_proj_out      = self.head_dim * n_kv_heads
     self.attn_q      = nn.Linear(dim, q_proj_out,  bias=False)
     self.attn_k      = nn.Linear(dim, kv_proj_out, bias=False)
     self.attn_v      = nn.Linear(dim, kv_proj_out, bias=False)
-    self.attn_output = nn.Linear(q_proj_out, dim,  bias=False)
+    self.attn_output = nn.Linear(self.head_dim * n_heads, dim,  bias=False)
 
     # --- RMSNorms --------------------------------------------------------
     self.attn_norm   = nn.RMSNorm(dim, norm_eps)
@@ -123,30 +130,31 @@ class TransformerBlock:
     if self.qk_norm and self.qk_norm != self.head_dim: q, k = self.attn_q_norm(q), self.attn_k_norm(k)
 
     B, T, _ = x.shape
-    q = q.reshape(B, T, self.n_heads,    self.head_dim).transpose(1, 2)  # (B,H,T,Hd)
+    if self.attn_gate:
+      q = q.reshape(B, T, self.n_heads, self.head_dim * 2)
+      q, gate = q[..., :self.head_dim].transpose(1, 2), q[..., self.head_dim:].transpose(1, 2)  # (B,H,T,Hd) each
+    else:
+      q = q.reshape(B, T, self.n_heads,    self.head_dim).transpose(1, 2)  # (B,H,T,Hd)
     k = k.reshape(B, T, self.n_kv_heads, self.head_dim).transpose(1, 2)  # (B,KvH,T,Hd)
     v = v.reshape(B, T, self.n_kv_heads, self.head_dim).transpose(1, 2)  # (B,KvH,T,Hd)
     if self.qk_norm == self.head_dim: q, k = self.attn_q_norm(q), self.attn_k_norm(k)
 
-    freqs_cis = precompute_freqs_cis(self.head_dim, self.max_context, self.rope_theta)[start_pos:start_pos+T]
-    q = apply_rope(q, freqs_cis)
-    k = apply_rope(k, freqs_cis)
+    rope_d = self.rope_dim or self.head_dim
+    freqs_cis = precompute_freqs_cis(rope_d, self.max_context, self.rope_theta)[start_pos:start_pos+T]
+    q = apply_rope(q, freqs_cis, self.rope_dim)
+    k = apply_rope(k, freqs_cis, self.rope_dim)
 
     # TODO: fix assign to behave like this
-    assigned_kv = self.cache_kv.uop.after(self.cache_kv[:, :, :, start_pos:start_pos+T, :].uop.assign(Tensor.stack(k, v).contiguous().uop))
-    tensor_assigned_kv = Tensor(assigned_kv, device=assigned_kv.device)
-    k = tensor_assigned_kv[0, :, :, 0:start_pos+T, :]
-    v = tensor_assigned_kv[1, :, :, 0:start_pos+T, :]
-
-    #self.cache_kv[:, :, :, start_pos:start_pos+T, :].assign(Tensor.stack(k, v))
-    #k = self.cache_kv[0, :, :, 0:start_pos+T, :]
-    #v = self.cache_kv[1, :, :, 0:start_pos+T, :]
+    cache = write_after(self.cache_kv[:, :, :, start_pos:start_pos+T, :], Tensor.stack(k, v).contiguous(), self.cache_kv)
+    k = cache[0, :, :, 0:start_pos+T, :]
+    v = cache[1, :, :, 0:start_pos+T, :]
 
     # NOTE: this mask is causal_lower_right, not the causal_upper_left generated by is_casual = True
     # TODO: this if statement should be removed and it shouldn't generate extra kernels
     mask = Tensor.full((1, 1, T, start_pos+T), float("-inf"), dtype=x.dtype, device=x.device).triu(start_pos+1)
     attn = q.scaled_dot_product_attention(k, v, attn_mask=mask, enable_gqa=True)     # (B,H,T,Hd)
     attn = attn.transpose(1, 2).reshape(B, T, -1)                                    # back to (B,T,D)
+    if self.attn_gate: attn = attn * gate.transpose(1, 2).reshape(B, T, -1).sigmoid()
     attn = self.attn_output(attn)
     return x + attn
 
@@ -169,11 +177,73 @@ class TransformerBlock:
       self.cache_kv = Tensor.zeros(2, x.shape[0], self.n_kv_heads, self.max_context, self.head_dim, device=x.device).clone()
     return self._feed_forward(self._attention(x, start_pos)).contiguous()
 
+class GatedDeltaNetBlock:
+  def __init__(self, dim:int, hidden_dim:int, norm_eps:float, n_heads:int, head_dim:int, conv_kernel:int):
+    self.n_heads, self.head_dim, self.conv_kernel = n_heads, head_dim, conv_kernel
+    inner = n_heads * head_dim
+
+    self.attn_norm  = nn.RMSNorm(dim, norm_eps)
+    self.ffn_norm   = nn.RMSNorm(dim, norm_eps)  # loaded from post_attention_norm
+    self.ssm_norm   = nn.RMSNorm(head_dim, norm_eps)
+
+    self.attn_qkv   = nn.Linear(dim, inner * 3, bias=False)
+    self.attn_gate  = nn.Linear(dim, inner, bias=False)
+    self.ssm_alpha  = nn.Linear(dim, n_heads, bias=False)
+    self.ssm_beta   = nn.Linear(dim, n_heads, bias=False)
+    self.ssm_out    = nn.Linear(inner, dim, bias=False)
+    self.ssm_a      = Tensor.zeros(n_heads)
+    self.ssm_dt     = Tensor.zeros(n_heads)
+    self.ssm_conv1d = Tensor.zeros(inner * 3, conv_kernel)
+
+    self.ffn_gate   = nn.Linear(dim, hidden_dim, bias=False)
+    self.ffn_up     = nn.Linear(dim, hidden_dim, bias=False)
+    self.ffn_down   = nn.Linear(hidden_dim, dim, bias=False)
+
+  def __call__(self, x:Tensor, start_pos:int|UOp):
+    B = x.shape[0]
+    inner = self.n_heads * self.head_dim
+    # squeeze T dimension (always 1 for recurrent blocks) so all shapes are concrete
+    x_s = x[:, 0]                                                                      # (B,D)
+    x_norm = self.attn_norm(x_s)
+
+    # input projections
+    qkv = self.attn_qkv(x_norm)                                                       # (B,inner*3)
+    z = self.attn_gate(x_norm).reshape(B, self.n_heads, self.head_dim)                 # (B,H,Hd)
+    beta = self.ssm_beta(x_norm).sigmoid()                                             # (B,H)
+    g = (-self.ssm_a.exp() * (self.ssm_alpha(x_norm) + self.ssm_dt).softplus())       # (B,H)
+
+    # causal depthwise conv1d
+    if not hasattr(self, "conv_state"):
+      self.conv_state = Tensor.zeros(B, inner * 3, self.conv_kernel - 1, device=x.device).clone()
+    conv_window = self.conv_state.cat(qkv.unsqueeze(-1), dim=-1)                       # (B,C,K)
+    qkv_conv = (conv_window * self.ssm_conv1d.reshape(1, -1, self.conv_kernel)).sum(-1).silu().contiguous()  # (B,C)
+    qkv_conv = write_after(self.conv_state, conv_window[:, :, 1:].contiguous(), qkv_conv)
+
+    # split Q, K, V, L2 normalize, scale Q
+    q, k, v = [qkv_conv[:, i*inner:(i+1)*inner].reshape(B, self.n_heads, self.head_dim) for i in range(3)]
+    q, k = q.normalize(dim=-1) * (self.head_dim ** -0.5), k.normalize(dim=-1)
+
+    # gated delta rule recurrence (single token)
+    if not hasattr(self, "ssm_state"):
+      self.ssm_state = Tensor.zeros(B, self.n_heads, self.head_dim, self.head_dim, device=x.device).clone()
+
+    state = self.ssm_state * g.exp().unsqueeze(-1).unsqueeze(-1)                       # (B,H,Hd,Hd) decay
+    delta = (v - (state * k.unsqueeze(-1)).sum(-2)) * beta.unsqueeze(-1)               # (B,H,Hd)    prediction error
+    state = (state + k.unsqueeze(-1) * delta.unsqueeze(-2)).contiguous()                # (B,H,Hd,Hd) write
+
+    o = (state * q.unsqueeze(-1)).sum(-2).contiguous()                                 # (B,H,Hd)    read
+    o = write_after(self.ssm_state, state, o)
+
+    # gated output: RMSNorm(o) * SiLU(z), then project + residual + FFN
+    h = x_s + self.ssm_out((self.ssm_norm(o) * z.silu()).reshape(B, -1))
+    h_norm = self.ffn_norm(h)
+    return (h + self.ffn_down(self.ffn_gate(h_norm).silu().contiguous() * self.ffn_up(h_norm))).reshape(B, 1, -1).contiguous()
+
 class Transformer:
   def __init__(self, *, num_blocks, dim, hidden_dim, n_heads, n_kv_heads, norm_eps, vocab_size, head_dim:int, rope_theta:float,
-               max_context:int=0, qk_norm:int=0, num_experts:int=0, num_experts_per_tok:int=0):
-    self.blk = [TransformerBlock(dim, hidden_dim, n_heads, n_kv_heads, norm_eps, head_dim, rope_theta, max_context, qk_norm,
-                                 num_experts, num_experts_per_tok) for _ in range(num_blocks)]
+               max_context:int=0, qk_norm:int=0, num_experts:int=0, num_experts_per_tok:int=0, blk:list|None=None):
+    self.blk = blk if blk is not None else [TransformerBlock(dim, hidden_dim, n_heads, n_kv_heads, norm_eps, head_dim, rope_theta, max_context,
+                                                              qk_norm, num_experts, num_experts_per_tok) for _ in range(num_blocks)]
     self.token_embd  = nn.Embedding(vocab_size, dim)
     self.output_norm = nn.RMSNorm(dim, norm_eps)
     self.output = nn.Linear(dim, vocab_size, bias=False)
@@ -211,14 +281,32 @@ class Transformer:
         if 'attn_q.weight' in name: state_dict[name] = state_dict[name].rearrange("(n h two) d -> (n two h) d", n=n_heads, two=2)
         if 'attn_k.weight' in name: state_dict[name] = state_dict[name].rearrange("(n h two) d -> (n two h) d", n=n_kv_heads, two=2)
 
-    model = Transformer(num_blocks=kv[f'{arch}.block_count'], dim=kv[f'{arch}.embedding_length'],
-                        hidden_dim=kv.get(f'{arch}.expert_feed_forward_length', kv[f'{arch}.feed_forward_length']),
-                        n_heads=n_heads, n_kv_heads=n_kv_heads, norm_eps=kv[f'{arch}.attention.layer_norm_rms_epsilon'],
-                        vocab_size=len(kv['tokenizer.ggml.tokens']),
-                        head_dim=kv.get(f'{arch}.attention.key_length', kv[f'{arch}.embedding_length'] // n_heads),
-                        rope_theta=kv[f'{arch}.rope.freq_base'], max_context=max_context,
-                        qk_norm=int(state_dict['blk.0.attn_q_norm.weight'].shape[0]) if 'blk.0.attn_q_norm.weight' in state_dict else 0,
-                        num_experts=kv.get(f'{arch}.expert_count', 0), num_experts_per_tok=kv.get(f'{arch}.expert_used_count', 0))
+    dim, hidden_dim = kv[f'{arch}.embedding_length'], kv.get(f'{arch}.expert_feed_forward_length', kv[f'{arch}.feed_forward_length'])
+    norm_eps = kv[f'{arch}.attention.layer_norm_rms_epsilon']
+    head_dim = kv.get(f'{arch}.attention.key_length', dim // n_heads)
+    rope_theta = kv[f'{arch}.rope.freq_base']
+    qk_norm = next((int(v.shape[0]) for k, v in state_dict.items() if k.endswith('.attn_q_norm.weight')), 0)
+
+    if arch == 'qwen35':
+      full_attn_interval, num_blocks = kv[f'{arch}.full_attention_interval'], kv[f'{arch}.block_count']
+      ssm_n_heads, ssm_head_dim, conv_kernel = kv[f'{arch}.ssm.group_count'], kv[f'{arch}.ssm.state_size'], kv[f'{arch}.ssm.conv_kernel']
+      rope_dim = kv[f'{arch}.rope.dimension_count']
+      blk: list = []
+      for i in range(num_blocks):
+        if (i + 1) % full_attn_interval == 0:
+          blk.append(TransformerBlock(dim, hidden_dim, n_heads, n_kv_heads, norm_eps, head_dim, rope_theta, max_context,
+                                      qk_norm=qk_norm, rope_dim=rope_dim, attn_gate=True))
+        else:
+          blk.append(GatedDeltaNetBlock(dim, hidden_dim, norm_eps, ssm_n_heads, ssm_head_dim, conv_kernel))
+      state_dict = {k.replace('post_attention_norm', 'ffn_norm').replace('ssm_dt.bias', 'ssm_dt').replace('ssm_conv1d.weight', 'ssm_conv1d'):
+                    v for k, v in state_dict.items()}
+    else:
+      blk = None
+
+    model = Transformer(num_blocks=kv[f'{arch}.block_count'], dim=dim, hidden_dim=hidden_dim, n_heads=n_heads, n_kv_heads=n_kv_heads,
+                        norm_eps=norm_eps, vocab_size=len(kv['tokenizer.ggml.tokens']), head_dim=head_dim, rope_theta=rope_theta,
+                        max_context=max_context, qk_norm=qk_norm,
+                        num_experts=kv.get(f'{arch}.expert_count', 0), num_experts_per_tok=kv.get(f'{arch}.expert_used_count', 0), blk=blk)
     nn.state.load_state_dict(model, state_dict, verbose=False, consume=True, realize=False)  # NOTE: rope_freqs.weight (32,) is unused
     # NOTE: without this contiguous, it unpacks the weights from the model every time. we shouldn't need this, but for now it's faster
     if realize:
@@ -233,6 +321,12 @@ class Transformer:
     t = Tensor(tokens + [0] * (self.max_context - len(tokens)), dtype="int32").reshape(1, self.max_context)
     # recompute start_pos from what's currently valid in the kv cache
     start_pos = sum(1 for _ in itertools.takewhile(lambda ab: ab[0] == ab[1], zip(tokens, self._cached_tokens)))
+    # recurrent layers require T=1, so prefill token-by-token (skip the last token, it's handled by the main loop)
+    if any(isinstance(b, GatedDeltaNetBlock) for b in self.blk):
+      for i in range(start_pos, len(tokens) - 1):
+        sp, nt = v_start_pos.bind(i), v_toks.bind(1)
+        self(t[:, sp:sp+nt], sp).item()
+      start_pos = max(len(tokens) - 1, 0)
     while len(tokens) < self.max_context:
       sp, nt = v_start_pos.bind(start_pos), v_toks.bind(len(tokens) - start_pos)
       t[:, sp+nt:sp+nt+1] = out = self(t[:, sp:sp+nt], sp)
@@ -251,6 +345,7 @@ models = {
   "qwen3:1.7b": "https://huggingface.co/unsloth/Qwen3-1.7B-GGUF/resolve/main/Qwen3-1.7B-Q4_K_M.gguf",
   "qwen3:8b": "https://huggingface.co/Qwen/Qwen3-8B-GGUF/resolve/main/Qwen3-8B-Q4_K_M.gguf",
   "qwen3:30b-a3b": "https://huggingface.co/Qwen/Qwen3-30B-A3B-GGUF/resolve/main/Qwen3-30B-A3B-Q4_K_M.gguf",
+  "qwen3.5:0.8b": "https://huggingface.co/unsloth/Qwen3.5-0.8B-GGUF/resolve/main/Qwen3.5-0.8B-Q4_K_M.gguf",
   "olmoe": "https://huggingface.co/allenai/OLMoE-1B-7B-0924-Instruct-GGUF/resolve/main/olmoe-1b-7b-0924-instruct-q4_k_m.gguf",
 }
 
