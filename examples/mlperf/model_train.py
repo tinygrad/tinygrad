@@ -1478,13 +1478,14 @@ def train_llama3():
   step_times = []
   while i < MAX_STEPS:
     GlobalCounters.reset()
+    actual_gbs = GBS if i >= 2 else BS
     if getenv("TRAIN", 1):
       profile_marker(f"train @ {i}")
       st = time.perf_counter()
 
       stopped = False
       losses, data_time, dev_time = [], 0, 0
-      for _ in range(grad_acc if i >= 3 else 1):
+      for _ in range(grad_acc if i >= 2 else 1):
         ist = time.perf_counter()
         try: tokens = next(train_iter)
         except StopIteration:
@@ -1509,7 +1510,7 @@ def train_llama3():
       if BENCHMARK: step_times.append(step_time)
 
       i += 1
-      sequences_seen += GBS
+      sequences_seen += actual_gbs
 
       mem_gb = GlobalCounters.mem_used / 1e9
       gflops = GlobalCounters.global_ops / 1e9 / dev_time
@@ -1552,7 +1553,7 @@ def train_llama3():
         print(f"epoch global_ops: {GlobalCounters.global_ops:_}, "
               f"epoch global_mem: {GlobalCounters.global_mem:_}")
 
-    if (sequences_seen % EVAL_FREQ == 0 and (i != 1 or EVAL_FREQ == 1)) or (BENCHMARK and i == BENCHMARK):
+    if (sequences_seen // EVAL_FREQ != (sequences_seen - actual_gbs) // EVAL_FREQ and (i != 1 or EVAL_FREQ == 1)) or (BENCHMARK and i == BENCHMARK):
       if EVAL_BS == 0: return
       tqdm.write(f"evaluating after {sequences_seen} sequences")
       profile_marker(f"eval @ {i}")

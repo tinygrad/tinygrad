@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field
-from tinygrad.uop.ops import UOp, UPat, PatternMatcher, Ops, GroupOp, graph_rewrite, identity_element, track_rewrites
+from tinygrad.uop.ops import UOp, UPat, PatternMatcher, Ops, GroupOp, graph_rewrite, track_rewrites
 from tinygrad.dtype import dtypes, ImageDType
-from tinygrad.helpers import prod, DEBUG, argsort, VIZ, pluralize, FLOAT16
+from tinygrad.helpers import prod, DEBUG, VIZ, pluralize
 
 @dataclass
 class AllocCtx:
@@ -51,6 +51,8 @@ def _buffer_like(u:UOp) -> UOp:
   return buffer
 
 def replace_contig_with_assign(u:UOp):
+  # can't allocate a buffer without a device (e.g., inside a CALL function body with only PARAMs)
+  if u._device is None: return None
   # if size is 0, remove the contig
   if u.size == 0: return u.src[0]
   # no real contig for DISK/TINYFS tensors, they are left alone
@@ -62,15 +64,6 @@ def replace_assign_with_contig(u:UOp):
   while assigned_to.op in {Ops.ASSIGN, Ops.BITCAST, Ops.AFTER}: assigned_to = assigned_to.src[0].base
   if assigned_to.op is not Ops.BUFFER:
     return u.src[1].contiguous(tag=u.tag)
-
-def found_contiguous(ctx:dict[UOp, UOp], contig:UOp, src:UOp):
-  if (x:=src).op is Ops.CAST and x.dtype == dtypes.half and FLOAT16: x, contig = x.src[0], contig.cast(dtypes.float)
-  while x is not x.base:
-    if x.op is Ops.PERMUTE: contig = contig.permute(argsort(x.marg))
-    elif x.op is Ops.RESHAPE: contig = contig.reshape(x.src[0].shape)
-    else: return None
-    x = x.src[0]
-  ctx[x] = contig
 
 def contiguous_mops_to_view(c:UOp):
   """CONTIGUOUS(MOPS(BUFFER)) → CONTIGUOUS(BUFFER_VIEW) when movement ops collapse to a contiguous range."""
@@ -97,25 +90,24 @@ def contiguous_mops_to_view(c:UOp):
   # NOTE: this contiguous is removed because this BUFFER_VIEW/RESHAPE has_buffer_identity
   return UOp(Ops.BUFFER_VIEW, src.dtype, (buf,), (src.size, offset)).reshape(src.shape).contiguous(tag=c.tag)
 
-
 def transform_precompiled_call(c:UOp) -> UOp|None:
   if not c.arg.precompile: return None
   if c.src[0].op is Ops.SINK: return None
   out = _buffer_like(c)
+  input_buffers = tuple(x.contiguous() if x.op not in {Ops.AFTER, Ops.BIND} else x for x in c.src[1:])
   fxn = out.param_like(len(c.src)-1).assign(c.src[0]).sink()
-  return out.after(c.replace(src=(fxn,)+tuple(x.contiguous() if x.op is not Ops.AFTER else x for x in c.src[1:])+(out,), dtype=dtypes.void, tag=None))
+  ret = out.after(c.replace(src=(fxn, *input_buffers, out), dtype=dtypes.void, tag=None))
+  # if the CALL has symbolic shapes, shrink the max-sized output to the actual symbolic shape
+  if any(isinstance(s, UOp) for s in c.shape): ret = ret.shrink(tuple((0, s) for s in c.shape))
+  return ret
 
+# NOTE: adding rules to here is bad. these all need to run before the schedule cache
 pm_early_transform_tensor_graph = PatternMatcher([
   # transform precompiled CALLs
   (UPat(Ops.CALL, name="c"), transform_precompiled_call),
 
   # CONTIGUOUS(MOPS(BUFFER/BUFFER_VIEW)) → CONTIGUOUS(BUFFER_VIEW) when movement ops collapse to contiguous range
   (UPat(Ops.CONTIGUOUS, src=(UPat(GroupOp.Movement),), name="c"), contiguous_mops_to_view),
-
-  # *** CONTIGUOUS replacement hack for openpilot ***
-  (UPat(Ops.CONTIGUOUS, src=(UPat((*GroupOp.Movement, Ops.CAST), name="src"),), name="contig"), found_contiguous),
-  # replace ALU sources with contiguous versions found above
-  (UPat(GroupOp.ALU, name="alu"), lambda ctx,alu: alu.replace(src=new_src) if (new_src:=tuple(ctx.get(s, s) for s in alu.src)) != alu.src else None),
 
   # add CONTIGUOUS to tagged UOps
   (UPat(GroupOp.All-{Ops.CONTIGUOUS, Ops.ASSIGN}, name="x"), lambda x: x.rtag(None).contiguous(tag=x.tag) if x.tag else x.replace(tag=None)),
@@ -126,15 +118,8 @@ pm_early_transform_tensor_graph = PatternMatcher([
   (UPat(Ops.ASSIGN, name="u"), replace_assign_with_contig),
   # replace CONTIGUOUS with ASSIGNs
   (UPat(Ops.CONTIGUOUS, name="u"), replace_contig_with_assign),
-  # remove DETACH/CONTIGUOUS_BACKWARD
+  # remove DETACH/CONTIGUOUS_BACKWARD (allows more contiguous removal)
   (UPat((Ops.DETACH, Ops.CONTIGUOUS_BACKWARD), name="x"), lambda x: x.src[0]),
-  # reduce of size 0 is the identity element
-  (UPat(Ops.REDUCE_AXIS, name="reduce", src=(UPat.var("x"),)),
-   lambda reduce,x: reduce.const_like(identity_element(reduce.arg[0], reduce.dtype)) if x.size == 0 and reduce.size != 0 else None),
-  # handle size 0
-  (UPat(GroupOp.All-{Ops.SINK}, name="x"), lambda x: x.const_like(0).rtag(x.tag) if x._shape is not None and x.size == 0 else None),
-  # early fixup const copy (TODO: is this wrong if there's a pad?)
-  (UPat(Ops.COPY, src=(UPat.var("s"), UPat()), name="c"), lambda c,s: c.const_like(ss.arg) if (ss:=s.base).op is Ops.CONST else None),
 ])
 
 def untag_and_append(ctx:AllocCtx, x:UOp):
@@ -160,7 +145,7 @@ pm_finalize_call = PatternMatcher([
   (UPat(Ops.ASSIGN, name="x"), untag_and_append),
   (UPat(Ops.AFTER, name="x"), append_after),
   (UPat(Ops.COPY, name="x"), lambda ctx,x: append_after(ctx,x) if isinstance(x.device, str) and x.device.startswith(("DISK", "TINYFS")) else None),
-  # replace UNIQUE with LUNIQUE for CONST cache key normalization
+  # remove unique from const. TODO: this is copied in function.py
   (UPat(Ops.CONST, src=(UPat(Ops.UNIQUE), UPat(Ops.DEVICE, name="d")), name="b"), lambda b,d: b.replace(src=(d,))),
 ])
 
@@ -186,7 +171,7 @@ def transform_to_call(big_sink:UOp) -> tuple[UOp, dict[UOp, UOp]]:
   big_sink = graph_rewrite(big_sink, add_tags, ctx=ctx, bottom_up=True, name="number the uops")
 
   # here we can break the tensor graph. this is the only place you need to maintain numbered tags
-  big_sink = graph_rewrite(big_sink, pm_early_transform_tensor_graph, ctx={}, name="early transform tensor graph")
+  big_sink = graph_rewrite(big_sink, pm_early_transform_tensor_graph, name="early transform tensor graph")
 
   # here we construct the final buffer_map. this is everything that will go into the tensor map
   graph_rewrite(big_sink, pm_finalize_call, ctx=ctx, name="finalize call")
