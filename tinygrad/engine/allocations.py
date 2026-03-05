@@ -145,7 +145,7 @@ pm_finalize_call = PatternMatcher([
   (UPat(Ops.ASSIGN, name="x"), untag_and_append),
   (UPat(Ops.AFTER, name="x"), append_after),
   (UPat(Ops.COPY, name="x"), lambda ctx,x: append_after(ctx,x) if isinstance(x.device, str) and x.device.startswith(("DISK", "TINYFS")) else None),
-  # replace UNIQUE with LUNIQUE for CONST cache key normalization
+  # remove unique from const. TODO: this is copied in function.py
   (UPat(Ops.CONST, src=(UPat(Ops.UNIQUE), UPat(Ops.DEVICE, name="d")), name="b"), lambda b,d: b.replace(src=(d,))),
 ])
 

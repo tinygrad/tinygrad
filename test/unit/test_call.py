@@ -213,6 +213,19 @@ class TestCallSchedule(unittest.TestCase):
     out = f(a, v.bind(5))
     np.testing.assert_allclose(out.numpy(), [5., 10., 15.])
 
+  def test_precompile_schedule_cache_hit(self):
+    """two instances of the same @function should produce identical function body keys (schedule cache hit)"""
+    @function(precompile=True)
+    def f(x:Tensor) -> Tensor: return x + Tensor.full(x.shape, -1.0)
+    a = Tensor.empty(4, 8)
+    b = Tensor.empty(4, 8)
+    r0, r1 = f(a), f(b)
+    # find the CALL nodes
+    c0 = next(u for u in r0.uop.toposort() if u.op is Ops.CALL)
+    c1 = next(u for u in r1.uop.toposort() if u.op is Ops.CALL)
+    # the function bodies (src[0]) should have identical keys — unique consts must not leak through
+    self.assertEqual(c0.src[0].key, c1.src[0].key)
+
   def test_precompile_symbolic_2d(self):
     """precompile with symbolic shapes in 2D (tests debuf reshape with symbolic PARAM)"""
     @function(precompile=True)
