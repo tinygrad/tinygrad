@@ -89,29 +89,32 @@ def apply_rope(x:Tensor, freqs_cis:Tensor) -> Tensor:
 # LLama.cpp layers: https://github.com/ggml-org/llama.cpp/blob/master/src/models/delta-net-base.cpp
 class GatedDeltaNet:
     def __init__(self, hidden_dim: int, num_k_heads: int, num_v_heads: int, head_k_dim: int, head_v_dim: int, conv_kernel: int):
-        self.hidden_dim = hidden_dim
-        self.num_k_heads = num_k_heads
-        self.num_v_heads = num_v_heads
-        self.head_k_dim = head_k_dim
-        self.head_v_dim = head_v_dim
-        self.k_dim = num_k_heads * head_k_dim
-        self.v_dim = num_v_heads * head_v_dim
-        self.conv_kernel = conv_kernel
+        self.hidden_dim     = hidden_dim
+        self.num_k_heads    = num_k_heads
+        self.num_v_heads    = num_v_heads
+        self.head_k_dim     = head_k_dim
+        self.head_v_dim     = head_v_dim
+        self.k_dim          = num_k_heads * head_k_dim
+        self.v_dim          = num_v_heads * head_v_dim
+        self.conv_kernel    = conv_kernel
 
         # Fused attention and delta projections
-        self.in_proj_qkv = nn.Linear(hidden_dim, self.k_dim * 2 + self.v_dim, bias=False)
-        self.in_proj_z = nn.Linear(hidden_dim, self.v_dim, bias=False)
-        self.in_proj_ba = nn.Linear(hidden_dim, self.num_v_heads * 2, bias=False)
+        self.in_proj_qkv    = nn.Linear(hidden_dim, self.k_dim * 2 + self.v_dim, bias=False)
+        self.in_proj_z      = nn.Linear(hidden_dim, self.v_dim, bias=False)
+        self.in_proj_ba     = nn.Linear(hidden_dim, self.num_v_heads * 2, bias=False)
+
         conv_dim = self.k_dim * 2 + self.v_dim
-        self.conv = nn.Conv1d(conv_dim, conv_dim, conv_kernel, bias=False, groups=conv_dim, padding=conv_kernel-1)
+        self.conv           = nn.Conv1d(conv_dim, conv_dim, conv_kernel, bias=False, groups=conv_dim, padding=conv_kernel-1)
 
-        self.norm = nn.RMSNorm(self.head_v_dim, eps=1e-6)
-        self.out_proj = nn.Linear(self.v_dim, hidden_dim, bias=False)
+        self.norm           = nn.RMSNorm(self.head_v_dim, eps=1e-6)
+        self.out_proj       = nn.Linear(self.v_dim, hidden_dim, bias=False)
 
-        self.A_log = Tensor.uniform(0, 16, num_v_heads)
-        self.dt_bias = Tensor.ones(num_v_heads)
+        # Decay params
+        self.A_log          = Tensor.uniform(0, 16, num_v_heads)
+        self.dt_bias        = Tensor.ones(num_v_heads)
     # Recurrent (autoregressive) delta net chain
-    def recurrent_forward(self, q: Tensor, k: Tensor, v: Tensor, a: Tensor, b: Tensor, state: Tensor) -> Tuple[Tensor, Tensor]:
+    @function
+    def _recurrent_deltachain(self, q: Tensor, k: Tensor, v: Tensor, a: Tensor, b: Tensor, state: Tensor) -> Tuple[Tensor, Tensor]:
         # Input shapes":" (batch, seq_len, num_heads, head_dim | None)
         batch, seq_len, _, _ = q.shape
         q, k, v, b, a  = [x.transpose(1, 2).contiguous() for x in (q, k, v, b, a)] # (batch, num_heads, seq_len, head_dim | None)
@@ -157,12 +160,65 @@ class GatedDeltaNet:
         if self.num_v_heads // self.num_k_heads > 1:
             q = q.repeat_interleave(self.num_v_heads // self.num_k_heads, dim=2)
             k = k.repeat_interleave(self.num_v_heads // self.num_k_heads, dim=2)
-        attn, recurrent_state = self.recurrent_forward(q, k, v, a, b, recurrent_state)
+        attn, recurrent_state = self._recurrent_deltachain(q, k, v, a, b, recurrent_state)
         attn = self.norm(attn.reshape(-1, self.head_v_dim)) * z.reshape(-1, self.head_v_dim).silu()
         return self.out_proj(attn.reshape(batch, seq_len, -1)), conv_state, recurrent_state
 
-class GatedMultiHeadAttention:
-    def __init__(self):
+class Attention:
+    def __init__(self, dim: int, head_dim: int, n_heads: int, n_kv_heads: int, max_context: int,
+                 rope_theta: float, norm_eps: float, qk_norm: int=0, is_gated: bool = False):
+        self.max_context    = max_context
+        self.rope_theta     = rope_theta
+        self.n_heads        = n_heads
+        self.n_kv_heads     = n_kv_heads
+        self.head_dim       = head_dim
+        self.is_gated       = is_gated
+        self.qk_norm        = qk_norm
+        self.q_proj_out     = self.head_dim * n_heads
+        self.kv_proj_out    = self.head_dim * n_kv_heads
+        if self.qk_norm: self.q_norm, self.k_norm = nn.RMSNorm(self.qk_norm, eps=norm_eps), nn.RMSNorm(self.qk_norm, eps=norm_eps)
+
+        self.qkv_proj       = nn.Linear(dim, self.q_proj_out + self.kv_proj_out*2, bias=False)
+        self.out_proj       = nn.Linear(self.q_proj_out, dim, bias=False)
+        if self.is_gated: self.gate_proj = nn.Linear(dim, self.q_proj_out, bias=False)
+    def __call__(self, x: Tensor, start_pos: int|UOp) -> Tensor:
+        B, T, _ = x.shape
+        q, k, v = self.qkv_proj(x).split([self.q_proj_out, self.kv_proj_out, self.kv_proj_out], dim=-1)
+        if self.qk_norm and self.qk_norm != self.head_dim: q, k = self.q_norm(q), self.k_norm(k)
+        q = q.reshape(B, T, self.n_heads, self.head_dim).transpose(1, 2)
+        k = k.reshape(B, T, self.n_kv_heads, self.head_dim).transpose(1, 2)
+        v = v.reshape(B, T, self.n_kv_heads, self.head_dim).transpose(1, 2)
+        if self.qk_norm == self.head_dim: q, k = self.q_norm(q), self.k_norm(k)
+
+        freqs_cis = precompute_freqs_cis(self.head_dim, self.max_context, self.rope_theta)[start_pos:start_pos+T]
+        q, k = apply_rope(q, freqs_cis), apply_rope(k, freqs_cis)
+
+        if not hasattr(self, "cache_kv"):
+          # TODO: how is the dtype of this determined?
+          self.cache_kv = Tensor.zeros(2, x.shape[0], self.n_kv_heads, self.max_context, self.head_dim, device=x.device).contiguous().realize()
+        assigned_kv = self.cache_kv.uop.after(self.cache_kv[:, :, :, start_pos:start_pos+T, :].uop.assign(Tensor.stack(k, v).contiguous().uop))
+        tensor_assigned_kv = Tensor(assigned_kv, device=assigned_kv.device)
+        k = tensor_assigned_kv[0, :, :, 0:start_pos+T, :]
+        v = tensor_assigned_kv[1, :, :, 0:start_pos+T, :]
+
+        mask = Tensor.full((1, 1, T, start_pos+T), float("-inf"), dtype=x.dtype, device=x.device).triu(start_pos+1) if T > 1 else None
+        attn = q.scaled_dot_product_attention(k, v, attn_mask=mask, enable_gqa=True)     # (B,H,T,Hd)
+        attn = attn.transpose(1, 2).reshape(B, T, -1)                                    # back to (B,T,D)
+
+        if self.is_gated:
+            gate = self.gate_proj(x)
+            attn = attn * gate.sigmoid()
+        attn = self.out_proj(attn)
+        return x + attn;
+
+class GatedBlock:
+    def __init__(self, dim:int, hidden_dim:int, n_heads:int, n_kv_heads:int, norm_eps:float, head_dim:int, rope_theta:float,
+                 conv_kernel:int, full_attn:bool, max_context:int=0, qk_norm:int=0, num_experts:int=0, num_experts_per_tok:int=0):
+        if full_attn:
+            self.attn = GatedDeltaNet(hidden_dim, n_kv_heads, n_kv_heads, head_dim, head_dim, conv_kernel)
+        else:
+            self.attn = Attention(dim, hidden_dim, n_heads, n_kv_heads, max_context, rope_theta, norm_eps, qk_norm, is_gated=True)
+    def __call__(self, x: Tensor, start_pos:int|UOp):
         pass
 
 class TransformerBlock:
@@ -175,18 +231,11 @@ class TransformerBlock:
     self.max_context  = max_context
     self.qk_norm      = qk_norm
 
-    # --- attention projections (all linear, bias-free) ------------------
-    q_proj_out       = self.head_dim * n_heads
-    kv_proj_out      = self.head_dim * n_kv_heads
-    self.attn_q      = nn.Linear(dim, q_proj_out,  bias=False)
-    self.attn_k      = nn.Linear(dim, kv_proj_out, bias=False)
-    self.attn_v      = nn.Linear(dim, kv_proj_out, bias=False)
-    self.attn_output = nn.Linear(q_proj_out, dim,  bias=False)
+    # --- Generic Multi-Head Causal Attention Block -----------------------
+    self.attn       = Attention(dim, head_dim, n_heads, n_kv_heads, max_context, rope_theta, norm_eps, qk_norm, is_gated=False)
 
     # --- RMSNorms --------------------------------------------------------
-    self.attn_norm   = nn.RMSNorm(dim, norm_eps)
     self.ffn_norm    = nn.RMSNorm(dim, norm_eps)
-    if qk_norm: self.attn_q_norm, self.attn_k_norm = nn.RMSNorm(qk_norm, norm_eps), nn.RMSNorm(qk_norm, norm_eps)
 
     # --- feed-forward (MoE or dense) -------------------------------------
     if num_experts > 0:
@@ -199,40 +248,6 @@ class TransformerBlock:
       self.ffn_gate    = nn.Linear(dim, hidden_dim, bias=False)
       self.ffn_up      = nn.Linear(dim, hidden_dim, bias=False)
       self.ffn_down    = nn.Linear(hidden_dim, dim, bias=False)
-
-  @function
-  def _attention(self, x:Tensor, start_pos:int|UOp) -> Tensor:
-    x_norm = self.attn_norm(x)                       # (B,T,D)
-    q, k, v = self.attn_q(x_norm), self.attn_k(x_norm), self.attn_v(x_norm)
-    if self.qk_norm and self.qk_norm != self.head_dim: q, k = self.attn_q_norm(q), self.attn_k_norm(k)
-
-    B, T, _ = x.shape
-    q = q.reshape(B, T, self.n_heads,    self.head_dim).transpose(1, 2)  # (B,H,T,Hd)
-    k = k.reshape(B, T, self.n_kv_heads, self.head_dim).transpose(1, 2)  # (B,KvH,T,Hd)
-    v = v.reshape(B, T, self.n_kv_heads, self.head_dim).transpose(1, 2)  # (B,KvH,T,Hd)
-    if self.qk_norm == self.head_dim: q, k = self.attn_q_norm(q), self.attn_k_norm(k)
-
-    freqs_cis = precompute_freqs_cis(self.head_dim, self.max_context, self.rope_theta)[start_pos:start_pos+T]
-    q = apply_rope(q, freqs_cis)
-    k = apply_rope(k, freqs_cis)
-
-    # TODO: fix assign to behave like this
-    assigned_kv = self.cache_kv.uop.after(self.cache_kv[:, :, :, start_pos:start_pos+T, :].uop.assign(Tensor.stack(k, v).contiguous().uop))
-    tensor_assigned_kv = Tensor(assigned_kv, device=assigned_kv.device)
-    k = tensor_assigned_kv[0, :, :, 0:start_pos+T, :]
-    v = tensor_assigned_kv[1, :, :, 0:start_pos+T, :]
-
-    #self.cache_kv[:, :, :, start_pos:start_pos+T, :].assign(Tensor.stack(k, v))
-    #k = self.cache_kv[0, :, :, 0:start_pos+T, :]
-    #v = self.cache_kv[1, :, :, 0:start_pos+T, :]
-
-    # NOTE: this mask is causal_lower_right, not the causal_upper_left generated by is_casual = True
-    # TODO: this if statement should be removed and it shouldn't generate extra kernels
-    mask = Tensor.full((1, 1, T, start_pos+T), float("-inf"), dtype=x.dtype, device=x.device).triu(start_pos+1) if T > 1 else None
-    attn = q.scaled_dot_product_attention(k, v, attn_mask=mask, enable_gqa=True)     # (B,H,T,Hd)
-    attn = attn.transpose(1, 2).reshape(B, T, -1)                                    # back to (B,T,D)
-    attn = self.attn_output(attn)
-    return x + attn
 
   @function(precompile=bool(getenv("PRECOMPILE", 0)))
   def _feed_forward(self, h: Tensor) -> Tensor:
@@ -247,10 +262,7 @@ class TransformerBlock:
     return h + self.ffn_down(gated)
 
   def __call__(self, x: Tensor, start_pos: int|UOp):
-    if not hasattr(self, "cache_kv"):
-      # TODO: how is the dtype of this determined?
-      self.cache_kv = Tensor.zeros(2, x.shape[0], self.n_kv_heads, self.max_context, self.head_dim, device=x.device).contiguous().realize()
-    return self._feed_forward(self._attention(x, start_pos)).contiguous()
+    return self._feed_forward(self.attn(x, start_pos)).contiguous()
 
 class Transformer:
   def __init__(self, *, num_blocks, dim, hidden_dim, n_heads, n_kv_heads, norm_eps, vocab_size, head_dim:int, rope_theta:float,
