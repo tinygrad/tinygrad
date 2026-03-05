@@ -94,9 +94,9 @@ def transform_precompiled_call(c:UOp) -> UOp|None:
   if not c.arg.precompile: return None
   if c.src[0].op is Ops.SINK: return None
   out = _buffer_like(c)
+  input_buffers = tuple(x.contiguous() if x.op not in {Ops.AFTER, Ops.BIND} else x for x in c.src[1:])
   fxn = out.param_like(len(c.src)-1).assign(c.src[0]).sink()
-  ret = out.after(c.replace(src=(fxn,)+tuple(x.contiguous() if x.op not in {Ops.AFTER, Ops.BIND} else x for x in c.src[1:])+(out,),
-                            dtype=dtypes.void, tag=None))
+  ret = out.after(c.replace(src=(fxn, *input_buffers, out), dtype=dtypes.void, tag=None))
   # if the CALL has symbolic shapes, shrink the max-sized output to the actual symbolic shape
   if any(isinstance(s, UOp) for s in c.shape): ret = ret.shrink(tuple((0, s) for s in c.shape))
   return ret
