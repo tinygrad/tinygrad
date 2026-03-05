@@ -630,18 +630,14 @@ def map_insts(data:bytes, lib:bytes, target:str) -> Iterator[tuple[PacketType, I
       while (inst_op:=getattr(inst, 'op_name', '')) in {"S_DELAY_ALU", "S_WAIT_ALU"}:
         wave_pc[p.wave] += inst.size()
         inst = pc_map[pc:=wave_pc[p.wave]]
-      # identify a branch instruction, only used for asserts
-      branch_inst = inst if "BRANCH" in inst_op else None
-      if branch_inst is not None and not (isinstance(p, (INST, INST_RDNA4)) and p.op.name.startswith("JUMP")):
-        raise AssertionError(f"branch can only be folowed by JUMP, got {p}")
+      # assert branch always has a JUMP packet
+      if "BRANCH" in inst_op and not (isinstance(p, (INST, INST_RDNA4)) and p.op.name.startswith("JUMP")):
+        raise AssertionError(f"{inst_op} can only be folowed by JUMP, got {p}")
       # JUMP handling
-      if (isinstance(p, INST) and p.op is InstOp.JUMP) or (isinstance(p, INST_RDNA4) and p.op is InstOpRDNA4.JUMP):
-        simm16 = getattr(branch_inst, 'simm16')
-        assert branch_inst is not None and simm16 is not None, f"JUMP packet must map to a branch instruction, got {inst}"
-        x = simm16 & 0xffff
-        wave_pc[p.wave] += branch_inst.size() + (x - 0x10000 if x & 0x8000 else x)*4
+      if isinstance(p, (INST, INST_RDNA4)) and p.op in {InstOp.JUMP, InstOpRDNA4.JUMP}:
+        x = getattr(inst, 'simm16') & 0xffff
+        wave_pc[p.wave] += inst.size() + (x - 0x10000 if x & 0x8000 else x)*4
       else:
-        if branch_inst is not None: assert inst_op != "S_BRANCH", f"S_BRANCH must have a JUMP packet, got {p}"
         wave_pc[p.wave] += inst.size()
       yield (p, InstructionInfo(pc, p.wave, inst))
       continue
