@@ -297,6 +297,9 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable((3+Variable("a",0,1))%4, 0, 3, "((a*-3)+3)")
     self.helper_test_variable((3+Variable("a",4,5))%4, 0, 3, "((a*-3)+15)")
 
+  def test_div_binary_expression(self):
+    self.helper_test_variable((3+Variable("a",0,1))//4, 0, 1, "a")
+
   def test_sum_div_const(self):
     self.helper_test_variable(usum([Variable("a", 0, 7)*4, uconst(3)]) // 4, 0, 7, "a")
 
@@ -605,6 +608,12 @@ class TestSymbolic(unittest.TestCase):
     idx1 = Variable("idx1", 0, start_pos)
     self.helper_test_variable((idx0*v+idx1)//v, 0, 2, "(idx0)")
     self.helper_test_variable((idx0*v+idx1)%v, 0, start_pos, "idx1")
+
+  def test_mod_variable_denom_factor_remainder(self):
+    d = Variable("d", 2, 5)
+    a = Variable("a", 0, 3)
+    b = Variable("b", 0, 1)
+    self.helper_test_variable((d*a+b)%d, 0, 1, "b")
 
   def test_divmod_variable_denom_fold_to_const(self):
     x = Variable("x", 20, 23)
