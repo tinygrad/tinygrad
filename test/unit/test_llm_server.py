@@ -60,28 +60,25 @@ class TestTransformerGenerate(unittest.TestCase):
     self.assertEqual(captured_inputs[0][1], 0)
 
   def test_two_prompts_schedule_cache(self):
-    """Third prompt should hit the schedule cache, not miss (first two warm up both jits: prefill + decode)."""
+    """After warmup, new prompts should hit the schedule cache, not miss."""
     from tinygrad.apps.llm import Transformer
     model = Transformer(num_blocks=1, dim=64, hidden_dim=128, n_heads=2, n_kv_heads=2,
                         norm_eps=1e-5, vocab_size=100, head_dim=32, rope_theta=10000.0, max_context=64)
 
-    # first two prompts warm up both jits (prefill + decode)
-    ids = list(range(1, 6))
-    gen = model.generate(ids)
-    for _ in range(3): next(gen)
-
-    ids += list(range(10, 15))
-    gen = model.generate(ids)
-    for _ in range(3): next(gen)
+    # warmup prompts: prefill needs 3 calls to capture (first call creates cache_kv, changing the graph)
+    for i in range(3):
+      ids = list(range(1, 6)) if i == 0 else ids + list(range(i*10, i*10+5))
+      gen = model.generate(ids)
+      for _ in range(3): next(gen)
     cache_size_after_warmup = len(schedule_cache)
 
-    # third prompt should reuse the same schedule cache entries, not create new ones
-    ids += list(range(20, 25))
+    # next prompt should reuse the same schedule cache entries, not create new ones
+    ids += list(range(40, 45))
     gen = model.generate(ids)
     for _ in range(3): next(gen)
 
     self.assertEqual(cache_size_after_warmup, len(schedule_cache),
-      f"third prompt added {len(schedule_cache) - cache_size_after_warmup} new schedule cache entries (expected 0)")
+      f"new prompt added {len(schedule_cache) - cache_size_after_warmup} new schedule cache entries (expected 0)")
 
 if __name__ == '__main__':
   unittest.main()
