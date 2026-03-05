@@ -36,7 +36,7 @@ propagate_invalid = PatternMatcher([
   # alu with invalid -> invalid
   *((invalid_pat.alu(op, UPat()), lambda i: i) for op in GroupOp.Binary-GroupOp.Comparison),
   # normalize where(cond, Invalid, val) -> where(~cond, val, Invalid)
-  (UPat.var("cond").where(invalid_pat, UPat.var("val")), lambda cond, i, val: cond.logical_not().where(val, i)),
+  (UPat.var("cond").where(invalid_pat, UPat.var("val")), lambda cond, i, val: cond.logical_not().where(val, i) if val.arg != Invalid else i),
 ])
 
 symbolic_simple = propagate_invalid + PatternMatcher([
