@@ -1,7 +1,7 @@
 from __future__ import annotations
 import sys, argparse, typing, re, unicodedata, json, uuid, time, functools, itertools
 from tinygrad import Tensor, nn, UOp, TinyJit, getenv, function
-from tinygrad.helpers import partition, DEBUG, Timing, GlobalCounters, stderr_log, colored
+from tinygrad.helpers import partition, DEBUG, Timing, GlobalCounters, stderr_log, colored, Context
 from tinygrad.viz.serve import TCPServerWithReuse, HTTPRequestHandler
 
 class SimpleTokenizer:
@@ -179,7 +179,6 @@ class Transformer:
     self.output = nn.Linear(dim, vocab_size, bias=False)
     self.max_context = max_context
     self._cached_tokens: list[int] = []
-    # JIT is used if T=1 and start_pos is a UOp. TODO: make this not needed by including T in the JIT and making start_pos always a UOp
     self.forward_jit = TinyJit(self.forward)
 
   def forward(self, tokens:Tensor, start_pos:int|UOp) -> Tensor:
@@ -191,7 +190,7 @@ class Transformer:
   def __call__(self, tokens:Tensor, start_pos:int|UOp=0) -> Tensor: return self.forward_jit(tokens, start_pos)
 
   @staticmethod
-  def from_gguf(gguf:Tensor, max_context:int|None=None, realize=bool(getenv("REALIZE", 1))) -> tuple[Transformer, dict]:
+  def from_gguf(gguf:Tensor, max_context:int|None=None, realize=bool(getenv("REALIZE", 0))) -> tuple[Transformer, dict]:
     # TODO: remove the need for copy to default device
     kv, state_dict = nn.state.gguf_load(gguf.to(None).realize())
 
@@ -377,7 +376,10 @@ if __name__ == "__main__":
     exit(0)
 
   # start server
-  if args.serve: TCPServerWithReuse(('', args.serve), Handler).serve_forever()
+  if args.serve:
+    # warmup: run 2 tokens through the model to capture the JIT before serving
+    with Context(DEBUG=max(DEBUG.value, 1)): list(zip(range(2), model.generate([0])))
+    TCPServerWithReuse(('', args.serve), Handler).serve_forever()
 
   # interactive chat
   ids: list[int] = [bos_id] if bos_id is not None else []
