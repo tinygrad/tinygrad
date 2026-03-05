@@ -2046,6 +2046,7 @@ class Tensor(OpMixin):
     print(t.normalize(p=1, dim=0).numpy())
     ```
     """
+    if p == 0: return self / (self != 0).sum(dim, keepdim=True).maximum(eps)
     return self / self.abs().pow(p).sum(dim, keepdim=True).pow(1/p).maximum(eps)
 
   def logsumexp(self, axis=None, keepdim=False) -> Tensor:
