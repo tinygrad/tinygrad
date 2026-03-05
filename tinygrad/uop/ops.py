@@ -852,7 +852,11 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     sself = self.simplify()
     varnames = tuple(x.expr for x in sself.toposort() if x.op is Ops.DEFINE_VAR)
     # TODO: sanitize varnames, or don't use naked eval while staying fast
-    return eval("lambda "+','.join(varnames)+": "+sself.render(pm=renderer_infer)), varnames  # pylint: disable=eval-used
+    ret = _render_with_splits(list(sself.toposort()), renderer_infer, {sself})
+    lines = [f"  {k}={v}" for k,v in ret.items() if k != "ast"] + [f"  return {ret['ast']}"]
+    ns: dict[str, Any] = {"max": max, "cdiv": cdiv, "cmod": cmod, "bitcast": bitcast, "dtypes": dtypes}
+    exec(f"def _f({','.join(varnames)}):\n"+'\n'.join(lines), ns)  # pylint: disable=exec-used
+    return ns["_f"], varnames
 
   def sym_infer(self, var_vals:dict[str, int]):
     fxn, varnames = self._sym_fxn
@@ -1540,6 +1544,24 @@ pm_pyrender = pm_pyrender_extra+PatternMatcher([
   (UPat(GroupOp.All, name="u"), lambda ctx,u: f"UOp({u.op}, {u.dtype}, {srcs(ctx,u.src)}"+(f", {repr(u.arg)})" if u.arg is not None else ")")),
 ])
 
+def _render_with_splits(lst:list[UOp], pm:PatternMatcher, to_render:set[UOp], split_depth:int=100) -> dict[str, str]:
+  r: dict[UOp, str] = {}
+  ret: dict[str, str] = {}
+  depth: dict[UOp, int] = {}
+  for i,u in enumerate(lst):
+    # limit inline depth to avoid "too many nested parentheses" in Python parser
+    op_depth = 1 + max([depth.get(s, 0) for s in u.src], default=0)
+    if op_depth > split_depth: to_render.add(u)
+    depth[u] = 0 if u in to_render else op_depth
+    ren = cast(str, pm.rewrite(u, ctx=r))
+    assert isinstance(ren, str)
+    if u.tag is not None: ren += f".rtag({repr(u.tag)})"
+    if u not in to_render: r[u] = ren
+    else:
+      r[u] = f"c{i}" if u is not lst[-1] else "ast"
+      ret[r[u]] = ren
+  return ret
+
 def pyrender(ast:UOp) -> str:
   lst = list(ast.toposort())
 
@@ -1561,21 +1583,7 @@ def pyrender(ast:UOp) -> str:
     to_render.add(u)
 
   kernels: dict[UOp, tuple[str, str]] = {}
-  r: dict[UOp, str] = {}
-  ret: dict[str, str] = {}
-  depth: dict[UOp, int] = {}
-  for i,u in enumerate(lst):
-    # limit inline depth to avoid "too many nested parentheses" in Python parser
-    op_depth = 1 + max([depth[s] for s in u.src], default=0)
-    if op_depth > 100: to_render.add(u)
-    depth[u] = 0 if u in to_render else op_depth
-    ren = cast(str, pm_pyrender.rewrite(u, ctx=r))
-    assert isinstance(ren, str)
-    if u.tag is not None: ren += f".rtag({repr(u.tag)})"
-    if u not in to_render: r[u] = ren
-    else:
-      r[u] = f"c{i}" if u is not lst[-1] else "ast"
-      ret[r[u]] = ren
+  ret = _render_with_splits(lst, pm_pyrender, to_render)
   return ''.join([v[1] for v in kernels.values()]) + '\n'.join([f"{k} = {strip_parens(v)}" for k,v in ret.items()])
 
 # *** what was symbolic.py ***
