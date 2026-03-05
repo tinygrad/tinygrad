@@ -152,6 +152,7 @@ class TestGGUFGEMV(unittest.TestCase):
     x = rng.standard_normal(cols).astype(np.float32)
     np.testing.assert_allclose((tensors["weight"] @ Tensor(x)).numpy(), ref @ x, atol=1e-2, rtol=1e-2)
     np.testing.assert_equal(tensors["weight"].numpy(), ref)
+    assert np.isfinite(ref).all() and np.isfinite(tensors["weight"].numpy()).all(), f"{qtype.name} has NaN/Inf"
 
   def test_gguf_gemv_q8_0(self): self._test_gguf_gemv(GGMLQuantizationType.Q8_0)
   def test_gguf_gemv_q4_k(self): self._test_gguf_gemv(GGMLQuantizationType.Q4_K)
