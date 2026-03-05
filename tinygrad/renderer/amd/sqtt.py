@@ -598,7 +598,6 @@ def map_insts(data:bytes, lib:bytes, target:str) -> Iterator[tuple[PacketType, I
   # map pcs to insts
   from tinygrad.viz.serve import amd_decode
   pc_map = amd_decode(lib, target)
-
   wave_pc:dict[int, int] = {}
   # only processing packets on one [CU, SIMD] unit
   def simd_select(p) -> bool: return getattr(p, "cu", 0) == 0 and getattr(p, "simd", 0) == 0
@@ -629,7 +628,7 @@ def map_insts(data:bytes, lib:bytes, target:str) -> Iterator[tuple[PacketType, I
         inst = pc_map[pc:=wave_pc[p.wave]]
       # assert branch always has a JUMP packet
       if "BRANCH" in inst_op and not (isinstance(p, (INST, INST_RDNA4)) and p.op.name.startswith("JUMP")):
-        raise AssertionError(f"{inst_op} can only be folowed by JUMP, got {p}")
+        raise AssertionError(f"{inst_op} can only be followed by JUMP, got {p}")
       # JUMP handling
       if isinstance(p, (INST, INST_RDNA4)) and p.op in {InstOp.JUMP, InstOpRDNA4.JUMP}:
         x = getattr(inst, 'simm16') & 0xffff
