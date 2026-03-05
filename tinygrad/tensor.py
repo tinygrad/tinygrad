@@ -2028,6 +2028,27 @@ class Tensor(OpMixin):
     m, _, ss = self._softmax(axis, dtype)
     return m - ss.log()
 
+  def normalize(self, p:float=2.0, dim:int=1, eps:float=1e-12) -> Tensor:
+    """
+    Performs Lp normalization of the tensor along the specified dimension.
+
+    See: https://pytorch.org/docs/stable/generated/torch.nn.functional.normalize.html
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    Tensor.manual_seed(42)
+    t = Tensor.randn(2, 3)
+    print(t.numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.normalize().numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.normalize(p=1, dim=0).numpy())
+    ```
+    """
+    if p == 0: return self / (self != 0).sum(dim, keepdim=True).maximum(eps)
+    return self / self.abs().pow(p).sum(dim, keepdim=True).pow(1/p).maximum(eps)
+
   def logsumexp(self, axis=None, keepdim=False) -> Tensor:
     """
     Computes the log-sum-exp of the tensor along the specified axis or axes.
