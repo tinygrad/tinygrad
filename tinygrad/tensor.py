@@ -3649,16 +3649,16 @@ class Tensor(OpMixin):
 
     # contiguous creates the image, and early realize static weights (TODO: test for the static weight)
     if IMAGE == 1:
-      x, w = x.reshape(bs*iy, ix*groups*cin//4, 4), w.reshape(cout//4, H*W*cin, 4)
+      x, w = x.reshape(bs*iy, ix*groups*cin), w.reshape(cout//4, H*W*cin*4)
 
       # hacks for pitch alignment
-      x, w = x.pad_to(None, round_up(xw:=x.shape[1], 64 // dtsz), None), w.pad_to(None, round_up(ww:=w.shape[1], 64 // dtsz), None)
+      x, w = x.pad_to(None, round_up(xw:=x.shape[1], 64 // dtsz)), w.pad_to(None, round_up(ww:=w.shape[1], 64 // dtsz))
 
       if FLOAT16: x, w = x.cast(dtypes.half).contiguous().cast(dtypes.float), w.cast(dtypes.half).contiguous().cast(dtypes.float)
       else: x, w = x.contiguous(), w.contiguous()
 
       # undo pitch alignment
-      x, w = x[:, :xw, :], w[:, :ww, :]
+      x, w = x[:, :xw], w[:, :ww]
     elif IMAGE: x, w = x.cast(base_image_type((bs*iy, ix*groups*cin//4, 4))).contiguous(), w.cast(base_image_type((cout//4, H*W*cin, 4))).contiguous()
     else: x, w = x.contiguous(), w.contiguous()
 
