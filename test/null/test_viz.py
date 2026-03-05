@@ -1,4 +1,4 @@
-import unittest, decimal, sys
+import unittest, decimal, sys, json
 from dataclasses import dataclass
 from typing import Generator
 
@@ -411,7 +411,7 @@ class TestVizProfiler(BaseTestViz):
     j = load_profile(prof)
     event = j['layout']['NV:SDMA:0']['events'][0]
     gbs = sz/(dur*1e-6)*1e-9
-    self.assertEqual(event['fmt'], f"{gbs:.0f} GB/s")
+    self.assertTrue(event['fmt'].startswith(f"{gbs:.0f} GB/s"))
 
   def test_graph(self):
     prof = [ProfileDeviceEvent(device='NV', tdiff=decimal.Decimal(-1000)),
@@ -453,7 +453,9 @@ class TestVizProfiler(BaseTestViz):
     j = load_profile(prof)
     sdma_events = j['layout']['NV:1:SDMA:0']['events']
     gbs = sz/(dur*1e-6)*1e-9
-    self.assertEqual(sdma_events[0]['fmt'], f"{gbs:.0f} GB/s")
+    timing_txt, trace_txt = sdma_events[0]['fmt'].split("\nTB:")
+    self.assertEqual(timing_txt, f"{gbs:.0f} GB/s")
+    self.assertEqual(json.loads(trace_txt)[0][0], __file__)
 
   def test_block_ordering(self):
     prof = [ProfileDeviceEvent(device='NV', tdiff=decimal.Decimal(-1000)),

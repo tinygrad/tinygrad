@@ -239,8 +239,14 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
         return None
 
       # passthrough ops
-      case Ops.REDUCE | Ops.MSTACK | Ops.MSELECT | Ops.DETACH | Ops.CONTIGUOUS | Ops.CONTIGUOUS_BACKWARD | Ops.AFTER | Ops.END | Ops.CALL:
+      case Ops.REDUCE | Ops.MSTACK | Ops.MSELECT | Ops.DETACH | Ops.CONTIGUOUS | Ops.CONTIGUOUS_BACKWARD | Ops.AFTER | Ops.END:
         return self.src[0]._shape
+
+      case Ops.CALL:
+        inner_shape = self.src[0]._shape
+        if inner_shape is None: return None
+        # substitute internal PARAMs in the shape with corresponding args
+        return tuple(graph_rewrite(s, _pm_resolve_params, self.src[1:], walk=True) if isinstance(s, UOp) else s for s in inner_shape)
 
       # TODO: disallow shape changing bitcast
       case Ops.BITCAST:
@@ -558,6 +564,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     inp = self if arg is None else UOp(Ops.MSELECT, self.dtype, src=(self,), arg=arg)
     return UOp(Ops.COPY, self.dtype, (inp, UOp(Ops.DEVICE, arg=device) if not isinstance(device, UOp) else device))
   def mselect(self, arg:int) -> UOp: return UOp(Ops.MSELECT, self.dtype, (self,), arg)
+  def mstack(self, *srcs: UOp) -> UOp: return UOp(Ops.MSTACK, self.dtype, (self,)+srcs)
   @property
   def metadata(self) -> tuple[Metadata, ...]|None: return all_metadata.get(self, None)
   def encdec(self, *src, arg=None): return UOp(Ops.ENCDEC, self.dtype, src=(self,)+src, arg=arg)
@@ -845,7 +852,11 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     sself = self.simplify()
     varnames = tuple(x.expr for x in sself.toposort() if x.op is Ops.DEFINE_VAR)
     # TODO: sanitize varnames, or don't use naked eval while staying fast
-    return eval("lambda "+','.join(varnames)+": "+sself.render(pm=renderer_infer)), varnames  # pylint: disable=eval-used
+    ret = _render_with_splits(list(sself.toposort()), renderer_infer, {sself})
+    lines = [f"  {k}={v}" for k,v in ret.items() if k != "ast"] + [f"  return {ret['ast']}"]
+    ns: dict[str, Any] = {"max": max, "cdiv": cdiv, "cmod": cmod, "bitcast": bitcast, "dtypes": dtypes}
+    exec(f"def _f({','.join(varnames)}):\n"+'\n'.join(lines), ns)  # pylint: disable=exec-used
+    return ns["_f"], varnames
 
   def sym_infer(self, var_vals:dict[str, int]):
     fxn, varnames = self._sym_fxn
@@ -1414,6 +1425,7 @@ pm_lower_index_dtype = PatternMatcher([
 def _index_to_concrete_int(u:UOp) -> UOp: return graph_rewrite(u.sink(), pm_lower_index_dtype).src[0]
 
 _substitute = PatternMatcher([(UPat(tuple(Ops), name="x"), lambda ctx,x: ctx.get(x,None))])
+_pm_resolve_params = PatternMatcher([(UPat(Ops.PARAM, name="p"), lambda ctx,p: ctx[p.arg])])
 _remove_all_tags = PatternMatcher([(UPat(GroupOp.All, name="x"), lambda x: x.replace(tag=None) if x.tag is not None else None)])
 
 def gate_kernel_sink(x:UOp) -> bool:
@@ -1532,6 +1544,24 @@ pm_pyrender = pm_pyrender_extra+PatternMatcher([
   (UPat(GroupOp.All, name="u"), lambda ctx,u: f"UOp({u.op}, {u.dtype}, {srcs(ctx,u.src)}"+(f", {repr(u.arg)})" if u.arg is not None else ")")),
 ])
 
+def _render_with_splits(lst:list[UOp], pm:PatternMatcher, to_render:set[UOp], split_depth:int=100) -> dict[str, str]:
+  r: dict[UOp, str] = {}
+  ret: dict[str, str] = {}
+  depth: dict[UOp, int] = {}
+  for i,u in enumerate(lst):
+    # limit inline depth to avoid "too many nested parentheses" in Python parser
+    op_depth = 1 + max([depth.get(s, 0) for s in u.src], default=0)
+    if op_depth > split_depth: to_render.add(u)
+    depth[u] = 0 if u in to_render else op_depth
+    ren = cast(str, pm.rewrite(u, ctx=r))
+    assert isinstance(ren, str)
+    if u.tag is not None: ren += f".rtag({repr(u.tag)})"
+    if u not in to_render: r[u] = ren
+    else:
+      r[u] = f"c{i}" if u is not lst[-1] else "ast"
+      ret[r[u]] = ren
+  return ret
+
 def pyrender(ast:UOp) -> str:
   lst = list(ast.toposort())
 
@@ -1553,21 +1583,7 @@ def pyrender(ast:UOp) -> str:
     to_render.add(u)
 
   kernels: dict[UOp, tuple[str, str]] = {}
-  r: dict[UOp, str] = {}
-  ret: dict[str, str] = {}
-  depth: dict[UOp, int] = {}
-  for i,u in enumerate(lst):
-    # limit inline depth to avoid "too many nested parentheses" in Python parser
-    op_depth = 1 + max([depth[s] for s in u.src], default=0)
-    if op_depth > 100: to_render.add(u)
-    depth[u] = 0 if u in to_render else op_depth
-    ren = cast(str, pm_pyrender.rewrite(u, ctx=r))
-    assert isinstance(ren, str)
-    if u.tag is not None: ren += f".rtag({repr(u.tag)})"
-    if u not in to_render: r[u] = ren
-    else:
-      r[u] = f"c{i}" if u is not lst[-1] else "ast"
-      ret[r[u]] = ren
+  ret = _render_with_splits(lst, pm_pyrender, to_render)
   return ''.join([v[1] for v in kernels.values()]) + '\n'.join([f"{k} = {strip_parens(v)}" for k,v in ret.items()])
 
 # *** what was symbolic.py ***

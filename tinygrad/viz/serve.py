@@ -7,7 +7,7 @@ from urllib.parse import parse_qs, urlparse
 from http.server import BaseHTTPRequestHandler
 from typing import Any, TypedDict, TypeVar, Generator, Callable
 from tinygrad.helpers import colored, getenv, tqdm, unwrap, word_wrap, TRACEMETA, ProfileEvent, ProfileRangeEvent, TracingKey, ProfilePointEvent, temp
-from tinygrad.helpers import printable, Context
+from tinygrad.helpers import printable, Context, START_TIME
 from tinygrad.renderer.amd.dsl import Inst
 from tinygrad.renderer.amd import detect_format
 
@@ -15,7 +15,7 @@ from tinygrad.renderer.amd import detect_format
 class TCPServerWithReuse(socketserver.TCPServer):
   allow_reuse_address = True
   def __init__(self, server_address, RequestHandlerClass):
-    print(f"*** started server on http://127.0.0.1:{server_address[1]}")
+    print(f"*** started server on http://127.0.0.1:{server_address[1]} at {time.perf_counter()-START_TIME:.2f} s")
     super().__init__(server_address, RequestHandlerClass)
 
 class HTTPRequestHandler(BaseHTTPRequestHandler):
@@ -227,6 +227,7 @@ def timeline_layout(dev_events:list[tuple[int, int, float, DevEvent]], start_ts:
       elif isinstance(e.name.ret, int):
         membw = e.name.ret / (dur * 1e-6)
         fmt.append(f"{membw*1e-9:.0f} GB/s" if membw < 1e13 else f"{membw*1e-12:.0f} TB/s")
+      if e.name.tb: fmt.append("TB:"+json.dumps(e.name.tb))
     events.append(struct.pack("<IIIIfI", enum_str(name, scache), option(ref), option(key), rel_ts(st,start_ts), dur, enum_str("\n".join(fmt),scache)))
   return struct.pack("<BI", 0, len(events))+b"".join(events) if events else None
 

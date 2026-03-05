@@ -1,5 +1,5 @@
 from __future__ import annotations
-import math
+import math, functools
 from tinygrad.tensor import Tensor
 from tinygrad.dtype import dtypes
 from tinygrad.helpers import prod, make_tuple, flatten, USE_ATOMICS
@@ -343,6 +343,10 @@ def _embedding_fwd(weight:Tensor, idx:Tensor) -> Tensor:
   arange = Tensor.arange(weight.shape[0], requires_grad=False, device=weight.device)
   return (arange == idx.unsqueeze(-1)).unsqueeze(-1).where(weight, 0).sum(-2, dtype=weight.dtype)
 
+@functools.cache
+def _embedding_fwd_fxn(wp, ip, device):
+  return _embedding_fwd(Tensor(wp, device=device), Tensor(ip, device=device))
+
 class Embedding:
   """
   A simple lookup table that stores embeddings of a fixed dictionary and size.
@@ -359,7 +363,9 @@ class Embedding:
 
   def __call__(self, idx:Tensor) -> Tensor:
     if not dtypes.is_int(idx.dtype): raise TypeError(f"Expected integer dtype for index in embedding, got {idx.dtype}")
-    if USE_ATOMICS: return Tensor.call(self.weight, idx, fxn=_embedding_fwd(self.weight.as_param(0), idx.as_param(1)), grad_fxn=_embedding_bwd)
+    if USE_ATOMICS:
+      fxn = _embedding_fwd_fxn(self.weight.as_param(0).uop, idx.as_param(1).uop, self.weight.device)
+      return Tensor.call(self.weight, idx, fxn=fxn, grad_fxn=_embedding_bwd)
     return _embedding_fwd(self.weight, idx)
 
 class LSTMCell:

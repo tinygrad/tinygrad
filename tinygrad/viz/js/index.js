@@ -284,6 +284,7 @@ function setFocus(key) {
       const prgSrc = ctxs[i+1].steps.findIndex(s => s.name === "View Source");
       if (prgSrc !== -1) html.append("a").text("View Source").on("click", () => switchCtx(i, prgSrc));
     }
+    if (e.arg.trace != null) html.append(() => traceBlock(JSON.parse(e.arg.trace.replace("TB:", "")).slice(1).reverse()));
   }
   if (eventType === EventTypes.BUF) {
     const [dtype, sz, nbytes, dur] = e.arg.tooltipText.split("\n");
@@ -417,9 +418,10 @@ async function renderProfiler(path, unit, opts) {
         // tiny device events go straight to the rewrite rule
         const key = k.startsWith("TINY") ? null : `${k}-${j}`;
         const labelHTML = label.map(l=>`<span style="color:${l.color}">${l.st}</span>`).join("");
-        let info = e.info != null ? "\n"+e.info : "";
-        if (info.startsWith("\nPC:")) data.pcToShape.set(key, {wave:dnum, pc:parseInt(e.info.split(":")[1]), st:e.st}); info = "";
-        const arg = { tooltipText:labelHTML+" N:"+shapes.length+"\n"+formatTime(e.dur)+info, bufs:[], key, ctx:shapeRef?.ctx, step:shapeRef?.step };
+        let info = e.info != null ? "\n"+e.info : "", trace = null
+        if (info.startsWith("\nPC:")) { data.pcToShape.set(key, {wave:dnum, pc:parseInt(e.info.split(":")[1]), st:e.st}); info = ""; }
+        if (info.startsWith("\nTB:")) { trace = info; info = ""; }
+        const arg = { tooltipText:labelHTML+" N:"+shapes.length+"\n"+formatTime(e.dur)+info, trace, bufs:[], key, ctx:shapeRef?.ctx, step:shapeRef?.step };
         if (e.key != null) shapeMap.set(e.key, key);
         // offset y by depth
         shapes.push({x:e.st, y:levelHeight*depth, width:e.dur, height:levelHeight, arg, label:opts.hideLabels ? null : label, fillColor });
@@ -724,6 +726,15 @@ function codeBlock(st, language, { loc, wrap }={}) {
   ret.appendChild(code);
   return ret;
 }
+function traceBlock(trace) {
+  const root = d3.create("pre").append("code").classed("hljs", true);
+  for (let i=trace.length-1; i>=0; i--) {
+    const [fp, lineno, fn, code] = trace[i];
+    root.append("div").style("margin-bottom", "2px").style("display","flex").text(fn+" ").append(() => pathLink(fp, lineno).node());
+    root.append("div").html(hljs.highlight(code, { language: "python" }).value).style("margin-bottom", "1ex");
+  }
+  return root.node().parentNode;
+}
 
 function toggleCls(prev, next, cls, value) {
   prev?.classList.remove(cls);
@@ -971,15 +982,7 @@ async function main() {
   metadata.innerHTML = "";
   if (ckey.includes("rewrites")) metadata.append(showIndexing.label, showCallSrc.label, showSink.label);
   if (step.code_line != null) metadata.appendChild(codeBlock(step.code_line, "python", { loc:step.loc, wrap:true }));
-  if (step.trace) {
-    const trace = d3.create("pre").append("code").classed("hljs", true);
-    for (let i=step.trace.length-1; i>=0; i--) {
-      const [fp, lineno, fn, code] = step.trace[i];
-      trace.append("div").style("margin-bottom", "2px").style("display","flex").text(fn+" ").append(() => pathLink(fp, lineno).node());
-      trace.append("div").html(hljs.highlight(code, { language: "python" }).value).style("margin-bottom", "1ex");
-      metadata.appendChild(trace.node().parentNode);
-    }
-  }
+  if (step.trace) metadata.appendChild(traceBlock(step.trace));
   if (data.uop != null) metadata.appendChild(codeBlock(data.uop, "python", { wrap:false })).classList.toggle("full-height", step.match_count === 0);
   // ** multi graph in one page
   if (!step.match_count) return;

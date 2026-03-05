@@ -95,7 +95,7 @@ def fold_divmod_general(d: UOp, correct_divmod_folding: bool) -> UOp|None:
 div_and_mod_symbolic = PatternMatcher([
   # ** 1. Fast Inline Rules **
   ((UPat.var("x")//UPat.cvar("c") + UPat.cvar("a"))//UPat.cvar("d"), lambda x,c,a,d: (x+a*c)//(c*d)
-    if c.vmin>0 and d.vmin>0 and ((x.vmin>=0 and a.vmin>=0) or (x.vmax<=0 and a.vmax<=0)) else None),  # (x//c+a)//d -> (x+a*c)//(c*d)
+    if c.vmin>0 and d.vmin>0 and x.vmin>=0 and a.vmin>=0 else None),  # (x//c+a)//d -> (x+a*c)//(c*d)
   (UPat.var("x", dtypes.index) // UPat.var("d"), lambda x,d: -(x//(-d)) if d.vmax < 0 else None),
   (UPat.var("x", dtypes.index) // UPat.var("d"), lambda x,d: -((-x)//d) if x.vmax <= 0 else None),
   ((UPat.var("x", dtypes.index)+UPat.cvar("c", vec=False)).named("n")//UPat.cvar("d", vec=False),
