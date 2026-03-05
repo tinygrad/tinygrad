@@ -32,7 +32,7 @@ def memory_plan_rewrite(linear:UOp, external_bufs:set[UOp]=frozenset()) -> tuple
   if not first_appearance: return linear, {}
 
   # phase 2: TLSF allocation per device
-  min_block_size = 32
+  min_block_size = 0x1000
   buffer_requests = sorted([((first_appearance[b], True), b) for b in first_appearance] +
                            [((last_appearance[b] + 1, False), b) for b in first_appearance], key=lambda x: x[0])
   total_memory = sum(round_up(b.arg * b.dtype.itemsize, min_block_size) for b in first_appearance) * 2
@@ -54,7 +54,7 @@ def memory_plan_rewrite(linear:UOp, external_bufs:set[UOp]=frozenset()) -> tuple
     replace_map[buf_uop] = UOp(Ops.BUFFER_VIEW, buf_uop.dtype, (arenas[buf_uop.device],), (buf_uop.arg, offset // buf_uop.dtype.itemsize))
 
   if DEBUG >= 1:
-    omem = sum(b.arg * b.dtype.itemsize for b in first_appearance) / 1e6
+    omem = sum(round_up(b.arg * b.dtype.itemsize, min_block_size) for b in first_appearance) / 1e6
     nmem = sum(round_up(peak, min_block_size) for peak, _ in peaks.values()) / 1e6
     if omem != nmem: print(f"memory reduced from {omem:.2f} MB -> {nmem:.2f} MB, {len(first_appearance)} -> {len(arenas)} bufs")
 
