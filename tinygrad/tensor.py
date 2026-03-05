@@ -3632,21 +3632,6 @@ class Tensor(OpMixin):
       w = w.pad_to(None, None, cin, None, None)
       x = x.pad_to(None, None, cin, None, None).reshape(bs, groups*cin, iy, ix)
 
-    # hacks for pitch alignment
-    if IMAGE == 1:
-      assert isinstance(ix, int) and isinstance(H, int)
-      added_width = 0
-      if (ix*groups*cin) % (64 // dtsz):
-        added_width = round_up(ix, 64 // (dtsz * math.gcd(groups * cin, 64 // dtsz))) - ix
-        ix = ix + added_width
-        x = x.pad_to(None, None, None, ix)
-
-      added_weight = 0
-      if (H*W*cin) % (64 // dtsz):
-        added_weight = round_up(H, 64 // (dtsz * math.gcd(W * cin, 64 // dtsz))) - H
-        H = H + added_weight
-        w = w.pad_to(None, None, None, H, None)
-
     # hack for non multiples of 4 on rcout
     added_output_channels = 0
     if rcout % 4 != 0 and not (rcout == 1 and groups%4 == 0):
@@ -3663,11 +3648,21 @@ class Tensor(OpMixin):
     else: w = w.reshape(cout//4,4,cin//4,4,H,W).permute(0,4,2,5,3,1)
 
     # contiguous creates the image, and early realize static weights (TODO: test for the static weight)
-    if IMAGE >= 2: x,w = x.cast(base_image_type((bs*iy, ix*groups*cin//4, 4))), w.cast(base_image_type((cout//4, H*W*cin, 4)))
-    if IMAGE == 1 and FLOAT16: x, w = x.cast(dtypes.half).contiguous().cast(dtypes.float), w.cast(dtypes.half).contiguous().cast(dtypes.float)
-    else: x, w = x.contiguous(), w.contiguous()
+    if IMAGE == 1:
+      # hacks for pitch alignment
+      assert isinstance(ix, int) and isinstance(H, int)
+      ALIGN = 64 // dtsz
+      x = x.pad_to(None, None, round_up(ix, ALIGN // math.gcd(groups * cin, ALIGN)), None)
+      w = w.pad_to((None, round_up(H, ALIGN // math.gcd(W * cin * 4, ALIGN))) + (None,) * (w.ndim - 2))
 
-    if IMAGE == 1 and added_weight: w, H = w[:, :-added_weight, ...], H - added_weight
+      if FLOAT16: x, w = x.cast(dtypes.half).contiguous().cast(dtypes.float), w.cast(dtypes.half).contiguous().cast(dtypes.float)
+      else: x, w = x.contiguous(), w.contiguous()
+
+      # undo alignment hacks
+      x, w = x[:, :, :ix, :], w[:, :H, ...]
+
+    elif IMAGE: x, w = x.cast(base_image_type((bs*iy, ix*groups*cin//4, 4))).contiguous(), w.cast(base_image_type((cout//4, H*W*cin, 4))).contiguous()
+    else: x, w = x.contiguous(), w.contiguous()
 
     # expand out
     rcin_hi, rcin_lo = (cin//4, 4) if cin >= 4 else (1, 1)
@@ -3675,9 +3670,6 @@ class Tensor(OpMixin):
     x = x.reshape(bs, iy, -1, groups, rcin_hi, rcin_lo)
     if cin_last: w = w.reshape(cout//4, H, rcin_hi, W, 4, rcin_lo)
     else: w = w.reshape(cout//4, H, rcin_hi, W, rcin_lo, 4).permute(0,1,2,3,5,4)
-
-    # undo pitch alignment hack
-    if IMAGE == 1 and added_width: x = x[:, :, :-added_width, ...]
 
     # prepare input
     x = x.permute(0,3,4,5,1,2).pad(self._resolve_pool_pads(padding,2))._pool((H,W), stride, dilation)# -> (bs, groups, rcin_hi, rcin_lo, oy, ox, H, W)
