@@ -21,7 +21,7 @@ OTHER_SIMD_OPS = {InstOp.OTHER_LDS_LOAD, InstOp.OTHER_LDS_STORE, InstOp.OTHER_LD
                   InstOp.OTHER_FLAT_STORE_128, InstOp.OTHER_GLOBAL_LOAD, InstOp.OTHER_GLOBAL_LOAD_VADDR,
                   InstOp.OTHER_GLOBAL_STORE_64, InstOp.OTHER_GLOBAL_STORE_96, InstOp.OTHER_GLOBAL_STORE_128,
                   InstOp.OTHER_GLOBAL_STORE_VADDR_128}
-OTHER_SIMD_OPS_RDNA4 = {InstOpRDNA4.OTHER_VMEM}
+OTHER_SIMD_OPS_RDNA4 = {InstOpRDNA4.OTHER_VMEM, InstOpRDNA4.OTHER_VMEM_5}
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # ROCPROF DECODER
@@ -210,12 +210,14 @@ class SQTTExamplesTestBase(unittest.TestCase):
 class TestSQTTExamplesRDNA3(SQTTExamplesTestBase):
   target = "gfx1100"
   expected = {
-    "profile_empty_run_0": [1744, 1801, 1854, 1890, 1917, 1822],
-    "profile_empty_run_1": [1744, 1801, 1854, 1886, 1921, 1906],
-    "profile_gemm_run_0": [1800, 1867, 1899, 1898, 1914, 1895, 1694, 1779, 1819, 1872, 1877, 1858, 1750, 1834, 1866, 1834, 1911, 1796],
-    "profile_gemm_run_1": [1806, 1874, 1837, 1885, 1907, 1906, 1694, 1778, 1810, 1873, 1885, 1867, 1750, 1834, 1866, 1856, 1903, 1897],
-    "profile_plus_run_0": [1744, 1878, 1854, 1890, 1878, 1910],
-    "profile_plus_run_1": [1744, 1878, 1854, 1886, 1921, 1909],
+    "profile_empty_run_0": [1974, 1961, 2014, 2065, 2092, 1998],
+    "profile_empty_run_1": [1979, 1972, 2019, 2070, 2097, 2003],
+    "profile_gemm_run_0": [2038, 11076, 2324, 2129, 2156, 2062],
+    "profile_gemm_run_1": [2038, 11037, 2318, 2129, 2156, 2062],
+    "profile_ops_run_0": [2038, 5070, 2078, 2129, 2156, 2062],
+    "profile_ops_run_1": [2038, 5007, 2078, 2129, 2156, 2062],
+    "profile_plus_run_0": [1979, 1979, 2030, 2070, 2097, 2003],
+    "profile_plus_run_1": [1979, 2043, 2030, 2070, 2097, 2003],
   }
 
 class TestSQTTExamplesRDNA4(SQTTExamplesTestBase): target = "gfx1200"

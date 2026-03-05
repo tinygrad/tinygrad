@@ -133,7 +133,7 @@ class InstOpRDNA4(Enum):
   VALU_SCL_TRANS = 0x99
   SALU_2 = 0x9b
   SALU_5 = 0x9c
-  OTHER_VMEM_1 = 0xbd
+  OTHER_VMEM = 0xbd
   OTHER_VMEM_5 = 0xc1
 
 # ═══════════════════════════════════════════════════════════════════════════════
