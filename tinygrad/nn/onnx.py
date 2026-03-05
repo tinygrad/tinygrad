@@ -890,6 +890,31 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
     return X.permute(*argsort(perm)) if perm else X
   def Upsample(X, scales, mode): return Resize(X=X, scales=scales, mode=mode)  # deprecated
 
+  def GridSample(X:Tensor, grid:Tensor, align_corners:int=0, mode:str="linear", padding_mode:str="zeros"):
+    N, C, H, W = (cast(int, d) for d in X.shape)
+    _, H_out, W_out, _ = (cast(int, d) for d in grid.shape)
+    # denormalize grid from [-1,1] to pixel coords
+    ix = (grid[..., 0] + 1) / 2 * (W - 1) if align_corners else ((grid[..., 0] + 1) * W - 1) / 2
+    iy = (grid[..., 1] + 1) / 2 * (H - 1) if align_corners else ((grid[..., 1] + 1) * H - 1) / 2
+    def _reflect(x:Tensor, lo:float, hi:float) -> Tensor:  # reflect coords into [lo, hi]
+      rng = hi - lo
+      x = ((x - lo).abs() % (2 * rng))
+      return (x > rng).where(2 * rng - x, x) + lo
+    def _sample(px:Tensor, py:Tensor) -> Tensor:
+      if padding_mode == "reflection":
+        px = _reflect(px, -0.5, W - 0.5) if not align_corners else _reflect(px, 0.0, W - 1.0)
+        py = _reflect(py, -0.5, H - 0.5) if not align_corners else _reflect(py, 0.0, H - 1.0)
+      mask = (px >= 0) & (px < W) & (py >= 0) & (py < H) if padding_mode == "zeros" else None
+      idx = py.clip(0, H-1).int() * W + px.clip(0, W-1).int()
+      val = X.reshape(N, C, H*W).gather(2, idx.unsqueeze(1).expand(N, C, H_out, W_out).reshape(N, C, -1)).reshape(N, C, H_out, W_out)
+      return mask.unsqueeze(1).where(val, 0) if mask is not None else val
+    if mode == "nearest": return _sample(ix.round(), iy.round())
+    if mode in ("linear", "bilinear"):
+      ix0, iy0, ix1, iy1 = ix.floor(), iy.floor(), ix.floor()+1, iy.floor()+1
+      w00, w01, w10, w11 = (ix1-ix)*(iy1-iy), (ix1-ix)*(iy-iy0), (ix-ix0)*(iy1-iy), (ix-ix0)*(iy-iy0)
+      return sum(w.unsqueeze(1) * _sample(px, py) for w, px, py in [(w00,ix0,iy0), (w01,ix0,iy1), (w10,ix1,iy0), (w11,ix1,iy1)])
+    raise NotImplementedError(f"GridSample mode {mode} not implemented")
+
   def TopK(X:Tensor, K:int|list[int], axis:int=-1, largest:int=1, sorted:int=1):  # noqa: A002 # pylint: disable=redefined-builtin
     val, idx = X.topk(_resolve_const(K), axis, bool(largest), bool(sorted))
     return val, idx.cast(dtypes.int64)
