@@ -1,5 +1,5 @@
 from __future__ import annotations
-import sys, argparse, typing, re, unicodedata, json, uuid, time, functools
+import sys, argparse, typing, re, unicodedata, json, uuid, time, functools, itertools
 from tinygrad import Tensor, nn, UOp, TinyJit, getenv, function
 from tinygrad.helpers import partition, DEBUG, Timing, GlobalCounters, stderr_log, colored
 from tinygrad.viz.serve import TCPServerWithReuse, HTTPRequestHandler
@@ -187,9 +187,7 @@ class Transformer:
     # TODO: add temperature
     return self.output(self.output_norm(x))[:, -1, :].softmax(-1, dtype="float").argmax(-1, keepdim=True)
 
-  def __call__(self, tokens:Tensor, start_pos:int|UOp=0) -> Tensor:
-    #return (self.forward_jit if getenv("JIT", 1) and tokens.shape[1] == 1 and isinstance(start_pos, UOp) else self.forward)(tokens, start_pos)
-    return self.forward_jit(tokens, start_pos)
+  def __call__(self, tokens:Tensor, start_pos:int|UOp=0) -> Tensor: return self.forward_jit(tokens, start_pos)
 
   @staticmethod
   def from_gguf(gguf:Tensor, max_context:int|None=None, realize=bool(getenv("REALIZE", 1))) -> tuple[Transformer, dict]:
@@ -228,23 +226,19 @@ class Transformer:
     return model, kv
 
   def generate(self, tokens:list[int]):
-    max_prefill = 256
     v_start_pos = UOp.variable("start_pos", 0, self.max_context-1)
-    v_toks = UOp.variable("toks", 1, max_prefill) # <-- max prefill (determines ram usage for activations)
+    v_toks = UOp.variable("toks", 1, self.max_context)
+    # assign all input tokens once, then slice from start_pos for the model call
+    t = Tensor(tokens + [0] * (self.max_context - len(tokens)), dtype="int32").reshape(1, self.max_context)
     # recompute start_pos from what's currently valid in the kv cache
-    start_pos = next((i for i, (a, b) in enumerate(zip(tokens, self._cached_tokens)) if a != b), min(len(tokens), len(self._cached_tokens)))
-    # NOTE: the input buffer must always be the same size so the schedule cache key is identical across calls
-    tok_data = tokens[start_pos:]
-    t = Tensor(tok_data + [0] * (max_prefill - len(tok_data)), dtype="int32").reshape(1, max_prefill)
+    start_pos = sum(1 for _ in itertools.takewhile(lambda ab: ab[0] == ab[1], zip(tokens, self._cached_tokens)))
     while len(tokens) < self.max_context:
-      t = self(t[:, :v_toks.bind(len(tok_data))], v_start_pos.bind(start_pos))
-      start_pos += len(tok_data)
-      next_id = int(t.item())
-      tokens.append(next_id)
+      sp, nt = v_start_pos.bind(start_pos), v_toks.bind(len(tokens) - start_pos)
+      t[:, sp+nt:sp+nt+1] = out = self(t[:, sp:sp+nt], sp)
+      start_pos = len(tokens)
+      tokens.append(int(out.item()))
       self._cached_tokens = tokens[:]
-      yield next_id
-      tok_data = [next_id]
-      t = Tensor([next_id] + [0] * (max_prefill - 1), dtype="int32").reshape(1, max_prefill)
+      yield tokens[-1]
 
 models = {
   "llama3.2:1b": "https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF/resolve/main/Llama-3.2-1B-Instruct-Q6_K.gguf",
