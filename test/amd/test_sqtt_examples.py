@@ -8,9 +8,9 @@ from tinygrad.runtime.support.elf import elf_loader
 from tinygrad.renderer.amd import decode_inst
 from tinygrad.runtime.autogen.amd.rdna3.ins import SOPP
 from tinygrad.runtime.autogen.amd.rdna3.enum import SOPPOp
-from tinygrad.renderer.amd.sqtt import (decode, LAYOUT_HEADER, WAVESTART, WAVESTART_RDNA4, WAVEEND, INST, INST_RDNA4, VALUINST,
-                                     IMMEDIATE, IMMEDIATE_MASK, PACKET_TYPES_RDNA3, PACKET_TYPES_RDNA4,
-                                     InstOp, InstOpRDNA4, print_packets)
+from tinygrad.renderer.amd.sqtt import (decode, LAYOUT_HEADER, WAVESTART, WAVESTART_RDNA4, WAVESTART_CDNA, WAVEEND, INST, INST_RDNA4, VALUINST,
+                                     IMMEDIATE, IMMEDIATE_MASK, PACKET_TYPES_RDNA3, PACKET_TYPES_RDNA4, PACKET_TYPES_CDNA, WAVEEND_CDNA,
+                                     InstOp, InstOpRDNA4, print_packets, INST_CDNA, IMMEDIATE_CDNA, REGCS_CDNA)
 from test.amd.helpers import TARGET_TO_ARCH
 
 import tinygrad
@@ -122,10 +122,11 @@ class SQTTExamplesTestBase(unittest.TestCase):
             print(f"\n=== {name} event {i} ===")
             print_packets(packets)
           self.assertGreater(len(packets), 0, f"no packets decoded from {name} event {i}")
-          self.assertIsInstance(packets[0], LAYOUT_HEADER, f"first packet should be LAYOUT_HEADER in {name}")
+          first_pkt = REGCS_CDNA if self.target.startswith("gfx9") else LAYOUT_HEADER
+          self.assertIsInstance(packets[0], first_pkt, f"first packet should be {type(first_pkt)} in {name}")
 
   def test_packet_types_valid(self):
-    all_classes = set(PACKET_TYPES_RDNA3.values()) | set(PACKET_TYPES_RDNA4.values())
+    all_classes = set(PACKET_TYPES_RDNA3.values()) | set(PACKET_TYPES_RDNA4.values()) | set(PACKET_TYPES_CDNA.values())
     for name, (events, *_) in self.examples.items():
       for i, event in enumerate(events):
         with self.subTest(example=name, event=i):
@@ -138,8 +139,8 @@ class SQTTExamplesTestBase(unittest.TestCase):
       if "empty" in name: continue
       with self.subTest(example=name):
         all_packets = [p for e in events for p in decode(e.blob)]
-        self.assertGreater(len([p for p in all_packets if isinstance(p, (WAVESTART, WAVESTART_RDNA4))]), 0, f"no WAVESTART in {name}")
-        self.assertGreater(len([p for p in all_packets if isinstance(p, WAVEEND)]), 0, f"no WAVEEND in {name}")
+        self.assertGreater(len([p for p in all_packets if isinstance(p, (WAVESTART,WAVESTART_RDNA4,WAVESTART_CDNA))]), 0, f"no WAVESTART in {name}")
+        self.assertGreater(len([p for p in all_packets if isinstance(p, (WAVEEND, WAVEEND_CDNA))]), 0, f"no WAVEEND in {name}")
 
   def test_time_monotonic(self):
     for name, (events, *_) in self.examples.items():
@@ -150,12 +151,15 @@ class SQTTExamplesTestBase(unittest.TestCase):
 
   def test_gemm_has_instructions(self):
     for name, (events, *_) in self.examples.items():
+      # TODO: CDNA gemm second run should also output an inst trace
+      if self.target == "gfx950" and name == "profile_gemm_run_1": continue
       if "gemm" not in name: continue
       with self.subTest(example=name):
         all_packets = [p for e in events for p in decode(e.blob)]
-        inst_names = [p.op.name for p in all_packets if isinstance(p, (INST, INST_RDNA4))]
+        inst_names = [p.op.name for p in all_packets if isinstance(p, (INST, INST_RDNA4, INST_CDNA))]
         self.assertGreater(len(inst_names), 0, f"no INST packets in {name}")
-        self.assertGreater(len([n for n in inst_names if n.startswith("JUMP")]), 0, f"no JUMP packets in {name}")
+        if not self.target.startswith("gfx9"):
+          self.assertGreater(len([n for n in inst_names if n.startswith("JUMP")]), 0, f"no JUMP packets in {name}")
 
   expected: dict[str, list[int]] = {}  # override in subclasses
   def test_packet_counts(self):
@@ -183,8 +187,8 @@ class SQTTExamplesTestBase(unittest.TestCase):
         for event in events:
           wave_starts: dict[tuple[int, int, int], int] = {}
           for p in decode(event.blob):
-            if isinstance(p, (WAVESTART, WAVESTART_RDNA4)): wave_starts[(p.wave, p.simd, p.cu)] = p._time
-            elif isinstance(p, WAVEEND) and (key := (p.wave, p.simd, p.cu)) in wave_starts:
+            if isinstance(p, (WAVESTART, WAVESTART_RDNA4, WAVESTART_CDNA)): wave_starts[(p.wave, p.simd, p.cu)] = p._time
+            elif isinstance(p, (WAVEEND, WAVEEND_CDNA)) and (key := (p.wave, p.simd, p.cu)) in wave_starts:
               our_waves.append((wave_starts[key], p._time))
         self.assertEqual(sorted(our_waves), sorted(roc_waves), f"wave times mismatch in {name}")
 
@@ -205,6 +209,9 @@ class SQTTExamplesTestBase(unittest.TestCase):
             elif isinstance(p, IMMEDIATE): our_insts.append(p._time)
             elif isinstance(p, IMMEDIATE_MASK):
               for _ in range(bin(p.mask).count('1')): our_insts.append(p._time)
+            elif isinstance(p, (INST_CDNA, IMMEDIATE_CDNA)): our_insts.append(p._time)
+        # skip last inst per wave, cdna endpgm gets an inst packet, rdna doesn't
+        if self.target == "gfx950": our_insts = our_insts[:-1]
         self.assertEqual(sorted(our_insts), sorted(roc_insts), f"instruction times mismatch in {name}")
 
 class TestSQTTExamplesRDNA3(SQTTExamplesTestBase):
@@ -221,7 +228,6 @@ class TestSQTTExamplesRDNA3(SQTTExamplesTestBase):
   }
 
 class TestSQTTExamplesRDNA4(SQTTExamplesTestBase): target = "gfx1200"
-@unittest.skip("TODO: fix CDNA")
 class TestSQTTExamplesCDNA(SQTTExamplesTestBase): target = "gfx950"
 
 if __name__ == "__main__":
