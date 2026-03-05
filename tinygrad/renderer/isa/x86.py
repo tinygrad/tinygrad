@@ -44,7 +44,7 @@ class X86Ops(FastEnum):
   # jumps
   JNE = auto(); JE = auto(); JL = auto(); JB = auto(); JGE = auto(); JMP = auto()
   # vectorize / gep
-  VSHUFPS = auto(); VINSERTPS = auto(); VPSRLDQ = auto()
+  VSHUFPS = auto(); VSHUFPD = auto(); VINSERTPS = auto(); VPSRLDQ = auto()
   VPEXTRB = auto(); VPEXTRW = auto(); VPEXTRD = auto(); VPEXTRQ = auto()
   VPINSRB = auto(); VPINSRW = auto(); VPINSRD = auto(); VPINSRQ = auto()
   VPBROADCASTB = auto(); VPBROADCASTW = auto(); VPBROADCASTD = auto(); VPBROADCASTQ = auto()
@@ -105,7 +105,8 @@ class X86GroupOp:
                 X86Ops.VPINSRB, X86Ops.VPINSRW, X86Ops.VPINSRD, X86Ops.VPINSRQ, X86Ops.VPAND, X86Ops.VPOR, X86Ops.VPXOR, X86Ops.VPSLLVD,
                 X86Ops.VPSLLVQ, X86Ops.VPSRLVD, X86Ops.VPSRLVQ, X86Ops.VPSRAVD, X86Ops.CMOVNE, X86Ops.CMOVE, X86Ops.CMOVL, X86Ops.CMOVB,
                 X86Ops.VMAXSS, X86Ops.VMAXSD, X86Ops.VMAXPS, X86Ops.VMAXPD, X86Ops.VMINSS, X86Ops.VMINSD, X86Ops.VMINPS, X86Ops.VMINPD,
-                X86Ops.VCVTSI2SS, X86Ops.VCVTSI2SD, X86Ops.VCVTSS2SD, X86Ops.VCVTSD2SS, X86Ops.VUCOMISS, X86Ops.VUCOMISD, X86Ops.IDIV}
+                X86Ops.VCVTSI2SS, X86Ops.VCVTSI2SD, X86Ops.VCVTSS2SD, X86Ops.VCVTSD2SS, X86Ops.VUCOMISS, X86Ops.VUCOMISD, X86Ops.IDIV,
+                X86Ops.VSHUFPD}
 
   # X86Ops whose third src can read from memory NOTE: these are TwoAddress so the third src is actually the second
   ReadMem3rd = {X86Ops.VFMADD213SS, X86Ops.VFMADD213SD, X86Ops.VFMADD213PS, X86Ops.VFMADD213PD}
@@ -249,11 +250,26 @@ def vcmp(x:UOp) -> UOp:
   return x.ins(X86Ops.VCMPSD if x.dtype.count == 1 else X86Ops.VCMPPD, src=x.src + (v,))
 
 # vshufps xmm2, xmm0, xmm1, imm
-# xmm2 selects its lower 2 32 bits from xmm0 and its upper 2 32 bits from xmm1 according to imm
+# for 128 bit xmm2 selects its lower 2 32 bits from xmm0 and its upper 2 32 bits from xmm1 according to imm
+# for 256 bit ymm2 repeats the shuffle for its upper 128 bits selecting from the upper 128 bits of ymm0 and ymm1
 def vshufps(x:UOp) -> UOp|None:
+  def _idx(i:int) -> int: return x.src[i].arg[0] if x.src[i].op is Ops.GEP else 0
   def _in(i:int) -> UOp: return s.src[0] if (s:=x.src[i]).op is Ops.GEP else s
-  if len(x.src) != 4 or (a:=_in(0)) is not _in(1) or (b:=_in(2)) is not _in(3): return None
-  return x.ins(X86Ops.VSHUFPS, src=(a, b, imm(dtypes.uint8, sum(s.arg[0] << 2*i if s.op is Ops.GEP else 0 for i,s in enumerate(x.src)))))
+  a, b = _in(0), _in(2)
+  if not (a is _in(1) and b is _in(3)) or any(_idx(i) > 3 for i in range(4)): return None
+  if len(x.src) == 8 and (not (a is _in(4) is _in(5) and b is _in(6) is _in(7)) or any(_idx(i+4) != _idx(i)+4 for i in range(4))): return None
+  return x.ins(X86Ops.VSHUFPS, src=(a, b, imm(dtypes.uint8, sum(_idx(i) << 2*i for i in range(4)))))
+
+# vshufpd xmm2, xmm0, xmm1, imm
+# for 128 bit xmm2 selects its lower 64 bits from xmm0 and its upper 64 bits from xmm1 according to imm
+# for 256 bit ymm2 additionally selects its upper 128 bits from the upper 128 bits of ymm0 and ymm1 from following the same constraint
+def vshufpd(x:UOp) -> UOp:
+  def _idx(i:int) -> int: return x.src[i].arg[0] if x.src[i].op is Ops.GEP else 0
+  def _in(i:int) -> UOp: return s.src[0] if (s:=x.src[i]).op is Ops.GEP else s
+  a, b = _in(0), _in(1)
+  if _idx(0) > 1 or _idx(1) > 1: return None
+  if len(x.src) == 4 and not (a is _in(2) and b is _in(3) and _idx(2) > 1 and _idx(3) > 1): return None
+  return x.ins(X86Ops.VSHUFPD, src=(a, b, imm(dtypes.uint8, sum(_idx(i) << i for i in range(len(x.src))))))
 
 # vinsertps xmm2, xmm0, xmm1, imm
 # inserts any 32 bit element in xmm1 into any position in xmm0 according to immm, result is written to xmm2
@@ -278,7 +294,9 @@ def vpbroadcast(ctx:IselContext, x:UOp, y:UOp) -> UOp:
   n = x.ins({1: X86Ops.VPBROADCASTB, 2: X86Ops.VPBROADCASTW, 4: X86Ops.VPBROADCASTD, 8: X86Ops.VPBROADCASTQ}[y.dtype.itemsize], src=(y,))
   if is_foldable_load(ctx, n, y): return n
   # if there isn't a load we can fold we need to move y from gpr to xmm
-  return n.replace(src=(y.bitcast(dtypes.float32 if y.dtype.itemsize < 8 else dtypes.float64),))
+  # this is hacky but required because int.vec(1) isn't supported
+  y = y if y.dtype.itemsize > 1 else y.cast(dtypes.int16)
+  return n.replace(src=(y.bitcast({2:dtypes.float16, 4:dtypes.float32, 8:dtypes.float64}[y.dtype.itemsize]),))
 
 def div(ctx:IselContext, x:UOp):
   # zero extend or move src[0] to x
@@ -321,10 +339,10 @@ def abi(ctx:IselContext, x:UOp):
   return def_reg(x.dtype, (RDI, RSI, RDX, RCX, GPR[8], GPR[9])[i]) if i < 6 else _stack_arg((i-5)*8)
 
 dts = dtypes.ints + (dtypes.bool, dtypes.float16, dtypes.float32, dtypes.float64)
-dt_16bit = tuple(dt.vec(l) for dt in dts for l in [2,1] if dt.vec(l).itemsize == 2 and dt.vec(l) not in dtypes.int16s)
-dt_32bit = tuple(dt.vec(l) for dt in dts for l in [4,2,1] if dt.vec(l).itemsize == 4 and dt.vec(l) not in dtypes.int32s)
-dt_64bit = tuple(dt.vec(l) for dt in dts for l in [8,4,2,1] if dt.vec(l).itemsize == 8 and dt.vec(l) not in dtypes.int64s)
-dt_128bit = tuple(dt.vec(l) for dt in dts for l in [16,8,4,2,1] if dt.vec(l).itemsize == 16)
+dt_16bit = tuple(dt.vec(l) for dt in dts for l in [2,1] if l*dt.itemsize == 2 and dt not in dtypes.int16s)
+dt_32bit = tuple(dt.vec(l) for dt in dts for l in [4,2,1] if l*dt.itemsize == 4 and dt not in dtypes.int32s)
+dt_64bit = tuple(dt.vec(l) for dt in dts for l in [8,4,2,1] if l*dt.itemsize == 8 and dt not in dtypes.int64s)
+dt_128bit = tuple(dt.vec(l) for dt in dts for l in [16,8,4,2,1] if l*dt.itemsize == 16)
 
 isel_matcher = PatternMatcher([
   # **** Op -> Op ****
@@ -407,12 +425,13 @@ isel_matcher = PatternMatcher([
   # for float16 we route the srcs through gprs unless we can fold them, this is suboptimal for values in xmms, in that case we want vpunpcklwd
   (UPat(Ops.VECTORIZE, dtypes.float16, name="x"), lambda ctx,x:
    vpins(x.replace(src=tuple(s if is_foldable_load(ctx, x, s) else s.bitcast(dtypes.int16) for s in x.src)))),
-  (UPat(Ops.VECTORIZE, dtypes.float32, name="x"), vshufps),
+  (UPat(Ops.VECTORIZE, (dtypes.float32.vec(4), dtypes.float32.vec(8)), name="x"), vshufps),
+  (UPat(Ops.VECTORIZE, (dtypes.float64.vec(2), dtypes.float64.vec(4)), name="x"), vshufpd),
   (UPat(Ops.VECTORIZE, dtypes.float32, name="x"), vinsertps),
   (UPat.var("y", dtypes.ints+(dtypes.bool,)).broadcast(name="x"), vpbroadcast),
   (UPat(Ops.VECTORIZE, dtypes.ints+(dtypes.bool,), name="x"), vpins),
   # gep
-  (UPat.var("y", dtypes.int8s).gep(name="x"), lambda y,x: x.ins(X86Ops.VPEXTRB, src=(y, imm(dtypes.uint8, x.arg[0])))),
+  (UPat.var("y", dtypes.int8s+(dtypes.bool,)).gep(name="x"), lambda y,x: x.ins(X86Ops.VPEXTRB, src=(y, imm(dtypes.uint8, x.arg[0])))),
   (UPat.var("y", dtypes.int16s).gep(name="x"), lambda y,x: x.ins(X86Ops.VPEXTRW, src=(y, imm(dtypes.uint8, x.arg[0])))),
   (UPat.var("y", dtypes.int32s).gep(name="x"), lambda y,x: x.ins(X86Ops.VPEXTRD, src=(y, imm(dtypes.uint8, x.arg[0])))),
   (UPat.var("y", dtypes.int64s).gep(name="x"), lambda y,x: x.ins(X86Ops.VPEXTRQ, src=(y, imm(dtypes.uint8, x.arg[0])))),
@@ -643,7 +662,7 @@ def encode(x:UOp, opc:int, reg:int|None=None, pp:int=0, sel:int=0, we:int=0) -> 
     if w | r | _x | b | (reg_sz == 1 & reg >> 2) | (rm_sz == 1 & rm >> 2): inst += bytes([0b0100 << 4 | w << 3 | r << 2 | _x << 1 | b])
   # OPCODE byte
   # legacy 8bit opcodes are 1 less than 16-64bit versions, with these exceptions
-  real_opc = opc-1 if (rm_sz == 1 or reg_sz == 1) and x.arg not in {X86Ops.SETB, X86Ops.SETE, X86Ops.SETL, X86Ops.SETNE, X86Ops.LEA} else opc
+  real_opc = opc-1 if (rm_sz == 1 or reg_sz == 1) and not sel and x.arg not in {X86Ops.SETB, X86Ops.SETE, X86Ops.SETL, X86Ops.SETNE, X86Ops.LEA} else opc
   inst += real_opc.to_bytes((real_opc.bit_length() + 7) // 8, 'big')
   # MODRM byte
   # now we only care about the lower 3 bits
@@ -774,7 +793,8 @@ encodings = {
   X86Ops.VBROADCASTSS: lambda x: encode(x, 0x18, pp=1, sel=2), X86Ops.VPSRLDQ: lambda x: encode(x, 0x73, reg=3, pp=1, sel=1),
   X86Ops.VPINSRB: lambda x: encode(x, 0x20, pp=1, sel=3), X86Ops.VPINSRW: lambda x: encode(x, 0xC4, pp=1, sel=1),
   X86Ops.VPINSRD: lambda x: encode(x, 0x22, pp=1, sel=3), X86Ops.VPINSRQ: lambda x: encode(x, 0x22, pp=1, sel=3, we=1),
-  X86Ops.VSHUFPS: lambda x: encode(x, 0xC6, pp=0, sel=1), X86Ops.VINSERTPS: lambda x: encode(x, 0x21, pp=1, sel=3),
+  X86Ops.VSHUFPS: lambda x: encode(x, 0xC6, pp=0, sel=1), X86Ops.VSHUFPD: lambda x: encode(x, 0xC6, pp=1, sel=1),
+  X86Ops.VINSERTPS: lambda x: encode(x, 0x21, pp=1, sel=3),
   # extract
   X86Ops.VPEXTRB: lambda x: encode(x, 0x14, pp=1, sel=3), X86Ops.VPEXTRW: lambda x: encode(x, 0x15, pp=1, sel=3),
   X86Ops.VPEXTRD: lambda x: encode(x, 0x16, pp=1, sel=3), X86Ops.VPEXTRQ: lambda x: encode(x, 0x16, pp=1, sel=3, we=1),

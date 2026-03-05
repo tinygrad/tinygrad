@@ -34,7 +34,8 @@ def alloc(ctx:RegallocContext, cons:tuple[Register, ...], i:int) -> Register:
   reg,vreg = max(((r,live_inv.get(r)) for r in cons),
                 key=lambda rv: next((j-i for j in ([] if rv[1] is None else ctx.live_range[rv[1]]) if j >= i), float('inf')))
   if vreg is not None and vreg not in ctx.spills and ctx.live_range[vreg][-1] >= i:
-    sz = ctx.vreg_to_rewrite[vreg].dtype.itemsize if not isinstance(ctx.vreg_to_rewrite[vreg].dtype, PtrDType) else 8
+    dt = ctx.vreg_to_rewrite[vreg].dtype
+    sz = dt.scalar().itemsize * dt.count if not isinstance(dt, PtrDType) else 8
     assert sz > 0
     offset = ctx.stack_size + (sz - ctx.stack_size % sz) % sz
     ctx.spills[vreg] = UOp.const(dtypes.int32, offset)
