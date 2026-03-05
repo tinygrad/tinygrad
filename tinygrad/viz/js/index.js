@@ -284,7 +284,7 @@ function setFocus(key) {
       const prgSrc = ctxs[i+1].steps.findIndex(s => s.name === "View Source");
       if (prgSrc !== -1) html.append("a").text("View Source").on("click", () => switchCtx(i, prgSrc));
     }
-    if (e.arg.trace != null) html.append(() => traceBlock(JSON.parse(e.arg.trace.replace("TB:", ""))));
+    if (e.arg.trace != null) html.append(() => traceBlock(JSON.parse(e.arg.trace.replace("TB:", "")).slice(1).reverse()));
   }
   if (eventType === EventTypes.BUF) {
     const [dtype, sz, nbytes, dur] = e.arg.tooltipText.split("\n");
