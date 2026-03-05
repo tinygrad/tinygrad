@@ -177,6 +177,7 @@ class Transformer:
     self.output_norm = nn.RMSNorm(dim, norm_eps)
     self.output = nn.Linear(dim, vocab_size, bias=False)
     self.max_context = max_context
+    self._cached_tokens: list[int] = []
     # JIT is used if T=1 and start_pos is a UOp. TODO: make this not needed by including T in the JIT and making start_pos always a UOp
     self.forward_jit = TinyJit(self.forward)
 
@@ -226,18 +227,21 @@ class Transformer:
       Tensor.realize(*params)
     return model, kv
 
-  def generate(self, tokens:list[int], start_pos=0):
-    v_start_pos = UOp.variable("start_pos", 0, self.max_context-1)
+  def generate(self, tokens:list[int]):
     max_prefill = 256
+    v_start_pos = UOp.variable("start_pos", 0, self.max_context-1)
     v_toks = UOp.variable("toks", 1, max_prefill) # <-- max prefill (determines ram usage for activations)
+    # recompute start_pos from what's currently valid in the kv cache
+    start_pos = next((i for i, (a, b) in enumerate(zip(tokens, self._cached_tokens)) if a != b), min(len(tokens), len(self._cached_tokens)))
     # NOTE: the input buffer must always be the same size so the schedule cache key is identical across calls
     tok_data = tokens[start_pos:]
     t = Tensor(tok_data + [0] * (max_prefill - len(tok_data)), dtype="int32").reshape(1, max_prefill)
     while len(tokens) < self.max_context:
       t = self(t[:, :v_toks.bind(len(tok_data))], v_start_pos.bind(start_pos))
+      start_pos += len(tok_data)
       next_id = int(t.item())
       tokens.append(next_id)
-      start_pos = len(tokens) - 1
+      self._cached_tokens = tokens[:]
       yield next_id
       tok_data = [next_id]
       t = Tensor([next_id] + [0] * (max_prefill - 1), dtype="int32").reshape(1, max_prefill)
@@ -369,7 +373,7 @@ if __name__ == "__main__":
 
   # do benchmark
   if args.benchmark:
-    gen = model.generate(toks:=[bos_id or 0], 0)
+    gen = model.generate(toks:=[bos_id or 0])
     for _ in range(args.benchmark):
       GlobalCounters.reset()
       with Timing(on_exit=lambda x: f", {1e9/x:6.2f} tok/s, {GlobalCounters.global_mem/x:7.2f} GB/s,"
@@ -383,12 +387,11 @@ if __name__ == "__main__":
   # interactive chat
   ids: list[int] = [bos_id] if bos_id is not None else []
   while 1:
-    start_pos = max(len(ids) - 1, 0)
     try:
       ids += tok.role("user") + tok.encode(input('>>> ')) + tok.end_turn(eos_id) + tok.role("assistant")
     except EOFError:
       break
-    for next_id in model.generate(ids, start_pos):
+    for next_id in model.generate(ids):
       sys.stdout.write(tok.decode([next_id]) if next_id != eos_id else "\n\n")
       sys.stdout.flush()
       if next_id == eos_id: break
