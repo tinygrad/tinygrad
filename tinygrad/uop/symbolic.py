@@ -34,7 +34,9 @@ propagate_invalid = PatternMatcher([
   # TODO: when can this happen? and is it always safe to just drop invalid?
   *((invalid_gate.alu(op, UPat.var("y")).named("alu"), lambda cond,x,y,alu,i: x.alu(alu.op,y)) for op in GroupOp.Comparison),
   # alu with invalid -> invalid
-  *((invalid_pat.alu(op, UPat(dtype=dtypes.index)), lambda i: i) for op in GroupOp.Binary-GroupOp.Comparison),
+  *((invalid_pat.alu(op, UPat()), lambda i: i) for op in GroupOp.Binary-GroupOp.Comparison),
+  # normalize where(cond, Invalid, val) -> where(~cond, val, Invalid)
+  (UPat.var("cond").where(invalid_pat, UPat.var("val")), lambda cond, i, val: cond.logical_not().where(val, i)),
 ])
 
 symbolic_simple = propagate_invalid + PatternMatcher([
@@ -412,6 +414,10 @@ sym = symbolic+pm_simplify_valid+PatternMatcher([
   # fold gated LOAD/STORE
   (UPat((Ops.LOAD, Ops.STORE), src=(UPat().index(UPat.const(dtypes.index, Invalid)).or_casted(),), allow_any_len=True, name="x"),
     lambda x: UOp(Ops.NOOP) if x.op is Ops.STORE else x.const_like(0)), # invalid store does nothing. invalid load produces 0
+  (UPat(Ops.STORE, src=(UPat(), invalid_pat), allow_any_len=True), lambda i: UOp(Ops.NOOP)),
+  # store of where with invalid -> gated store
+  (UPat(Ops.STORE, src=(UPat(Ops.INDEX, name="index"), UPat.var("cond").where(UPat.var("val"), invalid_pat)), allow_any_len=True, name="store"),
+   lambda index, cond, val, store, i: UOp.store(index.src[0].index(cond.where(index.src[1], UOp.invalid())), val, *store.src[2:])),
   ((UPat.var("x") * UPat.var("x")).reciprocal(), lambda x: x.reciprocal()*x.reciprocal()),  # 1/(x^c) -> (1/x)^c
   ((UPat.var("x") * UPat.var("x") * UPat.var("x")).reciprocal(), lambda x: x.reciprocal()*x.reciprocal()*x.reciprocal()),
   ((UPat.var("x") * UPat.cvar("c")).reciprocal(), lambda x,c: x.reciprocal()*c.reciprocal()), # 1/(x*c) -> (1/c)*(1/x)
