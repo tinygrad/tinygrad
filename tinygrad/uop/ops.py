@@ -246,9 +246,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
         inner_shape = self.src[0]._shape
         if inner_shape is None: return None
         # substitute internal PARAMs in the shape with corresponding args
-        args = self.src[1:]
-        subs = {x:args[x.arg] for s in inner_shape if isinstance(s, UOp) for x in s.toposort() if x.op is Ops.PARAM and x.arg < len(args)}
-        return tuple(s.substitute(subs) if isinstance(s, UOp) else s for s in inner_shape)
+        return tuple(graph_rewrite(s, _pm_resolve_params, self.src[1:], walk=True) if isinstance(s, UOp) else s for s in inner_shape)
 
       # TODO: disallow shape changing bitcast
       case Ops.BITCAST:
@@ -1422,6 +1420,7 @@ pm_lower_index_dtype = PatternMatcher([
 def _index_to_concrete_int(u:UOp) -> UOp: return graph_rewrite(u.sink(), pm_lower_index_dtype).src[0]
 
 _substitute = PatternMatcher([(UPat(tuple(Ops), name="x"), lambda ctx,x: ctx.get(x,None))])
+_pm_resolve_params = PatternMatcher([(UPat(Ops.PARAM, name="p"), lambda ctx,p: ctx[p.arg])])
 _remove_all_tags = PatternMatcher([(UPat(GroupOp.All, name="x"), lambda x: x.replace(tag=None) if x.tag is not None else None)])
 
 def gate_kernel_sink(x:UOp) -> bool:

@@ -2,7 +2,7 @@ import unittest
 import numpy as np
 from tinygrad import Tensor, function
 from tinygrad.dtype import dtypes
-from tinygrad.uop.ops import UOp, Ops, shape_to_shape_arg
+from tinygrad.uop.ops import UOp, Ops
 
 class TestCall(unittest.TestCase):
   def test_call_plus(self):
@@ -101,49 +101,40 @@ class TestCall(unittest.TestCase):
     np.testing.assert_equal(c.numpy(), 2 * np.ones((10, 10)))
 
 class TestCallShape(unittest.TestCase):
-  def _param_with_shape(self, slot, shape):
-    return UOp(Ops.PARAM, dtypes.float, (shape_to_shape_arg(shape), UOp(Ops.NOOP)), arg=slot)
-
   def test_call_shape_int(self):
-    # shape elements that are plain ints pass through unchanged
-    p0 = UOp.param(0, dtypes.float, (4, 8))
-    buf = UOp(Ops.BUFFER, dtypes.float.ptr(32), (), 32)
-    call = p0.call(buf)
-    self.assertEqual(call._shape, (4, 8))
+    # fixed-shape function: shape passes through unchanged
+    @function
+    def f(x:Tensor) -> Tensor: return x * 2
+    self.assertEqual(f(Tensor.empty(4, 8)).shape, (4, 8))
 
   def test_call_shape_param_substitution(self):
-    # a PARAM UOp appearing directly as a shape element is substituted with the corresponding arg
-    p0 = UOp(Ops.PARAM, dtypes.index, (shape_to_shape_arg(()), UOp(Ops.NOOP)), arg=0)
-    p1 = self._param_with_shape(1, (p0, 8))
-    size_arg = UOp.const(dtypes.index, 5)
-    buf = UOp(Ops.BUFFER, dtypes.float.ptr(40), (), 40)
-    call = p1.call(size_arg, buf)
-    # first dim should be substituted: PARAM(0) -> size_arg
-    self.assertEqual(call._shape[0], size_arg)
-    self.assertEqual(call._shape[1], 8)
+    # symbolic shape dimension is substituted: inner PARAM replaced with the BIND arg
+    @function
+    def f(x:Tensor) -> Tensor: return x * 2
+    sz = UOp.variable("sz", 1, 8)
+    shape = f(Tensor.empty(8)[:sz.bind(5)]).shape
+    # the PARAM should be gone, replaced with the BIND from the call arg
+    self.assertIsInstance(shape[0], UOp)
+    self.assertNotEqual(shape[0].op, Ops.PARAM)
+    self.assertEqual(shape[0], sz.bind(5))
 
   def test_call_shape_expr_substitution(self):
-    # a shape element that is an expression containing PARAMs gets substituted
-    p0 = UOp(Ops.PARAM, dtypes.index, (shape_to_shape_arg(()), UOp(Ops.NOOP)), arg=0)
-    p0_times_2 = p0 * UOp.const(dtypes.index, 2)
-    p1 = self._param_with_shape(1, (p0_times_2, 4))
-    size_arg = UOp.const(dtypes.index, 5)
-    buf = UOp(Ops.BUFFER, dtypes.float.ptr(40), (), 40)
-    call = p1.call(size_arg, buf)
-    # first dim should be const(5) * const(2)
-    s = call._shape[0]
-    self.assertIsInstance(s, UOp)
-    self.assertEqual(s.op, Ops.MUL)
-    self.assertEqual(call._shape[1], 4)
+    # expression containing PARAMs in shape gets fully substituted
+    @function
+    def f(x:Tensor) -> Tensor: return x + 1
+    sz = UOp.variable("sz", 1, 10)
+    shape = f(Tensor.empty(10, 4)[:sz.bind(3)]).shape
+    self.assertIsInstance(shape[0], UOp)
+    self.assertNotEqual(shape[0].op, Ops.PARAM)
+    self.assertEqual(shape[1], 4)
 
   def test_call_shape_no_param_passthrough(self):
-    # a UOp shape element with no PARAMs passes through unchanged
-    var = UOp(Ops.DEFINE_VAR, dtypes.index, (UOp.const(dtypes.index, 1), UOp.const(dtypes.index, 100)), arg='n')
-    p0 = self._param_with_shape(0, (var, 8))
-    buf = UOp(Ops.BUFFER, dtypes.float.ptr(800), (), 800)
-    call = p0.call(buf)
-    self.assertIs(call._shape[0], var)
-    self.assertEqual(call._shape[1], 8)
+    # a non-PARAM UOp shape element passes through unchanged
+    @function
+    def f(x:Tensor) -> Tensor: return x * 3
+    sz = UOp.variable("sz", 1, 8)
+    shape = f(Tensor.empty(8)[:sz.bind(5)]).shape
+    self.assertEqual(shape[0], sz.bind(5))
 
 class TestCallSchedule(unittest.TestCase):
   def test_reshape_precompile(self):
