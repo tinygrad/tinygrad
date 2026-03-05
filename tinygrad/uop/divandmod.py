@@ -22,6 +22,10 @@ def fold_divmod_general(d: UOp, correct_divmod_folding: bool) -> UOp|None:
   # ** Constant Denominator Rules **
   # these rules strictly require y to be a scalar constant > 0
   if y.op is Ops.CONST and (c := y.arg) > 0:
+    # canonicalize_mod_div: (x%(d*k))//d -> (x//d)%k, puts nested div/mod in div-first canonical form for recombine
+    if d.op is Ops.IDIV and x.op is Ops.MOD and x.src[1].op is Ops.CONST and x.vmin >= 0 and x.src[1].arg % c == 0:
+      return x.src[0] // y % x.ufix(x.src[1].arg // c)
+
     # remove_nested_mod: remove nested mod in case the inner mod is a multiple of the outer mod, example: (a%4 + b)%2 -> (a+b)%2
     if d.op is Ops.MOD and x.vmin >= 0:
       new_xs, changed = [], False

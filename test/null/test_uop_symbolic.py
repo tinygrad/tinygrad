@@ -548,6 +548,13 @@ class TestSymbolic(unittest.TestCase):
   def test_div_into_mod(self):
     self.helper_test_variable((Variable("idx", 0, 16)*4)%8//4, 0, 1, "(idx%2)")
 
+  def test_mod_div_reorder(self):
+    # (x % (a*b)) // a -> (x // a) % b, enables div-mod recombine
+    x = Variable("x", 0, 23)
+    self.helper_test_variable(x % 6 // 3, 0, 1, "(x//3%2)")
+    self.helper_test_variable(x % 12 // 4, 0, 2, "(x//4%3)")
+    self.helper_test_variable(x%12//4*4 + x%4 + x//12*12, 0, 23, "x")
+
   def test_div_neg_cancel(self):
     self.helper_test_variable((-Variable("idx", 0, 100)+199)//-4 + 50, 1, 26, "((idx//4)+1)")
     self.helper_test_variable((-Variable("idx", 0, 100)+200)//-4 + 50, 0, 25, "((idx+3)//4)")
