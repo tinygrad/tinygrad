@@ -69,7 +69,7 @@ class TestSQTTMapBase(unittest.TestCase):
         if event.kern not in kern_events: continue
         with self.subTest(example=name, kern=event.kern):
           # rocprof OSX has a bug for sopk decoding, linux rocprof works
-          pass_rocprof_err = OSX and target == "gfx1200" and name.startswith("profile_py")
+          pass_rocprof_err = OSX and target == "gfx1200" and name.startswith("profile_ops")
           passed_insts, n_waves, n_units = rocprof_inst_traces_match(event, kern_events[event.kern], target, pass_rocprof_err)
           if n_waves: print(f"{name}: passed for {passed_insts} instructions across {n_waves} waves scheduled on {n_units} wave units")
 
