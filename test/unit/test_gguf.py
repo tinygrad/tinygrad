@@ -131,7 +131,7 @@ class TestGGUFGEMV(unittest.TestCase):
     q_data = rng.integers(0, 256, size=n_blocks * type_size, dtype=np.uint8).reshape(n_blocks, type_size)
     scales = np.float16(rng.standard_normal(n_blocks * 4)).view(np.uint8).reshape(n_blocks, -1)
     if qtype == GGMLQuantizationType.Q8_0: q_data[:, :2] = scales[:, :2]                    # d at offset 0
-    elif qtype == GGMLQuantizationType.Q4_K: q_data[:, :4] = scales[:, :4]                  # d, dmin at offset 0
+    elif qtype in (GGMLQuantizationType.Q4_K, GGMLQuantizationType.Q5_K): q_data[:, :4] = scales[:, :4] # d, dmin at offset 0
     elif qtype == GGMLQuantizationType.Q6_K: q_data[:, -2:] = scales[:, :2]                 # d at end
     q_data = q_data.flatten()
     ref = dequantize(q_data, qtype).reshape(rows, cols)
