@@ -6,7 +6,6 @@ from tinygrad.device import Buffer, Compiled, Device, MultiBuffer
 from tinygrad.dtype import DType
 from tinygrad.uop.ops import UOp, Variable, sym_infer, Ops
 from tinygrad.engine.realize import ExecItem, capturing, ViewOp, BufferCopy, BufferXfer, EncDec, CompiledRunner, Runner, Estimates
-from tinygrad.engine.memory import _internal_memory_planner
 from tinygrad.nn.state import get_parameters
 from tinygrad.schedule.rangeify import mop_cleanup
 from dataclasses import dataclass, replace
@@ -206,8 +205,8 @@ class CapturedJit(Generic[ReturnType]):
     self.__post_init__()   # reset the graph state
 
   def replan_buffers_memory_layout(self):
-    blacklist = [t.uop.buffer for t in get_parameters(self.ret)]
-    asgn = _internal_memory_planner([[b for item in self.jit_cache for b in item.bufs if b is not None and b not in blacklist]], ignore_checks=True)
+    # blacklist = [t.uop.buffer for t in get_parameters(self.ret)]
+    asgn = {} #_internal_memory_planner([[b for item in self.jit_cache for b in item.bufs if b is not None and b not in blacklist]], ignore_checks=True)
     self.jit_cache = [replace(item, bufs=[asgn.get(b,b) if b is not None else None for b in item.bufs]) for item in self.jit_cache]
     for old, new in asgn.items():
       if old.is_allocated(): new.ensure_allocated().copyin(old.as_memoryview())

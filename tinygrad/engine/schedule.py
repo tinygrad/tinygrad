@@ -144,7 +144,7 @@ def complete_create_schedule_with_vars(big_sink:UOp, external_bufs:set[UOp]|None
   linear = graph_rewrite(linear_call, pm_resolve_linear_call, name="resolve linear call")
 
   # memory plan: replace each internal buffer with a BUFFER_VIEW
-  linear, _ = memory_plan_rewrite(linear, external_bufs or frozenset())
+  linear = memory_plan_rewrite(linear, external_bufs or frozenset())
 
   # vars used in the schedule
   used_vars = set().union(*[{v.expr for v in si.src[0].variables()} for si in linear.src])

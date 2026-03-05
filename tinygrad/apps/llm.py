@@ -1,6 +1,6 @@
 from __future__ import annotations
 import sys, argparse, typing, re, unicodedata, json, uuid, time, functools, itertools
-from tinygrad import Tensor, nn, UOp, TinyJit, getenv, function
+from tinygrad import Tensor, nn, UOp, TinyJit, getenv, function, jit
 from tinygrad.uop.ops import resolve
 from tinygrad.helpers import partition, DEBUG, Timing, GlobalCounters, stderr_log, colored, Context
 from tinygrad.viz.serve import TCPServerWithReuse, HTTPRequestHandler
@@ -181,8 +181,8 @@ class Transformer:
     self.max_context = max_context
     self._cached_tokens: list[int] = []
     # we specialize the JIT for prefill and rollout
-    self.prefill_jit = TinyJit(self.forward)
-    self.rollout_jit = TinyJit(self.forward)
+    self.prefill_jit = jit(self.forward)
+    self.rollout_jit = jit(self.forward)
 
   def forward(self, tokens:Tensor, start_pos:int|UOp) -> Tensor:
     x = self.token_embd(tokens)                           # (B, T, D)
