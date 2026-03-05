@@ -320,11 +320,11 @@ class Transformer:
     t = Tensor(tokens + [0] * (self.max_context - len(tokens)), dtype="int32").reshape(1, self.max_context)
     # recompute start_pos from what's currently valid in the kv cache
     start_pos = sum(1 for _ in itertools.takewhile(lambda ab: ab[0] == ab[1], zip(tokens, self._cached_tokens)))
-    # recurrent layers require T=1, so prefill token-by-token (skip the last token, it's handled by the main loop)
+    # GatedDeltaNet is recurrent (T=1), so prefill token-by-token to update conv/ssm state
     if any(isinstance(b, GatedDeltaNetBlock) for b in self.blk):
       for i in range(start_pos, len(tokens) - 1):
         sp, nt = v_start_pos.bind(i), v_toks.bind(1)
-        self(t[:, sp:sp+nt], sp).item()
+        self(t[:, sp:sp+nt], sp).item()  # run forward pass to update recurrent state; discard the predicted token
       start_pos = max(len(tokens) - 1, 0)
     while len(tokens) < self.max_context:
       sp, nt = v_start_pos.bind(start_pos), v_toks.bind(len(tokens) - start_pos)
