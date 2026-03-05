@@ -82,7 +82,7 @@ def apply_rope(x:Tensor, freqs_cis:Tensor, interleaved:bool=False) -> Tensor:
   assert x.shape[-1] % 2 == 0
   cos, sin = freqs_cis.reshape(1, 1, x.shape[2], -1).chunk(2, dim=-1)
   if interleaved:
-    x1, x2 = x[..., 0::2], x[..., 1::2]
+    x1, x2 = [t.squeeze(-1) for t in x.reshape(*x.shape[:-1], x.shape[-1]//2, 2).chunk(2, dim=-1)]
     return (x1 * cos - x2 * sin).unsqueeze(-1).cat((x2 * cos + x1 * sin).unsqueeze(-1), dim=-1).flatten(-2)
   x1, x2 = x.chunk(2, dim=-1)
   return (x1 * cos - x2 * sin).cat(x2 * cos + x1 * sin, dim=-1)
@@ -159,7 +159,7 @@ class TransformerBlock:
       tensor_assigned_k = Tensor(assigned_k, device=assigned_k.device)
       k_nope, k_rope = tensor_assigned_k[:, :, :start_pos+T, :].split([self.kv_lora_rank, self.qk_rope_head_dim], dim=-1)
       qk = (q_nope @ self.attn_k_b.weight.transpose(-1, -2) @ k_nope.transpose(-2, -1) + q_pe @ k_rope.transpose(-2, -1)) * self.attn_scale
-      if T > 1: qk = qk + Tensor.full((1, 1, T, start_pos+T), float("-inf"), dtype=x.dtype, device=x.device).triu(int(start_pos)+1)
+      if resolve(T != 1): qk = qk + Tensor.full((1, 1, T, start_pos+T), float("-inf"), dtype=x.dtype, device=x.device).triu(start_pos+1)
       attn = (qk.softmax(-1) @ k_nope @ self.attn_v_b.weight.transpose(-1, -2)).transpose(1, 2).reshape(B, T, -1)
       return x + self.attn_output(attn)
     q, k, v = self.attn_q(x_norm), self.attn_k(x_norm), self.attn_v(x_norm)
@@ -451,7 +451,7 @@ if __name__ == "__main__":
 
   # do benchmark
   if args.benchmark:
-    gen = model.generate(toks:=([bos_id or 0] + (tok.encode("<sop>") if tok.preset == 'glm4' else [])), 0)
+    gen = model.generate(toks:=([bos_id or 0] + (tok.encode("<sop>") if tok.preset == 'glm4' else [])))
     for _ in range(args.benchmark):
       GlobalCounters.reset()
       with Timing(on_exit=lambda x: f", {1e9/x:6.2f} tok/s, {GlobalCounters.global_mem/x:7.2f} GB/s,"
@@ -474,7 +474,7 @@ if __name__ == "__main__":
              (tok.encode("<think>") if tok.preset == 'glm4' else [])
     except EOFError:
       break
-    for next_id in model.generate(ids, start_pos):
+    for next_id in model.generate(ids):
       sys.stdout.write(tok.decode([next_id]) if next_id != eos_id and next_id != eot_id else "\n\n")
       sys.stdout.flush()
       if next_id == eos_id or next_id == eot_id: break
