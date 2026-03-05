@@ -5,7 +5,7 @@ from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, _
 from tinygrad.uop.ops import graph_rewrite, sint, AxisType, BottomUpGate, profile_matches, should_resolve_call, identity_element
 from tinygrad.uop.symbolic import symbolic
 from tinygrad.helpers import prod, all_same, getenv, dedup, all_int, DEBUG, SPLIT_REDUCEOP, DEBUG_RANGEIFY, VIZ, MAX_KERNEL_BUFFERS
-from tinygrad.helpers import PCONTIG, FLOAT16, argsort, partition, get_single_element
+from tinygrad.helpers import PCONTIG, FLOAT16, OPENPILOT_HACKS, argsort, partition, get_single_element
 from tinygrad.codegen.simplify import pm_flatten_range, pm_reduce_simplify
 from tinygrad.codegen.opt import Opt
 from tinygrad.schedule.indexing import run_rangeify, BufferizeOpts, ALWAYS_CONTIGUOUS, IndexingContext, apply_movement_op
@@ -31,8 +31,8 @@ def found_assign(ctx:dict[UOp, UOp], assign:UOp, src:UOp):
     x = x.src[0]
   ctx[x] = assign
 
-pm_openpilot_hacks = PatternMatcher([
-  # *** ASSIGN replacement hack for openpilot ***
+# *** fold moved ASSIGNs (hack for openpilot) ***
+pm_fold_moved_assign = PatternMatcher([
   (UPat(Ops.ASSIGN, src=(UPat(), UPat((*GroupOp.Movement, Ops.CAST), name="src")), name="assign"), found_assign),
   # replace ALU sources with assign versions found above
   (UPat(GroupOp.ALU, name="alu"), lambda ctx,alu: alu.replace(src=new_src) if (new_src:=tuple(ctx.get(s, s) for s in alu.src)) != alu.src else None),
@@ -431,7 +431,9 @@ class LocalAddBufferContext:
   opts:tuple|None = None
 
 def debuf(ctx:LocalAddBufferContext, buf:UOp):
-  ret = UOp(Ops.PARAM, buf.dtype.ptr(buf.size), arg=ctx.dg).reshape(buf.shape)
+  ret = UOp(Ops.PARAM, buf.dtype.ptr(buf.size), arg=ctx.dg).reshape(buf.max_shape)
+  # if the buffer has symbolic shape, shrink the max-sized view to the actual shape
+  if buf.max_shape != buf.shape: ret = ret.shrink(tuple((0, s) for s in buf.shape))
   if buf not in ctx.map: ctx.map[buf] = buf
   ctx.dg += 1
   return ret
@@ -535,8 +537,8 @@ split_kernels = PatternMatcher([
 
 @profile_matches
 def get_kernel_graph(sink:UOp) -> UOp:
-  tsink = graph_rewrite(sink, pm_openpilot_hacks, ctx={}, name="openpilot hacks")
-  tsink = graph_rewrite(tsink, multi_pm, name="multi_pm")
+  tsink = graph_rewrite(sink, multi_pm, name="multi_pm")
+  if OPENPILOT_HACKS: tsink = graph_rewrite(tsink, pm_fold_moved_assign, ctx={}, name="fold moved assigns")
   tsink = graph_rewrite(tsink, pm_syntactic_sugar+pm_mops+earliest_rewrites, bottom_up=True, name="earliest rewrites")
 
   # convert movement ops to ranges

@@ -1,5 +1,7 @@
 from __future__ import annotations
-import os, functools, platform, time, re, contextlib, operator, hashlib, pickle, sqlite3, tempfile, pathlib, string, ctypes, sys, gzip, getpass, gc
+import time
+START_TIME = time.perf_counter()
+import os, functools, platform, re, contextlib, operator, hashlib, pickle, sqlite3, tempfile, pathlib, string, ctypes, sys, gzip, getpass, gc
 from collections import defaultdict
 import subprocess, shutil, math, types, copyreg, inspect, importlib, decimal, itertools
 from dataclasses import dataclass, field
@@ -174,7 +176,7 @@ class ContextVar(Generic[T]):
     return [getattr(obj, x) if obj else x for x in self.value.split(',') if x]
 
 DEBUG, BEAM, NOOPT = ContextVar("DEBUG", 0), ContextVar("BEAM", 0), ContextVar("NOOPT", 0)
-IMAGE, FLOAT16 = ContextVar("IMAGE", 0), ContextVar("FLOAT16", 0)
+IMAGE, FLOAT16, OPENPILOT_HACKS = ContextVar("IMAGE", 0), ContextVar("FLOAT16", 0), ContextVar("OPENPILOT_HACKS", 0)
 JIT, JIT_BATCH_SIZE = ContextVar("JIT", 2 if OSX and ARCH_X86 else 1), ContextVar("JIT_BATCH_SIZE", 32)
 WINO, CAPTURING, TRACEMETA = ContextVar("WINO", 0), ContextVar("CAPTURING", 1), ContextVar("TRACEMETA", 1)
 USE_TC, TC_SELECT, TC_OPT, AMX = ContextVar("TC", 1), ContextVar("TC_SELECT", -1), ContextVar("TC_OPT", 0), ContextVar("AMX", 0)

@@ -19,6 +19,38 @@ def _sharded_empty(shape:Tensor, ref:Tensor, axis:int|None, dtype:DTypeLike|None
 def _sharded_empty_like(ref:Tensor, axis:int|None=None) -> Tensor:
   return _sharded_empty(ref.shape, ref, axis)
 
+@functools.cache
+def _fa_grad_fxn(B, H, N, D, H_local, H_KV_local, H_KV, B_local, shard_axis, shard_axis_t, single_device, arch):
+  def grad(dou:UOp, ker:UOp) -> tuple[None, None, UOp, UOp, UOp]:
+    do = Tensor(dou, device=dou.device)
+    attn = Tensor(ker.src[1].after(ker), device=ker.src[1].device)
+    l_vec = Tensor(ker.src[2].after(ker), device=ker.src[2].device)
+    xq = Tensor(ker.src[3], device=ker.src[3].device)
+    xk = Tensor(ker.src[4], device=ker.src[4].device)
+    xv = Tensor(ker.src[5], device=ker.src[5].device)
+
+    dq = _sharded_empty((B, H, N, D), xq, axis=shard_axis_t)
+    GROUP_SIZE = H_local // H_KV_local
+    dk_partial = _sharded_empty((B * GROUP_SIZE, N, H_KV, D), xk, axis=shard_axis)
+    dv_partial = _sharded_empty((B * GROUP_SIZE, N, H_KV, D), xv, axis=shard_axis)
+
+    # delta_vec = (do * attn).sum(-1, dtype=dtypes.float32).transpose(1, 2).unsqueeze(-2).detach()
+    delta_vec = _sharded_empty((B, H, 1, N), xq, dtype=dtypes.float32, axis=shard_axis_t)
+    delta_vec, dq = Tensor.custom_kernel(delta_vec, dq, attn, do, fxn=functools.partial(custom_fa_backward_pre, device=single_device, arch=arch, B=B_local, N=N, H=H_local, H_KV=H_KV_local, D=D))[:2]
+
+    dq, dk_partial, dv_partial = Tensor.custom_kernel(dq, dk_partial, dv_partial, do, xq, xk, xv, l_vec, delta_vec, fxn=functools.partial(custom_fa_backward, device=single_device, arch=arch, B=B_local, N=N, H=H_local, H_KV=H_KV_local, D=D))[:3]
+
+    # unshuffle dq: atomic_pk_add_bf16_with_warpid creates a shuffled layout within each 16x128 tile
+    # decompose each tile into (j=4, a=2, b=2, d=4, e=4, k=4, c=2) and permute to (e, k, j, a, d, b, c) = standard row-major
+    dq = dq.reshape(B, H, N//16, 4, 2, 2, 4, 4, 4, 2).permute(0, 1, 2, 7, 8, 3, 4, 6, 5, 9).reshape(B, H, N, D).transpose(1, 2)
+
+    # reduce partial dK/dV across GROUP_SIZE query heads
+    dk = dk_partial.reshape(B, GROUP_SIZE, N, H_KV, D).sum(1)
+    dv = dv_partial.reshape(B, GROUP_SIZE, N, H_KV, D).sum(1)
+
+    return None, None, dq.uop, dk.uop, dv.uop
+  return grad
+
 def flash_attention(xq, xk, xv, attn_mask:Tensor|None=None, is_causal:bool=False):
   assert attn_mask is None, "attn_mask not supported"
   assert is_causal, "only causal attention supported"
@@ -45,28 +77,7 @@ def flash_attention(xq, xk, xv, attn_mask:Tensor|None=None, is_causal:bool=False
   attn = _sharded_empty_like(xq, axis=shard_axis)
   l_vec = _sharded_empty((B, H, 1, N), xq, dtype=dtypes.float32, axis=shard_axis_t)
 
-  def grad(dou:UOp, _) -> tuple[None, None, UOp, UOp, UOp]:
-    do = Tensor(dou, device=dou.device)
-    dq = _sharded_empty((B, H, N, D), xq, axis=shard_axis_t)
-    GROUP_SIZE = H_local // H_KV_local
-    dk_partial = _sharded_empty((B * GROUP_SIZE, N, H_KV, D), xk, axis=shard_axis)
-    dv_partial = _sharded_empty((B * GROUP_SIZE, N, H_KV, D), xv, axis=shard_axis)
-
-    # delta_vec = (do * attn).sum(-1, dtype=dtypes.float32).transpose(1, 2).unsqueeze(-2).detach()
-    delta_vec = _sharded_empty((B, H, 1, N), xq, dtype=dtypes.float32, axis=shard_axis_t)
-    delta_vec, dq = Tensor.custom_kernel(delta_vec, dq, attn, do, fxn=functools.partial(custom_fa_backward_pre, device=single_device, arch=arch, B=B_local, N=N, H=H_local, H_KV=H_KV_local, D=D))[:2]
-
-    dq, dk_partial, dv_partial = Tensor.custom_kernel(dq, dk_partial, dv_partial, do, xq, xk, xv, l_vec, delta_vec, fxn=functools.partial(custom_fa_backward, device=single_device, arch=arch, B=B_local, N=N, H=H_local, H_KV=H_KV_local, D=D))[:3]
-
-    # unshuffle dq: atomic_pk_add_bf16_with_warpid creates a shuffled layout within each 16x128 tile
-    # decompose each tile into (j=4, a=2, b=2, d=4, e=4, k=4, c=2) and permute to (e, k, j, a, d, b, c) = standard row-major
-    dq = dq.reshape(B, H, N//16, 4, 2, 2, 4, 4, 4, 2).permute(0, 1, 2, 7, 8, 3, 4, 6, 5, 9).reshape(B, H, N, D).transpose(1, 2)
-
-    # reduce partial dK/dV across GROUP_SIZE query heads
-    dk = dk_partial.reshape(B, GROUP_SIZE, N, H_KV, D).sum(1)
-    dv = dv_partial.reshape(B, GROUP_SIZE, N, H_KV, D).sum(1)
-
-    return None, None, dq.uop, dk.uop, dv.uop
+  grad = _fa_grad_fxn(B, H, N, D, H_local, H_KV_local, H_KV, B_local, shard_axis, shard_axis_t, single_device, arch)
 
   attn, l_vec = Tensor.custom_kernel(attn, l_vec, xq, xk, xv, fxn=functools.partial(custom_fa_forward, device=single_device, arch=arch, B=B_local, N=N, H=H_local, H_KV=H_KV_local, D=D), grad_fxn=grad)[:2]
 
