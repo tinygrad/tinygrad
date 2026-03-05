@@ -90,8 +90,8 @@ def apply_rope(x:Tensor, freqs_cis:Tensor, interleaved:bool=False) -> Tensor:
 class TransformerBlock:
   def __init__(self, dim:int, hidden_dim:int, n_heads:int, n_kv_heads:int, norm_eps:float, head_dim:int, rope_theta:float,
                max_context:int=0, qk_norm:int=0, num_experts:int=0, num_experts_per_tok:int=0, kv_lora_rank:int=0, q_lora_rank:int=0,
-               qk_nope_head_dim:int=0, qk_rope_head_dim:int=0, v_head_dim:int=0, n_shared_experts:int=0,
-               expert_weights_norm:bool=False, expert_weights_scale:float=1.0):
+               qk_nope_head_dim:int=0, qk_rope_head_dim:int=0, v_head_dim:int=0, n_shared_experts:int=0, expert_weights_norm:bool=False,
+               expert_weights_scale:float=1.0):
     self.n_heads      = n_heads
     self.n_kv_heads   = n_kv_heads
     self.head_dim     = head_dim
@@ -229,13 +229,10 @@ class Transformer:
                max_context:int=0, qk_norm:int=0, num_experts:int=0, num_experts_per_tok:int=0, leading_dense_blocks:int=0,
                kv_lora_rank:int=0, q_lora_rank:int=0, qk_nope_head_dim:int=0, qk_rope_head_dim:int=0, v_head_dim:int=0,
                n_shared_experts:int=0, feed_forward_length:int=0, expert_weights_norm:bool=False, expert_weights_scale:float=1.0):
-    self.blk = [TransformerBlock(dim, (feed_forward_length or hidden_dim) if i < leading_dense_blocks else hidden_dim,
-                                 n_heads, n_kv_heads, norm_eps, head_dim, rope_theta, max_context, qk_norm,
-                                 num_experts=0 if i < leading_dense_blocks else num_experts, num_experts_per_tok=num_experts_per_tok,
-                                 kv_lora_rank=kv_lora_rank, q_lora_rank=q_lora_rank, qk_nope_head_dim=qk_nope_head_dim,
-                                 qk_rope_head_dim=qk_rope_head_dim, v_head_dim=v_head_dim, n_shared_experts=n_shared_experts,
-                                 expert_weights_norm=expert_weights_norm,
-                                 expert_weights_scale=expert_weights_scale) for i in range(num_blocks)]
+    self.blk = [TransformerBlock(dim, (feed_forward_length or hidden_dim) if i < leading_dense_blocks else hidden_dim, n_heads, n_kv_heads, norm_eps,
+                                 head_dim, rope_theta, max_context, qk_norm, 0 if i < leading_dense_blocks else num_experts, num_experts_per_tok,
+                                 kv_lora_rank, q_lora_rank, qk_nope_head_dim, qk_rope_head_dim, v_head_dim, n_shared_experts,
+                                 expert_weights_norm, expert_weights_scale) for i in range(num_blocks)]
     self.token_embd  = nn.Embedding(vocab_size, dim)
     self.output_norm = nn.RMSNorm(dim, norm_eps)
     self.output = nn.Linear(dim, vocab_size, bias=False)
