@@ -11,8 +11,8 @@ def b(i, base=None, offset=0, pin=False, size=16):
   if pin: global_map[i].ref(1)
   return global_map[i]
 
-def check_assign(buffers:list[list[Buffer]|tuple[Buffer, ...]]):
-  assigned = _internal_memory_planner(buffers, copy_buffers=None)
+def check_assign(buffers:list[list[Buffer]|tuple[Buffer, ...]], copy_buffers:set[Buffer]|None=None):
+  assigned = _internal_memory_planner(buffers, copy_buffers=copy_buffers)
 
   taken_parts = set()
   first_appearance, last_appearance = {}, {}
@@ -133,6 +133,119 @@ class TestMemoryPlanner(unittest.TestCase):
       [b(3, size=1 << 128), b(4, size=1 << 64)],
     ]
     check_assign(bs)
+
+  def test_copy_bufs_separate_from_compute(self):
+    bs = [
+      [b(0), b(1)],
+      [b(1), b(2)],
+      [b(3), b(2)],
+    ]
+    copy_bufs = {b(1)}
+    assigned = _internal_memory_planner(bs, copy_buffers=copy_bufs)
+    r1, r2 = assigned.get(b(1), b(1)), assigned.get(b(2), b(2))
+    assert r1.base != r2.base
+
+  def test_copy_bufs_reuse_among_copies(self):
+    bs = [
+      [b(0), b(1)],
+      [b(2), b(1)],
+      [b(3), b(2)],
+    ]
+    copy_bufs = {b(1), b(2)}
+    assigned = _internal_memory_planner(bs, copy_buffers=copy_bufs)
+    r1, r2 = assigned.get(b(1), b(1)), assigned.get(b(2), b(2))
+    assert r1.base == r2.base
+
+  def test_compute_bufs_reuse_among_compute(self):
+    bs = [
+      [b(0), b(1)],
+      [b(2), b(1)],
+      [b(3), b(2)],
+    ]
+    copy_bufs = {b(1)}
+    assigned = _internal_memory_planner(bs, copy_buffers=copy_bufs)
+    r0, r2 = assigned.get(b(0), b(0)), assigned.get(b(2), b(2))
+    assert r0.base == r2.base
+
+  def test_copy_and_compute_no_cross_reuse(self):
+    bs = [
+      [b(0), b(1)],
+      [b(2), b(1)],
+      [b(3), b(2)],
+    ]
+    copy_bufs = {b(2)}
+    assigned = _internal_memory_planner(bs, copy_buffers=copy_bufs)
+    r0, r2 = assigned.get(b(0), b(0)), assigned.get(b(2), b(2))
+    assert r0.base != r2.base
+
+  def test_multiple_copy_bufs_with_offsets(self):
+    bs = [
+      [b(0, pin=True), b(1), b(2)],
+      [b(3, base=0, offset=1, size=8), b(1), b(2)],
+      [b(4), b(3)],
+      [b(5), b(4)],
+    ]
+    check_assign(bs, copy_buffers={b(1), b(2)})
+
+  def test_copy_bufs_pinned_mixed(self):
+    bs = [
+      [b(0, pin=True), b(1), b(2)],
+      [b(1), b(3), b(2)],
+      [b(4), b(3)],
+      [b(5), b(4), b(0)],
+    ]
+    check_assign(bs, copy_buffers={b(1), b(3)})
+
+  def test_deferred_copy_frees_no_serialization(self):
+    bs = [
+      [b(0, pin=True), b(1)],
+      [b(2), b(1)],
+      [b(3), b(2)],
+      [b(4), b(3)],
+    ]
+    copy_bufs = {b(1), b(3)}
+    assigned = _internal_memory_planner(bs, copy_buffers=copy_bufs)
+    r1, r3 = assigned.get(b(1), b(1)), assigned.get(b(3), b(3))
+    assert r1.offset != r3.offset or r1.base != r3.base
+
+  def test_deferred_copy_frees_chain(self):
+    bs = []
+    copy_bufs = set()
+    for i in range(6):
+      copy_buf, compute_buf = b(i * 2 + 1), b(i * 2 + 2)
+      bs.append([copy_buf, b(0, pin=True)])
+      bs.append([compute_buf, copy_buf])
+      copy_bufs.add(copy_buf)
+    bs.append([b(100, pin=True)])
+
+    assigned = _internal_memory_planner(bs, copy_buffers=copy_bufs)
+    copy_regions = []
+    for i in range(6):
+      cb = b(i * 2 + 1)
+      r = assigned.get(cb, cb)
+      copy_regions.append((r.base, r.offset, r.offset + cb.nbytes))
+    for i in range(len(copy_regions)):
+      for j in range(i + 1, len(copy_regions)):
+        bi, si, ei = copy_regions[i]
+        bj, sj, ej = copy_regions[j]
+        if bi == bj: assert ei <= sj or ej <= si, f"copy bufs {i} and {j} overlap: [{si},{ei}) vs [{sj},{ej})"
+
+  def test_deferred_copy_frees_eventually_reuse(self):
+    bs = []
+    copy_bufs = set()
+    for i in range(12):
+      copy_buf = b(i + 1)
+      bs.append([copy_buf, b(0, pin=True)])
+      if i > 0: bs.append([b(100 + i), b(i)])
+      copy_bufs.add(copy_buf)
+    bs.append([b(200), b(12)])
+
+    assigned = _internal_memory_planner(bs, copy_buffers=copy_bufs)
+    offsets = set()
+    for i in range(1, 13):
+      r = assigned.get(b(i), b(i))
+      offsets.add(r.offset)
+    assert len(offsets) < 12
 
 if __name__ == "__main__":
   unittest.main()
