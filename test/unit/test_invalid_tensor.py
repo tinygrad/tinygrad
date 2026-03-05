@@ -1,6 +1,6 @@
 import unittest
 from tinygrad import Tensor
-from tinygrad.dtype import Invalid
+from tinygrad.dtype import Invalid, dtypes
 
 class TestInvalidTensor(unittest.TestCase):
   def test_where_x_invalid(self):
@@ -40,6 +40,12 @@ class TestInvalidTensor(unittest.TestCase):
     out = mask.where(Tensor([10.0, 20.0, 30.0]), Invalid)
     ret = out.tolist()
     assert ret == [10.0, 20.0, 30.0]
+
+  def test_where_cast(self):
+    mask = Tensor.arange(4) < 2
+    out = mask.where(Tensor([1.0, 2.0, 3.0, 4.0]), Invalid).cast(dtypes.int)
+    ret = out.tolist()
+    assert ret[0] == 1 and ret[1] == 2
 
 if __name__ == '__main__':
   unittest.main()
