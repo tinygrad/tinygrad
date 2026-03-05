@@ -320,7 +320,7 @@ class Handler(HTTPRequestHandler):
     yield {"choices": [{"index":0, "delta":{},"finish_reason":"stop"}], **tmpl}
     if include_usage:
       yield {"choices": [], "usage": {"prompt_tokens": len(ids), "completion_tokens": len(out), "total_tokens": len(ids) + len(out)}, **tmpl}
-    stderr_log(f"out:{len(out):5d}  {colored('--', 'BLACK')}  gen: {len(out)/(time.perf_counter()-pt):4.0f} tok/s\n")
+    stderr_log(f"gen:{len(out)/(time.perf_counter()-pt):4.0f} tok/s  {colored('--', 'BLACK')}  out:{len(out):5d}\n")
 
   def do_POST(self):
     raw_body = self.rfile.read(int(self.headers.get("Content-Length", "0")))
