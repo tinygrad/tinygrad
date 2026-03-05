@@ -113,6 +113,8 @@ class InstOpRDNA4(Enum):
   VALU_B4 = 0xe
   VINTERP = 0x12
   VMEM_RD_1 = 0x21
+  VMEM_RD_2 = 0x22
+  VMEM_WR_1 = 0x23
   VMEM_WR_2 = 0x24
   VMEM_WR_3 = 0x25
   VMEM_WR_4 = 0x26
@@ -131,7 +133,8 @@ class InstOpRDNA4(Enum):
   VALU_SCL_TRANS = 0x99
   SALU_2 = 0x9b
   SALU_5 = 0x9c
-  OTHER_VMEM = 0xc1
+  OTHER_VMEM_1 = 0xbd
+  OTHER_VMEM_5 = 0xc1
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # PACKET TYPE BASE CLASS
