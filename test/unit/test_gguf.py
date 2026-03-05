@@ -135,6 +135,7 @@ class TestGGUFGEMV(unittest.TestCase):
     elif qtype == GGMLQuantizationType.Q6_K: q_data[:, -2:] = scales[:, :2]                 # d at end
     q_data = q_data.flatten()
     ref = dequantize(q_data, qtype).reshape(rows, cols)
+    assert not np.any(np.isnan(ref)), f"reference dequantization produced NaN for {qtype.name}"
 
     # build a minimal gguf in memory: header + 1 tensor info + aligned data
     buf = bytearray()
