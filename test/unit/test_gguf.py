@@ -34,7 +34,7 @@ class TestGGUF(unittest.TestCase):
   def test_dequantization_q4_k(self): self._test_dequantization(GGMLQuantizationType.Q4_K)
   def test_dequantization_q5_k(self): self._test_dequantization(GGMLQuantizationType.Q5_K)
   def test_dequantization_q6_k(self): self._test_dequantization(GGMLQuantizationType.Q6_K)
-  def test_dequantization_mxfp4(self): self.test_dequantization(GGMLQuantizationType.MXFP4)
+  def test_dequantization_mxfp4(self): self._test_dequantization(GGMLQuantizationType.MXFP4)
   def test_dequantization_mxfp4_old(self):
     def encode(nibbles, E):
       packed = [(low & 0xF) | ((high & 0xF) << 4) for low, high in zip(nibbles[:16], nibbles[16:])]
