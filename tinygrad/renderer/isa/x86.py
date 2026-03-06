@@ -231,6 +231,8 @@ reg_strs = {"rax": {4:"eax", 2:"ax", 1:"al"}, "rcx": {4:"ecx", 2:"cx", 1:"cl"}, 
 # ***** X86 instruction selection *****
 # if the load is used multiple times we don't fold
 def is_foldable_load(ctx:IselContext, x:UOp, s:UOp) -> bool: return s.op is Ops.LOAD and len(ctx.uses[s]) == x.src.count(s) == 1
+def base(x:UOp, i:int) -> UOp: return s.src[0] if (s:=x.src[i]).op is Ops.GEP else s
+def lane(x:UOp, i:int) -> int: return x.src[i].arg[0] if x.src[i].op is Ops.GEP else 0
 def to_int(dt:DType): return {dtypes.float16: dtypes.int16, dtypes.float32: dtypes.int32, dtypes.float64: dtypes.int64}[dt]
 def def_reg(dt:DType, reg:Register|None=None) -> UOp: return UOp(Ops.INS, arg=X86Ops.DEFINE_REG, dtype=dt, tag=reg)
 def imm(dt:DType, v:int) -> UOp: return UOp(Ops.INS, arg=X86Ops.IMM, dtype=dt, tag=truncate[dt](v))
@@ -253,31 +255,27 @@ def vcmp(x:UOp) -> UOp:
 # for 128 bit xmm2 selects its lower 2 32 bits from xmm0 and its upper 2 32 bits from xmm1 according to imm
 # for 256 bit ymm2 repeats the shuffle for its upper 128 bits selecting from the upper 128 bits of ymm0 and ymm1
 def vshufps(x:UOp) -> UOp|None:
-  def _idx(i:int) -> int: return x.src[i].arg[0] if x.src[i].op is Ops.GEP else 0
-  def _in(i:int) -> UOp: return s.src[0] if (s:=x.src[i]).op is Ops.GEP else s
-  a, b = _in(0), _in(2)
-  if not (a is _in(1) and b is _in(3)) or any(_idx(i) > 3 for i in range(4)): return None
-  if len(x.src) == 8 and (not (a is _in(4) is _in(5) and b is _in(6) is _in(7)) or any(_idx(i+4) != _idx(i)+4 for i in range(4))): return None
-  return x.ins(X86Ops.VSHUFPS, src=(a, b, imm(dtypes.uint8, sum(_idx(i) << 2*i for i in range(4)))))
+  a, b = base(x, 0), base(x, 2)
+  if not (a is base(x, 1) and b is base(x, 3)) or any(lane(x, i) > 3 for i in range(4)): return None
+  if len(x.src) == 8:
+    if not (a is base(x, 4) is base(x, 5) and b is base(x, 6) is base(x, 7)) or any(lane(x, i+4) != lane(x, i)+4 for i in range(4)): return None
+  return x.ins(X86Ops.VSHUFPS, src=(a, b, imm(dtypes.uint8, sum(lane(x, i) << 2*i for i in range(4)))))
 
 # vshufpd xmm2, xmm0, xmm1, imm
 # for 128 bit xmm2 selects its lower 64 bits from xmm0 and its upper 64 bits from xmm1 according to imm
-# for 256 bit ymm2 additionally selects its upper 128 bits from the upper 128 bits of ymm0 and ymm1 from following the same constraint
+# for 256 bit ymm2 also selects its upper 128 bits from the upper 128 bits of ymm0 and ymm1 following the same constraint
 def vshufpd(x:UOp) -> UOp:
-  def _idx(i:int) -> int: return x.src[i].arg[0] if x.src[i].op is Ops.GEP else 0
-  def _in(i:int) -> UOp: return s.src[0] if (s:=x.src[i]).op is Ops.GEP else s
-  a, b = _in(0), _in(1)
-  if _idx(0) > 1 or _idx(1) > 1: return None
-  if len(x.src) == 4 and not (a is _in(2) and b is _in(3) and _idx(2) > 1 and _idx(3) > 1): return None
-  return x.ins(X86Ops.VSHUFPD, src=(a, b, imm(dtypes.uint8, sum(_idx(i) << i for i in range(len(x.src))))))
+  a, b = base(x, 0), base(x, 1)
+  if lane(x, 0) > 1 or lane(x, 1) > 1: return None
+  if len(x.src) == 4 and not (a is base(x, 2) and b is base(x, 3) and lane(x, 2) > 1 and lane(x, 3) > 1): return None
+  return x.ins(X86Ops.VSHUFPD, src=(a, b, imm(dtypes.uint8, sum(lane(x, i) << i for i in range(len(x.src))))))
 
 # vinsertps xmm2, xmm0, xmm1, imm
 # inserts any 32 bit element in xmm1 into any position in xmm0 according to immm, result is written to xmm2
 # this is the fallback slow case for when you can't match more a powerful shuffle
 def vinsertps(x:UOp) -> UOp:
   def _insert(ret:UOp, i:int) -> UOp:
-    s, v = x.src[i], 0
-    if s.op is Ops.GEP: s, v = s.src[0], s.arg[0]
+    s, v = base(x, i), lane(x, i)
     # moving the 0th element into the 0th position does nothing
     return s if i == v == 0 else x.ins(X86Ops.VINSERTPS, src=(ret, s, imm(dtypes.uint8, v << 6 | i << 4)))
   return functools.reduce(_insert, range(len(x.src)), def_reg(x.dtype))
