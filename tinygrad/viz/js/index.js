@@ -302,7 +302,8 @@ function setFocus(key) {
   }
   // instructions list renderer
   let instList = document.getElementById("insts");
-  if (data.pcToShape.size > 0 && instList == null) {
+  if (data.pcToShape.size == 0) return d3.select(instList?.parentElement).html("");
+  if (instList == null) {
     let contents = "", i = 0;
     for (const [k, v] of data.pcToShape) {
       contents += `<div class="line" data-k="${k}"><span class="left" id="inst-${k}"><span class="n">${i++}</span><span class="wave">${v.wave}</span>
@@ -314,7 +315,7 @@ function setFocus(key) {
   }
   d3.select(instList).selectAll("span").classed("highlight", false);
   const instLine = document.getElementById(`inst-${key}`); instLine?.classList.add("highlight");
-  if (instLine != null && instList != null) {
+  if (instLine != null) {
     const r = rect(instLine), c = rect(instList);
     if (Math.max(c.top-r.bottom, r.top-c.bottom)>=-30) instLine.scrollIntoView({ block:"center" });
   }
