@@ -69,6 +69,7 @@ movement_ops = PatternMatcher([
   (UPat((Ops.RESHAPE, Ops.EXPAND), name="mv", src=(UPat.var("x"), UPat(dtype=dtypes.index))), lambda mv,x: True),
   (UPat((Ops.PAD, Ops.SHRINK), name="mv", src=(UPat.var("x"), UPat(dtype=dtypes.index), UPat(dtype=dtypes.index))), lambda mv,x: True),
   (UPat((Ops.PERMUTE, Ops.FLIP), name="mv", src=(UPat.var("x"),)), lambda mv,x: isinstance(mv.arg, tuple)),
+  (UPat(Ops.CAT, name="mv"), lambda mv: isinstance(mv.arg, int) and len(mv.src) >= 1),
 
   # inputs to movement ops
   (UPat((Ops.VECTORIZE, Ops.VCONST), dtype=dtypes.index), lambda: True),
@@ -259,7 +260,7 @@ full_spec = PatternMatcher([
   (UPat(Ops.GEP, name="gep"), lambda gep: gep.dtype is dtypes.void or gep.dtype.vcount == len(gep.arg)),
   # PTRCAT is like VECTORIZE, but it functions on ptrs
   (UPat(Ops.PTRCAT, name="x"), lambda x: x.dtype.vcount == sum([y.dtype.base.count for y in x.src])),
-  # CAT is like VECTORIZE, but the srcs can be vectors
+  # VCAT is like VECTORIZE, but the srcs can be vectors
   (UPat(Ops.VCAT, name="x"), lambda x: x.dtype.vcount == sum([y.dtype.vcount for y in x.src])),
   # vectorized index
   (UPat(Ops.INDEX, src=(UPat((Ops.VECTORIZE, Ops.CAST)), UPat())), lambda: True),

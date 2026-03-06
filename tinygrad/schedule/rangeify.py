@@ -39,13 +39,14 @@ pm_fold_moved_assign = PatternMatcher([
 ])
 
 # movement op on INDEX as a PatternMatcher
+_SingleSrcMovement = GroupOp.Movement - {Ops.CAT}
 pm_mops = PatternMatcher([
-  (UPat(GroupOp.Movement, name="r").f(Ops.INDEX, allow_any_len=True, name="idx"),
+  (UPat(_SingleSrcMovement, name="r").f(Ops.INDEX, allow_any_len=True, name="idx"),
    lambda r,idx: r.src[0].index(*apply_movement_op(r.op, r.src[0].shape, r.marg, idx.src[1:]), dtype=idx.dtype, arg=idx.arg)),
   # move movement ops after AFTER
-  (UPat(GroupOp.Movement, name="r").after(name="a", allow_any_len=True),
+  (UPat(_SingleSrcMovement, name="r").after(name="a", allow_any_len=True),
    lambda r,a: UOp(r.op, r.dtype, (a.replace(src=(r.src[0],)+a.src[1:]),)+r.src[1:], r.arg)),
-  (UPat(GroupOp.Movement, name="r").end(name="a", allow_any_len=True), lambda r,a: a.replace(src=(r.src[0],)+a.src[1:])),
+  (UPat(_SingleSrcMovement, name="r").end(name="a", allow_any_len=True), lambda r,a: a.replace(src=(r.src[0],)+a.src[1:])),
 ])
 
 # *****************
@@ -112,7 +113,19 @@ def resolve_call(c:UOp, allow_param_mismatch=True) -> UOp|None:
     if p.dtype != a.dtype: raise TypeError(f"arg {i} dtype mismatch: expected {p.dtype}, got {a.dtype}")
   return c.src[0].substitute(dict_map, walk=True)
 
+def lower_cat(cat:UOp) -> UOp:
+  axis = cat.arg
+  dim_cumsum = list(itertools.accumulate([s.shape[axis] for s in cat.src], initial=0))
+  padded = [s.pad(tuple((dim_cumsum[i], dim_cumsum[-1]-dim_cumsum[i+1]) if j==axis else (0,0)
+    for j in range(len(s.shape)))) for i,s in enumerate(cat.src)]
+  ret = padded[0]
+  for p in padded[1:]: ret = ret.alu(Ops.ADD, p)
+  return ret
+
 earliest_rewrites = mop_cleanup+PatternMatcher([
+  # lower CAT to PAD/ADD
+  (UPat(Ops.CAT, name="cat"), lower_cat),
+
   # early fixup const copy
   (UPat(Ops.COPY, src=(UPat.var("s"), UPat.var("d"))),
    lambda s,d: s.substitute({UOp(Ops.DEVICE, arg=s.device):d}) if s.base.op is Ops.CONST else None),
@@ -131,10 +144,10 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
   (UPat((Ops.DETACH, Ops.CONTIGUOUS_BACKWARD), name="x"), lambda x: x.src[0]),
 
   # remove contiguous on movement ops before a copy on disk
-  (UPat(GroupOp.Movement-{Ops.SHRINK, Ops.RESHAPE}, name="x").f(Ops.CONTIGUOUS).f(Ops.COPY, allow_any_len=True, name="copy"),
+  (UPat(_SingleSrcMovement-{Ops.SHRINK, Ops.RESHAPE}, name="x").f(Ops.CONTIGUOUS).f(Ops.COPY, allow_any_len=True, name="copy"),
    lambda x,copy: copy.replace(src=(x,)+copy.src[1:]) if isinstance(x.device, str) and x.device.startswith("DISK") else None),
   # push copy past movement ops to disk
-  (UPat(GroupOp.Movement-{Ops.SHRINK, Ops.RESHAPE}, name="x").f(Ops.COPY, allow_any_len=True, name="copy"),
+  (UPat(_SingleSrcMovement-{Ops.SHRINK, Ops.RESHAPE}, name="x").f(Ops.COPY, allow_any_len=True, name="copy"),
    lambda x,copy: x.replace(src=(copy.replace(src=(x.src[0],)+copy.src[1:]),)+x.src[1:]) \
       if isinstance(x.device, str) and x.device.startswith("DISK") else None),
 
