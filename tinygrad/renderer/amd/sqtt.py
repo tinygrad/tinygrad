@@ -113,6 +113,8 @@ class InstOpRDNA4(Enum):
   VALU_B4 = 0xe
   VINTERP = 0x12
   VMEM_RD_1 = 0x21
+  VMEM_RD_2 = 0x22
+  VMEM_WR_1 = 0x23
   VMEM_WR_2 = 0x24
   VMEM_WR_3 = 0x25
   VMEM_WR_4 = 0x26
@@ -131,7 +133,8 @@ class InstOpRDNA4(Enum):
   VALU_SCL_TRANS = 0x99
   SALU_2 = 0x9b
   SALU_5 = 0x9c
-  OTHER_VMEM = 0xc1
+  OTHER_VMEM = 0xbd
+  OTHER_VMEM_5 = 0xc1
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # PACKET TYPE BASE CLASS
@@ -595,7 +598,6 @@ def map_insts(data:bytes, lib:bytes, target:str) -> Iterator[tuple[PacketType, I
   # map pcs to insts
   from tinygrad.viz.serve import amd_decode
   pc_map = amd_decode(lib, target)
-
   wave_pc:dict[int, int] = {}
   # only processing packets on one [CU, SIMD] unit
   def simd_select(p) -> bool: return getattr(p, "cu", 0) == 0 and getattr(p, "simd", 0) == 0
@@ -604,14 +606,12 @@ def map_insts(data:bytes, lib:bytes, target:str) -> Iterator[tuple[PacketType, I
     if isinstance(p, (WAVESTART, WAVESTART_RDNA4)):
       assert p.wave not in wave_pc, "only one inflight wave per unit"
       wave_pc[p.wave] = next(iter(pc_map))
-      continue
-    if isinstance(p, WAVEEND):
+    elif isinstance(p, WAVEEND):
       pc = wave_pc.pop(p.wave)
       yield (p, InstructionInfo(pc, p.wave, s_endpgm()))
-      continue
     # skip OTHER_ instructions, they don't belong to this unit
-    if isinstance(p, (INST, INST_RDNA4)) and p.op.name.startswith("OTHER_"): continue
-    if isinstance(p, IMMEDIATE_MASK):
+    elif isinstance(p, (INST, INST_RDNA4)) and p.op.name.startswith("OTHER_"): pass
+    elif isinstance(p, IMMEDIATE_MASK):
       # immediate mask may yield multiple times per packet
       for wave in range(16):
         if p.mask & (1 << wave):
@@ -620,30 +620,24 @@ def map_insts(data:bytes, lib:bytes, target:str) -> Iterator[tuple[PacketType, I
           assert type(inst).__name__ == "SOPP", f"IMMEDIATE_MASK packet must map to SOPP, got {inst}"
           wave_pc[wave] += inst.size()
           yield (p, InstructionInfo(pc, wave, inst))
-      continue
-    if isinstance(p, (VALUINST, INST, INST_RDNA4, IMMEDIATE)):
+    elif isinstance(p, (VALUINST, INST, INST_RDNA4, IMMEDIATE)):
       inst = pc_map[pc:=wave_pc[p.wave]]
-      # s_delay_alu doesn't get a packet?
+      # s_delay_alu and s_wait_alu instructions are skipped
       while (inst_op:=getattr(inst, 'op_name', '')) in {"S_DELAY_ALU", "S_WAIT_ALU"}:
         wave_pc[p.wave] += inst.size()
         inst = pc_map[pc:=wave_pc[p.wave]]
-      # identify a branch instruction, only used for asserts
-      branch_inst = inst if "BRANCH" in inst_op else None
-      if branch_inst is not None:
-        assert isinstance(p, (INST, INST_RDNA4)) and p.op.name in {"JUMP_NO", "JUMP", "JUMP_UNCOND"}, f"branch can only be folowed by JUMP, got {p}"
+      # assert branch always has a JUMP packet
+      if "BRANCH" in inst_op and not (isinstance(p, (INST, INST_RDNA4)) and p.op.name.startswith("JUMP")):
+        raise AssertionError(f"{inst_op} can only be followed by JUMP, got {p}")
       # JUMP handling
-      if (isinstance(p, INST) and p.op is InstOp.JUMP) or (isinstance(p, INST_RDNA4) and p.op is InstOpRDNA4.JUMP):
-        simm16 = getattr(branch_inst, 'simm16')
-        assert branch_inst is not None and simm16 is not None, f"JUMP packet must map to a branch instruction, got {inst}"
-        x = simm16 & 0xffff
-        wave_pc[p.wave] += branch_inst.size() + (x - 0x10000 if x & 0x8000 else x)*4
+      if isinstance(p, (INST, INST_RDNA4)) and p.op in {InstOp.JUMP, InstOpRDNA4.JUMP}:
+        x = getattr(inst, 'simm16') & 0xffff
+        wave_pc[p.wave] += inst.size() + (x - 0x10000 if x & 0x8000 else x)*4
       else:
-        if branch_inst is not None: assert inst_op != "S_BRANCH", f"S_BRANCH must have a JUMP packet, got {p}"
         wave_pc[p.wave] += inst.size()
       yield (p, InstructionInfo(pc, p.wave, inst))
-      continue
     # for all other packets (VMEMEXEC, ALUEXEC, etc.), yield with None
-    yield (p, None)
+    else: yield (p, None)
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # PRINTER

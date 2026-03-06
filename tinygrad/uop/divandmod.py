@@ -22,6 +22,10 @@ def fold_divmod_general(d: UOp, correct_divmod_folding: bool) -> UOp|None:
   # ** Constant Denominator Rules **
   # these rules strictly require y to be a scalar constant > 0
   if y.op is Ops.CONST and (c := y.arg) > 0:
+    # canonicalize_mod_div: (x%(d*k))//d -> (x//d)%k, puts nested div/mod in div-first canonical form for recombine
+    if d.op is Ops.IDIV and x.op is Ops.MOD and x.src[1].op is Ops.CONST and x.vmin >= 0 and x.src[1].arg % c == 0:
+      return x.src[0] // y % x.ufix(x.src[1].arg // c)
+
     # remove_nested_mod: remove nested mod in case the inner mod is a multiple of the outer mod, example: (a%4 + b)%2 -> (a+b)%2
     if d.op is Ops.MOD and x.vmin >= 0:
       new_xs, changed = [], False
@@ -59,12 +63,14 @@ def fold_divmod_general(d: UOp, correct_divmod_folding: bool) -> UOp|None:
           ret = new_x.alu(d.op, x.ufix(c//gcd.arg))
           return ret*gcd + const%gcd.arg if d.op is Ops.MOD else ret+const//c
 
-    # nest_div_by_smallest_factor: try and nest the div and see if it allows the numerator to be simplified
+    # nest_div_by_factor: try nesting the div with each candidate factor and pick the simplest result
     if d.op is Ops.IDIV and x.vmin >= 0:
-      div = min([c] + [abs(f) for u, f in zip(uops_no_const, factors) if u.op not in (Ops.CONST, Ops.VCONST) and abs(f) > 1 and (c%f)==0])
       # NOTE: this is recursive!
-      if div < c and (newxs := fold_divmod_general(x//div, correct_divmod_folding)) is not None and newxs.vmin >= 0:
-        return newxs // (c // div)
+      results = []
+      for div in {abs(f) for u, f in zip(uops_no_const, factors) if u.op not in (Ops.CONST, Ops.VCONST) and 1 < abs(f) < c and (c%f)==0}:
+        if (newxs := fold_divmod_general(x//div, correct_divmod_folding)) is not None and newxs.vmin >= 0:
+          results.append((len(newxs.backward_slice), newxs // (c // div)))
+      if results: return min(results)[1]
 
   # ** Variable Denominator / Fallback Rules **
   # These rules apply to variables OR constants that failed the checks above.
@@ -82,9 +88,9 @@ def fold_divmod_general(d: UOp, correct_divmod_folding: bool) -> UOp|None:
   quo, rem = [], []
   for u in all_uops:
     if (q:=u.divide_exact(y)) is not None: quo.append(q)
-    elif d.op is Ops.MOD and y.op is Ops.CONST and (c:=u.const_factor())%y.arg!=c:
+    elif y.op is Ops.CONST and (c:=u.const_factor())%y.arg!=c:
       rem.append(u.divides(c)*(c%y.arg))
-      quo.append(u.const_like(0))
+      quo.append(u.divides(c)*(c//y.arg) if d.op is Ops.IDIV else u.const_like(0))
     else: rem.append(u)
 
   if not quo: return None
@@ -95,7 +101,7 @@ def fold_divmod_general(d: UOp, correct_divmod_folding: bool) -> UOp|None:
 div_and_mod_symbolic = PatternMatcher([
   # ** 1. Fast Inline Rules **
   ((UPat.var("x")//UPat.cvar("c") + UPat.cvar("a"))//UPat.cvar("d"), lambda x,c,a,d: (x+a*c)//(c*d)
-    if c.vmin>0 and d.vmin>0 and ((x.vmin>=0 and a.vmin>=0) or (x.vmax<=0 and a.vmax<=0)) else None),  # (x//c+a)//d -> (x+a*c)//(c*d)
+    if c.vmin>0 and d.vmin>0 and x.vmin>=0 and a.vmin>=0 else None),  # (x//c+a)//d -> (x+a*c)//(c*d)
   (UPat.var("x", dtypes.index) // UPat.var("d"), lambda x,d: -(x//(-d)) if d.vmax < 0 else None),
   (UPat.var("x", dtypes.index) // UPat.var("d"), lambda x,d: -((-x)//d) if x.vmax <= 0 else None),
   ((UPat.var("x", dtypes.index)+UPat.cvar("c", vec=False)).named("n")//UPat.cvar("d", vec=False),

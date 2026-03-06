@@ -14,6 +14,7 @@ class TestLLMServer(unittest.TestCase):
 
     cls.mock_model = Mock()
     cls.mock_model.generate = Mock(side_effect=lambda ids, **kwargs: iter([300, 301, 999]))
+    cls.mock_model.get_start_pos = Mock(return_value=0)
 
     cls.bos_id = 1
     cls.eos_id = 999
