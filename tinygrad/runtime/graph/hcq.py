@@ -137,6 +137,21 @@ class HCQGraph(MultiGraphRunner):
 
       last_j[enqueue_queue] = j
 
+    if len(jit_cache) > 4000:
+      from collections import Counter
+      total_syncs = sum(len(self.ji_schedule[j][3]) for j in range(len(jit_cache)) if j in self.ji_schedule)
+      q_type = {}
+      for dev, q in self.comp_queues.items():
+        if q in self.signals: q_type[id(self.signals[q])] = "comp"
+      for (dev, idx), q in self.copy_queues.items():
+        if q in self.signals: q_type[id(self.signals[q])] = "copy"
+      type_pairs = Counter()
+      for j_s in range(len(jit_cache)):
+        if j_s not in self.ji_schedule: continue
+        for s, v in self.ji_schedule[j_s][3]:
+          type_pairs[(q_type.get(id(self.ji_schedule[j_s][4]), "?"), q_type.get(id(s), "?"))] += 1
+      print(f"SYNC STATS ({len(jit_cache)} ops): {total_syncs} syncs, type_pairs={dict(type_pairs)}")
+
     # Check which signals are used in the profile graph.
     self.prof_signal_is_used = [any(ent.st_id == j or ent.en_id == j for ent in self.prof_graph_entries) for j in range(len(jit_cache) * 2)]
 

@@ -217,35 +217,24 @@ class TestMemoryPlanner(unittest.TestCase):
       bs.append([compute_buf, copy_buf])
       copy_bufs.add(copy_buf)
     bs.append([b(100, pin=True)])
-
-    assigned = _internal_memory_planner(bs, copy_buffers=copy_bufs)
-    copy_regions = []
-    for i in range(6):
-      cb = b(i * 2 + 1)
-      r = assigned.get(cb, cb)
-      copy_regions.append((r.base, r.offset, r.offset + cb.nbytes))
-    for i in range(len(copy_regions)):
-      for j in range(i + 1, len(copy_regions)):
-        bi, si, ei = copy_regions[i]
-        bj, sj, ej = copy_regions[j]
-        if bi == bj: assert ei <= sj or ej <= si, f"copy bufs {i} and {j} overlap: [{si},{ei}) vs [{sj},{ej})"
+    check_assign(bs, copy_buffers=copy_bufs)
 
   def test_deferred_copy_frees_eventually_reuse(self):
     bs = []
     copy_bufs = set()
-    for i in range(12):
+    for i in range(100):
       copy_buf = b(i + 1)
       bs.append([copy_buf, b(0, pin=True)])
       if i > 0: bs.append([b(100 + i), b(i)])
       copy_bufs.add(copy_buf)
-    bs.append([b(200), b(12)])
+    bs.append([b(200), b(100)])
 
     assigned = _internal_memory_planner(bs, copy_buffers=copy_bufs)
     offsets = set()
-    for i in range(1, 13):
+    for i in range(1, 101):
       r = assigned.get(b(i), b(i))
       offsets.add(r.offset)
-    assert len(offsets) < 12
+    assert len(offsets) < 100
 
 if __name__ == "__main__":
   unittest.main()

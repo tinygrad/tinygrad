@@ -9,7 +9,8 @@ from tinygrad.runtime.support.memory import TLSFAllocator
 
 # **************** memory planning ****************
 
-def _internal_memory_planner(buffers:list[list[Buffer]], copy_buffers=None, ignore_checks=False, debug_prefix="") -> dict[Buffer, Buffer]:
+def _internal_memory_planner(buffers:list[list[Buffer]], copy_buffers=None, copy_src_buffers=None,
+                              ignore_checks=False, debug_prefix="") -> dict[Buffer, Buffer]:
   if NO_MEMORY_PLANNER: return {}
   first_appearance, last_appearance, buf_to_opt = {}, {}, set()
   for i,u in enumerate(buffers):
@@ -25,6 +26,16 @@ def _internal_memory_planner(buffers:list[list[Buffer]], copy_buffers=None, igno
                            [((last_appearance[buf] + 1, False), buf) for buf in first_appearance.keys()], key=lambda x: x[0])
   total_memory = sum(round_up(buf.nbytes, min_block_size:=0x1000) for buf in first_appearance.keys()) * 2 # *2 for fragmentation (which is about 15%)
 
+  # Compute max liveness span of cross-queue buffers per lane. Used to determine how long to defer frees:
+  # a deferred range is only released when the timeline distance exceeds the max span, ensuring no concurrent cross-queue conflict.
+  max_cross_span:dict[tuple[str,bool], int] = defaultdict(int)
+  for buf in first_appearance:
+    is_copy_dst = copy_buffers is not None and buf in copy_buffers
+    is_copy_src = copy_src_buffers is not None and buf in copy_src_buffers
+    if is_copy_dst or is_copy_src:
+      gk = (buf.device, is_copy_dst)
+      max_cross_span[gk] = max(max_cross_span[gk], last_appearance[buf] - first_appearance[buf] + 1)
+
   # Try to suballocate from a shared buffer managed by global_planner using TLSFAllocator.
   # Also track buffer replacements for buffers that do not support suballocation.
   # Copy buffers are optimized in a separate lane (keyed by is_copy) to preserve exec/copy parallelism.
@@ -32,25 +43,28 @@ def _internal_memory_planner(buffers:list[list[Buffer]], copy_buffers=None, igno
   reuse_buffers:dict[tuple, list[Buffer]] = defaultdict(list)
   global_planner:dict[tuple[str,bool], tuple[int, TLSFAllocator]] = defaultdict(lambda: (0, TLSFAllocator(total_memory, block_size=min_block_size, lv2_cnt=32)))
   buf_gkey:dict[Buffer, tuple[str, bool]] = {}
-  deferred_copy_frees:dict[tuple[str,bool], list[int]] = defaultdict(list)
-  for (_, is_open_ev), buf in buffer_requests:
-    is_copy = copy_buffers is not None and buf in copy_buffers
-    gk = (buf.device, is_copy)
+  deferred_frees:dict[tuple[str,bool], list[tuple[int, int]]] = defaultdict(list)
+  for (step, is_open_ev), buf in buffer_requests:
+    is_copy_dst = copy_buffers is not None and buf in copy_buffers
+    is_copy_src = copy_src_buffers is not None and buf in copy_src_buffers
+    is_cross_queue = is_copy_dst or is_copy_src
+    gk = (buf.device, is_copy_dst)
     # Check if suballocation is possible for the given buffer and device.
     if hasattr(Device[buf.device].allocator, "_offset") and not isinstance(buf.dtype, ImageDType):
       if is_open_ev:
-        # Defer copy dest frees by ~2 copy allocs to avoid copy→compute→copy serialization in graphs.
-        if is_copy:
-          while len(deferred_copy_frees[gk]) > 8: global_planner[gk][1].free(deferred_copy_frees[gk].pop(0))
+        # Defer cross-queue buffer frees to avoid physical memory reuse that creates cross-queue WAR deps in graphs.
+        if is_cross_queue:
+          safe_step = step - max_cross_span[gk]
+          while deferred_frees[gk] and deferred_frees[gk][0][0] <= safe_step: global_planner[gk][1].free(deferred_frees[gk].pop(0)[1])
         buffer_replace[buf] = (None, global_planner[gk][1].alloc(round_up(buf.nbytes, 0x1000)))
-      elif is_copy: deferred_copy_frees[gk].append(cast(int, buffer_replace[buf][1]))
+      elif is_cross_queue: deferred_frees[gk].append((step, cast(int, buffer_replace[buf][1])))
       else: global_planner[gk][1].free(cast(int, buffer_replace[buf][1]))
       global_planner[gk] = (max(global_planner[gk][0], buffer_replace[buf][1] + buf.nbytes), global_planner[gk][1])
       buf_gkey[buf] = gk
     else:
-      key = (buf.device, buf.dtype, buf.options, buf.nbytes, is_copy)
+      key = (buf.device, buf.dtype, buf.options, buf.nbytes, is_copy_dst)
       if is_open_ev: buffer_replace[buf] = (reuse_buffers[key].pop(), None) if key in reuse_buffers and len(reuse_buffers[key]) > 0 else (buf, None)
-      elif not is_copy: reuse_buffers[key].append(cast(Buffer, buffer_replace[buf][0]))
+      elif not is_copy_dst: reuse_buffers[key].append(cast(Buffer, buffer_replace[buf][0]))
 
   # Allocate global buffers based on the memory planner.
   global_buffers = {key: Buffer(key[0], round_up(sz, 0x1000), dtypes.int8) for key, (sz, _) in global_planner.items()}

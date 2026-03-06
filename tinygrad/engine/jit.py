@@ -375,7 +375,8 @@ class TinyJit(Generic[ReturnType]):
       # Copy destinations are optimized in a separate lane to preserve exec/copy parallelism.
       # Copy sources stay on the compute lane since compute kernels produce them.
       copy_buffers = {ji.bufs[0] for ji in jit_cache if isinstance(ji.prg, (BufferXfer, BufferCopy, EncDec))}
-      assigned = _internal_memory_planner([cast(list[Buffer], item.bufs) for item in jit_cache], copy_buffers, debug_prefix="JIT ")
+      copy_src_buffers = {ji.bufs[1].base for ji in jit_cache if isinstance(ji.prg, (BufferXfer, BufferCopy, EncDec))}
+      assigned = _internal_memory_planner([cast(list[Buffer], item.bufs) for item in jit_cache], copy_buffers, copy_src_buffers, debug_prefix="JIT ")
       jit_cache = [replace(item, bufs=[assigned.get(b,b).ensure_allocated() for b in item.bufs if b is not None]) for item in jit_cache]
 
       input_replace = get_input_replace(jit_cache, input_buffers)
