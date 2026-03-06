@@ -91,17 +91,17 @@ class TransformerBlock:
   def __init__(self, dim:int, hidden_dim:int, n_heads:int, n_kv_heads:int, norm_eps:float, head_dim:int, rope_theta:float,
                max_context:int=0, qk_norm:int=0, num_experts:int=0, num_experts_per_tok:int=0, kv_lora_rank:int=0, q_lora_rank:int=0,
                qk_nope_head_dim:int=0, qk_rope_head_dim:int=0, v_head_dim:int=0, n_shared_experts:int=0, expert_weights_norm:bool=False,
-               expert_weights_scale:float=1.0):
+               expert_weights_scale:float=1.0, expert_gating_func:int=0):
     self.n_heads      = n_heads
     self.n_kv_heads   = n_kv_heads
     self.head_dim     = head_dim
     self.rope_theta   = rope_theta
     self.max_context  = max_context
     self.qk_norm      = qk_norm
-    self.kv_lora_rank = kv_lora_rank
+    self.is_mla = kv_lora_rank > 0
 
-    # --- attention projections ---
-    if not kv_lora_rank:
+    # --- attention projections (all linear, bias-free) ------------------
+    if not self.is_mla:
       q_proj_out       = self.head_dim * n_heads
       kv_proj_out      = self.head_dim * n_kv_heads
       self.attn_q      = nn.Linear(dim, q_proj_out,  bias=False)
@@ -109,12 +109,13 @@ class TransformerBlock:
       self.attn_v      = nn.Linear(dim, kv_proj_out, bias=False)
       self.attn_output = nn.Linear(q_proj_out, dim,  bias=False)
     else:  # MLA
-      self.qk_nope_head_dim, self.qk_rope_head_dim = qk_nope_head_dim, qk_rope_head_dim
       self.q_head_dim, self.attn_scale = qk_nope_head_dim + qk_rope_head_dim, (qk_nope_head_dim + qk_rope_head_dim) ** -0.5
+      self.qk_split, self.kv_split = [qk_nope_head_dim, qk_rope_head_dim], [kv_lora_rank, qk_rope_head_dim]
+      self.cache_k_dim = kv_lora_rank + qk_rope_head_dim
       self.attn_q_a = nn.Linear(dim, q_lora_rank, bias=False)
       self.attn_q_a_norm = nn.RMSNorm(q_lora_rank, norm_eps)
       self.attn_q_b = nn.Linear(q_lora_rank, n_heads * self.q_head_dim, bias=False)
-      self.attn_kv_a_mqa = nn.Linear(dim, kv_lora_rank + qk_rope_head_dim, bias=False)
+      self.attn_kv_a_mqa = nn.Linear(dim, self.cache_k_dim, bias=False)
       self.attn_kv_a_norm = nn.RMSNorm(kv_lora_rank, norm_eps)
       self.attn_k_b = SimpleNamespace(weight=Tensor.empty(n_heads, kv_lora_rank, qk_nope_head_dim))
       self.attn_v_b = SimpleNamespace(weight=Tensor.empty(n_heads, v_head_dim, kv_lora_rank))
@@ -134,7 +135,7 @@ class TransformerBlock:
       self.ffn_down_exps = ExpertWeights(num_experts, hidden_dim, dim)
       self.expert_weights_scale = expert_weights_scale
       self.expert_weights_norm = expert_weights_norm
-      if kv_lora_rank: self.exp_probs_b = SimpleNamespace(bias=Tensor.empty(num_experts))
+      if expert_gating_func == 2: self.exp_probs_b = SimpleNamespace(bias=Tensor.empty(num_experts))  # GLM/DeepSeek MoE uses sigmoid+bias not softmax.
       if n_shared_experts > 0:
         shexp_hidden = n_shared_experts * (hidden_dim)
         self.ffn_gate_shexp = nn.Linear(dim, shexp_hidden, bias=False)
@@ -148,16 +149,16 @@ class TransformerBlock:
   @function(precompile=bool(getenv("PRECOMPILE", 0)))
   def _attention(self, x:Tensor, start_pos:int|UOp) -> Tensor:
     x_norm, (B, T, _) = self.attn_norm(x), x.shape  # (B,T,D)
-    if self.kv_lora_rank:  # MLA
+    if self.is_mla:  # MLA
       q = self.attn_q_b(self.attn_q_a_norm(self.attn_q_a(x_norm))).reshape(B, T, self.n_heads, self.q_head_dim).transpose(1, 2)
-      q_nope, q_pe = q.split([self.qk_nope_head_dim, self.qk_rope_head_dim], dim=-1)
-      compressed_kv, k_pe = self.attn_kv_a_mqa(x_norm).split([self.kv_lora_rank, self.qk_rope_head_dim], dim=-1)
-      freqs_cis = precompute_freqs_cis(self.qk_rope_head_dim, self.max_context, self.rope_theta)[start_pos:start_pos+T].half()
+      q_nope, q_pe = q.split(self.qk_split, dim=-1)
+      compressed_kv, k_pe = self.attn_kv_a_mqa(x_norm).split(self.kv_split, dim=-1)
+      freqs_cis = precompute_freqs_cis(self.qk_split[1], self.max_context, self.rope_theta)[start_pos:start_pos+T]
       q_pe, k_pe = [apply_rope(w, freqs_cis, interleaved=True) for w in [q_pe, k_pe.unsqueeze(1)]]
       k_new = self.attn_kv_a_norm(compressed_kv).unsqueeze(1).cat(k_pe, dim=-1)
       assigned_k = self.cache_k.uop.after(self.cache_k[:, :, start_pos:start_pos+T, :].uop.assign(k_new.contiguous().uop))
       tensor_assigned_k = Tensor(assigned_k, device=assigned_k.device)
-      k_nope, k_rope = tensor_assigned_k[:, :, :start_pos+T, :].split([self.kv_lora_rank, self.qk_rope_head_dim], dim=-1)
+      k_nope, k_rope = tensor_assigned_k[:, :, :start_pos+T, :].split(self.kv_split, dim=-1)
       qk = (q_nope @ self.attn_k_b.weight.transpose(-1, -2) @ k_nope.transpose(-2, -1) + q_pe @ k_rope.transpose(-2, -1)) * self.attn_scale
       if resolve(T != 1): qk = qk + Tensor.full((1, 1, T, start_pos+T), float("-inf"), dtype=x.dtype, device=x.device).triu(start_pos+1)
       attn = (qk.softmax(-1) @ k_nope @ self.attn_v_b.weight.transpose(-1, -2)).transpose(1, 2).reshape(B, T, -1)
@@ -214,10 +215,8 @@ class TransformerBlock:
     return h + self.ffn_down(gated)
 
   def __call__(self, x: Tensor, start_pos: int|UOp):
-    if self.kv_lora_rank:
-      if not hasattr(self, "cache_k") or (isinstance(start_pos, int) and start_pos == 0):
-        self.cache_k = (Tensor.empty(x.shape[0], 1, self.max_context, self.kv_lora_rank + self.qk_rope_head_dim, dtype=x.dtype, device=x.device) \
-          .contiguous().realize())
+    if self.is_mla and (not hasattr(self, "cache_k") or (isinstance(start_pos, int) and start_pos == 0)):
+        self.cache_k = (Tensor.empty(x.shape[0], 1, self.max_context, self.cache_k_dim, dtype=x.dtype, device=x.device).contiguous().realize())
     elif not hasattr(self, "cache_kv"):
       # TODO: how is the dtype of this determined?
       # NOTE: clone is used to promise the creation of a specific buffer
@@ -228,11 +227,12 @@ class Transformer:
   def __init__(self, *, num_blocks, dim, hidden_dim, n_heads, n_kv_heads, norm_eps, vocab_size, head_dim:int, rope_theta:float,
                max_context:int=0, qk_norm:int=0, num_experts:int=0, num_experts_per_tok:int=0, leading_dense_blocks:int=0,
                kv_lora_rank:int=0, q_lora_rank:int=0, qk_nope_head_dim:int=0, qk_rope_head_dim:int=0, v_head_dim:int=0,
-               n_shared_experts:int=0, feed_forward_length:int=0, expert_weights_norm:bool=False, expert_weights_scale:float=1.0):
+               n_shared_experts:int=0, feed_forward_length:int=0, expert_weights_norm:bool=False, expert_weights_scale:float=1.0,
+               expert_gating_func:int=0):
     self.blk = [TransformerBlock(dim, (feed_forward_length or hidden_dim) if i < leading_dense_blocks else hidden_dim, n_heads, n_kv_heads, norm_eps,
                                  head_dim, rope_theta, max_context, qk_norm, 0 if i < leading_dense_blocks else num_experts, num_experts_per_tok,
                                  kv_lora_rank, q_lora_rank, qk_nope_head_dim, qk_rope_head_dim, v_head_dim, n_shared_experts,
-                                 expert_weights_norm, expert_weights_scale) for i in range(num_blocks)]
+                                 expert_weights_norm, expert_weights_scale, expert_gating_func) for i in range(num_blocks)]
     self.token_embd  = nn.Embedding(vocab_size, dim)
     self.output_norm = nn.RMSNorm(dim, norm_eps)
     self.output = nn.Linear(dim, vocab_size, bias=False)
@@ -288,7 +288,8 @@ class Transformer:
                         n_shared_experts=kv.get(f'{arch}.expert_shared_count', 0),
                         feed_forward_length=kv[f'{arch}.feed_forward_length'],
                         expert_weights_norm=kv.get(f'{arch}.expert_weights_norm', False),
-                        expert_weights_scale=kv.get(f'{arch}.expert_weights_scale', 1.0))
+                        expert_weights_scale=kv.get(f'{arch}.expert_weights_scale', 1.0),
+                        expert_gating_func=kv.get(f'{arch}.expert_gating_func', 0))
     nn.state.load_state_dict(model, state_dict, verbose=False, consume=True, realize=False)  # NOTE: rope_freqs.weight (32,) is unused
     # NOTE: without this contiguous, it unpacks the weights from the model every time. we shouldn't need this, but for now it's faster
     if realize:
@@ -306,10 +307,9 @@ class Transformer:
     t = Tensor(tokens + [0] * (self.max_context - len(tokens)), dtype="int32").reshape(1, self.max_context)
     # recompute start_pos from what's currently valid in the kv cache
     start_pos = self.get_start_pos(tokens)
-    out, prompt_len = None, len(tokens)
     while len(tokens) < self.max_context:
       sp, nt = v_start_pos.bind(start_pos), v_toks.bind(min(chunk_size, len(tokens) - start_pos))
-      out = self(t[:, sp:sp+nt] if start_pos < prompt_len or out is None else out, sp).realize()
+      out = self(t[:, sp:sp+nt], sp).realize()
       start_pos += nt.val
       # chunked prefill: keep processing until all prompt tokens are consumed
       if start_pos < len(tokens): continue
@@ -382,8 +382,8 @@ class Handler(HTTPRequestHandler):
     out: list[int] = []
     st = time.perf_counter()
     for next_id in model.generate(ids):
-      if len(out) == 0: stderr_log(f"prefill:{len(ids)/((pt:=time.perf_counter())-st):4.0f} tok/s  {colored('--', 'BLACK')}  ")
-      if next_id == eos_id or next_id == eot_id: break
+      if len(out) == 0: stderr_log(f"prefill:{(len(ids)-cache_start_pos)/((pt:=time.perf_counter())-st):4.0f} tok/s  {colored('--', 'BLACK')}  ")
+      if next_id in stop_ids: break
       out.append(next_id)
       yield {"choices": [{"index":0, "delta":{"content":tok.decode([next_id])}, "finish_reason":None}], **tmpl}
     yield {"choices": [{"index":0, "delta":{},"finish_reason":"stop"}], **tmpl}
@@ -397,7 +397,7 @@ class Handler(HTTPRequestHandler):
     if DEBUG >= 1: print(json.dumps(body, indent=2))
     if self.path == "/v1/chat/completions":
       # extract tokens
-      ids: list[int] = ([bos_id] if bos_id is not None else []) + (tok.encode("<sop>") if tok.preset == 'glm4' else [])
+      ids = base_ids[:]
       for msg in body["messages"]:
         ids += tok.role(msg["role"])
         # content can be a str or a list
@@ -409,7 +409,7 @@ class Handler(HTTPRequestHandler):
             else: raise RuntimeError(f"unhandled type: {c['type']}")
         else: raise RuntimeError(f"unknown content type: {type(content)}")
         ids += tok.end_turn(eos_id)
-      ids += tok.role("assistant") + (tok.encode("<think>") if tok.preset == 'glm4' else [])
+      ids += assistant_ids
 
       # reply
       chunks = self.run_model(ids, body["model"], not body.get("stream") or body.get("stream_options",{}).get("include_usage", False))
@@ -445,11 +445,14 @@ if __name__ == "__main__":
   tok = SimpleTokenizer.from_gguf_kv(kv)
   bos_id: int|None = kv.get('tokenizer.ggml.bos_token_id') if kv.get('tokenizer.ggml.add_bos_token', True) else None
   eos_id: int = kv['tokenizer.ggml.eos_token_id']
-  eot_id = kv.get('tokenizer.ggml.eot_token_id')
+  eot_id: int|None = kv.get('tokenizer.ggml.eot_token_id')
+  sop_toks, think_toks = (tok.encode("<sop>"), tok.encode("<think>")) if tok.preset == 'glm4' else ([], [])
+  base_ids, assistant_ids = ([bos_id] if bos_id is not None else []) + sop_toks, tok.role("assistant") + think_toks
+  stop_ids = tuple(tid for tid in (eos_id, eot_id) if tid is not None)
 
   # do benchmark
   if args.benchmark:
-    gen = model.generate(toks:=([bos_id or 0] + (tok.encode("<sop>") if tok.preset == 'glm4' else [])))
+    gen = model.generate(toks:=([bos_id or 0] + sop_toks))
     for _ in range(args.benchmark):
       GlobalCounters.reset()
       with Timing(on_exit=lambda x: f", {1e9/x:6.2f} tok/s, {GlobalCounters.global_mem/x:7.2f} GB/s,"
@@ -465,14 +468,13 @@ if __name__ == "__main__":
     TCPServerWithReuse(('', args.serve), Handler).serve_forever()
 
   # interactive chat
-  ids: list[int] = ([bos_id] if bos_id is not None else []) + (tok.encode("<sop>") if tok.preset == 'glm4' else [])
+  ids = base_ids[:]
   while 1:
     try:
-      ids += tok.role("user") + tok.encode(input('>>> ')) + tok.end_turn(eos_id) + tok.role("assistant") + \
-             (tok.encode("<think>") if tok.preset == 'glm4' else [])
+      ids += tok.role("user") + tok.encode(input('>>> ')) + tok.end_turn(eos_id) + assistant_ids
     except EOFError:
       break
     for next_id in model.generate(ids):
-      sys.stdout.write(tok.decode([next_id]) if next_id != eos_id and next_id != eot_id else "\n\n")
+      sys.stdout.write(tok.decode([next_id]) if next_id not in stop_ids else "\n\n")
       sys.stdout.flush()
-      if next_id == eos_id or next_id == eot_id: break
+      if next_id in stop_ids: break
