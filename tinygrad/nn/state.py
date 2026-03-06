@@ -336,9 +336,12 @@ def ggml_data_to_tensor(t: Tensor, n: int, ggml_type: int) -> Tensor:
       d = blocks[:,-2:].bitcast(dtypes.float16).cast(dtypes.float32).expand((-1, 256))
       return d * (xl.bitwise_or(xh).bitcast(dtypes.int8) - 32).flatten(-2) * scales
     if ggml_type == 39:
-      e8m0_lut = Tensor([2.0**(-128), 2.0**(-127)] + [2.0**(i-128) for i in range(2, 256)],
-                        dtype=dtypes.float32, device=t.device)
-      d = e8m0_lut[blocks[:, 0].cast(dtypes.int32)].unsqueeze(-1)
+      e = blocks[:, 0].cast(dtypes.uint32)
+      small_lut = Tensor([0x00200000, 0x00400000], dtype=dtypes.uint32, device=t.device)
+      small_bits = small_lut[e.clip(0, 1).cast(dtypes.int32)]
+      normal_bits = ((e - 1) * 0x00800000).cast(dtypes.uint32)   # same as (e - 1) << 23
+      bits = (e < 2).where(small_bits, normal_bits)
+      d = bits.bitcast(dtypes.float32).unsqueeze(-1)
       codes = q_to_uint8(blocks[:, 1:17], 4)
       fp4_lut = Tensor([0.0, 1.0, 2.0, 3.0, 4.0, 6.0, 8.0, 12.0,
                        -0.0,-1.0,-2.0,-3.0,-4.0,-6.0,-8.0,-12.0],
