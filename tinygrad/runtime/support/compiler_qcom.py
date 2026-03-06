@@ -29,7 +29,7 @@ MODE_32BIT, MODE_64BIT, SRC_STR, SRC_BLOB = 0, 1, 0, 1
 
 def _read_lib(lib, off) -> int: return struct.unpack("I", lib[off:off+4])[0]
 def checked(handle):
-  assert get_error_code(handle) == 0, f"QCOM Compilation Error: {get_build_log(handle)}"
+  assert handle is not None and get_error_code(handle) == 0, "QCOM Compilation Error" + ("" if handle is None else f": {get_build_log(handle)}")
   return handle
 
 class QCOMCompiler(Compiler):
@@ -43,8 +43,8 @@ class QCOMCompiler(Compiler):
   def __reduce__(self): return QCOMCompiler, (self.chip_id,)
 
   def compile(self, src) -> bytes:
-    ch = compile_source(self.llvm_inst, self.chip_id, MODE_64BIT, b"", 0, 0, 0, src.encode(), 0, SRC_STR, None)
-    lh = link_program(self.llvm_inst, self.chip_id, MODE_64BIT, None, 1, ctypes.pointer(ctypes.c_void_p(ch)))
+    ch = checked(compile_source(self.llvm_inst, self.chip_id, MODE_64BIT, b"", 0, 0, 0, src.encode(), 0, SRC_STR, None))
+    lh = checked(link_program(self.llvm_inst, self.chip_id, MODE_64BIT, None, 1, ctypes.pointer(ctypes.c_void_p(ch))))
     handle_create_binary(lh, ctypes.byref(ptr:=ctypes.c_void_p()), ctypes.byref(sz:=ctypes.c_size_t()))
     for h in [ch, lh]: free_handle(h)
     ret = ctypes.string_at(ptr, sz.value)
