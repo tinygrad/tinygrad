@@ -11,8 +11,8 @@ def b(i, base=None, offset=0, pin=False, size=16):
   if pin: global_map[i].ref(1)
   return global_map[i]
 
-def check_assign(buffers:list[list[Buffer]|tuple[Buffer, ...]], copy_buffers:set[Buffer]|None=None):
-  assigned = _internal_memory_planner(buffers, copy_buffers=copy_buffers)
+def check_assign(buffers:list[list[Buffer]|tuple[Buffer, ...]], copies:list[tuple[Buffer, Buffer]]|None=None):
+  assigned = _internal_memory_planner(buffers, copies=copies)
 
   taken_parts = set()
   first_appearance, last_appearance = {}, {}
@@ -140,8 +140,7 @@ class TestMemoryPlanner(unittest.TestCase):
       [b(1), b(2)],
       [b(3), b(2)],
     ]
-    copy_bufs = {b(1)}
-    assigned = _internal_memory_planner(bs, copy_buffers=copy_bufs)
+    assigned = _internal_memory_planner(bs, copies=[(b(1), b(0))])
     r1, r2 = assigned.get(b(1), b(1)), assigned.get(b(2), b(2))
     assert r1.base != r2.base
 
@@ -151,8 +150,7 @@ class TestMemoryPlanner(unittest.TestCase):
       [b(2), b(1)],
       [b(3), b(2)],
     ]
-    copy_bufs = {b(1), b(2)}
-    assigned = _internal_memory_planner(bs, copy_buffers=copy_bufs)
+    assigned = _internal_memory_planner(bs, copies=[(b(1), b(0)), (b(2), b(1))])
     r1, r2 = assigned.get(b(1), b(1)), assigned.get(b(2), b(2))
     assert r1.base == r2.base
 
@@ -162,8 +160,7 @@ class TestMemoryPlanner(unittest.TestCase):
       [b(2), b(1)],
       [b(3), b(2)],
     ]
-    copy_bufs = {b(1)}
-    assigned = _internal_memory_planner(bs, copy_buffers=copy_bufs)
+    assigned = _internal_memory_planner(bs, copies=[(b(1), b(0))])
     r0, r2 = assigned.get(b(0), b(0)), assigned.get(b(2), b(2))
     assert r0.base == r2.base
 
@@ -173,8 +170,7 @@ class TestMemoryPlanner(unittest.TestCase):
       [b(2), b(1)],
       [b(3), b(2)],
     ]
-    copy_bufs = {b(2)}
-    assigned = _internal_memory_planner(bs, copy_buffers=copy_bufs)
+    assigned = _internal_memory_planner(bs, copies=[(b(2), b(1))])
     r0, r2 = assigned.get(b(0), b(0)), assigned.get(b(2), b(2))
     assert r0.base != r2.base
 
@@ -185,7 +181,7 @@ class TestMemoryPlanner(unittest.TestCase):
       [b(4), b(3)],
       [b(5), b(4)],
     ]
-    check_assign(bs, copy_buffers={b(1), b(2)})
+    check_assign(bs, copies=[(b(1), b(0)), (b(2), b(0))])
 
   def test_copy_bufs_pinned_mixed(self):
     bs = [
@@ -194,7 +190,7 @@ class TestMemoryPlanner(unittest.TestCase):
       [b(4), b(3)],
       [b(5), b(4), b(0)],
     ]
-    check_assign(bs, copy_buffers={b(1), b(3)})
+    check_assign(bs, copies=[(b(1), b(0)), (b(3), b(1))])
 
   def test_deferred_copy_frees_no_serialization(self):
     bs = [
@@ -203,38 +199,66 @@ class TestMemoryPlanner(unittest.TestCase):
       [b(3), b(2)],
       [b(4), b(3)],
     ]
-    copy_bufs = {b(1), b(3)}
-    assigned = _internal_memory_planner(bs, copy_buffers=copy_bufs)
+    assigned = _internal_memory_planner(bs, copies=[(b(1), b(0)), (b(3), b(2))])
     r1, r3 = assigned.get(b(1), b(1)), assigned.get(b(3), b(3))
     assert r1.offset != r3.offset or r1.base != r3.base
 
   def test_deferred_copy_frees_chain(self):
     bs = []
-    copy_bufs = set()
+    copies = []
     for i in range(6):
       copy_buf, compute_buf = b(i * 2 + 1), b(i * 2 + 2)
       bs.append([copy_buf, b(0, pin=True)])
       bs.append([compute_buf, copy_buf])
-      copy_bufs.add(copy_buf)
+      copies.append((copy_buf, b(0, pin=True)))
     bs.append([b(100, pin=True)])
-    check_assign(bs, copy_buffers=copy_bufs)
+    check_assign(bs, copies=copies)
 
   def test_deferred_copy_frees_eventually_reuse(self):
     bs = []
-    copy_bufs = set()
+    copies = []
     for i in range(100):
       copy_buf = b(i + 1)
       bs.append([copy_buf, b(0, pin=True)])
       if i > 0: bs.append([b(100 + i), b(i)])
-      copy_bufs.add(copy_buf)
+      copies.append((copy_buf, b(0, pin=True)))
     bs.append([b(200), b(100)])
 
-    assigned = _internal_memory_planner(bs, copy_buffers=copy_bufs)
+    assigned = _internal_memory_planner(bs, copies=copies)
     offsets = set()
     for i in range(1, 101):
       r = assigned.get(b(i), b(i))
       offsets.add(r.offset)
     assert len(offsets) < 100
+
+  def test_compute_bufs_not_deferred_by_copy_src_span(self):
+    # Compute bufs on the same lane as copy srcs should still reuse memory immediately (defer=0),
+    # not be delayed by the copy src's max_cross_span.
+    # b(1) is copy dst, b(0) is copy src. b(2) and b(4) are compute bufs on the same lane as b(0).
+    # b(2) dies before b(4) is born, so they should share memory despite b(0) having a long span.
+    bs = [
+      [b(0, pin=True), b(1)],   # copy: dst=b(1), src=b(0)
+      [b(1), b(2)],             # compute uses b(2)
+      [b(3), b(2)],             # b(2) last used here
+      [b(4), b(3)],             # b(4) should reuse b(2)'s memory
+      [b(5), b(4)],
+    ]
+    assigned = _internal_memory_planner(bs, copies=[(b(1), b(0))])
+    r2, r4 = assigned.get(b(2), b(2)), assigned.get(b(4), b(4))
+    assert r2.offset == r4.offset and r2.base == r4.base
+
+  def test_copy_src_deferred_but_compute_immediate(self):
+    # Copy src b(2) should be deferred, but compute buf b(3) on the same lane should free immediately.
+    bs = [
+      [b(1), b(2)],             # copy: dst=b(1), src=b(2)
+      [b(3), b(1)],             # compute uses b(3), b(2) is copy src (cross-queue)
+      [b(4), b(3)],             # b(3) last used here, should free immediately
+      [b(5), b(4)],             # b(5) should reuse b(3)'s memory
+      [b(6), b(5)],
+    ]
+    assigned = _internal_memory_planner(bs, copies=[(b(1), b(2))])
+    r3, r5 = assigned.get(b(3), b(3)), assigned.get(b(5), b(5))
+    assert r3.offset == r5.offset and r3.base == r5.base
 
 if __name__ == "__main__":
   unittest.main()
