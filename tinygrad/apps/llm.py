@@ -396,7 +396,7 @@ class Handler(HTTPRequestHandler):
       # extract tokens
       ids = base_ids[:]
       for msg in body["messages"]:
-        ids += tok.role(msg["role"])
+        ids += tok.role(msg["role"]) + (think_toks if msg["role"] == "assistant" else [])
         # content can be a str or a list
         content = msg["content"]
         if isinstance(content, str): ids += tok.encode(content)
