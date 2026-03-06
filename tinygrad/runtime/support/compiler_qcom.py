@@ -28,9 +28,6 @@ handle_create_binary.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_void_p
 MODE_32BIT, MODE_64BIT, SRC_STR, SRC_BLOB = 0, 1, 0, 1
 
 def _read_lib(lib, off) -> int: return struct.unpack("I", lib[off:off+4])[0]
-def checked(handle):
-  assert handle is not None and get_error_code(handle) == 0, "QCOM Compilation Error" + ("" if handle is None else f": {get_build_log(handle)}")
-  return handle
 
 class QCOMCompiler(Compiler):
   def __init__(self, chip_id):
@@ -40,6 +37,13 @@ class QCOMCompiler(Compiler):
   def __del__(self): destroy_llvm_instance(self.llvm_inst)
 
   def __reduce__(self): return QCOMCompiler, (self.chip_id,)
+
+  def checked(self, handle):
+    if handle is None or get_error_code(handle) != 0:
+      destroy_llvm_instance(self.llvm_inst)
+      self.llvm_inst = create_llvm_instance()
+      raise RuntimeError("QCOM Compilation Error" + ("" if handle is None else f": {get_build_log(handle)}"))
+    return handle
 
   def compile(self, src) -> bytes:
     ch = checked(compile_source(self.llvm_inst, self.chip_id, MODE_64BIT, b"", 0, 0, 0, src.encode(), 0, SRC_STR, None))
