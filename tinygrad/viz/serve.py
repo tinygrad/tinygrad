@@ -71,10 +71,9 @@ def get_rewrites(t:RewriteTrace) -> list[dict]:
     steps = [create_step(s.name, ("/graph-rewrites", i, j), loc=s.loc, match_count=len(s.matches), code_line=printable(s.loc),
                          trace=k.tb if j==0 else None, depth=s.depth) for j,s in enumerate(v)]
     if (p:=get_prg_uop(i)) is not None:
-      _, __, lin, src, binary = p.src
-      steps.append(create_step("View UOp List", ("/uops", i, len(steps)), lin.src))
-      steps.append(create_step("View Source", ("/code", i, len(steps)), src.arg))
-      steps.append(create_step("View Disassembly", ("/asm", i, len(steps)), (k.ret, binary.arg)))
+      steps.append(create_step("View UOp List", ("/uops", i, len(steps))))
+      steps.append(create_step("View Source", ("/code", i, len(steps)), p.src[3].arg))
+      steps.append(create_step("View Disassembly", ("/asm", i, len(steps)), (k.ret, p.src[4].arg)))
     for key in k.keys: ref_map[key] = i
     ret.append({"name":k.display_name, "steps":steps})
   return ret
@@ -150,9 +149,10 @@ def uop_to_json(x:UOp) -> dict[int, dict]:
   return graph
 
 @functools.cache
-def _reconstruct(a:int):
+def _reconstruct(a:int, depth:int|None=None):
   op, dtype, src, arg, *rest = trace.uop_fields[a]
-  return UOp(op, dtype, tuple(_reconstruct(s) for s in src), arg, *rest)
+  if depth is not None and depth <= 0: return UOp(op, dtype, (), arg, *rest)
+  return UOp(op, dtype, tuple(_reconstruct(s, None if depth is None else depth-1) for s in src), arg, *rest)
 
 def get_full_rewrite(ctx:TrackedGraphRewrite) -> Generator[GraphRewriteDetails, None, None]:
   next_sink = _reconstruct(ctx.sink)
@@ -169,7 +169,7 @@ def get_full_rewrite(ctx:TrackedGraphRewrite) -> Generator[GraphRewriteDetails, 
 
 def get_prg_uop(i:int) -> UOp|None:
   s = next((s for s in trace.rewrites[i] if s.name == "View Program"), None)
-  return _reconstruct(s.sink) if s is not None else None
+  return _reconstruct(s.sink, depth=1) if s is not None else None
 
 # encoder helpers
 
@@ -567,7 +567,7 @@ def get_render(query:str) -> dict:
   i, j, fmt = get_int(qs:=parse_qs(url.query), "ctx"), get_int(qs, "step"), url.path.lstrip("/")
   data = ctxs[i]["steps"][j]["data"]
   if fmt == "graph-rewrites": return {"value":get_full_rewrite(trace.rewrites[i][j]), "content_type":"text/event-stream"}
-  if fmt == "uops": return {"src":get_stdout(lambda: print_uops(data)), "lang":"txt"}
+  if fmt == "uops": return {"src":get_stdout(lambda: print_uops(_reconstruct(trace.rewrites[i][j-1].sink).src[2].src)), "lang":"txt"}
   if fmt == "code": return {"src":data, "lang":"cpp"}
   if fmt == "asm":
     ret:dict = {}
