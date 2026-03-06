@@ -405,16 +405,17 @@ class CDNA_PKT_2(PacketType):
   unk_padding = bits[63:8]
 
 class CDNA_WAVESTART(PacketType):
-  """pkt_fmt=3: 32-bit WAVESTART packet (case 0x8)"""
+  """type 3: 32-bit wave start (Wave/group_id)"""
   encoding = bits[3:0] == 3
-  unk_0 = bits[5:5]       # (data >> 5) & 1
-  unk_1 = bits[9:6]       # (data >> 6) & 0xf
-  wave = bits[13:10]      # (data >> 10) & 0xf
-  simd = bits[15:14]      # (data >> 0xe) & 3
-  cu = bits[17:16]        # (data >> 0x10) & 3
-  unk_5 = bits[19:18]     # (data >> 0x12) & 3
-  unk_6 = bits[28:22]     # (data >> 0x16) & 0x7f
-  unk_padding = bits[31:29]
+  sh = bits[5:5]
+  cu = bits[9:6]
+  wave = bits[13:10]
+  simd = bits[15:14]
+  pipe = bits[17:16]
+  me = bits[19:18]
+  _gap = bits[21:20]
+  count = bits[28:22]
+  _padding = bits[31:29]
 
 class CDNA_PKT_4(PacketType):
   """pkt_fmt=4: 16-bit packet (case 0xc, same as 0x8/0x14)"""
@@ -433,12 +434,12 @@ class CDNA_PKT_5(PacketType):
   unk_padding = bits[47:16]
 
 class CDNA_WAVEEND(PacketType):
-  """pkt_fmt=6: 16-bit WAVEEND packet (case 0x14, same as 0x8/0xc)"""
+  """type 6: 16-bit wave end (group_id)"""
   encoding = bits[3:0] == 6
-  unk_0 = bits[5:5]       # (data_word >> 5) & 1
-  unk_1 = bits[9:6]       # (data_word >> 6) & 0xf
-  wave = bits[13:10]      # (data_word >> 10) & 0xf
-  simd = bits[15:14]      # (data_word >> 0xe)
+  sh = bits[5:5]
+  cu = bits[9:6]
+  wave = bits[13:10]
+  simd = bits[15:14]
 
 class CDNA_EXEC(PacketType):
   """pkt_fmt=10: 16-bit EXEC packet (case 0x24)"""
