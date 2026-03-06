@@ -59,7 +59,7 @@ class TestGGUF(unittest.TestCase):
     tensor = Tensor(np.concatenate(blocks))
     out = ggml_data_to_tensor(tensor, len(expected), MXFP4)
     # TODO: should this be exact equal? somehow failed on CI
-    np.testing.assert_allclose(out.numpy(), expected, atol=0.0, rtol=1e-6)
+    np.testing.assert_equal(out.numpy(), expected)
 
   def test_dequantization_mxfp4_block(self):
     MXFP4 = 39
@@ -79,7 +79,7 @@ class TestGGUF(unittest.TestCase):
                         0.04687500,  0.00000000, 0.00000000,  0.01562500], dtype=np.float32)
     out = ggml_data_to_tensor(Tensor(block), 32, MXFP4)
     # TODO: similar to previous test fails on Mac CI with assert_equal for unclear reason
-    np.testing.assert_allclose(out.numpy(), expected, atol=0.0, rtol=1e-6)
+    np.testing.assert_equal(out.numpy(), expected)
 
   def test_expected_failure_unknown_type(self):
     with self.assertRaises(ValueError):
