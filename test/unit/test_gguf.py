@@ -36,6 +36,32 @@ class TestGGUF(unittest.TestCase):
   def test_dequantization_q6_k(self): self._test_dequantization(GGMLQuantizationType.Q6_K)
   def test_dequantization_mxfp4(self): self._test_dequantization(GGMLQuantizationType.MXFP4)
 
+  def test_dequantization_mxfp4_old(self):
+
+    def encode(nibbles, E):
+      packed = [(low & 0xF) | ((high & 0xF) << 4) for low, high in zip(nibbles[:16], nibbles[16:])]
+      return np.array([E] + packed, dtype=np.uint8)
+
+    def decode(code, E):
+      sign = -1.0 if (code & 0b1000) else 1.0
+      exp = (code >> 1) & 0b11
+      mant = code & 0b1
+      val = 2 * ((1.0 + 0.5 * mant) * np.exp2(exp - 1) if exp else 0.5 * mant)
+      scale = np.exp2(E - 128) if E >= 2 else np.exp2(-127 if E == 1 else -128)
+      return sign * val * scale
+
+    blocks, expected = [], []
+    rng = np.random.default_rng(42)
+    for _ in range(4):
+      E = rng.integers(0, 256)
+      codes = rng.integers(0, 16, size=32, dtype=np.uint8)
+      blocks.append(encode(codes, E))
+      expected.extend(decode(c, E) for c in codes)
+    tensor = Tensor(np.concatenate(blocks))
+    out = ggml_data_to_tensor(tensor, len(expected), GGMLQuantizationType.MXFP4.value)
+    # TODO: should this be exact equal? somehow failed on CI
+    np.testing.assert_allclose(out.numpy(), expected, atol=0.0, rtol=1e-6)
+
   def test_dequantization_mxfp4_block(self):
     # https://gist.github.com/Ananta-Ranganathan/3317b6ed51a3b033e9c2564fafb4e043
     # used the above script to download the first block of blk.0.attn_k_b.weight from
