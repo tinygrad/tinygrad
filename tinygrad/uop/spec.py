@@ -260,7 +260,7 @@ full_spec = PatternMatcher([
   # PTRCAT is like VECTORIZE, but it functions on ptrs
   (UPat(Ops.PTRCAT, name="x"), lambda x: x.dtype.vcount == sum([y.dtype.base.count for y in x.src])),
   # CAT is like VECTORIZE, but the srcs can be vectors
-  (UPat(Ops.CAT, name="x"), lambda x: x.dtype.vcount == sum([y.dtype.vcount for y in x.src])),
+  (UPat(Ops.VCAT, name="x"), lambda x: x.dtype.vcount == sum([y.dtype.vcount for y in x.src])),
   # vectorized index
   (UPat(Ops.INDEX, src=(UPat((Ops.VECTORIZE, Ops.CAST)), UPat())), lambda: True),
 
