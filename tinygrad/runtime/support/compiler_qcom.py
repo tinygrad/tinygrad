@@ -46,8 +46,8 @@ class QCOMCompiler(Compiler):
     return handle
 
   def compile(self, src) -> bytes:
-    ch = checked(compile_source(self.llvm_inst, self.chip_id, MODE_64BIT, b"", 0, 0, 0, src.encode(), 0, SRC_STR, None))
-    lh = checked(link_program(self.llvm_inst, self.chip_id, MODE_64BIT, None, 1, ctypes.pointer(ctypes.c_void_p(ch))))
+    ch = self.checked(compile_source(self.llvm_inst, self.chip_id, MODE_64BIT, b"", 0, 0, 0, src.encode(), 0, SRC_STR, None))
+    lh = self.checked(link_program(self.llvm_inst, self.chip_id, MODE_64BIT, None, 1, ctypes.pointer(ctypes.c_void_p(ch))))
     handle_create_binary(lh, ctypes.byref(ptr:=ctypes.c_void_p()), ctypes.byref(sz:=ctypes.c_size_t()))
     for h in [ch, lh]: free_handle(h)
     ret = ctypes.string_at(ptr, sz.value)
