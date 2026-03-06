@@ -756,7 +756,7 @@ class TestLoadStoreFolding(unittest.TestCase):
     self.assertEqual(len(gated_load.src), 2)  # PTRCAT + alt
     result = graph_rewrite(gated_load, load_store_folding, name='test')
     # After rewrite, should be CAT of LOADs, each preserving alt
-    self.assertEqual(result.op, Ops.CAT)
+    self.assertEqual(result.op, Ops.VCAT)
     for inner_load in result.src:
       self.assertEqual(inner_load.op, Ops.LOAD)
       self.assertEqual(len(inner_load.src), 2)  # INDEX + alt
