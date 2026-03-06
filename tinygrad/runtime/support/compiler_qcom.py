@@ -25,7 +25,7 @@ handle_create_binary.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_void_p
 (free_assembly:=dll.cl_compiler_free_assembly).restype, free_assembly.argtypes = None, [ctypes.c_void_p]
 (destroy_llvm_instance:=dll.cl_compiler_destroy_llvm_instance).restype, destroy_llvm_instance.argtypes = None, [ctypes.c_void_p]
 
-MODE_32BIT, MODE_64BIT, SRC_STR, SRC_BLOB  = 0, 1, 0, 1
+MODE_32BIT, MODE_64BIT, SRC_STR, SRC_BLOB = 0, 1, 0, 1
 
 def _read_lib(lib, off) -> int: return struct.unpack("I", lib[off:off+4])[0]
 def checked(handle):
