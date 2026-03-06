@@ -9,8 +9,8 @@ from tinygrad.renderer.amd import decode_inst
 from tinygrad.runtime.autogen.amd.rdna3.ins import SOPP
 from tinygrad.runtime.autogen.amd.rdna3.enum import SOPPOp
 from tinygrad.renderer.amd.sqtt import (decode, LAYOUT_HEADER, WAVESTART, WAVESTART_RDNA4, WAVEEND, INST, INST_RDNA4, VALUINST,
-                                     IMMEDIATE, IMMEDIATE_MASK, PACKET_TYPES_RDNA3, PACKET_TYPES_RDNA4, CDNA_WAVESTART, CDNA_WAVEEND,
-                                     InstOp, InstOpRDNA4, print_packets)
+                                     IMMEDIATE, IMMEDIATE_MASK, PACKET_TYPES_RDNA3, PACKET_TYPES_RDNA4, PACKET_TYPES_CDNA, CDNA_WAVESTART,
+                                     InstOp, InstOpRDNA4, print_packets, CDNA_WAVEEND)
 from test.amd.helpers import TARGET_TO_ARCH
 
 import tinygrad
@@ -125,7 +125,7 @@ class SQTTExamplesTestBase(unittest.TestCase):
           self.assertIsInstance(packets[0], LAYOUT_HEADER, f"first packet should be LAYOUT_HEADER in {name}")
 
   def test_packet_types_valid(self):
-    all_classes = set(PACKET_TYPES_RDNA3.values()) | set(PACKET_TYPES_RDNA4.values())
+    all_classes = set(PACKET_TYPES_RDNA3.values()) | set(PACKET_TYPES_RDNA4.values()) | set(PACKET_TYPES_CDNA.values())
     for name, (events, *_) in self.examples.items():
       for i, event in enumerate(events):
         with self.subTest(example=name, event=i):
