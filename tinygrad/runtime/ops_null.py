@@ -3,7 +3,7 @@ from tinygrad.device import Compiled, Allocator, CompilerSet
 from tinygrad.engine.jit import MultiGraphRunner
 from tinygrad.renderer.cstyle import Renderer, CStyleLanguage, AMDHIPRenderer, QCOMCLRenderer
 from tinygrad.uop.ops import Ops
-from tinygrad.helpers import cpu_profile, EMULATE, NULL_IR3, NULL_NAK, NULL_ALLOW_COPYOUT
+from tinygrad.helpers import cpu_profile, EMULATE, NULL_QCOMCL, NULL_IR3, NULL_NAK, NULL_ALLOW_COPYOUT
 from tinygrad.renderer.nir import IR3Renderer, NAKRenderer
 
 class NullRenderer(CStyleLanguage):
