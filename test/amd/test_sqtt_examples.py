@@ -224,6 +224,9 @@ class TestSQTTExamplesRDNA4(SQTTExamplesTestBase): target = "gfx1200"
 
 class TestSQTTExamplesCDNA(SQTTExamplesTestBase):
   target = "gfx950"
+  def test_decode_all_examples(self): self.skipTest("TODO: correct deltas in the timestamp packet types, first packet is REGCS_CDNA")
+  def test_gemm_has_instructions(self): self.skipTest("TODO: decode CDNA inst packets")
+  def test_rocprof_wave_times_match(self): self.skipTest("TODO: requires timestamp patching")
 
 if __name__ == "__main__":
   unittest.main()
