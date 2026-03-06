@@ -153,7 +153,7 @@ class TransformerBlock:
       q = self.attn_q_b(self.attn_q_a_norm(self.attn_q_a(x_norm))).reshape(B, T, self.n_heads, self.q_head_dim).transpose(1, 2)
       q_nope, q_pe = q.split(self.qk_split, dim=-1)
       compressed_kv, k_pe = self.attn_kv_a_mqa(x_norm).split(self.kv_split, dim=-1)
-      freqs_cis = precompute_freqs_cis(self.qk_split[1], self.max_context, self.rope_theta)[start_pos:start_pos+T]
+      freqs_cis = precompute_freqs_cis(self.qk_split[1], self.max_context, self.rope_theta)[start_pos:start_pos+T].cast(q_pe.dtype)
       q_pe, k_pe = [apply_rope(w, freqs_cis, interleaved=True) for w in [q_pe, k_pe.unsqueeze(1)]]
       k_new = self.attn_kv_a_norm(compressed_kv).unsqueeze(1).cat(k_pe, dim=-1)
       assigned_k = self.cache_k.uop.after(self.cache_k[:, :, start_pos:start_pos+T, :].uop.assign(k_new.contiguous().uop))
@@ -224,15 +224,14 @@ class TransformerBlock:
     return self._feed_forward(self._attention(x, start_pos)).contiguous()
 
 class Transformer:
-  def __init__(self, *, num_blocks, dim, hidden_dim, n_heads, n_kv_heads, norm_eps, vocab_size, head_dim:int, rope_theta:float,
-               max_context:int=0, qk_norm:int=0, num_experts:int=0, num_experts_per_tok:int=0, leading_dense_blocks:int=0,
-               kv_lora_rank:int=0, q_lora_rank:int=0, qk_nope_head_dim:int=0, qk_rope_head_dim:int=0, v_head_dim:int=0,
-               n_shared_experts:int=0, feed_forward_length:int=0, expert_weights_norm:bool=False, expert_weights_scale:float=1.0,
-               expert_gating_func:int=0):
+  def __init__(self, *, num_blocks, dim, hidden_dim, n_heads, n_kv_heads, norm_eps, vocab_size, head_dim:int, rope_theta:float, max_context:int=0,
+               qk_norm:int=0, num_experts:int=0, num_experts_per_tok:int=0, leading_dense_blocks:int=0, kv_lora_rank:int=0, q_lora_rank:int=0,
+               qk_nope_head_dim:int=0, qk_rope_head_dim:int=0, v_head_dim:int=0, n_shared_experts:int=0, feed_forward_length:int=0,
+               expert_weights_norm:bool=False, expert_weights_scale:float=1.0, expert_gating_func:int=0):
     self.blk = [TransformerBlock(dim, (feed_forward_length or hidden_dim) if i < leading_dense_blocks else hidden_dim, n_heads, n_kv_heads, norm_eps,
                                  head_dim, rope_theta, max_context, qk_norm, 0 if i < leading_dense_blocks else num_experts, num_experts_per_tok,
-                                 kv_lora_rank, q_lora_rank, qk_nope_head_dim, qk_rope_head_dim, v_head_dim, n_shared_experts,
-                                 expert_weights_norm, expert_weights_scale, expert_gating_func) for i in range(num_blocks)]
+                                 kv_lora_rank, q_lora_rank, qk_nope_head_dim, qk_rope_head_dim, v_head_dim, n_shared_experts, expert_weights_norm,
+                                 expert_weights_scale, expert_gating_func) for i in range(num_blocks)]
     self.token_embd  = nn.Embedding(vocab_size, dim)
     self.output_norm = nn.RMSNorm(dim, norm_eps)
     self.output = nn.Linear(dim, vocab_size, bias=False)
@@ -280,16 +279,14 @@ class Transformer:
                         rope_theta=kv[f'{arch}.rope.freq_base'], max_context=max_context,
                         qk_norm=int(state_dict['blk.0.attn_q_norm.weight'].shape[0]) if 'blk.0.attn_q_norm.weight' in state_dict else 0,
                         num_experts=kv.get(f'{arch}.expert_count', 0), num_experts_per_tok=kv.get(f'{arch}.expert_used_count', 0),
-                        leading_dense_blocks=kv.get(f'{arch}.leading_dense_block_count', 0),
-                        kv_lora_rank=kv.get(f'{arch}.attention.kv_lora_rank', 0), q_lora_rank=kv.get(f'{arch}.attention.q_lora_rank', 0),
+                        leading_dense_blocks=kv.get(f'{arch}.leading_dense_block_count', 0), kv_lora_rank=kv.get(f'{arch}.attention.kv_lora_rank', 0),
+                        q_lora_rank=kv.get(f'{arch}.attention.q_lora_rank', 0),
                         qk_nope_head_dim=max(kv.get(f'{arch}.attention.key_length_mla', 0) - kv.get(f'{arch}.rope.dimension_count', 0), 0),
                         qk_rope_head_dim=kv.get(f'{arch}.rope.dimension_count', 0),
                         v_head_dim=kv.get(f'{arch}.attention.value_length_mla', kv.get(f'{arch}.attention.value_length', 0)),
-                        n_shared_experts=kv.get(f'{arch}.expert_shared_count', 0),
-                        feed_forward_length=kv[f'{arch}.feed_forward_length'],
+                        n_shared_experts=kv.get(f'{arch}.expert_shared_count', 0), feed_forward_length=kv[f'{arch}.feed_forward_length'],
                         expert_weights_norm=kv.get(f'{arch}.expert_weights_norm', False),
-                        expert_weights_scale=kv.get(f'{arch}.expert_weights_scale', 1.0),
-                        expert_gating_func=kv.get(f'{arch}.expert_gating_func', 0))
+                        expert_weights_scale=kv.get(f'{arch}.expert_weights_scale', 1.0), expert_gating_func=kv.get(f'{arch}.expert_gating_func', 0))
     nn.state.load_state_dict(model, state_dict, verbose=False, consume=True, realize=False)  # NOTE: rope_freqs.weight (32,) is unused
     # NOTE: without this contiguous, it unpacks the weights from the model every time. we shouldn't need this, but for now it's faster
     if realize:
@@ -468,7 +465,7 @@ if __name__ == "__main__":
     TCPServerWithReuse(('', args.serve), Handler).serve_forever()
 
   # interactive chat
-  ids = base_ids[:]
+  ids: list[int] = base_ids[:]
   while 1:
     try:
       ids += tok.role("user") + tok.encode(input('>>> ')) + tok.end_turn(eos_id) + assistant_ids
