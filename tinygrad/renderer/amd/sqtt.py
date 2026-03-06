@@ -425,13 +425,13 @@ class CDNA_PKT_4(PacketType):
   unk_2 = bits[13:10]     # (data_word >> 10) & 0xf
   unk_3 = bits[15:14]     # (data_word >> 0xe)
 
-class CDNA_PKT_5(PacketType):
-  """pkt_fmt=5: 48-bit packet (case 0x10)"""
+class REGCS_CDNA(PacketType):
+  """type 5: 48-bit register CS write (RegCs)"""
   encoding = bits[3:0] == 5
-  unk_0 = bits[6:5]       # (data >> 5) & 3
-  unk_1 = bits[7:7]       # (data >> 7) + 1 & 1
-  unk_2 = bits[15:9]      # (data >> 9) & 0x7f
-  unk_padding = bits[47:16]
+  pipe = bits[6:5]
+  _me_raw = bits[8:7]
+  regaddr = bits[15:9]
+  regdata = bits[47:16]
 
 class CDNA_WAVEEND(PacketType):
   """type 6: 16-bit wave end (group_id)"""
@@ -512,7 +512,7 @@ class CDNA_PKT_15(PacketType):
   unk_padding = bits[47:16]
 
 PACKET_TYPES_CDNA: dict[int, type[PacketType]] = {
-  0: CDNA_DELTA, 1: CDNA_TIMESTAMP, 2: CDNA_PKT_2, 3: CDNA_WAVESTART, 4: CDNA_PKT_4, 5: CDNA_PKT_5, 6: CDNA_WAVEEND,
+  0: CDNA_DELTA, 1: CDNA_TIMESTAMP, 2: CDNA_PKT_2, 3: CDNA_WAVESTART, 4: CDNA_PKT_4, 5: REGCS_CDNA, 6: CDNA_WAVEEND,
   7: CDNA_PKT_7, 8: CDNA_PKT_8, 9: CDNA_PKT_9, 10: CDNA_EXEC, 11: CDNA_PKT_11, 12: CDNA_PKT_12,
   13: CDNA_INST, 14: CDNA_PKT_14, 15: CDNA_PKT_15,
 }
