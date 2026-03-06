@@ -10,7 +10,6 @@ from tinygrad.helpers import colored, getenv, tqdm, unwrap, word_wrap, TRACEMETA
 from tinygrad.helpers import printable, Context, START_TIME
 from tinygrad.renderer.amd.dsl import Inst
 from tinygrad.renderer.amd import detect_format
-trace = []
 
 # NOTE: using HTTPServer forces a potentially slow socket.getfqdn
 class TCPServerWithReuse(socketserver.TCPServer):
@@ -72,10 +71,9 @@ def get_rewrites(t:RewriteTrace) -> list[dict]:
     steps = [create_step(s.name, ("/graph-rewrites", i, j), loc=s.loc, match_count=len(s.matches), code_line=printable(s.loc),
                          trace=k.tb if j==0 else None, depth=s.depth) for j,s in enumerate(v)]
     if (p:=get_prg_uop(i)) is not None:
-      _, __, lin, src, binary = p.src
       steps.append(create_step("View UOp List", ("/uops", i, len(steps))))
-      steps.append(create_step("View Source", ("/code", i, len(steps)), src.arg))
-      steps.append(create_step("View Disassembly", ("/asm", i, len(steps)), (k.ret, binary.arg)))
+      steps.append(create_step("View Source", ("/code", i, len(steps)), p.src[3].arg))
+      steps.append(create_step("View Disassembly", ("/asm", i, len(steps)), (k.ret, p.src[4].arg)))
     for key in k.keys: ref_map[key] = i
     ret.append({"name":k.display_name, "steps":steps})
   return ret
