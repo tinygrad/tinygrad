@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from tinygrad.dtype import dtypes, ImageDType, DType, AddrSpace, Invalid, PtrDType
 from tinygrad.uop.ops import UOp, Ops, UPat, PatternMatcher, GroupOp, identity_element
 from tinygrad.uop.symbolic import uop_given_valid, parse_valid, invalid_gate
-from tinygrad.helpers import getenv, flatten, AMX, CPU_X86, prod, IMAGE
+from tinygrad.helpers import getenv, flatten, AMX, prod, IMAGE
 from tinygrad.renderer import Renderer
 
 # ***** image load valid simplification *****
@@ -149,9 +149,6 @@ def split_load_store(ctx:Renderer|None, ls:UOp, idx:UOp):
   must_divide = True
   if ctx is not None and ctx.device == "DSP":
     lengths = [128,64,32,16,8,4]
-    must_divide = False
-  elif ctx is not None and CPU_X86:
-    lengths = [l for l in [16,8,4,2,1] if l*buf.dtype.itemsize <= 16]
     must_divide = False
   elif buf.dtype.base not in (dtypes.float, dtypes.half, *dtypes.fp8s) and not isinstance(buf.dtype, ImageDType):
     pass
