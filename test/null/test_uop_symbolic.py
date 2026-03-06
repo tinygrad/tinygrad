@@ -703,6 +703,12 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable((31*b+1)//18, 0, 172, "(((b*13)+1)//18+b)")
     self.helper_test_variable((19*b+3)//7, 0, 271, "(((b*5)+3)//7+(b*2))")
 
+  def test_div_by_factor_tie_break(self):
+    a = Variable("a", 0, 1)
+    b = Variable("b", 0, 1)
+    with Context(CORRECT_DIVMOD_FOLDING=1):
+      self.helper_test_variable((a*2+b*3+2)//6, 0, 1, "((a+b+1)//3)")
+
   def test_div_mod_recombine_large_coeff(self):
     # recombine must work even when coeff > divisor: both mod and div reduce the coeff the same way
     b = Variable("b", 0, 100)
