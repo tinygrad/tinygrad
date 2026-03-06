@@ -6,6 +6,7 @@ from tinygrad.helpers import getenv, IMAGE, DEBUG, CI, Context, CPU_LLVM, AMD_LL
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.tensor import _to_np_dtype
 from tinygrad.device import is_dtype_supported
+from tinygrad.renderer.cstyle import QCOMCLRenderer
 from tinygrad.renderer.nir import NIRRenderer
 
 TINY_BACKEND = getenv("TINY_BACKEND")
@@ -436,7 +437,7 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45,35), (45,35), (45,35)], lambda x,y,z: x.lerp(y,z))
     helper_test_op(None, lambda x,y,z: x.lerp(y,z), vals=[[1.,2.,3.], [4.,5.,6.], 0.5])
 
-  @unittest.skipIf(Device.DEFAULT == "QCOM", "OpenCL fails to compile this (both on GPU(qcom)/QCOM backends)")
+  @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, QCOMCLRenderer), "OpenCL fails to compile this (both on CL(qcom)/QCOM backends)")
   def test_tril(self):
     helper_test_op([(3,3)], lambda x: x.tril())
     helper_test_op([(3,3)], lambda x: x.tril(1))
@@ -454,7 +455,7 @@ class TestOps(unittest.TestCase):
     helper_test_op([(5,3,3)], lambda x: x.tril(1))
     helper_test_op(None, lambda x: x.tril(), vals=[[[True] * 3] * 3], forward_only=True)
 
-  @unittest.skipIf(Device.DEFAULT == "QCOM", "OpenCL fails to compile this (both on GPU(qcom)/QCOM backends)")
+  @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, QCOMCLRenderer), "OpenCL fails to compile this (both on CL(qcom)/QCOM backends)")
   def test_triu(self):
     helper_test_op([(3,3)], lambda x: x.triu())
     helper_test_op([(3,3)], lambda x: x.triu(1))
@@ -1503,7 +1504,7 @@ class TestOps(unittest.TestCase):
     helper_test_op([(3,3)], lambda x: torch.full_like(x, 2).prod(), lambda x: (x.full_like(2)).prod(), forward_only=True)
     helper_test_op([(3,3)], lambda x: torch.full_like(x, 2).max(), lambda x: (x.full_like(2)).max(), forward_only=True)
 
-  @unittest.skipIf(Device.DEFAULT == "QCOM", "OpenCL fails to compile this (both on GPU(qcom)/QCOM backends)")
+  @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, QCOMCLRenderer), "OpenCL fails to compile this (both on CL(qcom)/QCOM backends)")
   def test_any(self):
     helper_test_op([(3,4,5,6)], lambda x: x.any(), forward_only=True)
     helper_test_op(None, lambda x: x.any(), vals=[[True, True]], forward_only=True)
@@ -1515,7 +1516,7 @@ class TestOps(unittest.TestCase):
   def test_any_zero_axis(self):
     helper_test_op([(1,0,3,0,5)], lambda x: x.any(axis=(1,3)), forward_only=True)
 
-  @unittest.skipIf(Device.DEFAULT == "QCOM", "OpenCL fails to compile this (both on GPU(qcom)/QCOM backends)")
+  @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, QCOMCLRenderer), "OpenCL fails to compile this (both on CL(qcom)/QCOM backends)")
   def test_all(self):
     helper_test_op([(3,4,5,6)], lambda x: x.all(), forward_only=True)
     helper_test_op(None, lambda x: x.all(), vals=[[True, True]], forward_only=True)
@@ -3275,7 +3276,7 @@ class TestOps(unittest.TestCase):
 
   @unittest.skipIf((getenv("MOCKGPU") or Device.DEFAULT == "PYTHON"), "very slow on MOCKGPU because reduce does not fold")
   @unittest.skipIf(Device.DEFAULT == "WEBGPU", "webgpu runtime issue")
-  @unittest.skipIf(Device.DEFAULT == "QCOM", "QCOM fails with: Resource deadlock avoided")
+  @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, QCOMCLRenderer), "OpenCL fails to compile this (both on CL(qcom)/QCOM backends)")
   def test_masked_select(self):
     helper_test_op([(32, 10)], lambda x: x.masked_select(x>0.5), lambda x: x.masked_select(x>0.5), forward_only=True)
     helper_test_op([(32, 10)], lambda x: x.masked_select(torch.tensor(True)), lambda x: x.masked_select(Tensor(True)), forward_only=True)
@@ -3285,7 +3286,7 @@ class TestOps(unittest.TestCase):
     helper_test_op([(20,)], lambda x: (x>0.5).nonzero().int(), lambda x: (x>0.5).nonzero(), forward_only=True)
     helper_test_op([(10, 5, 3)], lambda x: (x>0.5).nonzero().int(), lambda x: (x>0.5).nonzero(), forward_only=True)
 
-  @unittest.skipIf(Device.DEFAULT == "QCOM", "OpenCL fails to compile this (both on GPU(qcom)/QCOM backends)")
+  @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, QCOMCLRenderer), "OpenCL fails to compile this (both on CL(qcom)/QCOM backends)")
   def test_cast(self):
     helper_test_op([(3, 3)], lambda x: x.float())
     helper_test_op(None, lambda x: x.float(), vals=[[0, 1, 2, 3]], forward_only=True)
