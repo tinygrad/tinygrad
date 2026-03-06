@@ -52,8 +52,7 @@ class TestGGUF(unittest.TestCase):
                         -0.06250000,  0.00000000, 0.00000000, -0.01562500,
                         0.04687500,  0.00000000, 0.00000000,  0.01562500], dtype=np.float32)
     out = ggml_data_to_tensor(Tensor(block), 32, GGMLQuantizationType.MXFP4.value)
-    # TODO: similar to previous test fails on Mac CI with assert_equal for unclear reason
-    np.testing.assert_allclose(out.numpy(), expected, atol=0.0, rtol=1e-6)
+    np.testing.assert_equal(out.numpy(), expected)
 
   def test_expected_failure_unknown_type(self):
     with self.assertRaises(ValueError):
@@ -127,7 +126,7 @@ class TestGGUFGEMV(unittest.TestCase):
     x = rng.standard_normal(cols).astype(np.float32)
     np.testing.assert_allclose((tensors["weight"] @ Tensor(x)).numpy(), ref @ x, atol=1e-2, rtol=1e-2)
     if qtype != GGMLQuantizationType.MXFP4: np.testing.assert_equal(tensors["weight"].numpy(), ref)
-    if qtype == GGMLQuantizationType.MXFP4: np.testing.assert_allclose(tensors["weight"].numpy(), ref, atol=0.0, rtol=1e-6)
+    if qtype == GGMLQuantizationType.MXFP4: np.testing.assert_equal(tensors["weight"].numpy(), ref)
     assert np.isfinite(ref).all() and np.isfinite(tensors["weight"].numpy()).all(), f"{qtype.name} has NaN/Inf"
 
   def test_gguf_gemv_q8_0(self): self._test_gguf_gemv(GGMLQuantizationType.Q8_0)
