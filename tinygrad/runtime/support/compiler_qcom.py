@@ -34,7 +34,6 @@ def checked(handle):
 
 class QCOMCompiler(Compiler):
   def __init__(self, chip_id):
-    print(hex(chip_id))
     self.chip_id, self.llvm_inst = chip_id, create_llvm_instance()
     super().__init__(f"compile_qcomcl_{chip_id}")
 
