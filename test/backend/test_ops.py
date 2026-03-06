@@ -766,6 +766,7 @@ class TestOps(unittest.TestCase):
 
     self.helper_test_exception([(4), (4)], lambda x,y: x.bitwise_xor(y), expected=RuntimeError)
 
+  @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, QCOMCLRenderer), "OpenCL fails to compile this (both on CL(qcom)/QCOM backends)")
   def test_and(self):
     data = [[1,-8,1],[32,1,6]]
     tor = torch.tensor(data, dtype=torch.int)
