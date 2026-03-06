@@ -398,7 +398,7 @@ class Handler(HTTPRequestHandler):
       # extract tokens
       ids: list[int] = ([bos_id] if bos_id is not None else []) + (tok.encode("<sop>") if tok.preset == 'glm4' else [])
       for msg in body["messages"]:
-        ids += tok.role(msg["role"])
+        ids += tok.role(msg["role"]) + (tok.encode("</think>") if tok.preset == 'glm4' and msg["role"] == "assistant" else [])
         # content can be a str or a list
         content = msg["content"]
         if isinstance(content, str): ids += tok.encode(content)
