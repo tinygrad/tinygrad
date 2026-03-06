@@ -47,7 +47,7 @@ class QCOMCompiler(Compiler):
     lh = link_program(self.llvm_inst, self.chip_id, MODE_64BIT, None, 1, ctypes.pointer(ctypes.c_void_p(ch)))
     handle_create_binary(lh, ctypes.byref(ptr:=ctypes.c_void_p()), ctypes.byref(sz:=ctypes.c_size_t()))
     for h in [ch, lh]: free_handle(h)
-    ret = ctypes.string_at(ptr.value, sz.value)
+    ret = ctypes.string_at(ptr, sz.value)
     free_assembly(ptr)
     return ret
 
