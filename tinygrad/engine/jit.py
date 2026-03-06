@@ -84,16 +84,6 @@ def get_input_replace(jit_cache: list[ExecItem], input_buffers:list[Buffer],
         input_replace[(j,i)] = input_buffers.index(a)
   return input_replace
 
-def _split_overlap(entries:list[tuple[int, int, Any]], s:int, e:int) -> list[tuple[int, int, Any]]:
-  """Remove overlapping portions from entries, keeping non-overlapping fragments."""
-  kept = []
-  for es, ee, d in entries:
-    if not (es < e and s < ee): kept.append((es, ee, d))  # no overlap
-    else:
-      if es < s: kept.append((es, s, d))
-      if ee > e: kept.append((e, ee, d))
-  return kept
-
 class GraphRunner(Runner):
   def __init__(self, jit_cache: list[ExecItem], input_buffers: list[Buffer], var_vals: dict[str, int],
                orig_valid_positions: dict[int, set[int]]|None = None):
@@ -146,20 +136,16 @@ class GraphRunner(Runner):
     # whether for write or read operations. A resource can be accessed by either a single writer or multiple readers.
     # Track by (base_buf_id, offset, end) ranges so suballocated buffers from the same global buffer are treated as independent resources.
     wait_nodes = []
-
     for i,buf in enumerate(bufs):
       key, s, e = id(buf.base._buf), buf.offset, buf.offset + buf.nbytes
-      wait_nodes += [d for ws,we,d in self.w_dependency_map[key] if ws < e and s < we]
-      if i in write:
-        wait_nodes += [d for rs,re,d in self.r_dependency_map[key] if rs < e and s < re]
-        self.r_dependency_map[key] = _split_overlap(self.r_dependency_map[key], s, e)
-
+      wait_nodes += [dep for ws,we,dep in self.w_dependency_map[key] if ws < e and s < we]
+      if i in write: wait_nodes += [dep for rs,re,dep in self.r_dependency_map[key] if rs < e and s < re]
     for i,buf in enumerate(bufs):
       key, s, e = id(buf.base._buf), buf.offset, buf.offset + buf.nbytes
       if i in write:
-        self.w_dependency_map[key] = _split_overlap(self.w_dependency_map[key], s, e) + [(s, e, new_dependency)]
+        self.w_dependency_map[key].append((s, e, new_dependency))
+        self.r_dependency_map[key] = [(rs,re,dep) for rs,re,dep in self.r_dependency_map[key] if not (rs < e and s < re)]
       else: self.r_dependency_map[key].append((s, e, new_dependency))
-
     return list({id(x):x for x in wait_nodes}.values())
 
   @staticmethod
@@ -372,8 +358,7 @@ class TinyJit(Generic[ReturnType]):
         jit_cache = pruned
 
       # memory planning (optional)
-      # Copy destinations are optimized in a separate lane to preserve exec/copy parallelism.
-      # Copy sources stay on the compute lane since compute kernels produce them.
+      # Copy destinations are optimized in a separate lane. Copy sources get deferred frees to avoid cross-queue WAR deps.
       copy_buffers = {ji.bufs[0] for ji in jit_cache if isinstance(ji.prg, (BufferXfer, BufferCopy, EncDec))}
       copy_src_buffers = {ji.bufs[1].base for ji in jit_cache if isinstance(ji.prg, (BufferXfer, BufferCopy, EncDec))}
       assigned = _internal_memory_planner([cast(list[Buffer], item.bufs) for item in jit_cache], copy_buffers, copy_src_buffers, debug_prefix="JIT ")
