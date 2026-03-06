@@ -70,7 +70,7 @@ def fold_divmod_general(d: UOp, correct_divmod_folding: bool) -> UOp|None:
       for div in {abs(f) for u, f in zip(uops_no_const, factors) if u.op not in (Ops.CONST, Ops.VCONST) and 1 < abs(f) < c and (c%f)==0}:
         if (newxs := fold_divmod_general(x//div, correct_divmod_folding)) is not None and newxs.vmin >= 0:
           results.append((len(newxs.backward_slice), newxs // (c // div)))
-      if results: return min(results)[1]
+      if results: return min(results, key=lambda r: r[0])[1]
 
   # ** Variable Denominator / Fallback Rules **
   # These rules apply to variables OR constants that failed the checks above.
