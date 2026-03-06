@@ -566,7 +566,7 @@ class AMDHIPCCRenderer(AMDHIPRenderer):
     super().__init__(arch)
     self.compiler = HIPCCCompiler(arch)
 
-class QCOMRenderer(OpenCLRenderer):
+class QCOMCLRenderer(OpenCLRenderer):
   device = "QCOM"
 
   def __init__(self, chip_id):

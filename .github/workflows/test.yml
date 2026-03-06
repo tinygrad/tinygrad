@@ -1011,3 +1011,26 @@ jobs:
           python -c "from tinygrad import Device; assert Device.DEFAULT == 'NULL'"
           DEBUG=4 python3 test/backend/test_ops.py TestOps.test_add
           python -m pytest -n=auto test/backend/test_ops.py --durations=20
+  qcomclcompiletests:
+    name: Compile-only (QCOM CL)
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 15
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+      - name: Setup Environment
+        uses: ./.github/actions/setup-tinygrad
+        with:
+          key: compile-qcomcl
+          deps: testing_unit
+          tinydreno: 'true'
+          python-version: '3.12'
+      - name: Set env
+        shell: bash
+        run: printf "NULL=1\nNULL_ALLOW_COPYOUT=1\nNULL_QCOMCL=1" >> $GITHUB_ENV
+      - name: Run test_ops
+        shell: bash
+        run: |
+          python -c "from tinygrad import Device; assert Device.DEFAULT == 'NULL'"
+          DEBUG=4 python3 test/backend/test_ops.py TestOps.test_add
+          python -m pytest -n=auto test/backend/test_ops.py --durations=20
