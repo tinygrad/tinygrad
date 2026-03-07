@@ -120,10 +120,11 @@ def lower_cat(cat:UOp) -> UOp:
   for p in padded[1:]: ret = ret.alu(Ops.ADD, p)
   return ret
 
-earliest_rewrites = mop_cleanup+PatternMatcher([
-  # lower CAT to PAD/ADD
+pm_lower_cat = PatternMatcher([
   (UPat(Ops.CAT, name="cat"), lower_cat),
+])
 
+earliest_rewrites = mop_cleanup+pm_lower_cat+PatternMatcher([
   # early fixup const copy
   (UPat(Ops.COPY, src=(UPat.var("s"), UPat.var("d"))),
    lambda s,d: s.substitute({UOp(Ops.DEVICE, arg=s.device):d}) if s.base.op is Ops.CONST else None),
@@ -548,7 +549,8 @@ split_kernels = PatternMatcher([
 
 @profile_matches
 def get_kernel_graph(sink:UOp) -> UOp:
-  tsink = graph_rewrite(sink, multi_pm, name="multi_pm")
+  tsink = graph_rewrite(sink, pm_lower_cat, name="lower_cat")
+  tsink = graph_rewrite(tsink, multi_pm, name="multi_pm")
   if OPENPILOT_HACKS: tsink = graph_rewrite(tsink, pm_fold_moved_assign, ctx={}, name="fold moved assigns")
   tsink = graph_rewrite(tsink, pm_syntactic_sugar+pm_mops+earliest_rewrites, bottom_up=True, name="earliest rewrites")
 
