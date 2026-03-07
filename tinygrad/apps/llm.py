@@ -396,7 +396,7 @@ class Handler(HTTPRequestHandler):
       # extract tokens
       ids = base_ids[:]
       for msg in body["messages"]:
-        ids += tok.role(msg["role"]) + (think_toks if msg["role"] == "assistant" else [])
+        ids += tok.role(msg["role"]) + (tok.encode("<think>") if msg["role"] == "assistant" and tok.preset == 'glm4' else [])
         # content can be a str or a list
         content = msg["content"]
         if isinstance(content, str): ids += tok.encode(content)
@@ -443,8 +443,8 @@ if __name__ == "__main__":
   bos_id: int|None = kv.get('tokenizer.ggml.bos_token_id') if kv.get('tokenizer.ggml.add_bos_token', True) else None
   eos_id: int = kv['tokenizer.ggml.eos_token_id']
   eot_id: int|None = kv.get('tokenizer.ggml.eot_token_id')
-  sop_toks, think_toks = (tok.encode("<sop>"), tok.encode("<think>")) if tok.preset == 'glm4' else ([], [])
-  base_ids, assistant_ids = ([bos_id] if bos_id is not None else []) + sop_toks, tok.role("assistant") + think_toks
+  sop_toks = tok.encode("<sop>") if tok.preset == 'glm4' else []
+  base_ids, assistant_ids = ([bos_id] if bos_id is not None else []) + sop_toks, tok.role("assistant") + (tok.encode("<think>") if tok.preset == 'glm4' else [])
   stop_ids = tuple(tid for tid in (eos_id, eot_id) if tid is not None)
 
   # do benchmark
