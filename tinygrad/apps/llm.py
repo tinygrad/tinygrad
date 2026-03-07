@@ -380,7 +380,7 @@ class Handler(HTTPRequestHandler):
     st = time.perf_counter()
     for next_id in model.generate(ids):
       if len(out) == 0: stderr_log(f"prefill:{(len(ids)-cache_start_pos)/((pt:=time.perf_counter())-st):4.0f} tok/s  {colored('--', 'BLACK')}  ")
-      if next_id in stop_ids: break
+      if next_id in stop_tokens: break
       out.append(next_id)
       yield {"choices": [{"index":0, "delta":{"content":tok.decode([next_id])}, "finish_reason":None}], **tmpl}
     yield {"choices": [{"index":0, "delta":{},"finish_reason":"stop"}], **tmpl}
@@ -394,7 +394,8 @@ class Handler(HTTPRequestHandler):
     if DEBUG >= 1: print(json.dumps(body, indent=2))
     if self.path == "/v1/chat/completions":
       # extract tokens
-      ids = base_ids[:]
+      ids: list[int] = [bos_id] if bos_id is not None else []
+      if tok.preset == 'glm4': ids += tok.encode("<sop>")
       for msg in body["messages"]:
         ids += tok.role(msg["role"]) + (tok.encode("<think>") if msg["role"] == "assistant" and tok.preset == 'glm4' else [])
         # content can be a str or a list
@@ -406,7 +407,7 @@ class Handler(HTTPRequestHandler):
             else: raise RuntimeError(f"unhandled type: {c['type']}")
         else: raise RuntimeError(f"unknown content type: {type(content)}")
         ids += tok.end_turn(eos_id)
-      ids += assistant_ids
+      ids += tok.role("assistant") + (tok.encode("<think>") if tok.preset == 'glm4' else [])
 
       # reply
       chunks = self.run_model(ids, body["model"], not body.get("stream") or body.get("stream_options",{}).get("include_usage", False))
@@ -442,14 +443,11 @@ if __name__ == "__main__":
   tok = SimpleTokenizer.from_gguf_kv(kv)
   bos_id: int|None = kv.get('tokenizer.ggml.bos_token_id') if kv.get('tokenizer.ggml.add_bos_token', True) else None
   eos_id: int = kv['tokenizer.ggml.eos_token_id']
-  eot_id: int|None = kv.get('tokenizer.ggml.eot_token_id')
-  sop_toks = tok.encode("<sop>") if tok.preset == 'glm4' else []
-  base_ids, assistant_ids = ([bos_id] if bos_id is not None else []) + sop_toks, tok.role("assistant") + (tok.encode("<think>") if tok.preset == 'glm4' else [])
-  stop_ids = tuple(tid for tid in (eos_id, eot_id) if tid is not None)
+  stop_tokens = tuple(tid for tid in (eos_id, kv.get('tokenizer.ggml.eot_token_id')) if tid is not None)
 
   # do benchmark
   if args.benchmark:
-    gen = model.generate(toks:=([bos_id or 0] + sop_toks))
+    gen = model.generate(toks:=([bos_id or 0] + (tok.encode("<sop>") if tok.preset == 'glm4' else [])))
     for _ in range(args.benchmark):
       GlobalCounters.reset()
       with Timing(on_exit=lambda x: f", {1e9/x:6.2f} tok/s, {GlobalCounters.global_mem/x:7.2f} GB/s,"
@@ -465,13 +463,15 @@ if __name__ == "__main__":
     TCPServerWithReuse(('', args.serve), Handler).serve_forever()
 
   # interactive chat
-  ids: list[int] = base_ids[:]
+  ids: list[int] = [bos_id] if bos_id is not None else []
+  if tok.preset == 'glm4': ids += tok.encode("<sop>")
   while 1:
     try:
-      ids += tok.role("user") + tok.encode(input('>>> ')) + tok.end_turn(eos_id) + assistant_ids
+      ids += tok.role("user") + tok.encode(input('>>> ')) + tok.end_turn(eos_id) + tok.role("assistant") + \
+             (tok.encode("<think>") if tok.preset == 'glm4' else [])
     except EOFError:
       break
     for next_id in model.generate(ids):
-      sys.stdout.write(tok.decode([next_id]) if next_id not in stop_ids else "\n\n")
+      sys.stdout.write(tok.decode([next_id]) if next_id not in stop_tokens else "\n\n")
       sys.stdout.flush()
-      if next_id in stop_ids: break
+      if next_id in stop_tokens: break
