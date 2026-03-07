@@ -135,7 +135,7 @@ class TransformerBlock:
       self.ffn_down_exps = ExpertWeights(num_experts, hidden_dim, dim)
       self.expert_weights_scale = expert_weights_scale
       self.expert_weights_norm = expert_weights_norm
-      if expert_gating_func == 2: self.exp_probs_b = SimpleNamespace(bias=Tensor.empty(num_experts))  # GLM/DeepSeek MoE uses sigmoid+bias not softmax.
+      if expert_gating_func == 2: self.exp_probs_b = SimpleNamespace(bias=Tensor.empty(num_experts))  # GLM/DeepSeek MoE uses sigmoid+bias not softmax
       if n_shared_experts > 0:
         shexp_hidden = n_shared_experts * (hidden_dim)
         self.ffn_gate_shexp = nn.Linear(dim, shexp_hidden, bias=False)
