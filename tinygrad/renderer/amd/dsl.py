@@ -1,6 +1,17 @@
 # dsl.py - clean DSL for AMD assembly
 from typing import Any
 
+# Constants for register encoding
+LITERAL = 255
+VGPR_BASE = 256
+SGPR_MAX = 105
+TTMP_BASE = 108
+TTMP_COUNT = 16
+INLINE_INT_START = 128
+INLINE_INT_COUNT = 65
+INLINE_NEG_START = 192
+INLINE_NEG_COUNT = 16
+
 # ══════════════════════════════════════════════════════════════
 # Registers - unified src encoding space (0-511)
 # ══════════════════════════════════════════════════════════════
@@ -23,7 +34,7 @@ class Reg:
   def __getitem__(self, key):
     if isinstance(key, slice):
       start, stop = key.start or 0, key.stop or (self.sz - 1)
-      if start < 0 or stop >= self.sz: raise RuntimeError(f"slice [{start}:{stop}] out of bounds for size {self.sz}")
+      if start < 0 or stop > self.sz: raise RuntimeError(f"slice [{start}:{stop}] out of bounds for size {self.sz}")
       return Reg(self.offset + start, stop - start + 1)
     if key < 0 or key >= self.sz: raise RuntimeError(f"index {key} out of bounds for size {self.sz}")
     return Reg(self.offset + key, 1)
@@ -44,17 +55,20 @@ class Reg:
   def fmt(self, sz=None, parens=False, upper=False) -> str:
     o, sz = self.offset, sz or self.sz
     l, r = ("[", "]") if parens or sz > 1 else ("", "")  # brackets for multi-reg or when parens=True
-    if 256 <= o < 512:
-      idx = o - 256
+    if 512 <= o < 768:
+      idx = o - 512
+      base = f"acc{l}{idx}{r}" if sz == 1 else f"acc[{idx}:{idx + sz - 1}]"
+    elif VGPR_BASE <= o < 512:
+      idx = o - VGPR_BASE
       base = f"v{l}{idx}{r}" if sz == 1 else f"v[{idx}:{idx + sz - 1}]"
-    elif o < 106: base = f"s{l}{o}{r}" if sz == 1 else f"s[{o}:{o + sz - 1}]"
+    elif o <= SGPR_MAX: base = f"s{l}{o}{r}" if sz == 1 else f"s[{o}:{o + sz - 1}]"
     elif sz == 2 and o in self._PAIRS: base = self._PAIRS[o] if upper else self._PAIRS[o].lower()
     elif o in self._NAMES: base = self._NAMES[o] if upper else self._NAMES[o].lower()  # special regs (any sz)
-    elif 108 <= o < 124:
-      idx = o - 108
+    elif TTMP_BASE <= o < TTMP_BASE + TTMP_COUNT:
+      idx = o - TTMP_BASE
       base = f"ttmp{l}{idx}{r}" if sz == 1 else f"ttmp[{idx}:{idx + sz - 1}]"
-    elif 128 <= o <= 192: base = str(o - 128)  # inline int constants (0-64)
-    elif 193 <= o <= 208: base = str(-(o - 192))  # inline negative int constants (-1 to -16)
+    elif INLINE_INT_START <= o <= INLINE_INT_START + INLINE_INT_COUNT - 1: base = str(o - INLINE_INT_START)
+    elif INLINE_NEG_START + 1 <= o <= INLINE_NEG_START + INLINE_NEG_COUNT: base = str(-(o - INLINE_NEG_START))
     else: raise RuntimeError(f"unknown register: offset={o}, sz={sz}")
     if self.hi: base += ".h"
     if self.abs_: base = f"abs({base})" if upper else f"|{base}|"
@@ -63,7 +77,7 @@ class Reg:
   def __repr__(self): return self.fmt(parens=True, upper=True)
 
 # Full src encoding space
-src = Reg(0, 512)
+src = Reg(0, 768)
 
 # Slices for each region (inclusive end)
 s = src[0:105]           # SGPR0-105
@@ -87,6 +101,7 @@ SCC = src[253]
 SRC_LDS_DIRECT = src[254]
 LIT = src[255]           # literal constant marker
 v = src[256:511]         # VGPR0-255
+acc = src[512:768]       # ACCVGPR0-255 (CDNA only)
 
 # ══════════════════════════════════════════════════════════════
 # BitField
@@ -144,10 +159,13 @@ class EnumBitField(BitField):
 # ══════════════════════════════════════════════════════════════
 
 import struct
+from tinygrad.runtime.autogen.amd.common import OpType
 def _f32(f: float) -> int: return struct.unpack('I', struct.pack('f', f))[0]
+# OpTypes that always mean ACCVGPR (not VGPR) when register is in VGPR range
+_ACCVGPR_OPTYPES = {OpType.OPR_ACCVGPR, OpType.OPR_SRC_ACCVGPR}
 
 class SrcField(BitField):
-  _valid_range = (0, 511)  # inclusive
+  _valid_range = (0, 511) # inclusive
   _FLOAT_ENC = {0.5: 240, -0.5: 241, 1.0: 242, -1.0: 243, 2.0: 244, -2.0: 245, 4.0: 246, -4.0: 247}
 
   def __init__(self, hi: int, lo: int, default=s[0]):
@@ -159,12 +177,12 @@ class SrcField(BitField):
                          f"doesn't match range {self._valid_range} ({expected_size})")
 
   def encode(self, val) -> int:
-    """Encode value. Returns 255 (literal marker) for out-of-range values."""
-    if isinstance(val, Reg): offset = val.offset
-    elif isinstance(val, float): offset = self._FLOAT_ENC.get(val, 255)
-    elif isinstance(val, int) and 0 <= val <= 64: offset = 128 + val
-    elif isinstance(val, int) and -16 <= val < 0: offset = 192 - val
-    elif isinstance(val, int): offset = 255  # literal
+    """Encode value. Returns LITERAL (255) for out-of-range values."""
+    if isinstance(val, Reg): offset = val.offset - 256 if val.offset >= 512 else val.offset  # ACCVGPR (512-767) encodes as VGPR (256-511)
+    elif isinstance(val, float): offset = self._FLOAT_ENC.get(val, LITERAL)
+    elif isinstance(val, int) and 0 <= val <= 64: offset = INLINE_INT_START + val
+    elif isinstance(val, int) and -16 <= val < 0: offset = INLINE_NEG_START - val
+    elif isinstance(val, int): offset = LITERAL
     else: raise TypeError(f"invalid src value {val}")
     if not (self._valid_range[0] <= offset <= self._valid_range[1]):
       raise TypeError(f"{self.__class__.__name__}: {val} (offset {offset}) out of range {self._valid_range}")
@@ -182,10 +200,13 @@ class SrcField(BitField):
       assert self.name is not None
       name = self.name[1:] if self.name.startswith('v') and self.name[1:] in obj.op_regs else self.name
       if sz := obj.op_regs.get(name, 1): reg = Reg(reg.offset, sz, neg=reg.neg, abs_=reg.abs_, hi=reg.hi)
+    # ACCVGPR: remap VGPR range (256-511) to ACCVGPR range (512-767) when operand type indicates ACCVGPR
+    if 256 <= reg.offset < 512 and (op_info := obj.operands.get(self.name)):
+      if op_info[2] in (_ACCVGPR_OPTYPES): reg = Reg(reg.offset + 256, reg.sz, neg=reg.neg, abs_=reg.abs_, hi=reg.hi)
     return reg
 
 class VGPRField(SrcField):
-  _valid_range = (256, 511)
+  _valid_range = (VGPR_BASE, 511)
   def __init__(self, hi: int, lo: int, default=v[0]): super().__init__(hi, lo, default)
   def encode(self, val) -> int:
     if not isinstance(val, Reg): raise TypeError(f"VGPRField requires Reg, got {type(val).__name__}")
@@ -222,14 +243,14 @@ class VDSTYField(BitField):
   """VOPD vdsty: encoded = vgpr_idx >> 1. Actual vgpr = (encoded << 1) | ((vdstx & 1) ^ 1)."""
   def encode(self, val):
     if not isinstance(val, Reg): raise TypeError(f"VDSTYField requires Reg, got {type(val).__name__}")
-    if not (256 <= val.offset < 512): raise ValueError(f"VDSTYField requires VGPR, got offset {val.offset}")
-    return (val.offset - 256) >> 1
+    if not (VGPR_BASE <= val.offset < 512): raise ValueError(f"VDSTYField requires VGPR, got offset {val.offset}")
+    return (val.offset - VGPR_BASE) >> 1
   def __get__(self, obj, objtype=None):
     if obj is None: return self
     raw = (obj._raw >> self.lo) & self.mask
-    vdstx_bit0 = (obj.vdstx.offset - 256) & 1
+    vdstx_bit0 = (obj.vdstx.offset - VGPR_BASE) & 1
     vgpr_idx = (raw << 1) | (vdstx_bit0 ^ 1)
-    return Reg(256 + vgpr_idx, 1)
+    return Reg(VGPR_BASE + vgpr_idx, 1)
 
 # ══════════════════════════════════════════════════════════════
 # Operand info from XML
