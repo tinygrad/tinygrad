@@ -7,7 +7,7 @@ from tinygrad.uop.ops import Ops
 from tinygrad.dtype import dtypes, ImageDType
 from tinygrad.runtime.support.memory import TLSFAllocator
 
-LaneKey = tuple[str, bool]
+LaneKey = tuple[str, int]
 
 # **************** memory planning ****************
 
@@ -23,8 +23,8 @@ def _internal_memory_planner(buffers:list[list[Buffer]], copies:list[tuple[Buffe
       buf_to_opt.add(buf)
 
   # Defer cross-queue buffer frees to avoid physical memory reuse that creates cross-queue WAR deps.
-  copy_dsts, copy_srcs = ({dst for dst,_ in copies}, {src.base for _,src in copies}) if copies else (set(), set())
-  def _key(buf) -> LaneKey: return (buf.device, buf in copy_dsts)
+  copy_dsts, copy_srcs = ({dst.base for dst,_ in copies}, {src.base for _,src in copies}) if copies else (set(), set())
+  def _key(buf) -> LaneKey: return (buf.device, 2 if buf in copy_dsts else (1 if buf in copy_srcs else 0))
   # Extra hold time before freeing cross-queue buffers, so their physical memory isn't reused while another queue may still access it.
   buf_hold = {buf: last_appearance[buf] - first_appearance[buf] + 1 for buf in first_appearance if buf in copy_dsts or buf in copy_srcs}
 
@@ -39,7 +39,6 @@ def _internal_memory_planner(buffers:list[list[Buffer]], copies:list[tuple[Buffe
   buffer_replace:dict[Buffer, tuple[Buffer|None, int|None]] = {}
   reuse_buffers:dict[tuple, list[Buffer]] = defaultdict(list)
   global_planner:dict[LaneKey, tuple[int, TLSFAllocator]] = defaultdict(lambda: (0, TLSFAllocator(total_memory, block_size=min_block_size, lv2_cnt=32)))
-  buf_gkey:dict[Buffer, LaneKey] = {}
   for (step, is_open_ev), buf in buffer_requests:
     gk = _key(buf)
     # Check if suballocation is possible for the given buffer and device.
@@ -47,15 +46,14 @@ def _internal_memory_planner(buffers:list[list[Buffer]], copies:list[tuple[Buffe
       if is_open_ev: buffer_replace[buf] = (None, global_planner[gk][1].alloc(round_up(buf.nbytes, 0x1000)))
       else: global_planner[gk][1].free(cast(int, buffer_replace[buf][1]))
       global_planner[gk] = (max(global_planner[gk][0], buffer_replace[buf][1] + buf.nbytes), global_planner[gk][1])
-      buf_gkey[buf] = gk
     else:
       key = (gk, buf.dtype, buf.options, buf.nbytes)
       if is_open_ev: buffer_replace[buf] = (reuse_buffers[key].pop(), None) if key in reuse_buffers and len(reuse_buffers[key]) > 0 else (buf, None)
-      elif not gk[1]: reuse_buffers[key].append(cast(Buffer, buffer_replace[buf][0]))
+      elif buf not in copy_dsts|copy_srcs: reuse_buffers[key].append(cast(Buffer, buffer_replace[buf][0]))
 
   # Allocate global buffers based on the memory planner.
   global_buffers = {key: Buffer(key[0], round_up(sz, 0x1000), dtypes.int8) for key, (sz, _) in global_planner.items()}
-  buffer_resolve:dict[Buffer, tuple[Buffer, int|None]] = {buf: (base or global_buffers[buf_gkey[buf]], off) for buf,(base,off) in buffer_replace.items()}
+  buffer_resolve:dict[Buffer, tuple[Buffer, int|None]] = {buf: (base or global_buffers[_key(buf)], off) for buf,(base,off) in buffer_replace.items()}
 
   # Assign buffers. First, assign full buffers (not sub-buffers).
   assigned:dict[Buffer, Buffer] = {}
