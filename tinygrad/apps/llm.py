@@ -443,7 +443,7 @@ if __name__ == "__main__":
   tok = SimpleTokenizer.from_gguf_kv(kv)
   bos_id: int|None = kv.get('tokenizer.ggml.bos_token_id') if kv.get('tokenizer.ggml.add_bos_token', True) else None
   eos_id: int = kv['tokenizer.ggml.eos_token_id']
-  eot_id: int = kv.get('tokenizer.ggml.eot_token_id')
+  eot_id: int|None = kv.get('tokenizer.ggml.eot_token_id')
 
   # do benchmark
   if args.benchmark:
