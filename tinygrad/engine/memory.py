@@ -24,7 +24,7 @@ def _internal_memory_planner(buffers:list[list[Buffer]], copies:list[tuple[Buffe
 
   # Separate copy and compute buffers into different lanes and defer cross-queue frees to avoid introducing dependencies (copy->compute->copy).
   copy_dsts, copy_srcs = ({dst.base for dst,_ in copies}, {src.base for _,src in copies}) if copies else (set(), set())
-  def _key(buf) -> LaneKey: return (buf.device, 2 if buf in copy_dsts else (1 if buf in copy_srcs else 0))
+  def _key(buf) -> LaneKey: return (buf.device, 1 if buf in copy_dsts or buf in copy_srcs else 0)
   buf_hold = {buf: last_appearance[buf] - first_appearance[buf] + 1 for buf in first_appearance if buf in copy_dsts or buf in copy_srcs}
 
   # Sort buffer operations in timeline order. Two events: buffer is allocated or buffer is freed.
@@ -37,7 +37,7 @@ def _internal_memory_planner(buffers:list[list[Buffer]], copies:list[tuple[Buffe
   buffer_replace:dict[Buffer, tuple[Buffer|None, int|None]] = {}
   reuse_buffers:dict[tuple, list[Buffer]] = defaultdict(list)
   global_planner:dict[LaneKey, tuple[int, TLSFAllocator]] = defaultdict(lambda: (0, TLSFAllocator(total_memory, block_size=BLK, lv2_cnt=32)))
-  for (step, is_open_ev), buf in buffer_requests:
+  for (_, is_open_ev), buf in buffer_requests:
     # Check if suballocation is possible for the given buffer and device.
     if hasattr(Device[buf.device].allocator, "_offset") and not isinstance(buf.dtype, ImageDType):
       if is_open_ev: buffer_replace[buf] = (None, global_planner[_key(buf)][1].alloc(round_up(buf.nbytes, BLK)))
@@ -46,7 +46,7 @@ def _internal_memory_planner(buffers:list[list[Buffer]], copies:list[tuple[Buffe
     else:
       key = (_key(buf), buf.dtype, buf.options, buf.nbytes)
       if is_open_ev: buffer_replace[buf] = (reuse_buffers[key].pop(), None) if key in reuse_buffers and len(reuse_buffers[key]) > 0 else (buf, None)
-      elif buf not in copy_dsts|copy_srcs: reuse_buffers[key].append(cast(Buffer, buffer_replace[buf][0]))
+      else: reuse_buffers[key].append(cast(Buffer, buffer_replace[buf][0]))
 
   # Allocate global buffers based on the memory planner.
   global_buffers = {key: Buffer(key[0], round_up(sz, BLK), dtypes.int8) for key, (sz, _) in global_planner.items()}

@@ -132,22 +132,21 @@ class GraphRunner(Runner):
       yield j, (dims[gl] if gl is not None else self.launch_dims_base[j][0]), (dims[lc] if lc is not None else self.launch_dims_base[j][1])
 
   def _access_resources(self, bufs:list[Buffer], write:list[int], new_dependency:Any):
-    # To synchronize access to resources, we monitor the necessary prerequisites for accessing each resource,
-    # whether for write or read operations. A resource can be accessed by either a single writer or multiple readers.
-    # Track by (base_buf_id, offset, end) ranges so suballocated buffers from the same global buffer are treated as independent resources.
     wait_nodes = []
     for i,buf in enumerate(bufs):
       key, s, e = id(buf.base._buf), buf.offset, buf.offset + buf.nbytes
-      wait_nodes += [dep for ws,we,dep in self.w_dependency_map[key] if ws < e and s < we]
-      if i in write: wait_nodes += [dep for rs,re,dep in self.r_dependency_map[key] if rs < e and s < re]
+      wait_nodes += [dep for st,en,dep in self.w_dependency_map[key] if st < e and s < en]
+      if i in write: wait_nodes += [dep for st,en,dep in self.r_dependency_map[key] if st < e and s < en]
     for i,buf in enumerate(bufs):
       key, s, e = id(buf.base._buf), buf.offset, buf.offset + buf.nbytes
       if i in write:
-        # Split overlapping entries, keeping non-overlapping fragments to preserve deps for adjacent ranges.
-        self.w_dependency_map[key] = [(ws,we,d) for es,ee,d in self.w_dependency_map[key]
-          for ws,we in ([(es,ee)] if not (es < e and s < ee) else ([(es,s)] if es < s else []) + ([(e,ee)] if ee > e else []))] + [(s, e, new_dependency)]
-        self.r_dependency_map[key] = [(rs,re,d) for es,ee,d in self.r_dependency_map[key]
-          for rs,re in ([(es,ee)] if not (es < e and s < ee) else ([(es,s)] if es < s else []) + ([(e,ee)] if ee > e else []))]
+        for dmap in [self.w_dependency_map, self.r_dependency_map]:
+          kept = []
+          for st,en,dep in dmap[key]:
+            if st < min(s, en): kept.append((st, min(s, en), dep))
+            if max(e, st) < en: kept.append((max(e, st), en, dep))
+          dmap[key] = kept
+        self.w_dependency_map[key].append((s, e, new_dependency))
       else: self.r_dependency_map[key].append((s, e, new_dependency))
     return list({id(x):x for x in wait_nodes}.values())
 
