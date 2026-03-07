@@ -143,8 +143,11 @@ class GraphRunner(Runner):
     for i,buf in enumerate(bufs):
       key, s, e = id(buf.base._buf), buf.offset, buf.offset + buf.nbytes
       if i in write:
-        self.w_dependency_map[key].append((s, e, new_dependency))
-        self.r_dependency_map[key] = [(rs,re,dep) for rs,re,dep in self.r_dependency_map[key] if not (rs < e and s < re)]
+        # Split overlapping entries, keeping non-overlapping fragments to preserve deps for adjacent ranges.
+        self.w_dependency_map[key] = [(ws,we,d) for es,ee,d in self.w_dependency_map[key]
+          for ws,we in ([(es,ee)] if not (es < e and s < ee) else ([(es,s)] if es < s else []) + ([(e,ee)] if ee > e else []))] + [(s, e, new_dependency)]
+        self.r_dependency_map[key] = [(rs,re,d) for es,ee,d in self.r_dependency_map[key]
+          for rs,re in ([(es,ee)] if not (es < e and s < ee) else ([(es,s)] if es < s else []) + ([(e,ee)] if ee > e else []))]
       else: self.r_dependency_map[key].append((s, e, new_dependency))
     return list({id(x):x for x in wait_nodes}.values())
 
