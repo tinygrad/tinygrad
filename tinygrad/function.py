@@ -1,7 +1,7 @@
 import functools
 from typing import Generic, TypeVar, Callable, cast, overload
 from tinygrad.helpers import Context, dedup, getenv
-from tinygrad.uop.ops import UOp, Ops, graph_rewrite, PatternMatcher, UPat
+from tinygrad.uop.ops import UOp, Ops, GroupOp, graph_rewrite, PatternMatcher, UPat
 from tinygrad.tensor import Tensor
 
 def add_to_ctx(ctx, x:UOp):
@@ -15,6 +15,10 @@ pm_ctx = PatternMatcher([
    lambda ctx,x: add_to_ctx(ctx,x) if not x.op_in_backward_slice_with_self(Ops.PARAM) else None),
   # strip UNIQUE from unique consts — they don't need buffer identity inside function bodies
   (UPat(Ops.CONST, src=(UPat(Ops.UNIQUE), UPat(Ops.DEVICE)), name="x"), lambda ctx,x: x.replace(src=(x.src[1],))),
+])
+pm_make_pure = PatternMatcher([
+  (UPat(Ops.ASSIGN, src=(UPat((*GroupOp.Movement, Ops.CONTIGUOUS, Ops.CAST), name="dst"), UPat(name="rhs")), name="x"),
+   lambda dst, rhs, x: rhs if dst.op_in_backward_slice_with_self(Ops.PARAM) and dst in rhs.backward_slice_with_self else None),
 ])
 
 ReturnType = TypeVar('ReturnType')
@@ -45,6 +49,7 @@ class _function(Generic[ReturnType]):
     subs = {}
     for i,x in enumerate(call_uops): subs[x] = x.param_like(i)
     uret = ret.uop.substitute(subs)
+    uret = graph_rewrite(uret, pm_make_pure, bottom_up=True, name="impure_to_pure")
 
     # add contiguous to call_uops
     #call_uops = [x.contiguous() for x in call_uops]
