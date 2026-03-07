@@ -22,10 +22,9 @@ def _internal_memory_planner(buffers:list[list[Buffer]], copies:list[tuple[Buffe
       last_appearance[buf.base] = i
       buf_to_opt.add(buf)
 
-  # Defer cross-queue buffer frees to avoid physical memory reuse that creates cross-queue WAR deps.
+  # Separate copy and compute buffers into different lanes and defer cross-queue frees to avoid introducing dependencies (copy->compute->copy).
   copy_dsts, copy_srcs = ({dst.base for dst,_ in copies}, {src.base for _,src in copies}) if copies else (set(), set())
   def _key(buf) -> LaneKey: return (buf.device, 2 if buf in copy_dsts else (1 if buf in copy_srcs else 0))
-  # Extra hold time before freeing cross-queue buffers, so their physical memory isn't reused while another queue may still access it.
   buf_hold = {buf: last_appearance[buf] - first_appearance[buf] + 1 for buf in first_appearance if buf in copy_dsts or buf in copy_srcs}
 
   # Sort buffer operations in timeline order. Two events: buffer is allocated or buffer is freed.
@@ -35,19 +34,17 @@ def _internal_memory_planner(buffers:list[list[Buffer]], copies:list[tuple[Buffe
 
   # Try to suballocate from a shared buffer managed by global_planner using TLSFAllocator.
   # Also track buffer replacements for buffers that do not support suballocation.
-  # Copy buffers are optimized in a separate lane (keyed by _key) to preserve exec/copy parallelism.
   buffer_replace:dict[Buffer, tuple[Buffer|None, int|None]] = {}
   reuse_buffers:dict[tuple, list[Buffer]] = defaultdict(list)
   global_planner:dict[LaneKey, tuple[int, TLSFAllocator]] = defaultdict(lambda: (0, TLSFAllocator(total_memory, block_size=min_block_size, lv2_cnt=32)))
   for (step, is_open_ev), buf in buffer_requests:
-    gk = _key(buf)
     # Check if suballocation is possible for the given buffer and device.
     if hasattr(Device[buf.device].allocator, "_offset") and not isinstance(buf.dtype, ImageDType):
-      if is_open_ev: buffer_replace[buf] = (None, global_planner[gk][1].alloc(round_up(buf.nbytes, 0x1000)))
-      else: global_planner[gk][1].free(cast(int, buffer_replace[buf][1]))
-      global_planner[gk] = (max(global_planner[gk][0], buffer_replace[buf][1] + buf.nbytes), global_planner[gk][1])
+      if is_open_ev: buffer_replace[buf] = (None, global_planner[_key(buf)][1].alloc(round_up(buf.nbytes, 0x1000)))
+      else: global_planner[_key(buf)][1].free(cast(int, buffer_replace[buf][1]))
+      global_planner[_key(buf)] = (max(global_planner[_key(buf)][0], buffer_replace[buf][1] + buf.nbytes), global_planner[_key(buf)][1])
     else:
-      key = (gk, buf.dtype, buf.options, buf.nbytes)
+      key = (_key(buf), buf.dtype, buf.options, buf.nbytes)
       if is_open_ev: buffer_replace[buf] = (reuse_buffers[key].pop(), None) if key in reuse_buffers and len(reuse_buffers[key]) > 0 else (buf, None)
       elif buf not in copy_dsts|copy_srcs: reuse_buffers[key].append(cast(Buffer, buffer_replace[buf][0]))
 
