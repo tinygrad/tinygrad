@@ -360,7 +360,6 @@ class TinyJit(Generic[ReturnType]):
         jit_cache = pruned
 
       # memory planning (optional)
-      # Copy buffers are optimized in a separate lane with deferred frees to avoid cross-queue WAR deps.
       copies = [(cast(Buffer,ji.bufs[0]),cast(Buffer,ji.bufs[1])) for ji in jit_cache if isinstance(ji.prg, (BufferXfer, BufferCopy, EncDec))]
       assigned = _internal_memory_planner([cast(list[Buffer], item.bufs) for item in jit_cache], copies, debug_prefix="JIT ")
       jit_cache = [replace(item, bufs=[assigned.get(b,b).ensure_allocated() for b in item.bufs if b is not None]) for item in jit_cache]
