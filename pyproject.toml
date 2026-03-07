@@ -42,7 +42,12 @@ packages = [
   'tinygrad.schedule',
   'tinygrad.uop',
   'tinygrad.viz',
+  'tinygrad_extra',
+  'tinygrad.extra',
 ]
+
+[tool.setuptools.package-dir]
+tinygrad_extra = "extra"
 
 [tool.setuptools.package-data]
 tinygrad = ["py.typed"]
@@ -50,6 +55,11 @@ tinygrad = ["py.typed"]
 
 
 [project.optional-dependencies]
+extra = ["tinygrad-extra"]
+
+extra = [
+  "tinygrad-extra",
+]
 arm = ["unicorn"]
 triton = ["triton-nightly>=2.1.0.dev20231014192330"]
 linting = [
