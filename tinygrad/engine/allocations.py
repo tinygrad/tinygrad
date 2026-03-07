@@ -62,7 +62,7 @@ def replace_contig_with_assign(u:UOp):
 def replace_assign_with_contig(u:UOp):
   assigned_to = u
   while assigned_to.op in {Ops.ASSIGN, Ops.BITCAST, Ops.AFTER}: assigned_to = assigned_to.src[0].base
-  if assigned_to.op is not Ops.BUFFER:
+  if assigned_to.op not in {Ops.BUFFER, Ops.BUFFER_VIEW}:
     return u.src[1].contiguous(tag=u.tag)
 
 def contiguous_mops_to_view(c:UOp):
@@ -163,7 +163,7 @@ def transform_to_call(big_sink:UOp) -> tuple[UOp, dict[UOp, UOp]]:
   if VIZ: graph_rewrite(big_sink, PatternMatcher([]), name="View Tensor Graph")
   # uop list is a list in the original_sink graph and we can map to the tags later
   # here we build buffer map
-  dont_realize = {Ops.CONST, Ops.BUFFER, Ops.BIND, Ops.DEFINE_VAR, Ops.AFTER}
+  dont_realize = {Ops.CONST, Ops.BUFFER, Ops.BUFFER_VIEW, Ops.BIND, Ops.DEFINE_VAR, Ops.AFTER}
   ctx = AllocCtx(bases=set([x.multibase for x in big_sink.src if x.base.op not in dont_realize]))
 
   # this rewrite is "read-only", it adds simple things to buffer_map and may sink things on big_sink, bottom_up

@@ -82,7 +82,7 @@ def linear_to_schedule(linear:UOp) -> list[ExecItem]:
       schedule.append(ExecItem(ast, cast(list[Buffer|None], ubufs), metadata))
   return schedule
 
-from tinygrad.engine.memory import memory_planner
+from tinygrad.engine.memory import memory_plan_rewrite
 from tinygrad.schedule.rangeify import get_kernel_graph
 from tinygrad.uop.ops import PatternMatcher, UPat
 
@@ -135,13 +135,16 @@ pm_schedule = PatternMatcher([
   (UPat(Ops.SINK, name="function"), lower_sink_to_linear),
 ])
 
-@track_rewrites(lambda _,ret: f"Schedule {pluralize('Kernel', len(ret[0]))}")
-def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[list[ExecItem], dict[str, int]]:
+@track_rewrites(lambda *args,ret,**kw: f"Schedule {pluralize('Kernel', len(ret[0]))}")
+def complete_create_schedule_with_vars(big_sink:UOp, external_bufs:set[UOp]|None=None) -> tuple[list[ExecItem], dict[str,int]]:
   # big_sink srcs are all the Tensors
   linear_call = graph_rewrite(big_sink, pm_schedule, name="schedule to linear", enter_calls=True)
 
   # this recursively resolves the linear_call and allocates buffers
   linear = graph_rewrite(linear_call, pm_resolve_linear_call, name="resolve linear call")
+
+  # memory plan: replace each internal buffer with a BUFFER_VIEW
+  linear = memory_plan_rewrite(linear, external_bufs or frozenset())
 
   # vars used in the schedule
   used_vars = set().union(*[{v.expr for v in si.src[0].variables()} for si in linear.src])
@@ -157,5 +160,4 @@ def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[list[ExecItem], di
 
   # convert LINEAR to ExecItems
   schedule: list[ExecItem] = linear_to_schedule(linear)
-  with cpu_profile(TracingKey("memory planner")): schedule = memory_planner(schedule)
   return schedule, var_vals

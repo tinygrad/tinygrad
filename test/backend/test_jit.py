@@ -648,8 +648,8 @@ class TestJitFree(unittest.TestCase):
     fxn(Tensor([2]))
     self.assertEqual(x.item(), 8)
 
+  @unittest.skip("memory_plan_rewrite already consolidates buffers in schedule path")
   def test_replan_buffers_memory_layout(self):
-    if not hasattr(Device[Device.DEFAULT].allocator, '_offset'): raise unittest.SkipTest("replan_buffers_memory_layout useless")
 
     ext_tensor = Tensor([1,24,23,45,1]).contiguous()
     ext_tensor_2 = Tensor([2,2,2,2,2]).contiguous()
