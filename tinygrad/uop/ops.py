@@ -1582,9 +1582,8 @@ def pyrender(ast:UOp) -> str:
     if len(cmap[u]) == 1 and len([x for x in list(cmap[u].keys())[0].src if x is u]) == 1 and u.op not in always_rendered: continue
     to_render.add(u)
 
-  kernels: dict[UOp, tuple[str, str]] = {}
   ret = _render_with_splits(lst, pm_pyrender, to_render)
-  return ''.join([v[1] for v in kernels.values()]) + '\n'.join([f"{k} = {strip_parens(v)}" for k,v in ret.items()])
+  return '\n'.join([f"{k} = {strip_parens(v)}" for k,v in ret.items()])
 
 # *** what was symbolic.py ***
 
