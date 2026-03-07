@@ -380,7 +380,7 @@ class Handler(HTTPRequestHandler):
     st = time.perf_counter()
     for next_id in model.generate(ids):
       if len(out) == 0: stderr_log(f"prefill:{(len(ids)-cache_start_pos)/((pt:=time.perf_counter())-st):4.0f} tok/s  {colored('--', 'BLACK')}  ")
-      if next_id in stop_tokens: break
+      if next_id in (eos_id, eot_id): break
       out.append(next_id)
       yield {"choices": [{"index":0, "delta":{"content":tok.decode([next_id])}, "finish_reason":None}], **tmpl}
     yield {"choices": [{"index":0, "delta":{},"finish_reason":"stop"}], **tmpl}
@@ -397,7 +397,7 @@ class Handler(HTTPRequestHandler):
       ids: list[int] = [bos_id] if bos_id is not None else []
       if tok.preset == 'glm4': ids += tok.encode("<sop>")
       for msg in body["messages"]:
-        ids += tok.role(msg["role"]) + (tok.encode("<think>") if msg["role"] == "assistant" and tok.preset == 'glm4' else [])
+        ids += tok.role(msg["role"])
         # content can be a str or a list
         content = msg["content"]
         if isinstance(content, str): ids += tok.encode(content)
@@ -443,7 +443,7 @@ if __name__ == "__main__":
   tok = SimpleTokenizer.from_gguf_kv(kv)
   bos_id: int|None = kv.get('tokenizer.ggml.bos_token_id') if kv.get('tokenizer.ggml.add_bos_token', True) else None
   eos_id: int = kv['tokenizer.ggml.eos_token_id']
-  stop_tokens = tuple(tid for tid in (eos_id, kv.get('tokenizer.ggml.eot_token_id')) if tid is not None)
+  eot_id: int = kv.get('tokenizer.ggml.eot_token_id')
 
   # do benchmark
   if args.benchmark:
@@ -472,6 +472,6 @@ if __name__ == "__main__":
     except EOFError:
       break
     for next_id in model.generate(ids):
-      sys.stdout.write(tok.decode([next_id]) if next_id not in stop_tokens else "\n\n")
+      sys.stdout.write(tok.decode([next_id]) if next_id not in (eos_id, eot_id) else "\n\n")
       sys.stdout.flush()
-      if next_id in stop_tokens: break
+      if next_id in (eos_id, eot_id): break
