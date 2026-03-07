@@ -5,8 +5,8 @@ from tinygrad.helpers import argsort
 
 def cat_gradient(ctx:UOp, ret:UOp) -> tuple[UOp, ...]:
   axis = ret.arg
-  dim_cumsum = list(itertools.accumulate([s.shape[axis] for s in ret.src], initial=0))
-  return tuple(ctx.shrink(tuple([(dim_cumsum[i], dim_cumsum[i+1]) if j==axis else (0, ctx.shape[j])
+  dim_acc = list(itertools.accumulate([s.shape[axis] for s in ret.src], initial=0))
+  return tuple(ctx.shrink(tuple([(dim_acc[i], dim_acc[i+1]) if j==axis else (0, ctx.shape[j])
     for j in range(len(ctx.shape))])) for i in range(len(ret.src)))
 
 def reduce_gradient(ctx:UOp, ret:UOp, op:Ops):

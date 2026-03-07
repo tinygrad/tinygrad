@@ -264,14 +264,12 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
       case Ops.MULTI if len(self.src) == 0: return None
 
       case Ops.CAT:
-        shapes = [s._shape for s in self.src]
-        if any(s is None for s in shapes): raise RuntimeError("CAT requires all sources to have shapes")
+        shapes = [s.shape for s in self.src]
         axis = self.arg
-        if axis == -1: return (len(shapes),) + shapes[0]  # type: ignore  # new leading axis (stack)
         for s in shapes[1:]:
-          if len(s) != len(shapes[0]) or not all(a==b for i,(a,b) in enumerate(zip(s, shapes[0])) if i!=axis):  # type: ignore
+          if len(s) != len(shapes[0]) or not all(a==b for i,(a,b) in enumerate(zip(s, shapes[0])) if i!=axis):
             raise ValueError(f"CAT shape mismatch: {shapes}")
-        return tuple(ssimplify(sum(s[i] for s in shapes)) if i==axis else shapes[0][i] for i in range(len(shapes[0])))  # type: ignore
+        return tuple(ssimplify(sum(s[i] for s in shapes)) if i==axis else shapes[0][i] for i in range(len(shapes[0])))
 
     # movement ops change the shape
     # NOTE: ssimplify is required because the shape needs to be canonical for broadcasting and same shape checking

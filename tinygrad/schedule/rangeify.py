@@ -114,9 +114,8 @@ def resolve_call(c:UOp, allow_param_mismatch=True) -> UOp|None:
 
 def lower_cat(cat:UOp) -> UOp:
   axis = cat.arg
-  dim_cumsum = list(itertools.accumulate([s.shape[axis] for s in cat.src], initial=0))
-  padded = [s.pad(tuple((dim_cumsum[i], dim_cumsum[-1]-dim_cumsum[i+1]) if j==axis else (0,0)
-    for j in range(len(s.shape)))) for i,s in enumerate(cat.src)]
+  dim_acc = list(itertools.accumulate([s.shape[axis] for s in cat.src], initial=0))
+  padded = [s.pad(tuple((dim_acc[i], dim_acc[-1]-dim_acc[i+1]) if j==axis else (0,0) for j in range(len(s.shape)))) for i,s in enumerate(cat.src)]
   ret = padded[0]
   for p in padded[1:]: ret = ret.alu(Ops.ADD, p)
   return ret
