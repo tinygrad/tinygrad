@@ -263,6 +263,16 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
       # MULTI marker (axis info in PARAM sources) has no shape
       case Ops.MULTI if len(self.src) == 0: return None
 
+      case Ops.CAT:
+        shapes = [s._shape for s in self.src]
+        if any(s is None for s in shapes): raise RuntimeError("CAT requires all sources to have shapes")
+        axis = self.arg
+        if axis == -1: return (len(shapes),) + shapes[0]  # type: ignore  # new leading axis (stack)
+        for s in shapes[1:]:
+          if len(s) != len(shapes[0]) or not all(a==b for i,(a,b) in enumerate(zip(s, shapes[0])) if i!=axis):  # type: ignore
+            raise ValueError(f"CAT shape mismatch: {shapes}")
+        return tuple(ssimplify(sum(s[i] for s in shapes)) if i==axis else shapes[0][i] for i in range(len(shapes[0])))  # type: ignore
+
     # movement ops change the shape
     # NOTE: ssimplify is required because the shape needs to be canonical for broadcasting and same shape checking
     if self.op in GroupOp.Movement.union({Ops.MULTI, Ops.REDUCE_AXIS, Ops.WMMA}):
@@ -294,15 +304,6 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
         case Ops.FLIP:
           if len(ps) != len(self.marg) or not all(isinstance(x, bool) for x in self.marg): raise ValueError(f"bad flip on {ps}, {self.marg}")
           return ps
-        case Ops.CAT:
-          axis = self.arg
-          shapes = [s._shape for s in self.src]
-          if any(s is None for s in shapes): raise RuntimeError("CAT requires all sources to have shapes")
-          if axis == -1: return (len(shapes),) + shapes[0]  # type: ignore  # new leading axis (stack)
-          for s in shapes[1:]:
-            if len(s) != len(shapes[0]) or not all(a==b for i,(a,b) in enumerate(zip(s, shapes[0])) if i!=axis):  # type: ignore
-              raise ValueError(f"CAT shape mismatch: {shapes}")
-          return tuple(ssimplify(sum(s[i] for s in shapes)) if i==axis else shapes[0][i] for i in range(len(shapes[0])))  # type: ignore
         case Ops.MULTI: return tuple(s*len(self.device) if a == self.axis else s for a,s in enumerate(ps))
         case Ops.REDUCE_AXIS | Ops.WMMA:
           axis_arg = self.arg[1] if self.op is Ops.REDUCE_AXIS else self.arg[7]
@@ -582,14 +583,14 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
 
   @property
   def base(self) -> UOp:
-    if self.op in GroupOp.Movement and self.op is not Ops.CAT: return self.src[0].base
+    if self.op in GroupOp.Movement: return self.src[0].base
     if self.op is Ops.MULTI: return self.src[0].base  # MULTI is really a VIEW
     if self.op is Ops.DETACH: return self.src[0].base  # DETACH can't change base
     return self
 
   @property
   def multibase(self) -> UOp:
-    if self.op in GroupOp.Movement and self.op is not Ops.CAT: return self.src[0].base
+    if self.op in GroupOp.Movement: return self.src[0].base
     if self.op is Ops.DETACH: return self.src[0].base  # DETACH can't change base
     return self
 
@@ -606,7 +607,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     match self.op:
       case Ops.RESHAPE | Ops.EXPAND: return tuple(self.src[1].sgep(i) for i in range(self.src[1].dtype.count))
       case Ops.PAD | Ops.SHRINK: return tuple((self.src[1].sgep(i), self.src[2].sgep(i)) for i in range(self.src[1].dtype.count))
-      case Ops.PERMUTE | Ops.FLIP | Ops.CAT: return self.arg
+      case Ops.PERMUTE | Ops.FLIP: return self.arg
       case _: raise RuntimeError(f"{self.op} is not a MovementOp")
 
   def _mop(self, op:Ops, arg, same_shape_noop:bool=False) -> UOp:

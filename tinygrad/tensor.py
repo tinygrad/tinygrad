@@ -1384,17 +1384,8 @@ class Tensor(OpMixin):
     """
     dim = self._resolve_dim(dim)
     for arg in args: assert arg.ndim==self.ndim and all(ti==ai for i,(ti,ai) in enumerate(zip(self.shape, arg.shape)) if i!=dim)
-    tensors = [self, *args]
-    # validate dim is within shape bounds (catches scalar cat)
-    _ = [t.shape[dim] for t in tensors]
-    new_uop = UOp(Ops.CAT, self.uop.dtype, tuple(t.uop for t in tensors), dim)
-    if TRACEMETA >= 1 and (metadata:=_METADATA.get()) is not None: all_metadata[new_uop] = (metadata,)
-    needs_input_grad = [t.requires_grad for t in tensors]
-    ret = Tensor.__new__(Tensor)
-    ret.uop, ret.grad = new_uop, None
-    ret.requires_grad = True if any(needs_input_grad) else None if None in needs_input_grad else False
-    all_tensors[weakref.ref(ret)] = None
-    return ret
+    _ = [t.shape[dim] for t in [self, *args]]  # validate dim in bounds (catches scalar cat)
+    return self._apply_uop(lambda *uops, arg: UOp(Ops.CAT, uops[0].dtype, uops, arg), *args, arg=dim)
 
   def stack(self:Tensor, *args:Tensor, dim:int=0) -> Tensor:
     """
