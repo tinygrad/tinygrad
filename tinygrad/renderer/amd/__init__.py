@@ -40,6 +40,13 @@ def _load_formats() -> dict[str, list[type[Inst]]]:
     SOP2 as R4_SOP2, SOP2_LIT as R4_SOP2_LIT, SOPC as R4_SOPC, SOPC_LIT as R4_SOPC_LIT,
     SOPK as R4_SOPK, SOPK_LIT as R4_SOPK_LIT, SOPP as R4_SOPP,
     SMEM as R4_SMEM, DS as R4_DS, VFLAT as R4_FLAT, VGLOBAL as R4_GLOBAL, VSCRATCH as R4_SCRATCH)
+  from tinygrad.runtime.autogen.amd.rdna2.ins import (VOP1 as R2_VOP1, VOP1_SDST as R2_VOP1_SDST, VOP1_LIT as R2_VOP1_LIT,
+    VOP1_SDWA as R2_VOP1_SDWA, VOP2 as R2_VOP2, VOP2_LIT as R2_VOP2_LIT, VOP2_SDWA as R2_VOP2_SDWA,
+    VOPC as R2_VOPC, VOPC_SDWA_SDST as R2_VOPC_SDWA_SDST,
+    VOP3 as R2_VOP3, VOP3_SDST as R2_VOP3_SDST, VOP3SD as R2_VOP3SD, VOP3P as R2_VOP3P,
+    SOP1 as R2_SOP1, SOP1_LIT as R2_SOP1_LIT, SOP2 as R2_SOP2, SOP2_LIT as R2_SOP2_LIT,
+    SOPC as R2_SOPC, SOPC_LIT as R2_SOPC_LIT, SOPK as R2_SOPK, SOPK_LIT as R2_SOPK_LIT, SOPP as R2_SOPP,
+    SMEM as R2_SMEM, DS as R2_DS, FLAT as R2_FLAT, GLOBAL as R2_GLOBAL, SCRATCH as R2_SCRATCH)
   from tinygrad.runtime.autogen.amd.cdna.ins import (VOP1 as C_VOP1, VOP1_SDWA as C_VOP1_SDWA, VOP1_DPP16 as C_VOP1_DPP16,
     VOP2 as C_VOP2, VOP2_LIT as C_VOP2_LIT, VOP2_SDWA as C_VOP2_SDWA, VOP2_DPP16 as C_VOP2_DPP16,
     VOPC as C_VOPC, VOPC_SDWA_SDST as C_VOPC_SDWA_SDST,
@@ -49,6 +56,9 @@ def _load_formats() -> dict[str, list[type[Inst]]]:
   # Order matters: more specific encodings first, catch-alls (SOP2, VOP2) last
   # Order: base before _LIT (base matches regular ops, _LIT catches lit-only ops excluded from base)
   _FORMATS = {
+    "rdna2": [R2_VOP3P, R2_VOP3SD, R2_VOP3_SDST, R2_VOP3, R2_DS, R2_GLOBAL, R2_SCRATCH, R2_FLAT, R2_SMEM,
+              R2_SOP1, R2_SOP1_LIT, R2_SOPC, R2_SOPC_LIT, R2_SOPP, R2_SOPK, R2_SOPK_LIT, R2_VOPC_SDWA_SDST, R2_VOPC,
+              R2_VOP1_SDWA, R2_VOP1_SDST, R2_VOP1, R2_VOP1_LIT, R2_VOP2_SDWA, R2_SOP2, R2_SOP2_LIT, R2_VOP2, R2_VOP2_LIT],
     "rdna3": [VOPD, VOP3P, VINTERP, VOP3SD, VOP3_SDST, VOP3, DS, GLOBAL, SCRATCH, FLAT, SMEM,
               SOP1, SOP1_LIT, SOP2, SOP2_LIT, SOPC, SOPK, SOPK_LIT, SOPP, VOPC, VOP1_SDST, VOP1, VOP1_LIT, VOP2, VOP2_LIT],
     "rdna4": [R4_VOPD, R4_VOP3P, R4_VINTERP, R4_VOP3SD, R4_VOP3_SDST, R4_VOP3, R4_DS, R4_GLOBAL, R4_SCRATCH, R4_FLAT, R4_SMEM,

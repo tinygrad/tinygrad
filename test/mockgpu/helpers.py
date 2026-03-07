@@ -16,7 +16,7 @@ def _try_dlopen_gpuocelot():
   return None
 
 class PythonRemu:
-  """Python RDNA3/RDNA4 emulator wrapper that matches the libremu.so interface."""
+  """Python RDNA2/RDNA3/RDNA4 emulator wrapper that matches the libremu.so interface."""
   valid_mem_ranges: set[tuple[int, int]] = set()
   rsrc2: int = 0x19c  # Default: USER_SGPR_COUNT=14, enable X and Y workgroup IDs
   scratch_size: int = 0  # private_segment_fixed_size from kernel descriptor

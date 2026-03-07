@@ -90,8 +90,10 @@ class Fmt(Enum):
   FMT_NUM_PK8_U8 = auto()
   FMT_NUM_PK_F16 = auto()
   FMT_NUM_PK_I16 = auto()
+  FMT_NUM_PK_I4 = auto()
   FMT_NUM_PK_I8 = auto()
   FMT_NUM_PK_U16 = auto()
+  FMT_NUM_PK_U4 = auto()
   FMT_NUM_PK_U8 = auto()
   FMT_NUM_U16 = auto()
   FMT_NUM_U24 = auto()
@@ -224,8 +226,10 @@ FMT_BITS = {
   Fmt.FMT_NUM_PK8_U8: 64,
   Fmt.FMT_NUM_PK_F16: 32,
   Fmt.FMT_NUM_PK_I16: 32,
+  Fmt.FMT_NUM_PK_I4: 32,
   Fmt.FMT_NUM_PK_I8: 32,
   Fmt.FMT_NUM_PK_U16: 32,
+  Fmt.FMT_NUM_PK_U4: 32,
   Fmt.FMT_NUM_PK_U8: 32,
   Fmt.FMT_NUM_U16: 16,
   Fmt.FMT_NUM_U24: 24,
@@ -282,6 +286,7 @@ class OpType(Enum):
   OPR_EXEC = auto()
   OPR_HWREG = auto()
   OPR_LABEL = auto()
+  OPR_PARAM = auto()
   OPR_SDST = auto()
   OPR_SDST_NULL = auto()
   OPR_SENDMSG = auto()
@@ -307,12 +312,15 @@ class OpType(Enum):
   OPR_SREG_LITERAL = auto()
   OPR_SREG_M0 = auto()
   OPR_SREG_M0_INL = auto()
+  OPR_SREG_NONULL = auto()
   OPR_SREG_NOVCC = auto()
   OPR_SSRC = auto()
   OPR_SSRC_BARRIER_ID = auto()
   OPR_SSRC_LANESEL = auto()
+  OPR_SSRC_NOLDS = auto()
   OPR_SSRC_NOLIT = auto()
   OPR_TGT = auto()
+  OPR_VCC = auto()
   OPR_VERSION = auto()
   OPR_VGPR = auto()
   OPR_VGPR_OR_ACCVGPR = auto()
