@@ -199,6 +199,13 @@ class TestMultiTensor(unittest.TestCase):
       run_schedule(sched)
       np.testing.assert_equal(xt.numpy(), X_np[i*2:i*2+2])
 
+  def test_cat_on_non_shard_axis(self):
+    # cat must be lowered to PAD/ADD before multi_pm runs, otherwise MULTI nodes are not handled
+    X = Tensor.arange(8).reshape(4, 2).realize().shard_(devices_2, 0)
+    Y = Tensor.arange(8, 16).reshape(4, 2).realize().shard_(devices_2, 0)
+    Z = X.cat(Y, dim=1)
+    np.testing.assert_equal(Z.numpy(), np.concatenate([np.arange(8).reshape(4, 2), np.arange(8, 16).reshape(4, 2)], axis=1))
+
   @given(strat.sampled_from((devices_2, devices_3)),
          strat.sampled_from((Ops.ADD, Ops.MUL, Ops.MAX)),
          strat.sampled_from((None, 0, 1)), strat.sampled_from((None, 0, 1)))

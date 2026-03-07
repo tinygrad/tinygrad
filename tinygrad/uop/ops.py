@@ -263,6 +263,14 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
       # MULTI marker (axis info in PARAM sources) has no shape
       case Ops.MULTI if len(self.src) == 0: return None
 
+      case Ops.CAT:
+        shapes = [s.shape for s in self.src]
+        axis = self.arg
+        for s in shapes[1:]:
+          if len(s) != len(shapes[0]) or not all(a==b for i,(a,b) in enumerate(zip(s, shapes[0])) if i!=axis):
+            raise ValueError(f"CAT shape mismatch: {shapes}")
+        return tuple(ssimplify(sum(s[i] for s in shapes)) if i==axis else shapes[0][i] for i in range(len(shapes[0])))
+
     # movement ops change the shape
     # NOTE: ssimplify is required because the shape needs to be canonical for broadcasting and same shape checking
     if self.op in GroupOp.Movement.union({Ops.MULTI, Ops.REDUCE_AXIS, Ops.WMMA}):

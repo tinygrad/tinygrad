@@ -1,7 +1,13 @@
 from typing import cast
-import math, dataclasses
+import math, itertools, dataclasses
 from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, all_metadata
 from tinygrad.helpers import argsort
+
+def cat_gradient(ctx:UOp, ret:UOp) -> tuple[UOp, ...]:
+  axis = ret.arg
+  dim_acc = list(itertools.accumulate([s.shape[axis] for s in ret.src], initial=0))
+  return tuple(ctx.shrink(tuple([(dim_acc[i], dim_acc[i+1]) if j==axis else (0, ctx.shape[j])
+    for j in range(len(ctx.shape))])) for i in range(len(ret.src)))
 
 def reduce_gradient(ctx:UOp, ret:UOp, op:Ops):
   def broadcast_to_input(x): return x.reshape(x.shape+(1,)*(len(ret.src[0].shape)-len(x.shape))).expand(ret.src[0].shape)
@@ -54,6 +60,7 @@ pm_gradient = PatternMatcher([
   (UPat(Ops.SHRINK, name="ret"), lambda ctx, ret: (ctx.pad(tuple([(p[0], s-p[1]) for s,p in zip(ret.src[0].shape, ret.marg)])), None, None)),
   (UPat(Ops.PERMUTE, name="ret"), lambda ctx, ret: (ctx.permute(argsort(ret.marg)),)),
   (UPat(Ops.FLIP, name="ret"), lambda ctx, ret: (ctx.flip([i for i,x in enumerate(ret.marg) if x]),)),
+  (UPat(Ops.CAT, name="ret"), lambda ctx, ret: cat_gradient(ctx, ret)),
   (UPat(Ops.COPY, name="ret"), lambda ctx, ret: (ctx.copy_to_device(ret.src[0].device), None)),
   (UPat(Ops.MULTI, name="ret"), lambda ctx, ret: ctx.shard(ret.device, ret.axis).src),
   # NOTE: this is only correct when the KERNEL has a single output

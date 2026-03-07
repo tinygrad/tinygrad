@@ -112,7 +112,19 @@ def resolve_call(c:UOp, allow_param_mismatch=True) -> UOp|None:
     if p.dtype != a.dtype: raise TypeError(f"arg {i} dtype mismatch: expected {p.dtype}, got {a.dtype}")
   return c.src[0].substitute(dict_map, walk=True)
 
-earliest_rewrites = mop_cleanup+PatternMatcher([
+def lower_cat(cat:UOp) -> UOp:
+  axis = cat.arg
+  dim_acc = list(itertools.accumulate([s.shape[axis] for s in cat.src], initial=0))
+  padded = [s.pad(tuple((dim_acc[i], dim_acc[-1]-dim_acc[i+1]) if j==axis else (0,0) for j in range(len(s.shape)))) for i,s in enumerate(cat.src)]
+  ret = padded[0]
+  for p in padded[1:]: ret = ret.alu(Ops.ADD, p)
+  return ret
+
+pm_lower_cat = PatternMatcher([
+  (UPat(Ops.CAT, name="cat"), lower_cat),
+])
+
+earliest_rewrites = mop_cleanup+pm_lower_cat+PatternMatcher([
   # early fixup const copy
   (UPat(Ops.COPY, src=(UPat.var("s"), UPat.var("d"))),
    lambda s,d: s.substitute({UOp(Ops.DEVICE, arg=s.device):d}) if s.base.op is Ops.CONST else None),
@@ -537,7 +549,8 @@ split_kernels = PatternMatcher([
 
 @profile_matches
 def get_kernel_graph(sink:UOp) -> UOp:
-  tsink = graph_rewrite(sink, multi_pm, name="multi_pm")
+  tsink = graph_rewrite(sink, pm_lower_cat, name="lower_cat")
+  tsink = graph_rewrite(tsink, multi_pm, name="multi_pm")
   if OPENPILOT_HACKS: tsink = graph_rewrite(tsink, pm_fold_moved_assign, ctx={}, name="fold moved assigns")
   tsink = graph_rewrite(tsink, pm_syntactic_sugar+pm_mops+earliest_rewrites, bottom_up=True, name="earliest rewrites")
 
