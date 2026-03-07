@@ -113,7 +113,7 @@ def get_runner(device:str, ast:UOp) -> CompiledRunner:
   context = (BEAM.value, NOOPT.value, DEVECTORIZE.value, EMULATED_DTYPES.value)
   ckey = (device, type(Device[device].compiler), ast.key, context, False)
   if cret:=method_cache.get(ckey): return cret
-  bkey = (device.split(":")[0], type(Device[device].compiler), ast.key, context, True)
+  bkey = (device.split(":")[0], type(Device[device].compiler), Device[device].compiler.cachekey, ast.key, context, True)
   if bret:=method_cache.get(bkey):
     method_cache[ckey] = ret = CompiledRunner(replace(bret.p, device=device))
   else:
