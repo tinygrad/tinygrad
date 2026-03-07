@@ -245,7 +245,9 @@ class Transformer:
       out = self(t[:, sp:sp+nt] if out is None else out, sp).realize()
       start_pos += nt.val
       # chunked prefill: keep processing until all prompt tokens are consumed
-      if start_pos < len(tokens): continue
+      if start_pos < len(tokens):
+        out = None
+        continue
       tokens.append(int(out.item()))
       self._cached_tokens = tokens[:]
       yield tokens[-1]
