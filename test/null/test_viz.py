@@ -507,17 +507,17 @@ class TestVizProfiler(BaseTestViz):
     sz = len(get_profile(prof))
     self.assertLessEqual(sz/n_events, 26)
 
-  @Context(VIZ=1)
   def test_calltrace(self):
     def fxn(): return Tensor.empty(10).mul(2).realize()
-    fxn()
+    with cpu_profile(TracingKey("test_fxn"), "CUSTOM"):
+      fxn()
     codegen_trace = get_viz_list()[0]["steps"][0]["trace"]
     assert any(fxn.__code__.co_filename == f and fxn.__code__.co_firstlineno == l for f,l,*_ in codegen_trace), str(codegen_trace)
     profile_ret = load_profile(cpu_events)
-    user_event = profile_ret["layout"]["USER"]["events"][0]
-    self.assertEqual(user_event["name"], "empty")
-    runtime_trace = json.loads(user_event["fmt"].replace("TB:", ""))
-    assert any(fxn.__code__.co_filename == f and fxn.__code__.co_firstlineno == l for f,l,*_ in runtime_trace), str(runtime_trace)
+    e = profile_ret["layout"]["CUSTOM"]["events"][0]
+    self.assertEqual(e["name"], "test_fxn")
+    runtime_trace = json.loads(e["fmt"].replace("TB:", ""))
+    assert any(fxn.__code__.co_filename == f and fxn.__code__.co_firstlineno+1 == l for f,l,*_ in runtime_trace), str(runtime_trace)
 
   # can pack up to 1hr 11 min of trace events
   def test_trace_duration(self):
