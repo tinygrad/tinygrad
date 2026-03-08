@@ -507,6 +507,7 @@ class TestVizProfiler(BaseTestViz):
     sz = len(get_profile(prof))
     self.assertLessEqual(sz/n_events, 26)
 
+  @Context(VIZ=1)
   def test_calltrace(self):
     def fxn(): return Tensor.empty(10).mul(2).realize()
     fxn()
