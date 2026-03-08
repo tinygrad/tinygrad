@@ -485,6 +485,7 @@ class AMDCopyQueue(HWQueue):
     if (dev:=signal.owner) is not None and signal.is_timeline and not dev.is_am():
       self.q(self.sdma.SDMA_OP_FENCE | fence_flags, *data64_le(dev.queue_event_mailbox_ptr), dev.queue_event.event_id)
       self.q(self.sdma.SDMA_OP_TRAP, self.sdma.SDMA_PKT_TRAP_INT_CONTEXT_INT_CONTEXT(dev.queue_event.event_id))
+    elif dev is not None and dev.is_am(): self.q(self.sdma.SDMA_OP_TRAP, 0)
 
     return self
 
@@ -866,10 +867,12 @@ class PCIIface(PCIIfaceBase):
     return AMDQueueDesc(ring=ring.cpu_view().view(fmt='I'), doorbell=self.dev_impl.doorbell64.view(doorbell_index * 8, 8, fmt='Q'), put_value=0,
       read_ptr=gart.cpu_view().view(offset=rptr, size=8, fmt='Q'), write_ptr=gart.cpu_view().view(offset=wptr, size=8, fmt='Q'), params=rcvr_params)
 
-  def _collect_faults(self, reset=False):
+  def _collect_interrupts(self, reset=False, drain_only=False):
     devs:list[AMDDevice] = [d for pg in HCQCompiled.peer_groups.values() for d in pg if isinstance(d, AMDDevice) and d.is_am()]
     for d in devs:
-      d.iface.dev_impl.ih.interrupt_handler()
+      if drain_only: d.iface.dev_impl.ih.drain()
+      else: d.iface.dev_impl.ih.interrupt_handler()
+
       if reset and d.iface.dev_impl.recover(force=d.error_state is not None):
         d.compute_queue.put_value = d.compute_queue.read_ptr[0] = d.compute_queue.write_ptr[0] = 0
         d.iface.dev_impl.gfx.setup_ring(*d.compute_queue.params)
@@ -879,11 +882,11 @@ class PCIIface(PCIIfaceBase):
   def sleep(self, timeout):
     if hasattr(self.pci_dev, 'irq_poller') and self.pci_dev.irq_poller is not None and (events_cnt:=len(self.pci_dev.irq_poller.poll(timeout))):
       self.pci_dev.irq_fd.read(8 * events_cnt)
-    self._collect_faults()
+    self._collect_interrupts()
     if self.dev_impl.is_err_state: raise RuntimeError("Device is in error state")
 
   def on_device_hang(self):
-    self._collect_faults(reset=True)
+    self._collect_interrupts(reset=True)
     raise RuntimeError("Device hang detected")
 
   def device_fini(self): self.dev_impl.fini()
@@ -1075,6 +1078,10 @@ class AMDDevice(HCQCompiled):
   def invalidate_caches(self):
     self.hw_compute_queue_t().memory_barrier().signal(self.timeline_signal, self.next_timeline()).submit(self)
     self.synchronize()
+
+  def synchronize(self, timeout:int|None=None):
+    super().synchronize(timeout)
+    if self.is_am() and self.error_state is None: self.iface._collect_interrupts(reset=False, drain_only=True)
 
   def on_device_hang(self): self.iface.on_device_hang()
 
