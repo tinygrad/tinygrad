@@ -411,7 +411,7 @@ class TestVizProfiler(BaseTestViz):
     j = load_profile(prof)
     event = j['layout']['NV:SDMA:0']['events'][0]
     gbs = sz/(dur*1e-6)*1e-9
-    self.assertTrue(event['fmt'].startswith(f"{gbs:.0f} GB/s"))
+    self.assertEqual(event['fmt'], f"{gbs:.0f} GB/s")
 
   def test_graph(self):
     prof = [ProfileDeviceEvent(device='NV', tdiff=decimal.Decimal(-1000)),
@@ -453,9 +453,7 @@ class TestVizProfiler(BaseTestViz):
     j = load_profile(prof)
     sdma_events = j['layout']['NV:1:SDMA:0']['events']
     gbs = sz/(dur*1e-6)*1e-9
-    timing_txt, trace_txt = sdma_events[0]['fmt'].split("\nTB:")
-    self.assertEqual(timing_txt, f"{gbs:.0f} GB/s")
-    self.assertEqual(json.loads(trace_txt)[0][0], __file__)
+    self.assertEqual(sdma_events[0]['fmt'], f"{gbs:.0f} GB/s")
 
   def test_block_ordering(self):
     prof = [ProfileDeviceEvent(device='NV', tdiff=decimal.Decimal(-1000)),
@@ -511,9 +509,15 @@ class TestVizProfiler(BaseTestViz):
 
   def test_calltrace(self):
     def fxn(): return Tensor.empty(10).mul(2).realize()
-    fxn()
-    trace = get_viz_list()[0]["steps"][0]["trace"]
-    assert any(fxn.__code__.co_filename == f and fxn.__code__.co_firstlineno == l for f,l,*_ in trace), str(trace)
+    with cpu_profile(TracingKey("test_fxn"), "CUSTOM"):
+      fxn()
+    codegen_trace = get_viz_list()[0]["steps"][0]["trace"]
+    assert any(fxn.__code__.co_filename == f and fxn.__code__.co_firstlineno == l for f,l,*_ in codegen_trace), str(codegen_trace)
+    profile_ret = load_profile(cpu_events)
+    e = profile_ret["layout"]["CUSTOM"]["events"][0]
+    self.assertEqual(e["name"], "test_fxn")
+    runtime_trace = json.loads(e["fmt"].replace("TB:", ""))
+    assert any(fxn.__code__.co_filename == f and fxn.__code__.co_firstlineno+1 == l for f,l,*_ in runtime_trace), str(runtime_trace)
 
   # can pack up to 1hr 11 min of trace events
   def test_trace_duration(self):
