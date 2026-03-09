@@ -267,8 +267,6 @@ full_spec = PatternMatcher([
   # linearizer: outputs + intermediate KERNELs
   (UPat(Ops.CALL, dtype=dtypes.void), lambda: True),
 
-  # Invalid must have type Index
-  (UPat(Ops.CONST, arg=Invalid, name="x"), lambda x: x.dtype.scalar() == dtypes.index),
   # where on index in rhs position is fine
   (UPat(Ops.WHERE, dtype=dtypes.index, src=(UPat(dtype=dtypes.bool), UPat(), UPat(dtype=dtypes.index))), lambda: True),
   # allow index dtype on a restricted set of UOps
