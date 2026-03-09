@@ -268,7 +268,7 @@ function setFocus(key) {
   const html = d3.select(".info").html("");
   if (eventType === EventTypes.EXEC) {
     const [n, _, ...rest] = e.arg.tooltipText.split("\n");
-    html.append(() => tabulate([["Name", d3.create("p").html(n).node()], ["Duration", formatTime(e.width)], ["Start Time", formatTime(e.x)]]).node());
+    html.append(() => tabulate([["Name", colored(e.label)], ["Duration", formatTime(e.width)], ["Start Time", formatTime(e.x)]]).node());
     let group = html.append("div").classed("args", true);
     for (const r of rest) group.append("p").text(r);
     group = html.append("div").classed("args", true);
