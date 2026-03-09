@@ -323,10 +323,10 @@ function setFocus(key) {
 
 const EventTypes = { EXEC:0, BUF:1 };
 
-async function renderProfiler(path, unit, opts) {
+async function renderProfiler(path, opts) {
   displaySelection("#profiler");
   // support non realtime x axis units
-  formatTime = unit === "realtime" ? formatMicroseconds : formatCycles;
+  formatTime = opts.unit === "ms" ? formatMicroseconds : formatCycles;
   if (data?.path !== path) { data = {tracks:new Map(), axes:{}, path, first:null, pcToShape:new Map()}; focusedDevice = null; focusedShape = null; }
   setFocus(focusedShape);
   // layout once!
@@ -379,7 +379,10 @@ async function renderProfiler(path, unit, opts) {
         const e = {name:strings[u32()], ref:optional(u32()), key:optional(u32()), st:u32(), dur:f32(), info:strings[u32()] || null};
         // find a free level to put the event
         let depth = 0;
-        if (opts.levelKey != null) { depth = opts.levelKey(e); levels[depth] = 0; }
+        if (opts.levelKey != null) { 
+          depth = opts.levelKey(e); levels[depth] = 0;
+          console.log(depth)
+        }
         else {
           depth = levels.findIndex(levelEt => e.st >= levelEt);
           const et = e.st+Math.trunc(e.dur);
@@ -597,7 +600,7 @@ async function renderProfiler(path, unit, opts) {
       const labelX = x+ctx.lineWidth+2;
       if (labelX <= lastLabelEnd) continue;
 
-      const label = formatTime(tick, et-st <= 1e3 ? true : false);
+      const label = formatTime(tick, et-st <= 1e3);
       ctx.textBaseline = "top";
       ctx.fillText(label, labelX, tickSize);
       lastLabelEnd = labelX + ctx.measureText(label).width + 4;
@@ -880,7 +883,7 @@ async function main() {
     if (url.pathname+url.search !== ckey) e.close();
     else if (e.readyState === EventSource.OPEN) activeSrc = e;
   }
-  if (ctx.name === "Profiler") return renderProfiler("/get_profile", "realtime", { width:"132px" });
+  if (ctx.name === "Profiler") return renderProfiler("/get_profile", {unit:"ms", width:"132px"});
   if (workerUrl == null) await initWorker();
   if (ckey in cache) {
     ret = cache[ckey];
@@ -898,8 +901,8 @@ async function main() {
     }
     // timeline with cycles on the x axis
     if (ret instanceof ArrayBuffer) {
-      opts = {heightScale:0.5, hideLabels:true, levelKey:step.name.includes("PKTS") ? (e) => parseInt(e.name.split(" ")[1].split(":")[1]) : null, colorByName:ckey.includes("pkts")};
-      return renderProfiler(ckey, "clk", opts);
+      pkts = step.name.includes("PKTS")
+      return renderProfiler(ckey, {unit:"clk", heightScale:0.5, hideLabels:true, levelKey:pkts ? (e) => parseInt(e.name.split(" ")[1].split(":")[1]) : null, colorByName:pkts});
     }
     metadata.replaceChildren(...((ret.metadata ?? []).map((m) => {
       return tabulate(m.map((e) => [e.label.trim(), typeof e.value === "string" ? e.value : formatUnit(e.value)]));
