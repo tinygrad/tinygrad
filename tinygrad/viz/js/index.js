@@ -172,14 +172,24 @@ function renderDag(layoutSpec, { recenter }) {
 
 // ** profiler graph
 
-function formatMicroseconds(ts, showUs=true) {
-  const s = Math.floor(ts / 1e6), ms = Math.floor((ts % 1e6) / 1e3), us = Math.round(ts % 1e3);
+function formatNanoseconds(ts, showSmallest=true) {
+  const units = [["s", 1e9], ["ms", 1e6], ["us", 1e3], ["ns", 1]];
   const parts = [];
-  if (s) parts.push(`${s}s`);
-  if (ms || (!showUs && !s)) parts.push(`${ms}ms`);
-  if (showUs && (us || (!ms && !s))) parts.push(`${us}us`);
-  return parts.join(' ');
+  let rem = ts;
+  for (let i = 0; i < units.length; i++) {
+    const [name, size] = units[i];
+    const isLast = i === units.length - 1;
+    const value = isLast ? +rem.toFixed(2) : Math.floor(rem / size);
+    if (!isLast) rem %= size;
+    if (value) { parts.push(`${value}${name}`); continue; }
+    if (!parts.length && !isLast) continue;
+    if (!showSmallest && isLast) break;
+    if (isLast && !parts.length) parts.push(`${value}${name}`);
+  }
+  return parts.join(" ");
 }
+
+const formatMicroseconds = (ts, showUs=true) => formatNanoseconds(ts*1e3, showUs);
 
 function formatCycles(cycles) {
   const M = Math.floor(cycles / 1e6), K = Math.floor((cycles % 1e6) / 1e3), s = Math.round(cycles % 1e3);
@@ -326,7 +336,7 @@ const EventTypes = { EXEC:0, BUF:1 };
 async function renderProfiler(path, opts) {
   displaySelection("#profiler");
   // support non realtime x axis units
-  formatTime = opts.unit === "ms" ? formatMicroseconds : formatCycles;
+  formatTime = opts.unit === "ms" ? formatMicroseconds : opts.unit === "ns" ? formatNanoseconds : formatCycles;
   if (data?.path !== path) { data = {tracks:new Map(), axes:{}, path, first:null, pcToShape:new Map()}; focusedDevice = null; focusedShape = null; }
   setFocus(focusedShape);
   // layout once!
@@ -895,7 +905,7 @@ async function main() {
     // timeline with cycles on the x axis
     if (ret instanceof ArrayBuffer) {
       const pkts = step.name.includes("PKTS");
-      return renderProfiler(ckey, {unit:"clk", heightScale:0.5, hideLabels:true, colorByName:pkts});
+      return renderProfiler(ckey, {unit:pkts ? "ns" : "clk", heightScale:0.5, hideLabels:true, colorByName:pkts});
     }
     metadata.replaceChildren(...((ret.metadata ?? []).map((m) => {
       return tabulate(m.map((e) => [e.label.trim(), typeof e.value === "string" ? e.value : formatUnit(e.value)]));

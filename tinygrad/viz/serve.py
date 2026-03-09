@@ -335,31 +335,44 @@ def load_amd_counters(ctxs:list[dict], profile:list[ProfileEvent]) -> None:
     ctxs.append({"name":f"Exec {name}"+(f" n{run_number[k]}" if run_number[k] > 1 else ""), "steps":steps})
 
 def sqtt_timeline(data:bytes, lib:bytes, target:str) -> list[ProfileEvent]:
-  from tinygrad.renderer.amd.sqtt import map_insts, InstructionInfo, PacketType, INST, InstOp, VALUINST, IMMEDIATE, IMMEDIATE_MASK, VMEMEXEC, ALUEXEC
-  from tinygrad.renderer.amd.sqtt import INST_RDNA4, InstOpRDNA4
+  from tinygrad.renderer.amd.sqtt import map_insts, InstructionInfo, PacketType, TS_DELTA_OR_MARK, INST, InstOp, VALUINST, IMMEDIATE, IMMEDIATE_MASK
+  from tinygrad.renderer.amd.sqtt import VMEMEXEC, ALUEXEC, INST_RDNA4, InstOpRDNA4
   ret:list[ProfileEvent] = []
   rows:dict[str, None] = {}
   trace:dict[str, set[int]] = {}
+  start_time:int|None = None
   def add(name:str, p:PacketType, width=1, op_name=None, wave=None, info:InstructionInfo|None=None) -> None:
+    nonlocal start_time
     if hasattr(p, "wave"): wave = p.wave
     rows.setdefault(r:=(f"WAVE:{wave}" if wave is not None else f"{p.__class__.__name__}:0 {name}"))
     key = TracingKey(f"{op_name if op_name is not None else name}", ret=f"PC:{info.pc}" if info is not None else None)
-    ret.append(ProfileRangeEvent(r, key, Decimal(p._time), Decimal(p._time+width)))
+    if start_time is None: start_time = rt
+    ret.append(ProfileRangeEvent(r, key, Decimal(rt-start_time), Decimal(rt-start_time+width)))
+  prev_pair, curr_pair = None, None
+  RT_BASE = 1 << 36 # SQTT stores the low 36 bits of the realtime value
+  NS_PER_TICK = 10  # 100MHz
   for p, info in map_insts(data, lib, target):
     if len(ret) > getenv("MAX_SQTT_PKTS", 50_000): break
+    if isinstance(p, TS_DELTA_OR_MARK) and p.rt and not p.pl: prev_pair, curr_pair = curr_pair, (p._time, p.delta)
+    if prev_pair is None or curr_pair is None: continue
+    (s0, r0), (s1, r1) = prev_pair, curr_pair
+    rate = (s1 - s0) / (r1 - r0)
+    rt = (RT_BASE | round(r1 + (p._time - s1) / rate)) * NS_PER_TICK
+    # width scale of 1 cycle in nanoseconds
+    w = NS_PER_TICK / rate
     if isinstance(p, (INST, INST_RDNA4)):
       op_name = p.op.name if isinstance(p.op, (InstOp, InstOpRDNA4)) else f"0x{p.op:02x}"
       name, width = (op_name, 10 if "BARRIER" in op_name else 1)
-      add(name, p, width=width, info=info)
-    if isinstance(p, (VALUINST, IMMEDIATE)): add(p.__class__.__name__, p, info=info)
-    if isinstance(p, IMMEDIATE_MASK): add("IMMEDIATE", p, wave=unwrap(info).wave, info=info)
+      add(name, p, width=width*w, info=info)
+    if isinstance(p, (VALUINST, IMMEDIATE)): add(p.__class__.__name__, p, width=w, info=info)
+    if isinstance(p, IMMEDIATE_MASK): add("IMMEDIATE", p, width=w, wave=unwrap(info).wave, info=info)
     if isinstance(p, (VMEMEXEC, ALUEXEC)):
       name = str(p.src).split('.')[1]
       if name == "VALU_SALU":
-        add("VALU", p)
-        add("SALU", p)
+        add("VALU", p, width=w)
+        add("SALU", p, width=w)
       else:
-        add(name.replace("_ALT", ""), p, op_name=name)
+        add(name.replace("_ALT", ""), p, width=w, op_name=name)
       if p._time in trace.setdefault(name, set()): raise AssertionError(f"packets overlap in shared resource! {name}")
       trace[name].add(p._time)
   pc_map = {addr:str(inst) for addr,inst in amd_decode(lib, target).items()}
