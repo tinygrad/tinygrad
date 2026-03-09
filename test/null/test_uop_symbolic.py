@@ -286,6 +286,11 @@ class TestSymbolic(unittest.TestCase):
                               "(((z+(x*-1))+(y*-1))+7)")
     self.helper_test_variable((10+12*Variable("x",0,2)+Variable("y", 0, 4)%3)%13, 8, 12, "(((x*-1)+(y%3))+10)")
 
+  def test_mod_congruence_tied_remainder(self):
+    # when f%c == c/2, both r and r-c have equal abs — try both signs
+    self.helper_test_variable((3+2*Variable("x",0,1)+3*Variable("y",0,1))%4, 0, 3, "((x*-2)+(y*-1)+3)")
+    self.helper_test_variable((3+6*Variable("x",0,1)+7*Variable("y",0,1))%4, 0, 3, "((x*-2)+(y*-1)+3)")
+
   def test_div_congruence(self):
     self.helper_test_variable((3+3*Variable("a",0,3))//4, 0, 3, "a")
     self.helper_test_variable((18+17*Variable("a",0,2)+17)//18, 1, 3, "(a+1)")
