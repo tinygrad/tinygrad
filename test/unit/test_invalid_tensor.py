@@ -69,5 +69,12 @@ class TestInvalidTensor(unittest.TestCase):
     assert ret[0] == 1 and ret[1] == 2
     assert before[2] == ret[2] and before[3] == ret[3]
 
+  def test_where_compare(self):
+    mask = Tensor.arange(4) < 2
+    out = mask.where(Tensor([1.0, 2.0, 3.0, 4.0]), Invalid) > 1
+    before, ret = self._realize_and_capture(out)
+    assert not ret[0] and ret[1]
+    assert before[2] == ret[2] and before[3] == ret[3]
+
 if __name__ == '__main__':
   unittest.main()
