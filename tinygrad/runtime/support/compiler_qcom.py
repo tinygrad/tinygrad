@@ -1,5 +1,6 @@
 import ctypes, struct
 from tinygrad.device import Compiler
+from tinygrad.helpers import DEBUG, system
 from tinygrad.runtime.support.c import DLL
 from tinygrad.runtime.support.compiler_mesa import disas_adreno
 
@@ -47,6 +48,10 @@ class QCOMCompiler(Compiler):
 
   def compile(self, src) -> bytes:
     ch = self.checked(compile_source(self.llvm_inst, self.chip_id, MODE_64BIT, b"", 0, 0, 0, src.encode(), 0, SRC_STR, None))
+    if DEBUG >= 8:
+      handle_create_binary(ch, ctypes.byref(ptr:=ctypes.c_void_p()), ctypes.byref(sz:=ctypes.c_size_t()))
+      print(system("llvm-dis", input=ctypes.string_at(ptr, sz.value)[16:]))
+      free_assembly(ptr)
     lh = self.checked(link_program(self.llvm_inst, self.chip_id, MODE_64BIT, None, 1, ctypes.pointer(ctypes.c_void_p(ch))))
     handle_create_binary(lh, ctypes.byref(ptr:=ctypes.c_void_p()), ctypes.byref(sz:=ctypes.c_size_t()))
     for h in [ch, lh]: free_handle(h)
