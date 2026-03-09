@@ -91,5 +91,39 @@ class TestInvalidTensor(unittest.TestCase):
     assert ret[1] == 2.0
     assert before[0] == ret[0] and before[2] == ret[2] and before[3] == ret[3]
 
+  def test_where_reduce_always_true(self):
+    mask = Tensor.arange(4) < 9
+    out = mask.where(Tensor([1.0, 2.0, 3.0, 4.0]), Invalid).sum()
+    before, ret = self._realize_and_capture(out)
+    assert ret == 10.0
+
+  def test_invalid_unary(self):
+    mask = Tensor.arange(4) < 2
+    out = mask.where(Tensor([1.0, 2.0, 3.0, 4.0]), Tensor.full((4,), Invalid, dtype=dtypes.float).sqrt())
+    before, ret = self._realize_and_capture(out)
+    assert ret[0] == 1.0 and ret[1] == 2.0
+    assert before[2] == ret[2] and before[3] == ret[3]
+
+  def test_invalid_binary(self):
+    mask = Tensor.arange(4) < 2
+    out = mask.where(Tensor([1.0, 2.0, 3.0, 4.0]), Tensor.full((4,), Invalid, dtype=dtypes.float) + 2)
+    before, ret = self._realize_and_capture(out)
+    assert ret[0] == 1.0 and ret[1] == 2.0
+    assert before[2] == ret[2] and before[3] == ret[3]
+
+  def test_invalid_binary_left(self):
+    mask = Tensor.arange(4) < 2
+    out = mask.where(Tensor([1.0, 2.0, 3.0, 4.0]), 2 + Tensor.full((4,), Invalid, dtype=dtypes.float))
+    before, ret = self._realize_and_capture(out)
+    assert ret[0] == 1.0 and ret[1] == 2.0
+    assert before[2] == ret[2] and before[3] == ret[3]
+
+  def test_invalid_reshape(self):
+    mask = Tensor.arange(4) < 2
+    out = mask.where(Tensor([1.0, 2.0, 3.0, 4.0]), Invalid).reshape(2,2)
+    before, ret = self._realize_and_capture(out)
+    assert ret[0] == [1.0, 2.0]
+    assert ret[1] == [before[2], before[3]]
+
 if __name__ == '__main__':
   unittest.main()

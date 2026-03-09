@@ -38,7 +38,9 @@ propagate_invalid = PatternMatcher([
   *((UPat(op, src=(UPat.var("y"), invalid_gate), name="alu"), lambda cond,x,y,alu,i:
      x.alu(alu.op,y) if i.dtype is dtypes.index else cond.where(y.alu(alu.op,x), i.cast(dtypes.bool))) for op in GroupOp.Comparison),
   # alu with invalid -> invalid
-  *((invalid_pat.alu(op, UPat()), lambda i: i) for op in GroupOp.Binary-GroupOp.Comparison),
+  (UPat(GroupOp.Unary, src=(invalid_pat,)), lambda i: i),
+  (UPat(GroupOp.Binary-GroupOp.Comparison, src=(invalid_pat, UPat())), lambda i: i),
+  (UPat(GroupOp.Binary-GroupOp.Comparison, src=(UPat(), invalid_pat)), lambda i: i),
   # normalize where(cond, Invalid, val) -> where(~cond, val, Invalid)
   (UPat.var("cond").where(invalid_pat, UPat.var("val")), lambda cond, i, val: cond.logical_not().where(val, i) if val.arg != Invalid else i),
 ])
@@ -128,6 +130,9 @@ symbolic_simple = propagate_invalid + PatternMatcher([
   (UPat.cvar("gate", vec=False).where(UPat.var("c0"), UPat.var("c1")), lambda gate, c0, c1: c0 if gate.arg else c1),
   # a.where(b.where(c, d), d) -> (a & b).where(c, d)
   (UPat.var("a").where(UPat.var("b").where(UPat.var("c"), UPat.var("d")), UPat.var("d")), lambda a,b,c,d: (a&b).where(c,d)),
+  # reduce with invalid -> invalid
+  (UPat(Ops.REDUCE, src=(invalid_gate,), allow_any_len=True, name="r"), lambda r,cond,x,i: i.cast(r.dtype)),
+  (UPat(Ops.REDUCE, src=(invalid_pat,), allow_any_len=True, name="r"), lambda r,cond,x,i: i.cast(r.dtype)),
 ])
 
 # ******** phase 2 builds on phase 1, it includes the old "symbolic", rules that match deeper ********
