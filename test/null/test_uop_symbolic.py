@@ -730,6 +730,18 @@ class TestSymbolic(unittest.TestCase):
     b = Variable("b", 0, 2)
     self.helper_test_variable((a*3+b)%9, 0, 8, "(b+a%3*3)")
 
+  def test_mod_nest_by_factor_with_const(self):
+    # nest_by_factor MOD with non-zero constant offset: (a*f+b+const) % (f*k) = (a%k)*f + b + const when 0<=b+const<f
+    a = Variable("a", 0, 7)
+    b = Variable("b", 0, 1)
+    # f=4, k=2, const=2: (a*4+b+2)%8 = (a%2)*4 + b + 2
+    self.helper_test_variable((a*4+b+2)%8, 2, 7, "(b+a%2*4+2)")
+    # f=6, k=2, const=3: (a*6+b+3)%12 = (a%2)*6 + b + 3
+    b2 = Variable("b", 0, 2)
+    self.helper_test_variable((a*6+b2+3)%12, 3, 11, "(b+a%2*6+3)")
+    # f=3, k=2, const=1: (a*3+b+1)%6 = (a%2)*3 + b + 1
+    self.helper_test_variable((a*3+b+1)%6, 1, 5, "(b+a%2*3+1)")
+
   def test_div_mod_recombine_after_nesting(self):
     # when nest_div_by_factor simplifies the div, the mod must also nest so recombine can fire
     gidx0 = Variable("gidx0", 0, 15)
