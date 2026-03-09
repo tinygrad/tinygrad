@@ -3,116 +3,119 @@ from tinygrad.uop.ops import UOp, Ops, PatternMatcher, UPat
 from tinygrad.renderer.isa import ISARenderer, Register
 from tinygrad.dtype import dtypes, PtrDType
 
+def as_tuple(x): return x if isinstance(x, tuple) else (x,)
+
+PSEUDO_OPS = {Ops.NOOP, Ops.AFTER, Ops.BARRIER, Ops.GROUP}
+
 # loosely based on: https://bernsteinbear.com/assets/img/register-spilling-range-splitting-ssa.pdf
-class RegallocContext:
+class LinearScanRegallocContext:
   def __init__(self, uops:list[UOp], ren:ISARenderer, stack_size:int=0):
-    self.live_range: dict[Register, list[int]] = {}
-    self.live: dict[Register, Register] = {}
-    self.spills: dict[Register, UOp] = {}
-    self.rewrite_to_vreg: dict[UOp, Register] = {}
-    self.vreg_to_rewrite: dict[Register, UOp] = {}
-    self.live_ins: list[dict[Register, Register]] = []
+    live_range: dict[Register, list[int]] = {}
+    live: dict[Register, Register] = {}
+    live_ins: list[dict[Register, Register]] = []
+    self.defs: dict[Register, UOp] = {} # mapping from virtual to uop that defines it
+    self.real_defs: dict[Register, Register] = {} # mapping from virtual to real at definition
+    self.spills: dict[Register, UOp] = {} # mapping from virtual to stack slot
+    self.fills: dict[int, dict[int, tuple[Register, Register]]] = {} # mapping from program point to mapping from idx to virtual and real to fill to
+    self.insert_before: dict[int, list[tuple[Register, Register]]] = {} # mapping from program point to fills to be inserted
     self.idx = itertools.count()
     self.ren = ren
     self.stack_size = stack_size
     # the label associated with each loop NOTE: this is only used post regalloc and should be removed
     self.loop_label: dict[UOp, str] = {}
     # compute live ranges
-    lr = self.live_range
+    lr = live_range
     ranges: list[Register] = []
     for i,u in enumerate(reversed(uops)):
-      if u.op in (Ops.NOOP, Ops.AFTER): continue
-      for v in {s.tag for s in (u,) + u.src if isinstance(s.tag, Register)}: lr.setdefault(v, []).insert(0, len(uops) - 1 - i)
-      # a var defined before a range and used inside it is needed for the whole range
-      if u.tag in lr and (n:=max((lr[rng][-1] for rng in ranges if lr[rng][0] <= lr[u.tag][-1] < lr[rng][-1]), default=None)): lr[u.tag].append(n)
+      if u.op in PSEUDO_OPS: continue
+      defs = as_tuple(u.tag)
+      for v in defs + tuple(s.reg for s in set(u.src)):
+        if isinstance(v, Register): lr.setdefault(v, []).insert(0, len(uops) - 1 - i)
+      for v in defs:
+        if isinstance(v, Register): self.defs[v] = u
+        if v in lr and (n:=max((lr[rng][-1] for rng in ranges if lr[rng][0] <= lr[v][-1] < lr[rng][-1]), default=None)): lr[v].append(n)
       if u.op is Ops.RANGE: ranges.append(u.tag)
 
-def alloc(ctx:RegallocContext, cons:tuple[Register, ...], i:int) -> Register:
-  live_inv = {v:k for k,v in ctx.live.items()}
-  # allocate the best register. Registers not in live or not used again are free and have priority,
-  # otherwise pick the one with the furthest next use. Regs that appear first in cons have priority in case of a tie
-  reg,vreg = max(((r,live_inv.get(r)) for r in cons),
-                key=lambda rv: next((j-i for j in ([] if rv[1] is None else ctx.live_range[rv[1]]) if j >= i), float('inf')))
-  if vreg is not None and vreg not in ctx.spills and ctx.live_range[vreg][-1] >= i:
-    dt = ctx.vreg_to_rewrite[vreg].dtype
-    sz = dt.scalar().itemsize * dt.count if not isinstance(dt, PtrDType) else 8
-    assert sz > 0
-    offset = ctx.stack_size + (sz - ctx.stack_size % sz) % sz
-    ctx.spills[vreg] = UOp.const(dtypes.int32, offset)
-    ctx.stack_size = offset + sz
-  return ctx.live.pop(vreg) if vreg is not None else reg
+    def alloc(cons:tuple[Register, ...], i:int) -> Register:
+      live_inv = {v:k for k,v in live.items()}
+      # allocate the best register. Registers not in live or not used again are free and have priority,
+      # otherwise pick the one with the furthest next use. Regs that appear first in cons have priority in case of a tie
+      reg,vreg = max(((r,live_inv.get(r)) for r in cons),
+                    key=lambda rv: next((j-i for j in ([] if rv[1] is None else live_range[rv[1]]) if j >= i), float('inf')))
+      if vreg is not None and vreg not in self.spills and live_range[vreg][-1] >= i:
+        dt = self.defs[vreg].dtype
+        sz = dt.scalar().itemsize * dt.count if not isinstance(dt, PtrDType) else 8
+        assert sz > 0
+        offset = self.stack_size + (sz - self.stack_size % sz) % sz
+        self.spills[vreg] = UOp.const(dtypes.int32, offset)
+        self.stack_size = offset + sz
+      return live.pop(vreg) if vreg is not None else reg
 
-def regalloc(ctx:RegallocContext, x:UOp, i:int) -> tuple[UOp, list[UOp]]:
-  nsrc, loads = [], []
-  for s in x.src:
-    # allocate srcs, if src was spilled it's replaced by a load, if it's live the load was already emited otherwise alloc and emit one
-    # TODO: constraints that only apply on definition are being applied on the uses too
-    if isinstance(s.tag, Register) and (v:=ctx.rewrite_to_vreg[s]) in ctx.spills:
-      if v not in ctx.live:
-        ctx.live[v] = alloc(ctx, v.cons or (v,), i)
-        s = ctx.ren.fill(ctx.spills[v], s, ctx.live[v])
-        loads.append(s)
-      else: s = ctx.ren.fill(ctx.spills[v], s, ctx.live[v])
-    nsrc.append(s)
-  # allocate destination
-  if isinstance(v:=x.tag, Register) and v not in ctx.live:
-    # if no cons it's a real register, so it can only be assigned to itself
-    cons = v.cons or (v,)
-    # two address instructions (src is used in dest) can only coalesce reused src. reused src goes first to get priority in case of a tiebreak
-    if ctx.ren.is_two_address(x):
-      ins = tuple(ctx.live.get(ctx.rewrite_to_vreg[s]) for s in x.src)
-      cons = ((ins[0],) if ins[0] in cons else ()) + tuple(r for r in cons if r not in ins)
-      assert cons
-    ctx.live[v] = alloc(ctx, cons, i+1)
+    for i,u in enumerate(uops):
+      if u.op in PSEUDO_OPS: continue
+      # allocate uses
+      for j,s in enumerate(u.src):
+        # HACK
+        if u.op is Ops.END: continue
+        # allocate srcs, if src was spilled it's replaced by a load, if it's live the load was already emitted otherwise alloc and emit one
+        if isinstance(v:=s.reg, Register) and v in self.spills:
+          if v not in live:
+            live[v] = alloc(v.cons, i)
+            self.insert_before.setdefault(i, []).append((v, live[v]))
+          self.fills.setdefault(i, {})[j] = (v, live[v])
 
-  nx = x.replace(src=tuple(nsrc), tag=ctx.live.get(v, v))
-  # TODO: this check exists because of a hack in x86, rm once multiple outputs are supported
-  if nx not in ctx.rewrite_to_vreg: ctx.rewrite_to_vreg[nx] = v
-  if v not in ctx.vreg_to_rewrite: ctx.vreg_to_rewrite[v] = nx
-  return nx, loads + [nx]
+      # allocate defs
+      for j,v in enumerate(as_tuple(u.tag)):
+        if isinstance(v, Register):
+          assert v not in live
+          cons = v.cons
+          # two address instructions (src is reused by def) can only coalesce reused src. reused src goes first to get priority in case of a tiebreak
+          if ren.is_two_address(u) and j == 0:
+            ins = tuple(live.get(s.reg) for s in u.src)
+            cons = ((ins[0],) if ins[0] in cons else ()) + tuple(r for r in cons if r not in ins)
+            assert cons
+          self.real_defs[v] = live[v] = alloc(cons, i+1)
 
-# move uops to registers before the loop to avoid loading inside the loop
-def loop_prologue(ctx:RegallocContext, x:UOp, i:int):
-  assert isinstance(x.tag, Register)
-  nx, lst = regalloc(ctx, x, i)
-  # we move to register vars used in the loop sorted by next use, vars not used in the loop will not be reloaded in the epilogue
-  used_in_loop = [v for v in ctx.live.keys() | ctx.spills.keys() if any(i <= l < ctx.live_range[x.tag][-1] for l in ctx.live_range[v])]
-  sorted_uses = sorted(used_in_loop, key=lambda k: next(l-i for l in ctx.live_range[k] if l >= i))
-  live_in: dict[Register, Register] = {}
-  loads = []
-  for v in sorted_uses:
-    # if all the possible registers are already in live_in there's no space for this var
-    if set(v.cons or (v,)).issubset(live_in.values()): continue
-    if v not in ctx.live:
-      ctx.live[v] = alloc(ctx, v.cons or (v,), i)
-      s = ctx.vreg_to_rewrite[v]
-      loads.append(ctx.ren.fill(ctx.spills[v], s, ctx.live[v]))
-    assert ctx.live[v] not in live_in.values()
-    live_in |= {v: ctx.live[v]}
-  ctx.live_ins.append(live_in)
-  return nx, loads + lst
+      # loop prologue, avoid loading inside the loop
+      if u.op is Ops.RANGE:
+        # we move to registers vars used in the loop sorted by next use, vars not used in the loop will not be reloaded in the epilogue
+        used_in_loop = [v for v in live.keys() | self.spills.keys() if any(i <= l < live_range[u.tag][-1] for l in live_range[v])]
+        sorted_uses = sorted(used_in_loop, key=lambda k: next(l-i for l in live_range[k] if l >= i))
+        live_in: dict[Register, Register] = {}
+        for v in sorted_uses:
+          # if all the possible registers are already in live_in there's no space for this var
+          if set(v.cons).issubset(live_in.values()): continue
+          if v not in live:
+            live[v] = alloc(v.cons, i)
+            self.insert_before.setdefault(i, []).append((v, live[v]))
+          assert live[v] not in live_in.values()
+          live_in[v] = live[v]
+        live_ins.append(live_in)
 
-# reload registers that were live at loop entry
-def loop_epilogue(ctx:RegallocContext, x:UOp, i:int):
-  # TODO: if a uop is in a different reg in live out vs live in move between registers instead of loading
-  # TODO: don't reload if first use in loop is a load
-  loads = []
-  for k,v in ctx.live_ins.pop().items():
-    if k not in ctx.live or ctx.live[k] != v:
-      ctx.live[k] = alloc(ctx, (v,), i)
-      s = ctx.vreg_to_rewrite[k]
-      loads.append(ctx.ren.fill(ctx.spills[k], s, ctx.live[k]))
-  return x, loads + [x]
+      # loop epilogue, reload registers that were live at loop entry
+      if u.op is Ops.END:
+        # TODO: if a uop is in a different reg in live out vs live in move between registers instead of loading
+        # TODO: don't reload if first use in loop is a load
+        for v,r in live_ins.pop().items():
+          if v not in live or live[v] != r:
+            live[v] = alloc((r,), i)
+            self.insert_before.setdefault(i, []).append((v, live[v]))
 
-pm_regalloc = PatternMatcher([
-  (UPat(Ops.RANGE, name="x"), lambda ctx,x: loop_prologue(ctx, x, next(ctx.idx))),
-  (UPat(Ops.END, name="x"), lambda ctx,x: loop_epilogue(ctx, x, next(ctx.idx))),
-  (UPat({Ops.INS, Ops.NOOP, Ops.GROUP, Ops.AFTER, Ops.BARRIER}, name="x"), lambda ctx,x: regalloc(ctx, x, next(ctx.idx))),
-])
+def regalloc_rewrite(ctx:LinearScanRegallocContext, x:UOp):
+  i = next(ctx.idx)
+  if x.op in PSEUDO_OPS: return None
+  nsrc = []
+  for j,s in enumerate(x.src):
+    if i in ctx.fills and j in ctx.fills[i]:
+      v,r = ctx.fills[i][j]
+      nsrc.append(ctx.ren.fill(ctx.spills[v], ctx.defs[v], r))
+    else: nsrc.append(s)
+  ndefs = tuple(ctx.real_defs.get(v, v) for v in as_tuple(x.tag))
+  nx = x.replace(src=tuple(nsrc), tag=ndefs[0] if len(ndefs) == 1 else ndefs)
+  fills = [ctx.ren.fill(ctx.spills[v], ctx.defs[v], r) for v,r in ctx.insert_before.get(i, [])]
+  spills = [ctx.ren.spill(ctx.spills[v], nx) for v in as_tuple(x.tag) if v in ctx.spills]
+  return nx, fills + [nx] + spills
 
-# annoying that this is another pm
-pm_insert_spills = PatternMatcher([
-  # insert spill after definition
-  (UPat({Ops.INS, Ops.RANGE}, name="x"), lambda ctx,x:
-   (x, [x, ctx.ren.spill(y, x)]) if (y:=ctx.spills.get(ctx.rewrite_to_vreg.get(x))) is not None else None),
+pm_regalloc_rewrite = PatternMatcher([
+  (UPat({Ops.INS, Ops.RANGE, Ops.END, Ops.NOOP, Ops.GROUP, Ops.AFTER, Ops.BARRIER}, name="x"), regalloc_rewrite),
 ])

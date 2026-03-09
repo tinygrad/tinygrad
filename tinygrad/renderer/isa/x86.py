@@ -82,7 +82,7 @@ class X86GroupOp:
   # X86Ops whose first src is also the destination
   TwoAddress = {X86Ops.ADD, X86Ops.ADDi, X86Ops.AND, X86Ops.ANDi, X86Ops.XOR, X86Ops.XORi, X86Ops.OR, X86Ops.ORi, X86Ops.IMUL,
                 X86Ops.SUB, X86Ops.SUBi, X86Ops.SHL, X86Ops.SHLi, X86Ops.SHR, X86Ops.SHRi, X86Ops.SAR, X86Ops.SARi,
-                X86Ops.IDIV, X86Ops.VFMADD213SS, X86Ops.VFMADD213SD, X86Ops.VFMADD213PS, X86Ops.VFMADD213PD,
+                X86Ops.IDIV, X86Ops.DIV, X86Ops.VFMADD213SS, X86Ops.VFMADD213SD, X86Ops.VFMADD213PS, X86Ops.VFMADD213PD,
                 X86Ops.CMOVNE, X86Ops.CMOVE, X86Ops.CMOVL, X86Ops.CMOVB}
 
   # X86Ops whose first src can read from memory
@@ -92,7 +92,7 @@ class X86GroupOp:
                 X86Ops.VCVTDQ2PS, X86Ops.VCVTDQ2PD, X86Ops.VCVTTPS2DQ, X86Ops.VCVTTPD2DQ, X86Ops.VCVTTSS2SI, X86Ops.VCVTTSD2SI,
                 X86Ops.VCVTPH2PS, X86Ops.VCVTPS2PD, X86Ops.VCVTPD2PS, X86Ops.VROUNDPS, X86Ops.VROUNDPD, X86Ops.VSQRTPS, X86Ops.VSQRTPD,
                 X86Ops.VPBROADCASTB, X86Ops.VPBROADCASTW, X86Ops.VPBROADCASTD, X86Ops.VPBROADCASTQ, X86Ops.VBROADCASTSS,
-                X86Ops.CMPi, X86Ops.IMULi, X86Ops.DIV, X86Ops.LEA}
+                X86Ops.CMPi, X86Ops.IMULi, X86Ops.LEA}
 
   # X86Ops whose second src can read from memory NOTE: some of these are TwoAddress so the second src is actually the first
   ReadMem2nd = {X86Ops.ADD, X86Ops.SUB, X86Ops.AND, X86Ops.OR, X86Ops.XOR, X86Ops.SHL, X86Ops.SHR, X86Ops.SAR, X86Ops.IMUL, X86Ops.CMP,
@@ -105,7 +105,7 @@ class X86GroupOp:
                 X86Ops.VPINSRB, X86Ops.VPINSRW, X86Ops.VPINSRD, X86Ops.VPINSRQ, X86Ops.VPAND, X86Ops.VPOR, X86Ops.VPXOR, X86Ops.VPSLLVD,
                 X86Ops.VPSLLVQ, X86Ops.VPSRLVD, X86Ops.VPSRLVQ, X86Ops.VPSRAVD, X86Ops.CMOVNE, X86Ops.CMOVE, X86Ops.CMOVL, X86Ops.CMOVB,
                 X86Ops.VMAXSS, X86Ops.VMAXSD, X86Ops.VMAXPS, X86Ops.VMAXPD, X86Ops.VMINSS, X86Ops.VMINSD, X86Ops.VMINPS, X86Ops.VMINPD,
-                X86Ops.VCVTSI2SS, X86Ops.VCVTSI2SD, X86Ops.VCVTSS2SD, X86Ops.VCVTSD2SS, X86Ops.VUCOMISS, X86Ops.VUCOMISD, X86Ops.IDIV,
+                X86Ops.VCVTSI2SS, X86Ops.VCVTSI2SD, X86Ops.VCVTSS2SD, X86Ops.VCVTSD2SS, X86Ops.VUCOMISS, X86Ops.VUCOMISD, X86Ops.IDIV, X86Ops.DIV,
                 X86Ops.VSHUFPD}
 
   # X86Ops whose third src can read from memory NOTE: these are TwoAddress so the third src is actually the second
@@ -264,7 +264,7 @@ def vshufps(x:UOp) -> UOp|None:
 # vshufpd xmm2, xmm0, xmm1, imm
 # for 128 bit xmm2 selects its lower 64 bits from xmm0 and its upper 64 bits from xmm1 according to imm
 # for 256 bit ymm2 also selects its upper 128 bits from the upper 128 bits of ymm0 and ymm1 following the same constraint
-def vshufpd(x:UOp) -> UOp:
+def vshufpd(x:UOp) -> UOp|None:
   a, b = base(x, 0), base(x, 1)
   if lane(x, 0) > 1 or lane(x, 1) > 1: return None
   if len(x.src) == 4 and not (a is base(x, 2) and b is base(x, 3) and lane(x, 2) > 1 and lane(x, 3) > 1): return None
@@ -296,27 +296,23 @@ def vpbroadcast(ctx:IselContext, x:UOp, y:UOp) -> UOp:
   y = y if y.dtype.itemsize > 1 else y.cast(dtypes.int16)
   return n.replace(src=(y.bitcast({2:dtypes.float16, 4:dtypes.float32, 8:dtypes.float64}[y.dtype.itemsize]),))
 
-def div(ctx:IselContext, x:UOp):
-  # zero extend or move src[0] to x
-  move1 = x.ins(X86Ops.MOV, src=(x.src[0],), tag=ctx.vreg(RAX))
-  zero = x.ins(X86Ops.MOVi, src=(imm(min(dtypes.uint32, x.dtype), 0),), tag=ctx.vreg(RDX))
-  move2 = x.ins(X86Ops.MOV, src=(x.src[1],), tag=ctx.vreg(tuple(r for r in WGPR if r not in (RAX, RDX))))
-  div = x.ins(X86Ops.DIV, src=(move2, zero, move1), tag=ctx.vreg(RAX))
-  return x.ins(X86Ops.MOV, src=(div,))
-
-# TODO: you don't want to call ctx.vreg here because it can duplicate instructions, you instead assign the tuple of valid registers
-# for the instruction and a rewrite will add the vreg, this ensures a duplicate isn't created.
-# However vreg(RDX) is assigned here because IDIV also writes to RDX and regalloc isn't aware of that,
-# the correct fix is to model IDIV as multi output (RAX, RDX) so regalloc is aware of RDX being overwritten and rm vreg from here
+# we don't call ctx.vreg on the srcs to avoid duplicates, a rewrite will assign the tuple of valid registers to a vreg
 def idiv(ctx:IselContext, x:UOp):
-  # need to sign extend al to ah for 8bit idiv
-  divisor = UOp(Ops.INS, arg=X86Ops.MOVSX, dtype=dtypes.int16, src=(x.src[0],), tag=ctx.vreg(RAX)) if x.dtype is dtypes.int8 else x.src[0]
-  # need to sign extend rax to rdx for > 8bit idiv
-  ext_rdx = () if x.dtype is dtypes.int8 else (x.ins(X86Ops.SARi, src=(x.src[0], imm(dtypes.uint8, x.dtype.itemsize * 8 - 1)), tag=ctx.vreg(RDX)),)
-  # dividend can't be in rax or rdx
-  dividend = x.ins(X86Ops.MOV, src=(x.src[1],), tag=tuple(r for r in WGPR if r not in (RAX, RDX)))
-  idiv = x.ins(X86Ops.IDIV, src=(divisor, dividend) + ext_rdx, tag=(RAX,))
-  # this move "cleanses" the register constraint (rax) of idiv, this is because the constraint only applies on definition and not on the uses of idiv
+  op = X86Ops.DIV if x.dtype in dtypes.uints else X86Ops.IDIV
+  # for >8bit need to zero/sign extend rax to rdx
+  if x.dtype in dtypes.int8s: ext = []
+  elif x.dtype in dtypes.uints: ext = [x.ins(X86Ops.MOVi, src=(imm(min(dtypes.uint32, x.dtype), 0),), tag=(RDX,))]
+  else: ext = [x.ins(X86Ops.SARi, src=(x.src[0], imm(dtypes.uint8, x.dtype.itemsize * 8 - 1)), tag=(RDX,))]
+  # for 8bit need to zero/sign extend al to ah
+  if x.dtype is dtypes.uint8: dividend = UOp(Ops.INS, arg=X86Ops.MOVZX, dtype=dtypes.int16, src=(x.src[0],), tag=(RAX,))
+  elif x.dtype is dtypes.int8: dividend = UOp(Ops.INS, arg=X86Ops.MOVSX, dtype=dtypes.int16, src=(x.src[0],), tag=(RAX,))
+  else: dividend = x.ins(X86Ops.MOV, src=(x.src[0],), tag=(RAX,))
+  # divisor can't be in rax or rdx
+  divisor = x.ins(X86Ops.MOV, src=(x.src[1],), tag=tuple(r for r in WGPR if r not in (RAX, RDX)))
+  # for >8bit both rax and rdx are written to
+  defs = ctx.vreg(RAX) if x.dtype in dtypes.int8s else (ctx.vreg(RAX), ctx.vreg(RDX))
+  idiv = x.ins(op, src=(dividend, divisor) + tuple(ext), tag=defs)
+  # this move "cleanses" the register constraint (rax) of idiv as it only applies on definition and not on the uses of idiv
   return x.ins(X86Ops.MOV, src=(idiv,))
 
 def fold_address(x:UOp) -> tuple[UOp, UOp, UOp]:
@@ -331,10 +327,11 @@ def fold_address(x:UOp) -> tuple[UOp, UOp, UOp]:
 
 def abi(ctx:IselContext, x:UOp):
   i = ctx.func_args.index(x)
-  def _stack_arg(disp:int):
-    return x.ins(X86Ops.MOV, src=(def_reg(dtypes.uint64, RSP), UOp(Ops.NOOP), UOp(Ops.INS, arg=X86Ops.FRAME_INDEX, dtype=dtypes.int32, tag=disp)))
-  if sys.platform == "win32": return def_reg(x.dtype, (RCX, RDX, GPR[8], GPR[9])[i]) if i < 4 else _stack_arg((i-3)*8+32)
-  return def_reg(x.dtype, (RDI, RSI, RDX, RCX, GPR[8], GPR[9])[i]) if i < 6 else _stack_arg((i-5)*8)
+  def _stack_arg(disp:int): return (def_reg(dtypes.uint64, RSP), UOp(Ops.NOOP), UOp(Ops.INS, arg=X86Ops.FRAME_INDEX, dtype=dtypes.int32, tag=disp))
+  if sys.platform == "win32": src = (def_reg(x.dtype, (RCX, RDX, GPR[8], GPR[9])[i]),) if i < 4 else _stack_arg((i-3)*8+32)
+  else: src = (def_reg(x.dtype, (RDI, RSI, RDX, RCX, GPR[8], GPR[9])[i]),) if i < 6 else _stack_arg((i-5)*8)
+  # this move "cleanses" the abi register constraint
+  return x.ins(X86Ops.MOV, src=src)
 
 dts = dtypes.ints + (dtypes.bool, dtypes.float16, dtypes.float32, dtypes.float64)
 dt_16bit = tuple(dt.vec(l) for dt in dts for l in [2,1] if l*dt.itemsize == 2 and dt not in dtypes.int16s)
@@ -460,8 +457,7 @@ isel_matcher = PatternMatcher([
   (UPat(Ops.MUL, dtypes.int16s, name="x"), lambda x: x.ins(X86Ops.VPMULLW) if x.dtype.count > 1 else None),
   (UPat(Ops.MUL, dtypes.int32s, name="x"), lambda x: x.ins(X86Ops.VPMULLD) if x.dtype.count > 1 else None),
   # scalar int binary
-  ((UPat(dtype=dtypes.uints) // UPat()).named("x"), div),
-  ((UPat(dtype=dtypes.sints) // UPat()).named("x"), idiv),
+  ((UPat(dtype=dtypes.ints) // UPat()).named("x"), idiv),
   # scalar int binary with immediate
   (UPat.var("a", dtypes.ints) << UPat.cvar("c"), lambda a,c: a.ins(X86Ops.SHLi, src=(a, imm(dtypes.uint8, c.arg)))),
   (UPat.var("a", dtypes.uints) >> UPat.cvar("c"), lambda a,c: a.ins(X86Ops.SHRi, src=(a, imm(dtypes.uint8, c.arg)))),
@@ -559,10 +555,10 @@ isel_matcher = PatternMatcher([
    x.replace(src=x.src[:2] + fold_address(y.src[0]) + x.src[3:]) if x.arg in X86GroupOp.ReadMem3rd and is_foldable_load(ctx, x, y) else None),
   # allocate virtual register to X86Op with special constaints
   (UPat(Ops.INS, dtypes.ints+dtypes.floats+(dtypes.bool,), name="x"), lambda ctx,x:
-   x.replace(tag=ctx.vreg(x.tag)) if isinstance(x.tag, tuple) else None),
+   x.replace(tag=ctx.vreg(x.tag)) if isinstance(x.tag, tuple) and not x.tag[0]._cons else None),
   # allocate virtual register to X86Op without special constraints
   (UPat(Ops.INS, name="x"), lambda ctx,x: x.replace(tag=ctx.vreg(XMM if x.dtype in dtypes.floats or x.dtype.count > 1 else WGPR)) \
-   if not isinstance(x.tag, Register) and x.arg not in (X86Ops.IMM, X86Ops.FRAME_INDEX) and x.dtype != dtypes.void else None),
+   if not isinstance(x.tag, (Register, tuple)) and x.arg not in (X86Ops.IMM, X86Ops.FRAME_INDEX) and x.dtype != dtypes.void else None),
 ])
 
 # ***** post register allocation *****
@@ -591,13 +587,9 @@ post_regalloc_matcher = PatternMatcher([
   # rewrite END to ACC + 1 -> JUMP -> LABEL, also add the out of loop JUMP to the src so this becomes the jump target
   (UPat(Ops.END, name="x"), lambda ctx,x: (jmp:=UOp(Ops.INS, arg=X86Ops.JMP, tag=f".LOOP_{ctx.loop_label[x.src[1]]}"),
    [x.src[1].ins(X86Ops.ADDi, src=(imm(x.src[1].dtype, 1),)), jmp, UOp(Ops.INS, arg=X86Ops.LABEL, tag=f".LOOP_OUT_{ctx.loop_label[x.src[1]]}")])),
-  # TODO: rm this once multiple outputs are supported
-  # fixup div, zero rdx again because scheduling constraint isn't being respected
-  (UPat(Ops.INS, arg=X86Ops.DIV, name="x"), lambda x:
-   (nx:=x.replace(src=x.src[:1]), [x.ins(X86Ops.MOVi, src=(imm(min(dtypes.uint32, x.dtype), 0),), tag=RDX), nx])),
   # rewrite two address instructions to two address form, if reused src wasn't coalesced insert a move
   (UPat(Ops.INS, name="x"), lambda ctx,x: (nx:=x.replace(src=x.src[1:]),
-   [ctx.ren.assign(x.src[0], x.tag), nx] if x.tag != x.src[0].tag else [nx]) if x.arg in X86GroupOp.TwoAddress else None),
+   [ctx.ren.assign(x.src[0], x.reg), nx] if x.reg != x.src[0].reg else [nx]) if x.arg in X86GroupOp.TwoAddress else None),
 ])
 
 # ***** X86 spec *****
@@ -611,87 +603,89 @@ isa_spec = PatternMatcher([
 # ***** X86 instruction encoding *****
 
 def encode(x:UOp, opc:int, reg:int|None=None, pp:int=0, sel:int=0, we:int=0) -> bytes|None:
+  def _encode(reg_uop:UOp|None, rm_uop:UOp, idx_uop:UOp|None=None, disp_uop:UOp|None=None, vvvv_uop:UOp|None=None, imm_uop:UOp|None=None) -> bytes:
+    nonlocal reg, opc
+    # get the encoding values of the different fields
+    reg = cast(int, cast(Register, reg_uop.reg).index if reg_uop is not None else reg)
+    rm = cast(Register, rm_uop.reg).index
+    idx = cast(Register, idx_uop.reg).index if idx_uop is not None and idx_uop.reg is not None else 4
+    rm_sz = 8 if isinstance(rm_uop.dtype, PtrDType) and disp_uop is None else rm_uop.dtype.itemsize
+    reg_sz = (reg_uop.dtype.itemsize if not isinstance(reg_uop.dtype, PtrDType) else 8) if reg_uop is not None else 0
+    sz = reg_sz or rm_sz
+
+    # encode instruction
+    inst = bytes([])
+    assert 0 <= reg <= 15 and 0 <= idx <= 15 and 0 <= rm <= 15
+    # r extends reg field, x extends index field, b extends rm or base field
+    r, _x, b = reg >> 3, idx >> 3, rm >> 3
+    if sel: # VEX bytes
+      vvvv = cast(Register, vvvv_uop.reg).index if vvvv_uop is not None else 0
+      l = (max(reg_sz, rm_sz) > 16) & 0b1
+      if sel == 1 and _x == b == we == 0: inst += bytes([0xC5, (~r & 0b1) << 7 | (~vvvv & 0b1111) << 3 | l << 2 | pp])
+      else: inst += bytes([0xC4, (~r & 0b1) << 7 | (~_x & 0b1) << 6 | (~b & 0b1) << 5 | sel, we << 7 | (~vvvv & 0b1111) << 3 | l << 2 | pp])
+    else: # optional PREFIX and REX bytes
+      # PREFIX byte signaling 16 bit variant of instruction
+      if sz == 2: inst += bytes([0x66])
+      # bit signaling 64 bit variant of instruction
+      w = sz == 8
+      # REX byte is required when 64 bit or an extended reg is used (index 8 - 15) or lower 8 bits of (rsp, rbp, rsi, rdi) are accessed
+      if w | r | _x | b | (reg_sz == 1 & reg >> 2) | (rm_sz == 1 & rm >> 2): inst += bytes([0b0100 << 4 | w << 3 | r << 2 | _x << 1 | b])
+      # legacy 8bit opcode is 1 less than 16-64bit variants
+      if (rm_sz == 1 or reg_sz == 1) and x.arg not in X86GroupOp.ReadFlags: opc -= 1
+    # OPCODE byte
+    inst += opc.to_bytes((opc.bit_length() + 7) // 8, 'big')
+    # MODRM byte
+    # now we only care about the lower 3 bits
+    idx, rm, reg = idx & 0b111, rm & 0b111, reg & 0b111
+    # 0b00 -- signals memory access with no displacement
+    # 0b01 -- signals memory access with 8bit displacement
+    # 0b10 -- signals memory access with 32bit displacement
+    # 0b11 -- signals no memory access
+    if disp_uop is not None:
+      assert disp_uop.dtype in (dtypes.int8, dtypes.int32), "displacement can only be 1 or 4 byte signed int"
+      # rbp/r13 always require a displacement
+      if disp_uop.tag != 0 or rm == 0b101: mod = 0b01 if disp_uop.dtype.itemsize == 1 else 0b10
+      else: mod = 0b00
+    else: mod = 0b11
+    # x 0b0 and idx 0b100 means rsp which means no index exists
+    # rm 0b100 (rsp/r12) signals a sib byte is required, rm then is encoded in the base field of SIB
+    _rm = rm if idx == 0b100 and _x == 0b0 else 0b100
+    inst += bytes([mod << 6 | reg << 3 | _rm])
+    # SIB byte
+    if _rm == 0b100 and mod != 0b11:
+      scale = {1: 0b00, 2: 0b01, 4: 0b10, 8: 0b11}[1 if idx == 0b100 and _x == 0b0 else rm_sz]
+      inst += bytes([scale << 6 | idx << 3 | rm])
+    # DISP byte
+    if mod == 0b01 or mod == 0b10:
+      assert disp_uop is not None
+      inst += struct.pack(unwrap(disp_uop.dtype.fmt), disp_uop.tag)
+    # IMM byte
+    if imm_uop is not None:
+      if isinstance(imm_uop.tag, int): inst += struct.pack(unwrap(imm_uop.dtype.fmt), imm_uop.tag)
+      elif isinstance(imm_uop.reg, Register): inst += bytes([(imm_uop.reg.index & 0b1111) << 4 | 0b0000])
+    return inst
+
+  # get the encoding structure of the uop
   # when a uop writes to memory it takes the form of a store, dtype is void, no definition
   address:tuple[UOp|None, ...]
   if x.arg in X86GroupOp.WriteMem:
-    if len(x.src) > 3: address, rest = x.src[:3], list(x.src[3:])
-    else: address, rest = (x, None, None), list(x.src)
+    if len(x.src) > 3: address, rest = x.src[:3], x.src[3:]
+    else: address, rest = (x, None, None), x.src
+    return _encode(rest[0], *address, *(None, *rest[1:])) if reg is None else _encode(None, *address, *(None, *rest[:1]))
 
-  elif x.arg in X86GroupOp.Rm1st:
-    if len(x.src) > 2: address, rest = x.src[:3], list(x.src[3:])
-    else: address, rest = (x.src[0], None, None), list(x.src[1:])
-    if x.dtype is not dtypes.void: rest = [x] + rest
+  if x.arg in X86GroupOp.Rm1st:
+    if len(x.src) > 2: address, rest = x.src[:3], x.src[3:]
+    else: address, rest = (x.src[0], None, None), x.src[1:]
+    imm_uop = rest[:1] if rest and isinstance(rest[0].tag, int) else (None,)
+    return _encode(x, *address, *(None, *imm_uop)) if reg is None else _encode(None, *address, *(x if sel else None, *imm_uop))
 
-  elif x.arg in X86GroupOp.Rm2nd:
-    if len(x.src) > 3: address, rest = x.src[1:4], list(x.src[:1] + x.src[4:])
-    else: address, rest = (x.src[1], None, None), list(x.src[:1] + x.src[2:])
-    if x.dtype is not dtypes.void: rest = [x] + rest
+  if x.arg in X86GroupOp.Rm2nd:
+    if len(x.src) > 3: address, rest = x.src[1:4], x.src[:1] + x.src[4:]
+    else: address, rest = (x.src[1], None, None), x.src[:1] + x.src[2:]
+    # cmp/vucomiss reg, rm don't define a new register
+    return _encode(x, *address, *rest) if x.dtype is not dtypes.void else _encode(rest[0], *address)
 
-  else: return None
-
-  # get the encoding values of the different fields
-  reg_sz = (rest[0].dtype.itemsize if not isinstance(rest[0].dtype, PtrDType) else 8) if reg is None else 0
-  reg = cast(Register, rest.pop(0).tag).index if reg is None else reg
-  rm = cast(Register, address[0].tag).index
-  idx = cast(Register, address[1].tag).index if address[1] is not None and address[1].tag is not None else 4
-  disp_uop = address[2]
-  # TODO: another reason to get rid of ptrs, if we access memory the size should be in scale uop otherwise size is in rm
-  rm_sz = 8 if isinstance(address[0].dtype, PtrDType) and disp_uop is None else address[0].dtype.itemsize
-
-  # encode instruction
-  inst = bytes([])
-  # PREFIX byte
-  # there's other uses for this like atomic operations but setting 16bit variant of legacy op is currently the only one
-  if sel == 0 and (reg_sz == 2 if reg_sz != 0 else rm_sz == 2): inst += bytes([0x66])
-  # VEX bytes
-  assert 0 <= reg <= 15 and 0 <= idx <= 15 and 0 <= rm <= 15
-  # r extends reg field, x extends index field, b extends rm or base field
-  r, _x, b = reg >> 3, idx >> 3, rm >> 3
-  if sel:
-    vvvv = cast(Register, rest.pop(0).tag).index if rest and isinstance(rest[0].tag, Register) else 0
-    l = (max(reg_sz, rm_sz) > 16) & 0b1
-    if sel == 1 and _x == b == we == 0: inst += bytes([0xC5, (~r & 0b1) << 7 | (~vvvv & 0b1111) << 3 | l << 2 | pp])
-    else: inst += bytes([0xC4, (~r & 0b1) << 7 | (~_x & 0b1) << 6 | (~b & 0b1) << 5 | sel, we << 7 | (~vvvv & 0b1111) << 3 | l << 2 | pp])
-  # REX byte
-  else:
-    # bit signaling 64 bit variant of instruction
-    w = reg_sz == 8 if reg_sz != 0 else rm_sz == 8
-    # rex prefix is required when an extended reg is used (index 8 - 15) or lower 8 bits of (rsp, rbp, rsi, rdi) are accessed
-    if w | r | _x | b | (reg_sz == 1 & reg >> 2) | (rm_sz == 1 & rm >> 2): inst += bytes([0b0100 << 4 | w << 3 | r << 2 | _x << 1 | b])
-  # OPCODE byte
-  # legacy 8bit opcodes are 1 less than 16-64bit versions, with these exceptions
-  real_opc = opc-1 if (rm_sz == 1 or reg_sz == 1) and not sel and x.arg not in {X86Ops.SETB, X86Ops.SETE, X86Ops.SETL, X86Ops.SETNE, X86Ops.LEA} else opc
-  inst += real_opc.to_bytes((real_opc.bit_length() + 7) // 8, 'big')
-  # MODRM byte
-  # now we only care about the lower 3 bits
-  idx, rm, reg = idx & 0b111, rm & 0b111, reg & 0b111
-  # 0b00 -- signals memory access with no displacement
-  # 0b01 -- signals memory access with 8bit displacement
-  # 0b10 -- signals memory access with 32bit displacement
-  # 0b11 -- signals no memory access
-  if disp_uop is not None:
-    assert disp_uop.dtype in (dtypes.int8, dtypes.int32), "displacement can only be 1 or 4 byte signed int"
-    # rbp/r13 always require a displacement
-    if disp_uop.tag != 0 or rm == 0b101: mod = 0b01 if disp_uop.dtype.itemsize == 1 else 0b10
-    else: mod = 0b00
-  else: mod = 0b11
-  # x 0b0 and idx 0b100 means rsp which means no index exists
-  # rm 0b100 (rsp/r12) signals a sib byte is required, rm then is encoded in the base field of SIB
-  _rm = rm if idx == 0b100 and _x == 0b0 else 0b100
-  inst += bytes([mod << 6 | reg << 3 | _rm])
-  # SIB byte
-  if _rm == 0b100 and mod != 0b11:
-    scale = {1: 0b00, 2: 0b01, 4: 0b10, 8: 0b11}[1 if idx == 0b100 and _x == 0b0 else rm_sz]
-    inst += bytes([scale << 6 | idx << 3 | rm])
-  # DISP byte
-  if mod == 0b01 or mod == 0b10:
-    assert disp_uop is not None
-    inst += struct.pack(unwrap(disp_uop.dtype.fmt), disp_uop.tag)
-  # IMM byte
-  if rest:
-    if isinstance(rest[0].tag, int): inst += struct.pack(unwrap(rest[0].dtype.fmt), rest[0].tag)
-    elif isinstance(rest[0].tag, Register) and sel: inst += bytes([(rest[0].tag.index & 0b1111) << 4 | 0b0000])
-  return inst
+  return None
 
 # https://www.felixcloutier.com/x86/
 # NOTE: LEGACY prefix == VEX prefix
@@ -722,10 +716,10 @@ encodings = {
   X86Ops.VCVTDQ2PS: lambda x: encode(x, 0x5B, pp=0, sel=1), X86Ops.VCVTDQ2PD: lambda x: encode(x, 0xE6, pp=2, sel=1),
   X86Ops.VCVTPS2PD: lambda x: encode(x, 0x5A, pp=0, sel=1), X86Ops.VCVTPD2PS: lambda x: encode(x, 0x5A, pp=1, sel=1),
   X86Ops.VCVTTPS2DQ: lambda x: encode(x, 0x5B, pp=2, sel=1), X86Ops.VCVTTPD2DQ: lambda x: encode(x, 0xE6, pp=1, sel=1),
-  X86Ops.VCVTSI2SS: lambda x: encode(x, 0x2A, pp=2, sel=1, we=x.src[1].dtype.base is dtypes.int64),
-  X86Ops.VCVTSI2SD: lambda x: encode(x, 0x2A, pp=3, sel=1, we=x.src[1].dtype.base is dtypes.int64),
-  X86Ops.VCVTTSS2SI: lambda x: encode(x, 0x2C, pp=2, sel=1, we=x.dtype in dtypes.int64s),
-  X86Ops.VCVTTSD2SI: lambda x: encode(x, 0x2C, pp=3, sel=1, we=x.dtype in dtypes.int64s),
+  X86Ops.VCVTSI2SS: lambda x: encode(x, 0x2A, pp=2, sel=1, we=x.src[1].dtype.itemsize == 8),
+  X86Ops.VCVTSI2SD: lambda x: encode(x, 0x2A, pp=3, sel=1, we=x.src[1].dtype.itemsize == 8),
+  X86Ops.VCVTTSS2SI: lambda x: encode(x, 0x2C, pp=2, sel=1, we=x.dtype.itemsize == 8),
+  X86Ops.VCVTTSD2SI: lambda x: encode(x, 0x2C, pp=3, sel=1, we=x.dtype.itemsize == 8),
   # int division
   X86Ops.IDIV: lambda x: encode(x, 0xF7, reg=7), X86Ops.DIV: lambda x: encode(x, 0xF7, reg=6),
   # scalar int binary
@@ -797,12 +791,12 @@ encodings = {
   X86Ops.VPEXTRB: lambda x: encode(x, 0x14, pp=1, sel=3), X86Ops.VPEXTRW: lambda x: encode(x, 0x15, pp=1, sel=3),
   X86Ops.VPEXTRD: lambda x: encode(x, 0x16, pp=1, sel=3), X86Ops.VPEXTRQ: lambda x: encode(x, 0x16, pp=1, sel=3, we=1),
   # jumps are encoded with a placeholder which gets patched later once the real offset is known
-  X86Ops.JE: lambda x: bytes([0x0F, 0x84]) + int(0).to_bytes(4, 'little', signed=True),
-  X86Ops.JNE: lambda x: bytes([0x0F, 0x85]) + int(0).to_bytes(4, 'little', signed=True),
-  X86Ops.JL: lambda x: bytes([0x0F, 0x8C]) + int(0).to_bytes(4, 'little', signed=True),
-  X86Ops.JB: lambda x: bytes([0x0F, 0x82]) + int(0).to_bytes(4, 'little', signed=True),
-  X86Ops.JGE: lambda x: bytes([0x0F, 0x8D]) + int(0).to_bytes(4, 'little', signed=True),
-  X86Ops.JMP: lambda x: bytes([0xE9]) + int(0).to_bytes(4, 'little', signed=True),
+  X86Ops.JE: lambda x: bytes([0x0F, 0x84]) + int(0).to_bytes(4),
+  X86Ops.JNE: lambda x: bytes([0x0F, 0x85]) + int(0).to_bytes(4),
+  X86Ops.JL: lambda x: bytes([0x0F, 0x8C]) + int(0).to_bytes(4),
+  X86Ops.JB: lambda x: bytes([0x0F, 0x82]) + int(0).to_bytes(4),
+  X86Ops.JGE: lambda x: bytes([0x0F, 0x8D]) + int(0).to_bytes(4),
+  X86Ops.JMP: lambda x: bytes([0xE9]) + int(0).to_bytes(4),
   X86Ops.RET: lambda x: bytes([0xC3]),
 }
 
@@ -844,9 +838,10 @@ class X86Renderer(ISARenderer):
     def _format_op(x:UOp) -> str: return f"    {(o[7:-1] if (o:=str(x.arg))[-1] in ('i', 'm') else o[7:]).lower():7s}"
     def _format_operands(x:UOp) -> str:
       def _format(src:tuple[UOp, ...]) -> list[str]:
-        return [reg_strs[o].get(s.dtype.itemsize, o) if (o:=str(s.tag)) in reg_strs else o for s in src if s.tag is not None]
+        return [reg_strs[o].get(s.dtype.itemsize if not isinstance(s.dtype, PtrDType) else 8, o) if \
+                (o:=str(s.reg)) in reg_strs else o for s in src if s.reg is not None]
       def _mem_adress(base:UOp, idx:UOp, disp:UOp) -> str:
-        return f"[{base.tag}" + (f" + {idx.tag}*{base.dtype.itemsize}" if idx.tag else "") + (f" + {disp.tag}" if disp.tag else "") + "]"
+        return f"[{base.reg}" + (f" + {idx.reg}*{base.dtype.itemsize}" if idx.reg else "") + (f" + {disp.tag}" if disp.tag else "") + "]"
 
       if len(x.src) > 3 and x.arg in X86GroupOp.WriteMem: return ", ".join([_mem_adress(*x.src[:3])] + _format(x.src[3:]))
       elif len(x.src) > 2 and x.arg in X86GroupOp.Rm1st: return ", ".join(_format((x,)) + [_mem_adress(*x.src[:3])] + _format(x.src[3:]))
@@ -855,7 +850,7 @@ class X86Renderer(ISARenderer):
 
     asm = [f".{function_name}:"]
     for u in uops:
-      if u.op in (Ops.GROUP, Ops.NOOP, Ops.AFTER, Ops.BARRIER): continue
+      if u.op is not Ops.INS: continue
       if u.arg in (X86Ops.IMM, X86Ops.DEFINE_REG): continue
       if u.arg is X86Ops.LABEL: asm.append(f"{str(u.tag)}:")
       elif u.arg is X86Ops.RET: asm.append(_format_op(u))
@@ -868,7 +863,7 @@ class X86Renderer(ISARenderer):
     jumps: dict[UOp, int] = {}
     binary = bytearray()
     for u in uops:
-      if u.op in (Ops.GROUP, Ops.NOOP, Ops.AFTER, Ops.BARRIER): continue
+      if u.op is not Ops.INS: continue
       if u.arg in (X86Ops.IMM, X86Ops.DEFINE_REG): continue
       if u.arg is X86Ops.LABEL:
         targets[u.tag] = len(binary)

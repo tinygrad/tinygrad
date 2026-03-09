@@ -3,7 +3,7 @@ import itertools, heapq
 from collections import defaultdict
 from dataclasses import dataclass, field
 from tinygrad.renderer import Renderer
-from tinygrad.uop.ops import PatternMatcher, graph_rewrite, UOp, UPat, Ops
+from tinygrad.uop.ops import PatternMatcher, graph_rewrite, UOp, Ops
 from tinygrad.codegen import line_rewrite
 from tinygrad.uop.spec import type_verify
 from tinygrad.helpers import SPEC, DEBUG, prod
@@ -12,8 +12,9 @@ from tinygrad.helpers import SPEC, DEBUG, prod
 class Register:
   name: str
   index: int
-  cons: tuple[Register, ...] = field(default_factory=tuple)
-
+  _cons: tuple[Register, ...] = field(default_factory=tuple)
+  @property
+  def cons(self): return self._cons if self._cons else (self,)
   def __repr__(self): return self.name
 
 class IselContext:
@@ -29,13 +30,8 @@ class IselContext:
     self.stack_size += amt
     return ret
 
-  def vreg(self, cons:tuple[Register, ...]|Register|None=None):
-    return Register(f"v{next(self.reg_n)}", 0, cons=cons if isinstance(cons, tuple) else (cons,) if cons is not None else ())
-
-isel_fixup = PatternMatcher([
-  # NOOP / AFTER have the same register as first src
-  (UPat((Ops.NOOP, Ops.AFTER), name="x"), lambda x: x.replace(tag=x.src[0].tag) if x.src and x.tag is None else None),
-])
+  def vreg(self, cons:tuple[Register, ...]|Register):
+    return Register(f"v{next(self.reg_n)}", 0, _cons=cons if isinstance(cons, tuple) else (cons,))
 
 # TODO: this will eventually be a proper scheduler
 def isa_linearize(sink:UOp) -> list[UOp]:
@@ -124,17 +120,14 @@ class ISARenderer(Renderer):
   def asm(self, uops:list[UOp], function_name:str) -> str: raise NotImplementedError("arch specific")
   # TODO: these should go with the other rewrites in codegen
   def lower(self, sink:UOp):
-    from tinygrad.codegen.late.regalloc import RegallocContext, pm_regalloc, pm_insert_spills
+    from tinygrad.codegen.late.regalloc import LinearScanRegallocContext, pm_regalloc_rewrite
     function_name = sink.arg.function_name
     sink = graph_rewrite(sink, self.pre_isel_matcher, name="pre instruction selection", bottom_up=True)
     isel_ctx = IselContext(sink)
     sink = graph_rewrite(sink, self.isel_matcher, ctx=isel_ctx, name="instruction selection", bottom_up=True)
-    # TODO: is there a way to remove this?
-    sink = graph_rewrite(sink, isel_fixup, name="instruction selection fixup")
     lst = isa_linearize(sink)
-    regalloc_ctx = RegallocContext(lst, self, isel_ctx.stack_size)
-    lst = line_rewrite(lst, pm_regalloc, regalloc_ctx)
-    lst = line_rewrite(lst, pm_insert_spills, regalloc_ctx)
+    regalloc_ctx = LinearScanRegallocContext(lst, self, isel_ctx.stack_size)
+    lst = line_rewrite(lst, pm_regalloc_rewrite, regalloc_ctx)
     lst = line_rewrite(lst, self.post_regalloc_matcher, regalloc_ctx)
     if DEBUG >= 4: print(self.asm(lst, function_name))
     if SPEC: type_verify(lst, self.isa_spec)
