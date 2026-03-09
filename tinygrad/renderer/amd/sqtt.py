@@ -187,10 +187,10 @@ class TS_DELTA_SHORT(PacketType):
 class TS_DELTA_OR_MARK(PacketType):
   encoding = bits[6:0] == 0b0000001
   delta = bits[47:12]
-  pl = bits[8:8]
-  rt = bits[9:9]
+  bit8 = bits[8:8]
+  bit9 = bits[9:9]
   @property
-  def is_marker(self) -> bool: return bool(self.rt and not self.pl)
+  def is_marker(self) -> bool: return bool(self.bit9 and not self.bit8)
 
 class TS_DELTA_OR_MARK_RDNA4(PacketType):  # Layout 4: 48->64 bits
   encoding = bits[6:0] == 0b0000001

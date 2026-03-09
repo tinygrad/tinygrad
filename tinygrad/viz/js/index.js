@@ -379,18 +379,12 @@ async function renderProfiler(path, opts) {
         const e = {name:strings[u32()], ref:optional(u32()), key:optional(u32()), st:u32(), dur:f32(), info:strings[u32()] || null};
         // find a free level to put the event
         let depth = 0;
-        if (opts.levelKey != null) { 
-          depth = opts.levelKey(e); levels[depth] = 0;
-          console.log(depth)
-        }
-        else {
-          depth = levels.findIndex(levelEt => e.st >= levelEt);
-          const et = e.st+Math.trunc(e.dur);
-          if (depth === -1) {
-            depth = levels.length;
-            levels.push(et);
-          } else levels[depth] = et;
-        }
+        depth = levels.findIndex(levelEt => e.st >= levelEt);
+        const et = e.st+Math.trunc(e.dur);
+        if (depth === -1) {
+          depth = levels.length;
+          levels.push(et);
+        } else levels[depth] = et;
         if (depth === 0 || opts.colorByName) colorKey = e.name.split(" ")[0];
         if (!colorMap.has(colorKey)) {
           const color = typeof colors === "function" ? colors(colorKey)
@@ -901,8 +895,8 @@ async function main() {
     }
     // timeline with cycles on the x axis
     if (ret instanceof ArrayBuffer) {
-      pkts = step.name.includes("PKTS")
-      return renderProfiler(ckey, {unit:"clk", heightScale:0.5, hideLabels:true, levelKey:pkts ? (e) => parseInt(e.name.split(" ")[1].split(":")[1]) : null, colorByName:pkts});
+      const pkts = step.name.includes("PKTS");
+      return renderProfiler(ckey, {unit:"clk", heightScale:0.5, hideLabels:true, colorByName:pkts});
     }
     metadata.replaceChildren(...((ret.metadata ?? []).map((m) => {
       return tabulate(m.map((e) => [e.label.trim(), typeof e.value === "string" ? e.value : formatUnit(e.value)]));
