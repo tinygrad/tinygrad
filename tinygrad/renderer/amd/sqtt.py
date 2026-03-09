@@ -193,12 +193,10 @@ class TS_DELTA_OR_MARK(PacketType):
   def is_marker(self) -> bool: return bool(self.rt and not self.pl)
 
 class TS_DELTA_OR_MARK_RDNA4(TS_DELTA_OR_MARK):
-  encoding = bits[6:0] == 0b0000001
   delta = bits[63:12]
   rt = bits[7:7]
   pl = bits[8:8]
   tl = bits[9:9]
-  def is_marker(self) -> bool: return bool(self.rt and not self.pl)
 
 class TS_DELTA_S5_W2(PacketType):
   encoding = bits[4:0] == 0b11100
