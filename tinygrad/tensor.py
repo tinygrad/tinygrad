@@ -3175,7 +3175,10 @@ class Tensor(OpMixin):
     """
     ref_frames = [x.contiguous() for x in ref_frames or []]
     assert isinstance(frame_pos, Variable), "frame_pos must be a Variable"
-    return self.contiguous()._apply_uop(UOp.encdec, state.contiguous(), *ref_frames, extra_args=(frame_pos,), arg=(shape,))
+    srcs = (out:=Tensor.empty(*shape, device=self.device, dtype=self.dtype), self.contiguous(), state.contiguous(), *ref_frames)
+    define_var = frame_pos.src[0] if frame_pos.op is Ops.BIND else frame_pos
+    fn = UOp(Ops.CUSTOM_FUNCTION, dtypes.void, src=(define_var, *[UOp.const(dtypes.int, s) for s in shape]), arg="encdec")
+    return Tensor(out.uop.after(fn.call(*[s.uop for s in srcs], frame_pos)), device=self.device)
 
   # ***** functional nn ops *****
 
