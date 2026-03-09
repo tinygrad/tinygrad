@@ -1,4 +1,4 @@
-import functools
+import functools, itertools
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp
 from tinygrad.dtype import dtypes
 from tinygrad.helpers import cdiv, cmod, CORRECT_DIVMOD_FOLDING, unwrap
@@ -22,6 +22,10 @@ def fold_divmod_general(d: UOp, correct_divmod_folding: bool) -> UOp|None:
   # ** Constant Denominator Rules **
   # these rules strictly require y to be a scalar constant > 0
   if y.op is Ops.CONST and (c := y.arg) > 0:
+    # canonicalize_mod_div: (x%(d*k))//d -> (x//d)%k, puts nested div/mod in div-first canonical form for recombine
+    if d.op is Ops.IDIV and x.op is Ops.MOD and x.src[1].op is Ops.CONST and x.vmin >= 0 and x.src[1].arg % c == 0:
+      return x.src[0] // y % x.ufix(x.src[1].arg // c)
+
     # remove_nested_mod: remove nested mod in case the inner mod is a multiple of the outer mod, example: (a%4 + b)%2 -> (a+b)%2
     if d.op is Ops.MOD and x.vmin >= 0:
       new_xs, changed = [], False
@@ -44,10 +48,12 @@ def fold_divmod_general(d: UOp, correct_divmod_folding: bool) -> UOp|None:
 
     # fold_divmod_congruence: fold if a is congruent to an expression whose range is between 0 and c
     if not (x.vmin<0 and correct_divmod_folding):
-      rems = [min((r:=f%c), r-c, key=abs) for f in factors]
-      if (rem:=sum(r*v for r,v in zip(rems,terms))+const%c).vmin//c==rem.vmax//c:
-        if d.op is Ops.MOD: return rem - rem.vmin//c*c
-        return sum((f-r)//c * v for f,r,v in zip(factors,rems,terms)) + (const-const%c+rem.vmin//c*c)//c
+      # when f%c == c//2, abs(r) == abs(r-c) is a tie, try both signs since either may fit in one period
+      rem_choices = [((r:=f%c), r-c) if (r:=f%c)*2 == c else (min(r, r-c, key=abs),) for f in factors]
+      for rems in itertools.product(*rem_choices):
+        if (rem:=sum(r*v for r,v in zip(rems,terms))+const%c).vmin//c==rem.vmax//c:
+          if d.op is Ops.MOD: return rem - rem.vmin//c*c
+          return sum((f-r)//c * v for f,r,v in zip(factors,rems,terms)) + (const-const%c+rem.vmin//c*c)//c
 
     # gcd_with_remainder: factor out common gcd from numerator
     # Note: this rule uses uops_no_const to exclude the additive constant from the GCD calculation
@@ -59,12 +65,20 @@ def fold_divmod_general(d: UOp, correct_divmod_folding: bool) -> UOp|None:
           ret = new_x.alu(d.op, x.ufix(c//gcd.arg))
           return ret*gcd + const%gcd.arg if d.op is Ops.MOD else ret+const//c
 
-    # nest_div_by_smallest_factor: try and nest the div and see if it allows the numerator to be simplified
-    if d.op is Ops.IDIV and x.vmin >= 0:
-      div = min([c] + [abs(f) for u, f in zip(uops_no_const, factors) if u.op not in (Ops.CONST, Ops.VCONST) and abs(f) > 1 and (c%f)==0])
-      # NOTE: this is recursive!
-      if div < c and (newxs := fold_divmod_general(x//div, correct_divmod_folding)) is not None and newxs.vmin >= 0:
-        return newxs // (c // div)
+    # nest_by_factor: x//c -> (x//f)//(c//f), x%c -> (x//f%(c//f))*f + b where b=x%f
+    if x.vmin >= 0:
+      results = []
+      for div in {abs(f) for u, f in zip(uops_no_const, factors) if u.op not in (Ops.CONST, Ops.VCONST) and 1 < abs(f) < c and (c%f)==0}:
+        if (newxs := fold_divmod_general(x//div, correct_divmod_folding)) is not None and newxs.vmin >= 0:
+          if d.op is Ops.IDIV:
+            results.append((len(newxs.backward_slice), newxs // (c // div)))
+          else:
+            b_parts = [f%div*t for f, t in zip(factors, terms) if f%div]
+            if const % div: b_parts.append(x.const_like(const % div))
+            b = UOp.sum(*b_parts) if b_parts else x.const_like(0)
+            if 0 <= b.vmin and b.vmax < div:
+              results.append((len((r:=(newxs % x.ufix(c//div))*div + b).backward_slice), r))
+      if results: return min(results, key=lambda r: r[0])[1]
 
   # ** Variable Denominator / Fallback Rules **
   # These rules apply to variables OR constants that failed the checks above.
@@ -82,9 +96,9 @@ def fold_divmod_general(d: UOp, correct_divmod_folding: bool) -> UOp|None:
   quo, rem = [], []
   for u in all_uops:
     if (q:=u.divide_exact(y)) is not None: quo.append(q)
-    elif d.op is Ops.MOD and y.op is Ops.CONST and (c:=u.const_factor())%y.arg!=c:
+    elif y.op is Ops.CONST and (c:=u.const_factor())%y.arg!=c:
       rem.append(u.divides(c)*(c%y.arg))
-      quo.append(u.const_like(0))
+      quo.append(u.divides(c)*(c//y.arg) if d.op is Ops.IDIV else u.const_like(0))
     else: rem.append(u)
 
   if not quo: return None

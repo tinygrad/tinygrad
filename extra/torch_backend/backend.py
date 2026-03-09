@@ -505,7 +505,9 @@ tiny_backend_out = {**{f"aten.{x}.out":getattr(Tensor,x) for x in simple_tensor_
   "aten.lt.Tensor_out": Tensor.__lt__, "aten.lt.Scalar_out": Tensor.__lt__,
   "aten.le.Tensor_out": Tensor.__le__, "aten.le.Scalar_out": Tensor.__le__,
   "aten.clamp_max.Tensor_out": lambda input,max_: input.clamp(max_=max_),
+  "aten.clamp_max.out": lambda input,max_: input.clamp(max_=max_),
   "aten.clamp_min.Tensor_out": lambda input,min_: input.clamp(min_=min_),
+  "aten.clamp_min.out": lambda input,min_: input.clamp(min_=min_),
   "aten.fmod.Tensor_out": lambda input,other: input-input.div(other, rounding_mode="trunc")*other,
   # TODO: this might result in overflow issues
   "aten.round.decimals_out": lambda self,decimals: (self*10**decimals).round()/10**decimals,

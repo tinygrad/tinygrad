@@ -48,7 +48,7 @@ uops_colors = {Ops.LOAD: "#ffc0c0", Ops.STORE: "#87CEEB", Ops.CONST: "#e0e0e0", 
                Ops.RANGE: "#c8a0e0", Ops.ASSIGN: "#909090", Ops.BARRIER: "#ff8080", Ops.IF: "#c8b0c0", Ops.SPECIAL: "#c0c0ff",
                Ops.INDEX: "#cef263", Ops.WMMA: "#efefc0", Ops.MULTI: "#f6ccff", Ops.INS: "#eec4ff",
                **{x:"#D8F9E4" for x in GroupOp.Movement}, **{x:"#ffffc0" for x in GroupOp.ALU}, Ops.THREEFRY:"#ffff80",
-               Ops.BUFFER_VIEW: "#E5EAFF", Ops.BUFFER: "#B0BDFF", Ops.COPY: "#a040a0", Ops.ENCDEC: "#bf71b6",
+               Ops.BUFFER_VIEW: "#E5EAFF", Ops.BUFFER: "#B0BDFF", Ops.COPY: "#a040a0", Ops.CUSTOM_FUNCTION: "#bf71b6",
                Ops.CALL: "#00B7C8", Ops.PARAM: "#14686F", Ops.SOURCE: "#c0c0c0", Ops.LINEAR: "#7DF4FF", Ops.BINARY: "#404040",
                Ops.ALLREDUCE: "#ff40a0", Ops.MSELECT: "#d040a0", Ops.MSTACK: "#d040a0", Ops.CONTIGUOUS: "#FFC14D",
                Ops.BUFFERIZE: "#FF991C", Ops.REWRITE_ERROR: "#ff2e2e", Ops.AFTER: "#8A7866", Ops.END: "#524C46"}
@@ -71,10 +71,9 @@ def get_rewrites(t:RewriteTrace) -> list[dict]:
     steps = [create_step(s.name, ("/graph-rewrites", i, j), loc=s.loc, match_count=len(s.matches), code_line=printable(s.loc),
                          trace=k.tb if j==0 else None, depth=s.depth) for j,s in enumerate(v)]
     if (p:=get_prg_uop(i)) is not None:
-      _, __, lin, src, binary = p.src
-      steps.append(create_step("View UOp List", ("/uops", i, len(steps)), lin.src))
-      steps.append(create_step("View Source", ("/code", i, len(steps)), src.arg))
-      steps.append(create_step("View Disassembly", ("/asm", i, len(steps)), (k.ret, binary.arg)))
+      steps.append(create_step("View UOp List", ("/uops", i, len(steps))))
+      steps.append(create_step("View Source", ("/code", i, len(steps)), p.src[3].arg))
+      steps.append(create_step("View Disassembly", ("/asm", i, len(steps)), (k.ret, p.src[4].arg)))
     for key in k.keys: ref_map[key] = i
     ret.append({"name":k.display_name, "steps":steps})
   return ret
@@ -150,9 +149,10 @@ def uop_to_json(x:UOp) -> dict[int, dict]:
   return graph
 
 @functools.cache
-def _reconstruct(a:int):
+def _reconstruct(a:int, depth:int|None=None):
   op, dtype, src, arg, *rest = trace.uop_fields[a]
-  return UOp(op, dtype, tuple(_reconstruct(s) for s in src), arg, *rest)
+  if depth is not None and depth <= 0: return UOp(op, dtype, (), arg, *rest)
+  return UOp(op, dtype, tuple(_reconstruct(s, None if depth is None else depth-1) for s in src), arg, *rest)
 
 def get_full_rewrite(ctx:TrackedGraphRewrite) -> Generator[GraphRewriteDetails, None, None]:
   next_sink = _reconstruct(ctx.sink)
@@ -169,7 +169,7 @@ def get_full_rewrite(ctx:TrackedGraphRewrite) -> Generator[GraphRewriteDetails, 
 
 def get_prg_uop(i:int) -> UOp|None:
   s = next((s for s in trace.rewrites[i] if s.name == "View Program"), None)
-  return _reconstruct(s.sink) if s is not None else None
+  return _reconstruct(s.sink, depth=1) if s is not None else None
 
 # encoder helpers
 
@@ -227,6 +227,7 @@ def timeline_layout(dev_events:list[tuple[int, int, float, DevEvent]], start_ts:
       elif isinstance(e.name.ret, int):
         membw = e.name.ret / (dur * 1e-6)
         fmt.append(f"{membw*1e-9:.0f} GB/s" if membw < 1e13 else f"{membw*1e-12:.0f} TB/s")
+      elif e.name.tb: fmt.append("TB:"+json.dumps(e.name.tb))
     events.append(struct.pack("<IIIIfI", enum_str(name, scache), option(ref), option(key), rel_ts(st,start_ts), dur, enum_str("\n".join(fmt),scache)))
   return struct.pack("<BI", 0, len(events))+b"".join(events) if events else None
 
@@ -566,7 +567,7 @@ def get_render(query:str) -> dict:
   i, j, fmt = get_int(qs:=parse_qs(url.query), "ctx"), get_int(qs, "step"), url.path.lstrip("/")
   data = ctxs[i]["steps"][j]["data"]
   if fmt == "graph-rewrites": return {"value":get_full_rewrite(trace.rewrites[i][j]), "content_type":"text/event-stream"}
-  if fmt == "uops": return {"src":get_stdout(lambda: print_uops(data)), "lang":"txt"}
+  if fmt == "uops": return {"src":get_stdout(lambda: print_uops(_reconstruct(trace.rewrites[i][j-1].sink).src[2].src)), "lang":"txt"}
   if fmt == "code": return {"src":data, "lang":"cpp"}
   if fmt == "asm":
     ret:dict = {}
