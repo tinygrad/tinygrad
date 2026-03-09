@@ -236,7 +236,7 @@ const drawLine = (ctx, x, y, opts) => {
 function tabulate(rows) {
   const root = d3.create("div").style("display", "grid").style("grid-template-columns", `${Math.max(...rows.map(x => x[0].length), 0)}ch 1fr`).style("gap", "0.2em").style("white-space", "nowrap");
   for (const [k,v] of rows) { root.append("div").text(k); root.append("div").node().append(v); }
-  return root;
+  return root.node();
 }
 
 var data, focusedDevice, focusedShape, formatTime, canvasZoom, zoomLevel = d3.zoomIdentity;
@@ -268,7 +268,7 @@ function setFocus(key) {
   const html = d3.select(".info").html("");
   if (eventType === EventTypes.EXEC) {
     const [n, _, ...rest] = e.arg.tooltipText.split("\n");
-    html.append(() => tabulate([["Name", colored(e.label)], ["Duration", formatTime(e.width)], ["Start Time", formatTime(e.x)]]).node());
+    html.append(() => tabulate([["Name", colored(e.label)], ["Duration", formatTime(e.width)], ["Start Time", formatTime(e.x)]]));
     let group = html.append("div").classed("args", true);
     for (const r of rest) group.append("p").text(r);
     group = html.append("div").classed("args", true);
@@ -290,7 +290,7 @@ function setFocus(key) {
     const [dtype, sz, nbytes, dur] = e.arg.tooltipText.split("\n");
     const rows = [["DType", dtype], ["Len", sz], ["Size", nbytes], ["Lifetime", dur]];
     if (e.arg.users != null) rows.push(["Users", e.arg.users.length]);
-    html.append(() => tabulate(rows).node());
+    html.append(() => tabulate(rows));
     const kernels = html.append("div").classed("args", true);
     for (let u=0; u<e.arg.users?.length; u++) {
       const { repr, num, mode, shape } = e.arg.users[u];
@@ -902,7 +902,7 @@ async function main() {
       return renderProfiler(ckey, "clk", opts);
     }
     metadata.replaceChildren(...((ret.metadata ?? []).map((m) => {
-      return tabulate(m.map((e) => [e.label.trim(), typeof e.value === "string" ? e.value : formatUnit(e.value)])).node();
+      return tabulate(m.map((e) => [e.label.trim(), typeof e.value === "string" ? e.value : formatUnit(e.value)]));
     })));
     // graph render
     if (ret.data != null) {
