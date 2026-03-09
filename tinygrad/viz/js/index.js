@@ -674,11 +674,9 @@ async function renderProfiler(path, unit, opts) {
 
   canvas.addEventListener("mousemove", e => {
     const foundRect = findRectAtPosition(e.clientX, e.clientY);
+    const tooltip = document.getElementById("tooltip");
     if (foundRect?.tooltipText != null) {
-      const tooltip = document.getElementById("tooltip"), nodes = [];
-      for (const l of foundRect.label||[]) { const s = document.createElement("span"); s.innerText = l.st; s.style.color = l.color; nodes.push(s); }
-      nodes.push(document.createTextNode(foundRect.tooltipText));
-      tooltip.replaceChildren(...nodes);
+      tooltip.replaceChildren(colored(foundRect.label||[]), document.createTextNode(foundRect.tooltipText));
       tooltip.style.display = "block";
       tooltip.style.left = (e.pageX+10)+"px";
       tooltip.style.top = (e.pageY)+"px";
