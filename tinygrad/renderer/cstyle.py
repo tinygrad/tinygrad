@@ -566,4 +566,11 @@ class AMDHIPCCRenderer(AMDHIPRenderer):
     super().__init__(arch)
     self.compiler = HIPCCCompiler(arch)
 
-class QCOMRenderer(OpenCLRenderer): device = "QCOM"
+class QCOMCLRenderer(OpenCLRenderer):
+  device = "QCOM"
+
+  def __init__(self, chip_id):
+    from tinygrad.runtime.support.compiler_qcom import QCOMCompiler
+    self.chip_id, self.compiler = chip_id, QCOMCompiler(chip_id)
+
+  def __reduce__(self): return self.__class__, (self.chip_id,)

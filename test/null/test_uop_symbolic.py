@@ -286,6 +286,11 @@ class TestSymbolic(unittest.TestCase):
                               "(((z+(x*-1))+(y*-1))+7)")
     self.helper_test_variable((10+12*Variable("x",0,2)+Variable("y", 0, 4)%3)%13, 8, 12, "(((x*-1)+(y%3))+10)")
 
+  def test_mod_congruence_tied_remainder(self):
+    # when f%c == c/2, both r and r-c have equal abs — try both signs
+    self.helper_test_variable((3+2*Variable("x",0,1)+3*Variable("y",0,1))%4, 0, 3, "((x*-2)+(y*-1)+3)")
+    self.helper_test_variable((3+6*Variable("x",0,1)+7*Variable("y",0,1))%4, 0, 3, "((x*-2)+(y*-1)+3)")
+
   def test_div_congruence(self):
     self.helper_test_variable((3+3*Variable("a",0,3))//4, 0, 3, "a")
     self.helper_test_variable((18+17*Variable("a",0,2)+17)//18, 1, 3, "(a+1)")
@@ -703,12 +708,69 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable((31*b+1)//18, 0, 172, "(((b*13)+1)//18+b)")
     self.helper_test_variable((19*b+3)//7, 0, 271, "(((b*5)+3)//7+(b*2))")
 
+  def test_div_by_factor_tie_break(self):
+    a = Variable("a", 0, 1)
+    b = Variable("b", 0, 1)
+    with Context(CORRECT_DIVMOD_FOLDING=1):
+      self.helper_test_variable((a*2+b*3+2)//6, 0, 1, "((a+b+1)//3)")
+
   def test_div_mod_recombine_large_coeff(self):
     # recombine must work even when coeff > divisor: both mod and div reduce the coeff the same way
     b = Variable("b", 0, 100)
     self.helper_test_variable((19*b+3)%7 + ((19*b+3)//7)*7, 3, 1903, "((b*19)+3)")
     a = Variable("a", 0, 10)
     self.helper_test_variable((25*a+3)%10 + ((25*a+3)//10)*10, 3, 253, "((a*25)+3)")
+
+  def test_mod_nest_by_factor(self):
+    # (a*f+b) % (f*k) = (a%k)*f + b when 0<=b<f — mirrors nest_div_by_factor for MOD
+    gidx0 = Variable("gidx0", 0, 15)
+    lidx0 = Variable("lidx0", 0, 3)
+    # f=4, k=2, c=8: (gidx0*4+lidx0)%8 = (gidx0%2)*4 + lidx0
+    self.helper_test_variable((gidx0*4+lidx0)%8, 0, 7, "(lidx0+gidx0%2*4)")
+    # f=2, k=4: (gidx0*2+lidx0)%8 where lidx0 in [0,1]
+    lidx1 = Variable("lidx1", 0, 1)
+    self.helper_test_variable((gidx0*2+lidx1)%8, 0, 7, "(lidx1+gidx0%4*2)")
+    # f=3, k=3: (a*3+b)%9 where b in [0,2]
+    a = Variable("a", 0, 10)
+    b = Variable("b", 0, 2)
+    self.helper_test_variable((a*3+b)%9, 0, 8, "(b+a%3*3)")
+
+  def test_mod_nest_by_factor_with_const(self):
+    # nest_by_factor MOD with non-zero constant offset: (a*f+b+const) % (f*k) = (a%k)*f + b + const when 0<=b+const<f
+    a = Variable("a", 0, 7)
+    b = Variable("b", 0, 1)
+    # f=4, k=2, const=2: (a*4+b+2)%8 = (a%2)*4 + b + 2
+    self.helper_test_variable((a*4+b+2)%8, 2, 7, "(b+a%2*4+2)")
+    # f=6, k=2, const=3: (a*6+b+3)%12 = (a%2)*6 + b + 3
+    b2 = Variable("b", 0, 2)
+    self.helper_test_variable((a*6+b2+3)%12, 3, 11, "(b+a%2*6+3)")
+    # f=3, k=2, const=1: (a*3+b+1)%6 = (a%2)*3 + b + 1
+    self.helper_test_variable((a*3+b+1)%6, 1, 5, "(b+a%2*3+1)")
+
+  def test_div_mod_recombine_after_nesting(self):
+    # when nest_div_by_factor simplifies the div, the mod must also nest so recombine can fire
+    gidx0 = Variable("gidx0", 0, 15)
+    lidx0 = Variable("lidx0", 0, 3)
+    x = gidx0*4+lidx0
+    # div nests: x//8 -> gidx0//2, mod nests: x%8 -> (gidx0%2)*4+lidx0, then recombine gives x back
+    self.helper_test_variable((x//8)*8 + x%8, 0, 63, "(lidx0+gidx0*4)")
+    # with a scaling factor: recombine gives x*2
+    self.helper_test_variable((x//8)*16 + (x%8)*2, 0, 126, "(gidx0*8+lidx0*2)")
+    # two variables with different factors
+    a = Variable("a", 0, 7)
+    b = Variable("b", 0, 1)
+    y = a*6+b
+    # div nests: y//12 -> a//2, mod nests: y%12 -> (a%2)*6+b, recombine
+    self.helper_test_variable((y//12)*12 + y%12, 0, 43, "(b+a*6)")
+
+  def test_reshape_index_roundtrip(self):
+    # simulate reshape index decompose then recompose — the core pattern this enables
+    # (8,8) decomposed for (16,4): combined=r0*8+r1, div and mod by 4
+    r0 = Variable("r0", 0, 7)
+    r1 = Variable("r1", 0, 7)
+    combined = r0*8+r1
+    src_idx = (combined//4)*4 + combined%4
+    self.helper_test_variable(src_idx, 0, 63, "(r1+r0*8)")
 
   def test_gated_load(self):
     idx = Variable("idx", 0, 24)

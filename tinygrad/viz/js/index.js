@@ -236,7 +236,7 @@ const drawLine = (ctx, x, y, opts) => {
 function tabulate(rows) {
   const root = d3.create("div").style("display", "grid").style("grid-template-columns", `${Math.max(...rows.map(x => x[0].length), 0)}ch 1fr`).style("gap", "0.2em").style("white-space", "nowrap");
   for (const [k,v] of rows) { root.append("div").text(k); root.append("div").node().append(v); }
-  return root;
+  return root.node();
 }
 
 var data, focusedDevice, focusedShape, formatTime, canvasZoom, zoomLevel = d3.zoomIdentity;
@@ -268,7 +268,7 @@ function setFocus(key) {
   const html = d3.select(".info").html("");
   if (eventType === EventTypes.EXEC) {
     const [n, _, ...rest] = e.arg.tooltipText.split("\n");
-    html.append(() => tabulate([["Name", d3.create("p").html(n).node()], ["Duration", formatTime(e.width)], ["Start Time", formatTime(e.x)]]).node());
+    html.append(() => tabulate([["Name", colored(e.arg.label)], ["Duration", formatTime(e.width)], ["Start Time", formatTime(e.x)]]));
     let group = html.append("div").classed("args", true);
     for (const r of rest) group.append("p").text(r);
     group = html.append("div").classed("args", true);
@@ -290,7 +290,7 @@ function setFocus(key) {
     const [dtype, sz, nbytes, dur] = e.arg.tooltipText.split("\n");
     const rows = [["DType", dtype], ["Len", sz], ["Size", nbytes], ["Lifetime", dur]];
     if (e.arg.users != null) rows.push(["Users", e.arg.users.length]);
-    html.append(() => tabulate(rows).node());
+    html.append(() => tabulate(rows));
     const kernels = html.append("div").classed("args", true);
     for (let u=0; u<e.arg.users?.length; u++) {
       const { repr, num, mode, shape } = e.arg.users[u];
@@ -302,7 +302,8 @@ function setFocus(key) {
   }
   // instructions list renderer
   let instList = document.getElementById("insts");
-  if (data.pcToShape.size > 0 && instList == null) {
+  if (data.pcToShape.size == 0) return d3.select(instList?.parentElement).html("");
+  if (instList == null) {
     let contents = "", i = 0;
     for (const [k, v] of data.pcToShape) {
       contents += `<div class="line" data-k="${k}"><span class="left" id="inst-${k}"><span class="n">${i++}</span><span class="wave">${v.wave}</span>
@@ -314,7 +315,7 @@ function setFocus(key) {
   }
   d3.select(instList).selectAll("span").classed("highlight", false);
   const instLine = document.getElementById(`inst-${key}`); instLine?.classList.add("highlight");
-  if (instLine != null && instList != null) {
+  if (instLine != null) {
     const r = rect(instLine), c = rect(instList);
     if (Math.max(c.top-r.bottom, r.top-c.bottom)>=-30) instLine.scrollIntoView({ block:"center" });
   }
@@ -322,10 +323,10 @@ function setFocus(key) {
 
 const EventTypes = { EXEC:0, BUF:1 };
 
-async function renderProfiler(path, unit, opts) {
+async function renderProfiler(path, opts) {
   displaySelection("#profiler");
   // support non realtime x axis units
-  formatTime = unit === "realtime" ? formatMicroseconds : formatCycles;
+  formatTime = opts.unit === "ms" ? formatMicroseconds : formatCycles;
   if (data?.path !== path) { data = {tracks:new Map(), axes:{}, path, first:null, pcToShape:new Map()}; focusedDevice = null; focusedShape = null; }
   setFocus(focusedShape);
   // layout once!
@@ -377,16 +378,12 @@ async function renderProfiler(path, unit, opts) {
       for (let j=0; j<eventsLen; j++) {
         const e = {name:strings[u32()], ref:optional(u32()), key:optional(u32()), st:u32(), dur:f32(), info:strings[u32()] || null};
         // find a free level to put the event
-        let depth = 0;
-        if (opts.levelKey != null) { depth = opts.levelKey(e); levels[depth] = 0; }
-        else {
-          depth = levels.findIndex(levelEt => e.st >= levelEt);
-          const et = e.st+Math.trunc(e.dur);
-          if (depth === -1) {
-            depth = levels.length;
-            levels.push(et);
-          } else levels[depth] = et;
-        }
+        let depth = levels.findIndex(levelEt => e.st >= levelEt);
+        const et = e.st+Math.trunc(e.dur);
+        if (depth === -1) {
+          depth = levels.length;
+          levels.push(et);
+        } else levels[depth] = et;
         if (depth === 0 || opts.colorByName) colorKey = e.name.split(" ")[0];
         if (!colorMap.has(colorKey)) {
           const color = typeof colors === "function" ? colors(colorKey)
@@ -417,11 +414,10 @@ async function renderProfiler(path, unit, opts) {
         }
         // tiny device events go straight to the rewrite rule
         const key = k.startsWith("TINY") ? null : `${k}-${j}`;
-        const labelHTML = label.map(l=>`<span style="color:${l.color}">${l.st}</span>`).join("");
         let info = e.info != null ? "\n"+e.info : "", trace = null
         if (info.startsWith("\nPC:")) { data.pcToShape.set(key, {wave:dnum, pc:parseInt(e.info.split(":")[1]), st:e.st}); info = ""; }
         if (info.startsWith("\nTB:")) { trace = info; info = ""; }
-        const arg = { tooltipText:labelHTML+" N:"+shapes.length+"\n"+formatTime(e.dur)+info, trace, bufs:[], key, ctx:shapeRef?.ctx, step:shapeRef?.step };
+        const arg = { tooltipText:" N:"+shapes.length+"\n"+formatTime(e.dur)+info, label, trace, bufs:[], key, ctx:shapeRef?.ctx, step:shapeRef?.step };
         if (e.key != null) shapeMap.set(e.key, key);
         // offset y by depth
         shapes.push({x:e.st, y:levelHeight*depth, width:e.dur, height:levelHeight, arg, label:opts.hideLabels ? null : label, fillColor });
@@ -597,7 +593,7 @@ async function renderProfiler(path, unit, opts) {
       const labelX = x+ctx.lineWidth+2;
       if (labelX <= lastLabelEnd) continue;
 
-      const label = formatTime(tick, et-st <= 1e3 ? true : false);
+      const label = formatTime(tick, et-st <= 1e3);
       ctx.textBaseline = "top";
       ctx.fillText(label, labelX, tickSize);
       lastLabelEnd = labelX + ctx.measureText(label).width + 4;
@@ -674,12 +670,12 @@ async function renderProfiler(path, unit, opts) {
 
   canvas.addEventListener("mousemove", e => {
     const foundRect = findRectAtPosition(e.clientX, e.clientY);
+    const tooltip = document.getElementById("tooltip");
     if (foundRect?.tooltipText != null) {
-      const tooltip = document.getElementById("tooltip");
+      tooltip.replaceChildren(colored(foundRect.label||[]), document.createTextNode(foundRect.tooltipText));
       tooltip.style.display = "block";
       tooltip.style.left = (e.pageX+10)+"px";
       tooltip.style.top = (e.pageY)+"px";
-      tooltip.innerHTML = foundRect.tooltipText;
     } else tooltip.style.display = "none";
   });
   canvas.addEventListener("mouseleave", () => document.getElementById("tooltip").style.display = "none");
@@ -870,8 +866,6 @@ async function main() {
   // ** center graph
   const { currentCtx, currentStep, currentRewrite, expandSteps } = state;
   if (currentCtx == -1) return;
-  // always have a new sidebar when view changes
-  metadata.innerHTML = "";
   const ctx = ctxs[currentCtx];
   const step = ctx.steps[currentStep];
   const ckey = step?.query;
@@ -882,7 +876,7 @@ async function main() {
     if (url.pathname+url.search !== ckey) e.close();
     else if (e.readyState === EventSource.OPEN) activeSrc = e;
   }
-  if (ctx.name === "Profiler") return renderProfiler("/get_profile", "realtime", { width:"132px" });
+  if (ctx.name === "Profiler") return renderProfiler("/get_profile", {unit:"ms", width:"132px"});
   if (workerUrl == null) await initWorker();
   if (ckey in cache) {
     ret = cache[ckey];
@@ -900,15 +894,12 @@ async function main() {
     }
     // timeline with cycles on the x axis
     if (ret instanceof ArrayBuffer) {
-      opts = {heightScale:0.5, hideLabels:true, levelKey:step.name.includes("PKTS") ? (e) => parseInt(e.name.split(" ")[1].split(":")[1]) : null, colorByName:ckey.includes("pkts")};
-      return renderProfiler(ckey, "clk", opts);
+      const pkts = step.name.includes("PKTS");
+      return renderProfiler(ckey, {unit:"clk", heightScale:0.5, hideLabels:true, colorByName:pkts});
     }
-    ret.metadata?.forEach(m => {
-      if (Array.isArray(m)) return metadata.appendChild(tabulate(m.map(({ label, value }) => {
-        return [label.trim(), typeof value === "string" ? value : formatUnit(value)];
-      })).node());
-      metadata.appendChild(codeBlock(m.src)).classList.add("full-height")
-    });
+    metadata.replaceChildren(...((ret.metadata ?? []).map((m) => {
+      return tabulate(m.map((e) => [e.label.trim(), typeof e.value === "string" ? e.value : formatUnit(e.value)]));
+    })));
     // graph render
     if (ret.data != null) {
       metadata.prepend(showGraph.label);

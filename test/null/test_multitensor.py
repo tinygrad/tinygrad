@@ -108,7 +108,6 @@ class TestMultiRamUsage(unittest.TestCase):
   def test_matmul_half(self): self._test_matmul_half(dev_count=2)
   def test_matmul_half_alt(self): self._test_matmul_half(dev_count=4)
 
-  @unittest.expectedFailure
   def test_multi_layer_allreduce(self):
     N = 32
     devices_2 = ("NULL:1", "NULL:2")

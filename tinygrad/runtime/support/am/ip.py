@@ -425,6 +425,16 @@ class AM_IH(AM_IP):
     if self.adev.ip_ver[am.NBIO_HWIP][:2] != (7,9):
       self.adev.soc.doorbell_enable(port=1, awid=0x0, awaddr_31_28_value=0x0, offset=am.AMDGPU_NAVI10_DOORBELL_IH*2, size=2)
 
+  def drain(self):
+    _, _, suf, _ = self.rings[0]
+    wptr = self.adev.reg(f"regIH_RB_WPTR{suf}").read_bitfields()
+    self.adev.regIH_RB_RPTR.write(wptr['offset'] % (self.ring_size // 4))
+
+    if wptr['rb_overflow']:
+      self.adev.reg(f"regIH_RB_WPTR{suf}").update(rb_overflow=0)
+      self.adev.reg(f"regIH_RB_CNTL{suf}").update(wptr_overflow_clear=1)
+      self.adev.reg(f"regIH_RB_CNTL{suf}").update(wptr_overflow_clear=0)
+
   def interrupt_handler(self):
     _, _, suf, _ = self.rings[0]
     wptr = self.adev.reg(f"regIH_RB_WPTR{suf}").read_bitfields()
@@ -432,11 +442,15 @@ class AM_IH(AM_IP):
 
     while rptr != wptr['offset']:
       entry = [self.ring_view[(rptr + i) % (self.ring_size // 4)] for i in range(8)]
+      rptr = (rptr + 8) % (self.ring_size // 4)
+
       client, src, ring_id, vmid, vmid_type, pasid, node = \
         [getattr(am, f'SOC15_{n}_FROM_IH_ENTRY')(entry) for n in ['CLIENT_ID', 'SOURCE_ID', 'RING_ID', 'VMID', 'VMID_TYPE', 'PASID', 'NODEID']]
       ctx = [getattr(am, f'SOC15_CONTEXT_ID{i}_FROM_IH_ENTRY')(entry) for i in range(4)]
 
       src_name = self.adev.soc.ih_srcs_names.get(client, {}).get(src, '')
+      if src_name in {"SDMA_TRAP", "CP_EOP_INTR"}: continue
+
       print(f"am {self.adev.devfmt}: IH ({rptr:#x}/{wptr['offset']:#x}) client={self.adev.soc.ih_clients.get(client)} src={src_name}({src}) "
             f"ring={ring_id} vmid={vmid}({vmid_type}) pasid={pasid} node={node} ctx=[{ctx[0]:#x}, {ctx[1]:#x}, {ctx[2]:#x}, {ctx[3]:#x}]")
 
@@ -454,14 +468,7 @@ class AM_IH(AM_IP):
         self.adev.is_err_state = True
       else: self.adev.is_err_state = True
 
-      rptr = (rptr + 8) % (self.ring_size // 4)
-
-    if wptr['rb_overflow']:
-      self.adev.reg(f"regIH_RB_WPTR{suf}").update(rb_overflow=0)
-      self.adev.reg(f"regIH_RB_CNTL{suf}").update(wptr_overflow_clear=1)
-      self.adev.reg(f"regIH_RB_CNTL{suf}").update(wptr_overflow_clear=0)
-
-    self.adev.regIH_RB_RPTR.write(wptr['offset'] % (self.ring_size // 4))
+    self.drain()
 
     bif_intr = self.adev.regBIF_BX0_BIF_DOORBELL_INT_CNTL.read_bitfields()
     athub_err, cntlr_err = bif_intr['ras_athub_err_event_interrupt_status'], bif_intr['ras_cntlr_interrupt_status']
@@ -492,7 +499,8 @@ class AM_SDMA(AM_IP):
                                                           inst=inst)
         self.adev.reg(f"regSDMA{pipe}_{self.sdma_name}_CNTL").update(halt=0, **{f"{'th1_' if self.sdma_name == 'F32' else ''}reset":0}, inst=inst)
 
-      self.adev.reg(f"regSDMA{pipe}_CNTL").update(**({'utc_l1_enable':1} if self.adev.ip_ver[am.SDMA0_HWIP] <= (5,2,0) else {}), inst=inst)
+      self.adev.reg(f"regSDMA{pipe}_CNTL").update(trap_enable=1,
+        **({'utc_l1_enable':1} if self.adev.ip_ver[am.SDMA0_HWIP] <= (5,2,0) else {}), inst=inst)
 
     if self.adev.ip_ver[am.NBIO_HWIP] in {(7,9,0), (7,9,1)}:
       for aid_id in range(4):

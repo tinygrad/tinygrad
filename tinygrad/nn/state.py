@@ -336,15 +336,14 @@ def ggml_data_to_tensor(t: Tensor, n: int, ggml_type: int) -> Tensor:
       d = blocks[:,-2:].bitcast(dtypes.float16).cast(dtypes.float32).expand((-1, 256))
       return d * (xl.bitwise_or(xh).bitcast(dtypes.int8) - 32).flatten(-2) * scales
     if ggml_type == 39:
-      e_int = blocks[:, 0].cast(dtypes.int32)
-      d = ((e_int >= 2).cast(dtypes.float32) * (e_int.cast(dtypes.float32) - 128).exp2() +
-           (e_int == 1).cast(dtypes.float32) * 2.0**(-127) +
-           (e_int == 0).cast(dtypes.float32) * 2.0**(-128)).unsqueeze(-1)
+      e = blocks[:, 0].cast(dtypes.uint32)
+      small_bits = Tensor([0x00200000, 0x00400000], dtype=dtypes.uint32, device=t.device)[e.clip(0, 1).cast(dtypes.int32)] # e = 0 or e = 1 case
+      d = (e < 2).where(small_bits, ((e - 1) * 0x00800000).cast(dtypes.uint32)).bitcast(dtypes.float32).unsqueeze(-1)
       codes = q_to_uint8(blocks[:, 1:17], 4)
-      sign = 1.0 - codes.rshift(3).cast(dtypes.float32) * 2.0
-      exp, mant = codes.rshift(1).bitwise_and(0x3).cast(dtypes.float32), codes.bitwise_and(0x1).cast(dtypes.float32)
-      fp4_val = sign * 2.0 * ((exp != 0).cast(dtypes.float32) * (1.0 + 0.5 * mant) * (exp - 1.0).exp2() +
-                              (exp == 0).cast(dtypes.float32) * 0.5 * mant)
+      fp4_lut = Tensor([0.0, 1.0, 2.0, 3.0, 4.0, 6.0, 8.0, 12.0,
+                       -0.0,-1.0,-2.0,-3.0,-4.0,-6.0,-8.0,-12.0],
+                       dtype=dtypes.float32, device=t.device)
+      fp4_val = fp4_lut[codes]
       return (fp4_val * d).flatten(-2)[:n]
   raise ValueError(f"GGML type '{ggml_type}' is not supported!")
 
