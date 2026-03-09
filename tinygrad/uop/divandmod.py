@@ -1,4 +1,4 @@
-import functools
+import functools, itertools
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp
 from tinygrad.dtype import dtypes
 from tinygrad.helpers import cdiv, cmod, CORRECT_DIVMOD_FOLDING, unwrap
@@ -48,10 +48,12 @@ def fold_divmod_general(d: UOp, correct_divmod_folding: bool) -> UOp|None:
 
     # fold_divmod_congruence: fold if a is congruent to an expression whose range is between 0 and c
     if not (x.vmin<0 and correct_divmod_folding):
-      rems = [min((r:=f%c), r-c, key=abs) for f in factors]
-      if (rem:=sum(r*v for r,v in zip(rems,terms))+const%c).vmin//c==rem.vmax//c:
-        if d.op is Ops.MOD: return rem - rem.vmin//c*c
-        return sum((f-r)//c * v for f,r,v in zip(factors,rems,terms)) + (const-const%c+rem.vmin//c*c)//c
+      # when f%c == c//2, abs(r) == abs(r-c) is a tie, try both signs since either may fit in one period
+      rem_choices = [((r:=f%c), r-c) if (r:=f%c)*2 == c else (min(r, r-c, key=abs),) for f in factors]
+      for rems in itertools.product(*rem_choices):
+        if (rem:=sum(r*v for r,v in zip(rems,terms))+const%c).vmin//c==rem.vmax//c:
+          if d.op is Ops.MOD: return rem - rem.vmin//c*c
+          return sum((f-r)//c * v for f,r,v in zip(factors,rems,terms)) + (const-const%c+rem.vmin//c*c)//c
 
     # gcd_with_remainder: factor out common gcd from numerator
     # Note: this rule uses uops_no_const to exclude the additive constant from the GCD calculation
