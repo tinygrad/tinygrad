@@ -64,16 +64,18 @@ def fold_divmod_general(d: UOp, correct_divmod_folding: bool) -> UOp|None:
           return ret*gcd + const%gcd.arg if d.op is Ops.MOD else ret+const//c
 
     # nest_by_factor: x//c -> (x//f)//(c//f), x%c -> (x//f%(c//f))*f + b where b=x%f
-    if x.vmin >= 0 and (d.op is Ops.IDIV or (d.op is Ops.MOD and const == 0)):
+    if x.vmin >= 0:
       results = []
       for div in {abs(f) for u, f in zip(uops_no_const, factors) if u.op not in (Ops.CONST, Ops.VCONST) and 1 < abs(f) < c and (c%f)==0}:
-        if d.op is Ops.IDIV:
-          if (newxs := fold_divmod_general(x//div, correct_divmod_folding)) is not None and newxs.vmin >= 0:
+        if (newxs := fold_divmod_general(x//div, correct_divmod_folding)) is not None and newxs.vmin >= 0:
+          if d.op is Ops.IDIV:
             results.append((len(newxs.backward_slice), newxs // (c // div)))
-        else:
-          b = UOp.sum(*(f%div*t for f, t in zip(factors, terms) if f%div)) if any(f%div for f in factors) else x.const_like(0)
-          if 0 <= b.vmin and b.vmax < div:
-            results.append((len((r:=(x//div % x.ufix(c//div))*div + b).backward_slice), r))
+          else:
+            b_parts = [f%div*t for f, t in zip(factors, terms) if f%div]
+            if const % div: b_parts.append(x.const_like(const % div))
+            b = UOp.sum(*b_parts) if b_parts else x.const_like(0)
+            if 0 <= b.vmin and b.vmax < div:
+              results.append((len((r:=(newxs % x.ufix(c//div))*div + b).backward_slice), r))
       if results: return min(results, key=lambda r: r[0])[1]
 
   # ** Variable Denominator / Fallback Rules **
