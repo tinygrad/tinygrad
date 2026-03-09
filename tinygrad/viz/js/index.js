@@ -378,8 +378,7 @@ async function renderProfiler(path, opts) {
       for (let j=0; j<eventsLen; j++) {
         const e = {name:strings[u32()], ref:optional(u32()), key:optional(u32()), st:u32(), dur:f32(), info:strings[u32()] || null};
         // find a free level to put the event
-        let depth = 0;
-        depth = levels.findIndex(levelEt => e.st >= levelEt);
+        let depth = levels.findIndex(levelEt => e.st >= levelEt);
         const et = e.st+Math.trunc(e.dur);
         if (depth === -1) {
           depth = levels.length;
