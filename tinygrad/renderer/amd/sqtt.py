@@ -106,7 +106,7 @@ class InstOpRDNA4(Enum):
   SMEM = 0x1
   JUMP = 0x3
   JUMP_NO = 0x4
-  JUMP_UNCOND = 0x5
+  CALL = 0x5
   MESSAGE = 0x9
   VALU_TRANS = 0xb
   VALU_B2 = 0xd

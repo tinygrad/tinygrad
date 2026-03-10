@@ -85,8 +85,9 @@ class TestSQTTMapBase(unittest.TestCase):
             if "EXEC" in e.device:
               if "ALT" not in e.name.display_name: execs += 1
             elif "WAVE" in e.device:
-              if "IMMEDIATE" not in e.name.display_name: insts += 1
-            else: raise Exception(e.device)
+              # filter out INST packets that don't get an EXEC in ALU or MEM units
+              if e.name.display_name not in {"IMMEDIATE", "IMMEDIATE_MASK", "JUMP", "JUMP_NO", "MESSAGE"}: insts += 1
+            else: raise Exception(f"Timeline row must be INST or EXEC, got {e.device}")
           self.assertEqual(execs, insts)
 
 class TestSQTTMapRDNA3(TestSQTTMapBase): target = "gfx1100"
