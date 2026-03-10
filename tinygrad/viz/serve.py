@@ -338,19 +338,17 @@ def sqtt_timeline(data:bytes, lib:bytes, target:str) -> list[ProfileEvent]:
   from tinygrad.renderer.amd.sqtt import map_insts, InstructionInfo, PacketType, INST, InstOp, VALUINST, IMMEDIATE, IMMEDIATE_MASK, VMEMEXEC, ALUEXEC
   from tinygrad.renderer.amd.sqtt import INST_RDNA4, InstOpRDNA4
   ret:list[ProfileEvent] = []
-  rows:dict[str, None] = {}
-  trace:dict[str, set[int]] = {}
-  def add(name:str, p:PacketType, width=1, op_name=None, wave=None, info:InstructionInfo|None=None) -> None:
-    if hasattr(p, "wave"): wave = p.wave
-    rows.setdefault(r:=(f"WAVE:{wave}" if wave is not None else f"{p.__class__.__name__}:0 {name}"))
-    key = TracingKey(f"{op_name if op_name is not None else name}", ret=f"PC:{info.pc}" if info is not None else None)
-    ret.append(ProfileRangeEvent(r, key, Decimal(p._time), Decimal(p._time+width)))
+  row_ends:dict[str, Decimal] = {}
+  def add(name:str, p:PacketType, width=1, op:str|None=None, wave:int|None=None, info:InstructionInfo|None=None) -> None:
+    row = f"WAVE:{wave}" if (wave:=getattr(p, "wave", wave)) is not None else f"{p.__class__.__name__}:0 {name}"
+    ret.append(e:=ProfileRangeEvent(row, TracingKey(op or name, ret=f"PC:{info.pc}" if info else None), Decimal(p._time), Decimal(p._time+width)))
+    if (et:=row_ends.get(row)) is not None and e.st < et: raise RuntimeError(f"packet {p} overlaps another packet in {row}.")
+    row_ends[row] = unwrap(e.en)
   for p, info in map_insts(data, lib, target):
     if len(ret) > getenv("MAX_SQTT_PKTS", 50_000): break
     if isinstance(p, (INST, INST_RDNA4)):
-      op_name = p.op.name if isinstance(p.op, (InstOp, InstOpRDNA4)) else f"0x{p.op:02x}"
-      name, width = (op_name, 10 if "BARRIER" in op_name else 1)
-      add(name, p, width=width, info=info)
+      name = p.op.name if isinstance(p.op, (InstOp, InstOpRDNA4)) else f"0x{p.op:02x}"
+      add(name, p, width=10 if "BARRIER" in name else 1, info=info)
     if isinstance(p, (VALUINST, IMMEDIATE)): add(p.__class__.__name__, p, info=info)
     if isinstance(p, IMMEDIATE_MASK): add("IMMEDIATE", p, wave=unwrap(info).wave, info=info)
     if isinstance(p, (VMEMEXEC, ALUEXEC)):
@@ -359,11 +357,9 @@ def sqtt_timeline(data:bytes, lib:bytes, target:str) -> list[ProfileEvent]:
         add("VALU", p)
         add("SALU", p)
       else:
-        add(name.replace("_ALT", ""), p, op_name=name)
-      if p._time in trace.setdefault(name, set()): raise AssertionError(f"packets overlap in shared resource! {name}")
-      trace[name].add(p._time)
+        add(name.replace("_ALT", ""), p, op=name)
   pc_map = {addr:str(inst) for addr,inst in amd_decode(lib, target).items()}
-  return [ProfilePointEvent(r, "JSON", "pcMap", pc_map, ts=Decimal(0)) for r in rows]+ret
+  return [ProfilePointEvent(r, "JSON", "pcMap", pc_map, ts=Decimal(0)) for r in row_ends]+ret
 
 # ** SQTT OCC only unpacks wave start, end time and SIMD location
 
