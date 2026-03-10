@@ -2,7 +2,7 @@
 import unittest, pickle
 from typing import Iterator
 from pathlib import Path
-from tinygrad.helpers import DEBUG, OSX
+from tinygrad.helpers import DEBUG, OSX, getenv, temp
 from tinygrad.renderer.amd.sqtt import print_packets, map_insts
 from tinygrad.runtime.autogen.amd.rdna3.ins import s_endpgm
 from tinygrad.viz.serve import sqtt_timeline
@@ -54,7 +54,7 @@ class TestSQTTMapBase(unittest.TestCase):
   def setUpClass(cls):
     if cls is TestSQTTMapBase: raise unittest.SkipTest("base class")
     cls.examples = {}
-    for pkl_path in sorted((EXAMPLES_DIR/cls.target).glob("*.pkl")):
+    for pkl_path in ([Path(temp("profile.pkl", append_user=True))] if getenv("LOAD_PROFILE") else sorted((EXAMPLES_DIR/cls.target).glob("*.pkl"))):
       with open(pkl_path, "rb") as f:
         data = pickle.load(f)
       sqtt_events = [e for e in data if type(e).__name__ == "ProfileSQTTEvent"]
