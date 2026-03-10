@@ -3655,11 +3655,13 @@ class Tensor(OpMixin):
 
     # contiguous creates the image, and early realize static weights (TODO: test for the static weight)
     if IMAGE == 1:
+      # pad with Invalid
+      def _invalid_pad_to(t, shape): return t.ones_like(dtype=dtypes.bool).pad_to(shape).where(t.pad_to(shape), Invalid)
       # hacks for pitch alignment
       assert isinstance(ix, int) and isinstance(H, int)
       ALIGN = 64 // dtsz
-      x = x.pad_to(None, None, round_up(ix, ALIGN // math.gcd(groups * cin, ALIGN)), None)
-      w = w.pad_to((None, round_up(H, ALIGN // math.gcd(W * cin * 4, ALIGN))) + (None,) * (w.ndim - 2))
+      x = _invalid_pad_to(x, (None, None, round_up(ix, ALIGN // math.gcd(groups * cin, ALIGN)), None))
+      w = _invalid_pad_to(w, (None, round_up(H, ALIGN // math.gcd(W * cin * 4, ALIGN))) + (None,) * (w.ndim - 2))
 
       if FLOAT16: x, w = x.cast(dtypes.half).contiguous().cast(dtypes.float), w.cast(dtypes.half).contiguous().cast(dtypes.float)
       else: x, w = x.contiguous(), w.contiguous()
