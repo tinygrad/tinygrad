@@ -340,40 +340,31 @@ def sqtt_timeline(data:bytes, lib:bytes, target:str) -> list[ProfileEvent]:
   ret:list[ProfileEvent] = []
   rows:dict[str, None] = {}
   trace:dict[str, set[int]] = {}
-  start_time:int|None = None
+  # real time anchors
+  start_time, prev_pair, curr_pair = None, None
   def add(name:str, p:PacketType, width=1, op_name=None, wave=None, info:InstructionInfo|None=None) -> None:
     nonlocal start_time
+    if start_time is None: start_time = rt
     if hasattr(p, "wave"): wave = p.wave
     rows.setdefault(r:=(f"WAVE:{wave}" if wave is not None else f"{p.__class__.__name__}:0 {name}"))
     key = TracingKey(f"{op_name if op_name is not None else name}", ret=f"PC:{info.pc}" if info is not None else None)
-    if start_time is None: start_time = rt
     ret.append(ProfileRangeEvent(r, key, Decimal(rt-start_time), Decimal(rt-start_time+width)))
-  prev_pair, curr_pair = None, None
-  ts_cls = TS_DELTA_OR_MARK_RDNA4 if "gfx12" in target else TS_DELTA_OR_MARK
-  RT_BASE = 1 << (ts_cls.delta.hi-ts_cls.delta.lo+1)
-  NS_PER_TICK = 10  # 100MHz
   for p, info in map_insts(data, lib, target):
     if len(ret) > getenv("MAX_SQTT_PKTS", 50_000): break
     if isinstance(p, TS_DELTA_OR_MARK) and p.is_marker: prev_pair, curr_pair = curr_pair, (p._time, p.delta)
-    if prev_pair is None or curr_pair is None: continue
-    (s0, r0), (s1, r1) = prev_pair, curr_pair
-    rate = (s1 - s0) / (r1 - r0)
-    rt = (RT_BASE | round(r1 + (p._time - s1) / rate)) * NS_PER_TICK
-    # width scale of 1 cycle in nanoseconds
-    w = NS_PER_TICK / rate
     if isinstance(p, (INST, INST_RDNA4)):
       op_name = p.op.name if isinstance(p.op, (InstOp, InstOpRDNA4)) else f"0x{p.op:02x}"
       name, width = (op_name, 10 if "BARRIER" in op_name else 1)
-      add(name, p, width=width*w, info=info)
-    if isinstance(p, (VALUINST, IMMEDIATE)): add(p.__class__.__name__, p, width=w, info=info)
-    if isinstance(p, IMMEDIATE_MASK): add("IMMEDIATE", p, width=w, wave=unwrap(info).wave, info=info)
+      add(name, p, width=width, info=info)
+    if isinstance(p, (VALUINST, IMMEDIATE)): add(p.__class__.__name__, p, info=info)
+    if isinstance(p, IMMEDIATE_MASK): add("IMMEDIATE", p, wave=unwrap(info).wave, info=info)
     if isinstance(p, (VMEMEXEC, ALUEXEC)):
       name = str(p.src).split('.')[1]
       if name == "VALU_SALU":
-        add("VALU", p, width=w)
-        add("SALU", p, width=w)
+        add("VALU", p)
+        add("SALU", p)
       else:
-        add(name.replace("_ALT", ""), p, width=w, op_name=name)
+        add(name.replace("_ALT", ""), p, op_name=name)
       if p._time in trace.setdefault(name, set()): raise AssertionError(f"packets overlap in shared resource! {name}")
       trace[name].add(p._time)
   pc_map = {addr:str(inst) for addr,inst in amd_decode(lib, target).items()}
