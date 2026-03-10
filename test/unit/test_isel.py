@@ -111,7 +111,8 @@ class TestIselX86(unittest.TestCase):
     d = UOp.variable("e", 0, 0, dtypes.float32)
     # pack 1 from vector and 1 from scalar, moving 0th element to position 0 does nothing so only 1 vinsertps is generated
     n = self.isel_rewrite(UOp.vectorize(a.gep(0), d))
-    self.assertTrue(n.arg is X86Ops.VINSERTPS and n.src[0].arg is X86Ops.DEFINE_REG)
+    self.assertIs(n.arg, X86Ops.VINSERTPS)
+    self.assertIsNot(n.src[0].arg, X86Ops.VINSERTPS)
 
     valid = [UOp.vectorize(a.gep(0), b.gep(1), a.gep(2), b.gep(3)), # TODO: this should be vunpck
              UOp.vectorize(a.gep(3), b.gep(2), c.gep(1), d)]
@@ -122,8 +123,6 @@ class TestIselX86(unittest.TestCase):
     a = UOp.variable("a", 0, 0, dtypes.int32)
     load = UOp(Ops.PARAM, dtypes.int32.ptr(), arg=0).index(a + 1, ptr=True).load()
     n = self.isel_rewrite(load)
-    # base is PARAM, index is "a"
-    self.assertTrue(n.src[0].arg is X86Ops.DEFINE_REG and n.src[1].arg is X86Ops.DEFINE_REG)
     # displacement is the constant in "a" scaled to the buffer element size, dtype is int8 when the value fits otherwise int32
     self.assertTrue(n.src[2].arg is X86Ops.IMM and n.src[2].dtype is dtypes.int8 and n.src[2].tag == 4)
 

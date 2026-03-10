@@ -14,7 +14,7 @@ class Register:
   index: int
   _cons: tuple[Register, ...] = field(default_factory=tuple)
   @property
-  def cons(self): return self._cons if self._cons else (self,)
+  def cons(self): return self._cons or (self,)
   def __repr__(self): return self.name
 
 class IselContext:
