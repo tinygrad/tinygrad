@@ -3657,8 +3657,8 @@ class Tensor(OpMixin):
     if IMAGE == 1:
       # pad with Invalid
       def _invalid_pad_to(t, shape):
-        mask = Tensor(True, device=t.device).expand(t.shape).pad_to(shape)
-        return mask.where(t.pad_to(shape), Invalid)
+        if all(p is None or p == s for p,s in zip(shape, t.shape)): return t
+        return Tensor(True, device=t.device).expand(t.shape).pad_to(shape).where(t.pad_to(shape), Invalid)
       # hacks for pitch alignment
       assert isinstance(ix, int) and isinstance(H, int)
       ALIGN = 64 // dtsz
