@@ -3656,7 +3656,9 @@ class Tensor(OpMixin):
     # contiguous creates the image, and early realize static weights (TODO: test for the static weight)
     if IMAGE == 1:
       # pad with Invalid
-      def _invalid_pad_to(t, shape): return t.ones_like(dtype=dtypes.bool).pad_to(shape).where(t.pad_to(shape), Invalid)
+      def _invalid_pad_to(t, shape):
+        mask = Tensor(True, device=t.device).expand(t.shape).pad_to(shape)
+        return mask.where(t.pad_to(shape), Invalid)
       # hacks for pitch alignment
       assert isinstance(ix, int) and isinstance(H, int)
       ALIGN = 64 // dtsz
