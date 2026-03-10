@@ -87,7 +87,7 @@ class TestSQTTMapBase(unittest.TestCase):
             elif "WAVE" in e.device:
               if "IMMEDIATE" not in e.name.display_name: insts += 1
             else: raise Exception(e.device)
-          print(name, execs, insts)
+          self.assertEqual(execs, insts)
 
 class TestSQTTMapRDNA3(TestSQTTMapBase): target = "gfx1100"
 
