@@ -342,13 +342,15 @@ def sqtt_timeline(data:bytes, lib:bytes, target:str) -> list[ProfileEvent]:
   trace:dict[str, set[int]] = {}
   # real time anchors
   start_time, curr, prev = None, None, None # [shader_clk, real_clk]
+  TS_DELTA = (TS_DELTA_OR_MARK_RDNA4 if "gfx12" in target else TS_DELTA_OR_MARK).delta
+  RT_BASE = 1 << (TS_DELTA.hi - TS_DELTA.lo + 1)
+  NS_PER_TICK = 10  # 100MHz
   def add(name:str, p:PacketType, width=1, op_name=None, wave=None, info:InstructionInfo|None=None) -> None:
     nonlocal start_time, curr, prev
-    RT_BASE = 1 << 36 # SQTT stores the low 36 bits of the realtime value
-    NS_PER_TICK = 10  # 100MHz
     rate = (curr[0] - prev[0]) / (curr[1] - prev[1])
     rt = (RT_BASE | round(curr[1] + (p._time - curr[0]) / rate)) * NS_PER_TICK
     if start_time is None: start_time = rt
+    width *= NS_PER_TICK / rate
     if hasattr(p, "wave"): wave = p.wave
     rows.setdefault(r:=(f"WAVE:{wave}" if wave is not None else f"{p.__class__.__name__}:0 {name}"))
     key = TracingKey(f"{op_name if op_name is not None else name}", ret=f"PC:{info.pc}" if info is not None else None)

@@ -76,13 +76,12 @@ class TestSQTTMapBase(unittest.TestCase):
 
   def test_realtime_duration(self):
     for name, (events, kern_events, kern_durations, target) in self.examples.items():
-      print(name)
       for event in events:
         if (k:=kern_events.get(event.kern)) is None: continue
         if not (timeline:=sqtt_timeline(event.blob, k.lib, target)): continue
         cmp_dur = max(timestamps:=[e.st for e in timeline if type(e).__name__ == "ProfileRangeEvent"])-min(timestamps)
         ref_dur = kern_durations[k.name]
-        assert 0 < cmp_dur <= ref_dur, f"{ref_dur} {cmp_dur}"
+        assert 0 < cmp_dur <= ref_dur, f"{name} {ref_dur} {cmp_dur}"
 
 class TestSQTTMapRDNA3(TestSQTTMapBase): target = "gfx1100"
 
