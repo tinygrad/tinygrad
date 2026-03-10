@@ -133,5 +133,14 @@ class TestInvalidTensor(unittest.TestCase):
     assert ret[0] == [1.0, 2.0]
     assert ret[1] == [before[2], before[3]]
 
+  # tensor indexing uses reduce, so the entire result becomes invalid
+  @unittest.expectedFailure
+  def test_tensor_index(self):
+    idx = (Tensor.arange(4) < 2).where(Tensor([0, 1, 2, 3]), Invalid)
+    out = Tensor([1.0, 2.0, 3.0, 4.0])[idx]
+    before, ret = self._realize_and_capture(out)
+    assert ret[0] == 1.0 and ret[1] == 2.0
+    assert before[2] == ret[2] and before[3] == ret[3]
+
 if __name__ == '__main__':
   unittest.main()
