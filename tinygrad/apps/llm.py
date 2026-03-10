@@ -93,7 +93,7 @@ class TransformerBlock:
     self.rope_theta   = rope_theta
     self.max_context  = max_context
     self.qk_norm      = qk_norm
-    self.rope_dim     = rope_dim if rope_dim else head_dim
+    self.rope_dim     = rope_dim or head_dim
     self.gated_attn   = gated_attn
     if ssm is None:
       # --- attention projections (all linear, bias-free) ------------------
