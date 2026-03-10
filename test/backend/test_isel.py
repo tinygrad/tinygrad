@@ -1,10 +1,12 @@
 import unittest
+from tinygrad import Device
 from tinygrad.uop import Ops
 from tinygrad.uop.ops import UOp, dtypes, graph_rewrite
 from tinygrad.renderer.isa.x86 import X86Renderer, X86Ops
 from tinygrad.renderer.isa import IselContext
 
 # these tests are to catch changes that don't cause incorrect codegen but cause worse codegen
+@unittest.skipUnless(isinstance(Device[Device.DEFAULT].renderer, X86Renderer), "only x86")
 class TestIselX86(unittest.TestCase):
   def isel_rewrite(self, x:UOp): return graph_rewrite(x, X86Renderer().isel_matcher, IselContext(x), bottom_up=True)
 
@@ -12,8 +14,8 @@ class TestIselX86(unittest.TestCase):
     nargs = expr.__code__.co_argcount
     for dt,op in dt_op:
       with self.subTest(dtype=dt):
-        vars = [UOp.variable(str(i), 0, 0, dt) for i in range(nargs)]
-        n = self.isel_rewrite(expr(*vars))
+        v = [UOp.variable(str(i), 0, 0, dt) for i in range(nargs)]
+        n = self.isel_rewrite(expr(*v))
         self.assertIs(n.arg, op)
 
   def test_cmove(self):

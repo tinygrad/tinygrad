@@ -55,7 +55,7 @@ class LinearScanRegallocContext:
       if u.op in PSEUDO_OPS: continue
       # allocate uses
       for j,s in enumerate(u.src):
-        # HACK
+        # HACK: cause of later hacks to lower range
         if u.op is Ops.END: continue
         # allocate srcs, if src was spilled it's replaced by a load, if it's live the load was already emitted otherwise alloc and emit one
         if isinstance(v:=s.reg, Register) and v in self.spills:
@@ -74,7 +74,8 @@ class LinearScanRegallocContext:
             ins = tuple(live.get(s.reg) for s in u.src)
             cons = ((ins[0],) if ins[0] in cons else ()) + tuple(r for r in cons if r not in ins)
             assert cons
-          self.real_defs[v] = live[v] = alloc(cons, i+1)
+          # HACK: cause the range is missing the comparison
+          self.real_defs[v] = live[v] = alloc(cons, i+1 if u.op is not Ops.RANGE else i)
 
       # loop prologue, avoid loading inside the loop
       if u.op is Ops.RANGE:
