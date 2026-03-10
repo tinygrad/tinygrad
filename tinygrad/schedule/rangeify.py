@@ -24,11 +24,11 @@ pm_syntactic_sugar = PatternMatcher([
 
 def found_assign(ctx:dict[UOp, UOp], assign:UOp, src:UOp):
   if (x:=src).op is Ops.CAST and x.dtype == dtypes.half and FLOAT16: x, assign = x.src[0], assign.cast(dtypes.float)
-  while True:
-    if x.op is Ops.PERMUTE: x, assign = x.src[0], assign.permute(argsort(x.marg))
-    elif x.op is Ops.RESHAPE: x, assign = x.src[0], assign.reshape(x.src[0].shape)
-    elif x.op is Ops.WHERE and x.src[2].base.arg is Invalid: x = x.src[1]
-    else: break
+  while x is not x.base:
+    if x.op is Ops.PERMUTE: assign = assign.permute(argsort(x.marg))
+    elif x.op is Ops.RESHAPE: assign = assign.reshape(x.src[0].shape)
+    else: return None
+    x = x.src[0]
   ctx[x] = assign
 
 # *** fold moved ASSIGNs (hack for openpilot) ***
