@@ -1,4 +1,4 @@
-import functools, itertools
+import functools, itertools, math
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp
 from tinygrad.dtype import dtypes
 from tinygrad.helpers import cdiv, cmod, CORRECT_DIVMOD_FOLDING, unwrap
@@ -56,14 +56,11 @@ def fold_divmod_general(d: UOp, correct_divmod_folding: bool) -> UOp|None:
           return sum((f-r)//c * v for f,r,v in zip(factors,rems,terms)) + const//c + rem.vmin//c
 
     # gcd_with_remainder: factor out common gcd from numerator
-    # Note: this rule uses uops_no_const to exclude the additive constant from the GCD calculation
-    if x.vmin >= 0:
-      gcd = UOp.gcd(*uops_no_const, y).simplify()
-      if gcd.op is Ops.CONST and gcd.arg > 1:
-        new_x = unwrap(x_peeled.divide_exact(gcd)).simplify() + (const%c)//gcd.arg
-        if new_x.vmin >= 0:
-          ret = new_x.alu(d.op, x.ufix(c//gcd.arg))
-          return ret*gcd + const%gcd.arg if d.op is Ops.MOD else ret+const//c
+    if x.vmin >= 0 and (g:=math.gcd(*factors, c)) > 1:
+      new_x = unwrap(x_peeled.divides(g)).simplify() + (const//g)%(c//g)
+      if new_x.vmin >= 0:
+        if d.op is Ops.MOD: return new_x % (c//g) * g + const%g
+        return new_x // (c//g) + const//c
 
     # nest_by_factor: x//c -> (x//f)//(c//f), x%c -> (x//f%(c//f))*f + b where b=x%f
     if x.vmin >= 0:
