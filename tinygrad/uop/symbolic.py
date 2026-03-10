@@ -29,18 +29,17 @@ invalid_gate = UPat.var("cond").where(UPat.var("x"), invalid_pat)
 propagate_invalid = PatternMatcher([
   # propagate invalid, push it past children
   (invalid_gate.cast(name="cast"), lambda i,x,cond,cast: x.cast(cast.dtype) if i.dtype is dtypes.index else None),
-  *((invalid_gate.alu(op, UPat.var("y")).named("alu"), lambda cond,x,y,alu,i: cond.where(x.alu(alu.op,y), i))
-    for op in GroupOp.Binary-GroupOp.Comparison),
+  (UPat(GroupOp.Binary-GroupOp.Comparison, src=(invalid_gate, UPat.var("y")), name="alu"), lambda cond,x,y,alu,i: cond.where(x.alu(alu.op,y), i)),
+  (UPat(GroupOp.Binary-GroupOp.Comparison, src=(UPat.var("y"), invalid_gate), name="alu"), lambda cond,x,y,alu,i: cond.where(y.alu(alu.op,x), i)),
   (UPat(GroupOp.Unary, src=(invalid_gate,), name="alu"), lambda cond,x,alu,i: cond.where(x.alu(alu.op), i)),
   # TODO: when can this happen? and is it always safe to just drop invalid?
-  *((UPat(op, src=(invalid_gate, UPat.var("y")), name="alu"), lambda cond,x,y,alu,i:
-     x.alu(alu.op,y) if i.dtype is dtypes.index else cond.where(x.alu(alu.op,y), i.cast(dtypes.bool))) for op in GroupOp.Comparison),
-  *((UPat(op, src=(UPat.var("y"), invalid_gate), name="alu"), lambda cond,x,y,alu,i:
-     x.alu(alu.op,y) if i.dtype is dtypes.index else cond.where(y.alu(alu.op,x), i.cast(dtypes.bool))) for op in GroupOp.Comparison),
+  (UPat(GroupOp.Comparison, src=(invalid_gate, UPat.var("y")), name="alu"), lambda cond,x,y,alu,i:
+     x.alu(alu.op,y) if i.dtype is dtypes.index else cond.where(x.alu(alu.op,y), i.cast(dtypes.bool))),
+  (UPat(GroupOp.Comparison, src=(UPat.var("y"), invalid_gate), name="alu"), lambda cond,x,y,alu,i:
+     y.alu(alu.op,x) if i.dtype is dtypes.index else cond.where(y.alu(alu.op,x), i.cast(dtypes.bool))),
   # alu with invalid -> invalid
   (UPat(GroupOp.Unary, src=(invalid_pat,)), lambda i: i),
-  (UPat(GroupOp.Binary-GroupOp.Comparison, src=(invalid_pat, UPat())), lambda i: i),
-  (UPat(GroupOp.Binary-GroupOp.Comparison, src=(UPat(), invalid_pat)), lambda i: i),
+  (UPat(GroupOp.Binary-GroupOp.Comparison, src=[invalid_pat, UPat()]), lambda i: i),
   # normalize where(cond, Invalid, val) -> where(~cond, val, Invalid)
   (UPat.var("cond").where(invalid_pat, UPat.var("val")), lambda cond, i, val: cond.logical_not().where(val, i) if val.arg != Invalid else i),
 ])

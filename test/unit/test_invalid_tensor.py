@@ -56,6 +56,14 @@ class TestInvalidTensor(unittest.TestCase):
     assert ret[0] == 11.0 and ret[1] == 22.0
     assert before[2] == ret[2]
 
+  def test_where_invalid_add_left(self):
+    mask = Tensor.arange(3) < 2
+    mixed = mask.where(Tensor([10.0, 20.0, 30.0]), Invalid)
+    out = Tensor([1.0, 2.0, 3.0]) + mixed
+    before, ret = self._realize_and_capture(out)
+    assert ret[0] == 11.0 and ret[1] == 22.0
+    assert before[2] == ret[2]
+
   def test_where_always_true(self):
     mask = Tensor.arange(3) < 10
     out = mask.where(Tensor([10.0, 20.0, 30.0]), Invalid)
