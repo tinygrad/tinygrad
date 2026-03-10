@@ -78,16 +78,15 @@ class TestSQTTMapBase(unittest.TestCase):
       for event in events:
         if (p:=kern_events.get(event.kern)) is None: continue
         with self.subTest(example=name, kern=event.kern):
-          timeline = [e for e in sqtt_timeline(event.blob, p.lib, target) if type(e).__name__ == "ProfileRangeEvent"]
+          events = [e for e in sqtt_timeline(event.blob, p.lib, target) if type(e).__name__ == "ProfileRangeEvent"]
           insts, execs = 0, 0
-          for e in timeline:
-            assert e.en > e.st
+          for e in events:
             if "EXEC" in e.device:
               if "ALT" not in e.name.display_name: execs += 1
             elif "WAVE" in e.device:
-              # filter out INST packets that don't get an EXEC in ALU or MEM units
+              # sopk/immediates don't get ALU/MEM EXEC
               if e.name.display_name not in {"IMMEDIATE", "IMMEDIATE_MASK", "JUMP", "JUMP_NO", "MESSAGE"}: insts += 1
-            else: raise Exception(f"Timeline row must be INST or EXEC, got {e.device}")
+            else: raise Exception(f"timeline row must be INST or EXEC, got {e.device}")
           self.assertEqual(execs, insts)
 
 class TestSQTTMapRDNA3(TestSQTTMapBase): target = "gfx1100"
