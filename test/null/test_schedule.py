@@ -1189,5 +1189,11 @@ class TestBufferView(unittest.TestCase):
     b = a.shrink(((200, 800),)).shrink(((0, 300),)).reshape((30, 10)).shrink(((20, 25), (0, 10))).contiguous()
     run_schedule(check_schedule(b, 0))
 
+class TestInvalidTensor(unittest.TestCase):
+  def test_full_invalid_is_zero_kernels(self):
+    from tinygrad.dtype import Invalid
+    t = Tensor.full((4,), Invalid, dtype=dtypes.float)
+    check_schedule(t, 0)
+
 if __name__ == '__main__':
   unittest.main(verbosity=2)
