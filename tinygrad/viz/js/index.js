@@ -521,7 +521,8 @@ async function renderProfiler(path, opts) {
   }
   for (const m of markers) m.label = m.name.split(/(\s+)/).map(st => ({ st, color:m.color, width:ctx.measureText(st).width }));
   data.pcToShape = new Map([...data.pcToShape].sort((a, b) => a[1].st - b[1].st));
-  if (extData.pcMap != null) data.pcMap = extData.pcMap; setFocus(focusedShape);
+  const extra = [...Object.entries(extData)];
+  if (extra.length > 0) extra.forEach(([k, v]) => { data[k] = v; }); setFocus(focusedShape);
   updateProgress(Status.COMPLETE);
   // draw events on a timeline
   const dpr = window.devicePixelRatio || 1;
@@ -871,7 +872,7 @@ async function main() {
       }
       appendSteps(ul, i, steps);
     }
-    return setState({ currentCtx:-1 });
+    return setState({currentCtx: 12, currentStep: 2, currentRewrite: 0, expandSteps: true });
   }
   // ** center graph
   const { currentCtx, currentStep, currentRewrite, expandSteps } = state;

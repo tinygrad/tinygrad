@@ -339,6 +339,7 @@ def sqtt_timeline(data:bytes, lib:bytes, target:str) -> list[ProfileEvent]:
   from tinygrad.renderer.amd.sqtt import VMEMEXEC, ALUEXEC, INST_RDNA4, InstOpRDNA4, TS_DELTA_OR_MARK_RDNA4
   ret:list[ProfileEvent] = []
   rows:dict[str, None] = {}
+  freq:list[int] = []
   trace:dict[str, set[int]] = {}
   # real time anchors
   start_time, curr, prev = None, None, None # [shader_clk, real_clk]
@@ -348,6 +349,7 @@ def sqtt_timeline(data:bytes, lib:bytes, target:str) -> list[ProfileEvent]:
   def add(name:str, p:PacketType, width=1, op_name=None, wave=None, info:InstructionInfo|None=None) -> None:
     nonlocal start_time, curr, prev
     rate = (curr[0] - prev[0]) / (curr[1] - prev[1])
+    freq.append(rate)
     rt = (RT_BASE | round(curr[1] + (p._time - curr[0]) / rate)) * NS_PER_TICK
     if start_time is None: start_time = rt
     width *= NS_PER_TICK / rate
@@ -374,7 +376,8 @@ def sqtt_timeline(data:bytes, lib:bytes, target:str) -> list[ProfileEvent]:
       if p._time in trace.setdefault(name, set()): raise AssertionError(f"packets overlap in shared resource! {name}")
       trace[name].add(p._time)
   pc_map = {addr:str(inst) for addr,inst in amd_decode(lib, target).items()}
-  return [ProfilePointEvent(r, "JSON", "pcMap", pc_map, ts=Decimal(0)) for r in rows]+ret
+  frequency = ProfilePointEvent("SE", "JSON", "frequency", freq, ts=Decimal(0))
+  return [ProfilePointEvent(r, "JSON", "pcMap", pc_map, ts=Decimal(0)) for r in rows]+[frequency]+ret
 
 # ** SQTT OCC only unpacks wave start, end time and SIMD location
 
