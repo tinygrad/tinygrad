@@ -747,6 +747,16 @@ class TestSymbolic(unittest.TestCase):
     # f=3, k=2, const=1: (a*3+b+1)%6 = (a%2)*3 + b + 1
     self.helper_test_variable((a*3+b+1)%6, 1, 5, "(b+a%2*3+1)")
 
+  def test_nest_by_factor_subexpr_sharing(self):
+    # nest_by_factor should prefer factorizations that expose shared subexpressions
+    # (gidx0*4 + lidx1 + lidx0*32) % 256: with div=32, b=lidx1+gidx0*4 is shared with the weight index
+    # count_divmod tie-breaks in favor of div=32, old backward_slice metric picked div=4 which hides the subexpr
+    gidx0 = Variable("gidx0", 0, 1)
+    lidx1 = Variable("lidx1", 0, 3)
+    lidx0 = Variable("lidx0", 0, 31)
+    self.helper_test_variable((gidx0*4+lidx1+lidx0*32)%256, 0, 231, "(lidx1+gidx0*4+lidx0%8*32)")
+    self.helper_test_variable((gidx0*4+lidx1+lidx0*32)//256, 0, 3, "(lidx0//8)")
+
   def test_div_mod_recombine_after_nesting(self):
     # when nest_div_by_factor simplifies the div, the mod must also nest so recombine can fire
     gidx0 = Variable("gidx0", 0, 15)

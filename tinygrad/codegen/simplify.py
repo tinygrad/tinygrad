@@ -16,7 +16,6 @@ pm_flatten_range = PatternMatcher([
   (UPat((Ops.REDUCE, Ops.STORE, Ops.END), name="r"), flatten_range),
 ])
 
-def count_divmod(x:UOp) -> int: return sum(u.op in {Ops.IDIV, Ops.MOD} for u in x.backward_slice)
 def simplify_merge_adjacent(u:UOp) -> UOp|None:
   reduce_ranges = [x.ranges for x in u.backward_slice_with_self if x.op is Ops.REDUCE]
   # on END we only want to merge adjacent ranges, on REDUCE we want to try all combinations
@@ -32,7 +31,7 @@ def simplify_merge_adjacent(u:UOp) -> UOp|None:
                              name=f"check_merge_{r0.arg[0]}_{r1.arg[0]}")
 
         # check if it simplifies
-        if count_divmod(nidx) <= count_divmod(u):
+        if nidx.count_divmod() <= u.count_divmod():
           u = nidx
   return u
 

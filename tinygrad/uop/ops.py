@@ -162,6 +162,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
   def op_in_backward_slice_with_self(self, *ops:Ops) -> bool:
     # Check self first, then iterate backward_slice (avoids creating intermediate dict)
     return self.op in ops or any(x.op in ops for x in self.backward_slice)
+  def count_divmod(self) -> int: return sum(u.op in {Ops.IDIV, Ops.MOD} for u in self.backward_slice)
 
   def toposort(self, gate:Callable|None=None, enter_calls=True) -> dict[UOp, None]:
     cache: dict[UOp, None] = {}
