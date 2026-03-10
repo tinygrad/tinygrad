@@ -2,7 +2,7 @@
 import unittest, pickle
 from typing import Iterator
 from pathlib import Path
-from tinygrad.helpers import DEBUG, OSX, ProfileRangeEvent
+from tinygrad.helpers import DEBUG, OSX
 from tinygrad.renderer.amd.sqtt import print_packets, map_insts
 from tinygrad.runtime.autogen.amd.rdna3.ins import s_endpgm
 from tinygrad.viz.serve import sqtt_timeline
