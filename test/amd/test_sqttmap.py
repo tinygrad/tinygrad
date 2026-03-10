@@ -2,9 +2,10 @@
 import unittest, pickle
 from typing import Iterator
 from pathlib import Path
-from tinygrad.helpers import DEBUG, OSX
+from tinygrad.helpers import DEBUG, OSX, ProfileRangeEvent
 from tinygrad.renderer.amd.sqtt import print_packets, map_insts
 from tinygrad.runtime.autogen.amd.rdna3.ins import s_endpgm
+from tinygrad.viz.serve import sqtt_timeline
 from test.amd.disasm import disasm
 
 import tinygrad
@@ -58,11 +59,12 @@ class TestSQTTMapBase(unittest.TestCase):
         data = pickle.load(f)
       sqtt_events = [e for e in data if type(e).__name__ == "ProfileSQTTEvent"]
       kern_events = {e.tag:e for e in data if type(e).__name__ == "ProfileProgramEvent"}
+      kern_durations = {e.name:int(float(e.en-e.st)*1e3) for e in data if type(e).__name__ == "ProfileRangeEvent"}
       if sqtt_events and kern_events:
-        cls.examples[pkl_path.stem] = (sqtt_events, kern_events, cls.target)
+        cls.examples[pkl_path.stem] = (sqtt_events, kern_events, kern_durations, cls.target)
 
   def test_rocprof_inst_traces_match(self):
-    for name, (events, kern_events, target) in self.examples.items():
+    for name, (events, kern_events, _, target) in self.examples.items():
       for event in events:
         if not event.itrace: continue
         if event.kern not in kern_events: continue
@@ -71,6 +73,16 @@ class TestSQTTMapBase(unittest.TestCase):
           pass_rocprof_err = OSX and target == "gfx1200" and name.startswith("profile_ops")
           passed_insts, n_waves, n_units = rocprof_inst_traces_match(event, kern_events[event.kern], target, pass_rocprof_err)
           if n_waves: print(f"{name}: passed for {passed_insts} instructions across {n_waves} waves scheduled on {n_units} wave units")
+
+  def test_realtime_duration(self):
+    for name, (events, kern_events, kern_durations, target) in self.examples.items():
+      print(name)
+      for event in events:
+        if (k:=kern_events.get(event.kern)) is None: continue
+        if not (timeline:=sqtt_timeline(event.blob, k.lib, target)): continue
+        cmp_dur = max(timestamps:=[e.st for e in timeline if type(e).__name__ == "ProfileRangeEvent"])-min(timestamps)
+        ref_dur = kern_durations[k.name]
+        assert 0 < cmp_dur <= ref_dur, f"{ref_dur} {cmp_dur}"
 
 class TestSQTTMapRDNA3(TestSQTTMapBase): target = "gfx1100"
 

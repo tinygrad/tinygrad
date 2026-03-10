@@ -341,9 +341,13 @@ def sqtt_timeline(data:bytes, lib:bytes, target:str) -> list[ProfileEvent]:
   rows:dict[str, None] = {}
   trace:dict[str, set[int]] = {}
   # real time anchors
-  start_time, prev_pair, curr_pair = None, None
+  start_time, curr, prev = None, None, None # [shader_clk, real_clk]
   def add(name:str, p:PacketType, width=1, op_name=None, wave=None, info:InstructionInfo|None=None) -> None:
-    nonlocal start_time
+    nonlocal start_time, curr, prev
+    RT_BASE = 1 << 36 # SQTT stores the low 36 bits of the realtime value
+    NS_PER_TICK = 10  # 100MHz
+    rate = (curr[0] - prev[0]) / (curr[1] - prev[1])
+    rt = (RT_BASE | round(curr[1] + (p._time - curr[0]) / rate)) * NS_PER_TICK
     if start_time is None: start_time = rt
     if hasattr(p, "wave"): wave = p.wave
     rows.setdefault(r:=(f"WAVE:{wave}" if wave is not None else f"{p.__class__.__name__}:0 {name}"))
@@ -351,7 +355,7 @@ def sqtt_timeline(data:bytes, lib:bytes, target:str) -> list[ProfileEvent]:
     ret.append(ProfileRangeEvent(r, key, Decimal(rt-start_time), Decimal(rt-start_time+width)))
   for p, info in map_insts(data, lib, target):
     if len(ret) > getenv("MAX_SQTT_PKTS", 50_000): break
-    if isinstance(p, TS_DELTA_OR_MARK) and p.is_marker: prev_pair, curr_pair = curr_pair, (p._time, p.delta)
+    if isinstance(p, TS_DELTA_OR_MARK) and p.is_marker: prev, curr = curr, (p._time, p.delta)
     if isinstance(p, (INST, INST_RDNA4)):
       op_name = p.op.name if isinstance(p.op, (InstOp, InstOpRDNA4)) else f"0x{p.op:02x}"
       name, width = (op_name, 10 if "BARRIER" in op_name else 1)
