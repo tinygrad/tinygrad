@@ -249,8 +249,6 @@ class Transformer:
     # we specialize the JIT for prefill and rollout
     self.prefill_jit = TinyJit(self.forward)
     self.rollout_jit = TinyJit(self.forward)
-    # SSM models can't use symbolic T (Python for loop in _delta_net), so we use a single fixed-size prefill JIT
-    if self.has_ssm: self.ssm_prefill_jit = TinyJit(self.forward)
 
   def forward(self, tokens:Tensor, start_pos:int|UOp) -> Tensor:
     x = self.token_embd(tokens)                           # (B, T, D)
@@ -315,24 +313,16 @@ class Transformer:
     v_start_pos = UOp.variable("start_pos", 0, self.max_context-1)
     v_toks = UOp.variable("toks", 1, chunk_size)
     # assign all input tokens once, then slice from start_pos for the model call
-    if len(tokens) > self.max_context: tokens = tokens[-self.max_context:]
     t = Tensor(tokens + [0] * (self.max_context - len(tokens)), dtype="int32").reshape(1, self.max_context)
     # recompute start_pos from what's currently valid in the kv cache
     start_pos = self.get_start_pos(tokens)
     out, prompt_len = None, len(tokens)
     while len(tokens) < self.max_context:
       if self.has_ssm and start_pos < prompt_len:
-        # SSM prefill: use fixed chunk_size JIT for full chunks, direct forward() for remainder
-        remaining = prompt_len - start_pos
         sp = v_start_pos.bind(start_pos)
-        if remaining >= chunk_size:
-          chunk = Tensor(tokens[start_pos:start_pos+chunk_size], dtype="int32").reshape(1, chunk_size).realize()
-          out = self.ssm_prefill_jit(chunk, sp).realize()
-          start_pos += chunk_size
-        else:
-          chunk = Tensor(tokens[start_pos:start_pos+remaining], dtype="int32").reshape(1, remaining).realize()
-          out = self.forward(chunk, sp).realize()
-          start_pos += remaining
+        tok_tensor = Tensor([tokens[start_pos]], dtype="int32").reshape(1, 1).realize()
+        out = self.rollout_jit(tok_tensor, sp).realize()
+        start_pos += 1
       else:
         sp, nt = v_start_pos.bind(start_pos), v_toks.bind(min(chunk_size, len(tokens) - start_pos))
         out = self(t[:, sp:sp+nt] if start_pos < prompt_len or out is None else out, sp).realize()
