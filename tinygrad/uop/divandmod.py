@@ -26,7 +26,10 @@ def fold_divmod_general(d: UOp, correct_divmod_folding: bool) -> UOp|None:
     if d.op is Ops.IDIV and x.op is Ops.MOD and x.src[1].op is Ops.CONST and x.vmin >= 0 and x.src[1].arg % c == 0:
       return x.src[0] // y % x.ufix(x.src[1].arg // c)
 
-    # remove_nested_mod: remove nested mod in case the inner mod is a multiple of the outer mod, example: (a%4 + b)%2 -> (a+b)%2
+    # remove_nested_mod: (x%(k*c))%c -> x%c
+    if d.op is Ops.MOD and x.op is Ops.MOD and x.src[1].divides(c) is not None: return x.src[0] % y
+
+    # remove_nested_mod in sum: (a%4 + b)%2 -> (a+b)%2, requires non-negative sums
     if d.op is Ops.MOD and x.vmin >= 0:
       new_xs, changed = [], False
       for u in uops_no_const:
