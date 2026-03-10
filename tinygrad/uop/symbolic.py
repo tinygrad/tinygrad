@@ -29,9 +29,9 @@ invalid_gate = UPat.var("cond").where(UPat.var("x"), invalid_pat)
 propagate_invalid = PatternMatcher([
   # propagate invalid, push it past children
   (invalid_gate.cast(name="cast"), lambda i,x,cond,cast: x.cast(cast.dtype) if i.dtype is dtypes.index else None),
+  (UPat(GroupOp.Unary, src=(invalid_gate,), name="alu"), lambda cond,x,alu,i: cond.where(x.alu(alu.op), i)),
   (UPat(GroupOp.Binary-GroupOp.Comparison, src=(invalid_gate, UPat.var("y")), name="alu"), lambda cond,x,y,alu,i: cond.where(x.alu(alu.op,y), i)),
   (UPat(GroupOp.Binary-GroupOp.Comparison, src=(UPat.var("y"), invalid_gate), name="alu"), lambda cond,x,y,alu,i: cond.where(y.alu(alu.op,x), i)),
-  (UPat(GroupOp.Unary, src=(invalid_gate,), name="alu"), lambda cond,x,alu,i: cond.where(x.alu(alu.op), i)),
   # TODO: when can this happen? and is it always safe to just drop invalid?
   (UPat(GroupOp.Comparison, src=(invalid_gate, UPat.var("y")), name="alu"), lambda cond,x,y,alu,i:
      x.alu(alu.op,y) if i.dtype is dtypes.index else cond.where(x.alu(alu.op,y), i.cast(dtypes.bool))),
@@ -129,9 +129,12 @@ symbolic_simple = propagate_invalid + PatternMatcher([
   (UPat.cvar("gate", vec=False).where(UPat.var("c0"), UPat.var("c1")), lambda gate, c0, c1: c0 if gate.arg else c1),
   # a.where(b.where(c, d), d) -> (a & b).where(c, d)
   (UPat.var("a").where(UPat.var("b").where(UPat.var("c"), UPat.var("d")), UPat.var("d")), lambda a,b,c,d: (a&b).where(c,d)),
+  # where over invalid -> invalid
+  (invalid_gate.where(UPat.var("a"), UPat.var("b")), lambda a,b,cond,x,i: i.cast(a.dtype)),
+  (invalid_pat.where(UPat.var("a"), UPat.var("b")), lambda a,b,i: i.cast(a.dtype)),
   # reduce with invalid -> invalid
   (UPat(Ops.REDUCE, src=(invalid_gate,), allow_any_len=True, name="r"), lambda r,cond,x,i: i.cast(r.dtype)),
-  (UPat(Ops.REDUCE, src=(invalid_pat,), allow_any_len=True, name="r"), lambda r,cond,x,i: i.cast(r.dtype)),
+  (UPat(Ops.REDUCE, src=(invalid_pat,), allow_any_len=True, name="r"), lambda r,i: i.cast(r.dtype)),
 ])
 
 # ******** phase 2 builds on phase 1, it includes the old "symbolic", rules that match deeper ********
