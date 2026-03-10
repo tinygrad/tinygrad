@@ -336,7 +336,7 @@ def load_amd_counters(ctxs:list[dict], profile:list[ProfileEvent]) -> None:
 
 def sqtt_timeline(data:bytes, lib:bytes, target:str) -> list[ProfileEvent]:
   from tinygrad.renderer.amd.sqtt import map_insts, InstructionInfo, PacketType, TS_DELTA_OR_MARK, INST, InstOp, VALUINST, IMMEDIATE, IMMEDIATE_MASK
-  from tinygrad.renderer.amd.sqtt import VMEMEXEC, ALUEXEC, INST_RDNA4, InstOpRDNA4
+  from tinygrad.renderer.amd.sqtt import VMEMEXEC, ALUEXEC, INST_RDNA4, InstOpRDNA4, TS_DELTA_OR_MARK_RDNA4
   ret:list[ProfileEvent] = []
   rows:dict[str, None] = {}
   trace:dict[str, set[int]] = {}
@@ -349,11 +349,12 @@ def sqtt_timeline(data:bytes, lib:bytes, target:str) -> list[ProfileEvent]:
     if start_time is None: start_time = rt
     ret.append(ProfileRangeEvent(r, key, Decimal(rt-start_time), Decimal(rt-start_time+width)))
   prev_pair, curr_pair = None, None
-  RT_BASE = 1 << 36 # SQTT stores the low 36 bits of the realtime value
+  ts_cls = TS_DELTA_OR_MARK_RDNA4 if "gfx12" in target else TS_DELTA_OR_MARK
+  RT_BASE = 1 << (ts_cls.delta.hi-ts_cls.delta.lo+1)
   NS_PER_TICK = 10  # 100MHz
   for p, info in map_insts(data, lib, target):
     if len(ret) > getenv("MAX_SQTT_PKTS", 50_000): break
-    if isinstance(p, TS_DELTA_OR_MARK) and p.rt and not p.pl: prev_pair, curr_pair = curr_pair, (p._time, p.delta)
+    if isinstance(p, TS_DELTA_OR_MARK) and p.is_marker: prev_pair, curr_pair = curr_pair, (p._time, p.delta)
     if prev_pair is None or curr_pair is None: continue
     (s0, r0), (s1, r1) = prev_pair, curr_pair
     rate = (s1 - s0) / (r1 - r0)
