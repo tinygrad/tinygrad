@@ -175,47 +175,38 @@ class TransformerBlock:
 
   @function(precompile=bool(getenv("PRECOMPILE", 0)))
   def _delta_net(self, x:Tensor) -> Tensor:
-    B, T, _ = x.shape
+    B, _, _ = x.shape
     x_norm = self.attn_norm(x)
-    qkv = self.attn_qkv(x_norm)
-    out_gate = self.attn_gate(x_norm).reshape(B, T, self.num_v_heads, self.head_v_dim)
-    beta = self.ssm_beta(x_norm).sigmoid()
-    alpha_log = (self.ssm_alpha(x_norm).float() + self.ssm_dt_bias).softplus() * self.ssm_a               # log decay (negative)
+    out_gate = self.attn_gate(x_norm).reshape(B, 1, self.num_v_heads, self.head_v_dim)
+    beta = self.ssm_beta(x_norm).sigmoid().reshape(B, self.num_v_heads, 1, 1)
+    alpha = ((self.ssm_alpha(x_norm).float() + self.ssm_dt_bias).softplus() * self.ssm_a).reshape(B, self.num_v_heads, 1, 1).exp()
     # extract conv_state and recurrent_state from combined delta_cache buffer
     conv_flat = (self.ssm_conv_kernel - 1) * self.conv_channels
     ssm_flat = self.num_v_heads * self.head_v_dim * self.head_v_dim
     conv_state = self.delta_cache[:, :conv_flat].reshape(B, self.ssm_conv_kernel - 1, self.conv_channels)
     recurrent_state = self.delta_cache[:, conv_flat:conv_flat + ssm_flat].reshape(B, self.num_v_heads, self.head_v_dim, self.head_v_dim)
-    k_repeat = self.num_v_heads // self.num_k_heads
-    outs = []
-    for i in range(T):
-      conv_in = conv_state.cat(qkv[:, i:i+1, :], dim=1).transpose(1, 2)                     # (B, C, kernel)
-      conv_state = conv_state.cat(qkv[:, i:i+1, :], dim=1)[:, 1:, :]
-      conv_out = self.ssm_conv1d(conv_in).squeeze(-1).silu()                               # (B, C)
-      q, k, v = conv_out.split([self.q_dim, self.q_dim, self.conv_channels - 2*self.q_dim], dim=-1)
-      q, k = q.reshape(B, self.num_k_heads, self.head_k_dim).normalize(dim=-1), k.reshape(B, self.num_k_heads, self.head_k_dim).normalize(dim=-1)
-      v = v.reshape(B, self.num_v_heads, self.head_v_dim)
-      if k_repeat > 1:
-        q = q.unsqueeze(1).expand(B, k_repeat, self.num_k_heads, self.head_k_dim).reshape(B, self.num_v_heads, self.head_k_dim)
-        k = k.unsqueeze(1).expand(B, k_repeat, self.num_k_heads, self.head_k_dim).reshape(B, self.num_v_heads, self.head_k_dim)
-      q, k, v = (q * self.head_k_dim**-0.5).unsqueeze(-1), k.unsqueeze(-1), v.unsqueeze(-1)
-      alpha = alpha_log[:, i, :].reshape(B, self.num_v_heads, 1, 1).exp()
-      beta_t = beta[:, i, :].reshape(B, self.num_v_heads, 1, 1)
-      recurrent_state = recurrent_state * alpha                                                      # forget
-      recurrent_state = recurrent_state + ((v - recurrent_state@k) * beta_t)@k.transpose(-1, -2)  # delta update
-      if i < T - 1:  # intermediate steps: compute output directly from local state
-        core_attn_out = self.ssm_norm((recurrent_state@q).squeeze(-1).reshape(B, 1, self.num_v_heads, self.head_v_dim))
-        outs.append(self.ssm_out((core_attn_out * out_gate[:, i:i+1].silu()).reshape(B, 1, -1).cast(x.dtype)))
-    # combine both states and assign to single delta_cache buffer (like _attention's cache_kv)
-    new_cache = conv_state.reshape(B, -1).cat(recurrent_state.reshape(B, -1), dim=-1).contiguous()
+    # causal conv1d: shift in new token, apply conv + silu
+    conv_window = conv_state.cat(self.attn_qkv(x_norm), dim=1)
+    conv_out = self.ssm_conv1d(conv_window.transpose(1, 2)).squeeze(-1).silu()                               # (B, C)
+    # split into q, k, v and normalize q/k
+    q, k, v = conv_out.split([self.q_dim, self.q_dim, self.conv_channels - 2*self.q_dim], dim=-1)
+    q, k = q.reshape(B, self.num_k_heads, self.head_k_dim).normalize(dim=-1), k.reshape(B, self.num_k_heads, self.head_k_dim).normalize(dim=-1)
+    v = v.reshape(B, self.num_v_heads, self.head_v_dim)
+    if self.num_v_heads != self.num_k_heads:
+      k_repeat = self.num_v_heads // self.num_k_heads
+      q = q.unsqueeze(1).expand(B, k_repeat, self.num_k_heads, self.head_k_dim).reshape(B, self.num_v_heads, self.head_k_dim)
+      k = k.unsqueeze(1).expand(B, k_repeat, self.num_k_heads, self.head_k_dim).reshape(B, self.num_v_heads, self.head_k_dim)
+    q, k, v = (q * self.head_k_dim**-0.5).unsqueeze(-1), k.unsqueeze(-1), v.unsqueeze(-1)
+    # gated delta rule recurrence (single step)
+    recurrent_state = recurrent_state * alpha                                                                # forget
+    recurrent_state = recurrent_state + ((v - recurrent_state@k) * beta)@k.transpose(-1, -2)                # delta update
+    # combine both states and assign to single delta_cache buffer
+    new_cache = conv_window[:, 1:, :].reshape(B, -1).cat(recurrent_state.reshape(B, -1), dim=-1).contiguous()
     assigned = self.delta_cache.uop.after(self.delta_cache.uop.assign(new_cache.cast(self.delta_cache.dtype).uop))
     cache_tensor = Tensor(assigned, device=self.delta_cache.device)
-    # compute last step's output by reading ssm_state from the AFTER'd combined buffer
     final_state = cache_tensor[:, conv_flat:conv_flat + ssm_flat].reshape(B, self.num_v_heads, self.head_v_dim, self.head_v_dim)
     core_attn_out = self.ssm_norm((final_state@q).squeeze(-1).reshape(B, 1, self.num_v_heads, self.head_v_dim))
-    outs.append(self.ssm_out((core_attn_out * out_gate[:, -1:].silu()).reshape(B, 1, -1).cast(x.dtype)))
-    attn_out = (outs[0] if len(outs) == 1 else outs[0].cat(*outs[1:], dim=1))
-    return x + attn_out
+    return x + self.ssm_out((core_attn_out * out_gate.silu()).reshape(B, 1, -1).cast(x.dtype))
 
   @function(precompile=bool(getenv("PRECOMPILE", 0)))
   def _feed_forward(self, h: Tensor) -> Tensor:
@@ -465,7 +456,6 @@ if __name__ == "__main__":
 
   # load the model
   raw_model = Tensor.from_url(models[args.model])
-  print(raw_model)
   model, kv = Transformer.from_gguf(raw_model, args.max_context)
   if DEBUG >= 1 or args.benchmark:
     print(f"using model {args.model} with {raw_model.nbytes():,} bytes and {sum(x.numel() for x in nn.state.get_parameters(model)):,} params")
