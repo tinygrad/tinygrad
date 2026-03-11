@@ -45,8 +45,8 @@ class GradAccClipAdamW(Optimizer):
     for i, g in enumerate(grads):
       self.m[i].assign((self.b1 * self.m[i] + (1.0 - self.b1) * g).cast(self.m[i].dtype))
       self.v[i].assign((self.b2 * self.v[i] + (1.0 - self.b2) * (g * g)).cast(self.v[i].dtype))
-      m_hat = self.m[i] / (1.0 - self.b1_t)
-      v_hat = self.v[i] / (1.0 - self.b2_t)
+      m_hat = (self.m[i] / (1.0 - self.b1_t)).cast(self.m[i].dtype)
+      v_hat = (self.v[i] / (1.0 - self.b2_t)).cast(self.v[i].dtype)
       up = m_hat / (v_hat.sqrt() + self.eps)
       ret.append((self.lr * up).cast(g.dtype))
     return ret, [self.b1_t, self.b2_t] + self.m + self.v + [total_norm]
