@@ -249,8 +249,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
         if inner_shape is None: return None
         # substitute internal PARAMs in the shape with corresponding args
         ret = tuple(graph_rewrite(s, _pm_resolve_params, self.src[1:], walk=True) if isinstance(s, UOp) else s for s in inner_shape)
-        # NOTE: this requires the RANGEs directly on the call
-        prepend = tuple([x.vmax+1 for x in self.src[1:] if x.op is Ops.RANGE])
+        prepend = tuple([x.vmax+1 for x in self.src[0].ranges])
         return prepend+ret
 
       # TODO: disallow shape changing bitcast
@@ -353,7 +352,11 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
   @recursive_property
   def _ranges(self) -> dict[UOp, None]:
     ret: dict[UOp, None] = {}
-    for s in self.src: ret.update(s.ranges)
+    if self.op is Ops.CALL:
+      # ranges do not flow through calls
+      for s in self.src[1:]: ret.update(s.ranges)
+    else:
+      for s in self.src: ret.update(s.ranges)
     for er in self.ended_ranges:
       if er.op is Ops.RANGE:
         # if it's a single RANGE, we don't flow through it.
@@ -419,7 +422,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     return UOp(Ops.INDEX, kwargs.pop("dtype", self.dtype if ptr else self.dtype.base), (self,)+tuple([x for x in srcs if x is not None]), **kwargs)
   def __getitem__(self, idx):
     idx = argfix(idx)
-    assert len(idx) == len(self.shape), f"__getitem__ shape mismatch, indexing {self.shape} with {len(idx)} args"
+    #assert len(idx) == len(self.shape), f"__getitem__ shape mismatch, indexing {self.shape} with {len(idx)} args"
     if len(slice_idx:=[i for i,x in enumerate(idx) if isinstance(x, slice)]):
       perm = self.permute(tuple([i for i in range(self.ndim) if i not in slice_idx] + slice_idx))
       return perm.index(*[UOp.const(dtypes.index, x) if isinstance(x, int) else x for x in idx if not isinstance(x, slice)], ptr=True)
@@ -907,7 +910,8 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     return p
 
   def call(self, *srcs:UOp, grad_fxn:Callable|None=None, metadata:tuple[Metadata, ...]=(), name:str|None=None, precompile:bool=False) -> UOp:
-    assert len(self.ranges) == 0, f"ranges {self.ranges} are leaking out of the call in {self.pyrender()}"
+    # ranges don't leak through calls, they end!
+    #assert len(self.ranges) == 0, f"ranges {self.ranges} are leaking out of the call in {self.pyrender()}"
     return UOp(Ops.CALL, self.dtype, (self,)+srcs, CallInfo(grad_fxn, metadata, name, precompile))
   def custom_kernel(*srcs:UOp, fxn:Callable, grad_fxn:Callable|None=None) -> list[UOp]:
     contig_srcs = tuple(x.contiguous() if x.op is not Ops.AFTER else x for x in srcs)

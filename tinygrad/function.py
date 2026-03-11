@@ -36,7 +36,7 @@ class _function(Generic[ReturnType]):
     call_uops: list[UOp] = dedup(input_uops)
 
     # disable realize/schedule while this is running
-    # run it and do surgery later
+    # run it and do surgery later. TODO: why am i not calling it with the params?
     with Context(ALLOW_DEVICE_USAGE=getenv("DEVICE_IN_FUNCTION_BUG", 0)):
       ret = self.fxn(*args, **kwargs)
     assert isinstance(ret, Tensor), "only supports one tensor return for now"
