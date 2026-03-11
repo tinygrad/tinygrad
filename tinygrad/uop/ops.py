@@ -207,7 +207,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
   def _shape(self) -> tuple[sint, ...]|None:
     match self.op:
       # late ops don't have shape
-      case Ops.UNIQUE | Ops.LUNIQUE | Ops.DEVICE | Ops.RANGE | Ops.LOAD | Ops.IF | Ops.BARRIER | Ops.CUSTOM | Ops.CUSTOMI | \
+      case Ops.UNIQUE | Ops.LUNIQUE | Ops.DEVICE | Ops.LOAD | Ops.IF | Ops.BARRIER | Ops.CUSTOM | Ops.CUSTOMI | \
            Ops.VECTORIZE | Ops.GEP | Ops.SPECIAL | Ops.UNROLL | Ops.CONTRACT | Ops.SINK | \
            Ops.LINEAR | Ops.PROGRAM | Ops.SOURCE | Ops.BINARY | Ops.INS:
         return None
@@ -218,15 +218,17 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
           return None
 
       case Ops.INDEX:
-        # non pointer index doesn't have a shape
-        if not isinstance(self.dtype, PtrDType): return None
+        # non pointer index
+        if not isinstance(self.dtype, PtrDType):
+          idxs = flatten([d.shape for d in self.src[1:]])
+          return tuple(idxs) + self.src[0].shape[len(self.src)-1:]
         # fully indexed doesn't have a shape. TODO: remove this
         if self.src[0]._shape is None or len(self.src[1:]) == len(self.src[0].shape): return None
         # pointer index
         return self.src[0].shape[len(self.src[1:]):]
 
       # some ops init the shape
-      case Ops.CONST | Ops.VCONST | Ops.DEFINE_VAR | Ops.BIND: return ()
+      case Ops.CONST | Ops.VCONST | Ops.DEFINE_VAR | Ops.BIND | Ops.RANGE: return ()
       case Ops.BUFFER: return (self.arg,)
       case Ops.BUFFER_VIEW: return (self.arg[0],)
       case Ops.CUSTOM_FUNCTION: return None
@@ -246,7 +248,10 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
         inner_shape = self.src[0]._shape
         if inner_shape is None: return None
         # substitute internal PARAMs in the shape with corresponding args
-        return tuple(graph_rewrite(s, _pm_resolve_params, self.src[1:], walk=True) if isinstance(s, UOp) else s for s in inner_shape)
+        ret = tuple(graph_rewrite(s, _pm_resolve_params, self.src[1:], walk=True) if isinstance(s, UOp) else s for s in inner_shape)
+        # NOTE: this requires the RANGEs directly on the call
+        prepend = tuple([x.vmax+1 for x in self.src[1:] if x.op is Ops.RANGE])
+        return prepend+ret
 
       # TODO: disallow shape changing bitcast
       case Ops.BITCAST:
@@ -1462,6 +1467,7 @@ renderer = PatternMatcher([
   (UPat(Ops.PARAM, src=(UPat(), UPat(), UPat(), UPat(), UPat(Ops.NOOP, name="x"))), lambda x: x.arg),
   (UPat((Ops.SPECIAL), name="x"), lambda x: x.arg),
   (UPat(Ops.RANGE, name="x"), lambda x: f"r{range_str(x)}"),
+  (UPat(Ops.PARAM, name="x"), lambda x: f"p{x.arg}"),
   (UPat((Ops.CONST, Ops.VCONST), name="x"), lambda x: str(x.arg)),
   (UPat(Ops.UNROLL, name="x"), lambda ctx,x,u: f"UNROLL({ctx[x.src[0]]}, {u.arg})"),
   (UPat(Ops.CAST, name="x"), lambda ctx,x: f"({str(x.dtype)[7:]})({ctx[x.src[0]]})"),
