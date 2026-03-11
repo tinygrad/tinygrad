@@ -268,7 +268,19 @@ function setFocus(key) {
   const html = d3.select(".info").html("");
   if (eventType === EventTypes.EXEC) {
     const [n, _, ...rest] = e.arg.tooltipText.split("\n");
-    html.append(() => tabulate([["Name", colored(e.arg.label)], ["Duration", formatTime(e.width)], ["Start Time", formatTime(e.x)]]));
+    const tableData = [["Name", colored(e.arg.label)], ["Duration", formatTime(e.width)], ["Start Time", formatTime(e.x)]];
+    const frequency = data.tracks.get("Shader Clock");
+    if (frequency != null) {
+      let freq = null;
+      for (let [cycle, f] of frequency.valueMap) {
+        if (cycle > e.x) break;
+        freq = f;
+      }
+      tableData.push(["Frequency", formatUnit(freq, 'Hz')]);
+      const ns = e.x / freq * 1e9; const remNs = Math.round(ns % 1000);
+      tableData.push(["Timestamp", ns/1000 > 1 ? formatMicroseconds(ns/1000, true) + (remNs ? ` ${remNs}ns` : "") : Math.round(ns, 2) + "ns"]);
+    }
+    html.append(() => tabulate(tableData));
     let group = html.append("div").classed("args", true);
     for (const r of rest) group.append("p").text(r);
     group = html.append("div").classed("args", true);
@@ -684,6 +696,8 @@ async function renderProfiler(path, opts) {
     } else tooltip.style.display = "none";
   });
   canvas.addEventListener("mouseleave", () => document.getElementById("tooltip").style.display = "none");
+
+  setFocus("ALUEXEC:0 VALU-12040");
 }
 
 // ** zoom and recentering
