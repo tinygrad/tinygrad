@@ -177,21 +177,21 @@ class TransformerBlock:
   def _delta_net(self, x:Tensor) -> Tensor:
     B, T, _ = x.shape
     x_norm = self.attn_norm(x)
-    qkv = self.attn_qkv(x_norm).float()
-    out_gate = self.attn_gate(x_norm).float().reshape(B, T, self.num_v_heads, self.head_v_dim)
-    beta = self.ssm_beta(x_norm).float().sigmoid()
+    qkv = self.attn_qkv(x_norm)
+    out_gate = self.attn_gate(x_norm).reshape(B, T, self.num_v_heads, self.head_v_dim)
+    beta = self.ssm_beta(x_norm).sigmoid()
     alpha_log = (self.ssm_alpha(x_norm).float() + self.ssm_dt_bias).softplus() * self.ssm_a               # log decay (negative)
     # extract conv_state and recurrent_state from combined delta_cache buffer
     conv_flat = (self.ssm_conv_kernel - 1) * self.conv_channels
     ssm_flat = self.num_v_heads * self.head_v_dim * self.head_v_dim
-    conv_state = self.delta_cache[:, :conv_flat].reshape(B, self.ssm_conv_kernel - 1, self.conv_channels).float()
-    recurrent_state = self.delta_cache[:, conv_flat:conv_flat + ssm_flat].reshape(B, self.num_v_heads, self.head_v_dim, self.head_v_dim).float()
+    conv_state = self.delta_cache[:, :conv_flat].reshape(B, self.ssm_conv_kernel - 1, self.conv_channels)
+    recurrent_state = self.delta_cache[:, conv_flat:conv_flat + ssm_flat].reshape(B, self.num_v_heads, self.head_v_dim, self.head_v_dim)
     k_repeat = self.num_v_heads // self.num_k_heads
     outs = []
     for i in range(T):
       conv_in = conv_state.cat(qkv[:, i:i+1, :], dim=1).transpose(1, 2)                     # (B, C, kernel)
       conv_state = conv_state.cat(qkv[:, i:i+1, :], dim=1)[:, 1:, :]
-      conv_out = self.ssm_conv1d(conv_in).float().squeeze(-1).silu()                               # (B, C)
+      conv_out = self.ssm_conv1d(conv_in).squeeze(-1).silu()                               # (B, C)
       q, k, v = conv_out.split([self.q_dim, self.q_dim, self.conv_channels - 2*self.q_dim], dim=-1)
       q, k = q.reshape(B, self.num_k_heads, self.head_k_dim).normalize(dim=-1), k.reshape(B, self.num_k_heads, self.head_k_dim).normalize(dim=-1)
       v = v.reshape(B, self.num_v_heads, self.head_v_dim)
@@ -211,7 +211,7 @@ class TransformerBlock:
     assigned = self.delta_cache.uop.after(self.delta_cache.uop.assign(new_cache.cast(self.delta_cache.dtype).uop))
     cache_tensor = Tensor(assigned, device=self.delta_cache.device)
     # compute last step's output by reading ssm_state from the AFTER'd combined buffer
-    final_state = cache_tensor[:, conv_flat:conv_flat + ssm_flat].reshape(B, self.num_v_heads, self.head_v_dim, self.head_v_dim).float()
+    final_state = cache_tensor[:, conv_flat:conv_flat + ssm_flat].reshape(B, self.num_v_heads, self.head_v_dim, self.head_v_dim)
     core_attn_out = self.ssm_norm((final_state@q).squeeze(-1).reshape(B, 1, self.num_v_heads, self.head_v_dim))
     outs.append(self.ssm_out((core_attn_out * out_gate[:, -1:].silu()).reshape(B, 1, -1).cast(x.dtype)))
     attn_out = (outs[0] if len(outs) == 1 else outs[0].cat(*outs[1:], dim=1))
@@ -465,6 +465,7 @@ if __name__ == "__main__":
 
   # load the model
   raw_model = Tensor.from_url(models[args.model])
+  print(raw_model)
   model, kv = Transformer.from_gguf(raw_model, args.max_context)
   if DEBUG >= 1 or args.benchmark:
     print(f"using model {args.model} with {raw_model.nbytes():,} bytes and {sum(x.numel() for x in nn.state.get_parameters(model)):,} params")
