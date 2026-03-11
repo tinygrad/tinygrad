@@ -173,34 +173,48 @@ class TransformerBlock:
     attn = self.attn_output(attn if not self.gated_attn else (attn * gate.sigmoid()))
     return x + attn
 
+  @function(precompile=bool(getenv("PRECOMPILE", 0)))
   def _delta_net(self, x:Tensor) -> Tensor:
     B, T, _ = x.shape
     x_norm = self.attn_norm(x)
-    qkv, out_gate = self.attn_qkv(x_norm).float(), self.attn_gate(x_norm).float().reshape(B, T, self.num_v_heads, self.head_v_dim)
-    decay = (self.ssm_alpha(x_norm).float() + self.ssm_dt_bias).softplus() * self.ssm_a   # log-space forget factor
-    beta = self.ssm_beta(x_norm).float().sigmoid()                                         # delta-rule learning rate
-    state, conv_cache, outs = self.ssm_state.float(), self.conv_cache.float(), []
-    q_scale, k_repeat = self.head_k_dim**-0.5, self.num_v_heads // self.num_k_heads
+    qkv = self.attn_qkv(x_norm).float()
+    out_gate = self.attn_gate(x_norm).float().reshape(B, T, self.num_v_heads, self.head_v_dim)
+    beta = self.ssm_beta(x_norm).float().sigmoid()
+    alpha_log = (self.ssm_alpha(x_norm).float() + self.ssm_dt_bias).softplus() * self.ssm_a               # log decay (negative)
+    # extract conv_state and recurrent_state from combined delta_cache buffer
+    conv_flat = (self.ssm_conv_kernel - 1) * self.conv_channels
+    ssm_flat = self.num_v_heads * self.head_v_dim * self.head_v_dim
+    conv_state = self.delta_cache[:, :conv_flat].reshape(B, self.ssm_conv_kernel - 1, self.conv_channels).float()
+    recurrent_state = self.delta_cache[:, conv_flat:conv_flat + ssm_flat].reshape(B, self.num_v_heads, self.head_v_dim, self.head_v_dim).float()
+    k_repeat = self.num_v_heads // self.num_k_heads
+    outs = []
     for i in range(T):
-      conv_in = conv_cache.cat(qkv[:, i:i+1, :], dim=1).transpose(1, 2)                    # (B, C, kernel)
-      conv_cache = conv_cache.cat(qkv[:, i:i+1, :], dim=1)[:, 1:, :]
-      conv_out = self.ssm_conv1d(conv_in).float().squeeze(-1).silu()                        # depthwise 1d conv → (B, C)
+      conv_in = conv_state.cat(qkv[:, i:i+1, :], dim=1).transpose(1, 2)                     # (B, C, kernel)
+      conv_state = conv_state.cat(qkv[:, i:i+1, :], dim=1)[:, 1:, :]
+      conv_out = self.ssm_conv1d(conv_in).float().squeeze(-1).silu()                               # (B, C)
       q, k, v = conv_out.split([self.q_dim, self.q_dim, self.conv_channels - 2*self.q_dim], dim=-1)
       q, k = q.reshape(B, self.num_k_heads, self.head_k_dim).normalize(dim=-1), k.reshape(B, self.num_k_heads, self.head_k_dim).normalize(dim=-1)
       v = v.reshape(B, self.num_v_heads, self.head_v_dim)
       if k_repeat > 1:
         q = q.unsqueeze(1).expand(B, k_repeat, self.num_k_heads, self.head_k_dim).reshape(B, self.num_v_heads, self.head_k_dim)
         k = k.unsqueeze(1).expand(B, k_repeat, self.num_k_heads, self.head_k_dim).reshape(B, self.num_v_heads, self.head_k_dim)
-      q, k, v = (q*q_scale).unsqueeze(-1), k.unsqueeze(-1), v.unsqueeze(-1)
-      state = state * decay[:, i, :].reshape(B, self.num_v_heads, 1, 1).exp()              # forget
-      state = state + ((v - state@k) * beta[:, i, :].reshape(B, self.num_v_heads, 1, 1))@k.transpose(-1, -2)  # delta update
-      y = self.ssm_norm((state@q).squeeze(-1).reshape(B, 1, self.num_v_heads, self.head_v_dim))  # read from state
-      outs.append(self.ssm_out((y * out_gate[:, i:i+1].silu()).reshape(B, 1, -1).cast(x.dtype)))
-    assigned_conv = Tensor(self.conv_cache.uop.after(self.conv_cache.uop.assign(conv_cache.cast(self.conv_cache.dtype).uop)),
-                           device=self.conv_cache.device)
-    assigned_state = Tensor(self.ssm_state.uop.after(self.ssm_state.uop.assign(state.cast(self.ssm_state.dtype).uop)), device=self.ssm_state.device)
+      q, k, v = (q * self.head_k_dim**-0.5).unsqueeze(-1), k.unsqueeze(-1), v.unsqueeze(-1)
+      alpha = alpha_log[:, i, :].reshape(B, self.num_v_heads, 1, 1).exp()
+      beta_t = beta[:, i, :].reshape(B, self.num_v_heads, 1, 1)
+      recurrent_state = recurrent_state * alpha                                                      # forget
+      recurrent_state = recurrent_state + ((v - recurrent_state@k) * beta_t)@k.transpose(-1, -2)  # delta update
+      if i < T - 1:  # intermediate steps: compute output directly from local state
+        core_attn_out = self.ssm_norm((recurrent_state@q).squeeze(-1).reshape(B, 1, self.num_v_heads, self.head_v_dim))
+        outs.append(self.ssm_out((core_attn_out * out_gate[:, i:i+1].silu()).reshape(B, 1, -1).cast(x.dtype)))
+    # combine both states and assign to single delta_cache buffer (like _attention's cache_kv)
+    new_cache = conv_state.reshape(B, -1).cat(recurrent_state.reshape(B, -1), dim=-1).contiguous()
+    assigned = self.delta_cache.uop.after(self.delta_cache.uop.assign(new_cache.cast(self.delta_cache.dtype).uop))
+    cache_tensor = Tensor(assigned, device=self.delta_cache.device)
+    # compute last step's output by reading ssm_state from the AFTER'd combined buffer
+    final_state = cache_tensor[:, conv_flat:conv_flat + ssm_flat].reshape(B, self.num_v_heads, self.head_v_dim, self.head_v_dim).float()
+    core_attn_out = self.ssm_norm((final_state@q).squeeze(-1).reshape(B, 1, self.num_v_heads, self.head_v_dim))
+    outs.append(self.ssm_out((core_attn_out * out_gate[:, -1:].silu()).reshape(B, 1, -1).cast(x.dtype)))
     attn_out = (outs[0] if len(outs) == 1 else outs[0].cat(*outs[1:], dim=1))
-    attn_out = attn_out + (assigned_conv[:, :1, :1].sum() + assigned_state[:, :, :1, :1].sum()).cast(x.dtype) * 0
     return x + attn_out
 
   @function(precompile=bool(getenv("PRECOMPILE", 0)))
@@ -222,9 +236,10 @@ class TransformerBlock:
 
   def __call__(self, x: Tensor, start_pos: int|UOp):
     if hasattr(self, 'ssm_out'):
-      if not hasattr(self, "conv_cache"):
-        self.conv_cache = Tensor.zeros(x.shape[0], self.ssm_conv_kernel-1, self.conv_channels, device=x.device).clone()
-        self.ssm_state = Tensor.zeros(x.shape[0], self.num_v_heads, self.head_v_dim, self.head_v_dim, device=x.device).clone()
+      if not hasattr(self, "delta_cache"):
+        conv_flat = (self.ssm_conv_kernel - 1) * self.conv_channels
+        ssm_flat = self.num_v_heads * self.head_v_dim * self.head_v_dim
+        self.delta_cache = Tensor.zeros(x.shape[0], conv_flat + ssm_flat, device=x.device).clone()
       return self._feed_forward(self._delta_net(x)).contiguous()
     if not hasattr(self, "cache_kv"):
       # TODO: how is the dtype of this determined?
