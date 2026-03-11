@@ -36,10 +36,16 @@ def fold_add_divmod_recombine(x:UOp) -> UOp|None:
       if i == j: continue
       if v.op is not Ops.MUL or v.src[1].op is not Ops.CONST or v.src[1].arg != div*mul: continue
       q, exact = v.src[0], False
+      # (base%div)*mul + (base//div)*(div*mul) -> base*mul
       if q.op is Ops.IDIV and q.src[1].op is Ops.CONST and q.src[1].arg == div: exact = q.src[0] is base
+      # ((base//d)%div)*mul + (base//(d*div))*(div*mul) -> (base//d)*mul
       if not exact and base.op is Ops.IDIV and base.src[1].op is Ops.CONST:
         exact = q.op is Ops.IDIV and q.src[1].op is Ops.CONST and q.src[0] is base.src[0] and q.src[1].arg == base.src[1].arg*div
       if exact: return functools.reduce(operator.add, (t for k,t in enumerate(terms) if k not in (i,j)), base*mul)
+      # ((base//div)%d)*div + base%div -> base%(div*d)
+      if mul == 1 and div > 0 and q.op is Ops.MOD and q.src[1].op is Ops.CONST and (d:=q.src[1].arg) > 0 and q.src[0].op is Ops.IDIV:
+        if q.src[0].src[0] is base and q.src[0].src[1].op is Ops.CONST and q.src[0].src[1].arg == div:
+          return functools.reduce(operator.add, (t for k,t in enumerate(terms) if k not in (i,j)), base % (div*d))
   return None
 
 # this needs to be before symbolic so that 0*something_that_might_be_invalid doesnt become 0
