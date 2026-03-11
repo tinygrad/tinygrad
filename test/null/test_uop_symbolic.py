@@ -775,6 +775,13 @@ class TestSymbolic(unittest.TestCase):
     # div nests: y//12 -> a//2, mod nests: y%12 -> (a%2)*6+b, recombine
     self.helper_test_variable((y//12)*12 + y%12, 0, 43, "(b+a*6)")
 
+  def test_div_mod_recombine_in_additive_sum(self):
+    x = Variable("x", 0, 31)
+    y = Variable("y", 0, 5)
+    # recombine should work inside larger additive sums, not just in the two special y+... tree shapes
+    self.helper_test_variable((x//8)*4 + y + (x//2)%4, 0, 20, "(y+x//2)")
+    self.helper_test_variable(y + (x//8)*4 + (x//2)%4, 0, 20, "(y+x//2)")
+
   def test_reshape_index_roundtrip(self):
     # simulate reshape index decompose then recompose — the core pattern this enables
     # (8,8) decomposed for (16,4): combined=r0*8+r1, div and mod by 4
