@@ -275,7 +275,7 @@ def soft_err(fn:Callable):
   except Exception: fn({"src":traceback.format_exc()})
 
 def row_tuple(row:str) -> tuple[tuple[int, int], ...]:
-  return ((0, 0),) if row.startswith("LINE:") else tuple((ord(ss[0][0]), int(ss[1])) if len(ss:=x.split(":"))>1 else (999,999) for x in row.split())
+  return ((0, 0),) if "Clock" in row else tuple((ord(ss[0][0]), int(ss[1])) if len(ss:=x.split(":"))>1 else (999,999) for x in row.split())
 
 # *** Performance counters
 
