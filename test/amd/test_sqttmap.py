@@ -79,10 +79,12 @@ class TestSQTTMapBase(unittest.TestCase):
         if (p:=kern_events.get(event.kern)) is None: continue
         with self.subTest(example=name, kern=event.kern):
           if not (timeline:=sqtt_timeline(event.blob, p.lib, target)): continue
-          frequency = [e.key for e in timeline if type(e).__name__ == "ProfilePointEvent" and e.name == "shader_freq"]
+          frequency = [e.key for e in timeline if type(e).__name__ == "ProfilePointEvent" and e.name == "freq_hz"]
           mean = sum(frequency) / len(frequency)
           variance = sum((v - mean) ** 2 for v in frequency) / len(frequency)
-          print(f"{mean/1e9:.2f} GHz mean, {variance/1e18:.2f} GHz^2 variance")
+          self.assertGreater(mean, 0)
+          self.assertGreater(variance, 0)
+          if DEBUG >= 2: print(f"{name:20s} SE:{event.se} {mean/1e9:.2f} GHz mean, {variance/1e18:.2f} GHz^2 variance")
           events = [e for e in timeline if type(e).__name__ == "ProfileRangeEvent"]
           insts, execs = 0, 0
           for e in events:
