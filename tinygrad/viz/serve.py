@@ -239,13 +239,16 @@ def encode_mem_free(key:int, ts:int, execs:list[ProfilePointEvent], scache:dict)
     ei_encoding.append((e.key, enum_str(e.arg["name"], scache), num, mode))
   return struct.pack("<BIII", 0, ts, key, len(ei_encoding))+b"".join(struct.pack("<IIIB", *t) for t in ei_encoding)
 
-def mem_layout(dev_events:list[tuple[int, int, float, DevEvent]], start_ts:int, end_ts:int, peaks:list[int], dtype_size:dict[str, int],
-               scache:dict[str, int]) -> bytes|None:
+def graph_layout(k:str, dev_events:list[tuple[int, int, float, DevEvent]], start_ts:int, end_ts:int, peaks:list[int], dtype_size:dict[str, int],
+                 scache:dict[str, int]) -> tuple[str, bytes|None]:
+  if k.startswith("LINE:"):
+    events = [(rel_ts(e.ts, start_ts), e.key) for st,_,_,e in dev_events]
+    peaks.append(peak:=max([y for _,y in events]))
+    return k.replace("LINE:", ""), struct.pack("<BIBQ", 1, len(events), 1, peak)+b"".join(struct.pack("<IQ", x, y) for x,y in events)
   peak, mem = 0, 0
   temp:dict[int, int] = {}
   events:list[bytes] = []
   buf_ei:dict[int, list[ProfilePointEvent]] = {}
-
   for st,_,_,e in dev_events:
     if not isinstance(e, ProfilePointEvent): continue
     if e.name == "alloc":
@@ -262,7 +265,7 @@ def mem_layout(dev_events:list[tuple[int, int, float, DevEvent]], start_ts:int, 
       mem -= temp.pop(e.key)
   for t in temp: events.append(encode_mem_free(t, rel_ts(end_ts, start_ts), buf_ei.pop(t, []), scache))
   peaks.append(peak)
-  return struct.pack("<BIQ", 1, len(events), peak)+b"".join(events) if events else None
+  return f"{k} Memory", struct.pack("<BIBQ", 1, len(events), 0, peak)+b"".join(events) if events else None
 
 # by default, VIZ does not start when there is an error
 # use this to instead display the traceback to the user
@@ -272,7 +275,7 @@ def soft_err(fn:Callable):
   except Exception: fn({"src":traceback.format_exc()})
 
 def row_tuple(row:str) -> tuple[tuple[int, int], ...]:
-  return tuple((ord(ss[0][0]), int(ss[1])) if len(ss:=x.split(":"))>1 else (999,999) for x in row.split())
+  return ((0, 0),) if "Frequency" in row else tuple((ord(ss[0][0]), int(ss[1])) if len(ss:=x.split(":"))>1 else (999,999) for x in row.split())
 
 # *** Performance counters
 
@@ -335,36 +338,30 @@ def load_amd_counters(ctxs:list[dict], profile:list[ProfileEvent]) -> None:
     ctxs.append({"name":f"Exec {name}"+(f" n{run_number[k]}" if run_number[k] > 1 else ""), "steps":steps})
 
 def sqtt_timeline(data:bytes, lib:bytes, target:str) -> list[ProfileEvent]:
-  from tinygrad.renderer.amd.sqtt import map_insts, InstructionInfo, PacketType, TS_DELTA_OR_MARK, INST, InstOp, VALUINST, IMMEDIATE, IMMEDIATE_MASK
-  from tinygrad.renderer.amd.sqtt import VMEMEXEC, ALUEXEC, INST_RDNA4, InstOpRDNA4, TS_DELTA_OR_MARK_RDNA4
+  from tinygrad.renderer.amd.sqtt import map_insts, InstructionInfo, PacketType, INST, InstOp, VALUINST, IMMEDIATE, IMMEDIATE_MASK, VMEMEXEC, ALUEXEC
+  from tinygrad.renderer.amd.sqtt import INST_RDNA4, InstOpRDNA4, TS_DELTA_OR_MARK, TS_DELTA_OR_MARK_RDNA4
   ret:list[ProfileEvent] = []
   row_ends:dict[str, Decimal] = {}
-  # real time anchors
+  realtime:list[int] = [] # in nanoseconds
   TS_DELTA = (TS_DELTA_OR_MARK_RDNA4 if "gfx12" in target else TS_DELTA_OR_MARK).delta
-  RT_BASE = 1 << (TS_DELTA.hi - TS_DELTA.lo + 1)
+  RT_BASE = 1 << (TS_DELTA.hi - TS_DELTA.lo + 1) # SQTT only encodes the final bits of the timestamp, based on the delta field's width
   NS_PER_TICK = 10  # 100MHz
-  start:int|None = None
-  start_clk:int|None = None
-  curr:tuple[int, int]|None = None
-  prev:tuple[int, int]|None = None
-  freq = {"x":[], "y":[]}
+  prev_pair:tuple[int, int]|None = None # (shader, realtime)
   def add(name:str, p:PacketType, width=1, op:str|None=None, wave:int|None=None, info:InstructionInfo|None=None) -> None:
-    nonlocal start, start_clk, curr, prev
-    (s0, r0), (s1, r1) = unwrap(curr), unwrap(prev)
-    rate = (s1 - s0) / (r1 - r0)
-    rt = (RT_BASE | round(r1 + (p._time - s1) / rate)) * NS_PER_TICK
-    if start is None: start, start_clk = rt, s0
-    freq["x"].append(s0-start_clk)
-    freq["y"].append(rate * (1e9 / NS_PER_TICK))
-    width *= NS_PER_TICK / rate
     row = f"WAVE:{wave}" if (wave:=getattr(p, "wave", wave)) is not None else f"{p.__class__.__name__}:0 {name}"
-    ret.append(e:=ProfileRangeEvent(row, TracingKey(op or name, ret=f"PC:{info.pc}" if info else None), Decimal(rt-start), Decimal(rt-start+width)))
-    # TODO: fix this
-    #if (et:=row_ends.get(row)) is not None and e.st < et: raise RuntimeError(f"packet {p} overlaps another packet in {row}.")
+    ret.append(e:=ProfileRangeEvent(row, TracingKey(op or name, ret=f"PC:{info.pc}" if info else None), Decimal(p._time), Decimal(p._time+width)))
+    if (et:=row_ends.get(row)) is not None and e.st < et: raise RuntimeError(f"packet {p} overlaps another packet in {row}.")
     row_ends[row] = unwrap(e.en)
   for p, info in map_insts(data, lib, target):
     if len(ret) > getenv("MAX_SQTT_PKTS", 50_000): break
-    if isinstance(p, TS_DELTA_OR_MARK) and p.is_marker: prev, curr = curr, (p._time, p.delta)
+    if isinstance(p, TS_DELTA_OR_MARK) and p.is_marker:
+      pair = (p._time, p.delta)
+      if prev_pair is None: prev_pair = pair
+      elif ret:
+        (s0, r0), (s1, r1) = prev_pair, pair
+        freq_hz = (s1 - s0) * 1_000_000_000 // ((r1 - r0) * NS_PER_TICK)
+        ret.append(ProfilePointEvent("LINE:Shader Clock Frequency", "freq_hz", freq_hz, ts=p._time))
+        prev_pair = pair
     if isinstance(p, (INST, INST_RDNA4)):
       name = p.op.name if isinstance(p.op, (InstOp, InstOpRDNA4)) else f"0x{p.op:02x}"
       add(name, p, width=10 if "BARRIER" in name else 1, info=info)
@@ -378,8 +375,7 @@ def sqtt_timeline(data:bytes, lib:bytes, target:str) -> list[ProfileEvent]:
       else:
         add(name.replace("_ALT", ""), p, op=name)
   pc_map = {addr:str(inst) for addr,inst in amd_decode(lib, target).items()}
-  freq_plot = [ProfilePointEvent("SE", "JSON", "frequency", freq, ts=Decimal(0))] if freq else []
-  return [ProfilePointEvent(r, "JSON", "pcMap", pc_map, ts=Decimal(0)) for r in row_ends]+freq_plot+ret
+  return [ProfilePointEvent(r, "JSON", "pcMap", pc_map, ts=Decimal(0)) for r in row_ends]+ret
 
 # ** SQTT OCC only unpacks wave start, end time and SIMD location
 
@@ -451,7 +447,7 @@ def get_profile(profile:list[ProfileEvent], sort_fn:Callable[[str], Any]=device_
   for k,v in dev_events.items():
     v.sort(key=lambda e:e[0])
     layout[k] = timeline_layout(v, start_ts, scache)
-    layout[f"{k} Memory"] = mem_layout(v, start_ts, unwrap(end_ts), peaks, dtype_size, scache)
+    layout.update([graph_layout(k, v, start_ts, unwrap(end_ts), peaks, dtype_size, scache)])
   sorted_layout = sorted([k for k,v in layout.items() if v is not None], key=sort_fn)
   ret = [b"".join([struct.pack("<B", len(k)), k.encode(), unwrap(layout[k])]) for k in sorted_layout]
   index = json.dumps({"strings":list(scache), "dtypeSize":dtype_size, "markers":[{"ts":rel_ts(e.ts, start_ts), **e.arg} for e in markers],

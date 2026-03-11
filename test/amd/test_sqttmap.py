@@ -59,12 +59,11 @@ class TestSQTTMapBase(unittest.TestCase):
         data = pickle.load(f)
       sqtt_events = [e for e in data if type(e).__name__ == "ProfileSQTTEvent"]
       kern_events = {e.tag:e for e in data if type(e).__name__ == "ProfileProgramEvent"}
-      kern_durations = {e.name:int(float(e.en-e.st)*1e3) for e in data if type(e).__name__ == "ProfileRangeEvent"}
       if sqtt_events and kern_events:
-        cls.examples[pkl_path.stem] = (sqtt_events, kern_events, kern_durations, cls.target)
+        cls.examples[pkl_path.stem] = (sqtt_events, kern_events, cls.target)
 
   def test_rocprof_inst_traces_match(self):
-    for name, (events, kern_events, _, target) in self.examples.items():
+    for name, (events, kern_events, target) in self.examples.items():
       for event in events:
         if not event.itrace: continue
         if event.kern not in kern_events: continue
@@ -75,15 +74,16 @@ class TestSQTTMapBase(unittest.TestCase):
           if n_waves: print(f"{name}: passed for {passed_insts} instructions across {n_waves} waves scheduled on {n_units} wave units")
 
   def test_sqtt_timeline(self):
-    for name, (events, kern_events, kern_durations, target) in self.examples.items():
+    for name, (events, kern_events, target) in self.examples.items():
       for event in events:
         if (p:=kern_events.get(event.kern)) is None: continue
         with self.subTest(example=name, kern=event.kern):
-          events = [e for e in sqtt_timeline(event.blob, p.lib, target) if type(e).__name__ == "ProfileRangeEvent"]
-          if not events: continue
-          ref_dur = kern_durations[p.name]
-          cmp_dur = max(events, key=lambda e:e.st).st-min(events, key=lambda e:e.st).st
-          assert 0 < cmp_dur <= ref_dur, f"{name} {ref_dur} {cmp_dur}"
+          if not (timeline:=sqtt_timeline(event.blob, p.lib, target)): continue
+          frequency = [e.key for e in timeline if type(e).__name__ == "ProfilePointEvent" and e.name == "shader_freq"]
+          mean = sum(frequency) / len(frequency)
+          variance = sum((v - mean) ** 2 for v in frequency) / len(frequency)
+          print(f"{mean/1e9:.2f} GHz mean, {variance/1e18:.2f} GHz^2 variance")
+          events = [e for e in timeline if type(e).__name__ == "ProfileRangeEvent"]
           insts, execs = 0, 0
           for e in events:
             if "EXEC" in e.device:

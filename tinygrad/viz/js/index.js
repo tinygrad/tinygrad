@@ -172,24 +172,14 @@ function renderDag(layoutSpec, { recenter }) {
 
 // ** profiler graph
 
-function formatNanoseconds(ts, showSmallest=true) {
-  const units = [["s", 1e9], ["ms", 1e6], ["us", 1e3], ["ns", 1]];
+function formatMicroseconds(ts, showUs=true) {
+  const s = Math.floor(ts / 1e6), ms = Math.floor((ts % 1e6) / 1e3), us = Math.round(ts % 1e3);
   const parts = [];
-  let rem = ts;
-  for (let i = 0; i < units.length; i++) {
-    const [name, size] = units[i];
-    const isLast = i === units.length - 1;
-    const value = isLast ? +rem.toFixed(2) : Math.floor(rem / size);
-    if (!isLast) rem %= size;
-    if (value) { parts.push(`${value}${name}`); continue; }
-    if (!parts.length && !isLast) continue;
-    if (!showSmallest && isLast) break;
-    if (isLast && !parts.length) parts.push(`${value}${name}`);
-  }
-  return parts.join(" ");
+  if (s) parts.push(`${s}s`);
+  if (ms || (!showUs && !s)) parts.push(`${ms}ms`);
+  if (showUs && (us || (!ms && !s))) parts.push(`${us}us`);
+  return parts.join(' ');
 }
-
-const formatMicroseconds = (ts, showUs=true) => formatNanoseconds(ts*1e3, showUs);
 
 function formatCycles(cycles) {
   const M = Math.floor(cycles / 1e6), K = Math.floor((cycles % 1e6) / 1e3), s = Math.round(cycles % 1e3);
@@ -310,22 +300,6 @@ function setFocus(key) {
       if (shape != null) p.style("cursor", "pointer").on("click", () => setFocus(shape));
     }
   }
-  // shader clock rate chart
-  let freqChart = document.getElementById("freq-chart");
-  if (data.frequency != null && freqChart == null) {
-    const chartWidth = html.node().clientWidth, chartHeight = 110, margin = {top: 10, right: 10, bottom: 30, left: 40};
-    const width = chartWidth - margin.left - margin.right, height = chartHeight - margin.top - margin.bottom;
-    const svg = d3.create("svg").attr("id", "freq-chart").attr("width", "100%").attr("height", chartHeight).attr("viewBox", `0 0 ${chartWidth} ${chartHeight}`);
-    const g = svg.append("g").attr("transform", `translate(${margin.left},${margin.top})`);
-    const xScale = d3.scaleLinear().domain(d3.extent(data.frequency.x)).range([0, width]);
-    const yScale = d3.scaleLinear().domain([0, d3.max(data.frequency.y)]).range([height, 0]);
-    const line = d3.line().x((d, i) => xScale(data.frequency.x[i])).y(d => yScale(d));
-    g.append("path").datum(data.frequency.y).attr("fill", "none").attr("stroke", "#4a90e2").attr("stroke-width", 1.5).attr("d", line);
-    g.append("g").attr("transform", `translate(0,${height})`).call(d3.axisBottom(xScale).ticks(3).tickFormat(d => formatUnit(d, " clk")));
-    g.append("g").call(d3.axisLeft(yScale).ticks(4).tickValues(yScale.ticks(4).filter(d => d !== 0)).tickFormat(d => formatUnit(d, "Hz")));
-    g.append("text").attr("x", width + margin.right).attr("y", height + margin.bottom - 2).attr("text-anchor", "end").attr("font-size", "11px").attr("fill", "white").text("shader clock rate");
-    metadata.insertBefore(svg.node(), html.node());
-  }
   // instructions list renderer
   let instList = document.getElementById("insts");
   if (data.pcToShape.size == 0) return d3.select(instList?.parentElement).html("");
@@ -348,11 +322,12 @@ function setFocus(key) {
 }
 
 const EventTypes = { EXEC:0, BUF:1 };
+const GraphConfig = [{ pcolor:"#c9a8ff", unit:"B", fillColor:"#2B1B72", line:false }, { pcolor:"#4fa3cc", unit:"Hz", fillColor:"#4fa3cc", line:true }];
 
 async function renderProfiler(path, opts) {
   displaySelection("#profiler");
   // support non realtime x axis units
-  formatTime = opts.unit === "ms" ? formatMicroseconds : opts.unit === "ns" ? formatNanoseconds : formatCycles;
+  formatTime = opts.unit === "ms" ? formatMicroseconds : formatCycles;
   if (data?.path !== path) { data = {tracks:new Map(), axes:{}, path, first:null, pcToShape:new Map()}; focusedDevice = null; focusedShape = null; }
   setFocus(focusedShape);
   // layout once!
@@ -451,13 +426,15 @@ async function renderProfiler(path, opts) {
       }
       div.style("height", levelHeight*levels.length+padding+"px").style("pointerEvents", "none");
     } else {
-      const peak = u64();
+      const linear = u8(), peak = u64();
+      const config = GraphConfig[linear];
       const timestamps = [], valueMap = new Map();
       // start by unpacking the raw events
       const memEvents = [];
       let x = 0, y = 0, shapeIdx = 0;
       const allocs = new Map();
       for (let j=0; j<eventsLen; j++) {
+        if (linear) { const ts = u32(), value = u64(); timestamps.push(ts); valueMap.set(ts, value); continue; }
         const alloc = u8(), ts = u32(), key = u32();
         if (alloc) {
           const dtype = strings[u32()], sz = u64(), nbytes = dtypeSize[dtype]*sz;
@@ -475,11 +452,11 @@ async function renderProfiler(path, opts) {
         }
       }
       timestamps.push(dur);
-      const height = heightScale(peak);
+      const height = linear ? (baseHeight-padding)*(opts.heightScale ?? 1)*2 : heightScale(peak);
       const yscale = d3.scaleLinear().domain([0, peak]).range([height, 0]);
       // generic polygon merger
       const base0 = yscale(0);
-      const sum = {x:[], y0:[], y1:[], fillColor:"#2B1B72"};
+      const sum = {x:[], y0:[], y1:[], fillColor:config.fillColor};
       for (let i=0; i<timestamps.length-1; i++) {
         const yv = yscale(valueMap.get(timestamps[i]));
         sum.x.push(timestamps[i], timestamps[i+1]); sum.y1.push(yv, yv); sum.y0.push(base0, base0);
@@ -518,9 +495,12 @@ async function renderProfiler(path, opts) {
         return bufShapes;
       };
       if (timestamps.length > 0) data.first = data.first == null ? timestamps[0] : Math.min(data.first, timestamps[0]);
-      data.tracks.set(k, { shapes:[sum], eventType, visible, offsetY, pcolor:"#c9a8ff", height, peak, scaleFactor:maxheight*4/height,
-                           get views() { return [[sum], buildBufShapes()]; }, valueMap, rowBorderColor });
-      div.style("height", height+padding+"px").style("cursor", "pointer").on("click", (e) => {
+      const scaleFactor = maxheight*4/height;
+      data.tracks.set(k, { shapes:[sum], eventType, linear, visible, offsetY, pcolor:config.pcolor, height, peak, scaleFactor,
+                           get views() { return [[sum], linear ? null : buildBufShapes()]; }, valueMap, rowBorderColor });
+      div.style("height", height+padding+"px");
+      if (linear) continue;
+      div.style("cursor", "pointer").on("click", (e) => {
         const newFocus = e.currentTarget.id === focusedDevice ? null : e.currentTarget.id;
         let offset = 0;
         for (const [tid, track] of data.tracks) {
@@ -528,7 +508,7 @@ async function renderProfiler(path, opts) {
           if (tid === newFocus) { track.shapes = track.views[1]; offset += rescaleTrack(track, tid, track.scaleFactor); }
           else if (tid === focusedDevice) { track.shapes = track.views[0]; offset += rescaleTrack(track, tid, 1/track.scaleFactor); }
         }
-        data.axes.y = newFocus != null ? { domain:[0, (t=data.tracks.get(newFocus)).peak], range:[t.offsetY+t.height, t.offsetY], fmt:"B" } : null;
+        data.axes.y = newFocus != null ? { domain:[0, (t=data.tracks.get(newFocus)).peak], range:[t.offsetY+t.height, t.offsetY], fmt:config.unit } : null;
         toggleCls(document.getElementById(focusedDevice), document.getElementById(newFocus), "expanded");
         focusedDevice = newFocus;
         return resize();
@@ -537,8 +517,7 @@ async function renderProfiler(path, opts) {
   }
   for (const m of markers) m.label = m.name.split(/(\s+)/).map(st => ({ st, color:m.color, width:ctx.measureText(st).width }));
   data.pcToShape = new Map([...data.pcToShape].sort((a, b) => a[1].st - b[1].st));
-  const extra = [...Object.entries(extData)];
-  if (extra.length > 0) extra.forEach(([k, v]) => { data[k] = v; }); setFocus(focusedShape);
+  if (extData.pcMap != null) data.pcMap = extData.pcMap; setFocus(focusedShape);
   updateProgress(Status.COMPLETE);
   // draw events on a timeline
   const dpr = window.devicePixelRatio || 1;
@@ -568,11 +547,12 @@ async function renderProfiler(path, opts) {
     const visibleYStart = profilerEl.scrollTop-canvasTop + rect(profilerEl).top, visibleYEnd = visibleYStart+profilerEl.clientHeight;
     ctx.textBaseline = "middle";
     // draw shapes
-    for (const [k, { shapes, eventType, visible, offsetY, valueMap, pcolor, scolor, rowBorderColor }] of data.tracks) {
+    for (const [k, { shapes, eventType, linear, visible, offsetY, valueMap, pcolor, scolor, rowBorderColor }] of data.tracks) {
       visible.length = 0;
       const trackHeight = rect(document.getElementById(k)).height;
       if (offsetY+trackHeight < visibleYStart || offsetY > visibleYEnd) continue;
       const addBorder = scolor != null ? (w) => { if (w > 10) { ctx.strokeStyle = scolor; ctx.stroke(); } } : null;
+      const config = GraphConfig[linear];
       for (const e of shapes) {
         if (eventType === EventTypes.BUF) { // generic polygon
           if (e.x[0]>et || e.x.at(-1)<st) continue;
@@ -582,7 +562,7 @@ async function renderProfiler(path, opts) {
           for (let i=1; i<x.length; i++) {
             ctx.lineTo(x[i], offsetY+e.y0[i]);
             let arg = e.arg;
-            if (arg == null && valueMap != null) arg = {tooltipText: `Total: ${formatUnit(valueMap.get(e.x[i-1]), 'B')}`}
+            if (arg == null && valueMap != null) arg = {tooltipText: `Total: ${formatUnit(valueMap.get(e.x[i-1]), config.unit)}`}
             visible.push({ x0:x[i-1], x1:x[i], y0:offsetY+e.y1[i-1], y1:offsetY+e.y0[i], arg });
           }
           for (let i=x.length-1; i>=0; i--) ctx.lineTo(x[i], offsetY+e.y1[i]);
@@ -888,7 +868,7 @@ async function main() {
       }
       appendSteps(ul, i, steps);
     }
-    return setState({currentCtx: 2, currentStep: 2, currentRewrite: 0, expandSteps: true});
+    return setState({ currentCtx:-1 });
   }
   // ** center graph
   const { currentCtx, currentStep, currentRewrite, expandSteps } = state;
@@ -922,7 +902,7 @@ async function main() {
     // timeline with cycles on the x axis
     if (ret instanceof ArrayBuffer) {
       const pkts = step.name.includes("PKTS");
-      return renderProfiler(ckey, {unit:pkts ? "ns" : "clk", heightScale:0.5, hideLabels:true, colorByName:pkts});
+      return renderProfiler(ckey, {unit:"clk", heightScale:0.5, hideLabels:true, colorByName:pkts});
     }
     metadata.replaceChildren(...((ret.metadata ?? []).map((m) => {
       return tabulate(m.map((e) => [e.label.trim(), typeof e.value === "string" ? e.value : formatUnit(e.value)]));
