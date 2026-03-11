@@ -499,6 +499,7 @@ async function renderProfiler(path, opts) {
       data.tracks.set(k, { shapes:[sum], eventType, linear, visible, offsetY, pcolor:config.pcolor, height, peak, scaleFactor,
                            get views() { return [[sum], linear ? null : buildBufShapes()]; }, valueMap, rowBorderColor });
       div.style("height", height+padding+"px").style("cursor", "pointer").on("click", (e) => {
+        if (linear) return;
         const newFocus = e.currentTarget.id === focusedDevice ? null : e.currentTarget.id;
         let offset = 0;
         for (const [tid, track] of data.tracks) {
@@ -556,16 +557,16 @@ async function renderProfiler(path, opts) {
           if (e.x[0]>et || e.x.at(-1)<st) continue;
           ctx.beginPath();
           const x = e.x.map(xscale);
-          ctx.moveTo(x[0], offsetY+e.y0[0]);
+          ctx.moveTo(x[0], offsetY+e.y1[0]);
           for (let i=1; i<x.length; i++) {
-            ctx.lineTo(x[i], offsetY+e.y0[i]);
+            ctx.lineTo(x[i], offsetY+e.y1[i]);
             let arg = e.arg;
             if (arg == null && valueMap != null) arg = {tooltipText: `Total: ${formatUnit(valueMap.get(e.x[i-1]), config.unit)}`}
             visible.push({ x0:x[i-1], x1:x[i], y0:offsetY+e.y1[i-1], y1:offsetY+e.y0[i], arg });
           }
-          for (let i=x.length-1; i>=0; i--) ctx.lineTo(x[i], offsetY+e.y1[i]);
-          ctx.closePath();
-          ctx.fillStyle = e.fillColor; ctx.fill();
+          if (linear) { ctx.strokeStyle = e.fillColor; ctx.lineWidth = 2; ctx.stroke(); ctx.lineWidth = 1; }
+          // walk the path back and fill the complete shape
+          else { for (let i=x.length-1; i>=0; i--) ctx.lineTo(x[i], offsetY+e.y0[i]); ctx.closePath(); ctx.fillStyle = e.fillColor; ctx.fill(); }
         } else { // contiguous rect
           if (e.x>et || e.x+e.width<st) continue;
           const x = xscale(e.x);
