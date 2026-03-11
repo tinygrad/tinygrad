@@ -498,9 +498,7 @@ async function renderProfiler(path, opts) {
       const scaleFactor = maxheight*4/height;
       data.tracks.set(k, { shapes:[sum], eventType, linear, visible, offsetY, pcolor:config.pcolor, height, peak, scaleFactor,
                            get views() { return [[sum], linear ? null : buildBufShapes()]; }, valueMap, rowBorderColor });
-      div.style("height", height+padding+"px");
-      if (linear) continue;
-      div.style("cursor", "pointer").on("click", (e) => {
+      div.style("height", height+padding+"px").style("cursor", "pointer").on("click", (e) => {
         const newFocus = e.currentTarget.id === focusedDevice ? null : e.currentTarget.id;
         let offset = 0;
         for (const [tid, track] of data.tracks) {

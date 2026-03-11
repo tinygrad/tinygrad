@@ -242,9 +242,9 @@ def encode_mem_free(key:int, ts:int, execs:list[ProfilePointEvent], scache:dict)
 def graph_layout(k:str, dev_events:list[tuple[int, int, float, DevEvent]], start_ts:int, end_ts:int, peaks:list[int], dtype_size:dict[str, int],
                  scache:dict[str, int]) -> tuple[str, bytes|None]:
   if k.startswith("LINE:"):
-    events = [(rel_ts(e.ts, start_ts), e.key) for st,_,_,e in dev_events]
-    peaks.append(peak:=max([y for _,y in events]))
-    return k.replace("LINE:", ""), struct.pack("<BIBQ", 1, len(events), 1, peak)+b"".join(struct.pack("<IQ", x, y) for x,y in events)
+    xy = [(rel_ts(e.ts, start_ts), e.key) for st,_,_,e in dev_events if isinstance(e, ProfilePointEvent)]
+    peaks.append(peak:=max([y for _,y in xy]))
+    return k.replace("LINE:", ""), struct.pack("<BIBQ", 1, len(xy), 1, peak)+b"".join(struct.pack("<IQ", x, y) for x,y in xy)
   peak, mem = 0, 0
   temp:dict[int, int] = {}
   events:list[bytes] = []
@@ -342,9 +342,6 @@ def sqtt_timeline(data:bytes, lib:bytes, target:str) -> list[ProfileEvent]:
   from tinygrad.renderer.amd.sqtt import INST_RDNA4, InstOpRDNA4, TS_DELTA_OR_MARK, TS_DELTA_OR_MARK_RDNA4
   ret:list[ProfileEvent] = []
   row_ends:dict[str, Decimal] = {}
-  realtime:list[int] = [] # in nanoseconds
-  TS_DELTA = (TS_DELTA_OR_MARK_RDNA4 if "gfx12" in target else TS_DELTA_OR_MARK).delta
-  RT_BASE = 1 << (TS_DELTA.hi - TS_DELTA.lo + 1) # SQTT only encodes the final bits of the timestamp, based on the delta field's width
   NS_PER_TICK = 10  # 100MHz
   prev_pair:tuple[int, int]|None = None # (shader, realtime)
   def add(name:str, p:PacketType, width=1, op:str|None=None, wave:int|None=None, info:InstructionInfo|None=None) -> None:
@@ -354,13 +351,13 @@ def sqtt_timeline(data:bytes, lib:bytes, target:str) -> list[ProfileEvent]:
     row_ends[row] = unwrap(e.en)
   for p, info in map_insts(data, lib, target):
     if len(ret) > getenv("MAX_SQTT_PKTS", 50_000): break
-    if isinstance(p, TS_DELTA_OR_MARK) and p.is_marker:
+    if isinstance(p, (TS_DELTA_OR_MARK, TS_DELTA_OR_MARK_RDNA4)) and p.is_marker:
       pair = (p._time, p.delta)
       if prev_pair is None: prev_pair = pair
       elif ret:
         (s0, r0), (s1, r1) = prev_pair, pair
         freq_hz = (s1 - s0) * 1_000_000_000 // ((r1 - r0) * NS_PER_TICK)
-        ret.append(ProfilePointEvent("LINE:Shader Clock Frequency", "freq_hz", freq_hz, ts=p._time))
+        ret.append(ProfilePointEvent("LINE:Shader Clock Frequency", "freq_hz", freq_hz, ts=Decimal(p._time)))
         prev_pair = pair
     if isinstance(p, (INST, INST_RDNA4)):
       name = p.op.name if isinstance(p.op, (InstOp, InstOpRDNA4)) else f"0x{p.op:02x}"
