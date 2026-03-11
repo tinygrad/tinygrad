@@ -1,4 +1,4 @@
-import unittest
+import math, unittest
 from unittest.mock import patch
 from tinygrad import Tensor
 from tinygrad.device import Device
