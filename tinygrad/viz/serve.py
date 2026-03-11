@@ -5,7 +5,7 @@ from contextlib import redirect_stdout, redirect_stderr, contextmanager
 from decimal import Decimal
 from urllib.parse import parse_qs, urlparse
 from http.server import BaseHTTPRequestHandler
-from typing import Any, TypedDict, TypeVar, Generator, Callable
+from typing import Any, TypedDict, TypeVar, Generator, Callable, cast
 from tinygrad.helpers import colored, getenv, tqdm, unwrap, word_wrap, TRACEMETA, ProfileEvent, ProfileRangeEvent, TracingKey, ProfilePointEvent, temp
 from tinygrad.helpers import printable, Context, START_TIME
 from tinygrad.renderer.amd.dsl import Inst
@@ -372,15 +372,17 @@ def sqtt_timeline(data:bytes, lib:bytes, target:str) -> list[ProfileEvent]:
       else:
         add(name.replace("_ALT", ""), p, op=name)
   pc_map = {addr:str(inst) for addr,inst in amd_decode(lib, target).items()}
+  if len(ret) == 0: return []
   # cover the full range of packet data with frequency samples, on gfx11, we get samples ~every 4.7K cycles
   freq_samples:list[tuple[int, int]] = []
   # keep the last known frequency, before the first packet arrived
   pre_first:int|None = None
+  first_pkt, last_pkt = int(cast(ProfileRangeEvent, ret[0]).st), int(unwrap(cast(ProfileRangeEvent, ret[-1]).en))
   for x,y in freqs:
-    if x >= ret[-1].en: break
-    if x <= ret[0].st: pre_first = y
+    if x >= last_pkt: break
+    if x <= first_pkt: pre_first = y
     else: freq_samples.append((x, y))
-  if freq_samples[0][0] > ret[0].st: freq_samples.append((ret[0].st, unwrap(pre_first)))
+  if freq_samples[0][0] > first_pkt: freq_samples.append((first_pkt, unwrap(pre_first)))
   freq_events = [ProfilePointEvent("LINE:Shader Clock", "freq_hz", y, ts=Decimal(x)) for x,y in freq_samples]
   return [ProfilePointEvent(r, "JSON", "pcMap", pc_map, ts=Decimal(0)) for r in row_ends]+freq_events+ret
 
