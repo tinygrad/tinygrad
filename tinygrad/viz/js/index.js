@@ -312,18 +312,18 @@ function setFocus(key) {
   }
   // shader clock rate chart
   let freqChart = document.getElementById("freq-chart");
-  if (data.frequency?.length > 0 && freqChart == null) {
-    const chartWidth = html.node().clientWidth, chartHeight = 110, margin = {top: 10, right: 10, bottom: 30, left: 35};
+  if (data.frequency != null && freqChart == null) {
+    const chartWidth = html.node().clientWidth, chartHeight = 110, margin = {top: 10, right: 10, bottom: 30, left: 40};
     const width = chartWidth - margin.left - margin.right, height = chartHeight - margin.top - margin.bottom;
     const svg = d3.create("svg").attr("id", "freq-chart").attr("width", "100%").attr("height", chartHeight).attr("viewBox", `0 0 ${chartWidth} ${chartHeight}`);
     const g = svg.append("g").attr("transform", `translate(${margin.left},${margin.top})`);
-    const xScale = d3.scaleLinear().domain([0, data.frequency.length - 1]).range([0, width]);
-    const yScale = d3.scaleLinear().domain([0, d3.max(data.frequency) ]).range([height, 0]);
-    const line = d3.line().x((d, i) => xScale(i)).y(d => yScale(d ));
-    g.append("path").datum(data.frequency).attr("fill", "none").attr("stroke", "#4a90e2").attr("stroke-width", 1.5).attr("d", line);
-    g.append("g").attr("transform", `translate(0,${height})`).call(d3.axisBottom(xScale).ticks(5).tickFormat(d => formatUnit(d)));
-    g.append("g").call(d3.axisLeft(yScale).ticks(4).tickFormat(d => Math.round(d)));
-    g.append("text").attr("x", width + margin.right).attr("y", height + margin.bottom - 4).attr("text-anchor", "end").attr("font-size", "11px").attr("fill", "white").text("clock rate");
+    const xScale = d3.scaleLinear().domain(d3.extent(data.frequency.x)).range([0, width]);
+    const yScale = d3.scaleLinear().domain([0, d3.max(data.frequency.y)]).range([height, 0]);
+    const line = d3.line().x((d, i) => xScale(data.frequency.x[i])).y(d => yScale(d));
+    g.append("path").datum(data.frequency.y).attr("fill", "none").attr("stroke", "#4a90e2").attr("stroke-width", 1.5).attr("d", line);
+    g.append("g").attr("transform", `translate(0,${height})`).call(d3.axisBottom(xScale).ticks(3).tickFormat(d => formatUnit(d, " clk")));
+    g.append("g").call(d3.axisLeft(yScale).ticks(4).tickValues(yScale.ticks(4).filter(d => d !== 0)).tickFormat(d => formatUnit(d, "Hz")));
+    g.append("text").attr("x", width + margin.right).attr("y", height + margin.bottom - 2).attr("text-anchor", "end").attr("font-size", "11px").attr("fill", "white").text("shader clock rate");
     metadata.insertBefore(svg.node(), html.node());
   }
   // instructions list renderer
@@ -888,7 +888,7 @@ async function main() {
       }
       appendSteps(ul, i, steps);
     }
-    return setState({currentCtx: 12, currentStep: 2, currentRewrite: 0, expandSteps: true });
+    return setState({currentCtx: 2, currentStep: 2, currentRewrite: 0, expandSteps: true});
   }
   // ** center graph
   const { currentCtx, currentStep, currentRewrite, expandSteps } = state;

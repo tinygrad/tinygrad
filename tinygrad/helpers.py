@@ -303,7 +303,7 @@ class ProfileRangeEvent(ProfileEvent): device:str; name:str|TracingKey; st:decim
 
 @dataclass(frozen=True)
 class ProfilePointEvent(ProfileEvent):
-  device:str; name:str; key:Any; arg:Any=field(default_factory=dict); ts:decimal.Decimal=field(default_factory=perf_counter_us) # noqa: E702
+  device:str; name:str; key:Any; arg:dict=field(default_factory=dict); ts:decimal.Decimal=field(default_factory=perf_counter_us) # noqa: E702
 
 cpu_events:list[ProfileEvent] = []
 @contextlib.contextmanager

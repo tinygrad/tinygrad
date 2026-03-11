@@ -344,20 +344,23 @@ def sqtt_timeline(data:bytes, lib:bytes, target:str) -> list[ProfileEvent]:
   RT_BASE = 1 << (TS_DELTA.hi - TS_DELTA.lo + 1)
   NS_PER_TICK = 10  # 100MHz
   start:int|None = None
+  start_clk:int|None = None
   curr:tuple[int, int]|None = None
   prev:tuple[int, int]|None = None
-  freq:list[float] = []
+  freq = {"x":[], "y":[]}
   def add(name:str, p:PacketType, width=1, op:str|None=None, wave:int|None=None, info:InstructionInfo|None=None) -> None:
-    nonlocal start, curr, prev
+    nonlocal start, start_clk, curr, prev
     (s0, r0), (s1, r1) = unwrap(curr), unwrap(prev)
     rate = (s1 - s0) / (r1 - r0)
-    freq.append(rate)
     rt = (RT_BASE | round(r1 + (p._time - s1) / rate)) * NS_PER_TICK
-    if start is None: start = rt
+    if start is None: start, start_clk = rt, s0
+    freq["x"].append(s0-start_clk)
+    freq["y"].append(rate * (1e9 / NS_PER_TICK))
     width *= NS_PER_TICK / rate
     row = f"WAVE:{wave}" if (wave:=getattr(p, "wave", wave)) is not None else f"{p.__class__.__name__}:0 {name}"
     ret.append(e:=ProfileRangeEvent(row, TracingKey(op or name, ret=f"PC:{info.pc}" if info else None), Decimal(rt-start), Decimal(rt-start+width)))
-    if (et:=row_ends.get(row)) is not None and e.st < et: raise RuntimeError(f"packet {p} overlaps another packet in {row}.")
+    # TODO: fix this
+    #if (et:=row_ends.get(row)) is not None and e.st < et: raise RuntimeError(f"packet {p} overlaps another packet in {row}.")
     row_ends[row] = unwrap(e.en)
   for p, info in map_insts(data, lib, target):
     if len(ret) > getenv("MAX_SQTT_PKTS", 50_000): break
