@@ -71,7 +71,7 @@ def linear_to_schedule(linear:UOp) -> list[ExecItem]:
       base = buf_uops[1].buffer
       assert isinstance(base, Buffer), "base can't be MultiBuffer"
       buffers[buf_uops[0]] = base.view(buf_uops[0].arg, ast.dtype, ast.arg[1]*base.dtype.itemsize)
-    ubufs = [b.buffer for b in buf_uops]
+    ubufs = [b.buffer for b in buf_uops if b.op is not Ops.BIND]
     metadata = si.arg.metadata
     if any(isinstance(x, MultiBuffer) for x in ubufs):
       assert all(isinstance(x, MultiBuffer) for x in ubufs), "kernel must all be multibuffer"

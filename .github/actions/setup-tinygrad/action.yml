@@ -45,6 +45,10 @@ inputs:
     description: "Install mesa"
     required: false
     default: 'false'
+  tinydreno:
+    description: "Install tinydreno"
+    required: false
+    default: 'false'
 runs:
   using: "composite"
   steps:
@@ -326,3 +330,9 @@ runs:
       if: inputs.mesa == 'true' && runner.os == 'macOS'
       shell: bash
       run: brew install sirhcm/tinymesa/tinymesa_cpu
+
+    # *** tinydreno ***
+    - name: Install tinydreno (linux)
+      if: inputs.tinydreno == 'true' && runner.os == 'Linux'
+      shell: bash
+      run: sudo curl -fL https://github.com/sirhcm/tinydreno/raw/refs/heads/master/libllvm-qcom.so -o /usr/lib/libllvm-qcom.so

@@ -48,7 +48,7 @@ uops_colors = {Ops.LOAD: "#ffc0c0", Ops.STORE: "#87CEEB", Ops.CONST: "#e0e0e0", 
                Ops.RANGE: "#c8a0e0", Ops.ASSIGN: "#909090", Ops.BARRIER: "#ff8080", Ops.IF: "#c8b0c0", Ops.SPECIAL: "#c0c0ff",
                Ops.INDEX: "#cef263", Ops.WMMA: "#efefc0", Ops.MULTI: "#f6ccff", Ops.INS: "#eec4ff",
                **{x:"#D8F9E4" for x in GroupOp.Movement}, **{x:"#ffffc0" for x in GroupOp.ALU}, Ops.THREEFRY:"#ffff80",
-               Ops.BUFFER_VIEW: "#E5EAFF", Ops.BUFFER: "#B0BDFF", Ops.COPY: "#a040a0", Ops.ENCDEC: "#bf71b6",
+               Ops.BUFFER_VIEW: "#E5EAFF", Ops.BUFFER: "#B0BDFF", Ops.COPY: "#a040a0", Ops.CUSTOM_FUNCTION: "#bf71b6",
                Ops.CALL: "#00B7C8", Ops.PARAM: "#14686F", Ops.SOURCE: "#c0c0c0", Ops.LINEAR: "#7DF4FF", Ops.BINARY: "#404040",
                Ops.ALLREDUCE: "#ff40a0", Ops.MSELECT: "#d040a0", Ops.MSTACK: "#d040a0", Ops.CONTIGUOUS: "#FFC14D",
                Ops.BUFFERIZE: "#FF991C", Ops.REWRITE_ERROR: "#ff2e2e", Ops.AFTER: "#8A7866", Ops.END: "#524C46"}
@@ -71,10 +71,9 @@ def get_rewrites(t:RewriteTrace) -> list[dict]:
     steps = [create_step(s.name, ("/graph-rewrites", i, j), loc=s.loc, match_count=len(s.matches), code_line=printable(s.loc),
                          trace=k.tb if j==0 else None, depth=s.depth) for j,s in enumerate(v)]
     if (p:=get_prg_uop(i)) is not None:
-      _, __, lin, src, binary = p.src
-      steps.append(create_step("View UOp List", ("/uops", i, len(steps)), lin.src))
-      steps.append(create_step("View Source", ("/code", i, len(steps)), src.arg))
-      steps.append(create_step("View Disassembly", ("/asm", i, len(steps)), (k.ret, binary.arg)))
+      steps.append(create_step("View UOp List", ("/uops", i, len(steps))))
+      steps.append(create_step("View Source", ("/code", i, len(steps)), p.src[3].arg))
+      steps.append(create_step("View Disassembly", ("/asm", i, len(steps)), (k.ret, p.src[4].arg)))
     for key in k.keys: ref_map[key] = i
     ret.append({"name":k.display_name, "steps":steps})
   return ret
@@ -150,9 +149,10 @@ def uop_to_json(x:UOp) -> dict[int, dict]:
   return graph
 
 @functools.cache
-def _reconstruct(a:int):
+def _reconstruct(a:int, depth:int|None=None):
   op, dtype, src, arg, *rest = trace.uop_fields[a]
-  return UOp(op, dtype, tuple(_reconstruct(s) for s in src), arg, *rest)
+  if depth is not None and depth <= 0: return UOp(op, dtype, (), arg, *rest)
+  return UOp(op, dtype, tuple(_reconstruct(s, None if depth is None else depth-1) for s in src), arg, *rest)
 
 def get_full_rewrite(ctx:TrackedGraphRewrite) -> Generator[GraphRewriteDetails, None, None]:
   next_sink = _reconstruct(ctx.sink)
@@ -169,7 +169,7 @@ def get_full_rewrite(ctx:TrackedGraphRewrite) -> Generator[GraphRewriteDetails, 
 
 def get_prg_uop(i:int) -> UOp|None:
   s = next((s for s in trace.rewrites[i] if s.name == "View Program"), None)
-  return _reconstruct(s.sink) if s is not None else None
+  return _reconstruct(s.sink, depth=1) if s is not None else None
 
 # encoder helpers
 
@@ -227,6 +227,7 @@ def timeline_layout(dev_events:list[tuple[int, int, float, DevEvent]], start_ts:
       elif isinstance(e.name.ret, int):
         membw = e.name.ret / (dur * 1e-6)
         fmt.append(f"{membw*1e-9:.0f} GB/s" if membw < 1e13 else f"{membw*1e-12:.0f} TB/s")
+      elif e.name.tb: fmt.append("TB:"+json.dumps(e.name.tb))
     events.append(struct.pack("<IIIIfI", enum_str(name, scache), option(ref), option(key), rel_ts(st,start_ts), dur, enum_str("\n".join(fmt),scache)))
   return struct.pack("<BI", 0, len(events))+b"".join(events) if events else None
 
@@ -337,19 +338,17 @@ def sqtt_timeline(data:bytes, lib:bytes, target:str) -> list[ProfileEvent]:
   from tinygrad.renderer.amd.sqtt import map_insts, InstructionInfo, PacketType, INST, InstOp, VALUINST, IMMEDIATE, IMMEDIATE_MASK, VMEMEXEC, ALUEXEC
   from tinygrad.renderer.amd.sqtt import INST_RDNA4, InstOpRDNA4
   ret:list[ProfileEvent] = []
-  rows:dict[str, None] = {}
-  trace:dict[str, set[int]] = {}
-  def add(name:str, p:PacketType, idx=0, width=1, op_name=None, wave=None, info:InstructionInfo|None=None) -> None:
-    if hasattr(p, "wave"): wave = p.wave
-    rows.setdefault(r:=(f"WAVE:{wave}" if wave is not None else f"{p.__class__.__name__}:0 {name}"))
-    key = TracingKey(f"{op_name if op_name is not None else name} OP:{idx}", ret=f"PC:{info.pc}" if info is not None else None)
-    ret.append(ProfileRangeEvent(r, key, Decimal(p._time), Decimal(p._time+width)))
+  row_ends:dict[str, Decimal] = {}
+  def add(name:str, p:PacketType, width=1, op:str|None=None, wave:int|None=None, info:InstructionInfo|None=None) -> None:
+    row = f"WAVE:{wave}" if (wave:=getattr(p, "wave", wave)) is not None else f"{p.__class__.__name__}:0 {name}"
+    ret.append(e:=ProfileRangeEvent(row, TracingKey(op or name, ret=f"PC:{info.pc}" if info else None), Decimal(p._time), Decimal(p._time+width)))
+    if (et:=row_ends.get(row)) is not None and e.st < et: raise RuntimeError(f"packet {p} overlaps another packet in {row}.")
+    row_ends[row] = unwrap(e.en)
   for p, info in map_insts(data, lib, target):
     if len(ret) > getenv("MAX_SQTT_PKTS", 50_000): break
     if isinstance(p, (INST, INST_RDNA4)):
-      op_name = p.op.name if isinstance(p.op, (InstOp, InstOpRDNA4)) else f"0x{p.op:02x}"
-      name, width = (op_name, 10 if "BARRIER" in op_name else 1)
-      add(name, p, width=width, idx=int("OTHER" in name), info=info)
+      name = p.op.name if isinstance(p.op, (InstOp, InstOpRDNA4)) else f"0x{p.op:02x}"
+      add(name, p, width=10 if "BARRIER" in name else 1, info=info)
     if isinstance(p, (VALUINST, IMMEDIATE)): add(p.__class__.__name__, p, info=info)
     if isinstance(p, IMMEDIATE_MASK): add("IMMEDIATE", p, wave=unwrap(info).wave, info=info)
     if isinstance(p, (VMEMEXEC, ALUEXEC)):
@@ -358,11 +357,9 @@ def sqtt_timeline(data:bytes, lib:bytes, target:str) -> list[ProfileEvent]:
         add("VALU", p)
         add("SALU", p)
       else:
-        add(name.replace("_ALT", ""), p, op_name=name)
-      if p._time in trace.setdefault(name, set()): raise AssertionError(f"packets overlap in shared resource! {name}")
-      trace[name].add(p._time)
+        add(name.replace("_ALT", ""), p, op=name)
   pc_map = {addr:str(inst) for addr,inst in amd_decode(lib, target).items()}
-  return [ProfilePointEvent(r, "JSON", "pcMap", pc_map, ts=Decimal(0)) for r in rows]+ret
+  return [ProfilePointEvent(r, "JSON", "pcMap", pc_map, ts=Decimal(0)) for r in row_ends]+ret
 
 # ** SQTT OCC only unpacks wave start, end time and SIMD location
 
@@ -566,7 +563,7 @@ def get_render(query:str) -> dict:
   i, j, fmt = get_int(qs:=parse_qs(url.query), "ctx"), get_int(qs, "step"), url.path.lstrip("/")
   data = ctxs[i]["steps"][j]["data"]
   if fmt == "graph-rewrites": return {"value":get_full_rewrite(trace.rewrites[i][j]), "content_type":"text/event-stream"}
-  if fmt == "uops": return {"src":get_stdout(lambda: print_uops(data)), "lang":"txt"}
+  if fmt == "uops": return {"src":get_stdout(lambda: print_uops(_reconstruct(trace.rewrites[i][j-1].sink).src[2].src)), "lang":"txt"}
   if fmt == "code": return {"src":data, "lang":"cpp"}
   if fmt == "asm":
     ret:dict = {}

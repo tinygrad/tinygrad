@@ -1416,8 +1416,9 @@ def train_llama3():
     loss = vocab_mask.where(-1e9, logits).sparse_categorical_crossentropy(tokens[:, 1:])
     loss.backward()
     assert all(p.grad is g for p,g in zip(optim.params, grads))
-    Tensor.realize(loss, *grads)
-    return loss.flatten().float().to("CPU")
+    loss_cpu = loss.flatten().float().to("CPU")
+    Tensor.realize(loss_cpu, *grads)
+    return loss_cpu
 
   @TinyJit
   def optim_step():
@@ -1427,10 +1428,11 @@ def train_llama3():
     for g in grads:
       g.assign(g.zeros_like()).realize()
 
-    lr = optim.lr
-    Tensor.realize(lr, *grads)
+    lr_cpu = optim.lr.float().to("CPU")
+    grad_norm_cpu = grad_norm.float().to("CPU")
+    Tensor.realize(lr_cpu, grad_norm_cpu, *grads)
 
-    return lr.float().to("CPU"), grad_norm.float().to("CPU")
+    return lr_cpu, grad_norm_cpu
 
   @TinyJit
   @Tensor.train(False)
@@ -1478,13 +1480,14 @@ def train_llama3():
   step_times = []
   while i < MAX_STEPS:
     GlobalCounters.reset()
+    actual_gbs = GBS if i >= 2 else BS
     if getenv("TRAIN", 1):
       profile_marker(f"train @ {i}")
       st = time.perf_counter()
 
       stopped = False
       losses, data_time, dev_time = [], 0, 0
-      for _ in range(grad_acc if i >= 3 else 1):
+      for _ in range(grad_acc if i >= 2 else 1):
         ist = time.perf_counter()
         try: tokens = next(train_iter)
         except StopIteration:
@@ -1509,7 +1512,7 @@ def train_llama3():
       if BENCHMARK: step_times.append(step_time)
 
       i += 1
-      sequences_seen += GBS
+      sequences_seen += actual_gbs
 
       mem_gb = GlobalCounters.mem_used / 1e9
       gflops = GlobalCounters.global_ops / 1e9 / dev_time
@@ -1552,7 +1555,7 @@ def train_llama3():
         print(f"epoch global_ops: {GlobalCounters.global_ops:_}, "
               f"epoch global_mem: {GlobalCounters.global_mem:_}")
 
-    if (sequences_seen % EVAL_FREQ == 0 and (i != 1 or EVAL_FREQ == 1)) or (BENCHMARK and i == BENCHMARK):
+    if (sequences_seen // EVAL_FREQ != (sequences_seen - actual_gbs) // EVAL_FREQ and (i != 1 or EVAL_FREQ == 1)) or (BENCHMARK and i == BENCHMARK):
       if EVAL_BS == 0: return
       tqdm.write(f"evaluating after {sequences_seen} sequences")
       profile_marker(f"eval @ {i}")

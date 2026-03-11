@@ -80,5 +80,30 @@ class TestTransformerGenerate(unittest.TestCase):
     self.assertEqual(cache_size_after_warmup, len(schedule_cache),
       f"new prompt added {len(schedule_cache) - cache_size_after_warmup} new schedule cache entries (expected 0)")
 
+  def test_chunked_prefill(self):
+    """When prompt > chunk_size, all chunks should be prefill"""
+    from tinygrad.apps.llm import Transformer
+    from tinygrad.uop.ops import resolve
+    model = Transformer(num_blocks=1, dim=64, hidden_dim=128, n_heads=2, n_kv_heads=2,
+                        norm_eps=1e-5, vocab_size=100, head_dim=32, rope_theta=10000.0, max_context=64)
+
+    def get_prefill_flags(tokens, chunk_size):
+      is_prefill = []
+      def mock_call(self, tokens, start_pos):
+        is_prefill.append(resolve(tokens.shape[1] != 1))
+        return Tensor([[42]])
+      with patch.object(Transformer, '__call__', mock_call):
+        gen = model.generate(tokens, chunk_size=chunk_size)
+        for _ in range(3): next(gen)
+      model._cached_tokens = []
+      return is_prefill
+
+    # 8 tokens, chunk_size=4 -> 2 prefill chunks
+    self.assertEqual(get_prefill_flags(list(range(8)), 4), [True, True, False, False])
+    # 9 tokens, chunk_size=4 -> 3 prefill chunks (4+4+1)
+    self.assertEqual(get_prefill_flags(list(range(9)), 4), [True, True, True, False, False])
+    # 4 tokens, chunk_size=4 -> 1 prefill chunk
+    self.assertEqual(get_prefill_flags(list(range(4)), 4), [True, False, False])
+
 if __name__ == '__main__':
   unittest.main()

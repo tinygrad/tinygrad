@@ -812,6 +812,26 @@ class TestSchedule(unittest.TestCase):
       self.assertEqual(cnt2, 5)
 
   @unittest.skipIf(Device.DEFAULT != "CL", "image only supported on CL")
+  def test_image_f16_residual_fusion(self):
+    with Context(FLOAT16=1, OPENPILOT_HACKS=1):
+      def cnt():
+        inp = Tensor.empty((512,), dtype='float')
+        b1, b2 = Tensor.empty((512, 1024), dtype='float'), Tensor.empty((1024, 512), dtype='float')
+        c1, c2 = Tensor.empty((1024,), dtype='float'), Tensor.empty((512,), dtype='float')
+        rb = (((((inp @ b1) + c1).relu() @ b2) + c2).relu() + inp).relu()
+        b16, c16 = Tensor.empty((512, 16), dtype='float'), Tensor.empty((16,), dtype='float')
+        b32, c32 = Tensor.empty((512, 32), dtype='float'), Tensor.empty((32,), dtype='float')
+        sched = Tensor.schedule((rb @ b16 + c16).relu(), (rb @ b32 + c32).relu())
+        for si in sched: si.lower()
+        return len([si for si in sched if isinstance(si.prg, CompiledRunner)])
+
+      with Context(IMAGE=1): cnt1 = cnt()
+      with Context(IMAGE=2): cnt2 = cnt()
+
+      self.assertEqual(cnt1, 9)
+      self.assertEqual(cnt2, 9)
+
+  @unittest.skipIf(Device.DEFAULT != "CL", "image only supported on CL")
   @unittest.expectedFailure
   def test_image_conv_fusion(self):
     with Context(OPENPILOT_HACKS=1):
