@@ -1722,6 +1722,200 @@ def train_stable_diffusion():
   """)
     t6 = time.perf_counter()
 
+def train_flux():
+  """
+  MLPerf Training v5.1: Flux.1 text-to-image benchmark.
+
+  Key differences from SDv2 (train_stable_diffusion):
+    - Architecture: DiT (DoubleStream + SingleStream) vs UNet
+    - Loss: rectified flow (flow matching) vs DDPM v-prediction
+    - Dataset: CC12M pre-encoded moments (VAE latents + T5 + CLIP embeddings)
+    - Eval metric: validation loss (no FID/CLIP during training timing)
+    - Model size: ~11.9B vs ~860M params → requires BF16 + careful sharding
+
+  Reference: https://github.com/mlcommons/training/tree/master/flux1
+  Bounty: https://docs.google.com/spreadsheets/d/1WKHbT-7KOgjEawq5h5Ic1qUWzpfAzuD_J06N1JwOCGs
+  """
+  from extra.models.flux import flux_mlperf, rectified_flow_loss
+  from examples.mlperf.dataloader import batch_load_train_flux
+  from examples.mlperf.lr_schedulers import LambdaLR, LambdaLinearScheduler
+  import numpy as np
+
+  config = {}
+  GPUS     = config["GPUS"]     = [f"{Device.DEFAULT}:{i}" for i in range(getenv("GPUS", 1))]
+  seed     = config["seed"]     = getenv("SEED", 42)
+  # MLPerf Flux.1 reference uses global_batch_size=64 on 8xH100
+  # tinybox (6x7900XTX) target: BS=8 per GPU → GBS=48 as starting point (memory TBD)
+  BS       = config["BS"]       = getenv("BS", 4 * len(GPUS))
+  BASE_LR  = config["BASE_LR"]  = getenv("LEARNING_RATE", 1e-4)
+  DATADIR  = config["DATADIR"]  = Path(getenv("DATADIR", "./datasets/cc12m"))
+  CKPTDIR  = config["CKPTDIR"]  = Path(getenv("CKPTDIR", "./checkpoints"))
+  FLUX_CKPTDIR = config["FLUX_CKPTDIR"] = Path(getenv("FLUX_CKPTDIR", "./checkpoints/flux"))
+  # MLPerf rules: checkpoint every 512K samples
+  CKPT_STEP_INTERVAL = config["CKPT_STEP_INTERVAL"] = getenv("CKPT_STEP_INTERVAL", math.ceil(512_000 / BS))
+  # Validation: run every N steps, early stop when val_loss <= target
+  EVAL_STEP_INTERVAL = config["EVAL_STEP_INTERVAL"] = getenv("EVAL_STEP_INTERVAL", math.ceil(512_000 / BS))
+  VAL_LOSS_TARGET    = config["VAL_LOSS_TARGET"]    = getenv("VAL_LOSS_TARGET", 0.045)  # TBD: verify from reference
+
+  print(f"training flux.1 on {GPUS}")
+  print(f"BS={BS}, BASE_LR={BASE_LR}, CKPT_STEP_INTERVAL={CKPT_STEP_INTERVAL}")
+  for x in GPUS: Device[x]
+
+  if (WANDB := getenv("WANDB", "")):
+    import wandb
+    wandb.init(config=config, project="MLPerf-Flux")
+
+  Tensor.manual_seed(seed)
+
+  # ── Model ──────────────────────────────────────────────────────────────
+  model = flux_mlperf()
+
+  # Load pre-trained Flux.1 weights (required for MLPerf closed division)
+  # MLPerf provides a specific starting checkpoint; load it here if available.
+  flux_ckpt = FLUX_CKPTDIR / "flux1-mlperf.safetensors"
+  if flux_ckpt.exists():
+    print(f"Loading Flux.1 weights from {flux_ckpt}")
+    load_state_dict(model, safe_load(str(flux_ckpt)), strict=False)
+  else:
+    print(f"WARNING: No Flux.1 checkpoint found at {flux_ckpt}. Initialise from scratch (WIP only).")
+
+  # Shard model weights across GPUs (data parallel)
+  for k, x in get_state_dict(model).items():
+    x.realize().to_(GPUS)
+
+  parameters = get_parameters(model)
+  print(f"Flux.1 parameters: {sum(p.numel() for p in parameters) / 1e9:.2f}B")
+
+  # ── Optimizer ──────────────────────────────────────────────────────────
+  # MLPerf reference uses AdamW with linear warmup + constant LR
+  lr = BS * BASE_LR
+  optimizer = AdamW(parameters, lr=lr, b1=0.9, b2=0.999, eps=1e-8, wd=0.0)
+
+  # Linear warmup for 1000 steps, then constant
+  def lr_lambda(step: int) -> float:
+    warmup_steps = 1000
+    return min(1.0, step / max(1, warmup_steps))
+  lr_tensor = Tensor(lr, dtype=dtypes.float, device=optimizer.device)
+  lr_scheduler = LambdaLR(optimizer, lr_tensor, lr_lambda)
+
+  # ── Train step ──────────────────────────────────────────────────────────
+  @TinyJit
+  def train_step(
+    latents: Tensor,   # (B, 16, H/8, W/8) — pre-encoded VAE latents (moments sampled)
+    txt:     Tensor,   # (B, S_txt, 4096) — pre-encoded T5 embeddings
+    vec:     Tensor,   # (B, 768) — pre-encoded pooled CLIP embeddings
+  ) -> Tensor:
+    optimizer.zero_grad()
+
+    # shard batch across GPUs along batch axis
+    for t in (latents, txt, vec):
+      t.shard_(GPUS, axis=0)
+
+    loss = rectified_flow_loss(model, latents, txt, vec)
+    loss.backward()
+    optimizer.step()
+    lr_scheduler.step()
+
+    loss_out = loss.detach().to("CPU")
+    lr_out   = optimizer.lr.to("CPU")
+    Tensor.realize(loss_out, lr_out)
+    return loss_out, lr_out
+
+  # ── Validation step ─────────────────────────────────────────────────────
+  @TinyJit
+  def val_step(latents: Tensor, txt: Tensor, vec: Tensor) -> Tensor:
+    """Compute validation loss (no gradient). Used for early-stop quality target."""
+    for t in (latents, txt, vec):
+      t.shard_(GPUS, axis=0)
+    with Tensor.inference_mode():
+      loss = rectified_flow_loss(model, latents, txt, vec)
+    return loss.to("CPU")
+
+  # ── Dataloader ──────────────────────────────────────────────────────────
+  # CC12M pre-encoded dataset:
+  #   Each sample contains: vae_latent (16 x H x W), t5_emb (S x 4096), clip_emb (768,)
+  # All encoders are frozen; moments are pre-computed offline.
+  train_dl = batch_load_train_flux(DATADIR / "train", BS)
+  val_dl   = batch_load_train_flux(DATADIR / "val", BS, val=True)
+
+  # ── Training loop ────────────────────────────────────────────────────────
+  CKPTDIR.mkdir(parents=True, exist_ok=True)
+  saved_checkpoints = []
+  best_val_loss = float("inf")
+  train_start_time = time.perf_counter()
+  t0 = t6 = time.perf_counter()
+
+  for step, batch in enumerate(train_dl, start=1):
+    loop_time = time.perf_counter() - t0
+    t0 = time.perf_counter()
+    dl_time = t0 - t6
+    GlobalCounters.reset()
+
+    # Unpack pre-encoded batch
+    # latents: sampled from stored VAE moments (mean + std * randn)
+    mean    = Tensor(batch["mean"],    dtype=dtypes.bfloat16, device="CPU")
+    logvar  = Tensor(batch["logvar"],  dtype=dtypes.bfloat16, device="CPU")
+    txt_emb = Tensor(batch["t5"],      dtype=dtypes.bfloat16, device="CPU")
+    vec_emb = Tensor(batch["clip"],    dtype=dtypes.bfloat16, device="CPU")
+
+    # reparametrize latent sample
+    std     = (0.5 * logvar.clamp(-30.0, 20.0)).exp()
+    latents = (mean + std * Tensor.randn(*mean.shape, device="CPU"))
+
+    t1 = time.perf_counter()
+    loss, lr = train_step(latents, txt_emb, vec_emb)
+    loss_item, lr_item = loss.item(), lr.item()
+    t2 = time.perf_counter()
+
+    # print first 3 BEAM steps before printing BEAM COMPLETE
+    if step == 3:
+      for _ in range(3):
+        # checkpoint dry-run to catch OOM early
+        ckpt = get_training_state(model, optimizer, lr_scheduler)
+        for k, v in ckpt.items(): ckpt[k] = v.detach().to("CPU")
+        Tensor.realize(*ckpt.values())
+      print("BEAM COMPLETE", flush=True)
+
+    total_train_time = time.perf_counter() - train_start_time
+    if WANDB:
+      wandb.log({"loss": loss_item, "lr": lr_item, "step": step,
+                 "train_step_time": t2 - t1, "total_train_time": total_train_time})
+
+    print(f"step {step:6d}: loss={loss_item:.5f}  lr={lr_item:.3e}  "
+          f"step={t2-t1:.2f}s  dl={dl_time:.2f}s  total={total_train_time:.0f}s  "
+          f"gops={GlobalCounters.global_ops*1e-9/(t2-t1):.1f}  mem={GlobalCounters.mem_used/1e9:.2f}GB")
+
+    # ── Checkpoint ─────────────────────────────────────────────────────
+    if step % CKPT_STEP_INTERVAL == 0:
+      ckpt_path = CKPTDIR / f"flux_step{step:07d}.safetensors"
+      ckpt = get_training_state(model, optimizer, lr_scheduler)
+      for k, v in ckpt.items(): ckpt[k] = v.detach().to("CPU")
+      Tensor.realize(*ckpt.values())
+      safe_save({k: v.cast(v.dtype.base).contiguous() for k, v in ckpt.items()}, str(ckpt_path))
+      saved_checkpoints.append(ckpt_path)
+      print(f"  saved checkpoint: {ckpt_path}")
+
+    # ── Validation ─────────────────────────────────────────────────────
+    if step % EVAL_STEP_INTERVAL == 0:
+      val_losses = []
+      for val_batch in val_dl:
+        v_mean   = Tensor(val_batch["mean"],   dtype=dtypes.bfloat16, device="CPU")
+        v_logvar = Tensor(val_batch["logvar"], dtype=dtypes.bfloat16, device="CPU")
+        v_txt    = Tensor(val_batch["t5"],     dtype=dtypes.bfloat16, device="CPU")
+        v_vec    = Tensor(val_batch["clip"],   dtype=dtypes.bfloat16, device="CPU")
+        v_std    = (0.5 * v_logvar.clamp(-30.0, 20.0)).exp()
+        v_lat    = v_mean + v_std * Tensor.randn(*v_mean.shape, device="CPU")
+        vl = val_step(v_lat, v_txt, v_vec).item()
+        val_losses.append(vl)
+      val_loss = sum(val_losses) / len(val_losses)
+      print(f"  [EVAL] step={step}  val_loss={val_loss:.5f}  target={VAL_LOSS_TARGET}")
+      if WANDB:
+        wandb.log({"val_loss": val_loss, "step": step})
+      if val_loss <= VAL_LOSS_TARGET:
+        print(f"  TARGET REACHED: val_loss={val_loss:.5f} <= {VAL_LOSS_TARGET}  total_time={total_train_time:.0f}s")
+        break
+
+    t6 = time.perf_counter()
 if __name__ == "__main__":
   multiprocessing.set_start_method('spawn')
 
@@ -1730,7 +1924,7 @@ if __name__ == "__main__":
   else: bench_log_manager = contextlib.nullcontext()
 
   with Tensor.train():
-    for m in getenv("MODEL", "resnet,retinanet,unet3d,rnnt,bert,maskrcnn,stable_diffusion").split(","):
+    for m in getenv("MODEL", "resnet,retinanet,unet3d,rnnt,bert,maskrcnn,stable_diffusion,flux").split(","):
       nm = f"train_{m}"
       if nm in globals():
         print(f"training {m}")

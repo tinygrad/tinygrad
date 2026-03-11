@@ -530,6 +530,76 @@ def batch_load_train_stable_diffusion(urls:str, BS:int):
     assert all(isinstance(caption, str) for caption in x["txt"])
     yield x
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ADD THIS FUNCTION TO examples/mlperf/dataloader.py
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Flux.1 / CC12M pre-encoded dataset loader
+#
+# The MLPerf Flux.1 benchmark provides a pre-encoded dataset of 1,099,776 samples
+# from CC12M, where:
+#   - VAE latents (mean + logvar) are stored as (1, 32, H, W) float16 arrays
+#     (H=W=64 for 512x512 images with Flux VAE scale factor 8 and 16 channels split as mean/logvar)
+#   - T5-XXL embeddings: (1, S_txt, 4096) float16
+#   - CLIP pooled embeddings: (1, 768) float16
+#
+# Reference dataset structure mirrors the SDv2 webdataset format:
+#   {index}.tar containing .npy files per sample
+#
+# Reference: https://github.com/mlcommons/training/tree/master/flux1
+
+def batch_load_train_flux(data_dir: Path, BS: int, val: bool = False):
+  """
+  Load pre-encoded Flux.1 CC12M training (or val) data.
+
+  Each yielded batch is a dict with:
+    "mean":   np.ndarray (BS, 16, H, W)  — VAE latent mean
+    "logvar": np.ndarray (BS, 16, H, W)  — VAE latent log-variance
+    "t5":     np.ndarray (BS, S_txt, 4096) — T5-XXL embeddings
+    "clip":   np.ndarray (BS, 768)         — CLIP pooled embeddings
+
+  Layout on disk (expected, matches mlcommons reference):
+    data_dir/
+      00000.tar  (webdataset shards)
+      ...
+      01074.tar
+    Each .tar sample keys: ".mean.npy", ".logvar.npy", ".t5.npy", ".clip.npy"
+
+  TODO: verify exact shard count and key names from mlcommons/training flux1/
+  """
+  import webdataset
+  import numpy as np
+
+  split = "val" if val else "train"
+  # Glob all shards in the split directory
+  shard_pattern = str(data_dir / "{00000..01074}.tar") if not val else str(data_dir / "val_{00000..00010}.tar")
+
+  dataset = webdataset.WebDataset(urls=shard_pattern, resampled=not val, cache_size=-1, cache_dir=None)
+  if not val:
+    dataset = dataset.shuffle(size=1000)
+  dataset = dataset.decode()
+
+  def extract_sample(sample: dict) -> dict:
+    """Pull the pre-encoded arrays from a webdataset sample."""
+    return {
+      "mean":   sample["mean.npy"],
+      "logvar": sample["logvar.npy"],
+      "t5":     sample["t5.npy"],
+      "clip":   sample["clip.npy"],
+    }
+
+  def collate_flux(samples: list) -> dict:
+    return {k: np.stack([s[k][0] if s[k].ndim == 4 + (k in ("mean","logvar")) else s[k] for s in samples], axis=0) for k in samples[0].keys()}
+
+  dataset = dataset.map(extract_sample)
+  dataset = dataset.batched(BS, partial=False, collation_fn=lambda x: {k: np.stack([s[k].squeeze(0) if hasattr(s[k], 'ndim') and s[k].ndim > 0 else s[k] for s in x], axis=0) for k in x[0].keys()})
+  loader  = webdataset.WebLoader(dataset, batch_size=None, shuffle=False, num_workers=2,
+                                  persistent_workers=True)
+  for batch in loader:
+    # basic shape assertions (update dims once we have reference dataset)
+    assert "mean" in batch and "t5" in batch and "clip" in batch
+    yield batch
 # llama3
 
 class BinIdxDataset:

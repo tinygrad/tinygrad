@@ -302,8 +302,7 @@ function setFocus(key) {
   }
   // instructions list renderer
   let instList = document.getElementById("insts");
-  if (data.pcToShape.size == 0) return d3.select(instList?.parentElement).html("");
-  if (instList == null) {
+  if (data.pcToShape.size > 0 && instList == null) {
     let contents = "", i = 0;
     for (const [k, v] of data.pcToShape) {
       contents += `<div class="line" data-k="${k}"><span class="left" id="inst-${k}"><span class="n">${i++}</span><span class="wave">${v.wave}</span>
@@ -315,7 +314,7 @@ function setFocus(key) {
   }
   d3.select(instList).selectAll("span").classed("highlight", false);
   const instLine = document.getElementById(`inst-${key}`); instLine?.classList.add("highlight");
-  if (instLine != null) {
+  if (instLine != null && instList != null) {
     const r = rect(instLine), c = rect(instList);
     if (Math.max(c.top-r.bottom, r.top-c.bottom)>=-30) instLine.scrollIntoView({ block:"center" });
   }
@@ -872,6 +871,8 @@ async function main() {
   // ** center graph
   const { currentCtx, currentStep, currentRewrite, expandSteps } = state;
   if (currentCtx == -1) return;
+  // always have a new sidebar when view changes
+  metadata.innerHTML = "";
   const ctx = ctxs[currentCtx];
   const step = ctx.steps[currentStep];
   const ckey = step?.query;
@@ -903,9 +904,12 @@ async function main() {
       opts = {heightScale:0.5, hideLabels:true, levelKey:step.name.includes("PKTS") ? (e) => parseInt(e.name.split(" ")[1].split(":")[1]) : null, colorByName:ckey.includes("pkts")};
       return renderProfiler(ckey, "clk", opts);
     }
-    metadata.replaceChildren(...((ret.metadata ?? []).map((m) => {
-      return tabulate(m.map((e) => [e.label.trim(), typeof e.value === "string" ? e.value : formatUnit(e.value)])).node();
-    })));
+    ret.metadata?.forEach(m => {
+      if (Array.isArray(m)) return metadata.appendChild(tabulate(m.map(({ label, value }) => {
+        return [label.trim(), typeof value === "string" ? value : formatUnit(value)];
+      })).node());
+      metadata.appendChild(codeBlock(m.src)).classList.add("full-height")
+    });
     // graph render
     if (ret.data != null) {
       metadata.prepend(showGraph.label);
