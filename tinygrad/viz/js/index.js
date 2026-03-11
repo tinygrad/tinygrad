@@ -322,7 +322,7 @@ function setFocus(key) {
 }
 
 const EventTypes = { EXEC:0, BUF:1 };
-const GraphConfig = [{ pcolor:"#c9a8ff", unit:"B", fillColor:"#2B1B72", line:false }, { pcolor:"#4fa3cc", unit:"Hz", fillColor:"#4fa3cc", line:true }];
+const GraphConfig = [{ pcolor:"#c9a8ff", unit:"B", fillColor:"#2B1B72"}, { pcolor:"#4fa3cc", unit:"Hz", fillColor:"#4fa3cc"}];
 
 async function renderProfiler(path, opts) {
   displaySelection("#profiler");
@@ -495,8 +495,7 @@ async function renderProfiler(path, opts) {
         return bufShapes;
       };
       if (timestamps.length > 0) data.first = data.first == null ? timestamps[0] : Math.min(data.first, timestamps[0]);
-      const scaleFactor = maxheight*4/height;
-      data.tracks.set(k, { shapes:[sum], eventType, linear, visible, offsetY, pcolor:config.pcolor, height, peak, scaleFactor,
+      data.tracks.set(k, { shapes:[sum], eventType, linear, visible, offsetY, pcolor:config.pcolor, height, peak, scaleFactor:maxheight*4/height,
                            get views() { return [[sum], linear ? null : buildBufShapes()]; }, valueMap, rowBorderColor });
       div.style("height", height+padding+"px").style("cursor", "pointer").on("click", (e) => {
         if (linear) return;
