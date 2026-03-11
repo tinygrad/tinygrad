@@ -793,6 +793,10 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable((x//8)*4 + y + (x//2)%4, 0, 20, "(y+x//2)")
     self.helper_test_variable(y + (x//8)*4 + (x//2)%4, 0, 20, "(y+x//2)")
 
+  def test_div_mod_recompose_low_order_remainder(self):
+    x = Variable("x", 0, 127)
+    self.helper_test_variable((x//2)%4*2 + x%2, 0, 7, "(x%8)")
+
   def test_reshape_index_roundtrip(self):
     # simulate reshape index decompose then recompose — the core pattern this enables
     # (8,8) decomposed for (16,4): combined=r0*8+r1, div and mod by 4
