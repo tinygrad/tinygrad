@@ -8,6 +8,7 @@ from tinygrad.uop.ops import UOp, Variable, sym_infer, Ops
 from tinygrad.engine.realize import ExecItem, capturing, ViewOp, BufferCopy, BufferXfer, EncDec, CompiledRunner, Runner, Estimates
 from tinygrad.engine.memory import _internal_memory_planner
 from tinygrad.nn.state import get_parameters
+from tinygrad.schedule.rangeify import mop_cleanup
 from dataclasses import dataclass, replace
 from weakref import WeakKeyDictionary
 
@@ -264,7 +265,7 @@ def _prepare_jit_inputs(args, kwargs):
     raise JitError("JIT inputs cannot be const, create a buffer with .contiguous()")
   input_buffers: list[Buffer] = flatten([b.bufs if isinstance(b, MultiBuffer) else [b] for u in input_uops if (b:=u.base.realized) is not None])
   if len(set(input_buffers)) != len(input_buffers): raise JitError("duplicate inputs to JIT")
-  inputs = [(*(u.substitute({u.base:UOp(Ops.NOOP)}).unbind_all()), u.dtype, u.device) for u in input_uops]
+  inputs = [(*(u.substitute({u.base:UOp(Ops.NOOP)}, extra_pm=mop_cleanup).unbind_all()), u.dtype, u.device) for u in input_uops]
   _var_vals = merge_dicts([x[1] for x in inputs] + [dict(v.unbind() for v in (args + tuple(kwargs.values())) if isinstance(v, UOp))])
   var_vals = {k.expr:v for k,v in _var_vals.items()}
   expected_input_info = [(x[0], tuple(sorted(x[1].keys(), key=lambda v: v.expr)), x[2], x[3]) for x in inputs]
