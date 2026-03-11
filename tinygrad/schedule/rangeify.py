@@ -87,11 +87,6 @@ def split_reduceop(reduce:UOp, x:UOp):
   # reduce original axes, then split
   return splitted.r(*reduce.arg).contiguous().r(reduce.arg[0], (len(reduce.shape),)).reshape(reduce.shape)
 
-mop_cleanup = PatternMatcher([
-  # merge adjacent RESHAPES
-  (UPat(Ops.RESHAPE, src=(UPat(Ops.RESHAPE, name="x2"), UPat()), name="x"), lambda x,x2: x.replace(src=(x2.src[0], x.src[1]))),
-])
-
 pm_gather_params = PatternMatcher([ (UPat(Ops.PARAM, name="p"), lambda ctx, p: ctx.append(p)), ])
 def resolve_call(c:UOp, allow_param_mismatch=True) -> UOp|None:
   if not should_resolve_call(c): return None
@@ -112,7 +107,7 @@ def resolve_call(c:UOp, allow_param_mismatch=True) -> UOp|None:
     if p.dtype != a.dtype: raise TypeError(f"arg {i} dtype mismatch: expected {p.dtype}, got {a.dtype}")
   return c.src[0].substitute(dict_map, walk=True)
 
-earliest_rewrites = mop_cleanup+PatternMatcher([
+earliest_rewrites = PatternMatcher([
   # early fixup const copy
   (UPat(Ops.COPY, src=(UPat.var("s"), UPat.var("d"))),
    lambda s,d: s.substitute({UOp(Ops.DEVICE, arg=s.device):d}) if s.base.op is Ops.CONST else None),
