@@ -245,7 +245,7 @@ function selectShape(key) {
   if (key == null) return {};
   const [t, idx] = key.split("-");
   const track = data.tracks.get(t);
-  return { eventType:track?.eventType, e:track?.shapes[idx] };
+  return { eventType:track?.eventType, e:track?.shapes[idx], t };
 }
 
 const Modes = {0:'read', 1:'write', 2:'write+read'};
@@ -263,7 +263,7 @@ function setFocus(key) {
     }
     focusedShape = key; d3.select("#timeline").call(canvasZoom.transform, zoomLevel);
   }
-  const { eventType, e } = selectShape(key);
+  const { eventType, e, t } = selectShape(key);
   if (metadata.querySelector(".info") == null) d3.select(metadata).html("").append("div").classed("info", true);
   const html = d3.select(".info").html("");
   if (eventType === EventTypes.EXEC) {
@@ -271,15 +271,13 @@ function setFocus(key) {
     const tableData = [["Name", colored(e.arg.label)], ["Duration", formatTime(e.width)], ["Start Time", formatTime(e.x)]];
     const frequency = data.tracks.get("Shader Clock");
     if (frequency != null) {
-      let freq = null;
-      for (let [cycle, f] of frequency.valueMap) {
-        if (cycle > e.x) break;
-        freq = f;
+      let freq = 0;
+      for (const [c,f] of frequency.valueMap) if (c > e.x) break; else freq = f;
+      if (freq > 0) {
+        tableData.push(["Frequency", formatUnit(freq, 'Hz')]);
+        const ns = (e.x-data.tracks.get(t).shapes[0].x) / freq * 1e9; const remNs = Math.round(ns % 1000);
+        tableData.push(["Timestamp", ns/1000 > 1 ? formatMicroseconds(ns/1000, true) + (remNs ? ` ${remNs}ns` : "") : Math.round(ns, 2)+"ns"]);
       }
-      tableData.push(["Frequency", formatUnit(freq, 'Hz')]);
-      const start = data.tracks.get(key.split("-")[0]).shapes[0].x;
-      const ns = (e.x-start) / freq * 1e9; const remNs = Math.round(ns % 1000);
-      tableData.push(["Timestamp", ns/1000 > 1 ? formatMicroseconds(ns/1000, true) + (remNs ? ` ${remNs}ns` : "") : Math.round(ns, 2) + "ns"]);
     }
     html.append(() => tabulate(tableData));
     let group = html.append("div").classed("args", true);
