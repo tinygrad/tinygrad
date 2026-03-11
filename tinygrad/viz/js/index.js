@@ -696,8 +696,6 @@ async function renderProfiler(path, opts) {
     } else tooltip.style.display = "none";
   });
   canvas.addEventListener("mouseleave", () => document.getElementById("tooltip").style.display = "none");
-
-  setFocus("ALUEXEC:0 VALU-12040");
 }
 
 // ** zoom and recentering
@@ -880,7 +878,7 @@ async function main() {
       }
       appendSteps(ul, i, steps);
     }
-    return setState({currentCtx: 5, currentStep: 1, currentRewrite: 0, expandSteps: true });
+    return setState({ currentCtx:-1 });
   }
   // ** center graph
   const { currentCtx, currentStep, currentRewrite, expandSteps } = state;
