@@ -277,7 +277,8 @@ function setFocus(key) {
         freq = f;
       }
       tableData.push(["Frequency", formatUnit(freq, 'Hz')]);
-      const ns = e.x / freq * 1e9; const remNs = Math.round(ns % 1000);
+      const start = data.tracks.get(key.split("-")[0]).shapes[0].x;
+      const ns = (e.x-start) / freq * 1e9; const remNs = Math.round(ns % 1000);
       tableData.push(["Timestamp", ns/1000 > 1 ? formatMicroseconds(ns/1000, true) + (remNs ? ` ${remNs}ns` : "") : Math.round(ns, 2) + "ns"]);
     }
     html.append(() => tabulate(tableData));
