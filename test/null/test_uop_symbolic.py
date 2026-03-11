@@ -708,6 +708,18 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable((31*b+1)//18, 0, 172, "(((b*13)+1)//18+b)")
     self.helper_test_variable((19*b+3)//7, 0, 271, "(((b*5)+3)//7+(b*2))")
 
+  def test_gcd_with_remainder(self):
+    # gcd_with_remainder: factor GCD out of non-constant terms and denominator
+    a = Variable("a", 0, 2)
+    self.helper_test_variable((a*4)//6, 0, 1, "(a*2//3)")
+    self.helper_test_variable((a*4+1)//6, 0, 1, "(a*2//3)")
+    self.helper_test_variable((a*4+2)//6, 0, 1, "((a*2+1)//3)")
+    self.helper_test_variable((a*4+3)//6, 0, 1, "((a*2+1)//3)")
+    self.helper_test_variable((a*4)%6, 0, 4, "(a*2%3*2)")
+    self.helper_test_variable((a*4+1)%6, 1, 5, "(a*2%3*2+1)")
+    self.helper_test_variable((a*4+2)%6, 0, 4, "((a*2+1)%3*2)")
+    self.helper_test_variable((a*4+3)%6, 1, 5, "((a*2+1)%3*2+1)")
+
   def test_div_by_factor_tie_break(self):
     a = Variable("a", 0, 1)
     b = Variable("b", 0, 1)
@@ -747,6 +759,17 @@ class TestSymbolic(unittest.TestCase):
     # f=3, k=2, const=1: (a*3+b+1)%6 = (a%2)*3 + b + 1
     self.helper_test_variable((a*3+b+1)%6, 1, 5, "(b+a%2*3+1)")
 
+  def test_div_nest_by_factor_with_const(self):
+    # nest_by_factor IDIV: (160*a + 5*b + 4*c + K) // 60 should pick div=5 (clean) over div=4 (dirty)
+    a = Variable("a", 0, 2)
+    b = Variable("b", 0, 31)
+    c = Variable("c", 0, 1)
+    self.helper_test_variable((160*a + 5*b + 4*c) // 60, 0, 7, "(a*2+(b+a*8)//12)")
+    self.helper_test_variable((160*a + 5*b + 4*c + 1) // 60, 0, 8, "(a*2+(b+c+a*8)//12)")
+    self.helper_test_variable((160*a + 5*b + 4*c + 2) // 60, 0, 8, "(a*2+(b+c+a*8)//12)")
+    self.helper_test_variable((160*a + 5*b + 4*c + 3) // 60, 0, 8, "(a*2+(b+c+a*8)//12)")
+    self.helper_test_variable((160*a + 5*b + 4*c + 59) // 60, 0, 8, "(a*2+(b+c+a*8+11)//12)")
+
   def test_div_mod_recombine_after_nesting(self):
     # when nest_div_by_factor simplifies the div, the mod must also nest so recombine can fire
     gidx0 = Variable("gidx0", 0, 15)
@@ -762,6 +785,17 @@ class TestSymbolic(unittest.TestCase):
     y = a*6+b
     # div nests: y//12 -> a//2, mod nests: y%12 -> (a%2)*6+b, recombine
     self.helper_test_variable((y//12)*12 + y%12, 0, 43, "(b+a*6)")
+
+  def test_div_mod_recombine_in_additive_sum(self):
+    x = Variable("x", 0, 31)
+    y = Variable("y", 0, 5)
+    # recombine should work inside larger additive sums, not just in the two special y+... tree shapes
+    self.helper_test_variable((x//8)*4 + y + (x//2)%4, 0, 20, "(y+x//2)")
+    self.helper_test_variable(y + (x//8)*4 + (x//2)%4, 0, 20, "(y+x//2)")
+
+  def test_div_mod_recompose_low_order_remainder(self):
+    x = Variable("x", 0, 127)
+    self.helper_test_variable((x//2)%4*2 + x%2, 0, 7, "(x%8)")
 
   def test_reshape_index_roundtrip(self):
     # simulate reshape index decompose then recompose — the core pattern this enables
@@ -917,6 +951,12 @@ class TestSymbolic(unittest.TestCase):
     b = Variable("b", 1, 10, dtypes.int)
     self.assertIn((a.cast(dtypes.long)+b.cast(dtypes.long)).render(), "(long)((a+b))")
     self.assertIn((a.cast(dtypes.long)*b.cast(dtypes.long)).render(), "(long)((a*b))")
+
+  def test_nested_mod_negative_range(self):
+    # (x%(k*c))%c = x%c holds for cmod regardless of signs since sign(x%(k*c)) = sign(x)
+    x = Variable("x", 0, 1575)
+    self.helper_test_variable(((x + (-1064)) % 512) % 4, -3, 3, "((x+-1064)%4)")
+    self.helper_test_variable(((x + (-1064)) % 512) % 128, -127, 127, "((x+-1064)%128)")
 
 class TestSymbolicNumeric(unittest.TestCase):
   def helper_test_numeric(self, f):

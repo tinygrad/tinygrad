@@ -338,32 +338,33 @@ def sqtt_timeline(data:bytes, lib:bytes, target:str) -> list[ProfileEvent]:
   from tinygrad.renderer.amd.sqtt import map_insts, InstructionInfo, PacketType, TS_DELTA_OR_MARK, INST, InstOp, VALUINST, IMMEDIATE, IMMEDIATE_MASK
   from tinygrad.renderer.amd.sqtt import VMEMEXEC, ALUEXEC, INST_RDNA4, InstOpRDNA4, TS_DELTA_OR_MARK_RDNA4
   ret:list[ProfileEvent] = []
-  rows:dict[str, None] = {}
-  freq:list[int] = []
-  trace:dict[str, set[int]] = {}
+  row_ends:dict[str, Decimal] = {}
   # real time anchors
-  start_time, curr, prev = None, None, None # [shader_clk, real_clk]
   TS_DELTA = (TS_DELTA_OR_MARK_RDNA4 if "gfx12" in target else TS_DELTA_OR_MARK).delta
   RT_BASE = 1 << (TS_DELTA.hi - TS_DELTA.lo + 1)
   NS_PER_TICK = 10  # 100MHz
-  def add(name:str, p:PacketType, width=1, op_name=None, wave=None, info:InstructionInfo|None=None) -> None:
-    nonlocal start_time, curr, prev
-    rate = (curr[0] - prev[0]) / (curr[1] - prev[1])
+  start:int|None = None
+  curr:tuple[int, int]|None = None
+  prev:tuple[int, int]|None = None
+  freq:list[float] = []
+  def add(name:str, p:PacketType, width=1, op:str|None=None, wave:int|None=None, info:InstructionInfo|None=None) -> None:
+    nonlocal start, curr, prev
+    (s0, r0), (s1, r1) = unwrap(curr), unwrap(prev)
+    rate = (s1 - s0) / (r1 - r0)
     freq.append(rate)
-    rt = (RT_BASE | round(curr[1] + (p._time - curr[0]) / rate)) * NS_PER_TICK
-    if start_time is None: start_time = rt
+    rt = (RT_BASE | round(r1 + (p._time - s1) / rate)) * NS_PER_TICK
+    if start is None: start = rt
     width *= NS_PER_TICK / rate
-    if hasattr(p, "wave"): wave = p.wave
-    rows.setdefault(r:=(f"WAVE:{wave}" if wave is not None else f"{p.__class__.__name__}:0 {name}"))
-    key = TracingKey(f"{op_name if op_name is not None else name}", ret=f"PC:{info.pc}" if info is not None else None)
-    ret.append(ProfileRangeEvent(r, key, Decimal(rt-start_time), Decimal(rt-start_time+width)))
+    row = f"WAVE:{wave}" if (wave:=getattr(p, "wave", wave)) is not None else f"{p.__class__.__name__}:0 {name}"
+    ret.append(e:=ProfileRangeEvent(row, TracingKey(op or name, ret=f"PC:{info.pc}" if info else None), Decimal(rt-start), Decimal(rt-start+width)))
+    if (et:=row_ends.get(row)) is not None and e.st < et: raise RuntimeError(f"packet {p} overlaps another packet in {row}.")
+    row_ends[row] = unwrap(e.en)
   for p, info in map_insts(data, lib, target):
     if len(ret) > getenv("MAX_SQTT_PKTS", 50_000): break
     if isinstance(p, TS_DELTA_OR_MARK) and p.is_marker: prev, curr = curr, (p._time, p.delta)
     if isinstance(p, (INST, INST_RDNA4)):
-      op_name = p.op.name if isinstance(p.op, (InstOp, InstOpRDNA4)) else f"0x{p.op:02x}"
-      name, width = (op_name, 10 if "BARRIER" in op_name else 1)
-      add(name, p, width=width, info=info)
+      name = p.op.name if isinstance(p.op, (InstOp, InstOpRDNA4)) else f"0x{p.op:02x}"
+      add(name, p, width=10 if "BARRIER" in name else 1, info=info)
     if isinstance(p, (VALUINST, IMMEDIATE)): add(p.__class__.__name__, p, info=info)
     if isinstance(p, IMMEDIATE_MASK): add("IMMEDIATE", p, wave=unwrap(info).wave, info=info)
     if isinstance(p, (VMEMEXEC, ALUEXEC)):
@@ -372,12 +373,10 @@ def sqtt_timeline(data:bytes, lib:bytes, target:str) -> list[ProfileEvent]:
         add("VALU", p)
         add("SALU", p)
       else:
-        add(name.replace("_ALT", ""), p, op_name=name)
-      if p._time in trace.setdefault(name, set()): raise AssertionError(f"packets overlap in shared resource! {name}")
-      trace[name].add(p._time)
+        add(name.replace("_ALT", ""), p, op=name)
   pc_map = {addr:str(inst) for addr,inst in amd_decode(lib, target).items()}
-  frequency = [ProfilePointEvent("SE", "JSON", "frequency", freq, ts=Decimal(0))] if freq else []
-  return [ProfilePointEvent(r, "JSON", "pcMap", pc_map, ts=Decimal(0)) for r in rows]+frequency+ret
+  freq_plot = [ProfilePointEvent("SE", "JSON", "frequency", freq, ts=Decimal(0))] if freq else []
+  return [ProfilePointEvent(r, "JSON", "pcMap", pc_map, ts=Decimal(0)) for r in row_ends]+freq_plot+ret
 
 # ** SQTT OCC only unpacks wave start, end time and SIMD location
 

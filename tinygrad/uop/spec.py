@@ -84,7 +84,7 @@ _tensor_spec = PatternMatcher([
   (UPat(Ops.LUNIQUE, dtypes.void, ()), lambda: True),
   (UPat(Ops.DEVICE, dtypes.void, (), name="d"), lambda d:
    isinstance(d.arg, str) or (isinstance(d.arg, tuple) and all(isinstance(s, str) for s in d.arg))),
-  (UPat(Ops.BUFFER, src=(UPat((Ops.LUNIQUE, Ops.UNIQUE)), UPat(Ops.DEVICE)), name="buf"),
+  (UPat(Ops.BUFFER, src=(UPat((Ops.LUNIQUE, Ops.UNIQUE, Ops.NOOP)), UPat(Ops.DEVICE)), name="buf"),
    lambda buf: isinstance(buf.arg, int) and isinstance(buf.dtype, (DType, ImageDType))),
 
   # BUFFER_VIEW on BUFFER is allowed if BUFFER is
@@ -267,8 +267,6 @@ full_spec = PatternMatcher([
   # linearizer: outputs + intermediate KERNELs
   (UPat(Ops.CALL, dtype=dtypes.void), lambda: True),
 
-  # Invalid must have type Index
-  (UPat(Ops.CONST, arg=Invalid, name="x"), lambda x: x.dtype.scalar() == dtypes.index),
   # where on index in rhs position is fine
   (UPat(Ops.WHERE, dtype=dtypes.index, src=(UPat(dtype=dtypes.bool), UPat(), UPat(dtype=dtypes.index))), lambda: True),
   # allow index dtype on a restricted set of UOps
