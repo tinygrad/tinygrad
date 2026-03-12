@@ -82,7 +82,8 @@ class Ops(FastEnum):
   # ** 6 -- ops that don't exist in programs **
 
   # tensor graph ops
-  UNIQUE = auto(); DEVICE = auto(); ASSIGN = auto()
+  UNIQUE = auto(); DEVICE = auto() #; ASSIGN = auto()
+  ASSIGN = AFTER  # ASSIGN is AFTER now (remove it)
 
   # local unique
   LUNIQUE = auto()
