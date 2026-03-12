@@ -382,17 +382,20 @@ PACKET_TYPES_RDNA4: dict[int, type[PacketType]] = {
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class CDNA_MISC(PacketType):
+  """pkt_fmt=0: 16-bit (Misc)"""
   encoding = bits[3:0] == 0
   delta = bits[11:4]
   sh = bits[12:12]
   misc_type = bits[15:13]
 
 class CDNA_TIMESTAMP(PacketType):
+  """pkt_fmt=1: 64-bit absolute timestamp"""
   encoding = bits[3:0] == 1
   _reserved = bits[15:4]
   timestamp = bits[63:16]
 
 class CDNA_REG(PacketType):
+  """pkt_fmt=2: 64-bit (Reg)"""
   encoding = bits[3:0] == 2
   pipe = bits[6:5]
   _me_raw = bits[8:7]
@@ -401,6 +404,7 @@ class CDNA_REG(PacketType):
   regdata = bits[63:32]
 
 class CDNA_WAVESTART(PacketType):
+  """pkt_fmt=3: 32-bit (Wave)"""
   encoding = bits[3:0] == 3
   sh = bits[5:5]
   cu = bits[9:6]
@@ -413,6 +417,7 @@ class CDNA_WAVESTART(PacketType):
   _padding = bits[31:29]
 
 class CDNA_WAVEALLOC(PacketType):
+  """pkt_fmt=4: 16-bit (Wave)"""
   encoding = bits[3:0] == 4
   sh = bits[5:5]
   cu = bits[9:6]
@@ -420,6 +425,7 @@ class CDNA_WAVEALLOC(PacketType):
   simd = bits[15:14]
 
 class CDNA_REG_CS(PacketType):
+  """pkt_fmt=5: 48-bit (RegCs)"""
   encoding = bits[3:0] == 5
   pipe = bits[6:5]
   _me_raw = bits[8:7]
@@ -427,6 +433,7 @@ class CDNA_REG_CS(PacketType):
   regdata = bits[47:16]
 
 class CDNA_WAVEEND(PacketType):
+  """pkt_fmt=6: 16-bit (Wave)"""
   encoding = bits[3:0] == 6
   sh = bits[5:5]
   cu = bits[9:6]
@@ -434,24 +441,29 @@ class CDNA_WAVEEND(PacketType):
   simd = bits[15:14]
 
 class CDNA_EVENT(PacketType):
+  """pkt_fmt=7: 16-bit"""
   encoding = bits[3:0] == 7
   _reserved = bits[15:4]
 
 class CDNA_EVENT_CS(PacketType):
+  """pkt_fmt=8: 16-bit"""
   encoding = bits[3:0] == 8
   _reserved = bits[15:4]
 
 class CDNA_EVENT_GFX1(PacketType):
+  """pkt_fmt=9: 16-bit"""
   encoding = bits[3:0] == 9
   _reserved = bits[15:4]
 
 class CDNA_INST(PacketType):
+  """pkt_fmt=10: 16-bit (MsgInst)"""
   encoding = bits[3:0] == 10
   wave = bits[8:5]
   simd = bits[10:9]
   inst_type = bits[15:11]
 
 class CDNA_INST_PC(PacketType):
+  """pkt_fmt=11: 64-bit (MsgInstPc)"""
   encoding = bits[3:0] == 11
   wave = bits[8:5]
   simd = bits[10:9]
@@ -460,6 +472,7 @@ class CDNA_INST_PC(PacketType):
   pc = bits[63:16]
 
 class CDNA_USERDATA(PacketType):
+  """pkt_fmt=12: 48-bit (UserData)"""
   encoding = bits[3:0] == 12
   sh = bits[5:5]
   cu = bits[9:6]
@@ -468,6 +481,7 @@ class CDNA_USERDATA(PacketType):
   data = bits[47:16]
 
 class CDNA_ISSUE(PacketType):
+  """pkt_fmt=13: 32-bit (Issue)"""
   encoding = bits[3:0] == 13
   simd = bits[6:5]
   _gap = bits[7:7]
@@ -484,6 +498,7 @@ class CDNA_ISSUE(PacketType):
   _padding = bits[31:28]
 
 class CDNA_PERF(PacketType):
+  """pkt_fmt=14: 64-bit (MsgPerf)"""
   encoding = bits[3:0] == 14
   sh = bits[5:5]
   cu = bits[9:6]
@@ -494,6 +509,7 @@ class CDNA_PERF(PacketType):
   cntr3 = bits[63:51]
 
 class CDNA_REG_CS_PRIV(PacketType):
+  """pkt_fmt=15: 48-bit (RegCs)"""
   encoding = bits[3:0] == 15
   pipe = bits[6:5]
   _me_raw = bits[8:7]
