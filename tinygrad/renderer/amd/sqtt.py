@@ -389,10 +389,10 @@ class CDNA_MISC(PacketType):
   misc_type = bits[15:13]
 
 class CDNA_TIMESTAMP(PacketType):
-  """pkt_fmt=1: 64-bit absolute timestamp"""
+  """pkt_fmt=1: 64-bit timestamp packet (case 0x0)"""
   encoding = bits[3:0] == 1
   _reserved = bits[15:4]
-  timestamp = bits[63:16]
+  timestamp = bits[63:16]   # stored as (data_word >> 0x10) in low 46 bits of local_58
 
 class CDNA_REG(PacketType):
   """pkt_fmt=2: 64-bit (Reg)"""
@@ -404,7 +404,7 @@ class CDNA_REG(PacketType):
   regdata = bits[63:32]
 
 class CDNA_WAVESTART(PacketType):
-  """pkt_fmt=3: 32-bit (Wave)"""
+  """type 3: 32-bit wave start (Wave/group_id)"""
   encoding = bits[3:0] == 3
   sh = bits[5:5]
   cu = bits[9:6]
@@ -425,7 +425,7 @@ class CDNA_WAVEALLOC(PacketType):
   simd = bits[15:14]
 
 class CDNA_REG_CS(PacketType):
-  """pkt_fmt=5: 48-bit (RegCs)"""
+  """type 5: 48-bit register CS write (RegCs)"""
   encoding = bits[3:0] == 5
   pipe = bits[6:5]
   _me_raw = bits[8:7]
@@ -433,27 +433,12 @@ class CDNA_REG_CS(PacketType):
   regdata = bits[47:16]
 
 class CDNA_WAVEEND(PacketType):
-  """pkt_fmt=6: 16-bit (Wave)"""
+  """type 6: 16-bit wave end (group_id)"""
   encoding = bits[3:0] == 6
   sh = bits[5:5]
   cu = bits[9:6]
   wave = bits[13:10]
   simd = bits[15:14]
-
-class CDNA_EVENT(PacketType):
-  """pkt_fmt=7: 16-bit"""
-  encoding = bits[3:0] == 7
-  _reserved = bits[15:4]
-
-class CDNA_EVENT_CS(PacketType):
-  """pkt_fmt=8: 16-bit"""
-  encoding = bits[3:0] == 8
-  _reserved = bits[15:4]
-
-class CDNA_EVENT_GFX1(PacketType):
-  """pkt_fmt=9: 16-bit"""
-  encoding = bits[3:0] == 9
-  _reserved = bits[15:4]
 
 class CDNA_INST(PacketType):
   """pkt_fmt=10: 16-bit (MsgInst)"""
@@ -470,15 +455,6 @@ class CDNA_INST_PC(PacketType):
   _reserved = bits[14:11]
   err = bits[15:15]
   pc = bits[63:16]
-
-class CDNA_USERDATA(PacketType):
-  """pkt_fmt=12: 48-bit (UserData)"""
-  encoding = bits[3:0] == 12
-  sh = bits[5:5]
-  cu = bits[9:6]
-  wave = bits[13:10]
-  simd = bits[15:14]
-  data = bits[47:16]
 
 class CDNA_ISSUE(PacketType):
   """pkt_fmt=13: 32-bit (Issue)"""
@@ -507,6 +483,30 @@ class CDNA_PERF(PacketType):
   cntr1 = bits[37:25]
   cntr2 = bits[50:38]
   cntr3 = bits[63:51]
+
+class CDNA_EVENT(PacketType):
+  """pkt_fmt=7: 16-bit"""
+  encoding = bits[3:0] == 7
+  _reserved = bits[15:4]
+
+class CDNA_EVENT_CS(PacketType):
+  """pkt_fmt=8: 16-bit"""
+  encoding = bits[3:0] == 8
+  _reserved = bits[15:4]
+
+class CDNA_EVENT_GFX1(PacketType):
+  """pkt_fmt=9: 16-bit"""
+  encoding = bits[3:0] == 9
+  _reserved = bits[15:4]
+
+class CDNA_USERDATA(PacketType):
+  """pkt_fmt=12: 48-bit (UserData)"""
+  encoding = bits[3:0] == 12
+  sh = bits[5:5]
+  cu = bits[9:6]
+  wave = bits[13:10]
+  simd = bits[15:14]
+  data = bits[47:16]
 
 class CDNA_REG_CS_PRIV(PacketType):
   """pkt_fmt=15: 48-bit (RegCs)"""
