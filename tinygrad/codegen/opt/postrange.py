@@ -365,6 +365,9 @@ pm_make_images = PatternMatcher([
    st.replace(src=(idx.rtag(is_image:=any(c.op is Ops.RANGE and (c.vmax+1)%4 == 0 for c in idx.src[1].get_idx().split_uop(Ops.ADD))),
                    st.src[1].cast(dtypes.float if is_image and ImageDType.valid_dims(idx.src[0].dtype) else idx.dtype.base)))),
   (UPat(Ops.INDEX, src=(UPat(Ops.PARAM, name="pa"), UPat.var("off")), name="idx"), make_image),
+  # move casts out of WHERE to prevent double casts
+  (UPat(Ops.WHERE, src=[UPat.var("c", dtypes.bool), UPat(GroupOp.All, dtypes.float).cast(dtypes.half), UPat()], name="w").cast(dtypes.float),
+   lambda w,c: c.where(*(x.src[0] if x.op is Ops.CAST else x.cast(dtypes.float) for x in w.src[1:]))),
   # remove double cast from image loads / stores
   (UPat(Ops.INDEX, src=(UPat(Ops.PARAM, name="pa"),), allow_any_len=True, name="idx").cast(dtypes.half).cast(dtypes.float), lambda idx,pa:
    idx if isinstance(pa.dtype, ImageDType) else None),
