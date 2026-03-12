@@ -424,7 +424,9 @@ def fetch(url:str, name:pathlib.Path|str|None=None, subdir:str|None=None, gunzip
 
 def system(cmd:str, **kwargs) -> str:
   st = time.perf_counter()
-  ret = subprocess.check_output(cmd.split(), **kwargs).decode().strip()
+  try: ret = subprocess.check_output(cmd.split(), stderr=subprocess.STDOUT, **kwargs).decode().strip()
+  except subprocess.CalledProcessError as e:
+    raise RuntimeError(f"system: '{cmd}' failed with exit code {e.returncode}\n{(e.output or b'').decode().strip()}") from e
   if DEBUG >= 1: print(f"system: '{cmd}' returned {len(ret)} bytes in {(time.perf_counter() - st)*1e3:.2f} ms")
   return ret
 
