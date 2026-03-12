@@ -3655,17 +3655,20 @@ class Tensor(OpMixin):
 
     # contiguous creates the image, and early realize static weights (TODO: test for the static weight)
     if IMAGE == 1:
-      # pad with Invalid
-      def _invalid_pad_to(t, shape):
-        if all(p is None or p == s for p,s in zip(shape, t.shape)): return t
-        return Tensor(True, device=t.device).expand(t.shape).pad_to(shape).where(t.pad_to(shape), Invalid)
       # hacks for pitch alignment
       assert isinstance(ix, int) and isinstance(H, int)
       ALIGN = 64 // dtsz
-      x = _invalid_pad_to(x, (None, None, round_up(ix, ALIGN // math.gcd(groups * cin, ALIGN)), None))
-      w = _invalid_pad_to(w, (None, round_up(H, ALIGN // math.gcd(W * cin * 4, ALIGN))) + (None,) * (w.ndim - 2))
+      def _empty_pad_to(t, shape, dt=None):
+        if dt is not None: t = t.cast(dt)
+        padded = tuple(p if p is not None else s for p, s in zip(shape, t.shape))
+        if padded == t.shape: return t
+        buf = Tensor.empty(*padded, device=t.device, dtype=t.dtype)
+        buf[tuple(slice(0, s) for s in t.shape)] = t
+        return buf
+      x = _empty_pad_to(x, (None, None, round_up(ix, ALIGN // math.gcd(groups * cin, ALIGN)), None), dtypes.half if FLOAT16 else None)
+      w = _empty_pad_to(w, (None, round_up(H, ALIGN // math.gcd(W * cin * 4, ALIGN))) + (None,) * (w.ndim - 2), dtypes.half if FLOAT16 else None)
 
-      if FLOAT16: x, w = x.cast(dtypes.half).contiguous().cast(dtypes.float), w.cast(dtypes.half).contiguous().cast(dtypes.float)
+      if FLOAT16: x, w = x.contiguous().cast(dtypes.float), w.contiguous().cast(dtypes.float)
       else: x, w = x.contiguous(), w.contiguous()
 
       # undo alignment hacks
