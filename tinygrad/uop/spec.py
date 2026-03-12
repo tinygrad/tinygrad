@@ -96,6 +96,9 @@ _tensor_spec = PatternMatcher([
   # ASSIGN has a target and a value. It can also optionally depend on other assigns
   (UPat(Ops.ASSIGN, name="x"), lambda x: len(x.src) >= 2 and all(s.op is Ops.ASSIGN for s in x.src[2:])),
 
+  # STORE in tensor graph: store a value into a target
+  (UPat(Ops.STORE, dtypes.void, (UPat(), UPat())), lambda: True),
+
   # MSELECT chooses one of the multi buffers
   (UPat(Ops.MSELECT, name="x"), lambda x: isinstance(x.src[0].device, tuple) and x.arg < len(x.src[0].device)),
 
@@ -129,7 +132,7 @@ _tensor_spec = PatternMatcher([
   (UPat(Ops.REDUCE_AXIS, name="x"), lambda x: isinstance(x.arg, tuple) and len(x.arg) >= 2 and x.arg[0] in {Ops.ADD, Ops.MUL, Ops.MAX}),
 
   # AFTER if things were kernelized
-  (UPat(Ops.AFTER, src=(UPat((Ops.BUFFER, Ops.AFTER)),), allow_any_len=True), lambda: True),
+  (UPat(Ops.AFTER, src=(UPat((Ops.BUFFER, Ops.AFTER, Ops.PARAM)),), allow_any_len=True), lambda: True),
 
   # allow CALL/PARAM/CUSTOM_FUNCTION
   (UPat(Ops.CALL, src=(UPat(name="f"),), name="c", allow_any_len=True), lambda c,f: c.dtype == f.dtype),
