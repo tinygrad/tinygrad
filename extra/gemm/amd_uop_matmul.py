@@ -15,41 +15,20 @@ NUM_RUNS = getenv("CNT", 5)
 # ---------------------------
 
 WARP_SIZE = 32
-
-# Threadblock tile sizes (block-level tile of C that a block computes)
-BLOCK_N = 128   # columns of C (N-dim) per block
-BLOCK_M = 128   # rows of C (M-dim) per block
-BLOCK_K = 8     # K-slice per block iteration
-assert N % BLOCK_N == 0, f"N ({N}) must be a multiple of BLOCK_N ({BLOCK_N})"
-assert M % BLOCK_M == 0, f"M ({M}) must be a multiple of BLOCK_M ({BLOCK_M})"
-assert K % BLOCK_K == 0, f"K ({K}) must be a multiple of BLOCK_K ({BLOCK_K})"
-
-# Register tile sizes (per-thread accumulator tile of C)
-TN = 4     # columns per thread
-TM = 4     # rows per thread
+BLOCK_M, BLOCK_N, BLOCK_K = 128, 128, 8
+TM, TN = 4, 4
+LANES_PER_WAVE_M, LANES_PER_WAVE_N = 4, 8
+assert N % BLOCK_N == 0 and M % BLOCK_M == 0 and K % BLOCK_K == 0
 
 is_kernel5 = getenv("K5", 0)
 THREADS_PER_BLOCK = 128 if is_kernel5 else 256
-assert THREADS_PER_BLOCK % BLOCK_N == 0, "THREADS_PER_BLOCK must be divisible by BLOCK_N"
-assert THREADS_PER_BLOCK % BLOCK_K == 0, "THREADS_PER_BLOCK must be divisible by BLOCK_K"
-assert (BLOCK_N * BLOCK_K) % THREADS_PER_BLOCK == 0
-assert (BLOCK_M * BLOCK_K) % THREADS_PER_BLOCK == 0
+WAVES_PER_BLOCK_N = 1 if is_kernel5 else 2
+WAVES_PER_BLOCK_M = THREADS_PER_BLOCK // WARP_SIZE // WAVES_PER_BLOCK_N
+REG_TILES_PER_WAVE_N = BLOCK_N // (WAVES_PER_BLOCK_N * LANES_PER_WAVE_N * TN)
+REG_TILES_PER_WAVE_M = BLOCK_M // (WAVES_PER_BLOCK_M * LANES_PER_WAVE_M * TM)
 
-WARPS_PER_BLOCK = THREADS_PER_BLOCK // WARP_SIZE
-WAVE_TILE_N = 128 if is_kernel5 else 64
-WAVE_TILE_M = BLOCK_N * BLOCK_M // WARPS_PER_BLOCK // WAVE_TILE_N
-assert BLOCK_N % WAVE_TILE_N == 0, "BN must be a multiple of WN"
-assert BLOCK_M % WAVE_TILE_M == 0, "BM must be a multiple of WM"
-WAVES_PER_BLOCK_N = BLOCK_N // WAVE_TILE_N
-WAVES_PER_BLOCK_M = BLOCK_M // WAVE_TILE_M
-assert WAVES_PER_BLOCK_N * WAVES_PER_BLOCK_M == WARPS_PER_BLOCK, "wave grid must match warps/block"
-
-LANES_PER_WAVE_N = 8
-LANES_PER_WAVE_M = 4
-REG_TILES_PER_WAVE_N = WAVE_TILE_N // (LANES_PER_WAVE_N * TN)
-REG_TILES_PER_WAVE_M = WAVE_TILE_M // (LANES_PER_WAVE_M * TM)
-assert WAVE_TILE_N % (LANES_PER_WAVE_N * TN) == 0, "WAVE_TILE_N must be divisible by LANES_PER_WAVE_N*TN"
-assert WAVE_TILE_M % (LANES_PER_WAVE_M * TM) == 0, "WAVE_TILE_M must be divisible by LANES_PER_WAVE_M*TM"
+assert WAVES_PER_BLOCK_M*REG_TILES_PER_WAVE_M*LANES_PER_WAVE_M*TM == BLOCK_M, "M reshape is wrong"
+assert WAVES_PER_BLOCK_N*REG_TILES_PER_WAVE_N*LANES_PER_WAVE_N*TN == BLOCK_N, "N reshape is wrong"
 
 def rngs_for_shape(shape:tuple[sint, ...], rng:int, axis_type=AxisType.LOOP): return [UOp.range(s, rng+i, axis_type) for i,s in enumerate(shape)]
 def copy(dest:UOp, src:UOp, rng:int, set=False, upcast=False):
