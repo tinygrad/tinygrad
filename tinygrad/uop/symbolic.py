@@ -32,12 +32,10 @@ def fold_add_divmod_recombine(x:UOp) -> UOp|None:
     elif u.op is Ops.MUL and u.src[1].op is Ops.CONST and (m:=u.src[0]).op is Ops.MOD and m.src[1].op is Ops.CONST:
       base, div, mul = m.src[0], m.src[1].arg, u.src[1].arg
     else: continue
-    for j,v in enumerate(terms):
-      if i == j: continue
-      if v.op is not Ops.MUL or v.src[1].op is not Ops.CONST or v.src[1].arg != div*mul: continue
-      q, exact = v.src[0], False
+    qterms = [(j, v.src[0]) for j,v in enumerate(terms) if i != j and v.op is Ops.MUL and v.src[1].op is Ops.CONST and v.src[1].arg == div*mul]
+    for j,q in qterms:
       # (base%div)*mul + (base//div)*(div*mul) -> base*mul
-      if q.op is Ops.IDIV and q.src[1].op is Ops.CONST and q.src[1].arg == div: exact = q.src[0] is base
+      exact = q.op is Ops.IDIV and q.src[1].op is Ops.CONST and q.src[1].arg == div and q.src[0] is base
       # ((base//d)%div)*mul + (base//(d*div))*(div*mul) -> (base//d)*mul
       if not exact and base.op is Ops.IDIV and base.src[1].op is Ops.CONST:
         exact = q.op is Ops.IDIV and q.src[1].op is Ops.CONST and q.src[0] is base.src[0] and q.src[1].arg == base.src[1].arg*div
@@ -46,6 +44,15 @@ def fold_add_divmod_recombine(x:UOp) -> UOp|None:
       if mul == 1 and div > 0 and q.op is Ops.MOD and q.src[1].op is Ops.CONST and (d:=q.src[1].arg) > 0 and q.src[0].op is Ops.IDIV:
         if q.src[0].src[0] is base and q.src[0].src[1].op is Ops.CONST and q.src[0].src[1].arg == div:
           return functools.reduce(operator.add, (t for k,t in enumerate(terms) if k not in (i,j)), base % (div*d))
+    if len(qterms) > 1:
+      # fold asymmetric quotient splits: q0*(div*mul) + q1*(div*mul) + (base%div)*mul -> base*mul + extra*(div*mul)
+      rem = [q for _,q in qterms]
+      for t in (base//div).simplify().split_uop(Ops.ADD):
+        if t not in rem: break
+        rem.remove(t)
+      else:
+        ret = base*mul + rem[0].sum(*rem[1:])*(div*mul) if rem else base*mul
+        return functools.reduce(operator.add, (t for k,t in enumerate(terms) if k not in [i, *(j for j,_ in qterms)]), ret)
   return None
 
 # this needs to be before symbolic so that 0*something_that_might_be_invalid doesnt become 0
