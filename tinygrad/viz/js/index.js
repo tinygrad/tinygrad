@@ -248,6 +248,12 @@ function selectShape(key) {
   return { eventType:track?.eventType, e:track?.shapes[idx], t };
 }
 
+function setZoom(x0, x1) {
+  const xscale = d3.scaleLinear().domain([data.first, data.dur]).range([0, document.getElementById("timeline").clientWidth]);
+  const [st, et] = xscale.range().map(zoomLevel.invertX, zoomLevel).map(xscale.invert, xscale);
+  if (x1 < st || x0 > et) zoomLevel = d3.zoomIdentity.translate(-xscale((x0+x1)/2-(et-st)/2)*zoomLevel.k, 0).scale(zoomLevel.k);
+}
+
 const Modes = {0:'read', 1:'write', 2:'write+read'};
 
 function setFocus(key) {
@@ -255,12 +261,7 @@ function setFocus(key) {
     saveToHistory({ shape:focusedShape });
     // adjust zoom if the entire shape is off screen
     const { eventType, e } = selectShape(key);
-    if (e != null) {
-      const [x0, x1] = eventType === EventTypes.EXEC ? [e.x, e.x+e.width] : [e.x[0], e.x.at(-1)];
-      const xscale = d3.scaleLinear().domain([data.first, data.dur]).range([0, document.getElementById("timeline").clientWidth]);
-      const [st, et] = xscale.range().map(zoomLevel.invertX, zoomLevel).map(xscale.invert, xscale);
-      if (x1 < st || x0 > et) zoomLevel = d3.zoomIdentity.translate(-xscale((x0+x1)/2-(et-st)/2)*zoomLevel.k, 0).scale(zoomLevel.k);
-    }
+    if (e != null) setZoom(...(eventType === EventTypes.EXEC ? [e.x, e.x+e.width] : [e.x[0], e.x.at(-1)]));
     focusedShape = key; d3.select("#timeline").call(canvasZoom.transform, zoomLevel);
   }
   const { eventType, e, t } = selectShape(key);
@@ -660,6 +661,16 @@ async function renderProfiler(path, opts) {
   new ResizeObserver(([e]) => e.contentRect.width > 0 && resize()).observe(profiler.node());
   profiler.on("scroll", () => render(zoomLevel));
 
+  // on the first view, automatically zoom into the full range of instruction events
+  if (path.includes("pkts")) {
+    let packetRange = null;
+    for (const [k, { shapes }] of data.tracks) if (k.startsWith("WAVE")) {
+      const first = shapes[0].x, last = shapes.at(-1).x;
+      packetRange = packetRange == null ? [first, last] : [Math.min(first, packetRange[0]), Math.max(last, packetRange[1])]
+    }
+    setZoom(...packetRange);
+  }
+
   function findRectAtPosition(x, y) {
     let track = null;
     for (const k of data.tracks.keys()) {
@@ -877,7 +888,7 @@ async function main() {
       }
       appendSteps(ul, i, steps);
     }
-    return setState({ currentCtx:-1 });
+    return setState({currentCtx: 2, currentStep: 2, currentRewrite: 0, expandSteps: true});
   }
   // ** center graph
   const { currentCtx, currentStep, currentRewrite, expandSteps } = state;

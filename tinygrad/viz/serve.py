@@ -341,7 +341,6 @@ def sqtt_timeline(data:bytes, lib:bytes, target:str) -> list[ProfileEvent]:
   from tinygrad.renderer.amd.sqtt import map_insts, InstructionInfo, PacketType, INST, InstOp, VALUINST, IMMEDIATE, IMMEDIATE_MASK, VMEMEXEC, ALUEXEC
   from tinygrad.renderer.amd.sqtt import INST_RDNA4, InstOpRDNA4, TS_DELTA_OR_MARK, TS_DELTA_OR_MARK_RDNA4
   ret:list[ProfileEvent] = []
-  freqs:list[tuple[int, int]] = []
   row_ends:dict[str, Decimal] = {}
   NS_PER_TICK = 10  # 100MHz
   prev_pair:tuple[int, int]|None = None # (shader, realtime)
@@ -357,7 +356,8 @@ def sqtt_timeline(data:bytes, lib:bytes, target:str) -> list[ProfileEvent]:
       if prev_pair is None: prev_pair = pair
       else:
         (s0, r0), (s1, r1) = prev_pair, pair
-        freqs.append((p._time, (s1 - s0) * 1_000_000_000 // ((r1 - r0) * NS_PER_TICK)))
+        freq_hz = (s1 - s0) * 1_000_000_000 // ((r1 - r0) * NS_PER_TICK)
+        ret.append(ProfilePointEvent("LINE:Shader Clock", "freq_hz", freq_hz, ts=Decimal(p._time)))
         prev_pair = pair
     if isinstance(p, (INST, INST_RDNA4)):
       name = p.op.name if isinstance(p.op, (InstOp, InstOpRDNA4)) else f"0x{p.op:02x}"
@@ -373,18 +373,7 @@ def sqtt_timeline(data:bytes, lib:bytes, target:str) -> list[ProfileEvent]:
         add(name.replace("_ALT", ""), p, op=name)
   pc_map = {addr:str(inst) for addr,inst in amd_decode(lib, target).items()}
   if len(ret) == 0: return []
-  # cover the full range of packet data with frequency samples, on gfx11, we get samples ~every 4.7K cycles
-  freq_samples:list[tuple[int, int]] = []
-  # keep the last known frequency, before the first packet arrived
-  pre_first:int|None = None
-  first_pkt, last_pkt = int(cast(ProfileRangeEvent, ret[0]).st), int(unwrap(cast(ProfileRangeEvent, ret[-1]).en))
-  for x,y in freqs:
-    if x >= last_pkt: break
-    if x <= first_pkt: pre_first = y
-    else: freq_samples.append((x, y))
-  if freq_samples[0][0] > first_pkt: freq_samples.append((first_pkt, unwrap(pre_first)))
-  freq_events = [ProfilePointEvent("LINE:Shader Clock", "freq_hz", y, ts=Decimal(x)) for x,y in freq_samples]
-  return [ProfilePointEvent(r, "JSON", "pcMap", pc_map, ts=Decimal(0)) for r in row_ends]+freq_events+ret
+  return [ProfilePointEvent(r, "JSON", "pcMap", pc_map, ts=Decimal(0)) for r in row_ends]+ret
 
 # ** SQTT OCC only unpacks wave start, end time and SIMD location
 
