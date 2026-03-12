@@ -188,12 +188,15 @@ def _do_image_fixup(dt:ImageDType, idx:UOp) -> tuple[UOp, UOp, int, int]:
   x, valid = idx.src[1].get_idx(), idx.src[1].get_valid()
   h, w = dt.shape[0], dt.shape[1]
   if IMAGE == 1 and valid is not None:
-    h, w = max(ImageDType.valid_dims(dt), key=lambda hw:
-                # maximize number of valids removed
-               (len(_drop_valid_stmts(valid, idx:=uop_given_valid(valid, UOp.vectorize((x//4)%hw[1], x//(4*hw[1]))), *hw)),
-                # and minimize idx complexity (number of nodes)
-                -len(idx.backward_slice)))
-    buf = buf.replace(dtype=(dtypes.imageh if dt.itemsize == 2 else dtypes.imagef)((h, w, 4), w * 4 * dt.itemsize))
+    p, max_dropped, min_complexity = w, -1, float("inf")
+    for h_, w_ in ImageDType.valid_dims(dt):
+      real_w = ((x//4)%w_).simplify().vmax + 1 # shrink the width (eg. pad with pitch)
+      idx = uop_given_valid(valid, UOp.vectorize((x//4)%real_w, x//(4*w))) # secondary index still needs to be calculated relative to full width
+      if (dropped:=len(_drop_valid_stmts(valid, idx, h, real_w))) < max_dropped:
+        h, w, p, max_dropped, min_complexity = h_, real_w, w_, dropped, len(idx.backward_slice)
+      elif dropped == max_dropped and (complexity:=len(idx.backward_slice)) < min_complexity:
+        h, w, p, max_dropped, min_complexity = h_, real_w, w_, dropped, complexity
+    buf = buf.replace(dtype=(dtypes.imageh if dt.itemsize == 2 else dtypes.imagef)((h, w, 4), p * 4 * dt.itemsize))
   oidx = UOp(Ops.VECTORIZE, dtypes.index.vec(2), ((x // 4) % w, (x // (4*w))))
   return x, idx.replace(src=(buf, oidx.valid(valid))), w, h
 
