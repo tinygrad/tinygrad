@@ -116,7 +116,6 @@ def hand_spec_kernel3():
   A_local_slice = A_local[k, :].reshape(WAVES_PER_BLOCK_M, REG_TILES_PER_WAVE_M, LANES_PER_WAVE_M, TM)[waveIdy, :, laneIdy, :]
   A_col = copy(A_col, A_local_slice , 300, set=True, upcast=True)
 
-
   B_row = UOp.placeholder((REG_TILES_PER_WAVE_N, TN), dtypes.float, slot=1, addrspace=AddrSpace.REG)
   B_local_slice = B_local[k, :].reshape(WAVES_PER_BLOCK_N, REG_TILES_PER_WAVE_N, LANES_PER_WAVE_N, TN)[waveIdx, :, laneIdx, :]
   B_row = copy(B_row, B_local_slice, 400, set=True, upcast=True)
