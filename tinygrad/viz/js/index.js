@@ -254,13 +254,15 @@ const timelineScale = () => d3.scaleLinear().domain([data.first, data.dur]).rang
 function getZoomIdentity() {
   // for packets, set zoom to the full range of instruction events
   if (data.path.includes("pkts")) {
-    let packetRange = null;
+    let instRange = null;
     for (const [k, { shapes }] of data.tracks) if (k.startsWith("WAVE")) {
       const first = shapes[0].x, last = shapes.at(-1).x;
-      packetRange = packetRange == null ? [first, last] : [Math.min(first, packetRange[0]), Math.max(last, packetRange[1])]
+      instRange = instRange == null ? [first, last] : [Math.min(first, instRange[0]), Math.max(last, instRange[1])]
     }
-    const k = (data.dur - data.first) / (packetRange[1] - packetRange[0]), xscale = timelineScale();
-    return d3.zoomIdentity.translate(-xscale(packetRange[0]) * k, 0).scale(k);
+    if (instRange != null) {
+      const k = (data.dur - data.first) / (instRange[1] - instRange[0]), xscale = timelineScale();
+      return d3.zoomIdentity.translate(-xscale(instRange[0]) * k, 0).scale(k);
+    }
   }
   return d3.zoomIdentity;
 }
