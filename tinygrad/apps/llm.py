@@ -78,14 +78,15 @@ class ExpertWeights:
 
 def apply_rope(x:Tensor, freqs_cis:Tensor, rope_dim:int=0) -> Tensor:
   assert x.shape[-1] % 2 == 0
-  if rope_dim and rope_dim < x.shape[-1]: return apply_rope(x[..., :rope_dim], freqs_cis).cat(x[..., rope_dim:], dim=-1)
-  cos, sin = freqs_cis.reshape(1, 1, x.shape[2], -1).chunk(2, dim=-1)
-  x1, x2 = x.chunk(2, dim=-1)
-  return (x1 * cos - x2 * sin).cat(x2 * cos + x1 * sin, dim=-1)
+  x_rot, x_pass = (x[..., :rope_dim], x[..., rope_dim:]) if (rope_dim and rope_dim < x.shape[-1]) else (x, None)
+  cos, sin = freqs_cis.reshape(1, 1, x_rot.shape[2], -1).chunk(2, dim=-1)
+  x1, x2 = x_rot.chunk(2, dim=-1)
+  y = (x1 * cos - x2 * sin).cat(x2 * cos + x1 * sin, dim=-1)
+  return y.cat(x_pass, dim=-1) if x_pass is not None else y
 
 class TransformerBlock:
   def __init__(self, dim:int, hidden_dim:int, n_heads:int, n_kv_heads:int, norm_eps:float, head_dim:int, rope_theta:float,
-               max_context:int=0, qk_norm:int=0, rope_dim:int=0, gated_attn:bool=False,
+               max_context:int=0, qk_norm:int=0, rope_dim:int=0, has_gate:bool=False,
                num_experts:int=0, num_experts_per_tok:int=0, shared_expert_dim:int=0, ssm:dict|None=None):
     self.n_heads      = n_heads
     self.n_kv_heads   = n_kv_heads
@@ -94,10 +95,10 @@ class TransformerBlock:
     self.max_context  = max_context
     self.qk_norm      = qk_norm
     self.rope_dim     = rope_dim or head_dim
-    self.gated_attn   = gated_attn
+    self.has_gate     = has_gate
     if ssm is None:
       # --- attention projections (all linear, bias-free) ------------------
-      q_proj_out       = self.head_dim * n_heads * (2 if gated_attn else 1)
+      q_proj_out       = self.head_dim * n_heads * (2 if has_gate else 1)
       kv_proj_out      = self.head_dim * n_kv_heads
       self.attn_q      = nn.Linear(dim, q_proj_out,  bias=False)
       self.attn_k      = nn.Linear(dim, kv_proj_out, bias=False)
@@ -111,7 +112,7 @@ class TransformerBlock:
       self.conv_channels, self.q_dim = ssm['inner_size'] + 2*self.num_k_heads*self.head_k_dim, self.head_k_dim*self.num_k_heads
       self.attn_qkv, self.attn_gate = nn.Linear(dim, self.conv_channels, bias=False), nn.Linear(dim, ssm['inner_size'], bias=False)
       self.ssm_alpha, self.ssm_beta = nn.Linear(dim, self.num_v_heads, bias=False), nn.Linear(dim, self.num_v_heads, bias=False)
-      self.ssm_conv1d = nn.Conv1d(self.conv_channels, self.conv_channels, self.ssm_conv_kernel, groups=self.conv_channels, bias=False)
+      self.ssm_conv1d = Tensor.zeros(self.conv_channels, self.ssm_conv_kernel)
       self.ssm_dt_bias, self.ssm_a = Tensor.zeros(self.num_v_heads), Tensor.zeros(self.num_v_heads)
       self.ssm_norm, self.ssm_out = nn.RMSNorm(self.head_v_dim, norm_eps), nn.Linear(ssm['inner_size'], dim, bias=False)
 
@@ -143,7 +144,7 @@ class TransformerBlock:
     if self.qk_norm and self.qk_norm != self.head_dim: q, k = self.attn_q_norm(q), self.attn_k_norm(k)
 
     B, T, _ = x.shape
-    if self.gated_attn:
+    if self.has_gate:
       qg = q.reshape(B, T, self.n_heads, 2, self.head_dim)
       q, gate = qg[:, :, :, 0, :], qg[:, :, :, 1, :].reshape(B, T, self.n_heads * self.head_dim)
     q = q.reshape(B, T, self.n_heads,    self.head_dim).transpose(1, 2)  # (B,H,T,Hd)
@@ -170,7 +171,7 @@ class TransformerBlock:
     mask = Tensor.full((1, 1, T, start_pos+T), float("-inf"), dtype=x.dtype, device=x.device).triu(start_pos+1) if resolve(T != 1) else None
     attn = q.scaled_dot_product_attention(k, v, attn_mask=mask, enable_gqa=True)     # (B,H,T,Hd)
     attn = attn.transpose(1, 2).reshape(B, T, -1)                                    # back to (B,T,D)
-    attn = self.attn_output(attn if not self.gated_attn else (attn * gate.sigmoid()))
+    attn = self.attn_output(attn if not self.has_gate else (attn * gate.sigmoid()))
     return x + attn
 
   @function(precompile=bool(getenv("PRECOMPILE", 0)))
@@ -180,15 +181,12 @@ class TransformerBlock:
     out_gate = self.attn_gate(x_norm).reshape(B, 1, self.num_v_heads, self.head_v_dim)
     beta = self.ssm_beta(x_norm).sigmoid().reshape(B, self.num_v_heads, 1, 1)
     alpha = ((self.ssm_alpha(x_norm).float() + self.ssm_dt_bias).softplus() * self.ssm_a).reshape(B, self.num_v_heads, 1, 1).exp()
-    # extract conv_state and recurrent_state from combined delta_cache buffer
     conv_flat = (self.ssm_conv_kernel - 1) * self.conv_channels
     ssm_flat = self.num_v_heads * self.head_v_dim * self.head_v_dim
     conv_state = self.delta_cache[:, :conv_flat].reshape(B, self.ssm_conv_kernel - 1, self.conv_channels)
     recurrent_state = self.delta_cache[:, conv_flat:conv_flat + ssm_flat].reshape(B, self.num_v_heads, self.head_v_dim, self.head_v_dim)
-    # causal conv1d: shift in new token, apply conv + silu
     conv_window = conv_state.cat(self.attn_qkv(x_norm), dim=1)
-    conv_out = self.ssm_conv1d(conv_window.transpose(1, 2)).squeeze(-1).silu()                               # (B, C)
-    # split into q, k, v and normalize q/k
+    conv_out = (conv_window * self.ssm_conv1d.T.unsqueeze(0)).sum(1).silu()
     q, k, v = conv_out.split([self.q_dim, self.q_dim, self.conv_channels - 2*self.q_dim], dim=-1)
     q, k = q.reshape(B, self.num_k_heads, self.head_k_dim).normalize(dim=-1), k.reshape(B, self.num_k_heads, self.head_k_dim).normalize(dim=-1)
     v = v.reshape(B, self.num_v_heads, self.head_v_dim)
@@ -197,10 +195,8 @@ class TransformerBlock:
       q = q.unsqueeze(1).expand(B, k_repeat, self.num_k_heads, self.head_k_dim).reshape(B, self.num_v_heads, self.head_k_dim)
       k = k.unsqueeze(1).expand(B, k_repeat, self.num_k_heads, self.head_k_dim).reshape(B, self.num_v_heads, self.head_k_dim)
     q, k, v = (q * self.head_k_dim**-0.5).unsqueeze(-1), k.unsqueeze(-1), v.unsqueeze(-1)
-    # gated delta rule recurrence (single step)
-    recurrent_state = recurrent_state * alpha                                                                # forget
-    recurrent_state = recurrent_state + ((v - recurrent_state@k) * beta)@k.transpose(-1, -2)                # delta update
-    # combine both states and assign to single delta_cache buffer
+    recurrent_state = recurrent_state * alpha
+    recurrent_state = recurrent_state + ((v - recurrent_state@k) * beta)@k.transpose(-1, -2)
     new_cache = conv_window[:, 1:, :].reshape(B, -1).cat(recurrent_state.reshape(B, -1), dim=-1).contiguous()
     assigned = self.delta_cache.uop.after(self.delta_cache.uop.assign(new_cache.cast(self.delta_cache.dtype).uop))
     cache_tensor = Tensor(assigned, device=self.delta_cache.device)
@@ -243,7 +239,7 @@ class Transformer:
                max_context:int=0, qk_norm:int=0, rope_dim:int=0, num_experts:int=0, num_experts_per_tok:int=0,
                shared_expert_dim:int=0, full_attention_interval:int=0, ssm:dict|None=None):
     self.blk = [TransformerBlock(dim, hidden_dim, n_heads, n_kv_heads, norm_eps, head_dim, rope_theta, max_context,
-                                  head_dim if ssm else qk_norm, rope_dim, gated_attn=ssm is not None,
+                                  head_dim if ssm else qk_norm, rope_dim, has_gate=ssm is not None,
                                   num_experts=num_experts, num_experts_per_tok=num_experts_per_tok, shared_expert_dim=shared_expert_dim,
                                   ssm=ssm if ssm and (i+1) % full_attention_interval != 0 else None) for i in range(num_blocks)]
     self.token_embd  = nn.Embedding(vocab_size, dim)
@@ -287,12 +283,11 @@ class Transformer:
         if 'attn_k.weight' in name: state_dict[name] = state_dict[name].rearrange("(n h two) d -> (n two h) d", n=n_kv_heads, two=2)
 
     if arch in ('qwen35', 'qwen35moe'):
-      renames = {'ssm_dt.bias':'ssm_dt_bias', 'post_attention_norm':'ffn_norm', 'ffn_gate_inp_shexp.weight':'ffn_gate_inp_shexp_weight'}
+      renames = {'ssm_dt.bias':'ssm_dt_bias', 'post_attention_norm':'ffn_norm', 'ffn_gate_inp_shexp.weight':'ffn_gate_inp_shexp_weight',
+                 'ssm_conv1d.weight':'ssm_conv1d'}
       state_dict = {functools.reduce(lambda k,r: k.replace(*r), renames.items(), k):v for k,v in state_dict.items()}
-      for name in state_dict:
-        if 'ssm_conv1d.weight' in name: state_dict[name] = state_dict[name].unsqueeze(1)  # (C, K) → (C, 1, K) for Conv1d
-    ssm = ({k: kv[f'{arch}.ssm.{k}'] for k in ('conv_kernel','state_size','group_count','time_step_rank','inner_size')}
-           if arch in ('qwen35', 'qwen35moe') else None)
+    if arch not in ('qwen35', 'qwen35moe'): ssm = None
+    else: ssm = {k: kv[f'{arch}.ssm.{k}'] for k in ('conv_kernel','state_size','group_count','time_step_rank','inner_size')}
     model = Transformer(num_blocks=kv[f'{arch}.block_count'], dim=kv[f'{arch}.embedding_length'],
                         hidden_dim=kv.get(f'{arch}.expert_feed_forward_length', kv.get(f'{arch}.feed_forward_length', 0)),
                         n_heads=n_heads, n_kv_heads=n_kv_heads, norm_eps=kv[f'{arch}.attention.layer_norm_rms_epsilon'],
@@ -324,15 +319,11 @@ class Transformer:
     start_pos = self.get_start_pos(tokens)
     out, prompt_len = None, len(tokens)
     while len(tokens) < self.max_context:
-      if self.has_ssm and start_pos < prompt_len:
-        sp = v_start_pos.bind(start_pos)
-        tok_tensor = Tensor([tokens[start_pos]], dtype="int32").reshape(1, 1).realize()
-        out = self.rollout_jit(tok_tensor, sp).realize()
-        start_pos += 1
-      else:
-        sp, nt = v_start_pos.bind(start_pos), v_toks.bind(min(chunk_size, len(tokens) - start_pos))
-        out = self(t[:, sp:sp+nt] if start_pos < prompt_len or out is None else out, sp).realize()
-        start_pos += nt.val
+      sp, nt = v_start_pos.bind(start_pos), v_toks.bind(min(chunk_size, len(tokens) - start_pos))
+      if start_pos < prompt_len or out is None:
+        out = self(t[:, sp:sp+nt] if not self.has_ssm else Tensor([tokens[start_pos]]).reshape(1, 1), sp).realize()
+      else: out = self(out, sp).realize()
+      start_pos += (1 if self.has_ssm else nt.val)
       # chunked prefill: keep processing until all prompt tokens are consumed
       if start_pos < len(tokens): continue
       tokens.append(int(out.item()))
