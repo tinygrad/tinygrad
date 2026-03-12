@@ -808,8 +808,8 @@ class TestSchedule(unittest.TestCase):
       with Context(IMAGE=1): cnt1 = cnt()
       with Context(IMAGE=2): cnt2 = cnt()
 
-      self.assertEqual(cnt1, 5)
-      self.assertEqual(cnt2, 5)
+      self.assertEqual(cnt1, 2)
+      self.assertEqual(cnt2, 2)
 
   @unittest.skipIf(Device.DEFAULT != "CL", "image only supported on CL")
   def test_image_f16_residual_fusion(self):
@@ -828,11 +828,10 @@ class TestSchedule(unittest.TestCase):
       with Context(IMAGE=1): cnt1 = cnt()
       with Context(IMAGE=2): cnt2 = cnt()
 
-      self.assertEqual(cnt1, 9)
-      self.assertEqual(cnt2, 9)
+      self.assertEqual(cnt1, 4)
+      self.assertEqual(cnt2, 4)
 
   @unittest.skipIf(Device.DEFAULT != "CL", "image only supported on CL")
-  @unittest.expectedFailure
   def test_image_conv_fusion(self):
     with Context(OPENPILOT_HACKS=1):
       def cnt():
