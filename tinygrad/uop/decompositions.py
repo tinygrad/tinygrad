@@ -287,7 +287,7 @@ def fast_idiv(device: str, x: UOp, d: int, dont_cast=False) -> UOp|None:
   assert d>0, "Sign should have been taken out of divisor"
   vmin,vmax = max(x.vmin, x.dtype.min), min(x.vmax, x.dtype.max)
   m,s = magicgu(max(vmax, abs(vmin)), d)
-  if m*vmin >= dtypes.min(x.dtype) and m*vmax <= dtypes.max(x.dtype):
+  if m*vmin >= x.dtype.min and m*vmax <= x.dtype.max:
     return ((x*m) >> s) if is_unsigned else ((x*m) >> s) + (x<0).where(x.ufix(1), 0)
   # before we try casting to a larger dtype (slow), we see if there are powers of two in d we can shift to make x smaller
   if (largest_factor_of_two_in_d := (d & -d)) > 1:
@@ -295,7 +295,7 @@ def fast_idiv(device: str, x: UOp, d: int, dont_cast=False) -> UOp|None:
   if dont_cast: return None
   # promo_lattice needs to return an unsigned type if the type is unsigned
   if dtypes.is_int(next_dtype := promo_lattice[x.dtype.scalar()][-1]) and is_dtype_supported(next_dtype, device):
-    if m*vmin >= dtypes.min(next_dtype) and m*vmax <= dtypes.max(next_dtype):
+    if m*vmin >= next_dtype.min and m*vmax <= next_dtype.max:
       return ((x.cast(next_dtype)*m) >> s).cast(x.dtype) if is_unsigned else ((x.cast(next_dtype)*m) >> s).cast(x.dtype) + (x<0).where(x.ufix(1), 0)
   return None
 
