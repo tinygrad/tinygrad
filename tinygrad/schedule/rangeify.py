@@ -61,7 +61,7 @@ def normalize_assign_target_chain(assign:UOp, target:UOp, src:UOp):
   root_target = target
   while root_target.op is Ops.ASSIGN: root_target = root_target.src[0]
   # when RHS depends on the previous assign result, break with contiguous
-  if target in src.toposort(): src = src.contiguous()
+  #if target in src.toposort(): src = src.contiguous()
   return assign.replace(src=(root_target, src))
 
 def split_reduceop(reduce:UOp, x:UOp):
