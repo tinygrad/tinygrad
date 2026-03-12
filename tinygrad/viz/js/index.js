@@ -248,10 +248,16 @@ function selectShape(key) {
   return { eventType:track?.eventType, e:track?.shapes[idx], t };
 }
 
-function setZoom(x0, x1) {
-  const xscale = d3.scaleLinear().domain([data.first, data.dur]).range([0, document.getElementById("timeline").clientWidth]);
-  const [st, et] = xscale.range().map(zoomLevel.invertX, zoomLevel).map(xscale.invert, xscale);
-  if (x1 < st || x0 > et) zoomLevel = d3.zoomIdentity.translate(-xscale((x0+x1)/2-(et-st)/2)*zoomLevel.k, 0).scale(zoomLevel.k);
+function setZoom(x0, x1, fit) {
+  const width = document.getElementById("timeline").clientWidth;
+  const xscale = d3.scaleLinear().domain([data.first, data.dur]).range([0, width]);
+  if (fit) {
+    const k = (data.dur - data.first) / (x1 - x0);
+    zoomLevel = d3.zoomIdentity.translate(-xscale(x0) * k, 0).scale(k);
+  } else {
+    const [st, et] = xscale.range().map(zoomLevel.invertX, zoomLevel).map(xscale.invert, xscale);
+    if (x1 < st || x0 > et) zoomLevel = d3.zoomIdentity.translate(-xscale((x0+x1)/2-(et-st)/2) * zoomLevel.k, 0).scale(zoomLevel.k);
+  }
 }
 
 const Modes = {0:'read', 1:'write', 2:'write+read'};
@@ -545,6 +551,7 @@ async function renderProfiler(path, opts) {
     }
   }
   function render(transform) {
+    console.log("render");
     zoomLevel = transform;
     const canvasWidth = canvas.clientWidth;
     ctx.clearRect(0, 0, canvasWidth, canvas.clientHeight);
@@ -650,6 +657,15 @@ async function renderProfiler(path, opts) {
     canvas.style.height = `${height}px`;
     canvas.style.width = `${width}px`;
     ctx.scale(dpr, dpr);
+    // for packets, automatically zoom into the full range of instruction events
+    if (path.includes("pkts")) {
+      let packetRange = null;
+      for (const [k, { shapes }] of data.tracks) if (k.startsWith("WAVE")) {
+        const first = shapes[0].x, last = shapes.at(-1).x;
+        packetRange = packetRange == null ? [first, last] : [Math.min(first, packetRange[0]), Math.max(last, packetRange[1])]
+      }
+      setZoom(...packetRange, fit=true);
+    }
     d3.select(canvas).call(canvasZoom.transform, zoomLevel);
   }
 
@@ -660,16 +676,6 @@ async function renderProfiler(path, opts) {
 
   new ResizeObserver(([e]) => e.contentRect.width > 0 && resize()).observe(profiler.node());
   profiler.on("scroll", () => render(zoomLevel));
-
-  // on the first view, automatically zoom into the full range of instruction events
-  if (path.includes("pkts")) {
-    let packetRange = null;
-    for (const [k, { shapes }] of data.tracks) if (k.startsWith("WAVE")) {
-      const first = shapes[0].x, last = shapes.at(-1).x;
-      packetRange = packetRange == null ? [first, last] : [Math.min(first, packetRange[0]), Math.max(last, packetRange[1])]
-    }
-    setZoom(...packetRange);
-  }
 
   function findRectAtPosition(x, y) {
     let track = null;
