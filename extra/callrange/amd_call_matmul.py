@@ -76,9 +76,11 @@ def load_local(a_local, b_local, a_global, b_global):
     b_local[:, tid].store(b_global[:, tid]))
 
 @simple_function
-def reg_matmul()
+def reg_matmul(c_regs, a_local, b_local):
   A_col = UOp.placeholder((ITERS_PER_WAVE_M*TM), dtypes.float, slot=0, addrspace=AddrSpace.REG)
   B_row = UOp.placeholder((ITERS_PER_WAVE_N*TN), dtypes.float, slot=1, addrspace=AddrSpace.REG)
+
+
 
 @simple_function
 def local_matmul(c:UOp, a:UOp, b:UOp, a_local:UOp, b_local:UOp):
