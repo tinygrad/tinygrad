@@ -190,7 +190,7 @@ class TestFunction(unittest.TestCase):
 
     a = Tensor([1,2,3]).realize()
     np.testing.assert_equal(f(a).numpy(), [2,3,4])
-    np.testing.assert_equal(a.numpy(), [3,4,5])  # TODO: should be [1,2,3]
+    np.testing.assert_equal(a.numpy(), [2,3,4])  # TODO: should be [1,2,3]
 
   def test_implicit_assign(self):
     a = Tensor([1,2,3])
@@ -213,7 +213,6 @@ class TestFunction(unittest.TestCase):
     np.testing.assert_equal(a.numpy(), [11,21,31])  # TODO: should be [1,2,3]
     np.testing.assert_equal(b.numpy(), [10,20,30])
 
-  @unittest.expectedFailure
   def test_assign_slice(self):
     @function
     def f(a:Tensor, b:Tensor) -> Tensor:
