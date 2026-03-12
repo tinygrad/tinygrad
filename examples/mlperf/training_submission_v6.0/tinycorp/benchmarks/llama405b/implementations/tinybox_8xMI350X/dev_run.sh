@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+
+export PYTHONPATH="."
+export DEV=${DEV:-AMD}
+export EMULATE="AMD_CDNA4"
+export CHECK_OOB=0
+export REWRITE_STACK_LIMIT=5000000 HCQDEV_WAIT_TIMEOUT_MS=240000
+
+export DEBUG=${DEBUG:-0}
+export HK_FLASH_ATTENTION=${HK_FLASH_ATTENTION:-1}
+export ALL2ALL=${ALL2ALL:-1}
+export USE_ATOMICS=${USE_ATOMICS:-0}
+export ASM_GEMM=${ASM_GEMM:-1}
+export WQKV=${WQKV:-1}
+export OFFLOAD_OPTIM=${OFFLOAD_OPTIM:-1}
+
+export DEFAULT_FLOAT="bfloat16" OPTIM_DTYPE="bfloat16"
+export DP=${DP:-1} MP=${MP:-8}
+export BS=${BS:-1} EVAL_BS=${EVAL_BS:-1} GRADIENT_ACC_STEPS=${GRADIENT_ACC_STEPS:-1152}
+
+export MODEL="llama3"
+export BASEDIR="/raid/datasets/c4/"
+export LLAMA3_SIZE=${LLAMA3_SIZE:-"405B"}
+export SEQLEN=${SEQLEN:-8192}
+
+export SEED=${SEED:-$RANDOM}
+export DATA_SEED=${DATA_SEED:-5760}
+
+export JITBEAM=${JITBEAM:-3}
+export BEAM_UOPS_MAX=6000 BEAM_UPCAST_MAX=256 BEAM_LOCAL_MAX=1024 BEAM_MIN_PROGRESS=5 BEAM_PADTO=1
+
+python3 examples/mlperf/model_train.py

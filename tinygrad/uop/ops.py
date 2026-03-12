@@ -229,7 +229,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
       case Ops.CONST | Ops.VCONST | Ops.DEFINE_VAR | Ops.BIND: return ()
       case Ops.BUFFER: return (self.arg,)
       case Ops.BUFFER_VIEW: return (self.arg[0],)
-      case Ops.ENCDEC: return self.arg[0]
+      case Ops.CUSTOM_FUNCTION: return None
       case Ops.BUFFERIZE: return tuple([int(r.vmax+1) for r in self.src[1:]])
       case Ops.DEFINE_LOCAL | Ops.DEFINE_REG: return (self.ptrdtype.size,)
       case Ops.PARAM:
@@ -239,8 +239,14 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
         return None
 
       # passthrough ops
-      case Ops.REDUCE | Ops.MSTACK | Ops.MSELECT | Ops.DETACH | Ops.CONTIGUOUS | Ops.CONTIGUOUS_BACKWARD | Ops.AFTER | Ops.END | Ops.CALL:
+      case Ops.REDUCE | Ops.MSTACK | Ops.MSELECT | Ops.DETACH | Ops.CONTIGUOUS | Ops.CONTIGUOUS_BACKWARD | Ops.AFTER | Ops.END:
         return self.src[0]._shape
+
+      case Ops.CALL:
+        inner_shape = self.src[0]._shape
+        if inner_shape is None: return None
+        # substitute internal PARAMs in the shape with corresponding args
+        return tuple(graph_rewrite(s, _pm_resolve_params, self.src[1:], walk=True) if isinstance(s, UOp) else s for s in inner_shape)
 
       # TODO: disallow shape changing bitcast
       case Ops.BITCAST:
@@ -558,9 +564,9 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     inp = self if arg is None else UOp(Ops.MSELECT, self.dtype, src=(self,), arg=arg)
     return UOp(Ops.COPY, self.dtype, (inp, UOp(Ops.DEVICE, arg=device) if not isinstance(device, UOp) else device))
   def mselect(self, arg:int) -> UOp: return UOp(Ops.MSELECT, self.dtype, (self,), arg)
+  def mstack(self, *srcs: UOp) -> UOp: return UOp(Ops.MSTACK, self.dtype, (self,)+srcs)
   @property
   def metadata(self) -> tuple[Metadata, ...]|None: return all_metadata.get(self, None)
-  def encdec(self, *src, arg=None): return UOp(Ops.ENCDEC, self.dtype, src=(self,)+src, arg=arg)
 
   # *** uop movement ops ***
 
@@ -683,10 +689,10 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     if self.op in {Ops.CONTIGUOUS, Ops.RESHAPE, Ops.DETACH, Ops.AFTER}: return self.src[0].buffer
     # this buffer can process disk tensors and simple movement ops
     if self is not self.base:
-      offset = self.contiguous_view_offset()
-      if offset is None: raise RuntimeError(f"cannot collapse movement ops on {self.base.op} to a contiguous view")
       buf = self.base.buffer
       assert isinstance(buf, Buffer), "must be a Buffer for movement ops"
+      offset = self.contiguous_view_offset()
+      if offset is None: raise RuntimeError(f"non-contiguous view is not supported for {buf.device} buffer")
       return buf.view(self.size, self.dtype, offset*self.dtype.itemsize)
     if self.op is Ops.BITCAST:
       buf = self.src[0].buffer
@@ -845,7 +851,11 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     sself = self.simplify()
     varnames = tuple(x.expr for x in sself.toposort() if x.op is Ops.DEFINE_VAR)
     # TODO: sanitize varnames, or don't use naked eval while staying fast
-    return eval("lambda "+','.join(varnames)+": "+sself.render(pm=renderer_infer)), varnames  # pylint: disable=eval-used
+    ret = _render_with_splits(list(sself.toposort()), renderer_infer, {sself})
+    lines = [f"  {k}={v}" for k,v in ret.items() if k != "ast"] + [f"  return {ret['ast']}"]
+    ns: dict[str, Any] = {"max": max, "cdiv": cdiv, "cmod": cmod, "bitcast": bitcast, "dtypes": dtypes}
+    exec(f"def _f({','.join(varnames)}):\n"+'\n'.join(lines), ns)  # pylint: disable=exec-used
+    return ns["_f"], varnames
 
   def sym_infer(self, var_vals:dict[str, int]):
     fxn, varnames = self._sym_fxn
@@ -892,8 +902,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     return p
 
   def call(self, *srcs:UOp, grad_fxn:Callable|None=None, metadata:tuple[Metadata, ...]=(), name:str|None=None, precompile:bool=False) -> UOp:
-    # TODO: reenable this after ENCDEC is fixed
-    #assert len(self.ranges) == 0, f"ranges {self.ranges} are leaking out of the call in {self.pyrender()}"
+    assert len(self.ranges) == 0, f"ranges {self.ranges} are leaking out of the call in {self.pyrender()}"
     return UOp(Ops.CALL, self.dtype, (self,)+srcs, CallInfo(grad_fxn, metadata, name, precompile))
   def custom_kernel(*srcs:UOp, fxn:Callable, grad_fxn:Callable|None=None) -> list[UOp]:
     contig_srcs = tuple(x.contiguous() if x.op is not Ops.AFTER else x for x in srcs)
@@ -925,7 +934,7 @@ class CallInfo:
 def should_resolve_call(c:UOp) -> bool:
   # don't resolve real kernel calls, sink or program
   if c.src[0].op is Ops.SINK and isinstance(c.src[0].arg, KernelInfo): return False
-  if c.src[0].op in {Ops.PROGRAM, Ops.LINEAR, Ops.COPY}: return False
+  if c.src[0].op in {Ops.PROGRAM, Ops.LINEAR, Ops.COPY, Ops.CUSTOM_FUNCTION}: return False
   if c.arg.precompile: return False
   return True
 
@@ -1414,6 +1423,7 @@ pm_lower_index_dtype = PatternMatcher([
 def _index_to_concrete_int(u:UOp) -> UOp: return graph_rewrite(u.sink(), pm_lower_index_dtype).src[0]
 
 _substitute = PatternMatcher([(UPat(tuple(Ops), name="x"), lambda ctx,x: ctx.get(x,None))])
+_pm_resolve_params = PatternMatcher([(UPat(Ops.PARAM, name="p"), lambda ctx,p: ctx[p.arg])])
 _remove_all_tags = PatternMatcher([(UPat(GroupOp.All, name="x"), lambda x: x.replace(tag=None) if x.tag is not None else None)])
 
 def gate_kernel_sink(x:UOp) -> bool:
@@ -1501,7 +1511,7 @@ pm_pyrender_extra = PatternMatcher([
   (UPat(Ops.BUFFER, src=(UPat(Ops.UNIQUE, name="u"), UPat(Ops.DEVICE, name="d")), name="x"), lambda x,u,d:
     f"UOp.new_buffer({repr(d.arg)}, {x.size}, {x.dtype}, {u.arg})"),
   (UPat(Ops.COPY, src=(UPat(name="x"), UPat(Ops.DEVICE, name="d"))), lambda ctx,x,d: f"{ctx[x]}.copy_to_device({repr(d.arg)})"),
-  (UPat(Ops.ENCDEC, name="x"), lambda ctx,x: f"{ctx[x.src[0]]}.encdec({''.join([str(ctx[s])+', ' for s in x.src[1:]])}arg={x.arg!r})"),
+  (UPat(Ops.CUSTOM_FUNCTION, name="x"), lambda ctx,x: f"UOp(Ops.CUSTOM_FUNCTION, {x.dtype}, src={srcs(ctx, x.src)}, arg={x.arg!r})"),
   (UPat(Ops.REDUCE_AXIS, name="r"), lambda ctx,r: f"{ctx[r.src[0]]}.r({r.arg[0]}, {r.arg[1]})"),
   # NOTE: range has srcs sometimes after control flow
   (UPat(Ops.RANGE, src=(UPat(Ops.CONST, name="c"),), allow_any_len=True, name="x"), lambda ctx,x,c:
@@ -1509,7 +1519,7 @@ pm_pyrender_extra = PatternMatcher([
       (f', src={srcs(ctx, x.src[1:])}' if len(x.src) > 1 else '')+(', dtype='+str(x.dtype) if x.dtype is not dtypes.index else '')+")"),
   # TODO: index shouldn't mismatch dtype
   (UPat(Ops.INDEX, src=(UPat(), UPat()), allow_any_len=True, name="x"), lambda ctx,x:
-   f"{ctx[x.src[0]]}.index({ctx[x.src[1]]}, "+(f"{ctx[x.src[2]]}, " if len(x.src) > 2 else "")+
+   f"{ctx[x.src[0]]}.index({ctx[x.src[1]]}, "+''.join([f"{ctx[xx]}, " for xx in x.src[2:]])+
     (f"dtype={x.dtype})" if x.src[0].dtype != x.dtype else "ptr=True)") if x.src[0].dtype.base != x.dtype else None),
   # TODO: movement ops simplify stuff, this can break SPEC=2
   #(UPat(GroupOp.Movement, name="x"), lambda ctx,x: f"{ctx[x.src[0]]}.{x.op.name.lower()}({render_marg(ctx,x)})"),
@@ -1532,6 +1542,24 @@ pm_pyrender = pm_pyrender_extra+PatternMatcher([
   (UPat(GroupOp.All, name="u"), lambda ctx,u: f"UOp({u.op}, {u.dtype}, {srcs(ctx,u.src)}"+(f", {repr(u.arg)})" if u.arg is not None else ")")),
 ])
 
+def _render_with_splits(lst:list[UOp], pm:PatternMatcher, to_render:set[UOp], split_depth:int=100) -> dict[str, str]:
+  r: dict[UOp, str] = {}
+  ret: dict[str, str] = {}
+  depth: dict[UOp, int] = {}
+  for i,u in enumerate(lst):
+    # limit inline depth to avoid "too many nested parentheses" in Python parser
+    op_depth = 1 + max([depth.get(s, 0) for s in u.src], default=0)
+    if op_depth > split_depth: to_render.add(u)
+    depth[u] = 0 if u in to_render else op_depth
+    ren = cast(str, pm.rewrite(u, ctx=r))
+    assert isinstance(ren, str)
+    if u.tag is not None: ren += f".rtag({repr(u.tag)})"
+    if u not in to_render: r[u] = ren
+    else:
+      r[u] = f"c{i}" if u is not lst[-1] else "ast"
+      ret[r[u]] = ren
+  return ret
+
 def pyrender(ast:UOp) -> str:
   lst = list(ast.toposort())
 
@@ -1553,21 +1581,7 @@ def pyrender(ast:UOp) -> str:
     to_render.add(u)
 
   kernels: dict[UOp, tuple[str, str]] = {}
-  r: dict[UOp, str] = {}
-  ret: dict[str, str] = {}
-  depth: dict[UOp, int] = {}
-  for i,u in enumerate(lst):
-    # limit inline depth to avoid "too many nested parentheses" in Python parser
-    op_depth = 1 + max([depth[s] for s in u.src], default=0)
-    if op_depth > 100: to_render.add(u)
-    depth[u] = 0 if u in to_render else op_depth
-    ren = cast(str, pm_pyrender.rewrite(u, ctx=r))
-    assert isinstance(ren, str)
-    if u.tag is not None: ren += f".rtag({repr(u.tag)})"
-    if u not in to_render: r[u] = ren
-    else:
-      r[u] = f"c{i}" if u is not lst[-1] else "ast"
-      ret[r[u]] = ren
+  ret = _render_with_splits(lst, pm_pyrender, to_render)
   return ''.join([v[1] for v in kernels.values()]) + '\n'.join([f"{k} = {strip_parens(v)}" for k,v in ret.items()])
 
 # *** what was symbolic.py ***

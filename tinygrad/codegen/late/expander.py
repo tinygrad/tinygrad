@@ -51,7 +51,7 @@ def do_expand(root:UOp):
         new_srcs.append(src)
       elif src.dtype.count > 1:
         # put any input dtype > 1 grouped together
-        new_srcs.append(UOp(Ops.CAT, src.dtype.scalar().vec(expand_sz*src.dtype.count), (src,)*expand_sz))
+        new_srcs.append(UOp(Ops.VCAT, src.dtype.scalar().vec(expand_sz*src.dtype.count), (src,)*expand_sz))
       else:
         # repeat the arg
         new_srcs.append(src.broadcast(expand_sz))

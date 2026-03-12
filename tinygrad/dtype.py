@@ -30,6 +30,7 @@ class InvalidType:
   def __hash__(self): return id(self)
   def __repr__(self): return "Invalid"
   def __reduce__(self): return (InvalidType, ())  # unpickle returns the singleton
+  def __format__(self, spec): return "Invalid"
 
 Invalid = InvalidType()
 

@@ -5,7 +5,7 @@ from contextlib import ContextDecorator
 from typing import Any, Callable, ClassVar, Sequence, cast, get_args, Literal, SupportsIndex, ParamSpec, TypeVar, Generic, TYPE_CHECKING
 if TYPE_CHECKING: import numpy
 from tinygrad.dtype import DType, DTypeLike, dtypes, ImageDType, ConstType, least_upper_float, least_upper_dtype, sum_acc_dtype, to_dtype, truncate
-from tinygrad.dtype import _from_np_dtype, _to_np_dtype, PyConst
+from tinygrad.dtype import _from_np_dtype, _to_np_dtype, PyConst, Invalid, InvalidType
 from tinygrad.helpers import argfix, make_tuple, flatten, prod, all_int, round_up, merge_dicts, argsort, getenv, all_same, fully_flatten
 from tinygrad.helpers import IMAGE, FLOAT16, WINO, Metadata, TRACEMETA, ASM_GEMM, ceildiv, fetch, is_numpy_ndarray, TracingKey, cpu_profile
 from tinygrad.helpers import suppress_finalizing, disable_gc
@@ -113,7 +113,7 @@ class Tensor(OpMixin):
   __slots__ = "uop", "requires_grad", "grad"
   training: ClassVar[bool] = False
 
-  def __init__(self, data:PyConst|bytes|list|tuple|UOp|'numpy.ndarray'|pathlib.Path|None,
+  def __init__(self, data:ConstType|bytes|list|tuple|UOp|'numpy.ndarray'|pathlib.Path|None,
                device:str|tuple|list|None=None, dtype:DTypeLike|None=None, requires_grad:bool|None=None, _force_unique:bool=False):
     if device is None and isinstance(data, pathlib.Path): device = f"DISK:{data.resolve()}"  # keep it on the disk if device is None
     _dtype:DType|None = to_dtype(dtype) if dtype is not None else None
@@ -141,6 +141,9 @@ class Tensor(OpMixin):
       data = Tensor(0, device=_device, dtype=_dtype or dtypes.default_float, requires_grad=requires_grad).uop
     elif isinstance(data, get_args(PyConst)):
       data = (UOp.unique_const if _force_unique or requires_grad else UOp.const)(_dtype or dtypes.from_py(data), data, _device)
+    elif isinstance(data, InvalidType):
+      assert _dtype is not None
+      data = UOp.const(_dtype, data, _device)
     elif isinstance(data, bytes): data = _frompy(data, dtypes.uint8 if _dtype is None else _dtype)
     elif isinstance(data, (list, tuple)):
       if _dtype is None:
@@ -1061,7 +1064,7 @@ class Tensor(OpMixin):
     for t,g in zip(tensors_need_grad, self.gradient(*tensors_need_grad, gradient=gradient, materialize_grads=True)):
       assert g.shape == t.shape, f"grad shape must match tensor shape, {g.shape!r} != {t.shape!r}"
       if t.grad is None: t.grad = g
-      else: t.grad.assign(t.grad + g)
+      else: t.grad.assign(t.grad + g.to(t.grad.device))
     return self
 
   # ***** movement low level ops *****
@@ -2028,6 +2031,27 @@ class Tensor(OpMixin):
     m, _, ss = self._softmax(axis, dtype)
     return m - ss.log()
 
+  def normalize(self, p:float=2.0, dim:int=1, eps:float=1e-12) -> Tensor:
+    """
+    Performs Lp normalization of the tensor along the specified dimension.
+
+    See: https://pytorch.org/docs/stable/generated/torch.nn.functional.normalize.html
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    Tensor.manual_seed(42)
+    t = Tensor.randn(2, 3)
+    print(t.numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.normalize().numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.normalize(p=1, dim=0).numpy())
+    ```
+    """
+    if p == 0: return self / (self != 0).sum(dim, keepdim=True).maximum(eps)
+    return self / self.abs().pow(p).sum(dim, keepdim=True).pow(1/p).maximum(eps)
+
   def logsumexp(self, axis=None, keepdim=False) -> Tensor:
     """
     Computes the log-sum-exp of the tensor along the specified axis or axes.
@@ -2923,7 +2947,8 @@ class Tensor(OpMixin):
     if not isinstance(y, Tensor):
       # make y a Tensor
       assert isinstance(y, (*get_args(ConstType), UOp)), f"{type(y)=}, {y=}"
-      if isinstance(x.dtype, ImageDType) or dtypes.is_float(x.dtype) or (dtypes.is_int(x.dtype) and isinstance(y, int)): y_dtype = x.dtype
+      if y is Invalid or isinstance(x.dtype, ImageDType) or dtypes.is_float(x.dtype) or (dtypes.is_int(x.dtype) and isinstance(y, int)):
+        y_dtype = x.dtype
       elif not isinstance(y, UOp): y_dtype = dtypes.from_py(y)
       if isinstance(y, UOp): y = Tensor.from_uop(y, device=x.device)
       else: y = Tensor(dtypes.as_const(y, y_dtype), x.device, y_dtype, requires_grad=False)
@@ -3153,8 +3178,10 @@ class Tensor(OpMixin):
     the reference frames (`ref_frames`).
     """
     ref_frames = [x.contiguous() for x in ref_frames or []]
-    assert isinstance(frame_pos, Variable), "frame_pos must be a Variable"
-    return self.contiguous()._apply_uop(UOp.encdec, state.contiguous(), *ref_frames, extra_args=(frame_pos,), arg=(shape,))
+    assert frame_pos.op is Ops.BIND, "frame_pos must be a bound Variable"
+    srcs = (out:=Tensor.empty(*shape, device=self.device, dtype=self.dtype), self.contiguous(), state.contiguous(), *ref_frames)
+    fn = UOp(Ops.CUSTOM_FUNCTION, dtypes.void, src=(frame_pos.src[0], *[UOp.const(dtypes.int, s) for s in shape]), arg="encdec")
+    return Tensor(out.uop.after(fn.call(*[s.uop for s in srcs], frame_pos)), device=self.device)
 
   # ***** functional nn ops *****
 
@@ -3611,21 +3638,6 @@ class Tensor(OpMixin):
       w = w.pad_to(None, None, cin, None, None)
       x = x.pad_to(None, None, cin, None, None).reshape(bs, groups*cin, iy, ix)
 
-    # hacks for pitch alignment
-    if IMAGE == 1:
-      assert isinstance(ix, int) and isinstance(H, int)
-      added_width = 0
-      if (ix*groups*cin) % (64 // dtsz):
-        added_width = round_up(ix, 64 // (dtsz * math.gcd(groups * cin, 64 // dtsz))) - ix
-        ix = ix + added_width
-        x = x.pad_to(None, None, None, ix)
-
-      added_weight = 0
-      if (H*W*cin) % (64 // dtsz):
-        added_weight = round_up(H, 64 // (dtsz * math.gcd(W * cin, 64 // dtsz))) - H
-        H = H + added_weight
-        w = w.pad_to(None, None, None, H, None)
-
     # hack for non multiples of 4 on rcout
     added_output_channels = 0
     if rcout % 4 != 0 and not (rcout == 1 and groups%4 == 0):
@@ -3642,11 +3654,25 @@ class Tensor(OpMixin):
     else: w = w.reshape(cout//4,4,cin//4,4,H,W).permute(0,4,2,5,3,1)
 
     # contiguous creates the image, and early realize static weights (TODO: test for the static weight)
-    if IMAGE >= 2: x,w = x.cast(base_image_type((bs*iy, ix*groups*cin//4, 4))), w.cast(base_image_type((cout//4, H*W*cin, 4)))
-    if IMAGE == 1 and FLOAT16: x, w = x.cast(dtypes.half).contiguous().cast(dtypes.float), w.cast(dtypes.half).contiguous().cast(dtypes.float)
-    else: x, w = x.contiguous(), w.contiguous()
+    if IMAGE == 1:
+      # pad with Invalid
+      def _invalid_pad_to(t, shape):
+        if all(p is None or p == s for p,s in zip(shape, t.shape)): return t
+        return Tensor(True, device=t.device).expand(t.shape).pad_to(shape).where(t.pad_to(shape), Invalid)
+      # hacks for pitch alignment
+      assert isinstance(ix, int) and isinstance(H, int)
+      ALIGN = 64 // dtsz
+      x = _invalid_pad_to(x, (None, None, round_up(ix, ALIGN // math.gcd(groups * cin, ALIGN)), None))
+      w = _invalid_pad_to(w, (None, round_up(H, ALIGN // math.gcd(W * cin * 4, ALIGN))) + (None,) * (w.ndim - 2))
 
-    if IMAGE == 1 and added_weight: w, H = w[:, :-added_weight, ...], H - added_weight
+      if FLOAT16: x, w = x.cast(dtypes.half).contiguous().cast(dtypes.float), w.cast(dtypes.half).contiguous().cast(dtypes.float)
+      else: x, w = x.contiguous(), w.contiguous()
+
+      # undo alignment hacks
+      x, w = x[:, :, :ix, :], w[:, :H, ...]
+
+    elif IMAGE: x, w = x.cast(base_image_type((bs*iy, ix*groups*cin//4, 4))).contiguous(), w.cast(base_image_type((cout//4, H*W*cin, 4))).contiguous()
+    else: x, w = x.contiguous(), w.contiguous()
 
     # expand out
     rcin_hi, rcin_lo = (cin//4, 4) if cin >= 4 else (1, 1)
@@ -3654,9 +3680,6 @@ class Tensor(OpMixin):
     x = x.reshape(bs, iy, -1, groups, rcin_hi, rcin_lo)
     if cin_last: w = w.reshape(cout//4, H, rcin_hi, W, 4, rcin_lo)
     else: w = w.reshape(cout//4, H, rcin_hi, W, rcin_lo, 4).permute(0,1,2,3,5,4)
-
-    # undo pitch alignment hack
-    if IMAGE == 1 and added_width: x = x[:, :, :-added_width, ...]
 
     # prepare input
     x = x.permute(0,3,4,5,1,2).pad(self._resolve_pool_pads(padding,2))._pool((H,W), stride, dilation)# -> (bs, groups, rcin_hi, rcin_lo, oy, ox, H, W)
