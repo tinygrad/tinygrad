@@ -1,6 +1,6 @@
 from typing import Union, Optional, Any
 import collections, math
-from tinygrad import Tensor, Variable, TinyJit, dtypes, nn, Device, function
+from tinygrad import Tensor, Variable, TinyJit, dtypes, nn, Device
 from tinygrad.helpers import getenv, DEBUG
 
 # https://github.com/facebookresearch/llama/blob/1076b9c51c77ad06e9d7ba8a4c6df775741732bd/llama/model.py#L47
@@ -61,14 +61,14 @@ class Attention:
       xk = xqkv[:, :, :, self.n_rep:self.n_rep+1].reshape(xqkv.shape[0], xqkv.shape[1], -1)
       xv = xqkv[:, :, :, self.n_rep+1:self.n_rep+2].reshape(xqkv.shape[0], xqkv.shape[1], -1)
     else:
-      xq, xk, xv = self.wq(x), self.wk(x), self.wv(x)
+      xq, xk, xv = self.wq(x), self.wk(x.contiguous_backward()), self.wv(x)
 
     if self.q_norm is not None and self.k_norm is not None:
       xq = self.q_norm(xq)
       xk = self.k_norm(xk)
 
-    # # cast_float_to_bf16 is expensive in reduction loops, break it out
-    # if x.dtype == dtypes.bfloat16: xq, xk = xq.contiguous_backward(), xk.contiguous_backward()
+    # cast_float_to_bf16 is expensive in reduction loops, break it out
+    if x.dtype == dtypes.bfloat16: xq, xk = xq.contiguous_backward(), xk.contiguous_backward()
 
     xq = xq.reshape(xq.shape[0], xq.shape[1], self.n_heads, self.head_dim)
     xk = xk.reshape(xk.shape[0], xk.shape[1], self.n_kv_heads, self.head_dim)
@@ -126,7 +126,7 @@ class FeedForward:
 
   def __call__(self, x:Tensor) -> Tensor:
     w1 = self.w1(x).silu()
-    w3 = self.w3(x)  # this fixes a strange fusion that makes tensor cores miss
+    w3 = self.w3(x.contiguous_backward())  # this fixes a strange fusion that makes tensor cores miss
     return self.w2(w1 * w3)
 
 class TransformerBlock:
@@ -139,7 +139,7 @@ class TransformerBlock:
 
   def __call__(self, x:Tensor, start_pos:Union[Variable,int], freqs_cis:Tensor, mask:Optional[Tensor]):
     h = x + self.attention(self.attention_norm(x), start_pos, freqs_cis, mask)
-    return (h + self.feed_forward(self.ffn_norm(h)))
+    return (h + self.feed_forward(self.ffn_norm(h))).contiguous().contiguous_backward()
 
 # standard openai sampling
 def sample(logits: Tensor, temp: float, k: int, p: float, af: float, ap: float):
@@ -206,14 +206,14 @@ class Transformer:
 
   def forward(self, tokens:Tensor, start_pos:Union[Variable,int], temperature:float, top_k:int, top_p:float, alpha_f:float, alpha_p:float):
     _bsz, seqlen = tokens.shape
-    h = self.tok_embeddings(tokens)
+    h = self.tok_embeddings(tokens).contiguous()
     freqs_cis = self.freqs_cis.cast(h.dtype)[:, start_pos:start_pos+seqlen, :, :, :]
 
     if self.max_context != 0 and seqlen > 1:
       mask = Tensor.full((1, 1, seqlen, start_pos+seqlen), float("-inf"), dtype=h.dtype, device=h.device).triu(start_pos+1)
     else: mask = None
     for layer in self.layers: h = layer(h, start_pos, freqs_cis, mask)
-    logits = self.output(self.norm(h))
+    logits = self.output(self.norm(h).contiguous().contiguous_backward()).contiguous_backward()
     if math.isnan(temperature): return logits
 
     return sample(logits[:, -1, :].flatten(), temperature, top_k, top_p, alpha_f, alpha_p)
