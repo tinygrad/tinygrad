@@ -3,7 +3,7 @@ from tinygrad import Tensor, Device, Context, GlobalCounters, dtypes
 from tinygrad.uop.ops import UOp, KernelInfo, sint, AxisType
 from tinygrad.engine.realize import ExecItem, get_runner
 from tinygrad.dtype import AddrSpace
-from tinygrad.helpers import getenv
+from tinygrad.helpers import DEBUG, getenv
 
 N = getenv("N", 4096)
 M = getenv("M", N)
@@ -58,16 +58,12 @@ def copy(dest:UOp, src:UOp, rng:int, set=False, upcast=False):
   copy = dest[*rngs].store(src[*rngs]).end(*rngs)
   return dest.after(copy) if set else copy
 
-def hand_spec_kernel3():
+def hand_spec_kernel3(c:UOp, a:UOp, b:UOp) -> UOp:
   # ---------------------------
-  # block indices & placeholders
+  # block indices
   # ---------------------------
   block_id_n = UOp.special(N // BLOCK_N, "gidx0")
   block_id_m = UOp.special(M // BLOCK_M, "gidx1")
-
-  a = UOp.placeholder((M, K), dtypes.float, slot=1)
-  b = UOp.placeholder((K, N), dtypes.float, slot=2)
-  c = UOp.placeholder((M, N), dtypes.float, slot=0)
 
   # index the output with the globals
   c = c.reshape(M // BLOCK_M, BLOCK_M, N // BLOCK_N, BLOCK_N)[block_id_m, :, block_id_n, :]
@@ -114,7 +110,7 @@ def hand_spec_kernel3():
 
   A_col = UOp.placeholder((REG_TILES_PER_WAVE_M, TM), dtypes.float, slot=0, addrspace=AddrSpace.REG)
   A_local_slice = A_local[k, :].reshape(WAVES_PER_BLOCK_M, REG_TILES_PER_WAVE_M, LANES_PER_WAVE_M, TM)[waveIdy, :, laneIdy, :]
-  A_col = copy(A_col, A_local_slice , 300, set=True, upcast=True)
+  A_col = copy(A_col, A_local_slice, 300, set=True, upcast=True)
 
   B_row = UOp.placeholder((REG_TILES_PER_WAVE_N, TN), dtypes.float, slot=1, addrspace=AddrSpace.REG)
   B_local_slice = B_local[k, :].reshape(WAVES_PER_BLOCK_N, REG_TILES_PER_WAVE_N, LANES_PER_WAVE_N, TN)[waveIdx, :, laneIdx, :]
@@ -146,19 +142,18 @@ def hand_spec_kernel3():
 
   return sink.sink(arg=KernelInfo(opts_to_apply=())).simplify()
 
-def test_matmul(sink:UOp, dtype=dtypes.float32, M=M, N=N, K=K):
-  rng = np.random.default_rng()
-  a = Tensor(rng.random((M, K), dtype=np.float32)-0.5, dtype=dtype)
-  b = Tensor(rng.random((K, N), dtype=np.float32)-0.5, dtype=dtype)
-  hc = Tensor.empty(M, N, dtype=dtype)
-  Tensor.realize(a, b, hc)
-
-  ei = ExecItem(sink, [t.uop.buffer for t in [hc, a, b]], prg=get_runner(Device.DEFAULT, sink))
+if __name__ == "__main__":
+  a = Tensor.randn(M, K, dtype=dtypes.float)
+  b = Tensor.randn(K, N, dtype=dtypes.float)
+  c = Tensor.empty(M, N, dtype=dtypes.float)
+  with Context(DEBUG=0): Tensor.realize(a, b)
 
   ets = []
-  with Context(DEBUG=2):
+  with Context(DEBUG=max(2, DEBUG.value)):
     for _ in range(NUM_RUNS):
-      ets.append(ei.run(wait=True))
+      GlobalCounters.reset()
+      tst = Tensor.custom_kernel(c, a, b, fxn=hand_spec_kernel3)[0].realize()
+      ets.append(GlobalCounters.time_sum_s)
   print(f"REAL TFLOPS {M * N * K * 2 / min(ets) * 1e-12:.2f}")
 
   if getenv("VERIFY", 1):
@@ -166,10 +161,7 @@ def test_matmul(sink:UOp, dtype=dtypes.float32, M=M, N=N, K=K):
     with Context(DEBUG=2):
       tc = (a @ b).realize()
     with Context(DEBUG=0):
-      err = (hc - tc).square().mean().item()
+      err = (tc - tst).square().mean().item()
     print(f"mean squared error {err}")
     if err > 1e-06:
       raise RuntimeError("matmul is wrong!")
-
-if __name__ == "__main__":
-  test_matmul(hand_spec_kernel3(), N=N)
