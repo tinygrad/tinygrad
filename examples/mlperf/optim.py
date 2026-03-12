@@ -34,10 +34,10 @@ class GradAccClipAdamW(Optimizer):
       grads[0].assign((grads[0] * (self.clip_norm / (total_norm + 1e-6)).clamp(max_=1.0)).cast(grads[0].dtype))
     else:
       for i in range(len(grads)):
-        grads[i].assign(grads[i] / self.grad_acc).realize()
-      total_norm = Tensor.stack(*[g.float().square().sum() for g in grads]).sum().sqrt().contiguous().realize()
+        grads[i].assign(grads[i] / self.grad_acc)
+      total_norm = Tensor.stack(*[g.float().square().sum() for g in grads]).sum().sqrt().contiguous()
       for i in range(len(grads)):
-        grads[i].assign((grads[i] * (self.clip_norm / (total_norm + 1e-6)).clamp(max_=1.0)).cast(grads[i].dtype)).realize()
+        grads[i].assign((grads[i] * (self.clip_norm / (total_norm + 1e-6)).clamp(max_=1.0)).cast(grads[i].dtype))
 
     ret = []
     self.b1_t *= self.b1
