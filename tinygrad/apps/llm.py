@@ -85,16 +85,16 @@ def apply_rope(x:Tensor, freqs_cis:Tensor, rope_dim:int=0) -> Tensor:
   return y.cat(x_pass, dim=-1) if x_pass is not None else y
 
 class TransformerBlock:
-  def __init__(self, dim:int, hidden_dim:int, n_heads:int, n_kv_heads:int, norm_eps:float, head_dim:int, rope_theta:float,
-               max_context:int=0, qk_norm:int=0, rope_dim:int=0, has_gate:bool=False,
-               num_experts:int=0, num_experts_per_tok:int=0, shared_expert_dim:int=0, ssm:dict|None=None):
+  def __init__(self, dim:int, hidden_dim:int, n_heads:int, n_kv_heads:int, norm_eps:float, head_dim:int, rope_theta:float, rope_dim:int=0,
+               max_context:int=0, qk_norm:int=0, num_experts:int=0, num_experts_per_tok:int=0, shared_expert_dim:int=0,
+               has_gate:bool=False, ssm:dict|None=None):
     self.n_heads      = n_heads
     self.n_kv_heads   = n_kv_heads
     self.head_dim     = head_dim
     self.rope_theta   = rope_theta
+    self.rope_dim     = rope_dim or head_dim
     self.max_context  = max_context
     self.qk_norm      = qk_norm
-    self.rope_dim     = rope_dim or head_dim
     self.has_gate     = has_gate
     if ssm is None:
       # --- attention projections (all linear, bias-free) ------------------
@@ -235,13 +235,13 @@ class TransformerBlock:
     return self._feed_forward(self._attention(x, start_pos)).contiguous()
 
 class Transformer:
-  def __init__(self, *, num_blocks, dim, hidden_dim, n_heads, n_kv_heads, norm_eps, vocab_size, head_dim:int, rope_theta:float,
-               max_context:int=0, qk_norm:int=0, rope_dim:int=0, num_experts:int=0, num_experts_per_tok:int=0,
+  def __init__(self, *, num_blocks, dim, hidden_dim, n_heads, n_kv_heads, norm_eps, vocab_size, head_dim:int, rope_theta:float, rope_dim:int=0,
+               max_context:int=0, qk_norm:int=0, num_experts:int=0, num_experts_per_tok:int=0,
                shared_expert_dim:int=0, full_attention_interval:int=0, ssm:dict|None=None):
-    self.blk = [TransformerBlock(dim, hidden_dim, n_heads, n_kv_heads, norm_eps, head_dim, rope_theta, max_context,
-                                  head_dim if ssm else qk_norm, rope_dim, has_gate=ssm is not None,
-                                  num_experts=num_experts, num_experts_per_tok=num_experts_per_tok, shared_expert_dim=shared_expert_dim,
-                                  ssm=ssm if ssm and (i+1) % full_attention_interval != 0 else None) for i in range(num_blocks)]
+    self.blk = [TransformerBlock(dim, hidden_dim, n_heads, n_kv_heads, norm_eps, head_dim, rope_theta, rope_dim, max_context,
+                                 head_dim if ssm else qk_norm, num_experts=num_experts, num_experts_per_tok=num_experts_per_tok,
+                                 shared_expert_dim=shared_expert_dim, has_gate=ssm is not None,
+                                 ssm=ssm if ssm and (i+1) % full_attention_interval != 0 else None) for i in range(num_blocks)]
     self.token_embd  = nn.Embedding(vocab_size, dim)
     self.output_norm = nn.RMSNorm(dim, norm_eps)
     self.output = nn.Linear(dim, vocab_size, bias=False)
@@ -282,22 +282,21 @@ class Transformer:
         if 'attn_q.weight' in name: state_dict[name] = state_dict[name].rearrange("(n h two) d -> (n two h) d", n=n_heads, two=2)
         if 'attn_k.weight' in name: state_dict[name] = state_dict[name].rearrange("(n h two) d -> (n two h) d", n=n_kv_heads, two=2)
 
+    ssm = None
     if arch in ('qwen35', 'qwen35moe'):
+      ssm = {k: kv[f'{arch}.ssm.{k}'] for k in ('conv_kernel','state_size','group_count','time_step_rank','inner_size')}
       renames = {'ssm_dt.bias':'ssm_dt_bias', 'post_attention_norm':'ffn_norm', 'ffn_gate_inp_shexp.weight':'ffn_gate_inp_shexp_weight',
                  'ssm_conv1d.weight':'ssm_conv1d'}
       state_dict = {functools.reduce(lambda k,r: k.replace(*r), renames.items(), k):v for k,v in state_dict.items()}
-    if arch not in ('qwen35', 'qwen35moe'): ssm = None
-    else: ssm = {k: kv[f'{arch}.ssm.{k}'] for k in ('conv_kernel','state_size','group_count','time_step_rank','inner_size')}
     model = Transformer(num_blocks=kv[f'{arch}.block_count'], dim=kv[f'{arch}.embedding_length'],
                         hidden_dim=kv.get(f'{arch}.expert_feed_forward_length', kv.get(f'{arch}.feed_forward_length', 0)),
                         n_heads=n_heads, n_kv_heads=n_kv_heads, norm_eps=kv[f'{arch}.attention.layer_norm_rms_epsilon'],
                         vocab_size=len(kv['tokenizer.ggml.tokens']),
                         head_dim=kv.get(f'{arch}.attention.key_length', kv[f'{arch}.embedding_length'] // n_heads),
-                        rope_theta=kv[f'{arch}.rope.freq_base'], max_context=max_context,
+                        rope_theta=kv[f'{arch}.rope.freq_base'], rope_dim=kv.get(f'{arch}.rope.dimension_count', 0), max_context=max_context,
                         qk_norm=int(state_dict['blk.0.attn_q_norm.weight'].shape[0]) if 'blk.0.attn_q_norm.weight' in state_dict else 0,
                         num_experts=kv.get(f'{arch}.expert_count', 0), num_experts_per_tok=kv.get(f'{arch}.expert_used_count', 0),
                         shared_expert_dim=kv.get(f'{arch}.expert_shared_feed_forward_length', 0), ssm=ssm,
-                        rope_dim=kv.get(f'{arch}.rope.dimension_count', 0),
                         full_attention_interval=kv.get(f'{arch}.full_attention_interval', 0))
 
     nn.state.load_state_dict(model, state_dict, verbose=False, consume=True, realize=False)  # NOTE: rope_freqs.weight (32,) is unused
@@ -341,7 +340,7 @@ models = {
   "qwen3:8b": "https://huggingface.co/Qwen/Qwen3-8B-GGUF/resolve/main/Qwen3-8B-Q4_K_M.gguf",
   "qwen3:30b-a3b": "https://huggingface.co/Qwen/Qwen3-30B-A3B-GGUF/resolve/main/Qwen3-30B-A3B-Q4_K_M.gguf",
   "qwen3.5:0.8b": "https://huggingface.co/unsloth/Qwen3.5-0.8B-GGUF/resolve/main/Qwen3.5-0.8B-Q8_0.gguf",
-  "qwen3.5:9b": "https://huggingface.co/unsloth/Qwen3.5-9B-GGUF/resolve/main/Qwen3.5-9B-Q6_K.gguf",
+  "qwen3.5:9b": "https://huggingface.co/unsloth/Qwen3.5-9B-GGUF/resolve/main/Qwen3.5-9B-Q4_K_M.gguf",
   "qwen3.5:27b": "https://huggingface.co/unsloth/Qwen3.5-27B-GGUF/resolve/main/Qwen3.5-27B-Q4_K_M.gguf",
   "qwen3.5:35b-a3b": "https://huggingface.co/unsloth/Qwen3.5-35B-A3B-GGUF/resolve/main/Qwen3.5-35B-A3B-Q4_K_M.gguf",
   "olmoe": "https://huggingface.co/allenai/OLMoE-1B-7B-0924-Instruct-GGUF/resolve/main/olmoe-1b-7b-0924-instruct-q4_k_m.gguf",
