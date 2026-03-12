@@ -1340,7 +1340,7 @@ class Tensor(OpMixin):
       if is_disk: raise RuntimeError("advanced setitem is not supported for DISK tensors")
       if not isinstance(v, Tensor): v = Tensor(v, device=self.device, dtype=self.dtype)
       self.assign(self._getitem(indices, v))
-    elif is_disk or self.uop.is_realized or self.uop.base.op is Ops.AFTER: # basic setitem, self is realized
+    elif is_disk or self.uop.is_realized or self.uop.base.op in (Ops.AFTER, Ops.BUFFER): # basic setitem, self is realized
       view = self[indices]
       if isinstance(v, Tensor) and v.uop.op is Ops.ASSIGN and v.uop in view.uop.base.src: return
       view.assign(v)
@@ -3668,8 +3668,7 @@ class Tensor(OpMixin):
       x = _empty_pad_to(x, (None, None, round_up(ix, ALIGN // math.gcd(groups * cin, ALIGN)), None), dtypes.half if FLOAT16 else None)
       w = _empty_pad_to(w, (None, round_up(H, ALIGN // math.gcd(W * cin * 4, ALIGN))) + (None,) * (w.ndim - 2), dtypes.half if FLOAT16 else None)
 
-      if FLOAT16: x, w = x.contiguous().cast(dtypes.float), w.contiguous().cast(dtypes.float)
-      else: x, w = x.contiguous(), w.contiguous()
+      if FLOAT16: x, w = x.cast(dtypes.float), w.cast(dtypes.float)
 
       # undo alignment hacks
       x, w = x[:, :, :ix, :], w[:, :H, ...]
