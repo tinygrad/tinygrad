@@ -160,7 +160,7 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
   (UPat(Ops.ASSIGN, src=(UPat(Ops.ASSIGN, name="target"), UPat(name="src")), allow_any_len=True, name="assign"), normalize_assign_target_chain),
 
   # make source contiguous if it has hazardous movement ops on the dest buffer
-  (UPat(Ops.ASSIGN, src=(UPat.var("target"), UPat.var("src")), name="assign"), fix_assign_hazard),
+  (UPat(Ops.STORE, src=(UPat.var("target"), UPat.var("src")), name="assign"), fix_assign_hazard),
 
   # ** size 0 **
 
