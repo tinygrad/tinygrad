@@ -27,7 +27,7 @@ def realize_assign_src(ctx:dict[UOp, None], buf:UOp, x:UOp):
 
 pm_generate_realize_map = PatternMatcher([
   # always realize
-  (UPat({Ops.COPY, Ops.BUFFER_VIEW, Ops.CONTIGUOUS, Ops.STORE, Ops.ASSIGN}, name="tr"), realize),
+  (UPat({Ops.COPY, Ops.CONTIGUOUS, Ops.STORE, Ops.ASSIGN}, name="tr"), realize),
   # realize srcs of these
   (UPat((Ops.COPY, Ops.MSELECT, Ops.MSTACK), name="rb"), realize_srcs),
   # sometimes realize src of assign
