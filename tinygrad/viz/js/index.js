@@ -245,7 +245,7 @@ function selectShape(key) {
   if (key == null) return {};
   const [t, idx] = key.split("-");
   const track = data.tracks.get(t);
-  return { eventType:track?.eventType, e:track?.shapes[idx], t };
+  return { eventType:track?.eventType, e:track?.shapes[idx] };
 }
 
 // scaling function for time to pixels
@@ -280,23 +280,12 @@ function setFocus(key) {
     }
     focusedShape = key; d3.select("#timeline").call(canvasZoom.transform, zoomLevel);
   }
-  const { eventType, e, t } = selectShape(key);
+  const { eventType, e } = selectShape(key);
   if (metadata.querySelector(".info") == null) d3.select(metadata).html("").append("div").classed("info", true);
   const html = d3.select(".info").html("");
   if (eventType === EventTypes.EXEC) {
     const [n, _, ...rest] = e.arg.tooltipText.split("\n");
-    const tableData = [["Name", colored(e.arg.label)], ["Duration", formatTime(e.width)], ["Start Time", formatTime(e.x)]];
-    const frequency = data.tracks.get("Shader Clock");
-    if (frequency != null) {
-      let freq = 0;
-      for (const [c,f] of frequency.valueMap) if (c > e.x) break; else freq = f;
-      if (freq > 0) {
-        tableData.push(["Frequency", formatUnit(freq, 'Hz')]);
-        const ns = (e.x-data.tracks.get(t).shapes[0].x) / freq * 1e9; const remNs = Math.round(ns % 1000);
-        tableData.push(["Timestamp", ns/1000 > 1 ? formatMicroseconds(ns/1000, true) + (remNs ? ` ${remNs}ns` : "") : Math.round(ns, 2)+"ns"]);
-      }
-    }
-    html.append(() => tabulate(tableData));
+    html.append(() => tabulate([["Name", colored(e.arg.label)], ["Duration", formatTime(e.width)], ["Start Time", formatTime(e.x)]]));
     let group = html.append("div").classed("args", true);
     for (const r of rest) group.append("p").text(r);
     group = html.append("div").classed("args", true);
@@ -894,7 +883,7 @@ async function main() {
       }
       appendSteps(ul, i, steps);
     }
-    return setState({currentCtx: 2, currentStep: 2, currentRewrite: 0, expandSteps: true});
+    return setState({ currentCtx:-1 });
   }
   // ** center graph
   const { currentCtx, currentStep, currentRewrite, expandSteps } = state;

@@ -5,7 +5,7 @@ from contextlib import redirect_stdout, redirect_stderr, contextmanager
 from decimal import Decimal
 from urllib.parse import parse_qs, urlparse
 from http.server import BaseHTTPRequestHandler
-from typing import Any, TypedDict, TypeVar, Generator, Callable, cast
+from typing import Any, TypedDict, TypeVar, Generator, Callable
 from tinygrad.helpers import colored, getenv, tqdm, unwrap, word_wrap, TRACEMETA, ProfileEvent, ProfileRangeEvent, TracingKey, ProfilePointEvent, temp
 from tinygrad.helpers import printable, Context, START_TIME
 from tinygrad.renderer.amd.dsl import Inst
