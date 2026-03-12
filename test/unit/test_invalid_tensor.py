@@ -8,15 +8,13 @@ class TestInvalidTensor(unittest.TestCase):
     sched = out.schedule()
     buf = out.uop.buffer
     buf.allocate()
-    sentinel = bytearray(b'\x42' * buf.nbytes)
-    buf.copyin(memoryview(sentinel))
+    sentinel = memoryview(bytearray(b'\x42' * buf.nbytes))
+    buf.copyin(sentinel)
     before = buf.as_memoryview().cast(out.dtype.fmt).tolist()
     run_schedule(sched)
-    ret = out.tolist()
+    ret = buf.as_memoryview().cast(out.dtype.fmt).tolist()
 
     for i,v in enumerate(expected): self.assertEqual(ret[i], before[i] if v is None else v)
-
-    return before, ret
 
   def test_where_x_invalid(self):
     mask = Tensor.arange(4) < 2
@@ -32,11 +30,7 @@ class TestInvalidTensor(unittest.TestCase):
     mask = Tensor.arange(6).reshape(2, 3) < 3
     vals = Tensor([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
     out = mask.where(vals, Invalid)
-    before, ret = self._invalid_test_helper(out, [])
-    assert ret[0] == [1.0, 2.0, 3.0]
-    assert before[3] == ret[1][0]
-    assert before[4] == ret[1][1]
-    assert before[5] == ret[1][2]
+    self._invalid_test_helper(out, [1.0, 2.0, 3.0, None, None, None])
 
   def test_where_invalid_int(self):
     mask = Tensor.arange(3) < 2
@@ -84,8 +78,7 @@ class TestInvalidTensor(unittest.TestCase):
   def test_where_reduce_always_true(self):
     mask = Tensor.arange(4) < 9
     out = mask.where(Tensor([1.0, 2.0, 3.0, 4.0]), Invalid).sum()
-    before, ret = self._invalid_test_helper(out, [])
-    assert ret == 10.0
+    self._invalid_test_helper(out, [10.0])
 
   def test_invalid_unary(self):
     mask = Tensor.arange(4) < 2
@@ -105,10 +98,7 @@ class TestInvalidTensor(unittest.TestCase):
   def test_invalid_reshape(self):
     mask = Tensor.arange(4) < 2
     out = mask.where(Tensor([1.0, 2.0, 3.0, 4.0]), Invalid).reshape(2,2)
-    before, ret = self._invalid_test_helper(out, [])
-    assert ret[0] == [1.0, 2.0]
-    assert ret[1][0] == before[2]
-    assert ret[1][1] == before[3]
+    self._invalid_test_helper(out, [1.0, 2.0, None, None])
 
   def test_invalid_cast(self):
     mask = Tensor.arange(4) < 2
