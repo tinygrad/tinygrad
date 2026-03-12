@@ -366,7 +366,7 @@ class TestDTypeALU(unittest.TestCase):
 
   @unittest.expectedFailure
   def test_unsafe_cast_float_to_int_failure(self):
-    val = float(dtypes.max(dtypes.int32) - 1)
+    val = float(dtypes.int32.max - 1)
     t1 = Tensor([val], dtype=dtypes.float32).cast(dtypes.int32)
     t2 = Tensor(val, dtype=dtypes.float32).cast(dtypes.int32)
     np.testing.assert_equal(t1.item(), t2.item())

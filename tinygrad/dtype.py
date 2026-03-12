@@ -79,10 +79,14 @@ class DType(metaclass=DTypeMetaClass):
     return PtrDType(self.priority, self.bitsize, self.name, self.fmt, self.count, None, self, addrspace, 1, size)
   def scalar(self) -> DType: return self._scalar if self._scalar is not None else self
   def nbytes(self) -> int: raise RuntimeError("only ptr types have nbytes")
-  @property
-  def min(self): return dtypes.min(self)
-  @property
-  def max(self): return dtypes.max(self)
+  @functools.cached_property
+  def min(self):
+    if dtypes.is_int(self): return 0 if dtypes.is_unsigned(self) else -2**(self.scalar().bitsize-1)
+    return -float("inf") if dtypes.is_float(self) else False
+  @functools.cached_property
+  def max(self):
+    if dtypes.is_int(self): return 2**(self.scalar().bitsize)-1+self.min
+    return float("inf") if dtypes.is_float(self) else True
 
 @dataclass(frozen=True, eq=False)
 class PtrDType(DType):
@@ -171,16 +175,6 @@ class dtypes:
     if isinstance(val, float) and math.isnan(val): val = math.nan
     # int is the default. wrap floats in ConstFloat to distinguish -0.0 from 0.0 in cache
     return ConstFloat(float(val)) if dtypes.is_float(dtype) else bool(val) if dtypes.is_bool(dtype) else int(val)
-  @staticmethod
-  @functools.cache
-  def min(dtype:DType):
-    if dtypes.is_int(dtype): return 0 if dtypes.is_unsigned(dtype) else -2**(dtype.scalar().bitsize-1)
-    return -float("inf") if dtypes.is_float(dtype) else False
-  @staticmethod
-  @functools.cache
-  def max(dtype:DType):
-    if dtypes.is_int(dtype): return 2**(dtype.scalar().bitsize)-1+dtypes.min(dtype)
-    return float("inf") if dtypes.is_float(dtype) else True
   @staticmethod
   def finfo(dtype:DType) -> tuple[int, int]:
     """(exponent, mantissa)"""

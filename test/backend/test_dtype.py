@@ -101,7 +101,7 @@ class TestDType(unittest.TestCase):
   @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, (PTXRenderer, NIRRenderer)), "skip for now")
   def test_uint_overflow(self):
     if not dtypes.is_unsigned(self.DTYPE): raise unittest.SkipTest("only for unsigned")
-    v = dtypes.max(self.DTYPE)
+    v = self.DTYPE.max
     _test_to_np(Tensor(v, dtype=self.DTYPE)+2, _to_np_dtype(self.DTYPE), np.array(v, dtype=_to_np_dtype(self.DTYPE))+2)
     _test_to_np(Tensor(v, dtype=self.DTYPE)*2, _to_np_dtype(self.DTYPE), np.array(v, dtype=_to_np_dtype(self.DTYPE))*2)
 
@@ -516,4 +516,3 @@ class TestOpsBFloat16(unittest.TestCase):
 
 if __name__ == '__main__':
   unittest.main()
-

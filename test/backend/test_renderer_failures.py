@@ -62,7 +62,7 @@ class TestRendererFailures(unittest.TestCase):
 class TestCStyleFailures(unittest.TestCase):
   def test_inline_const_alu(self):
     # CPU doesn't use the max function
-    ret = _setup_and_test_alu(Ops.MAX, 1, UOp.const(dtypes.int, dtypes.min(dtypes.int)+1))
+    ret = _setup_and_test_alu(Ops.MAX, 1, UOp.const(dtypes.int, dtypes.int.min+1))
     self.assertEqual(ret[0], 1)
 
   def _test_src_strip_paren(self, op: Ops, should_strip_paren:bool=True):
