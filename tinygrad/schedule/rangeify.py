@@ -33,7 +33,7 @@ def found_assign(ctx:dict[UOp, UOp], assign:UOp, src:UOp):
 
 # *** fold moved ASSIGNs (hack for openpilot) ***
 pm_fold_moved_assign = PatternMatcher([
-  (UPat(Ops.ASSIGN, src=(UPat(), UPat((*GroupOp.Movement, Ops.CAST), name="src")), name="assign"), found_assign),
+  (UPat(Ops.AFTER, src=(UPat(), UPat(Ops.STORE, src=(UPat(), UPat((*GroupOp.Movement, Ops.CAST), name="src")))), name="assign"), found_assign),
   # replace ALU sources with assign versions found above
   (UPat(GroupOp.ALU, name="alu"), lambda ctx,alu: alu.replace(src=new_src) if (new_src:=tuple(ctx.get(s, s) for s in alu.src)) != alu.src else None),
 ])
