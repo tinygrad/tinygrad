@@ -786,6 +786,14 @@ class TestSymbolic(unittest.TestCase):
     # div nests: y//12 -> a//2, mod nests: y%12 -> (a%2)*6+b, recombine
     self.helper_test_variable((y//12)*12 + y%12, 0, 43, "(b+a*6)")
 
+  def test_div_mod_recombine_after_asymmetric_fold(self):
+    a = Variable("a", 0, 7)
+    b = Variable("b", 0, 14)
+    x = a*15+b
+    # TODO: expected "(b+a*15)"
+    self.helper_test_variable((x//10)*10 + x%10, 0, 119, "(a*10+(a+b//5)//2*10+(b+a*5)%10)")
+    self.helper_test_variable((x//10)*2 + (x//5)%2, 0, 23, "(a*3+b//5)")
+
   def test_div_mod_recombine_in_additive_sum(self):
     x = Variable("x", 0, 31)
     y = Variable("y", 0, 5)
