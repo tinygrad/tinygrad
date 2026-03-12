@@ -372,7 +372,6 @@ def sqtt_timeline(data:bytes, lib:bytes, target:str) -> list[ProfileEvent]:
       else:
         add(name.replace("_ALT", ""), p, op=name)
   pc_map = {addr:str(inst) for addr,inst in amd_decode(lib, target).items()}
-  if len(ret) == 0: return []
   return [ProfilePointEvent(r, "JSON", "pcMap", pc_map, ts=Decimal(0)) for r in row_ends]+ret
 
 # ** SQTT OCC only unpacks wave start, end time and SIMD location
