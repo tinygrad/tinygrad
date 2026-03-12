@@ -231,6 +231,8 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
   # if its a plus we add the associative variation too
   ((UPat.var("y")+UPat.var("c").where(UPat.var("t"), UPat.var("f"))) + UPat.var("c").where(UPat.var("tt"), UPat.var("ff")), \
    lambda y,c,t,tt,f,ff: y+c.where(t+tt, f+ff) if t.op == tt.op == Ops.CONST or f.op == ff.op == Ops.CONST else None),
+  # wheres with same cond can fold
+  (UPat.var("cond").where(UPat.var("cond").where(UPat.var("x"), UPat()), UPat.var("y")), lambda cond,x,y: cond.where(x,y)),
   # ALU/variable min==max -> CONST (slow!)
   (UPat(GroupOp.ALU|{Ops.DEFINE_VAR, Ops.SPECIAL}, name="x"), lambda x: x.const_like(x.vmin) if x.vmin == x.vmax else None),
   (UPat(Ops.RANGE, src=(UPat(Ops.CONST,)), name="x"), lambda x: x.const_like(x.vmin) if x.vmin == x.vmax else None),
@@ -390,6 +392,7 @@ pm_move_where_on_load = PatternMatcher([
 ])
 
 def gated_given_valid(cond:UOp, x:UOp, i:UOp) -> UOp|None:
+  if i.dtype is not dtypes.index: return None
   # Skip if x contains DIV/MOD AND IMAGE mode is enabled -> image index e.g. openpilot
   if IMAGE.value > 0 and x.op_in_backward_slice_with_self(Ops.IDIV, Ops.MOD): return None
   return cond.where(uop_given_valid(cond, x, try_simplex=False), i)
