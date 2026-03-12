@@ -354,7 +354,7 @@ def sqtt_timeline(data:bytes, lib:bytes, target:str) -> list[ProfileEvent]:
     if isinstance(p, (TS_DELTA_OR_MARK, TS_DELTA_OR_MARK_RDNA4)) and p.is_marker:
       pair = (p._time, p.delta)
       if prev_pair is None: prev_pair = pair
-      elif ret:
+      else:
         (s0, r0), (s1, r1) = prev_pair, pair
         freq_hz = (s1 - s0) * 1_000_000_000 // ((r1 - r0) * NS_PER_TICK)
         ret.append(ProfilePointEvent("LINE:Shader Clock", "freq_hz", freq_hz, ts=Decimal(p._time)))
