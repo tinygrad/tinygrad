@@ -31,7 +31,8 @@ def full_rewrite_to_sink(sink:UOp, ren:Renderer|None=None, optimize:bool=True) -
   if SPEC: type_verify(sink, kernel_spec)
 
   # preprocess
-  sink = graph_rewrite(sink, pm_mops+pm_syntactic_sugar, name="early movement ops", bottom_up=True)
+  sink = graph_rewrite(sink, pm_syntactic_sugar, name="syntax cleanup", bottom_up=True)
+  sink = graph_rewrite(sink, pm_mops, name="early movement ops", bottom_up=True)
 
   # first we optimize
   if optimize:

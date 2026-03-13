@@ -242,6 +242,9 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
       case Ops.REDUCE | Ops.MSTACK | Ops.MSELECT | Ops.DETACH | Ops.CONTIGUOUS | Ops.CONTIGUOUS_BACKWARD | Ops.AFTER | Ops.END:
         return self.src[0]._shape
 
+      case Ops.REPLICATED:
+        return tuple(1 if i in self.arg else x for i,x in enumerate(self.src[0]._shape))
+
       case Ops.CALL:
         inner_shape = self.src[0]._shape
         if inner_shape is None: return None
@@ -414,7 +417,8 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     return UOp(Ops.INDEX, kwargs.pop("dtype", self.dtype if ptr else self.dtype.base), (self,)+tuple([x for x in srcs if x is not None]), **kwargs)
   def __getitem__(self, idx):
     idx = argfix(idx)
-    assert len(idx) == len(self.shape), f"__getitem__ shape mismatch, indexing {self.shape} with {len(idx)} args"
+    # add : to the end
+    if len(idx) < len(self.shape): idx += tuple([slice(None)]*(len(self.shape)-len(idx)))
     if len(slice_idx:=[i for i,x in enumerate(idx) if isinstance(x, slice)]):
       perm = self.permute(tuple([i for i in range(self.ndim) if i not in slice_idx] + slice_idx))
       return perm.index(*[UOp.const(dtypes.index, x) if isinstance(x, int) else x for x in idx if not isinstance(x, slice)], ptr=True)
@@ -480,6 +484,9 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
   def r(self, op:Ops, axis:tuple[int, ...]):
     axis = tuple(sorted([x for x in axis if resolve(self.shape[x] != 1)]))
     return UOp(Ops.REDUCE_AXIS, self.dtype, (self,), (op, axis)) if len(axis) else self
+  def replicated(self, *axis:int|tuple[int, ...]):
+    _axis = tuple(sorted([x for x in argfix(*axis) if resolve(self.shape[x] != 1)]))
+    return UOp(Ops.REPLICATED, self.dtype, (self,), _axis) if len(_axis) else self
   @staticmethod
   def invalid(count=1): return UOp(Ops.CONST, dtypes.index.vec(count), src=(), arg=Invalid)
   def valid(self, cond): return self if cond.op is Ops.WHERE and cond.arg else cond.where(self, UOp.invalid(self.dtype.count))
@@ -596,7 +603,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     match self.op:
       case Ops.RESHAPE | Ops.EXPAND: return tuple(self.src[1].sgep(i) for i in range(self.src[1].dtype.count))
       case Ops.PAD | Ops.SHRINK: return tuple((self.src[1].sgep(i), self.src[2].sgep(i)) for i in range(self.src[1].dtype.count))
-      case Ops.PERMUTE | Ops.FLIP: return self.arg
+      case Ops.PERMUTE | Ops.FLIP | Ops.REPLICATED: return self.arg
       case _: raise RuntimeError(f"{self.op} is not a MovementOp")
 
   def _mop(self, op:Ops, arg, same_shape_noop:bool=False) -> UOp:

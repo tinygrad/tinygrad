@@ -20,6 +20,19 @@ pm_syntactic_sugar = PatternMatcher([
   # INDEX on ptr INDEX concats them
   (UPat(Ops.INDEX, name="i1").f(Ops.INDEX, name="i2", allow_any_len=True),
    lambda i1,i2: i2.replace(src=i1.src+i2.src[1:]) if isinstance(i1.dtype, PtrDType) and not isinstance(i2.dtype, PtrDType) else None),
+  # move movement ops after AFTER
+  (UPat(GroupOp.Movement, name="r").after(name="a", allow_any_len=True),
+   lambda r,a: UOp(r.op, r.dtype, (a.replace(src=(r.src[0],)+a.src[1:]),)+r.src[1:], r.arg)),
+  # merge adjacent RESHAPES
+  (UPat(Ops.RESHAPE, src=(UPat(Ops.RESHAPE, name="x2"), UPat()), name="x"), lambda x,x2: x.replace(src=(x2.src[0], x.src[1]))),
+  # reshape on STORE -> inverse RESHAPE
+  (UPat(Ops.STORE, src=(UPat(Ops.RESHAPE, src=(UPat.var("s"), UPat())), UPat.var("t")), name="x"),
+   lambda x,s,t: x.replace(src=(s, t.reshape(s.shape)))),
+  # replicated on STORE -> EXPAND
+  (UPat(Ops.STORE, src=(UPat(Ops.REPLICATED, src=(UPat.var("s"),)), UPat.var("t")), name="x"), lambda x,s,t: x.replace(src=(s, t.expand(s.shape)))),
+  # PERMUTE on STORE -> argsorted PERMUTE
+  (UPat(Ops.STORE, src=(UPat(Ops.PERMUTE, src=(UPat.var("s"),), name="p"), UPat.var("t")), name="x"),
+   lambda x,s,t,p: x.replace(src=(s, t.permute(argsort(p.arg))))),
 ])
 
 def found_assign(ctx:dict[UOp, UOp], assign:UOp, src:UOp):
