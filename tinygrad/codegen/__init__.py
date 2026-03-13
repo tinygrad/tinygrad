@@ -2,7 +2,8 @@ from typing import cast
 from dataclasses import replace
 import itertools
 from tinygrad.helpers import DISABLE_FAST_IDIV, EMULATED_DTYPES, DEVECTORIZE, TRANSCENDENTAL, SPEC, DEBUG, VIZ, IMAGE, TracingKey, Context
-from tinygrad.uop.ops import PatternMatcher, graph_rewrite, UOp, pm_lower_index_dtype, Ops, UPat, track_rewrites, KernelInfo, pyrender
+from tinygrad.uop.ops import PatternMatcher, graph_rewrite, UOp, pm_lower_index_dtype, Ops, UPat, track_rewrites, KernelInfo, pyrender, AxisType
+from tinygrad.uop.ops import GroupOp
 from tinygrad.uop.spec import type_verify, program_spec, kernel_spec
 from tinygrad.renderer import Renderer, ProgramSpec, Estimates
 from tinygrad.dtype import dtypes, promo_lattice
@@ -23,6 +24,19 @@ from tinygrad.schedule.rangeify import pm_add_buffers_local, rangeify_codegen, p
 from tinygrad.codegen.late.linearizer import CFGContext, pm_split_ends, pm_add_control_flow, linearize
 from tinygrad.renderer.amd.elf import do_assemble_amd
 
+def add_ranges_to_store(ctx, x):
+  if x.src[0]._shape is None or x.src[0].shape == (): return None
+  assert x.src[0].shape == x.src[1].shape, "bad store shape"
+  idxs = [UOp.range(r, next(ctx), AxisType.LOOP) for r in x.src[0].shape]
+  return UOp.store(x.src[0].index(*idxs), x.src[1].index(*idxs)).end(*idxs)
+
+pm_store_ranges = PatternMatcher([
+  (UPat(Ops.STORE, name="x"), add_ranges_to_store),
+  # rangeify
+  (UPat(Ops.INDEX, src=(UPat(GroupOp.Elementwise | {Ops.CONST}, name="x"),), allow_any_len=True, name="idx"),
+   lambda idx,x: x.replace(src=tuple([s.index(*idx.src[1:]) for s in x.src]))),
+])
+
 def full_rewrite_to_sink(sink:UOp, ren:Renderer|None=None, optimize:bool=True) -> UOp:
   if ren is None: ren = Renderer()
 
@@ -31,8 +45,7 @@ def full_rewrite_to_sink(sink:UOp, ren:Renderer|None=None, optimize:bool=True) -
   if SPEC: type_verify(sink, kernel_spec)
 
   # preprocess
-  sink = graph_rewrite(sink, pm_syntactic_sugar, name="syntax cleanup", bottom_up=True)
-  sink = graph_rewrite(sink, pm_mops, name="early movement ops", bottom_up=True)
+  sink = graph_rewrite(sink, pm_mops+pm_syntactic_sugar+pm_store_ranges, ctx=itertools.count(1000), name="early movement ops", bottom_up=True)
 
   # first we optimize
   if optimize:
@@ -40,7 +53,7 @@ def full_rewrite_to_sink(sink:UOp, ren:Renderer|None=None, optimize:bool=True) -
     sink = graph_rewrite(sink, pm_load_collapse, name="load collapse")
 
     # split ranges
-    sink = graph_rewrite(sink, pm_split_ranges+pm_flatten_range, ctx={}, name="split ranges")
+    #sink = graph_rewrite(sink, pm_split_ranges+pm_flatten_range, ctx={}, name="split ranges")
 
     # create image buffers
     if IMAGE == 1 and ren.device in {"QCOM", "CL"}: sink = graph_rewrite(sink, pm_make_images, name="create image buffers", bottom_up=True)

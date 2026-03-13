@@ -26,13 +26,13 @@ pm_syntactic_sugar = PatternMatcher([
   # merge adjacent RESHAPES
   (UPat(Ops.RESHAPE, src=(UPat(Ops.RESHAPE, name="x2"), UPat()), name="x"), lambda x,x2: x.replace(src=(x2.src[0], x.src[1]))),
   # reshape on STORE -> inverse RESHAPE
-  (UPat(Ops.STORE, src=(UPat(Ops.RESHAPE, src=(UPat.var("s"), UPat())), UPat.var("t")), name="x"),
-   lambda x,s,t: x.replace(src=(s, t.reshape(s.shape)))),
+  #(UPat(Ops.STORE, src=(UPat(Ops.RESHAPE, src=(UPat.var("s"), UPat())), UPat.var("t")), name="x"),
+  # lambda x,s,t: x.replace(src=(s, t.reshape(s.shape)))),
   # replicated on STORE -> EXPAND
-  (UPat(Ops.STORE, src=(UPat(Ops.REPLICATED, src=(UPat.var("s"),)), UPat.var("t")), name="x"), lambda x,s,t: x.replace(src=(s, t.expand(s.shape)))),
+  #(UPat(Ops.STORE, src=(UPat(Ops.REPLICATED, src=(UPat.var("s"),)), UPat.var("t")), name="x"), lambda x,s,t: x.replace(src=(s, t.expand(s.shape)))),
   # PERMUTE on STORE -> argsorted PERMUTE
-  (UPat(Ops.STORE, src=(UPat(Ops.PERMUTE, src=(UPat.var("s"),), name="p"), UPat.var("t")), name="x"),
-   lambda x,s,t,p: x.replace(src=(s, t.permute(argsort(p.arg))))),
+  #(UPat(Ops.STORE, src=(UPat(Ops.PERMUTE, src=(UPat.var("s"),), name="p"), UPat.var("t")), name="x"),
+  # lambda x,s,t,p: x.replace(src=(s, t.permute(argsort(p.arg))))),
 ])
 
 def found_assign(ctx:dict[UOp, UOp], assign:UOp, src:UOp):
@@ -54,7 +54,8 @@ pm_fold_moved_assign = PatternMatcher([
 # movement op on INDEX as a PatternMatcher
 pm_mops = PatternMatcher([
   (UPat(GroupOp.Movement, name="r").f(Ops.INDEX, allow_any_len=True, name="idx"),
-   lambda r,idx: r.src[0].index(*apply_movement_op(r.op, r.src[0].shape, r.marg, idx.src[1:]), dtype=idx.dtype, arg=idx.arg)),
+   lambda r,idx: r.src[0].index(*apply_movement_op(r.op, r.src[0].shape, r.marg, idx.src[1:]), dtype=idx.dtype, arg=idx.arg)
+     if len(idx.src[1:]) == len(r.shape) else None),
   # move movement ops after AFTER
   (UPat(GroupOp.Movement, name="r").after(name="a", allow_any_len=True),
    lambda r,a: UOp(r.op, r.dtype, (a.replace(src=(r.src[0],)+a.src[1:]),)+r.src[1:], r.arg)),
