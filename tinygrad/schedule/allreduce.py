@@ -1,5 +1,6 @@
 import functools, itertools
 from tinygrad.helpers import all_int, prod, DEBUG, RING, ALL2ALL, getenv
+from tinygrad.dtype import to_dtype
 from tinygrad.uop.ops import Ops, UOp
 
 # *** allreduce implementation ***
@@ -15,11 +16,17 @@ def handle_allreduce(buf:UOp, red:UOp) -> UOp|None:
   if DEBUG >= 2: print(f"{'ALL2ALL' if use_all2all else 'RING' if use_ring else 'NAIVE'} ALLREDUCE {ndev}x{numel} | {buf.dtype}")
 
   # contiguous before we copy it
-  buf = buf.contiguous()
+  original_dtype = buf.dtype
+  ar_dtype = getenv("ALLREDUCE_DTYPE", "")
+  if ar_dtype and to_dtype(ar_dtype) != original_dtype:
+    buf = buf.cast(to_dtype(ar_dtype)).contiguous()
+  else:
+    buf = buf.contiguous()
 
   # naive: copy to all devices. if you shrink later, that'll be handled
   if not use_ring and not use_all2all:
-    return functools.reduce(lambda x,y: x.alu(red.arg, y), [buf.mselect(i).copy_to_device(red.src[1]) for i in range(ndev)])
+    ret = functools.reduce(lambda x,y: x.alu(red.arg, y), [buf.mselect(i).copy_to_device(red.src[1]) for i in range(ndev)])
+    return ret.cast(original_dtype) if buf.dtype != original_dtype else ret
 
   # chunk data into ndev pieces
   factor = next((f for f in [32, 16, 8, 4, 2] if numel % f == 0), 1)
@@ -52,7 +59,8 @@ def handle_allreduce(buf:UOp, red:UOp) -> UOp|None:
       copied_chunks.append(UOp.mstack(*(chain[(j-i+1)%ndev] for j in range(ndev))))
 
   # reassemble
-  return UOp.sum(*[c.pad(((s,numel-e),)) for (s,e),c in zip(chunks, copied_chunks)]).reshape(shape)
+  ret = UOp.sum(*[c.pad(((s,numel-e),)) for (s,e),c in zip(chunks, copied_chunks)]).reshape(shape)
+  return ret.cast(original_dtype) if buf.dtype != original_dtype else ret
 
 def create_allreduce_function(buf:UOp, red:UOp, output:UOp|None=None) -> UOp|None:
   # BUFFER without unique have unique added later
