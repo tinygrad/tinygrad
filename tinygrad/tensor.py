@@ -3665,7 +3665,8 @@ class Tensor(OpMixin):
       def is_pow2(v): return v > 0 and v & (v - 1) == 0
       # pad dimension i to amt with invalids
       def ipad(t, i, amt):
-        return Tensor(True, device=t.device).expand(t.shape).pad_to(shape:=(None,)*i+(amt,)+(None,)*(t.ndim-i-1)).where(t.pad_to(shape), Invalid)
+        shape = (None,)*i + (amt,) + (None,)*(t.ndim-i-1)
+        return Tensor(True, device=t.device).expand(t.shape).pad_to(shape).where(t.pad_to(shape), Invalid) if amt != t.shape[i] else t
       # align a dimension to 64 bytes
       def pad_align(t, dim):
         return ipad(t, dim, round_up(t.shape[dim], (64 // dtsz) // math.gcd(prod(t.shape) // t.shape[dim], (64 // dtsz))))
