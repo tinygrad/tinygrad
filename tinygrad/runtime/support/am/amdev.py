@@ -1,6 +1,7 @@
 from __future__ import annotations
 import ctypes, collections, dataclasses, functools, hashlib, array
 from tinygrad.helpers import mv_address, getenv, DEBUG, fetch, lo32, hi32
+from tinygrad.runtime.autogen import pci
 from tinygrad.runtime.autogen.am import am
 from tinygrad.runtime.support.hcq import MMIOInterface
 from tinygrad.runtime.support.amd import AMDReg, import_module, import_asic_regs
@@ -185,6 +186,7 @@ class AMDev(PCIDevImplBase):
 
     # Re-initialize main blocks
     self.init_hw(self.gfx, self.sdma)
+    self.pci_dev.write_config(pci.PCI_COMMAND, self.pci_dev.read_config(pci.PCI_COMMAND, 2) | pci.PCI_COMMAND_MASTER, 2)
 
     self.smu.set_clocks(level=-1) # last level, max perf.
     for ip in [self.soc, self.gfx]: ip.set_clockgating_state()
