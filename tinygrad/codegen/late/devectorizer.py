@@ -196,7 +196,7 @@ def _do_image_fixup(dt:ImageDType, idx:UOp) -> tuple[UOp, UOp]:
       complexity = len(_idx.gep(1).backward_slice)
       if dropped > max_dropped or (dropped == max_dropped and complexity < min_complexity):
         print(f"  . {h_}x{real_w} (pitch: {w_}) -- {dropped=} {complexity=}")
-        h, w, p, max_dropped, min_complexity = h_, real_w, w_, dropped, len(_idx.backward_slice)
+        h, w, p, max_dropped, min_complexity = h_, real_w, w_, dropped, complexity
       else: print(f"  x {h_}x{real_w} (pitch: {w_}) -- {dropped=} {complexity=}")
     print(f"IMAGE SHAPE SELECTED: {h=} {w=} {p=} (dropped={max_dropped}, complexity={min_complexity})")
     oidx, buf = UOp.vectorize((x//4)%p, x//(4*p)), buf.replace(dtype=(dtypes.imageh if dt.itemsize==2 else dtypes.imagef)((h, w, 4), p*4*dt.itemsize))
