@@ -4,7 +4,7 @@ inputs:
   python-version:
     description: 'Python version to use'
     required: false
-    default: '3.12'
+    default: '3.12.10'
   key:
     description: 'Key for the python cache'
     required: false

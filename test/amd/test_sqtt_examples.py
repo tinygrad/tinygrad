@@ -10,7 +10,7 @@ from tinygrad.runtime.autogen.amd.rdna3.ins import SOPP
 from tinygrad.runtime.autogen.amd.rdna3.enum import SOPPOp
 from tinygrad.renderer.amd.sqtt import (decode, LAYOUT_HEADER, WAVESTART, WAVESTART_RDNA4, WAVEEND, INST, INST_RDNA4, VALUINST,
                                      IMMEDIATE, IMMEDIATE_MASK, PACKET_TYPES_RDNA3, PACKET_TYPES_RDNA4, PACKET_TYPES_CDNA, CDNA_WAVESTART,
-                                     InstOp, InstOpRDNA4, print_packets, CDNA_WAVEEND)
+                                     InstOp, InstOpRDNA4, print_packets, CDNA_WAVEEND, CDNA_TIMESTAMP)
 from test.amd.helpers import TARGET_TO_ARCH
 
 import tinygrad
@@ -122,7 +122,8 @@ class SQTTExamplesTestBase(unittest.TestCase):
             print(f"\n=== {name} event {i} ===")
             print_packets(packets)
           self.assertGreater(len(packets), 0, f"no packets decoded from {name} event {i}")
-          self.assertIsInstance(packets[0], LAYOUT_HEADER, f"first packet should be LAYOUT_HEADER in {name}")
+          first_pkt = CDNA_TIMESTAMP if self.target.startswith("gfx9") else LAYOUT_HEADER
+          self.assertIsInstance(packets[0], first_pkt, f"first packet should be {first_pkt.__name__} in {name}")
 
   def test_packet_types_valid(self):
     all_classes = set(PACKET_TYPES_RDNA3.values()) | set(PACKET_TYPES_RDNA4.values()) | set(PACKET_TYPES_CDNA.values())
@@ -224,7 +225,6 @@ class TestSQTTExamplesRDNA4(SQTTExamplesTestBase): target = "gfx1200"
 
 class TestSQTTExamplesCDNA(SQTTExamplesTestBase):
   target = "gfx950"
-  def test_decode_all_examples(self): self.skipTest("TODO: correct deltas in the timestamp packet types, first packet is REGCS_CDNA")
   def test_gemm_has_instructions(self): self.skipTest("TODO: decode CDNA inst packets")
   def test_rocprof_wave_times_match(self): self.skipTest("TODO: requires timestamp patching")
 
