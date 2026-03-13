@@ -4,7 +4,7 @@ inputs:
   python-version:
     description: 'Python version to use'
     required: false
-    default: '3.12.10'
+    default: '3.12'
   key:
     description: 'Key for the python cache'
     required: false
@@ -66,14 +66,14 @@ runs:
       uses: actions/cache/restore@v4
       with:
         path: ${{ github.workspace }}/.venv
-        key: venv-${{ runner.os }}-python-${{ steps.setup-python.outputs.python-version }}-${{ inputs.deps }}-${{ inputs.pydeps }}-${{ env.CACHE_VERSION }}
+        key: venv-${{ runner.os }}-${{ runner.arch }}-python-${{ steps.setup-python.outputs.python-version }}-${{ inputs.deps }}-${{ inputs.pydeps }}-${{ env.CACHE_VERSION }}
     - name: Cache Python packages
       if: github.event_name != 'pull_request'
       id: restore-venv
       uses: actions/cache@v4
       with:
         path: ${{ github.workspace }}/.venv
-        key: venv-${{ runner.os }}-python-${{ steps.setup-python.outputs.python-version }}-${{ inputs.deps }}-${{ inputs.pydeps }}-${{ env.CACHE_VERSION }}
+        key: venv-${{ runner.os }}-${{ runner.arch }}-python-${{ steps.setup-python.outputs.python-version }}-${{ inputs.deps }}-${{ inputs.pydeps }}-${{ env.CACHE_VERSION }}
 
     # **** Caching downloads ****
 
@@ -199,13 +199,13 @@ runs:
       uses: actions/cache/restore@v4
       with:
         path: /var/cache/apt/archives/
-        key: ${{ runner.os }}-apt-${{ steps.apt-pkgs.outputs.hash }}-${{ env.CACHE_VERSION }}
+        key: ${{ runner.os }}-${{ runner.arch }}-apt-${{ steps.apt-pkgs.outputs.hash }}-${{ env.CACHE_VERSION }}
     - name: Cache apt
       if: runner.os == 'Linux' && (inputs.opencl == 'true' || inputs.amd == 'true' || inputs.cuda == 'true' || inputs.webgpu == 'true' || inputs.llvm == 'true') && github.event_name != 'pull_request'
       uses: actions/cache@v4
       with:
         path: /var/cache/apt/archives/
-        key: ${{ runner.os }}-apt-${{ steps.apt-pkgs.outputs.hash }}-${{ env.CACHE_VERSION }}
+        key: ${{ runner.os }}-${{ runner.arch }}-apt-${{ steps.apt-pkgs.outputs.hash }}-${{ env.CACHE_VERSION }}
 
     - name: Run apt Update + Install
       if: runner.os == 'Linux' && (inputs.opencl == 'true' || inputs.amd == 'true' || inputs.cuda == 'true' || inputs.webgpu == 'true' || inputs.llvm == 'true')
