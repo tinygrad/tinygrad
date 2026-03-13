@@ -21,7 +21,8 @@ class GradAccClipAdamW(Optimizer):
     for i, tt in enumerate(self.params): tt.assign(self._apply_update(tt, updates[i]))
     to_realize = extra+self.params+self.buffers
 
-    Tensor.realize(*to_realize)
+    Tensor.realize(*extra, *self.buffers)
+    for i in range(0, len(self.params), step:=16): Tensor.realize(*self.params[i:i+step])
     return extra[-1]
 
   def _step(self, params:list[Tensor], grads:list[Tensor]) -> tuple[list[Tensor], list[Tensor]]:
