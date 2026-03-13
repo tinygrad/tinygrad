@@ -359,14 +359,13 @@ def bufferize_to_store(ctx:itertools.count, x:UOp, idx:UOp, allow_locals=True):
     while assign_src.op is Ops.NOOP: assign_src = assign_src.src[0]
 
     store_target = assign_target
-    if assign.arg and assign_target.src[0].op is Ops.BUFFERIZE and assign_target.src[0].src[0].op is Ops.INDEX:
+    if assign_target.src[0].op is Ops.BUFFERIZE and assign_target.src[0].src[0].op is Ops.INDEX:
       # BUFFERIZE(INDEX(...)); store through the underlying global index instead.
       store_target = assign_target.src[0].src[0]
 
     end_rngs = sorted(dedup(tuple(store_target.ranges) + tuple(rngs)), key=lambda x: x.arg)
     ret = store_target.buf_uop.base
-    if assign_src is not store_target: ret = ret.after(store_target.replace(dtype=sdtype).store(assign_src).end(*end_rngs))
-    for op, marg in reversed(assign.arg or ()): ret = ret._mop(op, marg)
+    if assign_src is not assign_target: ret = ret.after(store_target.replace(dtype=sdtype).store(assign_src).end(*end_rngs))
     return ret
 
   # NOTE: the DEFINE_LOCAL needs to be disambiguated here
