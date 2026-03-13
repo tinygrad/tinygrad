@@ -546,8 +546,8 @@ def amdgpu_cfg(lib:bytes, target:str) -> dict:
       elif name in {"op","opx","opy"}: tokens.append({"st":(op_name:=val.name.lower()), "keys":[op_name], "kind":0})
       elif name != "encoding" and val != field.default: tokens.append({"st":(s:=repr(val)), "keys":[s], "kind":1})
   # show a smaller view for repeated instructions in the graph
-  disasm = {pc:str(inst) for pc,inst in pc_table.items()}
   lines:list[str] = []
+  disasm = {pc:str(inst) for pc,inst in pc_table.items()}
   asm_width = max(len(asm) for asm in disasm.values())
   for pcs in blocks.values():
     new_pcs:list[int] = []
