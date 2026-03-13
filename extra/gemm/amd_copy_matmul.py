@@ -42,7 +42,9 @@ def block_128x128_gemm(c:UOp, a:UOp, b:UOp) -> UOp:
   a = a.reshape(K // BLOCK_K, BLOCK_K, BLOCK_M)
   b = b.reshape(K // BLOCK_K, BLOCK_K, BLOCK_N)
   k_tile_range = UOp.range(K // BLOCK_K, 3, AxisType.REDUCE)
-  barrier = UOp.barrier(A_local.store(a[k_tile_range]), B_local.store(b[k_tile_range]))  # TODO: allow the : to be implicit
+  A_store = A_local.reshape(-1, THREADS_PER_BLOCK)[:, tid].store(a[k_tile_range].reshape(-1, THREADS_PER_BLOCK)[:, tid])
+  B_store = B_local.reshape(-1, THREADS_PER_BLOCK)[:, tid].store(b[k_tile_range].reshape(-1, THREADS_PER_BLOCK)[:, tid])
+  barrier = UOp.barrier(A_store, B_store)
   A_local, B_local = A_local.after(barrier), B_local.after(barrier)
 
   # define accumulator (128x128), but broadcast across tid
