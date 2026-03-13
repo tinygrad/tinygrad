@@ -121,22 +121,19 @@ class ImageDType(PtrDType):
     assert addrspace == AddrSpace.GLOBAL, "images can't be local"
     return self
   def __repr__(self): return f"dtypes.{self.name}({self.shape})" + (f'.vec({self.v})' if self.v != 1 else '')
-
   @property
-  def pitch(self): return self._pitch if self._pitch != -1 else ImageDType.cl_pitch(self.shape[0], self.shape[1], self.itemsize)
-
-  @staticmethod
-  def cl_pitch(imgh, imgw, itemsize):
-    if OSX: return round_up(imgw, 256) * 4 * itemsize
-    itemsize_log = int(math.log2(itemsize))
+  def pitch(self):
+    if self._pitch != -1: return self._pitch
+    imgw, imgh, itemsize_log = self.shape[1], self.shape[0], int(math.log2(self.itemsize))
+    if OSX: return round_up(imgw, 256) * 4 * self.itemsize
     # needs to be IMAGE_PITCH_ALIGN=256 for AMD
     min_pitchalign = int(math.log2(v)) if (v := getenv("IMAGE_PITCH_ALIGN", 0)) > 0 else 6
     pitchalign = max(min_pitchalign, 11 - int(math.log2(imgh))) if imgh > 1 else min_pitchalign
     align_up = max(1, (8 // itemsize_log + 1) - imgh // 32) if pitchalign == 6 else (2 ** (pitchalign - itemsize_log - 2))
 
-    granularity = 128 if itemsize == 4 else 256
+    granularity = 128 if self.itemsize == 4 else 256
     pitch_add = (1 << pitchalign) if min(next_power2(imgw), round_up(imgw, granularity)) - align_up + 1 <= imgw and imgw > granularity//2 else 0
-    return round_up(imgw * 4 * itemsize, 1 << pitchalign) + pitch_add
+    return round_up(imgw * 4 * self.itemsize, 1 << pitchalign) + pitch_add
 
   # get list of (height, width) that do not require pitch padding
   @staticmethod
