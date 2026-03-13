@@ -19,7 +19,6 @@ class GradAccClipAdamW(Optimizer):
     else:
       updates, extra = self._step([], grads)
     for i, tt in enumerate(self.params): tt.assign(self._apply_update(tt, updates[i]))
-    to_realize = extra+self.params+self.buffers
 
     Tensor.realize(*extra, *self.buffers)
     for i in range(0, len(self.params), step:=16): Tensor.realize(*self.params[i:i+step])
