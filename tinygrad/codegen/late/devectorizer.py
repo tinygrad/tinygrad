@@ -193,7 +193,7 @@ def _do_image_fixup(dt:ImageDType, idx:UOp) -> tuple[UOp, UOp]:
     for h_, w_ in ImageDType.valid_dims(dt):
       real_w = ((x//4)%w_).simplify().vmax + 1 # shrink the width (eg. pad with pitch)
       dropped = len(_drop_valid_stmts(valid, _idx:=uop_given_valid(valid, UOp.vectorize((x//4)%w_, x//(4*w_)).simplify()), h_, real_w))
-      complexity = len(_idx.backward_slice)
+      complexity = len(_idx.gep(1).backward_slice)
       if dropped > max_dropped or (dropped == max_dropped and complexity < min_complexity):
         print(f"  . {h_}x{real_w} (pitch: {w_}) -- {dropped=} {complexity=}")
         h, w, p, max_dropped, min_complexity = h_, real_w, w_, dropped, len(_idx.backward_slice)
