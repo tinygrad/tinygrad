@@ -1,7 +1,7 @@
 from __future__ import annotations
 import os, mmap, array, functools, ctypes, select, contextlib, dataclasses, sys, itertools, struct, socket, subprocess, time, enum
 from typing import ClassVar
-from tinygrad.helpers import round_up, getenv, OSX, temp, ceildiv, unwrap, fetch, system
+from tinygrad.helpers import round_up, getenv, OSX, temp, ceildiv, unwrap, fetch, system, _ensure_downloads_dir
 from tinygrad.runtime.autogen import libc, pci, vfio, iokit, corefoundation
 from tinygrad.runtime.support.hcq import FileIOInterface, MMIOInterface, HCQBuffer, hcq_filter_visible_devices
 from tinygrad.runtime.support.memory import MemoryManager, VirtMapping, AddrSpace
@@ -323,12 +323,6 @@ class RemotePCIDevice(PCIDevice):
 class APLRemotePCIDevice(RemotePCIDevice):
   APP_PATH = "/Applications/TinyGPU.app/Contents/MacOS/TinyGPU"
 
-  @staticmethod
-  def install_tinygpu():
-    print("Downloading TinyGPU.app...")
-    system(f"ditto -xk {fetch('https://github.com/nimlgen/tinygpu_releases/raw/8120b5508b43149d27bf22f9a4e6d7c5a4b401e9/TinyGPU.zip')} /Applications")
-    print(system(f"{APLRemotePCIDevice.APP_PATH} install"))
-
   def __init__(self, devpref:str, pcibus:str, bars:list[int], resize_bars:list[int]|None=None):
     sock_path, sock = getenv("APL_REMOTE_SOCK", temp("tinygpu.sock")), socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     for i in range(100):
@@ -341,11 +335,19 @@ class APLRemotePCIDevice(RemotePCIDevice):
     super().__init__(devpref, pcibus, bars, sock)
 
 class APLRemoteIfaceBase(LNXPCIIfaceBase):
+  def ensure_tinygpu_app(self):
+    commit = "8120b5508b43149d27bf22f9a4e6d7c5a4b401e9"
+
+    if os.path.exists(APLRemotePCIDevice.APP_PATH) and (_ensure_downloads_dir() / (app_name:=f"TinyGPU_{commit}.zip")).is_file(): return
+    print("Downloading TinyGPU.app...")
+    system(f"ditto -xk {fetch(f'https://github.com/nimlgen/tinygpu_releases/raw/{commit}/TinyGPU.zip', name=app_name)} /Applications")
+    print(system(f"{APLRemotePCIDevice.APP_PATH} install"))
+
   def __init__(self, dev, dev_id, vendor, devices:list[tuple[int, list[int]]], bars, vram_bar, va_start, va_size, base_class:int|None=None):
     if not (cls:=type(self)).gpus:
       cls.gpus = System.pci_scan_bus(vendor, devices, base_class)
       if not cls.gpus: raise RuntimeError("No supported GPUs found")
-      if not os.path.exists(APLRemotePCIDevice.APP_PATH): APLRemotePCIDevice.install_tinygpu()
+      self.ensure_tinygpu_app()
     if dev_id >= len(cls.gpus): raise RuntimeError(f"No device found for {dev_id}. Requesting more devices than the system has ({cls.gpus})?")
     self.pci_dev = APLRemotePCIDevice(dev.__class__.__name__[:2], f'remote:{dev_id}', bars)
     self.dev, self.vram_bar = dev, vram_bar
