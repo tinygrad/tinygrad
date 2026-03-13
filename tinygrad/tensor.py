@@ -3662,20 +3662,26 @@ class Tensor(OpMixin):
 
     # contiguous creates the image, and early realize static weights (TODO: test for the static weight)
     if IMAGE == 1:
-      # hacks for pitch alignment
-      def pad(t, i):
-        pitch = ImageDType.cl_pitch(prod(t.shape[:i]), imgw:=(prod(t.shape[i:]) // 4), dtsz)
-        shape = (None,) * i + (math.ceil((pitch * t.shape[i]) / (4 * imgw)),) + (None,) * (t.ndim - i - 1)
-        return Tensor(True, device=t.device).expand(t.shape).pad_to(shape).where(t.pad_to(shape), Invalid)
+      def is_pow2(v): return v > 0 and v & (v - 1) == 0
+      # pad dimension i to amt with invalids
+      def ipad(t, i, amt):
+        return Tensor(True, device=t.device).expand(t.shape).pad_to(shape:=(None,)*i+(amt,)+(None,)*(t.ndim-i-1)).where(t.pad_to(shape), Invalid)
+      # align a dimension to 64 bytes
+      def pad_align(t, dim):
+        return ipad(t, dim, round_up(t.shape[dim], (64 // dtsz) // math.gcd(prod(t.shape) // t.shape[dim], (64 // dtsz))))
 
-      x = pad(x, 2) # (bs, iy, ix, groups*cin), pad in ix
-      w = pad(w, 1) # (cout//4, H, ...), pad in H (is this always right?)
+      # bank conflicts
+      if cin >= 8 and is_pow2(cin // 4): x, w = ipad(x.reshape(bs, iy, ix, groups, cin // 4, 4), 4, cin // 4 + 1), ipad(w, 2, cin // 4 + 1)
+
+      # 64-byte pitch alignment
+      x, w = pad_align(x, 2), pad_align(w, 1)
 
       if FLOAT16: x, w = x.cast(dtypes.half).contiguous().cast(dtypes.float), w.cast(dtypes.half).contiguous().cast(dtypes.float)
       else: x, w = x.contiguous(), w.contiguous()
 
       # undo alignment hacks
-      x, w = x[:, :, :ix, :], w[:, :H, ...]
+      if cin >= 8 and is_pow2(cin // 4): x, w = x[:, :, :ix, :, :cin // 4, :], w[:, :H, :cin // 4, ...]
+      else: x, w = x[:, :, :ix, :], w[:, :H, ...]
 
     elif IMAGE: x, w = x.cast(base_image_type((bs*iy, ix*groups*cin//4, 4))).contiguous(), w.cast(base_image_type((cout//4, H*W*cin, 4))).contiguous()
     else: x, w = x.contiguous(), w.contiguous()
