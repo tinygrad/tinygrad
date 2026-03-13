@@ -525,11 +525,7 @@ def amdgpu_cfg(lib:bytes, target:str) -> dict:
   curr:int|None = None
   blocks:dict[int, list[int]] = {}
   paths:dict[int, dict[int, int]] = {}
-  lines:list[str] = []
-  disasm = {pc:str(inst) for pc,inst in pc_table.items()}
-  asm_width = max(len(asm) for asm in disasm.values())
   for pc, inst in pc_table.items():
-    lines.append(f"  {disasm[pc]:<{asm_width}}  // {pc:012X}")
     if pc in leaders:
       paths[curr:=pc] = {}
       blocks[pc] = []
@@ -550,6 +546,9 @@ def amdgpu_cfg(lib:bytes, target:str) -> dict:
       elif name in {"op","opx","opy"}: tokens.append({"st":(op_name:=val.name.lower()), "keys":[op_name], "kind":0})
       elif name != "encoding" and val != field.default: tokens.append({"st":(s:=repr(val)), "keys":[s], "kind":1})
   # show a smaller view for repeated instructions in the graph
+  disasm = {pc:str(inst) for pc,inst in pc_table.items()}
+  lines:list[str] = []
+  asm_width = max(len(asm) for asm in disasm.values())
   for pcs in blocks.values():
     new_pcs:list[int] = []
     i, n = 0, len(pcs)
@@ -560,6 +559,7 @@ def amdgpu_cfg(lib:bytes, target:str) -> dict:
       if j-i>1:
         pc_tokens[pcs[i]].append({"st":f"({j-i}x)", "keys":[], "kind":0})
         for k in range(i+1, j): del pc_tokens[pcs[k]]
+      lines.append(f"  {disasm[pcs[i]]:<{asm_width}}  # {pcs[i]:012X}"+(f"...{pcs[j-1]:012X} ({j-i}x)" if j-i>1 else ""))
       i = j
     pcs[:] = new_pcs
   from tinygrad.runtime.autogen import amdgpu_kd
