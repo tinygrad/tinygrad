@@ -96,6 +96,20 @@ class TestGGUF(unittest.TestCase):
 
     np.testing.assert_equal(dq_tensor.numpy(), ref)
 
+  def test_gguf_load_no_tensor_leak(self):
+    """gguf_load must not retain references to the input tensor after returning."""
+    import sys, gc
+    fp = fetch("https://huggingface.co/ggml-org/models/resolve/main/tinyllamas/stories15M-q8_0.gguf?download=true")
+    t = Tensor.empty(os.stat(fp).st_size, dtype=dtypes.uint8, device=f"disk:{fp}").to(Device.DEFAULT).realize()
+    gc_was_enabled = gc.isenabled()
+    gc.disable()
+    try:
+      ref_before = sys.getrefcount(t)
+      kv_data, tensors = gguf_load(t)
+      self.assertEqual(sys.getrefcount(t), ref_before, "gguf_load leaked a reference to the input tensor")
+    finally:
+      if gc_was_enabled: gc.enable()
+
   def _test_gguf_load(self, url: str):
     fp = fetch(url)
     model_size = os.stat(fp).st_size

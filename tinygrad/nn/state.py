@@ -362,11 +362,8 @@ def gguf_load(tensor: Tensor) -> tuple[dict, dict[str, Tensor]]:
   reader, kv_data, state_dict = io.BufferedReader(TensorIO(tensor), 1_000_000), {}, {}
   def read_unpack(fmt: str, n: int): return struct.unpack(fmt, reader.read(n))[0]
   def read_str(): return str(reader.read(read_uint64()), "utf-8")
-  def read_arr():
-    reader, n = readers[read_int32()], read_uint64()
-    return [ reader() for _ in range(n) ]
 
-  readers: dict[int, Callable[[], Any]] = { 8: read_str, 9: read_arr, **{ t: functools.partial(read_unpack, "<"+f, nb) for t,f,nb in \
+  readers: dict[int, Callable[[], Any]] = { 8: read_str, **{ t: functools.partial(read_unpack, "<"+f, nb) for t,f,nb in \
     [ (0,"c",1), (1,"b",1), (2,"H",2), (3,"h",2), (4,"I",4), (5,"i",4), (6,"f",4), (7,"?",1), (10,"Q",8), (11,"q",8), (12,"d",8) ] } }
   read_uint32, read_int32, read_uint64, read_int64 = readers[4], readers[5], readers[10], readers[11]
 
@@ -374,7 +371,10 @@ def gguf_load(tensor: Tensor) -> tuple[dict, dict[str, Tensor]]:
   if magic != b"GGUF" or version not in [2, 3]: raise ValueError("Invalid GGUF format!")
   for _ in range(n_kv):
     k, typ = read_str(), read_int32()
-    kv_data[k] = readers[typ]()
+    if typ == 9:
+      read_elem, n = readers[read_int32()], read_uint64()
+      kv_data[k] = [read_elem() for _ in range(n)]
+    else: kv_data[k] = readers[typ]()
 
   t_infos = [ (read_str(), tuple(read_uint64() for _ in range(read_uint32())), read_int32(), read_uint64()) for _ in range(n_tensors) ]
   alignment, pos = kv_data.get("general.alignment", 32), reader.tell()
