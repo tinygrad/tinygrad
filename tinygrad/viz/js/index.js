@@ -248,6 +248,25 @@ function selectShape(key) {
   return { eventType:track?.eventType, e:track?.shapes[idx] };
 }
 
+// scaling function for time to pixels
+const timelineScale = () => d3.scaleLinear().domain([data.first, data.dur]).range([0, document.getElementById("timeline").clientWidth])
+
+function getZoomIdentity() {
+  // for packets, set zoom to the full range of instruction events
+  if (data.path.includes("pkts")) {
+    let instRange = null;
+    for (const [k, { shapes }] of data.tracks) if (k.startsWith("WAVE")) {
+      const first = shapes[0].x, last = shapes.at(-1).x;
+      instRange = instRange == null ? [first, last] : [Math.min(first, instRange[0]), Math.max(last, instRange[1])]
+    }
+    if (instRange != null) {
+      const k = (data.dur - data.first) / (instRange[1] - instRange[0]), xscale = timelineScale();
+      return d3.zoomIdentity.translate(-xscale(instRange[0]) * k, 0).scale(k);
+    }
+  }
+  return d3.zoomIdentity;
+}
+
 const Modes = {0:'read', 1:'write', 2:'write+read'};
 
 function setFocus(key) {
@@ -256,8 +275,8 @@ function setFocus(key) {
     // adjust zoom if the entire shape is off screen
     const { eventType, e } = selectShape(key);
     if (e != null) {
+      const xscale = timelineScale();
       const [x0, x1] = eventType === EventTypes.EXEC ? [e.x, e.x+e.width] : [e.x[0], e.x.at(-1)];
-      const xscale = d3.scaleLinear().domain([data.first, data.dur]).range([0, document.getElementById("timeline").clientWidth]);
       const [st, et] = xscale.range().map(zoomLevel.invertX, zoomLevel).map(xscale.invert, xscale);
       if (x1 < st || x0 > et) zoomLevel = d3.zoomIdentity.translate(-xscale((x0+x1)/2-(et-st)/2)*zoomLevel.k, 0).scale(zoomLevel.k);
     }
@@ -638,10 +657,10 @@ async function renderProfiler(path, opts) {
     canvas.style.height = `${height}px`;
     canvas.style.width = `${width}px`;
     ctx.scale(dpr, dpr);
+    zoomLevel = getZoomIdentity();
     d3.select(canvas).call(canvasZoom.transform, zoomLevel);
   }
 
-  zoomLevel = d3.zoomIdentity;
   canvasZoom = d3.zoom().filter(vizZoomFilter).on("zoom", e => render(e.transform));
   d3.select(canvas).call(canvasZoom);
   document.addEventListener("contextmenu", e => e.ctrlKey && e.preventDefault());
@@ -696,7 +715,7 @@ d3.select("#graph-svg").call(svgZoom);
 document.getElementById("zoom-to-fit-btn").addEventListener("click", () => {
   const canvas = d3.select("#timeline");
   if (!canvas.empty() && rect(canvas.node()).width !== 0) {
-    return canvas.call(canvasZoom.transform, d3.zoomIdentity);
+    return canvas.call(canvasZoom.transform, getZoomIdentity());
   }
   const svg = d3.select("#graph-svg");
   svg.call(svgZoom.transform, d3.zoomIdentity);

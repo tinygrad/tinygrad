@@ -313,7 +313,14 @@ class Tensor(OpMixin):
     assign_uop = self.uop.assign(x.uop)
     base = self.uop.base
     if base.op in {Ops.BUFFER, Ops.AFTER} and not self.uop.has_buffer_identity():
-      _apply_map_to_tensors({base: base.after(assign_uop)}, name="Embed View Assign", walk=True)
+      original_uop = self.uop
+      assigned_base = base.after(assign_uop)
+      _apply_map_to_tensors({base: assigned_base}, name="Embed View Assign", walk=True)
+      def replace_view_base(u:UOp) -> UOp:
+        return u.replace(src=((assigned_base if u.src[0] is base else replace_view_base(u.src[0])),)+u.src[1:])
+      ret = Tensor(replace_view_base(original_uop), device=self.device, requires_grad=self.requires_grad)
+      self.replace(self._apply_uop(lambda *_: assign_uop, x))
+      return ret
     return self.replace(self._apply_uop(lambda *_: assign_uop, x))
 
   def detach(self) -> Tensor:
