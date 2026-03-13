@@ -1,10 +1,10 @@
 from __future__ import annotations
 import os, mmap, array, functools, ctypes, select, contextlib, dataclasses, sys, itertools, struct, socket, subprocess, time, enum
 from typing import ClassVar
-from tinygrad.helpers import round_up, getenv, OSX, temp, ceildiv, unwrap, fetch, system
+from tinygrad.helpers import round_up, getenv, OSX, temp, ceildiv, unwrap, fetch, system, _ensure_downloads_dir
 from tinygrad.runtime.autogen import libc, pci, vfio, iokit, corefoundation
 from tinygrad.runtime.support.hcq import FileIOInterface, MMIOInterface, HCQBuffer, hcq_filter_visible_devices
-from tinygrad.runtime.support.memory import MemoryManager, VirtMapping, AddrSpace
+from tinygrad.runtime.support.memory import MemoryManager, VirtMapping, AddrSpace, BumpAllocator
 from tinygrad.runtime.support.usb import ASM24Controller, USBMMIOInterface
 
 MAP_FIXED, MAP_FIXED_NOREPLACE = 0x10, 0x100000
@@ -172,8 +172,8 @@ class PCIDevice:
       self.irq_poller.register(self.irq_fd.fd, select.POLLIN)
 
       irqs = vfio.struct_vfio_irq_set(index=vfio.VFIO_PCI_MSI_IRQ_INDEX, flags=vfio.VFIO_IRQ_SET_DATA_EVENTFD|vfio.VFIO_IRQ_SET_ACTION_TRIGGER,
-        argsz=ctypes.sizeof(vfio.struct_vfio_irq_set), count=1, data=(ctypes.c_int * 1)(self.irq_fd.fd))
-      vfio.VFIO_DEVICE_SET_IRQS(self.vfio_dev, irqs)
+        argsz=ctypes.sizeof(vfio.struct_vfio_irq_set) + ctypes.sizeof(ctypes.c_int), count=1)
+      vfio.VFIO_DEVICE_SET_IRQS(self.vfio_dev, (ctypes.c_byte * irqs.argsz).from_buffer(bytearray(bytes(irqs)) + struct.pack('i', self.irq_fd.fd)))
     else: FileIOInterface(f"/sys/bus/pci/devices/{self.pcibus}/enable", os.O_RDWR).write("1")
 
     self.cfg_fd = FileIOInterface(f"/sys/bus/pci/devices/{self.pcibus}/config", os.O_RDWR | os.O_SYNC | os.O_CLOEXEC)
@@ -201,9 +201,14 @@ class USBPCIDevice(PCIDevice):
     self.lock_fd = System.flock_acquire(f"{devpref.lower()}_{pcibus.lower()}.lock")
     self.usb = ASM24Controller()
     self.pcibus, self.bar_info = pcibus, System.pci_setup_usb_bars(self.usb, gpu_bus=4, mem_base=0x10000000, pref_mem_base=(32 << 30))
+    self.sram = BumpAllocator(size=0x80000, wrap=False) # asm24 controller sram
+  def read_config(self, offset:int, size:int): return self.usb.pcie_cfg_req(offset, bus=4, dev=0, fn=0, size=size)
+  def write_config(self, offset:int, value:int, size:int): self.usb.pcie_cfg_req(offset, bus=4, dev=0, fn=0, value=value, size=size)
   def map_bar(self, bar, off=0, addr=0, size=None, fmt='B'):
     return USBMMIOInterface(self.usb, self.bar_info[bar].addr + off, size or self.bar_info[bar].size, fmt)
   def dma_view(self, ctrl_addr, size): return USBMMIOInterface(self.usb, ctrl_addr, size, fmt='B', pcimem=False)
+  def alloc_sysmem(self, size:int, vaddr:int=0, contiguous:bool=False) -> tuple[MMIOInterface, list[int]]:
+    return self.dma_view(0xf000 + (off:=self.sram.alloc(size)), size), [0x200000 + off]
 
 class PCIDevImplBase:
   mm: MemoryManager
@@ -323,12 +328,6 @@ class RemotePCIDevice(PCIDevice):
 class APLRemotePCIDevice(RemotePCIDevice):
   APP_PATH = "/Applications/TinyGPU.app/Contents/MacOS/TinyGPU"
 
-  @staticmethod
-  def install_tinygpu():
-    print("Downloading TinyGPU.app...")
-    system(f"ditto -xk {fetch('https://github.com/nimlgen/tinygpu_releases/raw/8120b5508b43149d27bf22f9a4e6d7c5a4b401e9/TinyGPU.zip')} /Applications")
-    print(system(f"{APLRemotePCIDevice.APP_PATH} install"))
-
   def __init__(self, devpref:str, pcibus:str, bars:list[int], resize_bars:list[int]|None=None):
     sock_path, sock = getenv("APL_REMOTE_SOCK", temp("tinygpu.sock")), socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     for i in range(100):
@@ -341,11 +340,19 @@ class APLRemotePCIDevice(RemotePCIDevice):
     super().__init__(devpref, pcibus, bars, sock)
 
 class APLRemoteIfaceBase(LNXPCIIfaceBase):
+  def ensure_tinygpu_app(self):
+    commit = "8120b5508b43149d27bf22f9a4e6d7c5a4b401e9"
+
+    if os.path.exists(APLRemotePCIDevice.APP_PATH) and (_ensure_downloads_dir() / (app_name:=f"TinyGPU_{commit}.zip")).is_file(): return
+    print("Downloading TinyGPU.app...")
+    system(f"ditto -xk {fetch(f'https://github.com/nimlgen/tinygpu_releases/raw/{commit}/TinyGPU.zip', name=app_name)} /Applications")
+    print(system(f"{APLRemotePCIDevice.APP_PATH} install"))
+
   def __init__(self, dev, dev_id, vendor, devices:list[tuple[int, list[int]]], bars, vram_bar, va_start, va_size, base_class:int|None=None):
     if not (cls:=type(self)).gpus:
       cls.gpus = System.pci_scan_bus(vendor, devices, base_class)
       if not cls.gpus: raise RuntimeError("No supported GPUs found")
-      if not os.path.exists(APLRemotePCIDevice.APP_PATH): APLRemotePCIDevice.install_tinygpu()
+      self.ensure_tinygpu_app()
     if dev_id >= len(cls.gpus): raise RuntimeError(f"No device found for {dev_id}. Requesting more devices than the system has ({cls.gpus})?")
     self.pci_dev = APLRemotePCIDevice(dev.__class__.__name__[:2], f'remote:{dev_id}', bars)
     self.dev, self.vram_bar = dev, vram_bar

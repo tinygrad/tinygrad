@@ -11,7 +11,7 @@ from tinygrad.helpers import getenv, mv_address, round_up, data64, data64_le, pr
 from tinygrad.helpers import ContextVar, VIZ, ProfileEvent
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.cstyle import CUDARenderer
-from tinygrad.runtime.autogen import nv_570, nv_580, pci, mesa
+from tinygrad.runtime.autogen import nv_570, nv_580, mesa
 from tinygrad.runtime.support.elf import elf_loader
 from tinygrad.runtime.support.nv.nvdev import NVDev, NVMemoryManager
 from tinygrad.runtime.support.system import System, PCIIfaceBase, MAP_FIXED
@@ -544,7 +544,6 @@ class PCIIface(PCIIfaceBase):
       base_class=0x03, bars=[0, 1, 3], vram_bar=1, va_start=NVMemoryManager.va_allocator.base, va_size=NVMemoryManager.va_allocator.size)
     if not OSX: System.reserve_hugepages(64)
 
-    self.pci_dev.write_config(pci.PCI_COMMAND, self.pci_dev.read_config(pci.PCI_COMMAND, 2) | pci.PCI_COMMAND_MASTER, 2)
     self.dev_impl:NVDev = NVDev(self.pci_dev)
     self.root, self.gpu_instance = 0xc1000000, 0
     self.rm_alloc(0, nv_gpu.NV01_ROOT, nv_gpu.NV0000_ALLOC_PARAMETERS())
@@ -717,6 +716,8 @@ class NVDevice(HCQCompiled[NVSignal]):
     else:
       if coloc_size > self.vid_coloc_buf.size: self.vid_coloc_buf, _ = self._realloc(self.vid_coloc_buf, coloc_size, force=True)
       if filter_size > self.vid_filter_buf.size: self.vid_filter_buf, _ = self._realloc(self.vid_filter_buf, filter_size, force=True)
+
+  def hw_copy_queues(self): return super().hw_copy_queues() + ([("NVDEC:0", NVVideoQueue)] if hasattr(self, 'vid_gpfifo') else [])
 
   def invalidate_caches(self):
     if self.is_nvd(): self.iface.rm_control(self.subdevice, nv_gpu.NV2080_CTRL_CMD_INTERNAL_BUS_FLUSH_WITH_SYSMEMBAR, None)

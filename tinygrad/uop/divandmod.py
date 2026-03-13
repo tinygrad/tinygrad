@@ -1,4 +1,4 @@
-import functools
+import functools, itertools, math
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp
 from tinygrad.dtype import dtypes
 from tinygrad.helpers import cdiv, cmod, CORRECT_DIVMOD_FOLDING, unwrap
@@ -12,8 +12,8 @@ def fold_divmod_general(d: UOp, correct_divmod_folding: bool) -> UOp|None:
   x_min, x_max, y_min, y_max = x.vmin, x.vmax, y.vmin, y.vmax
   assert isinstance(x_min, int) and isinstance(x_max, int) and isinstance(y_min, int) and isinstance(y_max, int)
   if y_min==y_max==0: raise ZeroDivisionError(f"{'Division' if d.op is Ops.IDIV else 'Mod'} by zero trying to rewrite {x.alu(d.op, y)}")
-  if y_min*y_max > 0 and (q:=cdiv(x_min,y_min)) == cdiv(x_min,y_max) == cdiv(x_max,y_min) == cdiv(x_max,y_max):
-    return x - q*y if d.op is Ops.MOD else d.const_like(q)
+  if y_min*y_max > 0 and (qv:=cdiv(x_min,y_min)) == cdiv(x_min,y_max) == cdiv(x_max,y_min) == cdiv(x_max,y_max):
+    return x - qv*y if d.op is Ops.MOD else d.const_like(qv)
 
   # split uops for the rest of the processing
   x_peeled, const = x.pop_const()
@@ -22,11 +22,11 @@ def fold_divmod_general(d: UOp, correct_divmod_folding: bool) -> UOp|None:
   # ** Constant Denominator Rules **
   # these rules strictly require y to be a scalar constant > 0
   if y.op is Ops.CONST and (c := y.arg) > 0:
-    # canonicalize_mod_div: (x%(d*k))//d -> (x//d)%k, puts nested div/mod in div-first canonical form for recombine
-    if d.op is Ops.IDIV and x.op is Ops.MOD and x.src[1].op is Ops.CONST and x.vmin >= 0 and x.src[1].arg % c == 0:
-      return x.src[0] // y % x.ufix(x.src[1].arg // c)
+    # nested_div_mod: (x%(k*c))//c -> (x//c)%k, and (x%(k*c))%c -> x%c
+    if x.op is Ops.MOD and (k := x.src[1].divides(c)) is not None:
+      return x.src[0] // y % k if d.op is Ops.IDIV else x.src[0] % y
 
-    # remove_nested_mod: remove nested mod in case the inner mod is a multiple of the outer mod, example: (a%4 + b)%2 -> (a+b)%2
+    # remove_nested_mod in sum: (a%4 + b)%2 -> (a+b)%2, requires non-negative sums
     if d.op is Ops.MOD and x.vmin >= 0:
       new_xs, changed = [], False
       for u in uops_no_const:
@@ -42,40 +42,45 @@ def fold_divmod_general(d: UOp, correct_divmod_folding: bool) -> UOp|None:
 
     # fold_binary_numerator: fold if expression has one non-constant term that takes on two values
     if len(terms)==1 and (v:=terms[0]).vmax-v.vmin == 1:
-      y1 = cmod(factors[0]*v.vmin+const, c) if d.op is Ops.MOD else cdiv(factors[0]*v.vmin+const, c)
-      y2 = cmod(factors[0]*v.vmax+const, c) if d.op is Ops.MOD else cdiv(factors[0]*v.vmax+const, c)
+      y1 = (cmod if d.op is Ops.MOD else cdiv)(factors[0]*v.vmin+const, c)
+      y2 = (cmod if d.op is Ops.MOD else cdiv)(factors[0]*v.vmax+const, c)
       return (y2-y1)*(v-v.vmin) + y1
 
     # fold_divmod_congruence: fold if a is congruent to an expression whose range is between 0 and c
     if not (x.vmin<0 and correct_divmod_folding):
-      rems = [min((r:=f%c), r-c, key=abs) for f in factors]
-      if (rem:=sum(r*v for r,v in zip(rems,terms))+const%c).vmin//c==rem.vmax//c:
-        if d.op is Ops.MOD: return rem - rem.vmin//c*c
-        return sum((f-r)//c * v for f,r,v in zip(factors,rems,terms)) + (const-const%c+rem.vmin//c*c)//c
+      # when f%c == c//2, abs(r) == abs(r-c) is a tie, try both signs since either may fit in one period
+      rem_choices = [(r, r-c) if (r:=f%c)*2 == c else (min(r, r-c, key=abs),) for f in factors]
+      for rems in itertools.product(*rem_choices):
+        if (rem:=sum(r*v for r,v in zip(rems,terms))+const%c).vmin//c==rem.vmax//c:
+          if d.op is Ops.MOD: return rem - rem.vmin//c*c
+          return sum((f-r)//c * v for f,r,v in zip(factors,rems,terms)) + const//c + rem.vmin//c
 
     # gcd_with_remainder: factor out common gcd from numerator
-    # Note: this rule uses uops_no_const to exclude the additive constant from the GCD calculation
-    if x.vmin >= 0:
-      gcd = UOp.gcd(*uops_no_const, y).simplify()
-      if gcd.op is Ops.CONST and gcd.arg > 1:
-        new_x = unwrap(x_peeled.divide_exact(gcd)).simplify() + (const%c)//gcd.arg
-        if new_x.vmin >= 0:
-          ret = new_x.alu(d.op, x.ufix(c//gcd.arg))
-          return ret*gcd + const%gcd.arg if d.op is Ops.MOD else ret+const//c
+    if x.vmin >= 0 and (g:=math.gcd(*factors, c)) > 1:
+      new_x = unwrap(x_peeled.divides(g)).simplify() + (const//g)%(c//g)
+      if new_x.vmin >= 0:
+        if d.op is Ops.MOD: return new_x % (c//g) * g + const%g
+        return new_x // (c//g) + const//c
 
-    # nest_div_by_factor: try nesting the div with each candidate factor and pick the simplest result
-    if d.op is Ops.IDIV and x.vmin >= 0:
-      # NOTE: this is recursive!
+    # nest_by_factor: x//c -> (x//f)//(c//f), x%c -> (x//f%(c//f))*f + b where b=x%f
+    if x.vmin >= 0:
       results = []
       for div in {abs(f) for u, f in zip(uops_no_const, factors) if u.op not in (Ops.CONST, Ops.VCONST) and 1 < abs(f) < c and (c%f)==0}:
         if (newxs := fold_divmod_general(x//div, correct_divmod_folding)) is not None and newxs.vmin >= 0:
-          results.append((len(newxs.backward_slice), newxs // (c // div)))
-      if results: return min(results)[1]
+          if d.op is Ops.IDIV:
+            results.append((len(newxs.backward_slice), newxs // (c // div)))
+          else:
+            b_parts = [f%div*t for f, t in zip(factors, terms) if f%div]
+            if const % div: b_parts.append(x.const_like(const % div))
+            b = UOp.sum(*b_parts) if b_parts else x.const_like(0)
+            if 0 <= b.vmin and b.vmax < div:
+              results.append((len((r:=(newxs % x.ufix(c//div))*div + b).backward_slice), r))
+      if results: return min(results, key=lambda r: r[0])[1]
 
   # ** Variable Denominator / Fallback Rules **
   # These rules apply to variables OR constants that failed the checks above.
   # Reconstruct all uops including const for these checks.
-  all_uops = uops_no_const + ([x.const_like(const)] if const != 0 else [])
+  all_uops = list(x.split_uop(Ops.ADD))
 
   # divide_by_gcd: x//y -> (x//gcd)//(y//gcd)
   gcd = UOp.gcd(*all_uops, y).simplify()

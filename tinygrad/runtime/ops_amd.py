@@ -11,7 +11,7 @@ from tinygrad.helpers import getenv, round_up, data64_le, DEBUG, PROFILE, Profil
 from tinygrad.helpers import VIZ, AMD_CC, AMD_LLVM, AMD_HIPCC, ceildiv, unwrap
 from tinygrad.renderer.cstyle import AMDHIPRenderer, AMDHIPCCRenderer
 from tinygrad.renderer.llvmir import AMDLLVMRenderer
-from tinygrad.runtime.autogen import kfd, hsa, pci, sqtt, amdgpu_kd, amdgpu_drm
+from tinygrad.runtime.autogen import kfd, hsa, sqtt, amdgpu_kd, amdgpu_drm
 from tinygrad.runtime.autogen.am import am
 from tinygrad.runtime.support.elf import elf_loader
 from tinygrad.runtime.support.am.amdev import AMDev, AMMemoryManager
@@ -485,6 +485,7 @@ class AMDCopyQueue(HWQueue):
     if (dev:=signal.owner) is not None and signal.is_timeline and not dev.is_am():
       self.q(self.sdma.SDMA_OP_FENCE | fence_flags, *data64_le(dev.queue_event_mailbox_ptr), dev.queue_event.event_id)
       self.q(self.sdma.SDMA_OP_TRAP, self.sdma.SDMA_PKT_TRAP_INT_CONTEXT_INT_CONTEXT(dev.queue_event.event_id))
+    elif dev is not None and dev.is_am(): self.q(self.sdma.SDMA_OP_TRAP, 0)
 
     return self
 
@@ -829,13 +830,12 @@ class PCIIface(PCIIfaceBase):
     super().__init__(dev, dev_id, vendor=0x1002, devices=[(0xffff, [0x74a1, 0x744c, 0x7480, 0x7550, 0x7590, 0x75a0])], bars=[0, 2, 5], vram_bar=0,
       va_start=AMMemoryManager.va_allocator.base, va_size=AMMemoryManager.va_allocator.size)
     self._setup_adev(self.pci_dev)
-    self.pci_dev.write_config(pci.PCI_COMMAND, self.pci_dev.read_config(pci.PCI_COMMAND, 2) | pci.PCI_COMMAND_MASTER, 2)
 
   def require_profile_mode(self): return True
   def is_wgp_active(self, xcc, se, sa, wgp) -> bool: return True # TODO: account for WGP disablement on some asics.
 
-  def _setup_adev(self, pci_dev:PCIDevice, dma_regions:list[tuple[int, MMIOInterface]]|None=None):
-    self.dev_impl:AMDev = AMDev(pci_dev, dma_regions)
+  def _setup_adev(self, pci_dev:PCIDevice):
+    self.dev_impl:AMDev = AMDev(pci_dev)
     self.ip_versions = self.dev_impl.ip_ver
 
     gfxver = int(f"{self.dev_impl.ip_ver[am.GC_HWIP][0]:02d}{self.dev_impl.ip_ver[am.GC_HWIP][1]:02d}{self.dev_impl.ip_ver[am.GC_HWIP][2]:02d}")
@@ -866,10 +866,12 @@ class PCIIface(PCIIfaceBase):
     return AMDQueueDesc(ring=ring.cpu_view().view(fmt='I'), doorbell=self.dev_impl.doorbell64.view(doorbell_index * 8, 8, fmt='Q'), put_value=0,
       read_ptr=gart.cpu_view().view(offset=rptr, size=8, fmt='Q'), write_ptr=gart.cpu_view().view(offset=wptr, size=8, fmt='Q'), params=rcvr_params)
 
-  def _collect_faults(self, reset=False):
+  def _collect_interrupts(self, reset=False, drain_only=False):
     devs:list[AMDDevice] = [d for pg in HCQCompiled.peer_groups.values() for d in pg if isinstance(d, AMDDevice) and d.is_am()]
     for d in devs:
-      d.iface.dev_impl.ih.interrupt_handler()
+      if drain_only: d.iface.dev_impl.ih.drain()
+      else: d.iface.dev_impl.ih.interrupt_handler()
+
       if reset and d.iface.dev_impl.recover(force=d.error_state is not None):
         d.compute_queue.put_value = d.compute_queue.read_ptr[0] = d.compute_queue.write_ptr[0] = 0
         d.iface.dev_impl.gfx.setup_ring(*d.compute_queue.params)
@@ -879,11 +881,11 @@ class PCIIface(PCIIfaceBase):
   def sleep(self, timeout):
     if hasattr(self.pci_dev, 'irq_poller') and self.pci_dev.irq_poller is not None and (events_cnt:=len(self.pci_dev.irq_poller.poll(timeout))):
       self.pci_dev.irq_fd.read(8 * events_cnt)
-    self._collect_faults()
+    self._collect_interrupts()
     if self.dev_impl.is_err_state: raise RuntimeError("Device is in error state")
 
   def on_device_hang(self):
-    self._collect_faults(reset=True)
+    self._collect_interrupts(reset=True)
     raise RuntimeError("Device hang detected")
 
   def device_fini(self): self.dev_impl.fini()
@@ -891,7 +893,7 @@ class PCIIface(PCIIfaceBase):
 class USBIface(PCIIface):
   def __init__(self, dev, dev_id): # pylint: disable=super-init-not-called
     self.dev, self.pci_dev = dev, USBPCIDevice(dev.__class__.__name__[:2], f"usb:{dev_id}", bars=[0, 2, 5])
-    self._setup_adev(self.pci_dev, dma_regions=[(0x200000, self.pci_dev.dma_view(0xf000, 0x80000))])
+    self._setup_adev(self.pci_dev)
     self.pci_dev.usb._pci_cacheable += [(self.pci_dev.bar_info[2].addr, self.pci_dev.bar_info[2].size)] # doorbell region is cacheable
 
     # special regions
@@ -1075,6 +1077,10 @@ class AMDDevice(HCQCompiled):
   def invalidate_caches(self):
     self.hw_compute_queue_t().memory_barrier().signal(self.timeline_signal, self.next_timeline()).submit(self)
     self.synchronize()
+
+  def synchronize(self, timeout:int|None=None):
+    super().synchronize(timeout)
+    if self.is_am() and self.error_state is None: self.iface._collect_interrupts(reset=False, drain_only=True)
 
   def on_device_hang(self): self.iface.on_device_hang()
 

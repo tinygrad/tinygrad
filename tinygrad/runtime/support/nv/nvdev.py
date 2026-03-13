@@ -1,6 +1,7 @@
 from __future__ import annotations
 import ctypes, time, functools, re, gzip, struct
 from tinygrad.helpers import getenv, DEBUG, fetch, getbits
+from tinygrad.runtime.autogen import pci
 from tinygrad.runtime.support.memory import TLSFAllocator, MemoryManager, AddrSpace
 from tinygrad.runtime.support.nv.ip import NV_FLCN, NV_FLCN_COT, NV_GSP
 from tinygrad.runtime.support.system import PCIDevice, PCIDevImplBase, MMIOInterface
@@ -72,6 +73,7 @@ class NVMemoryManager(MemoryManager):
 class NVDev(PCIDevImplBase):
   def __init__(self, pci_dev:PCIDevice):
     self.pci_dev, self.devfmt, self.mmio = pci_dev, pci_dev.pcibus, pci_dev.map_bar(0, fmt='I')
+    self.pci_dev.write_config(pci.PCI_COMMAND, self.pci_dev.read_config(pci.PCI_COMMAND, 2) | pci.PCI_COMMAND_MASTER, 2)
 
     self.smi_dev, self.is_booting, self.is_err_state = False, True, False
     self._early_ip_init()
