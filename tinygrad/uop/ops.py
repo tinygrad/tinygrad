@@ -225,7 +225,9 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
       case Ops.INDEX:
         # non pointer index (element access) — shape is just the broadcast of index shapes
         if not isinstance(self.dtype, PtrDType):
-          return tuple(flatten([d.shape for d in self.src[1:]]))
+          idx_shapes = [d._shape for d in self.src[1:]]
+          if any(s is None for s in idx_shapes): return None
+          return tuple(flatten(idx_shapes))
         # fully indexed doesn't have a shape. TODO: remove this
         if self.src[0]._shape is None or len(self.src[1:]) == len(self.src[0].shape): return None
         # pointer index
