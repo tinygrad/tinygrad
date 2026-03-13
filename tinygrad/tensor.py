@@ -504,6 +504,14 @@ class Tensor(OpMixin):
   @staticmethod
   def from_uop(y:UOp, **kwargs) -> Tensor:
     if y.op is Ops.BIND: return Tensor(y, **kwargs, requires_grad=False)
+    if y.op is Ops.PARAM:
+      # add device to deviceless variable PARAMs
+      if y._device is None and len(y.src) >= 2:
+        device = kwargs.get('device') or canonicalize_device(None)
+        y = y.replace(src=(y.src[0], UOp(Ops.DEVICE, arg=device)) + y.src[2:])
+      # cast index to int for tensor dtype promotion
+      data = y.cast(dtypes.int) if y.dtype == dtypes.index else y
+      return Tensor(data, **kwargs, requires_grad=False)
     if y.op is Ops.CONST: return Tensor(y.arg, **kwargs, requires_grad=False)
     if y.op is Ops.MUL: return Tensor.from_uop(y.src[0]) * Tensor.from_uop(y.src[1])
     if y.op is Ops.ADD: return Tensor.from_uop(y.src[0]) + Tensor.from_uop(y.src[1])

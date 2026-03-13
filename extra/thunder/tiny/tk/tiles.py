@@ -62,18 +62,19 @@ class TileMathMixin(ElementwiseMixin):
   def alu(self, op, *src, inner_op=lambda x:x):
     assert isinstance(self, (RT, RV))
     if len(src) == 0:
-      if self._uop._shape is None: uop = UOp.alu(self._uop, op)
+      if not self._uop._shape: uop = UOp.alu(self._uop, op)
       else: uop = self.ker.warp.map(self._uop, lambda x: UOp.alu(x, op))
     elif len(src) == 1:
-      if self._uop._shape is None: uop = UOp.alu(self._uop, op, inner_op(self._uop.ufix(src[0])))
+      if not self._uop._shape: uop = UOp.alu(self._uop, op, inner_op(self._uop.ufix(src[0])))
       elif isinstance(src[0], (int,float,bool)): uop = self.ker.warp.map(self._uop, lambda x: UOp.alu(x, op, inner_op(x.ufix(src[0]))))
-      elif src[0]._shape is None: uop = UOp.alu(self._uop, op, inner_op(self._uop.ufix(src[0])))
+      elif not src[0]._shape: uop = UOp.alu(self._uop, op, inner_op(self._uop.ufix(src[0])))
       else:
+        src_uop = unwrap(src[0])
         if isinstance(self, RT) and isinstance(src[0], RV):
           match self.layout:
-            case TileLayout.ROW: uop = self.ker.warp.map(self._uop, lambda x, idx: UOp.alu(x, op, inner_op(src[0]._uop[idx[0], 0])))
-            case TileLayout.COL: uop = self.ker.warp.map(self._uop, lambda x, idx: UOp.alu(x, op, inner_op(src[0]._uop[idx[1], 0])))
-        else: uop = self.ker.warp.map(self._uop, lambda x, idx: UOp.alu(x, op, inner_op(src[0]._uop[*idx])))
+            case TileLayout.ROW: uop = self.ker.warp.map(self._uop, lambda x, idx: UOp.alu(x, op, inner_op(src_uop[idx[0], 0])))
+            case TileLayout.COL: uop = self.ker.warp.map(self._uop, lambda x, idx: UOp.alu(x, op, inner_op(src_uop[idx[1], 0])))
+        else: uop = self.ker.warp.map(self._uop, lambda x, idx: UOp.alu(x, op, inner_op(src_uop[*idx])))
     else: raise NotImplementedError
     return self.ruop(uop)
   def const_like(self, b): return b

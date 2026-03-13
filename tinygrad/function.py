@@ -1,6 +1,6 @@
 import functools
 from typing import Generic, TypeVar, Callable, cast, overload
-from tinygrad.helpers import Context, dedup, getenv
+from tinygrad.helpers import dedup
 from tinygrad.uop.ops import UOp, Ops, graph_rewrite, PatternMatcher, UPat
 from tinygrad.tensor import Tensor
 
@@ -35,16 +35,21 @@ class _function(Generic[ReturnType]):
     # deduplicate input_uops, keeping the first occurrence index for each unique uop
     call_uops: list[UOp] = dedup(input_uops)
 
-    # disable realize/schedule while this is running
-    # run it and do surgery later. TODO: why am i not calling it with the params?
-    with Context(ALLOW_DEVICE_USAGE=getenv("DEVICE_IN_FUNCTION_BUG", 0)):
-      ret = self.fxn(*args, **kwargs)
+    # create params for each unique input up front
+    params: dict[UOp, UOp] = {x: x.param_like(i) for i, x in enumerate(call_uops)}
+
+    # rebuild args/kwargs with param-based tensors/uops
+    def sub(t):
+      if isinstance(t, Tensor) and t.uop in params: return Tensor(params[t.uop], device=t.device)
+      if isinstance(t, UOp) and t in params: return params[t]
+      return t
+    new_args = tuple(sub(a) for a in args)
+    new_kwargs = {k: sub(v) for k, v in kwargs.items()}
+
+    ret = self.fxn(*new_args, **new_kwargs)
     assert isinstance(ret, Tensor), "only supports one tensor return for now"
 
-    # replace the known inputs with params (using deduplicated slots)
-    subs = {}
-    for i,x in enumerate(call_uops): subs[x] = x.param_like(i)
-    uret = ret.uop.substitute(subs)
+    uret = ret.uop
 
     # add contiguous to call_uops
     #call_uops = [x.contiguous() for x in call_uops]
