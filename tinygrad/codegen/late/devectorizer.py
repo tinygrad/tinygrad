@@ -192,7 +192,7 @@ def _do_image_fixup(dt:ImageDType, idx:UOp) -> tuple[UOp, UOp]:
     p, max_dropped, min_complexity = w, -1, float("inf")
     for h_, w_ in ImageDType.valid_dims(dt):
       real_w = ((x//4)%w_).simplify().vmax + 1 # shrink the width (eg. pad with pitch)
-      _idx = uop_given_valid(valid, UOp.vectorize((x//4)%real_w, x//(4*w_))) # secondary index still needs to be calculated relative to full width
+      _idx = uop_given_valid(valid, UOp.vectorize((x//4)%w_, x//(4*w_))) # secondary index still needs to be calculated relative to full width
       if (dropped:=len(_drop_valid_stmts(valid, _idx, h_, real_w))) > max_dropped:
         print(f"  . {h_}x{real_w} (pitch: {w_}) -- {dropped=} complexity={len(_idx.backward_slice)} simple complexity={len(_idx.simplify().backward_slice)}")
         h, w, p, max_dropped, min_complexity = h_, real_w, w_, dropped, len(_idx.backward_slice)
@@ -201,7 +201,7 @@ def _do_image_fixup(dt:ImageDType, idx:UOp) -> tuple[UOp, UOp]:
         print(f"  . {h_}x{real_w} (pitch: {w_}) -- {dropped=} {complexity=} simple complexity={len(_idx.simplify().backward_slice)}")
       else: print(f"  x {h_}x{real_w} (pitch: {w_}) -- {dropped=} complexity={len(_idx.backward_slice)} simple complexity={len(_idx.simplify().backward_slice)}")
     print(f"IMAGE SHAPE SELECTED: {h=} {w=} {p=} (dropped={max_dropped}, complexity={min_complexity})")
-    oidx, buf = UOp.vectorize((x//4)%w, x//(4*p)), buf.replace(dtype=(dtypes.imageh if dt.itemsize==2 else dtypes.imagef)((h, w, 4), p*4*dt.itemsize))
+    oidx, buf = UOp.vectorize((x//4)%p, x//(4*p)), buf.replace(dtype=(dtypes.imageh if dt.itemsize==2 else dtypes.imagef)((h, w, 4), p*4*dt.itemsize))
   else: oidx = UOp(Ops.VECTORIZE, dtypes.index.vec(2), ((x // 4) % w, (x // (4*w))))
   return x, idx.replace(src=(buf, oidx.valid(valid)))
 
