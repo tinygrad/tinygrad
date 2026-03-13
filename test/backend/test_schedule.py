@@ -808,7 +808,7 @@ class TestSchedule(unittest.TestCase):
       with Context(IMAGE=1): cnt1 = cnt()
       with Context(IMAGE=2): cnt2 = cnt()
 
-      self.assertEqual(cnt1, 2)
+      self.assertEqual(cnt1, 5)
       self.assertEqual(cnt2, 5)
 
   @unittest.skipIf(Device.DEFAULT != "CL", "image only supported on CL")
@@ -828,7 +828,7 @@ class TestSchedule(unittest.TestCase):
       with Context(IMAGE=1): cnt1 = cnt()
       with Context(IMAGE=2): cnt2 = cnt()
 
-      self.assertEqual(cnt1, 4)
+      self.assertEqual(cnt1, 9)
       self.assertEqual(cnt2, 9)
 
   @unittest.skipIf(Device.DEFAULT != "CL", "image only supported on CL")

@@ -3668,7 +3668,7 @@ class Tensor(OpMixin):
       def _empty_pad_to(t, shape, dt=None):
         if dt is not None: t = t.cast(dt)
         padded = tuple(p if p is not None else s for p, s in zip(shape, t.shape))
-        if padded == t.shape: return t
+        if padded == t.shape: return t.contiguous()
         buf = Tensor.empty(*padded, device=t.device, dtype=t.dtype)
         buf[tuple(slice(0, s) for s in t.shape)] = t
         return buf
