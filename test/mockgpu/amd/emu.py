@@ -1045,7 +1045,8 @@ def _compile_vopc(inst: ir3.VOPC|ir3.VOP3|ir4.VOPC|ir4.VOP3|irc.VOPC|irc.VOP3, c
     if is_float:
       s0 = _apply_src_mods(s0, 0, abs_bits, neg_bits, bits['s0'])
       s1 = _apply_src_mods(s1, 1, abs_bits, neg_bits, bits['s1'])
-    for dest, val in parse_pcode(pcode, {'S0': s0, 'S1': s1, 'laneId': lc})[1]:
+    d0_val = ctx.rmask(dst_off) if not is_vopc else ctx.rexec()
+    for dest, val in parse_pcode(pcode, {'S0': s0, 'S1': s1, 'laneId': lc, 'D0': d0_val})[1]:
       if '[laneId]' in dest and ('D0' in dest or 'EXEC' in dest): return val.cast(dtypes.uint32)
     return _c(0)
 
@@ -1627,6 +1628,54 @@ def _compile_mem_op(inst: ir3.DS|ir3.FLAT|ir3.GLOBAL|ir3.SCRATCH|ir4.DS|ir4.VFLA
 
   return UOp.sink(UOp.group(*stores).end(lane), *ctx.inc_pc())
 
+def _compile_mubuf(inst: irc.MUBUF, ctx: _Ctx) -> UOp:
+  """CDNA MUBUF: buffer load/store using a 4-SGPR buffer resource descriptor
+  [63:0]=base, [95:64]=stride/num_records, [127:96]=flags
+  Effective address = base + soffset + (offen ? vaddr*stride : 0) + inst_offset
+  """
+  exec_mask, op_name = ctx.rexec(), _op_name(inst)
+  is_load = 'LOAD' in op_name
+  data_bits = inst.canonical_op_bits.get('data', 32) # 32/64/96/128
+  # Read instruction fields dynamically
+  vdata_reg = ctx.inst_field(type(inst).vdata)
+  vaddr_reg = ctx.inst_field(type(inst).vaddr)
+  srsrc_reg = ctx.inst_field(type(inst).srsrc) # base SGPR of the 4-SGPR descriptor
+  soffset_reg = ctx.inst_field(type(inst).soffset) # scalar offset register
+  # Instruction-encoded flags
+  offen = bool(getattr(inst, 'offen', 0))
+  idxen = bool(getattr(inst, 'idxen', 0))
+  inst_offset = getattr(inst, 'offset', 0) or 0 # 12 bit immediate offset in encoding
+
+  def make_addr(lane: UOp) -> UOp:
+    # Extract base address from buffer descriptor (first two SGPRs = 64-bit base)
+    base = _u64(ctx.rsgpr_dyn(srsrc_reg), ctx.rsgpr_dyn(srsrc_reg + _c(1)))
+    # soffset: if soffset_reg < 124 use SGPR value, else 0 (NULL)
+    soff = (soffset_reg < _c(124)).where(ctx.rsgpr_dyn(soffset_reg).cast(dtypes.uint64),
+                                          UOp.const(dtypes.uint64, 0))
+    # vaddr contribution
+    vaddr_val = ctx.rvgpr_dyn(vaddr_reg, lane).cast(dtypes.uint64)
+    voff = vaddr_val if (offen or idxen) else UOp.const(dtypes.uint64, 0)
+    return base + soff + voff + UOp.const(dtypes.uint64, inst_offset)
+
+  lane = ctx.range()
+  active = _lane_active(exec_mask, lane)
+  addr = make_addr(lane)
+
+  stores = []
+  for i in range(data_bits // 32):
+    # Shared address logic
+    word_addr = (addr + UOp.const(dtypes.uint64, i * 4)) >> 2
+    idx = ctx.vmem.index(word_addr.cast(dtypes.int), active)
+    reg_idx = vdata_reg + _c(i)
+    if is_load: # Memory to Register
+      val = idx.load()
+      stores.append(ctx.wvgpr_dyn(reg_idx, lane, val, exec_mask))
+    else: # Register to Memory
+      val = ctx.rvgpr_dyn(reg_idx, lane)
+      stores.append(idx.store(active.where(val, idx.load())))
+
+  return UOp.sink(UOp.group(*stores).end(lane), *ctx.inc_pc())
+
 # Dispatch table: instruction type -> handler function
 _INST_HANDLERS: dict[type, Callable[..., UOp]] = {
   ir3.SOPP: _compile_sopp, ir3.SMEM: _compile_smem, ir3.SOP1: _compile_sop, ir3.SOP2: _compile_sop, ir3.SOPC: _compile_sop, ir3.SOPK: _compile_sop,
@@ -1643,7 +1692,7 @@ _INST_HANDLERS: dict[type, Callable[..., UOp]] = {
   irc.VOP1: _compile_vop12, irc.VOP2: _compile_vop12, irc.VOPC: _compile_vopc, irc.VOP3: _compile_vop3,
   irc.VOP3_SDST: _compile_vop3, irc.VOP3SD: _compile_vop3sd, irc.VOP3P: _compile_vop3p,
   irc.VOP1_SDWA: _compile_sdwa, irc.VOP2_SDWA: _compile_sdwa, irc.VOP2_SDWA_SDST: _compile_sdwa, irc.VOPC_SDWA_SDST: _compile_sdwa,
-  irc.DS: _compile_mem_op, irc.FLAT: _compile_mem_op, irc.GLOBAL: _compile_mem_op, irc.SCRATCH: _compile_mem_op,
+  irc.DS: _compile_mem_op, irc.FLAT: _compile_mem_op, irc.GLOBAL: _compile_mem_op, irc.MUBUF: _compile_mubuf, irc.SCRATCH: _compile_mem_op,
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════
