@@ -43,6 +43,11 @@ class _System:
 
   def reserve_hugepages(self, cnt): os.system(f"sudo sh -c 'echo {cnt} > /proc/sys/vm/nr_hugepages'")
 
+  @functools.cache
+  def reserve_va(self, va_start, va_size):
+    # cached, runs only once per range. used to not collide with other mappings.
+    FileIOInterface.anon_mmap(va_start, va_size, 0, mmap.MAP_PRIVATE | mmap.MAP_ANONYMOUS | MAP_NORESERVE | MAP_FIXED_NOREPLACE, 0)
+
   def memory_barrier(self): lib.atomic_thread_fence(__ATOMIC_SEQ_CST:=5) if (lib:=self.libsys if OSX else self.atomic_lib) is not None else None
 
   def lock_memory(self, addr:int, size:int):
@@ -71,14 +76,12 @@ class _System:
 
     return sorted([val for vndr, device, val in all_devs if vndr == vendor and any((device & mask) in devlist for mask, devlist in devices)])
 
-  _pci_cache:dict[int, list[str]] = {}
-  def probe_pci_device(self, devpref:str, dev_id:int, vendor:int, devices:list[tuple[int, list[int]]], bars:list[int],
+  def pci_probe_device(self, devpref:str, dev_id:int, vendor:int, devices:list[tuple[int, list[int]]], bars:list[int],
                        resize_bars:list[int]|None=None, base_class:int|None=None):
-    if vendor not in self._pci_cache:
-      self._pci_cache[vendor] = hcq_filter_visible_devices(System.pci_scan_bus(vendor, devices, base_class))
-      if not self._pci_cache[vendor]: raise RuntimeError("No supported GPUs found")
-    if OSX: return APLRemotePCIDevice(devpref, f'remote:{dev_id}', bars)
-    return PCIDevice(devpref, self._pci_cache[vendor][dev_id], bars=bars, resize_bars=resize_bars)
+    gpus = hcq_filter_visible_devices(System.pci_scan_bus(vendor, devices, base_class))
+    if not gpus: raise RuntimeError("No supported GPUs found")
+    if OSX: return APLRemotePCIDevice(devpref, f'usb4:{dev_id}', bars)
+    return PCIDevice(devpref, gpus[dev_id], bars=bars, resize_bars=resize_bars)
 
   def pci_setup_usb_bars(self, usb:ASM24Controller, gpu_bus:int, mem_base:int, pref_mem_base:int) -> dict[int, PCIBarInfo]:
     for bus in range(gpu_bus):
@@ -227,17 +230,17 @@ class PCIAllocationMeta: mapping:VirtMapping; has_cpu_mapping:bool; hMemory:int=
 class PCIIfaceBase:
   dev_impl:PCIDevImplBase
 
+  def is_local(self) -> bool: return not isinstance(self.pci_dev, RemotePCIDevice)
+
   def __init__(self, dev, dev_id, vendor, devices:list[tuple[int, list[int]]], bars, vram_bar, va_start, va_size, base_class:int|None=None):
-    self.pci_dev = System.probe_pci_device(dev.__class__.__name__[:2], dev_id, vendor, devices, bars, resize_bars=[vram_bar], base_class=base_class)
-    if dev_id == 0 and not isinstance(self.pci_dev, RemotePCIDevice):
-      FileIOInterface.anon_mmap(va_start, va_size, 0, mmap.MAP_PRIVATE | mmap.MAP_ANONYMOUS | MAP_NORESERVE | MAP_FIXED_NOREPLACE, 0)
+    self.pci_dev = System.pci_probe_device(dev.__class__.__name__[:2], dev_id, vendor, devices, bars, resize_bars=[vram_bar], base_class=base_class)
+    if self.is_local(): System.reserve_va(va_start, va_size)
     self.dev, self.vram_bar = dev, vram_bar
     self.p2p_base_addr = self.pci_dev.bar_info[vram_bar].addr
 
   def alloc(self, size:int, host=False, uncached=False, cpu_access=False, contiguous=False, force_devmem=False, **kwargs) -> HCQBuffer:
     # NOTE: remote devices have small bar, so cpu_access alone triggers sysmem.
-    is_remote = isinstance(self.pci_dev, RemotePCIDevice)
-    should_use_sysmem = host or ((cpu_access if is_remote else (uncached and cpu_access)) and not force_devmem)
+    should_use_sysmem = host or ((cpu_access if not self.is_local() else (uncached and cpu_access)) and not force_devmem)
     if should_use_sysmem:
       vaddr = self.dev_impl.mm.alloc_vaddr(size:=round_up(size, mmap.PAGESIZE), align=mmap.PAGESIZE)
       memview, paddrs = self.pci_dev.alloc_sysmem(size, vaddr=vaddr, contiguous=contiguous)
@@ -251,10 +254,10 @@ class PCIIfaceBase:
   def free(self, b:HCQBuffer):
     for dev in b.mapped_devs[1:]: dev.iface.dev_impl.mm.unmap_range(b.va_addr, b.size)
     if b.meta.mapping.aspace is AddrSpace.PHYS: self.dev_impl.mm.vfree(b.meta.mapping)
-    if b.owner == self.dev and b.meta.has_cpu_mapping and not isinstance(self.pci_dev, RemotePCIDevice): FileIOInterface.munmap(b.va_addr, b.size)
+    if self.is_local() and b.owner == self.dev and b.meta.has_cpu_mapping: FileIOInterface.munmap(b.va_addr, b.size)
 
   def map(self, b:HCQBuffer):
-    if isinstance(self.pci_dev, RemotePCIDevice): raise RuntimeError(f"P2P mapping not supported for remote devices: {b.owner} -> {self.dev}")
+    if not self.is_local(): raise RuntimeError(f"P2P mapping not supported for remote devices: {b.owner} -> {self.dev}")
     if b.owner is not None and b.owner._is_cpu():
       System.lock_memory(int(b.va_addr), b.size)
       paddrs, aspace = [(x, 0x1000) for x in System.system_paddrs(int(b.va_addr), round_up(b.size, 0x1000))], AddrSpace.SYS
