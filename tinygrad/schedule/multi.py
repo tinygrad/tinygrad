@@ -107,7 +107,7 @@ def copy_multi(multi:UOp, device:str | tuple[str, ...] | UOp):
   assert multi.axis is not None, "all multi ops have axis"
   target = device.arg if isinstance(device, UOp) else device
   if isinstance(target, str):
-    # gather: copy only each shard to target device, pad+sum there (avoids materializing full tensor on each GPU)
+    # reduce on single device
     ndev, axis = len(multi.device), multi.axis
     bsz = multi.src[0].shape[axis]
     copies = []
@@ -116,7 +116,6 @@ def copy_multi(multi:UOp, device:str | tuple[str, ...] | UOp):
       pad_arg = tuple((0,0) if a != axis else (bsz*i, bsz*(ndev-1-i)) for a in range(len(multi.src[0].shape)))
       copies.append(shard.pad(pad_arg))
     return UOp.sum(*copies)
-  # multi-device target: unshard+allreduce (axis mismatch redistribution)
   return multi.src[0]._unshard(multi.axis).allreduce(Ops.ADD, device)
 
 def assign_multi(dest:UOp, src:UOp):
