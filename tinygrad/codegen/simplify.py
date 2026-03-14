@@ -53,16 +53,16 @@ pm_simplify_ranges = PatternMatcher([
   (UPat(Ops.INDEX, name="idx"), mark_gated),
   # reduce ranges can't be shrunk
   (UPat(Ops.REDUCE, name="red"), lambda ctx, red: ctx.update({r:r.src[0] for r in red.src[1:]})),
-  (UPat(Ops.SINK, name="x"), lambda ctx, x: do_substitute(ctx, x, lambda r,c: r.replace(src=(c,)))),
+  (UPat(Ops.SINK, name="x"), lambda ctx, x: do_substitute(ctx, x, lambda r,c: r.replace(src=(c,)), simplify=False)),
 ])
 
 def mark_range_mod(ctx:dict[UOp, UOp|None], r:UOp, c:UOp) -> None:
   if r not in ctx and r.src[0].op is Ops.CONST and r.src[0].divides(c.arg) is not None: ctx[r] = c
 
-def do_substitute(ctx:dict, x: UOp, sub_fxn:Callable[[UOp, UOp], UOp]) -> UOp|None:
+def do_substitute(ctx:dict, x: UOp, sub_fxn:Callable[[UOp, UOp], UOp], simplify=True) -> UOp|None:
   ret = x.substitute({k:sub_fxn(k,v) for k,v in ctx.items() if v is not None})
   ctx.clear()
-  return None if ret is x else ret.simplify()
+  return None if ret is x else (ret.simplify() if simplify else ret)
 
 def dont_sub_ranges_for_image(ctx:dict[UOp, UOp|None], x:UOp) -> None:
   if isinstance(x.src[0].src[0].dtype, ImageDType):
