@@ -25,7 +25,7 @@ from tinygrad.codegen.late.linearizer import CFGContext, pm_split_ends, pm_add_c
 from tinygrad.renderer.amd.elf import do_assemble_amd
 
 def add_ranges_to_store(ctx, x):
-  if x.src[0]._shape is None or x.src[0].shape == (): return None
+  if x.src[0]._shape is None or x.src[1]._shape is None or x.src[0].shape == (): return None
   assert x.src[0].shape == x.src[1].shape, "bad store shape"
   idxs = [UOp.range(r, next(ctx), AxisType.LOOP) for r in x.src[0].shape]
   return UOp.store(x.src[0].index(*idxs), x.src[1].index(*idxs)).end(*idxs)
