@@ -559,13 +559,13 @@ def amdgpu_cfg(lib:bytes, target:str) -> dict:
       if j-i>1:
         pc_tokens[pcs[i]].append({"st":f"({j-i}x)", "keys":[], "kind":0})
         for k in range(i+1, j): del pc_tokens[pcs[k]]
-      lines.append(f"  {disasm[pcs[i]]:<{asm_width}}  # {pcs[i]:012X}"+(f"...{pcs[j-1]:012X} ({j-i}x)" if j-i>1 else ""))
+      lines.append(f"{disasm[pcs[i]]:<{asm_width}}  # {pcs[i]:012X}"+(f"...{pcs[j-1]:012X} ({j-i}x)" if j-i>1 else ""))
       i = j
     pcs[:] = new_pcs
   from tinygrad.runtime.autogen import amdgpu_kd
   kd = amdgpu_kd.llvm_amdhsa_kernel_descriptor_t.from_buffer_copy(bytearray(get_elf_section(lib, ".rodata").content))
   vgpr_gran = kd.compute_pgm_rsrc1 & amdgpu_kd.COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT
-  return {"data":{"blocks":blocks, "paths":paths, "pc_tokens":pc_tokens}, "src":"\n".join(lines),
+  return {"data":{"blocks":blocks, "paths":paths, "pc_tokens":pc_tokens}, "src":"\n".join(lines), "lang":"python",
           "metadata":[[{"label":f"{r} Alloc", "value":v} for r,v in [("VGPR", (vgpr_gran+1)*8-7), ("LDS", kd.group_segment_fixed_size),
                                                                      ("Scratch", kd.private_segment_fixed_size)] if v>0]]}
 

@@ -71,7 +71,7 @@ class TestCfg(unittest.TestCase):
     insts = [cfg["pc_tokens"][pc][0]["st"] for pc in references["r0"]]
     self.assertEqual(insts, ['s_mov_b32', 's_cmp_eq_u64'])
     end_block = [" ".join(t["st"] for t in cfg["pc_tokens"][pc]) for pc in list(cfg["blocks"].values())[-1]]
-    code_line = ret["src"].splitlines()[-1].strip()
+    code_line = ret["src"].splitlines()[-1]
     self.assertEqual(len(end_block), 2)
     for st in [end_block[-1], code_line]:
       assert st.startswith("s_code_end") and st.endswith("x)"), st
