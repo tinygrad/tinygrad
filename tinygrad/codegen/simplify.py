@@ -36,22 +36,19 @@ def simplify_merge_adjacent(u:UOp) -> UOp|None:
           u = nidx
   return u
 
-def mark_range_lt(ctx, idx, cond, x, i):
+def mark_gated(ctx, idx):
+  x, cond = idx.src[1].get_idx(), idx.src[1].get_valid()
   # get all ranges r with guards "r < c" for some const c
   guards = {r:c for v in cond.split_uop(Ops.AND) if v.op is Ops.CMPLT and (r:=v.src[0]).op is Ops.RANGE and (c:=v.src[1]).op is Ops.CONST}
-
-  for r in idx.ranges:
-    if r in guards and guards[r].arg < r.src[0].arg:
-      q = r.replace(src=(guards[r],))
-      # choose the max guard
-      ctx[r] = max(ctx[r], q, key=lambda s:s.src[0].arg) if r in ctx else q
-    else: ctx.pop(r, None) # if a range is unguarded, we cannot shrink it
+  # ensure that c actually limits the range, and that we choose max(c_i)
+  ctx |= {r:c for r,c in guards.items() if c.arg < r.src[0].arg and (r not in ctx or ctx[r].arg < c.arg)}
+  # but if a range is ever ungated, we cannot shrink it
+  ctx |= {r:r.src[0] for r in x.ranges if r not in guards}
 
 pm_simplify_ranges = PatternMatcher([
   (UPat((Ops.END, Ops.REDUCE), name="u"), simplify_merge_adjacent),
-  # if everywhere a range is used it is guarded by r < c_i, we can shrink the range to end at max(c_i)
-  (UPat(Ops.INDEX, src=(UPat(), invalid_gate,), name="idx"), mark_range_lt),
-  (UPat(Ops.SINK, name="x"), lambda ctx, x: x.substitute(ctx)),
+  (UPat(Ops.INDEX, name="idx"), mark_gated),
+  (UPat(Ops.SINK, name="x"), lambda ctx, x: x.substitute({r:r.replace(src=(c,)) for r,c in ctx.items()})),
 ])
 
 def mark_range_mod(ctx:dict[UOp, UOp|None], r:UOp, c:UOp) -> None:
