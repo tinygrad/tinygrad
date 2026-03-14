@@ -211,14 +211,14 @@ class SQTTExamplesTestBase(unittest.TestCase):
 class TestSQTTExamplesRDNA3(SQTTExamplesTestBase):
   target = "gfx1100"
   expected = {
-    "profile_empty_run_0": [1974, 1961, 2014, 2065, 2092, 1998],
-    "profile_empty_run_1": [1979, 1972, 2019, 2070, 2097, 2003],
-    "profile_gemm_run_0": [2038, 11076, 2324, 2129, 2156, 2062],
-    "profile_gemm_run_1": [2038, 11037, 2318, 2129, 2156, 2062],
-    "profile_ops_run_0": [2038, 5070, 2078, 2129, 2156, 2062],
-    "profile_ops_run_1": [2038, 5007, 2078, 2129, 2156, 2062],
-    "profile_plus_run_0": [1979, 1979, 2030, 2070, 2097, 2003],
-    "profile_plus_run_1": [1979, 2043, 2030, 2070, 2097, 2003],
+    "profile_empty_run_0": [1880, 1867, 1920, 1971, 1998, 1904],
+    "profile_empty_run_1": [1880, 1867, 1920, 1971, 1998, 1904],
+    "profile_gemm_run_0": [3275, 3278, 2426, 2475, 2511, 2431],
+    "profile_gemm_run_1": [3264, 3268, 2420, 2469, 2504, 2401],
+    "profile_ops_run_0": [1944, 4903, 1984, 2035, 2062, 1968],
+    "profile_ops_run_1": [1944, 4918, 1984, 2035, 2062, 1968],
+    "profile_plus_run_0": [1938, 1932, 1978, 2029, 2056, 1962],
+    "profile_plus_run_1": [1891, 1874, 1931, 1982, 2009, 1915],
   }
 
 class TestSQTTExamplesRDNA4(SQTTExamplesTestBase): target = "gfx1200"
