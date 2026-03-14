@@ -10,7 +10,7 @@ from tinygrad.runtime.autogen.amd.rdna3.ins import SOPP
 from tinygrad.runtime.autogen.amd.rdna3.enum import SOPPOp
 from tinygrad.renderer.amd.sqtt import (decode, LAYOUT_HEADER, WAVESTART, WAVESTART_RDNA4, WAVEEND, INST, INST_RDNA4, VALUINST,
                                      IMMEDIATE, IMMEDIATE_MASK, PACKET_TYPES_RDNA3, PACKET_TYPES_RDNA4, PACKET_TYPES_CDNA, CDNA_WAVESTART,
-                                     InstOp, InstOpRDNA4, print_packets, CDNA_WAVEEND)
+                                     InstOp, InstOpRDNA4, print_packets, CDNA_WAVEEND, CDNA_INST)
 from test.amd.helpers import TARGET_TO_ARCH
 
 import tinygrad
@@ -153,7 +153,7 @@ class SQTTExamplesTestBase(unittest.TestCase):
       if "gemm" not in name: continue
       with self.subTest(example=name):
         all_packets = [p for e in events for p in decode(e.blob)]
-        inst_names = [p.op.name for p in all_packets if isinstance(p, (INST, INST_RDNA4))]
+        inst_names = [p.op.name for p in all_packets if isinstance(p, (INST, INST_RDNA4, CDNA_INST))]
         self.assertGreater(len(inst_names), 0, f"no INST packets in {name}")
         self.assertGreater(len([n for n in inst_names if n.startswith("JUMP")]), 0, f"no JUMP packets in {name}")
 
@@ -224,8 +224,8 @@ class TestSQTTExamplesRDNA4(SQTTExamplesTestBase): target = "gfx1200"
 
 class TestSQTTExamplesCDNA(SQTTExamplesTestBase):
   target = "gfx950"
-  def test_gemm_has_instructions(self): self.skipTest("TODO: decode CDNA inst packets")
   def test_rocprof_wave_times_match(self): self.skipTest("TODO: requires timestamp patching")
+  def test_rocprof_inst_times_match(self): self.skipTest("TODO: requires timestamp patching")
 
 if __name__ == "__main__":
   unittest.main()
