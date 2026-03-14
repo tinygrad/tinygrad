@@ -1,7 +1,7 @@
 import itertools
 from typing import Callable
 from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, graph_rewrite, _substitute, range_start
-from tinygrad.uop.symbolic import symbolic, invalid_gate
+from tinygrad.uop.symbolic import symbolic
 from tinygrad.helpers import partition
 from tinygrad.dtype import dtypes, ImageDType
 
