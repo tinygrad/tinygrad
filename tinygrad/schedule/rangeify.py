@@ -16,10 +16,23 @@ from tinygrad.schedule.allreduce import create_allreduce_function
 import sys
 sys.setrecursionlimit(10000)
 
+def add_ranges_to_store(ctx, x):
+  if x.src[0]._shape is None or x.src[1]._shape is None or x.src[0].shape == (): return None
+  assert x.src[0].shape == x.src[1].shape, "bad store shape"
+  idxs = [UOp.range(r, next(ctx), AxisType.LOOP) for r in x.src[0].shape]
+  return UOp.store(x.src[0].index(*idxs), x.src[1].index(*idxs)).end(*idxs)
+
+pm_store_ranges = PatternMatcher([
+  (UPat(Ops.STORE, name="x"), add_ranges_to_store),
+])
+
 pm_syntactic_sugar = PatternMatcher([
   # INDEX on ptr INDEX concats them
   (UPat(Ops.INDEX, name="i1").f(Ops.INDEX, name="i2", allow_any_len=True),
    lambda i1,i2: i2.replace(src=i1.src+i2.src[1:]) if isinstance(i1.dtype, PtrDType) and not isinstance(i2.dtype, PtrDType) else None),
+  # early rangeify
+  (UPat(Ops.INDEX, src=(UPat(GroupOp.Elementwise | {Ops.CONST}, name="x"),), allow_any_len=True, name="idx"),
+   lambda idx,x: x.replace(src=tuple([s.index(*idx.src[1:]) for s in x.src]))),
 ])
 
 def found_assign(ctx:dict[UOp, UOp], assign:UOp, src:UOp):
@@ -41,7 +54,8 @@ pm_fold_moved_assign = PatternMatcher([
 # movement op on INDEX as a PatternMatcher
 pm_mops = PatternMatcher([
   (UPat(GroupOp.Movement, name="r").f(Ops.INDEX, allow_any_len=True, name="idx"),
-   lambda r,idx: r.src[0].index(*apply_movement_op(r.op, r.src[0].shape, r.marg, idx.src[1:]), dtype=idx.dtype, arg=idx.arg)),
+   lambda r,idx: r.src[0].index(*apply_movement_op(r.op, r.src[0].shape, r.marg, idx.src[1:]), dtype=idx.dtype, arg=idx.arg)
+     if len(idx.src[1:]) == len(r.shape) else None),
   # move movement ops after AFTER
   (UPat(GroupOp.Movement, name="r").after(name="a", allow_any_len=True),
    lambda r,a: UOp(r.op, r.dtype, (a.replace(src=(r.src[0],)+a.src[1:]),)+r.src[1:], r.arg)),
@@ -121,7 +135,6 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
   (UPat(Ops.CALL, name="c"), resolve_call),
 
   # resolve allreduce (must be bottom up)
-  (UPat(Ops.ASSIGN, src=(UPat.var("output"), UPat(Ops.ALLREDUCE, src=(UPat.var("buf"), UPat()), name="red"))), create_allreduce_function),
   (UPat(Ops.ALLREDUCE, src=(UPat.var("buf"), UPat()), name="red"), create_allreduce_function),
 
   # split_reduceop
