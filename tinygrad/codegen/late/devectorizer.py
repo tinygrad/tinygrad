@@ -183,7 +183,7 @@ def split_load_store(ctx:Renderer|None, ls:UOp, idx:UOp):
   if len(ret) <= 1: return None
   return UOp(Ops.VCAT, ls.dtype, tuple(ret)) if ls.op is Ops.LOAD else UOp.group(*ret)
 
-def _do_image_fixup(dt:ImageDType, idx:UOp) -> tuple[UOp, UOp]:
+def _do_image_fixup(dt:ImageDType, idx:UOp) -> tuple[UOp, UOp, int, int]:
   buf = idx.src[0]
   x, valid = idx.src[1].get_idx(), idx.src[1].get_valid()
   h, w = dt.shape[0], dt.shape[1]
