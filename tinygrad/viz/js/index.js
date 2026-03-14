@@ -323,9 +323,9 @@ function setFocus(key) {
   let instList = document.getElementById("insts");
   if (data.pcToShape.size == 0) return d3.select(instList?.parentElement).html("");
   if (instList == null) {
-    let contents = "", i = 0;
+    let contents = "";
     for (const [k, v] of data.pcToShape) {
-      contents += `<div class="line" data-k="${k}"><span class="left" id="inst-${k}"><span class="n">${i++}</span><span class="wave">${v.wave}</span>
+      contents += `<div class="line" data-k="${k}"><span class="left" id="inst-${k}"><span class="wave">${v.wave}</span>
         <span class="pc">${"0x"+v.pc.toString(16).padStart(12, "0")}</span><span class="label">${data.pcMap[v.pc]}</span></div>`;
     }
     instList = d3.create("pre").append("code").classed("hljs", true).style("margin-top", "20px").attr("id", "insts").html(contents)
