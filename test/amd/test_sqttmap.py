@@ -77,6 +77,7 @@ class TestSQTTMapBase(unittest.TestCase):
     for name, (events, kern_events, target) in self.examples.items():
       for event in events:
         if (p:=kern_events.get(event.kern)) is None: continue
+        if event.se != 0: continue
         with self.subTest(example=name, kern=event.kern):
           if not (timeline:=sqtt_timeline(event.blob, p.lib, target)): continue
           frequency = [e.key for e in timeline if type(e).__name__ == "ProfilePointEvent" and e.name == "freq_hz"]

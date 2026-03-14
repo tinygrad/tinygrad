@@ -600,6 +600,7 @@ class InstructionInfo:
   pc: int
   wave: int
   inst: Inst
+  span: int = 0
 
 def map_insts(data:bytes, lib:bytes, target:str) -> Iterator[tuple[PacketType, InstructionInfo|None]]:
   """maps SQTT packets to instructions, yields (packet, instruction_info or None)"""
@@ -607,6 +608,7 @@ def map_insts(data:bytes, lib:bytes, target:str) -> Iterator[tuple[PacketType, I
   from tinygrad.viz.serve import amd_decode
   pc_map = amd_decode(lib, target)
   wave_pc:dict[int, int] = {}
+  wave_syncs:list[INST|INST_RDNA4] = []
   # only processing packets on one [CU, SIMD] unit
   def simd_select(p) -> bool: return getattr(p, "cu", 0) == 0 and getattr(p, "simd", 0) == 0
   for p in decode(data):
@@ -643,7 +645,14 @@ def map_insts(data:bytes, lib:bytes, target:str) -> Iterator[tuple[PacketType, I
         wave_pc[p.wave] += inst.size() + (x - 0x10000 if x & 0x8000 else x)*4
       else:
         wave_pc[p.wave] += inst.size()
-      yield (p, InstructionInfo(pc, p.wave, inst))
+      # yield after all waves issue BARRIER
+      if isinstance(p, (INST, INST_RDNA4)) and p.op in {InstOp.BARRIER}:
+        wave_syncs.append(p)
+        if p.wave == max(wave_pc):
+          et = max([p._time for p in wave_syncs])
+          for p in wave_syncs: yield (p, InstructionInfo(pc, p.wave, inst, span=et-p._time))
+        else: continue
+      else: yield (p, InstructionInfo(pc, p.wave, inst))
     # for all other packets (VMEMEXEC, ALUEXEC, etc.), yield with None
     else: yield (p, None)
 
