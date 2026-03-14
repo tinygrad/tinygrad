@@ -1650,8 +1650,7 @@ def _compile_mubuf(inst: irc.MUBUF, ctx: _Ctx) -> UOp:
     # Extract base address from buffer descriptor (first two SGPRs = 64-bit base)
     base = _u64(ctx.rsgpr_dyn(srsrc_reg), ctx.rsgpr_dyn(srsrc_reg + _c(1)))
     # soffset: if soffset_reg < 124 use SGPR value, else 0 (NULL)
-    soff = (soffset_reg < _c(124)).where(ctx.rsgpr_dyn(soffset_reg).cast(dtypes.uint64),
-                                          UOp.const(dtypes.uint64, 0))
+    soff = (soffset_reg < _c(124)).where(ctx.rsgpr_dyn(soffset_reg).cast(dtypes.uint64), UOp.const(dtypes.uint64, 0))
     # vaddr contribution
     vaddr_val = ctx.rvgpr_dyn(vaddr_reg, lane).cast(dtypes.uint64)
     voff = vaddr_val if (offen or idxen) else UOp.const(dtypes.uint64, 0)
@@ -1665,15 +1664,11 @@ def _compile_mubuf(inst: irc.MUBUF, ctx: _Ctx) -> UOp:
   for i in range(data_bits // 32):
     # Shared address logic
     word_addr = (addr + UOp.const(dtypes.uint64, i * 4)) >> 2
-    idx = ctx.vmem.index(word_addr.cast(dtypes.int), active)
+    idx = ctx.vmem.index(word_addr.cast(dtypes.int), active, ptr=True)
     reg_idx = vdata_reg + _c(i)
-    if is_load: # Memory to Register
-      val = idx.load()
-      stores.append(ctx.wvgpr_dyn(reg_idx, lane, val, exec_mask))
-    else: # Register to Memory
-      val = ctx.rvgpr_dyn(reg_idx, lane)
-      stores.append(idx.store(active.where(val, idx.load())))
-
+    # load: memory → vgpr | store: vgpr → memory
+    op = ctx.wvgpr_dyn(reg_idx, lane, idx.load(), exec_mask) if is_load else idx.store(active.where(ctx.rvgpr_dyn(reg_idx, lane), idx.load()))
+    stores.append(op)
   return UOp.sink(UOp.group(*stores).end(lane), *ctx.inc_pc())
 
 # Dispatch table: instruction type -> handler function
