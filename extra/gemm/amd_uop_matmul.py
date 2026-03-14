@@ -115,7 +115,7 @@ def hand_spec_kernel3(c:UOp, a:UOp, b:UOp) -> UOp:
 
   return sink.sink(arg=KernelInfo(opts_to_apply=())).simplify()
 
-if __name__ == "__main__":
+def eval_custom_matmul(fxn):
   a = Tensor.randn(M, K, dtype=dtypes.float)
   b = Tensor.randn(K, N, dtype=dtypes.float)
   c = Tensor.empty(M, N, dtype=dtypes.float)
@@ -125,7 +125,7 @@ if __name__ == "__main__":
   with Context(DEBUG=max(2, DEBUG.value)):
     for _ in range(NUM_RUNS):
       GlobalCounters.reset()
-      tst = Tensor.custom_kernel(c, a, b, fxn=hand_spec_kernel3)[0].realize()
+      tst = Tensor.custom_kernel(c, a, b, fxn=fxn)[0].realize()
       ets.append(GlobalCounters.time_sum_s)
   print(f"REAL TFLOPS {M * N * K * 2 / min(ets) * 1e-12:.2f}")
 
@@ -138,3 +138,6 @@ if __name__ == "__main__":
     print(f"mean squared error {err}")
     if err > 1e-06:
       raise RuntimeError("matmul is wrong!")
+
+if __name__ == "__main__":
+  eval_custom_matmul(hand_spec_kernel3)
