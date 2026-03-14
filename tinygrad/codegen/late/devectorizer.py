@@ -61,6 +61,16 @@ load_store_indexing = PatternMatcher([
 # ***** load/store grouping *****
 
 def expand_index(buf:UOp, vec:UOp):
+  # determine optimal image shapes before the indexing expands
+  if isinstance(dt:=buf.dtype, ImageDType) and IMAGE == 1:
+    x, valid = vec.get_idx().gep(0), vec.get_valid().gep(1)
+    h, w = max(ImageDType.valid_dims(dt), key=lambda hw:
+                # maximize number of valids removed
+               (len(_drop_valid_stmts(valid, idx:=uop_given_valid(valid, UOp.vectorize((x//4)%hw[1], x//(4*hw[1])).simplify()), *hw)),
+                # and minimize idx complexity (number of nodes)
+                -len(idx.gep(1).backward_slice)))
+    buf = buf.replace(dtype=(dtypes.imageh if dt.itemsize == 2 else dtypes.imagef)((h, w, 4), w * 4 * dt.itemsize))
+
   if getenv("UNSAFE_DISABLE_MASK", 0): vec = vec.get_idx()
   # generate the individual indexes
   return UOp(Ops.VECTORIZE, buf.dtype, tuple(buf.index(vec.gep(i), ptr=True) for i in range(vec.dtype.count)))
@@ -183,31 +193,21 @@ def split_load_store(ctx:Renderer|None, ls:UOp, idx:UOp):
   if len(ret) <= 1: return None
   return UOp(Ops.VCAT, ls.dtype, tuple(ret)) if ls.op is Ops.LOAD else UOp.group(*ret)
 
-def _do_image_fixup(dt:ImageDType, idx:UOp) -> tuple[UOp, UOp, int, int]:
-  buf = idx.src[0]
-  x, valid = idx.src[1].get_idx(), idx.src[1].get_valid()
-  h, w = dt.shape[0], dt.shape[1]
-  if IMAGE == 1 and valid is not None:
-    h, w = max(ImageDType.valid_dims(dt), key=lambda hw:
-                # maximize number of valids removed
-               (len(_drop_valid_stmts(valid, idx:=uop_given_valid(valid, UOp.vectorize((x//4)%hw[1], x//(4*hw[1])).simplify()), *hw)),
-                # and minimize idx complexity (number of nodes)
-                -len(idx.gep(1).backward_slice)))
-    buf = buf.replace(dtype=(dtypes.imageh if dt.itemsize == 2 else dtypes.imagef)((h, w, 4), w * 4 * dt.itemsize))
-  oidx = UOp(Ops.VECTORIZE, dtypes.index.vec(2), ((x // 4) % w, (x // (4*w))))
-  return x, idx.replace(src=(buf, oidx.valid(valid))), w, h
+def get_image_idx(idx:UOp, width:int) -> UOp:
+  oidx = UOp(Ops.VECTORIZE, dtypes.index.vec(2), (((x:=idx.src[1].get_idx()) // 4) % width, (x // (4*width))))
+  return idx.replace(src=(idx.src[0], oidx.valid(idx.src[1].get_valid())))
 
 def image_fixup(ls:UOp):
   # normal image load or store, with the CAST from expand_index
   if ls.src[0].op is Ops.CAST and isinstance(image_dtype:=ls.src[0].src[0].dtype, ImageDType):
     assert ls.src[0].dtype.count == 4, "image must be casted to 4"
-    _, idx, _, _ = _do_image_fixup(image_dtype, ls.src[0].src[0])
+    idx = get_image_idx(ls.src[0].src[0], image_dtype.shape[1])
     return ls.replace(src=(idx,)+ls.src[1:])
 
   # this is an unprocessed image without a cast, aka unfoldable image load. this doesn't work for stores
   if isinstance(image_dtype:=ls.src[0].dtype, ImageDType) and ls.src[0].src[1].get_idx().dtype != dtypes.index.vec(2):
     assert ls.op is Ops.LOAD, "if an image store isn't upcasted to 4, we can't store it"
-    x, idx, width, height = _do_image_fixup(image_dtype, ls.src[0])
+    x, idx = ls.src[0].src[1].get_idx(), get_image_idx(ls.src[0], image_dtype.shape[1])
     vec_load = ls.replace(dtype=ls.dtype.vec(4), src=(idx,)+ls.src[1:])
     # image pixels have 4 channels (.xyzw), select channel based on x % 4
     x_mod_4 = x % 4
