@@ -135,7 +135,9 @@ class DLL(ctypes.CDLL):
   _loaded_: set[str] = set()
 
   @staticmethod
-  def findlib(nm:str, paths:list[str], extra_paths=[]):
+  def findlib(nm:str, paths:list[str], extra_paths=None):
+    if extra_paths is None:
+        extra_paths = []
     if nm == 'libc' and OSX: return '/usr/lib/libc.dylib'
     if pathlib.Path(path:=getenv(nm.replace('-', '_').upper()+"_PATH", '')).is_file(): return path
     for p in paths:
@@ -156,7 +158,9 @@ class DLL(ctypes.CDLL):
             with open(l, 'rb') as f:
               if f.read(4) == b'\x7FELF': return str(l)
 
-  def __init__(self, nm:str, paths:str|list[str], extra_paths=[], emsg="", **kwargs):
+  def __init__(self, nm:str, paths:str|list[str], extra_paths=None, emsg="", **kwargs):
+    if extra_paths is None:
+        extra_paths = []
     self.nm, self.emsg = nm, emsg
     if (path:= DLL.findlib(nm, paths if isinstance(paths, list) else [paths], extra_paths if isinstance(extra_paths, list) else [extra_paths])):
       if DEBUG >= 3: print(f"loading {nm} from {path}")
