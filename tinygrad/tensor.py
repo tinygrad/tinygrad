@@ -3665,16 +3665,18 @@ class Tensor(OpMixin):
       # hacks for pitch alignment
       assert isinstance(ix, int) and isinstance(H, int)
       ALIGN = 64 // dtsz
-      def _empty_pad_to(t, shape, dt=None):
-        if dt is not None: t = t.cast(dt)
+      def _empty_pad_to(t, shape):
         padded = tuple(p if p is not None else s for p, s in zip(shape, t.shape))
         if padded == t.shape: return t.contiguous()
         buf = Tensor.empty(*padded, device=t.device, dtype=t.dtype)
         buf[tuple(slice(0, s) for s in t.shape)] = t
         return buf
-      x = _empty_pad_to(x, (None, None, round_up(ix, ALIGN // math.gcd(groups * cin, ALIGN)), None), dtypes.half if FLOAT16 else None)
-      w = _empty_pad_to(w, (None, round_up(H, ALIGN // math.gcd(W * cin * 4, ALIGN))) + (None,) * (w.ndim - 2), dtypes.half if FLOAT16 else None)
 
+      if FLOAT16: x, w = x.cast(dtypes.half), w.cast(dtypes.half)
+      x = _empty_pad_to(x, (None, None, round_up(ix, ALIGN // math.gcd(groups * cin, ALIGN)), None))
+      w = _empty_pad_to(w, (None, round_up(H, ALIGN // math.gcd(W * cin * 4, ALIGN))) + (None,) * (w.ndim - 2))
+
+      # store in float16, but cast back to float for math
       if FLOAT16: x, w = x.cast(dtypes.float), w.cast(dtypes.float)
 
       # undo alignment hacks
