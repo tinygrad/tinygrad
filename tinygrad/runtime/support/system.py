@@ -231,6 +231,7 @@ class PCIIfaceBase:
   dev_impl:PCIDevImplBase
 
   def is_local(self) -> bool: return not isinstance(self.pci_dev, RemotePCIDevice)
+  def is_bar_small(self) -> bool: return self.pci_dev.bar_info[self.vram_bar].size == (256 << 20)
 
   def __init__(self, dev, dev_id, vendor, devices:list[tuple[int, list[int]]], bars, vram_bar, va_start, va_size, base_class:int|None=None):
     self.pci_dev = System.pci_probe_device(dev.__class__.__name__[:2], dev_id, vendor, devices, bars, resize_bars=[vram_bar], base_class=base_class)
@@ -239,8 +240,7 @@ class PCIIfaceBase:
     self.p2p_base_addr = self.pci_dev.bar_info[vram_bar].addr
 
   def alloc(self, size:int, host=False, uncached=False, cpu_access=False, contiguous=False, force_devmem=False, **kwargs) -> HCQBuffer:
-    # NOTE: remote devices have small bar, so cpu_access alone triggers sysmem.
-    should_use_sysmem = host or ((cpu_access if not self.is_local() else (uncached and cpu_access)) and not force_devmem)
+    should_use_sysmem = host or ((cpu_access if self.is_bar_small() else (uncached and cpu_access)) and not force_devmem)
     if should_use_sysmem:
       vaddr = self.dev_impl.mm.alloc_vaddr(size:=round_up(size, mmap.PAGESIZE), align=mmap.PAGESIZE)
       memview, paddrs = self.pci_dev.alloc_sysmem(size, vaddr=vaddr, contiguous=contiguous)
@@ -258,6 +258,7 @@ class PCIIfaceBase:
 
   def map(self, b:HCQBuffer):
     if not self.is_local(): raise RuntimeError(f"P2P mapping not supported for remote devices: {b.owner} -> {self.dev}")
+
     if b.owner is not None and b.owner._is_cpu():
       System.lock_memory(int(b.va_addr), b.size)
       paddrs, aspace = [(x, 0x1000) for x in System.system_paddrs(int(b.va_addr), round_up(b.size, 0x1000))], AddrSpace.SYS
