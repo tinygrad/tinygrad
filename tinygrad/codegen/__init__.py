@@ -2,8 +2,7 @@ from typing import cast
 from dataclasses import replace
 import itertools
 from tinygrad.helpers import DISABLE_FAST_IDIV, EMULATED_DTYPES, DEVECTORIZE, TRANSCENDENTAL, SPEC, DEBUG, VIZ, IMAGE, TracingKey, Context
-from tinygrad.uop.ops import PatternMatcher, graph_rewrite, UOp, pm_lower_index_dtype, Ops, UPat, track_rewrites, KernelInfo, pyrender, AxisType
-from tinygrad.uop.ops import GroupOp
+from tinygrad.uop.ops import PatternMatcher, graph_rewrite, UOp, pm_lower_index_dtype, Ops, UPat, track_rewrites, KernelInfo, pyrender
 from tinygrad.uop.spec import type_verify, program_spec, kernel_spec
 from tinygrad.renderer import Renderer, ProgramSpec, Estimates
 from tinygrad.dtype import dtypes, promo_lattice
@@ -20,22 +19,9 @@ from tinygrad.codegen.late.devectorizer import load_store_folding, load_store_in
   ReduceContext, correct_load_store, pm_render, pm_add_loads
 from tinygrad.codegen.opt.postrange import apply_opts, pm_make_images
 from tinygrad.codegen.simplify import pm_simplify_ranges, pm_flatten_range, pm_split_ranges, pm_load_collapse
-from tinygrad.schedule.rangeify import pm_add_buffers_local, rangeify_codegen, pm_mops, pm_syntactic_sugar
+from tinygrad.schedule.rangeify import pm_add_buffers_local, rangeify_codegen, pm_mops, pm_syntactic_sugar, pm_store_ranges
 from tinygrad.codegen.late.linearizer import CFGContext, pm_split_ends, pm_add_control_flow, linearize
 from tinygrad.renderer.amd.elf import do_assemble_amd
-
-def add_ranges_to_store(ctx, x):
-  if x.src[0]._shape is None or x.src[1]._shape is None or x.src[0].shape == (): return None
-  assert x.src[0].shape == x.src[1].shape, "bad store shape"
-  idxs = [UOp.range(r, next(ctx), AxisType.LOOP) for r in x.src[0].shape]
-  return UOp.store(x.src[0].index(*idxs), x.src[1].index(*idxs)).end(*idxs)
-
-pm_store_ranges = PatternMatcher([
-  (UPat(Ops.STORE, name="x"), add_ranges_to_store),
-  # rangeify
-  (UPat(Ops.INDEX, src=(UPat(GroupOp.Elementwise | {Ops.CONST}, name="x"),), allow_any_len=True, name="idx"),
-   lambda idx,x: x.replace(src=tuple([s.index(*idx.src[1:]) for s in x.src]))),
-])
 
 def full_rewrite_to_sink(sink:UOp, ren:Renderer|None=None, optimize:bool=True) -> UOp:
   if ren is None: ren = Renderer()
