@@ -1,6 +1,6 @@
 import itertools
 from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, graph_rewrite, _substitute, range_start
-from tinygrad.uop.symbolic import symbolic, invalid_gate
+from tinygrad.uop.symbolic import symbolic
 from tinygrad.helpers import partition
 from tinygrad.dtype import dtypes, ImageDType
 
@@ -37,9 +37,11 @@ def simplify_merge_adjacent(u:UOp) -> UOp|None:
   return u
 
 def mark_gated(ctx, idx):
-  x, cond = idx.src[1].get_idx(), idx.src[1].get_valid()
-  # get all ranges r with guards "r < c" for some const c
-  guards = {r:c for v in cond.split_uop(Ops.AND) if v.op is Ops.CMPLT and (r:=v.src[0]).op is Ops.RANGE and (c:=v.src[1]).op is Ops.CONST}
+  if idx.src[0].op is Ops.WHERE:
+    x, cond = idx.src[1].get_idx(), idx.src[1].get_valid()
+    # get all ranges r with guards "r < c" for some const c
+    guards = {r:c for v in cond.split_uop(Ops.AND) if v.op is Ops.CMPLT and (r:=v.src[0]).op is Ops.RANGE and (c:=v.src[1]).op is Ops.CONST}
+  else: x, guards = idx, {}
   # ensure that c actually limits the range, and that we choose max(c_i)
   ctx |= {r:c for r,c in guards.items() if c.arg < r.src[0].arg and (r not in ctx or ctx[r].arg < c.arg)}
   # but if a range is ever ungated, we cannot shrink it
