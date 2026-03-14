@@ -1,4 +1,5 @@
 import itertools
+from typing import Callable
 from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, graph_rewrite, _substitute, range_start
 from tinygrad.uop.symbolic import symbolic
 from tinygrad.helpers import partition
@@ -36,22 +37,32 @@ def simplify_merge_adjacent(u:UOp) -> UOp|None:
           u = nidx
   return u
 
+def mark_gated(ctx, idx):
+  if idx.src[1].op is Ops.WHERE:
+    x, cond = idx.src[1].get_idx(), idx.src[1].get_valid()
+    # get all ranges r with guards "r < c" for some const c
+    guards = {r:c for v in cond.split_uop(Ops.AND) if v.op is Ops.CMPLT and (r:=v.src[0]).op is Ops.RANGE and (c:=v.src[1]).op is Ops.CONST}
+  else: x, guards = idx, {}
+  # ensure that c actually limits the range, and that we choose max(c_i)
+  ctx |= {r:c for r,c in guards.items() if c.arg < r.src[0].arg and (r not in ctx or ctx[r].arg < c.arg)}
+  # but if a range is ever ungated, we cannot shrink it
+  ctx |= {r:r.src[0] for r in x.ranges if r not in guards}
+
 pm_simplify_ranges = PatternMatcher([
   (UPat((Ops.END, Ops.REDUCE), name="u"), simplify_merge_adjacent),
+  (UPat(Ops.INDEX, name="idx"), mark_gated),
+  # reduce ranges can't be shrunk
+  (UPat(Ops.REDUCE, name="red"), lambda ctx, red: ctx.update({r:r.src[0] for r in red.src[1:]})),
+  (UPat(Ops.SINK, name="x"), lambda ctx, x: do_substitute(ctx, x, lambda r,c: r.replace(src=(c,)))),
 ])
 
 def mark_range_mod(ctx:dict[UOp, UOp|None], r:UOp, c:UOp) -> None:
   if r not in ctx and r.src[0].op is Ops.CONST and r.src[0].divides(c.arg) is not None: ctx[r] = c
 
-def do_substitute(ctx:dict[UOp, UOp|None], x: UOp) -> UOp|None:
-  subs = {}
-  for k,v in ctx.items():
-    if v is not None:
-      subs[k] = k.replace(src=(k.src[0]//v,), arg=k.arg[0:-1]+(0,k.arg[-1]))*v + k.replace(src=(v,), arg=k.arg[0:-1]+(1,k.arg[-1]))
-  if not len(subs): return None
-  ret = x.substitute(subs).simplify()
+def do_substitute(ctx:dict, x: UOp, sub_fxn:Callable[[UOp, UOp], UOp]) -> UOp|None:
+  ret = x.substitute({k:sub_fxn(k,v) for k,v in ctx.items() if v is not None})
   ctx.clear()
-  return ret
+  return None if ret is x else ret.simplify()
 
 def dont_sub_ranges_for_image(ctx:dict[UOp, UOp|None], x:UOp) -> None:
   if isinstance(x.src[0].src[0].dtype, ImageDType):
@@ -60,7 +71,8 @@ def dont_sub_ranges_for_image(ctx:dict[UOp, UOp|None], x:UOp) -> None:
 pm_split_ranges = PatternMatcher([
   (UPat(Ops.RANGE, name="r")%UPat.cvar("c"), mark_range_mod),
   (UPat(Ops.STORE, name="x"), dont_sub_ranges_for_image),
-  (UPat(Ops.SINK, name="x"), do_substitute),
+  (UPat(Ops.SINK, name="x"), lambda ctx, x: do_substitute(ctx, x,
+    lambda k,v: k.replace(src=(k.src[0]//v,), arg=k.arg[0:-1]+(0,k.arg[-1]))*v + k.replace(src=(v,), arg=k.arg[0:-1]+(1,k.arg[-1])))),
 ])
 
 # **** reduce simplification ****
