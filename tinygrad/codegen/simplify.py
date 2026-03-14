@@ -51,6 +51,8 @@ def mark_gated(ctx, idx):
 pm_simplify_ranges = PatternMatcher([
   (UPat((Ops.END, Ops.REDUCE), name="u"), simplify_merge_adjacent),
   (UPat(Ops.INDEX, name="idx"), mark_gated),
+  # reduce ranges can't be shrunk
+  (UPat(Ops.REDUCE, name="red"), lambda ctx, red: ctx.update({r:r.src[0] for r in red.src[1:]})),
   (UPat(Ops.SINK, name="x"), lambda ctx, x: do_substitute(ctx, x, lambda r,c: r.replace(src=(c,)))),
 ])
 
