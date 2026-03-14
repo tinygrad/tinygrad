@@ -1,4 +1,5 @@
 import itertools
+from typing import Callable
 from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, graph_rewrite, _substitute, range_start
 from tinygrad.uop.symbolic import symbolic
 from tinygrad.helpers import partition
@@ -50,21 +51,16 @@ def mark_gated(ctx, idx):
 pm_simplify_ranges = PatternMatcher([
   (UPat((Ops.END, Ops.REDUCE), name="u"), simplify_merge_adjacent),
   (UPat(Ops.INDEX, name="idx"), mark_gated),
-  (UPat(Ops.SINK, name="x"), lambda ctx, x: x.substitute({r:r.replace(src=(c,)) for r,c in ctx.items()})),
+  (UPat(Ops.SINK, name="x"), lambda ctx, x: do_substitute(ctx, x, lambda r,c: r.replace(src=(c,)))),
 ])
 
 def mark_range_mod(ctx:dict[UOp, UOp|None], r:UOp, c:UOp) -> None:
   if r not in ctx and r.src[0].op is Ops.CONST and r.src[0].divides(c.arg) is not None: ctx[r] = c
 
-def do_substitute(ctx:dict[UOp, UOp|None], x: UOp) -> UOp|None:
-  subs = {}
-  for k,v in ctx.items():
-    if v is not None:
-      subs[k] = k.replace(src=(k.src[0]//v,), arg=k.arg[0:-1]+(0,k.arg[-1]))*v + k.replace(src=(v,), arg=k.arg[0:-1]+(1,k.arg[-1]))
-  if not len(subs): return None
-  ret = x.substitute(subs).simplify()
+def do_substitute(ctx:dict, x: UOp, sub_fxn:Callable[[UOp, UOp], UOp]) -> UOp|None:
+  ret = x.substitute({k:sub_fxn(k,v) for k,v in ctx.items() if v is not None})
   ctx.clear()
-  return ret
+  return None if ret is x else ret.simplify()
 
 def dont_sub_ranges_for_image(ctx:dict[UOp, UOp|None], x:UOp) -> None:
   if isinstance(x.src[0].src[0].dtype, ImageDType):
@@ -73,7 +69,8 @@ def dont_sub_ranges_for_image(ctx:dict[UOp, UOp|None], x:UOp) -> None:
 pm_split_ranges = PatternMatcher([
   (UPat(Ops.RANGE, name="r")%UPat.cvar("c"), mark_range_mod),
   (UPat(Ops.STORE, name="x"), dont_sub_ranges_for_image),
-  (UPat(Ops.SINK, name="x"), do_substitute),
+  (UPat(Ops.SINK, name="x"), lambda ctx, x: do_substitute(ctx, x,
+    lambda k,v: k.replace(src=(k.src[0]//v,), arg=k.arg[0:-1]+(0,k.arg[-1]))*v + k.replace(src=(v,), arg=k.arg[0:-1]+(1,k.arg[-1])))),
 ])
 
 # **** reduce simplification ****
