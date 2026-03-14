@@ -1282,7 +1282,7 @@ def train_bert():
         previous_step = i
 
 def train_llama3():
-  from extra.models.llama import Transformer
+  from examples.mlperf.models.llama import Transformer
   from examples.llama3 import MODEL_PARAMS
   from examples.mlperf.lr_schedulers import CosineAnnealingLRWithWarmup
   from examples.mlperf.optim import GradAccClipAdamW
@@ -1343,7 +1343,7 @@ def train_llama3():
   if (MP := getenv("MP", 1)) > 1: model_params['vocab_size'] = round_up(model_params['vocab_size'], 256 * MP)
   vocab_mask:Tensor = Tensor.arange(model_params['vocab_size']).reshape(1, 1, -1) >= real_vocab_size
 
-  model = Transformer(**model_params, max_context=SEQLEN, jit=False, disable_kv_cache=True)
+  model = Transformer(**model_params, max_context=SEQLEN)
 
   params = get_parameters(model)
   # weights are all bfloat16 for now
@@ -1417,7 +1417,7 @@ def train_llama3():
       device = tuple(f"{Device.DEFAULT}:{i}" for i in range(MP))
       tokens = tokens.shard(device)
     if DP == 1 and MP == 1: tokens = tokens.to(None)
-    logits:Tensor = model(tokens[:, :-1], start_pos=0, temperature=math.nan)
+    logits:Tensor = model(tokens[:, :-1])
     loss = vocab_mask.where(-1e9, logits).sparse_categorical_crossentropy(tokens[:, 1:])
     loss.backward()
     assert all(p.grad is g for p,g in zip(optim.params, grads))
@@ -1449,7 +1449,7 @@ def train_llama3():
       device = tuple(f"{Device.DEFAULT}:{i}" for i in range(MP))
       tokens = tokens.shard(device)
     if DP == 1 and MP == 1: tokens = tokens.to(None)
-    logits:Tensor = model(tokens[:, :-1], start_pos=0, temperature=math.nan)
+    logits:Tensor = model(tokens[:, :-1])
     loss = vocab_mask.where(-1e9, logits).sparse_categorical_crossentropy(tokens[:, 1:])
     return loss.flatten().float().to("CPU")
 
