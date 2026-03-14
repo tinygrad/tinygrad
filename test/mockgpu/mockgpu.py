@@ -12,7 +12,7 @@ libc.mmap.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int, ctypes.c_i
 libc.mmap.restype = ctypes.c_void_p
 
 _amd_iface = getenv("AMD_IFACE", "")
-drivers = [NVDriver(), AMDriver() if _amd_iface == "PCI" else (AMUSBDriver() if _amd_iface == "USB" else AMDDriver())]
+drivers = [NVDriver(), AMUSBDriver() if _amd_iface == "PCI:USB" else (AMDriver() if _amd_iface.startswith("PCI") else AMDDriver())]
 tracked_fds = {}
 
 original_memoryview = builtins.memoryview

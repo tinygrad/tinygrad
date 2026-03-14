@@ -73,12 +73,14 @@ class _System:
 
   _pci_cache:dict[int, list[str]] = {}
   def probe_pci_device(self, devpref:str, dev_id:int, vendor:int, devices:list[tuple[int, list[int]]], bars:list[int],
-                       resize_bars:list[int]|None=None, base_class:int|None=None):
+                       resize_bars:list[int]|None=None, base_class:int|None=None, transport:str=""):
+    if transport == "USB": return USBPCIDevice(devpref, f'usb:{dev_id}', bars=bars)
+    if OSX or transport == "REMOTE": return APLRemotePCIDevice(devpref, f'remote:{dev_id}', bars)
     if vendor not in self._pci_cache:
       self._pci_cache[vendor] = hcq_filter_visible_devices(System.pci_scan_bus(vendor, devices, base_class))
-    if OSX: return APLRemotePCIDevice(devpref, f'remote:{dev_id}', bars)
     if self._pci_cache[vendor]: return PCIDevice(devpref, self._pci_cache[vendor][dev_id], bars=bars, resize_bars=resize_bars)
-    return USBPCIDevice(devpref, f'usb:{dev_id}', bars=bars)
+    if not transport: return USBPCIDevice(devpref, f'usb:{dev_id}', bars=bars)
+    raise RuntimeError("No supported GPUs found")
 
   def pci_setup_usb_bars(self, usb:ASM24Controller, gpu_bus:int, mem_base:int, pref_mem_base:int) -> dict[int, PCIBarInfo]:
     for bus in range(gpu_bus):
@@ -210,7 +212,6 @@ class USBPCIDevice(PCIDevice):
     self.usb = ASM24Controller()
     self.pcibus, self.bar_info = pcibus, System.pci_setup_usb_bars(self.usb, gpu_bus=4, mem_base=0x10000000, pref_mem_base=(32 << 30))
     self.sram = BumpAllocator(size=0x80000, wrap=False) # asm24 controller sram
-    self.usb._pci_cacheable += [(self.bar_info[2].addr, self.bar_info[2].size)] # doorbell region is cacheable
   def read_config(self, offset:int, size:int): return self.usb.pcie_cfg_req(offset, bus=4, dev=0, fn=0, size=size)
   def write_config(self, offset:int, value:int, size:int): self.usb.pcie_cfg_req(offset, bus=4, dev=0, fn=0, value=value, size=size)
   def map_bar(self, bar, off=0, addr=0, size=None, fmt='B'):
@@ -223,8 +224,10 @@ class USBPCIDevice(PCIDevice):
 class PCIAllocationMeta: mapping:VirtMapping; has_cpu_mapping:bool; hMemory:int=0 # noqa: E702
 
 class PCIIfaceBase:
-  def __init__(self, dev, dev_id, vendor, devices:list[tuple[int, list[int]]], bars, vram_bar, va_start, va_size, base_class:int|None=None):
-    self.pci_dev = System.probe_pci_device(dev.__class__.__name__[:2], dev_id, vendor, devices, bars, resize_bars=[vram_bar], base_class=base_class)
+  def __init__(self, dev, dev_id, vendor, devices:list[tuple[int, list[int]]], bars, vram_bar, va_start, va_size, base_class:int|None=None,
+               transport:str=""):
+    self.pci_dev = System.probe_pci_device(dev.__class__.__name__[:2], dev_id, vendor, devices, bars, resize_bars=[vram_bar], base_class=base_class,
+                                           transport=transport)
     if dev_id == 0 and self._is_local:
       FileIOInterface.anon_mmap(va_start, va_size, 0, mmap.MAP_PRIVATE | mmap.MAP_ANONYMOUS | MAP_NORESERVE | MAP_FIXED_NOREPLACE, 0)
     self.dev, self.vram_bar = dev, vram_bar

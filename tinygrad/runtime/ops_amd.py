@@ -825,11 +825,14 @@ class KFDIface:
 
 class PCIIface(PCIIfaceBase):
   def __init__(self, dev, dev_id):
+    iface = getenv("AMD_IFACE", "")
+    transport = iface.split(":")[1].upper() if ":" in iface else ""
     super().__init__(dev, dev_id, vendor=0x1002, devices=[(0xffff, [0x74a1, 0x744c, 0x7480, 0x7550, 0x7590, 0x75a0])], bars=[0, 2, 5], vram_bar=0,
-      va_start=AMMemoryManager.va_allocator.base, va_size=AMMemoryManager.va_allocator.size)
+      va_start=AMMemoryManager.va_allocator.base, va_size=AMMemoryManager.va_allocator.size, transport=transport)
     self._setup_adev(self.pci_dev)
 
     if isinstance(self.pci_dev, USBPCIDevice):
+      self.pci_dev.usb._pci_cacheable += [(self.pci_dev.bar_info[2].addr, self.pci_dev.bar_info[2].size)] # doorbell region is cacheable
       self.copy_bufs = [self._usb_dma_region(ctrl_addr=0xf000, sys_addr=0x200000, size=0x80000)]
       self.sys_buf, self.sys_next_off = self._usb_dma_region(ctrl_addr=0xa000, sys_addr=0x820000, size=0x1000), 0x800
 

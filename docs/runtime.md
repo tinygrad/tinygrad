@@ -4,8 +4,8 @@ tinygrad supports various runtimes, enabling your code to scale across a wide ra
 
 | Runtime | Description | Compiler Options | Requirements |
 |---------|-------------|------------------|--------------|
-| [NV](https://github.com/tinygrad/tinygrad/tree/master/tinygrad/runtime/ops_nv.py) | Provides acceleration for NVIDIA GPUs | nvrtc (default)<br>PTX (`NV_PTX=1`) | Ampere/Ada/Blackwell series GPUs.<br>You can select an interface via `NV_IFACE=(NVK\|PCI)`. See [NV interfaces](#nv-interfaces) for details. |
-| [AMD](https://github.com/tinygrad/tinygrad/tree/master/tinygrad/runtime/ops_amd.py) | Provides acceleration for AMD GPUs | LLVM (`AMD_LLVM=1`)<br>HIP/COMGR (`AMD_HIP=1`) | RDNA2 or newer GPUs.<br>You can select an interface via `AMD_IFACE=(KFD\|PCI\|USB)`. See [AMD interfaces](#amd-interfaces) for details. |
+| [NV](https://github.com/tinygrad/tinygrad/tree/master/tinygrad/runtime/ops_nv.py) | Provides acceleration for NVIDIA GPUs | nvrtc (default)<br>PTX (`NV_PTX=1`) | Ampere/Ada/Blackwell series GPUs.<br>You can select an interface via `NV_IFACE=(NVK\|PCI\|PCI:REMOTE)`. See [NV interfaces](#nv-interfaces) for details. |
+| [AMD](https://github.com/tinygrad/tinygrad/tree/master/tinygrad/runtime/ops_amd.py) | Provides acceleration for AMD GPUs | LLVM (`AMD_LLVM=1`)<br>HIP/COMGR (`AMD_HIP=1`) | RDNA2 or newer GPUs.<br>You can select an interface via `AMD_IFACE=(KFD\|PCI\|PCI:USB\|PCI:REMOTE)`. See [AMD interfaces](#amd-interfaces) for details. |
 | [QCOM](https://github.com/tinygrad/tinygrad/tree/master/tinygrad/runtime/ops_qcom.py) | Provides acceleration for QCOM GPUs | - | 6xx series GPUs |
 | [METAL](https://github.com/tinygrad/tinygrad/tree/master/tinygrad/runtime/ops_metal.py) | Utilizes Metal for acceleration on Apple devices | - | M1+ Macs; Metal 3.0+ for `bfloat` support |
 | [CUDA](https://github.com/tinygrad/tinygrad/tree/master/tinygrad/runtime/ops_cuda.py) | Utilizes CUDA for acceleration on NVIDIA GPUs | nvrtc (default)<br> PTX (`CUDA_PTX=1`) | NVIDIA GPU with CUDA support |
@@ -69,8 +69,9 @@ tiny = Tensor.from_blob(rawbuf_ptr, (h*w*4,), dtype=dtypes.imagef((h,w)), device
 AMD backend supports several interfaces for communicating with devices:
 
 * `KFD`: uses the amdgpu driver
-* `PCI`: uses the [AM driver](developer/am.md)
-* `USB`: USB3 interface for asm24xx chips.
+* `PCI`: uses the [AM driver](developer/am.md) with direct PCI access
+* `PCI:USB`: uses the AM driver over USB3 (asm24xx controller)
+* `PCI:REMOTE`: uses the AM driver over a remote connection (macOS)
 
 You can force an interface by setting `AMD_IFACE` to one of these values. In the case of `AMD_IFACE=PCI`, this may unbind your GPU from the amdgpu driver.
 
@@ -78,4 +79,5 @@ You can force an interface by setting `AMD_IFACE` to one of these values. In the
 NV backend supports several interfaces for communicating with devices:
 
 * `NVK`: uses the nvidia driver
-* `PCI`: uses the [NV driver](https://github.com/tinygrad/tinygrad/tree/master/tinygrad/runtime/support/nv/nvdev.py)
+* `PCI`: uses the [NV driver](https://github.com/tinygrad/tinygrad/tree/master/tinygrad/runtime/support/nv/nvdev.py) with direct PCI access
+* `PCI:REMOTE`: uses the NV driver over a remote connection (macOS)
