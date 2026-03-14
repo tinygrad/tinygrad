@@ -1,4 +1,4 @@
-# RDNA3 emulator v2 - compiles pcode to UOps executed via tinygrad CPU backend
+# RDNA3/CDNA4 emulator v2 - compiles pcode to UOps executed via tinygrad CPU backend
 # Each instruction is compiled to a kernel that operates on buffers:
 #   arg=0: sgpr - sgpr[0-127], inline constants[128-255], PC_LO=256, PC_HI=257, SCC=258, SCRATCH_STRIDE=259
 #   arg=1: vgpr - vgpr[reg * 32 + lane]
@@ -1197,10 +1197,11 @@ def _compile_vop3sd(inst: ir3.VOP3SD | ir4.VOP3SD | irc.VOP3SD, ctx: _Ctx) -> UO
     return ctx.compile_vop_pcode(inst.op, srcs, lane, vdst_reg, exec_mask, sdst_reg=inst.sdst.offset)
 
 def _compile_mfma(inst: irc.VOP3P, ctx: _Ctx) -> UOp:
-  """CDNA MFMA 16x16xK matrix multiply-accumulate.
+  """CDNA MFMA matrix multiply-accumulate (supports 16x16xK and 32x32xK).
   Uses local temp array to cache inputs, avoiding aliasing when vdst overlaps src0/src1.
-  Phase 1: scatter A/B elements into tmp[0..n_elems-1] (A) and tmp[n_elems..2*n_elems-1] (B).
-  Phase 2: each lane accumulates 4 dot products D[m][n] += A[m]·B[n] and writes to ACCVGPR.
+  Phase 1: lanes scatter A/B elements into tmp[0..n_elems-1] (A) and tmp[n_elems..2*n_elems-1] (B).
+  Phase 2: each lane calculates dot products D[m][n] += sum(A[m][k] * B[n][k]) and updates ACCVGPRs.
+  For 16x16: each lane handles 4 output registers. For 32x32: each lane handles 16 output registers.
   """
   op_name, exec_mask = _op_name(inst), ctx.rexec()
   vdst_reg = ctx.inst_field(type(inst).vdst)
@@ -1209,12 +1210,12 @@ def _compile_mfma(inst: irc.VOP3P, ctx: _Ctx) -> UOp:
   is_bf16, is_fp8 = 'BF16' in op_name, 'FP8' in op_name or 'F8' in op_name
   m = re.search(r'(\d+)X(\d+)X(\d+)', op_name)
   M, N, K = int(m.group(1)), int(m.group(2)), int(m.group(3))
-  assert M == 16 and N == 16, f"only 16x16 MFMA supported, got {M}x{N}"
-  vpg, k_per_grp, n_elems = 4 if is_fp8 else 2, K // 4, 16 * K  # vpg: values packed per VGPR
+  assert M == N and M in {16, 32}, f"unsupported MFMA shape: {M}x{N}"
+  vpg, k_per_grp, n_elems = 4 if is_fp8 else 2, K // 4, M * K  # vpg: values packed per VGPR
   cvt = _FUNCS['bf16_to_f32'] if is_bf16 else _FUNCS['f16_to_f32']
   src2_is_vgpr = src2_off >= _c(256)
   acc_scalar = ctx.rsgpr_dyn(src2_off, src2_is_vgpr.ne(True)).bitcast(dtypes.float32)
-  b_off, Ki, i16 = UOp.const(dtypes.int, n_elems), UOp.const(dtypes.int, K), UOp.const(dtypes.int, 16)
+  b_off, Ki, tile = UOp.const(dtypes.int, n_elems), UOp.const(dtypes.int, K), UOp.const(dtypes.int, M)
   tmp = UOp(Ops.DEFINE_LOCAL, dtypes.float32.ptr(n_elems * 2, addrspace=AddrSpace.LOCAL), arg=(n_elems * 2,))
 
   def read_elem(src_r, raw_lane, kl):
@@ -1226,7 +1227,7 @@ def _compile_mfma(inst: irc.VOP3P, ctx: _Ctx) -> UOp:
 
   # Phase 1: each lane (= row/col) writes its k_per_grp elements for A and B into tmp
   read_lane = ctx.range()
-  read_row, read_grp = read_lane % i16, read_lane // i16  # lane_in_grp=row/col, grp=k-group
+  read_row, read_grp = read_lane % tile, read_lane // tile  # lane_in_grp=row/col, grp=k-group
   base_idx = read_row * Ki + read_grp * UOp.const(dtypes.int, k_per_grp)  # tmp offset for this lane
   read_stores = [s for kl in range(k_per_grp) for s in (
     tmp.index(base_idx + UOp.const(dtypes.int, kl)).store(read_elem(src0_r, read_lane, kl)),         # A[row][k]
@@ -1237,9 +1238,10 @@ def _compile_mfma(inst: irc.VOP3P, ctx: _Ctx) -> UOp:
   # Phase 2: each lane computes 4 outputs D[m][n] = sum_k A[m][k]*B[n][k] + C[m][n]
   tmp2 = tmp.after(read_phase)  # tmp view sequenced after read_phase
   compute_lane = ctx.range()
-  n_idx, c_grp = compute_lane % i16, compute_lane // i16  # n=col index, c_grp=output group
+  n_idx, c_grp = compute_lane % tile, compute_lane // tile  # n=col index, c_grp=output group
   compute_stores = []
-  for out_reg in range(4):  # each lane writes 4 ACCVGPR outputs (m = c_grp*4 + out_reg)
+  out_regs = 4 if M == 16 else 16
+  for out_reg in range(out_regs):  # Each lane updates its set of ACCVGPRs
     acc = src2_is_vgpr.where(ctx.raccvgpr_dyn(src2_off - _c(256) + _c(out_reg), compute_lane, src2_is_vgpr).bitcast(dtypes.float32), acc_scalar)
     m_base = c_grp * UOp.const(dtypes.int, 4) + UOp.const(dtypes.int, out_reg)
     for k in range(K):
@@ -1303,7 +1305,7 @@ def _compile_wmma(inst: ir3.VOP3P | ir4.VOP3P | irc.VOP3P, ctx: _Ctx) -> UOp:
 def _compile_vop3p(inst: ir3.VOP3P | ir4.VOP3P | irc.VOP3P, ctx: _Ctx) -> UOp:
   op_name = _op_name(inst)
   if 'WMMA' in op_name and ('16X16X16_F16' in op_name or '16X16X16_BF16' in op_name): return _compile_wmma(inst, ctx)
-  if 'MFMA' in op_name and '16X16X' in op_name and isinstance(inst, irc.VOP3P): return _compile_mfma(inst, ctx)
+  if 'MFMA' in op_name and ('16X16X' in op_name or '32X32X' in op_name) and isinstance(inst, irc.VOP3P): return _compile_mfma(inst, ctx)
 
   # ACCVGPR_WRITE/READ/MOV: copies between VGPR and ACCVGPR register files
   # Detect by checking operand types for ACCVGPR involvement
@@ -1667,6 +1669,7 @@ def _compile_mubuf(inst: irc.MUBUF, ctx: _Ctx) -> UOp:
   for i in range(data_bits // 32):
     # Shared address logic
     word_addr = (addr + UOp.const(dtypes.uint64, i * 4)) >> 2
+    # remove in final cleanup commit
     print(f"buffer_load_dwordx4: i={i}, word_addr={word_addr}, is_load={is_load}")
     idx = ctx.vmem.index(word_addr.cast(dtypes.int), active, ptr=True)
     reg_idx = vdata_reg + _c(i)
