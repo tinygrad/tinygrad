@@ -535,5 +535,12 @@ class TestRangeShrink(unittest.TestCase):
     self.assertEqual(len(ranges), 1)
     self.assertEqual(ranges[0].src[0].arg, 204)
 
+  def test_range_shrink_to_single_iteration(self):
+    # guard r < 1 shrinks range to 1 -> single iteration, range eliminated entirely
+    r = Range(0, 204)
+    load = get_gated_load_uop(r < UOp.const(dtypes.index, 1), r)
+    ranges = self.get_ranges(load.sink())
+    self.assertEqual(len(ranges), 0)
+
 if __name__ == '__main__':
   unittest.main()
