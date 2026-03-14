@@ -542,5 +542,23 @@ class TestRangeShrink(unittest.TestCase):
     ranges = self.get_ranges(load.sink())
     self.assertEqual(len(ranges), 0)
 
+  def test_range_shrink_store_where_invalid(self):
+    # emulates mask.where(x.pad_to(mask.shape), Invalid): range should shrink accordingly
+    from tinygrad.dtype import Invalid
+    r = Range(0, 204)
+    x = (r < 4).where(UOp.const(dtypes.float, 1), Invalid)
+    ranges = self.get_ranges(UOp(Ops.PARAM, dtypes.float.ptr(), arg=0).index(r).store((r < 4).where(x, 0)).sink())
+    self.assertEqual(len(ranges), 1)
+    self.assertEqual(ranges[0].src[0].arg, 4)
+
+  def test_range_shrink_store_where_invalid_flipped(self):
+    # above, but flipped
+    from tinygrad.dtype import Invalid
+    r = Range(0, 204)
+    x = (r < 4).where(UOp.const(dtypes.float, 1), Invalid)
+    ranges = self.get_ranges(UOp(Ops.PARAM, dtypes.float.ptr(), arg=0).index(r).store((r < 4).where(0, x)).sink())
+    self.assertEqual(len(ranges), 1)
+    self.assertEqual(ranges[0].src[0].arg, 4)
+
 if __name__ == '__main__':
   unittest.main()
