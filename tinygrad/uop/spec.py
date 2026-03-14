@@ -59,6 +59,9 @@ shared_spec = PatternMatcher([
   # RANGE/SPECIAL define loops, END closes them
   (UPat(Ops.END, src=(UPat(), UPat(Ops.RANGE))), lambda: True),
 
+  # STORE in tensor graph: store a value into a target
+  (UPat(Ops.STORE, dtypes.void, (UPat(), UPat())), lambda: True),
+
   # NOOP
   (UPat(Ops.NOOP), lambda: True)
 ])

@@ -27,7 +27,9 @@ def realize_assign_src(ctx:dict[UOp, None], buf:UOp, x:UOp):
 
 pm_generate_realize_map = PatternMatcher([
   # always realize
-  (UPat({Ops.COPY, Ops.CONTIGUOUS, Ops.STORE, Ops.ASSIGN}, name="tr"), realize),
+  (UPat({Ops.COPY, Ops.CONTIGUOUS, Ops.ASSIGN}, name="tr"), realize),
+  # realize AFTER of STORE+AFTER
+  (UPat(Ops.AFTER, src=(UPat(), UPat(Ops.STORE)), allow_any_len=True, name="tr"), realize),
   # realize srcs of these
   (UPat((Ops.COPY, Ops.MSELECT, Ops.MSTACK), name="rb"), realize_srcs),
   # sometimes realize src of assign
@@ -58,7 +60,13 @@ def create_bufferize_and_index_based_on_ranges(ctx:IndexingContext, x:UOp):
   new_srcs = []
   for s in x.src:
     new_src = s
-    if s.op in {Ops.PARAM, Ops.BUFFER_VIEW, Ops.MSTACK, Ops.MSELECT, Ops.AFTER}:
+    # TODO: this STORE+AFTER is very explicit, AFTER is the one being realized, and STORE needs to end ranges
+    if x.op is Ops.AFTER and s.op is Ops.STORE and x in ctx.realize_map:
+      realized_ranges = ctx.realize_map[x]
+      assert isinstance(realized_ranges, list), "realize map must contain range list"
+      closed_ranges = tuple([r for i,r in enumerate(ctx.range_map[x][1]) if i in realized_ranges])
+      new_src = s.end(*[r for r in closed_ranges if r.op is Ops.RANGE])
+    elif s.op in {Ops.PARAM, Ops.BUFFER_VIEW, Ops.MSTACK, Ops.MSELECT, Ops.AFTER}:
       if x in ctx.range_map: new_src = new_src.index(*ctx.range_map[x][0])
     elif s in ctx.realize_map:
       realized_ranges = ctx.realize_map[s]
@@ -163,8 +171,8 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
     # no ranges on kernels, they are internal
     if x.op in {Ops.CALL, Ops.LINEAR}: continue
 
-    # no range on after
-    if x.op is Ops.AFTER: continue
+    # only STORE+AFTER has range
+    if x.op is Ops.AFTER and all(s.op is not Ops.STORE for s in x.src[1:]): continue
 
     # treat MSTACK/MSELECT like SINK
     if x.op in {Ops.MSTACK, Ops.MSELECT}: continue

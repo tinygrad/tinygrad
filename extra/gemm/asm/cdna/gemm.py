@@ -64,9 +64,10 @@ def custom_uop_gemm(C:UOp, A:UOp, B:UOp) -> UOp:
   m = UOp.range(M, 1, AxisType.LOOP)
   n = UOp.range(N, 2, AxisType.LOOP)
   k = UOp.range(K, 0, AxisType.REDUCE)
-  mul = (A.index((m*UOp.const(dtypes.index, K)+k))*B.index((k*UOp.const(dtypes.index, N)+n))).cast(dtypes.float32)
+  mul = (A.flatten().index((m*UOp.const(dtypes.index, K)+k))*
+         B.flatten().index((k*UOp.const(dtypes.index, N)+n))).cast(dtypes.float32)
   red = mul.reduce(k, arg=Ops.ADD, dtype=dtypes.float32).cast(C.dtype.base)
-  store = C.index((m*UOp.const(dtypes.index, N)+n), ptr=True).store(red).end(m, n)
+  store = C.flatten().index((m*UOp.const(dtypes.index, N)+n), ptr=True).store(red).end(m, n)
   return store.sink(arg=KernelInfo(name=f'uop_gemm_{M}_{N}_{K}'))
 
 # ** backward gemm, might use the asm gemm
