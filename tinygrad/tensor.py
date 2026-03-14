@@ -3662,21 +3662,27 @@ class Tensor(OpMixin):
 
     # contiguous creates the image, and early realize static weights (TODO: test for the static weight)
     if IMAGE == 1:
-      # pad with Invalid
-      def _invalid_pad_to(t, shape):
-        if all(p is None or p == s for p,s in zip(shape, t.shape)): return t
-        return Tensor(True, device=t.device).expand(t.shape).pad_to(shape).where(t.pad_to(shape), Invalid)
-      # hacks for pitch alignment
-      assert isinstance(ix, int) and isinstance(H, int)
-      ALIGN = 64 // dtsz
-      x = _invalid_pad_to(x, (None, None, round_up(ix, ALIGN // math.gcd(groups * cin, ALIGN)), None))
-      w = _invalid_pad_to(w, (None, round_up(H, ALIGN // math.gcd(W * cin * 4, ALIGN))) + (None,) * (w.ndim - 2))
+      def is_pow2(v): return v > 0 and v & (v - 1) == 0
+      # pad dimension i to amt with invalids
+      def ipad(t, i, amt):
+        shape = (None,)*i + (amt,) + (None,)*(t.ndim-i-1)
+        return Tensor(True, device=t.device).expand(t.shape).pad_to(shape).where(t.pad_to(shape), Invalid) if amt != t.shape[i] else t
+      # align a dimension to 64 bytes
+      def pad_align(t, dim):
+        return ipad(t, dim, round_up(t.shape[dim], (64 // dtsz) // math.gcd(prod(t.shape) // t.shape[dim], (64 // dtsz))))
+
+      # bank conflicts
+      if cin >= 8 and is_pow2(cin // 4): x, w = ipad(x.reshape(bs, iy, ix, groups, cin // 4, 4), 4, cin // 4 + 1), ipad(w, 2, cin // 4 + 1)
+
+      # 64-byte pitch alignment
+      x, w = pad_align(x, 2), pad_align(w, 1)
 
       if FLOAT16: x, w = x.cast(dtypes.half).contiguous().cast(dtypes.float), w.cast(dtypes.half).contiguous().cast(dtypes.float)
       else: x, w = x.contiguous(), w.contiguous()
 
       # undo alignment hacks
-      x, w = x[:, :, :ix, :], w[:, :H, ...]
+      if cin >= 8 and is_pow2(cin // 4): x, w = x[:, :, :ix, :, :cin // 4, :], w[:, :H, :cin // 4, ...]
+      else: x, w = x[:, :, :ix, :], w[:, :H, ...]
 
     elif IMAGE: x, w = x.cast(base_image_type((bs*iy, ix*groups*cin//4, 4))).contiguous(), w.cast(base_image_type((cout//4, H*W*cin, 4))).contiguous()
     else: x, w = x.contiguous(), w.contiguous()

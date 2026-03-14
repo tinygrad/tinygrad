@@ -37,11 +37,12 @@ pm_syntactic_sugar = PatternMatcher([
 
 def found_assign(ctx:dict[UOp, UOp], assign:UOp, src:UOp):
   if (x:=src).op is Ops.CAST and x.dtype == dtypes.half and FLOAT16: x, assign = x.src[0], assign.cast(dtypes.float)
-  while x is not x.base:
-    if x.op is Ops.PERMUTE: assign = assign.permute(argsort(x.marg))
-    elif x.op is Ops.RESHAPE: assign = assign.reshape(x.src[0].shape)
-    else: return None
-    x = x.src[0]
+  while True:
+    if x.op is Ops.PERMUTE: x, assign = x.src[0], assign.permute(argsort(x.marg))
+    elif x.op is Ops.RESHAPE: x, assign = x.src[0], assign.reshape(x.src[0].shape)
+    elif x.op is Ops.WHERE and x.src[2].base.arg == Invalid and x.src[1].op is Ops.PAD:
+      x, assign = x.src[1].src[0], assign.shrink(tuple((l, s-r) for (l,r),s in zip(x.src[1].marg, x.shape)))
+    else: break
   ctx[x] = assign
 
 # *** fold moved ASSIGNs (hack for openpilot) ***
@@ -135,7 +136,6 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
   (UPat(Ops.CALL, name="c"), resolve_call),
 
   # resolve allreduce (must be bottom up)
-  (UPat(Ops.ASSIGN, src=(UPat.var("output"), UPat(Ops.ALLREDUCE, src=(UPat.var("buf"), UPat()), name="red"))), create_allreduce_function),
   (UPat(Ops.ALLREDUCE, src=(UPat.var("buf"), UPat()), name="red"), create_allreduce_function),
 
   # split_reduceop
