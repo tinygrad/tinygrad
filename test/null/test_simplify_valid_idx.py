@@ -46,9 +46,9 @@ class TestHelpers(unittest.TestCase):
     self.assertTrue((rng+2).is_increasing())
 
 class TestValidIdxSimplification(unittest.TestCase):
-  def check(self, load, sidx, svalid):
+  def check(self, load, sidx, svalid, extra=()):
     with Context(NOOPT=1, SPEC=0):
-      load = full_rewrite_to_sink(load.sink()).src[0]
+      load = full_rewrite_to_sink(UOp.sink(load, *extra)).src[0]
     idx, valid = load.src[0].src[1], load.src[0].src[2]
     check_uop_against_string(self, idx, sidx)
     check_uop_against_string(self, valid, svalid)
@@ -156,9 +156,12 @@ class TestValidIdxSimplification(unittest.TestCase):
     idx = (alu15*-31)+(((((alu11+218)//224)+ridx0)%30)*1568)
     valid = (ridx2<1)&(ridx1<6)
     load = get_gated_load_uop(valid, idx)
+    # prevent ridx1 and ridx2 from being shrunk
+    red = UOp(Ops.REDUCE, dtypes.float, (load, ridx1, ridx2), Ops.ADD)
     self.check(load,
       "(r0*1568)",
-      "((r2<1)&(r1<6))")
+      "((r2<1)&(r1<6))",
+      extra=(red,))
 
   def test_valid_becomes_const1_z3(self):
     from z3 import Ints, Solver, And, If, Not, unsat
