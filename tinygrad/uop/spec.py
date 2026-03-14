@@ -59,6 +59,9 @@ shared_spec = PatternMatcher([
   # RANGE/SPECIAL define loops, END closes them
   (UPat(Ops.END, src=(UPat(), UPat(Ops.RANGE))), lambda: True),
 
+  # STORE in tensor graph: store a value into a target
+  (UPat(Ops.STORE, dtypes.void, (UPat(), UPat())), lambda: True),
+
   # NOOP
   (UPat(Ops.NOOP), lambda: True)
 ])
@@ -95,9 +98,6 @@ _tensor_spec = PatternMatcher([
 
   # ASSIGN has a target and a value. It can also optionally depend on other assigns
   (UPat(Ops.ASSIGN, name="x"), lambda x: len(x.src) >= 2 and all(s.op is Ops.ASSIGN for s in x.src[2:])),
-
-  # STORE in tensor graph: store a value into a target
-  (UPat(Ops.STORE, dtypes.void, (UPat(), UPat())), lambda: True),
 
   # MSELECT chooses one of the multi buffers
   (UPat(Ops.MSELECT, name="x"), lambda x: isinstance(x.src[0].device, tuple) and x.arg < len(x.src[0].device)),
