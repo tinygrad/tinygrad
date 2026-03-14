@@ -1639,7 +1639,8 @@ def _compile_mubuf(inst: irc.MUBUF, ctx: _Ctx) -> UOp:
   # Read instruction fields dynamically
   vdata_reg = ctx.inst_field(type(inst).vdata)
   vaddr_reg = ctx.inst_field(type(inst).vaddr)
-  srsrc_reg = ctx.inst_field(type(inst).srsrc) # base SGPR of the 4-SGPR descriptor
+  srsrc_enc = ctx.inst_field(type(inst).srsrc) # base SGPR of the 4-SGPR descriptor
+  srsrc_reg = srsrc_enc * _c(4)
   soffset_reg = ctx.inst_field(type(inst).soffset) # scalar offset register
   # Instruction-encoded flags
   offen = bool(getattr(inst, 'offen', 0))
@@ -1649,11 +1650,13 @@ def _compile_mubuf(inst: irc.MUBUF, ctx: _Ctx) -> UOp:
   def make_addr(lane: UOp) -> UOp:
     # Extract base address from buffer descriptor (first two SGPRs = 64-bit base)
     base = _u64(ctx.rsgpr_dyn(srsrc_reg), ctx.rsgpr_dyn(srsrc_reg + _c(1)))
+    desc2 = ctx.rsgpr_dyn(srsrc_reg + _c(2))
+    stride = ((desc2 >> _c(16)) & _c(0xFFFF)).cast(dtypes.uint64)
     # soffset: if soffset_reg < 124 use SGPR value, else 0 (NULL)
     soff = (soffset_reg < _c(124)).where(ctx.rsgpr_dyn(soffset_reg).cast(dtypes.uint64), UOp.const(dtypes.uint64, 0))
     # vaddr contribution
     vaddr_val = ctx.rvgpr_dyn(vaddr_reg, lane).cast(dtypes.uint64)
-    voff = vaddr_val if (offen or idxen) else UOp.const(dtypes.uint64, 0)
+    voff = (vaddr_val * stride) if (offen or idxen) else UOp.const(dtypes.uint64, 0)
     return base + soff + voff + UOp.const(dtypes.uint64, inst_offset)
 
   lane = ctx.range()
@@ -1664,6 +1667,7 @@ def _compile_mubuf(inst: irc.MUBUF, ctx: _Ctx) -> UOp:
   for i in range(data_bits // 32):
     # Shared address logic
     word_addr = (addr + UOp.const(dtypes.uint64, i * 4)) >> 2
+    print(f"buffer_load_dwordx4: i={i}, word_addr={word_addr}, is_load={is_load}")
     idx = ctx.vmem.index(word_addr.cast(dtypes.int), active, ptr=True)
     reg_idx = vdata_reg + _c(i)
     # load: memory → vgpr | store: vgpr → memory
