@@ -170,7 +170,7 @@ class ScsiWriteOp: data:bytes; lba:int=0 # noqa: E702
 
 class ASM24Controller:
   def __init__(self):
-    self.usb = USB3(0xADD1, 0x0001, 0x81, 0x83, 0x02, 0x04)
+    self.usb = USB3(0xADD1, 0x0001, 0x81, 0x83, 0x02, 0x04, use_bot=bool(getenv("USB_BOT")))
     self._cache: dict[int, int|None] = {}
     self._pci_cacheable: list[tuple[int, int]] = []
     self._pci_cache: dict[int, int|None] = {}
