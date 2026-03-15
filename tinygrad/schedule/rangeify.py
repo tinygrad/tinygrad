@@ -16,19 +16,33 @@ from tinygrad.schedule.allreduce import create_allreduce_function
 import sys
 sys.setrecursionlimit(10000)
 
+def add_ranges_to_store(ctx, x):
+  if x.src[0]._shape is None or x.src[1]._shape is None or x.src[0].shape == (): return None
+  assert x.src[0].shape == x.src[1].shape, "bad store shape"
+  idxs = [UOp.range(r, next(ctx), AxisType.LOOP) for r in x.src[0].shape]
+  return UOp.store(x.src[0].index(*idxs), x.src[1].index(*idxs)).end(*idxs)
+
+pm_store_ranges = PatternMatcher([
+  (UPat(Ops.STORE, name="x"), add_ranges_to_store),
+])
+
 pm_syntactic_sugar = PatternMatcher([
   # INDEX on ptr INDEX concats them
   (UPat(Ops.INDEX, name="i1").f(Ops.INDEX, name="i2", allow_any_len=True),
    lambda i1,i2: i2.replace(src=i1.src+i2.src[1:]) if isinstance(i1.dtype, PtrDType) and not isinstance(i2.dtype, PtrDType) else None),
+  # early rangeify
+  (UPat(Ops.INDEX, src=(UPat(GroupOp.Elementwise | {Ops.CONST}, name="x"),), allow_any_len=True, name="idx"),
+   lambda idx,x: x.replace(src=tuple([s.index(*idx.src[1:]) for s in x.src]))),
 ])
 
 def found_assign(ctx:dict[UOp, UOp], assign:UOp, src:UOp):
   if (x:=src).op is Ops.CAST and x.dtype == dtypes.half and FLOAT16: x, assign = x.src[0], assign.cast(dtypes.float)
-  while x is not x.base:
-    if x.op is Ops.PERMUTE: assign = assign.permute(argsort(x.marg))
-    elif x.op is Ops.RESHAPE: assign = assign.reshape(x.src[0].shape)
-    else: return None
-    x = x.src[0]
+  while True:
+    if x.op is Ops.PERMUTE: x, assign = x.src[0], assign.permute(argsort(x.marg))
+    elif x.op is Ops.RESHAPE: x, assign = x.src[0], assign.reshape(x.src[0].shape)
+    elif x.op is Ops.WHERE and x.src[2].base.arg == Invalid and x.src[1].op is Ops.PAD:
+      x, assign = x.src[1].src[0], assign.shrink(tuple((l, s-r) for (l,r),s in zip(x.src[1].marg, x.shape)))
+    else: break
   ctx[x] = assign
 
 # *** fold moved ASSIGNs (hack for openpilot) ***
@@ -41,7 +55,8 @@ pm_fold_moved_assign = PatternMatcher([
 # movement op on INDEX as a PatternMatcher
 pm_mops = PatternMatcher([
   (UPat(GroupOp.Movement, name="r").f(Ops.INDEX, allow_any_len=True, name="idx"),
-   lambda r,idx: r.src[0].index(*apply_movement_op(r.op, r.src[0].shape, r.marg, idx.src[1:]), dtype=idx.dtype, arg=idx.arg)),
+   lambda r,idx: r.src[0].index(*apply_movement_op(r.op, r.src[0].shape, r.marg, idx.src[1:]), dtype=idx.dtype, arg=idx.arg)
+     if len(idx.src[1:]) == len(r.shape) else None),
   # move movement ops after AFTER
   (UPat(GroupOp.Movement, name="r").after(name="a", allow_any_len=True),
    lambda r,a: UOp(r.op, r.dtype, (a.replace(src=(r.src[0],)+a.src[1:]),)+r.src[1:], r.arg)),
@@ -121,7 +136,6 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
   (UPat(Ops.CALL, name="c"), resolve_call),
 
   # resolve allreduce (must be bottom up)
-  (UPat(Ops.ASSIGN, src=(UPat.var("output"), UPat(Ops.ALLREDUCE, src=(UPat.var("buf"), UPat()), name="red"))), create_allreduce_function),
   (UPat(Ops.ALLREDUCE, src=(UPat.var("buf"), UPat()), name="red"), create_allreduce_function),
 
   # split_reduceop
@@ -174,7 +188,7 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
 # *****************
 # 3.5 cleanups
 
-ALWAYS_RUN_OPS = {Ops.CONTIGUOUS, Ops.COPY, Ops.ASSIGN, Ops.ENCDEC, Ops.NOOP}
+ALWAYS_RUN_OPS = {Ops.CONTIGUOUS, Ops.COPY, Ops.ASSIGN, Ops.NOOP}
 
 # you don't know in the first pass if axes are going to die, this happens if there's an EXPAND to the left
 def cleanup_dead_axes(b:UOp):
@@ -210,56 +224,54 @@ def remove_bufferize(src:UOp, buf:UOp, idx:UOp):
   # if it's user contiguous, we never remove it
   if src.op in ALWAYS_RUN_OPS or not buf.arg.removable: return None
 
-  # we don't want to bufferize threefry, also causes problems because not all platforms support long
-  if src.op is not Ops.THREEFRY:
-    # *** here is where we compute the cost ***
-    # if we return None, the bufferize is kept
+  # *** here is where we compute the cost ***
+  # if we return None, the bufferize is kept
 
-    accessed_buffers: list[UOp] = []
-    indexes: list[UOp] = []
-    reduces: list[UOp] = []
-    def red_gate(x:UOp):
-      if (x.op is Ops.BUFFERIZE and x.arg.addrspace == AddrSpace.GLOBAL) or x.op is Ops.MSTACK:
-        accessed_buffers.append(x)
-        return False
-      if x.op is Ops.PARAM:
-        accessed_buffers.append(x)
-      if x.op is Ops.INDEX:
-        indexes.append(x)
-      if x.op is Ops.REDUCE: reduces.append(x)
-      return True
-    src.toposort(gate=red_gate)
-    del red_gate
-    accessed_buffers = dedup(accessed_buffers)
+  accessed_buffers: list[UOp] = []
+  indexes: list[UOp] = []
+  reduces: list[UOp] = []
+  def red_gate(x:UOp):
+    if (x.op is Ops.BUFFERIZE and x.arg.addrspace == AddrSpace.GLOBAL) or x.op is Ops.MSTACK:
+      accessed_buffers.append(x)
+      return False
+    if x.op is Ops.PARAM:
+      accessed_buffers.append(x)
+    if x.op is Ops.INDEX:
+      indexes.append(x)
+    if x.op is Ops.REDUCE: reduces.append(x)
+    return True
+  src.toposort(gate=red_gate)
+  del red_gate
+  accessed_buffers = dedup(accessed_buffers)
 
-    # if this is generated from multiple buffers, don't remove this buffer
-    if len(accessed_buffers) > 3 and not (PCONTIG > 2): return None
+  # if this is generated from multiple buffers, don't remove this buffer
+  if len(accessed_buffers) > 3 and not (PCONTIG > 2): return None
 
-    # if any reduces access a buffer, don't remove this buffer
-    buffer_in_reduce = False
-    def buf_gate(x:UOp):
-      nonlocal buffer_in_reduce
-      if x.op in {Ops.PARAM, Ops.BUFFERIZE}: buffer_in_reduce = True
-      return not buffer_in_reduce
-    UOp.sink(*[x.src[0] for x in reduces]).toposort(gate=buf_gate)
-    del buf_gate
-    if buffer_in_reduce:
-      if PCONTIG > 2:
-        out_in_ratio = (prod(buf.shape)+1) / (sum([x.size for x in accessed_buffers])+1)
-        if out_in_ratio < 10: return None
-        # here we have to check the indexes, we might do a partial contig here
-        local_indexes = [x for x in indexes if x.src[0].op is Ops.BUFFERIZE and x.src[0].arg.addrspace == AddrSpace.LOCAL]
-        exclude_ranges = UOp.group(*[UOp.group(*x.src[1:]) for x in local_indexes]).ranges
-        subs = [(k,v) for k,v in zip(buf.src[1:], idx.src[1:]) if k.op is not Ops.CONST]
-        # if it's bufferized or a reduce, it's pcontig
-        is_pcontig, is_subs = partition(subs, lambda x: x[0] in exclude_ranges or any([r.arg[-1] == AxisType.REDUCE for r in x[1].ranges]))
-        if not len(is_subs):
-          return None
-        if len(is_pcontig):
-          ret = src.substitute(dict(is_subs), extra_pm=pm_gate_substitute)
-          return ret.bufferize(*[x[0] for x in is_pcontig], arg=BufferizeOpts(None, AddrSpace.LOCAL)).index(*[x[1] for x in is_pcontig])
-      else:
+  # if any reduces access a buffer, don't remove this buffer
+  buffer_in_reduce = False
+  def buf_gate(x:UOp):
+    nonlocal buffer_in_reduce
+    if x.op in {Ops.PARAM, Ops.BUFFERIZE}: buffer_in_reduce = True
+    return not buffer_in_reduce
+  UOp.sink(*[x.src[0] for x in reduces]).toposort(gate=buf_gate)
+  del buf_gate
+  if buffer_in_reduce:
+    if PCONTIG > 2:
+      out_in_ratio = (prod(buf.shape)+1) / (sum([x.size for x in accessed_buffers])+1)
+      if out_in_ratio < 10: return None
+      # here we have to check the indexes, we might do a partial contig here
+      local_indexes = [x for x in indexes if x.src[0].op is Ops.BUFFERIZE and x.src[0].arg.addrspace == AddrSpace.LOCAL]
+      exclude_ranges = UOp.group(*[UOp.group(*x.src[1:]) for x in local_indexes]).ranges
+      subs = [(k,v) for k,v in zip(buf.src[1:], idx.src[1:]) if k.op is not Ops.CONST]
+      # if it's bufferized or a reduce, it's pcontig
+      is_pcontig, is_subs = partition(subs, lambda x: x[0] in exclude_ranges or any([r.arg[-1] == AxisType.REDUCE for r in x[1].ranges]))
+      if not len(is_subs):
         return None
+      if len(is_pcontig):
+        ret = src.substitute(dict(is_subs), extra_pm=pm_gate_substitute)
+        return ret.bufferize(*[x[0] for x in is_pcontig], arg=BufferizeOpts(None, AddrSpace.LOCAL)).index(*[x[1] for x in is_pcontig])
+    else:
+      return None
 
   # if it makes it here, the bufferize is removed
   # this is the ranges replaced
@@ -359,11 +371,15 @@ def bufferize_to_store(ctx:itertools.count, x:UOp, idx:UOp, allow_locals=True):
     assign_target, assign_src = assign.src[0], assign.src[1]
     assert assign_target.op is Ops.INDEX, f"{assign_target.op} is not index"
     while assign_src.op is Ops.NOOP: assign_src = assign_src.src[0]
-    # skip self-assign from same-device copy, otherwise create the store
-    # in assign, this is the buffer size, not the bufferize size
-    if assign_src is assign_target: ret = assign_target.src[0]
-    else: ret = assign_target.src[0].after(assign_target.replace(dtype=sdtype).store(assign_src).end(*rngs))
-    for op, marg in reversed(assign.arg or ()): ret = ret._mop(op, marg)
+
+    store_target = assign_target
+    if assign_target.src[0].op is Ops.BUFFERIZE and assign_target.src[0].src[0].op is Ops.INDEX:
+      # BUFFERIZE(INDEX(...)); store through the underlying global index instead.
+      store_target = assign_target.src[0].src[0]
+
+    end_rngs = sorted(dedup(tuple(store_target.ranges) + tuple(rngs)), key=lambda x: x.arg)
+    ret = store_target.buf_uop.base
+    if assign_src is not assign_target: ret = ret.after(store_target.replace(dtype=sdtype).store(assign_src).end(*end_rngs))
     return ret
 
   # NOTE: the DEFINE_LOCAL needs to be disambiguated here
@@ -518,12 +534,11 @@ def split_store(x:UOp) -> UOp|None:
   lctx = LocalAddBufferContext()
   ret = graph_rewrite(x, to_define_global+pm_flatten_range+rangeify_codegen, ctx=lctx, name="kernel split", bottom_up=True)
 
-  # SINK requires all buffers on the same device, but COPY/BUFFER_VIEW/ENCDEC are cross-device or special hardware ops
+  # SINK requires all buffers on the same device, but COPY/BUFFER_VIEW are cross-device or special hardware ops
   if ret.op is Ops.STORE: stored = ret.src[1]
   elif ret.op is Ops.END and ret.src[0].op is Ops.STORE: stored = ret.src[0].src[1]
   else: raise RuntimeError(f"unknown kernel type {ret.op}")
   if stored.op in {Ops.COPY, Ops.BUFFER_VIEW}: ret = stored.replace(src=stored.src + ret.ended_ranges)
-  elif stored.op is Ops.ENCDEC: ret = stored
   else: ret = ret.sink(arg=KernelInfo(opts_to_apply=lctx.opts))
 
   kernel = ret.call(*lctx.map.values(), *lctx.vars.keys())

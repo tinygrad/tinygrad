@@ -911,5 +911,36 @@ class TestAssignToUnrealizedView(unittest.TestCase):
       # TODO: broken now, silently dropped
       self.assertEqual(c.tolist(), [[5,5],[5,5]])
 
+class TestPartialAssignToSharedBuffer(unittest.TestCase):
+  def test_five_slices(self):
+    big = Tensor.zeros(50).contiguous().realize()
+    views = [big[i*10:(i+1)*10].reshape(2, 5) for i in range(5)]
+    for v in views: v.assign(v + 1)
+    Tensor.realize(*views)
+    for v in views:
+      np.testing.assert_allclose(v.numpy(), np.ones((2, 5)))
+
+  def test_many_slices(self):
+    n_params = 10
+    big = Tensor.zeros(n_params * 12).contiguous().realize()
+    grads = [big[i*12:(i+1)*12].reshape(3, 4) for i in range(n_params)]
+    for g in grads: g.assign(g + 1)
+    Tensor.realize(*grads)
+    for g in grads:
+      np.testing.assert_allclose(g.numpy(), np.ones((3, 4)))
+
+  def test_mixed_shapes(self):
+    big = Tensor.zeros(100).contiguous().realize()
+    shapes = [(3, 4), (4, 6), (6, 4), (2, 5), (4, 3)]
+    pos, views = 0, []
+    for s in shapes:
+      n = s[0] * s[1]
+      views.append(big[pos:pos+n].reshape(*s))
+      pos += n
+    for v in views: v.assign(v + 1)
+    Tensor.realize(*views)
+    for v, s in zip(views, shapes):
+      np.testing.assert_allclose(v.numpy(), np.ones(s))
+
 if __name__ == "__main__":
   unittest.main()

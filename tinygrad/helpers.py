@@ -1,5 +1,7 @@
 from __future__ import annotations
-import os, functools, platform, time, re, contextlib, operator, hashlib, pickle, sqlite3, tempfile, pathlib, string, ctypes, sys, gzip, getpass, gc
+import time
+START_TIME = time.perf_counter()
+import os, functools, platform, re, contextlib, operator, hashlib, pickle, sqlite3, tempfile, pathlib, string, ctypes, sys, gzip, getpass, gc
 from collections import defaultdict
 import subprocess, shutil, math, types, copyreg, inspect, importlib, decimal, itertools
 from dataclasses import dataclass, field
@@ -193,7 +195,8 @@ CPU_COUNT = ContextVar("CPU_COUNT", max(1, len(os.sched_getaffinity(0)) if hasat
 CPU_CC, CPU_LLVM, CPU_LVP = ContextVar("CPU_CC", ""), ContextVar("CPU_LLVM", 0), ContextVar("CPU_LVP", 0)
 NV_CC, NV_PTX, NV_NAK, NV_NVCC = ContextVar("NV_CC", ""), ContextVar("NV_PTX", 0), ContextVar("NV_NAK", 0), ContextVar("NV_NVCC", 0)
 CUDA_CC, CUDA_PTX, CUDA_NVCC = ContextVar("CUDA_CC", ""), ContextVar("CUDA_PTX", 0), ContextVar("CUDA_NVCC", 0)
-NULL_IR3, NULL_NAK, NULL_ALLOW_COPYOUT = ContextVar("NULL_IR3", 0), ContextVar("NULL_NAK", 0), ContextVar("NULL_ALLOW_COPYOUT", 0)
+NULL_QCOMCL, NULL_IR3, NULL_NAK = ContextVar("NULL_QCOMCL", 0), ContextVar("NULL_IR3", 0), ContextVar("NULL_NAK", 0)
+NULL_ALLOW_COPYOUT = ContextVar("NULL_ALLOW_COPYOUT", 0)
 AMD_CC, AMD_LLVM, AMD_HIPCC  = ContextVar("AMD_CC", ""), ContextVar("AMD_LLVM", 0), ContextVar("AMD_HIPCC", 0)
 QCOM_CC, QCOM_IR3 = ContextVar("QCOM_CC", ""), ContextVar("QCOM_IR3", 0)
 # VIZ implies PROFILE, but you can run PROFILE without VIZ
@@ -421,7 +424,9 @@ def fetch(url:str, name:pathlib.Path|str|None=None, subdir:str|None=None, gunzip
 
 def system(cmd:str, **kwargs) -> str:
   st = time.perf_counter()
-  ret = subprocess.check_output(cmd.split(), **kwargs).decode().strip()
+  try: ret = subprocess.check_output(cmd.split(), stderr=subprocess.STDOUT, **kwargs).decode().strip()
+  except subprocess.CalledProcessError as e:
+    raise RuntimeError(f"system: '{cmd}' failed with exit code {e.returncode}\n{(e.output or b'').decode().strip()}") from e
   if DEBUG >= 1: print(f"system: '{cmd}' returned {len(ret)} bytes in {(time.perf_counter() - st)*1e3:.2f} ms")
   return ret
 

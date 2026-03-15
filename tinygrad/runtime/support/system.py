@@ -1,10 +1,9 @@
 from __future__ import annotations
 import os, mmap, array, functools, ctypes, select, contextlib, dataclasses, sys, itertools, struct, socket, subprocess, time, enum
-from typing import ClassVar
-from tinygrad.helpers import round_up, getenv, OSX, temp, ceildiv, unwrap, fetch, system
+from tinygrad.helpers import round_up, getenv, OSX, temp, ceildiv, unwrap, fetch, system, _ensure_downloads_dir
 from tinygrad.runtime.autogen import libc, pci, vfio, iokit, corefoundation
 from tinygrad.runtime.support.hcq import FileIOInterface, MMIOInterface, HCQBuffer, hcq_filter_visible_devices
-from tinygrad.runtime.support.memory import MemoryManager, VirtMapping, AddrSpace
+from tinygrad.runtime.support.memory import MemoryManager, VirtMapping, AddrSpace, BumpAllocator
 from tinygrad.runtime.support.usb import ASM24Controller, USBMMIOInterface
 
 MAP_FIXED, MAP_FIXED_NOREPLACE = 0x10, 0x100000
@@ -44,6 +43,11 @@ class _System:
 
   def reserve_hugepages(self, cnt): os.system(f"sudo sh -c 'echo {cnt} > /proc/sys/vm/nr_hugepages'")
 
+  @functools.cache
+  def reserve_va(self, va_start, va_size):
+    # cached, runs only once per range. used to not collide with other mappings.
+    FileIOInterface.anon_mmap(va_start, va_size, 0, mmap.MAP_PRIVATE | mmap.MAP_ANONYMOUS | MAP_NORESERVE | MAP_FIXED_NOREPLACE, 0)
+
   def memory_barrier(self): lib.atomic_thread_fence(__ATOMIC_SEQ_CST:=5) if (lib:=self.libsys if OSX else self.atomic_lib) is not None else None
 
   def lock_memory(self, addr:int, size:int):
@@ -71,6 +75,13 @@ class _System:
                          int(FileIOInterface(f"/sys/bus/pci/devices/{pcibus}/device").read(), 16), pcibus))
 
     return sorted([val for vndr, device, val in all_devs if vndr == vendor and any((device & mask) in devlist for mask, devlist in devices)])
+
+  def pci_probe_device(self, devpref:str, dev_id:int, vendor:int, devices:list[tuple[int, list[int]]], bars:list[int],
+                       resize_bars:list[int]|None=None, base_class:int|None=None):
+    gpus = hcq_filter_visible_devices(System.pci_scan_bus(vendor, devices, base_class))
+    if not gpus: raise RuntimeError("No supported GPUs found")
+    if OSX: return APLRemotePCIDevice(devpref, f'usb4:{dev_id}', bars)
+    return PCIDevice(devpref, gpus[dev_id], bars=bars, resize_bars=resize_bars)
 
   def pci_setup_usb_bars(self, usb:ASM24Controller, gpu_bus:int, mem_base:int, pref_mem_base:int) -> dict[int, PCIBarInfo]:
     for bus in range(gpu_bus):
@@ -172,8 +183,8 @@ class PCIDevice:
       self.irq_poller.register(self.irq_fd.fd, select.POLLIN)
 
       irqs = vfio.struct_vfio_irq_set(index=vfio.VFIO_PCI_MSI_IRQ_INDEX, flags=vfio.VFIO_IRQ_SET_DATA_EVENTFD|vfio.VFIO_IRQ_SET_ACTION_TRIGGER,
-        argsz=ctypes.sizeof(vfio.struct_vfio_irq_set), count=1, data=(ctypes.c_int * 1)(self.irq_fd.fd))
-      vfio.VFIO_DEVICE_SET_IRQS(self.vfio_dev, irqs)
+        argsz=ctypes.sizeof(vfio.struct_vfio_irq_set) + ctypes.sizeof(ctypes.c_int), count=1)
+      vfio.VFIO_DEVICE_SET_IRQS(self.vfio_dev, (ctypes.c_byte * irqs.argsz).from_buffer(bytearray(bytes(irqs)) + struct.pack('i', self.irq_fd.fd)))
     else: FileIOInterface(f"/sys/bus/pci/devices/{self.pcibus}/enable", os.O_RDWR).write("1")
 
     self.cfg_fd = FileIOInterface(f"/sys/bus/pci/devices/{self.pcibus}/config", os.O_RDWR | os.O_SYNC | os.O_CLOEXEC)
@@ -201,9 +212,14 @@ class USBPCIDevice(PCIDevice):
     self.lock_fd = System.flock_acquire(f"{devpref.lower()}_{pcibus.lower()}.lock")
     self.usb = ASM24Controller()
     self.pcibus, self.bar_info = pcibus, System.pci_setup_usb_bars(self.usb, gpu_bus=4, mem_base=0x10000000, pref_mem_base=(32 << 30))
+    self.sram = BumpAllocator(size=0x80000, wrap=False) # asm24 controller sram
+  def read_config(self, offset:int, size:int): return self.usb.pcie_cfg_req(offset, bus=4, dev=0, fn=0, size=size)
+  def write_config(self, offset:int, value:int, size:int): self.usb.pcie_cfg_req(offset, bus=4, dev=0, fn=0, value=value, size=size)
   def map_bar(self, bar, off=0, addr=0, size=None, fmt='B'):
     return USBMMIOInterface(self.usb, self.bar_info[bar].addr + off, size or self.bar_info[bar].size, fmt)
   def dma_view(self, ctrl_addr, size): return USBMMIOInterface(self.usb, ctrl_addr, size, fmt='B', pcimem=False)
+  def alloc_sysmem(self, size:int, vaddr:int=0, contiguous:bool=False) -> tuple[MMIOInterface, list[int]]:
+    return self.dma_view(0xf000 + (off:=self.sram.alloc(size)), size), [0x200000 + off]
 
 class PCIDevImplBase:
   mm: MemoryManager
@@ -211,22 +227,20 @@ class PCIDevImplBase:
 @dataclasses.dataclass
 class PCIAllocationMeta: mapping:VirtMapping; has_cpu_mapping:bool; hMemory:int=0 # noqa: E702
 
-class LNXPCIIfaceBase:
+class PCIIfaceBase:
   dev_impl:PCIDevImplBase
-  gpus:ClassVar[list[str]] = []
+
+  def is_local(self) -> bool: return not isinstance(self.pci_dev, RemotePCIDevice)
+  def is_bar_small(self) -> bool: return self.pci_dev.bar_info[self.vram_bar].size == (256 << 20)
 
   def __init__(self, dev, dev_id, vendor, devices:list[tuple[int, list[int]]], bars, vram_bar, va_start, va_size, base_class:int|None=None):
-    if len((cls:=type(self)).gpus) == 0:
-      cls.gpus = hcq_filter_visible_devices(System.pci_scan_bus(vendor, devices, base_class))
-
-      # Acquire va range to avoid collisions.
-      FileIOInterface.anon_mmap(va_start, va_size, 0, mmap.MAP_PRIVATE | mmap.MAP_ANONYMOUS | MAP_NORESERVE | MAP_FIXED_NOREPLACE, 0)
-    self.pci_dev, self.dev, self.vram_bar = PCIDevice(dev.__class__.__name__[:2], cls.gpus[dev_id], bars=bars, resize_bars=[vram_bar]), dev, vram_bar
+    self.pci_dev = System.pci_probe_device(dev.__class__.__name__[:2], dev_id, vendor, devices, bars, resize_bars=[vram_bar], base_class=base_class)
+    if self.is_local(): System.reserve_va(va_start, va_size)
+    self.dev, self.vram_bar = dev, vram_bar
     self.p2p_base_addr = self.pci_dev.bar_info[vram_bar].addr
 
   def alloc(self, size:int, host=False, uncached=False, cpu_access=False, contiguous=False, force_devmem=False, **kwargs) -> HCQBuffer:
-    # NOTE: logic on macos is different, since bar is small
-    should_use_sysmem = host or ((cpu_access if OSX else (uncached and cpu_access)) and not force_devmem)
+    should_use_sysmem = host or ((cpu_access if self.is_bar_small() else (uncached and cpu_access)) and not force_devmem)
     if should_use_sysmem:
       vaddr = self.dev_impl.mm.alloc_vaddr(size:=round_up(size, mmap.PAGESIZE), align=mmap.PAGESIZE)
       memview, paddrs = self.pci_dev.alloc_sysmem(size, vaddr=vaddr, contiguous=contiguous)
@@ -240,14 +254,16 @@ class LNXPCIIfaceBase:
   def free(self, b:HCQBuffer):
     for dev in b.mapped_devs[1:]: dev.iface.dev_impl.mm.unmap_range(b.va_addr, b.size)
     if b.meta.mapping.aspace is AddrSpace.PHYS: self.dev_impl.mm.vfree(b.meta.mapping)
-    if b.owner == self.dev and b.meta.has_cpu_mapping and not OSX: FileIOInterface.munmap(b.va_addr, b.size)
+    if self.is_local() and b.owner == self.dev and b.meta.has_cpu_mapping: FileIOInterface.munmap(b.va_addr, b.size)
 
   def map(self, b:HCQBuffer):
+    if not self.is_local(): raise RuntimeError(f"P2P mapping not supported for remote devices: {b.owner} -> {self.dev}")
+
     if b.owner is not None and b.owner._is_cpu():
       System.lock_memory(int(b.va_addr), b.size)
       paddrs, aspace = [(x, 0x1000) for x in System.system_paddrs(int(b.va_addr), round_up(b.size, 0x1000))], AddrSpace.SYS
       snooped, uncached = True, True
-    elif (ifa:=getattr(b.owner, "iface", None)) is not None and isinstance(ifa, LNXPCIIfaceBase):
+    elif (ifa:=getattr(b.owner, "iface", None)) is not None and isinstance(ifa, PCIIfaceBase):
       snooped, uncached = True, b.meta.mapping.uncached
       if b.meta.mapping.aspace is AddrSpace.SYS: paddrs, aspace = b.meta.mapping.paddrs, AddrSpace.SYS
       elif hasattr(ifa.dev_impl, 'paddr2xgmi') and ifa.dev_impl.gmc.xgmi_seg_sz > 0:
@@ -323,13 +339,16 @@ class RemotePCIDevice(PCIDevice):
 class APLRemotePCIDevice(RemotePCIDevice):
   APP_PATH = "/Applications/TinyGPU.app/Contents/MacOS/TinyGPU"
 
-  @staticmethod
-  def install_tinygpu():
+  @classmethod
+  def ensure_app(cls):
+    commit = "8120b5508b43149d27bf22f9a4e6d7c5a4b401e9"
+    if os.path.exists(cls.APP_PATH) and (_ensure_downloads_dir() / (app_name:=f"TinyGPU_{commit}.zip")).is_file(): return
     print("Downloading TinyGPU.app...")
-    system(f"ditto -xk {fetch('https://github.com/nimlgen/tinygpu_releases/raw/8120b5508b43149d27bf22f9a4e6d7c5a4b401e9/TinyGPU.zip')} /Applications")
-    print(system(f"{APLRemotePCIDevice.APP_PATH} install"))
+    system(f"ditto -xk {fetch(f'https://github.com/nimlgen/tinygpu_releases/raw/{commit}/TinyGPU.zip', name=app_name)} /Applications")
+    print(system(f"{cls.APP_PATH} install"))
 
   def __init__(self, devpref:str, pcibus:str, bars:list[int], resize_bars:list[int]|None=None):
+    self.ensure_app()
     sock_path, sock = getenv("APL_REMOTE_SOCK", temp("tinygpu.sock")), socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     for i in range(100):
       with contextlib.suppress(ConnectionRefusedError, FileNotFoundError):
@@ -339,20 +358,3 @@ class APLRemotePCIDevice(RemotePCIDevice):
       time.sleep(0.05)
     else: raise RuntimeError(f"Failed to connect to TinyGPU server at {sock_path}.")
     super().__init__(devpref, pcibus, bars, sock)
-
-class APLRemoteIfaceBase(LNXPCIIfaceBase):
-  def __init__(self, dev, dev_id, vendor, devices:list[tuple[int, list[int]]], bars, vram_bar, va_start, va_size, base_class:int|None=None):
-    if not (cls:=type(self)).gpus:
-      cls.gpus = System.pci_scan_bus(vendor, devices, base_class)
-      if not cls.gpus: raise RuntimeError("No supported GPUs found")
-      if not os.path.exists(APLRemotePCIDevice.APP_PATH): APLRemotePCIDevice.install_tinygpu()
-    if dev_id >= len(cls.gpus): raise RuntimeError(f"No device found for {dev_id}. Requesting more devices than the system has ({cls.gpus})?")
-    self.pci_dev = APLRemotePCIDevice(dev.__class__.__name__[:2], f'remote:{dev_id}', bars)
-    self.dev, self.vram_bar = dev, vram_bar
-
-  def free(self, b:HCQBuffer):
-    for dev in b.mapped_devs[1:]: dev.iface.dev_impl.mm.unmap_range(b.va_addr, b.size)
-
-  def map(self, b:HCQBuffer): raise RuntimeError(f"P2P mapping not supported for remote devices: {b.owner} -> {self.dev}")
-
-PCIIfaceBase:type = APLRemoteIfaceBase if OSX else LNXPCIIfaceBase
