@@ -141,7 +141,7 @@ class ImageDType(PtrDType):
     ALIGN, MAXW = getenv("IMAGE_PITCH_ALIGN", 256 if OSX else 64), 16384
     if ptr.base not in (dtypes.half, dtypes.float) or ptr.size > 4*MAXW*MAXW: return []
     pxls: int = ptr.size // 4
-    if ptr.size % (ALIGN * 4) != 0: return [] if pxls > MAXW or ptr.size % getenv("IMAGE_BASE_ALIGN", 64) else [(1, pxls)]
+    if ptr.size % (ALIGN * 4) != 0: return [] if pxls > MAXW or OSX or ptr.nbytes() % getenv("IMAGE_BASE_ALIGN", 64) else [(1, pxls)]
     return [(pxls//w, w) for k in range(ceildiv(pxls//ALIGN, MAXW), min(pxls, MAXW)//ALIGN+1) if pxls%(w:=ALIGN*k) == 0]
 
 class dtypes:
