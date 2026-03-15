@@ -90,9 +90,18 @@ class TestSQTTMapBase(unittest.TestCase):
               if "ALT" not in e.name.display_name: execs += 1
             elif "WAVE" in e.device:
               # sopk/immediates don't get ALU/MEM EXEC
-              if e.name.display_name not in {"IMMEDIATE", "IMMEDIATE_MASK", "JUMP", "JUMP_NO", "MESSAGE"}: insts += 1
+              if e.name.display_name not in {"IMMEDIATE", "IMMEDIATE_MASK", "JUMP", "JUMP_NO", "MESSAGE", "BARRIER"}: insts += 1
             else: raise Exception(f"timeline row must be INST or EXEC, got {e.device}")
           self.assertEqual(execs, insts)
+
+  def test_wave_sync(self):
+    for name, (events, kern_events, target) in self.examples.items():
+      if "sync" not in name: continue
+      for event in events:
+        p = kern_events[event.kern]
+        if not (timeline:=sqtt_timeline(event.blob, p.lib, target)): continue
+        print(timeline)
+        # TODO: also assert that: 1. all 4 barriers are present and 2. the barrier widths are correctly aligned and end at the same time.
 
 class TestSQTTMapRDNA3(TestSQTTMapBase): target = "gfx1100"
 

@@ -9,6 +9,7 @@ EXAMPLES = {
   "empty":"test/backend/test_custom_kernel.py TestCustomKernel.test_empty",
   "plus":"test/test_tiny.py TestTiny.test_plus",
   "gemm":"-c \"from tinygrad import Tensor; (Tensor.empty(N:=32, N)@Tensor.empty(N, N)).realize()\"",
+  "sync":"test/amd/test_custom_kernel.py TestCustomKernel.test_wave_sync",
 }
 
 if __name__ == "__main__":

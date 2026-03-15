@@ -47,12 +47,21 @@ def custom_add_var(A:UOp, B:UOp) -> UOp:
 def custom_wave_sync(A:UOp) -> UOp:
   threads = UOp.special(96, "lidx0")
   wg = UOp.special(4, "gidx0")
-  insts = [s_nop(0)]*10+[s_barrier()]+[s_nop(0)]*10+[s_endpgm()]
+  insts = []
+  for _ in range(4):
+    insts += [s_nop(0)]*4
+    insts.append(s_barrier())
+  insts.append(s_endpgm())
   sink = UOp.sink(A.base, threads, wg, arg=KernelInfo("custom_wave_sync"))
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg="AMD"), UOp(Ops.LINEAR, src=tuple([UOp(Ops.INS, arg=x) for x in insts]))))
 
 @unittest.skipUnless(Device.DEFAULT == "AMD", "requires AMD device")
 class TestCustomKernel(unittest.TestCase):
+  def setUp(self):
+    self.arch = Device["AMD"].arch
+    if not any(self.arch.startswith(a) for a in {"gfx11", "gfx12"}):
+      self.skipTest(f"tests written for RDNA, got arch {self.arch}")
+
   def test_simple(self):
     a = Tensor.full((16, 16), 1.).contiguous().realize()
     a = Tensor.custom_kernel(a, fxn=custom_add_one)[0]
