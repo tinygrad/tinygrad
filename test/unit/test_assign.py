@@ -280,6 +280,11 @@ class TestAssign(unittest.TestCase):
     t.uop = t.uop.after(t[:5].uop.assign(Tensor.ones(5).uop))
     np.testing.assert_allclose(t.numpy(), [1.,1.,1.,1.,1.,0.,0.,0.,0.,0.])
 
+  def test_assign_after_target_chain(self):
+    t = Tensor.arange(16).reshape(4, 4).permute(1, 0).contiguous()
+    t.assign(t + 100)
+    np.testing.assert_equal(t.numpy(), [[100, 104, 108, 112], [101, 105, 109, 113], [102, 106, 110, 114], [103, 107, 111, 115]])
+
   def test_assign_contiguous(self):
     b = Tensor.arange(16).reshape(4,4).contiguous().realize()
     a = (Tensor.arange(16).reshape(4,4).contiguous().realize() + 1)
