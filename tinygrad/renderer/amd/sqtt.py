@@ -651,7 +651,7 @@ def map_insts(data:bytes, lib:bytes, target:str) -> Iterator[tuple[PacketType, I
         wave_syncs.append(p)
         if p.wave == max(wave_pc):
           et = max([p._time for p in wave_syncs])
-          for p in wave_syncs: yield (p, InstructionInfo(pc, p.wave, inst, span=et-p._time))
+          while wave_syncs: yield (p:=wave_syncs.pop(0), InstructionInfo(pc, p.wave, inst, span=et-p._time))
         else: continue
       # yield non barrier insts immediately
       else: yield (p, InstructionInfo(pc, p.wave, inst))
