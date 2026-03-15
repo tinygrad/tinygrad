@@ -46,18 +46,19 @@ def _buffer_like(u:UOp) -> UOp:
     if prod(dtype.shape) != prod(u.max_shard_shape) or ([x for x in u.max_shard_shape if x != 1] or [1])[-1] % 4 != 0:
       if DEBUG >= 1: print(f"demoting Image {dtype} with shape {u.max_shard_shape}")
       dtype = dtype.base
-  buffer = UOp.new_buffer(u.device, u.shard_size, dtype).reshape(u.max_shard_shape)
+  buffer = UOp.new_buffer(u.device, u.shard_size, dtype).reshape(u.max_shard_shape).shrink_to(u.shard_shape)
   if isinstance(u.device, tuple) and u.axis is not None: buffer = buffer.multi(u.axis)
   return buffer
 
-def replace_contig_with_assign(u:UOp):
+def replace_contig_with_store_after(u:UOp):
   # can't allocate a buffer without a device (e.g., inside a CALL function body with only PARAMs)
   if u._device is None: return None
   # if size is 0, remove the contig
   if u.size == 0: return u.src[0]
   # no real contig for DISK/TINYFS tensors, they are left alone
   if isinstance(u._device, str) and u._device.startswith(("DISK", "TINYFS")): return u.rtag(None)
-  return _buffer_like(u).assign(u.src[0]).rtag(u.tag)
+  buf = _buffer_like(u)
+  return buf.after(buf.store(u.src[0])).rtag(u.tag)
 
 def replace_assign_with_contig(u:UOp):
   assigned_to = u
@@ -111,14 +112,15 @@ pm_early_transform_tensor_graph = PatternMatcher([
   (UPat(Ops.CONTIGUOUS, src=(UPat(GroupOp.Movement),), name="c"), contiguous_mops_to_view),
 
   # add CONTIGUOUS to tagged UOps
-  (UPat(GroupOp.All-{Ops.CONTIGUOUS, Ops.ASSIGN}, name="x"), lambda x: x.rtag(None).contiguous(tag=x.tag) if x.tag else x.replace(tag=None)),
-  # remove extra CONTIGUOUS on ASSIGN (only when assign target is contiguous)
-  (UPat(Ops.CONTIGUOUS, src=(UPat(Ops.ASSIGN, name="a"),), name="c"),
+  (UPat(GroupOp.All-{Ops.CONTIGUOUS, Ops.ASSIGN, Ops.AFTER, Ops.STORE}, name="x"),
+   lambda x: x.rtag(None).contiguous(tag=x.tag) if x.tag else x.replace(tag=None)),
+  # remove extra CONTIGUOUS on ASSIGN/AFTER (only when target is contiguous)
+  (UPat(Ops.CONTIGUOUS, src=(UPat({Ops.ASSIGN, Ops.AFTER}, name="a"),), name="c"),
    lambda a,c: a.replace(tag=(a.tag or ())+(c.tag or ())) if a.src[0].has_buffer_identity() else None),
   # replace ASSIGN with CONTIGUOUS
   (UPat(Ops.ASSIGN, name="u"), replace_assign_with_contig),
-  # replace CONTIGUOUS with ASSIGNs
-  (UPat(Ops.CONTIGUOUS, name="u"), replace_contig_with_assign),
+  # replace CONTIGUOUS with STORE+AFTER
+  (UPat(Ops.CONTIGUOUS, name="u"), replace_contig_with_store_after),
   # remove DETACH/CONTIGUOUS_BACKWARD (allows more contiguous removal)
   (UPat((Ops.DETACH, Ops.CONTIGUOUS_BACKWARD), name="x"), lambda x: x.src[0]),
 ])
@@ -129,9 +131,9 @@ def untag_and_append(ctx:AllocCtx, x:UOp):
   for t in x.tag:
     original_uop: UOp = ctx.uop_list[t]
     replace_uop = ret
-    while replace_uop.op is Ops.ASSIGN: replace_uop = replace_uop.src[0]
+    while replace_uop.op in {Ops.ASSIGN, Ops.AFTER}: replace_uop = replace_uop.src[0]
     ctx.buffer_map[original_uop] = replace_uop.shrink_to(original_uop.shape)
-  ctx.assigns.append(ret)
+  if ret.op is not Ops.AFTER: ctx.assigns.append(ret)  # AFTER gets appended by append_after
   return ret
 
 def append_after(ctx:AllocCtx, x:UOp):
@@ -143,7 +145,7 @@ def replace_input_buffer(ctx:AllocCtx, b:UOp):
                    b._min_max if b.op is Ops.BIND else None, b.src[0].arg[0] if b.op is Ops.BIND else None)
 
 pm_finalize_call = PatternMatcher([
-  (UPat(Ops.ASSIGN, name="x"), untag_and_append),
+  (UPat({Ops.ASSIGN, Ops.AFTER}, name="x"), untag_and_append),
   (UPat(Ops.AFTER, name="x"), append_after),
   (UPat(Ops.COPY, name="x"), lambda ctx,x: append_after(ctx,x) if isinstance(x.device, str) and x.device.startswith(("DISK", "TINYFS")) else None),
   # remove unique from const. TODO: this is copied in function.py

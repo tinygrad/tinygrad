@@ -45,9 +45,10 @@ def found_assign(ctx:dict[UOp, UOp], assign:UOp, src:UOp):
     else: break
   ctx[x] = assign
 
-# *** fold moved ASSIGNs (hack for openpilot) ***
+# *** fold moved ASSIGNs/AFTERs (hack for openpilot) ***
 pm_fold_moved_assign = PatternMatcher([
   (UPat(Ops.ASSIGN, src=(UPat(), UPat((*GroupOp.Movement, Ops.CAST), name="src")), name="assign"), found_assign),
+  (UPat(Ops.AFTER, src=(UPat(), UPat(Ops.STORE, src=(UPat(), UPat((*GroupOp.Movement, Ops.CAST), name="src")))), name="assign"), found_assign),
   # replace ALU sources with assign versions found above
   (UPat(GroupOp.ALU, name="alu"), lambda ctx,alu: alu.replace(src=new_src) if (new_src:=tuple(ctx.get(s, s) for s in alu.src)) != alu.src else None),
 ])
@@ -57,9 +58,10 @@ pm_mops = PatternMatcher([
   (UPat(GroupOp.Movement, name="r").f(Ops.INDEX, allow_any_len=True, name="idx"),
    lambda r,idx: r.src[0].index(*apply_movement_op(r.op, r.src[0].shape, r.marg, idx.src[1:]), dtype=idx.dtype, arg=idx.arg)
      if len(idx.src[1:]) == len(r.shape) else None),
-  # move movement ops after AFTER
+  # move movement ops after AFTER (but not when AFTER has a raw STORE with shaped children — from replace_contig_with_store_after)
   (UPat(GroupOp.Movement, name="r").after(name="a", allow_any_len=True),
-   lambda r,a: UOp(r.op, r.dtype, (a.replace(src=(r.src[0],)+a.src[1:]),)+r.src[1:], r.arg)),
+   lambda r,a: UOp(r.op, r.dtype, (a.replace(src=(r.src[0],)+a.src[1:]),)+r.src[1:], r.arg)
+     if not any(s.op is Ops.STORE and s.src[0]._shape is not None for s in a.src[1:]) else None),
   (UPat(GroupOp.Movement, name="r").end(name="a", allow_any_len=True), lambda r,a: a.replace(src=(r.src[0],)+a.src[1:])),
 ])
 
@@ -69,12 +71,12 @@ pm_mops = PatternMatcher([
 def fix_assign_hazard(assign:UOp, target:UOp, src:UOp):
   # PERMUTE and FLIP reorder indices, SHRINK can have overlapping regions when dest is also shrunk
   unsafe = {Ops.PERMUTE, Ops.FLIP} | ({Ops.SHRINK} if target.op_in_backward_slice_with_self(Ops.SHRINK) else set())
-  if any(s.op in unsafe and target.base in s.backward_slice for s in src.toposort(gate=lambda s:s.op not in ALWAYS_CONTIGUOUS)):
+  if any(s.op in unsafe and target.base in s.backward_slice for s in src.toposort(gate=lambda s:s.op not in ALWAYS_CONTIGUOUS or s.op is Ops.AFTER)):
     return assign.replace(src=(target, src.contiguous()))
 
 def normalize_assign_target_chain(assign:UOp, target:UOp, src:UOp):
   root_target = target
-  while root_target.op is Ops.ASSIGN: root_target = root_target.src[0]
+  while root_target.op in {Ops.ASSIGN, Ops.AFTER}: root_target = root_target.src[0]
   # when RHS depends on the previous assign result, break with contiguous
   if target in src.toposort(): src = src.contiguous()
   return assign.replace(src=(root_target, src))
@@ -170,8 +172,9 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
   (UPat(Ops.ASSIGN, src=(UPat(Ops.BITCAST, src=(UPat(name="target"),)), UPat(name="src"))),
    lambda target, src: target.assign(src.bitcast(target.dtype))),
 
-  # if assign target is itself an ASSIGN chain, canonicalize to the original buffer target
-  (UPat(Ops.ASSIGN, src=(UPat(Ops.ASSIGN, name="target"), UPat(name="src")), allow_any_len=True, name="assign"), normalize_assign_target_chain),
+  # if assign target is itself an ASSIGN/AFTER chain, canonicalize to the original buffer target
+  (UPat(Ops.ASSIGN, src=(UPat({Ops.ASSIGN, Ops.AFTER}, name="target"), UPat(name="src")), allow_any_len=True, name="assign"),
+   normalize_assign_target_chain),
 
   # make source contiguous if it has hazardous movement ops on the dest buffer
   (UPat(Ops.ASSIGN, src=(UPat.var("target"), UPat.var("src")), name="assign"), fix_assign_hazard),
@@ -192,8 +195,8 @@ ALWAYS_RUN_OPS = {Ops.CONTIGUOUS, Ops.COPY, Ops.ASSIGN, Ops.NOOP}
 
 # you don't know in the first pass if axes are going to die, this happens if there's an EXPAND to the left
 def cleanup_dead_axes(b:UOp):
-  # don't optimize ALWAYS_RUN_OPS
-  if b.src[0].op in ALWAYS_RUN_OPS: return None
+  # don't optimize ALWAYS_RUN_OPS or AFTER (AFTER is a buffer identity — ranges define consumer access, not computation)
+  if b.src[0].op in ALWAYS_RUN_OPS or b.src[0].op is Ops.AFTER: return None
 
   new_rng = []
   hit = False
@@ -367,6 +370,11 @@ def bufferize_to_store(ctx:itertools.count, x:UOp, idx:UOp, allow_locals=True):
   assert size > 0 and isinstance(size, int), f"no zero sized or symbolic sized buffers {size}"
 
   sdtype = x.dtype.ptr(size=size, addrspace=x.arg.addrspace)
+  # AFTER: add END to the existing STORE, return buffer with kernel dependency
+  if x.src[0].op is Ops.AFTER:
+    buf = x.src[0].src[0].buf_uop.base
+    stores = [s for s in x.src[0].src[1:] if s.op is Ops.STORE]
+    return buf.after(*[s.end(*rngs) for s in stores]) if stores else buf
   if (assign := x.src[0]).op is Ops.ASSIGN:
     assign_target, assign_src = assign.src[0], assign.src[1]
     assert assign_target.op is Ops.INDEX, f"{assign_target.op} is not index"
@@ -529,6 +537,8 @@ pm_add_range_tags = PatternMatcher([
 def split_store(x:UOp) -> UOp|None:
   # if we have any open ranges here, we don't split
   if x.ranges: return None
+  # raw STORE (not from bufferize_to_store) should be processed through its END wrapper, not independently
+  if x.op is Ops.STORE and x.src[0]._shape is not None: return None
 
   # local kernel rewrite
   lctx = LocalAddBufferContext()
