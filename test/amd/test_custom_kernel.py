@@ -46,18 +46,14 @@ def custom_add_var(A:UOp, B:UOp) -> UOp:
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg="AMD"), UOp(Ops.LINEAR, src=tuple([UOp(Ops.INS, arg=x) for x in insts]))))
 
 def custom_wave_sync(A:UOp, arch:str) -> UOp:
-  threads = UOp.special(96, "lidx0")
-  wg = UOp.special(4, "gidx0")
+  # 1024 WG — enough to saturate a SIMD with many concurrent WGs
+  # s_sleep yields the SIMD so waves from different WGs interleave, causing barrier packet reordering
+  threads = UOp.special(128, "lidx0")
+  wg = UOp.special(1024, "gidx0")
   insts = []
   for _ in range(4):
-    insts += [s_nop(0)]*4
-    if arch == "rdna4":
-      insts.append(s_barrier_signal())
-      # continue
-      insts += [s_nop(0)]*2
-      # stop the world
-      insts.append(s_barrier_wait())
-    else: insts.append(s_barrier())
+    insts.append(s_sleep(4))
+    insts += [s_barrier()] if arch == "rdna3" else [s_barrier_signal(), s_barrier_wait()]
   insts.append(s_endpgm())
   sink = UOp.sink(A.base, threads, wg, arg=KernelInfo("custom_wave_sync"))
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg="AMD"), UOp(Ops.LINEAR, src=tuple([UOp(Ops.INS, arg=x) for x in insts]))))
