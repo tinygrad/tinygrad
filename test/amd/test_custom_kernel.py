@@ -46,7 +46,7 @@ def custom_add_var(A:UOp, B:UOp) -> UOp:
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg="AMD"), UOp(Ops.LINEAR, src=tuple([UOp(Ops.INS, arg=x) for x in insts]))))
 
 def custom_wave_sync(A:UOp, arch:str) -> UOp:
-  # 1024 WG — enough to saturate a SIMD with many concurrent WGs
+  # 4 waves across 1024 WG — enough to saturate a SIMD with many concurrent WGs
   # s_sleep yields the SIMD so waves from different WGs interleave, causing barrier packet reordering
   threads = UOp.special(128, "lidx0")
   wg = UOp.special(1024, "gidx0")
