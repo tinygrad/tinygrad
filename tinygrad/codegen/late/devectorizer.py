@@ -64,11 +64,14 @@ def expand_index(buf:UOp, vec:UOp):
   # determine optimal image shapes before the indexing expands
   if isinstance(dt:=buf.dtype, ImageDType) and IMAGE == 1:
     x, valid = vec.get_idx().gep(0), vec.get_valid().gep(1)
-    h, w = max(ImageDType.valid_dims(dt), key=lambda hw:
-                # maximize number of valids removed
-               (len(_drop_valid_stmts(valid, idx:=uop_given_valid(valid, UOp.vectorize((x//4)%hw[1], x//(4*hw[1])).simplify()), *hw)),
-                # and minimize idx complexity (number of nodes)
-                -len(idx.gep(1).backward_slice)))
+    def score(shape, debug=True):
+      idx = uop_given_valid(valid, UOp.vectorize((x//4)%shape[1], x//(4*shape[1])).simplify())
+      dropped, complexity = len(_drop_valid_stmts(valid, idx, *shape)), len(idx.gep(1).backward_slice)
+      if debug: print(f"  IMAGE DIM CANDIDATE: {shape[0]}x{shape[1]} {dropped} {complexity} {idx.render()}")
+      return (dropped, -complexity)
+    h, w = max(ImageDType.valid_dims(dt), key=score)
+    dropped, neg_c = score((h, w), debug=False)
+    print(f"IMAGE DIM SELECTED: {h}x{w} {dropped} {-neg_c}")
     buf = buf.replace(dtype=(dtypes.imageh if dt.itemsize == 2 else dtypes.imagef)((h, w, 4), w * 4 * dt.itemsize))
 
   if getenv("UNSAFE_DISABLE_MASK", 0): vec = vec.get_idx()
