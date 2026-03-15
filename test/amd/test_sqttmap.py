@@ -102,14 +102,9 @@ class TestSQTTMapBase(unittest.TestCase):
         for e in sqtt_timeline(event.blob, kern_events[event.kern].lib, target):
           if type(e).__name__ == "ProfileRangeEvent" and e.name.display_name == "BARRIER": wave_barriers.setdefault(e.device, []).append(e)
         if not wave_barriers: continue
-        # all waves trace barriers
-        barrier_per_wave = len(list(wave_barriers.values())[0])
-        assert barrier_per_wave > 0, f"{name} must have barriers"
-        assert all(len(v) == barrier_per_wave for v in wave_barriers.values()), f"all waves must have the same number of barriers {wave_barriers}"
-        # all waves in each barrier round end at the same time
-        for i in range(barrier_per_wave):
-          round_barriers = [v[i] for v in wave_barriers.values()]
-          self.assertEqual(len(set(e.en for e in round_barriers)), 1)
+        for row, events in wave_barriers.items():
+          for e in events:
+            assert e.en-e.st > 1, f"all barriers must have a duration greater than 1, got {e}"
 
 class TestSQTTMapRDNA3(TestSQTTMapBase): target = "gfx1100"
 

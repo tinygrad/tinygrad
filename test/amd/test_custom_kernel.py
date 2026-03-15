@@ -54,6 +54,7 @@ def custom_wave_sync(A:UOp, arch:str) -> UOp:
   for _ in range(4):
     insts.append(s_sleep(4))
     insts += [s_barrier()] if arch == "rdna3" else [s_barrier_signal(), s_barrier_wait()]
+    insts += [s_nop(0)]*4
   insts.append(s_endpgm())
   sink = UOp.sink(A.base, threads, wg, arg=KernelInfo("custom_wave_sync"))
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg="AMD"), UOp(Ops.LINEAR, src=tuple([UOp(Ops.INS, arg=x) for x in insts]))))
