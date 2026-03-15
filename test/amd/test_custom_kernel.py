@@ -1,5 +1,4 @@
 import unittest
-import functools
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.uop.ops import UOp, Ops, KernelInfo
 from tinygrad.renderer import Estimates
@@ -45,11 +44,11 @@ def custom_add_var(A:UOp, B:UOp) -> UOp:
   sink = UOp.sink(A.base, B.base, var, threads, arg=KernelInfo(f"custom_add_var_{A.size}"))
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg="AMD"), UOp(Ops.LINEAR, src=tuple([UOp(Ops.INS, arg=x) for x in insts]))))
 
-def custom_nop(A:UOp, num_threads:int, num_wg:int) -> UOp:
-  threads = UOp.special(num_threads, "lidx0")
-  wg = UOp.special(num_wg, "gidx0")
-  insts = [s_nop(0), s_endpgm()]
-  sink = UOp.sink(A.base, threads, wg, arg=KernelInfo(f"custom_nop_{num_threads}x{num_wg}"))
+def custom_wave_sync(A:UOp) -> UOp:
+  threads = UOp.special(96, "lidx0")
+  wg = UOp.special(4, "gidx0")
+  insts = [s_nop(0)]*10+[s_barrier()]+[s_nop(0)]*10+[s_endpgm()]
+  sink = UOp.sink(A.base, threads, wg, arg=KernelInfo("custom_wave_sync"))
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg="AMD"), UOp(Ops.LINEAR, src=tuple([UOp(Ops.INS, arg=x) for x in insts]))))
 
 @unittest.skipUnless(Device.DEFAULT == "AMD", "requires AMD device")
@@ -72,8 +71,7 @@ class TestCustomKernel(unittest.TestCase):
       ei.run({"var":i})
       self.assertTrue((a.numpy() == 1+i).all())
 
-  def test_wave_sched(self):
-    Tensor.empty(1).custom_kernel(fxn=functools.partial(custom_nop, num_threads=getenv("NUM_THREADS", 32), num_wg=getenv("NUM_WG", 32)))[0].realize()
+  def test_wave_sync(self): Tensor.empty(1).custom_kernel(fxn=custom_wave_sync)[0].realize()
 
 if __name__ == "__main__":
   unittest.main()
