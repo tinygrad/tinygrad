@@ -63,7 +63,7 @@ load_store_indexing = PatternMatcher([
 def expand_index(buf:UOp, vec:UOp):
   # determine optimal image shapes before the indexing expands
   if isinstance(dt:=buf.dtype, ImageDType) and IMAGE == 1:
-    x, valid = vec.get_idx().gep(0), vec.get_valid().gep(1)
+    x, valid = vec.get_idx().gep(0), vec.get_valid().gep(0)
     def score(shape, debug=True):
       idx = uop_given_valid(valid, UOp.vectorize((x//4)%shape[1], x//(4*shape[1])).simplify())
       dropped, complexity = len(_drop_valid_stmts(valid, idx, *shape)), len(idx.gep(1).backward_slice)

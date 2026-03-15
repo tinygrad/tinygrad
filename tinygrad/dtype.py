@@ -139,11 +139,9 @@ class ImageDType(PtrDType):
   @staticmethod
   def valid_dims(ptr:PtrDType) -> list[tuple[int,int]]:
     ALIGN, MAXW = getenv("IMAGE_PITCH_ALIGN", 256 if OSX else 64), 16384
-    if ptr.base not in (dtypes.half, dtypes.float) or ptr.size > 4*MAXW*MAXW or (ptr.size if OSX else ptr.nbytes()) % ALIGN != 0: return []
-    if OSX and (ptr.size // 4) % ALIGN: return [] # OSX has stricter requirements for height=1 images
+    if ptr.base not in (dtypes.half, dtypes.float) or ptr.size > 4*MAXW*MAXW or ptr.size % (ALIGN * 4) != 0: return []
     pxls: int = ptr.size // 4
-    return ([(1, pxls)] * (pxls < MAXW) + [(pxls//ALIGN//k, ALIGN*k) for k in range(ceildiv(pxls//ALIGN, MAXW), min(pxls//ALIGN, MAXW//ALIGN)+1)
-                                           if (pxls//ALIGN)%k == 0] if pxls//ALIGN else [])
+    return [(pxls//w, w) for k in range(ceildiv(pxls//ALIGN, MAXW), min(pxls, MAXW)//ALIGN+1) if pxls%(w:=ALIGN*k) == 0]
 
 class dtypes:
   @staticmethod
