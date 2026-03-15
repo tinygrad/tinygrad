@@ -41,26 +41,6 @@ if not getenv("LATE_ALLREDUCE", 1): replace_allreduce = _early_allreduce + repla
 
 # ***** multi functions *****
 
-def reshard_multi(multi:UOp, new_axis:int) -> UOp:
-  """All-to-all reshard: each device sends only the needed block to each target, avoiding full tensor materialization."""
-  old_axis = multi.axis
-  ndev = len(multi.device)
-  inner = multi.src[0]  # per-device shard, tuple device
-  new_chunk = inner.shape[new_axis] // ndev
-  old_chunk = inner.shape[old_axis]
-  per_device = []
-  for i in range(ndev):
-    pieces = []
-    for j in range(ndev):
-      # from source device j: extract only the slice target device i needs along new_axis
-      shrink_arg = tuple((0, s) if a != new_axis else (i * new_chunk, (i + 1) * new_chunk) for a, s in enumerate(inner.shape))
-      piece = inner.mselect(j).shrink(shrink_arg).copy_to_device(multi.device[i])
-      # pad along old_axis to position correctly in the reassembled tensor
-      pad_arg = tuple((0, 0) if a != old_axis else (j * old_chunk, (ndev - 1 - j) * old_chunk) for a in range(len(piece.shape)))
-      pieces.append(piece.pad(pad_arg))
-    per_device.append(UOp.sum(*pieces))
-  return UOp.mstack(*per_device)
-
 def alu_multi(root:UOp):
   msrcs = root.src
   assert all_same([x.device for x in msrcs]), f"all buffers must have the same device {[x.device for x in msrcs]}"
@@ -78,23 +58,16 @@ def alu_multi(root:UOp):
       if mlb.axis == axis:
         # same axis, just copy through
         srcs.append(mlb.src[0])
-      elif (sp := getenv("SP")) and mlb.axis == sp:
-        # sequence parallel: all-gather the SP-sharded operand, then shard on target axis
-        srcs.append(copy_multi(mlb, mlb.device)._shard(axis))
       else:
-        # axis mismatch, all-to-all reshard to the correct axis
-        srcs.append(reshard_multi(mlb, axis))
+        # axis mismatch, copy to all devices, and shard it correctly
+        srcs.append(copy_multi(mlb, mlb.device)._shard(axis))
   return srcs[0].alu(root.op, *srcs[1:]).multi(axis)
 
 def reduce_multi(root:UOp, multi:UOp):
   op, axis = root.arg
   if multi.axis is not None and multi.axis in axis:
     # all-reduce on sharded axes
-    reduced = multi.src[0].r(op, axis).allreduce(op, multi.device)
-    if (sp := getenv("SP")):
-      # sequence parallel: shard the allreduce result on the SP axis for memory savings
-      return reduced._shard(sp).multi(sp)
-    return reduced
+    return multi.src[0].r(op, axis).allreduce(op, multi.device)
   # reduce on non sharded axes, piecewise is fine. if axis is None this is also correct
   return multi.src[0].r(op, axis).multi(axis=multi.axis)
 
