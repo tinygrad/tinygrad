@@ -64,6 +64,8 @@ class TestSQTTMapBase(unittest.TestCase):
 
   def test_rocprof_inst_traces_match(self):
     for name, (events, kern_events, target) in self.examples.items():
+      if "sync" in name and self.target.startswith("gfx12"):
+        self.skipTest("our timestamps are off by a few cycles because rocprof patches timestamps for rdna4 barriers")
       for event in events:
         if not event.itrace: continue
         if event.kern not in kern_events: continue
@@ -96,14 +98,11 @@ class TestSQTTMapBase(unittest.TestCase):
 
   def test_wave_sync(self):
     for name, (events, kern_events, target) in self.examples.items():
-      if "sync" not in name: continue
       for event in events:
-        p = kern_events[event.kern]
-        if not (timeline:=sqtt_timeline(event.blob, p.lib, target)): continue
-        if not any(e.device.startswith("WAVE") for e in timeline): continue
         wave_barriers = {}
-        for e in timeline:
+        for e in sqtt_timeline(event.blob, kern_events[event.kern].lib, target):
           if type(e).__name__ == "ProfileRangeEvent" and e.name.display_name == "BARRIER": wave_barriers.setdefault(e.device, []).append(e)
+        if not wave_barriers: continue
         # all waves trace barriers
         barrier_per_wave = len(list(wave_barriers.values())[0])
         assert barrier_per_wave > 0, f"{name} must have barriers"

@@ -128,6 +128,7 @@ class InstOpRDNA4(Enum):
   LDS_WR_5 = 0x2e
   OTHER_LDS_1 = 0x50
   OTHER_LDS_2 = 0x51
+  BARRIER_SIGNAL = 0x7a
   WMMA_8 = 0x8c
   WMMA_16 = 0x8d
   VALU_DPFP = 0x92
