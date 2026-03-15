@@ -4,7 +4,7 @@ from tinygrad.helpers import getenv, DEBUG, fetch, getbits
 from tinygrad.runtime.autogen import pci
 from tinygrad.runtime.support.memory import TLSFAllocator, MemoryManager, AddrSpace
 from tinygrad.runtime.support.nv.ip import NV_FLCN, NV_FLCN_COT, NV_GSP
-from tinygrad.runtime.support.system import PCIDevice, PCIDevImplBase, MMIOInterface
+from tinygrad.runtime.support.system import PCIDevice, MMIOInterface
 
 NV_DEBUG = getenv("NV_DEBUG", 0)
 
@@ -70,7 +70,7 @@ class NVMemoryManager(MemoryManager):
 
   def on_range_mapped(self): self.dev.NV_VIRTUAL_FUNCTION_PRIV_MMU_INVALIDATE.write((1 << 0) | (1 << 1) | (1 << 6) | (1 << 31))
 
-class NVDev(PCIDevImplBase):
+class NVDev:
   def __init__(self, pci_dev:PCIDevice):
     self.pci_dev, self.devfmt, self.mmio = pci_dev, pci_dev.pcibus, pci_dev.map_bar(0, fmt='I')
     self.pci_dev.write_config(pci.PCI_COMMAND, self.pci_dev.read_config(pci.PCI_COMMAND, 2) | pci.PCI_COMMAND_MASTER, 2)

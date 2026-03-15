@@ -3,7 +3,7 @@ import os, mmap, array, functools, ctypes, select, contextlib, dataclasses, sys,
 from tinygrad.helpers import round_up, getenv, OSX, temp, ceildiv, unwrap, fetch, system, _ensure_downloads_dir
 from tinygrad.runtime.autogen import libc, pci, vfio, iokit, corefoundation
 from tinygrad.runtime.support.hcq import FileIOInterface, MMIOInterface, HCQBuffer, hcq_filter_visible_devices
-from tinygrad.runtime.support.memory import MemoryManager, VirtMapping, AddrSpace, BumpAllocator
+from tinygrad.runtime.support.memory import VirtMapping, AddrSpace, BumpAllocator
 from tinygrad.runtime.support.usb import ASM24Controller, USBMMIOInterface
 
 MAP_FIXED, MAP_FIXED_NOREPLACE = 0x10, 0x100000
@@ -221,21 +221,18 @@ class USBPCIDevice(PCIDevice):
   def alloc_sysmem(self, size:int, vaddr:int=0, contiguous:bool=False) -> tuple[MMIOInterface, list[int]]:
     return self.dma_view(0xf000 + (off:=self.sram.alloc(size)), size), [0x200000 + off]
 
-class PCIDevImplBase:
-  mm: MemoryManager
-
 @dataclasses.dataclass
 class PCIAllocationMeta: mapping:VirtMapping; has_cpu_mapping:bool; hMemory:int=0 # noqa: E702
 
 class PCIIfaceBase:
-  dev_impl:PCIDevImplBase
-
   def is_local(self) -> bool: return not isinstance(self.pci_dev, RemotePCIDevice)
   def is_bar_small(self) -> bool: return self.pci_dev.bar_info[self.vram_bar].size == (256 << 20)
 
-  def __init__(self, dev, dev_id, vendor, devices:list[tuple[int, list[int]]], bars, vram_bar, va_start, va_size, base_class:int|None=None):
+  def __init__(self, dev, dev_id, vendor, devices:list[tuple[int, list[int]]], bars, vram_bar, va_start, va_size,
+               dev_impl_t, base_class:int|None=None):
     self.pci_dev = System.pci_probe_device(dev.__class__.__name__[:2], dev_id, vendor, devices, bars, resize_bars=[vram_bar], base_class=base_class)
     if self.is_local(): System.reserve_va(va_start, va_size)
+    self.dev_impl = dev_impl_t(self.pci_dev)
     self.dev, self.vram_bar = dev, vram_bar
     self.p2p_base_addr = self.pci_dev.bar_info[vram_bar].addr
 
@@ -256,6 +253,9 @@ class PCIIfaceBase:
     if b.meta.mapping.aspace is AddrSpace.PHYS: self.dev_impl.mm.vfree(b.meta.mapping)
     if self.is_local() and b.owner == self.dev and b.meta.has_cpu_mapping: FileIOInterface.munmap(b.va_addr, b.size)
 
+  def p2p_paddrs(self, paddrs:list[tuple[int,int]]) -> tuple[list[tuple[int,int]], AddrSpace]:
+    return [(p + self.p2p_base_addr, sz) for p, sz in paddrs], AddrSpace.SYS
+
   def map(self, b:HCQBuffer):
     if not self.is_local(): raise RuntimeError(f"P2P mapping not supported for remote devices: {b.owner} -> {self.dev}")
 
@@ -266,9 +266,7 @@ class PCIIfaceBase:
     elif (ifa:=getattr(b.owner, "iface", None)) is not None and isinstance(ifa, PCIIfaceBase):
       snooped, uncached = True, b.meta.mapping.uncached
       if b.meta.mapping.aspace is AddrSpace.SYS: paddrs, aspace = b.meta.mapping.paddrs, AddrSpace.SYS
-      elif hasattr(ifa.dev_impl, 'paddr2xgmi') and ifa.dev_impl.gmc.xgmi_seg_sz > 0:
-        paddrs, aspace = [(ifa.dev_impl.paddr2xgmi(p), sz) for p, sz in b.meta.mapping.paddrs], AddrSpace.PEER
-      else: paddrs, aspace = [(p + ifa.p2p_base_addr, sz) for p, sz in b.meta.mapping.paddrs], AddrSpace.SYS
+      else: paddrs, aspace = ifa.p2p_paddrs(b.meta.mapping.paddrs)
     else: raise RuntimeError(f"map failed: {b.owner} -> {self.dev}")
 
     self.dev_impl.mm.map_range(int(b.va_addr), round_up(b.size, 0x1000), paddrs, aspace=aspace, snooped=snooped, uncached=uncached)
