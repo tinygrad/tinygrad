@@ -2,7 +2,6 @@ import unittest
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.uop.ops import UOp, Ops, KernelInfo
 from tinygrad.renderer import Estimates
-from tinygrad.helpers import getenv
 
 from tinygrad.runtime.autogen.amd.rdna3.ins import *
 from tinygrad.renderer.amd.dsl import s, v
