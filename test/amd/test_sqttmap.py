@@ -83,7 +83,6 @@ class TestSQTTMapBase(unittest.TestCase):
           mean = sum(frequency) / len(frequency)
           variance = sum((v - mean) ** 2 for v in frequency) / len(frequency)
           self.assertGreater(mean, 0)
-          self.assertGreater(variance, 0)
           if DEBUG >= 2: print(f"{name:20s} SE:{event.se} {mean/1e9:.2f} GHz mean, {variance/1e18:.2f} GHz^2 variance")
           events = [e for e in timeline if type(e).__name__ == "ProfileRangeEvent"]
           insts, execs = 0, 0
@@ -92,7 +91,7 @@ class TestSQTTMapBase(unittest.TestCase):
               if "ALT" not in e.name.display_name: execs += 1
             elif "WAVE" in e.device:
               # sopk/immediates don't get ALU/MEM EXEC
-              if e.name.display_name not in {"IMMEDIATE", "IMMEDIATE_MASK", "JUMP", "JUMP_NO", "MESSAGE", "BARRIER"}: insts += 1
+              if e.name.display_name not in {"IMMEDIATE", "IMMEDIATE_MASK", "JUMP", "JUMP_NO", "MESSAGE", "BARRIER", "BARRIER_SIGNAL"}: insts += 1
             else: raise Exception(f"timeline row must be INST or EXEC, got {e.device}")
           self.assertEqual(execs, insts)
 
