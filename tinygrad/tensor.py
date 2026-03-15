@@ -3672,7 +3672,7 @@ class Tensor(OpMixin):
         return ipad(t, dim, round_up(t.shape[dim], (64 // dtsz) // math.gcd(prod(t.shape) // t.shape[dim], (64 // dtsz))))
 
       # bank conflicts
-      if cin >= 8 and is_pow2(cin // 4): x, w = ipad(x.reshape(bs, iy, ix, groups, cin // 4, 4), 4, cin // 4 + 1), ipad(w, 2, cin // 4 + 1)
+      if cin >= 8 and is_pow2(cin//4): x, w = ipad(x.reshape(bs, iy, ix, groups, cin//4, 4), 4, bc:=cin//4+ceildiv(cin//4, 128)), ipad(w, 2, bc)
 
       # 64-byte pitch alignment
       x, w = pad_align(x, 2), pad_align(w, 1)
