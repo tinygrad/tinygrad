@@ -12,7 +12,7 @@ if __name__ == "__main__":
     drv_path = f"/sys/bus/pci/devices/{gpu}/driver"
     if FileIOInterface.exists(drv_path) and os.path.basename(os.readlink(drv_path)) == "amdgpu":
       raise RuntimeError(f"amdgpu is bound to {gpu}. Stopping...")
-  pcidevs = [PCIDevice("AM", gpu, bars=[0, 2, 5]) for gpu in gpus]
+  pcidevs = [PCIDevice("AM", gpu) for gpu in gpus]
   amdevs = []
   with Context(DEBUG=2):
     for pcidev in pcidevs:
