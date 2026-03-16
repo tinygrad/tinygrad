@@ -39,6 +39,9 @@ class Ops(FastEnum):
   # vector creation / item selection
   GEP = auto(); VECTORIZE = auto()
 
+  # tuple/gettuple for function with multiple returns
+  TUPLE = auto(); GETTUPLE = auto()
+
   # ** 3 -- load/store **
 
   # INDEX is a BinaryOp similar to ADD, but it operates on pointers

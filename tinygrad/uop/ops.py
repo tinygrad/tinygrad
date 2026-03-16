@@ -209,8 +209,14 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
       # late ops don't have shape
       case Ops.UNIQUE | Ops.LUNIQUE | Ops.DEVICE | Ops.RANGE | Ops.LOAD | Ops.STORE | Ops.IF | Ops.BARRIER | Ops.CUSTOM | Ops.CUSTOMI | \
            Ops.VECTORIZE | Ops.GEP | Ops.SPECIAL | Ops.UNROLL | Ops.CONTRACT | Ops.SINK | \
-           Ops.LINEAR | Ops.PROGRAM | Ops.SOURCE | Ops.BINARY | Ops.INS:
+           Ops.LINEAR | Ops.PROGRAM | Ops.SOURCE | Ops.BINARY | Ops.INS | Ops.TUPLE:
         return None
+
+      case Ops.GETTUPLE:
+        # GETTUPLE extracts from a TUPLE
+        in_tuple = self.src[0].src[0] if self.src[0].op is Ops.CALL else self.src[0]
+        assert in_tuple.op is Ops.TUPLE
+        return in_tuple.src[self.arg]._shape
 
       case Ops.CAST:
         # when PTX casts from ptr to non ptr, remove the shape
@@ -404,6 +410,12 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
 
   def sink(*srcs:UOp|None, **kwargs):  # pylint: disable=no-self-argument
     return UOp(Ops.SINK, dtypes.void, tuple([x for x in srcs if x is not None]), **kwargs)
+  def maketuple(*srcs:UOp):  # pylint: disable=no-self-argument
+    return UOp(Ops.TUPLE, dtypes.void, srcs)
+  def gettuple(self, idx:int) -> UOp:
+    in_tuple = self.src[0] if self.op is Ops.CALL else self
+    assert in_tuple.op is Ops.TUPLE, f"gettuple requires CALL or TUPLE source, got {self.op}"
+    return UOp(Ops.GETTUPLE, in_tuple.src[idx].dtype, (self,), idx)
   def group(*srcs:UOp|None):  # pylint: disable=no-self-argument
     if len(srcs) == 1 and isinstance(srcs[0], UOp): return srcs[0]
     return UOp(Ops.GROUP, dtypes.void, tuple([x for x in srcs if x is not None]))
@@ -903,9 +915,10 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     if self.axis is not None: p = p.replace(src=p.src + (UOp(Ops.MULTI, arg=self.axis),))
     return p
 
-  def call(self, *srcs:UOp, grad_fxn:Callable|None=None, metadata:tuple[Metadata, ...]=(), name:str|None=None, precompile:bool=False) -> UOp:
+  def call(self, *srcs:UOp, grad_fxn:Callable|None=None, metadata:tuple[Metadata, ...]=(),
+           name:str|None=None, precompile:bool=False, precompile_backward:bool=False) -> UOp:
     assert len(self.ranges) == 0, f"ranges {self.ranges} are leaking out of the call in {self.pyrender()}"
-    return UOp(Ops.CALL, self.dtype, (self,)+srcs, CallInfo(grad_fxn, metadata, name, precompile))
+    return UOp(Ops.CALL, self.dtype, (self,)+srcs, CallInfo(grad_fxn, metadata, name, precompile, precompile_backward))
   def custom_kernel(*srcs:UOp, fxn:Callable, grad_fxn:Callable|None=None) -> list[UOp]:
     contig_srcs = tuple(x.contiguous() if x.op is not Ops.AFTER else x for x in srcs)
     placeholders = [UOp.placeholder_like(s, slot=i) for i,s in enumerate(contig_srcs)]
@@ -929,9 +942,12 @@ class CallInfo:
   metadata: tuple[Metadata, ...] = ()
   name: str|None = None
   precompile: bool = False
+  precompile_backward: bool = False
   # grad_fxn can't be pickled, but metadata can
-  def __reduce__(self): return (CallInfo, (None, self.metadata, self.name, self.precompile))
-  def __repr__(self): return f"CallInfo({id(self.grad_fxn) if self.grad_fxn else None}, {self.metadata}, {repr(self.name)}, {self.precompile})"
+  def __reduce__(self): return (CallInfo, (None, self.metadata, self.name, self.precompile, self.precompile_backward))
+  def __repr__(self):
+    gf = id(self.grad_fxn) if self.grad_fxn else None
+    return f"CallInfo({gf}, {self.metadata}, {repr(self.name)}, {self.precompile}, {self.precompile_backward})"
 
 def should_resolve_call(c:UOp) -> bool:
   # don't resolve real kernel calls, sink or program
