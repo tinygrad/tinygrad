@@ -94,8 +94,21 @@ def contiguous_mops_to_view(c:UOp):
 def transform_precompiled_call(c:UOp) -> UOp|None:
   if not c.arg.precompile: return None
   if c.src[0].op is Ops.SINK: return None
-  out = _buffer_like(c)
   input_buffers = tuple(x.contiguous() if x.op not in {Ops.AFTER, Ops.BIND} else x for x in c.src[1:])
+  # multi-output (TUPLE) precompiled calls: allocate a buffer per output and return a TUPLE of buffers
+  if c.src[0].op is Ops.TUPLE:
+    tuple_body = c.src[0]
+    out_bufs = []
+    sink_srcs = []
+    for i, elem in enumerate(tuple_body.src):
+      buf = UOp.new_buffer(c.device, prod(elem.max_shape), elem.dtype).reshape(elem.max_shape).shrink_to(elem.shape)
+      out_bufs.append(buf)
+      target = buf.param_like(len(c.src) - 1 + i).shrink_to(elem.shape)
+      sink_srcs.append(target.after(target.store(elem)))
+    fxn = UOp.sink(*sink_srcs)
+    new_call = c.replace(src=(fxn, *input_buffers, *out_bufs), dtype=dtypes.void, tag=None)
+    return UOp(Ops.TUPLE, src=tuple(buf.after(new_call) for buf in out_bufs))
+  out = _buffer_like(c)
   target = out.param_like(len(c.src)-1).shrink_to(c.shape)
   fxn = target.after(target.store(c.src[0])).sink()
   ret = out.after(c.replace(src=(fxn, *input_buffers, out), dtype=dtypes.void, tag=None))

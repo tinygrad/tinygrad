@@ -336,13 +336,16 @@ class TestFunctionMulti(unittest.TestCase):
       np.testing.assert_allclose(x.grad.numpy(), expected)
 
 class TestFunctionTuple(unittest.TestCase):
-  def test_tuple(self):
+  def test_tuple(self, precompile=False):
     x = Tensor.ones(3).contiguous()
-    @function
+    @function(precompile=precompile)
     def f(t:Tensor): return (t+1, t+2)
     t1, t2 = f(x)
     t1.realize(t2)
     print(t1.tolist(), t2.tolist())
+    assert t1.tolist() == [2,2,2]
+    assert t2.tolist() == [3,3,3]
+  def test_tuple_precompile(self): self.test_tuple(True)
 
 class TestFunctionBackward(unittest.TestCase):
   def test_backward_has_grad(self):
