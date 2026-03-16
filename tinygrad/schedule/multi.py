@@ -143,7 +143,8 @@ multi_pm = PatternMatcher([
   (UPat(Ops.COPY, src=(UPat(Ops.MULTI, name="multi"), UPat(Ops.DEVICE, name="device"))), copy_multi),
   (UPat(Ops.ALLREDUCE, src=(UPat(Ops.MULTI, name="multi"), UPat(Ops.DEVICE, name="device")), name="red"),
     lambda multi,device,red: multi.src[0].allreduce(red.arg, device).multi(axis=multi.axis)),
-  # TUPLE with MULTI children: pull MULTI outside TUPLE so it can propagate through CALL
+
+  # TUPLE with MULTI children: strip MULTI so passthrough_multi can handle the CALL
   (UPat(Ops.TUPLE, name="root", custom_early_reject=set([Ops.MULTI])), lambda root:
     UOp.maketuple(*(s.src[0] if s.op is Ops.MULTI else s for s in root.src)).multi(
       next(s.axis for s in root.src if s.op is Ops.MULTI))),
