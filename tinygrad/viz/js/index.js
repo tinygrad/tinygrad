@@ -251,6 +251,22 @@ function selectShape(key) {
 // scaling function for time to pixels
 const timelineScale = () => d3.scaleLinear().domain([data.first, data.dur]).range([0, document.getElementById("timeline").clientWidth])
 
+// TODO: wrong.
+function timeAtCycle(cycle) {
+  let freq = null, firstCycle = null;
+  for (const [k, v] of data.tracks.get("Shader Clock").valueMap) {
+    if (firstCycle == null) firstCycle = k;
+    if (k > cycle) break;
+    freq = v;
+  }
+  if (!freq || firstCycle == null) return "-";
+  // TODO: not right when the frequency drops very fast in the end
+  const ns = (cycle - firstCycle) / freq * 1e9;
+  const remNs = Math.round(ns % 1000);
+  const ret = ns/1000 > 1 ? formatMicroseconds(ns/1000, true) + (remNs ? ` ${remNs}ns` : "") : Math.round(ns, 2)+"ns";
+  return ret;
+}
+
 function getZoomIdentity() {
   // for packets, set zoom to the full range of instruction events
   if (data.path.includes("pkts")) {
@@ -365,8 +381,10 @@ async function renderProfiler(path, opts) {
   const textDecoder = new TextDecoder("utf-8");
   const { strings, dtypeSize, markers, ...extData } = JSON.parse(textDecoder.decode(new Uint8Array(buf, offset, indexLen))); offset += indexLen;
   // place devices on the y axis and set vertical positions
-  const [tickSize, padding, baseOffset] = [10, 8, markers.length ? 14 : 0];
-  const deviceList = profiler.append("div").attr("id", "device-list").style("padding-top", tickSize+padding+baseOffset+"px");
+  const [tickSize, padding, baseOffset] = [5, 8, markers.length ? 14 : 0];
+  const axes = [(t, st, et) => formatTime(t, et-st <= 1e3)], axisGap = 8;
+  if (opts.unit == "clk") axes.unshift((t) => timeAtCycle(t));
+  const deviceList = profiler.append("div").attr("id", "device-list").style("padding-top", tickSize*axes.length+axisGap*axes.length+padding+baseOffset+"px");
   const canvas = profiler.append("canvas").attr("id", "timeline").node();
   // NOTE: scrolling via mouse can only zoom the graph
   canvas.addEventListener("wheel", e => (e.stopPropagation(), e.preventDefault()), { passive:false });
@@ -608,20 +626,25 @@ async function renderProfiler(path, opts) {
       }
     }
     // draw axes
-    ctx.translate(0, baseOffset);
-    drawLine(ctx, xscale.range(), [0, 0]);
-    let lastLabelEnd = -Infinity;
+    const lineHeight = 8, labelGap = 2;
+    const y = lineHeight+labelGap+tickSize;
+    drawLine(ctx, xscale.range(), [y, y]);
+    let lastTopLabelEnd = -Infinity, lastBottomLabelEnd = -Infinity;
     for (const tick of xscale.ticks()) {
-      if (!Number.isInteger(tick)) continue;
       const x = xscale(tick);
-      drawLine(ctx, [x, x], [0, tickSize]);
       const labelX = x+ctx.lineWidth+2;
-      if (labelX <= lastLabelEnd) continue;
-
-      const label = formatTime(tick, et-st <= 1e3);
-      ctx.textBaseline = "top";
-      ctx.fillText(label, labelX, tickSize);
-      lastLabelEnd = labelX + ctx.measureText(label).width + 4;
+      if (!Number.isInteger(tick)) continue;
+      drawLine(ctx, [x, x], [y-tickSize, y+tickSize]);
+      let label = axes[0](tick, st, et);
+      if (label != null && labelX > lastTopLabelEnd) {
+        ctx.textBaseline = "top"; ctx.fillText(label, labelX, 0);
+        lastTopLabelEnd = labelX+ctx.measureText(label).width+4;
+      }
+      label = axes[1](tick, st, et);
+      if (label != null && labelX > lastBottomLabelEnd) {
+        ctx.textBaseline = "top"; ctx.fillText(label, labelX, lineHeight+labelGap+tickSize*2+labelGap);
+        lastBottomLabelEnd = labelX+ctx.measureText(label).width+4;
+      }
     }
     if (data.axes.y != null) {
       drawLine(ctx, [0, 0], data.axes.y.range);
