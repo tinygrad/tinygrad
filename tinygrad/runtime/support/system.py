@@ -9,9 +9,6 @@ from tinygrad.runtime.support.usb import ASM24Controller, USBMMIOInterface
 MAP_FIXED, MAP_FIXED_NOREPLACE = 0x10, 0x100000
 MAP_LOCKED, MAP_POPULATE, MAP_NORESERVE = 0 if OSX else 0x2000, getattr(mmap, "MAP_POPULATE", 0 if OSX else 0x008000), 0x400
 
-@dataclasses.dataclass(frozen=True)
-class PCIBarInfo: addr:int; size:int # noqa: E702
-
 class _System:
   def write_sysfs(self, path:str, value:str, msg:str, expected:str|None=None):
     if FileIOInterface(path, os.O_RDONLY).read().splitlines()[0] != (expected or value):
@@ -76,14 +73,13 @@ class _System:
 
     return sorted([val for vndr, device, val in all_devs if vndr == vendor and any((device & mask) in devlist for mask, devlist in devices)])
 
-  def pci_probe_device(self, devpref:str, dev_id:int, vendor:int, devices:list[tuple[int, list[int]]], bars:list[int],
-                       resize_bars:list[int]|None=None, base_class:int|None=None):
+  def pci_probe_device(self, devpref:str, dev_id:int, vendor:int, devices:list[tuple[int, list[int]]], base_class:int|None=None):
     gpus = hcq_filter_visible_devices(System.pci_scan_bus(vendor, devices, base_class))
     if not gpus: raise RuntimeError("No supported GPUs found")
-    if OSX: return APLRemotePCIDevice(devpref, f'usb4:{dev_id}', bars)
-    return PCIDevice(devpref, gpus[dev_id], bars=bars, resize_bars=resize_bars)
+    if OSX: return APLRemotePCIDevice(devpref, f'usb4:{dev_id}')
+    return PCIDevice(devpref, gpus[dev_id])
 
-  def pci_setup_usb_bars(self, usb:ASM24Controller, gpu_bus:int, mem_base:int, pref_mem_base:int) -> dict[int, PCIBarInfo]:
+  def pci_setup_usb_bars(self, usb:ASM24Controller, gpu_bus:int, mem_base:int, pref_mem_base:int) -> dict[int, tuple[int, int]]:
     for bus in range(gpu_bus):
       # All 3 values must be written at the same time.
       buses = (0 << 0) | ((bus+1) << 8) | ((gpu_bus) << 16)
@@ -125,7 +121,7 @@ class _System:
         usb.pcie_cfg_req(pci.PCI_BASE_ADDRESS_0 + bar_off, bus=gpu_bus, dev=0, fn=0, value=mem_space_addr[bar_mem] & 0xffffffff, size=4)
         if bar_64: usb.pcie_cfg_req(pci.PCI_BASE_ADDRESS_0 + bar_off + 4, bus=gpu_bus, dev=0, fn=0, value=mem_space_addr[bar_mem] >> 32, size=4)
 
-        bars[bar_off // 4] = PCIBarInfo(mem_space_addr[bar_mem], bar_size)
+        bars[bar_off // 4] = (mem_space_addr[bar_mem], bar_size)
         mem_space_addr[bar_mem] += round_up(bar_size, 2 << 20)
 
       bar_off += 8 if bar_64 else 4
@@ -152,7 +148,7 @@ System = _System()
 # *** PCI Devices
 
 class PCIDevice:
-  def __init__(self, devpref:str, pcibus:str, bars:list[int], resize_bars:list[int]|None=None):
+  def __init__(self, devpref:str, pcibus:str):
     self.lock_fd = System.flock_acquire(f"{devpref.lower()}_{pcibus.lower()}.lock")
     self.pcibus, self.irq_poller = pcibus, None
 
@@ -161,11 +157,6 @@ class PCIDevice:
 
     if FileIOInterface.exists(f"/sys/bus/pci/devices/{self.pcibus}/driver"):
       FileIOInterface(f"/sys/bus/pci/devices/{self.pcibus}/driver/unbind", os.O_WRONLY).write(self.pcibus)
-
-    for i in resize_bars or []:
-      if FileIOInterface.exists(rpath:=f"/sys/bus/pci/devices/{self.pcibus}/resource{i}_resize"):
-        try: FileIOInterface(rpath, os.O_RDWR).write(str(int(FileIOInterface(rpath, os.O_RDONLY).read(), 16).bit_length() - 1))
-        except OSError as e: raise RuntimeError(f"Cannot resize BAR {i}: {e}. Ensure the resizable BAR option is enabled.") from e
 
     if getenv("VFIO", 0) and (vfio_fd:=System.vfio) is not None:
       FileIOInterface(f"/sys/bus/pci/devices/{self.pcibus}/driver_override", os.O_WRONLY).write("vfio-pci")
@@ -188,10 +179,6 @@ class PCIDevice:
     else: FileIOInterface(f"/sys/bus/pci/devices/{self.pcibus}/enable", os.O_RDWR).write("1")
 
     self.cfg_fd = FileIOInterface(f"/sys/bus/pci/devices/{self.pcibus}/config", os.O_RDWR | os.O_SYNC | os.O_CLOEXEC)
-    self.bar_fds = {b: FileIOInterface(f"/sys/bus/pci/devices/{self.pcibus}/resource{b}", os.O_RDWR | os.O_SYNC | os.O_CLOEXEC) for b in bars}
-
-    res = FileIOInterface(f"/sys/bus/pci/devices/{self.pcibus}/resource", os.O_RDONLY).read().splitlines()
-    self.bar_info = {j:PCIBarInfo(int(s,16), int(e,16)-int(s,16)+1) for j,(s,e,_) in enumerate(l.split() for l in res)}
 
   def alloc_sysmem(self, size:int, vaddr:int=0, contiguous:bool=False) -> tuple[MMIOInterface, list[int]]:
     assert not contiguous or size <= (2 << 20), "Contiguous allocation is only supported for sizes up to 2MB"
@@ -199,42 +186,60 @@ class PCIDevice:
     va = FileIOInterface.anon_mmap(vaddr, size, mmap.PROT_READ|mmap.PROT_WRITE, mmap.MAP_SHARED|mmap.MAP_ANONYMOUS|MAP_POPULATE|MAP_LOCKED|flags, 0)
     sysmem_view, paddrs = MMIOInterface(va, size), [(x, mmap.PAGESIZE) for x in System.system_paddrs(va, size)]
     return sysmem_view, [p + i for p, sz in paddrs for i in range(0, sz, 0x1000)][:ceildiv(size, 0x1000)]
+
+  def reset(self): os.system(f"sudo sh -c 'echo 1 > /sys/bus/pci/devices/{self.pcibus}/reset'")
   def read_config(self, offset:int, size:int): return int.from_bytes(self.cfg_fd.read(size, binary=True, offset=offset), byteorder='little')
   def write_config(self, offset:int, value:int, size:int): self.cfg_fd.write(value.to_bytes(size, byteorder='little'), binary=True, offset=offset)
+
+  @functools.cache
+  def bar_fd(self, bar_idx:int) -> FileIOInterface:
+    return FileIOInterface(f"/sys/bus/pci/devices/{self.pcibus}/resource{bar_idx}", os.O_RDWR | os.O_SYNC | os.O_CLOEXEC)
+  @functools.cache
+  def bar_info(self, bar_idx:int) -> tuple[int, int]:
+    s, e, _ = FileIOInterface(f"/sys/bus/pci/devices/{self.pcibus}/resource", os.O_RDONLY).read().splitlines()[bar_idx].split()
+    return (int(s, 16), int(e, 16) - int(s, 16) + 1)
   def map_bar(self, bar:int, off:int=0, addr:int=0, size:int|None=None, fmt='B') -> MMIOInterface:
-    fd, sz = self.bar_fds[bar], size or (self.bar_info[bar].size - off)
+    fd, sz = self.bar_fd(bar), size or (self.bar_info(bar)[1] - off)
     libc.madvise(loc:=fd.mmap(addr, sz, mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_SHARED | (MAP_FIXED if addr else 0), off), sz, libc.MADV_DONTFORK)
     return MMIOInterface(loc, sz, fmt=fmt)
-  def reset(self): os.system(f"sudo sh -c 'echo 1 > /sys/bus/pci/devices/{self.pcibus}/reset'")
+  def resize_bar(self, bar_idx:int):
+    rpath = f"/sys/bus/pci/devices/{self.pcibus}/resource{bar_idx}_resize"
+    try: FileIOInterface(rpath, os.O_RDWR).write(str(int(FileIOInterface(rpath, os.O_RDONLY).read(), 16).bit_length() - 1))
+    except OSError as e: raise RuntimeError(f"Cannot resize BAR {bar_idx}: {e}. Ensure the resizable BAR option is enabled.") from e
 
 class USBPCIDevice(PCIDevice):
-  def __init__(self, devpref:str, pcibus:str, bars:list[int], resize_bars:list[int]|None=None):
+  def __init__(self, devpref:str, pcibus:str):
     self.lock_fd = System.flock_acquire(f"{devpref.lower()}_{pcibus.lower()}.lock")
     self.usb = ASM24Controller()
-    self.pcibus, self.bar_info = pcibus, System.pci_setup_usb_bars(self.usb, gpu_bus=4, mem_base=0x10000000, pref_mem_base=(32 << 30))
+    self.pcibus, self._bar_info = pcibus, System.pci_setup_usb_bars(self.usb, gpu_bus=4, mem_base=0x10000000, pref_mem_base=(32 << 30))
     self.sram = BumpAllocator(size=0x80000, wrap=False) # asm24 controller sram
-  def read_config(self, offset:int, size:int): return self.usb.pcie_cfg_req(offset, bus=4, dev=0, fn=0, size=size)
-  def write_config(self, offset:int, value:int, size:int): self.usb.pcie_cfg_req(offset, bus=4, dev=0, fn=0, value=value, size=size)
-  def map_bar(self, bar, off=0, addr=0, size=None, fmt='B'):
-    return USBMMIOInterface(self.usb, self.bar_info[bar].addr + off, size or self.bar_info[bar].size, fmt)
+
   def dma_view(self, ctrl_addr, size): return USBMMIOInterface(self.usb, ctrl_addr, size, fmt='B', pcimem=False)
   def alloc_sysmem(self, size:int, vaddr:int=0, contiguous:bool=False) -> tuple[MMIOInterface, list[int]]:
     return self.dma_view(0xf000 + (off:=self.sram.alloc(size)), size), [0x200000 + off]
+
+  def read_config(self, offset:int, size:int): return self.usb.pcie_cfg_req(offset, bus=4, dev=0, fn=0, size=size)
+  def write_config(self, offset:int, value:int, size:int): self.usb.pcie_cfg_req(offset, bus=4, dev=0, fn=0, value=value, size=size)
+
+  def bar_info(self, bar_idx:int) -> tuple[int, int]: return self._bar_info[bar_idx]  # type: ignore[override]
+  def map_bar(self, bar, off=0, addr=0, size=None, fmt='B'):
+    return USBMMIOInterface(self.usb, self.bar_info(bar)[0] + off, size or self.bar_info(bar)[1], fmt)
+  def resize_bar(self, bar_idx:int): pass # already resized
 
 @dataclasses.dataclass
 class PCIAllocationMeta: mapping:VirtMapping; has_cpu_mapping:bool; hMemory:int=0 # noqa: E702
 
 class PCIIfaceBase:
   def is_local(self) -> bool: return not isinstance(self.pci_dev, RemotePCIDevice)
-  def is_bar_small(self) -> bool: return self.pci_dev.bar_info[self.vram_bar].size == (256 << 20)
+  def is_bar_small(self) -> bool: return self.pci_dev.bar_info(self.vram_bar)[1] == (256 << 20)
 
-  def __init__(self, dev, dev_id, vendor, devices:list[tuple[int, list[int]]], bars, vram_bar, va_start, va_size,
+  def __init__(self, dev, dev_id, vendor, devices:list[tuple[int, list[int]]], vram_bar, va_start, va_size,
                dev_impl_t, base_class:int|None=None):
-    self.pci_dev = System.pci_probe_device(dev.__class__.__name__[:2], dev_id, vendor, devices, bars, resize_bars=[vram_bar], base_class=base_class)
+    self.pci_dev = System.pci_probe_device(dev.__class__.__name__[:2], dev_id, vendor, devices, base_class=base_class)
     if self.is_local(): System.reserve_va(va_start, va_size)
+    with contextlib.suppress(Exception): self.pci_dev.resize_bar(vram_bar)
     self.dev_impl = dev_impl_t(self.pci_dev)
     self.dev, self.vram_bar = dev, vram_bar
-    self.p2p_base_addr = self.pci_dev.bar_info[vram_bar].addr
 
   def alloc(self, size:int, host=False, uncached=False, cpu_access=False, contiguous=False, force_devmem=False, **kwargs) -> HCQBuffer:
     should_use_sysmem = host or ((cpu_access if self.is_bar_small() else (uncached and cpu_access)) and not force_devmem)
@@ -254,7 +259,7 @@ class PCIIfaceBase:
     if self.is_local() and b.owner == self.dev and b.meta.has_cpu_mapping: FileIOInterface.munmap(b.va_addr, b.size)
 
   def p2p_paddrs(self, paddrs:list[tuple[int,int]]) -> tuple[list[tuple[int,int]], AddrSpace]:
-    return [(p + self.p2p_base_addr, sz) for p, sz in paddrs], AddrSpace.SYS
+    return [(p + self.pci_dev.bar_info(self.vram_bar)[0], sz) for p, sz in paddrs], AddrSpace.SYS
 
   def map(self, b:HCQBuffer):
     if not self.is_local(): raise RuntimeError(f"P2P mapping not supported for remote devices: {b.owner} -> {self.dev}")
@@ -295,11 +300,10 @@ class RemoteMMIOInterface(MMIOInterface):
     return RemoteMMIOInterface(self.dev, self.residx, size or (self.nbytes - offset), fmt or self.fmt, self.off + offset)
 
 class RemotePCIDevice(PCIDevice):
-  def __init__(self, devpref:str, pcibus:str, bars:list[int], sock:socket.socket):
+  def __init__(self, devpref:str, pcibus:str, sock:socket.socket):
     self.lock_fd = System.flock_acquire(f"{devpref.lower()}_{pcibus.lower()}.lock")
     self.pcibus, self.sock = pcibus, sock
     for buft in [socket.SO_SNDBUF, socket.SO_RCVBUF]: self.sock.setsockopt(socket.SOL_SOCKET, buft, 64 << 20)
-    self.bar_info = {b: PCIBarInfo(0, self._rpc(RemoteCmd.MAP_BAR, b)[0]) for b in bars}
 
   def _recvall(self, n:int) -> bytes:
     data = b''
@@ -328,11 +332,16 @@ class RemotePCIDevice(PCIDevice):
     # paddrs are returned as (paddr, size) pairs until a (paddr=0, size=0) terminator in the beginning of the mapping.
     paddrs_raw = list(itertools.takewhile(lambda p: p[1] != 0, zip(memview.view(fmt='Q')[0::2], memview.view(fmt='Q')[1::2])))
     return memview, [p + i for p, sz in paddrs_raw for i in range(0, sz, 0x1000)][:ceildiv(size, 0x1000)]
+
+  def reset(self): self._rpc(RemoteCmd.RESET, 0, 0, 0)
   def read_config(self, offset:int, size:int): return self._rpc(RemoteCmd.CFG_READ, 0, offset, size)[0]
   def write_config(self, offset:int, value:int, size:int): self._rpc(RemoteCmd.CFG_WRITE, 0, offset, size, value)
-  def reset(self): self._rpc(RemoteCmd.RESET, 0, 0, 0)
+
+  @functools.cache
+  def bar_info(self, bar_idx:int) -> tuple[int, int]: return (0, self._rpc(RemoteCmd.MAP_BAR, bar_idx)[0])
   def map_bar(self, bar:int, off:int=0, addr:int=0, size:int|None=None, fmt='B') -> MMIOInterface:
-    return RemoteMMIOInterface(self, bar, size or self.bar_info[bar].size, fmt).view(off, size, fmt)
+    return RemoteMMIOInterface(self, bar, size or self.bar_info(bar)[1], fmt).view(off, size, fmt)
+  def resize_bar(self, bar_idx:int): pass # TODO: resizing not supported for remote devices
 
 class APLRemotePCIDevice(RemotePCIDevice):
   APP_PATH = "/Applications/TinyGPU.app/Contents/MacOS/TinyGPU"
@@ -345,7 +354,7 @@ class APLRemotePCIDevice(RemotePCIDevice):
     system(f"ditto -xk {fetch(f'https://github.com/nimlgen/tinygpu_releases/raw/{commit}/TinyGPU.zip', name=app_name)} /Applications")
     print(system(f"{cls.APP_PATH} install"))
 
-  def __init__(self, devpref:str, pcibus:str, bars:list[int], resize_bars:list[int]|None=None):
+  def __init__(self, devpref:str, pcibus:str):
     self.ensure_app()
     sock_path, sock = getenv("APL_REMOTE_SOCK", temp("tinygpu.sock")), socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     for i in range(100):
@@ -355,4 +364,4 @@ class APLRemotePCIDevice(RemotePCIDevice):
       if i == 0: subprocess.Popen([self.APP_PATH, "server", sock_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
       time.sleep(0.05)
     else: raise RuntimeError(f"Failed to connect to TinyGPU server at {sock_path}.")
-    super().__init__(devpref, pcibus, bars, sock)
+    super().__init__(devpref, pcibus, sock)
