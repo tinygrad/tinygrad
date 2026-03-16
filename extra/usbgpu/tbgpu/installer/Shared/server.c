@@ -17,6 +17,7 @@
 // Protocol
 
 enum {
+  CMD_PROBE = 0,          // probe devices, returns count
   CMD_MAP_BAR = 1,        // map PCI BAR, returns size
   CMD_MAP_SYSMEM_FD = 2,  // alloc DMA memory, returns fd via SCM_RIGHTS
   CMD_CFG_READ = 3,       // read PCI config space
@@ -24,11 +25,14 @@ enum {
   CMD_RESET = 5,          // reset device
   CMD_MMIO_READ = 6,      // bulk read from BAR
   CMD_MMIO_WRITE = 7,     // bulk write to BAR
+  CMD_MAP_SYSMEM = 8,     // map system memory
+  CMD_SYSMEM_READ = 9,    // bulk read from system memory
+  CMD_SYSMEM_WRITE = 10,  // bulk write to system memory
   RESP_OK = 0, RESP_ERR = 1,
 };
 
-typedef struct { uint8_t cmd, bar; uint64_t offset, size, value; } __attribute__((packed)) request_t;
-typedef struct { uint8_t status; uint64_t value, addr; } __attribute__((packed)) response_t;
+typedef struct { uint8_t cmd; uint32_t dev_id, bar; uint64_t arg0, arg1, arg2; } __attribute__((packed)) request_t;
+typedef struct { uint8_t status; uint64_t resp0, resp1; } __attribute__((packed)) response_t;
 
 // Constants and state
 
@@ -77,7 +81,7 @@ static int send_response(int fd, response_t *resp, int send_fd) {
 }
 
 static void send_error(int fd, const char *msg) {
-  response_t resp = {.status = RESP_ERR, .value = strlen(msg)};
+  response_t resp = {.status = RESP_ERR, .resp0 = strlen(msg)};
   send_response(fd, &resp, -1);
   send(fd, msg, strlen(msg), 0);
 }
@@ -116,8 +120,8 @@ static int dext_rpc(uint32_t sel, uint64_t *in, uint32_t in_cnt, uint64_t *out_v
 static int map_bar(uint32_t bar, response_t *resp) {
   if (bar >= MAX_BARS) return -1;
   if (!g_bars[bar].addr && IOConnectMapMemory64(g_conn, bar, mach_task_self(), &g_bars[bar].addr, &g_bars[bar].size, kIOMapAnywhere)) return -1;
-  resp->addr = g_bars[bar].addr;
-  resp->value = g_bars[bar].size;
+  resp->resp0 = g_bars[bar].addr;
+  resp->resp1 = g_bars[bar].size;
   return 0;
 }
 
@@ -148,7 +152,7 @@ static int map_sysmem_fd(uint64_t size, response_t *resp, int *out_fd) {
   strncpy(g_sysmem[idx].shm_name, shm_name, sizeof(g_sysmem[idx].shm_name));
   g_sysmem_count++;
 
-  *resp = (response_t){.addr = idx, .value = alloc_sz};
+  *resp = (response_t){.resp0 = alloc_sz, .resp1 = idx};
   *out_fd = fd;
   return 0;
 
@@ -203,19 +207,19 @@ static void handle_client(int fd) {
 
     case CMD_MAP_SYSMEM_FD: {
       int shm_fd = -1;
-      resp.status = map_sysmem_fd(req.size, &resp, &shm_fd) ? 1 : 0;
+      resp.status = map_sysmem_fd(req.arg0, &resp, &shm_fd) ? 1 : 0;
       send_response(fd, &resp, shm_fd);
       continue;
     }
 
     case CMD_CFG_READ: {
-      uint64_t in[2] = {req.offset, req.size};
-      resp.status = dext_rpc(0, in, 2, &resp.value) ? 1 : 0;
+      uint64_t in[2] = {req.arg0, req.arg1};
+      resp.status = dext_rpc(0, in, 2, &resp.resp0) ? 1 : 0;
       break;
     }
 
     case CMD_CFG_WRITE: {
-      uint64_t in[3] = {req.offset, req.size, req.value};
+      uint64_t in[3] = {req.arg0, req.arg1, req.arg2};
       resp.status = dext_rpc(1, in, 3, NULL) ? 1 : 0;
       break;
     }
@@ -225,17 +229,17 @@ static void handle_client(int fd) {
       break;
 
     case CMD_MMIO_READ:
-      if (validate_bar(req.bar, req.offset, req.size)) { resp.status = 1; break; }
-      mmio_copy(g_bulk_buf, (void*)(g_bars[req.bar].addr + req.offset), req.size);
-      resp.value = req.size;
+      if (validate_bar(req.bar, req.arg0, req.arg1)) { resp.status = 1; break; }
+      mmio_copy(g_bulk_buf, (void*)(g_bars[req.bar].addr + req.arg0), req.arg1);
+      resp.resp0 = req.arg1;
       send_response(fd, &resp, -1);
-      send(fd, g_bulk_buf, req.size, 0);
+      send(fd, g_bulk_buf, req.arg1, 0);
       continue;
 
     case CMD_MMIO_WRITE:
-      recvall(fd, g_bulk_buf, req.size);
-      if (!validate_bar(req.bar, req.offset, req.size))
-        mmio_copy((void*)(g_bars[req.bar].addr + req.offset), g_bulk_buf, req.size);
+      recvall(fd, g_bulk_buf, req.arg1);
+      if (!validate_bar(req.bar, req.arg0, req.arg1))
+        mmio_copy((void*)(g_bars[req.bar].addr + req.arg0), g_bulk_buf, req.arg1);
       continue;
 
     default:
