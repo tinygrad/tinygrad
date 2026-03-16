@@ -151,7 +151,7 @@ class TransformerBlock:
     attn = self.attn_output(attn)
     return x + attn
 
-  @function(precompile=bool(getenv("PRECOMPILE", 0)))
+  @function(precompile=bool(getenv("PRECOMPILE", 0)), allow_implicit=False)
   def _feed_forward(self, h: Tensor) -> Tensor:
     h_norm = self.ffn_norm(h)
     if hasattr(self, 'ffn_gate_exps'):
