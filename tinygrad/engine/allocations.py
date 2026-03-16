@@ -107,9 +107,8 @@ def transform_precompiled_call(c:UOp) -> UOp|None:
   rets = tuple(o.after(new_call) for o in outs)
 
   # if the CALL has symbolic shapes, shrink the max-sized output to the actual symbolic shape
-  resolved = [c.gettuple(i) for i in range(len(srcs))]
-  rets = tuple(r.shrink(tuple((0, s) for s in rs.shape)) if any(isinstance(x, UOp) for x in rs.shape) else r
-               for r,rs in zip(rets, resolved))
+  # NOTE: must use resolved shapes from the CALL (which substitutes PARAMs with external args), not raw body shapes
+  rets = tuple(r.shrink_to(rs.shape) for r,rs in zip(rets, resolved))
 
   return UOp.maketuple(*rets)
 
