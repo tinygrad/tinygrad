@@ -191,7 +191,7 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
 # *****************
 # 3.5 cleanups
 
-ALWAYS_RUN_OPS = {Ops.CONTIGUOUS, Ops.COPY, Ops.ASSIGN, Ops.NOOP}
+ALWAYS_RUN_OPS = {Ops.CONTIGUOUS, Ops.COPY, Ops.NOOP}
 
 # you don't know in the first pass if axes are going to die, this happens if there's an EXPAND to the left
 def cleanup_dead_axes(b:UOp):
@@ -383,20 +383,6 @@ def bufferize_to_store(ctx:itertools.count, x:UOp, idx:UOp, allow_locals=True):
       end_rngs = sorted(dedup(tuple(store_target.ranges) + tuple(rngs)), key=lambda x: x.arg)
       ended_stores.append(store_target.replace(dtype=sdtype).store(stores[0].src[1]).end(*end_rngs))
     return buf.after(*ended_stores)
-  if (assign := x.src[0]).op is Ops.ASSIGN:
-    assign_target, assign_src = assign.src[0], assign.src[1]
-    assert assign_target.op is Ops.INDEX, f"{assign_target.op} is not index"
-    while assign_src.op is Ops.NOOP: assign_src = assign_src.src[0]
-
-    store_target = assign_target
-    if assign_target.src[0].op is Ops.BUFFERIZE and assign_target.src[0].src[0].op is Ops.INDEX:
-      # BUFFERIZE(INDEX(...)); store through the underlying global index instead.
-      store_target = assign_target.src[0].src[0]
-
-    end_rngs = sorted(dedup(tuple(store_target.ranges) + tuple(rngs)), key=lambda x: x.arg)
-    ret = store_target.buf_uop.base
-    if assign_src is not assign_target: ret = ret.after(store_target.replace(dtype=sdtype).store(assign_src).end(*end_rngs))
-    return ret
 
   # NOTE: the DEFINE_LOCAL needs to be disambiguated here
   if sdtype.addrspace == AddrSpace.GLOBAL:

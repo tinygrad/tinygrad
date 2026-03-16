@@ -37,7 +37,7 @@ add_tags = PatternMatcher([
    lambda a,c,dest: a.replace(src=(a.src[0], a.src[1].replace(src=(dest, c.rtag(())))), tag=a.tag+c.tag) if a.tag and c.tag else None),
   (UPat(Ops.AFTER, src=(UPat(), UPat(Ops.STORE)), name="x"), tag_uop),
   (UPat(Ops.AFTER, name="u"), apply_after),
-  (UPat({Ops.CONTIGUOUS, Ops.ASSIGN}, name="x"), tag_uop),
+  (UPat(Ops.CONTIGUOUS, name="x"), tag_uop),
   (UPat(GroupOp.All, name="x"), lambda ctx,x: tag_uop(ctx,x) if x in ctx.bases else None),
 ])
 
@@ -63,7 +63,7 @@ def replace_contig_with_store_after(u:UOp):
 
 def replace_store_after_with_contig(u:UOp, src:UOp):
   assigned_to = u
-  while assigned_to.op in {Ops.ASSIGN, Ops.BITCAST, Ops.AFTER}: assigned_to = assigned_to.src[0].base
+  while assigned_to.op in {Ops.BITCAST, Ops.AFTER}: assigned_to = assigned_to.src[0].base
   if assigned_to.op is not Ops.BUFFER: return src.contiguous(tag=u.tag)
 
 def contiguous_mops_to_view(c:UOp):
@@ -124,10 +124,10 @@ pm_early_transform_tensor_graph = PatternMatcher([
   (UPat(Ops.CONTIGUOUS, src=(UPat(GroupOp.Movement),), name="c"), contiguous_mops_to_view),
 
   # add CONTIGUOUS to tagged UOps
-  (UPat(GroupOp.All-{Ops.CONTIGUOUS, Ops.ASSIGN, Ops.AFTER, Ops.STORE}, name="x"),
+  (UPat(GroupOp.All-{Ops.CONTIGUOUS, Ops.AFTER, Ops.STORE}, name="x"),
    lambda x: x.rtag(None).contiguous(tag=x.tag) if x.tag else x.replace(tag=None)),
-  # remove extra CONTIGUOUS on ASSIGN/AFTER (only when target is contiguous)
-  (UPat(Ops.CONTIGUOUS, src=(UPat({Ops.ASSIGN, Ops.AFTER}, name="a"),), name="c"),
+  # remove extra CONTIGUOUS on AFTER (only when target is contiguous)
+  (UPat(Ops.CONTIGUOUS, src=(UPat(Ops.AFTER, name="a"),), name="c"),
    lambda a,c: a.replace(tag=(a.tag or ())+(c.tag or ())) if a.src[0].has_buffer_identity() else None),
   # replace AFTER+STORE with CONTIGUOUS when target is not a buffer
   (UPat(Ops.AFTER, src=(UPat(), UPat(Ops.STORE, src=(UPat(), UPat(name="src")))), name="u"), replace_store_after_with_contig),
@@ -143,7 +143,7 @@ def untag_and_append(ctx:AllocCtx, x:UOp):
   for t in x.tag:
     original_uop: UOp = ctx.uop_list[t]
     replace_uop = ret
-    while replace_uop.op in {Ops.ASSIGN, Ops.AFTER}: replace_uop = replace_uop.src[0]
+    while replace_uop.op is Ops.AFTER: replace_uop = replace_uop.src[0]
     ctx.buffer_map[original_uop] = replace_uop.shrink_to(original_uop.shape)
   if ret.op is not Ops.AFTER: ctx.assigns.append(ret)  # AFTER gets appended by append_after
   return ret
@@ -157,7 +157,7 @@ def replace_input_buffer(ctx:AllocCtx, b:UOp):
                    b._min_max if b.op is Ops.BIND else None, b.src[0].arg[0] if b.op is Ops.BIND else None)
 
 pm_finalize_call = PatternMatcher([
-  (UPat({Ops.ASSIGN, Ops.AFTER}, name="x"), untag_and_append),
+  (UPat(Ops.AFTER, name="x"), untag_and_append),
   (UPat(Ops.AFTER, name="x"), append_after),
   (UPat(Ops.COPY, name="x"), lambda ctx,x: append_after(ctx,x) if isinstance(x.device, str) and x.device.startswith(("DISK", "TINYFS")) else None),
   # remove unique from const. TODO: this is copied in function.py
