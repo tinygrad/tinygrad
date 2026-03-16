@@ -20,10 +20,11 @@ pm_ctx = PatternMatcher([
 
 ReturnType = TypeVar('ReturnType')
 class _function(Generic[ReturnType]):
-  def __init__(self, fxn:Callable[..., ReturnType], *, precompile:bool=False, allow_implicit:bool=True):
+  def __init__(self, fxn:Callable[..., ReturnType], *, precompile:bool=False, allow_implicit:bool=True, grad_fxn:Callable|None=None):
     self.fxn = fxn
     self.precompile = precompile
     self.allow_implicit = allow_implicit
+    self.grad_fxn = grad_fxn
 
   def __get__(self, obj, objtype=None): return functools.partial(self.__call__, obj) if obj is not None else self
 
@@ -69,7 +70,7 @@ class _function(Generic[ReturnType]):
     #call = assigned.call(*call_uops, buffer, name=name)
     #ret = buffer.after(call)
 
-    fret = uret.call(*call_uops, name=name, precompile=self.precompile)
+    fret = uret.call(*call_uops, grad_fxn=self.grad_fxn, name=name, precompile=self.precompile)
     if isinstance(ret, tuple):
       return cast(ReturnType, tuple(Tensor(fret.gettuple(i), device=fret.device) for i in range(len(ret))))
     else:
@@ -77,9 +78,11 @@ class _function(Generic[ReturnType]):
 
 # overload signatures support both @function and @function(precompile=True) syntax
 @overload
-def function(fxn:Callable[..., ReturnType], *, precompile:bool=False, allow_implicit:bool=True) -> _function[ReturnType]: ...
+def function(fxn:Callable[..., ReturnType], *, precompile:bool=False, allow_implicit:bool=True,
+             grad_fxn:Callable|None=None) -> _function[ReturnType]: ...
 @overload
-def function(fxn:None=None, *, precompile:bool=False, allow_implicit:bool=True) -> Callable[[Callable[..., ReturnType]], _function[ReturnType]]: ...
-def function(fxn=None, *, precompile:bool=False, allow_implicit:bool=True):
-  if fxn is None: return lambda f: _function(f, precompile=precompile, allow_implicit=allow_implicit)
-  return _function(fxn, precompile=precompile, allow_implicit=allow_implicit)
+def function(fxn:None=None, *, precompile:bool=False, allow_implicit:bool=True,
+             grad_fxn:Callable|None=None) -> Callable[[Callable[..., ReturnType]], _function[ReturnType]]: ...
+def function(fxn=None, *, precompile:bool=False, allow_implicit:bool=True, grad_fxn:Callable|None=None):
+  if fxn is None: return lambda f: _function(f, precompile=precompile, allow_implicit=allow_implicit, grad_fxn=grad_fxn)
+  return _function(fxn, precompile=precompile, allow_implicit=allow_implicit, grad_fxn=grad_fxn)

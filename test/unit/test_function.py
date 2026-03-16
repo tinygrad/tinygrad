@@ -357,5 +357,21 @@ class TestFunctionTuple(unittest.TestCase):
     x.grad.realize(y.grad)
   def test_grad_tuple_precompile(self): self.test_grad_tuple(True)
 
+  def test_grad_fxn_tuple(self):
+    # grad_fxn for tuple: receives (grads, call) where grads is a python tuple of UOps (one per output)
+    def grad_fxn(grads:tuple, call:UOp):
+      # f(u1, u2) = (u1+1, u2+2), grads = (d_out0, d_out1)
+      # df/du1 = d_out0, df/du2 = d_out1
+      return (grads[0], grads[1])
+
+    x = Tensor.ones(3, requires_grad=True).contiguous()
+    y = Tensor.ones(3, requires_grad=True).contiguous()
+    @function(grad_fxn=grad_fxn)
+    def f(u1:Tensor, u2:Tensor): return (u1+1, u2+2)
+    t1, t2 = f(x, y)
+    (t1+t2).sum().backward()
+    np.testing.assert_allclose(x.grad.numpy(), [1., 1., 1.])
+    np.testing.assert_allclose(y.grad.numpy(), [1., 1., 1.])
+
 if __name__ == '__main__':
   unittest.main()
