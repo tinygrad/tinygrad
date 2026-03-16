@@ -97,9 +97,6 @@ _tensor_spec = PatternMatcher([
   # KERNEL can attach to an AFTER to describe the compute required to realize a BUFFER
   (UPat(Ops.CALL, src=UPat((Ops.BUFFER, Ops.AFTER, Ops.MSELECT, Ops.MSTACK, Ops.BIND))), lambda: True),
 
-  # ASSIGN is used internally by allreduce for precompiled function bodies
-  (UPat(Ops.ASSIGN, name="x"), lambda x: len(x.src) >= 2),
-
   # MSELECT chooses one of the multi buffers
   (UPat(Ops.MSELECT, name="x"), lambda x: isinstance(x.src[0].device, tuple) and x.arg < len(x.src[0].device)),
 
