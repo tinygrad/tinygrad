@@ -308,13 +308,22 @@ class Tensor(OpMixin):
     if is_disk:
       self._buffer().copyin(x._data())
       return self
-    # NOTE: assign_uop is created before AFTER embedding (uses original self.uop),
-    # but AFTER must be embedded before _apply_uop (so subsequent assigns see it)
-    assign_uop = self.uop.assign(x.uop)
+    # STORE+AFTER: STORE is the write effect (void), AFTER wraps the view for correct shape/ranging
+    store_uop = self.uop.store(x.uop)
     base = self.uop.base
-    if base.op in {Ops.BUFFER, Ops.AFTER} and not self.uop.has_buffer_identity():
-      _apply_map_to_tensors({base: base.after(assign_uop)}, name="Embed View Assign", walk=True)
-    return self.replace(self._apply_uop(lambda *_: assign_uop, x))
+    if base.op in {Ops.BUFFER, Ops.AFTER} and self.uop is not base and not self.uop.has_buffer_identity():
+      # view assign: inner AFTER(view, STORE) for correct shape/ranging, outer AFTER(base, inner) for dependency
+      original_uop = self.uop
+      view_after = self.uop.after(store_uop)
+      assigned_base = base.after(view_after)
+      _apply_map_to_tensors({base: assigned_base}, name="Embed View Assign", walk=True)
+      def replace_view_base(u:UOp) -> UOp:
+        return u.replace(src=((assigned_base if u.src[0] is base else replace_view_base(u.src[0])),)+u.src[1:])
+      ret = Tensor(replace_view_base(original_uop), device=self.device, requires_grad=self.requires_grad)
+      self.replace(self._apply_uop(lambda *_: replace_view_base(original_uop), x))
+      return ret
+    # simple assign: AFTER wraps self.uop (may be RESHAPE'd buffer) with STORE effect
+    return self.replace(self._apply_uop(lambda *_: self.uop.after(store_uop), x))
 
   def detach(self) -> Tensor:
     """
@@ -1331,7 +1340,8 @@ class Tensor(OpMixin):
              if (t:=tref()) is not None and t is not self and t.uop is not v_uop and t.uop not in v_bw):
         raise RuntimeError("can't setitem on a tensor that already has other uses and requires grad")
       if not isinstance(v, Tensor): v = Tensor(v, device=self.device, dtype=self.dtype)
-      if v.uop.op is Ops.ASSIGN: v = v._apply_uop(lambda x: x.src[1])
+      # __iadd__/__isub__ creates AFTER(view, STORE(view, computed)); unwrap to get the computed value
+      if v.uop.op is Ops.AFTER and any(s.op is Ops.STORE for s in v.uop.src[1:]): v = v._apply_uop(lambda x: x.src[1].src[1])
       self.replace(self._getitem(indices, v))
       return
     idx = [indices] if (isinstance(indices, list) and all_int(indices)) or not isinstance(indices, (tuple, list)) else list(indices)
@@ -1340,14 +1350,14 @@ class Tensor(OpMixin):
       if is_disk: raise RuntimeError("advanced setitem is not supported for DISK tensors")
       if not isinstance(v, Tensor): v = Tensor(v, device=self.device, dtype=self.dtype)
       self.assign(self._getitem(indices, v))
-    elif is_disk or self.uop.is_realized or self.uop.base.op is Ops.AFTER: # basic setitem, self is realized
+    elif is_disk or self.uop.is_realized or self.uop.base.op is Ops.BUFFER or self.uop._base_buffer_is_realized(): # basic setitem
       view = self[indices]
-      if isinstance(v, Tensor) and v.uop.op is Ops.ASSIGN and v.uop in view.uop.base.src: return
+      if isinstance(v, Tensor) and v.uop.op is Ops.AFTER and v.uop in view.uop.base.src: return
       view.assign(v)
     else: # basic setitem, self is not realized
       if not isinstance(v, Tensor): v = Tensor(v, device=self.device, dtype=self.dtype)
-      # __iadd__/__isub__ on unrealized views creates a no-op ASSIGN; unwrap to get the computed value
-      if v.uop.op is Ops.ASSIGN: v = v._apply_uop(lambda x: x.src[1])
+      # __iadd__/__isub__ creates AFTER(view, STORE(view, computed)); unwrap to get the computed value
+      if v.uop.op is Ops.AFTER and any(s.op is Ops.STORE for s in v.uop.src[1:]): v = v._apply_uop(lambda x: x.src[1].src[1])
       self.replace(self._getitem(indices, v))
 
   def __delitem__(self, indices) -> None:
@@ -2484,7 +2494,7 @@ class Tensor(OpMixin):
     """
     if IMAGE: return self.image_dot(w, dtype)
     if ASM_GEMM:
-      from extra.gemm.asm.cdna.gemm import can_use_asm_gemm, asm_gemm
+      from extra.gemm.cdna_asm_gemm import can_use_asm_gemm, asm_gemm
       if can_use_asm_gemm(self, w): return asm_gemm(self, w)
     x, dx, dw = self, self.ndim, w.ndim
     if not (dx > 0 and dw > 0): raise RuntimeError(f"both tensors need to be at least 1D, got {dx}D and {dw}D")
@@ -3655,21 +3665,27 @@ class Tensor(OpMixin):
 
     # contiguous creates the image, and early realize static weights (TODO: test for the static weight)
     if IMAGE == 1:
-      # pad with Invalid
-      def _invalid_pad_to(t, shape):
-        if all(p is None or p == s for p,s in zip(shape, t.shape)): return t
-        return Tensor(True, device=t.device).expand(t.shape).pad_to(shape).where(t.pad_to(shape), Invalid)
-      # hacks for pitch alignment
-      assert isinstance(ix, int) and isinstance(H, int)
-      ALIGN = 64 // dtsz
-      x = _invalid_pad_to(x, (None, None, round_up(ix, ALIGN // math.gcd(groups * cin, ALIGN)), None))
-      w = _invalid_pad_to(w, (None, round_up(H, ALIGN // math.gcd(W * cin * 4, ALIGN))) + (None,) * (w.ndim - 2))
+      def is_pow2(v): return v > 0 and v & (v - 1) == 0
+      # pad dimension i to amt with invalids
+      def ipad(t, i, amt):
+        shape = (None,)*i + (amt,) + (None,)*(t.ndim-i-1)
+        return Tensor(True, device=t.device).expand(t.shape).pad_to(shape).where(t.pad_to(shape), Invalid) if amt != t.shape[i] else t
+      # align a dimension to 64 bytes
+      def pad_align(t, dim):
+        return ipad(t, dim, round_up(t.shape[dim], (64 // dtsz) // math.gcd(prod(t.shape) // t.shape[dim], (64 // dtsz))))
+
+      # bank conflicts
+      if cin >= 8 and is_pow2(cin // 4): x, w = ipad(x.reshape(bs, iy, ix, groups, cin // 4, 4), 4, cin // 4 + 1), ipad(w, 2, cin // 4 + 1)
+
+      # 64-byte pitch alignment
+      x, w = pad_align(x, 2), pad_align(w, 1)
 
       if FLOAT16: x, w = x.cast(dtypes.half).contiguous().cast(dtypes.float), w.cast(dtypes.half).contiguous().cast(dtypes.float)
       else: x, w = x.contiguous(), w.contiguous()
 
       # undo alignment hacks
-      x, w = x[:, :, :ix, :], w[:, :H, ...]
+      if cin >= 8 and is_pow2(cin // 4): x, w = x[:, :, :ix, :, :cin // 4, :], w[:, :H, :cin // 4, ...]
+      else: x, w = x[:, :, :ix, :], w[:, :H, ...]
 
     elif IMAGE: x, w = x.cast(base_image_type((bs*iy, ix*groups*cin//4, 4))).contiguous(), w.cast(base_image_type((cout//4, H*W*cin, 4))).contiguous()
     else: x, w = x.contiguous(), w.contiguous()

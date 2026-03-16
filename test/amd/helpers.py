@@ -6,7 +6,7 @@ from tinygrad.runtime.support.elf import elf_loader
 
 ARCH_TO_TARGET:dict[str, list[str]] = {
   "rdna3":["gfx1100"],
-  "rdna4":["gfx1200"],
+  "rdna4":["gfx1200", "gfx1201"],
   "cdna":["gfx950", "gfx942"],
 }
 
