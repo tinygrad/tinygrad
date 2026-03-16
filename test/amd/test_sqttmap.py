@@ -110,5 +110,7 @@ class TestSQTTMapRDNA3(TestSQTTMapBase): target = "gfx1100"
 
 class TestSQTTMapRDNA4(TestSQTTMapBase): target = "gfx1200"
 
+class TestSQTTMapCDNA3(TestSQTTMapBase): target = "gfx950"
+
 if __name__ == "__main__":
   unittest.main()

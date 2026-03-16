@@ -223,10 +223,7 @@ class TestSQTTExamplesRDNA3(SQTTExamplesTestBase):
 
 class TestSQTTExamplesRDNA4(SQTTExamplesTestBase): target = "gfx1200"
 
-class TestSQTTExamplesCDNA(SQTTExamplesTestBase):
-  target = "gfx950"
-  def test_rocprof_wave_times_match(self): self.skipTest("TODO: requires timestamp patching")
-  def test_rocprof_inst_times_match(self): self.skipTest("TODO: requires timestamp patching")
+class TestSQTTExamplesCDNA(SQTTExamplesTestBase): target = "gfx950"
 
 if __name__ == "__main__":
   unittest.main()
