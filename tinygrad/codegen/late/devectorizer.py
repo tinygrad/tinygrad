@@ -187,7 +187,7 @@ def _do_image_fixup(dt:ImageDType, idx:UOp) -> tuple[UOp, UOp, int, int]:
   buf = idx.src[0]
   x, valid = idx.src[1].get_idx(), idx.src[1].get_valid()
   h, w = dt.shape[0], dt.shape[1]
-  if IMAGE == 1 and valid is not None:
+  if IMAGE == 1 and valid.op is not Ops.CONST:
     h, w = max(ImageDType.valid_dims(dt), key=lambda hw:
                 # maximize number of valids removed
                (len(_drop_valid_stmts(valid, idx:=uop_given_valid(valid, UOp.vectorize((x//4)%hw[1], x//(4*hw[1])).simplify()), *hw)),
