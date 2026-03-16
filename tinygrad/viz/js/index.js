@@ -382,9 +382,9 @@ async function renderProfiler(path, opts) {
   const { strings, dtypeSize, markers, ...extData } = JSON.parse(textDecoder.decode(new Uint8Array(buf, offset, indexLen))); offset += indexLen;
   // place devices on the y axis and set vertical positions
   const [tickSize, padding, baseOffset] = [5, 8, markers.length ? 14 : 0];
-  const axes = [(t, st, et) => formatTime(t, et-st <= 1e3)], axisGap = 8;
-  if (opts.unit == "clk") axes.unshift((t) => timeAtCycle(t));
-  const deviceList = profiler.append("div").attr("id", "device-list").style("padding-top", tickSize*axes.length+axisGap*axes.length+padding+baseOffset+"px");
+  const secondaryTick = opts.unit == "clk" ? timeAtCycle : null;
+  const axisHeight = secondaryTick != null ? tickSize*2+(padding*2) : tickSize;
+  const deviceList = profiler.append("div").attr("id", "device-list").style("padding-top", axisHeight+padding+baseOffset+"px");
   const canvas = profiler.append("canvas").attr("id", "timeline").node();
   // NOTE: scrolling via mouse can only zoom the graph
   canvas.addEventListener("wheel", e => (e.stopPropagation(), e.preventDefault()), { passive:false });
@@ -626,24 +626,23 @@ async function renderProfiler(path, opts) {
       }
     }
     // draw axes
-    const lineHeight = 8, labelGap = 2;
-    const y = lineHeight+labelGap+tickSize;
+    ctx.translate(0, baseOffset);
+    const y = secondaryTick != null ? tickSize+padding : 0;
     drawLine(ctx, xscale.range(), [y, y]);
-    let lastTopLabelEnd = -Infinity, lastBottomLabelEnd = -Infinity;
+    let lastLabelEnd = -Infinity;
     for (const tick of xscale.ticks()) {
-      const x = xscale(tick);
-      const labelX = x+ctx.lineWidth+2;
       if (!Number.isInteger(tick)) continue;
-      drawLine(ctx, [x, x], [y-tickSize, y+tickSize]);
-      let label = axes[0](tick, st, et);
-      if (label != null && labelX > lastTopLabelEnd) {
-        ctx.textBaseline = "top"; ctx.fillText(label, labelX, 0);
-        lastTopLabelEnd = labelX+ctx.measureText(label).width+4;
-      }
-      label = axes[1](tick, st, et);
-      if (label != null && labelX > lastBottomLabelEnd) {
-        ctx.textBaseline = "top"; ctx.fillText(label, labelX, lineHeight+labelGap+tickSize*2+labelGap);
-        lastBottomLabelEnd = labelX+ctx.measureText(label).width+4;
+      const x = xscale(tick);
+      drawLine(ctx, [x, x], [y, y+tickSize]);
+      const labelX = x+ctx.lineWidth+2;
+      if (labelX <= lastLabelEnd) continue;
+      const label = formatTime(tick, et-st <= 1e3);
+      ctx.textBaseline = "top";
+      ctx.fillText(label, labelX, y+tickSize);
+      lastLabelEnd = labelX + ctx.measureText(label).width + 4;
+      if (secondaryTick != null) {
+        drawLine(ctx, [x, x], [y, y-tickSize]);
+        ctx.textBaseline = "top"; ctx.fillText(secondaryTick(tick, st, et), labelX, 0);
       }
     }
     if (data.axes.y != null) {
@@ -909,7 +908,7 @@ async function main() {
       }
       appendSteps(ul, i, steps);
     }
-    return setState({ currentCtx:-1 });
+    return setState({currentCtx: 5, currentStep: 2, currentRewrite: 0, expandSteps: true});
   }
   // ** center graph
   const { currentCtx, currentStep, currentRewrite, expandSteps } = state;
