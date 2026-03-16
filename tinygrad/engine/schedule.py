@@ -22,6 +22,7 @@ def create_schedule(sched_sink:UOp) -> UOp:
     for u in sched_sink.toposort(gate_kernel_sink):
       if u.op is not Ops.AFTER: continue
       k = u.src[1]
+      if k.op is Ops.STORE: continue  # skip unprocessed STORE+AFTER inside precompiled CALL bodies
       assert k.op in {Ops.CALL, Ops.END}, f"AFTER src[1] should be CALL or END, not {k.op}"
       in_degree.setdefault(k, 0)
       if k.op is Ops.END: assert k.src[0].op is Ops.CALL, f"END src[0] should be KERNEL, not {k.src[0].op}"
