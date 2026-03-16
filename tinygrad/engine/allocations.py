@@ -98,7 +98,8 @@ def transform_precompiled_call(c:UOp) -> UOp|None:
 
   # add the outputs to the call
   srcs = c.src[0].src if c.src[0].op is Ops.TUPLE else (c.src[0],)
-  outs = tuple(_buffer_like(c.gettuple(i) if c.src[0].op is Ops.TUPLE else c) for i in range(len(srcs)))
+  resolved = [c.gettuple(i) if c.src[0].op is Ops.TUPLE else c for i in range(len(srcs))]
+  outs = tuple(_buffer_like(r) for r in resolved)
   targets = [o.param_like(len(c.src)-1+i).shrink_to(s.shape) for i,(o,s) in enumerate(zip(outs, srcs))]
   fxn = UOp.sink(*[t.after(t.store(s)) for t,s in zip(targets, srcs)])
 
@@ -107,8 +108,9 @@ def transform_precompiled_call(c:UOp) -> UOp|None:
   rets = tuple(o.after(new_call) for o in outs)
 
   # if the CALL has symbolic shapes, shrink the max-sized output to the actual symbolic shape
-  rets = tuple(r.shrink(tuple((0, s) for s in s.shape)) if any(isinstance(x, UOp) for x in s.shape) else r
-               for r,s in zip(rets, srcs))
+  # NOTE: must use resolved shapes from the CALL (which substitutes PARAMs with external args), not raw body shapes
+  rets = tuple(r.shrink(tuple((0, s) for s in rs.shape)) if any(isinstance(x, UOp) for x in rs.shape) else r
+               for r,rs in zip(rets, resolved))
 
   # return tuple if tuple
   return UOp.maketuple(*rets) if c.src[0].op is Ops.TUPLE else rets[0]
