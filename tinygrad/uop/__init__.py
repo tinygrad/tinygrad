@@ -39,6 +39,9 @@ class Ops(FastEnum):
   # vector creation / item selection
   GEP = auto(); VECTORIZE = auto()
 
+  # tuple/gettuple for function with multiple returns
+  TUPLE = auto(); GETTUPLE = auto()
+
   # ** 3 -- load/store **
 
   # INDEX is a BinaryOp similar to ADD, but it operates on pointers
@@ -82,7 +85,7 @@ class Ops(FastEnum):
   # ** 6 -- ops that don't exist in programs **
 
   # tensor graph ops
-  UNIQUE = auto(); DEVICE = auto(); ASSIGN = auto()
+  UNIQUE = auto(); DEVICE = auto()
 
   # local unique
   LUNIQUE = auto()
