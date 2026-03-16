@@ -350,7 +350,7 @@ class APLRemotePCIDevice(RemotePCIDevice):
   @classmethod
   def ensure_app(cls):
     commit = "81f5bb45ba0d65edefa833475b71cd17a470c2c5"
-    if os.path.exists(cls.APP_PATH) and (_ensure_downloads_dir() / (app_name:=f"TinyGPU_{commit}.zip")).is_file(): return
+    if (_ensure_downloads_dir() / (app_name:=f"TinyGPU_{commit}.zip")).is_file() and os.path.exists(cls.APP_PATH): return
     print("Downloading TinyGPU.app...")
     with contextlib.suppress(RuntimeError): system("pkill -f TinyGPU")
     system(f"ditto -xk {fetch(f'https://github.com/nimlgen/tinygpu_releases/raw/{commit}/TinyGPU.zip', name=app_name)} /Applications")
