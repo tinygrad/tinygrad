@@ -335,5 +335,36 @@ class TestFunctionMulti(unittest.TestCase):
       f(x).sum().backward()
       np.testing.assert_allclose(x.grad.numpy(), expected)
 
+class TestFunctionTuple(unittest.TestCase):
+  def test_tuple(self):
+    x = Tensor.ones(3).contiguous()
+    @function
+    def f(t:Tensor): return (t+1, t+2)
+    t1, t2 = f(x)
+    t1.realize(t2)
+    print(t1.tolist(), t2.tolist())
+
+class TestFunctionBackward(unittest.TestCase):
+  def test_backward_has_grad(self):
+    N = 16
+    x = Tensor.empty(N, N)
+    w1 = Tensor.empty(N, N, requires_grad=True)
+    @function
+    def f(t:Tensor, w1:Tensor): return (t@w1)
+    f(x, w1).sum().backward()
+    assert w1.grad is not None
+
+  def test_double_matmul_backward(self):
+    N = 16
+    x = Tensor.empty(N, N)
+    w1 = Tensor.empty(N, N, requires_grad=True)
+    w2 = Tensor.empty(N, N, requires_grad=True)
+    ref = Tensor.empty(N)
+
+    @function(precompile=True)
+    def f(t:Tensor, w1:Tensor, w2:Tensor): return (t@w1)@w2
+    loss = (f(x, w1, w2)-ref).square().mean().backward()
+    loss.realize(w1.grad, w2.grad)
+
 if __name__ == '__main__':
   unittest.main()

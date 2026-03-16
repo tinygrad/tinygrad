@@ -209,8 +209,14 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
       # late ops don't have shape
       case Ops.UNIQUE | Ops.LUNIQUE | Ops.DEVICE | Ops.RANGE | Ops.LOAD | Ops.STORE | Ops.IF | Ops.BARRIER | Ops.CUSTOM | Ops.CUSTOMI | \
            Ops.VECTORIZE | Ops.GEP | Ops.SPECIAL | Ops.UNROLL | Ops.CONTRACT | Ops.SINK | \
-           Ops.LINEAR | Ops.PROGRAM | Ops.SOURCE | Ops.BINARY | Ops.INS:
+           Ops.LINEAR | Ops.PROGRAM | Ops.SOURCE | Ops.BINARY | Ops.INS | Ops.TUPLE:
         return None
+
+      case Ops.GETTUPLE:
+        # GETTUPLE extracts from a TUPLE
+        in_tuple = self.src[0].src[0] if self.src[0].op is Ops.CALL else self.src[0]
+        assert in_tuple.op is Ops.TUPLE
+        return in_tuple.src[self.arg]._shape
 
       case Ops.CAST:
         # when PTX casts from ptr to non ptr, remove the shape

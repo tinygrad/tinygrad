@@ -39,12 +39,17 @@ class _function(Generic[ReturnType]):
     # run it and do surgery later
     with Context(ALLOW_DEVICE_USAGE=getenv("DEVICE_IN_FUNCTION_BUG", 0)):
       ret = self.fxn(*args, **kwargs)
-    assert isinstance(ret, Tensor), "only supports one tensor return for now"
+    if isinstance(ret, Tensor):
+      uret = ret.uop
+    elif isinstance(ret, tuple) and all(isinstance(x, Tensor) for x in ret):
+      uret = UOp(Ops.TUPLE, src=tuple(x.uop for x in ret))
+    else:
+      raise RuntimeError(f"function return type {type(ret)} not supported")
 
     # replace the known inputs with params (using deduplicated slots)
     subs = {}
     for i,x in enumerate(call_uops): subs[x] = x.param_like(i)
-    uret = ret.uop.substitute(subs)
+    uret = uret.substitute(subs)
 
     # add contiguous to call_uops
     #call_uops = [x.contiguous() for x in call_uops]
@@ -60,8 +65,12 @@ class _function(Generic[ReturnType]):
     #call = assigned.call(*call_uops, buffer, name=name)
     #ret = buffer.after(call)
 
-    ret = uret.call(*call_uops, name=name, precompile=self.precompile)
-    return cast(ReturnType, Tensor(ret, device=ret.device))
+    fret = uret.call(*call_uops, name=name, precompile=self.precompile)
+    if isinstance(ret, tuple):
+      return cast(ReturnType, tuple(Tensor(UOp(Ops.GETTUPLE, dtype=fret.src[0].src[i].dtype, src=(fret,), arg=i),
+                                           device=fret.device) for i in range(len(ret))))
+    else:
+      return cast(ReturnType, Tensor(fret, device=fret.device))
 
 # overload signatures support both @function and @function(precompile=True) syntax
 @overload
