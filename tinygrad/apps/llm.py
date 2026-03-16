@@ -152,8 +152,8 @@ class TransformerBlock:
     v = v.reshape(B, T, self.n_kv_heads, self.head_dim).transpose(1, 2)  # (B,KvH,T,Hd)
     if self.qk_norm == self.head_dim: q, k = self.attn_q_norm(q), self.attn_k_norm(k)
 
-    q = apply_rope(q, self.freqs_cis[start_pos:start_pos+T])
-    k = apply_rope(k, self.freqs_cis[start_pos:start_pos+T])
+    q = apply_rope(q, self.freqs_cis[start_pos:start_pos+T], self.rope_dim)
+    k = apply_rope(k, self.freqs_cis[start_pos:start_pos+T], self.rope_dim)
 
     # TODO: fix assign to behave like this
     assigned_kv = self.cache_kv.uop.after(self.cache_kv[:, :, :, start_pos:start_pos+T, :].uop.assign(Tensor.stack(k, v).contiguous().uop))
@@ -231,7 +231,7 @@ class TransformerBlock:
       # TODO: how is the dtype of this determined?
       # NOTE: clone is used to promise the creation of a specific buffer
       self.cache_kv = Tensor.zeros(2, x.shape[0], self.n_kv_heads, self.max_context, self.head_dim, device=x.device).clone()
-      self.freqs_cis = precompute_freqs_cis(self.head_dim, self.max_context, self.rope_theta)
+      self.freqs_cis = precompute_freqs_cis(self.rope_dim, self.max_context, self.rope_theta)
     return self._feed_forward(self._attention(x, start_pos)).contiguous()
 
 class Transformer:
