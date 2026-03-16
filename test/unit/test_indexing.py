@@ -179,8 +179,6 @@ class TestIndexing(unittest.TestCase):
     def delitem(): del reference[0]
     self.assertRaises(TypeError, delitem)
 
-  # TODO setitem backward
-  '''
   def test_set_item_to_scalar_tensor(self):
     m = random.randint(1, 10)
     n = random.randint(1, 10)
@@ -190,7 +188,6 @@ class TestIndexing(unittest.TestCase):
     z[:, 0] = w
     z.sum().backward()
     numpy_testing_assert_equal_helper(w.grad, m * a)
-  '''
 
   def test_step(self):
     v = Tensor.arange(10)

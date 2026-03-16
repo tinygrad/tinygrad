@@ -36,7 +36,8 @@ def get_test_global_size(global_size, max_global_size, var_vals):
   return test_global_size, input_size / prod(test_global_size)
 
 def _time_program(p:ProgramSpec, lib:bytes, var_vals:dict[str, int], rawbufs:list[Buffer], early_stop:float|None=None,
-                  allow_test_size:int=True, max_global_size:int|None=65536, clear_l2=False, cnt=3, name="test") -> list[float]:
+                  allow_test_size:int=True, max_global_size:int|None=65536, clear_l2=False, cnt=3, name="test", dev_timeout=False) -> list[float]:
+  timeout = int(early_stop * 1e3) if dev_timeout and early_stop is not None and early_stop < math.inf else None
   factor = 1
   if allow_test_size and max_global_size is not None:
     global_size, factor = get_test_global_size(p.global_size, max_global_size, var_vals)
@@ -50,7 +51,7 @@ def _time_program(p:ProgramSpec, lib:bytes, var_vals:dict[str, int], rawbufs:lis
       if hasattr(dev:=Device[p.device], 'invalidate_caches'): dev.invalidate_caches()
       else:
         with Context(DEBUG=0, BEAM=0, CAPTURING=0, TRACK_MATCH_STATS=0): Tensor.ones(1024,1024).contiguous().realize(do_update_stats=False)
-    tms.append(unwrap(car(input_bufs, var_vals, wait=True))*factor)
+    tms.append(unwrap(car(input_bufs, var_vals, wait=True, timeout=timeout))*factor)
     if early_stop is not None and early_stop < min(tms): break
   return tms
 
@@ -161,7 +162,8 @@ def beam_search(s:Scheduler, rawbufs:list[Buffer], amt:int, allow_test_size=True
           continue
         seen_libs.add(lib)
         try: tms = _time_program(p, lib, var_vals, rawbufs, early_stop=beam[0][1]*3 if len(beam) else 1.0,
-                                 allow_test_size=allow_test_size, clear_l2=hasattr(dev, 'invalidate_caches'))
+                                 allow_test_size=allow_test_size, clear_l2=hasattr(dev, 'invalidate_caches'),
+                                 dev_timeout=getenv("BEAM_DEV_TIMEOUT", 1))
         except Exception as e:
           if BEAM_DEBUG: print(f"BEAM failed for opts: {candidates[i].applied_opts}\n{e}")
           if isinstance(e, RuntimeError): continue

@@ -1,4 +1,4 @@
-import os, unittest
+import os, struct, unittest
 from tinygrad import dtypes, Tensor, fetch, Device
 from tinygrad.nn.state import ggml_data_to_tensor, gguf_load
 from tinygrad.device import is_dtype_supported
@@ -26,16 +26,16 @@ class TestGGUF(unittest.TestCase):
     # codes 0-7 = [0, 1, 2, 3, 4, 6, 8, 12], codes 8-15 are their negatives
     block = np.array([0x80] + list(range(16)), dtype=np.uint8)  # E=128, nibbles 0-15 in low, zeros in high
     expected = np.array([0., 1., 2., 3., 4., 6., 8., 12., -0., -1., -2., -3., -4., -6., -8., -12.] + [0.]*16, dtype=np.float32)
-    np.testing.assert_equal(ggml_data_to_tensor(Tensor(block), 32, 39).numpy().flatten(), expected)
+    np.testing.assert_equal(ggml_data_to_tensor(Tensor(block), 32, GGMLQuantizationType.MXFP4.value).numpy().flatten(), expected)
 
   def test_dequantization_q4_0(self): self._test_dequantization(GGMLQuantizationType.Q4_0)
   def test_dequantization_q4_1(self): self._test_dequantization(GGMLQuantizationType.Q4_1)
   def test_dequantization_q8_0(self): self._test_dequantization(GGMLQuantizationType.Q8_0)
   def test_dequantization_q4_k(self): self._test_dequantization(GGMLQuantizationType.Q4_K)
+  def test_dequantization_q5_k(self): self._test_dequantization(GGMLQuantizationType.Q5_K)
   def test_dequantization_q6_k(self): self._test_dequantization(GGMLQuantizationType.Q6_K)
-  def test_dequantization_mxfp4(self):
-    MXFP4 = 39
-
+  def test_dequantization_mxfp4(self): self._test_dequantization(GGMLQuantizationType.MXFP4)
+  def test_dequantization_mxfp4_old(self):
     def encode(nibbles, E):
       packed = [(low & 0xF) | ((high & 0xF) << 4) for low, high in zip(nibbles[:16], nibbles[16:])]
       return np.array([E] + packed, dtype=np.uint8)
@@ -56,12 +56,10 @@ class TestGGUF(unittest.TestCase):
       blocks.append(encode(codes, E))
       expected.extend(decode(c, E) for c in codes)
     tensor = Tensor(np.concatenate(blocks))
-    out = ggml_data_to_tensor(tensor, len(expected), MXFP4)
-    # TODO: should this be exact equal? somehow failed on CI
-    np.testing.assert_allclose(out.numpy(), expected, atol=0.0, rtol=1e-6)
+    out = ggml_data_to_tensor(tensor, len(expected), GGMLQuantizationType.MXFP4.value)
+    np.testing.assert_equal(out.numpy(), expected)
 
   def test_dequantization_mxfp4_block(self):
-    MXFP4 = 39
     # https://gist.github.com/Ananta-Ranganathan/3317b6ed51a3b033e9c2564fafb4e043
     # used the above script to download the first block of blk.0.attn_k_b.weight from
     # https://huggingface.co/unsloth/GLM-4.7-Flash-GGUF/blob/main/GLM-4.7-Flash-MXFP4_MOE.gguf
@@ -76,9 +74,8 @@ class TestGGUF(unittest.TestCase):
                         0.03125000,  0.00000000, 0.06250000,  0.01562500,
                         -0.06250000,  0.00000000, 0.00000000, -0.01562500,
                         0.04687500,  0.00000000, 0.00000000,  0.01562500], dtype=np.float32)
-    out = ggml_data_to_tensor(Tensor(block), 32, MXFP4)
-    # TODO: similar to previous test fails on Mac CI with assert_equal for unclear reason
-    np.testing.assert_allclose(out.numpy(), expected, atol=0.0, rtol=1e-6)
+    out = ggml_data_to_tensor(Tensor(block), 32, GGMLQuantizationType.MXFP4.value)
+    np.testing.assert_equal(out.numpy(), expected)
 
   def test_expected_failure_unknown_type(self):
     with self.assertRaises(ValueError):
@@ -119,6 +116,46 @@ class TestGGUF(unittest.TestCase):
         self.assertEqual(kv_data[k], [read_val(i) for i in f.data])
       else:
         self.assertEqual(kv_data[k], read_val(-1))
+
+class TestGGUFGEMV(unittest.TestCase):
+  def _test_gguf_gemv(self, qtype: GGMLQuantizationType):
+    block_size, type_size = GGML_QUANT_SIZES[qtype]
+    rows, cols = 8192, 2048
+    n_blocks = rows * cols // block_size
+    rng = np.random.default_rng(42)
+    # generate random quantized blocks with valid fp16 scale fields (random bytes can produce NaN scales)
+    q_data = rng.integers(0, 256, size=n_blocks * type_size, dtype=np.uint8).reshape(n_blocks, type_size)
+    scales = np.float16(rng.standard_normal(n_blocks * 4)).view(np.uint8).reshape(n_blocks, -1)
+    if qtype == GGMLQuantizationType.Q8_0: q_data[:, :2] = scales[:, :2]                    # d at offset 0
+    elif qtype in (GGMLQuantizationType.Q4_K, GGMLQuantizationType.Q5_K): q_data[:, :4] = scales[:, :4] # d, dmin at offset 0
+    elif qtype == GGMLQuantizationType.Q6_K: q_data[:, -2:] = scales[:, :2]                 # d at end
+    elif qtype == GGMLQuantizationType.MXFP4: q_data[:, 0] = rng.integers(120, 136, size=n_blocks, dtype=np.uint8) # constrain byte0
+    q_data = q_data.flatten()
+    ref = dequantize(q_data, qtype).reshape(rows, cols)
+
+    # build a minimal gguf in memory: header + 1 tensor info + aligned data
+    buf = bytearray()
+    buf += struct.pack("<4siqq", b"GGUF", 3, 1, 0)              # magic, version, n_tensors, n_kv
+    buf += struct.pack("<Q", 6) + b"weight"                      # tensor name
+    buf += struct.pack("<I", 2)                                  # ndims
+    buf += struct.pack("<QQ", cols, rows)                        # dims (gguf stores reversed)
+    buf += struct.pack("<i", qtype.value)
+    buf += struct.pack("<Q", 0)                                  # offset
+    buf += b"\x00" * ((32 - len(buf) % 32) % 32)                # pad to alignment=32
+    buf += q_data.tobytes()
+
+    _, tensors = gguf_load(Tensor(np.frombuffer(buf, dtype=np.uint8)).to(None))
+
+    x = rng.standard_normal(cols).astype(np.float32)
+    np.testing.assert_allclose((tensors["weight"] @ Tensor(x)).numpy(), ref @ x, atol=1e-2, rtol=1e-2)
+    np.testing.assert_equal(tensors["weight"].numpy(), ref)
+    assert np.isfinite(ref).all() and np.isfinite(tensors["weight"].numpy()).all(), f"{qtype.name} has NaN/Inf"
+
+  def test_gguf_gemv_q8_0(self): self._test_gguf_gemv(GGMLQuantizationType.Q8_0)
+  def test_gguf_gemv_q4_k(self): self._test_gguf_gemv(GGMLQuantizationType.Q4_K)
+  def test_gguf_gemv_q5_k(self): self._test_gguf_gemv(GGMLQuantizationType.Q5_K)
+  def test_gguf_gemv_q6_k(self): self._test_gguf_gemv(GGMLQuantizationType.Q6_K)
+  def test_gguf_gemv_mxfp4(self): self._test_gguf_gemv(GGMLQuantizationType.MXFP4)
 
 if __name__ == '__main__':
   unittest.main()

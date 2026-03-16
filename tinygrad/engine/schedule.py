@@ -2,10 +2,9 @@ import time, inspect
 from typing import cast
 from collections import deque
 from tinygrad.uop.ops import UOp, Ops, buffers, UOpMetaClass, track_rewrites, graph_rewrite, gate_kernel_sink, KernelInfo
-from tinygrad.uop.ops import _remove_all_tags
 from tinygrad.uop.spec import type_verify, tensor_spec
 from tinygrad.device import Buffer, MultiBuffer
-from tinygrad.helpers import DEBUG, cpu_profile, TracingKey, SPEC, pluralize, SCACHE, BASEDIR
+from tinygrad.helpers import DEBUG, cpu_profile, TracingKey, SPEC, pluralize, SCACHE, BASEDIR, flatten
 from tinygrad.engine.realize import ExecItem
 
 # **** schedule linearizer
@@ -23,7 +22,8 @@ def create_schedule(sched_sink:UOp) -> UOp:
     for u in sched_sink.toposort(gate_kernel_sink):
       if u.op is not Ops.AFTER: continue
       k = u.src[1]
-      assert k.op in {Ops.CALL, Ops.END, Ops.LINEAR}, f"AFTER src[1] should be CALL or END, not {k.op}"
+      if k.op is Ops.STORE: continue  # skip unprocessed STORE+AFTER inside precompiled CALL bodies
+      assert k.op in {Ops.CALL, Ops.END}, f"AFTER src[1] should be CALL or END, not {k.op}"
       in_degree.setdefault(k, 0)
       if k.op is Ops.END: assert k.src[0].op is Ops.CALL, f"END src[0] should be KERNEL, not {k.src[0].op}"
       # WAR deps from rangeify are stored in AFTER src[2:]
@@ -72,7 +72,7 @@ def linear_to_schedule(linear:UOp) -> list[ExecItem]:
       base = buf_uops[1].buffer
       assert isinstance(base, Buffer), "base can't be MultiBuffer"
       buffers[buf_uops[0]] = base.view(buf_uops[0].arg, ast.dtype, ast.arg[1]*base.dtype.itemsize)
-    ubufs = [b.buffer for b in buf_uops]
+    ubufs = [b.buffer for b in buf_uops if b.op is not Ops.BIND]
     metadata = si.arg.metadata
     if any(isinstance(x, MultiBuffer) for x in ubufs):
       assert all(isinstance(x, MultiBuffer) for x in ubufs), "kernel must all be multibuffer"
@@ -92,22 +92,31 @@ def create_new_buffer(ctx:tuple[dict[UOp, UOp], tuple[UOp, ...]], b:UOp):
   return ret
 
 pm_post_sched_cache = PatternMatcher([
-  (UPat(Ops.PARAM, name="x"), lambda ctx,x: ctx[1][x.arg].rtag() if x.tag is None else None),
+  (UPat(Ops.PARAM, name="x"), lambda ctx,x: ctx[1][x.arg]),
   # create new BUFFERs for LUNIQUE BUFFERs from rangeify
   (UPat(Ops.BUFFER, src=(UPat(Ops.LUNIQUE), UPat(Ops.DEVICE)), name="b"), create_new_buffer),
 ])
 
+pm_resolve_linear_call = PatternMatcher([
+  # call LINEAR is resolved here
+  (UPat(Ops.CALL, src=(UPat(Ops.LINEAR),), name="linear_call", allow_any_len=True), lambda linear_call:
+   graph_rewrite(linear_call.src[0], pm_post_sched_cache, ctx=({}, linear_call.src[1:]), walk=True, name="params to buffers")),
+  # LINEAR on LINEAR
+  (UPat(Ops.LINEAR, custom_early_reject={Ops.LINEAR}, name="x"),
+   lambda x: x.replace(src=tuple(flatten(x.src if x.op is Ops.LINEAR else (x,) for x in x.src)))),
+])
+
 schedule_cache: dict[bytes, UOp] = {}
-def lower_schedule_to_linear(big_sink:UOp) -> UOp|None:
+# ctx is just for DEBUG on inner
+def lower_sink_to_linear(function:UOp) -> UOp|None:
   st = time.perf_counter()
-  function = big_sink.src[0]
   if isinstance(function.arg, KernelInfo): return None
-  if not SCACHE or (sc_ret:=schedule_cache.get(function.key, None)) is None:
-    if SPEC: type_verify(big_sink, tensor_spec)
+  cache_key = function.key
+  if not SCACHE or (sc_ret:=schedule_cache.get(cache_key, None)) is None:
+    if SPEC: type_verify(function, tensor_spec)
     # support recursive CALLs
-    function = graph_rewrite(function, pm_schedule, name="inner schedule to linear")
     linear = create_schedule(get_kernel_graph(function))
-    if SCACHE: schedule_cache[function.key] = linear
+    if SCACHE: schedule_cache[cache_key] = linear
   else:
     # schedule cache hit
     linear = sc_ret
@@ -119,20 +128,21 @@ def lower_schedule_to_linear(big_sink:UOp) -> UOp|None:
     else:
       frm = None
     print(f"scheduled {len(linear.src):5d} kernels in {(time.perf_counter()-st)*1000:8.2f} ms"+\
-          f" | {' cache hit' if SCACHE and sc_ret is not None else 'CACHE MISS'} {function.key.hex()[:8]}"+\
+          f" | {' cache hit' if SCACHE and sc_ret is not None else 'CACHE MISS'} {cache_key.hex()[:8]}"+\
           f" | {len(UOpMetaClass.ucache):7d} uops in cache"+("" if frm is None else f" | {frm.filename}:{frm.lineno}"))
-  # TODO: use walk and avoid the remove tags
-  linear = graph_rewrite(linear, pm_post_sched_cache, ctx=({}, big_sink.src[1:]), name="params to buffers")
-  return graph_rewrite(linear, _remove_all_tags, name="remove tags")
+  return linear
 
 pm_schedule = PatternMatcher([
-  (UPat(Ops.CALL, src=(UPat(Ops.SINK),), allow_any_len=True, name="big_sink"), lower_schedule_to_linear),
+  (UPat(Ops.SINK, name="function"), lower_sink_to_linear),
 ])
 
 @track_rewrites(lambda _,ret: f"Schedule {pluralize('Kernel', len(ret[0]))}")
 def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[list[ExecItem], dict[str, int]]:
   # big_sink srcs are all the Tensors
-  linear = graph_rewrite(big_sink, pm_schedule, name="schedule to linear")
+  linear_call = graph_rewrite(big_sink, pm_schedule, name="schedule to linear", enter_calls=True)
+
+  # this recursively resolves the linear_call and allocates buffers
+  linear = graph_rewrite(linear_call, pm_resolve_linear_call, name="resolve linear call")
 
   # vars used in the schedule
   used_vars = set().union(*[{v.expr for v in si.src[0].variables()} for si in linear.src])
@@ -143,7 +153,7 @@ def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[list[ExecItem], di
       nm = b.src[0].expr
       if nm not in used_vars: continue
       val = b.src[1].arg
-      assert nm not in var_vals or var_vals[nm] == val, f"bind mismatch on {nm}, {var_vals[nm]} != {val}"
+      if var_vals.get(nm, val) != val: raise RuntimeError(f"bind mismatch on {nm}, {var_vals[nm]} != {val}")
       var_vals[nm] = val
 
   # convert LINEAR to ExecItems

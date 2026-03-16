@@ -102,6 +102,14 @@
     fill: #FFD700;
     stroke: #B8860B;
   }
+  g.tag.collapsed circle {
+    fill: #5CD68D;
+    stroke: #4a4b57;
+  }
+  g.tag.expanded circle {
+    fill: #9FDDE6;
+    stroke: #4a4b57;
+  }
   g.port circle {
     fill: #b3dcc2;
   }
@@ -109,6 +117,7 @@
     stroke-width: 0.8;
   }
   g.tag text, #edge-labels text {
+    font-family: monospace;
     text-anchor: middle;
     font-size: 6px;
     fill: #08090e;
@@ -133,6 +142,27 @@
   }
   g.label rect.bg.highlight {
     fill: #5f0059;
+  }
+  #insts .line {
+    display: flex;
+    flex-direction: column;
+    cursor: pointer;
+    margin-bottom: 8px;
+  }
+  #insts .left {
+    width: fit-content;
+    display: flex;
+    gap: 4px;
+  }
+  #insts .left.highlight {
+    background-color: rgba(0, 199, 47, 0.2);
+  }
+  #insts .wave {
+    color: #7aa2f7;
+    min-width: 2ch;
+  }
+  #insts .pc {
+    color: #73daca;
   }
   g.node.highlight rect.node, .edgePath.highlight, g.port circle {
     stroke: #89C9A2;

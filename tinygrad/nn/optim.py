@@ -17,6 +17,7 @@ class Optimizer:
     assert len(self.params) != 0, "optimizer must have at least one param"
     self.buffers: list[Tensor] = dedup([x for x in params if not x.requires_grad])   # buffers are still realized
     self.device = device or self.params[0].device
+    self.param_dtype = to_dtype(getenv("OPTIM_DTYPE", "float32"))
     self.fused = fused
     # store lr in at least float32 precision
     self.lr = Tensor(lr if getenv("CONST_LR") else [lr], requires_grad=False, device=self.device,
@@ -24,10 +25,9 @@ class Optimizer:
     if self.fused: self.pos_params = list(itertools.accumulate(self.params, lambda x,y: x+y.numel(), initial=0))
 
   def _new_optim_param(self) -> list[Tensor]:
-    param_dtype = to_dtype(getenv("OPTIM_DTYPE", "float32"))
-    if self.fused: return [Tensor.zeros(self.pos_params[-1], dtype=param_dtype, device=self.device, requires_grad=False)]
-    if isinstance(self.device, tuple): return [Tensor.zeros_like(t, dtype=param_dtype, requires_grad=False) for t in self.params]
-    else: return [Tensor.zeros(t.shape, dtype=param_dtype, device=self.device, requires_grad=False) for t in self.params]
+    if self.fused: return [Tensor.zeros(self.pos_params[-1], dtype=self.param_dtype, device=self.device, requires_grad=False)]
+    if isinstance(self.device, tuple): return [Tensor.zeros_like(t, dtype=self.param_dtype, requires_grad=False) for t in self.params]
+    else: return [Tensor.zeros(t.shape, dtype=self.param_dtype, device=self.device, requires_grad=False) for t in self.params]
 
   def zero_grad(self):
     """

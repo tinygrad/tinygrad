@@ -3,7 +3,7 @@ from pathlib import Path
 import multiprocessing
 
 from tinygrad import Device, GlobalCounters, Tensor, TinyJit, dtypes
-from tinygrad.helpers import getenv, BEAM, WINO, round_up, diskcache_clear, Profiling, profile_marker
+from tinygrad.helpers import getenv, BEAM, WINO, round_up, diskcache_clear, Profiling, profile_marker, DEBUG
 from tinygrad.nn.state import get_parameters, get_state_dict, load_state_dict, safe_load, safe_save
 from tinygrad.nn.optim import LAMB, LARS, SGD, OptimizerGroup, Adam, AdamW
 
@@ -1282,7 +1282,7 @@ def train_bert():
         previous_step = i
 
 def train_llama3():
-  from extra.models.llama import Transformer
+  from examples.mlperf.models.llama import Transformer
   from examples.llama3 import MODEL_PARAMS
   from examples.mlperf.lr_schedulers import CosineAnnealingLRWithWarmup
   from examples.mlperf.optim import GradAccClipAdamW
@@ -1335,10 +1335,16 @@ def train_llama3():
   model_params = MODEL_PARAMS[getenv("LLAMA3_SIZE", "8B")]["args"]
   # vocab_size from the mixtral tokenizer
   if not SMALL: model_params |= {"vocab_size": 32000}
+  real_vocab_size = model_params['vocab_size']
   if (llama_layers:=getenv("LLAMA_LAYERS")) != 0: model_params['n_layers'] = llama_layers
   print(f"model parameters: {model_params}")
 
-  model = Transformer(**model_params, max_context=SEQLEN, jit=False, disable_kv_cache=True)
+  # pad vocab
+  if (MP := getenv("MP", 1)) > 1: model_params['vocab_size'] = round_up(model_params['vocab_size'], 256 * MP)
+  vocab_mask:Tensor = Tensor.arange(model_params['vocab_size']).reshape(1, 1, -1) >= real_vocab_size
+
+  model = Transformer(**model_params, max_context=SEQLEN)
+
   params = get_parameters(model)
   # weights are all bfloat16 for now
   assert params and all(p.dtype == dtypes.bfloat16 for p in params)
@@ -1351,6 +1357,8 @@ def train_llama3():
     device = tuple(f"{Device.DEFAULT}:{i}" for i in range(DP))
     for v in get_parameters(model):
       v.shard_(device, axis=None)
+
+    vocab_mask.shard_(device, axis=None)
 
   if (MP := getenv("MP", 1)) > 1:
     device = tuple(f"{Device.DEFAULT}:{i}" for i in range(MP))
@@ -1372,13 +1380,21 @@ def train_llama3():
       # prevents memory spike on device 0
       v.realize()
 
-  optim_device = "CPU" if getenv("OFFLOAD_OPTIM") else None
+    vocab_mask.shard_(device, axis=2).realize()
+
+  is_offload_optim = bool(getenv("OFFLOAD_OPTIM"))
+  is_fake_offload = Device.DEFAULT == "NULL"
+  optim_device = ("CPU" if not is_fake_offload else "NULL:99") if is_offload_optim else None
   optim = GradAccClipAdamW(get_parameters(model), lr=0.0, b1=opt_adamw_beta_1, b2=opt_adamw_beta_2,
                            eps=opt_adamw_epsilon, weight_decay=opt_adamw_weight_decay, grad_acc=grad_acc, device=optim_device)
 
   # init grads
-  for p in optim.params:
-    p.grad = p.zeros_like().contiguous().realize()
+  if is_offload_optim:
+    for p in optim.params:
+      p.grad = Tensor.zeros(p.shape, dtype=p.dtype, device=optim_device, requires_grad=False).contiguous().realize()
+  else:
+    for p in optim.params:
+      p.grad = p.zeros_like().contiguous().realize()
   grads: list[Tensor] = [p.grad for p in optim.params]
 
   scheduler = CosineAnnealingLRWithWarmup(optim, opt_base_learning_rate, opt_end_learning_rate, opt_learning_rate_warmup_steps, opt_learning_rate_decay_steps)
@@ -1394,51 +1410,55 @@ def train_llama3():
 
   @TinyJit
   def minibatch(tokens:Tensor):
-    tokens = tokens.to(None)
     if (DP := getenv("DP", 1)) > 1:
       device = tuple(f"{Device.DEFAULT}:{i}" for i in range(DP))
-      tokens = tokens.shard(device, 0)
+      tokens = tokens.to(None).shard(device, 0)
     if (MP := getenv("MP", 1)) > 1:
       device = tuple(f"{Device.DEFAULT}:{i}" for i in range(MP))
       tokens = tokens.shard(device)
-    logits:Tensor = model(tokens[:, :-1], start_pos=0, temperature=math.nan)
-    loss = logits.sparse_categorical_crossentropy(tokens[:, 1:])
+    if DP == 1 and MP == 1: tokens = tokens.to(None)
+    logits:Tensor = model(tokens[:, :-1])
+    loss = vocab_mask.where(-1e9, logits).sparse_categorical_crossentropy(tokens[:, 1:])
     loss.backward()
     assert all(p.grad is g for p,g in zip(optim.params, grads))
-    Tensor.realize(loss, *grads)
-    return loss.flatten().float().to("CPU")
+    loss_cpu = loss.flatten().float().to("CPU")
+    Tensor.realize(loss_cpu, *grads)
+    return loss_cpu
 
   @TinyJit
   def optim_step():
-    optim.step()
+    grad_norm = optim.fstep(grads)
     scheduler.step()
 
     for g in grads:
       g.assign(g.zeros_like())
 
-    lr = optim.lr
-    Tensor.realize(lr, *grads)
+    lr_cpu = optim.lr.float().to("CPU")
+    grad_norm_cpu = grad_norm.float().to("CPU")
+    Tensor.realize(lr_cpu, grad_norm_cpu, *grads)
 
-    return lr.float().to("CPU")
+    return lr_cpu, grad_norm_cpu
 
   @TinyJit
   @Tensor.train(False)
   def eval_step(tokens:Tensor):
-    tokens = tokens.to(None)
     if (DP := getenv("DP", 1)) > 1:
       device = tuple(f"{Device.DEFAULT}:{i}" for i in range(DP))
-      tokens = tokens.shard(device, 0)
+      tokens = tokens.to(None).shard(device, 0)
     if (MP := getenv("MP", 1)) > 1:
       device = tuple(f"{Device.DEFAULT}:{i}" for i in range(MP))
       tokens = tokens.shard(device)
-    logits:Tensor = model(tokens[:, :-1], start_pos=0, temperature=math.nan)
-    loss = logits.sparse_categorical_crossentropy(tokens[:, 1:])
+    if DP == 1 and MP == 1: tokens = tokens.to(None)
+    logits:Tensor = model(tokens[:, :-1])
+    loss = vocab_mask.where(-1e9, logits).sparse_categorical_crossentropy(tokens[:, 1:])
     return loss.flatten().float().to("CPU")
 
   # ** data iters **
   def fake_data(bs, samples):
+    import numpy as np
     for _ in range(samples // bs):
-      yield Tensor.randint(bs, SEQLEN + 1, low=0, high=model_params["vocab_size"], dtype=dtypes.int32, device=Device.DEFAULT)
+      fake_data_np = np.random.randint(0, model_params["vocab_size"], size=(bs, SEQLEN + 1), dtype=np.int32)
+      yield Tensor(fake_data_np, device="NPY")
 
   def get_train_iter():
     if getenv("FAKEDATA", 0):
@@ -1465,13 +1485,14 @@ def train_llama3():
   step_times = []
   while i < MAX_STEPS:
     GlobalCounters.reset()
+    actual_gbs = GBS if i >= 2 else BS
     if getenv("TRAIN", 1):
       profile_marker(f"train @ {i}")
       st = time.perf_counter()
 
       stopped = False
       losses, data_time, dev_time = [], 0, 0
-      for _ in range(grad_acc):
+      for _ in range(grad_acc if i >= 2 else 1):
         ist = time.perf_counter()
         try: tokens = next(train_iter)
         except StopIteration:
@@ -1484,7 +1505,8 @@ def train_llama3():
       if stopped: break
 
       gt = time.perf_counter()
-      lr = optim_step().item()
+      ret = optim_step()
+      lr, grad_norm = ret[0].item(), ret[1].item()
       et = time.perf_counter()
 
       loss = sum(losses) / len(losses)
@@ -1495,18 +1517,21 @@ def train_llama3():
       if BENCHMARK: step_times.append(step_time)
 
       i += 1
-      sequences_seen += GBS
+      sequences_seen += actual_gbs
 
       mem_gb = GlobalCounters.mem_used / 1e9
       gflops = GlobalCounters.global_ops / 1e9 / dev_time
       mfu = ((6 * num_params * SEQLEN * GBS) / (dev_time * max(getenv("DP", 1), getenv("MP", 1)) * 2.3e15)) * 100
       tqdm.write(
           f"{i:5} {step_time:.3f} s step, {gbs_time:.3f} s gbs, {optim_time:.3f} s optim, {data_time:.3f} s data, {loss:.4f} loss, " \
-          f"{lr:.12f} LR, {mem_gb:.2f} GB used, {gflops:9.2f} GFLOPS, {mfu:5.2f}% MFU")
+          f"{lr:.12f} LR, {grad_norm:.6f} grad_norm, {mem_gb:.2f} GB used, {gflops:9.2f} GFLOPS, {mfu:5.2f}% MFU")
+      if DEBUG >= 1: tqdm.write("  mem per device: " + ', '.join(f"{dev}: {mem/1e9:.2f} GB" for dev, mem in sorted(GlobalCounters.mem_used_per_device.items())))
 
       if WANDB:
         wandb.log({
-          "lr": lr, "train/loss": loss,
+          "train/loss": loss,
+          "train/lr": lr,
+          "train/grad_norm": grad_norm,
           "train/step_time": step_time,
           "train/gbs_time": gbs_time,
           "train/optim_time": optim_time,
@@ -1535,7 +1560,7 @@ def train_llama3():
         print(f"epoch global_ops: {GlobalCounters.global_ops:_}, "
               f"epoch global_mem: {GlobalCounters.global_mem:_}")
 
-    if (sequences_seen % EVAL_FREQ == 0 and (i != 1 or EVAL_FREQ == 1)) or (BENCHMARK and i == BENCHMARK):
+    if (sequences_seen // EVAL_FREQ != (sequences_seen - actual_gbs) // EVAL_FREQ and (i != 1 or EVAL_FREQ == 1)) or (BENCHMARK and i == BENCHMARK):
       if EVAL_BS == 0: return
       tqdm.write(f"evaluating after {sequences_seen} sequences")
       profile_marker(f"eval @ {i}")
@@ -1543,7 +1568,7 @@ def train_llama3():
       # run eval
       eval_losses = []
       eval_iter = get_eval_iter()
-      tqdm.write(f"evaluating {5760//EVAL_BS} batches of {EVAL_BS} sequences")
+      tqdm.write(f"evaluating {EVAL_SAMPLES//EVAL_BS} batches of {EVAL_BS} sequences")
 
       for j,tokens in tqdm(enumerate(eval_iter), total=EVAL_SAMPLES//EVAL_BS):
         eval_losses += eval_step(tokens).tolist()

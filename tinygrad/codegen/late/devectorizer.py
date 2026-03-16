@@ -1,7 +1,7 @@
 from typing import Any, cast
 import functools, itertools
 from collections import defaultdict
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from tinygrad.dtype import dtypes, ImageDType, DType, AddrSpace, Invalid, PtrDType
 from tinygrad.uop.ops import UOp, Ops, UPat, PatternMatcher, GroupOp, identity_element
 from tinygrad.uop.symbolic import uop_given_valid, parse_valid, invalid_gate
@@ -10,6 +10,7 @@ from tinygrad.renderer import Renderer
 
 # ***** image load valid simplification *****
 
+@functools.cache
 def _drop_valid_stmts(valid:UOp, idx:UOp, height:int, width:int) -> list[UOp]:
   # can drop valid if idx is out of bound when valid is False
   drop_stmt = []
@@ -130,7 +131,7 @@ load_store_folding = PatternMatcher([
   (UPat(Ops.STORE, src=(UPat(Ops.GEP, name="gep"), UPat.var("st")), name="sto"), gep_on_store),
   # put PTRCAT after LOAD
   (UPat(Ops.LOAD, src=(UPat(Ops.PTRCAT, name="cat"),), name="ld", allow_any_len=True),
-   lambda cat,ld: UOp(Ops.CAT, cat.dtype.base.vec(cat.dtype.vcount), tuple(ld.replace(dtype=x.dtype.base, src=(x,)+ld.src[1:]) for x in cat.src))),
+   lambda cat,ld: UOp(Ops.VCAT, cat.dtype.base.vec(cat.dtype.vcount), tuple(ld.replace(dtype=x.dtype.base, src=(x,)+ld.src[1:]) for x in cat.src))),
   # put PTRCAT after STORE
   (UPat(Ops.STORE, src=(UPat(Ops.PTRCAT, name="cat"), UPat(name="data")), name="sto"), cat_after_store),
 ])
@@ -181,15 +182,21 @@ def split_load_store(ctx:Renderer|None, ls:UOp, idx:UOp):
 
   # if it wasn't split, we return None. otherwise we CAT them
   if len(ret) <= 1: return None
-  return UOp(Ops.CAT, ls.dtype, tuple(ret)) if ls.op is Ops.LOAD else UOp.group(*ret)
+  return UOp(Ops.VCAT, ls.dtype, tuple(ret)) if ls.op is Ops.LOAD else UOp.group(*ret)
 
 def _do_image_fixup(dt:ImageDType, idx:UOp) -> tuple[UOp, UOp, int, int]:
   buf = idx.src[0]
   x, valid = idx.src[1].get_idx(), idx.src[1].get_valid()
   h, w = dt.shape[0], dt.shape[1]
-  if IMAGE == 1 and valid is not None:
-    h, w = max(ImageDType.valid_dims(dt), key=lambda hw:
-               (len(_drop_valid_stmts(valid, idx:=uop_given_valid(valid, UOp.vectorize((x//4)%hw[1], x//(4*hw[1]))), *hw)), -len(idx.backward_slice)))
+  if IMAGE == 1:
+    # search for dims that drop the most valid statements
+    best_drop, cands = -1, []
+    for ch, cw in ImageDType.valid_dims(dt):
+      if (dropped:=len(_drop_valid_stmts(valid, cidx:=uop_given_valid(valid, UOp.vectorize((x//4)%cw, x//(4*cw))), ch, cw))) > best_drop:
+        best_drop, cands = dropped, [(ch, cw, cidx)]
+      elif dropped == best_drop: cands.append((ch, cw, cidx))
+    # and tiebreak with indexing complexity (ie. number of nodes)
+    h, w, _ = cands[0] if len(cands) == 1 else min(cands, key=lambda cand: len(cand[2].simplify().gep(1).backward_slice))
     buf = buf.replace(dtype=(dtypes.imageh if dt.itemsize == 2 else dtypes.imagef)((h, w, 4), w * 4 * dt.itemsize))
   oidx = UOp(Ops.VECTORIZE, dtypes.index.vec(2), ((x // 4) % w, (x // (4*w))))
   return x, idx.replace(src=(buf, oidx.valid(valid))), w, h
@@ -308,8 +315,6 @@ pm_render = PatternMatcher([
 @dataclass
 class ReduceContext:
   acc_num: int = 0
-  # track ENDs by range for merging parallel reduces
-  range_to_ends: dict[tuple[UOp, ...], list[UOp]] = field(default_factory=dict)
 
 def horizontal_reduce(inp:UOp, out_dtype:DType) -> list[UOp]:
   # if this has a horizontal reduction component, do that first
@@ -335,13 +340,15 @@ def reduce_to_acc(ctx:ReduceContext, red:UOp):
     ctx.acc_num += 1
   ret = functools.reduce(lambda x,y: x.alu(red.arg, y), lst)
   if len(reduce_range) == 0: return ret
-  end = acc.index(UOp.const(dtypes.int, 0)).store(ret).end(*reduce_range)
-  ctx.range_to_ends.setdefault(reduce_range, []).append(end)
+  end = acc.index(UOp.const(dtypes.int, 0)).store(ret).end(*reduce_range).rtag("mergeable")
   return acc.after(end).index(UOp.const(dtypes.int, 0))
 
 def merge_reduce_ends(ctx:ReduceContext, sink:UOp):
-  # merge ENDs that share the same range
-  subs = {e: UOp.group(*(e.src[0] for e in ends)).end(*r) for r, ends in ctx.range_to_ends.items() if len(ends) > 1 for e in ends}
+  # merge ENDs that share the same range (only those created by reduce_to_acc)
+  range_to_ends: dict[tuple[UOp, ...], list[UOp]] = {}
+  for u in sink.backward_slice:
+    if u.op is Ops.END and u.tag == "mergeable": range_to_ends.setdefault(u.src[1:], []).append(u)
+  subs = {e: UOp.group(*(e.src[0] for e in ends)).end(*r) for r, ends in range_to_ends.items() if len(ends) > 1 for e in ends}
   return sink.substitute(subs) if subs else None
 
 pm_reduce = PatternMatcher([

@@ -396,6 +396,7 @@ def batch_load_retinanet(dataset, val:bool, base_dir:Path, batch_size:int=32, sh
       queue_in.put((idx, img, tgt))
 
   def _setup_shared_mem(shm_name:str, size:tuple[int, ...], dtype:dtypes) -> tuple[shared_memory.SharedMemory, Tensor]:
+    shm_name = f"{shm_name}_{os.getpid()}"
     if os.path.exists(f"/dev/shm/{shm_name}"): os.unlink(f"/dev/shm/{shm_name}")
     shm = shared_memory.SharedMemory(name=shm_name, create=True, size=prod(size))
     shm_tensor = Tensor.empty(*size, dtype=dtype, device=f"disk:/dev/shm/{shm_name}")
