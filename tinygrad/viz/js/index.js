@@ -269,16 +269,9 @@ function timeAtCycle(cycle) {
 
 function getZoomIdentity() {
   // for packets, set zoom to the full range of instruction events
-  if (data.path.includes("pkts")) {
-    let instRange = null;
-    for (const [k, { shapes }] of data.tracks) if (k.startsWith("WAVE")) {
-      const first = shapes[0].x, last = shapes.at(-1).x;
-      instRange = instRange == null ? [first, last] : [Math.min(first, instRange[0]), Math.max(last, instRange[1])]
-    }
-    if (instRange != null) {
-      const k = (data.dur - data.first) / (instRange[1] - instRange[0]), xscale = timelineScale();
-      return d3.zoomIdentity.translate(-xscale(instRange[0]) * k, 0).scale(k);
-    }
+  if (data.instSt != null) {
+    const k = (data.dur - data.first) / (data.instEt - data.instSt), xscale = timelineScale();
+    return d3.zoomIdentity.translate(-xscale(data.instSt) * k, 0).scale(k);
   }
   return d3.zoomIdentity;
 }
@@ -554,6 +547,15 @@ async function renderProfiler(path, opts) {
   for (const m of markers) m.label = m.name.split(/(\s+)/).map(st => ({ st, color:m.color, width:ctx.measureText(st).width }));
   data.pcToShape = new Map([...data.pcToShape].sort((a, b) => a[1].st - b[1].st));
   if (extData.pcMap != null) data.pcMap = extData.pcMap; setFocus(focusedShape);
+  // secondary axis mapping
+  let instRange = null;
+  for (const [k, { shapes }] of data.tracks) if (k.startsWith("WAVE")) {
+    const first = shapes[0].x, last = shapes.at(-1).x;
+    instRange = instRange == null ? [first, last] : [Math.min(first, instRange[0]), Math.max(last, instRange[1])];
+  }
+  if (instRange != null) {
+    [data.instSt, data.instEt] = instRange;
+  }
   updateProgress(Status.COMPLETE);
   // draw events on a timeline
   const dpr = window.devicePixelRatio || 1;
