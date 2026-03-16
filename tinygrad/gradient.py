@@ -13,21 +13,23 @@ def reduce_gradient(ctx:UOp, ret:UOp, op:Ops):
     return ((mask/broadcast_to_input(count)) * broadcast_to_input(ctx),)
   if op == Ops.MUL: return (broadcast_to_input(ctx * ret) / ret.src[0],)
 
-def call_gradient(ctx:UOp, k:UOp) -> tuple[UOp|None, ...]:
-  if k.arg.grad_fxn is not None: return (None,) + k.arg.grad_fxn(ctx, k)
-  # auto-differentiate the function
-  fxn, args = k.src[0], k.src[1:]
+def _call_grads(fxn:UOp, args:tuple[UOp, ...], ctx:UOp, name:str|None, precompile_backward:bool) -> list[UOp|None]:
+  """compute gradients of a function body w.r.t. its PARAM inputs, returns [grad_for_arg0, grad_for_arg1, ...]"""
   params = {x.arg:x for x in fxn.toposort(enter_calls=False) if x.op == Ops.PARAM}
   grads = compute_gradient(fxn, ctx.param_like(len(args)), set(params.values()))
-  ret: list[UOp|None] = [None]
+  ret: list[UOp|None] = []
   for i in range(len(args)):
     if (p:=params.get(i, None)) is not None and p in grads:
       # TODO: compact the args and remove unused ones
       assert not grads[p].op_in_backward_slice_with_self(Ops.BUFFER), "BUG: BUFFER in backward slice of grad"
-      ret.append(grads[p].call(*args, ctx, name=(k.arg.name or "")+f"_backward_{i}", precompile=k.arg.precompile_backward))
+      ret.append(grads[p].call(*args, ctx, name=(name or "")+f"_backward_{i}", precompile=precompile_backward))
     else:
       ret.append(None)
-  return tuple(ret)
+  return ret
+
+def call_gradient(ctx:UOp, k:UOp) -> tuple[UOp|None, ...]:
+  if k.arg.grad_fxn is not None: return (None,) + k.arg.grad_fxn(ctx, k)
+  return (None,) + tuple(_call_grads(k.src[0], k.src[1:], ctx, k.arg.name, k.arg.precompile_backward))
 
 # ctx is grad_output
 pm_gradient = PatternMatcher([
@@ -71,22 +73,31 @@ def _deepwalk(root:UOp, targets:set[UOp]) -> list[UOp]:
   # don't flow through DETACH/ASSIGN or anything not in target path
   return list(root.toposort(lambda node: node.op not in {Ops.DETACH, Ops.ASSIGN} and in_target_path[node]))
 
+def _accumulate_grad(grads:dict[UOp, UOp], k:UOp, v:UOp, t0:UOp):
+  if k in grads: grads[k] = grads[k] + v
+  else: grads[k] = v
+  if len(forward_metadata:=all_metadata.get(t0, ())):
+    backward_metadata = tuple(dataclasses.replace(x, backward=True) for x in forward_metadata)
+    for bw_uop in v.toposort(lambda x: x not in (t0, *t0.src, grads[t0])):
+      all_metadata[bw_uop] = all_metadata.get(bw_uop, ())+backward_metadata
+
 def compute_gradient(root:UOp, root_grad:UOp, targets:set[UOp]) -> dict[UOp, UOp]:
   grads = {root: root_grad}
   for t0 in reversed(_deepwalk(root, targets)):
     if t0 not in grads: continue
+    # GETTUPLE: differentiate the specific tuple element and pass gradients directly to the CALL's input args
+    if t0.op is Ops.GETTUPLE:
+      k = t0.src[0]  # the CALL
+      assert k.op is Ops.CALL and k.src[0].op is Ops.TUPLE
+      for arg, v in zip(k.src[1:], _call_grads(k.src[0].src[t0.arg], k.src[1:], grads[t0], k.arg.name, k.arg.precompile_backward)):
+        if v is not None: _accumulate_grad(grads, arg, v, t0)
+      continue
     lgrads: tuple[UOp|None, ...]|None = cast(tuple[UOp|None, ...]|None, pm_gradient.rewrite(t0, ctx=grads[t0]))
     if lgrads is None: raise RuntimeError(f"failed to compute gradient for {t0.op}\n\nin {str(t0)[0:1000]}...")
     assert len(lgrads) == len(t0.src), f"got {len(lgrads)} gradient, expected {len(t0.src)}"
     for k,v in zip(t0.src, lgrads):
       if v is None: continue
-      if k in grads: grads[k] = grads[k] + v
-      else: grads[k] = v
-      if len(forward_metadata:=all_metadata.get(t0, ())):
-        backward_metadata = tuple(dataclasses.replace(x, backward=True) for x in forward_metadata)
-        # we add the backward metadata to everything new in the graph
-        for bw_uop in v.toposort(lambda x: x not in (t0, *t0.src, grads[t0])):
-          all_metadata[bw_uop] = all_metadata.get(bw_uop, ())+backward_metadata
+      _accumulate_grad(grads, k, v, t0)
   # end any ranges on grads with a reduce sum
   for k,v in grads.items():
     if len(v.ranges):

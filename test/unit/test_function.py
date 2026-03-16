@@ -347,5 +347,15 @@ class TestFunctionTuple(unittest.TestCase):
     assert t2.tolist() == [3,3,3]
   def test_tuple_precompile(self): self.test_tuple(True)
 
+  def test_grad_tuple(self, precompile=False):
+    x = Tensor.ones(3, requires_grad=True).contiguous()
+    y = Tensor.ones(3, requires_grad=True).contiguous()
+    @function(precompile=precompile)
+    def f(u1:Tensor, u2:Tensor): return (u1+1, u2+2)
+    t1, t2 = f(x,y)
+    (t1+t2).sum().backward()
+    x.grad.realize(y.grad)
+  def test_grad_tuple_precompile(self): self.test_grad_tuple(True)
+
 if __name__ == '__main__':
   unittest.main()
