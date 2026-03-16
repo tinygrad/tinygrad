@@ -77,8 +77,9 @@ movement_ops = PatternMatcher([
   (UPat((Ops.VECTORIZE, Ops.VCONST), dtype=dtypes.index), lambda: True),
   (UPat({Ops.ADD, Ops.MUL, Ops.IDIV}, dtype=dtypes.index), lambda: True),
 
-  # AFTER on Movement Op or ASSIGN
-  (UPat(Ops.AFTER, src=(UPat(GroupOp.Movement.union({Ops.MULTI, Ops.CONTIGUOUS, Ops.ASSIGN, Ops.BUFFER})),), allow_any_len=True), lambda: True),
+  # AFTER on Movement Op, BUFFER, COPY, or BITCAST
+  (UPat(Ops.AFTER, src=(UPat(GroupOp.Movement.union({Ops.MULTI, Ops.CONTIGUOUS, Ops.BUFFER, Ops.BITCAST, Ops.COPY})),), allow_any_len=True),
+   lambda: True),
 ])
 
 _tensor_spec = PatternMatcher([
@@ -96,8 +97,8 @@ _tensor_spec = PatternMatcher([
   # KERNEL can attach to an AFTER to describe the compute required to realize a BUFFER
   (UPat(Ops.CALL, src=UPat((Ops.BUFFER, Ops.AFTER, Ops.MSELECT, Ops.MSTACK, Ops.BIND))), lambda: True),
 
-  # ASSIGN has a target and a value. It can also optionally depend on other assigns
-  (UPat(Ops.ASSIGN, name="x"), lambda x: len(x.src) >= 2 and all(s.op is Ops.ASSIGN for s in x.src[2:])),
+  # ASSIGN is used internally by allreduce for precompiled function bodies
+  (UPat(Ops.ASSIGN, name="x"), lambda x: len(x.src) >= 2),
 
   # MSELECT chooses one of the multi buffers
   (UPat(Ops.MSELECT, name="x"), lambda x: isinstance(x.src[0].device, tuple) and x.arg < len(x.src[0].device)),
