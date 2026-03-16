@@ -78,7 +78,7 @@ movement_ops = PatternMatcher([
   (UPat({Ops.ADD, Ops.MUL, Ops.IDIV}, dtype=dtypes.index), lambda: True),
 
   # AFTER on Movement Op or ASSIGN
-  (UPat(Ops.AFTER, src=(UPat(GroupOp.Movement.union({Ops.MULTI, Ops.CONTIGUOUS, Ops.ASSIGN})),), allow_any_len=True), lambda: True),
+  (UPat(Ops.AFTER, src=(UPat(GroupOp.Movement.union({Ops.MULTI, Ops.CONTIGUOUS, Ops.ASSIGN, Ops.BUFFER})),), allow_any_len=True), lambda: True),
 ])
 
 _tensor_spec = PatternMatcher([
@@ -233,8 +233,8 @@ program_spec = PatternMatcher([
   # END closes ranges
   (UPat(Ops.END, src=(UPat(), UPat(Ops.RANGE)), dtype=dtypes.void), lambda: True),
 
-  # make sure all index dtypes have been lowered
-  (UPat(GroupOp.All, dtype=dtypes.index), lambda: False),
+  # make sure all index dtypes have been lowered (except CONST/RANGE/DEFINE_VAR which are valid index-typed)
+  (UPat(GroupOp.All-{Ops.CONST, Ops.RANGE, Ops.DEFINE_VAR, Ops.VCONST, Ops.VECTORIZE}, dtype=dtypes.index), lambda: False),
   (UPat(Ops.CONST, arg=Invalid), lambda: False),
   (UPat(Ops.VCONST, name="x"), lambda x: all(v is not Invalid for v in x.arg) and len(x.arg)==x.dtype.vcount>1 and
     type(x.arg) is type(dtypes.as_const(x.arg, x.dtype))),
