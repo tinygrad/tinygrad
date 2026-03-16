@@ -251,20 +251,23 @@ function selectShape(key) {
 // scaling function for time to pixels
 const timelineScale = () => d3.scaleLinear().domain([data.first, data.dur]).range([0, document.getElementById("timeline").clientWidth])
 
-// TODO: wrong.
-function timeAtCycle(cycle) {
-  let freq = null, firstCycle = null;
-  for (const [k, v] of data.tracks.get("Shader Clock").valueMap) {
-    if (firstCycle == null) firstCycle = k;
-    if (k > cycle) break;
+function timeAtCycle(clk) {
+  if (clk < data.instSt || clk > data.instEt) return "-";
+  let cur = data.instSt, ns = 0, freq = null;
+  // walk through all frequency changes and accumulate time in nanoseconds
+  for (const [s, v] of data.tracks.get("Shader Clock").valueMap) {
+    if (freq != null && cur < s) {
+      const et = Math.min(clk, s);
+      ns += (et - cur) * 1e9 / freq;
+      cur = et;
+      if (cur === clk) break;
+    }
     freq = v;
   }
-  if (!freq || firstCycle == null) return "-";
-  // TODO: not right when the frequency drops very fast in the end
-  const ns = (cycle - firstCycle) / freq * 1e9;
+  // ending cycles use the last known frequency
+  if (cur < clk) ns += (clk - cur) * 1e9 / freq;
   const remNs = Math.round(ns % 1000);
-  const ret = ns/1000 > 1 ? formatMicroseconds(ns/1000, true) + (remNs ? ` ${remNs}ns` : "") : Math.round(ns, 2)+"ns";
-  return ret;
+  return ns/1000>1 ? formatMicroseconds(ns / 1000, true) + (remNs ? ` ${remNs}ns` : "") : Math.round(ns)+"ns";
 }
 
 function getZoomIdentity() {
@@ -296,7 +299,9 @@ function setFocus(key) {
   const html = d3.select(".info").html("");
   if (eventType === EventTypes.EXEC) {
     const [n, _, ...rest] = e.arg.tooltipText.split("\n");
-    html.append(() => tabulate([["Name", colored(e.arg.label)], ["Duration", formatTime(e.width)], ["Start Time", formatTime(e.x)]]));
+    const tableData = [["Name", colored(e.arg.label)], ["Duration", formatTime(e.width)], ["Start Time", formatTime(e.x)]];
+    if (data.instSt != null) tableData.push(["Timestamp", timeAtCycle(e.x)]);
+    html.append(() => tabulate(tableData));
     let group = html.append("div").classed("args", true);
     for (const r of rest) group.append("p").text(r);
     group = html.append("div").classed("args", true);
@@ -553,9 +558,7 @@ async function renderProfiler(path, opts) {
     const first = shapes[0].x, last = shapes.at(-1).x;
     instRange = instRange == null ? [first, last] : [Math.min(first, instRange[0]), Math.max(last, instRange[1])];
   }
-  if (instRange != null) {
-    [data.instSt, data.instEt] = instRange;
-  }
+  if (instRange != null) [data.instSt, data.instEt] = instRange;
   updateProgress(Status.COMPLETE);
   // draw events on a timeline
   const dpr = window.devicePixelRatio || 1;
@@ -910,7 +913,7 @@ async function main() {
       }
       appendSteps(ul, i, steps);
     }
-    return setState({currentCtx: 5, currentStep: 2, currentRewrite: 0, expandSteps: true});
+    return setState({ currentCtx:-1 });
   }
   // ** center graph
   const { currentCtx, currentStep, currentRewrite, expandSteps } = state;
