@@ -647,7 +647,8 @@ async function renderProfiler(path, opts) {
       lastLabelEnd = labelX + ctx.measureText(label).width + 4;
       if (secondaryTick != null) {
         drawLine(ctx, [x, x], [y, y-tickSize]);
-        ctx.textBaseline = "top"; ctx.fillText(secondaryTick(tick, st, et), labelX, 0);
+        const label = secondaryTick(tick, st, et); ctx.fillText(label, labelX, 0);
+        lastLabelEnd = Math.max(lastLabelEnd, labelX + ctx.measureText(label).width + 4);
       }
     }
     if (data.axes.y != null) {
