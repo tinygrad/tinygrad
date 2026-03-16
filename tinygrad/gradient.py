@@ -29,14 +29,14 @@ def call_gradient(ctx:UOp, k:UOp) -> tuple[UOp|None, ...]:
       grad_uops.append(grads[p])
   if len(grad_uops) == 0: return (None,) * (len(args) + 1)
   # build a single backward CALL returning a TUPLE of all gradients
-  bwd_body = UOp(Ops.TUPLE, src=tuple(grad_uops))
+  bwd_body = UOp.tuple(*grad_uops)
   bwd_call = bwd_body.call(*args, ctx, name=(k.arg.name or "")+"_backward", precompile=k.arg.precompile_backward)
   # extract each gradient via GETTUPLE
   ret: list[UOp|None] = [None]
   gi = 0
   for i in range(len(args)):
     if gi < len(grad_indices) and grad_indices[gi] == i:
-      ret.append(UOp(Ops.GETTUPLE, dtype=bwd_call.src[0].src[gi].dtype, src=(bwd_call,), arg=gi))
+      ret.append(bwd_call.gettuple(gi))
       gi += 1
     else:
       ret.append(None)

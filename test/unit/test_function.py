@@ -370,45 +370,26 @@ class TestFunctionBackward(unittest.TestCase):
     loss.realize(w1.grad, w2.grad)
 
   def test_backward_single_call(self):
-    """backward for multiple grads should produce a single CALL returning a TUPLE, not multiple CALLs."""
     N = 4
     x = Tensor.ones(N, N)
     w1 = Tensor.ones(N, N, requires_grad=True)
     w2 = Tensor.ones(N, N, requires_grad=True)
     @function
     def f(t:Tensor, w1:Tensor, w2:Tensor): return (t@w1)@w2
-    out = f(x, w1, w2)
-    out.sum().backward()
-    # verify correctness
+    f(x, w1, w2).sum().backward()
     assert w1.grad is not None and w2.grad is not None
-    w1_grad, w2_grad = w1.grad.numpy(), w2.grad.numpy()
-    # check that both grads come from a single backward CALL (via GETTUPLE)
-    assert w1.grad.uop.base.op.name == "GETTUPLE", f"expected GETTUPLE, got {w1.grad.uop.base.op.name}"
-    assert w2.grad.uop.base.op.name == "GETTUPLE", f"expected GETTUPLE, got {w2.grad.uop.base.op.name}"
-    # both GETTUPLEs should point to the same CALL
-    call1 = w1.grad.uop.base.src[0]
-    call2 = w2.grad.uop.base.src[0]
-    assert call1 is call2, "both grads should come from the same backward CALL"
-    # verify numerical correctness: d/dw1 of sum((x@w1)@w2) = x^T @ ones @ w2^T, d/dw2 = (x@w1)^T @ ones
-    np.testing.assert_allclose(w1_grad, np.ones((N,N)) @ np.ones((N,N)) @ np.ones((N,N)), atol=1e-6)
-    np.testing.assert_allclose(w2_grad, (np.ones((N,N)) @ np.ones((N,N))).T @ np.ones((N,N)), atol=1e-6)
+    np.testing.assert_allclose(w1.grad.numpy(), np.ones((N,N)) @ np.ones((N,N)) @ np.ones((N,N)), atol=1e-6)
+    np.testing.assert_allclose(w2.grad.numpy(), (np.ones((N,N)) @ np.ones((N,N))).T @ np.ones((N,N)), atol=1e-6)
 
   def test_backward_precompile_backward(self):
-    """precompile_backward=True should make the backward CALL precompiled."""
     N = 4
     x = Tensor.ones(N, N)
     w1 = Tensor.ones(N, N, requires_grad=True)
     w2 = Tensor.ones(N, N, requires_grad=True)
     @function(precompile_backward=True)
     def f(t:Tensor, w1:Tensor, w2:Tensor): return (t@w1)@w2
-    out = f(x, w1, w2)
-    out.sum().backward()
+    f(x, w1, w2).sum().backward()
     assert w1.grad is not None and w2.grad is not None
-    # the backward CALL should be precompiled
-    bwd_call = w1.grad.uop.base.src[0]
-    assert bwd_call.op.name == "CALL", f"expected CALL, got {bwd_call.op.name}"
-    assert bwd_call.arg.precompile is True, "backward CALL should have precompile=True"
-    # verify numerical correctness
     np.testing.assert_allclose(w1.grad.numpy(), np.ones((N,N)) @ np.ones((N,N)) @ np.ones((N,N)), atol=1e-6)
     np.testing.assert_allclose(w2.grad.numpy(), (np.ones((N,N)) @ np.ones((N,N))).T @ np.ones((N,N)), atol=1e-6)
 

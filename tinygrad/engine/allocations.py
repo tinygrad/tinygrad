@@ -107,7 +107,7 @@ def transform_precompiled_call(c:UOp) -> UOp|None:
       sink_srcs.append(target.after(target.store(elem)))
     fxn = UOp.sink(*sink_srcs)
     new_call = c.replace(src=(fxn, *input_buffers, *out_bufs), dtype=dtypes.void, tag=None)
-    return UOp(Ops.TUPLE, src=tuple(buf.after(new_call) for buf in out_bufs))
+    return UOp.tuple(*[buf.after(new_call) for buf in out_bufs])
   out = _buffer_like(c)
   target = out.param_like(len(c.src)-1).shrink_to(c.shape)
   fxn = target.after(target.store(c.src[0])).sink()

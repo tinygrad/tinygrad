@@ -43,7 +43,7 @@ class _function(Generic[ReturnType]):
     if isinstance(ret, Tensor):
       uret = ret.uop
     elif isinstance(ret, tuple) and all(isinstance(x, Tensor) for x in ret):
-      uret = UOp(Ops.TUPLE, src=tuple(x.uop for x in ret))
+      uret = UOp.tuple(*[x.uop for x in ret])
     else:
       raise RuntimeError(f"function return type {type(ret)} not supported")
 
@@ -68,8 +68,7 @@ class _function(Generic[ReturnType]):
 
     fret = uret.call(*call_uops, name=name, precompile=self.precompile, precompile_backward=self.precompile_backward)
     if isinstance(ret, tuple):
-      return cast(ReturnType, tuple(Tensor(UOp(Ops.GETTUPLE, dtype=fret.src[0].src[i].dtype, src=(fret,), arg=i),
-                                           device=fret.device) for i in range(len(ret))))
+      return cast(ReturnType, tuple(Tensor(fret.gettuple(i), device=fret.device) for i in range(len(ret))))
     else:
       return cast(ReturnType, Tensor(fret, device=fret.device))
 
