@@ -61,7 +61,7 @@ pm_gradient = PatternMatcher([
   (UPat(Ops.FLIP, name="ret"), lambda ctx, ret: (ctx.flip([i for i,x in enumerate(ret.marg) if x]),)),
   (UPat(Ops.COPY, name="ret"), lambda ctx, ret: (ctx.copy_to_device(ret.src[0].device), None)),
   (UPat(Ops.MULTI, name="ret"), lambda ctx, ret: ctx.shard(ret.device, ret.axis).src),
-  (UPat(Ops.TUPLE, name="ret"), lambda ctx, ret: ctx.src),
+  (UPat(Ops.TUPLE), lambda ctx: ctx.src),
   # NOTE: this is only correct when the KERNEL has a single output
   (UPat(Ops.AFTER), lambda ctx: (ctx, ctx)),
   # gradient on CALL: use provided grad_fxn or auto-differentiate
