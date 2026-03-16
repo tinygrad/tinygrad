@@ -302,13 +302,11 @@ class RemoteMMIOInterface(MMIOInterface):
     return RemoteMMIOInterface(self.dev, self.residx, size or (self.nbytes - offset), fmt or self.fmt, self.off + offset, self.rd_cmd, self.wr_cmd)
 
 class RemotePCIDevice(PCIDevice):
-  def __init__(self, devpref:str, pcibus:str, vendor:int, devices:list[tuple[int, list[int]]], dev_id:int, base_class:int|None, sock=None):
-    self.sock, self.dev_id = sock, dev_id
+  def __init__(self, devpref:str, pcibus:str, sock=None):
+    self.sock, self.pcibus, self.dev_id = sock, pcibus, int(pcibus.split(':')[-1]) if ':' in pcibus else 0
     for buft in [socket.SO_SNDBUF, socket.SO_RCVBUF]: self.sock.setsockopt(socket.SOL_SOCKET, buft, 64 << 20)
 
-    payload = array.array('I', itertools.chain.from_iterable((m, d) for m, ds in devices for d in ds)).tobytes()
-    _, self.dev_id, _ = self._rpc(RemoteCmd.OPEN, 0, base_class if base_class is not None else (1<<64)-1, len(payload), vendor, payload=payload)
-    self.lock_fd, self.pcibus = System.flock_acquire(f"{devpref.lower()}_{pcibus.lower()}.lock"), pcibus
+    self.lock_fd = System.flock_acquire(f"{devpref.lower()}_{pcibus.lower()}.lock")
 
   def _recvall(self, n:int) -> bytes:
     data = b''
@@ -316,30 +314,35 @@ class RemotePCIDevice(PCIDevice):
     if len(data) < n: raise RuntimeError("Connection closed")
     return data
 
-  def _rpc(self, cmd:int, *args:int, readout_size:int=0, payload:bytes=b'') -> tuple[int, int, bytes|None]:
-    self.sock.sendall(struct.pack('<BIBQQQ', cmd, self.dev_id, *(*args, 0, 0, 0, 0)[:4]) + payload)
-    if (resp:=struct.unpack('<BQQ', self._recvall(17)))[0] != 0:
-      raise RuntimeError(f"RPC failed: {self._recvall(resp[1]).decode() if resp[1] > 0 else 'unknown error'}")
-    return resp[1], resp[2], (self._recvall(readout_size) if readout_size > 0 else None)
+  def _recv_with_fd(self) -> tuple[bytes, int]:
+    msg, anc, _, _ = self.sock.recvmsg(17, socket.CMSG_LEN(4))
+    return msg, struct.unpack('<i', anc[0][2][:4])[0]
 
-  def _bulk_read(self, cmd:int, idx:int, offset:int, size:int) -> bytes: return unwrap(self._rpc(cmd, idx, offset, size, readout_size=size)[2])
+  def _rpc(self, cmd:int, *args:int, bar:int=0, readout_size:int=0, payload:bytes=b'', has_fd=False) -> tuple[int, int, bytes|None, int|None]:
+    self.sock.sendall(struct.pack('<BIIQQQ', cmd, self.dev_id, bar, *(*args, 0, 0, 0)[:3]) + payload)
+    msg, fd = self._recv_with_fd() if has_fd else (self._recvall(17), None)
+    if (resp:=struct.unpack('<BQQ', msg))[0] != 0:
+      raise RuntimeError(f"RPC failed: {self._recvall(resp[1]).decode() if resp[1] > 0 else 'unknown error'}")
+    return (resp[1], resp[2]) + ((self._recvall(readout_size) if readout_size > 0 else None),) + (fd,)
+
+  def _bulk_read(self, cmd:int, idx:int, offset:int, size:int) -> bytes: return unwrap(self._rpc(cmd, offset, size, bar=idx, readout_size=size)[2])
   def _bulk_write(self, cmd:int, idx:int, offset:int, data:bytes):
-    self.sock.sendall(struct.pack('<BIBQQQ', cmd, self.dev_id, idx, offset, len(data), 0) + data)
+    self.sock.sendall(struct.pack('<BIIQQQ', cmd, self.dev_id, idx, offset, len(data), 0) + data)
 
   def alloc_sysmem(self, size:int, vaddr:int=0, contiguous:bool=False) -> tuple[MMIOInterface, list[int]]:
-    mapped_size, _, _, fd = self._rpc(RemoteCmd.MAP_SYSMEM_FD, 0, 0, size, has_fd=True)
+    mapped_size, _, _, fd = self._rpc(RemoteCmd.MAP_SYSMEM_FD, size, has_fd=True)
     memview = MMIOInterface(FileIOInterface(fd=fd).mmap(0, mapped_size, mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_SHARED, 0), mapped_size, fmt='B')
 
     # paddrs are returned as (paddr, size) pairs until a (paddr=0, size=0) terminator in the beginning of the mapping.
     paddrs_raw = list(itertools.takewhile(lambda p: p[1] != 0, zip(memview.view(fmt='Q')[0::2], memview.view(fmt='Q')[1::2])))
     return memview, [p + i for p, sz in paddrs_raw for i in range(0, sz, 0x1000)][:ceildiv(size, 0x1000)]
 
-  def reset(self): self._rpc(RemoteCmd.RESET, 0, 0, 0)
-  def read_config(self, offset:int, size:int): return self._rpc(RemoteCmd.CFG_READ, 0, offset, size)[0]
-  def write_config(self, offset:int, value:int, size:int): self._rpc(RemoteCmd.CFG_WRITE, 0, offset, size, value)
+  def reset(self): self._rpc(RemoteCmd.RESET)
+  def read_config(self, offset:int, size:int): return self._rpc(RemoteCmd.CFG_READ, offset, size)[0]
+  def write_config(self, offset:int, value:int, size:int): self._rpc(RemoteCmd.CFG_WRITE, offset, size, value)
 
   @functools.cache
-  def bar_info(self, bar_idx:int) -> tuple[int, int]: return self._rpc(RemoteCmd.MAP_BAR, bar_idx)[:2]
+  def bar_info(self, bar_idx:int) -> tuple[int, int]: return self._rpc(RemoteCmd.MAP_BAR, bar=bar_idx)[:2]
   def map_bar(self, bar:int, off:int=0, addr:int=0, size:int|None=None, fmt='B') -> MMIOInterface:
     return RemoteMMIOInterface(self, bar, size or self.bar_info(bar)[1], fmt).view(off, size, fmt)
   def resize_bar(self, bar_idx:int): pass
@@ -352,6 +355,7 @@ class APLRemotePCIDevice(RemotePCIDevice):
     commit = "8120b5508b43149d27bf22f9a4e6d7c5a4b401e9"
     if os.path.exists(cls.APP_PATH) and (_ensure_downloads_dir() / (app_name:=f"TinyGPU_{commit}.zip")).is_file(): return
     print("Downloading TinyGPU.app...")
+    with contextlib.suppress(RuntimeError): system("pkill -f TinyGPU")
     system(f"ditto -xk {fetch(f'https://github.com/nimlgen/tinygpu_releases/raw/{commit}/TinyGPU.zip', name=app_name)} /Applications")
     print(system(f"{cls.APP_PATH} install"))
 
@@ -368,7 +372,7 @@ class APLRemotePCIDevice(RemotePCIDevice):
     super().__init__(devpref, pcibus, sock=sock)
 
   def alloc_sysmem(self, size:int, vaddr:int=0, contiguous:bool=False) -> tuple[MMIOInterface, list[int]]:
-    mapped_size, _, _, fd = self._rpc(RemoteCmd.MAP_SYSMEM_FD, 0, 0, size, has_fd=True)
+    mapped_size, _, _, fd = self._rpc(RemoteCmd.MAP_SYSMEM_FD, size, has_fd=True)
     memview = MMIOInterface(FileIOInterface(fd=fd).mmap(0, mapped_size, mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_SHARED, 0), mapped_size, fmt='B')
 
     # paddrs are returned as (paddr, size) pairs until a (paddr=0, size=0) terminator in the beginning of the mapping.
