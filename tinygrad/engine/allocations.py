@@ -29,12 +29,13 @@ def apply_after(ctx:AllocCtx, u:UOp):
   while base.op is Ops.AFTER: base = base.src[0]
   ctx.buffer_map[u] = base
 
-# CONTIGUOUS and ASSIGN + parents are the only nodes that get updated
+# CONTIGUOUS and AFTER+STORE + parents are the only nodes that get updated
 add_tags = PatternMatcher([
   (UPat(Ops.COPY, name="u"), disk_copy_is_buffer),
-  # no tag on copies that are assigned
-  (UPat(Ops.ASSIGN, src=(UPat(), UPat(Ops.COPY, name="c")), name="a"),
-   lambda a,c: a.replace(src=(a.src[0], c.rtag(())), tag=a.tag+c.tag) if a.tag and c.tag else None),
+  # no tag on copies that are assigned via STORE+AFTER — merge COPY tag into AFTER
+  (UPat(Ops.AFTER, src=(UPat(), UPat(Ops.STORE, src=(UPat(name="dest"), UPat(Ops.COPY, name="c")))), name="a"),
+   lambda a,c,dest: a.replace(src=(a.src[0], a.src[1].replace(src=(dest, c.rtag(())))), tag=a.tag+c.tag) if a.tag and c.tag else None),
+  (UPat(Ops.AFTER, src=(UPat(), UPat(Ops.STORE)), name="x"), tag_uop),
   (UPat(Ops.AFTER, name="u"), apply_after),
   (UPat({Ops.CONTIGUOUS, Ops.ASSIGN}, name="x"), tag_uop),
   (UPat(GroupOp.All, name="x"), lambda ctx,x: tag_uop(ctx,x) if x in ctx.bases else None),
@@ -60,11 +61,10 @@ def replace_contig_with_store_after(u:UOp):
   buf = _buffer_like(u)
   return buf.after(buf.store(u.src[0])).rtag(u.tag)
 
-def replace_assign_with_contig(u:UOp):
+def replace_store_after_with_contig(u:UOp, src:UOp):
   assigned_to = u
   while assigned_to.op in {Ops.ASSIGN, Ops.BITCAST, Ops.AFTER}: assigned_to = assigned_to.src[0].base
-  if assigned_to.op is not Ops.BUFFER:
-    return u.src[1].contiguous(tag=u.tag)
+  if assigned_to.op is not Ops.BUFFER: return src.contiguous(tag=u.tag)
 
 def contiguous_mops_to_view(c:UOp):
   """CONTIGUOUS(MOPS(BUFFER)) → CONTIGUOUS(BUFFER_VIEW) when movement ops collapse to a contiguous range."""
@@ -129,8 +129,8 @@ pm_early_transform_tensor_graph = PatternMatcher([
   # remove extra CONTIGUOUS on ASSIGN/AFTER (only when target is contiguous)
   (UPat(Ops.CONTIGUOUS, src=(UPat({Ops.ASSIGN, Ops.AFTER}, name="a"),), name="c"),
    lambda a,c: a.replace(tag=(a.tag or ())+(c.tag or ())) if a.src[0].has_buffer_identity() else None),
-  # replace ASSIGN with CONTIGUOUS
-  (UPat(Ops.ASSIGN, name="u"), replace_assign_with_contig),
+  # replace AFTER+STORE with CONTIGUOUS when target is not a buffer
+  (UPat(Ops.AFTER, src=(UPat(), UPat(Ops.STORE, src=(UPat(), UPat(name="src")))), name="u"), replace_store_after_with_contig),
   # replace CONTIGUOUS with STORE+AFTER
   (UPat(Ops.CONTIGUOUS, name="u"), replace_contig_with_store_after),
   # remove DETACH/CONTIGUOUS_BACKWARD (allows more contiguous removal)
