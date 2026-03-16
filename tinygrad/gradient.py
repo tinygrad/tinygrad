@@ -13,31 +13,26 @@ def reduce_gradient(ctx:UOp, ret:UOp, op:Ops):
     return ((mask/broadcast_to_input(count)) * broadcast_to_input(ctx),)
   if op == Ops.MUL: return (broadcast_to_input(ctx * ret) / ret.src[0],)
 
-def _autodiff_call(fxn:UOp, args:tuple[UOp, ...], ctx:UOp, name:str|None, precompile_backward:bool) -> list[UOp|None]:
+def call_gradient(ctx:UOp, k:UOp) -> tuple[UOp|None, ...]:
+  if k.arg.grad_fxn is not None: return (None,) + k.arg.grad_fxn(ctx, k)
+  fxn, args = k.src[0], k.src[1:]
   params = {x.arg:x for x in fxn.toposort(enter_calls=False) if x.op == Ops.PARAM}
-  grads = compute_gradient(fxn, ctx.param_like(len(args)), set(params.values()))
-  ret: list[UOp|None] = []
+  if fxn.op is Ops.TUPLE:
+    grad_args = ctx.src
+    root_grad = UOp(Ops.TUPLE, src=tuple(g.param_like(len(args) + i) for i, g in enumerate(grad_args)))
+  else:
+    grad_args = (ctx,)
+    root_grad = ctx.param_like(len(args))
+  grads = compute_gradient(fxn, root_grad, set(params.values()))
+  ret: list[UOp|None] = [None]
   for i in range(len(args)):
     if (p:=params.get(i, None)) is not None and p in grads:
       # TODO: compact the args and remove unused ones
       assert not grads[p].op_in_backward_slice_with_self(Ops.BUFFER), "BUG: BUFFER in backward slice of grad"
-      ret.append(grads[p].call(*args, ctx, name=(name or "")+f"_backward_{i}", precompile=precompile_backward))
+      ret.append(grads[p].call(*args, *grad_args, name=(k.arg.name or "")+f"_backward_{i}", precompile=k.arg.precompile_backward))
     else:
       ret.append(None)
-  return ret
-
-def call_gradient(ctx, k:UOp) -> tuple[UOp|None, ...]:
-  if k.arg.grad_fxn is not None: return (None,) + k.arg.grad_fxn(ctx, k)
-  # for tuple returns, autodiff each element and sum the gradients
-  if isinstance(ctx, tuple):
-    combined: list[UOp|None] = [None] * len(k.src[1:])
-    for i, g in enumerate(ctx):
-      if g is None: continue
-      for j, eg in enumerate(_autodiff_call(k.src[0].src[i], k.src[1:], g, k.arg.name, k.arg.precompile_backward)):
-        if eg is None: continue
-        combined[j] = eg if (prev_g:=combined[j]) is None else prev_g + eg
-    return (None,) + tuple(combined)
-  return (None,) + tuple(_autodiff_call(k.src[0], k.src[1:], ctx, k.arg.name, k.arg.precompile_backward))
+  return tuple(ret)
 
 # ctx is grad_output
 pm_gradient = PatternMatcher([
@@ -66,6 +61,7 @@ pm_gradient = PatternMatcher([
   (UPat(Ops.FLIP, name="ret"), lambda ctx, ret: (ctx.flip([i for i,x in enumerate(ret.marg) if x]),)),
   (UPat(Ops.COPY, name="ret"), lambda ctx, ret: (ctx.copy_to_device(ret.src[0].device), None)),
   (UPat(Ops.MULTI, name="ret"), lambda ctx, ret: ctx.shard(ret.device, ret.axis).src),
+  (UPat(Ops.TUPLE, name="ret"), lambda ctx, ret: ctx.src),
   # NOTE: this is only correct when the KERNEL has a single output
   (UPat(Ops.AFTER), lambda ctx: (ctx, ctx)),
   # gradient on CALL: use provided grad_fxn or auto-differentiate
@@ -82,28 +78,27 @@ def _deepwalk(root:UOp, targets:set[UOp]) -> list[UOp]:
   return list(root.toposort(lambda node: node.op is not Ops.DETACH and in_target_path[node]))
 
 def compute_gradient(root:UOp, root_grad:UOp, targets:set[UOp]) -> dict[UOp, UOp]:
-  grads: dict[UOp, UOp|tuple[UOp|None, ...]] = {root: root_grad}
+  grads: dict[UOp, UOp] = {root: root_grad}
   for t0 in reversed(_deepwalk(root, targets)):
     if t0 not in grads: continue
-    # GETTUPLE: accumulate gradient into a python tuple on the CALL, process when we hit the CALL
+    # GETTUPLE: accumulate gradient into a TUPLE UOp on the CALL, process when we hit the CALL
     if t0.op is Ops.GETTUPLE:
       k = t0.src[0]  # the CALL
       assert k.op is Ops.CALL and k.src[0].op is Ops.TUPLE
       n_outputs = len(k.src[0].src)
-      prev: tuple[UOp|None, ...] = cast(tuple[UOp|None, ...], grads.get(k)) or (None,) * n_outputs
-      g = cast(UOp, grads[t0])
-      grads[k] = tuple((p + g if (p:=prev[i]) is not None else g) if i == t0.arg else prev[i] for i in range(n_outputs))
+      prev: tuple[UOp, ...] = grads[k].src if k in grads else tuple(grads[t0].const_like(0) for _ in range(n_outputs))
+      grads[k] = UOp.maketuple(*(prev[i] + grads[t0] if i == t0.arg else prev[i] for i in range(n_outputs)))
       continue
     lgrads: tuple[UOp|None, ...]|None = cast(tuple[UOp|None, ...]|None, pm_gradient.rewrite(t0, ctx=grads[t0]))
     if lgrads is None: raise RuntimeError(f"failed to compute gradient for {t0.op}\n\nin {str(t0)[0:1000]}...")
     assert len(lgrads) == len(t0.src), f"got {len(lgrads)} gradient, expected {len(t0.src)}"
     for k,v in zip(t0.src, lgrads):
       if v is None: continue
-      if k in grads: grads[k] = cast(UOp, grads[k]) + v
+      if k in grads: grads[k] = grads[k] + v
       else: grads[k] = v
       if len(forward_metadata:=all_metadata.get(t0, ())):
         backward_metadata = tuple(dataclasses.replace(x, backward=True) for x in forward_metadata)
         # we add the backward metadata to everything new in the graph
         for bw_uop in v.toposort(lambda x: x not in (t0, *t0.src, grads[t0])):
           all_metadata[bw_uop] = all_metadata.get(bw_uop, ())+backward_metadata
-  return cast(dict[UOp, UOp], grads)
+  return grads

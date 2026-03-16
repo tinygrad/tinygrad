@@ -358,11 +358,11 @@ class TestFunctionTuple(unittest.TestCase):
   def test_grad_tuple_precompile(self): self.test_grad_tuple(True)
 
   def test_grad_fxn_tuple(self):
-    # grad_fxn for tuple: receives (grads, call) where grads is a python tuple of UOps (one per output)
-    def grad_fxn(grads:tuple, call:UOp):
-      # f(u1, u2) = (u1+1, u2+2), grads = (d_out0, d_out1)
+    # grad_fxn for tuple: ctx is a TUPLE UOp with one element per output
+    def grad_fxn(ctx:UOp, call:UOp):
+      # f(u1, u2) = (u1+1, u2+2), ctx.src = (d_out0, d_out1)
       # df/du1 = d_out0, df/du2 = d_out1
-      return (grads[0], grads[1])
+      return (ctx.src[0], ctx.src[1])
 
     x = Tensor.ones(3, requires_grad=True).contiguous()
     y = Tensor.ones(3, requires_grad=True).contiguous()
