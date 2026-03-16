@@ -371,27 +371,31 @@ class TestFunctionBackward(unittest.TestCase):
 
   def test_backward_single_call(self):
     N = 4
-    x = Tensor.ones(N, N)
-    w1 = Tensor.ones(N, N, requires_grad=True)
-    w2 = Tensor.ones(N, N, requires_grad=True)
+    x = Tensor.arange(N*N).reshape(N, N).float()
+    w1 = Tensor.arange(N*N).reshape(N, N).float().requires_grad_()
+    w2 = Tensor.arange(N*N).reshape(N, N).float().requires_grad_()
+    xn, w1n, w2n = x.numpy(), w1.numpy(), w2.numpy()
     @function
     def f(t:Tensor, w1:Tensor, w2:Tensor): return (t@w1)@w2
     f(x, w1, w2).sum().backward()
     assert w1.grad is not None and w2.grad is not None
-    np.testing.assert_allclose(w1.grad.numpy(), np.ones((N,N)) @ np.ones((N,N)) @ np.ones((N,N)), atol=1e-6)
-    np.testing.assert_allclose(w2.grad.numpy(), (np.ones((N,N)) @ np.ones((N,N))).T @ np.ones((N,N)), atol=1e-6)
+    np.testing.assert_allclose(w1.grad.numpy(), xn.T @ np.ones((N,N)) @ w2n.T, atol=1e-3)
+    np.testing.assert_allclose(w2.grad.numpy(), (xn @ w1n).T @ np.ones((N,N)), atol=1e-3)
 
   def test_backward_precompile_backward(self):
     N = 4
-    x = Tensor.ones(N, N)
-    w1 = Tensor.ones(N, N, requires_grad=True)
-    w2 = Tensor.ones(N, N, requires_grad=True)
-    @function(precompile_backward=True)
+    x = Tensor.arange(N*N).reshape(N, N).float().contiguous()
+    w1 = Tensor.arange(N*N).reshape(N, N).float().requires_grad_().contiguous()
+    w2 = Tensor.arange(N*N).reshape(N, N).float().requires_grad_().contiguous()
+    Tensor.realize(x, w1, w2)
+    xn, w1n, w2n = x.numpy(), w1.numpy(), w2.numpy()
+    @function(precompile=True, precompile_backward=True)
     def f(t:Tensor, w1:Tensor, w2:Tensor): return (t@w1)@w2
-    f(x, w1, w2).sum().backward()
+    loss = f(x, w1, w2).sum().backward()
     assert w1.grad is not None and w2.grad is not None
-    np.testing.assert_allclose(w1.grad.numpy(), np.ones((N,N)) @ np.ones((N,N)) @ np.ones((N,N)), atol=1e-6)
-    np.testing.assert_allclose(w2.grad.numpy(), (np.ones((N,N)) @ np.ones((N,N))).T @ np.ones((N,N)), atol=1e-6)
+    Tensor.realize(loss, w1.grad, w2.grad)
+    np.testing.assert_allclose(w1.grad.numpy(), xn.T @ np.ones((N,N)) @ w2n.T, atol=1e-3)
+    np.testing.assert_allclose(w2.grad.numpy(), (xn @ w1n).T @ np.ones((N,N)), atol=1e-3)
 
 if __name__ == '__main__':
   unittest.main()

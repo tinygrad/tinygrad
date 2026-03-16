@@ -43,7 +43,7 @@ class _function(Generic[ReturnType]):
     if isinstance(ret, Tensor):
       uret = ret.uop
     elif isinstance(ret, tuple) and all(isinstance(x, Tensor) for x in ret):
-      uret = UOp.tuple(*[x.uop for x in ret])
+      uret = UOp.maketuple(*[x.uop for x in ret])
     else:
       raise RuntimeError(f"function return type {type(ret)} not supported")
 
