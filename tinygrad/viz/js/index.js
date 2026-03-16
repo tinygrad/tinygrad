@@ -251,18 +251,30 @@ function selectShape(key) {
 // scaling function for time to pixels
 const timelineScale = () => d3.scaleLinear().domain([data.first, data.dur]).range([0, document.getElementById("timeline").clientWidth])
 
+function timeAtCycle(clk) {
+  if (clk < data.instSt || clk > data.instEt) return "-";
+  let cur = data.instSt, ns = 0, freq = null;
+  // walk through all frequency changes and accumulate time in nanoseconds
+  for (const [s, v] of data.tracks.get("Shader Clock").valueMap) {
+    if (freq != null && cur < s) {
+      const et = Math.min(clk, s);
+      ns += (et - cur) * 1e9 / freq;
+      cur = et;
+      if (cur === clk) break;
+    }
+    freq = v;
+  }
+  // ending cycles use the last known frequency
+  if (cur < clk) ns += (clk - cur) * 1e9 / freq;
+  const remNs = Math.round(ns % 1000);
+  return ns/1000>1 ? formatMicroseconds(ns / 1000, true) + (remNs ? ` ${remNs}ns` : "") : Math.round(ns)+"ns";
+}
+
 function getZoomIdentity() {
   // for packets, set zoom to the full range of instruction events
-  if (data.path.includes("pkts")) {
-    let instRange = null;
-    for (const [k, { shapes }] of data.tracks) if (k.startsWith("WAVE")) {
-      const first = shapes[0].x, last = shapes.at(-1).x;
-      instRange = instRange == null ? [first, last] : [Math.min(first, instRange[0]), Math.max(last, instRange[1])]
-    }
-    if (instRange != null) {
-      const k = (data.dur - data.first) / (instRange[1] - instRange[0]), xscale = timelineScale();
-      return d3.zoomIdentity.translate(-xscale(instRange[0]) * k, 0).scale(k);
-    }
+  if (data.instSt != null) {
+    const k = (data.dur - data.first) / (data.instEt - data.instSt), xscale = timelineScale();
+    return d3.zoomIdentity.translate(-xscale(data.instSt) * k, 0).scale(k);
   }
   return d3.zoomIdentity;
 }
@@ -287,7 +299,9 @@ function setFocus(key) {
   const html = d3.select(".info").html("");
   if (eventType === EventTypes.EXEC) {
     const [n, _, ...rest] = e.arg.tooltipText.split("\n");
-    html.append(() => tabulate([["Name", colored(e.arg.label)], ["Duration", formatTime(e.width)], ["Start Time", formatTime(e.x)]]));
+    const tableData = [["Name", colored(e.arg.label)], ["Duration", formatTime(e.width)], ["Start Time", formatTime(e.x)]];
+    if (data.instSt != null) tableData.push(["Timestamp", timeAtCycle(e.x)]);
+    html.append(() => tabulate(tableData));
     let group = html.append("div").classed("args", true);
     for (const r of rest) group.append("p").text(r);
     group = html.append("div").classed("args", true);
@@ -365,8 +379,10 @@ async function renderProfiler(path, opts) {
   const textDecoder = new TextDecoder("utf-8");
   const { strings, dtypeSize, markers, ...extData } = JSON.parse(textDecoder.decode(new Uint8Array(buf, offset, indexLen))); offset += indexLen;
   // place devices on the y axis and set vertical positions
-  const [tickSize, padding, baseOffset] = [10, 8, markers.length ? 14 : 0];
-  const deviceList = profiler.append("div").attr("id", "device-list").style("padding-top", tickSize+padding+baseOffset+"px");
+  const [tickSize, padding, baseOffset] = [5, 8, markers.length ? 14 : 0];
+  const secondaryTick = opts.unit == "clk" ? timeAtCycle : null;
+  const axisHeight = secondaryTick != null ? tickSize*2+(padding*2) : tickSize;
+  const deviceList = profiler.append("div").attr("id", "device-list").style("padding-top", axisHeight+padding+baseOffset+"px");
   const canvas = profiler.append("canvas").attr("id", "timeline").node();
   // NOTE: scrolling via mouse can only zoom the graph
   canvas.addEventListener("wheel", e => (e.stopPropagation(), e.preventDefault()), { passive:false });
@@ -536,6 +552,13 @@ async function renderProfiler(path, opts) {
   for (const m of markers) m.label = m.name.split(/(\s+)/).map(st => ({ st, color:m.color, width:ctx.measureText(st).width }));
   data.pcToShape = new Map([...data.pcToShape].sort((a, b) => a[1].st - b[1].st));
   if (extData.pcMap != null) data.pcMap = extData.pcMap; setFocus(focusedShape);
+  // secondary axis mapping
+  let instRange = null;
+  for (const [k, { shapes }] of data.tracks) if (k.startsWith("WAVE")) {
+    const first = shapes[0].x, last = shapes.at(-1).x;
+    instRange = instRange == null ? [first, last] : [Math.min(first, instRange[0]), Math.max(last, instRange[1])];
+  }
+  if (instRange != null) [data.instSt, data.instEt] = instRange;
   updateProgress(Status.COMPLETE);
   // draw events on a timeline
   const dpr = window.devicePixelRatio || 1;
@@ -609,19 +632,24 @@ async function renderProfiler(path, opts) {
     }
     // draw axes
     ctx.translate(0, baseOffset);
-    drawLine(ctx, xscale.range(), [0, 0]);
+    const y = secondaryTick != null ? tickSize+padding : 0;
+    drawLine(ctx, xscale.range(), [y, y]);
     let lastLabelEnd = -Infinity;
     for (const tick of xscale.ticks()) {
       if (!Number.isInteger(tick)) continue;
       const x = xscale(tick);
-      drawLine(ctx, [x, x], [0, tickSize]);
+      drawLine(ctx, [x, x], [y, y+tickSize]);
       const labelX = x+ctx.lineWidth+2;
       if (labelX <= lastLabelEnd) continue;
-
       const label = formatTime(tick, et-st <= 1e3);
       ctx.textBaseline = "top";
-      ctx.fillText(label, labelX, tickSize);
+      ctx.fillText(label, labelX, y+tickSize);
       lastLabelEnd = labelX + ctx.measureText(label).width + 4;
+      if (secondaryTick != null) {
+        drawLine(ctx, [x, x], [y, y-tickSize]);
+        const label = secondaryTick(tick, st, et); ctx.fillText(label, labelX, 0);
+        lastLabelEnd = Math.max(lastLabelEnd, labelX + ctx.measureText(label).width + 4);
+      }
     }
     if (data.axes.y != null) {
       drawLine(ctx, [0, 0], data.axes.y.range);
