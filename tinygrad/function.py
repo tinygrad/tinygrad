@@ -3,7 +3,7 @@ from typing import Generic, TypeVar, Callable, cast, overload
 from tinygrad.helpers import Context, dedup, getenv
 from tinygrad.uop.ops import UOp, Ops, graph_rewrite, PatternMatcher, UPat
 from tinygrad.tensor import Tensor
-from tinygrad.nn.state import get_parameters
+from tinygrad.nn.state import get_state_dict
 
 def add_to_ctx(ctx, x:UOp):
   ret = x.param_like(len(ctx))
@@ -28,7 +28,7 @@ class _function(Generic[ReturnType]):
   def __get__(self, obj, objtype=None): return functools.partial(self.__call__, obj) if obj is not None else self
 
   def __call__(self, *args, **kwargs) -> ReturnType:
-    params = get_parameters((args, kwargs))
+    params = get_state_dict((args, kwargs), tensor_type=(Tensor, UOp)).values()
 
     # deduplicate input_uops, keeping the first occurrence index for each unique uop
     call_uops: list[UOp] = dedup([(t.uop if isinstance(t, Tensor) else t) for t in params])
