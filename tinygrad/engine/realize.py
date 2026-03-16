@@ -93,8 +93,8 @@ class BufferXfer(BufferCopy):
   def copy(self, dest, src): dest.allocator._transfer(dest._buf, src._buf, dest.nbytes, src_dev=src.allocator.dev, dest_dev=dest.allocator.dev)
 
 class EncDec(Runner):
-  def __init__(self, encdec:UOp, total_sz:int, device:str):
-    self.shape, self.pos_var = encdec.arg[0], encdec.variables()[0].expr
+  def __init__(self, cf:UOp, total_sz:int, device:str):
+    self.shape, self.pos_var = tuple(s.arg for s in cf.src if s.op is Ops.CONST), cf.variables()[0].expr
     name = f"enc/dec {total_sz/1e6:7.2f}M, HEVC" if total_sz >= 1e6 else f"enc/dec {total_sz:8d}, HEVC"
     super().__init__(colored(name, "yellow"), device, Estimates(lds=total_sz, mem=total_sz))
   def __call__(self, rawbufs:list[Buffer], var_vals:dict[str, int], wait=False):
@@ -130,7 +130,7 @@ si_lowerer = PatternMatcher([
   (UPat(Ops.COPY, name="copy"), lambda ctx,copy: (BufferXfer(ctx[0].nbytes, ctx[0].device, ctx[1].device) \
       if hasattr(alc:=Device[ctx[0].device].allocator, '_transfer') and alc.supports_transfer and all_same([x.device.split(":")[0] for x in ctx]) \
       else BufferCopy(ctx[0].nbytes, ctx[0].device, ctx[1].device))),
-  (UPat(Ops.ENCDEC, name="encdec"), lambda ctx,encdec: EncDec(encdec, ctx[0].nbytes, ctx[1].device)),
+  (UPat(Ops.CUSTOM_FUNCTION, arg="encdec", name="cf"), lambda ctx,cf: EncDec(cf, ctx[0].nbytes, ctx[0].device)),
 ])
 
 @dataclass

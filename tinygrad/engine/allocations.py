@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field
 from tinygrad.uop.ops import UOp, UPat, PatternMatcher, Ops, GroupOp, graph_rewrite, track_rewrites
 from tinygrad.dtype import dtypes, ImageDType
-from tinygrad.helpers import prod, DEBUG, VIZ, pluralize
+from tinygrad.helpers import prod, DEBUG, VIZ, pluralize, all_int
 
 @dataclass
 class AllocCtx:
@@ -29,14 +29,15 @@ def apply_after(ctx:AllocCtx, u:UOp):
   while base.op is Ops.AFTER: base = base.src[0]
   ctx.buffer_map[u] = base
 
-# CONTIGUOUS and ASSIGN + parents are the only nodes that get updated
+# CONTIGUOUS and AFTER+STORE + parents are the only nodes that get updated
 add_tags = PatternMatcher([
   (UPat(Ops.COPY, name="u"), disk_copy_is_buffer),
-  # no tag on copies that are assigned
-  (UPat(Ops.ASSIGN, src=(UPat(), UPat(Ops.COPY, name="c")), name="a"),
-   lambda a,c: a.replace(src=(a.src[0], c.rtag(())), tag=a.tag+c.tag) if a.tag and c.tag else None),
+  # no tag on copies that are assigned via STORE+AFTER — merge COPY tag into AFTER
+  (UPat(Ops.AFTER, src=(UPat(), UPat(Ops.STORE, src=(UPat(name="dest"), UPat(Ops.COPY, name="c")))), name="a"),
+   lambda a,c,dest: a.replace(src=(a.src[0], a.src[1].replace(src=(dest, c.rtag(())))), tag=a.tag+c.tag) if a.tag and c.tag else None),
+  (UPat(Ops.AFTER, src=(UPat(), UPat(Ops.STORE)), name="x"), tag_uop),
   (UPat(Ops.AFTER, name="u"), apply_after),
-  (UPat({Ops.CONTIGUOUS, Ops.ASSIGN}, name="x"), tag_uop),
+  (UPat(Ops.CONTIGUOUS, name="x"), tag_uop),
   (UPat(GroupOp.All, name="x"), lambda ctx,x: tag_uop(ctx,x) if x in ctx.bases else None),
 ])
 
@@ -46,32 +47,33 @@ def _buffer_like(u:UOp) -> UOp:
     if prod(dtype.shape) != prod(u.max_shard_shape) or ([x for x in u.max_shard_shape if x != 1] or [1])[-1] % 4 != 0:
       if DEBUG >= 1: print(f"demoting Image {dtype} with shape {u.max_shard_shape}")
       dtype = dtype.base
-  buffer = UOp.new_buffer(u.device, u.shard_size, dtype).reshape(u.max_shard_shape)
+  buffer = UOp.new_buffer(u.device, u.shard_size, dtype).reshape(u.max_shard_shape).shrink_to(u.shard_shape)
   if isinstance(u.device, tuple) and u.axis is not None: buffer = buffer.multi(u.axis)
   return buffer
 
-def replace_contig_with_assign(u:UOp):
+def replace_contig_with_store_after(u:UOp):
+  # can't allocate a buffer without a device (e.g., inside a CALL function body with only PARAMs)
+  if u._device is None: return None
   # if size is 0, remove the contig
   if u.size == 0: return u.src[0]
   # no real contig for DISK/TINYFS tensors, they are left alone
   if isinstance(u._device, str) and u._device.startswith(("DISK", "TINYFS")): return u.rtag(None)
-  return _buffer_like(u).assign(u.src[0]).rtag(u.tag)
+  buf = _buffer_like(u)
+  return buf.after(buf.store(u.src[0])).rtag(u.tag)
 
-def replace_assign_with_contig(u:UOp):
+def replace_store_after_with_contig(u:UOp, src:UOp):
   assigned_to = u
-  while assigned_to.op in {Ops.ASSIGN, Ops.BITCAST, Ops.AFTER}: assigned_to = assigned_to.src[0].base
-  if assigned_to.op is not Ops.BUFFER:
-    return u.src[1].contiguous(tag=u.tag)
+  while assigned_to.op in {Ops.BITCAST, Ops.AFTER}: assigned_to = assigned_to.src[0].base
+  if assigned_to.op is not Ops.BUFFER: return src.contiguous(tag=u.tag)
 
-def contiguous_mops_to_view(c:UOp):
+def contiguous_mops_to_view(c:UOp, src:UOp):
   """CONTIGUOUS(MOPS(BUFFER)) → CONTIGUOUS(BUFFER_VIEW) when movement ops collapse to a contiguous range."""
-  src = c.src[0]
   buf = src.base
   if buf.op not in {Ops.BUFFER, Ops.BUFFER_VIEW}: return None
   if src.op is Ops.RESHAPE and src.src[0].op in {Ops.BUFFER, Ops.BUFFER_VIEW}: return None
 
   # no symbolic shape
-  if not all(isinstance(x, int) for x in c.shape): return None
+  if not all_int(c.shape): return None
 
   # check if view is supported
   if not isinstance(c.device, str): return None
@@ -79,8 +81,7 @@ def contiguous_mops_to_view(c:UOp):
   if not hasattr(Device[c.device].allocator, "_offset"): return None
 
   # see if this can be a view
-  offset = src.contiguous_view_offset()
-  if offset is None: return None
+  if (offset := src.contiguous_view_offset()) is None: return None
 
   # merge BUFFER_VIEWs
   if buf.op is Ops.BUFFER_VIEW: offset, buf = offset + buf.arg[1], buf.src[0]
@@ -91,9 +92,25 @@ def contiguous_mops_to_view(c:UOp):
 def transform_precompiled_call(c:UOp) -> UOp|None:
   if not c.arg.precompile: return None
   if c.src[0].op is Ops.SINK: return None
-  out = _buffer_like(c)
-  fxn = out.param_like(len(c.src)-1).assign(c.src[0]).sink()
-  return out.after(c.replace(src=(fxn,)+tuple(x.contiguous() if x.op is not Ops.AFTER else x for x in c.src[1:])+(out,), dtype=dtypes.void, tag=None))
+  input_buffers = tuple(x.contiguous() if x.op not in {Ops.AFTER, Ops.BIND} else x for x in c.src[1:])
+
+  # add the outputs to the call
+  srcs = c.src[0].src if c.src[0].op is Ops.TUPLE else (c.src[0],)
+  resolved = [c.gettuple(i) if c.src[0].op is Ops.TUPLE else c for i in range(len(srcs))]
+  outs = tuple(_buffer_like(r) for r in resolved)
+  targets = [o.param_like(len(c.src)-1+i).shrink_to(s.shape) for i,(o,s) in enumerate(zip(outs, srcs))]
+  fxn = UOp.sink(*[t.after(t.store(s)) for t,s in zip(targets, srcs)])
+
+  # create the new thing for the big graph
+  new_call = c.replace(src=(fxn, *input_buffers, *outs), dtype=dtypes.void, tag=None)
+  rets = tuple(o.after(new_call) for o in outs)
+
+  # if the CALL has symbolic shapes, shrink the max-sized output to the actual symbolic shape
+  # NOTE: must use resolved shapes from the CALL (which substitutes PARAMs with external args), not raw body shapes
+  rets = tuple(r.shrink_to(rs.shape) for r,rs in zip(rets, resolved))
+
+  # return tuple if tuple
+  return UOp.maketuple(*rets) if c.src[0].op is Ops.TUPLE else rets[0]
 
 # NOTE: adding rules to here is bad. these all need to run before the schedule cache
 pm_early_transform_tensor_graph = PatternMatcher([
@@ -101,17 +118,18 @@ pm_early_transform_tensor_graph = PatternMatcher([
   (UPat(Ops.CALL, name="c"), transform_precompiled_call),
 
   # CONTIGUOUS(MOPS(BUFFER/BUFFER_VIEW)) → CONTIGUOUS(BUFFER_VIEW) when movement ops collapse to contiguous range
-  (UPat(Ops.CONTIGUOUS, src=(UPat(GroupOp.Movement),), name="c"), contiguous_mops_to_view),
+  (UPat(Ops.CONTIGUOUS, src=(UPat(GroupOp.Movement, name="src"),), name="c"), contiguous_mops_to_view),
 
   # add CONTIGUOUS to tagged UOps
-  (UPat(GroupOp.All-{Ops.CONTIGUOUS, Ops.ASSIGN}, name="x"), lambda x: x.rtag(None).contiguous(tag=x.tag) if x.tag else x.replace(tag=None)),
-  # remove extra CONTIGUOUS on ASSIGN (only when assign target is contiguous)
-  (UPat(Ops.CONTIGUOUS, src=(UPat(Ops.ASSIGN, name="a"),), name="c"),
+  (UPat(GroupOp.All-{Ops.CONTIGUOUS, Ops.AFTER, Ops.STORE}, name="x"),
+   lambda x: x.rtag(None).contiguous(tag=x.tag) if x.tag else x.replace(tag=None)),
+  # remove extra CONTIGUOUS on AFTER (only when target is contiguous)
+  (UPat(Ops.CONTIGUOUS, src=(UPat(Ops.AFTER, name="a"),), name="c"),
    lambda a,c: a.replace(tag=(a.tag or ())+(c.tag or ())) if a.src[0].has_buffer_identity() else None),
-  # replace ASSIGN with CONTIGUOUS
-  (UPat(Ops.ASSIGN, name="u"), replace_assign_with_contig),
-  # replace CONTIGUOUS with ASSIGNs
-  (UPat(Ops.CONTIGUOUS, name="u"), replace_contig_with_assign),
+  # replace AFTER+STORE with CONTIGUOUS when target is not a buffer
+  (UPat(Ops.AFTER, src=(UPat(), UPat(Ops.STORE, src=(UPat(), UPat(name="src")))), name="u"), replace_store_after_with_contig),
+  # replace CONTIGUOUS with STORE+AFTER
+  (UPat(Ops.CONTIGUOUS, name="u"), replace_contig_with_store_after),
   # remove DETACH/CONTIGUOUS_BACKWARD (allows more contiguous removal)
   (UPat((Ops.DETACH, Ops.CONTIGUOUS_BACKWARD), name="x"), lambda x: x.src[0]),
 ])
@@ -122,9 +140,9 @@ def untag_and_append(ctx:AllocCtx, x:UOp):
   for t in x.tag:
     original_uop: UOp = ctx.uop_list[t]
     replace_uop = ret
-    while replace_uop.op is Ops.ASSIGN: replace_uop = replace_uop.src[0]
+    while replace_uop.op is Ops.AFTER: replace_uop = replace_uop.src[0]
     ctx.buffer_map[original_uop] = replace_uop.shrink_to(original_uop.shape)
-  ctx.assigns.append(ret)
+  if ret.op is not Ops.AFTER: ctx.assigns.append(ret)  # AFTER gets appended by append_after
   return ret
 
 def append_after(ctx:AllocCtx, x:UOp):
@@ -136,10 +154,10 @@ def replace_input_buffer(ctx:AllocCtx, b:UOp):
                    b._min_max if b.op is Ops.BIND else None, b.src[0].arg[0] if b.op is Ops.BIND else None)
 
 pm_finalize_call = PatternMatcher([
-  (UPat(Ops.ASSIGN, name="x"), untag_and_append),
+  (UPat(Ops.AFTER, name="x"), untag_and_append),
   (UPat(Ops.AFTER, name="x"), append_after),
   (UPat(Ops.COPY, name="x"), lambda ctx,x: append_after(ctx,x) if isinstance(x.device, str) and x.device.startswith(("DISK", "TINYFS")) else None),
-  # replace UNIQUE with LUNIQUE for CONST cache key normalization
+  # remove unique from const. TODO: this is copied in function.py
   (UPat(Ops.CONST, src=(UPat(Ops.UNIQUE), UPat(Ops.DEVICE, name="d")), name="b"), lambda b,d: b.replace(src=(d,))),
 ])
 

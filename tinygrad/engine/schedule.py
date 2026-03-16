@@ -22,6 +22,7 @@ def create_schedule(sched_sink:UOp) -> UOp:
     for u in sched_sink.toposort(gate_kernel_sink):
       if u.op is not Ops.AFTER: continue
       k = u.src[1]
+      if k.op is Ops.STORE: continue  # skip unprocessed STORE+AFTER inside precompiled CALL bodies
       assert k.op in {Ops.CALL, Ops.END}, f"AFTER src[1] should be CALL or END, not {k.op}"
       in_degree.setdefault(k, 0)
       if k.op is Ops.END: assert k.src[0].op is Ops.CALL, f"END src[0] should be KERNEL, not {k.src[0].op}"
@@ -71,7 +72,7 @@ def linear_to_schedule(linear:UOp) -> list[ExecItem]:
       base = buf_uops[1].buffer
       assert isinstance(base, Buffer), "base can't be MultiBuffer"
       buffers[buf_uops[0]] = base.view(buf_uops[0].arg, ast.dtype, ast.arg[1]*base.dtype.itemsize)
-    ubufs = [b.buffer for b in buf_uops]
+    ubufs = [b.buffer for b in buf_uops if b.op is not Ops.BIND]
     metadata = si.arg.metadata
     if any(isinstance(x, MultiBuffer) for x in ubufs):
       assert all(isinstance(x, MultiBuffer) for x in ubufs), "kernel must all be multibuffer"

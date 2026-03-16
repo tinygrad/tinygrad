@@ -271,6 +271,7 @@ class SDMAExecutor(AMDQueue):
       elif op == amd_gpu.SDMA_OP_GCR: self._execute_gcr()
       elif op == amd_gpu.SDMA_OP_COPY: self._execute_copy()
       elif op == amd_gpu.SDMA_OP_TIMESTAMP: self._execute_timestamp()
+      elif op == 32: self.rptr[0] += 4  # SDMA_OP_DUMMY_TRAP: pipeline flush, no interrupt
       else: raise RuntimeError(f"Unknown SDMA op {op}")
     return self.rptr[0] - prev_rptr
 
