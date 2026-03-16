@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field
 from tinygrad.uop.ops import UOp, UPat, PatternMatcher, Ops, GroupOp, graph_rewrite, track_rewrites
-from tinygrad.dtype import dtypes, ImageDType
+from tinygrad.dtype import ImageDType
 from tinygrad.helpers import prod, DEBUG, VIZ, pluralize
 
 @dataclass
