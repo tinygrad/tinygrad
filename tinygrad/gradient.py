@@ -24,7 +24,7 @@ def call_gradient(ctx:UOp, k:UOp) -> tuple[UOp|None, ...]:
     if (p:=params.get(i, None)) is not None and p in grads:
       # TODO: compact the args and remove unused ones
       assert not grads[p].op_in_backward_slice_with_self(Ops.BUFFER), "BUG: BUFFER in backward slice of grad"
-      ret.append(grads[p].call(*args, ctx, name=(k.arg.name or "")+f"_backward_{i}"))
+      ret.append(grads[p].call(*args, ctx, name=(k.arg.name or "")+f"_backward_{i}", precompile=k.arg.precompile_backward))
     else:
       ret.append(None)
   return tuple(ret)

@@ -139,6 +139,10 @@ _tensor_spec = PatternMatcher([
   (UPat(Ops.PARAM), lambda: True),
   (UPat(Ops.CUSTOM_FUNCTION, name="x"), lambda x: isinstance(x.arg, str)),
 
+  # TUPLE must have void dtype, GETTUPLE can only appear on CALL or TUPLE
+  (UPat(Ops.TUPLE, dtypes.void), lambda: True),
+  (UPat(Ops.GETTUPLE, src=(UPat((Ops.CALL, Ops.TUPLE)),), name="g"), lambda g: isinstance(g.arg, int)),
+
   # ** for custom kernels **
 
   # codegen: PROGRAM with progressive sources through the pipeline (SINK, DEVICE, LINEAR?, SOURCE?, BINARY?)
