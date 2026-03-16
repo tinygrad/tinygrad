@@ -14,22 +14,22 @@ def reduce_gradient(ctx:UOp, ret:UOp, op:Ops):
   if op == Ops.MUL: return (broadcast_to_input(ctx * ret) / ret.src[0],)
 
 def call_gradient(ctx:UOp, k:UOp) -> tuple[UOp|None, ...]:
-  if k.arg.grad_fxn is not None: return (None,) + k.arg.grad_fxn(ctx, k)
   fxn, args = k.src[0], k.src[1:]
+  assert fxn.op is Ops.TUPLE, f"expected TUPLE body for gradient, got {fxn.op}"
+  if k.arg.grad_fxn is not None:
+    grad_ctx = ctx.src[0] if len(fxn.src) == 1 else ctx
+    return (None,) + k.arg.grad_fxn(grad_ctx, k)
   params = {x.arg:x for x in fxn.toposort(enter_calls=False) if x.op == Ops.PARAM}
-  if fxn.op is Ops.TUPLE:
-    grad_args = ctx.src
-    root_grad = UOp(Ops.TUPLE, src=tuple(g.param_like(len(args) + i) for i, g in enumerate(grad_args)))
-  else:
-    grad_args = (ctx,)
-    root_grad = ctx.param_like(len(args))
+  grad_args = ctx.src
+  root_grad = UOp(Ops.TUPLE, src=tuple(g.param_like(len(args) + i) for i, g in enumerate(grad_args)))
   grads = compute_gradient(fxn, root_grad, set(params.values()))
   ret: list[UOp|None] = [None]
   for i in range(len(args)):
     if (p:=params.get(i, None)) is not None and p in grads:
       # TODO: compact the args and remove unused ones
       assert not grads[p].op_in_backward_slice_with_self(Ops.BUFFER), "BUG: BUFFER in backward slice of grad"
-      ret.append(grads[p].call(*args, *grad_args, name=(k.arg.name or "")+f"_backward_{i}", precompile=k.arg.precompile_backward))
+      bwd_call = grads[p].call(*args, *grad_args, name=(k.arg.name or "")+f"_backward_{i}", precompile=k.arg.precompile_backward)
+      ret.append(bwd_call.gettuple(0))
     else:
       ret.append(None)
   return tuple(ret)

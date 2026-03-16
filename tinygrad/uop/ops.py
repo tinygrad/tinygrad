@@ -213,10 +213,15 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
         return None
 
       case Ops.GETTUPLE:
-        # GETTUPLE extracts from a TUPLE
+        # GETTUPLE extracts from a TUPLE (possibly through a CALL)
         in_tuple = self.src[0].src[0] if self.src[0].op is Ops.CALL else self.src[0]
         assert in_tuple.op is Ops.TUPLE
-        return in_tuple.src[self.arg]._shape
+        inner_shape = in_tuple.src[self.arg]._shape
+        if inner_shape is None: return None
+        # if through a CALL, substitute internal PARAMs in the shape with corresponding args
+        if self.src[0].op is Ops.CALL:
+          return tuple(graph_rewrite(s, _pm_resolve_params, self.src[0].src[1:], walk=True) if isinstance(s, UOp) else s for s in inner_shape)
+        return inner_shape
 
       case Ops.CAST:
         # when PTX casts from ptr to non ptr, remove the shape
@@ -248,11 +253,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
       case Ops.REDUCE | Ops.MSTACK | Ops.MSELECT | Ops.DETACH | Ops.CONTIGUOUS | Ops.CONTIGUOUS_BACKWARD | Ops.AFTER | Ops.END:
         return self.src[0]._shape
 
-      case Ops.CALL:
-        inner_shape = self.src[0]._shape
-        if inner_shape is None: return None
-        # substitute internal PARAMs in the shape with corresponding args
-        return tuple(graph_rewrite(s, _pm_resolve_params, self.src[1:], walk=True) if isinstance(s, UOp) else s for s in inner_shape)
+      case Ops.CALL: return None
 
       # TODO: disallow shape changing bitcast
       case Ops.BITCAST:
@@ -919,10 +920,13 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     if self.axis is not None: p = p.replace(src=p.src + (UOp(Ops.MULTI, arg=self.axis),))
     return p
 
+  _NO_TUPLE_WRAP = {Ops.SINK, Ops.PROGRAM, Ops.LINEAR, Ops.COPY, Ops.BUFFER_VIEW, Ops.CUSTOM_FUNCTION, Ops.TUPLE}
   def call(self, *srcs:UOp, grad_fxn:Callable|None=None, metadata:tuple[Metadata, ...]=(),
            name:str|None=None, precompile:bool=False, precompile_backward:bool=False) -> UOp:
     assert len(self.ranges) == 0, f"ranges {self.ranges} are leaking out of the call in {self.pyrender()}"
-    return UOp(Ops.CALL, self.dtype, (self,)+srcs, CallInfo(grad_fxn, metadata, name, precompile, precompile_backward))
+    # value-producing bodies are always wrapped in TUPLE so CALL dtype is always void
+    body = self if self.op in UOp._NO_TUPLE_WRAP else UOp.maketuple(self)
+    return UOp(Ops.CALL, dtypes.void, (body,)+srcs, CallInfo(grad_fxn, metadata, name, precompile, precompile_backward))
   def custom_kernel(*srcs:UOp, fxn:Callable, grad_fxn:Callable|None=None) -> list[UOp]:
     contig_srcs = tuple(x.contiguous() if x.op is not Ops.AFTER else x for x in srcs)
     placeholders = [UOp.placeholder_like(s, slot=i) for i,s in enumerate(contig_srcs)]

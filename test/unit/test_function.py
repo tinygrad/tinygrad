@@ -165,13 +165,13 @@ class TestFunction(unittest.TestCase):
   def test_name(self):
     @function
     def f(a:Tensor) -> Tensor: return a + 1
-    assert f(Tensor([1])).uop.arg.name.endswith("f")
+    assert f(Tensor([1])).uop.src[0].arg.name.endswith("f")
 
   def test_method_name(self):
     class Foo:
       @function
       def __call__(self, x:Tensor) -> Tensor: return x + 1
-    assert Foo()(Tensor([1])).uop.arg.name.endswith("Foo.__call__")
+    assert Foo()(Tensor([1])).uop.src[0].arg.name.endswith("Foo.__call__")
 
   def test_callable_instance(self):
     class Foo:
@@ -180,7 +180,7 @@ class TestFunction(unittest.TestCase):
     foo = Foo()
     f = function(foo)
     np.testing.assert_equal(f(Tensor([1,2,3])).numpy(), [11,22,33])
-    assert f(Tensor([1,2,3])).uop.arg.name.endswith("Foo")
+    assert f(Tensor([1,2,3])).uop.src[0].arg.name.endswith("Foo")
 
   def test_iadd(self):
     @function
