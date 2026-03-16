@@ -48,11 +48,16 @@ def decode_profile(data:bytes) -> dict:
         name, ref, key, st, dur, fmt = u("<IIIIfI")
         v["events"].append({"name":strings[name], "ref":option(ref), "key":option(key), "st":st, "dur":dur, "fmt":strings[fmt]})
     else:
+      v["linear"] = u("<B")[0]
       v["peak"] = u("<Q")[0]
       for _ in range(event_count):
-        alloc, ts, key = u("<BII")
-        if alloc: v["events"].append({"event":"alloc", "ts":ts, "key":key, "arg": {"dtype":strings[u("<I")[0]], "sz":u("<Q")[0]}})
-        else: v["events"].append({"event":"free", "ts":ts, "key":key, "arg": {"users":[u("<IIIB") for _ in range(u("<I")[0])]}})
+        if v["linear"]:
+          ts, value = u("<IQ")
+          v["events"].append({"event":"freq", "ts":ts, "value":value})
+        else:
+          alloc, ts, key = u("<BII")
+          if alloc: v["events"].append({"event":"alloc", "ts":ts, "key":key, "arg": {"dtype":strings[u("<I")[0]], "sz":u("<Q")[0]}})
+          else: v["events"].append({"event":"free", "ts":ts, "key":key, "arg": {"users":[u("<IIIB") for _ in range(u("<I")[0])]}})
   return {"dur":total_dur, "peak":global_peak, "layout":layout, "markers":markers}
 
 if __name__ == "__main__":
