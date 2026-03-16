@@ -2,6 +2,7 @@ import functools
 from typing import Generic, TypeVar, Callable, cast, overload
 from tinygrad.helpers import Context, dedup, getenv
 from tinygrad.uop.ops import UOp, Ops, graph_rewrite, PatternMatcher, UPat
+from tinygrad.gradient import compute_gradient
 from tinygrad.tensor import Tensor
 
 def add_to_ctx(ctx, x:UOp):
@@ -66,11 +67,70 @@ class _function(Generic[ReturnType]):
     #call = assigned.call(*call_uops, buffer, name=name)
     #ret = buffer.after(call)
 
-    fret = uret.call(*call_uops, name=name, precompile=self.precompile, precompile_backward=self.precompile_backward)
+    # precompute the backward: determine which inputs need gradients and build the backward CALL body
+    grad_fxn = None
+    inputs = [t for t in list(args)+[kwargs[k] for k in sorted(kwargs)] if isinstance(t, (Tensor, UOp))]
+    grad_params = {x.arg:x for x in uret.toposort(enter_calls=False) if x.op == Ops.PARAM}
+    # find which param slots correspond to requires_grad inputs
+    need_grad = {i for i, t in enumerate(inputs) if isinstance(t, Tensor) and t.requires_grad}
+    target_params = {grad_params[i] for i in need_grad if i in grad_params}
+    if target_params:
+      grad_fxn = self._make_grad_fxn(uret, len(call_uops), target_params, need_grad, name, self.precompile_backward)
+
+    fret = uret.call(*call_uops, name=name, precompile=self.precompile, precompile_backward=self.precompile_backward, grad_fxn=grad_fxn)
     if isinstance(ret, tuple):
       return cast(ReturnType, tuple(Tensor(fret.gettuple(i), device=fret.device) for i in range(len(ret))))
     else:
       return cast(ReturnType, Tensor(fret, device=fret.device))
+
+  @staticmethod
+  def _make_grad_fxn(uret:UOp, num_args:int, target_params:set[UOp], need_grad:set[int], name:str, precompile_backward:bool):
+    def grad_fxn(ctx, k):
+      fxn, args = k.src[0], k.src[1:]
+      params = {x.arg:x for x in fxn.toposort(enter_calls=False) if x.op == Ops.PARAM}
+      # compute gradients only for needed params
+      if isinstance(ctx, dict):
+        all_grads: dict[UOp, UOp] = {}
+        for idx, grad_out in ctx.items():
+          elem_grads = compute_gradient(fxn.src[idx], grad_out.param_like(len(args) + idx), target_params)
+          for p, g in elem_grads.items():
+            if p in all_grads: all_grads[p] = all_grads[p] + g
+            else: all_grads[p] = g
+        grads = all_grads
+        grad_ctx_inputs = tuple(ctx.get(i, fxn.src[i].const_like(0)) for i in range(len(fxn.src)))
+      else:
+        grads = compute_gradient(fxn, ctx.param_like(len(args)), target_params)
+        grad_ctx_inputs = (ctx,)
+      # collect gradients for needed params only
+      grad_indices: list[int] = []
+      grad_uops: list[UOp] = []
+      for i in range(len(args)):
+        if i in need_grad and (p:=params.get(i)) is not None and p in grads:
+          grad_indices.append(i)
+          grad_uops.append(grads[p])
+      if len(grad_uops) == 0: return (None,) * len(args)
+      # replace forward output references with PARAMs to avoid recomputation
+      if fxn.op is Ops.TUPLE:
+        fwd_subs = {elem: elem.param_like(len(args) + len(grad_ctx_inputs) + i) for i, elem in enumerate(fxn.src)}
+        fwd_inputs = tuple(k.gettuple(i) for i in range(len(fxn.src)))
+      else:
+        fwd_subs = {fxn: fxn.param_like(len(args) + 1)}
+        fwd_inputs = (k,)
+      grad_uops = [g.substitute(fwd_subs) for g in grad_uops]
+      # build a single backward CALL returning a TUPLE of all gradients
+      bwd_body = UOp.maketuple(*grad_uops)
+      bwd_call = bwd_body.call(*args, *grad_ctx_inputs, *fwd_inputs, name=name+"_backward", precompile=precompile_backward)
+      # extract each gradient via GETTUPLE
+      ret: list[UOp|None] = []
+      gi = 0
+      for i in range(len(args)):
+        if gi < len(grad_indices) and grad_indices[gi] == i:
+          ret.append(bwd_call.gettuple(gi))
+          gi += 1
+        else:
+          ret.append(None)
+      return tuple(ret)
+    return grad_fxn
 
 # overload signatures support both @function and @function(precompile=True) syntax
 @overload

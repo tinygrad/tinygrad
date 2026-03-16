@@ -3,6 +3,7 @@ import unittest
 from tinygrad.function import function
 from tinygrad import Tensor
 from tinygrad.uop.ops import UOp
+from tinygrad.helpers import GlobalCounters
 
 class TestFunction(unittest.TestCase):
   def test_simple(self):
@@ -393,9 +394,42 @@ class TestFunctionBackward(unittest.TestCase):
     def f(t:Tensor, w1:Tensor, w2:Tensor): return (t@w1)@w2
     loss = f(x, w1, w2).sum().backward()
     assert w1.grad is not None and w2.grad is not None
+    GlobalCounters.reset()
     Tensor.realize(loss, w1.grad, w2.grad)
     np.testing.assert_allclose(w1.grad.numpy(), xn.T @ np.ones((N,N)) @ w2n.T, atol=1e-3)
     np.testing.assert_allclose(w2.grad.numpy(), (xn @ w1n).T @ np.ones((N,N)), atol=1e-3)
+
+  def test_backward_precompile_backward_tuple(self):
+    N = 4
+    x = Tensor.arange(N*N).reshape(N, N).float().contiguous()
+    w1 = Tensor.arange(N*N).reshape(N, N).float().requires_grad_().contiguous()
+    w2 = Tensor.arange(N*N).reshape(N, N).float().requires_grad_().contiguous()
+    Tensor.realize(x, w1, w2)
+    xn, w1n, w2n = x.numpy(), w1.numpy(), w2.numpy()
+    # non-tuple reference
+    ref_w1 = Tensor.arange(N*N).reshape(N, N).float().requires_grad_().contiguous()
+    ref_w2 = Tensor.arange(N*N).reshape(N, N).float().requires_grad_().contiguous()
+    Tensor.realize(ref_w1, ref_w2)
+    @function(precompile=True, precompile_backward=True)
+    def g(t:Tensor, w1:Tensor, w2:Tensor): return (t@w1)@w2
+    g(x, ref_w1, ref_w2).sum().backward()
+    GlobalCounters.reset()
+    Tensor.realize(ref_w1.grad, ref_w2.grad)
+    ref_ops = GlobalCounters.global_ops
+    # tuple version with intermediate — should not redo forward compute
+    @function(precompile=True, precompile_backward=True)
+    def f(t:Tensor, w1:Tensor, w2:Tensor):
+      h = t@w1
+      return (h, h@w2)
+    h, out = f(x, w1, w2)
+    loss = out.sum().backward()
+    assert w1.grad is not None and w2.grad is not None
+    GlobalCounters.reset()
+    Tensor.realize(loss, w1.grad, w2.grad)
+    np.testing.assert_allclose(w1.grad.numpy(), xn.T @ np.ones((N,N)) @ w2n.T, atol=1e-3)
+    np.testing.assert_allclose(w2.grad.numpy(), (xn @ w1n).T @ np.ones((N,N)), atol=1e-3)
+    # tuple version should have fewer ops than non-tuple (saves recomputing h=t@w1 in backward)
+    self.assertLessEqual(GlobalCounters.global_ops, ref_ops)
 
 if __name__ == '__main__':
   unittest.main()

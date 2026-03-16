@@ -13,12 +13,26 @@ def reduce_gradient(ctx:UOp, ret:UOp, op:Ops):
     return ((mask/broadcast_to_input(count)) * broadcast_to_input(ctx),)
   if op == Ops.MUL: return (broadcast_to_input(ctx * ret) / ret.src[0],)
 
-def call_gradient(ctx:UOp, k:UOp) -> tuple[UOp|None, ...]:
-  if k.arg.grad_fxn is not None: return (None,) + k.arg.grad_fxn(ctx, k)
+def call_gradient(ctx:UOp|dict[int, UOp], k:UOp) -> tuple[UOp|None, ...]:
+  if k.arg.grad_fxn is not None:
+    if isinstance(ctx, dict): return (None,) + k.arg.grad_fxn(ctx, k)
+    return (None,) + k.arg.grad_fxn(ctx, k)
   # auto-differentiate the function
   fxn, args = k.src[0], k.src[1:]
   params = {x.arg:x for x in fxn.toposort(enter_calls=False) if x.op == Ops.PARAM}
-  grads = compute_gradient(fxn, ctx.param_like(len(args)), set(params.values()))
+  # for tuple-returning CALLs, ctx is a dict mapping output index to gradient; differentiate each output separately and sum
+  if isinstance(ctx, dict):
+    all_grads: dict[UOp, UOp] = {}
+    for idx, grad_out in ctx.items():
+      elem_grads = compute_gradient(fxn.src[idx], grad_out.param_like(len(args) + idx), set(params.values()))
+      for p, g in elem_grads.items():
+        if p in all_grads: all_grads[p] = all_grads[p] + g
+        else: all_grads[p] = g
+    grads = all_grads
+    grad_ctx_inputs = tuple(ctx.get(i, fxn.src[i].const_like(0)) for i in range(len(fxn.src)))
+  else:
+    grads = compute_gradient(fxn, ctx.param_like(len(args)), set(params.values()))
+    grad_ctx_inputs = (ctx,)
   # collect which args have gradients
   grad_indices: list[int] = []
   grad_uops: list[UOp] = []
@@ -28,9 +42,17 @@ def call_gradient(ctx:UOp, k:UOp) -> tuple[UOp|None, ...]:
       grad_indices.append(i)
       grad_uops.append(grads[p])
   if len(grad_uops) == 0: return (None,) * (len(args) + 1)
+  # replace forward output references with PARAMs, passing the forward CALL output(s) as inputs to avoid recomputation
+  if fxn.op is Ops.TUPLE:
+    fwd_subs = {elem: elem.param_like(len(args) + len(grad_ctx_inputs) + i) for i, elem in enumerate(fxn.src)}
+    fwd_inputs = tuple(k.gettuple(i) for i in range(len(fxn.src)))
+  else:
+    fwd_subs = {fxn: fxn.param_like(len(args) + 1)}
+    fwd_inputs = (k,)
+  grad_uops = [g.substitute(fwd_subs) for g in grad_uops]
   # build a single backward CALL returning a TUPLE of all gradients
   bwd_body = UOp.maketuple(*grad_uops)
-  bwd_call = bwd_body.call(*args, ctx, name=(k.arg.name or "")+"_backward", precompile=k.arg.precompile_backward)
+  bwd_call = bwd_body.call(*args, *grad_ctx_inputs, *fwd_inputs, name=(k.arg.name or "")+"_backward", precompile=k.arg.precompile_backward)
   # extract each gradient via GETTUPLE
   ret: list[UOp|None] = [None]
   gi = 0
@@ -85,11 +107,26 @@ def _deepwalk(root:UOp, targets:set[UOp]) -> list[UOp]:
   return list(root.toposort(lambda node: node.op not in {Ops.DETACH, Ops.ASSIGN} and in_target_path[node]))
 
 def compute_gradient(root:UOp, root_grad:UOp, targets:set[UOp]) -> dict[UOp, UOp]:
-  grads = {root: root_grad}
+  grads: dict[UOp, UOp] = {root: root_grad}
+  # for GETTUPLE nodes on tuple-returning CALLs, collect per-output gradients
+  tuple_call_grads: dict[UOp, dict[int, UOp]] = {}
   for t0 in reversed(_deepwalk(root, targets)):
-    if t0 not in grads: continue
-    lgrads: tuple[UOp|None, ...]|None = cast(tuple[UOp|None, ...]|None, pm_gradient.rewrite(t0, ctx=grads[t0]))
-    if lgrads is None: raise RuntimeError(f"failed to compute gradient for {t0.op}\n\nin {str(t0)[0:1000]}...")
+    if t0 not in grads and t0 not in tuple_call_grads: continue
+    # for tuple-returning CALLs, use accumulated per-output gradients
+    if t0.op is Ops.CALL and t0 in tuple_call_grads:
+      lgrads = cast(tuple[UOp|None, ...], call_gradient(tuple_call_grads[t0], t0))
+    elif t0 not in grads:
+      continue
+    # for GETTUPLE on a CALL, accumulate gradient per output index instead of propagating to CALL directly
+    elif t0.op is Ops.GETTUPLE and t0.src[0].op is Ops.CALL:
+      call = t0.src[0]
+      if call not in tuple_call_grads: tuple_call_grads[call] = {}
+      if t0.arg in tuple_call_grads[call]: tuple_call_grads[call][t0.arg] = tuple_call_grads[call][t0.arg] + grads[t0]
+      else: tuple_call_grads[call][t0.arg] = grads[t0]
+      continue
+    else:
+      lgrads = cast(tuple[UOp|None, ...]|None, pm_gradient.rewrite(t0, ctx=grads[t0]))
+      if lgrads is None: raise RuntimeError(f"failed to compute gradient for {t0.op}\n\nin {str(t0)[0:1000]}...")
     assert len(lgrads) == len(t0.src), f"got {len(lgrads)} gradient, expected {len(t0.src)}"
     for k,v in zip(t0.src, lgrads):
       if v is None: continue
