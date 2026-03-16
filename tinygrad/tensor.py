@@ -3674,7 +3674,7 @@ class Tensor(OpMixin):
       # align a dimension, use at to specify the dimension to pad in, defaults to first
       def pad_align(t, dim, at=None, force=False):
         # align to 64 pixels when height is real, otherwise 64 bytes is sufficient
-        align = (64 // dtsz) if prod(t.shape[:dim]) == 1 else 256
+        align = (64 // dtsz) if prod(t.shape[:dim]) == 1 or prod(t.shape) < 16384 * 4 else 256
         return ipad(t, at:=at or dim, round_up(t.shape[at] + int(force), align // math.gcd(prod(t.shape[dim:]) // t.shape[at], align)))
 
       # bank conflicts
