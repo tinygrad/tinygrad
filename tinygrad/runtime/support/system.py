@@ -54,7 +54,7 @@ class _System:
     self.pagemap.seek(vaddr // mmap.PAGESIZE * 8)
     return [(x & ((1<<55) - 1)) * mmap.PAGESIZE for x in array.array('Q', self.pagemap.read(size//mmap.PAGESIZE*8, binary=True))]
 
-  def pci_scan_bus(self, vendor:int, devices:list[tuple[int, list[int]]], base_class:int|None=None) -> list[str]:
+  def pci_scan_bus(self, vendor:int, devices:tuple[tuple[int, tuple[int, ...]], ...], base_class:int|None=None) -> list[str]:
     all_devs = []
     if OSX:
       def read_prop(svc, key) -> int:
@@ -74,10 +74,10 @@ class _System:
     return sorted([val for vndr, device, val in all_devs if vndr == vendor and any((device & mask) in devlist for mask, devlist in devices)])
 
   @functools.cache
-  def list_devices(self, vendor:int, devices:tuple[tuple[int, tuple[int]]], base_class:int|None=None) -> list[str]:
+  def list_devices(self, vendor:int, devices:tuple[tuple[int, tuple[int, ...]], ...], base_class:int|None=None) -> list[tuple[type, str]]:
     return [(APLRemotePCIDevice if OSX else PCIDevice, x) for x in System.pci_scan_bus(vendor, devices, base_class)]
 
-  def pci_probe_device(self, devpref:str, dev_id:int, vendor:int, devices:tuple[tuple[int, tuple[int]]], base_class:int|None=None):
+  def pci_probe_device(self, devpref:str, dev_id:int, vendor:int, devices:tuple[tuple[int, tuple[int, ...]], ...], base_class:int|None=None):
     cl, pcibus = hcq_filter_visible_devices(self.list_devices(vendor, devices, base_class))[dev_id]
     return cl(devpref, pcibus)
 
@@ -235,7 +235,7 @@ class PCIIfaceBase:
   def is_local(self) -> bool: return not isinstance(self.pci_dev, RemotePCIDevice)
   def is_bar_small(self) -> bool: return self.pci_dev.bar_info(self.vram_bar)[1] == (256 << 20)
 
-  def __init__(self, dev, dev_id, vendor, devices:list[tuple[int, list[int]]], vram_bar, va_start, va_size,
+  def __init__(self, dev, dev_id, vendor, devices:tuple[tuple[int, tuple[int, ...]], ...], vram_bar, va_start, va_size,
                dev_impl_t, base_class:int|None=None):
     self.pci_dev = System.pci_probe_device(dev.__class__.__name__[:2], dev_id, vendor, devices, base_class=base_class)
     if self.is_local(): System.reserve_va(va_start, va_size)
@@ -333,7 +333,7 @@ class RemotePCIDevice(PCIDevice):
   def _bulk_write(self, cmd:int, idx:int, offset:int, data:bytes):
     self.sock.sendall(struct.pack('<BIIQQQ', cmd, self.dev_id, idx, offset, len(data), 0) + data)
 
-  def alloc_sysmem(self, size:int, vaddr:int=0, contiguous:bool=False) -> tuple[MMIOInterface, list[int]]: pass
+  def alloc_sysmem(self, size:int, vaddr:int=0, contiguous:bool=False) -> tuple[MMIOInterface, list[int]]: raise NotImplementedError()
   def reset(self): self._rpc(self.sock, self.dev_id, RemoteCmd.RESET)
   def read_config(self, offset:int, size:int): return self._rpc(self.sock, self.dev_id, RemoteCmd.CFG_READ, offset, size)[0]
   def write_config(self, offset:int, value:int, size:int): self._rpc(self.sock, self.dev_id, RemoteCmd.CFG_WRITE, offset, size, value)
@@ -349,7 +349,7 @@ class APLRemotePCIDevice(RemotePCIDevice):
 
   @classmethod
   def ensure_app(cls):
-    commit = "8120b5508b43149d27bf22f9a4e6d7c5a4b401e9"
+    commit = "c4d5a845763e6694ef53ff1c0c8c6d3e130c3724"
     if os.path.exists(cls.APP_PATH) and (_ensure_downloads_dir() / (app_name:=f"TinyGPU_{commit}.zip")).is_file(): return
     print("Downloading TinyGPU.app...")
     with contextlib.suppress(RuntimeError): system("pkill -f TinyGPU")
