@@ -19,12 +19,25 @@ def call_gradient(ctx:UOp, k:UOp) -> tuple[UOp|None, ...]:
   fxn, args = k.src[0], k.src[1:]
   params = {x.arg:x for x in fxn.toposort(enter_calls=False) if x.op == Ops.PARAM}
   grads = compute_gradient(fxn, ctx.param_like(len(args)), set(params.values()))
-  ret: list[UOp|None] = [None]
+  # collect which args have gradients
+  grad_indices: list[int] = []
+  grad_uops: list[UOp] = []
   for i in range(len(args)):
     if (p:=params.get(i, None)) is not None and p in grads:
-      # TODO: compact the args and remove unused ones
       assert not grads[p].op_in_backward_slice_with_self(Ops.BUFFER), "BUG: BUFFER in backward slice of grad"
-      ret.append(grads[p].call(*args, ctx, name=(k.arg.name or "")+f"_backward_{i}"))
+      grad_indices.append(i)
+      grad_uops.append(grads[p])
+  if len(grad_uops) == 0: return (None,) * (len(args) + 1)
+  # build a single backward CALL returning a TUPLE of all gradients
+  bwd_body = UOp(Ops.TUPLE, src=tuple(grad_uops))
+  bwd_call = bwd_body.call(*args, ctx, name=(k.arg.name or "")+"_backward", precompile=k.arg.precompile_backward)
+  # extract each gradient via GETTUPLE
+  ret: list[UOp|None] = [None]
+  gi = 0
+  for i in range(len(args)):
+    if gi < len(grad_indices) and grad_indices[gi] == i:
+      ret.append(UOp(Ops.GETTUPLE, dtype=bwd_call.src[0].src[gi].dtype, src=(bwd_call,), arg=gi))
+      gi += 1
     else:
       ret.append(None)
   return tuple(ret)

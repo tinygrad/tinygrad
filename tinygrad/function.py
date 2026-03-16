@@ -19,9 +19,10 @@ pm_ctx = PatternMatcher([
 
 ReturnType = TypeVar('ReturnType')
 class _function(Generic[ReturnType]):
-  def __init__(self, fxn:Callable[..., ReturnType], *, precompile:bool=False):
+  def __init__(self, fxn:Callable[..., ReturnType], *, precompile:bool=False, precompile_backward:bool=False):
     self.fxn = fxn
     self.precompile = precompile
+    self.precompile_backward = precompile_backward
 
   def __get__(self, obj, objtype=None): return functools.partial(self.__call__, obj) if obj is not None else self
 
@@ -65,7 +66,7 @@ class _function(Generic[ReturnType]):
     #call = assigned.call(*call_uops, buffer, name=name)
     #ret = buffer.after(call)
 
-    fret = uret.call(*call_uops, name=name, precompile=self.precompile)
+    fret = uret.call(*call_uops, name=name, precompile=self.precompile, precompile_backward=self.precompile_backward)
     if isinstance(ret, tuple):
       return cast(ReturnType, tuple(Tensor(UOp(Ops.GETTUPLE, dtype=fret.src[0].src[i].dtype, src=(fret,), arg=i),
                                            device=fret.device) for i in range(len(ret))))
@@ -74,9 +75,10 @@ class _function(Generic[ReturnType]):
 
 # overload signatures support both @function and @function(precompile=True) syntax
 @overload
-def function(fxn:Callable[..., ReturnType], *, precompile:bool=False) -> _function[ReturnType]: ...
+def function(fxn:Callable[..., ReturnType], *, precompile:bool=False, precompile_backward:bool=False) -> _function[ReturnType]: ...
 @overload
-def function(fxn:None=None, *, precompile:bool=False) -> Callable[[Callable[..., ReturnType]], _function[ReturnType]]: ...
-def function(fxn=None, *, precompile:bool=False):
-  if fxn is None: return lambda f: _function(f, precompile=precompile)
-  return _function(fxn, precompile=precompile)
+def function(fxn:None=None, *, precompile:bool=False, precompile_backward:bool=False) -> \
+  Callable[[Callable[..., ReturnType]], _function[ReturnType]]: ...
+def function(fxn=None, *, precompile:bool=False, precompile_backward:bool=False):
+  if fxn is None: return lambda f: _function(f, precompile=precompile, precompile_backward=precompile_backward)
+  return _function(fxn, precompile=precompile, precompile_backward=precompile_backward)
