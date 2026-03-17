@@ -630,15 +630,37 @@ class Tensor(OpMixin):
       Tensor._device_seeds[device] = Tensor(
         [int.from_bytes(hashlib.sha256(len(Tensor._device_seeds).to_bytes(4, "big")).digest(), "big"), Tensor._seed],
         device=device, dtype=dtypes.uint32, requires_grad=False)
-      Tensor._device_rng_counters[device] = Tensor([num], device=device, dtype=dtypes.uint32, requires_grad=False).contiguous()
+      Tensor._device_rng_counters[device] = Tensor([0, 0], device=device, dtype=dtypes.uint32, requires_grad=False).contiguous()
+
     # increment rng counter for devices
-    else: Tensor._device_rng_counters[device].assign(Tensor._device_rng_counters[device] + num)
+    c = Tensor._device_rng_counters[device]
+    new_low = c[0:1] + (num & 0xFFFFFFFF)
+    carry = (new_low < c[0:1]).cast(dtypes.uint32)
+    new_high = c[1:2] + (num >> 32) + carry
+    c.assign(Tensor.cat(new_low, new_high))
+
+    # To ensure the assign is executed in the lazy graph, we must depend on `c`
+    low = c[0:1] - (num & 0xFFFFFFFF)
+    high = c[1:2] - (num >> 32) - (c[0:1] < (num & 0xFFFFFFFF)).cast(dtypes.uint32)
 
     # threefry random bits
-    bits_count = Tensor._device_rng_counters[device] - num
-    counts0 = (Tensor.arange(ceildiv(num, 2), device=device, dtype=dtypes.uint32, requires_grad=False)+bits_count)
-    counts1 = counts0 + ceildiv(num, 2)
-    bits = Tensor._threefry_random_bits(Tensor._device_seeds[device], counts0, counts1)[:num]
+    MAX_ARANGE = dtypes.uint32.max
+    if num > MAX_ARANGE:
+      bits_list = []
+      for i in range(0, num, MAX_ARANGE):
+        chunk_num = min(num - i, MAX_ARANGE)
+        c_low = low + (i & 0xFFFFFFFF)
+        c_carry = (c_low < low).cast(dtypes.uint32)
+        c_high = high + (i >> 32) + c_carry
+        new_key = Tensor._threefry_random_bits(Tensor._device_seeds[device], c_low, c_high)
+        counts0 = Tensor.arange(ceildiv(chunk_num, 2), device=device, dtype=dtypes.uint32, requires_grad=False)
+        counts1 = counts0 + ceildiv(chunk_num, 2)
+        bits_list.append(Tensor._threefry_random_bits(new_key, counts0, counts1)[:chunk_num])
+      bits = Tensor.cat(*bits_list)
+    else:
+      counts0 = Tensor.arange(ceildiv(num, 2), device=device, dtype=dtypes.uint32, requires_grad=False) + low
+      counts1 = counts0 + ceildiv(num, 2)
+      bits = Tensor._threefry_random_bits(Tensor._device_seeds[device], counts0, counts1)[:num]
 
     # bitcast to uint with same number of bits
     _, nmant = dtypes.finfo(dt)
