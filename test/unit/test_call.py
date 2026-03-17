@@ -316,7 +316,7 @@ class TestCallMultiSharded(unittest.TestCase):
     ref_b = np.arange(8, dtype=np.float32).reshape(4, 2)
     np.testing.assert_allclose(t1.numpy(), ref_a + 1)
     np.testing.assert_allclose(t2.numpy(), ref_b + 2)
-    
+
   def test_call_reduce_sharded(self):
     devs = ("CPU:0", "CPU:1")
     a = Tensor.ones(10, 10).shard(devs, axis=0)
