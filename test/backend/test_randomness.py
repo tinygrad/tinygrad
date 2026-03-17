@@ -384,6 +384,21 @@ class TestRandomness(unittest.TestCase):
     for _ in range(833): Tensor.rand(1)
     Tensor.rand(1).realize()
 
+  def test_random_counter_overflow(self):
+    device = Device.DEFAULT
+    Tensor.manual_seed(1337)
+    Tensor.rand(1).realize()
+
+    Tensor._device_rng_counters[device].assign(Tensor([dtypes.uint32.max - 5, 0], device=device, dtype=dtypes.uint32)).realize()
+
+    Tensor.rand(10).realize()
+    c = Tensor._device_rng_counters[device].numpy()
+    np.testing.assert_allclose(c, [4, 1])
+
+    Tensor.rand(10).realize()
+    c = Tensor._device_rng_counters[device].numpy()
+    np.testing.assert_allclose(c, [14, 1])
+
 # TODO: still fails with MAX_KERNEL_BUFFERS
 @unittest.skipIf(Device.DEFAULT == "WEBGPU" and not OSX, "WEBGPU Vulkan can only run kernels with up to 10 buffers")
 class TestSample(unittest.TestCase):
