@@ -75,6 +75,7 @@ class _System:
 
   @functools.cache
   def list_devices(self, vendor:int, devices:tuple[tuple[int, tuple[int, ...]], ...], base_class:int|None=None) -> list[tuple[type, str]]:
+    if getenv("REMOTE", ""): return [(RemotePCIDevice, x) for x in RemotePCIDevice.remote_list(vendor, devices, base_class)]
     return [(APLRemotePCIDevice if OSX else PCIDevice, x) for x in System.pci_scan_bus(vendor, devices, base_class)]
 
   def pci_probe_device(self, devpref:str, dev_id:int, vendor:int, devices:tuple[tuple[int, tuple[int, ...]], ...], base_class:int|None=None):
@@ -264,13 +265,15 @@ class PCIIfaceBase:
     return [(p + self.pci_dev.bar_info(self.vram_bar)[0], sz) for p, sz in paddrs], AddrSpace.SYS
 
   def map(self, b:HCQBuffer):
-    if not self.is_local(): raise RuntimeError(f"P2P mapping not supported for remote devices: {b.owner} -> {self.dev}")
-
     if b.owner is not None and b.owner._is_cpu():
+      if not self.is_local(): raise RuntimeError(f"P2P mapping not supported for remote devices: {b.owner} -> {self.dev}")
+
       System.lock_memory(int(b.va_addr), b.size)
       paddrs, aspace = [(x, 0x1000) for x in System.system_paddrs(int(b.va_addr), round_up(b.size, 0x1000))], AddrSpace.SYS
       snooped, uncached = True, True
     elif (ifa:=getattr(b.owner, "iface", None)) is not None and isinstance(ifa, PCIIfaceBase):
+      if ifa.is_bar_small(): raise RuntimeError(f"P2P mapping not supported for small bar devices: {b.owner} -> {self.dev}")
+
       snooped, uncached = True, b.meta.mapping.uncached
       if b.meta.mapping.aspace is AddrSpace.SYS: paddrs, aspace = b.meta.mapping.paddrs, AddrSpace.SYS
       else: paddrs, aspace = ifa.p2p_paddrs(b.meta.mapping.paddrs)
@@ -305,6 +308,24 @@ class RemoteMMIOInterface(MMIOInterface):
 
 class RemotePCIDevice(PCIDevice):
   @staticmethod
+  @functools.cache
+  def remote_sock() -> socket.socket:
+    host_port = getenv("REMOTE", "127.0.0.1:6667").split(":")
+    host, port = host_port[0], int(host_port[1]) if len(host_port) > 1 else 6667
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+    sock.connect((host, port))
+    return sock
+
+  @staticmethod
+  @functools.cache
+  def remote_list(vendor:int, devices:tuple[tuple[int, tuple[int, ...]], ...], base_class:int|None) -> list[str]:
+    host, port = (sock:=RemotePCIDevice.remote_sock()).getpeername()
+    payload = array.array('I', itertools.chain.from_iterable((m, d) for m, ds in devices for d in ds)).tobytes()
+    data_len, _, _, _ = RemotePCIDevice._rpc(sock, 0, RemoteCmd.PROBE, base_class or 0, len(payload), vendor, payload=payload)
+    return [f"remote:{host}:{port}:{d}" for d in RemotePCIDevice._recvall(sock, data_len).decode().split('\n')] if data_len else []
+
+  @staticmethod
   def _recvall(sock:socket.socket, n:int) -> bytes:
     data = b''
     while len(data) < n and (chunk:=sock.recv(n - len(data))): data += chunk
@@ -323,7 +344,7 @@ class RemotePCIDevice(PCIDevice):
     return (resp[1], resp[2]) + ((RemotePCIDevice._recvall(sock, readout_size) if readout_size > 0 else None),) + (fd,)
 
   def __init__(self, devpref:str, pcibus:str, sock:socket.socket|None=None):
-    self.sock, self.pcibus, self.dev_id = unwrap(sock), pcibus, int(pcibus.split(':')[-1]) if ':' in pcibus else 0
+    self.sock, self.pcibus, self.dev_id = sock or self.remote_sock(), pcibus, int(pcibus.split(':')[-1]) if ':' in pcibus else 0
     for buft in [socket.SO_SNDBUF, socket.SO_RCVBUF]: self.sock.setsockopt(socket.SOL_SOCKET, buft, 64 << 20)
 
     self.lock_fd = System.flock_acquire(f"{devpref.lower()}_{pcibus.lower()}.lock")
@@ -333,7 +354,11 @@ class RemotePCIDevice(PCIDevice):
   def _bulk_write(self, cmd:int, idx:int, offset:int, data:bytes):
     self.sock.sendall(struct.pack('<BIIQQQ', cmd, self.dev_id, idx, offset, len(data), 0) + data)
 
-  def alloc_sysmem(self, size:int, vaddr:int=0, contiguous:bool=False) -> tuple[MMIOInterface, list[int]]: raise NotImplementedError()
+  def alloc_sysmem(self, size:int, vaddr:int=0, contiguous:bool=False) -> tuple[MMIOInterface, list[int]]:
+    paddrs_len, handle, _, _ = self._rpc(self.sock, self.dev_id, RemoteCmd.MAP_SYSMEM, size)
+    paddrs = list(struct.unpack(f'<{paddrs_len // 8}Q', self._recvall(self.sock, paddrs_len)))
+    return RemoteMMIOInterface(self, handle, size, fmt='B', rd_cmd=RemoteCmd.SYSMEM_READ, wr_cmd=RemoteCmd.SYSMEM_WRITE), paddrs
+
   def reset(self): self._rpc(self.sock, self.dev_id, RemoteCmd.RESET)
   def read_config(self, offset:int, size:int): return self._rpc(self.sock, self.dev_id, RemoteCmd.CFG_READ, offset, size)[0]
   def write_config(self, offset:int, value:int, size:int): self._rpc(self.sock, self.dev_id, RemoteCmd.CFG_WRITE, offset, size, value)
