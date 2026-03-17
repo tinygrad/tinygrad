@@ -1,11 +1,9 @@
 #!/usr/bin/env python3
-import os
-os.environ["VIZ"] = "0"
 import argparse, pathlib, sys, struct, json
 from typing import Iterator
 from tinygrad.viz import serve as viz
 from tinygrad.uop.ops import RewriteTrace
-from tinygrad.helpers import temp, ansistrip, colored, time_to_str, ansilen
+from tinygrad.helpers import temp, ansistrip, colored, time_to_str, ansilen, Context
 
 # ** generic helpers
 
@@ -61,6 +59,7 @@ def decode_profile(data:bytes) -> dict:
   return {"dur":total_dur, "peak":global_peak, "layout":layout, "markers":markers}
 
 if __name__ == "__main__":
+  Context(VIZ=0, TRACK_MATCH_STATS=0).__enter__()
   parser = argparse.ArgumentParser()
   g_mode = parser.add_argument_group("mode")
   g_mode.add_argument("--profile", action="store_true", help="View profile trace")
