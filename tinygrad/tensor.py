@@ -310,20 +310,17 @@ class Tensor(OpMixin):
       self._buffer().copyin(x._data())
       return self
     # STORE+AFTER: STORE is the write effect (void), AFTER wraps the view for correct shape/ranging
-    store_uop = self.uop.store(x.uop)
-    base = self.uop.base
-    if base.op in {Ops.BUFFER, Ops.AFTER} and self.uop is not base and not self.uop.has_buffer_identity():
-      # view assign: inner AFTER(view, STORE) for correct shape/ranging, outer AFTER(ib, inner) for dependency
-      # replace at the buffer-identity level (e.g. RESHAPE(BUFFER)) so @function's substitution catches it
+    assign = self.uop.after(self.uop.store(x.uop))
+    if (base := self.uop.base).op in {Ops.BUFFER, Ops.AFTER} and self.uop is not base and not self.uop.has_buffer_identity():
+      # view assign: replace at the buffer-identity level (e.g. RESHAPE(BUFFER)) so @function's substitution catches it
       ib = self.uop
       while not ib.has_buffer_identity() and ib is not base: ib = ib.src[0]
-      assigned_ib = ib.after(self.uop.after(store_uop))
+      assigned_ib = ib.after(assign)
       _apply_map_to_tensors({ib: assigned_ib}, name="Embed View Assign", walk=True)
-      def replace_view_base(u:UOp) -> UOp:
-        return u.replace(src=((assigned_ib if u.src[0] is ib else replace_view_base(u.src[0])),)+u.src[1:])
-      return Tensor(replace_view_base(self.uop), device=self.device, requires_grad=self.requires_grad)
-    # simple assign: AFTER wraps self.uop (may be RESHAPE'd buffer) with STORE effect
-    return self.replace(self._apply_uop(lambda *_: self.uop.after(store_uop), x))
+    else:
+      # simple assign
+      self.uop = assign
+    return self
 
   def detach(self) -> Tensor:
     """
@@ -3670,15 +3667,17 @@ class Tensor(OpMixin):
       def ipad(t, i, amt):
         shape = (None,)*i + (amt,) + (None,)*(t.ndim-i-1)
         return Tensor(True, device=t.device).expand(t.shape).pad_to(shape).where(t.pad_to(shape), Invalid) if amt != t.shape[i] else t
-      # align a dimension to 64 bytes
-      def pad_align(t, dim):
-        return ipad(t, dim, round_up(t.shape[dim], (64 // dtsz) // math.gcd(prod(t.shape) // t.shape[dim], (64 // dtsz))))
+
+      # align a dimension, use at to specify the dimension to pad in, defaults to first
+      def pad_align(t, dim, at=None, force=False):
+        # align to 64 pixels when height is real, otherwise 64 bytes is sufficient
+        align = (64 // dtsz) if prod(t.shape[:dim]) == 1 or prod(t.shape) < 16384 * 4 else 256
+        return ipad(t, at:=at or dim, round_up(t.shape[at] + int(force), align // math.gcd(prod(t.shape[dim:]) // t.shape[at], align)))
 
       # bank conflicts
-      if cin >= 8 and is_pow2(cin // 4): x, w = ipad(x.reshape(bs, iy, ix, groups, cin // 4, 4), 4, cin // 4 + 1), ipad(w, 2, cin // 4 + 1)
-
-      # 64-byte pitch alignment
-      x, w = pad_align(x, 2), pad_align(w, 1)
+      if cin >= 8 and is_pow2(cin // 4):
+        x, w = pad_align(x.reshape(bs, iy, ix, groups, cin // 4, 4), 2, at=4, force=True), pad_align(w, 1, at=2, force=True)
+      else: x, w = pad_align(x, 2), pad_align(w, 1)
 
       if FLOAT16: x, w = x.cast(dtypes.half).contiguous().cast(dtypes.float), w.cast(dtypes.half).contiguous().cast(dtypes.float)
       else: x, w = x.contiguous(), w.contiguous()

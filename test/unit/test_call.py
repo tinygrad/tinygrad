@@ -316,6 +316,37 @@ class TestCallMultiSharded(unittest.TestCase):
     ref_b = np.arange(8, dtype=np.float32).reshape(4, 2)
     np.testing.assert_allclose(t1.numpy(), ref_a + 1)
     np.testing.assert_allclose(t2.numpy(), ref_b + 2)
+    
+  def test_call_reduce_sharded(self):
+    devs = ("CPU:0", "CPU:1")
+    a = Tensor.ones(10, 10).shard(devs, axis=0)
+    Tensor.realize(a)
+    c = Tensor.call(a, fxn=a.as_param(0).sum(axis=0))
+    np.testing.assert_equal(c.numpy(), 10 * np.ones(10))
+
+  def test_call_reduce_sharded_mixed_args(self):
+    devs = ("CPU:0", "CPU:1")
+    a = Tensor.ones(10, 10).shard(devs, axis=0)
+    b = Tensor.ones(10).shard(devs, axis=None)
+    Tensor.realize(a, b)
+    c = Tensor.call(a, b, fxn=a.as_param(0).sum(axis=0) + b.as_param(1))
+    np.testing.assert_equal(c.numpy(), 11 * np.ones(10))
+
+  def test_call_reduce_sharded_backward(self):
+    devs = ("CPU:0", "CPU:1")
+    a = Tensor.randn(10, 10, requires_grad=True).shard(devs, axis=0)
+    b = Tensor.randn(10, 10, requires_grad=True).shard(devs, axis=0)
+    Tensor.realize(a, b)
+
+    def grad_fxn(grad, call):
+      a_arg, b_arg = call.src[1], call.src[2]
+      return (grad.expand(a_arg.shape) * b_arg, grad.expand(b_arg.shape) * a_arg)
+
+    body = (a.as_param(0) * b.as_param(1)).sum(axis=0)
+    c = Tensor.call(a, b, fxn=body, grad_fxn=grad_fxn)
+    c.sum().backward()
+    np.testing.assert_allclose(a.grad.numpy(), b.numpy(), rtol=1e-5)
+    np.testing.assert_allclose(b.grad.numpy(), a.numpy(), rtol=1e-5)
 
 if __name__ == '__main__':
   unittest.main()
