@@ -349,8 +349,7 @@ class APLRemotePCIDevice(RemotePCIDevice):
 
   @classmethod
   def ensure_app(cls):
-    sip_disabled = "disabled" in subprocess.run(["csrutil", "status"], capture_output=True, text=True).stdout.lower()
-    commit = "c4d5a845763e6694ef53ff1c0c8c6d3e130c3724" if sip_disabled else "81f5bb45ba0d65edefa833475b71cd17a470c2c5"
+    commit = "6e474cb69d7d61acd29299a6ab5b44265f0ac2f1"
     app_name = f"TinyGPU_{commit}.zip"
     if (_ensure_downloads_dir() / app_name).is_file() and os.path.exists(cls.APP_PATH): return
     print("Downloading TinyGPU.app...")
