@@ -655,7 +655,7 @@ def map_insts(data:bytes, lib:bytes, target:str) -> Iterator[tuple[PacketType, I
           assert type(inst).__name__ == "SOPP", f"IMMEDIATE_MASK packet must map to SOPP, got {inst}"
           wave_pc[wave] += inst.size()
           yield (p, InstructionInfo(pc, wave, inst))
-    elif isinstance(p, (VALUINST, INST, INST_RDNA4, CDNA_INST, IMMEDIATE)):
+    elif isinstance(p, (VALUINST, INST, INST_RDNA4, IMMEDIATE)):
       inst = pc_map[pc:=wave_pc[p.wave]]
       # s_delay_alu and s_wait_alu instructions are skipped
       while (inst_op:=getattr(inst, 'op_name', '')) in {"S_DELAY_ALU", "S_WAIT_ALU"}:
