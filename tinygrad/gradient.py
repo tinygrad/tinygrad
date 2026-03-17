@@ -15,8 +15,8 @@ def reduce_gradient(ctx:UOp, ret:UOp, op:Ops):
 
 def call_gradient(ctx:UOp, k:UOp) -> tuple[UOp|None, ...]:
   fxn, args = k.src[0], k.src[1:]
-  assert fxn.op is Ops.TUPLE, f"expected TUPLE body for gradient, got {fxn.op}"
   if k.arg.grad_fxn is not None: return (None,) + k.arg.grad_fxn(*ctx.src, call=k)
+  assert fxn.op is Ops.TUPLE, f"expected TUPLE body for gradient, got {fxn.op}"
   params = {x.arg:x for x in fxn.toposort(enter_calls=False) if x.op == Ops.PARAM}
   grad_args = ctx.src
   root_grad = UOp(Ops.TUPLE, src=tuple(g.param_like(len(args) + i) for i, g in enumerate(grad_args)))
