@@ -19,7 +19,7 @@ def handle(conn, cmd, dev_id, bar, arg0, arg1, arg2):
       mask, dev = struct.unpack('<II', payload[i:i+8])
       filter_devices.setdefault(mask, []).append(dev)
     base_class = None if arg0 == 0 else int(arg0)
-    devs = System.pci_scan_bus(arg2, list(filter_devices.items()), base_class)
+    devs = System.list_devices(arg2, tuple([(x, tuple(y)) for x,y in filter_devices.items()]), base_class)
     for p in devs:
       if p not in discovered_devices: discovered_devices.append(p)
     data = "\n".join(f"{p}:{discovered_devices.index(p)}" for p in devs).encode()
@@ -28,7 +28,8 @@ def handle(conn, cmd, dev_id, bar, arg0, arg1, arg2):
   # lazy device open
   if dev_id not in opened_devices:
     if dev_id >= len(discovered_devices): raise RuntimeError(f"device {dev_id} not probed")
-    opened_devices[dev_id] = PCIDevice("SV", discovered_devices[dev_id])
+    cl, pcibus = discovered_devices[dev_id]
+    opened_devices[dev_id] = cl("SV", pcibus)
   pci_dev = opened_devices[dev_id]
 
   if cmd == RemoteCmd.MAP_BAR:
