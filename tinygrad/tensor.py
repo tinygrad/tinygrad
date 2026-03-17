@@ -3669,15 +3669,17 @@ class Tensor(OpMixin):
       def ipad(t, i, amt):
         shape = (None,)*i + (amt,) + (None,)*(t.ndim-i-1)
         return Tensor(True, device=t.device).expand(t.shape).pad_to(shape).where(t.pad_to(shape), Invalid) if amt != t.shape[i] else t
-      # align a dimension to 64 bytes
-      def pad_align(t, dim):
-        return ipad(t, dim, round_up(t.shape[dim], (64 // dtsz) // math.gcd(prod(t.shape) // t.shape[dim], (64 // dtsz))))
+
+      # align a dimension, use at to specify the dimension to pad in, defaults to first
+      def pad_align(t, dim, at=None, force=False):
+        # align to 64 pixels when height is real, otherwise 64 bytes is sufficient
+        align = (64 // dtsz) if prod(t.shape[:dim]) == 1 or prod(t.shape) < 16384 * 4 else 256
+        return ipad(t, at:=at or dim, round_up(t.shape[at] + int(force), align // math.gcd(prod(t.shape[dim:]) // t.shape[at], align)))
 
       # bank conflicts
-      if cin >= 8 and is_pow2(cin // 4): x, w = ipad(x.reshape(bs, iy, ix, groups, cin // 4, 4), 4, cin // 4 + 1), ipad(w, 2, cin // 4 + 1)
-
-      # 64-byte pitch alignment
-      x, w = pad_align(x, 2), pad_align(w, 1)
+      if cin >= 8 and is_pow2(cin // 4):
+        x, w = pad_align(x.reshape(bs, iy, ix, groups, cin // 4, 4), 2, at=4, force=True), pad_align(w, 1, at=2, force=True)
+      else: x, w = pad_align(x, 2), pad_align(w, 1)
 
       if FLOAT16: x, w = x.cast(dtypes.half).contiguous().cast(dtypes.float), w.cast(dtypes.half).contiguous().cast(dtypes.float)
       else: x, w = x.contiguous(), w.contiguous()
