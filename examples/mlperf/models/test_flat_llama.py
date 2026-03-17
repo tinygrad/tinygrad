@@ -12,9 +12,9 @@ def copy_weights(flat:FlatTransformer, ref:Transformer):
   Tensor.realize(*nn.state.get_state_dict(ref).values())
   flat.wqkv.assign(Tensor(np.stack([ref.layers[i].attention.wqkv.weight.numpy() for i in range(n_layers)])))
   flat.wo.assign(Tensor(np.stack([ref.layers[i].attention.wo.weight.numpy() for i in range(n_layers)])))
-  flat.w13.assign(Tensor(np.stack([np.concatenate([ref.layers[i].feed_forward.w1.weight.numpy(),
-                                                    ref.layers[i].feed_forward.w3.weight.numpy()], axis=0) for i in range(n_layers)])))
+  flat.w1.assign(Tensor(np.stack([ref.layers[i].feed_forward.w1.weight.numpy() for i in range(n_layers)])))
   flat.w2.assign(Tensor(np.stack([ref.layers[i].feed_forward.w2.weight.numpy() for i in range(n_layers)])))
+  flat.w3.assign(Tensor(np.stack([ref.layers[i].feed_forward.w3.weight.numpy() for i in range(n_layers)])))
   flat.attention_norm.assign(Tensor(np.stack([ref.layers[i].attention_norm.weight.numpy() for i in range(n_layers)])))
   flat.ffn_norm.assign(Tensor(np.stack([ref.layers[i].ffn_norm.weight.numpy() for i in range(n_layers)])))
   flat.norm.weight.assign(Tensor(ref.norm.weight.numpy()))
@@ -70,15 +70,12 @@ class TestFlatLlama(unittest.TestCase):
       for flat_key, ref_key in [
         ("wqkv", f"layers.{i}.attention.wqkv.weight"),
         ("wo", f"layers.{i}.attention.wo.weight"),
+        ("w1", f"layers.{i}.feed_forward.w1.weight"),
         ("w2", f"layers.{i}.feed_forward.w2.weight"),
+        ("w3", f"layers.{i}.feed_forward.w3.weight"),
       ]:
         diff = abs(ref_grads[ref_key] - flat_grads[flat_key][i]).max()
         self.assertLess(diff, 1e-4, f"layer {i} {flat_key} grad mismatch: max abs diff {diff}")
-
-      # w13 grad = cat(w1.grad, w3.grad)
-      ref_w13_grad = np.concatenate([ref_grads[f"layers.{i}.feed_forward.w1.weight"], ref_grads[f"layers.{i}.feed_forward.w3.weight"]], axis=0)
-      diff = abs(ref_w13_grad - flat_grads["w13"][i]).max()
-      self.assertLess(diff, 1e-4, f"layer {i} w13 grad mismatch: max abs diff {diff}")
 
 if __name__ == "__main__":
   unittest.main()
