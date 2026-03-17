@@ -3,8 +3,8 @@ if __name__ == "__main__":
   os.environ["DEFAULT_FLOAT"] = "bfloat16"
   os.environ["OPTIM_DTYPE"] = "bfloat16"
   os.environ["DEV"] = "NULL"
-from tinygrad import Tensor, nn, function, getenv, dtypes
-from tinygrad.helpers import Timing
+from tinygrad import Tensor, nn, function, getenv, dtypes, TinyJit
+from tinygrad.helpers import Timing, colored, GlobalCounters
 from extra.models.llama import apply_rotary_emb, precompute_freqs_cis
 
 def rmsnorm(x_in:Tensor, eps:float):
@@ -104,11 +104,22 @@ if __name__ == "__main__":
   sz = 0
   for k,v in state.items():
     if v.requires_grad is None: v.requires_grad_(True)
-    print(k, v.shape, v.dtype, v.device)
+    print(f"{k:30s} {str(v.shape):30s} {v.dtype} {v.device}")
     sz += v.nbytes()
   print(f"total sz: {sz/1e9:.2f} GB")
 
+  with Timing("realize weights: "): Tensor.realize(*state.values())
   with Timing("fake data: "): tokens = Tensor.randint(BS, SEQLEN+1, low=0, high=model.vocab_size, dtype=dtypes.int).realize()
-  with Timing("python forward: "): loss = model(tokens[:, :-1]).sparse_categorical_crossentropy(tokens[:, 1:])
-  with Timing("python backward: "): loss.backward()
-  with Timing("run step: "): loss.realize(*[x.grad for x in state.values() if x.requires_grad])
+
+  @TinyJit
+  def jit_step(tokens:Tensor):
+    GlobalCounters.reset()
+    print(colored("*** step", "red"))
+    with Timing("python forward: "): loss = model(tokens[:, :-1]).sparse_categorical_crossentropy(tokens[:, 1:])
+    with Timing("python backward: "): loss.backward()
+    with Timing("run step: "): loss.realize(*[x.grad for x in state.values() if x.requires_grad])
+
+  jit_step(tokens)
+  jit_step(tokens)
+  jit_step(tokens)
+  print(f"mem used: {GlobalCounters.mem_used/1e9:.2f} GB")
