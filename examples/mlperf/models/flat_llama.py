@@ -24,7 +24,7 @@ class FlatTransformer:
 
     # Attention
     self.wqkv = self.lin_per_layer(dim, self.n_heads * self.head_dim + self.n_kv_heads * self.head_dim * 2)
-    self.wo = self.lin_per_layer(dim, self.n_heads * self.head_dim)
+    self.wo = self.lin_per_layer(self.n_heads * self.head_dim, dim)
 
     # FeedForward
     self.w1 = self.lin_per_layer(dim, hidden_dim)
@@ -69,9 +69,9 @@ class FlatTransformer:
 
   def feed_forward(self, x:Tensor, ffn_norm:Tensor, w1:Tensor, w2:Tensor, w3:Tensor):
     x = rmsnorm(x, self.norm_eps) * ffn_norm
-    w1 = (x @ w1.T).silu()
-    w3 =  x @ w3.T
-    return (w1 * w3) @ w2.T
+    x_w1 = (x @ w1.T).silu()
+    x_w3 =  x.contiguous_backward() @ w3.T
+    return (x_w1 * x_w3) @ w2.T
 
   @function(precompile=True, precompile_backward=True)
   def run_layer(self, x:Tensor, freqs_cis:Tensor,
@@ -104,7 +104,7 @@ if __name__ == "__main__":
   sz = 0
   for k,v in state.items():
     if v.requires_grad is None: v.requires_grad_(True)
-    print(f"{colored(k, "green" if v.requires_grad else "white"):30s} {str(v.shape):30s} {v.dtype} {v.device}")
+    print(f"{colored(k, 'green' if v.requires_grad else 'white'):30s} {str(v.shape):30s} {v.dtype} {v.device}")
     sz += v.nbytes()
   print(f"total sz: {sz/1e9:.2f} GB")
 
