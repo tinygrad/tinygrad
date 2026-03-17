@@ -28,6 +28,7 @@ enum {
   CMD_MAP_SYSMEM = 8,     // map system memory
   CMD_SYSMEM_READ = 9,    // bulk read from system memory
   CMD_SYSMEM_WRITE = 10,  // bulk write to system memory
+  CMD_RESIZE_BAR = 11,    // resize bar (noop)
   RESP_OK = 0, RESP_ERR = 1,
 };
 
@@ -223,6 +224,9 @@ static void handle_client(int fd) {
       resp.status = dext_rpc(1, in, 3, NULL) ? 1 : 0;
       break;
     }
+
+    case CMD_RESIZE_BAR:
+      break;
 
     case CMD_RESET:
       resp.status = dext_rpc(2, NULL, 0, NULL) ? 1 : 0;
