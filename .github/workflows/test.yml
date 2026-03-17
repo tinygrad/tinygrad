@@ -167,10 +167,10 @@ jobs:
       run: PYTHON=1 python3 test/backend/test_symbolic_ops.py
     - name: test_renderer_failures with Python emulator
       run: PYTHON=1 python3 -m pytest -rA test/backend/test_renderer_failures.py::TestRendererFailures
-    - name: Test IMAGE=2 support
+    - name: Test IMAGE support
       run: |
-        IMAGE=2 PYTHON=1 python3 test/backend/test_ops.py TestOps.test_gemm
-        IMAGE=2 PYTHON=1 python3 test/backend/test_ops.py TestOps.test_simple_conv2d
+        IMAGE=1 PYTHON=1 python3 test/backend/test_ops.py TestOps.test_gemm
+        IMAGE=1 PYTHON=1 python3 test/backend/test_ops.py TestOps.test_simple_conv2d
     - name: Test emulated METAL tensor cores
       run: |
         DEBUG=2 EMULATE=METAL FORWARD_ONLY=1 PYTHON=1 python3 test/backend/test_ops.py TestOps.test_big_gemm
