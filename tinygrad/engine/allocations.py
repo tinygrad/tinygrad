@@ -117,6 +117,9 @@ pm_early_transform_tensor_graph = PatternMatcher([
   # transform precompiled CALLs
   (UPat(Ops.CALL, name="c"), transform_precompiled_call),
 
+  # resolve TUPLE+GETTUPLE (for precompiled calls)
+  (UPat(Ops.GETTUPLE, src=(UPat(Ops.TUPLE, name="t"),), name="g"), lambda g,t: t.src[g.arg]),
+
   # CONTIGUOUS(MOPS(BUFFER/BUFFER_VIEW)) → CONTIGUOUS(BUFFER_VIEW) when movement ops collapse to contiguous range
   (UPat(Ops.CONTIGUOUS, src=(UPat(GroupOp.Movement, name="src"),), name="c"), contiguous_mops_to_view),
 

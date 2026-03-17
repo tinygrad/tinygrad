@@ -697,6 +697,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
   def has_buffer_identity(self):
     """Check if this UOp has a concrete buffer identity in the graph (RESHAPE/MULTI -> BUFFER chain)."""
     if self.op in {Ops.RESHAPE, Ops.MULTI}: return self.src[0].has_buffer_identity()
+    if self.op is Ops.GETTUPLE and self.src[0].op is Ops.TUPLE: return self.src[0].src[self.arg].has_buffer_identity()
     return self.op in {Ops.BUFFER, Ops.BUFFER_VIEW, Ops.PARAM}
 
   def _base_buffer_is_realized(self) -> bool:
