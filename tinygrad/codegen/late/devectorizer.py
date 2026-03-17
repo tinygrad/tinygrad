@@ -208,7 +208,7 @@ def image_fixup(ls:UOp):
     return ls.replace(src=(idx,)+ls.src[1:])
 
   # this is an unprocessed image without a cast, aka unfoldable image load. this doesn't work for stores
-  if isinstance(image_dtype:=ls.src[0].dtype, ImageDType) and ls.src[0].src[1].get_idx().dtype != dtypes.weakint.vec(2):
+  if isinstance(image_dtype:=ls.src[0].src[0].dtype, ImageDType) and ls.src[0].src[1].get_idx().dtype != dtypes.weakint.vec(2):
     assert ls.op is Ops.LOAD, "if an image store isn't upcasted to 4, we can't store it"
     x, idx = ls.src[0].src[1].get_idx(), get_image_idx(ls.src[0], image_dtype.shape[1])
     vec_load = ls.replace(dtype=ls.dtype.vec(4), src=(idx,)+ls.src[1:])
