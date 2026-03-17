@@ -13,6 +13,11 @@ def reduce_gradient(ctx:UOp, ret:UOp, op:Ops):
     return ((mask/broadcast_to_input(count)) * broadcast_to_input(ctx),)
   if op == Ops.MUL: return (broadcast_to_input(ctx * ret) / ret.src[0],)
 
+def _compact_params(body:UOp, all_args:tuple[UOp, ...]) -> tuple[UOp, tuple[UOp, ...]]:
+  """Remove unused PARAMs from body and return compacted (body, args)."""
+  used = sorted({p.arg: p for p in body.toposort() if p.op is Ops.PARAM}.items())
+  return body.substitute({p: p.replace(arg=j) for j,(_, p) in enumerate(used)}, walk=True), tuple(all_args[i] for i,_ in used)
+
 def call_gradient(ctx:UOp, k:UOp, needed:set[int]) -> tuple[UOp|None, ...]:
   fxn, args = k.src[0], k.src[1:]
   if k.arg.grad_fxn is not None:
@@ -28,14 +33,11 @@ def call_gradient(ctx:UOp, k:UOp, needed:set[int]) -> tuple[UOp|None, ...]:
   # for precompiled calls, substitute forward outputs with params so intermediates aren't recomputed
   fwd_subs = {src: src.param_like(len(args)+len(grad_args)+i) for i, src in enumerate(fxn.src)} if k.arg.precompile else {}
   fwd_outs = tuple(k.gettuple(i) for i in range(len(fxn.src))) if k.arg.precompile else ()
-  # collect needed gradient bodies
-  grad_bodies = [(i, grads[p].substitute(fwd_subs)) for i in needed if (p:=params.get(i)) is not None and p in grads]
-  all_args = (*args, *grad_args, *fwd_outs)
-  # compact unused params out of the backward body, then create a single backward CALL
-  bwd_body = UOp.maketuple(*(gb for _, gb in grad_bodies))
-  used = sorted({p.arg: p for p in bwd_body.toposort() if p.op is Ops.PARAM}.items())
-  bwd_call = bwd_body.substitute({p: p.replace(arg=j) for j,(_, p) in enumerate(used)}).call(
-    *(all_args[i] for i,_ in used), name=(k.arg.name or "")+"_backward", precompile=k.arg.precompile_backward)
+  # collect needed gradient bodies, compact unused params, create a single backward CALL
+  grad_bodies = [(i, grads[p]) for i in needed if (p:=params.get(i)) is not None and p in grads]
+  bwd_body = UOp.maketuple(*(gb for _, gb in grad_bodies)).substitute(fwd_subs, walk=True)
+  bwd_body, compact_args = _compact_params(bwd_body, (*args, *grad_args, *fwd_outs))
+  bwd_call = bwd_body.call(*compact_args, name=(k.arg.name or "")+"_backward", precompile=k.arg.precompile_backward)
   gb_map = {i: idx for idx, (i, _) in enumerate(grad_bodies)}
   return (None,) + tuple(bwd_call.gettuple(gb_map[i]) if i in gb_map else None for i in range(len(args)))
 

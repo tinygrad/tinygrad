@@ -1,7 +1,7 @@
 import numpy as np
 import unittest
 from tinygrad.function import function
-from tinygrad import Tensor, GlobalCounters, Context
+from tinygrad import Tensor, GlobalCounters
 from tinygrad.uop.ops import UOp
 
 class TestFunction(unittest.TestCase):
@@ -385,7 +385,6 @@ class TestFunctionTuple(unittest.TestCase):
     np.testing.assert_allclose(y.grad.numpy(), [1., 1., 1.])
 
 class TestFunctionGrad(unittest.TestCase):
-  @Context(NOOPT=1)
   def test_function_grad_ops(self, precompile=False, precompile_backward=False):
     N = 64
     x = Tensor.ones(N,N).contiguous()
