@@ -281,7 +281,7 @@ class PCIIfaceBase:
 # *** Remote PCI Devices
 
 class RemoteCmd(enum.IntEnum):
-  PROBE, MAP_BAR, MAP_SYSMEM_FD, CFG_READ, CFG_WRITE, RESET, MMIO_READ, MMIO_WRITE, MAP_SYSMEM, SYSMEM_READ, SYSMEM_WRITE = range(11)
+  PROBE, MAP_BAR, MAP_SYSMEM_FD, CFG_READ, CFG_WRITE, RESET, MMIO_READ, MMIO_WRITE, MAP_SYSMEM, SYSMEM_READ, SYSMEM_WRITE, RESIZE_BAR = range(12)
 
 class RemoteMMIOInterface(MMIOInterface):
   def __init__(self, dev:RemotePCIDevice, residx:int, nbytes:int, fmt='B', off=0, rd_cmd=RemoteCmd.MMIO_READ, wr_cmd=RemoteCmd.MMIO_WRITE):
@@ -342,7 +342,7 @@ class RemotePCIDevice(PCIDevice):
   def bar_info(self, bar_idx:int) -> tuple[int, int]: return self._rpc(self.sock, self.dev_id, RemoteCmd.MAP_BAR, bar=bar_idx)[:2]
   def map_bar(self, bar:int, off:int=0, addr:int=0, size:int|None=None, fmt='B') -> MMIOInterface:
     return RemoteMMIOInterface(self, bar, size or self.bar_info(bar)[1], fmt).view(off, size, fmt)
-  def resize_bar(self, bar_idx:int): pass
+  def resize_bar(self, bar_idx:int): self._rpc(self.sock, self.dev_id, RemoteCmd.RESIZE_BAR, bar=bar_idx)
 
 class APLRemotePCIDevice(RemotePCIDevice):
   APP_PATH = "/Applications/TinyGPU.app/Contents/MacOS/TinyGPU"
@@ -350,7 +350,7 @@ class APLRemotePCIDevice(RemotePCIDevice):
   @classmethod
   def ensure_app(cls):
     sip_disabled = "disabled" in subprocess.run(["csrutil", "status"], capture_output=True, text=True).stdout.lower()
-    commit = "c4d5a845763e6694ef53ff1c0c8c6d3e130c3724" if sip_disabled else "81f5bb45ba0d65edefa833475b71cd17a470c2c5"
+    commit = "2600fc5908cd913e633903b2d075a650b51218cf" if sip_disabled else "81f5bb45ba0d65edefa833475b71cd17a470c2c5"
     app_name = f"TinyGPU_{commit}.zip"
     if (_ensure_downloads_dir() / app_name).is_file() and os.path.exists(cls.APP_PATH): return
     print("Downloading TinyGPU.app...")
