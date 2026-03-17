@@ -1164,6 +1164,7 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
       elif reduction == "mul": x[i] *= u
       elif reduction == "max": x[i] = x[i].maximum(u)
       elif reduction == "min": x[i] = x[i].minimum(u)
+      x.realize()
     return x
 
   def TensorScatter(data: Tensor, updates: Tensor, indices: Tensor, mode: str = 'default'):
