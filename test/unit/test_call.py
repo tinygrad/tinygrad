@@ -245,6 +245,78 @@ class TestCallSchedule(unittest.TestCase):
     out = f(a) + 2
     np.testing.assert_allclose(out.numpy(), np.arange(8, dtype=np.float32).reshape(4, 2) + 3)
 
+class TestCallMultiSharded(unittest.TestCase):
+  # TODO: multi-output + sharded needs per-device CALL execution, which requires reworking how MULTI propagates through TUPLE bodies
+  def test_tuple_sharded(self):
+    """multi-output function with sharded input"""
+    devs = ("CPU:0", "CPU:1")
+    @function
+    def f(x:Tensor): return (x + 1, x * 2)
+    a = Tensor.arange(8).reshape(4, 2).float().shard(devs, axis=0)
+    t1, t2 = f(a)
+    ref = np.arange(8, dtype=np.float32).reshape(4, 2)
+    np.testing.assert_allclose(t1.numpy(), ref + 1)
+    np.testing.assert_allclose(t2.numpy(), ref * 2)
+
+  def test_tuple_sharded_precompile(self):
+    """multi-output precompiled function with sharded input"""
+    devs = ("CPU:0", "CPU:1")
+    @function(precompile=True)
+    def f(x:Tensor): return (x + 1, x * 2)
+    a = Tensor.arange(8).reshape(4, 2).float().shard(devs, axis=0)
+    t1, t2 = f(a)
+    ref = np.arange(8, dtype=np.float32).reshape(4, 2)
+    np.testing.assert_allclose(t1.numpy(), ref + 1)
+    np.testing.assert_allclose(t2.numpy(), ref * 2)
+
+  def test_tuple_sharded_different_axis(self):
+    """multi-output function where outputs have different sharding: one reduces on sharded axis, one doesn't"""
+    devs = ("CPU:0", "CPU:1")
+    @function
+    def f(x:Tensor): return (x.sum(axis=0), x.sum(axis=1))
+    a = Tensor.arange(8).reshape(4, 2).float().shard(devs, axis=0)
+    t1, t2 = f(a)
+    ref = np.arange(8, dtype=np.float32).reshape(4, 2)
+    np.testing.assert_allclose(t1.numpy(), ref.sum(axis=0))
+    np.testing.assert_allclose(t2.numpy(), ref.sum(axis=1))
+
+  def test_tuple_sharded_different_ops(self):
+    """multi-output function with different operations per output"""
+    devs = ("CPU:0", "CPU:1")
+    @function
+    def f(x:Tensor, y:Tensor): return (x + y, x * y)
+    a = Tensor.arange(8).reshape(4, 2).float().shard(devs, axis=0)
+    b = Tensor.arange(8).reshape(4, 2).float().shard(devs, axis=0) + 1
+    t1, t2 = f(a, b)
+    ref_a = np.arange(8, dtype=np.float32).reshape(4, 2)
+    ref_b = ref_a + 1
+    np.testing.assert_allclose(t1.numpy(), ref_a + ref_b)
+    np.testing.assert_allclose(t2.numpy(), ref_a * ref_b)
+
+  def test_tuple_sharded_mixed_use(self):
+    """multi-output sharded results used in further computation"""
+    devs = ("CPU:0", "CPU:1")
+    @function
+    def f(x:Tensor): return (x + 1, x * 2)
+    a = Tensor.arange(8).reshape(4, 2).float().shard(devs, axis=0)
+    t1, t2 = f(a)
+    out = (t1 + t2).sum()
+    ref = np.arange(8, dtype=np.float32).reshape(4, 2)
+    np.testing.assert_allclose(out.numpy(), ((ref + 1) + (ref * 2)).sum())
+
+  def test_tuple_sharded_outputs_different_axis(self):
+    """multi-output function where the two outputs are sharded on different axes"""
+    devs = ("CPU:0", "CPU:1")
+    @function
+    def f(x:Tensor, y:Tensor): return (x + 1, y + 2)
+    a = Tensor.arange(8).reshape(4, 2).float().shard(devs, axis=0)
+    b = Tensor.arange(8).reshape(4, 2).float().shard(devs, axis=1)
+    t1, t2 = f(a, b)
+    ref_a = np.arange(8, dtype=np.float32).reshape(4, 2)
+    ref_b = np.arange(8, dtype=np.float32).reshape(4, 2)
+    np.testing.assert_allclose(t1.numpy(), ref_a + 1)
+    np.testing.assert_allclose(t2.numpy(), ref_b + 2)
+
   def test_call_reduce_sharded(self):
     devs = ("CPU:0", "CPU:1")
     a = Tensor.ones(10, 10).shard(devs, axis=0)
