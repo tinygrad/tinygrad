@@ -13,22 +13,54 @@ def reduce_gradient(ctx:UOp, ret:UOp, op:Ops):
     return ((mask/broadcast_to_input(count)) * broadcast_to_input(ctx),)
   if op == Ops.MUL: return (broadcast_to_input(ctx * ret) / ret.src[0],)
 
-def call_gradient(ctx:UOp, k:UOp) -> tuple[UOp|None, ...]:
+def call_gradient(ctx:UOp, k:UOp, needed:set[int]) -> tuple[UOp|None, ...]:
   fxn, args = k.src[0], k.src[1:]
   if k.arg.grad_fxn is not None:
-    return (None,) + (k.arg.grad_fxn(*ctx.src, call=k) if ctx.op is Ops.TUPLE else k.arg.grad_fxn(ctx, k))
+    real = [g for g in ctx.src if g.op is not Ops.NOOP]
+    return (None,) + (k.arg.grad_fxn(*real, call=k) if len(real) > 1 else k.arg.grad_fxn(real[0], k))
   assert fxn.op is Ops.TUPLE, f"expected TUPLE body for gradient, got {fxn.op}"
   params = {x.arg:x for x in fxn.toposort(enter_calls=False) if x.op == Ops.PARAM}
-  grad_args = ctx.src
-  root_grad = UOp(Ops.TUPLE, src=tuple(g.param_like(len(args) + i) for i, g in enumerate(grad_args)))
+
+  # only pass real grad outputs as external args, embed const 0 in the body for NOOP slots
+  ext_grad_args: list[UOp] = []
+  root_grad_srcs: list[UOp] = []
+  for i, g in enumerate(ctx.src):
+    if g.op is Ops.NOOP:
+      root_grad_srcs.append(fxn.src[i].const_like(0))
+    else:
+      root_grad_srcs.append(g.param_like(len(args) + len(ext_grad_args)))
+      ext_grad_args.append(g)
+  root_grad = UOp(Ops.TUPLE, src=tuple(root_grad_srcs))
   grads = compute_gradient(fxn, root_grad, set(params.values()))
-  ret: list[UOp|None] = [None]
+
+  # for precompiled calls, pass forward outputs to backward so intermediates aren't recomputed
+  fwd_outs: tuple[UOp, ...] = ()
+  fwd_subs: dict[UOp, UOp] = {}
+  if k.arg.precompile:
+    fwd_slot_base = len(args) + len(ext_grad_args)
+    for i, src in enumerate(fxn.src):
+      fwd_subs[src] = src.param_like(fwd_slot_base + i)
+      fwd_outs += (k.gettuple(i),)
+
+  # collect gradient bodies per param, only for needed params
+  grad_bodies: list[tuple[int, UOp]] = []
   for i in range(len(args)):
+    if needed is not None and i not in needed: continue
     if (p:=params.get(i, None)) is not None and p in grads:
-      # TODO: compact the args and remove unused ones
-      assert not grads[p].op_in_backward_slice_with_self(Ops.BUFFER), "BUG: BUFFER in backward slice of grad"
-      bwd_call = grads[p].call(*args, *grad_args, name=(k.arg.name or "")+f"_backward_{i}", precompile=k.arg.precompile_backward)
-      ret.append(bwd_call.gettuple(0))
+      grad_body = grads[p].substitute(fwd_subs) if fwd_subs else grads[p]
+      assert not grad_body.op_in_backward_slice_with_self(Ops.BUFFER), "BUG: BUFFER in backward slice of grad"
+      grad_bodies.append((i, grad_body))
+
+  # create a single backward CALL with all grads as a TUPLE
+  bwd_call = UOp.maketuple(*(gb for _, gb in grad_bodies)).call(
+    *args, *ext_grad_args, *fwd_outs, name=(k.arg.name or "")+"_backward", precompile=k.arg.precompile_backward)
+
+  ret: list[UOp|None] = [None]
+  bwd_idx = 0
+  for i in range(len(args)):
+    if bwd_idx < len(grad_bodies) and grad_bodies[bwd_idx][0] == i:
+      ret.append(bwd_call.gettuple(bwd_idx))
+      bwd_idx += 1
     else:
       ret.append(None)
   return tuple(ret)
@@ -63,32 +95,37 @@ pm_gradient = PatternMatcher([
   (UPat(Ops.TUPLE), lambda ctx: ctx.src),
   # NOTE: this is only correct when the KERNEL has a single output
   (UPat(Ops.AFTER), lambda ctx: (ctx, ctx)),
-  # gradient on CALL: use provided grad_fxn or auto-differentiate
-  (UPat(Ops.CALL, name="k"), call_gradient),
   # there's no gradient for bitcast
   (UPat(Ops.BITCAST), lambda: (None,)),
 ])
 
-def _deepwalk(root:UOp, targets:set[UOp]) -> list[UOp]:
+def _deepwalk(root:UOp, targets:set[UOp]) -> tuple[list[UOp], dict[UOp, bool]]:
   # compute the target path (top down)
   in_target_path: dict[UOp, bool] = {}
   for u in root.toposort(): in_target_path[u] = any(x in targets or in_target_path[x] for x in u.src)
   # don't flow through DETACH or anything not in target path
-  return list(root.toposort(lambda node: node.op is not Ops.DETACH and in_target_path[node]))
+  return list(root.toposort(lambda node: node.op is not Ops.DETACH and in_target_path[node])), in_target_path
 
 def compute_gradient(root:UOp, root_grad:UOp, targets:set[UOp]) -> dict[UOp, UOp]:
+  walk, in_target_path = _deepwalk(root, targets)
   grads: dict[UOp, UOp] = {root: root_grad}
-  for t0 in reversed(_deepwalk(root, targets)):
+  for t0 in reversed(walk):
     if t0 not in grads: continue
     # GETTUPLE: accumulate gradient into a TUPLE UOp on the CALL, process when we hit the CALL
     if t0.op is Ops.GETTUPLE:
       k = t0.src[0]  # the CALL
       assert k.op is Ops.CALL and k.src[0].op is Ops.TUPLE
       n_outputs = len(k.src[0].src)
-      prev: tuple[UOp, ...] = grads[k].src if k in grads else tuple(grads[t0].const_like(0) for _ in range(n_outputs))
-      grads[k] = UOp.maketuple(*(prev[i] + grads[t0] if i == t0.arg else prev[i] for i in range(n_outputs)))
+      prev: tuple[UOp, ...] = grads[k].src if k in grads else tuple(UOp(Ops.NOOP) for _ in range(n_outputs))
+      grads[k] = UOp.maketuple(*(prev[i] + grads[t0] if i == t0.arg and prev[i].op is not Ops.NOOP else
+                                 grads[t0] if i == t0.arg else prev[i] for i in range(n_outputs)))
       continue
-    lgrads: tuple[UOp|None, ...]|None = cast(tuple[UOp|None, ...]|None, pm_gradient.rewrite(t0, ctx=grads[t0]))
+    # CALL: pass needed param set so backward only computes required gradients
+    if t0.op is Ops.CALL:
+      needed = {i for i, arg in enumerate(t0.src[1:]) if arg in targets or in_target_path.get(arg, False)}
+      lgrads:tuple[UOp|None, ...]|None = call_gradient(grads[t0], t0, needed)
+    else:
+      lgrads = cast(tuple[UOp|None, ...]|None, pm_gradient.rewrite(t0, ctx=grads[t0]))
     if lgrads is None: raise RuntimeError(f"failed to compute gradient for {t0.op}\n\nin {str(t0)[0:1000]}...")
     assert len(lgrads) == len(t0.src), f"got {len(lgrads)} gradient, expected {len(t0.src)}"
     for k,v in zip(t0.src, lgrads):

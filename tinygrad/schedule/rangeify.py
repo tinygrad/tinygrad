@@ -111,6 +111,9 @@ mop_cleanup = PatternMatcher([
 
 pm_gather_params = PatternMatcher([ (UPat(Ops.PARAM, name="p"), lambda ctx, p: ctx.append(p)), ])
 def resolve_call(c:UOp, allow_param_mismatch=True) -> UOp|None:
+  if c.arg.precompile:
+    # add contiguous on all non contiguous srcs if the call is precompiled
+    return c.replace(src=(c.src[0],)+tuple(x.contiguous() if x.op not in {Ops.AFTER, Ops.BIND} else x for x in c.src[1:]))
   if not should_resolve_call(c): return None
   params: list[UOp] = []
   graph_rewrite(c.src[0], pm_gather_params, bottom_up=True, ctx=params, name="gather params")

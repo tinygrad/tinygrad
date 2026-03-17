@@ -93,7 +93,6 @@ def transform_precompiled_call(c:UOp) -> UOp|None:
   if not c.arg.precompile: return None
   if c.src[0].op is Ops.SINK: return None
   assert c.src[0].op is Ops.TUPLE, f"expected TUPLE body for precompiled call, got {c.src[0].op}"
-  input_buffers = tuple(x.contiguous() if x.op not in {Ops.AFTER, Ops.BIND} else x for x in c.src[1:])
 
   # add the outputs to the call
   srcs = c.src[0].src
@@ -103,7 +102,7 @@ def transform_precompiled_call(c:UOp) -> UOp|None:
   fxn = UOp.sink(*[t.after(t.store(s)) for t,s in zip(targets, srcs)])
 
   # create the new thing for the big graph
-  new_call = c.replace(src=(fxn, *input_buffers, *outs), tag=None)
+  new_call = c.replace(src=(fxn, *c.src[1:], *outs), tag=None)
   rets = tuple(o.after(new_call) for o in outs)
 
   # if the CALL has symbolic shapes, shrink the max-sized output to the actual symbolic shape
@@ -116,6 +115,9 @@ def transform_precompiled_call(c:UOp) -> UOp|None:
 pm_early_transform_tensor_graph = PatternMatcher([
   # transform precompiled CALLs
   (UPat(Ops.CALL, name="c"), transform_precompiled_call),
+
+  # resolve TUPLE+GETTUPLE (for precompiled calls)
+  (UPat(Ops.GETTUPLE, src=(UPat(Ops.TUPLE, name="t"),), name="g"), lambda g,t: t.src[g.arg]),
 
   # CONTIGUOUS(MOPS(BUFFER/BUFFER_VIEW)) → CONTIGUOUS(BUFFER_VIEW) when movement ops collapse to contiguous range
   (UPat(Ops.CONTIGUOUS, src=(UPat(GroupOp.Movement, name="src"),), name="c"), contiguous_mops_to_view),
