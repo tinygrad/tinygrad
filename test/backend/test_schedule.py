@@ -805,11 +805,8 @@ class TestSchedule(unittest.TestCase):
         for si in sched: si.lower()
         return len([si for si in sched if isinstance(si.prg, CompiledRunner)])
 
-      with Context(IMAGE=1): cnt1 = cnt()
-      with Context(IMAGE=2): cnt2 = cnt()
-
-      self.assertEqual(cnt1, 5)
-      self.assertEqual(cnt2, 5)
+      with Context(IMAGE=1):
+        self.assertEqual(cnt(), 5)
 
   @unittest.skipIf(Device.DEFAULT != "CL", "image only supported on CL")
   def test_image_f16_residual_fusion(self):
@@ -825,14 +822,10 @@ class TestSchedule(unittest.TestCase):
         for si in sched: si.lower()
         return len([si for si in sched if isinstance(si.prg, CompiledRunner)])
 
-      with Context(IMAGE=1): cnt1 = cnt()
-      with Context(IMAGE=2): cnt2 = cnt()
-
-      self.assertEqual(cnt1, 9)
-      self.assertEqual(cnt2, 9)
+      with Context(IMAGE=1):
+        self.assertEqual(cnt(), 9)
 
   @unittest.skipIf(Device.DEFAULT != "CL", "image only supported on CL")
-  @unittest.expectedFailure
   def test_image_conv_fusion(self):
     with Context(OPENPILOT_HACKS=1):
       def cnt():
@@ -843,10 +836,8 @@ class TestSchedule(unittest.TestCase):
         for si in sched: si.lower()
         return len([si for si in sched if isinstance(si.prg, CompiledRunner)])
 
-      with Context(IMAGE=1): cnt1 = cnt()
-      with Context(IMAGE=2): cnt2 = cnt()
-
-      self.assertEqual(cnt1, cnt2)
+      with Context(IMAGE=1):
+        self.assertEqual(cnt(), 5)
 
   def _test_fusion(self, shapes, f, cnt):
     with Context(DEBUG=0, TRACK_MATCH_STATS=0): args = [Tensor.randn(s).realize() for s in shapes]

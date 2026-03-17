@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field, replace
 import itertools
-from tinygrad.dtype import dtypes, PtrDType, ImageDType, AddrSpace, Invalid
+from tinygrad.dtype import dtypes, PtrDType, AddrSpace, Invalid
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, _substitute, KernelInfo
 from tinygrad.uop.ops import graph_rewrite, sint, AxisType, BottomUpGate, profile_matches, should_resolve_call, identity_element
 from tinygrad.uop.symbolic import symbolic
@@ -295,9 +295,6 @@ def remove_noop_bufferize(idx,b2):
 
 pm_const_buffer_folding = pm_mops+PatternMatcher([
   (UPat(Ops.BUFFERIZE, name="b"), cleanup_dead_axes),
-  (UPat(GroupOp.All-{Ops.BUFFERIZE, Ops.PARAM}, name="x"), lambda x: x.replace(dtype=x.dtype.base) if isinstance(x.dtype, ImageDType) else None),
-  (UPat((Ops.BUFFERIZE), name="x"), lambda x: x.replace(dtype=x.dtype.base) if isinstance(x.dtype, ImageDType)
-    and (resolve(prod(x.dtype.shape)!=prod(x.shape)) or x.shape[-1]%4!=0) else None),
   # remove noop buffers. if we look at the next index we can remove even more of these
   (UPat(Ops.INDEX, name="idx").f(Ops.BUFFERIZE, allow_any_len=True, name="b2"), remove_noop_bufferize),
   # no buffers for const (ranges don't matter for const - it's the same value everywhere)
@@ -519,11 +516,11 @@ rangeify_codegen = PatternMatcher([
   # fix broadcast dtype
   (UPat(Ops.AFTER, name="a").broadcast(name="b"), lambda a,b: a.broadcast(len(b.src))),
   (UPat(Ops.DEFINE_LOCAL).f(Ops.AFTER, allow_any_len=True).broadcast(name="dg").f(Ops.INDEX, name="idx", allow_any_len=True),
-    lambda dg,idx: None if isinstance(idx.dtype, (PtrDType, ImageDType)) else
+    lambda dg,idx: None if isinstance(idx.dtype, PtrDType) else
       idx.replace(dtype=dg.dtype, arg=None).load(dtype=dg.dtype.base.scalar().vec(dg.dtype.vcount))),
   (UPat(Ops.AFTER, name="a").gep(name="b"), lambda a,b: a.gep(b.arg)),
   (UPat(Ops.DEFINE_LOCAL).f(Ops.AFTER, allow_any_len=True).gep(name="dg").f(Ops.INDEX, name="idx", allow_any_len=True),
-    lambda dg,idx: None if isinstance(idx.dtype, (PtrDType, ImageDType)) else
+    lambda dg,idx: None if isinstance(idx.dtype, PtrDType) else
       idx.replace(dtype=dg.dtype, arg=None).load(dtype=dg.dtype.base.scalar().vec(dg.dtype.vcount))),
 ])
 

@@ -4,7 +4,7 @@ from tinygrad.engine.realize import ExecItem
 from tinygrad.device import Device, Buffer
 from tinygrad.helpers import NO_MEMORY_PLANNER, dedup, DEBUG, round_up
 from tinygrad.uop.ops import Ops
-from tinygrad.dtype import dtypes, ImageDType
+from tinygrad.dtype import dtypes
 from tinygrad.runtime.support.memory import TLSFAllocator
 
 LaneKey = tuple[str, int]
@@ -39,7 +39,7 @@ def _internal_memory_planner(buffers:list[list[Buffer]], copies:list[tuple[Buffe
   global_planner:dict[LaneKey, tuple[int, TLSFAllocator]] = defaultdict(lambda: (0, TLSFAllocator(total_memory, block_size=BLK, lv2_cnt=32)))
   for (_, is_open_ev), buf in buffer_requests:
     # Check if suballocation is possible for the given buffer and device.
-    if hasattr(Device[buf.device].allocator, "_offset") and not isinstance(buf.dtype, ImageDType):
+    if hasattr(Device[buf.device].allocator, "_offset"):
       if is_open_ev: buffer_replace[buf] = (None, global_planner[_key(buf)][1].alloc(round_up(buf.nbytes, BLK)))
       else: global_planner[_key(buf)][1].free(cast(int, buffer_replace[buf][1]))
       global_planner[_key(buf)] = (max(global_planner[_key(buf)][0], buffer_replace[buf][1] + buf.nbytes), global_planner[_key(buf)][1])

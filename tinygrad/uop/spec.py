@@ -89,7 +89,7 @@ _tensor_spec = PatternMatcher([
   (UPat(Ops.DEVICE, dtypes.void, (), name="d"), lambda d:
    isinstance(d.arg, str) or (isinstance(d.arg, tuple) and all(isinstance(s, str) for s in d.arg))),
   (UPat(Ops.BUFFER, src=(UPat((Ops.LUNIQUE, Ops.UNIQUE)), UPat(Ops.DEVICE)), name="buf"),
-   lambda buf: isinstance(buf.arg, int) and isinstance(buf.dtype, (DType, ImageDType))),
+   lambda buf: isinstance(buf.arg, int) and isinstance(buf.dtype, DType)),
 
   # BUFFER_VIEW on BUFFER is allowed if BUFFER is
   (UPat(Ops.BUFFER_VIEW, src=(UPat(Ops.BUFFER),)), lambda: True),

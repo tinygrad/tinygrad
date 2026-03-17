@@ -4,7 +4,7 @@ import time, math, itertools, functools, struct, sys, inspect, pathlib, string, 
 from contextlib import ContextDecorator
 from typing import Any, Callable, ClassVar, Sequence, cast, get_args, Literal, SupportsIndex, ParamSpec, TypeVar, Generic, TYPE_CHECKING
 if TYPE_CHECKING: import numpy
-from tinygrad.dtype import DType, DTypeLike, dtypes, ImageDType, ConstType, least_upper_float, least_upper_dtype, sum_acc_dtype, to_dtype, truncate
+from tinygrad.dtype import DType, DTypeLike, dtypes, ConstType, least_upper_float, least_upper_dtype, sum_acc_dtype, to_dtype, truncate
 from tinygrad.dtype import _from_np_dtype, _to_np_dtype, PyConst, Invalid
 from tinygrad.helpers import argfix, make_tuple, flatten, prod, all_int, round_up, merge_dicts, argsort, getenv, all_same, fully_flatten
 from tinygrad.helpers import IMAGE, FLOAT16, WINO, Metadata, TRACEMETA, ASM_GEMM, ceildiv, fetch, is_numpy_ndarray, TracingKey, cpu_profile
@@ -2953,8 +2953,7 @@ class Tensor(OpMixin):
     if not isinstance(y, Tensor):
       # make y a Tensor
       assert isinstance(y, (*get_args(ConstType), UOp)), f"{type(y)=}, {y=}"
-      if y is Invalid or isinstance(x.dtype, ImageDType) or dtypes.is_float(x.dtype) or (dtypes.is_int(x.dtype) and isinstance(y, int)):
-        y_dtype = x.dtype
+      if y is Invalid or dtypes.is_float(x.dtype) or (dtypes.is_int(x.dtype) and isinstance(y, int)): y_dtype = x.dtype
       elif not isinstance(y, UOp): y_dtype = dtypes.from_py(y)
       if isinstance(y, UOp): y = Tensor.from_uop(y, device=x.device)
       else: y = Tensor(y_dtype.const(y), x.device, y_dtype, requires_grad=False)
@@ -3626,7 +3625,7 @@ class Tensor(OpMixin):
     return cx.image_conv2d(cw, groups=groups, dtype=dtype).reshape(out_shape_t).transpose(self.ndim-1, self.ndim-2)
 
   def image_conv2d(self, weight:Tensor, bias:Tensor|None=None, groups=1, stride=1, dilation=1, padding=0, dtype=None) -> Tensor:
-    base_image_type, dtsz = (dtypes.imageh, 2) if FLOAT16 else (dtypes.imagef, 4)
+    dtsz = 2 if FLOAT16 else 4
 
     (bs,_,iy,ix), (cout,cin,H,W) = self.shape, weight.shape
     x, w = self, weight.reshape(groups, (rcout := cout//groups), cin, H, W)
@@ -3655,33 +3654,29 @@ class Tensor(OpMixin):
     else: w = w.reshape(cout//4,4,cin//4,4,H,W).permute(0,4,2,5,3,1)
 
     # contiguous creates the image, and early realize static weights (TODO: test for the static weight)
-    if IMAGE == 1:
-      def is_pow2(v): return v > 0 and v & (v - 1) == 0
-      # pad dimension i to amt with invalids
-      def ipad(t, i, amt):
-        shape = (None,)*i + (amt,) + (None,)*(t.ndim-i-1)
-        return Tensor(True, device=t.device).expand(t.shape).pad_to(shape).where(t.pad_to(shape), Invalid) if amt != t.shape[i] else t
+    def is_pow2(v): return v > 0 and v & (v - 1) == 0
+    # pad dimension i to amt with invalids
+    def ipad(t, i, amt):
+      shape = (None,)*i + (amt,) + (None,)*(t.ndim-i-1)
+      return Tensor(True, device=t.device).expand(t.shape).pad_to(shape).where(t.pad_to(shape), Invalid) if amt != t.shape[i] else t
 
-      # align a dimension, use at to specify the dimension to pad in, defaults to first
-      def pad_align(t, dim, at=None, force=False):
-        # align to 64 pixels when height is real, otherwise 64 bytes is sufficient
-        align = (64 // dtsz) if prod(t.shape[:dim]) == 1 or prod(t.shape) < 16384 * 4 else 256
-        return ipad(t, at:=at or dim, round_up(t.shape[at] + int(force), align // math.gcd(prod(t.shape[dim:]) // t.shape[at], align)))
+    # align a dimension, use at to specify the dimension to pad in, defaults to first
+    def pad_align(t, dim, at=None, force=False):
+      # align to 64 pixels when height is real, otherwise 64 bytes is sufficient
+      align = (64 // dtsz) if prod(t.shape[:dim]) == 1 or prod(t.shape) < 16384 * 4 else 256
+      return ipad(t, at:=at or dim, round_up(t.shape[at] + int(force), align // math.gcd(prod(t.shape[dim:]) // t.shape[at], align)))
 
-      # bank conflicts
-      if cin >= 8 and is_pow2(cin // 4):
-        x, w = pad_align(x.reshape(bs, iy, ix, groups, cin // 4, 4), 2, at=4, force=True), pad_align(w, 1, at=2, force=True)
-      else: x, w = pad_align(x, 2), pad_align(w, 1)
+    # bank conflicts
+    if cin >= 8 and is_pow2(cin // 4):
+      x, w = pad_align(x.reshape(bs, iy, ix, groups, cin // 4, 4), 2, at=4, force=True), pad_align(w, 1, at=2, force=True)
+    else: x, w = pad_align(x, 2), pad_align(w, 1)
 
-      if FLOAT16: x, w = x.cast(dtypes.half).contiguous().cast(dtypes.float), w.cast(dtypes.half).contiguous().cast(dtypes.float)
-      else: x, w = x.contiguous(), w.contiguous()
-
-      # undo alignment hacks
-      if cin >= 8 and is_pow2(cin // 4): x, w = x[:, :, :ix, :, :cin // 4, :], w[:, :H, :cin // 4, ...]
-      else: x, w = x[:, :, :ix, :], w[:, :H, ...]
-
-    elif IMAGE: x, w = x.cast(base_image_type((bs*iy, ix*groups*cin//4, 4))).contiguous(), w.cast(base_image_type((cout//4, H*W*cin, 4))).contiguous()
+    if FLOAT16: x, w = x.cast(dtypes.half).contiguous().cast(dtypes.float), w.cast(dtypes.half).contiguous().cast(dtypes.float)
     else: x, w = x.contiguous(), w.contiguous()
+
+    # undo alignment hacks
+    if cin >= 8 and is_pow2(cin // 4): x, w = x[:, :, :ix, :, :cin // 4, :], w[:, :H, :cin // 4, ...]
+    else: x, w = x[:, :, :ix, :], w[:, :H, ...]
 
     # expand out
     rcin_hi, rcin_lo = (cin//4, 4) if cin >= 4 else (1, 1)
@@ -3697,18 +3692,17 @@ class Tensor(OpMixin):
     # prepare weights
     w = w.permute(0,4,2,5,1,3).reshape((1, 1, 1, *group_shape, *rcout_expand, rcin_hi, rcin_lo, H, W))
 
-    if IMAGE == 1:
-      added_ox = 0
-      assert isinstance(ox, int) and isinstance(cout, int)
-      if (ox * cout) % (64 // dtsz):
-        added_ox = round_up(ox, 64 // (dtsz * math.gcd(cout, 64 // dtsz))) - ox
-        ox = ox + added_ox
-        x = x.pad_to(None, None, ox, None, None, None, None, None, None, None, None)
+    added_ox = 0
+    assert isinstance(ox, int) and isinstance(cout, int)
+    if (ox * cout) % (64 // dtsz):
+      added_ox = round_up(ox, 64 // (dtsz * math.gcd(cout, 64 // dtsz))) - ox
+      ox = ox + added_ox
+      x = x.pad_to(None, None, ox, None, None, None, None, None, None, None, None)
 
     # the conv!
-    ret = (x*w).cast(base_image_type((bs*oy, ox*cout//4, 4)) if IMAGE >= 2 else dtypes.float32).sum((-4, -3, -2, -1), dtype=dtype)
+    ret = (x*w).cast(dtypes.float32).sum((-4, -3, -2, -1), dtype=dtype)
 
-    if IMAGE == 1 and added_ox:
+    if added_ox:
       ret = ret.reshape(bs, oy, ox, groups, rcout)[:, :, :-added_ox, ...]
       ox = ox - added_ox
 

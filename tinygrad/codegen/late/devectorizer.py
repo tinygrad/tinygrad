@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from tinygrad.dtype import dtypes, ImageDType, DType, AddrSpace, Invalid, PtrDType
 from tinygrad.uop.ops import UOp, Ops, UPat, PatternMatcher, GroupOp, identity_element
 from tinygrad.uop.symbolic import uop_given_valid, parse_valid, invalid_gate
-from tinygrad.helpers import getenv, flatten, AMX, prod, IMAGE
+from tinygrad.helpers import getenv, flatten, AMX, prod
 from tinygrad.renderer import Renderer
 
 # ***** image load valid simplification *****
@@ -63,7 +63,7 @@ load_store_indexing = PatternMatcher([
 
 def expand_index(buf:UOp, vec:UOp):
   # determine optimal image shapes
-  if IMAGE == 1 and isinstance(dt:=buf.dtype, ImageDType):
+  if isinstance(dt:=buf.dtype, ImageDType):
     x, valid = vec.get_idx().gep(0), vec.get_valid().gep(0)
     # search for dims that drop the most valid statements
     best_drop, cands = -1, []
