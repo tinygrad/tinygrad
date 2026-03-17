@@ -27,9 +27,8 @@ class FlatTransformer:
     self.wo = self.lin_per_layer(self.n_heads * self.head_dim, dim)
 
     # FeedForward
-    self.w1 = self.lin_per_layer(dim, hidden_dim)
+    self.w13 = self.lin_per_layer(dim, hidden_dim*2)
     self.w2 = self.lin_per_layer(hidden_dim, dim)
-    self.w3 = self.lin_per_layer(dim, hidden_dim)
 
     self.norm_eps = norm_eps
     self.attention_norm = Tensor.ones(n_layers, dim)
@@ -67,18 +66,18 @@ class FlatTransformer:
     attn = attn.reshape(bsz, seqlen, -1)
     return attn @ wo.T
 
-  def feed_forward(self, x:Tensor, ffn_norm:Tensor, w1:Tensor, w2:Tensor, w3:Tensor):
+  def feed_forward(self, x:Tensor, ffn_norm:Tensor, w13:Tensor, w2:Tensor):
     x = rmsnorm(x, self.norm_eps) * ffn_norm
-    x_w1 = (x @ w1.T).silu()
-    x_w3 =  x.contiguous_backward() @ w3.T
-    return (x_w1 * x_w3) @ w2.T
+    x13 = x.contiguous_backward() @ w13.T
+    x_w1, x_w3 = x13.chunk(2, dim=-1)
+    return (x_w1.silu() * x_w3) @ w2.T
 
   @function(precompile=True, precompile_backward=True)
   def run_layer(self, x:Tensor, freqs_cis:Tensor,
                 attention_norm:Tensor, wqkv:Tensor, wo:Tensor,
-                ffn_norm:Tensor, w1:Tensor, w2:Tensor, w3:Tensor):
+                ffn_norm:Tensor, w13:Tensor, w2:Tensor):
     h = x + self.attention(x, freqs_cis, attention_norm, wqkv, wo)
-    return h + self.feed_forward(h, ffn_norm, w1, w2, w3)
+    return h + self.feed_forward(h, ffn_norm, w13, w2)
 
   def __call__(self, tokens:Tensor):
     h = self.tok_embeddings(tokens)
@@ -86,7 +85,7 @@ class FlatTransformer:
     for i in range(self.n_layers):
       h = self.run_layer(h, freqs_cis,
                          self.attention_norm[i], self.wqkv[i], self.wo[i],
-                         self.ffn_norm[i], self.w1[i], self.w2[i], self.w3[i])
+                         self.ffn_norm[i], self.w13[i], self.w2[i])
     logits = self.output(self.norm(h))
     return logits
 
