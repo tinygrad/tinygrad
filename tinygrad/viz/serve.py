@@ -339,7 +339,7 @@ def load_amd_counters(ctxs:list[dict], profile:list[ProfileEvent]) -> None:
 
 def sqtt_timeline(data:bytes, lib:bytes, target:str) -> list[ProfileEvent]:
   from tinygrad.renderer.amd.sqtt import map_insts, InstructionInfo, PacketType, INST, InstOp, VALUINST, IMMEDIATE, IMMEDIATE_MASK, VMEMEXEC, ALUEXEC
-  from tinygrad.renderer.amd.sqtt import INST_RDNA4, InstOpRDNA4, TS_DELTA_OR_MARK, TS_DELTA_OR_MARK_RDNA4
+  from tinygrad.renderer.amd.sqtt import INST_RDNA4, InstOpRDNA4, TS_DELTA_OR_MARK, TS_DELTA_OR_MARK_RDNA4, CDNA_INST, InstOpCDNA
   ret:list[ProfileEvent] = []
   row_ends:dict[str, Decimal] = {}
   curr_barrier:dict[str, ProfileRangeEvent] = {}
@@ -363,8 +363,8 @@ def sqtt_timeline(data:bytes, lib:bytes, target:str) -> list[ProfileEvent]:
         freq_hz = (s1 - s0) * 1_000_000_000 // ((r1 - r0) * NS_PER_TICK)
         ret.append(ProfilePointEvent("LINE:Shader Clock", "freq_hz", freq_hz, ts=Decimal(p._time)))
         prev_pair = pair
-    if isinstance(p, (INST, INST_RDNA4)):
-      name = p.op.name if isinstance(p.op, (InstOp, InstOpRDNA4)) else f"0x{p.op:02x}"
+    if isinstance(p, (INST, INST_RDNA4, CDNA_INST)):
+      name = p.op.name if isinstance(p.op, (InstOp, InstOpRDNA4, InstOpCDNA)) else f"0x{p.op:02x}"
       add(name, p, info=info)
     if isinstance(p, (VALUINST, IMMEDIATE)): add(p.__class__.__name__, p, info=info)
     if isinstance(p, IMMEDIATE_MASK): add("IMMEDIATE", p, wave=unwrap(info).wave, info=info)
