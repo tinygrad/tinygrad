@@ -155,12 +155,6 @@ class InstOpCDNA(Enum):
   SMEM_WR = 16
   SALU_64 = 17
   VALU_64 = 18
-  SMEM_RD_REPLAY = 19
-  SMEM_WR_REPLAY = 20
-  VMEM_RD_REPLAY = 21
-  VMEM_WR_REPLAY = 22
-  FLAT_WR_REPLAY = 23
-  FLAT_RD_REPLAY = 24
   VALU_MAI = 28
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -644,8 +638,6 @@ def map_insts(data:bytes, lib:bytes, target:str) -> Iterator[tuple[PacketType, I
       yield (p, InstructionInfo(pc, p.wave, s_endpgm()))
     # skip OTHER_ instructions, they don't belong to this unit
     elif isinstance(p, (INST, INST_RDNA4)) and p.op.name.startswith("OTHER_"): pass
-    # skip xnack packets on CDNA
-    elif isinstance(p, CDNA_INST) and p.op.name.endswith("_REPLAY"): pass
     elif isinstance(p, IMMEDIATE_MASK):
       # immediate mask may yield multiple times per packet
       for wave in range(16):
