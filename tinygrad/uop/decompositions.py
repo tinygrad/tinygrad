@@ -14,7 +14,7 @@ def _lazy_map_numbers(x:UOp, inf:UOp, _inf:UOp, nan:UOp, ratio:UOp):
 
 # *** helper functions for bit manipulation ***
 def mantissa_bits(d:DType) -> int: return dtypes.finfo(d.scalar())[1]
-def exponent_bias(d:DType) -> int: return (1 << (dtypes.finfo(d.scalar())[0] - 1)) - 1
+def exponent_bias(d:DType) -> int: return (1 << (dtypes.finfo(d.scalar())[0] - 1)) - (0 if d.scalar() in dtypes.fp8_fnuz else 1)
 def exponent_mask(d:DType) -> int: return (1 << dtypes.finfo(d.scalar())[0]) - 1
 
 # **** utils ****
@@ -287,7 +287,7 @@ def fast_idiv(device: str, x: UOp, d: int, dont_cast=False) -> UOp|None:
   assert d>0, "Sign should have been taken out of divisor"
   vmin,vmax = max(x.vmin, x.dtype.min), min(x.vmax, x.dtype.max)
   m,s = magicgu(max(vmax, abs(vmin)), d)
-  if m*vmin >= dtypes.min(x.dtype) and m*vmax <= dtypes.max(x.dtype):
+  if m*vmin >= x.dtype.min and m*vmax <= x.dtype.max:
     return ((x*m) >> s) if is_unsigned else ((x*m) >> s) + (x<0).where(x.ufix(1), 0)
   # before we try casting to a larger dtype (slow), we see if there are powers of two in d we can shift to make x smaller
   if (largest_factor_of_two_in_d := (d & -d)) > 1:
@@ -295,7 +295,7 @@ def fast_idiv(device: str, x: UOp, d: int, dont_cast=False) -> UOp|None:
   if dont_cast: return None
   # promo_lattice needs to return an unsigned type if the type is unsigned
   if dtypes.is_int(next_dtype := promo_lattice[x.dtype.scalar()][-1]) and is_dtype_supported(next_dtype, device):
-    if m*vmin >= dtypes.min(next_dtype) and m*vmax <= dtypes.max(next_dtype):
+    if m*vmin >= next_dtype.min and m*vmax <= next_dtype.max:
       return ((x.cast(next_dtype)*m) >> s).cast(x.dtype) if is_unsigned else ((x.cast(next_dtype)*m) >> s).cast(x.dtype) + (x<0).where(x.ufix(1), 0)
   return None
 
@@ -335,7 +335,6 @@ def l2i(op: Ops, dt: DType, *uops:UOp):
     case Ops.CAST if dt in dtypes.floats:
       small = (a1.eq(0) & (a0 >= 0)) | (a1.eq(-1) & (a0 < 0))
       return small.where(a0.cast(dt), ((a1.cast(dtypes.float32) * (2**32)) + a0.bitcast(dtypes.uint).cast(dtypes.float32)).cast(dt))
-    case Ops.CAST if dt == dtypes.bool: return a0.ne(UOp.const(a0.dtype, 0)) | a1.ne(UOp.const(a1.dtype, 0))
     case Ops.CAST: return a0.bitcast(dtypes.uint).cast(dt)
     case Ops.BITCAST: return a0.bitcast(dt), a1.bitcast(dt)
     case Ops.SHL:
@@ -389,6 +388,10 @@ def f2f(v, fr:DType, to:DType):
     sign, nosign = shl((v & shl(1, fs-1)).cast(f2f_dt[to]), ts - fs), (v & (shl(1, fs-1) - 1)).cast(f2f_dt[to])
     exp, norm = shr(nosign, fm), shl(nosign, tm - fm) + shl(tb - fb, tm)
     nan = shl(nosign, tm - fm) | shl((shl(1, te) - 1), tm)
+    if fr in dtypes.fp8_fnuz:
+      fnuz_nan = sign.ne(0) & nosign.eq(0)
+      qnan = shl(shl(1, te) - 1, tm) | shl(1, tm - 1)
+      return fnuz_nan.where(qnan, sign | exp.eq(0).where(0, norm)).bitcast(to)
     # fp8e4m3 has only one nan
     is_nan = (nosign.eq(shl(1, fm + fe) - 1) if fr == dtypes.fp8e4m3 else exp.eq(shl(1, fe) - 1))
     return (sign | exp.eq(0).where(0, is_nan.where(nan, norm))).bitcast(to)
@@ -400,12 +403,14 @@ def f2f(v, fr:DType, to:DType):
     nan_mantissa = (shl(1, tm) - 1) if to == dtypes.fp8e4m3 else (shr(nosign, fm - tm) & (shl(1, tm) - 1))
     nan = (sign | nan_mantissa | shl(shl(1, te) - 1, tm)).cast(f2f_dt[to])
     is_nan = (shr(v, fm) & (shl(1, fe) - 1)).eq(shl(1, fe) - 1)
+    if to in dtypes.fp8_fnuz: return is_nan.where(shl(1, ts - 1), underflow.where(0, sign.cast(f2f_dt[to]) | norm))
     return is_nan.where(nan, sign.cast(f2f_dt[to]) | underflow.where(0, norm))
   else: raise NotImplementedError(f"unsupported decomp {fr} -> {to}")
 
 def f2f_clamp(val:UOp, dt:DType) -> UOp:
   e, m = dtypes.finfo(dt)
-  max_exp, max_man = ((1 << e) - 1, (1 << m) - 2) if dt == dtypes.fp8e4m3 else ((1 << e) - 2, (1 << m) - 1)
+  if dt in dtypes.fp8_fnuz: max_exp, max_man = (1 << e) - 1, (1 << m) - 1
+  else: max_exp, max_man = ((1 << e) - 1, (1 << m) - 2) if dt == dtypes.fp8e4m3 else ((1 << e) - 2, (1 << m) - 1)
   mx = val.const_like(2.0**(max_exp - exponent_bias(dt)) * (1.0 + max_man / (1 << m)))
   sat = mx if dt in dtypes.fp8s else val.const_like(float('inf'))
   # FIXME: CMPLT of nan is undefined

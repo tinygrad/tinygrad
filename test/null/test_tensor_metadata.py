@@ -4,6 +4,7 @@ from tinygrad.tensor import _METADATA
 from tinygrad.engine.realize import capturing
 from tinygrad.helpers import Context
 
+@unittest.skip("tensor metadata is no longer supported")
 class TestTensorMetadata(unittest.TestCase):
   def setUp(self) -> None:
     _METADATA.set(None)

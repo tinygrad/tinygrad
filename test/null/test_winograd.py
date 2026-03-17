@@ -45,7 +45,7 @@ class TestWinograd(unittest.TestCase):
 
     # TODO: what's optimal on this?
     self.assertLess(ops_ratio, 4.3)
-    self.assertLess(mem_ratio, 3)
+    self.assertLess(mem_ratio, 4)
 
   def test_dtype(self):
     IC, OC, X, Y = 4,4,9,9

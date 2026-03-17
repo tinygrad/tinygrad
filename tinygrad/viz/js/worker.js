@@ -5,11 +5,16 @@ const canvas = new OffscreenCanvas(0, 0);
 const ctx = canvas.getContext("2d");
 
 onmessage = (e) => {
-  const { data, opts } = e.data;
-  const g = new dagre.graphlib.Graph({ compound: true }).setDefaultEdgeLabel(function() { return {}; });
-  (data.blocks != null ? layoutCfg : layoutUOp)(g, data, opts);
-  postMessage(dagre.graphlib.json.write(g));
-  self.close();
+  try {
+    const { data, opts } = e.data;
+    const g = new dagre.graphlib.Graph({ compound: true }).setDefaultEdgeLabel(function() { return {}; });
+    (data.blocks != null ? layoutCfg : layoutUOp)(g, data, opts);
+    postMessage({result: dagre.graphlib.json.write(g)});
+    self.close();
+  } catch (err) {
+    postMessage({error: err.stack || err.message || String(err)});
+    self.close();
+  }
 }
 
 const layoutCfg = (g, { blocks, paths, pc_tokens }) => {
@@ -41,6 +46,7 @@ const layoutUOp = (g, { graph, change }, opts) => {
   g.setGraph({ rankdir: "LR", font:"sans-serif", lh:lineHeight });
   ctx.font = `350 ${lineHeight}px ${g.graph().font}`;
   if (change?.length) g.setNode("overlay", {label:"", labelWidth:0, labelHeight:0, className:"overlay"});
+  let callCount = 0;
   for (const [k, {label, src, ref, color, tag }] of Object.entries(graph)) {
     // adjust node dims by label size (excluding escape codes) + add padding
     let [width, height] = [0, 0];
@@ -48,26 +54,36 @@ const layoutUOp = (g, { graph, change }, opts) => {
       width = Math.max(width, ctx.measureText(line).width);
       height += lineHeight;
     }
-    g.setNode(k, {...rectDims(width, height), label, ref, id:k, color, tag});
+    const callNode = label.startsWith("CALL\n");
+    if (callNode) callCount++;
+    g.setNode(k, {...rectDims(width, height), label, ref, id:k, color, tag, callNode});
     // add edges
     const edgeCounts = {};
     for (const [_, s] of src) edgeCounts[s] = (edgeCounts[s] || 0)+1;
-    for (const [port, s] of src) g.setEdge(s, k, { label: edgeCounts[s] > 1 ? {type:"tag", text:edgeCounts[s]} : {type:"port", text:port}});
+    for (const [port, s] of src) g.setEdge(s, k, { label: edgeCounts[s] > 1 ? {type:"tag", text:edgeCounts[s]} : {type:"port", text:port},
+      ...(callNode && port === 0 && {color:"#a0a1b8"})});
     if (change?.includes(parseInt(k))) g.setParent(k, "overlay");
   }
   // optionally hide nodes from the layout
+  if (!opts.showSink) {
+    for (const n of g.nodes()) {
+      const node = g.node(n);
+      if ((node.label === "SINK" || node.label.startsWith("SINK\n")) && (g.successors(n) || []).length === 0) g.removeNode(n);
+    }
+  }
   if (!opts.showIndexing) {
     for (const n of g.nodes()) {
       const node = g.node(n);
       if (node.label.includes("dtypes.index")) g.removeNode(n);
     }
   }
-  if (!opts.showCallSrc) {
+  if (!opts.showCallSrc || opts.callSrcMask.size > 0) {
     // remove edges from src[0] to CALL nodes, track affected nodes
     const disconnected = new Set();
     for (const n of g.nodes()) {
       const node = g.node(n);
-      if (node?.label?.startsWith("CALL\n") || node?.label === "CALL") {
+      if (node.callNode && (opts.showCallSrc ? opts.callSrcMask.has(n) : !opts.callSrcMask.has(n))) {
+        node.collapsed = true;
         for (const pred of (g.predecessors(n) || [])) {
           const edge = g.edge(pred, n);
           if (edge?.label?.text === 0) {
@@ -91,6 +107,7 @@ const layoutUOp = (g, { graph, change }, opts) => {
       }
     }
   }
+  g.graph().callCount = callCount;
   dagre.layout(g);
   // remove overlay node if it's empty
   if (!g.node("overlay")?.width) g.removeNode("overlay");

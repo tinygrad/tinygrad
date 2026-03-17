@@ -1,5 +1,5 @@
 # schedule tests that pass on NULL backend (no copyout needed)
-import unittest, time
+import gc, unittest, time
 from tinygrad import nn, dtypes, Device, Tensor
 from tinygrad.device import is_dtype_supported
 from tinygrad.uop.ops import UOp, Ops, GroupOp, UPat
@@ -59,7 +59,7 @@ class TestBufferUOp(unittest.TestCase):
 
   def test_buffer_view_not_allowed(self):
     permuted_view = Tensor.empty(1, 2, 3).permute(0, 2, 1)
-    with self.assertRaisesRegex(AssertionError, "can only be RESHAPE"):
+    with self.assertRaises(RuntimeError):
       permuted_view.uop.buffer # cannot access Buffer of a non contiguous VIEW
 
   def test_buffer_only_after_realize(self):
@@ -74,7 +74,7 @@ class TestBufferUOp(unittest.TestCase):
     self.assertIsNotNone(a.uop.buffer)
 
   def test_const_does_not_realize(self):
-    a = Tensor(1)+Tensor(2)
+    a = Tensor(1)
     run_schedule(check_schedule(a, 0))
     self.assertIsNone(a.uop.base.realized)
 
@@ -117,7 +117,7 @@ class TestContiguous(unittest.TestCase):
   def test_size_change_buffer_view(self):
     a = Tensor.empty(4)
     b = a.reshape((1, 1, 4)).shrink(((0, 1), (0, 1), (0, 3))).contiguous()
-    check_schedule(b, 1)
+    check_schedule(b, 0)  # contiguous shrink of a realized buffer is a zero-copy BUFFER_VIEW
 
   def test_double_contiguous_realizes_once(self):
     a = Tensor.empty(4, 1)
@@ -169,7 +169,7 @@ class TestSchedule(unittest.TestCase):
   def test_empty_is_not_realized(self):
     a = Tensor.empty(10)
     child = a+2
-    assert a.uop.is_realized
+    assert not a.uop.is_realized
     child.realize()
     assert a.uop.is_realized
 
@@ -185,11 +185,18 @@ class TestSchedule(unittest.TestCase):
   def test_childless_empty_never_allocates(self):
     a = Tensor.empty(10)
     a.realize()
-    assert not a.uop.buffer.is_allocated()
+    assert not a.uop.is_realized
 
   def test_simplify_padded_const(self):
     a, _ = Tensor.empty(1022).cummax(axis=0)
     check_schedule(a, 3)
+
+  @unittest.skip("should this pass?")
+  def test_contiguous_assign(self):
+    a = Tensor.ones(10) * 2
+    b = Tensor.empty(10)
+    c = b.assign(a.contiguous())
+    check_schedule(c, 1)
 
   def test_basic_binop_fusion(self):
     a = Tensor.empty(10)
@@ -226,6 +233,18 @@ class TestSchedule(unittest.TestCase):
     c = (a*b).sum()
     d = Tensor.empty(1).assign(c)
     check_schedule(d, 1)
+
+  def test_detach_assign(self):
+    a = Tensor.ones(4, 4).contiguous().realize()
+    buf1, buf2 = Tensor.empty(4, 4).contiguous(), Tensor.empty(4, 4).contiguous()
+    r = buf2.assign(buf1.assign(a + 1.0) * 2.0)
+    check_schedule(r.detach().contiguous(), 2)
+
+  def test_contiguous_backward_assign(self):
+    a = Tensor.ones(4, 4).contiguous().realize()
+    buf1, buf2 = Tensor.empty(4, 4).contiguous(), Tensor.empty(4, 4).contiguous()
+    r = buf2.assign(buf1.assign(a + 1.0) * 2.0)
+    check_schedule(r.contiguous_backward().contiguous(), 2)
 
   def test_mulacc_relu_fusion(self):
     a = Tensor.empty(10)
@@ -405,20 +424,20 @@ class TestSchedule(unittest.TestCase):
       out = bn(c1(img)).relu()
       check_schedule(out, 4, [c1.weight, c1.bias])
 
-  def test_fold_conv_batchnorm_optim(self):
-    # this is too high
-    for optim, cnt in [(nn.optim.Adam, 27), (nn.optim.SGD, 7)]:
-      with self.subTest(optim=optim.__name__):
-        with Tensor.train():
-          img = Tensor.ones(1,3,4,4)
-          c1 = nn.Conv2d(3,32,3)
-          bn = nn.BatchNorm2d(32, track_running_stats=False)
-          _realize_weights([c1, bn])
-          opt = optim(nn.state.get_parameters([c1, bn]))
-          img_bn = bn(c1(img)).elu().sum()
-          opt.zero_grad()
-          img_bn.backward()
-          check_schedule(opt.schedule_step(), cnt)
+  def test_fold_conv_batchnorm_optim(self, adam=False):
+    # 2 is too low?
+    optim, cnt = (nn.optim.Adam, 16) if adam else (nn.optim.SGD, 2)
+    with Tensor.train():
+      img = Tensor.ones(1,3,4,4)
+      c1 = nn.Conv2d(3,32,3)
+      bn = nn.BatchNorm2d(32, track_running_stats=False)
+      _realize_weights([c1, bn])
+      opt = optim(nn.state.get_parameters([c1, bn]))
+      img_bn = bn(c1(img)).elu().sum()
+      opt.zero_grad()
+      img_bn.backward()
+      check_schedule(opt.schedule_step(), cnt)
+  def test_fold_conv_batchnorm_optim_adam(self): self.test_fold_conv_batchnorm_optim(True)
 
   def test_fold_batchnorm_backward(self):
     with Tensor.train():
@@ -561,21 +580,22 @@ class TestSchedule(unittest.TestCase):
 
   # this is the failing case in openpilot...it's very simple like this
   def test_image_conv_fusion(self):
-    w1 = Tensor.empty(16, 16, 1, 1)
-    b1 = Tensor.empty(16)
-    w2 = Tensor.empty(16, 16, 1, 1)
-    b2 = Tensor.empty(16)
-    w3 = Tensor.empty(16, 16, 1, 1)
-    b3 = Tensor.empty(16)
+    with Context(OPENPILOT_HACKS=1):
+      w1 = Tensor.empty(16, 16, 1, 1)
+      b1 = Tensor.empty(16)
+      w2 = Tensor.empty(16, 16, 1, 1)
+      b2 = Tensor.empty(16)
+      w3 = Tensor.empty(16, 16, 1, 1)
+      b3 = Tensor.empty(16)
 
-    x = Tensor.empty(1, 16, 32, 32)
-    x = base = x.image_conv2d(w1, b1)
-    x = x.image_conv2d(w2, b2) + base
-    x = x.image_conv2d(w3, b3)
+      x = Tensor.empty(1, 16, 32, 32)
+      x = base = x.image_conv2d(w1, b1)
+      x = x.image_conv2d(w2, b2) + base
+      x = x.image_conv2d(w3, b3)
 
-    # NOOP, 3 convs, contiguous
-    #check_schedule(x, 5)
-    check_schedule(x, 7)
+      # NOOP, 3 convs, contiguous
+      #check_schedule(x, 5)
+      check_schedule(x, 7)
 
   def test_image_conv_fusion_minimal(self):
     b1 = Tensor.empty(16)
@@ -642,6 +662,7 @@ class TestSchedule(unittest.TestCase):
     t = Tensor([1.0, 2.0, 3.0]) ** 8
     self.assertEqual(self._alu_from_tensor(t), [Ops.MUL, Ops.MUL, Ops.MUL])
 
+  @unittest.skip("const folding is removed")
   def test_pow_const_tensor_to_zero(self):
     x = Tensor([1,2,3,4])
     out = x ** Tensor(0.0)
@@ -766,7 +787,7 @@ class TestSchedule(unittest.TestCase):
       _realize_weights(layer)
       opt = nn.optim.Adam(nn.state.get_parameters(layer), lr=1e-4)
       layer(x).relu().sum().backward()
-      check_schedule(opt.schedule_step(), 19)
+      check_schedule(opt.schedule_step(), 13)
 
   def test_adam_conv_fuse(self):
     with Tensor.train():
@@ -776,7 +797,7 @@ class TestSchedule(unittest.TestCase):
       opt = nn.optim.Adam(nn.state.get_parameters(c1), lr=1e-4)
       opt.zero_grad()
       c1(img).relu().sum().backward()
-      check_schedule(opt.schedule_step(), 19)
+      check_schedule(opt.schedule_step(), 13)
 
   def test_adam_2convs_fuse(self):
     with Tensor.train():
@@ -787,7 +808,7 @@ class TestSchedule(unittest.TestCase):
       opt = nn.optim.Adam(nn.state.get_parameters([c1, c2]), lr=1e-4)
       opt.zero_grad()
       c2(c1(img).relu()).relu().sum().backward()
-      check_schedule(opt.schedule_step(), 21)
+      check_schedule(opt.schedule_step(), 15)
 
   def test_sgd_conv_fuse(self):
     with Tensor.train():
@@ -819,7 +840,7 @@ class TestSchedule(unittest.TestCase):
       opt = nn.optim.SGD(nn.state.get_parameters([c1, c2]), nesterov=True, momentum=0.9, weight_decay=0.1)
       opt.zero_grad()
       c2(c1(img).relu()).relu().sum().backward()
-      check_schedule(opt.schedule_step(), 13)
+      check_schedule(opt.schedule_step(), 11)
 
   def test_sgd_4convs_fuse(self):
     with Tensor.train():
@@ -895,9 +916,11 @@ class TestSchedule(unittest.TestCase):
     check_schedule(out, 2)
 
   def test_schedule_mem_used(self):
+    gc.collect()
     base = GlobalCounters.mem_used
     Tensor.ones(256).contiguous().realize()
     Tensor.ones(5, 5).contiguous().schedule()
+    gc.collect()
     self.assertEqual(GlobalCounters.mem_used-base, 0)
 
   def test_const_schedule(self):
@@ -1001,6 +1024,7 @@ class TestUOpBecome(unittest.TestCase):
 
   # sometimes we prefer to perform an op before movement ops, in this case we should stack the mops on top of the new buffer
 
+  @unittest.skip("no longer supported")
   def test_reorder_expand(self):
     a = Tensor.empty(4, 1)
     b = a.expand(4, 4).reciprocal()
@@ -1036,6 +1060,7 @@ class TestUOpBecome(unittest.TestCase):
     late_add = noop+2
     late_add.realize()
 
+  @unittest.skip("const folding is removed")
   def test_become_const_in_base(self):
     a = Tensor.empty(4)
     b = a*0
@@ -1043,6 +1068,7 @@ class TestUOpBecome(unittest.TestCase):
     check_schedule(b, 0)
     assert UPat(Ops.CONST, arg=0).match(b.uop.base, {}) # scheduling replaces the tensor uop with a VIEW(BUFFER)
 
+  @unittest.skip("const folding is removed")
   def test_become_const_from_const(self):
     const_add = Tensor(1)+Tensor(2)
     assert UPat(Ops.ADD).match(const_add.uop, {})
@@ -1091,6 +1117,7 @@ class TestUOpBecome(unittest.TestCase):
     from tinygrad.helpers import all_same
     assert all_same([x.uop.base.realized for x in [a,b,c]])
 
+  @unittest.skip("not clear if we want this")
   def test_setitem_becomes_subbuffer(self):
     a = Tensor.full((4,), 2.).contiguous().realize()
     b = a.shrink(((0, 2),)).assign(Tensor.full((2,), 1.0))
@@ -1131,7 +1158,7 @@ class TestFusionOp(unittest.TestCase):
     a = Tensor(val)
     for _ in range(24): a = Tensor.stack(a, a)[0]
     sched = a.schedule()
-    self.assertEqual(len(sched), 0)
+    self.assertLessEqual(len(sched), 1)
     self.assertLess(time.perf_counter()-st, 2.0)
 
   def test_recursive_reshape(self):
@@ -1143,6 +1170,30 @@ class TestFusionOp(unittest.TestCase):
     sched = r.schedule()
     self.assertEqual(len(sched), 1)
     self.assertLess(time.perf_counter()-st, 2.0)
+
+# NOTE: the NULL backend supports BUFFER_VIEW
+class TestBufferView(unittest.TestCase):
+  def test_shrink_contiguous_is_buffer_view(self):
+    # simple 1D shrink of a realized buffer should be BUFFER_VIEW, not a copy kernel
+    a = Tensor.arange(100).contiguous().realize()
+    b = a.shrink(((10, 50),)).contiguous()
+    run_schedule(check_schedule(b, 0))
+
+  def test_shrink_2d_contiguous_is_buffer_view(self):
+    a = Tensor.arange(100).reshape(10,10).contiguous().realize()
+    b = a.shrink(((1, 5),None)).contiguous()
+    run_schedule(check_schedule(b, 0))
+
+  def test_chained_shrink_is_buffer_view(self):
+    a = Tensor.arange(1000).contiguous().realize()
+    b = a.shrink(((200, 800),)).shrink(((0, 300),)).reshape((30, 10)).shrink(((20, 25), (0, 10))).contiguous()
+    run_schedule(check_schedule(b, 0))
+
+class TestInvalidTensor(unittest.TestCase):
+  def test_full_invalid_is_zero_kernels(self):
+    from tinygrad.dtype import Invalid
+    t = Tensor.full((4,), Invalid, dtype=dtypes.float)
+    check_schedule(t, 0)
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)

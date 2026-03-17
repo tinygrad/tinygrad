@@ -76,7 +76,7 @@ class TestHCQ(unittest.TestCase):
         TestHCQ.d0.timeline_signal.wait(TestHCQ.d0.timeline_value)
         TestHCQ.d0.timeline_value += 1
 
-  @unittest.skipIf(Device.DEFAULT in {"CPU"}, "Can't handle async update on CPU device")
+  @unittest.skipIf(Device.DEFAULT in {"CPU"} or getenv("AMD_IFACE", "") == "PCI", "Can't handle async update on CPU/MOCKAM device")
   def test_wait_late_set(self):
     for queue_type in [TestHCQ.d0.hw_compute_queue_t, TestHCQ.d0.hw_copy_queue_t]:
       if queue_type is None: continue
@@ -538,7 +538,7 @@ class TestHCQ(unittest.TestCase):
 
       np.testing.assert_equal(cpu_buffer.numpy(), local_buf.numpy(), "failed")
 
-  @unittest.skipUnless(MOCKGPU, "Emulate this on MOCKGPU to check the path in CI")
+  @unittest.skipUnless(MOCKGPU and getenv("AMD_IFACE", "") != "PCI", "Emulate this on MOCKGPU to check the path in CI")
   def test_on_device_hang(self):
     if not hasattr(self.d0, 'on_device_hang'): self.skipTest("device does not have on_device_hang")
 

@@ -1,4 +1,4 @@
-import unittest, decimal, json, struct, sys
+import unittest, decimal, sys, json
 from dataclasses import dataclass
 from typing import Generator
 
@@ -282,9 +282,25 @@ class TestVizIntegration(BaseTestViz):
     ast = Tensor.schedule(Tensor.empty(4)+Tensor.empty(4))[0].ast
     prg = get_program(ast, Device[Device.DEFAULT].renderer)
     lst = get_viz_list()
-    self.assertEqual(len(lst), 2)
-    self.assertEqual(lst[0]["name"], "Schedule 1 Kernel n1")
-    self.assertEqual(lst[1]["name"], prg.name)
+    self.assertEqual(len(lst), 3)
+    self.assertEqual(lst[0]["name"], "Process 1 Buffer n1")
+    self.assertEqual(lst[1]["name"], "Schedule 1 Kernel n1")
+    self.assertEqual(lst[2]["name"], prg.name)
+
+  # schedule graph CALL nodes have a link to jump to codegen
+  def test_link_sched_codegen(self):
+    c1 = Tensor.empty(4).add(1)
+    c2 = Tensor.empty(8).add(1)
+    sched = Tensor.schedule(c1, c2)
+    prgs = [si.lower().prg.p.name for si in sched]
+    lst = get_viz_list()
+    sched_idx = next(i for i,l in enumerate(lst) if l["name"].startswith("Schedule"))
+    viz_kernel = next(i for i,s in enumerate(lst[sched_idx]["steps"]) if s["name"] == "View Kernel Graph")
+    graph = next(get_viz_details(sched_idx, viz_kernel))["graph"]
+    call_nodes = [n for n in graph.values() if n["label"].startswith("CALL")]
+    for i,n in enumerate(call_nodes):
+      assert n["ref"] is not None
+      self.assertEqual(lst[n["ref"]]["name"], prgs[i])
 
   def test_metadata_tracing(self):
     with Context(TRACEMETA=2):
@@ -341,41 +357,9 @@ class TestVizIntegration(BaseTestViz):
 
 from tinygrad.device import ProfileDeviceEvent, ProfileGraphEvent, ProfileGraphEntry
 from tinygrad.viz.serve import get_profile
+from extra.viz.cli import decode_profile
 
-class TinyUnpacker:
-  def __init__(self, buf): self.buf, self.offset = buf, 0
-  def __call__(self, fmt:str) -> tuple:
-    ret = struct.unpack_from(fmt, self.buf, self.offset)
-    self.offset += struct.calcsize(fmt)
-    return ret
-
-# 0 means None, otherwise it's an enum value
-def option(i:int) -> int|None: return None if i == 0 else i-1
-
-def load_profile(lst:list[ProfileEvent]) -> dict:
-  ret = get_profile(lst)
-  u = TinyUnpacker(ret)
-  total_dur, global_peak, index_len, layout_len = u("<IQII")
-  strings, dtypes, markers = json.loads(ret[u.offset:u.offset+index_len]).values()
-  u.offset += index_len
-  layout:dict[str, dict] = {}
-  for _ in range(layout_len):
-    klen = u("<B")[0]
-    k = ret[u.offset:u.offset+klen].decode()
-    u.offset += klen
-    layout[k] = v = {"events":[]}
-    event_type, event_count = u("<BI")
-    if event_type == 0:
-      for _ in range(event_count):
-        name, ref, key, st, dur, fmt = u("<IIIIfI")
-        v["events"].append({"name":strings[name], "ref":option(ref), "key":option(key), "st":st, "dur":dur, "fmt":strings[fmt]})
-    else:
-      v["peak"] = u("<Q")[0]
-      for _ in range(event_count):
-        alloc, ts, key = u("<BII")
-        if alloc: v["events"].append({"event":"alloc", "ts":ts, "key":key, "arg": {"dtype":strings[u("<I")[0]], "sz":u("<Q")[0]}})
-        else: v["events"].append({"event":"free", "ts":ts, "key":key, "arg": {"users":[u("<IIIB") for _ in range(u("<I")[0])]}})
-  return {"dur":total_dur, "peak":global_peak, "layout":layout, "markers":markers}
+def load_profile(lst:list[ProfileEvent]) -> dict: return decode_profile(get_profile(lst))
 
 class TestVizProfiler(BaseTestViz):
   def test_transfer_uses_copy_device(self):
@@ -525,9 +509,15 @@ class TestVizProfiler(BaseTestViz):
 
   def test_calltrace(self):
     def fxn(): return Tensor.empty(10).mul(2).realize()
-    fxn()
-    trace = get_viz_list()[0]["steps"][0]["trace"]
-    assert any(fxn.__code__.co_filename == f and fxn.__code__.co_firstlineno == l for f,l,*_ in trace), str(trace)
+    with cpu_profile(TracingKey("test_fxn"), "CUSTOM"):
+      fxn()
+    codegen_trace = get_viz_list()[0]["steps"][0]["trace"]
+    assert any(fxn.__code__.co_filename == f and fxn.__code__.co_firstlineno == l for f,l,*_ in codegen_trace), str(codegen_trace)
+    profile_ret = load_profile(cpu_events)
+    e = profile_ret["layout"]["CUSTOM"]["events"][0]
+    self.assertEqual(e["name"], "test_fxn")
+    runtime_trace = json.loads(e["fmt"].replace("TB:", ""))
+    assert any(fxn.__code__.co_filename == f and fxn.__code__.co_firstlineno+1 == l for f,l,*_ in runtime_trace), str(runtime_trace)
 
   # can pack up to 1hr 11 min of trace events
   def test_trace_duration(self):

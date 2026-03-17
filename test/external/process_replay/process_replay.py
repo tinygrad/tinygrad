@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # compare kernels created by HEAD against master
-import os, multiprocessing, logging, pickle, sqlite3, difflib, warnings, itertools, functools, base64, codecs
+import os, multiprocessing, logging, pickle, sqlite3, difflib, warnings, functools, base64, codecs
 from dataclasses import replace
 from typing import Callable, Any
 
@@ -8,7 +8,6 @@ ASSERT_DIFF = int((flag:="[pr]") in os.getenv("COMMIT_MESSAGE", flag) or flag in
 if not int(os.getenv("ASSERT_PROCESS_REPLAY", "1")): ASSERT_DIFF = 0
 
 try:
-  from tinygrad.schedule.rangeify import get_rangeify_map
   from tinygrad.renderer import Renderer, ProgramSpec
   from tinygrad.engine.realize import get_program
   from tinygrad.uop.ops import UOp, Ops, KernelInfo
@@ -43,14 +42,6 @@ class ProcessReplayWarning(Warning): pass
 
 # *** replay the function and convert return values to string
 
-def replay_get_rangeify_map(ret:dict[UOp, UOp], big_sink:UOp) -> tuple[str, str, tuple[Any, ...]]:
-  UOp.unique_num = itertools.count(max([u.arg for u in big_sink.toposort() if u.op is Ops.UNIQUE], default=0)+1)
-  new_sink = big_sink.substitute(get_rangeify_map(big_sink))
-  def to_str(ret:UOp) -> str:
-    asts = [repr(u.arg.ast) for u in ret.toposort() if u.op is Ops.CALL]
-    return "\n".join([f"{len(asts)} kernels", *asts])
-  return to_str(new_sink), to_str(big_sink.substitute(ret)), (big_sink,)
-
 def replay_get_program(p:ProgramSpec, ast:UOp, renderer:Renderer, opts:list[Opt]|None=None) -> tuple[str, str, tuple[Any, ...]]:
   # the ast.arg is non None if we are inside of search.py
   sink_arg = ast.arg or KernelInfo()
@@ -68,8 +59,6 @@ def replay_get_program(p:ProgramSpec, ast:UOp, renderer:Renderer, opts:list[Opt]
 
 replayers: dict[str, Callable[..., tuple[str, str, tuple[Any, ...]]]] = {}
 replayers["get_program"] = replay_get_program
-# disable this for speed, does it ever find things?
-#replayers["get_rangeify_map"] = replay_get_rangeify_map
 
 # *** run replayers on captured rows and print diffs
 

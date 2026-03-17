@@ -90,7 +90,7 @@ class WebGPUProgram:
 
     self.name, self.lib, self.prg = name, lib, shader_module
   def __call__(self, *bufs:WGPUBufPtr, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1),
-               vals:tuple[int, ...]=(), wait=False) -> float|None:
+               vals:tuple[int, ...]=(), wait=False, **kw) -> float|None:
     wait = wait and self.timestamp_supported
     tmp_bufs = [*bufs]
     buf_patch = False

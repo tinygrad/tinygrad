@@ -58,7 +58,8 @@ class TestCfg(unittest.TestCase):
     k.emit(s_endpgm())
     k.emit(s_code_end())
     ei = run_asm("diamond", k)
-    cfg = amdgpu_cfg(ei.prg.p.lib, self.arch)["data"]
+    ret = amdgpu_cfg(ei.prg.p.lib, self.arch)
+    cfg = ret["data"]
     self.assertEqual(len(cfg["blocks"]), 5)
     edge_count = sum(len(v) for v in cfg["paths"].values())
     self.assertEqual(edge_count, 5)
@@ -69,6 +70,11 @@ class TestCfg(unittest.TestCase):
     self.assertEqual(len(references["r0"]), 2)
     insts = [cfg["pc_tokens"][pc][0]["st"] for pc in references["r0"]]
     self.assertEqual(insts, ['s_mov_b32', 's_cmp_eq_u64'])
+    end_block = [" ".join(t["st"] for t in cfg["pc_tokens"][pc]) for pc in list(cfg["blocks"].values())[-1]]
+    code_line = ret["src"].splitlines()[-1]
+    self.assertEqual(len(end_block), 2)
+    for st in [end_block[-1], code_line]:
+      assert st.startswith("s_code_end") and st.endswith("x)"), st
 
   def test_loop(self):
     k = Kernel(arch=Device["AMD"].arch)

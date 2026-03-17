@@ -6,7 +6,6 @@ from tinygrad import Device
 
 from test.mockgpu.amd.emu import WaveState, _decode_at, WAVE_SIZE, VCC_LO, EXEC_LO, SCC
 from tinygrad.renderer.amd import decode_inst
-from test.amd.helpers import KernelInfo
 import tinygrad
 REMU_PATH = Path(tinygrad.__file__).parent.parent / "extra/remu/target/release/libremu.so"
 if not REMU_PATH.exists(): REMU_PATH = Path(tinygrad.__file__).parent.parent / "extra/remu/target/release/libremu.dylib"
@@ -21,6 +20,15 @@ def _vals_equal(a: int, b: int) -> bool:
   """Compare two 32-bit values, treating all NaN bit patterns as equal."""
   if a == b: return True
   return _is_f32_nan(a) and _is_f32_nan(b)
+
+@dataclass
+class KernelSnapshot:
+  code: bytes
+  src: str
+  global_size: tuple[int, int, int]
+  local_size: tuple[int, int, int]
+  buf_idxs: list[int]  # indices into shared buffer pool
+  buf_sizes: list[int]  # sizes for each buffer index
 
 @dataclass
 class StateSnapshot:
@@ -285,7 +293,7 @@ def run_single_kernel(kernel: bytes, n_lanes: int, args_ptr: int, global_size: t
 
   return True, f"Completed {gx*gy*gz} workgroups", total_steps
 
-def compare_emulators_multi_kernel(kernels: list[KernelInfo], buf_pool: dict[int, int], max_steps: int = 1000,
+def compare_emulators_multi_kernel(kernels: list[KernelSnapshot], buf_pool: dict[int, int], max_steps: int = 1000,
                                     debug: bool = False, trace_len: int = 10, buf_data: dict[int, bytes] | None = None) -> tuple[bool, str]:
   """Run all kernels through both emulators with shared buffer pool."""
   if buf_data is None: buf_data = {}
@@ -349,7 +357,7 @@ def compare_emulators_with_memory(kernel: bytes, n_lanes: int, buf_sizes: list, 
   ok, msg, _ = run_single_kernel(kernel, n_lanes, args_ptr, global_size, (n_lanes, 1, 1), max_steps, debug, trace_len)
   return ok, msg
 
-def get_kernels_from_tinygrad(op_fn) -> tuple[list[KernelInfo], dict[int, int], dict[int, bytes]]:
+def get_kernels_from_tinygrad(op_fn) -> tuple[list[KernelSnapshot], dict[int, int], dict[int, bytes]]:
   """Compile a tinygrad operation and extract all kernels with their buffer mappings."""
   from tinygrad import Tensor
   from tinygrad.runtime.support.elf import elf_loader
@@ -387,7 +395,7 @@ def get_kernels_from_tinygrad(op_fn) -> tuple[list[KernelInfo], dict[int, int], 
                 buf_pool[buf_id] = b.nbytes
               buf_idxs.append(buf_id)
               buf_sizes.append(b.nbytes)
-            kernels.append(KernelInfo(
+            kernels.append(KernelSnapshot(
               code=bytes(sec.content),
               src=lowered.prg.p.src,
               global_size=tuple(lowered.prg.p.global_size),

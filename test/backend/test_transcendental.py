@@ -84,7 +84,6 @@ class TestFromFuzzer(unittest.TestCase):
     _test_value(np.pi * 2, unit=1.5)
 
   @given(strat.sampled_from(dtypes_float))
-  @unittest.skipIf(Device.DEFAULT == "WEBGPU" and CI, "Nan location mismatch on Vulkan, Metal works")
   def test_log2(self, dtype):
     if not is_dtype_supported(dtype): return
     if dtype == dtypes.float64:

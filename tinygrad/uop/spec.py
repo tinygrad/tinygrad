@@ -58,6 +58,12 @@ shared_spec = PatternMatcher([
 
   # RANGE/SPECIAL define loops, END closes them
   (UPat(Ops.END, src=(UPat(), UPat(Ops.RANGE))), lambda: True),
+
+  # STORE in tensor graph: store a value into a target
+  (UPat(Ops.STORE, dtypes.void, (UPat(), UPat())), lambda: True),
+
+  # NOOP
+  (UPat(Ops.NOOP), lambda: True)
 ])
 
 # ***** UOp spec in the Tensor graph *****
@@ -71,8 +77,9 @@ movement_ops = PatternMatcher([
   (UPat((Ops.VECTORIZE, Ops.VCONST), dtype=dtypes.index), lambda: True),
   (UPat({Ops.ADD, Ops.MUL, Ops.IDIV}, dtype=dtypes.index), lambda: True),
 
-  # AFTER on Movement Op
-  (UPat(Ops.AFTER, src=(UPat(GroupOp.Movement.union({Ops.MULTI, Ops.CONTIGUOUS})),), allow_any_len=True), lambda: True),
+  # AFTER on Movement Op, BUFFER, COPY, or BITCAST
+  (UPat(Ops.AFTER, src=(UPat(GroupOp.Movement.union({Ops.MULTI, Ops.CONTIGUOUS, Ops.BUFFER, Ops.BITCAST, Ops.COPY})),), allow_any_len=True),
+   lambda: True),
 ])
 
 _tensor_spec = PatternMatcher([
@@ -81,14 +88,14 @@ _tensor_spec = PatternMatcher([
   (UPat(Ops.LUNIQUE, dtypes.void, ()), lambda: True),
   (UPat(Ops.DEVICE, dtypes.void, (), name="d"), lambda d:
    isinstance(d.arg, str) or (isinstance(d.arg, tuple) and all(isinstance(s, str) for s in d.arg))),
-  (UPat(Ops.BUFFER, src=(UPat((Ops.LUNIQUE, Ops.UNIQUE)), UPat(Ops.DEVICE)), name="buf"),
+  (UPat(Ops.BUFFER, src=(UPat((Ops.LUNIQUE, Ops.UNIQUE, Ops.NOOP)), UPat(Ops.DEVICE)), name="buf"),
    lambda buf: isinstance(buf.arg, int) and isinstance(buf.dtype, (DType, ImageDType))),
+
+  # BUFFER_VIEW on BUFFER is allowed if BUFFER is
+  (UPat(Ops.BUFFER_VIEW, src=(UPat(Ops.BUFFER),)), lambda: True),
 
   # KERNEL can attach to an AFTER to describe the compute required to realize a BUFFER
   (UPat(Ops.CALL, src=UPat((Ops.BUFFER, Ops.AFTER, Ops.MSELECT, Ops.MSTACK, Ops.BIND))), lambda: True),
-
-  # ASSIGN has a target and a value. It can also optionally depend on other assigns
-  (UPat(Ops.ASSIGN, name="x"), lambda x: len(x.src) >= 2 and all(s.op is Ops.ASSIGN for s in x.src[2:])),
 
   # MSELECT chooses one of the multi buffers
   (UPat(Ops.MSELECT, name="x"), lambda x: isinstance(x.src[0].device, tuple) and x.arg < len(x.src[0].device)),
@@ -114,28 +121,25 @@ _tensor_spec = PatternMatcher([
   (UPat(Ops.CONTIGUOUS, name="root", src=(UPat.var("x"),), allow_any_len=True, arg=None),
    lambda root,x: root.dtype == x.dtype and all(u.op is Ops.RANGE for u in root.src[1:])),
 
-  # COPY/ALLREDUCE/MULTI/ENCDEC
+  # COPY/ALLREDUCE/MULTI
   (UPat(Ops.COPY, name="copy", src=(UPat.var("x"), UPat(Ops.DEVICE)), arg=None), lambda copy,x: copy.dtype == x.dtype),
   (UPat(Ops.ALLREDUCE, name="red", src=(UPat.var("x"), UPat(Ops.DEVICE))), lambda red,x: red.dtype == x.dtype and isinstance(red.arg, Ops)),
   (UPat(Ops.MULTI, name="multi"), lambda multi: all(x.dtype == multi.dtype for x in multi.src) and isinstance(multi.arg, int)),
-  (UPat(Ops.ENCDEC, name="x"), lambda x: len(x.src) >= 2), # state + inbuffer
 
   # REDUCE_AXIS is the reduce in the tensor graph
   (UPat(Ops.REDUCE_AXIS, name="x"), lambda x: isinstance(x.arg, tuple) and len(x.arg) >= 2 and x.arg[0] in {Ops.ADD, Ops.MUL, Ops.MAX}),
 
-  # REDUCE with an outerworld range
-  (UPat(Ops.REDUCE, src=(UPat(),), allow_any_len=True, name="x"), lambda x: all(y.dtype == dtypes.index for y in x.src[1:])),
-
   # AFTER if things were kernelized
   (UPat(Ops.AFTER, src=(UPat((Ops.BUFFER, Ops.AFTER)),), allow_any_len=True), lambda: True),
 
-  # Tensor range bind / store
-  (UPat(Ops.BIND, (dtypes.int,dtypes.index,), (UPat(Ops.DEFINE_VAR), UPat(Ops.RANGE)), arg=None), lambda: True),
-  (UPat(Ops.STORE, src=(UPat(), UPat())), lambda: True),
-
-  # allow CALL/PARAM
-  (UPat(Ops.CALL, src=(UPat(name="f"),), name="c", allow_any_len=True), lambda c,f: c.dtype == f.dtype),
+  # allow CALL/PARAM/CUSTOM_FUNCTION — CALL dtype is always void
+  (UPat(Ops.CALL, dtypes.void), lambda: True),
   (UPat(Ops.PARAM), lambda: True),
+  (UPat(Ops.CUSTOM_FUNCTION, name="x"), lambda x: isinstance(x.arg, str)),
+
+  # TUPLE must have void dtype, GETTUPLE can only appear on CALL or TUPLE
+  (UPat(Ops.TUPLE, dtypes.void), lambda: True),
+  (UPat(Ops.GETTUPLE, src=(UPat((Ops.CALL, Ops.TUPLE)),), name="g"), lambda g: isinstance(g.arg, int)),
 
   # ** for custom kernels **
 
@@ -209,6 +213,12 @@ kernel_spec = PatternMatcher([
 
   # reduce must be on ranges
   (UPat(Ops.REDUCE, src=(UPat(),), allow_any_len=True, name="x"), lambda x: all(y.dtype in (dtypes.index, dtypes.int) for y in x.src[1:])),
+
+  # COPY/BUFFER_VIEW can have ranges appended
+  (UPat(Ops.COPY, name="x", src=(UPat.var("s"), UPat(Ops.DEVICE)), allow_any_len=True, arg=None),
+   lambda x,s: x.dtype == s.dtype and all(u.op is Ops.RANGE for u in x.src[2:])),
+  (UPat(Ops.BUFFER_VIEW, src=(UPat((Ops.INDEX, Ops.LOAD)),), allow_any_len=True, name="x"),
+   lambda x: all(u.op is Ops.RANGE for u in x.src[1:])),
 ])+movement_ops+shared_codegen_spec+shared_spec
 
 tensor_spec = PatternMatcher([
@@ -225,8 +235,8 @@ program_spec = PatternMatcher([
   # END closes ranges
   (UPat(Ops.END, src=(UPat(), UPat(Ops.RANGE)), dtype=dtypes.void), lambda: True),
 
-  # make sure all index dtypes have been lowered
-  (UPat(GroupOp.All, dtype=dtypes.index), lambda: False),
+  # make sure all index dtypes have been lowered (except CONST/RANGE/DEFINE_VAR which are valid index-typed)
+  (UPat(GroupOp.All-{Ops.CONST, Ops.RANGE, Ops.DEFINE_VAR, Ops.VCONST, Ops.VECTORIZE}, dtype=dtypes.index), lambda: False),
   (UPat(Ops.CONST, arg=Invalid), lambda: False),
   (UPat(Ops.VCONST, name="x"), lambda x: all(v is not Invalid for v in x.arg) and len(x.arg)==x.dtype.vcount>1 and
     type(x.arg) is type(dtypes.as_const(x.arg, x.dtype))),
@@ -255,15 +265,13 @@ full_spec = PatternMatcher([
   # PTRCAT is like VECTORIZE, but it functions on ptrs
   (UPat(Ops.PTRCAT, name="x"), lambda x: x.dtype.vcount == sum([y.dtype.base.count for y in x.src])),
   # CAT is like VECTORIZE, but the srcs can be vectors
-  (UPat(Ops.CAT, name="x"), lambda x: x.dtype.vcount == sum([y.dtype.vcount for y in x.src])),
+  (UPat(Ops.VCAT, name="x"), lambda x: x.dtype.vcount == sum([y.dtype.vcount for y in x.src])),
   # vectorized index
   (UPat(Ops.INDEX, src=(UPat((Ops.VECTORIZE, Ops.CAST)), UPat())), lambda: True),
 
   # linearizer: outputs + intermediate KERNELs
   (UPat(Ops.CALL, dtype=dtypes.void), lambda: True),
 
-  # Invalid must have type Index
-  (UPat(Ops.CONST, arg=Invalid, name="x"), lambda x: x.dtype.scalar() == dtypes.index),
   # where on index in rhs position is fine
   (UPat(Ops.WHERE, dtype=dtypes.index, src=(UPat(dtype=dtypes.bool), UPat(), UPat(dtype=dtypes.index))), lambda: True),
   # allow index dtype on a restricted set of UOps

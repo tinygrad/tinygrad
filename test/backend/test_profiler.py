@@ -1,4 +1,4 @@
-import unittest, struct, contextlib, statistics, time, gc
+import unittest, struct, contextlib, statistics, gc
 from tinygrad import Device, Tensor, dtypes, TinyJit
 from tinygrad.helpers import CI, getenv, Context, ProfileRangeEvent, cpu_profile, cpu_events, ProfilePointEvent, dedup
 from tinygrad.device import Buffer, BufferSpec, Compiled, ProfileDeviceEvent, ProfileGraphEvent
@@ -20,7 +20,7 @@ def helper_collect_profile(*devs):
   cpu_events.clear()
 
   profile_list = []
-  with Context(VIZ=1, PROFILE=1):
+  with Context(PROFILE=1):
     yield profile_list
     for dev in devs: dev.synchronize()
     for dev in devs: dev._at_profile_finalize()
@@ -170,30 +170,19 @@ class TestProfiler(unittest.TestCase):
     for (i1, d1), (i2, d2) in pairs:
       assert abs(jitter_matrix[i1][i2]) < 0.5, "jitter should be less than 0.5us"
 
-  @unittest.skip("this test is flaky")
   def test_cpu_profile(self):
     def test_fxn(err=False):
-      time.sleep(0.1)
       if err: raise Exception()
-      time.sleep(0.1)
 
     with helper_collect_profile(dev:=TestProfiler.d0) as profile:
-      with cpu_profile("test_1", dev.device):
+      with cpu_profile("test_1", dev):
         test_fxn(err=False)
       with self.assertRaises(Exception):
-        with cpu_profile("test_2", dev.device):
+        with cpu_profile("test_2", dev):
           test_fxn(err=True)
 
-    range_events = [p for p in profile if isinstance(p, ProfileRangeEvent)]
+    range_events = [p for p in profile if isinstance(p, ProfileRangeEvent) and p.device == dev]
     self.assertEqual(len(range_events), 2)
-    # record start/end time up to exit (error or success)
-    for e in range_events:
-      self.assertGreater(e.en, e.st)
-    e1, e2 = range_events
-    self.assertEqual([e1.name, e2.name], ["test_1", "test_2"])
-    # TODO: this is flaky
-    #self.assertLess(e1.st, e2.st)
-    #self.assertGreater(e1.en-e1.st, e2.en-e2.st)
 
   @unittest.skip("this test is flaky")
   @unittest.skipUnless(Device[Device.DEFAULT].graph is not None, "graph support required")

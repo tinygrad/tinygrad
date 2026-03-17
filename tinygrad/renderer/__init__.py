@@ -80,19 +80,16 @@ class ProgramSpec:
   ins:list[int]=field(default_factory=list)
 
   @property
-  def estimates(self) -> Estimates: return self.ast.arg.estimates
+  def estimates(self) -> Estimates: return self.ast.arg.estimates if self.ast.arg is not None and self.ast.arg.estimates is not None else Estimates()
 
   @functools.cached_property
   def function_name(self) -> str: return to_function_name(self.name)
 
   @functools.cached_property
-  def runtimevars(self) -> dict[str, int]: return {v.arg[0]: i for i, v in enumerate(self.vars) if v.arg[0] == 'core_id'}
+  def runtimevars(self) -> dict[str, int]: return {v.expr: i for i, v in enumerate(self.vars) if v.expr == 'core_id'}
 
   @property
-  def applied_opts(self) -> tuple[Opt, ...]|None:
-    if self.uops is None: return None
-    assert self.uops[-1].op is Ops.SINK, self.uops[-1].op
-    return self.uops[-1].arg.applied_opts
+  def applied_opts(self) -> tuple[Opt, ...]|None: return self.ast.arg.applied_opts if self.ast.arg is not None else None
 
   def launch_dims(self, var_vals:dict[str, int]):
     global_size = [sym_infer(sz, var_vals) for sz in self.global_size]

@@ -1,7 +1,7 @@
 import ctypes, struct, dataclasses, array, itertools
 from typing import Sequence
 from tinygrad.runtime.autogen import libusb
-from tinygrad.helpers import DEBUG, to_mv, round_up, OSX
+from tinygrad.helpers import DEBUG, to_mv, round_up, OSX, getenv
 from tinygrad.runtime.support.hcq import MMIOInterface
 
 class USB3:
@@ -107,7 +107,7 @@ class USB3:
       if self.use_bot:
         dir_in = rlen > 0
         data_len = rlen if dir_in else (len(send_data) if send_data is not None else 0)
-        assert (data_len == 0) if dir_in else (rlen == 0), "BOT mode only supports either read or write per command"
+        assert not (rlen > 0 and send_data is not None), "BOT mode only supports either read or write per command"
 
         # CBW
         self._tag += 1
@@ -323,3 +323,5 @@ class USBMMIOInterface(MMIOInterface):
 
     _, acc_sz = self._acc_size(len(data) * struct.calcsize(self.fmt))
     self.usb.pcie_mem_write(self.addr+off, [int.from_bytes(data[i:i+acc_sz], "little") for i in range(0, len(data), acc_sz)], acc_sz)
+
+if getenv("MOCKGPU"): from test.mockgpu.usb import MockUSB3 as USB3  # type: ignore  # noqa: F811

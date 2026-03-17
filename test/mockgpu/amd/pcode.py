@@ -468,10 +468,10 @@ class Parser:
       case '||' | '|': return left | right
       case '&&' | '&': return left & right
       case '^': return left ^ right
-      case '==' | '<>': return left.eq(right) if op == '==' else self._cmp_nan(left, right, lambda a,b: a.ne(b))
+      case '==': return left.eq(right)
       case '!=': return left.ne(right)
-      case '>=' | '<=' | '>' | '<':
-        ops = {'>=':(lambda a,b:a>=b),'<=':(lambda a,b:a<=b),'>':(lambda a,b:a>b),'<':(lambda a,b:a<b)}
+      case '>=' | '<=' | '>' | '<' | '<>':
+        ops = {'>=':(lambda a,b:a>=b),'<=':(lambda a,b:a<=b),'>':(lambda a,b:a>b),'<':(lambda a,b:a<b),'<>':(lambda a,b:a.ne(b))}
         return self._cmp_nan(left, right, ops[op])
       case '>>' | '<<': return (left >> right) if op == '>>' else (left << right)
       case '+' | '-':

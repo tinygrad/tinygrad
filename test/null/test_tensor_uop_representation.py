@@ -8,6 +8,7 @@ def is_pattern_uop(u:UOp, pat:UPat): assert pat.match(u, {}), f"{u}\nis not\n{pa
 def is_pattern(ten:Tensor, pat:UPat): is_pattern_uop(ten.uop, pat)
 
 class TestTensorMutates(unittest.TestCase):
+  @unittest.skip("this doesn't mutate anymore")
   def test_mutate_add(self):
     a = Tensor([1,2,3])
     b = Tensor([4,5,6])

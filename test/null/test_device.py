@@ -2,7 +2,8 @@
 import unittest, os, subprocess
 from tinygrad import Tensor
 from tinygrad.device import Device, Compiler, enumerate_devices_str
-from tinygrad.helpers import diskcache_get, diskcache_put, getenv, Context, WIN, CI
+from tinygrad.helpers import diskcache_get, diskcache_put, getenv, Context, WIN, CI, OSX
+from tinygrad.runtime.support.c import DLL
 
 class TestDevice(unittest.TestCase):
   def test_canonicalize(self):
@@ -100,6 +101,7 @@ class TestCompiler(unittest.TestCase):
       a = Tensor([0.,1.], device=Device.DEFAULT).realize()
       (a + 1).realize()
 
+@unittest.skipIf(OSX and 'libclang' in DLL._loaded_, "MTLCompiler can't be loaded after libclang on OSX")
 class TestRunAsModule(unittest.TestCase):
   def test_module_runs(self):
     cpu_line = [l for l in enumerate_devices_str() if "CPU" in l][0]

@@ -68,6 +68,14 @@ class TestTensorGradient(unittest.TestCase):
     np.testing.assert_allclose(x.grad.numpy(), [2.0+3.0+2*3.0])
     self.assertIs(x.grad, old_grad)
 
+  def test_gradient_through_chained_unrealized_setitem(self):
+    g1 = Tensor.zeros(4).contiguous()
+    g1[2] = Tensor(1.0)
+    g2 = Tensor.zeros(5, 4).contiguous()
+    g2[0] = g1
+    x = Tensor.randn(4, 4)
+    np.testing.assert_allclose(x.pad(((1,0),(0,0))).gradient(x, gradient=g2)[0].numpy(), np.zeros((4, 4)))
+
 class TestViewGradient(unittest.TestCase):
   def test_expand(self):
     x = Tensor.randn(5,2)
