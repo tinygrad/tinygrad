@@ -23,24 +23,28 @@ def call_gradient(ctx:UOp, k:UOp, needed:set[int]) -> tuple[UOp|None, ...]:
   assert fxn.op is Ops.TUPLE, f"expected TUPLE body for gradient, got {fxn.op}"
   params = {x.arg:x for x in fxn.toposort(enter_calls=False) if x.op == Ops.PARAM}
   grad_args = ctx.src
-  root_grad = UOp(Ops.TUPLE, src=tuple(fxn.src[i].const_like(0) if g.op is Ops.NOOP else g.param_like(len(args)+i) for i, g in enumerate(grad_args)))
+  root_grad = UOp(Ops.TUPLE, src=tuple(fxn.src[i].const_like(0) if g.op is Ops.NOOP else g.param_like(len(args)+i) for i,g in enumerate(grad_args)))
   grads = compute_gradient(fxn, root_grad, set(params.values()))
-  # for precompiled calls, pass forward outputs to backward so intermediates aren't recomputed
+  # for precompiled calls, substitute forward outputs with params so intermediates aren't recomputed
   fwd_subs = {src: src.param_like(len(args)+len(grad_args)+i) for i, src in enumerate(fxn.src)} if k.arg.precompile else {}
   fwd_outs = tuple(k.gettuple(i) for i in range(len(fxn.src))) if k.arg.precompile else ()
-  # collect needed gradient bodies, create a single backward CALL
-  grad_bodies = [(i, (grads[p].substitute(fwd_subs) if fwd_subs else grads[p])) for i in needed
-                 if (p:=params.get(i)) is not None and p in grads]
-  bwd_body = UOp.maketuple(*(gb for _, gb in grad_bodies))
-  # compact: only pass args that the backward body actually uses
+  # collect needed gradient bodies
+  grad_bodies = [(i, grads[p].substitute(fwd_subs)) for i in needed if (p:=params.get(i)) is not None and p in grads]
   all_args = (*args, *grad_args, *fwd_outs)
-  used_params = {p.arg: p for p in bwd_body.toposort() if p.op is Ops.PARAM}
-  compact_args = tuple(all_args[i] for i in sorted(used_params))
-  compact_subs = {used_params[i]: used_params[i].replace(arg=j) for j, i in enumerate(sorted(used_params))}
-  bwd_call = bwd_body.substitute(compact_subs, walk=True).call(
-    *compact_args, name=(k.arg.name or "")+"_backward", precompile=k.arg.precompile_backward)
-  gb_map = {i: idx for idx, (i, _) in enumerate(grad_bodies)}
-  return (None,) + tuple(bwd_call.gettuple(gb_map[i]) if i in gb_map else None for i in range(len(args)))
+  if k.arg.precompile_backward:
+    # compact unused params out of the backward body, then create a single backward CALL
+    bwd_body = UOp.maketuple(*(gb for _, gb in grad_bodies))
+    used = sorted({p.arg: p for p in bwd_body.toposort() if p.op is Ops.PARAM}.items())
+    bwd_call = bwd_body.substitute({p: p.replace(arg=j) for j,(_, p) in enumerate(used)}).call(
+      *(all_args[i] for i,_ in used), name=(k.arg.name or "")+"_backward", precompile=True)
+    gb_map = {i: idx for idx, (i, _) in enumerate(grad_bodies)}
+    return (None,) + tuple(bwd_call.gettuple(gb_map[i]) if i in gb_map else None for i in range(len(args)))
+  # separate backward CALLs per gradient
+  ret: list[UOp|None] = [None]
+  gb_dict = dict(grad_bodies)
+  for i in range(len(args)):
+    ret.append(gb_dict[i].call(*all_args, name=(k.arg.name or "")+f"_backward_{i}").gettuple(0) if i in gb_dict else None)
+  return tuple(ret)
 
 # ctx is grad_output
 pm_gradient = PatternMatcher([
