@@ -22,7 +22,7 @@ def handle(conn, cmd, dev_id, bar, arg0, arg1, arg2):
     devs = System.list_devices(arg2, tuple([(x, tuple(y)) for x,y in filter_devices.items()]), base_class)
     for p in devs:
       if p not in discovered_devices: discovered_devices.append(p)
-    data = "\n".join(f"{p}:{discovered_devices.index(p)}" for p in devs).encode()
+    data = "\n".join(f"{p[1]}:{discovered_devices.index(p)}" for p in devs).encode()
     return conn.sendall(resp(len(data), len(devs)) + data)
 
   # lazy device open
