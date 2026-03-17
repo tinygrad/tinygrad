@@ -4,6 +4,8 @@ from tinygrad.helpers import OSX, WIN
 from tinygrad.runtime.support.c import DLL, record, init_records
 from tinygrad.runtime.support import c
 from tinygrad.runtime.support.autogen import gen
+from tinygrad.runtime.support.hcq import MMIOInterface
+from tinygrad.runtime.autogen import libc
 
 @unittest.skipIf(WIN, "doesn't compile on windows")
 class TestC(unittest.TestCase):
@@ -290,6 +292,57 @@ class TestC(unittest.TestCase):
     mask_begin(params.mask, 42)
     result = mask_end(params.mask)
     self.assertEqual(result, 43)  # 42 + 1
+
+@unittest.skipIf(WIN, "mmap not available on windows")
+class TestStructFromView(unittest.TestCase):
+  def _alloc_mmio(self, size:int) -> MMIOInterface:
+    addr = libc.mmap(0, size, 0x3, 0x1002, -1, 0) # PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANON
+    assert addr != 0xffffffffffffffff
+    return MMIOInterface(addr, size)
+
+  def test_struct_fields(self):
+    @record
+    class S(c.Struct):
+      SIZE = 16
+      a_u8: Annotated[ctypes.c_uint8, 0]
+      b_u16: Annotated[ctypes.c_uint16, 2]
+      c_u32: Annotated[ctypes.c_uint32, 4]
+      d_u64: Annotated[ctypes.c_uint64, 8]
+    init_records()
+
+    view = self._alloc_mmio(16)
+
+    view[0:16] = struct.pack('<BxHIQ', 0xAB, 0xCDEF, 0xDEADBEEF, 0xCAFEBABE12345678)
+    s = S.from_view(view)
+    self.assertEqual(s.a_u8, 0xAB)
+    self.assertEqual(s.b_u16, 0xCDEF)
+    self.assertEqual(s.c_u32, 0xDEADBEEF)
+    self.assertEqual(s.d_u64, 0xCAFEBABE12345678)
+
+    s.a_u8, s.b_u16, s.c_u32, s.d_u64 = 0x42, 0x1234, 0xAABBCCDD, 0x1122334455667788
+    self.assertEqual(bytes(view[0:16]), struct.pack('<BxHIQ', 0x42, 0x1234, 0xAABBCCDD, 0x1122334455667788))
+
+  def test_bitfields(self):
+    @record
+    class S(c.Struct):
+      SIZE = 2
+      flag: Annotated[ctypes.c_uint8, 0, 1, 0]
+      nibble: Annotated[ctypes.c_uint8, 0, 4, 1]
+      rest: Annotated[ctypes.c_uint8, 0, 3, 5]
+      high: Annotated[ctypes.c_uint8, 1, 4, 0]
+    init_records()
+    view = self._alloc_mmio(2)
+
+    # flag=1(bit0), nibble=0xA(bits1-4), rest=0x5(bits5-7) -> 0xB5, high=0xF -> 0x0F
+    view[0:2] = bytes([0xB5, 0x0F])
+    s = S.from_view(view)
+    self.assertEqual(s.flag, 1)
+    self.assertEqual(s.nibble, 0xA)
+    self.assertEqual(s.rest, 0x5)
+    self.assertEqual(s.high, 0xF)
+
+    s.flag, s.nibble, s.rest, s.high = 0, 0x5, 0x3, 0xC
+    self.assertEqual(bytes(view[0:2]), bytes([0x6A, 0x0C]))
 
 @unittest.skipIf(OSX and ('MTLCompiler' in DLL._loaded_ or 'llvm' in DLL._loaded_), "libclang can't be loaded after MTLCompiler or llvm on OSX")
 @unittest.skipIf(WIN, "doesn't compile on windows")

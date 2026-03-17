@@ -80,13 +80,18 @@ else:
 
 def i2b(i:int, sz:int) -> bytes: return i.to_bytes(sz, sys.byteorder)
 def b2i(b:bytes) -> int: return int.from_bytes(b, sys.byteorder)
-def mv(st) -> memoryview: return memoryview(st).cast('B')
+def mv(st): return st._view if hasattr(st, '_view') else memoryview(st).cast('B')
 
 class Struct(ctypes.Structure):
   def __init__(self, *args, **kwargs):
     ctypes.Structure.__init__(self)
     self._objects_ = {}
     for f,v in [*zip((rf[0] for rf in self._real_fields_), args), *kwargs.items()]: setattr(self, f, v)
+  @classmethod
+  def from_view(cls, view):
+    self = cls.__new__(cls)
+    self._view = view
+    return self
 
 def record(cls) -> type[Struct]:
   struct = type(cls.__name__, (Struct,), {'_fields_': [('_mem_', ctypes.c_byte * cls.SIZE)]})
@@ -117,9 +122,10 @@ class Field(property):
           mv(self).__setitem__(sl, bytes(v if isinstance(v, typ) else f(v)))
         return wrapper
       if issubclass(typ, _CArray):
-        getter = (lambda self: typ.from_buffer(mv(self)[sl]).value) if typ._type_ is ctypes.c_char else (lambda self: typ.from_buffer(mv(self)[sl]))
+        getter = (lambda self: typ.from_buffer_copy(mv(self)[sl]).value) if typ._type_ is ctypes.c_char else (lambda self: typ.from_buffer_copy(mv(self)[sl]))
         super().__init__(getter, set_with_objs(lambda v: typ(*v)))
-      else: super().__init__(lambda self: v.value if isinstance(v:=typ.from_buffer(mv(self)[sl]), _SimpleCData) else v, set_with_objs(typ))
+      elif issubclass(typ, _SimpleCData): super().__init__(lambda self: typ.from_buffer_copy(mv(self)[sl]).value, set_with_objs(typ))
+      else: super().__init__(lambda self: typ.from_buffer_copy(mv(self)[sl]), set_with_objs(typ))
     self.offset = off
 
 @functools.cache
