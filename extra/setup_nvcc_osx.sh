@@ -13,14 +13,14 @@ mkdir -p "$install_loc"
 tee "$install_loc/nvccshim" >/dev/null <<'EOF'
 #!/bin/sh
 set -eu
-vols=""
-for arg in "$@"; do
-  case "$arg" in /*)
-    d=$(dirname -- "$arg")
-    case "$vols" in *" $d:"*) ;; *) vols="$vols -v $d:$d" ;; esac
-  ;; esac
-done
-exec docker run --rm --platform=linux/arm64 $vols cuda-nvcc:12.8 "$(basename "$0")" "$@"
+cname="cuda-nvcc-persistent"
+if ! docker inspect --format='{{.State.Running}}' "$cname" 2>/dev/null | grep -q true; then
+  docker rm -f "$cname" 2>/dev/null || true
+  docker run -d --platform=linux/arm64 --name "$cname" \
+    -v /var/folders:/var/folders -v /tmp:/tmp -v "$HOME":"$HOME" \
+    cuda-nvcc:12.8 sleep infinity >/dev/null
+fi
+exec docker exec "$cname" "$(basename "$0")" "$@"
 EOF
 chmod +x "$install_loc/nvccshim"
 for t in nvcc nvdisasm; do
