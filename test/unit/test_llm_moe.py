@@ -49,5 +49,26 @@ class TestMoEFeedForward(unittest.TestCase):
     expected = 1 + (Tensor([1.0]).silu().item() + Tensor([3.0]).silu().item()) / 2
     np.testing.assert_allclose(out.numpy(), expected, rtol=1e-2)
 
+  def test_moe_feed_forward_norm_topk_prob(self):
+    from tinygrad.apps.llm import TransformerBlock
+    dim, hidden, n_heads = 8, 16, 2
+    num_experts, k = 4, 2
+
+    block = TransformerBlock(dim, hidden, n_heads, n_heads, norm_eps=1e-5, head_dim=dim//n_heads,
+                             rope_theta=10000, max_context=16, num_experts=num_experts, num_experts_per_tok=k)
+    block.norm_topk_prob = True
+
+    block.ffn_gate_exps.weight = Tensor.stack(*[Tensor.eye(hidden, dim) * (i + 1) for i in range(num_experts)])
+    block.ffn_up_exps.weight = Tensor.stack(*[Tensor.eye(hidden, dim) for _ in range(num_experts)])
+    block.ffn_down_exps.weight = Tensor.stack(*[Tensor.eye(dim, hidden) for _ in range(num_experts)])
+    block.ffn_gate_inp.weight = Tensor([[0.1, 0, 0.1, 0]] * dim).T  # equal top-2 experts, but only ~69% mass before renorm
+    block.ffn_norm.weight = Tensor.ones(dim)
+
+    h = Tensor.ones(1, 1, dim)
+    out = block._feed_forward(h)
+
+    expected = 1 + (Tensor([1.0]).silu().item() + Tensor([3.0]).silu().item()) / 2
+    np.testing.assert_allclose(out.numpy()[0, 0, 0], expected, rtol=1e-2)
+
 if __name__ == '__main__':
   unittest.main()

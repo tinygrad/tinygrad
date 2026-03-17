@@ -116,6 +116,11 @@ def rewrite_into_call(call:UOp):
   if not should_resolve_call(call): return None
   new_body = graph_rewrite(call.src[0], multi_pm, name="subcall")
   new_args = tuple(a.src[0] if a.op is Ops.MULTI else a for a in call.src[1:])
+  # after multi resolution, TUPLE elements may be MULTI — strip MULTI from body, create per-shard CALL, wrap each GETTUPLE in its own MULTI
+  assert new_body.op is Ops.TUPLE
+  if any(s.op is Ops.MULTI for s in new_body.src):
+    shard_call = call.replace(src=(UOp.maketuple(*[s.src[0] if s.op is Ops.MULTI else s for s in new_body.src]),)+new_args)
+    return UOp.maketuple(*[shard_call.gettuple(i).multi(s.axis) if s.op is Ops.MULTI else shard_call.gettuple(i) for i, s in enumerate(new_body.src)])
   return call.replace(src=(new_body,)+new_args)
 
 def param_to_multi(p:UOp):
@@ -137,12 +142,20 @@ multi_pm = PatternMatcher([
   (UPat(Ops.COPY, src=(UPat(Ops.MULTI, name="multi"), UPat(Ops.DEVICE, name="device"))), copy_multi),
   (UPat(Ops.ALLREDUCE, src=(UPat(Ops.MULTI, name="multi"), UPat(Ops.DEVICE, name="device")), name="red"),
     lambda multi,device,red: multi.src[0].allreduce(red.arg, device).multi(axis=multi.axis)),
+
+  # resolve TUPLE+GETTUPLE (needed in multi)
+  (UPat(Ops.GETTUPLE, src=(UPat(Ops.TUPLE, name="t"),), name="g"), lambda g,t: t.src[g.arg]),
+  # GETTUPLE on MULTI: passthrough MULTI (e.g. when CALL was replaced by MULTI(GETTUPLE(...)))
+  (UPat(Ops.GETTUPLE, src=(UPat(Ops.MULTI, name="multi"),), name="g"),
+    lambda g, multi: multi.src[0].gettuple(g.arg).multi(multi.axis) if multi.src[0].op in {Ops.CALL, Ops.TUPLE}
+    else multi),
   # rewrite into calls explicitly for MULTI
   (UPat(Ops.CALL, name="call"), rewrite_into_call),
   (UPat((Ops.CALL, Ops.AFTER, Ops.STORE), src=(UPat(Ops.MULTI, name="multi"), ), name="root", allow_any_len=True), passthrough_multi),
-  # we just remove the MULTI from CALLs with dtypes.void and assume they are handled by the user for custom kernels
+  # we just remove the MULTI from non-value-producing CALLs (custom kernels, etc.) — TUPLE body CALLs are handled by rewrite_into_call
   (UPat(Ops.CALL, dtype=dtypes.void, name="root", custom_early_reject=set([Ops.MULTI])), lambda root:
-    UOp(root.op, root.dtype, tuple(x.src[0] if x.op is Ops.MULTI else x for x in root.src), root.arg)),
+    UOp(root.op, root.dtype, tuple(x.src[0] if x.op is Ops.MULTI else x for x in root.src), root.arg)
+    if root.src[0].op is not Ops.TUPLE else None),
   (UPat((Ops.CAST, Ops.BITCAST, Ops.CONTIGUOUS, Ops.DETACH, Ops.CONTIGUOUS_BACKWARD),
         src=(UPat(Ops.MULTI, name="multi"), ), name="root"), passthrough_multi),
 ])+replace_allreduce

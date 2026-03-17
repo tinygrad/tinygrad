@@ -242,7 +242,8 @@ class Tensor(OpMixin):
       param = UOp.param(slot, self.dtype, self.shape, self.device)
     return Tensor(param, device=self.device)
   def call(self, *lst:Tensor, fxn:Tensor|UOp, grad_fxn:Callable|None=None) -> Tensor:
-    return Tensor((fxn.uop if isinstance(fxn, Tensor) else fxn).call(*[t.uop for t in (self,)+lst], grad_fxn=grad_fxn), device=self.device)
+    fret = (fxn.uop if isinstance(fxn, Tensor) else fxn).call(*[t.uop for t in (self,)+lst], grad_fxn=grad_fxn)
+    return Tensor(fret.gettuple(0), device=self.device)
 
   def custom_kernel(self, *lst:Tensor, fxn:Callable, grad_fxn:Callable|None=None) -> list[Tensor]:
     """
@@ -309,20 +310,17 @@ class Tensor(OpMixin):
       self._buffer().copyin(x._data())
       return self
     # STORE+AFTER: STORE is the write effect (void), AFTER wraps the view for correct shape/ranging
-    store_uop = self.uop.store(x.uop)
-    base = self.uop.base
-    if base.op in {Ops.BUFFER, Ops.AFTER} and self.uop is not base and not self.uop.has_buffer_identity():
-      # view assign: inner AFTER(view, STORE) for correct shape/ranging, outer AFTER(ib, inner) for dependency
-      # replace at the buffer-identity level (e.g. RESHAPE(BUFFER)) so @function's substitution catches it
+    assign = self.uop.after(self.uop.store(x.uop))
+    if (base := self.uop.base).op in {Ops.BUFFER, Ops.AFTER} and self.uop is not base and not self.uop.has_buffer_identity():
+      # view assign: replace at the buffer-identity level (e.g. RESHAPE(BUFFER)) so @function's substitution catches it
       ib = self.uop
       while not ib.has_buffer_identity() and ib is not base: ib = ib.src[0]
-      assigned_ib = ib.after(self.uop.after(store_uop))
+      assigned_ib = ib.after(assign)
       _apply_map_to_tensors({ib: assigned_ib}, name="Embed View Assign", walk=True)
-      def replace_view_base(u:UOp) -> UOp:
-        return u.replace(src=((assigned_ib if u.src[0] is ib else replace_view_base(u.src[0])),)+u.src[1:])
-      return Tensor(replace_view_base(self.uop), device=self.device, requires_grad=self.requires_grad)
-    # simple assign: AFTER wraps self.uop (may be RESHAPE'd buffer) with STORE effect
-    return self.replace(self._apply_uop(lambda *_: self.uop.after(store_uop), x))
+    else:
+      # simple assign
+      self.uop = assign
+    return self
 
   def detach(self) -> Tensor:
     """

@@ -1,7 +1,7 @@
 import numpy as np
 import unittest
 from tinygrad.function import function
-from tinygrad import Tensor
+from tinygrad import Tensor, GlobalCounters
 from tinygrad.uop.ops import UOp
 
 class TestFunction(unittest.TestCase):
@@ -165,13 +165,13 @@ class TestFunction(unittest.TestCase):
   def test_name(self):
     @function
     def f(a:Tensor) -> Tensor: return a + 1
-    assert f(Tensor([1])).uop.arg.name.endswith("f")
+    assert f(Tensor([1])).uop.src[0].arg.name.endswith("f")
 
   def test_method_name(self):
     class Foo:
       @function
       def __call__(self, x:Tensor) -> Tensor: return x + 1
-    assert Foo()(Tensor([1])).uop.arg.name.endswith("Foo.__call__")
+    assert Foo()(Tensor([1])).uop.src[0].arg.name.endswith("Foo.__call__")
 
   def test_callable_instance(self):
     class Foo:
@@ -180,7 +180,7 @@ class TestFunction(unittest.TestCase):
     foo = Foo()
     f = function(foo)
     np.testing.assert_equal(f(Tensor([1,2,3])).numpy(), [11,22,33])
-    assert f(Tensor([1,2,3])).uop.arg.name.endswith("Foo")
+    assert f(Tensor([1,2,3])).uop.src[0].arg.name.endswith("Foo")
 
   def test_iadd(self):
     @function
@@ -369,11 +369,11 @@ class TestFunctionTuple(unittest.TestCase):
   def test_grad_tuple_precompile(self): self.test_grad_tuple(True)
 
   def test_grad_fxn_tuple(self):
-    # grad_fxn for tuple: ctx is a TUPLE UOp with one element per output
-    def grad_fxn(ctx:UOp, call:UOp):
-      # f(u1, u2) = (u1+1, u2+2), ctx.src = (d_out0, d_out1)
+    # grad_fxn for tuple: receives one gradient per output as positional args
+    def grad_fxn(d_out0:UOp, d_out1:UOp, call:UOp):
+      # f(u1, u2) = (u1+1, u2+2)
       # df/du1 = d_out0, df/du2 = d_out1
-      return (ctx.src[0], ctx.src[1])
+      return (d_out0, d_out1)
 
     x = Tensor.ones(3, requires_grad=True).contiguous()
     y = Tensor.ones(3, requires_grad=True).contiguous()
@@ -383,6 +383,32 @@ class TestFunctionTuple(unittest.TestCase):
     (t1+t2).sum().backward()
     np.testing.assert_allclose(x.grad.numpy(), [1., 1., 1.])
     np.testing.assert_allclose(y.grad.numpy(), [1., 1., 1.])
+
+class TestFunctionGrad(unittest.TestCase):
+  def test_function_grad_ops(self, precompile=False, precompile_backward=False):
+    N = 64
+    x = Tensor.ones(N,N).contiguous()
+    w1 = Tensor.ones(N,N, requires_grad=True).contiguous()
+    w2 = Tensor.ones(N,N, requires_grad=True).contiguous()
+    w3 = Tensor.ones(N,N, requires_grad=True).contiguous()
+    ref = Tensor.ones(N,N).contiguous()
+    Tensor.realize(x, w1, w2, w3, ref)
+    @function(precompile=precompile, precompile_backward=precompile_backward)
+    def f(x, w1, w2, w3) -> tuple[Tensor, ...]:
+      p1 = x@w1
+      p2 = p1@w2
+      p3 = p2@w3
+      return p1, p2, p3, p3.contiguous()
+    ret = f(x, w1, w2, w3)[-1]
+    loss = (ret-ref).square().mean().backward()
+    print("RESET")
+    GlobalCounters.reset()
+    loss.realize(w1.grad, w2.grad, w3.grad)
+    print(GlobalCounters.global_ops, GlobalCounters.global_mem)
+    self.assertLessEqual(GlobalCounters.global_ops, 4739073)
+  def test_function_grad_ops_precompile(self): self.test_function_grad_ops(precompile=True)
+  def test_function_grad_ops_precompile_backward(self):
+    self.test_function_grad_ops(precompile=True, precompile_backward=True)
 
 if __name__ == '__main__':
   unittest.main()
