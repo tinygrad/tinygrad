@@ -252,7 +252,7 @@ function selectShape(key) {
 const timelineScale = () => d3.scaleLinear().domain([data.first, data.dur]).range([0, document.getElementById("timeline").clientWidth])
 
 function timeAtCycle(clk) {
-  if (clk < data.instSt || clk > data.instEt) return "-";
+  if (clk < data.instSt || clk > data.instEt || data.tracks.get("Shader Clock") == null) return "-";
   let cur = data.instSt, ns = 0, freq = null;
   // walk through all frequency changes and accumulate time in nanoseconds
   for (const [s, v] of data.tracks.get("Shader Clock").valueMap) {
