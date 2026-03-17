@@ -110,18 +110,17 @@ def copy_multi(multi:UOp, device:str | tuple[str, ...] | UOp):
 def store_after_multi(dest:UOp, src:UOp): return dest.after(dest.store(src.src[0])).multi(src.axis)
 
 def passthrough_multi(root:UOp, multi:UOp):
-  shard = UOp(root.op, root.dtype, (multi.src[0],)+tuple(x.src[0] if x.op is Ops.MULTI else x for x in root.src[1:]), root.arg)
-  # CALL has no shape — extract values via GETTUPLE (which has shape) before wrapping in MULTI
-  if root.op is Ops.CALL and shard.src[0].op is Ops.TUPLE:
-    n = len(shard.src[0].src)
-    if n == 1: return shard.gettuple(0).multi(multi.axis)
-    return UOp.maketuple(*(shard.gettuple(i).multi(multi.axis) for i in range(n)))
-  return shard.multi(multi.axis)
+  return UOp(root.op, root.dtype, (multi.src[0],)+tuple(x.src[0] if x.op is Ops.MULTI else x for x in root.src[1:]), root.arg).multi(multi.axis)
 
 def rewrite_into_call(call:UOp):
   if not should_resolve_call(call): return None
   new_body = graph_rewrite(call.src[0], multi_pm, name="subcall")
   new_args = tuple(a.src[0] if a.op is Ops.MULTI else a for a in call.src[1:])
+  # after multi resolution, TUPLE elements may be MULTI — strip MULTI from body, create per-shard CALL, wrap each GETTUPLE in its own MULTI
+  assert new_body.op is Ops.TUPLE
+  if any(s.op is Ops.MULTI for s in new_body.src):
+    shard_call = call.replace(src=(UOp.maketuple(*[s.src[0] if s.op is Ops.MULTI else s for s in new_body.src]),)+new_args)
+    return UOp.maketuple(*[shard_call.gettuple(i).multi(s.axis) if s.op is Ops.MULTI else shard_call.gettuple(i) for i, s in enumerate(new_body.src)])
   return call.replace(src=(new_body,)+new_args)
 
 def param_to_multi(p:UOp):
@@ -144,10 +143,8 @@ multi_pm = PatternMatcher([
   (UPat(Ops.ALLREDUCE, src=(UPat(Ops.MULTI, name="multi"), UPat(Ops.DEVICE, name="device")), name="red"),
     lambda multi,device,red: multi.src[0].allreduce(red.arg, device).multi(axis=multi.axis)),
 
-  # TUPLE with MULTI children: strip MULTI so passthrough_multi can handle the CALL
-  (UPat(Ops.TUPLE, name="root", custom_early_reject=set([Ops.MULTI])), lambda root:
-    UOp.maketuple(*(s.src[0] if s.op is Ops.MULTI else s for s in root.src)).multi(
-      next(s.axis for s in root.src if s.op is Ops.MULTI))),
+  # resolve TUPLE+GETTUPLE (needed in multi)
+  (UPat(Ops.GETTUPLE, src=(UPat(Ops.TUPLE, name="t"),), name="g"), lambda g,t: t.src[g.arg]),
   # GETTUPLE on MULTI: passthrough MULTI (e.g. when CALL was replaced by MULTI(GETTUPLE(...)))
   (UPat(Ops.GETTUPLE, src=(UPat(Ops.MULTI, name="multi"),), name="g"),
     lambda g, multi: multi.src[0].gettuple(g.arg).multi(multi.axis) if multi.src[0].op in {Ops.CALL, Ops.TUPLE}

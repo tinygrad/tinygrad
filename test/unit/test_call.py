@@ -269,7 +269,6 @@ class TestCallMultiSharded(unittest.TestCase):
     np.testing.assert_allclose(t1.numpy(), ref + 1)
     np.testing.assert_allclose(t2.numpy(), ref * 2)
 
-  @unittest.expectedFailure  # TODO: mixed MULTI/non-MULTI TUPLE elements need per-element axis handling
   def test_tuple_sharded_different_axis(self):
     """multi-output function where outputs have different sharding: one reduces on sharded axis, one doesn't"""
     devs = ("CPU:0", "CPU:1")
@@ -304,6 +303,19 @@ class TestCallMultiSharded(unittest.TestCase):
     out = (t1 + t2).sum()
     ref = np.arange(8, dtype=np.float32).reshape(4, 2)
     np.testing.assert_allclose(out.numpy(), ((ref + 1) + (ref * 2)).sum())
+
+  def test_tuple_sharded_outputs_different_axis(self):
+    """multi-output function where the two outputs are sharded on different axes"""
+    devs = ("CPU:0", "CPU:1")
+    @function
+    def f(x:Tensor, y:Tensor): return (x + 1, y + 2)
+    a = Tensor.arange(8).reshape(4, 2).float().shard(devs, axis=0)
+    b = Tensor.arange(8).reshape(4, 2).float().shard(devs, axis=1)
+    t1, t2 = f(a, b)
+    ref_a = np.arange(8, dtype=np.float32).reshape(4, 2)
+    ref_b = np.arange(8, dtype=np.float32).reshape(4, 2)
+    np.testing.assert_allclose(t1.numpy(), ref_a + 1)
+    np.testing.assert_allclose(t2.numpy(), ref_b + 2)
 
 if __name__ == '__main__':
   unittest.main()

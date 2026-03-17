@@ -536,6 +536,10 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     # COPY removes axis. TODO: add more tests for this, and consider MSELECT/MSTACK
     if self.op is Ops.COPY: return None
     if self.op is Ops.MULTI: return self.arg
+    # GETTUPLE: axis comes from the specific TUPLE element, not src[0]
+    if self.op is Ops.GETTUPLE:
+      in_tuple = self.src[0].src[0] if self.src[0].op is Ops.CALL else self.src[0]
+      return in_tuple.src[self.arg].axis if in_tuple.op is Ops.TUPLE else None
     # PARAM: axis is stored as a MULTI source
     if self.op is Ops.PARAM:
       for s in self.src:
