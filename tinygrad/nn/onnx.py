@@ -1162,11 +1162,9 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
     idx_cols = [(indices[..., k] < 0).where(x.shape[k], 0) + indices[..., k] for k in range(K)]
 
     # compute linear indices into the first K dims of x
-    strides, s = [1] * K, 1
-    for k in range(K - 1, 0, -1):
-      s *= x.shape[k]
-      strides[k - 1] = s
-    flat_idx = sum(idx_cols[k] * strides[k] for k in range(K))
+    flat_idx = idx_cols[K - 1]
+    for k in range(K - 2, -1, -1):
+      flat_idx = flat_idx + idx_cols[k] * math.prod(x.shape[k+1:K])
 
     # reshape to [flat, *rest] so scatter can work along dim 0
     flat_size = math.prod(x.shape[:K])
