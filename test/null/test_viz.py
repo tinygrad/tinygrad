@@ -648,24 +648,19 @@ from tinygrad.runtime.autogen.amd.rdna3.ins import *
 from extra.gemm.amd_asm_matmul import Kernel
 
 class TestCfg(unittest.TestCase):
-  def setUp(self):
-    self.arch = getattr(Device[Device.DEFAULT].renderer, "arch", "")
-    if not any(self.arch.startswith(a) for a in {"gfx11", "gfx12"}):
-      self.skipTest(f"tests written for RDNA, got arch {self.arch}")
+  def setUp(self): self.arch = "gfx1100"
 
+  @Context(EMULATE="AMD")
   def get_cfg(self, name:str, k:Kernel):
     insts = k.finalize()
-    t = Tensor.empty(1)
-    dname = t.device
     def fxn(out:UOp) -> UOp:
       lidx = UOp.special(1, "lidx0")
       gidx = UOp.special(1, "gidx0")
       sink = UOp.sink(out.base, lidx, gidx, arg=KernelInfo(name=name))
-      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg=dname), UOp(Ops.LINEAR, src=tuple([UOp(Ops.INS, arg=x) for x in insts]))))
-    out = Tensor.custom_kernel(t, fxn=fxn)[0]
-    ei = out.schedule()[-1].lower()
-    ei.run()
-    return amdgpu_cfg(ei.prg.p.lib, self.arch)
+      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg="NULL"), UOp(Ops.LINEAR, src=tuple([UOp(Ops.INS, arg=x) for x in insts]))))
+    out = Tensor.custom_kernel(Tensor.empty(1, device="NULL"), fxn=fxn)[0]
+    prg = out.schedule()[-1].lower().prg.p
+    return amdgpu_cfg(prg.lib, self.arch)
 
   def test_simple(self):
     k = Kernel(arch=self.arch)
