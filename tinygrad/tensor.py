@@ -313,16 +313,15 @@ class Tensor(OpMixin):
     store_uop = self.uop.store(x.uop)
     base = self.uop.base
     if base.op in {Ops.BUFFER, Ops.AFTER} and self.uop is not base and not self.uop.has_buffer_identity():
-      # view assign: inner AFTER(view, STORE) for correct shape/ranging, outer AFTER(base, inner) for dependency
-      original_uop = self.uop
-      view_after = self.uop.after(store_uop)
-      assigned_base = base.after(view_after)
-      _apply_map_to_tensors({base: assigned_base}, name="Embed View Assign", walk=True)
+      # view assign: inner AFTER(view, STORE) for correct shape/ranging, outer AFTER(ib, inner) for dependency
+      # replace at the buffer-identity level (e.g. RESHAPE(BUFFER)) so @function's substitution catches it
+      ib = self.uop
+      while not ib.has_buffer_identity() and ib is not base: ib = ib.src[0]
+      assigned_ib = ib.after(self.uop.after(store_uop))
+      _apply_map_to_tensors({ib: assigned_ib}, name="Embed View Assign", walk=True)
       def replace_view_base(u:UOp) -> UOp:
-        return u.replace(src=((assigned_base if u.src[0] is base else replace_view_base(u.src[0])),)+u.src[1:])
-      ret = Tensor(replace_view_base(original_uop), device=self.device, requires_grad=self.requires_grad)
-      self.replace(self._apply_uop(lambda *_: replace_view_base(original_uop), x))
-      return ret
+        return u.replace(src=((assigned_ib if u.src[0] is ib else replace_view_base(u.src[0])),)+u.src[1:])
+      return Tensor(replace_view_base(self.uop), device=self.device, requires_grad=self.requires_grad)
     # simple assign: AFTER wraps self.uop (may be RESHAPE'd buffer) with STORE effect
     return self.replace(self._apply_uop(lambda *_: self.uop.after(store_uop), x))
 
