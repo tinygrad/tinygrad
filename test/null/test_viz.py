@@ -644,7 +644,9 @@ class TestVizMemoryLayout(BaseTestViz):
 
 from tinygrad.uop.ops import KernelInfo
 from tinygrad.viz.serve import amdgpu_cfg
-from tinygrad.runtime.autogen.amd.rdna3.ins import *
+from tinygrad.renderer.amd.dsl import s
+from tinygrad.runtime.autogen.amd.rdna3.ins import (s_add_u32, s_branch, s_cbranch_execz, s_cbranch_scc0, s_cbranch_scc1, s_cmp_eq_i32,
+                                                    s_cmp_eq_u64, s_code_end, s_endpgm, s_mov_b32, s_nop)
 from extra.gemm.amd_asm_matmul import Kernel
 from tinygrad.renderer.cstyle import AMDHIPRenderer
 
