@@ -647,25 +647,25 @@ from tinygrad.viz.serve import amdgpu_cfg
 from tinygrad.runtime.autogen.amd.rdna3.ins import *
 from extra.gemm.amd_asm_matmul import Kernel
 
-def run_asm(name:str, k:Kernel):
-  insts = k.finalize()
-  t = Tensor.empty(1)
-  dname = t.device
-  def fxn(out:UOp) -> UOp:
-    lidx = UOp.special(1, "lidx0")
-    gidx = UOp.special(1, "gidx0")
-    sink = UOp.sink(out.base, lidx, gidx, arg=KernelInfo(name=name))
-    return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg=dname), UOp(Ops.LINEAR, src=tuple([UOp(Ops.INS, arg=x) for x in insts]))))
-  out = Tensor.custom_kernel(t, fxn=fxn)[0]
-  ei = out.schedule()[-1].lower()
-  ei.run()
-  return ei
-
 class TestCfg(unittest.TestCase):
   def setUp(self):
     self.arch = getattr(Device[Device.DEFAULT].renderer, "arch", "")
     if not any(self.arch.startswith(a) for a in {"gfx11", "gfx12"}):
       self.skipTest(f"tests written for RDNA, got arch {self.arch}")
+
+  def get_cfg(self, name:str, k:Kernel):
+    insts = k.finalize()
+    t = Tensor.empty(1)
+    dname = t.device
+    def fxn(out:UOp) -> UOp:
+      lidx = UOp.special(1, "lidx0")
+      gidx = UOp.special(1, "gidx0")
+      sink = UOp.sink(out.base, lidx, gidx, arg=KernelInfo(name=name))
+      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg=dname), UOp(Ops.LINEAR, src=tuple([UOp(Ops.INS, arg=x) for x in insts]))))
+    out = Tensor.custom_kernel(t, fxn=fxn)[0]
+    ei = out.schedule()[-1].lower()
+    ei.run()
+    return amdgpu_cfg(ei.prg.p.lib, self.arch)
 
   def test_simple(self):
     k = Kernel(arch=self.arch)
@@ -674,8 +674,7 @@ class TestCfg(unittest.TestCase):
     k.label("bb1")
     k.emit(s_endpgm())
     k.emit(s_code_end())
-    ei = run_asm("simple", k)
-    cfg = amdgpu_cfg(ei.prg.p.lib, self.arch)["data"]
+    cfg = self.get_cfg("simple", k)["data"]
     self.assertEqual(len(cfg["blocks"]), 2)
 
   def test_diamond(self):
@@ -694,8 +693,7 @@ class TestCfg(unittest.TestCase):
     k.label("end")
     k.emit(s_endpgm())
     k.emit(s_code_end())
-    ei = run_asm("diamond", k)
-    ret = amdgpu_cfg(ei.prg.p.lib, self.arch)
+    ret = self.get_cfg("diamond", k)
     cfg = ret["data"]
     self.assertEqual(len(cfg["blocks"]), 5)
     edge_count = sum(len(v) for v in cfg["paths"].values())
@@ -723,7 +721,7 @@ class TestCfg(unittest.TestCase):
     k.emit(s_cbranch_scc0(), target="loop")
     k.emit(s_endpgm())
     k.emit(s_code_end())
-    run_asm("simple_loop", k)
+    self.get_cfg("simple_loop", k)
 
   def test_loop_branch(self):
     k = Kernel(arch=self.arch)
@@ -741,7 +739,7 @@ class TestCfg(unittest.TestCase):
     k.emit(s_cbranch_scc0(), target="loop")
     k.emit(s_endpgm())
     k.emit(s_code_end())
-    run_asm("loop_if", k)
+    self.get_cfg("loop_if", k)
 
   def test_loop_break(self):
     k = Kernel(arch=self.arch)
@@ -756,7 +754,7 @@ class TestCfg(unittest.TestCase):
     k.label("break")
     k.emit(s_endpgm())
     k.emit(s_code_end())
-    run_asm("loop_break", k)
+    self.get_cfg("loop_break", k)
 
   def test_switch(self):
     k = Kernel(arch=self.arch)
@@ -778,7 +776,7 @@ class TestCfg(unittest.TestCase):
     k.label("join")
     k.emit(s_endpgm())
     k.emit(s_code_end())
-    run_asm("switch_case", k)
+    self.get_cfg("switch_case", k)
 
   def test_ping_pong(self):
     k = Kernel(arch=self.arch)
@@ -796,7 +794,7 @@ class TestCfg(unittest.TestCase):
     k.label("end")
     k.emit(s_endpgm())
     k.emit(s_code_end())
-    run_asm("ping_pong", k)
+    self.get_cfg("ping_pong", k)
 
   def test_colored_blocks(self):
     N = 10
@@ -817,7 +815,7 @@ class TestCfg(unittest.TestCase):
     k.label("end")
     k.emit(s_endpgm())
     k.emit(s_code_end())
-    run_asm("test_colored_blocks", k)
+    self.get_cfg("test_colored_blocks", k)
 
   def test_jump_back_to_end(self):
     k = Kernel(arch=self.arch)
@@ -831,7 +829,7 @@ class TestCfg(unittest.TestCase):
     k.emit(s_cmp_eq_i32(s[1], 0))
     k.emit(s_branch(), target="end")
     k.emit(s_code_end())
-    run_asm("jump_back_to_end", k)
+    self.get_cfg("jump_back_to_end", k)
 
 if __name__ == "__main__":
   unittest.main()
