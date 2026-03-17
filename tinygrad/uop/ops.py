@@ -923,7 +923,6 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     if self.axis is not None: p = p.replace(src=p.src + (UOp(Ops.MULTI, arg=self.axis),))
     return p
 
-  # TODO: COPY and BUFFER_VIEW should have void dtype so this set can be replaced with a self.dtype == dtypes.void check
   _NO_TUPLE_WRAP = {Ops.SINK, Ops.PROGRAM, Ops.LINEAR, Ops.COPY, Ops.BUFFER_VIEW, Ops.CUSTOM_FUNCTION, Ops.TUPLE}
   def call(self, *srcs:UOp, grad_fxn:Callable|None=None, metadata:tuple[Metadata, ...]=(),
            name:str|None=None, precompile:bool=False, precompile_backward:bool=False) -> UOp:

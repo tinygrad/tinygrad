@@ -133,7 +133,7 @@ _tensor_spec = PatternMatcher([
   (UPat(Ops.AFTER, src=(UPat((Ops.BUFFER, Ops.AFTER)),), allow_any_len=True), lambda: True),
 
   # allow CALL/PARAM/CUSTOM_FUNCTION — CALL dtype is always void
-  (UPat(Ops.CALL, dtypes.void, src=(UPat(),), allow_any_len=True), lambda: True),
+  (UPat(Ops.CALL, dtypes.void), lambda: True),
   (UPat(Ops.PARAM), lambda: True),
   (UPat(Ops.CUSTOM_FUNCTION, name="x"), lambda x: isinstance(x.arg, str)),
 
