@@ -20,8 +20,7 @@ pm_ctx = PatternMatcher([
 
 ReturnType = TypeVar('ReturnType')
 class _function(Generic[ReturnType]):
-  def __init__(self, fxn:Callable[..., ReturnType], *, precompile:bool=False, precompile_backward:bool=False,
-               allow_implicit:bool=True, grad_fxn:Callable|None=None):
+  def __init__(self, fxn:Callable[..., ReturnType], *, precompile:bool, precompile_backward:bool, allow_implicit:bool, grad_fxn:Callable|None):
     self.fxn = fxn
     self.precompile = precompile
     self.precompile_backward = precompile_backward
@@ -82,11 +81,12 @@ class _function(Generic[ReturnType]):
 # overload signatures support both @function and @function(precompile=True) syntax
 @overload
 def function(fxn:Callable[..., ReturnType], *, precompile:bool=False, precompile_backward:bool=False,
-             allow_implicit:bool=True, grad_fxn:Callable|None=None) -> _function[ReturnType]: ...
+             allow_implicit:bool=False, grad_fxn:Callable|None=None) -> _function[ReturnType]: ...
 @overload
 def function(fxn:None=None, *, precompile:bool=False, precompile_backward:bool=False,
-             allow_implicit:bool=True, grad_fxn:Callable|None=None) -> Callable[[Callable[..., ReturnType]], _function[ReturnType]]: ...
-def function(fxn=None, *, precompile:bool=False, precompile_backward:bool=False, allow_implicit:bool=True, grad_fxn:Callable|None=None):
+             allow_implicit:bool=False, grad_fxn:Callable|None=None) -> Callable[[Callable[..., ReturnType]], _function[ReturnType]]: ...
+def function(fxn=None, *, precompile:bool=False, precompile_backward:bool=False,
+             allow_implicit:bool=False, grad_fxn:Callable|None=None):
   if fxn is None:
     return lambda f: _function(f, precompile=precompile, precompile_backward=precompile_backward,
                                allow_implicit=allow_implicit, grad_fxn=grad_fxn)

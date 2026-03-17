@@ -22,7 +22,7 @@ class TestFunction(unittest.TestCase):
 
   def test_implicit(self):
     inp = Tensor([7,8,9])
-    @function
+    @function(allow_implicit=True)
     def f(a:Tensor, b:Tensor) -> Tensor: return a+b+inp
 
     a = Tensor([1,2,3])
@@ -31,7 +31,7 @@ class TestFunction(unittest.TestCase):
 
   def test_implicit_same_as_input(self):
     inp = Tensor([7,8,9])
-    @function
+    @function(allow_implicit=True)
     def f(a:Tensor, b:Tensor) -> Tensor: return a+b+inp
 
     a = Tensor([1,2,3])
@@ -39,11 +39,11 @@ class TestFunction(unittest.TestCase):
 
   def test_implicit_2(self):
     inp = Tensor([7,8,9])
-    @function
+    @function(allow_implicit=True)
     def f(a:Tensor, b:Tensor) -> Tensor:
       return a+b+inp
     inp2 = Tensor([7,8,10])
-    @function
+    @function(allow_implicit=True)
     def g(a:Tensor, b:Tensor) -> Tensor:
       return a+b+inp2
 
@@ -57,7 +57,7 @@ class TestFunction(unittest.TestCase):
 
   def test_implicit_unrealized(self):
     inp = Tensor([1,2,3]) + Tensor([4,5,6])
-    @function
+    @function(allow_implicit=True)
     def f(a:Tensor) -> Tensor: return a + inp
 
     np.testing.assert_equal(f(Tensor([10,20,30])).numpy(), [15,27,39])
@@ -103,7 +103,7 @@ class TestFunction(unittest.TestCase):
   def test_grad_implicit(self):
     w = Tensor([1., 2., 3.], requires_grad=True)
     w.realize() # TODO: this is required
-    @function
+    @function(allow_implicit=True)
     def f(x:Tensor) -> Tensor: return x * w
 
     x = Tensor([4., 5., 6.])
@@ -112,7 +112,7 @@ class TestFunction(unittest.TestCase):
 
   def test_symbolic_index(self):
     table = Tensor([10,20,30,40]).contiguous().realize()
-    @function
+    @function(allow_implicit=True)
     def f(x:Tensor, start_pos:int|UOp) -> Tensor:
       return x + table[start_pos]
 
@@ -129,9 +129,9 @@ class TestFunction(unittest.TestCase):
 
   def test_nested_calls(self):
     w = Tensor([10., 20., 30.])
-    @function
+    @function(allow_implicit=True)
     def f(a:Tensor) -> Tensor: return a + w
-    @function
+    @function(allow_implicit=True)
     def g(a:Tensor) -> Tensor: return a * w
 
     a = Tensor([1., 2., 3.])
@@ -139,9 +139,9 @@ class TestFunction(unittest.TestCase):
 
   def test_nested_calls_backward(self):
     w = Tensor([[1., 2.], [3., 4.]]).contiguous().realize()
-    @function
+    @function(allow_implicit=True)
     def inner(x:Tensor) -> Tensor: return x + w
-    @function
+    @function(allow_implicit=True)
     def outer(a:Tensor, b:Tensor) -> Tensor: return inner(a.reshape(1,2) + b.reshape(1,2))
 
     a = Tensor([1., 2.], requires_grad=True)
@@ -178,7 +178,7 @@ class TestFunction(unittest.TestCase):
       def __init__(self): self.w = Tensor([10,20,30])
       def __call__(self, x:Tensor) -> Tensor: return x + self.w
     foo = Foo()
-    f = function(foo)
+    f = function(foo, allow_implicit=True)
     np.testing.assert_equal(f(Tensor([1,2,3])).numpy(), [11,22,33])
     assert f(Tensor([1,2,3])).uop.src[0].arg.name.endswith("Foo")
 
@@ -267,7 +267,7 @@ class TestFunctionMulti(unittest.TestCase):
   def test_grad_implicit_multi(self):
     w = Tensor([1., 2., 3., 4.], requires_grad=True).shard(self.devices_2, axis=None)
     w.realize()
-    @function
+    @function(allow_implicit=True)
     def f(x:Tensor) -> Tensor: return x * w
 
     x = Tensor([4., 5., 6., 7.]).shard(self.devices_2, axis=None)
@@ -324,7 +324,7 @@ class TestFunctionMulti(unittest.TestCase):
     devices_4 = tuple(f"CPU:{i}" for i in range(4))
     w = Tensor([[1.,2.],[3.,4.]], requires_grad=True).shard(devices_4, axis=None)
     w.realize()
-    @function
+    @function(allow_implicit=True)
     def f(x:Tensor) -> Tensor: return x @ w
 
     x = Tensor(np.arange(16).reshape(8,2).astype(np.float32), requires_grad=True).shard(devices_4, axis=0)
@@ -337,7 +337,7 @@ class TestFunctionMulti(unittest.TestCase):
     w.realize()
     # pre-init grads like the training loop does
     w.grad = w.zeros_like().contiguous().realize()
-    @function
+    @function(allow_implicit=True)
     def f(x:Tensor) -> Tensor: return x @ w
 
     expected = np.ones((8,2)) @ np.array([[1,3],[2,4]])

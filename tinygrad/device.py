@@ -175,9 +175,6 @@ class Buffer:
   def __repr__(self):
     return f"<buf real:{self.is_allocated()} device:{self.device} size:{self.size} dtype:{self.dtype}" + \
            (f" offset:{self.offset}" if self._base is not None else "") + (f" {self.options=}" if self.options is not None else "") + ">"
-  def as_dmaref(self) -> DMARef:
-    assert hasattr(self.allocator, "_as_dmaref"), f"Device {self.device} doesn't support DMA"
-    return self.allocator._as_dmaref(self._buf)
   def as_memoryview(self, allow_zero_copy=False, force_zero_copy=False) -> memoryview:
     # zero copy with as_memoryview (disabled by default due to use after free)
     if (force_zero_copy or allow_zero_copy) and hasattr(self.allocator, '_as_buffer') and (self.options is None or self.options.image is None):
@@ -203,19 +200,6 @@ class Buffer:
   def view(self, size:int, dtype:DType, offset:int) -> Buffer:
     assert offset < self.nbytes, "offset must be less than nbytes"
     return Buffer(self.device, size, dtype, base=self.base, offset=self.offset+offset)
-
-@dataclass(frozen=True)
-class DMACPURef:
-  addr: int
-  size: int
-
-@dataclass(frozen=True)
-class DMAFdRef:
-  fd: int
-  offset: int
-  size: int
-
-DMARef = DMACPURef|DMAFdRef
 
 DeviceType = TypeVar('DeviceType', bound='Compiled')
 

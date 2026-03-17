@@ -299,8 +299,8 @@ function setFocus(key) {
   const html = d3.select(".info").html("");
   if (eventType === EventTypes.EXEC) {
     const [n, _, ...rest] = e.arg.tooltipText.split("\n");
-    const tableData = [["Name", colored(e.arg.label)], ["Duration", formatTime(e.width)], ["Start Time", formatTime(e.x)]];
-    if (data.instSt != null) tableData.push(["Timestamp", timeAtCycle(e.x)]);
+    const tableData = [["Name", colored(e.arg.label)], ["Duration", formatTime(e.width)]];
+    data.instSt != null ? tableData.push(["Start Cycle", formatTime(e.x)], ["Timestamp", timeAtCycle(e.x)]) : tableData.push(["Start Time", formatTime(e.x)]);
     html.append(() => tabulate(tableData));
     let group = html.append("div").classed("args", true);
     for (const r of rest) group.append("p").text(r);
