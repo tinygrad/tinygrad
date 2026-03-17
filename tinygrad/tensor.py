@@ -646,8 +646,7 @@ class Tensor(OpMixin):
       for i in range(0, num, dtypes.uint32.max):
         chunk_num = min(num - i, dtypes.uint32.max)
         c_low = low + (i & 0xffffffff)
-        c_carry = (c_low < low).cast(dtypes.uint32)
-        c_high = high + (i >> 32) + c_carry
+        c_high = high + (i >> 32) + (c_low < low).cast(dtypes.uint32)
         new_key = Tensor._threefry_random_bits(Tensor._device_seeds[device], c_low, c_high)
         counts0 = Tensor.arange(ceildiv(chunk_num, 2), device=device, dtype=dtypes.uint32, requires_grad=False)
         counts1 = counts0 + ceildiv(chunk_num, 2)
