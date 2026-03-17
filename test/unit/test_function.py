@@ -165,13 +165,13 @@ class TestFunction(unittest.TestCase):
   def test_name(self):
     @function
     def f(a:Tensor) -> Tensor: return a + 1
-    assert f(Tensor([1])).uop.arg.name.endswith("f")
+    assert f(Tensor([1])).uop.src[0].arg.name.endswith("f")
 
   def test_method_name(self):
     class Foo:
       @function
       def __call__(self, x:Tensor) -> Tensor: return x + 1
-    assert Foo()(Tensor([1])).uop.arg.name.endswith("Foo.__call__")
+    assert Foo()(Tensor([1])).uop.src[0].arg.name.endswith("Foo.__call__")
 
   def test_callable_instance(self):
     class Foo:
@@ -180,7 +180,7 @@ class TestFunction(unittest.TestCase):
     foo = Foo()
     f = function(foo)
     np.testing.assert_equal(f(Tensor([1,2,3])).numpy(), [11,22,33])
-    assert f(Tensor([1,2,3])).uop.arg.name.endswith("Foo")
+    assert f(Tensor([1,2,3])).uop.src[0].arg.name.endswith("Foo")
 
   def test_iadd(self):
     @function
@@ -212,6 +212,17 @@ class TestFunction(unittest.TestCase):
     np.testing.assert_equal(f(a,b).numpy(), [11,21,31])
     np.testing.assert_equal(a.numpy(), [11,21,31])  # TODO: should be [1,2,3]
     np.testing.assert_equal(b.numpy(), [10,20,30])
+
+  def test_view_assign_explicit_buffer(self):
+    """view assign on an explicit param's buffer should not create implicit inputs."""
+    class State:
+      def __init__(self): self.buf = Tensor.zeros(2, 4).contiguous().realize()
+      @function(allow_implicit=False)
+      def __call__(self, x:Tensor) -> Tensor:
+        self.buf[:, 0:2].assign(x)
+        return self.buf[:, 0:2]
+    s = State()
+    np.testing.assert_equal(s(Tensor([[5., 6.], [7., 8.]])).numpy(), [[5., 6.], [7., 8.]])
 
   @unittest.expectedFailure
   def test_assign_slice(self):
@@ -358,11 +369,11 @@ class TestFunctionTuple(unittest.TestCase):
   def test_grad_tuple_precompile(self): self.test_grad_tuple(True)
 
   def test_grad_fxn_tuple(self):
-    # grad_fxn for tuple: ctx is a TUPLE UOp with one element per output
-    def grad_fxn(ctx:UOp, call:UOp):
-      # f(u1, u2) = (u1+1, u2+2), ctx.src = (d_out0, d_out1)
+    # grad_fxn for tuple: receives one gradient per output as positional args
+    def grad_fxn(d_out0:UOp, d_out1:UOp, call:UOp):
+      # f(u1, u2) = (u1+1, u2+2)
       # df/du1 = d_out0, df/du2 = d_out1
-      return (ctx.src[0], ctx.src[1])
+      return (d_out0, d_out1)
 
     x = Tensor.ones(3, requires_grad=True).contiguous()
     y = Tensor.ones(3, requires_grad=True).contiguous()

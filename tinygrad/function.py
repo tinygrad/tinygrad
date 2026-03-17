@@ -74,7 +74,7 @@ class _function(Generic[ReturnType]):
     if isinstance(ret, tuple):
       return cast(ReturnType, tuple(Tensor(fret.gettuple(i), device=fret.device) for i in range(len(ret))))
     else:
-      return cast(ReturnType, Tensor(fret, device=fret.device))
+      return cast(ReturnType, Tensor(fret.gettuple(0), device=fret.device))
 
 # overload signatures support both @function and @function(precompile=True) syntax
 @overload

@@ -87,6 +87,9 @@ class TestGemmLarge(unittest.TestCase):
     if not is_cdna4():
       self.skipTest("very slow on non mi350x")
 
+  @Context(ASM_GEMM=1)
+  def test_empty(self): (Tensor.empty(N:=getenv("N", 4096), N, dtype=dtypes.half)@Tensor.empty(N, N, dtype=dtypes.half)).realize()
+
   def test_tiny(self): verify_asm_gemm(1, 256, 256, 64)
   def test_simple(self): verify_asm_gemm(1, N:=getenv("N", 4096), N, N, dtype=dtypes.half)
   def test_gemm(self): verify_asm_gemm(1, 8192, 4096, 14336)
