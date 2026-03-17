@@ -1,10 +1,7 @@
 import math
-from tinygrad import Tensor, nn, UOp, function
+from tinygrad import Tensor, nn, UOp, function, getenv
 from extra.models.llama import apply_rotary_emb, precompute_freqs_cis
 
-def lin_layer(n_layers:int, out_features:int, in_features:int):
-  bound = 1 / math.sqrt(in_features)
-  return Tensor.uniform(n_layers, out_features, in_features, low=-bound, high=bound)
 
 def rmsnorm(x_in:Tensor, eps:float):
   x = x_in.float()
@@ -21,13 +18,13 @@ class FlatTransformer:
     self.n_rep = self.n_heads // self.n_kv_heads
 
     # Attention
-    self.wqkv = lin_layer(n_layers, dim, self.n_heads * self.head_dim + self.n_kv_heads * self.head_dim * 2)
-    self.wo = lin_layer(dim, self.n_heads * self.head_dim)
+    self.wqkv = self.lin_per_layer(dim, self.n_heads * self.head_dim + self.n_kv_heads * self.head_dim * 2)
+    self.wo = self.lin_per_layer(dim, self.n_heads * self.head_dim)
 
     # FeedForward
-    self.w1 = lin_layer(n_layers, hidden_dim, dim)
-    self.w2 = lin_layer(n_layers, dim, hidden_dim)
-    self.w3 = lin_layer(n_layers, hidden_dim, dim)
+    self.w1 = self.lin_per_layer(hidden_dim, dim)
+    self.w2 = self.lin_per_layer(dim, hidden_dim)
+    self.w3 = self.lin_per_layer(hidden_dim, dim)
 
     self.norm_eps = norm_eps
     self.attention_norm = Tensor.ones(n_layers, dim)
@@ -38,6 +35,10 @@ class FlatTransformer:
     self.tok_embeddings = nn.Embedding(vocab_size, dim)
     self.output = nn.Linear(dim, vocab_size, bias=False)
     self.freqs_cis = precompute_freqs_cis(dim // n_heads, max_context * 2, rope_theta).contiguous().requires_grad_(False)
+
+  def lin_per_layer(self, out_features:int, in_features:int):
+    bound = 1 / math.sqrt(in_features)
+    return Tensor.uniform(self.n_layers, out_features, in_features, low=-bound, high=bound)
 
   def attention(self, i:UOp, x:Tensor, freqs_cis:Tensor):
     x = rmsnorm(x, self.norm_eps) * self.attention_norm[i]
@@ -78,3 +79,13 @@ class FlatTransformer:
     for i in range(self.n_layers): h = self.run_layer(layer.bind(i), h, freqs_cis)
     logits = self.output(self.norm(h))
     return logits
+
+if __name__ == "__main__":
+  config = {}
+  SEQLEN             = config["SEQLEN"]                 = getenv("SEQLEN", 8192)
+  from examples.llama3 import MODEL_PARAMS
+  model_params = MODEL_PARAMS[getenv("LLAMA3_SIZE", "8B")]["args"]
+  model = FlatTransformer(**model_params, max_context=SEQLEN)
+  state = nn.state.get_state_dict(model)
+  print("tensor count:", len(state))
+  for k,v in state.items(): print(k, v.shape, v.dtype)
