@@ -104,7 +104,7 @@ if __name__ == "__main__":
   sz = 0
   for k,v in state.items():
     if v.requires_grad is None: v.requires_grad_(True)
-    print(f"{k:30s} {str(v.shape):30s} {v.dtype} {v.device}")
+    print(f"{colored(k, "green" if v.requires_grad else "white"):30s} {str(v.shape):30s} {v.dtype} {v.device}")
     sz += v.nbytes()
   print(f"total sz: {sz/1e9:.2f} GB")
 
