@@ -22,50 +22,25 @@ def call_gradient(ctx:UOp, k:UOp, needed:set[int]) -> tuple[UOp|None, ...]:
     return (None,) + k.arg.grad_fxn(ctx, k)
   assert fxn.op is Ops.TUPLE, f"expected TUPLE body for gradient, got {fxn.op}"
   params = {x.arg:x for x in fxn.toposort(enter_calls=False) if x.op == Ops.PARAM}
-
-  # only pass real grad outputs as external args, embed const 0 in the body for NOOP slots
-  ext_grad_args: list[UOp] = []
-  root_grad_srcs: list[UOp] = []
-  for i, g in enumerate(ctx.src):
-    if g.op is Ops.NOOP:
-      root_grad_srcs.append(fxn.src[i].const_like(0))
-    else:
-      root_grad_srcs.append(g.param_like(len(args) + len(ext_grad_args)))
-      ext_grad_args.append(g)
-  root_grad = UOp(Ops.TUPLE, src=tuple(root_grad_srcs))
+  grad_args = ctx.src
+  root_grad = UOp(Ops.TUPLE, src=tuple(fxn.src[i].const_like(0) if g.op is Ops.NOOP else g.param_like(len(args)+i) for i, g in enumerate(grad_args)))
   grads = compute_gradient(fxn, root_grad, set(params.values()))
-
   # for precompiled calls, pass forward outputs to backward so intermediates aren't recomputed
-  fwd_outs: tuple[UOp, ...] = ()
-  fwd_subs: dict[UOp, UOp] = {}
-  if k.arg.precompile:
-    fwd_slot_base = len(args) + len(ext_grad_args)
-    for i, src in enumerate(fxn.src):
-      fwd_subs[src] = src.param_like(fwd_slot_base + i)
-      fwd_outs += (k.gettuple(i),)
-
-  # collect gradient bodies per param, only for needed params
-  grad_bodies: list[tuple[int, UOp]] = []
-  for i in range(len(args)):
-    if needed is not None and i not in needed: continue
-    if (p:=params.get(i, None)) is not None and p in grads:
-      grad_body = grads[p].substitute(fwd_subs) if fwd_subs else grads[p]
-      assert not grad_body.op_in_backward_slice_with_self(Ops.BUFFER), "BUG: BUFFER in backward slice of grad"
-      grad_bodies.append((i, grad_body))
-
-  # create a single backward CALL with all grads as a TUPLE
-  bwd_call = UOp.maketuple(*(gb for _, gb in grad_bodies)).call(
-    *args, *ext_grad_args, *fwd_outs, name=(k.arg.name or "")+"_backward", precompile=k.arg.precompile_backward)
-
-  ret: list[UOp|None] = [None]
-  bwd_idx = 0
-  for i in range(len(args)):
-    if bwd_idx < len(grad_bodies) and grad_bodies[bwd_idx][0] == i:
-      ret.append(bwd_call.gettuple(bwd_idx))
-      bwd_idx += 1
-    else:
-      ret.append(None)
-  return tuple(ret)
+  fwd_subs = {src: src.param_like(len(args)+len(grad_args)+i) for i, src in enumerate(fxn.src)} if k.arg.precompile else {}
+  fwd_outs = tuple(k.gettuple(i) for i in range(len(fxn.src))) if k.arg.precompile else ()
+  # collect needed gradient bodies, create a single backward CALL
+  grad_bodies = [(i, (grads[p].substitute(fwd_subs) if fwd_subs else grads[p])) for i in needed
+                 if (p:=params.get(i)) is not None and p in grads]
+  bwd_body = UOp.maketuple(*(gb for _, gb in grad_bodies))
+  # compact: only pass args that the backward body actually uses
+  all_args = (*args, *grad_args, *fwd_outs)
+  used_params = {p.arg: p for p in bwd_body.toposort() if p.op is Ops.PARAM}
+  compact_args = tuple(all_args[i] for i in sorted(used_params))
+  compact_subs = {used_params[i]: used_params[i].replace(arg=j) for j, i in enumerate(sorted(used_params))}
+  bwd_call = bwd_body.substitute(compact_subs, walk=True).call(
+    *compact_args, name=(k.arg.name or "")+"_backward", precompile=k.arg.precompile_backward)
+  gb_map = {i: idx for idx, (i, _) in enumerate(grad_bodies)}
+  return (None,) + tuple(bwd_call.gettuple(gb_map[i]) if i in gb_map else None for i in range(len(args)))
 
 # ctx is grad_output
 pm_gradient = PatternMatcher([
@@ -118,7 +93,7 @@ def compute_gradient(root:UOp, root_grad:UOp, targets:set[UOp]) -> dict[UOp, UOp
       k = t0.src[0]  # the CALL
       assert k.op is Ops.CALL and k.src[0].op is Ops.TUPLE
       n_outputs = len(k.src[0].src)
-      prev: tuple[UOp, ...] = grads[k].src if k in grads else tuple(UOp(Ops.NOOP) for _ in range(n_outputs))
+      prev = grads[k].src if k in grads else tuple(UOp(Ops.NOOP) for _ in range(n_outputs))
       grads[k] = UOp.maketuple(*(prev[i] + grads[t0] if i == t0.arg and prev[i].op is not Ops.NOOP else
                                  grads[t0] if i == t0.arg else prev[i] for i in range(n_outputs)))
       continue
