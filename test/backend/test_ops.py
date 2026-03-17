@@ -3006,6 +3006,28 @@ class TestOps(unittest.TestCase):
                          lambda x: x.gather(dim=0, index=Tensor([2, 1, 0, 1, 2])),
                          vals=[[-float("inf"), 2., 3.]])
 
+  def test_scatternd(self):
+    from tinygrad.nn.onnx import get_onnx_ops
+    ScatterND = get_onnx_ops()["ScatterND"]
+    x = Tensor.zeros(4, 4)
+    indices = Tensor([[0], [2]])
+    updates = Tensor([[1, 2, 3, 4], [5, 6, 7, 8]]).float()
+    result = ScatterND(x, indices, updates)
+    expected = np.zeros((4, 4), dtype=np.float32)
+    expected[0] = [1, 2, 3, 4]
+    expected[2] = [5, 6, 7, 8]
+    np.testing.assert_allclose(result.numpy(), expected)
+
+  def test_scatternd_add(self):
+    from tinygrad.nn.onnx import get_onnx_ops
+    ScatterND = get_onnx_ops()["ScatterND"]
+    x = Tensor.ones(3, 3)
+    indices = Tensor([[0], [0], [1]])
+    updates = Tensor([[10, 20, 30], [1, 2, 3], [4, 5, 6]]).float()
+    result = ScatterND(x, indices, updates, reduction="add")
+    expected = np.array([[12, 23, 34], [5, 6, 7], [1, 1, 1]], dtype=np.float32)
+    np.testing.assert_allclose(result.numpy(), expected)
+
   def test_scatter(self):
     b = torch.randint(3, size=[3,4,5], dtype=torch.int64, requires_grad=False)
     a = Tensor(b.detach().cpu().numpy().astype(np.int32), dtype=dtypes.int32, requires_grad=False)

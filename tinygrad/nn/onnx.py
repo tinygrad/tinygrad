@@ -1155,17 +1155,34 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
     ret = x[(b_idx,) + tuple(i.squeeze(-1) for i in indices.split(1, -1))]
     return ret.reshape(*x_shape[:batch_dims], *i_shape[batch_dims:-1], *ret.shape[indices.ndim-1:])
   def ScatterND(x:Tensor, indices:Tensor, updates:Tensor, reduction:Literal["none", "add", "mul", "max", "min"]='none'):
-    assert updates.shape == indices.shape[:-1] + x.shape[cast(int, indices.shape[-1]):]
-    for index, u in zip(indices.split(1, 0), updates.split(1, 0)):
-      i = tuple(idx.squeeze(-1) for idx in index.squeeze(0).split(1, -1))
-      u = u.squeeze(0)
-      if reduction == "none": x[i] = u
-      elif reduction == "add": x[i] += u
-      elif reduction == "mul": x[i] *= u
-      elif reduction == "max": x[i] = x[i].maximum(u)
-      elif reduction == "min": x[i] = x[i].minimum(u)
-      x.realize()
-    return x
+    K = cast(int, indices.shape[-1])
+    assert updates.shape == indices.shape[:-1] + x.shape[K:]
+
+    # normalize negative indices per dimension (same pattern as ScatterElements)
+    idx_cols = [(indices[..., k] < 0).where(x.shape[k], 0) + indices[..., k] for k in range(K)]
+
+    # compute linear indices into the first K dims of x
+    strides, s = [1] * K, 1
+    for k in range(K - 1, 0, -1):
+      s *= x.shape[k]
+      strides[k - 1] = s
+    flat_idx = sum(idx_cols[k] * strides[k] for k in range(K))
+
+    # reshape to [flat, *rest] so scatter can work along dim 0
+    flat_size = math.prod(x.shape[:K])
+    rest = x.shape[K:]
+    num_upd = math.prod(indices.shape[:-1])
+
+    x_flat = x.reshape(flat_size, *rest)
+    upd_flat = updates.reshape(num_upd, *rest)
+    idx = flat_idx.reshape(num_upd, *([1] * len(rest))).expand(num_upd, *rest)
+
+    if reduction == "none":
+      out = x_flat.scatter(0, idx, upd_flat)
+    else:
+      reduce_map = {"add": "sum", "mul": "prod", "max": "amax", "min": "amin"}
+      out = x_flat.scatter_reduce(0, idx, upd_flat, cast(Literal["sum","prod","amax","amin"], reduce_map[reduction]))
+    return out.reshape(x.shape)
 
   def TensorScatter(data: Tensor, updates: Tensor, indices: Tensor, mode: str = 'default'):
     # scatter updates along axis -2 at positions given by indices, for each batch
