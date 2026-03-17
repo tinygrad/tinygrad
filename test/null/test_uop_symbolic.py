@@ -36,7 +36,7 @@ class TestSymbolic(unittest.TestCase):
     self.assertEqual(solver.check(expr1 != expr2), z3.unsat, "simplified expression not equal to original")
 
   def helper_test_variable(self, v, n, m, s, test_z3:bool=True):
-    v_simplified = graph_rewrite(v, sym, name="simplify symbolic uop")
+    v_simplified = graph_rewrite(v, sym+pm_simplify_valid, name="simplify symbolic uop")
     if test_z3: self.check_equal_z3(v, v_simplified)
     nmin, nmax = v_simplified.vmin, v_simplified.vmax
     check_uop_against_string(self, v_simplified, s)
