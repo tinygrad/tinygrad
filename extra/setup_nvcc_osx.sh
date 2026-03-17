@@ -13,10 +13,15 @@ mkdir -p "$install_loc"
 tee "$install_loc/nvccshim" >/dev/null <<'EOF'
 #!/bin/sh
 set -eu
-last="${@: -1}"
-vol=""
-if [ -e "$last" ]; then dir=$(cd "$(dirname -- "$last")" && pwd); vol="-v $dir:$dir"; fi
-exec docker run --rm --platform=linux/amd64 $vol cuda-nvcc:12.8 "$(basename "$0")" "$@"
+# collect all absolute path args and mount their directories
+vols=""
+for arg in "$@"; do
+  case "$arg" in /*)
+    d=$(dirname -- "$arg")
+    case "$vols" in *" $d:"*) ;; *) vols="$vols -v $d:$d" ;; esac
+  ;; esac
+done
+exec docker run --rm --platform=linux/amd64 $vols cuda-nvcc:12.8 "$(basename "$0")" "$@"
 EOF
 chmod +x "$install_loc/nvccshim"
 for t in nvcc nvdisasm; do
