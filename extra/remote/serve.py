@@ -81,6 +81,7 @@ if __name__ == "__main__":
   server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
   server.bind(("0.0.0.0", port))
   server.listen(1)
+  print(f"listening on {socket.gethostbyname(socket.gethostname())}:{port}")
   while True:
     conn, addr = server.accept()
     conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
