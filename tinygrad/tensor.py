@@ -633,23 +633,19 @@ class Tensor(OpMixin):
       Tensor._device_rng_counters[device] = Tensor([0, 0], device=device, dtype=dtypes.uint32, requires_grad=False).contiguous()
 
     # increment rng counter for devices
-    c = Tensor._device_rng_counters[device]
-    new_low = c[0:1] + (num & 0xFFFFFFFF)
-    carry = (new_low < c[0:1]).cast(dtypes.uint32)
-    new_high = c[1:2] + (num >> 32) + carry
-    c.assign(Tensor.cat(new_low, new_high))
+    new_low = Tensor._device_rng_counters[device][0] + (num & 0xffffffff)
+    new_high = Tensor._device_rng_counters[device][1] + (num >> 32) + (new_low < Tensor._device_rng_counters[device][0]).cast(dtypes.uint32)
+    Tensor._device_rng_counters[device].assign(Tensor.stack(new_low, new_high))
 
-    # To ensure the assign is executed in the lazy graph, we must depend on `c`
-    low = c[0:1] - (num & 0xFFFFFFFF)
-    high = c[1:2] - (num >> 32) - (c[0:1] < (num & 0xFFFFFFFF)).cast(dtypes.uint32)
+    low = Tensor._device_rng_counters[device][0] - (num & 0xffffffff)
+    high = Tensor._device_rng_counters[device][1] - (num >> 32) - (Tensor._device_rng_counters[device][0] < (num & 0xffffffff)).cast(dtypes.uint32)
 
     # threefry random bits
-    MAX_ARANGE = dtypes.uint32.max
-    if num > MAX_ARANGE:
+    if num > dtypes.uint32.max:
       bits_list = []
-      for i in range(0, num, MAX_ARANGE):
-        chunk_num = min(num - i, MAX_ARANGE)
-        c_low = low + (i & 0xFFFFFFFF)
+      for i in range(0, num, dtypes.uint32.max):
+        chunk_num = min(num - i, dtypes.uint32.max)
+        c_low = low + (i & 0xffffffff)
         c_carry = (c_low < low).cast(dtypes.uint32)
         c_high = high + (i >> 32) + c_carry
         new_key = Tensor._threefry_random_bits(Tensor._device_seeds[device], c_low, c_high)
