@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 import socket, struct, sys
 from tinygrad.runtime.support.system import PCIDevice, RemoteCmd, System
-from tinygrad.helpers import DEBUG
+from tinygrad.helpers import DEBUG, OSX
 
 def resp(resp0=0, resp1=0, status=0): return struct.pack('<BQQ', status, resp0, resp1)
 def resp_err(msg): return struct.pack('<BQQ', 1, len(err:=msg.encode()), 0) + err
@@ -47,15 +47,19 @@ def handle(conn, cmd, dev_id, bar, arg0, arg1, arg2):
     pci_dev.reset()
     conn.sendall(resp())
   elif cmd == RemoteCmd.MMIO_READ:
-    conn.sendmsg([resp(arg1), mapped_bars[(dev_id, bar)][arg0:arg0+arg1]])
+    bar_view = mapped_bars[(dev_id, bar)]
+    if arg0 % 4 == 0 and arg1 == 4: conn.sendmsg([resp(arg1), struct.pack(f'<{arg1 // 4}I', bar_view.view(arg0, arg1, fmt='I')[0])])
+    else: conn.sendmsg([resp(arg1), bar_view[arg0:arg0+arg1]])
   elif cmd == RemoteCmd.MMIO_WRITE:
-    mapped_bars[(dev_id, bar)][arg0:arg0+arg1] = conn.recv(arg1, socket.MSG_WAITALL)
+    data = conn.recv(arg1, socket.MSG_WAITALL)
+    bar_view = mapped_bars[(dev_id, bar)]
+    if arg0 % 4 == 0 and arg1 == 4: bar_view.view(arg0, arg1, fmt='I')[0] = struct.unpack(f'<{arg1 // 4}I', data)[0]
+    else: bar_view[arg0:arg0+arg1] = data
   elif cmd == RemoteCmd.MAP_SYSMEM:
-    memview, paddrs = pci_dev.alloc_sysmem(arg0)
-    hdl = len(sysmem_allocs)
+    memview, paddrs = pci_dev.alloc_sysmem(arg0, contiguous=bool(arg1))
     sysmem_allocs.append((memview, paddrs))
     paddrs_bytes = struct.pack(f'<{len(paddrs)}Q', *paddrs)
-    conn.sendall(resp(len(paddrs_bytes), hdl) + paddrs_bytes)
+    conn.sendall(resp(len(paddrs_bytes), len(sysmem_allocs) - 1) + paddrs_bytes)
   elif cmd == RemoteCmd.SYSMEM_READ:
     conn.sendmsg([resp(arg1), sysmem_allocs[bar][0][arg0:arg0+arg1]])
   elif cmd == RemoteCmd.SYSMEM_WRITE:
@@ -77,6 +81,8 @@ def serve(conn:socket.socket):
       conn.sendall(resp_err(str(e)))
 
 if __name__ == "__main__":
+  if not OSX: System.reserve_hugepages(128) # for sysmem allocations
+
   port = int(sys.argv[1]) if len(sys.argv) > 1 else 6667
   server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
   server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)

@@ -20,7 +20,8 @@ from tinygrad.engine.allocations import transform_to_call
 
 # TODO: this should be the only usage of Device
 def canonicalize_device(device:str|tuple|list|None) -> str|tuple[str, ...]:
-  return tuple(Device.canonicalize(d) for d in device) if isinstance(device, (tuple, list)) else Device.canonicalize(device)
+  if not isinstance(device, (tuple, list)): return Device.canonicalize(device)
+  return canonical[0] if len(canonical:=tuple(Device.canonicalize(d) for d in device)) == 1 else canonical
 
 # *** all in scope Tensors are here. this gets relevant UOps ***
 
@@ -61,7 +62,7 @@ def _frompy(x:list|tuple|bytes, dtype:DType) -> UOp:
     ret = UOp.new_buffer("PYTHON", prod(shape:=get_shape(x)), dtype).reshape(shape)
     assert dtype.fmt is not None, f"{dtype=} has None fmt"
     truncate_function = truncate[dtype]
-    data = struct.pack(f"{ret.size}{dtype.fmt}", *[truncate_function(dtypes.as_const(xi, dtype)) for xi in fully_flatten(x)])
+    data = struct.pack(f"{ret.size}{dtype.fmt}", *[truncate_function(dtype.const(xi)) for xi in fully_flatten(x)])
   # fake realize
   ret.buffer.allocate(memoryview(data if Device.DEFAULT != "PYTHON" else bytearray(data)))
   return ret
@@ -115,7 +116,9 @@ class Tensor(OpMixin):
 
   def __init__(self, data:ConstType|bytes|list|tuple|UOp|'numpy.ndarray'|pathlib.Path|None,
                device:str|tuple|list|None=None, dtype:DTypeLike|None=None, requires_grad:bool|None=None, _force_unique:bool=False):
-    if device is None and isinstance(data, pathlib.Path): device = f"DISK:{data.resolve()}"  # keep it on the disk if device is None
+    if device is None:
+      if isinstance(data, pathlib.Path): device = f"DISK:{data.resolve()}"  # keep it on the disk if device is None
+      elif isinstance(data, UOp): device = data._device
     _dtype:DType|None = to_dtype(dtype) if dtype is not None else None
     _device:str|tuple[str, ...] = canonicalize_device(device)
     del device, dtype
@@ -138,24 +141,24 @@ class Tensor(OpMixin):
         const = UOp.const(var.dtype, val, _device, ())
         data = data.replace(src=(var.replace(src=const.src), const))
     elif data is None:
-      data = Tensor(0, device=_device, dtype=_dtype or dtypes.default_float, requires_grad=requires_grad).uop
-    elif isinstance(data, get_args(PyConst)):
+      data = UOp.const(_dtype or dtypes.default_float, 0, _device)
+    elif isinstance(data, get_args(ConstType)):
       data = (UOp.unique_const if _force_unique or requires_grad else UOp.const)(_dtype or dtypes.from_py(data), data, _device)
     elif isinstance(data, InvalidType):
       assert _dtype is not None
       data = UOp.const(_dtype, data, _device)
-    elif isinstance(data, bytes): data = _frompy(data, dtypes.uint8 if _dtype is None else _dtype)
+    elif isinstance(data, bytes): data = _frompy(data, _dtype or dtypes.uint8)
     elif isinstance(data, (list, tuple)):
       if _dtype is None:
         if (d := fully_flatten(data)) and all(isinstance(s, bool) for s in d): _dtype = dtypes.bool
         else: _dtype = dtypes.default_int if d and all_int(d) else dtypes.default_float  # NOTE: this works because all_int([True, False]) is True
-      if _dtype in [dtypes.bfloat16, *dtypes.fp8s]: data = Tensor(_frompy(data, dtypes.float32), device=_device).cast(_dtype).uop
+      if _dtype in [dtypes.bfloat16, *dtypes.fp8s]: data = _frompy(data, dtypes.float32).cast(_dtype)
       else: data = _frompy(data, _dtype)
     elif is_numpy_ndarray(data):
       import numpy as np
       assert isinstance(data, np.ndarray), f"expected np.ndarray, got {data}"
       if data.shape == ():
-        data = Tensor(data.item(), device=_device, dtype=_dtype or _from_np_dtype(data.dtype), requires_grad=requires_grad).uop
+        data = UOp.const(_dtype or _from_np_dtype(data.dtype), data.item(), _device)
       else:
         data = _fromnp(data.astype(npdtype) if _dtype is not None and (npdtype:=_to_np_dtype(_dtype)) is not None else data)
     elif isinstance(data, pathlib.Path):
@@ -166,12 +169,7 @@ class Tensor(OpMixin):
     if not isinstance(data, UOp): raise RuntimeError(f"can't create Tensor from {data!r} with type {type(data)}")
 
     # data might be on a different device
-    if isinstance(_device, str): self.uop:UOp = data if data.device == _device else data.copy_to_device(_device)
-    # if device is a tuple, we should have/construct a multi-device UOp
-    elif isinstance(data.device, str): self.uop = Tensor(data).shard(_device).uop
-    else:
-      assert data.device == _device, f"multi-device UOp device mismatch, {data.device} != {_device}"
-      self.uop = data
+    self.uop:UOp = data if data.device == _device else data.copy_to_device(_device)
 
     # add to all_tensors after construction succeeds
     all_tensors[weakref.ref(self)] = None
@@ -197,7 +195,7 @@ class Tensor(OpMixin):
     lhs,rhs = self._broadcasted(x, reverse)
     return lhs._apply_uop(lambda *u: u[0].alu(op, *u[1:]), rhs)
   def alu(self, op: Ops, *src: Tensor) -> Tensor: return self._apply_uop(lambda *u: u[0].alu(op, *u[1:]), *src)
-  def const_like(self, b:ConstType) -> Tensor: return Tensor(dtypes.as_const(b, self.dtype), self.device, self.dtype, requires_grad=False)
+  def const_like(self, b:ConstType) -> Tensor: return Tensor(self.dtype.const(b), self.device, self.dtype, requires_grad=False)
 
   def requires_grad_(self, requires_grad=True) -> Tensor:
     # make the UOp unique if it's a CONST to prevent gradient accumulation bugs with cached const UOps
@@ -666,7 +664,7 @@ class Tensor(OpMixin):
   # ***** creation helper functions *****
 
   @staticmethod
-  def full(shape:tuple[sint, ...], fill_value:PyConst, **kwargs) -> Tensor:
+  def full(shape:tuple[sint, ...], fill_value:ConstType, **kwargs) -> Tensor:
     """
     Creates a tensor with the given shape, filled with the given value.
 
@@ -681,6 +679,17 @@ class Tensor(OpMixin):
     ```
     """
     return Tensor(fill_value, _force_unique=True, **kwargs).reshape((1, )*len(new_shape := argfix(shape))).expand(new_shape)
+
+  @staticmethod
+  def invalid(*shape, **kwargs) -> Tensor:
+    """
+    Creates a tensor with the given shape, filled with Invalid.
+
+    This is an alternative to Tensor.empty when you want an "anonymous" buffer.
+
+    Eventually Tensor.empty will be replaced by this.
+    """
+    return Tensor.full(argfix(*shape), Invalid, **kwargs)
 
   @staticmethod
   def zeros(*shape, **kwargs) -> Tensor:
@@ -2970,7 +2979,7 @@ class Tensor(OpMixin):
         y_dtype = x.dtype
       elif not isinstance(y, UOp): y_dtype = dtypes.from_py(y)
       if isinstance(y, UOp): y = Tensor.from_uop(y, device=x.device)
-      else: y = Tensor(dtypes.as_const(y, y_dtype), x.device, y_dtype, requires_grad=False)
+      else: y = Tensor(y_dtype.const(y), x.device, y_dtype, requires_grad=False)
 
     if match_dtype and x.dtype != y.dtype:
       output_dtype = least_upper_dtype(x.dtype, y.dtype)

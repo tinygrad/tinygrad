@@ -170,5 +170,9 @@ class TestRand(unittest.TestCase):
     Tensor.rand(2**17, 2**17).schedule()
     Tensor.rand(2**17, 2**17).schedule()
 
+class TestTensorDevice(unittest.TestCase):
+  def test_create_from_single_device_tuple(self):
+    (Tensor([1.0], device=(Device.DEFAULT,)) + Tensor([2.0])).realize()
+
 if __name__ == '__main__':
   unittest.main()

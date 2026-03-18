@@ -304,7 +304,7 @@ class Compiled:
 
     # remove disabled compilers
     for en, rc in self.comp_sets.values():
-      if en is not None and en.value == 0 and rc in comps: comps.remove(rc)
+      if en is not None and en.value == 0 and en.key in os.environ and rc in comps: comps.remove(rc)
 
     return select_first_inited(list(forced_comps) if len(forced_comps)>0 else comps, f"No compiler for {self.device} is available", self.cached_pair)
 
