@@ -337,18 +337,19 @@ function setFocus(key) {
   let instList = document.getElementById("insts");
   if (data.pcToShape.size == 0) return d3.select(instList?.parentElement).html("");
   if (instList == null) {
+    const hitPcs = new Set([...data.pcToShape.values()].map(v => v.pc));
     let contents = "";
-    for (const [k, v] of data.pcToShape) {
-      const pcHex = v.pc.toString(16);
-      contents += `<div class="line" data-k="${k}"><span class="left" id="inst-${k}"><span class="wave">${v.wave}</span>
-        <span class="pc">${"0x"+pcHex.padStart(Math.max(4, Math.ceil(pcHex.length/4)*4), 0)}</span><span class="label">${data.pcMap[v.pc]}</span></div>`;
+    for (let [pc, label] of Object.entries(data.pcMap)) {
+      pc = parseInt(pc);
+      if (!hitPcs.has(pc)) continue;
+      const pcHex = pc.toString(16);
+      contents += `<div class="line"><span class="left" id="inst-${pc}"><span class="pc">${"0x"+pcHex.padStart(Math.max(4, Math.ceil(pcHex.length/4)*4), 0)}</span><span class="label">${label}</span></span></div>`;
     }
-    instList = d3.create("pre").append("code").classed("hljs", true).style("margin-top", "20px").attr("id", "insts").html(contents)
-      .on("click", e => { const line = e.target.closest(".line"); line && setFocus(line.dataset.k); }).node();
+    instList = d3.create("pre").append("code").classed("hljs", true).style("margin-top", "20px").attr("id", "insts").html(contents).node();
     metadata.insertBefore(instList.parentElement, html.node());
   }
   d3.select(instList).selectAll("span").classed("highlight", false);
-  const instLine = document.getElementById(`inst-${key}`); instLine?.classList.add("highlight");
+  const instLine = document.getElementById(`inst-${data.pcToShape.get(key)?.pc}`); instLine?.classList.add("highlight");
   if (instLine != null) {
     const r = rect(instLine), c = rect(instList);
     if (Math.max(c.top-r.bottom, r.top-c.bottom)>=-30) instLine.scrollIntoView({ block:"center" });
@@ -914,7 +915,7 @@ async function main() {
       }
       appendSteps(ul, i, steps);
     }
-    return setState({ currentCtx:-1 });
+    return setState({ currentCtx: 16, currentStep: 2, currentRewrite: 0, expandSteps: true });
   }
   // ** center graph
   const { currentCtx, currentStep, currentRewrite, expandSteps } = state;
