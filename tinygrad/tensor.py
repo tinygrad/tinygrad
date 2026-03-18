@@ -61,7 +61,7 @@ def _frompy(x:list|tuple|bytes, dtype:DType) -> UOp:
     ret = UOp.new_buffer("PYTHON", prod(shape:=get_shape(x)), dtype).reshape(shape)
     assert dtype.fmt is not None, f"{dtype=} has None fmt"
     truncate_function = truncate[dtype]
-    data = struct.pack(f"{ret.size}{dtype.fmt}", *[truncate_function(dtypes.as_const(xi, dtype)) for xi in fully_flatten(x)])
+    data = struct.pack(f"{ret.size}{dtype.fmt}", *[truncate_function(dtype.const(xi)) for xi in fully_flatten(x)])
   # fake realize
   ret.buffer.allocate(memoryview(data if Device.DEFAULT != "PYTHON" else bytearray(data)))
   return ret
@@ -197,7 +197,7 @@ class Tensor(OpMixin):
     lhs,rhs = self._broadcasted(x, reverse)
     return lhs._apply_uop(lambda *u: u[0].alu(op, *u[1:]), rhs)
   def alu(self, op: Ops, *src: Tensor) -> Tensor: return self._apply_uop(lambda *u: u[0].alu(op, *u[1:]), *src)
-  def const_like(self, b:ConstType) -> Tensor: return Tensor(dtypes.as_const(b, self.dtype), self.device, self.dtype, requires_grad=False)
+  def const_like(self, b:ConstType) -> Tensor: return Tensor(self.dtype.const(b), self.device, self.dtype, requires_grad=False)
 
   def requires_grad_(self, requires_grad=True) -> Tensor:
     # make the UOp unique if it's a CONST to prevent gradient accumulation bugs with cached const UOps
@@ -2975,7 +2975,7 @@ class Tensor(OpMixin):
         y_dtype = x.dtype
       elif not isinstance(y, UOp): y_dtype = dtypes.from_py(y)
       if isinstance(y, UOp): y = Tensor.from_uop(y, device=x.device)
-      else: y = Tensor(dtypes.as_const(y, y_dtype), x.device, y_dtype, requires_grad=False)
+      else: y = Tensor(y_dtype.const(y), x.device, y_dtype, requires_grad=False)
 
     if match_dtype and x.dtype != y.dtype:
       output_dtype = least_upper_dtype(x.dtype, y.dtype)

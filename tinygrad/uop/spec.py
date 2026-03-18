@@ -36,7 +36,7 @@ shared_spec = PatternMatcher([
   (UPat(Ops.SINK, dtypes.void), lambda: True), # NOTE: for testing, we let sinks be anything
 
   # CONST/DEFINE_VAR are everywhere
-  (UPat(Ops.CONST, src=(), name="x"), lambda x: type(x.arg) is type(dtypes.as_const(x.arg, x.dtype))),
+  (UPat(Ops.CONST, src=(), name="x"), lambda x: type(x.arg) is type(x.dtype.const(x.arg))),
   (UPat(Ops.DEFINE_VAR, name="x"), lambda x: isinstance(x.arg[1], int) and isinstance(x.arg[2], int)),
 
   # ALUs: most ALUs have all matching dtypes, except CMPLT, CMPNE, and WHERE
@@ -239,7 +239,7 @@ program_spec = PatternMatcher([
   (UPat(GroupOp.All-{Ops.CONST, Ops.RANGE, Ops.DEFINE_VAR, Ops.VCONST, Ops.VECTORIZE}, dtype=dtypes.index), lambda: False),
   (UPat(Ops.CONST, arg=Invalid), lambda: False),
   (UPat(Ops.VCONST, name="x"), lambda x: all(v is not Invalid for v in x.arg) and len(x.arg)==x.dtype.vcount>1 and
-    type(x.arg) is type(dtypes.as_const(x.arg, x.dtype))),
+    type(x.arg) is type(x.dtype.const(x.arg))),
 
   # if has a <gate, index_for_dedup>
   (UPat(Ops.IF, dtype=dtypes.void, src=(UPat(dtype=dtypes.bool), UPat((Ops.CAST, Ops.INDEX)))), lambda: True),
