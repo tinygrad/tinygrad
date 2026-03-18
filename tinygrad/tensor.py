@@ -671,7 +671,7 @@ class Tensor(OpMixin):
   # ***** creation helper functions *****
 
   @staticmethod
-  def full(shape:tuple[sint, ...], fill_value:PyConst, **kwargs) -> Tensor:
+  def full(shape:tuple[sint, ...], fill_value:ConstType, **kwargs) -> Tensor:
     """
     Creates a tensor with the given shape, filled with the given value.
 
@@ -686,6 +686,17 @@ class Tensor(OpMixin):
     ```
     """
     return Tensor(fill_value, _force_unique=True, **kwargs).reshape((1, )*len(new_shape := argfix(shape))).expand(new_shape)
+
+  @staticmethod
+  def invalid(*shape, **kwargs) -> Tensor:
+    """
+    Creates a tensor with the given shape, filled with Invalid.
+
+    This is an alternative to Tensor.empty when you want an "anonymous" buffer.
+
+    Eventually Tensor.empty will be replaced by this.
+    """
+    return Tensor.full(argfix(*shape), Invalid, **kwargs)
 
   @staticmethod
   def zeros(*shape, **kwargs) -> Tensor:

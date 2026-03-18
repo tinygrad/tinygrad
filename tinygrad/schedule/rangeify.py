@@ -411,12 +411,6 @@ def flatten_bufferize(x:UOp):
   return ret
 pm_flatten_bufferize = PatternMatcher([(UPat(Ops.BUFFERIZE, name="x"), flatten_bufferize)])
 
-def resolve_anonymous_buffer(ctx:itertools.count, b:UOp, c:UOp) -> UOp|None:
-  dab = b.replace(src=(UOp(Ops.LUNIQUE, arg=next(ctx)),)+b.src[1:])
-  nc_src = tuple(dab if x is b else x for x in c.src)
-  if nc_src == c.src: return None
-  return dab.after(c.replace(src=nc_src))
-
 pm_add_buffers = pm_mops+pm_flatten_bufferize+to_bufferview+PatternMatcher([
   (UPat(Ops.BUFFERIZE, src=(UPat(), UPat(name="idx")), name="x"), lambda ctx,x,idx: bufferize_to_store(ctx, x, idx, allow_locals=False)),
 
@@ -431,9 +425,6 @@ pm_add_buffers = pm_mops+pm_flatten_bufferize+to_bufferview+PatternMatcher([
   (UPat(Ops.AFTER, src=(UPat.var("x"), UPat(GroupOp.Movement, name="y"))), lambda x,y: x.after(y.src[0])),
   # remove double AFTER
   (UPat(Ops.AFTER, src=(UPat.var("x"), UPat(Ops.AFTER, name="y"))), lambda x,y: x.after(*y.src[1:])),
-
-  # resolve anonymous buffers
-  (UPat(Ops.AFTER, src=(UPat(Ops.BUFFER, src=(UPat(Ops.NOOP),), name="b", allow_any_len=True), UPat(Ops.CALL, name="c"))), resolve_anonymous_buffer),
 ])
 
 pm_add_buffers_local = pm_mops+pm_flatten_bufferize+to_bufferview+PatternMatcher([
