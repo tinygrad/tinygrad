@@ -162,7 +162,7 @@ class PageTableTraverseContext:
         while not pt.is_page(pte_idx) and (self.free_pts or pt.valid(pte_idx)): pt, pte_idx, pte_covers = self.level_down()
 
       entries = max(min(size // pte_covers, self._pt_pte_cnt(pt.lv) - pte_idx), 1 if self.inspect else 0)
-      assert entries > 0 or self.inspect, f"Invalid entries {size=:#x}, {pte_covers=:#x}"
+      assert entries > 0, f"Invalid entries {size=:#x}, {pte_covers=:#x}"
       yield off, pt, pte_idx, entries, pte_covers
 
       size, off, self.vaddr = size - entries * pte_covers, off + entries * pte_covers, self.vaddr + entries * pte_covers
