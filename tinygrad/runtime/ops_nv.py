@@ -825,7 +825,7 @@ class NVDevice(HCQCompiled[NVSignal]):
     if params.bytesAvailable == 0: return None
 
     start, end = self.pma_rptr, self.pma_rptr + params.bytesAvailable
-    pma_data = self.pma_buf.cpu_view()[start:min(end, self.pma_buf.size)] + self.pma_buf.cpu_view()[:max(0, end - self.pma_buf.size)]
+    pma_data = bytes(self.pma_buf.cpu_view()[start:min(end, self.pma_buf.size)]) + bytes(self.pma_buf.cpu_view()[:max(0, end - self.pma_buf.size)])
     self.pma_rptr = end % self.pma_buf.size
 
     self.iface.rm_control(self.profiler, nv_gpu.NVB0CC_CTRL_CMD_PMA_STREAM_UPDATE_GET_PUT,
