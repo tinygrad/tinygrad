@@ -14,7 +14,7 @@ if __name__ == "__main__":
       os.environ["ASM_GEMM"] = "1"
 from tinygrad import Tensor, nn, function, getenv, dtypes, TinyJit
 from tinygrad.helpers import Timing, colored, GlobalCounters
-from tinygrad.uop.ops import Ops
+from tinygrad.uop.ops import Ops, UOp
 from extra.models.llama import apply_rotary_emb, precompute_freqs_cis
 
 def rmsnorm(x_in:Tensor, eps:float):
@@ -149,16 +149,15 @@ if __name__ == "__main__":
   if DP > 1: tokens = tokens.shard(tuple(f"{Device.DEFAULT}:{i}" for i in range(DP)), axis=0)
   if MP > 1: tokens = tokens.shard(tuple(f"{Device.DEFAULT}:{i}" for i in range(MP)))
 
-  # TODO: this shouldn't be needed, but it prevents a copy of the grads
-  def apply_grad(old_grad:Tensor, new_grad:Tensor):
-    if new_grad.uop.op == Ops.ADD:
-      apply_grad(old_grad, Tensor(new_grad.uop.src[0], device=new_grad.device))
-      apply_grad(old_grad, Tensor(new_grad.uop.src[1], device=new_grad.device))
-    elif new_grad.uop.op == Ops.PAD:
-      grad_shrink = tuple([(p[0], s+p[0]) for s,p in zip(new_grad.uop.src[0].shape, new_grad.uop.marg)])
-      apply_grad(old_grad.shrink(grad_shrink), Tensor(new_grad.uop.src[0], device=new_grad.device))
+  # TODO: this shouldn't be needed, but it prevents a copy of the grads. CAT can help
+  def apply_grad(old_grad:UOp, new_grad:UOp) -> list[UOp]:
+    if new_grad.op == Ops.ADD:
+      return apply_grad(old_grad, new_grad.src[0])+apply_grad(old_grad, new_grad.src[1])
+    elif new_grad.op == Ops.PAD:
+      grad_shrink = tuple([(p[0], s+p[0]) for s,p in zip(new_grad.src[0].shape, new_grad.marg)])
+      return apply_grad(old_grad.shrink(grad_shrink), new_grad.src[0])
     else:
-      old_grad.assign(new_grad)
+      return [old_grad.store(old_grad + new_grad)]
 
   @TinyJit
   def jit_step(tokens:Tensor):
@@ -166,7 +165,8 @@ if __name__ == "__main__":
     print(colored("*** step", "red"))
     with Timing("python forward: "): loss = model(tokens[:, :-1]).sparse_categorical_crossentropy(tokens[:, 1:])
     with Timing("python backward: "):
-      for t,g in zip(grads, loss.gradient(*grads)): apply_grad(grads[t], g)
+      for t,g in zip(grads, loss.gradient(*grads)):
+        grads[t] = Tensor(grads[t].uop.after(UOp.group(*apply_grad(grads[t].uop, g.uop))), device=t.device)
     with Timing("run step: "): loss.realize(*grads.values())
 
   jit_step(tokens)
