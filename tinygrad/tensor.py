@@ -633,12 +633,12 @@ class Tensor(OpMixin):
       Tensor._device_rng_counters[device] = Tensor([0, 0], device=device, dtype=dtypes.uint32, requires_grad=False).contiguous()
 
     # increment rng counter for devices
-    new_low = Tensor._device_rng_counters[device][0] + (num & 0xffffffff)
-    new_high = Tensor._device_rng_counters[device][1] + (num >> 32) + (new_low < Tensor._device_rng_counters[device][0]).cast(dtypes.uint32)
-    Tensor._device_rng_counters[device].assign(Tensor.stack(new_low, new_high))
+    new_low = Tensor._device_rng_counters[device][0:1] + (num & 0xffffffff)
+    new_high = Tensor._device_rng_counters[device][1:2] + (num >> 32) + (new_low < Tensor._device_rng_counters[device][0]).cast(dtypes.uint32)
+    Tensor._device_rng_counters[device].assign(new_low.cat(new_high))
 
-    low = Tensor._device_rng_counters[device][0] - (num & 0xffffffff)
-    high = Tensor._device_rng_counters[device][1] - (num >> 32) - (Tensor._device_rng_counters[device][0] < (num & 0xffffffff)).cast(dtypes.uint32)
+    low = Tensor._device_rng_counters[device][0:1] - (num & 0xffffffff)
+    high = Tensor._device_rng_counters[device][1:2] - (num >> 32) - (Tensor._device_rng_counters[device][0] < (num & 0xffffffff)).cast(dtypes.uint32)
 
     # threefry random bits
     if num > dtypes.uint32.max:
