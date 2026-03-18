@@ -35,20 +35,20 @@ pm_syntactic_sugar = PatternMatcher([
    lambda idx,x: x.replace(src=tuple([s.index(*idx.src[1:]) for s in x.src]))),
 ])
 
-def found_assign(ctx:dict[UOp, UOp], assign:UOp, src:UOp):
-  if (x:=src).op is Ops.CAST and x.dtype == dtypes.half and FLOAT16: x, assign = x.src[0], assign.cast(dtypes.float)
+def found_after(ctx:dict[UOp, UOp], after:UOp, src:UOp):
+  if (x:=src).op is Ops.CAST and x.dtype == dtypes.half and FLOAT16: x, after = x.src[0], after.cast(dtypes.float)
   while True:
-    if x.op is Ops.PERMUTE: x, assign = x.src[0], assign.permute(argsort(x.marg))
-    elif x.op is Ops.RESHAPE: x, assign = x.src[0], assign.reshape(x.src[0].shape)
+    if x.op is Ops.PERMUTE: x, after = x.src[0], after.permute(argsort(x.marg))
+    elif x.op is Ops.RESHAPE: x, after = x.src[0], after.reshape(x.src[0].shape)
     elif x.op is Ops.WHERE and x.src[2].base.arg == Invalid and x.src[1].op is Ops.PAD:
-      x, assign = x.src[1].src[0], assign.shrink(tuple((l, s-r) for (l,r),s in zip(x.src[1].marg, x.shape)))
+      x, after = x.src[1].src[0], after.shrink(tuple((l, s-r) for (l,r),s in zip(x.src[1].marg, x.shape)))
     else: break
-  ctx[x] = assign
+  ctx[x] = after
 
 # *** fold moved AFTERs (hack for openpilot) ***
-pm_fold_moved_assign = PatternMatcher([
-  (UPat(Ops.AFTER, src=(UPat(), UPat(Ops.STORE, src=(UPat(), UPat((*GroupOp.Movement, Ops.CAST), name="src")))), name="assign"), found_assign),
-  # replace ALU sources with assign versions found above
+pm_fold_moved_after = PatternMatcher([
+  (UPat(Ops.AFTER, src=(UPat(), UPat(Ops.STORE, src=(UPat(), UPat((*GroupOp.Movement,Ops.CAST,Ops.WHERE), name="src")))), name="after"), found_after),
+  # replace ALU sources with AFTER versions found above
   (UPat(GroupOp.ALU, name="alu"), lambda ctx,alu: alu.replace(src=new_src) if (new_src:=tuple(ctx.get(s, s) for s in alu.src)) != alu.src else None),
 ])
 
@@ -557,7 +557,7 @@ split_kernels = PatternMatcher([
 @profile_matches
 def get_kernel_graph(sink:UOp) -> UOp:
   tsink = graph_rewrite(sink, multi_pm, name="multi_pm")
-  if OPENPILOT_HACKS: tsink = graph_rewrite(tsink, pm_fold_moved_assign, ctx={}, name="fold moved assigns")
+  if OPENPILOT_HACKS: tsink = graph_rewrite(tsink, pm_fold_moved_after, ctx={}, name="fold moved afters")
   tsink = graph_rewrite(tsink, pm_syntactic_sugar+pm_mops+earliest_rewrites, bottom_up=True, name="earliest rewrites")
 
   # convert movement ops to ranges
