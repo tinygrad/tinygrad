@@ -339,8 +339,9 @@ def load_amd_counters(ctxs:list[dict], profile:list[ProfileEvent]) -> None:
     ctxs.append({"name":f"Exec {name}"+(f" n{run_number[k]}" if run_number[k] > 1 else ""), "steps":steps})
 
 def sqtt_timeline(data:bytes, lib:bytes, target:str) -> list[ProfileEvent]:
-  from tinygrad.renderer.amd.sqtt import map_insts, InstructionInfo, PacketType, INST, InstOp, VALUINST, IMMEDIATE, IMMEDIATE_MASK, VMEMEXEC, ALUEXEC
-  from tinygrad.renderer.amd.sqtt import INST_RDNA4, InstOpRDNA4, TS_DELTA_OR_MARK, TS_DELTA_OR_MARK_RDNA4, CDNA_INST, InstOpCDNA
+  from tinygrad.renderer.amd.sqtt import (map_insts, InstructionInfo, PacketType, INST, InstOp, VALUINST, IMMEDIATE, IMMEDIATE_MASK, VMEMEXEC,
+                                          ALUEXEC, INST_RDNA4, InstOpRDNA4, TS_DELTA_OR_MARK, TS_DELTA_OR_MARK_RDNA4, CDNA_INST, InstOpCDNA,
+                                          WAVEEND, CDNA_WAVEEND)
   ret:list[ProfileEvent] = []
   row_ends:dict[str, Decimal] = {}
   curr_barrier:dict[str, ProfileRangeEvent] = {}
@@ -369,7 +370,7 @@ def sqtt_timeline(data:bytes, lib:bytes, target:str) -> list[ProfileEvent]:
     if isinstance(p, (INST, INST_RDNA4, CDNA_INST)):
       name = p.op.name if isinstance(p.op, (InstOp, InstOpRDNA4, InstOpCDNA)) else f"0x{p.op:02x}"
       add(name, p, info=info)
-    if isinstance(p, (VALUINST, IMMEDIATE)): add(p.__class__.__name__, p, info=info)
+    if isinstance(p, (VALUINST, IMMEDIATE, WAVEEND, CDNA_WAVEEND)): add(p.__class__.__name__, p, info=info)
     if isinstance(p, IMMEDIATE_MASK): add("IMMEDIATE", p, wave=unwrap(info).wave, info=info)
     if isinstance(p, (VMEMEXEC, ALUEXEC)):
       name = str(p.src).split('.')[1]
