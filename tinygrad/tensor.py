@@ -639,21 +639,16 @@ class Tensor(OpMixin):
     high = Tensor._device_rng_counters[device][1:2] - (num >> 32) - (Tensor._device_rng_counters[device][0] < (num & 0xffffffff)).cast(dtypes.uint32)
 
     # threefry random bits
-    if num > dtypes.uint32.max:
-      bits_list = []
-      for i in range(0, num, dtypes.uint32.max):
-        chunk_num = min(num - i, dtypes.uint32.max)
-        c_low = low + (i & 0xffffffff)
-        c_high = high + (i >> 32) + (c_low < low).cast(dtypes.uint32)
-        new_key = Tensor._threefry_random_bits(Tensor._device_seeds[device], c_low, c_high)
-        counts0 = Tensor.arange(ceildiv(chunk_num, 2), device=device, dtype=dtypes.uint32, requires_grad=False)
-        counts1 = counts0 + ceildiv(chunk_num, 2)
-        bits_list.append(Tensor._threefry_random_bits(new_key, counts0, counts1)[:chunk_num])
-      bits = Tensor.cat(*bits_list)
-    else:
-      counts0 = Tensor.arange(ceildiv(num, 2), device=device, dtype=dtypes.uint32, requires_grad=False) + low
-      counts1 = counts0 + ceildiv(num, 2)
-      bits = Tensor._threefry_random_bits(Tensor._device_seeds[device], counts0, counts1)[:num]
+    bits_list = []
+    for i in range(0, num, dtypes.uint32.max):
+      chunk_num = min(num - i, dtypes.uint32.max)
+      c_low = low + (i & 0xffffffff)
+      c_high = high + (i >> 32) + (c_low < low).cast(dtypes.uint32)
+      new_key = Tensor._threefry_random_bits(Tensor._device_seeds[device], c_low, c_high)
+      counts0 = Tensor.arange(ceildiv(chunk_num, 2), device=device, dtype=dtypes.uint32, requires_grad=False)
+      counts1 = counts0 + ceildiv(chunk_num, 2)
+      bits_list.append(Tensor._threefry_random_bits(new_key, counts0, counts1)[:chunk_num])
+    bits = Tensor.cat(*bits_list)
 
     # bitcast to uint with same number of bits
     _, nmant = dtypes.finfo(dt)
