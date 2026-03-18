@@ -655,6 +655,13 @@ jobs:
       run: PYTHONPATH=. ./extra/hcq/hcq_smi.py amd rmmod
     - name: Kill stale pids
       run: PYTHONPATH=. ./extra/hcq/hcq_smi.py amd kill_pids
+    - name: Remote bench
+      run: |
+        pkill -f 'extra/remote/serve.py' || true
+        PYTHONPATH=. python3 extra/remote/serve.py 55250 &
+        sleep 1
+        DEBUG=2 PYTHONPATH=. REMOTE=127.0.0.1:55250 AM_RESET=1 AMD=1 AMD_IFACE=PCI python3 test/test_tiny.py
+        pkill -f 'extra/remote/serve.py' || true
     - name: Symlink models and datasets
       run: |
         mkdir -p weights
@@ -719,6 +726,13 @@ jobs:
       run: PYTHONPATH=. ./extra/hcq/hcq_smi.py nv rmmod
     - name: Kill stale pids
       run: PYTHONPATH=. ./extra/hcq/hcq_smi.py nv kill_pids
+    - name: Remote bench
+      run: |
+        pkill -f 'extra/remote/serve.py' || true
+        PYTHONPATH=. python3 extra/remote/serve.py 55250 &
+        sleep 1
+        DEBUG=2 PYTHONPATH=. REMOTE=127.0.0.1:55250 NV=1 python3 test/test_tiny.py
+        pkill -f 'extra/remote/serve.py' || true
     - name: Symlink models and datasets
       run: |
         mkdir -p weights
