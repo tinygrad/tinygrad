@@ -10,14 +10,17 @@ def add_to_ctx(ctx, x:UOp):
   ctx[0].append(x)
   return ret
 
-pm_ctx = PatternMatcher([
-  (UPat((Ops.BUFFER, Ops.BIND), name="x"), add_to_ctx),
-  (UPat((Ops.AFTER, Ops.CONTIGUOUS), name="x"),
-   lambda ctx,x: add_to_ctx(ctx,x) if not x.op_in_backward_slice_with_self(Ops.PARAM) and x.op_in_backward_slice_with_self(Ops.BUFFER) else None),
+pm_transform_unique_const = PatternMatcher([
   # transform unique consts to LUNIQUE
   (UPat(Ops.CONST, src=(UPat(Ops.UNIQUE), UPat(Ops.DEVICE)), name="x"),
    lambda ctx,x: x.replace(src=(UOp(Ops.LUNIQUE, arg=next(ctx[1])), x.src[1]))),
 ])
+
+pm_ctx = PatternMatcher([
+  (UPat((Ops.BUFFER, Ops.BIND), name="x"), add_to_ctx),
+  (UPat((Ops.AFTER, Ops.CONTIGUOUS), name="x"),
+   lambda ctx,x: add_to_ctx(ctx,x) if not x.op_in_backward_slice_with_self(Ops.PARAM) and x.op_in_backward_slice_with_self(Ops.BUFFER) else None),
+])+pm_transform_unique_const
 
 ReturnType = TypeVar('ReturnType')
 class _function(Generic[ReturnType]):
