@@ -3,6 +3,15 @@ if __name__ == "__main__":
   os.environ["DEFAULT_FLOAT"] = "bfloat16"
   os.environ["OPTIM_DTYPE"] = "bfloat16"
   os.environ["DEV"] = "NULL"
+  # CDNA
+  os.environ["EMULATE"] = "AMD_CDNA4"
+  os.environ["DEVICE_IN_FUNCTION_BUG"] = "1"
+  os.environ["ALL2ALL"] = "1"
+  os.environ["USE_ATOMICS"] = "1"
+  if "HK_FLASH_ATTENTION" not in os.environ:
+    os.environ["HK_FLASH_ATTENTION"] = "1"
+    if "ASM_GEMM" not in os.environ:
+      os.environ["ASM_GEMM"] = "1"
 from tinygrad import Tensor, nn, function, getenv, dtypes, TinyJit
 from tinygrad.helpers import Timing, colored, GlobalCounters
 from extra.models.llama import apply_rotary_emb, precompute_freqs_cis
