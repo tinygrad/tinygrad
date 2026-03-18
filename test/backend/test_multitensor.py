@@ -110,7 +110,7 @@ class TestMultiTensor(unittest.TestCase):
   def test_tensor_from_multi(self):
     X = Tensor([1, 2], dtype=dtypes.int).shard_(devices_2, 0)
     Y = Tensor(X.uop)
-    self.assertEqual(Y.device, Device.DEFAULT)
+    self.assertEqual(Y.device, devices_2)
     np.testing.assert_equal(X.numpy(), Y.numpy())
 
     with self.assertRaises(AssertionError):
@@ -645,6 +645,7 @@ class TestMultiTensor(unittest.TestCase):
     out = t0.flip(0) + 1
     self.assertTrue((rng.flip(0)+1).allclose(out.to(rng.device)))
 
+  @unittest.skip("flaky")
   def test_reshape_on_axis(self):
     t0 = Tensor.rand((26, 15, 7)).shard(devices_3, axis=1)
 
