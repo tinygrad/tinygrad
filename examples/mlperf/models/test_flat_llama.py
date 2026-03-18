@@ -77,5 +77,41 @@ class TestFlatLlama(unittest.TestCase):
         diff = abs(ref_grads[ref_key] - flat_grads[flat_key][i]).max()
         self.assertLess(diff, 1e-4, f"layer {i} {flat_key} grad mismatch: max abs diff {diff}")
 
+  @unittest.skipUnless(os.getenv("CPU", "") == "1", "multi-device CPU test")
+  def test_forward_match_mp(self):
+    Tensor.manual_seed(42)
+    params = dict(dim=128, hidden_dim=256, n_heads=4, n_kv_heads=2, n_layers=2, norm_eps=1e-5, vocab_size=1024, rope_theta=10000, max_context=64)
+    from tinygrad import Device
+    devices = (f"{Device.DEFAULT}:0", f"{Device.DEFAULT}:1")
+    ref = Transformer(**params)
+    flat = FlatTransformer(**params)
+    copy_weights(flat, ref)
+    Tensor.realize(*nn.state.get_state_dict(flat).values())
+    flat.shard(devices, mp=True)
+
+    tokens = Tensor([[1, 50, 100, 999, 2]], device=devices[0])
+    ref_logits = ref(tokens.to(devices[0])).numpy()
+    flat_logits = flat(tokens.shard(devices)).numpy()
+    self.assertEqual(ref_logits.shape, flat_logits.shape)
+    np.testing.assert_allclose(flat_logits, ref_logits, atol=1e-4, rtol=1e-4)
+
+  @unittest.skipUnless(os.getenv("CPU", "") == "1", "multi-device CPU test")
+  def test_forward_match_dp(self):
+    Tensor.manual_seed(42)
+    params = dict(dim=128, hidden_dim=256, n_heads=4, n_kv_heads=2, n_layers=2, norm_eps=1e-5, vocab_size=1024, rope_theta=10000, max_context=64)
+    from tinygrad import Device
+    devices = (f"{Device.DEFAULT}:0", f"{Device.DEFAULT}:1")
+    ref = Transformer(**params)
+    flat = FlatTransformer(**params)
+    copy_weights(flat, ref)
+    Tensor.realize(*nn.state.get_state_dict(flat).values())
+    flat.shard(devices)
+
+    tokens = Tensor([[1, 50, 100, 999, 2], [2, 100, 50, 1, 999]], device=devices[0])
+    ref_logits = ref(tokens.to(devices[0])).numpy()
+    flat_logits = flat(tokens.shard(devices, axis=0)).numpy()
+    self.assertEqual(ref_logits.shape, flat_logits.shape)
+    np.testing.assert_allclose(flat_logits, ref_logits, atol=1e-4, rtol=1e-4)
+
 if __name__ == "__main__":
   unittest.main()

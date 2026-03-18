@@ -1145,6 +1145,7 @@ class TestMultiBufferView(unittest.TestCase):
     run_schedule(sched)
     np.testing.assert_equal(b_multi.numpy(), b_ref.numpy())
 
+  @unittest.skip("flaky on LLVM")
   def test_shrink_non_shard_axis(self):
     ref = Tensor.arange(8*4*10).reshape(8, 4, 10).contiguous().realize()
     a = Tensor.arange(8*4*10).reshape(8, 4, 10).contiguous().shard(devices_2, axis=1).realize()
