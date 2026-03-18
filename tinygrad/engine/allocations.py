@@ -76,9 +76,21 @@ def contiguous_mops_to_view(c:UOp, src:UOp):
   if not all_int(c.shape): return None
 
   # check if view is supported
-  if not isinstance(c.device, str): return None
   from tinygrad.device import Device
-  if not hasattr(Device[c.device].allocator, "_offset"): return None
+  if isinstance(c.device, str):
+    if not hasattr(Device[c.device].allocator, "_offset"): return None
+  elif not all(hasattr(Device[d].allocator, "_offset") for d in c.device): return None
+
+  # for MULTI tensors, use multi_pm to resolve per-shard movement ops, then compute offset on the resolved result
+  if not isinstance(c.device, str):
+    from tinygrad.schedule.multi import multi_pm
+    resolved = graph_rewrite(src, multi_pm, name="multi_buffer_view")
+    if resolved.op is not Ops.MULTI: return None
+    shard_src = resolved.src[0]
+    if (offset := shard_src.contiguous_view_offset()) is None: return None
+    shard_buf = shard_src.base
+    if shard_buf.op is Ops.BUFFER_VIEW: offset, shard_buf = offset + shard_buf.arg[1], shard_buf.src[0]
+    return UOp(Ops.BUFFER_VIEW, src.dtype, (shard_buf,), (shard_src.size, offset)).reshape(shard_src.shape).multi(resolved.arg).contiguous(tag=c.tag)
 
   # see if this can be a view
   if (offset := src.contiguous_view_offset()) is None: return None

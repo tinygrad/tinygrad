@@ -1131,6 +1131,50 @@ class TestTensorOps(unittest.TestCase):
     helper_test_shard_op([(256,), (256,)], lambda x: x.bitcast(dtypes.int))
 
 @unittest.skipIf(not_support_multi_device(), "need multi")
+class TestMultiBufferView(unittest.TestCase):
+  @needs_second_gpu
+  def setUp(self): pass
+
+  def _check(self, a_ref:Tensor, a_multi:Tensor, view_fn):
+    """Apply view_fn to both, verify zero compiled kernels and matching values."""
+    b_ref = view_fn(a_ref)
+    b_multi = view_fn(a_multi).contiguous()
+    sched = b_multi.schedule()
+    compiled = [si for si in sched if isinstance(si.prg, CompiledRunner)]
+    self.assertEqual(len(compiled), 0, f"expected zero compiled kernels, got {len(compiled)}")
+    run_schedule(sched)
+    np.testing.assert_equal(b_multi.numpy(), b_ref.numpy())
+
+  def test_shrink_non_shard_axis(self):
+    ref = Tensor.arange(8*4*10).reshape(8, 4, 10).contiguous().realize()
+    a = Tensor.arange(8*4*10).reshape(8, 4, 10).contiguous().shard(devices_2, axis=1).realize()
+    self._check(ref, a, lambda t: t[3])
+
+  def test_shrink_2d(self):
+    ref = Tensor.arange(6*4).reshape(6, 4).contiguous().realize()
+    a = Tensor.arange(6*4).reshape(6, 4).contiguous().shard(devices_2, axis=1).realize()
+    self._check(ref, a, lambda t: t.shrink(((1, 4), None)))
+
+  def test_reshape_then_shrink(self):
+    ref = Tensor.arange(8*6).reshape(8, 6).contiguous().realize()
+    a = Tensor.arange(8*6).reshape(8, 6).contiguous().shard(devices_2, axis=1).realize()
+    self._check(ref, a, lambda t: t.reshape(4, 2, 6)[1])
+
+  def test_chained_shrink(self):
+    ref = Tensor.arange(10*8).reshape(10, 8).contiguous().realize()
+    a = Tensor.arange(10*8).reshape(10, 8).contiguous().shard(devices_2, axis=1).realize()
+    self._check(ref, a, lambda t: t.shrink(((2, 8), None)).shrink(((1, 4), None)))
+
+  def test_4_devices(self):
+    ref = Tensor.arange(8*12).reshape(8, 12).contiguous().realize()
+    a = Tensor.arange(8*12).reshape(8, 12).contiguous().shard(devices_4, axis=1).realize()
+    sched = a[5].contiguous().schedule()
+    compiled = [si for si in sched if isinstance(si.prg, CompiledRunner)]
+    self.assertEqual(len(compiled), 0)
+    run_schedule(sched)
+    np.testing.assert_equal(a[5].contiguous().numpy(), ref[5].numpy())
+
+@unittest.skipIf(not_support_multi_device(), "need multi")
 class TestMultiFromUnrenderable(unittest.TestCase):
   @needs_second_gpu
   def test_from_npy(self):
