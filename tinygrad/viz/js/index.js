@@ -554,7 +554,7 @@ async function renderProfiler(path, opts) {
   if (extData.pcMap != null) data.pcMap = extData.pcMap; setFocus(focusedShape);
   // secondary axis mapping
   let instRange = null;
-  for (const [k, { shapes }] of data.tracks) if (k.startsWith("WAVE")) {
+  for (const [k, { shapes }] of data.tracks) if (!k.includes("Clock")) {
     const first = shapes[0].x, last = shapes.at(-1).x;
     instRange = instRange == null ? [first, last] : [Math.min(first, instRange[0]), Math.max(last, instRange[1])];
   }
