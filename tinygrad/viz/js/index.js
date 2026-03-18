@@ -281,6 +281,80 @@ function getZoomIdentity() {
 
 const Modes = {0:'read', 1:'write', 2:'write+read'};
 
+function renderTable(root, ret) {
+  const table = root.append("table");
+  const thead = table.append("thead");
+  for (const c of ret.cols) thead.append("th").text(c.title ?? c);
+  for (const row of ret.rows) {
+    const values = row;
+    const tr = table.append("tr").classed("main-row", true);
+    if (row.className != null) tr.classed(row.className, true);
+    if (row.onClick != null) tr.on("click", row.onClick);
+    for (const [i, value] of values.entries()) {
+      // nested table
+      if (value.cols != null) {
+        tr.classed("has-children", true);
+        tr.on("click", () => {
+          const el = tr.node().nextElementSibling;
+          if (el?.classList.contains("nested-row")) { tr.classed("expanded", false); return el.remove(); }
+          tr.classed("expanded", true);
+          const td = table.insert("tr", () => tr.node().nextSibling).classed("nested-row", true).append("td");
+          td.attr("colSpan", ret.cols.length);
+          renderTable(td, value);
+        });
+        continue;
+      }
+      const td = tr.append("td").classed(ret.cols[i], true);
+      // string format scalar values
+      td.append(() => typeof value === "string" ? colored(value) : d3.create("p").text(ret.cols[i] === "Duration" ? formatMicroseconds(value) : formatUnit(value)).node());
+    }
+  }
+  return table;
+}
+
+function formatPc(pc) {
+  const pcHex = pc.toString(16);
+  return "0x"+pcHex.padStart(Math.max(4, Math.ceil(pcHex.length/4)*4), 0);
+}
+
+function buildInstTable(data) {
+  const hitsByPc = new Map();
+  for (const [k, v] of data.pcToShape) {
+    let hits = hitsByPc.get(v.pc);
+    if (hits == null) {
+      hits = [];
+      hitsByPc.set(v.pc, hits);
+    }
+    hits.push([k, v]);
+  }
+
+  const rows = [];
+  for (const [pc, label] of Object.entries(data.pcMap)) {
+    const pcNum = Number(pc);
+    const hits = hitsByPc.get(pcNum);
+    if (hits == null || hits.length == 0) continue;
+
+    rows.push([
+      formatPc(pcNum),
+      label,
+      hits.length,
+      {
+        cols: ["Wave", "Hit", "Packet"],
+        rows: hits.map(([k, v], i) => ({
+          values: [v.wave, i + 1, k],
+          onClick: () => setFocus(k),
+          className: "packet-row"
+        }))
+      }
+    ]);
+  }
+
+  return {
+    cols: ["PC", "Instruction", "Hits"],
+    rows
+  };
+}
+
 function setFocus(key) {
   if (key !== focusedShape) {
     saveToHistory({ shape:focusedShape });
@@ -336,24 +410,14 @@ function setFocus(key) {
   // instructions list renderer
   let instList = document.getElementById("insts");
   if (data.pcToShape.size == 0) return d3.select(instList?.parentElement).html("");
+  const root = d3.create("div");
+  const ret = buildInstTable(data);
+  if (ret.rows.length != 0) renderTable(root, ret);
   if (instList == null) {
-    const hitPcs = new Set([...data.pcToShape.values()].map(v => v.pc));
-    let contents = "";
-    for (let [pc, label] of Object.entries(data.pcMap)) {
-      pc = parseInt(pc);
-      if (!hitPcs.has(pc)) continue;
-      const pcHex = pc.toString(16);
-      contents += `<div class="line"><span class="left" id="inst-${pc}"><span class="pc">${"0x"+pcHex.padStart(Math.max(4, Math.ceil(pcHex.length/4)*4), 0)}</span><span class="label">${label}</span></span></div>`;
-    }
-    instList = d3.create("pre").append("code").classed("hljs", true).style("margin-top", "20px").attr("id", "insts").html(contents).node();
-    metadata.insertBefore(instList.parentElement, html.node());
+    instList = d3.create("div").attr("id", "insts").style("max-height", "30vh").style("overflow", "auto").node();
   }
-  d3.select(instList).selectAll("span").classed("highlight", false);
-  const instLine = document.getElementById(`inst-${data.pcToShape.get(key)?.pc}`); instLine?.classList.add("highlight");
-  if (instLine != null) {
-    const r = rect(instLine), c = rect(instList);
-    if (Math.max(c.top-r.bottom, r.top-c.bottom)>=-30) instLine.scrollIntoView({ block:"center" });
-  }
+  instList.replaceChildren(root.node());
+  metadata.insertBefore(instList, html.node());
 }
 
 const EventTypes = { EXEC:0, BUF:1 };
