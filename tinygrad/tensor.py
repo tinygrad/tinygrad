@@ -20,7 +20,8 @@ from tinygrad.engine.allocations import transform_to_call
 
 # TODO: this should be the only usage of Device
 def canonicalize_device(device:str|tuple|list|None) -> str|tuple[str, ...]:
-  return tuple(Device.canonicalize(d) for d in device) if isinstance(device, (tuple, list)) else Device.canonicalize(device)
+  if not isinstance(device, (tuple, list)): return Device.canonicalize(device)
+  return canonical[0] if len(canonical:=tuple(Device.canonicalize(d) for d in device)) == 1 else canonical
 
 # *** all in scope Tensors are here. this gets relevant UOps ***
 
