@@ -300,7 +300,12 @@ function setFocus(key) {
   if (eventType === EventTypes.EXEC) {
     const [n, _, ...rest] = e.arg.tooltipText.split("\n");
     const tableData = [["Name", colored(e.arg.label)], ["Duration", formatTime(e.width)]];
-    data.instSt != null ? tableData.push(["Start Cycle", formatTime(e.x)], ["Timestamp", timeAtCycle(e.x)]) : tableData.push(["Start Time", formatTime(e.x)]);
+    if (data.instSt != null) {
+      const p = d3.create("p");
+      p.append("span").text(timeAtCycle(e.x));
+      p.append("span").style("margin-left", "8px").style("color", "#f0f0f566").text(formatTime(e.x));
+      tableData.push(["Cycle", formatTime(e.x-data.instSt)], ["Time", p.node()]);
+    } else tableData.push(["Start Time", formatTime(e.x)]);
     html.append(() => tabulate(tableData));
     let group = html.append("div").classed("args", true);
     for (const r of rest) group.append("p").text(r);
