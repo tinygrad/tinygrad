@@ -112,7 +112,7 @@ class PythonProgram:
         elif uop is Ops.VECTORIZE: values[i] = src_values
         elif uop is Ops.BITCAST: values[i] = [bitcast(x, src_dtypes[0], dtype) for x in src_values[0]]
         elif uop is Ops.CAST:
-          values[i] = [truncate.get(dtype, lambda dt: dt)(dtypes.as_const(x, dtype)) for x in src_values[0]]
+          values[i] = [truncate.get(dtype, lambda dt: dt)(dtype.const(x)) for x in src_values[0]]
         elif uop is Ops.LOAD:
           if dtype.count > 1:
             values[i] = [load([src_values[i][j] if i != 0 and src_dtypes[i].count > 1 else src_values[i] \

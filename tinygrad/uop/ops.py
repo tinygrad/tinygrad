@@ -29,7 +29,7 @@ axis_to_pos = {AxisType.LOOP: -1, AxisType.THREAD: 0, AxisType.GLOBAL: 0, AxisTy
 range_start = {Ops.BUFFERIZE: 1, Ops.REDUCE: 1, Ops.STORE: 2, Ops.WMMA: 3, Ops.END: 1, Ops.CALL: 1, Ops.COPY: 2, Ops.BUFFER_VIEW: 1}
 
 # https://en.wikipedia.org/wiki/Identity_element
-def identity_element(op:Ops, dt:DType) -> PyConst: return dtypes.as_const({Ops.ADD:0, Ops.MUL:1, Ops.MAX:dt.min}[op], dt)
+def identity_element(op:Ops, dt:DType) -> PyConst: return dt.const({Ops.ADD:0, Ops.MUL:1, Ops.MAX:dt.min}[op])
 
 # With True as the default, this matches the old symbolic behavior
 def resolve(x:UOp|bool, default:bool=True):
@@ -471,15 +471,16 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
       assert len(b) > 0, "can't create const from empty tuple"
       b = b[0]  # doesn't have to be a VCONST if they are all the same
     ret = UOp(Ops.VCONST if isinstance(b, tuple) else Ops.CONST, dtype,
-              arg=dtypes.as_const(b, dtype),
+              arg=dtype.const(b),
               src=(UOp(Ops.DEVICE, arg=device),) if device is not None else ())
     return ret.reshape((1,)*len(shape)).expand(shape) if shape is not None else ret
   @staticmethod
-  def unique_const(dtype:DType, b:ConstType, device:str|tuple[str, ...], unique=True):
+  def unique_const(dtype:DType, b:ConstType, device:str|tuple[str, ...], shape:tuple[sint, ...]|None=None, unique=True):
     # NOTE: b is ConstType, not ConstLike, so UOps and tuples aren't allowed
     assert not isinstance(b, (UOp, tuple)), "unique const only works on numbers"
     ret = UOp.const(dtype, b, device)
-    return ret.replace(src=(UOp.unique(None if unique is True else unique),) + ret.src)
+    ret = ret.replace(src=(UOp.unique(None if unique is True else unique),) + ret.src)
+    return ret.reshape((1,)*len(shape)).expand(shape) if shape is not None else ret
   @staticmethod
   def range(end:sint, axis_id, axis_type=AxisType.LOOP, *arg, dtype=dtypes.index, src=(), **kwargs):
     return UOp(Ops.RANGE, dtype=dtype, src=(sint_to_uop(end, dtype),)+src, arg=(axis_id, axis_type)+arg, **kwargs)

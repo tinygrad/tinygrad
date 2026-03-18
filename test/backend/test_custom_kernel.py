@@ -285,29 +285,28 @@ class TestCustomKernel(unittest.TestCase):
 
   def test_anonymous_buffers_in_function(self):
     """Test that custom kernels with anonymous output buffers work inside @function."""
+    a = Tensor.full((4, 4), 3.).contiguous()
+    b = Tensor.full((4, 4), 2.).contiguous()
+    Tensor.realize(a, b)
+
+    def custom_add_with_tmp(o1:UOp, o2:UOp, A:UOp, B:UOp) -> UOp:
+      o1,o2,A,B = o1.flatten(), o2.flatten(), A.flatten(), B.flatten()
+      i = UOp.range(o1.size, 0)
+      store_o1 = o1[i].store(A[i]+B[i])
+      store_o2 = o2[i].store(A[i]+B[i]+2)
+      return UOp.group(store_o1, store_o2).end(i).sink(arg=KernelInfo(name=f"add_with_tmp_{o1.size}")).simplify()
+
     from tinygrad import function
+    @function(precompile=True)
+    def run(x:Tensor, w:Tensor) -> Tensor:
+      out = Tensor.invalid(*x.shape, dtype=x.dtype)
+      tmp = Tensor.invalid(*x.shape, dtype=x.dtype)
+      out, tmp = Tensor.custom_kernel(out, tmp, x, w, fxn=custom_add_with_tmp)[:2]
+      return out+tmp
 
-    def custom_add_with_tmp(C:UOp, tmp:UOp, A:UOp, B:UOp) -> UOp:
-      C,tmp,A,B = C.flatten(), tmp.flatten(), A.flatten(), B.flatten()
-      i = UOp.range(C.size, 0)
-      store_tmp = tmp[i].store(A[i]+B[i])
-      store_c = C[i].store(tmp[i]+A[i])
-      return UOp.group(store_tmp, store_c).end(i).sink(arg=KernelInfo(name=f"add_with_tmp_{C.size}")).simplify()
-
-    class Model:
-      @function(precompile=True) #, allow_implicit=True)
-      def run(self, x:Tensor, w:Tensor) -> Tensor:
-        out = Tensor.zeros(*x.shape)
-        tmp = Tensor.zeros(*x.shape)
-        out, tmp = Tensor.custom_kernel(out, tmp, x, w, fxn=custom_add_with_tmp)[:2]
-        return out+tmp
-
-    m = Model()
-    a = Tensor.full((4, 4), 3.).contiguous().realize()
-    b = Tensor.full((4, 4), 2.).contiguous().realize()
-    # a+b=5, then 5+a=8
-    result = m.run(a, b).realize()
-    assert all(x == 8 for x in result.flatten().tolist()), f"expected all 8, got {result.flatten().tolist()}"
+    result = run(a, b).flatten().tolist()
+    expected = (3+2)*2+2
+    assert all(x == expected for x in result), f"expected all {expected}, got {result}"
 
 if __name__ == '__main__':
   unittest.main()
