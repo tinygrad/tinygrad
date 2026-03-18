@@ -335,13 +335,11 @@ function setFocus(key) {
   }
   // instructions list renderer
   let instList = document.getElementById("insts");
-  if (data.pcToShape.size == 0) return d3.select(instList?.parentElement).html("");
+  if (data.pcMap == null) return d3.select(instList?.parentElement).html("");
   if (instList == null) {
-    const hitPcs = new Set([...data.pcToShape.values()].map(v => v.pc));
     let contents = "";
     for (let [pc, label] of Object.entries(data.pcMap)) {
       pc = parseInt(pc);
-      if (!hitPcs.has(pc)) continue;
       const pcHex = pc.toString(16);
       contents += `<div class="line"><span class="left" id="inst-${pc}"><span class="pc">${"0x"+pcHex.padStart(Math.max(4, Math.ceil(pcHex.length/4)*4), 0)}</span><span class="label">${label}</span></span></div>`;
     }
@@ -349,7 +347,7 @@ function setFocus(key) {
     metadata.insertBefore(instList.parentElement, html.node());
   }
   d3.select(instList).selectAll("span").classed("highlight", false);
-  const instLine = document.getElementById(`inst-${data.pcToShape.get(key)?.pc}`); instLine?.classList.add("highlight");
+  const instLine = document.getElementById(`inst-${e?.arg.pc}`); instLine?.classList.add("highlight");
   if (instLine != null) {
     const r = rect(instLine), c = rect(instList);
     if (Math.max(c.top-r.bottom, r.top-c.bottom)>=-30) instLine.scrollIntoView({ block:"center" });
@@ -363,7 +361,7 @@ async function renderProfiler(path, opts) {
   displaySelection("#profiler");
   // support non realtime x axis units
   formatTime = opts.unit === "ms" ? formatMicroseconds : formatCycles;
-  if (data?.path !== path) { data = {tracks:new Map(), axes:{}, path, first:null, pcToShape:new Map()}; focusedDevice = null; focusedShape = null; }
+  if (data?.path !== path) { data = {tracks:new Map(), axes:{}, path, first:null}; focusedDevice = null; focusedShape = null; }
   setFocus(focusedShape);
   // layout once!
   if (data.tracks.size !== 0) return updateProgress(Status.COMPLETE);
@@ -452,10 +450,10 @@ async function renderProfiler(path, opts) {
         }
         // tiny device events go straight to the rewrite rule
         const key = k.startsWith("TINY") ? null : `${k}-${j}`;
-        let info = e.info != null ? "\n"+e.info : "", trace = null
-        if (info.startsWith("\nPC:")) { data.pcToShape.set(key, {wave:dnum, pc:parseInt(e.info.split(":")[1]), st:e.st}); info = ""; }
+        let info = e.info != null ? "\n"+e.info : "", trace = null, pc = null
+        if (info.startsWith("\nPC:")) { pc = parseInt(e.info.split(":")[1]); info = ""; }
         if (info.startsWith("\nTB:")) { trace = info; info = ""; }
-        const arg = { tooltipText:" N:"+shapes.length+"\n"+formatTime(e.dur)+info, label, trace, bufs:[], key, ctx:shapeRef?.ctx, step:shapeRef?.step };
+        const arg = { tooltipText:" N:"+shapes.length+"\n"+formatTime(e.dur)+info, label, pc, trace, bufs:[], key, ctx:shapeRef?.ctx, step:shapeRef?.step };
         if (e.key != null) shapeMap.set(e.key, key);
         // offset y by depth
         shapes.push({x:e.st, y:levelHeight*depth, width:e.dur, height:levelHeight, arg, label:opts.hideLabels ? null : label, fillColor });
@@ -551,7 +549,6 @@ async function renderProfiler(path, opts) {
     }
   }
   for (const m of markers) m.label = m.name.split(/(\s+)/).map(st => ({ st, color:m.color, width:ctx.measureText(st).width }));
-  data.pcToShape = new Map([...data.pcToShape].sort((a, b) => a[1].st - b[1].st));
   if (extData.pcMap != null) data.pcMap = extData.pcMap; setFocus(focusedShape);
   // secondary axis mapping
   let instRange = null;
@@ -915,7 +912,7 @@ async function main() {
       }
       appendSteps(ul, i, steps);
     }
-    return setState({ currentCtx: 16, currentStep: 2, currentRewrite: 0, expandSteps: true });
+    return setState({ currentCtx:-1 });
   }
   // ** center graph
   const { currentCtx, currentStep, currentRewrite, expandSteps } = state;
