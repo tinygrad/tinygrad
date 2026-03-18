@@ -139,7 +139,7 @@ class Tensor(OpMixin):
         data = data.replace(src=(var.replace(src=const.src), const))
     elif data is None:
       data = Tensor(0, device=_device, dtype=_dtype or dtypes.default_float, requires_grad=requires_grad).uop
-    elif isinstance(data, get_args(PyConst)):
+    elif isinstance(data, get_args(ConstType)):
       data = (UOp.unique_const if _force_unique or requires_grad else UOp.const)(_dtype or dtypes.from_py(data), data, _device)
     elif isinstance(data, InvalidType):
       assert _dtype is not None
