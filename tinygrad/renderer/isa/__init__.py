@@ -46,7 +46,7 @@ class ISARenderer(Renderer):
 
   def is_two_address(self, x:UOp) -> bool: return False
   def should_rematerialize(self, x:UOp) -> bool: return False
-  def assign(self, x:UOp, reg:Register) -> UOp: raise NotImplementedError("arch specific")
+  def copy(self, x:UOp, reg:Register) -> UOp: raise NotImplementedError("arch specific")
   def spill(self, disp:UOp, x:UOp) -> UOp: raise NotImplementedError("arch specific")
   def fill(self, disp:UOp, x:UOp, reg:Register) -> UOp: raise NotImplementedError("arch specific")
   def asm(self, uops:list[UOp], function_name:str) -> str: raise NotImplementedError("arch specific")

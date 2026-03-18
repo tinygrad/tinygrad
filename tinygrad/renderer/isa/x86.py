@@ -316,7 +316,7 @@ def idiv(ctx:IselContext, x:UOp) -> UOp:
   return x.ins(X86Ops.MOV, src=(idiv,))
 
 def fold_address(x:UOp) -> tuple[UOp, UOp, UOp]:
-  def _disp(v:int) -> UOp: return imm(dtypes.int32 if abs(v) > dtypes.max(dtypes.int8) else dtypes.int8, v)
+  def _disp(v:int) -> UOp: return imm(dtypes.int32 if abs(v) > dtypes.int8.max else dtypes.int8, v)
   def _cast(v:UOp) -> UOp: return v.cast(dtypes.int64) if v.vmin < 0 else v
   if x.op is not Ops.INDEX: return (x, UOp(Ops.NOOP), _disp(0))
   base, idx = x.src
@@ -542,12 +542,12 @@ isel_matcher = PatternMatcher([
   # index
   (UPat(Ops.INDEX, name="x"), lambda x: x.ins(X86Ops.LEA, src=fold_address(x))),
   # TODO: fuse stores, very few cases -- store cmp becomes setcc, store gep int becomes vpextr, store bitcast to int becomes vmovd/q
-  # assign, load, store
-  # NOTE: assign here violates the spec, it only happens in register allocation when a reg to reg move needs to be inserted
-  (UPat(Ops.ASSIGN, dt_128bit, name="x"), lambda x: x.ins(X86Ops.VMOVUPS)),
-  (UPat(Ops.ASSIGN, dt_64bit, name="x"), lambda x: x.ins(X86Ops.VMOVSD)),
-  (UPat(Ops.ASSIGN, dt_32bit+dt_16bit, name="x"), lambda x: x.ins(X86Ops.VMOVSS)),
-  (UPat(Ops.ASSIGN, dtypes.ints+(dtypes.bool,), name="x"), lambda x: x.ins(X86Ops.MOV)),
+  # copy, load, store
+  # NOTE: copy here violates the spec, it only happens in register allocation when a reg to reg move needs to be inserted
+  (UPat(Ops.COPY, dt_128bit, name="x"), lambda x: x.ins(X86Ops.VMOVUPS)),
+  (UPat(Ops.COPY, dt_64bit, name="x"), lambda x: x.ins(X86Ops.VMOVSD)),
+  (UPat(Ops.COPY, dt_32bit+dt_16bit, name="x"), lambda x: x.ins(X86Ops.VMOVSS)),
+  (UPat(Ops.COPY, dtypes.ints+(dtypes.bool,), name="x"), lambda x: x.ins(X86Ops.MOV)),
   (UPat(Ops.LOAD, dt_128bit, name="x"), lambda x: x.ins(X86Ops.VMOVUPS, src=fold_address(x.src[0]))),
   (UPat(Ops.LOAD, dt_64bit, name="x"), lambda x: x.ins(X86Ops.VMOVSD, src=fold_address(x.src[0]))),
   (UPat(Ops.LOAD, dt_32bit, name="x"), lambda x: x.ins(X86Ops.VMOVSS, src=fold_address(x.src[0]))),
@@ -617,7 +617,7 @@ post_regalloc_matcher = PatternMatcher([
    [x.src[1].ins(X86Ops.ADDi, src=(imm(x.src[1].dtype, 1),)), jmp, UOp(Ops.INS, arg=X86Ops.LABEL, tag=f".LOOP_OUT_{ctx.loop_label[x.src[1]]}")])),
   # rewrite two address instructions to two address form, if reused src wasn't coalesced insert a move
   (UPat(Ops.INS, name="x"), lambda ctx,x: (nx:=x.replace(src=x.src[1:]),
-   [ctx.ren.assign(x.src[0], x.reg), nx] if x.reg != x.src[0].reg else [nx]) if x.arg in X86GroupOp.TwoAddress else None),
+   [ctx.ren.copy(x.src[0], x.reg), nx] if x.reg != x.src[0].reg else [nx]) if x.arg in X86GroupOp.TwoAddress else None),
 ])
 
 # ***** X86 spec *****
@@ -845,9 +845,9 @@ class X86Renderer(ISARenderer):
     self.compiler = X86Compiler()
   def is_two_address(self, x:UOp) -> bool: return x.arg in X86GroupOp.TwoAddress
   # nasty hacks to deal with pointers TODO: rm pointers
-  def assign(self, x:UOp, reg:Register):
+  def copy(self, x:UOp, reg:Register):
     dt = dtypes.uint64 if isinstance(x.dtype, PtrDType) else x.dtype
-    ret = isel_matcher.rewrite(UOp(Ops.ASSIGN, dt, (x,), tag=reg))
+    ret = isel_matcher.rewrite(UOp(Ops.COPY, dt, (x,), tag=reg))
     assert ret is not None
     return ret.replace(dtype=x.dtype)
 
