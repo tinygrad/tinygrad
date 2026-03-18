@@ -416,11 +416,6 @@ jobs:
           deps: testing
           opencl: 'true'
           llvm: 'true'
-      - name: Test openpilot model kernel count and gate usage
-        run: |
-          ALLOWED_KERNEL_COUNT=123 ALLOWED_READ_IMAGE=1397 ALLOWED_GATED_READ_IMAGE=94 FLOAT16=1 CL=1 IMAGE=1 python examples/openpilot/compile3.py https://gitlab.com/commaai/openpilot-lfs.git/gitlab-lfs/objects/cf6376aa9a090f0da26c280ef69eabf9bbdd51d1faac9ed392919c3db69be916
-      - name: Test openpilot CL compile fp16
-        run: FLOAT16=1 DEBUGCL=1 CL=1 IMAGE=1 python examples/openpilot/compile3.py https://gitlab.com/commaai/openpilot-lfs.git/gitlab-lfs/objects/cf6376aa9a090f0da26c280ef69eabf9bbdd51d1faac9ed392919c3db69be916
       - name: Test openpilot CL compile fp32 (test correctness)
         run: CL=1 IMAGE=1 SELFTEST=1 python examples/openpilot/compile3.py https://github.com/haraschax/filedump/raw/refs/heads/master/driving_vision_fp32.onnx
       - name: Test openpilot LLVM compile fp16
@@ -1038,3 +1033,5 @@ jobs:
           python -c "from tinygrad import Device; assert Device.DEFAULT == 'NULL'"
           DEBUG=4 python3 test/backend/test_ops.py TestOps.test_add
           python -m pytest -n=auto test/backend/test_ops.py --durations=20
+      - name: Test openpilot model kernel count and gate usage
+        run: ALLOWED_KERNEL_COUNT=123 ALLOWED_READ_IMAGE=1397 ALLOWED_GATED_READ_IMAGE=94 FLOAT16=1 CL=1 IMAGE=1 python examples/openpilot/compile3.py https://gitlab.com/commaai/openpilot-lfs.git/gitlab-lfs/objects/cf6376aa9a090f0da26c280ef69eabf9bbdd51d1faac9ed392919c3db69be916
