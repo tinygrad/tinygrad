@@ -1,5 +1,5 @@
 import unittest
-from tinygrad.runtime.support.am.amdev import AMMemoryManager, AMPageTableEntry
+from tinygrad.runtime.support.am.amdev import AMMemoryManager, AMPageTable
 from tinygrad.runtime.support.am.ip import AM_GMC
 from tinygrad.runtime.support.hcq import MMIOInterface
 from tinygrad.runtime.support.memory import PageTableTraverseContext, AddrSpace
@@ -25,7 +25,7 @@ class FakeAM:
     self.vram_mv = memoryview(bytearray(self.vram_size))
     self.vram = MMIOInterface(mv_address(self.vram_mv), self.vram_mv.nbytes)
     self.gmc = FakeGMC(self)
-    self.mm = AMMemoryManager(self, self.vram_size, boot_size=(32 << 20), pt_t=AMPageTableEntry, va_shifts=[12, 21, 30, 39], va_bits=48,
+    self.mm = AMMemoryManager(self, self.vram_size, boot_size=(32 << 20), pt_t=AMPageTable, va_shifts=[12, 21, 30, 39], va_bits=48,
       first_lv=am.AMDGPU_VM_PDB2, va_base=AMMemoryManager.va_allocator.base,
       palloc_ranges=[(1 << (i + 12), 0x1000) for i in range(9 * (3 - am.AMDGPU_VM_PDB2), -1, -1)])
     self.is_booting = False

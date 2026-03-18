@@ -1,4 +1,4 @@
-import collections, functools, dataclasses, enum
+import collections, functools, dataclasses, enum, array
 from typing import Any, ClassVar
 from tinygrad.helpers import round_up, getenv
 
@@ -112,6 +112,27 @@ class AddrSpace(enum.Enum): PHYS = enum.auto(); SYS = enum.auto(); PEER = enum.a
 @dataclasses.dataclass(frozen=True)
 class VirtMapping: va_addr:int; size:int; paddrs:list[tuple[int, int]]; aspace:AddrSpace; uncached:bool=False; snooped:bool=False # noqa: E702
 
+class PageTable:
+  entry_t: type # set by subclass
+
+  @property
+  def qw(self) -> int: return 1
+
+  def __init__(self, dev, paddr, lv): self.dev, self.paddr, self.lv, self.entries = dev, paddr, lv, dev.vram.view(paddr, 0x1000, fmt='Q')
+
+  def new_entry(self, **kwargs): return self.entry_t(self, None, **kwargs)
+
+  def read_entry(self, entry_id:int): return self.read_entries(entry_id, 1)[0]
+  def read_entries(self, start:int, count:int) -> list:
+    raw = self.entries[start*self.qw:(start+count)*self.qw]
+    if self.qw == 1: return [self.entry_t(self, v) for v in raw]
+    return [self.entry_t(self, (raw[2*i+1]<<64)|raw[2*i]) for i in range(count)]
+
+  def write_entry(self, entry_id:int, e): self.write_entries(entry_id, [e])
+  def write_entries(self, start:int, entries:list):
+    if self.qw == 1: self.entries[start:start+len(entries)] = array.array('Q', [e.raw for e in entries])
+    else: self.entries[2*start:2*start+2*len(entries)] = array.array('Q', [w for e in entries for w in (e.raw & 0xffffffffffffffff, e.raw >> 64)])
+
 class PageTableTraverseContext:
   def __init__(self, dev, pt, vaddr, create_pts=False, free_pts=False, boot=False):
     self.dev, self.vaddr, self.create_pts, self.free_pts, self.boot = dev, vaddr - dev.mm.va_base, create_pts, free_pts, boot
@@ -123,23 +144,25 @@ class PageTableTraverseContext:
 
   def level_down(self):
     pt, pte_idx, _ = self.pt_stack[-1]
+    e = pt.read_entry(pte_idx)
 
-    if not pt.valid(pte_idx):
+    if not e.valid:
       assert self.create_pts, "Not allowed to create new page table"
-      pt.set_entry(pte_idx, self.dev.mm.palloc(0x1000, zero=True, boot=self.boot, ptable=True), table=True, valid=True)
+      e = pt.new_entry(paddr=self.dev.mm.palloc(0x1000, zero=True, boot=self.boot, ptable=True), table=True, valid=True)
+      pt.write_entry(pte_idx, e)
 
-    assert not pt.is_page(pte_idx), f"Must be table pt={pt.paddr:#x}, {pt.lv=} {pte_idx=} {pt.entry(pte_idx)=:#x}"
-    child_page_table = self.dev.mm.pt_t(self.dev, pt.address(pte_idx), lv=pt.lv+1)
+    assert not e.is_page(), f"Must be table pt={pt.paddr:#x}, {pt.lv=} {pte_idx=} {e.raw=:#x}"
+    child_page_table = self.dev.mm.pt_t(self.dev, e.address, lv=pt.lv+1)
 
     self.pt_stack.append((child_page_table, self._pt_pte_idx(child_page_table, self.vaddr), self._pt_pte_size(child_page_table)))
     return self.pt_stack[-1]
 
   def _try_free_pt(self) -> bool:
     pt, _, _ = self.pt_stack[-1]
-    if self.free_pts and pt != self.dev.mm.root_page_table and all(not pt.valid(i) for i in range(self._pt_pte_cnt(self.pt_stack[-1][0].lv))):
+    if self.free_pts and pt != self.dev.mm.root_page_table and all(not e.valid for e in pt.read_entries(0, self._pt_pte_cnt(pt.lv))):
       self.dev.mm.pfree(pt.paddr, ptable=True)
       parent_pt, parent_pte_idx, _ = self.pt_stack[-2]
-      parent_pt.set_entry(parent_pte_idx, 0x0, valid=False)
+      parent_pt.write_entry(parent_pte_idx, parent_pt.new_entry(paddr=0x0, valid=False))
       return True
     return False
 
@@ -155,7 +178,7 @@ class PageTableTraverseContext:
         assert paddr is not None, "paddr must be provided when allocating new page tables"
         while pte_covers > size or not pt.supports_huge_page(paddr+off) or self.vaddr&(pte_covers-1) != 0: pt, pte_idx, pte_covers = self.level_down()
       else:
-        while not pt.is_page(pte_idx): pt, pte_idx, pte_covers = self.level_down()
+        while not pt.read_entry(pte_idx).is_page(): pt, pte_idx, pte_covers = self.level_down()
 
       entries = min(size // pte_covers, self._pt_pte_cnt(pt.lv) - pte_idx)
       assert entries > 0, f"Invalid entries {size=:#x}, {pte_covers=:#x}"
@@ -198,12 +221,15 @@ class MemoryManager:
     assert size == sum(p[1] for p in paddrs), f"Size mismatch {size=} {sum(p[1] for p in paddrs)=}"
 
     ctx = PageTableTraverseContext(self.dev, self.root_page_table, vaddr, create_pts=True, boot=boot)
+    for _, pt, pte_idx, pte_cnt, _ in ctx.next(size, paddr=0):
+      entries = pt.read_entries(pte_idx, pte_cnt)
+      assert all(not e.valid for e in entries), f"Some PTEs are mapped: {[e.raw for e in entries if e.valid]}"
+
+    ctx = PageTableTraverseContext(self.dev, self.root_page_table, vaddr, create_pts=True, boot=boot)
     for paddr, psize in paddrs:
       for off, pt, pte_idx, pte_cnt, pte_covers in ctx.next(psize, paddr=paddr):
-        for pte_off in range(pte_cnt):
-          assert not pt.valid(pte_idx + pte_off), f"PTE already mapped: {pt.entry(pte_idx + pte_off):#x}"
-          pt.set_entry(pte_idx + pte_off, paddr + off + pte_off * pte_covers, uncached=uncached, aspace=aspace, snooped=snooped,
-                       frag=self._frag_size(ctx.vaddr+off, pte_cnt * pte_covers), valid=True)
+        pt.write_entries(pte_idx, [pt.new_entry(paddr=paddr + off + pte_off * pte_covers, uncached=uncached, aspace=aspace, snooped=snooped,
+                                                frag=self._frag_size(ctx.vaddr+off, pte_cnt * pte_covers), valid=True) for pte_off in range(pte_cnt)])
 
     self.on_range_mapped()
     return VirtMapping(vaddr, size, paddrs, aspace=aspace, uncached=uncached, snooped=snooped)
@@ -213,9 +239,9 @@ class MemoryManager:
 
     ctx = PageTableTraverseContext(self.dev, self.root_page_table, vaddr, free_pts=True)
     for _, pt, pte_idx, pte_cnt, _ in ctx.next(size):
-      for pte_id in range(pte_idx, pte_idx + pte_cnt):
-        assert pt.valid(pte_id), f"PTE not mapped: {pt.entry(pte_id):#x}"
-        pt.set_entry(pte_id, paddr=0x0, valid=False)
+      entries = pt.read_entries(pte_idx, pte_cnt)
+      assert all(e.valid for e in entries), f"Some PTEs not mapped: {[e.raw for e in entries if not e.valid]}"
+      pt.write_entries(pte_idx, [pt.new_entry(paddr=0x0, valid=False) for _ in range(pte_cnt)])
 
   def on_range_mapped(self): pass
 

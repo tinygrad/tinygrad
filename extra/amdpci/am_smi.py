@@ -5,7 +5,7 @@ from tinygrad.helpers import DEBUG, colored, ansilen
 from tinygrad.runtime.autogen import libc
 from tinygrad.runtime.autogen.am import am
 from tinygrad.runtime.support.hcq import MMIOInterface
-from tinygrad.runtime.support.am.amdev import AMDev, AMMemoryManager, AMPageTableEntry
+from tinygrad.runtime.support.am.amdev import AMDev, AMMemoryManager, AMPageTable
 from tinygrad.runtime.support.am.ip import AM_SOC, AM_GMC, AM_IH, AM_PSP, AM_SMU, AM_GFX, AM_SDMA
 
 def bold(s): return f"\033[1m{s}\033[0m"
@@ -240,14 +240,12 @@ class SMICtx:
     pt_stack = [dev.mm.root_page_table]
     while len(pt_stack) > 0:
       pt = pt_stack.pop()
-      for i in range(512):
-        entry = pt.entries[i]
-
-        if (entry & am.AMDGPU_PTE_VALID) == 0: continue
-        if pt.lv < am.AMDGPU_VM_PDB0 and not dev.gmc.is_pte_huge_page(pt.lv, entry):
-          pt_stack.append(AMPageTableEntry(dev, dev.xgmi2paddr(entry & 0x0000FFFFFFFFF000), lv=pt.lv+1))
+      for e in pt.read_entries(0, 512):
+        if not e.valid: continue
+        if pt.lv < am.AMDGPU_VM_PDB0 and not e.is_page():
+          pt_stack.append(AMPageTable(dev, e.address, lv=pt.lv+1))
           continue
-        if (entry & am.AMDGPU_PTE_SYSTEM) != 0: continue
+        if e.raw & am.AMDGPU_PTE_SYSTEM != 0: continue
         usage += (1 << ((9 * (3-pt.lv)) + 12))
     return usage
 

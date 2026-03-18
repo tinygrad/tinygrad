@@ -2,7 +2,7 @@ from __future__ import annotations
 import ctypes, time, functools, re, gzip, struct
 from tinygrad.helpers import getenv, DEBUG, fetch, getbits
 from tinygrad.runtime.autogen import pci
-from tinygrad.runtime.support.memory import TLSFAllocator, MemoryManager, AddrSpace
+from tinygrad.runtime.support.memory import TLSFAllocator, MemoryManager, PageTable, AddrSpace
 from tinygrad.runtime.support.nv.ip import NV_FLCN, NV_FLCN_COT, NV_GSP
 from tinygrad.runtime.support.system import PCIDevice, MMIOInterface
 
@@ -30,40 +30,39 @@ class NVReg:
   def decode(self, val: int) -> dict: return {name:getbits(val, start, end) for name,(start,end) in self.fields.items()}
 
 class NVPageTableEntry:
-  def __init__(self, nvdev, paddr, lv): self.nvdev, self.paddr, self.lv, self.entries = nvdev, paddr, lv, nvdev.vram.view(paddr, 0x1000, fmt='Q')
-
-  def _is_dual_pde(self) -> bool: return self.lv == self.nvdev.mm.level_cnt - 2
-
-  def set_entry(self, entry_id:int, paddr:int, table=False, uncached=False, aspace=AddrSpace.PHYS, snooped=False, frag=0, valid=True):
-    if not table:
-      x = self.nvdev.pte_t.encode(valid=valid, address_sys=paddr >> 12, aperture=2 if aspace is AddrSpace.SYS else 0, kind=6,
-        **({'pcf': int(uncached)} if self.nvdev.mmu_ver == 3 else {'vol': uncached}))
+  def __init__(self, pt:NVPageTable, raw:int|None, paddr:int=0, table=False, uncached=False, aspace=AddrSpace.PHYS, snooped=False, frag=0, valid=True):
+    self.pt = pt
+    if raw is not None: self.raw = raw
     else:
-      pde = self.nvdev.dual_pde_t if self._is_dual_pde() else self.nvdev.pde_t
-      small, sys = ("_small" if self._is_dual_pde() else ""), "" if self.nvdev.mmu_ver == 3 else "_sys"
-      x = pde.encode(is_pte=False, **{f'aperture{small}': 1 if valid else 0, f'address{small}{sys}': paddr >> 12},
-        **({f'pcf{small}': 0b10} if self.nvdev.mmu_ver == 3 else {'no_ats': 1}))
+      if not table:
+        self.raw = pt.dev.pte_t.encode(valid=valid, address_sys=paddr >> 12, aperture=2 if aspace is AddrSpace.SYS else 0, kind=6,
+          **({'pcf': int(uncached)} if pt.dev.mmu_ver == 3 else {'vol': uncached}))
+      else:
+        pde = pt.dev.dual_pde_t if self._is_dual_pde() else pt.dev.pde_t
+        small, sys = ("_small" if self._is_dual_pde() else ""), "" if pt.dev.mmu_ver == 3 else "_sys"
+        self.raw = pde.encode(is_pte=False, **{f'aperture{small}': 1 if valid else 0, f'address{small}{sys}': paddr >> 12},
+          **({f'pcf{small}': 0b10} if pt.dev.mmu_ver == 3 else {'no_ats': 1}))
 
-    if self._is_dual_pde(): self.entries[2*entry_id], self.entries[2*entry_id+1] = x & 0xffffffffffffffff, x >> 64
-    else: self.entries[entry_id] = x
+  def _read_fields(self) -> dict:
+    if self.is_page(): return self.pt.dev.pte_t.decode(self.raw)
+    return (self.pt.dev.dual_pde_t if self._is_dual_pde() else self.pt.dev.pde_t).decode(self.raw)
+  def _is_dual_pde(self) -> bool: return self.pt.lv == self.pt.dev.mm.level_cnt - 2
 
-  def entry(self, entry_id:int) -> int:
-    return (self.entries[2*entry_id+1]<<64) | self.entries[2*entry_id] if self._is_dual_pde() else self.entries[entry_id]
+  @property
+  def valid(self):
+    if self.is_page(): return self._read_fields()['valid']
+    return self._read_fields()['aperture_small' if self._is_dual_pde() else 'aperture'] != 0
+  @property
+  def address(self) -> int:
+    small, sys = ("_small" if self._is_dual_pde() else ""), "_sys" if self.pt.dev.mmu_ver == 2 or self.pt.lv == self.pt.dev.mm.level_cnt - 1 else ""
+    return self._read_fields()[f'address{small}{sys}'] << 12
+  def is_page(self) -> bool: return (self.raw & 1 == 1) if self.pt.lv < self.pt.dev.mm.level_cnt - 1 else True
 
-  def read_fields(self, entry_id:int) -> dict:
-    if self.is_page(entry_id): return self.nvdev.pte_t.decode(self.entry(entry_id))
-    return (self.nvdev.dual_pde_t if self._is_dual_pde() else self.nvdev.pde_t).decode(self.entry(entry_id))
-
-  def is_page(self, entry_id) -> bool: return (self.entry(entry_id) & 1 == 1) if self.lv < self.nvdev.mm.level_cnt - 1 else True
-  def supports_huge_page(self, paddr:int): return self.lv >= self.nvdev.mm.level_cnt - 3 and paddr % self.nvdev.mm.pte_covers[self.lv] == 0
-
-  def valid(self, entry_id):
-    if self.is_page(entry_id): return self.read_fields(entry_id)['valid']
-    return self.read_fields(entry_id)['aperture_small' if self._is_dual_pde() else 'aperture'] != 0
-
-  def address(self, entry_id:int) -> int:
-    small, sys = ("_small" if self._is_dual_pde() else ""), "_sys" if self.nvdev.mmu_ver == 2 or self.lv == self.nvdev.mm.level_cnt - 1 else ""
-    return self.read_fields(entry_id)[f'address{small}{sys}'] << 12
+class NVPageTable(PageTable):
+  entry_t = NVPageTableEntry
+  @property
+  def qw(self) -> int: return 2 if self.lv == self.dev.mm.level_cnt - 2 else 1
+  def supports_huge_page(self, paddr:int): return self.lv >= self.dev.mm.level_cnt - 3 and paddr % self.dev.mm.pte_covers[self.lv] == 0
 
 class NVMemoryManager(MemoryManager):
   va_allocator = TLSFAllocator((1 << 44), base=0x1000000000) # global for all devices.
@@ -143,7 +142,7 @@ class NVDev:
     bits, shifts = (56, [12, 21, 29, 38, 47, 56]) if self.mmu_ver == 3 else (48, [12, 21, 29, 38, 47])
 
     # tail vram reserved for falcon structs
-    self.mm = NVMemoryManager(self, self.vram_size - (64 << 20), boot_size=(2 << 20), pt_t=NVPageTableEntry, va_bits=bits, va_shifts=shifts,
+    self.mm = NVMemoryManager(self, self.vram_size - (64 << 20), boot_size=(2 << 20), pt_t=NVPageTable, va_bits=bits, va_shifts=shifts,
       va_base=0, palloc_ranges=[(x, x) for x in [512 << 20, 2 << 20, 4 << 10]], reserve_ptable=not self.large_bar)
 
   def _alloc_sysmem(self, size:int, vaddr:int=0, contiguous:bool=False, data:bytes|None=None) -> tuple[MMIOInterface, list[int]]:

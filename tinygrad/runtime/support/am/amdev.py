@@ -4,7 +4,7 @@ from tinygrad.helpers import mv_address, getenv, DEBUG, fetch, lo32, hi32
 from tinygrad.runtime.autogen import pci
 from tinygrad.runtime.autogen.am import am
 from tinygrad.runtime.support.amd import AMDReg, import_module, import_asic_regs
-from tinygrad.runtime.support.memory import TLSFAllocator, MemoryManager, AddrSpace
+from tinygrad.runtime.support.memory import TLSFAllocator, MemoryManager, PageTable, AddrSpace
 from tinygrad.runtime.support.system import PCIDevice
 from tinygrad.runtime.support.am.ip import AM_IP, AM_SOC, AM_GMC, AM_IH, AM_PSP, AM_SMU, AM_GFX, AM_SDMA
 
@@ -119,20 +119,25 @@ class AMFirmware:
   def desc(self, blob:memoryview, offset:int, size:int, *types:int) -> tuple[list[int], memoryview]: return (list(types), blob[offset:offset+size])
 
 class AMPageTableEntry:
-  def __init__(self, adev, paddr, lv): self.adev, self.paddr, self.lv, self.entries = adev, paddr, lv, adev.vram.view(paddr, 0x1000, fmt='Q')
+  def __init__(self, pt:AMPageTable, raw:int|None, paddr:int=0, table=False, uncached=False, aspace=AddrSpace.PHYS, snooped=False, frag=0, valid=True):
+    self.pt = pt
+    if raw is not None: self.raw = raw
+    else:
+      is_sys = aspace is AddrSpace.SYS
+      if aspace is AddrSpace.PHYS: paddr = pt.dev.paddr2xgmi(paddr)
+      assert paddr & pt.dev.gmc.address_space_mask == paddr, f"Invalid physical address {paddr:#x}"
+      self.raw = pt.dev.gmc.get_pte_flags(pt.lv, table, frag, uncached, is_sys, snooped, valid) | (paddr & 0x0000FFFFFFFFF000)
 
-  def set_entry(self, entry_id:int, paddr:int, table=False, uncached=False, aspace=AddrSpace.PHYS, snooped=False, frag=0, valid=True):
-    is_sys = aspace is AddrSpace.SYS
-    if aspace is AddrSpace.PHYS: paddr = self.adev.paddr2xgmi(paddr)
-    assert paddr & self.adev.gmc.address_space_mask == paddr, f"Invalid physical address {paddr:#x}"
-    self.entries[entry_id] = self.adev.gmc.get_pte_flags(self.lv, table, frag, uncached, is_sys, snooped, valid) | (paddr & 0x0000FFFFFFFFF000)
+  @property
+  def valid(self) -> bool: return (self.raw & am.AMDGPU_PTE_VALID) != 0
+  @property
+  def address(self) -> int:
+    assert self.raw & am.AMDGPU_PTE_SYSTEM == 0, "should not be system address"
+    return self.pt.dev.xgmi2paddr(self.raw & 0x0000FFFFFFFFF000)
+  def is_page(self) -> bool: return self.pt.lv == am.AMDGPU_VM_PTB or self.pt.dev.gmc.is_pte_huge_page(self.pt.lv, self.raw)
 
-  def entry(self, entry_id:int) -> int: return self.entries[entry_id]
-  def valid(self, entry_id:int) -> bool: return (self.entries[entry_id] & am.AMDGPU_PTE_VALID) != 0
-  def address(self, entry_id:int) -> int:
-    assert self.entries[entry_id] & am.AMDGPU_PTE_SYSTEM == 0, "should not be system address"
-    return self.adev.xgmi2paddr(self.entries[entry_id] & 0x0000FFFFFFFFF000)
-  def is_page(self, entry_id:int) -> bool: return self.lv == am.AMDGPU_VM_PTB or self.adev.gmc.is_pte_huge_page(self.lv, self.entries[entry_id])
+class AMPageTable(PageTable):
+  entry_t = AMPageTableEntry
   def supports_huge_page(self, paddr:int): return self.lv >= am.AMDGPU_VM_PDB2
 
 class AMMemoryManager(MemoryManager):
@@ -197,7 +202,7 @@ class AMDev:
     self.smi_dev, self.is_err_state = smi_dev, False
 
     # Memory manager & firmware
-    self.mm = AMMemoryManager(self, self.vram_size - self.reserved_vram_size, boot_size=(32 << 20), pt_t=AMPageTableEntry, va_shifts=[12, 21, 30, 39],
+    self.mm = AMMemoryManager(self, self.vram_size - self.reserved_vram_size, boot_size=(32 << 20), pt_t=AMPageTable, va_shifts=[12, 21, 30, 39],
       va_bits=48, first_lv=am.AMDGPU_VM_PDB2, va_base=AMMemoryManager.va_allocator.base,
       palloc_ranges=[(1 << (i + 12), 0x1000) for i in range(9 * (3 - am.AMDGPU_VM_PDB2), -1, -1)], reserve_ptable=not self.large_bar)
     self.fw = AMFirmware(self)
