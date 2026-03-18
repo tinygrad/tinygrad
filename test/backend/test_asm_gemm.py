@@ -2,7 +2,7 @@ import unittest
 from tinygrad import Tensor, Device, dtypes, Context
 from tinygrad.device import is_dtype_supported
 from tinygrad.helpers import getenv
-from extra.gemm.asm.cdna.gemm import asm_gemm
+from extra.gemm.cdna_asm_gemm import asm_gemm
 from test.helpers import needs_second_gpu
 
 # On non CDNA4 it will only validate the Tensor.custom_kernel integration
@@ -87,6 +87,9 @@ class TestGemmLarge(unittest.TestCase):
     if not is_cdna4():
       self.skipTest("very slow on non mi350x")
 
+  @Context(ASM_GEMM=1)
+  def test_empty(self): (Tensor.empty(N:=getenv("N", 4096), N, dtype=dtypes.half)@Tensor.empty(N, N, dtype=dtypes.half)).realize()
+
   def test_tiny(self): verify_asm_gemm(1, 256, 256, 64)
   def test_simple(self): verify_asm_gemm(1, N:=getenv("N", 4096), N, N, dtype=dtypes.half)
   def test_gemm(self): verify_asm_gemm(1, 8192, 4096, 14336)
@@ -157,7 +160,7 @@ class TestGemmLarge(unittest.TestCase):
 
 class TestMagicGu(unittest.TestCase):
   def test_magicgu_matches_old(self):
-    from extra.gemm.asm.cdna.asm import _magicgu_mulhi, TILE_M, TILE_N, TILE_K
+    from extra.gemm.cdna_asm_gemm import _magicgu_mulhi, TILE_M, TILE_N, TILE_K
     old_iters_args = {64: (67108864, 0), 128: (33554432, 0), 224: (613566757, 2147483656)}
     old_gemm_shapes = [
       (8192, 4096, 4096), (8192, 14336, 4096), (8192, 4096, 14336),

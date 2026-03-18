@@ -2,7 +2,7 @@ from __future__ import annotations
 import platform, sys, ctypes, functools, time, mmap, threading, queue
 from tinygrad.helpers import to_mv, OSX, WIN, mv_address, suppress_finalizing, unwrap, data64_le
 from tinygrad.helpers import CPU_CC, CPU_LVP, CPU_LLVM, CPU_X86
-from tinygrad.device import BufferSpec, DMACPURef, CompilerSet
+from tinygrad.device import BufferSpec, CompilerSet
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, HWQueue, HCQArgsState, HCQSignal, HCQProgram, MMIOInterface
 from tinygrad.runtime.support.hcq import CLikeArgsState
 from tinygrad.renderer.cstyle import ClangJITRenderer
@@ -130,9 +130,6 @@ class CPUAllocator(HCQAllocator):
   def _as_buffer(self, src) -> memoryview:
     self.dev.synchronize()
     return to_mv(src.va_addr, src.size)
-  def _as_dmaref(self, buf):
-    self.dev.synchronize()
-    return DMACPURef(buf.va_addr, buf.size)
   def _map(self, buf:HCQBuffer):
     if buf.view is None or not isinstance(buf.view, MMIOInterface): raise RuntimeError("Cannot map buffer without view to cpu")
 

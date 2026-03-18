@@ -12,6 +12,7 @@ export ALL2ALL=${ALL2ALL:-1}
 export USE_ATOMICS=${USE_ATOMICS:-0}
 export ASM_GEMM=${ASM_GEMM:-1}
 export WQKV=${WQKV:-1}
+export OFFLOAD_OPTIM=${OFFLOAD_OPTIM:-1}
 
 export DEFAULT_FLOAT="bfloat16" OPTIM_DTYPE="bfloat16"
 export DP=${DP:-1} MP=${MP:-8}

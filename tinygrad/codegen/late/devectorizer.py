@@ -10,6 +10,7 @@ from tinygrad.renderer import Renderer
 
 # ***** image load valid simplification *****
 
+@functools.cache
 def _drop_valid_stmts(valid:UOp, idx:UOp, height:int, width:int) -> list[UOp]:
   # can drop valid if idx is out of bound when valid is False
   drop_stmt = []
@@ -61,6 +62,18 @@ load_store_indexing = PatternMatcher([
 # ***** load/store grouping *****
 
 def expand_index(buf:UOp, vec:UOp):
+  # determine optimal image shapes
+  if IMAGE == 1 and isinstance(dt:=buf.dtype, ImageDType):
+    x, valid = vec.get_idx().gep(0), vec.get_valid().gep(0)
+    # search for dims that drop the most valid statements
+    best_drop, cands = -1, []
+    for ch, cw in ImageDType.valid_dims(dt):
+      if (dropped:=len(_drop_valid_stmts(valid, cidx:=uop_given_valid(valid, UOp.vectorize((x//4)%cw, x//(4*cw))), ch, cw))) > best_drop:
+        best_drop, cands = dropped, [(ch, cw, cidx)]
+      elif dropped == best_drop: cands.append((ch, cw, cidx))
+    # and tiebreak with indexing complexity (ie. number of nodes)
+    h, w, _ = cands[0] if len(cands) == 1 else min(cands, key=lambda cand: len(cand[2].gep(1).simplify().backward_slice))
+    buf = buf.replace(dtype=(dtypes.imageh if dt.itemsize == 2 else dtypes.imagef)((h, w, 4), w * 4 * dt.itemsize))
   if getenv("UNSAFE_DISABLE_MASK", 0): vec = vec.get_idx()
   # generate the individual indexes
   return UOp(Ops.VECTORIZE, buf.dtype, tuple(buf.index(vec.gep(i), ptr=True) for i in range(vec.dtype.count)))
@@ -183,31 +196,21 @@ def split_load_store(ctx:Renderer|None, ls:UOp, idx:UOp):
   if len(ret) <= 1: return None
   return UOp(Ops.VCAT, ls.dtype, tuple(ret)) if ls.op is Ops.LOAD else UOp.group(*ret)
 
-def _do_image_fixup(dt:ImageDType, idx:UOp) -> tuple[UOp, UOp, int, int]:
-  buf = idx.src[0]
-  x, valid = idx.src[1].get_idx(), idx.src[1].get_valid()
-  h, w = dt.shape[0], dt.shape[1]
-  if IMAGE == 1 and valid is not None:
-    h, w = max(ImageDType.valid_dims(dt), key=lambda hw:
-                # maximize number of valids removed
-               (len(_drop_valid_stmts(valid, idx:=uop_given_valid(valid, UOp.vectorize((x//4)%hw[1], x//(4*hw[1]))), *hw)),
-                # and minimize idx complexity (number of nodes)
-                -len(idx.backward_slice)))
-    buf = buf.replace(dtype=(dtypes.imageh if dt.itemsize == 2 else dtypes.imagef)((h, w, 4), w * 4 * dt.itemsize))
-  oidx = UOp(Ops.VECTORIZE, dtypes.index.vec(2), ((x // 4) % w, (x // (4*w))))
-  return x, idx.replace(src=(buf, oidx.valid(valid))), w, h
+def get_image_idx(idx:UOp, width:int):
+  oidx = UOp(Ops.VECTORIZE, dtypes.index.vec(2), (((x:=idx.src[1].get_idx()) // 4) % width, (x // (4*width))))
+  return idx.replace(src=(idx.src[0], oidx.valid(idx.src[1].get_valid())))
 
 def image_fixup(ls:UOp):
   # normal image load or store, with the CAST from expand_index
   if ls.src[0].op is Ops.CAST and isinstance(image_dtype:=ls.src[0].src[0].dtype, ImageDType):
     assert ls.src[0].dtype.count == 4, "image must be casted to 4"
-    _, idx, _, _ = _do_image_fixup(image_dtype, ls.src[0].src[0])
+    idx = get_image_idx(ls.src[0].src[0], image_dtype.shape[1])
     return ls.replace(src=(idx,)+ls.src[1:])
 
   # this is an unprocessed image without a cast, aka unfoldable image load. this doesn't work for stores
   if isinstance(image_dtype:=ls.src[0].dtype, ImageDType) and ls.src[0].src[1].get_idx().dtype != dtypes.index.vec(2):
     assert ls.op is Ops.LOAD, "if an image store isn't upcasted to 4, we can't store it"
-    x, idx, width, height = _do_image_fixup(image_dtype, ls.src[0])
+    x, idx = ls.src[0].src[1].get_idx(), get_image_idx(ls.src[0], image_dtype.shape[1])
     vec_load = ls.replace(dtype=ls.dtype.vec(4), src=(idx,)+ls.src[1:])
     # image pixels have 4 channels (.xyzw), select channel based on x % 4
     x_mod_4 = x % 4
@@ -248,32 +251,27 @@ def no_vectorized_alu(alu:UOp):
 def no_vectorized_buf(buf:UOp):
   return buf.replace(dtype=buf.ptrdtype.base.scalar().ptr(buf.ptrdtype.size*buf.ptrdtype.count, buf.ptrdtype.addrspace)).cast(buf.dtype)
 
-def no_vectorized_index(buf:UOp, cast:UOp, idx:UOp):
+def no_vectorized_index(buf:UOp, cast:UOp, idx:UOp, bcast:UOp|None=None):
   cnt = cast.dtype.count
-  assert idx.dtype.count == 1, f"idx dtype must be 1 {idx.dtype}"
-  return buf.broadcast(cnt).index(idx.broadcast(cnt)*cnt+UOp.const(dtypes.index.vec(cnt), tuple(range(cnt))), ptr=True)
-
-def no_vectorized_index_broadcast(buf:UOp, cast:UOp, bcast:UOp, idx:UOp):
-  cnt = cast.dtype.count
-  vcnt = cast.dtype.vcount
-  precnt = bcast.dtype.vcount
-  # TODO: I have no idea *why* this is. I just change things until the tests pass. No AI, old school.
-  if bcast.op is Ops.GEP:
-    gep_arg = tuple(flatten([range(precnt) for _ in range(vcnt)]))
-    sum_arg = tuple(flatten([[i+y for y in bcast.arg] for i in range(vcnt)]))
+  if bcast is not None and bcast.op is Ops.GEP:
+    # GEP selects specific lanes; bcast.arg[k] is the offset for lane k, iterate groups × selected lanes
+    pairs = [(k, g + bcast.arg[k]) for g, k in itertools.product(range(cast.dtype.vcount), range(len(bcast.arg)))]
+  elif bcast is not None:
+    # BROADCAST: cross product of components × lanes
+    pairs = [(j, c) for c, j in itertools.product(range(cnt), range(bcast.dtype.vcount))]
   else:
-    gep_arg = tuple(flatten([range(precnt) for _ in range(cnt)]))
-    sum_arg = tuple(flatten([[i]*precnt for i in range(cnt)]))
-  new_idx = idx.gep(gep_arg)*cnt + UOp.const(dtypes.index.vec(len(sum_arg)), sum_arg)
-  return buf.broadcast(cnt*precnt).index(new_idx, ptr=True)
+    # simple scalar index: one lane, all components
+    pairs = [(0, c) for c in range(cnt)]
+  idx_lanes, offsets = (tuple(x) for x in zip(*pairs))
+  return buf.broadcast(len(pairs)).index(idx.gep(idx_lanes)*cnt + UOp.const(dtypes.index.vec(len(pairs)), offsets), ptr=True)
 
 devectorize_buf_and_index = PatternMatcher([
   (UPat((Ops.DEFINE_LOCAL, Ops.DEFINE_REG), name="buf"), no_vectorized_buf),
   (UPat((Ops.DEFINE_LOCAL, Ops.DEFINE_REG)).or_after(name="buf").cast(name="cast").index(UPat.var("idx")), no_vectorized_index),
   (UPat((Ops.DEFINE_LOCAL, Ops.DEFINE_REG)).or_after(name="buf").cast(name="cast").broadcast(name="bcast").index(UPat.var("idx")),
-   no_vectorized_index_broadcast),
+   no_vectorized_index),
   (UPat((Ops.DEFINE_LOCAL, Ops.DEFINE_REG)).or_after(name="buf").cast(name="cast").gep(name="bcast").index(UPat.var("idx")),
-   no_vectorized_index_broadcast),
+   no_vectorized_index),
 ])
 
 devectorize = PatternMatcher([

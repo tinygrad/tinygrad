@@ -107,7 +107,7 @@ class USB3:
       if self.use_bot:
         dir_in = rlen > 0
         data_len = rlen if dir_in else (len(send_data) if send_data is not None else 0)
-        assert (data_len == 0) if dir_in else (rlen == 0), "BOT mode only supports either read or write per command"
+        assert not (rlen > 0 and send_data is not None), "BOT mode only supports either read or write per command"
 
         # CBW
         self._tag += 1

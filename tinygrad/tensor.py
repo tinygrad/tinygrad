@@ -5,7 +5,7 @@ from contextlib import ContextDecorator
 from typing import Any, Callable, ClassVar, Sequence, cast, get_args, Literal, SupportsIndex, ParamSpec, TypeVar, Generic, TYPE_CHECKING
 if TYPE_CHECKING: import numpy
 from tinygrad.dtype import DType, DTypeLike, dtypes, ImageDType, ConstType, least_upper_float, least_upper_dtype, sum_acc_dtype, to_dtype, truncate
-from tinygrad.dtype import _from_np_dtype, _to_np_dtype, PyConst
+from tinygrad.dtype import _from_np_dtype, _to_np_dtype, PyConst, Invalid, InvalidType
 from tinygrad.helpers import argfix, make_tuple, flatten, prod, all_int, round_up, merge_dicts, argsort, getenv, all_same, fully_flatten
 from tinygrad.helpers import IMAGE, FLOAT16, WINO, Metadata, TRACEMETA, ASM_GEMM, ceildiv, fetch, is_numpy_ndarray, TracingKey, cpu_profile
 from tinygrad.helpers import suppress_finalizing, disable_gc
@@ -113,7 +113,7 @@ class Tensor(OpMixin):
   __slots__ = "uop", "requires_grad", "grad"
   training: ClassVar[bool] = False
 
-  def __init__(self, data:PyConst|bytes|list|tuple|UOp|'numpy.ndarray'|pathlib.Path|None,
+  def __init__(self, data:ConstType|bytes|list|tuple|UOp|'numpy.ndarray'|pathlib.Path|None,
                device:str|tuple|list|None=None, dtype:DTypeLike|None=None, requires_grad:bool|None=None, _force_unique:bool=False):
     if device is None and isinstance(data, pathlib.Path): device = f"DISK:{data.resolve()}"  # keep it on the disk if device is None
     _dtype:DType|None = to_dtype(dtype) if dtype is not None else None
@@ -141,6 +141,9 @@ class Tensor(OpMixin):
       data = Tensor(0, device=_device, dtype=_dtype or dtypes.default_float, requires_grad=requires_grad).uop
     elif isinstance(data, get_args(PyConst)):
       data = (UOp.unique_const if _force_unique or requires_grad else UOp.const)(_dtype or dtypes.from_py(data), data, _device)
+    elif isinstance(data, InvalidType):
+      assert _dtype is not None
+      data = UOp.const(_dtype, data, _device)
     elif isinstance(data, bytes): data = _frompy(data, dtypes.uint8 if _dtype is None else _dtype)
     elif isinstance(data, (list, tuple)):
       if _dtype is None:
@@ -239,7 +242,8 @@ class Tensor(OpMixin):
       param = UOp.param(slot, self.dtype, self.shape, self.device)
     return Tensor(param, device=self.device)
   def call(self, *lst:Tensor, fxn:Tensor|UOp, grad_fxn:Callable|None=None) -> Tensor:
-    return Tensor((fxn.uop if isinstance(fxn, Tensor) else fxn).call(*[t.uop for t in (self,)+lst], grad_fxn=grad_fxn), device=self.device)
+    fret = (fxn.uop if isinstance(fxn, Tensor) else fxn).call(*[t.uop for t in (self,)+lst], grad_fxn=grad_fxn)
+    return Tensor(fret.gettuple(0), device=self.device)
 
   def custom_kernel(self, *lst:Tensor, fxn:Callable, grad_fxn:Callable|None=None) -> list[Tensor]:
     """
@@ -305,13 +309,18 @@ class Tensor(OpMixin):
     if is_disk:
       self._buffer().copyin(x._data())
       return self
-    # NOTE: assign_uop is created before AFTER embedding (uses original self.uop),
-    # but AFTER must be embedded before _apply_uop (so subsequent assigns see it)
-    assign_uop = self.uop.assign(x.uop)
-    base = self.uop.base
-    if base.op in {Ops.BUFFER, Ops.AFTER} and not self.uop.has_buffer_identity():
-      _apply_map_to_tensors({base: base.after(assign_uop)}, name="Embed View Assign", walk=True)
-    return self.replace(self._apply_uop(lambda *_: assign_uop, x))
+    # STORE+AFTER: STORE is the write effect (void), AFTER wraps the view for correct shape/ranging
+    assign = self.uop.after(self.uop.store(x.uop))
+    if (base := self.uop.base).op in {Ops.BUFFER, Ops.AFTER} and self.uop is not base and not self.uop.has_buffer_identity():
+      # view assign: replace at the buffer-identity level (e.g. RESHAPE(BUFFER)) so @function's substitution catches it
+      ib = self.uop
+      while not ib.has_buffer_identity() and ib is not base: ib = ib.src[0]
+      assigned_ib = ib.after(assign)
+      _apply_map_to_tensors({ib: assigned_ib}, name="Embed View Assign", walk=True)
+    else:
+      # simple assign
+      self.uop = assign
+    return self
 
   def detach(self) -> Tensor:
     """
@@ -621,15 +630,32 @@ class Tensor(OpMixin):
       Tensor._device_seeds[device] = Tensor(
         [int.from_bytes(hashlib.sha256(len(Tensor._device_seeds).to_bytes(4, "big")).digest(), "big"), Tensor._seed],
         device=device, dtype=dtypes.uint32, requires_grad=False)
-      Tensor._device_rng_counters[device] = Tensor([num], device=device, dtype=dtypes.uint32, requires_grad=False).contiguous()
+      Tensor._device_rng_counters[device] = Tensor([0, 0], device=device, dtype=dtypes.uint32, requires_grad=False).contiguous()
+
     # increment rng counter for devices
-    else: Tensor._device_rng_counters[device].assign(Tensor._device_rng_counters[device] + num)
+    new_low = Tensor._device_rng_counters[device][0] + (num & 0xffffffff)
+    new_high = Tensor._device_rng_counters[device][1] + (num >> 32) + (new_low < Tensor._device_rng_counters[device][0]).cast(dtypes.uint32)
+    Tensor._device_rng_counters[device].assign(Tensor.stack(new_low, new_high))
+
+    low = Tensor._device_rng_counters[device][0] - (num & 0xffffffff)
+    high = Tensor._device_rng_counters[device][1] - (num >> 32) - (Tensor._device_rng_counters[device][0] < (num & 0xffffffff)).cast(dtypes.uint32)
 
     # threefry random bits
-    bits_count = Tensor._device_rng_counters[device] - num
-    counts0 = (Tensor.arange(ceildiv(num, 2), device=device, dtype=dtypes.uint32, requires_grad=False)+bits_count)
-    counts1 = counts0 + ceildiv(num, 2)
-    bits = Tensor._threefry_random_bits(Tensor._device_seeds[device], counts0, counts1)[:num]
+    if num > dtypes.uint32.max:
+      bits_list = []
+      for i in range(0, num, dtypes.uint32.max):
+        chunk_num = min(num - i, dtypes.uint32.max)
+        c_low = low + (i & 0xffffffff)
+        c_high = high + (i >> 32) + (c_low < low).cast(dtypes.uint32)
+        new_key = Tensor._threefry_random_bits(Tensor._device_seeds[device], c_low, c_high)
+        counts0 = Tensor.arange(ceildiv(chunk_num, 2), device=device, dtype=dtypes.uint32, requires_grad=False)
+        counts1 = counts0 + ceildiv(chunk_num, 2)
+        bits_list.append(Tensor._threefry_random_bits(new_key, counts0, counts1)[:chunk_num])
+      bits = Tensor.cat(*bits_list)
+    else:
+      counts0 = Tensor.arange(ceildiv(num, 2), device=device, dtype=dtypes.uint32, requires_grad=False) + low
+      counts1 = counts0 + ceildiv(num, 2)
+      bits = Tensor._threefry_random_bits(Tensor._device_seeds[device], counts0, counts1)[:num]
 
     # bitcast to uint with same number of bits
     _, nmant = dtypes.finfo(dt)
@@ -1061,7 +1087,7 @@ class Tensor(OpMixin):
     for t,g in zip(tensors_need_grad, self.gradient(*tensors_need_grad, gradient=gradient, materialize_grads=True)):
       assert g.shape == t.shape, f"grad shape must match tensor shape, {g.shape!r} != {t.shape!r}"
       if t.grad is None: t.grad = g
-      else: t.grad.assign(t.grad + g)
+      else: t.grad.assign(t.grad + g.to(t.grad.device))
     return self
 
   # ***** movement low level ops *****
@@ -1328,7 +1354,8 @@ class Tensor(OpMixin):
              if (t:=tref()) is not None and t is not self and t.uop is not v_uop and t.uop not in v_bw):
         raise RuntimeError("can't setitem on a tensor that already has other uses and requires grad")
       if not isinstance(v, Tensor): v = Tensor(v, device=self.device, dtype=self.dtype)
-      if v.uop.op is Ops.ASSIGN: v = v._apply_uop(lambda x: x.src[1])
+      # __iadd__/__isub__ creates AFTER(view, STORE(view, computed)); unwrap to get the computed value
+      if v.uop.op is Ops.AFTER and any(s.op is Ops.STORE for s in v.uop.src[1:]): v = v._apply_uop(lambda x: x.src[1].src[1])
       self.replace(self._getitem(indices, v))
       return
     idx = [indices] if (isinstance(indices, list) and all_int(indices)) or not isinstance(indices, (tuple, list)) else list(indices)
@@ -1337,14 +1364,14 @@ class Tensor(OpMixin):
       if is_disk: raise RuntimeError("advanced setitem is not supported for DISK tensors")
       if not isinstance(v, Tensor): v = Tensor(v, device=self.device, dtype=self.dtype)
       self.assign(self._getitem(indices, v))
-    elif is_disk or self.uop.is_realized or self.uop.base.op is Ops.AFTER: # basic setitem, self is realized
+    elif is_disk or self.uop.is_realized or self.uop.base.op is Ops.BUFFER or self.uop._base_buffer_is_realized(): # basic setitem
       view = self[indices]
-      if isinstance(v, Tensor) and v.uop.op is Ops.ASSIGN and v.uop in view.uop.base.src: return
+      if isinstance(v, Tensor) and v.uop.op is Ops.AFTER and v.uop in view.uop.base.src: return
       view.assign(v)
     else: # basic setitem, self is not realized
       if not isinstance(v, Tensor): v = Tensor(v, device=self.device, dtype=self.dtype)
-      # __iadd__/__isub__ on unrealized views creates a no-op ASSIGN; unwrap to get the computed value
-      if v.uop.op is Ops.ASSIGN: v = v._apply_uop(lambda x: x.src[1])
+      # __iadd__/__isub__ creates AFTER(view, STORE(view, computed)); unwrap to get the computed value
+      if v.uop.op is Ops.AFTER and any(s.op is Ops.STORE for s in v.uop.src[1:]): v = v._apply_uop(lambda x: x.src[1].src[1])
       self.replace(self._getitem(indices, v))
 
   def __delitem__(self, indices) -> None:
@@ -2106,7 +2133,7 @@ class Tensor(OpMixin):
     x_unsqueezed = x.unsqueeze(-2).expand((None,)*(self.ndim-1)+(last_dim_size, None))
     x_cummax, _ = x.cummax(-1)
     mask = Tensor.ones(last_dim_size, last_dim_size, requires_grad=False, device=self.device).tril()
-    ret = mask.where(x_unsqueezed - x_cummax.unsqueeze(-1), dtypes.min(self.dtype)).exp().sum(-1).log() + x_cummax
+    ret = mask.where(x_unsqueezed - x_cummax.unsqueeze(-1), self.dtype.min).exp().sum(-1).log() + x_cummax
     return ret.transpose(-1, axis)
 
   def argmax(self, axis=None, keepdim=False) -> Tensor:
@@ -2303,12 +2330,12 @@ class Tensor(OpMixin):
     axis = tuple(range(-len(k_ := make_tuple(kernel_size, 2)), 0))
     pads = self._resolve_pool_pads(padding, len(k_))
     if ceil_mode: pads = self._apply_ceil_mode(pads, k_, stride if stride is not None else k_, dilation)
-    pooled = self.pad(pads, value=dtypes.min(self.dtype))._pool(k_, stride if stride is not None else k_, dilation)
+    pooled = self.pad(pads, value=self.dtype.min)._pool(k_, stride if stride is not None else k_, dilation)
     if not return_indices: return pooled.max(axis)
     spatial_sz = int(math.prod(spatial_shape := self.shape[-len(k_):]))
     idx = Tensor.arange(spatial_sz,0,-1, requires_grad=False, device=self.device).reshape(spatial_shape)
     m = pooled == pooled.max(axis, keepdim=True)
-    idx = m * idx.pad(pads, value=dtypes.min(idx.dtype))._pool(k_, stride if stride is not None else k_, dilation)
+    idx = m * idx.pad(pads, value=idx.dtype.min)._pool(k_, stride if stride is not None else k_, dilation)
     return pooled.max(axis), spatial_sz - idx.max(axis)
 
   def max_unpool2d(self, indices:Tensor, kernel_size:tuple[int, ...]=(2,2), stride=None, dilation=1, padding:int|tuple[int, ...]=0, output_size=None):
@@ -2481,7 +2508,7 @@ class Tensor(OpMixin):
     """
     if IMAGE: return self.image_dot(w, dtype)
     if ASM_GEMM:
-      from extra.gemm.asm.cdna.gemm import can_use_asm_gemm, asm_gemm
+      from extra.gemm.cdna_asm_gemm import can_use_asm_gemm, asm_gemm
       if can_use_asm_gemm(self, w): return asm_gemm(self, w)
     x, dx, dw = self, self.ndim, w.ndim
     if not (dx > 0 and dw > 0): raise RuntimeError(f"both tensors need to be at least 1D, got {dx}D and {dw}D")
@@ -2749,8 +2776,8 @@ class Tensor(OpMixin):
     def _inv_mask(a:Tensor|PyConst, b:Tensor|PyConst) -> Tensor: return mask.any(-1).logical_not().where(a, b)
     if reduce == "sum": return mask.where(src, 0).sum(-1).add(self if include_self else _inv_mask(self, 0))
     if reduce == "prod": return mask.where(src, 1).prod(-1).mul(self if include_self else _inv_mask(self, 1))
-    if reduce == "amax": return mask.where(src, m := dtypes.min(src.dtype)).max(-1).maximum(self if include_self else _inv_mask(self, m))
-    if reduce == "amin": return mask.where(src, m := dtypes.max(src.dtype)).min(-1).minimum(self if include_self else _inv_mask(self, m))
+    if reduce == "amax": return mask.where(src, m := src.dtype.min).max(-1).maximum(self if include_self else _inv_mask(self, m))
+    if reduce == "amin": return mask.where(src, m := src.dtype.max).min(-1).minimum(self if include_self else _inv_mask(self, m))
     if reduce == "mean":
       count = mask.where(1, 0).sum(-1).add(1 if include_self else _inv_mask(1, 0))
       return mask.where(src, 0).sum(-1).add(self if include_self else _inv_mask(self, 0)).div(count)
@@ -2779,7 +2806,7 @@ class Tensor(OpMixin):
     # pad to power of 2
     n_stages = (orig_len-1).bit_length()
     pads = tuple((0, 2**n_stages - orig_len) if i == dim else None for i in range(x.ndim))
-    x = x.pad(pads, value=dtypes.min(x.dtype) if descending else dtypes.max(x.dtype)).unflatten(dim, (2,)*n_stages)
+    x = x.pad(pads, value=x.dtype.min if descending else x.dtype.max).unflatten(dim, (2,)*n_stages)
     # https://en.wikipedia.org/wiki/Bitonic_sorter#/media/File:BitonicSort1.svg
     for stage in range(1, n_stages+1):
       if stage != n_stages:
@@ -2944,7 +2971,8 @@ class Tensor(OpMixin):
     if not isinstance(y, Tensor):
       # make y a Tensor
       assert isinstance(y, (*get_args(ConstType), UOp)), f"{type(y)=}, {y=}"
-      if isinstance(x.dtype, ImageDType) or dtypes.is_float(x.dtype) or (dtypes.is_int(x.dtype) and isinstance(y, int)): y_dtype = x.dtype
+      if y is Invalid or isinstance(x.dtype, ImageDType) or dtypes.is_float(x.dtype) or (dtypes.is_int(x.dtype) and isinstance(y, int)):
+        y_dtype = x.dtype
       elif not isinstance(y, UOp): y_dtype = dtypes.from_py(y)
       if isinstance(y, UOp): y = Tensor.from_uop(y, device=x.device)
       else: y = Tensor(dtypes.as_const(y, y_dtype), x.device, y_dtype, requires_grad=False)
@@ -3651,17 +3679,29 @@ class Tensor(OpMixin):
 
     # contiguous creates the image, and early realize static weights (TODO: test for the static weight)
     if IMAGE == 1:
-      # hacks for pitch alignment
-      assert isinstance(ix, int) and isinstance(H, int)
-      ALIGN = 64 // dtsz
-      x = x.pad_to(None, None, round_up(ix, ALIGN // math.gcd(groups * cin, ALIGN)), None)
-      w = w.pad_to((None, round_up(H, ALIGN // math.gcd(W * cin * 4, ALIGN))) + (None,) * (w.ndim - 2))
+      def is_pow2(v): return v > 0 and v & (v - 1) == 0
+      # pad dimension i to amt with invalids
+      def ipad(t, i, amt):
+        shape = (None,)*i + (amt,) + (None,)*(t.ndim-i-1)
+        return Tensor(True, device=t.device).expand(t.shape).pad_to(shape).where(t.pad_to(shape), Invalid) if amt != t.shape[i] else t
+
+      # align a dimension, use at to specify the dimension to pad in, defaults to first
+      def pad_align(t, dim, at=None, force=False):
+        # align to 64 pixels when height is real, otherwise 64 bytes is sufficient
+        align = (64 // dtsz) if prod(t.shape[:dim]) == 1 or prod(t.shape) < 16384 * 4 else 256
+        return ipad(t, at:=at or dim, round_up(t.shape[at] + int(force), align // math.gcd(prod(t.shape[dim:]) // t.shape[at], align)))
+
+      # bank conflicts
+      if cin >= 8 and is_pow2(cin // 4):
+        x, w = pad_align(x.reshape(bs, iy, ix, groups, cin // 4, 4), 2, at=4, force=True), pad_align(w, 1, at=2, force=True)
+      else: x, w = pad_align(x, 2), pad_align(w, 1)
 
       if FLOAT16: x, w = x.cast(dtypes.half).contiguous().cast(dtypes.float), w.cast(dtypes.half).contiguous().cast(dtypes.float)
       else: x, w = x.contiguous(), w.contiguous()
 
       # undo alignment hacks
-      x, w = x[:, :, :ix, :], w[:, :H, ...]
+      if cin >= 8 and is_pow2(cin // 4): x, w = x[:, :, :ix, :, :cin // 4, :], w[:, :H, :cin // 4, ...]
+      else: x, w = x[:, :, :ix, :], w[:, :H, ...]
 
     elif IMAGE: x, w = x.cast(base_image_type((bs*iy, ix*groups*cin//4, 4))).contiguous(), w.cast(base_image_type((cout//4, H*W*cin, 4))).contiguous()
     else: x, w = x.contiguous(), w.contiguous()

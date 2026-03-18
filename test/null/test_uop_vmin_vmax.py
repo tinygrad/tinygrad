@@ -64,8 +64,8 @@ class TestVminVmaxProperties(unittest.TestCase):
 
     # negative mask: x & -1 could be anything since -1 has all bits set
     uop = x & -1
-    self.assertEqual(uop.vmin, dtypes.min(dtypes.int32))
-    self.assertEqual(uop.vmax, dtypes.max(dtypes.int32))
+    self.assertEqual(uop.vmin, dtypes.int32.min)
+    self.assertEqual(uop.vmax, dtypes.int32.max)
 
   def test_vmin_vmax_multiplication_with_variable(self):
     # vmin and vmax for multiplication with a variable
@@ -136,8 +136,8 @@ class TestVminVmaxProperties(unittest.TestCase):
     self.assertEqual(x_bool.vmin, False)
     self.assertEqual(x_bool.vmax, True)
     x_uint = x.cast(dtypes.uint)
-    self.assertEqual(x_uint.vmin, dtypes.min(dtypes.uint))
-    self.assertEqual(x_uint.vmax, dtypes.max(dtypes.uint))
+    self.assertEqual(x_uint.vmin, dtypes.uint.min)
+    self.assertEqual(x_uint.vmax, dtypes.uint.max)
 
   def test_vmin_vmax_invalid(self):
     i = UOp.invalid()

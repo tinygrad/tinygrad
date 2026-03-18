@@ -1,11 +1,9 @@
 #!/usr/bin/env python3
-import os
-os.environ["VIZ"] = "0"
 import argparse, pathlib, sys, struct, json
 from typing import Iterator
 from tinygrad.viz import serve as viz
 from tinygrad.uop.ops import RewriteTrace
-from tinygrad.helpers import temp, ansistrip, colored, time_to_str, ansilen
+from tinygrad.helpers import temp, ansistrip, colored, time_to_str, ansilen, Context
 
 # ** generic helpers
 
@@ -48,14 +46,20 @@ def decode_profile(data:bytes) -> dict:
         name, ref, key, st, dur, fmt = u("<IIIIfI")
         v["events"].append({"name":strings[name], "ref":option(ref), "key":option(key), "st":st, "dur":dur, "fmt":strings[fmt]})
     else:
+      v["linear"] = u("<B")[0]
       v["peak"] = u("<Q")[0]
       for _ in range(event_count):
-        alloc, ts, key = u("<BII")
-        if alloc: v["events"].append({"event":"alloc", "ts":ts, "key":key, "arg": {"dtype":strings[u("<I")[0]], "sz":u("<Q")[0]}})
-        else: v["events"].append({"event":"free", "ts":ts, "key":key, "arg": {"users":[u("<IIIB") for _ in range(u("<I")[0])]}})
+        if v["linear"]:
+          ts, value = u("<IQ")
+          v["events"].append({"event":"freq", "ts":ts, "value":value})
+        else:
+          alloc, ts, key = u("<BII")
+          if alloc: v["events"].append({"event":"alloc", "ts":ts, "key":key, "arg": {"dtype":strings[u("<I")[0]], "sz":u("<Q")[0]}})
+          else: v["events"].append({"event":"free", "ts":ts, "key":key, "arg": {"users":[u("<IIIB") for _ in range(u("<I")[0])]}})
   return {"dur":total_dur, "peak":global_peak, "layout":layout, "markers":markers}
 
 if __name__ == "__main__":
+  Context(VIZ=0, TRACK_MATCH_STATS=0).__enter__()
   parser = argparse.ArgumentParser()
   g_mode = parser.add_argument_group("mode")
   g_mode.add_argument("--profile", action="store_true", help="View profile trace")
