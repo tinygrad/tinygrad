@@ -45,7 +45,7 @@ def nv_iowr(fd:FileIOInterface, nr, args, cmd=None):
 class QMD:
   fields: dict[str, dict[str, tuple[int, int]]] = {}
 
-  def __init__(self, dev:NVDevice, addr:int|None=None, **kwargs):
+  def __init__(self, dev:NVDevice, view:MMIOInterface|None=None, **kwargs):
     self.ver, self.sz = (5, 0x60) if dev.iface.compute_class >= nv_gpu.BLACKWELL_COMPUTE_A else (3, 0x40)
 
     # Init fields from module
@@ -53,7 +53,7 @@ class QMD:
       QMD.fields[pref] = {**{name[len(pref)+1:]: dt for name,dt in nv_gpu.__dict__.items() if name.startswith(pref) and isinstance(dt, tuple)},
         **{name[len(pref)+1:]+f"_{i}": dt(i) for name,dt in nv_gpu.__dict__.items() for i in range(8) if name.startswith(pref) and callable(dt)}}
 
-    self.mv, self.pref = (memoryview(bytearray(self.sz * 4)) if addr is None else to_mv(addr, self.sz * 4)), pref
+    self.mv, self.pref = (memoryview(bytearray(self.sz * 4)) if view is None else view), pref
     if kwargs: self.write(**kwargs)
 
   def _rw_bits(self, hi:int, lo:int, value:int|None=None):
@@ -140,7 +140,7 @@ class NVComputeQueue(NVCommandQueue):
     qmd_buf.cpu_view().view(size=prg.qmd.mv.nbytes, fmt='B')[:] = prg.qmd.mv
     assert qmd_buf.va_addr < (1 << 40), f"large qmd addr {qmd_buf.va_addr:x}"
 
-    qmd = QMD(dev=prg.dev, addr=qmd_buf.cpu_view().addr) # Save qmd for later update
+    qmd = QMD(dev=prg.dev, view=qmd_buf.cpu_view()) # Save qmd for later update
 
     self.bind_sints_to_mem(*global_size, mem=qmd_buf.cpu_view(), fmt='I', offset=qmd.field_offset('cta_raster_width' if qmd.ver<4 else 'grid_width'))
     self.bind_sints_to_mem(*(local_size[:2]), mem=qmd_buf.cpu_view(), fmt='H', offset=qmd.field_offset('cta_thread_dimension0'))

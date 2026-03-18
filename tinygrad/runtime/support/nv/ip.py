@@ -2,8 +2,8 @@ from __future__ import annotations
 import ctypes, time, array, struct, itertools, dataclasses
 from typing import cast, Any
 from tinygrad.runtime.autogen import nv, nv_570 as nv_gpu, pci
-from tinygrad.helpers import to_mv, lo32, hi32, DEBUG, round_up, round_down, mv_address, fetch, wait_cond, ceildiv
-from tinygrad.runtime.support.system import System
+from tinygrad.helpers import lo32, hi32, DEBUG, round_up, round_down, fetch, wait_cond, ceildiv
+from tinygrad.runtime.support.system import System, MMIOInterface
 from tinygrad.runtime.support.elf import elf_loader
 
 @dataclasses.dataclass(frozen=True)
@@ -16,14 +16,17 @@ class NV_IP:
   def fini_hw(self): pass # Finalize hw for this IP
 
 class NVRpcQueue:
-  def __init__(self, gsp:NV_GSP, va:int, completion_q_va:int|None=None):
-    self.tx = nv.msgqTxHeader.from_address(va)
-    wait_cond(lambda: self.tx.entryOff, value=0x1000, msg="RPC queue not initialized")
+  def __init__(self, gsp:NV_GSP, view:MMIOInterface, completion_q_view:MMIOInterface|None=None):
+    self.tx_view = view.view(fmt='I')
+    wait_cond(lambda: self.tx_view[getattr(nv.msgqTxHeader, 'entryOff').offset // 4], value=0x1000, msg="RPC queue not initialized")
+    self.tx = nv.msgqTxHeader.from_buffer_copy(bytes(view[:ctypes.sizeof(nv.msgqTxHeader)]))
 
-    if completion_q_va is not None: self.rx = nv.msgqRxHeader.from_address(completion_q_va + nv.msgqTxHeader.from_address(completion_q_va).rxHdrOff)
+    if completion_q_view is not None:
+      comp_tx = nv.msgqTxHeader.from_buffer_copy(bytes(completion_q_view[:ctypes.sizeof(nv.msgqTxHeader)]))
+      self.rx_view = completion_q_view.view(comp_tx.rxHdrOff, fmt='I')
 
-    self.gsp, self.va, self.queue_va, self.seq = gsp, va, va + self.tx.entryOff, 0
-    self.queue_mv = to_mv(self.queue_va, self.tx.msgSize * self.tx.msgCount)
+    self.gsp, self.view, self.seq = gsp, view, 0
+    self.queue_mv = view.view(self.tx.entryOff, self.tx.msgSize * self.tx.msgCount)
 
   def _checksum(self, data:bytes):
     if (pad_len:=(-len(data)) % 8): data += b'\x00' * pad_len
@@ -40,10 +43,11 @@ class NVRpcQueue:
     phdr.checkSum = self._checksum(bytes(phdr) + msg)
     msg = (bytes(phdr) + msg).ljust(phdr.elemCount * self.tx.msgSize, b'\x00')
 
-    off, first = self.tx.writePtr * self.tx.msgSize, min(len(msg), len(self.queue_mv) - self.tx.writePtr * self.tx.msgSize)
+    wp = self.tx_view[getattr(nv.msgqTxHeader, 'writePtr').offset // 4]
+    off, first = wp * self.tx.msgSize, min(len(msg), len(self.queue_mv) - wp * self.tx.msgSize)
     self.queue_mv[off:off+first] = msg[:first]
     if first < len(msg): self.queue_mv[:len(msg)-first] = msg[first:]
-    self.tx.writePtr = (self.tx.writePtr + phdr.elemCount) % self.tx.msgCount
+    self.tx_view[getattr(nv.msgqTxHeader, 'writePtr').offset // 4] = (wp + phdr.elemCount) % self.tx.msgCount
     System.memory_barrier()
 
     self.seq += 1
@@ -56,20 +60,20 @@ class NVRpcQueue:
 
   def read_resp(self):
     System.memory_barrier()
-    while self.rx.readPtr != self.tx.writePtr:
-      off = self.rx.readPtr * self.tx.msgSize
-      hdr = nv.rpc_message_header_v.from_address(self.queue_va + off + 0x30)
-      msg = self.queue_mv[off + 0x50 : off + 0x50 + hdr.length]
+    while self.rx_view[0] != self.tx_view[getattr(nv.msgqTxHeader, 'writePtr').offset // 4]:
+      off = self.rx_view[0] * self.tx.msgSize
+      hdr = nv.rpc_message_header_v.from_buffer_copy(bytes(self.queue_mv[off + 0x30 : off + 0x30 + ctypes.sizeof(nv.rpc_message_header_v)]))
+      msg = bytes(self.queue_mv[off + 0x50 : off + 0x50 + hdr.length])
 
       # Handling special functions
       if hdr.function == nv.NV_VGPU_MSG_EVENT_GSP_RUN_CPU_SEQUENCER: self.gsp.run_cpu_seq(msg)
       elif hdr.function == nv.NV_VGPU_MSG_EVENT_OS_ERROR_LOG:
-        print(f"nv {self.gsp.nvdev.devfmt}: GSP LOG: {msg[12:].tobytes().rstrip(bytes([0])).decode('utf-8')}")
+        print(f"nv {self.gsp.nvdev.devfmt}: GSP LOG: {msg[12:].rstrip(bytes([0])).decode('utf-8')}")
 
       self.gsp.nvdev.is_err_state |= hdr.function in {nv.NV_VGPU_MSG_EVENT_OS_ERROR_LOG, nv.NV_VGPU_MSG_EVENT_MMU_FAULT_QUEUED}
 
       # Update the read pointer
-      self.rx.readPtr = (self.rx.readPtr + round_up(hdr.length, self.tx.msgSize) // self.tx.msgSize) % self.tx.msgCount
+      self.rx_view[0] = (self.rx_view[0] + round_up(hdr.length, self.tx.msgSize) // self.tx.msgSize) % self.tx.msgCount
       System.memory_barrier()
 
       if DEBUG >= 3:
@@ -79,7 +83,7 @@ class NVRpcQueue:
       if hdr.rpc_result != 0: raise RuntimeError(f"RPC call {hdr.function} failed with result {hdr.rpc_result}")
       yield hdr.function, msg
 
-  def wait_resp(self, cmd:int, timeout:int=10000) -> memoryview:
+  def wait_resp(self, cmd:int, timeout:int=10000) -> bytes:
     start_time = int(time.perf_counter() * 1000)
     while (int(time.perf_counter() * 1000) - start_time) < timeout:
       if (msg:=next((message for func, message in self.read_resp() if func == cmd), None)) is not None: return msg
@@ -289,7 +293,7 @@ class NV_FLCN_COT(NV_IP):
     self.nvdev.include("src/nvidia/arch/nvalloc/common/inc/fsp/fsp_mctp_format.h")
     self.nvdev.include("src/nvidia/arch/nvalloc/common/inc/fsp/fsp_emem_channels.h")
 
-    self.fmc_boot_args, self.fmc_boot_args_sysmem = self.nvdev._alloc_boot_struct(nv.GSP_FMC_BOOT_PARAMS())
+    self.fmc_boot_args_view, self.fmc_boot_args_sysmem = self.nvdev._alloc_boot_struct(nv.GSP_FMC_BOOT_PARAMS())
     self.init_fmc_image()
 
   def init_fmc_image(self):
@@ -302,9 +306,10 @@ class NV_FLCN_COT(NV_IP):
   def init_hw(self):
     self.falcon = 0x00110000
 
-    self.fmc_boot_args.bootGspRmParams = nv.GSP_ACR_BOOT_GSP_RM_PARAMS(gspRmDescOffset=self.nvdev.gsp.wpr_meta_sysmem,
+    boot_args = nv.GSP_ACR_BOOT_GSP_RM_PARAMS(gspRmDescOffset=self.nvdev.gsp.wpr_meta_sysmem,
       gspRmDescSize=ctypes.sizeof(nv.GspFwWprMeta), target=nv.GSP_DMA_TARGET_COHERENT_SYSTEM, bIsGspRmBoot=True)
-    self.fmc_boot_args.gspRmParams = nv.GSP_RM_PARAMS(bootArgsOffset=self.nvdev.gsp.libos_args_sysmem[0], target=nv.GSP_DMA_TARGET_COHERENT_SYSTEM)
+    rm_args = nv.GSP_RM_PARAMS(bootArgsOffset=self.nvdev.gsp.libos_args_sysmem[0], target=nv.GSP_DMA_TARGET_COHERENT_SYSTEM)
+    self.fmc_boot_args_view[:ctypes.sizeof(nv.GSP_FMC_BOOT_PARAMS)] = bytes(nv.GSP_FMC_BOOT_PARAMS(bootGspRmParams=boot_args, gspRmParams=rm_args))
 
     cot_payload = nv.NVDM_PAYLOAD_COT(version=0x2, size=ctypes.sizeof(nv.NVDM_PAYLOAD_COT), frtsVidmemOffset=0x1c00000, frtsVidmemSize=0x100000,
       gspBootArgsSysmemOffset=self.fmc_boot_args_sysmem, gspFmcSysmemOffset=self.fmc_booter_sysmem[0])
@@ -365,25 +370,24 @@ class NV_GSP(NV_IP):
     _, self.rm_args_sysmem = self.nvdev._alloc_boot_struct(nv.GSP_ARGUMENTS_CACHED(bDmemStack=True, messageQueueInitArguments=queue_args))
 
     # Build command queue header
-    self.cmd_q_va, self.stat_q_va = queues_view.addr + pt_size, queues_view.addr + pt_size + queue_size
+    # self.cmd_q_va, self.stat_q_va = queues_view.addr + pt_size, queues_view.addr + pt_size + queue_size
+    self.cmd_q_view, self.stat_q_view = queues_view.view(pt_size), queues_view.view(pt_size + queue_size)
 
-    cmd_q_tx = nv.msgqTxHeader(version=0, size=queue_size, entryOff=0x1000, msgSize=0x1000, msgCount=(queue_size - 0x1000) // 0x1000,
-      writePtr=0, flags=1, rxHdrOff=ctypes.sizeof(nv.msgqTxHeader))
-    to_mv(self.cmd_q_va, ctypes.sizeof(nv.msgqTxHeader))[:] = bytes(cmd_q_tx)
+    self.cmd_q_view[:ctypes.sizeof(nv.msgqTxHeader)] = bytes(nv.msgqTxHeader(version=0, size=queue_size, entryOff=0x1000, msgSize=0x1000,
+      msgCount=(queue_size - 0x1000) // 0x1000, writePtr=0, flags=1, rxHdrOff=ctypes.sizeof(nv.msgqTxHeader)))
 
-    self.cmd_q = NVRpcQueue(self, self.cmd_q_va, None)
+    self.cmd_q = NVRpcQueue(self, self.cmd_q_view, None)
 
   def init_libos_args(self):
     _, logbuf_sysmem = self.nvdev._alloc_sysmem((2 << 20), contiguous=True)
     libos_args_view, self.libos_args_sysmem = self.nvdev._alloc_sysmem(0x1000, contiguous=True)
 
-    libos_structs = (nv.LibosMemoryRegionInitArgument * 6).from_address(libos_args_view.addr)
-    for i, name in enumerate(["INIT", "INTR", "RM", "MNOC", "KRNL"]):
-      libos_structs[i] = nv.LibosMemoryRegionInitArgument(kind=nv.LIBOS_MEMORY_REGION_CONTIGUOUS, loc=nv.LIBOS_MEMORY_REGION_LOC_SYSMEM, size=0x10000,
+    libos_structs = [nv.LibosMemoryRegionInitArgument(kind=nv.LIBOS_MEMORY_REGION_CONTIGUOUS, loc=nv.LIBOS_MEMORY_REGION_LOC_SYSMEM, size=0x10000,
         id8=int.from_bytes(bytes(f"LOG{name}", 'utf-8'), 'big'), pa=logbuf_sysmem[0] + 0x10000 * i)
-
-    libos_structs[5] = nv.LibosMemoryRegionInitArgument(kind=nv.LIBOS_MEMORY_REGION_CONTIGUOUS, loc=nv.LIBOS_MEMORY_REGION_LOC_SYSMEM, size=0x1000,
-        id8=int.from_bytes(bytes("RMARGS", 'utf-8'), 'big'), pa=self.rm_args_sysmem)
+        for i, name in enumerate(["INIT", "INTR", "RM", "MNOC", "KRNL"])]
+    libos_structs.append(nv.LibosMemoryRegionInitArgument(kind=nv.LIBOS_MEMORY_REGION_CONTIGUOUS, loc=nv.LIBOS_MEMORY_REGION_LOC_SYSMEM, size=0x1000,
+        id8=int.from_bytes(bytes("RMARGS", 'utf-8'), 'big'), pa=self.rm_args_sysmem))
+    libos_args_view[:sum(ctypes.sizeof(s) for s in libos_structs)] = b''.join(bytes(s) for s in libos_structs)
 
   def init_gsp_image(self):
     fw = fetch("https://github.com/NVIDIA/linux-firmware/raw/refs/heads/nvidia-staging/nvidia/ga102/gsp/gsp-570.144.bin", subdir="fw").read_bytes()
@@ -488,8 +492,8 @@ class NV_GSP(NV_IP):
     self.rpc_rm_alloc(hParent=ch_gpfifo, hClass=self.dma_class, params=None)
 
   def init_hw(self):
-    self.stat_q = NVRpcQueue(self, self.stat_q_va, self.cmd_q_va)
-    self.cmd_q.rx = nv.msgqRxHeader.from_address(self.stat_q.va + self.stat_q.tx.rxHdrOff)
+    self.stat_q = NVRpcQueue(self, self.stat_q_view, self.cmd_q_view)
+    self.cmd_q.rx_view = self.stat_q_view.view(self.stat_q.tx.rxHdrOff, fmt='I')
 
     self.stat_q.wait_resp(nv.NV_VGPU_MSG_EVENT_GSP_INIT_DONE)
 
@@ -599,9 +603,9 @@ class NV_GSP(NV_IP):
     header = nv.PACKED_REGISTRY_TABLE(size=hdr_size + len(entries_bytes) + len(data_bytes), numEntries=len(table))
     self.cmd_q.send_rpc(nv.NV_VGPU_MSG_FUNCTION_SET_REGISTRY, bytes(header) + entries_bytes + data_bytes)
 
-  def run_cpu_seq(self, seq_buf:memoryview):
-    hdr = nv.rpc_run_cpu_sequencer_v17_00.from_address(mv_address(seq_buf))
-    cmd_iter = iter(seq_buf[ctypes.sizeof(nv.rpc_run_cpu_sequencer_v17_00):].cast('I')[:hdr.cmdIndex])
+  def run_cpu_seq(self, seq_buf:bytes):
+    hdr = nv.rpc_run_cpu_sequencer_v17_00.from_buffer_copy(seq_buf[:(hdr_sz:=ctypes.sizeof(nv.rpc_run_cpu_sequencer_v17_00))])
+    cmd_iter = iter(memoryview(seq_buf[hdr_sz:]).cast('I')[:hdr.cmdIndex])
 
     for op in cmd_iter:
       if op == 0x0: self.nvdev.wreg(next(cmd_iter), next(cmd_iter)) # reg write
