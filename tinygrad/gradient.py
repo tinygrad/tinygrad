@@ -1,5 +1,5 @@
 from typing import cast
-import math, dataclasses
+import math, dataclasses, itertools
 from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, all_metadata, graph_rewrite
 from tinygrad.helpers import argsort
 
@@ -38,8 +38,8 @@ def call_gradient(ctx:UOp, k:UOp, needed:set[int]) -> tuple[UOp|None, ...]:
   bwd_body = UOp.maketuple(*(gb for _, gb in grad_bodies)).substitute(fwd_subs, walk=True)
   bwd_body, compact_args = _compact_params(bwd_body, (*args, *grad_args, *fwd_outs))
   # TODO: is this okay here?
-  from tinygrad.function import pm_strip_unique_const
-  bwd_body = graph_rewrite(bwd_body, pm_strip_unique_const)
+  from tinygrad.function import pm_transform_unique_const
+  bwd_body = graph_rewrite(bwd_body, pm_transform_unique_const, ctx=(None, itertools.count(0)))
   bwd_call = bwd_body.call(*compact_args, name=(k.arg.name or "")+"_backward", precompile=k.arg.precompile_backward)
   gb_map = {i: idx for idx, (i, _) in enumerate(grad_bodies)}
   return (None,) + tuple(bwd_call.gettuple(gb_map[i]) if i in gb_map else None for i in range(len(args)))

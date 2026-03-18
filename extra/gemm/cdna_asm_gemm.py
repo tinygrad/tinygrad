@@ -2702,13 +2702,14 @@ def asm_gemm(a:Tensor, b:Tensor) -> Tensor:
 
   if is_multi:
     if n_sharded:
-      out = Tensor(Tensor.zeros(batch, M, N//len(a.device), dtype=a.dtype, device=a.device).uop.multi(2), device=a.device)
+      out = Tensor(Tensor.invalid(batch, M, N//len(a.device), dtype=a.dtype, device=a.device).uop.multi(2), device=a.device)
     elif m_sharded:
-      out = Tensor(Tensor.zeros(batch, M, N, dtype=a.dtype, device=a.device).uop.multi(1), device=a.device)
+      out = Tensor(Tensor.invalid(batch, M, N, dtype=a.dtype, device=a.device).uop.multi(1), device=a.device)
     else:
-      out = Tensor(Tensor.zeros(batch//len(a.device) if a.uop.axis==0 else batch, M, N, dtype=a.dtype, device=a.device).uop.multi(0), device=a.device)
+      out = Tensor(Tensor.invalid(batch//len(a.device) if a.uop.axis==0 else batch, M, N, dtype=a.dtype, device=a.device).uop.multi(0),
+                   device=a.device)
   else:
-    out = Tensor.zeros(batch, M, N, dtype=a.dtype, device=a.device)
+    out = Tensor.invalid(batch, M, N, dtype=a.dtype, device=a.device)
 
   renderer = Device[a.device[0] if is_multi else a.device].renderer
   dname, arch = renderer.device, getattr(renderer, "arch", "")
