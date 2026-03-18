@@ -31,10 +31,18 @@ def linearize(sink:UOp) -> list[UOp]:
       case Ops.RANGE: priority = 5    # placing RANGE is good
       case Ops.END: priority = -5     # placing END is bad
       case _: priority = 0            # everything else has priority 0
+
+    # stack pointer needs to be scheduled at the top of the kernel
+    # TODO: remove once there's a proper isa scheduler
+    if u.op is Ops.INS:
+      from tinygrad.renderer.isa.x86 import X86Ops, RSP
+      match u.arg:
+        case X86Ops.DEFINE_REG: priority = -21 if u.tag[0] == RSP else -20
+
     priorities[u] = (run_count, priority, extra)
 
   # number the uops in "ideal" order
-  nkey = {u:i for i,u in enumerate(sorted(lst, key=lambda x: priorities[x]+(x.tuplize if TUPLE_ORDER else ())))}
+  nkey = {u:i for i,u in enumerate(sorted(lst, key=lambda x: priorities[x]+(x.tuplize if TUPLE_ORDER and not getenv("CPU_X86") else ())))}
 
   # then force them to be toposorted in as close to the ideal order as possible
   heap = [(-nkey[sink], sink)]

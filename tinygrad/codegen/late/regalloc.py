@@ -3,8 +3,6 @@ from tinygrad.uop.ops import UOp, Ops, PatternMatcher, UPat
 from tinygrad.renderer.isa import ISARenderer, Register
 from tinygrad.dtype import dtypes, PtrDType
 
-def as_tuple(x): return x if isinstance(x, tuple) else (x,)
-
 PSEUDO_OPS = {Ops.NOOP, Ops.AFTER, Ops.BARRIER, Ops.GROUP}
 
 # loosely based on: https://bernsteinbear.com/assets/img/register-spilling-range-splitting-ssa.pdf
@@ -28,28 +26,34 @@ class LinearScanRegallocContext:
     ranges: list[Register] = []
     for i,u in enumerate(reversed(uops)):
       if u.op in PSEUDO_OPS: continue
-      defs = as_tuple(u.tag)
+      defs = u.tag if isinstance(u.tag, tuple) else ()
       for v in defs + tuple(s.reg for s in set(u.src)):
         if isinstance(v, Register): lr.setdefault(v, []).insert(0, len(uops) - 1 - i)
       for v in defs:
         if isinstance(v, Register): self.defs[v] = u
         if v in lr and (n:=max((lr[rng][-1] for rng in ranges if lr[rng][0] <= lr[v][-1] < lr[rng][-1]), default=None)): lr[v].append(n)
-      if u.op is Ops.RANGE: ranges.append(u.tag)
+      if u.op is Ops.RANGE: ranges.append(u.reg)
 
     def alloc(cons:tuple[Register, ...], i:int) -> Register:
       live_inv = {v:k for k,v in live.items()}
       # allocate the best register. Registers not in live or not used again are free and have priority,
       # otherwise pick the one with the furthest next use. Regs that appear first in cons have priority in case of a tie
       reg,vreg = max(((r,live_inv.get(r)) for r in cons),
-                    key=lambda rv: next((j-i for j in ([] if rv[1] is None else live_range[rv[1]]) if j >= i), float('inf')))
-      if vreg is not None and vreg not in self.spills and live_range[vreg][-1] >= i:
-        dt = self.defs[vreg].dtype
+                    key=lambda rv: next((j-i for j in ([] if rv[1] is None else live_range[rv[1]]) if j >= i), len(uops)))
+      return live.pop(vreg) if vreg is not None else reg
+
+    # assign register to spilled virtual and record load to be emitted before current uop, also assign it a stack slot
+    def fill(v:Register, i:int, cons:tuple[Register, ...]|None=None) -> Register:
+      if v not in self.spills:
+        dt = self.defs[v].dtype
         sz = dt.scalar().itemsize * dt.count if not isinstance(dt, PtrDType) else 8
         assert sz > 0
         offset = self.stack_size + (sz - self.stack_size % sz) % sz
-        self.spills[vreg] = UOp.const(dtypes.int32, offset)
+        self.spills[v] = UOp.const(dtypes.int32, offset)
         self.stack_size = offset + sz
-      return live.pop(vreg) if vreg is not None else reg
+      r = alloc(cons if cons is not None else v.cons, i)
+      self.insert_before.setdefault(i, []).append((v, r))
+      return r
 
     for i,u in enumerate(uops):
       if u.op in PSEUDO_OPS: continue
@@ -57,17 +61,14 @@ class LinearScanRegallocContext:
       for j,s in enumerate(u.src):
         # HACK: cause of later hacks to lower range
         if u.op is Ops.END: continue
-        # allocate srcs, if src was spilled it's replaced by a load, if it's live the load was already emitted otherwise alloc and emit one
-        if isinstance(v:=s.reg, Register) and v in self.spills:
-          if v not in live:
-            live[v] = alloc(v.cons, i)
-            self.insert_before.setdefault(i, []).append((v, live[v]))
-          self.fills.setdefault(i, {})[j] = (v, live[v])
+        if not isinstance(v:=s.reg, Register): continue
+        if v not in live: live[v] = fill(v, i)
+        if v in self.spills: self.fills.setdefault(i, {})[j] = (v, live[v])
 
       # allocate defs
-      for j,v in enumerate(as_tuple(u.tag)):
-        if isinstance(v, Register):
-          assert v not in live
+      if isinstance(u.tag, tuple):
+        for j,v in enumerate(u.tag):
+          assert isinstance(v, Register) and v not in live
           cons = v.cons
           # two address instructions (src is reused by def) can only coalesce reused src. reused src goes first to get priority in case of a tiebreak
           if ren.is_two_address(u) and j == 0:
@@ -80,15 +81,13 @@ class LinearScanRegallocContext:
       # loop prologue, avoid loading inside the loop
       if u.op is Ops.RANGE:
         # we move to registers vars used in the loop sorted by next use, vars not used in the loop will not be reloaded in the epilogue
-        used_in_loop = [v for v in live.keys() | self.spills.keys() if any(i <= l < live_range[u.tag][-1] for l in live_range[v])]
+        used_in_loop = [v for v in live.keys() | self.spills.keys() if any(i <= l < live_range[u.reg][-1] for l in live_range[v])]
         sorted_uses = sorted(used_in_loop, key=lambda k: next(l-i for l in live_range[k] if l >= i))
         live_in: dict[Register, Register] = {}
         for v in sorted_uses:
           # if all the possible registers are already in live_in there's no space for this var
           if set(v.cons).issubset(live_in.values()): continue
-          if v not in live:
-            live[v] = alloc(v.cons, i)
-            self.insert_before.setdefault(i, []).append((v, live[v]))
+          if v not in live: live[v] = fill(v, i)
           assert live[v] not in live_in.values()
           live_in[v] = live[v]
         live_ins.append(live_in)
@@ -98,9 +97,7 @@ class LinearScanRegallocContext:
         # TODO: if a uop is in a different reg in live out vs live in move between registers instead of loading
         # TODO: don't reload if first use in loop is a load
         for v,r in live_ins.pop().items():
-          if v not in live or live[v] != r:
-            live[v] = alloc((r,), i)
-            self.insert_before.setdefault(i, []).append((v, live[v]))
+          if v not in live or live[v] != r: live[v] = fill(v, i, (r,))
 
 def regalloc_rewrite(ctx:LinearScanRegallocContext, x:UOp):
   i = next(ctx.idx)
@@ -111,10 +108,10 @@ def regalloc_rewrite(ctx:LinearScanRegallocContext, x:UOp):
       v,r = ctx.fills[i][j]
       nsrc.append(ctx.ren.fill(ctx.spills[v], ctx.defs[v], r))
     else: nsrc.append(s)
-  ndefs = tuple(ctx.real_defs.get(v, v) for v in as_tuple(x.tag))
-  nx = x.replace(src=tuple(nsrc), tag=ndefs[0] if len(ndefs) == 1 else ndefs)
+  ndefs = tuple(ctx.real_defs[v] for v in x.tag) if isinstance(x.tag, tuple) else x.tag
+  nx = x.replace(src=tuple(nsrc), tag=ndefs)
   fills = [ctx.ren.fill(ctx.spills[v], ctx.defs[v], r) for v,r in ctx.insert_before.get(i, [])]
-  spills = [ctx.ren.spill(ctx.spills[v], nx) for v in as_tuple(x.tag) if v in ctx.spills]
+  spills = [ctx.ren.spill(ctx.spills[v], nx) for v in x.tag if v in ctx.spills] if isinstance(x.tag, tuple) else []
   return nx, fills + [nx] + spills
 
 pm_regalloc_rewrite = PatternMatcher([
