@@ -350,7 +350,7 @@ function setFocus(key) {
   const instLine = document.getElementById(`inst-${e?.arg.pc}`); instLine?.classList.add("highlight");
   if (instLine != null) {
     const r = rect(instLine), c = rect(instList);
-    if (Math.max(c.top-r.bottom, r.top-c.bottom)>=-30) instLine.scrollIntoView({ block:"center" });
+    if (Math.max(c.top-r.bottom, r.top-c.bottom)>=-30) instList.scrollTop = instLine.offsetTop-instList.clientHeight/2+instLine.clientHeight/2;
   }
 }
 
