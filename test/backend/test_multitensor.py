@@ -110,7 +110,7 @@ class TestMultiTensor(unittest.TestCase):
   def test_tensor_from_multi(self):
     X = Tensor([1, 2], dtype=dtypes.int).shard_(devices_2, 0)
     Y = Tensor(X.uop)
-    self.assertEqual(Y.device, Device.DEFAULT)
+    self.assertEqual(Y.device, devices_2)
     np.testing.assert_equal(X.numpy(), Y.numpy())
 
     with self.assertRaises(AssertionError):
