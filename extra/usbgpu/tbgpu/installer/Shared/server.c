@@ -126,7 +126,7 @@ static int map_bar(uint32_t bar, response_t *resp) {
   return 0;
 }
 
-static int map_sysmem_fd(uint64_t size, response_t *resp, int *out_fd) {
+static int map_sysmem_fd(uint64_t size, int contiguous, response_t *resp, int *out_fd) {
   if (g_sysmem_count >= MAX_SYSMEM) return -1;
   int idx = g_sysmem_count;
   int fd = -1;
@@ -208,7 +208,7 @@ static void handle_client(int fd) {
 
     case CMD_MAP_SYSMEM_FD: {
       int shm_fd = -1;
-      resp.status = map_sysmem_fd(req.arg0, &resp, &shm_fd) ? 1 : 0;
+      resp.status = map_sysmem_fd(req.arg0, (int)req.arg1, &resp, &shm_fd) ? 1 : 0;
       send_response(fd, &resp, shm_fd);
       continue;
     }
