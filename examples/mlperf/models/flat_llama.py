@@ -3,6 +3,15 @@ if __name__ == "__main__":
   os.environ["DEFAULT_FLOAT"] = "bfloat16"
   os.environ["OPTIM_DTYPE"] = "bfloat16"
   os.environ["DEV"] = "NULL"
+  # CDNA
+  os.environ["EMULATE"] = "AMD_CDNA4"
+  os.environ["DEVICE_IN_FUNCTION_BUG"] = "1"
+  os.environ["ALL2ALL"] = "1"
+  os.environ["USE_ATOMICS"] = "1"
+  if "HK_FLASH_ATTENTION" not in os.environ:
+    os.environ["HK_FLASH_ATTENTION"] = "1"
+    if "ASM_GEMM" not in os.environ:
+      os.environ["ASM_GEMM"] = "1"
 from tinygrad import Tensor, nn, function, getenv, dtypes, TinyJit
 from tinygrad.helpers import Timing, colored, GlobalCounters
 from extra.models.llama import apply_rotary_emb, precompute_freqs_cis
@@ -50,18 +59,14 @@ class FlatTransformer:
     x = rmsnorm(x, self.norm_eps) * attention_norm
     xqkv = x @ wqkv.T
 
-    # reshapes
-    xqkv = xqkv.reshape(xqkv.shape[0], xqkv.shape[1], self.n_kv_heads, self.n_rep + 2, self.head_dim)
-    xq = xqkv[:, :, :, :self.n_rep].reshape(xqkv.shape[0], xqkv.shape[1], -1)
-    xk = xqkv[:, :, :, self.n_rep:self.n_rep+1].reshape(xqkv.shape[0], xqkv.shape[1], -1)
-    xv = xqkv[:, :, :, self.n_rep+1:self.n_rep+2].reshape(xqkv.shape[0], xqkv.shape[1], -1)
-    xq = xq.reshape(xq.shape[0], xq.shape[1], self.n_heads, self.head_dim)
-    xk = xk.reshape(xk.shape[0], xk.shape[1], self.n_kv_heads, self.head_dim)
-    xv = xv.reshape(xv.shape[0], xv.shape[1], self.n_kv_heads, self.head_dim)
+    bsz, seqlen, _ = xqkv.shape
+    # interleaved layout: each kv group has [n_rep q heads, 1 k head, 1 v head] for clean MP sharding
+    xqkv = xqkv.reshape(bsz, seqlen, self.n_kv_heads, self.n_rep + 2, self.head_dim)
+    xq = xqkv[:, :, :, :self.n_rep].reshape(bsz, seqlen, self.n_heads, self.head_dim)
+    xk = xqkv[:, :, :, self.n_rep].reshape(bsz, seqlen, self.n_kv_heads, self.head_dim)
+    xv = xqkv[:, :, :, self.n_rep+1].reshape(bsz, seqlen, self.n_kv_heads, self.head_dim)
 
     xq, xk = apply_rotary_emb(xq, xk, freqs_cis)
-    bsz, seqlen, _, _ = xq.shape
-
     xq, xk, xv = xq.transpose(1, 2), xk.transpose(1, 2), xv.transpose(1, 2)
     attn = xq.scaled_dot_product_attention(xk, xv, is_causal=True, enable_gqa=True).transpose(1, 2)
     attn = attn.reshape(bsz, seqlen, -1)
@@ -79,6 +84,24 @@ class FlatTransformer:
                 ffn_norm:Tensor, w1:Tensor, w2:Tensor, w3:Tensor):
     h = x + self.attention(x, freqs_cis, attention_norm, wqkv, wo)
     return h + self.feed_forward(h, ffn_norm, w1, w2, w3)
+
+  def shard(self, device:tuple[str, ...], mp:bool=False):
+    from tinygrad.nn.state import get_parameters
+    if not mp:
+      for v in get_parameters(self): v.shard_(device, axis=None)
+    else:
+      # flat per-layer weights: axis 0 is n_layers, so shard axes are +1 vs per-layer Transformer
+      self.wqkv.shard_(device, axis=1).realize()          # (n_layers, out, dim) shard out
+      self.wo.shard_(device, axis=2).realize()             # (n_layers, dim, in) shard in
+      self.w1.shard_(device, axis=1).realize()             # (n_layers, hidden, dim) shard out
+      self.w2.shard_(device, axis=2).realize()             # (n_layers, dim, hidden) shard in
+      self.w3.shard_(device, axis=1).realize()             # (n_layers, hidden, dim) shard out
+      self.attention_norm.shard_(device, axis=None).realize()
+      self.ffn_norm.shard_(device, axis=None).realize()
+      self.norm.weight.shard_(device, axis=None).realize()
+      self.tok_embeddings.weight.shard_(device, axis=0).realize()
+      self.output.weight.shard_(device, axis=0).realize()
+      self.freqs_cis.shard_(device, axis=None).realize()
 
   def __call__(self, tokens:Tensor):
     h = self.tok_embeddings(tokens)
@@ -108,8 +131,16 @@ if __name__ == "__main__":
     sz += v.nbytes()
   print(f"total sz: {sz/1e9:.2f} GB")
 
+  from tinygrad import Device
+  if (DP := getenv("DP", 1)) > 1:
+    model.shard(tuple(f"{Device.DEFAULT}:{i}" for i in range(DP)))
+  if (MP := getenv("MP", 1)) > 1:
+    model.shard(tuple(f"{Device.DEFAULT}:{i}" for i in range(MP)), mp=True)
+
   with Timing("realize weights: "): Tensor.realize(*state.values())
   with Timing("fake data: "): tokens = Tensor.randint(BS, SEQLEN+1, low=0, high=model.vocab_size, dtype=dtypes.int).realize()
+  if DP > 1: tokens = tokens.shard(tuple(f"{Device.DEFAULT}:{i}" for i in range(DP)), axis=0)
+  if MP > 1: tokens = tokens.shard(tuple(f"{Device.DEFAULT}:{i}" for i in range(MP)))
 
   @TinyJit
   def jit_step(tokens:Tensor):
@@ -122,4 +153,4 @@ if __name__ == "__main__":
   jit_step(tokens)
   jit_step(tokens)
   jit_step(tokens)
-  print(f"mem used: {GlobalCounters.mem_used/1e9:.2f} GB")
+  print("mem per device: " + ', '.join(f"{dev}: {mem/1e9:.2f} GB" for dev, mem in sorted(GlobalCounters.mem_used_per_device.items())))

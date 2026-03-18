@@ -115,7 +115,9 @@ class Tensor(OpMixin):
 
   def __init__(self, data:ConstType|bytes|list|tuple|UOp|'numpy.ndarray'|pathlib.Path|None,
                device:str|tuple|list|None=None, dtype:DTypeLike|None=None, requires_grad:bool|None=None, _force_unique:bool=False):
-    if device is None and isinstance(data, pathlib.Path): device = f"DISK:{data.resolve()}"  # keep it on the disk if device is None
+    if device is None:
+      if isinstance(data, pathlib.Path): device = f"DISK:{data.resolve()}"  # keep it on the disk if device is None
+      elif isinstance(data, UOp): device = data._device
     _dtype:DType|None = to_dtype(dtype) if dtype is not None else None
     _device:str|tuple[str, ...] = canonicalize_device(device)
     del device, dtype
@@ -139,7 +141,7 @@ class Tensor(OpMixin):
         data = data.replace(src=(var.replace(src=const.src), const))
     elif data is None:
       data = UOp.const(_dtype or dtypes.default_float, 0, _device)
-    elif isinstance(data, get_args(PyConst)):
+    elif isinstance(data, get_args(ConstType)):
       data = (UOp.unique_const if _force_unique or requires_grad else UOp.const)(_dtype or dtypes.from_py(data), data, _device)
     elif isinstance(data, InvalidType):
       assert _dtype is not None
@@ -666,7 +668,7 @@ class Tensor(OpMixin):
   # ***** creation helper functions *****
 
   @staticmethod
-  def full(shape:tuple[sint, ...], fill_value:PyConst, **kwargs) -> Tensor:
+  def full(shape:tuple[sint, ...], fill_value:ConstType, **kwargs) -> Tensor:
     """
     Creates a tensor with the given shape, filled with the given value.
 
@@ -681,6 +683,17 @@ class Tensor(OpMixin):
     ```
     """
     return Tensor(fill_value, _force_unique=True, **kwargs).reshape((1, )*len(new_shape := argfix(shape))).expand(new_shape)
+
+  @staticmethod
+  def invalid(*shape, **kwargs) -> Tensor:
+    """
+    Creates a tensor with the given shape, filled with Invalid.
+
+    This is an alternative to Tensor.empty when you want an "anonymous" buffer.
+
+    Eventually Tensor.empty will be replaced by this.
+    """
+    return Tensor.full(argfix(*shape), Invalid, **kwargs)
 
   @staticmethod
   def zeros(*shape, **kwargs) -> Tensor:
