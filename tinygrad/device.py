@@ -6,7 +6,7 @@ import importlib, inspect, functools, pathlib, os, platform, contextlib, sys, re
 from tinygrad.helpers import CI, OSX, LRU, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, flat_mv, PROFILE, temp, colored
 from tinygrad.helpers import Context, CCACHE, ALLOW_DEVICE_USAGE, MAX_BUFFER_SIZE, cpu_events, ProfileEvent, ProfilePointEvent, dedup, ContextVar
 from tinygrad.helpers import unwrap_class_type, suppress_finalizing, select_first_inited, VIZ, CPU_LLVM, CPU_LVP, NV_PTX, CUDA_PTX, NV_NAK
-from tinygrad.helpers import EMULATED_DTYPES, NULL_IR3, NULL_QCOMCL, TracingKey, size_to_str
+from tinygrad.helpers import EMULATE, EMULATED_DTYPES, NULL_IR3, NULL_QCOMCL, TracingKey, size_to_str
 from tinygrad.dtype import DType, ImageDType, PtrDType, dtypes, _to_np_dtype
 if TYPE_CHECKING: from tinygrad.renderer import Renderer
 
@@ -355,7 +355,7 @@ def is_dtype_supported(dtype:DType, device:str|None=None) -> bool:
   if dtype == dtypes.half:
     if device == "CL": return not CI and not OSX
     if device == "QCOM": return False # QCOM compiler is flaky with half
-    if device in ["CUDA", "NV"]: return not CI
+    if device in ["CUDA", "NV"]: return not CI or EMULATE == "CUDA"
     if device == "CPU" and CPU_LLVM: return OSX
     if device == "PYTHON": return sys.version_info >= (3, 12)
   if dtype == dtypes.float64: return (device not in {"METAL", "QCOM"} and not (OSX and device == "CL") and not NULL_IR3 and not NULL_QCOMCL
