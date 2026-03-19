@@ -142,6 +142,7 @@ class Renderer:
   # NOTE: these two should be in (x,y,z) order to match the max_sizes argument in get_grouped_dims
   global_max: tuple[int, ...]|None = (0x8FFFFFFF,) * (3) # TODO: Ops.SPECIAL int32 indexes right now
   local_max: tuple[int, ...]|None = (0x8FFFFFFF,) * (3) # TODO: Ops.SPECIAL int32 indexes right now
+  global_prod_max: tuple[int, ...]|None = None
   shared_max: int = 32768
   tensor_cores: list[TensorCore] = []
   pre_matcher: PatternMatcher|None = None

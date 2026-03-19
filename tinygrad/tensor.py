@@ -238,10 +238,10 @@ class Tensor(OpMixin):
       param = UOp.param(slot, self.dtype, self.uop.shard_shape, self.device).multi(self.uop.axis)
     else:
       param = UOp.param(slot, self.dtype, self.shape, self.device)
-    return Tensor(param, device=self.device)
+    return Tensor(param)
   def call(self, *lst:Tensor, fxn:Tensor|UOp, grad_fxn:Callable|None=None) -> Tensor:
     fret = (fxn.uop if isinstance(fxn, Tensor) else fxn).call(*[t.uop for t in (self,)+lst], grad_fxn=grad_fxn)
-    return Tensor(fret.gettuple(0), device=self.device)
+    return Tensor(fret.gettuple(0))
 
   def custom_kernel(self, *lst:Tensor, fxn:Callable, grad_fxn:Callable|None=None) -> list[Tensor]:
     """
@@ -324,7 +324,7 @@ class Tensor(OpMixin):
     """
     Returns a new tensor with the same data as this tensor, but detached from the autograd graph.
     """
-    return Tensor(self.uop.detach(), device=self.device, requires_grad=False)
+    return Tensor(self.uop.detach(), requires_grad=False)
 
   def _buffer(self) -> Buffer:
     from tinygrad.engine.realize import capturing
@@ -803,7 +803,7 @@ class Tensor(OpMixin):
     if kwargs.get("device") is not None: raise RuntimeError("cannot specify `device` on `*_like` of a multi device tensor")
     if self.uop.axis is None: return fxn(self.shape, *args, dtype=dtype, **kwargs).shard(self.device)
     stacked = UOp(Ops.MSTACK, dtype=dtype, src=tuple([fxn(self.uop.shard_shape, *args, device=d, dtype=dtype, **kwargs).uop for d in self.device]))
-    return Tensor(UOp.multi(stacked, axis=self.uop.axis), device=self.device, dtype=dtype)
+    return Tensor(UOp.multi(stacked, axis=self.uop.axis), dtype=dtype)
 
   def full_like(self, fill_value:PyConst, **kwargs) -> Tensor:
     """
@@ -1714,7 +1714,7 @@ class Tensor(OpMixin):
     """
     return self._reduce(Ops.MAX, axis, keepdim)
 
-  def _inverse(self) -> Tensor: return -self if self.is_floating_point() else ~self if dtypes.is_int(self.dtype) else self.logical_not()
+  def _inverse(self) -> Tensor: return -self if self.is_floating_point() else ~self
 
   def min(self, axis:int|Sequence[int]|None=None, keepdim=False) -> Tensor:
     """
@@ -2883,16 +2883,6 @@ class Tensor(OpMixin):
     """
     return self.cast(dtypes.bool).ne(True)
 
-  def neg(self) -> Tensor:
-    """
-    Negates the tensor element-wise.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).neg().numpy())
-    ```
-    """
-    return self*-1 if self.dtype != dtypes.bool else self.logical_not()
-
   def contiguous(self, *args, **kwargs) -> Tensor:
     """
     Returns a contiguous tensor.
@@ -3167,8 +3157,6 @@ class Tensor(OpMixin):
 
   # ***** op wrappers *****
 
-  def __invert__(self) -> Tensor: return self.bitwise_not()
-
   # TODO: combine with UOps __floordiv__
   def __floordiv__(self, x): return self.div(x, rounding_mode="floor")
   def __rfloordiv__(self, x): return self.div(x, rounding_mode="floor", reverse=True)
@@ -3183,7 +3171,7 @@ class Tensor(OpMixin):
   def __ipow__(self, x) -> Tensor: return self.assign(self.pow(x))
   def __imatmul__(self, x) -> Tensor: return self.assign(self.matmul(x))
 
-  # unlike Tensors, UOps are immutable, so these don't go in MathTraits
+  # unlike Tensors, UOps are immutable, so these don't go in mixin
   def __iadd__(self, x) -> Tensor: return self.assign(self.add(x)) # type: ignore[misc]
   def __isub__(self, x) -> Tensor: return self.assign(self.sub(x)) # type: ignore[misc]
   def __imul__(self, x) -> Tensor: return self.assign(self.mul(x)) # type: ignore[misc]
@@ -3363,9 +3351,10 @@ class Tensor(OpMixin):
     return qk.cast(self.dtype).softmax(-1).dropout(dropout_p) @ value
 
   def _do_reduction(self, reduction:ReductionStr="mean") -> Tensor:
-    if reduction not in get_args(ReductionStr): raise ValueError(f"{reduction=} must be one of {get_args(ReductionStr)}")
-    reductions: dict[str, Callable[[Tensor], Tensor]] = {"mean": Tensor.mean, "sum": Tensor.sum, "none": lambda x: x}
-    return reductions[reduction](self)
+    if reduction == "none": return self
+    if reduction == "sum": return self.sum()
+    if reduction == "mean": return self.mean()
+    raise ValueError(f"{reduction=} must be one of {get_args(ReductionStr)}")
 
   def binary_crossentropy(self, Y:Tensor, reduction:ReductionStr="mean") -> Tensor:
     """
@@ -3412,14 +3401,12 @@ class Tensor(OpMixin):
     ```
     """
     assert 0.0 <= label_smoothing <= 1.0, "label_smoothing must be in [0.0, 1.0]"
-    assert reduction in get_args(ReductionStr), f"reduction must be one of {get_args(ReductionStr)}"
     log_probs = self.log_softmax()
     loss_mask = (Y != ignore_index) if ignore_index != -1 else Y.ones_like(dtype=dtypes.bool)
     y = Y.to(self.device).unsqueeze(-1)._one_hot_along_dim(self.shape[-1], dim=-1) * loss_mask.unsqueeze(-1)
     smoothing = label_smoothing * (log_probs.mean(-1) * loss_mask)
     unreduced = ((1 - label_smoothing) * (log_probs * y).sum(-1) + smoothing)
-    # NOTE: because of ignore_index, we can't use Tensor.mean (so can't use `_do_reduction` here)
-    return -(unreduced.sum() / loss_mask.sum() if reduction == "mean" else (unreduced.sum() if reduction == "sum" else unreduced))
+    return -unreduced.sum() / loss_mask.sum() if reduction == "mean" else -unreduced._do_reduction(reduction)
 
   def cross_entropy(self, Y:Tensor, reduction:ReductionStr="mean", label_smoothing:float=0.0) -> Tensor:
     """
@@ -3467,7 +3454,7 @@ class Tensor(OpMixin):
     print(t.log_softmax().nll_loss(Y, reduction='none').numpy())
     ```
     """
-    weight = Tensor.ones_like(Y, requires_grad=False) if weight is None else weight[Y]
+    weight = Y.ones_like(requires_grad=False) if weight is None else weight[Y]
     masked_weight = weight if ignore_index is None else weight * (Y != ignore_index)
     nll = -self.gather(1, Y.unsqueeze(1)).squeeze(1) * masked_weight
     return nll.sum() / masked_weight.sum() if reduction == "mean" else nll._do_reduction(reduction)
