@@ -128,7 +128,7 @@ class NVCommandQueue(HWQueue[HCQSignal, 'NVDevice', 'NVProgram', 'NVArgsState'])
     gpfifo.put_value += 1
 
 class NVComputeQueue(NVCommandQueue):
-  # Tegra SoC race condition:MMIO doorbell races CWD release payload patching (desktop hidden by PCIe latency)
+  # NOTE: Tegra SoC race: MMIO doorbell races CWD release payload patching (hidden by PCIe latency on desktop).
   _tegra_signal = False
 
   def memory_barrier(self):
