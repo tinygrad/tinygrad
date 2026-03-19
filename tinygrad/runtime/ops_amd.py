@@ -626,7 +626,9 @@ class AMDProgram(HCQProgram):
           print(colored(f"{self.dev.device}: Warning: SQTT buffer is full (SE {se})! Increase SQTT buffer with SQTT_BUFFER_SIZE=X (in MB)", "yellow"))
 
         self.dev.allocator._copyout(sqtt_mv:=memoryview(bytearray(wptr)), buf)
-        resbuf = (struct.pack('<Q', 0x11 | (4 << 13) | (0xf << 16) | (se << 24)) + bytes(sqtt_mv)) if self.dev.target[0] == 9 else bytes(sqtt_mv)
+        # GFX9 real HW needs CDNA header, but mockgpu emits RDNA3-style packets that decode directly
+        resbuf = bytes(sqtt_mv) if getenv("MOCKGPU") else \
+                 (struct.pack('<Q', 0x11 | (4 << 13) | (0xf << 16) | (se << 24)) + bytes(sqtt_mv)) if self.dev.target[0] == 9 else bytes(sqtt_mv)
         Compiled.profile_events += [ProfileSQTTEvent(self.dev.device, self.prof_prg_counter, se, resbuf,
                                                      bool((SQTT_ITRACE_SE_MASK.value >> se) & 1), self.dev.prof_exec_counter)]
     return res

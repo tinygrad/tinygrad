@@ -16,10 +16,15 @@ regCOMPUTE_TMPRING_SIZE = 0x1bb8 + amd_gpu.GC_BASE__INST0_SEG0
 regCOMPUTE_USER_DATA_0 = 0x1be0 + amd_gpu.GC_BASE__INST0_SEG0
 regCOMPUTE_NUM_THREAD_X = 0x1ba7 + amd_gpu.GC_BASE__INST0_SEG0
 regGRBM_GFX_INDEX = 0x2200 + amd_gpu.GC_BASE__INST0_SEG1
-regSQ_THREAD_TRACE_BUF0_BASE = 0x39e8 + amd_gpu.GC_BASE__INST0_SEG1
-regSQ_THREAD_TRACE_BUF0_SIZE = {"rdna3": 0x39e9, "rdna4": 0x39e6, "cdna4": 0x39e9}[MOCKGPU_ARCH] + amd_gpu.GC_BASE__INST0_SEG1
-regSQ_THREAD_TRACE_WPTR = 0x39ef + amd_gpu.GC_BASE__INST0_SEG1
-regSQ_THREAD_TRACE_STATUS = 0x39f4 + amd_gpu.GC_BASE__INST0_SEG1
+# SQTT registers - different offsets for different architectures
+regSQ_THREAD_TRACE_BUF0_BASE = 0x39e8 + amd_gpu.GC_BASE__INST0_SEG1  # rdna3/rdna4 only
+regSQ_THREAD_TRACE_BUF0_SIZE = {"rdna3": 0x39e9, "rdna4": 0x39e6}[MOCKGPU_ARCH] + amd_gpu.GC_BASE__INST0_SEG1 if MOCKGPU_ARCH != "cdna4" else 0
+regSQ_THREAD_TRACE_WPTR = {"rdna3": 0x39ef, "rdna4": 0x39ef, "cdna4": 0x2339}[MOCKGPU_ARCH] + amd_gpu.GC_BASE__INST0_SEG1
+regSQ_THREAD_TRACE_STATUS = {"rdna3": 0x39f4, "rdna4": 0x39f4, "cdna4": 0x233a}[MOCKGPU_ARCH] + amd_gpu.GC_BASE__INST0_SEG1
+# CDNA4 (GFX9) uses different registers for trace buffer
+regSQ_THREAD_TRACE_BASE = 0x2330 + amd_gpu.GC_BASE__INST0_SEG1  # cdna4 only
+regSQ_THREAD_TRACE_BASE2 = 0x2337 + amd_gpu.GC_BASE__INST0_SEG1  # cdna4 hi part
+regSQ_THREAD_TRACE_MODE = 0x2336 + amd_gpu.GC_BASE__INST0_SEG1  # cdna4 only
 regCP_PERFMON_CNTL = 0x3808 + amd_gpu.GC_BASE__INST0_SEG1
 regCPG_PERFCOUNTER1_LO = 0x3000 + amd_gpu.GC_BASE__INST0_SEG1
 regGUS_PERFCOUNTER_HI = 0x3643 + amd_gpu.GC_BASE__INST0_SEG1
@@ -160,7 +165,10 @@ class PM4Executor(AMDQueue):
     _ = (info >> 8) & 0b1 # mem_engine
 
     if mem_space == 0 and mem_op == 1: mval = val # hack for memory barrier, should properly handle (req_req, reg_done)
-    elif mem_space == 0: mval = self.gpu.regs[addr_hi<<32|addr_lo]
+    elif mem_space == 0:
+      # GFX9 (cdna4): register addresses in WAIT_REG_MEM are relative to UCONFIG_START
+      reg_addr = (addr_hi<<32|addr_lo) + (pm4.PACKET3_SET_UCONFIG_REG_START if MOCKGPU_ARCH == "cdna4" else 0)
+      mval = self.gpu.regs[reg_addr]
     elif mem_space == 1: mval = to_mv(self.gpu.translate_addr(addr_lo + (addr_hi << 32)), 4).cast('I')[0]
 
     mval &= mask
@@ -176,8 +184,40 @@ class PM4Executor(AMDQueue):
   def _exec_set_reg(self, n, off):
     reg = off + self._next_dword()
     for i in range(n):
-      self.gpu.regs[reg] = self._next_dword()
+      val = self._next_dword()
+      self.gpu.regs[reg] = val
+      # cdna4 SQTT finalization: when mode=0 is written to regSQ_THREAD_TRACE_MODE, trigger trace finish
+      if MOCKGPU_ARCH == "cdna4" and reg == regSQ_THREAD_TRACE_MODE and (val & 0b11) == 0:
+        self._finalize_sqtt_cdna4()
       reg += 1
+
+  def _finalize_sqtt_cdna4(self):
+    """Handle SQTT finalization for cdna4 (GFX9) when regSQ_THREAD_TRACE_MODE is written with mode=0."""
+    from test.mockgpu.amd.emu import sqtt_traces
+    blob = sqtt_traces.pop(0) if sqtt_traces else b''
+    old_idx = self.gpu.regs.grbm_index
+    for se in range(self.gpu.regs.n_se):
+      self.gpu.regs.grbm_index = 0b011 << 29 | se << 16  # select se, broadcast sa and instance
+      # Check if trace buffer was configured for this SE
+      try:
+        buf_lo = self.gpu.regs[regSQ_THREAD_TRACE_BASE]
+        buf_hi = self.gpu.regs[regSQ_THREAD_TRACE_BASE2]
+        buf_addr = ((buf_hi & 0xffff) << 32 | buf_lo) << 12
+      except KeyError:
+        # Trace buffer not configured for this SE, skip
+        self.gpu.regs[regSQ_THREAD_TRACE_STATUS] = 1 << 12  # FINISH_DONE=1, BUSY=0
+        self.gpu.regs[regSQ_THREAD_TRACE_WPTR] = 0
+        continue
+
+      self.gpu.regs[regSQ_THREAD_TRACE_STATUS] = 1 << 12  # FINISH_DONE=1, BUSY=0
+      # Use real trace blob for SE 0 (which has itrace enabled), empty blob for other SEs
+      se_blob = blob if se == 0 else b''
+      # Write blob to trace buffer
+      if se_blob and buf_addr: ctypes.memmove(buf_addr, se_blob, len(se_blob))
+      # cdna4 wptr is relative offset in 32-byte units
+      wptr_val = (len(se_blob) // 32) & 0x1FFFFFFF
+      self.gpu.regs[regSQ_THREAD_TRACE_WPTR] = wptr_val
+    self.gpu.regs.grbm_index = old_idx
 
   def _exec_dispatch_direct(self, n):
     assert n == 3
@@ -240,11 +280,19 @@ class PM4Executor(AMDQueue):
         old_idx = self.gpu.regs.grbm_index
         for se in range(self.gpu.regs.n_se):
           self.gpu.regs.grbm_index = 0b011 << 29 | se << 16 # select se, broadcast sa and instance
+          # Check if trace buffer was configured for this SE
+          try:
+            if MOCKGPU_ARCH == "rdna3":
+              buf_addr = ((self.gpu.regs[regSQ_THREAD_TRACE_BUF0_SIZE]&0xf)<<32|self.gpu.regs[regSQ_THREAD_TRACE_BUF0_BASE])<<12
+            else:
+              buf_addr = ((self.gpu.regs[regSQ_THREAD_TRACE_BUF0_BASE_HI])<<32|self.gpu.regs[regSQ_THREAD_TRACE_BUF0_BASE_LO])<<12
+          except KeyError:
+            # Trace buffer not configured for this SE, skip
+            self.gpu.regs[regSQ_THREAD_TRACE_STATUS] = 1 << 12  # FINISH_DONE=1, BUSY=0
+            self.gpu.regs[regSQ_THREAD_TRACE_WPTR] = 0
+            continue
+
           self.gpu.regs[regSQ_THREAD_TRACE_STATUS] = 1 << 12 # FINISH_PENDING==0 FINISH_DONE==1 BUSY==0
-          if MOCKGPU_ARCH == "rdna3":
-            buf_addr = ((self.gpu.regs[regSQ_THREAD_TRACE_BUF0_SIZE]&0xf)<<32|self.gpu.regs[regSQ_THREAD_TRACE_BUF0_BASE])<<12
-          else:
-            buf_addr = ((self.gpu.regs[regSQ_THREAD_TRACE_BUF0_BASE_HI])<<32|self.gpu.regs[regSQ_THREAD_TRACE_BUF0_BASE_LO])<<12
           # Use real trace blob for SE 0 (which has itrace enabled), empty blob for other SEs
           se_blob = blob if se == 0 else b''
 

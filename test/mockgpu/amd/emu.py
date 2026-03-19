@@ -101,6 +101,7 @@ def _init_sqtt_encoder():
   """Initialize and return SQTT encoder state. Called once per dispatch with tracing enabled."""
   from tinygrad.runtime.autogen.amd.rdna3.enum import SOPPOp as SOPPOp3
   from tinygrad.runtime.autogen.amd.rdna4.enum import SOPPOp as SOPPOp4
+  from tinygrad.runtime.autogen.amd.cdna.enum import SOPPOp as SOPPOpC
   import re
 
   _SOPP = (ir3.SOPP, ir4.SOPP, irc.SOPP)
@@ -113,22 +114,26 @@ def _init_sqtt_encoder():
   _FLAT = (ir3.FLAT, ir4.VFLAT, irc.FLAT)
   _SCRATCH = (ir3.SCRATCH, ir4.VSCRATCH, irc.SCRATCH)
 
-  # SOPP classification sets
+  # SOPP classification sets (include both RDNA3/4 and CDNA opcodes since values differ)
   _SOPP_SKIP = {SOPPOp3.S_ENDPGM.value, SOPPOp3.S_ENDPGM_SAVED.value, SOPPOp3.S_ENDPGM_ORDERED_PS_DONE.value,
-                SOPPOp3.S_DELAY_ALU.value}
+                SOPPOp3.S_DELAY_ALU.value, SOPPOpC.S_ENDPGM.value}
   _SOPP_IMMEDIATE = {SOPPOp3.S_NOP.value, SOPPOp3.S_CLAUSE.value, SOPPOp3.S_WAITCNT.value, SOPPOp3.S_WAITCNT_DEPCTR.value,
                      SOPPOp3.S_WAIT_IDLE.value, SOPPOp3.S_WAIT_EVENT.value, SOPPOp3.S_SLEEP.value,
-                     SOPPOp3.S_SET_INST_PREFETCH_DISTANCE.value}
+                     SOPPOp3.S_SET_INST_PREFETCH_DISTANCE.value,
+                     SOPPOpC.S_NOP.value, SOPPOpC.S_WAITCNT.value}
   for _op in (SOPPOp4.S_WAIT_ALU, SOPPOp4.S_WAIT_LOADCNT, SOPPOp4.S_WAIT_STORECNT, SOPPOp4.S_WAIT_SAMPLECNT,
               SOPPOp4.S_WAIT_BVHCNT, SOPPOp4.S_WAIT_EXPCNT, SOPPOp4.S_WAIT_DSCNT, SOPPOp4.S_WAIT_KMCNT,
               SOPPOp4.S_WAIT_LOADCNT_DSCNT, SOPPOp4.S_WAIT_STORECNT_DSCNT):
     _SOPP_IMMEDIATE.add(_op.value)
-  _SOPP_BARRIER = {SOPPOp3.S_BARRIER.value}
+  _SOPP_BARRIER = {SOPPOp3.S_BARRIER.value, SOPPOpC.S_BARRIER.value}
   if hasattr(SOPPOp4, 'S_BARRIER_WAIT'): _SOPP_BARRIER.add(SOPPOp4.S_BARRIER_WAIT.value)
   if hasattr(SOPPOp4, 'S_BARRIER_LEAVE'): _SOPP_BARRIER.add(SOPPOp4.S_BARRIER_LEAVE.value)
   _SOPP_BRANCH = {SOPPOp3.S_BRANCH.value, SOPPOp3.S_CBRANCH_SCC0.value, SOPPOp3.S_CBRANCH_SCC1.value,
                   SOPPOp3.S_CBRANCH_VCCZ.value, SOPPOp3.S_CBRANCH_VCCNZ.value,
-                  SOPPOp3.S_CBRANCH_EXECZ.value, SOPPOp3.S_CBRANCH_EXECNZ.value}
+                  SOPPOp3.S_CBRANCH_EXECZ.value, SOPPOp3.S_CBRANCH_EXECNZ.value,
+                  SOPPOpC.S_BRANCH.value, SOPPOpC.S_CBRANCH_SCC0.value, SOPPOpC.S_CBRANCH_SCC1.value,
+                  SOPPOpC.S_CBRANCH_VCCZ.value, SOPPOpC.S_CBRANCH_VCCNZ.value,
+                  SOPPOpC.S_CBRANCH_EXECZ.value, SOPPOpC.S_CBRANCH_EXECNZ.value}
 
   # VALU sub-classification patterns
   _VALU_TRANS_RE = re.compile(r'V_(EXP|LOG|RCP|RSQ|SQRT|SIN|COS|CEIL|FLOOR|TRUNC|RNDNE|FRACT|FREXP)_')
@@ -164,11 +169,17 @@ def _init_sqtt_encoder():
       started.add(wave_id)
     inst_type, inst_op, op_name = type(inst), inst.op.value if hasattr(inst, 'op') else 0, inst.op.name if hasattr(inst, 'op') else ""
     if issubclass(inst_type, _SOPP):
-      if inst_op in _SOPP_SKIP: return
-      elif inst_op in _SOPP_IMMEDIATE: _emit_nibbles(nibbles, IMMEDIATE, delta=1, wave=w)
-      elif inst_op in _SOPP_BARRIER: _emit_nibbles(nibbles, INST, delta=1, wave=w, op=InstOp.BARRIER)
-      elif inst_op in _SOPP_BRANCH:
+      # Use op_name for classification since opcode values overlap between RDNA3/CDNA
+      if "BRANCH" in op_name:
         _emit_nibbles(nibbles, INST, delta=1, wave=w, op=InstOp.JUMP if branch_taken else InstOp.JUMP_NO)
+      elif op_name in {"S_ENDPGM", "S_ENDPGM_SAVED", "S_ENDPGM_ORDERED_PS_DONE", "S_DELAY_ALU"}: return
+      elif op_name in {"S_NOP", "S_CLAUSE", "S_WAITCNT", "S_WAITCNT_DEPCTR", "S_WAIT_IDLE", "S_WAIT_EVENT", "S_SLEEP",
+                       "S_SET_INST_PREFETCH_DISTANCE", "S_WAIT_ALU", "S_WAIT_LOADCNT", "S_WAIT_STORECNT",
+                       "S_WAIT_SAMPLECNT", "S_WAIT_BVHCNT", "S_WAIT_EXPCNT", "S_WAIT_DSCNT", "S_WAIT_KMCNT",
+                       "S_WAIT_LOADCNT_DSCNT", "S_WAIT_STORECNT_DSCNT"}:
+        _emit_nibbles(nibbles, IMMEDIATE, delta=1, wave=w)
+      elif op_name in {"S_BARRIER", "S_BARRIER_WAIT", "S_BARRIER_LEAVE"}:
+        _emit_nibbles(nibbles, INST, delta=1, wave=w, op=InstOp.BARRIER)
       else: _emit_nibbles(nibbles, INST, delta=1, wave=w, op=InstOp.SALU)
     elif issubclass(inst_type, _VALU):
       op = _valu_op(op_name)
@@ -1956,7 +1967,9 @@ def _get_runner(inst_bytes: bytes, arch: str = "rdna3"):
 _BARRIER_OPS = {ir3.SOPPOp.S_BARRIER, irc.SOPPOp.S_BARRIER}
 if hasattr(ir4.SOPPOp, 'S_BARRIER_WAIT'): _BARRIER_OPS.add(ir4.SOPPOp.S_BARRIER_WAIT)
 _BRANCH_OPS: set[int] = {op.value for op in (ir3.SOPPOp.S_BRANCH, ir3.SOPPOp.S_CBRANCH_SCC0, ir3.SOPPOp.S_CBRANCH_SCC1,
-  ir3.SOPPOp.S_CBRANCH_VCCZ, ir3.SOPPOp.S_CBRANCH_VCCNZ, ir3.SOPPOp.S_CBRANCH_EXECZ, ir3.SOPPOp.S_CBRANCH_EXECNZ)}
+  ir3.SOPPOp.S_CBRANCH_VCCZ, ir3.SOPPOp.S_CBRANCH_VCCNZ, ir3.SOPPOp.S_CBRANCH_EXECZ, ir3.SOPPOp.S_CBRANCH_EXECNZ,
+  irc.SOPPOp.S_BRANCH, irc.SOPPOp.S_CBRANCH_SCC0, irc.SOPPOp.S_CBRANCH_SCC1,
+  irc.SOPPOp.S_CBRANCH_VCCZ, irc.SOPPOp.S_CBRANCH_VCCNZ, irc.SOPPOp.S_CBRANCH_EXECZ, irc.SOPPOp.S_CBRANCH_EXECNZ)}
 
 def _decode_at(pc: int, arch: str):
   """Decode and compile instruction at absolute address pc. Returns (runner, decoded_inst)."""
