@@ -232,7 +232,7 @@ reg_strs = {"rax": {4:"eax", 2:"ax", 1:"al"}, "rcx": {4:"ecx", 2:"cx", 1:"cl"}, 
 # if the load is used multiple times we don't fold
 def is_foldable_load(ctx:IselContext, x:UOp, s:UOp) -> bool: return s.op is Ops.LOAD and len(ctx.uses[s]) == x.src.count(s) == 1
 def base(x:UOp, i:int) -> UOp: return s.src[0] if (s:=x.src[i]).op is Ops.GEP else s
-def lane(x:UOp, i:int) -> int: return x.src[i].arg[0] if x.src[i].op is Ops.GEP else 0
+def lane(x:UOp, i:int) -> int: return s.arg[0] if (s:=x.src[i]).op is Ops.GEP else 0
 def to_int(dt:DType): return {dtypes.float16: dtypes.int16, dtypes.float32: dtypes.int32, dtypes.float64: dtypes.int64}[dt]
 def def_reg(dt:DType, reg:Register|None=None) -> UOp: return UOp(Ops.INS, arg=X86Ops.DEFINE_REG, dtype=dt, tag=None if reg is None else (reg,))
 def imm(dt:DType, v:int) -> UOp: return UOp(Ops.INS, arg=X86Ops.IMM, dtype=dt, tag=truncate[dt](v))
@@ -357,10 +357,9 @@ dt_128bit = tuple(dt.vec(l) for dt in dts for l in [16,8,4,2,1] if l*dt.itemsize
 
 isel_matcher = PatternMatcher([
   # **** Op -> Op ****
-  # TODO: this breaks stuff
   # float gep(0) is a noop as it just moves the 0th element from one xmm register to another
-  # this is done here to not interfere with shuffles / gep store fusion
-  #(UPat(dtype=dtypes.floats).gep(0, name="x"), lambda x: x.replace(op=Ops.NOOP, arg=None)),
+  # this is done here to not interfere with shuffles
+  (UPat(dtype=dtypes.floats).gep(0, name="x"), lambda x: x.replace(op=Ops.NOOP, arg=None)),
   # range is lowered to acc, cmp, jmp after regalloc
   (UPat(Ops.RANGE, src=(UPat.cvar("c"),), allow_any_len=True, name="x"), lambda c,x: x.replace(src=(imm(c.dtype, c.arg),) + x.src[1:])),
   (UPat(Ops.RANGE, name="x"), lambda ctx,x: x.replace(tag=(ctx.vreg(WGPR),)) if not isinstance(x.tag, tuple) else None),
@@ -543,7 +542,7 @@ isel_matcher = PatternMatcher([
   (UPat(Ops.INDEX, name="x"), lambda x: x.ins(X86Ops.LEA, src=fold_address(x))),
   # TODO: fuse stores, very few cases -- store cmp becomes setcc, store gep int becomes vpextr, store bitcast to int becomes vmovd/q
   # copy, load, store
-  # NOTE: copy here violates the spec, it only happens in register allocation when a reg to reg move needs to be inserted
+  # NOTE: copy here violates the spec, it only happens post register allocation when a reg to reg move needs to be inserted
   (UPat(Ops.COPY, dt_128bit, name="x"), lambda x: x.ins(X86Ops.VMOVUPS)),
   (UPat(Ops.COPY, dt_64bit, name="x"), lambda x: x.ins(X86Ops.VMOVSD)),
   (UPat(Ops.COPY, dt_32bit+dt_16bit, name="x"), lambda x: x.ins(X86Ops.VMOVSS)),
