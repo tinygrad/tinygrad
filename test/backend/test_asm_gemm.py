@@ -99,6 +99,8 @@ class TestAsmGEMM(unittest.TestCase):
     a, b = Tensor(a_np), Tensor(b_np)
     c = asm_gemm(a, b)
     c.realize()
+    # no validation on the NULL device
+    if a.device.startswith("NULL"): return None
     np.testing.assert_allclose(c.numpy(), c_np, atol=2e-3, rtol=5e-2)
 
 # test the Asm GEMM with Llama shapes, only run on the real machine for speed
