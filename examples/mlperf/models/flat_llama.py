@@ -2,7 +2,7 @@ import math, os
 if __name__ == "__main__":
   os.environ["DEFAULT_FLOAT"] = "bfloat16"
   os.environ["OPTIM_DTYPE"] = "bfloat16"
-  os.environ["DEV"] = "NULL"
+  if "DEV" not in os.environ: os.environ["DEV"] = "NULL"
   # CDNA
   os.environ["EMULATE"] = "AMD_CDNA4"
   os.environ["DEVICE_IN_FUNCTION_BUG"] = "1"
@@ -162,14 +162,13 @@ if __name__ == "__main__":
   @TinyJit
   def jit_step(tokens:Tensor):
     GlobalCounters.reset()
-    print(colored("*** step", "red"))
     with Timing("python forward: "): loss = model(tokens[:, :-1]).sparse_categorical_crossentropy(tokens[:, 1:])
     with Timing("python backward: "):
       for t,g in zip(grads, loss.gradient(*grads)):
         grads[t] = Tensor(grads[t].uop.after(UOp.group(*apply_grad(grads[t].uop, g.uop))), device=t.device)
     with Timing("run step: "): loss.realize(*grads.values())
 
-  jit_step(tokens)
-  jit_step(tokens)
-  jit_step(tokens)
+  for i in range(5):
+    with Timing(colored(f"*** step {i}: ", "red")):
+      jit_step(tokens)
   print("mem per device: " + ', '.join(f"{dev}: {mem/1e9:.2f} GB" for dev, mem in sorted(GlobalCounters.mem_used_per_device.items())))
