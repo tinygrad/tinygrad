@@ -25,6 +25,13 @@ class ElementwiseMixin(DTypeMixin):
     return self.ne(True)
 
   def neg(self) -> Self:
+    """
+    Negates the tensor element-wise.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).neg().numpy())
+    ```
+    """
     return self.logical_not() if self.dtype.scalar() == dtypes.bool else self * (-1)
 
   def _check_dtype(self) -> None:
@@ -140,6 +147,9 @@ class ElementwiseMixin(DTypeMixin):
 
   def __neg__(self) -> Self:
     return self.neg()
+
+  def __invert__(self) -> Self:
+    return self.bitwise_not()
 
   def __add__(self, x: Self | ConstType) -> Self:
     return self.add(x)

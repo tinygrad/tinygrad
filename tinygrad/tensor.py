@@ -1714,7 +1714,7 @@ class Tensor(OpMixin):
     """
     return self._reduce(Ops.MAX, axis, keepdim)
 
-  def _inverse(self) -> Tensor: return -self if self.is_floating_point() else ~self if dtypes.is_int(self.dtype) else self.logical_not()
+  def _inverse(self) -> Tensor: return -self if self.is_floating_point() else ~self
 
   def min(self, axis:int|Sequence[int]|None=None, keepdim=False) -> Tensor:
     """
@@ -2883,16 +2883,6 @@ class Tensor(OpMixin):
     """
     return self.cast(dtypes.bool).ne(True)
 
-  def neg(self) -> Tensor:
-    """
-    Negates the tensor element-wise.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).neg().numpy())
-    ```
-    """
-    return self*-1 if self.dtype != dtypes.bool else self.logical_not()
-
   def contiguous(self, *args, **kwargs) -> Tensor:
     """
     Returns a contiguous tensor.
@@ -3167,8 +3157,6 @@ class Tensor(OpMixin):
 
   # ***** op wrappers *****
 
-  def __invert__(self) -> Tensor: return self.bitwise_not()
-
   # TODO: combine with UOps __floordiv__
   def __floordiv__(self, x): return self.div(x, rounding_mode="floor")
   def __rfloordiv__(self, x): return self.div(x, rounding_mode="floor", reverse=True)
@@ -3183,7 +3171,7 @@ class Tensor(OpMixin):
   def __ipow__(self, x) -> Tensor: return self.assign(self.pow(x))
   def __imatmul__(self, x) -> Tensor: return self.assign(self.matmul(x))
 
-  # unlike Tensors, UOps are immutable, so these don't go in MathTraits
+  # unlike Tensors, UOps are immutable, so these don't go in mixin
   def __iadd__(self, x) -> Tensor: return self.assign(self.add(x)) # type: ignore[misc]
   def __isub__(self, x) -> Tensor: return self.assign(self.sub(x)) # type: ignore[misc]
   def __imul__(self, x) -> Tensor: return self.assign(self.mul(x)) # type: ignore[misc]
