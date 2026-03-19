@@ -2,8 +2,9 @@ import os
 os.environ["WQKV"] = "1"
 import unittest
 import numpy as np
-from tinygrad import Tensor, nn
+from tinygrad import Tensor, nn, dtypes
 from tinygrad.nn.state import get_parameters
+from tinygrad.device import is_dtype_supported
 from examples.mlperf.models.llama import Transformer
 from examples.mlperf.models.flat_llama import FlatTransformer
 
@@ -112,6 +113,28 @@ class TestFlatLlama(unittest.TestCase):
     flat_logits = flat(tokens.shard(devices, axis=0)).numpy()
     self.assertEqual(ref_logits.shape, flat_logits.shape)
     np.testing.assert_allclose(flat_logits, ref_logits, atol=1e-4, rtol=1e-4)
+
+  @unittest.skipUnless(is_dtype_supported(dtypes.fp8e4m3), "fp8 not supported on this device")
+  def test_forward_fp8(self):
+    import examples.mlperf.models.flat_llama as flat_llama_mod
+    old_fp8 = flat_llama_mod.FP8
+    try:
+      flat_llama_mod.FP8 = 1
+      Tensor.manual_seed(42)
+      params = dict(dim=128, hidden_dim=256, n_heads=4, n_kv_heads=2, n_layers=2, norm_eps=1e-5, vocab_size=1024, rope_theta=10000, max_context=64)
+      ref = Transformer(**params)
+      flat = FlatTransformer(**params)
+      copy_weights(flat, ref)
+      Tensor.realize(*nn.state.get_state_dict(flat).values())
+
+      tokens = Tensor([[1, 50, 100, 999, 2]])
+      ref_logits = ref(tokens).numpy()
+      flat_logits = flat(tokens).numpy()
+      self.assertEqual(ref_logits.shape, flat_logits.shape)
+      # FP8 has lower precision, allow larger tolerance
+      np.testing.assert_allclose(flat_logits, ref_logits, atol=1.0, rtol=0.1)
+    finally:
+      flat_llama_mod.FP8 = old_fp8
 
 if __name__ == "__main__":
   unittest.main()
