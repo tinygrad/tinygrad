@@ -247,8 +247,8 @@ class MemoryManager:
           # Move to a smaller size and try again.
           nxt_range += 1
           if nxt_range == len(self.palloc_ranges):
-            for paddr, _ in paddrs: self.pa_allocator.free(paddr)
-            raise MemoryError(f"Failed to allocate memory. (total allocation size={size:#x}, current try={self.palloc_ranges[nxt_range-1]})")
+            for paddr, _ in paddrs: self.pfree(paddr)
+            raise MemoryError(f"Failed to allocate memory (OOM). Request size={size:#x} ({self.palloc_ranges[nxt_range-1]})")
           continue
         rem_size -= self.palloc_ranges[nxt_range][0]
 
@@ -258,7 +258,7 @@ class MemoryManager:
     assert self.va_allocator is not None, "must be set"
     self.unmap_range(vm.va_addr, vm.size)
     self.va_allocator.free(vm.va_addr)
-    for paddr, _ in vm.paddrs: self.pa_allocator.free(paddr)
+    for paddr, _ in vm.paddrs: self.pfree(paddr)
 
   def palloc(self, size:int, align:int=0x1000, zero=True, boot=False, ptable=False) -> int:
     assert self.dev.is_booting == boot, "During booting, only boot memory can be allocated"

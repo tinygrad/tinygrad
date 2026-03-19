@@ -703,6 +703,14 @@ jobs:
     - name: Run 10 MLPerf Bert training steps (1 gpu)
       # TODO: remove BERT_LAYERS once scheduler is fast
       run: BENCHMARK_LOG=bert_10steps AMD=1 CAPTURE_PROCESS_REPLAY=0 DEFAULT_FLOAT=HALF BENCHMARK=10 BS=66 GPUS=1 BERT_LAYERS=2 MODEL=bert python3 examples/mlperf/model_train.py
+    - name: Remote
+      run: |
+        pkill -f 'extra/remote/serve.py' || true
+        PYTHONPATH=. python3 extra/remote/serve.py 6482 &
+        sleep 1
+        DEBUG=2 PYTHONPATH=. REMOTE=127.0.0.1:6482 AM_RESET=1 AMD=1 AMD_IFACE=PCI python3 test/test_tiny.py
+        DEBUG=2 PYTHONPATH=. REMOTE=127.0.0.1:6482 AM_RESET=1 AMD=1 AMD_AQL=1 AMD_IFACE=PCI python3 test/test_tiny.py
+        pkill -f 'extra/remote/serve.py' || true
     - name: Run process replay tests
       run: cp test/external/process_replay/process_replay.py ./process_replay.py && git fetch origin master && git -c advice.detachedHead=false checkout origin/master && PYTHONPATH=. python3 process_replay.py
 
@@ -759,5 +767,12 @@ jobs:
     - name: Run 10 MLPerf Bert training steps (1 gpu)
       # TODO: remove BERT_LAYERS once scheduler is fast
       run: BENCHMARK_LOG=bert_10steps NV=1 CAPTURE_PROCESS_REPLAY=0 DEFAULT_FLOAT=HALF BENCHMARK=10 BS=66 GPUS=1 BERT_LAYERS=2 MODEL=bert python3 examples/mlperf/model_train.py
+    - name: Remote
+      run: |
+        pkill -f 'extra/remote/serve.py' || true
+        PYTHONPATH=. python3 extra/remote/serve.py 6483 &
+        sleep 1
+        DEBUG=2 PYTHONPATH=. REMOTE=127.0.0.1:6483 NV=1 python3 test/test_tiny.py
+        pkill -f 'extra/remote/serve.py' || true
     - name: Run process replay tests
       run: cp test/external/process_replay/process_replay.py ./process_replay.py && git fetch origin master && git -c advice.detachedHead=false checkout origin/master && PYTHONPATH=. python3 process_replay.py
