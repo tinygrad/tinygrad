@@ -1,6 +1,7 @@
 from typing import cast
 import math, dataclasses, itertools
 from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, all_metadata, graph_rewrite
+from tinygrad.dtype import sum_acc_dtype
 from tinygrad.helpers import argsort
 
 def reduce_gradient(ctx:UOp, ret:UOp, op:Ops):
@@ -8,9 +9,10 @@ def reduce_gradient(ctx:UOp, ret:UOp, op:Ops):
   if op == Ops.ADD: return (broadcast_to_input(ctx),)
   if op == Ops.MAX:
     assert ret.op is Ops.REDUCE_AXIS, "only works on REDUCE_AXIS"
-    mask = ret.src[0].eq(broadcast_to_input(ret)).cast(ctx.dtype)
+    acc_dtype = sum_acc_dtype(ctx.dtype)
+    mask = ret.src[0].eq(broadcast_to_input(ret)).cast(acc_dtype)
     count = mask.r(Ops.ADD, ret.arg[1])
-    return ((mask/broadcast_to_input(count)) * broadcast_to_input(ctx),)
+    return ((mask/broadcast_to_input(count)).cast(ctx.dtype) * broadcast_to_input(ctx),)
   if op == Ops.MUL: return (broadcast_to_input(ctx * ret) / ret.src[0],)
 
 def _compact_params(body:UOp, all_args:tuple[UOp, ...]) -> tuple[UOp, tuple[UOp, ...]]:

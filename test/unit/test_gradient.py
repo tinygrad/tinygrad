@@ -76,6 +76,12 @@ class TestTensorGradient(unittest.TestCase):
     x = Tensor.randn(4, 4)
     np.testing.assert_allclose(x.pad(((1,0),(0,0))).gradient(x, gradient=g2)[0].numpy(), np.zeros((4, 4)))
 
+  def test_max_backward_half(self):
+    n = 70000
+    t = Tensor.ones(n, dtype=dtypes.float16, requires_grad=True).contiguous()
+    t.max().backward()
+    np.testing.assert_allclose(t.grad.numpy(), np.full(n, 1.0/n, dtype=np.float16), rtol=1e-2)
+
 class TestViewGradient(unittest.TestCase):
   def test_expand(self):
     x = Tensor.randn(5,2)
