@@ -6,7 +6,7 @@ import importlib, inspect, functools, pathlib, os, platform, contextlib, sys, re
 from tinygrad.helpers import CI, OSX, LRU, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, flat_mv, PROFILE, temp, colored
 from tinygrad.helpers import Context, CCACHE, ALLOW_DEVICE_USAGE, MAX_BUFFER_SIZE, cpu_events, ProfileEvent, ProfilePointEvent, dedup, ContextVar
 from tinygrad.helpers import unwrap_class_type, suppress_finalizing, select_first_inited, VIZ, CPU_LLVM, CPU_LVP, NV_PTX, CUDA_PTX, NV_NAK
-from tinygrad.helpers import EMULATED_DTYPES, NULL_IR3, NULL_QCOMCL, TracingKey
+from tinygrad.helpers import EMULATED_DTYPES, NULL_IR3, NULL_QCOMCL, TracingKey, size_to_str
 from tinygrad.dtype import DType, ImageDType, PtrDType, dtypes, _to_np_dtype
 if TYPE_CHECKING: from tinygrad.renderer import Renderer
 
@@ -212,7 +212,9 @@ class Allocator(Generic[DeviceType]):
   # overridden in LRUAllocator
   def alloc(self, size:int, options:BufferSpec|None=None):
     assert size > 0, f"alloc size must be positive, getting {size}"
-    return self._alloc(size, options if options is not None else self.default_buffer_spec)
+    try: return self._alloc(size, options if options is not None else self.default_buffer_spec)
+    except (RuntimeError, MemoryError) as e: raise MemoryError(f"Allocations of size {size_to_str(size)} failed on {self.dev.device}."
+                                                               f"Allocated {size_to_str(GlobalCounters.mem_used_per_device[self.dev.device])}") from e
   def free(self, opaque, size:int, options:BufferSpec|None=None):
     self._free(opaque, options if options is not None else self.default_buffer_spec)
 
