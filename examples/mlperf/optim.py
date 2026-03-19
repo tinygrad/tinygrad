@@ -25,8 +25,10 @@ class GradAccClipAdamW(Optimizer):
     return extra[-1]
 
   def _step(self, params:list[Tensor], grads:list[Tensor]) -> tuple[list[Tensor], list[Tensor]]:
+    grads = list(grads)
+
     for i in range(len(grads)):
-      if grads[i].device != self.m[i].device: grads[i].assign(grads[i].to(self.m[i].device))
+      if grads[i].device != self.m[i].device: grads[i] = grads[i].to(self.m[i].device)
 
     if self.fused:
       grads[0].assign(grads[0] / self.grad_acc)
