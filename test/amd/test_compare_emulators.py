@@ -4,8 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from tinygrad import Device
 
-from test.mockgpu.amd.emu import WaveState, _decode_at, VCC_LO, EXEC_LO, SCC
-WAVE_SIZE = 32
+from test.mockgpu.amd.emu import WaveState, _decode_at, WAVE_SIZE, VCC_LO, EXEC_LO, SCC
 from tinygrad.renderer.amd import decode_inst
 import tinygrad
 REMU_PATH = Path(tinygrad.__file__).parent.parent / "extra/remu/target/release/libremu.so"
