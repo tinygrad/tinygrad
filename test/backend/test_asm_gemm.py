@@ -84,7 +84,8 @@ class TestGemm(unittest.TestCase):
 # uses the smallest size for the cdna assembly gemm
 class TestAsmGEMM(unittest.TestCase):
   def setUp(self):
-    if not is_cdna4(): self.skipTest("assembly gemm is only for cdna4")
+    if not is_cdna4():
+      self.skipTest("assembly gemm is only for cdna4")
 
   def test_tiny(self): verify_asm_gemm(1, 256, 256, 64)
 
@@ -100,7 +101,7 @@ class TestAsmGEMM(unittest.TestCase):
     c.realize()
     np.testing.assert_allclose(c.numpy(), c_np, atol=2e-3, rtol=5e-2)
 
-# test the Asm GEMM on Llama shapes, only run on the real machine for speed
+# test the Asm GEMM with Llama shapes, only run on the real machine for speed
 class TestGemmLlama(unittest.TestCase):
   def setUp(self):
     if not is_cdna4() or getenv("MOCKGPU"):

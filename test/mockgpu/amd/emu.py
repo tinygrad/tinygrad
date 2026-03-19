@@ -1266,10 +1266,10 @@ def _compile_mfma(inst: irc.VOP3P, ctx: _Ctx) -> UOp:
   is_int_out = 'I32' in op_name.split('_')[2]  # V_MFMA_I32_...
 
   # Determine elements per VGPR and conversion function
-  if is_i8: vpg, elem_bits = 4, 8  # 4 i8 per VGPR
-  elif is_f32_src: vpg, elem_bits = 1, 32  # 1 f32 per VGPR
-  elif is_fp8: vpg, elem_bits = 4, 8
-  else: vpg, elem_bits = 2, 16  # f16/bf16: 2 per VGPR
+  if is_i8: vpg = 4
+  elif is_f32_src: vpg = 1
+  elif is_fp8: vpg = 4
+  else: vpg = 2
 
   # For 16x16: grp_size=16, n_grps=4, out_per_lane=4
   # For 32x32: grp_size=32, n_grps=2, out_per_lane=16
@@ -1402,7 +1402,7 @@ def _compile_mfma(inst: irc.VOP3P, ctx: _Ctx) -> UOp:
       # Each half covers 8 rows. out_reg 0-3: rows 0-3 (half0) or 16-19 (half1)
       # out_reg 4-7: rows 4-7 (half0) or 20-23 (half1), etc.
       # Actually: for 32x32, the output layout per lane is:
-      # acc[0:3] -> rows 0-3 (half 0) or rows 0-3 (half 1)? 
+      # acc[0:3] -> rows 0-3 (half 0) or rows 0-3 (half 1)?
       # Let me use the ISA doc: for 32x32, D has 16 dwords per lane. The mapping is:
       # acc[r] at lane l -> D[m][n] where n = (l%32)%16 + ((l%32)//16)*16
       # m = (l//32)*16 + (r//4)*4 + (r%4)  ... giving rows in blocks of 4
@@ -1439,7 +1439,7 @@ def _compile_mfma(inst: irc.VOP3P, ctx: _Ctx) -> UOp:
         m_base = c_grp * UOp.const(dtypes.int, M * K) + UOp.const(dtypes.int, out_reg * K)
         for k in range(K):
           a_val = tmp2.index(m_base + UOp.const(dtypes.int, k)).bitcast(acc_dt)
-          b_val = tmp2.index(b_off + c_grp * UOp.const(dtypes.int, N * K) + n_idx * UOp.const(dtypes.int, K) + UOp.const(dtypes.int, k)).bitcast(acc_dt)
+          b_val = tmp2.index(b_off + c_grp * UOp.const(dtypes.int, N*K) + n_idx * UOp.const(dtypes.int, K)+UOp.const(dtypes.int, k)).bitcast(acc_dt)
           acc = acc + a_val * b_val
       else:
         # 16x16: K is split across groups. Shared MxK/NxK arrays.
@@ -1839,136 +1839,58 @@ def _compile_mem_op(inst: ir3.DS|ir3.FLAT|ir3.GLOBAL|ir3.SCRATCH|ir4.DS|ir4.VFLA
   return UOp.sink(UOp.group(*stores).end(lane), *ctx.inc_pc())
 
 def _compile_mubuf(inst: irc.MUBUF, ctx: _Ctx) -> UOp:
-  """CDNA MUBUF (buffer memory) instruction compiler.
-
-  MUBUF uses a 4-SGPR V# resource descriptor for address computation:
-    V#[0:1] = base address (48-bit), V#[2] = num_records, V#[3] = flags (stride in bits 0-13)
-    addr = base + soffset + index*stride + offset  (linear mode)
-  """
+  """CDNA MUBUF: linear buffer address = base + soffset + (stride * index) + vgpr_offset + inst_offset"""
   exec_mask, op_name = ctx.rexec(), _op_name(inst)
-  pcode = get_pcode(inst.op)
-  use_acc = bool(getattr(inst, 'acc', 0))
+  use_acc, is_store, is_lds = bool(getattr(inst, 'acc', 0)), 'STORE' in op_name, bool(getattr(inst, 'lds', 0))
+  n_dwords = 4 if 'X4' in op_name else 2 if 'X2' in op_name else 1
 
-  # Read instruction fields
-  vdata_reg = ctx.inst_field(type(inst).vdata)
-  vaddr_reg = ctx.inst_field(type(inst).vaddr)
-  srsrc_raw = ctx.inst_field(type(inst).srsrc)  # encoded as sgpr_index / 4
-  srsrc_base = srsrc_raw * _c(4)  # actual SGPR register index
-  soffset_field = ctx.inst_field(type(inst).soffset)
-  offset_field = ctx.inst_field(type(inst).offset)
-  offen = ctx.inst_field(type(inst).offen)
-  idxen = ctx.inst_field(type(inst).idxen)
+  # instruction fields
+  vdata, vaddr = ctx.inst_field(type(inst).vdata), ctx.inst_field(type(inst).vaddr)
+  srsrc, soffset = ctx.inst_field(type(inst).srsrc) * _c(4), ctx.inst_field(type(inst).soffset)
+  offset, offen, idxen = ctx.inst_field(type(inst).offset), ctx.inst_field(type(inst).offen), ctx.inst_field(type(inst).idxen)
 
-  # Determine actual memory data width from op name (canonical_op_bits may report 32 for all)
-  if 'BYTE' in op_name: data_bits_mem = 8
-  elif 'SHORT' in op_name: data_bits_mem = 16
-  else: data_bits_mem = inst.canonical_op_bits.get('data', 32)
-  is_store = 'STORE' in op_name
-
-  # Read V# descriptor fields
-  num_records = ctx.rsgpr_dyn(srsrc_base + _c(2))  # V# word 2: num_records (32-bit)
-
-  def make_addr(lane: UOp) -> tuple[UOp, UOp]:
-    """Returns (final_address, buffer_offset) for bounds checking."""
-    # Read base address from V# descriptor (first 2 SGPRs = 48-bit base)
-    base_lo = ctx.rsgpr_dyn(srsrc_base)
-    base_hi = ctx.rsgpr_dyn(srsrc_base + _c(1))
-    base_addr = _u64(base_lo, base_hi) & UOp.const(dtypes.uint64, 0x0000FFFFFFFFFFFF)  # 48-bit base
-
-    # Read stride from V# word 3 (bits 0-13) for structured buffer addressing
-    rsrc_w3 = ctx.rsgpr_dyn(srsrc_base + _c(3))
-    stride = (rsrc_w3 & _c(0x3FFF)).cast(dtypes.uint64)  # 14-bit stride
-
-    # SOFFSET: SGPR byte offset (0-255 encoded; 128 = 0 literal, <128 = SGPR index, >=128 = inline constant)
-    soffset_is_sgpr = soffset_field < _c(128)
-    soffset_val = soffset_is_sgpr.where(ctx.rsgpr_dyn(soffset_field), soffset_field - _c(128))
-
-    # VADDR interpretation depends on IDXEN and OFFEN:
-    has_idx = idxen.ne(_c(0))
-    has_off = offen.ne(_c(0))
-    vgpr_index = has_idx.where(ctx.rvgpr_dyn(vaddr_reg, lane), _c(0))
-    vgpr_offset = has_off.where(
-      has_idx.where(ctx.rvgpr_dyn(vaddr_reg + _c(1), lane), ctx.rvgpr_dyn(vaddr_reg, lane)),
-      _c(0))
-
-    # Linear buffer address: base + soffset + index * stride + vgpr_offset + inst_offset
-    buffer_offset = vgpr_index.cast(dtypes.uint64) * stride + vgpr_offset.cast(dtypes.uint64) + offset_field.cast(dtypes.uint64)
-    final_addr = base_addr + soffset_val.cast(dtypes.uint64) + buffer_offset
-    return final_addr, buffer_offset.cast(dtypes.uint32)
-
-  is_lds_load = bool(getattr(inst, 'lds', 0)) and not is_store
+  # V# descriptor: base[0:1], num_records[2], stride=word3[13:0]
+  base = _u64(ctx.rsgpr_dyn(srsrc), ctx.rsgpr_dyn(srsrc + _c(1))) & UOp.const(dtypes.uint64, 0xFFFFFFFFFFFF)
+  num_records = ctx.rsgpr_dyn(srsrc + _c(2))
+  stride = (ctx.rsgpr_dyn(srsrc + _c(3)) & _c(0x3FFF)).cast(dtypes.uint64)
 
   lane = ctx.range()
   active = _lane_active(exec_mask, lane)
-  raw_addr, buf_offset = make_addr(lane)
+
+  # soffset: sgpr if < 128, else inline constant
+  soff = (soffset < _c(128)).where(ctx.rsgpr_dyn(soffset), soffset - _c(128)).cast(dtypes.uint64)
+  # vaddr: index (if idxen) in vaddr, offset (if offen) in vaddr or vaddr+1
+  index = idxen.ne(_c(0)).where(ctx.rvgpr_dyn(vaddr, lane), _c(0)).cast(dtypes.uint64)
+  voff = offen.ne(_c(0)).where(ctx.rvgpr_dyn(idxen.ne(_c(0)).where(vaddr + _c(1), vaddr), lane), _c(0)).cast(dtypes.uint64)
+
+  # buffer_offset for bounds check, final address
+  buffer_offset = (stride * index + voff + offset.cast(dtypes.uint64)).cast(dtypes.uint32)
+  in_bounds = active & buffer_offset.__lt__(num_records)
+  addr = base + soff + buffer_offset.cast(dtypes.uint64)
+  addr = in_bounds.where(addr, UOp.const(dtypes.uint64, 0))  # safe address when OOB
   mem = ctx.vmem
-  # Bounds check: if buffer_offset >= num_records, access is out-of-range (return 0 for loads, skip for stores)
-  in_bounds = buf_offset.cast(dtypes.uint32).__lt__(num_records)
-  # Use safe address (0) when out of bounds to prevent segfault from garbage pointers
-  addr = in_bounds.where(raw_addr, UOp.const(dtypes.uint64, 0))
-  in_bounds = active & in_bounds
 
   stores: list[UOp] = []
-
-  if is_lds_load:
-    # LDS=1: load from memory buffer directly into LDS (bypassing VGPRs)
-    m0_val = ctx.rsgpr_dyn(_c(124))
-    lds_base = m0_val & _c(0x3FFFF)  # M0[17:0]
-    n_dwords = data_bits_mem // 32
-    elem_size = n_dwords * 4  # bytes per lane
-    lds_addr = lds_base + lane.cast(dtypes.uint32) * _c(elem_size)
-    lds_mem = ctx.lds
+  if is_lds and not is_store:
+    # LDS load: buffer -> LDS (bypass VGPRs), LDS addr = M0[17:0] + lane * elem_size
+    lds_base = ctx.rsgpr_dyn(_c(124)) & _c(0x3FFFF)
+    lds_addr = lds_base + lane.cast(dtypes.uint32) * _c(n_dwords * 4)
     for i in range(n_dwords):
-      byte_addr = addr + UOp.const(dtypes.uint64, i * 4)
-      word_idx = (byte_addr >> UOp.const(dtypes.uint64, 2)).cast(dtypes.int64)
-      val = in_bounds.where(mem.index(word_idx, ptr=True).load(), _c(0))
-      lds_word_idx = ((lds_addr + _c(i * 4)) >> _c(2)).cast(dtypes.int)
-      stores.append(lds_mem.index(lds_word_idx, active).store(active.where(val, lds_mem.index(lds_word_idx, active))))
-    return UOp.sink(UOp.group(*stores).end(lane), *ctx.inc_pc())
-
-  if is_store:
-    # Store VDATA dwords to memory using 64-bit pointer arithmetic
-    _rvdata = ctx.raccvgpr_dyn if use_acc else ctx.rvgpr_dyn
-    vdata_val = _rvdata(vdata_reg, lane)
-    if 'D16_HI' in op_name: vdata_val = (vdata_val >> _c(16)) & _c(0xFFFF)
-    if data_bits_mem >= 32:
-      for i in range(data_bits_mem // 32):
-        byte_addr = addr + UOp.const(dtypes.uint64, i * 4)
-        word_idx = (byte_addr >> UOp.const(dtypes.uint64, 2)).cast(dtypes.int64)
-        val = _rvdata(vdata_reg + _c(i), lane)
-        idx = mem.index(word_idx, in_bounds)
-        stores.append(idx.store(in_bounds.where(_to_u32(val), idx)))
-    else:
-      word_idx = (addr >> UOp.const(dtypes.uint64, 2)).cast(dtypes.int64)
-      idx = mem.index(word_idx, in_bounds)
-      byte_pos = addr.cast(dtypes.uint32) & _c(3)
-      byte_shift = byte_pos * _c(8)
-      val_u32 = vdata_val.cast(dtypes.uint32)
-      size_mask = _c(0xFF if data_bits_mem == 8 else 0xFFFF)
-      mask = size_mask << byte_shift
-      new_word = (idx & (mask ^ _c(0xFFFFFFFF))) | ((val_u32 & size_mask) << byte_shift)
-      stores.append(idx.store(in_bounds.where(new_word, idx)))
+      word_addr = (addr + UOp.const(dtypes.uint64, i * 4)) >> UOp.const(dtypes.uint64, 2)
+      val = in_bounds.where(mem.index(word_addr.cast(dtypes.int64), ptr=True).load(), _c(0))
+      lds_idx = ((lds_addr + _c(i * 4)) >> _c(2)).cast(dtypes.int)
+      stores.append(ctx.lds.index(lds_idx, active).store(active.where(val, ctx.lds.index(lds_idx, active))))
+  elif is_store:
+    for i in range(n_dwords):
+      word_addr = (addr + UOp.const(dtypes.uint64, i * 4)) >> UOp.const(dtypes.uint64, 2)
+      idx = mem.index(word_addr.cast(dtypes.int64), in_bounds)
+      val = (ctx.raccvgpr_dyn if use_acc else ctx.rvgpr_dyn)(vdata + _c(i), lane)
+      stores.append(idx.store(in_bounds.where(_to_u32(val), idx)))
   else:
-    # Load from memory into VDATA dwords (out-of-range returns 0)
-    _wdst = ctx.waccvgpr_dyn if use_acc else ctx.wvgpr_dyn
-    vdst_reg = vdata_reg
-    if data_bits_mem >= 32:
-      for i in range(data_bits_mem // 32):
-        byte_addr = addr + UOp.const(dtypes.uint64, i * 4)
-        word_idx = (byte_addr >> UOp.const(dtypes.uint64, 2)).cast(dtypes.int64)
-        val = in_bounds.where(mem.index(word_idx, in_bounds, ptr=True).load(), _c(0))
-        stores.append(_wdst(vdst_reg + _c(i), lane, val, exec_mask))
-    else:
-      word_idx = (addr >> UOp.const(dtypes.uint64, 2)).cast(dtypes.int64)
-      word_val = in_bounds.where(mem.index(word_idx, in_bounds, ptr=True).load(), _c(0))
-      if data_bits_mem == 8:
-        byte_pos = addr.cast(dtypes.uint32) & _c(3)
-        val = (word_val >> (byte_pos * _c(8))) & _c(0xFF)
-      else:
-        half_pos = (addr.cast(dtypes.uint32) >> _c(1)) & _c(1)
-        val = (word_val >> (half_pos * _c(16))) & _c(0xFFFF)
-      stores.append(_wdst(vdst_reg, lane, val, exec_mask))
-
+    for i in range(n_dwords):
+      word_addr = (addr + UOp.const(dtypes.uint64, i * 4)) >> UOp.const(dtypes.uint64, 2)
+      val = in_bounds.where(mem.index(word_addr.cast(dtypes.int64), in_bounds, ptr=True).load(), _c(0))
+      stores.append((ctx.waccvgpr_dyn if use_acc else ctx.wvgpr_dyn)(vdata + _c(i), lane, val, exec_mask))
   return UOp.sink(UOp.group(*stores).end(lane), *ctx.inc_pc())
 
 # Dispatch table: instruction type -> handler function
