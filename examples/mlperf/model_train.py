@@ -13,6 +13,8 @@ from extra.bench_log import BenchEvent, WallTimeEvent
 # TODO: fix benchmark logging and use tinygrad tqdm
 from tqdm import tqdm
 
+from tinygrad.uop.ops import UOp
+
 def train_resnet():
   from extra.models import resnet
   from examples.mlperf.dataloader import batch_load_resnet
@@ -1283,6 +1285,7 @@ def train_bert():
 
 def train_llama3():
   from examples.mlperf.models.llama import Transformer
+  from examples.mlperf.models.flat_llama import FlatTransformer, apply_grad
   from examples.llama3 import MODEL_PARAMS
   from examples.mlperf.lr_schedulers import CosineAnnealingLRWithWarmup
   from examples.mlperf.optim import GradAccClipAdamW
@@ -1343,9 +1346,10 @@ def train_llama3():
   if (MP := getenv("MP", 1)) > 1: model_params['vocab_size'] = round_up(model_params['vocab_size'], 256 * MP)
   vocab_mask:Tensor = Tensor.arange(model_params['vocab_size']).reshape(1, 1, -1) >= real_vocab_size
 
-  model = Transformer(**model_params, max_context=SEQLEN)
+  model = FlatTransformer(**model_params, max_context=SEQLEN)
 
   params = get_parameters(model)
+  state = get_state_dict(model)
   # weights are all bfloat16 for now
   assert params and all(p.dtype == dtypes.bfloat16 for p in params)
 
@@ -1353,49 +1357,28 @@ def train_llama3():
     for v in get_parameters(model):
       v = v.assign(Tensor.empty(v.shape))
 
-  if (DP := getenv("DP", 1)) > 1:
-    device = tuple(f"{Device.DEFAULT}:{i}" for i in range(DP))
-    for v in get_parameters(model):
-      v.shard_(device, axis=None)
+  is_dp = (DP := getenv("DP", 1)) > 1
+  is_mp = (MP := getenv("MP", 1)) > 1
+  device_count = max(DP, MP)
+  device = tuple(f"{Device.DEFAULT}:{i}" for i in range(device_count))
 
-    vocab_mask.shard_(device, axis=None)
+  model.shard(device, is_mp)
 
-  if (MP := getenv("MP", 1)) > 1:
-    device = tuple(f"{Device.DEFAULT}:{i}" for i in range(MP))
-    for k,v in get_state_dict(model).items():
-      if 'scale' in k: v.shard_(device, axis=None)  # from quantized
-      elif '.attention.wq' in k: v.shard_(device, axis=0)
-      elif '.attention.wk' in k: v.shard_(device, axis=0)
-      elif '.attention.wv' in k: v.shard_(device, axis=0)
-      elif '.attention.wqkv' in k: v.shard_(device, axis=0)
-      elif '.attention.wo' in k: v.shard_(device, axis=1)
-      elif '.feed_forward.w1.' in k: v.shard_(device, axis=0)
-      elif '.feed_forward.w2.' in k: v.shard_(device, axis=1)
-      elif '.feed_forward.w3.' in k: v.shard_(device, axis=0)
-      elif 'tok_embeddings.weight' in k: v.shard_(device, axis=0)
-      elif 'output.weight' in k: v.shard_(device, axis=0)
-      else:
-        # attention_norm, ffn_norm, norm
-        v.shard_(device, axis=None)
-      # prevents memory spike on device 0
-      v.realize()
-
-    vocab_mask.shard_(device, axis=2).realize()
+  if is_dp: vocab_mask.shard_(device, axis=None).realize()
+  if is_mp: vocab_mask.shard_(device, axis=2).realize()
 
   is_offload_optim = bool(getenv("OFFLOAD_OPTIM"))
   is_fake_offload = Device.DEFAULT == "NULL"
   optim_device = ("CPU" if not is_fake_offload else "NULL:99") if is_offload_optim else None
-  optim = GradAccClipAdamW(get_parameters(model), lr=0.0, b1=opt_adamw_beta_1, b2=opt_adamw_beta_2,
+  optim = GradAccClipAdamW(params, lr=0.0, b1=opt_adamw_beta_1, b2=opt_adamw_beta_2,
                            eps=opt_adamw_epsilon, weight_decay=opt_adamw_weight_decay, grad_acc=grad_acc, device=optim_device)
 
   # init grads
-  if is_offload_optim:
-    for p in optim.params:
-      p.grad = Tensor.zeros(p.shape, dtype=p.dtype, device=optim_device, requires_grad=False).contiguous().realize()
-  else:
-    for p in optim.params:
-      p.grad = p.zeros_like().contiguous().realize()
-  grads: list[Tensor] = [p.grad for p in optim.params]
+  # if is_offload_optim:
+  #   grads = {p:Tensor.zeros(p.shape, dtype=p.dtype, device=optim_device).contiguous() for p in optim.params}
+  #   print(grads)
+  # else:
+  grads = {p:Tensor.zeros_like(p).contiguous() for p in optim.params}
 
   scheduler = CosineAnnealingLRWithWarmup(optim, opt_base_learning_rate, opt_end_learning_rate, opt_learning_rate_warmup_steps, opt_learning_rate_decay_steps)
 
@@ -1419,15 +1402,17 @@ def train_llama3():
     if DP == 1 and MP == 1: tokens = tokens.to(None)
     logits:Tensor = model(tokens[:, :-1])
     loss = vocab_mask.where(-1e9, logits).sparse_categorical_crossentropy(tokens[:, 1:])
-    loss.backward()
-    assert all(p.grad is g for p,g in zip(optim.params, grads))
+
+    for t,g in zip(grads, loss.gradient(*grads)):
+      grads[t] = Tensor(grads[t].uop.after(UOp.group(*apply_grad(grads[t].uop, g.uop))), device=t.device)
+
     loss_cpu = loss.flatten().float().to("CPU")
     Tensor.realize(loss_cpu, *grads)
     return loss_cpu
 
   @TinyJit
   def optim_step():
-    grad_norm = optim.fstep(grads)
+    grad_norm = optim.fstep(list(grads.values()))
     scheduler.step()
 
     for g in grads:
