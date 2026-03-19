@@ -208,7 +208,8 @@ def image_fixup(ls:UOp):
 
   # this is an unprocessed image without a cast, we should just make it a buffer
   if isinstance(dt, ImageDType) and (off:=ls.src[0].src[1]).get_idx().dtype != dtypes.weakint.vec(2):
-    return ls.replace(src=(ls.src[0].src[0].replace(dtype=(dtypes.half if dt.itemsize == 2 else dtypes.float).ptr(dt.size)).index(off), *ls.src[1:]))
+    idx = ls.src[0].src[0].replace(dtype=(dtypes.half if dt.itemsize == 2 else dtypes.float).ptr(dt.size)).index(off)
+    return ls.replace(src=(idx,)).cast(dtypes.float) if ls.op is Ops.LOAD else ls.replace(src=(idx, ls[1].cast(dtypes.float)))
 
 correct_load_store = PatternMatcher([
   # split LOAD/STORE
