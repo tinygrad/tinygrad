@@ -128,6 +128,7 @@ class NVCommandQueue(HWQueue[HCQSignal, 'NVDevice', 'NVProgram', 'NVArgsState'])
     gpfifo.put_value += 1
 
 class NVComputeQueue(NVCommandQueue):
+  # Tegra SoC race condition:MMIO doorbell races CWD release payload patching (desktop hidden by PCIe latency)
   _tegra_signal = False
 
   def memory_barrier(self):
@@ -608,6 +609,7 @@ class NVDevice(HCQCompiled[NVSignal]):
     ctxshare = self.iface.rm_alloc(self.channel_group, nv_gpu.FERMI_CONTEXT_SHARE_A, ctxshare_params)
 
     _gfe, _doff = (0x400, 0x3000) if self.is_tegra() else (0x10000, 0x100000)
+    assert _doff >= _gfe * 8 + 0x1000, f"gpfifo layout overflow: _doff={_doff:#x} needs >= {_gfe*8+0x1000:#x} (ring+USERD page)"
     self.compute_gpfifo = self._new_gpu_fifo(self.gpfifo_area, ctxshare, self.channel_group, offset=0, entries=_gfe, compute=True)
     self.dma_gpfifo = self._new_gpu_fifo(self.gpfifo_area, ctxshare, self.channel_group, offset=_doff, entries=_gfe, compute=False)
     self.iface.rm_control(self.channel_group, nv_gpu.NVA06C_CTRL_CMD_GPFIFO_SCHEDULE, nv_gpu.NVA06C_CTRL_GPFIFO_SCHEDULE_PARAMS(bEnable=1))
@@ -632,7 +634,7 @@ class NVDevice(HCQCompiled[NVSignal]):
     self.pma_enabled = PMA.value > 0 and PROFILE >= 1 and not self.is_tegra()
     if self.pma_enabled: self._prof_init()
 
-    if self.is_tegra(): NVComputeQueue._tegra_signal = True
+    if self.is_tegra(): NVComputeQueue._tegra_signal = True  # force GPFIFO signal path
     self._setup_gpfifos()
 
   def _new_gpu_fifo(self, gpfifo_area, ctxshare, channel_group, offset=0, entries=0x400, compute=False, video=False) -> GPFifo:
@@ -733,7 +735,7 @@ class NVDevice(HCQCompiled[NVSignal]):
               (nv_gpu.NV2080_CTRL_FB_FLUSH_GPU_CACHE_FLAGS_FLUSH_MODE_FULL_CACHE << 4))))
 
   def on_device_hang(self):
-    if self.is_tegra(): raise RuntimeError("Tegra device hang detected (no RM debugger)")
+    if self.is_tegra(): raise RuntimeError("Tegra device hang, nvgpu driver resets GPU channel on fd close")
     # Prepare fault report.
     # TODO: Restore the GPU using NV83DE_CTRL_CMD_CLEAR_ALL_SM_ERROR_STATES if needed.
 
