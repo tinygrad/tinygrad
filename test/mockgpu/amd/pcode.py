@@ -42,7 +42,9 @@ def _bitreverse(v: UOp, bits: int) -> UOp:
 def _extract_bits(val: UOp, hi: int, lo: int) -> UOp:
   dt = dtypes.uint64 if val.dtype in (dtypes.uint64, dtypes.int64) else dtypes.uint32
   width = hi - lo + 1
-  result = ((val >> _const(dt, lo)) if lo > 0 else val) & _const(val.dtype, (1 << width) - 1)
+  # Cast to dt first to ensure shift operands have matching types
+  val_cast = val.cast(dt) if val.dtype != dt else val
+  result = ((val_cast >> _const(dt, lo)) if lo > 0 else val_cast) & _const(dt, (1 << width) - 1)
   # Downcast to match extracted bit width so brace-concat { hi, lo } computes correct output dtype
   target_dt = _BITS_DT.get(width) or (dtypes.uint32 if width <= 32 else dtypes.uint64 if width <= 64 else dt)
   if result.dtype != target_dt: result = result.cast(target_dt)
@@ -477,7 +479,13 @@ class Parser:
       case '+' | '-':
         if op == '-' and left.op == Ops.CONST and right.op == Ops.CONST: return _const(left.dtype, left.arg - right.arg)
         return (left + right) if op == '+' else (left - right)
-      case '*' | '/': return (left * right) if op == '*' else (left / right)
+      case '*' | '/':
+        # Integer promotion: promote 16-bit integers to 32-bit before multiply to avoid overflow
+        # (e.g. SOPP branch offset: SIMM16.i16 * 16'4 can exceed int16 range)
+        if op == '*' and left.dtype.itemsize == 2 and left.dtype in (dtypes.int16, dtypes.short, dtypes.uint16, dtypes.ushort):
+          pdt = dtypes.int if left.dtype in (dtypes.int16, dtypes.short) else dtypes.uint
+          left, right = left.cast(pdt), right.cast(pdt)
+        return (left * right) if op == '*' else (left / right)
       case '**': return UOp(Ops.EXP2, left.dtype, (right.cast(left.dtype),)) if left.op == Ops.CONST and left.arg == 2.0 else left
 
   _PREC = [('||',), ('&&',), ('|',), ('^',), ('&',), ('==', '!=', '<>'), ('>=', '<=', '>', '<'), ('>>', '<<'), ('+', '-'), ('*', '/'), ('**',)]
