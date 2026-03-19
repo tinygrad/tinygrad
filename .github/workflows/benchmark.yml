@@ -709,6 +709,7 @@ jobs:
         PYTHONPATH=. python3 extra/remote/serve.py 6482 &
         sleep 1
         DEBUG=2 PYTHONPATH=. REMOTE=127.0.0.1:6482 AM_RESET=1 AMD=1 AMD_IFACE=PCI python3 test/test_tiny.py
+        DEBUG=2 PYTHONPATH=. REMOTE=127.0.0.1:6482 AM_RESET=1 AMD=1 AMD_AQL=1 AMD_IFACE=PCI python3 test/test_tiny.py
         pkill -f 'extra/remote/serve.py' || true
     - name: Run process replay tests
       run: cp test/external/process_replay/process_replay.py ./process_replay.py && git fetch origin master && git -c advice.detachedHead=false checkout origin/master && PYTHONPATH=. python3 process_replay.py
