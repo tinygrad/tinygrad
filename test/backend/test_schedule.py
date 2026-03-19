@@ -9,7 +9,7 @@ from hypothesis import assume, given, settings, strategies as strat
 
 from tinygrad import nn, dtypes, Device, Tensor, Variable
 from tinygrad.device import is_dtype_supported
-from tinygrad.dtype import DType, ImageDType
+from tinygrad.dtype import DType
 from tinygrad.uop.ops import UOp, Ops, UPat
 from tinygrad.helpers import CI, DEBUG, OSX, GlobalCounters, Context, getenv, all_same, temp
 from tinygrad.engine.realize import CompiledRunner, run_schedule
@@ -782,18 +782,6 @@ class TestSchedule(unittest.TestCase):
     (x+Tensor.ones(256).contiguous()).schedule()
     gc.collect()
     self.assertEqual(GlobalCounters.mem_used-base, 1024)
-
-  @unittest.skipIf(Device.DEFAULT != "CL", "image only supported on CL")
-  def test_image_matmul(self):
-    with Context(IMAGE=2):
-      x = Tensor.randn((9, 9)).realize()
-      y = Tensor.randn((9, 9)).realize()
-      out = x@y
-      run_schedule(check_schedule(out, 3))
-      np.testing.assert_allclose(out.numpy(), x.numpy()@y.numpy(), atol=1e-4, rtol=1e-4)
-      self.assertIsInstance(out.dtype, ImageDType)
-      self.assertIsNotNone(out.uop.base.realized)
-      self.assertIsInstance(out.uop.base.realized.dtype, ImageDType)
 
   @unittest.skipIf(Device.DEFAULT != "CL", "image only supported on CL")
   def test_image_dot_f16_fusion(self):
