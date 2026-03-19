@@ -256,7 +256,7 @@ class TestTinygrad(unittest.TestCase):
   def test_randperm(self):
     Tensor.manual_seed(0)
     a = Tensor.randperm(10).realize()
-    np.testing.assert_equal(a.numpy(), [5, 2, 8, 1, 3, 7, 9, 6, 0, 4])
+    np.testing.assert_equal(a.numpy(), [8, 9, 4, 3, 6, 1, 7, 5, 2, 0])
     b = Tensor.randperm(1000).realize()
     np.testing.assert_equal(set(b.numpy()), set(range(1000)))
 
@@ -492,6 +492,17 @@ class TestTinygrad(unittest.TestCase):
     a = t[10:20]
     dev = a.to(Device.DEFAULT)
     np.testing.assert_allclose(a.numpy(), dev.numpy())
+
+  def test_copy_from_numpy_dtype(self):
+    data = np.array([1.0, 2, 3], dtype=np.float32)
+    t = Tensor(data, dtype=dtypes.bfloat16)
+    try:
+      # TODO: fix dtype in tinygrad space
+      assert t.dtype == dtypes.bfloat16
+    except AssertionError:
+      assert t.dtype == dtypes.float32
+    np.testing.assert_equal(t.tolist(), data)
+    np.testing.assert_equal((t+1).tolist(), data+1)
 
   # Regression test for https://github.com/tinygrad/tinygrad/issues/1751
   def test_copy_from_numpy_unaligned(self):

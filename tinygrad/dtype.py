@@ -87,6 +87,15 @@ class DType(metaclass=DTypeMetaClass):
   def max(self):
     if dtypes.is_int(self): return 2**(self.scalar().bitsize)-1+self.min
     return float("inf") if dtypes.is_float(self) else True
+  def const(self, val: tuple[ConstType, ...]|ConstType):
+    if isinstance(val, tuple):
+      assert len(val) == self.count, f"mismatch {val} {self}"
+      return tuple(map(self.const, val))
+    if isinstance(val, InvalidType): return val
+    # NOTE: float('nan') != float('nan'), so we canonicalize here
+    if isinstance(val, float) and math.isnan(val): val = math.nan
+    # int is the default. wrap floats in ConstFloat to distinguish -0.0 from 0.0 in cache
+    return ConstFloat(float(val)) if dtypes.is_float(self) else bool(val) if dtypes.is_bool(self) else int(val)
 
 @dataclass(frozen=True, eq=False)
 class PtrDType(DType):
@@ -164,16 +173,6 @@ class dtypes:
     # put this in the last is faster because there are more items than lists/tuples to check
     if x.__class__ is list or x.__class__ is tuple: return max(dtypes.from_py(xi) for xi in x) if x else dtypes.default_float
     raise RuntimeError(f"Could not infer dtype of {x} with type {type(x)}")
-  @staticmethod
-  def as_const(val: tuple[ConstType, ...]|ConstType, dtype:DType):
-    if isinstance(val, tuple):
-      assert len(val) == dtype.count, f"mismatch {val} {dtype}"
-      return tuple(dtypes.as_const(x, dtype) for x in val)
-    if isinstance(val, InvalidType): return val
-    # NOTE: float('nan') != float('nan'), so we canonicalize here
-    if isinstance(val, float) and math.isnan(val): val = math.nan
-    # int is the default. wrap floats in ConstFloat to distinguish -0.0 from 0.0 in cache
-    return ConstFloat(float(val)) if dtypes.is_float(dtype) else bool(val) if dtypes.is_bool(dtype) else int(val)
   @staticmethod
   def finfo(dtype:DType) -> tuple[int, int]:
     """(exponent, mantissa)"""
