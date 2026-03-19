@@ -356,7 +356,7 @@ def is_dtype_supported(dtype:DType, device:str|None=None) -> bool:
     if device == "CL": return not CI and not OSX
     if device == "QCOM": return False # QCOM compiler is flaky with half
     if device in ["CUDA", "NV"]: return not CI or EMULATE == "CUDA"
-    if device == "CPU" and CPU_LLVM: return OSX
+    # if device == "CPU" and CPU_LLVM: return False
     if device == "PYTHON": return sys.version_info >= (3, 12)
   if dtype == dtypes.float64: return (device not in {"METAL", "QCOM"} and not (OSX and device == "CL") and not NULL_IR3 and not NULL_QCOMCL
                                       and dtypes.long not in EMULATED_DTYPES.tolist(dtypes))
