@@ -531,7 +531,7 @@ pm_float_decomp = PatternMatcher([
    f2f_store(st, idx, val, *ctx) if val.dtype.scalar() == ctx[1] and (idx:=idx.src[0] if idx.op == Ops.CAST else idx).tag == ctx[0] else None),
 ])
 
-def do_dtype_decomps(sink:UOp, ctx:str) -> PatternMatcher:
+def do_dtype_decomps(sink:UOp, ctx:str) -> UOp:
   def _should_emulate(dt): return not is_dtype_supported(dt, ctx) or dt in EMULATED_DTYPES.tolist(dtypes)
   if _should_emulate(dtypes.long): sink = graph_rewrite(sink, pm_long_decomp, name="decomp long -> int", bottom_up=True)
   for fr in filter(_should_emulate, dtypes.fp8s+(dtypes.bfloat16, dtypes.half)):
