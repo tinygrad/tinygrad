@@ -1374,10 +1374,6 @@ def train_llama3():
                            eps=opt_adamw_epsilon, weight_decay=opt_adamw_weight_decay, grad_acc=grad_acc, device=optim_device)
 
   # init grads
-  # if is_offload_optim:
-  #   grads = {p:Tensor.zeros(p.shape, dtype=p.dtype, device=optim_device).contiguous() for p in optim.params}
-  #   print(grads)
-  # else:
   grads = {p:Tensor.zeros_like(p).contiguous() for p in optim.params}
 
   scheduler = CosineAnnealingLRWithWarmup(optim, opt_base_learning_rate, opt_end_learning_rate, opt_learning_rate_warmup_steps, opt_learning_rate_decay_steps)
