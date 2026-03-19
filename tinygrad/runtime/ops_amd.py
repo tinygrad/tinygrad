@@ -907,6 +907,8 @@ class USBIface(PCIIface):
     barview = self.pci_dev.map_bar(bar=0, off=paddr, size=size) if cpu_access else None
     return HCQBuffer(mc_addr, size, meta=PCIAllocationMeta(mapping, has_cpu_mapping=False), view=barview, owner=self.dev)
 
+  def free(self, b:HCQBuffer): pass
+
   def create_queue(self, queue_type, ring, gart, rptr, wptr, eop_buffer=None, cwsr_buffer=None, ctl_stack_size=0, ctx_save_restore_size=0,
                    xcc_id=0, idx=0):
     if queue_type == kfd.KFD_IOC_QUEUE_TYPE_COMPUTE: self.pci_dev.usb._pci_cacheable += [(ring.cpu_view().addr, ring.size)]
