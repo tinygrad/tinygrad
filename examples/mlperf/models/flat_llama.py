@@ -114,6 +114,16 @@ class FlatTransformer:
     logits = self.output(self.norm(h))
     return logits
 
+# TODO: this shouldn't be needed, but it prevents a copy of the grads. CAT can help
+def apply_grad(old_grad:UOp, new_grad:UOp) -> list[UOp]:
+  if new_grad.op == Ops.ADD:
+    return apply_grad(old_grad, new_grad.src[0])+apply_grad(old_grad, new_grad.src[1])
+  elif new_grad.op == Ops.PAD:
+    grad_shrink = tuple([(p[0], s+p[0]) for s,p in zip(new_grad.src[0].shape, new_grad.marg)])
+    return apply_grad(old_grad.shrink(grad_shrink), new_grad.src[0])
+  else:
+    return [old_grad.store(old_grad + new_grad)]
+
 if __name__ == "__main__":
   config = {}
   BS                 = config["BS"]                     = getenv("BS", 16)
@@ -148,16 +158,6 @@ if __name__ == "__main__":
   print("mem per device: " + ', '.join(f"{dev}: {mem/1e9:.2f} GB" for dev, mem in sorted(GlobalCounters.mem_used_per_device.items())))
   if DP > 1: tokens = tokens.shard(tuple(f"{Device.DEFAULT}:{i}" for i in range(DP)), axis=0)
   if MP > 1: tokens = tokens.shard(tuple(f"{Device.DEFAULT}:{i}" for i in range(MP)))
-
-  # TODO: this shouldn't be needed, but it prevents a copy of the grads. CAT can help
-  def apply_grad(old_grad:UOp, new_grad:UOp) -> list[UOp]:
-    if new_grad.op == Ops.ADD:
-      return apply_grad(old_grad, new_grad.src[0])+apply_grad(old_grad, new_grad.src[1])
-    elif new_grad.op == Ops.PAD:
-      grad_shrink = tuple([(p[0], s+p[0]) for s,p in zip(new_grad.src[0].shape, new_grad.marg)])
-      return apply_grad(old_grad.shrink(grad_shrink), new_grad.src[0])
-    else:
-      return [old_grad.store(old_grad + new_grad)]
 
   @TinyJit
   def jit_step(tokens:Tensor):
