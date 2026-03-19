@@ -773,7 +773,7 @@ class _Ctx:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def _compile_sopp(inst: ir3.SOPP | ir4.SOPP, ctx: _Ctx) -> UOp:
-  simm16 = ctx.inst_field_signed(type(inst).simm16)  # keep as int32 to avoid overflow in branch offset calc (SIMM16*4 can exceed int16)
+  simm16 = ctx.inst_field_signed(type(inst).simm16).cast(dtypes.int16)
   if inst.op in (ir3.SOPPOp.S_ENDPGM, ir4.SOPPOp.S_ENDPGM, irc.SOPPOp.S_ENDPGM):
     return UOp.sink(ctx.wsgpr_dyn(_c(PC_LO_IDX), UOp.const(dtypes.uint32, 0xFFFFFFFF)),
                           ctx.wsgpr_dyn(_c(PC_HI_IDX), UOp.const(dtypes.uint32, 0xFFFFFFFF)))
