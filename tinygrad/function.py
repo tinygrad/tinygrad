@@ -78,9 +78,9 @@ class _function(Generic[ReturnType]):
     fret = uret.call(*call_uops, grad_fxn=self.grad_fxn, name=name, precompile=self.precompile,
                      precompile_backward=self.precompile_backward)
     if isinstance(ret, tuple):
-      return cast(ReturnType, tuple(Tensor(fret.gettuple(i), device=fret.device) for i in range(len(ret))))
+      return cast(ReturnType, tuple(Tensor(fret.gettuple(i)) for i in range(len(ret))))
     else:
-      return cast(ReturnType, Tensor(fret.gettuple(0), device=fret.device))
+      return cast(ReturnType, Tensor(fret.gettuple(0)))
 
 # overload signatures support both @function and @function(precompile=True) syntax
 @overload

@@ -249,7 +249,7 @@ class Tensor(OpMixin):
 
     This API is alpha and may change.
     """
-    return [Tensor(u, device=u.device) for u in UOp.custom_kernel(*[t.uop for t in (self,)+lst], fxn=fxn, grad_fxn=grad_fxn)]
+    return [Tensor(u) for u in UOp.custom_kernel(*[t.uop for t in (self,)+lst], fxn=fxn, grad_fxn=grad_fxn)]
 
   def callify(self, *lst:Tensor) -> Tensor:
     big_sink = UOp.sink(*[x.uop for x in (self,)+lst])
@@ -1063,14 +1063,13 @@ class Tensor(OpMixin):
     if gradient is None: gradient = Tensor(1.0, dtype=self.dtype, device=self.device, requires_grad=False)
     target_uops = [x.uop for x in targets]
     grads = compute_gradient(self.uop, gradient.uop, set(target_uops))
-    ret = []
+    ret:list[Tensor] = []
     for x in target_uops:
       if (y:=grads.get(x)) is None:
         if materialize_grads: y = x.const_like(0)
         else: raise RuntimeError(f"{x}\n\nnot found in\n\n{self.uop}")
-      ret.append(y)
-    # create returned Tensors
-    return [Tensor(u, device=t.device) for t,u in zip(targets, ret)]
+      ret.append(Tensor(y))
+    return ret
 
   def backward(self, gradient:Tensor|None=None) -> Tensor:
     """
@@ -3195,7 +3194,7 @@ class Tensor(OpMixin):
     assert frame_pos.op is Ops.BIND, "frame_pos must be a bound Variable"
     srcs = (out:=Tensor.empty(*shape, device=self.device, dtype=self.dtype), self.contiguous(), state.contiguous(), *ref_frames)
     fn = UOp(Ops.CUSTOM_FUNCTION, dtypes.void, src=(frame_pos.src[0], *[UOp.const(dtypes.int, s) for s in shape]), arg="encdec")
-    return Tensor(out.uop.after(fn.call(*[s.uop for s in srcs], frame_pos)), device=self.device)
+    return Tensor(out.uop.after(fn.call(*[s.uop for s in srcs], frame_pos)))
 
   # ***** functional nn ops *****
 
