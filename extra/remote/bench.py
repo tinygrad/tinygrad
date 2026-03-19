@@ -16,12 +16,14 @@ if __name__ == "__main__":
   pci = RemotePCIDevice("BN", devs[0])
   print(f"connected to {os.environ['REMOTE']}, device: {devs[0]}\n")
 
-  # latency
-  for _ in range(10): pci.read_config(0, 4)
+  # ping (minimal server round-trip, no device I/O)
+  from tinygrad.runtime.support.system import RemoteCmd
+  sock = pci.sock
+  for _ in range(10): RemotePCIDevice._rpc(sock, 0, RemoteCmd.PING)
   st = time.perf_counter()
-  for _ in range(LAT_N_RUNS): pci.read_config(0, 4)
-  lat = (time.perf_counter() - st) / LAT_N_RUNS
-  print(f"RPC latency: {lat*1e6:.1f} us ({1/lat:,.0f} ops/sec)\n")
+  for _ in range(LAT_N_RUNS): RemotePCIDevice._rpc(sock, 0, RemoteCmd.PING)
+  ping_lat = (time.perf_counter() - st) / LAT_N_RUNS
+  print(f"PING latency: {ping_lat*1e6:.1f} us ({1/ping_lat:,.0f} ops/sec)\n")
 
   # throughput
   sysmem, _ = pci.alloc_sysmem(max(SIZES))

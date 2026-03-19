@@ -12,6 +12,9 @@ mapped_bars: dict[tuple[int, int], object] = {}
 sysmem_allocs: list[tuple] = []
 
 def handle(conn, cmd, dev_id, bar, arg0, arg1, arg2):
+  if cmd == RemoteCmd.PING:
+    return conn.sendall(resp())
+
   if cmd == RemoteCmd.PROBE:
     payload = conn.recv(arg1, socket.MSG_WAITALL) if arg1 > 0 else b""
     filter_devices: dict[int, list[int]] = {}
