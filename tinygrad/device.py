@@ -213,8 +213,8 @@ class Allocator(Generic[DeviceType]):
   def alloc(self, size:int, options:BufferSpec|None=None):
     assert size > 0, f"alloc size must be positive, getting {size}"
     try: return self._alloc(size, options if options is not None else self.default_buffer_spec)
-    except (RuntimeError, MemoryError) as e: raise MemoryError(f"Allocations of size {size_to_str(size)} failed on {self.dev.device}."
-                                                               f"Allocated {size_to_str(GlobalCounters.mem_used_per_device[self.dev.device])}") from e
+    except (RuntimeError, MemoryError) as e: raise MemoryError(f"Allocation of {size_to_str(size)} failed on {self.dev.device}. "
+                                                               f"Used: {size_to_str(GlobalCounters.mem_used_per_device[self.dev.device])}") from e
   def free(self, opaque, size:int, options:BufferSpec|None=None):
     self._free(opaque, options if options is not None else self.default_buffer_spec)
 
