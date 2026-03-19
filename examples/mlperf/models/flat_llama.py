@@ -14,6 +14,7 @@ if __name__ == "__main__":
       os.environ["ASM_GEMM"] = "1"
 from tinygrad import Tensor, nn, function, getenv, dtypes, TinyJit
 from tinygrad.helpers import Timing, colored, GlobalCounters
+from tinygrad.uop.ops import Ops, UOp
 from extra.models.llama import apply_rotary_emb, precompute_freqs_cis
 
 def rmsnorm(x_in:Tensor, eps:float):
@@ -41,8 +42,8 @@ class FlatTransformer:
     self.w3 = self.lin_per_layer(dim, hidden_dim)
 
     self.norm_eps = norm_eps
-    self.attention_norm = Tensor.ones(n_layers, dim)
-    self.ffn_norm = Tensor.ones(n_layers, dim)
+    self.attention_norm = Tensor.ones(n_layers, dim).contiguous()
+    self.ffn_norm = Tensor.ones(n_layers, dim).contiguous()
 
     # output
     self.norm = nn.RMSNorm(dim, norm_eps)
@@ -124,31 +125,49 @@ if __name__ == "__main__":
   model = FlatTransformer(**model_params, max_context=SEQLEN)
   state = nn.state.get_state_dict(model)
   print("tensor count:", len(state))
-  sz = 0
-  for k,v in state.items():
-    if v.requires_grad is None: v.requires_grad_(True)
-    print(f"{colored(k, 'green' if v.requires_grad else 'white'):30s} {str(v.shape):30s} {v.dtype} {v.device}")
-    sz += v.nbytes()
-  print(f"total sz: {sz/1e9:.2f} GB")
 
+  # shard the model
   from tinygrad import Device
   if (DP := getenv("DP", 1)) > 1:
     model.shard(tuple(f"{Device.DEFAULT}:{i}" for i in range(DP)))
   if (MP := getenv("MP", 1)) > 1:
     model.shard(tuple(f"{Device.DEFAULT}:{i}" for i in range(MP)), mp=True)
 
-  with Timing("realize weights: "): Tensor.realize(*state.values())
-  with Timing("fake data: "): tokens = Tensor.randint(BS, SEQLEN+1, low=0, high=model.vocab_size, dtype=dtypes.int).realize()
+  # preallocate all the grad buffers and zero them out
+  grads = {x:Tensor.zeros_like(x).contiguous() for x in state.values() if x.requires_grad is None}
+
+  # print model size
+  sz = 0
+  for k,v in state.items():
+    print(f"{colored(k, 'green' if v in grads else 'white'):30s} {str(v.shape):30s} {v.dtype} {v.device}  {v.nbytes()/1e9:.2f} GB")
+    sz += v.nbytes()
+  print(f"total sz: {sz/1e9:.2f} GB")
+
+  with Timing("fake data: "): tokens = Tensor.randint(BS, SEQLEN+1, low=0, high=model.vocab_size, dtype=dtypes.int)
+  with Timing("realize weights/grads/data: "): Tensor.realize(*state.values(), *grads.values(), tokens)
+  print("mem per device: " + ', '.join(f"{dev}: {mem/1e9:.2f} GB" for dev, mem in sorted(GlobalCounters.mem_used_per_device.items())))
   if DP > 1: tokens = tokens.shard(tuple(f"{Device.DEFAULT}:{i}" for i in range(DP)), axis=0)
   if MP > 1: tokens = tokens.shard(tuple(f"{Device.DEFAULT}:{i}" for i in range(MP)))
+
+  # TODO: this shouldn't be needed, but it prevents a copy of the grads. CAT can help
+  def apply_grad(old_grad:UOp, new_grad:UOp) -> list[UOp]:
+    if new_grad.op == Ops.ADD:
+      return apply_grad(old_grad, new_grad.src[0])+apply_grad(old_grad, new_grad.src[1])
+    elif new_grad.op == Ops.PAD:
+      grad_shrink = tuple([(p[0], s+p[0]) for s,p in zip(new_grad.src[0].shape, new_grad.marg)])
+      return apply_grad(old_grad.shrink(grad_shrink), new_grad.src[0])
+    else:
+      return [old_grad.store(old_grad + new_grad)]
 
   @TinyJit
   def jit_step(tokens:Tensor):
     GlobalCounters.reset()
     print(colored("*** step", "red"))
     with Timing("python forward: "): loss = model(tokens[:, :-1]).sparse_categorical_crossentropy(tokens[:, 1:])
-    with Timing("python backward: "): loss.backward()
-    with Timing("run step: "): loss.realize(*[x.grad for x in state.values() if x.requires_grad])
+    with Timing("python backward: "):
+      for t,g in zip(grads, loss.gradient(*grads)):
+        grads[t] = Tensor(grads[t].uop.after(UOp.group(*apply_grad(grads[t].uop, g.uop))), device=t.device)
+    with Timing("run step: "): loss.realize(*grads.values())
 
   jit_step(tokens)
   jit_step(tokens)
