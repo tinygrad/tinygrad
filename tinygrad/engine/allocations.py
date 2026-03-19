@@ -66,6 +66,13 @@ def replace_store_after_with_contig(u:UOp, src:UOp):
   while assigned_to.op in {Ops.BITCAST, Ops.AFTER}: assigned_to = assigned_to.src[0].base
   if assigned_to.op is not Ops.BUFFER: return src.contiguous(tag=u.tag)
 
+def _make_buffer_view(src:UOp) -> UOp|None:
+  """If movement ops on src collapse to a contiguous range, return BUFFER_VIEW.reshape(src.shape). Otherwise None."""
+  if (offset := src.contiguous_view_offset()) is None: return None
+  buf = src.base
+  if buf.op is Ops.BUFFER_VIEW: offset, buf = offset + buf.arg[1], buf.src[0]
+  return UOp(Ops.BUFFER_VIEW, src.dtype, (buf,), (src.size, offset)).reshape(src.shape)
+
 def contiguous_mops_to_view(c:UOp, src:UOp):
   """CONTIGUOUS(MOPS(BUFFER)) → CONTIGUOUS(BUFFER_VIEW) when movement ops collapse to a contiguous range."""
   buf = src.base
@@ -76,18 +83,22 @@ def contiguous_mops_to_view(c:UOp, src:UOp):
   if not all_int(c.shape): return None
 
   # check if view is supported
-  if not isinstance(c.device, str): return None
   from tinygrad.device import Device
-  if not hasattr(Device[c.device].allocator, "_offset"): return None
+  if isinstance(c.device, str):
+    if not hasattr(Device[c.device].allocator, "_offset"): return None
+  elif not all(hasattr(Device[d].allocator, "_offset") for d in c.device): return None
 
-  # see if this can be a view
-  if (offset := src.contiguous_view_offset()) is None: return None
-
-  # merge BUFFER_VIEWs
-  if buf.op is Ops.BUFFER_VIEW: offset, buf = offset + buf.arg[1], buf.src[0]
+  # for MULTI tensors, use multi_pm to resolve per-shard movement ops, then create BUFFER_VIEW on the resolved result
+  if not isinstance(c.device, str):
+    from tinygrad.schedule.multi import multi_pm
+    resolved = graph_rewrite(src, multi_pm, name="multi_buffer_view")
+    if resolved.op is not Ops.MULTI: return None
+    if (view := _make_buffer_view(resolved.src[0])) is None: return None
+    return view.multi(resolved.arg).contiguous(tag=c.tag)
 
   # NOTE: this contiguous is removed because this BUFFER_VIEW/RESHAPE has_buffer_identity
-  return UOp(Ops.BUFFER_VIEW, src.dtype, (buf,), (src.size, offset)).reshape(src.shape).contiguous(tag=c.tag)
+  if (view := _make_buffer_view(src)) is None: return None
+  return view.contiguous(tag=c.tag)
 
 def transform_precompiled_call(c:UOp) -> UOp|None:
   if not c.arg.precompile: return None

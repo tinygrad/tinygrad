@@ -216,6 +216,7 @@ class AMDLLVMRenderer(LLVMRenderer):
   has_local = True
   shared_max = AMDHIPRenderer.shared_max
   global_max = AMDHIPRenderer.global_max
+  global_prod_max = AMDHIPRenderer.global_prod_max
   abi = "amdgpu_kernel"
   code_for_op = {**LLVMRenderer.code_for_op, **{op: lambda: None for op in llvm_intrinsics}}
   string_rewrite = PatternMatcher([
