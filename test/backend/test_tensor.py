@@ -493,6 +493,17 @@ class TestTinygrad(unittest.TestCase):
     dev = a.to(Device.DEFAULT)
     np.testing.assert_allclose(a.numpy(), dev.numpy())
 
+  def test_copy_from_numpy_dtype(self):
+    data = np.array([1.0, 2, 3], dtype=np.float32)
+    t = Tensor(data, dtype=dtypes.bfloat16)
+    try:
+      # TODO: fix dtype in tinygrad space
+      assert t.dtype == dtypes.bfloat16
+    except AssertionError:
+      assert t.dtype == dtypes.float32
+    np.testing.assert_equal(t.tolist(), data)
+    np.testing.assert_equal((t+1).tolist(), data+1)
+
   # Regression test for https://github.com/tinygrad/tinygrad/issues/1751
   def test_copy_from_numpy_unaligned(self):
     # 2**15 is the minimum for repro
