@@ -289,7 +289,6 @@ _pcode_fixes = {
   'V_TRIG_PREOP_F64': ("result = 64'F((1201'B(2.0 / PI)[1200 : 0] << shift.u32) & 1201'0x1fffffffffffff)", "result = trig_preop_result(shift)"),
 }
 
-
 def _get_pcode_dict(op) -> dict:
   """Return the PCODE dictionary for the given opcode based on its architecture."""
   return PCODE_CDNA if 'cdna' in type(op).__module__ else PCODE_RDNA4 if 'rdna4' in type(op).__module__ else PCODE_RDNA3
@@ -517,8 +516,10 @@ class _Ctx:
     return self.sgpr.index(reg.cast(dtypes.int), ptr=True).load()
 
   def wsgpr_dyn(self, reg: UOp, val: UOp) -> UOp:
-    """Write SGPR with dynamic register index. On CDNA, index 124 = M0 (read/write). On RDNA, index 124 = NULL (discard)."""
-    return self.sgpr.index(reg.cast(dtypes.int)).store(val.cast(dtypes.uint32))
+    """Write SGPR with dynamic register index. On RDNA, index 124 = NULL (writes discarded). On CDNA, index 124 = M0 (read/write)."""
+    # RDNA: NULL (124) discards writes. CDNA: M0 (124) is writable.
+    valid = None if self.wave_size == 64 else reg.ne(_c(124))
+    return self.sgpr.index(reg.cast(dtypes.int), valid).store(val.cast(dtypes.uint32))
 
   def wmask(self, reg: UOp, val: UOp) -> list[UOp]:
     """Write a lane mask (VCC/EXEC). Splits into lo/hi for wave64."""
