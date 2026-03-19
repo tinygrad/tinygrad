@@ -468,6 +468,7 @@ class AMDHIPRenderer(CStyleLanguage):
   shared_max = 65536
   # NOTE: this is only really needed on gfx12, even though gfx11 reports the same limitation
   global_max = (2147483647, 65535, 65535)
+  global_prod_max = (0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF)
 
   @staticmethod
   def get_tensor_cores(arch):
@@ -566,4 +567,11 @@ class AMDHIPCCRenderer(AMDHIPRenderer):
     super().__init__(arch)
     self.compiler = HIPCCCompiler(arch)
 
-class QCOMRenderer(OpenCLRenderer): device = "QCOM"
+class QCOMCLRenderer(OpenCLRenderer):
+  device = "QCOM"
+
+  def __init__(self, chip_id):
+    from tinygrad.runtime.support.compiler_qcom import QCOMCompiler
+    self.chip_id, self.compiler = chip_id, QCOMCompiler(chip_id)
+
+  def __reduce__(self): return self.__class__, (self.chip_id,)

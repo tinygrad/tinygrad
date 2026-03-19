@@ -17,6 +17,8 @@ dtype_floats = [dt for dt in core_dtypes if dtypes.is_float(dt) and is_dtype_sup
 
 FP8E4M3_MAX = 448.0
 FP8E5M2_MAX = 57344.0
+FP8E4M3FNUZ_MAX = 240.0
+FP8E5M2FNUZ_MAX = 57344.0
 
 def _assert_eq(tensor:Tensor, target_dtype:DType, target, tol_target_dtype:float=1e-7):
   if DEBUG >= 2: print(tensor.numpy())
@@ -26,7 +28,8 @@ def _assert_eq(tensor:Tensor, target_dtype:DType, target, tol_target_dtype:float
     if target_dtype in dtypes.floats and (not is_dtype_supported(target_dtype) or target_dtype in EMULATED_DTYPES.tolist(dtypes)):
       fe, fm = dtypes.finfo(target_dtype)
       kwargs = {"atol":2 ** (2 - (1 << (fe - 1))), "rtol": 2 ** (-fm)}
-    else: kwargs = {"rtol": {dtypes.float16:1e-3, dtypes.bfloat16:1e-2, dtypes.fp8e4m3:1e-1, dtypes.fp8e5m2:5e-1}.get(target_dtype, tol_target_dtype)}
+    else: kwargs = {"rtol": {dtypes.float16:1e-3, dtypes.bfloat16:1e-2, dtypes.fp8e4m3:1e-1, dtypes.fp8e5m2:5e-1,
+                             dtypes.fp8e4m3fnuz:1e-1, dtypes.fp8e5m2fnuz:5e-1}.get(target_dtype, tol_target_dtype)}
     np.testing.assert_allclose(tensor.numpy(), target, **kwargs)
 
   except AssertionError as e:

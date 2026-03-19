@@ -113,8 +113,8 @@ class AddrSpace(enum.Enum): PHYS = enum.auto(); SYS = enum.auto(); PEER = enum.a
 class VirtMapping: va_addr:int; size:int; paddrs:list[tuple[int, int]]; aspace:AddrSpace; uncached:bool=False; snooped:bool=False # noqa: E702
 
 class PageTableTraverseContext:
-  def __init__(self, dev, pt, vaddr, create_pts=False, free_pts=False, boot=False):
-    self.dev, self.vaddr, self.create_pts, self.free_pts, self.boot = dev, vaddr - dev.mm.va_base, create_pts, free_pts, boot
+  def __init__(self, dev, pt, vaddr, create_pts=False, free_pts=False, inspect=False, boot=False):
+    self.dev, self.vaddr, self.create_pts, self.free_pts, self.inspect, self.boot = dev, vaddr - dev.mm.va_base, create_pts, free_pts, inspect, boot
     self.pt_stack:list[tuple[Any, int, int]] = [(pt, self._pt_pte_idx(pt, self.vaddr), self._pt_pte_size(pt))]
 
   def _pt_pte_cnt(self, lv): return self.dev.mm.pte_cnt[lv]
@@ -151,13 +151,17 @@ class PageTableTraverseContext:
   def next(self, size:int, paddr:int|None=None, off:int=0):
     while size > 0:
       pt, pte_idx, pte_covers = self.pt_stack[-1]
+
+      # create_pts goes down until the page covers the request.
+      # free_pts goes down to the table, it assumses all entries are valid on the range (and validates that)
+      # inspect just visits any valid ranges and yields them.
       if self.create_pts:
         assert paddr is not None, "paddr must be provided when allocating new page tables"
         while pte_covers > size or not pt.supports_huge_page(paddr+off) or self.vaddr&(pte_covers-1) != 0: pt, pte_idx, pte_covers = self.level_down()
       else:
-        while not pt.is_page(pte_idx): pt, pte_idx, pte_covers = self.level_down()
+        while not pt.is_page(pte_idx) and (self.free_pts or pt.valid(pte_idx)): pt, pte_idx, pte_covers = self.level_down()
 
-      entries = min(size // pte_covers, self._pt_pte_cnt(pt.lv) - pte_idx)
+      entries = max(min(size // pte_covers, self._pt_pte_cnt(pt.lv) - pte_idx), 1 if self.inspect else 0)
       assert entries > 0, f"Invalid entries {size=:#x}, {pte_covers=:#x}"
       yield off, pt, pte_idx, entries, pte_covers
 
@@ -197,11 +201,14 @@ class MemoryManager:
 
     assert size == sum(p[1] for p in paddrs), f"Size mismatch {size=} {sum(p[1] for p in paddrs)=}"
 
+    ctx = PageTableTraverseContext(self.dev, self.root_page_table, vaddr, boot=boot, inspect=True)
+    for _, pt, pte_idx, pte_cnt, _ in ctx.next(size):
+      for pte_off in range(pte_cnt): assert not pt.valid(pte_idx + pte_off), f"PTE already mapped: {pt.entry(pte_idx + pte_off):#x}"
+
     ctx = PageTableTraverseContext(self.dev, self.root_page_table, vaddr, create_pts=True, boot=boot)
     for paddr, psize in paddrs:
       for off, pt, pte_idx, pte_cnt, pte_covers in ctx.next(psize, paddr=paddr):
         for pte_off in range(pte_cnt):
-          assert not pt.valid(pte_idx + pte_off), f"PTE already mapped: {pt.entry(pte_idx + pte_off):#x}"
           pt.set_entry(pte_idx + pte_off, paddr + off + pte_off * pte_covers, uncached=uncached, aspace=aspace, snooped=snooped,
                        frag=self._frag_size(ctx.vaddr+off, pte_cnt * pte_covers), valid=True)
 
@@ -240,8 +247,8 @@ class MemoryManager:
           # Move to a smaller size and try again.
           nxt_range += 1
           if nxt_range == len(self.palloc_ranges):
-            for paddr, _ in paddrs: self.pa_allocator.free(paddr)
-            raise MemoryError(f"Failed to allocate memory. (total allocation size={size:#x}, current try={self.palloc_ranges[nxt_range-1]})")
+            for paddr, _ in paddrs: self.pfree(paddr)
+            raise MemoryError(f"Failed to allocate memory (OOM). Request size={size:#x} ({self.palloc_ranges[nxt_range-1]})")
           continue
         rem_size -= self.palloc_ranges[nxt_range][0]
 
@@ -251,7 +258,7 @@ class MemoryManager:
     assert self.va_allocator is not None, "must be set"
     self.unmap_range(vm.va_addr, vm.size)
     self.va_allocator.free(vm.va_addr)
-    for paddr, _ in vm.paddrs: self.pa_allocator.free(paddr)
+    for paddr, _ in vm.paddrs: self.pfree(paddr)
 
   def palloc(self, size:int, align:int=0x1000, zero=True, boot=False, ptable=False) -> int:
     assert self.dev.is_booting == boot, "During booting, only boot memory can be allocated"

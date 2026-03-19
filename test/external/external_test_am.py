@@ -176,6 +176,34 @@ class TestAMPageTable(unittest.TestCase):
       mm0.map_range(helper_va(0x1000000), 2 << 20, paddrs=[(0x10000, 2 << 20)], aspace=AddrSpace.PHYS)
       mm0.unmap_range(helper_va(0x1000000), 2 << 20)
 
+  def test_inspect_mode(self):
+    mm0 = self.d[0].mm
+
+    # Map a few disjoint ranges inside a larger region.
+    mappings = [(0x10000, 0x3000), (0x20000, 0x2000), (0x1000000, 2 << 20)]
+    for va, sz in mappings:
+      mm0.map_range(helper_va(va), sz, paddrs=[(va, sz)], aspace=AddrSpace.PHYS)
+
+    # Inspect over the whole region: should visit all mapped pages.
+    ctx = PageTableTraverseContext(self.d[0], mm0.root_page_table, helper_va(0x0), inspect=True)
+    visited = set()
+    for _off, pt, pte_idx, n_ptes, pte_covers in ctx.next(0x4000000):
+      for i in range(n_ptes):
+        pte = helper_read_entry_components(pt.entries[pte_idx + i])
+        if pte['valid']:
+          for p in range(0, pte_covers, 0x1000): visited.add(pte['paddr'] + p)
+
+    expected_pages = {va + off for va, sz in mappings for off in range(0, sz, 0x1000)}
+    assert visited == expected_pages
+
+    for va, sz in mappings:
+      mm0.unmap_range(helper_va(va), sz)
+
+    # Inspect after unmap: should find no valid entries.
+    ctx = PageTableTraverseContext(self.d[0], mm0.root_page_table, helper_va(0x0), inspect=True)
+    for _off, pt, pte_idx, n_ptes, pte_covers in ctx.next(0x4000000):
+      for i in range(n_ptes): assert not pt.valid(pte_idx + i)
+
   def test_frag_size(self):
     mm0 = self.d[0].mm
 

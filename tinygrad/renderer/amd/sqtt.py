@@ -46,6 +46,7 @@ class InstOp(Enum):
   SMEM = 0x1
   JUMP = 0x3              # branch taken
   JUMP_NO = 0x4           # branch not taken
+  CALL = 0x5              # s_call_b64
   MESSAGE = 0x9
   VALU_TRANS = 0xb        # transcendental: exp, log, rcp, sqrt, sin, cos
   VALU_64_SHIFT = 0xd     # 64-bit shifts: lshl, lshr, ashr
@@ -72,8 +73,10 @@ class InstOp(Enum):
 
   # LDS ops on traced SIMD
   LDS_LOAD = 0x29
+  LDS_ATOMIC = 0x2a        # ds_append, ds_consume, ds_store_addtid_b32
   LDS_STORE = 0x2b
   LDS_STORE_64 = 0x2c
+  LDS_STORE_96 = 0x2d
   LDS_STORE_128 = 0x2e
 
   # Memory ops on other SIMD (0x5x range)
@@ -99,19 +102,60 @@ class InstOp(Enum):
 
 class InstOpRDNA4(Enum):
   """SQTT instruction operation types for RDNA4 (gfx1200). Different encoding from RDNA3."""
-  # TODO: we need to do discovery of all of these from instructions
   SALU = 0x0
-  JUMP = 0x1
-  NEXT = 0x2
-  MESSAGE = 0x4
-  VALU_64 = 0x6
-  VALU_WMMA = 0x46
-  VMEM = 0x10
-  VMEM_128 = 0x11
-  VMEM_STORE = 0x12
-  VMEM_STORE_128 = 0x14
-  OTHER_VMEM = 0x5e
-  OTHER_VMEM_STORE = 0x60
+  SMEM = 0x1
+  JUMP = 0x3
+  JUMP_NO = 0x4
+  CALL = 0x5
+  MESSAGE = 0x9
+  VALU_TRANS = 0xb
+  VALU_B2 = 0xd
+  VALU_B4 = 0xe
+  VINTERP = 0x12
+  VMEM_RD_1 = 0x21
+  VMEM_RD_2 = 0x22
+  VMEM_WR_1 = 0x23
+  VMEM_WR_2 = 0x24
+  VMEM_WR_3 = 0x25
+  VMEM_WR_4 = 0x26
+  VMEM_WR_5 = 0x27
+  VMEM_WR_6 = 0x28
+  LDS_RD = 0x29
+  LDS_WR_1 = 0x2a
+  LDS_WR_2 = 0x2b
+  LDS_WR_3 = 0x2c
+  LDS_WR_4 = 0x2d
+  LDS_WR_5 = 0x2e
+  OTHER_LDS_1 = 0x50
+  OTHER_LDS_2 = 0x51
+  BARRIER_SIGNAL = 0x7a
+  WMMA_8 = 0x8c
+  WMMA_16 = 0x8d
+  VALU_DPFP = 0x92
+  SALU_FLOAT3 = 0x98
+  VALU_SCL_TRANS = 0x99
+  SALU_2 = 0x9b
+  SALU_5 = 0x9c
+  OTHER_VMEM = 0xbd
+  OTHER_VMEM_5 = 0xc1
+
+class InstOpCDNA(Enum):
+  SMEM_RD = 0
+  SALU_32 = 1
+  VMEM_RD = 2
+  VMEM_WR = 3
+  FLAT_WR = 4
+  VALU_32 = 5
+  LDS = 6
+  PC = 7
+  JUMP = 12
+  NEXT = 13
+  FLAT_RD = 14
+  OTHER_MSG = 15
+  SMEM_WR = 16
+  SALU_64 = 17
+  VALU_64 = 18
+  VALU_MAI = 28
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # PACKET TYPE BASE CLASS
@@ -147,11 +191,6 @@ class TS_DELTA_S8_W3(PacketType):
   delta = bits[10:8]
   _padding = bits[63:11]
 
-class TS_DELTA_S8_W3_RDNA4(PacketType):  # Layout 4: 64->72 bits
-  encoding = bits[6:0] == 0b0100001
-  delta = bits[10:8]
-  _padding = bits[71:11]
-
 class TS_DELTA_S5_W3(PacketType):
   encoding = bits[4:0] == 0b00110
   delta = bits[7:5]
@@ -169,19 +208,16 @@ class TS_DELTA_SHORT(PacketType):
 class TS_DELTA_OR_MARK(PacketType):
   encoding = bits[6:0] == 0b0000001
   delta = bits[47:12]
-  bit8 = bits[8:8]
-  bit9 = bits[9:9]
+  pl = bits[8:8]
+  rt = bits[9:9]
   @property
-  def is_marker(self) -> bool: return bool(self.bit9 and not self.bit8)
+  def is_marker(self) -> bool: return bool(self.rt and not self.pl)
 
-class TS_DELTA_OR_MARK_RDNA4(PacketType):  # Layout 4: 48->64 bits
-  encoding = bits[6:0] == 0b0000001
+class TS_DELTA_OR_MARK_RDNA4(TS_DELTA_OR_MARK):
   delta = bits[63:12]
-  bit7 = bits[7:7]
-  bit8 = bits[8:8]
-  bit9 = bits[9:9]
-  @property
-  def is_marker(self) -> bool: return bool((self.bit9 and not self.bit8) or self.bit7)
+  rt = bits[7:7]
+  pl = bits[8:8]
+  tl = bits[9:9]
 
 class TS_DELTA_S5_W2(PacketType):
   encoding = bits[4:0] == 0b11100
@@ -341,14 +377,9 @@ class INST(PacketType):
 class INST_RDNA4(PacketType):  # Layout 4: different delta position and InstOp encoding
   encoding = bits[2:0] == 0b010
   delta = bits[5:3]
-  flag1 = bits[6:6]
-  flag2 = bits[7:7]
-  wave_pair = bits[11:8]
-  flag3 = bits[12:12]
-  op = bits[19:13].enum(InstOpRDNA4)
-  # INST_RDNA4 wave_pair field (4 bits) addresses wave pairs, flag2 selects even/odd wave
-  @property
-  def wave(self): return self.wave_pair * 2 + self.flag2
+  w64h = bits[6:6]
+  wave = bits[11:7]
+  op = bits[19:12].enum(InstOpRDNA4)
 
 class UTILCTR(PacketType):
   encoding = bits[6:0] == 0b0110001
@@ -363,7 +394,7 @@ PACKET_TYPES_RDNA3: dict[int, type[PacketType]] = {
 }
 PACKET_TYPES_RDNA4: dict[int, type[PacketType]] = {
   **PACKET_TYPES_RDNA3,
-  7: TS_DELTA_S8_W3_RDNA4, 9: WAVESTART_RDNA4, 10: TS_DELTA_S5_W2_RDNA4, 11: WAVEALLOC_RDNA4,
+  9: WAVESTART_RDNA4, 10: TS_DELTA_S5_W2_RDNA4, 11: WAVEALLOC_RDNA4,
   12: TS_DELTA_S5_W3_RDNA4, 13: PERF_RDNA4, 22: TS_DELTA_OR_MARK_RDNA4, 24: INST_RDNA4,
 }
 
@@ -371,136 +402,145 @@ PACKET_TYPES_RDNA4: dict[int, type[PacketType]] = {
 # CDNA PACKET TYPE DEFINITIONS
 # ═══════════════════════════════════════════════════════════════════════════════
 
-class CDNA_DELTA(PacketType):
-  """pkt_fmt=0: 16-bit timestamp delta packet"""
+class CDNA_MISC(PacketType):
+  """pkt_fmt=0: 16-bit (Misc)"""
   encoding = bits[3:0] == 0
-  delta = bits[11:4]      # (data >> 4) & 0xff
-  unk_0 = bits[12:12]     # (data >> 0xc) & 1
-  unk_1 = bits[15:13]     # (data >> 0xd)
+  delta = bits[11:4]
+  sh = bits[12:12]
+  misc_type = bits[15:13]
 
 class CDNA_TIMESTAMP(PacketType):
   """pkt_fmt=1: 64-bit timestamp packet (case 0x0)"""
   encoding = bits[3:0] == 1
-  unk_0 = bits[15:4]
+  _reserved = bits[15:4]
   timestamp = bits[63:16]   # stored as (data_word >> 0x10) in low 46 bits of local_58
 
-class CDNA_PKT_2(PacketType):
-  """pkt_fmt=2: 64-bit packet (case 0x4)"""
+class CDNA_REG(PacketType):
+  """pkt_fmt=2: 64-bit (Reg)"""
   encoding = bits[3:0] == 2
-  unk_0 = bits[6:5]       # (data >> 5) & 3
-  unk_1 = bits[7:7]       # (data >> 7) + 1 & 1
-  unk_padding = bits[63:8]
+  pipe = bits[6:5]
+  _me_raw = bits[8:7]
+  _reserved = bits[15:9]
+  regaddr = bits[31:16]
+  regdata = bits[63:32]
 
 class CDNA_WAVESTART(PacketType):
-  """pkt_fmt=3: 32-bit WAVESTART packet (case 0x8)"""
+  """type 3: 32-bit wave start (Wave/group_id)"""
   encoding = bits[3:0] == 3
-  unk_0 = bits[5:5]       # (data >> 5) & 1
-  unk_1 = bits[9:6]       # (data >> 6) & 0xf
-  wave = bits[13:10]      # (data >> 10) & 0xf
-  simd = bits[15:14]      # (data >> 0xe) & 3
-  cu = bits[17:16]        # (data >> 0x10) & 3
-  unk_5 = bits[19:18]     # (data >> 0x12) & 3
-  unk_6 = bits[28:22]     # (data >> 0x16) & 0x7f
-  unk_padding = bits[31:29]
+  sh = bits[5:5]
+  cu = bits[9:6]
+  wave = bits[13:10]
+  simd = bits[15:14]
+  pipe = bits[17:16]
+  me = bits[19:18]
+  _reserved = bits[21:20]
+  count = bits[28:22]
+  _padding = bits[31:29]
 
-class CDNA_PKT_4(PacketType):
-  """pkt_fmt=4: 16-bit packet (case 0xc, same as 0x8/0x14)"""
+class CDNA_WAVEALLOC(PacketType):
+  """pkt_fmt=4: 16-bit (Wave)"""
   encoding = bits[3:0] == 4
-  unk_0 = bits[5:5]       # (data_word >> 5) & 1
-  unk_1 = bits[9:6]       # (data_word >> 6) & 0xf
-  unk_2 = bits[13:10]     # (data_word >> 10) & 0xf
-  unk_3 = bits[15:14]     # (data_word >> 0xe)
+  sh = bits[5:5]
+  cu = bits[9:6]
+  wave = bits[13:10]
+  simd = bits[15:14]
 
-class CDNA_PKT_5(PacketType):
-  """pkt_fmt=5: 48-bit packet (case 0x10)"""
+class CDNA_REG_CS(PacketType):
+  """type 5: 48-bit register CS write (RegCs)"""
   encoding = bits[3:0] == 5
-  unk_0 = bits[6:5]       # (data >> 5) & 3
-  unk_1 = bits[7:7]       # (data >> 7) + 1 & 1
-  unk_2 = bits[15:9]      # (data >> 9) & 0x7f
-  unk_padding = bits[47:16]
+  pipe = bits[6:5]
+  _me_raw = bits[8:7]
+  regaddr = bits[15:9]
+  regdata = bits[47:16]
 
 class CDNA_WAVEEND(PacketType):
-  """pkt_fmt=6: 16-bit WAVEEND packet (case 0x14, same as 0x8/0xc)"""
+  """type 6: 16-bit wave end (group_id)"""
   encoding = bits[3:0] == 6
-  unk_0 = bits[5:5]       # (data_word >> 5) & 1
-  unk_1 = bits[9:6]       # (data_word >> 6) & 0xf
-  wave = bits[13:10]      # (data_word >> 10) & 0xf
-  simd = bits[15:14]      # (data_word >> 0xe)
-
-class CDNA_EXEC(PacketType):
-  """pkt_fmt=10: 16-bit EXEC packet (case 0x24)"""
-  encoding = bits[3:0] == 10
-  unk_0 = bits[8:5]       # (data_word >> 5) & 0xf
-  unk_1 = bits[10:9]      # (data_word >> 9) & 3
-  unk_2 = bits[15:11]     # (data_word >> 0xb)
-
-class CDNA_PKT_11(PacketType):
-  """pkt_fmt=11: 64-bit packet (case 0x28)"""
-  encoding = bits[3:0] == 11
-  unk_0 = bits[8:5]       # (data_word >> 5) & 0xf
-  unk_1 = bits[10:9]      # (data_word >> 9) & 3
-  unk_2 = bits[15:15]     # (data_word >> 0xf) & 1
-  unk_padding = bits[63:16]
+  sh = bits[5:5]
+  cu = bits[9:6]
+  wave = bits[13:10]
+  simd = bits[15:14]
 
 class CDNA_INST(PacketType):
-  """pkt_fmt=13: 32-bit INST packet (case 0x30)"""
+  """pkt_fmt=10: 16-bit (MsgInst)"""
+  encoding = bits[3:0] == 10
+  wave = bits[8:5]
+  simd = bits[10:9]
+  op = bits[15:11].enum(InstOpCDNA)
+
+class CDNA_INST_PC(PacketType):
+  """pkt_fmt=11: 64-bit (MsgInstPc)"""
+  encoding = bits[3:0] == 11
+  wave = bits[8:5]
+  simd = bits[10:9]
+  _reserved = bits[14:11]
+  err = bits[15:15]
+  pc = bits[63:16]
+
+class CDNA_ISSUE(PacketType):
+  """pkt_fmt=13: 32-bit (Issue)"""
   encoding = bits[3:0] == 13
-  unk_0 = bits[6:5]       # (data >> 5) & 3
-  unk_1 = bits[9:8]       # (data >> 8) & 3
-  unk_2 = bits[11:10]     # (data >> 10) & 3
-  unk_3 = bits[13:12]     # (data >> 0xc) & 3
-  unk_4 = bits[15:14]     # (data >> 0xe) & 3
-  unk_5 = bits[19:18]     # (data >> 0x12) & 3
-  unk_6 = bits[21:20]     # (data >> 0x14) & 3
-  unk_7 = bits[23:22]     # (data >> 0x16) & 3
-  unk_8 = bits[25:24]     # (data >> 0x18) & 3
-  unk_9 = bits[27:26]     # (data >> 0x1a) & 3
-  unk_padding = bits[31:28]
+  simd = bits[6:5]
+  _gap = bits[7:7]
+  inst0 = bits[9:8]
+  inst1 = bits[11:10]
+  inst2 = bits[13:12]
+  inst3 = bits[15:14]
+  inst4 = bits[17:16]
+  inst5 = bits[19:18]
+  inst6 = bits[21:20]
+  inst7 = bits[23:22]
+  inst8 = bits[25:24]
+  inst9 = bits[27:26]
+  _padding = bits[31:28]
 
-class CDNA_PKT_14(PacketType):
-  """pkt_fmt=14: 64-bit packet (case 0x34)"""
+class CDNA_PERF(PacketType):
+  """pkt_fmt=14: 64-bit (MsgPerf)"""
   encoding = bits[3:0] == 14
-  unk_0 = bits[5:5]       # (data >> 5) & 1
-  unk_1 = bits[9:6]       # (data >> 6) & 0xf
-  unk_2 = bits[11:10]     # (data >> 10) & 3
-  unk_3 = bits[24:12]     # (data >> 0xc) & 0x1fff
-  unk_4 = bits[37:25]     # (data >> 0x19) & 0x1fff
-  unk_5 = bits[50:38]     # (data >> 0x26) & 0x1fff
-  unk_6 = bits[51:51]     # (data >> 0x33) & 1
-  unk_padding = bits[63:52]
+  sh = bits[5:5]
+  cu = bits[9:6]
+  cntr_bank = bits[11:10]
+  cntr0 = bits[24:12]
+  cntr1 = bits[37:25]
+  cntr2 = bits[50:38]
+  cntr3 = bits[63:51]
 
-class CDNA_PKT_7(PacketType):
-  """pkt_fmt=7: 16-bit packet"""
+class CDNA_EVENT(PacketType):
+  """pkt_fmt=7: 16-bit"""
   encoding = bits[3:0] == 7
-  unk_padding = bits[15:4]
+  _reserved = bits[15:4]
 
-class CDNA_PKT_8(PacketType):
-  """pkt_fmt=8: 16-bit packet"""
+class CDNA_EVENT_CS(PacketType):
+  """pkt_fmt=8: 16-bit"""
   encoding = bits[3:0] == 8
-  unk_padding = bits[15:4]
+  _reserved = bits[15:4]
 
-class CDNA_PKT_9(PacketType):
-  """pkt_fmt=9: 16-bit packet"""
+class CDNA_EVENT_GFX1(PacketType):
+  """pkt_fmt=9: 16-bit"""
   encoding = bits[3:0] == 9
-  unk_padding = bits[15:4]
+  _reserved = bits[15:4]
 
-class CDNA_PKT_12(PacketType):
-  """pkt_fmt=12: 48-bit packet"""
+class CDNA_USERDATA(PacketType):
+  """pkt_fmt=12: 48-bit (UserData)"""
   encoding = bits[3:0] == 12
-  unk_padding = bits[47:4]
+  sh = bits[5:5]
+  cu = bits[9:6]
+  wave = bits[13:10]
+  simd = bits[15:14]
+  data = bits[47:16]
 
-class CDNA_PKT_15(PacketType):
-  """pkt_fmt=15: 48-bit packet (case 0x38, same as 0x10)"""
+class CDNA_REG_CS_PRIV(PacketType):
+  """pkt_fmt=15: 48-bit (RegCs)"""
   encoding = bits[3:0] == 15
-  unk_0 = bits[6:5]       # (data >> 5) & 3
-  unk_1 = bits[7:7]       # (data >> 7) + 1 & 1
-  unk_2 = bits[15:9]      # (data >> 9) & 0x7f
-  unk_padding = bits[47:16]
+  pipe = bits[6:5]
+  _me_raw = bits[8:7]
+  regaddr = bits[15:9]
+  regdata = bits[47:16]
 
 PACKET_TYPES_CDNA: dict[int, type[PacketType]] = {
-  0: CDNA_DELTA, 1: CDNA_TIMESTAMP, 2: CDNA_PKT_2, 3: CDNA_WAVESTART, 4: CDNA_PKT_4, 5: CDNA_PKT_5, 6: CDNA_WAVEEND,
-  7: CDNA_PKT_7, 8: CDNA_PKT_8, 9: CDNA_PKT_9, 10: CDNA_EXEC, 11: CDNA_PKT_11, 12: CDNA_PKT_12,
-  13: CDNA_INST, 14: CDNA_PKT_14, 15: CDNA_PKT_15,
+  0: CDNA_MISC, 1: CDNA_TIMESTAMP, 2: CDNA_REG, 3: CDNA_WAVESTART, 4: CDNA_WAVEALLOC, 5: CDNA_REG_CS, 6: CDNA_WAVEEND,
+  7: CDNA_EVENT, 8: CDNA_EVENT_CS, 9: CDNA_EVENT_GFX1, 10: CDNA_INST, 11: CDNA_INST_PC, 12: CDNA_USERDATA,
+  13: CDNA_ISSUE, 14: CDNA_PERF, 15: CDNA_REG_CS_PRIV, 16: LAYOUT_HEADER,
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -512,8 +552,8 @@ def _build_decode_tables(packet_types: dict[int, type[PacketType]]) -> tuple[dic
   sorted_types = sorted(packet_types.items(), key=lambda x: (-bin(x[1].encoding.mask).count('1'), x[0] == 16))
   state_table = bytes(next((op for op, cls in sorted_types if (b & cls.encoding.mask) == cls.encoding.default), 16) for b in range(256))
   # Build decode info: opcode -> (pkt_cls, nib_count, delta_lo, delta_mask, special_case)
-  # special_case: 0=none, 1=TS_DELTA_OR_MARK (check is_marker), 2=TS_DELTA_SHORT (add 8), 3=CDNA_DELTA (*4), 4=CDNA_TIMESTAMP (absolute)
-  _special = {TS_DELTA_OR_MARK: 1, TS_DELTA_OR_MARK_RDNA4: 1, TS_DELTA_SHORT: 2, CDNA_DELTA: 3, CDNA_TIMESTAMP: 4}
+  # special_case: 0=none, 1=TS_DELTA_OR_MARK (check is_marker), 2=TS_DELTA_SHORT (add 8), 3=CDNA_MISC (*4), 4=CDNA_TIMESTAMP (absolute)
+  _special = {TS_DELTA_OR_MARK: 1, TS_DELTA_OR_MARK_RDNA4: 1, TS_DELTA_SHORT: 2, CDNA_MISC: 3, CDNA_TIMESTAMP: 4}
   decode_info = {}
   for opcode, pkt_cls in packet_types.items():
     delta_field = getattr(pkt_cls, 'delta', None)
@@ -585,23 +625,20 @@ def map_insts(data:bytes, lib:bytes, target:str) -> Iterator[tuple[PacketType, I
   # map pcs to insts
   from tinygrad.viz.serve import amd_decode
   pc_map = amd_decode(lib, target)
-
   wave_pc:dict[int, int] = {}
   # only processing packets on one [CU, SIMD] unit
   def simd_select(p) -> bool: return getattr(p, "cu", 0) == 0 and getattr(p, "simd", 0) == 0
   for p in decode(data):
     if not simd_select(p): continue
-    if isinstance(p, (WAVESTART, WAVESTART_RDNA4)):
+    if isinstance(p, (WAVESTART, WAVESTART_RDNA4, CDNA_WAVESTART)):
       assert p.wave not in wave_pc, "only one inflight wave per unit"
       wave_pc[p.wave] = next(iter(pc_map))
-      continue
-    if isinstance(p, WAVEEND):
+    elif isinstance(p, WAVEEND):
       pc = wave_pc.pop(p.wave)
       yield (p, InstructionInfo(pc, p.wave, s_endpgm()))
-      continue
     # skip OTHER_ instructions, they don't belong to this unit
-    if isinstance(p, (INST, INST_RDNA4)) and p.op.name.startswith("OTHER_"): continue
-    if isinstance(p, IMMEDIATE_MASK):
+    elif isinstance(p, (INST, INST_RDNA4)) and p.op.name.startswith("OTHER_"): pass
+    elif isinstance(p, IMMEDIATE_MASK):
       # immediate mask may yield multiple times per packet
       for wave in range(16):
         if p.mask & (1 << wave):
@@ -610,30 +647,24 @@ def map_insts(data:bytes, lib:bytes, target:str) -> Iterator[tuple[PacketType, I
           assert type(inst).__name__ == "SOPP", f"IMMEDIATE_MASK packet must map to SOPP, got {inst}"
           wave_pc[wave] += inst.size()
           yield (p, InstructionInfo(pc, wave, inst))
-      continue
-    if isinstance(p, (VALUINST, INST, INST_RDNA4, IMMEDIATE)):
+    elif isinstance(p, (VALUINST, INST, INST_RDNA4, IMMEDIATE)):
       inst = pc_map[pc:=wave_pc[p.wave]]
-      # s_delay_alu doesn't get a packet?
+      # s_delay_alu and s_wait_alu instructions are skipped
       while (inst_op:=getattr(inst, 'op_name', '')) in {"S_DELAY_ALU", "S_WAIT_ALU"}:
         wave_pc[p.wave] += inst.size()
         inst = pc_map[pc:=wave_pc[p.wave]]
-      # identify a branch instruction, only used for asserts
-      branch_inst = inst if "BRANCH" in inst_op else None
-      if branch_inst is not None:
-        assert isinstance(p, (INST, INST_RDNA4)) and p.op.name in {"JUMP_NO", "JUMP", "NEXT"}, f"branch can only be folowed by JUMP, got {p}"
+      # assert branch always has a JUMP packet
+      if "BRANCH" in inst_op and not (isinstance(p, (INST, INST_RDNA4)) and p.op.name.startswith("JUMP")):
+        raise AssertionError(f"{inst_op} can only be followed by JUMP, got {p}")
       # JUMP handling
-      if (isinstance(p, INST) and p.op is InstOp.JUMP) or (isinstance(p, INST_RDNA4) and branch_inst is not None and p.flag3):
-        simm16 = getattr(branch_inst, 'simm16')
-        assert branch_inst is not None and simm16 is not None, f"JUMP packet must map to a branch instruction, got {inst}"
-        x = simm16 & 0xffff
-        wave_pc[p.wave] += branch_inst.size() + (x - 0x10000 if x & 0x8000 else x)*4
+      if isinstance(p, (INST, INST_RDNA4)) and p.op in {InstOp.JUMP, InstOpRDNA4.JUMP}:
+        x = getattr(inst, 'simm16') & 0xffff
+        wave_pc[p.wave] += inst.size() + (x - 0x10000 if x & 0x8000 else x)*4
       else:
-        if branch_inst is not None: assert inst_op != "S_BRANCH", f"S_BRANCH must have a JUMP packet, got {p}"
         wave_pc[p.wave] += inst.size()
       yield (p, InstructionInfo(pc, p.wave, inst))
-      continue
     # for all other packets (VMEMEXEC, ALUEXEC, etc.), yield with None
-    yield (p, None)
+    else: yield (p, None)
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # PRINTER
@@ -651,7 +682,7 @@ def format_packet(p) -> str:
   name = type(p).__name__
   if isinstance(p, (INST, INST_RDNA4)):
     op_name = p.op.name if isinstance(p.op, (InstOp, InstOpRDNA4)) else f"0x{p.op:02x}"
-    fields = f"wave={p.wave} op={op_name}" + (" flag1" if p.flag1 else "") + (" flag2" if p.flag2 else "")
+    fields = f"wave={p.wave} op={op_name}" + ((" flag1" if p.flag1 else "") + (" flag2" if p.flag2 else "") if isinstance(p, INST) else "")
   elif isinstance(p, VALUINST): fields = f"wave={p.wave}" + (" flag" if p.flag else "")
   elif isinstance(p, ALUEXEC): fields = f"src={p.src.name if isinstance(p.src, AluSrc) else p.src}"
   elif isinstance(p, VMEMEXEC): fields = f"src={p.src.name if isinstance(p.src, MemSrc) else p.src}"
@@ -673,10 +704,8 @@ def print_packets(packets) -> None:
 
 if __name__ == "__main__":
   import sys, pickle
-  if len(sys.argv) < 2:
-    print("Usage: python sqtt.py <pkl_file>")
-    sys.exit(1)
-  with open(sys.argv[1], "rb") as f:
+  from tinygrad.helpers import temp
+  with open(temp("profile.pkl", append_user=True) if len(sys.argv) < 2 else sys.argv[1], "rb") as f:
     data = pickle.load(f)
   prg_events = {e.tag: e for e in data if type(e).__name__ == "ProfileProgramEvent" and e.tag is not None}
   sqtt_events = [e for e in data if type(e).__name__ == "ProfileSQTTEvent"]
