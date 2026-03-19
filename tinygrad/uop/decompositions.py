@@ -2,9 +2,9 @@ from typing import Callable
 import math, functools
 from tinygrad.dtype import dtypes, DType, promo_lattice, truncate
 from tinygrad.device import is_dtype_supported
-from tinygrad.helpers import flatten, polyN
+from tinygrad.helpers import flatten, polyN, EMULATED_DTYPES
 from tinygrad.uop import GroupOp
-from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher
+from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher, graph_rewrite
 
 TRANSCENDENTAL_DTYPES = (dtypes.float16, dtypes.float32, dtypes.float64)
 
@@ -529,4 +529,16 @@ pm_float_decomp = PatternMatcher([
    st.replace(src=(idx, val.replace(dtype=f2f_dt[ctx[0]]))) if val.dtype == ctx[0] and idx.tag == ctx[0] else None),
   (UPat(Ops.STORE, src=(UPat.var("idx"), UPat.var("val", dtypes.floats)), name='st'), lambda ctx,st,idx,val:
    f2f_store(st, idx, val, *ctx) if val.dtype.scalar() == ctx[1] and (idx:=idx.src[0] if idx.op == Ops.CAST else idx).tag == ctx[0] else None),
+])
+
+def do_dtype_decomps(sink:UOp, ctx:str) -> PatternMatcher:
+  def _should_emulate(dt): return not is_dtype_supported(dt, ctx) or dt in EMULATED_DTYPES.tolist(dtypes)
+  if _should_emulate(dtypes.long): sink = graph_rewrite(sink, pm_long_decomp, name="decomp long -> int", bottom_up=True)
+  for fr in filter(_should_emulate, dtypes.fp8s+(dtypes.bfloat16, dtypes.half)):
+    to = dtypes.half if is_dtype_supported(dtypes.half, ctx) and fr in dtypes.fp8s else dtypes.float
+    sink = graph_rewrite(sink, pm_float_decomp, name=f"decomp {fr} -> {to}", ctx=(fr, to), bottom_up=True)
+  return sink
+
+pm_dtype_decomps = PatternMatcher([
+  (UPat(Ops.SINK, name="sink"), do_dtype_decomps),
 ])
