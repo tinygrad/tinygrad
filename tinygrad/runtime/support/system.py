@@ -314,7 +314,9 @@ class RemotePCIDevice(PCIDevice):
     host, port = host_port[0], int(host_port[1]) if len(host_port) > 1 else 6667
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+    sock.settimeout(getenv("REMOTE_TIMEOUT", 3))
     sock.connect((host, port))
+    sock.settimeout(None)
     return sock
 
   @staticmethod
