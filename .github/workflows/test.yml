@@ -371,6 +371,7 @@ jobs:
           opencl: 'true'
       - name: Test CL IMAGE=1 ops
         run: |
+          CL=1 IMAGE=1 DEBUG=4 python -X faulthandler -m pytest test/backend/test_ops.py::TestOps::test_negative_padding_conv2d
           CL=1 IMAGE=1 python -m pytest -n=auto test/backend/test_ops.py --durations=20
         # TODO: training is broken
         # CL=1 IMAGE=1 python test/models/test_end2end.py TestEnd2End.test_linear_mnist
