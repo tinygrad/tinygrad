@@ -58,6 +58,7 @@ def compile(onnx_file):
   if (allowed_gated_read_image:=getenv("ALLOWED_GATED_READ_IMAGE", -1)) != -1:
     assert gated_read_image_count == allowed_gated_read_image, f"different gated read_image! {gated_read_image_count=}, {allowed_gated_read_image=}"
 
+  run_onnx_jit.captured.replan_buffers_memory_layout()
   with open(OUTPUT, "wb") as f:
     pickle.dump(run_onnx_jit, f)
   mdl_sz = os.path.getsize(onnx_file)
