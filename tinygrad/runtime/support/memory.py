@@ -235,8 +235,7 @@ class MemoryManager:
 
   @functools.cache  # pylint: disable=method-cache-max-size-none
   def _identity_va(self, uncached:bool) -> int:
-    va = self.va_allocator.alloc(self.vram_size, self.vram_size)
-    self.map_range(va, self.vram_size, [(0, self.vram_size)], AddrSpace.PHYS, uncached=uncached)
+    self.map_range(va:=self.alloc_vaddr(self.vram_size, self.vram_size), self.vram_size, [(0, self.vram_size)], AddrSpace.PHYS, uncached=uncached)
     return va
 
   def valloc(self, size:int, align=0x1000, uncached=False, contiguous=False) -> VirtMapping:
