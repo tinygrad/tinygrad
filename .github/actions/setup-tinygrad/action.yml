@@ -279,6 +279,7 @@ runs:
       if: inputs.ocelot == 'true' && steps.cache-build-pr.outputs.cache-hit != 'true' && steps.cache-build.outputs.cache-hit != 'true'
       shell: bash
       run: |
+        sudo xcode-select -s /Applications/Xcode_16.2.app/Contents/Developer
         git clone --recurse-submodules https://github.com/gpuocelot/gpuocelot.git ${{ github.workspace }}/gpuocelot
         cd ${{ github.workspace }}/gpuocelot/ocelot
         git checkout b16039dc940dc6bc4ea0a98380495769ff35ed99
