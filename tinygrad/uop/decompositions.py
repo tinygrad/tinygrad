@@ -533,7 +533,7 @@ pm_float_decomp = PatternMatcher([
 
 def do_dtype_decomps(sink:UOp, ctx:tuple[set[DType], str]) -> UOp:
   def _should_emulate(dt): return dt in EMULATED_DTYPES.tolist(dtypes) or not is_dtype_supported(dt, ctx[1])
-  for fr in filter(_should_emulate, ctx[0]):
+  for fr in sorted(filter(_should_emulate, ctx[0])):
     if fr in dtypes.floats:
       to = dtypes.half if not _should_emulate(dtypes.half) and fr in dtypes.fp8s else dtypes.float
       sink = graph_rewrite(sink, pm_float_decomp, name=f"decomp {fr} -> {to}", ctx=(fr, to), bottom_up=True)
