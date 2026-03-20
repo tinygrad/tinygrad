@@ -16,15 +16,14 @@ use_wmma = getenv("WMMA")
 if use_wmma:
   WMMA_M, WMMA_N, WMMA_K = 16, 16, 16
   WAVES_M, WAVES_N = 2, 2
-  LANES_PER_WAVE_M, LANES_PER_WAVE_N = 2, 16
   TM = BLOCK_M // (WAVES_M * WMMA_M)  # 4
   TN = BLOCK_N // (WAVES_N * WMMA_N)  # 4
 else:
   UNROLL_M, UNROLL_N = 4, 4
   WAVES_M, WAVES_N = 4, 1
   LANES_PER_WAVE_M, LANES_PER_WAVE_N = 4, 8
-  TM = BLOCK_M // (WAVES_M * LANES_PER_WAVE_M * UNROLL_M)  # 2
-  TN = BLOCK_N // (WAVES_N * LANES_PER_WAVE_N * UNROLL_N)  # 4
+  TM = BLOCK_M // (WAVES_M * LANES_PER_WAVE_M)  # 8
+  TN = BLOCK_N // (WAVES_N * LANES_PER_WAVE_N)  # 16
 
 # WARP_SIZE * total waves
 THREADS_PER_BLOCK = WARP_SIZE * WAVES_M * WAVES_N
@@ -56,7 +55,6 @@ def block_128x128_gemm(c:UOp, a:UOp, b:UOp) -> UOp:
   lane_m, lane_n = lane // LANES_PER_WAVE_N, lane % LANES_PER_WAVE_N
 
   if use_wmma:
-
     # accumulator
     acc = UOp.placeholder((TM, TN), dtypes.float.vec(8), slot=2, addrspace=AddrSpace.REG)
     zi = UOp.range(TM, 200); zj = UOp.range(TN, 201)
@@ -88,28 +86,27 @@ def block_128x128_gemm(c:UOp, a:UOp, b:UOp) -> UOp:
     stores = [c[wave_m, st_m, e*2 + lane_m, wave_n, st_n, lane_n].store(acc[st_m, st_n].gep(e)) for e in range(8)]
     return UOp.group(*stores).end(st_m, st_n, tid)
   else:
-
     # accumulator
-    acc = UOp.placeholder((TM*UNROLL_M, TN*UNROLL_N), dtypes.float, slot=2, addrspace=AddrSpace.REG)
+    acc = UOp.placeholder((TM, TN), dtypes.float, slot=2, addrspace=AddrSpace.REG)
     acc = acc.after(acc.store(UOp.const(dtypes.float, 0).reshape((1,)*len(acc.shape)).expand(acc.shape)))
 
     # registers for LOCAL -> REG
-    a_frag = UOp.placeholder((TM, UNROLL_M), dtypes.float, slot=0, addrspace=AddrSpace.REG)
-    b_frag = UOp.placeholder((TN, UNROLL_N), dtypes.float, slot=1, addrspace=AddrSpace.REG)
+    a_frag = UOp.placeholder((TM//UNROLL_M, UNROLL_M), dtypes.float, slot=0, addrspace=AddrSpace.REG)
+    b_frag = UOp.placeholder((TN//UNROLL_N, UNROLL_N), dtypes.float, slot=1, addrspace=AddrSpace.REG)
 
     k = UOp.range(BLOCK_K, 4, AxisType.REDUCE)
-    a_frag = a_frag.after(a_frag.store(A_local[k].reshape(WAVES_M, TM, LANES_PER_WAVE_M, UNROLL_M)[wave_m, :, lane_m, :]))
-    b_frag = b_frag.after(b_frag.store(B_local[k].reshape(WAVES_N, TN, LANES_PER_WAVE_N, UNROLL_N)[wave_n, :, lane_n, :]))
+    a_frag = a_frag.after(a_frag.store(A_local[k].reshape(WAVES_M, TM//UNROLL_M, LANES_PER_WAVE_M, UNROLL_M)[wave_m, :, lane_m, :]))
+    b_frag = b_frag.after(b_frag.store(B_local[k].reshape(WAVES_N, TN//UNROLL_N, LANES_PER_WAVE_N, UNROLL_N)[wave_n, :, lane_n, :]))
 
     # FMA
-    a_frag = a_frag.reshape(TM*UNROLL_M, 1).expand(TM*UNROLL_M, TN*UNROLL_N)
-    b_frag = b_frag.reshape(1, TN*UNROLL_N).expand(TM*UNROLL_M, TN*UNROLL_N)
+    a_frag = a_frag.reshape(TM, 1).expand(TM, TN)
+    b_frag = b_frag.reshape(1, TN).expand(TM, TN)
     acc = acc.after(acc.store(acc.after(k) + (a_frag * b_frag)).end(k).barrier().end(k_tile))
 
     # store back to c
-    c = c.reshape(WAVES_M, TM, LANES_PER_WAVE_M, UNROLL_M,
-                  WAVES_N, TN, LANES_PER_WAVE_N, UNROLL_N)
-    c = c.permute((0,4,2,6, 1,3,5,7)).reshape(THREADS_PER_BLOCK, TM*UNROLL_M, TN*UNROLL_N)
+    c = c.reshape(WAVES_M, TM//UNROLL_M, LANES_PER_WAVE_M, UNROLL_M,
+                  WAVES_N, TN//UNROLL_N, LANES_PER_WAVE_N, UNROLL_N)
+    c = c.permute((0,4,2,6, 1,3,5,7)).reshape(THREADS_PER_BLOCK, TM, TN)
     return c[tid].store(acc).end(tid)
 
 def amd_copy_matmul(c:UOp, a:UOp, b:UOp) -> UOp:
