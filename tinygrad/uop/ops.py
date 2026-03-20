@@ -343,6 +343,9 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
   def ended_ranges(self) -> tuple[UOp, ...]:
     if self.op in range_start: return self.src[range_start[self.op]:]
     if self.op is Ops.AFTER: return tuple(flatten([x.ended_ranges for x in self.src[1:]]))
+    if self.op is Ops.CONTRACT:
+      contract_rng_ids = {rng_id for rng_id, _ in self.arg}
+      return tuple(r for r in self.src[0].ranges if r.op is Ops.RANGE and r.arg[0] in contract_rng_ids)
     return ()
 
   # determine what ranges this is in
@@ -1452,6 +1455,9 @@ pm_lower_index_dtype = PatternMatcher([
    lambda buf,idx,valid: buf.index(idx, valid, ptr=True)),
   (UPat((Ops.SINK, Ops.NOOP, Ops.END), name="n"),
    lambda n: n.replace(src=tuple(s.src[0] if s.op is Ops.CAST and s.dtype == dtypes.weakint else s for s in n.src))),
+  # vectorized indexes (ie. images) must be int
+  (UPat(Ops.INDEX, src=(UPat(), UPat(Ops.VECTORIZE, dtypes.long, name="vec")), allow_any_len=True, name="idx"),
+   lambda idx,vec: idx.replace(src=(idx.src[0], UOp.vectorize(*(u.cast(dtypes.int) for u in vec.src)), *idx.src[2:])))
 ])
 def _index_to_concrete_int(u:UOp) -> UOp: return graph_rewrite(u.sink(), pm_lower_index_dtype).src[0]
 

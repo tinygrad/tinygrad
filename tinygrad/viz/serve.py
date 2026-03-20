@@ -341,7 +341,7 @@ def load_amd_counters(ctxs:list[dict], profile:list[ProfileEvent]) -> None:
 def sqtt_timeline(data:bytes, lib:bytes, target:str) -> list[ProfileEvent]:
   from tinygrad.renderer.amd.sqtt import (map_insts, InstructionInfo, PacketType, INST, InstOp, VALUINST, IMMEDIATE, IMMEDIATE_MASK, VMEMEXEC,
                                           ALUEXEC, INST_RDNA4, InstOpRDNA4, TS_DELTA_OR_MARK, TS_DELTA_OR_MARK_RDNA4, CDNA_INST, InstOpCDNA,
-                                          WAVEEND, CDNA_WAVEEND)
+                                          WAVEEND, CDNA_WAVEEND, WAVERDY)
   ret:list[ProfileEvent] = []
   row_ends:dict[str, Decimal] = {}
   curr_barrier:dict[str, ProfileRangeEvent] = {}
@@ -372,6 +372,11 @@ def sqtt_timeline(data:bytes, lib:bytes, target:str) -> list[ProfileEvent]:
       add(name, p, info=info)
     if isinstance(p, (VALUINST, IMMEDIATE, WAVEEND, CDNA_WAVEEND)): add(p.__class__.__name__, p, info=info)
     if isinstance(p, IMMEDIATE_MASK): add("IMMEDIATE", p, wave=unwrap(info).wave, info=info)
+    if isinstance(p, WAVERDY):
+      for wave in range(16):
+        if p.mask & (1 << wave):
+          row = f"WAVE:{wave}"
+          if row in curr_barrier: add("WAVERDY", p, wave=wave)
     if isinstance(p, (VMEMEXEC, ALUEXEC)):
       name = str(p.src).split('.')[1]
       if name == "VALU_SALU":

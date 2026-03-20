@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from tinygrad.dtype import dtypes, ImageDType, DType, AddrSpace, Invalid, PtrDType
 from tinygrad.uop.ops import UOp, Ops, UPat, PatternMatcher, GroupOp, identity_element
 from tinygrad.uop.symbolic import uop_given_valid, parse_valid, invalid_gate
-from tinygrad.helpers import getenv, flatten, AMX, prod, IMAGE
+from tinygrad.helpers import getenv, flatten, AMX, prod
 from tinygrad.renderer import Renderer
 
 # ***** image load valid simplification *****
@@ -63,7 +63,7 @@ load_store_indexing = PatternMatcher([
 
 def expand_index(buf:UOp, vec:UOp):
   # determine optimal image shapes
-  if IMAGE == 1 and isinstance(dt:=buf.dtype, ImageDType):
+  if isinstance(dt:=buf.dtype, ImageDType):
     x, valid = vec.get_idx().gep(0), vec.get_valid().gep(0)
     # search for dims that drop the most valid statements
     best_drop, cands = -1, []
@@ -202,24 +202,14 @@ def get_image_idx(idx:UOp, width:int):
 
 def image_fixup(ls:UOp):
   # normal image load or store, with the CAST from expand_index
-  if ls.src[0].op is Ops.CAST and isinstance(image_dtype:=ls.src[0].src[0].dtype, ImageDType):
+  if isinstance(dt:=ls.src[0].src[0].dtype, ImageDType) and ls.src[0].op is Ops.CAST:
     assert ls.src[0].dtype.count == 4, "image must be casted to 4"
-    idx = get_image_idx(ls.src[0].src[0], image_dtype.shape[1])
-    return ls.replace(src=(idx,)+ls.src[1:])
+    return ls.replace(src=(get_image_idx(ls.src[0].src[0], dt.shape[1]),)+ls.src[1:])
 
-  # this is an unprocessed image without a cast, aka unfoldable image load. this doesn't work for stores
-  if isinstance(image_dtype:=ls.src[0].dtype, ImageDType) and ls.src[0].src[1].get_idx().dtype != dtypes.weakint.vec(2):
-    assert ls.op is Ops.LOAD, "if an image store isn't upcasted to 4, we can't store it"
-    x, idx = ls.src[0].src[1].get_idx(), get_image_idx(ls.src[0], image_dtype.shape[1])
-    vec_load = ls.replace(dtype=ls.dtype.vec(4), src=(idx,)+ls.src[1:])
-    # image pixels have 4 channels (.xyzw), select channel based on x % 4
-    x_mod_4 = x % 4
-    def sel(ret, i): return x_mod_4.ne(i).where(ret, vec_load.gep(i))
-    # if x is non-negative, x % 4 is in [0, 3] and we can skip NAN fallback
-    if x_mod_4.vmin >= 0: return functools.reduce(sel, range(int(x_mod_4.vmin)+1, int(x_mod_4.vmax)+1), vec_load.gep(int(x_mod_4.vmin)))
-    return functools.reduce(sel, range(4), ls.const_like(float('nan')))
-
-  return None
+  # this is an unprocessed image without a cast, we should just make it a buffer
+  if isinstance(dt, ImageDType) and (off:=ls.src[0].src[1]).get_idx().dtype != dtypes.weakint.vec(2):
+    idx = ls.src[0].src[0].replace(dtype=(new_dt:=dtypes.half if dt.itemsize == 2 else dtypes.float).ptr(dt.size)).index(off)
+    return ls.replace(src=(idx,), dtype=new_dt).cast(dtypes.float) if ls.op is Ops.LOAD else ls.replace(src=(idx, ls[1].cast(dtypes.float)))
 
 correct_load_store = PatternMatcher([
   # split LOAD/STORE
