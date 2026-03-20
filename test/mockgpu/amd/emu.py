@@ -7,7 +7,7 @@
 #   arg=4: scratch - per-lane scratch memory
 from __future__ import annotations
 import ctypes, functools, re, platform, subprocess, tempfile
-from typing import Callable
+from typing import Callable, cast
 
 # Set/restore DAZ+FTZ (denormals-are-zero + flush-to-zero) to match RDNA3 default float mode
 # x86: MXCSR bits DAZ(6)+FTZ(15), ARM64: FPCR bit FZ(24)
@@ -701,11 +701,12 @@ class _Ctx:
     for dest, val in assigns:
       # VGPR bit-slice assignment: VGPR[lane][reg][hi:lo] = (vgpr_idx, rhs_val, hi, lo[, cond]) -> read-modify-write
       if dest.startswith('VGPR[') and re.search(r'\[\d+:\d+\]', dest):
-        vgpr_idx, rhs_val, hi_bit, lo_bit = val[:4]
-        branch_cond = val[4] if len(val) > 4 else None  # optional condition from if/else branch
-        width = hi_bit - lo_bit + 1
+        val_tuple = cast(tuple[UOp, ...], val)  # type: ignore  # VGPR bit-slice values are tuples
+        vgpr_idx, rhs_val, hi_bit, lo_bit = val_tuple[:4]
+        branch_cond = val_tuple[4] if len(val_tuple) > 4 else None  # optional condition from if/else branch
+        width = cast(int, hi_bit) - cast(int, lo_bit) + 1
         old = self.vgpr.index(vgpr_idx.cast(dtypes.int), ptr=True).load()
-        new_val = _set_bits(old, _val_to_bits(rhs_val), width, lo_bit).cast(dtypes.uint32)
+        new_val = _set_bits(old, _val_to_bits(rhs_val), width, cast(int, lo_bit)).cast(dtypes.uint32)
         active = _lane_active(exec_mask, lane)
         if branch_cond is not None: active = active & _to_u32(branch_cond).ne(_c(0))
         raw_stores.append(('vgpr_direct', self.vgpr.index(vgpr_idx.cast(dtypes.int), active).store(new_val)))
@@ -716,13 +717,13 @@ class _Ctx:
         raw_stores.extend([('vcc', s) for s in self.wmask(_c(VCC_LO.offset), new_vcc)])
       elif dest.startswith('D0'):
         if (slice_match := re.match(r'D0\[(\d+)\s*:\s*(\d+)\]', dest)):
-          hi_bit, lo_bit = int(slice_match.group(1)), int(slice_match.group(2))
-          if hi_bit != 31 or lo_bit != 0:
-            width, slice_mask = hi_bit - lo_bit + 1, (1 << (hi_bit - lo_bit + 1)) - 1
+          d0_hi_bit, d0_lo_bit = int(slice_match.group(1)), int(slice_match.group(2))
+          if d0_hi_bit != 31 or d0_lo_bit != 0:
+            d0_width, slice_mask = d0_hi_bit - d0_lo_bit + 1, (1 << (d0_hi_bit - d0_lo_bit + 1)) - 1
             val_bits = val.bitcast(dtypes.uint16).cast(dtypes.uint32) if val.dtype == dtypes.half else \
                        val.cast(dtypes.uint32) if val.dtype in (dtypes.uint16, dtypes.int16) else \
                        val.cast(dtypes.uint32) & UOp.const(dtypes.uint32, slice_mask)
-            raw_stores.append(('vgpr_slice', (lo_bit, width, val_bits)))
+            raw_stores.append(('vgpr_slice', (d0_lo_bit, d0_width, val_bits)))
             continue
         # For integer ops with clamp, use pre-computed saturated value; for floats, clamp to [0,1]
         if int_saturate is not None: val = int_saturate
@@ -918,8 +919,10 @@ def _compile_sdwa(inst: irc.VOP1_SDWA | irc.VOP2_SDWA | irc.VOP2_SDWA_SDST | irc
   is_vopc = isinstance(inst, irc.VOPC_SDWA_SDST)
   exec_mask = ctx.rexec()
   # sd=1 means use sdst register, sd=0 means use VCC (for VOPC_SDWA_SDST and VOP2_SDWA_SDST)
-  has_sdst = isinstance(inst, (irc.VOP2_SDWA_SDST, irc.VOPC_SDWA_SDST))
-  sdst_off = _c(inst.sdst.offset) if has_sdst and getattr(inst, 'sd', 0) else _c(VCC_LO.offset)
+  if isinstance(inst, (irc.VOP2_SDWA_SDST, irc.VOPC_SDWA_SDST)):
+    sdst_off = _c(inst.sdst.offset) if getattr(inst, 'sd', False) else _c(VCC_LO.offset)
+  else:
+    sdst_off = _c(VCC_LO.offset)
   # Read SDWA fields (these are dynamic but shared across lanes)
   src0_sel = ctx.inst_field(type(inst).src0_sel)
   src0_sext = ctx.inst_field(type(inst).src0_sext)
@@ -948,7 +951,7 @@ def _compile_sdwa(inst: irc.VOP1_SDWA | irc.VOP2_SDWA | irc.VOP2_SDWA_SDST | irc
 
   # Non-VOPC path: VOP1_SDWA, VOP2_SDWA, VOP2_SDWA_SDST — uses lane loop
   lane = ctx.range()
-  vdst_reg = ctx.inst_field(type(inst).vdst)
+  vdst_reg = ctx.inst_field(type(inst).vdst)  # type: ignore[union-attr]
   s0_raw = ctx.rsgpr_dyn(vsrc0_reg) if inst.s0 else ctx.rvgpr_dyn(vsrc0_reg, lane)
   s0 = _sdwa_select(s0_raw, src0_sel, src0_sext)
   if isinstance(inst, (irc.VOP2_SDWA, irc.VOP2_SDWA_SDST)):
@@ -960,8 +963,8 @@ def _compile_sdwa(inst: irc.VOP1_SDWA | irc.VOP2_SDWA | irc.VOP2_SDWA_SDST | irc
   # dst_sel and dst_unused
   has_dst_sel = hasattr(type(inst), 'dst_sel')
   if has_dst_sel:
-    dst_sel = ctx.inst_field(type(inst).dst_sel)
-    dst_unused = ctx.inst_field(type(inst).dst_unused)
+    dst_sel = ctx.inst_field(type(inst).dst_sel)  # type: ignore[union-attr]
+    dst_unused = ctx.inst_field(type(inst).dst_unused)  # type: ignore[union-attr]
   srcs.update({'VCC': ctx.rmask(_c(VCC_LO.offset)), 'EXEC': exec_mask, 'SCC': ctx.rsgpr_dyn(_c(SCC.offset)),
                'laneId': lane, 'VDST': vdst_reg, 'ROUND_MODE': _c(0), 'ROUND_TOWARD_ZERO': _c(0),
                'ROUND_NEAREST_EVEN': _c(0), '_vgpr': ctx.vgpr, '_wave_size': ctx.wave_size,
@@ -1257,6 +1260,7 @@ def _compile_mfma(inst: irc.VOP3P, ctx: _Ctx) -> UOp:
   src1_is_vgpr = src1_off >= _c(256)
 
   m = _re.search(r'(\d+)X(\d+)X(\d+)', op_name)
+  if m is None: raise ValueError(f"could not parse MFMA dimensions from {op_name}")
   M, N, K = int(m.group(1)), int(m.group(2)), int(m.group(3))
 
   is_bf16 = 'BF16' in op_name
@@ -1546,7 +1550,7 @@ def _compile_vop3p(inst: ir3.VOP3P | ir4.VOP3P | irc.VOP3P, ctx: _Ctx) -> UOp:
   is_pk_f32 = 'PK' in op_name and 'F32' in op_name and 'MOV' not in op_name  # CDNA packed F32 ops
   is_pk_mov_b32 = 'PK_MOV_B32' in op_name  # CDNA packed MOV needs special handling
   do_cast = any(x in op_name for x in ('F16', 'F32', 'BF16')) and 'IU' not in op_name and not is_pk_f32
-  literal = ctx.inst_field(type(inst).literal) if hasattr(type(inst), 'literal') else None
+  literal = ctx.inst_field(type(inst).literal) if hasattr(type(inst), 'literal') else None  # type: ignore[union-attr]
   src0 = ctx.rsrc_dyn(ctx.inst_field(type(inst).src0), lane, 16, literal=literal, do_cast=do_cast)
   src1 = ctx.rsrc_dyn(ctx.inst_field(type(inst).src1), lane, 16, literal=literal, do_cast=do_cast)
   src2 = ctx.rsrc_dyn(ctx.inst_field(type(inst).src2), lane, 16, literal=literal, do_cast=do_cast)
