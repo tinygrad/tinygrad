@@ -134,9 +134,7 @@ class TransformerBlock:
     k = apply_rope(k, self.freqs_cis[start_pos:start_pos+T])
 
     # NOTE: we don't want to change self.cache_kv, the function API doesn't support this well
-    # TODO: we should not need this double after here, but it's wrong without it
-    cache_kv_slice = self.cache_kv[:, :, :, start_pos:start_pos+T, :].uop
-    assigned_kv = Tensor(self.cache_kv.uop.after(cache_kv_slice.after(cache_kv_slice.store(Tensor.stack(k, v).uop))))
+    assigned_kv = Tensor(self.cache_kv.uop.after(self.cache_kv[:, :, :, start_pos:start_pos+T, :].uop.store(Tensor.stack(k, v).uop)))
     k = assigned_kv[0, :, :, 0:start_pos+T, :]
     v = assigned_kv[1, :, :, 0:start_pos+T, :]
 
