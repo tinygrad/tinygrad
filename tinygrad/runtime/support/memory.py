@@ -183,8 +183,6 @@ class MemoryManager:
     self.pa_allocator = TLSFAllocator(vram_size - (off_sz:=self.boot_allocator.size + self.ptable_allocator.size), base=off_sz)
     self.root_page_table = pt_t(self.dev, self.palloc(0x1000, zero=not self.dev.smi_dev, boot=True), lv=first_lv)
 
-    self.gmmu = getenv("GMMU", 1)
-
   def _frag_size(self, va, sz, must_cover=True):
     """
     Calculate the tlb fragment size for a given virtual address and size.
@@ -234,14 +232,14 @@ class MemoryManager:
     return cls.va_allocator.alloc(size, max((1 << (size.bit_length() - 1)), align))
 
   @functools.cache  # pylint: disable=method-cache-max-size-none
-  def _identity_va(self, uncached:bool) -> int:
+  def identity_va(self, uncached:bool) -> int:
     self.map_range(va:=self.alloc_vaddr(self.vram_size, self.vram_size), self.vram_size, [(0, self.vram_size)], AddrSpace.PHYS, uncached=uncached)
     return va
 
   def valloc(self, size:int, align=0x1000, uncached=False, contiguous=False) -> VirtMapping:
-    if not self.gmmu:
+    if not getenv("GMMU", 1):
       paddr = self.palloc(size:=round_up(size, 0x1000), align, zero=False)
-      return VirtMapping(self._identity_va(uncached) + paddr, size, [(paddr, size)], aspace=AddrSpace.PHYS, uncached=uncached)
+      return VirtMapping(self.identity_va(uncached) + paddr, size, [(paddr, size)], aspace=AddrSpace.PHYS, uncached=uncached)
 
     # Alloc physical memory and map it to the virtual address
     va = self.alloc_vaddr(size:=round_up(size, 0x1000), align)
@@ -266,9 +264,8 @@ class MemoryManager:
     return self.map_range(va, size, paddrs, aspace=AddrSpace.PHYS, uncached=uncached)
 
   def vfree(self, vm:VirtMapping):
-    if not self.gmmu:
-      for paddr, _ in vm.paddrs: self.pfree(paddr)
-      return
+    if not getenv("GMMU", 1): return self.pfree(vm.paddrs[0][0])
+
     assert self.va_allocator is not None, "must be set"
     self.unmap_range(vm.va_addr, vm.size)
     self.va_allocator.free(vm.va_addr)
