@@ -54,6 +54,6 @@ class GradAccClipAdamW(Optimizer):
     return ret, [self.b1_t, self.b2_t] + self.m + self.v + [total_norm]
 
   def _apply_update(self, t:Tensor, up:Tensor) -> Tensor:
-    wd = self.wd if t.ndim >= 2 else 0.0
+    wd = self.wd if t.ndim >= 3 else 0.0
     up = up.shard_like(t) + self.lr.to(t.device) * wd * t.detach()
     return t.detach() - up.cast(t.dtype)
