@@ -8,25 +8,25 @@ K = getenv("K", N)
 
 WARP_SIZE = 32
 BLOCK_M, BLOCK_N = 128, 128
-
-use_wmma = getenv("WMMA", 0)
-
-BLOCK_K = getenv("BK", 16) if use_wmma else 8
-THREADS_PER_BLOCK = 128
+BLOCK_K = getenv("BK", 16)
 assert N % BLOCK_N == 0 and M % BLOCK_M == 0 and K % BLOCK_K == 0
+
+use_wmma = getenv("WMMA")
 
 if use_wmma:
   WMMA_M, WMMA_N, WMMA_K = 16, 16, 16
   WAVES_M, WAVES_N = 2, 2
-  TILES_PER_WAVE_M = BLOCK_M // (WAVES_M * WMMA_M)  # 4
-  TILES_PER_WAVE_N = BLOCK_N // (WAVES_N * WMMA_N)   # 4
+  REG_TILES_PER_WAVE_M = BLOCK_M // (WAVES_M * WMMA_M)  # 4
+  REG_TILES_PER_WAVE_N = BLOCK_N // (WAVES_N * WMMA_N)  # 4
 else:
   TM, TN = 4, 4
   LANES_PER_WAVE_M, LANES_PER_WAVE_N = 4, 8
-  WAVES_PER_BLOCK_M = THREADS_PER_BLOCK // WARP_SIZE  # 4
-  WAVES_PER_BLOCK_N = 1
-  REG_TILES_PER_WAVE_M = BLOCK_M // (WAVES_PER_BLOCK_M * LANES_PER_WAVE_M * TM)  # 2
-  REG_TILES_PER_WAVE_N = BLOCK_N // (WAVES_PER_BLOCK_N * LANES_PER_WAVE_N * TN)  # 4
+  WAVES_M, WAVES_N = 4, 1
+  REG_TILES_PER_WAVE_M = BLOCK_M // (WAVES_M * LANES_PER_WAVE_M * TM)  # 2
+  REG_TILES_PER_WAVE_N = BLOCK_N // (WAVES_N * LANES_PER_WAVE_N * TN)  # 4
+
+# WARP_SIZE * total waves
+THREADS_PER_BLOCK = WARP_SIZE * WAVES_M * WAVES_N
 
 def block_128x128_gemm(c:UOp, a:UOp, b:UOp) -> UOp:
   tid = UOp.range(THREADS_PER_BLOCK, 2, AxisType.WARP if use_wmma else AxisType.LOCAL)
@@ -56,16 +56,16 @@ def block_128x128_gemm(c:UOp, a:UOp, b:UOp) -> UOp:
     lane_row, lane_half = lane % WMMA_M, lane // WMMA_M
 
     # accumulator
-    acc = UOp.placeholder((TILES_PER_WAVE_M, TILES_PER_WAVE_N), dtypes.float.vec(8), slot=2, addrspace=AddrSpace.REG)
-    zi = UOp.range(TILES_PER_WAVE_M, 200); zj = UOp.range(TILES_PER_WAVE_N, 201)
+    acc = UOp.placeholder((REG_TILES_PER_WAVE_M, REG_TILES_PER_WAVE_N), dtypes.float.vec(8), slot=2, addrspace=AddrSpace.REG)
+    zi = UOp.range(REG_TILES_PER_WAVE_M, 200); zj = UOp.range(REG_TILES_PER_WAVE_N, 201)
     acc = acc[zi, zj].set(UOp.const(dtypes.float.vec(8), 0.0), end=(zi, zj))
 
-    A_tiles = A_local.reshape(WAVES_M, TILES_PER_WAVE_M, WMMA_M, BLOCK_K // WMMA_K, WMMA_K)
-    B_tiles = B_local.reshape(WAVES_N, TILES_PER_WAVE_N, WMMA_N, BLOCK_K // WMMA_K, WMMA_K)
+    A_tiles = A_local.reshape(WAVES_M, REG_TILES_PER_WAVE_M, WMMA_M, BLOCK_K // WMMA_K, WMMA_K)
+    B_tiles = B_local.reshape(WAVES_N, REG_TILES_PER_WAVE_N, WMMA_N, BLOCK_K // WMMA_K, WMMA_K)
 
     k = UOp.range(BLOCK_K // WMMA_K, 4, AxisType.REDUCE)
-    tile_m = UOp.range(TILES_PER_WAVE_M, 5, AxisType.LOOP)
-    tile_n = UOp.range(TILES_PER_WAVE_N, 6, AxisType.LOOP)
+    tile_m = UOp.range(REG_TILES_PER_WAVE_M, 5, AxisType.LOOP)
+    tile_n = UOp.range(REG_TILES_PER_WAVE_N, 6, AxisType.LOOP)
 
     k_upcast_a = UOp.range(WMMA_K, 301, axis_type=AxisType.UPCAST)
     a_frag = A_tiles[wave_m, tile_m, lane_row, k, k_upcast_a].contract(k_upcast_a)
@@ -80,13 +80,13 @@ def block_128x128_gemm(c:UOp, a:UOp, b:UOp) -> UOp:
     acc = acc.after(acc_store.end(tile_m, tile_n, k).barrier().end(k_tile))
 
     # store accumulator to output
-    c = c.reshape(WAVES_M, TILES_PER_WAVE_M, WMMA_M, WAVES_N, TILES_PER_WAVE_N, WMMA_N)
-    st_m = UOp.range(TILES_PER_WAVE_M, 9, AxisType.LOOP)
-    st_n = UOp.range(TILES_PER_WAVE_N, 10, AxisType.LOOP)
+    c = c.reshape(WAVES_M, REG_TILES_PER_WAVE_M, WMMA_M, WAVES_N, REG_TILES_PER_WAVE_N, WMMA_N)
+    st_m = UOp.range(REG_TILES_PER_WAVE_M, 9, AxisType.LOOP)
+    st_n = UOp.range(REG_TILES_PER_WAVE_N, 10, AxisType.LOOP)
     stores = [c[wave_m, st_m, e*2 + lane_half, wave_n, st_n, lane_row].store(acc[st_m, st_n].gep(e)) for e in range(8)]
     return UOp.group(*stores).end(st_m, st_n, tid)
   else:
-    wave_n, wave_m = warp % WAVES_PER_BLOCK_N, warp // WAVES_PER_BLOCK_N
+    wave_n, wave_m = warp % WAVES_N, warp // WAVES_N
     lane_n, lane_m = lane % LANES_PER_WAVE_N, lane // LANES_PER_WAVE_N
 
     # accumulator
@@ -98,8 +98,8 @@ def block_128x128_gemm(c:UOp, a:UOp, b:UOp) -> UOp:
     B_row = UOp.placeholder((REG_TILES_PER_WAVE_N, TN), dtypes.float, slot=1, addrspace=AddrSpace.REG)
 
     k = UOp.range(BLOCK_K, 4, AxisType.REDUCE)
-    A_col = A_col.after(A_col.store(A_local[k].reshape(WAVES_PER_BLOCK_M, REG_TILES_PER_WAVE_M, LANES_PER_WAVE_M, TM)[wave_m, :, lane_m, :]))
-    B_row = B_row.after(B_row.store(B_local[k].reshape(WAVES_PER_BLOCK_N, REG_TILES_PER_WAVE_N, LANES_PER_WAVE_N, TN)[wave_n, :, lane_n, :]))
+    A_col = A_col.after(A_col.store(A_local[k].reshape(WAVES_M, REG_TILES_PER_WAVE_M, LANES_PER_WAVE_M, TM)[wave_m, :, lane_m, :]))
+    B_row = B_row.after(B_row.store(B_local[k].reshape(WAVES_N, REG_TILES_PER_WAVE_N, LANES_PER_WAVE_N, TN)[wave_n, :, lane_n, :]))
 
     # FMA
     A_col = A_col.reshape(REG_TILES_PER_WAVE_M*TM, 1).expand(REG_TILES_PER_WAVE_M*TM, REG_TILES_PER_WAVE_N*TN)
@@ -107,8 +107,8 @@ def block_128x128_gemm(c:UOp, a:UOp, b:UOp) -> UOp:
     c_regs = c_regs.after(c_regs.store(c_regs.after(k) + (A_col * B_row)).end(k).barrier().end(k_tile))
 
     # store back to c
-    c = c.reshape(WAVES_PER_BLOCK_M, REG_TILES_PER_WAVE_M, LANES_PER_WAVE_M, TM,
-                  WAVES_PER_BLOCK_N, REG_TILES_PER_WAVE_N, LANES_PER_WAVE_N, TN)
+    c = c.reshape(WAVES_M, REG_TILES_PER_WAVE_M, LANES_PER_WAVE_M, TM,
+                  WAVES_N, REG_TILES_PER_WAVE_N, LANES_PER_WAVE_N, TN)
     c = c.permute((0,4,2,6, 1,3,5,7)).reshape(THREADS_PER_BLOCK, REG_TILES_PER_WAVE_M*TM, REG_TILES_PER_WAVE_N*TN)
     return c[tid].store(c_regs).end(tid)
 
