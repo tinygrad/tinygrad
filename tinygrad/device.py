@@ -351,7 +351,7 @@ def is_dtype_supported(dtype:DType, device:str|None=None) -> bool:
   # double can't be bitcast to anything without long support
   if dtype == dtypes.half:
     if device == "CL": return (not CI or BENCHMARKS) and not OSX
-    if device == "QCOM": return IMAGE and FLOAT16 # QCOM compiler is flaky with half
+    if device == "QCOM": return bool(IMAGE) and bool(FLOAT16) # QCOM compiler is flaky with half
     if device in ["CUDA", "NV"]: return (not CI or BENCHMARKS) or "CUDA" in EMULATE.value
     if device == "CPU" and CPU_LLVM: return OSX
     if device == "PYTHON": return sys.version_info >= (3, 12)
