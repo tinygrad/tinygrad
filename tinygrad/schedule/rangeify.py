@@ -175,6 +175,10 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
   (UPat(Ops.AFTER, src=(UPat(Ops.BITCAST, src=(UPat(name="target"),)), UPat(Ops.STORE, src=(UPat(Ops.BITCAST), UPat(name="src"))))),
    lambda target, src: target.after(target.store(src.bitcast(target.dtype)))),
 
+  # wrap STORE in inner AFTER when target is a view — gives the STORE its own ranges from the view shape
+  (UPat(Ops.AFTER, src=(UPat(name="buf"), UPat(Ops.STORE, src=(UPat(name="target"), UPat()))), name="after"),
+   lambda after, buf, target: after.replace(src=(buf, target.after(after.src[1]))) if target.shape != buf.shape else None),
+
   # make source contiguous if it has hazardous movement ops on the dest buffer
   (UPat(Ops.AFTER, src=(UPat(), UPat(Ops.STORE, src=(UPat(name="target"), UPat(name="src")))), name="after"), fix_store_after_hazard),
 
