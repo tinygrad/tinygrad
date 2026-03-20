@@ -134,7 +134,9 @@ class TransformerBlock:
     k = apply_rope(k, self.freqs_cis[start_pos:start_pos+T])
 
     # NOTE: we don't want to change self.cache_kv, the function API doesn't support this well
-    assigned_kv = Tensor(self.cache_kv.uop.after(self.cache_kv[:, :, :, start_pos:start_pos+T, :].uop.store(Tensor.stack(k, v).contiguous().uop)))
+    # TODO: we should not need this double after here, but it's wrong without it
+    cache_kv_slice = self.cache_kv[:, :, :, start_pos:start_pos+T, :].uop
+    assigned_kv = Tensor(self.cache_kv.uop.after(cache_kv_slice.after(cache_kv_slice.store(Tensor.stack(k, v).uop))))
     k = assigned_kv[0, :, :, 0:start_pos+T, :]
     v = assigned_kv[1, :, :, 0:start_pos+T, :]
 
@@ -163,19 +165,16 @@ class TransformerBlock:
     gated  = self.ffn_gate(h_norm).silu().contiguous() * self.ffn_up(h_norm)
     return h + self.ffn_down(gated)
 
-  def _layer(self, x:Tensor, start_pos:int|UOp):
-    # we pass in the weights implicitly so we unpack the GGUF on the fly
-    @function(precompile=True, allow_implicit=True)
-    def _run(x:Tensor, start_pos:int|UOp): return self._feed_forward(self._attention(x, start_pos)).contiguous()
-    return _run(x, start_pos)
-
   def __call__(self, x: Tensor, start_pos: int|UOp):
     if not hasattr(self, "cache_kv"):
       # TODO: how is the dtype of this determined?
       # NOTE: clone is used to promise the creation of a specific buffer
       self.cache_kv = Tensor.zeros(2, x.shape[0], self.n_kv_heads, self.max_context, self.head_dim, device=x.device).clone()
       self.freqs_cis = precompute_freqs_cis(self.head_dim, self.max_context, self.rope_theta)
-    return self._layer(x, start_pos)
+    # we pass in the weights implicitly so we unpack the GGUF on the fly
+    @function(precompile=True, allow_implicit=True)
+    def _run(x:Tensor, start_pos:int|UOp): return self._feed_forward(self._attention(x, start_pos)).contiguous()
+    return _run(x, start_pos)
 
 class Transformer:
   def __init__(self, *, num_blocks, dim, hidden_dim, n_heads, n_kv_heads, norm_eps, vocab_size, head_dim:int, rope_theta:float,
