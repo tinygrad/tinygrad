@@ -190,7 +190,7 @@ class Transformer:
     self.rollout_jit = TinyJit(self.forward)
 
   def forward(self, tokens:Tensor, start_pos:int|UOp) -> Tensor:
-    x = self.token_embd(tokens)                           # (B, T, D)
+    x = self.token_embd(tokens).float()                   # (B, T, D)
     for block in self.blk: x = block(x, start_pos)
     # TODO: add temperature
     return self.output(self.output_norm(x))[:, -1, :].softmax(-1, dtype="float").argmax(-1, keepdim=True)
