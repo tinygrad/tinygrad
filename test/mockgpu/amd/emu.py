@@ -337,7 +337,7 @@ def get_pcode(op) -> str:
     pcode = pcode.replace('VCC = 0x0LL', 'VCC.u64[laneId] = 0').replace('VCC = 0x1LL', 'VCC.u64[laneId] = 1')
   return pcode
 
-def parse_pcode(pcode: str, srcs: dict[str, UOp] | None = None) -> tuple[dict, list[tuple[str, UOp]]]:
+def parse_pcode(pcode: str, srcs: dict[str, UOp | int] | None = None) -> tuple[dict, list[tuple[str, UOp]]]:
   env: dict = srcs.copy() if srcs else {}
   assigns: list[tuple[str, UOp]] = []
   raw_lines = [l.strip().rstrip(';') for l in pcode.split('\n') if l.strip() and not l.strip().startswith('//')]
@@ -620,7 +620,7 @@ class _Ctx:
       elif dest.startswith('VCC'): stores.extend(self.wmask(_c(VCC_LO.offset), val))
     return stores
 
-  def compile_sop_pcode(self, op, srcs: dict[str, UOp], sdst_reg: UOp, sdst_size: int) -> UOp:
+  def compile_sop_pcode(self, op, srcs: dict[str, UOp | int], sdst_reg: UOp, sdst_size: int) -> UOp:
     """Compile a scalar instruction with dynamic destination register."""
     pcode = get_pcode(op)
     srcs.update({'VCC': self.rmask(_c(VCC_LO.offset)), 'EXEC': self.rexec(), 'SCC': self.rsgpr_dyn(_c(SCC.offset)),
@@ -653,7 +653,7 @@ class _Ctx:
       elif dest.startswith('VGPR['): stores.append(self.vgpr.index(val[0].cast(dtypes.int)).store(val[1].cast(dtypes.uint32)))
     return UOp.sink(*stores, *self.inc_pc())
 
-  def compile_vop_pcode(self, op, srcs: dict[str, UOp], lane: UOp, vdst_reg: UOp, exec_mask: UOp,
+  def compile_vop_pcode(self, op, srcs: dict[str, UOp | int], lane: UOp, vdst_reg: UOp, exec_mask: UOp,
                         opsel_dst_hi: bool | UOp = False, sdst_reg: int | None = None, clmp: int = 0,
                         src0_off: UOp | None = None) -> UOp:
     """Compile VOP instruction. Returns sink with stores and inc_pc."""
@@ -688,6 +688,7 @@ class _Ctx:
     if clmp and int_saturate is None and any(p in op.name for p in ('_SUB_U32', '_ADD_U32', '_SUB_U16', '_ADD_U16')):
       s0, s1 = srcs.get('S0'), srcs.get('S1')
       if s0 is not None and s1 is not None:
+        assert isinstance(s0, UOp) and isinstance(s1, UOp)
         a, b = (s1.cast(dtypes.uint32), s0.cast(dtypes.uint32)) if 'SUBREV' in op.name else (s0.cast(dtypes.uint32), s1.cast(dtypes.uint32))
         if 'SUB' in op.name:
           int_saturate = (a < b).where(_c(0), a - b)  # underflow -> 0
@@ -937,7 +938,7 @@ def _compile_sdwa(inst: irc.VOP1_SDWA | irc.VOP2_SDWA | irc.VOP2_SDWA_SDST | irc
       s0 = _sdwa_select(s0_raw, src0_sel, src0_sext)
       s1_raw = ctx.rsgpr_dyn(vsrc1_reg) if inst.s1 else ctx.rvgpr_dyn(vsrc1_reg, lc)
       s1 = _sdwa_select(s1_raw, src1_sel, src1_sext)
-      srcs: dict[str, UOp] = {'S0': s0, 'S1': s1, 'laneId': lc}
+      srcs = {'S0': s0, 'S1': s1, 'laneId': lc}
       for dest, val in parse_pcode(pcode, srcs)[1]:
         if '[laneId]' in dest and ('D0' in dest or 'EXEC' in dest): return val.cast(dtypes.uint32)
       return _c(0)
@@ -953,7 +954,7 @@ def _compile_sdwa(inst: irc.VOP1_SDWA | irc.VOP2_SDWA | irc.VOP2_SDWA_SDST | irc
   if isinstance(inst, (irc.VOP2_SDWA, irc.VOP2_SDWA_SDST)):
     s1_raw = ctx.rsgpr_dyn(vsrc1_reg) if inst.s1 else ctx.rvgpr_dyn(vsrc1_reg, lane)
     s1 = _sdwa_select(s1_raw, src1_sel, src1_sext)
-    srcs: dict[str, UOp] = {'S0': s0, 'S1': s1, 'D0': ctx.rvgpr_dyn(vdst_reg, lane)}
+    srcs:dict[str, UOp | int] = {'S0': s0, 'S1': s1, 'D0': ctx.rvgpr_dyn(vdst_reg, lane)}
   else:
     srcs = {'S0': s0}
   # dst_sel and dst_unused
@@ -967,7 +968,7 @@ def _compile_sdwa(inst: irc.VOP1_SDWA | irc.VOP2_SDWA | irc.VOP2_SDWA_SDST | irc
                'SDWA_SRC0_SEL': _c(0), 'BYTE0': _c(0), 'BYTE1': _c(1), 'BYTE2': _c(2), 'BYTE3': _c(3),
                'WORD0': _c(0), 'WORD1': _c(1)})
   _, assigns = parse_pcode(pcode, srcs)
-  stores: list[UOp] = []
+  stores = []
   vcc_val = None
   for dest, val in assigns:
     if 'D0' in dest and '[laneId]' in dest:
@@ -1020,7 +1021,7 @@ def _compile_vop12(inst: ir3.VOP1 | ir3.VOP1_SDST | ir3.VOP2 | ir4.VOP1 | ir4.VO
       src0_reg = src0_hi.where(src0_off - _c(384), _c(0))
       s0 = src0_hi.where(_hi16(ctx.rvgpr_dyn(src0_reg, lane)), s0)
     d0 = _cond_hi16(write_hi_half, ctx.rvgpr_dyn(vdst_reg, lane))
-    srcs = {'S0': s0, 'D0': d0}
+    srcs:dict[str, UOp | int] = {'S0': s0, 'D0': d0}
   else:
     vsrc1_reg = ctx.inst_field(type(inst).vsrc1)
     vsrc1_hi = bits['s0'] == 16 and (vsrc1_reg >= _c(128))
@@ -1571,6 +1572,7 @@ def _compile_vop3p(inst: ir3.VOP3P | ir4.VOP3P | irc.VOP3P, ctx: _Ctx) -> UOp:
     stores = [ctx.wvgpr_dyn(vdst_reg, lane, lo_out, exec_mask), ctx.wvgpr_dyn(vdst_reg + _c(1), lane, hi_out, exec_mask)]
     return UOp.sink(UOp.group(*stores).end(lane), *ctx.inc_pc())
 
+  srcs: dict[str, UOp | int] = {}
   if is_pk_f32:
     # CDNA packed F32: read 32-bit sources, build 64-bit packed values using opsel.
     # For VGPRs: opsel selects between v[reg] (0) and v[reg+1] (1) for each half.
@@ -1648,6 +1650,7 @@ def _compile_vopd(inst: ir3.VOPD | ir4.VOPD, ctx: _Ctx) -> UOp:
   lane = ctx.range()
   srcy0, srcy1 = ctx.rsrc_dyn(srcy0_off, lane, literal=literal), ctx.rvgpr_dyn(vsrcy1_reg, lane)
   all_stores = []
+  srcs:dict[str, UOp | int] = {}
   for op, src0_off, vsrc1_reg, vdst_reg, label in [(inst.opx, srcx0_off, vsrcx1_reg, vdstx_reg, 'X'),
                                                     (inst.opy, srcy0_off, vsrcy1_reg, vdsty_reg, 'Y')]:
     vop = VOPD_TO_VOP2.get(op)
