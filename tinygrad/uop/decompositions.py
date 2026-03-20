@@ -531,14 +531,19 @@ pm_float_decomp = PatternMatcher([
    f2f_store(st, idx, val, *ctx) if val.dtype.scalar() == ctx[1] and (idx:=idx.src[0] if idx.op == Ops.CAST else idx).tag == ctx[0] else None),
 ])
 
-def do_dtype_decomps(sink:UOp, ctx:str) -> UOp:
-  def _should_emulate(dt): return dt in EMULATED_DTYPES.tolist(dtypes) or not is_dtype_supported(dt, ctx)
-  if _should_emulate(dtypes.long): sink = graph_rewrite(sink, pm_long_decomp, name="decomp long -> int", bottom_up=True)
-  for fr in filter(_should_emulate, dtypes.fp8s+(dtypes.bfloat16, dtypes.half)):
-    to = dtypes.half if is_dtype_supported(dtypes.half, ctx) and fr in dtypes.fp8s else dtypes.float
-    sink = graph_rewrite(sink, pm_float_decomp, name=f"decomp {fr} -> {to}", ctx=(fr, to), bottom_up=True)
+def do_dtype_decomps(sink:UOp, ctx:tuple[set[DType], str]) -> UOp:
+  def _should_emulate(dt): return dt in EMULATED_DTYPES.tolist(dtypes) or not is_dtype_supported(dt, ctx[1])
+  for fr in filter(_should_emulate, ctx[0]):
+    if fr in dtypes.floats:
+      to = dtypes.half if is_dtype_supported(dtypes.half, ctx[1]) and fr in dtypes.fp8s else dtypes.float
+      sink = graph_rewrite(sink, pm_float_decomp, name=f"decomp {fr} -> {to}", ctx=(fr, to), bottom_up=True)
+    else: sink = graph_rewrite(sink, pm_long_decomp, name="decomp long -> int", bottom_up=True)
   return sink
 
 pm_dtype_decomps = PatternMatcher([
+  # detect dtypes to decompose
+  (UPat(GroupOp.All, (*dtypes.fp8s, dtypes.bfloat16, dtypes.half, dtypes.long, dtypes.ulong), name="x"), lambda x,ctx:
+   ctx[0].add({dtypes.ulong:dtypes.long}.get(dt:=x.dtype.base.scalar(), dt))),
+  # do the rewrites
   (UPat(Ops.SINK, name="sink"), do_dtype_decomps),
 ])

@@ -91,7 +91,7 @@ def full_rewrite_to_sink(sink:UOp, ren:Renderer|None=None, optimize:bool=True) -
   pm_decomp = symbolic_simple+get_late_rewrite_patterns(supported_ops, ren.device, bool(DISABLE_FAST_IDIV))
   pm_transcendental = symbolic_simple+get_transcendental_patterns(supported_ops, TRANSCENDENTAL>=2)
   sink = graph_rewrite(sink, pm_decomp, ctx=ren.device, name="decompositions")
-  sink = graph_rewrite(sink, pm_dtype_decomps, ctx=ren.device, name="decomp dtypes")
+  sink = graph_rewrite(sink, pm_dtype_decomps, ctx=(set(), ren.device), name="decomp dtypes")
   sink = graph_rewrite(sink, pm_transcendental, ctx=ren.device, name="transcendental")
 
   # final rules for the renderer (without sym)
