@@ -7,7 +7,7 @@
 #   arg=4: scratch - per-lane scratch memory
 from __future__ import annotations
 import ctypes, functools, re, platform, subprocess, tempfile
-from typing import Callable, cast
+from typing import Callable
 
 # Set/restore DAZ+FTZ (denormals-are-zero + flush-to-zero) to match RDNA3 default float mode
 # x86: MXCSR bits DAZ(6)+FTZ(15), ARM64: FPCR bit FZ(24)
@@ -701,15 +701,13 @@ class _Ctx:
     for dest, val in assigns:
       # VGPR bit-slice assignment: VGPR[lane][reg][hi:lo] = (vgpr_idx, rhs_val, hi, lo[, cond]) -> read-modify-write
       if dest.startswith('VGPR[') and re.search(r'\[\d+:\d+\]', dest):
-        val_tuple = cast(tuple[UOp, ...], val)  # type: ignore  # VGPR bit-slice values are tuples
-        vgpr_idx, rhs_val, hi_bit, lo_bit = val_tuple[:4]
-        branch_cond = val_tuple[4] if len(val_tuple) > 4 else None  # optional condition from if/else branch
-        width = cast(int, hi_bit) - cast(int, lo_bit) + 1
-        old = self.vgpr.index(vgpr_idx.cast(dtypes.int), ptr=True).load()
-        new_val = _set_bits(old, _val_to_bits(rhs_val), width, cast(int, lo_bit)).cast(dtypes.uint32)
+        # VGPR bit-slice: (vgpr_idx, rhs_val, hi_bit, lo_bit) - hi/lo are UOp constants
+        hi_bit, lo_bit = int(val[2].arg), int(val[3].arg)
+        width = hi_bit - lo_bit + 1
+        old = self.vgpr.index(val[0].cast(dtypes.int), ptr=True).load()
+        new_val = _set_bits(old, _val_to_bits(val[1]), width, lo_bit).cast(dtypes.uint32)
         active = _lane_active(exec_mask, lane)
-        if branch_cond is not None: active = active & _to_u32(branch_cond).ne(_c(0))
-        raw_stores.append(('vgpr_direct', self.vgpr.index(vgpr_idx.cast(dtypes.int), active).store(new_val)))
+        raw_stores.append(('vgpr_direct', self.vgpr.index(val[0].cast(dtypes.int), active).store(new_val)))
         continue
       if 'D0' in dest and '[laneId]' in dest:
         old_vcc = self.rmask(_c(VCC_LO.offset))
