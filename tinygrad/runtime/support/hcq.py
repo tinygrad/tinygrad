@@ -499,7 +499,10 @@ class HCQAllocatorBase(LRUAllocator[HCQDeviceType], Generic[HCQDeviceType]):
 
   def __init__(self, dev:HCQDeviceType, batch_size:int=(2 << 20), batch_cnt:int=32, copy_bufs=None, max_copyout_size:int|None=None, **kwargs):
     super().__init__(dev, **kwargs)
-    self.b = copy_bufs or [self._alloc(batch_size, BufferSpec(host=True)) for _ in range(batch_cnt)]
+    self.b = copy_bufs
+    if self.b is None:
+      buf = self._alloc(batch_size * batch_cnt, BufferSpec(host=True))
+      self.b = [buf.offset(x) for x in range(0, batch_size * batch_cnt, batch_size)]
     self.b_timeline, self.b_next, self.max_copyout_size = [0] * len(self.b), 0, max_copyout_size
 
   def map(self, buf:HCQBuffer):
