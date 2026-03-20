@@ -1349,7 +1349,6 @@ def train_llama3():
   model = FlatTransformer(**model_params, max_context=SEQLEN)
 
   params = get_parameters(model)
-  state = get_state_dict(model)
   # weights are all bfloat16 for now
   assert params and all(p.dtype == dtypes.bfloat16 for p in params)
 
@@ -1359,6 +1358,7 @@ def train_llama3():
 
   is_dp = (DP := getenv("DP", 1)) > 1
   is_mp = (MP := getenv("MP", 1)) > 1
+  is_sharding = is_dp or is_mp
   device_count = max(DP, MP)
   device = tuple(f"{Device.DEFAULT}:{i}" for i in range(device_count))
 
@@ -1374,7 +1374,7 @@ def train_llama3():
                            eps=opt_adamw_epsilon, weight_decay=opt_adamw_weight_decay, grad_acc=grad_acc, device=optim_device)
 
   # init grads
-  grads = {p:Tensor.zeros_like(p).contiguous() for p in optim.params}
+  grads = [Tensor.zeros_like(p).contiguous() for p in optim.params]
 
   scheduler = CosineAnnealingLRWithWarmup(optim, opt_base_learning_rate, opt_end_learning_rate, opt_learning_rate_warmup_steps, opt_learning_rate_decay_steps)
 
@@ -1389,30 +1389,24 @@ def train_llama3():
 
   @TinyJit
   def minibatch(tokens:Tensor):
-    if (DP := getenv("DP", 1)) > 1:
-      device = tuple(f"{Device.DEFAULT}:{i}" for i in range(DP))
-      tokens = tokens.to(None).shard(device, 0)
-    if (MP := getenv("MP", 1)) > 1:
-      device = tuple(f"{Device.DEFAULT}:{i}" for i in range(MP))
-      tokens = tokens.shard(device)
-    if DP == 1 and MP == 1: tokens = tokens.to(None)
+    if is_dp: tokens = tokens.to(None).shard(device, 0)
+    if is_mp: tokens = tokens.shard(device)
+    if not is_sharding: tokens = tokens.to(None)
     logits:Tensor = model(tokens[:, :-1])
     loss = vocab_mask.where(-1e9, logits).sparse_categorical_crossentropy(tokens[:, 1:])
 
-    for t,g in zip(grads, loss.gradient(*grads)):
-      grads[t] = Tensor(grads[t].uop.after(UOp.group(*apply_grad(grads[t].uop, g.uop))), device=t.device)
+    for i,(t,g) in enumerate(zip(optim.params, loss.gradient(*optim.params))):
+      grads[i].replace(Tensor(grads[i].uop.after(UOp.group(*apply_grad(grads[i].uop, g.uop))), device=t.device))
 
     loss_cpu = loss.flatten().float().to("CPU")
-    Tensor.realize(loss_cpu, *grads)
-    return loss_cpu
+    return loss_cpu.realize(*grads)
 
   @TinyJit
   def optim_step():
-    grad_norm = optim.fstep(list(grads.values()))
+    grad_norm = optim.fstep(grads)
     scheduler.step()
 
-    for g in grads:
-      g.assign(g.zeros_like())
+    for g in grads: g.assign(g.zeros_like())
 
     lr_cpu = optim.lr.float().to("CPU")
     grad_norm_cpu = grad_norm.float().to("CPU")
@@ -1423,13 +1417,9 @@ def train_llama3():
   @TinyJit
   @Tensor.train(False)
   def eval_step(tokens:Tensor):
-    if (DP := getenv("DP", 1)) > 1:
-      device = tuple(f"{Device.DEFAULT}:{i}" for i in range(DP))
-      tokens = tokens.to(None).shard(device, 0)
-    if (MP := getenv("MP", 1)) > 1:
-      device = tuple(f"{Device.DEFAULT}:{i}" for i in range(MP))
-      tokens = tokens.shard(device)
-    if DP == 1 and MP == 1: tokens = tokens.to(None)
+    if is_dp: tokens = tokens.to(None).shard(device, 0)
+    if is_mp: tokens = tokens.shard(device)
+    if not is_sharding: tokens = tokens.to(None)
     logits:Tensor = model(tokens[:, :-1])
     loss = vocab_mask.where(-1e9, logits).sparse_categorical_crossentropy(tokens[:, 1:])
     return loss.flatten().float().to("CPU")
