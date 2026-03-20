@@ -531,8 +531,8 @@ pm_float_decomp = PatternMatcher([
    f2f_store(st, idx, val, *ctx) if val.dtype.scalar() == ctx[1] and (idx:=idx.src[0] if idx.op == Ops.CAST else idx).tag == ctx[0] else None),
 ])
 
-def do_dtype_decomps(sink:UOp, ctx:tuple[set[DType], str]) -> UOp:
-  def _should_emulate(dt): return dt in EMULATED_DTYPES.tolist(dtypes) or not is_dtype_supported(dt, ctx[1])
+def do_dtype_decomps(sink:UOp, ctx:tuple[set[DType], str, str]) -> UOp:
+  def _should_emulate(dt): return dt in EMULATED_DTYPES.tolist(dtypes) or not is_dtype_supported(dt, ctx[1], ctx[2])
   for fr in sorted(filter(_should_emulate, ctx[0])):
     if fr in dtypes.floats:
       to = dtypes.half if not _should_emulate(dtypes.half) and fr in dtypes.fp8s else dtypes.float
