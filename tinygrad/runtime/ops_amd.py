@@ -17,7 +17,7 @@ from tinygrad.runtime.support.elf import elf_loader
 from tinygrad.runtime.support.am.amdev import AMDev, AMMemoryManager
 from tinygrad.runtime.support.amd import AMDReg, AMDIP, import_module, import_soc, import_ip_offsets, import_pmc
 from tinygrad.runtime.support.system import System, PCIIfaceBase, PCIAllocationMeta, USBPCIDevice, MAP_FIXED, MAP_NORESERVE
-from tinygrad.runtime.support.memory import AddrSpace, VirtMapping
+from tinygrad.runtime.support.memory import AddrSpace
 if getenv("IOCTL"): import extra.hip_gpu_driver.hip_ioctl  # noqa: F401 # pylint: disable=unused-import
 
 SQTT = ContextVar("SQTT", abs(VIZ.value)>=2)
