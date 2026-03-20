@@ -168,8 +168,7 @@ class TransformerBlock:
   def __call__(self, x: Tensor, start_pos: int|UOp):
     if not hasattr(self, "cache_kv"):
       # TODO: how is the dtype of this determined?
-      # NOTE: clone is used to promise the creation of a specific buffer
-      self.cache_kv = Tensor.zeros(2, x.shape[0], self.n_kv_heads, self.max_context, self.head_dim, device=x.device).clone()
+      self.cache_kv = Tensor.empty(2, x.shape[0], self.n_kv_heads, self.max_context, self.head_dim, device=x.device)
       self.freqs_cis = precompute_freqs_cis(self.head_dim, self.max_context, self.rope_theta)
     # we pass in the weights implicitly so we unpack the GGUF on the fly
     @function(precompile=True, allow_implicit=True)
