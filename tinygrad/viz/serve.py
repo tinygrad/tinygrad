@@ -337,13 +337,25 @@ def load_amd_counters(ctxs:list[dict], profile:list[ProfileEvent]) -> None:
       steps.append(create_step("SQTT", ("/prg-sqtt", len(ctxs), len(steps)), ((k, tag), sqtt, prg_events[k], arch)))
     ctxs.append({"name":f"Exec {name}"+(f" n{run_number[k]}" if run_number[k] > 1 else ""), "steps":steps})
 
+def get_exec_type(p) -> str|None:
+  from tinygrad.renderer.amd.sqtt import VALUINST, INST, INST_RDNA4, InstOp, InstOpRDNA4
+  if isinstance(p, VALUINST): return "VALU"
+  if isinstance(p, (INST, INST_RDNA4)) and isinstance(p.op, (InstOp, InstOpRDNA4)):
+    op_to_exec = {"SALU":"SALU", "GLOBAL":"VMEM", "FLAT":"VMEM", "LDS":"LDS", "VALU":"VALU", "SMEM":"SALU"}
+    for k,v in op_to_exec.items():
+      if k in p.op.name: return v
+  return None
+
 def sqtt_timeline(data:bytes, lib:bytes, target:str) -> list[ProfileEvent]:
   from tinygrad.renderer.amd.sqtt import (map_insts, InstructionInfo, PacketType, INST, InstOp, VALUINST, IMMEDIATE, IMMEDIATE_MASK, VMEMEXEC,
                                           ALUEXEC, INST_RDNA4, InstOpRDNA4, TS_DELTA_OR_MARK, TS_DELTA_OR_MARK_RDNA4, CDNA_INST, InstOpCDNA,
-                                          WAVEEND, CDNA_WAVEEND, WAVERDY)
+                                          WAVEEND, CDNA_WAVEEND, WAVERDY, AluSrc)
+  from tinygrad.renderer.amd.sqtt import print_packets
   ret:list[ProfileEvent] = []
   row_ends:dict[str, Decimal] = {}
+  row_counts:dict[str, itertools.count] = {}
   curr_barrier:dict[str, ProfileRangeEvent] = {}
+  exec_pending:dict[str, list[str]] = {}
   NS_PER_TICK = 10  # 100MHz
   prev_pair:tuple[int, int]|None = None # (shader, realtime)
   is_cdna = target.startswith("gfx9")
@@ -355,7 +367,17 @@ def sqtt_timeline(data:bytes, lib:bytes, target:str) -> list[ProfileEvent]:
     # allow CDNA packets to overlap, NOT allowed on RDNA.
     if (et:=row_ends.get(row)) is not None and e.st < et and not is_cdna: raise RuntimeError(f"packet {p} overlaps another packet in {row}.")
     row_ends[row] = unwrap(e.en)
+    idx = next(row_counts.setdefault(row, itertools.count(0)))
     if name == "BARRIER": curr_barrier[row] = e
+    # queue for exec linking
+    if (exec_type:=get_exec_type(p)) is not None:
+      exec_pending.setdefault(exec_type, []).append(f"{row}-{idx}")
+    if isinstance(p, ALUEXEC):
+      dispatch:list[str] = []
+      if p.src is AluSrc.VALU_SALU: dispatch += [exec_pending["SALU"].pop(0), exec_pending["VALU"].pop(0)]
+      elif p.src is AluSrc.VALU: dispatch += [exec_pending["VALU"].pop(0)]
+      elif p.src is AluSrc.SALU: dispatch += [exec_pending["SALU"].pop(0)]
+      e.name = TracingKey(e.name.display_name, ret=f"LINK:{','.join(dispatch)}")
   for p, info in map_insts(data, lib, target):
     if len(ret) > getenv("MAX_SQTT_PKTS", 50_000): break
     if isinstance(p, (TS_DELTA_OR_MARK, TS_DELTA_OR_MARK_RDNA4)) and p.is_marker:
