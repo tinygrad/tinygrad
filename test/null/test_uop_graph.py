@@ -205,7 +205,7 @@ class TestUOpGraph(unittest.TestCase):
 
   def test_where_same_fold(self):
     v = UOp.variable('tmp', 0, 1)
-    c0 = UOp.const(dtypes.index, 0)
+    c0 = UOp.const(dtypes.weakint, 0)
     vc = UOp(Ops.CMPNE, dtypes.bool, (v, c0))
     c1 = UOp.const(dtypes.float, 1.0)
     out = UOp(Ops.WHERE, dtypes.float, (vc, c1, c1))
@@ -469,16 +469,16 @@ class TestUOpGraph(unittest.TestCase):
     # mnist indexing with split reduceop
     # Make sure we are not doign math on the loaded index, which would promote it to long
     c0 = UOp(Ops.PARAM, dtypes.uchar.ptr(128000), arg=0, src=())
-    c1 = UOp.range(UOp.const(dtypes.index, 512), 1, AxisType.LOOP)
-    c2 = UOp.range(UOp.const(dtypes.index, 250), 2, AxisType.LOOP)
+    c1 = UOp.range(UOp.const(dtypes.weakint, 512), 1, AxisType.LOOP)
+    c2 = UOp.range(UOp.const(dtypes.weakint, 250), 2, AxisType.LOOP)
     c3 = UOp(Ops.PARAM, dtypes.int.ptr(512), arg=1, src=())
     c4 = c3.index(c1)
-    c5 = UOp.range(UOp.const(dtypes.index, 240), 0, AxisType.REDUCE)
-    c6 = ((c2*UOp.const(dtypes.index, 240))+c5)
+    c5 = UOp.range(UOp.const(dtypes.weakint, 240), 0, AxisType.REDUCE)
+    c6 = ((c2*UOp.const(dtypes.weakint, 240))+c5)
     c7 = UOp(Ops.PARAM, dtypes.uchar.ptr(60000), arg=2, src=())
     c8 = c7.index(c6)
     c9 = ((c4<0).where((c4+60000), c4)!=c6.cast(dtypes.int)).where(0, c8.cast(dtypes.uint).cast(dtypes.uchar)).reduce(c5, arg=Ops.ADD)
-    c10 = c0.index(((c1*UOp.const(dtypes.index, 250))+c2)).store(c9).end(c1, c2)
+    c10 = c0.index(((c1*UOp.const(dtypes.weakint, 250))+c2)).store(c9).end(c1, c2)
     uops = to_uops_list([c10])
     for u in uops:
       self.assertNotEqual(u.dtype, dtypes.long)
@@ -486,19 +486,19 @@ class TestUOpGraph(unittest.TestCase):
   def test_load_idx_no_math_on_loaded(self):
     # test the (x+y)<c pattern where x has loads - we shouldn't do math on loaded indices
     c0 = UOp(Ops.PARAM, dtypes.uchar.ptr(128000), arg=0, src=())
-    c1 = UOp.range(UOp.const(dtypes.index, 512), 1, AxisType.LOOP)
-    c2 = UOp.range(UOp.const(dtypes.index, 250), 2, AxisType.LOOP)
+    c1 = UOp.range(UOp.const(dtypes.weakint, 512), 1, AxisType.LOOP)
+    c2 = UOp.range(UOp.const(dtypes.weakint, 250), 2, AxisType.LOOP)
     c3 = UOp(Ops.PARAM, dtypes.int.ptr(512), arg=1, src=())
     c4 = c3.index(c1)  # c4 is a load
-    c5 = UOp.range(UOp.const(dtypes.index, 240), 0, AxisType.REDUCE)
-    c6 = ((c2*UOp.const(dtypes.index, 240))+c5)
+    c5 = UOp.range(UOp.const(dtypes.weakint, 240), 0, AxisType.REDUCE)
+    c6 = ((c2*UOp.const(dtypes.weakint, 240))+c5)
     c7 = UOp(Ops.PARAM, dtypes.uchar.ptr(60000), arg=2, src=())
     c8 = c7.index(c6)
     # (loaded + range) < const pattern - loaded value shouldn't be promoted to long
-    loaded_idx = c4.cast(dtypes.index)
-    comparison = (loaded_idx + c5) < UOp.const(dtypes.index, 60000)
+    loaded_idx = c4.cast(dtypes.weakint)
+    comparison = (loaded_idx + c5) < UOp.const(dtypes.weakint, 60000)
     c9 = comparison.where(c8.cast(dtypes.uint).cast(dtypes.uchar), 0).reduce(c5, arg=Ops.ADD)
-    c10 = c0.index(((c1*UOp.const(dtypes.index, 250))+c2)).store(c9).end(c1, c2)
+    c10 = c0.index(((c1*UOp.const(dtypes.weakint, 250))+c2)).store(c9).end(c1, c2)
     uops = to_uops_list([c10])
     for u in uops:
       self.assertNotEqual(u.dtype, dtypes.long)

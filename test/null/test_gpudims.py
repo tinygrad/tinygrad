@@ -24,7 +24,7 @@ class TestGroupedDims(unittest.TestCase):
     total = math.prod(dims)
     specials = sorted(dedup(flatten([[y for y in x.toposort() if y.op is Ops.SPECIAL] for x in idxs])), key=lambda u: u.arg)
     # build flat index and primed flat (same expression with renamed SPECIALs)
-    flat = UOp.const(dtypes.index, 0)
+    flat = UOp.const(dtypes.weakint, 0)
     for i, idx in enumerate(idxs):
       flat = flat + idx * int(math.prod(dims[i+1:]))
     flat_p = flat.substitute({s: UOp(Ops.SPECIAL, s.dtype, s.src, s.arg+"_p") for s in specials})
