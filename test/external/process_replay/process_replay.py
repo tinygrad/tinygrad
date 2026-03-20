@@ -80,6 +80,8 @@ def diff(offset:int, fxns:dict[str, Callable[..., tuple|None]]) -> None:
       ctx_vars = {k:v.value for k,v in ctx_vals.items() if k not in ("DEBUG", "CAPTURE_PROCESS_REPLAY")
                   and (var:=ContextVar._cache.get(k)) is not None and var.value != v.value}
       if (replayer:=fxns.get(name)) is None: continue
+      # skip emulated_dtypes process replay, it's not reproducible.
+      if ctx_vars.get("EMULATED_DTYPES") is not None: continue
       with Context(**ctx_vars):
         if (ret:=replayer(ret, *args, **kwargs)) is None: continue
         good, compare, metadata = ret
