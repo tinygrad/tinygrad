@@ -1044,7 +1044,7 @@ class Tensor(OpMixin):
 
   # ***** toposort and backward pass *****
 
-  def gradient(self, *targets:Tensor, gradient:Tensor|None=None, materialize_grads=False) -> list[Tensor]:
+  def gradient(self, *targets:Tensor, gradient:Tensor|None=None) -> list[Tensor]:
     """
     Computes the gradient of the targets with respect to self.
 
@@ -1065,9 +1065,7 @@ class Tensor(OpMixin):
     grads = compute_gradient(self.uop, gradient.uop, set(target_uops))
     ret:list[Tensor] = []
     for x in target_uops:
-      if (y:=grads.get(x)) is None:
-        if materialize_grads: y = x.const_like(0)
-        else: raise RuntimeError(f"{x}\n\nnot found in\n\n{self.uop}")
+      if (y:=grads.get(x)) is None: y = x.const_like(0)
       ret.append(Tensor(y))
     return ret
 
@@ -1085,7 +1083,7 @@ class Tensor(OpMixin):
     tensors_need_grad: list[Tensor] = [t for tref in all_tensors if (t:=tref()) is not None and \
                                        t.uop in all_uops and t.requires_grad]
     # clear contexts
-    for t,g in zip(tensors_need_grad, self.gradient(*tensors_need_grad, gradient=gradient, materialize_grads=True)):
+    for t,g in zip(tensors_need_grad, self.gradient(*tensors_need_grad, gradient=gradient)):
       assert g.shape == t.shape, f"grad shape must match tensor shape, {g.shape!r} != {t.shape!r}"
       if t.grad is None: t.grad = g
       else: t.grad.assign(t.grad + g.to(t.grad.device))
@@ -3136,9 +3134,7 @@ class Tensor(OpMixin):
     """
     # NOTE: torch always return in float, we return based on the broadcasting rule.
     other = self._broadcasted(other)[1]
-    # TODO: remove other.sign()*0?
-    # other.sign()*0 keeps other in the gradient graph (gradient=0) without affecting forward (works for inf unlike other*0)
-    return self.abs() * ((other < 0) | (other.reciprocal() < 0)).where(-1, 1) + other.sign()*0
+    return self.abs() * ((other < 0) | (other.reciprocal() < 0)).where(-1, 1)
 
   def logaddexp(self, other) -> Tensor:
     """
