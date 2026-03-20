@@ -39,7 +39,7 @@ else:
 assert N % BLOCK_N == 0 and M % BLOCK_M == 0 and K % BLOCK_K == 0
 
 def block_128x128_wmma(c:UOp, a:UOp, b:UOp) -> UOp:
-  tid = UOp.special(THREADS_PER_BLOCK, "lidx0")
+  tid = UOp.range(THREADS_PER_BLOCK, 2, AxisType.WARP)
   warp, lane = tid // WARP_SIZE, tid % WARP_SIZE
   wave_m, wave_n = warp // WAVES_N, warp % WAVES_N
   lane_row, lane_half = lane % WMMA_M, lane // WMMA_M
@@ -86,13 +86,11 @@ def block_128x128_wmma(c:UOp, a:UOp, b:UOp) -> UOp:
   st_m = UOp.range(TILES_PER_WAVE_M, 9, AxisType.LOOP)
   st_n = UOp.range(TILES_PER_WAVE_N, 10, AxisType.LOOP)
   stores = [c[wave_m, st_m, e*2 + lane_half, wave_n, st_n, lane_row].store(acc[st_m, st_n].gep(e)) for e in range(8)]
-  return UOp.group(*stores).end(st_m, st_n)
+  return UOp.group(*stores).end(st_m, st_n, tid)
 
 # 128x128 out, kx128, kx128 in
 def block_128x128_gemm(c:UOp, a:UOp, b:UOp) -> UOp:
   tid = UOp.range(THREADS_PER_BLOCK, 2, AxisType.LOCAL)
-
-  #tid = UOp.special(THREADS_PER_BLOCK, "lidx0")
   warp, lane = tid // WARP_SIZE, tid % WARP_SIZE
   wave_n, wave_m = warp % WAVES_PER_BLOCK_N, warp // WAVES_PER_BLOCK_N
   lane_n, lane_m = lane % LANES_PER_WAVE_N, lane // LANES_PER_WAVE_N
@@ -133,21 +131,13 @@ def block_128x128_gemm(c:UOp, a:UOp, b:UOp) -> UOp:
   return c_store[tid].store(c_regs).end(tid)
 
 def amd_copy_matmul(c:UOp, a:UOp, b:UOp) -> UOp:
+  block_id_m = UOp.range(M // BLOCK_M, 0, AxisType.GLOBAL)
+  block_id_n = UOp.range(N // BLOCK_N, 1, AxisType.GLOBAL)
+  c = c.reshape(M // BLOCK_M, BLOCK_M, N // BLOCK_N, BLOCK_N)[block_id_m, :, block_id_n, :]
+  a = a.T.reshape(K, M // BLOCK_M, BLOCK_M)[:, block_id_m, :]
+  b = b.reshape(K, N // BLOCK_N, BLOCK_N)[:, block_id_n, :]
   block_fn = block_128x128_wmma if use_wmma else block_128x128_gemm
-  if use_wmma:
-    block_id_n = UOp.special(N // BLOCK_N, "gidx0")
-    block_id_m = UOp.special(M // BLOCK_M, "gidx1")
-    c = c.reshape(M // BLOCK_M, BLOCK_M, N // BLOCK_N, BLOCK_N)[block_id_m, :, block_id_n, :]
-    a = a.T.reshape(K, M // BLOCK_M, BLOCK_M)[:, block_id_m, :]
-    b = b.reshape(K, N // BLOCK_N, BLOCK_N)[:, block_id_n, :]
-    return block_fn(c, a, b).sink(arg=KernelInfo(opts_to_apply=()))
-  else:
-    block_id_n = UOp.range(N // BLOCK_N, 0, AxisType.GLOBAL)
-    block_id_m = UOp.range(M // BLOCK_M, 1, AxisType.GLOBAL)
-    c = c.reshape(M // BLOCK_M, BLOCK_M, N // BLOCK_N, BLOCK_N)[block_id_m, :, block_id_n, :]
-    a = a.T.reshape(K, M // BLOCK_M, BLOCK_M)[:, block_id_m, :]
-    b = b.reshape(K, N // BLOCK_N, BLOCK_N)[:, block_id_n, :]
-    return block_fn(c, a, b).end(block_id_n, block_id_m).sink(arg=KernelInfo(opts_to_apply=()))
+  return block_fn(c, a, b).end(block_id_n, block_id_m).sink(arg=KernelInfo(opts_to_apply=()))
 
 if __name__ == "__main__":
   from amd_uop_matmul import eval_custom_matmul
