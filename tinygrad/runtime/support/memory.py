@@ -183,11 +183,7 @@ class MemoryManager:
     self.pa_allocator = TLSFAllocator(vram_size - (off_sz:=self.boot_allocator.size + self.ptable_allocator.size), base=off_sz)
     self.root_page_table = pt_t(self.dev, self.palloc(0x1000, zero=not self.dev.smi_dev, boot=True), lv=first_lv)
 
-    # GMMU=0: identity map the whole VRAM twice (cached + uncached), making valloc/vfree simple PA allocations.
     self.gmmu = getenv("GMMU", 1)
-    if not self.gmmu:
-      self._identity_va = [self.va_allocator.alloc(vram_size, 1 << va_shifts[-1]) for _ in range(2)]
-      for uc in range(2): self.map_range(self._identity_va[uc], vram_size, [(0, vram_size)], AddrSpace.PHYS, uncached=bool(uc), boot=True)
 
   def _frag_size(self, va, sz, must_cover=True):
     """
@@ -237,10 +233,16 @@ class MemoryManager:
     assert cls.va_allocator is not None, "must be set"
     return cls.va_allocator.alloc(size, max((1 << (size.bit_length() - 1)), align))
 
+  @functools.cache  # pylint: disable=method-cache-max-size-none
+  def _identity_va(self, uncached:bool) -> int:
+    va = self.va_allocator.alloc(self.vram_size, self.vram_size)
+    self.map_range(va, self.vram_size, [(0, self.vram_size)], AddrSpace.PHYS, uncached=uncached)
+    return va
+
   def valloc(self, size:int, align=0x1000, uncached=False, contiguous=False) -> VirtMapping:
     if not self.gmmu:
       paddr = self.palloc(size:=round_up(size, 0x1000), align, zero=False)
-      return VirtMapping(self._identity_va[uncached] + paddr, size, [(paddr, size)], aspace=AddrSpace.PHYS, uncached=uncached)
+      return VirtMapping(self._identity_va(uncached) + paddr, size, [(paddr, size)], aspace=AddrSpace.PHYS, uncached=uncached)
 
     # Alloc physical memory and map it to the virtual address
     va = self.alloc_vaddr(size:=round_up(size, 0x1000), align)
