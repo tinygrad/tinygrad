@@ -292,7 +292,7 @@ jobs:
         llvm: 'true'
         amd: 'true'
     - name: Run pre-commit test hooks
-      run: SKIP=ruff,mypy pre-commit run --all-files
+      run: pre-commit run --all-files
     - name: Check Device.DEFAULT
       run: python -c "from tinygrad import Device; assert Device.DEFAULT == 'CPU', Device.DEFAULT"
     - name: Run unit tests
