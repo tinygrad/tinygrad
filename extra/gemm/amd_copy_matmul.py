@@ -30,9 +30,10 @@ else:
 THREADS_PER_BLOCK = WARP_SIZE * WAVES_M * WAVES_N
 
 def block_128x128_gemm(c:UOp, a:UOp, b:UOp) -> UOp:
-  wave = UOp.range(THREADS_PER_BLOCK // WARP_SIZE, 2, AxisType.LOCAL)
+  wave_m = UOp.range(WAVES_M, 100, AxisType.LOCAL)
+  wave_n = UOp.range(WAVES_N, 101, AxisType.LOCAL)
   lane = UOp.range(WARP_SIZE, -1, AxisType.WARP)
-  tid = wave * WARP_SIZE + lane
+  tid = (wave_m * WAVES_N + wave_n) * WARP_SIZE + lane
 
   # -- GLOBAL -> LOCAL --
   # wmma: spatial outer, k inner (k contiguous for vectorized WMMA tile loads)
@@ -53,7 +54,6 @@ def block_128x128_gemm(c:UOp, a:UOp, b:UOp) -> UOp:
   A_local, B_local = A_local.after(barrier), B_local.after(barrier)
 
   # -- COMPUTE --
-  wave_m, wave_n = wave // WAVES_N, wave % WAVES_N
   lane_m, lane_n = lane // LANES_PER_WAVE_N, lane % LANES_PER_WAVE_N
 
   if use_wmma:
@@ -86,7 +86,7 @@ def block_128x128_gemm(c:UOp, a:UOp, b:UOp) -> UOp:
     st_m = UOp.range(TM, 9, AxisType.LOOP)
     st_n = UOp.range(TN, 10, AxisType.LOOP)
     stores = [c[wave_m, st_m, e*2 + lane_m, wave_n, st_n, lane_n].store(acc[st_m, st_n].gep(e)) for e in range(8)]
-    return UOp.group(*stores).end(st_m, st_n, wave, lane)
+    return UOp.group(*stores).end(st_m, st_n, wave_m, wave_n, lane)
   else:
     # accumulator
     acc = UOp.placeholder((TM, TN), dtypes.float, slot=2, addrspace=AddrSpace.REG)
@@ -109,7 +109,7 @@ def block_128x128_gemm(c:UOp, a:UOp, b:UOp) -> UOp:
     c = c.reshape(WAVES_M, TM//UNROLL_M, LANES_PER_WAVE_M, UNROLL_M,
                   WAVES_N, TN//UNROLL_N, LANES_PER_WAVE_N, UNROLL_N)
     c = c.permute((0,4,2,6, 1,3,5,7)).reshape(THREADS_PER_BLOCK, TM, TN)
-    return c[tid].store(acc).end(wave, lane)
+    return c[tid].store(acc).end(wave_m, wave_n, lane)
 
 def amd_copy_matmul(c:UOp, a:UOp, b:UOp) -> UOp:
   block_id_m = UOp.range(M // BLOCK_M, 0, AxisType.GLOBAL)
