@@ -1284,7 +1284,6 @@ def train_bert():
         previous_step = i
 
 def train_llama3():
-  from examples.mlperf.models.llama import Transformer
   from examples.mlperf.models.flat_llama import FlatTransformer, apply_grad
   from examples.llama3 import MODEL_PARAMS
   from examples.mlperf.lr_schedulers import CosineAnnealingLRWithWarmup
