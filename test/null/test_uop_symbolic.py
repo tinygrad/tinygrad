@@ -12,13 +12,13 @@ from tinygrad.uop.validate import uops_to_z3
 def check_uop_against_string(self, v:UOp, s:str):
   sym_vars = {v.render():v for v in v.toposort() if v.op in (Ops.DEFINE_VAR, Ops.RANGE, Ops.SPECIAL)}
   s_eval = eval(s, sym_vars)
-  if isinstance(s_eval, int) and v.dtype==dtypes.index: s_eval = UOp.const(dtypes.index, s_eval)
+  if isinstance(s_eval, int) and v.dtype==dtypes.weakint: s_eval = UOp.const(dtypes.weakint, s_eval)
   elif isinstance(s_eval, (bool, int, float)): s_eval = UOp.const(dtypes.from_py(s_eval), s_eval)
   s_eval = graph_rewrite(s_eval, commutative, name="cannonicalize eval")
   self.assertIs(s_eval, v, f"eval did not match simplified: {s_eval} != {v.render()} for {s}")
 
-def Variable(name: str, min_val: ConstType, max_val: ConstType, dtype: DType=dtypes.index): return UOp.variable(name,min_val,max_val,dtype)
-def uconst(val): return UOp.const(dtypes.index, val)
+def Variable(name: str, min_val: ConstType, max_val: ConstType, dtype: DType=dtypes.weakint): return UOp.variable(name,min_val,max_val,dtype)
+def uconst(val): return UOp.const(dtypes.weakint, val)
 def usum(ops): return functools.reduce(lambda x,y: x+y, ops)
 def uand(ops): return functools.reduce(lambda x,y: x*y, ops)
 
@@ -245,12 +245,12 @@ class TestSymbolic(unittest.TestCase):
     self.assertEqual((Variable("x", -10, 0)%Variable("y", 1, 10))._min_max, (-9, 0))
 
   def test_range_div_its_symbolic_bound(self):
-    a = Variable("a", 1, 10, dtypes.index)
+    a = Variable("a", 1, 10, dtypes.weakint)
     ridx0 = UOp.range(a+2, 0)
     self.helper_test_variable(ridx0//(a+2), 0, 0, "0")
 
   def test_range_mod_its_symbolic_bound(self):
-    a = Variable("a", 1, 10, dtypes.index)
+    a = Variable("a", 1, 10, dtypes.weakint)
     ridx = UOp.range(a+2, 0)
     self.helper_test_variable(ridx%(a+2), 0, 11, "r0")
 
@@ -941,7 +941,7 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable((numerator//denominator)<=0, 1, 1, "True")
 
   def test_symbolic_range_doesnt_collapse(self):
-    r0 = UOp.range((Variable("a", 1, 10)<5).cast(dtypes.index), 0)
+    r0 = UOp.range((Variable("a", 1, 10)<5).cast(dtypes.weakint), 0)
     self.helper_test_variable(r0, 0, 0, "r0")
 
   def test_const_reciprocal(self):
@@ -1202,16 +1202,16 @@ class TestInvalidIndex(unittest.TestCase):
     self.assertIs((UOp.invalid()<Variable("a",0,10)).simplify().dtype, dtypes.bool)
 
   def test_alu_invalid_vconst(self):
-    c1 = UOp.const(dtypes.index.vec(4), (1, 1, Invalid, Invalid))
-    c2 = UOp.const(dtypes.index.vec(4), (1, Invalid, 1, 1))
-    self.assertIs((c1+c2).simplify(), UOp.const(dtypes.index.vec(4), (2, Invalid, Invalid, Invalid)))
+    c1 = UOp.const(dtypes.weakint.vec(4), (1, 1, Invalid, Invalid))
+    c2 = UOp.const(dtypes.weakint.vec(4), (1, Invalid, 1, 1))
+    self.assertIs((c1+c2).simplify(), UOp.const(dtypes.weakint.vec(4), (2, Invalid, Invalid, Invalid)))
 
 class TestStoreLoadFolding(unittest.TestCase):
   """Tests for store(index, load(index)) -> NOOP rule. This rule matches patterns that EMERGE during simplification."""
   def test_store_load_folding(self):
     # store(idx, load(idx)) -> NOOP, including emergent patterns like store(idx, load(idx) + 0)
     buf = UOp(Ops.PARAM, dtypes.int.ptr(), arg=0)
-    index = buf.index(UOp.const(dtypes.index, 0))
+    index = buf.index(UOp.const(dtypes.weakint, 0))
     # Direct: store(idx, load(idx)) -> NOOP
     self.assertEqual(graph_rewrite(index.store(index.load()), sym).op, Ops.NOOP)
     # Emergent: store(idx, load(idx) + 0) -> store(idx, load(idx)) -> NOOP
@@ -1250,10 +1250,10 @@ class TestGatedUopGivenValid(unittest.TestCase):
 
     idx0 = (r0 + uconst(-1)) // uconst(3)
     idx1 = r0 % uconst(3)
-    idx:UOp = (r0 < 3).where(UOp(Ops.VECTORIZE, dtypes.index.vec(2), (idx0, idx1)), UOp.invalid())
+    idx:UOp = (r0 < 3).where(UOp(Ops.VECTORIZE, dtypes.weakint.vec(2), (idx0, idx1)), UOp.invalid())
     idx = graph_rewrite(idx, pm_simplify_valid)
     # NOTE: independent simplification: (r0-1)//3 -> 0, r0%3 -> r0 when r0 in [0,2]
-    expected_vec = UOp(Ops.VECTORIZE, dtypes.index.vec(2), (uconst(0), r0))
+    expected_vec = UOp(Ops.VECTORIZE, dtypes.weakint.vec(2), (uconst(0), r0))
     self.assertEqual(idx, (r0 < 3).where(expected_vec, UOp.invalid()))
 
 class TestRangeSplitting(unittest.TestCase):

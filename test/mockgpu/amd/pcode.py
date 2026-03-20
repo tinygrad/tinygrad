@@ -1073,7 +1073,7 @@ def parse_block(lines: list[str], start: int, env: dict[str, VarVal], funcs: dic
           ws = env.get('_wave_size', 32)
           vgpr_idx = _to_u32(rg) * _u32(ws) + _to_u32(ln)
           if assigns is not None:
-            assigns.append((f'VGPR[{_tok_str(lane_toks)}][{_tok_str(reg_toks)}][{hi_val}:{lo_val}]', (vgpr_idx, val, hi_val, lo_val)))
+            assigns.append((f'VGPR[{_tok_str(lane_toks)}][{_tok_str(reg_toks)}][{hi_val}:{lo_val}]', (vgpr_idx, val, _u32(hi_val), _u32(lo_val))))
           i += 1
           continue
         if j < len(toks) and toks[j].type == 'DOT': j += 2  # skip .type suffix

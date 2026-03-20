@@ -15,11 +15,11 @@ def get_gated_load_uop(valid:UOp, idx:UOp):
 
 def get_load_image_uop(image_shape:tuple[int, ...], valid:UOp, idx:tuple[UOp, UOp]):
   return UOp(Ops.LOAD, dtypes.float.vec(4), (
-    UOp(Ops.PARAM, dtypes.imagef(image_shape), arg=0).index(UOp(Ops.VECTORIZE, dtypes.index.vec(2), idx).valid(valid), ptr=True),
+    UOp(Ops.PARAM, dtypes.imagef(image_shape), arg=0).index(UOp(Ops.VECTORIZE, dtypes.weakint.vec(2), idx).valid(valid), ptr=True),
     UOp(Ops.VECTORIZE, dtypes.float.vec(4), src=(UOp.const(dtypes.float, 0.0),) * 4)
   ))
 
-def Special(expr, nmax): return UOp(Ops.SPECIAL, dtypes.index, (UOp.const(dtypes.index, nmax),), expr)
+def Special(expr, nmax): return UOp(Ops.SPECIAL, dtypes.weakint, (UOp.const(dtypes.weakint, nmax),), expr)
 def Variable(expr, nmin, nmax): return UOp.variable(expr, nmin, nmax)
 def Range(n, nmax): return UOp.range(nmax, n)
 
@@ -478,7 +478,7 @@ class TestDropTrueGate(unittest.TestCase):
     from tinygrad.codegen.late.devectorizer import load_store_indexing
     from tinygrad.uop.ops import graph_rewrite
     buf = UOp(Ops.PARAM, dtypes.int.ptr(), arg=0)
-    idx = UOp.const(dtypes.index, 0)
+    idx = UOp.const(dtypes.weakint, 0)
     true_gate = UOp.const(dtypes.bool, True)
     index_with_gate = UOp(Ops.INDEX, dtypes.int.ptr(), (buf, idx, true_gate))
     # apply the optimization
@@ -495,7 +495,7 @@ class TestRangeShrink(unittest.TestCase):
   def test_range_shrink_single_guard(self):
     # range 0..203 guarded by r < 4 everywhere -> shrink to 0..3
     r = Range(0, 204)
-    load = get_gated_load_uop(r < UOp.const(dtypes.index, 4), r)
+    load = get_gated_load_uop(r < UOp.const(dtypes.weakint, 4), r)
     ranges = self.get_ranges(load.sink())
     self.assertEqual(len(ranges), 1)
     self.assertEqual(ranges[0].src[0].arg, 4)
@@ -503,8 +503,8 @@ class TestRangeShrink(unittest.TestCase):
   def test_range_shrink_picks_max_guard(self):
     # two loads guard the same range with r < 4 and r < 8 -> shrink to max(4, 8) = 8
     r = Range(0, 204)
-    load1 = get_gated_load_uop(r < UOp.const(dtypes.index, 4), r)
-    load2 = get_gated_load_uop(r < UOp.const(dtypes.index, 8), r)
+    load1 = get_gated_load_uop(r < UOp.const(dtypes.weakint, 4), r)
+    load2 = get_gated_load_uop(r < UOp.const(dtypes.weakint, 8), r)
     ranges = self.get_ranges(UOp.sink(load1, load2))
     self.assertEqual(len(ranges), 1)
     self.assertEqual(ranges[0].src[0].arg, 8)
@@ -512,7 +512,7 @@ class TestRangeShrink(unittest.TestCase):
   def test_range_no_shrink_guard_ge_max(self):
     # guard r < 300 with range max 204 -> no shrink (guard doesn't constrain)
     r = Range(0, 204)
-    load = get_gated_load_uop(r < UOp.const(dtypes.index, 300), r)
+    load = get_gated_load_uop(r < UOp.const(dtypes.weakint, 300), r)
     ranges = self.get_ranges(load.sink())
     self.assertEqual(len(ranges), 1)
     self.assertEqual(ranges[0].src[0].arg, 204)
@@ -520,7 +520,7 @@ class TestRangeShrink(unittest.TestCase):
   def test_range_no_shrink_when_unguarded_elsewhere(self):
     # one load guards r < 4, but another load uses r without a gate -> no shrink
     r = Range(0, 204)
-    load1 = get_gated_load_uop(r < UOp.const(dtypes.index, 4), r)
+    load1 = get_gated_load_uop(r < UOp.const(dtypes.weakint, 4), r)
     load2 = UOp(Ops.LOAD, dtypes.float, (UOp(Ops.PARAM, dtypes.float.ptr(), arg=1).index(r, ptr=True),))
     ranges = self.get_ranges(UOp.sink(load1, load2))
     self.assertEqual(len(ranges), 1)
@@ -529,7 +529,7 @@ class TestRangeShrink(unittest.TestCase):
   def test_range_no_shrink_when_used_in_reduce(self):
     # range used in both a gated load AND directly in the reduce expression -> no shrink
     r = Range(0, 204)
-    gated_load = get_gated_load_uop(r < UOp.const(dtypes.index, 4), r)
+    gated_load = get_gated_load_uop(r < UOp.const(dtypes.weakint, 4), r)
     red = UOp(Ops.REDUCE, dtypes.float, (r.cast(dtypes.float) + gated_load, r), Ops.ADD)
     ranges = self.get_ranges(red.sink())
     self.assertEqual(len(ranges), 1)
@@ -538,7 +538,7 @@ class TestRangeShrink(unittest.TestCase):
   def test_range_shrink_to_single_iteration(self):
     # guard r < 1 shrinks range to 1 -> single iteration, range eliminated entirely
     r = Range(0, 204)
-    load = get_gated_load_uop(r < UOp.const(dtypes.index, 1), r)
+    load = get_gated_load_uop(r < UOp.const(dtypes.weakint, 1), r)
     ranges = self.get_ranges(load.sink())
     self.assertEqual(len(ranges), 0)
 
