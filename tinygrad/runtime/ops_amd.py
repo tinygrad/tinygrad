@@ -885,7 +885,7 @@ class PCIIface(PCIIfaceBase):
 
 class USBIface(PCIIface):
   def __init__(self, dev, dev_id): # pylint: disable=super-init-not-called
-    self.dev, self.pci_dev = dev, USBPCIDevice(dev.__class__.__name__[:2], f"usb:{dev_id}")
+    self.dev, self.pci_dev, self.vram_bar = dev, USBPCIDevice(dev.__class__.__name__[:2], f"usb:{dev_id}"), 0
     self.dev_impl = AMDev(self.pci_dev)
     self._compute_props()
     self.pci_dev.usb._pci_cacheable += [self.pci_dev.bar_info(2)] # doorbell region is cacheable
@@ -903,9 +903,8 @@ class USBIface(PCIIface):
       self.sys_next_off += size
       return self.sys_buf.offset(self.sys_next_off - size, size)
 
-    mapping = self.dev_impl.mm.valloc(size:=round_up(size, 4 << 10), uncached=uncached, contiguous=cpu_access)
-    barview = self.pci_dev.map_bar(bar=0, off=mapping.paddrs[0][0], size=mapping.size) if cpu_access else None
-    return HCQBuffer(mapping.va_addr, size, meta=PCIAllocationMeta(mapping, has_cpu_mapping=False), view=barview, owner=self.dev)
+    # force devmem
+    return super().alloc(size, host=host, uncached=uncached, cpu_access=cpu_access, contiguous=contiguous, force_devmem=True, **kwargs)
 
   def create_queue(self, queue_type, ring, gart, rptr, wptr, eop_buffer=None, cwsr_buffer=None, ctl_stack_size=0, ctx_save_restore_size=0,
                    xcc_id=0, idx=0):
