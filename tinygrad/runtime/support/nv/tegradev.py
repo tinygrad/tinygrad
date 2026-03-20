@@ -6,7 +6,7 @@ from tinygrad.runtime.support.hcq import HCQBuffer, MMIOInterface, FileIOInterfa
 from tinygrad.runtime.support.system import MAP_FIXED
 from tinygrad.helpers import round_up, to_mv
 
-_NVMAP_FREE = (ord('N') << 8) | 4  # _IO('N', 4), raw int handle
+_NVMAP_FREE = (ord('N') << 8) | 4
 _NVMAP_TAG = 0x0900
 
 def _nvmap_buf(nvmap_fd, size, cache_flags, align=4096):
@@ -21,7 +21,7 @@ class TegraMem:
   gpu_va: int = 0
   size: int = 0
   cpu_addr: int = 0
-  hMemory: int = 0  # synthetic RM handle for gpfifo_area lookup
+  hMemory: int = 0
 
 class TegraIface:
   _nvmap_fd, _ctrl_fd, _gpu_info = -1, -1, None
@@ -40,7 +40,7 @@ class TegraIface:
     self.dev, self.device_id = dev, device_id
     tegra_gpu_info = TegraIface._gpu_info
     self.compute_class, self.gpfifo_class, self.dma_class = tegra_gpu_info.compute_class, tegra_gpu_info.gpfifo_class, tegra_gpu_info.dma_copy_class
-    self.viddec_class = None  # no video decoder on Tegra iGPU
+    self.viddec_class = None
     self._handle_cnt = 0x10000
     self._as_fd, self._tsg_fd, self._subctx_veid = -1, -1, 0
     self._ch_fds: dict[int, int] = {}
@@ -80,7 +80,7 @@ class TegraIface:
       ch_fd = tegra.NVGPU_GPU_IOCTL_OPEN_CHANNEL(self._ctrl_fd, channel_fd=-1).channel_fd
       tegra.NVGPU_AS_IOCTL_BIND_CHANNEL(self._as_fd, channel_fd=ch_fd)
       tegra.NVGPU_TSG_IOCTL_BIND_CHANNEL_EX(self._tsg_fd, channel_fd=ch_fd, subcontext_id=self._subctx_veid)
-      tegra.NVGPU_IOCTL_CHANNEL_WDT(ch_fd, wdt_status=1)  # disable watchdog
+      tegra.NVGPU_IOCTL_CHANNEL_WDT(ch_fd, wdt_status=1)
 
       gpfifo_entries, gpfifo_buf_handle, gpfifo_va, userd_off = 0x10000, 0, 0, 0
       if params is not None:
