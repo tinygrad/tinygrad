@@ -411,7 +411,7 @@ class TestVizProfiler(BaseTestViz):
     j = load_profile(prof)
     event = j['layout']['NV:SDMA:0']['events'][0]
     gbs = sz/(dur*1e-6)*1e-9
-    self.assertTrue(event['fmt'].startswith(f"{gbs:.0f} GB/s"))
+    self.assertEqual(event['fmt'], f"{gbs:.0f} GB/s")
 
   def test_graph(self):
     prof = [ProfileDeviceEvent(device='NV', tdiff=decimal.Decimal(-1000)),
@@ -453,9 +453,7 @@ class TestVizProfiler(BaseTestViz):
     j = load_profile(prof)
     sdma_events = j['layout']['NV:1:SDMA:0']['events']
     gbs = sz/(dur*1e-6)*1e-9
-    timing_txt, trace_txt = sdma_events[0]['fmt'].split("\nTB:")
-    self.assertEqual(timing_txt, f"{gbs:.0f} GB/s")
-    self.assertEqual(json.loads(trace_txt)[0][0], __file__)
+    self.assertEqual(sdma_events[0]['fmt'], f"{gbs:.0f} GB/s")
 
   def test_block_ordering(self):
     prof = [ProfileDeviceEvent(device='NV', tdiff=decimal.Decimal(-1000)),
@@ -511,9 +509,15 @@ class TestVizProfiler(BaseTestViz):
 
   def test_calltrace(self):
     def fxn(): return Tensor.empty(10).mul(2).realize()
-    fxn()
-    trace = get_viz_list()[0]["steps"][0]["trace"]
-    assert any(fxn.__code__.co_filename == f and fxn.__code__.co_firstlineno == l for f,l,*_ in trace), str(trace)
+    with cpu_profile(TracingKey("test_fxn"), "CUSTOM"):
+      fxn()
+    codegen_trace = get_viz_list()[0]["steps"][0]["trace"]
+    assert any(fxn.__code__.co_filename == f and fxn.__code__.co_firstlineno == l for f,l,*_ in codegen_trace), str(codegen_trace)
+    profile_ret = load_profile(cpu_events)
+    e = profile_ret["layout"]["CUSTOM"]["events"][0]
+    self.assertEqual(e["name"], "test_fxn")
+    runtime_trace = json.loads(e["fmt"].replace("TB:", ""))
+    assert any(fxn.__code__.co_filename == f and fxn.__code__.co_firstlineno+1 == l for f,l,*_ in runtime_trace), str(runtime_trace)
 
   # can pack up to 1hr 11 min of trace events
   def test_trace_duration(self):
@@ -637,6 +641,195 @@ class TestVizMemoryLayout(BaseTestViz):
     programs = profile["layout"][a.device]["events"]
     users = profile["layout"][f"{a.device} Memory"]["events"].pop()["arg"]["users"]
     self.assertEqual(len(programs), len(set(users)), n)
+
+from tinygrad.uop.ops import KernelInfo
+from tinygrad.viz.serve import amdgpu_cfg
+from tinygrad.renderer.amd.dsl import s
+from tinygrad.runtime.autogen.amd.rdna3.ins import (s_add_u32, s_branch, s_cbranch_execz, s_cbranch_scc0, s_cbranch_scc1, s_cmp_eq_i32,
+                                                    s_cmp_eq_u64, s_code_end, s_endpgm, s_mov_b32, s_nop)
+from extra.gemm.amd_asm_matmul import Kernel
+from tinygrad.renderer.cstyle import AMDHIPRenderer
+
+class TestCfg(unittest.TestCase):
+  def setUp(self): self.arch = "gfx1100"
+
+  def get_cfg(self, name:str, k:Kernel):
+    insts = k.finalize()
+    def fxn(out:UOp) -> UOp:
+      lidx = UOp.special(1, "lidx0")
+      gidx = UOp.special(1, "gidx0")
+      sink = UOp.sink(out.base, lidx, gidx, arg=KernelInfo(name=name))
+      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg="NULL"), UOp(Ops.LINEAR, src=tuple([UOp(Ops.INS, arg=x) for x in insts]))))
+    with Context(EMULATE="AMD"):
+      out = Tensor.custom_kernel(Tensor.empty(1, device="NULL"), fxn=fxn)[0]
+      # TODO: uncomment the better version once EMULATE works in Context
+      #prg = out.schedule()[-1].lower().prg.p
+      prg = get_program(out.schedule()[-1].ast, AMDHIPRenderer(self.arch))
+      return amdgpu_cfg(prg.lib, self.arch)
+
+  def test_simple(self):
+    k = Kernel(arch=self.arch)
+    k.label("entry")
+    k.emit(s_branch(), target="bb1")
+    k.label("bb1")
+    k.emit(s_endpgm())
+    k.emit(s_code_end())
+    cfg = self.get_cfg("simple", k)["data"]
+    self.assertEqual(len(cfg["blocks"]), 2)
+
+  def test_diamond(self):
+    k = Kernel(arch=self.arch)
+    k.label("entry")
+    k.emit(s_mov_b32(s[0], 0))
+    k.emit(s_mov_b32(s[1], 0))
+    k.emit(s_cmp_eq_u64(s[0:1], 0))
+    k.emit(s_cbranch_scc1(), target="if")
+    k.emit(s_branch(), target="else")
+    k.label("if")
+    k.emit(s_nop(1))
+    k.emit(s_branch(), target="end")
+    k.label("else")
+    k.emit(s_nop(0))
+    k.label("end")
+    k.emit(s_endpgm())
+    k.emit(s_code_end())
+    ret = self.get_cfg("diamond", k)
+    cfg = ret["data"]
+    self.assertEqual(len(cfg["blocks"]), 5)
+    edge_count = sum(len(v) for v in cfg["paths"].values())
+    self.assertEqual(edge_count, 5)
+    references:dict[str, list[str]] = {}
+    for pc, tokens in cfg["pc_tokens"].items():
+      for t in tokens:
+        for key in t["keys"]: references.setdefault(key, []).append(pc)
+    self.assertEqual(len(references["r0"]), 2)
+    insts = [cfg["pc_tokens"][pc][0]["st"] for pc in references["r0"]]
+    self.assertEqual(insts, ['s_mov_b32', 's_cmp_eq_u64'])
+    end_block = [" ".join(t["st"] for t in cfg["pc_tokens"][pc]) for pc in list(cfg["blocks"].values())[-1]]
+    code_line = ret["src"].splitlines()[-1]
+    self.assertEqual(len(end_block), 2)
+    for st in [end_block[-1], code_line]:
+      assert st.startswith("s_code_end") and st.endswith("x)"), st
+
+  def test_loop(self):
+    k = Kernel(arch=self.arch)
+    k.label("entry")
+    k.emit(s_mov_b32(s[1], 4))
+    k.label("loop")
+    k.emit(s_add_u32(s[1], s[1], -1))
+    k.emit(s_cmp_eq_i32(s[1], 0))
+    k.emit(s_cbranch_scc0(), target="loop")
+    k.emit(s_endpgm())
+    k.emit(s_code_end())
+    self.get_cfg("simple_loop", k)
+
+  def test_loop_branch(self):
+    k = Kernel(arch=self.arch)
+    k.label("entry")
+    k.emit(s_mov_b32(s[1], 4))
+    k.label("loop")
+    k.emit(s_add_u32(s[1], s[1], -1))
+    k.emit(s_cmp_eq_i32(s[1], 2))
+    k.emit(s_cbranch_scc1(), target="cond")
+    k.emit(s_branch(), target="cont")
+    k.label("cond")
+    k.emit(s_add_u32(s[1], s[1], -2))
+    k.label("cont")
+    k.emit(s_cmp_eq_i32(s[1], 0))
+    k.emit(s_cbranch_scc0(), target="loop")
+    k.emit(s_endpgm())
+    k.emit(s_code_end())
+    self.get_cfg("loop_if", k)
+
+  def test_loop_break(self):
+    k = Kernel(arch=self.arch)
+    k.label("entry")
+    k.emit(s_mov_b32(s[1], 8))
+    k.label("loop")
+    k.emit(s_add_u32(s[1], s[1], -1))
+    k.emit(s_cmp_eq_i32(s[1], 5))
+    k.emit(s_cbranch_scc1(), target="break")
+    k.emit(s_cmp_eq_i32(s[1], 0))
+    k.emit(s_cbranch_scc0(), target="loop")
+    k.label("break")
+    k.emit(s_endpgm())
+    k.emit(s_code_end())
+    self.get_cfg("loop_break", k)
+
+  def test_switch(self):
+    k = Kernel(arch=self.arch)
+    k.label("entry")
+    k.emit(s_cmp_eq_i32(s[0], 0))
+    k.emit(s_cbranch_scc1(), target="case0")
+    k.emit(s_cmp_eq_i32(s[0], 1))
+    k.emit(s_cbranch_scc1(), target="case1")
+    k.emit(s_branch(), target="case2")
+    k.label("case0")
+    k.emit(s_nop(0))
+    k.emit(s_branch(), target="join")
+    k.label("case1")
+    k.emit(s_nop(1))
+    k.emit(s_branch(), target="join")
+    k.label("case2")
+    k.emit(s_nop(2))
+    k.emit(s_branch(), target="join")
+    k.label("join")
+    k.emit(s_endpgm())
+    k.emit(s_code_end())
+    self.get_cfg("switch_case", k)
+
+  def test_ping_pong(self):
+    k = Kernel(arch=self.arch)
+    k.label("entry")
+    k.emit(s_cmp_eq_i32(s[0], 0))
+    k.emit(s_cbranch_scc1(), target="ping")
+    k.emit(s_branch(), target="pong")
+    k.label("ping")
+    k.emit(s_cmp_eq_i32(s[1], 0))
+    k.emit(s_cbranch_scc1(), target="pong")
+    k.emit(s_branch(), target="end")
+    k.label("pong")
+    k.emit(s_cmp_eq_i32(s[2], 0))
+    k.emit(s_cbranch_scc1(), target="ping")
+    k.label("end")
+    k.emit(s_endpgm())
+    k.emit(s_code_end())
+    self.get_cfg("ping_pong", k)
+
+  def test_colored_blocks(self):
+    N = 10
+    k = Kernel(arch=self.arch)
+    k.label("entry")
+    k.emit(s_branch(), target="init0")
+    for i in range(N):
+      loop = f"loop{i}"
+      k.label(f"init{i}")
+      k.emit(s_mov_b32(s[1], i + 1))
+      k.emit(s_branch(), target=loop)
+      k.label(loop)
+      k.emit(s_nop(i & 7))
+      k.emit(s_add_u32(s[1], s[1], -1))
+      k.emit(s_cmp_eq_i32(s[1], 0))
+      k.emit(s_cbranch_scc0(), target=loop)
+      k.emit(s_branch(), target=f"init{i+1}" if i + 1 < N else "end")
+    k.label("end")
+    k.emit(s_endpgm())
+    k.emit(s_code_end())
+    self.get_cfg("test_colored_blocks", k)
+
+  def test_jump_back_to_end(self):
+    k = Kernel(arch=self.arch)
+    k.label("entry")
+    k.emit(s_mov_b32(s[1], 2))
+    k.emit(s_cbranch_execz(), target="loop")
+    k.label("end")
+    k.emit(s_endpgm())
+    k.label("loop")
+    k.emit(s_add_u32(s[1], s[1], -1))
+    k.emit(s_cmp_eq_i32(s[1], 0))
+    k.emit(s_branch(), target="end")
+    k.emit(s_code_end())
+    self.get_cfg("jump_back_to_end", k)
 
 if __name__ == "__main__":
   unittest.main()

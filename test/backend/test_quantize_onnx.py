@@ -204,13 +204,13 @@ class TestQuantizeOnnx(unittest.TestCase):
     W = Tensor(m2:=(np.random.uniform(0, 255, size=(N,N)).astype(wi))).realize()
     tg_dtype = dtypes.int8 if xi == np.int8 else dtypes.uint8
     out = (X.int().matmul(W.int())//1000)
-    if clip: out = out.clip(dtypes.min(tg_dtype),dtypes.max(tg_dtype))
+    if clip: out = out.clip(tg_dtype.min, tg_dtype.max)
     out = out.cast(tg_dtype)
     opts = [Opt(op=OptOps.UPCAST, axis=1, arg=128), Opt(op=OptOps.UNROLL, axis=0, arg=4)] if opts is None else opts
     sexec(out, opts, replace_src, run_count=1)
     tout = out.numpy()
     mout = ((m1.astype(np.int32) @ m2.astype(np.int32)) // 1000)
-    if clip: mout = mout.clip(dtypes.min(tg_dtype),dtypes.max(tg_dtype))
+    if clip: mout = mout.clip(tg_dtype.min, tg_dtype.max)
     mout = mout.astype(xi)
     print(tout)
     print(mout)

@@ -17,7 +17,7 @@ regCOMPUTE_USER_DATA_0 = 0x1be0 + amd_gpu.GC_BASE__INST0_SEG0
 regCOMPUTE_NUM_THREAD_X = 0x1ba7 + amd_gpu.GC_BASE__INST0_SEG0
 regGRBM_GFX_INDEX = 0x2200 + amd_gpu.GC_BASE__INST0_SEG1
 regSQ_THREAD_TRACE_BUF0_BASE = 0x39e8 + amd_gpu.GC_BASE__INST0_SEG1
-regSQ_THREAD_TRACE_BUF0_SIZE = {"rdna3": 0x39e9, "rdna4": 0x39e6}[MOCKGPU_ARCH] + amd_gpu.GC_BASE__INST0_SEG1
+regSQ_THREAD_TRACE_BUF0_SIZE = {"rdna3": 0x39e9, "rdna4": 0x39e6, "cdna4": 0x39e9}[MOCKGPU_ARCH] + amd_gpu.GC_BASE__INST0_SEG1
 regSQ_THREAD_TRACE_WPTR = 0x39ef + amd_gpu.GC_BASE__INST0_SEG1
 regSQ_THREAD_TRACE_STATUS = 0x39f4 + amd_gpu.GC_BASE__INST0_SEG1
 regCP_PERFMON_CNTL = 0x3808 + amd_gpu.GC_BASE__INST0_SEG1
@@ -200,11 +200,13 @@ class PM4Executor(AMDQueue):
       if st <= prg_addr < st+sz: prg_sz = sz - (prg_addr - st)
 
     # Get scratch size from COMPUTE_TMPRING_SIZE register
-    # For gfx11: WAVESIZE = ceildiv(64 * size_per_thread, 256), so size_per_thread ≈ WAVESIZE * 256 / 64 = WAVESIZE * 4
+    # WAVESIZE = ceildiv(lanes * size_per_thread, mem_alignment_size)
+    # GFX11+: mem_alignment_size=256, so size_per_thread = WAVESIZE * 256 / 64 = WAVESIZE * 4
+    # GFX9:   mem_alignment_size=1024, so size_per_thread = WAVESIZE * 1024 / 64 = WAVESIZE * 16
     try: tmpring_size = self.gpu.regs[regCOMPUTE_TMPRING_SIZE]
     except KeyError: tmpring_size = 0
-    wavesize = (tmpring_size >> 12) & 0x3FFF  # WAVESIZE field is bits 12:25 for gfx11
-    scratch_size = wavesize * 4  # This gives the scratch size per thread (lane)
+    wavesize = (tmpring_size >> 12) & 0x3FFF  # WAVESIZE field is bits 12:25
+    scratch_size = wavesize * (16 if self.gpu.arch == "cdna" else 4)  # per-thread scratch size in bytes
 
     assert prg_sz > 0, "Invalid prg ptr (not found in mapped ranges)"
     # Pass valid memory ranges, rsrc2, scratch_size, arch, and user data registers to Python emulator
@@ -271,6 +273,7 @@ class SDMAExecutor(AMDQueue):
       elif op == amd_gpu.SDMA_OP_GCR: self._execute_gcr()
       elif op == amd_gpu.SDMA_OP_COPY: self._execute_copy()
       elif op == amd_gpu.SDMA_OP_TIMESTAMP: self._execute_timestamp()
+      elif op == 32: self.rptr[0] += 4  # SDMA_OP_DUMMY_TRAP: pipeline flush, no interrupt
       else: raise RuntimeError(f"Unknown SDMA op {op}")
     return self.rptr[0] - prev_rptr
 
@@ -401,7 +404,7 @@ p2p_links_count 5
 cpu_core_id_base 0
 simd_id_base 2147488032
 max_waves_per_simd 16
-lds_size_in_kb 128
+lds_size_in_kb 160
 gds_size_in_kb 0
 num_gws 64
 wave_front_size 64

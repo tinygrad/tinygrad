@@ -2,7 +2,7 @@ import unittest
 from tinygrad import Tensor, Device, dtypes, Context
 from tinygrad.device import is_dtype_supported
 from tinygrad.helpers import getenv
-from extra.gemm.asm.cdna.gemm import asm_gemm
+from extra.gemm.cdna_asm_gemm import asm_gemm
 from test.helpers import needs_second_gpu
 
 # On non CDNA4 it will only validate the Tensor.custom_kernel integration
@@ -81,13 +81,37 @@ class TestGemm(unittest.TestCase):
   @needs_second_gpu
   def test_gemm_k_sharded_3d(self): verify_asm_gemm_k_sharded_3d(1, 64, 32, 2*64, gpus=2)
 
-# uses the Asm GEMM on CDNA4 only for speed reasons
-class TestGemmLarge(unittest.TestCase):
+# uses the smallest size for the cdna assembly gemm
+class TestAsmGEMM(unittest.TestCase):
   def setUp(self):
     if not is_cdna4():
-      self.skipTest("very slow on non mi350x")
+      self.skipTest("assembly gemm is only for cdna4")
 
   def test_tiny(self): verify_asm_gemm(1, 256, 256, 64)
+
+  def test_verify_with_numpy(self):
+    import numpy as np
+    M, N, K = 256, 256, 64
+    rng = np.random.default_rng(0)
+    a_np = (rng.random((M, K), dtype=np.float32) - 0.5).astype(np.half)
+    b_np = (rng.random((K, N), dtype=np.float32) - 0.5).astype(np.half)
+    c_np = a_np @ b_np
+    a, b = Tensor(a_np), Tensor(b_np)
+    c = asm_gemm(a, b)
+    c.realize()
+    # no validation on the NULL device
+    if a.device.startswith("NULL"): return None
+    np.testing.assert_allclose(c.numpy(), c_np, atol=2e-3, rtol=5e-2)
+
+# test the Asm GEMM with Llama shapes, only run on the real machine for speed
+class TestGemmLlama(unittest.TestCase):
+  def setUp(self):
+    if not is_cdna4() or getenv("MOCKGPU"):
+      self.skipTest("very slow on non mi350x")
+
+  @Context(ASM_GEMM=1)
+  def test_empty(self): (Tensor.empty(N:=getenv("N", 4096), N, dtype=dtypes.half)@Tensor.empty(N, N, dtype=dtypes.half)).realize()
+
   def test_simple(self): verify_asm_gemm(1, N:=getenv("N", 4096), N, N, dtype=dtypes.half)
   def test_gemm(self): verify_asm_gemm(1, 8192, 4096, 14336)
   def test_gemm_batched(self): verify_asm_gemm(2, 8192, 4096, 4096)
@@ -157,7 +181,7 @@ class TestGemmLarge(unittest.TestCase):
 
 class TestMagicGu(unittest.TestCase):
   def test_magicgu_matches_old(self):
-    from extra.gemm.asm.cdna.asm import _magicgu_mulhi, TILE_M, TILE_N, TILE_K
+    from extra.gemm.cdna_asm_gemm import _magicgu_mulhi, TILE_M, TILE_N, TILE_K
     old_iters_args = {64: (67108864, 0), 128: (33554432, 0), 224: (613566757, 2147483656)}
     old_gemm_shapes = [
       (8192, 4096, 4096), (8192, 14336, 4096), (8192, 4096, 14336),
