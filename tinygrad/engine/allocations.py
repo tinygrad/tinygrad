@@ -1,7 +1,6 @@
 from dataclasses import dataclass, field
 from tinygrad.uop.ops import UOp, UPat, PatternMatcher, Ops, GroupOp, graph_rewrite, track_rewrites
-from tinygrad.dtype import ImageDType
-from tinygrad.helpers import prod, DEBUG, VIZ, pluralize, all_int
+from tinygrad.helpers import VIZ, pluralize, all_int
 
 @dataclass
 class AllocCtx:
@@ -42,12 +41,7 @@ add_tags = PatternMatcher([
 ])
 
 def _buffer_like(u:UOp) -> UOp:
-  dtype = u.dtype
-  if isinstance(dtype, ImageDType):
-    if prod(dtype.shape) != prod(u.max_shard_shape) or ([x for x in u.max_shard_shape if x != 1] or [1])[-1] % 4 != 0:
-      if DEBUG >= 1: print(f"demoting Image {dtype} with shape {u.max_shard_shape}")
-      dtype = dtype.base
-  buffer = UOp.new_buffer(u.device, u.shard_size, dtype).reshape(u.max_shard_shape).shrink_to(u.shard_shape)
+  buffer = UOp.new_buffer(u.device, u.shard_size, u.dtype).reshape(u.max_shard_shape).shrink_to(u.shard_shape)
   if isinstance(u.device, tuple) and u.axis is not None: buffer = buffer.multi(u.axis)
   return buffer
 
