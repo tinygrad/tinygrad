@@ -14,12 +14,12 @@ from tinygrad.mixin import OpMixin
 from tinygrad.mixin.movement import _align_left
 from tinygrad.uop.ops import smax, smin, resolve, UOp, Ops, sint, identity_element, all_metadata, _index_to_concrete_int, sint_to_uop, Variable
 from tinygrad.engine.schedule import ExecItem, complete_create_schedule_with_vars
-from tinygrad.device import Device, Buffer
+from tinygrad.device import Buffer
 from tinygrad.engine.realize import run_schedule
 from tinygrad.engine.allocations import transform_to_call
 
-# TODO: this should be the only usage of Device
 def canonicalize_device(device:str|tuple|list|None) -> str|tuple[str, ...]:
+  from tinygrad.device import Device
   if not isinstance(device, (tuple, list)): return Device.canonicalize(device)
   return canonical[0] if len(canonical:=tuple(Device.canonicalize(d) for d in device)) == 1 else canonical
 
@@ -56,15 +56,15 @@ def get_shape(x) -> tuple[int, ...]:
   if not all_same(subs:=[get_shape(xi) for xi in x]): raise ValueError(f"inhomogeneous shape from {x}")
   return (len(subs),) + (subs[0] if subs else ())
 
-def _frompy(x:list|tuple|bytes, dtype:DType) -> UOp:
+def _frompy(x:list|tuple|bytes, dtype:DType, device:str|tuple[str,...]) -> UOp:
   if isinstance(x, bytes): ret, data = UOp.new_buffer("PYTHON", len(x)//dtype.itemsize, dtype), x
   else:
     ret = UOp.new_buffer("PYTHON", prod(shape:=get_shape(x)), dtype).reshape(shape)
     assert dtype.fmt is not None, f"{dtype=} has None fmt"
     truncate_function = truncate[dtype]
     data = struct.pack(f"{ret.size}{dtype.fmt}", *[truncate_function(dtype.const(xi)) for xi in fully_flatten(x)])
-  # fake realize
-  ret.buffer.allocate(memoryview(data if Device.DEFAULT != "PYTHON" else bytearray(data)))
+  # fake realize. if target device is PYTHON it needs bytearray to be writable
+  ret.buffer.allocate(memoryview(data if device != "PYTHON" else bytearray(data)))
   return ret
 
 def _get_winograd_matcols(mat, dims:int, shp:tuple[sint, ...], device:str|tuple[str, ...], dtype:DType) -> list[list[Tensor]]:
@@ -148,13 +148,13 @@ class Tensor(OpMixin):
     elif isinstance(data, InvalidType):
       assert _dtype is not None
       data = UOp.const(_dtype, data, _device)
-    elif isinstance(data, bytes): data = _frompy(data, _dtype or dtypes.uint8)
+    elif isinstance(data, bytes): data = _frompy(data, _dtype or dtypes.uint8, _device)
     elif isinstance(data, (list, tuple)):
       if _dtype is None:
         if (d := fully_flatten(data)) and all(isinstance(s, bool) for s in d): _dtype = dtypes.bool
         else: _dtype = dtypes.default_int if d and all_int(d) else dtypes.default_float  # NOTE: this works because all_int([True, False]) is True
-      if _dtype in [dtypes.bfloat16, *dtypes.fp8s]: data = _frompy(data, dtypes.float32).cast(_dtype)
-      else: data = _frompy(data, _dtype)
+      if _dtype in [dtypes.bfloat16, *dtypes.fp8s]: data = _frompy(data, dtypes.float32, _device).cast(_dtype)
+      else: data = _frompy(data, _dtype, _device)
     elif is_numpy_ndarray(data):
       import numpy as np
       assert isinstance(data, np.ndarray), f"expected np.ndarray, got {data}"
