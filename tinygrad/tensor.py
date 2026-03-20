@@ -3630,6 +3630,10 @@ class Tensor(OpMixin):
     (bs,_,iy,ix), (cout,cin,H,W) = self.shape, weight.shape
     x, w = self, weight.reshape(groups, (rcout := cout//groups), cin, H, W)
 
+    padding_neg, padding_pos = [min(0, p) for p in self._resolve_pool_pads(padding, 2)], [max(0, p) for p in self._resolve_pool_pads(padding, 2)]
+    x = x.pad(padding_neg)
+    iy, ix = x.shape[2:]
+
     # hack for non multiples of 4 on cin
     if cin % 4 != 0 and not (cin == 1 and groups%4 == 0):
       x = x.reshape(bs, groups, cin, iy, ix)   # do this always?
@@ -3686,7 +3690,7 @@ class Tensor(OpMixin):
     else: w = w.reshape(cout//4, H, rcin_hi, W, rcin_lo, 4).permute(0,1,2,3,5,4)
 
     # prepare input
-    x = x.permute(0,3,4,5,1,2).pad(self._resolve_pool_pads(padding,2))._pool((H,W), stride, dilation)# -> (bs, groups, rcin_hi, rcin_lo, oy, ox, H, W)
+    x = x.permute(0,3,4,5,1,2).pad(padding_pos)._pool((H,W), stride, dilation)# -> (bs, groups, rcin_hi, rcin_lo, oy, ox, H, W)
     x = x.permute(0,4,5,1,2,3,6,7).reshape(bs, (oy := x.shape[4]), (ox := x.shape[5]), *group_shape, 1, 1, rcin_hi, rcin_lo, H, W)
 
     # prepare weights
