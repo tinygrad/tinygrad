@@ -14,7 +14,7 @@ def prod(x:Iterable[T]) -> T|int: return functools.reduce(operator.mul, x, 1)
 
 # NOTE: helpers is not allowed to import from anything else in tinygrad
 OSX, WIN = platform.system() == "Darwin", sys.platform == "win32"
-CI = os.getenv("CI", "") != ""
+CI = os.getenv("CI", "") != "" and os.getenv("RUNNER_ENVIRONMENT", "") == "github-hosted"
 ARCH_X86 = any(x in platform.processor() for x in ("Intel", "i386", "x86_64"))
 BASEDIR = pathlib.Path(__file__).parent
 
