@@ -589,7 +589,7 @@ jobs:
     - name: reset process replay
       run: test/external/process_replay/reset.py
     - name: openpilot compile3 0.11.0 driving_vision
-      run: BENCHMARK_LOG=openpilot_0_11_0_vision PYTHONPATH="." DEV=QCOM FLOAT16=1 NOLOCALS=1 taskset -c 4-7 python3 examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/v0.11.0/selfdrive/modeld/models/driving_vision.onnx
+      run: BENCHMARK_LOG=openpilot_0_11_0_vision PYTHONPATH="." ASSERT_MIN_STEPS_TIME=17 DEV=QCOM FLOAT16=1 IMAGE=1 NOLOCALS=1 taskset -c 4-7 python3 examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/v0.11.0/selfdrive/modeld/models/driving_vision.onnx
     - name: openpilot compile3 0.11.0 driving_policy
       run: BENCHMARK_LOG=openpilot_0_11_0_policy PYTHONPATH="." ASSERT_MIN_STEP_TIME=3 DEV=QCOM FLOAT16=1 IMAGE=1 NOLOCALS=1 taskset -c 4-7 python3 examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/v0.11.0/selfdrive/modeld/models/driving_policy.onnx
     - name: openpilot compile3 0.11.0 dmonitoring
