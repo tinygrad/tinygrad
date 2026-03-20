@@ -233,6 +233,34 @@ const drawLine = (ctx, x, y, opts) => {
   ctx.stroke();
 }
 
+const drawArrow = (ctx, from, to, color) => {
+  if (from == null || to == null) return; // TODO: handle out of range
+  // ai code, mostly correct
+  const fromLeft = from.x0;
+  const fromRight = from.x1;
+  const fromY = (from.y0+from.y1)/2;
+  const toLeft = to.x0;
+  const toRight = to.x1;
+  const toY = (to.y0+to.y1)/2;
+  const startX = fromRight <= toLeft ? fromRight : fromLeft;
+  const endX = fromRight <= toLeft ? toLeft : toRight;
+  const dir = startX <= endX ? 1 : -1;
+  const dx = Math.abs(endX-startX);
+  const bend = Math.max(12, Math.min(40, dx/2));
+  ctx.beginPath();
+  ctx.moveTo(startX, fromY);
+  ctx.bezierCurveTo(startX+bend*dir, fromY, endX-bend*dir, toY, endX, toY);
+  ctx.strokeStyle = color;
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(endX, toY);
+  ctx.lineTo(endX-6*dir, toY-4);
+  ctx.lineTo(endX-6*dir, toY+4);
+  ctx.closePath();
+  ctx.fillStyle = color;
+  ctx.fill();
+}
+
 function tabulate(rows) {
   const root = d3.create("div").style("display", "grid").style("grid-template-columns", `${Math.max(...rows.map(x => x[0].length), 0)}ch 1fr`).style("gap", "0.2em").style("white-space", "nowrap");
   for (const [k,v] of rows) { root.append("div").text(k); root.append("div").node().append(v); }
@@ -281,6 +309,7 @@ function getZoomIdentity() {
 
 const Modes = {0:'read', 1:'write', 2:'write+read'};
 
+let arrowPairs = [];
 function setFocus(key) {
   if (key !== focusedShape) {
     saveToHistory({ shape:focusedShape });
@@ -292,6 +321,8 @@ function setFocus(key) {
       const [st, et] = xscale.range().map(zoomLevel.invertX, zoomLevel).map(xscale.invert, xscale);
       if (x1 < st || x0 > et) zoomLevel = d3.zoomIdentity.translate(-xscale((x0+x1)/2-(et-st)/2)*zoomLevel.k, 0).scale(zoomLevel.k);
     }
+    const links = e?.arg.links || [data.links.get(key)];
+    arrowPairs = links?.[0] == null ? [] : links.map(x => [key, x]);
     focusedShape = key; d3.select("#timeline").call(canvasZoom.transform, zoomLevel);
   }
   const { eventType, e } = selectShape(key);
@@ -337,11 +368,6 @@ function setFocus(key) {
       if (shapeInfo?.length > 5) p.append("span").text(" "+shapeInfo[5]);
       if (shape != null) p.style("cursor", "pointer").on("click", () => setFocus(shape));
     }
-  }
-  // shape linking
-  const links = e?.arg.links || [data.links.get(key)];
-  if (links[0] != null) {
-    console.log(key, links);
   }
   // instructions list renderer
   let instList = document.getElementById("insts");
@@ -598,6 +624,7 @@ async function renderProfiler(path, opts) {
     xscale.domain([st, et]);
     const profilerEl = profiler.node();
     const visibleYStart = profilerEl.scrollTop-canvasTop + rect(profilerEl).top, visibleYEnd = visibleYStart+profilerEl.clientHeight;
+    const shapeBounds = new Map();
     ctx.textBaseline = "middle";
     // draw shapes
     for (const [k, { shapes, eventType, linear, visible, offsetY, valueMap, pcolor, scolor, rowBorderColor }] of data.tracks) {
@@ -631,10 +658,12 @@ async function renderProfiler(path, opts) {
           visible.push({ y0:y, y1:y+e.height, x0:x, x1:x+width, arg:e.arg });
           ctx.fillStyle = e.fillColor; ctx.fill();
           addBorder?.(width);
+          shapeBounds.set(e.arg.key, { x0:x, x1:x+width, y0:y, y1:y+e.height });
           // add label
           drawText(ctx, e.label, x+2, y+e.height/2, width);
         }
         if (focusedShape != null && e.arg?.key === focusedShape) { ctx.strokeStyle = pcolor; ctx.stroke(); }
+        // else if (arrowPairs[0]?.includes(e.arg?.key)) ctx.strokeStyle = "#c888b0"; ctx.stroke();
       }
       // draw row line
       if (rowBorderColor != null) {
@@ -642,6 +671,8 @@ async function renderProfiler(path, opts) {
         drawLine(ctx, [0, canvasWidth], [y, y], { color:rowBorderColor });
       }
     }
+    // draw arrows
+    for (const [a, b] of arrowPairs) drawArrow(ctx, shapeBounds.get(a), shapeBounds.get(b), "#c888b0");
     // draw axes
     ctx.translate(0, baseOffset);
     const y = secondaryTick != null ? tickSize+padding : 0;
@@ -926,7 +957,7 @@ async function main() {
       }
       appendSteps(ul, i, steps);
     }
-    return setState({ currentCtx: 5, currentStep: 2, currentRewrite: 0, expandSteps: true });
+    return setState({ currentCtx:-1 });
   }
   // ** center graph
   const { currentCtx, currentStep, currentRewrite, expandSteps } = state;

@@ -350,7 +350,6 @@ def sqtt_timeline(data:bytes, lib:bytes, target:str) -> list[ProfileEvent]:
   from tinygrad.renderer.amd.sqtt import (map_insts, InstructionInfo, PacketType, INST, InstOp, VALUINST, IMMEDIATE, IMMEDIATE_MASK, VMEMEXEC,
                                           ALUEXEC, INST_RDNA4, InstOpRDNA4, TS_DELTA_OR_MARK, TS_DELTA_OR_MARK_RDNA4, CDNA_INST, InstOpCDNA,
                                           WAVEEND, CDNA_WAVEEND, WAVERDY, AluSrc)
-  from tinygrad.renderer.amd.sqtt import print_packets
   ret:list[ProfileEvent] = []
   row_ends:dict[str, Decimal] = {}
   row_counts:dict[str, itertools.count] = {}
@@ -377,7 +376,9 @@ def sqtt_timeline(data:bytes, lib:bytes, target:str) -> list[ProfileEvent]:
       if p.src is AluSrc.VALU_SALU: dispatch += [exec_pending["SALU"].pop(0), exec_pending["VALU"].pop(0)]
       elif p.src is AluSrc.VALU: dispatch += [exec_pending["VALU"].pop(0)]
       elif p.src is AluSrc.SALU: dispatch += [exec_pending["SALU"].pop(0)]
+      assert isinstance(e.name, TracingKey), f"ALUEXEC op key was {e.name}"
       e.name = TracingKey(e.name.display_name, ret=f"LINK:{','.join(dispatch)}")
+    # TODO: add vmem
   for p, info in map_insts(data, lib, target):
     if len(ret) > getenv("MAX_SQTT_PKTS", 50_000): break
     if isinstance(p, (TS_DELTA_OR_MARK, TS_DELTA_OR_MARK_RDNA4)) and p.is_marker:
