@@ -213,6 +213,17 @@ class TestFunction(unittest.TestCase):
     np.testing.assert_equal(a.numpy(), [11,21,31])  # TODO: should be [1,2,3]
     np.testing.assert_equal(b.numpy(), [10,20,30])
 
+  def test_assign_input_twice(self):
+    @function
+    def f(x:Tensor) -> Tensor:
+      x += 1
+      return x
+    x = Tensor([10]).contiguous().realize()
+    np.testing.assert_equal(f(x).numpy(), [11])
+    np.testing.assert_equal(x.numpy(), [12]) # ?
+    np.testing.assert_equal(f(x).numpy(), [13]) # ?
+    np.testing.assert_equal(x.numpy(), [14]) # ?
+
   def test_view_assign_explicit_buffer(self):
     """view assign on an explicit param's buffer should not create implicit inputs."""
     class State:
