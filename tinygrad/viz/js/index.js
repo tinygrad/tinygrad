@@ -338,6 +338,11 @@ function setFocus(key) {
       if (shape != null) p.style("cursor", "pointer").on("click", () => setFocus(shape));
     }
   }
+  // shape linking
+  const links = e?.arg.links || [data.links.get(key)];
+  if (links[0] != null) {
+    console.log(key, links);
+  }
   // instructions list renderer
   let instList = document.getElementById("insts");
   if (data.pcMap == null) return d3.select(instList?.parentElement).html("");
@@ -366,7 +371,7 @@ async function renderProfiler(path, opts) {
   displaySelection("#profiler");
   // support non realtime x axis units
   formatTime = opts.unit === "ms" ? formatMicroseconds : formatCycles;
-  if (data?.path !== path) { data = {tracks:new Map(), axes:{}, path, first:null}; focusedDevice = null; focusedShape = null; }
+  if (data?.path !== path) { data = {tracks:new Map(), axes:{}, path, first:null, links:new Map()}; focusedDevice = null; focusedShape = null; }
   setFocus(focusedShape);
   // layout once!
   if (data.tracks.size !== 0) return updateProgress(Status.COMPLETE);
@@ -455,11 +460,14 @@ async function renderProfiler(path, opts) {
         }
         // tiny device events go straight to the rewrite rule
         const key = k.startsWith("TINY") ? null : `${k}-${j}`;
-        let info = e.info != null ? "\n"+e.info : "", trace = null, pc = null, link = null
+        let info = e.info != null ? "\n"+e.info : "", trace = null, pc = null, links = null
         if (info.startsWith("\nPC:")) { pc = parseInt(e.info.split(":")[1]); info = ""; }
         if (info.startsWith("\nTB:")) { trace = info; info = ""; }
-        if (info.startsWith("\nLINK:")) { link = info.replace("\nLINK:", "").split(","); info = ""; }
-        const arg = { tooltipText:" N:"+shapes.length+"\n"+formatTime(e.dur)+info, label, pc, trace, link, bufs:[], key, ctx:shapeRef?.ctx, step:shapeRef?.step };
+        if (info.startsWith("\nLINK:")) {
+          links = info.replace("\nLINK:", "").split(","); info = "";
+          for (const e of links) data.links.set(e, key);
+        }
+        const arg = { tooltipText:" N:"+shapes.length+"\n"+formatTime(e.dur)+info, label, pc, trace, links, bufs:[], key, ctx:shapeRef?.ctx, step:shapeRef?.step };
         if (e.key != null) shapeMap.set(e.key, key);
         // offset y by depth
         shapes.push({x:e.st, y:levelHeight*depth, width:e.dur, height:levelHeight, arg, label:opts.hideLabels ? null : label, fillColor });
