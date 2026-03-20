@@ -49,13 +49,15 @@ class FlatTransformer:
     self.head_dim = dim // n_heads
     self.n_rep = self.n_heads // self.n_kv_heads
 
+    scaled_std = 0.02 / math.sqrt(2 * n_layers)
+
     # Attention
     self.wqkv = self.lin_per_layer(dim, self.n_heads * self.head_dim + self.n_kv_heads * self.head_dim * 2)
-    self.wo = self.lin_per_layer(self.n_heads * self.head_dim, dim)
+    self.wo = self.lin_per_layer(self.n_heads * self.head_dim, dim, std=scaled_std)
 
     # FeedForward
     self.w1 = self.lin_per_layer(dim, hidden_dim)
-    self.w2 = self.lin_per_layer(hidden_dim, dim)
+    self.w2 = self.lin_per_layer(hidden_dim, dim, std=scaled_std)
     self.w3 = self.lin_per_layer(dim, hidden_dim)
 
     self.norm_eps = norm_eps
@@ -65,14 +67,15 @@ class FlatTransformer:
     # output
     self.norm = nn.RMSNorm(dim, norm_eps)
     self.tok_embeddings = nn.Embedding(vocab_size, dim)
+    self.tok_embeddings.weight = Tensor.normal(vocab_size, dim, mean=0.0, std=0.02)
     self.output = nn.Linear(dim, vocab_size, bias=False)
+    self.output.weight = Tensor.normal(vocab_size, dim, mean=0.0, std=dim**-0.5)
     self.freqs_cis = precompute_freqs_cis(dim // n_heads, max_context * 2, rope_theta).contiguous().requires_grad_(False)
 
-  def lin_per_layer(self, in_features:int, out_features:int):
-    bound = 1 / math.sqrt(in_features)
+  def lin_per_layer(self, in_features:int, out_features:int, std:float=0.02):
     dt = FP8_DTYPE if FP8 else None
     if getenv("ZEROS"): return Tensor.zeros(self.n_layers, out_features, in_features, dtype=dt)
-    return Tensor.uniform(self.n_layers, out_features, in_features, low=-bound, high=bound, dtype=dt)
+    return Tensor.normal(self.n_layers, out_features, in_features, mean=0.0, std=std, dtype=dt)
 
   def attention(self, x:Tensor, freqs_cis:Tensor, attention_norm:Tensor, wqkv:Tensor, wo:Tensor):
     x = rmsnorm(x, self.norm_eps) * attention_norm
@@ -97,7 +100,7 @@ class FlatTransformer:
     x_w3 = matmul(x.contiguous_backward(), w3)
     return matmul(x_w1 * x_w3, w2)
 
-  @function(precompile=True, precompile_backward=True)
+  # @function(precompile=True, precompile_backward=True)
   def run_layer(self, x:Tensor, freqs_cis:Tensor,
                 attention_norm:Tensor, wqkv:Tensor, wo:Tensor,
                 ffn_norm:Tensor, w1:Tensor, w2:Tensor, w3:Tensor):
