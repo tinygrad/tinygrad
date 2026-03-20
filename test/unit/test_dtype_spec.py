@@ -1,7 +1,7 @@
 import unittest, math, subprocess
-from tinygrad.tensor import Tensor, dtypes, Device
-from tinygrad.dtype import DType, DTYPES_DICT
-from tinygrad.device import is_dtype_supported
+from tinygrad.tensor import Tensor
+from tinygrad.dtype import dtypes, DType, DTYPES_DICT
+from tinygrad.device import Device, is_dtype_supported
 from tinygrad.helpers import getenv, DEBUG, EMULATED_DTYPES
 from test.helpers import slow
 from hypothesis import given, settings, strategies as strat

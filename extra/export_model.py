@@ -1,11 +1,11 @@
 from typing import Tuple, Dict, List, Optional
-from tinygrad.dtype import DType
+from tinygrad.dtype import DType, dtypes
 from tinygrad.renderer import ProgramSpec
-from tinygrad.tensor import Device, Tensor
+from tinygrad.tensor import Tensor
+from tinygrad.device import Device
 from tinygrad.engine.jit import TinyJit
 from tinygrad.nn.state import get_state_dict
 from tinygrad.helpers import Context, to_mv
-from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import Ops
 import json
 from collections import OrderedDict
