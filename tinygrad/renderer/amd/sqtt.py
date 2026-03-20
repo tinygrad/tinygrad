@@ -8,6 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Iterator
 from enum import Enum
+from tinygrad.helpers import getenv
 from tinygrad.renderer.amd.dsl import BitField, FixedBitField, Inst, bits
 from tinygrad.runtime.autogen.amd.rdna3.ins import s_endpgm # same encoding as RDNA4
 
@@ -710,7 +711,10 @@ if __name__ == "__main__":
   prg_events = {e.tag: e for e in data if type(e).__name__ == "ProfileProgramEvent" and e.tag is not None}
   sqtt_events = [e for e in data if type(e).__name__ == "ProfileSQTTEvent"]
   dev_targets = {e.device:f"gfx{e.props['gfx_target_version']//1000}" for e in data if type(e).__name__ == "ProfileDeviceEvent" and e.props}
+  evt_num = getenv("SQTT_EVENT", -1)
   for i, event in enumerate(sqtt_events):
     prg = prg_events.get(event.kern)
-    print(f"\n=== event {i} {prg.name if prg is not None else ''} ===")
-    print_packets(map_insts(event.blob, prg.lib, dev_targets[prg.device]) if prg is not None else decode(event.blob))
+    print(f"=== event {i} {prg.name if prg is not None else ''} ===")
+    if evt_num == -1 or i == evt_num:
+      print_packets(map_insts(event.blob, prg.lib, dev_targets[prg.device]) if prg is not None else decode(event.blob))
+      print("\n")
