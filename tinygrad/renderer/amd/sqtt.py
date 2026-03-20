@@ -8,7 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Iterator
 from enum import Enum
-from tinygrad.helpers import getenv
+from tinygrad.helpers import getenv, colored
 from tinygrad.renderer.amd.dsl import BitField, FixedBitField, Inst, bits
 from tinygrad.runtime.autogen.amd.rdna3.ins import s_endpgm # same encoding as RDNA4
 
@@ -679,7 +679,6 @@ PACKET_COLORS = {
 }
 
 def format_packet(p) -> str:
-  from tinygrad.helpers import colored
   name = type(p).__name__
   if isinstance(p, (INST, INST_RDNA4)):
     op_name = p.op.name if isinstance(p.op, (InstOp, InstOpRDNA4)) else f"0x{p.op:02x}"
@@ -696,7 +695,6 @@ def format_packet(p) -> str:
   return f"{p._time:8}: {colored(f'{name:18}', PACKET_COLORS.get(name.replace('_RDNA4', ''), 'white'))} {fields}"
 
 def print_packets(packets) -> None:
-  from tinygrad.helpers import getenv
   skip = {"NOP", "TS_DELTA_SHORT", "TS_WAVE_STATE", "TS_DELTA_OR_MARK",
           "TS_DELTA_S5_W2", "TS_DELTA_S5_W3", "TS_DELTA_S8_W3", "REG", "EVENT"} if not getenv("NOSKIP") else {"NOP"}
   for data in packets:
