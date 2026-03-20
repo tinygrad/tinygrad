@@ -16,6 +16,7 @@ use_wmma = getenv("WMMA")
 if use_wmma:
   WMMA_M, WMMA_N, WMMA_K = 16, 16, 16
   WAVES_M, WAVES_N = 2, 2
+  LANES_PER_WAVE_M, LANES_PER_WAVE_N = 2, 16
   TM = BLOCK_M // (WAVES_M * WMMA_M)  # 4
   TN = BLOCK_N // (WAVES_N * WMMA_N)  # 4
 else:
@@ -76,11 +77,11 @@ def block_128x128_gemm(c:UOp, a:UOp, b:UOp) -> UOp:
     wmma_arg = ('WMMA_16_16_16_half_float', (16, 16, 16), dtypes.half, dtypes.float, 'AMD', 32,
                 (((301, 16),), ((311, 16),), ()), ())
     out = UOp(Ops.WMMA, dtypes.float.vec(8), (a_frag, b_frag, acc_load), arg=wmma_arg)
-    acc_store = acc[tile_m, tile_n].store(out)
-    acc = acc.after(acc_store.end(tile_m, tile_n, k).barrier().end(k_tile))
+    acc = acc.after(acc[tile_m, tile_n].store(out).end(tile_m, tile_n).end(k).barrier().end(k_tile))
 
     # store accumulator to output
-    c = c.reshape(WAVES_M, TM, WMMA_M, WAVES_N, TN, WMMA_N)
+    c = c.reshape(WAVES_M, TM, WMMA_M,
+                  WAVES_N, TN, WMMA_N)
     st_m = UOp.range(TM, 9, AxisType.LOOP)
     st_n = UOp.range(TN, 10, AxisType.LOOP)
     stores = [c[wave_m, st_m, e*2 + lane_m, wave_n, st_n, lane_n].store(acc[st_m, st_n].gep(e)) for e in range(8)]
@@ -103,7 +104,7 @@ def block_128x128_gemm(c:UOp, a:UOp, b:UOp) -> UOp:
     b_frag = b_frag.reshape(1, TN).expand(TM, TN)
     acc = acc.after(acc.store(acc.after(k) + (a_frag * b_frag)).end(k).barrier().end(k_tile))
 
-    # store back to c
+    # store accumulator to output
     c = c.reshape(WAVES_M, TM//UNROLL_M, LANES_PER_WAVE_M, UNROLL_M,
                   WAVES_N, TN//UNROLL_N, LANES_PER_WAVE_N, UNROLL_N)
     c = c.permute((0,4,2,6, 1,3,5,7)).reshape(THREADS_PER_BLOCK, TM, TN)
