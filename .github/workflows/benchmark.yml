@@ -332,7 +332,7 @@ jobs:
     # - name: Fuzz Padded Tensor Core GEMM (PTX)
     #   run: NV=1 NV_PTX=1 M_START=12 M_STOP=20 M_STEP=1 N_START=6 N_STOP=10 N_STEP=1 K_START=28 K_STOP=36 K_STEP=1 HALF=1 TC_OPT=2 python3 ./extra/gemm/fuzz_matmul.py
     - name: HEVC Decode Benchmark
-      run: VALIDATE=1 MAX_FRAMES=100 JITBEAM=1 NV=1 PYTHONPATH=. python3 extra/hevc/decode.py
+      run: VALIDATE=1 MAX_FRAMES=100 ASSERT_FPS=1400 JITBEAM=1 NV=1 PYTHONPATH=. python3 extra/hevc/decode.py
     - name: Train MNIST
       run: time PYTHONPATH=. NV=1 TARGET_EVAL_ACC_PCT=96.0 python3 examples/beautiful_mnist.py
     - name: Run 10 CIFAR training steps
@@ -590,10 +590,14 @@ jobs:
         rm -f /tmp/staging.db /tmp/staging.db-shm /tmp/staging.db-wal
     - name: reset process replay
       run: test/external/process_replay/reset.py
-    - name: openpilot compile3 0.10.0 driving_policy
-      run: BENCHMARK_LOG=openpilot_0_10_0_policy PYTHONPATH="." ASSERT_MIN_STEP_TIME=3 DEV=QCOM FLOAT16=1 IMAGE=2 NOLOCALS=1 taskset -c 4-7 python3 examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/v0.10.0/selfdrive/modeld/models/driving_policy.onnx
-    - name: openpilot compile3 0.10.0 dmonitoring
-      run: BENCHMARK_LOG=openpilot_0_10_0_dmonitoring PYTHONPATH="." ASSERT_MIN_STEP_TIME=11 DEV=QCOM FLOAT16=1 IMAGE=2 NOLOCALS=1 taskset -c 4-7 python3 examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/v0.10.0/selfdrive/modeld/models/dmonitoring_model.onnx
+    - name: IMAGE=1 openpilot compile3 0.11.0 driving_vision
+      run: BENCHMARK_LOG=image_1_openpilot_0_11_0_vision PYTHONPATH="." DEV=QCOM FLOAT16=1 IMAGE=2 NOLOCALS=1 taskset -c 4-7 python3 examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/v0.11.0/selfdrive/modeld/models/driving_vision.onnx
+    - name: openpilot compile3 0.11.0 driving_vision
+      run: BENCHMARK_LOG=openpilot_0_11_0_vision PYTHONPATH="." ASSERT_MIN_STEP_TIME=17 DEV=QCOM FLOAT16=1 IMAGE=2 NOLOCALS=1 taskset -c 4-7 python3 examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/v0.11.0/selfdrive/modeld/models/driving_vision.onnx
+    - name: openpilot compile3 0.11.0 driving_policy
+      run: BENCHMARK_LOG=openpilot_0_11_0_policy PYTHONPATH="." ASSERT_MIN_STEP_TIME=3 DEV=QCOM FLOAT16=1 IMAGE=2 NOLOCALS=1 taskset -c 4-7 python3 examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/v0.11.0/selfdrive/modeld/models/driving_policy.onnx
+    - name: openpilot compile3 0.11.0 dmonitoring
+      run: BENCHMARK_LOG=openpilot_0_11_0_dmonitoring PYTHONPATH="." ASSERT_MIN_STEP_TIME=11 DEV=QCOM FLOAT16=1 IMAGE=2 NOLOCALS=1 taskset -c 4-7 python3 examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/v0.11.0/selfdrive/modeld/models/dmonitoring_model.onnx
     - name: DEBUG=2 openpilot compile3 0.10.1 driving_vision
       run: PYTHONPATH="." DEBUG=2 DEV=QCOM FLOAT16=1 IMAGE=2 NOLOCALS=1 taskset -c 4-7 python3 examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/720392c9a5b986981fdbed1bb8c47a6c5573a50e/selfdrive/modeld/models/driving_vision.onnx
     - name: DEBUG=2 IMAGE=1 openpilot compile3 0.10.1 driving_vision
@@ -616,6 +620,27 @@ jobs:
         PYTHONPATH=. CC=clang-19 DSP=1 NOOPT=1 CNT=2 DEBUG=2 python3 examples/test_onnx_imagenet.py /tmp/model.quant.onnx
     - name: Run process replay tests
       run: cp test/external/process_replay/process_replay.py ./process_replay.py && git fetch origin master && git -c advice.detachedHead=false checkout origin/master && PYTHONPATH=. python3 process_replay.py
+
+  testcommausbgpubenchmark:
+    name: UsbGPU Benchmark (comma)
+    runs-on: [self-hosted, Linux, comma4]
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash -e -o pipefail {0}
+    if: github.repository_owner == 'tinygrad'
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+    - name: setup staging db
+      if: github.ref == 'refs/heads/update_benchmark_staging'
+      run: |
+        echo "CACHEDB=/tmp/staging.db" >> $GITHUB_ENV
+        rm -f /tmp/staging.db /tmp/staging.db-shm /tmp/staging.db-wal
+    - name: openpilot compile3 0.10.1 driving_vision
+      run: BENCHMARK_LOG=usbgpu_openpilot_0_10_1_vision PYTHONPATH="." DEV=AMD AMD_LLVM=1 AMD_IFACE=USB ASSERT_MIN_STEP_TIME=50 python3 examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/720392c9a5b986981fdbed1bb8c47a6c5573a50e/selfdrive/modeld/models/driving_vision.onnx
+    - name: openpilot load_pickle 0.10.1 driving_vision
+      run: BENCHMARK_LOG=usbgpu_openpilot_0_10_1_vision_load_pickle PYTHONPATH="." DEV=AMD AMD_IFACE=USB ASSERT_MIN_LOAD_TIME=15 python3 examples/openpilot/load_pickle.py
 
   testreddriverbenchmark:
     name: AM Benchmark
@@ -678,6 +703,14 @@ jobs:
     - name: Run 10 MLPerf Bert training steps (1 gpu)
       # TODO: remove BERT_LAYERS once scheduler is fast
       run: BENCHMARK_LOG=bert_10steps AMD=1 CAPTURE_PROCESS_REPLAY=0 DEFAULT_FLOAT=HALF BENCHMARK=10 BS=66 GPUS=1 BERT_LAYERS=2 MODEL=bert python3 examples/mlperf/model_train.py
+    - name: Remote
+      run: |
+        pkill -f 'extra/remote/serve.py' || true
+        PYTHONPATH=. python3 extra/remote/serve.py 6482 &
+        sleep 1
+        DEBUG=2 PYTHONPATH=. REMOTE=127.0.0.1:6482 AM_RESET=1 AMD=1 AMD_IFACE=PCI python3 test/test_tiny.py
+        DEBUG=2 PYTHONPATH=. REMOTE=127.0.0.1:6482 AM_RESET=1 AMD=1 AMD_AQL=1 AMD_IFACE=PCI python3 test/test_tiny.py
+        pkill -f 'extra/remote/serve.py' || true
     - name: Run process replay tests
       run: cp test/external/process_replay/process_replay.py ./process_replay.py && git fetch origin master && git -c advice.detachedHead=false checkout origin/master && PYTHONPATH=. python3 process_replay.py
 
@@ -734,5 +767,12 @@ jobs:
     - name: Run 10 MLPerf Bert training steps (1 gpu)
       # TODO: remove BERT_LAYERS once scheduler is fast
       run: BENCHMARK_LOG=bert_10steps NV=1 CAPTURE_PROCESS_REPLAY=0 DEFAULT_FLOAT=HALF BENCHMARK=10 BS=66 GPUS=1 BERT_LAYERS=2 MODEL=bert python3 examples/mlperf/model_train.py
+    - name: Remote
+      run: |
+        pkill -f 'extra/remote/serve.py' || true
+        PYTHONPATH=. python3 extra/remote/serve.py 6483 &
+        sleep 1
+        DEBUG=2 PYTHONPATH=. REMOTE=127.0.0.1:6483 NV=1 python3 test/test_tiny.py
+        pkill -f 'extra/remote/serve.py' || true
     - name: Run process replay tests
       run: cp test/external/process_replay/process_replay.py ./process_replay.py && git fetch origin master && git -c advice.detachedHead=false checkout origin/master && PYTHONPATH=. python3 process_replay.py

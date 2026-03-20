@@ -143,6 +143,22 @@
   g.label rect.bg.highlight {
     fill: #5f0059;
   }
+  #insts .line {
+    display: flex;
+    flex-direction: column;
+    margin-bottom: 8px;
+  }
+  #insts .left {
+    width: fit-content;
+    display: flex;
+    gap: 4px;
+  }
+  #insts .left.highlight {
+    background-color: rgba(0, 199, 47, 0.2);
+  }
+  #insts .pc {
+    color: #73daca;
+  }
   g.node.highlight rect.node, .edgePath.highlight, g.port circle {
     stroke: #89C9A2;
   }

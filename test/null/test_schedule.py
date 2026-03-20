@@ -117,7 +117,7 @@ class TestContiguous(unittest.TestCase):
   def test_size_change_buffer_view(self):
     a = Tensor.empty(4)
     b = a.reshape((1, 1, 4)).shrink(((0, 1), (0, 1), (0, 3))).contiguous()
-    check_schedule(b, 1)
+    check_schedule(b, 0)  # contiguous shrink of a realized buffer is a zero-copy BUFFER_VIEW
 
   def test_double_contiguous_realizes_once(self):
     a = Tensor.empty(4, 1)
@@ -233,6 +233,18 @@ class TestSchedule(unittest.TestCase):
     c = (a*b).sum()
     d = Tensor.empty(1).assign(c)
     check_schedule(d, 1)
+
+  def test_detach_assign(self):
+    a = Tensor.ones(4, 4).contiguous().realize()
+    buf1, buf2 = Tensor.empty(4, 4).contiguous(), Tensor.empty(4, 4).contiguous()
+    r = buf2.assign(buf1.assign(a + 1.0) * 2.0)
+    check_schedule(r.detach().contiguous(), 2)
+
+  def test_contiguous_backward_assign(self):
+    a = Tensor.ones(4, 4).contiguous().realize()
+    buf1, buf2 = Tensor.empty(4, 4).contiguous(), Tensor.empty(4, 4).contiguous()
+    r = buf2.assign(buf1.assign(a + 1.0) * 2.0)
+    check_schedule(r.contiguous_backward().contiguous(), 2)
 
   def test_mulacc_relu_fusion(self):
     a = Tensor.empty(10)
@@ -568,21 +580,22 @@ class TestSchedule(unittest.TestCase):
 
   # this is the failing case in openpilot...it's very simple like this
   def test_image_conv_fusion(self):
-    w1 = Tensor.empty(16, 16, 1, 1)
-    b1 = Tensor.empty(16)
-    w2 = Tensor.empty(16, 16, 1, 1)
-    b2 = Tensor.empty(16)
-    w3 = Tensor.empty(16, 16, 1, 1)
-    b3 = Tensor.empty(16)
+    with Context(OPENPILOT_HACKS=1):
+      w1 = Tensor.empty(16, 16, 1, 1)
+      b1 = Tensor.empty(16)
+      w2 = Tensor.empty(16, 16, 1, 1)
+      b2 = Tensor.empty(16)
+      w3 = Tensor.empty(16, 16, 1, 1)
+      b3 = Tensor.empty(16)
 
-    x = Tensor.empty(1, 16, 32, 32)
-    x = base = x.image_conv2d(w1, b1)
-    x = x.image_conv2d(w2, b2) + base
-    x = x.image_conv2d(w3, b3)
+      x = Tensor.empty(1, 16, 32, 32)
+      x = base = x.image_conv2d(w1, b1)
+      x = x.image_conv2d(w2, b2) + base
+      x = x.image_conv2d(w3, b3)
 
-    # NOOP, 3 convs, contiguous
-    #check_schedule(x, 5)
-    check_schedule(x, 7)
+      # NOOP, 3 convs, contiguous
+      #check_schedule(x, 5)
+      check_schedule(x, 7)
 
   def test_image_conv_fusion_minimal(self):
     b1 = Tensor.empty(16)
@@ -1157,6 +1170,85 @@ class TestFusionOp(unittest.TestCase):
     sched = r.schedule()
     self.assertEqual(len(sched), 1)
     self.assertLess(time.perf_counter()-st, 2.0)
+
+# NOTE: the NULL backend supports BUFFER_VIEW
+class TestBufferView(unittest.TestCase):
+  def test_shrink_contiguous_is_buffer_view(self):
+    # simple 1D shrink of a realized buffer should be BUFFER_VIEW, not a copy kernel
+    a = Tensor.arange(100).contiguous().realize()
+    b = a.shrink(((10, 50),)).contiguous()
+    run_schedule(check_schedule(b, 0))
+
+  def test_shrink_2d_contiguous_is_buffer_view(self):
+    a = Tensor.arange(100).reshape(10,10).contiguous().realize()
+    b = a.shrink(((1, 5),None)).contiguous()
+    run_schedule(check_schedule(b, 0))
+
+  def test_chained_shrink_is_buffer_view(self):
+    a = Tensor.arange(1000).contiguous().realize()
+    b = a.shrink(((200, 800),)).shrink(((0, 300),)).reshape((30, 10)).shrink(((20, 25), (0, 10))).contiguous()
+    run_schedule(check_schedule(b, 0))
+
+  def test_shrink_non_shard_axis_is_buffer_view_multi(self):
+    # indexing a non-shard axis of a realized sharded tensor should be BUFFER_VIEW on each device, not copy kernels
+    # this is the flat_llama pattern: weight[layer_idx] where weight is (n_layers, out, dim) sharded on axis=1
+    devices = ("NULL:1", "NULL:2")
+    a = Tensor.arange(8*4*10).reshape(8, 4, 10).contiguous().shard(devices, axis=1).realize()
+    run_schedule(check_schedule(a[3].contiguous(), 0))
+
+  def test_shrink_2d_non_shard_axis_multi(self):
+    devices = ("NULL:1", "NULL:2")
+    a = Tensor.arange(6*4).reshape(6, 4).contiguous().shard(devices, axis=1).realize()
+    run_schedule(check_schedule(a.shrink(((1, 4), None)).contiguous(), 0))
+
+  def test_shrink_shard_axis_0_multi(self):
+    # shrinking a middle dim is not contiguous per shard, so this needs copy kernels
+    devices = ("NULL:1", "NULL:2")
+    a = Tensor.arange(4*6*2).reshape(4, 6, 2).contiguous().shard(devices, axis=0).realize()
+    run_schedule(check_schedule(a.shrink((None, (2, 5), None)).contiguous(), 2))
+
+  def test_reshape_then_shrink_multi(self):
+    devices = ("NULL:1", "NULL:2")
+    a = Tensor.arange(8*6).reshape(8, 6).contiguous().shard(devices, axis=1).realize()
+    run_schedule(check_schedule(a.reshape(4, 2, 6)[1].contiguous(), 0))
+
+  def test_permute_then_shrink_multi(self):
+    # permute makes per-shard view non-contiguous, needs copy kernels
+    devices = ("NULL:1", "NULL:2")
+    a = Tensor.arange(4*6*2).reshape(4, 6, 2).contiguous().shard(devices, axis=1).realize()
+    run_schedule(check_schedule(a.permute(1, 0, 2).shrink(((0, 6), (1, 3), None)).contiguous(), 2))
+
+  def test_multi_buffer_view_4_devices(self):
+    devices = tuple(f"NULL:{i}" for i in range(4))
+    a = Tensor.arange(8*12).reshape(8, 12).contiguous().shard(devices, axis=1).realize()
+    run_schedule(check_schedule(a[5].contiguous(), 0))
+
+  def test_chained_shrink_multi(self):
+    devices = ("NULL:1", "NULL:2")
+    a = Tensor.arange(10*8).reshape(10, 8).contiguous().shard(devices, axis=1).realize()
+    run_schedule(check_schedule(a.shrink(((2, 8), None)).shrink(((1, 4), None)).contiguous(), 0))
+
+  # negative tests: these should NOT become BUFFER_VIEW (non-contiguous per shard)
+  def test_expand_multi_not_buffer_view(self):
+    devices = ("NULL:1", "NULL:2")
+    a = Tensor.arange(4*2).reshape(4, 1, 2).contiguous().shard(devices, axis=2).realize()
+    run_schedule(check_schedule(a.expand(4, 3, 2).contiguous(), 2))
+
+  def test_pad_multi_not_buffer_view(self):
+    devices = ("NULL:1", "NULL:2")
+    a = Tensor.arange(4*2).reshape(4, 2).contiguous().shard(devices, axis=1).realize()
+    run_schedule(check_schedule(a.pad(((1, 1), (0, 0))).contiguous(), 2))
+
+  def test_flip_multi_not_buffer_view(self):
+    devices = ("NULL:1", "NULL:2")
+    a = Tensor.arange(4*2).reshape(4, 2).contiguous().shard(devices, axis=1).realize()
+    run_schedule(check_schedule(a.flip(0).contiguous(), 2))
+
+class TestInvalidTensor(unittest.TestCase):
+  def test_full_invalid_is_zero_kernels(self):
+    from tinygrad.dtype import Invalid
+    t = Tensor.full((4,), Invalid, dtype=dtypes.float)
+    check_schedule(t, 0)
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)

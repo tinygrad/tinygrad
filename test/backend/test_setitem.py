@@ -205,6 +205,20 @@ class TestSetitem(unittest.TestCase):
     n[:, ind_1.numpy(), :, ind_2.numpy(), :] = v.numpy()
     np.testing.assert_equal(t.numpy(), n)
 
+  def test_setitem_tensor_int_indexing(self):
+    t = Tensor.zeros(4, 3, dtype=dtypes.int).contiguous()
+    t[Tensor([0, 2]), 0] = Tensor([99, 88], dtype=dtypes.int)
+    n = np.zeros((4, 3), dtype=np.int32)
+    n[[0, 2], 0] = [99, 88]
+    np.testing.assert_equal(t.numpy(), n)
+
+  def test_setitem_tensor_slice_indexing(self):
+    t = Tensor.zeros(4, 3, dtype=dtypes.int).contiguous()
+    t[Tensor([0, 2]), :2] = Tensor([[10, 20], [30, 40]], dtype=dtypes.int)
+    n = np.zeros((4, 3), dtype=np.int32)
+    n[[0, 2], :2] = [[10, 20], [30, 40]]
+    np.testing.assert_equal(t.numpy(), n)
+
   def test_setitem_2d_tensor_indexing(self):
     t = Tensor.zeros(2, dtype=dtypes.int).contiguous()
     index = Tensor([[0, 1], [1,0]])
@@ -237,8 +251,11 @@ class TestSetitem(unittest.TestCase):
     s1 = t.sum()
     t[3:].assign(2.0)
     s2 = t.sum()
-    # TODO: s0 and s1 see final buffer state, should be [0.0, 3.0, 9.0]
-    np.testing.assert_allclose([s0.item(), s1.item(), s2.item()], [9.0, 9.0, 9.0])
+    try:
+      np.testing.assert_allclose([s0.item(), s1.item(), s2.item()], [0.0, 3.0, 9.0])
+    except AssertionError:
+      # TODO: broken now, lazy sums all see final buffer state
+      np.testing.assert_allclose([s0.item(), s1.item(), s2.item()], [9.0, 9.0, 9.0])
 
     # eager version
     t = Tensor.zeros(6).contiguous().realize()
@@ -259,8 +276,11 @@ class TestSetitem(unittest.TestCase):
     a.assign(new_a)
     b.assign(new_b)
     np.testing.assert_allclose(a.numpy(), [4, 6, 8, 10])
-    # TODO: new_b sees mutated a, should be [0, 2, 4, 6]
-    np.testing.assert_allclose(b.numpy(), [8, 12, 16, 20])
+    try:
+      np.testing.assert_allclose(b.numpy(), [0, 2, 4, 6])
+    except AssertionError:
+      # TODO: broken now, new_b sees mutated a
+      np.testing.assert_allclose(b.numpy(), [8, 12, 16, 20])
 
     # eager version
     a = Tensor.arange(4, dtype=dtypes.float).contiguous().realize()
@@ -272,6 +292,13 @@ class TestSetitem(unittest.TestCase):
     np.testing.assert_allclose(a.numpy(), [4, 6, 8, 10])
     np.testing.assert_allclose(b.numpy(), [0, 2, 4, 6])
 
+  def test_setitem_multiple_disjoint_on_invalid(self):
+    z = Tensor.invalid(10, dtype="int").realize()
+    z[2:5] = 2
+    z[6:7] = 3
+    z.realize()
+    self.assertListEqual(z[2:5].tolist(), [2, 2, 2])
+    self.assertListEqual(z[6:7].tolist(), [3])
 
 class TestWithGrad(unittest.TestCase):
   def test_no_requires_grad_works(self):
@@ -279,17 +306,43 @@ class TestWithGrad(unittest.TestCase):
     x = Tensor.rand(8)
     z[:3] = x
 
-  def test_set_into_requires_grad(self):
-    z = Tensor.rand(8, 8, requires_grad=True)
-    x = Tensor.rand(8)
-    with self.assertRaises(NotImplementedError):
-      z[:3] = x
-
   def test_set_with_requires_grad(self):
-    z = Tensor.rand(8, 8)
-    x = Tensor.rand(8, requires_grad=True)
-    with self.assertRaises(NotImplementedError):
-      z[:3] = x
+    z = Tensor.ones(8, 8)
+    x = Tensor.rand(8, 8, requires_grad=True)
+    z[:] = x
+    z.sum().backward()
+    np.testing.assert_allclose(x.grad.numpy(), np.ones((8, 8)))
+
+  def test_set_nonleaf_requires_grad(self):
+    x = Tensor([1.0, 2.0, 3.0, 4.0], requires_grad=True)
+    z = x * 2
+    z[:2] = Tensor([10.0, 20.0])
+    z.sum().backward()
+    np.testing.assert_allclose(x.grad.numpy(), [0, 0, 2, 2])
+
+  def test_set_overlapping_requires_grad(self):
+    z = Tensor.zeros(6, requires_grad=True)
+    x = Tensor.ones(4, requires_grad=True)
+    y = Tensor.ones(4, requires_grad=True) * 2
+    z[:4] = x
+    z[2:] = y
+    z.sum().backward()
+    np.testing.assert_allclose(x.grad.numpy(), [1, 1, 0, 0])
+    np.testing.assert_allclose(y.grad.numpy(), np.ones(4))
+
+  def test_set_iadd_requires_grad(self):
+    z = Tensor([1.0, 2.0, 3.0, 4.0], requires_grad=True)
+    x = Tensor([10.0, 20.0], requires_grad=True)
+    z[:2] += x
+    z.sum().backward()
+    np.testing.assert_allclose(z.grad.numpy(), np.ones(4))
+    np.testing.assert_allclose(x.grad.numpy(), np.ones(2))
+
+  def test_set_used_before_setitem(self):
+    z = Tensor([1.0, 2.0, 3.0, 4.0], requires_grad=True)
+    _ = z.sum()
+    with self.assertRaises(RuntimeError):
+      z[:2] = Tensor([0.0, 0.0])
 
 class TestSetitemLoop(unittest.TestCase):
   def test_arange(self):

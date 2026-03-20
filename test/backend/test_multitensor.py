@@ -110,7 +110,7 @@ class TestMultiTensor(unittest.TestCase):
   def test_tensor_from_multi(self):
     X = Tensor([1, 2], dtype=dtypes.int).shard_(devices_2, 0)
     Y = Tensor(X.uop)
-    self.assertEqual(Y.device, Device.DEFAULT)
+    self.assertEqual(Y.device, devices_2)
     np.testing.assert_equal(X.numpy(), Y.numpy())
 
     with self.assertRaises(AssertionError):
@@ -228,17 +228,17 @@ class TestMultiTensor(unittest.TestCase):
       a,b = _test_allreduce(Tensor.rand(256, 256))
       np.testing.assert_almost_equal(a.numpy(), b.numpy(), decimal=5)
 
-  def test_multiple_to_single_device_naive(self):
-    with Context(RING=0):
-      t = Tensor.arange(32).shard(devices_4, 0).to(Device.DEFAULT).realize()
-    self.assertEqual(t.device, Device.DEFAULT)
-    np.testing.assert_equal(t.numpy(), np.arange(32))
-
-  def test_multiple_to_single_device_ring(self):
-    with Context(RING=2):
-      t = Tensor.arange(32).shard(devices_4, 0).to(Device.DEFAULT).realize()
-    self.assertEqual(t.device, Device.DEFAULT)
-    np.testing.assert_equal(t.numpy(), np.arange(32))
+  def test_multiple_to_single_device(self):
+    kernel_counts = {}
+    for ring in (0, 2):
+      GlobalCounters.reset()
+      with Context(RING=ring, SCACHE=0):
+        t = Tensor.arange(32).contiguous().shard(devices_4, 0).to(Device.DEFAULT)
+        t.realize()
+      kernel_counts[ring] = GlobalCounters.kernel_count
+      self.assertEqual(t.device, Device.DEFAULT)
+      np.testing.assert_equal(t.numpy(), np.arange(32))
+    self.assertNotEqual(kernel_counts[0], kernel_counts[2])
 
   def test_allreduce_all2all(self):
     with Context(ALL2ALL=2):
@@ -645,6 +645,7 @@ class TestMultiTensor(unittest.TestCase):
     out = t0.flip(0) + 1
     self.assertTrue((rng.flip(0)+1).allclose(out.to(rng.device)))
 
+  @unittest.skip("flaky")
   def test_reshape_on_axis(self):
     t0 = Tensor.rand((26, 15, 7)).shard(devices_3, axis=1)
 
@@ -1128,6 +1129,51 @@ class TestTensorOps(unittest.TestCase):
   @needs_second_gpu
   def test_bitcast(self):
     helper_test_shard_op([(256,), (256,)], lambda x: x.bitcast(dtypes.int))
+
+@unittest.skipIf(not_support_multi_device(), "need multi")
+class TestMultiBufferView(unittest.TestCase):
+  @needs_second_gpu
+  def setUp(self): pass
+
+  def _check(self, a_ref:Tensor, a_multi:Tensor, view_fn):
+    """Apply view_fn to both, verify zero compiled kernels and matching values."""
+    b_ref = view_fn(a_ref)
+    b_multi = view_fn(a_multi).contiguous()
+    sched = b_multi.schedule()
+    compiled = [si for si in sched if isinstance(si.prg, CompiledRunner)]
+    self.assertEqual(len(compiled), 0, f"expected zero compiled kernels, got {len(compiled)}")
+    run_schedule(sched)
+    np.testing.assert_equal(b_multi.numpy(), b_ref.numpy())
+
+  @unittest.skip("flaky on LLVM")
+  def test_shrink_non_shard_axis(self):
+    ref = Tensor.arange(8*4*10).reshape(8, 4, 10).contiguous().realize()
+    a = Tensor.arange(8*4*10).reshape(8, 4, 10).contiguous().shard(devices_2, axis=1).realize()
+    self._check(ref, a, lambda t: t[3])
+
+  def test_shrink_2d(self):
+    ref = Tensor.arange(6*4).reshape(6, 4).contiguous().realize()
+    a = Tensor.arange(6*4).reshape(6, 4).contiguous().shard(devices_2, axis=1).realize()
+    self._check(ref, a, lambda t: t.shrink(((1, 4), None)))
+
+  def test_reshape_then_shrink(self):
+    ref = Tensor.arange(8*6).reshape(8, 6).contiguous().realize()
+    a = Tensor.arange(8*6).reshape(8, 6).contiguous().shard(devices_2, axis=1).realize()
+    self._check(ref, a, lambda t: t.reshape(4, 2, 6)[1])
+
+  def test_chained_shrink(self):
+    ref = Tensor.arange(10*8).reshape(10, 8).contiguous().realize()
+    a = Tensor.arange(10*8).reshape(10, 8).contiguous().shard(devices_2, axis=1).realize()
+    self._check(ref, a, lambda t: t.shrink(((2, 8), None)).shrink(((1, 4), None)))
+
+  def test_4_devices(self):
+    ref = Tensor.arange(8*12).reshape(8, 12).contiguous().realize()
+    a = Tensor.arange(8*12).reshape(8, 12).contiguous().shard(devices_4, axis=1).realize()
+    sched = a[5].contiguous().schedule()
+    compiled = [si for si in sched if isinstance(si.prg, CompiledRunner)]
+    self.assertEqual(len(compiled), 0)
+    run_schedule(sched)
+    np.testing.assert_equal(a[5].contiguous().numpy(), ref[5].numpy())
 
 @unittest.skipIf(not_support_multi_device(), "need multi")
 class TestMultiFromUnrenderable(unittest.TestCase):

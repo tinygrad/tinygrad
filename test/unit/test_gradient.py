@@ -12,10 +12,10 @@ class TestTensorGradient(unittest.TestCase):
     self.assertListEqual(dx.tolist(), [[2.0, 2.0, 2.0], [0.0, 0.0, 0.0], [-2.0, -2.0, -2.0]])
     self.assertListEqual(dy.tolist(), [[1.0, 1.0, 1.0]])
 
-  def test_raises(self):
+  def test_zero_if_not_used(self):
     x = Tensor([1.0, 2.0, 3.0])
     w = Tensor.randn((3,))
-    with self.assertRaises(RuntimeError): x.sum().gradient(w)
+    self.assertListEqual(x.sum().gradient(w)[0].tolist(), [0.0, 0.0, 0.0])
 
   def test_with_custom_gradient(self):
     x = Tensor([1.0, 2.0, 3.0])
@@ -67,6 +67,14 @@ class TestTensorGradient(unittest.TestCase):
     (x*x)[0].backward()
     np.testing.assert_allclose(x.grad.numpy(), [2.0+3.0+2*3.0])
     self.assertIs(x.grad, old_grad)
+
+  def test_gradient_through_chained_unrealized_setitem(self):
+    g1 = Tensor.zeros(4).contiguous()
+    g1[2] = Tensor(1.0)
+    g2 = Tensor.zeros(5, 4).contiguous()
+    g2[0] = g1
+    x = Tensor.randn(4, 4)
+    np.testing.assert_allclose(x.pad(((1,0),(0,0))).gradient(x, gradient=g2)[0].numpy(), np.zeros((4, 4)))
 
 class TestViewGradient(unittest.TestCase):
   def test_expand(self):

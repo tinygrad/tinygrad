@@ -408,6 +408,23 @@ class TestVOP3P(unittest.TestCase):
     self.assertEqual(lo, 0x0005, f"lo: expected 0x0005, got 0x{lo:04x}")
     self.assertEqual(hi, 0x4003, f"hi: expected 0x4003, got 0x{hi:04x}")
 
+  def test_v_pk_add_u16_literal_constant(self):
+    """V_PK_ADD_U16 with a literal constant (value > 64, requires VOP3P_LIT encoding).
+    Regression test: VOP3P literal constants were not passed to rsrc_dyn, so literal src read as 0.
+    """
+    instructions = [
+      s_mov_b32(s[0], 0x1C001C00),  # packed u16: hi=0x1C00, lo=0x1C00 (f16 for 2^-8)
+      v_mov_b32_e32(v[0], s[0]),
+      v_pk_add_u16(v[1], 0x2000, v[0], opsel_hi=2, opsel_hi2=1),  # add 0x2000 bias to both halves
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = st.vgpr[0][1]
+    lo = result & 0xffff
+    hi = (result >> 16) & 0xffff
+    # lo = 0x1C00 + 0x2000 = 0x3C00 (f16 1.0), hi = 0x1C00 + 0x2000 = 0x3C00 (f16 1.0)
+    self.assertEqual(lo, 0x3C00, f"lo: expected 0x3C00, got 0x{lo:04x}")
+    self.assertEqual(hi, 0x3C00, f"hi: expected 0x3C00, got 0x{hi:04x}")
+
 
 class TestWMMAF16(unittest.TestCase):
   """Tests for WMMA F16 output variant (V_WMMA_F16_16X16X16_F16).

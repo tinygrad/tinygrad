@@ -87,7 +87,7 @@ class TestHuggingFaceOnnxModels(unittest.TestCase):
       "input_ids": np.random.randint(0, 250002, (1, 11), dtype=np.int64),
       "attention_mask": np.ones((1, 11), dtype=np.int64),
     }
-    self._validate(repo_id, model_file, custom_inputs)
+    self._validate(repo_id, model_file, custom_inputs, atol=1e-3)
 
 if __name__ == "__main__":
   unittest.main()

@@ -262,8 +262,8 @@ def _extract_pcode_rdna2(pages: list[list[tuple[float, float, str, str]]], name_
         all_instructions.append((page_idx, float(y_key), name, opcode))
       else:
         for dy in range(1, min(5, len(sorted_ys) - yi)):
-          next_y = sorted_ys[yi + dy]
-          cont = [t for x, t, f in by_y[next_y] if 105 < x < 135 and f == '/F1.0']
+          peek_y = sorted_ys[yi + dy]
+          cont = [t for x, t, f in by_y[peek_y] if 105 < x < 135 and f == '/F1.0']
           if cont:
             full = name + cont[0].strip()
             if full in name_to_op: all_instructions.append((page_idx, float(y_key), full, opcode))

@@ -1,7 +1,7 @@
 name: Unit Tests
 env:
   # increment this when downloads substantially change to avoid the internet
-  CACHE_VERSION: '17'
+  CACHE_VERSION: '18'
   CAPTURE_PROCESS_REPLAY: 1
   GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   PYTHONPATH: ${{ github.workspace }}
@@ -244,6 +244,37 @@ jobs:
     - name: Run TYPED=1
       run: CHECK_OOB=0 DEV=CPU TYPED=1 python test/test_tiny.py
 
+  nulltest:
+    name: Null Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+    - name: Setup Environment
+      uses: ./.github/actions/setup-tinygrad
+      with:
+        key: unittest-13
+        pydeps: "pillow ftfy regex pre-commit"
+        deps: testing_unit
+        llvm: 'true'
+        amd: 'true'
+    - name: Run NULL backend tests
+      run: NULL=1 python -m pytest -n=auto test/null/ --durations=20
+    - name: Run targetted tests on NULL backend
+      run: NULL=1 python3 -m unittest test.backend.test_multitensor.TestMultiTensor.test_data_parallel_resnet_train_step
+    # TODO: too slow
+    # - name: Run SDXL on NULL backend
+    #   run: NULL=1 DEBUG=1 python3 examples/sdxl.py --seed 0 --noshow --timing --fakeweights
+    - name: Run Clip tests for SD MLPerf on NULL backend
+      run: NULL=1 python -m pytest -n=auto test/external/mlperf_stable_diffusion/external_test_models.py::TestOpenClip --durations=20
+    - name: Run AMD emulated BERT training on NULL backend
+      run: EMULATE=AMD_RDNA4 NULL=1 NULL_ALLOW_COPYOUT=1 CAPTURE_PROCESS_REPLAY=0 DEFAULT_FLOAT=HALF BENCHMARK=10 BS=66 GPUS=1 BERT_LAYERS=2 MODEL=bert python3 examples/mlperf/model_train.py
+    # TODO: support fake weights
+    #- name: Run LLaMA 7B on 4 fake devices
+    #  run: NULL=1 python3 examples/llama.py --gen 1 --size 7B --shard 4 --prompt "Hello." --count 3 --temperature 0 --timing
+
   unittest:
     name: Unit Tests
     runs-on: ubuntu-latest
@@ -268,20 +299,6 @@ jobs:
       run: |
         CPU=1 python test/null/test_device.py TestRunAsModule.test_module_runs
         CPU=1 python -m pytest -n=auto test/unit/ --durations=20
-    - name: Run NULL backend tests
-      run: NULL=1 python -m pytest -n=auto test/null/ --durations=20
-    - name: Run targetted tests on NULL backend
-      run: NULL=1 python3 -m unittest test.backend.test_multitensor.TestMultiTensor.test_data_parallel_resnet_train_step
-    # TODO: too slow
-    # - name: Run SDXL on NULL backend
-    #   run: NULL=1 DEBUG=1 python3 examples/sdxl.py --seed 0 --noshow --timing --fakeweights
-    - name: Run Clip tests for SD MLPerf on NULL backend
-      run: NULL=1 python -m pytest -n=auto test/external/mlperf_stable_diffusion/external_test_models.py::TestOpenClip --durations=20
-    - name: Run AMD emulated BERT training on NULL backend
-      run: EMULATE=AMD_RDNA4 NULL=1 NULL_ALLOW_COPYOUT=1 CAPTURE_PROCESS_REPLAY=0 DEFAULT_FLOAT=HALF BENCHMARK=10 BS=66 GPUS=1 BERT_LAYERS=2 MODEL=bert python3 examples/mlperf/model_train.py
-    # TODO: support fake weights
-    #- name: Run LLaMA 7B on 4 fake devices
-    #  run: NULL=1 python3 examples/llama.py --gen 1 --size 7B --shard 4 --prompt "Hello." --count 3 --temperature 0 --timing
     - name: Run GC tests
       run: python test/external/external_uop_gc.py
     - name: External Benchmark Schedule
@@ -644,7 +661,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install llvm-21 llvm-21-tools cloc
       - name: Install rocprof-trace-decoder
-        run: sudo PYTHONPATH="." ./extra/sqtt/install_sqtt_decoder.py
+        run: sudo PYTHONPATH="." ./extra/sqtt/install_rocprof_decoder.py
       - name: Run AMD renderer tests
         run: AMD_LLVM=0 python -m pytest -n=auto test/amd/ --durations 20
       - name: Run AMD renderer tests (AMD_LLVM=1)
@@ -691,8 +708,7 @@ jobs:
       fail-fast: false
       matrix:
         backend: [amd, amdllvm]
-        arch: [rdna3, rdna4]
-        #arch: [rdna3, rdna4, cdna4]
+        arch: [rdna3, rdna4, cdna4]
 
     name: Linux (${{ matrix.backend }} ${{ matrix.arch }})
     runs-on: ubuntu-22.04
@@ -718,7 +734,7 @@ jobs:
           python3 -c "from tinygrad import Device; assert Device.DEFAULT in ['AMD'], Device.DEFAULT"
           DEBUG=5 FORWARD_ONLY=1 python3 test/test_tiny.py TestTiny.test_plus
       - name: Run pytest (amd)
-        run: python -m pytest -n=auto test/backend/test_ops.py test/backend/test_dtype.py test/backend/test_dtype_alu.py test/backend/test_linearizer.py test/backend/test_randomness.py test/backend/test_jit.py test/backend/test_graph.py test/backend/test_multitensor.py test/device/test_hcq.py test/testextra/test_cfg_viz.py test/external/external_test_am.py --durations=20
+        run: python -m pytest -n=auto test/backend/test_ops.py test/backend/test_dtype.py test/backend/test_dtype_alu.py test/backend/test_linearizer.py test/backend/test_randomness.py test/backend/test_jit.py test/backend/test_graph.py test/backend/test_multitensor.py test/device/test_hcq.py test/external/external_test_am.py test/backend/test_asm_gemm.py::TestAsmGEMM --durations=20
       - name: Run TRANSCENDENTAL math
         run: TRANSCENDENTAL=2 python -m pytest -n=auto test/backend/test_ops.py::TestOps::test_sin test/backend/test_ops.py::TestOps::test_cos test/backend/test_ops.py::TestOps::test_tan test/backend/test_ops.py::TestOps::test_exp test/backend/test_ops.py::TestOps::test_log --durations=20
       - name: Run process replay tests
@@ -988,6 +1004,29 @@ jobs:
       - name: Set env
         shell: bash
         run: printf "NULL=1\nNULL_ALLOW_COPYOUT=1\n${{ matrix.backend == 'ir3' && 'NULL_IR3=1' || matrix.backend == 'nak' && 'NULL_NAK=1' }}" >> $GITHUB_ENV
+      - name: Run test_ops
+        shell: bash
+        run: |
+          python -c "from tinygrad import Device; assert Device.DEFAULT == 'NULL'"
+          DEBUG=4 python3 test/backend/test_ops.py TestOps.test_add
+          python -m pytest -n=auto test/backend/test_ops.py --durations=20
+  qcomclcompiletests:
+    name: Compile-only (QCOM CL)
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 15
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+      - name: Setup Environment
+        uses: ./.github/actions/setup-tinygrad
+        with:
+          key: compile-qcomcl
+          deps: testing_unit
+          tinydreno: 'true'
+          python-version: '3.12'
+      - name: Set env
+        shell: bash
+        run: printf "NULL=1\nNULL_ALLOW_COPYOUT=1\nNULL_QCOMCL=1" >> $GITHUB_ENV
       - name: Run test_ops
         shell: bash
         run: |

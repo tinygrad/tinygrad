@@ -1,10 +1,12 @@
 import unittest
+import functools
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.uop.ops import UOp, Ops, KernelInfo
 from tinygrad.renderer import Estimates
-
 from tinygrad.runtime.autogen.amd.rdna3.ins import *
+from tinygrad.runtime.autogen.amd.rdna4.ins import s_barrier_wait, s_barrier_signal
 from tinygrad.renderer.amd.dsl import s, v
+from test.amd.helpers import TARGET_TO_ARCH
 
 def custom_add_one(A:UOp) -> UOp:
   A = A.flatten()
@@ -43,9 +45,26 @@ def custom_add_var(A:UOp, B:UOp) -> UOp:
   sink = UOp.sink(A.base, B.base, var, threads, arg=KernelInfo(f"custom_add_var_{A.size}"))
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg="AMD"), UOp(Ops.LINEAR, src=tuple([UOp(Ops.INS, arg=x) for x in insts]))))
 
+def custom_wave_sync(A:UOp, arch:str) -> UOp:
+  # 4 waves across 1024 WG — enough to saturate a SIMD with many concurrent WGs
+  # s_sleep yields the SIMD so waves from different WGs interleave, causing barrier packet reordering
+  threads = UOp.special(128, "lidx0")
+  wg = UOp.special(1024, "gidx0")
+  insts = []
+  for _ in range(4):
+    insts.append(s_sleep(4))
+    insts += [s_barrier()] if arch == "rdna3" else [s_barrier_signal(), s_barrier_wait()]
+    insts += [s_nop(0)]*4
+  insts.append(s_endpgm())
+  sink = UOp.sink(A.base, threads, wg, arg=KernelInfo("custom_wave_sync"))
+  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg="AMD"), UOp(Ops.LINEAR, src=tuple([UOp(Ops.INS, arg=x) for x in insts]))))
+
 @unittest.skipUnless(Device.DEFAULT == "AMD", "requires AMD device")
 class TestCustomKernel(unittest.TestCase):
+  def setUp(self): self.arch = TARGET_TO_ARCH[Device["AMD"].arch]
+
   def test_simple(self):
+    if self.arch != "rdna3": self.skipTest("only rdna3")
     a = Tensor.full((16, 16), 1.).contiguous().realize()
     a = Tensor.custom_kernel(a, fxn=custom_add_one)[0]
     ei = a.schedule()[-1].lower()
@@ -55,6 +74,7 @@ class TestCustomKernel(unittest.TestCase):
     self.assertTrue((a.numpy() == 2.).all())
 
   def test_variable(self):
+    if self.arch != "rdna3": self.skipTest("only rdna3")
     b = Tensor.full((16, 16), 1, dtype=dtypes.uint32).contiguous().realize()
     a = Tensor.zeros_like(b).contiguous().realize()
     a = Tensor.custom_kernel(a, b, fxn=custom_add_var)[0]
@@ -62,6 +82,10 @@ class TestCustomKernel(unittest.TestCase):
     for i in range(4):
       ei.run({"var":i})
       self.assertTrue((a.numpy() == 1+i).all())
+
+  def test_wave_sync(self):
+    if self.arch not in {"rdna3", "rdna4"}: self.skipTest("only rdna3 or rdna4")
+    Tensor.empty(1).custom_kernel(fxn=functools.partial(custom_wave_sync, arch=self.arch))[0].realize()
 
 if __name__ == "__main__":
   unittest.main()
