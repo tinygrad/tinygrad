@@ -11,32 +11,22 @@ BLOCK_M, BLOCK_N = 128, 128
 
 use_wmma = getenv("WMMA", 0)
 
+BLOCK_K = getenv("BK", 16) if use_wmma else 8
+THREADS_PER_BLOCK = 128
+assert N % BLOCK_N == 0 and M % BLOCK_M == 0 and K % BLOCK_K == 0
+
 if use_wmma:
-  # RDNA3 WMMA: v_wmma_f32_16x16x16_f16 (fp16 in, fp32 acc)
   WMMA_M, WMMA_N, WMMA_K = 16, 16, 16
-  BLOCK_K = getenv("BK", 16)
-  THREADS_PER_BLOCK = 128
   WAVES_M, WAVES_N = 2, 2
   TILES_PER_WAVE_M = BLOCK_M // (WAVES_M * WMMA_M)  # 4
   TILES_PER_WAVE_N = BLOCK_N // (WAVES_N * WMMA_N)   # 4
-  assert WAVES_M * TILES_PER_WAVE_M * WMMA_M == BLOCK_M
-  assert WAVES_N * TILES_PER_WAVE_N * WMMA_N == BLOCK_N
 else:
-  BLOCK_K = 8
   TM, TN = 4, 4
   LANES_PER_WAVE_M, LANES_PER_WAVE_N = 4, 8
-  is_kernel5 = getenv("K5", 0)
-  THREADS_PER_BLOCK = 128 if is_kernel5 else 256
-  WAVES_PER_BLOCK_N = 1 if is_kernel5 else 2
-  WAVES_PER_BLOCK_M = THREADS_PER_BLOCK // WARP_SIZE // WAVES_PER_BLOCK_N
-  REG_TILES_PER_WAVE_N = BLOCK_N // (WAVES_PER_BLOCK_N * LANES_PER_WAVE_N * TN)
-  REG_TILES_PER_WAVE_M = BLOCK_M // (WAVES_PER_BLOCK_M * LANES_PER_WAVE_M * TM)
-  assert WAVES_PER_BLOCK_M*REG_TILES_PER_WAVE_M*LANES_PER_WAVE_M*TM == BLOCK_M, "M reshape is wrong"
-  assert WAVES_PER_BLOCK_N*REG_TILES_PER_WAVE_N*LANES_PER_WAVE_N*TN == BLOCK_N, "N reshape is wrong"
-  consts = {"wpb_m":WAVES_PER_BLOCK_M, "lpw_m":LANES_PER_WAVE_M, "rt_m":REG_TILES_PER_WAVE_M, "t_m": TM,
-            "wpb_n":WAVES_PER_BLOCK_N, "lpw_n":LANES_PER_WAVE_N, "rt_n":REG_TILES_PER_WAVE_N, "t_n": TN}
-
-assert N % BLOCK_N == 0 and M % BLOCK_M == 0 and K % BLOCK_K == 0
+  WAVES_PER_BLOCK_M = THREADS_PER_BLOCK // WARP_SIZE  # 4
+  WAVES_PER_BLOCK_N = 1
+  REG_TILES_PER_WAVE_M = BLOCK_M // (WAVES_PER_BLOCK_M * LANES_PER_WAVE_M * TM)  # 2
+  REG_TILES_PER_WAVE_N = BLOCK_N // (WAVES_PER_BLOCK_N * LANES_PER_WAVE_N * TN)  # 4
 
 def block_128x128_gemm(c:UOp, a:UOp, b:UOp) -> UOp:
   tid = UOp.range(THREADS_PER_BLOCK, 2, AxisType.WARP if use_wmma else AxisType.LOCAL)
@@ -117,8 +107,10 @@ def block_128x128_gemm(c:UOp, a:UOp, b:UOp) -> UOp:
     c_regs = c_regs.after(c_regs.store(c_regs.after(k) + (A_col * B_row)).end(k).barrier().end(k_tile))
 
     # store back to c
-    c_store = c.rearrange("(wpb_m rt_m lpw_m t_m) (wpb_n rt_n lpw_n t_n) -> (wpb_m wpb_n lpw_m lpw_n) (rt_m t_m) (rt_n t_n)", **consts)
-    return c_store[tid].store(c_regs).end(tid)
+    c = c.reshape(WAVES_PER_BLOCK_M, REG_TILES_PER_WAVE_M, LANES_PER_WAVE_M, TM,
+                  WAVES_PER_BLOCK_N, REG_TILES_PER_WAVE_N, LANES_PER_WAVE_N, TN)
+    c = c.permute((0,4,2,6, 1,3,5,7)).reshape(THREADS_PER_BLOCK, REG_TILES_PER_WAVE_M*TM, REG_TILES_PER_WAVE_N*TN)
+    return c[tid].store(c_regs).end(tid)
 
 def amd_copy_matmul(c:UOp, a:UOp, b:UOp) -> UOp:
   block_id_m = UOp.range(M // BLOCK_M, 0, AxisType.GLOBAL)
