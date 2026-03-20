@@ -2649,6 +2649,9 @@ def can_use_asm_gemm(a:Tensor, b:Tensor) -> bool:
   else: dname = a.device
   arch = getattr(Device[dname].renderer, "arch", "")
   if batch not in {1, 2}: return todo(f"GEMM batch size {batch}")
+  # blacklist slow matmul
+  # TODO: why is this slow?
+  if (M,N,K) == (8192, 2304, 16384): return todo("blacklisted slow matmul")
   if (M % TILE_M != 0 or N % TILE_N != 0 or K % TILE_K != 0) and arch == "gfx950":
     return todo(f"GEMM shape ({M},{N},{K}) not a multiple of ({TILE_M},{TILE_N},{TILE_K})")
   return True
