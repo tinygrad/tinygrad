@@ -330,7 +330,7 @@ class Handler(HTTPRequestHandler):
     raw_body = self.rfile.read(int(self.headers.get("Content-Length", "0")))
     body: dict[str, typing.Any] = json.loads(raw_body.decode("utf-8"))
     if DEBUG >= 1: print(json.dumps(body, indent=2))
-    if self.path == "/v1/chat/completions":
+    if self.path in ("/v1/chat/completions", "/chat/completions"):
       # extract tokens
       ids: list[int] = [bos_id] if bos_id is not None else []
       for msg in body["messages"]:
