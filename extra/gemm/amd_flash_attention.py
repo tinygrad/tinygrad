@@ -22,16 +22,14 @@ TM = BLOCK_M // (WAVES_M * LANES_PER_WAVE_M)
 TN = BLOCK_N // (WAVES_N * LANES_PER_WAVE_N)
 TD = D // (WAVES_N * LANES_PER_WAVE_N)
 
-# number of threads that share the same M rows = WAVES_N * LANES_PER_WAVE_N = 32
-N_THREADS_PER_ROW = WAVES_N * LANES_PER_WAVE_N  # 32
+N_THREADS_PER_ROW = WAVES_N * LANES_PER_WAVE_N
 
 WMMA_ARG = ((WMMA_M, WMMA_N, WMMA_K), 'AMD', 32)
 SCALE = 1.0 / math.sqrt(D)
 LOG2E = math.log2(math.e)
 
 def row_index(wave_m, ri, re, lane_m):
-  return wave_m * UOp.const(dtypes.weakint, BLOCK_M // WAVES_M) + ri * UOp.const(dtypes.weakint, WMMA_M) + \
-         re * UOp.const(dtypes.weakint, LANES_PER_WAVE_M) + lane_m
+  return wave_m * (BLOCK_M // WAVES_M) + ri * WMMA_M + re * LANES_PER_WAVE_M + lane_m
 
 def amd_flash_attention(o:UOp, q:UOp, k:UOp, v:UOp) -> UOp:
   block_bh = UOp.range(B * H, 0, AxisType.GLOBAL)
@@ -48,8 +46,7 @@ def amd_flash_attention(o:UOp, q:UOp, k:UOp, v:UOp) -> UOp:
   tid = (wave_m * WAVES_N + wave_n) * WARP_SIZE + lane
   lane_m = lane // LANES_PER_WAVE_N
   lane_n = lane % LANES_PER_WAVE_N
-  # thread's N-index within the row: wave_n * LANES_PER_WAVE_N + lane_n
-  n_thread_idx = wave_n * UOp.const(dtypes.weakint, LANES_PER_WAVE_N) + lane_n
+  n_thread_idx = wave_n * LANES_PER_WAVE_N + lane_n
 
   # load Q into LDS
   Q_lds = UOp.placeholder((BLOCK_M, D), dtypes.half, slot=0, addrspace=AddrSpace.LOCAL)
@@ -66,7 +63,7 @@ def amd_flash_attention(o:UOp, q:UOp, k:UOp, v:UOp) -> UOp:
   m_i = m_i.after(m_i.store(m_i.const_like(-math.inf)))
   l_i = l_i.after(l_i.store(l_i.const_like(0)))
 
-  # LDS for reduction (BLOCK_M floats for max, BLOCK_M for sum)
+  # LDS for cross-thread reduction
   red_lds = UOp.placeholder((BLOCK_M, N_THREADS_PER_ROW), dtypes.float, slot=5, addrspace=AddrSpace.LOCAL)
   P_lds = UOp.placeholder((BLOCK_M, BLOCK_N), dtypes.half, slot=6, addrspace=AddrSpace.LOCAL)
 
@@ -77,7 +74,7 @@ def amd_flash_attention(o:UOp, q:UOp, k:UOp, v:UOp) -> UOp:
   KV_lds_k = KV_lds.after(UOp.barrier(KV_lds.reshape(-1, THREADS_PER_BLOCK)[:, tid].store(
     k[n_tile].reshape(-1, THREADS_PER_BLOCK)[:, tid])))
 
-  # -- S = Q @ K^T via WMMA into registers (re-init each n_tile) --
+  # -- S = Q @ K^T via WMMA (re-init each n_tile) --
   S_reg = UOp.placeholder((TM, TN), dtypes.float, slot=7, addrspace=AddrSpace.REG)
   S_reg = S_reg.after(S_reg.after(n_tile).store(S_reg.const_like(0)))
   k_qk = UOp.range(D // WMMA_K, 101, AxisType.REDUCE)
@@ -90,51 +87,43 @@ def amd_flash_attention(o:UOp, q:UOp, k:UOp, v:UOp) -> UOp:
   S_reg = S_reg.after(S_frag.store(qk).end(tm1, tn1).end(k_qk).barrier())
 
   # -- softmax in registers with LDS reduction --
-  # scale S in registers
-  S_reg = S_reg.after(S_reg.store(S_reg * S_reg.const_like(SCALE)))
+  S_reg = S_reg.after(S_reg.store(S_reg * SCALE))
 
-  # step 1: per-thread local row max over TN=2 elements
+  # per-thread local row max over TN elements
   m_local = UOp.placeholder((TM,), dtypes.float, slot=8, addrspace=AddrSpace.REG)
   m_local = m_local.after(m_local.after(n_tile).store(m_local.const_like(-math.inf)))
   rm1 = UOp.range(TM, 260, AxisType.LOOP)
   rm2 = UOp.range(TN, 261, AxisType.REDUCE)
   m_local = m_local.after(m_local[rm1].store(UOp(Ops.MAX, dtypes.float, (m_local.after(rm1, rm2)[rm1], S_reg[rm1, rm2]))).end(rm2, rm1))
 
-  # step 2: write local max to LDS for cross-thread reduction, barrier, read back global max
+  # write local max to LDS, barrier, read global max
   ri_r = UOp.range(TM, 270, AxisType.LOOP)
-  red_lds = red_lds.after(UOp.barrier(red_lds[row_index(wave_m, ri_r // UOp.const(dtypes.weakint, WMMA_ACC),
-    ri_r % UOp.const(dtypes.weakint, WMMA_ACC), lane_m), n_thread_idx].store(m_local[ri_r]).end(ri_r)))
+  red_lds = red_lds.after(UOp.barrier(red_lds[row_index(wave_m, ri_r // WMMA_ACC, ri_r % WMMA_ACC, lane_m), n_thread_idx]
+    .store(m_local[ri_r]).end(ri_r)))
 
-  # read global max: reduce across N_THREADS_PER_ROW threads
   m_ij = UOp.placeholder((TM,), dtypes.float, slot=9, addrspace=AddrSpace.REG)
   m_ij = m_ij.after(m_ij.after(n_tile).store(m_ij.const_like(-math.inf)))
   ri_g = UOp.range(TM, 280, AxisType.LOOP)
   rn_g = UOp.range(N_THREADS_PER_ROW, 281, AxisType.REDUCE)
   m_ij = m_ij.after(m_ij[ri_g].store(UOp(Ops.MAX, dtypes.float, (m_ij.after(ri_g, rn_g)[ri_g],
-    red_lds[row_index(wave_m, ri_g // UOp.const(dtypes.weakint, WMMA_ACC),
-      ri_g % UOp.const(dtypes.weakint, WMMA_ACC), lane_m), rn_g]))).end(rn_g, ri_g))
+    red_lds[row_index(wave_m, ri_g // WMMA_ACC, ri_g % WMMA_ACC, lane_m), rn_g]))).end(rn_g, ri_g))
 
-  # step 3: per-thread local exp and sum
+  # per-thread local exp and sum
   p_local = UOp.placeholder((TM,), dtypes.float, slot=10, addrspace=AddrSpace.REG)
   p_local = p_local.after(p_local.after(n_tile).store(p_local.const_like(0)))
   rp1 = UOp.range(TM, 290, AxisType.LOOP)
   rp2 = UOp.range(TN, 291, AxisType.REDUCE)
-  exp_local = ((S_reg[rp1, rp2] - m_ij[rp1]) * UOp.const(dtypes.float, LOG2E)).exp2()
-  p_local = p_local.after(p_local[rp1].store(p_local.after(rp1, rp2)[rp1] + exp_local).end(rp2, rp1))
+  p_local = p_local.after(p_local[rp1].store(p_local.after(rp1, rp2)[rp1] + ((S_reg[rp1, rp2] - m_ij[rp1]) * LOG2E).exp2()).end(rp2, rp1))
 
-  # write P to P_lds: each thread writes its TN columns
+  # write P to P_lds (shaped)
   P_write = P_lds.reshape(WAVES_M, TM // WMMA_ACC, WMMA_ACC, LANES_PER_WAVE_M, WAVES_N, TN, LANES_PER_WAVE_N)
   P_write = P_write.permute((0, 4, 3, 6, 1, 2, 5)).reshape(THREADS_PER_BLOCK, TM, TN)
-  rw1 = UOp.range(TM, 295, AxisType.LOOP)
-  rw2 = UOp.range(TN, 296, AxisType.LOOP)
-  p_val = ((S_reg[rw1, rw2] - m_ij[rw1]) * UOp.const(dtypes.float, LOG2E)).exp2()
-  P_store = P_write[tid, rw1, rw2].store(p_val.cast(dtypes.half)).end(rw1, rw2)
+  P_store = P_write[tid].store(((S_reg - m_ij.reshape(TM, 1).expand(TM, TN)) * LOG2E).exp2().cast(dtypes.half))
 
-  # step 4: write local sum to LDS, barrier, read global sum
+  # write local sum to LDS, barrier, read global sum
   ri_s = UOp.range(TM, 300, AxisType.LOOP)
   sum_barrier = UOp.barrier(UOp.group(
-    red_lds[row_index(wave_m, ri_s // UOp.const(dtypes.weakint, WMMA_ACC),
-      ri_s % UOp.const(dtypes.weakint, WMMA_ACC), lane_m), n_thread_idx].store(p_local[ri_s]).end(ri_s),
+    red_lds[row_index(wave_m, ri_s // WMMA_ACC, ri_s % WMMA_ACC, lane_m), n_thread_idx].store(p_local[ri_s]).end(ri_s),
     P_store))
   red_lds = red_lds.after(sum_barrier)
   P_lds = P_lds.after(sum_barrier)
@@ -144,20 +133,17 @@ def amd_flash_attention(o:UOp, q:UOp, k:UOp, v:UOp) -> UOp:
   ri_gs = UOp.range(TM, 310, AxisType.LOOP)
   rn_gs = UOp.range(N_THREADS_PER_ROW, 311, AxisType.REDUCE)
   p_sum = p_sum.after(p_sum[ri_gs].store(p_sum.after(ri_gs, rn_gs)[ri_gs] +
-    red_lds[row_index(wave_m, ri_gs // UOp.const(dtypes.weakint, WMMA_ACC),
-      ri_gs % UOp.const(dtypes.weakint, WMMA_ACC), lane_m), rn_gs]).end(rn_gs, ri_gs))
+    red_lds[row_index(wave_m, ri_gs // WMMA_ACC, ri_gs % WMMA_ACC, lane_m), rn_gs]).end(rn_gs, ri_gs))
 
-  # -- online softmax correction --
-  ri4 = UOp.range(TM, 330, AxisType.LOOP)
-  m_new_val = UOp(Ops.MAX, dtypes.float, (m_i[ri4], m_ij[ri4]))
-  alpha_val = ((m_i[ri4] - m_new_val) * UOp.const(dtypes.float, LOG2E)).exp2()
-  beta_val = ((m_ij[ri4] - m_new_val) * UOp.const(dtypes.float, LOG2E)).exp2()
-  rj4 = UOp.range(TD, 331, AxisType.LOOP)
+  # -- online softmax correction (shaped) --
+  m_new = UOp(Ops.MAX, dtypes.float, (m_i, m_ij))
+  alpha = ((m_i - m_new) * LOG2E).exp2()
+  beta = ((m_ij - m_new) * LOG2E).exp2()
   correction = UOp.group(
-    acc[ri4, rj4].store(alpha_val * acc[ri4, rj4]).end(rj4),
-    l_i[ri4].store(alpha_val * l_i[ri4] + beta_val * p_sum[ri4]),
-    m_i[ri4].store(m_new_val),
-  ).end(ri4)
+    acc.store(alpha.reshape(TM, 1).expand(TM, TD) * acc),
+    l_i.store(alpha * l_i + beta * p_sum),
+    m_i.store(m_new),
+  )
   acc = acc.after(correction)
   l_i = l_i.after(correction)
   m_i = m_i.after(correction)
@@ -181,8 +167,8 @@ def amd_flash_attention(o:UOp, q:UOp, k:UOp, v:UOp) -> UOp:
   l_i = l_i.after(n_tile_end)
   m_i = m_i.after(n_tile_end)
 
-  # normalize: l_i = 1/l_i, then acc *= l_i broadcast
-  acc = acc.after(acc.store(acc * (1/l_i).reshape(TM, 1).expand(TM, TD)))
+  # normalize: acc /= l_i
+  acc = acc.after(acc.store(acc * (1 / l_i).reshape(TM, 1).expand(TM, TD)))
 
   # store output
   o = o.reshape(WAVES_M, TM // WMMA_ACC, WMMA_ACC, LANES_PER_WAVE_M, WAVES_N, TD, LANES_PER_WAVE_N)
