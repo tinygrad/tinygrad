@@ -340,7 +340,7 @@ def load_amd_counters(ctxs:list[dict], profile:list[ProfileEvent]) -> None:
 def sqtt_timeline(data:bytes, lib:bytes, target:str) -> list[ProfileEvent]:
   from tinygrad.renderer.amd.sqtt import (map_insts, InstructionInfo, PacketType, INST, InstOp, VALUINST, IMMEDIATE, IMMEDIATE_MASK, VMEMEXEC,
                                           ALUEXEC, INST_RDNA4, InstOpRDNA4, TS_DELTA_OR_MARK, TS_DELTA_OR_MARK_RDNA4, CDNA_INST, InstOpCDNA,
-                                          WAVEEND, CDNA_WAVEEND, WAVERDY, AluSrc, MemSrc)
+                                          WAVEEND, CDNA_WAVEEND, WAVERDY)
   ret:list[ProfileEvent] = []
   row_ends:dict[str, Decimal] = {}
   row_counts:dict[str, itertools.count] = {}
