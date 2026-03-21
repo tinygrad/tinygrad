@@ -115,14 +115,14 @@ def hand_spec_kernel3(c:UOp, a:UOp, b:UOp) -> UOp:
 
   return sink.sink(arg=KernelInfo(opts_to_apply=())).simplify()
 
-def eval_custom_matmul(fxn):
-  a = Tensor.randn(M, K, dtype=dtypes.float)
-  b = Tensor.randn(K, N, dtype=dtypes.float)
+def eval_custom_matmul(fxn, dt=dtypes.float):
+  a = Tensor.randn(M, K, dtype=dt)
+  b = Tensor.randn(K, N, dtype=dt)
   c = Tensor.empty(M, N, dtype=dtypes.float)
   with Context(DEBUG=0): Tensor.realize(a, b)
 
   ets = []
-  with Context(DEBUG=max(2, DEBUG.value)):
+  with Context(DEBUG=max(2, DEBUG.value), DEVECTORIZE=2 if dt == dtypes.half else 0):
     for _ in range(NUM_RUNS):
       GlobalCounters.reset()
       tst = Tensor.custom_kernel(c, a, b, fxn=fxn)[0].realize()
@@ -132,11 +132,11 @@ def eval_custom_matmul(fxn):
   if getenv("VERIFY", 1):
     GlobalCounters.reset()
     with Context(DEBUG=2):
-      tc = (a @ b).realize()
+      tc = (a.float() @ b.float()).realize()
     with Context(DEBUG=0):
       err = (tc - tst).square().mean().item()
     print(f"mean squared error {err}")
-    if err > 1e-06:
+    if err > (1e-2 if dt == dtypes.half else 1e-6):
       raise RuntimeError("matmul is wrong!")
 
 if __name__ == "__main__":

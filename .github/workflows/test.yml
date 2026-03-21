@@ -167,10 +167,10 @@ jobs:
       run: PYTHON=1 python3 test/backend/test_symbolic_ops.py
     - name: test_renderer_failures with Python emulator
       run: PYTHON=1 python3 -m pytest -rA test/backend/test_renderer_failures.py::TestRendererFailures
-    - name: Test IMAGE=2 support
+    - name: Test IMAGE support
       run: |
-        IMAGE=2 PYTHON=1 python3 test/backend/test_ops.py TestOps.test_gemm
-        IMAGE=2 PYTHON=1 python3 test/backend/test_ops.py TestOps.test_simple_conv2d
+        IMAGE=1 PYTHON=1 python3 test/backend/test_ops.py TestOps.test_gemm
+        IMAGE=1 PYTHON=1 python3 test/backend/test_ops.py TestOps.test_simple_conv2d
     - name: Test emulated METAL tensor cores
       run: |
         DEBUG=2 EMULATE=METAL FORWARD_ONLY=1 PYTHON=1 python3 test/backend/test_ops.py TestOps.test_big_gemm
@@ -369,11 +369,11 @@ jobs:
           key: gpu-image
           deps: testing_unit
           opencl: 'true'
-      - name: Test CL IMAGE=2 ops
+      - name: Test CL IMAGE=1 ops
         run: |
-          CL=1 IMAGE=2 python -m pytest -n=auto test/backend/test_ops.py --durations=20
+          CL=1 IMAGE=1 python -m pytest -n=auto test/backend/test_ops.py --durations=20
         # TODO: training is broken
-        # CL=1 IMAGE=2 python test/models/test_end2end.py TestEnd2End.test_linear_mnist
+        # CL=1 IMAGE=1 python test/models/test_end2end.py TestEnd2End.test_linear_mnist
       - name: Run process replay tests
         uses: ./.github/actions/process-replay
 
@@ -418,13 +418,13 @@ jobs:
           llvm: 'true'
       - name: Test openpilot model kernel count and gate usage
         run: |
-          ALLOWED_KERNEL_COUNT=123 ALLOWED_READ_IMAGE=1397 ALLOWED_GATED_READ_IMAGE=94 FLOAT16=1 CL=1 IMAGE=2 python examples/openpilot/compile3.py https://gitlab.com/commaai/openpilot-lfs.git/gitlab-lfs/objects/cf6376aa9a090f0da26c280ef69eabf9bbdd51d1faac9ed392919c3db69be916
+          ALLOWED_KERNEL_COUNT=123 ALLOWED_READ_IMAGE=1486 ALLOWED_GATED_READ_IMAGE=17 FLOAT16=1 CL=1 IMAGE=1 python examples/openpilot/compile3.py https://gitlab.com/commaai/openpilot-lfs.git/gitlab-lfs/objects/cf6376aa9a090f0da26c280ef69eabf9bbdd51d1faac9ed392919c3db69be916
       - name: Test openpilot CL compile fp16
-        run: FLOAT16=1 DEBUGCL=1 CL=1 IMAGE=2 python examples/openpilot/compile3.py https://gitlab.com/commaai/openpilot-lfs.git/gitlab-lfs/objects/cf6376aa9a090f0da26c280ef69eabf9bbdd51d1faac9ed392919c3db69be916
+        run: FLOAT16=1 DEBUGCL=1 CL=1 IMAGE=1 python examples/openpilot/compile3.py https://gitlab.com/commaai/openpilot-lfs.git/gitlab-lfs/objects/cf6376aa9a090f0da26c280ef69eabf9bbdd51d1faac9ed392919c3db69be916
       - name: Test openpilot CL compile fp32 (test correctness)
-        run: DEBUGCL=1 CL=1 IMAGE=2 SELFTEST=1 python examples/openpilot/compile3.py https://github.com/haraschax/filedump/raw/refs/heads/master/driving_vision_fp32.onnx
+        run: CL=1 IMAGE=1 SELFTEST=1 python examples/openpilot/compile3.py https://github.com/haraschax/filedump/raw/refs/heads/master/driving_vision_fp32.onnx
       - name: Test openpilot LLVM compile fp16
-        run: FLOAT16=1 CPU=1 CPU_LLVM=1 python examples/openpilot/compile3.py https://gitlab.com/commaai/openpilot-lfs.git/gitlab-lfs/objects/cf6376aa9a090f0da26c280ef69eabf9bbdd51d1faac9ed392919c3db69be916
+        run: IMAGE=1 FLOAT16=1 CPU=1 CPU_LLVM=1 python examples/openpilot/compile3.py https://gitlab.com/commaai/openpilot-lfs.git/gitlab-lfs/objects/cf6376aa9a090f0da26c280ef69eabf9bbdd51d1faac9ed392919c3db69be916
       - name: Run process replay tests
         uses: ./.github/actions/process-replay
 
