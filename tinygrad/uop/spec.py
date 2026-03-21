@@ -205,6 +205,10 @@ kernel_spec = PatternMatcher([
   (UPat(Ops.CONTRACT, name="x"), lambda x: x.dtype.count == prod(y[1] for y in x.arg)),
   (UPat(Ops.UNROLL, name="x"), lambda x: x.src[0].dtype.count == prod(y[1] for y in x.arg)),
 
+  # SHAPED_WMMA has <a, b, acc> with shaped inputs, arg=((M,N,K), device, threads), lowered to WMMA+CONTRACT later
+  (UPat(Ops.SHAPED_WMMA, src=(UPat(), UPat(), UPat()), name="x"),
+   lambda x: isinstance(x.arg, tuple) and len(x.arg) == 3 and isinstance(x.arg[0], tuple)),
+
   # END can end multiple axes here
   (UPat(Ops.END, src=(UPat(), UPat()), allow_any_len=True), lambda: True),
 

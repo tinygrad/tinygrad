@@ -22,6 +22,17 @@ def add_ranges_to_store(ctx, x):
   idxs = [UOp.range(r, next(ctx), AxisType.LOOP) for r in x.src[0].shape]
   return UOp.store(x.src[0].index(*idxs), x.src[1].index(*idxs)).end(*idxs)
 
+def lower_shaped_wmma(ctx, x):
+  dims, device, threads = x.arg
+  dtype_in, dtype_out = x.src[0].dtype.base, x.dtype
+  upcasts = [(s, UOp.range(s.shape[-1], next(ctx), axis_type=AxisType.UPCAST)) for s in x.src]
+  tc_upcast_axes = tuple(((u.arg[0], s.shape[-1]),) for s, u in upcasts)
+  name = f"WMMA_{'_'.join(map(str, dims))}_{dtype_in.name}_{dtype_out.name}"
+  wmma_arg = (name, dims, dtype_in, dtype_out, device, threads, tc_upcast_axes, ())
+  wmma = UOp(Ops.WMMA, dtype_out.vec(x.src[2].shape[-1]), tuple(s[u].contract(u) for s, u in upcasts), arg=wmma_arg)
+  tmp = UOp.placeholder((x.src[2].shape[-1],), dtype_out, slot=next(ctx), addrspace=AddrSpace.REG)
+  return tmp.after(UOp.group(*[tmp[e].store(wmma.gep(e)) for e in range(x.src[2].shape[-1])]))
+
 pm_store_ranges = PatternMatcher([
   (UPat(Ops.STORE, name="x"), add_ranges_to_store),
 ])
@@ -63,6 +74,8 @@ pm_mops = PatternMatcher([
    lambda r,a: UOp(r.op, r.dtype, (a.replace(src=(r.src[0],)+a.src[1:]),)+r.src[1:], r.arg)
      if a.src[0]._shape is not None and not any(s.op is Ops.STORE and s.src[0]._shape is not None for s in a.src[1:]) else None),
   (UPat(GroupOp.Movement, name="r").end(name="a", allow_any_len=True), lambda r,a: a.replace(src=(r.src[0],)+a.src[1:])),
+  # lower SHAPED_WMMA to WMMA with CONTRACT/UNROLL
+  (UPat(Ops.SHAPED_WMMA, name="x"), lower_shaped_wmma),
 ])
 
 # *****************
