@@ -347,12 +347,12 @@ def _embedding_bwd(grad_emb:UOp, call:UOp) -> tuple:
       # each device owns [offset, offset+local_vocab_size) of the global vocabulary
       dnum = UOp.variable("_device_num", 0, ndev-1)
       offset = dnum * local_vocab_size
-      global_token_id = idx_flat[i].cast(dtypes.index)
+      global_token_id = idx_flat[i].cast(dtypes.weakint)
       local_token_id = (global_token_id - offset).clip(0, grad_weight.shape[0]-1)
       in_range = (global_token_id >= offset) & (global_token_id < (offset + local_vocab_size))
       grad_val = in_range.where(grad_emb_flat[i, j].cast(dtypes.float), 0.0)
     else:
-      local_token_id = idx_flat[i].clip(0, grad_weight.shape[0]-1).cast(dtypes.index)
+      local_token_id = idx_flat[i].clip(0, grad_weight.shape[0]-1).cast(dtypes.weakint)
       grad_val = grad_emb_flat[i, j].cast(dtypes.float)
     # atomic scatter-add: grad_weight[token_id, j] += grad_emb_flat[i, j]
     if device in ("CPU", "NULL"): atomic_arg = "__atomic_fetch_add({0}, {1}, __ATOMIC_RELAXED);"

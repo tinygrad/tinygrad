@@ -144,7 +144,7 @@ class TestVminVmaxProperties(unittest.TestCase):
     self.assertNotEqual(i.vmin, i.vmax)
 
   def test_vmin_vmax_invalid_vconst(self):
-    x = UOp.const(dtypes.index.vec(4), (0, 4, Invalid, Invalid))
+    x = UOp.const(dtypes.weakint.vec(4), (0, 4, Invalid, Invalid))
     self.assertLess(x.vmin, 0)
     self.assertGreater(x.vmax, 4)
 

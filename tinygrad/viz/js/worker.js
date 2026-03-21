@@ -74,7 +74,7 @@ const layoutUOp = (g, { graph, change }, opts) => {
   if (!opts.showIndexing) {
     for (const n of g.nodes()) {
       const node = g.node(n);
-      if (node.label.includes("dtypes.index")) g.removeNode(n);
+      if (node.label.includes("dtypes.weakint")) g.removeNode(n);
     }
   }
   if (!opts.showCallSrc || opts.callSrcMask.size > 0) {

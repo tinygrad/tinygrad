@@ -2649,6 +2649,9 @@ def can_use_asm_gemm(a:Tensor, b:Tensor) -> bool:
   else: dname = a.device
   arch = getattr(Device[dname].renderer, "arch", "")
   if batch not in {1, 2}: return todo(f"GEMM batch size {batch}")
+  # blacklist slow matmul
+  # TODO: why is this slow?
+  if (M,N,K) == (8192, 2304, 16384): return todo("blacklisted slow matmul")
   if (M % TILE_M != 0 or N % TILE_N != 0 or K % TILE_K != 0) and arch == "gfx950":
     return todo(f"GEMM shape ({M},{N},{K}) not a multiple of ({TILE_M},{TILE_N},{TILE_K})")
   return True
@@ -2663,10 +2666,10 @@ def custom_uop_gemm(C:UOp, A:UOp, B:UOp) -> UOp:
   m = UOp.range(M, 1, AxisType.LOOP)
   n = UOp.range(N, 2, AxisType.LOOP)
   k = UOp.range(K, 0, AxisType.REDUCE)
-  mul = (A.flatten().index((m*UOp.const(dtypes.index, K)+k))*
-         B.flatten().index((k*UOp.const(dtypes.index, N)+n))).cast(dtypes.float32)
+  mul = (A.flatten().index((m*UOp.const(dtypes.weakint, K)+k))*
+         B.flatten().index((k*UOp.const(dtypes.weakint, N)+n))).cast(dtypes.float32)
   red = mul.reduce(k, arg=Ops.ADD, dtype=dtypes.float32).cast(C.dtype.base)
-  store = C.flatten().index((m*UOp.const(dtypes.index, N)+n), ptr=True).store(red).end(m, n)
+  store = C.flatten().index((m*UOp.const(dtypes.weakint, N)+n), ptr=True).store(red).end(m, n)
   return store.sink(arg=KernelInfo(name=f'uop_gemm_{M}_{N}_{K}'))
 
 # ** backward gemm, might use the asm gemm

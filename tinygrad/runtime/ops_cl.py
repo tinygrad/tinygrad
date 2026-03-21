@@ -53,10 +53,10 @@ class CLProgram:
     try: check(cl.clReleaseProgram(self.program))
     except (TypeError, AttributeError): pass
 
-  def __call__(self, *bufs:tuple[cl.cl_mem, BufferSpec], global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]|None=None,
-               vals:tuple[int, ...]=(), wait=False, **kw) -> float|None:
+  def __call__(self, *bufs:cl.cl_mem, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]|None=None, vals:tuple[int, ...]=(),
+               wait=False, **kw) -> float|None:
     i = 0
-    for i,(b,_) in enumerate(bufs):
+    for i,b in enumerate(bufs):
       for real_i, dt in self.arg_dtypes[i]:
         if isinstance(dt, ImageDType):
           fmt = cl.cl_image_format(cl.CL_RGBA, {2:cl.CL_HALF_FLOAT, 4:cl.CL_FLOAT}[dt.itemsize])
@@ -78,26 +78,16 @@ class CLProgram:
     return None
 
 class CLAllocator(LRUAllocator['CLDevice']):
-  def _alloc(self, size:int, options:BufferSpec) -> tuple[cl.cl_mem, BufferSpec]:
-    # Recalculate real size for texture
-    if options.image is not None: size = options.image.pitch * options.image.shape[0]
-    return (checked(cl.clCreateBuffer(self.dev.context, cl.CL_MEM_READ_WRITE, size, None, status := ctypes.c_int32()), status), options)
+  def _alloc(self, size:int, options:BufferSpec) -> cl.cl_mem:
+    return checked(cl.clCreateBuffer(self.dev.context, cl.CL_MEM_READ_WRITE, size, None, status := ctypes.c_int32()), status)
   @suppress_finalizing
-  def _free(self, opaque:tuple[cl.cl_mem, BufferSpec], options:BufferSpec): check(cl.clReleaseMemObject(opaque[0]))
-  def _copyin(self, dest:tuple[cl.cl_mem, BufferSpec], src:memoryview):
+  def _free(self, opaque:cl.cl_mem, options:BufferSpec): check(cl.clReleaseMemObject(opaque))
+  def _copyin(self, dest:cl.cl_mem, src:memoryview):
     if mv_address(src) % 16: src = memoryview(bytearray(src))
-    if (img:=dest[1].image):
-      stride = img.shape[1]*img.itemsize*4
-      for i in range(img.shape[0]):
-        check(cl.clEnqueueWriteBuffer(self.dev.queue, dest[0], False, i*img.pitch, stride, mv_address(src)+(i*stride), 0, None, None))
-    else: check(cl.clEnqueueWriteBuffer(self.dev.queue, dest[0], False, 0, len(src)*src.itemsize, from_mv(src), 0, None, None))
+    check(cl.clEnqueueWriteBuffer(self.dev.queue, dest, False, 0, len(src)*src.itemsize, from_mv(src), 0, None, None))
     self.dev.pending_copyin.append(src)    # NOTE: these can't be freed until the GPU actually executes this command
-  def _copyout(self, dest:memoryview, src:tuple[cl.cl_mem, BufferSpec]):
-    if (img:=src[1].image):
-      stride = img.shape[1]*img.itemsize*4
-      for i in range(img.shape[0]):
-        check(cl.clEnqueueReadBuffer(self.dev.queue, src[0], False, i*img.pitch, stride, mv_address(dest)+(i*stride), 0, None, None))
-    else: check(cl.clEnqueueReadBuffer(self.dev.queue, src[0], False, 0, len(dest)*dest.itemsize, from_mv(dest), 0, None, None))
+  def _copyout(self, dest:memoryview, src:cl.cl_mem):
+    check(cl.clEnqueueReadBuffer(self.dev.queue, src, False, 0, len(dest)*dest.itemsize, from_mv(dest), 0, None, None))
     self.dev.synchronize()
 
 class CLDevice(Compiled):

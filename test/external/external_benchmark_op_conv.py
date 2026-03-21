@@ -23,7 +23,7 @@ def vision_conv_143():
   c32 = ((c27<3)!=True)&(c27<67)
   c34 = UOp(Ops.PARAM, dtypes.imageh((32, 1024, 4)), (), 1)
   c38 = c5//2
-  c45 = (c32&c24).where((c27*64+c38+c17*4096+-12480), UOp.const(dtypes.index, Invalid))
+  c45 = (c32&c24).where((c27*64+c38+c17*4096+-12480), UOp.const(dtypes.weakint, Invalid))
   c48 = (c24&c32).where(c34.index(c45), UOp.const(dtypes.float, 0.0))
   c49 = UOp(Ops.PARAM, dtypes.imageh((64, 49, 4)), (), 2)
   c61 = c48*c49.index((c26*4+c5%2+c16*28+c38*196))
@@ -49,7 +49,7 @@ def vision_conv_153():
   c32 = ((c27<3)!=True)&(c27<35)
   c34 = UOp(Ops.PARAM, dtypes.imageh((16, 1024, 4)), (), 1)
   c38 = c5//2
-  c45 = (c32&c24).where((c27*128+c38+c17*4096+-12672), UOp.const(dtypes.index, Invalid))
+  c45 = (c32&c24).where((c27*128+c38+c17*4096+-12672), UOp.const(dtypes.weakint, Invalid))
   c48 = (c24&c32).where(c34.index(c45), UOp.const(dtypes.float, 0.0))
   c49 = UOp(Ops.PARAM, dtypes.imageh((128, 49, 4)), (), 2)
   c61 = c48*c49.index((c26*4+c5%2+c16*28+c38*196))
