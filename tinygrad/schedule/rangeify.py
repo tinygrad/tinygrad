@@ -23,28 +23,15 @@ def add_ranges_to_store(ctx, x):
   return UOp.store(x.src[0].index(*idxs), x.src[1].index(*idxs)).end(*idxs)
 
 def lower_shaped_wmma(ctx, x):
-  a, b, acc = x.src
-  a_k, b_k, acc_n = a.shape[-1], b.shape[-1], acc.shape[-1]
   dims, device, threads = x.arg
-  dtype_in, dtype_out = a.dtype.base, x.dtype
-  # create upcast ranges for each input's contraction dimension
-  a_range_id, b_range_id, acc_range_id = next(ctx), next(ctx), next(ctx)
-  a_upcast = UOp.range(a_k, a_range_id, axis_type=AxisType.UPCAST)
-  b_upcast = UOp.range(b_k, b_range_id, axis_type=AxisType.UPCAST)
-  acc_upcast = UOp.range(acc_n, acc_range_id, axis_type=AxisType.UPCAST)
-  # contract each input's last dimension into a vec type
-  a_vec = a[a_upcast].contract(a_upcast)
-  b_vec = b[b_upcast].contract(b_upcast)
-  acc_vec = acc[acc_upcast].contract(acc_upcast)
-  # build full wmma_arg
+  dtype_in, dtype_out = x.src[0].dtype.base, x.dtype
+  upcasts = [(s, UOp.range(s.shape[-1], next(ctx), axis_type=AxisType.UPCAST)) for s in x.src]
+  tc_upcast_axes = tuple(((u.arg[0], s.shape[-1]),) for s, u in upcasts)
   name = f"WMMA_{'_'.join(map(str, dims))}_{dtype_in.name}_{dtype_out.name}"
-  tc_upcast_axes = (((a_range_id, a_k),), ((b_range_id, b_k),), ((acc_range_id, acc_n),))
   wmma_arg = (name, dims, dtype_in, dtype_out, device, threads, tc_upcast_axes, ())
-  # create WMMA op, store result into a temp REG, return the REG
-  wmma = UOp(Ops.WMMA, dtype_out.vec(acc_n), (a_vec, b_vec, acc_vec), arg=wmma_arg)
-  tmp = UOp.placeholder((acc_n,), dtype_out, slot=next(ctx), addrspace=AddrSpace.REG)
-  stores = UOp.group(*[tmp[e].store(wmma.gep(e)) for e in range(acc_n)])
-  return tmp.after(stores)
+  wmma = UOp(Ops.WMMA, dtype_out.vec(x.src[2].shape[-1]), tuple(s[u].contract(u) for s, u in upcasts), arg=wmma_arg)
+  tmp = UOp.placeholder((x.src[2].shape[-1],), dtype_out, slot=next(ctx), addrspace=AddrSpace.REG)
+  return tmp.after(UOp.group(*[tmp[e].store(wmma.gep(e)) for e in range(x.src[2].shape[-1])]))
 
 pm_store_ranges = PatternMatcher([
   (UPat(Ops.STORE, name="x"), add_ranges_to_store),
