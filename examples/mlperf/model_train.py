@@ -1546,7 +1546,7 @@ def train_llama3():
         if BENCHMARK and (j+1) == min(BENCHMARK, EVAL_SAMPLES//EVAL_BS):
           return
 
-      log_perplexity = Tensor(eval_losses).mean().float().item()
+      log_perplexity = sum(eval_losses) / len(eval_losses)
 
       tqdm.write(f"eval log perplexity: {log_perplexity:.4f}")
 
