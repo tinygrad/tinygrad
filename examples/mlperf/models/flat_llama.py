@@ -111,7 +111,7 @@ class FlatTransformer:
     x_w3 = matmul(x.contiguous_backward(), w3)
     return matmul(x_w1 * x_w3, w2)
 
-  # @function(precompile=True, precompile_backward=True)
+  @function(precompile=True, precompile_backward=True)
   def run_layer(self, x:Tensor, freqs_cis:Tensor,
                 attention_norm:Tensor, wo:Tensor,
                 ffn_norm:Tensor, w1:Tensor, w2:Tensor, w3:Tensor,
