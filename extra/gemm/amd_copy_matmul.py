@@ -58,9 +58,9 @@ def block_128x128_gemm(c:UOp, a:UOp, b:UOp) -> UOp:
 
   if use_wmma:
     # accumulator
-    acc = UOp.placeholder((TM, TN), dtypes.float.vec(8), slot=2, addrspace=AddrSpace.REG)
-    zi = UOp.range(TM, 200); zj = UOp.range(TN, 201)
-    acc = acc[zi, zj].set(UOp.const(dtypes.float.vec(8), 0.0), end=(zi, zj))
+    acc = UOp.placeholder((TM, TN, 8), dtypes.float, slot=2, addrspace=AddrSpace.REG)
+    zi = UOp.range(TM, 200); zj = UOp.range(TN, 201); zk = UOp.range(8, 202)
+    acc = acc[zi, zj, zk].set(UOp.const(dtypes.float, 0.0), end=(zi, zj, zk))
 
     A_tiles = A_local.reshape(WAVES_M, TM, WMMA_M, BLOCK_K // WMMA_K, WMMA_K)
     B_tiles = B_local.reshape(WAVES_N, TN, WMMA_N, BLOCK_K // WMMA_K, WMMA_K)
@@ -74,18 +74,20 @@ def block_128x128_gemm(c:UOp, a:UOp, b:UOp) -> UOp:
     k_upcast_b = UOp.range(WMMA_K, 311, axis_type=AxisType.UPCAST)
     b_frag = B_tiles[wave_n, tile_n, lane_n, k, k_upcast_b].contract(k_upcast_b)
 
-    acc_load = acc.after(k_tile, k, tile_m, tile_n)[tile_m, tile_n]
+    acc_ref = acc.after(k_tile, k, tile_m, tile_n)
+    acc_load = UOp(Ops.VECTORIZE, dtypes.float.vec(8), tuple(acc_ref[tile_m, tile_n, e] for e in range(8)))
     wmma_arg = ('WMMA_16_16_16_half_float', (16, 16, 16), dtypes.half, dtypes.float, 'AMD', 32,
-                (((301, 16),), ((311, 16),), ()), ())
+                (((301, 16),), ((311, 16),), ((302, 8),)), ())
     out = UOp(Ops.WMMA, dtypes.float.vec(8), (a_frag, b_frag, acc_load), arg=wmma_arg)
-    acc = acc.after(acc[tile_m, tile_n].store(out).end(tile_m, tile_n).end(k).barrier().end(k_tile))
+    stores_to_acc = UOp.group(*[acc[tile_m, tile_n, e].store(out.gep(e)) for e in range(8)])
+    acc = acc.after(stores_to_acc.end(tile_m, tile_n).end(k).barrier().end(k_tile))
 
     # store accumulator to output
     c = c.reshape(WAVES_M, TM, WMMA_M,
                   WAVES_N, TN, WMMA_N)
     st_m = UOp.range(TM, 9, AxisType.LOOP)
     st_n = UOp.range(TN, 10, AxisType.LOOP)
-    stores = [c[wave_m, st_m, e*2 + lane_m, wave_n, st_n, lane_n].store(acc[st_m, st_n].gep(e)) for e in range(8)]
+    stores = [c[wave_m, st_m, e*2 + lane_m, wave_n, st_n, lane_n].store(acc[st_m, st_n, e]) for e in range(8)]
     return UOp.group(*stores).end(st_m, st_n, wave_m, wave_n, lane)
   else:
     # accumulator
