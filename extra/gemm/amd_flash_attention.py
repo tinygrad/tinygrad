@@ -62,9 +62,9 @@ def amd_flash_attention(o:UOp, q:UOp, k:UOp, v:UOp) -> UOp:
   acc = UOp.placeholder((TM, TD), dtypes.float, slot=2, addrspace=AddrSpace.REG)
   m_i = UOp.placeholder((TM,), dtypes.float, slot=3, addrspace=AddrSpace.REG)
   l_i = UOp.placeholder((TM,), dtypes.float, slot=4, addrspace=AddrSpace.REG)
-  acc = acc.after(acc.store(UOp.const(dtypes.float, 0).reshape(1, 1).expand(TM, TD)))
-  m_i = m_i.after(m_i.store(UOp.const(dtypes.float, -math.inf).reshape(1).expand(TM)))
-  l_i = l_i.after(l_i.store(UOp.const(dtypes.float, 0).reshape(1).expand(TM)))
+  acc = acc.after(acc.store(acc.const_like(0)))
+  m_i = m_i.after(m_i.store(m_i.const_like(-math.inf)))
+  l_i = l_i.after(l_i.store(l_i.const_like(0)))
 
   # LDS for reduction (BLOCK_M floats for max, BLOCK_M for sum)
   red_lds = UOp.placeholder((BLOCK_M, N_THREADS_PER_ROW), dtypes.float, slot=5, addrspace=AddrSpace.LOCAL)
@@ -79,7 +79,7 @@ def amd_flash_attention(o:UOp, q:UOp, k:UOp, v:UOp) -> UOp:
 
   # -- S = Q @ K^T via WMMA into registers (re-init each n_tile) --
   S_reg = UOp.placeholder((TM, TN), dtypes.float, slot=7, addrspace=AddrSpace.REG)
-  S_reg = S_reg.after(S_reg.after(n_tile).store(UOp.const(dtypes.float, 0).reshape(1, 1).expand(TM, TN)))
+  S_reg = S_reg.after(S_reg.after(n_tile).store(S_reg.const_like(0)))
   k_qk = UOp.range(D // WMMA_K, 101, AxisType.REDUCE)
   tm1 = UOp.range(TM // WMMA_ACC, 200, AxisType.LOOP)
   tn1 = UOp.range(TN, 201, AxisType.LOOP)
@@ -91,13 +91,11 @@ def amd_flash_attention(o:UOp, q:UOp, k:UOp, v:UOp) -> UOp:
 
   # -- softmax in registers with LDS reduction --
   # scale S in registers
-  rs1 = UOp.range(TM, 250, AxisType.LOOP)
-  rs2 = UOp.range(TN, 251, AxisType.LOOP)
-  S_reg = S_reg.after(S_reg[rs1, rs2].store(S_reg[rs1, rs2] * UOp.const(dtypes.float, SCALE)).end(rs1, rs2))
+  S_reg = S_reg.after(S_reg.store(S_reg * S_reg.const_like(SCALE)))
 
   # step 1: per-thread local row max over TN=2 elements
   m_local = UOp.placeholder((TM,), dtypes.float, slot=8, addrspace=AddrSpace.REG)
-  m_local = m_local.after(m_local.after(n_tile).store(UOp.const(dtypes.float, -math.inf).reshape(1).expand(TM)))
+  m_local = m_local.after(m_local.after(n_tile).store(m_local.const_like(-math.inf)))
   rm1 = UOp.range(TM, 260, AxisType.LOOP)
   rm2 = UOp.range(TN, 261, AxisType.REDUCE)
   m_local = m_local.after(m_local[rm1].store(UOp(Ops.MAX, dtypes.float, (m_local.after(rm1, rm2)[rm1], S_reg[rm1, rm2]))).end(rm2, rm1))
@@ -109,7 +107,7 @@ def amd_flash_attention(o:UOp, q:UOp, k:UOp, v:UOp) -> UOp:
 
   # read global max: reduce across N_THREADS_PER_ROW threads
   m_ij = UOp.placeholder((TM,), dtypes.float, slot=9, addrspace=AddrSpace.REG)
-  m_ij = m_ij.after(m_ij.after(n_tile).store(UOp.const(dtypes.float, -math.inf).reshape(1).expand(TM)))
+  m_ij = m_ij.after(m_ij.after(n_tile).store(m_ij.const_like(-math.inf)))
   ri_g = UOp.range(TM, 280, AxisType.LOOP)
   rn_g = UOp.range(N_THREADS_PER_ROW, 281, AxisType.REDUCE)
   m_ij = m_ij.after(m_ij[ri_g].store(UOp(Ops.MAX, dtypes.float, (m_ij.after(ri_g, rn_g)[ri_g],
@@ -118,7 +116,7 @@ def amd_flash_attention(o:UOp, q:UOp, k:UOp, v:UOp) -> UOp:
 
   # step 3: per-thread local exp and sum
   p_local = UOp.placeholder((TM,), dtypes.float, slot=10, addrspace=AddrSpace.REG)
-  p_local = p_local.after(p_local.after(n_tile).store(UOp.const(dtypes.float, 0).reshape(1).expand(TM)))
+  p_local = p_local.after(p_local.after(n_tile).store(p_local.const_like(0)))
   rp1 = UOp.range(TM, 290, AxisType.LOOP)
   rp2 = UOp.range(TN, 291, AxisType.REDUCE)
   exp_local = ((S_reg[rp1, rp2] - m_ij[rp1]) * UOp.const(dtypes.float, LOG2E)).exp2()
@@ -142,7 +140,7 @@ def amd_flash_attention(o:UOp, q:UOp, k:UOp, v:UOp) -> UOp:
   P_lds = P_lds.after(sum_barrier)
 
   p_sum = UOp.placeholder((TM,), dtypes.float, slot=11, addrspace=AddrSpace.REG)
-  p_sum = p_sum.after(p_sum.after(n_tile).store(UOp.const(dtypes.float, 0).reshape(1).expand(TM)))
+  p_sum = p_sum.after(p_sum.after(n_tile).store(p_sum.const_like(0)))
   ri_gs = UOp.range(TM, 310, AxisType.LOOP)
   rn_gs = UOp.range(N_THREADS_PER_ROW, 311, AxisType.REDUCE)
   p_sum = p_sum.after(p_sum[ri_gs].store(p_sum.after(ri_gs, rn_gs)[ri_gs] +
@@ -183,10 +181,8 @@ def amd_flash_attention(o:UOp, q:UOp, k:UOp, v:UOp) -> UOp:
   l_i = l_i.after(n_tile_end)
   m_i = m_i.after(n_tile_end)
 
-  # normalize: acc /= l_i
-  rn1 = UOp.range(TM, 500, AxisType.LOOP)
-  rn2 = UOp.range(TD, 501, AxisType.LOOP)
-  acc = acc.after(acc[rn1, rn2].store(acc[rn1, rn2] / l_i[rn1]).end(rn1, rn2))
+  # normalize: l_i = 1/l_i, then acc *= l_i broadcast
+  acc = acc.after(acc.store(acc * (1/l_i).reshape(TM, 1).expand(TM, TD)))
 
   # store output
   o = o.reshape(WAVES_M, TM // WMMA_ACC, WMMA_ACC, LANES_PER_WAVE_M, WAVES_N, TD, LANES_PER_WAVE_N)

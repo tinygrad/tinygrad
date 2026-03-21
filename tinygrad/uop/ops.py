@@ -437,7 +437,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
       return self.index(*[UOp.const(dtypes.weakint, x) if isinstance(x, int) else x for x in idx])
   def const_like(self, b:ConstLike):
     # constants can optionally have a DEVICE source
-    return UOp.const(self.dtype, b, device=self._device, shape=self._shape)
+    return UOp.const(self.dtype.base, b, device=self._device, shape=self._shape)
   def broadcast(self, count:int):
     assert self.dtype.vcount == 1
     if count == 1: return self
