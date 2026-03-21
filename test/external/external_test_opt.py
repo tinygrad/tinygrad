@@ -7,13 +7,14 @@ from tinygrad import GlobalCounters, Tensor, Device
 from tinygrad.helpers import getenv
 from tinygrad.nn.state import get_parameters
 from tinygrad.engine.realize import capturing
+from tinygrad.engine.schedule import linear_to_schedule
 from tinygrad.tensor import _to_np_dtype
 
 class CLCache:
   def __init__(self, allowed=None, strict=False, preclear=True, var_vals=None):
     self.allowed, self.strict, self.preclear, self.var_vals = allowed, strict, preclear, var_vals if var_vals is not None else {}
     self.count = 0
-  def add(self, ei): self.count += 1
+  def add_linear(self, linear, var_vals): self.count += len(linear_to_schedule(linear))
   def __enter__(self):
     if self.preclear:
       gc.collect()

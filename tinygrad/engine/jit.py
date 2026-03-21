@@ -7,10 +7,10 @@ from tinygrad.dtype import DType
 from tinygrad.uop.ops import UOp, Variable, sym_infer, Ops
 from tinygrad.engine.realize import ExecItem, capturing, ViewOp, BufferCopy, BufferXfer, EncDec, CompiledRunner, Runner, Estimates
 from tinygrad.engine.memory import _internal_memory_planner
+from tinygrad.engine.schedule import linear_to_schedule
 from tinygrad.nn.state import get_parameters
 from tinygrad.schedule.rangeify import mop_cleanup
 from dataclasses import dataclass, replace
-from weakref import WeakKeyDictionary
 
 class GraphException(Exception): pass
 class JitError(Exception): pass
@@ -280,17 +280,7 @@ class TinyJit(Generic[ReturnType]):
     self.prune = prune
     self.optimize = optimize
 
-  def add_buffer(self, b:Buffer) -> Buffer:
-    if found:=self._buffer_replace.get(b, None): return found
-    if b.is_allocated() or b.uop_refcount > 0: return b
-    if b._base is not None:
-      self._buffer_replace[b] = ret = Buffer(b.device, b.size, b.dtype, base=self.add_buffer(b._base), offset=b.offset)
-    else:
-      self._buffer_replace[b] = ret = Buffer(b.device, b.size, b.dtype, options=b.options)
-    return ret
-
-  def add(self, ei:ExecItem):
-    self._jit_cache.append(ExecItem(ei.ast, [self.add_buffer(buf) for buf in ei.bufs if buf is not None], ei.metadata, ei.fixedvars, ei.prg))
+  def add_linear(self, linear:UOp, var_vals:dict[str, int]): self._linears.append(linear)
 
   def reset(self):
     assert self.fxn is not None, "can't reset without function"
@@ -321,20 +311,20 @@ class TinyJit(Generic[ReturnType]):
       # jit capture
       assert self.fxn is not None
       if capturing: raise RuntimeError(f"having TinyJit inside another TinyJit is not supported {len(capturing)=} {capturing=}")
-      self._jit_cache: list[ExecItem] = []
-      self._buffer_replace: WeakKeyDictionary[Buffer, Buffer] = WeakKeyDictionary()
-      # TODO: should we always disable the memory planner here? it must be off for prune
-      with Context(BEAM=getenv("JITBEAM", BEAM.value), NO_MEMORY_PLANNER=int(self.prune)):
+      self._linears: list[UOp] = []
+      with Context(BEAM=getenv("JITBEAM", BEAM.value)):
         capturing.append(self)
         try:
           ret = self.fxn(*args, **kwargs)
           if len(params:=get_parameters(ret)): Tensor.realize(*params)
         finally: capturing.clear()
-      jit_cache = self._jit_cache
-      del self._buffer_replace, self._jit_cache
-      if not len(jit_cache): raise JitError("didn't JIT anything!")
+      if not len(self._linears): raise JitError("didn't JIT anything!")
       _check_no_non_tensor_return(ret)
-      if DEBUG >= 1: print(f"JIT captured {len(jit_cache)} kernels with {len(input_buffers)} inputs")
+      if DEBUG >= 1: print(f"JIT captured {len(self._linears)} linears with {len(input_buffers)} inputs")
+
+      # combine all captured linears into one and convert to ExecItems
+      jit_cache = [ei.lower() for ei in linear_to_schedule(UOp(Ops.LINEAR, src=tuple(flatten([l.src for l in self._linears]))))]
+      del self._linears
 
       # track inputs that are views of buffers
       # TODO: eventually expected_buffers should live in ExecItem
@@ -367,9 +357,10 @@ class TinyJit(Generic[ReturnType]):
       input_replace = get_input_replace(jit_cache, input_buffers)
       if DEBUG >= 1 and len(set(input_replace.values())) != len(input_buffers): print("WARNING: some input tensors not found")
 
-      # set this for next run
+      # set this for next run and execute the combined schedule (applies graphs on first run)
       self.captured = CapturedJit(ret, jit_cache, input_replace, extra_view_inputs, names, expected_input_info)
       if self.optimize: self.captured.replan_buffers_memory_layout()
+      self.captured(input_buffers, var_vals)
     elif self.cnt >= 2:
       # jit exec
       assert self.captured is not None
