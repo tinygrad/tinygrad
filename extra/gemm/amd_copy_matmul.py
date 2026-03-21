@@ -19,7 +19,7 @@ if use_wmma:
   WAVES_M, WAVES_N = 2, 2
   LANES_PER_WAVE_M, LANES_PER_WAVE_N = 2, 16
   TM = BLOCK_M // (WAVES_M * WMMA_M) * WMMA_ACC  # 32
-  TN = BLOCK_N // (WAVES_N * WMMA_N)  # 4
+  TN = BLOCK_N // (WAVES_N * WMMA_N)             # 4
 else:
   UNROLL_M, UNROLL_N = 4, 4
   WAVES_M, WAVES_N = 4, 1
@@ -79,11 +79,10 @@ def block_128x128_gemm(c:UOp, a:UOp, b:UOp) -> UOp:
     wmma_arg = ('WMMA_16_16_16_half_float', (16, 16, 16), dtypes.half, dtypes.float, 'AMD', 32,
                 (((301, 16),), ((311, 16),), ((302, WMMA_ACC),)), ())
     out = UOp(Ops.WMMA, dtypes.float.vec(WMMA_ACC), (a_frag, b_frag, acc_load), arg=wmma_arg)
-    acc_wr = acc.reshape(TM // WMMA_ACC, WMMA_ACC, TN)
-    acc = acc.after(UOp.group(*[acc_wr[tile_m, e, tile_n].store(out.gep(e)) for e in range(WMMA_ACC)]) \
-      .end(tile_m, tile_n).end(k).barrier().end(k_tile))
-  else:
 
+    acc_wr = acc.reshape(TM // WMMA_ACC, WMMA_ACC, TN)
+    acc_store = UOp.group(*[acc_wr[tile_m, e, tile_n].store(out.gep(e)) for e in range(WMMA_ACC)]).end(tile_m, tile_n)
+  else:
     # registers for LOCAL -> REG
     a_frag = UOp.placeholder((TM//UNROLL_M, UNROLL_M), dtypes.float, slot=0, addrspace=AddrSpace.REG)
     b_frag = UOp.placeholder((TN//UNROLL_N, UNROLL_N), dtypes.float, slot=1, addrspace=AddrSpace.REG)
@@ -95,18 +94,21 @@ def block_128x128_gemm(c:UOp, a:UOp, b:UOp) -> UOp:
     # FMA
     a_frag = a_frag.reshape(TM, 1).expand(TM, TN)
     b_frag = b_frag.reshape(1, TN).expand(TM, TN)
-    acc = acc.after(acc.store(acc.after(k) + (a_frag * b_frag)).end(k).barrier().end(k_tile))
+    acc_store = acc.store(acc.after(k) + (a_frag * b_frag))
+
+  # store accumulator and loop
+  acc = acc.after(acc_store.end(k).barrier().end(k_tile))
 
   # store accumulator to output (unified)
   if use_wmma:
-    c = c.reshape(WAVES_M, TM // WMMA_ACC, WMMA_ACC, LANES_PER_WAVE_M,
+    c = c.reshape(WAVES_M, TM//WMMA_ACC, WMMA_ACC, LANES_PER_WAVE_M,
                   WAVES_N, TN, LANES_PER_WAVE_N)
-    c = c.permute((0,4,3,6, 1,2,5)).reshape(THREADS_PER_BLOCK, TM, TN)
+    c = c.permute((0,4,3,6, 1,2,5))
   else:
     c = c.reshape(WAVES_M, TM//UNROLL_M, LANES_PER_WAVE_M, UNROLL_M,
                   WAVES_N, TN//UNROLL_N, LANES_PER_WAVE_N, UNROLL_N)
-    c = c.permute((0,4,2,6, 1,3,5,7)).reshape(THREADS_PER_BLOCK, TM, TN)
-  return c[tid].store(acc).end(wave_m, wave_n, lane)
+    c = c.permute((0,4,2,6, 1,3,5,7))
+  return c.reshape(THREADS_PER_BLOCK, TM, TN)[tid].store(acc).end(wave_m, wave_n, lane)
 
 def amd_copy_matmul(c:UOp, a:UOp, b:UOp) -> UOp:
   block_id_m = UOp.range(M // BLOCK_M, 0, AxisType.GLOBAL)
