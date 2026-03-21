@@ -74,7 +74,7 @@ class FlatTransformer:
     self.norm = nn.RMSNorm(dim, norm_eps)
     self.tok_embeddings = nn.Embedding(vocab_size, dim)
     self.tok_embeddings.weight = Tensor.normal(vocab_size, dim, mean=0.0, std=0.02)
-    self.output = Tensor.normal(1, vocab_size, dim, mean=0.0, std=dim**-0.5)
+    self.output = Tensor.normal(1, vocab_size, dim, mean=0.0, std=0.02)
     self.freqs_cis = precompute_freqs_cis(dim // n_heads, max_context * 2, rope_theta).contiguous().requires_grad_(False)
 
   def lin_per_layer(self, in_features:int, out_features:int, std:float=0.02):
