@@ -249,6 +249,9 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
         if len(self.src) >= 1: return tuple(self.src[0].sgep(i) for i in range(self.src[0].dtype.count))
         return None
 
+      # SHAPED_WMMA output shape = accumulator shape (src[2])
+      case Ops.SHAPED_WMMA: return self.src[2]._shape
+
       # passthrough ops
       case Ops.REDUCE | Ops.MSTACK | Ops.MSELECT | Ops.DETACH | Ops.CONTIGUOUS | Ops.CONTIGUOUS_BACKWARD | Ops.AFTER | Ops.END:
         return self.src[0]._shape

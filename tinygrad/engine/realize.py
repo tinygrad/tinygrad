@@ -1,7 +1,7 @@
 from typing import cast, Callable
 import time, pprint, random, itertools, math
 from dataclasses import dataclass, replace, field
-from tinygrad.helpers import all_same, colored, DEBUG, GlobalCounters, ansilen, BEAM, NOOPT, all_int, CAPTURING, Metadata, TRACEMETA, TracingKey
+from tinygrad.helpers import all_same, colored, DEBUG, GlobalCounters, ansilen, BEAM, NOOPT, all_int, Metadata, TRACEMETA, TracingKey
 from tinygrad.helpers import DEVECTORIZE, time_to_str, VALIDATE_WITH_CPU, cpu_profile, PROFILE, ProfilePointEvent, cpu_events, prod, Context, unwrap
 from tinygrad.helpers import EMULATED_DTYPES
 from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, sym_infer
@@ -187,12 +187,11 @@ class ExecItem:
 
 # **************** main run function ****************
 
-capturing: list = []  # put classes with an add method in here
+capturing: list = []  # put classes with an add_linear method in here
 
 def run_schedule(schedule:list[ExecItem], var_vals:dict[str, int]|None=None, do_update_stats=True):
   while len(schedule):
     ei = schedule.pop(0).lower()
-    if len(capturing) and CAPTURING: capturing[0].add(ei)
     if VALIDATE_WITH_CPU and ei.ast.op is Ops.SINK:
       # copy in allocated buffers from the GPU
       bufs = [b for b in ei.bufs if b is not None]
