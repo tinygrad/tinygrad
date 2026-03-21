@@ -77,9 +77,9 @@ movement_ops = PatternMatcher([
   (UPat((Ops.VECTORIZE, Ops.VCONST), dtype=dtypes.weakint), lambda: True),
   (UPat({Ops.ADD, Ops.MUL, Ops.IDIV}, dtype=dtypes.weakint), lambda: True),
 
-  # AFTER on Movement Op, BUFFER, COPY, or BITCAST
-  (UPat(Ops.AFTER, src=(UPat(GroupOp.Movement.union({Ops.MULTI, Ops.CONTIGUOUS, Ops.BUFFER, Ops.BITCAST, Ops.COPY})),), allow_any_len=True),
-   lambda: True),
+  # AFTER on Movement Op, INDEX, BUFFER, COPY, or BITCAST
+  (UPat(Ops.AFTER, src=(UPat(GroupOp.Movement.union({Ops.INDEX, Ops.MULTI, Ops.CONTIGUOUS, Ops.BUFFER, Ops.BITCAST, Ops.COPY})),),
+   allow_any_len=True), lambda: True),
 ])
 
 _tensor_spec = PatternMatcher([
