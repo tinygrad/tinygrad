@@ -14,6 +14,7 @@ assert N % BLOCK_N == 0 and M % BLOCK_M == 0 and K % BLOCK_K == 0
 use_wmma = getenv("WMMA")
 
 if use_wmma:
+  UNROLL_M, UNROLL_N = 1, 1
   WMMA_M, WMMA_N, WMMA_K = 16, 16, 16
   WMMA_ACC = 8  # accumulator elements per thread in the M dimension
   WAVES_M, WAVES_N = 2, 2
@@ -100,14 +101,9 @@ def block_128x128_gemm(c:UOp, a:UOp, b:UOp) -> UOp:
   acc = acc.after(acc_store.end(k).barrier().end(k_tile))
 
   # store accumulator to output (unified)
-  if use_wmma:
-    c = c.reshape(WAVES_M, TM//WMMA_ACC, WMMA_ACC, LANES_PER_WAVE_M,
-                  WAVES_N, TN, LANES_PER_WAVE_N)
-    c = c.permute((0,4,3,6, 1,2,5))
-  else:
-    c = c.reshape(WAVES_M, TM//UNROLL_M, LANES_PER_WAVE_M, UNROLL_M,
-                  WAVES_N, TN//UNROLL_N, LANES_PER_WAVE_N, UNROLL_N)
-    c = c.permute((0,4,2,6, 1,3,5,7))
+  c = c.reshape(WAVES_M, TM//UNROLL_M, LANES_PER_WAVE_M, UNROLL_M,
+                WAVES_N, TN//UNROLL_N, LANES_PER_WAVE_N, UNROLL_N)
+  c = c.permute((0,4,2,6, 1,3,5,7))
   return c.reshape(THREADS_PER_BLOCK, TM, TN)[tid].store(acc).end(wave_m, wave_n, lane)
 
 def amd_copy_matmul(c:UOp, a:UOp, b:UOp) -> UOp:
