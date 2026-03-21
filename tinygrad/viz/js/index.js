@@ -362,8 +362,10 @@ function setFocus(key) {
     metadata.insertBefore(instList.parentElement, html.node());
   }
   d3.select(instList).selectAll("span").classed("highlight", false);
-  const instLine = document.getElementById(`inst-${e?.arg.pc}`); instLine?.classList.add("highlight");
+  let instLine = document.getElementById(`inst-${e?.arg.pc}`);
+  if (instLine == null && linkPair != null) instLine = document.getElementById(`inst-${selectShape(linkPair[1]).e.arg.pc}`);
   if (instLine != null) {
+    instLine.classList.add("highlight");
     const r = rect(instLine), c = rect(instList);
     if (Math.max(c.top-r.bottom, r.top-c.bottom)>=-30) instList.scrollTop = instLine.offsetTop-instList.clientHeight/2+instLine.clientHeight/2;
   }
@@ -656,7 +658,7 @@ async function renderProfiler(path, opts) {
       const startX = left.x1, endX = right.x0;
       const leftY = (left.y0+left.y1)/2, rightY = (right.y0+right.y1)/2;
       const dx = endX-startX, bend = Math.max(12, Math.min(40, dx/2));
-      ctx.beginPath(); ctx.moveTo(startX, leftY); ctx.bezierCurveTo(startX+bend, leftY, endX-bend, rightY, endX, rightY); ctx.strokeStyle = "#c888b0"; ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(startX, leftY); ctx.bezierCurveTo(startX+bend, leftY, endX-bend, rightY, endX, rightY); ctx.strokeStyle = "#858b9d"; ctx.stroke();
     }
     // draw axes
     ctx.translate(0, baseOffset);
