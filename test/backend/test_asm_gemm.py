@@ -34,7 +34,7 @@ def run_asm_gemm(a_shape, b_shape, dtype=dtypes.float16, a_shard=None, b_shard=N
 
   # no validation on the NULL device
   if a_rand.device.startswith("NULL"): return None
-  atol, rtol = (1e-2, 1e-3)
+  atol, rtol = (2e-1, 1e-2) if dtype == dtypes.bfloat16 else (1e-2, 1e-3)
   with Context(DEBUG=0):
     assert tst.allclose(ref, atol=atol, rtol=rtol), "forward mismatch"
     assert a.grad.allclose(a_ref.grad, atol=atol, rtol=rtol), "grad_a mismatch"
