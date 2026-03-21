@@ -68,8 +68,7 @@ class FlatTransformer:
     self.norm = nn.RMSNorm(dim, norm_eps)
     self.tok_embeddings = nn.Embedding(vocab_size, dim)
     self.tok_embeddings.weight = Tensor.normal(vocab_size, dim, mean=0.0, std=0.02)
-    self.output = nn.Linear(dim, vocab_size, bias=False)
-    self.output.weight = Tensor.normal(vocab_size, dim, mean=0.0, std=dim**-0.5)
+    self.output = Tensor.normal(1, vocab_size, dim, mean=0.0, std=dim**-0.5)
     self.freqs_cis = precompute_freqs_cis(dim // n_heads, max_context * 2, rope_theta).contiguous().requires_grad_(False)
 
   def lin_per_layer(self, in_features:int, out_features:int, std:float=0.02):
@@ -122,7 +121,7 @@ class FlatTransformer:
       self.ffn_norm.shard_(device, axis=None).realize()
       self.norm.weight.shard_(device, axis=None).realize()
       self.tok_embeddings.weight.shard_(device, axis=0).realize()
-      self.output.weight.shard_(device, axis=0).realize()
+      self.output.shard_(device, axis=1).realize()
       self.freqs_cis.shard_(device, axis=None).realize()
 
   def __call__(self, tokens:Tensor):
@@ -132,7 +131,7 @@ class FlatTransformer:
       h = self.run_layer(h, freqs_cis,
                          self.attention_norm[i], self.wqkv[i], self.wo[i],
                          self.ffn_norm[i], self.w1[i], self.w2[i], self.w3[i])
-    logits = self.output(self.norm(h))
+    logits = self.norm(h) @ self.output[0].T
     return logits
 
 # TODO: this shouldn't be needed, but it prevents a copy of the grads. CAT can help
