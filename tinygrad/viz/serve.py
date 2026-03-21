@@ -44,7 +44,7 @@ from tinygrad.device import ProfileDeviceEvent, ProfileGraphEvent, ProfileGraphE
 from tinygrad.dtype import dtypes
 
 uops_colors = {Ops.LOAD: "#ffc0c0", Ops.STORE: "#87CEEB", Ops.CONST: "#e0e0e0", Ops.VCONST: "#e0e0e0", Ops.REDUCE: "#FF5B5B",
-               **{x:"#f2cb91" for x in {Ops.DEFINE_LOCAL, Ops.DEFINE_REG}}, Ops.REDUCE_AXIS: "#FF6B6B",
+               **{x:"#f2cb91" for x in {Ops.DEFINE_LOCAL, Ops.DEFINE_REG}}, Ops.REDUCE_AXIS: "#FF6B6B", Ops.WMMA: "#FF5B5B",
                Ops.RANGE: "#c8a0e0", Ops.BARRIER: "#ff8080", Ops.IF: "#c8b0c0", Ops.SPECIAL: "#c0c0ff",
                Ops.INDEX: "#cef263", Ops.WMMA: "#efefc0", Ops.MULTI: "#f6ccff", Ops.INS: "#eec4ff",
                **{x:"#D8F9E4" for x in GroupOp.Movement}, **{x:"#ffffc0" for x in GroupOp.ALU}, Ops.THREEFRY:"#ffff80",
@@ -341,7 +341,8 @@ def get_exec_type(p) -> str|None:
   from tinygrad.renderer.amd.sqtt import VALUINST, INST, INST_RDNA4, InstOp, InstOpRDNA4
   if isinstance(p, VALUINST): return "VALU"
   if isinstance(p, (INST, INST_RDNA4)) and isinstance(p.op, (InstOp, InstOpRDNA4)):
-    op_to_exec = {"SALU":"SALU", "GLOBAL":"VMEM", "FLAT":"VMEM", "LDS":"LDS", "VALU":"VALU", "SMEM":"SALU"}
+    op_to_exec = {"SALU":"SALU", "GLOBAL":"VMEM", "FLAT":"VMEM", "LDS":"LDS", "VALU":"VALU", "SMEM":"SALU",
+                  "VMEM":"VMEM", "VINTERP":"VALU", "WMMA":"VALU"}
     for k,v in op_to_exec.items():
       if k in p.op.name: return v
   return None
@@ -349,7 +350,7 @@ def get_exec_type(p) -> str|None:
 def sqtt_timeline(data:bytes, lib:bytes, target:str) -> list[ProfileEvent]:
   from tinygrad.renderer.amd.sqtt import (map_insts, InstructionInfo, PacketType, INST, InstOp, VALUINST, IMMEDIATE, IMMEDIATE_MASK, VMEMEXEC,
                                           ALUEXEC, INST_RDNA4, InstOpRDNA4, TS_DELTA_OR_MARK, TS_DELTA_OR_MARK_RDNA4, CDNA_INST, InstOpCDNA,
-                                          WAVEEND, CDNA_WAVEEND, WAVERDY, AluSrc)
+                                          WAVEEND, CDNA_WAVEEND, WAVERDY, AluSrc, MemSrc)
   ret:list[ProfileEvent] = []
   row_ends:dict[str, Decimal] = {}
   row_counts:dict[str, itertools.count] = {}
@@ -371,14 +372,10 @@ def sqtt_timeline(data:bytes, lib:bytes, target:str) -> list[ProfileEvent]:
     # queue for exec linking
     if (exec_type:=get_exec_type(p)) is not None:
       exec_pending.setdefault(exec_type, []).append(f"{row}-{idx}")
-    if isinstance(p, ALUEXEC):
-      dispatch:list[str] = []
-      if p.src is AluSrc.VALU_SALU: dispatch += [exec_pending["SALU"].pop(0), exec_pending["VALU"].pop(0)]
-      elif p.src is AluSrc.VALU: dispatch += [exec_pending["VALU"].pop(0)]
-      elif p.src is AluSrc.SALU: dispatch += [exec_pending["SALU"].pop(0)]
-      assert isinstance(e.name, TracingKey), f"ALUEXEC op key was {e.name}"
-      e.name = TracingKey(e.name.display_name, ret=f"LINK:{','.join(dispatch)}")
-    # TODO: add vmem
+    if isinstance(p, (ALUEXEC, VMEMEXEC)) and "ALT" not in str(p.src):
+      dispatch = exec_pending[name].pop(0)
+      assert isinstance(e.name, TracingKey), f"op name was {e.name}"
+      e.name = TracingKey(e.name.display_name, ret=f"LINK:{dispatch}")
   for p, info in map_insts(data, lib, target):
     if len(ret) > getenv("MAX_SQTT_PKTS", 50_000): break
     if isinstance(p, (TS_DELTA_OR_MARK, TS_DELTA_OR_MARK_RDNA4)) and p.is_marker:

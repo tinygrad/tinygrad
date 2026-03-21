@@ -25,6 +25,13 @@ const colored = n => d3.create("span").call(s => s.selectAll("span").data(typeof
 
 const rect = (s) => (typeof s === "string" ? document.querySelector(s) : s).getBoundingClientRect();
 
+// dims of shapes on the canvas aren't tracked by the browser, we compute it
+const canvasRect = (s, pixelScale) => {
+  const { e } = selectShape(s), t = data.tracks.get(s.split("-")[0]);
+  const x = pixelScale(e.x), w = pixelScale(e.x+e.width)-x, y = t.offsetY+e.y;
+  return {x0:x, x1:x+w, y0:y, y1:y+e.height};
+};
+
 let timeout = null;
 const Status = {STARTED:0, COMPLETE:1, ERR:2}
 const updateProgress = (st, msg) => {
@@ -233,34 +240,6 @@ const drawLine = (ctx, x, y, opts) => {
   ctx.stroke();
 }
 
-const drawArrow = (ctx, from, to, color) => {
-  if (from == null || to == null) return; // TODO: handle out of range
-  // ai code, mostly correct
-  const fromLeft = from.x0;
-  const fromRight = from.x1;
-  const fromY = (from.y0+from.y1)/2;
-  const toLeft = to.x0;
-  const toRight = to.x1;
-  const toY = (to.y0+to.y1)/2;
-  const startX = fromRight <= toLeft ? fromRight : fromLeft;
-  const endX = fromRight <= toLeft ? toLeft : toRight;
-  const dir = startX <= endX ? 1 : -1;
-  const dx = Math.abs(endX-startX);
-  const bend = Math.max(12, Math.min(40, dx/2));
-  ctx.beginPath();
-  ctx.moveTo(startX, fromY);
-  ctx.bezierCurveTo(startX+bend*dir, fromY, endX-bend*dir, toY, endX, toY);
-  ctx.strokeStyle = color;
-  ctx.stroke();
-  ctx.beginPath();
-  ctx.moveTo(endX, toY);
-  ctx.lineTo(endX-6*dir, toY-4);
-  ctx.lineTo(endX-6*dir, toY+4);
-  ctx.closePath();
-  ctx.fillStyle = color;
-  ctx.fill();
-}
-
 function tabulate(rows) {
   const root = d3.create("div").style("display", "grid").style("grid-template-columns", `${Math.max(...rows.map(x => x[0].length), 0)}ch 1fr`).style("gap", "0.2em").style("white-space", "nowrap");
   for (const [k,v] of rows) { root.append("div").text(k); root.append("div").node().append(v); }
@@ -309,7 +288,7 @@ function getZoomIdentity() {
 
 const Modes = {0:'read', 1:'write', 2:'write+read'};
 
-let arrowPairs = [];
+let linkPair = null;
 function setFocus(key) {
   if (key !== focusedShape) {
     saveToHistory({ shape:focusedShape });
@@ -321,8 +300,8 @@ function setFocus(key) {
       const [st, et] = xscale.range().map(zoomLevel.invertX, zoomLevel).map(xscale.invert, xscale);
       if (x1 < st || x0 > et) zoomLevel = d3.zoomIdentity.translate(-xscale((x0+x1)/2-(et-st)/2)*zoomLevel.k, 0).scale(zoomLevel.k);
     }
-    const links = e?.arg.links || [data.links.get(key)];
-    arrowPairs = links?.[0] == null ? [] : links.map(x => [key, x]);
+    const link = e?.arg.links ?? data.links.get(key);
+    linkPair = link == null ? null : [key, link];
     focusedShape = key; d3.select("#timeline").call(canvasZoom.transform, zoomLevel);
   }
   const { eventType, e } = selectShape(key);
@@ -490,8 +469,8 @@ async function renderProfiler(path, opts) {
         if (info.startsWith("\nPC:")) { pc = parseInt(e.info.split(":")[1]); info = ""; }
         if (info.startsWith("\nTB:")) { trace = info; info = ""; }
         if (info.startsWith("\nLINK:")) {
-          links = info.replace("\nLINK:", "").split(","); info = "";
-          for (const e of links) data.links.set(e, key);
+          links = info.replace("\nLINK:", ""); info = "";
+          data.links.set(links, key);
         }
         const arg = { tooltipText:" N:"+shapes.length+"\n"+formatTime(e.dur)+info, label, pc, trace, links, bufs:[], key, ctx:shapeRef?.ctx, step:shapeRef?.step };
         if (e.key != null) shapeMap.set(e.key, key);
@@ -624,7 +603,6 @@ async function renderProfiler(path, opts) {
     xscale.domain([st, et]);
     const profilerEl = profiler.node();
     const visibleYStart = profilerEl.scrollTop-canvasTop + rect(profilerEl).top, visibleYEnd = visibleYStart+profilerEl.clientHeight;
-    const shapeBounds = new Map();
     ctx.textBaseline = "middle";
     // draw shapes
     for (const [k, { shapes, eventType, linear, visible, offsetY, valueMap, pcolor, scolor, rowBorderColor }] of data.tracks) {
@@ -658,12 +636,12 @@ async function renderProfiler(path, opts) {
           visible.push({ y0:y, y1:y+e.height, x0:x, x1:x+width, arg:e.arg });
           ctx.fillStyle = e.fillColor; ctx.fill();
           addBorder?.(width);
-          shapeBounds.set(e.arg.key, { x0:x, x1:x+width, y0:y, y1:y+e.height });
           // add label
           drawText(ctx, e.label, x+2, y+e.height/2, width);
         }
-        if (focusedShape != null && e.arg?.key === focusedShape) { ctx.strokeStyle = pcolor; ctx.stroke(); }
-        // else if (arrowPairs[0]?.includes(e.arg?.key)) ctx.strokeStyle = "#c888b0"; ctx.stroke();
+        if ((focusedShape != null && e.arg?.key === focusedShape) || (linkPair != null && (e.arg?.key === linkPair[0] || e.arg?.key === linkPair[1]))) {
+          ctx.strokeStyle = pcolor; ctx.stroke();
+        }
       }
       // draw row line
       if (rowBorderColor != null) {
@@ -671,8 +649,15 @@ async function renderProfiler(path, opts) {
         drawLine(ctx, [0, canvasWidth], [y, y], { color:rowBorderColor });
       }
     }
-    // draw arrows
-    for (const [a, b] of arrowPairs) drawArrow(ctx, shapeBounds.get(a), shapeBounds.get(b), "#c888b0");
+    // draw the link
+    if (linkPair != null) {
+      const [a, b] = [canvasRect(linkPair[0], xscale), canvasRect(linkPair[1], xscale)];
+      const [left, right] = a.x0 <= b.x0 ? [a, b] : [b, a];
+      const startX = left.x1, endX = right.x0;
+      const leftY = (left.y0+left.y1)/2, rightY = (right.y0+right.y1)/2;
+      const dx = endX-startX, bend = Math.max(12, Math.min(40, dx/2));
+      ctx.beginPath(); ctx.moveTo(startX, leftY); ctx.bezierCurveTo(startX+bend, leftY, endX-bend, rightY, endX, rightY); ctx.strokeStyle = "#c888b0"; ctx.stroke();
+    }
     // draw axes
     ctx.translate(0, baseOffset);
     const y = secondaryTick != null ? tickSize+padding : 0;
