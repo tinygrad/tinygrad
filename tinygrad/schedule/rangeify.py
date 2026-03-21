@@ -22,6 +22,31 @@ def add_ranges_to_store(ctx, x):
   idxs = [UOp.range(r, next(ctx), AxisType.LOOP) for r in x.src[0].shape]
   return UOp.store(x.src[0].index(*idxs), x.src[1].index(*idxs)).end(*idxs)
 
+def lower_shaped_wmma_store(ctx, st):
+  x = st.src[1]  # the SHAPED_WMMA
+  dst = st.src[0]  # the destination ptr
+  a, b, acc = x.src
+  a_k, b_k, acc_n = a.shape[-1], b.shape[-1], acc.shape[-1]
+  dims, device, threads = x.arg
+  dtype_in, dtype_out = a.dtype.base, x.dtype
+  # create upcast ranges for each input's contraction dimension
+  a_range_id, b_range_id, acc_range_id = next(ctx), next(ctx), next(ctx)
+  a_upcast = UOp.range(a_k, a_range_id, axis_type=AxisType.UPCAST)
+  b_upcast = UOp.range(b_k, b_range_id, axis_type=AxisType.UPCAST)
+  acc_upcast = UOp.range(acc_n, acc_range_id, axis_type=AxisType.UPCAST)
+  # contract each input's last dimension into a vec type
+  a_vec = a[a_upcast].contract(a_upcast)
+  b_vec = b[b_upcast].contract(b_upcast)
+  acc_vec = acc[acc_upcast].contract(acc_upcast)
+  # build full wmma_arg
+  name = f"WMMA_{'_'.join(map(str, dims))}_{dtype_in.name}_{dtype_out.name}"
+  tc_upcast_axes = (((a_range_id, a_k),), ((b_range_id, b_k),), ((acc_range_id, acc_n),))
+  wmma_arg = (name, dims, dtype_in, dtype_out, device, threads, tc_upcast_axes, ())
+  # create WMMA op
+  wmma = UOp(Ops.WMMA, dtype_out.vec(acc_n), (a_vec, b_vec, acc_vec), arg=wmma_arg)
+  # store each element individually
+  return UOp.group(*[dst[e].store(wmma.gep(e)) for e in range(acc_n)])
+
 pm_store_ranges = PatternMatcher([
   (UPat(Ops.STORE, name="x"), add_ranges_to_store),
 ])
@@ -63,6 +88,8 @@ pm_mops = PatternMatcher([
    lambda r,a: UOp(r.op, r.dtype, (a.replace(src=(r.src[0],)+a.src[1:]),)+r.src[1:], r.arg)
      if a.src[0]._shape is not None and not any(s.op is Ops.STORE and s.src[0]._shape is not None for s in a.src[1:]) else None),
   (UPat(GroupOp.Movement, name="r").end(name="a", allow_any_len=True), lambda r,a: a.replace(src=(r.src[0],)+a.src[1:])),
+  # lower STORE(ptr, SHAPED_WMMA) to WMMA with CONTRACT + individual stores
+  (UPat(Ops.STORE, src=(UPat(), UPat(Ops.SHAPED_WMMA)), name="st"), lower_shaped_wmma_store),
 ])
 
 # *****************

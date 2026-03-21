@@ -72,17 +72,8 @@ def block_128x128_gemm(c:UOp, a:UOp, b:UOp) -> UOp:
     a_frag = A_local.reshape(WAVES_M, TM // WMMA_ACC, WMMA_M, BLOCK_K // WMMA_K, WMMA_K)[wave_m, tile_m, lane_n, k]
     b_frag = B_local.reshape(WAVES_N, TN, WMMA_N, BLOCK_K // WMMA_K, WMMA_K)[wave_n, tile_n, lane_n, k]
 
-    # TODO: remove unneeded CONTRACTS
-    k_upcast_a = UOp.range(WMMA_K, 301, axis_type=AxisType.UPCAST)
-    k_upcast_b = UOp.range(WMMA_K, 311, axis_type=AxisType.UPCAST)
-    acc_upcast = UOp.range(WMMA_ACC, 302, axis_type=AxisType.UPCAST)
-    wmma_arg = ('WMMA_16_16_16_half_float', (16, 16, 16), dtypes.half, dtypes.float, 'AMD', 32,
-                (((301, 16),), ((311, 16),), ((302, WMMA_ACC),)), ())
-    out = UOp(Ops.WMMA, dtypes.float.vec(WMMA_ACC), (a_frag[k_upcast_a].contract(k_upcast_a),
-                                                     b_frag[k_upcast_b].contract(k_upcast_b),
-                                                     acc_frag.after(k)[acc_upcast].contract(acc_upcast)), arg=wmma_arg)
-
-    acc_store = UOp.group(*[acc_frag[e].store(out.gep(e)) for e in range(WMMA_ACC)]).end(tile_m, tile_n)
+    wmma = UOp(Ops.SHAPED_WMMA, dtypes.float, (a_frag, b_frag, acc_frag.after(k)), arg=((16, 16, 16), 'AMD', 32))
+    acc_store = acc_frag.store(wmma).end(tile_m, tile_n)
   else:
     # registers for LOCAL -> REG
     a_frag = UOp.placeholder((TM//UNROLL_M, UNROLL_M), dtypes.float, slot=0, addrspace=AddrSpace.REG)
