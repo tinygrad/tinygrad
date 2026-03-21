@@ -326,6 +326,9 @@ class TinyJit(Generic[ReturnType]):
       jit_cache = [ei.lower() for ei in linear_to_schedule(UOp(Ops.LINEAR, src=tuple(flatten([l.src for l in self._linears]))))]
       del self._linears
 
+      # exec
+      for ei in jit_cache: ei.run(var_vals)
+
       # track inputs that are views of buffers
       # TODO: eventually expected_buffers should live in ExecItem
       extra_view_inputs: list[tuple[int, int, str, int, DType]] = []
@@ -357,10 +360,8 @@ class TinyJit(Generic[ReturnType]):
       input_replace = get_input_replace(jit_cache, input_buffers)
       if DEBUG >= 1 and len(set(input_replace.values())) != len(input_buffers): print("WARNING: some input tensors not found")
 
-      # set this for next run and execute the combined schedule (applies graphs on first run)
       self.captured = CapturedJit(ret, jit_cache, input_replace, extra_view_inputs, names, expected_input_info)
       if self.optimize: self.captured.replan_buffers_memory_layout()
-      self.captured(input_buffers, var_vals)
     elif self.cnt >= 2:
       # jit exec
       assert self.captured is not None
