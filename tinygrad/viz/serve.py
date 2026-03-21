@@ -337,16 +337,6 @@ def load_amd_counters(ctxs:list[dict], profile:list[ProfileEvent]) -> None:
       steps.append(create_step("SQTT", ("/prg-sqtt", len(ctxs), len(steps)), ((k, tag), sqtt, prg_events[k], arch)))
     ctxs.append({"name":f"Exec {name}"+(f" n{run_number[k]}" if run_number[k] > 1 else ""), "steps":steps})
 
-def get_exec_type(p) -> str|None:
-  from tinygrad.renderer.amd.sqtt import VALUINST, INST, INST_RDNA4, InstOp, InstOpRDNA4
-  if isinstance(p, VALUINST): return "VALU"
-  if isinstance(p, (INST, INST_RDNA4)) and isinstance(p.op, (InstOp, InstOpRDNA4)):
-    op_to_exec = {"SALU":"SALU", "GLOBAL":"VMEM", "FLAT":"VMEM", "LDS":"LDS", "VALU":"VALU", "SMEM":"SALU",
-                  "VMEM":"VMEM", "VINTERP":"VALU", "WMMA":"VALU"}
-    for k,v in op_to_exec.items():
-      if k in p.op.name: return v
-  return None
-
 def sqtt_timeline(data:bytes, lib:bytes, target:str) -> list[ProfileEvent]:
   from tinygrad.renderer.amd.sqtt import (map_insts, InstructionInfo, PacketType, INST, InstOp, VALUINST, IMMEDIATE, IMMEDIATE_MASK, VMEMEXEC,
                                           ALUEXEC, INST_RDNA4, InstOpRDNA4, TS_DELTA_OR_MARK, TS_DELTA_OR_MARK_RDNA4, CDNA_INST, InstOpCDNA,
@@ -359,6 +349,8 @@ def sqtt_timeline(data:bytes, lib:bytes, target:str) -> list[ProfileEvent]:
   NS_PER_TICK = 10  # 100MHz
   prev_pair:tuple[int, int]|None = None # (shader, realtime)
   is_cdna = target.startswith("gfx9")
+  dispatch_to_exec = {"WMMA":"VALU", "VALU":"VALU", "VALUINST":"VALU", "VINTERP":"VALU", "GLOBAL":"VMEM", "FLAT":"VMEM", "LDS":"LDS", "SALU":"SALU",
+                      "SMEM":"SALU", "VMEM":"VMEM"}
   def add(name:str, p:PacketType, op:str|None=None, wave:int|None=None, info:InstructionInfo|None=None) -> None:
     row = f"WAVE:{wave}" if (wave:=getattr(p, "wave", wave)) is not None else f"{p.__class__.__name__}:0 {name}"
     # barrier on this row extends to fill the time our wave was waiting
@@ -370,12 +362,9 @@ def sqtt_timeline(data:bytes, lib:bytes, target:str) -> list[ProfileEvent]:
     idx = next(row_counts.setdefault(row, itertools.count(0)))
     if name == "BARRIER": curr_barrier[row] = e
     # queue for exec linking
-    if (exec_type:=get_exec_type(p)) is not None:
+    if isinstance(p, (VALUINST, INST, INST_RDNA4)) and (exec_type:=dispatch_to_exec.get(name.split("_")[0])) is not None:
       exec_pending.setdefault(exec_type, []).append(f"{row}-{idx}")
-    if isinstance(p, (ALUEXEC, VMEMEXEC)) and "ALT" not in str(p.src):
-      dispatch = exec_pending[name].pop(0)
-      assert isinstance(e.name, TracingKey), f"op name was {e.name}"
-      e.name = TracingKey(e.name.display_name, ret=f"LINK:{dispatch}")
+    if isinstance(p, (ALUEXEC, VMEMEXEC)) and "ALT" not in str(p.src): e.name = TracingKey(op or name, ret=f"LINK:{exec_pending[name].pop(0)}")
   for p, info in map_insts(data, lib, target):
     if len(ret) > getenv("MAX_SQTT_PKTS", 50_000): break
     if isinstance(p, (TS_DELTA_OR_MARK, TS_DELTA_OR_MARK_RDNA4)) and p.is_marker:

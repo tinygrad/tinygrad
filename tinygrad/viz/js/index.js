@@ -288,7 +288,6 @@ function getZoomIdentity() {
 
 const Modes = {0:'read', 1:'write', 2:'write+read'};
 
-let linkPair = null;
 function setFocus(key) {
   if (key !== focusedShape) {
     saveToHistory({ shape:focusedShape });
@@ -300,8 +299,8 @@ function setFocus(key) {
       const [st, et] = xscale.range().map(zoomLevel.invertX, zoomLevel).map(xscale.invert, xscale);
       if (x1 < st || x0 > et) zoomLevel = d3.zoomIdentity.translate(-xscale((x0+x1)/2-(et-st)/2)*zoomLevel.k, 0).scale(zoomLevel.k);
     }
-    const link = e?.arg.links ?? data.links.get(key);
-    linkPair = link == null ? null : [key, link];
+    const link = e?.arg.link ?? data.links.get(key);
+    data.link = link == null ? null : [key, link];
     focusedShape = key; d3.select("#timeline").call(canvasZoom.transform, zoomLevel);
   }
   const { eventType, e } = selectShape(key);
@@ -363,7 +362,7 @@ function setFocus(key) {
   }
   d3.select(instList).selectAll("span").classed("highlight", false);
   let instLine = document.getElementById(`inst-${e?.arg.pc}`);
-  if (instLine == null && linkPair != null) instLine = document.getElementById(`inst-${selectShape(linkPair[1]).e.arg.pc}`);
+  if (instLine == null && data.link != null) instLine = document.getElementById(`inst-${selectShape(data.link[1]).e.arg.pc}`);
   if (instLine != null) {
     instLine.classList.add("highlight");
     const r = rect(instLine), c = rect(instList);
@@ -467,14 +466,11 @@ async function renderProfiler(path, opts) {
         }
         // tiny device events go straight to the rewrite rule
         const key = k.startsWith("TINY") ? null : `${k}-${j}`;
-        let info = e.info != null ? "\n"+e.info : "", trace = null, pc = null, links = null
+        let info = e.info != null ? "\n"+e.info : "", trace = null, pc = null, link = null
         if (info.startsWith("\nPC:")) { pc = parseInt(e.info.split(":")[1]); info = ""; }
         if (info.startsWith("\nTB:")) { trace = info; info = ""; }
-        if (info.startsWith("\nLINK:")) {
-          links = info.replace("\nLINK:", ""); info = "";
-          data.links.set(links, key);
-        }
-        const arg = { tooltipText:" N:"+shapes.length+"\n"+formatTime(e.dur)+info, label, pc, trace, links, bufs:[], key, ctx:shapeRef?.ctx, step:shapeRef?.step };
+        if (info.startsWith("\nLINK:")) { link = info.replace("\nLINK:", ""); info = ""; data.links.set(link, key); }
+        const arg = { tooltipText:" N:"+shapes.length+"\n"+formatTime(e.dur)+info, label, pc, trace, link, bufs:[], key, ctx:shapeRef?.ctx, step:shapeRef?.step };
         if (e.key != null) shapeMap.set(e.key, key);
         // offset y by depth
         shapes.push({x:e.st, y:levelHeight*depth, width:e.dur, height:levelHeight, arg, label:opts.hideLabels ? null : label, fillColor });
@@ -641,7 +637,7 @@ async function renderProfiler(path, opts) {
           // add label
           drawText(ctx, e.label, x+2, y+e.height/2, width);
         }
-        if ((focusedShape != null && e.arg?.key === focusedShape) || (linkPair != null && (e.arg?.key === linkPair[0] || e.arg?.key === linkPair[1]))) {
+        if ((focusedShape != null && e.arg?.key === focusedShape) || (data.link != null && (e.arg?.key === data.link[0] || e.arg?.key === data.link[1]))) {
           ctx.strokeStyle = pcolor; ctx.stroke();
         }
       }
@@ -652,8 +648,8 @@ async function renderProfiler(path, opts) {
       }
     }
     // draw the link
-    if (linkPair != null) {
-      const [a, b] = [canvasRect(linkPair[0], xscale), canvasRect(linkPair[1], xscale)];
+    if (data.link != null) {
+      const [a, b] = [canvasRect(data.link[0], xscale), canvasRect(data.link[1], xscale)];
       const [left, right] = a.x0 <= b.x0 ? [a, b] : [b, a];
       const startX = left.x1, endX = right.x0;
       const leftY = (left.y0+left.y1)/2, rightY = (right.y0+right.y1)/2;
