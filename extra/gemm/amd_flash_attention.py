@@ -110,17 +110,22 @@ def amd_flash_attention(o:UOp, q:UOp, k:UOp, v:UOp) -> UOp:
   m_ij_global = m_ij_global.after(m_ij_global[ri_g].store(UOp(Ops.MAX, dtypes.float, (m_ij_global.after(ri_g, rn_g)[ri_g],
     red_lds_max[row_idx_g, rn_g]))).end(rn_g, ri_g))
 
-  # per-thread local exp and sum
+  # compute P = exp2((S - m_ij) * log2e) in S_reg (reuse), then sum and write to P_lds
+  S_reg = S_reg.after(S_reg.store(((S_reg - m_ij_global.reshape(TM, 1).expand(TM, TN)) * LOG2E).exp2()))
+
+  # per-thread local sum of P
   p_local = UOp.placeholder((TM,), dtypes.float, slot=10, addrspace=AddrSpace.REG)
   p_local = p_local.after(p_local.after(n_tile).store(p_local.const_like(0)))
   rp1 = UOp.range(TM, 290, AxisType.LOOP)
   rp2 = UOp.range(TN, 291, AxisType.REDUCE)
-  p_local = p_local.after(p_local[rp1].store(p_local.after(rp1, rp2)[rp1] + ((S_reg[rp1, rp2] - m_ij_global[rp1]) * LOG2E).exp2()).end(rp2, rp1))
+  p_local = p_local.after(p_local[rp1].store(p_local.after(rp1, rp2)[rp1] + S_reg[rp1, rp2]).end(rp2, rp1))
 
-  # write P to P_lds (shaped)
+  # write P to P_lds
   P_write = P_lds.reshape(WAVES_M, TM // WMMA_ACC, WMMA_ACC, LANES_PER_WAVE_M, WAVES_N, TN, LANES_PER_WAVE_N)
   P_write = P_write.permute((0, 4, 3, 6, 1, 2, 5)).reshape(THREADS_PER_BLOCK, TM, TN)
-  P_store = P_write[tid].store(((S_reg - m_ij_global.reshape(TM, 1).expand(TM, TN)) * LOG2E).exp2().cast(dtypes.half))
+  rw1 = UOp.range(TM, 295, AxisType.LOOP)
+  rw2 = UOp.range(TN, 296, AxisType.LOOP)
+  P_store = P_write[tid, rw1, rw2].store(S_reg[rw1, rw2].cast(dtypes.half)).end(rw1, rw2)
 
   # write local sum to LDS (intra-warp, no barrier for sum reduction)
   # P_store still needs a barrier for cross-warp P_lds visibility
