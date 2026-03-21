@@ -12,24 +12,25 @@ BLOCK_K = getenv("BK", 16)
 assert N % BLOCK_N == 0 and M % BLOCK_M == 0 and K % BLOCK_K == 0
 
 use_wmma = getenv("WMMA")
-
 if use_wmma:
-  UNROLL_M, UNROLL_N = 1, 1
-  WMMA_M, WMMA_N, WMMA_K = 16, 16, 16
-  WMMA_ACC = 8  # accumulator elements per thread in the M dimension
   WAVES_M, WAVES_N = 2, 2
   LANES_PER_WAVE_M, LANES_PER_WAVE_N = 2, 16
-  TM = BLOCK_M // (WAVES_M * WMMA_M) * WMMA_ACC  # 32
-  TN = BLOCK_N // (WAVES_N * WMMA_N)             # 4
+  UNROLL_M, UNROLL_N = 1, 1
+
+  # wmma params
+  WMMA_M, WMMA_N, WMMA_K = 16, 16, 16
+  WMMA_ACC = WMMA_M // LANES_PER_WAVE_M
 else:
-  UNROLL_M, UNROLL_N = 4, 4
   WAVES_M, WAVES_N = 4, 1
   LANES_PER_WAVE_M, LANES_PER_WAVE_N = 4, 8
-  TM = BLOCK_M // (WAVES_M * LANES_PER_WAVE_M)  # 8
-  TN = BLOCK_N // (WAVES_N * LANES_PER_WAVE_N)  # 16
+  UNROLL_M, UNROLL_N = 4, 4
 
 # WARP_SIZE * total waves
 THREADS_PER_BLOCK = WARP_SIZE * WAVES_M * WAVES_N
+
+# accumulator size
+TM = BLOCK_M // (WAVES_M * LANES_PER_WAVE_M)
+TN = BLOCK_N // (WAVES_N * LANES_PER_WAVE_N)
 
 def block_128x128_gemm(c:UOp, a:UOp, b:UOp) -> UOp:
   wave_m = UOp.range(WAVES_M, 2, AxisType.LOCAL)
