@@ -96,7 +96,7 @@ if __name__ == "__main__":
         print(f"  {k}")
       sys.exit(0)
 
-    # SQTT printer
+    # ** SQTT printer
     if args.device in counters:
       sqtt_events = viz.sqtt_timeline(*counters[args.device])
       sqtt_pkts = [e for e in sqtt_events if type(e).__name__ == "ProfileRangeEvent"]
@@ -124,6 +124,7 @@ if __name__ == "__main__":
         print(f"Showed events {start_idx}-{end_idx} from {total_sqtt_pkts} events, set --offset and --limit to see others")
       sys.exit(0)
 
+    # ** Profiler printer
     agg, total, n = {}, 0, 0
     for k,v in profile["layout"].items():
       if not optional_eq({"name":k}, args.device): continue
@@ -152,6 +153,7 @@ if __name__ == "__main__":
       print(tabulate(table, headers=["name", "total", "count", "pct"], tablefmt="github"))
     sys.exit(0)
 
+  # ** Graph rewrites printer
   for k in viz.ctxs:
     if not optional_eq(k, args.kernel): continue
     print(k["name"])
