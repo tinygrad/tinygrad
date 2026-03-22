@@ -630,6 +630,13 @@ class Tensor(OpMixin):
     new_low = Tensor._device_rng_counters[device][0:1] + (num & 0xffffffff)
     new_high = Tensor._device_rng_counters[device][1:2] + (num >> 32) + (new_low < Tensor._device_rng_counters[device][0]).cast(dtypes.uint32)
     Tensor._device_rng_counters[device].assign(new_low.cat(new_high))
+    # periodically realize the counter outside JIT to prevent O(n^2) graph growth across n rand() calls
+    from tinygrad.engine.realize import capturing
+    if not capturing:
+      Tensor._rng_realize_counter = getattr(Tensor, '_rng_realize_counter', 0) + 1
+      if Tensor._rng_realize_counter >= 32:
+        Tensor._device_rng_counters[device].realize()
+        Tensor._rng_realize_counter = 0
 
     low = Tensor._device_rng_counters[device][0:1] - (num & 0xffffffff)
     high = Tensor._device_rng_counters[device][1:2] - (num >> 32) - (Tensor._device_rng_counters[device][0] < (num & 0xffffffff)).cast(dtypes.uint32)
