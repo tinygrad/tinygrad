@@ -84,6 +84,12 @@ def apply_rope(x:Tensor, freqs_cis:Tensor, rope_dim:int=0) -> Tensor:
   y = (x1 * cos - x2 * sin).cat(x2 * cos + x1 * sin, dim=-1)
   return y.cat(x_pass, dim=-1) if x_pass is not None else y
 
+def pairwise_topk(logits: Tensor, n: int, k: int) -> Tensor:
+  cmp = (logits.unsqueeze(-1) > logits.unsqueeze(-2)) | ((logits.unsqueeze(-1) == logits.unsqueeze(-2)) & \
+    (Tensor.arange(n).reshape(1,1,n,1) < Tensor.arange(n).reshape(1,1,1,n)))
+  ranks = (logits*0).scatter(-1, cmp.sum(axis=-1).cast('int32'), logits*0+Tensor.arange(n).reshape(1,1,n).cast(logits.dtype))
+  return ranks[:,:,n-k:].cast('int32')
+
 class TransformerBlock:
   def __init__(self, dim:int, hidden_dim:int, n_heads:int, n_kv_heads:int, norm_eps:float, head_dim:int, rope_theta:float, rope_dim:int=0,
                max_context:int=0, qk_norm:int=0, num_experts:int=0, num_experts_per_tok:int=0, norm_topk_prob:bool=False, shared_expert_dim:int=0,
@@ -168,8 +174,9 @@ class TransformerBlock:
     h_norm = self.ffn_norm(h)
     if hasattr(self, 'ffn_gate_exps'):
       x = h_norm.unsqueeze(2)  # (B, T, 1, D) - add expert dim for broadcasting
-      probs, sel = self.ffn_gate_inp(h_norm).softmax(-1).topk(self.num_experts_per_tok)  # (B, T, k) each
-      if self.norm_topk_prob: probs = probs / probs.sum(axis=-1, keepdim=True)
+      logits, n, k = self.ffn_gate_inp(h_norm), self.ffn_gate_inp.weight.shape[0], self.num_experts_per_tok
+      sel = pairwise_topk(logits, n, k)
+      probs = logits.gather(-1, sel).softmax(-1) if self.norm_topk_prob else logits.softmax(-1).gather(-1, sel)
       x_down = self.ffn_down_exps(sel, self.ffn_gate_exps(sel, x).silu() * self.ffn_up_exps(sel, x))  # (B, T, k, D)
       out = (x_down * probs.unsqueeze(-1)).sum(axis=2)  # (B, T, D)
       if hasattr(self, 'ffn_gate_shexp'):
@@ -255,13 +262,13 @@ class DeltaNetBlock:
     h_norm = self.ffn_norm(h)
     if hasattr(self, 'ffn_gate_exps'):
       x = h_norm.unsqueeze(2)  # (B, T, 1, D) - add expert dim for broadcasting
-      probs, sel = self.ffn_gate_inp(h_norm).softmax(-1).topk(self.num_experts_per_tok)  # (B, T, k) each
-      if hasattr(self, 'ffn_gate_shexp'): probs = probs / probs.sum(axis=-1, keepdim=True)
+      logits = self.ffn_gate_inp(h_norm)
+      sel = pairwise_topk(logits, self.ffn_gate_inp.weight.shape[0], self.num_experts_per_tok)
+      probs = logits.gather(-1, sel).softmax(-1)
       x_down = self.ffn_down_exps(sel, self.ffn_gate_exps(sel, x).silu() * self.ffn_up_exps(sel, x))  # (B, T, k, D)
       out = (x_down * probs.unsqueeze(-1)).sum(axis=2)  # (B, T, D)
-      if hasattr(self, 'ffn_gate_shexp'):
-        shared_gate = (h_norm * self.ffn_gate_inp_shexp_weight).sum(axis=-1, keepdim=True).sigmoid()
-        out = out + self.ffn_down_shexp(self.ffn_gate_shexp(h_norm).silu() * self.ffn_up_shexp(h_norm)) * shared_gate
+      shared_gate = (h_norm * self.ffn_gate_inp_shexp_weight).sum(axis=-1, keepdim=True).sigmoid()
+      out = out + self.ffn_down_shexp(self.ffn_gate_shexp(h_norm).silu() * self.ffn_up_shexp(h_norm)) * shared_gate
       return h + out
     # TODO: remove the need for this contiguous
     gated  = self.ffn_gate(h_norm).silu().contiguous() * self.ffn_up(h_norm)
@@ -282,7 +289,7 @@ class Transformer:
                               shared_expert_dim=shared_expert_dim) if ssm and (i+1) % full_attention_interval != 0 else
                 TransformerBlock(dim, hidden_dim, n_heads, n_kv_heads, norm_eps, head_dim, rope_theta, rope_dim, max_context,
                                  head_dim if ssm else qk_norm, num_experts=num_experts, num_experts_per_tok=num_experts_per_tok,
-                                 norm_topk_prob=norm_topk_prob, shared_expert_dim=shared_expert_dim, has_gate=ssm is not None) 
+                                 norm_topk_prob=norm_topk_prob, shared_expert_dim=shared_expert_dim, has_gate=ssm is not None)
                                  for i in range(num_blocks)]
     self.token_embd  = nn.Embedding(vocab_size, dim)
     self.output_norm = nn.RMSNorm(dim, norm_eps)
