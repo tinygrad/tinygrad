@@ -88,7 +88,7 @@ if __name__ == "__main__":
     from tabulate import tabulate
     profile = decode_profile(viz.get_profile(profile_data:=viz.load_pickle(args.profile_path, default=[])))
     viz.load_amd_counters(viz.ctxs, profile_data)
-    counters = {f'{c["name"]} SQTT {s["name"]}': s["data"] for c in viz.ctxs if c["name"].startswith("Exec") for s in c["steps"]
+    counters = {ansistrip(f'{c["name"]} SQTT {s["name"]}'): s["data"] for c in viz.ctxs if c["name"].startswith("Exec") for s in c["steps"]
                 if s["name"].startswith("PKTS")}
     if args.device is None:
       print("Select a device:")
