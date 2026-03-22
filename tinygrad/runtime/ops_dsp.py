@@ -43,7 +43,7 @@ class DSPRenderer(ClangRenderer):
   extra_matcher = dsp_pm_late+ClangRenderer.extra_matcher
   string_rewrite = dsp_string+ClangRenderer.string_rewrite
   type_map = { **ClangRenderer.type_map, dtypes.uint64: "unsigned long long", dtypes.int64: "long long" }
-  code_for_op = {**ClangRenderer.code_for_op, Ops.SQRT: lambda x,dtype: f"__builtin_sqrtf({x})" if dtype == dtypes.float else f"__builtin_sqrt({x})"}
+  code_for_op = {**ClangRenderer.code_for_op, Ops.SQRT: lambda x,dtype: f"sqrtf({x})" if dtype == dtypes.float else f"sqrt({x})"}
 
   def __init__(self): self.compiler = DSPCompiler()
 
@@ -52,7 +52,22 @@ class DSPRenderer(ClangRenderer):
       _Bool set_dcvs_params; short _pad2; char target_corner; char min_corner; char max_corner; int _pad3[3];};''','int HAP_power_set(void*, void*);',
       'typedef union { struct { void *pv; unsigned int len; } buf; struct { int fd; unsigned int offset; } dma; } remote_arg;',
       'void* HAP_mmap(void *addr, int len, int prot, int flags, int fd, long offset);', 'int HAP_munmap(void *addr, int len);',
-      'unsigned long long HAP_perf_get_time_us(void);'] + super()._render_defines(uops)
+      'unsigned long long HAP_perf_get_time_us(void);',
+      '''
+      float sqrtf(float x) {
+        if (x < 0) return __builtin_nanf("");
+        if (x == 0) return 0;
+        float y = x;
+        float xhalf = 0.5f * y;
+        int i = *(int*)&y;
+        i = 0x5f3759df - (i >> 1);
+        y = *(float*)&i;
+        y = y * (1.5f - xhalf * y * y);
+        y = y * (1.5f - xhalf * y * y);
+        return x * y;
+      }
+      #define sqrt(x) sqrtf(x)
+      '''] + super()._render_defines(uops)
 
   def _render_entry(self, function_name:str, bufs:list[tuple[str,tuple[DType,bool]]]) -> str:
     msrc = ['int entry(unsigned long long handle, unsigned int sc, remote_arg* pra) {',
@@ -158,8 +173,7 @@ class DSPDevice(Compiled):
       RPCListener(self).start()
 
   def open_lib(self, lib):
-    self.binded_lib, self.binded_lib_off = lib, 0
-    fp = "file:///tinylib?entry&_modver=1.0&_dom=cdsp\0"
+    self.binded_lib, self.binded_lib_off = lib, 0\n    fp = "file:///tinylib?entry&_modver=1.0&_dom=cdsp\0"
     pra, _, _, _ = rpc_prep_args(ins=[memoryview(array.array('I', [len(fp), 0xff])), memoryview(bytearray(fp.encode()))],
                                  outs=[o1:=memoryview(bytearray(0x8)), o2:=memoryview(bytearray(0xff))])
     qcom_dsp.FASTRPC_IOCTL_INVOKE(self.rpc_fd, handle=0, sc=rpc_sc(method=0, ins=2, outs=2), pra=pra)
