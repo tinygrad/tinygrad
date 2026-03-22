@@ -82,9 +82,22 @@ pm_mops = PatternMatcher([
 # 0. do some cleanup rewrites, mostly copied from the old stuff
 
 def fix_store_after_hazard(after:UOp, target:UOp, src:UOp):
+  base = target.base
+  # fast path: 87% of calls have base unreachable from src — check with lightweight DFS before expensive toposort
+  visited: set[int] = set()
+  stack: list[UOp] = [src]
+  while stack:
+    n = stack.pop()
+    nid = id(n)
+    if nid in visited: continue
+    if n.op is Ops.CONTIGUOUS: continue
+    if n is base: break
+    visited.add(nid)
+    stack.extend(n.src)
+  else:
+    return None  # base not reachable from src, no hazard
   # PERMUTE and FLIP reorder indices, SHRINK can have overlapping regions when dest is also shrunk
   unsafe = {Ops.PERMUTE, Ops.FLIP} | ({Ops.SHRINK} if target.op_in_backward_slice_with_self(Ops.SHRINK) else set())
-  base = target.base
   reaches_base: dict[UOp, bool] = {}
   for s in src.toposort(gate=lambda s: s.op is not Ops.CONTIGUOUS):
     reaches_base[s] = s is base or any(reaches_base.get(c) for c in s.src)
