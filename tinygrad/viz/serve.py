@@ -337,7 +337,7 @@ def load_amd_counters(ctxs:list[dict], profile:list[ProfileEvent]) -> None:
       steps.append(create_step("SQTT", ("/prg-sqtt", len(ctxs), len(steps)), ((k, tag), sqtt, prg_events[k], arch)))
     ctxs.append({"name":f"Exec {name}"+(f" n{run_number[k]}" if run_number[k] > 1 else ""), "steps":steps})
 
-def sqtt_timeline(data:bytes, lib:bytes, target:str, max_pkts:int=getenv("MAX_SQTT_PKTS", 50_000)) -> tuple[list[ProfileEvent], bool]:
+def sqtt_timeline(data:bytes, lib:bytes, target:str, max_pkts=getenv("MAX_SQTT_PKTS", 50_000)) -> tuple[list[ProfileEvent], bool]:
   from tinygrad.renderer.amd.sqtt import (map_insts, InstructionInfo, PacketType, INST, InstOp, VALUINST, IMMEDIATE, IMMEDIATE_MASK, VMEMEXEC,
                                           ALUEXEC, INST_RDNA4, InstOpRDNA4, TS_DELTA_OR_MARK, TS_DELTA_OR_MARK_RDNA4, CDNA_INST, InstOpCDNA,
                                           WAVEEND, CDNA_WAVEEND, WAVERDY)
@@ -366,12 +366,10 @@ def sqtt_timeline(data:bytes, lib:bytes, target:str, max_pkts:int=getenv("MAX_SQ
       exec_pending.setdefault(exec_type, []).append(f"{row}-{idx}")
     if isinstance(p, (ALUEXEC, VMEMEXEC)) and "ALT" not in str(p.src): e.name = TracingKey(op or name, ret=f"LINK:{exec_pending[name].pop(0)}")
   has_more = False
-  pbar = tqdm(total=max_pkts, desc="Decoding SQTT", unit="packets", disable=max_pkts <= 50_000)
-  for p, info in map_insts(data, lib, target):
+  for p, info in tqdm(map_insts(data, lib, target), total=max_pkts, desc="Decoding SQTT", unit="packets", disable=max_pkts <= 50_000):
     if len(ret) > max_pkts:
       has_more = True
       break
-    if len(ret) % 1_000 == 0: pbar.update(len(ret) - pbar.n)
     if isinstance(p, (TS_DELTA_OR_MARK, TS_DELTA_OR_MARK_RDNA4)) and p.is_marker:
       pair = (p._time, p.delta)
       if prev_pair is None: prev_pair = pair
@@ -397,7 +395,6 @@ def sqtt_timeline(data:bytes, lib:bytes, target:str, max_pkts:int=getenv("MAX_SQ
         add("SALU", p)
       else:
         add(name.replace("_ALT", ""), p, op=name)
-  pbar.update(close=True)
   pc_map = {addr:str(inst) for addr,inst in amd_decode(lib, target).items()}
   return [ProfilePointEvent(r, "JSON", "pcMap", pc_map, ts=Decimal(0)) for r in row_ends]+ret, has_more
 
@@ -491,7 +488,7 @@ def load_nv_counters(ctxs:list[dict], profile:list) -> None:
                                data=(e.blob, sm_version[e.device])))
   if steps: ctxs.append({"name":"All Counters", "steps":steps})
 
-def pma_timeline(blob:bytes, sm_version:int, max_pkts:int|None=None) -> list[ProfileEvent]:
+def pma_timeline(blob:bytes, sm_version:int) -> list[ProfileEvent]:
   from extra.nv_pma.decode import decode, decode_tpc_id
   ret:list[ProfileEvent] = []
   rows:dict[str, None] = {}
@@ -499,7 +496,7 @@ def pma_timeline(blob:bytes, sm_version:int, max_pkts:int|None=None) -> list[Pro
   # assume every sample is 32 cycles
   cycles_per_sample = 32
   for s, tpc_id in decode(blob, sm_version):
-    if len(ret) > max_pkts: break
+    if len(ret) > getenv("MAX_SQTT_PKTS", 50_000): break
     gpc, tpc, sm = decode_tpc_id(tpc_id)
     tpc_count[tpc_id] = (n:=tpc_count.get(tpc_id,0)) + 1
     rows.setdefault(row:=f"GPC:{gpc} TPC:{tpc} SM:{sm} WAVE:{s.wave_id}")
