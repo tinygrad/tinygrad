@@ -131,34 +131,43 @@ def get_null_runner(ctx:list[Buffer|None], ast:UOp) -> CompiledRunner:
   uops = list(ast.toposort())
 
   # extract globals/outs/ins from STORE→INDEX→PARAM chains (same structure as ProgramSpec.from_uop)
+  store_target_idx_ids: set[int] = set()
   _globals, outs = [], []
   for u in uops:
     if u.op is Ops.PARAM: _globals.append(u.arg)
     if u.op is Ops.STORE:
       idx = u.src[0]
       if idx.op is Ops.CAST and idx.src[0].op is Ops.INDEX: idx = idx.src[0]
-      if idx.op is Ops.INDEX and idx.src[0].op is Ops.PARAM: outs.append(idx.src[0].arg)
+      if idx.op is Ops.INDEX:
+        store_target_idx_ids.add(id(idx))
+        if idx.src[0].op is Ops.PARAM: outs.append(idx.src[0].arg)
   _globals = sorted(set(_globals))
   outs = sorted(set(outs))
   ins = sorted(set(_globals) - set(outs))
 
   # compute estimates without full kernel lowering:
-  # - mem: sum of buffer sizes from PARAM ptrdtype (accurate)
+  # - mem: write buffers (outs) + read buffers (INDEX not used as STORE targets)
   # - ops: count float ALU + REDUCE ops weighted by loop mults (excludes weakint address ops)
   # - lds: bytes stored/loaded weighted by loop mults
-  flops, lds, mem_val = 0, 0, 0
+  read_params: set[int] = set()
+  for u in uops:
+    if u.op is Ops.INDEX and id(u) not in store_target_idx_ids and u.src[0].op is Ops.PARAM:
+      read_params.add(u.src[0].arg)
+  param_sizes = {u.arg: u.dtype.nbytes() for u in uops if u.op is Ops.PARAM and isinstance(u.dtype, PtrDType) and u.dtype.size != -1}
+  mem_val = sum(param_sizes[p] for p in outs if p in param_sizes) + sum(param_sizes[p] for p in read_params if p in param_sizes)
+
+  flops, lds = 0, 0
   mults, mult_stack = 1, []
   for u in uops:
     if u.op is Ops.RANGE:
       mult_stack.append(mults)
-      mults *= u.src[0].arg
+      mults *= u.src[0].ssimplify()
     elif u.op is Ops.END: mults = mult_stack.pop(-1)
     elif u.op in GroupOp.ALU and dtypes.is_float(u.dtype.scalar()):
       flops += (mults * (2 if u.op is Ops.MULACC else 1)) * u.dtype.count
     elif u.op is Ops.REDUCE: flops += mults
     elif u.op is Ops.WMMA: flops += 2 * prod(u.arg[1]) // u.arg[5] * mults
     elif u.op is Ops.STORE: lds += u.src[1].dtype.itemsize * mults
-    elif u.op is Ops.PARAM and isinstance(u.dtype, PtrDType) and u.dtype.size != -1: mem_val += u.dtype.nbytes()
 
   ast_with_estimates = ast.replace(arg=replace(ast.arg, estimates=Estimates(flops, lds, mem_val)))
   prg = ProgramSpec("null_kernel", "", device, ast_with_estimates, lib=b"", globals=_globals, outs=outs, ins=ins)
