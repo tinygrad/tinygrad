@@ -337,7 +337,7 @@ def load_amd_counters(ctxs:list[dict], profile:list[ProfileEvent]) -> None:
       steps.append(create_step("SQTT", ("/prg-sqtt", len(ctxs), len(steps)), ((k, tag), sqtt, prg_events[k], arch)))
     ctxs.append({"name":f"Exec {name}"+(f" n{run_number[k]}" if run_number[k] > 1 else ""), "steps":steps})
 
-def sqtt_timeline(data:bytes, lib:bytes, target:str, max_pkts=getenv("MAX_SQTT_PKTS", 50_000)) -> tuple[list[ProfileEvent], bool]:
+def sqtt_timeline(data:bytes, lib:bytes, target:str, max_pkts=getenv("MAX_SQTT_PKTS",50_000)) -> tuple[list[ProfileEvent], bool]:
   from tinygrad.renderer.amd.sqtt import (map_insts, InstructionInfo, PacketType, INST, InstOp, VALUINST, IMMEDIATE, IMMEDIATE_MASK, VMEMEXEC,
                                           ALUEXEC, INST_RDNA4, InstOpRDNA4, TS_DELTA_OR_MARK, TS_DELTA_OR_MARK_RDNA4, CDNA_INST, InstOpCDNA,
                                           WAVEEND, CDNA_WAVEEND, WAVERDY)
@@ -366,7 +366,7 @@ def sqtt_timeline(data:bytes, lib:bytes, target:str, max_pkts=getenv("MAX_SQTT_P
       exec_pending.setdefault(exec_type, []).append(f"{row}-{idx}")
     if isinstance(p, (ALUEXEC, VMEMEXEC)) and "ALT" not in str(p.src): e.name = TracingKey(op or name, ret=f"LINK:{exec_pending[name].pop(0)}")
   has_more = False
-  for p, info in tqdm(map_insts(data, lib, target), desc="Decoding SQTT", unit=" packets", disable=max_pkts <= 50_000):
+  for p, info in tqdm(map_insts(data, lib, target), desc="Decoding SQTT", unit=" packets"):
     if len(ret) > max_pkts:
       has_more = True
       break
