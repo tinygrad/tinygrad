@@ -100,7 +100,10 @@ if __name__ == "__main__":
     if args.device in counters:
       sqtt_events = viz.sqtt_timeline(*counters[args.device])
       sqtt_pkts = [e for e in sqtt_events if type(e).__name__ == "ProfileRangeEvent"]
-      pc_map = next(e.arg for e in sqtt_events if type(e).__name__ == "ProfilePointEvent" and e.key == 'pcMap')
+      pc_map = next((e.arg for e in sqtt_events if type(e).__name__ == "ProfilePointEvent" and e.key == 'pcMap'), None)
+      if pc_map is None:
+        print(f"No SQTT packets for {args.device}")
+        sys.exit(0)
       # modern terminals support 24-bit color
       def hex_colored(st:str, color:str) -> str: return f"\x1b[38;2;{int(color[1:3],16)};{int(color[3:5],16)};{int(color[5:7],16)}m{st}\x1b[0m"
       WAVE_COLORS = ((('VALU', 'VINTERP'), '#ffffc0'), (('SALU',), '#cef263'), (('VMEM',), '#b2b7c9'), (('LOAD', 'SMEM'), '#ffc0c0'),
