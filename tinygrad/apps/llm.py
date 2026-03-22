@@ -86,8 +86,7 @@ def apply_rope(x:Tensor, freqs_cis:Tensor, rope_dim:int=0) -> Tensor:
 
 class TransformerBlock:
   def __init__(self, dim:int, hidden_dim:int, n_heads:int, n_kv_heads:int, norm_eps:float, head_dim:int, rope_theta:float, rope_dim:int=0,
-               max_context:int=0, qk_norm:int=0, num_experts:int=0, num_experts_per_tok:int=0, shared_expert_dim:int=0,
-               has_gate:bool=False, ssm:dict|None=None):
+               max_context:int=0, qk_norm:int=0, num_experts:int=0, num_experts_per_tok:int=0, shared_expert_dim:int=0, has_gate:bool=False):
     self.n_heads      = n_heads
     self.n_kv_heads   = n_kv_heads
     self.head_dim     = head_dim
@@ -96,29 +95,19 @@ class TransformerBlock:
     self.max_context  = max_context
     self.qk_norm      = qk_norm
     self.has_gate     = has_gate
-    if ssm is None:
-      # --- attention projections (all linear, bias-free) ------------------
-      q_proj_out       = self.head_dim * n_heads * (2 if has_gate else 1)
-      kv_proj_out      = self.head_dim * n_kv_heads
-      self.attn_q      = nn.Linear(dim, q_proj_out,  bias=False)
-      self.attn_k      = nn.Linear(dim, kv_proj_out, bias=False)
-      self.attn_v      = nn.Linear(dim, kv_proj_out, bias=False)
-      self.attn_output = nn.Linear(self.head_dim * n_heads, dim, bias=False)
-      if qk_norm: self.attn_q_norm, self.attn_k_norm = nn.RMSNorm(qk_norm, norm_eps), nn.RMSNorm(qk_norm, norm_eps)
-    else:
-      # --- DeltaNet -------------------------------------------------------
-      self.head_k_dim, self.num_k_heads, self.num_v_heads = ssm['state_size'], ssm['group_count'], ssm['time_step_rank']
-      self.head_v_dim, self.ssm_conv_kernel = ssm['inner_size'] // ssm['time_step_rank'], ssm['conv_kernel']
-      self.conv_channels, self.q_dim = ssm['inner_size'] + 2*self.num_k_heads*self.head_k_dim, self.head_k_dim*self.num_k_heads
-      self.attn_qkv, self.attn_gate = nn.Linear(dim, self.conv_channels, bias=False), nn.Linear(dim, ssm['inner_size'], bias=False)
-      self.ssm_alpha, self.ssm_beta = nn.Linear(dim, self.num_v_heads, bias=False), nn.Linear(dim, self.num_v_heads, bias=False)
-      self.ssm_conv1d = Tensor.zeros(self.conv_channels, self.ssm_conv_kernel)
-      self.ssm_dt_bias, self.ssm_a = Tensor.zeros(self.num_v_heads), Tensor.zeros(self.num_v_heads)
-      self.ssm_norm, self.ssm_out = nn.RMSNorm(self.head_v_dim, norm_eps), nn.Linear(ssm['inner_size'], dim, bias=False)
+
+    # --- attention projections (all linear, bias-free) ------------------
+    q_proj_out       = self.head_dim * n_heads * (2 if has_gate else 1)
+    kv_proj_out      = self.head_dim * n_kv_heads
+    self.attn_q      = nn.Linear(dim, q_proj_out,  bias=False)
+    self.attn_k      = nn.Linear(dim, kv_proj_out, bias=False)
+    self.attn_v      = nn.Linear(dim, kv_proj_out, bias=False)
+    self.attn_output = nn.Linear(self.head_dim * n_heads, dim, bias=False)
 
     # --- RMSNorms --------------------------------------------------------
     self.attn_norm   = nn.RMSNorm(dim, norm_eps)
     self.ffn_norm    = nn.RMSNorm(dim, norm_eps)
+    if qk_norm: self.attn_q_norm, self.attn_k_norm = nn.RMSNorm(qk_norm, norm_eps), nn.RMSNorm(qk_norm, norm_eps)
 
     # --- feed-forward (MoE or dense) -------------------------------------
     if num_experts > 0:
@@ -174,6 +163,61 @@ class TransformerBlock:
     return x + attn
 
   @function(precompile=bool(getenv("PRECOMPILE", 0)), allow_implicit=False)
+  def _feed_forward(self, h: Tensor) -> Tensor:
+    h_norm = self.ffn_norm(h)
+    if hasattr(self, 'ffn_gate_exps'):
+      x = h_norm.unsqueeze(2)  # (B, T, 1, D) - add expert dim for broadcasting
+      probs, sel = self.ffn_gate_inp(h_norm).softmax(-1).topk(self.num_experts_per_tok)  # (B, T, k) each
+      if hasattr(self, 'ffn_gate_shexp'): probs = probs / probs.sum(axis=-1, keepdim=True)
+      x_down = self.ffn_down_exps(sel, self.ffn_gate_exps(sel, x).silu() * self.ffn_up_exps(sel, x))  # (B, T, k, D)
+      out = (x_down * probs.unsqueeze(-1)).sum(axis=2)  # (B, T, D)
+      if hasattr(self, 'ffn_gate_shexp'):
+        shared_gate = (h_norm * self.ffn_gate_inp_shexp_weight).sum(axis=-1, keepdim=True).sigmoid()
+        out = out + self.ffn_down_shexp(self.ffn_gate_shexp(h_norm).silu() * self.ffn_up_shexp(h_norm)) * shared_gate
+      return h + out
+    # TODO: remove the need for this contiguous
+    gated  = self.ffn_gate(h_norm).silu().contiguous() * self.ffn_up(h_norm)
+    return h + self.ffn_down(gated)
+
+  def __call__(self, x: Tensor, start_pos: int|UOp):
+    if not hasattr(self, "cache_kv"):
+      # TODO: how is the dtype of this determined?
+      # NOTE: clone is used to promise the creation of a specific buffer
+      self.cache_kv = Tensor.zeros(2, x.shape[0], self.n_kv_heads, self.max_context, self.head_dim, device=x.device).clone()
+      self.freqs_cis = precompute_freqs_cis(self.rope_dim, self.max_context, self.rope_theta)
+    return self._feed_forward(self._attention(x, start_pos)).contiguous()
+
+class DeltaNetBlock:
+  def __init__(self, dim:int, hidden_dim:int, norm_eps:float, ssm:dict, num_experts:int=0, num_experts_per_tok:int=0, shared_expert_dim:int=0):
+    self.head_k_dim, self.num_k_heads, self.num_v_heads = ssm['state_size'], ssm['group_count'], ssm['time_step_rank']
+    self.head_v_dim, self.ssm_conv_kernel = ssm['inner_size'] // ssm['time_step_rank'], ssm['conv_kernel']
+    self.conv_channels, self.q_dim = ssm['inner_size'] + 2*self.num_k_heads*self.head_k_dim, self.head_k_dim*self.num_k_heads
+    self.attn_qkv, self.attn_gate = nn.Linear(dim, self.conv_channels, bias=False), nn.Linear(dim, ssm['inner_size'], bias=False)
+    self.ssm_alpha, self.ssm_beta = nn.Linear(dim, self.num_v_heads, bias=False), nn.Linear(dim, self.num_v_heads, bias=False)
+    self.ssm_conv1d = Tensor.zeros(self.conv_channels, self.ssm_conv_kernel)
+    self.ssm_dt_bias, self.ssm_a = Tensor.zeros(self.num_v_heads), Tensor.zeros(self.num_v_heads)
+    self.ssm_norm, self.ssm_out = nn.RMSNorm(self.head_v_dim, norm_eps), nn.Linear(ssm['inner_size'], dim, bias=False)
+
+    self.attn_norm   = nn.RMSNorm(dim, norm_eps)
+    self.ffn_norm    = nn.RMSNorm(dim, norm_eps)
+
+    if num_experts > 0:
+      self.num_experts_per_tok = num_experts_per_tok
+      self.ffn_gate_inp  = nn.Linear(dim, num_experts, bias=False)
+      self.ffn_gate_exps = ExpertWeights(num_experts, dim, hidden_dim)
+      self.ffn_up_exps   = ExpertWeights(num_experts, dim, hidden_dim)
+      self.ffn_down_exps = ExpertWeights(num_experts, hidden_dim, dim)
+      if shared_expert_dim > 0:
+        self.ffn_gate_shexp = nn.Linear(dim, shared_expert_dim, bias=False)
+        self.ffn_up_shexp = nn.Linear(dim, shared_expert_dim, bias=False)
+        self.ffn_down_shexp = nn.Linear(shared_expert_dim, dim, bias=False)
+        self.ffn_gate_inp_shexp_weight = Tensor.zeros(dim)
+    else:
+      self.ffn_gate    = nn.Linear(dim, hidden_dim, bias=False)
+      self.ffn_up      = nn.Linear(dim, hidden_dim, bias=False)
+      self.ffn_down    = nn.Linear(hidden_dim, dim, bias=False)
+
+  @function(precompile=bool(getenv("PRECOMPILE", 0)), allow_implicit=False)
   def _delta_net(self, x:Tensor) -> Tensor:
     B, _, _ = x.shape
     x_norm = self.attn_norm(x)
@@ -221,27 +265,21 @@ class TransformerBlock:
     return h + self.ffn_down(gated)
 
   def __call__(self, x: Tensor, start_pos: int|UOp):
-    if hasattr(self, 'ssm_out'):
-      if not hasattr(self, "delta_cache"):
-        conv_flat = (self.ssm_conv_kernel - 1) * self.conv_channels
-        ssm_flat = self.num_v_heads * self.head_v_dim * self.head_v_dim
-        self.delta_cache = Tensor.zeros(x.shape[0], conv_flat + ssm_flat, device=x.device).clone()
-      return self._feed_forward(self._delta_net(x)).contiguous()
-    if not hasattr(self, "cache_kv"):
-      # TODO: how is the dtype of this determined?
-      # NOTE: clone is used to promise the creation of a specific buffer
-      self.cache_kv = Tensor.zeros(2, x.shape[0], self.n_kv_heads, self.max_context, self.head_dim, device=x.device).clone()
-      self.freqs_cis = precompute_freqs_cis(self.rope_dim, self.max_context, self.rope_theta)
-    return self._feed_forward(self._attention(x, start_pos)).contiguous()
+    if not hasattr(self, "delta_cache"):
+      conv_flat = (self.ssm_conv_kernel - 1) * self.conv_channels
+      ssm_flat = self.num_v_heads * self.head_v_dim * self.head_v_dim
+      self.delta_cache = Tensor.zeros(x.shape[0], conv_flat + ssm_flat, device=x.device).clone()
+    return self._feed_forward(self._delta_net(x)).contiguous()
 
 class Transformer:
   def __init__(self, *, num_blocks, dim, hidden_dim, n_heads, n_kv_heads, norm_eps, vocab_size, head_dim:int, rope_theta:float, rope_dim:int=0,
                max_context:int=0, qk_norm:int=0, num_experts:int=0, num_experts_per_tok:int=0,
                shared_expert_dim:int=0, full_attention_interval:int=0, ssm:dict|None=None):
-    self.blk = [TransformerBlock(dim, hidden_dim, n_heads, n_kv_heads, norm_eps, head_dim, rope_theta, rope_dim, max_context,
+    self.blk = [DeltaNetBlock(dim, hidden_dim, norm_eps, ssm, num_experts=num_experts, num_experts_per_tok=num_experts_per_tok,
+                              shared_expert_dim=shared_expert_dim) if ssm and (i+1) % full_attention_interval != 0 else
+                TransformerBlock(dim, hidden_dim, n_heads, n_kv_heads, norm_eps, head_dim, rope_theta, rope_dim, max_context,
                                  head_dim if ssm else qk_norm, num_experts=num_experts, num_experts_per_tok=num_experts_per_tok,
-                                 shared_expert_dim=shared_expert_dim, has_gate=ssm is not None,
-                                 ssm=ssm if ssm and (i+1) % full_attention_interval != 0 else None) for i in range(num_blocks)]
+                                 shared_expert_dim=shared_expert_dim, has_gate=ssm is not None) for i in range(num_blocks)]
     self.token_embd  = nn.Embedding(vocab_size, dim)
     self.output_norm = nn.RMSNorm(dim, norm_eps)
     self.output = nn.Linear(dim, vocab_size, bias=False)
