@@ -101,9 +101,9 @@ if __name__ == "__main__":
       sys.exit(0)
 
     # ** SQTT printer
-    if args.device in counters:
+    if args.device is not None and (sqtt_data:=next((v for k,v in counters.items() if ansistrip(k) == args.device), None)) is not None:
       assert args.limit > 1, f"SQTT limit must be greater than 1, got {args.limit}"
-      sqtt_events, has_more = viz.sqtt_timeline(*counters[args.device], max_pkts=args.offset+args.limit)
+      sqtt_events, has_more = viz.sqtt_timeline(*sqtt_data, max_pkts=args.offset+args.limit)
       sqtt_pkts = [e for e in sqtt_events if type(e).__name__ == "ProfileRangeEvent"]
       pc_map = next(e.arg for e in sqtt_events if type(e).__name__ == "ProfilePointEvent" and e.key == 'pcMap')
       # modern terminals support 24-bit color
