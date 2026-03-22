@@ -1,6 +1,6 @@
 import functools, itertools
 from tinygrad.helpers import all_int, prod, DEBUG, RING, ALL2ALL, getenv
-from tinygrad.uop.ops import Ops, UOp
+from tinygrad.uop.ops import UOp, Invalid
 
 # *** allreduce implementation ***
 def handle_allreduce(buf:UOp, red:UOp) -> UOp|None:
@@ -56,8 +56,8 @@ def handle_allreduce(buf:UOp, red:UOp) -> UOp|None:
 
 def create_allreduce_function(buf:UOp, red:UOp, output:UOp|None=None) -> UOp|None:
   # BUFFER without unique have unique added later
-  if output is None: output = UOp(Ops.BUFFER, red.dtype, (UOp(Ops.NOOP), red.src[1]), red.size).reshape(red.shape)
+  if output is None: output = UOp.unique_const(red.dtype, Invalid, red.device, red.shape).contiguous()
   to = red.param_like(0)
   src = buf.param_like(1)
   red = src.allreduce(red.arg, red.src[1])
-  return output.after(to.assign(handle_allreduce(src, red)).sink().call(output, buf.contiguous(), name="allreduce", precompile=True))
+  return output.after(to.after(to.store(handle_allreduce(src, red))).sink().call(output, buf.contiguous(), name="allreduce", precompile=True))

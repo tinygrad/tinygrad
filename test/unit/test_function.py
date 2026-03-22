@@ -1,7 +1,7 @@
 import numpy as np
 import unittest
 from tinygrad.function import function
-from tinygrad import Tensor
+from tinygrad import Tensor, GlobalCounters
 from tinygrad.uop.ops import UOp
 
 class TestFunction(unittest.TestCase):
@@ -22,7 +22,7 @@ class TestFunction(unittest.TestCase):
 
   def test_implicit(self):
     inp = Tensor([7,8,9])
-    @function
+    @function(allow_implicit=True)
     def f(a:Tensor, b:Tensor) -> Tensor: return a+b+inp
 
     a = Tensor([1,2,3])
@@ -31,7 +31,7 @@ class TestFunction(unittest.TestCase):
 
   def test_implicit_same_as_input(self):
     inp = Tensor([7,8,9])
-    @function
+    @function(allow_implicit=True)
     def f(a:Tensor, b:Tensor) -> Tensor: return a+b+inp
 
     a = Tensor([1,2,3])
@@ -39,11 +39,11 @@ class TestFunction(unittest.TestCase):
 
   def test_implicit_2(self):
     inp = Tensor([7,8,9])
-    @function
+    @function(allow_implicit=True)
     def f(a:Tensor, b:Tensor) -> Tensor:
       return a+b+inp
     inp2 = Tensor([7,8,10])
-    @function
+    @function(allow_implicit=True)
     def g(a:Tensor, b:Tensor) -> Tensor:
       return a+b+inp2
 
@@ -57,7 +57,7 @@ class TestFunction(unittest.TestCase):
 
   def test_implicit_unrealized(self):
     inp = Tensor([1,2,3]) + Tensor([4,5,6])
-    @function
+    @function(allow_implicit=True)
     def f(a:Tensor) -> Tensor: return a + inp
 
     np.testing.assert_equal(f(Tensor([10,20,30])).numpy(), [15,27,39])
@@ -103,7 +103,7 @@ class TestFunction(unittest.TestCase):
   def test_grad_implicit(self):
     w = Tensor([1., 2., 3.], requires_grad=True)
     w.realize() # TODO: this is required
-    @function
+    @function(allow_implicit=True)
     def f(x:Tensor) -> Tensor: return x * w
 
     x = Tensor([4., 5., 6.])
@@ -112,7 +112,7 @@ class TestFunction(unittest.TestCase):
 
   def test_symbolic_index(self):
     table = Tensor([10,20,30,40]).contiguous().realize()
-    @function
+    @function(allow_implicit=True)
     def f(x:Tensor, start_pos:int|UOp) -> Tensor:
       return x + table[start_pos]
 
@@ -129,9 +129,9 @@ class TestFunction(unittest.TestCase):
 
   def test_nested_calls(self):
     w = Tensor([10., 20., 30.])
-    @function
+    @function(allow_implicit=True)
     def f(a:Tensor) -> Tensor: return a + w
-    @function
+    @function(allow_implicit=True)
     def g(a:Tensor) -> Tensor: return a * w
 
     a = Tensor([1., 2., 3.])
@@ -139,9 +139,9 @@ class TestFunction(unittest.TestCase):
 
   def test_nested_calls_backward(self):
     w = Tensor([[1., 2.], [3., 4.]]).contiguous().realize()
-    @function
+    @function(allow_implicit=True)
     def inner(x:Tensor) -> Tensor: return x + w
-    @function
+    @function(allow_implicit=True)
     def outer(a:Tensor, b:Tensor) -> Tensor: return inner(a.reshape(1,2) + b.reshape(1,2))
 
     a = Tensor([1., 2.], requires_grad=True)
@@ -165,22 +165,22 @@ class TestFunction(unittest.TestCase):
   def test_name(self):
     @function
     def f(a:Tensor) -> Tensor: return a + 1
-    assert f(Tensor([1])).uop.arg.name.endswith("f")
+    assert f(Tensor([1])).uop.src[0].arg.name.endswith("f")
 
   def test_method_name(self):
     class Foo:
       @function
       def __call__(self, x:Tensor) -> Tensor: return x + 1
-    assert Foo()(Tensor([1])).uop.arg.name.endswith("Foo.__call__")
+    assert Foo()(Tensor([1])).uop.src[0].arg.name.endswith("Foo.__call__")
 
   def test_callable_instance(self):
     class Foo:
       def __init__(self): self.w = Tensor([10,20,30])
       def __call__(self, x:Tensor) -> Tensor: return x + self.w
     foo = Foo()
-    f = function(foo)
+    f = function(foo, allow_implicit=True)
     np.testing.assert_equal(f(Tensor([1,2,3])).numpy(), [11,22,33])
-    assert f(Tensor([1,2,3])).uop.arg.name.endswith("Foo")
+    assert f(Tensor([1,2,3])).uop.src[0].arg.name.endswith("Foo")
 
   def test_iadd(self):
     @function
@@ -212,6 +212,31 @@ class TestFunction(unittest.TestCase):
     np.testing.assert_equal(f(a,b).numpy(), [11,21,31])
     np.testing.assert_equal(a.numpy(), [11,21,31])  # TODO: should be [1,2,3]
     np.testing.assert_equal(b.numpy(), [10,20,30])
+
+  def test_view_assign_explicit_buffer(self):
+    """view assign on an explicit param's buffer should not create implicit inputs."""
+    class State:
+      def __init__(self): self.buf = Tensor.zeros(2, 4).contiguous().realize()
+      @function(allow_implicit=False)
+      def __call__(self, x:Tensor) -> Tensor:
+        self.buf[:, 0:2].assign(x)
+        return self.buf[:, 0:2]
+    s = State()
+    np.testing.assert_equal(s(Tensor([[5., 6.], [7., 8.]])).numpy(), [[5., 6.], [7., 8.]])
+
+  def test_single_after_store(self):
+    """AFTER(buf, STORE(view, data)) should write data through the view into buf, same as the double-after pattern."""
+    @function
+    def f(buf:Tensor, x:Tensor, start_pos:int|UOp) -> Tensor:
+      slice_uop = buf[:, start_pos:start_pos+1].uop
+      assigned = Tensor(buf.uop.after(slice_uop.store(x.uop)))
+      return assigned
+
+    buf = Tensor.zeros(2, 8).contiguous().realize()
+    x = Tensor([[1.], [2.]]).realize()
+    v = UOp.variable("sp", 0, 7)
+    r0 = f(buf, x, v.bind(0)).numpy()
+    np.testing.assert_equal(r0, [[1.,0.,0.,0.,0.,0.,0.,0.], [2.,0.,0.,0.,0.,0.,0.,0.]])
 
   @unittest.expectedFailure
   def test_assign_slice(self):
@@ -256,7 +281,7 @@ class TestFunctionMulti(unittest.TestCase):
   def test_grad_implicit_multi(self):
     w = Tensor([1., 2., 3., 4.], requires_grad=True).shard(self.devices_2, axis=None)
     w.realize()
-    @function
+    @function(allow_implicit=True)
     def f(x:Tensor) -> Tensor: return x * w
 
     x = Tensor([4., 5., 6., 7.]).shard(self.devices_2, axis=None)
@@ -313,7 +338,7 @@ class TestFunctionMulti(unittest.TestCase):
     devices_4 = tuple(f"CPU:{i}" for i in range(4))
     w = Tensor([[1.,2.],[3.,4.]], requires_grad=True).shard(devices_4, axis=None)
     w.realize()
-    @function
+    @function(allow_implicit=True)
     def f(x:Tensor) -> Tensor: return x @ w
 
     x = Tensor(np.arange(16).reshape(8,2).astype(np.float32), requires_grad=True).shard(devices_4, axis=0)
@@ -326,7 +351,7 @@ class TestFunctionMulti(unittest.TestCase):
     w.realize()
     # pre-init grads like the training loop does
     w.grad = w.zeros_like().contiguous().realize()
-    @function
+    @function(allow_implicit=True)
     def f(x:Tensor) -> Tensor: return x @ w
 
     expected = np.ones((8,2)) @ np.array([[1,3],[2,4]])
@@ -358,11 +383,11 @@ class TestFunctionTuple(unittest.TestCase):
   def test_grad_tuple_precompile(self): self.test_grad_tuple(True)
 
   def test_grad_fxn_tuple(self):
-    # grad_fxn for tuple: ctx is a TUPLE UOp with one element per output
-    def grad_fxn(ctx:UOp, call:UOp):
-      # f(u1, u2) = (u1+1, u2+2), ctx.src = (d_out0, d_out1)
+    # grad_fxn for tuple: receives one gradient per output as positional args
+    def grad_fxn(d_out0:UOp, d_out1:UOp, call:UOp):
+      # f(u1, u2) = (u1+1, u2+2)
       # df/du1 = d_out0, df/du2 = d_out1
-      return (ctx.src[0], ctx.src[1])
+      return (d_out0, d_out1)
 
     x = Tensor.ones(3, requires_grad=True).contiguous()
     y = Tensor.ones(3, requires_grad=True).contiguous()
@@ -372,6 +397,32 @@ class TestFunctionTuple(unittest.TestCase):
     (t1+t2).sum().backward()
     np.testing.assert_allclose(x.grad.numpy(), [1., 1., 1.])
     np.testing.assert_allclose(y.grad.numpy(), [1., 1., 1.])
+
+class TestFunctionGrad(unittest.TestCase):
+  def test_function_grad_ops(self, precompile=False, precompile_backward=False):
+    N = 64
+    x = Tensor.ones(N,N).contiguous()
+    w1 = Tensor.ones(N,N, requires_grad=True).contiguous()
+    w2 = Tensor.ones(N,N, requires_grad=True).contiguous()
+    w3 = Tensor.ones(N,N, requires_grad=True).contiguous()
+    ref = Tensor.ones(N,N).contiguous()
+    Tensor.realize(x, w1, w2, w3, ref)
+    @function(precompile=precompile, precompile_backward=precompile_backward)
+    def f(x, w1, w2, w3) -> tuple[Tensor, ...]:
+      p1 = x@w1
+      p2 = p1@w2
+      p3 = p2@w3
+      return p1, p2, p3, p3.contiguous()
+    ret = f(x, w1, w2, w3)[-1]
+    loss = (ret-ref).square().mean().backward()
+    print("RESET")
+    GlobalCounters.reset()
+    loss.realize(w1.grad, w2.grad, w3.grad)
+    print(GlobalCounters.global_ops, GlobalCounters.global_mem)
+    self.assertLessEqual(GlobalCounters.global_ops, 4739073)
+  def test_function_grad_ops_precompile(self): self.test_function_grad_ops(precompile=True)
+  def test_function_grad_ops_precompile_backward(self):
+    self.test_function_grad_ops(precompile=True, precompile_backward=True)
 
 if __name__ == '__main__':
   unittest.main()

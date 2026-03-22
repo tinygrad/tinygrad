@@ -1,9 +1,10 @@
 import unittest, math
 import z3
-from tinygrad.codegen.gpudims import get_grouped_dims
-from tinygrad.uop.ops import UOp, Ops
+from tinygrad.codegen.gpudims import get_grouped_dims, add_gpudims
+from tinygrad.uop.ops import UOp, Ops, KernelInfo, AxisType
 from tinygrad.uop.validate import uops_to_z3
 from tinygrad.dtype import dtypes
+from tinygrad.renderer import Renderer
 from tinygrad.helpers import flatten, dedup
 
 class TestGroupedDims(unittest.TestCase):
@@ -23,7 +24,7 @@ class TestGroupedDims(unittest.TestCase):
     total = math.prod(dims)
     specials = sorted(dedup(flatten([[y for y in x.toposort() if y.op is Ops.SPECIAL] for x in idxs])), key=lambda u: u.arg)
     # build flat index and primed flat (same expression with renamed SPECIALs)
-    flat = UOp.const(dtypes.index, 0)
+    flat = UOp.const(dtypes.weakint, 0)
     for i, idx in enumerate(idxs):
       flat = flat + idx * int(math.prod(dims[i+1:]))
     flat_p = flat.substitute({s: UOp(Ops.SPECIAL, s.dtype, s.src, s.arg+"_p") for s in specials})
@@ -92,6 +93,14 @@ class TestGroupedDims(unittest.TestCase):
     idxs = get_grouped_dims("gidx", (2,3,4,5), (16,16,16), False)
     assert idxs[2].op is Ops.SPECIAL, f"expected SPECIAL for direct-mapped dim, got {idxs[2].op}"
     assert idxs[3].op is Ops.SPECIAL, f"expected SPECIAL for direct-mapped dim, got {idxs[3].op}"
+
+  def test_global_prod_max(self):
+    g, l = UOp.range(256, 0, AxisType.GLOBAL), UOp.range(256, 1, AxisType.LOCAL)
+    sink = UOp(Ops.PARAM, dtypes.float.ptr(), (), 0).index(g + l).store(UOp.const(dtypes.float, 1.0)).end(g, l).sink(arg=KernelInfo())
+    class R(Renderer): global_max, local_max, global_prod_max = (256, 256, 256), (128, 128, 128), (128, 128, 128)
+    specials = [u for u in add_gpudims(R(), sink).toposort() if u.op is Ops.SPECIAL]
+    self.assertGreater(len([s for s in specials if "lidx" in s.arg]), 1)
+    self.assertGreater(len([s for s in specials if "gidx" in s.arg]), 1)
 
   def test_max_sizes_none(self):
     self._check_grouped_dims("gidx", (2,3,4), None, False, [2,3,4])

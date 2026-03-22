@@ -1,4 +1,4 @@
-import functools
+import functools, itertools
 from typing import Generic, TypeVar, Callable, cast, overload
 from tinygrad.helpers import Context, dedup, getenv
 from tinygrad.uop.ops import UOp, Ops, graph_rewrite, PatternMatcher, UPat
@@ -6,23 +6,28 @@ from tinygrad.tensor import Tensor
 from tinygrad.nn.state import get_state_dict
 
 def add_to_ctx(ctx, x:UOp):
-  ret = x.param_like(len(ctx))
-  ctx.append(x)
+  ret = x.param_like(len(ctx[0]))
+  ctx[0].append(x)
   return ret
+
+pm_transform_unique_const = PatternMatcher([
+  # transform unique consts to LUNIQUE
+  (UPat(Ops.CONST, src=(UPat(Ops.UNIQUE), UPat(Ops.DEVICE)), name="x"),
+   lambda ctx,x: x.replace(src=(UOp(Ops.LUNIQUE, arg=next(ctx[1])), x.src[1]))),
+])
 
 pm_ctx = PatternMatcher([
   (UPat((Ops.BUFFER, Ops.BIND), name="x"), add_to_ctx),
   (UPat((Ops.AFTER, Ops.CONTIGUOUS), name="x"),
-   lambda ctx,x: add_to_ctx(ctx,x) if not x.op_in_backward_slice_with_self(Ops.PARAM) else None),
-  # strip UNIQUE from unique consts — they don't need buffer identity inside function bodies
-  (UPat(Ops.CONST, src=(UPat(Ops.UNIQUE), UPat(Ops.DEVICE)), name="x"), lambda ctx,x: x.replace(src=(x.src[1],))),
-])
+   lambda ctx,x: add_to_ctx(ctx,x) if not x.op_in_backward_slice_with_self(Ops.PARAM) and x.op_in_backward_slice_with_self(Ops.BUFFER) else None),
+])+pm_transform_unique_const
 
 ReturnType = TypeVar('ReturnType')
 class _function(Generic[ReturnType]):
-  def __init__(self, fxn:Callable[..., ReturnType], *, precompile:bool=False, allow_implicit:bool=True, grad_fxn:Callable|None=None):
+  def __init__(self, fxn:Callable[..., ReturnType], *, precompile:bool, precompile_backward:bool, allow_implicit:bool, grad_fxn:Callable|None):
     self.fxn = fxn
     self.precompile = precompile
+    self.precompile_backward = precompile_backward
     self.allow_implicit = allow_implicit
     self.grad_fxn = grad_fxn
 
@@ -55,7 +60,7 @@ class _function(Generic[ReturnType]):
 
     # the BUFFERs that are left are the implicit inputs
     num_explicit = len(call_uops)
-    uret = graph_rewrite(uret, pm_ctx, call_uops, bottom_up=True, name="get_implicit_inputs")
+    uret = graph_rewrite(uret, pm_ctx, (call_uops, itertools.count(0)), bottom_up=True, name="get_implicit_inputs")
     name = getattr(self.fxn, '__qualname__', None) or type(self.fxn).__qualname__
     if not self.allow_implicit:
       implicit_buffers = [x for x in call_uops[num_explicit:] if x.op is Ops.BUFFER]
@@ -70,19 +75,24 @@ class _function(Generic[ReturnType]):
     #call = assigned.call(*call_uops, buffer, name=name)
     #ret = buffer.after(call)
 
-    fret = uret.call(*call_uops, grad_fxn=self.grad_fxn, name=name, precompile=self.precompile)
+    fret = uret.call(*call_uops, grad_fxn=self.grad_fxn, name=name, precompile=self.precompile,
+                     precompile_backward=self.precompile_backward)
     if isinstance(ret, tuple):
-      return cast(ReturnType, tuple(Tensor(fret.gettuple(i), device=fret.device) for i in range(len(ret))))
+      return cast(ReturnType, tuple(Tensor(fret.gettuple(i)) for i in range(len(ret))))
     else:
-      return cast(ReturnType, Tensor(fret, device=fret.device))
+      return cast(ReturnType, Tensor(fret.gettuple(0)))
 
 # overload signatures support both @function and @function(precompile=True) syntax
 @overload
-def function(fxn:Callable[..., ReturnType], *, precompile:bool=False, allow_implicit:bool=True,
-             grad_fxn:Callable|None=None) -> _function[ReturnType]: ...
+def function(fxn:Callable[..., ReturnType], *, precompile:bool=False, precompile_backward:bool=False,
+             allow_implicit:bool=False, grad_fxn:Callable|None=None) -> _function[ReturnType]: ...
 @overload
-def function(fxn:None=None, *, precompile:bool=False, allow_implicit:bool=True,
-             grad_fxn:Callable|None=None) -> Callable[[Callable[..., ReturnType]], _function[ReturnType]]: ...
-def function(fxn=None, *, precompile:bool=False, allow_implicit:bool=True, grad_fxn:Callable|None=None):
-  if fxn is None: return lambda f: _function(f, precompile=precompile, allow_implicit=allow_implicit, grad_fxn=grad_fxn)
-  return _function(fxn, precompile=precompile, allow_implicit=allow_implicit, grad_fxn=grad_fxn)
+def function(fxn:None=None, *, precompile:bool=False, precompile_backward:bool=False,
+             allow_implicit:bool=False, grad_fxn:Callable|None=None) -> Callable[[Callable[..., ReturnType]], _function[ReturnType]]: ...
+def function(fxn=None, *, precompile:bool=False, precompile_backward:bool=False,
+             allow_implicit:bool=False, grad_fxn:Callable|None=None):
+  if fxn is None:
+    return lambda f: _function(f, precompile=precompile, precompile_backward=precompile_backward,
+                               allow_implicit=allow_implicit, grad_fxn=grad_fxn)
+  return _function(fxn, precompile=precompile, precompile_backward=precompile_backward,
+                   allow_implicit=allow_implicit, grad_fxn=grad_fxn)

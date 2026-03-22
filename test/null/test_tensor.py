@@ -162,5 +162,17 @@ class TestTensorUnique(unittest.TestCase):
     Tensor.realize(b,c)
     self.assertIs(b.uop.buffer, c.uop.buffer)
 
+class TestRand(unittest.TestCase):
+  def test_rand_large_tensor(self):
+    # large tensor rand (num > uint32.max) should not crash in frontend
+    Tensor.manual_seed(0)
+    Tensor.rand(2**17, 2**17).schedule()
+    Tensor.rand(2**17, 2**17).schedule()
+    Tensor.rand(2**17, 2**17).schedule()
+
+class TestTensorDevice(unittest.TestCase):
+  def test_create_from_single_device_tuple(self):
+    (Tensor([1.0], device=(Device.DEFAULT,)) + Tensor([2.0])).realize()
+
 if __name__ == '__main__':
   unittest.main()

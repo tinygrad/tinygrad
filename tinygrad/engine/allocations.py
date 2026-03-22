@@ -1,7 +1,6 @@
 from dataclasses import dataclass, field
 from tinygrad.uop.ops import UOp, UPat, PatternMatcher, Ops, GroupOp, graph_rewrite, track_rewrites
-from tinygrad.dtype import dtypes, ImageDType
-from tinygrad.helpers import prod, DEBUG, VIZ, pluralize, all_int
+from tinygrad.helpers import VIZ, pluralize, all_int
 
 @dataclass
 class AllocCtx:
@@ -42,12 +41,7 @@ add_tags = PatternMatcher([
 ])
 
 def _buffer_like(u:UOp) -> UOp:
-  dtype = u.dtype
-  if isinstance(dtype, ImageDType):
-    if prod(dtype.shape) != prod(u.max_shard_shape) or ([x for x in u.max_shard_shape if x != 1] or [1])[-1] % 4 != 0:
-      if DEBUG >= 1: print(f"demoting Image {dtype} with shape {u.max_shard_shape}")
-      dtype = dtype.base
-  buffer = UOp.new_buffer(u.device, u.shard_size, dtype).reshape(u.max_shard_shape).shrink_to(u.shard_shape)
+  buffer = UOp.new_buffer(u.device, u.shard_size, u.dtype).reshape(u.max_shard_shape).shrink_to(u.shard_shape)
   if isinstance(u.device, tuple) and u.axis is not None: buffer = buffer.multi(u.axis)
   return buffer
 
@@ -66,6 +60,13 @@ def replace_store_after_with_contig(u:UOp, src:UOp):
   while assigned_to.op in {Ops.BITCAST, Ops.AFTER}: assigned_to = assigned_to.src[0].base
   if assigned_to.op is not Ops.BUFFER: return src.contiguous(tag=u.tag)
 
+def _make_buffer_view(src:UOp) -> UOp|None:
+  """If movement ops on src collapse to a contiguous range, return BUFFER_VIEW.reshape(src.shape). Otherwise None."""
+  if (offset := src.contiguous_view_offset()) is None: return None
+  buf = src.base
+  if buf.op is Ops.BUFFER_VIEW: offset, buf = offset + buf.arg[1], buf.src[0]
+  return UOp(Ops.BUFFER_VIEW, src.dtype, (buf,), (src.size, offset)).reshape(src.shape)
+
 def contiguous_mops_to_view(c:UOp, src:UOp):
   """CONTIGUOUS(MOPS(BUFFER)) → CONTIGUOUS(BUFFER_VIEW) when movement ops collapse to a contiguous range."""
   buf = src.base
@@ -76,46 +77,53 @@ def contiguous_mops_to_view(c:UOp, src:UOp):
   if not all_int(c.shape): return None
 
   # check if view is supported
-  if not isinstance(c.device, str): return None
   from tinygrad.device import Device
-  if not hasattr(Device[c.device].allocator, "_offset"): return None
+  if isinstance(c.device, str):
+    if not hasattr(Device[c.device].allocator, "_offset"): return None
+  elif not all(hasattr(Device[d].allocator, "_offset") for d in c.device): return None
 
-  # see if this can be a view
-  if (offset := src.contiguous_view_offset()) is None: return None
-
-  # merge BUFFER_VIEWs
-  if buf.op is Ops.BUFFER_VIEW: offset, buf = offset + buf.arg[1], buf.src[0]
+  # for MULTI tensors, use multi_pm to resolve per-shard movement ops, then create BUFFER_VIEW on the resolved result
+  if not isinstance(c.device, str):
+    from tinygrad.schedule.multi import multi_pm
+    resolved = graph_rewrite(src, multi_pm, name="multi_buffer_view")
+    if resolved.op is not Ops.MULTI: return None
+    if (view := _make_buffer_view(resolved.src[0])) is None: return None
+    return view.multi(resolved.arg).contiguous(tag=c.tag)
 
   # NOTE: this contiguous is removed because this BUFFER_VIEW/RESHAPE has_buffer_identity
-  return UOp(Ops.BUFFER_VIEW, src.dtype, (buf,), (src.size, offset)).reshape(src.shape).contiguous(tag=c.tag)
+  if (view := _make_buffer_view(src)) is None: return None
+  return view.contiguous(tag=c.tag)
 
 def transform_precompiled_call(c:UOp) -> UOp|None:
   if not c.arg.precompile: return None
   if c.src[0].op is Ops.SINK: return None
+  assert c.src[0].op is Ops.TUPLE, f"expected TUPLE body for precompiled call, got {c.src[0].op}"
   input_buffers = tuple(x.contiguous() if x.op not in {Ops.AFTER, Ops.BIND} else x for x in c.src[1:])
 
   # add the outputs to the call
-  srcs = c.src[0].src if c.src[0].op is Ops.TUPLE else (c.src[0],)
-  resolved = [c.gettuple(i) if c.src[0].op is Ops.TUPLE else c for i in range(len(srcs))]
+  srcs = c.src[0].src
+  resolved = [c.gettuple(i) for i in range(len(srcs))]
   outs = tuple(_buffer_like(r) for r in resolved)
   targets = [o.param_like(len(c.src)-1+i).shrink_to(s.shape) for i,(o,s) in enumerate(zip(outs, srcs))]
   fxn = UOp.sink(*[t.after(t.store(s)) for t,s in zip(targets, srcs)])
 
   # create the new thing for the big graph
-  new_call = c.replace(src=(fxn, *input_buffers, *outs), dtype=dtypes.void, tag=None)
+  new_call = c.replace(src=(fxn, *input_buffers, *outs), tag=None)
   rets = tuple(o.after(new_call) for o in outs)
 
   # if the CALL has symbolic shapes, shrink the max-sized output to the actual symbolic shape
   # NOTE: must use resolved shapes from the CALL (which substitutes PARAMs with external args), not raw body shapes
   rets = tuple(r.shrink_to(rs.shape) for r,rs in zip(rets, resolved))
 
-  # return tuple if tuple
-  return UOp.maketuple(*rets) if c.src[0].op is Ops.TUPLE else rets[0]
+  return UOp.maketuple(*rets)
 
 # NOTE: adding rules to here is bad. these all need to run before the schedule cache
 pm_early_transform_tensor_graph = PatternMatcher([
   # transform precompiled CALLs
   (UPat(Ops.CALL, name="c"), transform_precompiled_call),
+
+  # resolve TUPLE+GETTUPLE (for precompiled calls)
+  (UPat(Ops.GETTUPLE, src=(UPat(Ops.TUPLE, name="t"),), name="g"), lambda g,t: t.src[g.arg]),
 
   # CONTIGUOUS(MOPS(BUFFER/BUFFER_VIEW)) → CONTIGUOUS(BUFFER_VIEW) when movement ops collapse to contiguous range
   (UPat(Ops.CONTIGUOUS, src=(UPat(GroupOp.Movement, name="src"),), name="c"), contiguous_mops_to_view),

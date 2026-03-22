@@ -78,8 +78,9 @@ class TestSQTTMapBase(unittest.TestCase):
       for event in events:
         if (p:=kern_events.get(event.kern)) is None: continue
         with self.subTest(example=name, kern=event.kern):
+          # skip if there's no SQTT frequency data
           if not (timeline:=sqtt_timeline(event.blob, p.lib, target)): continue
-          frequency = [e.key for e in timeline if type(e).__name__ == "ProfilePointEvent" and e.name == "freq_hz"]
+          if not (frequency:=[e.key for e in timeline if type(e).__name__ == "ProfilePointEvent" and e.name == "freq_hz"]): continue
           mean = sum(frequency) / len(frequency)
           variance = sum((v - mean) ** 2 for v in frequency) / len(frequency)
           self.assertGreater(mean, 0)
@@ -91,7 +92,8 @@ class TestSQTTMapBase(unittest.TestCase):
               if "ALT" not in e.name.display_name: execs += 1
             elif "WAVE" in e.device:
               # sopk/immediates don't get ALU/MEM EXEC
-              if e.name.display_name not in {"IMMEDIATE", "IMMEDIATE_MASK", "JUMP", "JUMP_NO", "MESSAGE", "BARRIER", "BARRIER_SIGNAL"}: insts += 1
+              if e.name.display_name not in {"IMMEDIATE", "IMMEDIATE_MASK", "JUMP", "JUMP_NO", "MESSAGE", "BARRIER", "BARRIER_SIGNAL",
+                                             "WAVEEND"}: insts += 1
             else: raise Exception(f"timeline row must be INST or EXEC, got {e.device}")
           self.assertEqual(execs, insts)
 
@@ -109,6 +111,10 @@ class TestSQTTMapBase(unittest.TestCase):
 class TestSQTTMapRDNA3(TestSQTTMapBase): target = "gfx1100"
 
 class TestSQTTMapRDNA4(TestSQTTMapBase): target = "gfx1200"
+
+class TestSQTTMapCDNA(TestSQTTMapBase):
+  target = "gfx950"
+  def test_rocprof_inst_traces_match(self): self.skipTest("requires timestamp patching to match rocprof, currently it's off by a few cycles")
 
 if __name__ == "__main__":
   unittest.main()

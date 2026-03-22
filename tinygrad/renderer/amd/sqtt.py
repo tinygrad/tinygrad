@@ -8,6 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Iterator
 from enum import Enum
+from tinygrad.helpers import getenv, colored
 from tinygrad.renderer.amd.dsl import BitField, FixedBitField, Inst, bits
 from tinygrad.runtime.autogen.amd.rdna3.ins import s_endpgm # same encoding as RDNA4
 
@@ -138,6 +139,24 @@ class InstOpRDNA4(Enum):
   SALU_5 = 0x9c
   OTHER_VMEM = 0xbd
   OTHER_VMEM_5 = 0xc1
+
+class InstOpCDNA(Enum):
+  SMEM_RD = 0
+  SALU_32 = 1
+  VMEM_RD = 2
+  VMEM_WR = 3
+  FLAT_WR = 4
+  VALU_32 = 5
+  LDS = 6
+  PC = 7
+  JUMP = 12
+  NEXT = 13
+  FLAT_RD = 14
+  OTHER_MSG = 15
+  SMEM_WR = 16
+  SALU_64 = 17
+  VALU_64 = 18
+  VALU_MAI = 28
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # PACKET TYPE BASE CLASS
@@ -448,7 +467,7 @@ class CDNA_INST(PacketType):
   encoding = bits[3:0] == 10
   wave = bits[8:5]
   simd = bits[10:9]
-  inst_type = bits[15:11]
+  op = bits[15:11].enum(InstOpCDNA)
 
 class CDNA_INST_PC(PacketType):
   """pkt_fmt=11: 64-bit (MsgInstPc)"""
@@ -612,7 +631,7 @@ def map_insts(data:bytes, lib:bytes, target:str) -> Iterator[tuple[PacketType, I
   def simd_select(p) -> bool: return getattr(p, "cu", 0) == 0 and getattr(p, "simd", 0) == 0
   for p in decode(data):
     if not simd_select(p): continue
-    if isinstance(p, (WAVESTART, WAVESTART_RDNA4)):
+    if isinstance(p, (WAVESTART, WAVESTART_RDNA4, CDNA_WAVESTART)):
       assert p.wave not in wave_pc, "only one inflight wave per unit"
       wave_pc[p.wave] = next(iter(pc_map))
     elif isinstance(p, WAVEEND):
@@ -660,7 +679,6 @@ PACKET_COLORS = {
 }
 
 def format_packet(p) -> str:
-  from tinygrad.helpers import colored
   name = type(p).__name__
   if isinstance(p, (INST, INST_RDNA4)):
     op_name = p.op.name if isinstance(p.op, (InstOp, InstOpRDNA4)) else f"0x{p.op:02x}"
@@ -677,7 +695,6 @@ def format_packet(p) -> str:
   return f"{p._time:8}: {colored(f'{name:18}', PACKET_COLORS.get(name.replace('_RDNA4', ''), 'white'))} {fields}"
 
 def print_packets(packets) -> None:
-  from tinygrad.helpers import getenv
   skip = {"NOP", "TS_DELTA_SHORT", "TS_WAVE_STATE", "TS_DELTA_OR_MARK",
           "TS_DELTA_S5_W2", "TS_DELTA_S5_W3", "TS_DELTA_S8_W3", "REG", "EVENT"} if not getenv("NOSKIP") else {"NOP"}
   for data in packets:
@@ -692,7 +709,10 @@ if __name__ == "__main__":
   prg_events = {e.tag: e for e in data if type(e).__name__ == "ProfileProgramEvent" and e.tag is not None}
   sqtt_events = [e for e in data if type(e).__name__ == "ProfileSQTTEvent"]
   dev_targets = {e.device:f"gfx{e.props['gfx_target_version']//1000}" for e in data if type(e).__name__ == "ProfileDeviceEvent" and e.props}
+  evt_num = getenv("SQTT_EVENT", -1)
   for i, event in enumerate(sqtt_events):
     prg = prg_events.get(event.kern)
-    print(f"\n=== event {i} {prg.name if prg is not None else ''} ===")
-    print_packets(map_insts(event.blob, prg.lib, dev_targets[prg.device]) if prg is not None else decode(event.blob))
+    print(f"=== event {i} {prg.name if prg is not None else ''} ===")
+    if evt_num == -1 or i == evt_num:
+      print_packets(map_insts(event.blob, prg.lib, dev_targets[prg.device]) if prg is not None else decode(event.blob))
+      print("\n")

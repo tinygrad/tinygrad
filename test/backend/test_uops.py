@@ -77,15 +77,15 @@ class TestUOps(unittest.TestCase):
   def _test_uop_fxn(self, op, fxn, dts=(dtypes.float32, )):
     for f in [_test_single_value, _test_single_value_const]:
       for a in [-2.0, 0.0, 1.0]:
-        a = dtypes.as_const(a, dts[0])
+        a = dts[0].const(a)
         self._equal(f([a], op, dts), fxn(a))
 
   def _test_bop_fxn(self, op, fxn, dts=(dtypes.float32, )*2, no_b_zero=False, no_b_neg=False):
     for f in [_test_single_value, _test_single_value_const]:
       for a in [-2.0, 0.0, 1.0]:
         for b in [-3.0, 1.0] + ([] if no_b_zero else [0.0]):
-          a = dtypes.as_const(a, dts[0])
-          b = dtypes.as_const(abs(b) if no_b_neg else b, dts[1])
+          a = dts[0].const(a)
+          b = dts[1].const(abs(b) if no_b_neg else b)
           self._equal(f([a,b], op, dts), fxn(a,b))
 
   def _test_top_fxn(self, op, fxn, dts=(dtypes.float32, )*3):
@@ -93,9 +93,9 @@ class TestUOps(unittest.TestCase):
       for a in [-2.0, 0, 1]:
         for b in [-3.0, 3.0]:
           for c in [-4.0, 4.0]:
-            a = dtypes.as_const(a, dts[0])
-            b = dtypes.as_const(b, dts[1])
-            c = dtypes.as_const(c, dts[2])
+            a = dts[0].const(a)
+            b = dts[1].const(b)
+            c = dts[2].const(c)
             self._equal(f([a,b,c], op, dts), fxn(a,b,c))
 
 class TestFloatUOps(TestUOps):
@@ -117,7 +117,7 @@ class TestFloatUOps(TestUOps):
   def test_cmpne_nan(self):  # NaN != x for any x (IEEE 754)
     for a, b in [(math.nan, 1.0), (1.0, math.nan), (math.nan, math.nan)]:
       self.assertTrue(_test_single_value(
-        [dtypes.as_const(a, dtypes.float32), dtypes.as_const(b, dtypes.float32)],
+        [dtypes.float32.const(a), dtypes.float32.const(b)],
         Ops.CMPNE, (dtypes.float32, dtypes.float32)))
   # MOD isn't tested on floats
 
