@@ -129,6 +129,10 @@ def get_null_runner(ctx:list[Buffer|None], ast:UOp) -> CompiledRunner:
   context = (BEAM.value, NOOPT.value, DEVECTORIZE.value, EMULATED_DTYPES.value)
   ckey = (device, type(Device[device].compiler), ast.key, context, False)
   if cret := method_cache.get(ckey): return cret
+
+  def strip_index_cast(u:UOp) -> UOp:
+    return u.src[0] if u.op is Ops.CAST and u.src[0].op is Ops.INDEX else u
+
   # for Ops.PROGRAM, estimates go on the SINK (src[0]); normalize so we always work on the SINK
   sink = ast.src[0] if ast.op is Ops.PROGRAM else ast
   uops = list(sink.toposort())
@@ -144,31 +148,25 @@ def get_null_runner(ctx:list[Buffer|None], ast:UOp) -> CompiledRunner:
 
   # extract globals/outs/ins from STORE/LOAD→INDEX→PARAM chains (same structure as ProgramSpec.from_uop)
   store_target_idx_ids: set[int] = set()
-  _globals: list[int] = []
-  outs: list[int] = []
-  ins: list[int] = []
+  _globals: set[int] = set()
+  outs: set[int] = set()
+  ins: set[int] = set()
   for u in uops:
-    if u.op is Ops.PARAM: _globals.append(u.arg)
-    if u.op in (Ops.STORE, Ops.LOAD):
-      idx = u.src[0]
-      if idx.op is Ops.CAST and idx.src[0].op is Ops.INDEX: idx = idx.src[0]
-      if idx.op is Ops.INDEX:
-        if u.op is Ops.STORE: store_target_idx_ids.add(id(idx))
-        if idx.src[0].op is Ops.PARAM: (outs if u.op is Ops.STORE else ins).append(idx.src[0].arg)
-  _globals = sorted(set(_globals))
-  outs = sorted(set(outs))
-  ins = sorted(set(ins))
+    if u.op is Ops.PARAM: _globals.add(u.arg)
+    if u.op not in (Ops.STORE, Ops.LOAD): continue
+    idx = strip_index_cast(u.src[0])
+    if idx.op is not Ops.INDEX: continue
+    if u.op is Ops.STORE: store_target_idx_ids.add(id(idx))
+    if idx.src[0].op is Ops.PARAM: (outs if u.op is Ops.STORE else ins).add(idx.src[0].arg)
+  globals_list, outs_list, ins_list = sorted(_globals), sorted(outs), sorted(ins)
 
   # compute estimates without full kernel lowering:
   # - mem: write buffers (outs) + read buffers (INDEX not used as STORE targets)
   # - ops: count float ALU + REDUCE ops weighted by loop mults (excludes weakint address ops)
   # - lds: bytes stored/loaded weighted by loop mults
-  read_params: set[int] = set()
-  for u in uops:
-    if u.op is Ops.INDEX and id(u) not in store_target_idx_ids and u.src[0].op is Ops.PARAM:
-      read_params.add(u.src[0].arg)
+  read_params = {u.src[0].arg for u in uops if u.op is Ops.INDEX and id(u) not in store_target_idx_ids and u.src[0].op is Ops.PARAM}
   param_sizes = {u.arg: u.dtype.nbytes() for u in uops if u.op is Ops.PARAM and isinstance(u.dtype, PtrDType) and u.dtype.size != -1}
-  mem_val = sum(param_sizes[p] for p in outs if p in param_sizes) + sum(param_sizes[p] for p in read_params if p in param_sizes)
+  mem_val = sum(param_sizes[p] for p in outs_list if p in param_sizes) + sum(param_sizes[p] for p in read_params if p in param_sizes)
 
   flops: sint = 0
   lds: sint = 0
@@ -189,7 +187,7 @@ def get_null_runner(ctx:list[Buffer|None], ast:UOp) -> CompiledRunner:
     elif u.op is Ops.STORE: lds += u.src[1].dtype.itemsize * mults
 
   sink_with_estimates = sink.replace(arg=replace(sink.arg, estimates=Estimates(flops, lds, mem_val)))
-  prg = ProgramSpec("null_kernel", "", device, sink_with_estimates, lib=b"", globals=_globals, outs=outs, ins=ins)
+  prg = ProgramSpec("null_kernel", "", device, sink_with_estimates, lib=b"", globals=globals_list, outs=outs_list, ins=ins_list)
   method_cache[ckey] = ret = CompiledRunner(prg)
   return ret
 
