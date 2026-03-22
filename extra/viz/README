@@ -1,6 +1,7 @@
 A command line tool for exploring the VIZ trace.
 
-After running with VIZ=-1, use `extra/viz/cli.py` to explore the saved trace files.
+1. Set VIZ to -1 to save the trace.
+2. Use `extra/viz/cli.py` to inspect the trace files.
 
 ## Inspect runtime profiling
 
