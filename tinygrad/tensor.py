@@ -635,7 +635,7 @@ class Tensor(OpMixin):
     from tinygrad.engine.realize import capturing
     if not capturing:
       Tensor._rng_realize_counter += 1
-      if Tensor._rng_realize_counter >= 32:
+      if Tensor._rng_realize_counter >= 256:
         Tensor._device_rng_counters[device].realize()
         Tensor._rng_realize_counter = 0
 
