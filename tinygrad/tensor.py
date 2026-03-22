@@ -2397,7 +2397,7 @@ class Tensor(OpMixin):
     # conv2d is a pooling op (with padding)
     x = self.pad(padding_)._pool(HW, stride, dilation)   # (bs, groups*cin, oy, ox, H, W)
     rcout, oyx = cout//groups, x.shape[2:-len(HW)]
-    if not all(x == 3 for x in HW) or stride != 1 or dilation != 1 or not WINO:
+    if not all(x == 3 for x in HW) or (stride != 1 and stride != dilation) or not WINO:
       # normal conv
       x = x.reshape(bs, groups, cin, 1, *oyx, *HW).expand(bs, groups, cin, rcout, *oyx, *HW)\
         .permute(0,1,3,*[4+i for i in range(len(oyx))],2,*[4+len(oyx)+i for i in range(len(HW))])
@@ -2407,12 +2407,19 @@ class Tensor(OpMixin):
         .sum([-1-i for i in range(1+len(oyx))], keepdim=True, dtype=dtype).reshape(bs, cout, *oyx)
       return ret if bias is None else ret.add(bias.reshape(1, -1, *[1] * len(HW)))
 
+    # Handle stride == dilation > 1 by subsampling input
+    if stride == dilation and stride > 1 and WINO:
+      subsample_slice = (slice(None), slice(None)) + tuple(slice(None, None, stride) for _ in range(len(HW)))
+      x_sub = self[subsample_slice]
+      new_padding = tuple(p // stride for p in padding_)
+      return x_sub.conv2d(weight, bias, groups, stride=1, dilation=1, padding=new_padding, dtype=dtype)
+
+    # Standard Winograd for stride=1, dilation=1
     HWI, HWO = (6,) * len(HW), (4,) * len(HW)  # F(4x4,3x3) winograd tiles
     winograd_G = [[1/4, 0, 0], [-1/6, -1/6, -1/6], [-1/6, 1/6, -1/6], [1/24, 1/12, 1/6], [1/24, -1/12, 1/6], [0, 0, 1]]
     winograd_Bt = [[4, 0, -5, 0, 1, 0], [0, -4, -4, 1, 1, 0], [0, 4, -4, -1, 1, 0], [0, -2, -1, 2, 1, 0], [0, 2, -1, -2, 1, 0], [0, 4, 0, -5, 0, 1]]
     winograd_At = [[1, 1, 1, 1, 1, 0], [0, 1, -1, 2, -2, 0], [0, 1, 1, 4, 4, 0], [0, 1, -1, 8, -8, 1]] # applying At in pre-order doubles compile time
 
-    # TODO: stride == dilation
     # use padding to round up to 4x4 output tiles
     # (bs, cin_, tyx, HWI)
     pads = [[padding_[i*2], padding_[i*2+1] + (-(dim+sum(padding_[i*2:(i+1)*2])-2) % 4)] for i, dim in enumerate(reversed(self.shape[-len(HW):]))]
