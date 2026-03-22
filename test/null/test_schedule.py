@@ -160,11 +160,11 @@ class TestSchedule(unittest.TestCase):
 
   def test_rand(self):
     x = Tensor.rand(32)
-    check_schedule(x, 1, [Tensor._device_rng_counters[x.device]])
+    check_schedule(x, 1)
 
   def test_rand_recompute_arange(self):
     x = Tensor.rand(32)
-    check_schedule(x, 1, [Tensor._device_rng_counters[x.device]])
+    check_schedule(x, 1)
 
   def test_empty_is_not_realized(self):
     a = Tensor.empty(10)

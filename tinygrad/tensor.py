@@ -569,7 +569,7 @@ class Tensor(OpMixin):
 
   _seed: int = int(time.time())
   _device_seeds: dict[str, Tensor] = {}
-  _device_rng_counters: dict[str, Tensor] = {}
+  _device_rng_counters: dict[str, int] = {}
   @staticmethod
   def manual_seed(seed=0) -> None:
     """
@@ -624,15 +624,14 @@ class Tensor(OpMixin):
       Tensor._device_seeds[device] = Tensor(
         [int.from_bytes(hashlib.sha256(len(Tensor._device_seeds).to_bytes(4, "big")).digest(), "big"), Tensor._seed],
         device=device, dtype=dtypes.uint32, requires_grad=False)
-      Tensor._device_rng_counters[device] = Tensor([0, 0], device=device, dtype=dtypes.uint32, requires_grad=False).contiguous()
+      Tensor._device_rng_counters[device] = 0
 
-    # increment rng counter for devices
-    new_low = Tensor._device_rng_counters[device][0:1] + (num & 0xffffffff)
-    new_high = Tensor._device_rng_counters[device][1:2] + (num >> 32) + (new_low < Tensor._device_rng_counters[device][0]).cast(dtypes.uint32)
-    Tensor._device_rng_counters[device].assign(new_low.cat(new_high))
+    # increment rng counter eagerly to prevent O(n^2) graph growth across n rand() calls
+    counter = Tensor._device_rng_counters[device]
+    Tensor._device_rng_counters[device] = counter + num
 
-    low = Tensor._device_rng_counters[device][0:1] - (num & 0xffffffff)
-    high = Tensor._device_rng_counters[device][1:2] - (num >> 32) - (Tensor._device_rng_counters[device][0] < (num & 0xffffffff)).cast(dtypes.uint32)
+    low = Tensor([counter & 0xffffffff], device=device, dtype=dtypes.uint32, requires_grad=False)
+    high = Tensor([(counter >> 32) & 0xffffffff], device=device, dtype=dtypes.uint32, requires_grad=False)
 
     # threefry random bits
     bits_list = []
