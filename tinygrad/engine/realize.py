@@ -144,7 +144,9 @@ def get_null_runner(ctx:list[Buffer|None], ast:UOp) -> CompiledRunner:
 
   # extract globals/outs/ins from STORE/LOAD→INDEX→PARAM chains (same structure as ProgramSpec.from_uop)
   store_target_idx_ids: set[int] = set()
-  _globals, outs, ins = [], [], []
+  _globals: list[int] = []
+  outs: list[int] = []
+  ins: list[int] = []
   for u in uops:
     if u.op is Ops.PARAM: _globals.append(u.arg)
     if u.op in (Ops.STORE, Ops.LOAD):
