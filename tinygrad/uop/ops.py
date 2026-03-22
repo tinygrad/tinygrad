@@ -168,8 +168,20 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
   @property
   def backward_slice_with_self(self:UOp) -> dict[UOp, None]: return {self:None, **self.backward_slice}
   def op_in_backward_slice_with_self(self, *ops:Ops) -> bool:
-    # Check self first, then iterate backward_slice (avoids creating intermediate dict)
-    return self.op in ops or any(x.op in ops for x in self.backward_slice)
+    if self.op in ops: return True
+    # use cached backward_slice if available, otherwise DFS with early exit (avoids triggering full toposort)
+    if 'backward_slice' in self.__dict__: return any(x.op in ops for x in self.__dict__['backward_slice'])
+    ops_set = set(ops)
+    visited: set[int] = set()
+    stack: list[UOp] = list(self.src)
+    while stack:
+      n = stack.pop()
+      if n.op in ops_set: return True
+      nid = id(n)
+      if nid in visited: continue
+      visited.add(nid)
+      stack.extend(n.src)
+    return False
 
   def toposort(self, gate:Callable|None=None, enter_calls=True) -> dict[UOp, None]:
     cache: dict[UOp, None] = {}
