@@ -1310,6 +1310,11 @@ class TestCopyFolding(unittest.TestCase):
     run_schedule(check_schedule(x, 2, filter_sink=False))
     self.assertEqual(x.item(), 2.0)
 
+  def test_arange_to_device_no_copy(self):
+    b = Tensor.arange(5).to("CPU")
+    run_schedule(check_schedule(b, 1, filter_sink=False))
+    self.assertListEqual(b.tolist(), [0, 1, 2, 3, 4])
+
   def test_late_const_copy_folding(self):
     a = Tensor.arange(3).realize()
     zeros = Tensor.zeros(3).realize()
