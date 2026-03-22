@@ -124,11 +124,15 @@ def get_runner(device:str, ast:UOp) -> CompiledRunner:
 
 def get_null_runner(ctx:list[Buffer|None], ast:UOp) -> CompiledRunner:
   """Fast path for NULL device: skip code generation and return a trivial runner."""
+<<<<<<< HEAD
   if VIZ: return get_runner(cast(Buffer, ctx[0]).device, ast)
+=======
+>>>>>>> 174728deb (Add a NULL device path in realize.py that skips get_program for NULL device kernels)
   device = cast(Buffer, ctx[0]).device
   context = (BEAM.value, NOOPT.value, DEVECTORIZE.value, EMULATED_DTYPES.value)
   ckey = (device, type(Device[device].compiler), ast.key, context, False)
   if cret := method_cache.get(ckey): return cret
+<<<<<<< HEAD
 
   def strip_index_cast(u:UOp) -> UOp:
     return u.src[0] if u.op is Ops.CAST and u.src[0].op is Ops.INDEX else u
@@ -188,6 +192,9 @@ def get_null_runner(ctx:list[Buffer|None], ast:UOp) -> CompiledRunner:
 
   sink_with_estimates = sink.replace(arg=replace(sink.arg, estimates=Estimates(flops, lds, mem_val)))
   prg = ProgramSpec("null_kernel", "", device, sink_with_estimates, lib=b"", globals=globals_list, outs=outs_list, ins=ins_list)
+=======
+  prg = ProgramSpec("null_kernel", "", device, ast, lib=b"", globals=list(range(len(ctx))))
+>>>>>>> 174728deb (Add a NULL device path in realize.py that skips get_program for NULL device kernels)
   method_cache[ckey] = ret = CompiledRunner(prg)
   return ret
 
