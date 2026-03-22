@@ -43,7 +43,7 @@ class DSPRenderer(ClangRenderer):
   extra_matcher = dsp_pm_late+ClangRenderer.extra_matcher
   string_rewrite = dsp_string+ClangRenderer.string_rewrite
   type_map = { **ClangRenderer.type_map, dtypes.uint64: "unsigned long long", dtypes.int64: "long long" }
-  code_for_op = {k:v for k,v in ClangRenderer.code_for_op.items() if k != Ops.SQRT}
+  code_for_op = {**ClangRenderer.code_for_op, Ops.SQRT: lambda x,dtype: f"__builtin_sqrtf({x})" if dtype == dtypes.float else f"__builtin_sqrt({x})"}
 
   def __init__(self): self.compiler = DSPCompiler()
 
@@ -126,9 +126,9 @@ class DSPCompiler(Compiler):
       # Generate link script to pass into clang. Aligning all used sections to 4k fixes invoke problem.
       sections = ['text', 'rela.plt', 'rela.dyn', 'plt', 'data', 'bss', 'hash', 'dynamic',
                   'got', 'got.plt', 'dynsym', 'dynstr', 'symtab', 'shstrtab', 'strtab']
-      sections_link = '\n'.join([f'.{n} : ALIGN(4096) {{ *(.{n}) }}' for n in sections])
+      sections_link = '\\n'.join([f'.{n} : ALIGN(4096) {{ *(.{n}) }}' for n in sections])
       with tempfile.NamedTemporaryFile(delete=False) as self.link_ld:
-        self.link_ld.write(f"SECTIONS {{ . = 0x0; {sections_link}\n /DISCARD/ : {{ *(.note .note.* .gnu.hash .comment) }} }}".encode())
+        self.link_ld.write(f"SECTIONS {{ . = 0x0; {sections_link}\\n /DISCARD/ : {{ *(.note .note.* .gnu.hash .comment) }} }}".encode())
         self.link_ld.flush()
 
       self.args = f"-shared {compiler_args} -T{self.link_ld.name}"
