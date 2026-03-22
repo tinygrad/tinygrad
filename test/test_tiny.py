@@ -35,9 +35,9 @@ class TestTiny(unittest.TestCase):
     out = Tensor.cat(Tensor.ones(8).contiguous(), Tensor.zeros(8).contiguous())
     self.assertListEqual(out.tolist(), [1]*8+[0]*8)
 
-  def test_sum(self, N=getenv("SUM_N", 256)):
-    out = Tensor.ones(N).contiguous().sum()
-    self.assertEqual(out.item(), N)
+  def test_sum(self):
+    out = Tensor.ones(256).contiguous().sum()
+    self.assertEqual(out.item(), 256)
 
   def test_gemm(self, N=getenv("GEMM_N", 64)):
     a = Tensor.ones(N,N).contiguous()
@@ -110,8 +110,6 @@ class TestTiny(unittest.TestCase):
 
   # *** a model ***
 
-  # TODO: this is failing because of how swizzling rewrites the ShapeTracker of the final STORE
-  @unittest.skipIf(CI and Device.DEFAULT == "DSP", "failing because of make things that can't be images not images")
   def test_mnist(self):
     layers = [
       nn.Conv2d(1, 32, 5), Tensor.relu,
@@ -129,8 +127,6 @@ class TestTiny(unittest.TestCase):
     probs = Tensor.rand(1, 1, 28, 28).sequential(layers).tolist()
     self.assertEqual(len(probs[0]), 10)
 
-  # TODO: this is failing because of how swizzling rewrites the ShapeTracker of the final STORE
-  @unittest.skipIf(CI and Device.DEFAULT == "DSP", "failing because of make things that can't be images not images")
   def test_mnist_backward(self):
     # NOTE: we don't have the whole model here for speed
     layers = [
