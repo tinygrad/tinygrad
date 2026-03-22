@@ -129,7 +129,9 @@ def get_null_runner(ctx:list[Buffer|None], ast:UOp) -> CompiledRunner:
   context = (BEAM.value, NOOPT.value, DEVECTORIZE.value, EMULATED_DTYPES.value)
   ckey = (device, type(Device[device].compiler), ast.key, context, False)
   if cret := method_cache.get(ckey): return cret
-  uops = list(ast.toposort())
+  # for Ops.PROGRAM, estimates go on the SINK (src[0]); normalize so we always work on the SINK
+  sink = ast.src[0] if ast.op is Ops.PROGRAM else ast
+  uops = list(sink.toposort())
 
   # fall back to full get_runner for kernels with loop-index-only float WHERE ops (Winograd coefficient generation)
   # our estimator can't predict which coefficients constant-fold to zero, so op counts become inflated without full lowering
@@ -181,8 +183,8 @@ def get_null_runner(ctx:list[Buffer|None], ast:UOp) -> CompiledRunner:
     elif u.op is Ops.WMMA: flops += 2 * prod(u.arg[1]) // u.arg[5] * mults
     elif u.op is Ops.STORE: lds += u.src[1].dtype.itemsize * mults
 
-  ast_with_estimates = ast.replace(arg=replace(ast.arg, estimates=Estimates(flops, lds, mem_val)))
-  prg = ProgramSpec("null_kernel", "", device, ast_with_estimates, lib=b"", globals=_globals, outs=outs, ins=ins)
+  sink_with_estimates = sink.replace(arg=replace(sink.arg, estimates=Estimates(flops, lds, mem_val)))
+  prg = ProgramSpec("null_kernel", "", device, sink_with_estimates, lib=b"", globals=_globals, outs=outs, ins=ins)
   method_cache[ckey] = ret = CompiledRunner(prg)
   return ret
 
