@@ -111,7 +111,7 @@ if __name__ == "__main__":
       WAVE_COLORS = ((('VALU', 'VINTERP'), '#ffffc0'), (('SALU',), '#cef263'), (('VMEM',), '#b2b7c9'), (('LOAD', 'SMEM'), '#ffc0c0'),
                      (('STORE',), '#4fa3cc'), (('IMMEDIATE',), '#f3b44a'), (('BARRIER',), '#d00000'), (('LDS',), '#9fb4a6'), (('JUMP',), '#ffb703'),
                      (('JUMP_NO',), '#fb8500'), (('MESSAGE',), '#90dbf4'), (('WAVERDY',), '#1a2a2a'))
-      print(f"\n{'Clk':<12} {'Unit':<20} {'Op':<15} {'Dur':<4} {'Info'}")
+      print(f"{'Clk':<12} {'Unit':<20} {'Op':<15} {'Dur':<4} {'Info'}")
       print("-" * 90)
       # start from the first packet in trace, prepare packet indexes and map dispatches
       pkt_idxs:dict[str, itertools.count] = {}

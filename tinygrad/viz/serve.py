@@ -366,9 +366,7 @@ def sqtt_timeline(data:bytes, lib:bytes, target:str, max_pkts=getenv("MAX_SQTT_P
       exec_pending.setdefault(exec_type, []).append(f"{row}-{idx}")
     if isinstance(p, (ALUEXEC, VMEMEXEC)) and "ALT" not in str(p.src): e.name = TracingKey(op or name, ret=f"LINK:{exec_pending[name].pop(0)}")
   has_more = False
-  bar, step = tqdm(desc="Decoding SQTT"), 50_000
-  for i, (p, info) in enumerate(map_insts(data, lib, target)):
-    if i % step == 0: bar.update(step)
+  for p, info in map_insts(data, lib, target):
     if len(ret) > max_pkts:
       has_more = True
       break
@@ -397,7 +395,6 @@ def sqtt_timeline(data:bytes, lib:bytes, target:str, max_pkts=getenv("MAX_SQTT_P
         add("SALU", p)
       else:
         add(name.replace("_ALT", ""), p, op=name)
-  bar.update(close=True)
   pc_map = {addr:str(inst) for addr,inst in amd_decode(lib, target).items()}
   return [ProfilePointEvent(r, "JSON", "pcMap", pc_map, ts=Decimal(0)) for r in row_ends]+ret, has_more
 
