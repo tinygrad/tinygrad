@@ -677,7 +677,7 @@ class ElementwiseMixin(DTypeMixin):
     print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).sign().numpy())
     ```
     """
-    return self.ne(0).where((self < 0).where(self.const_like(-1), self.const_like(1)), self.const_like(0)) + self * 0
+    return self.ne(0).where((self < 0).where(self.const_like(-1), self.const_like(1)), self.const_like(0))
 
   def abs(self) -> Self:
     """
