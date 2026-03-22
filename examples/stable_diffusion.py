@@ -266,7 +266,15 @@ if __name__ == "__main__":
   args = parser.parse_args()
 
   profile_marker("create model")
-  model = StableDiffusion()
+  if args.fakeweights:
+    # fast initialization: avoid expensive random weight ops (kaiming_uniform etc.)
+    orig_uniform, orig_glorot = Tensor.uniform, Tensor.glorot_uniform
+    Tensor.uniform = lambda *shape, low=0, high=1, dtype=dtypes.float32, **kw: Tensor.empty(*shape, dtype=dtype)
+    Tensor.glorot_uniform = lambda *shape, **kw: Tensor.empty(*shape)
+    model = StableDiffusion()
+    Tensor.uniform, Tensor.glorot_uniform = orig_uniform, orig_glorot
+  else:
+    model = StableDiffusion()
 
   profile_marker("load in weights")
   with WallTimeEvent(BenchEvent.LOAD_WEIGHTS):
@@ -284,15 +292,22 @@ if __name__ == "__main__":
     Tensor.realize(*get_state_dict(model).values())
 
   profile_marker("run clip (conditional)")
-  tokenizer = Tokenizer.ClipTokenizer()
-  prompt = Tensor([tokenizer.encode(args.prompt)])
-  context = model.cond_stage_model.transformer.text_model(prompt).realize()
-  print("got CLIP context", context.shape)
+  if args.fakeweights:
+    # with fake weights CLIP output is meaningless; use zero tensors to skip compilation
+    context = Tensor.zeros(1, 77, 768).realize()
+    unconditional_context = Tensor.zeros(1, 77, 768).realize()
+    print("got CLIP context", context.shape)
+    print("got unconditional CLIP context", unconditional_context.shape)
+  else:
+    tokenizer = Tokenizer.ClipTokenizer()
+    prompt = Tensor([tokenizer.encode(args.prompt)])
+    context = model.cond_stage_model.transformer.text_model(prompt).realize()
+    print("got CLIP context", context.shape)
 
-  profile_marker("run clip (unconditional)")
-  prompt = Tensor([tokenizer.encode("")])
-  unconditional_context = model.cond_stage_model.transformer.text_model(prompt).realize()
-  print("got unconditional CLIP context", unconditional_context.shape)
+    profile_marker("run clip (unconditional)")
+    prompt = Tensor([tokenizer.encode("")])
+    unconditional_context = model.cond_stage_model.transformer.text_model(prompt).realize()
+    print("got unconditional CLIP context", unconditional_context.shape)
 
   # done with clip model
   del model.cond_stage_model
