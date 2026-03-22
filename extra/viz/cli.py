@@ -88,7 +88,7 @@ if __name__ == "__main__":
     from tabulate import tabulate
     profile = decode_profile(viz.get_profile(profile_data:=viz.load_pickle(args.profile_path, default=[])))
     viz.load_amd_counters(viz.ctxs, profile_data)
-    counters = {ansistrip(f'{c["name"]} SQTT {s["name"]}'): s["data"] for c in viz.ctxs if c["name"].startswith("Exec") for s in c["steps"]
+    counters = {f'{c["name"]} SQTT {s["name"]}': s["data"] for c in viz.ctxs if c["name"].startswith("Exec") for s in c["steps"]
                 if s["name"].startswith("PKTS")}
     if args.device is None:
       print("Select a device:")
@@ -97,8 +97,8 @@ if __name__ == "__main__":
       sys.exit(0)
 
     # ** SQTT printer
-    if args.device in counters:
-      sqtt_events = viz.sqtt_timeline(*counters[args.device])
+    if args.device is not None and (sqtt_data:=next((v for k,v in counters.items() if ansistrip(k) == args.device), None)) is not None:
+      sqtt_events = viz.sqtt_timeline(*sqtt_data)
       sqtt_pkts = [e for e in sqtt_events if type(e).__name__ == "ProfileRangeEvent"]
       pc_map = next((e.arg for e in sqtt_events if type(e).__name__ == "ProfilePointEvent" and e.key == 'pcMap'), None)
       if pc_map is None:
