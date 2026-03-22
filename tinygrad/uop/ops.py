@@ -1393,7 +1393,7 @@ class RewriteContext:
     pm_rewrite = self.pm_rewrite
     pm_pdict = pm.pdict if pm is not None else None  # for fast op-check before calling pm_rewrite
     limit = REWRITE_STACK_LIMIT.value
-    stack: collections.deque[tuple[UOp, int, UOp]] = collections.deque([(root, 0, root)])
+    stack: list[tuple[UOp, int, UOp]] = [(root, 0, root)]
     on_stack = {root}  # all UOps either on the stack or in self.replace, i.e. dont have to be placed again
     waitlist: dict[UOp, list[tuple[UOp, int, UOp]]] = {}  # UOps waiting on a dependency to be in self.replace
     while stack:
