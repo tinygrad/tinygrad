@@ -570,6 +570,7 @@ class Tensor(OpMixin):
   _seed: int = int(time.time())
   _device_seeds: dict[str, Tensor] = {}
   _device_rng_counters: dict[str, Tensor] = {}
+  _rng_realize_counter: int = 0
   @staticmethod
   def manual_seed(seed=0) -> None:
     """
@@ -586,7 +587,7 @@ class Tensor(OpMixin):
     print(Tensor.rand(5).numpy())
     ```
     """
-    Tensor._seed, Tensor._device_seeds, Tensor._device_rng_counters = seed, {}, {}
+    Tensor._seed, Tensor._device_seeds, Tensor._device_rng_counters, Tensor._rng_realize_counter = seed, {}, {}, 0
 
   @staticmethod
   def _threefry_random_bits(key:Tensor, counts0:Tensor, counts1:Tensor) -> Tensor:
@@ -630,6 +631,13 @@ class Tensor(OpMixin):
     new_low = Tensor._device_rng_counters[device][0:1] + (num & 0xffffffff)
     new_high = Tensor._device_rng_counters[device][1:2] + (num >> 32) + (new_low < Tensor._device_rng_counters[device][0]).cast(dtypes.uint32)
     Tensor._device_rng_counters[device].assign(new_low.cat(new_high))
+    # periodically realize the counter outside JIT to prevent O(n^2) graph growth across n rand() calls
+    from tinygrad.engine.realize import capturing
+    if not capturing:
+      Tensor._rng_realize_counter += 1
+      if Tensor._rng_realize_counter >= 32:
+        Tensor._device_rng_counters[device].realize()
+        Tensor._rng_realize_counter = 0
 
     low = Tensor._device_rng_counters[device][0:1] - (num & 0xffffffff)
     high = Tensor._device_rng_counters[device][1:2] - (num >> 32) - (Tensor._device_rng_counters[device][0] < (num & 0xffffffff)).cast(dtypes.uint32)
