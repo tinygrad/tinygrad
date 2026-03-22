@@ -1352,6 +1352,7 @@ class RewriteContext:
     replace = self.replace
     bpm, pm, enter_calls = self.bpm, self.pm, self.enter_calls
     cached_bpm_rewrite, pm_rewrite = self.cached_bpm_rewrite, self.pm_rewrite
+    pm_pdict = pm.pdict if pm is not None else None
     stack: list[tuple[UOp, bool]] = [(root, False)]
     while stack:
       n, processed = stack.pop()
@@ -1370,8 +1371,8 @@ class RewriteContext:
         # rebuild node with rewritten srcs
         new_src = tuple(replace.get(x, x) for x in n.src)
         new_n = UOp(n.op, n.dtype, new_src, n.arg, n.tag) if new_src != n.src else n
-        # top-down: try pm on rebuilt node, use result as-is (no re-traversal)
-        if pm is not None and (rewritten:=pm_rewrite(new_n)) is not None: new_n = rewritten
+        # top-down: try pm on rebuilt node, use result as-is (no re-traversal). skip if op has no patterns.
+        if pm_pdict is not None and new_n.op in pm_pdict and (rewritten:=pm_rewrite(new_n)) is not None: new_n = rewritten
         replace[n] = new_n
     return replace.get(root, root)
 
@@ -1381,6 +1382,7 @@ class RewriteContext:
     bpm, pm, enter_calls = self.bpm, self.pm, self.enter_calls
     cached_bpm_rewrite = self.cached_bpm_rewrite
     pm_rewrite = self.pm_rewrite
+    pm_pdict = pm.pdict if pm is not None else None  # for fast op-check before calling pm_rewrite
     limit = REWRITE_STACK_LIMIT.value
     stack: collections.deque[tuple[UOp, int, UOp]] = collections.deque([(root, 0, root)])
     on_stack = {root}  # all UOps either on the stack or in self.replace, i.e. dont have to be placed again
@@ -1394,12 +1396,16 @@ class RewriteContext:
         if bpm is not None:
           # apply rewrite rules until a fixed point is reached. may return `uop` itself if PatternMatcher doesn't match
           test_n: UOp|None = n
-          seen = set()
           try:
-            while test_n is not None:
-              if test_n in seen: raise RuntimeError("infinite loop in fixed_point_rewrite")
-              seen.add(test_n)
-              new_n, test_n = test_n, cached_bpm_rewrite(test_n)
+            first = cached_bpm_rewrite(n)
+            if first is not None:
+              new_n = test_n = first
+              seen = {n, first}
+              test_n = cached_bpm_rewrite(first)
+              while test_n is not None:
+                if test_n in seen: raise RuntimeError("infinite loop in fixed_point_rewrite")
+                seen.add(test_n)
+                new_n, test_n = test_n, cached_bpm_rewrite(test_n)
           except BottomUpGate:
             # if the bpm matching raised a gate, we are done with this node and dont continue down the srcs
             replace[n] = unwrap(test_n)
@@ -1415,24 +1421,25 @@ class RewriteContext:
           stack.append((x, 0, x))
           on_stack.add(x)
       elif stage == 1:
-        tmp = []
+        # check if all srcs are ready and detect changes via identity check (avoids building tmp list + tuple comparison)
+        any_changed = False
         for x in new_n.src:
-          if (rx:=replace.get(x, SENTINEL)) is SENTINEL:
+          rx = replace.get(x, SENTINEL)
+          if rx is SENTINEL:
             # source not ready: register in waitlist instead of spinning
             waitlist.setdefault(x, []).append((n, 1, new_n))
             break
-          tmp.append(rx)
+          if rx is not x: any_changed = True
         else:
-          # in stage 1, once all srcs are rewritten, rebuild (if changed) or run top-down rewrite
-          if (new_src:=tuple(tmp)) == new_n.src:
-            # if top down, do the rewrite. if no rewrite or bottom up, we are done rewriting this node so we add it to the dict
-            if pm is None or (new_src_n:=pm_rewrite(new_n)) is None:
+          if not any_changed:
+            # no srcs changed: run top-down rewrite on original node (skip pm_rewrite if op has no patterns)
+            if pm_pdict is None or new_n.op not in pm_pdict or (new_src_n:=pm_rewrite(new_n)) is None:
               replace[n] = new_n
               if n in waitlist: stack.extend(waitlist.pop(n))
               continue
           else:
-            # if srcs changed from rewrites, construct a new UOp with the new srcs
-            new_src_n = UOp(new_n.op, new_n.dtype, new_src, new_n.arg, new_n.tag)
+            # srcs changed: construct a new UOp with rewritten srcs
+            new_src_n = UOp(new_n.op, new_n.dtype, tuple(replace[x] for x in new_n.src), new_n.arg, new_n.tag)
           # trigger a rewrite of new_src_n, then after that rewrite is done, link it back to n
           stack.append((n, 2, new_src_n))
           stack.append((new_src_n, 0, new_src_n))
