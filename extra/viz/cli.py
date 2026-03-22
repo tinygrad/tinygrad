@@ -121,7 +121,7 @@ if __name__ == "__main__":
         pkt_unit = f"{e.device}-{next(pkt_idxs.setdefault(e.device, itertools.count()))}"
         print(f"{i:<6} {int(e.st):<11} {pkt_unit:<28} {op_str}{' '*(15-ansilen(op_str))} {int(e.en-e.st):<4} {info}")
       if args.limit != -1 and (start_idx > 0 or end_idx < total_sqtt_pkts):
-        print(f"Showed events {start_idx}-{end_idx} from {total_sqtt_pkts} events, set --offset and --limit to see others")
+        print(f"Printed events {start_idx}-{end_idx} from {total_sqtt_pkts} events, set --offset and --limit to see others")
       sys.exit(0)
 
     # ** Profiler printer
