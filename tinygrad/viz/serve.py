@@ -366,7 +366,7 @@ def sqtt_timeline(data:bytes, lib:bytes, target:str, max_pkts=getenv("MAX_SQTT_P
       exec_pending.setdefault(exec_type, []).append(f"{row}-{idx}")
     if isinstance(p, (ALUEXEC, VMEMEXEC)) and "ALT" not in str(p.src): e.name = TracingKey(op or name, ret=f"LINK:{exec_pending[name].pop(0)}")
   has_more = False
-  for p, info in tqdm(map_insts(data, lib, target), total=max_pkts, desc="Decoding SQTT", unit="packets", disable=max_pkts <= 50_000):
+  for p, info in tqdm(map_insts(data, lib, target), desc="Decoding SQTT", unit=" packets", disable=max_pkts <= 50_000):
     if len(ret) > max_pkts:
       has_more = True
       break
