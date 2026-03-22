@@ -4,7 +4,7 @@ from dataclasses import dataclass, replace, field
 from tinygrad.helpers import all_same, colored, DEBUG, GlobalCounters, ansilen, BEAM, NOOPT, all_int, Metadata, TRACEMETA, TracingKey
 from tinygrad.helpers import DEVECTORIZE, time_to_str, VALIDATE_WITH_CPU, cpu_profile, PROFILE, ProfilePointEvent, cpu_events, prod, Context, unwrap
 from tinygrad.helpers import EMULATED_DTYPES
-from tinygrad.uop.ops import Ops, GroupOp, PatternMatcher, UOp, UPat, sym_infer
+from tinygrad.uop.ops import Ops, GroupOp, PatternMatcher, UOp, UPat, sym_infer, sint
 from tinygrad.dtype import PtrDType, dtypes
 from tinygrad.device import Device, Buffer
 from tinygrad.renderer import ProgramSpec, Estimates
@@ -165,12 +165,14 @@ def get_null_runner(ctx:list[Buffer|None], ast:UOp) -> CompiledRunner:
   param_sizes = {u.arg: u.dtype.nbytes() for u in uops if u.op is Ops.PARAM and isinstance(u.dtype, PtrDType) and u.dtype.size != -1}
   mem_val = sum(param_sizes[p] for p in outs if p in param_sizes) + sum(param_sizes[p] for p in read_params if p in param_sizes)
 
-  flops, lds = 0, 0
-  mults, mult_stack = 1, []
+  flops: sint = 0
+  lds: sint = 0
+  mults: sint = 1
+  mult_stack: list[sint] = []
   for u in uops:
     if u.op is Ops.RANGE:
       mult_stack.append(mults)
-      mults *= u.src[0].ssimplify()
+      mults *= cast(sint, u.src[0].ssimplify())
     elif u.op is Ops.END: mults = mult_stack.pop(-1)
     elif u.op in GroupOp.ALU and dtypes.is_float(u.dtype.scalar()):
       flops += (mults * (2 if u.op is Ops.MULACC else 1)) * u.dtype.count
