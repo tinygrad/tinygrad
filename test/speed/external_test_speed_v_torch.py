@@ -258,10 +258,10 @@ class TestSpeed(unittest.TestCase):
     def f2(a, b): return (a.permute(1,0).reshape(N, 1, N).expand(N, N, N) * b.permute(1,0).reshape(1, N, N).expand(N, N, N)).sum(axis=2)
     helper_test_generic_square('gemm_unrolled_permute_lr', N, f1, f2)
 
-  def test_matvec_1024_1024(self): helper_test_matvec('matvec_1024_1024', 1024, 1024)
-  def test_matvec_1024_4096(self): helper_test_matvec('matvec_1024_4096', 1024, 4096)
-  def test_matvec_4096_1024(self): helper_test_matvec('matvec_4096_1024', 4096, 1024)
-  def test_matvec_4096_4096(self): helper_test_matvec('matvec_4096_4096', 4096, 4096)
+  def test_matvec_1024_1024(self): helper_test_matvec('matvec', 1024, 1024)
+  def test_matvec_1024_4096(self): helper_test_matvec('matvec', 1024, 4096)
+  def test_matvec_4096_1024(self): helper_test_matvec('matvec', 4096, 1024)
+  def test_matvec_4096_4096(self): helper_test_matvec('matvec', 4096, 4096)
 
   def test_openpilot_conv2d(self):
     bs, in_chans, out_chans = 1,12,32
