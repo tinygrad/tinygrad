@@ -69,9 +69,9 @@ shared_spec = PatternMatcher([
 # ***** UOp spec in the Tensor graph *****
 
 movement_ops = PatternMatcher([
-  (UPat((Ops.RESHAPE, Ops.EXPAND), name="mv", src=(UPat.var("x"), UPat(dtype=dtypes.weakint))), lambda mv,x: True),
-  (UPat((Ops.PAD, Ops.SHRINK), name="mv", src=(UPat.var("x"), UPat(dtype=dtypes.weakint), UPat(dtype=dtypes.weakint))), lambda mv,x: True),
-  (UPat((Ops.PERMUTE, Ops.FLIP), name="mv", src=(UPat.var("x"),)), lambda mv,x: isinstance(mv.arg, tuple)),
+  (UPat((Ops.RESHAPE, Ops.EXPAND), src=(UPat(), UPat(dtype=dtypes.weakint))), lambda: True),
+  (UPat((Ops.PAD, Ops.SHRINK), src=(UPat(), UPat(dtype=dtypes.weakint), UPat(dtype=dtypes.weakint))), lambda: True),
+  (UPat((Ops.PERMUTE, Ops.FLIP), name="mv", src=(UPat(),)), lambda mv: isinstance(mv.arg, tuple)),
 
   # inputs to movement ops
   (UPat((Ops.VECTORIZE, Ops.VCONST), dtype=dtypes.weakint), lambda: True),
@@ -213,7 +213,7 @@ kernel_spec = PatternMatcher([
   (UPat(Ops.END, src=(UPat(), UPat()), allow_any_len=True), lambda: True),
 
   # bufferize can be on anything
-  (UPat(Ops.BUFFERIZE, src=(UPat(),), allow_any_len=True, name="x"), lambda x: True),
+  (UPat(Ops.BUFFERIZE, src=(UPat(),), allow_any_len=True), lambda: True),
 
   # reduce must be on ranges
   (UPat(Ops.REDUCE, src=(UPat(),), allow_any_len=True, name="x"), lambda x: all(y.dtype in (dtypes.weakint, dtypes.int) for y in x.src[1:])),
@@ -286,7 +286,7 @@ full_spec = PatternMatcher([
   (UPat(Ops.BIND, (dtypes.int, dtypes.weakint), (UPat(), UPat()), arg=None), lambda: True),
 
   # in progress MSTACK may lose device
-  (UPat((Ops.MSELECT, Ops.MSTACK), name="x"), lambda x: True),
+  (UPat((Ops.MSELECT, Ops.MSTACK)), lambda: True),
 
   # temp VECTORIZE/INDEX during rewrite have the wrong dtype
   (UPat(Ops.VECTORIZE), lambda: True),
