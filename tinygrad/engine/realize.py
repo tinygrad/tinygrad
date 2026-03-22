@@ -176,7 +176,10 @@ def get_null_runner(ctx:list[Buffer|None], ast:UOp) -> CompiledRunner:
     if u.op is Ops.RANGE:
       mult_stack.append(mults)
       mults *= cast(sint, u.src[0].ssimplify())
+      # SPECIAL are already counted in mults; substitute to avoid them propagating into the flops expression
+      mults = mults.substitute({x:x.const_like(0) for x in mults.toposort() if x.op is Ops.SPECIAL}) if isinstance(mults, UOp) else mults
     elif u.op is Ops.END: mults = mult_stack.pop(-1)
+    elif u.op is Ops.SPECIAL: mults *= cast(sint, u.src[0].ssimplify())
     elif u.op in GroupOp.ALU and dtypes.is_float(u.dtype.scalar()):
       flops += (mults * (2 if u.op is Ops.MULACC else 1)) * u.dtype.count
     elif u.op is Ops.REDUCE: flops += mults
