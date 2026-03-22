@@ -65,8 +65,8 @@ if __name__ == "__main__":
   g_mode.add_argument("--rewrites", action="store_true", help="View rewrites trace")
   g_common = parser.add_argument_group("common options")
   g_common.add_argument("--kernel", type=str, default=None, metavar="NAME", help="Select a kernel by name (optional name, default: only list names)")
-  interactive_tty = sys.stdin.isatty() and sys.stdout.isatty()
-  g_common.add_argument("--no-color", action="store_true", default=not interactive_tty, help="Disable colored output (default: true in non-interactive mode)")
+  g_common.add_argument("--no-color", action="store_true", default=not (sys.stdin.isatty() and sys.stdout.isatty()),
+                        help="Disable colored output (default: true in non-interactive mode)")
   g_profile = parser.add_argument_group("profile options")
   g_profile.add_argument("--device", type=str, default=None, metavar="NAME", help="Select a device (optional name, default: only list names)")
   g_profile.add_argument("--offset", type=int, default=0, metavar="N", help="event offset (default: 0)")

@@ -79,7 +79,7 @@ class TestSQTTMapBase(unittest.TestCase):
         if (p:=kern_events.get(event.kern)) is None: continue
         with self.subTest(example=name, kern=event.kern):
           # skip if there's no SQTT frequency data
-          if not (timeline:=sqtt_timeline(event.blob, p.lib, target)): continue
+          if not (timeline:=sqtt_timeline(event.blob, p.lib, target)[0]): continue
           if not (frequency:=[e.key for e in timeline if type(e).__name__ == "ProfilePointEvent" and e.name == "freq_hz"]): continue
           mean = sum(frequency) / len(frequency)
           variance = sum((v - mean) ** 2 for v in frequency) / len(frequency)
@@ -101,7 +101,7 @@ class TestSQTTMapBase(unittest.TestCase):
     for name, (events, kern_events, target) in self.examples.items():
       for event in events:
         wave_barriers = {}
-        for e in sqtt_timeline(event.blob, kern_events[event.kern].lib, target):
+        for e in sqtt_timeline(event.blob, kern_events[event.kern].lib, target)[0]:
           if type(e).__name__ == "ProfileRangeEvent" and e.name.display_name == "BARRIER": wave_barriers.setdefault(e.device, []).append(e)
         if not wave_barriers: continue
         for row, events in wave_barriers.items():
