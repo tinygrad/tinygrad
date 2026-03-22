@@ -121,11 +121,22 @@ def get_runner(device:str, ast:UOp) -> CompiledRunner:
     method_cache[ckey] = method_cache[bkey] = ret = CompiledRunner(replace(prg, device=device))
   return ret
 
+def get_null_runner(ctx:list[Buffer|None], ast:UOp) -> CompiledRunner:
+  """Fast path for NULL device: skip code generation and return a trivial runner."""
+  device = cast(Buffer, ctx[0]).device
+  context = (BEAM.value, NOOPT.value, DEVECTORIZE.value, EMULATED_DTYPES.value)
+  ckey = (device, type(Device[device].compiler), ast.key, context, False)
+  if cret := method_cache.get(ckey): return cret
+  prg = ProgramSpec("null_kernel", "", device, ast, lib=b"", globals=list(range(len(ctx))))
+  method_cache[ckey] = ret = CompiledRunner(prg)
+  return ret
+
 # **************** lowering functions ****************
 
 # NOTE: ctx is the buffers
 si_lowerer = PatternMatcher([
-  (UPat((Ops.SINK, Ops.PROGRAM), name="sink"), lambda ctx,sink: get_runner(ctx[0].device, sink)),
+  (UPat((Ops.SINK, Ops.PROGRAM), name="sink"), lambda ctx,sink:
+    get_null_runner(ctx, sink) if ctx and ctx[0] is not None and ctx[0].device.split(":")[0] == "NULL" else get_runner(ctx[0].device, sink)),
   (UPat(Ops.BUFFER_VIEW), lambda ctx: ViewOp(ctx[0])),
   (UPat(Ops.COPY, name="copy"), lambda ctx,copy: (BufferXfer(ctx[0].nbytes, ctx[0].device, ctx[1].device) \
       if hasattr(alc:=Device[ctx[0].device].allocator, '_transfer') and alc.supports_transfer and all_same([x.device.split(":")[0] for x in ctx]) \
