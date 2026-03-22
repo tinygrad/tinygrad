@@ -11,6 +11,10 @@ ALWAYS_CONTIGUOUS: set[Ops] = {Ops.CONTIGUOUS, Ops.AFTER, Ops.COPY, Ops.BUFFER, 
                      Ops.CONST, Ops.BIND, Ops.DEVICE, Ops.MSELECT, Ops.MSTACK, Ops.PARAM,
                      Ops.DEFINE_LOCAL, Ops.DEFINE_REG, Ops.LOAD, Ops.CALL}
 
+# precomputed buffer reachability bitsets (set by get_kernel_graph before run_rangeify)
+_realize_buf_reach: dict[int, int] = {}
+_realize_buf_idx: dict[int, int] = {}
+
 def realize(ctx:dict[UOp, None], tr:UOp) -> None: ctx[tr] = None
 
 def realize_srcs(ctx:dict[UOp, None], rb:UOp) -> None:
@@ -22,12 +26,15 @@ def realize_store_after_src(ctx:dict[UOp, None], dest:UOp, src:UOp):
   if src.op in {Ops.COPY, Ops.BUFFER_VIEW} and src in ctx \
      and not dest.op_in_backward_slice_with_self(Ops.SHRINK, Ops.PERMUTE, Ops.FLIP, Ops.PAD):
     del ctx[src]
-  # you don't usually have to do this for assign unless there's a WAR hazard like TestAssign.test_assign_double_diamond_reduce
-  # 67% of calls find dest.base NOT in src — DFS avoids building a full toposort dict for a membership check on median 5430-node graphs
   target_base = dest.base
   if target_base is src:
     ctx[src] = None
+  elif _realize_buf_idx:
+    # O(1) precomputed reachability check (precomputed in get_kernel_graph)
+    base_bit = _realize_buf_idx.get(id(target_base))
+    if base_bit is not None and (_realize_buf_reach.get(id(src), 0) & (1 << base_bit)): ctx[src] = None
   else:
+    # fallback DFS when precomputed data not available
     visited: set[int] = set()
     stack: list[UOp] = list(src.src)
     while stack:

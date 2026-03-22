@@ -81,21 +81,51 @@ pm_mops = PatternMatcher([
 # *****************
 # 0. do some cleanup rewrites, mostly copied from the old stuff
 
+# precomputed buffer reachability bitsets (set by get_kernel_graph before "earliest rewrites")
+_hazard_buf_reach: dict[int, int] = {}
+_hazard_buf_idx: dict[int, int] = {}
+
+def _precompute_buf_reach(tsink: UOp, gate_contiguous: bool) -> tuple[dict[int, int], dict[int, int]]:
+  """Single O(N) pass to build per-node bitmask of reachable base nodes (PARAM/AFTER targets of STORE)."""
+  topo = tsink.toposort()
+  # collect all base nodes that fix_store_after_hazard/realize_store_after_src will query
+  buf_idx: dict[int, int] = {}
+  idx = 0
+  for node in topo:
+    if node.op is Ops.AFTER and len(node.src) >= 2 and node.src[1].op is Ops.STORE:
+      nid = id(node.src[1].src[0].base)
+      if nid not in buf_idx: buf_idx[nid] = idx; idx += 1
+  if not buf_idx: return {}, {}
+  buf_reach: dict[int, int] = {}
+  for node in topo:
+    if gate_contiguous and node.op is Ops.CONTIGUOUS: buf_reach[id(node)] = 0; continue
+    bits = 0
+    nid = id(node)
+    if nid in buf_idx: bits = 1 << buf_idx[nid]
+    for child in node.src: bits |= buf_reach.get(id(child), 0)
+    buf_reach[nid] = bits
+  return buf_reach, buf_idx
+
 def fix_store_after_hazard(after:UOp, target:UOp, src:UOp):
   base = target.base
-  # fast path: 87% of calls have base unreachable from src — check with lightweight DFS before expensive toposort
-  visited: set[int] = set()
-  stack: list[UOp] = [src]
-  while stack:
-    n = stack.pop()
-    nid = id(n)
-    if nid in visited: continue
-    if n.op is Ops.CONTIGUOUS: continue
-    if n is base: break
-    visited.add(nid)
-    stack.extend(n.src)
+  # O(1) precomputed reachability check (precomputed in get_kernel_graph)
+  if _hazard_buf_idx:
+    base_bit = _hazard_buf_idx.get(id(base))
+    if base_bit is not None and not (_hazard_buf_reach.get(id(src), 0) & (1 << base_bit)): return None
   else:
-    return None  # base not reachable from src, no hazard
+    # fallback DFS when precomputed data not available
+    visited: set[int] = set()
+    stack: list[UOp] = [src]
+    while stack:
+      n = stack.pop()
+      nid = id(n)
+      if nid in visited: continue
+      if n.op is Ops.CONTIGUOUS: continue
+      if n is base: break
+      visited.add(nid)
+      stack.extend(n.src)
+    else:
+      return None
   # PERMUTE and FLIP reorder indices, SHRINK can have overlapping regions when dest is also shrunk
   unsafe = {Ops.PERMUTE, Ops.FLIP} | ({Ops.SHRINK} if target.op_in_backward_slice_with_self(Ops.SHRINK) else set())
   reaches_base: dict[UOp, bool] = {}
@@ -593,12 +623,19 @@ split_kernels = PatternMatcher([
 
 @profile_matches
 def get_kernel_graph(sink:UOp) -> UOp:
+  global _hazard_buf_reach, _hazard_buf_idx
   tsink = graph_rewrite(sink, multi_pm, name="multi_pm")
   if OPENPILOT_HACKS: tsink = graph_rewrite(tsink, pm_fold_moved_after, ctx={}, name="fold moved afters")
+  # precompute buffer reachability for fix_store_after_hazard (CONTIGUOUS acts as barrier)
+  _hazard_buf_reach, _hazard_buf_idx = _precompute_buf_reach(tsink, gate_contiguous=True)
   tsink = graph_rewrite(tsink, pm_syntactic_sugar+pm_mops+earliest_rewrites, bottom_up=True, name="earliest rewrites")
+  _hazard_buf_reach, _hazard_buf_idx = {}, {}
 
-  # convert movement ops to ranges
+  # convert movement ops to ranges — precompute buffer reachability for realize_store_after_src (no gate)
+  import tinygrad.schedule.indexing as _indexing
+  _indexing._realize_buf_reach, _indexing._realize_buf_idx = _precompute_buf_reach(tsink, gate_contiguous=False)
   tsink, rctx = run_rangeify(tsink, bool(DEBUG_RANGEIFY))
+  _indexing._realize_buf_reach, _indexing._realize_buf_idx = {}, {}
 
   tsink = graph_rewrite(tsink, symbolic+pm_reduce_simplify+pm_const_buffer_folding+pm_remove_bufferize, name="symbolic+reduce_collapse+debuf")
   tsink = graph_rewrite(tsink, pm_limit_bufs, ctx=rctx, name="limit buffers")

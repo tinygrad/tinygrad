@@ -113,8 +113,13 @@ class recursive_property(property):
     if x is None: return self
     # fast path: 90.7% of accesses are cache hits — skip toposort entirely
     if self.nm in x.__dict__: return x.__dict__[self.nm]
-    for node in x.toposort(gate=lambda node: self.nm not in node.__dict__): node.__dict__[self.nm] = self.fxn(node)
-    return x.__dict__[self.nm]
+    # medium path: if all children already have this property, compute directly without toposort
+    nm = self.nm
+    if all(nm in child.__dict__ for child in x.src):
+      x.__dict__[nm] = self.fxn(x)
+      return x.__dict__[nm]
+    for node in x.toposort(gate=lambda node: nm not in node.__dict__): node.__dict__[nm] = self.fxn(node)
+    return x.__dict__[nm]
 
 # we import this late so we can use resolve/smax in mixins
 from tinygrad.mixin import OpMixin
@@ -1344,40 +1349,49 @@ class RewriteContext:
 
   def walk_rewrite(self, root:UOp) -> UOp:
     """MLIR-style Walk Pattern Rewrite Driver: single-pass, no re-traversal into rewritten subtrees."""
+    replace = self.replace
+    bpm, pm, enter_calls = self.bpm, self.pm, self.enter_calls
+    cached_bpm_rewrite, pm_rewrite = self.cached_bpm_rewrite, self.pm_rewrite
     stack: list[tuple[UOp, bool]] = [(root, False)]
     while stack:
       n, processed = stack.pop()
-      if n in self.replace: continue
+      if n in replace: continue
       if not processed:
         # bottom-up: try bpm on original node first, if it rewrites, use result as-is (no traversal into replacement)
-        if self.bpm is not None and (rewritten:=self.cached_bpm_rewrite(n)) is not None:
-          self.replace[n] = rewritten
+        if bpm is not None and (rewritten:=cached_bpm_rewrite(n)) is not None:
+          replace[n] = rewritten
           continue
         # no rewrite, process children then come back to rebuild
         stack.append((n, True))
-        if not self.enter_calls and n.op is Ops.CALL: self.replace[n.src[0]] = n.src[0]
+        if not enter_calls and n.op is Ops.CALL: replace[n.src[0]] = n.src[0]
         for x in reversed(n.src):
-          if x not in self.replace: stack.append((x, False))
+          if x not in replace: stack.append((x, False))
       else:
         # rebuild node with rewritten srcs
-        new_src = tuple(self.replace.get(x, x) for x in n.src)
+        new_src = tuple(replace.get(x, x) for x in n.src)
         new_n = UOp(n.op, n.dtype, new_src, n.arg, n.tag) if new_src != n.src else n
         # top-down: try pm on rebuilt node, use result as-is (no re-traversal)
-        if self.pm is not None and (rewritten:=self.pm_rewrite(new_n)) is not None: new_n = rewritten
-        self.replace[n] = new_n
-    return self.replace.get(root, root)
+        if pm is not None and (rewritten:=pm_rewrite(new_n)) is not None: new_n = rewritten
+        replace[n] = new_n
+    return replace.get(root, root)
 
   def unified_rewrite(self, root:UOp) -> UOp:
+    # cache frequently accessed attributes as locals for speed (saves ~100ns per attribute lookup in hot loop)
+    replace = self.replace
+    bpm, pm, enter_calls = self.bpm, self.pm, self.enter_calls
+    cached_bpm_rewrite = self.cached_bpm_rewrite
+    pm_rewrite = self.pm_rewrite
+    limit = REWRITE_STACK_LIMIT.value
     stack: collections.deque[tuple[UOp, int, UOp]] = collections.deque([(root, 0, root)])
     on_stack = {root}  # all UOps either on the stack or in self.replace, i.e. dont have to be placed again
     waitlist: dict[UOp, list[tuple[UOp, int, UOp]]] = {}  # UOps waiting on a dependency to be in self.replace
     while stack:
-      if len(stack) > REWRITE_STACK_LIMIT: raise RuntimeError("infinite loop in graph_rewrite (stack too big)")
+      if len(stack) > limit: raise RuntimeError("infinite loop in graph_rewrite (stack too big)")
       n, stage, new_n = stack.pop()
-      if n in self.replace: continue  # skip any nodes we have seen
+      if n in replace: continue  # skip any nodes we have seen
       if stage == 0:
         # if bottom up, we rewrite this node early. in both cases, we add its srcs to the stack
-        if self.bpm is not None:
+        if bpm is not None:
           # apply rewrite rules until a fixed point is reached. may return `uop` itself if PatternMatcher doesn't match
           test_n: UOp|None = n
           seen = set()
@@ -1385,17 +1399,17 @@ class RewriteContext:
             while test_n is not None:
               if test_n in seen: raise RuntimeError("infinite loop in fixed_point_rewrite")
               seen.add(test_n)
-              new_n, test_n = test_n, self.cached_bpm_rewrite(test_n)
+              new_n, test_n = test_n, cached_bpm_rewrite(test_n)
           except BottomUpGate:
             # if the bpm matching raised a gate, we are done with this node and dont continue down the srcs
-            self.replace[n] = unwrap(test_n)
+            replace[n] = unwrap(test_n)
             if n in waitlist: stack.extend(waitlist.pop(n))
             continue
         stack.append((n, 1, new_n))
         # NOTE: CALL is handled as a special case.
         # The function that is called is not included in the graph_rewrite.
         # If you want to graph_rewrite a call, you can
-        if not self.enter_calls and new_n.op is Ops.CALL: self.replace[new_n.src[0]] = new_n.src[0]
+        if not enter_calls and new_n.op is Ops.CALL: replace[new_n.src[0]] = new_n.src[0]
         for x in reversed(new_n.src):
           if x in on_stack: continue
           stack.append((x, 0, x))
@@ -1403,7 +1417,7 @@ class RewriteContext:
       elif stage == 1:
         tmp = []
         for x in new_n.src:
-          if (rx:=self.replace.get(x, SENTINEL)) is SENTINEL:
+          if (rx:=replace.get(x, SENTINEL)) is SENTINEL:
             # source not ready: register in waitlist instead of spinning
             waitlist.setdefault(x, []).append((n, 1, new_n))
             break
@@ -1412,8 +1426,8 @@ class RewriteContext:
           # in stage 1, once all srcs are rewritten, rebuild (if changed) or run top-down rewrite
           if (new_src:=tuple(tmp)) == new_n.src:
             # if top down, do the rewrite. if no rewrite or bottom up, we are done rewriting this node so we add it to the dict
-            if self.pm is None or (new_src_n:=self.pm_rewrite(new_n)) is None:
-              self.replace[n] = new_n
+            if pm is None or (new_src_n:=pm_rewrite(new_n)) is None:
+              replace[n] = new_n
               if n in waitlist: stack.extend(waitlist.pop(n))
               continue
           else:
@@ -1424,14 +1438,14 @@ class RewriteContext:
           stack.append((new_src_n, 0, new_src_n))
       else:
         # in stage 2, we link the result of new_n to the result of n
-        if (replaced_new_n:=self.replace.get(new_n, SENTINEL)) is SENTINEL:
+        if (replaced_new_n:=replace.get(new_n, SENTINEL)) is SENTINEL:
           # not ready: register in waitlist instead of spinning
           waitlist.setdefault(new_n, []).append((n, 2, new_n))
         else:
           # otherwise we are done
-          self.replace[n] = replaced_new_n
+          replace[n] = replaced_new_n
           if n in waitlist: stack.extend(waitlist.pop(n))
-    return self.replace[root]
+    return replace[root]
 
 @profile_matches
 def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False, name=None, bpm=None, walk=False, enter_calls=False) -> UOp:
