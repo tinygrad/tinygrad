@@ -65,6 +65,8 @@ if __name__ == "__main__":
   g_mode.add_argument("--rewrites", action="store_true", help="View rewrites trace")
   g_common = parser.add_argument_group("common options")
   g_common.add_argument("--kernel", type=str, default=None, metavar="NAME", help="Select a kernel by name (optional name, default: only list names)")
+  interactive_tty = sys.stdin.isatty() and sys.stdout.isatty()
+  g_common.add_argument("--no-color", action="store_true", default=not interactive_tty, help="Disable colored output (default: true in non-interactive mode)")
   g_profile = parser.add_argument_group("profile options")
   g_profile.add_argument("--device", type=str, default=None, metavar="NAME", help="Select a device (optional name, default: only list names)")
   g_profile.add_argument("--offset", type=int, default=0, metavar="N", help="event offset (default: 0)")
@@ -97,34 +99,29 @@ if __name__ == "__main__":
       sys.exit(0)
 
     # ** SQTT printer
-    if args.device is not None and (sqtt_data:=next((v for k,v in counters.items() if ansistrip(k) == args.device), None)) is not None:
-      sqtt_events = viz.sqtt_timeline(*sqtt_data)
+    if args.device in counters:
+      assert args.limit > 1, f"SQTT limit must be greater than 1, got {args.limit}"
+      sqtt_events, has_more = viz.sqtt_timeline(*counters[args.device], max_pkts=args.offset+args.limit)
       sqtt_pkts = [e for e in sqtt_events if type(e).__name__ == "ProfileRangeEvent"]
-      pc_map = next((e.arg for e in sqtt_events if type(e).__name__ == "ProfilePointEvent" and e.key == 'pcMap'), None)
-      if pc_map is None:
-        print(f"No SQTT packets for {args.device}")
-        sys.exit(0)
+      pc_map = next(e.arg for e in sqtt_events if type(e).__name__ == "ProfilePointEvent" and e.key == 'pcMap')
       # modern terminals support 24-bit color
       def hex_colored(st:str, color:str) -> str: return f"\x1b[38;2;{int(color[1:3],16)};{int(color[3:5],16)};{int(color[5:7],16)}m{st}\x1b[0m"
       WAVE_COLORS = ((('VALU', 'VINTERP'), '#ffffc0'), (('SALU',), '#cef263'), (('VMEM',), '#b2b7c9'), (('LOAD', 'SMEM'), '#ffc0c0'),
                      (('STORE',), '#4fa3cc'), (('IMMEDIATE',), '#f3b44a'), (('BARRIER',), '#d00000'), (('LDS',), '#9fb4a6'), (('JUMP',), '#ffb703'),
                      (('JUMP_NO',), '#fb8500'), (('MESSAGE',), '#90dbf4'), (('WAVERDY',), '#1a2a2a'))
-      total_sqtt_pkts = len(sqtt_pkts)
-      start_idx, end_idx = args.offset, total_sqtt_pkts if args.limit == -1 else min(args.offset+args.limit, total_sqtt_pkts)
-      print(f"{args.device} Instruction Trace:\n")
-      print(f"{'#':<6} {'Clk':<11} {'Unit':<28} {'Op':<15} {'Dur':<4} {'Info'}")
-      print("-" * 100)
+      print(f"{'Clk':<12} {'Unit':<28} {'Op':<15} {'Dur':<4} {'Info'}")
+      print("-" * 90)
       pkt_idxs:dict[str, itertools.count] = {}
-      for e in sqtt_pkts[:start_idx]: next(pkt_idxs.setdefault(e.device, itertools.count()))
-      for i, e in enumerate(sqtt_pkts[start_idx:end_idx], start=start_idx):
+      for e in sqtt_pkts[:-args.limit]: next(pkt_idxs.setdefault(e.device, itertools.count()))
+      for e in sqtt_pkts[-args.limit:]:
         op_name, info = e.name.display_name, e.name.ret or ""
         color = next((c for p, c in WAVE_COLORS if any(x in op_name for x in p)), None)
-        op_str = hex_colored(op_name, color) if color else op_name
+        op_str = hex_colored(op_name, color) if color and not args.no_color else op_name
         if info.startswith("PC:"): info += f" {pc_map[int(info[3:])]}"
         pkt_unit = f"{e.device}-{next(pkt_idxs.setdefault(e.device, itertools.count()))}"
-        print(f"{i:<6} {int(e.st):<11} {pkt_unit:<28} {op_str}{' '*(15-ansilen(op_str))} {int(e.en-e.st):<4} {info}")
-      if args.limit != -1 and (start_idx > 0 or end_idx < total_sqtt_pkts):
-        print(f"Printed events {start_idx}-{end_idx} from {total_sqtt_pkts} events, set --offset and --limit to see others")
+        print(f"{int(e.st):<12} {pkt_unit:<28} {op_str}{' '*(15-ansilen(op_str))} {int(e.en-e.st):<4} {info}")
+      # note: we only print the important packets and skip the rest
+      if has_more: print(f"Decoded packets {args.offset:,}-{args.offset + args.limit:,}. Use --offset and --limit to see others")
       sys.exit(0)
 
     # ** Profiler printer
