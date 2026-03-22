@@ -130,6 +130,15 @@ def get_null_runner(ctx:list[Buffer|None], ast:UOp) -> CompiledRunner:
   if cret := method_cache.get(ckey): return cret
   uops = list(ast.toposort())
 
+  # fall back to full get_runner for kernels with loop-index-only float WHERE ops (Winograd coefficient generation)
+  # our estimator can't predict which coefficients constant-fold to zero, so op counts become inflated without full lowering
+  constant_ids: set[int] = set()
+  for u in uops:
+    if u.op in (Ops.CONST, Ops.RANGE): constant_ids.add(id(u))
+    elif u.op in GroupOp.ALU and all(id(s) in constant_ids for s in u.src): constant_ids.add(id(u))
+  if any(u.op is Ops.WHERE and dtypes.is_float(u.dtype.scalar()) and all(id(s) in constant_ids for s in u.src) for u in uops):
+    return get_runner(device, ast)
+
   # extract globals/outs/ins from STORE→INDEX→PARAM chains (same structure as ProgramSpec.from_uop)
   store_target_idx_ids: set[int] = set()
   _globals, outs = [], []
