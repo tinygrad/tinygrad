@@ -346,7 +346,11 @@ if __name__ == "__main__":
     min_time = min(step_times)
     assert min_time < assert_time, f"Speed regression, expected min step time of < {assert_time} ms but took: {min_time} ms"
   profile_marker("run decoder") # upsample latent space to image with autoencoder
-  x = model.decode(latent).realize()
+  if args.fakeweights:
+    # with fake weights the decoded output is meaningless; skip the expensive decoder
+    x = Tensor.zeros(512, 512, 3, dtype=dtypes.uint8).contiguous().realize()
+  else:
+    x = model.decode(latent).realize()
   print(x.shape)
 
   profile_marker("save image")
