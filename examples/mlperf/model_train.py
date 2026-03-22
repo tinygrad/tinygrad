@@ -1373,7 +1373,9 @@ def train_llama3():
                            eps=opt_adamw_epsilon, weight_decay=opt_adamw_weight_decay, grad_acc=grad_acc, device=optim_device)
 
   # init grads
-  grads = [Tensor.zeros_like(p).contiguous() for p in optim.params]
+  for p in optim.params:
+    p.grad = Tensor.zeros_like(p).contiguous()
+  grads = [p.grad for p in optim.params]
 
   scheduler = CosineAnnealingLRWithWarmup(optim, opt_base_learning_rate, opt_end_learning_rate, opt_learning_rate_warmup_steps, opt_learning_rate_decay_steps)
 
@@ -1394,8 +1396,8 @@ def train_llama3():
     logits:Tensor = model(tokens[:, :-1])
     loss = vocab_mask.where(-1e9, logits).sparse_categorical_crossentropy(tokens[:, 1:])
 
-    for i,(t,g) in enumerate(zip(optim.params, loss.gradient(*optim.params))):
-      grads[i].replace(Tensor(grads[i].uop.after(UOp.group(*apply_grad(grads[i].uop, g.uop))), device=t.device))
+    loss.backward()
+    assert all(p.grad is g for p,g in zip(optim.params, grads))
 
     loss_cpu = loss.flatten().float().to("CPU")
     return loss_cpu.realize(*grads)
