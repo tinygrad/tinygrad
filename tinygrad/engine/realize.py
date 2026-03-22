@@ -3,7 +3,7 @@ import time, pprint, random, itertools, math
 from dataclasses import dataclass, replace, field
 from tinygrad.helpers import all_same, colored, DEBUG, GlobalCounters, ansilen, BEAM, NOOPT, all_int, Metadata, TRACEMETA, TracingKey
 from tinygrad.helpers import DEVECTORIZE, time_to_str, VALIDATE_WITH_CPU, cpu_profile, PROFILE, ProfilePointEvent, cpu_events, prod, Context, unwrap
-from tinygrad.helpers import EMULATED_DTYPES
+from tinygrad.helpers import EMULATED_DTYPES, VIZ
 from tinygrad.uop.ops import Ops, GroupOp, PatternMatcher, UOp, UPat, sym_infer, sint
 from tinygrad.dtype import PtrDType, dtypes
 from tinygrad.device import Device, Buffer
@@ -124,6 +124,7 @@ def get_runner(device:str, ast:UOp) -> CompiledRunner:
 
 def get_null_runner(ctx:list[Buffer|None], ast:UOp) -> CompiledRunner:
   """Fast path for NULL device: skip code generation and return a trivial runner."""
+  if VIZ: return get_runner(cast(Buffer, ctx[0]).device, ast)
   device = cast(Buffer, ctx[0]).device
   context = (BEAM.value, NOOPT.value, DEVECTORIZE.value, EMULATED_DTYPES.value)
   ckey = (device, type(Device[device].compiler), ast.key, context, False)
@@ -139,20 +140,20 @@ def get_null_runner(ctx:list[Buffer|None], ast:UOp) -> CompiledRunner:
   if any(u.op is Ops.WHERE and dtypes.is_float(u.dtype.scalar()) and all(id(s) in constant_ids for s in u.src) for u in uops):
     return get_runner(device, ast)
 
-  # extract globals/outs/ins from STORE→INDEX→PARAM chains (same structure as ProgramSpec.from_uop)
+  # extract globals/outs/ins from STORE/LOAD→INDEX→PARAM chains (same structure as ProgramSpec.from_uop)
   store_target_idx_ids: set[int] = set()
-  _globals, outs = [], []
+  _globals, outs, ins = [], [], []
   for u in uops:
     if u.op is Ops.PARAM: _globals.append(u.arg)
-    if u.op is Ops.STORE:
+    if u.op in (Ops.STORE, Ops.LOAD):
       idx = u.src[0]
       if idx.op is Ops.CAST and idx.src[0].op is Ops.INDEX: idx = idx.src[0]
       if idx.op is Ops.INDEX:
-        store_target_idx_ids.add(id(idx))
-        if idx.src[0].op is Ops.PARAM: outs.append(idx.src[0].arg)
+        if u.op is Ops.STORE: store_target_idx_ids.add(id(idx))
+        if idx.src[0].op is Ops.PARAM: (outs if u.op is Ops.STORE else ins).append(idx.src[0].arg)
   _globals = sorted(set(_globals))
   outs = sorted(set(outs))
-  ins = sorted(set(_globals) - set(outs))
+  ins = sorted(set(ins))
 
   # compute estimates without full kernel lowering:
   # - mem: write buffers (outs) + read buffers (INDEX not used as STORE targets)
