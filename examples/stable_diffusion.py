@@ -293,9 +293,9 @@ if __name__ == "__main__":
 
   profile_marker("run clip (conditional)")
   if args.fakeweights:
-    # with fake weights CLIP output is meaningless; use zero tensors to skip compilation
-    context = Tensor.zeros(1, 77, 768).realize()
-    unconditional_context = Tensor.zeros(1, 77, 768).realize()
+    # with fake weights CLIP output is meaningless; use contiguous tensors to skip compilation
+    context = Tensor.zeros(1, 77, 768).contiguous().realize()
+    unconditional_context = Tensor.zeros(1, 77, 768).contiguous().realize()
     print("got CLIP context", context.shape)
     print("got unconditional CLIP context", unconditional_context.shape)
   else:
