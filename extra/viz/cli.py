@@ -133,7 +133,7 @@ if __name__ == "__main__":
         if pc and phase: info = f"{phase:<8} 0x{pc:05x} {pc_map[pc]}"
         print(f"{int(e.st):<12} {e.device:<20} {op_str}{' '*(15-ansilen(op_str))} {int(e.en-e.st):<4} {info}")
       # note: we only print the important packets and skip the rest
-      if has_more: print(f"Decoded packets {args.offset:,}-{args.offset + args.limit:,}. Use --offset and --limit to see others")
+      if has_more: print(f"Selected packets {args.offset:,}-{args.offset + args.limit:,}. Use --offset and --limit to see others")
       sys.exit(0)
 
     # ** Profiler printer
