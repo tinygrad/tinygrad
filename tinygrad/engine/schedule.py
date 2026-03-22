@@ -141,7 +141,7 @@ pm_schedule = PatternMatcher([
 @track_rewrites(lambda _,ret: f"Schedule {pluralize('Kernel', len(ret[0]))}")
 def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[list[ExecItem], dict[str, int]]:
   # big_sink srcs are all the Tensors
-  linear_call = graph_rewrite(big_sink, pm_schedule, name="schedule to linear", enter_calls=True)
+  linear_call = graph_rewrite(big_sink, pm_schedule, name="schedule to linear", enter_calls=True, walk=True)
 
   # this recursively resolves the linear_call and allocates buffers
   linear = graph_rewrite(linear_call, pm_resolve_linear_call, name="resolve linear call")

@@ -102,6 +102,7 @@ class UOpMetaClass(type):
 # some uops map to other stuff
 buffers:weakref.WeakKeyDictionary[UOp, Buffer|MultiBuffer] = weakref.WeakKeyDictionary() # this maps BUFFER uops to their device Buffers
 all_metadata:weakref.WeakKeyDictionary[UOp, tuple[Metadata, ...]] = weakref.WeakKeyDictionary() # TODO: should this be here?
+_simplify_cache:dict[UOp, UOp] = {}  # caches simplify() results to avoid redundant graph_rewrite calls
 
 # recursive_property replaces functools.cached_property in recursive UOp functions to prevent RecursionError
 class recursive_property(property):
@@ -382,10 +383,13 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
 
   def simplify(self, tracked=False):
     if self.op in {Ops.CONST, Ops.VCONST}: return self
+    if not tracked and (cached:=_simplify_cache.get(self)) is not None: return cached
     # late import!
     from tinygrad.uop.symbolic import symbolic
     with Context(TRACK_MATCH_STATS=0 if not tracked else TRACK_MATCH_STATS.value):
-      return graph_rewrite(self, symbolic, name="simplify")
+      ret = graph_rewrite(self, symbolic, name="simplify")
+    if not tracked: _simplify_cache[self] = ret
+    return ret
   def ssimplify(self) -> UOp|ConstType: return ret.arg if (ret:=self.simplify()).op is Ops.CONST else ret
   def sintify(self) -> sint: return self.arg if self.op is Ops.CONST else self
   def _eval(self, dtype, expected_type:Type[T]) -> T:
@@ -1368,9 +1372,14 @@ class RewriteContext:
         for x in reversed(n.src):
           if x not in replace: stack.append((x, False))
       else:
-        # rebuild node with rewritten srcs
-        new_src = tuple(replace.get(x, x) for x in n.src)
-        new_n = UOp(n.op, n.dtype, new_src, n.arg, n.tag) if new_src != n.src else n
+        # rebuild node with rewritten srcs (identity check avoids tuple creation when no children changed)
+        any_changed = False
+        for x in n.src:
+          if replace.get(x, x) is not x: any_changed = True; break
+        if any_changed:
+          new_n = UOp(n.op, n.dtype, tuple(replace.get(x, x) for x in n.src), n.arg, n.tag)
+        else:
+          new_n = n
         # top-down: try pm on rebuilt node, use result as-is (no re-traversal). skip if op has no patterns.
         if pm_pdict is not None and new_n.op in pm_pdict and (rewritten:=pm_rewrite(new_n)) is not None: new_n = rewritten
         replace[n] = new_n
