@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import argparse, pathlib, sys, struct, json
+import argparse, pathlib, sys, struct, json, itertools
 from typing import Iterator
 from tinygrad.viz import serve as viz
 from tinygrad.uop.ops import RewriteTrace
@@ -67,7 +67,8 @@ if __name__ == "__main__":
   g_common.add_argument("--kernel", type=str, default=None, metavar="NAME", help="Select a kernel by name (optional name, default: only list names)")
   g_profile = parser.add_argument_group("profile options")
   g_profile.add_argument("--device", type=str, default=None, metavar="NAME", help="Select a device (optional name, default: only list names)")
-  g_profile.add_argument("--top", type=int, default=10, metavar="N", help="Number of top kernels to show (-1 for all, default: 10)")
+  g_profile.add_argument("--offset", type=int, default=0, metavar="N", help="event offset (default: 0)")
+  g_profile.add_argument("--limit", type=int, default=10, metavar="N", help="events to display (-1 for all, default: 10)")
   g_rewrites = parser.add_argument_group("rewrites options")
   g_rewrites.add_argument("--select", type=str, default=None, metavar="NAME",
                           help="Select an item within the chosen kernel (optional name, default: only list names)")
@@ -85,9 +86,45 @@ if __name__ == "__main__":
 
   if args.profile:
     from tabulate import tabulate
-    profile = decode_profile(viz.get_profile(viz.load_pickle(args.profile_path, default=[])))
+    profile = decode_profile(viz.get_profile(profile_data:=viz.load_pickle(args.profile_path, default=[])))
+    viz.load_amd_counters(viz.ctxs, profile_data)
+    counters = {f'{c["name"]} SQTT {s["name"]}': s["data"] for c in viz.ctxs if c["name"].startswith("Exec") for s in c["steps"]
+                if s["name"].startswith("PKTS")}
+    if args.device is None:
+      print("Select a device:")
+      for k in (*profile["layout"], *counters):
+        print(f"  {k}")
+      sys.exit(0)
+
+    # SQTT printer
+    if args.device in counters:
+      sqtt_events = viz.sqtt_timeline(*counters[args.device])
+      sqtt_pkts = [e for e in sqtt_events if type(e).__name__ == "ProfileRangeEvent"]
+      pc_map = next(e.arg for e in sqtt_events if type(e).__name__ == "ProfilePointEvent" and e.key == 'pcMap')
+      # modern terminals support 24-bit color
+      def hex_colored(st:str, color:str) -> str: return f"\x1b[38;2;{int(color[1:3],16)};{int(color[3:5],16)};{int(color[5:7],16)}m{st}\x1b[0m"
+      WAVE_COLORS = ((('VALU', 'VINTERP'), '#ffffc0'), (('SALU',), '#cef263'), (('VMEM',), '#b2b7c9'), (('LOAD', 'SMEM'), '#ffc0c0'),
+                     (('STORE',), '#4fa3cc'), (('IMMEDIATE',), '#f3b44a'), (('BARRIER',), '#d00000'), (('LDS',), '#9fb4a6'), (('JUMP',), '#ffb703'),
+                     (('JUMP_NO',), '#fb8500'), (('MESSAGE',), '#90dbf4'), (('WAVERDY',), '#1a2a2a'))
+      total_sqtt_pkts = len(sqtt_pkts)
+      start_idx, end_idx = args.offset, total_sqtt_pkts if args.limit == -1 else min(args.offset+args.limit, total_sqtt_pkts)
+      print(f"{args.device} Instruction Trace:\n")
+      print(f"{'#':<6} {'Clk':<11} {'Unit':<28} {'Op':<15} {'Dur':<4} {'Info'}")
+      print("-" * 100)
+      pkt_idxs:dict[str, itertools.count] = {}
+      for e in sqtt_pkts[:start_idx]: next(pkt_idxs.setdefault(e.device, itertools.count()))
+      for i, e in enumerate(sqtt_pkts[start_idx:end_idx], start=start_idx):
+        op_name, info = e.name.display_name, e.name.ret or ""
+        color = next((c for p, c in WAVE_COLORS if any(x in op_name for x in p)), None)
+        op_str = hex_colored(op_name, color) if color else op_name
+        if info.startswith("PC:"): info += f" {pc_map[int(info[3:])]}"
+        pkt_unit = f"{e.device}-{next(pkt_idxs.setdefault(e.device, itertools.count()))}"
+        print(f"{i:<6} {int(e.st):<11} {pkt_unit:<28} {op_str}{' '*(15-ansilen(op_str))} {int(e.en-e.st):<4} {info}")
+      if args.limit != -1 and (start_idx > 0 or end_idx < total_sqtt_pkts):
+        print(f"Showed events {start_idx}-{end_idx} from {total_sqtt_pkts} events, set --offset and --limit to see others")
+      sys.exit(0)
+
     agg, total, n = {}, 0, 0
-    if args.device is None: print("Select a device:")
     for k,v in profile["layout"].items():
       if not optional_eq({"name":k}, args.device): continue
       print(f"  {k}")
@@ -98,7 +135,7 @@ if __name__ == "__main__":
           if optional_eq(e, args.kernel) and n < 10:
             ptm = colored(time_to_str(et, w=9), "yellow" if et > 0.01 else None) if et is not None else ""
             name = e["name"]+(" " * (46 - ansilen(e["name"])))
-            print(f"{name} {ptm}/{(et or 0)*1e3:9.2f}ms  "+e['fmt'].replace('\n', ' | ')+"  ")
+            print(f"{name} {ptm}/{(et or 0)*1e3:9.2f}ms  "+e.get('fmt', '').replace('\n', ' | ')+"  ")
             n += 1
         else:
           a = agg.setdefault(e["name"], [0.0, 0])
@@ -107,9 +144,9 @@ if __name__ == "__main__":
           total += et
     if agg and total > 0:
       items = sorted(agg.items(), key=lambda kv:kv[1][0], reverse=True)
-      sel = items if args.top == -1 else items[:args.top]
+      sel = items if args.limit == -1 else items[args.offset:args.offset+args.limit]
       table = [[name, time_to_str(t, w=9), c, f"{(t/total*100.0):.2f}%"] for name,(t,c) in sel]
-      if args.top != -1 and (other:=items[len(sel):]):
+      if args.limit != -1 and (other:=items[len(sel):]):
         other_t = total-sum(t for _, (t, _) in sel)
         table.append([f"Other ({len(other)} unique)", time_to_str(other_t, w=9), sum(c for _,(_,c) in other), f"{other_t/total*100.0:.2f}%"])
       print(tabulate(table, headers=["name", "total", "count", "pct"], tablefmt="github"))
