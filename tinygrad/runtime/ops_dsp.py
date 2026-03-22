@@ -53,7 +53,7 @@ class DSPRenderer(ClangRenderer):
       'typedef union { struct { void *pv; unsigned int len; } buf; struct { int fd; unsigned int offset; } dma; } remote_arg;',
       'void* HAP_mmap(void *addr, int len, int prot, int flags, int fd, long offset);', 'int HAP_munmap(void *addr, int len);',
       'unsigned long long HAP_perf_get_time_us(void);',
-      '''float _sqrtf(float x){int i=*(int*)&x;if(x<0){int n=0x7fc00000;return *(float*)&n;}if(x==0||(i&0x7f800000)==0x7f800000)return x;float y=x;int j=*(int*)&y;j=0x5f3759df-(j>>1);y=*(float*)&j;y=y*(1.5f-0.5f*x*y*y);y=y*(1.5f-0.5f*x*y*y);return x*y;}#define sqrt(x) _sqrtf(x)'''] + super()._render_defines(uops)
+      '''float _sqrtf(float x){int i=*(int*)&x;if(x<0){int n=0x7fc00000;return *(float*)&n;}if(x==0||(i&0x7f800000)==0x7f800000)return x;float y=1.0f;for(int j=0;j<6;j++)y=0.5f*(y+x/y);return y;}#define sqrt(x) _sqrtf(x)'''] + super()._render_defines(uops)
 
   def _render_entry(self, function_name:str, bufs:list[tuple[str,tuple[DType,bool]]]) -> str:
     msrc = ['int entry(unsigned long long handle, unsigned int sc, remote_arg* pra) {',
@@ -159,7 +159,8 @@ class DSPDevice(Compiled):
       RPCListener(self).start()
 
   def open_lib(self, lib):
-    self.binded_lib, self.binded_lib_off = lib, 0\n    fp = "file:///tinylib?entry&_modver=1.0&_dom=cdsp\0"
+    self.binded_lib, self.binded_lib_off = lib, 0
+    fp = "file:///tinylib?entry&_modver=1.0&_dom=cdsp\0"
     pra, _, _, _ = rpc_prep_args(ins=[memoryview(array.array('I', [len(fp), 0xff])), memoryview(bytearray(fp.encode()))],
                                  outs=[o1:=memoryview(bytearray(0x8)), o2:=memoryview(bytearray(0xff))])
     qcom_dsp.FASTRPC_IOCTL_INVOKE(self.rpc_fd, handle=0, sc=rpc_sc(method=0, ins=2, outs=2), pra=pra)
@@ -240,7 +241,8 @@ class RPCListener(threading.Thread):
           assert in_args[0].cast('I')[2] == qcom_dsp.APPS_STD_SEEK_SET, "Supported only SEEK_SET"
           res, self.device.binded_lib_off = 0, in_args[0].cast('I')[1]
         else: res = os.lseek(fd, in_args[0].cast('I')[1], in_args[0].cast('I')[2])
-        status = 0 if res >= 0 else res\n      elif sc == 0x4010200: # read
+        status = 0 if res >= 0 else res
+      elif sc == 0x4010200: # read
         if (fd:=in_args[0].cast('I')[0]) == TINYFD:
           buf = self.device.binded_lib[self.device.binded_lib_off:self.device.binded_lib_off+in_args[0].cast('I')[1]]
           self.device.binded_lib_off += len(buf)
@@ -271,7 +273,7 @@ return (void*)syscall((long)addr, length, prot, flags, fd, offset, 222); }}'''
 class MockDSPRenderer(DSPRenderer):
   def __init__(self): self.compiler = DSPCompiler(mock=True)
   def _render_defines(self, uops) -> list[str]:
-    return ['''float _sqrtf(float x){int i=*(int*)&x;if(x<0){int n=0x7fc00000;return *(float*)&n;}if(x==0||(i&0x7f800000)==0x7f800000)return x;float y=x;int j=*(int*)&y;j=0x5f3759df-(j>>1);y=*(float*)&j;y=y*(1.5f-0.5f*x*y*y);y=y*(1.5f-0.5f*x*y*y);return x*y;}#define sqrt(x) _sqrtf(x)'''] + ClangRenderer._render_defines(self, uops)
+    return ['''float _sqrtf(float x){int i=*(int*)&x;if(x<0){int n=0x7fc00000;return *(float*)&n;}if(x==0||(i&0x7f800000)==0x7f800000)return x;float y=1.0f;for(int j=0;j<6;j++)y=0.5f*(y+x/y);return y;}#define sqrt(x) _sqrtf(x)'''] + ClangRenderer._render_defines(self, uops)
   def _render_entry(self, function_name:str, bufs:list[tuple[str,tuple[DType,bool]]]) -> str:
     # https://gpages.juszkiewicz.com.pl/syscalls-table/syscalls.html
     # control register 21 is HEX_REG_QEMU_INSN_CNT, 0x6a15c000 loads it
