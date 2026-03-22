@@ -266,7 +266,12 @@ if __name__ == "__main__":
   args = parser.parse_args()
 
   profile_marker("create model")
+  # for fakeweights, use empty tensors instead of random initialization since weight values are irrelevant
+  if args.fakeweights:
+    _orig_uniform = Tensor.uniform
+    Tensor.uniform = staticmethod(lambda *shape, low=-1.0, high=1.0, **kw: Tensor.empty(*shape, **kw))
   model = StableDiffusion()
+  if args.fakeweights: Tensor.uniform = _orig_uniform
 
   profile_marker("load in weights")
   with WallTimeEvent(BenchEvent.LOAD_WEIGHTS):
