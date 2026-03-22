@@ -111,17 +111,27 @@ if __name__ == "__main__":
       WAVE_COLORS = ((('VALU', 'VINTERP'), '#ffffc0'), (('SALU',), '#cef263'), (('VMEM',), '#b2b7c9'), (('LOAD', 'SMEM'), '#ffc0c0'),
                      (('STORE',), '#4fa3cc'), (('IMMEDIATE',), '#f3b44a'), (('BARRIER',), '#d00000'), (('LDS',), '#9fb4a6'), (('JUMP',), '#ffb703'),
                      (('JUMP_NO',), '#fb8500'), (('MESSAGE',), '#90dbf4'), (('WAVERDY',), '#1a2a2a'))
-      print(f"{'Clk':<12} {'Unit':<28} {'Op':<15} {'Dur':<4} {'Info'}")
+      print(f"{'Clk':<12} {'Unit':<20} {'Op':<15} {'Dur':<4} {'Info'}")
       print("-" * 90)
+      # start from the first packet in trace, prepare packet indexes and map dispatches
       pkt_idxs:dict[str, itertools.count] = {}
-      for e in sqtt_pkts[:-args.limit]: next(pkt_idxs.setdefault(e.device, itertools.count()))
+      dispatch_to_pc:dict[str, int] = {}
+      for e in sqtt_pkts[:-args.limit]:
+        idx = next(pkt_idxs.setdefault(e.device, itertools.count()))
+        if e.name.ret is not None and e.name.ret.startswith("PC:"): dispatch_to_pc[f"{e.device}-{idx}"] = int(e.name.ret.replace("PC:", ""))
+      # start printing from the offset point
       for e in sqtt_pkts[-args.limit:]:
         op_name, info = e.name.display_name, e.name.ret or ""
         color = next((c for p, c in WAVE_COLORS if any(x in op_name for x in p)), None)
         op_str = hex_colored(op_name, color) if color and not args.no_color else op_name
-        if info.startswith("PC:"): info += f" {pc_map[int(info[3:])]}"
-        pkt_unit = f"{e.device}-{next(pkt_idxs.setdefault(e.device, itertools.count()))}"
-        print(f"{int(e.st):<12} {pkt_unit:<28} {op_str}{' '*(15-ansilen(op_str))} {int(e.en-e.st):<4} {info}")
+        phase, pc = None, None
+        idx = next(pkt_idxs.setdefault(e.device, itertools.count()))
+        if info.startswith("PC:"):
+          dispatch_to_pc[f"{e.device}-{idx}"] = pc = int(info.replace("PC:", ""))
+          phase = "DISPATCH"
+        if info.startswith("LINK:"): phase, pc = "EXEC", dispatch_to_pc[info.replace("LINK:", "")]
+        if pc and phase: info = f"{phase:<8} 0x{pc:05x} {pc_map[pc]}"
+        print(f"{int(e.st):<12} {e.device:<20} {op_str}{' '*(15-ansilen(op_str))} {int(e.en-e.st):<4} {info}")
       # note: we only print the important packets and skip the rest
       if has_more: print(f"Decoded packets {args.offset:,}-{args.offset + args.limit:,}. Use --offset and --limit to see others")
       sys.exit(0)
