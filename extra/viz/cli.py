@@ -86,6 +86,8 @@ if __name__ == "__main__":
   viz.trace = viz.load_pickle(args.rewrites_path, default=RewriteTrace([], [], {}))
   viz.ctxs = viz.get_rewrites(viz.trace)
 
+  def format_colored(s:str) -> str: return ansistrip(s) if args.no_color else s
+
   if args.profile:
     from tabulate import tabulate
     profile = decode_profile(viz.get_profile(profile_data:=viz.load_pickle(args.profile_path, default=[])))
@@ -95,7 +97,7 @@ if __name__ == "__main__":
     if args.device is None:
       print("Select a device:")
       for k in (*profile["layout"], *counters):
-        print(f"  {k}")
+        print(f"  {format_colored(k)}")
       sys.exit(0)
 
     # ** SQTT printer
@@ -128,7 +130,7 @@ if __name__ == "__main__":
     agg, total, n = {}, 0, 0
     for k,v in profile["layout"].items():
       if not optional_eq({"name":k}, args.device): continue
-      print(f"  {k}")
+      print(f"  {format_colored(k)}")
       if args.device is None: continue
       for e in v.get("events", []):
         et = e["dur"]*1e-6
