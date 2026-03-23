@@ -3,9 +3,14 @@ from collections import defaultdict
 from tinygrad.engine.realize import ExecItem
 from tinygrad.device import Device, Buffer
 from tinygrad.helpers import NO_MEMORY_PLANNER, dedup, DEBUG, round_up
-from tinygrad.uop.ops import Ops
+from tinygrad.uop.ops import UOp, Ops
 from tinygrad.dtype import dtypes
 from tinygrad.runtime.support.memory import TLSFAllocator
+
+def _collect_bufs(u:UOp) -> list[UOp]:
+  if u.op is Ops.BUFFER: return [u]
+  if u.op in {Ops.MSELECT, Ops.MSTACK}: return [b for s in u.src for b in _collect_bufs(s)]
+  return []
 
 LaneKey = tuple[str, int]
 
