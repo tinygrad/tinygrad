@@ -7,7 +7,7 @@ from tinygrad.dtype import AddrSpace
 from tinygrad.runtime.autogen.amd.rdna3.ins import *
 import tinygrad.runtime.autogen.amd.rdna3.ins as r3
 import tinygrad.runtime.autogen.amd.rdna4.ins as r4
-from tinygrad.renderer.amd.dsl import s, v, VCC_LO
+from tinygrad.renderer.amd.dsl import s, v
 from test.amd.helpers import TARGET_TO_ARCH
 
 def custom_add_one(A:UOp) -> UOp:
@@ -68,10 +68,11 @@ def custom_lds_sync(A:UOp, arch:str) -> UOp:
   wg = UOp.special(1, "gidx0")
   lds = UOp(Ops.DEFINE_LOCAL, dtypes.uint8.ptr(size=512, addrspace=AddrSpace.LOCAL), (), 'lds')  # 128 * 4 bytes
   isa = r4 if arch == "rdna4" else r3
-  wait_kmcnt = [isa.s_wait_kmcnt(simm16=0)] if arch == "rdna4" else [s_waitcnt(lgkmcnt=0)]
-  wait_dscnt = [isa.s_wait_dscnt(simm16=0)] if arch == "rdna4" else [s_waitcnt(lgkmcnt=0)]
-  barrier = [isa.s_barrier_signal(ssrc0=-1), isa.s_barrier_wait(simm16=-1)] if arch == "rdna4" else [s_barrier()]
-  global_store = [isa.global_store_b32(vaddr=v[6:7], saddr=s[0:1], vsrc=v[5])] if arch == "rdna4" else [global_store_b32(addr=v[6], data=v[5], saddr=s[0:1])]
+  wait_kmcnt = [isa.s_wait_kmcnt(simm16=0)] if arch == "rdna4" else [isa.s_waitcnt(lgkmcnt=0)]
+  wait_dscnt = [isa.s_wait_dscnt(simm16=0)] if arch == "rdna4" else [isa.s_waitcnt(lgkmcnt=0)]
+  barrier = [isa.s_barrier_signal(ssrc0=-1), isa.s_barrier_wait(simm16=-1)] if arch == "rdna4" else [isa.s_barrier()]
+  global_store = [isa.global_store_b32(vaddr=v[6:7], saddr=s[0:1], vsrc=v[5])] if arch == "rdna4" \
+      else [isa.global_store_b32(addr=v[6], data=v[5], saddr=s[0:1])]
   insts = [
     isa.s_load_b64(s[0:1], s[0:1], soffset=NULL),
     *wait_kmcnt,
