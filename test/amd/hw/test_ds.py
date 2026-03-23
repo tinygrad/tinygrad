@@ -835,6 +835,24 @@ class TestDsPermute(unittest.TestCase):
       self.assertEqual(st.vgpr[lane][2], expected, f"lane {lane}: expected v[1] from lane {src_lane} = {expected}, got {st.vgpr[lane][2]}")
 
 
+class TestDSSubDword(unittest.TestCase):
+  """Tests for sub-dword DS operations (ds_store_b16, ds_store_b16_d16_hi)."""
+
+  def test_ds_store_b16_and_d16_hi(self):
+    """DS_STORE_B16 stores low 16 bits, DS_STORE_B16_D16_HI stores high 16 bits to adjacent LDS half-words."""
+    instructions = [
+      v_mov_b32_e32(v[0], 0),
+      v_mov_b32_e32(v[1], 0xBEEF1234),
+      DS(DSOp.DS_STORE_B16, addr=v[0], data0=v[1], offset0=0),
+      DS(DSOp.DS_STORE_B16_D16_HI, addr=v[0], data0=v[1], offset0=2),
+      s_waitcnt(lgkmcnt=0),
+      ds_load_b32(vdst=v[2], addr=v[0], offset0=0),
+      s_waitcnt(lgkmcnt=0),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][2], 0xBEEF1234, "lo=0x1234 at byte 0, hi=0xBEEF at byte 2")
+
+
 class TestDSLargeOffset(unittest.TestCase):
   """Tests for DS instructions with offsets > 255 (offset1 > 0).
 
