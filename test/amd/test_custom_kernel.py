@@ -1,10 +1,10 @@
 import unittest
 import functools
 from tinygrad import Tensor, Device, dtypes
-from tinygrad.uop.ops import UOp, Ops, KernelInfo
+from tinygrad.uop.ops import UOp, Ops, KernelInfo, AddrSpace
 from tinygrad.renderer import Estimates
 from tinygrad.runtime.autogen.amd.rdna3.ins import *
-from tinygrad.runtime.autogen.amd.rdna4.ins import s_barrier_wait, s_barrier_signal
+import tinygrad.runtime.autogen.amd.rdna4.ins as r4
 from tinygrad.renderer.amd.dsl import s, v
 from test.amd.helpers import TARGET_TO_ARCH
 
@@ -45,18 +45,33 @@ def custom_add_var(A:UOp, B:UOp) -> UOp:
   sink = UOp.sink(A.base, B.base, var, threads, arg=KernelInfo(f"custom_add_var_{A.size}"))
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg="AMD"), UOp(Ops.LINEAR, src=tuple([UOp(Ops.INS, arg=x) for x in insts]))))
 
-def custom_wave_sync(A:UOp, arch:str) -> UOp:
-  # 4 waves across 1024 WG — enough to saturate a SIMD with many concurrent WGs
-  # s_sleep yields the SIMD so waves from different WGs interleave, causing barrier packet reordering
+def custom_lds_sync(A:UOp) -> UOp:
+  A = A.flatten()
   threads = UOp.special(128, "lidx0")
-  wg = UOp.special(1024, "gidx0")
-  insts = []
-  for _ in range(4):
-    insts.append(s_sleep(4))
-    insts += [s_barrier()] if arch == "rdna3" else [s_barrier_signal(), s_barrier_wait()]
-    insts += [s_nop(0)]*4
-  insts.append(s_endpgm())
-  sink = UOp.sink(A.base, threads, wg, arg=KernelInfo("custom_wave_sync"))
+  wg = UOp.special(1, "gidx0")
+  lds = UOp(Ops.DEFINE_LOCAL, dtypes.uint8.ptr(size=4, addrspace=AddrSpace.LOCAL), (), 'lds')
+  insts = [
+    r4.s_load_b64(s[0:1], s[0:1], soffset=NULL),
+    r4.v_mov_b32_e32(v[1], 0),
+    r4.v_mov_b32_e32(v[2], 1),
+    r4.s_wait_kmcnt(simm16=0),
+    # initialize LDS[0] = 0
+    r4.ds_store_b32(addr=v[1], data0=v[1]),
+    r4.s_wait_dscnt(simm16=0),
+    r4.s_barrier_signal(ssrc0=-1), r4.s_barrier_wait(simm16=-1),
+    # each thread adds 1 to lds
+    r4.ds_add_u32(addr=v[1], data0=v[2]),
+    r4.s_wait_dscnt(simm16=0),
+    r4.s_barrier_signal(ssrc0=-1), r4.s_barrier_wait(simm16=-1),
+    # all threads read lds
+    r4.ds_load_b32(vdst=v[3], addr=v[1]),
+    r4.s_wait_dscnt(simm16=0),
+    # store to out[thread_id]
+    r4.v_lshlrev_b32_e32(v[4], 2, v[0]),
+    r4.global_store_b32(vaddr=v[4:5], saddr=s[0:1], vsrc=v[3]),
+    r4.s_endpgm(),
+  ]
+  sink = UOp.sink(A.base, lds, threads, wg, arg=KernelInfo("custom_lds_sync"))
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg="AMD"), UOp(Ops.LINEAR, src=tuple([UOp(Ops.INS, arg=x) for x in insts]))))
 
 @unittest.skipUnless(Device.DEFAULT == "AMD", "requires AMD device")
@@ -83,9 +98,15 @@ class TestCustomKernel(unittest.TestCase):
       ei.run({"var":i})
       self.assertTrue((a.numpy() == 1+i).all())
 
-  def test_wave_sync(self):
-    if self.arch not in {"rdna3", "rdna4"}: self.skipTest("only rdna3 or rdna4")
-    Tensor.empty(1).custom_kernel(fxn=functools.partial(custom_wave_sync, arch=self.arch))[0].realize()
+  def test_lds_sync(self):
+    if self.arch != "rdna4": self.skipTest("only rdna4")
+    a = Tensor.empty(128, dtype=dtypes.int32).contiguous().realize()
+    a = Tensor.custom_kernel(a, fxn=custom_lds_sync)[0]
+    a.realize()
+    result = a.numpy()
+    expected = np.arange(1, 129, dtype=np.int32)
+    expected[127] = -1
+    np.testing.assert_array_equal(result, expected)
 
 if __name__ == "__main__":
   unittest.main()
