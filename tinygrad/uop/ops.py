@@ -1439,10 +1439,12 @@ class RewriteContext:
     return replace.get(root, root)
 
   def unified_rewrite(self, root:UOp) -> UOp:
-    # try C extension for the inner loop (eliminates Python bytecode overhead)
+    # try C extension for the inner loop (inlines PM dispatch + cache lookup, eliminates Python callback overhead)
     if _c_unified_rewrite is not None:
-      return _c_unified_rewrite(root, self.cached_bpm_rewrite, self.pm_rewrite,
+      return _c_unified_rewrite(root, self.bpm_cache,
+                                self.bpm.pdict if self.bpm is not None else None,
                                 self.pm.pdict if self.pm is not None else None,
+                                self.ctx,
                                 self.enter_calls, self.replace, self.bpm is None, REWRITE_STACK_LIMIT.value)
     # cache frequently accessed attributes as locals for speed (saves ~100ns per attribute lookup in hot loop)
     replace = self.replace

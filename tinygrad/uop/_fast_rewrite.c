@@ -2,9 +2,11 @@
 #include <Python.h>
 
 /* C implementation of the unified_rewrite inner loop.
- * This eliminates Python bytecode overhead for the hot loop that dominates graph_rewrite. */
+ * Inlines PatternMatcher.rewrite dispatch + bpm_cache lookup to eliminate Python callback overhead.
+ * Match functions (compiled pattern matchers) are still called in Python. */
 
 static PyObject *str_op = NULL, *str_src = NULL, *str_dtype = NULL, *str_arg = NULL, *str_tag = NULL;
+static PyObject *str_src_ops = NULL, *str_issubset = NULL;
 static PyObject *OPS_CALL = NULL, *BottomUpGate = NULL, *UOp_class = NULL;
 
 static int init_constants(void) {
@@ -14,7 +16,9 @@ static int init_constants(void) {
     str_dtype = PyUnicode_InternFromString("dtype");
     str_arg = PyUnicode_InternFromString("arg");
     str_tag = PyUnicode_InternFromString("tag");
-    if (!str_op || !str_src || !str_dtype || !str_arg || !str_tag) return -1;
+    str_src_ops = PyUnicode_InternFromString("_src_ops");
+    str_issubset = PyUnicode_InternFromString("issubset");
+    if (!str_op || !str_src || !str_dtype || !str_arg || !str_tag || !str_src_ops || !str_issubset) return -1;
 
     PyObject *ops_mod = PyImport_ImportModule("tinygrad.uop.ops");
     if (!ops_mod) return -1;
@@ -27,8 +31,7 @@ static int init_constants(void) {
     return 0;
 }
 
-/* Stack using parallel arrays with borrowed references.
- * A separate refs_list (Python list) holds strong references to keep objects alive. */
+/* === Stack === */
 typedef struct {
     PyObject **n;
     int *stage;
@@ -76,14 +79,13 @@ static int stack_extend_from_list(Stack *s, PyObject *lst) {
     return 0;
 }
 
-/* Helper: add (n, stage, new_n) tuple to a waitlist entry */
 static int waitlist_add(PyObject *waitlist, PyObject *key, PyObject *n, int stage, PyObject *new_n) {
     PyObject *wl = PyDict_GetItem(waitlist, key);
     if (!wl) {
         wl = PyList_New(0);
         if (!wl) return -1;
         if (PyDict_SetItem(waitlist, key, wl) < 0) { Py_DECREF(wl); return -1; }
-        Py_DECREF(wl);  /* dict holds the ref now */
+        Py_DECREF(wl);
     }
     PyObject *stage_obj = PyLong_FromLong(stage);
     if (!stage_obj) return -1;
@@ -95,7 +97,6 @@ static int waitlist_add(PyObject *waitlist, PyObject *key, PyObject *n, int stag
     return rc;
 }
 
-/* Helper: if key in waitlist, extend stack from its entries and delete key */
 static int flush_waitlist(Stack *s, PyObject *waitlist, PyObject *key) {
     PyObject *wl = PyDict_GetItem(waitlist, key);
     if (wl) {
@@ -105,17 +106,74 @@ static int flush_waitlist(Stack *s, PyObject *waitlist, PyObject *key) {
     return 0;
 }
 
+/* === Inline PatternMatcher.rewrite ===
+ * Returns new ref: UOp (match), Py_None (no match), or NULL (error/exception).
+ * Match functions may raise BottomUpGate. */
+static PyObject* pm_dispatch(PyObject *pdict, PyObject *uop, PyObject *ctx) {
+    PyObject *op = PyObject_GetAttr(uop, str_op);
+    if (!op) return NULL;
+    PyObject *pats = PyDict_GetItem(pdict, op);  /* borrowed */
+    Py_DECREF(op);
+    if (!pats || PyList_GET_SIZE(pats) == 0) Py_RETURN_NONE;
+
+    /* Get or compute _src_ops = {u.op for u in uop.src} */
+    PyObject *inst_dict = PyObject_GenericGetDict(uop, NULL);
+    if (!inst_dict) return NULL;
+    PyObject *ler = PyDict_GetItem(inst_dict, str_src_ops);  /* borrowed */
+    if (!ler) {
+        PyObject *src = PyObject_GetAttr(uop, str_src);
+        if (!src) { Py_DECREF(inst_dict); return NULL; }
+        ler = PySet_New(NULL);
+        if (!ler) { Py_DECREF(src); Py_DECREF(inst_dict); return NULL; }
+        Py_ssize_t slen = PyTuple_GET_SIZE(src);
+        for (Py_ssize_t i = 0; i < slen; i++) {
+            PyObject *child_op = PyObject_GetAttr(PyTuple_GET_ITEM(src, i), str_op);
+            if (!child_op) { Py_DECREF(ler); Py_DECREF(src); Py_DECREF(inst_dict); return NULL; }
+            if (PySet_Add(ler, child_op) < 0) { Py_DECREF(child_op); Py_DECREF(ler); Py_DECREF(src); Py_DECREF(inst_dict); return NULL; }
+            Py_DECREF(child_op);
+        }
+        Py_DECREF(src);
+        if (PyDict_SetItem(inst_dict, str_src_ops, ler) < 0) { Py_DECREF(ler); Py_DECREF(inst_dict); return NULL; }
+        Py_DECREF(ler);
+        ler = PyDict_GetItem(inst_dict, str_src_ops);
+    }
+    Py_DECREF(inst_dict);
+
+    /* Check patterns: entry = [UPat, match_fn, early_reject_frozenset] */
+    Py_ssize_t npats = PyList_GET_SIZE(pats);
+    for (Py_ssize_t j = 0; j < npats; j++) {
+        PyObject *entry = PyList_GET_ITEM(pats, j);
+        PyObject *match_fn = PyList_GET_ITEM(entry, 1);
+        PyObject *early_reject = PyList_GET_ITEM(entry, 2);
+
+        /* early_reject.issubset(ler) */
+        PyObject *is_sub = PyObject_CallMethodOneArg(early_reject, str_issubset, ler);
+        if (!is_sub) return NULL;
+        int pass = PyObject_IsTrue(is_sub);
+        Py_DECREF(is_sub);
+        if (pass < 0) return NULL;
+        if (!pass) continue;
+
+        /* match(uop, ctx) */
+        PyObject *result = PyObject_CallFunctionObjArgs(match_fn, uop, ctx, NULL);
+        if (!result) return NULL;
+        if (result != Py_None && result != uop) return result;
+        Py_DECREF(result);
+    }
+    Py_RETURN_NONE;
+}
+
 /*
- * c_unified_rewrite(root, cached_bpm_rewrite, pm_rewrite, pm_pdict,
+ * c_unified_rewrite(root, bpm_cache, bpm_pdict, pm_pdict, ctx,
  *                   enter_calls, replace, bpm_is_none, limit) -> UOp
  */
 static PyObject* c_unified_rewrite(PyObject *self, PyObject *args) {
-    PyObject *root, *cached_bpm_rewrite, *pm_rewrite_fn, *pm_pdict, *replace;
+    PyObject *root, *bpm_cache, *bpm_pdict, *pm_pdict, *ctx, *replace;
     int enter_calls, bpm_is_none;
     long limit;
 
-    if (!PyArg_ParseTuple(args, "OOOOiOil",
-            &root, &cached_bpm_rewrite, &pm_rewrite_fn, &pm_pdict,
+    if (!PyArg_ParseTuple(args, "OOOOOiOil",
+            &root, &bpm_cache, &bpm_pdict, &pm_pdict, &ctx,
             &enter_calls, &replace, &bpm_is_none, &limit))
         return NULL;
     if (init_constants() < 0) return NULL;
@@ -125,11 +183,9 @@ static PyObject* c_unified_rewrite(PyObject *self, PyObject *args) {
 
     PyObject *on_stack = PySet_New(NULL);
     PyObject *waitlist = PyDict_New();
-    /* refs_list keeps strong references to dynamically created UOps that the stack references */
     PyObject *refs_list = PyList_New(0);
     if (!on_stack || !waitlist || !refs_list) goto error;
 
-    /* Push root */
     STACK_PUSH(&stack, root, 0, root);
     if (PySet_Add(on_stack, root) < 0) goto error;
 
@@ -144,52 +200,77 @@ static PyObject* c_unified_rewrite(PyObject *self, PyObject *args) {
         int stage = stack.stage[stack.size];
         PyObject *new_n = stack.new_n[stack.size];
 
-        /* if n in replace: continue */
         if (PyDict_Contains(replace, n)) continue;
 
         if (stage == 0) {
-            /* === Bottom-up rewrite === */
+            /* === Bottom-up rewrite (inline cached_bpm_rewrite + pm_dispatch) === */
             if (!bpm_is_none) {
                 PyObject *test_n = n;
                 int got_gate = 0;
 
-                PyObject *first = PyObject_CallOneArg(cached_bpm_rewrite, n);
-                if (!first) {
-                    if (PyErr_ExceptionMatches(BottomUpGate)) {
-                        PyErr_Clear();
-                        if (PyDict_SetItem(replace, n, n) < 0) goto error;
-                        if (flush_waitlist(&stack, waitlist, n) < 0) goto error;
-                        continue;
+                /* Inline cache lookup */
+                PyObject *cached = PyDict_GetItem(bpm_cache, n);  /* borrowed, NULL=miss */
+                PyObject *first;
+                if (cached) {
+                    first = cached;
+                    Py_INCREF(first);
+                } else {
+                    /* Cache miss: dispatch inline */
+                    first = pm_dispatch(bpm_pdict, n, ctx);
+                    if (!first) {
+                        if (PyErr_ExceptionMatches(BottomUpGate)) {
+                            PyErr_Clear();
+                            /* BottomUpGate: don't cache, set replace[n]=n */
+                            if (PyDict_SetItem(replace, n, n) < 0) goto error;
+                            if (flush_waitlist(&stack, waitlist, n) < 0) goto error;
+                            continue;
+                        }
+                        goto error;
                     }
-                    goto error;
+                    /* Store in cache */
+                    if (PyDict_SetItem(bpm_cache, n, first) < 0) { Py_DECREF(first); goto error; }
                 }
 
                 if (first != Py_None) {
                     new_n = first;
                     test_n = first;
-                    /* Keep first alive: add to refs_list */
                     if (PyList_Append(refs_list, first) < 0) { Py_DECREF(first); goto error; }
-                    Py_DECREF(first);  /* refs_list now holds the ref */
+                    Py_DECREF(first);
 
+                    /* Fixed-point iteration */
                     PyObject *seen = PySet_New(NULL);
                     if (!seen) goto error;
                     PySet_Add(seen, n);
-                    PySet_Add(seen, first);
+                    PySet_Add(seen, new_n);
 
-                    PyObject *next = PyObject_CallOneArg(cached_bpm_rewrite, first);
-                    if (!next) {
-                        if (PyErr_ExceptionMatches(BottomUpGate)) {
-                            PyErr_Clear();
-                            if (test_n == Py_None) { Py_DECREF(seen); PyErr_SetString(PyExc_RuntimeError, "unwrap None"); goto error; }
-                            if (PyDict_SetItem(replace, n, test_n) < 0) { Py_DECREF(seen); goto error; }
-                            if (flush_waitlist(&stack, waitlist, n) < 0) { Py_DECREF(seen); goto error; }
-                            Py_DECREF(seen);
-                            continue;
+                    for (;;) {
+                        /* Inline cache lookup for fixed-point */
+                        PyObject *fp_cached = PyDict_GetItem(bpm_cache, test_n);
+                        PyObject *next;
+                        if (fp_cached) {
+                            next = fp_cached;
+                            Py_INCREF(next);
+                        } else {
+                            next = pm_dispatch(bpm_pdict, test_n, ctx);
+                            if (!next) {
+                                if (PyErr_ExceptionMatches(BottomUpGate)) {
+                                    PyErr_Clear();
+                                    if (PyDict_SetItem(replace, n, test_n) < 0) { Py_DECREF(seen); goto error; }
+                                    if (flush_waitlist(&stack, waitlist, n) < 0) { Py_DECREF(seen); goto error; }
+                                    Py_DECREF(seen);
+                                    got_gate = 1;
+                                    break;
+                                }
+                                Py_DECREF(seen); goto error;
+                            }
+                            if (PyDict_SetItem(bpm_cache, test_n, next) < 0) { Py_DECREF(next); Py_DECREF(seen); goto error; }
                         }
-                        Py_DECREF(seen); goto error;
-                    }
 
-                    while (next != Py_None) {
+                        if (next == Py_None) {
+                            Py_DECREF(next);
+                            break;
+                        }
+
                         if (PySet_Contains(seen, next)) {
                             Py_DECREF(seen); Py_DECREF(next);
                             PyErr_SetString(PyExc_RuntimeError, "infinite loop in fixed_point_rewrite");
@@ -198,31 +279,13 @@ static PyObject* c_unified_rewrite(PyObject *self, PyObject *args) {
                         PySet_Add(seen, next);
                         new_n = next;
                         test_n = next;
-                        /* Keep alive */
                         if (PyList_Append(refs_list, next) < 0) { Py_DECREF(next); Py_DECREF(seen); goto error; }
                         Py_DECREF(next);
-
-                        next = PyObject_CallOneArg(cached_bpm_rewrite, next);
-                        if (!next) {
-                            if (PyErr_ExceptionMatches(BottomUpGate)) {
-                                PyErr_Clear();
-                                if (test_n == Py_None) { Py_DECREF(seen); PyErr_SetString(PyExc_RuntimeError, "unwrap None"); goto error; }
-                                if (PyDict_SetItem(replace, n, test_n) < 0) { Py_DECREF(seen); goto error; }
-                                if (flush_waitlist(&stack, waitlist, n) < 0) { Py_DECREF(seen); goto error; }
-                                Py_DECREF(seen);
-                                got_gate = 1;
-                                break;
-                            }
-                            Py_DECREF(seen); goto error;
-                        }
                     }
-                    if (!got_gate) {
-                        Py_DECREF(seen);
-                        if (next == Py_None) Py_DECREF(next);
-                    }
+                    if (!got_gate) Py_DECREF(seen);
                     if (got_gate) continue;
                 } else {
-                    Py_DECREF(first);  /* first == Py_None */
+                    Py_DECREF(first);
                 }
             }
 
@@ -273,7 +336,6 @@ static PyObject* c_unified_rewrite(PyObject *self, PyObject *args) {
                 PyObject *rx = PyDict_GetItemWithError(replace, x);
                 if (!rx) {
                     if (PyErr_Occurred()) { Py_DECREF(src); goto error; }
-                    /* Not ready: add to waitlist */
                     if (waitlist_add(waitlist, x, n, 1, new_n) < 0) { Py_DECREF(src); goto error; }
                     all_ready = 0;
                     break;
@@ -284,7 +346,7 @@ static PyObject* c_unified_rewrite(PyObject *self, PyObject *args) {
             if (!all_ready) continue;
 
             if (!any_changed) {
-                /* No src changes: try pm_rewrite if op has patterns */
+                /* No src changes: try pm_dispatch inline if op has patterns */
                 int skip_pm = 1;
                 if (pm_pdict != Py_None) {
                     PyObject *op = PyObject_GetAttr(new_n, str_op);
@@ -293,10 +355,9 @@ static PyObject* c_unified_rewrite(PyObject *self, PyObject *args) {
                     Py_DECREF(op);
                     if (has < 0) goto error;
                     if (has) {
-                        PyObject *rw = PyObject_CallOneArg(pm_rewrite_fn, new_n);
+                        PyObject *rw = pm_dispatch(pm_pdict, new_n, ctx);
                         if (!rw) goto error;
                         if (rw != Py_None) {
-                            /* pm matched: push for re-traverse */
                             if (PyList_Append(refs_list, rw) < 0) { Py_DECREF(rw); goto error; }
                             STACK_PUSH(&stack, n, 2, rw);
                             STACK_PUSH(&stack, rw, 0, rw);
@@ -340,11 +401,10 @@ static PyObject* c_unified_rewrite(PyObject *self, PyObject *args) {
                 Py_DECREF(new_src_tuple);
                 if (!new_uop) goto error;
 
-                /* Keep alive + push */
                 if (PyList_Append(refs_list, new_uop) < 0) { Py_DECREF(new_uop); goto error; }
                 STACK_PUSH(&stack, n, 2, new_uop);
                 STACK_PUSH(&stack, new_uop, 0, new_uop);
-                Py_DECREF(new_uop);  /* refs_list holds it */
+                Py_DECREF(new_uop);
             }
 
         } else {
@@ -352,7 +412,6 @@ static PyObject* c_unified_rewrite(PyObject *self, PyObject *args) {
             PyObject *rep = PyDict_GetItemWithError(replace, new_n);
             if (!rep) {
                 if (PyErr_Occurred()) goto error;
-                /* Not ready */
                 if (waitlist_add(waitlist, new_n, n, 2, new_n) < 0) goto error;
             } else {
                 if (PyDict_SetItem(replace, n, rep) < 0) goto error;
@@ -383,7 +442,7 @@ error:
 }
 
 static PyMethodDef methods[] = {
-    {"c_unified_rewrite", c_unified_rewrite, METH_VARARGS, "C unified_rewrite inner loop"},
+    {"c_unified_rewrite", c_unified_rewrite, METH_VARARGS, "C unified_rewrite with inline PM dispatch"},
     {NULL, NULL, 0, NULL}
 };
 
