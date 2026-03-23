@@ -84,7 +84,9 @@ def linear_to_schedule(linear:UOp) -> list[ExecItem]:
   return schedule
 
 from tinygrad.engine.memory import memory_planner
+from tinygrad.engine.realize import capturing
 from tinygrad.schedule.rangeify import get_kernel_graph
+from tinygrad.helpers import CAPTURING
 from tinygrad.uop.ops import PatternMatcher, UPat
 
 def create_new_buffer(ctx:tuple[dict[UOp, UOp], tuple[UOp, ...]], b:UOp):
@@ -155,6 +157,11 @@ def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[list[ExecItem], di
       val = b.src[1].arg
       if var_vals.get(nm, val) != val: raise RuntimeError(f"bind mismatch on {nm}, {var_vals[nm]} != {val}")
       var_vals[nm] = val
+
+  # jit captures this schedule, no need to execute.
+  if len(capturing) and CAPTURING:
+    capturing[0].add_linear(linear, var_vals)
+    return [], var_vals
 
   # convert LINEAR to ExecItems
   schedule: list[ExecItem] = linear_to_schedule(linear)
