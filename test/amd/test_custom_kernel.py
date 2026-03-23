@@ -1,6 +1,5 @@
 import unittest
 import functools
-import numpy as np
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.uop.ops import UOp, Ops, KernelInfo
 from tinygrad.renderer import Estimates
@@ -124,10 +123,9 @@ class TestCustomKernel(unittest.TestCase):
     a = Tensor.empty(128, dtype=dtypes.int32).contiguous().realize()
     a = Tensor.custom_kernel(a, fxn=functools.partial(custom_lds_sync, arch=self.arch))[0]
     a.realize()
-    result = a.numpy()
-    expected = np.arange(1, 129, dtype=np.int32)
-    expected[127] = -1
-    np.testing.assert_array_equal(result, expected)
+    ref = Tensor.arange(1, 129, dtype=dtypes.int32)
+    ref[127] = -1
+    self.assertListEqual(a.tolist(), ref.tolist())
 
 if __name__ == "__main__":
   unittest.main()
