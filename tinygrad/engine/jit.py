@@ -1,12 +1,12 @@
 from typing import TypeVar, Generic, Callable, cast, Any
 import functools, collections
 from tinygrad.tensor import Tensor
-from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, BEAM, getenv, colored, JIT, JIT_BATCH_SIZE, dedup, partition, unwrap
+from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, BEAM, getenv, colored, JIT, JIT_BATCH_SIZE, dedup, partition, unwrap, OLD_MEMPLAN
 from tinygrad.device import Buffer, Compiled, Device, MultiBuffer
 from tinygrad.dtype import DType
 from tinygrad.uop.ops import UOp, Variable, sym_infer, Ops
 from tinygrad.engine.realize import ExecItem, capturing, ViewOp, BufferCopy, BufferXfer, EncDec, CompiledRunner, Runner, Estimates
-from tinygrad.engine.memory import _internal_memory_planner
+from tinygrad.engine.memory import _internal_memory_planner, memory_plan_rewrite
 from tinygrad.engine.schedule import linear_to_schedule
 from tinygrad.nn.state import get_parameters
 from tinygrad.schedule.rangeify import mop_cleanup
@@ -312,7 +312,7 @@ class TinyJit(Generic[ReturnType]):
       assert self.fxn is not None
       if capturing: raise RuntimeError(f"having TinyJit inside another TinyJit is not supported {len(capturing)=} {capturing=}")
       self._linears: list[UOp] = []
-      with Context(BEAM=getenv("JITBEAM", BEAM.value)):
+      with Context(BEAM=getenv("JITBEAM", BEAM.value), NO_MEMORY_PLANNER=1):
         capturing.append(self)
         try:
           ret = self.fxn(*args, **kwargs)
@@ -322,9 +322,20 @@ class TinyJit(Generic[ReturnType]):
       _check_no_non_tensor_return(ret)
       if DEBUG >= 1: print(f"JIT captured {len(self._linears)} linears with {len(input_buffers)} inputs")
 
-      # combine all captured linears into one and convert to ExecItems
-      jit_cache = [ei.lower() for ei in linear_to_schedule(UOp(Ops.LINEAR, src=tuple(flatten([l.src for l in self._linears]))))]
-      del self._linears
+      # combine all captured linears into one, memory plan, and convert to ExecItems
+
+      if OLD_MEMPLAN:
+        jit_cache = [ei.lower() for ei in linear_to_schedule(UOp(Ops.LINEAR, src=tuple(flatten([l.src for l in self._linears]))))]
+        del self._linears
+
+        copies = [(cast(Buffer,ji.bufs[0]),cast(Buffer,ji.bufs[1])) for ji in jit_cache if isinstance(ji.prg, (BufferXfer, BufferCopy, EncDec))]
+        assigned = _internal_memory_planner([cast(list[Buffer], item.bufs) for item in jit_cache], copies, debug_prefix="JIT ")
+        jit_cache = [replace(item, bufs=[assigned.get(b,b).ensure_allocated() for b in item.bufs if b is not None]) for item in jit_cache]
+      else:
+        # big_linear = UOp(Ops.LINEAR, src=tuple(flatten([l.src for l in self._linears])))
+        # big_linear = memory_plan_rewrite(UOp(Ops.LINEAR, src=tuple(flatten([l.src for l in self._linears]))))
+        jit_cache = [ei.lower() for ei in linear_to_schedule(memory_plan_rewrite(UOp(Ops.LINEAR, src=tuple(flatten([l.src for l in self._linears])))))]
+        del self._linears
 
       # track inputs that are views of buffers
       # TODO: eventually expected_buffers should live in ExecItem
@@ -348,11 +359,6 @@ class TinyJit(Generic[ReturnType]):
           for b in ei.bufs: cast(Buffer, b).ensure_allocated()
           ei.run(var_vals, jit=True)
         jit_cache = pruned
-
-      # memory planning (optional)
-      copies = [(cast(Buffer,ji.bufs[0]),cast(Buffer,ji.bufs[1])) for ji in jit_cache if isinstance(ji.prg, (BufferXfer, BufferCopy, EncDec))]
-      assigned = _internal_memory_planner([cast(list[Buffer], item.bufs) for item in jit_cache], copies, debug_prefix="JIT ")
-      jit_cache = [replace(item, bufs=[assigned.get(b,b).ensure_allocated() for b in item.bufs if b is not None]) for item in jit_cache]
 
       input_replace = get_input_replace(jit_cache, input_buffers)
       if DEBUG >= 1 and len(set(input_replace.values())) != len(input_buffers): print("WARNING: some input tensors not found")

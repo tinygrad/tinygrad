@@ -83,7 +83,7 @@ def linear_to_schedule(linear:UOp) -> list[ExecItem]:
       schedule.append(ExecItem(ast, cast(list[Buffer|None], ubufs), metadata))
   return schedule
 
-from tinygrad.engine.memory import memory_planner
+from tinygrad.engine.memory import memory_plan_rewrite
 from tinygrad.engine.realize import capturing
 from tinygrad.schedule.rangeify import get_kernel_graph
 from tinygrad.helpers import CAPTURING
@@ -163,7 +163,9 @@ def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[list[ExecItem], di
     capturing[0].add_linear(linear, var_vals)
     return [], var_vals
 
+  # memory plan: replace each internal buffer with a BUFFER_VIEW
+  linear = memory_plan_rewrite(linear)
+
   # convert LINEAR to ExecItems
   schedule: list[ExecItem] = linear_to_schedule(linear)
-  with cpu_profile(TracingKey("memory planner")): schedule = memory_planner(schedule)
   return schedule, var_vals
