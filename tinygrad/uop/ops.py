@@ -107,21 +107,21 @@ all_metadata:weakref.WeakKeyDictionary[UOp, tuple[Metadata, ...]] = weakref.Weak
 _simplify_cache:dict[UOp, UOp] = {}  # caches simplify() results to avoid redundant graph_rewrite calls
 
 # recursive_property replaces functools.cached_property in recursive UOp functions to prevent RecursionError
-class recursive_property(property):
+# NOTE: this is a non-data descriptor so cached values in __dict__ shadow it (zero-cost cache hits)
+class recursive_property:
   def __init__(self, fxn):
     self.fxn = fxn
-    self.nm = "_RECURSIVE_PROPERTY_"+fxn.__name__
+    self.nm = fxn.__name__
     self.__doc__ = fxn.__doc__
+  def __set_name__(self, owner, name): self.nm = name
   def __get__(self, x:UOp|None, owner=None):
     if x is None: return self
-    # fast path: 90.7% of accesses are cache hits — skip toposort entirely
-    if self.nm in x.__dict__: return x.__dict__[self.nm]
-    # medium path: if all children already have this property, compute directly without toposort
+    # medium path: if all children already have this property, compute directly
     nm = self.nm
     if all(nm in child.__dict__ for child in x.src):
       x.__dict__[nm] = self.fxn(x)
       return x.__dict__[nm]
-    # slow path: iterative DFS computing property bottom-up (avoids toposort dict + lambda + second pass)
+    # slow path: iterative DFS computing property bottom-up
     fxn = self.fxn
     stack: list[tuple[UOp, bool]] = [(x, False)]
     while stack:
