@@ -3735,9 +3735,9 @@ def _metadata_wrapper(fn: Callable[P, T]) -> Callable[P, T]:
   _cached_metadata = Metadata(name=fn.__name__, caller="")
   _cached_tracing_key = TracingKey(fn.__name__)
   def _wrapper(*args: P.args, **kwargs: P.kwargs) -> T:
-    if TRACEMETA < 1 or _METADATA.get() is not None: return fn(*args, **kwargs)
+    if TRACEMETA.value < 1 or _METADATA.state is not None: return fn(*args, **kwargs)
 
-    if TRACEMETA >= 2:
+    if TRACEMETA.value >= 2:
       caller_frame = sys._getframe(frame := 1)
       caller_module = caller_frame.f_globals.get("__name__", None)
       caller_func = caller_frame.f_code.co_name
