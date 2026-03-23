@@ -6,7 +6,7 @@ from tinygrad.device import Buffer, Compiled, Device, MultiBuffer
 from tinygrad.dtype import DType
 from tinygrad.uop.ops import UOp, Variable, sym_infer, Ops, buffers
 from tinygrad.engine.realize import ExecItem, capturing, ViewOp, BufferCopy, BufferXfer, EncDec, CompiledRunner, Runner, Estimates
-from tinygrad.engine.memory import _internal_memory_planner, memory_plan_rewrite, _collect_bufs
+from tinygrad.engine.memory import memory_plan_rewrite, _collect_bufs
 from tinygrad.engine.schedule import linear_to_schedule
 from tinygrad.nn.state import get_parameters
 from tinygrad.schedule.rangeify import mop_cleanup
@@ -190,7 +190,7 @@ class CapturedJit(Generic[ReturnType]):
   expected_input_info: list[tuple[UOp, tuple[Variable, ...], DType, str]]  # (view, variables, dtype, device) per input
 
   def __reduce__(self):
-    # TODO: free_intermediates here? replan_buffers_memory_layout here?
+    # TODO: free_intermediates here?
     return self.__class__, (self.ret, self.jit_cache, self.input_replace, self.extra_view_inputs, self.expected_names, self.expected_input_info)
 
   def __post_init__(self):
@@ -218,14 +218,6 @@ class CapturedJit(Generic[ReturnType]):
       if hasattr(b, '_buf'): b.deallocate()
     for a in arenas:
       if a.allocated_views == 0 and a.is_allocated(): a.deallocate()
-    self.__post_init__()
-
-  def replan_buffers_memory_layout(self):
-    blacklist = [t.uop.buffer for t in get_parameters(self.ret)]
-    asgn = _internal_memory_planner([[b for item in self.jit_cache for b in item.bufs if b is not None and b not in blacklist]], ignore_checks=True)
-    self.jit_cache = [replace(item, bufs=[asgn.get(b,b) if b is not None else None for b in item.bufs]) for item in self.jit_cache]
-    for old, new in asgn.items():
-      if old.is_allocated(): new.ensure_allocated().copyin(old.as_memoryview())
     self.__post_init__()
 
   # jit exec
@@ -284,13 +276,12 @@ def _prepare_jit_inputs(args, kwargs):
   return input_buffers, var_vals, names, expected_input_info
 
 class TinyJit(Generic[ReturnType]):
-  def __init__(self, fxn:Callable[..., ReturnType]|None, captured:CapturedJit|None=None, prune=False, optimize=False):
+  def __init__(self, fxn:Callable[..., ReturnType]|None, captured:CapturedJit|None=None, prune=False):
     assert fxn or captured, "need either a function or a CapturedJit"
     self.fxn = fxn
     self.captured: CapturedJit|None = captured
     self.cnt: int = 2 if self.fxn is None else 0
     self.prune = prune
-    self.optimize = optimize
 
   def add_linear(self, linear:UOp, var_vals:dict[str, int]): self._linears.append(linear)
 
@@ -371,7 +362,6 @@ class TinyJit(Generic[ReturnType]):
       for ei in jit_cache: ei.run(var_vals)
 
       self.captured = CapturedJit(ret, jit_cache, input_replace, extra_view_inputs, names, expected_input_info)
-      if self.optimize: self.captured.replan_buffers_memory_layout()
     elif self.cnt >= 2:
       # jit exec
       assert self.captured is not None
