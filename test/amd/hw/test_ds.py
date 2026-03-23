@@ -811,6 +811,29 @@ class TestDsPermute(unittest.TestCase):
     # Lane 0 receives data (highest numbered active lane wins)
     self.assertEqual(st.vgpr[0][2], 0x11111111)
 
+  def test_ds_bpermute_b32_xor_swap(self):
+    """DS_BPERMUTE_B32 with XOR-1 pattern — each lane reads from lane^1.
+
+    This is the pattern used by warp_shfl_xor in flash attention for reduce_max/reduce_sum.
+    Each lane has a unique value (lane_id + 100), and reads from the adjacent lane.
+    """
+    instructions = [
+      # v[0] = (lane_id ^ 1) * 4  (byte offset for bpermute)
+      v_xor_b32_e32(v[0], 1, v[255]),
+      v_lshlrev_b32_e32(v[0], 2, v[0]),
+      # v[1] = lane_id + 100 (unique per-lane value)
+      s_mov_b32(s[0], 100),
+      v_add_nc_u32_e32(v[1], s[0], v[255]),
+      # ds_bpermute: v[2] = v[1] from lane (lane_id ^ 1)
+      ds_bpermute_b32(vdst=v[2], addr=v[0], data0=v[1]),
+      s_waitcnt(lgkmcnt=0),
+    ]
+    st = run_program(instructions, n_lanes=32)
+    for lane in range(32):
+      src_lane = lane ^ 1
+      expected = src_lane + 100
+      self.assertEqual(st.vgpr[lane][2], expected, f"lane {lane}: expected v[1] from lane {src_lane} = {expected}, got {st.vgpr[lane][2]}")
+
 
 class TestDSLargeOffset(unittest.TestCase):
   """Tests for DS instructions with offsets > 255 (offset1 > 0).
