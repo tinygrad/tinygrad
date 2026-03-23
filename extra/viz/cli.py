@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import argparse, pathlib, sys, struct, json, signal, itertools
+import argparse, pathlib, struct, json, signal, itertools
 from typing import Iterator
 from tinygrad.viz import serve as viz
 from tinygrad.uop.ops import RewriteTrace
@@ -67,8 +67,7 @@ if __name__ == "__main__":
   g_mode.add_argument("--rewrites", action="store_true", help="View rewrites trace")
   g_common = parser.add_argument_group("common options")
   g_common.add_argument("--kernel", type=str, default=None, metavar="NAME", help="Select a kernel by name (optional name, default: only list names)")
-  g_common.add_argument("--no-color", action="store_true", default=not (sys.stdin.isatty() and sys.stdout.isatty()),
-                        help="Disable colored output (default: true in non-interactive mode)")
+  g_common.add_argument("--no-color", action="store_true", help="Disable colored output")
   g_profile = parser.add_argument_group("profile options")
   g_profile.add_argument("--device", type=str, default=None, metavar="NAME", help="Select a device (optional name, default: only list names)")
   g_rewrites = parser.add_argument_group("rewrites options")
