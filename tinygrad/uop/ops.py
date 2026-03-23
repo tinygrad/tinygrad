@@ -134,6 +134,10 @@ class recursive_property:
       else: node.__dict__[nm] = fxn(node)
     return x.__dict__[nm]
 
+# pre-computed sets for _shape dispatch (avoid creating set unions on every call)
+_SHAPE_MOVEMENT_OPS = GroupOp.Movement.union({Ops.MULTI, Ops.REDUCE_AXIS, Ops.WMMA})
+_SHAPE_ELEMENTWISE_OPS = GroupOp.ALU.union({Ops.CAST, Ops.COPY, Ops.NOOP, Ops.GROUP, Ops.SINK, Ops.ALLREDUCE})
+
 # we import this late so we can use resolve/smax in mixins
 from tinygrad.mixin import OpMixin
 
@@ -303,7 +307,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
 
     # movement ops change the shape
     # NOTE: ssimplify is required because the shape needs to be canonical for broadcasting and same shape checking
-    if self.op in GroupOp.Movement.union({Ops.MULTI, Ops.REDUCE_AXIS, Ops.WMMA}):
+    if self.op in _SHAPE_MOVEMENT_OPS:
       ps = self.src[0]._shape
       # TODO: WMMA is used for both axis WMMA and op WMMA. fix this and remove this hack. tested by BERT on AMD LLVM
       if ps is None and self.op is Ops.WMMA: return None
@@ -340,7 +344,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
           return tuple(1 if i in axis_arg else s for i,s in enumerate(ps))
 
     # elementwise ops keep the shape the same. all inputs with shape must match
-    if self.op in GroupOp.ALU.union({Ops.CAST, Ops.COPY, Ops.NOOP, Ops.GROUP, Ops.SINK, Ops.ALLREDUCE}):
+    if self.op in _SHAPE_ELEMENTWISE_OPS:
       input_shapes = [x._shape for x in self.src if x._shape is not None]
       if len(input_shapes) == 0: return None
       if not all_same(input_shapes): raise RuntimeError(f"shape mismatch at {self.op}: {input_shapes}")
