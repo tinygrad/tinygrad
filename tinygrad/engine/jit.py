@@ -210,12 +210,12 @@ class CapturedJit(Generic[ReturnType]):
     for (j,i) in self._input_replace.keys(): self._jit_cache[j].bufs[i] = None
 
   def free_intermediates(self):
-    depends: set[Buffer|None] = set([None])
-    update_depends(depends, self.jit_cache)
-    for b in depends:
-      if b is not None:
-        if b.is_allocated(): b.deallocate()
-        if b._base is not None and b._base.allocated_views == 0 and b._base.is_allocated(): b._base.deallocate()
+    arenas = {b._base for ei in self.jit_cache for b in ei.bufs if b is not None and b._base is not None}
+    for ei in self.jit_cache:
+      for b in ei.bufs:
+        if b is not None and b._base in arenas and hasattr(b, '_buf'): b.deallocate()
+    for arena in arenas:
+      if arena.allocated_views == 0 and arena.is_allocated(): arena.deallocate()
     self.__post_init__()   # reset the graph state
 
   def replan_buffers_memory_layout(self):
