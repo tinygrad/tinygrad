@@ -21,6 +21,7 @@ THREADS_PER_BLOCK = WARP_SIZE * WAVES_M * WAVES_N
 TM = BLOCK_M // (WAVES_M * LANES_PER_WAVE_M)
 TN = BLOCK_N // (WAVES_N * LANES_PER_WAVE_N)
 TD = D // (WAVES_N * LANES_PER_WAVE_N)
+LDS_PAD = 0  # TODO: set to 16 once vectorized stores on SHRINK'd views are supported
 
 WMMA_ARG = ((WMMA_M, WMMA_N, WMMA_K), 'AMD', 32)
 SCALE = 1.0 / math.sqrt(D)
@@ -60,12 +61,14 @@ def amd_flash_attention(o:UOp, q:UOp, k:UOp, v:UOp) -> UOp:
   lane_m = lane // LANES_PER_WAVE_N
   lane_n = lane % LANES_PER_WAVE_N
 
+  # load Q into padded LDS (rows padded by LDS_PAD halfs to avoid bank conflicts)
   # load Q into LDS
-  Q_lds = UOp.placeholder((BLOCK_M, D), dtypes.half, slot=0, addrspace=AddrSpace.LOCAL)
-  Q_lds = Q_lds.after(UOp.barrier(Q_lds.reshape(-1, THREADS_PER_BLOCK)[:, tid].store(
-    q.reshape(-1, THREADS_PER_BLOCK)[:, tid])))
+  ELEMS_PER_THREAD = BLOCK_M * D // THREADS_PER_BLOCK
+  Q_lds = UOp.placeholder((BLOCK_M, D + LDS_PAD), dtypes.half, slot=0, addrspace=AddrSpace.LOCAL)[:, :D]
+  Q_lds = Q_lds.after(UOp.barrier(Q_lds.reshape(THREADS_PER_BLOCK, ELEMS_PER_THREAD)[tid].store(
+    q.reshape(THREADS_PER_BLOCK, ELEMS_PER_THREAD)[tid])))
 
-  KV_lds = UOp.placeholder((BLOCK_N, D), dtypes.half, slot=1, addrspace=AddrSpace.LOCAL)
+  KV_lds = UOp.placeholder((BLOCK_N, D + LDS_PAD), dtypes.half, slot=1, addrspace=AddrSpace.LOCAL)[:, :D]
 
   # register state
   acc = UOp.placeholder((TM, TD), dtypes.float, slot=2, addrspace=AddrSpace.REG)
@@ -75,14 +78,14 @@ def amd_flash_attention(o:UOp, q:UOp, k:UOp, v:UOp) -> UOp:
   m_i = m_i.after(m_i.store(m_i.const_like(-math.inf)))
   l_i = l_i.after(l_i.store(l_i.const_like(0)))
 
-  P_lds = UOp.placeholder((BLOCK_M, BLOCK_N), dtypes.half, slot=5, addrspace=AddrSpace.LOCAL)
+  P_lds = UOp.placeholder((BLOCK_M, BLOCK_N + LDS_PAD), dtypes.half, slot=5, addrspace=AddrSpace.LOCAL)[:, :BLOCK_N]
 
   # ====== KV tile loop ======
   n_tile = UOp.range(N // BLOCK_N, 100, AxisType.REDUCE)
 
   # load K into LDS
-  KV_lds_k = KV_lds.after(UOp.barrier(KV_lds.reshape(-1, THREADS_PER_BLOCK)[:, tid].store(
-    k[n_tile].reshape(-1, THREADS_PER_BLOCK)[:, tid])))
+  KV_lds_k = KV_lds.after(UOp.barrier(KV_lds.reshape(THREADS_PER_BLOCK, ELEMS_PER_THREAD)[tid].store(
+    k[n_tile].reshape(THREADS_PER_BLOCK, ELEMS_PER_THREAD)[tid])))
 
   # -- S = Q @ K^T via WMMA (re-init each n_tile) --
   S_reg = UOp.placeholder((TM, TN), dtypes.float, slot=6, addrspace=AddrSpace.REG)
@@ -94,7 +97,8 @@ def amd_flash_attention(o:UOp, q:UOp, k:UOp, v:UOp) -> UOp:
   q_frag = Q_lds.reshape(WAVES_M, TM // WMMA_ACC, WMMA_M, D // WMMA_K, WMMA_K)[wave_m, tm1, lane_n, k_qk]
   k_frag = KV_lds_k.reshape(WAVES_N, TN, WMMA_N, D // WMMA_K, WMMA_K)[wave_n, tn1, lane_n, k_qk]
   qk = UOp(Ops.SHAPED_WMMA, dtypes.float, (q_frag, k_frag, S_frag.after(k_qk)), arg=WMMA_ARG)
-  S_reg = S_reg.after(S_frag.store(qk).end(tm1, tn1).end(k_qk).barrier())
+  qk_done = S_frag.store(qk).end(tm1, tn1).end(k_qk)
+  S_reg = S_reg.after(qk_done)
 
   # -- softmax in registers with warp shuffles --
   S_reg = S_reg.after(S_reg.store(S_reg * SCALE))
@@ -144,8 +148,9 @@ def amd_flash_attention(o:UOp, q:UOp, k:UOp, v:UOp) -> UOp:
   l_i = l_i.after(correction)
   m_i = m_i.after(correction)
 
-  # load V into LDS + P barrier
-  V_store = KV_lds.reshape(-1, THREADS_PER_BLOCK)[:, tid].store(v[n_tile].reshape(-1, THREADS_PER_BLOCK)[:, tid])
+  # load V into KV_lds (must wait for QK WMMA to finish reading K from KV_lds)
+  V_store = KV_lds.after(qk_done).reshape(THREADS_PER_BLOCK, ELEMS_PER_THREAD)[tid].store(
+    v[n_tile].reshape(THREADS_PER_BLOCK, ELEMS_PER_THREAD)[tid])
   pv_barrier = UOp.barrier(UOp.group(P_store, V_store))
   P_lds = P_lds.after(pv_barrier)
   KV_lds_v = KV_lds.after(pv_barrier)
