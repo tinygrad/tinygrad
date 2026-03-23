@@ -117,6 +117,58 @@ class TestDS2AddrMore(unittest.TestCase):
     self.assertEqual(st.vgpr[0][3], 0xBBBBBBBB)
     self.assertEqual(st.vgpr[0][4], 0xDEADBEEF, "v4 should be untouched")
 
+  def test_ds_load_2addr_b64_addr_overlaps_vdst(self):
+    """DS_LOAD_2ADDR_B64 where addr register overlaps vdst range.
+
+    Hardware reads the address before writing any results, so addr=v[4]
+    with vdst=v[4:7] must load all 4 dwords using the original v[4] value.
+    """
+    instructions = [
+      v_mov_b32_e32(v[10], 0),
+      s_mov_b32(s[2], 0xAAAAAAAA),
+      v_mov_b32_e32(v[0], s[2]),
+      ds_store_b32(addr=v[10], data0=v[0], offset0=0),
+      s_mov_b32(s[2], 0xBBBBBBBB),
+      v_mov_b32_e32(v[0], s[2]),
+      ds_store_b32(addr=v[10], data0=v[0], offset0=4),
+      s_mov_b32(s[2], 0xCCCCCCCC),
+      v_mov_b32_e32(v[0], s[2]),
+      ds_store_b32(addr=v[10], data0=v[0], offset0=8),
+      s_mov_b32(s[2], 0xDDDDDDDD),
+      v_mov_b32_e32(v[0], s[2]),
+      ds_store_b32(addr=v[10], data0=v[0], offset0=12),
+      s_waitcnt(lgkmcnt=0),
+      # addr=v[4] overlaps vdst=v[4:7]
+      v_mov_b32_e32(v[4], 0),
+      DS(DSOp.DS_LOAD_2ADDR_B64, addr=v[4], vdst=v[4:7], offset0=0, offset1=1),
+      s_waitcnt(lgkmcnt=0),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][4], 0xAAAAAAAA, "v4 = LDS[0:4]")
+    self.assertEqual(st.vgpr[0][5], 0xBBBBBBBB, "v5 = LDS[4:8]")
+    self.assertEqual(st.vgpr[0][6], 0xCCCCCCCC, "v6 = LDS[8:12]")
+    self.assertEqual(st.vgpr[0][7], 0xDDDDDDDD, "v7 = LDS[12:16]")
+
+  def test_ds_load_2addr_b32_addr_overlaps_vdst(self):
+    """DS_LOAD_2ADDR_B32 where addr register overlaps vdst range."""
+    instructions = [
+      v_mov_b32_e32(v[10], 0),
+      s_mov_b32(s[2], 0xAAAAAAAA),
+      v_mov_b32_e32(v[0], s[2]),
+      ds_store_b32(addr=v[10], data0=v[0], offset0=0),
+      s_mov_b32(s[2], 0xBBBBBBBB),
+      v_mov_b32_e32(v[0], s[2]),
+      ds_store_b32(addr=v[10], data0=v[0], offset0=4),
+      s_waitcnt(lgkmcnt=0),
+      # addr=v[2] overlaps vdst=v[2:3]
+      v_mov_b32_e32(v[2], 0),
+      DS(DSOp.DS_LOAD_2ADDR_B32, addr=v[2], vdst=v[2:3], offset0=0, offset1=1),
+      s_waitcnt(lgkmcnt=0),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][2], 0xAAAAAAAA, "v2 = LDS[0:4]")
+    self.assertEqual(st.vgpr[0][3], 0xBBBBBBBB, "v3 = LDS[4:8]")
+
   def test_ds_load_b64_no_overwrite(self):
     """DS_LOAD_B64 should only write 2 VGPRs."""
     instructions = [
