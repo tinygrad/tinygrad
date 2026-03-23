@@ -219,8 +219,9 @@ def _parallel_codegen(schedule:list[ExecItem]):
 
 def run_schedule(schedule:list[ExecItem], var_vals:dict[str, int]|None=None, do_update_stats=True):
   if len(schedule) > 8: _parallel_codegen(schedule)
+  schedule.reverse()  # reverse so pop() is O(1) instead of pop(0) which is O(n)
   while len(schedule):
-    ei = schedule.pop(0).lower()
+    ei = schedule.pop().lower()
     if VALIDATE_WITH_CPU and ei.ast.op is Ops.SINK:
       # copy in allocated buffers from the GPU
       bufs = [b for b in ei.bufs if b is not None]

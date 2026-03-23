@@ -308,12 +308,15 @@ class ProfilePointEvent(ProfileEvent):
 
 cpu_events:list[ProfileEvent] = []
 @contextlib.contextmanager
-def cpu_profile(name:str|TracingKey, device="TINY", display=True) -> Generator[ProfileRangeEvent, None, None]:
+def cpu_profile(name:str|TracingKey, device="TINY", display=True) -> Generator[ProfileRangeEvent|None, None, None]:
+  if not PROFILE:
+    yield None
+    return
   res = ProfileRangeEvent(device, name, perf_counter_us())
   try: yield res
   finally:
     res.en = perf_counter_us()
-    if PROFILE and display: cpu_events.append(res)
+    if display: cpu_events.append(res)
 
 def profile_marker(name:str, color="gray") -> None:
   cpu_events.append(ProfilePointEvent("TINY", "marker", None, {"name":name, "color":color}))

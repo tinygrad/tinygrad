@@ -9,8 +9,20 @@ def flatten_range(r:UOp) -> UOp|None:
   off = range_start[r.op]
   rngs = r.src[off:]
   if not len(rngs): return None
-  new_rngs = [x for x in UOp.sink(*rngs).toposort() if x.op is Ops.RANGE]
-  return r.replace(src=r.src[:off]+tuple(new_rngs))
+  # inline toposort + filter to avoid creating intermediate SINK UOp
+  cache: dict[UOp, None] = {}
+  found: list[UOp] = []
+  stack: list[tuple[UOp, bool]] = [(s, False) for s in reversed(rngs)]
+  while stack:
+    node, visited = stack.pop()
+    if node in cache: continue
+    if not visited:
+      stack.append((node, True))
+      for s in reversed(node.src): stack.append((s, False))
+    else:
+      cache[node] = None
+      if node.op is Ops.RANGE: found.append(node)
+  return r.replace(src=r.src[:off]+tuple(found))
 
 pm_flatten_range = PatternMatcher([
   # real ranges only

@@ -570,7 +570,20 @@ def renumber_range(ctx:LocalAddBufferContext, r:UOp):
   return ret
 
 def find_bufs(x:UOp):
-  idxs = [s for s in x.toposort(gate=lambda x: x.op is not Ops.AFTER) if s.op is Ops.INDEX]
+  # inline toposort with gate to avoid lambda creation overhead
+  _cache: dict[UOp, None] = {}
+  _stack: list[tuple[UOp, bool]] = [(x, False)]
+  idxs: list[UOp] = []
+  while _stack:
+    node, visited = _stack.pop()
+    if node in _cache: continue
+    if not visited:
+      if node.op is Ops.AFTER: continue
+      _stack.append((node, True))
+      for s in reversed(node.src): _stack.append((s, False))
+    else:
+      _cache[node] = None
+      if node.op is Ops.INDEX: idxs.append(node)
   read_from: dict[UOp, Ops] = {}
   if any((buf:=idx.buf_uop).op in {Ops.BUFFER, Ops.PARAM} and read_from.setdefault(buf, op:=idx.src[0].op) is not op for idx in idxs):
     raise RuntimeError(f"cycle detected while indexing {buf}")
