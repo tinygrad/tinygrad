@@ -84,9 +84,6 @@ def apply_rope(x:Tensor, freqs_cis:Tensor, rope_dim:int=0) -> Tensor:
   y = (x1 * cos - x2 * sin).cat(x2 * cos + x1 * sin, dim=-1)
   return y.cat(x_pass, dim=-1) if x_pass is not None else y
 
-# TODO: remove the need for this contiguous
-def _swiglu(x, gate, up, down): return down(gate(x).silu().contiguous() * up(x))
-
 def pairwise_topk(x: Tensor, k: int) -> tuple[Tensor, Tensor]:
   n = x.shape[-1]
   cmp = (x.unsqueeze(-1) > x.unsqueeze(-2)) | ((x.unsqueeze(-1) == x.unsqueeze(-2)) & \
@@ -121,7 +118,9 @@ class FFNBlock:
   @function
   def _feed_forward(self, h: Tensor) -> Tensor:
     h_norm = self.ffn_norm(h)
-    if not hasattr(self, 'ffn_gate_exps'): return h + _swiglu(h_norm, self.ffn_gate, self.ffn_up, self.ffn_down)
+    if not hasattr(self, 'ffn_gate_exps'):
+      # TODO: remove the need for this contiguous
+      return h + self.ffn_down(self.ffn_gate(h_norm).silu().contiguous() * self.ffn_up(h_norm))
     x = h_norm.unsqueeze(2)  # (B, T, 1, D) - add expert dim for broadcasting
     logits = self.ffn_gate_inp(h_norm)
     vals, sel = pairwise_topk(logits, self.num_experts_per_tok)
@@ -130,7 +129,7 @@ class FFNBlock:
     out = (x_down * probs.unsqueeze(-1)).sum(axis=2)  # (B, T, D)
     if hasattr(self, 'ffn_gate_shexp'):
       shared_gate = (h_norm * self.ffn_gate_inp_shexp_weight).sum(axis=-1, keepdim=True).sigmoid()
-      out = out + _swiglu(h_norm, self.ffn_gate_shexp, self.ffn_up_shexp, self.ffn_down_shexp) * shared_gate
+      out = out + self.ffn_down_shexp(self.ffn_gate_shexp(h_norm).silu().contiguous() * self.ffn_up_shexp(h_norm)) * shared_gate
     return h + out
 
   def __call__(self, x: Tensor, start_pos: int|UOp):
@@ -145,9 +144,16 @@ class TransformerBlock(FFNBlock):
                max_context:int=0, qk_norm:int=0, num_experts:int=0, num_experts_per_tok:int=0, norm_topk_prob:bool=False, shared_expert_dim:int=0,
                has_gate:bool=False):
     super().__init__(dim, hidden_dim, norm_eps, num_experts, num_experts_per_tok, norm_topk_prob, shared_expert_dim)
-    self.n_heads, self.n_kv_heads, self.head_dim = n_heads, n_kv_heads, head_dim
-    self.rope_theta, self.rope_dim, self.max_context = rope_theta, rope_dim or head_dim, max_context
-    self.qk_norm, self.has_gate = qk_norm, has_gate
+    self.n_heads      = n_heads
+    self.n_kv_heads   = n_kv_heads
+    self.head_dim     = head_dim
+    self.rope_theta   = rope_theta
+    self.rope_dim     = rope_dim or head_dim
+    self.max_context  = max_context
+    self.qk_norm      = qk_norm
+    self.has_gate     = has_gate
+
+    # --- attention projections (all linear, bias-free) ------------------
     q_proj_out       = self.head_dim * n_heads * (2 if has_gate else 1)
     kv_proj_out      = self.head_dim * n_kv_heads
     self.attn_q      = nn.Linear(dim, q_proj_out,  bias=False)
