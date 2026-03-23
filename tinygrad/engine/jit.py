@@ -332,7 +332,7 @@ class TinyJit(Generic[ReturnType]):
       _check_no_non_tensor_return(ret)
       if DEBUG >= 1: print(f"JIT captured {len(self._linears)} linears with {len(input_buffers)} inputs")
 
-      # combine all captured linears into one, memory plan, and convert to ExecItems
+      # combine all captured linears into one and convert to ExecItems
       big_linear = UOp(Ops.LINEAR, src=tuple(flatten([l.src for l in self._linears])))
       del self._linears
 
