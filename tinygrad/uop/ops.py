@@ -119,7 +119,17 @@ class recursive_property(property):
     if all(nm in child.__dict__ for child in x.src):
       x.__dict__[nm] = self.fxn(x)
       return x.__dict__[nm]
-    for node in x.toposort(gate=lambda node: nm not in node.__dict__): node.__dict__[nm] = self.fxn(node)
+    # slow path: iterative DFS computing property bottom-up (avoids toposort dict + lambda + second pass)
+    fxn = self.fxn
+    stack: list[tuple[UOp, bool]] = [(x, False)]
+    while stack:
+      node, visited = stack.pop()
+      if nm in node.__dict__: continue
+      if not visited:
+        stack.append((node, True))
+        for s in reversed(node.src):
+          if nm not in s.__dict__: stack.append((s, False))
+      else: node.__dict__[nm] = fxn(node)
     return x.__dict__[nm]
 
 # we import this late so we can use resolve/smax in mixins
