@@ -1,7 +1,7 @@
 from __future__ import annotations
 import os, ctypes, functools, mmap, struct, array, math, sys, weakref, contextlib
 assert sys.platform != 'win32'
-from typing import Any
+from typing import Any, cast
 from tinygrad.device import BufferSpec, CompilerSet, Device
 from tinygrad.runtime.support.hcq import HCQBuffer, HWQueue, HCQProgram, HCQCompiled, HCQAllocatorBase, HCQSignal, HCQArgsState, BumpAllocator
 from tinygrad.runtime.support.hcq import FileIOInterface, MMIOInterface
@@ -203,7 +203,8 @@ class QCOMArgsState(HCQArgsState):
     ubos = [b for i,b in enumerate(bufs) for _,dt in prg.buf_dtypes[i] if not isinstance(dt, ImageDType)]
     uavs = [(dt,b) for i,b in enumerate(bufs) for _,dt in prg.buf_dtypes[i] if isinstance(dt, ImageDType)]
     ibos, texs = uavs[:prg.ibo_cnt], uavs[prg.ibo_cnt:]
-    for cnst_val,cnst_off,cnst_sz in prg.consts_info: to_mv(self.buf.va_addr + cnst_off, cnst_sz)[:] = cnst_val.to_bytes(cnst_sz, byteorder='little')
+    for cnst_val,cnst_off,cnst_sz in prg.consts_info:
+      to_mv(cast(int, self.buf.va_addr) + cnst_off, cnst_sz)[:] = cnst_val.to_bytes(cnst_sz, byteorder='little')
 
     if prg.samp_cnt > 0: to_mv(int(self.buf.va_addr) + prg.samp_off, len(prg.samplers) * 4).cast('I')[:] = array.array('I', prg.samplers)
     if prg.NIR:
