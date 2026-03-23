@@ -4,7 +4,7 @@ from collections import deque
 from tinygrad.uop.ops import UOp, Ops, buffers, UOpMetaClass, track_rewrites, graph_rewrite, gate_kernel_sink, KernelInfo
 from tinygrad.uop.spec import type_verify, tensor_spec
 from tinygrad.device import Buffer, MultiBuffer
-from tinygrad.helpers import DEBUG, cpu_profile, TracingKey, SPEC, pluralize, SCACHE, BASEDIR, flatten
+from tinygrad.helpers import DEBUG, cpu_profile, TracingKey, SPEC, pluralize, SCACHE, BASEDIR, flatten, diskcache_get, diskcache_put, getenv
 from tinygrad.engine.realize import ExecItem
 
 # **** schedule linearizer
@@ -109,16 +109,25 @@ pm_resolve_linear_call = PatternMatcher([
 ])
 
 schedule_cache: dict[bytes, UOp] = {}
+DISKCACHE_SCHEDULE = getenv("DISKCACHE_SCHEDULE", 1)
 # ctx is just for DEBUG on inner
 def lower_sink_to_linear(function:UOp) -> UOp|None:
   st = time.perf_counter()
   if isinstance(function.arg, KernelInfo): return None
   cache_key = function.key
   if not SCACHE or (sc_ret:=schedule_cache.get(cache_key, None)) is None:
-    if SPEC: type_verify(function, tensor_spec)
-    # support recursive CALLs
-    linear = create_schedule(get_kernel_graph(function))
-    if SCACHE: schedule_cache[cache_key] = linear
+    # try disk cache before expensive rewrite
+    if DISKCACHE_SCHEDULE and SCACHE and (dc_ret:=diskcache_get("schedule", cache_key.hex())) is not None:
+      sc_ret = dc_ret
+      schedule_cache[cache_key] = sc_ret
+      linear = sc_ret
+    else:
+      if SPEC: type_verify(function, tensor_spec)
+      # support recursive CALLs
+      linear = create_schedule(get_kernel_graph(function))
+      if SCACHE:
+        schedule_cache[cache_key] = linear
+        if DISKCACHE_SCHEDULE: diskcache_put("schedule", cache_key.hex(), linear)
   else:
     # schedule cache hit
     linear = sc_ret
