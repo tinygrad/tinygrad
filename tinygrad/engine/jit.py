@@ -292,7 +292,9 @@ class TinyJit(Generic[ReturnType]):
     self.prune = prune
     self.optimize = optimize
 
-  def add_linear(self, linear:UOp, var_vals:dict[str, int]): self._linears.append(linear)
+  def add_linear(self, linear:UOp, var_vals:dict[str, int], external_bufs:set[UOp]|None=None):
+    self._linears.append(linear)
+    self._external_bufs.update(external_bufs)
 
   def reset(self):
     assert self.fxn is not None, "can't reset without function"
@@ -324,12 +326,12 @@ class TinyJit(Generic[ReturnType]):
       assert self.fxn is not None
       if capturing: raise RuntimeError(f"having TinyJit inside another TinyJit is not supported {len(capturing)=} {capturing=}")
       self._linears: list[UOp] = []
-      with Context(NO_MEMORY_PLANNER=1):
-        capturing.append(self)
-        try:
-          ret = self.fxn(*args, **kwargs)
-          if len(params:=get_parameters(ret)): Tensor.realize(*params)
-        finally: capturing.clear()
+      self._external_bufs: set[UOp] = set()
+      capturing.append(self)
+      try:
+        ret = self.fxn(*args, **kwargs)
+        if len(params:=get_parameters(ret)): Tensor.realize(*params)
+      finally: capturing.clear()
       if not len(self._linears): raise JitError("didn't JIT anything!")
       _check_no_non_tensor_return(ret)
       if DEBUG >= 1: print(f"JIT captured {len(self._linears)} linears with {len(input_buffers)} inputs")
@@ -355,7 +357,8 @@ class TinyJit(Generic[ReturnType]):
       else:
         # big_linear = UOp(Ops.LINEAR, src=tuple(flatten([l.src for l in self._linears])))
         # big_linear = memory_plan_rewrite(UOp(Ops.LINEAR, src=tuple(flatten([l.src for l in self._linears]))))
-        with Context(BEAM=getenv("JITBEAM", BEAM.value)): jit_cache = [ei.lower() for ei in linear_to_schedule(memory_plan_rewrite(big_linear))]
+        with Context(BEAM=getenv("JITBEAM", BEAM.value)):
+          jit_cache = [ei.lower() for ei in linear_to_schedule(memory_plan_rewrite(big_linear, self._external_bufs))]
 
       del big_linear
 

@@ -12,18 +12,14 @@ def _collect_bufs(u:UOp) -> list[UOp]:
   if u.op in {Ops.MSELECT, Ops.MSTACK}: return [b for s in u.src for b in _collect_bufs(s)]
   return []
 
-def _get_external_bufs() -> set[UOp]:
-  from tinygrad.tensor import all_tensors
-  return {n for tref in list(all_tensors) if (t:=tref()) is not None for n in t.uop.toposort() if n.op is Ops.BUFFER}
-
 def _can_plan(b:UOp, external_bufs:set[UOp]) -> bool:
   if b in external_bufs or b in buffers: return False
   devs = (b.device,) if isinstance(b.device, str) else b.device
   return all(not d.startswith(("DISK", "TINYFS")) and hasattr(Device[d].allocator, "_offset") for d in devs)
 
-def memory_plan_rewrite(linear:UOp) -> UOp:
+def memory_plan_rewrite(linear:UOp, external_bufs:set[UOp]|None=None) -> UOp:
   if NO_MEMORY_PLANNER: return linear
-  external_bufs = _get_external_bufs()
+  if external_bufs is None: external_bufs = set()
 
   # compute lifetimes for all plannable internal buffers
   first_appearance:dict[UOp, int] = {}
