@@ -431,12 +431,10 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     if len(idx) < len(self.shape): idx += tuple([slice(None)]*(len(self.shape)-len(idx)))
     assert len(idx) == len(self.shape), f"__getitem__ shape mismatch, indexing {self.shape} with {len(idx)} args"
     if len(slice_idx:=[i for i,x in enumerate(idx) if isinstance(x, slice)]):
-      # apply SHRINK for slices that aren't full range
-      shrink_args = tuple((s.start or 0, s.stop if s.stop is not None else self.shape[i]) for i,s in enumerate(idx) if isinstance(s, slice))
-      src = self
-      if any(a != (0, self.shape[slice_idx[j]]) for j, a in enumerate(shrink_args)):
-        src = self.shrink(tuple((s.start or 0, s.stop if s.stop is not None else self.shape[i]) if isinstance(s, slice) else (0, self.shape[i])
-                                for i, s in enumerate(idx)))
+      # apply SHRINK for slices that aren't the full range
+      bounds = tuple((s.start or 0, s.stop if s.stop is not None else self.shape[i]) if isinstance(s, slice) else (0, self.shape[i])
+                     for i, s in enumerate(idx))
+      src = self if all(b == (0, self.shape[i]) for i, b in enumerate(bounds)) else self.shrink(bounds)
       perm = src.permute(tuple([i for i in range(src.ndim) if i not in slice_idx] + slice_idx))
       return perm.index(*[UOp.const(dtypes.weakint, x) if isinstance(x, int) else x for x in idx if not isinstance(x, slice)], ptr=True)
     else:
