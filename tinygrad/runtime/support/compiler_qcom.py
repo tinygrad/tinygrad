@@ -26,7 +26,7 @@ class QCOMCompiler(Compiler):
   def compile(self, src) -> bytes:
     ch = self.checked(llvm_qcom.cl_compiler_compile_source(self.llvm_inst, self.chip_id, llvm_qcom.CL_MODE_64BIT, b"", 0, 0, 0, src.encode(), 0,
                                                            llvm_qcom.CL_SRC_STR, None))
-    if DEBUG >= 8: print(system("llvm-dis", input=ctypes.string_at(ch.compiled.llvm_bitcode, ch.compiled.llvm_bitcode_size)))
+    if DEBUG >= 8: print(system("llvm-dis", input=ctypes.string_at((comp:=ch.contents.compiled.contents).llvm_bitcode, comp.llvm_bitcode_size)))
     lh = self.checked(llvm_qcom.cl_compiler_link_program(self.llvm_inst, self.chip_id, llvm_qcom.CL_MODE_64BIT, None, 1, ch))
     llvm_qcom.cl_compiler_handle_create_binary(lh, ctypes.byref(ptr:=ctypes.c_void_p()), ctypes.byref(sz:=ctypes.c_size_t()))
     for h in [ch, lh]: llvm_qcom.cl_compiler_free_handle(h)
