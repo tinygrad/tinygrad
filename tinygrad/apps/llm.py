@@ -84,11 +84,14 @@ def apply_rope(x:Tensor, freqs_cis:Tensor, rope_dim:int=0) -> Tensor:
   y = (x1 * cos - x2 * sin).cat(x2 * cos + x1 * sin, dim=-1)
   return y.cat(x_pass, dim=-1) if x_pass is not None else y
 
-def pairwise_topk(logits: Tensor, n: int, k: int) -> Tensor:
-  cmp = (logits.unsqueeze(-1) > logits.unsqueeze(-2)) | ((logits.unsqueeze(-1) == logits.unsqueeze(-2)) & \
+def _swiglu(x, gate, up, down): return down(gate(x).silu().contiguous() * up(x))
+
+def pairwise_topk(x: Tensor, k: int) -> tuple[Tensor, Tensor]:
+  n = x.shape[-1]
+  cmp = (x.unsqueeze(-1) > x.unsqueeze(-2)) | ((x.unsqueeze(-1) == x.unsqueeze(-2)) & \
     (Tensor.arange(n).reshape(1,1,n,1) < Tensor.arange(n).reshape(1,1,1,n)))
-  ranks = (logits*0).scatter(-1, cmp.sum(axis=-1).cast('int32'), logits*0+Tensor.arange(n).reshape(1,1,n).cast(logits.dtype))
-  return ranks[:,:,n-k:].cast('int32')
+  sel = (x*0).scatter(-1, cmp.sum(axis=-1).cast('int32'), x*0+Tensor.arange(n).reshape(1,1,n).cast(x.dtype))[:,:,n-k:].cast('int32')
+  return x.gather(-1, sel), sel
 
 class TransformerBlock:
   def __init__(self, dim:int, hidden_dim:int, n_heads:int, n_kv_heads:int, norm_eps:float, head_dim:int, rope_theta:float, rope_dim:int=0,
@@ -174,18 +177,16 @@ class TransformerBlock:
     h_norm = self.ffn_norm(h)
     if hasattr(self, 'ffn_gate_exps'):
       x = h_norm.unsqueeze(2)  # (B, T, 1, D) - add expert dim for broadcasting
-      logits, n, k = self.ffn_gate_inp(h_norm), self.ffn_gate_inp.weight.shape[0], self.num_experts_per_tok
-      sel = pairwise_topk(logits, n, k)
-      probs = logits.gather(-1, sel).softmax(-1) if self.norm_topk_prob else logits.softmax(-1).gather(-1, sel)
+      logits = self.ffn_gate_inp(h_norm)
+      vals, sel = pairwise_topk(logits, self.num_experts_per_tok)
+      probs = vals.softmax(-1) if self.norm_topk_prob else logits.softmax(-1).gather(-1, sel)
       x_down = self.ffn_down_exps(sel, self.ffn_gate_exps(sel, x).silu() * self.ffn_up_exps(sel, x))  # (B, T, k, D)
       out = (x_down * probs.unsqueeze(-1)).sum(axis=2)  # (B, T, D)
       if hasattr(self, 'ffn_gate_shexp'):
         shared_gate = (h_norm * self.ffn_gate_inp_shexp_weight).sum(axis=-1, keepdim=True).sigmoid()
-        out = out + self.ffn_down_shexp(self.ffn_gate_shexp(h_norm).silu() * self.ffn_up_shexp(h_norm)) * shared_gate
+        out = out + _swiglu(h_norm, self.ffn_gate_shexp, self.ffn_up_shexp, self.ffn_down_shexp) * shared_gate
       return h + out
-    # TODO: remove the need for this contiguous
-    gated  = self.ffn_gate(h_norm).silu().contiguous() * self.ffn_up(h_norm)
-    return h + self.ffn_down(gated)
+    return h + _swiglu(h_norm, self.ffn_gate, self.ffn_up, self.ffn_down)
 
   def __call__(self, x: Tensor, start_pos: int|UOp):
     if not hasattr(self, "cache_kv"):
@@ -262,17 +263,14 @@ class GatedDeltaNetBlock:
     h_norm = self.ffn_norm(h)
     if hasattr(self, 'ffn_gate_exps'):
       x = h_norm.unsqueeze(2)  # (B, T, 1, D) - add expert dim for broadcasting
-      logits = self.ffn_gate_inp(h_norm)
-      sel = pairwise_topk(logits, self.ffn_gate_inp.weight.shape[0], self.num_experts_per_tok)
-      probs = logits.gather(-1, sel).softmax(-1)
+      vals, sel = pairwise_topk(self.ffn_gate_inp(h_norm), self.num_experts_per_tok)
+      probs = vals.softmax(-1)
       x_down = self.ffn_down_exps(sel, self.ffn_gate_exps(sel, x).silu() * self.ffn_up_exps(sel, x))  # (B, T, k, D)
       out = (x_down * probs.unsqueeze(-1)).sum(axis=2)  # (B, T, D)
       shared_gate = (h_norm * self.ffn_gate_inp_shexp_weight).sum(axis=-1, keepdim=True).sigmoid()
-      out = out + self.ffn_down_shexp(self.ffn_gate_shexp(h_norm).silu() * self.ffn_up_shexp(h_norm)) * shared_gate
+      out = out + _swiglu(h_norm, self.ffn_gate_shexp, self.ffn_up_shexp, self.ffn_down_shexp) * shared_gate
       return h + out
-    # TODO: remove the need for this contiguous
-    gated  = self.ffn_gate(h_norm).silu().contiguous() * self.ffn_up(h_norm)
-    return h + self.ffn_down(gated)
+    return h + _swiglu(h_norm, self.ffn_gate, self.ffn_up, self.ffn_down)
 
   def __call__(self, x: Tensor, start_pos: int|UOp):
     if not hasattr(self, "delta_cache"):
