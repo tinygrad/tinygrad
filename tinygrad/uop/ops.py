@@ -431,13 +431,17 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     if len(idx) < len(self.shape): idx += tuple([slice(None)]*(len(self.shape)-len(idx)))
     assert len(idx) == len(self.shape), f"__getitem__ shape mismatch, indexing {self.shape} with {len(idx)} args"
     if len(slice_idx:=[i for i,x in enumerate(idx) if isinstance(x, slice)]):
-      perm = self.permute(tuple([i for i in range(self.ndim) if i not in slice_idx] + slice_idx))
+      # apply SHRINK for slices that aren't the full range
+      bounds = tuple((s.start or 0, s.stop if s.stop is not None else self.shape[i]) if isinstance(s, slice) else (0, self.shape[i])
+                     for i, s in enumerate(idx))
+      src = self if all(b == (0, self.shape[i]) for i, b in enumerate(bounds)) else self.shrink(bounds)
+      perm = src.permute(tuple([i for i in range(src.ndim) if i not in slice_idx] + slice_idx))
       return perm.index(*[UOp.const(dtypes.weakint, x) if isinstance(x, int) else x for x in idx if not isinstance(x, slice)], ptr=True)
     else:
       return self.index(*[UOp.const(dtypes.weakint, x) if isinstance(x, int) else x for x in idx])
   def const_like(self, b:ConstLike):
     # constants can optionally have a DEVICE source
-    return UOp.const(self.dtype, b, device=self._device, shape=self._shape)
+    return UOp.const(self.dtype.base, b, device=self._device, shape=self._shape)
   def broadcast(self, count:int):
     assert self.dtype.vcount == 1
     if count == 1: return self
