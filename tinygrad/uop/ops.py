@@ -60,10 +60,14 @@ def multirange_str(rngs:Iterable[UOp], color=False, pad=None) -> str:
   if pad is not None: ret += " " * (pad-ansilen(ret))
   return ret
 
+_shape_to_shape_arg_cache: dict[tuple[sint, ...], UOp] = {}
 def shape_to_shape_arg(arg:tuple[sint, ...]) -> UOp:
-  if len(arg) == 0: return UOp(Ops.VECTORIZE, dtypes.weakint.vec(0))
-  elif all_int(arg): return UOp.const(dtypes.weakint.vec(len(arg)), arg)
+  if (cached := _shape_to_shape_arg_cache.get(arg)) is not None: return cached
+  if len(arg) == 0: ret = UOp(Ops.VECTORIZE, dtypes.weakint.vec(0))
+  elif all_int(arg): ret = UOp.const(dtypes.weakint.vec(len(arg)), arg)
   else: return UOp(Ops.VECTORIZE, dtypes.weakint.vec(len(arg)), tuple(UOp.const(dtypes.weakint, x) if isinstance(x, int) else x for x in arg))
+  _shape_to_shape_arg_cache[arg] = ret
+  return ret
 
 def consumer_map_from_toposort(lst:Iterable[UOp]):
   ret: dict[UOp, dict[UOp, None]] = {}
