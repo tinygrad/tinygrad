@@ -42,7 +42,7 @@ def memory_plan_rewrite(linear:UOp) -> UOp:
   buf_hold = {b: last_appearance[b] - first_appearance[b] + 1 for b in first_appearance if b in copy_bufs}
 
   # suballocation: build sorted open/close events, then alloc/free in order
-  block_size = 128 # ~cache-line
+  block_size = 256
   nbytes = {b: round_up(b.arg * b.dtype.itemsize, block_size) for b in first_appearance}
   events = sorted([(first_appearance[b], True, b) for b in first_appearance] +
                   [(last_appearance[b] + 1 + buf_hold.get(b, 0), False, b) for b in first_appearance], key=lambda x: (x[0], x[1]))
