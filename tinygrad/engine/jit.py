@@ -1,16 +1,26 @@
 from typing import TypeVar, Generic, Callable, cast, Any
 import functools, collections
 from tinygrad.tensor import Tensor
-from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, BEAM, getenv, colored, JIT, JIT_BATCH_SIZE, dedup, partition, unwrap
+from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, BEAM, getenv, colored, JIT, JIT_BATCH_SIZE, dedup, unwrap
 from tinygrad.device import Buffer, Compiled, Device, MultiBuffer
 from tinygrad.dtype import DType
-from tinygrad.uop.ops import UOp, Variable, sym_infer, Ops
+from tinygrad.uop.ops import UOp, Variable, sym_infer, Ops, buffers
 from tinygrad.engine.realize import ExecItem, capturing, ViewOp, BufferCopy, BufferXfer, EncDec, CompiledRunner, Runner, Estimates
-from tinygrad.engine.memory import _internal_memory_planner
+from tinygrad.engine.memory import _internal_memory_planner, _collect_bufs
 from tinygrad.engine.schedule import linear_to_schedule
 from tinygrad.nn.state import get_parameters
 from tinygrad.schedule.rangeify import mop_cleanup
 from dataclasses import dataclass, replace
+
+def prune_linear(linear:UOp, needed:set[UOp]) -> tuple[UOp, UOp]:
+  kept, onetime = [], []
+  for si in linear.src:
+    si_bufs = {b for src in si.src[1:] for b in _collect_bufs(src)}
+    if not si_bufs.isdisjoint(needed):
+      kept.append(si)
+      needed |= si_bufs
+    else: onetime.append(si)
+  return linear.replace(src=tuple(kept)), linear.replace(src=tuple(onetime))
 
 class GraphException(Exception): pass
 class JitError(Exception): pass
@@ -312,19 +322,29 @@ class TinyJit(Generic[ReturnType]):
       assert self.fxn is not None
       if capturing: raise RuntimeError(f"having TinyJit inside another TinyJit is not supported {len(capturing)=} {capturing=}")
       self._linears: list[UOp] = []
-      with Context(BEAM=getenv("JITBEAM", BEAM.value)):
-        capturing.append(self)
-        try:
-          ret = self.fxn(*args, **kwargs)
-          if len(params:=get_parameters(ret)): Tensor.realize(*params)
-        finally: capturing.clear()
+      capturing.append(self)
+      try:
+        ret = self.fxn(*args, **kwargs)
+        if len(params:=get_parameters(ret)): Tensor.realize(*params)
+      finally: capturing.clear()
       if not len(self._linears): raise JitError("didn't JIT anything!")
       _check_no_non_tensor_return(ret)
       if DEBUG >= 1: print(f"JIT captured {len(self._linears)} linears with {len(input_buffers)} inputs")
 
       # combine all captured linears into one and convert to ExecItems
-      jit_cache = [ei.lower() for ei in linear_to_schedule(UOp(Ops.LINEAR, src=tuple(flatten([l.src for l in self._linears]))))]
+      big_linear = UOp(Ops.LINEAR, src=tuple(flatten([l.src for l in self._linears])))
       del self._linears
+
+      if self.prune:
+        big_linear, onetime_linear = prune_linear(big_linear, {k for k,v in buffers.items() if isinstance(v, Buffer) and v in set(input_buffers)})
+        if DEBUG >= 1: print(f"pruned from {len(big_linear.src) + len(onetime_linear.src)} -> {len(big_linear.src)} kernels")
+        for ei in (si.lower() for si in linear_to_schedule(onetime_linear)):
+          for b in ei.bufs: cast(Buffer, b).ensure_allocated()
+          ei.run(var_vals, jit=True)
+        del onetime_linear
+
+      with Context(BEAM=getenv("JITBEAM", BEAM.value)): jit_cache = [ei.lower() for ei in linear_to_schedule(big_linear)]
+      del big_linear
 
       # track inputs that are views of buffers
       # TODO: eventually expected_buffers should live in ExecItem
@@ -334,20 +354,6 @@ class TinyJit(Generic[ReturnType]):
           if b is not None and b._base is not None and b._base in input_buffers:
             input_buffers.append(b)
             extra_view_inputs.append((input_buffers.index(b.base), b.offset, b.device, b.size, b.dtype))
-
-      # prune independent kernels (optional)
-      if self.prune:
-        depends = set(input_buffers)
-        update_depends(depends, jit_cache)
-        pruned, onetime = partition(jit_cache, lambda ei: any(b in depends for b in get_out_buffers_for_ei(ei)))
-        if DEBUG >= 1: print(f"pruned from {len(jit_cache)} -> {len(pruned)} kernels")
-        # sync before re-executing onetime kernels
-        for dev in set(Device[b.device] for ei in onetime for b in ei.bufs if b is not None): dev.synchronize()
-        # run the onetime kernels here
-        for ei in onetime:
-          for b in ei.bufs: cast(Buffer, b).ensure_allocated()
-          ei.run(var_vals, jit=True)
-        jit_cache = pruned
 
       # memory planning (optional)
       copies = [(cast(Buffer,ji.bufs[0]),cast(Buffer,ji.bufs[1])) for ji in jit_cache if isinstance(ji.prg, (BufferXfer, BufferCopy, EncDec))]
