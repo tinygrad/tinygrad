@@ -8,7 +8,7 @@ from tinygrad.tensor import Tensor
 from tinygrad.engine.jit import TinyJit, JitError, GraphRunner, MultiGraphRunner, graph_class
 from tinygrad.engine.realize import CompiledRunner, BufferCopy, BufferXfer
 from tinygrad.device import Device
-from tinygrad.helpers import Context, JIT, GlobalCounters, getenv
+from tinygrad.helpers import Context, JIT, GlobalCounters, getenv, BEAM
 from tinygrad.dtype import dtypes
 from extra.models.unet import ResBlock
 
@@ -38,6 +38,21 @@ class TestJit(unittest.TestCase):
     @TinyJit
     def add(a, b): return (a+b).realize()
     _simple_test(add)
+
+  def test_beam_inside_jit(self):
+    from unittest.mock import patch
+    from tinygrad.codegen.opt.search import beam_search
+
+    @TinyJit
+    def add(a, b): return (a+b).realize()
+
+    with patch("tinygrad.codegen.opt.search.beam_search", wraps=lambda k,*a,**kw: k) as mock_beam:
+      for i in range(2): add(Tensor.randn(10, 10), Tensor.randn(10, 10))
+      assert mock_beam.call_count == 0
+
+      with Context(BEAM=1):
+        for i in range(2): add(Tensor.randn(10, 10), Tensor.randn(10, 10))
+      assert mock_beam.call_count > 0
 
   def test_simple_jit_reset(self):
     @TinyJit

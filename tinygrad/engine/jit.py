@@ -343,7 +343,8 @@ class TinyJit(Generic[ReturnType]):
           ei.run(var_vals, jit=True)
         del onetime_linear
 
-      jit_cache = [ei.lower() for ei in linear_to_schedule(big_linear)]
+      with Context(BEAM=getenv("JITBEAM", BEAM.value)):
+        jit_cache = [ei.lower() for ei in linear_to_schedule(big_linear)]
       del big_linear
 
       # track inputs that are views of buffers
@@ -364,8 +365,7 @@ class TinyJit(Generic[ReturnType]):
       if DEBUG >= 1 and len(set(input_replace.values())) != len(input_buffers): print("WARNING: some input tensors not found")
 
       # exec
-      with Context(BEAM=getenv("JITBEAM", BEAM.value)):
-        for ei in jit_cache: ei.run(var_vals)
+      for ei in jit_cache: ei.run(var_vals)
 
       self.captured = CapturedJit(ret, jit_cache, input_replace, extra_view_inputs, names, expected_input_info)
       if self.optimize: self.captured.replan_buffers_memory_layout()
