@@ -324,7 +324,7 @@ class TinyJit(Generic[ReturnType]):
       assert self.fxn is not None
       if capturing: raise RuntimeError(f"having TinyJit inside another TinyJit is not supported {len(capturing)=} {capturing=}")
       self._linears: list[UOp] = []
-      with Context(BEAM=getenv("JITBEAM", BEAM.value), NO_MEMORY_PLANNER=1):
+      with Context(NO_MEMORY_PLANNER=1):
         capturing.append(self)
         try:
           ret = self.fxn(*args, **kwargs)
@@ -347,7 +347,7 @@ class TinyJit(Generic[ReturnType]):
         del onetime_linear
 
       if OLD_MEMPLAN:
-        jit_cache = [ei.lower() for ei in linear_to_schedule(big_linear)]
+        with Context(BEAM=getenv("JITBEAM", BEAM.value)): jit_cache = [ei.lower() for ei in linear_to_schedule(big_linear)]
 
         copies = [(cast(Buffer,ji.bufs[0]),cast(Buffer,ji.bufs[1])) for ji in jit_cache if isinstance(ji.prg, (BufferXfer, BufferCopy, EncDec))]
         assigned = _internal_memory_planner([cast(list[Buffer], item.bufs) for item in jit_cache], copies, debug_prefix="JIT ")
@@ -355,7 +355,8 @@ class TinyJit(Generic[ReturnType]):
       else:
         # big_linear = UOp(Ops.LINEAR, src=tuple(flatten([l.src for l in self._linears])))
         # big_linear = memory_plan_rewrite(UOp(Ops.LINEAR, src=tuple(flatten([l.src for l in self._linears]))))
-        jit_cache = [ei.lower() for ei in linear_to_schedule(memory_plan_rewrite(big_linear))]
+        with Context(BEAM=getenv("JITBEAM", BEAM.value)): jit_cache = [ei.lower() for ei in linear_to_schedule(memory_plan_rewrite(big_linear))]
+
       del big_linear
 
       # track inputs that are views of buffers
