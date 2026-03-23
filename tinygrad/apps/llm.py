@@ -93,6 +93,42 @@ def pairwise_topk(x: Tensor, k: int) -> tuple[Tensor, Tensor]:
   sel = (x*0).scatter(-1, cmp.sum(axis=-1).cast('int32'), x*0+Tensor.arange(n).reshape(1,1,n).cast(x.dtype))[:,:,n-k:].cast('int32')
   return x.gather(-1, sel), sel
 
+def _init_ffn(self, dim, hidden_dim, norm_eps, num_experts=0, num_experts_per_tok=0, norm_topk_prob=False, shared_expert_dim=0):
+  self.attn_norm = nn.RMSNorm(dim, norm_eps)
+  self.ffn_norm  = nn.RMSNorm(dim, norm_eps)
+  if num_experts > 0:
+    self.norm_topk_prob = norm_topk_prob
+    self.num_experts_per_tok = num_experts_per_tok
+    self.ffn_gate_inp  = nn.Linear(dim, num_experts, bias=False)
+    self.ffn_gate_exps = ExpertWeights(num_experts, dim, hidden_dim)
+    self.ffn_up_exps   = ExpertWeights(num_experts, dim, hidden_dim)
+    self.ffn_down_exps = ExpertWeights(num_experts, hidden_dim, dim)
+    if shared_expert_dim > 0:
+      self.ffn_gate_shexp = nn.Linear(dim, shared_expert_dim, bias=False)
+      self.ffn_up_shexp = nn.Linear(dim, shared_expert_dim, bias=False)
+      self.ffn_down_shexp = nn.Linear(shared_expert_dim, dim, bias=False)
+      self.ffn_gate_inp_shexp_weight = Tensor.zeros(dim)
+  else:
+    self.ffn_gate = nn.Linear(dim, hidden_dim, bias=False)
+    self.ffn_up   = nn.Linear(dim, hidden_dim, bias=False)
+    self.ffn_down = nn.Linear(hidden_dim, dim, bias=False)
+
+@function
+def _block_feed_forward(self, h: Tensor) -> Tensor:
+  h_norm = self.ffn_norm(h)
+  if hasattr(self, 'ffn_gate_exps'):
+    x = h_norm.unsqueeze(2)  # (B, T, 1, D) - add expert dim for broadcasting
+    logits = self.ffn_gate_inp(h_norm)
+    vals, sel = pairwise_topk(logits, self.num_experts_per_tok)
+    probs = vals.softmax(-1) if self.norm_topk_prob else logits.softmax(-1).gather(-1, sel)
+    x_down = self.ffn_down_exps(sel, self.ffn_gate_exps(sel, x).silu() * self.ffn_up_exps(sel, x))  # (B, T, k, D)
+    out = (x_down * probs.unsqueeze(-1)).sum(axis=2)  # (B, T, D)
+    if hasattr(self, 'ffn_gate_shexp'):
+      shared_gate = (h_norm * self.ffn_gate_inp_shexp_weight).sum(axis=-1, keepdim=True).sigmoid()
+      out = out + _swiglu(h_norm, self.ffn_gate_shexp, self.ffn_up_shexp, self.ffn_down_shexp) * shared_gate
+    return h + out
+  return h + _swiglu(h_norm, self.ffn_gate, self.ffn_up, self.ffn_down)
+
 class TransformerBlock:
   def __init__(self, dim:int, hidden_dim:int, n_heads:int, n_kv_heads:int, norm_eps:float, head_dim:int, rope_theta:float, rope_dim:int=0,
                max_context:int=0, qk_norm:int=0, num_experts:int=0, num_experts_per_tok:int=0, norm_topk_prob:bool=False, shared_expert_dim:int=0,
@@ -114,28 +150,8 @@ class TransformerBlock:
     self.attn_v      = nn.Linear(dim, kv_proj_out, bias=False)
     self.attn_output = nn.Linear(self.head_dim * n_heads, dim, bias=False)
 
-    # --- RMSNorms --------------------------------------------------------
-    self.attn_norm   = nn.RMSNorm(dim, norm_eps)
-    self.ffn_norm    = nn.RMSNorm(dim, norm_eps)
+    _init_ffn(self, dim, hidden_dim, norm_eps, num_experts, num_experts_per_tok, norm_topk_prob, shared_expert_dim)
     if qk_norm: self.attn_q_norm, self.attn_k_norm = nn.RMSNorm(qk_norm, norm_eps), nn.RMSNorm(qk_norm, norm_eps)
-
-    # --- feed-forward (MoE or dense) -------------------------------------
-    if num_experts > 0:
-      self.norm_topk_prob = norm_topk_prob
-      self.num_experts_per_tok = num_experts_per_tok
-      self.ffn_gate_inp = nn.Linear(dim, num_experts, bias=False)  # router
-      self.ffn_gate_exps = ExpertWeights(num_experts, dim, hidden_dim)
-      self.ffn_up_exps = ExpertWeights(num_experts, dim, hidden_dim)
-      self.ffn_down_exps = ExpertWeights(num_experts, hidden_dim, dim)
-      if shared_expert_dim > 0:
-        self.ffn_gate_shexp = nn.Linear(dim, shared_expert_dim, bias=False)
-        self.ffn_up_shexp = nn.Linear(dim, shared_expert_dim, bias=False)
-        self.ffn_down_shexp = nn.Linear(shared_expert_dim, dim, bias=False)
-        self.ffn_gate_inp_shexp_weight = Tensor.zeros(dim)
-    else:
-      self.ffn_gate    = nn.Linear(dim, hidden_dim, bias=False)
-      self.ffn_up      = nn.Linear(dim, hidden_dim, bias=False)
-      self.ffn_down    = nn.Linear(hidden_dim, dim, bias=False)
 
   @function
   def _attention(self, x:Tensor, start_pos:int|UOp) -> Tensor:
@@ -172,21 +188,7 @@ class TransformerBlock:
     attn = self.attn_output(attn if not self.has_gate else (attn * gate.sigmoid()))
     return x + attn
 
-  @function
-  def _feed_forward(self, h: Tensor) -> Tensor:
-    h_norm = self.ffn_norm(h)
-    if hasattr(self, 'ffn_gate_exps'):
-      x = h_norm.unsqueeze(2)  # (B, T, 1, D) - add expert dim for broadcasting
-      logits = self.ffn_gate_inp(h_norm)
-      vals, sel = pairwise_topk(logits, self.num_experts_per_tok)
-      probs = vals.softmax(-1) if self.norm_topk_prob else logits.softmax(-1).gather(-1, sel)
-      x_down = self.ffn_down_exps(sel, self.ffn_gate_exps(sel, x).silu() * self.ffn_up_exps(sel, x))  # (B, T, k, D)
-      out = (x_down * probs.unsqueeze(-1)).sum(axis=2)  # (B, T, D)
-      if hasattr(self, 'ffn_gate_shexp'):
-        shared_gate = (h_norm * self.ffn_gate_inp_shexp_weight).sum(axis=-1, keepdim=True).sigmoid()
-        out = out + _swiglu(h_norm, self.ffn_gate_shexp, self.ffn_up_shexp, self.ffn_down_shexp) * shared_gate
-      return h + out
-    return h + _swiglu(h_norm, self.ffn_gate, self.ffn_up, self.ffn_down)
+  _feed_forward = _block_feed_forward
 
   def __call__(self, x: Tensor, start_pos: int|UOp):
     if not hasattr(self, "cache_kv"):
@@ -210,23 +212,7 @@ class GatedDeltaNetBlock:
     self.ssm_dt_bias, self.ssm_a = Tensor.zeros(self.num_v_heads), Tensor.zeros(self.num_v_heads)
     self.ssm_norm, self.ssm_out = nn.RMSNorm(self.head_v_dim, norm_eps), nn.Linear(inner_size, dim, bias=False)
 
-    self.attn_norm   = nn.RMSNorm(dim, norm_eps)
-    self.ffn_norm    = nn.RMSNorm(dim, norm_eps)
-
-    if num_experts > 0:
-      self.num_experts_per_tok = num_experts_per_tok
-      self.ffn_gate_inp  = nn.Linear(dim, num_experts, bias=False)
-      self.ffn_gate_exps = ExpertWeights(num_experts, dim, hidden_dim)
-      self.ffn_up_exps   = ExpertWeights(num_experts, dim, hidden_dim)
-      self.ffn_down_exps = ExpertWeights(num_experts, hidden_dim, dim)
-      self.ffn_gate_shexp = nn.Linear(dim, shared_expert_dim, bias=False)
-      self.ffn_up_shexp = nn.Linear(dim, shared_expert_dim, bias=False)
-      self.ffn_down_shexp = nn.Linear(shared_expert_dim, dim, bias=False)
-      self.ffn_gate_inp_shexp_weight = Tensor.zeros(dim)
-    else:
-      self.ffn_gate    = nn.Linear(dim, hidden_dim, bias=False)
-      self.ffn_up      = nn.Linear(dim, hidden_dim, bias=False)
-      self.ffn_down    = nn.Linear(hidden_dim, dim, bias=False)
+    _init_ffn(self, dim, hidden_dim, norm_eps, num_experts, num_experts_per_tok, norm_topk_prob=True, shared_expert_dim=shared_expert_dim)
 
   @function
   def _delta_net(self, x:Tensor) -> Tensor:
@@ -258,19 +244,7 @@ class GatedDeltaNetBlock:
     core_attn_out = self.ssm_norm((final_state@q).squeeze(-1).reshape(B, 1, self.num_v_heads, self.head_v_dim))
     return x + self.ssm_out((core_attn_out * out_gate.silu()).reshape(B, 1, -1).cast(x.dtype))
 
-  @function
-  def _feed_forward(self, h: Tensor) -> Tensor:
-    h_norm = self.ffn_norm(h)
-    if hasattr(self, 'ffn_gate_exps'):
-      x = h_norm.unsqueeze(2)  # (B, T, 1, D) - add expert dim for broadcasting
-      vals, sel = pairwise_topk(self.ffn_gate_inp(h_norm), self.num_experts_per_tok)
-      probs = vals.softmax(-1)
-      x_down = self.ffn_down_exps(sel, self.ffn_gate_exps(sel, x).silu() * self.ffn_up_exps(sel, x))  # (B, T, k, D)
-      out = (x_down * probs.unsqueeze(-1)).sum(axis=2)  # (B, T, D)
-      shared_gate = (h_norm * self.ffn_gate_inp_shexp_weight).sum(axis=-1, keepdim=True).sigmoid()
-      out = out + _swiglu(h_norm, self.ffn_gate_shexp, self.ffn_up_shexp, self.ffn_down_shexp) * shared_gate
-      return h + out
-    return h + _swiglu(h_norm, self.ffn_gate, self.ffn_up, self.ffn_down)
+  _feed_forward = _block_feed_forward
 
   def __call__(self, x: Tensor, start_pos: int|UOp):
     if not hasattr(self, "delta_cache"):
