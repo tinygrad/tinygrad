@@ -289,6 +289,9 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
   (UPat(GroupOp.All-{Ops.SINK}, name="x"), lambda x: x.const_like(0).rtag(x.tag) if x._shape is not None and x.size == 0 else None),
 ])
 
+# pre-combine PMs at module level to avoid re-creating (and re-compiling) on every get_kernel_graph call
+_combined_earliest = pm_syntactic_sugar+pm_mops+earliest_rewrites
+
 # *****************
 # 3.5 cleanups
 
@@ -635,6 +638,10 @@ pm_add_range_tags = PatternMatcher([
   (UPat(Ops.RANGE, name="x"), lambda x: x.rtag(())),
 ])
 
+# pre-combine PMs at module level to avoid recreating on every get_kernel_graph call
+_combined_symbolic = symbolic+pm_reduce_simplify+pm_const_buffer_folding+pm_remove_bufferize
+_combined_kernel_split = to_define_global+pm_flatten_range+rangeify_codegen
+
 def split_store(x:UOp) -> UOp|None:
   # if we have any open ranges here, we don't split
   if x.ranges: return None
@@ -643,7 +650,7 @@ def split_store(x:UOp) -> UOp|None:
 
   # local kernel rewrite
   lctx = LocalAddBufferContext()
-  ret = graph_rewrite(x, to_define_global+pm_flatten_range+rangeify_codegen, ctx=lctx, name="kernel split", bottom_up=True)
+  ret = graph_rewrite(x, _combined_kernel_split, ctx=lctx, name="kernel split", bottom_up=True)
 
   # SINK requires all buffers on the same device, but COPY/BUFFER_VIEW are cross-device or special hardware ops
   if ret.op is Ops.STORE: stored = ret.src[1]
@@ -668,7 +675,7 @@ def get_kernel_graph(sink:UOp) -> UOp:
   if OPENPILOT_HACKS: tsink = graph_rewrite(tsink, pm_fold_moved_after, ctx={}, name="fold moved afters")
   # precompute buffer reachability for fix_store_after_hazard (CONTIGUOUS acts as barrier)
   _hazard_buf_reach, _hazard_buf_idx, _hazard_permflip_reach, _hazard_shrink_reach = _precompute_buf_reach(tsink, gate_contiguous=True)
-  tsink = graph_rewrite(tsink, pm_syntactic_sugar+pm_mops+earliest_rewrites, bottom_up=True, name="earliest rewrites")
+  tsink = graph_rewrite(tsink, _combined_earliest, bottom_up=True, name="earliest rewrites")
   _hazard_buf_reach, _hazard_buf_idx, _hazard_permflip_reach, _hazard_shrink_reach = {}, {}, {}, {}
 
   # convert movement ops to ranges — precompute buffer reachability for realize_store_after_src (no gate)
@@ -677,7 +684,7 @@ def get_kernel_graph(sink:UOp) -> UOp:
   tsink, rctx = run_rangeify(tsink, bool(DEBUG_RANGEIFY))
   _indexing._realize_buf_reach, _indexing._realize_buf_idx = {}, {}
 
-  tsink = graph_rewrite(tsink, symbolic+pm_reduce_simplify+pm_const_buffer_folding+pm_remove_bufferize, name="symbolic+reduce_collapse+debuf")
+  tsink = graph_rewrite(tsink, _combined_symbolic, name="symbolic+reduce_collapse+debuf")
   # skip limit_buffers when MAX_KERNEL_BUFFERS is unset and device has no buffer limit (avoids traversing entire graph for no-op)
   device = tsink._device
   if device is not None:

@@ -60,6 +60,11 @@ def mark_gated(ctx, idx):
   # but if a range is ever ungated, we cannot shrink it
   ctx |= {r:r.src[0] for r in x.ranges if r not in guards}
 
+def do_substitute(ctx:dict, x: UOp, sub_fxn:Callable[[UOp, UOp], UOp]) -> UOp|None:
+  ret = x.substitute({k:sub_fxn(k,v) for k,v in ctx.items() if v is not None})
+  ctx.clear()
+  return None if ret is x else ret.simplify()
+
 pm_simplify_ranges = PatternMatcher([
   (UPat((Ops.END, Ops.REDUCE), name="u"), simplify_merge_adjacent),
   (UPat(Ops.INDEX, name="idx"), mark_gated),
@@ -70,11 +75,6 @@ pm_simplify_ranges = PatternMatcher([
 
 def mark_range_mod(ctx:dict[UOp, UOp|None], r:UOp, c:UOp) -> None:
   if r not in ctx and r.arg[-1] is not AxisType.WARP and r.src[0].op is Ops.CONST and r.src[0].divides(c.arg) is not None: ctx[r] = c
-
-def do_substitute(ctx:dict, x: UOp, sub_fxn:Callable[[UOp, UOp], UOp]) -> UOp|None:
-  ret = x.substitute({k:sub_fxn(k,v) for k,v in ctx.items() if v is not None})
-  ctx.clear()
-  return None if ret is x else ret.simplify()
 
 def dont_sub_ranges_for_image(ctx:dict[UOp, UOp|None], x:UOp) -> None:
   if isinstance(x.src[0].src[0].dtype, ImageDType):
