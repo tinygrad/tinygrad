@@ -343,8 +343,7 @@ class TinyJit(Generic[ReturnType]):
           ei.run(var_vals, jit=True)
         del onetime_linear
 
-      with Context(BEAM=getenv("JITBEAM", BEAM.value)):
-        jit_cache = [ei.lower() for ei in linear_to_schedule(big_linear)]
+      with Context(BEAM=getenv("JITBEAM", BEAM.value)): jit_cache = [ei.lower() for ei in linear_to_schedule(big_linear)]
       del big_linear
 
       # track inputs that are views of buffers
