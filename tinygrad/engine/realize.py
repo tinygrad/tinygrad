@@ -1,5 +1,5 @@
 from typing import cast, Callable
-import time, pprint, random, itertools, math
+import time, pprint, random, itertools, math, os, pickle
 from dataclasses import dataclass, replace, field
 from tinygrad.helpers import all_same, colored, DEBUG, GlobalCounters, ansilen, BEAM, NOOPT, all_int, Metadata, TRACEMETA, TracingKey
 from tinygrad.helpers import DEVECTORIZE, time_to_str, VALIDATE_WITH_CPU, cpu_profile, PROFILE, ProfilePointEvent, cpu_events, prod, Context, unwrap
@@ -189,7 +189,42 @@ class ExecItem:
 
 capturing: list = []  # put classes with an add_linear method in here
 
+_codegen_pool = None
+def _get_codegen_pool():
+  global _codegen_pool
+  if _codegen_pool is None:
+    from concurrent.futures import ProcessPoolExecutor
+    _codegen_pool = ProcessPoolExecutor(max_workers=os.cpu_count() or 8)
+  return _codegen_pool
+
+def _parallel_codegen(schedule:list[ExecItem]):
+  """Pre-populate method_cache by running codegen for unique ASTs in parallel across multiple processes."""
+  context = (BEAM.value, NOOPT.value, DEVECTORIZE.value, EMULATED_DTYPES.value)
+  needs_codegen: dict[bytes, tuple[UOp, str]] = {}
+  for ei in schedule:
+    if ei.prg is not None or ei.ast.op not in {Ops.SINK, Ops.PROGRAM} or not ei.bufs: continue
+    device = ei.bufs[0].device
+    ckey = (device, type(Device[device].compiler), ei.ast.key, context, False)
+    if ckey not in method_cache and ei.ast.key not in needs_codegen:
+      needs_codegen[ei.ast.key] = (ei.ast, device)
+  if len(needs_codegen) <= 8: return
+  from tinygrad.engine.codegen_worker import codegen_worker
+  pool = _get_codegen_pool()
+  work = [(pickle.dumps(ast), dev) for ast, dev in needs_codegen.values()]
+  for (ast_key, (ast, device)), prg_bytes in zip(needs_codegen.items(), pool.map(codegen_worker, work)):
+    prg = pickle.loads(prg_bytes)
+    ckey = (device, type(Device[device].compiler), ast_key, context, False)
+    bkey = (device.split(":")[0], type(Device[device].compiler), ast_key, context, True)
+    method_cache[ckey] = method_cache[bkey] = CompiledRunner(replace(prg, device=device))
+  # pre-assign runners to ExecItems so lower() becomes a no-op
+  for ei in schedule:
+    if ei.prg is not None or ei.ast.op not in {Ops.SINK, Ops.PROGRAM} or not ei.bufs: continue
+    device = ei.bufs[0].device
+    ckey = (device, type(Device[device].compiler), ei.ast.key, context, False)
+    if (runner:=method_cache.get(ckey)) is not None: ei.prg = runner
+
 def run_schedule(schedule:list[ExecItem], var_vals:dict[str, int]|None=None, do_update_stats=True):
+  if len(schedule) > 8: _parallel_codegen(schedule)
   while len(schedule):
     ei = schedule.pop(0).lower()
     if VALIDATE_WITH_CPU and ei.ast.op is Ops.SINK:
