@@ -146,22 +146,13 @@ static PyObject* pm_dispatch(PyObject *pdict, PyObject *uop, PyObject *ctx) {
         PyObject *match_fn = PyList_GET_ITEM(entry, 1);
         PyObject *early_reject = PyList_GET_ITEM(entry, 2);
 
-        /* Fast issubset: check early_reject ⊆ ler without Python method call.
+        /* Fast issubset: check early_reject ⊆ ler using C API directly.
          * For empty early_reject (common), skip entirely. */
         Py_ssize_t er_size = PySet_GET_SIZE(early_reject);
         if (er_size > 0) {
-            int is_subset = 1;
-            PyObject *iter = PyObject_GetIter(early_reject);
-            if (!iter) return NULL;
-            PyObject *item;
-            while ((item = PyIter_Next(iter)) != NULL) {
-                int contains = PySet_Contains(ler, item);
-                Py_DECREF(item);
-                if (contains < 0) { Py_DECREF(iter); return NULL; }
-                if (!contains) { is_subset = 0; break; }
-            }
-            Py_DECREF(iter);
-            if (PyErr_Occurred()) return NULL;
+            /* early_reject.issubset(ler) — both are frozenset/set, use <= operator */
+            int is_subset = PyObject_RichCompareBool(early_reject, ler, Py_LE);
+            if (is_subset < 0) return NULL;
             if (!is_subset) continue;
         }
 
@@ -408,7 +399,8 @@ static PyObject* c_unified_rewrite(PyObject *self, PyObject *args) {
                     Py_XDECREF(nn_op); Py_XDECREF(nn_dt); Py_XDECREF(nn_arg); Py_XDECREF(nn_tag);
                     Py_DECREF(new_src_tuple); goto error;
                 }
-                PyObject *new_uop = PyObject_CallFunctionObjArgs(UOp_class, nn_op, nn_dt, new_src_tuple, nn_arg, nn_tag, NULL);
+                PyObject *vc_args[5] = {nn_op, nn_dt, new_src_tuple, nn_arg, nn_tag};
+                PyObject *new_uop = PyObject_Vectorcall(UOp_class, vc_args, 5, NULL);
                 Py_DECREF(nn_op); Py_DECREF(nn_dt); Py_DECREF(nn_arg); Py_DECREF(nn_tag);
                 Py_DECREF(new_src_tuple);
                 if (!new_uop) goto error;
