@@ -13,36 +13,31 @@ assert D % 16 == 0 and N % 16 == 0
 BLOCK_M, BLOCK_N = 64, 64
 WARP_SIZE = 32
 WMMA_M, WMMA_N, WMMA_K = 16, 16, 16
-WAVES_M, WAVES_N = 4, 1
+WAVES_M = 4
 LANES_PER_WAVE_M, LANES_PER_WAVE_N = 2, 16
 WMMA_ACC = WMMA_M // LANES_PER_WAVE_M
-THREADS_PER_BLOCK = WARP_SIZE * WAVES_M * WAVES_N
+THREADS_PER_BLOCK = WARP_SIZE * WAVES_M
 
 TM = BLOCK_M // (WAVES_M * LANES_PER_WAVE_M)
-TN = BLOCK_N // (WAVES_N * LANES_PER_WAVE_N)
-TD = D // (WAVES_N * LANES_PER_WAVE_N)
+TN = BLOCK_N // LANES_PER_WAVE_N
+TD = D // LANES_PER_WAVE_N
 LDS_PAD = 4  # pad LDS rows to reduce bank conflicts
 
 WMMA_ARG = ((WMMA_M, WMMA_N, WMMA_K), 'AMD', 32)
 SCALE = 1.0 / math.sqrt(D)
 LOG2E = math.log2(math.e)
 
-def warp_shfl_xor(val, offset, lane):
+def warp_shfl_xor(val:UOp, offset:int, lane:UOp) -> UOp:
   """Read val from lane ^ offset using ds_bpermute."""
-  idx = ((lane ^ offset) * 4).cast(dtypes.int)
-  return UOp(Ops.CUSTOM, dtypes.float, (idx, val),
+  return UOp(Ops.CUSTOM, dtypes.float, (((lane ^ offset) * 4).cast(dtypes.int), val),
              arg="__builtin_bit_cast(float, __builtin_amdgcn_ds_bpermute({0}, __builtin_bit_cast(int, {1})))")
 
-def warp_reduce_max(val, lane):
-  """Tree reduce MAX across LANES_PER_WAVE_N=16 lanes."""
-  for offset in [8, 4, 2, 1]:
-    val = UOp(Ops.MAX, dtypes.float, (val, warp_shfl_xor(val, offset, lane)))
+def warp_reduce_max(val:UOp, lane:UOp) -> UOp:
+  for offset in [8, 4, 2, 1]: val = val.maximum(warp_shfl_xor(val, offset, lane))
   return val
 
-def warp_reduce_sum(val, lane):
-  """Tree reduce SUM across LANES_PER_WAVE_N=16 lanes."""
-  for offset in [8, 4, 2, 1]:
-    val = val + warp_shfl_xor(val, offset, lane)
+def warp_reduce_sum(val:UOp, lane:UOp) -> UOp:
+  for offset in [8, 4, 2, 1]: val = val + warp_shfl_xor(val, offset, lane)
   return val
 
 def amd_flash_attention(o:UOp, q:UOp, k:UOp, v:UOp) -> UOp:
@@ -55,16 +50,16 @@ def amd_flash_attention(o:UOp, q:UOp, k:UOp, v:UOp) -> UOp:
   o = o.reshape(B*H, N//BLOCK_M, BLOCK_M, D)[block_bh, block_m]
 
   wave_m = UOp.range(WAVES_M, 2, AxisType.LOCAL)
-  wave_n = UOp.range(WAVES_N, 3, AxisType.LOCAL)
   lane = UOp.range(WARP_SIZE, -1, AxisType.WARP)
-  tid = (wave_m * WAVES_N + wave_n) * WARP_SIZE + lane
-  lane_m = lane // LANES_PER_WAVE_N
+  tid = wave_m * WARP_SIZE + lane
   lane_n = lane % LANES_PER_WAVE_N
 
-  # LDS allocation: slot 0 = Q then P (shared), slot 1 = K then V
-  # TODO: the memory planner should be able to find this reuse
+  # LDS: slot 0 = Q/P (Q reloaded each iter, P overwrites after QK), slot 1 = K/V
+  # TODO: memory planner should hande this aliasing
   ELEMS_PER_THREAD = BLOCK_M * D // THREADS_PER_BLOCK
-  QP_lds = UOp.placeholder((BLOCK_M, D + LDS_PAD), dtypes.half, slot=0, addrspace=AddrSpace.LOCAL)
+  QP_lds = UOp.placeholder((BLOCK_M, max(D, BLOCK_N) + LDS_PAD), dtypes.half, slot=0, addrspace=AddrSpace.LOCAL)
+  Q_lds = QP_lds[:, :D]
+  P_lds = QP_lds[:, :BLOCK_N]
   KV_lds = UOp.placeholder((BLOCK_N, D + LDS_PAD), dtypes.half, slot=1, addrspace=AddrSpace.LOCAL)[:, :D]
 
   # register state
@@ -79,7 +74,6 @@ def amd_flash_attention(o:UOp, q:UOp, k:UOp, v:UOp) -> UOp:
   n_tile = UOp.range(N // BLOCK_N, 100, AxisType.REDUCE)
 
   # load Q + K into LDS (Q reloaded each iteration since P overwrites slot 0)
-  Q_lds = QP_lds[:, :D]
   Q_store = Q_lds.after(n_tile).reshape(THREADS_PER_BLOCK, ELEMS_PER_THREAD)[tid].store(
     q.reshape(THREADS_PER_BLOCK, ELEMS_PER_THREAD)[tid])
   K_store = KV_lds.reshape(THREADS_PER_BLOCK, ELEMS_PER_THREAD)[tid].store(
@@ -96,7 +90,7 @@ def amd_flash_attention(o:UOp, q:UOp, k:UOp, v:UOp) -> UOp:
   tn1 = UOp.range(TN, 201, AxisType.LOOP)
   S_frag = S_reg.reshape(TM // WMMA_ACC, WMMA_ACC, TN).permute(0, 2, 1)[tm1, tn1]
   q_frag = Q_lds.reshape(WAVES_M, TM // WMMA_ACC, WMMA_M, D // WMMA_K, WMMA_K)[wave_m, tm1, lane_n, k_qk]
-  k_frag = KV_lds_k.reshape(WAVES_N, TN, WMMA_N, D // WMMA_K, WMMA_K)[wave_n, tn1, lane_n, k_qk]
+  k_frag = KV_lds_k.reshape(TN, WMMA_N, D // WMMA_K, WMMA_K)[tn1, lane_n, k_qk]
   qk = UOp(Ops.SHAPED_WMMA, dtypes.float, (q_frag, k_frag, S_frag.after(k_qk)), arg=WMMA_ARG)
   qk_done = S_frag.store(qk).end(tm1, tn1).end(k_qk)
   S_reg = S_reg.after(qk_done)
@@ -109,35 +103,32 @@ def amd_flash_attention(o:UOp, q:UOp, k:UOp, v:UOp) -> UOp:
   m_ij = m_ij.after(m_ij.after(n_tile).store(m_ij.const_like(-math.inf)))
   rm1 = UOp.range(TM, 260, AxisType.LOOP)
   rm2 = UOp.range(TN, 261, AxisType.REDUCE)
-  m_ij = m_ij.after(m_ij[rm1].store(UOp(Ops.MAX, dtypes.float, (m_ij.after(rm1, rm2)[rm1], S_reg[rm1, rm2]))).end(rm2, rm1))
+  m_ij = m_ij.after(m_ij[rm1].store(m_ij.after(rm2)[rm1].maximum(S_reg[rm1, rm2])).end(rm2, rm1))
   # warp reduce max (in-place)
   ri_w = UOp.range(TM, 270, AxisType.LOOP)
   m_ij = m_ij.after(m_ij[ri_w].store(warp_reduce_max(m_ij[ri_w], lane)).end(ri_w))
 
-  # compute P = exp(S - m_ij) in S_reg (manual ranges)
-  rp0a = UOp.range(TM, 275, AxisType.LOOP)
-  rp0b = UOp.range(TN, 276, AxisType.LOOP)
-  S_reg = S_reg.after(S_reg[rp0a, rp0b].store(((S_reg[rp0a, rp0b] - m_ij[rp0a]) * LOG2E).exp2()).end(rp0a, rp0b))
+  # compute P = exp(S - m_ij) in S_reg
+  S_reg = S_reg.after(S_reg.store(((S_reg - m_ij.reshape(TM, 1).expand(TM, TN)) * LOG2E).exp2()))
 
   p_local = UOp.placeholder((TM,), dtypes.float, slot=8, addrspace=AddrSpace.REG)
   p_local = p_local.after(p_local.after(n_tile).store(p_local.const_like(0)))
   rp1 = UOp.range(TM, 290, AxisType.LOOP)
   rp2 = UOp.range(TN, 291, AxisType.REDUCE)
-  p_local = p_local.after(p_local[rp1].store(p_local.after(rp1, rp2)[rp1] + S_reg[rp1, rp2]).end(rp2, rp1))
+  p_local = p_local.after(p_local[rp1].store(p_local.after(rp2)[rp1] + S_reg[rp1, rp2]).end(rp2, rp1))
   ri_ws = UOp.range(TM, 295, AxisType.LOOP)
   p_sum = p_local.after(p_local[ri_ws].store(warp_reduce_sum(p_local[ri_ws], lane)).end(ri_ws))
 
   # write P = exp(S - m_ij) to P_lds (reuses slot 0, Q no longer needed)
-  P_lds = QP_lds[:, :BLOCK_N]
-  P_write = P_lds.reshape(WAVES_M, TM // WMMA_ACC, WMMA_ACC, LANES_PER_WAVE_M, WAVES_N, TN, LANES_PER_WAVE_N)
-  P_write = P_write.permute((0, 4, 3, 6, 1, 2, 5)).reshape(THREADS_PER_BLOCK, TM, TN)
+  P_write = P_lds.reshape(WAVES_M, TM // WMMA_ACC, WMMA_ACC, LANES_PER_WAVE_M, TN, LANES_PER_WAVE_N)
+  P_write = P_write.permute((0, 3, 5, 1, 2, 4)).reshape(THREADS_PER_BLOCK, TM, TN)
   rw1 = UOp.range(TM, 296, AxisType.LOOP)
   rw2 = UOp.range(TN, 297, AxisType.LOOP)
   P_store = P_write[tid, rw1, rw2].store(S_reg[rw1, rw2].cast(dtypes.half)).end(rw1, rw2)
 
   # -- online softmax correction --
   ri4 = UOp.range(TM, 330, AxisType.LOOP)
-  m_new_val = UOp(Ops.MAX, dtypes.float, (m_i[ri4], m_ij[ri4]))
+  m_new_val = m_i[ri4].maximum(m_ij[ri4])
   alpha_val = ((m_i[ri4] - m_new_val) * LOG2E).exp2()
   beta_val = ((m_ij[ri4] - m_new_val) * LOG2E).exp2()
   rj4 = UOp.range(TD, 331, AxisType.LOOP)
@@ -163,7 +154,7 @@ def amd_flash_attention(o:UOp, q:UOp, k:UOp, v:UOp) -> UOp:
   tn2 = UOp.range(TD, 402, AxisType.LOOP)
   acc_frag = acc.reshape(TM // WMMA_ACC, WMMA_ACC, TD).permute(0, 2, 1)[tm2, tn2]
   p_frag = P_lds.reshape(WAVES_M, TM // WMMA_ACC, WMMA_M, BLOCK_N // WMMA_K, WMMA_K)[wave_m, tm2, lane_n, k_pv]
-  v_frag = KV_lds_v.reshape(WAVES_N, TD, WMMA_N, BLOCK_N // WMMA_K, WMMA_K)[wave_n, tn2, lane_n, k_pv]
+  v_frag = KV_lds_v.reshape(TD, WMMA_N, BLOCK_N // WMMA_K, WMMA_K)[tn2, lane_n, k_pv]
   pv = UOp(Ops.SHAPED_WMMA, dtypes.float, (p_frag, v_frag, acc_frag.after(k_pv)), arg=WMMA_ARG)
 
   # end KV tile loop
@@ -176,9 +167,9 @@ def amd_flash_attention(o:UOp, q:UOp, k:UOp, v:UOp) -> UOp:
   acc = acc.after(acc.store(acc * (1 / l_i).reshape(TM, 1).expand(TM, TD)))
 
   # store output
-  o = o.reshape(WAVES_M, TM // WMMA_ACC, WMMA_ACC, LANES_PER_WAVE_M, WAVES_N, TD, LANES_PER_WAVE_N)
-  o = o.permute((0, 4, 3, 6, 1, 2, 5)).reshape(THREADS_PER_BLOCK, TM, TD)
-  return o[tid].store(acc).end(wave_m, wave_n, lane).end(block_m, block_bh).sink(arg=KernelInfo(opts_to_apply=()))
+  o = o.reshape(WAVES_M, TM // WMMA_ACC, WMMA_ACC, LANES_PER_WAVE_M, TD, LANES_PER_WAVE_N)
+  o = o.permute((0, 3, 5, 1, 2, 4)).reshape(THREADS_PER_BLOCK, TM, TD)
+  return o[tid].store(acc).end(wave_m, lane).end(block_m, block_bh).sink(arg=KernelInfo(opts_to_apply=()))
 
 if __name__ == "__main__":
   q = Tensor.rand(B, H, N, D).cast(dtypes.half)
@@ -190,7 +181,7 @@ if __name__ == "__main__":
   q_flat, k_flat, v_flat, o_flat = q.reshape(B*H, N, D), k.reshape(B*H, N, D), v.reshape(B*H, N, D), o.reshape(B*H, N, D)
   NUM_RUNS = getenv("CNT", 5)
   ets = []
-  with Context(DEBUG=getenv("KDBG", 2)):
+  with Context(DEBUG=2):
     for _ in range(NUM_RUNS):
       GlobalCounters.reset()
       tst = Tensor.custom_kernel(o_flat, q_flat, k_flat, v_flat, fxn=amd_flash_attention)[0].realize()
