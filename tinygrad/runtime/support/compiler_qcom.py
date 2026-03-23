@@ -17,10 +17,10 @@ class QCOMCompiler(Compiler):
   def __reduce__(self): return QCOMCompiler, (self.chip_id,)
 
   def checked(self, handle):
-    if (hc:=handle.contents) is None or (data:=(hc.executable if hc.type == llvm_qcom.CL_HANDLE_LINKED else hc.compiled).contents).error_code != 0:
+    if not handle or (data:=(hc.executable if (hc:=handle.contents).type == llvm_qcom.CL_HANDLE_LINKED else hc.compiled).contents).error_code != 0:
       llvm_qcom.cl_compiler_destroy_llvm_instance(self.llvm_inst)
       self.llvm_inst = llvm_qcom.cl_compiler_create_llvm_instance()
-      raise RuntimeError("QCOM Compilation Error" + ("" if handle is None else f": {ctypes.string_at(data.build_log).decode()}"))
+      raise RuntimeError("QCOM Compilation Error" + ("" if not handle else f": {ctypes.string_at(data.build_log).decode()}"))
     return handle
 
   def compile(self, src) -> bytes:
