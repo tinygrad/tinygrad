@@ -315,6 +315,7 @@ function setFocus(key) {
       p.append("span").style("margin-left", "8px").style("color", "#f0f0f566").text(formatTime(e.x));
       tableData.push(["Cycle", formatTime(e.x-data.instSt)], ["Time", p.node()]);
     } else tableData.push(["Start Time", formatTime(e.x)]);
+    if (data.link != null) tableData.push(["Delay", `${formatTime(Math.abs(selectShape(data.link[0]).e.x - selectShape(data.link[1]).e.x))} Cycles`]);
     html.append(() => tabulate(tableData));
     let group = html.append("div").classed("args", true);
     for (const r of rest) group.append("p").text(r);
