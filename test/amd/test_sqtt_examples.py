@@ -10,7 +10,7 @@ from tinygrad.runtime.autogen.amd.rdna3.ins import SOPP
 from tinygrad.runtime.autogen.amd.rdna3.enum import SOPPOp
 from tinygrad.renderer.amd.sqtt import (decode, LAYOUT_HEADER, WAVESTART, WAVESTART_RDNA4, WAVEEND, INST, INST_RDNA4, VALUINST,
                                      IMMEDIATE, IMMEDIATE_MASK, PACKET_TYPES_RDNA3, PACKET_TYPES_RDNA4, PACKET_TYPES_CDNA, CDNA_WAVESTART,
-                                     InstOp, InstOpRDNA4, print_packets, CDNA_WAVEEND, CDNA_INST)
+                                     print_packets, CDNA_WAVEEND, CDNA_INST)
 from test.amd.helpers import TARGET_TO_ARCH
 
 import tinygrad

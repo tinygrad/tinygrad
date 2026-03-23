@@ -109,9 +109,7 @@ class InstOpRDNA4(Enum):
   JUMP = 0x3
   JUMP_NO = 0x4
   CALL = 0x5
-  TRAP = 0x6
   SALU_NO_EXEC = 0x7
-  FATAL_HALT = 0x8
   MESSAGE = 0x9
   VALU_1 = 0xa
   VALU_TRANS = 0xb
@@ -163,22 +161,16 @@ class InstOpRDNA4(Enum):
   SALU_WR_EXEC = 0x72
   VALU1_WR_EXEC = 0x73
   VALU_B2_WR_EXEC = 0x74
-  RFE = 0x75
   OTHER_LDS_6 = 0x77
   OTHER_LDS_10 = 0x78
   BARRIER_SIGNAL = 0x7a
   DYN_VGPR = 0x87
-  TRY_LOCK = 0x88
-  UNLOCK = 0x89
   BARRIER_JOIN = 0x8a
   WMMA_8 = 0x8c
   WMMA_16 = 0x8d
   WMMA_32 = 0x8e
   WMMA_64 = 0x8f
   VALU_DPFP = 0x92
-  VALU_DERATE = 0x93
-  ICPREF = 0x96
-  KCPREF = 0x97
   SALU_FLOAT3 = 0x98
   VALU_SCL_TRANS = 0x99
   SALU_2 = 0x9b
@@ -635,7 +627,7 @@ def decode(data: bytes) -> Iterator[PacketType]:
     if special == 1:  # TS_DELTA_OR_MARK
       pkt = pkt_cls.from_raw(reg, 0)  # create packet to check is_marker
       if pkt.is_marker: delta = 0
-    elif special == 2: delta += 8  # TS_DELTA_SHORT: delta value is offset by 4
+    elif special == 2: delta += 8  # TS_DELTA_SHORT
     elif special == 3: delta *= 4  # CDNA_DELTA
     elif special == 4:  # CDNA_TIMESTAMP (absolute timestamp anchoring)
       if (reg >> 4) & 0xfff == 0:  # unk_0 == 0 means absolute timestamp
