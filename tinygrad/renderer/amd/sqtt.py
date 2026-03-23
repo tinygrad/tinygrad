@@ -635,7 +635,7 @@ def decode(data: bytes) -> Iterator[PacketType]:
     if special == 1:  # TS_DELTA_OR_MARK
       pkt = pkt_cls.from_raw(reg, 0)  # create packet to check is_marker
       if pkt.is_marker: delta = 0
-    elif special == 2: delta += 4  # TS_DELTA_SHORT: delta value is offset by 4
+    elif special == 2: delta += 8  # TS_DELTA_SHORT: delta value is offset by 4
     elif special == 3: delta *= 4  # CDNA_DELTA
     elif special == 4:  # CDNA_TIMESTAMP (absolute timestamp anchoring)
       if (reg >> 4) & 0xfff == 0:  # unk_0 == 0 means absolute timestamp

@@ -15,13 +15,6 @@ from test.amd.helpers import TARGET_TO_ARCH
 
 import tinygrad
 EXAMPLES_DIR = Path(tinygrad.__file__).parent.parent / "extra/sqtt/examples"
-# INST ops for non-traced SIMDs (excluded from instruction count)
-OTHER_SIMD_OPS = {InstOp.OTHER_LDS_LOAD, InstOp.OTHER_LDS_STORE, InstOp.OTHER_LDS_STORE_64, InstOp.OTHER_LDS_STORE_128,
-                  InstOp.OTHER_FLAT_LOAD, InstOp.OTHER_FLAT_STORE, InstOp.OTHER_FLAT_STORE_64, InstOp.OTHER_FLAT_STORE_96,
-                  InstOp.OTHER_FLAT_STORE_128, InstOp.OTHER_GLOBAL_LOAD, InstOp.OTHER_GLOBAL_LOAD_VADDR,
-                  InstOp.OTHER_GLOBAL_STORE_64, InstOp.OTHER_GLOBAL_STORE_96, InstOp.OTHER_GLOBAL_STORE_128,
-                  InstOp.OTHER_GLOBAL_STORE_VADDR_128}
-OTHER_SIMD_OPS_RDNA4 = {InstOpRDNA4.OTHER_VMEM, InstOpRDNA4.OTHER_VMEM_5, InstOpRDNA4.OTHER_LDS_1, InstOpRDNA4.OTHER_LDS_2}
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # ROCPROF DECODER
@@ -207,8 +200,8 @@ class SQTTExamplesTestBase(unittest.TestCase):
         our_insts: list[int] = []
         for event in events:
           for p in decode(event.blob):
-            if isinstance(p, INST) and p.op not in OTHER_SIMD_OPS: our_insts.append(p._time)
-            elif isinstance(p, INST_RDNA4) and p.op not in OTHER_SIMD_OPS_RDNA4: our_insts.append(p._time)
+            # INST ops for non-traced SIMDs (excluded from instruction count)
+            if isinstance(p, (INST, INST_RDNA4)) and not p.op.name.startswith("OTHER_"): our_insts.append(p._time)
             elif isinstance(p, VALUINST): our_insts.append(p._time)
             elif isinstance(p, IMMEDIATE): our_insts.append(p._time)
             elif isinstance(p, IMMEDIATE_MASK):
