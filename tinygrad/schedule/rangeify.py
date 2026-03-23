@@ -678,12 +678,29 @@ def get_kernel_graph(sink:UOp) -> UOp:
   _indexing._realize_buf_reach, _indexing._realize_buf_idx = {}, {}
 
   tsink = graph_rewrite(tsink, symbolic+pm_reduce_simplify+pm_const_buffer_folding+pm_remove_bufferize, name="symbolic+reduce_collapse+debuf")
-  tsink = graph_rewrite(tsink, pm_limit_bufs, ctx=rctx, name="limit buffers")
+  # skip limit_buffers when MAX_KERNEL_BUFFERS is unset and device has no buffer limit (avoids traversing entire graph for no-op)
+  device = tsink._device
+  if device is not None:
+    dev_str = device if isinstance(device, str) else device[0].split(":")[0]
+    if MAX_KERNEL_BUFFERS.value or DEVICE_MAX_BUFS.get(dev_str, 0):
+      tsink = graph_rewrite(tsink, pm_limit_bufs, ctx=rctx, name="limit buffers")
+  else:
+    tsink = graph_rewrite(tsink, pm_limit_bufs, ctx=rctx, name="limit buffers")
 
   if VIZ: graph_rewrite(tsink, PatternMatcher([]), name="View Rangeify")
 
-  # bufferize -> store
-  lunique_start: int = max([-1]+[x.arg for x in tsink.toposort() if x.op is Ops.LUNIQUE]) + 1
+  # bufferize -> store — find max LUNIQUE arg without full toposort (only needs visited set, not ordering)
+  lunique_max = -1
+  _seen: set[int] = set()
+  _stack = [tsink]
+  while _stack:
+    _node = _stack.pop()
+    _nid = id(_node)
+    if _nid in _seen: continue
+    _seen.add(_nid)
+    if _node.op is Ops.LUNIQUE and _node.arg > lunique_max: lunique_max = _node.arg
+    _stack.extend(_node.src)
+  lunique_start: int = lunique_max + 1
   tsink = graph_rewrite(tsink, pm_add_buffers+pm_add_range_tags, ctx=itertools.count(lunique_start), bottom_up=True, name="bufferize to store")
   tsink = graph_rewrite(tsink, split_kernels, bottom_up=True, name="split kernels")
 

@@ -7,7 +7,7 @@ if TYPE_CHECKING: import numpy
 from tinygrad.dtype import DType, DTypeLike, dtypes, ConstType, least_upper_float, least_upper_dtype, sum_acc_dtype, to_dtype, truncate
 from tinygrad.dtype import _from_np_dtype, _to_np_dtype, PyConst, Invalid, InvalidType
 from tinygrad.helpers import argfix, make_tuple, flatten, prod, all_int, round_up, merge_dicts, argsort, getenv, all_same, fully_flatten
-from tinygrad.helpers import IMAGE, FLOAT16, WINO, Metadata, TRACEMETA, ASM_GEMM, ceildiv, fetch, is_numpy_ndarray, TracingKey, cpu_profile
+from tinygrad.helpers import IMAGE, FLOAT16, WINO, Metadata, TRACEMETA, ASM_GEMM, ceildiv, fetch, is_numpy_ndarray, TracingKey, cpu_profile, PROFILE
 from tinygrad.helpers import suppress_finalizing, disable_gc
 from tinygrad.gradient import compute_gradient
 from tinygrad.mixin import OpMixin
@@ -3731,6 +3731,9 @@ class _ContextVar(Generic[T]):
 _METADATA: _ContextVar[Metadata|None] = _ContextVar(default=None)
 
 def _metadata_wrapper(fn: Callable[P, T]) -> Callable[P, T]:
+  # pre-cache immutable objects to avoid re-creating them on every call
+  _cached_metadata = Metadata(name=fn.__name__, caller="")
+  _cached_tracing_key = TracingKey(fn.__name__)
   def _wrapper(*args: P.args, **kwargs: P.kwargs) -> T:
     if TRACEMETA < 1 or _METADATA.get() is not None: return fn(*args, **kwargs)
 
@@ -3753,11 +3756,14 @@ def _metadata_wrapper(fn: Callable[P, T]) -> Callable[P, T]:
       caller_func = caller_frame.f_code.co_name
       caller_lineno = caller_frame.f_lineno
 
-      caller = f"{caller_module}:{caller_lineno}::{caller_func}"
-    else: caller = ""
+      token = _METADATA.set(Metadata(name=fn.__name__, caller=f"{caller_module}:{caller_lineno}::{caller_func}"))
+    else:
+      token = _METADATA.set(_cached_metadata)
 
-    token = _METADATA.set(Metadata(name=fn.__name__, caller=caller))
-    with cpu_profile(TracingKey(fn.__name__), "USER"):
+    if PROFILE:
+      with cpu_profile(_cached_tracing_key, "USER"):
+        ret = fn(*args, **kwargs)
+    else:
       ret = fn(*args, **kwargs)
     _METADATA.set(token)
     return ret
