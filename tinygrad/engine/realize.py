@@ -216,12 +216,6 @@ def _parallel_codegen(schedule:list[ExecItem]):
     ckey = (device, type(Device[device].compiler), ast_key, context, False)
     bkey = (device.split(":")[0], type(Device[device].compiler), ast_key, context, True)
     method_cache[ckey] = method_cache[bkey] = CompiledRunner(replace(prg, device=device))
-  # pre-assign runners to ExecItems so lower() becomes a no-op
-  for ei in schedule:
-    if ei.prg is not None or ei.ast.op not in {Ops.SINK, Ops.PROGRAM} or not ei.bufs: continue
-    device = ei.bufs[0].device
-    ckey = (device, type(Device[device].compiler), ei.ast.key, context, False)
-    if (runner:=method_cache.get(ckey)) is not None: ei.prg = runner
 
 def run_schedule(schedule:list[ExecItem], var_vals:dict[str, int]|None=None, do_update_stats=True):
   if len(schedule) > 8: _parallel_codegen(schedule)
