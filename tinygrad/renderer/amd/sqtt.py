@@ -439,37 +439,10 @@ PACKET_TYPES_RDNA3: dict[int, type[PacketType]] = {
   9: WAVESTART, 10: TS_DELTA_S5_W2, 11: WAVEALLOC, 12: TS_DELTA_S5_W3, 13: PERF, 14: UTILCTR, 15: TS_DELTA_SHORT,
   16: NOP, 17: TS_WAVE_STATE, 18: EVENT, 19: EVENT_BIG, 20: REG, 21: SNAPSHOT, 22: TS_DELTA_OR_MARK, 23: LAYOUT_HEADER, 24: INST,
 }
-# GFX12-only token types with changed sizes or new encodings
-class NEW_PC_RDNA4(PacketType):  # 72 bits on GFX12 (was 64 on GFX10)
-  encoding = bits[6:0] == 0b0100001
-  delta = bits[10:8]
-  _padding = bits[71:11]
-
-class SHADER_DATA_RDNA4(PacketType):  # 56 bits on GFX12 (was 52 on RDNA3)
-  encoding = bits[6:0] == 0b0000110
-  delta = bits[9:7]
-  _padding = bits[55:10]
-
-class SHADER_DATA_SHORT_RDNA4(PacketType):  # 32 bits on GFX12 (was 28 on RDNA3)
-  encoding = bits[6:0] == 0b1000110
-  delta = bits[9:7]
-  _padding = bits[31:10]
-
-class EXEC_POPCOUNT1(PacketType):  # 24 bits, GFX12-only (replaces SHADER_DATA at this encoding)
-  encoding = bits[6:0] == 0b1100110
-  delta = bits[9:7]
-  _padding = bits[23:10]
-
-class EXEC_POPCOUNT3(PacketType):  # 48 bits, GFX12-only (replaces SHADER_DATA_SHORT at this encoding)
-  encoding = bits[5:0] == 0b010110
-  delta = bits[8:6]
-  _padding = bits[47:9]
-
 PACKET_TYPES_RDNA4: dict[int, type[PacketType]] = {
   **PACKET_TYPES_RDNA3,
   9: WAVESTART_RDNA4, 10: TS_DELTA_S5_W2_RDNA4, 11: WAVEALLOC_RDNA4,
   12: TS_DELTA_S5_W3_RDNA4, 13: PERF_RDNA4, 22: TS_DELTA_OR_MARK_RDNA4, 24: INST_RDNA4,
-  25: NEW_PC_RDNA4, 26: SHADER_DATA_RDNA4, 27: SHADER_DATA_SHORT_RDNA4, 28: EXEC_POPCOUNT1, 29: EXEC_POPCOUNT3,
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════
