@@ -158,15 +158,15 @@ def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[list[ExecItem], di
       if var_vals.get(nm, val) != val: raise RuntimeError(f"bind mismatch on {nm}, {var_vals[nm]} != {val}")
       var_vals[nm] = val
 
-  # external_bufs from CALL.src[1:] are inputs/outputs held by tensors
-  external_bufs = {b for b in linear_call.src[1:] if b.op is Ops.BUFFER} if linear_call.op is Ops.CALL else set()
+  # held_bufs: all realized buffers + CALL params (inputs/outputs held by tensors) must not be memory-planned
+  held_bufs = set(buffers) | ({b for b in linear_call.src[1:] if b.op is Ops.BUFFER} if linear_call.op is Ops.CALL else set())
 
   # jit captures this schedule, no need to execute.
   if len(capturing) and CAPTURING:
-    capturing[0].add_linear(linear, var_vals, external_bufs)
+    capturing[0].add_linear(linear, var_vals)
     return [], var_vals
 
-  linear = memory_plan_rewrite(linear, external_bufs)
+  linear = memory_plan_rewrite(linear, held_bufs)
 
   # convert LINEAR to ExecItems
   schedule: list[ExecItem] = linear_to_schedule(linear)

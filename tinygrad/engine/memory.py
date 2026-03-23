@@ -3,7 +3,7 @@ from collections import defaultdict
 from tinygrad.engine.realize import ExecItem
 from tinygrad.device import Device, Buffer
 from tinygrad.helpers import NO_MEMORY_PLANNER, dedup, DEBUG, round_up
-from tinygrad.uop.ops import UOp, Ops, buffers
+from tinygrad.uop.ops import UOp, Ops
 from tinygrad.dtype import dtypes
 from tinygrad.runtime.support.memory import TLSFAllocator
 
@@ -12,21 +12,20 @@ def _collect_bufs(u:UOp) -> list[UOp]:
   if u.op in {Ops.MSELECT, Ops.MSTACK}: return [b for s in u.src for b in _collect_bufs(s)]
   return []
 
-def _can_plan(b:UOp, external_bufs:set[UOp]) -> bool:
-  if b in external_bufs or b in buffers: return False
+def _can_plan(b:UOp, held_bufs:set[UOp]) -> bool:
+  if b in held_bufs: return False
   devs = (b.device,) if isinstance(b.device, str) else b.device
   return all(not d.startswith(("DISK", "TINYFS")) and hasattr(Device[d].allocator, "_offset") for d in devs)
 
-def memory_plan_rewrite(linear:UOp, external_bufs:set[UOp]|None=None) -> UOp:
+def memory_plan_rewrite(linear:UOp, held_bufs:set[UOp]=frozenset()) -> UOp:
   if NO_MEMORY_PLANNER: return linear
-  if external_bufs is None: external_bufs = set()
 
   # compute lifetimes for all plannable internal buffers
   first_appearance:dict[UOp, int] = {}
   last_appearance:dict[UOp, int] = {}
   copy_bufs: set[UOp] = set()
   for i, si in enumerate(linear.src):
-    si_bufs = [b for src in si.src[1:] for b in _collect_bufs(src) if _can_plan(b, external_bufs)]
+    si_bufs = [b for src in si.src[1:] for b in _collect_bufs(src) if _can_plan(b, held_bufs)]
     for b in si_bufs:
       if b not in first_appearance: first_appearance[b] = i
       last_appearance[b] = i
