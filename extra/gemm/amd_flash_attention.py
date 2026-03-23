@@ -18,14 +18,31 @@ LANES_PER_WAVE_M, LANES_PER_WAVE_N = 2, 16
 WMMA_ACC = WMMA_M // LANES_PER_WAVE_M
 THREADS_PER_BLOCK = WARP_SIZE * WAVES_M * WAVES_N
 
-TM = BLOCK_M // (WAVES_M * LANES_PER_WAVE_M)  # 8
-TN = BLOCK_N // (WAVES_N * LANES_PER_WAVE_N)   # 4
-TD = D // (WAVES_N * LANES_PER_WAVE_N)          # 4
+TM = BLOCK_M // (WAVES_M * LANES_PER_WAVE_M)
+TN = BLOCK_N // (WAVES_N * LANES_PER_WAVE_N)
+TD = D // (WAVES_N * LANES_PER_WAVE_N)
 
-# with WAVES_N=1, all N columns are in one wave → softmax is fully in-register!
 WMMA_ARG = ((WMMA_M, WMMA_N, WMMA_K), 'AMD', 32)
 SCALE = 1.0 / math.sqrt(D)
 LOG2E = math.log2(math.e)
+
+def warp_shfl_xor(val, offset, lane):
+  """Read val from lane ^ offset using ds_bpermute."""
+  idx = ((lane ^ offset) * 4).cast(dtypes.int)
+  return UOp(Ops.CUSTOM, dtypes.float, (idx, val),
+             arg="__builtin_bit_cast(float, __builtin_amdgcn_ds_bpermute({0}, __builtin_bit_cast(int, {1})))")
+
+def warp_reduce_max(val, lane):
+  """Tree reduce MAX across LANES_PER_WAVE_N=16 lanes."""
+  for offset in [8, 4, 2, 1]:
+    val = UOp(Ops.MAX, dtypes.float, (val, warp_shfl_xor(val, offset, lane)))
+  return val
+
+def warp_reduce_sum(val, lane):
+  """Tree reduce SUM across LANES_PER_WAVE_N=16 lanes."""
+  for offset in [8, 4, 2, 1]:
+    val = val + warp_shfl_xor(val, offset, lane)
+  return val
 
 def amd_flash_attention(o:UOp, q:UOp, k:UOp, v:UOp) -> UOp:
   block_bh = UOp.range(B * H, 0, AxisType.GLOBAL)
@@ -40,6 +57,7 @@ def amd_flash_attention(o:UOp, q:UOp, k:UOp, v:UOp) -> UOp:
   wave_n = UOp.range(WAVES_N, 3, AxisType.LOCAL)
   lane = UOp.range(WARP_SIZE, -1, AxisType.WARP)
   tid = (wave_m * WAVES_N + wave_n) * WARP_SIZE + lane
+  lane_m = lane // LANES_PER_WAVE_N
   lane_n = lane % LANES_PER_WAVE_N
 
   # load Q into LDS
@@ -76,84 +94,57 @@ def amd_flash_attention(o:UOp, q:UOp, k:UOp, v:UOp) -> UOp:
   q_frag = Q_lds.reshape(WAVES_M, TM // WMMA_ACC, WMMA_M, D // WMMA_K, WMMA_K)[wave_m, tm1, lane_n, k_qk]
   k_frag = KV_lds_k.reshape(WAVES_N, TN, WMMA_N, D // WMMA_K, WMMA_K)[wave_n, tn1, lane_n, k_qk]
   qk = UOp(Ops.SHAPED_WMMA, dtypes.float, (q_frag, k_frag, S_frag.after(k_qk)), arg=WMMA_ARG)
-  S_reg = S_reg.after(S_frag.store(qk).end(tm1, tn1).end(k_qk))
+  S_reg = S_reg.after(S_frag.store(qk).end(tm1, tn1).end(k_qk).barrier())
 
-  # -- softmax fully in registers (no LDS reduction needed with WAVES_N=1) --
+  # -- softmax in registers with warp shuffles --
   S_reg = S_reg.after(S_reg.store(S_reg * SCALE))
 
-  # row max over TN=4 elements per row
+  # per-thread local row max over TN=4 elements, then warp reduce across 16 lanes
   m_ij = UOp.placeholder((TM,), dtypes.float, slot=7, addrspace=AddrSpace.REG)
   m_ij = m_ij.after(m_ij.after(n_tile).store(m_ij.const_like(-math.inf)))
   rm1 = UOp.range(TM, 260, AxisType.LOOP)
   rm2 = UOp.range(TN, 261, AxisType.REDUCE)
   m_ij = m_ij.after(m_ij[rm1].store(UOp(Ops.MAX, dtypes.float, (m_ij.after(rm1, rm2)[rm1], S_reg[rm1, rm2]))).end(rm2, rm1))
+  # warp reduce max (in-place)
+  ri_w = UOp.range(TM, 270, AxisType.LOOP)
+  m_ij = m_ij.after(m_ij[ri_w].store(warp_reduce_max(m_ij[ri_w], lane)).end(ri_w))
 
-  # BUT: each thread only has TN=4 of BLOCK_N=64 columns! With WAVES_N=1, LANES_PER_WAVE_N=16 threads
-  # share the same row. We still need cross-lane reduction for full row max/sum.
-  # However, within a warp (32 threads), we can use LDS more efficiently.
-  # LANES_PER_WAVE_N=16 threads per row, each with TN=4 cols → 16*4=64=BLOCK_N. 
-  # Need reduction across 16 lanes.
+  # compute P = exp(S - m_ij) in S_reg (manual ranges)
+  rp0a = UOp.range(TM, 275, AxisType.LOOP)
+  rp0b = UOp.range(TN, 276, AxisType.LOOP)
+  S_reg = S_reg.after(S_reg[rp0a, rp0b].store(((S_reg[rp0a, rp0b] - m_ij[rp0a]) * LOG2E).exp2()).end(rp0a, rp0b))
 
-  # write local max to LDS for intra-warp reduction (no barrier needed — same wavefront)
-  red_lds = UOp.placeholder((BLOCK_M, LANES_PER_WAVE_N), dtypes.float, slot=8, addrspace=AddrSpace.LOCAL)
-  lane_m = lane // LANES_PER_WAVE_N
-  ri_r = UOp.range(TM, 270, AxisType.LOOP)
-  row_idx = wave_m * (BLOCK_M // WAVES_M) + (ri_r // WMMA_ACC) * WMMA_M + (ri_r % WMMA_ACC) * LANES_PER_WAVE_M + lane_m
-  red_lds_max = red_lds.after(red_lds[row_idx, lane_n].store(m_ij[ri_r]).end(ri_r))
-
-  # read global max across LANES_PER_WAVE_N=16 threads (intra-warp, no barrier)
-  m_ij_global = UOp.placeholder((TM,), dtypes.float, slot=9, addrspace=AddrSpace.REG)
-  m_ij_global = m_ij_global.after(m_ij_global.after(n_tile).store(m_ij_global.const_like(-math.inf)))
-  ri_g = UOp.range(TM, 280, AxisType.LOOP)
-  rn_g = UOp.range(LANES_PER_WAVE_N, 281, AxisType.REDUCE)
-  row_idx_g = wave_m * (BLOCK_M // WAVES_M) + (ri_g // WMMA_ACC) * WMMA_M + (ri_g % WMMA_ACC) * LANES_PER_WAVE_M + lane_m
-  m_ij_global = m_ij_global.after(m_ij_global[ri_g].store(UOp(Ops.MAX, dtypes.float, (m_ij_global.after(ri_g, rn_g)[ri_g],
-    red_lds_max[row_idx_g, rn_g]))).end(rn_g, ri_g))
-
-  # compute P = exp2((S - m_ij) * log2e) in S_reg (reuse), then sum and write to P_lds
-  S_reg = S_reg.after(S_reg.store(((S_reg - m_ij_global.reshape(TM, 1).expand(TM, TN)) * LOG2E).exp2()))
-
-  # per-thread local sum of P
-  p_local = UOp.placeholder((TM,), dtypes.float, slot=10, addrspace=AddrSpace.REG)
+  p_local = UOp.placeholder((TM,), dtypes.float, slot=8, addrspace=AddrSpace.REG)
   p_local = p_local.after(p_local.after(n_tile).store(p_local.const_like(0)))
   rp1 = UOp.range(TM, 290, AxisType.LOOP)
   rp2 = UOp.range(TN, 291, AxisType.REDUCE)
   p_local = p_local.after(p_local[rp1].store(p_local.after(rp1, rp2)[rp1] + S_reg[rp1, rp2]).end(rp2, rp1))
+  ri_ws = UOp.range(TM, 295, AxisType.LOOP)
+  p_sum = p_local.after(p_local[ri_ws].store(warp_reduce_sum(p_local[ri_ws], lane)).end(ri_ws))
 
-  # write P to P_lds
+  # write P = exp(S - m_ij) to P_lds
   P_write = P_lds.reshape(WAVES_M, TM // WMMA_ACC, WMMA_ACC, LANES_PER_WAVE_M, WAVES_N, TN, LANES_PER_WAVE_N)
   P_write = P_write.permute((0, 4, 3, 6, 1, 2, 5)).reshape(THREADS_PER_BLOCK, TM, TN)
-  rw1 = UOp.range(TM, 295, AxisType.LOOP)
-  rw2 = UOp.range(TN, 296, AxisType.LOOP)
+  rw1 = UOp.range(TM, 296, AxisType.LOOP)
+  rw2 = UOp.range(TN, 297, AxisType.LOOP)
   P_store = P_write[tid, rw1, rw2].store(S_reg[rw1, rw2].cast(dtypes.half)).end(rw1, rw2)
 
-  # write local sum to LDS (intra-warp, no barrier for sum reduction)
-  # P_store still needs a barrier for cross-warp P_lds visibility
-  ri_s = UOp.range(TM, 300, AxisType.LOOP)
-  row_idx_s = wave_m * (BLOCK_M // WAVES_M) + (ri_s // WMMA_ACC) * WMMA_M + (ri_s % WMMA_ACC) * LANES_PER_WAVE_M + lane_m
-  red_lds_sum = red_lds.after(red_lds[row_idx_s, lane_n].store(p_local[ri_s]).end(ri_s))
-
-  p_sum = UOp.placeholder((TM,), dtypes.float, slot=11, addrspace=AddrSpace.REG)
-  p_sum = p_sum.after(p_sum.after(n_tile).store(p_sum.const_like(0)))
-  ri_gs = UOp.range(TM, 310, AxisType.LOOP)
-  rn_gs = UOp.range(LANES_PER_WAVE_N, 311, AxisType.REDUCE)
-  row_idx_gs = wave_m * (BLOCK_M // WAVES_M) + (ri_gs // WMMA_ACC) * WMMA_M + (ri_gs % WMMA_ACC) * LANES_PER_WAVE_M + lane_m
-  p_sum = p_sum.after(p_sum[ri_gs].store(p_sum.after(ri_gs, rn_gs)[ri_gs] + red_lds_sum[row_idx_gs, rn_gs]).end(rn_gs, ri_gs))
-
-  # -- online softmax correction (shaped) --
-  m_new = UOp(Ops.MAX, dtypes.float, (m_i, m_ij_global))
-  alpha = ((m_i - m_new) * LOG2E).exp2()
-  beta = ((m_ij_global - m_new) * LOG2E).exp2()
+  # -- online softmax correction --
+  ri4 = UOp.range(TM, 330, AxisType.LOOP)
+  m_new_val = UOp(Ops.MAX, dtypes.float, (m_i[ri4], m_ij[ri4]))
+  alpha_val = ((m_i[ri4] - m_new_val) * LOG2E).exp2()
+  beta_val = ((m_ij[ri4] - m_new_val) * LOG2E).exp2()
+  rj4 = UOp.range(TD, 331, AxisType.LOOP)
   correction = UOp.group(
-    acc.store(alpha.reshape(TM, 1).expand(TM, TD) * acc),
-    l_i.store(alpha * l_i + beta * p_sum),
-    m_i.store(m_new),
-  )
+    acc[ri4, rj4].store(alpha_val * acc[ri4, rj4]).end(rj4),
+    l_i[ri4].store(alpha_val * l_i[ri4] + beta_val * p_sum[ri4]),
+    m_i[ri4].store(m_new_val),
+  ).end(ri4)
   acc = acc.after(correction)
   l_i = l_i.after(correction)
   m_i = m_i.after(correction)
 
-  # load V into LDS + P_lds barrier (merged into one barrier)
+  # load V into LDS + P barrier
   V_store = KV_lds.reshape(-1, THREADS_PER_BLOCK)[:, tid].store(v[n_tile].reshape(-1, THREADS_PER_BLOCK)[:, tid])
   pv_barrier = UOp.barrier(UOp.group(P_store, V_store))
   P_lds = P_lds.after(pv_barrier)
