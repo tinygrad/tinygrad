@@ -1028,7 +1028,6 @@ jobs:
           key: compile-qcomcl
           deps: testing_unit
           tinydreno: 'true'
-          llvm: 'true'
           python-version: '3.12'
       - name: Set env
         shell: bash
@@ -1037,5 +1036,5 @@ jobs:
         shell: bash
         run: |
           python -c "from tinygrad import Device; assert Device.DEFAULT == 'NULL'"
-          DEBUG=8 python3 test/backend/test_ops.py TestOps.test_add
+          DEBUG=4 python3 test/backend/test_ops.py TestOps.test_add
           python -m pytest -n=auto test/backend/test_ops.py --durations=20
