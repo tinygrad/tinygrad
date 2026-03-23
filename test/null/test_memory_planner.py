@@ -1,19 +1,20 @@
 import unittest
 from tinygrad import dtypes
-from tinygrad.uop.ops import UOp, Ops
+from tinygrad.uop.ops import UOp, Ops, buffers as buffers_dict
 from tinygrad.engine.memory import memory_plan_rewrite
 
 global_map = {}
-pinned: set[UOp] = set()
+_pinned_uops: list[UOp] = []
 def b(i, base=None, offset=0, pin=False, size=16):
   global global_map
   if i in global_map: return global_map[i]
-  # sub-buffers share the same UOp as their base (new planner doesn't have pre-existing sub-buffers)
   if base is not None:
     global_map[i] = global_map[base]
     return global_map[i]
   global_map[i] = UOp.new_buffer("NULL", size, dtypes.int8)
-  if pin: pinned.add(global_map[i])
+  if pin:
+    buffers_dict[global_map[i]] = None  # mark as allocated so planner skips it
+    _pinned_uops.append(global_map[i])
   return global_map[i]
 
 def _make_linear(buffer_lists, copies=None):
@@ -33,7 +34,7 @@ def _get_arena(buf:UOp, linear:UOp, result:UOp) -> UOp|None:
 
 def check_assign(buffer_lists, copies=None):
   linear = _make_linear(buffer_lists, copies)
-  result = memory_plan_rewrite(linear, set(pinned))
+  result = memory_plan_rewrite(linear)
 
   # build mapping: original buf -> (arena, offset_bytes, nbytes) from the result
   replace_map: dict[int, tuple[UOp, int, int]] = {}  # id(buf) -> (arena, offset, nbytes)
@@ -46,7 +47,7 @@ def check_assign(buffer_lists, copies=None):
   first_appearance, last_appearance = {}, {}
   for i, bufs in enumerate(buffer_lists):
     for buf in bufs:
-      if buf in pinned: continue
+      if buf in buffers_dict: continue
       if id(buf) not in first_appearance: first_appearance[id(buf)] = i
       last_appearance[id(buf)] = i
 
@@ -54,7 +55,7 @@ def check_assign(buffer_lists, copies=None):
   taken_parts: set[tuple[int, int, int, int]] = set()  # (id(arena), offset, nbytes, id(buf))
   for i, bufs in enumerate(buffer_lists):
     for buf in bufs:
-      if buf in pinned or id(buf) not in replace_map: continue
+      if buf in buffers_dict or id(buf) not in replace_map: continue
       arena, off, nb = replace_map[id(buf)]
       for part in taken_parts:
         assert id(buf) == part[3] or part[0] != id(arena) or part[1] + part[2] <= off or part[1] >= off + nb, \
@@ -64,9 +65,10 @@ def check_assign(buffer_lists, copies=None):
 
 class TestMemoryPlanner(unittest.TestCase):
   def setUp(self):
-    global global_map, pinned
+    global global_map
+    for u in _pinned_uops: buffers_dict.pop(u, None)
+    _pinned_uops.clear()
     global_map = {}
-    pinned = set()
 
   def test_simple_buffer(self):
     bs = [
@@ -170,7 +172,7 @@ class TestMemoryPlanner(unittest.TestCase):
       [b(3), b(2)],
     ]
     linear = _make_linear(bs, copies=[(b(1), b(0))])
-    result = memory_plan_rewrite(linear, set())
+    result = memory_plan_rewrite(linear)
     r1_arena, r2_arena = _get_arena(b(1), linear, result), _get_arena(b(2), linear, result)
     assert r1_arena is not None and r2_arena is not None
     assert r1_arena is not r2_arena
@@ -182,7 +184,7 @@ class TestMemoryPlanner(unittest.TestCase):
       [b(3), b(2)],
     ]
     linear = _make_linear(bs, copies=[(b(1), b(0)), (b(2), b(1))])
-    result = memory_plan_rewrite(linear, set())
+    result = memory_plan_rewrite(linear)
     r1_arena, r2_arena = _get_arena(b(1), linear, result), _get_arena(b(2), linear, result)
     assert r1_arena is not None and r2_arena is not None
     assert r1_arena is r2_arena
@@ -195,7 +197,7 @@ class TestMemoryPlanner(unittest.TestCase):
       [b(4), b(3)],
     ]
     linear = _make_linear(bs, copies=[(b(1), b(0))])
-    result = memory_plan_rewrite(linear, set())
+    result = memory_plan_rewrite(linear)
     r2_arena, r3_arena = _get_arena(b(2), linear, result), _get_arena(b(3), linear, result)
     assert r2_arena is not None and r3_arena is not None
     assert r2_arena is r3_arena
@@ -207,7 +209,7 @@ class TestMemoryPlanner(unittest.TestCase):
       [b(3), b(2)],
     ]
     linear = _make_linear(bs, copies=[(b(2), b(1))])
-    result = memory_plan_rewrite(linear, set())
+    result = memory_plan_rewrite(linear)
     r0_arena, r2_arena = _get_arena(b(0), linear, result), _get_arena(b(2), linear, result)
     assert r0_arena is not None and r2_arena is not None
     assert r0_arena is not r2_arena

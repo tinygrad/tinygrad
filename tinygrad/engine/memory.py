@@ -10,29 +10,29 @@ from tinygrad.runtime.support.memory import TLSFAllocator
 # **************** UOp-level memory planning ****************
 
 def _collect_bufs(u:UOp) -> list[UOp]:
-  """Recursively collect BUFFER UOps, following through MSELECT/MSTACK for multi-device."""
   if u.op is Ops.BUFFER: return [u]
   if u.op in {Ops.MSELECT, Ops.MSTACK}: return [b for s in u.src for b in _collect_bufs(s)]
   return []
-
-def _can_plan(b:UOp) -> bool:
-  devs = (b.device,) if isinstance(b.device, str) else b.device
-  return all(not d.startswith(("DISK", "TINYFS")) and hasattr(Device[d].allocator, "_offset") for d in devs)
 
 def _get_external_bufs() -> set[UOp]:
   from tinygrad.tensor import all_tensors
   return {n for tref in list(all_tensors) if (t:=tref()) is not None for n in t.uop.toposort() if n.op is Ops.BUFFER}
 
-def memory_plan_rewrite(linear:UOp, external_bufs:set[UOp]|None=None) -> UOp:
+def _can_plan(b:UOp, external_bufs:set[UOp]) -> bool:
+  if b in external_bufs or b in buffers: return False
+  devs = (b.device,) if isinstance(b.device, str) else b.device
+  return all(not d.startswith(("DISK", "TINYFS")) and hasattr(Device[d].allocator, "_offset") for d in devs)
+
+def memory_plan_rewrite(linear:UOp) -> UOp:
   if NO_MEMORY_PLANNER: return linear
-  if external_bufs is None: external_bufs = _get_external_bufs()
+  external_bufs = _get_external_bufs()
 
   # compute lifetimes for all plannable internal buffers
   first_appearance:dict[UOp, int] = {}
   last_appearance:dict[UOp, int] = {}
   copy_bufs: set[UOp] = set()
   for i, si in enumerate(linear.src):
-    si_bufs = [b for src in si.src[1:] for b in _collect_bufs(src) if b not in external_bufs and b not in buffers and _can_plan(b)]
+    si_bufs = [b for src in si.src[1:] for b in _collect_bufs(src) if _can_plan(b, external_bufs)]
     for b in si_bufs:
       if b not in first_appearance: first_appearance[b] = i
       last_appearance[b] = i
