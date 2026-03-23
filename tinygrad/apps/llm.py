@@ -197,16 +197,17 @@ class TransformerBlock:
     def _run(x:Tensor, start_pos:int|UOp): return self._feed_forward(self._attention(x, start_pos)).contiguous()
     return _run(x, start_pos)
 
-class DeltaNetBlock:
-  def __init__(self, dim:int, hidden_dim:int, norm_eps:float, ssm:dict, num_experts:int=0, num_experts_per_tok:int=0, shared_expert_dim:int=0):
-    self.head_k_dim, self.num_k_heads, self.num_v_heads = ssm['state_size'], ssm['group_count'], ssm['time_step_rank']
-    self.head_v_dim, self.ssm_conv_kernel = ssm['inner_size'] // ssm['time_step_rank'], ssm['conv_kernel']
-    self.conv_channels, self.q_dim = ssm['inner_size'] + 2*self.num_k_heads*self.head_k_dim, self.head_k_dim*self.num_k_heads
-    self.attn_qkv, self.attn_gate = nn.Linear(dim, self.conv_channels, bias=False), nn.Linear(dim, ssm['inner_size'], bias=False)
+class GatedDeltaNetBlock:
+  def __init__(self, dim:int, hidden_dim:int, norm_eps:float, inner_size:int, time_step_rank:int, group_count:int, state_size:int, conv_kernel:int,
+               num_experts:int=0, num_experts_per_tok:int=0, shared_expert_dim:int=0):
+    self.head_k_dim, self.num_k_heads, self.num_v_heads = state_size, group_count, time_step_rank
+    self.head_v_dim, self.ssm_conv_kernel = inner_size // time_step_rank, conv_kernel
+    self.conv_channels, self.q_dim = inner_size + 2*group_count*state_size, state_size*group_count
+    self.attn_qkv, self.attn_gate = nn.Linear(dim, self.conv_channels, bias=False), nn.Linear(dim, inner_size, bias=False)
     self.ssm_alpha, self.ssm_beta = nn.Linear(dim, self.num_v_heads, bias=False), nn.Linear(dim, self.num_v_heads, bias=False)
     self.ssm_conv1d = Tensor.zeros(self.conv_channels, self.ssm_conv_kernel)
     self.ssm_dt_bias, self.ssm_a = Tensor.zeros(self.num_v_heads), Tensor.zeros(self.num_v_heads)
-    self.ssm_norm, self.ssm_out = nn.RMSNorm(self.head_v_dim, norm_eps), nn.Linear(ssm['inner_size'], dim, bias=False)
+    self.ssm_norm, self.ssm_out = nn.RMSNorm(self.head_v_dim, norm_eps), nn.Linear(inner_size, dim, bias=False)
 
     self.attn_norm   = nn.RMSNorm(dim, norm_eps)
     self.ffn_norm    = nn.RMSNorm(dim, norm_eps)
@@ -217,17 +218,16 @@ class DeltaNetBlock:
       self.ffn_gate_exps = ExpertWeights(num_experts, dim, hidden_dim)
       self.ffn_up_exps   = ExpertWeights(num_experts, dim, hidden_dim)
       self.ffn_down_exps = ExpertWeights(num_experts, hidden_dim, dim)
-      if shared_expert_dim > 0:
-        self.ffn_gate_shexp = nn.Linear(dim, shared_expert_dim, bias=False)
-        self.ffn_up_shexp = nn.Linear(dim, shared_expert_dim, bias=False)
-        self.ffn_down_shexp = nn.Linear(shared_expert_dim, dim, bias=False)
-        self.ffn_gate_inp_shexp_weight = Tensor.zeros(dim)
+      self.ffn_gate_shexp = nn.Linear(dim, shared_expert_dim, bias=False)
+      self.ffn_up_shexp = nn.Linear(dim, shared_expert_dim, bias=False)
+      self.ffn_down_shexp = nn.Linear(shared_expert_dim, dim, bias=False)
+      self.ffn_gate_inp_shexp_weight = Tensor.zeros(dim)
     else:
       self.ffn_gate    = nn.Linear(dim, hidden_dim, bias=False)
       self.ffn_up      = nn.Linear(dim, hidden_dim, bias=False)
       self.ffn_down    = nn.Linear(hidden_dim, dim, bias=False)
 
-  @function(precompile=bool(getenv("PRECOMPILE", 0)), allow_implicit=False)
+  @function
   def _delta_net(self, x:Tensor) -> Tensor:
     B, _, _ = x.shape
     x_norm = self.attn_norm(x)
@@ -257,7 +257,7 @@ class DeltaNetBlock:
     core_attn_out = self.ssm_norm((final_state@q).squeeze(-1).reshape(B, 1, self.num_v_heads, self.head_v_dim))
     return x + self.ssm_out((core_attn_out * out_gate.silu()).reshape(B, 1, -1).cast(x.dtype))
 
-  @function(precompile=bool(getenv("PRECOMPILE", 0)), allow_implicit=False)
+  @function
   def _feed_forward(self, h: Tensor) -> Tensor:
     h_norm = self.ffn_norm(h)
     if hasattr(self, 'ffn_gate_exps'):
@@ -279,13 +279,16 @@ class DeltaNetBlock:
       conv_flat = (self.ssm_conv_kernel - 1) * self.conv_channels
       ssm_flat = self.num_v_heads * self.head_v_dim * self.head_v_dim
       self.delta_cache = Tensor.zeros(x.shape[0], conv_flat + ssm_flat, device=x.device).clone()
-    return self._feed_forward(self._delta_net(x)).contiguous()
+    # we pass in the weights implicitly so we unpack the GGUF on the fly
+    @function(precompile=True, allow_implicit=True)
+    def _run(x:Tensor, start_pos:int|UOp): return self._feed_forward(self._delta_net(x)).contiguous()
+    return _run(x, start_pos)
 
 class Transformer:
   def __init__(self, *, num_blocks, dim, hidden_dim, n_heads, n_kv_heads, norm_eps, vocab_size, head_dim:int, rope_theta:float, rope_dim:int=0,
                max_context:int=0, qk_norm:int=0, num_experts:int=0, num_experts_per_tok:int=0, norm_topk_prob:bool=False,
                shared_expert_dim:int=0, full_attention_interval:int=0, ssm:dict|None=None):
-    self.blk = [DeltaNetBlock(dim, hidden_dim, norm_eps, ssm, num_experts=num_experts, num_experts_per_tok=num_experts_per_tok,
+    self.blk = [GatedDeltaNetBlock(dim, hidden_dim, norm_eps, **ssm, num_experts=num_experts, num_experts_per_tok=num_experts_per_tok,
                               shared_expert_dim=shared_expert_dim) if ssm and (i+1) % full_attention_interval != 0 else
                 TransformerBlock(dim, hidden_dim, n_heads, n_kv_heads, norm_eps, head_dim, rope_theta, rope_dim, max_context,
                                  head_dim if ssm else qk_norm, num_experts=num_experts, num_experts_per_tok=num_experts_per_tok,
