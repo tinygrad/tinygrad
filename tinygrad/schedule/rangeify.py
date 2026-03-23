@@ -309,16 +309,9 @@ def remove_noop_bufferize(idx,b2):
 def remove_bufferize_before_copy(copy:UOp, d:UOp):
   buf = copy.src[0].src[0]
   if buf.op is not Ops.BUFFERIZE or buf.arg.removable: return None
-  if not isinstance(buf.arg.device, str) or isinstance(d.arg, str) and d.arg.startswith(("DISK", "TINYFS")): return None
+  if not isinstance(buf.arg.device, str) or (isinstance(d.arg, str) and d.arg.startswith(("DISK", "TINYFS"))): return None
   src = buf.src[0]
-  # only for recomputable sources (no buffer deps)
-  has_buf = False
-  def gate(x:UOp):
-    nonlocal has_buf
-    if x.op in {Ops.BUFFERIZE, Ops.MSTACK, Ops.PARAM, Ops.AFTER}: has_buf = True
-    return not has_buf
-  src.toposort(gate=gate)
-  if has_buf: return None
+  if any(x.op in {Ops.BUFFERIZE, Ops.MSTACK, Ops.PARAM, Ops.AFTER} for x in src.toposort()): return None
   idx = copy.src[0]
   replaced = {k:v for k,v in zip(buf.src[1:], idx.src[1:]) if k.op is not Ops.CONST and not (v.op is Ops.CONST and v.arg is Invalid)}
   replaced[UOp(Ops.DEVICE, arg=buf.arg.device)] = d
