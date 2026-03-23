@@ -231,12 +231,13 @@ class QCOMProgram(HCQProgram):
 
     if self.NIR:
       from tinygrad.runtime.support.compiler_mesa import IR3Compiler
-      v, cs, self.imm_vals, self.image = IR3Compiler.unpack_lib(lib)
+      v, cs, imm_vals, self.image = IR3Compiler.unpack_lib(lib)
       self.prg_offset, self.brnchstck, self.image_size, self.pvtmem, self.shmem = 0, v.branchstack, v.info.size, v.pvtmem_size, v.shared_size
       self.wgsz = alloc.offset_vec4 * 4 + 8 if (alloc:=cs.allocs.consts[mesa.IR3_CONST_ALLOC_DRIVER_PARAMS]).size_vec4 else 0xfc
 
       self.wgid, self.lid = v.cs.work_group_id, v.cs.local_invocation_id # register ids
-      self.buf_off, self.imm_off = cs.ubo_state.range[0].offset, cs.allocs.max_const_offset_vec4 * 16
+      self.buf_off, imm_off = cs.ubo_state.range[0].offset, cs.allocs.max_const_offset_vec4 * 16
+      self.consts_info = [(struct.unpack_from("<I", imm_vals, i)[0], imm_off + i, 4) for i in range(0, len(imm_vals), 4)]
 
       # see https://elixir.bootlin.com/mesa/mesa-25.3.0/source/src/freedreno/ir3/ir3_shader.h#L525
       # and https://elixir.bootlin.com/mesa/mesa-25.3.0/source/src/freedreno/ir3/ir3_compiler_nir.c#L5389
@@ -247,7 +248,6 @@ class QCOMProgram(HCQProgram):
 
       self.tex_off, self.ibo_off, self.samp_off = 2048, 2048 + 0x40 * self.tex_cnt, 2048 + 0x40 * (self.tex_cnt + self.ibo_cnt)
       self.fregs, self.hregs = v.info.max_reg + 1, v.info.max_half_reg + 1
-      self.consts_info:list[tuple] = []
     else: self._parse_lib(lib)
 
     self.lib_gpu: HCQBuffer = self.dev.allocator.alloc(self.image_size, buf_spec:=BufferSpec(cpu_access=True, nolru=True))

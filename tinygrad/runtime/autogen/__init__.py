@@ -8,6 +8,7 @@ ffmpeg_src = "https://ffmpeg.org/releases/ffmpeg-8.0.1.tar.gz"
 rocr_src = "https://github.com/ROCm/rocm-systems/archive/refs/tags/rocm-7.1.1.tar.gz"
 linux_headers_deb = "https://snapshot.debian.org/archive/debian/20260207T145350Z/pool/main/l/linux/linux-libc-dev_6.18.9-1_all.deb"
 liburing_src = "https://raw.githubusercontent.com/axboe/liburing/refs/tags/liburing-2.14/src/include/liburing.h"
+tinydreno_src = "https://raw.githubusercontent.com/sirhcm/tinydreno/4f3344a3e4345f2113c883abf9ea1d55edc491e0/tinydreno.h"
 macossdk = "/var/db/xcode_select_link/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk"
 
 llvm_lib = (r"'C:\\Program Files\\LLVM\\bin\\LLVM-C.dll' if WIN else '/opt/homebrew/opt/llvm@20/lib/libLLVM.dylib' if OSX else " +
@@ -160,4 +161,5 @@ def __getattr__(nm):
     case "corefoundation": return load("corefoundation", "'CoreFoundation'",
                                        [f"{macossdk}/System/Library/Frameworks/CoreFoundation.framework/Headers/CF{s}.h" for s in ["String", "Data"]],
                                        args=["-isysroot", macossdk])
+    case "llvm_qcom": return load("llvm_qcom", "'llvm-qcom'", ["{}/tinydreno.h"], srcs=tinydreno_src)
     case _: raise AttributeError(f"no such autogen: {nm}")
