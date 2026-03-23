@@ -560,7 +560,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     ret = UOp(Ops.VCONST if isinstance(b, tuple) else Ops.CONST, dtype,
               arg=dtype.const(b),
               src=(UOp(Ops.DEVICE, arg=device),) if device is not None else ())
-    return ret.reshape((1,)*len(shape)).expand(shape) if shape is not None else ret
+    return ret.reshape((1,)*len(shape)).expand(shape) if shape is not None and len(shape) else ret
   @staticmethod
   def unique_const(dtype:DType, b:ConstType, device:str|tuple[str, ...], shape:tuple[sint, ...]|None=None, unique=True):
     # NOTE: b is ConstType, not ConstLike, so UOps and tuples aren't allowed
