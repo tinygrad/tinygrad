@@ -1,8 +1,6 @@
-from typing import cast
 from collections import defaultdict
-from tinygrad.engine.realize import ExecItem
-from tinygrad.device import Device, Buffer
-from tinygrad.helpers import NO_MEMORY_PLANNER, dedup, DEBUG, round_up
+from tinygrad.device import Device
+from tinygrad.helpers import NO_MEMORY_PLANNER, DEBUG, round_up
 from tinygrad.uop.ops import UOp, Ops
 from tinygrad.dtype import dtypes
 from tinygrad.runtime.support.memory import TLSFAllocator
@@ -17,8 +15,11 @@ def _can_plan(b:UOp, held_bufs:set[UOp]) -> bool:
   devs = (b.device,) if isinstance(b.device, str) else b.device
   return all(not d.startswith(("DISK", "TINYFS")) and hasattr(Device[d].allocator, "_offset") for d in devs)
 
-def memory_plan_rewrite(linear:UOp, held_bufs:set[UOp]=frozenset()) -> UOp:
+LaneKey = tuple[str, int]
+
+def memory_plan_rewrite(linear:UOp, held_bufs:set[UOp]|None=None) -> UOp:
   if NO_MEMORY_PLANNER: return linear
+  if held_bufs is None: held_bufs = set()
 
   # compute lifetimes for all plannable internal buffers
   first_appearance:dict[UOp, int] = {}
