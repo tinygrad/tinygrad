@@ -2993,7 +2993,7 @@ class Tensor(OpMixin):
     a, b = self._broadcasted(x, reverse)
     return a + (-b)
 
-  def div(self, x:Tensor|ConstType, reverse=False, rounding_mode:Literal["trunc", "floor"]|None=None) -> Tensor:
+  def div(self, x:Tensor|ConstType|UOp, reverse=False, rounding_mode:Literal["trunc", "floor"]|None=None) -> Tensor:
     """
     Divides `self` by `x`.
     Equivalent to `self / x`.
