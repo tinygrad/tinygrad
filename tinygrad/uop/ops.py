@@ -108,31 +108,34 @@ _simplify_cache:dict[UOp, UOp] = {}  # caches simplify() results to avoid redund
 
 # recursive_property replaces functools.cached_property in recursive UOp functions to prevent RecursionError
 # NOTE: this is a non-data descriptor so cached values in __dict__ shadow it (zero-cost cache hits)
-class recursive_property:
-  def __init__(self, fxn):
-    self.fxn = fxn
-    self.nm = fxn.__name__
-    self.__doc__ = fxn.__doc__
-  def __set_name__(self, owner, name): self.nm = name
-  def __get__(self, x:UOp|None, owner=None):
-    if x is None: return self
-    # medium path: if all children already have this property, compute directly
-    nm = self.nm
-    if all(nm in child.__dict__ for child in x.src):
-      x.__dict__[nm] = self.fxn(x)
+try:
+  from tinygrad.uop._fast_recursive_property import recursive_property
+except ImportError:
+  class recursive_property:
+    def __init__(self, fxn):
+      self.fxn = fxn
+      self.nm = fxn.__name__
+      self.__doc__ = fxn.__doc__
+    def __set_name__(self, owner, name): self.nm = name
+    def __get__(self, x:UOp|None, owner=None):
+      if x is None: return self
+      # medium path: if all children already have this property, compute directly
+      nm = self.nm
+      if all(nm in child.__dict__ for child in x.src):
+        x.__dict__[nm] = self.fxn(x)
+        return x.__dict__[nm]
+      # slow path: iterative DFS computing property bottom-up
+      fxn = self.fxn
+      stack: list[tuple[UOp, bool]] = [(x, False)]
+      while stack:
+        node, visited = stack.pop()
+        if nm in node.__dict__: continue
+        if not visited:
+          stack.append((node, True))
+          for s in reversed(node.src):
+            if nm not in s.__dict__: stack.append((s, False))
+        else: node.__dict__[nm] = fxn(node)
       return x.__dict__[nm]
-    # slow path: iterative DFS computing property bottom-up
-    fxn = self.fxn
-    stack: list[tuple[UOp, bool]] = [(x, False)]
-    while stack:
-      node, visited = stack.pop()
-      if nm in node.__dict__: continue
-      if not visited:
-        stack.append((node, True))
-        for s in reversed(node.src):
-          if nm not in s.__dict__: stack.append((s, False))
-      else: node.__dict__[nm] = fxn(node)
-    return x.__dict__[nm]
 
 # pre-computed sets for _shape dispatch (avoid creating set unions on every call)
 _SHAPE_MOVEMENT_OPS = GroupOp.Movement.union({Ops.MULTI, Ops.REDUCE_AXIS, Ops.WMMA})
