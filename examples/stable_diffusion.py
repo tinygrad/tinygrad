@@ -2,7 +2,7 @@
 # https://github.com/ekagra-ranjan/huggingface-blog/blob/main/stable_diffusion.md
 import tempfile
 from pathlib import Path
-import argparse, time
+import argparse, time, contextlib
 from collections import namedtuple
 from typing import Dict, Any
 
@@ -16,6 +16,18 @@ from extra.models import unet, clip
 from extra.models.unet import UNetModel
 from examples.mlperf.initializers import AutocastLinear, AutocastConv2d, AutocastGroupNorm, AutocastLayerNorm, zero_module, attn_f32_softmax, gelu_erf
 from extra.bench_log import BenchEvent, WallTimeEvent
+
+@contextlib.contextmanager
+def _empty_fakeweights_init():
+  # Fakeweights only need shapes to exist, so skip expensive random init graphs.
+  orig_uniform, orig_glorot_uniform, orig_kaiming_uniform = Tensor.uniform, Tensor.glorot_uniform, Tensor.kaiming_uniform
+  def _empty_init(*shape, device=None, dtype=None, requires_grad=None, **kwargs):
+    return Tensor.empty(*shape, device=device, dtype=dtype, requires_grad=requires_grad)
+  Tensor.uniform, Tensor.glorot_uniform, Tensor.kaiming_uniform = staticmethod(_empty_init), staticmethod(_empty_init), staticmethod(_empty_init)
+  try:
+    yield
+  finally:
+    Tensor.uniform, Tensor.glorot_uniform, Tensor.kaiming_uniform = orig_uniform, orig_glorot_uniform, orig_kaiming_uniform
 
 class AttnBlock:
   def __init__(self, in_channels):
@@ -81,14 +93,14 @@ class Decoder:
     x = self.mid(x)
 
     for l in self.up[::-1]:
-      print("decode", x.shape)
+      if getenv("DEBUG"): print("decode", x.shape)
       for b in l['block']: x = b(x)
       if 'upsample' in l:
         # https://pytorch.org/docs/stable/generated/torch.nn.functional.interpolate.html ?
         bs,c,py,px = x.shape
         x = x.reshape(bs, c, py, 1, px, 1).expand(bs, c, py, 2, px, 2).reshape(bs, c, py*2, px*2)
         x = l['upsample']['conv'](x)
-      x.realize()
+      if not getenv("NULL"): x.realize()
 
     return self.conv_out(self.norm_out(x).swish())
 
@@ -113,7 +125,7 @@ class Encoder:
     x = self.conv_in(x)
 
     for l in self.down:
-      print("encode", x.shape)
+      if getenv("DEBUG"): print("encode", x.shape)
       for b in l['block']: x = b(x)
       if 'downsample' in l: x = l['downsample']['conv'](x)
 
@@ -131,7 +143,7 @@ class AutoencoderKL:
     latent = self.encoder(x)
     latent = self.quant_conv(latent)
     latent = latent[:, 0:4]  # only the means
-    print("latent", latent.shape)
+    if getenv("DEBUG"): print("latent", latent.shape)
     latent = self.post_quant_conv(latent)
     return self.decoder(latent)
 
@@ -233,7 +245,7 @@ class StableDiffusion:
     #e_t_next = get_model_output(x_prev)
     #e_t_prime = (e_t + e_t_next) / 2
     #x_prev, pred_x0 = get_x_prev_and_pred_x0(latent, e_t_prime, index)
-    return x_prev.realize()
+    return x_prev
 
 # ** ldm.models.autoencoder.AutoencoderKL (done!)
 # 3x512x512 <--> 4x64x64 (16384)
@@ -266,7 +278,8 @@ if __name__ == "__main__":
   args = parser.parse_args()
 
   profile_marker("create model")
-  model = StableDiffusion()
+  with _empty_fakeweights_init() if args.fakeweights else contextlib.nullcontext():
+    model = StableDiffusion()
 
   profile_marker("load in weights")
   with WallTimeEvent(BenchEvent.LOAD_WEIGHTS):
@@ -281,7 +294,8 @@ if __name__ == "__main__":
         if k.startswith("model"):
           v.replace(v.cast(dtypes.float16))
 
-    Tensor.realize(*get_state_dict(model).values())
+    if not args.fakeweights:
+      Tensor.realize(*get_state_dict(model).values())
 
   profile_marker("run clip (conditional)")
   tokenizer = Tokenizer.ClipTokenizer()
