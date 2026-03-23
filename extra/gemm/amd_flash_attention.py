@@ -21,7 +21,7 @@ THREADS_PER_BLOCK = WARP_SIZE * WAVES_M * WAVES_N
 TM = BLOCK_M // (WAVES_M * LANES_PER_WAVE_M)
 TN = BLOCK_N // (WAVES_N * LANES_PER_WAVE_N)
 TD = D // (WAVES_N * LANES_PER_WAVE_N)
-LDS_PAD = 0  # TODO: set to 16 once vectorized stores on SHRINK'd views are supported
+LDS_PAD = 4  # pad LDS rows to reduce bank conflicts
 
 WMMA_ARG = ((WMMA_M, WMMA_N, WMMA_K), 'AMD', 32)
 SCALE = 1.0 / math.sqrt(D)
@@ -61,13 +61,10 @@ def amd_flash_attention(o:UOp, q:UOp, k:UOp, v:UOp) -> UOp:
   lane_m = lane // LANES_PER_WAVE_N
   lane_n = lane % LANES_PER_WAVE_N
 
-  # load Q into padded LDS (rows padded by LDS_PAD halfs to avoid bank conflicts)
-  # load Q into LDS
+  # LDS allocation: slot 0 = Q then P (shared), slot 1 = K then V
+  # TODO: the memory planner should be able to find this reuse
   ELEMS_PER_THREAD = BLOCK_M * D // THREADS_PER_BLOCK
-  Q_lds = UOp.placeholder((BLOCK_M, D + LDS_PAD), dtypes.half, slot=0, addrspace=AddrSpace.LOCAL)[:, :D]
-  Q_lds = Q_lds.after(UOp.barrier(Q_lds.reshape(THREADS_PER_BLOCK, ELEMS_PER_THREAD)[tid].store(
-    q.reshape(THREADS_PER_BLOCK, ELEMS_PER_THREAD)[tid])))
-
+  QP_lds = UOp.placeholder((BLOCK_M, D + LDS_PAD), dtypes.half, slot=0, addrspace=AddrSpace.LOCAL)
   KV_lds = UOp.placeholder((BLOCK_N, D + LDS_PAD), dtypes.half, slot=1, addrspace=AddrSpace.LOCAL)[:, :D]
 
   # register state
@@ -78,14 +75,18 @@ def amd_flash_attention(o:UOp, q:UOp, k:UOp, v:UOp) -> UOp:
   m_i = m_i.after(m_i.store(m_i.const_like(-math.inf)))
   l_i = l_i.after(l_i.store(l_i.const_like(0)))
 
-  P_lds = UOp.placeholder((BLOCK_M, BLOCK_N + LDS_PAD), dtypes.half, slot=5, addrspace=AddrSpace.LOCAL)[:, :BLOCK_N]
-
   # ====== KV tile loop ======
   n_tile = UOp.range(N // BLOCK_N, 100, AxisType.REDUCE)
 
-  # load K into LDS
-  KV_lds_k = KV_lds.after(UOp.barrier(KV_lds.reshape(THREADS_PER_BLOCK, ELEMS_PER_THREAD)[tid].store(
-    k[n_tile].reshape(THREADS_PER_BLOCK, ELEMS_PER_THREAD)[tid])))
+  # load Q + K into LDS (Q reloaded each iteration since P overwrites slot 0)
+  Q_lds = QP_lds[:, :D]
+  Q_store = Q_lds.after(n_tile).reshape(THREADS_PER_BLOCK, ELEMS_PER_THREAD)[tid].store(
+    q.reshape(THREADS_PER_BLOCK, ELEMS_PER_THREAD)[tid])
+  K_store = KV_lds.reshape(THREADS_PER_BLOCK, ELEMS_PER_THREAD)[tid].store(
+    k[n_tile].reshape(THREADS_PER_BLOCK, ELEMS_PER_THREAD)[tid])
+  qk_load_barrier = UOp.barrier(UOp.group(Q_store, K_store))
+  Q_lds = Q_lds.after(qk_load_barrier)
+  KV_lds_k = KV_lds.after(qk_load_barrier)
 
   # -- S = Q @ K^T via WMMA (re-init each n_tile) --
   S_reg = UOp.placeholder((TM, TN), dtypes.float, slot=6, addrspace=AddrSpace.REG)
@@ -126,7 +127,8 @@ def amd_flash_attention(o:UOp, q:UOp, k:UOp, v:UOp) -> UOp:
   ri_ws = UOp.range(TM, 295, AxisType.LOOP)
   p_sum = p_local.after(p_local[ri_ws].store(warp_reduce_sum(p_local[ri_ws], lane)).end(ri_ws))
 
-  # write P = exp(S - m_ij) to P_lds
+  # write P = exp(S - m_ij) to P_lds (reuses slot 0, Q no longer needed)
+  P_lds = QP_lds[:, :BLOCK_N]
   P_write = P_lds.reshape(WAVES_M, TM // WMMA_ACC, WMMA_ACC, LANES_PER_WAVE_M, WAVES_N, TN, LANES_PER_WAVE_N)
   P_write = P_write.permute((0, 4, 3, 6, 1, 2, 5)).reshape(THREADS_PER_BLOCK, TM, TN)
   rw1 = UOp.range(TM, 296, AxisType.LOOP)
