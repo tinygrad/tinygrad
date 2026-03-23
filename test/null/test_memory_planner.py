@@ -1,10 +1,10 @@
 import unittest
 from tinygrad import dtypes
-from tinygrad.uop.ops import UOp, Ops, buffers as buffers_dict
+from tinygrad.uop.ops import UOp, Ops
 from tinygrad.engine.memory import memory_plan_rewrite
 
 global_map = {}
-_pinned_uops: list[UOp] = []
+held_bufs: set[UOp] = set()
 def b(i, base=None, offset=0, pin=False, size=16):
   global global_map
   if i in global_map: return global_map[i]
@@ -12,9 +12,7 @@ def b(i, base=None, offset=0, pin=False, size=16):
     global_map[i] = global_map[base]
     return global_map[i]
   global_map[i] = UOp.new_buffer("NULL", size, dtypes.int8)
-  if pin:
-    buffers_dict[global_map[i]] = None  # mark as allocated so planner skips it
-    _pinned_uops.append(global_map[i])
+  if pin: held_bufs.add(global_map[i])
   return global_map[i]
 
 def _make_linear(buffer_lists, copies=None):
@@ -22,11 +20,10 @@ def _make_linear(buffer_lists, copies=None):
   calls = []
   for bufs in buffer_lists:
     is_copy = len(bufs) == 2 and frozenset((id(bufs[0]), id(bufs[1]))) in copy_pairs
-    ast = UOp(Ops.COPY if is_copy else Ops.SINK)
-    calls.append(UOp(Ops.CALL, dtypes.void, (ast, *bufs)))
+    calls.append(UOp(Ops.CALL, dtypes.void, (UOp(Ops.COPY if is_copy else Ops.SINK), *bufs)))
   return UOp(Ops.LINEAR, src=tuple(calls))
 
-def _get_arena(buf:UOp, linear:UOp, result:UOp) -> UOp|None:
+def _get_arena(buf, linear, result):
   for orig_si, new_si in zip(linear.src, result.src):
     for orig, new in zip(orig_si.src[1:], new_si.src[1:]):
       if orig is buf and new.op is Ops.BUFFER_VIEW: return new.src[0]
@@ -34,20 +31,24 @@ def _get_arena(buf:UOp, linear:UOp, result:UOp) -> UOp|None:
 
 def check_assign(buffer_lists, copies=None):
   linear = _make_linear(buffer_lists, copies)
-  result = memory_plan_rewrite(linear)
+  result = memory_plan_rewrite(linear, held_bufs)
 
   # build mapping: original buf -> (arena, offset_bytes, nbytes) from the result
-  replace_map: dict[int, tuple[UOp, int, int]] = {}  # id(buf) -> (arena, offset, nbytes)
+  replace_map: dict[int, tuple[UOp, int, int]] = {}
   for orig_si, new_si in zip(linear.src, result.src):
     for orig, new in zip(orig_si.src[1:], new_si.src[1:]):
       if new.op is Ops.BUFFER_VIEW and id(orig) not in replace_map:
         replace_map[id(orig)] = (new.src[0], new.arg[1] * new.dtype.itemsize, new.arg[0] * new.dtype.itemsize)
 
+  # verify pinned buffers are not planned
+  for buf in held_bufs:
+    assert id(buf) not in replace_map, "pinned buffer was planned"
+
   # compute lifetimes
   first_appearance, last_appearance = {}, {}
   for i, bufs in enumerate(buffer_lists):
     for buf in bufs:
-      if buf in buffers_dict: continue
+      if buf in held_bufs: continue
       if id(buf) not in first_appearance: first_appearance[id(buf)] = i
       last_appearance[id(buf)] = i
 
@@ -55,7 +56,7 @@ def check_assign(buffer_lists, copies=None):
   taken_parts: set[tuple[int, int, int, int]] = set()  # (id(arena), offset, nbytes, id(buf))
   for i, bufs in enumerate(buffer_lists):
     for buf in bufs:
-      if buf in buffers_dict or id(buf) not in replace_map: continue
+      if buf in held_bufs or id(buf) not in replace_map: continue
       arena, off, nb = replace_map[id(buf)]
       for part in taken_parts:
         assert id(buf) == part[3] or part[0] != id(arena) or part[1] + part[2] <= off or part[1] >= off + nb, \
@@ -66,8 +67,7 @@ def check_assign(buffer_lists, copies=None):
 class TestMemoryPlanner(unittest.TestCase):
   def setUp(self):
     global global_map
-    for u in _pinned_uops: buffers_dict.pop(u, None)
-    _pinned_uops.clear()
+    held_bufs.clear()
     global_map = {}
 
   def test_simple_buffer(self):
