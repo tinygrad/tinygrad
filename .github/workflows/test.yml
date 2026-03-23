@@ -1028,6 +1028,7 @@ jobs:
           key: compile-qcomcl
           deps: testing_unit
           tinydreno: 'true'
+          llvm: 'true'
           python-version: '3.12'
       - name: Set env
         shell: bash
