@@ -1348,8 +1348,6 @@ def train_llama3():
   model = FlatTransformer(**model_params, max_context=SEQLEN)
 
   params = get_parameters(model)
-  # weights are all bfloat16 for now
-  assert params and all(p.dtype == dtypes.bfloat16 for p in params)
 
   if getenv("FAKEDATA"):
     for v in get_parameters(model):
