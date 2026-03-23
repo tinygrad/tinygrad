@@ -146,16 +146,28 @@ static PyObject* pm_dispatch(PyObject *pdict, PyObject *uop, PyObject *ctx) {
         PyObject *match_fn = PyList_GET_ITEM(entry, 1);
         PyObject *early_reject = PyList_GET_ITEM(entry, 2);
 
-        /* early_reject.issubset(ler) */
-        PyObject *is_sub = PyObject_CallMethodOneArg(early_reject, str_issubset, ler);
-        if (!is_sub) return NULL;
-        int pass = PyObject_IsTrue(is_sub);
-        Py_DECREF(is_sub);
-        if (pass < 0) return NULL;
-        if (!pass) continue;
+        /* Fast issubset: check early_reject ⊆ ler without Python method call.
+         * For empty early_reject (common), skip entirely. */
+        Py_ssize_t er_size = PySet_GET_SIZE(early_reject);
+        if (er_size > 0) {
+            int is_subset = 1;
+            PyObject *iter = PyObject_GetIter(early_reject);
+            if (!iter) return NULL;
+            PyObject *item;
+            while ((item = PyIter_Next(iter)) != NULL) {
+                int contains = PySet_Contains(ler, item);
+                Py_DECREF(item);
+                if (contains < 0) { Py_DECREF(iter); return NULL; }
+                if (!contains) { is_subset = 0; break; }
+            }
+            Py_DECREF(iter);
+            if (PyErr_Occurred()) return NULL;
+            if (!is_subset) continue;
+        }
 
-        /* match(uop, ctx) */
-        PyObject *result = PyObject_CallFunctionObjArgs(match_fn, uop, ctx, NULL);
+        /* match(uop, ctx) — use vectorcall for speed (avoids tuple creation) */
+        PyObject *match_args[2] = {uop, ctx};
+        PyObject *result = PyObject_Vectorcall(match_fn, match_args, 2, NULL);
         if (!result) return NULL;
         if (result != Py_None && result != uop) return result;
         Py_DECREF(result);
