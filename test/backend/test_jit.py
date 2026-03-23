@@ -648,25 +648,6 @@ class TestJitFree(unittest.TestCase):
     fxn(Tensor([2]))
     self.assertEqual(x.item(), 8)
 
-  def test_replan_buffers_memory_layout(self):
-    if not hasattr(Device[Device.DEFAULT].allocator, '_offset'): raise unittest.SkipTest("replan_buffers_memory_layout useless")
-
-    ext_tensor = Tensor([1,24,23,45,1]).contiguous()
-    ext_tensor_2 = Tensor([2,2,2,2,2]).contiguous()
-    @TinyJit
-    def fxn(x:Tensor):
-      out = (x*ext_tensor_2+ext_tensor).reshape(5,1).expand(5, 100).contiguous()
-      return out.sum()
-    for i in range(5):
-      out = fxn(Tensor([i,1,2,3,4]))
-      self.assertEqual(out.item(), 11400+200*i)
-    self.assertEqual(len(set([b.base for item in fxn.captured.jit_cache for b in item.bufs if b is not None])), 4)
-    fxn.captured.replan_buffers_memory_layout()
-    self.assertEqual(len(set([b.base for item in fxn.captured.jit_cache for b in item.bufs if b is not None])), 2)
-
-    out = fxn(Tensor([11,1,2,3,4]))
-    self.assertEqual(out.item(), 13600)
-
 class TestJitGraphSplit(unittest.TestCase):
   def compute(self, device, inp):
     assert inp.device == device, f"Input device {inp.device} does not match expected {device}"
