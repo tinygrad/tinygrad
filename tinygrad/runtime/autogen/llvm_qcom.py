@@ -15,28 +15,28 @@ CL_HANDLE_COMPILED = enum_cl_handle_type.define('CL_HANDLE_COMPILED', 1)
 CL_HANDLE_LIBRARY = enum_cl_handle_type.define('CL_HANDLE_LIBRARY', 2)
 CL_HANDLE_LINKED = enum_cl_handle_type.define('CL_HANDLE_LINKED', 3)
 
+class struct_cl_compiled_data(ctypes.Structure): pass
+class struct_cl_executable_data(ctypes.Structure): pass
 @c.record
 class cl_handle(c.Struct):
   SIZE = 16
   type: Annotated[enum_cl_handle_type, 0]
-  compiled: Annotated[c.POINTER[_anonstruct0], 8]
-  executable: Annotated[c.POINTER[_anonstruct1], 8]
-class _anonstruct0(ctypes.Structure): pass
-class _anonstruct1(ctypes.Structure): pass
+  compiled: Annotated[c.POINTER[struct_cl_compiled_data], 8]
+  executable: Annotated[c.POINTER[struct_cl_executable_data], 8]
 @dll.bind
 def cl_compiler_compile_source(inst:cl_llvm_instance, chip_id:Annotated[int, ctypes.c_int32], mode:Annotated[int, ctypes.c_int32], options:c.POINTER[Annotated[bytes, ctypes.c_char]], p5:Annotated[int, ctypes.c_int32], p6:Annotated[int, ctypes.c_int32], p7:Annotated[int, ctypes.c_int32], source:c.POINTER[Annotated[bytes, ctypes.c_char]], source_len:Annotated[int, ctypes.c_int32], source_type:Annotated[int, ctypes.c_int32], p11:ctypes.c_void_p) -> c.POINTER[cl_handle]: ...
 @dll.bind
 def cl_compiler_link_program(inst:cl_llvm_instance, chip_id:Annotated[int, ctypes.c_int32], mode:Annotated[int, ctypes.c_int32], options:c.POINTER[Annotated[bytes, ctypes.c_char]], num_handles:Annotated[int, ctypes.c_int32], input_handles:c.POINTER[c.POINTER[cl_handle]]) -> c.POINTER[cl_handle]: ...
 @dll.bind
 def cl_compiler_handle_create_binary(handle:c.POINTER[cl_handle], out_ptr:c.POINTER[ctypes.c_void_p], out_size:c.POINTER[Annotated[int, ctypes.c_int32]]) -> None: ...
+class _anonstruct0(ctypes.Structure): pass
+cl_lib_section: TypeAlias = _anonstruct0
+class _anonstruct1(ctypes.Structure): pass
+cl_lib_header: TypeAlias = _anonstruct1
 class _anonstruct2(ctypes.Structure): pass
-cl_lib_section: TypeAlias = _anonstruct2
+cl_lib_prog: TypeAlias = _anonstruct2
 class _anonstruct3(ctypes.Structure): pass
-cl_lib_header: TypeAlias = _anonstruct3
-class _anonstruct4(ctypes.Structure): pass
-cl_lib_prog: TypeAlias = _anonstruct4
-class _anonstruct5(ctypes.Structure): pass
-cl_lib_img_desc: TypeAlias = _anonstruct5
+cl_lib_img_desc: TypeAlias = _anonstruct3
 @dll.bind
 def cl_compiler_free_handle(handle:c.POINTER[cl_handle]) -> None: ...
 @dll.bind
