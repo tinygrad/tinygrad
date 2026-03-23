@@ -1,7 +1,7 @@
 from typing import TypeVar, Generic, Callable, cast, Any
 import functools, collections
 from tinygrad.tensor import Tensor
-from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, BEAM, getenv, colored, JIT, JIT_BATCH_SIZE, dedup, unwrap, OLD_MEMPLAN
+from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, BEAM, getenv, colored, JIT, JIT_BATCH_SIZE, dedup, unwrap
 from tinygrad.device import Buffer, Compiled, Device, MultiBuffer
 from tinygrad.dtype import DType
 from tinygrad.uop.ops import UOp, Variable, sym_infer, Ops, buffers
@@ -292,7 +292,7 @@ class TinyJit(Generic[ReturnType]):
     self.prune = prune
     self.optimize = optimize
 
-  def add_linear(self, linear:UOp, var_vals:dict[str, int], external_bufs:set[UOp]|None=None): self._linears.append(linear)
+  def add_linear(self, linear:UOp, var_vals:dict[str, int]): self._linears.append(linear)
 
   def reset(self):
     assert self.fxn is not None, "can't reset without function"
@@ -345,19 +345,9 @@ class TinyJit(Generic[ReturnType]):
           ei.run(var_vals, jit=True)
         del onetime_linear
 
-      if OLD_MEMPLAN:
-        with Context(BEAM=getenv("JITBEAM", BEAM.value)): jit_cache = [ei.lower() for ei in linear_to_schedule(big_linear)]
-
-        copies = [(cast(Buffer,ji.bufs[0]),cast(Buffer,ji.bufs[1])) for ji in jit_cache if isinstance(ji.prg, (BufferXfer, BufferCopy, EncDec))]
-        assigned = _internal_memory_planner([cast(list[Buffer], item.bufs) for item in jit_cache], copies, debug_prefix="JIT ")
-        jit_cache = [replace(item, bufs=[assigned.get(b,b).ensure_allocated() for b in item.bufs if b is not None]) for item in jit_cache]
-      else:
-        # big_linear = UOp(Ops.LINEAR, src=tuple(flatten([l.src for l in self._linears])))
-        # held_bufs: all realized buffers + output buffers from ret
-        held_bufs = set(buffers) | {t.uop.buf_uop for t in get_parameters(ret) if t.uop.buf_uop.op is Ops.BUFFER}
-        with Context(BEAM=getenv("JITBEAM", BEAM.value)):
-          jit_cache = [ei.lower() for ei in linear_to_schedule(memory_plan_rewrite(big_linear, held_bufs))]
-
+      held_bufs = set(buffers) | {t.uop.buf_uop for t in get_parameters(ret) if t.uop.buf_uop.op is Ops.BUFFER}
+      with Context(BEAM=getenv("JITBEAM", BEAM.value)):
+        jit_cache = [ei.lower() for ei in linear_to_schedule(memory_plan_rewrite(big_linear, held_bufs))]
       del big_linear
 
       # track inputs that are views of buffers
