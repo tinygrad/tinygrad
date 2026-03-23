@@ -102,43 +102,46 @@ class InstOp(Enum):
   VALU_CMPX = 0x73        # v_cmpx_*
 
 class InstOpRDNA4(Enum):
-  """SQTT instruction operation types for RDNA4 (gfx1200). Different encoding from RDNA3."""
-  SALU = 0x0
-  SMEM = 0x1
-  JUMP = 0x3
-  JUMP_NO = 0x4
-  CALL = 0x5
-  MESSAGE = 0x9
-  VALU_TRANS = 0xb
-  VALU_B2 = 0xd
-  VALU_B4 = 0xe
-  VINTERP = 0x12
-  VMEM_RD_1 = 0x21
-  VMEM_RD_2 = 0x22
-  VMEM_WR_1 = 0x23
-  VMEM_WR_2 = 0x24
-  VMEM_WR_3 = 0x25
-  VMEM_WR_4 = 0x26
-  VMEM_WR_5 = 0x27
-  VMEM_WR_6 = 0x28
-  LDS_RD = 0x29
-  LDS_WR_1 = 0x2a
-  LDS_WR_2 = 0x2b
-  LDS_WR_3 = 0x2c
-  LDS_WR_4 = 0x2d
-  LDS_WR_5 = 0x2e
-  OTHER_LDS_1 = 0x50
-  OTHER_LDS_2 = 0x51
-  BARRIER_SIGNAL = 0x7a
-  WMMA_8 = 0x8c
-  WMMA_16 = 0x8d
-  VALU_DPFP = 0x92
-  SALU_FLOAT3 = 0x98
-  VALU_SCL_TRANS = 0x99
-  SALU_2 = 0x9b
-  SALU_5 = 0x9c
-  OTHER_VMEM = 0xbd
-  OTHER_VMEM_5 = 0xc1
+  """SQTT instruction operation types for RDNA4 (gfx1200). Complete EINST enum from rocprof-trace-decoder gfx12wave.cpp."""
+  SALU = 0; SMEM = 1; SMEM_WR = 2; JUMP = 3; JUMP_NO = 4; CALL = 5; TRAP = 6; SALU_NO_EXEC = 7; FATAL_HALT = 8; MESSAGE = 9  # noqa: E702
+  VALU_1 = 10; VALU_TRANS = 11; VALU_B1 = 12; VALU_B2 = 13; VALU_B4 = 14; VALU_B16 = 15  # noqa: E702
+  VINTERP = 18; BARRIER_WAIT = 19; EXPREQ_GDS = 20; EXPREQ_GFX = 21  # noqa: E702
+  FLAT_RD_2 = 28; FLAT_WR_3 = 29; FLAT_WR_4 = 30; FLAT_WR_5 = 31; FLAT_WR_6 = 32  # noqa: E702
+  VMEM_RD_1 = 33; VMEM_RD_2 = 34; VMEM_WR_1 = 35; VMEM_WR_2 = 36; VMEM_WR_3 = 37; VMEM_WR_4 = 38; VMEM_WR_5 = 39; VMEM_WR_6 = 40  # noqa: E702
+  LDS_RD = 41; LDS_WR_1 = 42; LDS_WR_2 = 43; LDS_WR_3 = 44; LDS_WR_4 = 45; LDS_WR_5 = 46  # noqa: E702
+  BUF_RD_1 = 47; BUF_RD_2 = 48; BUF_WR_1 = 49; BUF_WR_2 = 50; BUF_WR_3 = 51; BUF_WR_4 = 52; BUF_WR_5 = 53; BUF_WR_6 = 54  # noqa: E702
+  IMG_SAMPLE_1 = 55; IMG_SAMPLE_2 = 56; IMG_SAMPLE_3 = 57; IMG_SAMPLE_4 = 58; IMG_SAMPLE_5 = 59; IMG_SAMPLE_6 = 60  # noqa: E702
+  IMG_SAMPLE_7 = 61; IMG_SAMPLE_8 = 62; IMG_SAMPLE_9 = 63; IMG_SAMPLE_10 = 64; IMG_SAMPLE_11 = 65; IMG_SAMPLE_12 = 66  # noqa: E702
+  IMG_SAMPLE_RESERVED = 67; IMG_RD_1 = 68; IMG_RD_2 = 69; IMG_RD_3 = 70; IMG_RD_4 = 71  # noqa: E702
+  IMG_WR_2 = 72; IMG_WR_3 = 73; IMG_WR_4 = 74; IMG_WR_5 = 75; IMG_WR_6 = 76; IMG_WR_7 = 77; IMG_WR_8 = 78  # noqa: E702
+  OTHER_LDS_1 = 80; OTHER_LDS_2 = 81; OTHER_LDS_3 = 82; OTHER_LDS_4 = 83; OTHER_LDS_5 = 84  # noqa: E702
+  OTHER_FLAT_2 = 85; OTHER_FLAT_3 = 86; OTHER_FLAT_4 = 87; OTHER_FLAT_5 = 88; OTHER_FLAT_6 = 89  # noqa: E702
+  RAYTRACE_8 = 103; RAYTRACE_9 = 104; RAYTRACE_11 = 105; RAYTRACE_12 = 106  # noqa: E702
+  LDS_DIR_LOAD = 110; LDS_PARAM_LOAD = 111; SALU_WR_EXEC = 114; VALU1_WR_EXEC = 115; VALU_B2_WR_EXEC = 116  # noqa: E702
+  RFE = 117; LDS_BVH_6 = 118; OTHER_LDS_6 = 119; OTHER_LDS_10 = 120; LDS_BVH_10 = 121  # noqa: E702
+  BARRIER_SIGNAL = 122; DYN_VGPR = 135; TRY_LOCK = 136; UNLOCK = 137; BARRIER_JOIN = 138  # noqa: E702
+  WMMA_8 = 140; WMMA_16 = 141; WMMA_32 = 142; WMMA_64 = 143; VALU_DPFP = 146; VALU_DERATE = 147  # noqa: E702
+  ICPREF = 150; KCPREF = 151; SALU_FLOAT3 = 152; VALU_SCL_TRANS = 153; SALU_2 = 155; SALU_5 = 156  # noqa: E702
+  # 188-221: vmem_other_simd range (OTHER_VMEM_1..OTHER_VMEM_34)
+  OTHER_VMEM_1 = 188; OTHER_VMEM_2 = 189; OTHER_VMEM_3 = 190; OTHER_VMEM_4 = 191  # noqa: E702
+  OTHER_VMEM_5 = 192; OTHER_VMEM_6 = 193; OTHER_VMEM_7 = 194; OTHER_VMEM_8 = 195  # noqa: E702
+  OTHER_VMEM_9 = 196; OTHER_VMEM_10 = 197; OTHER_VMEM_11 = 198; OTHER_VMEM_12 = 199  # noqa: E702
+  OTHER_VMEM_13 = 200; OTHER_VMEM_14 = 201; OTHER_VMEM_15 = 202; OTHER_VMEM_16 = 203  # noqa: E702
+  OTHER_VMEM_17 = 204; OTHER_VMEM_18 = 205; OTHER_VMEM_19 = 206; OTHER_VMEM_20 = 207  # noqa: E702
+  OTHER_VMEM_21 = 208; OTHER_VMEM_22 = 209; OTHER_VMEM_23 = 210; OTHER_VMEM_24 = 211  # noqa: E702
+  OTHER_VMEM_25 = 212; OTHER_VMEM_26 = 213; OTHER_VMEM_27 = 214; OTHER_VMEM_28 = 215  # noqa: E702
+  OTHER_VMEM_29 = 216; OTHER_VMEM_30 = 217; OTHER_VMEM_31 = 218; OTHER_VMEM_32 = 219  # noqa: E702
+  OTHER_VMEM_33 = 220; OTHER_VMEM_34 = 221  # noqa: E702
+  # 222-255: block_store range (BLOCK_STORE_1..BLOCK_STORE_34)
+  BLOCK_STORE_1 = 222; BLOCK_STORE_2 = 223; BLOCK_STORE_3 = 224; BLOCK_STORE_4 = 225  # noqa: E702
+  BLOCK_STORE_5 = 226; BLOCK_STORE_6 = 227; BLOCK_STORE_7 = 228; BLOCK_STORE_8 = 229  # noqa: E702
+  BLOCK_STORE_9 = 230; BLOCK_STORE_10 = 231; BLOCK_STORE_11 = 232; BLOCK_STORE_12 = 233  # noqa: E702
+  BLOCK_STORE_13 = 234; BLOCK_STORE_14 = 235; BLOCK_STORE_15 = 236; BLOCK_STORE_16 = 237  # noqa: E702
+  BLOCK_STORE_17 = 238; BLOCK_STORE_18 = 239; BLOCK_STORE_19 = 240; BLOCK_STORE_20 = 241  # noqa: E702
+  BLOCK_STORE_21 = 242; BLOCK_STORE_22 = 243; BLOCK_STORE_23 = 244; BLOCK_STORE_24 = 245  # noqa: E702
+  BLOCK_STORE_25 = 246; BLOCK_STORE_26 = 247; BLOCK_STORE_27 = 248; BLOCK_STORE_28 = 249  # noqa: E702
+  BLOCK_STORE_29 = 250; BLOCK_STORE_30 = 251; BLOCK_STORE_31 = 252; BLOCK_STORE_32 = 253  # noqa: E702
+  BLOCK_STORE_33 = 254; BLOCK_STORE_34 = 255  # noqa: E702
 
 class InstOpCDNA(Enum):
   SMEM_RD = 0
@@ -393,10 +396,37 @@ PACKET_TYPES_RDNA3: dict[int, type[PacketType]] = {
   9: WAVESTART, 10: TS_DELTA_S5_W2, 11: WAVEALLOC, 12: TS_DELTA_S5_W3, 13: PERF, 14: UTILCTR, 15: TS_DELTA_SHORT,
   16: NOP, 17: TS_WAVE_STATE, 18: EVENT, 19: EVENT_BIG, 20: REG, 21: SNAPSHOT, 22: TS_DELTA_OR_MARK, 23: LAYOUT_HEADER, 24: INST,
 }
+# GFX12-only token types with changed sizes or new encodings
+class NEW_PC_RDNA4(PacketType):  # 72 bits on GFX12 (was 64 on GFX10)
+  encoding = bits[6:0] == 0b0100001
+  delta = bits[10:8]
+  _padding = bits[71:11]
+
+class SHADER_DATA_RDNA4(PacketType):  # 56 bits on GFX12 (was 52 on RDNA3)
+  encoding = bits[6:0] == 0b0000110
+  delta = bits[9:7]
+  _padding = bits[55:10]
+
+class SHADER_DATA_SHORT_RDNA4(PacketType):  # 32 bits on GFX12 (was 28 on RDNA3)
+  encoding = bits[6:0] == 0b1000110
+  delta = bits[9:7]
+  _padding = bits[31:10]
+
+class EXEC_POPCOUNT1(PacketType):  # 24 bits, GFX12-only (replaces SHADER_DATA at this encoding)
+  encoding = bits[6:0] == 0b1100110
+  delta = bits[9:7]
+  _padding = bits[23:10]
+
+class EXEC_POPCOUNT3(PacketType):  # 48 bits, GFX12-only (replaces SHADER_DATA_SHORT at this encoding)
+  encoding = bits[5:0] == 0b010110
+  delta = bits[8:6]
+  _padding = bits[47:9]
+
 PACKET_TYPES_RDNA4: dict[int, type[PacketType]] = {
   **PACKET_TYPES_RDNA3,
   9: WAVESTART_RDNA4, 10: TS_DELTA_S5_W2_RDNA4, 11: WAVEALLOC_RDNA4,
   12: TS_DELTA_S5_W3_RDNA4, 13: PERF_RDNA4, 22: TS_DELTA_OR_MARK_RDNA4, 24: INST_RDNA4,
+  25: NEW_PC_RDNA4, 26: SHADER_DATA_RDNA4, 27: SHADER_DATA_SHORT_RDNA4, 28: EXEC_POPCOUNT1, 29: EXEC_POPCOUNT3,
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -589,7 +619,7 @@ def decode(data: bytes) -> Iterator[PacketType]:
     if special == 1:  # TS_DELTA_OR_MARK
       pkt = pkt_cls.from_raw(reg, 0)  # create packet to check is_marker
       if pkt.is_marker: delta = 0
-    elif special == 2: delta += 8  # TS_DELTA_SHORT
+    elif special == 2: delta += 4  # TS_DELTA_SHORT: delta value is offset by 4
     elif special == 3: delta *= 4  # CDNA_DELTA
     elif special == 4:  # CDNA_TIMESTAMP (absolute timestamp anchoring)
       if (reg >> 4) & 0xfff == 0:  # unk_0 == 0 means absolute timestamp
@@ -650,8 +680,8 @@ def map_insts(data:bytes, lib:bytes, target:str) -> Iterator[tuple[PacketType, I
           yield (p, InstructionInfo(pc, wave, inst))
     elif isinstance(p, (VALUINST, INST, INST_RDNA4, IMMEDIATE)):
       inst = pc_map[pc:=wave_pc[p.wave]]
-      # s_delay_alu and s_wait_alu instructions are skipped
-      while (inst_op:=getattr(inst, 'op_name', '')) in {"S_DELAY_ALU", "S_WAIT_ALU"}:
+      # s_delay_alu, s_wait_alu and s_barrier_wait instructions are skipped
+      while (inst_op:=getattr(inst, 'op_name', '')) in {"S_DELAY_ALU", "S_WAIT_ALU", "S_BARRIER_WAIT"}:
         wave_pc[p.wave] += inst.size()
         inst = pc_map[pc:=wave_pc[p.wave]]
       # assert branch always has a JUMP packet
