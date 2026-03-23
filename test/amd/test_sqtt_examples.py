@@ -190,7 +190,7 @@ class SQTTExamplesTestBase(unittest.TestCase):
             elif isinstance(p, (WAVEEND, CDNA_WAVEEND)) and (key := (p.wave, p.simd, p.cu)) in wave_starts:
               our_waves.append((wave_starts[key], p._time))
           for st in wave_starts.values():
-            self.assertGreater(st, first_timestamp, f"wave start must be after the first packet")
+            self.assertGreater(st, first_timestamp, "wave start must be after the first packet")
         # rocprof fails non deterministically and gives inaccurate timestamps.
         #self.assertEqual(sorted(our_waves), sorted(roc_waves), f"wave times mismatch in {name}")
         for st, et in our_waves:
