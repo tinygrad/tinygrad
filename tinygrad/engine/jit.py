@@ -1,16 +1,26 @@
 from typing import TypeVar, Generic, Callable, cast, Any
 import functools, collections
 from tinygrad.tensor import Tensor
-from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, BEAM, getenv, colored, JIT, JIT_BATCH_SIZE, dedup, partition, unwrap
+from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, BEAM, getenv, colored, JIT, JIT_BATCH_SIZE, dedup, unwrap
 from tinygrad.device import Buffer, Compiled, Device, MultiBuffer
 from tinygrad.dtype import DType
-from tinygrad.uop.ops import UOp, Variable, sym_infer, Ops
+from tinygrad.uop.ops import UOp, Variable, sym_infer, Ops, buffers
 from tinygrad.engine.realize import ExecItem, capturing, ViewOp, BufferCopy, BufferXfer, EncDec, CompiledRunner, Runner, Estimates
-from tinygrad.engine.memory import _internal_memory_planner
+from tinygrad.engine.memory import memory_plan_rewrite, _collect_bufs
+from tinygrad.engine.schedule import linear_to_schedule
 from tinygrad.nn.state import get_parameters
 from tinygrad.schedule.rangeify import mop_cleanup
-from dataclasses import dataclass, replace
-from weakref import WeakKeyDictionary
+from dataclasses import dataclass
+
+def prune_linear(linear:UOp, needed:set[UOp]) -> tuple[UOp, UOp]:
+  kept, onetime = [], []
+  for si in linear.src:
+    si_bufs = {b for src in si.src[1:] for b in _collect_bufs(src)}
+    if not si_bufs.isdisjoint(needed):
+      kept.append(si)
+      needed |= si_bufs
+    else: onetime.append(si)
+  return linear.replace(src=tuple(kept)), linear.replace(src=tuple(onetime))
 
 class GraphException(Exception): pass
 class JitError(Exception): pass
@@ -180,7 +190,7 @@ class CapturedJit(Generic[ReturnType]):
   expected_input_info: list[tuple[UOp, tuple[Variable, ...], DType, str]]  # (view, variables, dtype, device) per input
 
   def __reduce__(self):
-    # TODO: free_intermediates here? replan_buffers_memory_layout here?
+    # TODO: free_intermediates here?
     return self.__class__, (self.ret, self.jit_cache, self.input_replace, self.extra_view_inputs, self.expected_names, self.expected_input_info)
 
   def __post_init__(self):
@@ -202,18 +212,12 @@ class CapturedJit(Generic[ReturnType]):
   def free_intermediates(self):
     depends: set[Buffer|None] = set([None])
     update_depends(depends, self.jit_cache)
-    for b in depends:
-      if b is not None:
-        if b.is_allocated(): b.deallocate()
-        if b._base is not None and b._base.allocated_views == 0 and b._base.is_allocated(): b._base.deallocate()
-    self.__post_init__()   # reset the graph state
-
-  def replan_buffers_memory_layout(self):
-    blacklist = [t.uop.buffer for t in get_parameters(self.ret)]
-    asgn = _internal_memory_planner([[b for item in self.jit_cache for b in item.bufs if b is not None and b not in blacklist]], ignore_checks=True)
-    self.jit_cache = [replace(item, bufs=[asgn.get(b,b) if b is not None else None for b in item.bufs]) for item in self.jit_cache]
-    for old, new in asgn.items():
-      if old.is_allocated(): new.ensure_allocated().copyin(old.as_memoryview())
+    arenas = {b._base for b in depends if b is not None and b._base is not None}
+    to_free = {b for b in depends if b is not None} | {b for ei in self.jit_cache for b in ei.bufs if b is not None and b._base in arenas}
+    for b in to_free:
+      if hasattr(b, '_buf'): b.deallocate()
+    for a in arenas:
+      if a.allocated_views == 0 and a.is_allocated(): a.deallocate()
     self.__post_init__()
 
   # jit exec
@@ -272,25 +276,14 @@ def _prepare_jit_inputs(args, kwargs):
   return input_buffers, var_vals, names, expected_input_info
 
 class TinyJit(Generic[ReturnType]):
-  def __init__(self, fxn:Callable[..., ReturnType]|None, captured:CapturedJit|None=None, prune=False, optimize=False):
+  def __init__(self, fxn:Callable[..., ReturnType]|None, captured:CapturedJit|None=None, prune=False):
     assert fxn or captured, "need either a function or a CapturedJit"
     self.fxn = fxn
     self.captured: CapturedJit|None = captured
     self.cnt: int = 2 if self.fxn is None else 0
     self.prune = prune
-    self.optimize = optimize
 
-  def add_buffer(self, b:Buffer) -> Buffer:
-    if found:=self._buffer_replace.get(b, None): return found
-    if b.is_allocated() or b.uop_refcount > 0: return b
-    if b._base is not None:
-      self._buffer_replace[b] = ret = Buffer(b.device, b.size, b.dtype, base=self.add_buffer(b._base), offset=b.offset)
-    else:
-      self._buffer_replace[b] = ret = Buffer(b.device, b.size, b.dtype, options=b.options)
-    return ret
-
-  def add(self, ei:ExecItem):
-    self._jit_cache.append(ExecItem(ei.ast, [self.add_buffer(buf) for buf in ei.bufs if buf is not None], ei.metadata, ei.fixedvars, ei.prg))
+  def add_linear(self, linear:UOp, var_vals:dict[str, int]): self._linears.append(linear)
 
   def reset(self):
     assert self.fxn is not None, "can't reset without function"
@@ -321,20 +314,32 @@ class TinyJit(Generic[ReturnType]):
       # jit capture
       assert self.fxn is not None
       if capturing: raise RuntimeError(f"having TinyJit inside another TinyJit is not supported {len(capturing)=} {capturing=}")
-      self._jit_cache: list[ExecItem] = []
-      self._buffer_replace: WeakKeyDictionary[Buffer, Buffer] = WeakKeyDictionary()
-      # TODO: should we always disable the memory planner here? it must be off for prune
-      with Context(BEAM=getenv("JITBEAM", BEAM.value), NO_MEMORY_PLANNER=int(self.prune)):
-        capturing.append(self)
-        try:
-          ret = self.fxn(*args, **kwargs)
-          if len(params:=get_parameters(ret)): Tensor.realize(*params)
-        finally: capturing.clear()
-      jit_cache = self._jit_cache
-      del self._buffer_replace, self._jit_cache
-      if not len(jit_cache): raise JitError("didn't JIT anything!")
+      self._linears: list[UOp] = []
+      capturing.append(self)
+      try:
+        ret = self.fxn(*args, **kwargs)
+        if len(params:=get_parameters(ret)): Tensor.realize(*params)
+      finally: capturing.clear()
+      if not len(self._linears): raise JitError("didn't JIT anything!")
       _check_no_non_tensor_return(ret)
-      if DEBUG >= 1: print(f"JIT captured {len(jit_cache)} kernels with {len(input_buffers)} inputs")
+      if DEBUG >= 1: print(f"JIT captured {len(self._linears)} linears with {len(input_buffers)} inputs")
+
+      # combine all captured linears into one, memory plan, and convert to ExecItems
+      big_linear = UOp(Ops.LINEAR, src=tuple(flatten([l.src for l in self._linears])))
+      del self._linears
+
+      if self.prune:
+        big_linear, onetime_linear = prune_linear(big_linear, {k for k,v in buffers.items() if isinstance(v, Buffer) and v in set(input_buffers)})
+        if DEBUG >= 1: print(f"pruned from {len(big_linear.src) + len(onetime_linear.src)} -> {len(big_linear.src)} kernels")
+        for ei in (si.lower() for si in linear_to_schedule(onetime_linear)):
+          for b in ei.bufs: cast(Buffer, b).ensure_allocated()
+          ei.run(var_vals, jit=True)
+        del onetime_linear
+
+      held_bufs = set(buffers) | {t.uop.buf_uop for t in get_parameters(ret) if t.uop.buf_uop.op is Ops.BUFFER}
+      with Context(BEAM=getenv("JITBEAM", BEAM.value)):
+        jit_cache = [ei.lower() for ei in linear_to_schedule(memory_plan_rewrite(big_linear, held_bufs))]
+      del big_linear
 
       # track inputs that are views of buffers
       # TODO: eventually expected_buffers should live in ExecItem
@@ -345,31 +350,13 @@ class TinyJit(Generic[ReturnType]):
             input_buffers.append(b)
             extra_view_inputs.append((input_buffers.index(b.base), b.offset, b.device, b.size, b.dtype))
 
-      # prune independent kernels (optional)
-      if self.prune:
-        depends = set(input_buffers)
-        update_depends(depends, jit_cache)
-        pruned, onetime = partition(jit_cache, lambda ei: any(b in depends for b in get_out_buffers_for_ei(ei)))
-        if DEBUG >= 1: print(f"pruned from {len(jit_cache)} -> {len(pruned)} kernels")
-        # sync before re-executing onetime kernels
-        for dev in set(Device[b.device] for ei in onetime for b in ei.bufs if b is not None): dev.synchronize()
-        # run the onetime kernels here
-        for ei in onetime:
-          for b in ei.bufs: cast(Buffer, b).ensure_allocated()
-          ei.run(var_vals, jit=True)
-        jit_cache = pruned
-
-      # memory planning (optional)
-      copies = [(cast(Buffer,ji.bufs[0]),cast(Buffer,ji.bufs[1])) for ji in jit_cache if isinstance(ji.prg, (BufferXfer, BufferCopy, EncDec))]
-      assigned = _internal_memory_planner([cast(list[Buffer], item.bufs) for item in jit_cache], copies, debug_prefix="JIT ")
-      jit_cache = [replace(item, bufs=[assigned.get(b,b).ensure_allocated() for b in item.bufs if b is not None]) for item in jit_cache]
-
       input_replace = get_input_replace(jit_cache, input_buffers)
       if DEBUG >= 1 and len(set(input_replace.values())) != len(input_buffers): print("WARNING: some input tensors not found")
 
-      # set this for next run
+      # exec
+      for ei in jit_cache: ei.run(var_vals)
+
       self.captured = CapturedJit(ret, jit_cache, input_replace, extra_view_inputs, names, expected_input_info)
-      if self.optimize: self.captured.replan_buffers_memory_layout()
     elif self.cnt >= 2:
       # jit exec
       assert self.captured is not None

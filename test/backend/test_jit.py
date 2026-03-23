@@ -39,6 +39,18 @@ class TestJit(unittest.TestCase):
     def add(a, b): return (a+b).realize()
     _simple_test(add)
 
+  def test_jitbeam_triggers_beam(self):
+    from unittest.mock import patch
+    from tinygrad.helpers import getenv as _getenv
+    @TinyJit
+    def add(a, b): return (a+b).realize()
+    a, b = Tensor.ones(10, 10).contiguous().realize(), Tensor.ones(10, 10).contiguous().realize()
+    with patch("tinygrad.codegen.opt.search.beam_search", wraps=lambda k,*a,**kw: k) as mock_beam:
+      add(a, b)
+      assert mock_beam.call_count == 0
+      with patch("tinygrad.engine.jit.getenv", side_effect=lambda k, d=0: 1 if k == "JITBEAM" else _getenv(k, d)): add(a, b)
+      assert mock_beam.call_count == 1
+
   def test_simple_jit_reset(self):
     @TinyJit
     def add(a, b): return (a+b).realize()
@@ -618,7 +630,7 @@ class TestJitFree(unittest.TestCase):
 
     expected_savings = (len(inp) * inp.dtype.itemsize * 2) + dtypes.float32.itemsize # (t1 and t2) + out
 
-    self.assertEqual(savings_after_free, expected_savings)
+    self.assertGreaterEqual(savings_after_free, expected_savings)
     out = fxn(Tensor([11,1,2,3,4]))
     self.assertEqual(out.item(), 136)
 
@@ -628,7 +640,7 @@ class TestJitFree(unittest.TestCase):
     fxn.captured.free_intermediates() # 2nd time to validate
     savings_after_free = pre_free - GlobalCounters.mem_used
 
-    self.assertEqual(savings_after_free, expected_savings)
+    self.assertGreaterEqual(savings_after_free, expected_savings)
     out = fxn(Tensor([11,1,2,3,4]))
     self.assertEqual(out.item(), 136)
 
@@ -647,25 +659,6 @@ class TestJitFree(unittest.TestCase):
     self.assertEqual(savings_after_free, 0)
     fxn(Tensor([2]))
     self.assertEqual(x.item(), 8)
-
-  def test_replan_buffers_memory_layout(self):
-    if not hasattr(Device[Device.DEFAULT].allocator, '_offset'): raise unittest.SkipTest("replan_buffers_memory_layout useless")
-
-    ext_tensor = Tensor([1,24,23,45,1]).contiguous()
-    ext_tensor_2 = Tensor([2,2,2,2,2]).contiguous()
-    @TinyJit
-    def fxn(x:Tensor):
-      out = (x*ext_tensor_2+ext_tensor).reshape(5,1).expand(5, 100).contiguous()
-      return out.sum()
-    for i in range(5):
-      out = fxn(Tensor([i,1,2,3,4]))
-      self.assertEqual(out.item(), 11400+200*i)
-    self.assertEqual(len(set([b.base for item in fxn.captured.jit_cache for b in item.bufs if b is not None])), 4)
-    fxn.captured.replan_buffers_memory_layout()
-    self.assertEqual(len(set([b.base for item in fxn.captured.jit_cache for b in item.bufs if b is not None])), 2)
-
-    out = fxn(Tensor([11,1,2,3,4]))
-    self.assertEqual(out.item(), 13600)
 
 class TestJitGraphSplit(unittest.TestCase):
   def compute(self, device, inp):
