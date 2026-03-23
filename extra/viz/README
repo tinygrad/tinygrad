@@ -7,8 +7,8 @@ A command line tool for exploring the VIZ trace.
 
 Use `extra/viz/cli.py --profile` to list all traced devices.
 
-List top slowest kernels on a device: `--profile --device "AMD"`
-List samples of a kernel on a device: `--profile --device "AMD" --kernel E_3`
+List top slowest kernels on a device: `--profile --select "AMD"`
+List samples of a kernel on a device: `--profile --select "AMD" --kernel E_3`
 
 ## Inspect codegen and PatternMatcher
 

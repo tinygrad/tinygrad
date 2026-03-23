@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import argparse, pathlib, struct, json, signal, itertools
+import argparse, pathlib, sys, struct, json, itertools, signal
 from typing import Iterator
 from tinygrad.viz import serve as viz
 from tinygrad.uop.ops import RewriteTrace
