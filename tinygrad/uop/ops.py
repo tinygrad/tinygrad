@@ -416,6 +416,35 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
   def substitute(self, dvars:dict[UOp, UOp], name:str|None=None, extra_pm:PatternMatcher|None=None, walk:bool=False):
     dvars = {k:v for k,v in dvars.items() if k is not v}
     if len(dvars) == 0: return self
+    # fast path: simple substitution without extra_pm or tracking — avoids graph_rewrite overhead entirely
+    if extra_pm is None and name is None:
+      replace:dict[UOp, UOp] = {}
+      stack:list[tuple[UOp, bool]] = [(self, False)]
+      while stack:
+        n, processed = stack.pop()
+        if n in replace: continue
+        if not processed:
+          stack.append((n, True))
+          # if n is in dvars, process the replacement's children instead of n's children
+          target = n
+          if n in dvars:
+            target = dvars[n]
+            while target in dvars: target = dvars[target]  # resolve chains
+          for s in reversed(target.src):
+            if s not in replace: stack.append((s, False))
+        else:
+          target = n
+          if n in dvars:
+            target = dvars[n]
+            while target in dvars: target = dvars[target]
+          any_changed = False
+          for s in target.src:
+            if replace.get(s, s) is not s: any_changed = True; break
+          if any_changed:
+            replace[n] = UOp(target.op, target.dtype, tuple(replace.get(s, s) for s in target.src), target.arg, target.tag)
+          else:
+            replace[n] = target
+      return replace.get(self, self)
     with Context(TRACK_MATCH_STATS=(0 if name is None else TRACK_MATCH_STATS.value)):
       return graph_rewrite(self, (extra_pm+_substitute) if extra_pm is not None else _substitute, dvars,
                            bottom_up=True, walk=walk, name=name)
