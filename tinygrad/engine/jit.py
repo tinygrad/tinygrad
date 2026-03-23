@@ -6,11 +6,11 @@ from tinygrad.device import Buffer, Compiled, Device, MultiBuffer
 from tinygrad.dtype import DType
 from tinygrad.uop.ops import UOp, Variable, sym_infer, Ops, buffers
 from tinygrad.engine.realize import ExecItem, capturing, ViewOp, BufferCopy, BufferXfer, EncDec, CompiledRunner, Runner, Estimates
-from tinygrad.engine.memory import _internal_memory_planner, _collect_bufs
+from tinygrad.engine.memory import memory_plan_rewrite, _collect_bufs
 from tinygrad.engine.schedule import linear_to_schedule
 from tinygrad.nn.state import get_parameters
 from tinygrad.schedule.rangeify import mop_cleanup
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 
 def prune_linear(linear:UOp, needed:set[UOp]) -> tuple[UOp, UOp]:
   kept, onetime = [], []
@@ -212,11 +212,13 @@ class CapturedJit(Generic[ReturnType]):
   def free_intermediates(self):
     depends: set[Buffer|None] = set([None])
     update_depends(depends, self.jit_cache)
-    for b in depends:
-      if b is not None:
-        if b.is_allocated(): b.deallocate()
-        if b._base is not None and b._base.allocated_views == 0 and b._base.is_allocated(): b._base.deallocate()
-    self.__post_init__()   # reset the graph state
+    arenas = {b._base for b in depends if b is not None and b._base is not None}
+    to_free = {b for b in depends if b is not None} | {b for ei in self.jit_cache for b in ei.bufs if b is not None and b._base in arenas}
+    for b in to_free:
+      if hasattr(b, '_buf'): b.deallocate()
+    for a in arenas:
+      if a.allocated_views == 0 and a.is_allocated(): a.deallocate()
+    self.__post_init__()
 
   # jit exec
   def __call__(self, input_buffers:list[Buffer], var_vals:dict[str, int]) -> ReturnType:
@@ -322,7 +324,7 @@ class TinyJit(Generic[ReturnType]):
       _check_no_non_tensor_return(ret)
       if DEBUG >= 1: print(f"JIT captured {len(self._linears)} linears with {len(input_buffers)} inputs")
 
-      # combine all captured linears into one and convert to ExecItems
+      # combine all captured linears into one, memory plan, and convert to ExecItems
       big_linear = UOp(Ops.LINEAR, src=tuple(flatten([l.src for l in self._linears])))
       del self._linears
 
@@ -334,7 +336,9 @@ class TinyJit(Generic[ReturnType]):
           ei.run(var_vals, jit=True)
         del onetime_linear
 
-      with Context(BEAM=getenv("JITBEAM", BEAM.value)): jit_cache = [ei.lower() for ei in linear_to_schedule(big_linear)]
+      held_bufs = set(buffers) | {t.uop.buf_uop for t in get_parameters(ret) if t.uop.buf_uop.op is Ops.BUFFER}
+      with Context(BEAM=getenv("JITBEAM", BEAM.value)):
+        jit_cache = [ei.lower() for ei in linear_to_schedule(memory_plan_rewrite(big_linear, held_bufs))]
       del big_linear
 
       # track inputs that are views of buffers
@@ -345,11 +349,6 @@ class TinyJit(Generic[ReturnType]):
           if b is not None and b._base is not None and b._base in input_buffers:
             input_buffers.append(b)
             extra_view_inputs.append((input_buffers.index(b.base), b.offset, b.device, b.size, b.dtype))
-
-      # memory planning (optional)
-      copies = [(cast(Buffer,ji.bufs[0]),cast(Buffer,ji.bufs[1])) for ji in jit_cache if isinstance(ji.prg, (BufferXfer, BufferCopy, EncDec))]
-      assigned = _internal_memory_planner([cast(list[Buffer], item.bufs) for item in jit_cache], copies, debug_prefix="JIT ")
-      jit_cache = [replace(item, bufs=[assigned.get(b,b).ensure_allocated() for b in item.bufs if b is not None]) for item in jit_cache]
 
       input_replace = get_input_replace(jit_cache, input_buffers)
       if DEBUG >= 1 and len(set(input_replace.values())) != len(input_buffers): print("WARNING: some input tensors not found")
