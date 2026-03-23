@@ -183,15 +183,18 @@ class SQTTExamplesTestBase(unittest.TestCase):
         our_waves: list[tuple[int, int]] = []
         for event in events:
           wave_starts: dict[tuple[int, int, int], int] = {}
+          first_timestamp:int|None = None
           for p in decode(event.blob):
+            if first_timestamp is None: first_timestamp = p._time
             if isinstance(p, (WAVESTART, CDNA_WAVESTART, WAVESTART_RDNA4)): wave_starts[(p.wave, p.simd, p.cu)] = p._time
             elif isinstance(p, (WAVEEND, CDNA_WAVEEND)) and (key := (p.wave, p.simd, p.cu)) in wave_starts:
               our_waves.append((wave_starts[key], p._time))
-        # rocprof fails non deterministically and gives inaccurate cycle times.
+          for st in wave_starts.values():
+            self.assertGreater(st, first_timestamp, f"wave start must be after the first packet")
+        # rocprof fails non deterministically and gives inaccurate timestamps.
         #self.assertEqual(sorted(our_waves), sorted(roc_waves), f"wave times mismatch in {name}")
         for st, et in our_waves:
-          self.assertGreater(et, st, f"invalid wave start/end time {st} {et}")
-          self.assertNotEqual(st, 0, f"wave start time must never be zero {st}")
+          self.assertGreater(et, st, "wave end must be after start")
 
   def test_rocprof_inst_times_match(self):
     """Instruction times must match rocprof exactly (excluding s_endpgm)."""
