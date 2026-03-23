@@ -9,6 +9,8 @@ from tinygrad.dtype import storage_fmt_for_dtype, to_storage_scalar, from_storag
 from tinygrad.helpers import ContextVar, all_int, prod, getenv, all_same, Context, partition, temp, unwrap, T, argfix, Metadata, flatten, TRACEMETA
 from tinygrad.helpers import PROFILE, dedup, cdiv, cmod, diskcache_put, to_function_name, cpu_profile, TracingKey, VIZ, SPEC, CAPTURE_PROCESS_REPLAY
 from tinygrad.helpers import strip_parens, colored, ansilen, printable
+try: from tinygrad.uop._fast_rewrite import c_unified_rewrite as _c_unified_rewrite
+except ImportError: _c_unified_rewrite = None
 if TYPE_CHECKING:
   from tinygrad.device import Buffer, MultiBuffer
   from tinygrad.renderer import Estimates
@@ -1437,6 +1439,11 @@ class RewriteContext:
     return replace.get(root, root)
 
   def unified_rewrite(self, root:UOp) -> UOp:
+    # try C extension for the inner loop (eliminates Python bytecode overhead)
+    if _c_unified_rewrite is not None:
+      return _c_unified_rewrite(root, self.cached_bpm_rewrite, self.pm_rewrite,
+                                self.pm.pdict if self.pm is not None else None,
+                                self.enter_calls, self.replace, self.bpm is None, REWRITE_STACK_LIMIT.value)
     # cache frequently accessed attributes as locals for speed (saves ~100ns per attribute lookup in hot loop)
     replace = self.replace
     bpm, pm, enter_calls = self.bpm, self.pm, self.enter_calls
