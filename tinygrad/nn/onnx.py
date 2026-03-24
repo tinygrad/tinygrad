@@ -626,6 +626,21 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
   def Hardmax(x:Tensor, axis:int=-1): return x.argmax(axis).unsqueeze(axis)._one_hot_along_dim(x.shape[axis], dim=axis).cast(x.dtype)
   def Binarizer(x:Tensor, threshold:float=0.0): return (x > threshold).float()
   def Swish(x:Tensor, alpha:float=1.0): return x * (x * alpha).sigmoid()
+  def _apply_rnn_activation(x:Tensor, activation:str, alpha:float|None=None, beta:float|None=None):
+    if activation == "Relu": return x.relu()
+    if activation == "Tanh": return x.tanh()
+    if activation == "Sigmoid": return x.sigmoid()
+    if activation == "Affine": return x * (alpha if alpha is not None else 1.0) + (beta if beta is not None else 0.0)
+    if activation == "LeakyRelu": return x.leaky_relu(alpha if alpha is not None else 0.01)
+    if activation == "ThresholdedRelu":
+      threshold = alpha if alpha is not None else 1.0
+      return (x > threshold).where(x, 0)
+    if activation == "ScaledTanh": return (x * (beta if beta is not None else 1.0)).tanh() * (alpha if alpha is not None else 1.0)
+    if activation == "HardSigmoid": return (x * (alpha if alpha is not None else 0.2) + (beta if beta is not None else 0.5)).clip(0, 1)
+    if activation == "Elu": return x.relu() - (x < 0).where(((-x).exp() - 1) * (alpha if alpha is not None else 1.0), 0)
+    if activation == "Softsign": return x.softsign()
+    if activation == "Softplus": return x.softplus()
+    raise NotImplementedError(f"unsupported RNN activation {activation!r}")
 
   # ***** Unary Ops (broadcasted) *****
   def Add(x:Tensor,y:Tensor, broadcast=None, axis=None): return x + y
@@ -909,6 +924,81 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
 
       return X.batchnorm(scale, B, current_mean, current_invstd).cast(X.dtype),running_mean.cast(input_mean.dtype),running_var.cast(input_var.dtype)
     return X.batchnorm(scale, B, input_mean, (input_var + epsilon).rsqrt())
+  def LSTM(X:Tensor, W:Tensor, R:Tensor, B:Tensor|None=None, sequence_lens:Tensor|None=None, initial_h:Tensor|None=None, initial_c:Tensor|None=None,
+           P:Tensor|None=None, activation_alpha:list[float]|None=None, activation_beta:list[float]|None=None, activations:list[str]|None=None,
+           clip:float|None=None, direction:str="forward", hidden_size:int|None=None, input_forget:int=0, layout:int=0):
+    if hidden_size is None: hidden_size = cast(int, W.shape[1] // 4)
+    if sequence_lens is not None: raise NotImplementedError("LSTM sequence_lens is not supported yet")
+    if P is not None: raise NotImplementedError("LSTM peephole weights are not supported yet")
+
+    num_directions = 2 if direction == "bidirectional" else 1
+    if W.shape[0] != num_directions or R.shape[0] != num_directions:
+      raise RuntimeError(f"LSTM got inconsistent direction weights: {W.shape=} {R.shape=} {direction=}")
+
+    if layout == 1:
+      X = X.permute(1, 0, 2)
+      if initial_h is not None: initial_h = initial_h.permute(1, 0, 2)
+      if initial_c is not None: initial_c = initial_c.permute(1, 0, 2)
+    elif layout != 0:
+      raise NotImplementedError(f"LSTM {layout=} is not supported")
+
+    if B is None: B = Tensor.zeros(num_directions, hidden_size * 8, dtype=X.dtype, device=X.device, requires_grad=False)
+    if initial_h is None: initial_h = Tensor.zeros(num_directions, X.shape[1], hidden_size, dtype=X.dtype, device=X.device, requires_grad=False)
+    if initial_c is None: initial_c = Tensor.zeros(num_directions, X.shape[1], hidden_size, dtype=X.dtype, device=X.device, requires_grad=False)
+
+    def clip_input(x:Tensor) -> Tensor: return x.clip(-clip, clip) if clip is not None else x
+
+    def activation_params(direction_idx:int):
+      act_names = list(activations) if activations is not None else ["Sigmoid", "Tanh", "Tanh"] * num_directions
+      alpha_vals = list(activation_alpha) if activation_alpha is not None else []
+      beta_vals = list(activation_beta) if activation_beta is not None else []
+      offset = direction_idx * 3
+      return tuple((act_names[offset+i], alpha_vals[offset+i] if len(alpha_vals) > offset+i else None,
+                    beta_vals[offset+i] if len(beta_vals) > offset+i else None) for i in range(3))
+
+    def run_direction(direction_idx:int, reverse:bool) -> tuple[Tensor, Tensor, Tensor]:
+      f_act, g_act, h_act = activation_params(direction_idx)
+      Wi, Wo, Wf, Wc = W[direction_idx].split([hidden_size] * 4, dim=0)
+      Ri, Ro, Rf, Rc = R[direction_idx].split([hidden_size] * 4, dim=0)
+      Wb, Rb = B[direction_idx].split([hidden_size * 4] * 2, dim=0)
+      Wbi, Wbo, Wbf, Wbc = Wb.split([hidden_size] * 4, dim=0)
+      Rbi, Rbo, Rbf, Rbc = Rb.split([hidden_size] * 4, dim=0)
+      h_t, c_t = initial_h[direction_idx], initial_c[direction_idx]
+      outputs:list[Tensor] = []
+
+      steps = range(cast(int, X.shape[0]) - 1, -1, -1) if reverse else range(cast(int, X.shape[0]))
+      for step in steps:
+        x_t = X[step]
+        i_in = clip_input(x_t @ Wi.T + h_t @ Ri.T + Wbi + Rbi)
+        o_in = clip_input(x_t @ Wo.T + h_t @ Ro.T + Wbo + Rbo)
+        f_in = clip_input(x_t @ Wf.T + h_t @ Rf.T + Wbf + Rbf)
+        c_in = clip_input(x_t @ Wc.T + h_t @ Rc.T + Wbc + Rbc)
+
+        i_t = _apply_rnn_activation(i_in, *f_act)
+        f_t = 1.0 - i_t if input_forget else _apply_rnn_activation(f_in, *f_act)
+        c_bar = _apply_rnn_activation(c_in, *g_act)
+        c_t = f_t * c_t + i_t * c_bar
+        h_t = _apply_rnn_activation(o_in, *f_act) * _apply_rnn_activation(clip_input(c_t), *h_act)
+        outputs.append(h_t)
+
+      if reverse: outputs.reverse()
+      return Tensor.stack(*outputs, dim=0).unsqueeze(1), h_t.unsqueeze(0), c_t.unsqueeze(0)
+
+    direction_runs = []
+    if direction in {"forward", "bidirectional"}: direction_runs.append(run_direction(0, reverse=False))
+    if direction == "reverse": direction_runs.append(run_direction(0, reverse=True))
+    if direction == "bidirectional": direction_runs.append(run_direction(1, reverse=True))
+    if not direction_runs: raise RuntimeError(f"invalid LSTM direction {direction!r}")
+
+    Y = direction_runs[0][0] if len(direction_runs) == 1 else Tensor.cat(*(out[0] for out in direction_runs), dim=1)
+    Y_h = direction_runs[0][1] if len(direction_runs) == 1 else Tensor.cat(*(out[1] for out in direction_runs), dim=0)
+    Y_c = direction_runs[0][2] if len(direction_runs) == 1 else Tensor.cat(*(out[2] for out in direction_runs), dim=0)
+
+    if layout == 1:
+      Y = Y.permute(2, 0, 1, 3)
+      Y_h = Y_h.permute(1, 0, 2)
+      Y_c = Y_c.permute(1, 0, 2)
+    return Y, Y_h, Y_c
   def GroupNormalization(x:Tensor, scale:Tensor, bias:Tensor, num_groups:int, epsilon:float=1e-05, stash_type:int=1):
     assert stash_type == 1, "only float32 is supported"
     x = x.reshape(x.shape[0], num_groups, -1).cast(dtypes.float).layernorm(eps=epsilon).cast(x.dtype).reshape(x.shape)

@@ -41,6 +41,17 @@ class TestOnnxOps(unittest.TestCase):
 
 class TestMainOnnxOps(TestOnnxOps):
   DOMAIN = ONNX_DOMAIN
+  def helper_test_lstm(self, inps:dict[str, np.ndarray], input_names:list[str], outs:list[str], rtol=1e-3, atol=1e-6, **opts):
+    onnx_inputs = [onnx.helper.make_tensor_value_info(name, onnx.helper.np_dtype_to_tensor_dtype(arr.dtype), arr.shape) for name, arr in inps.items()]
+    onnx_outputs = [onnx.helper.make_empty_tensor_value_info(name) for name in outs]
+    nodes = [onnx.helper.make_node("LSTM", input_names, outs, domain=self.DOMAIN, **opts)]
+    graph = onnx.helper.make_graph(nodes, "test_lstm", onnx_inputs, onnx_outputs)
+    model = onnx.helper.make_model(graph, producer_name="test_lstm", ir_version=IR_VERSION,
+                                   opset_imports=[onnx.helper.make_opsetid(self.DOMAIN, ai_onnx)])
+    with tempfile.NamedTemporaryFile() as tmp:
+      onnx.save(model, tmp.name)
+      validate(tmp.name, inps, rtol, atol)
+
   def test_reshape(self):
     inputs = {"in": np.arange(6, dtype=np.float32), "shape": np.array([2,3], dtype=np.int64)}
     attributes = {}
@@ -363,6 +374,51 @@ class TestMainOnnxOps(TestOnnxOps):
   def test_reduce_l2_half(self):
     inputs = {"data": np.random.randn(1, 1, 32, 32, 32).astype(np.half)*100}
     self.helper_test_single_op("ReduceL2", inputs, {}, ["reduced"])
+
+  def test_lstm_forward(self):
+    hidden_size = 5
+    inputs = {
+      "X": np.random.randn(4, 2, 3).astype(np.float32),
+      "W": np.random.randn(1, hidden_size * 4, 3).astype(np.float32),
+      "R": np.random.randn(1, hidden_size * 4, hidden_size).astype(np.float32),
+      "B": np.random.randn(1, hidden_size * 8).astype(np.float32),
+    }
+    self.helper_test_lstm(inputs, ["X", "W", "R", "B"], ["Y"], hidden_size=hidden_size)
+
+  def test_lstm_forward_with_initial_state_and_all_outputs(self):
+    hidden_size = 4
+    inputs = {
+      "X": np.random.randn(3, 2, 6).astype(np.float32),
+      "W": np.random.randn(1, hidden_size * 4, 6).astype(np.float32),
+      "R": np.random.randn(1, hidden_size * 4, hidden_size).astype(np.float32),
+      "B": np.random.randn(1, hidden_size * 8).astype(np.float32),
+      "initial_h": np.random.randn(1, 2, hidden_size).astype(np.float32),
+      "initial_c": np.random.randn(1, 2, hidden_size).astype(np.float32),
+    }
+    self.helper_test_lstm(inputs, ["X", "W", "R", "B", "", "initial_h", "initial_c"], ["Y", "Y_h", "Y_c"], hidden_size=hidden_size)
+
+  def test_lstm_reverse(self):
+    hidden_size = 3
+    inputs = {
+      "X": np.random.randn(5, 2, 4).astype(np.float32),
+      "W": np.random.randn(1, hidden_size * 4, 4).astype(np.float32),
+      "R": np.random.randn(1, hidden_size * 4, hidden_size).astype(np.float32),
+      "B": np.random.randn(1, hidden_size * 8).astype(np.float32),
+    }
+    self.helper_test_lstm(inputs, ["X", "W", "R", "B"], ["Y", "Y_h", "Y_c"], hidden_size=hidden_size, direction="reverse")
+
+  def test_lstm_bidirectional(self):
+    hidden_size = 4
+    inputs = {
+      "X": np.random.randn(4, 3, 5).astype(np.float32),
+      "W": np.random.randn(2, hidden_size * 4, 5).astype(np.float32),
+      "R": np.random.randn(2, hidden_size * 4, hidden_size).astype(np.float32),
+      "B": np.random.randn(2, hidden_size * 8).astype(np.float32),
+      "initial_h": np.random.randn(2, 3, hidden_size).astype(np.float32),
+      "initial_c": np.random.randn(2, 3, hidden_size).astype(np.float32),
+    }
+    self.helper_test_lstm(inputs, ["X", "W", "R", "B", "", "initial_h", "initial_c"], ["Y", "Y_h", "Y_c"],
+                          hidden_size=hidden_size, direction="bidirectional")
 
 class TestTrainingOnnxOps(TestOnnxOps):
   # NOTE: ORT doesn't actually support training ops on cpu so we test using functions provided by onnx
