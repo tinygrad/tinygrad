@@ -353,7 +353,6 @@ def sqtt_timeline(data:bytes, lib:bytes, target:str) -> Generator[ProfileEvent, 
                       "SMEM":"SALU", "VMEM":"VMEM"}
   def add(name:str, p:PacketType, op:str|None=None, wave:int|None=None, info:InstructionInfo|None=None) -> Generator[ProfileEvent, None, None]:
     row = f"WAVE:{wave}" if (wave:=getattr(p, "wave", wave)) is not None else f"{p.__class__.__name__}:0 {name}"
-    # yield a point event the first time we see a row
     if row not in row_ends: yield ProfilePointEvent(row, "JSON", "pcMap", pc_map, ts=Decimal(0))
     # barrier on this row extends to fill the time our wave was waiting
     if (barrier:=curr_barrier.pop(row, None)) is not None: barrier.en = Decimal(p._time)
