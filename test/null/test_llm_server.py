@@ -21,6 +21,7 @@ class TestLLMServer(unittest.TestCase):
 
     import tinygrad.apps.llm as llm_module
     llm_module.model = cls.mock_model
+    llm_module.model_name = "test-model"
     llm_module.tok = cls.mock_tok
     llm_module.bos_id = cls.bos_id
     llm_module.eos_id = cls.eos_id
@@ -133,6 +134,34 @@ class TestLLMServer(unittest.TestCase):
     self.assertIsNotNone(resp.usage)
     self.assertIsNotNone(resp.usage.prompt_tokens)
     self.assertIsNotNone(resp.usage.completion_tokens)
+
+  def test_max_tokens_streaming(self):
+    self.mock_model.generate = Mock(side_effect=lambda ids, **kwargs: iter([300, 301, 302, 303, 999]))
+    stream = self.client.chat.completions.create(
+      model="test", messages=[{"role": "user", "content": "Hello"}], stream=True, max_tokens=2
+    )
+    chunks = list(stream)
+    content_chunks = [c for c in chunks if c.choices and c.choices[0].delta.content]
+    self.assertEqual(len(content_chunks), 2)
+    self.assertEqual(chunks[-1].choices[0].finish_reason, "length")
+
+  def test_max_tokens_non_streaming(self):
+    self.mock_model.generate = Mock(side_effect=lambda ids, **kwargs: iter([300, 301, 302, 303, 999]))
+    resp = self.client.chat.completions.create(
+      model="test", messages=[{"role": "user", "content": "Hello"}], stream=False, max_tokens=2
+    )
+    self.assertEqual(resp.choices[0].finish_reason, "length")
+    self.assertEqual(resp.usage.completion_tokens, 2)
+
+  def test_models_endpoint(self):
+    import requests as req
+    resp = req.get(f"http://127.0.0.1:{self.port}/v1/models")
+    self.assertEqual(resp.status_code, 200)
+    data = resp.json()
+    self.assertEqual(data["object"], "list")
+    self.assertEqual(len(data["data"]), 1)
+    self.assertEqual(data["data"][0]["id"], "test-model")
+    self.assertEqual(data["data"][0]["object"], "model")
 
 if __name__ == '__main__':
   unittest.main()
