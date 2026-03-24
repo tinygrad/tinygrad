@@ -21,6 +21,15 @@ class Runner:
   def __call__(self, rawbufs:list[Buffer], var_vals:dict[str, int], wait=False) -> float|None:
     raise NotImplementedError("override this")
 
+class NullKernelRunner(Runner):
+  def __init__(self, ast:UOp, device:str):
+    name = ast.arg.name if ast.arg is not None and hasattr(ast.arg, "name") else "null kernel"
+    estimates = ast.arg.estimates if ast.arg is not None and ast.arg.estimates is not None else Estimates()
+    super().__init__(name, device, estimates)
+
+  def __call__(self, rawbufs:list[Buffer], var_vals:dict[str, int]|None=None, wait=False, timeout:int|None=None) -> float|None:
+    return 1e-3
+
 def optimize_local_size(_prg:Callable, global_size:list[int], rawbufs:list[Buffer]) -> list[int]:
   test_rawbuffers = [Buffer(rawbufs[0].device, rawbufs[0].size, rawbufs[0].dtype).allocate(), *rawbufs[1:]] if rawbufs[0] in rawbufs[1:] else rawbufs
   MAX_WORKGROUP = 1024
@@ -107,18 +116,21 @@ class EncDec(Runner):
 
 # **************** method cache ****************
 
-method_cache: dict[tuple[str, type, bytes, tuple, bool], CompiledRunner] = {}
-def get_runner(device:str, ast:UOp) -> CompiledRunner:
+method_cache: dict[tuple[str, type, bytes, tuple, bool], Runner] = {}
+def get_runner(device:str, ast:UOp) -> Runner:
   # TODO: this should be all context relevant to rendering
   context = (BEAM.value, NOOPT.value, DEVECTORIZE.value, EMULATED_DTYPES.value)
   ckey = (device, type(Device[device].compiler), ast.key, context, False)
   if cret:=method_cache.get(ckey): return cret
   bkey = (device.split(":")[0], type(Device[device].compiler), ast.key, context, True)
   if bret:=method_cache.get(bkey):
-    method_cache[ckey] = ret = CompiledRunner(replace(bret.p, device=device))
+    method_cache[ckey] = ret = CompiledRunner(replace(bret.p, device=device)) if isinstance(bret, CompiledRunner) else bret
   else:
-    prg: ProgramSpec = get_program(ast, Device[device].renderer)
-    method_cache[ckey] = method_cache[bkey] = ret = CompiledRunner(replace(prg, device=device))
+    if device.split(":")[0] == "NULL" and Device[device].renderer.device == "NULL" and not EMULATED_DTYPES:
+      method_cache[ckey] = method_cache[bkey] = ret = NullKernelRunner(ast, device)
+    else:
+      prg: ProgramSpec = get_program(ast, Device[device].renderer)
+      method_cache[ckey] = method_cache[bkey] = ret = CompiledRunner(replace(prg, device=device))
   return ret
 
 # **************** lowering functions ****************

@@ -36,6 +36,13 @@ def _check_no_non_tensor_return(ret):
     return
   raise JitError(f"JIT return contains non-Tensor value of type {type(ret).__name__}")
 
+def _count_tensor_returns(ret) -> int:
+  if ret is None: return 0
+  if isinstance(ret, Tensor): return 1
+  if isinstance(ret, (tuple, list)): return sum(_count_tensor_returns(x) for x in ret)
+  if isinstance(ret, dict): return sum(_count_tensor_returns(x) for x in ret.values())
+  return 0
+
 def graph_class(dev): return dev.graph.func if isinstance(dev.graph, functools.partial) else dev.graph
 
 def apply_graph_to_jit(jit_cache: list[ExecItem], input_buffers: list[Buffer], var_vals: dict[str, int],
@@ -286,6 +293,8 @@ class TinyJit(Generic[ReturnType]):
     self.captured: CapturedJit|None = captured
     self.cnt: int = 2 if self.fxn is None else 0
     self.prune = prune
+    self.disable_jit = False
+    self.fallback_jit_cache: list[ExecItem] = []
 
   def add_linear(self, linear:UOp, var_vals:dict[str, int]): self._linears.append(linear)
 
@@ -293,6 +302,8 @@ class TinyJit(Generic[ReturnType]):
     assert self.fxn is not None, "can't reset without function"
     self.cnt = 0
     self.captured = None
+    self.disable_jit = False
+    self.fallback_jit_cache = []
 
   def __reduce__(self):
     assert self.captured is not None, "can't pickle an uncaptured JIT"
@@ -300,7 +311,7 @@ class TinyJit(Generic[ReturnType]):
 
   # keep legacy code working
   @property
-  def jit_cache(self) -> list[ExecItem]: return self.captured._jit_cache if self.captured is not None else []
+  def jit_cache(self) -> list[ExecItem]: return self.captured._jit_cache if self.captured is not None else self.fallback_jit_cache
   @property
   def input_replace(self) -> dict[tuple[int, int], int]: return self.captured._input_replace if self.captured is not None else {}
 
@@ -308,7 +319,7 @@ class TinyJit(Generic[ReturnType]):
 
   def __call__(self, *args, **kwargs) -> ReturnType:
     input_buffers, var_vals, names, expected_input_info = _prepare_jit_inputs(args, kwargs)
-    if not JIT or self.cnt == 0:
+    if not JIT or self.disable_jit or self.cnt == 0:
       # jit ignore
       assert self.fxn is not None
       with Context(BEAM=0 if getenv("IGNORE_JIT_FIRST_BEAM") else BEAM.value):
@@ -324,7 +335,13 @@ class TinyJit(Generic[ReturnType]):
         ret = self.fxn(*args, **kwargs)
         if len(params:=get_parameters(ret)): Tensor.realize(*params)
       finally: capturing.clear()
-      if not len(self._linears): raise JitError("didn't JIT anything!")
+      if not len(self._linears):
+        if ret is not None and all(b.device.startswith("NULL") for b in input_buffers):
+          self.disable_jit = True
+          self.fallback_jit_cache = [ExecItem(UOp(Ops.NOOP), prg=Runner("null jit fallback", input_buffers[0].device)) for _ in range(_count_tensor_returns(ret))]
+          self.cnt += 1
+          return ret
+        raise JitError("didn't JIT anything!")
       _check_no_non_tensor_return(ret)
       if DEBUG >= 1: print(f"JIT captured {len(self._linears)} linears with {len(input_buffers)} inputs")
 

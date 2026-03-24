@@ -7,7 +7,7 @@ if TYPE_CHECKING: import numpy
 from tinygrad.dtype import DType, DTypeLike, dtypes, ConstType, least_upper_float, least_upper_dtype, sum_acc_dtype, to_dtype, truncate
 from tinygrad.dtype import _from_np_dtype, _to_np_dtype, PyConst, Invalid, InvalidType
 from tinygrad.helpers import argfix, make_tuple, flatten, prod, all_int, round_up, merge_dicts, argsort, getenv, all_same, fully_flatten
-from tinygrad.helpers import IMAGE, FLOAT16, WINO, Metadata, TRACEMETA, ASM_GEMM, ceildiv, fetch, is_numpy_ndarray, TracingKey, cpu_profile
+from tinygrad.helpers import IMAGE, FLOAT16, WINO, Metadata, TRACEMETA, ASM_GEMM, EMULATED_DTYPES, ceildiv, fetch, is_numpy_ndarray, TracingKey, cpu_profile
 from tinygrad.helpers import suppress_finalizing, disable_gc
 from tinygrad.gradient import compute_gradient
 from tinygrad.mixin import OpMixin
@@ -269,6 +269,12 @@ class Tensor(OpMixin):
   def realize(self, *lst:Tensor, do_update_stats=True) -> Tensor:
     """Triggers the computation needed to create these Tensor(s)."""
     if len(to_realize:=[x for x in (self,)+lst if not x.uop.has_buffer_identity()]):
+      if not EMULATED_DTYPES and all(isinstance(x.device, str) and x.device.startswith("NULL") for x in to_realize) and \
+         all(x.uop.base.op not in {Ops.CONST, Ops.BIND} for x in to_realize):
+        for x in to_realize:
+          x.uop = Tensor.empty(*x.shape, device=x.device, dtype=x.dtype).uop
+          x.uop.base.buffer.ensure_allocated()
+        return self
       run_schedule(*Tensor.schedule_with_vars(*to_realize), do_update_stats=do_update_stats)
     return self
 
@@ -611,6 +617,10 @@ class Tensor(OpMixin):
     if not all_int(shape:=argfix(*shape)) or not all(s >= 0 for s in shape): raise ValueError(f"invalid input {shape=}")
     if device is not None and not isinstance(device, str): raise ValueError(f"rand only supports single device, got {device=}")
     device = cast(str, canonicalize_device(device))
+    if not EMULATED_DTYPES and device.startswith("NULL"):
+      ret = Tensor.empty(shape, device=device, dtype=dt, **kwargs)
+      ret.uop.base.buffer.ensure_allocated()
+      return ret
 
     # if shape has 0, return zero tensor
     if (numel := prod(shape)) == 0: return Tensor.zeros(shape, device=device, dtype=dt, **kwargs)
