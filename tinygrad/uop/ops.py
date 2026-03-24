@@ -45,6 +45,11 @@ def _suop(lst, uop_fxn, python_fxn):
 def smax(*lst) -> sint: return _suop(argfix(*lst), UOp.maximum, max)
 def smin(*lst) -> sint: return _suop(argfix(*lst), UOp.minimum, min)
 def srender(x:sint) -> str: return x.render() if isinstance(x, UOp) else str(x)
+def _align_left(*shapes:tuple[sint, ...]) -> tuple[tuple[sint, ...], ...]:
+  max_dim = max(len(s) for s in shapes)
+  return tuple((1,)*(max_dim-len(s))+s for s in shapes)
+def _broadcast_shape(*shapes:tuple[sint, ...]) -> tuple[sint, ...]:
+  return tuple(0 if 0 in nth_dim_sizes else smax(nth_dim_sizes) for nth_dim_sizes in zip(*_align_left(*shapes)))
 
 def ssimplify(uop:sint): return uop.ssimplify() if isinstance(uop, UOp) else uop
 def sym_infer(uop: UOp|int, var_vals: dict[str, int]) -> int: return uop.sym_infer(var_vals) if isinstance(uop, UOp) else uop
@@ -473,9 +478,14 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     assert all(x.arg[-1] == AxisType.UPCAST for x in rngs), "all contract ranges must be upcast"
     return UOp(Ops.CONTRACT, dtype=self.dtype.vec(prod([x.vmax+1 for x in rngs])), src=(self,), arg=tuple((x.arg[0], x.vmax+1) for x in rngs))
   def alu(self, op, *src:UOp, **kwargs):
-    out_dtype = (self, *src)[-1].dtype
+    all_srcs = (self, *src)
+    # broadcast shaped operands to a common shape (None and () are falsy, so only real shapes participate)
+    if (shapes := [s for x in all_srcs if (s:=x._shape)]) and not all_same(shapes):
+      out_shape = _broadcast_shape(*shapes)
+      all_srcs = tuple(x._broadcast_to(out_shape) if x._shape else x for x in all_srcs)
+    out_dtype = all_srcs[-1].dtype
     if op in {Ops.CMPLT, Ops.CMPNE, Ops.CMPEQ}: out_dtype = dtypes.bool.vec(out_dtype.count) if out_dtype.count > 1 else dtypes.bool
-    return UOp(op, out_dtype, (self,)+src, **kwargs)
+    return UOp(op, out_dtype, all_srcs, **kwargs)
   @staticmethod
   def const(dtype:DType, b:ConstLike, device:str|tuple[str, ...]|None=None, shape:tuple[sint, ...]|None=None):
     if isinstance(b, UOp): return b.unbind()[0] if b.op is Ops.BIND else b

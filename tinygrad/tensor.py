@@ -11,8 +11,8 @@ from tinygrad.helpers import IMAGE, FLOAT16, WINO, Metadata, TRACEMETA, ASM_GEMM
 from tinygrad.helpers import suppress_finalizing, disable_gc
 from tinygrad.gradient import compute_gradient
 from tinygrad.mixin import OpMixin
-from tinygrad.mixin.movement import _align_left
 from tinygrad.uop.ops import smax, smin, resolve, UOp, Ops, sint, identity_element, all_metadata, _index_to_concrete_int, sint_to_uop, Variable
+from tinygrad.uop.ops import _broadcast_shape
 from tinygrad.engine.schedule import ExecItem, complete_create_schedule_with_vars
 from tinygrad.device import Buffer
 from tinygrad.engine.realize import run_schedule
@@ -82,9 +82,6 @@ def _apply_winograd_matrix(mat, t:Tensor, dims:int) -> Tensor:
   ret = sum(prod(col[idx] for col, idx in zip(matcols, mat_is)) * t_[mat_is] for mat_is in itertools.product(range(len(mat[0])), repeat=dims))
   assert isinstance(ret, Tensor), "sum didn't return a Tensor"
   return ret
-
-def _broadcast_shape(*shapes:tuple[sint, ...]) -> tuple[sint, ...]:
-  return tuple(0 if 0 in nth_dim_sizes else smax(nth_dim_sizes) for nth_dim_sizes in zip(*_align_left(*shapes)))
 
 def _masked_setitem(target:Tensor, values:Tensor, mask:Tensor, axes:tuple[int, ...]) -> Tensor:
   # reduce such that if mask contains repeated indices the last one remains
