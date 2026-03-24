@@ -3,6 +3,12 @@ from tinygrad.dtype import dtypes
 from tinygrad.nn.optim import Optimizer
 from tinygrad.helpers import FUSE_OPTIM
 
+def stochastic_round_bf16(x:Tensor) -> Tensor:
+  """Stochastic rounding from fp32 to bf16. E[SR(x)] = x, preventing small updates from vanishing."""
+  bits = x.bitcast(dtypes.uint32)
+  noise = (x.rand_like() * 0xFFFF).cast(dtypes.uint32)
+  return ((bits + noise) & 0xFFFF0000).bitcast(dtypes.float32).cast(dtypes.bfloat16)
+
 class GradAccClipAdamW(Optimizer):
   def __init__(self, params:list[Tensor], lr=0.001, b1=0.9, b2=0.999, eps=1e-6, weight_decay=0.0, grad_acc=1, clip_norm=1.0, device=None, fused=FUSE_OPTIM):
     super().__init__(params, lr, device, fused)
@@ -11,8 +17,6 @@ class GradAccClipAdamW(Optimizer):
     self.m = self._new_optim_param()
     self.v = self._new_optim_param()
     self.grad_acc, self.clip_norm = grad_acc, clip_norm
-    # fp32 master weights for mixed precision training
-    self.master_params:list[Tensor]|None = [p.float().contiguous() for p in self.params] if self.params[0].dtype != dtypes.float32 else None
 
   def fstep(self, grads:list[Tensor]):
     if self.fused:
@@ -20,8 +24,8 @@ class GradAccClipAdamW(Optimizer):
       updates = [out[0][self.pos_params[i]:self.pos_params[i+1]].reshape(tt.shape) for i, tt in enumerate(self.params)]
     else:
       updates, extra = self._step([], grads)
-    for i, tt in enumerate(self.params): tt.assign(self._apply_update(tt, updates[i], self.master_params[i] if self.master_params else None))
-    to_realize = extra+self.params+self.buffers+(self.master_params or [])
+    for i, tt in enumerate(self.params): tt.assign(self._apply_update(tt, updates[i]))
+    to_realize = extra+self.params+self.buffers
 
     Tensor.realize(*to_realize)
     return extra[-1]
@@ -47,18 +51,17 @@ class GradAccClipAdamW(Optimizer):
     self.b1_t *= self.b1
     self.b2_t *= self.b2
     for i, g in enumerate(grads):
-      self.m[i].assign((self.b1 * self.m[i] + (1.0 - self.b1) * g).cast(self.m[i].dtype))
-      self.v[i].assign((self.b2 * self.v[i] + (1.0 - self.b2) * (g * g)).cast(self.v[i].dtype))
-      m_hat = (self.m[i] / (1.0 - self.b1_t)).cast(self.m[i].dtype)
-      v_hat = (self.v[i] / (1.0 - self.b2_t)).cast(self.v[i].dtype)
+      m_new = self.b1 * self.m[i].float() + (1.0 - self.b1) * g.float()
+      v_new = self.b2 * self.v[i].float() + (1.0 - self.b2) * (g.float() * g.float())
+      self.m[i].assign(stochastic_round_bf16(m_new) if self.m[i].dtype == dtypes.bfloat16 else m_new.cast(self.m[i].dtype))
+      self.v[i].assign(stochastic_round_bf16(v_new) if self.v[i].dtype == dtypes.bfloat16 else v_new.cast(self.v[i].dtype))
+      m_hat = (m_new / (1.0 - self.b1_t)).cast(self.m[i].dtype)
+      v_hat = (v_new / (1.0 - self.b2_t)).cast(self.v[i].dtype)
       up = m_hat / (v_hat.sqrt() + self.eps)
       ret.append((self.lr * up).cast(g.dtype))
     return ret, [self.b1_t, self.b2_t] + self.m + self.v + [total_norm]
 
-  def _apply_update(self, t:Tensor, up:Tensor, master:Tensor|None=None) -> Tensor:
-    w = master if master is not None else t
+  def _apply_update(self, t:Tensor, up:Tensor) -> Tensor:
     wd = self.wd if t.ndim >= 3 else 0.0
-    up = up.float().shard_like(w) + self.lr.to(w.device) * wd * w.detach()
-    new_w = w.detach() - up
-    if master is not None: master.assign(new_w)
-    return new_w.cast(t.dtype)
+    new_w = t.detach().float() - (up.float().shard_like(t) + self.lr.to(t.device) * wd * t.detach().float())
+    return stochastic_round_bf16(new_w) if t.dtype == dtypes.bfloat16 else new_w.cast(t.dtype)
