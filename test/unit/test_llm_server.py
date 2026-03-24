@@ -11,7 +11,7 @@ class TestTransformerGenerate(unittest.TestCase):
                         norm_eps=1e-5, vocab_size=100, head_dim=32, rope_theta=10000.0, max_context=32)
 
     captured_inputs = []
-    def mock_call(self, tokens, start_pos):
+    def mock_call(self, tokens, start_pos, temperature):
       captured_inputs.append((tokens.shape, start_pos if isinstance(start_pos, int) else start_pos.val))
       return Tensor([[42]])
 
@@ -40,7 +40,7 @@ class TestTransformerGenerate(unittest.TestCase):
                         norm_eps=1e-5, vocab_size=100, head_dim=32, rope_theta=10000.0, max_context=32)
 
     captured_inputs = []
-    def mock_call(self, tokens, start_pos):
+    def mock_call(self, tokens, start_pos, temperature):
       captured_inputs.append((tokens.shape, start_pos if isinstance(start_pos, int) else start_pos.val))
       return Tensor([[42]])
 
@@ -92,7 +92,7 @@ class TestTransformerGenerate(unittest.TestCase):
 
     def get_prefill_flags(tokens, chunk_size):
       is_prefill = []
-      def mock_call(self, tokens, start_pos):
+      def mock_call(self, tokens, start_pos, temperature):
         is_prefill.append(resolve(tokens.shape[1] != 1))
         return Tensor([[42]])
       with patch.object(Transformer, '__call__', mock_call):
@@ -107,6 +107,45 @@ class TestTransformerGenerate(unittest.TestCase):
     self.assertEqual(get_prefill_flags(list(range(9)), 4), [True, True, True, False, False])
     # 4 tokens, chunk_size=4 -> 1 prefill chunk
     self.assertEqual(get_prefill_flags(list(range(4)), 4), [True, False, False])
+
+  def test_temperature_zero_is_greedy(self):
+    """Temperature 0 (or near 0) should produce deterministic output."""
+    from tinygrad.apps.llm import Transformer
+    model = Transformer(num_blocks=1, dim=64, hidden_dim=128, n_heads=2, n_kv_heads=2,
+                        norm_eps=1e-5, vocab_size=100, head_dim=32, rope_theta=10000.0, max_context=32)
+    tokens = list(range(1, 6))
+    results = [list(zip(range(5), model.generate(list(tokens)))) for _ in range(3)]
+    # all runs should produce the same tokens
+    self.assertEqual(results[0], results[1])
+    self.assertEqual(results[1], results[2])
+
+  def test_temperature_high_produces_variety(self):
+    """High temperature should produce different outputs across runs."""
+    from tinygrad.apps.llm import Transformer
+    model = Transformer(num_blocks=1, dim=64, hidden_dim=128, n_heads=2, n_kv_heads=2,
+                        norm_eps=1e-5, vocab_size=100, head_dim=32, rope_theta=10000.0, max_context=32)
+    tokens = list(range(1, 6))
+    runs = set()
+    for _ in range(5):
+      gen = model.generate(list(tokens), temperature=2.0)
+      out = tuple(next(gen) for _ in range(10))
+      runs.add(out)
+    # with temperature=2.0, we should see at least 2 distinct outputs across 5 runs
+    self.assertGreater(len(runs), 1, "high temperature should produce varied outputs")
+
+  def test_temperature_passed_to_forward(self):
+    """Temperature from generate should be passed through to __call__."""
+    from tinygrad.apps.llm import Transformer
+    model = Transformer(num_blocks=1, dim=64, hidden_dim=128, n_heads=2, n_kv_heads=2,
+                        norm_eps=1e-5, vocab_size=100, head_dim=32, rope_theta=10000.0, max_context=32)
+    captured_temps = []
+    def mock_call(self, tokens, start_pos, temperature):
+      captured_temps.append(float(temperature.item()))
+      return Tensor([[42]])
+    with patch.object(Transformer, '__call__', mock_call):
+      gen = model.generate([1, 2, 3], temperature=0.6)
+      next(gen)
+    self.assertAlmostEqual(captured_temps[-1], 0.6, places=5)
 
 if __name__ == '__main__':
   unittest.main()
