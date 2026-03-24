@@ -121,6 +121,25 @@ class TestViz(BaseTestViz):
     # NOTE: names from TracingKey do not get deduped
     self.assertEqual(lst[0]["name"], "custom_name")
 
+  def test_nested_track_rewrites(self):
+    @track_rewrites(name=lambda _,ret: TracingKey("inner fxn", (ret,)))
+    def inner(x:tuple[UOp, ...]): return graph_rewrite(x, PatternMatcher([]), name="each")
+    @track_rewrites(name=lambda *args,ret: f"outer rewrite of {len(args)} inputs")
+    def outer(*xs:tuple[UOp, ...]): return graph_rewrite(UOp.sink(*[inner(x) for x in xs]), PatternMatcher([]), name="all")
+    outer(*[UOp.variable(x, 1, 10) for x in ["a", "b", "c"]])
+    lst = get_viz_list()
+    # inner calls fall outside the outer call
+    self.assertEqual(len(lst), 4)
+    self.assertEqual(lst[0]["name"], "outer rewrite of 3 inputs n1")
+    steps = lst[0]["steps"]
+    self.assertEqual(len(steps), 1)
+    self.assertEqual(steps[0]["name"], "all")
+    for _ in range(3):
+      self.assertEqual(lst[1]["name"], f"inner fxn n{i+1}")
+      steps = lst[0]["steps"]
+      self.assertEqual(len(steps), 1)
+      self.assertEqual(steps[1]["name"], "each")
+
   def test_profile_matches(self):
     @profile_matches
     def nested_function(u:UOp):
