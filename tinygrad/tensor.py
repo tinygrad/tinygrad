@@ -5,7 +5,7 @@ from contextlib import ContextDecorator
 from typing import Any, Callable, ClassVar, Sequence, cast, get_args, Literal, SupportsIndex, ParamSpec, TypeVar, Generic, TYPE_CHECKING
 if TYPE_CHECKING: import numpy
 from tinygrad.dtype import DType, DTypeLike, dtypes, ConstType, least_upper_float, least_upper_dtype, sum_acc_dtype, to_dtype, truncate
-from tinygrad.dtype import _from_np_dtype, _to_np_dtype, PyConst, Invalid
+from tinygrad.dtype import _from_np_dtype, _to_np_dtype, PyConst, Invalid, InvalidType
 from tinygrad.helpers import argfix, make_tuple, flatten, prod, all_int, round_up, merge_dicts, argsort, getenv, all_same, fully_flatten
 from tinygrad.helpers import IMAGE, FLOAT16, WINO, Metadata, TRACEMETA, ASM_GEMM, ceildiv, fetch, is_numpy_ndarray, TracingKey, cpu_profile
 from tinygrad.helpers import suppress_finalizing, disable_gc
@@ -2949,16 +2949,15 @@ class Tensor(OpMixin):
 
   # ***** broadcasted elementwise ops *****
 
-  def _broadcasted(self, y:Tensor|ConstType|UOp, reverse:bool=False, match_dtype:bool=True, backward_cast:bool=True) -> tuple[Tensor, Tensor]:
+  def _broadcasted(self, y:Tensor|ConstType|UOp, reverse:bool=False, backward_cast:bool=True) -> tuple[Tensor, Tensor]:
     x: Tensor = self
     if not isinstance(y, Tensor):
       # make y a Tensor
       assert isinstance(y, (*get_args(ConstType), UOp)), f"{type(y)=}, {y=}"
-      if y is Invalid or dtypes.is_float(x.dtype) or (dtypes.is_int(x.dtype) and isinstance(y, int)): y_dtype = x.dtype
-      else: y_dtype = y.dtype if isinstance(y, UOp) else dtypes.from_py(y)
+      y_dtype = x.dtype if dtypes.is_float(x.dtype) or (dtypes.is_int(x.dtype) and isinstance(y, (int, InvalidType))) else None
       y = Tensor(y, x.device, y_dtype, requires_grad=False)
 
-    if match_dtype and x.dtype != y.dtype:
+    if x.dtype != y.dtype:
       output_dtype = least_upper_dtype(x.dtype, y.dtype)
       x, y = x.cast(output_dtype), y.cast(output_dtype)
 
@@ -3121,9 +3120,9 @@ class Tensor(OpMixin):
     """
     if isinstance(x, Tensor): x, y = x._broadcasted(y)
     elif isinstance(y, Tensor): y, x = y._broadcasted(x)
-    cond, x = self._broadcasted(x, match_dtype=False)
-    cond, y = cond._broadcasted(y, match_dtype=False)
-    return cond.cast(dtypes.bool)._apply_uop(UOp.where, *x._broadcasted(y))
+    else: x, y = Tensor(x, self.device, requires_grad=False)._broadcasted(y)
+    out_shape = _broadcast_shape(self.shape, x.shape)
+    return self.cast(dtypes.bool)._broadcast_to(out_shape)._apply_uop(UOp.where, x._broadcast_to(out_shape), y._broadcast_to(out_shape))
 
   def copysign(self, other) -> Tensor:
     """

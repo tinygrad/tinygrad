@@ -869,5 +869,15 @@ class TestUOpGetItem(unittest.TestCase):
     result = p[0]
     self.assertEqual(result.shape, (64,))
 
+  # all slices should not create a bare INDEX
+  def test_all_slices_no_index(self):
+    p = self._placeholder((64, 80))
+    result = p[:, :64]
+    self.assertNotEqual(result.op, Ops.INDEX)
+  def test_all_full_slices_no_index(self):
+    p = self._placeholder((64, 64))
+    result = p[:, :]
+    self.assertNotEqual(result.op, Ops.INDEX)
+
 if __name__ == '__main__':
   unittest.main(verbosity=2)

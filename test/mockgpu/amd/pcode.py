@@ -485,7 +485,8 @@ class Parser:
         if op == '*' and left.dtype.itemsize == 2 and left.dtype in (dtypes.int16, dtypes.short, dtypes.uint16, dtypes.ushort):
           pdt = dtypes.int if left.dtype in (dtypes.int16, dtypes.short) else dtypes.uint
           left, right = left.cast(pdt), right.cast(pdt)
-        return (left * right) if op == '*' else (left / right)
+        if op == '*': return left * right
+        return (left // right) if dtypes.is_int(left.dtype) else (left / right)
       case '**': return UOp(Ops.EXP2, left.dtype, (right.cast(left.dtype),)) if left.op == Ops.CONST and left.arg == 2.0 else left
 
   _PREC = [('||',), ('&&',), ('|',), ('^',), ('&',), ('==', '!=', '<>'), ('>=', '<=', '>', '<'), ('>>', '<<'), ('+', '-'), ('*', '/'), ('**',)]
