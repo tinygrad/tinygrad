@@ -281,6 +281,8 @@ if __name__ == "__main__":
         if k.startswith("model"):
           v.replace(v.cast(dtypes.float16))
 
+    # realize RNG counters first to break serial dependency chains in weight init graphs, reducing scheduling cost
+    for counter in Tensor._device_rng_counters.values(): counter.realize()
     Tensor.realize(*get_state_dict(model).values())
 
   profile_marker("run clip (conditional)")
