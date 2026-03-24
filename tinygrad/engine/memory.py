@@ -1,7 +1,7 @@
 from collections import defaultdict
 from tinygrad.device import Device
 from tinygrad.helpers import NO_MEMORY_PLANNER, DEBUG, round_up
-from tinygrad.uop.ops import UOp, Ops
+from tinygrad.uop.ops import UOp, Ops, PatternMatcher, UPat, graph_rewrite
 from tinygrad.dtype import dtypes
 from tinygrad.runtime.support.memory import TLSFAllocator
 
@@ -62,4 +62,6 @@ def memory_plan_rewrite(linear:UOp, held_bufs:set[UOp]|None=None) -> UOp:
   if DEBUG >= 1 and (omem:=sum(nbytes.values()) / 1e6) != (nmem:=sum(arena_sizes.values()) / 1e6):
     print(f"memory reduced from {omem:.2f} MB -> {nmem:.2f} MB, {len(first_appearance)} -> {len(arenas)} bufs")
 
-  return linear.substitute(replace_map, name="memory plan", walk=True)
+  # optimization: specialized substitute to avoid expensive recursive AST walks
+  pm_memory_plan = PatternMatcher([(UPat(Ops.BUFFER, name="b"), lambda ctx, b: ctx.get(b, b))])
+  return graph_rewrite(linear, pm_memory_plan, ctx=replace_map)

@@ -24,7 +24,13 @@ def prune_linear(linear:UOp, needed:set[UOp]) -> tuple[UOp, UOp]:
 
 @track_rewrites(lambda linear,held_bufs,ret: f"JIT {pluralize('Kernel', len(ret))}")
 def jit_lower(linear:UOp, held_bufs:set[UOp]) -> list[ExecItem]:
-  return [ei.lower() for ei in linear_to_schedule(memory_plan_rewrite(linear, held_bufs))]
+  schedule = linear_to_schedule(memory_plan_rewrite(linear, held_bufs))
+  # optimization: local lower() cache for identical ASTs
+  lower_cache: dict[UOp, CompiledRunner] = {}
+  for ei in schedule:
+    if (prg:=lower_cache.get(ei.ast)) is not None: ei.prg = prg
+    else: lower_cache[ei.ast] = ei.lower().prg
+  return schedule
 
 class GraphException(Exception): pass
 class JitError(Exception): pass
@@ -319,11 +325,14 @@ class TinyJit(Generic[ReturnType]):
       assert self.fxn is not None
       if capturing: raise RuntimeError(f"having TinyJit inside another TinyJit is not supported {len(capturing)=} {capturing=}")
       self._linears: list[UOp] = []
+      self._memo: dict[UOp, UOp] = {}
       capturing.append(self)
       try:
         ret = self.fxn(*args, **kwargs)
         if len(params:=get_parameters(ret)): Tensor.realize(*params)
-      finally: capturing.clear()
+      finally:
+        capturing.clear()
+        del self._memo
       if not len(self._linears): raise JitError("didn't JIT anything!")
       _check_no_non_tensor_return(ret)
       if DEBUG >= 1: print(f"JIT captured {len(self._linears)} linears with {len(input_buffers)} inputs")
