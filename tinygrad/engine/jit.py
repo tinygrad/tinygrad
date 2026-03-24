@@ -25,11 +25,15 @@ def prune_linear(linear:UOp, needed:set[UOp]) -> tuple[UOp, UOp]:
 @track_rewrites(lambda linear,held_bufs,ret: f"JIT {pluralize('Kernel', len(ret))}")
 def jit_lower(linear:UOp, held_bufs:set[UOp]) -> list[ExecItem]:
   schedule = linear_to_schedule(memory_plan_rewrite(linear, held_bufs))
-  # optimization: local lower() cache for identical ASTs
-  lower_cache: dict[UOp, CompiledRunner] = {}
+  # optimization: local lower() cache for identical ASTs on the same device with same buffer signatures
+  lower_cache: dict[tuple, CompiledRunner] = {}
   for ei in schedule:
-    if (prg:=lower_cache.get(ei.ast)) is not None: ei.prg = prg
-    else: lower_cache[ei.ast] = ei.lower().prg
+    if len(ei.bufs) == 0: continue
+    cache_key = (ei.bufs[0].device, tuple((buf.size, buf.dtype) for buf in ei.bufs), repr(ei.ast))
+    if (prg:=lower_cache.get(cache_key)) is not None: ei.prg = prg
+    else:
+      ei.lower()
+      lower_cache[cache_key] = ei.prg
   return schedule
 
 class GraphException(Exception): pass

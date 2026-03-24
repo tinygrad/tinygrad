@@ -752,14 +752,13 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
       buffers[self] = ret = buf.view(self.size, self.dtype, self.arg[1] * self.dtype.itemsize)
       return ret
     if self.op is Ops.MSELECT:
-      ret = self.src[0].buffer
-      assert isinstance(ret, MultiBuffer)
-      return ret.bufs[self.arg]
+      mbuf = cast(MultiBuffer, self.src[0].buffer)
+      return mbuf.bufs[self.arg]
     if self.op is Ops.MSTACK:
-      ret = MultiBuffer.__new__(MultiBuffer)
-      ret.bufs = [cast(Buffer, x.buffer) for x in self.src]
-      assert all_same([(x.size, x.dtype) for x in ret.bufs]), "multibuffers mismatch buffers"
-      return ret
+      ret_mbuf = MultiBuffer.__new__(MultiBuffer)
+      ret_mbuf.bufs = [cast(Buffer, x.buffer) for x in self.src]
+      assert all_same([(x.size, x.dtype) for x in ret_mbuf.bufs]), "multibuffers mismatch buffers"
+      return ret_mbuf
     assert self.op is Ops.BUFFER, f"must be BUFFER {self.op}"
     assert self.src[0].op is Ops.UNIQUE, f"buffer src[0] must be UNIQUE, not {self.src[0].op}"
     if (cret:=buffers.get(self)) is not None: return cret
