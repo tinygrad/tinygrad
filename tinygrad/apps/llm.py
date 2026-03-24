@@ -325,17 +325,20 @@ class Handler(HTTPRequestHandler):
       if len(out) == 0: stderr_log(f"prefill:{(len(ids)-cache_start_pos)/((pt:=time.perf_counter())-st):4.0f} tok/s  {colored('--', 'BLACK')}  ")
       if next_id == eos_id: break
       out.append(next_id)
-      out_text += tok.decode([next_id])
-      yield {"choices": [{"index":0, "delta":{"content":tok.decode([next_id])}, "finish_reason":None}], **tmpl}
+      text = tok.decode([next_id])
+      yield {"choices": [{"index":0, "delta":{"content":text}, "finish_reason":None}], **tmpl}
       if max_tokens is not None and len(out) >= max_tokens:
         finish_reason = "length"
         break
-      if stop and any(s in out_text for s in stop): break
+      if stop:
+        out_text += text
+        if any(s in out_text for s in stop): break
     yield {"choices": [{"index":0, "delta":{},"finish_reason":finish_reason}], **tmpl}
     if include_usage:
       yield {"choices": [], "usage": {"prompt_tokens": len(ids), "completion_tokens": len(out), "total_tokens": len(ids) + len(out)}, **tmpl}
-    stderr_log(f"gen:{len(out)/(time.perf_counter()-pt):4.0f} tok/s  {colored('--', 'BLACK')}  out:{len(out):5d}  {colored('--', 'BLACK')}  "
-              f"total:{time.perf_counter()-st:6.2f}s\n")
+    et = time.perf_counter()
+    stderr_log(f"gen:{len(out)/(et-pt) if len(out) > 1 else 0:4.0f} tok/s  {colored('--', 'BLACK')}  "
+               f"out:{len(out):5d}  {colored('--', 'BLACK')}  total:{et-st:6.2f}s\n")
 
   def do_POST(self):
     raw_body = self.rfile.read(int(self.headers.get("Content-Length", "0")))
@@ -367,8 +370,7 @@ class Handler(HTTPRequestHandler):
       else:
         out, finish_reason = [], "stop"
         for c in chunks:
-          if c["choices"] and c["choices"][0].get("delta", {}).get("content"):
-            out.append(c["choices"][0]["delta"]["content"])
+          if c["choices"] and c["choices"][0].get("delta", {}).get("content"): out.append(c["choices"][0]["delta"]["content"])
           if c["choices"] and c["choices"][0].get("finish_reason"): finish_reason = c["choices"][0]["finish_reason"]
         self.send_data(json.dumps({**c, "object":"chat.completion",
           "choices":[{"index":0, "message":{"role":"assistant","content":"".join(out)}, "finish_reason":finish_reason}]}).encode())
