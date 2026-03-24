@@ -26,11 +26,12 @@ if __name__ == "__main__":
   rows = [(q, c, a) for q, c, a in zip(table["question"], table["choices"], table["answerKey"]) if len(c["label"]) == 4]
   total_questions = min(len(rows), args.offset + args.limit) if args.limit else len(rows)
   for question, choices, answer in rows[args.offset:total_questions]:
-    phrasing = f"Given the following question and four candidate answers (A, B, C and D), choose the best answer.\n" +\
+    phrasing = "Given the following question and four candidate answers (A, B, C and D), choose the best answer.\n" +\
                f"Question: {question}\n" + '\n'.join([f"{l}. {t}" for l, t in zip(LABEL, choices['text'])]) +\
-               f'\nYour response should end with "The best answer is [the_answer_letter]" where the [the_answer_letter] is one of A, B, C or D.' +\
-               (" /no_think" if args.no_think else "")
-    resp = client.chat.completions.create(model="test", messages=[{"role": "user", "content": phrasing}], max_tokens=args.max_tokens, temperature=args.temperature)
+               '\nYour response should end with "The best answer is [the_answer_letter]"' +\
+               " where the [the_answer_letter] is one of A, B, C or D." + (" /no_think" if args.no_think else "")
+    resp = client.chat.completions.create(model="test", messages=[{"role": "user", "content": phrasing}],
+                                          max_tokens=args.max_tokens, temperature=args.temperature)
     # normalize answer key (some use 1/2/3/4 instead of A/B/C/D)
     correct = answer.as_py().strip()
     if correct not in LABEL: correct = LABEL[int(correct) - 1]
