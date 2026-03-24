@@ -589,6 +589,13 @@ class Tensor(OpMixin):
     Tensor._seed, Tensor._device_seeds, Tensor._device_rng_counters = seed, {}, {}
 
   @staticmethod
+  def realize_rng_counters():
+    """Realize the RNG counter to break the serial assign chain before bulk weight realize.
+    This reduces the weight init graph size by removing the counter dependency chain."""
+    for counter in Tensor._device_rng_counters.values():
+      if not counter.uop.has_buffer_identity(): counter.realize()
+
+  @staticmethod
   def _threefry_random_bits(key:Tensor, counts0:Tensor, counts1:Tensor) -> Tensor:
     x = (counts1.cast(dtypes.uint64) << 32) | counts0.cast(dtypes.uint64)
     x = x._apply_uop(UOp.threefry, (key[1]._broadcast_to(x.shape).cast(dtypes.uint64) << 32) | key[0]._broadcast_to(x.shape).cast(dtypes.uint64))
@@ -625,7 +632,6 @@ class Tensor(OpMixin):
         [int.from_bytes(hashlib.sha256(len(Tensor._device_seeds).to_bytes(4, "big")).digest(), "big"), Tensor._seed],
         device=device, dtype=dtypes.uint32, requires_grad=False)
       Tensor._device_rng_counters[device] = Tensor([0, 0], device=device, dtype=dtypes.uint32, requires_grad=False).contiguous()
-
     # increment rng counter for devices
     new_low = Tensor._device_rng_counters[device][0:1] + (num & 0xffffffff)
     new_high = Tensor._device_rng_counters[device][1:2] + (num >> 32) + (new_low < Tensor._device_rng_counters[device][0]).cast(dtypes.uint32)
