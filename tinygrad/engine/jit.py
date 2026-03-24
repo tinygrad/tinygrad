@@ -26,10 +26,10 @@ def prune_linear(linear:UOp, needed:set[UOp]) -> tuple[UOp, UOp]:
 def jit_lower(linear:UOp, held_bufs:set[UOp]) -> list[ExecItem]:
   schedule = linear_to_schedule(memory_plan_rewrite(linear, held_bufs))
   # optimization: local lower() cache for identical ASTs on the same device with same buffer signatures
-  lower_cache: dict[tuple, CompiledRunner] = {}
+  lower_cache: dict[tuple, Runner] = {}
   for ei in schedule:
-    if len(ei.bufs) == 0: continue
-    cache_key = (ei.bufs[0].device, tuple((buf.size, buf.dtype) for buf in ei.bufs), repr(ei.ast))
+    if len(ei.bufs) == 0 or ei.bufs[0] is None: continue
+    cache_key = (ei.bufs[0].device, tuple((buf.size, buf.dtype) if buf is not None else None for buf in ei.bufs), repr(ei.ast))
     if (prg:=lower_cache.get(cache_key)) is not None: ei.prg = prg
     else:
       ei.lower()
