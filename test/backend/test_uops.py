@@ -179,6 +179,52 @@ class TestBoolUOps(TestUOps):
   def test_where_bool(self): self._test_top_bool_fxn(Ops.WHERE, lambda a,b,c: b if a else c)
 
 class TestLocalAccess(unittest.TestCase):
+  # NOTE: this is failing on METAL CI, no idea why. Works locally.
+  @unittest.skipIf(Device.DEFAULT == "METAL" and CI, "failing only in CI")
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared memory")
+  def test_local_basic(self):
+    uops = []
+    smem = uop(uops, Ops.DEFINE_LOCAL, dtypes.float32.ptr(size=16, addrspace=AddrSpace.LOCAL), (), 'smem')
+    st = uop(uops, Ops.STORE, dtypes.void, (smem.index(uop(uops, Ops.CONST, dtypes.int32, (), 0)), uop(uops, Ops.CONST, dtypes.float32, (), 42.0)))
+    barr = uop(uops, Ops.BARRIER, dtypes.void, (st,))
+    sres = uop(uops, Ops.LOAD, dtypes.float32, (smem.after(barr).index(uop(uops, Ops.CONST, dtypes.int32, (), 0), ptr=True),))
+    self.assertEqual(_test_uops_result(dtypes.float32, uops, sres), 42)
+
+  # NOTE: webgpu specific, since only webgpu performs bitpacking
+  @unittest.skipUnless(Device.DEFAULT == "WEBGPU", "Test local access with packed data type")
+  def test_local_packed(self):
+    uops = []
+    smem = uop(uops, Ops.DEFINE_LOCAL, dtypes.uint8.ptr(size=16, addrspace=AddrSpace.LOCAL), (), 'smem')
+    st = uop(uops, Ops.STORE, dtypes.void, (smem.index(uop(uops, Ops.CONST, dtypes.int32, (), 0)), uop(uops, Ops.CONST, dtypes.uint8, (), 42)))
+    barr = uop(uops, Ops.BARRIER, dtypes.void, (st,))
+    sres = smem.after(barr).index(uop(uops, Ops.CONST, dtypes.int32, (), 0))
+    self.assertEqual(_test_uops_result(dtypes.uint8, uops, sres), 42)
+
+  # NOTE: webgpu specific, since only webgpu performs bitpacking
+  @unittest.skipUnless(Device.DEFAULT == "WEBGPU", "Test local memory size for packed data types")
+  def test_packed_smem_size(self):
+    _dtypes = [dtypes.char, dtypes.uchar, dtypes.short, dtypes.ushort, dtypes.half]
+    size = 16
+    for dtype in _dtypes:
+      temp = UOp(Ops.DEFINE_LOCAL, dtype.ptr(size=size, addrspace=AddrSpace.LOCAL), (), 'smem')
+      uops = to_uops_list([temp], ren=Device[Device.DEFAULT].renderer)
+      out = Device[Device.DEFAULT].renderer.render(uops)
+      # half is supported in wgsl, so it doesn't have to be packed
+      corrected_size = size//(4//dtype.itemsize) if dtype != dtypes.half else size
+      self.assertIn(f"temp0: array<{Device[Device.DEFAULT].renderer.buf_map(dtype)},{corrected_size}>;", out)
+
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared memory")
+  @unittest.skip("tinygrad doesn't support this behavior")
+  def test_local_indirect(self):
+    uops = []
+    smem = uop(uops, Ops.DEFINE_LOCAL, dtypes.int32.ptr(size=16, addrspace=AddrSpace.LOCAL), (), 'smem')
+    st1 = uop(uops, Ops.STORE, dtypes.void, (smem.index(uop(uops, Ops.CONST, dtypes.int32, (), 1)), uop(uops, Ops.CONST, dtypes.int32, (), 2)))
+    st2 = uop(uops, Ops.STORE, dtypes.void, (smem.index(uop(uops, Ops.CONST, dtypes.int32, (), 2)), uop(uops, Ops.CONST, dtypes.int32, (), 42)))
+    barr = uop(uops, Ops.BARRIER, dtypes.void, (st1,st2))
+    ofs = uop(uops, Ops.LOAD, dtypes.int32, (smem.index(uop(uops, Ops.CONST, dtypes.int32, (), 1)), barr))
+    sres = uop(uops, Ops.LOAD, dtypes.int32, (smem.index(ofs),))
+    self.assertEqual(_test_uops_result(dtypes.int32, uops, sres), 42)
+
   def _get_smem_usage(self, uops, result):
     c0 = uop(uops, Ops.CONST, dtypes.int32, (), 0)
     buf_store = uop(uops, Ops.PARAM, dtypes.float32.ptr(), (), 0)
