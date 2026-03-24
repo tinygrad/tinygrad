@@ -202,7 +202,8 @@ class QCOMArgsState(HCQArgsState):
 
     ubos = [b for i,b in enumerate(bufs) for _,dt in prg.buf_dtypes[i] if not isinstance(dt, ImageDType)]
     uavs = [(dt,b) for i,b in enumerate(bufs) for _,dt in prg.buf_dtypes[i] if isinstance(dt, ImageDType)]
-    ibos, texs = uavs[:prg.ibo_cnt], uavs[prg.ibo_cnt:]
+    # NIR can reorder images to different texture slots
+    ibos, texs = uavs[:prg.ibo_cnt], [uavs[prg.ibo_cnt + (prg.tex_to_image[i] if prg.NIR else i)] for i in range(prg.tex_cnt)]
     for cnst_val,cnst_off,cnst_sz in prg.consts_info:
       to_mv(cast(int, self.buf.va_addr) + cnst_off, cnst_sz)[:] = cnst_val.to_bytes(cnst_sz, byteorder='little')
 
@@ -243,6 +244,7 @@ class QCOMProgram(HCQProgram):
       # see https://elixir.bootlin.com/mesa/mesa-25.3.0/source/src/freedreno/ir3/ir3_shader.h#L525
       # and https://elixir.bootlin.com/mesa/mesa-25.3.0/source/src/freedreno/ir3/ir3_compiler_nir.c#L5389
       self.samp_cnt, self.tex_cnt, self.ibo_cnt = (nt:=v.image_mapping.num_tex), nt, v.num_uavs - nt
+      self.tex_to_image = v.image_mapping.tex_to_image[:]
       # IR3 outputs a sampler for every texture (https://elixir.bootlin.com/mesa/mesa-25.3.0/source/src/freedreno/ir3/ir3_compiler_nir.c#L1714)
       self.samplers = [qreg.a6xx_tex_samp_0(wrap_s=(clamp_mode:=mesa.A6XX_TEX_CLAMP_TO_BORDER), wrap_t=clamp_mode, wrap_r=clamp_mode),
                        qreg.a6xx_tex_samp_1(unnorm_coords=True, cubemapseamlessfiltoff=True), 0, 0] * self.samp_cnt

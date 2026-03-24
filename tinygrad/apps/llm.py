@@ -275,14 +275,15 @@ class Transformer:
     self.prefill_jit = TinyJit(self.forward)
     self.rollout_jit = TinyJit(self.forward)
 
-  def forward(self, tokens:Tensor, start_pos:int|UOp) -> Tensor:
+  def forward(self, tokens:Tensor, start_pos:int|UOp, temperature:Tensor) -> Tensor:
     x = self.token_embd(tokens).float()                   # (B, T, D)
     for block in self.blk: x = block(x, start_pos)
-    # TODO: add temperature
-    return self.output(self.output_norm(x))[:, -1, :].softmax(-1, dtype="float").argmax(-1, keepdim=True)
+    logits = self.output(self.output_norm(x))[:, -1, :]
+    # Gumbel-max trick: argmax(logits/temp - log(-log(uniform))) is equivalent to sampling from softmax(logits/temp)
+    return (logits / temperature.maximum(1e-12) - (Tensor.rand_like(logits).maximum(1e-12).log().neg()).log()).argmax(-1, keepdim=True)
 
-  def __call__(self, tokens:Tensor, start_pos:int|UOp=0) -> Tensor:
-    return (self.prefill_jit if resolve(tokens.shape[1] != 1) else self.rollout_jit)(tokens, start_pos)
+  def __call__(self, tokens:Tensor, start_pos:int|UOp, temperature:Tensor) -> Tensor:
+    return (self.prefill_jit if resolve(tokens.shape[1] != 1) else self.rollout_jit)(tokens, start_pos, temperature)
 
   @staticmethod
   def from_gguf(gguf:Tensor, max_context:int|None=None, realize=bool(getenv("REALIZE", 0))) -> tuple[Transformer, dict]:
@@ -332,9 +333,11 @@ class Transformer:
   def get_start_pos(self, tokens:list[int]):
     return sum(1 for _ in itertools.takewhile(lambda ab: ab[0] == ab[1], zip(tokens[:-1], self._cached_tokens)))
 
-  def generate(self, tokens:list[int], chunk_size:int=32):
+  def generate(self, tokens:list[int], chunk_size:int=32, temperature:float=0.0):
     v_start_pos = UOp.variable("start_pos", 0, self.max_context-1)
     v_toks = UOp.variable("toks", 1, chunk_size)
+    # TODO: use UOp.variable for temperature once float variables are supported
+    temp = Tensor(temperature).contiguous()
     # assign all input tokens once, then slice from start_pos for the model call
     t = Tensor(tokens + [0] * (self.max_context - len(tokens)), dtype="int32").reshape(1, self.max_context)
     # recompute start_pos from what's currently valid in the kv cache
@@ -343,8 +346,8 @@ class Transformer:
     while len(tokens) < self.max_context:
       sp, nt = v_start_pos.bind(start_pos), v_toks.bind(min(chunk_size, len(tokens) - start_pos))
       if start_pos < prompt_len or out is None:
-        out = self(t[:, sp:sp+nt] if not self.has_ssm else Tensor([tokens[start_pos]]).reshape(1, 1), sp).realize()
-      else: out = self(out, sp).realize()
+        out = self(t[:, sp:sp+nt] if not self.has_ssm else Tensor([tokens[start_pos]]).reshape(1, 1), sp, temp).realize()
+      else: out = self(out, sp, temp).realize()
       start_pos += (1 if self.has_ssm else nt.val)
       # chunked prefill: keep processing until all prompt tokens are consumed
       if start_pos < len(tokens): continue
@@ -395,7 +398,7 @@ CHAT_HTML = b'''<!DOCTYPE html><html><head><title>tinygrad chat</title><style>
     input.value = '';
     const d = document.createElement('div'); d.className = 'msg'; chat.appendChild(d);
     const r = await fetch('/v1/chat/completions', {method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({model: 'llama', messages: msgs, stream: true})});
+      body: JSON.stringify({model: 'llama', messages: msgs, stream: true, temperature: 0.7})});
     for (const rd = r.body.getReader(), dec = new TextDecoder();;) {
       const {done, value} = await rd.read();
       if (done) break;
@@ -410,24 +413,32 @@ CHAT_HTML = b'''<!DOCTYPE html><html><head><title>tinygrad chat</title><style>
 
 class Handler(HTTPRequestHandler):
   def log_request(self, code='-', size='-'): pass
-  def do_GET(self): self.send_data(CHAT_HTML, content_type="text/html")
-  def run_model(self, ids:list[int], model_name:str, include_usage=False):
+  def do_GET(self):
+    if self.path == "/v1/models": self.send_data(json.dumps({"object":"list","data":[{"id":model_name,"object":"model"}]}).encode())
+    else: self.send_data(CHAT_HTML, content_type="text/html")
+  def run_model(self, ids:list[int], model_name:str, include_usage=False, max_tokens:int|None=None, temperature:float=0.0):
     cache_start_pos = model.get_start_pos(ids)
     stderr_log(f"{self.path}  {colored('--', 'BLACK')}  "
                f"in:{colored(f'{cache_start_pos:5d}', 'green')} +{len(ids)-cache_start_pos:5d}  {colored('--', 'BLACK')}  ")
     tmpl = {"id":f"chatcmpl-{uuid.uuid4().hex[:24]}", "object":"chat.completion.chunk", "created":int(time.time()), "model":model_name}
     yield {"choices": [{"index":0, "delta":{"role":"assistant","content":""}, "finish_reason":None}], **tmpl}
     out: list[int] = []
+    finish_reason = "stop"
     st = time.perf_counter()
-    for next_id in model.generate(ids):
+    for next_id in model.generate(ids, temperature=temperature):
       if len(out) == 0: stderr_log(f"prefill:{(len(ids)-cache_start_pos)/((pt:=time.perf_counter())-st):4.0f} tok/s  {colored('--', 'BLACK')}  ")
       if next_id == eos_id: break
       out.append(next_id)
       yield {"choices": [{"index":0, "delta":{"content":tok.decode([next_id])}, "finish_reason":None}], **tmpl}
-    yield {"choices": [{"index":0, "delta":{},"finish_reason":"stop"}], **tmpl}
+      if max_tokens is not None and len(out) >= max_tokens:
+        finish_reason = "length"
+        break
+    yield {"choices": [{"index":0, "delta":{},"finish_reason":finish_reason}], **tmpl}
     if include_usage:
       yield {"choices": [], "usage": {"prompt_tokens": len(ids), "completion_tokens": len(out), "total_tokens": len(ids) + len(out)}, **tmpl}
-    stderr_log(f"gen:{len(out)/(time.perf_counter()-pt):4.0f} tok/s  {colored('--', 'BLACK')}  out:{len(out):5d}\n")
+    et = time.perf_counter()
+    stderr_log(f"gen:{len(out)/(et-pt) if len(out) > 1 else 0:4.0f} tok/s  {colored('--', 'BLACK')}  "
+               f"out:{len(out):5d}  {colored('--', 'BLACK')}  total:{et-st:6.2f}s\n")
 
   def do_POST(self):
     raw_body = self.rfile.read(int(self.headers.get("Content-Length", "0")))
@@ -450,13 +461,17 @@ class Handler(HTTPRequestHandler):
       ids += tok.role("assistant")
 
       # reply
-      chunks = self.run_model(ids, body["model"], not body.get("stream") or body.get("stream_options",{}).get("include_usage", False))
+      max_tokens = body.get("max_completion_tokens") or body.get("max_tokens")
+      chunks = self.run_model(ids, body["model"], not body.get("stream") or body.get("stream_options",{}).get("include_usage", False),
+                              max_tokens=max_tokens, temperature=float(body.get("temperature", 0.0)))
       if body.get("stream"): self.stream_json(chunks)
       else:
-        out = []
-        for c in chunks: out.append(c["choices"][0]["delta"].get("content", "") if c["choices"] else "")
+        out, finish_reason = [], "stop"
+        for c in chunks:
+          if c["choices"] and c["choices"][0].get("delta", {}).get("content"): out.append(c["choices"][0]["delta"]["content"])
+          if c["choices"] and c["choices"][0].get("finish_reason"): finish_reason = c["choices"][0]["finish_reason"]
         self.send_data(json.dumps({**c, "object":"chat.completion",
-          "choices":[{"index":0, "message":{"role":"assistant","content":"".join(out)}, "finish_reason":"stop"}]}).encode())
+          "choices":[{"index":0, "message":{"role":"assistant","content":"".join(out)}, "finish_reason":finish_reason}]}).encode())
     else:
       raise RuntimeError(f"unhandled path {self.path}")
 
@@ -480,6 +495,7 @@ if __name__ == "__main__":
   gc.collect()
 
   # extract some metadata
+  model_name = args.model
   tok = SimpleTokenizer.from_gguf_kv(kv)
   bos_id: int|None = kv.get('tokenizer.ggml.bos_token_id') if kv.get('tokenizer.ggml.add_bos_token', True) else None
   eos_id: int = kv['tokenizer.ggml.eos_token_id']
