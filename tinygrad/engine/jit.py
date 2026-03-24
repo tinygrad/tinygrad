@@ -30,10 +30,10 @@ def jit_lower(linear:UOp, held_bufs:set[UOp]) -> list[ExecItem]:
   for ei in schedule:
     if len(ei.bufs) == 0 or ei.bufs[0] is None: continue
     cache_key = (ei.bufs[0].device, tuple((buf.size, buf.dtype) if buf is not None else None for buf in ei.bufs), repr(ei.ast))
-    if cache_key in lower_cache: ei.prg = lower_cache[cache_key]
+    if cache_key in lower_cache: ei.prg = unwrap(lower_cache[cache_key])
     else:
       ei.lower()
-      lower_cache[cache_key] = ei.prg
+      lower_cache[cache_key] = unwrap(ei.prg)
   return schedule
 
 class GraphException(Exception): pass
