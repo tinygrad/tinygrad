@@ -1,7 +1,7 @@
 from typing import TypeVar, Generic, Callable, cast, Any
 import functools, collections
 from tinygrad.tensor import Tensor
-from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, BEAM, getenv, colored, JIT, JIT_BATCH_SIZE, dedup, unwrap, pluralize
+from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, BEAM, getenv, colored, JIT, JIT_BATCH_SIZE, dedup, unwrap, pluralize, NULL_FASTPATH
 from tinygrad.device import Buffer, Compiled, Device, MultiBuffer
 from tinygrad.dtype import DType
 from tinygrad.uop.ops import UOp, Variable, sym_infer, Ops, buffers, track_rewrites
@@ -324,7 +324,12 @@ class TinyJit(Generic[ReturnType]):
         ret = self.fxn(*args, **kwargs)
         if len(params:=get_parameters(ret)): Tensor.realize(*params)
       finally: capturing.clear()
-      if not len(self._linears): raise JitError("didn't JIT anything!")
+      if not len(self._linears):
+        if NULL_FASTPATH and ret is not None and all(b.device.startswith("NULL") for b in input_buffers):
+          self.captured = CapturedJit(ret, [], {}, [], names, expected_input_info)
+          self.cnt += 1
+          return ret
+        raise JitError("didn't JIT anything!")
       _check_no_non_tensor_return(ret)
       if DEBUG >= 1: print(f"JIT captured {len(self._linears)} linears with {len(input_buffers)} inputs")
 

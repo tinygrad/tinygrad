@@ -3,7 +3,7 @@ import time, pprint, random, itertools, math
 from dataclasses import dataclass, replace, field
 from tinygrad.helpers import all_same, colored, DEBUG, GlobalCounters, ansilen, BEAM, NOOPT, all_int, Metadata, TRACEMETA, TracingKey
 from tinygrad.helpers import DEVECTORIZE, time_to_str, VALIDATE_WITH_CPU, cpu_profile, PROFILE, ProfilePointEvent, cpu_events, prod, Context, unwrap
-from tinygrad.helpers import EMULATED_DTYPES
+from tinygrad.helpers import EMULATED_DTYPES, NULL_FASTPATH
 from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, sym_infer
 from tinygrad.device import Device, Buffer
 from tinygrad.renderer import ProgramSpec, Estimates
@@ -20,6 +20,15 @@ class Runner:
     return self(rawbufs, {} if var_vals is None else var_vals)
   def __call__(self, rawbufs:list[Buffer], var_vals:dict[str, int], wait=False) -> float|None:
     raise NotImplementedError("override this")
+
+class NullKernelRunner(Runner):
+  def __init__(self, ast:UOp, device:str):
+    name = ast.arg.name if ast.arg is not None and hasattr(ast.arg, "name") else "null kernel"
+    estimates = ast.arg.estimates if ast.arg is not None and ast.arg.estimates is not None else Estimates()
+    super().__init__(name, device, estimates)
+
+  def __call__(self, rawbufs:list[Buffer], var_vals:dict[str, int]|None=None, wait=False, timeout:int|None=None) -> float|None:
+    return 1e-3
 
 def optimize_local_size(_prg:Callable, global_size:list[int], rawbufs:list[Buffer]) -> list[int]:
   test_rawbuffers = [Buffer(rawbufs[0].device, rawbufs[0].size, rawbufs[0].dtype).allocate(), *rawbufs[1:]] if rawbufs[0] in rawbufs[1:] else rawbufs
@@ -40,8 +49,11 @@ class CompiledRunner(Runner):
     if DEBUG >= 3 and p.applied_opts: print(p.applied_opts)
     if DEBUG >= 4: print(p.src)
     if p.lib is None:
-      with cpu_profile(TracingKey(f"compile {p.name}", (p.function_name,)), "TINY"):
-        p = replace(p, lib=Device[p.device].compiler.compile_cached(p.src))
+      if NULL_FASTPATH and Device[p.device].renderer.device == "NULL" and not EMULATED_DTYPES:
+        p = replace(p, lib=b"")
+      else:
+        with cpu_profile(TracingKey(f"compile {p.name}", (p.function_name,)), "TINY"):
+          p = replace(p, lib=Device[p.device].compiler.compile_cached(p.src))
     self.p:ProgramSpec = p
     assert self.p.lib is not None
     if DEBUG >= 7: Device[p.device].compiler.disassemble(self.p.lib)
@@ -107,18 +119,21 @@ class EncDec(Runner):
 
 # **************** method cache ****************
 
-method_cache: dict[tuple[str, type, bytes, tuple, bool], CompiledRunner] = {}
-def get_runner(device:str, ast:UOp) -> CompiledRunner:
+method_cache: dict[tuple[str, type, bytes, tuple, bool], Runner] = {}
+def get_runner(device:str, ast:UOp) -> Runner:
   # TODO: this should be all context relevant to rendering
-  context = (BEAM.value, NOOPT.value, DEVECTORIZE.value, EMULATED_DTYPES.value)
+  context = (BEAM.value, NOOPT.value, DEVECTORIZE.value, EMULATED_DTYPES.value, NULL_FASTPATH.value)
   ckey = (device, type(Device[device].compiler), ast.key, context, False)
   if cret:=method_cache.get(ckey): return cret
   bkey = (device.split(":")[0], type(Device[device].compiler), ast.key, context, True)
   if bret:=method_cache.get(bkey):
-    method_cache[ckey] = ret = CompiledRunner(replace(bret.p, device=device))
+    method_cache[ckey] = ret = CompiledRunner(replace(bret.p, device=device)) if isinstance(bret, CompiledRunner) else bret
   else:
-    prg: ProgramSpec = get_program(ast, Device[device].renderer)
-    method_cache[ckey] = method_cache[bkey] = ret = CompiledRunner(replace(prg, device=device))
+    if NULL_FASTPATH and device.split(":")[0] == "NULL" and Device[device].renderer.device == "NULL" and not EMULATED_DTYPES:
+      method_cache[ckey] = method_cache[bkey] = ret = NullKernelRunner(ast, device)
+    else:
+      prg: ProgramSpec = get_program(ast, Device[device].renderer)
+      method_cache[ckey] = method_cache[bkey] = ret = CompiledRunner(replace(prg, device=device))
   return ret
 
 # **************** lowering functions ****************

@@ -143,6 +143,15 @@ def get_alphas_cumprod(beta_start=0.00085, beta_end=0.0120, n_training_steps=100
 def should_show_image() -> bool:
   return any(os.getenv(k) for k in ("DISPLAY", "WAYLAND_DISPLAY"))
 
+def use_null_fastpath(fakeweights:bool) -> bool:
+  return fakeweights and Device.DEFAULT.split(":")[0] == "NULL"
+
+def null_clip_context() -> Tensor:
+  return Tensor.empty(1, 77, 768)
+
+def null_decoded_image() -> Tensor:
+  return Tensor.empty(512, 512, 3, dtype=dtypes.uint8)
+
 unet_params: Dict[str,Any] = {
   "adm_in_ch": None,
   "in_ch": 4,
@@ -286,56 +295,57 @@ if __name__ == "__main__":
     if not args.fakeweights or args.fp16:
       Tensor.realize(*get_state_dict(model).values())
 
-  profile_marker("run clip (conditional)")
-  tokenizer = Tokenizer.ClipTokenizer()
-  prompt = Tensor([tokenizer.encode(args.prompt)])
-  context = model.cond_stage_model.transformer.text_model(prompt).realize()
-  print("got CLIP context", context.shape)
+  with Context(NULL_FASTPATH=int(use_null_fastpath(args.fakeweights))):
+    profile_marker("run clip (conditional)")
+    tokenizer = Tokenizer.ClipTokenizer()
+    prompt = Tensor([tokenizer.encode(args.prompt)])
+    context = null_clip_context() if use_null_fastpath(args.fakeweights) else model.cond_stage_model.transformer.text_model(prompt).realize()
+    print("got CLIP context", context.shape)
 
-  profile_marker("run clip (unconditional)")
-  prompt = Tensor([tokenizer.encode("")])
-  unconditional_context = model.cond_stage_model.transformer.text_model(prompt).realize()
-  print("got unconditional CLIP context", unconditional_context.shape)
+    profile_marker("run clip (unconditional)")
+    prompt = Tensor([tokenizer.encode("")])
+    unconditional_context = null_clip_context() if use_null_fastpath(args.fakeweights) else model.cond_stage_model.transformer.text_model(prompt).realize()
+    print("got unconditional CLIP context", unconditional_context.shape)
 
-  # done with clip model
-  del model.cond_stage_model
+    # done with clip model
+    del model.cond_stage_model
 
-  timesteps = list(range(1, 1000, 1000//args.steps))
-  print(f"running for {timesteps} timesteps")
-  alphas = model.alphas_cumprod[Tensor(timesteps)]
-  alphas_prev = Tensor([1.0]).cat(alphas[:-1])
+    timesteps = list(range(1, 1000, 1000//args.steps))
+    print(f"running for {timesteps} timesteps")
+    alphas = model.alphas_cumprod[Tensor(timesteps)]
+    alphas_prev = Tensor([1.0]).cat(alphas[:-1])
 
-  # start with random noise
-  if args.seed is not None: Tensor.manual_seed(args.seed)
-  latent = Tensor.randn(1,4,64,64)
+    # start with random noise
+    if args.seed is not None: Tensor.manual_seed(args.seed)
+    latent = Tensor.randn(1,4,64,64)
 
-  @TinyJit
-  def run(model, *x): return model(*x).realize()
+    @TinyJit
+    def run(model, *x): return model(*x).realize()
 
-  # this is diffusion
-  step_times = []
-  with Context(BEAM=getenv("LATEBEAM")):
-    for index, timestep in (t:=tqdm(list(enumerate(timesteps))[::-1])):
-      profile_marker(f"step {len(timesteps)-index-1}")
-      GlobalCounters.reset()
-      st = time.perf_counter_ns()
-      t.set_description("%3d %3d" % (index, timestep))
-      with Timing("step in ", enabled=args.timing, on_exit=lambda _: f", using {GlobalCounters.mem_used/1e9:.2f} GB"):
-        with WallTimeEvent(BenchEvent.STEP):
-          tid = Tensor([index])
-          latent = run(model, unconditional_context, context, latent, Tensor([timestep]), alphas[tid], alphas_prev[tid], Tensor([args.guidance]))
-          if args.timing: Device[Device.DEFAULT].synchronize()
-      step_times.append((time.perf_counter_ns() - st)*1e-6)
-    # done with diffusion model
-    del run
-    del model.model
+    # this is diffusion
+    step_times = []
+    with Context(BEAM=getenv("LATEBEAM")):
+      for index, timestep in (t:=tqdm(list(enumerate(timesteps))[::-1])):
+        profile_marker(f"step {len(timesteps)-index-1}")
+        GlobalCounters.reset()
+        st = time.perf_counter_ns()
+        t.set_description("%3d %3d" % (index, timestep))
+        with Timing("step in ", enabled=args.timing, on_exit=lambda _: f", using {GlobalCounters.mem_used/1e9:.2f} GB"):
+          with WallTimeEvent(BenchEvent.STEP):
+            tid = Tensor([index])
+            latent = run(model, unconditional_context, context, latent, Tensor([timestep]), alphas[tid], alphas_prev[tid], Tensor([args.guidance]))
+            if args.timing: Device[Device.DEFAULT].synchronize()
+        step_times.append((time.perf_counter_ns() - st)*1e-6)
+      # done with diffusion model
+      del run
+      del model.model
 
-  if (assert_time:=getenv("ASSERT_MIN_STEP_TIME")):
-    min_time = min(step_times)
-    assert min_time < assert_time, f"Speed regression, expected min step time of < {assert_time} ms but took: {min_time} ms"
-  profile_marker("run decoder") # upsample latent space to image with autoencoder
-  x = model.decode(latent).realize()
-  print(x.shape)
+    if (assert_time:=getenv("ASSERT_MIN_STEP_TIME")):
+      min_time = min(step_times)
+      assert min_time < assert_time, f"Speed regression, expected min step time of < {assert_time} ms but took: {min_time} ms"
+    profile_marker("run decoder") # upsample latent space to image with autoencoder
+    x = null_decoded_image() if use_null_fastpath(args.fakeweights) else model.decode(latent).realize()
+    print(x.shape)
 
   profile_marker("save image")
   from PIL import Image

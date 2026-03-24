@@ -197,7 +197,7 @@ CPU_CC, CPU_LLVM, CPU_LVP = ContextVar("CPU_CC", ""), ContextVar("CPU_LLVM", 0),
 NV_CC, NV_PTX, NV_NAK, NV_NVCC = ContextVar("NV_CC", ""), ContextVar("NV_PTX", 0), ContextVar("NV_NAK", 0), ContextVar("NV_NVCC", 0)
 CUDA_CC, CUDA_PTX, CUDA_NVCC = ContextVar("CUDA_CC", ""), ContextVar("CUDA_PTX", 0), ContextVar("CUDA_NVCC", 0)
 NULL_QCOMCL, NULL_IR3, NULL_NAK = ContextVar("NULL_QCOMCL", 0), ContextVar("NULL_IR3", 0), ContextVar("NULL_NAK", 0)
-NULL_ALLOW_COPYOUT = ContextVar("NULL_ALLOW_COPYOUT", 0)
+NULL_ALLOW_COPYOUT, NULL_FASTPATH = ContextVar("NULL_ALLOW_COPYOUT", 0), ContextVar("NULL_FASTPATH", 0)
 AMD_CC, AMD_LLVM, AMD_HIPCC  = ContextVar("AMD_CC", ""), ContextVar("AMD_LLVM", 0), ContextVar("AMD_HIPCC", 0)
 QCOM_CC, QCOM_IR3 = ContextVar("QCOM_CC", ""), ContextVar("QCOM_IR3", 0)
 # VIZ implies PROFILE, but you can run PROFILE without VIZ
