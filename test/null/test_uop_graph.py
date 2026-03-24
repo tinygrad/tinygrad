@@ -869,5 +869,50 @@ class TestUOpGetItem(unittest.TestCase):
     result = p[0]
     self.assertEqual(result.shape, (64,))
 
+  # all slices should not create a bare INDEX
+  def test_all_slices_no_index(self):
+    p = self._placeholder((64, 80))
+    result = p[:, :64]
+    self.assertNotEqual(result.op, Ops.INDEX)
+  def test_all_full_slices_no_index(self):
+    p = self._placeholder((64, 64))
+    result = p[:, :]
+    self.assertNotEqual(result.op, Ops.INDEX)
+
+class TestUOpBroadcast(unittest.TestCase):
+  def test_broadcast_row(self):
+    a = UOp.const(dtypes.float, 1, shape=(4, 8))
+    b = UOp.const(dtypes.float, 2, shape=(4, 1))
+    c = a + b
+    self.assertEqual(c.shape, (4, 8))
+    self.assertEqual(c.op, Ops.ADD)
+
+  def test_broadcast_col(self):
+    a = UOp.const(dtypes.float, 1, shape=(4, 8))
+    b = UOp.const(dtypes.float, 2, shape=(1, 8))
+    c = a + b
+    self.assertEqual(c.shape, (4, 8))
+    self.assertEqual(c.op, Ops.ADD)
+
+  def test_broadcast_lower_dim(self):
+    a = UOp.const(dtypes.float, 1, shape=(4, 8))
+    b = UOp.const(dtypes.float, 2, shape=(8,))
+    c = a * b
+    self.assertEqual(c.shape, (4, 8))
+    self.assertEqual(c.op, Ops.MUL)
+
+  def test_broadcast_scalar(self):
+    a = UOp.const(dtypes.float, 1, shape=(4, 8))
+    c = a * 2
+    self.assertEqual(c.shape, (4, 8))
+    self.assertEqual(c.op, Ops.MUL)
+
+  def test_broadcast_symbolic_same_shape(self):
+    t = Variable("t", 1, 10)
+    a = UOp.const(dtypes.float, 1, shape=(1, 1, t))
+    b = UOp.const(dtypes.float, 2, shape=(1, 1, t))
+    c = a + b
+    self.assertEqual(c.op, Ops.ADD)
+
 if __name__ == '__main__':
   unittest.main(verbosity=2)

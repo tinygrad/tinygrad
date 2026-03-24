@@ -32,7 +32,7 @@ jobs:
     if: github.repository_owner == 'tinygrad'
     steps:
     - name: Checkout Code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
     # brew install uv
     - name: setup python environment
       run: |
@@ -64,7 +64,7 @@ jobs:
     if: github.repository_owner == 'tinygrad'
     steps:
     - name: Checkout Code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
     - name: Symlink models and datasets
       run: |
         mkdir -p weights
@@ -154,7 +154,7 @@ jobs:
     # TODO: too slow
     # - name: Run 10 CIFAR training steps w winograd
     #   run: BENCHMARK_LOG=cifar_10steps_wino JIT=1 ASSERT_MIN_STEP_TIME=150 WINO=1 STEPS=10 python3.11 examples/hlb_cifar10.py
-    - uses: actions/upload-artifact@v4
+    - uses: actions/upload-artifact@v7
       with:
         name: Speed (Mac)
         path: |
@@ -174,7 +174,7 @@ jobs:
     if: github.repository_owner == 'tinygrad'
     steps:
     - name: Checkout Code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
     - name: setup staging db
       if: github.ref == 'refs/heads/update_benchmark_staging'
       run: |
@@ -207,7 +207,7 @@ jobs:
     if: github.repository_owner == 'tinygrad'
     steps:
     - name: Checkout Code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
     - name: Print nvidia-smi
       run: nvidia-smi
     - name: Symlink models and datasets
@@ -287,7 +287,7 @@ jobs:
       run: BENCHMARK_LOG=gpt2_half NV=1 HALF=1 ASSERT_MIN_STEP_TIME=6 python3 examples/gpt2.py --count 10 --temperature 0 --timing
     - name: Run GPT2 w HALF/BEAM
       run: BENCHMARK_LOG=gpt2_half_beam NV=1 HALF=1 JITBEAM=2 IGNORE_BEAM_CACHE=1 python3 examples/gpt2.py --count 10 --temperature 0 --timing
-    - uses: actions/upload-artifact@v4
+    - uses: actions/upload-artifact@v7
       with:
         name: Speed (NVIDIA)
         path: |
@@ -305,7 +305,7 @@ jobs:
     if: github.repository_owner == 'tinygrad'
     steps:
     - name: Checkout Code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
     - name: Symlink models and datasets
       run: |
         mkdir -p weights
@@ -367,7 +367,7 @@ jobs:
     if: github.repository_owner == 'tinygrad'
     steps:
     - name: Checkout Code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
     - name: Setcap to python
       run: ./extra/amdpci/setup_python_cap.sh
     - name: Remove amd modules
@@ -479,7 +479,7 @@ jobs:
     if: github.repository_owner == 'tinygrad'
     steps:
     - name: Checkout Code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
     - name: Setcap to python
       run: ./extra/amdpci/setup_python_cap.sh
     - name: Remove amd modules
@@ -534,7 +534,7 @@ jobs:
     if: github.repository_owner == 'tinygrad'
     steps:
     - name: Checkout Code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
     - name: Setcap to python
       run: ./extra/amdpci/setup_python_cap.sh
     - name: Remove amd modules
@@ -580,7 +580,7 @@ jobs:
     if: github.repository_owner == 'tinygrad'
     steps:
     - name: Checkout Code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
     - name: setup staging db
       if: github.ref == 'refs/heads/update_benchmark_staging'
       run: |
@@ -590,6 +590,8 @@ jobs:
       run: test/external/process_replay/reset.py
     - name: openpilot compile3 0.11.0 driving_vision
       run: BENCHMARK_LOG=openpilot_0_11_0_vision PYTHONPATH="." ASSERT_MIN_STEP_TIME=17 DEV=QCOM FLOAT16=1 IMAGE=1 NOLOCALS=1 taskset -c 4-7 python3 examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/v0.11.0/selfdrive/modeld/models/driving_vision.onnx
+    - name: IR3 openpilot compile3 0.11.0 driving_vision
+      run: BENCHMARK_LOG=ir3_openpilot_0_11_0_vision PYTHONPATH="." ASSERT_MIN_STEP_TIME=17 DEV=QCOM QCOM_IR3=1 FLOAT16=1 IMAGE=1 NOLOCALS=1 taskset -c 4-7 python3 examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/v0.11.0/selfdrive/modeld/models/driving_vision.onnx
     - name: openpilot compile3 0.11.0 driving_policy
       run: BENCHMARK_LOG=openpilot_0_11_0_policy PYTHONPATH="." ASSERT_MIN_STEP_TIME=3 DEV=QCOM FLOAT16=1 IMAGE=1 NOLOCALS=1 taskset -c 4-7 python3 examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/v0.11.0/selfdrive/modeld/models/driving_policy.onnx
     - name: openpilot compile3 0.11.0 dmonitoring
@@ -623,7 +625,7 @@ jobs:
     if: github.repository_owner == 'tinygrad'
     steps:
     - name: Checkout Code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
     - name: setup staging db
       if: github.ref == 'refs/heads/update_benchmark_staging'
       run: |
@@ -644,7 +646,7 @@ jobs:
     if: github.repository_owner == 'tinygrad'
     steps:
     - name: Checkout Code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
     - name: Setcap to python
       run: ./extra/amdpci/setup_python_cap.sh
     - name: Remove amd modules
@@ -716,7 +718,7 @@ jobs:
     if: github.repository_owner == 'tinygrad'
     steps:
     - name: Checkout Code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
     - name: Setcap to python
       run: ./extra/amdpci/setup_python_cap.sh
     - name: Remove nv modules

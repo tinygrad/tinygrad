@@ -3,16 +3,10 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Self
 from tinygrad.uop import Ops
 from tinygrad.helpers import prod, argfix, argsort, flatten, dedup, make_tuple, ceildiv
-from tinygrad.uop.ops import resolve, smax
+from tinygrad.uop.ops import resolve, smax, _align_left
 
 if TYPE_CHECKING:
   from tinygrad.uop.ops import sint
-
-
-def _align_left(*shapes: tuple[sint, ...]) -> tuple[tuple[sint, ...], ...]:
-  # unsqueeze left to make every shape same length
-  max_dim = max(len(shape) for shape in shapes)
-  return tuple((1,) * (max_dim - len(shape)) + shape for shape in shapes)
 
 
 class MovementMixin:

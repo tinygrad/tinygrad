@@ -15,7 +15,7 @@ jobs:
       branchstat: ${{ steps.brstat.outputs.stat}}
     steps:
       - name: Check code from PR branch 
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: ${{ github.event.pull_request.head.repo.full_name }}
           ref: ${{ github.event.pull_request.head.sha }}
@@ -46,18 +46,18 @@ jobs:
     if: needs.checkbranch.outputs.branchstat == 'false'
     steps:
       - name: Checkout code from PR branch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: ${{ github.event.pull_request.head.repo.full_name }}
           ref: ${{ github.event.pull_request.head.sha }}
           path: pr
         # the base default to tinygrad master and cannot be other fork branch for security purpose
       - name: Checkout code from tinygrad master
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           path: base
       - name: Set up Python 3.12
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.12'
       - name: Count Line Diff
@@ -71,7 +71,7 @@ jobs:
           echo "EOF" >> "$GITHUB_ENV"
       - name: Comment Code Line Diff
         continue-on-error: false
-        uses: marocchino/sticky-pull-request-comment@v2
+        uses: marocchino/sticky-pull-request-comment@v3
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ignore_empty: true
@@ -89,7 +89,7 @@ jobs:
     steps:
       - name: Comment Rebase
         continue-on-error: false
-        uses: marocchino/sticky-pull-request-comment@v2
+        uses: marocchino/sticky-pull-request-comment@v3
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           skip_unchanged: true

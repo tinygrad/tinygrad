@@ -167,11 +167,12 @@ class dtypes:
   def is_bool(x: DType) -> bool: return x.scalar() == dtypes.bool
   @staticmethod
   def from_py(x) -> DType:
-    if x.__class__ is float: return dtypes.default_float
-    if x.__class__ is int: return dtypes.default_int
-    if x.__class__ is bool: return dtypes.bool
+    # NOTE: isinstance(True, int) is True, so bool must be checked before int
+    if isinstance(x, bool): return dtypes.bool
+    if isinstance(x, float): return dtypes.default_float
+    if isinstance(x, int): return dtypes.default_int
     # put this in the last is faster because there are more items than lists/tuples to check
-    if x.__class__ is list or x.__class__ is tuple: return max(dtypes.from_py(xi) for xi in x) if x else dtypes.default_float
+    if isinstance(x, (list, tuple)): return max(dtypes.from_py(xi) for xi in x) if x else dtypes.default_float
     raise RuntimeError(f"Could not infer dtype of {x} with type {type(x)}")
   @staticmethod
   def finfo(dtype:DType) -> tuple[int, int]:

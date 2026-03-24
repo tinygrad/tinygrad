@@ -4,12 +4,6 @@ from tinygrad.dtype import AddrSpace, dtypes
 from tinygrad.helpers import DEBUG, GlobalCounters, Context
 import math
 
-B = getenv("B", 1)
-H = getenv("H", 32)
-N = getenv("N", 1024)
-D = getenv("D", 64)
-assert D % 16 == 0 and N % 16 == 0
-
 BLOCK_M, BLOCK_N = 64, 64
 WARP_SIZE = 32
 WMMA_M, WMMA_N, WMMA_K = 16, 16, 16
@@ -17,14 +11,9 @@ WAVES_M, WAVES_N = 4, 1
 LANES_PER_WAVE_M, LANES_PER_WAVE_N = 2, 16
 WMMA_ACC = WMMA_M // LANES_PER_WAVE_M
 THREADS_PER_BLOCK = WARP_SIZE * WAVES_M * WAVES_N
-
-TM = BLOCK_M // (WAVES_M * LANES_PER_WAVE_M)
-TN = BLOCK_N // (WAVES_N * LANES_PER_WAVE_N)
-TD = D // (WAVES_N * LANES_PER_WAVE_N)
 LDS_PAD = 4  # pad LDS rows to reduce bank conflicts
 
 WMMA_ARG = ((WMMA_M, WMMA_N, WMMA_K), 'AMD', 32)
-SCALE = 1.0 / math.sqrt(D)
 LOG2E = math.log2(math.e)
 
 def warp_shfl_xor(val, offset, lane):
@@ -46,13 +35,23 @@ def warp_reduce_sum(val, lane):
   return val
 
 def amd_flash_attention(o:UOp, q:UOp, k:UOp, v:UOp) -> UOp:
-  block_bh = UOp.range(B * H, 0, AxisType.GLOBAL)
+  # inputs are (B*H, N, D)
+  BH, N, D = q.shape
+  assert N % BLOCK_M == 0 and N % BLOCK_N == 0, f"N={N} must be divisible by BLOCK_M={BLOCK_M} and BLOCK_N={BLOCK_N}"
+  assert D % WMMA_K == 0 and D % LANES_PER_WAVE_N == 0, f"D={D} must be divisible by WMMA_K={WMMA_K} and LANES_PER_WAVE_N={LANES_PER_WAVE_N}"
+  assert BLOCK_M % (WAVES_M * WMMA_M) == 0 and BLOCK_N % LANES_PER_WAVE_N == 0
+  TM = BLOCK_M // (WAVES_M * LANES_PER_WAVE_M)
+  TN = BLOCK_N // (WAVES_N * LANES_PER_WAVE_N)
+  TD = D // (WAVES_N * LANES_PER_WAVE_N)
+  SCALE = 1.0 / math.sqrt(D)
+
+  block_bh = UOp.range(BH, 0, AxisType.GLOBAL)
   block_m = UOp.range(N // BLOCK_M, 1, AxisType.GLOBAL)
 
-  q = q.reshape(B*H, N//BLOCK_M, BLOCK_M, D)[block_bh, block_m]
-  k = k.reshape(B*H, N//BLOCK_N, BLOCK_N, D)[block_bh]
-  v = v.reshape(B*H, N//BLOCK_N, BLOCK_N, D)[block_bh]
-  o = o.reshape(B*H, N//BLOCK_M, BLOCK_M, D)[block_bh, block_m]
+  q = q.reshape(BH, N//BLOCK_M, BLOCK_M, D)[block_bh, block_m]
+  k = k.reshape(BH, N//BLOCK_N, BLOCK_N, D)[block_bh]
+  v = v.reshape(BH, N//BLOCK_N, BLOCK_N, D)[block_bh]
+  o = o.reshape(BH, N//BLOCK_M, BLOCK_M, D)[block_bh, block_m]
 
   wave_m = UOp.range(WAVES_M, 2, AxisType.LOCAL)
   wave_n = UOp.range(WAVES_N, 3, AxisType.LOCAL)
@@ -107,23 +106,19 @@ def amd_flash_attention(o:UOp, q:UOp, k:UOp, v:UOp) -> UOp:
   # per-thread local row max over TN=4 elements, then warp reduce across 16 lanes
   m_ij = UOp.placeholder((TM,), dtypes.float, slot=7, addrspace=AddrSpace.REG)
   m_ij = m_ij.after(m_ij.after(n_tile).store(m_ij.const_like(-math.inf)))
-  rm1 = UOp.range(TM, 260, AxisType.LOOP)
   rm2 = UOp.range(TN, 261, AxisType.REDUCE)
-  m_ij = m_ij.after(m_ij[rm1].store(UOp(Ops.MAX, dtypes.float, (m_ij.after(rm1, rm2)[rm1], S_reg[rm1, rm2]))).end(rm2, rm1))
+  m_ij = m_ij.after(m_ij.store(m_ij.after(rm2).maximum(S_reg[:, rm2])).end(rm2))
   # warp reduce max (in-place)
   ri_w = UOp.range(TM, 270, AxisType.LOOP)
   m_ij = m_ij.after(m_ij[ri_w].store(warp_reduce_max(m_ij[ri_w], lane)).end(ri_w))
 
-  # compute P = exp(S - m_ij) in S_reg (manual ranges)
-  rp0a = UOp.range(TM, 275, AxisType.LOOP)
-  rp0b = UOp.range(TN, 276, AxisType.LOOP)
-  S_reg = S_reg.after(S_reg[rp0a, rp0b].store(((S_reg[rp0a, rp0b] - m_ij[rp0a]) * LOG2E).exp2()).end(rp0a, rp0b))
+  # compute P = exp(S - m_ij) in S_reg
+  S_reg = S_reg.after(S_reg.store(((S_reg - m_ij.reshape(TM, 1).expand(TM, TN)) * LOG2E).exp2()))
 
   p_local = UOp.placeholder((TM,), dtypes.float, slot=8, addrspace=AddrSpace.REG)
   p_local = p_local.after(p_local.after(n_tile).store(p_local.const_like(0)))
-  rp1 = UOp.range(TM, 290, AxisType.LOOP)
   rp2 = UOp.range(TN, 291, AxisType.REDUCE)
-  p_local = p_local.after(p_local[rp1].store(p_local.after(rp1, rp2)[rp1] + S_reg[rp1, rp2]).end(rp2, rp1))
+  p_local = p_local.after(p_local.store(p_local.after(rp2) + S_reg[:, rp2]).end(rp2))
   ri_ws = UOp.range(TM, 295, AxisType.LOOP)
   p_sum = p_local.after(p_local[ri_ws].store(warp_reduce_sum(p_local[ri_ws], lane)).end(ri_ws))
 
@@ -131,13 +126,14 @@ def amd_flash_attention(o:UOp, q:UOp, k:UOp, v:UOp) -> UOp:
   P_lds = QP_lds[:, :BLOCK_N]
   P_write = P_lds.reshape(WAVES_M, TM // WMMA_ACC, WMMA_ACC, LANES_PER_WAVE_M, WAVES_N, TN, LANES_PER_WAVE_N)
   P_write = P_write.permute((0, 4, 3, 6, 1, 2, 5)).reshape(THREADS_PER_BLOCK, TM, TN)
+  # TODO: P_write[tid].store(S_reg.cast(dtypes.half)) — shaped store fails due to RESHAPE(DEFINE_LOCAL) surviving linearization
   rw1 = UOp.range(TM, 296, AxisType.LOOP)
   rw2 = UOp.range(TN, 297, AxisType.LOOP)
   P_store = P_write[tid, rw1, rw2].store(S_reg[rw1, rw2].cast(dtypes.half)).end(rw1, rw2)
 
   # -- online softmax correction --
   ri4 = UOp.range(TM, 330, AxisType.LOOP)
-  m_new_val = UOp(Ops.MAX, dtypes.float, (m_i[ri4], m_ij[ri4]))
+  m_new_val = m_i[ri4].maximum(m_ij[ri4])
   alpha_val = ((m_i[ri4] - m_new_val) * LOG2E).exp2()
   beta_val = ((m_ij[ri4] - m_new_val) * LOG2E).exp2()
   rj4 = UOp.range(TD, 331, AxisType.LOOP)
@@ -181,6 +177,7 @@ def amd_flash_attention(o:UOp, q:UOp, k:UOp, v:UOp) -> UOp:
   return o[tid].store(acc).end(wave_m, wave_n, lane).end(block_m, block_bh).sink(arg=KernelInfo(opts_to_apply=()))
 
 if __name__ == "__main__":
+  B, H, N, D = getenv("B", 1), getenv("H", 32), getenv("N", 1024), getenv("D", 64)
   q = Tensor.rand(B, H, N, D).cast(dtypes.half)
   k = Tensor.rand(B, H, N, D).cast(dtypes.half)
   v = Tensor.rand(B, H, N, D).cast(dtypes.half)
@@ -190,7 +187,7 @@ if __name__ == "__main__":
   q_flat, k_flat, v_flat, o_flat = q.reshape(B*H, N, D), k.reshape(B*H, N, D), v.reshape(B*H, N, D), o.reshape(B*H, N, D)
   NUM_RUNS = getenv("CNT", 5)
   ets = []
-  with Context(DEBUG=getenv("KDBG", 2)):
+  with Context(DEBUG=2):
     for _ in range(NUM_RUNS):
       GlobalCounters.reset()
       tst = Tensor.custom_kernel(o_flat, q_flat, k_flat, v_flat, fxn=amd_flash_attention)[0].realize()
