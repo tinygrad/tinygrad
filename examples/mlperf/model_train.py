@@ -13,8 +13,6 @@ from extra.bench_log import BenchEvent, WallTimeEvent
 # TODO: fix benchmark logging and use tinygrad tqdm
 from tqdm import tqdm
 
-from tinygrad.uop.ops import UOp
-
 def train_resnet():
   from extra.models import resnet
   from examples.mlperf.dataloader import batch_load_resnet
@@ -1284,7 +1282,7 @@ def train_bert():
         previous_step = i
 
 def train_llama3():
-  from examples.mlperf.models.flat_llama import FlatTransformer, apply_grad
+  from examples.mlperf.models.flat_llama import FlatTransformer
   from examples.llama3 import MODEL_PARAMS
   from examples.mlperf.lr_schedulers import CosineAnnealingLRWithWarmup
   from examples.mlperf.optim import GradAccClipAdamW
