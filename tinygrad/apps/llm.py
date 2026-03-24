@@ -221,7 +221,7 @@ class GatedDeltaNetBlock(FFNBlock):
   @function
   def _delta_net(self, x:Tensor, start_pos:int|UOp) -> Tensor:
     B, _, _ = x.shape
-    x_norm = self.attn_norm(x)
+    x_norm = self.attn_norm(x).half()
     out_gate = self.attn_gate(x_norm).reshape(B, 1, self.num_v_heads, self.head_v_dim)
     beta = self.ssm_beta(x_norm).sigmoid().reshape(B, self.num_v_heads, 1, 1)
     alpha = ((self.ssm_alpha(x_norm).float() + self.ssm_dt_bias).softplus() * self.ssm_a).reshape(B, self.num_v_heads, 1, 1).exp()
