@@ -71,7 +71,7 @@ jobs:
           echo "EOF" >> "$GITHUB_ENV"
       - name: Comment Code Line Diff
         continue-on-error: false
-        uses: marocchino/sticky-pull-request-comment@v2
+        uses: marocchino/sticky-pull-request-comment@v3
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ignore_empty: true
@@ -89,7 +89,7 @@ jobs:
     steps:
       - name: Comment Rebase
         continue-on-error: false
-        uses: marocchino/sticky-pull-request-comment@v2
+        uses: marocchino/sticky-pull-request-comment@v3
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           skip_unchanged: true
