@@ -1,10 +1,10 @@
 from typing import TypeVar, Generic, Callable, cast, Any
 import functools, collections
 from tinygrad.tensor import Tensor
-from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, BEAM, getenv, colored, JIT, JIT_BATCH_SIZE, dedup, unwrap
+from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, BEAM, getenv, colored, JIT, JIT_BATCH_SIZE, dedup, unwrap, pluralize
 from tinygrad.device import Buffer, Compiled, Device, MultiBuffer
 from tinygrad.dtype import DType
-from tinygrad.uop.ops import UOp, Variable, sym_infer, Ops, buffers
+from tinygrad.uop.ops import UOp, Variable, sym_infer, Ops, buffers, track_rewrites
 from tinygrad.engine.realize import ExecItem, capturing, ViewOp, BufferCopy, BufferXfer, EncDec, CompiledRunner, Runner, Estimates
 from tinygrad.engine.memory import memory_plan_rewrite, _collect_bufs
 from tinygrad.engine.schedule import linear_to_schedule
@@ -21,6 +21,10 @@ def prune_linear(linear:UOp, needed:set[UOp]) -> tuple[UOp, UOp]:
       needed |= si_bufs
     else: onetime.append(si)
   return linear.replace(src=tuple(kept)), linear.replace(src=tuple(onetime))
+
+@track_rewrites(lambda linear,held_bufs,ret: f"JIT {pluralize('Kernel', len(ret))}")
+def jit_lower(linear:UOp, held_bufs:set[UOp]) -> list[ExecItem]:
+  return [ei.lower() for ei in linear_to_schedule(memory_plan_rewrite(linear, held_bufs))]
 
 class GraphException(Exception): pass
 class JitError(Exception): pass
@@ -334,12 +338,10 @@ class TinyJit(Generic[ReturnType]):
         for ei in (si.lower() for si in linear_to_schedule(onetime_linear)):
           for b in ei.bufs: cast(Buffer, b).ensure_allocated()
           ei.run(var_vals, jit=True)
-        del onetime_linear
 
       held_bufs = set(buffers) | {t.uop.buf_uop for t in get_parameters(ret) if t.uop.buf_uop.op is Ops.BUFFER}
       with Context(BEAM=getenv("JITBEAM", BEAM.value)):
-        jit_cache = [ei.lower() for ei in linear_to_schedule(memory_plan_rewrite(big_linear, held_bufs))]
-      del big_linear
+        jit_cache = jit_lower(big_linear, held_bufs)
 
       # track inputs that are views of buffers
       # TODO: eventually expected_buffers should live in ExecItem
