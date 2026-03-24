@@ -132,11 +132,14 @@ class FFNBlock:
       out = out + self.ffn_down_shexp(self.ffn_gate_shexp(h_norm).silu().contiguous() * self.ffn_up_shexp(h_norm)) * shared_gate
     return h + out
 
+  def _init_state(self, x:Tensor): raise NotImplementedError
+  def _attention(self, x:Tensor, start_pos:int|UOp) -> Tensor: raise NotImplementedError
+
   def __call__(self, x: Tensor, start_pos: int|UOp):
     self._init_state(x)
     # we pass in the weights implicitly so we unpack the GGUF on the fly
     @function(precompile=True, allow_implicit=True)
-    def _run(x:Tensor, start_pos:int|UOp): return self._feed_forward(self._mix(x, start_pos)).contiguous()
+    def _run(x:Tensor, start_pos:int|UOp): return self._feed_forward(self._attention(x, start_pos)).contiguous()
     return _run(x, start_pos)
 
 class TransformerBlock(FFNBlock):
@@ -197,8 +200,6 @@ class TransformerBlock(FFNBlock):
     attn = self.attn_output(attn if not self.has_gate else (attn * gate.sigmoid()))
     return x + attn
 
-  _mix = _attention
-
   def _init_state(self, x):
     if not hasattr(self, "cache_kv"):
       # TODO: how is the dtype of this determined?
@@ -219,7 +220,7 @@ class GatedDeltaNetBlock(FFNBlock):
     self.ssm_norm, self.ssm_out = nn.RMSNorm(self.head_v_dim, norm_eps), nn.Linear(inner_size, dim, bias=False)
 
   @function
-  def _delta_net(self, x:Tensor, start_pos:int|UOp) -> Tensor:
+  def _attention(self, x:Tensor, start_pos:int|UOp) -> Tensor:
     B, _, _ = x.shape
     x_norm = self.attn_norm(x).half()
     out_gate = self.attn_gate(x_norm).reshape(B, 1, self.num_v_heads, self.head_v_dim)
@@ -247,8 +248,6 @@ class GatedDeltaNetBlock(FFNBlock):
     final_state = cache_tensor[:, conv_flat:conv_flat + ssm_flat].reshape(B, self.num_v_heads, self.head_v_dim, self.head_v_dim)
     core_attn_out = self.ssm_norm((final_state@q).squeeze(-1).reshape(B, 1, self.num_v_heads, self.head_v_dim))
     return x + self.ssm_out((core_attn_out * out_gate.silu()).reshape(B, 1, -1).cast(x.dtype))
-
-  _mix = _delta_net
 
   def _init_state(self, x):
     if not hasattr(self, "delta_cache"):
