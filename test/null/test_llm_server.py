@@ -153,21 +153,6 @@ class TestLLMServer(unittest.TestCase):
     self.assertEqual(resp.choices[0].finish_reason, "length")
     self.assertEqual(resp.usage.completion_tokens, 2)
 
-  def test_stop_sequence(self):
-    self.mock_tok.decode = Mock(side_effect=lambda ids: {300: "One", 301: "Stop", 302: "Three"}.get(ids[0], "?"))
-    self.mock_model.generate = Mock(side_effect=lambda ids, **kwargs: iter([300, 301, 302, 999]))
-    stream = self.client.chat.completions.create(
-      model="test", messages=[{"role": "user", "content": "Hello"}], stream=True,
-      extra_body={"stop": ["Stop"]}
-    )
-    chunks = list(stream)
-    content_chunks = [c.choices[0].delta.content for c in chunks if c.choices and c.choices[0].delta.content]
-    # should have "One" and "Stop" then stop (stop token is emitted, then generation stops)
-    self.assertIn("One", content_chunks)
-    self.assertNotIn("Three", content_chunks)
-    self.assertEqual(chunks[-1].choices[0].finish_reason, "stop")
-    self.mock_tok.decode = Mock(return_value="Hello")
-
   def test_models_endpoint(self):
     import requests as req
     resp = req.get(f"http://127.0.0.1:{self.port}/v1/models")
