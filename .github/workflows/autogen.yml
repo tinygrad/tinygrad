@@ -28,7 +28,7 @@ jobs:
     timeout-minutes: 15
     steps:
     - name: Checkout Code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
     - name: Setup Environment
       uses: ./.github/actions/setup-tinygrad
       with:
@@ -68,7 +68,7 @@ jobs:
         fi
     - name: Upload patch artifact
       if: failure()
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: autogen-ubuntu-patch
         path: autogen-ubuntu.patch
@@ -79,7 +79,7 @@ jobs:
     timeout-minutes: 15
     steps:
     - name: Checkout Code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
     - name: Setup Environment
       uses: ./.github/actions/setup-tinygrad
       with:
@@ -99,7 +99,7 @@ jobs:
         fi
     - name: Upload patch artifact
       if: failure()
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: autogen-macos-patch
         path: autogen-macos.patch
@@ -110,7 +110,7 @@ jobs:
     timeout-minutes: 15
     steps:
     - name: Checkout Code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
     - name: Setup Environment
       uses: ./.github/actions/setup-tinygrad
       with:
@@ -138,7 +138,7 @@ jobs:
         fi
     - name: Upload patch artifact
       if: failure()
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: autogen-comgr2-patch
         path: autogen-comgr2.patch

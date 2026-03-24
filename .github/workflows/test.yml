@@ -21,7 +21,7 @@ jobs:
     timeout-minutes: 20
     steps:
     - name: Checkout Code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
     - name: Setup Environment
       uses: ./.github/actions/setup-tinygrad
       with:
@@ -41,7 +41,7 @@ jobs:
       CHECK_OOB: 0
     steps:
     - name: Checkout Code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
     - name: Setup Environment
       uses: ./.github/actions/setup-tinygrad
       with:
@@ -93,7 +93,7 @@ jobs:
     timeout-minutes: 15
     steps:
     - name: Checkout Code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
     - name: Setup Environment
       uses: ./.github/actions/setup-tinygrad
       with:
@@ -129,7 +129,7 @@ jobs:
     timeout-minutes: 15
     steps:
     - name: Checkout Code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
     - name: Setup Environment
       uses: ./.github/actions/setup-tinygrad
       with:
@@ -151,7 +151,7 @@ jobs:
     timeout-minutes: 15
     steps:
     - name: Checkout Code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
     - name: Setup Environment
       uses: ./.github/actions/setup-tinygrad
       with:
@@ -220,7 +220,7 @@ jobs:
 
     steps:
     - name: Checkout Code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
     - name: Setup Environment
       uses: ./.github/actions/setup-tinygrad
       with:
@@ -251,7 +251,7 @@ jobs:
 
     steps:
     - name: Checkout Code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
     - name: Setup Environment
       uses: ./.github/actions/setup-tinygrad
       with:
@@ -282,7 +282,7 @@ jobs:
 
     steps:
     - name: Checkout Code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
     - name: Setup Environment
       uses: ./.github/actions/setup-tinygrad
       with:
@@ -325,7 +325,7 @@ jobs:
     timeout-minutes: 15
     steps:
     - name: Checkout Code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
     - name: Setup Environment
       uses: ./.github/actions/setup-tinygrad
       with:
@@ -341,7 +341,7 @@ jobs:
     timeout-minutes: 10
     steps:
     - name: Checkout Code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
     - name: Setup Environment
       uses: ./.github/actions/setup-tinygrad
       with:
@@ -362,7 +362,7 @@ jobs:
     timeout-minutes: 15
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
       - name: Setup Environment
         uses: ./.github/actions/setup-tinygrad
         with:
@@ -383,7 +383,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
       - name: Setup Environment
         uses: ./.github/actions/setup-tinygrad
         with:
@@ -397,7 +397,7 @@ jobs:
       - name: Run fused optimizer tests
         run: CL=1 FUSE_OPTIM=1 python -m pytest -n=auto test/models/test_mnist.py test/backend/test_optim.py -k "not muon"
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: sops.gz
           path: /tmp/sops.gz
@@ -408,7 +408,7 @@ jobs:
     timeout-minutes: 15
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
       - name: Setup Environment
         uses: ./.github/actions/setup-tinygrad
         with:
@@ -437,7 +437,7 @@ jobs:
 
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
       - name: Setup Environment
         uses: ./.github/actions/setup-tinygrad
         with:
@@ -464,7 +464,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
       - name: Setup Environment
         uses: ./.github/actions/setup-tinygrad
         with:
@@ -500,7 +500,7 @@ jobs:
       CHECK_OOB: 0
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
       - name: Setup Environment
         uses: ./.github/actions/setup-tinygrad
         with:
@@ -521,7 +521,7 @@ jobs:
     timeout-minutes: 15
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
       - name: Setup Environment
         uses: ./.github/actions/setup-tinygrad
         with:
@@ -544,7 +544,7 @@ jobs:
     timeout-minutes: 20
     steps:
     - name: Checkout Code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
     - name: Setup Environment
       uses: ./.github/actions/setup-tinygrad
       with:
@@ -564,7 +564,7 @@ jobs:
     timeout-minutes: 15
     steps:
     - name: Checkout Code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
     - name: Setup Environment
       uses: ./.github/actions/setup-tinygrad
       with:
@@ -585,7 +585,7 @@ jobs:
     timeout-minutes: 15
     steps:
     - name: Checkout Code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
     - name: Setup Environment
       uses: ./.github/actions/setup-tinygrad
       with:
@@ -619,7 +619,7 @@ jobs:
     timeout-minutes: 20
     steps:
     - name: Checkout Code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
     - name: Setup Environment
       uses: ./.github/actions/setup-tinygrad
       with:
@@ -647,7 +647,7 @@ jobs:
       MOCKGPU: 1
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
       - name: Setup Environment
         uses: ./.github/actions/setup-tinygrad
         with:
@@ -694,7 +694,7 @@ jobs:
       AMD_IFACE: PCI
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
       - name: Setup Environment
         uses: ./.github/actions/setup-tinygrad
         with:
@@ -726,7 +726,7 @@ jobs:
       AMD_LLVM: ${{ matrix.backend == 'amdllvm' && '1' || matrix.backend != 'amdllvm' && '0' }}
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
       - name: Setup Environment
         uses: ./.github/actions/setup-tinygrad
         with:
@@ -759,7 +759,7 @@ jobs:
       FORWARD_ONLY: 1
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
       - name: Setup Environment
         uses: ./.github/actions/setup-tinygrad
         with:
@@ -792,7 +792,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
       - name: Setup Environment
         uses: ./.github/actions/setup-tinygrad
         with:
@@ -822,7 +822,7 @@ jobs:
     timeout-minutes: 20
     steps:
     - name: Checkout Code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
     - name: Setup Environment
       uses: ./.github/actions/setup-tinygrad
       with:
@@ -886,7 +886,7 @@ jobs:
     timeout-minutes: 10
     steps:
     - name: Checkout Code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
     - name: Setup Environment
       uses: ./.github/actions/setup-tinygrad
       with:
@@ -927,7 +927,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
       - name: Setup Environment
         uses: ./.github/actions/setup-tinygrad
         with:
@@ -962,7 +962,7 @@ jobs:
     timeout-minutes: 15
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
       - name: Setup Environment
         uses: ./.github/actions/setup-tinygrad
         with:
@@ -998,7 +998,7 @@ jobs:
     timeout-minutes: 15
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
       - name: Setup Environment
         uses: ./.github/actions/setup-tinygrad
         with:
@@ -1021,7 +1021,7 @@ jobs:
     timeout-minutes: 15
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
       - name: Setup Environment
         uses: ./.github/actions/setup-tinygrad
         with:
