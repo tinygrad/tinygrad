@@ -1,7 +1,10 @@
 # eval for tinygrad.apps.llm -- hits the server via OpenAI API
-import argparse, pyarrow.parquet as pq
+# uses Meta's exact ARC-Challenge prompt template from lm-evaluation-harness llama3 tasks
+import argparse, re, pyarrow.parquet as pq
 from openai import OpenAI
 from tinygrad.helpers import fetch, colored
+
+LABEL = ["A", "B", "C", "D"]
 
 if __name__ == "__main__":
   parser = argparse.ArgumentParser()
@@ -14,15 +17,21 @@ if __name__ == "__main__":
   table = pq.read_table(dat)
 
   num_correct, num_answered = 0, 0
-  total_questions = min(len(table["question"]), args.limit) if args.limit else len(table["question"])
-  for question, choices, answer in list(zip(table["question"], table["choices"], table["answerKey"]))[:total_questions]:
-    phrasing = f"Question: {question}\n\n" + \
-               '\n'.join([f"{k}) {v}" for k,v in zip(choices['label'], choices['text'])]) +\
-               "\n\nReply with the letter of the correct answer only."
-    resp = client.chat.completions.create(model="test", messages=[
-      {"role": "system", "content": "You answer multiple choice questions with a single letter."},
-      {"role": "user", "content": phrasing}], max_tokens=1)
-    correct, given = answer.as_py().strip(), resp.choices[0].message.content.strip()
+  # filter to 4-choice questions and normalize labels to A/B/C/D (matches Meta's eval)
+  rows = [(q, c, a) for q, c, a in zip(table["question"], table["choices"], table["answerKey"]) if len(c["label"]) == 4]
+  total_questions = min(len(rows), args.limit) if args.limit else len(rows)
+  for question, choices, answer in rows[:total_questions]:
+    phrasing = f"Given the following question and four candidate answers (A, B, C and D), choose the best answer.\n" +\
+               f"Question: {question}\n" + '\n'.join([f"{l}. {t}" for l, t in zip(LABEL, choices['text'])]) +\
+               f'\nYour response should end with "The best answer is [the_answer_letter]" where the [the_answer_letter] is one of A, B, C or D.'
+    resp = client.chat.completions.create(model="test", messages=[{"role": "user", "content": phrasing}], max_tokens=100)
+    # normalize answer key (some use 1/2/3/4 instead of A/B/C/D)
+    correct = answer.as_py().strip()
+    if correct not in LABEL: correct = LABEL[int(correct) - 1]
+    # extract answer: take last single capital letter A-D from response (prompt asks model to end with the answer)
+    text = resp.choices[0].message.content.strip()
+    m = re.findall(r'\b([A-D])\b', text)
+    given = m[-1] if m else text[:1]
     num_correct += correct == given
     num_answered += 1
     print(f"{num_answered:4d}/{total_questions:4d}  "+\
