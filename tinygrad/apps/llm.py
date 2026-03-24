@@ -308,8 +308,7 @@ CHAT_HTML = b'''<!DOCTYPE html><html><head><title>tinygrad chat</title><style>
 class Handler(HTTPRequestHandler):
   def log_request(self, code='-', size='-'): pass
   def do_GET(self):
-    if self.path == "/v1/models":
-      self.send_data(json.dumps({"object":"list","data":[{"id":model_name,"object":"model"}]}).encode())
+    if self.path == "/v1/models": self.send_data(json.dumps({"object":"list","data":[{"id":model_name,"object":"model"}]}).encode())
     else: self.send_data(CHAT_HTML, content_type="text/html")
   def run_model(self, ids:list[int], model_name:str, include_usage=False, max_tokens:int|None=None, stop:list[str]|None=None):
     cache_start_pos = model.get_start_pos(ids)
