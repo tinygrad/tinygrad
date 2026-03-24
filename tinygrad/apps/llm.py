@@ -255,6 +255,9 @@ class GatedDeltaNetBlock(FFNBlock):
       ssm_flat = self.num_v_heads * self.head_v_dim * self.head_v_dim
       self.delta_cache = Tensor.zeros(x.shape[0], conv_flat + ssm_flat, device=x.device).clone()
 
+  def reset_state(self):
+    if hasattr(self, 'delta_cache'): self.delta_cache.assign(Tensor.zeros_like(self.delta_cache)).realize()
+
 class Transformer:
   def __init__(self, *, num_blocks, dim, hidden_dim, n_heads, n_kv_heads, norm_eps, vocab_size, head_dim:int, rope_theta:float, rope_dim:int=0,
                max_context:int=0, qk_norm:int=0, num_experts:int=0, num_experts_per_tok:int=0, norm_topk_prob:bool=False,
@@ -342,6 +345,11 @@ class Transformer:
     t = Tensor(tokens + [0] * (self.max_context - len(tokens)), dtype="int32").reshape(1, self.max_context)
     # recompute start_pos from what's currently valid in the kv cache
     start_pos = self.get_start_pos(tokens)
+    # SSM state is sequential: if tokens diverge from cache, state is invalid and must be rebuilt
+    if self.has_ssm and start_pos < len(self._cached_tokens):
+      for block in self.blk:
+        if hasattr(block, 'reset_state'): block.reset_state()
+      start_pos = 0
     out, prompt_len = None, len(tokens)
     while len(tokens) < self.max_context:
       sp, nt = v_start_pos.bind(start_pos), v_toks.bind(min(chunk_size, len(tokens) - start_pos))
