@@ -14,7 +14,7 @@ export USE_ATOMICS=${USE_ATOMICS:-1}
 export ASM_GEMM=${ASM_GEMM:-1}
 export WQKV=${WQKV:-0}
 
-export DEFAULT_FLOAT="bfloat16" OPTIM_DTYPE="bfloat16"
+export DEFAULT_FLOAT="bfloat16" OPTIM_DTYPE="float32"
 export DP=${DP:-8} MP=${MP:-1} BS=${BS:-8} EVAL_BS=${EVAL_BS:-8} GRADIENT_ACC_STEPS=${GRADIENT_ACC_STEPS:-4}
 export GBS=$((BS * GRADIENT_ACC_STEPS))
 
