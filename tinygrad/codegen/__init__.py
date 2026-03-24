@@ -131,7 +131,7 @@ def do_linearize(prg:UOp, sink:UOp) -> UOp:
   if SPEC: type_verify(lst, program_spec)
   return prg.replace(src=prg.src + (UOp(Ops.LINEAR, src=tuple(lst)),))
 
-def do_shared_memplan(prg:UOp, lin:UOp) -> UOp|None:
+def do_local_memplan(prg:UOp, lin:UOp) -> UOp|None:
   return prg.replace(src=(new_lin.src[-1], prg.src[1], new_lin) + prg.src[3:]) if (new_lin:=local_memory_plan(lin)) is not None else None
 
 def do_estimates(prg:UOp, sink:UOp, lin:UOp) -> UOp|None:
@@ -148,7 +148,7 @@ def do_compile(ctx:Renderer, prg:UOp, source:UOp) -> UOp|None:
 
 pm_to_program = PatternMatcher([
   (UPat(Ops.PROGRAM, src=(UPat(Ops.SINK, name="sink"), UPat(Ops.DEVICE)), name="prg"), do_linearize),
-  (UPat(Ops.PROGRAM, src=(UPat(Ops.SINK), UPat(Ops.DEVICE), UPat(Ops.LINEAR, name="lin")), name="prg"), do_shared_memplan),
+  (UPat(Ops.PROGRAM, src=(UPat(Ops.SINK), UPat(Ops.DEVICE), UPat(Ops.LINEAR, name="lin")), name="prg"), do_local_memplan),
   (UPat(Ops.PROGRAM, src=(UPat(Ops.SINK, name="sink"), UPat(Ops.DEVICE), UPat(Ops.LINEAR, name="lin")), name="prg"), do_estimates),
   (UPat(Ops.PROGRAM, src=(UPat(), UPat(Ops.DEVICE), UPat(Ops.LINEAR, src=UPat(Ops.INS), name="lin")), name="prg"), do_assemble_amd),
   (UPat(Ops.PROGRAM, src=(UPat(), UPat(Ops.DEVICE), UPat(Ops.LINEAR, name="lin")), name="prg"), do_render),
@@ -182,7 +182,7 @@ def get_program(ast:UOp, renderer:Renderer, opts:list[Opt]|None=None) -> Program
   else:
     raise RuntimeError(f"can't call get_program on {ast.op}")
 
-  prg = graph_rewrite(prg, pm_to_program, ctx=renderer, name="linearize/smemplan/render")
+  prg = graph_rewrite(prg, pm_to_program, ctx=renderer, name="linearize/lcmemplan/render")
   if VIZ: graph_rewrite(prg, PatternMatcher([]), name="View Program")
 
   # create the ProgramSpec
