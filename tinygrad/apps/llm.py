@@ -307,24 +307,35 @@ CHAT_HTML = b'''<!DOCTYPE html><html><head><title>tinygrad chat</title><style>
 
 class Handler(HTTPRequestHandler):
   def log_request(self, code='-', size='-'): pass
-  def do_GET(self): self.send_data(CHAT_HTML, content_type="text/html")
-  def run_model(self, ids:list[int], model_name:str, include_usage=False):
+  def do_GET(self):
+    if self.path == "/v1/models":
+      self.send_data(json.dumps({"object":"list","data":[{"id":model_name,"object":"model"}]}).encode())
+    else: self.send_data(CHAT_HTML, content_type="text/html")
+  def run_model(self, ids:list[int], model_name:str, include_usage=False, max_tokens:int|None=None, stop:list[str]|None=None):
     cache_start_pos = model.get_start_pos(ids)
     stderr_log(f"{self.path}  {colored('--', 'BLACK')}  "
                f"in:{colored(f'{cache_start_pos:5d}', 'green')} +{len(ids)-cache_start_pos:5d}  {colored('--', 'BLACK')}  ")
     tmpl = {"id":f"chatcmpl-{uuid.uuid4().hex[:24]}", "object":"chat.completion.chunk", "created":int(time.time()), "model":model_name}
     yield {"choices": [{"index":0, "delta":{"role":"assistant","content":""}, "finish_reason":None}], **tmpl}
     out: list[int] = []
+    out_text = ""
+    finish_reason = "stop"
     st = time.perf_counter()
     for next_id in model.generate(ids):
       if len(out) == 0: stderr_log(f"prefill:{(len(ids)-cache_start_pos)/((pt:=time.perf_counter())-st):4.0f} tok/s  {colored('--', 'BLACK')}  ")
       if next_id == eos_id: break
       out.append(next_id)
+      out_text += tok.decode([next_id])
       yield {"choices": [{"index":0, "delta":{"content":tok.decode([next_id])}, "finish_reason":None}], **tmpl}
-    yield {"choices": [{"index":0, "delta":{},"finish_reason":"stop"}], **tmpl}
+      if max_tokens is not None and len(out) >= max_tokens:
+        finish_reason = "length"
+        break
+      if stop and any(s in out_text for s in stop): break
+    yield {"choices": [{"index":0, "delta":{},"finish_reason":finish_reason}], **tmpl}
     if include_usage:
       yield {"choices": [], "usage": {"prompt_tokens": len(ids), "completion_tokens": len(out), "total_tokens": len(ids) + len(out)}, **tmpl}
-    stderr_log(f"gen:{len(out)/(time.perf_counter()-pt):4.0f} tok/s  {colored('--', 'BLACK')}  out:{len(out):5d}\n")
+    stderr_log(f"gen:{len(out)/(time.perf_counter()-pt):4.0f} tok/s  {colored('--', 'BLACK')}  out:{len(out):5d}  {colored('--', 'BLACK')}  "
+              f"total:{time.perf_counter()-st:6.2f}s\n")
 
   def do_POST(self):
     raw_body = self.rfile.read(int(self.headers.get("Content-Length", "0")))
@@ -347,13 +358,20 @@ class Handler(HTTPRequestHandler):
       ids += tok.role("assistant")
 
       # reply
-      chunks = self.run_model(ids, body["model"], not body.get("stream") or body.get("stream_options",{}).get("include_usage", False))
+      max_tokens = body.get("max_completion_tokens") or body.get("max_tokens")
+      stop = body.get("stop")
+      if isinstance(stop, str): stop = [stop]
+      chunks = self.run_model(ids, body["model"], not body.get("stream") or body.get("stream_options",{}).get("include_usage", False),
+                              max_tokens=max_tokens, stop=stop)
       if body.get("stream"): self.stream_json(chunks)
       else:
-        out = []
-        for c in chunks: out.append(c["choices"][0]["delta"].get("content", "") if c["choices"] else "")
+        out, finish_reason = [], "stop"
+        for c in chunks:
+          if c["choices"] and c["choices"][0].get("delta", {}).get("content"):
+            out.append(c["choices"][0]["delta"]["content"])
+          if c["choices"] and c["choices"][0].get("finish_reason"): finish_reason = c["choices"][0]["finish_reason"]
         self.send_data(json.dumps({**c, "object":"chat.completion",
-          "choices":[{"index":0, "message":{"role":"assistant","content":"".join(out)}, "finish_reason":"stop"}]}).encode())
+          "choices":[{"index":0, "message":{"role":"assistant","content":"".join(out)}, "finish_reason":finish_reason}]}).encode())
     else:
       raise RuntimeError(f"unhandled path {self.path}")
 
@@ -377,6 +395,7 @@ if __name__ == "__main__":
   gc.collect()
 
   # extract some metadata
+  model_name = args.model
   tok = SimpleTokenizer.from_gguf_kv(kv)
   bos_id: int|None = kv.get('tokenizer.ggml.bos_token_id') if kv.get('tokenizer.ggml.add_bos_token', True) else None
   eos_id: int = kv['tokenizer.ggml.eos_token_id']
