@@ -1,10 +1,12 @@
 # https://arxiv.org/pdf/2112.10752.pdf
 # https://github.com/ekagra-ranjan/huggingface-blog/blob/main/stable_diffusion.md
-import tempfile
+import os, sys, tempfile
 from pathlib import Path
 import argparse, time
 from collections import namedtuple
 from typing import Dict, Any
+
+sys.path.append(Path(__file__).resolve().parents[1].as_posix())
 
 import numpy as np
 from tinygrad import Device, GlobalCounters, dtypes, Tensor, TinyJit
@@ -81,14 +83,12 @@ class Decoder:
     x = self.mid(x)
 
     for l in self.up[::-1]:
-      print("decode", x.shape)
       for b in l['block']: x = b(x)
       if 'upsample' in l:
         # https://pytorch.org/docs/stable/generated/torch.nn.functional.interpolate.html ?
         bs,c,py,px = x.shape
         x = x.reshape(bs, c, py, 1, px, 1).expand(bs, c, py, 2, px, 2).reshape(bs, c, py*2, px*2)
         x = l['upsample']['conv'](x)
-      x.realize()
 
     return self.conv_out(self.norm_out(x).swish())
 
@@ -113,7 +113,6 @@ class Encoder:
     x = self.conv_in(x)
 
     for l in self.down:
-      print("encode", x.shape)
       for b in l['block']: x = b(x)
       if 'downsample' in l: x = l['downsample']['conv'](x)
 
@@ -140,6 +139,9 @@ def get_alphas_cumprod(beta_start=0.00085, beta_end=0.0120, n_training_steps=100
   alphas = 1.0 - betas
   alphas_cumprod = np.cumprod(alphas, axis=0)
   return Tensor(alphas_cumprod)
+
+def should_show_image() -> bool:
+  return any(os.getenv(k) for k in ("DISPLAY", "WAYLAND_DISPLAY"))
 
 unet_params: Dict[str,Any] = {
   "adm_in_ch": None,
@@ -281,7 +283,8 @@ if __name__ == "__main__":
         if k.startswith("model"):
           v.replace(v.cast(dtypes.float16))
 
-    Tensor.realize(*get_state_dict(model).values())
+    if not args.fakeweights or args.fp16:
+      Tensor.realize(*get_state_dict(model).values())
 
   profile_marker("run clip (conditional)")
   tokenizer = Tokenizer.ClipTokenizer()
@@ -340,7 +343,7 @@ if __name__ == "__main__":
   print(f"saving {args.out}")
   im.save(args.out)
   # Open image.
-  if not args.noshow: im.show()
+  if not args.noshow and should_show_image(): im.show()
 
   if args.prompt == default_prompt and args.steps == 6 and args.seed == 0 and args.guidance == 7.5:
     profile_marker("validate")
