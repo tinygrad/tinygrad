@@ -102,16 +102,8 @@ def custom_lds_sync(A:UOp, arch:str) -> UOp:
     (isa.v_lshlrev_b64 if arch == 'rdna3' else isa.v_lshlrev_b64_e32)(v[2:3], 2, v[0:1]),
   ]
   # ** wmma with 16 bit and 8 bit inputs
-  if arch == "rdna4":
-    insts += [
-      isa.v_wmma_f32_16x16x16_bf16(v[0:7], v[8:11], v[8:11], 1),
-      isa.v_wmma_i32_16x16x16_iu8(v[0:7], v[8:9], v[8:9], 1),
-    ]
-  else:
-    insts += [
-      isa.v_wmma_f32_16x16x16_bf16(v[0:7], v[8:15], v[8:15], 1),
-      isa.v_wmma_i32_16x16x16_iu8(v[0:7], v[8:11], v[8:11], 1),
-    ]
+  v_wmma_16 = v[8:15] if arch == 'rdna3' else v[8:11]
+  insts += [isa.v_wmma_f32_16x16x16_bf16(v[0:7], v_wmma_16, v_wmma_16, 1)]*4
   insts.append(s_endpgm())
   sink = UOp.sink(A.base, lds, threads, wg, arg=KernelInfo("custom_lds_sync"))
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg="AMD"), UOp(Ops.LINEAR, src=tuple([UOp(Ops.INS, arg=x) for x in insts]))))
