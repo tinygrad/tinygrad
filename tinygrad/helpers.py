@@ -172,40 +172,10 @@ class ContextVar(Generic[T]):
   def __ge__(self, x): return self.value >= x
   def __gt__(self, x): return self.value > x
   def __lt__(self, x): return self.value < x
-  def tolist(self, obj=None, delim=","):
+  def tolist(self, obj=None):
     assert isinstance(self.value, str)
-    return [getattr(obj, x) if obj else x for x in self.value.split(delim) if x]
+    return [getattr(obj, x) if obj else x for x in self.value.split(',') if x]
 
-@dataclass(frozen=True)
-class Target:
-  interface: str = ""
-  device: str = ""
-  renderer: str = ""
-  arch: str = ""
-  arch_params: list[str] = field(default_factory=list)
-
-  @staticmethod
-  def parse(s:str) -> Target:
-    iface_split = s.split('+')
-    triple = iface_split[-1].split(':')
-    arch, *arch_params = triple.pop().split(',') if len(triple) == 3 else ("",)
-    assert len(iface_split) <= 2 and len(triple) <= 3, f"invalid target string: '{s}'"
-    return Target(interface=iface_split[0] if len(iface_split) == 2 else "", device=triple[0].upper() if triple else "",
-                  renderer=triple[1] if len(triple) > 1 else "", arch=arch, arch_params=arch_params)
-
-  def __repr__(self):
-    colonsep = [self.device, self.renderer, ",".join([self.arch, *self.arch_params])]
-    while colonsep and not colonsep[-1]: colonsep.pop()
-    return f"{self.interface}{'+' if self.interface else ''}"+":".join(colonsep)
-
-class _DEV(ContextVar):
-  def __init__(self): super().__init__("DEV", "")
-  def tolist(self, obj=None, delim=";"): return [Target.parse(x) for x in super().tolist(delim=delim)] if self.value else [Target()]
-  @property
-  def DEFAULT(self): return self.tolist()[0]
-  def __getitem__(self, key): return next(x for x in self.tolist() if not x.device or x.device == key)
-
-DEV = _DEV()
 DEBUG, BEAM, NOOPT = ContextVar("DEBUG", 0), ContextVar("BEAM", 0), ContextVar("NOOPT", 0)
 IMAGE, FLOAT16, OPENPILOT_HACKS = ContextVar("IMAGE", 0), ContextVar("FLOAT16", 0), ContextVar("OPENPILOT_HACKS", 0)
 JIT, JIT_BATCH_SIZE = ContextVar("JIT", 2 if OSX and ARCH_X86 else 1), ContextVar("JIT_BATCH_SIZE", 32)
