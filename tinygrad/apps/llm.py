@@ -84,7 +84,7 @@ def apply_rope(x:Tensor, freqs_cis:Tensor) -> Tensor:
   return (x1 * cos - x2 * sin).cat(x2 * cos + x1 * sin, dim=-1)
 
 @dataclass(frozen=True)
-class ModelConfig:
+class TransformerConfig:
   num_blocks: int
   dim: int
   hidden_dim: int
@@ -101,7 +101,7 @@ class ModelConfig:
   norm_topk_prob: bool = False
 
 class TransformerBlock:
-  def __init__(self, config:ModelConfig):
+  def __init__(self, config:TransformerConfig):
     self.config = config
 
     # --- attention projections (all linear, bias-free) ------------------
@@ -184,7 +184,7 @@ class TransformerBlock:
     return _run(x, start_pos)
 
 class Transformer:
-  def __init__(self, config:ModelConfig):
+  def __init__(self, config:TransformerConfig):
     self.blk = [TransformerBlock(config) for _ in range(config.num_blocks)]
     self.token_embd  = nn.Embedding(config.vocab_size, config.dim)
     self.output_norm = nn.RMSNorm(config.dim, config.norm_eps)
@@ -226,7 +226,7 @@ class Transformer:
         if 'attn_q.weight' in name: state_dict[name] = state_dict[name].rearrange("(n h two) d -> (n two h) d", n=n_heads, two=2)
         if 'attn_k.weight' in name: state_dict[name] = state_dict[name].rearrange("(n h two) d -> (n two h) d", n=n_kv_heads, two=2)
 
-    config = ModelConfig(
+    config = TransformerConfig(
       num_blocks=kv[f'{arch}.block_count'], dim=kv[f'{arch}.embedding_length'],
       hidden_dim=kv.get(f'{arch}.expert_feed_forward_length', kv[f'{arch}.feed_forward_length']),
       n_heads=n_heads, n_kv_heads=n_kv_heads, norm_eps=kv[f'{arch}.attention.layer_norm_rms_epsilon'],
