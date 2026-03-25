@@ -103,8 +103,8 @@ class TransformerConfig:
   vocab_size: int
   head_dim: int
   rope_theta: float
-  max_context: int = 0
   rope_dim: int = 0
+  max_context: int = 0
   qk_norm: int = 0
   num_experts: int = 0
   num_experts_per_tok: int = 0
@@ -177,21 +177,20 @@ class TransformerBlock(FFNBlock):
 
   @function
   def _attention(self, x:Tensor, start_pos:int|UOp) -> Tensor:
-    config = self.config
     x_norm = self.attn_norm(x)                       # (B,T,D)
     q, k, v = self.attn_q(x_norm), self.attn_k(x_norm), self.attn_v(x_norm)
-    if config.qk_norm and config.qk_norm != config.head_dim: q, k = self.attn_q_norm(q), self.attn_k_norm(k)
+    if self.config.qk_norm and self.config.qk_norm != self.config.head_dim: q, k = self.attn_q_norm(q), self.attn_k_norm(k)
 
     B, T, _ = x.shape
     if self.has_gate:
-      qg = q.reshape(B, T, config.n_heads, 2, config.head_dim)
-      q, gate = qg[:, :, :, 0, :], qg[:, :, :, 1, :].reshape(B, T, config.n_heads * config.head_dim)
-    q = q.reshape(B, T, config.n_heads,    config.head_dim).transpose(1, 2)  # (B,H,T,Hd)
-    k = k.reshape(B, T, config.n_kv_heads, config.head_dim).transpose(1, 2)  # (B,KvH,T,Hd)
-    v = v.reshape(B, T, config.n_kv_heads, config.head_dim).transpose(1, 2)  # (B,KvH,T,Hd)
-    if config.qk_norm == config.head_dim: q, k = self.attn_q_norm(q), self.attn_k_norm(k)
+      qg = q.reshape(B, T, self.config.n_heads, 2, self.config.head_dim)
+      q, gate = qg[:, :, :, 0, :], qg[:, :, :, 1, :].reshape(B, T, self.config.n_heads * self.config.head_dim)
+    q = q.reshape(B, T, self.config.n_heads,    self.config.head_dim).transpose(1, 2)  # (B,H,T,Hd)
+    k = k.reshape(B, T, self.config.n_kv_heads, self.config.head_dim).transpose(1, 2)  # (B,KvH,T,Hd)
+    v = v.reshape(B, T, self.config.n_kv_heads, self.config.head_dim).transpose(1, 2)  # (B,KvH,T,Hd)
+    if self.config.qk_norm == self.config.head_dim: q, k = self.attn_q_norm(q), self.attn_k_norm(k)
 
-    rope_dim = config.rope_dim or config.head_dim
+    rope_dim = self.config.rope_dim or self.config.head_dim
     q = apply_rope(q, self.freqs_cis[start_pos:start_pos+T], rope_dim)
     k = apply_rope(k, self.freqs_cis[start_pos:start_pos+T], rope_dim)
 
@@ -214,6 +213,7 @@ class TransformerBlock(FFNBlock):
 
   def _init_state(self, x):
     if not hasattr(self, "cache_kv"):
+      # TODO: how is the dtype of this determined?
       rope_dim = self.config.rope_dim or self.config.head_dim
       self.cache_kv = Tensor.empty(2, x.shape[0], self.config.n_kv_heads, self.config.max_context, self.config.head_dim, device=x.device)
       self.freqs_cis = precompute_freqs_cis(rope_dim, self.config.max_context, self.config.rope_theta)
@@ -221,7 +221,8 @@ class TransformerBlock(FFNBlock):
 class GatedDeltaNetBlock(FFNBlock):
   def __init__(self, config:TransformerConfig):
     super().__init__(config)
-    assert (ssm := config.ssm) is not None
+    assert config.ssm is not None
+    ssm = config.ssm
     self.head_k_dim, self.num_k_heads, self.num_v_heads = ssm['state_size'], ssm['group_count'], ssm['time_step_rank']
     self.head_v_dim, self.ssm_conv_kernel = ssm['inner_size'] // ssm['time_step_rank'], ssm['conv_kernel']
     self.conv_channels, self.q_dim = ssm['inner_size'] + 2*ssm['group_count']*ssm['state_size'], ssm['state_size']*ssm['group_count']
@@ -461,11 +462,10 @@ class Handler(HTTPRequestHandler):
     body: dict[str, typing.Any] = json.loads(raw_body.decode("utf-8"))
     if DEBUG >= 1: print(json.dumps(body, indent=2))
     if self.path == "/v1/chat/completions":
-      # extract tokens
+      # extract tokens, last assistant message is treated as prefill
       ids: list[int] = [bos_id] if bos_id is not None else []
-      for msg in body["messages"]:
+      for i, msg in enumerate(body["messages"]):
         ids += tok.role(msg["role"])
-        # content can be a str or a list
         content = msg["content"]
         if isinstance(content, str): ids += tok.encode(content)
         elif isinstance(content, list):
@@ -473,8 +473,9 @@ class Handler(HTTPRequestHandler):
             if c["type"] == "text": ids += tok.encode(c["text"])
             else: raise RuntimeError(f"unhandled type: {c['type']}")
         else: raise RuntimeError(f"unknown content type: {type(content)}")
+        if msg["role"] == "assistant" and i == len(body["messages"]) - 1: break
         ids += tok.end_turn(eos_id)
-      ids += tok.role("assistant")
+      else: ids += tok.role("assistant")
 
       # reply
       max_tokens = body.get("max_completion_tokens") or body.get("max_tokens")
@@ -493,25 +494,23 @@ class Handler(HTTPRequestHandler):
 
 if __name__ == "__main__":
   parser = argparse.ArgumentParser()
-  parser.add_argument("--model", "-m", choices=list(models.keys()), default=list(models.keys())[0], help="Model choice")
+  parser.add_argument("--model", "-m", default=list(models.keys())[0], help=f"Model choice ({', '.join(models.keys())}) or path to a local GGUF file")
   parser.add_argument("--max_context", type=int, default=4096, help="Max Context Length")
   parser.add_argument("--serve", nargs='?', type=int, const=11434, metavar="PORT", help="Run OpenAI compatible API (optional port, default 11434)")
   parser.add_argument("--benchmark", nargs='?', type=int, const=20, metavar="COUNT", help="Benchmark tok/s (optional count, default 20)")
   args = parser.parse_args()
 
   # load the model
-  raw_model = Tensor.from_url(models[args.model])
+  raw_model = Tensor.from_url(models.get(args.model, args.model))
   model, kv = Transformer.from_gguf(raw_model, args.max_context)
-  if DEBUG >= 1 or args.benchmark:
-    print(f"using model {args.model} with {raw_model.nbytes():,} bytes and {sum(x.numel() for x in nn.state.get_parameters(model)):,} params")
+  model_name = kv.get('general.name') or kv.get('general.basename') or args.model
+  print(f"using model \"{model_name}\" with {raw_model.nbytes():,} bytes and {sum(x.numel() for x in nn.state.get_parameters(model)):,} params")
   del raw_model
 
   # TODO: why this is required to free the RAM of the GGUF copy?
   import gc
   gc.collect()
 
-  # extract some metadata
-  model_name = args.model
   tok = SimpleTokenizer.from_gguf_kv(kv)
   bos_id: int|None = kv.get('tokenizer.ggml.bos_token_id') if kv.get('tokenizer.ggml.add_bos_token', True) else None
   eos_id: int = kv['tokenizer.ggml.eos_token_id']
