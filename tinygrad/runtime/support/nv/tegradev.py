@@ -34,7 +34,7 @@ class TegraIface:
       TegraIface._ctrl_fd = os.open("/dev/nvgpu/igpu0/ctrl", os.O_RDWR | os.O_CLOEXEC)
       tegra_gpu_info = tegra.struct_nvgpu_gpu_characteristics()
       tegra.NVGPU_GPU_IOCTL_GET_CHARACTERISTICS(TegraIface._ctrl_fd,
-        buf_size=ctypes.sizeof(tegra_gpu_info), buf_addr=ctypes.addressof(tegra_gpu_info))
+        gpu_characteristics_buf_size=ctypes.sizeof(tegra_gpu_info), gpu_characteristics_buf_addr=ctypes.addressof(tegra_gpu_info))
       TegraIface._gpu_info = tegra_gpu_info
 
     self.dev, self.device_id = dev, device_id
@@ -65,7 +65,9 @@ class TegraIface:
     if clss == nv_gpu.NV01_MEMORY_VIRTUAL:
       self._as_fd = tegra.NVGPU_GPU_IOCTL_ALLOC_AS(self._ctrl_fd, flags=2, va_range_start=(1 << 21), va_range_end=(1 << 40) - (1 << 21)).as_fd
       for reserved_va in [0xFD00000000, 0xFE00000000]:
-        tegra.NVGPU_AS_IOCTL_ALLOC_SPACE(self._as_fd, pages=0x40000000 // mmap.PAGESIZE, page_size=mmap.PAGESIZE, flags=1, offset=reserved_va)
+        rsv = tegra.struct_nvgpu_as_alloc_space_args(pages=0x40000000 // mmap.PAGESIZE, page_size=mmap.PAGESIZE, flags=1)
+        rsv.o_a.offset = reserved_va
+        tegra.NVGPU_AS_IOCTL_ALLOC_SPACE(self._as_fd, __payload=rsv)
       return handle
 
     if clss == nv_gpu.KEPLER_CHANNEL_GROUP_A:
