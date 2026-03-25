@@ -2953,22 +2953,15 @@ class Tensor(OpMixin):
     return Tensor(x, self.device, dtype, requires_grad=False)
 
   def _broadcasted(self, y:Tensor|ConstType|UOp, reverse:bool=False) -> tuple[Tensor, Tensor]:
-    x: Tensor = self
-    if not isinstance(y, Tensor): y = x.ufix(y)
+    if not isinstance(y, Tensor): y = self.ufix(y)
 
-    if x.dtype != y.dtype:
-      output_dtype = least_upper_dtype(x.dtype, y.dtype)
-      x, y = x.cast(output_dtype), y.cast(output_dtype)
+    x, y = (self, y) if not reverse else (y, self)
 
-    if reverse: x, y = y, x
+    out_shape, out_dtype = _broadcast_shape(x.shape, y.shape), least_upper_dtype(x.dtype, y.dtype)
 
-    # compute the output shape
-    out_shape = _broadcast_shape(x.shape, y.shape)
-
-    # broadcast
     # NOTE: the backward cast is no-op in forward and uses sum_acc_dtype in the backward sum
-    return x.cast(sum_acc_dtype(x.dtype))._broadcast_to(out_shape).cast(x.dtype), \
-           y.cast(sum_acc_dtype(y.dtype))._broadcast_to(out_shape).cast(y.dtype)
+    return x.cast(sum_acc_dtype(x.dtype))._broadcast_to(out_shape).cast(x.dtype).cast(out_dtype), \
+           y.cast(sum_acc_dtype(y.dtype))._broadcast_to(out_shape).cast(y.dtype).cast(out_dtype)
 
   def sub(self, x:Tensor|ConstType, reverse=False) -> Tensor:
     """
