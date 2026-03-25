@@ -12,7 +12,7 @@ _NVMAP_TAG = 0x0900
 def _nvmap_buf(nvmap_fd, size, cache_flags, align=4096):
   c = tegra.NVMAP_IOC_CREATE(nvmap_fd, size=size)
   tegra.NVMAP_IOC_ALLOC(nvmap_fd, handle=c.handle, heap_mask=tegra.NVMAP_HEAP_IOVMM, flags=(_NVMAP_TAG << 16) | cache_flags, align=align)
-  return c.handle, tegra.NVMAP_IOC_GET_FD(nvmap_fd, handle=c.handle).size
+  return c.handle, tegra.NVMAP_IOC_GET_FD(nvmap_fd, handle=c.handle).size  # .size field holds the returned dmabuf fd (kernel ioctl struct layout)
 
 @dataclass(eq=False)
 class TegraMem:
@@ -30,8 +30,8 @@ class TegraIface:
     if device_id != 0: raise RuntimeError("TegraIface only supports device 0 (single iGPU)")
     if TegraIface._gpu_info is None:
       if not os.path.exists("/dev/nvgpu/igpu0/ctrl"): raise FileNotFoundError("/dev/nvgpu/igpu0/ctrl")
-      TegraIface._nvmap_fd = os.open("/dev/nvmap", os.O_RDWR | os.O_SYNC)
-      TegraIface._ctrl_fd = os.open("/dev/nvgpu/igpu0/ctrl", os.O_RDWR)
+      TegraIface._nvmap_fd = os.open("/dev/nvmap", os.O_RDWR | os.O_SYNC | os.O_CLOEXEC)
+      TegraIface._ctrl_fd = os.open("/dev/nvgpu/igpu0/ctrl", os.O_RDWR | os.O_CLOEXEC)
       tegra_gpu_info = tegra.nvgpu_gpu_characteristics()
       tegra.NVGPU_GPU_IOCTL_GET_CHARACTERISTICS(TegraIface._ctrl_fd,
         buf_size=ctypes.sizeof(tegra_gpu_info), buf_addr=ctypes.addressof(tegra_gpu_info))
@@ -210,6 +210,17 @@ class TegraIface:
   def sleep(self, tm:int): pass
 
   def device_fini(self):
+    # free outstanding allocations before closing shared fds
+    while self._allocs:
+      meta = self._allocs.pop()
+      if meta.gpu_va and self._as_fd >= 0:
+        with contextlib.suppress(OSError): tegra.NVGPU_AS_IOCTL_UNMAP_BUFFER(self._as_fd, offset=meta.gpu_va)
+      if meta.cpu_addr:
+        with contextlib.suppress(Exception): FileIOInterface.munmap(meta.cpu_addr, meta.size)
+      if meta.dmabuf_fd >= 0:
+        with contextlib.suppress(OSError): os.close(meta.dmabuf_fd)
+      if meta.handle and self._nvmap_fd >= 0:
+        with contextlib.suppress(OSError): fcntl.ioctl(self._nvmap_fd, _NVMAP_FREE, ctypes.c_int32(meta.handle).value)
     for ch_fd in self._ch_fds.values():
       with contextlib.suppress(OSError): os.close(ch_fd)
     for ring_nvmap_h, ring_fd, userd_nvmap_h, userd_fd in self._ch_bufs.values():
