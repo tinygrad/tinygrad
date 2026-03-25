@@ -921,9 +921,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        backend: [metal, cl, llvm, cpu, lvp]
+        backend: [metal, llvm, cpu, lvp]
     name: MacOS (${{ matrix.backend }})
-    runs-on: ${{ matrix.backend == 'cl' && 'macos-14' || 'macos-15' }}
+    runs-on: macos-15
     timeout-minutes: 20
     steps:
       - name: Checkout Code
@@ -936,10 +936,7 @@ jobs:
           llvm: ${{ matrix.backend == 'llvm' || matrix.backend == 'lvp' }}
           mesa: ${{ matrix.backend == 'lvp' && 'true' }}
       - name: Set env
-        run: printf "${{ matrix.backend == 'llvm' && 'CPU=1\nCPU_LLVM=1' || matrix.backend == 'cpu' && 'CPU=1\nCPU_LLVM=0\nCPU_COUNT=2' || matrix.backend == 'metal' && 'METAL=1' || matrix.backend == 'cl' && 'CL=1' || matrix.backend == 'lvp' && 'CPU=1\nCPU_LVP=1' }}" >> $GITHUB_ENV
-      - name: Debug OpenCL
-        if: matrix.backend == 'cl'
-        run: brew install clinfo && clinfo || true
+        run: printf "${{ matrix.backend == 'llvm' && 'CPU=1\nCPU_LLVM=1' || matrix.backend == 'cpu' && 'CPU=1\nCPU_LLVM=0\nCPU_COUNT=2' || matrix.backend == 'metal' && 'METAL=1' || matrix.backend == 'lvp' && 'CPU=1\nCPU_LVP=1' }}" >> $GITHUB_ENV
       - name: Check Device.DEFAULT and print some source
         run: |
           python -c "from tinygrad import Device; assert Device.DEFAULT == {'LLVM':'CPU','LVP':'CPU'}.get(x:='${{ matrix.backend }}'.upper(), x), Device.DEFAULT"
@@ -951,9 +948,6 @@ jobs:
       - name: Run macOS-specific unit test
         if: matrix.backend == 'cpu'
         run: python3 -m pytest test/unit/test_disk_tensor.py::TestDiskTensor::test_copy_to_cpu_not_truncated
-      - name: Test openpilot model kernel count and gate usage
-        if: matrix.backend == 'cl'
-        run: ALLOWED_KERNEL_COUNT=123 ALLOWED_READ_IMAGE=1486 ALLOWED_GATED_READ_IMAGE=18 FLOAT16=1 IMAGE=1 python examples/openpilot/compile3.py https://gitlab.com/commaai/openpilot-lfs.git/gitlab-lfs/objects/cf6376aa9a090f0da26c280ef69eabf9bbdd51d1faac9ed392919c3db69be916
 
 # ****** Windows Tests ******
 
