@@ -2,11 +2,16 @@ from tinygrad.tensor import Tensor
 from tinygrad.dtype import dtypes
 from tinygrad.nn.optim import Optimizer
 from tinygrad.helpers import FUSE_OPTIM
+from tinygrad.uop.ops import UOp, Ops
 
 def stochastic_round_bf16(x:Tensor) -> Tensor:
-  """Stochastic rounding from fp32 to bf16. E[SR(x)] = x, preventing small updates from vanishing."""
   bits = x.bitcast(dtypes.uint32)
-  noise = (x.rand_like() * 0xFFFF).cast(dtypes.uint32)
+  if isinstance(x.device, tuple):
+    shape = x.uop.shard_shape if x.uop.axis is not None else x.shape
+    noise = Tensor(UOp(Ops.MSTACK, dtypes.default_float, tuple(Tensor.rand(*shape, device=d).uop for d in x.device)))
+  else:
+    noise = x.rand_like()
+  noise = (noise * 0xFFFF).cast(dtypes.uint32)
   return ((bits + noise) & 0xFFFF0000).bitcast(dtypes.float32).cast(dtypes.bfloat16)
 
 class GradAccClipAdamW(Optimizer):
@@ -53,12 +58,12 @@ class GradAccClipAdamW(Optimizer):
     for i, g in enumerate(grads):
       m_new = self.b1 * self.m[i].float() + (1.0 - self.b1) * g.float()
       v_new = self.b2 * self.v[i].float() + (1.0 - self.b2) * (g.float() * g.float())
-      self.m[i].assign(stochastic_round_bf16(m_new) if self.m[i].dtype == dtypes.bfloat16 else m_new.cast(self.m[i].dtype))
-      self.v[i].assign(stochastic_round_bf16(v_new) if self.v[i].dtype == dtypes.bfloat16 else v_new.cast(self.v[i].dtype))
-      m_hat = (m_new / (1.0 - self.b1_t)).cast(self.m[i].dtype)
-      v_hat = (v_new / (1.0 - self.b2_t)).cast(self.v[i].dtype)
+      self.m[i].assign(m_new.cast(self.m[i].dtype))
+      self.v[i].assign(v_new.cast(self.v[i].dtype))
+      m_hat = m_new / (1.0 - self.b1_t)
+      v_hat = v_new / (1.0 - self.b2_t)
       up = m_hat / (v_hat.sqrt() + self.eps)
-      ret.append((self.lr * up).cast(g.dtype))
+      ret.append(self.lr * up)
     return ret, [self.b1_t, self.b2_t] + self.m + self.v + [total_norm]
 
   def _apply_update(self, t:Tensor, up:Tensor) -> Tensor:
