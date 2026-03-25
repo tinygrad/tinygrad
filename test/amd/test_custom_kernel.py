@@ -68,6 +68,7 @@ def custom_lds_sync(A:UOp, arch:str) -> UOp:
   wg = UOp.special(1, "gidx0")
   lds = UOp(Ops.DEFINE_LOCAL, dtypes.uint8.ptr(size=512, addrspace=AddrSpace.LOCAL), (), 'lds')  # 128 * 4 bytes
   isa = r4 if arch == "rdna4" else r3
+  # ** handwritten barrier test
   wait_kmcnt = [isa.s_wait_kmcnt(simm16=0)] if arch == "rdna4" else [isa.s_waitcnt(lgkmcnt=0)]
   wait_dscnt = [isa.s_wait_dscnt(simm16=0)] if arch == "rdna4" else [isa.s_waitcnt(lgkmcnt=0)]
   barrier = [isa.s_barrier_signal(ssrc0=-1), isa.s_barrier_wait(simm16=-1)] if arch == "rdna4" else [isa.s_barrier()]
@@ -90,8 +91,22 @@ def custom_lds_sync(A:UOp, arch:str) -> UOp:
     isa.v_cndmask_b32_e32(v[5], v[4], v[3]),
     isa.v_lshlrev_b32_e32(v[6], 2, v[0]),
     *global_store,
-    isa.s_endpgm(),
+    *wait_kmcnt,
   ]
+  # ** valu ops with known cycle count
+  insts += [
+    isa.v_mov_b32_e32(v[10], 4.0),
+    # 4 cycles
+    isa.v_rcp_f32_e32(v[11], v[10]),
+    # 2 cycles
+    (isa.v_lshlrev_b64 if arch == 'rdna3' else isa.v_lshlrev_b64_e32)(v[2:3], 2, v[0:1]),
+  ]
+  # ** wmma with 16 bit and 8 bit inputs
+  insts += [
+    isa.v_wmma_f32_16x16x16_bf16(v[0:7], v[8:15], v[8:15], 1),
+    isa.v_wmma_i32_16x16x16_iu8(v[0:7], v[8:11], v[8:11], 1),
+  ]
+  insts.append(s_endpgm())
   sink = UOp.sink(A.base, lds, threads, wg, arg=KernelInfo("custom_lds_sync"))
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg="AMD"), UOp(Ops.LINEAR, src=tuple([UOp(Ops.INS, arg=x) for x in insts]))))
 
