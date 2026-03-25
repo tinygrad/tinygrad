@@ -273,9 +273,6 @@ class GatedDeltaNetBlock(FFNBlock):
       ssm_flat = self.num_v_heads * self.head_v_dim * self.head_v_dim
       self.delta_cache = Tensor.zeros(x.shape[0], conv_flat + ssm_flat, device=x.device).clone()
 
-  def reset_state(self):
-    if hasattr(self, 'delta_cache'): self.delta_cache.assign(Tensor.zeros_like(self.delta_cache)).realize()
-
 class Transformer:
   def __init__(self, config:TransformerConfig):
     attn_config = config if not config.ssm else dc_replace(config, qk_norm=config.head_dim)
@@ -360,8 +357,7 @@ class Transformer:
     start_pos = self.get_start_pos(tokens)
     # SSM state is sequential: if tokens diverge from cache, state is invalid and must be rebuilt
     if self.has_ssm and start_pos < len(self._cached_tokens):
-      for block in self.blk:
-        if hasattr(block, 'reset_state'): block.reset_state()
+      Tensor.realize(*[b.delta_cache.assign(Tensor.zeros_like(b.delta_cache)) for b in self.blk if hasattr(b, 'delta_cache')])
       start_pos = 0
     out, prompt_len = None, len(tokens)
     while len(tokens) < self.max_context:
