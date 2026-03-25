@@ -18,6 +18,8 @@ class ConstFloat(float):
     if isinstance(other, float) and math.isnan(self) and math.isnan(other): return True
     return float.__eq__(self, other)
   def __hash__(self): return hash(self.bits)
+  def __repr__(self): return f"ConstFloat({float.__repr__(self)})"
+  def __str__(self): return float.__repr__(self)
 
 class InvalidType:
   _instance: ClassVar[InvalidType|None] = None
