@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import Final, ClassVar, Callable, Literal
 import math, struct, ctypes, functools
 from dataclasses import dataclass, fields
-from tinygrad.helpers import ceildiv, getenv, prod, OSX
+from tinygrad.helpers import ceildiv, getenv, prod, round_up, OSX
 from enum import Enum, auto
 
 class ConstFloat(float):
@@ -129,16 +129,18 @@ class ImageDType(PtrDType):
     assert addrspace == AddrSpace.GLOBAL, "images can't be local"
     return self
   def __repr__(self): return f"dtypes.{self.name}({self.shape})" + (f'.vec({self.v})' if self.v != 1 else '')
+
+  # for 1d images on macos, we need to round pitch up to 256 pixels to make CL happy
   @property
-  def pitch(self): return self.shape[1] * 4 * self.itemsize
+  def pitch(self): return (round_up(self.shape[1], 256) if OSX else self.shape[1]) * 4 * self.itemsize
 
   # get list of (height, width) that do not require pitch padding
   @staticmethod
   def valid_dims(ptr:PtrDType) -> list[tuple[int,int]]:
     ALIGN, MAXW, pxls = getenv("IMAGE_PITCH_ALIGN", 256 if OSX else 64), 16384, ptr.size // 4
     if ptr.base not in (dtypes.half, dtypes.float) or ptr.size > 4*MAXW*MAXW: return []
-    # OSX has stricter requirements for height=1 images
-    if ptr.size % (ALIGN * 4) != 0: return [] if OSX or ptr.nbytes() % getenv("IMAGE_BASE_ALIGN", 64) != 0 or pxls > MAXW else [(1, pxls)]
+    # height=1 images just need to abide by alignment requirements in bytes, not pixels!
+    if ptr.size % (ALIGN * 4) != 0: return [] if ptr.nbytes() % getenv("IMAGE_BASE_ALIGN", 64) != 0 or pxls > MAXW else [(1, pxls)]
     return [(pxls//ALIGN//k, ALIGN*k) for k in range(ceildiv(pxls//ALIGN, MAXW), min(pxls//ALIGN, MAXW//ALIGN)+1) if (pxls//ALIGN)%k == 0]
 
 class dtypes:
