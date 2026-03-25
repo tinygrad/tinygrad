@@ -138,6 +138,47 @@ class TestVOPDLiterals(unittest.TestCase):
     self.assertAlmostEqual(i2f(st.vgpr[0][2]), 13.0, places=5, msg="fma(2.0, 5.0, 3.0) should be 13.0")
 
 
+class TestVOPDDot2Acc(unittest.TestCase):
+  """Tests for V_DUAL_DOT2ACC_F32_F16 - packed f16 dot product accumulate."""
+
+  def test_vopd_dot2acc_f32_f16_basic(self):
+    """V_DUAL_DOT2ACC_F32_F16: D += lo(S0)*lo(S1) + hi(S0)*hi(S1).
+
+    S0 = pack(1.0h, 2.0h), S1 = pack(3.0h, 4.0h), D = 10.0f
+    result = 10.0 + 1.0*3.0 + 2.0*4.0 = 10.0 + 3.0 + 8.0 = 21.0
+    """
+    from test.amd.hw.helpers import f2i, i2f, f32_to_f16
+    pk_s0 = f32_to_f16(1.0) | (f32_to_f16(2.0) << 16)  # lo=1.0h, hi=2.0h
+    pk_s1 = f32_to_f16(3.0) | (f32_to_f16(4.0) << 16)  # lo=3.0h, hi=4.0h
+    instructions = [
+      v_mov_b32_e32(v[0], pk_s0),
+      v_mov_b32_e32(v[1], pk_s1),
+      v_mov_b32_e32(v[3], f2i(10.0)),  # accumulator in v[3] (vdsty with vdstx=v[4])
+      # X: v[4] = MOV v[0] (don't care), Y: v[3] += dot2(v[0], v[1])
+      VOPD(VOPDOp.V_DUAL_MOV_B32, VOPDOp.V_DUAL_DOT2ACC_F32_F16, v[4], v[3], v[0], v[0], v[0], v[1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertAlmostEqual(i2f(st.vgpr[0][3]), 21.0, places=2, msg="10.0 + 1.0*3.0 + 2.0*4.0 = 21.0")
+
+  def test_vopd_dot2acc_f32_f16_zero_accum(self):
+    """V_DUAL_DOT2ACC_F32_F16 with zero accumulator — pure dot product.
+
+    S0 = pack(0.5h, -1.0h), S1 = pack(2.0h, 3.0h), D = 0.0f
+    result = 0.0 + 0.5*2.0 + (-1.0)*3.0 = 1.0 - 3.0 = -2.0
+    """
+    from test.amd.hw.helpers import f2i, i2f, f32_to_f16
+    pk_s0 = f32_to_f16(0.5) | (f32_to_f16(-1.0) << 16)
+    pk_s1 = f32_to_f16(2.0) | (f32_to_f16(3.0) << 16)
+    instructions = [
+      v_mov_b32_e32(v[0], pk_s0),
+      v_mov_b32_e32(v[1], pk_s1),
+      v_mov_b32_e32(v[3], f2i(0.0)),  # zero accumulator in v[3]
+      VOPD(VOPDOp.V_DUAL_MOV_B32, VOPDOp.V_DUAL_DOT2ACC_F32_F16, v[4], v[3], v[0], v[0], v[0], v[1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertAlmostEqual(i2f(st.vgpr[0][3]), -2.0, places=2, msg="0.5*2.0 + (-1.0)*3.0 = -2.0")
+
+
 class TestVOPDMultilane(unittest.TestCase):
   """Tests for VOPD with multiple lanes."""
 

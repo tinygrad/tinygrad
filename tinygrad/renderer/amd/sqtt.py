@@ -109,9 +109,7 @@ class InstOpRDNA4(Enum):
   JUMP = 0x3
   JUMP_NO = 0x4
   CALL = 0x5
-  TRAP = 0x6
   SALU_NO_EXEC = 0x7
-  FATAL_HALT = 0x8
   MESSAGE = 0x9
   VALU_1 = 0xa
   VALU_TRANS = 0xb
@@ -163,13 +161,10 @@ class InstOpRDNA4(Enum):
   SALU_WR_EXEC = 0x72
   VALU1_WR_EXEC = 0x73
   VALU_B2_WR_EXEC = 0x74
-  RFE = 0x75
   OTHER_LDS_6 = 0x77
   OTHER_LDS_10 = 0x78
   BARRIER_SIGNAL = 0x7a
   DYN_VGPR = 0x87
-  TRY_LOCK = 0x88
-  UNLOCK = 0x89
   BARRIER_JOIN = 0x8a
   WMMA_8 = 0x8c
   WMMA_16 = 0x8d

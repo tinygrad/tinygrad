@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import Final, ClassVar, Callable, Literal
 import math, struct, ctypes, functools
 from dataclasses import dataclass, fields
-from tinygrad.helpers import ceildiv, getenv, prod, round_up, next_power2, OSX
+from tinygrad.helpers import ceildiv, getenv, prod, round_up, OSX
 from enum import Enum, auto
 
 class ConstFloat(float):
@@ -18,6 +18,8 @@ class ConstFloat(float):
     if isinstance(other, float) and math.isnan(self) and math.isnan(other): return True
     return float.__eq__(self, other)
   def __hash__(self): return hash(self.bits)
+  def __repr__(self): return f"ConstFloat({float.__repr__(self)})"
+  def __str__(self): return float.__repr__(self)
 
 class InvalidType:
   _instance: ClassVar[InvalidType|None] = None
@@ -125,32 +127,22 @@ class PtrDType(DType):
 @dataclass(frozen=True, eq=False)
 class ImageDType(PtrDType):
   shape: tuple[int, ...] = ()   # shape of the Image
-  _pitch: int = -1
   def ptr(self, size=-1, addrspace=AddrSpace.GLOBAL) -> PtrDType:
     assert addrspace == AddrSpace.GLOBAL, "images can't be local"
     return self
   def __repr__(self): return f"dtypes.{self.name}({self.shape})" + (f'.vec({self.v})' if self.v != 1 else '')
-  @property
-  def pitch(self):
-    if self._pitch != -1: return self._pitch
-    imgw, imgh, itemsize_log = self.shape[1], self.shape[0], int(math.log2(self.itemsize))
-    if OSX: return round_up(imgw, 256) * 4 * self.itemsize
-    # needs to be IMAGE_PITCH_ALIGN=256 for AMD
-    min_pitchalign = int(math.log2(v)) if (v := getenv("IMAGE_PITCH_ALIGN", 0)) > 0 else 6
-    pitchalign = max(min_pitchalign, 11 - int(math.log2(imgh))) if imgh > 1 else min_pitchalign
-    align_up = max(1, (8 // itemsize_log + 1) - imgh // 32) if pitchalign == 6 else (2 ** (pitchalign - itemsize_log - 2))
 
-    granularity = 128 if self.itemsize == 4 else 256
-    pitch_add = (1 << pitchalign) if min(next_power2(imgw), round_up(imgw, granularity)) - align_up + 1 <= imgw and imgw > granularity//2 else 0
-    return round_up(imgw * 4 * self.itemsize, 1 << pitchalign) + pitch_add
+  # for 1d images on macos, we need to round pitch up to 256 pixels to make CL happy
+  @property
+  def pitch(self): return (round_up(self.shape[1], 256) if OSX else self.shape[1]) * 4 * self.itemsize
 
   # get list of (height, width) that do not require pitch padding
   @staticmethod
   def valid_dims(ptr:PtrDType) -> list[tuple[int,int]]:
     ALIGN, MAXW, pxls = getenv("IMAGE_PITCH_ALIGN", 256 if OSX else 64), 16384, ptr.size // 4
     if ptr.base not in (dtypes.half, dtypes.float) or ptr.size > 4*MAXW*MAXW: return []
-    # OSX has stricter requirements for height=1 images
-    if ptr.size % (ALIGN * 4) != 0: return [] if OSX or ptr.nbytes() % getenv("IMAGE_BASE_ALIGN", 64) != 0 or pxls > MAXW else [(1, pxls)]
+    # height=1 images just need to abide by alignment requirements in bytes, not pixels!
+    if ptr.size % (ALIGN * 4) != 0: return [] if ptr.nbytes() % getenv("IMAGE_BASE_ALIGN", 64) != 0 or pxls > MAXW else [(1, pxls)]
     return [(pxls//ALIGN//k, ALIGN*k) for k in range(ceildiv(pxls//ALIGN, MAXW), min(pxls//ALIGN, MAXW//ALIGN)+1) if (pxls//ALIGN)%k == 0]
 
 class dtypes:
@@ -167,11 +159,12 @@ class dtypes:
   def is_bool(x: DType) -> bool: return x.scalar() == dtypes.bool
   @staticmethod
   def from_py(x) -> DType:
-    if x.__class__ is float: return dtypes.default_float
-    if x.__class__ is int: return dtypes.default_int
-    if x.__class__ is bool: return dtypes.bool
+    # NOTE: isinstance(True, int) is True, so bool must be checked before int
+    if isinstance(x, bool): return dtypes.bool
+    if isinstance(x, float): return dtypes.default_float
+    if isinstance(x, int): return dtypes.default_int
     # put this in the last is faster because there are more items than lists/tuples to check
-    if x.__class__ is list or x.__class__ is tuple: return max(dtypes.from_py(xi) for xi in x) if x else dtypes.default_float
+    if isinstance(x, (list, tuple)): return max(dtypes.from_py(xi) for xi in x) if x else dtypes.default_float
     raise RuntimeError(f"Could not infer dtype of {x} with type {type(x)}")
   @staticmethod
   def finfo(dtype:DType) -> tuple[int, int]:
@@ -180,7 +173,7 @@ class dtypes:
     return {dtypes.float16: (5, 10), dtypes.bfloat16: (8, 7), dtypes.float32: (8, 23), dtypes.float64: (11, 52),
             dtypes.fp8e4m3: (4, 3), dtypes.fp8e5m2: (5, 2), dtypes.fp8e4m3fnuz: (4, 3), dtypes.fp8e5m2fnuz: (5, 2)}[dtype]
   void: Final[DType] = DType.new(-1, 0, "void", None)
-  weakint: Final[DType] = DType.new(-1, 800, "weakint", None)
+  weakint: Final[DType] = DType.new(0, 800, "weakint", None)
   bool: Final[DType] = DType.new(0, 1, "bool", '?')
   int8: Final[DType] = DType.new(1, 8, "signed char", 'b')
   uint8: Final[DType] = DType.new(2, 8, "unsigned char", 'B')
@@ -209,9 +202,9 @@ class dtypes:
 
   # NOTE: these are image dtypes
   @staticmethod
-  def imageh(shp, pitch=-1): return ImageDType(100, 16, "imageh", 'e', 1, None, dtypes.float32, AddrSpace.GLOBAL, 1, prod(shp), shp, pitch)
+  def imageh(shp): return ImageDType(100, 16, "imageh", 'e', 1, None, dtypes.float32, AddrSpace.GLOBAL, 1, prod(shp), shp)
   @staticmethod
-  def imagef(shp, pitch=-1): return ImageDType(100, 32, "imagef", 'f', 1, None, dtypes.float32, AddrSpace.GLOBAL, 1, prod(shp), shp, pitch)
+  def imagef(shp): return ImageDType(100, 32, "imagef", 'f', 1, None, dtypes.float32, AddrSpace.GLOBAL, 1, prod(shp), shp)
 
   default_float: ClassVar[DType] = float32
   default_int: ClassVar[DType] = int32
@@ -238,8 +231,8 @@ def to_dtype(dtype:DTypeLike) -> DType: return dtype if isinstance(dtype, DType)
 
 # https://jax.readthedocs.io/en/latest/jep/9407-type-promotion.html
 # we don't support complex type
-# TODO: weakint and weakfloat in lattice
-promo_lattice = { dtypes.bool: [dtypes.int8, dtypes.uint8], dtypes.int8: [dtypes.int16], dtypes.int16: [dtypes.int32], dtypes.int32: [dtypes.int64],
+promo_lattice = { dtypes.bool: [dtypes.weakint], dtypes.weakint: [dtypes.int8, dtypes.uint8],
+  dtypes.int8: [dtypes.int16], dtypes.int16: [dtypes.int32], dtypes.int32: [dtypes.int64],
   dtypes.int64: [dtypes.uint64], dtypes.uint8: [dtypes.int16, dtypes.uint16], dtypes.uint16: [dtypes.int32, dtypes.uint32],
   dtypes.uint32: [dtypes.int64, dtypes.uint64], dtypes.uint64: [dtypes.fp8e4m3, dtypes.fp8e5m2, dtypes.fp8e4m3fnuz, dtypes.fp8e5m2fnuz],
   dtypes.fp8e4m3: [dtypes.float16, dtypes.bfloat16], dtypes.fp8e5m2: [dtypes.float16, dtypes.bfloat16],

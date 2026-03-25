@@ -11,8 +11,8 @@ from tinygrad.helpers import IMAGE, FLOAT16, WINO, Metadata, TRACEMETA, ASM_GEMM
 from tinygrad.helpers import suppress_finalizing, disable_gc
 from tinygrad.gradient import compute_gradient
 from tinygrad.mixin import OpMixin
-from tinygrad.mixin.movement import _align_left
 from tinygrad.uop.ops import smax, smin, resolve, UOp, Ops, sint, identity_element, all_metadata, _index_to_concrete_int, sint_to_uop, Variable
+from tinygrad.uop.ops import _broadcast_shape
 from tinygrad.engine.schedule import ExecItem, complete_create_schedule_with_vars
 from tinygrad.device import Buffer
 from tinygrad.engine.realize import run_schedule
@@ -82,9 +82,6 @@ def _apply_winograd_matrix(mat, t:Tensor, dims:int) -> Tensor:
   ret = sum(prod(col[idx] for col, idx in zip(matcols, mat_is)) * t_[mat_is] for mat_is in itertools.product(range(len(mat[0])), repeat=dims))
   assert isinstance(ret, Tensor), "sum didn't return a Tensor"
   return ret
-
-def _broadcast_shape(*shapes:tuple[sint, ...]) -> tuple[sint, ...]:
-  return tuple(0 if 0 in nth_dim_sizes else smax(nth_dim_sizes) for nth_dim_sizes in zip(*_align_left(*shapes)))
 
 def _masked_setitem(target:Tensor, values:Tensor, mask:Tensor, axes:tuple[int, ...]) -> Tensor:
   # reduce such that if mask contains repeated indices the last one remains
@@ -2949,27 +2946,11 @@ class Tensor(OpMixin):
 
   # ***** broadcasted elementwise ops *****
 
-  def _broadcasted(self, y:Tensor|ConstType|UOp, reverse:bool=False, match_dtype:bool=True, backward_cast:bool=True) -> tuple[Tensor, Tensor]:
-    x: Tensor = self
-    if not isinstance(y, Tensor):
-      # make y a Tensor
-      assert isinstance(y, (*get_args(ConstType), UOp)), f"{type(y)=}, {y=}"
-      y_dtype = x.dtype if dtypes.is_float(x.dtype) or (dtypes.is_int(x.dtype) and isinstance(y, (int, InvalidType))) else None
-      y = Tensor(y, x.device, y_dtype, requires_grad=False)
-
-    if match_dtype and x.dtype != y.dtype:
-      output_dtype = least_upper_dtype(x.dtype, y.dtype)
-      x, y = x.cast(output_dtype), y.cast(output_dtype)
-
-    if reverse: x, y = y, x
-
-    # compute the output shape
-    out_shape = _broadcast_shape(x.shape, y.shape)
-
-    # broadcast
-    # NOTE: the backward cast is no-op in forward and uses sum_acc_dtype in the backward sum
-    return x.cast(sum_acc_dtype(x.dtype) if backward_cast else x.dtype)._broadcast_to(out_shape).cast(x.dtype), \
-           y.cast(sum_acc_dtype(y.dtype) if backward_cast else y.dtype)._broadcast_to(out_shape).cast(y.dtype)
+  def ufix(self, x) -> Tensor:
+    # TODO: x:ConstType|UOp does not work because mixin only accepts Self | ConstType
+    assert isinstance(x, (*get_args(ConstType), UOp)), f"{type(x)=}, {x=}"
+    dtype = self.dtype if dtypes.is_float(self.dtype) or (dtypes.is_int(self.dtype) and isinstance(x, (int, InvalidType))) else None
+    return Tensor(x, self.device, dtype, requires_grad=False)
 
   def sub(self, x:Tensor|ConstType, reverse=False) -> Tensor:
     """
@@ -3120,9 +3101,9 @@ class Tensor(OpMixin):
     """
     if isinstance(x, Tensor): x, y = x._broadcasted(y)
     elif isinstance(y, Tensor): y, x = y._broadcasted(x)
-    cond, x = self._broadcasted(x, match_dtype=False)
-    cond, y = cond._broadcasted(y, match_dtype=False)
-    return cond.cast(dtypes.bool)._apply_uop(UOp.where, *x._broadcasted(y))
+    else: x, y = Tensor(x, self.device, requires_grad=False)._broadcasted(y)
+    out_shape = _broadcast_shape(self.shape, x.shape)
+    return self.cast(dtypes.bool)._broadcast_to(out_shape)._apply_uop(UOp.where, x._broadcast_to(out_shape), y._broadcast_to(out_shape))
 
   def copysign(self, other) -> Tensor:
     """

@@ -16,7 +16,7 @@ def exec_rewrite(sink:UOp, pm_lst:list[PatternMatcher], names:None|list[str]=Non
   return sink
 
 # real VIZ=1 loads the trace from a file, we just keep it in memory for tests
-from tinygrad.uop.ops import tracked_keys, tracked_ctxs, uop_fields, active_rewrites, _name_cnt, RewriteTrace
+from tinygrad.uop.ops import tracked_keys, tracked_ctxs, uop_fields, active_rewrites, active_group, _name_cnt, RewriteTrace
 from tinygrad.viz import serve
 serve.trace = RewriteTrace(tracked_keys, tracked_ctxs, uop_fields)
 from tinygrad.viz.serve import get_rewrites, get_full_rewrite, uop_to_json
@@ -29,7 +29,7 @@ def get_viz_details(rewrite_idx:int, step:int) -> Generator[dict, None, None]:
 class BaseTestViz(unittest.TestCase):
   def setUp(self):
     # clear the global context
-    for lst in [tracked_keys, tracked_ctxs, active_rewrites, _name_cnt]: lst.clear()
+    for lst in [tracked_keys, tracked_ctxs, active_rewrites, active_group, _name_cnt]: lst.clear()
     Buffer.profile_events.clear()
     cpu_events.clear()
     self.tms = TRACK_MATCH_STATS.value
@@ -120,6 +120,26 @@ class TestViz(BaseTestViz):
     lst = get_viz_list()
     # NOTE: names from TracingKey do not get deduped
     self.assertEqual(lst[0]["name"], "custom_name")
+
+  def test_nested_track_rewrites(self):
+    @track_rewrites(name=lambda x,ret: TracingKey(f"inner fxn for {x.render()}", (ret,)))
+    def inner(x:UOp): return graph_rewrite(x, PatternMatcher([]), name="each")
+    @track_rewrites(name=lambda *args,ret: f"outer rewrite of {len(args)} inputs")
+    def outer(*xs:tuple[UOp, ...]): return graph_rewrite(UOp.sink(*[inner(x) for x in xs]), PatternMatcher([]), name="all")
+    items = ["a", "b", "c"]
+    outer(*[UOp.variable(x, 1, 10) for x in items])
+    lst = get_viz_list()
+    # inner calls fall outside the outer call
+    self.assertEqual(len(lst), len(items)+1)
+    self.assertEqual(lst[0]["name"], f"outer rewrite of {len(items)} inputs n1")
+    steps = lst[0]["steps"]
+    self.assertEqual(len(steps), 1)
+    self.assertEqual(steps[0]["name"], "all")
+    for i in range(len(items)):
+      self.assertEqual(lst[i+1]["name"], f"inner fxn for {items[i]}")
+      steps = lst[i+1]["steps"]
+      self.assertEqual(len(steps), 1)
+      self.assertEqual(steps[0]["name"], "each")
 
   def test_profile_matches(self):
     @profile_matches
