@@ -1,5 +1,6 @@
 from __future__ import annotations
-import sys, argparse, typing, re, unicodedata, json, uuid, time, functools, itertools
+import sys, argparse, typing, types, re, unicodedata, json, uuid, time, functools, itertools
+from dataclasses import dataclass, replace as dc_replace
 from tinygrad import Tensor, nn, UOp, TinyJit, getenv, function
 from tinygrad.uop.ops import resolve
 from tinygrad.helpers import partition, DEBUG, Timing, GlobalCounters, stderr_log, colored, Context
@@ -91,29 +92,48 @@ def pairwise_topk(x: Tensor, k: int) -> tuple[Tensor, Tensor]:
   sel = (x*0).scatter(-1, cmp.sum(axis=-1).cast('int32'), x*0+Tensor.arange(n).reshape(1,1,n).cast(x.dtype))[:,:,n-k:].cast('int32')
   return x.gather(-1, sel), sel
 
+@dataclass(frozen=True)
+class TransformerConfig:
+  num_blocks: int
+  dim: int
+  hidden_dim: int
+  n_heads: int
+  n_kv_heads: int
+  norm_eps: float
+  vocab_size: int
+  head_dim: int
+  rope_theta: float
+  max_context: int = 0
+  rope_dim: int = 0
+  qk_norm: int = 0
+  num_experts: int = 0
+  num_experts_per_tok: int = 0
+  norm_topk_prob: bool = False
+  shared_expert_dim: int = 0
+  full_attention_interval: int = 0
+  ssm: dict|None = None
+
 class FFNBlock:
-  def __init__(self, dim:int, hidden_dim:int, norm_eps:float, num_experts:int=0, num_experts_per_tok:int=0,
-               norm_topk_prob:bool=False, shared_expert_dim:int=0):
+  def __init__(self, config:TransformerConfig):
+    self.config = config
     # --- RMSNorms --------------------------------------------------------
-    self.attn_norm   = nn.RMSNorm(dim, norm_eps)
-    self.ffn_norm    = nn.RMSNorm(dim, norm_eps)
+    self.attn_norm   = nn.RMSNorm(config.dim, config.norm_eps)
+    self.ffn_norm    = nn.RMSNorm(config.dim, config.norm_eps)
     # --- feed-forward (MoE or dense) -------------------------------------
-    if num_experts > 0:
-      self.norm_topk_prob = norm_topk_prob
-      self.num_experts_per_tok = num_experts_per_tok
-      self.ffn_gate_inp = nn.Linear(dim, num_experts, bias=False)  # router
-      self.ffn_gate_exps = ExpertWeights(num_experts, dim, hidden_dim)
-      self.ffn_up_exps = ExpertWeights(num_experts, dim, hidden_dim)
-      self.ffn_down_exps = ExpertWeights(num_experts, hidden_dim, dim)
-      if shared_expert_dim > 0:
-        self.ffn_gate_shexp = nn.Linear(dim, shared_expert_dim, bias=False)
-        self.ffn_up_shexp = nn.Linear(dim, shared_expert_dim, bias=False)
-        self.ffn_down_shexp = nn.Linear(shared_expert_dim, dim, bias=False)
-        self.ffn_gate_inp_shexp_weight = Tensor.zeros(dim)
+    if config.num_experts > 0:
+      self.ffn_gate_inp = nn.Linear(config.dim, config.num_experts, bias=False)  # router
+      self.ffn_gate_exps = ExpertWeights(config.num_experts, config.dim, config.hidden_dim)
+      self.ffn_up_exps = ExpertWeights(config.num_experts, config.dim, config.hidden_dim)
+      self.ffn_down_exps = ExpertWeights(config.num_experts, config.hidden_dim, config.dim)
+      if config.shared_expert_dim > 0:
+        self.ffn_gate_shexp = nn.Linear(config.dim, config.shared_expert_dim, bias=False)
+        self.ffn_up_shexp = nn.Linear(config.dim, config.shared_expert_dim, bias=False)
+        self.ffn_down_shexp = nn.Linear(config.shared_expert_dim, config.dim, bias=False)
+        self.ffn_gate_inp_shexp = types.SimpleNamespace(weight=Tensor.zeros(config.dim))
     else:
-      self.ffn_gate    = nn.Linear(dim, hidden_dim, bias=False)
-      self.ffn_up      = nn.Linear(dim, hidden_dim, bias=False)
-      self.ffn_down    = nn.Linear(hidden_dim, dim, bias=False)
+      self.ffn_gate    = nn.Linear(config.dim, config.hidden_dim, bias=False)
+      self.ffn_up      = nn.Linear(config.dim, config.hidden_dim, bias=False)
+      self.ffn_down    = nn.Linear(config.hidden_dim, config.dim, bias=False)
 
   @function
   def _feed_forward(self, h: Tensor) -> Tensor:
@@ -123,12 +143,12 @@ class FFNBlock:
       return h + self.ffn_down(self.ffn_gate(h_norm).silu().contiguous() * self.ffn_up(h_norm))
     x = h_norm.unsqueeze(2)  # (B, T, 1, D) - add expert dim for broadcasting
     logits = self.ffn_gate_inp(h_norm)
-    vals, sel = pairwise_topk(logits, self.num_experts_per_tok)
-    probs = vals.softmax(-1) if self.norm_topk_prob else logits.softmax(-1).gather(-1, sel)
+    vals, sel = pairwise_topk(logits, self.config.num_experts_per_tok)
+    probs = vals.softmax(-1) if self.config.norm_topk_prob else logits.softmax(-1).gather(-1, sel)
     x_down = self.ffn_down_exps(sel, self.ffn_gate_exps(sel, x).silu() * self.ffn_up_exps(sel, x))  # (B, T, k, D)
     out = (x_down * probs.unsqueeze(-1)).sum(axis=2)  # (B, T, D)
     if hasattr(self, 'ffn_gate_shexp'):
-      shared_gate = (h_norm * self.ffn_gate_inp_shexp_weight).sum(axis=-1, keepdim=True).sigmoid()
+      shared_gate = (h_norm * self.ffn_gate_inp_shexp.weight).sum(axis=-1, keepdim=True).sigmoid()
       out = out + self.ffn_down_shexp(self.ffn_gate_shexp(h_norm).silu().contiguous() * self.ffn_up_shexp(h_norm)) * shared_gate
     return h + out
 
@@ -143,45 +163,37 @@ class FFNBlock:
     return _run(x, start_pos)
 
 class TransformerBlock(FFNBlock):
-  def __init__(self, dim:int, hidden_dim:int, n_heads:int, n_kv_heads:int, norm_eps:float, head_dim:int, rope_theta:float, rope_dim:int=0,
-               max_context:int=0, qk_norm:int=0, num_experts:int=0, num_experts_per_tok:int=0, norm_topk_prob:bool=False, shared_expert_dim:int=0,
-               has_gate:bool=False):
-    super().__init__(dim, hidden_dim, norm_eps, num_experts, num_experts_per_tok, norm_topk_prob, shared_expert_dim)
-    self.n_heads      = n_heads
-    self.n_kv_heads   = n_kv_heads
-    self.head_dim     = head_dim
-    self.rope_theta   = rope_theta
-    self.rope_dim     = rope_dim or head_dim
-    self.max_context  = max_context
-    self.qk_norm      = qk_norm
-    self.has_gate     = has_gate
-
+  def __init__(self, config:TransformerConfig):
+    super().__init__(config)
+    self.has_gate = config.ssm is not None
     # --- attention projections (all linear, bias-free) ------------------
-    q_proj_out       = self.head_dim * n_heads * (2 if has_gate else 1)
-    kv_proj_out      = self.head_dim * n_kv_heads
-    self.attn_q      = nn.Linear(dim, q_proj_out,  bias=False)
-    self.attn_k      = nn.Linear(dim, kv_proj_out, bias=False)
-    self.attn_v      = nn.Linear(dim, kv_proj_out, bias=False)
-    self.attn_output = nn.Linear(self.head_dim * n_heads, dim, bias=False)
-    if qk_norm: self.attn_q_norm, self.attn_k_norm = nn.RMSNorm(qk_norm, norm_eps), nn.RMSNorm(qk_norm, norm_eps)
+    q_proj_out       = config.head_dim * config.n_heads * (2 if self.has_gate else 1)
+    kv_proj_out      = config.head_dim * config.n_kv_heads
+    self.attn_q      = nn.Linear(config.dim, q_proj_out,  bias=False)
+    self.attn_k      = nn.Linear(config.dim, kv_proj_out, bias=False)
+    self.attn_v      = nn.Linear(config.dim, kv_proj_out, bias=False)
+    self.attn_output = nn.Linear(config.head_dim * config.n_heads, config.dim, bias=False)
+    if config.qk_norm: self.attn_q_norm, self.attn_k_norm = nn.RMSNorm(config.qk_norm, config.norm_eps), nn.RMSNorm(config.qk_norm, config.norm_eps)
 
   @function
   def _attention(self, x:Tensor, start_pos:int|UOp) -> Tensor:
+    config = self.config
     x_norm = self.attn_norm(x)                       # (B,T,D)
     q, k, v = self.attn_q(x_norm), self.attn_k(x_norm), self.attn_v(x_norm)
-    if self.qk_norm and self.qk_norm != self.head_dim: q, k = self.attn_q_norm(q), self.attn_k_norm(k)
+    if config.qk_norm and config.qk_norm != config.head_dim: q, k = self.attn_q_norm(q), self.attn_k_norm(k)
 
     B, T, _ = x.shape
     if self.has_gate:
-      qg = q.reshape(B, T, self.n_heads, 2, self.head_dim)
-      q, gate = qg[:, :, :, 0, :], qg[:, :, :, 1, :].reshape(B, T, self.n_heads * self.head_dim)
-    q = q.reshape(B, T, self.n_heads,    self.head_dim).transpose(1, 2)  # (B,H,T,Hd)
-    k = k.reshape(B, T, self.n_kv_heads, self.head_dim).transpose(1, 2)  # (B,KvH,T,Hd)
-    v = v.reshape(B, T, self.n_kv_heads, self.head_dim).transpose(1, 2)  # (B,KvH,T,Hd)
-    if self.qk_norm == self.head_dim: q, k = self.attn_q_norm(q), self.attn_k_norm(k)
+      qg = q.reshape(B, T, config.n_heads, 2, config.head_dim)
+      q, gate = qg[:, :, :, 0, :], qg[:, :, :, 1, :].reshape(B, T, config.n_heads * config.head_dim)
+    q = q.reshape(B, T, config.n_heads,    config.head_dim).transpose(1, 2)  # (B,H,T,Hd)
+    k = k.reshape(B, T, config.n_kv_heads, config.head_dim).transpose(1, 2)  # (B,KvH,T,Hd)
+    v = v.reshape(B, T, config.n_kv_heads, config.head_dim).transpose(1, 2)  # (B,KvH,T,Hd)
+    if config.qk_norm == config.head_dim: q, k = self.attn_q_norm(q), self.attn_k_norm(k)
 
-    q = apply_rope(q, self.freqs_cis[start_pos:start_pos+T], self.rope_dim)
-    k = apply_rope(k, self.freqs_cis[start_pos:start_pos+T], self.rope_dim)
+    rope_dim = config.rope_dim or config.head_dim
+    q = apply_rope(q, self.freqs_cis[start_pos:start_pos+T], rope_dim)
+    k = apply_rope(k, self.freqs_cis[start_pos:start_pos+T], rope_dim)
 
     # NOTE: we don't want to change self.cache_kv, the function API doesn't support this well
     assigned_kv = Tensor(self.cache_kv.uop.after(self.cache_kv[:, :, :, start_pos:start_pos+T, :].uop.store(Tensor.stack(k, v).uop)))
@@ -202,22 +214,23 @@ class TransformerBlock(FFNBlock):
 
   def _init_state(self, x):
     if not hasattr(self, "cache_kv"):
-      # TODO: how is the dtype of this determined?
-      self.cache_kv = Tensor.empty(2, x.shape[0], self.n_kv_heads, self.max_context, self.head_dim, device=x.device)
-      self.freqs_cis = precompute_freqs_cis(self.rope_dim, self.max_context, self.rope_theta)
+      rope_dim = self.config.rope_dim or self.config.head_dim
+      self.cache_kv = Tensor.empty(2, x.shape[0], self.config.n_kv_heads, self.config.max_context, self.config.head_dim, device=x.device)
+      self.freqs_cis = precompute_freqs_cis(rope_dim, self.config.max_context, self.config.rope_theta)
 
 class GatedDeltaNetBlock(FFNBlock):
-  def __init__(self, dim:int, hidden_dim:int, norm_eps:float, inner_size:int, time_step_rank:int, group_count:int, state_size:int, conv_kernel:int,
-               num_experts:int=0, num_experts_per_tok:int=0, shared_expert_dim:int=0):
-    super().__init__(dim, hidden_dim, norm_eps, num_experts, num_experts_per_tok, norm_topk_prob=True, shared_expert_dim=shared_expert_dim)
-    self.head_k_dim, self.num_k_heads, self.num_v_heads = state_size, group_count, time_step_rank
-    self.head_v_dim, self.ssm_conv_kernel = inner_size // time_step_rank, conv_kernel
-    self.conv_channels, self.q_dim = inner_size + 2*group_count*state_size, state_size*group_count
-    self.attn_qkv, self.attn_gate = nn.Linear(dim, self.conv_channels, bias=False), nn.Linear(dim, inner_size, bias=False)
-    self.ssm_alpha, self.ssm_beta = nn.Linear(dim, self.num_v_heads, bias=False), nn.Linear(dim, self.num_v_heads, bias=False)
-    self.ssm_conv1d = Tensor.zeros(self.conv_channels, self.ssm_conv_kernel)
-    self.ssm_dt_bias, self.ssm_a = Tensor.zeros(self.num_v_heads), Tensor.zeros(self.num_v_heads)
-    self.ssm_norm, self.ssm_out = nn.RMSNorm(self.head_v_dim, norm_eps), nn.Linear(inner_size, dim, bias=False)
+  def __init__(self, config:TransformerConfig):
+    super().__init__(config)
+    assert (ssm := config.ssm) is not None
+    self.head_k_dim, self.num_k_heads, self.num_v_heads = ssm['state_size'], ssm['group_count'], ssm['time_step_rank']
+    self.head_v_dim, self.ssm_conv_kernel = ssm['inner_size'] // ssm['time_step_rank'], ssm['conv_kernel']
+    self.conv_channels, self.q_dim = ssm['inner_size'] + 2*ssm['group_count']*ssm['state_size'], ssm['state_size']*ssm['group_count']
+    self.attn_qkv, self.attn_gate = nn.Linear(config.dim, self.conv_channels, bias=False), nn.Linear(config.dim, ssm['inner_size'], bias=False)
+    self.ssm_alpha, self.ssm_beta = nn.Linear(config.dim, self.num_v_heads, bias=False), nn.Linear(config.dim, self.num_v_heads, bias=False)
+    self.ssm_conv1d = types.SimpleNamespace(weight=Tensor.zeros(self.conv_channels, self.ssm_conv_kernel))
+    self.ssm_dt = types.SimpleNamespace(bias=Tensor.zeros(self.num_v_heads))
+    self.ssm_a = Tensor.zeros(self.num_v_heads)
+    self.ssm_norm, self.ssm_out = nn.RMSNorm(self.head_v_dim, config.norm_eps), nn.Linear(ssm['inner_size'], config.dim, bias=False)
 
   @function
   def _attention(self, x:Tensor, start_pos:int|UOp) -> Tensor:
@@ -225,13 +238,13 @@ class GatedDeltaNetBlock(FFNBlock):
     x_norm = self.attn_norm(x).half()
     out_gate = self.attn_gate(x_norm).reshape(B, 1, self.num_v_heads, self.head_v_dim)
     beta = self.ssm_beta(x_norm).sigmoid().reshape(B, self.num_v_heads, 1, 1)
-    alpha = ((self.ssm_alpha(x_norm).float() + self.ssm_dt_bias).softplus() * self.ssm_a).reshape(B, self.num_v_heads, 1, 1).exp()
+    alpha = ((self.ssm_alpha(x_norm).float() + self.ssm_dt.bias).softplus() * self.ssm_a).reshape(B, self.num_v_heads, 1, 1).exp()
     conv_flat = (self.ssm_conv_kernel - 1) * self.conv_channels
     ssm_flat = self.num_v_heads * self.head_v_dim * self.head_v_dim
     conv_state = self.delta_cache[:, :conv_flat].reshape(B, self.ssm_conv_kernel - 1, self.conv_channels)
     recurrent_state = self.delta_cache[:, conv_flat:conv_flat + ssm_flat].reshape(B, self.num_v_heads, self.head_v_dim, self.head_v_dim)
     conv_window = conv_state.cat(self.attn_qkv(x_norm), dim=1)
-    conv_out = (conv_window * self.ssm_conv1d.T.unsqueeze(0)).sum(1).silu()
+    conv_out = (conv_window * self.ssm_conv1d.weight.T.unsqueeze(0)).sum(1).silu()
     q, k, v = conv_out.split([self.q_dim, self.q_dim, self.conv_channels - 2*self.q_dim], dim=-1)
     q, k = q.reshape(B, self.num_k_heads, self.head_k_dim).normalize(dim=-1), k.reshape(B, self.num_k_heads, self.head_k_dim).normalize(dim=-1)
     v = v.reshape(B, self.num_v_heads, self.head_v_dim)
@@ -259,20 +272,15 @@ class GatedDeltaNetBlock(FFNBlock):
     if hasattr(self, 'delta_cache'): self.delta_cache.assign(Tensor.zeros_like(self.delta_cache)).realize()
 
 class Transformer:
-  def __init__(self, *, num_blocks, dim, hidden_dim, n_heads, n_kv_heads, norm_eps, vocab_size, head_dim:int, rope_theta:float, rope_dim:int=0,
-               max_context:int=0, qk_norm:int=0, num_experts:int=0, num_experts_per_tok:int=0, norm_topk_prob:bool=False,
-               shared_expert_dim:int=0, full_attention_interval:int=0, ssm:dict|None=None):
-    self.blk = [GatedDeltaNetBlock(dim, hidden_dim, norm_eps, **ssm, num_experts=num_experts, num_experts_per_tok=num_experts_per_tok,
-                              shared_expert_dim=shared_expert_dim) if ssm and (i+1) % full_attention_interval != 0 else
-                TransformerBlock(dim, hidden_dim, n_heads, n_kv_heads, norm_eps, head_dim, rope_theta, rope_dim, max_context,
-                                 head_dim if ssm else qk_norm, num_experts=num_experts, num_experts_per_tok=num_experts_per_tok,
-                                 norm_topk_prob=norm_topk_prob, shared_expert_dim=shared_expert_dim, has_gate=ssm is not None)
-                                 for i in range(num_blocks)]
-    self.token_embd  = nn.Embedding(vocab_size, dim)
-    self.output_norm = nn.RMSNorm(dim, norm_eps)
-    self.output = nn.Linear(dim, vocab_size, bias=False)
-    self.max_context = max_context
-    self.has_ssm = ssm is not None
+  def __init__(self, config:TransformerConfig):
+    attn_config = config if not config.ssm else dc_replace(config, qk_norm=config.head_dim)
+    self.blk = [GatedDeltaNetBlock(config) if config.ssm and (i+1) % config.full_attention_interval != 0 else
+                TransformerBlock(attn_config) for i in range(config.num_blocks)]
+    self.token_embd  = nn.Embedding(config.vocab_size, config.dim)
+    self.output_norm = nn.RMSNorm(config.dim, config.norm_eps)
+    self.output = nn.Linear(config.dim, config.vocab_size, bias=False)
+    self.max_context = config.max_context
+    self.has_ssm = config.ssm is not None
     self._cached_tokens: list[int] = []
     # we specialize the JIT for prefill and rollout
     self.prefill_jit = TinyJit(self.forward)
@@ -312,20 +320,20 @@ class Transformer:
     ssm = None
     if arch in ('qwen35', 'qwen35moe'):
       ssm = {k: kv[f'{arch}.ssm.{k}'] for k in ('conv_kernel','state_size','group_count','time_step_rank','inner_size')}
-      renames = {'ssm_dt.bias':'ssm_dt_bias', 'post_attention_norm':'ffn_norm', 'ffn_gate_inp_shexp.weight':'ffn_gate_inp_shexp_weight',
-                 'ssm_conv1d.weight':'ssm_conv1d'}
-      state_dict = {functools.reduce(lambda k,r: k.replace(*r), renames.items(), k):v for k,v in state_dict.items()}
-    model = Transformer(num_blocks=kv[f'{arch}.block_count'], dim=kv[f'{arch}.embedding_length'],
-                        hidden_dim=kv.get(f'{arch}.expert_feed_forward_length', kv.get(f'{arch}.feed_forward_length', 0)),
-                        n_heads=n_heads, n_kv_heads=n_kv_heads, norm_eps=kv[f'{arch}.attention.layer_norm_rms_epsilon'],
-                        vocab_size=len(kv['tokenizer.ggml.tokens']),
-                        head_dim=kv.get(f'{arch}.attention.key_length', kv[f'{arch}.embedding_length'] // n_heads),
-                        rope_theta=kv[f'{arch}.rope.freq_base'], rope_dim=kv.get(f'{arch}.rope.dimension_count', 0), max_context=max_context,
-                        qk_norm=int(state_dict['blk.0.attn_q_norm.weight'].shape[0]) if 'blk.0.attn_q_norm.weight' in state_dict else 0,
-                        num_experts=kv.get(f'{arch}.expert_count', 0), num_experts_per_tok=kv.get(f'{arch}.expert_used_count', 0),
-                        norm_topk_prob=arch in ('qwen3moe', 'qwen35moe'),
-                        shared_expert_dim=kv.get(f'{arch}.expert_shared_feed_forward_length', 0), ssm=ssm,
-                        full_attention_interval=kv.get(f'{arch}.full_attention_interval', 0))
+      state_dict = {k.replace('post_attention_norm', 'ffn_norm'):v for k,v in state_dict.items()}
+    config = TransformerConfig(
+      num_blocks=kv[f'{arch}.block_count'], dim=kv[f'{arch}.embedding_length'],
+      hidden_dim=kv.get(f'{arch}.expert_feed_forward_length', kv.get(f'{arch}.feed_forward_length', 0)),
+      n_heads=n_heads, n_kv_heads=n_kv_heads, norm_eps=kv[f'{arch}.attention.layer_norm_rms_epsilon'],
+      vocab_size=len(kv['tokenizer.ggml.tokens']),
+      head_dim=kv.get(f'{arch}.attention.key_length', kv[f'{arch}.embedding_length'] // n_heads),
+      rope_theta=kv[f'{arch}.rope.freq_base'], rope_dim=kv.get(f'{arch}.rope.dimension_count', 0), max_context=max_context,
+      qk_norm=int(state_dict['blk.0.attn_q_norm.weight'].shape[0]) if 'blk.0.attn_q_norm.weight' in state_dict else 0,
+      num_experts=kv.get(f'{arch}.expert_count', 0), num_experts_per_tok=kv.get(f'{arch}.expert_used_count', 0),
+      norm_topk_prob=arch in ('qwen3moe', 'qwen35moe'),
+      shared_expert_dim=kv.get(f'{arch}.expert_shared_feed_forward_length', 0), ssm=ssm,
+      full_attention_interval=kv.get(f'{arch}.full_attention_interval', 0))
+    model = Transformer(config)
     nn.state.load_state_dict(model, state_dict, verbose=False, consume=True, realize=False)  # NOTE: rope_freqs.weight (32,) is unused
     # NOTE: without this contiguous, it unpacks the weights from the model every time. we shouldn't need this, but for now it's faster
     if realize:
