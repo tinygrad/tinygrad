@@ -18,6 +18,7 @@ from tinygrad.uop.ops import Ops, UOp
 from extra.models.llama import apply_rotary_emb, precompute_freqs_cis
 
 FP8 = getenv("FP8", 0)
+WQKV = getenv("WQKV", 0)
 
 FP8_DTYPE = dtypes.fp8e4m3
 FP8_MAX = 448.0
@@ -49,13 +50,20 @@ class FlatTransformer:
     self.head_dim = dim // n_heads
     self.n_rep = self.n_heads // self.n_kv_heads
 
+    scaled_std = 0.02 / math.sqrt(2 * n_layers)
+
     # Attention
-    self.wqkv = self.lin_per_layer(dim, self.n_heads * self.head_dim + self.n_kv_heads * self.head_dim * 2)
-    self.wo = self.lin_per_layer(self.n_heads * self.head_dim, dim)
+    if WQKV:
+      self.wqkv = self.lin_per_layer(dim, self.n_heads * self.head_dim + self.n_kv_heads * self.head_dim * 2)
+    else:
+      self.wq = self.lin_per_layer(dim, self.n_heads * self.head_dim)
+      self.wk = self.lin_per_layer(dim, self.n_kv_heads * self.head_dim)
+      self.wv = self.lin_per_layer(dim, self.n_kv_heads * self.head_dim)
+    self.wo = self.lin_per_layer(self.n_heads * self.head_dim, dim, std=scaled_std)
 
     # FeedForward
     self.w1 = self.lin_per_layer(dim, hidden_dim)
-    self.w2 = self.lin_per_layer(hidden_dim, dim)
+    self.w2 = self.lin_per_layer(hidden_dim, dim, std=scaled_std)
     self.w3 = self.lin_per_layer(dim, hidden_dim)
 
     self.norm_eps = norm_eps
@@ -65,25 +73,31 @@ class FlatTransformer:
     # output
     self.norm = nn.RMSNorm(dim, norm_eps)
     self.tok_embeddings = nn.Embedding(vocab_size, dim)
-    self.output = nn.Linear(dim, vocab_size, bias=False)
+    self.tok_embeddings.weight = Tensor.normal(vocab_size, dim, mean=0.0, std=0.02)
+    self.output = Tensor.normal(1, vocab_size, dim, mean=0.0, std=0.02)
     self.freqs_cis = precompute_freqs_cis(dim // n_heads, max_context * 2, rope_theta).contiguous().requires_grad_(False)
 
-  def lin_per_layer(self, in_features:int, out_features:int):
-    bound = 1 / math.sqrt(in_features)
+  def lin_per_layer(self, in_features:int, out_features:int, std:float=0.02):
     dt = FP8_DTYPE if FP8 else None
     if getenv("ZEROS"): return Tensor.zeros(self.n_layers, out_features, in_features, dtype=dt)
-    return Tensor.uniform(self.n_layers, out_features, in_features, low=-bound, high=bound, dtype=dt)
+    return Tensor.normal(self.n_layers, out_features, in_features, mean=0.0, std=std, dtype=dt)
 
-  def attention(self, x:Tensor, freqs_cis:Tensor, attention_norm:Tensor, wqkv:Tensor, wo:Tensor):
+  def attention(self, x:Tensor, freqs_cis:Tensor, attention_norm:Tensor, wo:Tensor, wqkv:Tensor|None=None,
+                wq:Tensor|None=None, wk:Tensor|None=None, wv:Tensor|None=None):
     x = rmsnorm(x, self.norm_eps) * attention_norm
-    xqkv = matmul(x, wqkv)
+    bsz, seqlen, _ = x.shape
 
-    bsz, seqlen, _ = xqkv.shape
-    # interleaved layout: each kv group has [n_rep q heads, 1 k head, 1 v head] for clean MP sharding
-    xqkv = xqkv.reshape(bsz, seqlen, self.n_kv_heads, self.n_rep + 2, self.head_dim)
-    xq = xqkv[:, :, :, :self.n_rep].reshape(bsz, seqlen, self.n_heads, self.head_dim)
-    xk = xqkv[:, :, :, self.n_rep].reshape(bsz, seqlen, self.n_kv_heads, self.head_dim)
-    xv = xqkv[:, :, :, self.n_rep+1].reshape(bsz, seqlen, self.n_kv_heads, self.head_dim)
+    if wqkv is not None:
+      xqkv = matmul(x, wqkv)
+      xqkv = xqkv.reshape(bsz, seqlen, self.n_kv_heads, self.n_rep + 2, self.head_dim)
+      xq = xqkv[:, :, :, :self.n_rep].reshape(bsz, seqlen, self.n_heads, self.head_dim)
+      xk = xqkv[:, :, :, self.n_rep].reshape(bsz, seqlen, self.n_kv_heads, self.head_dim)
+      xv = xqkv[:, :, :, self.n_rep+1].reshape(bsz, seqlen, self.n_kv_heads, self.head_dim)
+    else:
+      assert wq is not None and wk is not None and wv is not None
+      xq = matmul(x, wq).reshape(bsz, seqlen, self.n_heads, self.head_dim)
+      xk = matmul(x, wk).reshape(bsz, seqlen, self.n_kv_heads, self.head_dim)
+      xv = matmul(x, wv).reshape(bsz, seqlen, self.n_kv_heads, self.head_dim)
 
     xq, xk = apply_rotary_emb(xq, xk, freqs_cis)
     xq, xk, xv = xq.transpose(1, 2), xk.transpose(1, 2), xv.transpose(1, 2)
@@ -99,9 +113,10 @@ class FlatTransformer:
 
   @function(precompile=True, precompile_backward=True)
   def run_layer(self, x:Tensor, freqs_cis:Tensor,
-                attention_norm:Tensor, wqkv:Tensor, wo:Tensor,
-                ffn_norm:Tensor, w1:Tensor, w2:Tensor, w3:Tensor):
-    h = x + self.attention(x, freqs_cis, attention_norm, wqkv, wo)
+                attention_norm:Tensor, wo:Tensor,
+                ffn_norm:Tensor, w1:Tensor, w2:Tensor, w3:Tensor,
+                wqkv:Tensor|None=None, wq:Tensor|None=None, wk:Tensor|None=None, wv:Tensor|None=None):
+    h = x + self.attention(x, freqs_cis, attention_norm, wo, wqkv=wqkv, wq=wq, wk=wk, wv=wv)
     return h + self.feed_forward(h, ffn_norm, w1, w2, w3)
 
   def shard(self, device:tuple[str, ...], mp:bool=False):
@@ -110,7 +125,12 @@ class FlatTransformer:
       for v in get_parameters(self): v.shard_(device, axis=None)
     else:
       # flat per-layer weights: axis 0 is n_layers, so shard axes are +1 vs per-layer Transformer
-      self.wqkv.shard_(device, axis=1).realize()          # (n_layers, out, dim) shard out
+      if WQKV:
+        self.wqkv.shard_(device, axis=1).realize()          # (n_layers, out, dim) shard out
+      else:
+        self.wq.shard_(device, axis=1).realize()            # (n_layers, n_heads*head_dim, dim) shard out
+        self.wk.shard_(device, axis=1).realize()            # (n_layers, n_kv_heads*head_dim, dim) shard out
+        self.wv.shard_(device, axis=1).realize()            # (n_layers, n_kv_heads*head_dim, dim) shard out
       self.wo.shard_(device, axis=2).realize()             # (n_layers, dim, in) shard in
       self.w1.shard_(device, axis=1).realize()             # (n_layers, hidden, dim) shard out
       self.w2.shard_(device, axis=2).realize()             # (n_layers, dim, hidden) shard in
@@ -119,17 +139,18 @@ class FlatTransformer:
       self.ffn_norm.shard_(device, axis=None).realize()
       self.norm.weight.shard_(device, axis=None).realize()
       self.tok_embeddings.weight.shard_(device, axis=0).realize()
-      self.output.weight.shard_(device, axis=0).realize()
+      self.output.shard_(device, axis=1).realize()
       self.freqs_cis.shard_(device, axis=None).realize()
 
   def __call__(self, tokens:Tensor):
     h = self.tok_embeddings(tokens)
     freqs_cis = self.freqs_cis.cast(h.dtype)[:, :tokens.shape[1], :, :, :]
     for i in range(self.n_layers):
+      attn_kwargs = {"wqkv": self.wqkv[i]} if WQKV else {"wq": self.wq[i], "wk": self.wk[i], "wv": self.wv[i]}
       h = self.run_layer(h, freqs_cis,
-                         self.attention_norm[i], self.wqkv[i], self.wo[i],
-                         self.ffn_norm[i], self.w1[i], self.w2[i], self.w3[i])
-    logits = self.output(self.norm(h))
+                         self.attention_norm[i], self.wo[i],
+                         self.ffn_norm[i], self.w1[i], self.w2[i], self.w3[i], **attn_kwargs)
+    logits = self.norm(h) @ self.output[0].T
     return logits
 
 # TODO: this shouldn't be needed, but it prevents a copy of the grads. CAT can help

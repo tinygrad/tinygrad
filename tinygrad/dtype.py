@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import Final, ClassVar, Callable, Literal
 import math, struct, ctypes, functools
 from dataclasses import dataclass, fields
-from tinygrad.helpers import ceildiv, getenv, prod, round_up, next_power2, OSX
+from tinygrad.helpers import ceildiv, getenv, prod, OSX
 from enum import Enum, auto
 
 class ConstFloat(float):
@@ -125,24 +125,12 @@ class PtrDType(DType):
 @dataclass(frozen=True, eq=False)
 class ImageDType(PtrDType):
   shape: tuple[int, ...] = ()   # shape of the Image
-  _pitch: int = -1
   def ptr(self, size=-1, addrspace=AddrSpace.GLOBAL) -> PtrDType:
     assert addrspace == AddrSpace.GLOBAL, "images can't be local"
     return self
   def __repr__(self): return f"dtypes.{self.name}({self.shape})" + (f'.vec({self.v})' if self.v != 1 else '')
   @property
-  def pitch(self):
-    if self._pitch != -1: return self._pitch
-    imgw, imgh, itemsize_log = self.shape[1], self.shape[0], int(math.log2(self.itemsize))
-    if OSX: return round_up(imgw, 256) * 4 * self.itemsize
-    # needs to be IMAGE_PITCH_ALIGN=256 for AMD
-    min_pitchalign = int(math.log2(v)) if (v := getenv("IMAGE_PITCH_ALIGN", 0)) > 0 else 6
-    pitchalign = max(min_pitchalign, 11 - int(math.log2(imgh))) if imgh > 1 else min_pitchalign
-    align_up = max(1, (8 // itemsize_log + 1) - imgh // 32) if pitchalign == 6 else (2 ** (pitchalign - itemsize_log - 2))
-
-    granularity = 128 if self.itemsize == 4 else 256
-    pitch_add = (1 << pitchalign) if min(next_power2(imgw), round_up(imgw, granularity)) - align_up + 1 <= imgw and imgw > granularity//2 else 0
-    return round_up(imgw * 4 * self.itemsize, 1 << pitchalign) + pitch_add
+  def pitch(self): return self.shape[1] * 4 * self.itemsize
 
   # get list of (height, width) that do not require pitch padding
   @staticmethod
@@ -167,11 +155,12 @@ class dtypes:
   def is_bool(x: DType) -> bool: return x.scalar() == dtypes.bool
   @staticmethod
   def from_py(x) -> DType:
-    if x.__class__ is float: return dtypes.default_float
-    if x.__class__ is int: return dtypes.default_int
-    if x.__class__ is bool: return dtypes.bool
+    # NOTE: isinstance(True, int) is True, so bool must be checked before int
+    if isinstance(x, bool): return dtypes.bool
+    if isinstance(x, float): return dtypes.default_float
+    if isinstance(x, int): return dtypes.default_int
     # put this in the last is faster because there are more items than lists/tuples to check
-    if x.__class__ is list or x.__class__ is tuple: return max(dtypes.from_py(xi) for xi in x) if x else dtypes.default_float
+    if isinstance(x, (list, tuple)): return max(dtypes.from_py(xi) for xi in x) if x else dtypes.default_float
     raise RuntimeError(f"Could not infer dtype of {x} with type {type(x)}")
   @staticmethod
   def finfo(dtype:DType) -> tuple[int, int]:
@@ -209,9 +198,9 @@ class dtypes:
 
   # NOTE: these are image dtypes
   @staticmethod
-  def imageh(shp, pitch=-1): return ImageDType(100, 16, "imageh", 'e', 1, None, dtypes.float32, AddrSpace.GLOBAL, 1, prod(shp), shp, pitch)
+  def imageh(shp): return ImageDType(100, 16, "imageh", 'e', 1, None, dtypes.float32, AddrSpace.GLOBAL, 1, prod(shp), shp)
   @staticmethod
-  def imagef(shp, pitch=-1): return ImageDType(100, 32, "imagef", 'f', 1, None, dtypes.float32, AddrSpace.GLOBAL, 1, prod(shp), shp, pitch)
+  def imagef(shp): return ImageDType(100, 32, "imagef", 'f', 1, None, dtypes.float32, AddrSpace.GLOBAL, 1, prod(shp), shp)
 
   default_float: ClassVar[DType] = float32
   default_int: ClassVar[DType] = int32

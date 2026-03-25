@@ -713,10 +713,10 @@ async function renderProfiler(path, opts) {
     canvas.style.height = `${height}px`;
     canvas.style.width = `${width}px`;
     ctx.scale(dpr, dpr);
-    zoomLevel = getZoomIdentity();
     d3.select(canvas).call(canvasZoom.transform, zoomLevel);
   }
 
+  zoomLevel = getZoomIdentity();
   canvasZoom = d3.zoom().filter(vizZoomFilter).on("zoom", e => render(e.transform));
   d3.select(canvas).call(canvasZoom);
   document.addEventListener("contextmenu", e => e.ctrlKey && e.preventDefault());

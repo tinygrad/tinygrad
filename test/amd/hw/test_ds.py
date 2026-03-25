@@ -117,6 +117,58 @@ class TestDS2AddrMore(unittest.TestCase):
     self.assertEqual(st.vgpr[0][3], 0xBBBBBBBB)
     self.assertEqual(st.vgpr[0][4], 0xDEADBEEF, "v4 should be untouched")
 
+  def test_ds_load_2addr_b64_addr_overlaps_vdst(self):
+    """DS_LOAD_2ADDR_B64 where addr register overlaps vdst range.
+
+    Hardware reads the address before writing any results, so addr=v[4]
+    with vdst=v[4:7] must load all 4 dwords using the original v[4] value.
+    """
+    instructions = [
+      v_mov_b32_e32(v[10], 0),
+      s_mov_b32(s[2], 0xAAAAAAAA),
+      v_mov_b32_e32(v[0], s[2]),
+      ds_store_b32(addr=v[10], data0=v[0], offset0=0),
+      s_mov_b32(s[2], 0xBBBBBBBB),
+      v_mov_b32_e32(v[0], s[2]),
+      ds_store_b32(addr=v[10], data0=v[0], offset0=4),
+      s_mov_b32(s[2], 0xCCCCCCCC),
+      v_mov_b32_e32(v[0], s[2]),
+      ds_store_b32(addr=v[10], data0=v[0], offset0=8),
+      s_mov_b32(s[2], 0xDDDDDDDD),
+      v_mov_b32_e32(v[0], s[2]),
+      ds_store_b32(addr=v[10], data0=v[0], offset0=12),
+      s_waitcnt(lgkmcnt=0),
+      # addr=v[4] overlaps vdst=v[4:7]
+      v_mov_b32_e32(v[4], 0),
+      DS(DSOp.DS_LOAD_2ADDR_B64, addr=v[4], vdst=v[4:7], offset0=0, offset1=1),
+      s_waitcnt(lgkmcnt=0),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][4], 0xAAAAAAAA, "v4 = LDS[0:4]")
+    self.assertEqual(st.vgpr[0][5], 0xBBBBBBBB, "v5 = LDS[4:8]")
+    self.assertEqual(st.vgpr[0][6], 0xCCCCCCCC, "v6 = LDS[8:12]")
+    self.assertEqual(st.vgpr[0][7], 0xDDDDDDDD, "v7 = LDS[12:16]")
+
+  def test_ds_load_2addr_b32_addr_overlaps_vdst(self):
+    """DS_LOAD_2ADDR_B32 where addr register overlaps vdst range."""
+    instructions = [
+      v_mov_b32_e32(v[10], 0),
+      s_mov_b32(s[2], 0xAAAAAAAA),
+      v_mov_b32_e32(v[0], s[2]),
+      ds_store_b32(addr=v[10], data0=v[0], offset0=0),
+      s_mov_b32(s[2], 0xBBBBBBBB),
+      v_mov_b32_e32(v[0], s[2]),
+      ds_store_b32(addr=v[10], data0=v[0], offset0=4),
+      s_waitcnt(lgkmcnt=0),
+      # addr=v[2] overlaps vdst=v[2:3]
+      v_mov_b32_e32(v[2], 0),
+      DS(DSOp.DS_LOAD_2ADDR_B32, addr=v[2], vdst=v[2:3], offset0=0, offset1=1),
+      s_waitcnt(lgkmcnt=0),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][2], 0xAAAAAAAA, "v2 = LDS[0:4]")
+    self.assertEqual(st.vgpr[0][3], 0xBBBBBBBB, "v3 = LDS[4:8]")
+
   def test_ds_load_b64_no_overwrite(self):
     """DS_LOAD_B64 should only write 2 VGPRs."""
     instructions = [
@@ -758,6 +810,47 @@ class TestDsPermute(unittest.TestCase):
     st = run_program(instructions, n_lanes=4)
     # Lane 0 receives data (highest numbered active lane wins)
     self.assertEqual(st.vgpr[0][2], 0x11111111)
+
+  def test_ds_bpermute_b32_xor_swap(self):
+    """DS_BPERMUTE_B32 with XOR-1 pattern — each lane reads from lane^1.
+
+    This is the pattern used by warp_shfl_xor in flash attention for reduce_max/reduce_sum.
+    Each lane has a unique value (lane_id + 100), and reads from the adjacent lane.
+    """
+    instructions = [
+      # v[0] = (lane_id ^ 1) * 4  (byte offset for bpermute)
+      v_xor_b32_e32(v[0], 1, v[255]),
+      v_lshlrev_b32_e32(v[0], 2, v[0]),
+      # v[1] = lane_id + 100 (unique per-lane value)
+      s_mov_b32(s[0], 100),
+      v_add_nc_u32_e32(v[1], s[0], v[255]),
+      # ds_bpermute: v[2] = v[1] from lane (lane_id ^ 1)
+      ds_bpermute_b32(vdst=v[2], addr=v[0], data0=v[1]),
+      s_waitcnt(lgkmcnt=0),
+    ]
+    st = run_program(instructions, n_lanes=32)
+    for lane in range(32):
+      src_lane = lane ^ 1
+      expected = src_lane + 100
+      self.assertEqual(st.vgpr[lane][2], expected, f"lane {lane}: expected v[1] from lane {src_lane} = {expected}, got {st.vgpr[lane][2]}")
+
+
+class TestDSSubDword(unittest.TestCase):
+  """Tests for sub-dword DS operations (ds_store_b16, ds_store_b16_d16_hi)."""
+
+  def test_ds_store_b16_and_d16_hi(self):
+    """DS_STORE_B16 stores low 16 bits, DS_STORE_B16_D16_HI stores high 16 bits to adjacent LDS half-words."""
+    instructions = [
+      v_mov_b32_e32(v[0], 0),
+      v_mov_b32_e32(v[1], 0xBEEF1234),
+      DS(DSOp.DS_STORE_B16, addr=v[0], data0=v[1], offset0=0),
+      DS(DSOp.DS_STORE_B16_D16_HI, addr=v[0], data0=v[1], offset0=2),
+      s_waitcnt(lgkmcnt=0),
+      ds_load_b32(vdst=v[2], addr=v[0], offset0=0),
+      s_waitcnt(lgkmcnt=0),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][2], 0xBEEF1234, "lo=0x1234 at byte 0, hi=0xBEEF at byte 2")
 
 
 class TestDSLargeOffset(unittest.TestCase):

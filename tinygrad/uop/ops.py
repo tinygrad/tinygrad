@@ -45,6 +45,11 @@ def _suop(lst, uop_fxn, python_fxn):
 def smax(*lst) -> sint: return _suop(argfix(*lst), UOp.maximum, max)
 def smin(*lst) -> sint: return _suop(argfix(*lst), UOp.minimum, min)
 def srender(x:sint) -> str: return x.render() if isinstance(x, UOp) else str(x)
+def _align_left(*shapes:tuple[sint, ...]) -> tuple[tuple[sint, ...], ...]:
+  max_dim = max(len(s) for s in shapes)
+  return tuple((1,)*(max_dim-len(s))+s for s in shapes)
+def _broadcast_shape(*shapes:tuple[sint, ...]) -> tuple[sint, ...]:
+  return tuple(0 if 0 in nth_dim_sizes else smax(nth_dim_sizes) for nth_dim_sizes in zip(*_align_left(*shapes)))
 
 def ssimplify(uop:sint): return uop.ssimplify() if isinstance(uop, UOp) else uop
 def sym_infer(uop: UOp|int, var_vals: dict[str, int]) -> int: return uop.sym_infer(var_vals) if isinstance(uop, UOp) else uop
@@ -435,8 +440,10 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
       bounds = tuple((s.start or 0, s.stop if s.stop is not None else self.shape[i]) if isinstance(s, slice) else (0, self.shape[i])
                      for i, s in enumerate(idx))
       src = self if all(b == (0, self.shape[i]) for i, b in enumerate(bounds)) else self.shrink(bounds)
+      non_slice_args = [UOp.const(dtypes.weakint, x) if isinstance(x, int) else x for x in idx if not isinstance(x, slice)]
+      if not non_slice_args: return src  # all dims are slices, no indexing needed
       perm = src.permute(tuple([i for i in range(src.ndim) if i not in slice_idx] + slice_idx))
-      return perm.index(*[UOp.const(dtypes.weakint, x) if isinstance(x, int) else x for x in idx if not isinstance(x, slice)], ptr=True)
+      return perm.index(*non_slice_args, ptr=True)
     else:
       return self.index(*[UOp.const(dtypes.weakint, x) if isinstance(x, int) else x for x in idx])
   def const_like(self, b:ConstLike):
@@ -472,9 +479,14 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     assert all(x.arg[-1] == AxisType.UPCAST for x in rngs), "all contract ranges must be upcast"
     return UOp(Ops.CONTRACT, dtype=self.dtype.vec(prod([x.vmax+1 for x in rngs])), src=(self,), arg=tuple((x.arg[0], x.vmax+1) for x in rngs))
   def alu(self, op, *src:UOp, **kwargs):
-    out_dtype = (self, *src)[-1].dtype
+    all_srcs = (self, *src)
+    # broadcast shaped operands to a common shape (None and () are falsy, so only real shapes participate)
+    if (shapes := [s for x in all_srcs if (s:=x._shape)]) and not all_same(shapes):
+      out_shape = _broadcast_shape(*shapes)
+      all_srcs = tuple(x._broadcast_to(out_shape) if x._shape else x for x in all_srcs)
+    out_dtype = all_srcs[-1].dtype
     if op in {Ops.CMPLT, Ops.CMPNE, Ops.CMPEQ}: out_dtype = dtypes.bool.vec(out_dtype.count) if out_dtype.count > 1 else dtypes.bool
-    return UOp(op, out_dtype, (self,)+src, **kwargs)
+    return UOp(op, out_dtype, all_srcs, **kwargs)
   @staticmethod
   def const(dtype:DType, b:ConstLike, device:str|tuple[str, ...]|None=None, shape:tuple[sint, ...]|None=None):
     if isinstance(b, UOp): return b.unbind()[0] if b.op is Ops.BIND else b
@@ -1223,17 +1235,22 @@ def add_trace_group(kt:TracingKey) -> None:
   tracked_keys.append(kt)
   tracked_ctxs.append([])
 
+active_group:list[int] = []
 def track_rewrites(name:Callable[..., str|TracingKey]|bool=True, replay:bool=False):
   def _decorator(func):
     def __wrapper(*args, **kwargs):
       fn = key = func.__name__
-      if TRACK_MATCH_STATS >= 2: add_trace_group(key:=TracingKey(n:=f"{fn} n{next(_name_cnt.setdefault(fn, itertools.count(1)))}", (n,)))
+      idx = -1
+      if TRACK_MATCH_STATS >= 2:
+        add_trace_group(key:=TracingKey(n:=f"{fn} n{next(_name_cnt.setdefault(fn, itertools.count(1)))}", (n,)))
+        active_group.append(idx:=len(tracked_keys)-1)
       with cpu_profile(key, "TINY") as e:
         ret = func(*args, **kwargs)
+      if TRACK_MATCH_STATS >= 2: active_group.pop()
       if TRACK_MATCH_STATS >= 2 and callable(name):
         name_ret = name(*args, **kwargs, ret=ret)
         assert isinstance(name_ret, (TracingKey, str)), f"name function returned {type(name_ret)}"
-        tracked_keys[-1] = k = TracingKey(n:=tracked_keys[-1].display_name.replace(fn, name_ret), (n,)) if isinstance(name_ret, str) else name_ret
+        tracked_keys[idx] = k = TracingKey(n:=tracked_keys[idx].display_name.replace(fn, name_ret), (n,)) if isinstance(name_ret, str) else name_ret
         e.name = TracingKey(k.display_name if isinstance(name_ret, str) else f"{fn} for {k.display_name}", k.keys)
       if CAPTURE_PROCESS_REPLAY and replay:
         # find the unittest frame we're capturing in
@@ -1256,7 +1273,8 @@ def profile_matches(fxn:Callable):
       loc = ((frm:=sys._getframe(1)).f_code.co_filename, frm.f_lineno)
       depth = len(active_rewrites)
       if not tracked_ctxs: add_trace_group(TracingKey(f"default {fxn.__name__}"))
-      tracked_ctxs[-1].append(ctx:=TrackedGraphRewrite(loc, args[0].trace_num, [], name, depth, kwargs.get("bottom_up", False)))
+      dest_group = active_group[-1] if active_group else len(tracked_ctxs)-1
+      tracked_ctxs[dest_group].append(ctx:=TrackedGraphRewrite(loc, args[0].trace_num, [], name, depth, kwargs.get("bottom_up", False)))
       active_rewrites.append(ctx)
       with cpu_profile(name, "TINY"):
         ret = fxn(*args, **kwargs)

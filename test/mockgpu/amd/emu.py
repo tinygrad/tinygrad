@@ -221,6 +221,7 @@ VOPD_TO_VOP2 = {
   ir3.VOPDOp.V_DUAL_LSHLREV_B32: ir3.VOP2Op.V_LSHLREV_B32_E32, ir3.VOPDOp.V_DUAL_AND_B32: ir3.VOP2Op.V_AND_B32_E32,
   ir3.VOPDOp.V_DUAL_MOV_B32: ir3.VOP1Op.V_MOV_B32_E32, ir3.VOPDOp.V_DUAL_CNDMASK_B32: ir3.VOP2Op.V_CNDMASK_B32_E32,
   ir3.VOPDOp.V_DUAL_FMAAK_F32: ir3.VOP2Op.V_FMAAK_F32_E32, ir3.VOPDOp.V_DUAL_FMAMK_F32: ir3.VOP2Op.V_FMAMK_F32_E32,
+  ir3.VOPDOp.V_DUAL_DOT2ACC_F32_F16: ir3.VOP2Op.V_DOT2ACC_F32_F16_E32,
   # RDNA4 mappings (same VOP1/VOP2 targets, RDNA4 uses _NUM_ suffix for min/max)
   ir4.VOPDOp.V_DUAL_FMAC_F32: ir3.VOP2Op.V_FMAC_F32_E32, ir4.VOPDOp.V_DUAL_MUL_F32: ir3.VOP2Op.V_MUL_F32_E32,
   ir4.VOPDOp.V_DUAL_ADD_F32: ir3.VOP2Op.V_ADD_F32_E32, ir4.VOPDOp.V_DUAL_SUB_F32: ir3.VOP2Op.V_SUB_F32_E32,
@@ -229,6 +230,7 @@ VOPD_TO_VOP2 = {
   ir4.VOPDOp.V_DUAL_LSHLREV_B32: ir3.VOP2Op.V_LSHLREV_B32_E32, ir4.VOPDOp.V_DUAL_AND_B32: ir3.VOP2Op.V_AND_B32_E32,
   ir4.VOPDOp.V_DUAL_MOV_B32: ir3.VOP1Op.V_MOV_B32_E32, ir4.VOPDOp.V_DUAL_CNDMASK_B32: ir3.VOP2Op.V_CNDMASK_B32_E32,
   ir4.VOPDOp.V_DUAL_FMAAK_F32: ir3.VOP2Op.V_FMAAK_F32_E32, ir4.VOPDOp.V_DUAL_FMAMK_F32: ir3.VOP2Op.V_FMAMK_F32_E32,
+  ir4.VOPDOp.V_DUAL_DOT2ACC_F32_F16: ir3.VOP2Op.V_DOT2ACC_F32_F16_E32,
 }
 def _wave_size(arch: str) -> int: return 64 if arch.startswith("cdna") else 32
 WAVE_SIZE = 32  # default wave size for RDNA (exported for test_compare_emulators)
@@ -1729,7 +1731,12 @@ def _compile_mem_op(inst: ir3.DS|ir3.FLAT|ir3.GLOBAL|ir3.SCRATCH|ir4.DS|ir4.VFLA
     return UOp.sink(*stores, *ctx.inc_pc())
 
   def make_addr(lane: UOp) -> UOp:
-    if is_lds: return ctx.rvgpr_dyn(addr_reg, lane)
+    if is_lds:
+      addr = ctx.rvgpr_dyn(addr_reg, lane)
+      # Some DS pcode (e.g. DS_STORE_B16) uses MEM[ADDR] without adding OFFSET explicitly.
+      # In those cases, add the instruction offset to ADDR here.
+      if 'OFFSET' not in pcode: addr = addr + offset
+      return addr
     offset64 = offset.cast(dtypes.uint64)
     # Dynamic saddr check: saddr < 124 means valid SGPR, otherwise use VGPR pair for address
     use_saddr = (saddr_reg < _c(124)) if saddr_reg is not None else UOp.const(dtypes.bool, False)
@@ -1751,7 +1758,17 @@ def _compile_mem_op(inst: ir3.DS|ir3.FLAT|ir3.GLOBAL|ir3.SCRATCH|ir4.DS|ir4.VFLA
     base_addr = use_saddr.where(saddr_base + ctx.rvgpr_dyn(addr_reg, lane).cast(dtypes.uint64), vaddr_base)
     return base_addr + offset64
 
-  def wmem(addr: UOp, val: UOp, active: UOp) -> UOp:
+  def wmem(addr: UOp, val: UOp, active: UOp, data_bits: int = 32) -> UOp:
+    if data_bits < 32:
+      # Sub-dword LDS write: read-modify-write within the uint32 slot
+      word_addr = (addr >> addr_shift).cast(dtypes.int)
+      idx = mem.index(word_addr, active)
+      byte_pos = addr.cast(dtypes.uint32) & _c(3)
+      byte_shift = byte_pos * _c(8)
+      size_mask = _c(0xFF if data_bits == 8 else 0xFFFF)
+      mask = size_mask << byte_shift
+      new_word = (idx & (mask ^ _c(0xFFFFFFFF))) | ((val.cast(dtypes.uint32) & size_mask) << byte_shift)
+      return idx.store(active.where(new_word, idx))
     idx = mem.index((addr >> addr_shift).cast(dtypes.int))
     return idx.store(active.where(val, idx.load()))
 
@@ -1764,7 +1781,7 @@ def _compile_mem_op(inst: ir3.DS|ir3.FLAT|ir3.GLOBAL|ir3.SCRATCH|ir4.DS|ir4.VFLA
       elif data_bits_mem == 96:
         data = {'DATA': ctx.rvgpr_dyn(vdata_reg, lane), 'DATA1': ctx.rvgpr_dyn(vdata_reg + _c(1), lane),
                 'DATA2': ctx.rvgpr_dyn(vdata_reg + _c(2), lane)}
-      elif data_bits_mem == 32:
+      elif data_bits_mem <= 32:
         data = {'DATA': ctx.rvgpr_dyn(vdata_reg, lane), 'DATA2': ctx.rvgpr_dyn(data1_reg, lane) if has_data1 else UOp.const(dtypes.uint32, 0)}
       else:
         data = {'DATA': _u64(ctx.rvgpr_dyn(vdata_reg, lane), ctx.rvgpr_dyn(vdata_reg + _c(1), lane)),
@@ -1805,7 +1822,9 @@ def _compile_mem_op(inst: ir3.DS|ir3.FLAT|ir3.GLOBAL|ir3.SCRATCH|ir4.DS|ir4.VFLA
     parts = dest.rsplit('.', 1)
     data_bits = int(parts[1][1:]) if len(parts) == 2 else 32
     if dest.startswith('MEM['):
-      if is_lds or is_atomic: return _write_val(data_bits, val[1], wmem, val[0], active, is_mem=True)
+      if is_lds or is_atomic:
+        if data_bits < 32 and is_lds: return [wmem(val[0], val[1], active, data_bits)]
+        return _write_val(data_bits, val[1], wmem, val[0], active, is_mem=True)
       if is_scratch: return _mem_store_bytes(mem, val[0], val[1], active, data_bits)
       return _mem_store(mem, val[0], val[1], active, 64, data_bits)
     if dest.startswith('RETURN_DATA') and writes_return_data:
@@ -1824,12 +1843,25 @@ def _compile_mem_op(inst: ir3.DS|ir3.FLAT|ir3.GLOBAL|ir3.SCRATCH|ir4.DS|ir4.VFLA
     mem_addrs = set(m.group(1) if (m := re.match(r'MEM\[([^\]]+)\]', d)) else d for d in mem_assigns)
     use_separate_ranges = (len(mem_addrs) > 1 or '2ADDR' in op_name) and 'STOREXCHG' not in op_name
     if use_separate_ranges:
+      # Split assigns into MEM writes (stores) and RETURN_DATA writes (loads).
+      # Stores to different addresses need separate lane ranges. Loads must share a single lane range so the
+      # addr vgpr is read before any vdst write (hardware reads addr once, then writes all results).
+      store_assigns = [(i, d) for i, (d, _) in enumerate(assigns) if d.startswith('MEM[')]
+      load_assigns = [(i, d) for i, (d, _) in enumerate(assigns) if d.startswith('RETURN_DATA')]
       ended: list[UOp] = []
-      for i, (dest, _) in enumerate(assigns):
+      for i, dest in store_assigns:
         lane = ctx.range()
         active = _lane_active(exec_mask, lane)
         _, lane_assigns = parse_pcode(pcode, make_srcs(lane))
         ended.extend(s.end(lane) for s in make_stores(dest, lane_assigns[i][1], lane, active, True))
+      if load_assigns:
+        lane = ctx.range()
+        active = _lane_active(exec_mask, lane)
+        _, lane_assigns = parse_pcode(pcode, make_srcs(lane))
+        load_stores: list[UOp] = []
+        for i, dest in load_assigns:
+          load_stores.extend(make_stores(dest, lane_assigns[i][1], lane, active, True))
+        if load_stores: ended.append(UOp.group(*load_stores).end(lane))
       return UOp.sink(*ended, *ctx.inc_pc())
 
   # Standard path: single lane range
