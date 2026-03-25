@@ -394,7 +394,7 @@ if __name__ == "__main__":
   raw_model = Tensor.from_url(models.get(args.model, args.model))
   model, kv = Transformer.from_gguf(raw_model, args.max_context)
   model_name = kv.get('general.name') or kv.get('general.basename') or args.model
-  print(f"using model {model_name} with {raw_model.nbytes():,} bytes and {sum(x.numel() for x in nn.state.get_parameters(model)):,} params")
+  print(f"using model \"{model_name}\" with {raw_model.nbytes():,} bytes and {sum(x.numel() for x in nn.state.get_parameters(model)):,} params")
   del raw_model
 
   # TODO: why this is required to free the RAM of the GGUF copy?
