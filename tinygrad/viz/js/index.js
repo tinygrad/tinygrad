@@ -250,7 +250,7 @@ var data, focusedDevice, focusedShape, formatTime, canvasZoom, zoomLevel = d3.zo
 
 const canvasDims = () => {
   const sideRect = rect("#device-list");
-  return [document.querySelector("#profiler").clientWidth-sideRect.width, Math.round(sideRect.height)];
+  return [Math.round(document.querySelector("#profiler").clientWidth-sideRect.width), Math.round(sideRect.height)];
 }
 
 function selectShape(key) {
@@ -705,6 +705,12 @@ async function renderProfiler(path, opts) {
       if (nextMark != null) maxWidth = Math.min(maxWidth, xscale(nextMark)-tx);
       if (maxWidth <= 0) continue;
       drawText(ctx, m.label, tx, 1, maxWidth);
+    }
+    // hide tooltip if there's no longer a shape at its position
+    const tooltip = document.getElementById("tooltip");
+    if (tooltip.style.display !== "none") {
+      const r = rect(tooltip);
+      if (findRectAtPosition(r.left-10, r.top)?.tooltipText == null) tooltip.style.display = "none";
     }
   }
 
