@@ -248,6 +248,11 @@ function tabulate(rows) {
 
 var data, focusedDevice, focusedShape, formatTime, canvasZoom, zoomLevel = d3.zoomIdentity;
 
+const canvasDims = () => {
+  const sideRect = rect("#device-list");
+  return [document.querySelector("#profiler").clientWidth-sideRect.width, Math.round(sideRect.height)];
+}
+
 function selectShape(key) {
   if (key == null) return {};
   const [t, idx] = key.split("-");
@@ -256,7 +261,7 @@ function selectShape(key) {
 }
 
 // scaling function for time to pixels
-const timelineScale = () => d3.scaleLinear().domain([data.first, data.dur]).range([0, document.getElementById("timeline").clientWidth])
+const timelineScale = () => d3.scaleLinear().domain([data.first, data.dur]).range([0, canvasDims()[0]]);
 
 function timeAtCycle(clk) {
   if (clk < data.instSt || clk > data.instEt || data.tracks.get("Shader Clock") == null) return "-";
@@ -704,9 +709,7 @@ async function renderProfiler(path, opts) {
   }
 
   function resize() {
-    const profiler = document.querySelector("#profiler");
-    const sideRect = rect("#device-list");
-    const width = profiler.clientWidth-(sideRect.width+padding), height = Math.round(sideRect.height);
+    const [width, height] = canvasDims();
     if (canvas.width === width*dpr && canvas.height === height*dpr) return;
     canvas.width = width*dpr;
     canvas.height = height*dpr;
