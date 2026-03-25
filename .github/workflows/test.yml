@@ -707,11 +707,14 @@ jobs:
         run: GMMU=0 AMD_IFACE=USB python test/test_tiny.py
       - name: Run test_hcq on MOCKAM
         run: python -m pytest test/device/test_hcq.py
+      - name: Run disk copy tests on MOCKAM
+        run: python -m pytest test/unit/test_disk_tensor.py -k test_copy_from_disk
       - name: Run test_tiny on MOCKAM Remote
         run: |
           python extra/remote/serve.py 6667 &
           sleep 2
-          REMOTE=127.0.0.1:6667 python test/test_tiny.py; kill %1
+          REMOTE=127.0.0.1:6667 python test/test_tiny.py
+          REMOTE=127.0.0.1:6667 python -m pytest test/unit/test_disk_tensor.py -k test_copy_from_disk; kill %1
 
   testamd:
     strategy:
