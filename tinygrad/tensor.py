@@ -2859,16 +2859,6 @@ class Tensor(OpMixin):
 
   # ***** unary ops *****
 
-  def logical_not(self) -> Tensor:
-    """
-    Computes the logical NOT of the tensor element-wise.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([False, True]).logical_not().numpy())
-    ```
-    """
-    return self.cast(dtypes.bool).ne(True)
-
   def contiguous(self, *args, **kwargs) -> Tensor:
     """
     Returns a contiguous tensor.
