@@ -8,7 +8,7 @@ from tinygrad.viz.serve import TCPServerWithReuse, HTTPRequestHandler
 
 class SimpleTokenizer:
   def __init__(self, normal_tokens:dict[str, int], special_tokens:dict[str, int], preset:str="llama3"):
-    if preset not in ("llama3","llama-v3","llama-bpe","qwen2","olmo"): raise ValueError(f"Invalid tokenizer preset '{preset}'")
+    if preset not in ("llama3","llama-v3","llama-bpe","qwen2","olmo","kimi-k2"): raise ValueError(f"Invalid tokenizer preset '{preset}'")
     # https://github.com/openai/gpt-2/blob/9b63575ef42771a015060c964af2c3da4cf7c8ab/src/encoder.py#L9
     bs = [*range(33, 127), *range(161, 173), *range(174, 256)]  # bytes that map to themselves
     self._byte_decoder = {chr(b): b for b in bs} | {chr(256+i): b for i,b in enumerate(b for b in range(256) if b not in bs)}
@@ -56,12 +56,20 @@ class SimpleTokenizer:
   def decode(self, ids:list[int]) -> str: return b''.join(self._tok2bytes[tid] for tid in ids).decode(errors='replace')
   def role(self, role:str):
     if self.preset == 'olmo': return self.encode("<|" + role + "|>\n")  # OLMoE Instruct format
+    if self.preset == 'kimi-k2': return self.encode("<|im_" + role + "|>" + role + "<|im_middle|>")
     if self.preset == 'qwen2': return self.encode("<|im_start|>" + role + "\n")
     return self.encode("<|start_header_id|>" + role + "<|end_header_id|>\n\n")
   def end_turn(self, eos_id:int):
     if self.preset == 'olmo': return self.encode("\n")
+    if self.preset == 'kimi-k2': return [eos_id]
     if self.preset == 'qwen2': return [eos_id] + self.encode("\n")
     return [eos_id]
+  @property
+  def default_system_prompt(self) -> str|None:
+    if self.preset == 'kimi-k2': return "You are a helpful assistant"
+    return None
+  @property
+  def add_bos(self) -> bool: return self.preset != 'kimi-k2'
 
 @functools.cache
 def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0) -> Tensor:
@@ -351,8 +359,11 @@ class Handler(HTTPRequestHandler):
     if DEBUG >= 1: print(json.dumps(body, indent=2))
     if self.path == "/v1/chat/completions":
       # extract tokens, last assistant message is treated as prefill
-      ids: list[int] = [bos_id] if bos_id is not None else []
-      for i, msg in enumerate(body["messages"]):
+      ids: list[int] = [bos_id] if bos_id is not None and tok.add_bos else []
+      messages = body["messages"]
+      if tok.default_system_prompt and (not messages or messages[0]["role"] != "system"):
+        messages = [{"role": "system", "content": tok.default_system_prompt}] + messages
+      for i, msg in enumerate(messages):
         ids += tok.role(msg["role"])
         content = msg["content"]
         if isinstance(content, str): ids += tok.encode(content)
@@ -421,7 +432,8 @@ if __name__ == "__main__":
     TCPServerWithReuse(('', args.serve), Handler).serve_forever()
 
   # interactive chat
-  ids: list[int] = [bos_id] if bos_id is not None else []
+  ids: list[int] = [bos_id] if bos_id is not None and tok.add_bos else []
+  if tok.default_system_prompt: ids += tok.role("system") + tok.encode(tok.default_system_prompt) + tok.end_turn(eos_id)
   while 1:
     try:
       ids += tok.role("user") + tok.encode(input('>>> ')) + tok.end_turn(eos_id) + tok.role("assistant")

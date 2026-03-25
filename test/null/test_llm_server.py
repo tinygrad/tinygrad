@@ -11,6 +11,8 @@ class TestLLMServer(unittest.TestCase):
     cls.mock_tok.encode = Mock(return_value=[200, 201, 202])
     cls.mock_tok.decode = Mock(return_value="Hello")
     cls.mock_tok.end_turn = Mock(return_value=[998])
+    cls.mock_tok.default_system_prompt = None
+    cls.mock_tok.add_bos = True
 
     cls.mock_model = Mock()
     cls.mock_model.generate = Mock(side_effect=lambda ids, **kwargs: iter([300, 301, 999]))
