@@ -1,5 +1,11 @@
 A command line tool for exploring the VIZ trace.
 
+# Lightweight tracing
+
+Supported on all backends.
+
+Flags: VIZ=-1 to only save the trace to a file, VIZ=1 also launches a web server.
+
 1. Set VIZ to -1 to save the trace.
 2. Use `extra/viz/cli.py` to inspect the trace files.
 
@@ -7,8 +13,8 @@ A command line tool for exploring the VIZ trace.
 
 Use `extra/viz/cli.py --profile` to list all traced devices.
 
-List top slowest kernels on a device: `--profile --device "AMD"`
-List samples of a kernel on a device: `--profile --device "AMD" --kernel E_3`
+List top slowest kernels on a device: `--profile --device "AMD" | head 10`
+List samples of a kernel on a device: `--profile --device "AMD" --kernel E_3 | head 4`
 
 ## Inspect codegen and PatternMatcher
 
@@ -17,3 +23,20 @@ Use `extra/viz/cli.py --rewrites` to list all traced kernels.
 List all codegen steps for a kernel: `--rewrites --kernel E_3`
 Get source code: `--rewrites --kernel E_3 --select "View Source"`
 Inspect a graph rewrite: `--rewrites --kernel E_3 --select "initial symbolic"`
+
+# SQTT tracing
+
+Supported on AMD for RDNA3 and RDNA4 (best) and CDNA (developing).
+
+Flags: VIZ=-2 to save SQTT trace to a file. VIZ=2 also launches a web server. View other flags in tinygrad/runtime/ops_amd.py to configure SQTT as needed.
+
+Use `extra/viz/cli.py --profile | grep SQTT` to view all available SQTT traces.
+You can select a specific trace option with --device, Example workflow:
+
+```bash
+# Run amd_asm_matmul with VIZ=-2 to capture the trace
+VIZ=-2 python extra/gemm/amd_asm_matmul.py
+
+# View barriers
+extra/viz/cli.py --profile --device "Exec kernel SQTT PKTS SE:0" | rg BARRIER | head -10
+```
