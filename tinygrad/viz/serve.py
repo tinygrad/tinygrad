@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import multiprocessing, pickle, difflib, os, threading, json, time, sys, webbrowser, socket, argparse, functools, codecs, io, struct
+import multiprocessing, pickle, difflib, os, threading, json, time, sys, webbrowser, socket, argparse, functools, codecs, io, struct, re
 import pathlib, traceback, itertools, socketserver
 from contextlib import redirect_stdout, redirect_stderr, contextmanager
 from decimal import Decimal
@@ -345,7 +345,7 @@ def sqtt_timeline(data:bytes, lib:bytes, target:str) -> Generator[ProfileEvent, 
   row_ends:dict[str, Decimal] = {}
   row_counts:dict[str, itertools.count] = {}
   curr_barrier:dict[str, ProfileRangeEvent] = {}
-  exec_pending:dict[str, list[str]] = {}
+  exec_pending:dict[str, list[tuple[str, int, str]]] = {}
   NS_PER_TICK = 10  # 100MHz
   prev_pair:tuple[int, int]|None = None # (shader, realtime)
   is_cdna = target.startswith("gfx9")
@@ -364,8 +364,11 @@ def sqtt_timeline(data:bytes, lib:bytes, target:str) -> Generator[ProfileEvent, 
     if name == "BARRIER": curr_barrier[row] = e
     # queue for exec linking
     if isinstance(p, (VALUINST, INST, INST_RDNA4)) and (exec_type:=dispatch_to_exec.get(name.split("_")[0])) is not None:
-      exec_pending.setdefault(exec_type, []).append(f"{row}-{idx}")
-    if isinstance(p, (ALUEXEC, VMEMEXEC)) and "ALT" not in str(p.src): e.name = TracingKey(op or name, ret=f"LINK:{exec_pending[name].pop(0)}")
+      exec_pending.setdefault(exec_type, []).append((row, idx, name))
+    if isinstance(p, (ALUEXEC, VMEMEXEC)) and "ALT" not in str(p.src):
+      dispatch = exec_pending[name].pop(0)
+      e.name = TracingKey(op or name, ret=f"LINK:{dispatch[0]}-{dispatch[1]}")
+      e.en = Decimal(e.st+(int(m.group(1)) if (m:=re.match(r".*_(\d+)$", dispatch[2])) else 1))
     yield e
   for p, info in map_insts(data, lib, target):
     if isinstance(p, (TS_DELTA_OR_MARK, TS_DELTA_OR_MARK_RDNA4)) and p.is_marker:
