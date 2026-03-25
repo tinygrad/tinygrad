@@ -30,6 +30,7 @@ class TestGGUF(unittest.TestCase):
 
   def test_dequantization_q4_0(self): self._test_dequantization(GGMLQuantizationType.Q4_0)
   def test_dequantization_q4_1(self): self._test_dequantization(GGMLQuantizationType.Q4_1)
+  def test_dequantization_q5_0(self): self._test_dequantization(GGMLQuantizationType.Q5_0)
   def test_dequantization_q8_0(self): self._test_dequantization(GGMLQuantizationType.Q8_0)
   def test_dequantization_q4_k(self): self._test_dequantization(GGMLQuantizationType.Q4_K)
   def test_dequantization_q5_k(self): self._test_dequantization(GGMLQuantizationType.Q5_K)
@@ -126,7 +127,7 @@ class TestGGUFGEMV(unittest.TestCase):
     # generate random quantized blocks with valid fp16 scale fields (random bytes can produce NaN scales)
     q_data = rng.integers(0, 256, size=n_blocks * type_size, dtype=np.uint8).reshape(n_blocks, type_size)
     scales = np.float16(rng.standard_normal(n_blocks * 4)).view(np.uint8).reshape(n_blocks, -1)
-    if qtype == GGMLQuantizationType.Q8_0: q_data[:, :2] = scales[:, :2]                    # d at offset 0
+    if qtype in (GGMLQuantizationType.Q5_0, GGMLQuantizationType.Q8_0): q_data[:, :2] = scales[:, :2]  # d at offset 0
     elif qtype in (GGMLQuantizationType.Q4_K, GGMLQuantizationType.Q5_K): q_data[:, :4] = scales[:, :4] # d, dmin at offset 0
     elif qtype == GGMLQuantizationType.Q6_K: q_data[:, -2:] = scales[:, :2]                 # d at end
     elif qtype == GGMLQuantizationType.MXFP4: q_data[:, 0] = rng.integers(120, 136, size=n_blocks, dtype=np.uint8) # constrain byte0
@@ -152,6 +153,7 @@ class TestGGUFGEMV(unittest.TestCase):
     if is_dtype_supported(dtypes.half): np.testing.assert_equal(tensors["weight"].numpy(), ref)
     assert np.isfinite(ref).all() and np.isfinite(tensors["weight"].numpy()).all(), f"{qtype.name} has NaN/Inf"
 
+  def test_gguf_gemv_q5_0(self): self._test_gguf_gemv(GGMLQuantizationType.Q5_0)
   def test_gguf_gemv_q8_0(self): self._test_gguf_gemv(GGMLQuantizationType.Q8_0)
   def test_gguf_gemv_q4_k(self): self._test_gguf_gemv(GGMLQuantizationType.Q4_K)
   def test_gguf_gemv_q5_k(self): self._test_gguf_gemv(GGMLQuantizationType.Q5_K)
