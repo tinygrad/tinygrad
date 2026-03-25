@@ -13,8 +13,6 @@ from extra.bench_log import BenchEvent, WallTimeEvent
 # TODO: fix benchmark logging and use tinygrad tqdm
 from tqdm import tqdm
 
-from tinygrad.uop.ops import UOp
-
 def train_resnet():
   from extra.models import resnet
   from examples.mlperf.dataloader import batch_load_resnet
@@ -1284,7 +1282,7 @@ def train_bert():
         previous_step = i
 
 def train_llama3():
-  from examples.mlperf.models.flat_llama import FlatTransformer, apply_grad
+  from examples.mlperf.models.flat_llama import FlatTransformer
   from examples.llama3 import MODEL_PARAMS
   from examples.mlperf.lr_schedulers import CosineAnnealingLRWithWarmup
   from examples.mlperf.optim import GradAccClipAdamW
@@ -1348,8 +1346,6 @@ def train_llama3():
   model = FlatTransformer(**model_params, max_context=SEQLEN)
 
   params = get_parameters(model)
-  # weights are all bfloat16 for now
-  assert params and all(p.dtype == dtypes.bfloat16 for p in params)
 
   if getenv("FAKEDATA"):
     for v in get_parameters(model):
@@ -1373,7 +1369,9 @@ def train_llama3():
                            eps=opt_adamw_epsilon, weight_decay=opt_adamw_weight_decay, grad_acc=grad_acc, device=optim_device)
 
   # init grads
-  grads = [Tensor.zeros_like(p).contiguous() for p in optim.params]
+  for p in optim.params:
+    p.grad = Tensor.zeros_like(p).contiguous()
+  grads = [p.grad for p in optim.params]
 
   scheduler = CosineAnnealingLRWithWarmup(optim, opt_base_learning_rate, opt_end_learning_rate, opt_learning_rate_warmup_steps, opt_learning_rate_decay_steps)
 
@@ -1394,8 +1392,8 @@ def train_llama3():
     logits:Tensor = model(tokens[:, :-1])
     loss = vocab_mask.where(-1e9, logits).sparse_categorical_crossentropy(tokens[:, 1:])
 
-    for i,(t,g) in enumerate(zip(optim.params, loss.gradient(*optim.params))):
-      grads[i].replace(Tensor(grads[i].uop.after(UOp.group(*apply_grad(grads[i].uop, g.uop))), device=t.device))
+    loss.backward()
+    assert all(p.grad is g for p,g in zip(optim.params, grads))
 
     loss_cpu = loss.flatten().float().to("CPU")
     return loss_cpu.realize(*grads)
@@ -1491,7 +1489,7 @@ def train_llama3():
 
       mem_gb = GlobalCounters.mem_used / 1e9
       gflops = GlobalCounters.global_ops / 1e9 / dev_time
-      mfu = ((6 * num_params * SEQLEN * GBS) / (dev_time * max(getenv("DP", 1), getenv("MP", 1)) * 2.3e15)) * 100
+      mfu = ((6 * num_params * SEQLEN * GBS) / (dev_time * device_count * 2.3e15)) * 100
       tqdm.write(
           f"{i:5} {step_time:.3f} s step, {gbs_time:.3f} s gbs, {optim_time:.3f} s optim, {data_time:.3f} s data, {loss:.4f} loss, " \
           f"{lr:.12f} LR, {grad_norm:.6f} grad_norm, {mem_gb:.2f} GB used, {gflops:9.2f} GFLOPS, {mfu:5.2f}% MFU")
@@ -1546,7 +1544,7 @@ def train_llama3():
         if BENCHMARK and (j+1) == min(BENCHMARK, EVAL_SAMPLES//EVAL_BS):
           return
 
-      log_perplexity = Tensor(eval_losses).mean().float().item()
+      log_perplexity = sum(eval_losses) / len(eval_losses)
 
       tqdm.write(f"eval log perplexity: {log_perplexity:.4f}")
 

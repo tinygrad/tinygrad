@@ -11,6 +11,8 @@ class GradAccClipAdamW(Optimizer):
     self.m = self._new_optim_param()
     self.v = self._new_optim_param()
     self.grad_acc, self.clip_norm = grad_acc, clip_norm
+    # fp32 master weights for mixed precision training
+    self.master_params:list[Tensor]|None = [p.float().contiguous() for p in self.params] if self.params[0].dtype != dtypes.float32 else None
 
   def fstep(self, grads:list[Tensor]):
     if self.fused:
@@ -18,8 +20,8 @@ class GradAccClipAdamW(Optimizer):
       updates = [out[0][self.pos_params[i]:self.pos_params[i+1]].reshape(tt.shape) for i, tt in enumerate(self.params)]
     else:
       updates, extra = self._step([], grads)
-    for i, tt in enumerate(self.params): tt.assign(self._apply_update(tt, updates[i]))
-    to_realize = extra+self.params+self.buffers
+    for i, tt in enumerate(self.params): tt.assign(self._apply_update(tt, updates[i], self.master_params[i] if self.master_params else None))
+    to_realize = extra+self.params+self.buffers+(self.master_params or [])
 
     Tensor.realize(*to_realize)
     return extra[-1]
@@ -53,7 +55,10 @@ class GradAccClipAdamW(Optimizer):
       ret.append((self.lr * up).cast(g.dtype))
     return ret, [self.b1_t, self.b2_t] + self.m + self.v + [total_norm]
 
-  def _apply_update(self, t:Tensor, up:Tensor) -> Tensor:
+  def _apply_update(self, t:Tensor, up:Tensor, master:Tensor|None=None) -> Tensor:
+    w = master if master is not None else t
     wd = self.wd if t.ndim >= 3 else 0.0
-    up = up.shard_like(t) + self.lr.to(t.device) * wd * t.detach()
-    return t.detach() - up.cast(t.dtype)
+    up = up.float().shard_like(w) + self.lr.to(w.device) * wd * w.detach()
+    new_w = w.detach() - up
+    if master is not None: master.assign(new_w)
+    return new_w.cast(t.dtype)
