@@ -603,7 +603,7 @@ async function renderProfiler(path, opts) {
     const canvasWidth = canvas.clientWidth;
     ctx.clearRect(0, 0, canvasWidth, canvas.clientHeight);
     // rescale to match current zoom
-    const xscale = d3.scaleLinear().domain([data.first, dur]).range([0, canvasWidth]);
+    const xscale = timelineScale();
     const visibleX = xscale.range().map(zoomLevel.invertX, zoomLevel).map(xscale.invert, xscale);
     const st = visibleX[0], et = visibleX[1];
     xscale.domain([st, et]);
