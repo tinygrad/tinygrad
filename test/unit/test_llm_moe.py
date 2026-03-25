@@ -1,15 +1,19 @@
 import unittest
 import numpy as np
 from tinygrad import Tensor
+from tinygrad.apps.llm import TransformerBlock, TransformerConfig
+
+def _moe_config(dim=8, hidden=16, n_heads=2, num_experts=4, num_experts_per_tok=2):
+  return TransformerConfig(num_blocks=1, dim=dim, hidden_dim=hidden, n_heads=n_heads, n_kv_heads=n_heads,
+                           norm_eps=1e-5, vocab_size=100, head_dim=dim//n_heads, rope_theta=10000, max_context=16,
+                           num_experts=num_experts, num_experts_per_tok=num_experts_per_tok)
 
 class TestMoEFeedForward(unittest.TestCase):
   def test_moe_feed_forward(self):
-    from tinygrad.apps.llm import TransformerBlock
     dim, hidden, n_heads = 8, 16, 2
     num_experts, k = 4, 2
 
-    block = TransformerBlock(dim, hidden, n_heads, n_heads, norm_eps=1e-5, head_dim=dim//n_heads,
-                             rope_theta=10000, max_context=16, num_experts=num_experts, num_experts_per_tok=k)
+    block = TransformerBlock(_moe_config(dim, hidden, n_heads, num_experts, k))
 
     # set up weights: gate scales by (expert_id+1), up/down are identity-ish, router picks experts 0,2
     block.ffn_gate_exps.weight = Tensor.stack(*[Tensor.eye(hidden, dim) * (i + 1) for i in range(num_experts)])
@@ -27,12 +31,10 @@ class TestMoEFeedForward(unittest.TestCase):
     np.testing.assert_allclose(out.numpy()[0, 0, 0], expected, rtol=1e-2)
 
   def test_moe_feed_forward_batched(self):
-    from tinygrad.apps.llm import TransformerBlock
     dim, hidden, n_heads = 8, 16, 2
     num_experts, k = 4, 2
 
-    block = TransformerBlock(dim, hidden, n_heads, n_heads, norm_eps=1e-5, head_dim=dim//n_heads,
-                             rope_theta=10000, max_context=16, num_experts=num_experts, num_experts_per_tok=k)
+    block = TransformerBlock(_moe_config(dim, hidden, n_heads, num_experts, k))
 
     # same setup as BS=1 test
     block.ffn_gate_exps.weight = Tensor.stack(*[Tensor.eye(hidden, dim) * (i + 1) for i in range(num_experts)])
@@ -50,13 +52,11 @@ class TestMoEFeedForward(unittest.TestCase):
     np.testing.assert_allclose(out.numpy(), expected, rtol=1e-2)
 
   def test_moe_feed_forward_norm_topk_prob(self):
-    from tinygrad.apps.llm import TransformerBlock
     dim, hidden, n_heads = 8, 16, 2
     num_experts, k = 4, 2
 
-    block = TransformerBlock(dim, hidden, n_heads, n_heads, norm_eps=1e-5, head_dim=dim//n_heads,
-                             rope_theta=10000, max_context=16, num_experts=num_experts, num_experts_per_tok=k)
-    block.norm_topk_prob = True
+    from dataclasses import replace
+    block = TransformerBlock(replace(_moe_config(dim, hidden, n_heads, num_experts, k), norm_topk_prob=True))
 
     block.ffn_gate_exps.weight = Tensor.stack(*[Tensor.eye(hidden, dim) * (i + 1) for i in range(num_experts)])
     block.ffn_up_exps.weight = Tensor.stack(*[Tensor.eye(hidden, dim) for _ in range(num_experts)])
