@@ -463,8 +463,9 @@ class Handler(HTTPRequestHandler):
     if DEBUG >= 1: print(json.dumps(body, indent=2))
     if self.path == "/v1/chat/completions":
       # extract tokens, last assistant message is treated as prefill
-      ids: list[int] = [bos_id] if bos_id is not None else []
-      for i, msg in enumerate(body["messages"]):
+      n = conv_cache["n_msgs"] + 1 if conv_cache["ids"] and len(body["messages"]) > conv_cache["n_msgs"] else 0
+      ids: list[int] = conv_cache["ids"][:] if n else ([bos_id] if bos_id is not None else [])
+      for i, msg in enumerate(body["messages"][n:], n):
         ids += tok.role(msg["role"])
         content = msg["content"]
         if isinstance(content, str): ids += tok.encode(content)
@@ -489,6 +490,7 @@ class Handler(HTTPRequestHandler):
           if c["choices"] and c["choices"][0].get("finish_reason"): finish_reason = c["choices"][0]["finish_reason"]
         self.send_data(json.dumps({**c, "object":"chat.completion",
           "choices":[{"index":0, "message":{"role":"assistant","content":"".join(out)}, "finish_reason":finish_reason}]}).encode())
+      conv_cache.update(n_msgs=len(body["messages"]), ids=model._cached_tokens[:])
     else:
       raise RuntimeError(f"unhandled path {self.path}")
 
@@ -530,6 +532,7 @@ if __name__ == "__main__":
     # warmup: run 2 tokens through the model twice to capture the JIT before serving
     with Context(DEBUG=max(DEBUG.value, 1)):
       for _ in range(2): list(zip(range(2), model.generate([0])))
+    conv_cache: dict = {"n_msgs": 0, "ids": []}
     TCPServerWithReuse(('', args.serve), Handler).serve_forever()
 
   # interactive chat
