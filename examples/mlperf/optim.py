@@ -1,8 +1,11 @@
 from tinygrad.tensor import Tensor
 from tinygrad.dtype import dtypes
 from tinygrad.nn.optim import Optimizer
-from tinygrad.helpers import FUSE_OPTIM
+from tinygrad.helpers import FUSE_OPTIM, getenv
 from tinygrad.uop.ops import UOp, Ops
+
+STOCHASTIC_ROUND = getenv("STOCHASTIC_ROUND", 0)
+MASTER_WEIGHTS = getenv("MASTER_WEIGHTS", 0)
 
 def stochastic_round_bf16(x:Tensor) -> Tensor:
   bits = x.bitcast(dtypes.uint32)
@@ -22,6 +25,7 @@ class GradAccClipAdamW(Optimizer):
     self.m = self._new_optim_param()
     self.v = self._new_optim_param()
     self.grad_acc, self.clip_norm = grad_acc, clip_norm
+    self.master_params:list[Tensor]|None = [p.float().contiguous() for p in self.params] if MASTER_WEIGHTS and self.params[0].dtype != dtypes.float32 else None
 
   def fstep(self, grads:list[Tensor]):
     if self.fused:
@@ -29,8 +33,8 @@ class GradAccClipAdamW(Optimizer):
       updates = [out[0][self.pos_params[i]:self.pos_params[i+1]].reshape(tt.shape) for i, tt in enumerate(self.params)]
     else:
       updates, extra = self._step([], grads)
-    for i, tt in enumerate(self.params): tt.assign(self._apply_update(tt, updates[i]))
-    to_realize = extra+self.params+self.buffers
+    for i, tt in enumerate(self.params): tt.assign(self._apply_update(tt, updates[i], self.master_params[i] if self.master_params else None))
+    to_realize = extra+self.params+self.buffers+(self.master_params or [])
 
     Tensor.realize(*to_realize)
     return extra[-1]
@@ -66,7 +70,11 @@ class GradAccClipAdamW(Optimizer):
       ret.append(self.lr * up)
     return ret, [self.b1_t, self.b2_t] + self.m + self.v + [total_norm]
 
-  def _apply_update(self, t:Tensor, up:Tensor) -> Tensor:
+  def _apply_update(self, t:Tensor, up:Tensor, master:Tensor|None=None) -> Tensor:
+    w = master if master is not None else t
     wd = self.wd if t.ndim >= 3 else 0.0
-    new_w = t.detach().float() - (up.float().shard_like(t) + self.lr.to(t.device) * wd * t.detach().float())
-    return stochastic_round_bf16(new_w) if t.dtype == dtypes.bfloat16 else new_w.cast(t.dtype)
+    up = up.float().shard_like(w) + self.lr.to(w.device) * wd * w.detach()
+    new_w = w.detach() - up
+    if master is not None: master.assign(new_w)
+    if STOCHASTIC_ROUND and t.dtype == dtypes.bfloat16: return stochastic_round_bf16(new_w)
+    return new_w.cast(t.dtype)
