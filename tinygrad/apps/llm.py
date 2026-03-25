@@ -103,6 +103,10 @@ class TransformerConfig:
   qk_nope_head_dim: int = 0
   qk_rope_head_dim: int = 0
   v_head_dim: int = 0
+  shared_expert_dim: int = 0
+  leading_dense_blocks: int = 0
+  dense_hidden_dim: int = 0
+  routed_scaling_factor: float = 1.0
 
 class TransformerBlock:
   def __init__(self, config:TransformerConfig):
@@ -126,9 +130,14 @@ class TransformerBlock:
     # feed-forward
     if config.num_experts > 0:
       self.ffn_gate_inp = nn.Linear(config.dim, config.num_experts, bias=False)
+      if config.kv_lora_rank > 0: self.exp_probs_b_bias = Tensor.zeros(config.num_experts)
       self.ffn_gate_exps = ExpertWeights(config.num_experts, config.dim, config.hidden_dim)
       self.ffn_up_exps   = ExpertWeights(config.num_experts, config.dim, config.hidden_dim)
       self.ffn_down_exps = ExpertWeights(config.num_experts, config.hidden_dim, config.dim)
+      if config.shared_expert_dim > 0:
+        self.ffn_gate_shexp = nn.Linear(config.dim, config.shared_expert_dim, bias=False)
+        self.ffn_up_shexp   = nn.Linear(config.dim, config.shared_expert_dim, bias=False)
+        self.ffn_down_shexp = nn.Linear(config.shared_expert_dim, config.dim, bias=False)
     else:
       self.ffn_gate = nn.Linear(config.dim, config.hidden_dim, bias=False)
       self.ffn_up   = nn.Linear(config.dim, config.hidden_dim, bias=False)
@@ -185,10 +194,23 @@ class TransformerBlock:
     h_norm = self.ffn_norm(h)
     if hasattr(self, 'ffn_gate_exps'):
       x = h_norm.unsqueeze(2)  # (B, T, 1, D) - add expert dim for broadcasting
-      probs, sel = self.ffn_gate_inp(h_norm).softmax(-1).topk(self.config.num_experts_per_tok)  # (B, T, k) each
+      logits = self.ffn_gate_inp(h_norm)
+      if hasattr(self, 'exp_probs_b_bias'):
+        probs = logits.sigmoid()
+        _, sel = (probs + self.exp_probs_b_bias).topk(self.config.num_experts_per_tok)
+        probs = probs.gather(-1, sel)
+      else:
+        probs, sel = logits.softmax(-1).topk(self.config.num_experts_per_tok)
       if self.config.norm_topk_prob: probs = probs / probs.sum(axis=-1, keepdim=True)
+      probs = probs * self.config.routed_scaling_factor
       x_down = self.ffn_down_exps(sel, self.ffn_gate_exps(sel, x).silu() * self.ffn_up_exps(sel, x))  # (B, T, k, D)
-      return h + (x_down * probs.unsqueeze(-1)).sum(axis=2)  # (B, T, D)
+      out = (x_down * probs.unsqueeze(-1)).sum(axis=2)
+      if hasattr(self, 'ffn_gate_shexp'):
+        shexp = self.ffn_down_shexp(self.ffn_gate_shexp(h_norm).silu().contiguous() * self.ffn_up_shexp(h_norm))
+        if hasattr(self, 'ffn_gate_inp_shexp_weight'):
+          shexp = shexp * (h_norm * self.ffn_gate_inp_shexp_weight).sum(axis=-1, keepdim=True).sigmoid()
+        out = out + shexp
+      return h + out
     # TODO: remove the need for this contiguous
     gated  = self.ffn_gate(h_norm).silu().contiguous() * self.ffn_up(h_norm)
     return h + self.ffn_down(gated)
@@ -209,7 +231,9 @@ class TransformerBlock:
 
 class Transformer:
   def __init__(self, config:TransformerConfig):
-    self.blk = [TransformerBlock(config) for _ in range(config.num_blocks)]
+    from dataclasses import replace
+    dense_config = replace(config, num_experts=0, num_experts_per_tok=0, shared_expert_dim=0, hidden_dim=config.dense_hidden_dim or config.hidden_dim)
+    self.blk = [TransformerBlock(dense_config if i < config.leading_dense_blocks else config) for i in range(config.num_blocks)]
     self.token_embd  = nn.Embedding(config.vocab_size, config.dim)
     self.output_norm = nn.RMSNorm(config.dim, config.norm_eps)
     self.output = nn.Linear(config.dim, config.vocab_size, bias=False)
@@ -253,7 +277,7 @@ class Transformer:
     kv_lora_rank = kv.get(f'{arch}.attention.kv_lora_rank', 0)
     # rename MLA weight keys to match our attribute names
     if kv_lora_rank:
-      renames = {'attn_k_b.weight': 'attn_k_b_weight', 'attn_v_b.weight': 'attn_v_b_weight'}
+      renames = {'attn_k_b.weight': 'attn_k_b_weight', 'attn_v_b.weight': 'attn_v_b_weight', 'exp_probs_b.bias': 'exp_probs_b_bias'}
       state_dict = {functools.reduce(lambda k, r: k.replace(*r), renames.items(), k): v for k, v in state_dict.items()}
     config = TransformerConfig(
       num_blocks=kv[f'{arch}.block_count'], dim=kv[f'{arch}.embedding_length'],
@@ -264,11 +288,15 @@ class Transformer:
       rope_theta=kv[f'{arch}.rope.freq_base'], max_context=max_context,
       qk_norm=int(state_dict['blk.0.attn_q_norm.weight'].shape[0]) if 'blk.0.attn_q_norm.weight' in state_dict else 0,
       num_experts=kv.get(f'{arch}.expert_count', 0), num_experts_per_tok=kv.get(f'{arch}.expert_used_count', 0),
-      norm_topk_prob=arch == 'qwen3moe',
+      norm_topk_prob=kv.get(f'{arch}.expert_weights_norm', arch == 'qwen3moe'),
       kv_lora_rank=kv_lora_rank,
       qk_nope_head_dim=kv.get(f'{arch}.attention.key_length_mla', 0) - kv.get(f'{arch}.rope.dimension_count', 0) if kv_lora_rank else 0,
       qk_rope_head_dim=kv.get(f'{arch}.rope.dimension_count', 0) if kv_lora_rank else 0,
-      v_head_dim=kv.get(f'{arch}.attention.value_length_mla', 0))
+      v_head_dim=kv.get(f'{arch}.attention.value_length_mla', 0),
+      shared_expert_dim=kv.get(f'{arch}.expert_shared_count', 0) * kv.get(f'{arch}.expert_feed_forward_length', 0),
+      leading_dense_blocks=kv.get(f'{arch}.leading_dense_block_count', 0),
+      dense_hidden_dim=kv.get(f'{arch}.feed_forward_length', 0) if kv.get(f'{arch}.leading_dense_block_count', 0) else 0,
+      routed_scaling_factor=kv.get(f'{arch}.expert_weights_scale', 1.0))
     model = Transformer(config)
     nn.state.load_state_dict(model, state_dict, verbose=False, consume=True, realize=False)  # NOTE: rope_freqs.weight (32,) is unused
     # NOTE: without this contiguous, it unpacks the weights from the model every time. we shouldn't need this, but for now it's faster
