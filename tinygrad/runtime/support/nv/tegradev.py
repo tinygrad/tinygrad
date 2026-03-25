@@ -32,7 +32,7 @@ class TegraIface:
       if not os.path.exists("/dev/nvgpu/igpu0/ctrl"): raise FileNotFoundError("/dev/nvgpu/igpu0/ctrl")
       TegraIface._nvmap_fd = os.open("/dev/nvmap", os.O_RDWR | os.O_SYNC | os.O_CLOEXEC)
       TegraIface._ctrl_fd = os.open("/dev/nvgpu/igpu0/ctrl", os.O_RDWR | os.O_CLOEXEC)
-      tegra_gpu_info = tegra.nvgpu_gpu_characteristics()
+      tegra_gpu_info = tegra.struct_nvgpu_gpu_characteristics()
       tegra.NVGPU_GPU_IOCTL_GET_CHARACTERISTICS(TegraIface._ctrl_fd,
         buf_size=ctypes.sizeof(tegra_gpu_info), buf_addr=ctypes.addressof(tegra_gpu_info))
       TegraIface._gpu_info = tegra_gpu_info

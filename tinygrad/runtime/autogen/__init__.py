@@ -119,18 +119,10 @@ def __getattr__(nm):
                                 args=["-I/opt/rocm/include", "-x", "c++"])
     case "amdgpu_drm": return load("amdgpu_drm", None, [ "/usr/include/drm/drm.h", *[root/f"extra/hip_gpu_driver/{s}.h" for s in ["amdgpu_drm"]]])
     case "tegra_36":
-      def _tegra_preprocess(path):
-        subprocess.run("tar xjf kernel_oot_modules_src.tbz2 --strip-components=1 -C . nvidia-oot/include/uapi/linux/nvmap.h "
-          "nvidia-oot/include/linux/nvmap.h", cwd=path+"Linux_for_Tegra/source/", shell=True, check=False, stderr=subprocess.DEVNULL)
-        if not (pathlib.Path(path) / "Linux_for_Tegra/source/nvidia-oot/include/uapi/linux/nvmap.h").exists():
-          raise FileNotFoundError("nvmap.h not found after extraction")
-      l4t_src = "https://developer.nvidia.com/downloads/embedded/l4t/r36_release_v4.4/sources/public_sources.tbz2"
-      return load("tegra_36", None, [
-        "{}/nvgpu/include/uapi/linux/nvgpu.h", "{}/nvgpu/include/uapi/linux/nvgpu-ctrl.h",
-        "{}/nvgpu/include/uapi/linux/nvgpu-as.h", "{}/nvidia-oot/include/uapi/linux/nvmap.h",
-      ], args=["-D__user=", "-D__u8=unsigned char", "-D__u16=unsigned short", "-D__u32=unsigned int", "-D__u64=unsigned long long",
-              "-D__s8=signed char", "-D__s16=short", "-D__s32=int", "-D__s64=long long", "-D_IOC_TYPECHECK(t)=sizeof(t)"],
-      srcs=l4t_src, preprocess=_tegra_preprocess)
+      return load("tegra_36", None, [root/f"extra/tegra_gpu_driver/{s}.h" for s in ["nvgpu", "nvgpu-ctrl", "nvgpu-as", "nvmap", "nvmap_extras"]],
+        args=["-D__user=", "-D__u8=unsigned char", "-D__u16=unsigned short", "-D__u32=unsigned int", "-D__u64=unsigned long long",
+              "-D__s8=signed char", "-D__s16=short", "-D__s32=int", "-D__s64=long long", "-D_IOC_TYPECHECK(t)=sizeof(t)",
+              f"-I{root/'extra/tegra_gpu_driver'}"])
     case "kgsl": return load("kgsl", None, [root/"extra/qcom_gpu_driver/msm_kgsl.h"], args=["-D__user="])
     case "qcom_dsp":
       return load("qcom_dsp", None, [root/f"extra/dsp/include/{s}.h" for s in ["ion", "msm_ion", "adsprpc_shared", "remote_default", "apps_std"]])
