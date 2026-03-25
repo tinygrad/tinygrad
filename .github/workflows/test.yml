@@ -211,7 +211,7 @@ jobs:
         DEBUG=2 EMULATE=AMD DEV=PYTHON python3 ./test/null/test_uops_stats.py TestUOpsStatsMatmulHalf
         DEBUG=2 EMULATE=CUDA DEV=PYTHON python3 ./test/null/test_uops_stats.py TestUOpsStatsMatmulHalf
         DEBUG=2 EMULATE=INTEL DEV=PYTHON python3 ./test/null/test_uops_stats.py TestUOpsStatsMatmulHalf
-        DEBUG=2 AMX=1 EMULATE=AMX DEV=PYTHON=1 python3 ./test/null/test_uops_stats.py TestUOpsStats.test_simple_matmul
+        DEBUG=2 AMX=1 EMULATE=AMX DEV=PYTHON python3 ./test/null/test_uops_stats.py TestUOpsStats.test_simple_matmul
 
   linter:
     name: Linters
