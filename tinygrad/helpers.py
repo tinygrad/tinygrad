@@ -190,7 +190,8 @@ class Target:
     triple = iface_split[-1].split(':')
     arch, *arch_params = triple.pop().split(',') if len(triple) == 3 else ("",)
     assert len(iface_split) <= 2 and len(triple) <= 3, f"invalid target string: '{s}'"
-    return Target(iface_split[0] if len(iface_split) == 2 else "", *(x.upper() for x in triple), arch=arch, arch_params=arch_params)
+    return Target(interface=iface_split[0] if len(iface_split) == 2 else "", device=triple[0].upper() if triple else "",
+                  renderer=triple[1] if len(triple) > 1 else "", arch=arch, arch_params=arch_params)
 
   def __repr__(self):
     colonsep = [self.device, self.renderer, ",".join([self.arch, *self.arch_params])]
@@ -199,10 +200,10 @@ class Target:
 
 class _DEV(ContextVar):
   def __init__(self): super().__init__("DEV", "")
-  def tolist(self): return [Target.parse(x) for x in super().tolist(delim=";")] if self.value else [Target()]
+  def tolist(self, obj=None, delim=";"): return [Target.parse(x) for x in super().tolist(delim=delim)] if self.value else [Target()]
   @property
   def DEFAULT(self): return self.tolist()[0]
-  def __getitem__(self, key): return next(filter(lambda x: not x.device or x.device == key), self.tolist())
+  def __getitem__(self, key): return next(x for x in self.tolist() if not x.device or x.device == key)
 
 DEV = _DEV()
 DEBUG, BEAM, NOOPT = ContextVar("DEBUG", 0), ContextVar("BEAM", 0), ContextVar("NOOPT", 0)
