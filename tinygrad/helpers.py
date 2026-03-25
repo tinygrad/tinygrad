@@ -190,7 +190,7 @@ class Target:
     triple = iface_split[-1].split(':')
     arch, *arch_params = triple.pop().split(',') if len(triple) == 3 else ("",)
     assert len(iface_split) <= 2 and len(triple) <= 3, f"invalid target string: '{s}'"
-    return Target(iface_split[0] if len(iface_split) == 2 else "", *triple, arch=arch, arch_params=arch_params)
+    return Target(iface_split[0] if len(iface_split) == 2 else "", *(x.upper() for x in triple), arch=arch, arch_params=arch_params)
 
   def __repr__(self):
     colonsep = [self.device, self.renderer, ",".join([self.arch, *self.arch_params])]
