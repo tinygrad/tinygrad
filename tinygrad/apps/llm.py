@@ -342,11 +342,10 @@ class Handler(HTTPRequestHandler):
     body: dict[str, typing.Any] = json.loads(raw_body.decode("utf-8"))
     if DEBUG >= 1: print(json.dumps(body, indent=2))
     if self.path == "/v1/chat/completions":
-      # extract tokens
+      # extract tokens, last assistant message is treated as prefill
       ids: list[int] = [bos_id] if bos_id is not None else []
-      for msg in body["messages"]:
+      for i, msg in enumerate(body["messages"]):
         ids += tok.role(msg["role"])
-        # content can be a str or a list
         content = msg["content"]
         if isinstance(content, str): ids += tok.encode(content)
         elif isinstance(content, list):
@@ -354,8 +353,9 @@ class Handler(HTTPRequestHandler):
             if c["type"] == "text": ids += tok.encode(c["text"])
             else: raise RuntimeError(f"unhandled type: {c['type']}")
         else: raise RuntimeError(f"unknown content type: {type(content)}")
+        if msg["role"] == "assistant" and i == len(body["messages"]) - 1: break
         ids += tok.end_turn(eos_id)
-      ids += tok.role("assistant")
+      else: ids += tok.role("assistant")
 
       # reply
       max_tokens = body.get("max_completion_tokens") or body.get("max_tokens")
@@ -383,8 +383,7 @@ if __name__ == "__main__":
   # load the model
   raw_model = Tensor.from_url(models[args.model])
   model, kv = Transformer.from_gguf(raw_model, args.max_context)
-  if DEBUG >= 1 or args.benchmark:
-    print(f"using model {args.model} with {raw_model.nbytes():,} bytes and {sum(x.numel() for x in nn.state.get_parameters(model)):,} params")
+  print(f"using model {args.model} with {raw_model.nbytes():,} bytes and {sum(x.numel() for x in nn.state.get_parameters(model)):,} params")
   del raw_model
 
   # TODO: why this is required to free the RAM of the GGUF copy?
