@@ -171,9 +171,6 @@ class InstOpRDNA4(Enum):
   WMMA_32 = 0x8e
   WMMA_64 = 0x8f
   VALU_DPFP = 0x92
-  VALU_DERATE = 0x93
-  ICPREF = 0x96
-  KCPREF = 0x97
   SALU_FLOAT3 = 0x98
   VALU_SCL_TRANS = 0x99
   SALU_2 = 0x9b
@@ -630,7 +627,7 @@ def decode(data: bytes) -> Iterator[PacketType]:
     if special == 1:  # TS_DELTA_OR_MARK
       pkt = pkt_cls.from_raw(reg, 0)  # create packet to check is_marker
       if pkt.is_marker: delta = 0
-    elif special == 2: delta += 8  # TS_DELTA_SHORT: delta value is offset by 4
+    elif special == 2: delta += 8  # TS_DELTA_SHORT
     elif special == 3: delta *= 4  # CDNA_DELTA
     elif special == 4:  # CDNA_TIMESTAMP (absolute timestamp anchoring)
       if (reg >> 4) & 0xfff == 0:  # unk_0 == 0 means absolute timestamp
