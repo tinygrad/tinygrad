@@ -13,7 +13,7 @@ if __name__ == "__main__":
   parser.add_argument("--max_tokens", "-T", type=int, default=4096)
   parser.add_argument("--offset", "-O", type=int, default=0)
   parser.add_argument("--temperature", "-t", type=float, default=0.0)
-  parser.add_argument("--no_think", action="store_true", help="append /no_think to disable thinking (for Qwen3)")
+  parser.add_argument("--no_think", action="store_true", help="disable thinking (prefills empty think block via assistant message)")
   parser.add_argument("--debug", action="store_true")
   args = parser.parse_args()
 
@@ -29,8 +29,10 @@ if __name__ == "__main__":
     phrasing = "Given the following question and four candidate answers (A, B, C and D), choose the best answer.\n" +\
                f"Question: {question}\n" + '\n'.join([f"{l}. {t}" for l, t in zip(LABEL, choices['text'])]) +\
                '\nYour response should end with "The best answer is [the_answer_letter]"' +\
-               " where the [the_answer_letter] is one of A, B, C or D." + (" /no_think" if args.no_think else "")
-    resp = client.chat.completions.create(model="test", messages=[{"role": "user", "content": phrasing}],
+               " where the [the_answer_letter] is one of A, B, C or D."
+    messages = [{"role": "user", "content": phrasing}]
+    if args.no_think: messages.append({"role": "assistant", "content": "<think>\n\n</think>\n\n"})
+    resp = client.chat.completions.create(model="test", messages=messages,
                                           max_tokens=args.max_tokens, temperature=args.temperature)
     # normalize answer key (some use 1/2/3/4 instead of A/B/C/D)
     correct = answer.as_py().strip()

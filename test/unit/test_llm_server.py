@@ -2,13 +2,15 @@ import unittest
 from unittest.mock import patch
 from tinygrad import Tensor, UOp
 from tinygrad.engine.schedule import schedule_cache
+from tinygrad.apps.llm import Transformer, TransformerConfig
+
+TEST_CONFIG = TransformerConfig(num_blocks=1, dim=64, hidden_dim=128, n_heads=2, n_kv_heads=2,
+                          norm_eps=1e-5, vocab_size=100, head_dim=32, rope_theta=10000.0, max_context=32)
 
 class TestTransformerGenerate(unittest.TestCase):
   def test_kv_cache_reuse(self):
     """Test that generate reuses the KV cache when tokens extend the cached prefix."""
-    from tinygrad.apps.llm import Transformer
-    model = Transformer(num_blocks=1, dim=64, hidden_dim=128, n_heads=2, n_kv_heads=2,
-                        norm_eps=1e-5, vocab_size=100, head_dim=32, rope_theta=10000.0, max_context=32)
+    model = Transformer(TEST_CONFIG)
 
     captured_inputs = []
     def mock_call(self, tokens, start_pos, temperature):
@@ -35,9 +37,7 @@ class TestTransformerGenerate(unittest.TestCase):
 
   def test_kv_cache_invalidation(self):
     """Test that generate invalidates the KV cache when tokens diverge from the cached prefix."""
-    from tinygrad.apps.llm import Transformer
-    model = Transformer(num_blocks=1, dim=64, hidden_dim=128, n_heads=2, n_kv_heads=2,
-                        norm_eps=1e-5, vocab_size=100, head_dim=32, rope_theta=10000.0, max_context=32)
+    model = Transformer(TEST_CONFIG)
 
     captured_inputs = []
     def mock_call(self, tokens, start_pos, temperature):
@@ -61,9 +61,8 @@ class TestTransformerGenerate(unittest.TestCase):
 
   def test_two_prompts_schedule_cache(self):
     """Third prompt should hit the schedule cache, not miss (first two warm up both jits: prefill + decode)."""
-    from tinygrad.apps.llm import Transformer
-    model = Transformer(num_blocks=1, dim=64, hidden_dim=128, n_heads=2, n_kv_heads=2,
-                        norm_eps=1e-5, vocab_size=100, head_dim=32, rope_theta=10000.0, max_context=64)
+    from dataclasses import replace
+    model = Transformer(replace(TEST_CONFIG, max_context=64))
 
     # first two prompts warm up both jits (prefill + decode)
     ids = list(range(1, 6))
@@ -85,10 +84,9 @@ class TestTransformerGenerate(unittest.TestCase):
 
   def test_chunked_prefill(self):
     """When prompt > chunk_size, all chunks should be prefill"""
-    from tinygrad.apps.llm import Transformer
     from tinygrad.uop.ops import resolve
-    model = Transformer(num_blocks=1, dim=64, hidden_dim=128, n_heads=2, n_kv_heads=2,
-                        norm_eps=1e-5, vocab_size=100, head_dim=32, rope_theta=10000.0, max_context=64)
+    from dataclasses import replace
+    model = Transformer(replace(TEST_CONFIG, max_context=64))
 
     def get_prefill_flags(tokens, chunk_size):
       is_prefill = []
@@ -110,9 +108,7 @@ class TestTransformerGenerate(unittest.TestCase):
 
   def test_temperature_zero_is_greedy(self):
     """Temperature 0 (or near 0) should produce deterministic output."""
-    from tinygrad.apps.llm import Transformer
-    model = Transformer(num_blocks=1, dim=64, hidden_dim=128, n_heads=2, n_kv_heads=2,
-                        norm_eps=1e-5, vocab_size=100, head_dim=32, rope_theta=10000.0, max_context=32)
+    model = Transformer(TEST_CONFIG)
     tokens = list(range(1, 6))
     results = [list(zip(range(5), model.generate(list(tokens)))) for _ in range(3)]
     # all runs should produce the same tokens
@@ -121,9 +117,7 @@ class TestTransformerGenerate(unittest.TestCase):
 
   def test_temperature_high_produces_variety(self):
     """High temperature should produce different outputs across runs."""
-    from tinygrad.apps.llm import Transformer
-    model = Transformer(num_blocks=1, dim=64, hidden_dim=128, n_heads=2, n_kv_heads=2,
-                        norm_eps=1e-5, vocab_size=100, head_dim=32, rope_theta=10000.0, max_context=32)
+    model = Transformer(TEST_CONFIG)
     tokens = list(range(1, 6))
     runs = set()
     for _ in range(5):
@@ -135,9 +129,7 @@ class TestTransformerGenerate(unittest.TestCase):
 
   def test_temperature_passed_to_forward(self):
     """Temperature from generate should be passed through to __call__."""
-    from tinygrad.apps.llm import Transformer
-    model = Transformer(num_blocks=1, dim=64, hidden_dim=128, n_heads=2, n_kv_heads=2,
-                        norm_eps=1e-5, vocab_size=100, head_dim=32, rope_theta=10000.0, max_context=32)
+    model = Transformer(TEST_CONFIG)
     captured_temps = []
     def mock_call(self, tokens, start_pos, temperature):
       captured_temps.append(float(temperature.item()))
