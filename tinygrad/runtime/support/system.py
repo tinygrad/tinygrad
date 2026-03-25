@@ -322,14 +322,14 @@ class RemotePCIDevice(PCIDevice):
     sock.settimeout(getenv("REMOTE_TIMEOUT", 3))
     sock.connect((host, port))
     sock.settimeout(None)
-    RemotePCIDevice._start_time = time.perf_counter()
-    def _print_stats():
-      if DEBUG >= 1:
+    if DEBUG >= 1:
+      RemotePCIDevice._start_time = time.perf_counter()
+      def _print_stats():
         dt = time.perf_counter() - RemotePCIDevice._start_time
         sent_mb, recv_mb = RemotePCIDevice._bulk_sent / 1e6, RemotePCIDevice._bulk_recv / 1e6
         print(f"remote: sent {sent_mb:,.2f} MB ({sent_mb/dt:,.2f} MB/s), recv {recv_mb:,.2f} MB ({recv_mb/dt:,.2f} MB/s), "
               f"{RemotePCIDevice._rpc_count:,} roundtrips in {dt:.2f}s")
-    atexit.register(_print_stats)
+      atexit.register(_print_stats)
     return sock
 
   @staticmethod
