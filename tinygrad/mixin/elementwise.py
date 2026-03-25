@@ -22,7 +22,14 @@ class ElementwiseMixin(DTypeMixin):
     return self.ufix(x).alu(op, self) if reverse else self.alu(op, self.ufix(x))
 
   def logical_not(self) -> Self:
-    return self.ne(True)
+    """
+    Computes the logical NOT of the tensor element-wise.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([False, True]).logical_not().numpy())
+    ```
+    """
+    return self.cast(dtypes.bool).ne(True)
 
   def neg(self) -> Self:
     """
