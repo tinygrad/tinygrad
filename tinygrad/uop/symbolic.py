@@ -401,7 +401,13 @@ def gated_given_valid(cond:UOp, x:UOp, i:UOp) -> UOp|None:
 
 def fold_where_closure(cond:UOp, t:UOp, f:UOp) -> UOp|None:
   """In cond.where(t, f), fold nested cond.where(a, b) -> a in t, -> b in f"""
-  def is_foldable_where(u:UOp) -> bool: return u.op is Ops.WHERE and u.src[0] is cond and Invalid not in (getattr(u.src[1],'arg',None), getattr(u.src[2],'arg',None))
+  def is_foldable_where(u:UOp) -> bool:
+    if not (u.op is Ops.WHERE and u.src[0] is cond): return False
+    if Invalid in (getattr(u.src[1],'arg',None), getattr(u.src[2],'arg',None)): return False
+    # don't fold if either branch contains memory ops (LOAD/INDEX) which may depend on the condition for validity
+    if u.src[1].op_in_backward_slice_with_self(Ops.LOAD, Ops.INDEX): return False
+    if u.src[2].op_in_backward_slice_with_self(Ops.LOAD, Ops.INDEX): return False
+    return True
   t_subs = {u: u.src[1] for u in t.toposort() if is_foldable_where(u)}
   f_subs = {u: u.src[2] for u in f.toposort() if is_foldable_where(u)}
   if not t_subs and not f_subs: return None
