@@ -349,8 +349,8 @@ def sqtt_timeline(data:bytes, lib:bytes, target:str) -> Generator[ProfileEvent, 
   NS_PER_TICK = 10  # 100MHz
   prev_pair:tuple[int, int]|None = None # (shader, realtime)
   is_cdna = target.startswith("gfx9")
-  dispatch_to_exec = {"WMMA":"VALU", "VALU":"VALU", "VALUINST":"VALU", "VINTERP":"VALU", "GLOBAL":"VMEM", "FLAT":"VMEM", "LDS":"LDS", "SALU":"SALU",
-                      "SMEM":"SALU", "VMEM":"VMEM"}
+  dispatch_to_exec = {"WMMA":"VALU", "VALU":"VALU", "VALU1":"VALU", "VALUT":"VALU", "VALUB":"VALU", "VALUINST":"VALU", "VINTERP":"VALU",
+                      "SGMEM":"VMEM", "FLAT":"VMEM", "LDS":"LDS", "SALU":"SALU", "SMEM":"SALU", "VMEM":"VMEM"}
   def add(name:str, p:PacketType, op:str|None=None, wave:int|None=None, info:InstructionInfo|None=None) -> Generator[ProfileEvent, None, None]:
     row = f"WAVE:{wave}" if (wave:=getattr(p, "wave", wave)) is not None else f"{p.__class__.__name__}:0 {name}"
     if row not in row_ends: yield ProfilePointEvent(row, "JSON", "pcMap", pc_map, ts=Decimal(0))
