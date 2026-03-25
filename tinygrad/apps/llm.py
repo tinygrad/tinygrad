@@ -8,6 +8,7 @@ from tinygrad.viz.serve import TCPServerWithReuse, HTTPRequestHandler
 
 class SimpleTokenizer:
   def __init__(self, normal_tokens:dict[str, int], special_tokens:dict[str, int], preset:str="llama3"):
+    preset = {"qwen35":"qwen2","qwen35moe":"qwen2"}.get(preset, preset)
     if preset not in ("llama3","llama-v3","llama-bpe","qwen2","olmo"): raise ValueError(f"Invalid tokenizer preset '{preset}'")
     # https://github.com/openai/gpt-2/blob/9b63575ef42771a015060c964af2c3da4cf7c8ab/src/encoder.py#L9
     bs = [*range(33, 127), *range(161, 173), *range(174, 256)]  # bytes that map to themselves
@@ -31,7 +32,7 @@ class SimpleTokenizer:
     # https://github.com/ggml-org/llama.cpp/blob/94933c8c2eeaa9a7983e3f6c08af76bd86724094/src/llama-vocab.cpp#L1818-L1820
     vocab: typing.Iterable[tuple[str, int]] = ((tok, idx) for idx, tok in enumerate(kv["tokenizer.ggml.tokens"]))
     normal_tokens, special_tokens = partition(vocab, lambda e: kv["tokenizer.ggml.token_type"][e[1]] == 1)
-    return SimpleTokenizer(dict(normal_tokens), dict(special_tokens), {"qwen35":"qwen2","qwen35moe":"qwen2"}.get(p:=kv["tokenizer.ggml.pre"], p))
+    return SimpleTokenizer(dict(normal_tokens), dict(special_tokens), kv["tokenizer.ggml.pre"])
 
   def _encode_word(self, word:bytes) -> list[int]:
     if (early_token:=self._normal_tokens.get(word)) is not None: return [early_token]
@@ -77,19 +78,18 @@ class ExpertWeights:
     # sel: (B, T, k), x: (B, T, 1, in) or (B, T, k, in) -> output: (B, T, k, out)
     return (x.unsqueeze(-2) @ self.weight[sel].transpose(-1, -2)).squeeze(-2)
 
-def apply_rope(x:Tensor, freqs_cis:Tensor, rope_dim:int=0) -> Tensor:
+def apply_rope(x:Tensor, freqs_cis:Tensor) -> Tensor:
   assert x.shape[-1] % 2 == 0
-  x_rot, x_pass = (x[..., :rope_dim], x[..., rope_dim:]) if (rope_dim and rope_dim < x.shape[-1]) else (x, None)
-  cos, sin = freqs_cis.reshape(1, 1, x_rot.shape[2], -1).chunk(2, dim=-1)
-  x1, x2 = x_rot.chunk(2, dim=-1)
-  y = (x1 * cos - x2 * sin).cat(x2 * cos + x1 * sin, dim=-1)
-  return y.cat(x_pass, dim=-1) if x_pass is not None else y
+  cos, sin = freqs_cis.reshape(1, 1, x.shape[2], -1).chunk(2, dim=-1)
+  x1, x2 = x.chunk(2, dim=-1)
+  return (x1 * cos - x2 * sin).cat(x2 * cos + x1 * sin, dim=-1)
 
 def pairwise_topk(x: Tensor, k: int) -> tuple[Tensor, Tensor]:
   n = x.shape[-1]
   cmp = (x.unsqueeze(-1) > x.unsqueeze(-2)) | ((x.unsqueeze(-1) == x.unsqueeze(-2)) & \
     (Tensor.arange(n).reshape(1,1,n,1) < Tensor.arange(n).reshape(1,1,1,n)))
-  sel = (x*0).scatter(-1, cmp.sum(axis=-1).cast('int32'), x*0+Tensor.arange(n).reshape(1,1,n).cast(x.dtype))[:,:,n-k:].cast('int32')
+  vals = Tensor.zeros_like(x)+Tensor.arange(n).reshape(1,1,n).cast(x.dtype)
+  sel = Tensor.zeros_like(x).scatter(-1, cmp.sum(axis=-1).cast('int32'), vals)[:,:,n-k:].cast('int32')
   return x.gather(-1, sel), sel
 
 @dataclass(frozen=True)
@@ -127,6 +127,7 @@ class FFNBlock:
     # --- RMSNorms --------------------------------------------------------
     self.attn_norm   = nn.RMSNorm(config.dim, config.norm_eps)
     self.ffn_norm    = nn.RMSNorm(config.dim, config.norm_eps)
+
     # --- feed-forward (MoE or dense) -------------------------------------
     if config.num_experts > 0:
       self.ffn_gate_inp = nn.Linear(config.dim, config.num_experts, bias=False)  # router
@@ -183,7 +184,6 @@ class TransformerBlock(FFNBlock):
     self.attn_output = nn.Linear(config.head_dim * config.n_heads, config.dim, bias=False)
     if config.qk_norm: self.attn_q_norm, self.attn_k_norm = nn.RMSNorm(config.qk_norm, config.norm_eps), nn.RMSNorm(config.qk_norm, config.norm_eps)
 
-  @function
   def _attention(self, x:Tensor, start_pos:int|UOp) -> Tensor:
     x_norm = self.attn_norm(x)                       # (B,T,D)
     q, k, v = self.attn_q(x_norm), self.attn_k(x_norm), self.attn_v(x_norm)
@@ -199,8 +199,8 @@ class TransformerBlock(FFNBlock):
     if self.config.qk_norm == self.config.head_dim: q, k = self.attn_q_norm(q), self.attn_k_norm(k)
 
     rope_dim = self.config.rope_dim or self.config.head_dim
-    q = apply_rope(q, self.freqs_cis[start_pos:start_pos+T], rope_dim)
-    k = apply_rope(k, self.freqs_cis[start_pos:start_pos+T], rope_dim)
+    q = apply_rope(q[..., :rope_dim], self.freqs_cis[start_pos:start_pos+T]).cat(q[..., rope_dim:], dim=-1)
+    k = apply_rope(k[..., :rope_dim], self.freqs_cis[start_pos:start_pos+T]).cat(k[..., rope_dim:], dim=-1)
 
     # NOTE: we don't want to change self.cache_kv, the function API doesn't support this well
     assigned_kv = Tensor(self.cache_kv.uop.after(self.cache_kv[:, :, :, start_pos:start_pos+T, :].uop.store(Tensor.stack(k, v).uop)))
@@ -222,9 +222,8 @@ class TransformerBlock(FFNBlock):
   def _init_state(self, x):
     if not hasattr(self, "cache_kv"):
       # TODO: how is the dtype of this determined?
-      rope_dim = self.config.rope_dim or self.config.head_dim
       self.cache_kv = Tensor.empty(2, x.shape[0], self.config.n_kv_heads, self.config.max_context, self.config.head_dim, device=x.device)
-      self.freqs_cis = precompute_freqs_cis(rope_dim, self.config.max_context, self.config.rope_theta)
+      self.freqs_cis = precompute_freqs_cis(self.config.rope_dim or self.config.head_dim, self.config.max_context, self.config.rope_theta)
 
 class GatedDeltaNetBlock(FFNBlock):
   def __init__(self, config:TransformerConfig, ssm:SSMConfig):
@@ -239,7 +238,6 @@ class GatedDeltaNetBlock(FFNBlock):
     self.ssm_a = Tensor.zeros(self.num_v_heads)
     self.ssm_norm, self.ssm_out = nn.RMSNorm(self.head_v_dim, config.norm_eps), nn.Linear(ssm.inner_size, config.dim, bias=False)
 
-  @function
   def _attention(self, x:Tensor, start_pos:int|UOp) -> Tensor:
     B, _, _ = x.shape
     x_norm = self.attn_norm(x).half()
