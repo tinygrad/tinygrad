@@ -399,14 +399,15 @@ def gated_given_valid(cond:UOp, x:UOp, i:UOp) -> UOp|None:
   if IMAGE.value > 0 and x.op_in_backward_slice_with_self(Ops.IDIV, Ops.MOD): return None
   return cond.where(uop_given_valid(cond, x, try_simplex=False), i)
 
-# TODO: this is O(number of WHERE * number of node)
-# def fold_where_closure(cond:UOp, t:UOp, f:UOp) -> UOp|None:
-#   """In cond.where(t, f), fold nested cond.where(a, b) -> a in t, -> b in f"""
-#   def is_valid_where(u:UOp) -> bool: return u.op is Ops.WHERE and u.src[0] is cond and Invalid not in (u.src[1].arg, u.src[2].arg)
-#   t_subs, f_subs = {u: u.src[1] for u in t.toposort() if is_valid_where(u)}, {u: u.src[2] for u in f.toposort() if is_valid_where(u)}
-#   if not t_subs and not f_subs: return None
-#   new_t, new_f = t.substitute(t_subs).simplify() if t_subs else t, f.substitute(f_subs).simplify() if f_subs else f
-#   return None if new_t is t and new_f is f else cond.where(new_t, new_f)
+def fold_where_closure(cond:UOp, t:UOp, f:UOp) -> UOp|None:
+  """In cond.where(t, f), fold nested cond.where(a, b) -> a in t, -> b in f"""
+  def is_foldable_where(u:UOp) -> bool: return u.op is Ops.WHERE and u.src[0] is cond and Invalid not in (getattr(u.src[1],'arg',None), getattr(u.src[2],'arg',None))
+  t_subs = {u: u.src[1] for u in t.toposort() if is_foldable_where(u)}
+  f_subs = {u: u.src[2] for u in f.toposort() if is_foldable_where(u)}
+  if not t_subs and not f_subs: return None
+  new_t = t.substitute(t_subs).simplify() if t_subs else t
+  new_f = f.substitute(f_subs).simplify() if f_subs else f
+  return cond.where(new_t, new_f) if new_t is not t or new_f is not f else None
 
 pm_simplify_valid = PatternMatcher([
   # simplify valid
@@ -421,8 +422,8 @@ sym = symbolic+pm_simplify_valid+PatternMatcher([
   (UPat(GroupOp.ALU, src=(UPat(Ops.VECTORIZE, src=UPat(name='x')), UPat(Ops.VECTORIZE, src=UPat(name='y'))), name='alu'),
    lambda x,y,alu: UOp(Ops.VECTORIZE, alu.dtype, (UOp(alu.op, alu.dtype.scalar(), (x,y)),)*alu.dtype.count)),
   # ** where **
-  # # fold nested where with same condition: in cond.where(t,f), cond.where(a,b)->a in t, ->b in f
-  # (UPat.var("cond").where(UPat.var("t"), UPat.var("f")), fold_where_closure),
+  # fold nested where with same condition: in cond.where(t,f), cond.where(a,b)->a in t, ->b in f
+  (UPat.var("cond").where(UPat.var("t"), UPat.var("f")), fold_where_closure),
   # push cast to branches
   (UPat.var("s").where(UPat.var("a"), UPat.var("b")).cast().named("cast"), lambda s,a,b,cast: s.where(a.cast(cast.dtype), b.cast(cast.dtype))),
   # ** pow **

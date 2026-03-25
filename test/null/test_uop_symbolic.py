@@ -921,7 +921,6 @@ class TestSymbolic(unittest.TestCase):
     # (a if ((s<5)&(s<6)) else b) -> (a if (s<5) else b)
     self.helper_test_variable(expr, 0, 3, "(s<5).where(a, b)")
 
-  @unittest.expectedFailure
   def test_where_closure_folding(self):
     # cond.where(t, f) where f contains cond.where(a, b) should fold the inner where to b in false branch
     x = Variable("x", 0, 10)
@@ -930,6 +929,15 @@ class TestSymbolic(unittest.TestCase):
     outer = cond.where(inner * 2, inner + 1)  # true: -x*2, false: x+1
     # the inner where should be folded: true branch gets -x, false branch gets x
     self.helper_test_variable(outer, -20, 11, "(x<5).where((x*-2), (x+1))")
+
+  def test_where_closure_folding_both_branches(self):
+    # both branches contain cond.where -> fold in both
+    x = Variable("x", 0, 10)
+    cond = x < 5
+    inner = cond.where(x, x + 1)
+    outer = cond.where(inner, inner + 10)
+    # true: cond is true -> inner = x, false: cond is false -> inner = x+1, so x+11
+    self.helper_test_variable(outer, 0, 21, "(x<5).where(x, (x+11))")
 
   def test_symbolic_div(self):
     # from symbolic arange
