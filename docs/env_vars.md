@@ -3,7 +3,7 @@
 This is a list of environment variable that control the runtime behavior of tinygrad and its examples.
 Most of these are self-explanatory, and are usually used to set an option at runtime.
 
-Example: `CL=1 DEBUG=4 python3 -m pytest`
+Example: `DEV=CL DEBUG=4 python3 -m pytest`
 
 However you can also decorate a function to set a value only inside that function.
 
@@ -21,6 +21,35 @@ with Context(DEBUG=0):
   a *= 2
 ```
 
+## `DEV` Variable
+
+`DEV` is probably the most commonly used environment variable, and obeys an elaborate syntax.
+In tinygrad, `DEV` is used to specify the default backend, which includes the interface, device runtime,
+renderer, arch string, and additional arch parameters. The core of the `DEV` syntax is a `:`-delimited
+triple (eg. `AMD:AMDLLVM:gfx1100`). In order, these fields specify the device runtime, renderer, and arch.
+Omitting any of these fields will cause tinygrad to infer a value, which allows trailing `:`'s to be dropped.
+That is, writing `DEV=AMD` is equivalent to writing `DEV=AMD::` (NB: you cannot write `DEV=gfx1100` as a
+shorthand for `DEV=::gfx1100` and similarly `DEV=LLVM` is not a valid shorthand for `DEV=:LLVM`). The arch
+section of the triple may also contain additional comma-separated parameters (eg. `DEV=CPU:LLVM:x86_64,avx512`).
+To specify the interface, prepend `<iface>+` to rest of the target string (eg. `DEV=USB+AMD`). Finally, additional
+target strings may be added, semicolon-separated, to `DEV` to specify desired settings for the non-default devices.
+
+### Example Values
+
+Value | Meaning
+---|---
+AMD                               | use the AMD device
+AMD:AMDLLVM                       | use the AMD device with the AMDLLVM renderer
+CPU:LLVM:x86_64,avx512            | use the CPU device with the LLVM renderer targeting x86_64, with additional parameter avx512
+NV:CUDA:sm_70                     | use the NV device with the CUDA renderer targeting sm_70
+NULL:QCOMCL:a630                  | use the NULL device with the QCOMCL renderer targeting a630
+MOCK+AMD::gfx950                  | use the AMD device over the MOCK interface targeting gfx950
+PYTHON::sm_89                     | use the PYTHON device targeting sm_89 (ie. emulate sm_89 tensor cores in python)
+USB+AMD:AMDLLVM:gfx1201           | use the AMD device over the USB interface with the AMDLLVM renderer targeting gfx1201
+REMOTE:localhost:1337+AMD:AMDLLVM | use the AMD device over the REMOTE interface (at localhost:1337) with the AMDLLVM renderer
+PCI:0-2,4+AMD                     | use the AMD device over the PCI interface (physical devices 0-2,4)
+AMD:AMDLLVM;QCOM:IR3              | default to using the AMD device with the AMDLLVM renderer, render any QCOM kernels with the IR3 renderer
+
 ## Global Variables
 The columns of this list are are: Variable, Possible Value(s) and Description.
 
@@ -31,12 +60,6 @@ These control the behavior of core tinygrad even when used as a library.
 Variable | Possible Value(s) | Description
 ---|---|---
 DEBUG               | [1-7]      | enable debugging output (operations, timings, speed, generated code and more)
-CL                  | [1]        | enable OpenCL backend
-CUDA                | [1]        | enable CUDA backend
-AMD                 | [1]        | enable AMD backend
-NV                  | [1]        | enable NV backend
-METAL               | [1]        | enable Metal backend (for Mac M1 and after)
-CPU                 | [1]        | enable CPU backend
 BEAM                | [#]        | number of beams in kernel beam search
 DEFAULT_FLOAT       | [HALF, ...]| specify the default float dtype (FLOAT32, HALF, BFLOAT16, FLOAT64, ...), default to FLOAT32
 IMAGE               | [1-2]      | enable 2d specific optimizations
