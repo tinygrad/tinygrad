@@ -128,7 +128,6 @@ class TransformerBlock:
       self.ffn_up      = nn.Linear(config.dim, config.hidden_dim, bias=False)
       self.ffn_down    = nn.Linear(config.hidden_dim, config.dim, bias=False)
 
-  @function
   def _attention(self, x:Tensor, start_pos:int|UOp) -> Tensor:
     x_norm = self.attn_norm(x)                       # (B,T,D)
     q, k, v = self.attn_q(x_norm), self.attn_k(x_norm), self.attn_v(x_norm)
@@ -160,7 +159,6 @@ class TransformerBlock:
     attn = self.attn_output(attn)
     return x + attn
 
-  @function
   def _feed_forward(self, h: Tensor) -> Tensor:
     h_norm = self.ffn_norm(h)
     if hasattr(self, 'ffn_gate_exps'):
