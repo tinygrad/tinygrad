@@ -112,7 +112,7 @@ class TestSQTTMapBase(unittest.TestCase):
           if e.name.display_name == "BARRIER": wave_barriers.setdefault(e.device, []).append(e)
           if (info:=e.name.ret) is None: continue
           # TODO: this doesn't work because RDNA3 WMMA dispatches VALUINST, need to hardcode wmma
-          #if "INST" in e.name.display_name and "wmma" in pc_map[int(info.replace("PC:", ""))]: wmma_dispatch_ids.append(f"{e.device}-{idx}")
+          #if "INST" in e.name.display_name and "wmma" in _pc_map[int(info.replace("PC:", ""))]: wmma_dispatch_ids.append(f"{e.device}-{idx}")
           # on RDNA4 the cycle count is in the op type
           if "WMMA" in e.name.display_name: wmma_dispatch_ids.append(f"{e.device}-{idx}")
           if info.replace("LINK:", "") in wmma_dispatch_ids: wmma_execs.append(e)

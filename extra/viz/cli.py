@@ -90,7 +90,7 @@ def main():
       pkt_idxs:dict[str, itertools.count] = {}
       dispatch_to_pc:dict[str, int] = {}
       for e in viz.sqtt_timeline(*sqtt_data):
-        if isinstance(e, ProfilePointEvent) and e.key == 'pcMap': pc_map = e.arg; continue
+        if isinstance(e, ProfilePointEvent) and e.key == 'pcMap': pc_map = e.arg
         if not isinstance(e, ProfileRangeEvent): continue
         op_name, info = e.name.display_name, e.name.ret or ""
         color = next((c for p, c in WAVE_COLORS if any(x in op_name for x in p)), None)
