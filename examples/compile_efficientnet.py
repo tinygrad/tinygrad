@@ -68,6 +68,6 @@ if __name__ == "__main__":
     else printf("%s\\n", lbls[best_idx]);
   }""")
 
-    # CPU=1 python3 examples/compile_efficientnet.py | clang -O2 -lm -x c - -o recognize && DEBUG=1 time ./recognize docs/showcase/stable_diffusion_by_tinygrad.jpg
+    # DEV=CPU python3 examples/compile_efficientnet.py | clang -O2 -lm -x c - -o recognize && DEBUG=1 time ./recognize docs/showcase/stable_diffusion_by_tinygrad.jpg
     # category : 281 (tabby, tabby cat) with 9.452788
     print('\n'.join(cprog))
