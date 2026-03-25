@@ -93,6 +93,14 @@ def pairwise_topk(x: Tensor, k: int) -> tuple[Tensor, Tensor]:
   return x.gather(-1, sel), sel
 
 @dataclass(frozen=True)
+class SSMConfig:
+  conv_kernel: int
+  state_size: int
+  group_count: int
+  time_step_rank: int
+  inner_size: int
+
+@dataclass(frozen=True)
 class TransformerConfig:
   num_blocks: int
   dim: int
@@ -111,7 +119,7 @@ class TransformerConfig:
   norm_topk_prob: bool = False
   shared_expert_dim: int = 0
   full_attention_interval: int = 0
-  ssm: dict|None = None
+  ssm: SSMConfig|None = None
 
 class FFNBlock:
   def __init__(self, config:TransformerConfig):
@@ -219,19 +227,17 @@ class TransformerBlock(FFNBlock):
       self.freqs_cis = precompute_freqs_cis(rope_dim, self.config.max_context, self.config.rope_theta)
 
 class GatedDeltaNetBlock(FFNBlock):
-  def __init__(self, config:TransformerConfig):
+  def __init__(self, config:TransformerConfig, ssm:SSMConfig):
     super().__init__(config)
-    assert config.ssm is not None
-    ssm = config.ssm
-    self.head_k_dim, self.num_k_heads, self.num_v_heads = ssm['state_size'], ssm['group_count'], ssm['time_step_rank']
-    self.head_v_dim, self.ssm_conv_kernel = ssm['inner_size'] // ssm['time_step_rank'], ssm['conv_kernel']
-    self.conv_channels, self.q_dim = ssm['inner_size'] + 2*ssm['group_count']*ssm['state_size'], ssm['state_size']*ssm['group_count']
-    self.attn_qkv, self.attn_gate = nn.Linear(config.dim, self.conv_channels, bias=False), nn.Linear(config.dim, ssm['inner_size'], bias=False)
+    self.head_k_dim, self.num_k_heads, self.num_v_heads = ssm.state_size, ssm.group_count, ssm.time_step_rank
+    self.head_v_dim, self.ssm_conv_kernel = ssm.inner_size // ssm.time_step_rank, ssm.conv_kernel
+    self.conv_channels, self.q_dim = ssm.inner_size + 2*ssm.group_count*ssm.state_size, ssm.state_size*ssm.group_count
+    self.attn_qkv, self.attn_gate = nn.Linear(config.dim, self.conv_channels, bias=False), nn.Linear(config.dim, ssm.inner_size, bias=False)
     self.ssm_alpha, self.ssm_beta = nn.Linear(config.dim, self.num_v_heads, bias=False), nn.Linear(config.dim, self.num_v_heads, bias=False)
     self.ssm_conv1d = types.SimpleNamespace(weight=Tensor.zeros(self.conv_channels, self.ssm_conv_kernel))
     self.ssm_dt = types.SimpleNamespace(bias=Tensor.zeros(self.num_v_heads))
     self.ssm_a = Tensor.zeros(self.num_v_heads)
-    self.ssm_norm, self.ssm_out = nn.RMSNorm(self.head_v_dim, config.norm_eps), nn.Linear(ssm['inner_size'], config.dim, bias=False)
+    self.ssm_norm, self.ssm_out = nn.RMSNorm(self.head_v_dim, config.norm_eps), nn.Linear(ssm.inner_size, config.dim, bias=False)
 
   @function
   def _attention(self, x:Tensor, start_pos:int|UOp) -> Tensor:
@@ -275,7 +281,7 @@ class GatedDeltaNetBlock(FFNBlock):
 class Transformer:
   def __init__(self, config:TransformerConfig):
     attn_config = config if not config.ssm else dc_replace(config, qk_norm=config.head_dim)
-    self.blk = [GatedDeltaNetBlock(config) if config.ssm and (i+1) % config.full_attention_interval != 0 else
+    self.blk = [GatedDeltaNetBlock(config, config.ssm) if config.ssm and (i+1) % config.full_attention_interval != 0 else
                 TransformerBlock(attn_config) for i in range(config.num_blocks)]
     self.token_embd  = nn.Embedding(config.vocab_size, config.dim)
     self.output_norm = nn.RMSNorm(config.dim, config.norm_eps)
@@ -320,7 +326,7 @@ class Transformer:
 
     ssm = None
     if arch in ('qwen35', 'qwen35moe'):
-      ssm = {k: kv[f'{arch}.ssm.{k}'] for k in ('conv_kernel','state_size','group_count','time_step_rank','inner_size')}
+      ssm = SSMConfig(**{k: kv[f'{arch}.ssm.{k}'] for k in ('conv_kernel','state_size','group_count','time_step_rank','inner_size')})
       state_dict = {k.replace('post_attention_norm', 'ffn_norm'):v for k,v in state_dict.items()}
     config = TransformerConfig(
       num_blocks=kv[f'{arch}.block_count'], dim=kv[f'{arch}.embedding_length'],
