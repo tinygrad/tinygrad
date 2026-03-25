@@ -1,11 +1,9 @@
 #!/usr/bin/env python3
-import argparse, pathlib, sys, struct, json, itertools, signal
+import argparse, pathlib, sys, struct, json, itertools
 from typing import Iterator
 from tinygrad.viz import serve as viz
 from tinygrad.uop.ops import RewriteTrace
 from tinygrad.helpers import temp, ansistrip, colored, time_to_str, ansilen, ProfilePointEvent, ProfileRangeEvent
-
-signal.signal(signal.SIGPIPE, signal.SIG_DFL)
 
 # ** generic helpers
 
