@@ -4,7 +4,7 @@ from collections import defaultdict
 from typing import Any, Generic, TypeVar, Iterator, Generator, TYPE_CHECKING
 import importlib, inspect, functools, pathlib, os, platform, contextlib, sys, re, atexit, pickle, decimal
 from tinygrad.helpers import BENCHMARKS, CI, OSX, LRU, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, flat_mv, PROFILE, temp, colored
-from tinygrad.helpers import Context, CCACHE, ALLOW_DEVICE_USAGE, MAX_BUFFER_SIZE, cpu_events, ProfileEvent, ProfilePointEvent, dedup, ContextVar
+from tinygrad.helpers import Context, CCACHE, ALLOW_DEVICE_USAGE, MAX_BUFFER_SIZE, cpu_events, ProfileEvent, ProfilePointEvent, ContextVar
 from tinygrad.helpers import unwrap_class_type, suppress_finalizing, select_first_inited, DEV, VIZ, CPU_LLVM, CPU_LVP, NV_PTX, CUDA_PTX, NV_NAK
 from tinygrad.helpers import EMULATE, EMULATED_DTYPES, NULL_IR3, NULL_QCOMCL, IMAGE, FLOAT16, TracingKey, size_to_str
 from tinygrad.dtype import DType, PtrDType, dtypes, _to_np_dtype
