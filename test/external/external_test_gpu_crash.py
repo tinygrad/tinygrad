@@ -2,7 +2,7 @@
 """Tests for GPU crash scenarios using AMD assembly to trigger invalid operations.
 
 These tests intentionally cause GPU faults to verify error handling.
-Run with: AMD=1 python -m pytest test/external/external_test_gpu_crash.py -v
+Run with: DEV=AMD python -m pytest test/external/external_test_gpu_crash.py -v
 """
 import unittest, re, importlib
 from tinygrad.device import Device
