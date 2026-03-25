@@ -13,11 +13,10 @@ def _moe_config(dim=8, hidden=16, n_heads=2, num_experts=4, num_experts_per_tok=
 
 class TestMoEFeedForward(unittest.TestCase):
   def _setup_experts(self, block: TransformerBlock, dim=8, hidden=16, num_experts=4):
-    # expert i produces a predictable magnitude via gate_exps scaling (i+1)
     block.ffn_gate_exps.weight = Tensor.stack(*[Tensor.eye(hidden, dim) * (i + 1) for i in range(num_experts)])
     block.ffn_up_exps.weight = Tensor.stack(*[Tensor.eye(hidden, dim) for _ in range(num_experts)])
     block.ffn_down_exps.weight = Tensor.stack(*[Tensor.eye(dim, hidden) for _ in range(num_experts)])
-    block.ffn_norm.weight = Tensor.ones(dim)  # make norm a no-op
+    block.ffn_norm.weight = Tensor.ones(dim)
 
   def test_moe_feed_forward_softmax_path(self):
     dim, hidden, n_heads = 8, 16, 2
@@ -25,7 +24,6 @@ class TestMoEFeedForward(unittest.TestCase):
     block = TransformerBlock(_moe_config(dim, hidden, n_heads, num_experts, k))
     self._setup_experts(block, dim, hidden, num_experts)
 
-    # router prefers experts 0 and 2
     block.ffn_gate_inp.weight = Tensor([[1, 0, 1, 0]] * dim).T
     h = Tensor.ones(1, 1, dim)
     out = block._feed_forward(h)
@@ -39,7 +37,6 @@ class TestMoEFeedForward(unittest.TestCase):
     block = TransformerBlock(replace(_moe_config(dim, hidden, n_heads, num_experts, k), norm_topk_prob=True))
     self._setup_experts(block, dim, hidden, num_experts)
 
-    # equal top-2 experts, normalization should keep mean behavior stable
     block.ffn_gate_inp.weight = Tensor([[0.1, 0, 0.1, 0]] * dim).T
     h = Tensor.ones(1, 1, dim)
     out = block._feed_forward(h)
@@ -55,14 +52,12 @@ class TestMoEFeedForward(unittest.TestCase):
     block = TransformerBlock(cfg)
     self._setup_experts(block, dim, hidden, num_experts)
 
-    # zero logits => sigmoid probs all 0.5, selection is controlled only by exp_probs_b_bias
     block.ffn_gate_inp.weight = Tensor.zeros(*block.ffn_gate_inp.weight.shape)
     block.exp_probs_b_bias = Tensor([-100.0, -100.0, 100.0, 100.0])
 
     h = Tensor.ones(1, 1, dim)
     out = block._feed_forward(h)
 
-    # expects experts 2 and 3 chosen, but weighted by unbiased probs (0.5 each)
     expected = 1 + 0.5 * Tensor([3.0]).silu().item() + 0.5 * Tensor([4.0]).silu().item()
     np.testing.assert_allclose(out.numpy()[0, 0, 0], expected, rtol=1e-2)
 
@@ -77,7 +72,6 @@ class TestMoEFeedForward(unittest.TestCase):
     self._setup_experts(b1, dim, hidden, num_experts)
     self._setup_experts(b2, dim, hidden, num_experts)
 
-    # identical routing behavior
     for b in (b1, b2):
       b.ffn_gate_inp.weight = Tensor.zeros(*b.ffn_gate_inp.weight.shape)
       b.exp_probs_b_bias = Tensor([-100.0, -100.0, 100.0, 100.0])
@@ -86,7 +80,6 @@ class TestMoEFeedForward(unittest.TestCase):
     out1 = b1._feed_forward(h).numpy()[0, 0, 0]
     out2 = b2._feed_forward(h).numpy()[0, 0, 0]
 
-    # residual (1.0) is unchanged; routed contribution should scale by ~0.5
     contrib1, contrib2 = out1 - 1.0, out2 - 1.0
     np.testing.assert_allclose(contrib2 / contrib1, 0.5, rtol=1e-2)
 
