@@ -307,6 +307,8 @@ function setFocus(key) {
     const link = e?.arg.link ?? data.links.get(key);
     data.link = link == null ? null : [key, link];
     focusedShape = key; d3.select("#timeline").call(canvasZoom.transform, zoomLevel);
+    const tooltip = document.getElementById("tooltip");
+    if (tooltip.dataset.key !== key) tooltip.style.display = "none";
   }
   const { eventType, e } = selectShape(key);
   if (metadata.querySelector(".info") == null) d3.select(metadata).html("").append("div").classed("info", true);
@@ -706,12 +708,6 @@ async function renderProfiler(path, opts) {
       if (maxWidth <= 0) continue;
       drawText(ctx, m.label, tx, 1, maxWidth);
     }
-    // hide tooltip if there's no longer a shape at its position
-    const tooltip = document.getElementById("tooltip");
-    if (tooltip.style.display !== "none") {
-      const r = rect(tooltip);
-      if (findRectAtPosition(r.left-10, r.top)?.tooltipText == null) tooltip.style.display = "none";
-    }
   }
 
   function resize() {
@@ -765,6 +761,7 @@ async function renderProfiler(path, opts) {
       tooltip.style.display = "block";
       tooltip.style.left = (e.pageX+10)+"px";
       tooltip.style.top = (e.pageY)+"px";
+      tooltip.dataset.key = foundRect.key ?? "";
     } else tooltip.style.display = "none";
   });
   canvas.addEventListener("mouseleave", () => document.getElementById("tooltip").style.display = "none");
