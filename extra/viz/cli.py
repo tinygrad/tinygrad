@@ -98,7 +98,7 @@ def main(args) -> None:
         phase, pc = None, None
         idx = next(pkt_idxs.setdefault(e.device, itertools.count()))
         if e.device.startswith("WAVE") or e.device == "OTHER":
-          dispatch_to_inst[f"{e.device}-{idx}"] = inst = f"0x{(pc:=int(info.replace('PC:', ''))):05x} {pc_map[pc]}" if info else op_name
+          dispatch_to_inst[f"{e.device}-{idx}"] = inst = f"0x{(pc:=int(info.replace('PC:', ''))):05x} {pc_map[pc]}" if info else f"{'':7} {op_name}"
           phase = "DISPATCH"
         if info.startswith("LINK:"): phase, inst = "EXEC", dispatch_to_inst[info.replace("LINK:", "")]
         if inst and phase: info = f"{phase:<8} {inst}"
