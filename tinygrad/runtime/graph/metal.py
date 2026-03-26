@@ -3,7 +3,7 @@ import ctypes, re, decimal
 from tinygrad.dtype import dtypes
 from tinygrad.helpers import dedup, getenv, merge_dicts, PROFILE
 from tinygrad.device import Buffer, ProfileGraphEntry, ProfileGraphEvent
-from tinygrad.uop.ops import UOp
+from tinygrad.uop.ops import UOp, Ops
 from tinygrad.engine.realize import ExecItem, CompiledRunner
 from tinygrad.engine.jit import GraphRunner, GraphException
 from tinygrad.runtime.ops_metal import wait_check, to_ns_str, MetalBuffer
@@ -111,7 +111,5 @@ class MetalGraph(GraphRunner):
 
   @staticmethod
   def supports_exec_item(batch_devs, new_call:UOp) -> bool:
-    from tinygrad.uop.ops import Ops
-    # Metal ICB replay encodes offsets as uint32; reject if any BUFFER_VIEW offset exceeds 32-bit range.
     if any(b.op is Ops.BUFFER_VIEW and b.arg[1] * b.dtype.itemsize > 0xFFFFFFFF for b in new_call.src[1:] if b.op is not Ops.BIND): return False
     return GraphRunner.supports_exec_item(batch_devs, new_call)

@@ -240,19 +240,13 @@ class HCQGraph(MultiGraphRunner):
 
   @staticmethod
   def supports_exec_item(batch_devs:list[Compiled], new_call:UOp) -> bool:
-    from tinygrad.uop.ops import Ops  # NOTE: late import to avoid circular dependency
+    from tinygrad.uop.ops import Ops
     from tinygrad.engine.jit import GraphRunner
-    ast = new_call.src[0]
     all_devs = cast(list[HCQCompiled], GraphRunner._all_devs(batch_devs, new_call))
-    # Check if all devices are HCQ
     if not all(issubclass(type(d), HCQCompiled) for d in all_devs): return False
-    # If all of devices are mapped into CPU address space, can use CPU inside the peer group.
     cpu_support = all(type(d.timeline_signal.base_buf.view) is MMIOInterface for d in all_devs)
-    # Check if all devices are within the same peer group. If CPU is supported, don't count it as a separate peer group.
     if len(set(d.peer_group for d in all_devs if not (cpu_support and d._is_cpu()))) > 1: return False
-    # COPY without transfer support needs copy queue + no MOCKGPU
-    if ast.op is Ops.COPY:
-      call_dev = Device[new_call.device]
-      is_xfer = hasattr(alc:=call_dev.allocator, '_transfer') and alc.supports_transfer
-      if not is_xfer: return cast(HCQCompiled, batch_devs[0]).hw_copy_queue_t is not None and not getenv("MOCKGPU")
-    return ast.op in (Ops.SINK, Ops.PROGRAM, Ops.COPY)
+    if new_call.src[0].op is Ops.COPY:
+      return (cast(HCQCompiled, all_devs[0]).hw_copy_queue_t is not None and not getenv("MOCKGPU")) or \
+        (hasattr(alc:=all_devs[0].allocator, '_transfer') and alc.supports_transfer)
+    return new_call.src[0].op in (Ops.SINK, Ops.PROGRAM)

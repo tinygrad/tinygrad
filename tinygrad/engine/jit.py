@@ -23,12 +23,9 @@ def prune_linear(linear:UOp, needed:set[UOp]) -> tuple[UOp, UOp]:
   return linear.replace(src=tuple(kept)), linear.replace(src=tuple(onetime))
 
 def create_graph_call(batch:list[UOp], input_buffers:set[Buffer]) -> UOp:
-  seen, input_list, internal_list = set[UOp](), [], []
-  for si in batch:
-    for b in si.src[1:]:
-      if b.op is Ops.BIND or b in seen: continue
-      seen.add(b)
-      (input_list if b.op in (Ops.BUFFER, Ops.BUFFER_VIEW) and b.buffer in input_buffers else internal_list).append(b)
+  all_bufs = dedup(b for si in batch for b in si.src[1:] if b.op is not Ops.BIND)
+  input_list = [b for b in all_bufs if b.op in (Ops.BUFFER, Ops.BUFFER_VIEW) and b.buffer in input_buffers]
+  internal_list = [b for b in all_bufs if b not in set(input_list)]
   param_map = {b: b.param_like(i) for i, b in enumerate(input_list)}
   sub_linear = UOp(Ops.LINEAR, src=tuple(batch)).substitute(param_map, name="graph split") if param_map else UOp(Ops.LINEAR, src=tuple(batch))
   cf = UOp(Ops.CUSTOM_FUNCTION, dtypes.void, src=(sub_linear, *input_list), arg="graph")
@@ -50,22 +47,19 @@ def graph_split_rewrite(linear:UOp, input_buffers:set[Buffer], max_batch_size:in
     current_batch, current_batch_devs = [], []
 
   for si in linear.src:
-    if si.src[0].op is Ops.BUFFER_VIEW:
-      new_src.append(si)
-      continue
+    if si.src[0].op is Ops.BUFFER_VIEW: continue
 
     devs = [Device[x] for x in (si.device if isinstance(si.device, tuple) else (si.device,))]
-    gt = graph_class(devs[0]) if devs[0].graph is not None else None
-    can_graph = gt is not None and gt.supports_exec_item(devs, si)
-    can_extend = can_graph and (not current_batch_devs or gt.supports_exec_item(current_batch_devs, si)) \
+    graph_t = graph_class(devs[0]) if devs[0].graph is not None else None
+
+    can_graph = graph_t is not None and graph_t.supports_exec_item(devs, si)
+    can_extend = can_graph and (not current_batch_devs or graph_t.supports_exec_item(current_batch_devs, si)) \
       and (max_batch_size == 0 or len(current_batch) < max_batch_size)
     if not can_extend and current_batch: flush_batch()
-    if can_graph:
-      current_batch.append(si)
-      current_batch_devs = dedup(current_batch_devs + devs)
-    else:
-      new_src.append(si)
-      current_batch_devs = []
+
+    # append this si and update devs
+    (current_batch if can_graph else new_src).append(si)
+    current_batch_devs = dedup(current_batch_devs + devs) if can_graph else []
   if current_batch: flush_batch()
   return linear.replace(src=tuple(new_src))
 
@@ -121,8 +115,7 @@ class GraphRunner(Runner):
     if isinstance(cf_or_cache, UOp):
       self.jit_cache, self.input_replace = lower_linear(cf_or_cache.src[0], cf_or_cache.src[1:])
       ensure_bufs_allocated(self.jit_cache)
-    else:
-      self.jit_cache, self.input_replace = cf_or_cache, input_replace or {}
+    else: self.jit_cache, self.input_replace = cf_or_cache, input_replace or {}
 
     self.var_vals_replace:dict[int, list[tuple[int, int]]] = {}
     self.launch_dims_replace:dict[int, tuple[int|None, int|None]] = {}
@@ -190,12 +183,8 @@ class GraphRunner(Runner):
 
   @staticmethod
   def _all_devs(batch_devs:list[Compiled], new_call:UOp) -> list[Compiled]:
-    call_devs = []
-    for b in new_call.src[1:]:
-      if b.op is Ops.BIND: continue
-      d = b.device
-      call_devs.extend(Device[x] for x in (d if isinstance(d, tuple) else (d,)))
-    return dedup(batch_devs + call_devs)
+    return dedup(batch_devs + [Device[x] for b in new_call.src[1:] if b.op is not Ops.BIND
+                               for x in (b.device if isinstance(b.device, tuple) else (b.device,))])
   @staticmethod
   def supports_exec_item(batch_devs:list[Compiled], new_call:UOp) -> bool:
     return new_call.src[0].op in (Ops.SINK, Ops.PROGRAM) and len(GraphRunner._all_devs(batch_devs, new_call)) == 1
@@ -204,13 +193,12 @@ class GraphRunner(Runner):
 class MultiGraphRunner(GraphRunner):
   @staticmethod
   def supports_exec_item(batch_devs:list[Compiled], new_call:UOp) -> bool:
-    return new_call.src[0].op in (Ops.SINK, Ops.PROGRAM, Ops.COPY) and \
-      len(dedup([type(d) for d in GraphRunner._all_devs(batch_devs, new_call)])) == 1
+    return new_call.src[0].op in (Ops.SINK, Ops.PROGRAM, Ops.COPY) and len(dedup([type(d) for d in GraphRunner._all_devs(batch_devs, new_call)])) == 1
 
 def get_out_buffers_for_ei(ei:ExecItem) -> list[Buffer]:
   if isinstance(ei.prg, CompiledRunner): return [cast(Buffer, ei.bufs[out]) for out in ei.prg.p.outs if out not in ei.prg.p.ins]
   if isinstance(ei.prg, (BufferCopy, BufferXfer, EncDec)): return [cast(Buffer, ei.bufs[0])]
-  if isinstance(ei.prg, GraphRunner): return [b for inner in ei.prg.jit_cache for b in get_out_buffers_for_ei(inner)]
+  if isinstance(ei.prg, GraphRunner): return dedup([b for inner in ei.prg.jit_cache for b in get_out_buffers_for_ei(inner)])
   return []
 
 def update_depends(depends:set[Buffer|None], jit_cache:list[ExecItem]):
