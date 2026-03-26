@@ -86,9 +86,9 @@ def main():
                      (('JUMP_NO',), '#fb8500'), (('MESSAGE',), '#90dbf4'), (('WAVERDY',), '#1a2a2a'))
       print(f"{'Clk':<12} {'Unit':<20} {'Op':<22} {'Dur':<4} {'Info'}")
       print("-" * 90)
-      pc_map:dict[int, str]|None = None
+      pc_map:dict[int, str] = {}
       pkt_idxs:dict[str, itertools.count] = {}
-      dispatch_to_pc:dict[str, int] = {}
+      dispatch_to_inst:dict[str, int] = {}
       for e in viz.sqtt_timeline(*sqtt_data):
         if isinstance(e, ProfilePointEvent) and e.key == 'pcMap': pc_map = e.arg
         if not isinstance(e, ProfileRangeEvent): continue
@@ -97,11 +97,11 @@ def main():
         op_str = hex_colored(op_name, color) if color and not args.no_color else op_name
         phase, pc = None, None
         idx = next(pkt_idxs.setdefault(e.device, itertools.count()))
-        if info.startswith("PC:"):
-          dispatch_to_pc[f"{e.device}-{idx}"] = pc = int(info.replace("PC:", ""))
+        if e.device.startswith("WAVE") or e.device == "OTHER":
+          dispatch_to_inst[f"{e.device}-{idx}"] = inst = f"0x{(pc:=int(info.replace('PC:', ''))):05x} {pc_map[pc]}" if info else op_name
           phase = "DISPATCH"
-        if info.startswith("LINK:"): phase, pc = "EXEC", dispatch_to_pc[info.replace("LINK:", "")]
-        if pc and phase and pc_map: info = f"{phase:<8} 0x{pc:05x} {pc_map[pc]}"
+        if info.startswith("LINK:"): phase, inst = "EXEC", dispatch_to_inst[info.replace("LINK:", "")]
+        if inst and phase: info = f"{phase:<8} {inst}"
         print(f"{int(e.st):<12} {e.device:<20} {op_str}{' '*(22-ansilen(op_str))} {int(e.en-e.st):<4} {info}")
       sys.exit(0)
 
