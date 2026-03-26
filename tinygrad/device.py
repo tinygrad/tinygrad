@@ -41,10 +41,12 @@ class _Device:
       with contextlib.suppress(Exception): yield self[device].device
   @functools.cached_property
   def DEFAULT(self) -> str:
+    assert (dev:=next((d for d in self._devices if d not in ["DISK", "TINYFS", "NPY"] and getenv(d) == 1), None)) is None, \
+      f"{dev}=1 is deprecated, use DEV={dev} instead"
     if (dev:=getenv("DEV", "").upper()): return dev
     try:
       device = next(self.get_available_devices())
-      os.environ[device] = "1"   # we set this in environment for spawned children
+      os.environ["DEV"] = device   # we set this in environment for spawned children
       return device
     except StopIteration as exc: raise RuntimeError("no usable devices") from exc
 Device: _Device = _Device()
