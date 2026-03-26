@@ -3,7 +3,7 @@ import functools, itertools
 from collections import defaultdict
 from dataclasses import dataclass
 from tinygrad.dtype import dtypes, ImageDType, DType, AddrSpace, Invalid, PtrDType
-from tinygrad.uop.ops import UOp, Ops, UPat, PatternMatcher, GroupOp, identity_element, graph_rewrite
+from tinygrad.uop.ops import UOp, Ops, UPat, PatternMatcher, GroupOp, identity_element
 from tinygrad.uop.symbolic import uop_given_valid, parse_valid, invalid_gate
 from tinygrad.helpers import getenv, flatten, AMX, prod
 from tinygrad.renderer import Renderer
@@ -356,25 +356,24 @@ pm_add_loads = PatternMatcher([
 
 # make images
 
-pm_image_store = PatternMatcher([
-  # store(imageh, x) is store(half, x.half()), so store(imageh, x.half().float()) -> store(half, x.half().float().half()) -> store(imageh, x)
-  (UPat.var("x", dtypes.float).cast(dtypes.half).cast(dtypes.float), lambda x: x),
-  # store(imageh, a.where(b.half(), c).float()) -> store(imageh, a.where(b, c.float()))
-  (UPat(Ops.WHERE, src=(UPat.var("a"), UPat.var("b", dtypes.float).cast(dtypes.half), UPat.var("c"))).cast(dtypes.float), lambda a,b,c:
-   a.where(b, c.cast(dtypes.float))),
-])
-
-def make_image(ls, idx, buf, off):
+def make_image(ls, buf, off):
   if (vcount:=buf.dtype.vcount) != 1: buf = buf.src[0]
-  if buf.op == Ops.PARAM and not isinstance(dt:=idx.dtype, ImageDType) and (dims:=ImageDType.valid_dims(dt)):
+  if buf.op == Ops.PARAM and not isinstance(dt:=buf.dtype, ImageDType) and (dims:=ImageDType.valid_dims(dt)):
     buf = buf.replace(dtype=(dtypes.imageh if dt.base == dtypes.half else dtypes.imagef)((*dims[0], 4)))
     if vcount != 1: buf = UOp.vectorize(*([buf] * vcount))
     if ls.op is Ops.LOAD: return ls.replace(src=(buf.index(off, ptr=True),), dtype=dtypes.float.vec(dt.vcount)).cast(dt.base)
     if dt.base == dtypes.float: return buf.index(off, ptr=True).store(ls.src[1])
-    return buf.index(off, ptr=True).store(graph_rewrite(ls.src[1].cast(dtypes.float), pm_image_store, name="imageh store"))
+    # handle cast for imageh store
+    idx, x = buf.index(off, ptr=True), ls.src[1]
+    # store(idx, x) is store<half>(idx, x.half()), so store(idx, x.half().float()) -> store<half>(idx, x.half().float().half()) -> store(idx, x)
+    x = next((d["x"] for d in UPat.var("x", dtypes.float).cast(dtypes.half).match(x, {})), x)
+    # store(imageh, a.where(b.half(), c).float()) -> store(imageh, a.where(b, c.float()))
+    x = next((d["a"].where(d["b"], d["c"].cast(dtypes.float))
+              for d in UPat(Ops.WHERE, src=(UPat.var("a"), UPat.var("b", dtypes.float).cast(dtypes.half), UPat.var("c"))).match(x, {})), x)
+    return buf.index(off, ptr=True).store(x.cast(dtypes.float))
 
 pm_make_images = PatternMatcher([
-  (UPat((Ops.LOAD, Ops.STORE), src=(UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("off")), name="idx"),), allow_any_len=True, name="ls"), make_image),
+  (UPat((Ops.LOAD, Ops.STORE), src=(UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("off"))),), allow_any_len=True, name="ls"), make_image),
   # load(imageh) is load(half).float(), so load(imageh).half().float() -> load(half).float().half().float() -> load(imageh)
   (UPat(Ops.LOAD, name="li").cast(dtypes.half).cast(dtypes.float), lambda li: li if isinstance(li.src[0].dtype, ImageDType) else None),
 ])

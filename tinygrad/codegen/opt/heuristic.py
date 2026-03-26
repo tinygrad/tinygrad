@@ -1,7 +1,7 @@
 import itertools
 from tinygrad.codegen.opt import Opt, OptOps, KernelOptError
 from tinygrad.helpers import getenv, DEBUG, prod, NOLOCALS, TC_OPT, TC_SELECT, USE_TC, AMX, IMAGE
-from tinygrad.dtype import ImageDType
+from tinygrad.dtype import PtrDType, ImageDType
 from tinygrad.uop.ops import Ops, resolve, AxisType
 from tinygrad.codegen.opt.postrange import Scheduler
 
@@ -51,7 +51,7 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
   # upcast float4 images, this must be early so we don't accidentally add locals before the upcast
   if IMAGE:
     for buf_index,buf in enumerate(k.bufs):
-      if ImageDType.valid_dims(buf.src[0].dtype):
+      if isinstance(buf.src[0].dtype, PtrDType) and ImageDType.valid_dims(buf.src[0].dtype):
         # part of is_expanded
         unit_stride_axes_mul_4 = [k.rngs.index(c) for c in k.bufs[buf_index].src[1].get_idx().split_uop(Ops.ADD) if
           c.op is Ops.RANGE and (c.vmax+1)%4 == 0]
