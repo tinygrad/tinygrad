@@ -22,19 +22,19 @@ def prune_linear(linear:UOp, needed:set[UOp]) -> tuple[UOp, UOp]:
     else: onetime.append(si)
   return linear.replace(src=tuple(kept)), linear.replace(src=tuple(onetime))
 
-def create_graph_call(batch:list[UOp], input_buf_uops:set[UOp]) -> UOp:
+def create_graph_call(batch:list[UOp], input_buffers:set[Buffer]) -> UOp:
   seen, input_list, internal_list = set[UOp](), [], []
   for si in batch:
     for b in si.src[1:]:
       if b.op is Ops.BIND or b in seen: continue
       seen.add(b)
-      (input_list if b in input_buf_uops else internal_list).append(b)
+      (input_list if b.op in (Ops.BUFFER, Ops.BUFFER_VIEW) and b.buffer in input_buffers else internal_list).append(b)
   param_map = {b: b.param_like(i) for i, b in enumerate(input_list)}
   sub_linear = UOp(Ops.LINEAR, src=tuple(batch)).substitute(param_map, name="graph split") if param_map else UOp(Ops.LINEAR, src=tuple(batch))
   cf = UOp(Ops.CUSTOM_FUNCTION, dtypes.void, src=(sub_linear, *input_list), arg="graph")
   return cf.call(*input_list + internal_list, metadata=tuple(m for si in batch for m in si.arg.metadata))
 
-def graph_split_rewrite(linear:UOp, input_buf_uops:set[UOp], input_buffers:list[Buffer], max_batch_size:int=0) -> UOp:
+def graph_split_rewrite(linear:UOp, input_buffers:set[Buffer], max_batch_size:int=0) -> UOp:
   new_src: list[UOp] = []
   current_batch: list[UOp] = []
   current_batch_devs: list[Compiled] = []
@@ -43,7 +43,7 @@ def graph_split_rewrite(linear:UOp, input_buf_uops:set[UOp], input_buffers:list[
     nonlocal current_batch, current_batch_devs, max_batch_size
     if len(current_batch) <= 1 and not getenv("GRAPH_ONE_KERNEL"): new_src.extend(current_batch)
     else:
-      new_src.append(graph_call:=create_graph_call(current_batch, input_buf_uops))
+      new_src.append(graph_call:=create_graph_call(current_batch, input_buffers))
       max_batch_size *= 2
       if DEBUG >= 2: print(f"JIT GRAPHing batch with {len(current_batch)} kernels")
       if VIZ: graph_rewrite(graph_call, PatternMatcher([]), name=f"graph split {len(current_batch)} kernels")
@@ -54,11 +54,9 @@ def graph_split_rewrite(linear:UOp, input_buf_uops:set[UOp], input_buffers:list[
       new_src.append(si)
       continue
 
-    if isinstance(si.device, tuple): can_graph, devs, gt = False, [], None  # multi-device expanded later in linear_to_schedule
-    else:
-      devs = [Device[si.device]]
-      gt = graph_class(devs[0]) if devs[0].graph is not None else None
-      can_graph = gt is not None and gt.supports_exec_item(devs, si)
+    devs = [Device[x] for x in (si.device if isinstance(si.device, tuple) else (si.device,))]
+    gt = graph_class(devs[0]) if devs[0].graph is not None else None
+    can_graph = gt is not None and gt.supports_exec_item(devs, si)
     can_extend = can_graph and (not current_batch_devs or gt.supports_exec_item(current_batch_devs, si)) \
       and (max_batch_size == 0 or len(current_batch) < max_batch_size)
     if not can_extend and current_batch: flush_batch()
@@ -71,14 +69,29 @@ def graph_split_rewrite(linear:UOp, input_buf_uops:set[UOp], input_buffers:list[
   if current_batch: flush_batch()
   return linear.replace(src=tuple(new_src))
 
+def ensure_bufs_allocated(jit_cache:list[ExecItem]):
+  for ei in jit_cache:
+    for b in ei.bufs:
+      if b is not None: b.ensure_allocated()
+
+def lower_linear(linear:UOp, input_bufs:tuple[UOp, ...]=()) -> tuple[list[ExecItem], dict[tuple[int,int],int]]:
+  input_replace: dict[tuple[int,int],int] = {}
+  if input_bufs:
+    # build input_replace based on PARAM positions, accounting for multi-device expansion.
+    exec_idx = 0
+    for si in linear.src:
+      for idx, b in enumerate(b for b in si.src[1:] if b.op is not Ops.BIND):
+        if b.op is Ops.PARAM: input_replace[(exec_idx, idx)] = b.arg
+      exec_idx += len(si.device) if isinstance(si.device, tuple) else 1
+    # substitute PARAM with actual input buffers.
+    linear = linear.substitute({u: input_bufs[u.arg] for u in linear.toposort(enter_calls=False) if u.op is Ops.PARAM})
+  return [ei.lower() for ei in linear_to_schedule(linear)], input_replace
+
 @track_rewrites(lambda linear,held_bufs,input_buffers=None,ret=(): f"JIT {pluralize('Kernel', len(ret))}")
 def jit_lower(linear:UOp, held_bufs:set[UOp], input_buffers:list[Buffer]|None=None) -> list[ExecItem]:
   linear = memory_plan_rewrite(linear, held_bufs)
-  if input_buffers is not None and JIT < 2:
-    input_buf_set = set(input_buffers)
-    input_buf_uops = {k for k,v in buffers.items() if isinstance(v, Buffer) and v in input_buf_set}
-    linear = graph_split_rewrite(linear, input_buf_uops, input_buffers, max_batch_size=JIT_BATCH_SIZE.value)
-  return [ei.lower() for ei in linear_to_schedule(linear)]
+  if JIT < 2: linear = graph_split_rewrite(linear, set(input_buffers or []), max_batch_size=JIT_BATCH_SIZE.value)
+  return lower_linear(linear)[0]
 
 class GraphException(Exception): pass
 class JitError(Exception): pass
@@ -104,25 +117,12 @@ def get_input_replace(jit_cache: list[ExecItem], input_buffers:list[Buffer],
   return input_replace
 
 class GraphRunner(Runner):
-  @staticmethod
-  def _lower_linear(cf:UOp) -> tuple[list[ExecItem], dict[tuple[int,int],int]]:
-    sub_linear, orig_input_bufs = cf.src[0], cf.src[1:]
-    input_replace: dict[tuple[int,int],int] = {}
-    for j, si in enumerate(sub_linear.src):
-      idx = 0
-      for b in si.src[1:]:
-        if b.op is Ops.BIND: continue
-        if b.op is Ops.PARAM: input_replace[(j, idx)] = b.arg
-        idx += 1
-    resolved = sub_linear.substitute({u: orig_input_bufs[u.arg] for u in sub_linear.toposort(enter_calls=False) if u.op is Ops.PARAM})
-    exec_items = [ei.lower() for ei in linear_to_schedule(resolved)]
-    for ei in exec_items:
-      for b in ei.bufs:
-        if b is not None: b.ensure_allocated()
-    return exec_items, input_replace
-
   def __init__(self, cf_or_cache: UOp|list[ExecItem], input_replace:dict[tuple[int,int],int]|None=None):
-    self.jit_cache, self.input_replace = self._lower_linear(cf_or_cache) if isinstance(cf_or_cache, UOp) else (cf_or_cache, input_replace or {})
+    if isinstance(cf_or_cache, UOp):
+      self.jit_cache, self.input_replace = lower_linear(cf_or_cache.src[0], cf_or_cache.src[1:])
+      ensure_bufs_allocated(self.jit_cache)
+    else:
+      self.jit_cache, self.input_replace = cf_or_cache, input_replace or {}
 
     self.var_vals_replace:dict[int, list[tuple[int, int]]] = {}
     self.launch_dims_replace:dict[int, tuple[int|None, int|None]] = {}
@@ -273,9 +273,7 @@ class CapturedJit(Generic[ReturnType]):
 
     # allocate intermediates if freed on first run
     if self._first_run:
-      for ji in self.jit_cache:
-        for b in ji.bufs:
-          if b is not None: b.ensure_allocated()
+      ensure_bufs_allocated(self.jit_cache)
       self._first_run = False
 
     if DEBUG >= 1 and len(self._jit_cache) >= 10: print(f"jit execs {len(self._jit_cache)} kernels")
@@ -371,7 +369,7 @@ class TinyJit(Generic[ReturnType]):
       extra_view_inputs: list[tuple[int, int, str, int, DType]] = []
       for item in jit_cache:
         for b in item.bufs:
-          if b is not None and b._base is not None and b._base in input_buffers:
+          if isinstance(b, Buffer) and b._base is not None and b._base in input_buffers:
             input_buffers.append(b)
             extra_view_inputs.append((input_buffers.index(b.base), b.offset, b.device, b.size, b.dtype))
 

@@ -5,7 +5,7 @@ from tinygrad.helpers import all_same, colored, DEBUG, GlobalCounters, ansilen, 
 from tinygrad.helpers import DEVECTORIZE, time_to_str, VALIDATE_WITH_CPU, cpu_profile, PROFILE, ProfilePointEvent, cpu_events, prod, Context, unwrap
 from tinygrad.helpers import EMULATED_DTYPES
 from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, sym_infer
-from tinygrad.device import Device, Buffer
+from tinygrad.device import Device, Buffer, MultiBuffer
 from tinygrad.renderer import ProgramSpec, Estimates
 from tinygrad.codegen import get_program
 
@@ -131,7 +131,8 @@ si_lowerer = PatternMatcher([
       if hasattr(alc:=Device[ctx[0].device].allocator, '_transfer') and alc.supports_transfer and all_same([x.device.split(":")[0] for x in ctx]) \
       else BufferCopy(ctx[0].nbytes, ctx[0].device, ctx[1].device))),
   (UPat(Ops.CUSTOM_FUNCTION, arg="encdec", name="cf"), lambda ctx,cf: EncDec(cf, ctx[0].nbytes, ctx[0].device)),
-  (UPat(Ops.CUSTOM_FUNCTION, arg="graph", name="cf"), lambda ctx,cf: Device[ctx[0].device].graph(cf)),
+  (UPat(Ops.CUSTOM_FUNCTION, arg="graph", name="cf"),
+   lambda ctx,cf: Device[(ctx[0].bufs[0] if isinstance(ctx[0], MultiBuffer) else ctx[0]).device].graph(cf)),
 ])
 
 @dataclass
