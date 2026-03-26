@@ -54,15 +54,17 @@ def graph_split_rewrite(linear:UOp, input_buf_uops:set[UOp], input_buffers:list[
       new_src.append(si)
       continue
 
-    dev = Device[si.device]
-    gt = graph_class(dev) if dev.graph is not None else None
-    can_graph = gt is not None and gt.supports_exec_item([dev], si)
+    if isinstance(si.device, tuple): can_graph, devs, gt = False, [], None  # multi-device expanded later in linear_to_schedule
+    else:
+      devs = [Device[si.device]]
+      gt = graph_class(devs[0]) if devs[0].graph is not None else None
+      can_graph = gt is not None and gt.supports_exec_item(devs, si)
     can_extend = can_graph and (not current_batch_devs or gt.supports_exec_item(current_batch_devs, si)) \
       and (max_batch_size == 0 or len(current_batch) < max_batch_size)
     if not can_extend and current_batch: flush_batch()
     if can_graph:
       current_batch.append(si)
-      current_batch_devs = dedup(current_batch_devs + [dev])
+      current_batch_devs = dedup(current_batch_devs + devs)
     else:
       new_src.append(si)
       current_batch_devs = []
@@ -179,7 +181,12 @@ class GraphRunner(Runner):
 
   @staticmethod
   def _all_devs(batch_devs:list[Compiled], new_call:UOp) -> list[Compiled]:
-    return dedup(batch_devs + [Device[b.device] for b in new_call.src[1:] if b.op is not Ops.BIND])
+    call_devs = []
+    for b in new_call.src[1:]:
+      if b.op is Ops.BIND: continue
+      d = b.device
+      call_devs.extend(Device[x] for x in (d if isinstance(d, tuple) else (d,)))
+    return dedup(batch_devs + call_devs)
   @staticmethod
   def supports_exec_item(batch_devs:list[Compiled], new_call:UOp) -> bool:
     return new_call.src[0].op in (Ops.SINK, Ops.PROGRAM) and len(GraphRunner._all_devs(batch_devs, new_call)) == 1

@@ -28,8 +28,10 @@ class TestAttention(unittest.TestCase):
     for _ in range(3):
       rope_noprune(Tensor.randn(1, 2, 4, 8, dtype=dtypes.float32), v_pos.bind(1))
       rope_prune(Tensor.randn(1, 2, 4, 8, dtype=dtypes.float32), v_pos.bind(1))
-    noprune_size = len(rope_noprune.captured.jit_cache)
-    prune_size = len(rope_prune.captured.jit_cache)
+    def _kernel_count(captured):
+      return sum(len(ei.prg.jit_cache) if hasattr(ei.prg, 'jit_cache') else 1 for ei in captured.jit_cache)
+    noprune_size = _kernel_count(rope_noprune.captured)
+    prune_size = _kernel_count(rope_prune.captured)
 
     self.assertGreater(noprune_size, prune_size)
     self.assertGreaterEqual(noprune_size, 2)
