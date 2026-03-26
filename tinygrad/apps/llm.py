@@ -360,7 +360,7 @@ class Transformer:
     out, prompt_len = None, len(tokens)
     while len(tokens) < self.max_context:
       n = min(chunk_size, len(tokens) - start_pos)
-      sp, nt = v_start_pos.bind(start_pos), v_toks.bind(n) if v_toks else n
+      sp, nt = v_start_pos.bind(start_pos), v_toks.bind(n) if v_toks is not None else n
       if start_pos < prompt_len or out is None: out = self.prefill_jit(t[:, sp:sp+nt], sp, temp).realize()
       else: out = self.rollout_jit(out, sp, temp).realize()
       start_pos += n
