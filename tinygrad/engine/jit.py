@@ -346,11 +346,11 @@ class TinyJit(Generic[ReturnType]):
       # track inputs that are views of buffers
       # TODO: eventually expected_buffers should live in ExecItem
       extra_view_inputs: list[tuple[int, int, str, int, DType]] = []
-      for item in jit_cache:
-        for b in item.bufs:
-          if b is not None and b._base is not None and b._base in input_buffers:
-            input_buffers.append(b)
-            extra_view_inputs.append((input_buffers.index(b.base), b.offset, b.device, b.size, b.dtype))
+      # for item in jit_cache:
+      #   for b in item.bufs:
+      #     if b is not None and b._base is not None and b._base in input_buffers:
+      #       input_buffers.append(b)
+      #       extra_view_inputs.append((input_buffers.index(b.base), b.offset, b.device, b.size, b.dtype))
 
       input_replace = get_input_replace(jit_cache, input_buffers)
       if DEBUG >= 1 and len(set(input_replace.values())) != len(input_buffers): print("WARNING: some input tensors not found")
