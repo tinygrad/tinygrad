@@ -128,7 +128,7 @@ def main(args) -> None:
       items = sorted(agg.items(), key=lambda kv:kv[1][0], reverse=True)
       table = [[name, time_to_str(t, w=9), c, f"{(t/total*100.0):.2f}%"] for name,(t,c) in items]
       print(tabulate(table, headers=["name", "total", "count", "pct"], tablefmt="github"))
-    return
+    return None
 
   # ** Graph rewrites printer
   for k in viz.ctxs:
