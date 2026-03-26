@@ -113,12 +113,19 @@ class recursive_property(property):
   def __init__(self, fxn):
     self.fxn = fxn
     self.nm = "_RECURSIVE_PROPERTY_"+fxn.__name__
+    self._gate = lambda node: self.nm not in node.__dict__
     self.__doc__ = fxn.__doc__
   def __get__(self, x:UOp|None, owner=None):
     if x is None: return self
     if self.nm in x.__dict__: return x.__dict__[self.nm]
-    for node in x.toposort(gate=lambda node: self.nm not in node.__dict__): node.__dict__[self.nm] = self.fxn(node)
-    return x.__dict__[self.nm]
+    # fast path: if all direct sources already have this property, compute directly without toposort
+    nm = self.nm
+    src = x.src
+    if all(nm in s.__dict__ for s in src):
+      x.__dict__[nm] = self.fxn(x)
+      return x.__dict__[nm]
+    for node in x.toposort(gate=self._gate): node.__dict__[nm] = self.fxn(node)
+    return x.__dict__[nm]
 
 # we import this late so we can use resolve/smax in mixins
 from tinygrad.mixin import OpMixin
@@ -165,9 +172,23 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
 
   @property
   def backward_slice_with_self(self:UOp) -> dict[UOp, None]: return {self:None, **self.backward_slice}
+  def dfs_match(self, match:Callable[[UOp], bool], gate:Callable[[UOp], bool]|None=None) -> bool:
+    """Short-circuit DFS over src graph. Returns True if match(node) is True for any reachable node.
+    Optional gate controls traversal: if gate(node) is False, don't descend into node's sources."""
+    seen: set[UOp] = set()
+    stack: list[UOp] = [self]
+    while stack:
+      node = stack.pop()
+      if node in seen: continue
+      seen.add(node)
+      if match(node): return True
+      if gate is None or gate(node): stack.extend(node.src)
+    return False
+
   def op_in_backward_slice_with_self(self, *ops:Ops) -> bool:
-    # Check self first, then iterate backward_slice (avoids creating intermediate dict)
-    return self.op in ops or any(x.op in ops for x in self.backward_slice)
+    if self.op in ops: return True
+    if "backward_slice" in self.__dict__: return any(x.op in ops for x in self.backward_slice)
+    return self.dfs_match(lambda node: node.op in ops)
 
   def toposort(self, gate:Callable|None=None, enter_calls=True) -> dict[UOp, None]:
     cache: dict[UOp, None] = {}
@@ -1389,8 +1410,9 @@ class RewriteContext:
     stack: collections.deque[tuple[UOp, int, UOp]] = collections.deque([(root, 0, root)])
     on_stack = {root}  # all UOps either on the stack or in self.replace, i.e. dont have to be placed again
     waitlist: dict[UOp, list[tuple[UOp, int, UOp]]] = {}  # UOps waiting on a dependency to be in self.replace
+    rewrite_stack_limit = REWRITE_STACK_LIMIT.value
     while stack:
-      if len(stack) > REWRITE_STACK_LIMIT: raise RuntimeError("infinite loop in graph_rewrite (stack too big)")
+      if len(stack) > rewrite_stack_limit: raise RuntimeError("infinite loop in graph_rewrite (stack too big)")
       n, stage, new_n = stack.pop()
       if n in self.replace: continue  # skip any nodes we have seen
       if stage == 0:

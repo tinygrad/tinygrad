@@ -281,7 +281,9 @@ if __name__ == "__main__":
         if k.startswith("model"):
           v.replace(v.cast(dtypes.float16))
 
-    Tensor.realize(*get_state_dict(model).values())
+    all_weights = [v for v in get_state_dict(model).values() if not v.uop.has_buffer_identity()]
+    for i in range(0, len(all_weights), 256):
+      Tensor.realize(*all_weights[i:i+256])
 
   profile_marker("run clip (conditional)")
   tokenizer = Tokenizer.ClipTokenizer()
