@@ -97,6 +97,13 @@ class InstOp(Enum):
   OTHER_VMEM_4 = 0x5d             # saddr=SGPR 96 or saddr=NULL 64
   OTHER_VMEM_5 = 0x5e             # saddr=SGPR 128 or saddr=NULL 96
   OTHER_VMEM_6 = 0x5f             # saddr=NULL, 128-bit
+  OTHER_VMEM_7 = 0x60
+  OTHER_VMEM_8 = 0x61
+  OTHER_VMEM_9 = 0x62
+  OTHER_VMEM_10 = 0x63
+  OTHER_VMEM_11 = 0x64
+  OTHER_VMEM_12 = 0x65
+  OTHER_VMEM_13 = 0x66
 
   # EXEC-modifying ops (0x7x range)
   SALU_WR_EXEC = 0x72     # s_*_saveexec_b32/b64
