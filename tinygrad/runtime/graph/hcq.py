@@ -9,16 +9,15 @@ from tinygrad.engine.realize import ExecItem, BufferXfer, CompiledRunner, Buffer
 from tinygrad.engine.jit import MultiGraphRunner
 
 class HCQGraph(MultiGraphRunner):
-  def __init__(self, jit_cache: list[ExecItem], input_buffers: list[Buffer], var_vals: dict[str, int],
-               orig_valid_positions: dict[int, set[int]]|None = None):
-    super().__init__(jit_cache, input_buffers, var_vals, orig_valid_positions)
-    self.devices = list(set(cast(HCQCompiled, d) for ji in jit_cache for d in [Device[cast(Buffer, x).device] for x in ji.bufs]))
+  def __init__(self, *args, **kwargs):
+    super().__init__(*args, **kwargs)
+    self.devices = list(set(cast(HCQCompiled, d) for ji in self.jit_cache for d in [Device[cast(Buffer, x).device] for x in ji.bufs]))
 
     # CPU Device is always last
     self.devices = sorted(self.devices, key=lambda x: 1 if x._is_cpu() else 0)
 
     # Replace input buffers with variables.
-    self.hcq_bufs = [[cast(Buffer, x)._buf for x in ji.bufs] for ji in jit_cache]
+    self.hcq_bufs = [[cast(Buffer, x)._buf for x in ji.bufs] for ji in self.jit_cache]
     self.input_replace_to_var: dict[tuple[int, int], Variable] = {}
 
     for (j,i), input_idx in self.input_replace.items():
@@ -27,7 +26,7 @@ class HCQGraph(MultiGraphRunner):
 
     # Allocate kernel args.
     kernargs_size: dict[Compiled, int] = collections.defaultdict(int)
-    for ji in jit_cache:
+    for ji in self.jit_cache:
       if not isinstance(ji.prg, CompiledRunner): continue
       kernargs_size[ji.prg.dev] += round_up(ji.prg._prg.kernargs_alloc_size, 16)
     self.kernargs_bufs: dict[Compiled, HCQBuffer] = {d:d.allocator._alloc(max(sz, 1), BufferSpec(cpu_access=True)) for d,sz in kernargs_size.items()}
@@ -36,7 +35,7 @@ class HCQGraph(MultiGraphRunner):
     self.ji_args: dict[int, HCQArgsState] = {}
 
     kargs_alloc: dict[Compiled, BumpAllocator] = {dev:BumpAllocator(buf.size) for dev,buf in self.kernargs_bufs.items()}
-    for j,ji in enumerate(jit_cache):
+    for j,ji in enumerate(self.jit_cache):
       if not isinstance(ji.prg, CompiledRunner): continue
 
       argsbuf = self.kernargs_bufs[ji.prg.dev].offset(kargs_alloc[ji.prg.dev].alloc(ji.prg._prg.kernargs_alloc_size, 16))
@@ -73,7 +72,7 @@ class HCQGraph(MultiGraphRunner):
     self.input_replace_map: dict[HCQCompiled, set[int]] = collections.defaultdict(set)
     self.device_vars: dict[HCQCompiled, dict[str, int]] = {}
 
-    for j,ji in enumerate(jit_cache):
+    for j,ji in enumerate(self.jit_cache):
       if is_exec_prg:=isinstance(ji.prg, CompiledRunner): enqueue_dev: HCQCompiled = ji.prg.dev
       else:
         # For copy ops prioritize enqeueuing on the dest device, so reverse the buffers.
@@ -138,7 +137,7 @@ class HCQGraph(MultiGraphRunner):
       last_j[enqueue_queue] = j
 
     # Check which signals are used in the profile graph.
-    self.prof_signal_is_used = [any(ent.st_id == j or ent.en_id == j for ent in self.prof_graph_entries) for j in range(len(jit_cache) * 2)]
+    self.prof_signal_is_used = [any(ent.st_id == j or ent.en_id == j for ent in self.prof_graph_entries) for j in range(len(self.jit_cache) * 2)]
 
     # Build hardware queues.
     self.copy_to_devs: dict[HCQCompiled, set[HCQCompiled]] = {dev: set() for dev in self.devices}
@@ -152,7 +151,7 @@ class HCQGraph(MultiGraphRunner):
       self.comp_queues[dev].memory_barrier().wait(self.virt_timeline_signals[dev], self.virt_timeline_vals[dev]) \
                            .wait(self.signals['KICK'], self.kickoff_var).signal(self.signals[dev], self.kickoff_var)
 
-    for j,ji in enumerate(jit_cache):
+    for j,ji in enumerate(self.jit_cache):
       enqueue_dev, enqueue_queue, sync_signals, deps, signal, signal_val = self.ji_schedule[j]
 
       # Lazy allocate signals

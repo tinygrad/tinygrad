@@ -4,7 +4,7 @@ import unittest
 import numpy as np
 from tinygrad import Tensor, nn, dtypes
 from tinygrad.nn.state import get_parameters
-from tinygrad.device import is_dtype_supported
+from tinygrad.device import is_dtype_supported, Device
 from examples.mlperf.models.llama import Transformer
 from examples.mlperf.models.flat_llama import FlatTransformer
 
@@ -78,7 +78,7 @@ class TestFlatLlama(unittest.TestCase):
         diff = abs(ref_grads[ref_key] - flat_grads[flat_key][i]).max()
         self.assertLess(diff, 1e-4, f"layer {i} {flat_key} grad mismatch: max abs diff {diff}")
 
-  @unittest.skipUnless(os.getenv("CPU", "") == "1", "multi-device CPU test")
+  @unittest.skipUnless(Device.DEFAULT == "CPU", "multi-device CPU test")
   def test_forward_match_mp(self):
     Tensor.manual_seed(42)
     params = dict(dim=128, hidden_dim=256, n_heads=4, n_kv_heads=2, n_layers=2, norm_eps=1e-5, vocab_size=1024, rope_theta=10000, max_context=64)
@@ -96,7 +96,7 @@ class TestFlatLlama(unittest.TestCase):
     self.assertEqual(ref_logits.shape, flat_logits.shape)
     np.testing.assert_allclose(flat_logits, ref_logits, atol=1e-4, rtol=1e-4)
 
-  @unittest.skipUnless(os.getenv("CPU", "") == "1", "multi-device CPU test")
+  @unittest.skipUnless(Device.DEFAULT == "CPU", "multi-device CPU test")
   def test_forward_match_dp(self):
     Tensor.manual_seed(42)
     params = dict(dim=128, hidden_dim=256, n_heads=4, n_kv_heads=2, n_layers=2, norm_eps=1e-5, vocab_size=1024, rope_theta=10000, max_context=64)

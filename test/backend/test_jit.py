@@ -73,6 +73,13 @@ class TestJit(unittest.TestCase):
     def add(a, b): return {"billy": a+b}
     _simple_test(add, extract=lambda x: x["billy"])
 
+  def test_jit_input_view(self):
+    @TinyJit
+    def f(x): return (x[2:5].contiguous() + 1).realize()
+    for i in range(5):
+      x = (Tensor.arange(10).float() + i * 10).contiguous().realize()
+      np.testing.assert_allclose(f(x).numpy(), x.numpy()[2:5] + 1)
+
   def test_jit_multiple_outputs(self):
     @TinyJit
     def f(a, b): return (a+b).realize(), (a-b).realize(), (a*b).realize()

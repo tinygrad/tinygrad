@@ -2716,7 +2716,7 @@ class TestOps(unittest.TestCase):
 
   def test_avg_pool3d(self):
     # TODO: AMD_LLVM has larger atol
-    # TODO: PYTHON=1 backward hangs?
+    # TODO: DEV=PYTHON backward hangs?
     atol = 1e-2 if AMD_LLVM else 1e-6
     helper_test_op([(1,1,16,16,16)],
       lambda x: torch.nn.functional.avg_pool3d(x, kernel_size=(8,8,8), stride=5, padding=1, count_include_pad=False),
