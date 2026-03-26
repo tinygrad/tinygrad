@@ -326,6 +326,8 @@ class NVProgram(HCQProgram):
     return res
 
 class NVAllocator(HCQAllocator['NVDevice']):
+  def __init__(self, dev:'NVDevice'): super().__init__(dev, supports_copy_from_disk=not dev.is_nvd() or dev.iface.is_local())
+
   def _alloc(self, size:int, options:BufferSpec) -> HCQBuffer:
     return self.dev.iface.alloc(size, cpu_access=options.cpu_access, host=options.host)
 
