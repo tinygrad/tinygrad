@@ -30,6 +30,12 @@ class TestDevice(unittest.TestCase):
     self.assertEqual(Device.canonicalize(None), device)
     Device.DEFAULT = device
 
+  def test_old_device_env_raises(self):
+    result = subprocess.run(['python3', '-c', 'from tinygrad import Device; Device.DEFAULT'],
+                            env={**os.environ, "CPU": "1"}, capture_output=True)
+    self.assertNotEqual(result.returncode, 0)
+    self.assertIn(b"deprecated", result.stderr)
+
   @unittest.skipIf(WIN and CI, "skipping windows test") # TODO: subprocess causes memory violation?
   def test_env_overwrite_default_compiler(self):
     if Device.DEFAULT == "CPU":
