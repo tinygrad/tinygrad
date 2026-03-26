@@ -105,18 +105,25 @@ def get_input_replace(jit_cache: list[ExecItem], input_buffers:list[Buffer],
 
 class GraphRunner(Runner):
   @staticmethod
-  def _lower_linear(cf:UOp, input_buffers:list[Buffer]) -> list[ExecItem]:
+  def _lower_linear(cf:UOp) -> tuple[list[ExecItem], dict[tuple[int,int],int]]:
     sub_linear, orig_input_bufs = cf.src[0], cf.src[1:]
+    input_replace: dict[tuple[int,int],int] = {}
+    for j, si in enumerate(sub_linear.src):
+      idx = 0
+      for b in si.src[1:]:
+        if b.op is Ops.BIND: continue
+        if b.op is Ops.PARAM: input_replace[(j, idx)] = b.arg
+        idx += 1
     resolved = sub_linear.substitute({u: orig_input_bufs[u.arg] for u in sub_linear.toposort(enter_calls=False) if u.op is Ops.PARAM})
     exec_items = [ei.lower() for ei in linear_to_schedule(resolved)]
     for ei in exec_items:
       for b in ei.bufs:
         if b is not None: b.ensure_allocated()
-    return exec_items
+    return exec_items, input_replace
 
-  def __init__(self, cf: UOp, input_buffers: list[Buffer]):
-    self.jit_cache = self._lower_linear(cf, input_buffers)
-    self.input_replace:dict[tuple[int, int], int] = get_input_replace(self.jit_cache, input_buffers)
+  def __init__(self, cf_or_cache: UOp|list[ExecItem], input_replace:dict[tuple[int,int],int]|None=None):
+    self.jit_cache, self.input_replace = self._lower_linear(cf_or_cache) if isinstance(cf_or_cache, UOp) else (cf_or_cache, input_replace or {})
+
     self.var_vals_replace:dict[int, list[tuple[int, int]]] = {}
     self.launch_dims_replace:dict[int, tuple[int|None, int|None]] = {}
     self.launch_dims_base:dict[int, tuple[tuple[int, ...], tuple[int, ...]]] = {}
@@ -149,6 +156,8 @@ class GraphRunner(Runner):
 
     assert self.jit_cache[0].prg is not None
     super().__init__(colored(f"<batched {len(self.jit_cache)}>", "cyan"), self.jit_cache[0].prg.device.split(":")[0], estimates.simplify())
+
+  def __reduce__(self): return self.__class__, (self.jit_cache, self.input_replace)
 
   def updated_vars(self, var_vals: dict[str, int]):
     vals = [var_vals[v] for v in self.vars]

@@ -96,8 +96,7 @@ def helper_test_graphs(graph_impl, graphs, runs=RUN_CNT):
       calls.append(ei.ast.call(*buf_uops, metadata=ei.metadata))
     sub_linear = UOp(Ops.LINEAR, src=tuple(calls))
     return UOp(Ops.CUSTOM_FUNCTION, dtypes.void, src=(sub_linear,), arg="graph")
-  # NOTE: bufs set to all bufs so graph can find them for input_replace
-  gr_ji = [ExecItem(UOp(Ops.NOOP), bufs, prg=graph_impl(_make_graph_cf(graph), bufs)) for graph in graphs]
+  gr_ji = [ExecItem(UOp(Ops.NOOP), bufs, prg=graph_impl(_make_graph_cf(graph))) for graph in graphs]
 
   for _ in range(runs):
     test_bufs = helper_run_jit(gr_ji, bufs, out_buffers)
