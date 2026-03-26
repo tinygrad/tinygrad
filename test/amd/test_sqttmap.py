@@ -11,8 +11,9 @@ from test.amd.disasm import disasm
 import tinygrad
 EXAMPLES_DIR = Path(tinygrad.__file__).parent.parent / "extra/sqtt/examples"
 
-def run_cli(*cli_flags) -> str:
-  from extra.viz.cli import main
+def run_cli(*cli_args) -> str:
+  from extra.viz.cli import main, get_arg_parser
+  args = get_arg_parser().parse_args(cli_args)
   with contextlib.redirect_stdout(buf:=io.StringIO()):
     main(args)
   return buf.getvalue().strip()
