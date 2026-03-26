@@ -1,6 +1,6 @@
 # Runtimes
 
-tinygrad supports various runtimes, enabling your code to scale across a wide range of devices. The default runtime can be automatically selected based on the available hardware, or you can force a specific runtime to be default using environment variables (e.g., `CPU=1`).
+tinygrad supports various runtimes, enabling your code to scale across a wide range of devices. The default runtime can be automatically selected based on the available hardware, or you can force a specific runtime to be default using environment variables (e.g., `DEV=CPU`).
 
 | Runtime | Description | Compiler Options | Requirements |
 |---------|-------------|------------------|--------------|

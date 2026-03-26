@@ -14,6 +14,9 @@ class ElementwiseMixin(DTypeMixin):
   def const_like(self, b: ConstType) -> Self:
     raise NotImplementedError
 
+  def _broadcasted(self, y: Self | ConstType, reverse: bool = False) -> tuple[Self, Self]:
+    raise NotImplementedError
+
   # great functions you get!
   def ufix(self, x: Self | ConstType) -> Self:
     return self.const_like(x) if not isinstance(x, ElementwiseMixin) else x
@@ -63,6 +66,27 @@ class ElementwiseMixin(DTypeMixin):
     ```
     """
     return self._binop(Ops.ADD, x, reverse)
+
+  def sub(self, x: Self | ConstType, reverse: bool = False) -> Self:
+    """
+    Subtracts `x` from `self`.
+    Equivalent to `self - x`.
+    Supports broadcasting to a common shape, type promotion, and integer, float, boolean inputs.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    Tensor.manual_seed(42)
+    t = Tensor.randn(4)
+    print(t.numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.sub(20).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.sub(Tensor([[2.0], [3.5]])).numpy())
+    ```
+    """
+    a, b = self._broadcasted(x, reverse)
+    return a + (-b)
 
   def mul(self, x: Self | ConstType, reverse: bool = False) -> Self:
     """
@@ -145,9 +169,6 @@ class ElementwiseMixin(DTypeMixin):
 
   def mod(self, x: Self | ConstType, reverse: bool = False) -> Self:
     return self._binop(Ops.MOD, x, reverse)
-
-  def sub(self, x: Self | ConstType, reverse: bool = False) -> Self:
-    return self.ufix(x).alu(Ops.ADD, -self) if reverse else self.alu(Ops.ADD, -self.ufix(x))
 
   def div(self, x: Self | ConstType, reverse: bool = False) -> Self:
     return (self.ufix(x) * self.alu(Ops.RECIPROCAL)) if reverse else (self * self.ufix(x).alu(Ops.RECIPROCAL))
