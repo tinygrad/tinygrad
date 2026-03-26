@@ -3,7 +3,6 @@ import unittest, pickle, functools, math
 import z3
 
 from tinygrad.dtype import dtypes, ConstType, DType, Invalid
-from tinygrad.helpers import Context
 from test.helpers import get_uops
 from tinygrad.uop.ops import UOp, Ops, graph_rewrite, sym_infer
 from tinygrad.uop.symbolic import sym, commutative, pm_simplify_valid
@@ -441,21 +440,11 @@ class TestSymbolic(unittest.TestCase):
   def test_sum_num_hoisted_and_factors_cancel_out(self):
     self.helper_test_variable(usum([Variable("a", 0, 1) * -4 + 1, Variable("a", 0, 1) * 4]), 1, 1, "1")
 
-  @unittest.expectedFailure  # only correct for floordiv, not truncdiv
   def test_div_cancel(self):
-    self.helper_test_variable(usum([uconst(-40), Variable("a", 0, 10)*2, Variable("b", 0, 10)*40])//40, -1, 9, "(b+-1)")
+    self.helper_test_variable(usum([uconst(-40), Variable("a", 0, 10)*2, Variable("b", 0, 10)*40])//40, -1, 9, "(((a+(b*20))+-20)//20)")
 
-  def test_div_cancel_correct(self):
-    with Context(CORRECT_DIVMOD_FOLDING=1):
-      self.helper_test_variable(usum([uconst(-40), Variable("a", 0, 10)*2, Variable("b", 0, 10)*40])//40, -1, 9, "(((a+(b*20))+-20)//20)")
-
-  @unittest.expectedFailure  # only correct for floordiv, not truncdiv
   def test_mod_cancel(self):
-    self.helper_test_variable(usum([uconst(-40), Variable("a", 0, 10)*2, Variable("b", 0, 10)*40]) % 40, 0, 20, "(a*2)")
-
-  def test_mod_cancel_correct(self):
-    with Context(CORRECT_DIVMOD_FOLDING=1):
-      self.helper_test_variable(usum([uconst(-40), Variable("a", 0, 10)*2, Variable("b", 0, 10)*40]) % 40, -38, 38, "((((a+(b*20))+-20)%20)*2)")
+    self.helper_test_variable(usum([uconst(-40), Variable("a", 0, 10)*2, Variable("b", 0, 10)*40]) % 40, -38, 38, "((((a+(b*20))+-20)%20)*2)")
 
   def test_mul_div(self):
     self.helper_test_variable((Variable("a", 0, 10)*4)//4, 0, 10, "a")
@@ -542,8 +531,7 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable((-Variable("a", 10, 10))%7, -3, -3, "-3")
 
   def test_div_numerator_negative(self):
-    with Context(CORRECT_DIVMOD_FOLDING=1):
-      self.helper_test_variable((Variable("idx", 0, 9)*-10)//11, -8, 0, "(((idx*10)//11)*-1)")
+    self.helper_test_variable((Variable("idx", 0, 9)*-10)//11, -8, 0, "(((idx*10)//11)*-1)")
 
   def test_nest_div_negative_factor(self):
     ridx0=Variable("ridx0", 0, 9)
@@ -723,8 +711,7 @@ class TestSymbolic(unittest.TestCase):
   def test_div_by_factor_tie_break(self):
     a = Variable("a", 0, 1)
     b = Variable("b", 0, 1)
-    with Context(CORRECT_DIVMOD_FOLDING=1):
-      self.helper_test_variable((a*2+b*3+2)//6, 0, 1, "((a+b+1)//3)")
+    self.helper_test_variable((a*2+b*3+2)//6, 0, 1, "((a+b+1)//3)")
 
   def test_div_mod_recombine_large_coeff(self):
     # recombine must work even when coeff > divisor: both mod and div reduce the coeff the same way

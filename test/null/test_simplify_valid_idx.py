@@ -447,12 +447,12 @@ class TestImageSimplification(unittest.TestCase):
     load = get_load_image_uop((32, 1024, 4), valid, (alu0, alu1))
     self.check(load, None, "(lidx1*128+gidx0//2+144)", "(lidx0*2+r0+-3)")
 
-    # TODO: this is the same idx as above, but simplifying idx too early makes it hard to drop the valid
+    # same idx as above but pre-simplified; generalized simplex now fully simplifies this too
     alu0 = ((gidx0*2+lidx1*512+(lidx0*8192+r0*4096)+-11711)//4%1024)
     alu1 = (lidx0*2+r0+-3)
     valid = ((lidx1<7)&((((lidx0*2+r0)<3)!=1)&((lidx0*2+r0)<35)))
     load = get_load_image_uop((32, 1024, 4), valid, (alu0, alu1))
-    self.check(load, "(lidx1<7)", "((gidx0*2+lidx1*512+(lidx0*8192+r0*4096)+-11711)//4%1024)", "(lidx0*2+r0+-3)")
+    self.check(load, None, "(lidx1*128+gidx0//2+144)", "(lidx0*2+r0+-3)")
 
 class TestUnfoldableImage(unittest.TestCase):
   def test_unfoldable_becomes_buffer(self):
