@@ -1,6 +1,6 @@
 import unittest
 from tinygrad import Tensor
-from tinygrad.helpers import getenv, GlobalCounters, EMULATE
+from tinygrad.helpers import GlobalCounters, EMULATE
 from tinygrad.engine.realize import get_program
 from tinygrad.renderer import ProgramSpec
 from tinygrad.renderer import Estimates
@@ -79,7 +79,7 @@ class TestMemoryCount(unittest.TestCase):
     self.assertEqual(mem, 32*4)
 
 # NOTE: this still isn't testing unroll using the acc
-@unittest.skipUnless(getenv("PYTHON"), "only run test on emulated tensor cores")
+@unittest.skipUnless(Device.DEFAULT == "PYTHON", "only run test on emulated tensor cores")
 class TestUOpsStatsMatmulHalf(unittest.TestCase):
   def test_simple_matmul_half(self, N=16):
     GlobalCounters.reset()

@@ -2,7 +2,7 @@ from typing import Optional, Any
 import unittest, math
 import numpy as np
 from tinygrad.tensor import Tensor, _to_np_dtype
-from tinygrad.helpers import CI, getenv, Context
+from tinygrad.helpers import CI, Context
 from tinygrad.dtype import dtypes, DType, AddrSpace, ConstFloat  # noqa: F401
 from tinygrad.device import Buffer, Device
 from tinygrad.uop.ops import Ops, UOp, KernelInfo, AxisType
@@ -124,7 +124,7 @@ class TestFloatUOps(TestUOps):
   def test_where(self):
     self._test_top_fxn(Ops.WHERE, lambda a,b,c: b if a!=0 else c, (dtypes.bool, dtypes.float, dtypes.float))
 
-  @unittest.skipUnless(getenv("PYTHON"), "only python supports MULACC")
+  @unittest.skipUnless(Device.DEFAULT == "PYTHON", "only python supports MULACC")
   def test_mulacc(self):
     self._test_top_fxn(Ops.MULACC, lambda a,b,c: a*b+c, (dtypes.float, dtypes.float, dtypes.float))
 
