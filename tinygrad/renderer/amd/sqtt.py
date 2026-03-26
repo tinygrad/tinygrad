@@ -8,6 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Iterator
 from enum import Enum
+from tinygrad.helpers import getenv, colored
 from tinygrad.renderer.amd.dsl import BitField, FixedBitField, Inst, bits
 from tinygrad.runtime.autogen.amd.rdna3.ins import s_endpgm # same encoding as RDNA4
 
@@ -43,75 +44,86 @@ class InstOp(Enum):
   OTHER_ range follows same pattern but values overlap differently.
   """
   SALU = 0x0
-  SMEM = 0x1
+  SMEM_RD = 0x1
   JUMP = 0x3              # branch taken
   JUMP_NO = 0x4           # branch not taken
   CALL = 0x5              # s_call_b64
   MESSAGE = 0x9
-  VALU_TRANS = 0xb        # transcendental: exp, log, rcp, sqrt, sin, cos
-  VALU_64_SHIFT = 0xd     # 64-bit shifts: lshl, lshr, ashr
-  VALU_MAD64 = 0xe        # 64-bit multiply-add
-  VALU_64 = 0xf           # 64-bit: add, mul, fma, rcp, sqrt, rounding, frexp, div helpers
+  VALUT_4 = 0xb           # transcendental: exp, log, rcp, sqrt, sin, cos
+  VALUB_2 = 0xd           # 64-bit shifts: lshl, lshr, ashr
+  VALUB_4 = 0xe           # 64-bit multiply-add
+  VALUB_16 = 0xf          # 64-bit: add, mul, fma, rcp, sqrt, rounding, frexp, div helpers
   VINTERP = 0x12          # interpolation: v_interp_p10_f32, v_interp_p2_f32
   BARRIER = 0x13
 
   # FLAT memory ops on traced SIMD (0x1x range)
-  FLAT_LOAD = 0x1c
-  FLAT_STORE = 0x1d
-  FLAT_STORE_64 = 0x1e
-  FLAT_STORE_96 = 0x1f
-  FLAT_STORE_128 = 0x20
+  FLAT_RD_2 = 0x1c
+  FLAT_WR_3 = 0x1d
+  FLAT_WR_4 = 0x1e
+  FLAT_WR_5 = 0x1f
+  FLAT_WR_6 = 0x20
 
   # GLOBAL memory ops on traced SIMD (0x2x range)
-  GLOBAL_LOAD = 0x21             # saddr=SGPR, all sizes
-  GLOBAL_LOAD_VADDR = 0x22       # saddr=NULL, all sizes
-  GLOBAL_STORE = 0x24            # saddr=SGPR, 32-bit
-  GLOBAL_STORE_64 = 0x25         # saddr=SGPR 64 or saddr=NULL 32
-  GLOBAL_STORE_96 = 0x26         # saddr=SGPR 96 or saddr=NULL 64
-  GLOBAL_STORE_128 = 0x27        # saddr=SGPR 128 or saddr=NULL 96
-  GLOBAL_STORE_VADDR_128 = 0x28  # saddr=NULL, 128-bit
+  SGMEM_RD_1 = 0x21             # saddr=SGPR, all sizes
+  SGMEM_RD_2 = 0x22             # saddr=NULL, all sizes
+  SGMEM_WR_2 = 0x24             # saddr=SGPR, 32-bit
+  SGMEM_WR_3 = 0x25             # saddr=SGPR 64 or saddr=NULL 32
+  SGMEM_WR_4 = 0x26             # saddr=SGPR 96 or saddr=NULL 64
+  SGMEM_WR_5 = 0x27             # saddr=SGPR 128 or saddr=NULL 96
+  SGMEM_WR_6 = 0x28             # saddr=NULL, 128-bit
 
   # LDS ops on traced SIMD
-  LDS_LOAD = 0x29
-  LDS_ATOMIC = 0x2a        # ds_append, ds_consume, ds_store_addtid_b32
-  LDS_STORE = 0x2b
-  LDS_STORE_64 = 0x2c
-  LDS_STORE_96 = 0x2d
-  LDS_STORE_128 = 0x2e
+  LDS_RD = 0x29
+  LDS_WR_1 = 0x2a               # ds_append, ds_consume, ds_store_addtid_b32
+  LDS_WR_2 = 0x2b
+  LDS_WR_3 = 0x2c
+  LDS_WR_4 = 0x2d
+  LDS_WR_5 = 0x2e
 
   # Memory ops on other SIMD (0x5x range)
-  OTHER_LDS_LOAD = 0x50
-  OTHER_LDS_STORE = 0x51
-  OTHER_LDS_STORE_64 = 0x52
-  OTHER_LDS_STORE_128 = 0x54
-  OTHER_FLAT_LOAD = 0x55
-  OTHER_FLAT_STORE = 0x56
-  OTHER_FLAT_STORE_64 = 0x57
-  OTHER_FLAT_STORE_96 = 0x58
-  OTHER_FLAT_STORE_128 = 0x59
-  OTHER_GLOBAL_LOAD = 0x5a             # saddr=SGPR, all sizes
-  OTHER_GLOBAL_LOAD_VADDR = 0x5b       # saddr=NULL or saddr=SGPR store 32
-  OTHER_GLOBAL_STORE_64 = 0x5c         # saddr=SGPR 64 or saddr=NULL 32
-  OTHER_GLOBAL_STORE_96 = 0x5d         # saddr=SGPR 96 or saddr=NULL 64
-  OTHER_GLOBAL_STORE_128 = 0x5e        # saddr=SGPR 128 or saddr=NULL 96
-  OTHER_GLOBAL_STORE_VADDR_128 = 0x5f  # saddr=NULL, 128-bit
+  OTHER_LDS_1 = 0x50
+  OTHER_LDS_2 = 0x51
+  OTHER_LDS_3 = 0x52
+  OTHER_LDS_5 = 0x54
+  OTHER_FLAT_2 = 0x55
+  OTHER_FLAT_3 = 0x56
+  OTHER_FLAT_4 = 0x57
+  OTHER_FLAT_5 = 0x58
+  OTHER_FLAT_6 = 0x59
+  OTHER_VMEM_1 = 0x5a             # saddr=SGPR, all sizes
+  OTHER_VMEM_2 = 0x5b             # saddr=NULL or saddr=SGPR store 32
+  OTHER_VMEM_3 = 0x5c             # saddr=SGPR 64 or saddr=NULL 32
+  OTHER_VMEM_4 = 0x5d             # saddr=SGPR 96 or saddr=NULL 64
+  OTHER_VMEM_5 = 0x5e             # saddr=SGPR 128 or saddr=NULL 96
+  OTHER_VMEM_6 = 0x5f             # saddr=NULL, 128-bit
 
   # EXEC-modifying ops (0x7x range)
-  SALU_SAVEEXEC = 0x72    # s_*_saveexec_b32/b64
-  VALU_CMPX = 0x73        # v_cmpx_*
+  SALU_WR_EXEC = 0x72     # s_*_saveexec_b32/b64
+  VALU1_WR_EXEC = 0x73    # v_cmpx_*
 
 class InstOpRDNA4(Enum):
   """SQTT instruction operation types for RDNA4 (gfx1200). Different encoding from RDNA3."""
   SALU = 0x0
   SMEM = 0x1
+  SMEM_WR = 0x2
   JUMP = 0x3
   JUMP_NO = 0x4
   CALL = 0x5
+  SALU_NO_EXEC = 0x7
   MESSAGE = 0x9
+  VALU_1 = 0xa
   VALU_TRANS = 0xb
+  VALU_B1 = 0xc
   VALU_B2 = 0xd
   VALU_B4 = 0xe
+  VALU_B16 = 0xf
   VINTERP = 0x12
+  BARRIER_WAIT = 0x13
+  FLAT_RD_2 = 0x1c
+  FLAT_WR_3 = 0x1d
+  FLAT_WR_4 = 0x1e
+  FLAT_WR_5 = 0x1f
+  FLAT_WR_6 = 0x20
   VMEM_RD_1 = 0x21
   VMEM_RD_2 = 0x22
   VMEM_WR_1 = 0x23
@@ -126,18 +138,45 @@ class InstOpRDNA4(Enum):
   LDS_WR_3 = 0x2c
   LDS_WR_4 = 0x2d
   LDS_WR_5 = 0x2e
+  BUF_RD_1 = 0x2f
+  BUF_RD_2 = 0x30
+  BUF_WR_1 = 0x31
+  BUF_WR_2 = 0x32
+  BUF_WR_3 = 0x33
+  BUF_WR_4 = 0x34
+  BUF_WR_5 = 0x35
+  BUF_WR_6 = 0x36
   OTHER_LDS_1 = 0x50
   OTHER_LDS_2 = 0x51
+  OTHER_LDS_3 = 0x52
+  OTHER_LDS_4 = 0x53
+  OTHER_LDS_5 = 0x54
+  OTHER_FLAT_2 = 0x55
+  OTHER_FLAT_3 = 0x56
+  OTHER_FLAT_4 = 0x57
+  OTHER_FLAT_5 = 0x58
+  OTHER_FLAT_6 = 0x59
+  LDS_DIR_LOAD = 0x6e
+  LDS_PARAM_LOAD = 0x6f
+  SALU_WR_EXEC = 0x72
+  VALU1_WR_EXEC = 0x73
+  VALU_B2_WR_EXEC = 0x74
+  OTHER_LDS_6 = 0x77
+  OTHER_LDS_10 = 0x78
   BARRIER_SIGNAL = 0x7a
+  DYN_VGPR = 0x87
+  BARRIER_JOIN = 0x8a
   WMMA_8 = 0x8c
   WMMA_16 = 0x8d
+  WMMA_32 = 0x8e
+  WMMA_64 = 0x8f
   VALU_DPFP = 0x92
   SALU_FLOAT3 = 0x98
   VALU_SCL_TRANS = 0x99
   SALU_2 = 0x9b
   SALU_5 = 0x9c
-  OTHER_VMEM = 0xbd
-  OTHER_VMEM_5 = 0xc1
+  OTHER_VMEM = 0xbc  # 0xbc-0xdd: vmem_other_simd
+for _i in range(34): InstOpRDNA4._value2member_map_[0xbc + _i] = InstOpRDNA4.OTHER_VMEM
 
 class InstOpCDNA(Enum):
   SMEM_RD = 0
@@ -649,8 +688,8 @@ def map_insts(data:bytes, lib:bytes, target:str) -> Iterator[tuple[PacketType, I
           yield (p, InstructionInfo(pc, wave, inst))
     elif isinstance(p, (VALUINST, INST, INST_RDNA4, IMMEDIATE)):
       inst = pc_map[pc:=wave_pc[p.wave]]
-      # s_delay_alu and s_wait_alu instructions are skipped
-      while (inst_op:=getattr(inst, 'op_name', '')) in {"S_DELAY_ALU", "S_WAIT_ALU"}:
+      # s_delay_alu, s_wait_alu and s_barrier_wait instructions are skipped
+      while (inst_op:=getattr(inst, 'op_name', '')) in {"S_DELAY_ALU", "S_WAIT_ALU", "S_BARRIER_WAIT"}:
         wave_pc[p.wave] += inst.size()
         inst = pc_map[pc:=wave_pc[p.wave]]
       # assert branch always has a JUMP packet
@@ -678,7 +717,6 @@ PACKET_COLORS = {
 }
 
 def format_packet(p) -> str:
-  from tinygrad.helpers import colored
   name = type(p).__name__
   if isinstance(p, (INST, INST_RDNA4)):
     op_name = p.op.name if isinstance(p.op, (InstOp, InstOpRDNA4)) else f"0x{p.op:02x}"
@@ -695,7 +733,6 @@ def format_packet(p) -> str:
   return f"{p._time:8}: {colored(f'{name:18}', PACKET_COLORS.get(name.replace('_RDNA4', ''), 'white'))} {fields}"
 
 def print_packets(packets) -> None:
-  from tinygrad.helpers import getenv
   skip = {"NOP", "TS_DELTA_SHORT", "TS_WAVE_STATE", "TS_DELTA_OR_MARK",
           "TS_DELTA_S5_W2", "TS_DELTA_S5_W3", "TS_DELTA_S8_W3", "REG", "EVENT"} if not getenv("NOSKIP") else {"NOP"}
   for data in packets:
@@ -710,7 +747,10 @@ if __name__ == "__main__":
   prg_events = {e.tag: e for e in data if type(e).__name__ == "ProfileProgramEvent" and e.tag is not None}
   sqtt_events = [e for e in data if type(e).__name__ == "ProfileSQTTEvent"]
   dev_targets = {e.device:f"gfx{e.props['gfx_target_version']//1000}" for e in data if type(e).__name__ == "ProfileDeviceEvent" and e.props}
+  evt_num = getenv("SQTT_EVENT", -1)
   for i, event in enumerate(sqtt_events):
     prg = prg_events.get(event.kern)
-    print(f"\n=== event {i} {prg.name if prg is not None else ''} ===")
-    print_packets(map_insts(event.blob, prg.lib, dev_targets[prg.device]) if prg is not None else decode(event.blob))
+    print(f"=== event {i} {prg.name if prg is not None else ''} ===")
+    if evt_num == -1 or i == evt_num:
+      print_packets(map_insts(event.blob, prg.lib, dev_targets[prg.device]) if prg is not None else decode(event.blob))
+      print("\n")

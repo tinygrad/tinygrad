@@ -332,7 +332,7 @@ class Scheduler:
 
 def bufs_from_ast(ast:UOp, dname:str) -> list[Buffer]:
   glbls = sorted([x for x in ast.backward_slice if x.op is Ops.PARAM], key=lambda x: x.arg)
-  return [Buffer(dname, x.ptrdtype.size, x.dtype.base if not isinstance(x.dtype, ImageDType) else x.dtype) for x in glbls]
+  return [Buffer(dname, x.ptrdtype.size, x.dtype.base) for x in glbls]
 
 def apply_opts(ast:UOp, ren:Renderer) -> UOp:
   if ast.tag is not None: return ast
@@ -355,7 +355,7 @@ def apply_opts(ast:UOp, ren:Renderer) -> UOp:
 
 def make_image(pa, off, idx):
   if not isinstance(dt:=pa.dtype, ImageDType) and (idx.tag is None or idx.tag) and (shapes:=ImageDType.valid_dims(dt)):
-    new_pa = pa.replace(dtype=(dtypes.imageh if dt.base==dtypes.half else dtypes.imagef)(shapes[0] + (4,), shapes[0][1] * 4 * dt.itemsize))
+    new_pa = pa.replace(dtype=(dtypes.imageh if dt.base==dtypes.half else dtypes.imagef)(shapes[0] + (4,)))
     new_idx = idx.replace(src=(new_pa, off), dtype=dtypes.float if dt.base == dtypes.half else idx.dtype)
     return new_idx if idx.tag or dt.base == dtypes.float else new_idx.cast(dtypes.half)
 

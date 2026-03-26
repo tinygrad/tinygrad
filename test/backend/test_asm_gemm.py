@@ -6,7 +6,7 @@ from extra.gemm.cdna_asm_gemm import asm_gemm
 from test.helpers import needs_second_gpu
 
 # On non CDNA4 it will only validate the Tensor.custom_kernel integration
-# Use NULL=1 EMULATE=AMD_CDNA4 to also test the assembly
+# Use DEV=NULL EMULATE=AMD_CDNA4 to also test the assembly
 def is_cdna4(): return getattr(Device[Device.DEFAULT].renderer, "arch", "").startswith("gfx950")
 
 def run_asm_gemm(a_shape, b_shape, dtype=dtypes.float16, a_shard=None, b_shard=None, gpus:int=1) -> None:
@@ -81,16 +81,37 @@ class TestGemm(unittest.TestCase):
   @needs_second_gpu
   def test_gemm_k_sharded_3d(self): verify_asm_gemm_k_sharded_3d(1, 64, 32, 2*64, gpus=2)
 
-# uses the Asm GEMM on CDNA4 only for speed reasons
-class TestGemmLarge(unittest.TestCase):
+# uses the smallest size for the cdna assembly gemm
+class TestAsmGEMM(unittest.TestCase):
   def setUp(self):
     if not is_cdna4():
+      self.skipTest("assembly gemm is only for cdna4")
+
+  def test_tiny(self): verify_asm_gemm(1, 256, 256, 64)
+
+  def test_verify_with_numpy(self):
+    import numpy as np
+    M, N, K = 256, 256, 64
+    rng = np.random.default_rng(0)
+    a_np = (rng.random((M, K), dtype=np.float32) - 0.5).astype(np.half)
+    b_np = (rng.random((K, N), dtype=np.float32) - 0.5).astype(np.half)
+    c_np = a_np @ b_np
+    a, b = Tensor(a_np), Tensor(b_np)
+    c = asm_gemm(a, b)
+    c.realize()
+    # no validation on the NULL device
+    if a.device.startswith("NULL"): return None
+    np.testing.assert_allclose(c.numpy(), c_np, atol=2e-3, rtol=5e-2)
+
+# test the Asm GEMM with Llama shapes, only run on the real machine for speed
+class TestGemmLlama(unittest.TestCase):
+  def setUp(self):
+    if not is_cdna4() or getenv("MOCKGPU"):
       self.skipTest("very slow on non mi350x")
 
   @Context(ASM_GEMM=1)
   def test_empty(self): (Tensor.empty(N:=getenv("N", 4096), N, dtype=dtypes.half)@Tensor.empty(N, N, dtype=dtypes.half)).realize()
 
-  def test_tiny(self): verify_asm_gemm(1, 256, 256, 64)
   def test_simple(self): verify_asm_gemm(1, N:=getenv("N", 4096), N, N, dtype=dtypes.half)
   def test_gemm(self): verify_asm_gemm(1, 8192, 4096, 14336)
   def test_gemm_batched(self): verify_asm_gemm(2, 8192, 4096, 4096)

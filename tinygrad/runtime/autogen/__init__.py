@@ -160,4 +160,5 @@ def __getattr__(nm):
     case "corefoundation": return load("corefoundation", "'CoreFoundation'",
                                        [f"{macossdk}/System/Library/Frameworks/CoreFoundation.framework/Headers/CF{s}.h" for s in ["String", "Data"]],
                                        args=["-isysroot", macossdk])
+    case "llvm_qcom": return load("llvm_qcom", "'llvm-qcom'", [root/"extra/tinydreno.h"])
     case _: raise AttributeError(f"no such autogen: {nm}")

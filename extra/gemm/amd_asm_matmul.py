@@ -291,7 +291,7 @@ def build_kernel(N, arch='gfx1100'):
   # MAIN GEMM LOOP
   # ===========================================================================
 
-  NO_DS, NO_GLOBAL = getenv("NO_DS", 0), getenv("NO_GLOBAL", 0)
+  NO_ALU, NO_DS, NO_GLOBAL = getenv("NO_ALU", 0), getenv("NO_DS", 0), getenv("NO_GLOBAL", 0)
 
   k.label('LOOP_INC')
   k.emit(s_add_i32(s[S_LOOP_CTR], s[S_LOOP_CTR], 8))
@@ -350,10 +350,11 @@ def build_kernel(N, arch='gfx1100'):
 
     # 64 dual FMACs
     k.waitcnt(lgkm=0)
-    k.emit(s_clause(simm16=len(FMAC_PATTERN)-1))
-    for i, (vdst_x, vdst_y, ax, bx, ay, by) in enumerate(FMAC_PATTERN):
-      k.emit(VOPD(VOPDOp.V_DUAL_FMAC_F32, VOPDOp.V_DUAL_FMAC_F32,
-                  vdstx=v[vdst_x], vdsty=v[vdst_y], srcx0=v[ax], vsrcx1=v[bx], srcy0=v[ay], vsrcy1=v[by]))
+    if not NO_ALU:
+      k.emit(s_clause(simm16=len(FMAC_PATTERN)-1))
+      for i, (vdst_x, vdst_y, ax, bx, ay, by) in enumerate(FMAC_PATTERN):
+        k.emit(VOPD(VOPDOp.V_DUAL_FMAC_F32, VOPDOp.V_DUAL_FMAC_F32,
+                    vdstx=v[vdst_x], vdsty=v[vdst_y], srcx0=v[ax], vsrcx1=v[bx], srcy0=v[ay], vsrcy1=v[by]))
 
   # wait for all global loads to finish
   # then sync the warp so it's safe to store local

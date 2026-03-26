@@ -28,6 +28,7 @@ enum {
   CMD_MAP_SYSMEM = 8,     // map system memory
   CMD_SYSMEM_READ = 9,    // bulk read from system memory
   CMD_SYSMEM_WRITE = 10,  // bulk write to system memory
+  CMD_RESIZE_BAR = 11,    // resize bar (noop)
   RESP_OK = 0, RESP_ERR = 1,
 };
 
@@ -125,7 +126,7 @@ static int map_bar(uint32_t bar, response_t *resp) {
   return 0;
 }
 
-static int map_sysmem_fd(uint64_t size, response_t *resp, int *out_fd) {
+static int map_sysmem_fd(uint64_t size, int contiguous, response_t *resp, int *out_fd) {
   if (g_sysmem_count >= MAX_SYSMEM) return -1;
   int idx = g_sysmem_count;
   int fd = -1;
@@ -207,7 +208,7 @@ static void handle_client(int fd) {
 
     case CMD_MAP_SYSMEM_FD: {
       int shm_fd = -1;
-      resp.status = map_sysmem_fd(req.arg0, &resp, &shm_fd) ? 1 : 0;
+      resp.status = map_sysmem_fd(req.arg0, (int)req.arg1, &resp, &shm_fd) ? 1 : 0;
       send_response(fd, &resp, shm_fd);
       continue;
     }
@@ -223,6 +224,9 @@ static void handle_client(int fd) {
       resp.status = dext_rpc(1, in, 3, NULL) ? 1 : 0;
       break;
     }
+
+    case CMD_RESIZE_BAR:
+      break;
 
     case CMD_RESET:
       resp.status = dext_rpc(2, NULL, 0, NULL) ? 1 : 0;

@@ -3,16 +3,10 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Self
 from tinygrad.uop import Ops
 from tinygrad.helpers import prod, argfix, argsort, flatten, dedup, make_tuple, ceildiv
-from tinygrad.uop.ops import resolve, smax
+from tinygrad.uop.ops import resolve, smax, _align_left
 
 if TYPE_CHECKING:
   from tinygrad.uop.ops import sint
-
-
-def _align_left(*shapes: tuple[sint, ...]) -> tuple[tuple[sint, ...], ...]:
-  # unsqueeze left to make every shape same length
-  max_dim = max(len(shape) for shape in shapes)
-  return tuple((1,) * (max_dim - len(shape)) + shape for shape in shapes)
 
 
 class MovementMixin:
@@ -173,6 +167,9 @@ class MovementMixin:
 
   def shrink_to(self, shape, *args) -> Self:
     return self.shrink(tuple([None if ns is None else (0, ns) for ns in argfix(shape, *args)]))
+
+  def pad_to(self, shape, *args) -> Self:
+    return self._mop(Ops.PAD, tuple([(0, 0 if ns is None else ns-s) for s,ns in zip(self.shape, argfix(shape, *args), strict=True)]))
 
   def view(self, shape, *args) -> Self:
     """`.view` is an alias for `.reshape`."""

@@ -3,11 +3,11 @@ from dataclasses import dataclass, replace
 from collections import defaultdict
 from typing import Any, Generic, TypeVar, Iterator, Generator, TYPE_CHECKING
 import importlib, inspect, functools, pathlib, os, platform, contextlib, sys, re, atexit, pickle, decimal
-from tinygrad.helpers import CI, OSX, LRU, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, flat_mv, PROFILE, temp, colored
-from tinygrad.helpers import Context, CCACHE, ALLOW_DEVICE_USAGE, MAX_BUFFER_SIZE, cpu_events, ProfileEvent, ProfilePointEvent, dedup, ContextVar
+from tinygrad.helpers import BENCHMARKS, CI, OSX, LRU, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, flat_mv, PROFILE, temp, colored
+from tinygrad.helpers import Context, CCACHE, ALLOW_DEVICE_USAGE, MAX_BUFFER_SIZE, cpu_events, ProfileEvent, ProfilePointEvent, ContextVar
 from tinygrad.helpers import unwrap_class_type, suppress_finalizing, select_first_inited, VIZ, CPU_LLVM, CPU_LVP, NV_PTX, CUDA_PTX, NV_NAK
-from tinygrad.helpers import EMULATED_DTYPES, NULL_IR3, NULL_QCOMCL, TracingKey
-from tinygrad.dtype import DType, ImageDType, PtrDType, dtypes, _to_np_dtype
+from tinygrad.helpers import EMULATE, EMULATED_DTYPES, NULL_IR3, NULL_QCOMCL, IMAGE, FLOAT16, TracingKey, size_to_str
+from tinygrad.dtype import DType, PtrDType, dtypes, _to_np_dtype
 if TYPE_CHECKING: from tinygrad.renderer import Renderer
 
 # **************** Device ****************
@@ -41,13 +41,12 @@ class _Device:
       with contextlib.suppress(Exception): yield self[device].device
   @functools.cached_property
   def DEFAULT(self) -> str:
-    dev = [dev] if (dev:=getenv("DEV", "").upper()) else []
-    from_env = dedup(dev + [d for d in self._devices if d not in ["DISK", "TINYFS", "NPY"] and getenv(d) == 1])
-    assert len(from_env) < 2, f"multiple devices set in env: {from_env}"
-    if len(from_env) == 1: return from_env[0]
+    assert (dev:=next((d for d in self._devices if d not in ["DISK", "TINYFS", "NPY"] and getenv(d) == 1), None)) is None, \
+      f"{dev}=1 is deprecated, use DEV={dev} instead"
+    if (dev:=getenv("DEV", "").upper()): return dev
     try:
       device = next(self.get_available_devices())
-      os.environ[device] = "1"   # we set this in environment for spawned children
+      os.environ["DEV"] = device   # we set this in environment for spawned children
       return device
     except StopIteration as exc: raise RuntimeError("no usable devices") from exc
 Device: _Device = _Device()
@@ -72,7 +71,6 @@ class ProfileGraphEvent(ProfileEvent): ents:list[ProfileGraphEntry]; deps:list[l
 @dataclass(frozen=True, eq=True)
 class BufferSpec:
   # TODO: move device, size, dtype here?
-  image: ImageDType|None = None
   uncached: bool = False
   cpu_access: bool = False
   host: bool = False
@@ -96,8 +94,7 @@ class Buffer:
   profile_events:list[ProfileEvent] = []
   def __init__(self, device:str, size:int, dtype:DType, opaque:Any=None, options:BufferSpec|None=None, initial_value:bytes|None=None,
                uop_refcount=0, base:Buffer|None=None, offset:int=0, preallocate=False):
-    if isinstance(dtype, ImageDType): options = BufferSpec(image=dtype) # TODO: image hack shouldn't be here. where should it be?
-    else: assert isinstance(dtype, DType) and not isinstance(dtype, PtrDType)
+    assert isinstance(dtype, DType) and not isinstance(dtype, PtrDType)
     self.device, self.size, self.dtype, self.options, self.offset, self.allocated_views = device, size, dtype, options, offset, 0
     if base is None:
       assert offset == 0, "base buffers can't have offset"
@@ -175,12 +172,9 @@ class Buffer:
   def __repr__(self):
     return f"<buf real:{self.is_allocated()} device:{self.device} size:{self.size} dtype:{self.dtype}" + \
            (f" offset:{self.offset}" if self._base is not None else "") + (f" {self.options=}" if self.options is not None else "") + ">"
-  def as_dmaref(self) -> DMARef:
-    assert hasattr(self.allocator, "_as_dmaref"), f"Device {self.device} doesn't support DMA"
-    return self.allocator._as_dmaref(self._buf)
   def as_memoryview(self, allow_zero_copy=False, force_zero_copy=False) -> memoryview:
     # zero copy with as_memoryview (disabled by default due to use after free)
-    if (force_zero_copy or allow_zero_copy) and hasattr(self.allocator, '_as_buffer') and (self.options is None or self.options.image is None):
+    if (force_zero_copy or allow_zero_copy) and hasattr(self.allocator, '_as_buffer') and self.options is None:
       return self.allocator._as_buffer(self._buf)
     assert not force_zero_copy, "force zero copy was passed, but copy is required"
     return self.copyout(memoryview(bytearray(self.nbytes)))
@@ -204,19 +198,6 @@ class Buffer:
     assert offset < self.nbytes, "offset must be less than nbytes"
     return Buffer(self.device, size, dtype, base=self.base, offset=self.offset+offset)
 
-@dataclass(frozen=True)
-class DMACPURef:
-  addr: int
-  size: int
-
-@dataclass(frozen=True)
-class DMAFdRef:
-  fd: int
-  offset: int
-  size: int
-
-DMARef = DMACPURef|DMAFdRef
-
 DeviceType = TypeVar('DeviceType', bound='Compiled')
 
 # TODO: size, dest, src are the same type. can we enforce this?
@@ -228,7 +209,9 @@ class Allocator(Generic[DeviceType]):
   # overridden in LRUAllocator
   def alloc(self, size:int, options:BufferSpec|None=None):
     assert size > 0, f"alloc size must be positive, getting {size}"
-    return self._alloc(size, options if options is not None else self.default_buffer_spec)
+    try: return self._alloc(size, options if options is not None else self.default_buffer_spec)
+    except (RuntimeError, MemoryError) as e: raise MemoryError(f"Allocation of {size_to_str(size)} failed on {self.dev.device}. "
+                                                               f"Used: {size_to_str(GlobalCounters.mem_used_per_device[self.dev.device])}") from e
   def free(self, opaque, size:int, options:BufferSpec|None=None):
     self._free(opaque, options if options is not None else self.default_buffer_spec)
 
@@ -320,7 +303,7 @@ class Compiled:
 
     # remove disabled compilers
     for en, rc in self.comp_sets.values():
-      if en is not None and en.value == 0 and rc in comps: comps.remove(rc)
+      if en is not None and en.value == 0 and en.key in os.environ and rc in comps: comps.remove(rc)
 
     return select_first_inited(list(forced_comps) if len(forced_comps)>0 else comps, f"No compiler for {self.device} is available", self.cached_pair)
 
@@ -344,19 +327,21 @@ class Compiled:
 
 # TODO: move this to each Device
 # this only tracks if the dtype is natively supported, it may be supported in the frontend using decomps
-def is_dtype_supported(dtype:DType, device:str|None=None) -> bool:
-  if dtype == dtypes.index: return False
+def is_dtype_supported(dtype:DType, device:str|None=None, arch:str|None=None) -> bool:
   if device is None: device = Device.DEFAULT
   if dtype == dtypes.bfloat16:
-    if device == "METAL": return not CI
-    if device == "CUDA": return not CI and not CUDA_PTX
-    if device == "NV": return not CI and not NV_PTX and not NV_NAK
-    if device in {"CPU"}: return not CI and platform.machine() in {"arm", "arm64", "aarch64", "x86_64", "amd64"} and not CPU_LVP
+    if device == "METAL": return not CI or BENCHMARKS
+    if device == "CUDA": return (not CI or BENCHMARKS) and not CUDA_PTX
+    if device == "NV": return (not CI or BENCHMARKS) and not NV_PTX and not NV_NAK
+    if device in {"CPU"}: return (not CI or BENCHMARKS) and platform.machine() in {"arm", "arm64", "aarch64", "x86_64", "amd64"} and not CPU_LVP
     return device in {"AMD", "CL", "PYTHON", "NULL"}
   if dtype in dtypes.fp8_ocp:
-    if device == "CUDA": return not CI and not CUDA_PTX
-    if device == "NV": return not CI and not NV_PTX and not NV_NAK
-    if device == "AMD": return not CI and getattr(Device["AMD"], "target") == (9,5,0)
+    if device == "CUDA": return (not CI or BENCHMARKS) and not CUDA_PTX
+    if device == "NV": return (not CI or BENCHMARKS) and not NV_PTX and not NV_NAK
+    if device == "AMD":
+      # TODO: open the device to get arch of device, will be fixed after triple is in the device string
+      if arch is None: arch = getattr(Device[device].renderer, "arch", "")
+      return (not CI or BENCHMARKS) and arch == "gfx950"
     return device in {"PYTHON", "NULL"}
   if dtype in dtypes.fp8_fnuz: return device in {"PYTHON", "NULL"}
   if device == "WEBGPU": return dtype in [dtypes.bool, dtypes.char, dtypes.uchar, dtypes.short,
@@ -367,9 +352,9 @@ def is_dtype_supported(dtype:DType, device:str|None=None) -> bool:
   # PYTHON supports half memoryview in 3.12+ https://github.com/python/cpython/issues/90751
   # double can't be bitcast to anything without long support
   if dtype == dtypes.half:
-    if device == "CL": return not CI and not OSX
-    if device == "QCOM": return False # QCOM compiler is flaky with half
-    if device in ["CUDA", "NV"]: return not CI
+    if device == "CL": return (not CI or BENCHMARKS) and not OSX
+    if device == "QCOM": return bool(IMAGE) and bool(FLOAT16) # QCOM compiler is flaky with half
+    if device in ["CUDA", "NV"]: return (not CI or BENCHMARKS) or "CUDA" in EMULATE.value
     if device == "CPU" and CPU_LLVM: return OSX
     if device == "PYTHON": return sys.version_info >= (3, 12)
   if dtype == dtypes.float64: return (device not in {"METAL", "QCOM"} and not (OSX and device == "CL") and not NULL_IR3 and not NULL_QCOMCL

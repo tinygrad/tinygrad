@@ -2,6 +2,7 @@ import unittest
 from tinygrad import Tensor, dtypes
 from tinygrad.tensor import _METADATA
 from tinygrad.engine.realize import capturing
+from tinygrad.engine.schedule import linear_to_schedule
 from tinygrad.helpers import Context
 
 @unittest.skip("tensor metadata is no longer supported")
@@ -94,10 +95,11 @@ class TestTensorMetadata(unittest.TestCase):
       self.assertEqual(si.metadata, ())
 
   def _has_metadata(self, h, name):
-    items = []
-    capturing.append(type("", (), {"add": lambda _, ei: items.append(ei)})())
+    linears = []
+    capturing.append(type("", (), {"add_linear": lambda _, linear, var_vals: linears.append(linear)})())
     try: h.realize()
     finally: capturing.clear()
+    items = [ei for linear in linears for ei in linear_to_schedule(linear)]
     return any(m.name == name for ei in items for m in ei.metadata)
 
   def test_metadata_survives_realize_pending_assign(self):

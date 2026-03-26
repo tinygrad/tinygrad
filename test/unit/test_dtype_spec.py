@@ -1,8 +1,8 @@
 import unittest, math, subprocess
-from tinygrad.tensor import Tensor, dtypes, Device
-from tinygrad.dtype import DType, DTYPES_DICT
-from tinygrad.device import is_dtype_supported
-from tinygrad.helpers import getenv, DEBUG
+from tinygrad.tensor import Tensor
+from tinygrad.dtype import dtypes, DType, DTYPES_DICT
+from tinygrad.device import Device, is_dtype_supported
+from tinygrad.helpers import getenv, DEBUG, EMULATED_DTYPES
 from test.helpers import slow
 from hypothesis import given, settings, strategies as strat
 import numpy as np
@@ -24,8 +24,13 @@ def _assert_eq(tensor:Tensor, target_dtype:DType, target, tol_target_dtype:float
   if DEBUG >= 2: print(tensor.numpy())
   try:
     assert tensor.dtype == target_dtype
-    np.testing.assert_allclose(tensor.numpy(), target, rtol={dtypes.float16:1e-3, dtypes.bfloat16:1e-2,
-      dtypes.fp8e4m3:1e-1, dtypes.fp8e5m2:5e-1, dtypes.fp8e4m3fnuz:1e-1, dtypes.fp8e5m2fnuz:5e-1}.get(target_dtype, tol_target_dtype))
+    # denormals are zero
+    if target_dtype in dtypes.floats and (not is_dtype_supported(target_dtype) or target_dtype in EMULATED_DTYPES.tolist(dtypes)):
+      fe, fm = dtypes.finfo(target_dtype)
+      kwargs = {"atol":2 ** (2 - (1 << (fe - 1))), "rtol": 2 ** (-fm)}
+    else: kwargs = {"rtol": {dtypes.float16:1e-3, dtypes.bfloat16:1e-2, dtypes.fp8e4m3:1e-1, dtypes.fp8e5m2:5e-1,
+                             dtypes.fp8e4m3fnuz:1e-1, dtypes.fp8e5m2fnuz:5e-1}.get(target_dtype, tol_target_dtype)}
+    np.testing.assert_allclose(tensor.numpy(), target, **kwargs)
 
   except AssertionError as e:
     raise AssertionError(f"\ntensor {tensor.numpy()} dtype {tensor.dtype} does not match target {target} with dtype {target_dtype}") from e

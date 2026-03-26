@@ -1,8 +1,10 @@
 #!/usr/bin/env python
 import unittest, os, subprocess
+from unittest.mock import patch
 from tinygrad import Tensor
 from tinygrad.device import Device, Compiler, enumerate_devices_str
-from tinygrad.helpers import diskcache_get, diskcache_put, getenv, Context, WIN, CI
+from tinygrad.helpers import diskcache_get, diskcache_put, getenv, Context, WIN, CI, OSX
+from tinygrad.runtime.support.c import DLL
 
 class TestDevice(unittest.TestCase):
   def test_canonicalize(self):
@@ -27,6 +29,12 @@ class TestDevice(unittest.TestCase):
     Device.DEFAULT = device.lower()
     self.assertEqual(Device.canonicalize(None), device)
     Device.DEFAULT = device
+
+  def test_old_device_env_raises(self):
+    result = subprocess.run(['python3', '-c', 'from tinygrad import Device; Device.DEFAULT'],
+                            env={**os.environ, "CPU": "1"}, capture_output=True)
+    self.assertNotEqual(result.returncode, 0)
+    self.assertIn(b"deprecated", result.stderr)
 
   @unittest.skipIf(WIN and CI, "skipping windows test") # TODO: subprocess causes memory violation?
   def test_env_overwrite_default_compiler(self):
@@ -75,6 +83,18 @@ class TestDevice(unittest.TestCase):
       self.assertIsInstance(Device["CPU"].compiler, CPULLVMCompiler)
       assert inst is Device["CPU"].compiler  # cached
 
+  @unittest.skipIf(Device.DEFAULT != "CPU", "only run on CPU")
+  def test_compiler_autodetect_fallback(self):
+    from tinygrad.runtime.support.compiler_cpu import CPULLVMCompiler
+
+    try: CPULLVMCompiler()
+    except Exception as e: self.skipTest(f"skipping: LLVM not available: {e}")
+
+    dev = Device["CPU"]
+    dev.cached_pair.clear()
+    with patch("tinygrad.renderer.cstyle.ClangJITRenderer.__init__", side_effect=RuntimeError("broken")):
+      self.assertIsInstance(dev.renderer.compiler, CPULLVMCompiler)
+
 class MockCompiler(Compiler):
   def __init__(self, key): super().__init__(key)
   def compile(self, src) -> bytes: return src.encode()
@@ -100,6 +120,7 @@ class TestCompiler(unittest.TestCase):
       a = Tensor([0.,1.], device=Device.DEFAULT).realize()
       (a + 1).realize()
 
+@unittest.skipIf(OSX and 'libclang' in DLL._loaded_, "MTLCompiler can't be loaded after libclang on OSX")
 class TestRunAsModule(unittest.TestCase):
   def test_module_runs(self):
     cpu_line = [l for l in enumerate_devices_str() if "CPU" in l][0]
