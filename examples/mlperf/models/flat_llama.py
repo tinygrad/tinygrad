@@ -103,21 +103,24 @@ class FlatTransformer:
     xq, xk, xv = xq.transpose(1, 2), xk.transpose(1, 2), xv.transpose(1, 2)
     attn = xq.scaled_dot_product_attention(xk, xv, is_causal=True, enable_gqa=True).transpose(1, 2)
     attn = attn.reshape(bsz, seqlen, -1)
-    return matmul(attn, wo)
+    return (matmul(attn, wo),)
 
   def feed_forward(self, x:Tensor, ffn_norm:Tensor, w1:Tensor, w2:Tensor, w3:Tensor):
     x = rmsnorm(x, self.norm_eps) * ffn_norm
-    x_w1 = matmul(x, w1).silu()
+    x_w1 = matmul(x, w1)
     x_w3 = matmul(x.contiguous_backward(), w3)
-    return matmul(x_w1 * x_w3, w2)
+    return matmul(x_w1.silu() * x_w3, w2), x, x_w1, x_w3
 
   @function(precompile=True, precompile_backward=True)
   def run_layer(self, x:Tensor, freqs_cis:Tensor,
                 attention_norm:Tensor, wo:Tensor,
                 ffn_norm:Tensor, w1:Tensor, w2:Tensor, w3:Tensor,
                 wqkv:Tensor|None=None, wq:Tensor|None=None, wk:Tensor|None=None, wv:Tensor|None=None):
-    h = x + self.attention(x, freqs_cis, attention_norm, wo, wqkv=wqkv, wq=wq, wk=wk, wv=wv)
-    return h + self.feed_forward(h, ffn_norm, w1, w2, w3)
+    attn, *attn_save = self.attention(x, freqs_cis, attention_norm, wo, wqkv=wqkv, wq=wq, wk=wk, wv=wv)
+    h = x + attn
+    ffn, *ffn_save = self.feed_forward(h, ffn_norm, w1, w2, w3)
+    h = h + ffn
+    return h, attn, *attn_save, ffn, *ffn_save
 
   def shard(self, device:tuple[str, ...], mp:bool=False):
     from tinygrad.nn.state import get_parameters
@@ -149,7 +152,7 @@ class FlatTransformer:
       attn_kwargs = {"wqkv": self.wqkv[i]} if WQKV else {"wq": self.wq[i], "wk": self.wk[i], "wv": self.wv[i]}
       h = self.run_layer(h, freqs_cis,
                          self.attention_norm[i], self.wo[i],
-                         self.ffn_norm[i], self.w1[i], self.w2[i], self.w3[i], **attn_kwargs)
+                         self.ffn_norm[i], self.w1[i], self.w2[i], self.w3[i], **attn_kwargs)[0]
     logits = self.norm(h) @ self.output[0].T
     return logits
 
