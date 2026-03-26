@@ -372,8 +372,7 @@ jobs:
       - name: Test CL IMAGE=1 ops
         run: |
           DEV=CL IMAGE=1 python -m pytest -n=auto test/backend/test_ops.py --durations=20
-        # TODO: training is broken
-        # DEV=CL IMAGE=1 python test/models/test_end2end.py TestEnd2End.test_linear_mnist
+          DEV=CL IMAGE=1 python test/models/test_end2end.py TestEnd2End.test_linear_mnist
       - name: Run process replay tests
         uses: ./.github/actions/process-replay
 
