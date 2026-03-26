@@ -365,10 +365,9 @@ def sqtt_timeline(data:bytes, lib:bytes, target:str) -> Generator[ProfileEvent, 
       exec_pending.setdefault(exec_type, []).append((row, idx, name))
     # construct and yield the event for this packet
     if row not in row_ends: yield ProfilePointEvent(row, "JSON", "pcMap", pc_map, ts=Decimal(0))
-    yield (e:=ProfileRangeEvent(row, TracingKey(op or name, ret=link), Decimal(p._time), Decimal(p._time+duration)))
+    yield (e:=ProfileRangeEvent(row, TracingKey(op or name, ret=link), Decimal(p._time-duration), Decimal(p._time)))
     # allow CDNA packets to overlap, NOT allowed on RDNA.
-    if (et:=row_ends.get(row)) is not None and e.st < et and not is_cdna and not getenv("OVERLAP_BUG"):
-      raise RuntimeError(f"packet {row}-{idx} overlaps: {e.st} {et}.")
+    if (et:=row_ends.get(row)) is not None and e.st < et and not is_cdna: raise RuntimeError(f"packet {row}-{idx} overlaps: {e.st} {et}.")
     row_ends[row] = unwrap(e.en)
     # barrier on this wave extends to fill the time it was waiting
     if wave is not None:
