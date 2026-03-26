@@ -59,7 +59,7 @@ def decode_profile(data:bytes) -> dict:
           else: v["events"].append({"event":"free", "ts":ts, "key":key, "arg": {"users":[u("<IIIB") for _ in range(u("<I")[0])]}})
   return {"dur":total_dur, "peak":global_peak, "layout":layout, "markers":markers}
 
-def main():
+def main(args):
   viz.trace = viz.load_pickle(args.rewrites_path, default=RewriteTrace([], [], {}))
   viz.ctxs = viz.get_rewrites(viz.trace)
 
@@ -75,7 +75,7 @@ def main():
       print("Select a device:")
       for k in (*profile["layout"], *counters):
         print(f"  {format_colored(k)}")
-      sys.exit(0)
+      return
 
     # ** SQTT printer
     if args.device is not None and (sqtt_data:=next((v for k,v in counters.items() if ansistrip(k) == args.device), None)) is not None:
@@ -103,7 +103,7 @@ def main():
         if info.startswith("LINK:"): phase, inst = "EXEC", dispatch_to_inst[info.replace("LINK:", "")]
         if inst and phase: info = f"{phase:<8} {inst}"
         print(f"{int(e.st):<12} {e.device:<20} {op_str}{' '*(22-ansilen(op_str))} {int(e.en-e.st):<4} {info}")
-      sys.exit(0)
+      return
 
     # ** Profiler printer
     agg, total, n = {}, 0, 0
@@ -128,7 +128,7 @@ def main():
       items = sorted(agg.items(), key=lambda kv:kv[1][0], reverse=True)
       table = [[name, time_to_str(t, w=9), c, f"{(t/total*100.0):.2f}%"] for name,(t,c) in items]
       print(tabulate(table, headers=["name", "total", "count", "pct"], tablefmt="github"))
-    sys.exit(0)
+    return
 
   # ** Graph rewrites printer
   for k in viz.ctxs:
@@ -162,5 +162,5 @@ if __name__ == "__main__":
     parser.print_help()
     sys.exit(0)
 
-  try: main()
+  try: main(args)
   except KeyboardInterrupt: pass

@@ -1,8 +1,8 @@
 # test to compare every packet with the rocprof decoder
-import unittest, pickle
+import unittest, pickle, contextlib, io
 from typing import Iterator
 from pathlib import Path
-from tinygrad.helpers import DEBUG, getenv, temp
+from tinygrad.helpers import DEBUG, getenv, temp, ansistrip
 from tinygrad.renderer.amd.sqtt import print_packets, map_insts
 from tinygrad.runtime.autogen.amd.rdna3.ins import s_endpgm
 from tinygrad.viz.serve import sqtt_timeline
@@ -10,6 +10,12 @@ from test.amd.disasm import disasm
 
 import tinygrad
 EXAMPLES_DIR = Path(tinygrad.__file__).parent.parent / "extra/sqtt/examples"
+
+def run_cli(*cli_flags) -> str:
+  from extra.viz.cli import main
+  with contextlib.redirect_stdout(buf:=io.StringIO()):
+    main(args)
+  return buf.getvalue().strip()
 
 def rocprof_inst_traces_match(sqtt, prg, target):
   from tinygrad.viz.serve import amd_decode
@@ -109,6 +115,20 @@ class TestSQTTMapBase(unittest.TestCase):
         for row, events in wave_barriers.items():
           for e in events:
             assert e.en-e.st > 1, f"all barriers must have a duration greater than 1, got {e}"
+
+  def test_sqtt_cli(self):
+    for pkl_path in sorted((EXAMPLES_DIR/self.target).glob("*.pkl")):
+      # list devices
+      out = run_cli("--profile", "--profile-path", str(pkl_path), "--no-color")
+      devices = [l.strip() for l in out.split("\n") if l.startswith("  ") and "SQTT PKTS" in l]
+      for dev in devices:
+        out = run_cli("--profile", "--profile-path", str(pkl_path), "--device", dev, "--no-color")
+        lines = out.split("\n")
+        self.assertIn("Clk", lines[0])
+        if len(lines) <= 2: continue
+        for line in lines[2:]:
+          parts = line.split()
+          self.assertTrue(parts[0].isdigit(), f"expected clock timestamp, got {parts[0]}")
 
 class TestSQTTMapRDNA3(TestSQTTMapBase): target = "gfx1100"
 
