@@ -428,6 +428,8 @@ CHAT_HTML = b'''<!DOCTYPE html><html><head><title>tinygrad chat</title><style>
   }
 </script></body></html>'''
 
+conv_cache: dict = {"n_msgs": 0, "ids": []}
+
 class Handler(HTTPRequestHandler):
   def log_request(self, code='-', size='-'): pass
   def do_GET(self):
@@ -532,7 +534,6 @@ if __name__ == "__main__":
     # warmup: run 2 tokens through the model twice to capture the JIT before serving
     with Context(DEBUG=max(DEBUG.value, 1)):
       for _ in range(2): list(zip(range(2), model.generate([0])))
-    conv_cache: dict = {"n_msgs": 0, "ids": []}
     TCPServerWithReuse(('', args.serve), Handler).serve_forever()
 
   # interactive chat
