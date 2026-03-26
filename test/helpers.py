@@ -32,13 +32,12 @@ def assert_jit_cache_len(fxn, expected_len):
   if not fxn.jit_cache:
     assert expected_len == 0, expected_len
     return
-  # until we have a better way of typing the prg in ExecItem
-  if issubclass(type(fxn.jit_cache[0].prg), Runner) and not type(fxn.jit_cache[0].prg).__name__.endswith('Graph'):
+  # check if the first item is a graph (GraphRunner, MetalGraph, HCQGraph, etc.)
+  is_graph = hasattr(fxn.jit_cache[0].prg, 'jit_cache')
+  if not is_graph:
     assert len(fxn.jit_cache) == expected_len, f"expected {expected_len}, got {len(fxn.jit_cache)}"
   else:
     assert len(fxn.jit_cache) == 1, len(fxn.jit_cache)
-    # until we have a better way of typing the prg in ExecItem
-    assert type(fxn.jit_cache[0].prg).__name__.endswith('Graph')
     assert len(fxn.jit_cache[0].prg.jit_cache) == expected_len, f"expected {expected_len}, got {len(fxn.jit_cache[0].prg.jit_cache)}"
 
 def rand_for_dtype(dt:DType, size:int, allow_subnormal=True):
