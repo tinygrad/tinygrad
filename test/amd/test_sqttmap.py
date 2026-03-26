@@ -126,9 +126,8 @@ class TestSQTTMapBase(unittest.TestCase):
         out = run_cli("--profile", "--profile-path", str(pkl_path), "--device", dev, "--no-color")
         lines = out.split("\n")
         self.assertIn("Clk", lines[0])
-        if len(lines) <= 2: continue
-        for line in lines[2:]:
-          parts = line.split()
+        for r in lines[2:]:
+          parts = r.split()
           self.assertTrue(parts[0].isdigit(), f"expected clock timestamp, got {parts[0]}")
 
 class TestSQTTMapRDNA3(TestSQTTMapBase): target = "gfx1100"
