@@ -1392,8 +1392,10 @@ def train_llama3():
     logits:Tensor = model(tokens[:, :-1])
     loss = vocab_mask.where(-1e9, logits).sparse_categorical_crossentropy(tokens[:, 1:])
 
-    loss.backward()
-    assert all(p.grad is g for p,g in zip(optim.params, grads))
+    # loss.backward()
+    # assert all(p.grad is g for p,g in zip(optim.params, grads))
+    for g, new_g in zip(grads, loss.gradient(*optim.params)):
+      apply_grad(g, new_g.uop)
 
     loss_cpu = loss.flatten().float().to("CPU")
     return loss_cpu.realize(*grads)
