@@ -1,6 +1,6 @@
-import functools, itertools
+import functools, itertools, time
 from typing import Generic, TypeVar, Callable, cast, overload
-from tinygrad.helpers import Context, dedup, getenv
+from tinygrad.helpers import Context, dedup, getenv, DEBUG
 from tinygrad.uop.ops import UOp, Ops, graph_rewrite, PatternMatcher, UPat
 from tinygrad.tensor import Tensor
 from tinygrad.nn.state import get_state_dict
@@ -24,6 +24,7 @@ pm_ctx = PatternMatcher([
 
 ReturnType = TypeVar('ReturnType')
 class _function(Generic[ReturnType]):
+  depth = 0
   def __init__(self, fxn:Callable[..., ReturnType], *, precompile:bool, precompile_backward:bool, allow_implicit:bool, grad_fxn:Callable|None):
     self.fxn = fxn
     self.precompile = precompile
@@ -34,6 +35,8 @@ class _function(Generic[ReturnType]):
   def __get__(self, obj, objtype=None): return functools.partial(self.__call__, obj) if obj is not None else self
 
   def __call__(self, *args, **kwargs) -> ReturnType:
+    st = time.perf_counter()
+
     params = get_state_dict((args, kwargs), tensor_type=(Tensor, UOp)).values()
 
     # deduplicate input_uops, keeping the first occurrence index for each unique uop
@@ -42,7 +45,9 @@ class _function(Generic[ReturnType]):
     # disable realize/schedule while this is running
     # run it and do surgery later
     with Context(ALLOW_DEVICE_USAGE=getenv("DEVICE_IN_FUNCTION_BUG", 0)):
+      _function.depth += 1
       ret = self.fxn(*args, **kwargs)
+      _function.depth -= 1
     if isinstance(ret, Tensor):
       uret = ret.uop
     elif isinstance(ret, tuple) and all(isinstance(x, Tensor) for x in ret):
@@ -77,6 +82,11 @@ class _function(Generic[ReturnType]):
 
     fret = uret.call(*call_uops, grad_fxn=self.grad_fxn, name=name, precompile=self.precompile,
                      precompile_backward=self.precompile_backward)
+
+    if DEBUG >= 2:
+      #signature = [(x._shape, x.dtype, x._device) for x in call_uops]
+      print("  "*_function.depth+f"function {uret.key.hex()[:8]} in {(time.perf_counter()-st)*1000:8.2f} ms: {name}") # with sig {signature}")
+
     if isinstance(ret, tuple):
       return cast(ReturnType, tuple(Tensor(fret.gettuple(i)) for i in range(len(ret))))
     else:

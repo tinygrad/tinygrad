@@ -5,31 +5,30 @@ from tinygrad.helpers import dedup
 from tinygrad.runtime.support.c import init_c_var
 from tinygrad.device import Buffer, Device
 from tinygrad.runtime.ops_cuda import CUDADevice, check, encode_args, cu_time_execution
-from tinygrad.engine.realize import ExecItem, BufferXfer, CompiledRunner
+from tinygrad.engine.realize import BufferXfer, CompiledRunner
 from tinygrad.engine.jit import MultiGraphRunner, GraphException
 
 class CUDAGraph(MultiGraphRunner):
-  def __init__(self, jit_cache: list[ExecItem], input_buffers: list[Buffer], var_vals: dict[str, int],
-               orig_valid_positions: dict[int, set[int]]|None = None):
-    super().__init__(jit_cache, input_buffers, var_vals, orig_valid_positions)
+  def __init__(self, *args, **kwargs):
+    super().__init__(*args, **kwargs)
 
     # Check all jit items are compatible.
-    if not all(isinstance(ji.prg, (CompiledRunner, BufferXfer)) for ji in jit_cache): raise GraphException
+    if not all(isinstance(ji.prg, (CompiledRunner, BufferXfer)) for ji in self.jit_cache): raise GraphException
 
     self.jc_idx_with_updatable_bufs = dedup([x[0] for x in self.input_replace.keys()])
     self.updatable_nodes: dict[int, tuple[Any, Any, Any, bool]] = {} # dict[jc index] = tuple(graph node, node params, input kernel params, is memcpy)
 
     self.graph = init_c_var(cuda.CUgraph, lambda x: check(cuda.cuGraphCreate(ctypes.byref(x), 0)))
 
-    for j,ji in enumerate(jit_cache):
+    for j,ji in enumerate(self.jit_cache):
       if isinstance(ji.prg, CompiledRunner):
-        global_size, local_size = ji.prg.p.launch_dims(var_vals)
+        global_size, local_size = ji.prg.p.launch_dims({v: 0 for v in self.vars})
 
         new_node = cuda.CUgraphNode()
         deps = self._access_resources([x.base for x in ji.bufs if x is not None], ji.prg.p.outs, new_dependency=new_node)
         c_deps = (cuda.CUgraphNode*len(deps))(*deps) if deps else None
 
-        c_args, vargs = encode_args([cast(Buffer, x)._buf for x in ji.bufs], [var_vals.get(x.expr, ji.fixedvars.get(x.expr)) for x in ji.prg.p.vars])
+        c_args, vargs = encode_args([cast(Buffer, x)._buf for x in ji.bufs], [ji.fixedvars.get(x.expr, 0) for x in ji.prg.p.vars])
         kern_params = cuda.CUDA_KERNEL_NODE_PARAMS_v1(ji.prg._prg.prg, *global_size, *local_size, 0, ctypes.cast(0, ctypes.POINTER(ctypes.c_void_p)),
                                                       vargs)
         check(cuda.cuGraphAddKernelNode(ctypes.byref(new_node), self.graph, c_deps, len(deps), ctypes.byref(kern_params)))

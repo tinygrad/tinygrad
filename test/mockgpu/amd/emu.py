@@ -131,25 +131,25 @@ def _init_sqtt_encoder():
                   SOPPOp3.S_CBRANCH_EXECZ.value, SOPPOp3.S_CBRANCH_EXECNZ.value}
 
   # VALU sub-classification patterns
-  _VALU_TRANS_RE = re.compile(r'V_(EXP|LOG|RCP|RSQ|SQRT|SIN|COS|CEIL|FLOOR|TRUNC|RNDNE|FRACT|FREXP)_')
-  _VALU_64_SHIFT_RE = re.compile(r'V_(LSHLREV|LSHRREV|ASHRREV)_(B|I)64')
-  _VALU_MAD64_RE = re.compile(r'V_MAD_(U|I)64')
-  _VALU_64_RE = re.compile(r'V_\w+_F64')
+  _VALUT_4_RE = re.compile(r'V_(EXP|LOG|RCP|RSQ|SQRT|SIN|COS|CEIL|FLOOR|TRUNC|RNDNE|FRACT|FREXP)_')
+  _VALUB_2_RE = re.compile(r'V_(LSHLREV|LSHRREV|ASHRREV)_(B|I)64')
+  _VALUB_4_RE = re.compile(r'V_MAD_(U|I)64')
+  _VALUB_16_RE = re.compile(r'V_\w+_F64')
 
   def _valu_op(op_name: str) -> InstOp|None:
-    if 'CMPX' in op_name: return InstOp.VALU_CMPX
-    if _VALU_64_SHIFT_RE.search(op_name): return InstOp.VALU_64_SHIFT
-    if _VALU_MAD64_RE.search(op_name): return InstOp.VALU_MAD64
-    if _VALU_64_RE.search(op_name): return InstOp.VALU_64
-    if _VALU_TRANS_RE.search(op_name): return InstOp.VALU_TRANS
+    if 'CMPX' in op_name: return InstOp.VALU1_WR_EXEC
+    if _VALUB_2_RE.search(op_name): return InstOp.VALUB_2
+    if _VALUB_4_RE.search(op_name): return InstOp.VALUB_4
+    if _VALUB_16_RE.search(op_name): return InstOp.VALUB_16
+    if _VALUT_4_RE.search(op_name): return InstOp.VALUT_4
     return None
 
   def _mem_op(t, op_name: str) -> InstOp:
     is_store = "STORE" in op_name
-    if issubclass(t, _DS): return InstOp.LDS_STORE if is_store else InstOp.LDS_LOAD
-    if issubclass(t, _GLOBAL): return InstOp.GLOBAL_STORE if is_store else InstOp.GLOBAL_LOAD
-    if issubclass(t, _FLAT): return InstOp.FLAT_STORE if is_store else InstOp.FLAT_LOAD
-    if issubclass(t, _SCRATCH): return InstOp.FLAT_STORE if is_store else InstOp.FLAT_LOAD
+    if issubclass(t, _DS): return InstOp.LDS_WR_2 if is_store else InstOp.LDS_RD
+    if issubclass(t, _GLOBAL): return InstOp.SGMEM_WR_2 if is_store else InstOp.SGMEM_RD_1
+    if issubclass(t, _FLAT): return InstOp.FLAT_WR_3 if is_store else InstOp.FLAT_RD_2
+    if issubclass(t, _SCRATCH): return InstOp.FLAT_WR_3 if is_store else InstOp.FLAT_RD_2
     return InstOp.SALU
 
   nibbles: list[int] = []
@@ -174,7 +174,7 @@ def _init_sqtt_encoder():
       op = _valu_op(op_name)
       if op is None: _emit_nibbles(nibbles, VALUINST, delta=1, wave=w)
       else: _emit_nibbles(nibbles, INST, delta=1, wave=w, op=op)
-    elif issubclass(inst_type, _SMEM): _emit_nibbles(nibbles, INST, delta=1, wave=w, op=InstOp.SMEM)
+    elif issubclass(inst_type, _SMEM): _emit_nibbles(nibbles, INST, delta=1, wave=w, op=InstOp.SMEM_RD)
     else: _emit_nibbles(nibbles, INST, delta=1, wave=w, op=_mem_op(inst_type, op_name))
 
   def finish(wave_id: int):

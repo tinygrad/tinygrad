@@ -59,28 +59,7 @@ def decode_profile(data:bytes) -> dict:
           else: v["events"].append({"event":"free", "ts":ts, "key":key, "arg": {"users":[u("<IIIB") for _ in range(u("<I")[0])]}})
   return {"dur":total_dur, "peak":global_peak, "layout":layout, "markers":markers}
 
-if __name__ == "__main__":
-  parser = argparse.ArgumentParser()
-  g_mode = parser.add_argument_group("mode")
-  g_mode.add_argument("--profile", action="store_true", help="View profile trace")
-  g_mode.add_argument("--rewrites", action="store_true", help="View rewrites trace")
-  g_common = parser.add_argument_group("common options")
-  g_common.add_argument("--kernel", type=str, default=None, metavar="NAME", help="Select a kernel by name (optional name, default: only list names)")
-  g_common.add_argument("--no-color", action="store_true", help="Disable colored output")
-  g_profile = parser.add_argument_group("profile options")
-  g_profile.add_argument("--device", type=str, default=None, metavar="NAME", help="Select a device (optional name, default: only list names)")
-  g_rewrites = parser.add_argument_group("rewrites options")
-  g_rewrites.add_argument("--select", type=str, default=None, metavar="NAME",
-                          help="Select an item within the chosen kernel (optional name, default: only list names)")
-  parser.add_argument("--profile-path", type=pathlib.Path, metavar="PATH", help="Path to profile (optional file, default: latest profile)",
-                        default=pathlib.Path(temp("profile.pkl", append_user=True)))
-  parser.add_argument("--rewrites-path", type=pathlib.Path, metavar="PATH", help="Path to rewrites (optional file, default: latest rewrites)",
-                        default=pathlib.Path(temp("rewrites.pkl", append_user=True)))
-  args = parser.parse_args()
-  if not args.profile and not args.rewrites:
-    parser.print_help()
-    sys.exit(0)
-
+def main():
   viz.trace = viz.load_pickle(args.rewrites_path, default=RewriteTrace([], [], {}))
   viz.ctxs = viz.get_rewrites(viz.trace)
 
@@ -111,7 +90,7 @@ if __name__ == "__main__":
       pkt_idxs:dict[str, itertools.count] = {}
       dispatch_to_pc:dict[str, int] = {}
       for e in viz.sqtt_timeline(*sqtt_data):
-        if isinstance(e, ProfilePointEvent) and e.key == 'pcMap': pc_map = e.arg; continue
+        if isinstance(e, ProfilePointEvent) and e.key == 'pcMap': pc_map = e.arg
         if not isinstance(e, ProfileRangeEvent): continue
         op_name, info = e.name.display_name, e.name.ret or ""
         color = next((c for p, c in WAVE_COLORS if any(x in op_name for x in p)), None)
@@ -160,3 +139,28 @@ if __name__ == "__main__":
       if not optional_eq(s, args.select): continue
       print(" "*s["depth"]+s['name']+(f" - {s['match_count']}" if s.get('match_count') is not None else ''))
       if args.select is not None: print_data(viz.get_render(s['query']))
+
+if __name__ == "__main__":
+  parser = argparse.ArgumentParser()
+  g_mode = parser.add_argument_group("mode")
+  g_mode.add_argument("--profile", action="store_true", help="View profile trace")
+  g_mode.add_argument("--rewrites", action="store_true", help="View rewrites trace")
+  g_common = parser.add_argument_group("common options")
+  g_common.add_argument("--kernel", type=str, default=None, metavar="NAME", help="Select a kernel by name (optional name, default: only list names)")
+  g_common.add_argument("--no-color", action="store_true", help="Disable colored output")
+  g_profile = parser.add_argument_group("profile options")
+  g_profile.add_argument("--device", type=str, default=None, metavar="NAME", help="Select a device (optional name, default: only list names)")
+  g_rewrites = parser.add_argument_group("rewrites options")
+  g_rewrites.add_argument("--select", type=str, default=None, metavar="NAME",
+                          help="Select an item within the chosen kernel (optional name, default: only list names)")
+  parser.add_argument("--profile-path", type=pathlib.Path, metavar="PATH", help="Path to profile (optional file, default: latest profile)",
+                        default=pathlib.Path(temp("profile.pkl", append_user=True)))
+  parser.add_argument("--rewrites-path", type=pathlib.Path, metavar="PATH", help="Path to rewrites (optional file, default: latest rewrites)",
+                        default=pathlib.Path(temp("rewrites.pkl", append_user=True)))
+  args = parser.parse_args()
+  if not args.profile and not args.rewrites:
+    parser.print_help()
+    sys.exit(0)
+
+  try: main()
+  except KeyboardInterrupt: pass

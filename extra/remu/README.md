@@ -24,7 +24,7 @@ The latest binaries are released in https://github.com/Qazalin/remu/releases. Al
 
 Tinygrad does not yet output RDNA3 kernels directly. You can either install comgr or use `AMD_LLVM=1` (default) if you have [LLVM@19](https://github.com/tinygrad/tinygrad/blob/e2ed673c946c8f1774d816c75e52a994c2dd8a88/.github/actions/setup-tinygrad/action.yml#L208).
 
-`PYTHONPATH="." MOCKGPU=1 AMD=1 python test/test_tiny.py TestTiny.test_plus` runs an emulated RDNA3 kernel with Remu.
+`PYTHONPATH="." MOCKGPU=1 DEV=AMD python test/test_tiny.py TestTiny.test_plus` runs an emulated RDNA3 kernel with Remu.
 
 Add `DEBUG=6` to see Remu's logs.
 
@@ -59,7 +59,7 @@ Green = The thread is actively executing the instruction.
 
 Gray = The thread has been "turned off" by the EXEC mask, it skips execution of some instructions. (refer to "EXECute Mask" on [page 23](https://www.amd.com/content/dam/amd/en/documents/radeon-tech-docs/instruction-set-architectures/rdna3-shader-instruction-set-architecture-feb-2023_0.pdf#page=23) of ISA docs for more details.)
 
-To see the colors in action, try running `DEBUG=6 PYTHONPATH="." MOCKGPU=1 AMD=1 python test/test_ops.py TestOps.test_arange_big`. See how only lane 0 writes to global memory:
+To see the colors in action, try running `DEBUG=6 PYTHONPATH="." MOCKGPU=1 DEV=AMD python test/test_ops.py TestOps.test_arange_big`. See how only lane 0 writes to global memory:
 ```
 [255 0   0  ] [0   0   0  ] 0  DC6A0000 FLAT { op: 26, offset: 0, dlc: false, glc: false, slc: false, seg: 2, addr: 8, data: 0, saddr: 0, sve: false, vdst: 0 }
 [255 0   0  ] [1   0   0  ] 1  DC6A0000
