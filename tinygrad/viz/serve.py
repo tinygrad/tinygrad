@@ -344,7 +344,7 @@ def sqtt_timeline(data:bytes, lib:bytes, target:str) -> Generator[ProfileEvent, 
   pc_map = {addr:str(inst) for addr,inst in amd_decode(lib, target).items()}
   row_ends:dict[str, Decimal] = {}
   row_counts:dict[str, itertools.count] = {}
-  curr_barrier:dict[str, ProfileRangeEvent] = {}
+  curr_barrier:dict[int, ProfileRangeEvent] = {}
   exec_pending:dict[str, list[str]] = {}
   is_cdna = target.startswith("gfx9")
   dispatch_to_exec = {"WMMA":"VALU", "VALU":"VALU", "VALU1":"VALU", "VALUT":"VALU", "VALUB":"VALU", "VALUINST":"VALU", "VINTERP":"VALU",
@@ -367,9 +367,10 @@ def sqtt_timeline(data:bytes, lib:bytes, target:str) -> Generator[ProfileEvent, 
     # allow CDNA packets to overlap, NOT allowed on RDNA.
     if (et:=row_ends.get(row)) is not None and e.st < et and not is_cdna: raise RuntimeError(f"packet {p} overlaps another packet in {row}.")
     row_ends[row] = unwrap(e.en)
-    # barrier on this row extends to fill the time our wave was waiting
-    if (barrier:=curr_barrier.pop(row, None)) is not None: barrier.en = Decimal(p._time)
-    if name == "BARRIER": curr_barrier[row] = e
+    # barrier on this wave extends to fill the time it was waiting
+    if wave is not None:
+      if (barrier:=curr_barrier.pop(wave, None)) is not None: barrier.en = Decimal(p._time)
+      if name == "BARRIER": curr_barrier[wave] = e
   NS_PER_TICK = 10  # 100MHz
   prev_pair:tuple[int, int]|None = None # (shader, realtime)
   for p, info in map_insts(data, lib, target):
@@ -389,8 +390,7 @@ def sqtt_timeline(data:bytes, lib:bytes, target:str) -> Generator[ProfileEvent, 
     if isinstance(p, WAVERDY):
       for wave in range(16):
         if p.mask & (1 << wave):
-          row = f"WAVE:{wave}"
-          if row in curr_barrier: yield from add("WAVERDY", p, wave=wave)
+          if wave in curr_barrier: yield from add("WAVERDY", p, wave=wave)
     if isinstance(p, (VMEMEXEC, ALUEXEC)):
       name = str(p.src).split('.')[1]
       if name == "VALU_SALU":
