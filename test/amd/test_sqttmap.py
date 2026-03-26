@@ -94,6 +94,8 @@ class TestSQTTMapBase(unittest.TestCase):
               # sopk/immediates don't get ALU/MEM EXEC
               if e.name.display_name not in {"IMMEDIATE", "IMMEDIATE_MASK", "JUMP", "JUMP_NO", "MESSAGE", "BARRIER", "BARRIER_SIGNAL",
                                              "WAVEEND", "WAVERDY"}: insts += 1
+            # OTHER_ is its own stream, it's the INST from other SIMDs that share the same EXEC.
+            elif e.device.startswith("OTHER"): continue
             else: raise Exception(f"timeline row must be INST or EXEC, got {e.device}")
           self.assertEqual(execs, insts)
 
