@@ -349,23 +349,25 @@ def sqtt_timeline(data:bytes, lib:bytes, target:str) -> Generator[ProfileEvent, 
   is_cdna = target.startswith("gfx9")
   dispatch_to_exec = {"WMMA":"VALU", "VALU":"VALU", "VALU1":"VALU", "VALUT":"VALU", "VALUB":"VALU", "VALUINST":"VALU", "VINTERP":"VALU",
                       "SGMEM":"VMEM", "FLAT":"VMEM", "LDS":"LDS", "SALU":"SALU", "SMEM":"SALU", "VMEM":"VMEM"}
-  def add(name:str, p:PacketType, op:str|None=None, wave:int|None=None, info:InstructionInfo|None=None) -> Generator[ProfileEvent, None, None]:
-    row = f"WAVE:{wave}" if (wave:=getattr(p, "wave", wave)) is not None else f"{p.__class__.__name__}:0 {name}"
+  def add(name:str, p:PacketType, wave:int|None=None, info:InstructionInfo|None=None) -> Generator[ProfileEvent, None, None]:
+    row = "OTHER" if name.startswith("OTHER_") else f"WAVE:{wave}" if (wave:=getattr(p, "wave", wave)) is not None \
+        else f"{p.__class__.__name__}:0 {name.replace('_ALT', '')}"
     # default length is 1 cycle
     duration = 1
     # exec links to dispatch, dispatch links to PC
     link = f"PC:{info.pc}" if info else None
-    if isinstance(p, (ALUEXEC, VMEMEXEC)) and "ALT" not in str(p.src):
+    if isinstance(p, (ALUEXEC, VMEMEXEC)):
       dispatch = exec_pending[name].pop(0)
       if (m:=re.match(r".*_(\d+)$", dispatch[2])): duration = int(m.group(1))
       link = f"LINK:{dispatch[0]}-{dispatch[1]}"
     # queue inst dispatches
     idx = next(row_counts.setdefault(row, itertools.count(0)))
-    if isinstance(p, (VALUINST, INST, INST_RDNA4)) and (exec_type:=dispatch_to_exec.get(name.split("_")[0])) is not None:
+    if isinstance(p, (VALUINST, INST, INST_RDNA4)) and (exec_type:=dispatch_to_exec.get(name.replace("OTHER_", "").split("_")[0])) is not None:
+      if name.startswith("OTHER_"): exec_type = f"{exec_type}_ALT"
       exec_pending.setdefault(exec_type, []).append((row, idx, name))
     # construct and yield the event for this packet
     if row not in row_ends: yield ProfilePointEvent(row, "JSON", "pcMap", pc_map, ts=Decimal(0))
-    yield (e:=ProfileRangeEvent(row, TracingKey(op or name, ret=link), Decimal(p._time-duration), Decimal(p._time)))
+    yield (e:=ProfileRangeEvent(row, TracingKey(name, ret=link), Decimal(p._time), Decimal(p._time+duration)))
     # allow CDNA packets to overlap, NOT allowed on RDNA.
     if (et:=row_ends.get(row)) is not None and e.st < et and not is_cdna and not getenv("OVERLAP_BUG"):
       raise RuntimeError(f"packet {row}-{idx} overlaps: {e.st} {et}.")
@@ -400,7 +402,7 @@ def sqtt_timeline(data:bytes, lib:bytes, target:str) -> Generator[ProfileEvent, 
         yield from add("VALU", p)
         yield from add("SALU", p)
       else:
-        yield from add(name.replace("_ALT", ""), p, op=name)
+        yield from add(name, p)
 
 # ** SQTT OCC only unpacks wave start, end time and SIMD location
 
