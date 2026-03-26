@@ -120,7 +120,7 @@ class TestSQTTMapBase(unittest.TestCase):
   def test_sqtt_cli(self):
     for pkl_path in sorted((EXAMPLES_DIR/self.target).glob("*.pkl")):
       out = run_cli("--profile", "--profile-path", str(pkl_path), "--no-color")
-      sqtt_traces = [l.strip() for l in out.split("\n") if l.startswith("  ") and "SQTT" in l]
+      sqtt_traces = [l.strip() for l in out.split("\n") if "SQTT" in l]
       for name in sqtt_traces:
         out = run_cli("--profile", "--profile-path", str(pkl_path), "--device", name, "--no-color")
         lines = out.split("\n")
