@@ -84,6 +84,7 @@ class InstOp(Enum):
   OTHER_LDS_1 = 0x50
   OTHER_LDS_2 = 0x51
   OTHER_LDS_3 = 0x52
+  OTHER_LDS_4 = 0x53
   OTHER_LDS_5 = 0x54
   OTHER_FLAT_2 = 0x55
   OTHER_FLAT_3 = 0x56
