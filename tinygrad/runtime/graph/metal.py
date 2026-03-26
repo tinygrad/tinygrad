@@ -3,6 +3,7 @@ import ctypes, re, decimal
 from tinygrad.dtype import dtypes
 from tinygrad.helpers import dedup, getenv, merge_dicts, PROFILE
 from tinygrad.device import Buffer, ProfileGraphEntry, ProfileGraphEvent
+from tinygrad.uop.ops import UOp
 from tinygrad.engine.realize import ExecItem, CompiledRunner
 from tinygrad.engine.jit import GraphRunner, GraphException
 from tinygrad.runtime.ops_metal import wait_check, to_ns_str, MetalBuffer
@@ -10,9 +11,9 @@ from tinygrad.runtime.autogen import metal
 from tinygrad.runtime.support import objc
 
 class MetalGraph(GraphRunner):
-  def __init__(self, jit_cache: list[ExecItem], input_buffers: list[Buffer], var_vals: dict[str, int],
-               orig_valid_positions: dict[int, set[int]]|None = None):
-    super().__init__(jit_cache, input_buffers, var_vals, orig_valid_positions)
+  def __init__(self, *args, **kwargs):
+    super().__init__(*args, **kwargs)
+    jit_cache, var_vals = self.jit_cache, {v: 0 for v in self.vars}
 
     # create metal batch exec
     icb_descriptor = metal.MTLIndirectCommandBufferDescriptor.new()
@@ -110,7 +111,8 @@ class MetalGraph(GraphRunner):
       self.collect_timestamps()
 
   @staticmethod
-  def supports_exec_item(devs, ei:ExecItem) -> bool:
-    # Metal ICB replay encodes offsets as uint32; reject if any Metal buffer offset exceeds 32-bit range.
-    if any(b is not None and isinstance(b._buf, MetalBuffer) and b._buf.offset > 0xFFFFFFFF for b in ei.bufs): return False
-    return GraphRunner.supports_exec_item(devs, ei)
+  def supports_exec_item(batch_devs, new_call:UOp) -> bool:
+    from tinygrad.uop.ops import Ops
+    # Metal ICB replay encodes offsets as uint32; reject if any BUFFER_VIEW offset exceeds 32-bit range.
+    if any(b.op is Ops.BUFFER_VIEW and b.arg[1] * b.dtype.itemsize > 0xFFFFFFFF for b in new_call.src[1:] if b.op is not Ops.BIND): return False
+    return GraphRunner.supports_exec_item(batch_devs, new_call)

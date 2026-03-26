@@ -27,13 +27,14 @@ def helper_exec_op(device, outbuf, inbufs):
 
       si = s.schedule()[-1]
       prg = get_runner(device, si.ast)
-    cached_prgs[(device, len(inbufs))] = prg
+    cached_prgs[(device, len(inbufs))] = (prg, si.ast)
 
-  return ExecItem(UOp(Ops.NOOP), [outbuf] + inbufs, prg=cached_prgs[(device, len(inbufs))])
+  prg, ast = cached_prgs[(device, len(inbufs))]
+  return ExecItem(ast, [outbuf] + inbufs, prg=prg)
 
 def helper_copy_op(device, dest, src):
   prg = BufferXfer(dest.nbytes, device, src.device)
-  return ExecItem(UOp(Ops.NOOP), [dest, src], prg=prg)
+  return ExecItem(UOp(Ops.COPY, src=tuple()), [dest, src], prg=prg)
 
 def helper_alloc_rawbuffer(device, fill=False):
   rawbuf = Buffer(device, BUF_SIZE, dtypes.int).ensure_allocated()
@@ -81,8 +82,22 @@ def helper_test_graphs(graph_impl, graphs, runs=RUN_CNT):
   ground_thruth_bufs = helper_run_jit(reg_ji, bufs, out_buffers)
   ground_truth_np = [np.frombuffer(x, _to_np_dtype(bufs[i].dtype)) for i,x in enumerate(ground_thruth_bufs)]
 
-  # Build graphs
-  gr_ji = [ExecItem(UOp(Ops.NOOP), [], prg=graph_impl(graph, [], {})) for graph in graphs]
+  # Build graphs — construct CUSTOM_FUNCTION UOps from ExecItems for the new graph API
+  from tinygrad.uop.ops import buffers as uop_buffers, dtypes
+  def _make_graph_cf(graph_eis):
+    calls = []
+    for ei in graph_eis:
+      buf_uops = []
+      for b in ei.bufs:
+        if b is None: continue
+        u = UOp.new_buffer(b.device, b.size, b.dtype)
+        uop_buffers[u] = b
+        buf_uops.append(u)
+      calls.append(ei.ast.call(*buf_uops, metadata=ei.metadata))
+    sub_linear = UOp(Ops.LINEAR, src=tuple(calls))
+    return UOp(Ops.CUSTOM_FUNCTION, dtypes.void, src=(sub_linear,), arg="graph")
+  # NOTE: bufs set to all bufs so graph can find them for input_replace
+  gr_ji = [ExecItem(UOp(Ops.NOOP), bufs, prg=graph_impl(_make_graph_cf(graph), bufs)) for graph in graphs]
 
   for _ in range(runs):
     test_bufs = helper_run_jit(gr_ji, bufs, out_buffers)
