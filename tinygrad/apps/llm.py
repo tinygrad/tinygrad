@@ -295,9 +295,6 @@ class Transformer:
     # Gumbel-max trick: argmax(logits/temp - log(-log(uniform))) is equivalent to sampling from softmax(logits/temp)
     return (logits / temperature.maximum(1e-12) - (Tensor.rand_like(logits).maximum(1e-12).log().neg()).log()).argmax(-1, keepdim=True)
 
-  def __call__(self, tokens:Tensor, start_pos:int|UOp, temperature:Tensor) -> Tensor:
-    return (self.prefill_jit if resolve(tokens.shape[1] != 1) else self.rollout_jit)(tokens, start_pos, temperature)
-
   @staticmethod
   def from_gguf(gguf:Tensor, max_context:int|None=None, realize=bool(getenv("REALIZE", 0))) -> tuple[Transformer, dict]:
     # TODO: remove the need for copy to default device
@@ -348,7 +345,8 @@ class Transformer:
 
   def generate(self, tokens:list[int], chunk_size:int=32, temperature:float=0.0):
     v_start_pos = UOp.variable("start_pos", 0, self.max_context-1)
-    v_toks = UOp.variable("toks", 1, chunk_size)
+    if self.has_ssm: chunk_size = 1
+    v_toks = None if chunk_size == 1 else UOp.variable("toks", 1, chunk_size)
     # TODO: use UOp.variable for temperature once float variables are supported
     temp = Tensor(temperature).contiguous()
     # assign all input tokens once, then slice from start_pos for the model call
@@ -361,11 +359,11 @@ class Transformer:
       start_pos = 0
     out, prompt_len = None, len(tokens)
     while len(tokens) < self.max_context:
-      sp, nt = v_start_pos.bind(start_pos), v_toks.bind(min(chunk_size, len(tokens) - start_pos))
-      if start_pos < prompt_len or out is None:
-        out = self(t[:, sp:sp+nt] if not self.has_ssm else Tensor([tokens[start_pos]]).reshape(1, 1), sp, temp).realize()
-      else: out = self(out, sp, temp).realize()
-      start_pos += (1 if self.has_ssm else nt.val)
+      n = min(chunk_size, len(tokens) - start_pos)
+      sp, nt = v_start_pos.bind(start_pos), v_toks.bind(n) if v_toks else n
+      if start_pos < prompt_len or out is None: out = self.prefill_jit(t[:, sp:sp+nt], sp, temp).realize()
+      else: out = self.rollout_jit(out, sp, temp).realize()
+      start_pos += n
       # chunked prefill: keep processing until all prompt tokens are consumed
       if start_pos < len(tokens): continue
       tokens.append(int(out.item()))
