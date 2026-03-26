@@ -209,7 +209,7 @@ def image_fixup(ls:UOp):
   # this is an unprocessed image without a cast, we should just make it a buffer
   if isinstance(dt, ImageDType) and (off:=ls.src[0].src[1]).get_idx().dtype != dtypes.weakint.vec(2):
     idx = ls.src[0].src[0].replace(dtype=(new_dt:=dtypes.half if dt.itemsize == 2 else dtypes.float).ptr(dt.size)).index(off)
-    return ls.replace(src=(idx,), dtype=new_dt).cast(dtypes.float) if ls.op is Ops.LOAD else ls.replace(src=(idx, ls[1].cast(dtypes.float)))
+    return ls.replace(src=(idx,), dtype=new_dt).cast(dtypes.float) if ls.op is Ops.LOAD else ls.replace(src=(idx, ls.src[1].cast(dtypes.float)))
 
 correct_load_store = PatternMatcher([
   # split LOAD/STORE
@@ -348,9 +348,24 @@ pm_reduce = PatternMatcher([
 
 pm_add_loads = PatternMatcher([
   # add loads to non ptr index
-  (UPat(Ops.INDEX, name="idx"), lambda idx: None if isinstance(idx.dtype, (PtrDType, ImageDType)) else
+  (UPat(Ops.INDEX, name="idx"), lambda idx: None if isinstance(idx.dtype, PtrDType) else
     idx.replace(dtype=idx.src[0].dtype).load(dtype=idx.dtype.base)),
   # remove loads from stores
   (UPat(Ops.STORE, src=(UPat(Ops.LOAD), UPat(name="val")), name="s"), lambda s,val: s.replace(src=(s.src[0].src[0], val))),
 ])
 
+# make images
+
+def make_image(ls, idx):
+  if not isinstance(dt:=idx.dtype, ImageDType) and (dims:=ImageDType.valid_dims(dt)):
+    idx = idx.src[0].replace(dtype=(dtypes.imageh if dt.base == dtypes.half else dtypes.imagef)(dims[0] + (4,))).index(idx.src[1], ptr=True)
+    return ls.replace(src=(idx,)).cast(dt.base) if ls.op is Ops.LOAD else idx.store(ls.src[1].cast(dtypes.float))
+
+pm_make_images = PatternMatcher([
+  (UPat((Ops.LOAD, Ops.STORE), src=(UPat(Ops.INDEX, src=(UPat(Ops.PARAM), UPat()), name="idx"),), allow_any_len=True, name="ls"), make_image),
+  # load(imageh) is load(half).float(), so load(imageh).half().float() -> load(half).float().half().float() -> load(imageh)
+  (UPat(Ops.LOAD, name="li").cast(dtypes.half).cast(dtypes.float), lambda li: li if isinstance(li.src[0].dtype, ImageDType) else None),
+  # store(imageh, x) is store(half, x.half()), so store(imageh, x.half().float()) -> store(half, x.half().float().half()) -> store(imageh, x)
+  (UPat(Ops.STORE, src=(UPat(), UPat.var("x").cast(dtypes.half).cast(dtypes.float)), name="st"), lambda st,x:
+   st.replace(src=(st.src[0], x)) if isinstance(st.src[0].dtype, ImageDType) else None),
+])

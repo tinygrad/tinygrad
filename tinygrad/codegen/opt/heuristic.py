@@ -1,6 +1,6 @@
 import itertools
 from tinygrad.codegen.opt import Opt, OptOps, KernelOptError
-from tinygrad.helpers import getenv, DEBUG, prod, NOLOCALS, TC_OPT, TC_SELECT, USE_TC, AMX
+from tinygrad.helpers import getenv, DEBUG, prod, NOLOCALS, TC_OPT, TC_SELECT, USE_TC, AMX, IMAGE
 from tinygrad.dtype import ImageDType
 from tinygrad.uop.ops import Ops, resolve, AxisType
 from tinygrad.codegen.opt.postrange import Scheduler
@@ -49,16 +49,17 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
   k = k.copy()
 
   # upcast float4 images, this must be early so we don't accidentally add locals before the upcast
-  for buf_index,buf in enumerate(k.bufs):
-    if isinstance(buf.src[0].dtype, ImageDType):
-      # part of is_expanded
-      unit_stride_axes_mul_4 = [k.rngs.index(c) for c in k.bufs[buf_index].src[1].get_idx().split_uop(Ops.ADD) if
-        c.op is Ops.RANGE and (c.vmax+1)%4 == 0]
-      if len(unit_stride_axes_mul_4):
-        if (axis:=unit_stride_axes_mul_4[0]) in k.upcastable_dims:
-          k.apply_opt(Opt(OptOps.UPCAST, axis, 4))
-        elif axis in k.unrollable_dims:
-          k.apply_opt(Opt(OptOps.UNROLL, k.unrollable_dims.index(axis), 4))
+  if IMAGE:
+    for buf_index,buf in enumerate(k.bufs):
+      if ImageDType.valid_dims(buf.src[0].dtype):
+        # part of is_expanded
+        unit_stride_axes_mul_4 = [k.rngs.index(c) for c in k.bufs[buf_index].src[1].get_idx().split_uop(Ops.ADD) if
+          c.op is Ops.RANGE and (c.vmax+1)%4 == 0]
+        if len(unit_stride_axes_mul_4):
+          if (axis:=unit_stride_axes_mul_4[0]) in k.upcastable_dims:
+            k.apply_opt(Opt(OptOps.UPCAST, axis, 4))
+          elif axis in k.unrollable_dims:
+            k.apply_opt(Opt(OptOps.UNROLL, k.unrollable_dims.index(axis), 4))
 
   # should use matvec - TODO: adjust/tune based on the wide vs tall/large vs small mat
   MV_BLOCKSIZE, MV_THREADS_PER_ROW, MV_ROWS_PER_THREAD = getenv("MV_BLOCKSIZE", 4), getenv("MV_THREADS_PER_ROW", 8), getenv("MV_ROWS_PER_THREAD", 4)
