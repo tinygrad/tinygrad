@@ -364,15 +364,17 @@ pm_image_store = PatternMatcher([
    a.where(b, c.cast(dtypes.float))),
 ])
 
-def make_image(ls, idx, vec, off):
-  if not isinstance(dt:=idx.dtype, ImageDType) and (dims:=ImageDType.valid_dims(dt)):
-    vec = UOp.vectorize(*([vec.src[0].replace(dtype=(dtypes.imageh if dt.base == dtypes.half else dtypes.imagef)((*dims[0], 5)))] * vec.dtype.vcount))
-    if ls.op is Ops.LOAD: return ls.replace(src=(vec.index(off, ptr=True),), dtype=dtypes.float.vec(dt.vcount)).cast(dt.base)
-    if dt.base == dtypes.float: return vec.index(off, ptr=True).store(ls.src[1])
-    return vec.index(off, ptr=True).store(graph_rewrite(ls.src[1].cast(dtypes.float), pm_image_store, name="imageh store"))
+def make_image(ls, idx, buf, off):
+  if (vcount:=buf.dtype.vcount) != 1: buf = buf.src[0]
+  if buf.op == Ops.PARAM and not isinstance(dt:=idx.dtype, ImageDType) and (dims:=ImageDType.valid_dims(dt)):
+    buf = buf.replace(dtype=(dtypes.imageh if dt.base == dtypes.half else dtypes.imagef)((*dims[0], 4)))
+    if vcount != 1: buf = UOp.vectorize(*([buf] * vcount))
+    if ls.op is Ops.LOAD: return ls.replace(src=(buf.index(off, ptr=True),), dtype=dtypes.float.vec(dt.vcount)).cast(dt.base)
+    if dt.base == dtypes.float: return buf.index(off, ptr=True).store(ls.src[1])
+    return buf.index(off, ptr=True).store(graph_rewrite(ls.src[1].cast(dtypes.float), pm_image_store, name="imageh store"))
 
 pm_make_images = PatternMatcher([
-  (UPat((Ops.LOAD, Ops.STORE), src=(UPat(Ops.INDEX, src=(UPat.var("vec"), UPat.var("off")), name="idx"),), allow_any_len=True, name="ls"), make_image),
+  (UPat((Ops.LOAD, Ops.STORE), src=(UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("off")), name="idx"),), allow_any_len=True, name="ls"), make_image),
   # load(imageh) is load(half).float(), so load(imageh).half().float() -> load(half).float().half().float() -> load(imageh)
   (UPat(Ops.LOAD, name="li").cast(dtypes.half).cast(dtypes.float), lambda li: li if isinstance(li.src[0].dtype, ImageDType) else None),
 ])
