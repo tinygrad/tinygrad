@@ -351,15 +351,16 @@ def sqtt_timeline(data:bytes, lib:bytes, target:str) -> Generator[ProfileEvent, 
                       "SGMEM":"VMEM", "FLAT":"VMEM", "LDS":"LDS", "SALU":"SALU", "SMEM":"SALU", "VMEM":"VMEM"}
   def add(name:str, p:PacketType, op:str|None=None, wave:int|None=None, info:InstructionInfo|None=None) -> Generator[ProfileEvent, None, None]:
     row = f"WAVE:{wave}" if (wave:=getattr(p, "wave", wave)) is not None else f"{p.__class__.__name__}:0 {name}"
+    if name.startswith("OTHER_"): row = "OTHER"
     # default length is 1 cycle
     duration = 1
     # exec links to dispatch, dispatch links to PC
     link = f"PC:{info.pc}" if info else None
-    if isinstance(p, (ALUEXEC, VMEMEXEC)) and "ALT" not in str(p.src):
+    if isinstance(p, (ALUEXEC, VMEMEXEC)):
       link = f"LINK:{exec_pending[name].pop(0)}"
     # queue inst dispatches
     idx = next(row_counts.setdefault(row, itertools.count(0)))
-    if isinstance(p, (VALUINST, INST, INST_RDNA4)) and (exec_type:=dispatch_to_exec.get(name.split("_")[0])) is not None:
+    if isinstance(p, (VALUINST, INST, INST_RDNA4)) and (exec_type:=dispatch_to_exec.get(name.replace("OTHER_", "").split("_")[0])) is not None:
       exec_pending.setdefault(exec_type, []).append(f"{row}-{idx}")
     # construct and yield the event for this packet
     if row not in row_ends: yield ProfilePointEvent(row, "JSON", "pcMap", pc_map, ts=Decimal(0))

@@ -667,7 +667,7 @@ def map_insts(data:bytes, lib:bytes, target:str) -> Iterator[tuple[PacketType, I
           wave_pc[wave] += inst.size()
           yield (p, InstructionInfo(pc, wave, inst))
     # map INST events on this SIMD to the program counter, we know the waves
-    elif isinstance(p, (VALUINST, INST, INST_RDNA4, IMMEDIATE)) not (isinstance(p, (INST, INST_RDNA4)) and p.op.name.startswith("OTHER_")):
+    elif isinstance(p, (VALUINST, INST, INST_RDNA4, IMMEDIATE)) and not (isinstance(p, (INST, INST_RDNA4)) and p.op.name.startswith("OTHER_")):
       inst = pc_map[pc:=wave_pc[p.wave]]
       # s_delay_alu, s_wait_alu and s_barrier_wait instructions are skipped
       while (inst_op:=getattr(inst, 'op_name', '')) in {"S_DELAY_ALU", "S_WAIT_ALU", "S_BARRIER_WAIT"}:
