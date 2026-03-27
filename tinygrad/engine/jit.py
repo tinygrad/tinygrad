@@ -25,8 +25,7 @@ def prune_linear(linear:UOp, needed:set[UOp]) -> tuple[UOp, UOp]:
 def create_graph_call(batch:list[UOp], input_buffers:set[Buffer]) -> UOp:
   def bufs_for(b): return b.buffer.bufs if isinstance(b.buffer, MultiBuffer) else [b.buffer]
 
-  all_bufs = dedup(b for si in batch for b in si.src[1:] if b.op is not Ops.BIND)
-  input_list = [b for b in all_bufs if b.op in (Ops.BUFFER, Ops.BUFFER_VIEW) and not input_buffers.isdisjoint(bufs_for(b))]
+  input_list = dedup(b for si in batch for b in si.src[1:] if b.op in (Ops.BUFFER, Ops.BUFFER_VIEW) and not input_buffers.isdisjoint(bufs_for(b)))
   cf = UOp(Ops.CUSTOM_FUNCTION, dtypes.void, src=(UOp(Ops.LINEAR, src=tuple(batch)), *input_list), arg="graph")
   return cf.call(*input_list, metadata=tuple(m for si in batch for m in si.arg.metadata))
 
