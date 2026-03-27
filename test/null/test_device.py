@@ -26,9 +26,8 @@ class TestDevice(unittest.TestCase):
 
   def test_lowercase_canonicalizes(self):
     device = Device.DEFAULT
-    Device.DEFAULT = device.lower()
-    self.assertEqual(Device.canonicalize(None), device)
-    Device.DEFAULT = device
+    with Context(DEV=device.lower()):
+      self.assertEqual(Device.canonicalize(None), device)
 
   def test_old_device_env_raises(self):
     result = subprocess.run(['python3', '-c', 'from tinygrad import Device; Device.DEFAULT'],
@@ -94,6 +93,12 @@ class TestDevice(unittest.TestCase):
     dev.cached_pair.clear()
     with patch("tinygrad.renderer.cstyle.ClangJITRenderer.__init__", side_effect=RuntimeError("broken")):
       self.assertIsInstance(dev.renderer.compiler, CPULLVMCompiler)
+
+  def test_dev_contextvar(self):
+    orig_dev = Device.DEFAULT
+    with Context(DEV="CPU"): self.assertEqual(Tensor.empty(1).device, "CPU")
+    with Context(DEV="NULL"): self.assertEqual(Tensor.empty(1).device, "NULL")
+    self.assertEqual(Tensor.empty(1).device, orig_dev)
 
 class MockCompiler(Compiler):
   def __init__(self, key): super().__init__(key)
