@@ -5,7 +5,7 @@ from typing import cast, Final
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, KernelInfo, graph_rewrite, AxisType, ssimplify, GroupOp
 from tinygrad.uop.ops import axis_letters, axis_colors, axis_to_pos
 from tinygrad.device import Buffer
-from tinygrad.dtype import dtypes, ImageDType
+from tinygrad.dtype import dtypes
 from tinygrad.helpers import colored, BEAM, getenv, DEBUG, to_function_name, NOOPT, argsort, round_up, prod, merge_dicts, get_single_element, flatten
 from tinygrad.helpers import ALLOW_TF32, count, Context
 from tinygrad.codegen.opt import Opt, OptOps, KernelOptError, check
@@ -352,22 +352,3 @@ def apply_opts(ast:UOp, ren:Renderer) -> UOp:
     if not any(u.op is Ops.BUFFERIZE for u in ast.backward_slice):
       k = hand_coded_optimizations(k)
   return k.get_optimized_ast(name_override=ast.arg.name if ast.arg is not None and ast.arg.name != "test" else None)
-
-def make_image(pa, off, idx):
-  if not isinstance(dt:=pa.dtype, ImageDType) and (idx.tag is None or idx.tag) and (shapes:=ImageDType.valid_dims(dt)):
-    new_pa = pa.replace(dtype=(dtypes.imageh if dt.base==dtypes.half else dtypes.imagef)(shapes[0] + (4,)))
-    new_idx = idx.replace(src=(new_pa, off), dtype=dtypes.float if dt.base == dtypes.half else idx.dtype)
-    return new_idx if idx.tag or dt.base == dtypes.float else new_idx.cast(dtypes.half)
-
-pm_make_images = PatternMatcher([
-  # ensure we dont create an unfoldable image store
-  (UPat(Ops.STORE, src=(UPat.var("idx"),), allow_any_len=True, name="st"), lambda idx,st:
-   st.replace(src=(idx.rtag(is_image:=any(c.op is Ops.RANGE and (c.vmax+1)%4 == 0 for c in idx.src[1].get_idx().split_uop(Ops.ADD))),
-                   st.src[1].cast(dtypes.float if is_image and ImageDType.valid_dims(idx.src[0].dtype) else idx.dtype.base)))),
-  (UPat(Ops.INDEX, src=(UPat(Ops.PARAM, name="pa"), UPat.var("off")), name="idx"), make_image),
-  # remove double cast from image loads / stores
-  (UPat(Ops.INDEX, src=(UPat(Ops.PARAM, name="pa"),), allow_any_len=True, name="idx").cast(dtypes.half).cast(dtypes.float), lambda idx,pa:
-   idx if isinstance(pa.dtype, ImageDType) else None),
-  (UPat(Ops.STORE, src=(UPat(Ops.PARAM, name="pa").index(UPat()), UPat.var("val").cast(dtypes.half).cast(dtypes.float)), name="st"), lambda st,pa,val:
-   st.replace(src=(st.src[0], val)) if isinstance(pa.dtype, ImageDType) else None),
-])
