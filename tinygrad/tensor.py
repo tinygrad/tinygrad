@@ -3013,29 +3013,6 @@ class Tensor(OpMixin):
     assert dtypes.is_unsigned(self.dtype) and isinstance(x, int) and x >= 0 and not reverse, f"not supported {self.dtype=} {x=}"
     return self.idiv(2 ** x, reverse)
 
-  def pow(self, x:Tensor|ConstType, reverse=False) -> Tensor:
-    """
-    Computes power of `self` with `x`.
-    Equivalent to `self ** x`.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-1, 2, 3]).pow(2.0).numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-1, 2, 3]).pow(Tensor([-1.5, 0.5, 1.5])).numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print((2.0 ** Tensor([-1, 2, 3])).numpy())
-    ```
-    """
-    base, exponent = self._broadcasted(x, reverse=reverse)
-    # TODO: int pow
-    if not base.is_floating_point() and not (isinstance(x, int) and x >= 0): raise RuntimeError("base needs to be float")
-
-    ret = base._apply_uop(UOp.pow, exponent)
-    # NOTE: pow(int, float) -> int
-    return ret.round().cast(self.dtype) if not reverse and not dtypes.is_float(self.dtype) and dtypes.is_float(exponent.dtype) else ret
-
   def minimum(self, x:Tensor|ConstType) -> Tensor:
     """
     Computes element-wise minimum of `self` and `x`.
@@ -3095,14 +3072,11 @@ class Tensor(OpMixin):
   def __floordiv__(self, x): return self.div(x, rounding_mode="floor")
   def __rfloordiv__(self, x): return self.div(x, rounding_mode="floor", reverse=True)
 
-  def __pow__(self, x) -> Tensor: return self.pow(x)
   def __matmul__(self, x) -> Tensor: return self.matmul(x)
 
-  def __rpow__(self, x) -> Tensor: return self.pow(x, True)
   def __rmatmul__(self, x) -> Tensor: return self.matmul(x, True)
 
   def __ifloordiv__(self, x) -> Tensor: return self.assign(self.__floordiv__(x))
-  def __ipow__(self, x) -> Tensor: return self.assign(self.pow(x))
   def __imatmul__(self, x) -> Tensor: return self.assign(self.matmul(x))
 
   # unlike Tensors, UOps are immutable, so these don't go in mixin
@@ -3110,6 +3084,7 @@ class Tensor(OpMixin):
   def __isub__(self, x) -> Tensor: return self.assign(self.sub(x)) # type: ignore[misc]
   def __imul__(self, x) -> Tensor: return self.assign(self.mul(x)) # type: ignore[misc]
   def __itruediv__(self, x) -> Tensor: return self.assign(self.div(x)) # type: ignore[misc]
+  def __ipow__(self, x) -> Tensor: return self.assign(self.pow(x)) # type: ignore[misc]
   def __iand__(self, x) -> Tensor: return self.assign(self.bitwise_and(x)) # type: ignore[misc]
   def __ior__(self, x) -> Tensor: return self.assign(self.bitwise_or(x)) # type: ignore[misc]
   def __ixor__(self, x) -> Tensor: return self.assign(self.bitwise_xor(x)) # type: ignore[misc]
