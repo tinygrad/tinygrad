@@ -247,6 +247,6 @@ class HCQGraph(MultiGraphRunner):
     cpu_support = all(type(d.timeline_signal.base_buf.view) is MMIOInterface for d in all_devs)
     if len(set(d.peer_group for d in all_devs if not (cpu_support and d._is_cpu()))) > 1: return False
     if new_call.src[0].op is Ops.COPY:
-      return (cast(HCQCompiled, all_devs[0]).hw_copy_queue_t is not None and not getenv("MOCKGPU")) or \
-        (hasattr(alc:=all_devs[0].allocator, '_transfer') and alc.supports_transfer)
+      is_xfer = len(set(type(d) for d in all_devs)) == 1 and hasattr(alc:=all_devs[0].allocator, '_transfer') and alc.supports_transfer
+      return is_xfer or (cast(HCQCompiled, all_devs[0]).hw_copy_queue_t is not None and not getenv("MOCKGPU"))
     return new_call.src[0].op in (Ops.SINK, Ops.PROGRAM)
