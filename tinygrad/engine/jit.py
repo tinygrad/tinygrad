@@ -63,10 +63,14 @@ def graph_split_rewrite(linear:UOp, input_buffers:set[Buffer], max_batch_size:in
   if current_batch: flush_batch()
   return linear.replace(src=tuple(new_src))
 
-def ensure_bufs_allocated(jit_cache:list[ExecItem]):
+def jit_cache_bufs(jit_cache:list[ExecItem]):
   for ei in jit_cache:
     for b in ei.bufs:
-      if b is not None: b.ensure_allocated()
+      if b is not None: yield b
+    if isinstance(ei.prg, GraphRunner): yield from jit_cache_bufs(ei.prg.jit_cache)
+
+def ensure_bufs_allocated(jit_cache:list[ExecItem]):
+  for b in jit_cache_bufs(jit_cache): b.ensure_allocated()
 
 def lower_linear(linear:UOp) -> list[ExecItem]:
   return [ei.lower() for ei in linear_to_schedule(linear)]
@@ -214,6 +218,7 @@ class CapturedJit(Generic[ReturnType]):
     self._jit_cache: list[ExecItem] = self.jit_cache
     self._input_replace: dict[tuple[int, int], int] = self.input_replace
     self._first_run = True
+    self._needs_rebuild = False
     # precompute read-after-write hazard detection
     self._output_to_writer = {b: j for j, ei in enumerate(self.jit_cache) for b in get_out_buffers_for_ei(ei)}
     self._input_to_max_reader: dict[int, int] = {}
@@ -230,12 +235,13 @@ class CapturedJit(Generic[ReturnType]):
     depends: set[Buffer|None] = set([None])
     update_depends(depends, self.jit_cache)
     arenas = {b._base for b in depends if b is not None and b._base is not None}
-    to_free = {b for b in depends if b is not None} | {b for ei in self.jit_cache for b in ei.bufs if b is not None and b._base in arenas}
+    to_free = {b for b in depends if b is not None} | {b for b in jit_cache_bufs(self.jit_cache) if b._base in arenas}
     for b in to_free:
       if hasattr(b, '_buf'): b.deallocate()
     for a in arenas:
       if a.allocated_views == 0 and a.is_allocated(): a.deallocate()
     self.__post_init__()
+    self._needs_rebuild = True
 
   # jit exec
   def __call__(self, input_buffers:list[Buffer], var_vals:dict[str, int]) -> ReturnType:
@@ -251,9 +257,11 @@ class CapturedJit(Generic[ReturnType]):
     for (j,i),input_idx in self._input_replace.items(): self._jit_cache[j].bufs[i] = input_buffers[input_idx]
 
     # allocate intermediates if freed on first run
-    if self._first_run:
-      ensure_bufs_allocated(self.jit_cache)
-      self._first_run = False
+    if self._first_run: ensure_bufs_allocated(self.jit_cache)
+    if self._needs_rebuild:
+      for ei in self.jit_cache:
+        if isinstance(ei.prg, GraphRunner): ei.prg = type(ei.prg)(ei.prg.jit_cache, ei.prg.input_replace)
+    self._first_run = self._needs_rebuild = False
 
     if DEBUG >= 1 and len(self._jit_cache) >= 10: print(f"jit execs {len(self._jit_cache)} kernels")
     for ei in self._jit_cache: ei.run(var_vals, jit=True)
