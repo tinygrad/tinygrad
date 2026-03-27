@@ -356,24 +356,25 @@ pm_add_loads = PatternMatcher([
 
 # make images
 
+pm_imageh_store = PatternMatcher([
+  # store<imageh>(idx, x) is actually store(idx, x.cast(half)) so we can pull the cast into the store
+  (UPat.var("x", dtypes.float).cast(dtypes.half), lambda x: x),
+  # store(imageh, a.where(b.half(), c).float()) -> store(imageh, a.where(b, c.float()))
+  (UPat(Ops.WHERE, src=(UPat.var("a"), UPat.var("b", dtypes.float).cast(dtypes.half), UPat.var("c"))), lambda a,b,c: a.where(b,c.cast(dtypes.float))),
+  # otherwise, we cast to float
+  (UPat.var("x"), lambda x:x.cast(dtypes.float))
+])
+
 def make_image(ls, buf, off):
   if (vcount:=buf.dtype.vcount) != 1: buf = buf.src[0]
   if buf.op == Ops.PARAM and not isinstance(dt:=buf.dtype, ImageDType) and (dims:=ImageDType.valid_dims(dt)):
     buf = buf.replace(dtype=(dtypes.imageh if dt.base == dtypes.half else dtypes.imagef)((*dims[0], 4)))
     if vcount != 1: buf = UOp.vectorize(*([buf] * vcount))
     if ls.op is Ops.LOAD: return ls.replace(src=(buf.index(off, ptr=True),), dtype=dtypes.float.vec(dt.vcount)).cast(dt.base)
-    if dt.base == dtypes.float: return buf.index(off, ptr=True).store(ls.src[1])
-    # handle cast for imageh store
-    idx, x = buf.index(off, ptr=True), ls.src[1]
-    # store(idx, x) is store<half>(idx, x.half()), so store(idx, x.half().float()) -> store<half>(idx, x.half().float().half()) -> store(idx, x)
-    x = next((d["x"] for d in UPat.var("x", dtypes.float).cast(dtypes.half).match(x, {})), x)
-    # store(imageh, a.where(b.half(), c).float()) -> store(imageh, a.where(b, c.float()))
-    x = next((d["a"].where(d["b"], d["c"].cast(dtypes.float))
-              for d in UPat(Ops.WHERE, src=(UPat.var("a"), UPat.var("b", dtypes.float).cast(dtypes.half), UPat.var("c"))).match(x, {})), x)
-    return buf.index(off, ptr=True).store(x.cast(dtypes.float))
+    return buf.index(off, ptr=True).store(pm_imageh_store.rewrite(ls.src[1]) if dt.base == dtypes.half else ls.src[1])
 
 pm_make_images = PatternMatcher([
   (UPat((Ops.LOAD, Ops.STORE), src=(UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("off"))),), allow_any_len=True, name="ls"), make_image),
-  # load(imageh) is load(half).float(), so load(imageh).half().float() -> load(half).float().half().float() -> load(imageh)
+  # load<imageh> is actually load<half>.cast(float), so load<imageh>.half().float() -> load<half>.float().half().float() -> load<half>.float()
   (UPat(Ops.LOAD, name="li").cast(dtypes.half).cast(dtypes.float), lambda li: li if isinstance(li.src[0].dtype, ImageDType) else None),
 ])
