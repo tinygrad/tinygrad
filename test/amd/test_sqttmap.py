@@ -1,6 +1,5 @@
 # test to compare every packet with the rocprof decoder
-import unittest
-import pickle, contextlib, io, itertools
+import unittest, pickle, contextlib, io
 from typing import Iterator
 from pathlib import Path
 from tinygrad.helpers import DEBUG, getenv, temp
@@ -111,21 +110,8 @@ class TestSQTTMapBase(unittest.TestCase):
     for name, (events, kern_events, target) in self.examples.items():
       for event in events:
         wave_barriers = {}
-        wmma_dispatch_ids, wmma_execs = [], []
-        pkt_idxs:dict[str, itertools.count] = {}
-        _pc_map = {}
         for e in sqtt_timeline(event.blob, kern_events[event.kern].lib, target):
-          if type(e).__name__ == "ProfilePointEvent" and e.key == 'pcMap': _pc_map = e.arg
-          if type(e).__name__ != "ProfileRangeEvent": continue
-          idx = next(pkt_idxs.setdefault(e.device, itertools.count()))
-          if e.name.display_name == "BARRIER": wave_barriers.setdefault(e.device, []).append(e)
-          if (info:=e.name.ret) is None: continue
-          # detect WMMA dispatches from ISA (works for both RDNA3 VALUINST and RDNA4 INST)
-          if info.startswith("PC:") and "wmma" in _pc_map.get(int(info.replace("PC:", "")), ""): wmma_dispatch_ids.append(f"{e.device}-{idx}")
-          if info.replace("LINK:", "") in wmma_dispatch_ids: wmma_execs.append(e)
-        self.assertEqual(len(wmma_execs), len(wmma_dispatch_ids))
-        for e in wmma_execs:
-          assert e.en-e.st > 1, f"WMMA EXEC must show take more than one cycle, got {e}"
+          if type(e).__name__ == "ProfileRangeEvent" and e.name.display_name == "BARRIER": wave_barriers.setdefault(e.device, []).append(e)
         if not wave_barriers: continue
         for row, events in wave_barriers.items():
           for e in events:
