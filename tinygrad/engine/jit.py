@@ -113,11 +113,11 @@ class GraphRunner(Runner):
 
     def is_sym_dim(dim) -> bool: return not all(isinstance(d, (int, float)) for d in dim)
 
-    self.vars = sorted({v.expr for ji in self.jit_cache if isinstance(ji.prg, CompiledRunner) for v in ji.prg.p.vars
-                        if v.expr not in ji.fixedvars | ji.prg.p.runtimevars})
-    crs = [ji.prg for ji in self.jit_cache if isinstance(ji.prg, CompiledRunner)]
-    self.symbolic_dims = dedup([tuple(d) for p in crs if (d:=p.p.local_size) and is_sym_dim(d)] +
-                               [tuple(d) for p in crs if (d:=p.p.global_size) and is_sym_dim(d)])
+    crs = [(ji, ji.prg) for ji in self.jit_cache if isinstance(ji.prg, CompiledRunner)]
+    self.vars = sorted({v.expr for ji,p in crs for v in p.p.vars if v.expr not in ji.fixedvars | p.p.runtimevars})
+    self.symbolic_dims = dedup([tuple(d) for _,p in crs if (d:=p.p.local_size) and is_sym_dim(d)] +
+                               [tuple(d) for _,p in crs if (d:=p.p.global_size) and is_sym_dim(d)])
+
     def find_symbolic_dim(dim): return self.symbolic_dims.index(tuple(dim)) if dim is not None and tuple(dim) in self.symbolic_dims else None
 
     estimates = Estimates()
