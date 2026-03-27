@@ -183,6 +183,7 @@ class GraphRunner(Runner):
 class MultiGraphRunner(GraphRunner):
   @staticmethod
   def supports_exec_item(batch_devs:list[Compiled], new_call:UOp) -> bool:
+    # Devices must be the same type
     return new_call.src[0].op in (Ops.SINK, Ops.PROGRAM, Ops.COPY) and len(dedup([type(d) for d in GraphRunner._all_devs(batch_devs, new_call)])) == 1
 
 def get_out_buffers_for_ei(ei:ExecItem) -> list[Buffer]:
