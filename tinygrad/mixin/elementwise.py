@@ -392,11 +392,34 @@ class ElementwiseMixin(DTypeMixin):
     """
     return self._ensure_float().alu(Ops.EXP2)
 
-  def pow(self, x: Self | ConstType) -> Self:
-    return self.alu(Ops.POW, self.ufix(x))
+  def pow(self, x: Self | ConstType, reverse: bool = False) -> Self:
+    """
+    Computes power of `self` with `x`.
+    Equivalent to `self ** x`.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([-1, 2, 3]).pow(2.0).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([-1, 2, 3]).pow(Tensor([-1.5, 0.5, 1.5])).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print((2.0 ** Tensor([-1, 2, 3])).numpy())
+    ```
+    """
+    base, exponent = self._broadcasted(x, reverse=reverse)
+    # TODO: int pow
+    if not base.is_floating_point() and not isinstance(x, ElementwiseMixin) and not (isinstance(x, int) and x >= 0):
+      raise RuntimeError("base needs to be float")
+    ret = base.alu(Ops.POW, exponent)
+    # NOTE: pow(int, float) -> int
+    return ret.round().cast(self.dtype) if not reverse and not dtypes.is_float(self.dtype) and dtypes.is_float(exponent.dtype) else ret
 
   def __pow__(self, x: Self | ConstType) -> Self:
     return self.pow(x)
+
+  def __rpow__(self, x: Self | ConstType) -> Self:
+    return self.pow(x, True)
 
   def square(self) -> Self:
     """
