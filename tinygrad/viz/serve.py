@@ -352,20 +352,22 @@ def sqtt_timeline(data:bytes, lib:bytes, target:str) -> Generator[ProfileEvent, 
   def add(name:str, p:PacketType, wave:int|None=None, info:InstructionInfo|None=None) -> Generator[ProfileEvent, None, None]:
     row = "OTHER" if name.startswith("OTHER_") else f"WAVE:{wave}" if (wave:=getattr(p, "wave", wave)) is not None \
         else f"{p.__class__.__name__}:0 {name.replace('_ALT', '')}"
-    # by default we draw one cycle for each packet
+    # by default we extend the packet to one cycle after timestamp
     start_time, end_time = p._time, p._time+1
     # exec links to dispatch, dispatch links to PC
     link = f"PC:{info.pc}" if info else None
     if isinstance(p, (ALUEXEC, VMEMEXEC)):
       dispatch_id, duration = exec_pending[name].pop(0)
-      link, start_time, end_time = f"LINK:{dispatch_id}", p._time-duration, p._time
+      # for execs, timestmap is the completion time
+      start_time, end_time = p._time-duration, p._time
+      link = f"LINK:{dispatch_id}"
     # queue inst dispatches
     idx = next(row_counts.setdefault(row, itertools.count(0)))
     if isinstance(p, (VALUINST, INST, INST_RDNA4)) and (exec_type:=dispatch_to_exec.get(name.replace("OTHER_", "").split("_")[0])) is not None:
       if name.startswith("OTHER_"): exec_type = f"{exec_type}_ALT"
-      # get the number of cycles it takes from the op type
+      # get the number of cycles from the op type
       duration = int(m.group(1)) if (m:=re.match(r".*_(\d+)$", name)) else 1
-      # detect rdna3 wmma from the asm, rdna4 has an op type for it
+      # detect rdna3 wmma from the asm, only rdna4 has an op type for it
       if isinstance(p, VALUINST) and (asm:=getattr(unwrap(info).inst, "op_name", "")).startswith("V_WMMA"): duration = 16 if 'IU4' in asm else 32
       exec_pending.setdefault(exec_type, []).append((f"{row}-{idx}", duration))
     # construct and yield the event for this packet
