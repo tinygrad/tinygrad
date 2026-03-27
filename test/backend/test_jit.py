@@ -698,7 +698,7 @@ class TestJitGraphSplit(unittest.TestCase):
     assert len(got) == len(validate), f"Expected {len(validate)} operations, got {len(got)}"
     for expected, got in zip(validate, got):
       if expected["type"] == "graph":
-        assert hasattr(got.prg, 'jit_cache'), f"Expected graph runner, got {type(got.prg)}"
+        assert isinstance(got.prg, GraphRunner), f"Expected GraphRunner, got {type(got.prg)}"
         assert len(got.prg.jit_cache) == expected["cnt"], f"Expected {expected['cnt']} operations in graph, got {len(got.prg.jit_cache)}"
       elif expected["type"] == "comp":
         assert isinstance(got.prg, CompiledRunner), f"Expected CompiledRunner, got {type(got.prg)}"
