@@ -10,16 +10,6 @@ from tinygrad.helpers import temp, ansistrip, colored, time_to_str, ansilen, Pro
 
 def optional_eq(val:dict, arg:str|None) -> bool: return arg is None or ansistrip(val["name"]) == arg
 
-def print_data(data:dict) -> None:
-  if isinstance(data.get("value"), Iterator):
-    for m in data["value"]:
-      if m.get("uop"): print(f"Input UOp:\n{m['uop']}")
-      if m.get("diff"):
-        loc = pathlib.Path(m["upat"][0][0])
-        print(f"Rewrite at {loc.parent.name}/{loc.name}:{m['upat'][0][1]}\n{m['upat'][1]}")
-        for line in m["diff"]: print(colored(line, "red" if line.startswith("-") else "green" if line.startswith("+") else None))
-  if data.get("src") is not None: print(data["src"])
-
 # ** Profiler trace decoder
 
 # 0 means None, otherwise it's an enum value
@@ -138,7 +128,16 @@ def main(args) -> None:
     for s in k["steps"]:
       if not optional_eq(s, args.item): continue
       print(" "*s["depth"]+s['name']+(f" - {s['match_count']}" if s.get('match_count') is not None else ''))
-      if args.item is not None: print_data(viz.get_render(s['query']))
+      if args.item is None: continue
+      data = viz.get_render(s["query"])
+      if isinstance(data.get("value"), Iterator):
+        for m in data["value"]:
+          if m.get("uop"): print(f"Input UOp:\n{m['uop']}")
+          if m.get("diff"):
+            loc = pathlib.Path(m["upat"][0][0])
+            print(f"Rewrite at {loc.parent.name}/{loc.name}:{m['upat'][0][1]}\n{m['upat'][1]}")
+            for line in m["diff"]: print(colored(line, "red" if line.startswith("-") else "green" if line.startswith("+") else None))
+      if data.get("src") is not None: print(data["src"])
 
 def get_arg_parser() -> argparse.ArgumentParser:
   parser = argparse.ArgumentParser()
