@@ -4,7 +4,7 @@ if hasattr(signal, "SIGPIPE"): signal.signal(signal.SIGPIPE, signal.SIG_DFL)
 from typing import Iterator
 from tinygrad.viz import serve as viz
 from tinygrad.uop.ops import RewriteTrace
-from tinygrad.helpers import temp, ansistrip, colored, time_to_str, ansilen, ProfilePointEvent, ProfileRangeEvent
+from tinygrad.helpers import temp, ansistrip, colored, time_to_str, ansilen, ProfilePointEvent, ProfileRangeEvent, TracingKey, unwrap
 
 # profile decoder used in CLI and tests
 def decode_profile(data:bytes) -> dict:
@@ -24,7 +24,8 @@ def decode_profile(data:bytes) -> dict:
     klen = u("<B")[0]
     k = ret[off:off+klen].decode()
     off += klen
-    layout[k] = v = {"events":[]}
+    v:dict = {"events":[]}
+    layout[k] = v
     event_type, event_count = u("<BI")
     if event_type == 0:
       for _ in range(event_count):
@@ -46,7 +47,7 @@ def decode_profile(data:bytes) -> dict:
 def get(data:dict, key:str):
   for k,v in data.items():
     if ansistrip(k) == key: return v
-  raise RuntimeError(f'item "{arg}" not found in list')
+  raise RuntimeError(f'item "{key}" not found in list')
 
 def main(args) -> None:
   viz.trace = viz.load_pickle(args.rewrites_path, default=RewriteTrace([], [], {}))
@@ -55,8 +56,10 @@ def main(args) -> None:
   def format_colored(s:str) -> str: return ansistrip(s) if args.no_color else s
 
   if args.profile:
-    profile = decode_profile(viz.get_profile(profile_data:=viz.load_pickle(args.profile_path, default=[])))
-    viz.load_amd_counters(viz.ctxs, profile_data)
+    events:list = viz.load_pickle(args.profile_path, default=[])
+    if (profile_bytes:=viz.get_profile(events)) is None: raise RuntimeError(f"empty profile in {args.profile_path}")
+    profile = decode_profile(profile_bytes)
+    viz.load_amd_counters(viz.ctxs, events)
     profile["layout"].update([(f'{c["name"]} SQTT {s["name"]}', s["data"]) for c in viz.ctxs if c["name"].startswith("Exec") for s in c["steps"]
                               if s["name"].startswith("PKTS")])
     if args.source is None:
@@ -76,10 +79,11 @@ def main(args) -> None:
       print("-" * 90)
       pc_map:dict[int, str] = {}
       pkt_idxs:dict[str, itertools.count] = {}
-      dispatch_to_inst:dict[str, int] = {}
+      dispatch_to_inst:dict[str, str] = {}
       for e in viz.sqtt_timeline(*data):
         if isinstance(e, ProfilePointEvent) and e.key == 'pcMap': pc_map = e.arg
         if not isinstance(e, ProfileRangeEvent): continue
+        assert isinstance(e.name, TracingKey)
         op_name, info = e.name.display_name, e.name.ret or ""
         color = next((c for p, c in WAVE_COLORS if any(x in op_name for x in p)), None)
         op_str = hex_colored(op_name, color) if color and not args.no_color else op_name
@@ -90,22 +94,22 @@ def main(args) -> None:
           phase = "DISPATCH"
         if info.startswith("LINK:"): phase, inst = "EXEC", dispatch_to_inst[info.replace("LINK:", "")]
         if inst and phase: info = f"{phase:<8} {inst}"
-        print(f"{int(e.st):<12} {e.device:<20} {op_str}{' '*(22-ansilen(op_str))} {int(e.en-e.st):<4} {info}")
+        print(f"{int(e.st):<12} {e.device:<20} {op_str}{' '*(22-ansilen(op_str))} {int(unwrap(e.en)-e.st):<4} {info}")
       return None
 
     # ** Profiler printer
-    agg, total = {}, 0
+    agg:dict[str, tuple[float, int]] = {}
+    total = 0
     for e in data.get("events", []):
-      et = e["dur"]*1e-6
+      et = e["dur"] * 1e-6
       if args.item is not None:
         if ansistrip(e["name"]) == args.item:
-          ptm = colored(time_to_str(et, w=9), "yellow" if et > 0.01 else None) if et is not None else ""
-          name = e["name"]+(" " * (46 - ansilen(e["name"])))
-          print(f"{name} {ptm}/{(et or 0)*1e3:9.2f}ms  "+e.get('fmt', '').replace('\n', ' | ')+"  ")
+          ptm = colored(time_to_str(et, w=9), "yellow" if et > 0.01 else None)
+          name = e["name"] + (" " * (46 - ansilen(e["name"])))
+          print(f"{name} {ptm}/{et*1e3:9.2f}ms  " + e.get("fmt", "").replace("\n", " | ") + "  ")
       else:
-        a = agg.setdefault(e["name"], [0.0, 0])
-        a[0] += et
-        a[1] += 1
+        t, c = agg.get(e["name"], (0.0, 0))
+        agg[e["name"]] = (t+et, c+1)
         total += et
     if agg and total > 0:
       from tabulate import tabulate
