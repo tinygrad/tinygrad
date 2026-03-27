@@ -2,7 +2,7 @@
 import unittest, pickle, contextlib, io
 from typing import Iterator
 from pathlib import Path
-from tinygrad.helpers import DEBUG, getenv, temp
+from tinygrad.helpers import DEBUG, getenv, temp, ansistrip
 from tinygrad.renderer.amd.sqtt import print_packets, map_insts
 from tinygrad.runtime.autogen.amd.rdna3.ins import s_endpgm
 from tinygrad.viz.serve import sqtt_timeline
@@ -122,7 +122,7 @@ class TestSQTTMapBase(unittest.TestCase):
       out = run_cli("--profile", "--profile-path", str(pkl_path))
       sqtt_traces = [l.strip() for l in out.split("\n") if "SQTT" in l]
       for name in sqtt_traces:
-        out = run_cli("--profile", "--profile-path", str(pkl_path), "--source", name)
+        out = run_cli("--profile", "--profile-path", str(pkl_path), "--source", ansistrip(name))
         lines = out.split("\n")
         self.assertIn("Clk", lines[0])
         for r in lines[2:]:

@@ -6,15 +6,7 @@ from tinygrad.viz import serve as viz
 from tinygrad.uop.ops import RewriteTrace
 from tinygrad.helpers import temp, ansistrip, colored, time_to_str, ansilen, ProfilePointEvent, ProfileRangeEvent
 
-# ** generic helpers
-
-def optional_eq(val:dict, arg:str|None) -> bool: return arg is None or ansistrip(val["name"]) == arg
-
-# ** Profiler trace decoder
-
-# 0 means None, otherwise it's an enum value
-def option(i:int) -> int|None: return None if i == 0 else i-1
-
+# profile decoder used in CLI and tests
 def decode_profile(data:bytes) -> dict:
   ret, off = data, 0
   def u(fmt:str) -> tuple:
@@ -26,6 +18,8 @@ def decode_profile(data:bytes) -> dict:
   strings, dtypes, markers = json.loads(ret[off:off+index_len]).values()
   off += index_len
   layout:dict[str, dict] = {}
+  # 0 means None, otherwise it's an enum value
+  def option(i:int) -> int|None: return None if i == 0 else i-1
   for _ in range(layout_len):
     klen = u("<B")[0]
     k = ret[off:off+klen].decode()
@@ -49,6 +43,16 @@ def decode_profile(data:bytes) -> dict:
           else: v["events"].append({"event":"free", "ts":ts, "key":key, "arg": {"users":[u("<IIIB") for _ in range(u("<I")[0])]}})
   return {"dur":total_dur, "peak":global_peak, "layout":layout, "markers":markers}
 
+def get(data:dict|list, arg:str):
+  if isinstance(data, dict):
+    for k,v in data.items():
+      if ansistrip(k) == arg: return v
+  # TODO: graph rewrite names aren't unique in CLI
+  else:
+    for v in data:
+      if ansistrip(v["name"]) == arg: return v
+  raise RuntimeError(f'item "{arg}" not found in list')
+
 def main(args) -> None:
   viz.trace = viz.load_pickle(args.rewrites_path, default=RewriteTrace([], [], {}))
   viz.ctxs = viz.get_rewrites(viz.trace)
@@ -56,19 +60,17 @@ def main(args) -> None:
   def format_colored(s:str) -> str: return ansistrip(s) if args.no_color else s
 
   if args.profile:
-    from tabulate import tabulate
     profile = decode_profile(viz.get_profile(profile_data:=viz.load_pickle(args.profile_path, default=[])))
     viz.load_amd_counters(viz.ctxs, profile_data)
-    counters = {f'{c["name"]} SQTT {s["name"]}': s["data"] for c in viz.ctxs if c["name"].startswith("Exec") for s in c["steps"]
-                if s["name"].startswith("PKTS")}
+    sqtt = {f'{c["name"]} SQTT {s["name"]}': s["data"] for c in viz.ctxs if c["name"].startswith("Exec") for s in c["steps"]
+            if s["name"].startswith("PKTS")}
     if args.source is None:
-      print("Available sources:")
-      for k in (*profile["layout"], *counters):
+      for k in (*profile["layout"], *sqtt):
         print(f"  {format_colored(k)}")
       return None
 
     # ** SQTT printer
-    if args.source is not None and (sqtt_data:=next((v for k,v in counters.items() if ansistrip(k) == args.source), None)) is not None:
+    if (sqtt_data:=get(sqtt, args.source)):
       # modern terminals support 24-bit color
       def hex_colored(st:str, color:str) -> str: return f"\x1b[38;2;{int(color[1:3],16)};{int(color[3:5],16)};{int(color[5:7],16)}m{st}\x1b[0m"
       WAVE_COLORS = ((('VALU', 'VINTERP'), '#ffffc0'), (('SALU',), '#cef263'), (('VMEM',), '#b2b7c9'), (('LOAD', 'SMEM'), '#ffc0c0'),
@@ -96,40 +98,36 @@ def main(args) -> None:
       return None
 
     # ** Profiler printer
-    agg, total, n = {}, 0, 0
-    for k,v in profile["layout"].items():
-      if not optional_eq({"name":k}, args.source): continue
-      print(f"  {format_colored(k)}")
-      if args.source is None: continue
-      for e in v.get("events", []):
-        et = e["dur"]*1e-6
-        if args.item is not None:
-          if optional_eq(e, args.item) and n < 10:
-            ptm = colored(time_to_str(et, w=9), "yellow" if et > 0.01 else None) if et is not None else ""
-            name = e["name"]+(" " * (46 - ansilen(e["name"])))
-            print(f"{name} {ptm}/{(et or 0)*1e3:9.2f}ms  "+e.get('fmt', '').replace('\n', ' | ')+"  ")
-            n += 1
-        else:
-          a = agg.setdefault(e["name"], [0.0, 0])
-          a[0] += et
-          a[1] += 1
-          total += et
+    agg, total = {}, 0
+    data = profile["layout"][args.source]
+    for e in data.get("events", []):
+      et = e["dur"]*1e-6
+      if args.item is not None:
+        if ansistrip(e["name"]) == args.item:
+          ptm = colored(time_to_str(et, w=9), "yellow" if et > 0.01 else None) if et is not None else ""
+          name = e["name"]+(" " * (46 - ansilen(e["name"])))
+          print(f"{name} {ptm}/{(et or 0)*1e3:9.2f}ms  "+e.get('fmt', '').replace('\n', ' | ')+"  ")
+      else:
+        a = agg.setdefault(e["name"], [0.0, 0])
+        a[0] += et
+        a[1] += 1
+        total += et
     if agg and total > 0:
+      from tabulate import tabulate
       items = sorted(agg.items(), key=lambda kv:kv[1][0], reverse=True)
       table = [[name, time_to_str(t, w=9), c, f"{(t/total*100.0):.2f}%"] for name,(t,c) in items]
       print(tabulate(table, headers=["name", "total", "count", "pct"], tablefmt="github"))
     return None
 
   # ** Graph rewrites printer
-  for k in viz.ctxs:
-    if not optional_eq(k, args.source): continue
-    print(k["name"])
-    if args.source is None: continue
-    for s in k["steps"]:
-      if not optional_eq(s, args.item): continue
-      print(" "*s["depth"]+s['name']+(f" - {s['match_count']}" if s.get('match_count') is not None else ''))
-      if args.item is None: continue
-      data = viz.get_render(s["query"])
+  if args.source is None:
+    for k in viz.ctxs: print(f"  {format_colored(k['name'])}")
+  else:
+    steps = get(viz.ctxs, args.source)["steps"]
+    if args.item is None:
+      for s in steps: print(" "*s["depth"]+s['name']+(f" - {s['match_count']}" if s.get('match_count') is not None else ''))
+    else:
+      data = viz.get_render(get(steps, args.item)["query"])
       if isinstance(data.get("value"), Iterator):
         for m in data["value"]:
           if m.get("uop"): print(f"Input UOp:\n{m['uop']}")
