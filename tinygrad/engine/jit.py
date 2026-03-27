@@ -27,8 +27,7 @@ def create_graph_call(batch:list[UOp], input_buffers:set[Buffer]) -> UOp:
 
   all_bufs = dedup(b for si in batch for b in si.src[1:] if b.op is not Ops.BIND)
   input_list = [b for b in all_bufs if b.op in (Ops.BUFFER, Ops.BUFFER_VIEW) and not input_buffers.isdisjoint(bufs_for(b))]
-  sub_linear = UOp(Ops.LINEAR, src=tuple(batch))
-  cf = UOp(Ops.CUSTOM_FUNCTION, dtypes.void, src=(sub_linear, *input_list), arg="graph")
+  cf = UOp(Ops.CUSTOM_FUNCTION, dtypes.void, src=(UOp(Ops.LINEAR, src=tuple(batch)), *input_list), arg="graph")
   return cf.call(*input_list, metadata=tuple(m for si in batch for m in si.arg.metadata))
 
 def graph_split_rewrite(linear:UOp, input_buffers:set[Buffer], max_batch_size:int=0) -> UOp:
@@ -176,7 +175,8 @@ class GraphRunner(Runner):
 
   @staticmethod
   def _all_devs(batch_devs:list[Compiled], new_call:UOp) -> list[Compiled]:
-    return dedup(batch_devs + [Device[x] for b in new_call.src[1:] for x in (b.device if isinstance(b.device, tuple) else (b.device,))])
+    return dedup(batch_devs + [Device[x] for b in new_call.src[1:] if b.op is not Ops.BIND
+                 for x in (b.device if isinstance(b.device, tuple) else (b.device,))])
 
   @staticmethod
   def supports_exec_item(batch_devs:list[Compiled], new_call:UOp) -> bool:
