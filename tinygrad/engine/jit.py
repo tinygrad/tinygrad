@@ -35,7 +35,7 @@ def graph_split_rewrite(linear:UOp, input_buffers:set[Buffer], max_batch_size:in
   current_batch_devs: list[Compiled] = []
 
   def flush_batch():
-    nonlocal current_batch, current_batch_devs, max_batch_size
+    nonlocal current_batch, current_batch_devs, max_batch_size, new_src
     if len(current_batch) <= 1 and not getenv("GRAPH_ONE_KERNEL"): new_src.extend(current_batch)
     else:
       new_src.append(create_graph_call(current_batch, input_buffers))
