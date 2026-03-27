@@ -345,37 +345,35 @@ def sqtt_timeline(data:bytes, lib:bytes, target:str) -> Generator[ProfileEvent, 
   row_ends:dict[str, Decimal] = {}
   row_counts:dict[str, itertools.count] = {}
   curr_barrier:dict[int, ProfileRangeEvent] = {}
-  exec_pending:dict[str, list[tuple[str, int, str]]] = {}
+  exec_pending:dict[str, list[tuple[str, int]]] = {}
   is_cdna = target.startswith("gfx9")
   dispatch_to_exec = {"WMMA":"VALU", "VALU":"VALU", "VALU1":"VALU", "VALUT":"VALU", "VALUB":"VALU", "VALUINST":"VALU", "VINTERP":"VALU",
                       "SGMEM":"VMEM", "FLAT":"VMEM", "LDS":"LDS", "SALU":"SALU", "SMEM":"SALU", "VMEM":"VMEM"}
   def add(name:str, p:PacketType, wave:int|None=None, info:InstructionInfo|None=None) -> Generator[ProfileEvent, None, None]:
     row = "OTHER" if name.startswith("OTHER_") else f"WAVE:{wave}" if (wave:=getattr(p, "wave", wave)) is not None \
         else f"{p.__class__.__name__}:0 {name.replace('_ALT', '')}"
-    # default length is 1 cycle
-    duration = 1
+    # by default we draw one cycle for each packet
+    start_time, end_time = p._time, p._time+1
     # exec links to dispatch, dispatch links to PC
     link = f"PC:{info.pc}" if info else None
     if isinstance(p, (ALUEXEC, VMEMEXEC)):
-      dispatch = exec_pending[name].pop(0)
-      if (m:=re.match(r".*_(\d+)$", dispatch[2])): duration = int(m.group(1))
-      link = f"LINK:{dispatch[0]}-{dispatch[1]}"
+      dispatch_id, duration = exec_pending[name].pop(0)
+      link, start_time, end_time = f"LINK:{dispatch_id}", p._time-duration, p._time
     # queue inst dispatches
     idx = next(row_counts.setdefault(row, itertools.count(0)))
     if isinstance(p, (VALUINST, INST, INST_RDNA4)) and (exec_type:=dispatch_to_exec.get(name.replace("OTHER_", "").split("_")[0])) is not None:
       if name.startswith("OTHER_"): exec_type = f"{exec_type}_ALT"
-      exec_pending.setdefault(exec_type, []).append((row, idx, name))
+      # get the number of cycles it takes from the op type
+      duration = int(m.group(1)) if (m:=re.match(r".*_(\d+)$", name)) else 1
+      # detect rdna3 wmma from the asm, rdna4 has an op type for it
+      if isinstance(p, VALUINST) and (asm:=getattr(unwrap(info).inst, "op_name", "")).startswith("V_WMMA"): duration = 16 if 'IU4' in asm else 32
+      exec_pending.setdefault(exec_type, []).append((f"{row}-{idx}", duration))
     # construct and yield the event for this packet
     if row not in row_ends: yield ProfilePointEvent(row, "JSON", "pcMap", pc_map, ts=Decimal(0))
-    start_time, end_time = p._time, p._time+duration
-    # NOTE: this makes no sense. but it looks correct in VIZ
-    if isinstance(p, ALUEXEC): start_time, end_time = p._time-duration, p._time
     yield (e:=ProfileRangeEvent(row, TracingKey(name, ret=link), Decimal(start_time), Decimal(end_time)))
     # allow CDNA packets to overlap, NOT allowed on RDNA.
-    if (et:=row_ends.get(row)) is not None and e.st < et and not is_cdna:
-      msg = f"packet {row}-{idx} overlaps: {e.st} {et}."
-      if not getenv("OVERLAP_BUG"): raise RuntimeError(msg)
-      else: print(msg)
+    if (et:=row_ends.get(row)) is not None and e.st < et and not is_cdna and not isinstance(p, (ALUEXEC, VMEMEXEC)):
+      RuntimeError(f"packet {row}-{idx} overlaps: {e.st} {et}.")
     row_ends[row] = unwrap(e.en)
     # barrier on this wave extends to fill the time it was waiting
     if wave is not None:
@@ -395,15 +393,7 @@ def sqtt_timeline(data:bytes, lib:bytes, target:str) -> Generator[ProfileEvent, 
     if isinstance(p, (INST, INST_RDNA4, CDNA_INST)):
       name = p.op.name if isinstance(p.op, (InstOp, InstOpRDNA4, InstOpCDNA)) else f"0x{p.op:02x}"
       yield from add(name, p, info=info)
-    if isinstance(p, VALUINST):
-      # on RDNA3, WMMA dispatches VALUINST (not INST with a cycle-count op like RDNA4). detect from ISA op_name.
-      # WMMA internally decomposes into DOT instructions: cycles = 16*16*16 / (32_lanes * ops_per_DOT)
-      # IU4 uses V_DOT8 (8 ops/lane) = 16 cycles, everything else uses V_DOT2/V_DOT4 (4 ops/lane) = 32 cycles.
-      valu_name = "VALUINST"
-      if info and (op_name:=getattr(info.inst, "op_name", "")).startswith("V_WMMA"):
-        valu_name = f"VALUINST_{16 if 'IU4' in op_name else 32}"
-      yield from add(valu_name, p, info=info)
-    if isinstance(p, (IMMEDIATE, WAVEEND, CDNA_WAVEEND)): yield from add(p.__class__.__name__, p, info=info)
+    if isinstance(p, (VALUINST, IMMEDIATE, WAVEEND, CDNA_WAVEEND)): yield from add(p.__class__.__name__, p, info=info)
     if isinstance(p, IMMEDIATE_MASK): yield from add("IMMEDIATE", p, wave=unwrap(info).wave, info=info)
     if isinstance(p, WAVERDY):
       for wave in range(16):
