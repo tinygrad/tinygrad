@@ -29,6 +29,10 @@ class TestDevice(unittest.TestCase):
     with Context(DEV=device.lower()):
       self.assertEqual(Device.canonicalize(None), device)
 
+  def test_set_device_default_raises(self):
+    with self.assertRaisesRegex(AttributeError, "setting Device.DEFAULT is deprecated"):
+      Device.DEFAULT = "CPU"
+
   def test_old_device_env_raises(self):
     result = subprocess.run(['python3', '-c', 'from tinygrad import Device; Device.DEFAULT'],
                             env={**os.environ, "CPU": "1", "DEV": ""}, capture_output=True)
