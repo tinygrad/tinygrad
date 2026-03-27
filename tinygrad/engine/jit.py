@@ -69,17 +69,11 @@ def jit_cache_bufs(jit_cache:list[ExecItem]):
       if b is not None: yield b
     if isinstance(ei.prg, GraphRunner): yield from jit_cache_bufs(ei.prg.jit_cache)
 
-def ensure_bufs_allocated(jit_cache:list[ExecItem]):
-  for b in jit_cache_bufs(jit_cache): b.ensure_allocated()
-
-def lower_linear(linear:UOp) -> list[ExecItem]:
-  return [ei.lower() for ei in linear_to_schedule(linear)]
-
 @track_rewrites(lambda linear,held_bufs,input_buffers=None,ret=(): f"JIT {pluralize('Kernel', len(ret))}")
 def jit_lower(linear:UOp, held_bufs:set[UOp], input_buffers:list[Buffer]|None=None) -> list[ExecItem]:
   linear = memory_plan_rewrite(linear, held_bufs)
   if JIT < 2: linear = graph_split_rewrite(linear, set(input_buffers or []), max_batch_size=JIT_BATCH_SIZE.value)
-  return lower_linear(linear)
+  return [ei.lower() for ei in linear_to_schedule(linear)]
 
 class GraphException(Exception): pass
 class JitError(Exception): pass
@@ -105,12 +99,13 @@ def get_input_replace(jit_cache: list[ExecItem], input_buffers:list[Buffer],
   return input_replace
 
 class GraphRunner(Runner):
-  def __init__(self, cf_or_cache: UOp|list[ExecItem], input_buffers:list[Buffer]|dict[tuple[int,int],int]|None=None):
-    if isinstance(cf_or_cache, UOp):
-      self.jit_cache = lower_linear(cf_or_cache.src[0])
-      ensure_bufs_allocated(self.jit_cache)
-      self.input_replace = get_input_replace(self.jit_cache, input_buffers) if input_buffers else {}
-    else: self.jit_cache, self.input_replace = cf_or_cache, input_buffers or {}
+  def __init__(self, cf:UOp|None, input_buffers:list[Buffer]|None, jit_cache:list[ExecItem]=(), input_replace:dict[tuple[int,int],int]=()):
+    # TODO: captured jit as linear?
+    if cf is not None:
+      jit_cache = [ei.lower() for ei in linear_to_schedule(cf.src[0])]
+      for b in jit_cache_bufs(jit_cache): b.ensure_allocated()
+      input_replace = get_input_replace(jit_cache, input_buffers) if input_buffers else {}
+    self.jit_cache, self.input_replace = list(jit_cache), dict(input_replace)
 
     self.var_vals_replace:dict[int, list[tuple[int, int]]] = {}
     self.launch_dims_replace:dict[int, tuple[int|None, int|None]] = {}
@@ -145,7 +140,7 @@ class GraphRunner(Runner):
     assert self.jit_cache[0].prg is not None
     super().__init__(colored(f"<batched {len(self.jit_cache)}>", "cyan"), self.jit_cache[0].prg.device.split(":")[0], estimates.simplify())
 
-  def __reduce__(self): return self.__class__, (self.jit_cache, self.input_replace)
+  def __reduce__(self): return self.__class__, (None, None, self.jit_cache, self.input_replace)
 
   def updated_vars(self, var_vals: dict[str, int]):
     vals = [var_vals[v] for v in self.vars]
@@ -257,10 +252,11 @@ class CapturedJit(Generic[ReturnType]):
     for (j,i),input_idx in self._input_replace.items(): self._jit_cache[j].bufs[i] = input_buffers[input_idx]
 
     # allocate intermediates if freed on first run
-    if self._first_run: ensure_bufs_allocated(self.jit_cache)
+    if self._first_run:
+      for b in jit_cache_bufs(self.jit_cache): b.ensure_allocated()
     if self._needs_rebuild:
       for ei in self.jit_cache:
-        if isinstance(ei.prg, GraphRunner): ei.prg = type(ei.prg)(ei.prg.jit_cache, ei.prg.input_replace)
+        if isinstance(ei.prg, GraphRunner): ei.prg = type(ei.prg)(None, None, ei.prg.jit_cache, ei.prg.input_replace)
     self._first_run = self._needs_rebuild = False
 
     if DEBUG >= 1 and len(self._jit_cache) >= 10: print(f"jit execs {len(self._jit_cache)} kernels")
