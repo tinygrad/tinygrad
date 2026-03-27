@@ -88,9 +88,6 @@ class MultiBuffer:
     for b in self.bufs: b.ref(cnt)
     return self
   def is_allocated(self): return all(x.is_allocated() for x in self.bufs)
-  def ensure_allocated(self):
-    for b in self.bufs: b.ensure_allocated()
-    return self
   def __repr__(self): return f"<multibuf real:{self.is_allocated()} device:{tuple(x.device for x in self.bufs)} size:{self.size} dtype:{self.dtype}>"
 
 class Buffer:
