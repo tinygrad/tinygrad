@@ -101,7 +101,7 @@ def get_input_replace(jit_cache: list[ExecItem], input_buffers:list[Buffer],
 class GraphRunner(Runner):
   def __init__(self, linear:UOp|None, input_buffers:list[Buffer]|None,
                jit_cache:list[ExecItem]|None=None, input_replace:dict[tuple[int,int],int]|None=None):
-    # TODO: captured jit as linear?n
+    # TODO: captured jit as linear?
     if linear is not None:
       jit_cache = [ei.lower() for ei in linear_to_schedule(linear.src[0])]
       for b in jit_cache_bufs(jit_cache): b.ensure_allocated()
