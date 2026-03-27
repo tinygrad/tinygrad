@@ -72,11 +72,20 @@ def lower_linear(linear:UOp, input_bufs:tuple[UOp, ...]=()) -> tuple[list[ExecIt
   input_replace: dict[tuple[int,int],int] = {}
   if input_bufs:
     # build input_replace based on PARAM positions, accounting for multi-device expansion.
+    # compute flat offsets for multi-device input bufs (MultiBuffer expands to N individual Buffers in graph ExecItem bufs)
+    flat_base = []
+    off = 0
+    for ib in input_bufs:
+      flat_base.append(off)
+      off += len(ib.buffer.bufs) if isinstance(ib.buffer, MultiBuffer) else 1
+    # build input_replace, accounting for multi-device expansion (graph calls stay as 1 ExecItem).
     exec_idx = 0
     for si in linear.src:
-      for idx, b in enumerate(b for b in si.src[1:] if b.op is not Ops.BIND):
-        if b.op is Ops.PARAM: input_replace[(exec_idx, idx)] = b.arg
-      exec_idx += len(si.device) if isinstance(si.device, tuple) else 1
+      n = 1 if (si.src[0].op is Ops.CUSTOM_FUNCTION) else (len(si.device) if isinstance(si.device, tuple) else 1)
+      for k in range(n):
+        for idx, b in enumerate(b for b in si.src[1:] if b.op is not Ops.BIND):
+          if b.op is Ops.PARAM: input_replace[(exec_idx + k, idx)] = flat_base[b.arg] + k
+      exec_idx += n
     # substitute PARAM with actual input buffers.
     linear = linear.substitute({u: input_bufs[u.arg] for u in linear.toposort(enter_calls=False) if u.op is Ops.PARAM})
   return [ei.lower() for ei in linear_to_schedule(linear)], input_replace
