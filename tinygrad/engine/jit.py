@@ -178,8 +178,8 @@ class GraphRunner(Runner):
 
   @staticmethod
   def _all_devs(batch_devs:list[Compiled], new_call:UOp) -> list[Compiled]:
-    return dedup(batch_devs + [Device[x] for b in new_call.src[1:] if b.op is not Ops.BIND
-                               for x in (b.device if isinstance(b.device, tuple) else (b.device,))])
+    return dedup(batch_devs + [Device[x] for b in new_call.src[1:] for x in (b.device if isinstance(b.device, tuple) else (b.device,))])
+
   @staticmethod
   def supports_exec_item(batch_devs:list[Compiled], new_call:UOp) -> bool:
     return new_call.src[0].op in (Ops.SINK, Ops.PROGRAM) and len(GraphRunner._all_devs(batch_devs, new_call)) == 1
