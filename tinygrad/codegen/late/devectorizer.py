@@ -362,7 +362,7 @@ pm_imageh_store = PatternMatcher([
   # store(imageh, a.where(b.half(), c).float()) -> store(imageh, a.where(b, c.float()))
   (UPat(Ops.WHERE, src=(UPat.var("a"), UPat.var("b", dtypes.float).cast(dtypes.half), UPat.var("c"))), lambda a,b,c: a.where(b,c.cast(dtypes.float))),
   # otherwise, we cast to float
-  (UPat.var("x"), lambda x:x.cast(dtypes.float))
+  (UPat(GroupOp.All, name="x"), lambda x:x.cast(dtypes.float))
 ])
 
 def make_image(ls, buf, off):
