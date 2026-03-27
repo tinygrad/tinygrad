@@ -43,14 +43,9 @@ def decode_profile(data:bytes) -> dict:
           else: v["events"].append({"event":"free", "ts":ts, "key":key, "arg": {"users":[u("<IIIB") for _ in range(u("<I")[0])]}})
   return {"dur":total_dur, "peak":global_peak, "layout":layout, "markers":markers}
 
-def get(data:dict|list, arg:str):
-  if isinstance(data, dict):
-    for k,v in data.items():
-      if ansistrip(k) == arg: return v
-  # TODO: graph rewrite names aren't unique in CLI
-  else:
-    for v in data:
-      if ansistrip(v["name"]) == arg: return v
+def get(data:dict, key:str):
+  for k,v in data.items():
+    if ansistrip(k) == key: return v
   raise RuntimeError(f'item "{arg}" not found in list')
 
 def main(args) -> None:
@@ -120,22 +115,23 @@ def main(args) -> None:
     return None
 
   # ** Graph rewrites printer
+  rewrites = {c["name"]:{s["name"]:s for s in c["steps"]} for c in viz.ctxs if c.get("steps")}
   if args.source is None:
-    for k in viz.ctxs: print(f"  {format_colored(k['name'])}")
+    for k in rewrites: print(f"  {format_colored(k)}")
+    return None
+  steps = get(rewrites, args.source)
+  if args.item is None:
+    for k,v in steps.items(): print(" "*v["depth"]+k+(f" - {v['match_count']}" if v.get('match_count', 0) else ''))
   else:
-    steps = get(viz.ctxs, args.source)["steps"]
-    if args.item is None:
-      for s in steps: print(" "*s["depth"]+s['name']+(f" - {s['match_count']}" if s.get('match_count') is not None else ''))
-    else:
-      data = viz.get_render(get(steps, args.item)["query"])
-      if isinstance(data.get("value"), Iterator):
-        for m in data["value"]:
-          if m.get("uop"): print(f"Input UOp:\n{m['uop']}")
-          if m.get("diff"):
-            loc = pathlib.Path(m["upat"][0][0])
-            print(f"Rewrite at {loc.parent.name}/{loc.name}:{m['upat'][0][1]}\n{m['upat'][1]}")
-            for line in m["diff"]: print(colored(line, "red" if line.startswith("-") else "green" if line.startswith("+") else None))
-      if data.get("src") is not None: print(data["src"])
+    data = viz.get_render(get(steps, args.item)["query"])
+    if isinstance(data.get("value"), Iterator):
+      for m in data["value"]:
+        if m.get("uop"): print(f"Input UOp:\n{m['uop']}")
+        if m.get("diff"):
+          loc = pathlib.Path(m["upat"][0][0])
+          print(f"Rewrite at {loc.parent.name}/{loc.name}:{m['upat'][0][1]}\n{m['upat'][1]}")
+          for line in m["diff"]: print(colored(line, "red" if line.startswith("-") else "green" if line.startswith("+") else None))
+    if data.get("src") is not None: print(data["src"])
 
 def get_arg_parser() -> argparse.ArgumentParser:
   parser = argparse.ArgumentParser()
