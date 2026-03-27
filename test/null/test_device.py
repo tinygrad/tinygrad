@@ -31,7 +31,7 @@ class TestDevice(unittest.TestCase):
 
   def test_old_device_env_raises(self):
     result = subprocess.run(['python3', '-c', 'from tinygrad import Device; Device.DEFAULT'],
-                            env={**os.environ, "CPU": "1"}, capture_output=True)
+                            env={**os.environ, "CPU": "1", "DEV": ""}, capture_output=True)
     self.assertNotEqual(result.returncode, 0)
     self.assertIn(b"deprecated", result.stderr)
 
