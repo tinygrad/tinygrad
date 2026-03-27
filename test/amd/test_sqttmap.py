@@ -113,10 +113,8 @@ class TestSQTTMapBase(unittest.TestCase):
           idx = next(pkt_idxs.setdefault(e.device, itertools.count()))
           if e.name.display_name == "BARRIER": wave_barriers.setdefault(e.device, []).append(e)
           if (info:=e.name.ret) is None: continue
-          # TODO: this doesn't work because RDNA3 WMMA dispatches VALUINST, need to hardcode wmma
-          #if "INST" in e.name.display_name and "wmma" in _pc_map[int(info.replace("PC:", ""))]: wmma_dispatch_ids.append(f"{e.device}-{idx}")
-          # on RDNA4 the cycle count is in the op type
-          if "WMMA" in e.name.display_name: wmma_dispatch_ids.append(f"{e.device}-{idx}")
+          # detect WMMA dispatches from ISA (works for both RDNA3 VALUINST and RDNA4 INST)
+          if info.startswith("PC:") and "wmma" in _pc_map.get(int(info.replace("PC:", "")), ""): wmma_dispatch_ids.append(f"{e.device}-{idx}")
           if info.replace("LINK:", "") in wmma_dispatch_ids: wmma_execs.append(e)
         self.assertEqual(len(wmma_execs), len(wmma_dispatch_ids))
         for e in wmma_execs:

@@ -395,7 +395,13 @@ def sqtt_timeline(data:bytes, lib:bytes, target:str) -> Generator[ProfileEvent, 
     if isinstance(p, (INST, INST_RDNA4, CDNA_INST)):
       name = p.op.name if isinstance(p.op, (InstOp, InstOpRDNA4, InstOpCDNA)) else f"0x{p.op:02x}"
       yield from add(name, p, info=info)
-    if isinstance(p, (VALUINST, IMMEDIATE, WAVEEND, CDNA_WAVEEND)): yield from add(p.__class__.__name__, p, info=info)
+    if isinstance(p, VALUINST):
+      # on RDNA3, WMMA dispatches VALUINST (not INST with a cycle-count op like RDNA4). detect from ISA op_name.
+      valu_name = "VALUINST"
+      if info and (op_name:=getattr(info.inst, "op_name", "")).startswith("V_WMMA"):
+        valu_name = f"VALUINST_{20 if 'IU4' in op_name else 32}"
+      yield from add(valu_name, p, info=info)
+    if isinstance(p, (IMMEDIATE, WAVEEND, CDNA_WAVEEND)): yield from add(p.__class__.__name__, p, info=info)
     if isinstance(p, IMMEDIATE_MASK): yield from add("IMMEDIATE", p, wave=unwrap(info).wave, info=info)
     if isinstance(p, WAVERDY):
       for wave in range(16):
