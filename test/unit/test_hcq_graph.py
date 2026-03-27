@@ -14,7 +14,6 @@ class TestHCQUnit(unittest.TestCase):
   def test_supports_exec_item(self):
     d0, cpu_dev = Device[Device.DEFAULT], Device["CPU"]
 
-    # run a JIT to ensure devices are fully initialized
     @TinyJit
     def f(inp, inp_cpu):
       return (inp + 1.0).contiguous().realize(), (inp_cpu + 1.0).contiguous().realize()

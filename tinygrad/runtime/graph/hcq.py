@@ -4,9 +4,9 @@ from tinygrad.helpers import round_up, PROFILE, ALL2ALL, merge_dicts, getenv, de
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQSignal, HCQBuffer, HWQueue, HCQArgsState, BumpAllocator, MMIOInterface
 from tinygrad.device import Buffer, BufferSpec, Compiled, Device, ProfileGraphEntry, ProfileGraphEvent
 from tinygrad.dtype import dtypes
-from tinygrad.uop.ops import UOp, Variable
+from tinygrad.uop.ops import UOp, Ops, Variable
 from tinygrad.engine.realize import ExecItem, BufferXfer, CompiledRunner, BufferCopy
-from tinygrad.engine.jit import MultiGraphRunner
+from tinygrad.engine.jit import GraphRunner, MultiGraphRunner
 
 class HCQGraph(MultiGraphRunner):
   def __init__(self, *args, **kwargs):
@@ -240,13 +240,18 @@ class HCQGraph(MultiGraphRunner):
 
   @staticmethod
   def supports_exec_item(batch_devs:list[Compiled], new_call:UOp) -> bool:
-    from tinygrad.uop.ops import Ops
-    from tinygrad.engine.jit import GraphRunner
+    # Check if all devices are HCQ
     all_devs = cast(list[HCQCompiled], GraphRunner._all_devs(batch_devs, new_call))
     if not all(issubclass(type(d), HCQCompiled) for d in all_devs): return False
+
+    # If all of devices are mapped into CPU address space, can use CPU inside the peer group.
     cpu_support = all(type(d.timeline_signal.base_buf.view) is MMIOInterface for d in all_devs)
+
+    # Check if all devices are within the same peer group. If CPU is supported, don't count it as a separate peer group.
     if len(set(d.peer_group for d in all_devs if not (cpu_support and d._is_cpu()))) > 1: return False
+
     if new_call.src[0].op is Ops.COPY:
+      # MOCKGPU is not supported, since it can't execute commands in parallel
       is_xfer = len(set(type(d) for d in all_devs)) == 1 and hasattr(alc:=all_devs[0].allocator, '_transfer') and alc.supports_transfer
       return is_xfer or (cast(HCQCompiled, all_devs[0]).hw_copy_queue_t is not None and not getenv("MOCKGPU"))
     return new_call.src[0].op in (Ops.SINK, Ops.PROGRAM)

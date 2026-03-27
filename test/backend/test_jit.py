@@ -419,8 +419,10 @@ class TestJit(unittest.TestCase):
       if prev is not None: np.testing.assert_allclose(o, prev, atol=1e-4, rtol=1e-5)
       prev = o
 
+    graph_t = Device[Device.DEFAULT].graph.func if isinstance(Device[Device.DEFAULT].graph, functools.partial) else Device[Device.DEFAULT].graph
     # Checking that 2 graphs are inited.
-    assert len(jf.jit_cache) >= 1 and all(hasattr(ji.prg, 'jit_cache') for ji in jf.jit_cache)
+    assert isinstance(jf.jit_cache[0].prg, graph_t)
+    assert isinstance(jf.jit_cache[1].prg, graph_t)
 
   def test_jitted_clone(self):
     def f(a): return a.clone().realize()
