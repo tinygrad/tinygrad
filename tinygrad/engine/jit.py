@@ -25,11 +25,9 @@ def prune_linear(linear:UOp, needed:set[UOp]) -> tuple[UOp, UOp]:
 def create_graph_call(batch:list[UOp], input_buffers:set[Buffer]) -> UOp:
   all_bufs = dedup(b for si in batch for b in si.src[1:] if b.op is not Ops.BIND)
   input_list = [b for b in all_bufs if b.op in (Ops.BUFFER, Ops.BUFFER_VIEW) and b.buffer in input_buffers]
-  internal_list = [b for b in all_bufs if b not in set(input_list)]
-  param_map = {b: b.param_like(i) for i, b in enumerate(input_list)}
-  sub_linear = UOp(Ops.LINEAR, src=tuple(batch)).substitute(param_map, name="graph split") if param_map else UOp(Ops.LINEAR, src=tuple(batch))
+  sub_linear = UOp(Ops.LINEAR, src=tuple(batch))
   cf = UOp(Ops.CUSTOM_FUNCTION, dtypes.void, src=(sub_linear, *input_list), arg="graph")
-  return cf.call(*input_list + internal_list, metadata=tuple(m for si in batch for m in si.arg.metadata))
+  return cf.call(*input_list, metadata=tuple(m for si in batch for m in si.arg.metadata))
 
 def graph_split_rewrite(linear:UOp, input_buffers:set[Buffer], max_batch_size:int=0) -> UOp:
   new_src: list[UOp] = []
@@ -68,33 +66,14 @@ def ensure_bufs_allocated(jit_cache:list[ExecItem]):
     for b in ei.bufs:
       if b is not None: b.ensure_allocated()
 
-def lower_linear(linear:UOp, input_bufs:tuple[UOp, ...]=()) -> tuple[list[ExecItem], dict[tuple[int,int],int]]:
-  input_replace: dict[tuple[int,int],int] = {}
-  if input_bufs:
-    # build input_replace based on PARAM positions, accounting for multi-device expansion.
-    # compute flat offsets for multi-device input bufs (MultiBuffer expands to N individual Buffers in graph ExecItem bufs)
-    flat_base = []
-    off = 0
-    for ib in input_bufs:
-      flat_base.append(off)
-      off += len(ib.buffer.bufs) if isinstance(ib.buffer, MultiBuffer) else 1
-    # build input_replace, accounting for multi-device expansion (graph calls stay as 1 ExecItem).
-    exec_idx = 0
-    for si in linear.src:
-      n = 1 if (si.src[0].op is Ops.CUSTOM_FUNCTION) else (len(si.device) if isinstance(si.device, tuple) else 1)
-      for k in range(n):
-        for idx, b in enumerate(b for b in si.src[1:] if b.op is not Ops.BIND):
-          if b.op is Ops.PARAM: input_replace[(exec_idx + k, idx)] = flat_base[b.arg] + k
-      exec_idx += n
-    # substitute PARAM with actual input buffers.
-    linear = linear.substitute({u: input_bufs[u.arg] for u in linear.toposort(enter_calls=False) if u.op is Ops.PARAM})
-  return [ei.lower() for ei in linear_to_schedule(linear)], input_replace
+def lower_linear(linear:UOp) -> list[ExecItem]:
+  return [ei.lower() for ei in linear_to_schedule(linear)]
 
 @track_rewrites(lambda linear,held_bufs,input_buffers=None,ret=(): f"JIT {pluralize('Kernel', len(ret))}")
 def jit_lower(linear:UOp, held_bufs:set[UOp], input_buffers:list[Buffer]|None=None) -> list[ExecItem]:
   linear = memory_plan_rewrite(linear, held_bufs)
   if JIT < 2: linear = graph_split_rewrite(linear, set(input_buffers or []), max_batch_size=JIT_BATCH_SIZE.value)
-  return lower_linear(linear)[0]
+  return lower_linear(linear)
 
 class GraphException(Exception): pass
 class JitError(Exception): pass
@@ -120,11 +99,12 @@ def get_input_replace(jit_cache: list[ExecItem], input_buffers:list[Buffer],
   return input_replace
 
 class GraphRunner(Runner):
-  def __init__(self, cf_or_cache: UOp|list[ExecItem], input_replace:dict[tuple[int,int],int]|None=None):
+  def __init__(self, cf_or_cache: UOp|list[ExecItem], input_buffers:list[Buffer]|dict[tuple[int,int],int]|None=None):
     if isinstance(cf_or_cache, UOp):
-      self.jit_cache, self.input_replace = lower_linear(cf_or_cache.src[0], cf_or_cache.src[1:])
+      self.jit_cache = lower_linear(cf_or_cache.src[0])
       ensure_bufs_allocated(self.jit_cache)
-    else: self.jit_cache, self.input_replace = cf_or_cache, input_replace or {}
+      self.input_replace = get_input_replace(self.jit_cache, input_buffers) if input_buffers else {}
+    else: self.jit_cache, self.input_replace = cf_or_cache, input_buffers or {}
 
     self.var_vals_replace:dict[int, list[tuple[int, int]]] = {}
     self.launch_dims_replace:dict[int, tuple[int|None, int|None]] = {}
