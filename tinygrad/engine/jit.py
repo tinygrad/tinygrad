@@ -5,7 +5,7 @@ from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, BEAM, getenv,
 from tinygrad.device import Buffer, Compiled, Device, MultiBuffer
 from tinygrad.dtype import DType, dtypes
 from tinygrad.uop.ops import UOp, PatternMatcher, Variable, sym_infer, Ops, buffers, track_rewrites, graph_rewrite
-from tinygrad.engine.realize import ExecItem, capturing, ViewOp, BufferCopy, BufferXfer, EncDec, CompiledRunner, Runner, Estimates
+from tinygrad.engine.realize import ExecItem, capturing, BufferCopy, BufferXfer, EncDec, CompiledRunner, Runner, Estimates
 from tinygrad.engine.memory import memory_plan_rewrite, _collect_bufs
 from tinygrad.engine.schedule import linear_to_schedule
 from tinygrad.nn.state import get_parameters
@@ -40,10 +40,9 @@ def graph_split_rewrite(linear:UOp, input_buffers:set[Buffer], max_batch_size:in
     nonlocal current_batch, current_batch_devs, max_batch_size
     if len(current_batch) <= 1 and not getenv("GRAPH_ONE_KERNEL"): new_src.extend(current_batch)
     else:
-      new_src.append(graph_call:=create_graph_call(current_batch, input_buffers))
+      new_src.append(create_graph_call(current_batch, input_buffers))
       max_batch_size *= 2
       if DEBUG >= 2: print(f"JIT GRAPHing batch with {len(current_batch)} kernels")
-      if VIZ: graph_rewrite(graph_call, PatternMatcher([]), name=f"graph split {len(current_batch)} kernels")
     current_batch, current_batch_devs = [], []
 
   for si in linear.src:
@@ -53,7 +52,7 @@ def graph_split_rewrite(linear:UOp, input_buffers:set[Buffer], max_batch_size:in
     graph_t = graph_class(devs[0]) if devs[0].graph is not None else None
 
     can_graph = graph_t is not None and graph_t.supports_exec_item(devs, si)
-    can_extend = can_graph and (not current_batch_devs or graph_t.supports_exec_item(current_batch_devs, si)) \
+    can_extend = can_graph and graph_t is not None and (not current_batch_devs or graph_t.supports_exec_item(current_batch_devs, si)) \
       and (max_batch_size == 0 or len(current_batch) < max_batch_size)
     if not can_extend and current_batch: flush_batch()
 
@@ -69,10 +68,12 @@ def jit_cache_bufs(jit_cache:list[ExecItem]):
       if b is not None: yield b
     if isinstance(ei.prg, GraphRunner): yield from jit_cache_bufs(ei.prg.jit_cache)
 
-@track_rewrites(lambda linear,held_bufs,input_buffers=None,ret=(): f"JIT {pluralize('Kernel', len(ret))}")
+@track_rewrites(lambda linear,held_bufs,input_buffers=None,ret=(): f"JIT {pluralize('call', len(linear.src))}")
 def jit_lower(linear:UOp, held_bufs:set[UOp], input_buffers:list[Buffer]|None=None) -> list[ExecItem]:
+  if VIZ: graph_rewrite(linear, PatternMatcher([]), name="View captured linear")
   linear = memory_plan_rewrite(linear, held_bufs)
   if JIT < 2: linear = graph_split_rewrite(linear, set(input_buffers or []), max_batch_size=JIT_BATCH_SIZE.value)
+  if VIZ: graph_rewrite(linear, PatternMatcher([]), name="View graphed linear")
   return [ei.lower() for ei in linear_to_schedule(linear)]
 
 class GraphException(Exception): pass
@@ -99,13 +100,14 @@ def get_input_replace(jit_cache: list[ExecItem], input_buffers:list[Buffer],
   return input_replace
 
 class GraphRunner(Runner):
-  def __init__(self, cf:UOp|None, input_buffers:list[Buffer]|None, jit_cache:list[ExecItem]=(), input_replace:dict[tuple[int,int],int]=()):
-    # TODO: captured jit as linear?
-    if cf is not None:
-      jit_cache = [ei.lower() for ei in linear_to_schedule(cf.src[0])]
+  def __init__(self, linear:UOp|None, input_buffers:list[Buffer]|None,
+               jit_cache:list[ExecItem]|None=None, input_replace:dict[tuple[int,int],int]|None=None):
+    # TODO: captured jit as linear?n
+    if linear is not None:
+      jit_cache = [ei.lower() for ei in linear_to_schedule(linear.src[0])]
       for b in jit_cache_bufs(jit_cache): b.ensure_allocated()
       input_replace = get_input_replace(jit_cache, input_buffers) if input_buffers else {}
-    self.jit_cache, self.input_replace = list(jit_cache), dict(input_replace)
+    self.jit_cache, self.input_replace = unwrap(jit_cache), input_replace or {}
 
     self.var_vals_replace:dict[int, list[tuple[int, int]]] = {}
     self.launch_dims_replace:dict[int, tuple[int|None, int|None]] = {}
@@ -115,8 +117,9 @@ class GraphRunner(Runner):
 
     self.vars = sorted({v.expr for ji in self.jit_cache if isinstance(ji.prg, CompiledRunner) for v in ji.prg.p.vars
                         if v.expr not in ji.fixedvars | ji.prg.p.runtimevars})
-    self.symbolic_dims = dedup([tuple(d) for ji in self.jit_cache if isinstance(ji.prg, CompiledRunner) and (d:=ji.prg.p.local_size) and is_sym_dim(d)] +
-                               [tuple(d) for ji in self.jit_cache if isinstance(ji.prg, CompiledRunner) and (d:=ji.prg.p.global_size) and is_sym_dim(d)])
+    crs = [ji.prg for ji in self.jit_cache if isinstance(ji.prg, CompiledRunner)]
+    self.symbolic_dims = dedup([tuple(d) for p in crs if (d:=p.p.local_size) and is_sym_dim(d)] +
+                               [tuple(d) for p in crs if (d:=p.p.global_size) and is_sym_dim(d)])
     def find_symbolic_dim(dim): return self.symbolic_dims.index(tuple(dim)) if dim is not None and tuple(dim) in self.symbolic_dims else None
 
     estimates = Estimates()

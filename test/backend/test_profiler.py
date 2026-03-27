@@ -134,7 +134,7 @@ class TestProfiler(unittest.TestCase):
     _, _ = helper_profile_filter_device(profile, TestProfiler.d0.device)
     _, _ = helper_profile_filter_device(profile, d1.device)
 
-    assert len(graph_evs) == 1, "one graph event is expected"
+    assert len(graph_evs) == 2, "2 graph events are expected"
     assert len(graph_evs[0].ents) == 2, "two entities are expected"
 
   @unittest.skipIf(CI or not issubclass(type(Device[Device.DEFAULT]), HCQCompiled), "skip CI")

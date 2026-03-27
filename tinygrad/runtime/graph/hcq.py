@@ -1,11 +1,11 @@
 import collections, time
 from typing import Any, cast
-from tinygrad.helpers import round_up, PROFILE, ALL2ALL, merge_dicts, getenv, dedup, suppress_finalizing, TracingKey
+from tinygrad.helpers import round_up, PROFILE, ALL2ALL, merge_dicts, getenv, suppress_finalizing, TracingKey
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQSignal, HCQBuffer, HWQueue, HCQArgsState, BumpAllocator, MMIOInterface
 from tinygrad.device import Buffer, BufferSpec, Compiled, Device, ProfileGraphEntry, ProfileGraphEvent
 from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import UOp, Ops, Variable
-from tinygrad.engine.realize import ExecItem, BufferXfer, CompiledRunner, BufferCopy
+from tinygrad.engine.realize import BufferXfer, CompiledRunner, BufferCopy
 from tinygrad.engine.jit import GraphRunner, MultiGraphRunner
 
 class HCQGraph(MultiGraphRunner):
@@ -253,5 +253,5 @@ class HCQGraph(MultiGraphRunner):
     if new_call.src[0].op is Ops.COPY:
       # MOCKGPU is not supported, since it can't execute commands in parallel
       is_xfer = len(set(type(d) for d in all_devs)) == 1 and hasattr(alc:=all_devs[0].allocator, '_transfer') and alc.supports_transfer
-      return is_xfer or (cast(HCQCompiled, all_devs[0]).hw_copy_queue_t is not None and not getenv("MOCKGPU"))
+      return is_xfer or (all_devs[0].hw_copy_queue_t is not None and not getenv("MOCKGPU"))
     return new_call.src[0].op in (Ops.SINK, Ops.PROGRAM)
