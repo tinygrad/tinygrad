@@ -3,7 +3,7 @@ from typing import Callable
 from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, graph_rewrite, _substitute, range_start, AxisType
 from tinygrad.uop.symbolic import symbolic
 from tinygrad.helpers import partition
-from tinygrad.dtype import dtypes, ImageDType
+from tinygrad.dtype import dtypes
 
 def flatten_range(r:UOp) -> UOp|None:
   off = range_start[r.op]
@@ -64,13 +64,8 @@ def do_substitute(ctx:dict, x: UOp, sub_fxn:Callable[[UOp, UOp], UOp]) -> UOp|No
   ctx.clear()
   return None if ret is x else ret.simplify()
 
-def dont_sub_ranges_for_image(ctx:dict[UOp, UOp|None], x:UOp) -> None:
-  if isinstance(x.src[0].src[0].dtype, ImageDType):
-    for s in x.src[0].ranges: ctx[s] = None
-
 pm_split_ranges = PatternMatcher([
   (UPat(Ops.RANGE, name="r")%UPat.cvar("c"), mark_range_mod),
-  (UPat(Ops.STORE, name="x"), dont_sub_ranges_for_image),
   (UPat(Ops.SINK, name="x"), lambda ctx, x: do_substitute(ctx, x,
     lambda k,v: k.replace(src=(k.src[0]//v,), arg=k.arg[0:-1]+(0,k.arg[-1]))*v + k.replace(src=(v,), arg=k.arg[0:-1]+(1,k.arg[-1])))),
 ])
