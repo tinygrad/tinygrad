@@ -355,7 +355,7 @@ class TinyJit(Generic[ReturnType]):
       extra_view_inputs: list[tuple[int, int, str, int, DType]] = []
       for item in jit_cache:
         for b in item.bufs:
-          if isinstance(b, Buffer) and b._base is not None and b._base in input_buffers:
+          if b is not None and b._base is not None and b._base in input_buffers:
             input_buffers.append(b)
             extra_view_inputs.append((input_buffers.index(b.base), b.offset, b.device, b.size, b.dtype))
 
