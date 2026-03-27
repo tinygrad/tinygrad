@@ -397,6 +397,8 @@ def sqtt_timeline(data:bytes, lib:bytes, target:str) -> Generator[ProfileEvent, 
       yield from add(name, p, info=info)
     if isinstance(p, VALUINST):
       # on RDNA3, WMMA dispatches VALUINST (not INST with a cycle-count op like RDNA4). detect from ISA op_name.
+      # WMMA internally decomposes into DOT instructions: cycles = 16*16*16 / (32_lanes * ops_per_DOT)
+      # IU4 uses V_DOT8 (8 ops/lane) = 16 cycles, everything else uses V_DOT2/V_DOT4 (4 ops/lane) = 32 cycles.
       valu_name = "VALUINST"
       if info and (op_name:=getattr(info.inst, "op_name", "")).startswith("V_WMMA"):
         valu_name = f"VALUINST_{16 if 'IU4' in op_name else 32}"
