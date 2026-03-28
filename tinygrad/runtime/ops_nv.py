@@ -606,6 +606,8 @@ class NVDevice(HCQCompiled[NVSignal]):
     self.compute_gpfifo = self._new_gpu_fifo(self.gpfifo_area, ctxshare, self.channel_group, offset=0, entries=0x10000, compute=True)
     self.dma_gpfifo = self._new_gpu_fifo(self.gpfifo_area, ctxshare, self.channel_group, offset=0x100000, entries=0x10000, compute=False)
     self.iface.rm_control(self.channel_group, nv_gpu.NVA06C_CTRL_CMD_GPFIFO_SCHEDULE, nv_gpu.NVA06C_CTRL_GPFIFO_SCHEDULE_PARAMS(bEnable=1))
+    self.iface.rm_control(self.channel_group, nv_gpu.NVA06C_CTRL_CMD_SET_INTERLEAVE_LEVEL,
+      nv_gpu.NVA06C_CTRL_SET_INTERLEAVE_LEVEL_PARAMS(tsgInterleaveLevel=getenv("NV_INTERLEAVE", 0)))
 
     self.cmdq_page:HCQBuffer = self.iface.alloc(0x200000, cpu_access=True)
     self.cmdq_allocator = BumpAllocator(size=self.cmdq_page.size, base=int(self.cmdq_page.va_addr), wrap=True)
