@@ -100,7 +100,7 @@ class Decoder:
         bs,c,py,px = x.shape
         x = x.reshape(bs, c, py, 1, px, 1).expand(bs, c, py, 2, px, 2).reshape(bs, c, py*2, px*2)
         x = l['upsample']['conv'](x)
-      if not getenv("NULL"): x.realize()
+      if Device.DEFAULT != "NULL": x.realize()
 
     return self.conv_out(self.norm_out(x).swish())
 
@@ -253,7 +253,7 @@ class StableDiffusion:
     return x_prev
 
 def _is_null_fakeweights(args) -> bool:
-  return args.fakeweights and getenv("DEV") == "NULL"
+  return args.fakeweights and Device.DEFAULT == "NULL"
 
 # ** ldm.models.autoencoder.AutoencoderKL (done!)
 # 3x512x512 <--> 4x64x64 (16384)
@@ -329,8 +329,7 @@ if __name__ == "__main__":
   if args.seed is not None: Tensor.manual_seed(args.seed)
   latent = Tensor.randn(1,4,64,64)
 
-  @TinyJit
-  def run(model, *x): return model(*x).realize()
+  run = TinyJit(lambda model, *x: model(*x).realize(), prune=True)
 
   # this is diffusion
   step_times = []
