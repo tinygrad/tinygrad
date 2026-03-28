@@ -10,9 +10,12 @@ if z3.get_version() < (4, 12, 4, 0):
 
 # IDIV is truncated division but z3 does euclidian division (floor if b>0 ceil otherwise); mod by power of two sometimes uses Ops.AND
 def z3_cdiv(a:z3.ArithRef, b:z3.ArithRef) -> z3.ArithRef:return z3.If((a<0), z3.If(0<b, (a+(b-1))/b, (a-(b+1))/b), a/b)
-def z3_xor(a:z3.BoolRef, b:z3.BoolRef) -> z3.BoolRef:
-  assert isinstance(a, z3.BoolRef), f"{type(a)=}, {a=}"
-  return a^b
+def z3_xor(a:z3.ExprRef, b:z3.ExprRef) -> z3.ExprRef:
+  if isinstance(a, z3.BoolRef): return a^b
+  # x ^ -1 = -(x+1), i.e. bitwise NOT
+  if isinstance(b, z3.IntNumRef) and b.as_long() == -1: return -(a+1)
+  if isinstance(a, z3.IntNumRef) and a.as_long() == -1: return -(b+1)
+  raise RuntimeError(f"z3 int XOR only supports XOR with -1, got {a=} {b=}")
 z3_alu: dict[Ops, Callable[..., z3.ExprRef]] = python_alu | {Ops.MOD: lambda a,b: a-z3_cdiv(a,b)*b, Ops.IDIV: z3_cdiv,
   Ops.SHR: lambda a,b: a/(2**b.as_long()), Ops.SHL: lambda a,b: a*(2**b.as_long()),
   Ops.AND: lambda a,b: a%(b+1) if isinstance(b, z3.ArithRef) else a&b, Ops.WHERE: z3.If, Ops.XOR: z3_xor, Ops.MAX: lambda a,b: z3.If(a<b, b, a),}
