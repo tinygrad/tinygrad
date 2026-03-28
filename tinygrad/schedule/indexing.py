@@ -146,6 +146,13 @@ def apply_movement_op(op:Ops, in_shape:tuple[sint,...], arg:tuple, rngs:tuple[UO
     case _: raise RuntimeError(f"{op} is not a MovementOp")
   return rngs
 
+def merge_ending_ranges(consumers:dict[UOp, None], ending_ranges:dict[UOp, list[UOp]]) -> list[UOp]:
+  if len(consumers) == 0: return []
+  if len(consumers) == 1: return list(ending_ranges.get(next(iter(consumers)), ()))
+  merged: list[UOp] = []
+  for u in consumers: merged.extend(ending_ranges.get(u, ()))
+  return merged
+
 @profile_matches
 def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
   if debug: print("**************************")
@@ -173,14 +180,15 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
     if x.op in {Ops.MSTACK, Ops.MSELECT}: continue
 
     if x.dtype.scalar() == dtypes.weakint: continue  # TODO: why do I need this?
-    ending_ranges[x] = sum([ending_ranges.get(u, []) for u in consumer_map[x]], [])
+    consumers = consumer_map[x]
+    ending_ranges[x] = merge_ending_ranges(consumers, ending_ranges)
 
     # *** the ranges on the output are
     #  1. new if this op is realized
     #  2. from the single consumer if this op only has one consumer
     #  3. potentially new if this op has 2+ consumers
 
-    consumer_rngs = [rctx.range_map[c][0] for c in consumer_map[x] if c in rctx.range_map]
+    consumer_rngs = [cr[0] for c in consumers if (cr:=rctx.range_map.get(c)) is not None]
     if x in rctx.realize_map:
       # if this is in the realize_map, we create new ranges (at the output)
       out_rngs = tuple(rctx.new_range(s) for s in x.shape)
@@ -196,30 +204,34 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
       # if this has one consumer, it inherits the ranges from it
       out_rngs = consumer_rngs[0]
     elif len(consumer_rngs) > 1:
-      # if this has two consumers, we have to merge the ranges and might create new ones
-      all_rngs: list[tuple[UOp, ...]] = list(zip(*consumer_rngs))
-      rngs_valids = []
-      for valid_rngs in all_rngs:
-        local_rngs, valids = zip(*[(r.get_idx(), r.get_valid()) for r in valid_rngs])
-        rngs_valids.append((local_rngs, valids))
+      first_consumer_rngs = consumer_rngs[0]
+      if all(rngs == first_consumer_rngs for rngs in consumer_rngs[1:]):
+        out_rngs = first_consumer_rngs
+      else:
+        # if this has two consumers, we have to merge the ranges and might create new ones
+        all_rngs: list[tuple[UOp, ...]] = list(zip(*consumer_rngs))
+        rngs_valids = []
+        for valid_rngs in all_rngs:
+          local_rngs, valids = zip(*[(r.get_idx(), r.get_valid()) for r in valid_rngs])
+          rngs_valids.append((local_rngs, valids))
 
-      # TODO: in RANGEIFY > 1 all_all_same isn't required
-      all_all_same = all(all_same(local_rngs) for local_rngs,_ in rngs_valids)
-      _out_rngs = []
-      _realize_axis = []
-      for i,(local_rngs,valids) in enumerate(rngs_valids):
-        # we compare the ranges without their valids
-        if all_all_same or (PCONTIG and all_same(local_rngs)):
-          # the new valid is the OR of all the children valids
-          minimum_valid = UOp.const(dtypes.bool, False).sum(*valids)
-          _out_rngs.append(graph_rewrite(minimum_valid.where(local_rngs[0], UOp.invalid()), symbolic, name="minimum_valid"))
-        else:
-          _out_rngs.append(rctx.new_range(x.shape[i]))
-          _realize_axis.append(i)
-      out_rngs = tuple(_out_rngs)
+        # TODO: in RANGEIFY > 1 all_all_same isn't required
+        all_all_same = all(all_same(local_rngs) for local_rngs,_ in rngs_valids)
+        _out_rngs = []
+        _realize_axis = []
+        for i,(local_rngs,valids) in enumerate(rngs_valids):
+          # we compare the ranges without their valids
+          if all_all_same or (PCONTIG and all_same(local_rngs)):
+            # the new valid is the OR of all the children valids
+            minimum_valid = UOp.const(dtypes.bool, False).sum(*valids)
+            _out_rngs.append(graph_rewrite(minimum_valid.where(local_rngs[0], UOp.invalid()), symbolic, name="minimum_valid"))
+          else:
+            _out_rngs.append(rctx.new_range(x.shape[i]))
+            _realize_axis.append(i)
+        out_rngs = tuple(_out_rngs)
 
-      # we have to (partially) realize here if there's new ranges
-      if len(_realize_axis): rctx.realize_map[x] = _realize_axis
+        # we have to (partially) realize here if there's new ranges
+        if len(_realize_axis): rctx.realize_map[x] = _realize_axis
 
     # if this element is a reduce and there's ended ranges, we might have to end some other ranges
     if len(ending_ranges[x]) and x.op in GroupOp.Elementwise.union({Ops.REDUCE_AXIS}):
