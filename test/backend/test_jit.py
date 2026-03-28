@@ -577,7 +577,7 @@ class TestJitPrune(unittest.TestCase):
       a = Tensor.rand(16).realize()
       out = w2_noprune(a)
       np.testing.assert_allclose(out.tolist(), [x*2+y for x,y in zip(weights.tolist(), a.tolist())])
-    assert len(w2_noprune.captured.jit_cache) == 2
+    assert_jit_cache_len(w2_noprune, 2)
 
     for _ in range(3):
       a = Tensor.rand(16).realize()

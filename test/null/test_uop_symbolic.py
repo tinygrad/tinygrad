@@ -149,6 +149,9 @@ class TestSymbolic(unittest.TestCase):
   def test_xor_0(self):
     self.helper_test_variable(Variable("a", 0, 8, dtypes.int) ^ 0, 0, 8, "a", test_z3=False)
 
+  def test_xor_self_inverse(self):
+    self.helper_test_variable((Variable("a", 0, 8, dtypes.int) ^ 5) ^ 5, 0, 8, "a", test_z3=False)
+
   def test_add_1(self):
     self.helper_test_variable(Variable("a", 0, 8)+1, 1, 9, "(a+1)")
 

@@ -1,6 +1,7 @@
 import unittest
 from tinygrad import Tensor, dtypes, TinyJit, UOp
 from tinygrad.apps.llm import apply_rope as apply_rope_new, precompute_freqs_cis
+from test.helpers import assert_jit_cache_len
 
 def apply_rope(x:Tensor, start_pos:int):
   B, H, T, Hd = x.shape
@@ -28,12 +29,8 @@ class TestAttention(unittest.TestCase):
     for _ in range(3):
       rope_noprune(Tensor.randn(1, 2, 4, 8, dtype=dtypes.float32), v_pos.bind(1))
       rope_prune(Tensor.randn(1, 2, 4, 8, dtype=dtypes.float32), v_pos.bind(1))
-    noprune_size = len(rope_noprune.captured.jit_cache)
-    prune_size = len(rope_prune.captured.jit_cache)
-
-    self.assertGreater(noprune_size, prune_size)
-    self.assertGreaterEqual(noprune_size, 2)
-    self.assertEqual(prune_size, 1)
+    assert_jit_cache_len(rope_prune, 1)
+    assert_jit_cache_len(rope_noprune, 3)
 
 if __name__ == '__main__':
   unittest.main()

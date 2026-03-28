@@ -287,8 +287,36 @@ class ElementwiseMixin(DTypeMixin):
     """
     return self._binop(Ops.MAX, x, False)
 
+  def _inverse(self) -> Self: return -self if self.is_floating_point() else ~self
+
   def minimum(self, x: Self | ConstType) -> Self:
-    return -(-self).maximum(-self.ufix(x))
+    """
+    Computes element-wise minimum of `self` and `x`.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([-1, 2, 3]).minimum(1).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([-1, 2, 3]).minimum(Tensor([-4, -2, 9])).numpy())
+    ```
+    """
+    t, x = self._broadcasted(x)
+    return t._inverse().maximum(x._inverse())._inverse()
+
+  def copysign(self, other: Self | ConstType) -> Self:
+    """
+    Returns a tensor of with the magnitude of `self` and the sign of `other`, elementwise.
+    """
+    # NOTE: torch always return in float, we return based on the broadcasting rule.
+    other = self._broadcasted(other)[1]
+    return self.abs() * ((other < 0) | (other.reciprocal() < 0)).where(-1, 1)
+
+  def logaddexp(self, other: Self | ConstType) -> Self:
+    """
+    Calculates (self.exp()+other.exp()).log(), elementwise.
+    """
+    m = self.maximum(other)
+    return ((self-m).exp() + (self._broadcasted(other)[1]-m).exp()).log() + m
 
   def where(self, x: Self | ConstType, y: Self | ConstType) -> Self:
     if isinstance(x, type(self)):
@@ -392,11 +420,34 @@ class ElementwiseMixin(DTypeMixin):
     """
     return self._ensure_float().alu(Ops.EXP2)
 
-  def pow(self, x: Self | ConstType) -> Self:
-    return self.alu(Ops.POW, self.ufix(x))
+  def pow(self, x: Self | ConstType, reverse: bool = False) -> Self:
+    """
+    Computes power of `self` with `x`.
+    Equivalent to `self ** x`.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([-1, 2, 3]).pow(2.0).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([-1, 2, 3]).pow(Tensor([-1.5, 0.5, 1.5])).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print((2.0 ** Tensor([-1, 2, 3])).numpy())
+    ```
+    """
+    base, exponent = self._broadcasted(x, reverse=reverse)
+    # TODO: int pow
+    if not base.is_floating_point() and not isinstance(x, ElementwiseMixin) and not (isinstance(x, int) and x >= 0):
+      raise RuntimeError("base needs to be float")
+    ret = base.alu(Ops.POW, exponent)
+    # NOTE: pow(int, float) -> int
+    return ret.round().cast(self.dtype) if not reverse and not dtypes.is_float(self.dtype) and dtypes.is_float(exponent.dtype) else ret
 
   def __pow__(self, x: Self | ConstType) -> Self:
     return self.pow(x)
+
+  def __rpow__(self, x: Self | ConstType) -> Self:
+    return self.pow(x, True)
 
   def square(self) -> Self:
     """
