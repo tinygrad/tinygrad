@@ -126,6 +126,18 @@ def _apply_reshape(in_shape:tuple[sint,...], out_shape:tuple[sint, ...], urngs:U
   # this simplify is doing a lot of heavy lifting. this is the replacement for the reshape view merging code
   return graph_rewrite(UOp.sink(*axes_out[::-1]), symbolic+pm_simplify_valid+pm_drop_and_clauses, name="reshape")
 
+@functools.cache
+def _pad_movement_template(in_shape:tuple[sint, ...], arg:tuple) -> tuple[tuple[UOp, ...], UOp]:
+  prngs = tuple(UOp.range(sh+s+e, i, AxisType.PLACEHOLDER) for i,(sh,(s,e)) in enumerate(zip(in_shape, arg)))
+  trngs = tuple(r if (s == 0 and e == 0) else graph_rewrite((r >= s) & (r < (sh+s)),
+    symbolic+pm_simplify_valid, name="pad").where(r-s, UOp.invalid()) for r,sh,(s,e) in zip(prngs, in_shape, arg))
+  return prngs, UOp.sink(*trngs)
+
+@functools.cache
+def _reshape_movement_template(in_shape:tuple[sint, ...], out_shape:tuple[sint, ...]) -> tuple[tuple[UOp, ...], UOp]:
+  prngs = tuple(UOp.range(s, i, AxisType.PLACEHOLDER) for i,s in enumerate(out_shape))
+  return prngs, _apply_reshape(in_shape, out_shape, UOp.sink(*prngs).simplify())
+
 # this is the definition of the movement ops
 @functools.cache
 def apply_movement_op(op:Ops, in_shape:tuple[sint,...], arg:tuple, rngs:tuple[UOp, ...]) -> tuple[UOp, ...]:
@@ -135,14 +147,11 @@ def apply_movement_op(op:Ops, in_shape:tuple[sint,...], arg:tuple, rngs:tuple[UO
     case Ops.FLIP:    rngs = tuple(((s-1)-a) if f else a for a,s,f in zip(rngs, in_shape, arg))
     case Ops.EXPAND:  rngs = tuple(a if in_sh == out_sh else a.const_like(0) for a,in_sh,out_sh in zip(rngs, in_shape, arg))
     case Ops.PAD:
-      # NOTE: the .where(r-s, i) is not inside the graph_rewrite so that `convert_pad_to_where_to_keep_behavior_local`
-      #       wraps the pad with only the newly added valid
-      rngs = tuple(r if (s == 0 and e == 0) else graph_rewrite((r >= s) & (r < (sh+s)),
-        symbolic+pm_simplify_valid, name="pad").where(r-s, UOp.invalid()) for r,sh,(s,e) in zip(rngs, in_shape, arg))
+      prngs, pad_template = _pad_movement_template(in_shape, arg)
+      rngs = pad_template.src if all(a is b for a,b in zip(rngs, prngs)) else pad_template.substitute(dict(zip(prngs, rngs))).src
     case Ops.RESHAPE:
-      sink = UOp.sink(*rngs).simplify() # NOTE: this applies any commutative flips to the rngs early
-      sub_array = {r:UOp.range(r.src[0], i, AxisType.PLACEHOLDER) for i,r in enumerate(sink.ranges)}
-      rngs = _apply_reshape(in_shape, arg, sink.substitute(sub_array)).substitute({v:k for k,v in sub_array.items()}).src
+      prngs, reshape_template = _reshape_movement_template(in_shape, arg)
+      rngs = reshape_template.src if all(a is b for a,b in zip(rngs, prngs)) else reshape_template.substitute(dict(zip(prngs, rngs))).src
     case _: raise RuntimeError(f"{op} is not a MovementOp")
   return rngs
 

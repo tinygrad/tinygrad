@@ -7,7 +7,6 @@ from tinygrad.helpers import cdiv, cmod, CORRECT_DIVMOD_FOLDING, unwrap
 @functools.cache
 def fold_divmod_general(d: UOp, correct_divmod_folding: bool) -> UOp|None:
   x, y = d.src
-
   # cancel_divmod: simple cancel div/mod case when the range of the numerator lies within a single denominator interval
   x_min, x_max, y_min, y_max = x.vmin, x.vmax, y.vmin, y.vmax
   assert isinstance(x_min, int) and isinstance(x_max, int) and isinstance(y_min, int) and isinstance(y_max, int)
@@ -48,12 +47,66 @@ def fold_divmod_general(d: UOp, correct_divmod_folding: bool) -> UOp|None:
 
     # fold_divmod_congruence: fold if a is congruent to an expression whose range is between 0 and c
     if not (x.vmin<0 and correct_divmod_folding):
-      # when f%c == c//2, abs(r) == abs(r-c) is a tie, try both signs since either may fit in one period
-      rem_choices = [(r, r-c) if (r:=f%c)*2 == c else (min(r, r-c, key=abs),) for f in factors]
-      for rems in itertools.product(*rem_choices):
-        if (rem:=sum(r*v for r,v in zip(rems,terms))+const%c).vmin//c==rem.vmax//c:
-          if d.op is Ops.MOD: return rem - rem.vmin//c*c
-          return sum((f-r)//c * v for f,r,v in zip(factors,rems,terms)) + const//c + rem.vmin//c
+      is_mod = d.op is Ops.MOD
+      fixed_rem_terms:list[UOp] = []
+      fixed_rem_min, fixed_rem_max = const%c, const%c
+      fixed_quo_terms:list[UOp] = []
+      tie_variants_mod:list[tuple[tuple[UOp, int, int], tuple[UOp, int, int]]] = []
+      tie_variants_div:list[tuple[tuple[UOp, int, int, UOp], tuple[UOp, int, int, UOp]]] = []
+      for f, v in zip(factors, terms):
+        vmin, vmax = v.vmin, v.vmax
+        assert isinstance(vmin, int) and isinstance(vmax, int)
+        r = f % c
+        if r*2 == c:
+          alt_r = r-c
+          r_bounds = (r*vmin, r*vmax) if r >= 0 else (r*vmax, r*vmin)
+          alt_bounds = (alt_r*vmin, alt_r*vmax) if alt_r >= 0 else (alt_r*vmax, alt_r*vmin)
+          if is_mod:
+            tie_variants_mod.append(((r*v, *r_bounds), (alt_r*v, *alt_bounds)))
+          else:
+            pos_variant = (r*v, *r_bounds, ((f-r)//c) * v)
+            neg_variant = (alt_r*v, *alt_bounds, ((f-alt_r)//c) * v)
+            tie_variants_div.append((pos_variant, neg_variant))
+          continue
+        r = min(r, r-c, key=abs)
+        if r != 0:
+          fixed_rem_terms.append(r*v)
+          if r >= 0:
+            fixed_rem_min += r*vmin
+            fixed_rem_max += r*vmax
+          else:
+            fixed_rem_min += r*vmax
+            fixed_rem_max += r*vmin
+        if not is_mod and (q:=(f-r)//c) != 0: fixed_quo_terms.append(q*v)
+      fixed_rem = sum(fixed_rem_terms, start=x.const_like(const%c))
+      if not is_mod: fixed_quo = sum(fixed_quo_terms, start=x.const_like(const//c))
+
+      if is_mod and not tie_variants_mod:
+        if fixed_rem_min//c==fixed_rem_max//c: return fixed_rem - (fixed_rem_min//c)*c
+      elif not is_mod and not tie_variants_div:
+        if fixed_rem_min//c==fixed_rem_max//c: return fixed_quo + fixed_rem_min//c
+      elif is_mod:
+        for tie_choices in itertools.product((0, 1), repeat=len(tie_variants_mod)):
+          rem = fixed_rem
+          rem_min, rem_max = fixed_rem_min, fixed_rem_max
+          for i,choice in enumerate(tie_choices):
+            rem_term, tmin, tmax = tie_variants_mod[i][choice]
+            rem += rem_term
+            rem_min += tmin
+            rem_max += tmax
+          if rem_min//c==rem_max//c: return rem - (rem_min//c)*c
+      else:
+        for tie_choices in itertools.product((0, 1), repeat=len(tie_variants_div)):
+          rem = fixed_rem
+          rem_min, rem_max = fixed_rem_min, fixed_rem_max
+          quo = fixed_quo
+          for i,choice in enumerate(tie_choices):
+            rem_term, tmin, tmax, quo_term = tie_variants_div[i][choice]
+            rem += rem_term
+            rem_min += tmin
+            rem_max += tmax
+            quo += quo_term
+          if rem_min//c==rem_max//c: return quo + rem_min//c
 
     # gcd_with_remainder: factor out common gcd from numerator
     if x.vmin >= 0 and (g:=math.gcd(*factors, c)) > 1:
@@ -83,7 +136,12 @@ def fold_divmod_general(d: UOp, correct_divmod_folding: bool) -> UOp|None:
   all_uops = list(x.split_uop(Ops.ADD))
 
   # divide_by_gcd: x//y -> (x//gcd)//(y//gcd)
-  gcd = UOp.gcd(*all_uops, y).simplify()
+  # Constant denominators cannot contribute symbolic factors, so a const-factor gcd
+  # of 1 means UOp.gcd would also be 1.
+  if y.op is Ops.CONST and math.gcd(*(u.const_factor() for u in all_uops), y.arg) == 1:
+    gcd = y.const_like(1)
+  else:
+    gcd = UOp.gcd(*all_uops, y).simplify()
   if not (gcd.op is Ops.CONST and gcd.arg==1):
     ret = unwrap(x.divide_exact(gcd)).alu(d.op, unwrap(y.divide_exact(gcd)))
     return ret*gcd if d.op is Ops.MOD else ret

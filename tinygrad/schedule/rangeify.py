@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field, replace
-import itertools
+import functools, itertools
 from tinygrad.dtype import dtypes, PtrDType, AddrSpace, Invalid
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, _substitute, KernelInfo
 from tinygrad.uop.ops import graph_rewrite, sint, AxisType, BottomUpGate, profile_matches, should_resolve_call, identity_element
@@ -56,6 +56,20 @@ def found_after(ctx:dict[UOp, UOp], after:UOp, src:UOp):
     else: break
   ctx[x] = after
 
+@functools.cache
+def _move_index_through_movement_cached(r:UOp, idx:UOp):
+  if r.src[0]._shape is None or len(idx.src[1:]) != len(r.shape): return None
+  rngs = idx.src[1:]
+  match r.op:
+    case Ops.SHRINK:  new_rngs = tuple(a if ss == 0 else a+ss for a,(ss,_) in zip(rngs, r.marg))
+    case Ops.PERMUTE: new_rngs = tuple(rngs[p] for p in argsort(r.marg))
+    case Ops.FLIP:    new_rngs = tuple(((s-1)-a) if f else a for a,s,f in zip(rngs, r.src[0].shape, r.marg))
+    case Ops.EXPAND:  new_rngs = tuple(a if in_sh == out_sh else a.const_like(0) for a,in_sh,out_sh in zip(rngs, r.src[0].shape, r.marg))
+    case _:           new_rngs = apply_movement_op(r.op, r.src[0].shape, r.marg, rngs)
+  return idx.replace(src=(r.src[0],)+new_rngs)
+
+def move_index_through_movement(r:UOp, idx:UOp): return _move_index_through_movement_cached(r, idx)
+
 # *** fold moved AFTERs (hack for openpilot) ***
 pm_fold_moved_after = PatternMatcher([
   (UPat(Ops.AFTER, src=(UPat(), UPat(Ops.STORE, src=(UPat(), UPat((*GroupOp.Movement,Ops.CAST,Ops.WHERE), name="src")))), name="after"), found_after),
@@ -66,9 +80,7 @@ pm_fold_moved_after = PatternMatcher([
 # movement op on INDEX as a PatternMatcher
 # TODO: clean up .src[0]._shape is not None
 pm_mops = PatternMatcher([
-  (UPat(GroupOp.Movement, name="r").f(Ops.INDEX, allow_any_len=True, name="idx"),
-   lambda r,idx: r.src[0].index(*apply_movement_op(r.op, r.src[0].shape, r.marg, idx.src[1:]), dtype=idx.dtype, arg=idx.arg)
-     if r.src[0]._shape is not None and len(idx.src[1:]) == len(r.shape) else None),
+  (UPat(GroupOp.Movement, name="r").f(Ops.INDEX, allow_any_len=True, name="idx"), move_index_through_movement),
   # move movement ops and INDEX after AFTER (but not when AFTER has a raw STORE with shaped children — from replace_contig_with_store_after)
   (UPat(GroupOp.Movement|{Ops.INDEX}, name="r").after(name="a", allow_any_len=True),
    lambda r,a: UOp(r.op, r.dtype, (a.replace(src=(r.src[0],)+a.src[1:]),)+r.src[1:], r.arg)
@@ -542,7 +554,6 @@ pm_add_range_tags = PatternMatcher([
 ])
 
 def split_store(x:UOp) -> UOp|None:
-  # if we have any open ranges here, we don't split
   if x.ranges: return None
   # raw STORE (not from bufferize_to_store) should be processed through its END wrapper, not independently
   if x.op is Ops.STORE and x.src[0]._shape is not None: return None
@@ -577,17 +588,27 @@ def get_kernel_graph(sink:UOp) -> UOp:
   tsink, rctx = run_rangeify(tsink, bool(DEBUG_RANGEIFY))
 
   tsink = graph_rewrite(tsink, symbolic+pm_reduce_simplify+pm_const_buffer_folding+pm_remove_bufferize, name="symbolic+reduce_collapse+debuf")
-  tsink = graph_rewrite(tsink, pm_limit_bufs, ctx=rctx, name="limit buffers")
+
+  need_limit_bufs = True
+  if MAX_KERNEL_BUFFERS.value == 0 and (device:=tsink._device) is not None:
+    base_device = device if isinstance(device, str) else device[0].split(":")[0]
+    need_limit_bufs = base_device in DEVICE_MAX_BUFS
+  if need_limit_bufs: tsink = graph_rewrite(tsink, pm_limit_bufs, ctx=rctx, name="limit buffers")
 
   if VIZ: graph_rewrite(tsink, PatternMatcher([]), name="View Rangeify")
 
   # bufferize -> store
   lunique_start: int = max([-1]+[x.arg for x in tsink.toposort() if x.op is Ops.LUNIQUE]) + 1
   tsink = graph_rewrite(tsink, pm_add_buffers+pm_add_range_tags, ctx=itertools.count(lunique_start), bottom_up=True, name="bufferize to store")
-  tsink = graph_rewrite(tsink, split_kernels, bottom_up=True, name="split kernels")
+
+  tsink_after_buffers_topo = tsink.toposort()
+  split_candidate_topo = tsink.toposort(enter_calls=False)
+  has_split_candidates = any((u.op is Ops.END and not u.ranges) or (u.op is Ops.STORE and not u.ranges and u.src[0]._shape is None)
+                             for u in split_candidate_topo)
+  if has_split_candidates: tsink = graph_rewrite(tsink, split_kernels, bottom_up=True, name="split kernels")
 
   # WAR deps: if kernel U reads buffer S, and S is also written by another kernel, S's write must wait for U to finish
-  afters = [u for u in tsink.toposort() if u.op is Ops.AFTER]
+  afters = [u for u in (tsink_after_buffers_topo if not has_split_candidates else tsink.toposort()) if u.op is Ops.AFTER]
   kernel_assign: dict[UOp, UOp] = {u.buf_uop:u for u in afters}
   assign_rep: dict[UOp, UOp] = {}
   for u in afters:
