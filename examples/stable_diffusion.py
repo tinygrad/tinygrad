@@ -329,7 +329,7 @@ if __name__ == "__main__":
   if args.seed is not None: Tensor.manual_seed(args.seed)
   latent = Tensor.randn(1,4,64,64)
 
-  run = TinyJit(lambda model, *x: model(*x).realize(), prune=True)
+  run = TinyJit(lambda model, *x: model(*x).realize(), prune=True, capture_first=null_fakeweights)
 
   # this is diffusion
   step_times = []
