@@ -105,26 +105,20 @@ def custom_handwritten(A:UOp, arch:str) -> UOp:
   k.emit(r4.s_nop(0))
   k.emit(r4.v_mov_b32_e32(v[1], 10))
   def emit_alt():
-    k.emit(r4.ds_store_b32(addr=v[0], data0=v[1]))
-    k.emit(r4.v_mov_b32_e32(v[10], 4.0))
-    k.emit(r4.v_rcp_f32_e32(v[11], v[10]))
-    k.emit(r4.s_mov_b32(s[10], 2.0))
+    for i in range(4):
+      k.emit(r4.v_mov_b32_e32(v[20+i], 4.0))
+      k.emit(r4.v_rcp_f32_e32(v[22+i], v[20+i]))
+      k.emit(r4.s_mov_b32(s[20+i], i))
+  def emit_wmma():
+    for _ in range(4):
+      k.emit(r4.v_wmma_f32_16x16x16_f16(v[0:7], v[8:11], v[8:11], 1))
   k.label("start")
   k.emit(s_mov_b32(s[1], 10))
   k.label("loop")
-  k.emit(r4.v_wmma_f32_16x16x16_f16(v[0:7], v[8:11], v[8:11], 1))
-  emit_alt()
-  k.emit(r4.v_wmma_f32_16x16x16_bf16(v[0:7], v[8:11], v[8:11], 1))
-  emit_alt()
-  k.emit(r4.v_wmma_bf16_16x16x16_bf16(v[0:3], v[4:7], v[4:7], 1))
-  emit_alt()
-  k.emit(r4.v_wmma_f16_16x16x16_f16(v[0:3], v[4:7], v[4:7], 1))
-  emit_alt()
-  k.emit(r4.v_wmma_f32_16x16x16_bf8_bf8(v[0:7], v[8:9], v[8:9], 1))
-  emit_alt()
-  k.emit(r4.v_wmma_f32_16x16x16_bf16(v[0:7], v[8:11], v[8:11], 1))
-  emit_alt()
-  k.emit(r4.v_wmma_i32_16x16x16_iu8(v[0:7], v[8:9], v[8:9], 1))
+  # wmma should've overlapped here if it was a different unit?
+  for _ in range(4):
+    emit_wmma()
+    emit_alt()
   for _ in range(8): k.emit(s_nop(1))
   k.emit(s_add_u32(s[1], s[1], -1))
   k.emit(s_cmp_eq_i32(s[1], 0))
