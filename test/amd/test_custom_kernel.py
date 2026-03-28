@@ -9,6 +9,7 @@ import tinygrad.runtime.autogen.amd.rdna3.ins as r3
 import tinygrad.runtime.autogen.amd.rdna4.ins as r4
 from tinygrad.renderer.amd.dsl import s, v
 from test.amd.helpers import TARGET_TO_ARCH
+from extra.gemm.amd_asm_matmul import Kernel
 
 def custom_add_one(A:UOp) -> UOp:
   A = A.flatten()
@@ -95,6 +96,38 @@ def custom_lds_sync(A:UOp, arch:str) -> UOp:
   sink = UOp.sink(A.base, lds, threads, wg, arg=KernelInfo("custom_lds_sync"))
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg="AMD"), UOp(Ops.LINEAR, src=tuple([UOp(Ops.INS, arg=x) for x in insts]))))
 
+def custom_handwritten(A:UOp, arch:str) -> UOp:
+  A = A.flatten()
+  threads = UOp.special(128, "lidx0")
+  wg = UOp.special(256, "gidx0")
+  lds = UOp(Ops.DEFINE_LOCAL, dtypes.uint8.ptr(size=512, addrspace=AddrSpace.LOCAL), (), 'lds')  # 128 * 4 bytes
+  k = Kernel(arch)
+  k.emit(r4.s_nop(0))
+  k.emit(r4.v_mov_b32_e32(v[1], 10))
+  def emit_alt():
+    for i in range(4):
+      k.emit(r4.v_mov_b32_e32(v[20+i], 4.0))
+      k.emit(r4.v_rcp_f32_e32(v[22+i], v[20+i]))
+      k.emit(r4.s_mov_b32(s[20+i], i))
+  def emit_wmma():
+    for _ in range(4):
+      k.emit(r4.v_wmma_f32_16x16x16_f16(v[0:7], v[8:11], v[8:11], 1))
+  k.label("start")
+  k.emit(s_mov_b32(s[1], 10))
+  k.label("loop")
+  # wmma should've overlapped here if it was a different unit?
+  for _ in range(4):
+    emit_wmma()
+    emit_alt()
+  for _ in range(8): k.emit(s_nop(1))
+  k.emit(s_add_u32(s[1], s[1], -1))
+  k.emit(s_cmp_eq_i32(s[1], 0))
+  k.emit(s_cbranch_scc0(), target="loop")
+  k.emit(r4.s_endpgm())
+  insts = k.finalize()
+  sink = UOp.sink(A.base, threads, wg, lds, arg=KernelInfo("custom_handwritten"))
+  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg="AMD"), UOp(Ops.LINEAR, src=tuple([UOp(Ops.INS, arg=x) for x in insts]))))
+
 @unittest.skipUnless(Device.DEFAULT == "AMD", "requires AMD device")
 class TestCustomKernel(unittest.TestCase):
   def setUp(self): self.arch = TARGET_TO_ARCH[Device["AMD"].arch]
@@ -127,6 +160,12 @@ class TestCustomKernel(unittest.TestCase):
     ref = Tensor.arange(1, 129, dtype=dtypes.int32)
     ref[127] = -1
     self.assertListEqual(a.tolist(), ref.tolist())
+
+  def test_handwritten(self):
+    if self.arch != "rdna4": self.skipTest("only tested on rdna4")
+    a = Tensor.empty(1024, dtype=dtypes.int32).contiguous().realize()
+    a = Tensor.custom_kernel(a, fxn=functools.partial(custom_handwritten, arch=self.arch))[0]
+    a.realize()
 
 if __name__ == "__main__":
   unittest.main()

@@ -75,26 +75,32 @@ def main(args) -> None:
       WAVE_COLORS = ((('VALU', 'VINTERP'), '#ffffc0'), (('SALU',), '#cef263'), (('VMEM',), '#b2b7c9'), (('LOAD', 'SMEM'), '#ffc0c0'),
                      (('STORE',), '#4fa3cc'), (('IMMEDIATE',), '#f3b44a'), (('BARRIER',), '#d00000'), (('LDS',), '#9fb4a6'), (('JUMP',), '#ffb703'),
                      (('JUMP_NO',), '#fb8500'), (('MESSAGE',), '#90dbf4'), (('WAVERDY',), '#1a2a2a'))
-      print(f"{'Clk':<12} {'Unit':<20} {'Op':<22} {'Dur':<4} {'Info'}")
-      print("-" * 90)
+      print(f"{'Clk':<12} {'Unit':<20} {'Op':<22} {'Dur':<4} {'Delay':<4} {'Info'}")
+      print("-" * 100)
       pc_map:dict[int, str] = {}
       pkt_idxs:dict[str, itertools.count] = {}
-      dispatch_to_inst:dict[str, str] = {}
+      dispatch_to_inst:dict[str, tuple[str, int]] = {}
+      inst_st:int|None = None
       for e in viz.sqtt_timeline(*data):
         if isinstance(e, ProfilePointEvent) and e.key == 'pcMap': pc_map = e.arg
         if not isinstance(e, ProfileRangeEvent): continue
+        if inst_st is None: inst_st = int(e.st)
         assert isinstance(e.name, TracingKey)
         op_name, info = e.name.display_name, e.name.ret or ""
         color = next((c for p, c in WAVE_COLORS if any(x in op_name for x in p)), None)
         op_str = hex_colored(op_name, color) if color and not args.no_color else op_name
-        phase, pc = None, None
+        phase, delay = None, ""
         idx = next(pkt_idxs.setdefault(e.device, itertools.count()))
         if e.device.startswith("WAVE") or e.device == "OTHER":
-          dispatch_to_inst[f"{e.device}-{idx}"] = inst = f"0x{(pc:=int(info.replace('PC:', ''))):05x} {pc_map[pc]}" if info else f"{'':7} {op_name}"
+          inst = f"0x{(pc:=int(info.replace('PC:', ''))):05x} {pc_map[pc]}" if info else f"{'':7} {op_name}"
+          dispatch_to_inst[f"{e.device}-{idx}"] = (inst, int(e.st))
           phase = "DISPATCH"
-        if info.startswith("LINK:"): phase, inst = "EXEC", dispatch_to_inst[info.replace("LINK:", "")]
+        if info.startswith("LINK:"):
+          inst, dispatch_st = dispatch_to_inst[info.replace("LINK:", "")]
+          phase, delay = "EXEC", int(e.st) - dispatch_st
         if inst and phase: info = f"{phase:<8} {inst}"
-        print(f"{int(e.st):<12} {e.device:<20} {op_str}{' '*(22-ansilen(op_str))} {int(unwrap(e.en)-e.st):<4} {info}")
+        unit = e.device.replace(" ", "-")
+        print(f"{int(e.st)-inst_st:<12} {unit:<20} {op_str}{' '*(22-ansilen(op_str))} {int(unwrap(e.en)-e.st):<4} {str(delay):<4} {info}")
       return None
 
     # ** Profiler printer

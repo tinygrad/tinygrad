@@ -39,4 +39,7 @@ VIZ=-2 python extra/gemm/amd_asm_matmul.py
 
 # View barriers
 extra/viz/cli.py --profile -s "Exec kernel SQTT PKTS SE:0" | rg BARRIER | head -10
+
+# Find the EXEC corresponding to a DISPATCH at cycle 410
+extra/viz/cli.py --profile -s "Exec kernel SQTT PKTS SE:0" | awk '/EXEC/ && $1 - $5 == 410'
 ```
