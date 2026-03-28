@@ -8,7 +8,7 @@ from tinygrad.helpers import prod, all_same, getenv, dedup, all_int, DEBUG, SPLI
 from tinygrad.helpers import PCONTIG, FLOAT16, OPENPILOT_HACKS, argsort, partition, get_single_element
 from tinygrad.codegen.simplify import pm_flatten_range, pm_reduce_simplify
 from tinygrad.codegen.opt import Opt
-from tinygrad.schedule.indexing import run_rangeify, BufferizeOpts, IndexingContext, apply_movement_op
+from tinygrad.schedule.indexing import run_rangeify, BufferizeOpts, IndexingContext, apply_movement_op, _BUF_OPS
 from tinygrad.schedule.multi import multi_pm
 from tinygrad.schedule.allreduce import create_allreduce_function
 
@@ -350,17 +350,28 @@ to_bufferview = PatternMatcher([
 ])
 
 DEVICE_MAX_BUFS = {"METAL": 31, "WEBGPU": 8} # TODO: get from device?
+def _get_bufs(u:UOp, cache:dict[UOp, frozenset[UOp]]) -> frozenset[UOp]:
+  if u in cache: return cache[u]
+  if u.op in _BUF_OPS: return cache.setdefault(u, frozenset({u}))
+  stack: list[tuple[UOp, bool]] = [(u, False)]
+  while stack:
+    node, visited = stack.pop()
+    if node in cache: continue
+    if node.op in _BUF_OPS:
+      cache[node] = frozenset({node})
+      continue
+    if not visited:
+      stack.append((node, True))
+      for s in reversed(node.src): stack.append((s, False))
+    else:
+      cache[node] = frozenset().union(*(cache.get(s, frozenset()) for s in node.src)) if node.src else frozenset()
+  return cache.get(u, frozenset())
 def limit_bufs(ctx:IndexingContext, root:UOp):
   if (device:=root._device) is None: return None # no device, index related calculations
   device = device if isinstance(device, str) else device[0].split(":")[0]
   if not (MAX_BUFS:=MAX_KERNEL_BUFFERS.value or DEVICE_MAX_BUFS.get(device, 0)): return None
 
-  bufs: set[UOp] = set()
-  def gate_input(u:UOp):
-    # TODO: add cache to fix n^2
-    if is_load:=(u.op in {Ops.BUFFERIZE, Ops.AFTER, Ops.PARAM, Ops.MSELECT, Ops.MSTACK, Ops.DEFINE_VAR}): bufs.add(u)
-    return not is_load
-  root.toposort(gate=gate_input)
+  bufs = _get_bufs(root, ctx.bufs_cache)
 
   if len(bufs) > MAX_BUFS - 1: # NOTE: this -1 is for the output buffer
     srcs = []

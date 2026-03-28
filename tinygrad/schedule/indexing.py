@@ -43,10 +43,13 @@ class BufferizeOpts:
   addrspace: AddrSpace = AddrSpace.GLOBAL
   removable: bool = True
 
+_BUF_OPS = frozenset({Ops.BUFFERIZE, Ops.AFTER, Ops.PARAM, Ops.MSELECT, Ops.MSTACK, Ops.DEFINE_VAR})
+
 @dataclass
 class IndexingContext:
   realize_map: dict[UOp, None|list[int]] = field(default_factory=dict)
   range_map: dict[UOp, tuple[tuple[UOp, ...], tuple[UOp, ...]]] = field(default_factory=dict)
+  bufs_cache: dict[UOp, frozenset[UOp]] = field(default_factory=dict)
 
   # create ranges
   range_idx: Iterator[int] = field(default_factory=itertools.count)
