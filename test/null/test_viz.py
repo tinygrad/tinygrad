@@ -545,7 +545,7 @@ class TestVizProfiler(BaseTestViz):
     n_events = 1_000
     step = decimal.Decimal(dur_mins*60*1e6//n_events)
     prof = [ProfileRangeEvent("CPU", name="k_test", st=decimal.Decimal(ts:=i*step), en=decimal.Decimal(ts)+step) for i in range(n_events)]
-    with self.assertRaisesRegex(ValueError, "timestamp out of range"):
+    with self.assertRaisesRegex(ValueError, "timestamp out of range for"):
       get_profile(prof)
 
   def test_python_marker(self):
