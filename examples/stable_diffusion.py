@@ -199,6 +199,7 @@ class StableDiffusion:
           weights = {k.replace("first_stage_model.", "", 1):v for k,v in torch_load(pretrained)["state_dict"].items() if k.startswith("first_stage_model.")}
           load_state_dict(self.first_stage_model, weights)
 
+    self.ctx_dim = unet_init_params["ctx_dim"] if isinstance(unet_init_params["ctx_dim"], int) else unet_init_params["ctx_dim"][0]
     self.model = namedtuple("DiffusionModel", ["diffusion_model"])(diffusion_model = UNetModel(**unet_init_params))
     if version == "v2-mlperf-train":
       # the mlperf reference inits certain weights as zeroes
@@ -307,16 +308,22 @@ if __name__ == "__main__":
     if not args.fakeweights:
       Tensor.realize(*get_state_dict(model).values())
 
-  profile_marker("run clip (conditional)")
-  tokenizer = Tokenizer.ClipTokenizer()
-  prompt = Tensor([tokenizer.encode(args.prompt)])
-  context = model.cond_stage_model.transformer.text_model(prompt).realize()
-  print("got CLIP context", context.shape)
+  if null_fakeweights:
+    context = Tensor.empty(1, 77, model.ctx_dim).realize()
+    unconditional_context = Tensor.empty(1, 77, model.ctx_dim).realize()
+    print("got CLIP context", context.shape)
+    print("got unconditional CLIP context", unconditional_context.shape)
+  else:
+    profile_marker("run clip (conditional)")
+    tokenizer = Tokenizer.ClipTokenizer()
+    prompt = Tensor([tokenizer.encode(args.prompt)])
+    context = model.cond_stage_model.transformer.text_model(prompt).realize()
+    print("got CLIP context", context.shape)
 
-  profile_marker("run clip (unconditional)")
-  prompt = Tensor([tokenizer.encode("")])
-  unconditional_context = model.cond_stage_model.transformer.text_model(prompt).realize()
-  print("got unconditional CLIP context", unconditional_context.shape)
+    profile_marker("run clip (unconditional)")
+    prompt = Tensor([tokenizer.encode("")])
+    unconditional_context = model.cond_stage_model.transformer.text_model(prompt).realize()
+    print("got unconditional CLIP context", unconditional_context.shape)
 
   # done with clip model
   del model.cond_stage_model
@@ -354,7 +361,7 @@ if __name__ == "__main__":
     min_time = min(step_times)
     assert min_time < assert_time, f"Speed regression, expected min step time of < {assert_time} ms but took: {min_time} ms"
   profile_marker("run decoder") # upsample latent space to image with autoencoder
-  x = model.decode(latent).realize()
+  x = Tensor.zeros(512, 512, 3, dtype=dtypes.uint8).realize() if null_fakeweights else model.decode(latent).realize()
   print(x.shape)
 
   profile_marker("save image")
@@ -365,7 +372,7 @@ if __name__ == "__main__":
   # Open image.
   if not args.noshow: im.show()
 
-  if args.prompt == default_prompt and args.steps == 6 and args.seed == 0 and args.guidance == 7.5:
+  if not null_fakeweights and args.prompt == default_prompt and args.steps == 6 and args.seed == 0 and args.guidance == 7.5:
     profile_marker("validate")
     ref_image = Tensor(np.array(Image.open(Path(__file__).parent / "stable_diffusion_seed0.png")))
     distance = (((x.cast(dtypes.float) - ref_image.cast(dtypes.float)) / ref_image.max())**2).mean().item()
