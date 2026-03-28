@@ -172,7 +172,8 @@ mlperf_params: Dict[str,Any] = {"adm_in_ch": None, "in_ch": 4, "out_ch": 4, "mod
                                 "num_groups":16, "st_norm_eps":1e-6}
 
 class StableDiffusion:
-  def __init__(self, version:str|None=None, pretrained:str|None=None):
+  def __init__(self, version:str|None=None, pretrained:str|None=None, null_fakeweights:bool=False):
+    self.null_fakeweights = null_fakeweights
     self.alphas_cumprod = get_alphas_cumprod()
     if version != "v2-mlperf-train":
       self.first_stage_model = AutoencoderKL() # only needed for decoding generated latents to images; not needed in mlperf training from preprocessed moments
@@ -223,6 +224,10 @@ class StableDiffusion:
     return x_prev, pred_x0
 
   def get_model_output(self, unconditional_context, context, latent, timestep, unconditional_guidance_scale):
+    if self.null_fakeweights:
+      # NULL+fakeweights only need the UNet graph shape to exist, so avoid duplicating work for CFG.
+      return self.model.diffusion_model(latent, timestep, context)
+
     # put into diffuser
     latents = self.model.diffusion_model(latent.expand(2, *latent.shape[1:]), timestep, unconditional_context.cat(context, dim=0))
     unconditional_latent, latent = latents[0:1], latents[1:2]
@@ -246,6 +251,9 @@ class StableDiffusion:
     #e_t_prime = (e_t + e_t_next) / 2
     #x_prev, pred_x0 = get_x_prev_and_pred_x0(latent, e_t_prime, index)
     return x_prev
+
+def _is_null_fakeweights(args) -> bool:
+  return args.fakeweights and getenv("DEV") == "NULL"
 
 # ** ldm.models.autoencoder.AutoencoderKL (done!)
 # 3x512x512 <--> 4x64x64 (16384)
@@ -276,10 +284,11 @@ if __name__ == "__main__":
   parser.add_argument('--guidance', type=float, default=7.5, help="Prompt strength")
   parser.add_argument('--fakeweights', action='store_true', help="Skip loading checkpoints and use fake weights")
   args = parser.parse_args()
+  null_fakeweights = _is_null_fakeweights(args)
 
   profile_marker("create model")
   with _empty_fakeweights_init() if args.fakeweights else contextlib.nullcontext():
-    model = StableDiffusion()
+    model = StableDiffusion(null_fakeweights=null_fakeweights)
 
   profile_marker("load in weights")
   with WallTimeEvent(BenchEvent.LOAD_WEIGHTS):
