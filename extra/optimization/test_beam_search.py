@@ -7,7 +7,7 @@ from tinygrad.nn import Conv2d
 from tinygrad.uop.ops import AxisType
 from tinygrad.codegen.opt import Opt, OptOps
 from tinygrad.codegen.opt.postrange import Scheduler
-from tinygrad.codegen.opt.search import get_kernel_actions
+from tinygrad.codegen.opt.search import get_kernel_actions, beam_search
 
 def rand(*shape):
   return Tensor(np.random.rand(*shape).astype(np.float32))
@@ -100,6 +100,19 @@ class TestBeamSearch(unittest.TestCase):
       actions = get_kernel_actions(s, include_0=False, max_up=max_up)
       for up_opts in [s.applied_opts for s in actions.values() if any(opt.op in (OptOps.UPCAST, OptOps.UNROLL) for opt in s.applied_opts)]:
         assert len([opt for opt in up_opts if opt.arg > max_up]) == 0 and len([op for op in up_opts if op.arg <= max_up]) > 0
+
+  def test_beam_cache_key_includes_action_env_vars(self):
+    from unittest.mock import patch
+    a = Tensor.rand(4, 4).contiguous()
+    si = a.schedule()[-1]
+    s = Scheduler(si.ast, Device[Device.DEFAULT].renderer)
+    bufs = [b.ensure_allocated() for b in si.bufs]
+    with patch('tinygrad.codegen.opt.search.diskcache_get', return_value=None) as mock_get, \
+         patch('tinygrad.codegen.opt.search.diskcache_put'):
+      beam_search(s, bufs, amt=1, disable_cache=False)
+    key = mock_get.call_args[0][1]
+    for field in ("nolocals", "tc", "tc_opt", "beam_padto"):
+      self.assertIn(field, key, f"beam cache key missing '{field}'")
 
 if __name__ == '__main__':
   unittest.main()
