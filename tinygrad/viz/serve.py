@@ -182,7 +182,7 @@ def option(s:int|None) -> int: return 0 if s is None else s+1
 
 def rel_ts(ts:int|Decimal, start_ts:int, ctx:str="") -> int:
   val = int(ts) - start_ts
-  if val < 0 or val > 0xFFFFFFFF: raise ValueError(f"timestamp out of range for {ctx}: {val} exceeds u32 max {0xFFFFFFFF} (ts={ts} start={start_ts})")
+  if val < 0 or val > 0xFFFFFFFF: raise ValueError(f"timestamp out of range: {ctx} diff={val} (ts={ts} start={start_ts})")
   return val
 
 # Profiler API
