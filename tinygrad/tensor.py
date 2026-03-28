@@ -1699,8 +1699,6 @@ class Tensor(OpMixin):
     """
     return self._reduce(Ops.MAX, axis, keepdim)
 
-  def _inverse(self) -> Tensor: return -self if self.is_floating_point() else ~self
-
   def min(self, axis:int|Sequence[int]|None=None, keepdim=False) -> Tensor:
     """
     Returns the minimum value of the tensor along the specified axis or axes.
@@ -3013,20 +3011,6 @@ class Tensor(OpMixin):
     assert dtypes.is_unsigned(self.dtype) and isinstance(x, int) and x >= 0 and not reverse, f"not supported {self.dtype=} {x=}"
     return self.idiv(2 ** x, reverse)
 
-  def minimum(self, x:Tensor|ConstType) -> Tensor:
-    """
-    Computes element-wise minimum of `self` and `x`.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-1, 2, 3]).minimum(1).numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-1, 2, 3]).minimum(Tensor([-4, -2, 9])).numpy())
-    ```
-    """
-    t, x = self._broadcasted(x)
-    return t._inverse().maximum(x._inverse())._inverse()
-
   def where(self:Tensor, x:Tensor|ConstType|sint, y:Tensor|ConstType|sint) -> Tensor:
     """
     Returns a tensor of elements selected from either `x` or `y`, depending on `self`.
@@ -3050,21 +3034,6 @@ class Tensor(OpMixin):
     else: x, y = Tensor(x, self.device, requires_grad=False)._broadcasted(y)
     out_shape = _broadcast_shape(self.shape, x.shape)
     return self.cast(dtypes.bool)._broadcast_to(out_shape)._apply_uop(UOp.where, x._broadcast_to(out_shape), y._broadcast_to(out_shape))
-
-  def copysign(self, other) -> Tensor:
-    """
-    Returns a tensor of with the magnitude of `self` and the sign of `other`, elementwise.
-    """
-    # NOTE: torch always return in float, we return based on the broadcasting rule.
-    other = self._broadcasted(other)[1]
-    return self.abs() * ((other < 0) | (other.reciprocal() < 0)).where(-1, 1)
-
-  def logaddexp(self, other) -> Tensor:
-    """
-    Calculates (self.exp()+other.exp()).log(), elementwise.
-    """
-    m = self.maximum(other)
-    return ((self-m).exp() + (self._broadcasted(other)[1]-m).exp()).log() + m
 
   # ***** op wrappers *****
 

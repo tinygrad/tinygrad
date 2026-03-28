@@ -287,8 +287,36 @@ class ElementwiseMixin(DTypeMixin):
     """
     return self._binop(Ops.MAX, x, False)
 
+  def _inverse(self) -> Self: return -self if self.is_floating_point() else ~self
+
   def minimum(self, x: Self | ConstType) -> Self:
-    return -(-self).maximum(-self.ufix(x))
+    """
+    Computes element-wise minimum of `self` and `x`.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([-1, 2, 3]).minimum(1).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([-1, 2, 3]).minimum(Tensor([-4, -2, 9])).numpy())
+    ```
+    """
+    t, x = self._broadcasted(x)
+    return t._inverse().maximum(x._inverse())._inverse()
+
+  def copysign(self, other: Self | ConstType) -> Self:
+    """
+    Returns a tensor of with the magnitude of `self` and the sign of `other`, elementwise.
+    """
+    # NOTE: torch always return in float, we return based on the broadcasting rule.
+    other = self._broadcasted(other)[1]
+    return self.abs() * ((other < 0) | (other.reciprocal() < 0)).where(-1, 1)
+
+  def logaddexp(self, other: Self | ConstType) -> Self:
+    """
+    Calculates (self.exp()+other.exp()).log(), elementwise.
+    """
+    m = self.maximum(other)
+    return ((self-m).exp() + (self._broadcasted(other)[1]-m).exp()).log() + m
 
   def where(self, x: Self | ConstType, y: Self | ConstType) -> Self:
     if isinstance(x, type(self)):
