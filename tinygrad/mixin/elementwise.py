@@ -688,6 +688,8 @@ class ElementwiseMixin(DTypeMixin):
     print(Tensor([1., 2., 4., 8.]).log().numpy())
     ```
     """
+    if self.is_floating_point():
+      return self.cast(least_upper_dtype(self.dtype, dtypes.float32)).log2().mul(math.log(2)).cast(self.dtype)
     return self.log2()*math.log(2)
 
   def log10(self) -> Self:

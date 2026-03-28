@@ -508,5 +508,10 @@ class TestOpsBFloat16(unittest.TestCase):
     expected = torch.tensor(data, dtype=torch.bfloat16).sqrt().float().numpy()
     np.testing.assert_allclose(Tensor(data, dtype=dtypes.bfloat16).sqrt().numpy(), expected)
 
+  def test_bf16_log(self):
+    data = [12.0, 1.0, 0.5, 100.0]
+    expected = torch.tensor(data, dtype=torch.bfloat16).log().float().numpy()
+    np.testing.assert_allclose(Tensor(data, dtype=dtypes.bfloat16).log().numpy(), expected)
+
 if __name__ == '__main__':
   unittest.main()
