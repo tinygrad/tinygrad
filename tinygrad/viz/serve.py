@@ -338,9 +338,9 @@ def load_amd_counters(ctxs:list[dict], profile:list[ProfileEvent]) -> None:
       steps.append(create_step("SQTT", ("/prg-sqtt", len(ctxs), len(steps)), ((k, tag), sqtt, prg_events[k], arch)))
     ctxs.append({"name":f"Exec {name}"+(f" n{run_number[k]}" if run_number[k] > 1 else ""), "steps":steps})
 
-wave_colors = ((('WMMA',), '#1F7857'), (('VALU', 'VINTERP'), '#ffffc0'), (('SALU',), '#cef263'), (('VMEM',), '#b2b7c9'), (('SMEM',), '#ffc0c0'),
-               (('STORE',), '#4fa3cc'), (('IMMEDIATE',), '#f3b44a'), (('BARRIER',), '#d00000'), (('LDS',), '#9fb4a6'), (('JUMP_NO',), '#fb8500'),
-               (('JUMP',), '#ffb703'), (('MESSAGE',), '#90dbf4'), (('WAVERDY',), '#1a2a2a'))
+wave_colors = ((('WMMA',), '#1F7857'), (('VALU', 'VINTERP'), '#ffffc0'), (('SALU',), '#cef263'), (('SMEM',), '#ffc0c0'), (('STORE',), '#4fa3cc'),
+               (('VMEM', 'SGMEM'), '#b2b7c9'), (('LDS',), '#9fb4a6'), (('IMMEDIATE',), '#f3b44a'), (('BARRIER',), '#d00000'),
+               (('JUMP_NO',), '#fb8500'), (('JUMP',), '#ffb703'), (('WAVERDY',), '#1a2a2a'))
 
 def sqtt_timeline(data:bytes, lib:bytes, target:str) -> Generator[ProfileEvent, None, None]:
   from tinygrad.renderer.amd.sqtt import (map_insts, InstructionInfo, PacketType, INST, InstOp, VALUINST, IMMEDIATE, IMMEDIATE_MASK, VMEMEXEC,
@@ -350,7 +350,7 @@ def sqtt_timeline(data:bytes, lib:bytes, target:str) -> Generator[ProfileEvent, 
   row_ends:dict[str, Decimal] = {}
   row_counts:dict[str, itertools.count] = {}
   curr_barrier:dict[int, ProfileRangeEvent] = {}
-  exec_pending:dict[str, list[tuple[str, int]]] = {}
+  exec_pending:dict[str, list[tuple[str, str]]] = {}
   is_cdna = target.startswith("gfx9")
   dispatch_to_exec = {"WMMA":"VALU", "VALU":"VALU", "VALU1":"VALU", "VALUT":"VALU", "VALUB":"VALU", "VALUINST":"VALU", "VINTERP":"VALU",
                       "SGMEM":"VMEM", "FLAT":"VMEM", "LDS":"LDS", "SALU":"SALU", "SMEM":"SALU", "VMEM":"VMEM"}
@@ -362,12 +362,14 @@ def sqtt_timeline(data:bytes, lib:bytes, target:str) -> Generator[ProfileEvent, 
     # exec links to dispatch, dispatch links to PC
     link = f"PC:{info.pc}" if info else None
     if isinstance(p, (ALUEXEC, VMEMEXEC)):
-      dispatch_id, name = exec_pending[name].pop(0)
+      dispatch_id, op_type = exec_pending[name].pop(0)
       # get the number of cycles from the op type
-      duration = int(m.group(1)) if (m:=re.match(r".*_(\d+)$", name)) else 1
+      duration = int(dur_match.group(1)) if (dur_match:=re.match(r".*_(\d+)$", op_type)) else 1
       # for execs, timestamp is the completion time
       start_time, end_time = p._time-duration, p._time
       link = f"LINK:{dispatch_id}"
+      # add wmma in the exec name for coloring
+      if op_type.startswith("WMMA"): name += "_WMMA"
     # queue inst dispatches
     idx = next(row_counts.setdefault(row, itertools.count(0)))
     if isinstance(p, (VALUINST, INST, INST_RDNA4)) and (exec_type:=dispatch_to_exec.get(name.replace("OTHER_", "").split("_")[0])) is not None:
