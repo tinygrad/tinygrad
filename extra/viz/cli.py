@@ -84,7 +84,7 @@ def main(args) -> None:
         if inst_st is None: inst_st = int(e.st)
         assert isinstance(e.name, TracingKey)
         op_name, info = e.name.display_name, e.name.ret or ""
-        color = next((c for p, c in viz.wave_colors if any(x in op_name for x in p)), None)
+        color = next((v for k,v in viz.wave_colors.items() if k in op_name), None)
         op_str = hex_colored(op_name, color) if color and not args.no_color else op_name
         phase, delay = None, ""
         idx = next(pkt_idxs.setdefault(e.device, itertools.count()))

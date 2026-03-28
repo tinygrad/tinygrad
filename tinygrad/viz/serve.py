@@ -338,9 +338,9 @@ def load_amd_counters(ctxs:list[dict], profile:list[ProfileEvent]) -> None:
       steps.append(create_step("SQTT", ("/prg-sqtt", len(ctxs), len(steps)), ((k, tag), sqtt, prg_events[k], arch)))
     ctxs.append({"name":f"Exec {name}"+(f" n{run_number[k]}" if run_number[k] > 1 else ""), "steps":steps})
 
-wave_colors = ((('WMMA',), '#1F7857'), (('VALU', 'VINTERP'), '#ffffc0'), (('SALU',), '#cef263'), (('SMEM',), '#ffc0c0'), (('STORE',), '#4fa3cc'),
-               (('VMEM', 'SGMEM'), '#b2b7c9'), (('LDS',), '#9fb4a6'), (('IMMEDIATE',), '#f3b44a'), (('BARRIER',), '#d00000'),
-               (('JUMP_NO',), '#fb8500'), (('JUMP',), '#ffb703'), (('WAVERDY',), '#1a2a2a'))
+wave_colors = {"WMMA": "#1F7857", **{x:"#ffffc0" for x in ["VALU", "VINTERP"]}, "SALU": "#cef263", "SMEM": "#ffc0c0", "STORE": "#4fa3cc",
+               **{x:"#b2b7c9" for x in ["VMEM", "SGMEM"]}, "LDS": "#9fb4a6", "IMMEDIATE": "#f3b44a", "BARRIER": "#d00000",
+               "JUMP_NO": "#fb8500", "JUMP": "#ffb703", "WAVERDY": "#1a2a2a"}
 
 def sqtt_timeline(data:bytes, lib:bytes, target:str) -> Generator[ProfileEvent, None, None]:
   from tinygrad.renderer.amd.sqtt import (map_insts, InstructionInfo, PacketType, INST, InstOp, VALUINST, IMMEDIATE, IMMEDIATE_MASK, VMEMEXEC,
@@ -391,7 +391,7 @@ def sqtt_timeline(data:bytes, lib:bytes, target:str) -> Generator[ProfileEvent, 
       if name == "BARRIER": curr_barrier[wave] = e
   NS_PER_TICK = 10  # 100MHz
   prev_pair:tuple[int, int]|None = None # (shader, realtime)
-  yield ProfilePointEvent("", "JSON", "waveColors", wave_colors, ts=Decimal(0))
+  yield ProfilePointEvent("", "JSON", "waveColors", list(wave_colors.items()), ts=Decimal(0))
   for p, info in map_insts(data, lib, target):
     if isinstance(p, (TS_DELTA_OR_MARK, TS_DELTA_OR_MARK_RDNA4)) and p.is_marker:
       pair = (p._time, p.delta)

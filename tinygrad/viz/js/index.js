@@ -200,7 +200,7 @@ function formatCycles(cycles) {
 const formatUnit = (d, unit="") => d3.format(".3~s")(d)+unit;
 
 const waveColor = (op) => {
-  let ret = data.waveColors.find(([patterns]) => patterns.some(p => op.includes(p)))?.[1] ?? "#ffffff";
+  let ret = data.waveColors.find(([pattern]) => op.includes(pattern))?.[1] ?? "#ffffff";
   if (op.includes("OTHER_") || op.includes("_ALT")) { ret = darkenHex(ret, 75) }
   if (op.includes("LDS_")) { ret = darkenHex(ret, 25) }
   return ret
