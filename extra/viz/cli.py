@@ -75,7 +75,7 @@ def main(args) -> None:
       WAVE_COLORS = ((('VALU', 'VINTERP'), '#ffffc0'), (('SALU',), '#cef263'), (('VMEM',), '#b2b7c9'), (('LOAD', 'SMEM'), '#ffc0c0'),
                      (('STORE',), '#4fa3cc'), (('IMMEDIATE',), '#f3b44a'), (('BARRIER',), '#d00000'), (('LDS',), '#9fb4a6'), (('JUMP',), '#ffb703'),
                      (('JUMP_NO',), '#fb8500'), (('MESSAGE',), '#90dbf4'), (('WAVERDY',), '#1a2a2a'))
-      print(f"{'Clk':<12} {'Unit':<20} {'Op':<22} {'Dur':<4} {'Dly':<4} {'Info'}")
+      print(f"{'Clk':<12} {'Unit':<20} {'Op':<22} {'Dur':<4} {'Delay':<4} {'Info'}")
       print("-" * 100)
       pc_map:dict[int, str] = {}
       pkt_idxs:dict[str, itertools.count] = {}
@@ -99,7 +99,8 @@ def main(args) -> None:
           inst, dispatch_st = dispatch_to_inst[info.replace("LINK:", "")]
           phase, delay = "EXEC", int(e.st) - dispatch_st
         if inst and phase: info = f"{phase:<8} {inst}"
-        print(f"{int(e.st)-inst_st:<12} {e.device:<20} {op_str}{' '*(22-ansilen(op_str))} {int(unwrap(e.en)-e.st):<4} {str(delay):<4} {info}")
+        unit = e.device.replace(" ", "-")
+        print(f"{int(e.st)-inst_st:<12} {unit:<20} {op_str}{' '*(22-ansilen(op_str))} {int(unwrap(e.en)-e.st):<4} {str(delay):<4} {info}")
       return None
 
     # ** Profiler printer
