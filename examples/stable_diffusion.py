@@ -1,6 +1,6 @@
 # https://arxiv.org/pdf/2112.10752.pdf
 # https://github.com/ekagra-ranjan/huggingface-blog/blob/main/stable_diffusion.md
-import tempfile
+import os, tempfile
 from pathlib import Path
 import argparse, time, contextlib
 from collections import namedtuple
@@ -285,6 +285,8 @@ if __name__ == "__main__":
   parser.add_argument('--fakeweights', action='store_true', help="Skip loading checkpoints and use fake weights")
   args = parser.parse_args()
   null_fakeweights = _is_null_fakeweights(args)
+  if null_fakeweights: os.environ["NULL_FASTPATH"] = "1"
+  if args.timing and null_fakeweights: os.environ["JIT_CAPTURE_TIMING"] = "1"
 
   profile_marker("create model")
   with _empty_fakeweights_init() if args.fakeweights else contextlib.nullcontext():
