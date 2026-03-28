@@ -315,15 +315,12 @@ class TinyJit(Generic[ReturnType]):
       # jit capture
       assert self.fxn is not None
       if capturing: raise RuntimeError(f"having TinyJit inside another TinyJit is not supported {len(capturing)=} {capturing=}")
-      capture_timing = getenv("JIT_CAPTURE_TIMING")
-      capture_st = time.perf_counter_ns()
       self._linears: list[UOp] = []
       capturing.append(self)
       try:
         ret = self.fxn(*args, **kwargs)
         if len(params:=get_parameters(ret)): Tensor.realize(*params)
       finally: capturing.clear()
-      if capture_timing: print(f"JIT capture trace {(time.perf_counter_ns()-capture_st)*1e-6:7.2f} ms")
       if not len(self._linears): raise JitError("didn't JIT anything!")
       _check_no_non_tensor_return(ret)
       if DEBUG >= 1: print(f"JIT captured {len(self._linears)} linears with {len(input_buffers)} inputs")
@@ -335,24 +332,16 @@ class TinyJit(Generic[ReturnType]):
       if self.prune:
         big_linear, onetime_linear = prune_linear(big_linear, {k for k,v in buffers.items() if isinstance(v, Buffer) and v in set(input_buffers)})
         if DEBUG >= 1: print(f"pruned from {len(big_linear.src) + len(onetime_linear.src)} -> {len(big_linear.src)} kernels")
-        prune_st = time.perf_counter_ns()
         for ei in (si.lower() for si in linear_to_schedule(onetime_linear)):
           for b in ei.bufs: cast(Buffer, b).ensure_allocated()
           ei.run(var_vals, jit=True)
-        if capture_timing: print(f"JIT capture prune {(time.perf_counter_ns()-prune_st)*1e-6:7.2f} ms")
         del onetime_linear
 
       held_bufs = set(buffers) | {t.uop.buf_uop for t in get_parameters(ret) if t.uop.buf_uop.op is Ops.BUFFER}
-      memory_plan_st = time.perf_counter_ns()
       planned_linear = memory_plan_rewrite(big_linear, held_bufs)
-      if capture_timing: print(f"JIT capture memory_plan {(time.perf_counter_ns()-memory_plan_st)*1e-6:7.2f} ms")
       with Context(BEAM=getenv("JITBEAM", BEAM.value)):
-        linearize_st = time.perf_counter_ns()
         schedule = linear_to_schedule(planned_linear)
-        if capture_timing: print(f"JIT capture linear_to_schedule {(time.perf_counter_ns()-linearize_st)*1e-6:7.2f} ms")
-        lower_st = time.perf_counter_ns()
         jit_cache = [ei.lower() for ei in schedule]
-        if capture_timing: print(f"JIT capture lower {(time.perf_counter_ns()-lower_st)*1e-6:7.2f} ms")
       del big_linear
 
       # track inputs that are views of buffers
@@ -368,9 +357,7 @@ class TinyJit(Generic[ReturnType]):
       if DEBUG >= 1 and len(set(input_replace.values())) != len(input_buffers): print("WARNING: some input tensors not found")
 
       # exec
-      exec_st = time.perf_counter_ns()
       for ei in jit_cache: ei.run(var_vals)
-      if capture_timing: print(f"JIT capture exec {(time.perf_counter_ns()-exec_st)*1e-6:7.2f} ms")
 
       self.captured = CapturedJit(ret, jit_cache, input_replace, extra_view_inputs, names, expected_input_info)
     elif self.cnt >= 2:

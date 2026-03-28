@@ -286,7 +286,6 @@ if __name__ == "__main__":
   args = parser.parse_args()
   null_fakeweights = _is_null_fakeweights(args)
   if null_fakeweights: os.environ["NULL_FASTPATH"] = "1"
-  if args.timing and null_fakeweights: os.environ["JIT_CAPTURE_TIMING"] = "1"
 
   profile_marker("create model")
   with _empty_fakeweights_init() if args.fakeweights else contextlib.nullcontext():
