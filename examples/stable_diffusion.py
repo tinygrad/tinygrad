@@ -20,7 +20,9 @@ from extra.bench_log import BenchEvent, WallTimeEvent
 @contextlib.contextmanager
 def _empty_fakeweights_init():
   # Fakeweights only need shapes to exist, so skip expensive random init graphs.
-  orig_uniform, orig_glorot_uniform, orig_kaiming_uniform = Tensor.uniform, Tensor.glorot_uniform, Tensor.kaiming_uniform
+  orig_uniform = Tensor.__dict__["uniform"]
+  orig_glorot_uniform = Tensor.__dict__["glorot_uniform"]
+  orig_kaiming_uniform = Tensor.__dict__["kaiming_uniform"]
   def _empty_init(*shape, device=None, dtype=None, requires_grad=None, **kwargs):
     return Tensor.empty(*shape, device=device, dtype=dtype, requires_grad=requires_grad)
   Tensor.uniform, Tensor.glorot_uniform, Tensor.kaiming_uniform = staticmethod(_empty_init), staticmethod(_empty_init), staticmethod(_empty_init)
