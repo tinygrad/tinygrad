@@ -15,7 +15,7 @@ def get_random_term(ranges, factors):
 
 def get_random_expr(ranges, factors):
   num_terms = random.randint(2,4)
-  x = UOp.sum(*[get_random_term(ranges, factors) for _ in range(num_terms)])
+  x = UOp.usum(*[get_random_term(ranges, factors) for _ in range(num_terms)])
   return x.alu(random.choice([Ops.IDIV, Ops.MOD]), x.ufix(random.choice(factors)*random.choice([1, 1, 1, -1])))
 
 if __name__ == "__main__":
