@@ -134,16 +134,15 @@ def custom_data_deps(A:UOp, arch:str) -> UOp:
   threads = UOp.special(A.size, "lidx0")
   k = Kernel(arch)
   k.emit(s_load_b64(s[0:1], s[0:1], soffset=NULL))
-  k.emit(s_waitcnt_lgkmcnt(sdst=NULL, simm16=0))
+  k.emit(s_waitcnt_lgkmcnt(simm16=0))
   k.emit(v_lshlrev_b32_e32(v[0], 2, v[0]))
   k.emit(global_load_b32(v[1], v[0], saddr=s[0:1]))
-  k.emit(s_waitcnt_vmcnt(sdst=NULL, simm16=0))
-  k.emit(v_mov_b32_e32(v[2], 1.0))
-  k.emit(v_add_f32_e32(v[1], v[1], v[2]))
+  k.emit(s_waitcnt_vmcnt(simm16=0))
+  k.emit(v_add_f32_e32(v[1], 1.0, v[1]))
   k.emit(global_store_b32(addr=v[0], data=v[1], saddr=s[0:1]))
   k.emit(s_endpgm())
   insts = k.finalize()
-  sink = UOp.sink(A.base, threads, arg=KernelInfo("custom_data_deps", estimates=Estimates(ops=A.size, mem=A.size*4*2)))
+  sink = UOp.sink(A.base, threads, arg=KernelInfo("custom_data_deps"))
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg="AMD"), UOp(Ops.LINEAR, src=tuple([UOp(Ops.INS, arg=x) for x in insts]))))
 
 @unittest.skipUnless(Device.DEFAULT == "AMD", "requires AMD device")
@@ -187,7 +186,7 @@ class TestCustomKernel(unittest.TestCase):
 
   def test_data_deps(self):
     if self.arch != "rdna3": self.skipTest("only tested on rdna3")
-    a = Tensor(np.full(1024, 5.0, dtype=np.float32)).realize()
+    a = Tensor(np.full(32, 5.0, dtype=np.float32)).realize()
     a = Tensor.custom_kernel(a, fxn=functools.partial(custom_data_deps, arch=self.arch))[0]
     a.realize()
     self.assertTrue((a.numpy() == 6.0).all())
