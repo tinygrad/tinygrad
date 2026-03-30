@@ -1,9 +1,9 @@
 import functools
-from tinygrad.device import Compiled, Allocator, CompilerSet
+from tinygrad.device import Compiled, Allocator
 from tinygrad.engine.jit import MultiGraphRunner
 from tinygrad.renderer.cstyle import Renderer, CStyleLanguage, AMDHIPRenderer, QCOMCLRenderer
 from tinygrad.uop.ops import Ops
-from tinygrad.helpers import cpu_profile, EMULATE, NULL_QCOMCL, NULL_IR3, NULL_NAK, NULL_ALLOW_COPYOUT
+from tinygrad.helpers import cpu_profile, EMULATE, NULL_ALLOW_COPYOUT
 from tinygrad.renderer.nir import IR3Renderer, NAKRenderer
 
 class NullRenderer(CStyleLanguage):
@@ -39,7 +39,7 @@ class NullDevice(Compiled):
       case "AMD_CDNA4": renderer = functools.partial(AMDHIPRenderer, "gfx950")
       case "": renderer = NullRenderer
       case _: raise RuntimeError(f"can't EMULATE device: {EMULATE.value}")
-    compilers = CompilerSet([(renderer, None), (functools.partial(QCOMCLRenderer, 0x6030001), NULL_QCOMCL), # adreno 630
-                             (functools.partial(IR3Renderer, 0x6030001), NULL_IR3), # adreno 630
-                             (functools.partial(NAKRenderer, "sm_120", 48), NULL_NAK)]) # 5090
-    super().__init__(device, NullAllocator(self), compilers, functools.partial(NullProgram, device), NullGraph)
+    # adreno 630, 5090
+    renderers:list[type[Renderer]|functools.partial] = [renderer, functools.partial(QCOMCLRenderer, 0x6030001),
+                                                        functools.partial(IR3Renderer, 0x6030001), functools.partial(NAKRenderer, "sm_120", 48)]
+    super().__init__(device, NullAllocator(self), renderers, functools.partial(NullProgram, device), NullGraph)
