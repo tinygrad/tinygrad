@@ -118,7 +118,7 @@ def split_reduceop(reduce:UOp, x:UOp):
   splitted = x.reshape(splitted_shape).permute(tuple([d for d in range(len(splitted_shape)) if d!=dim_to_split]+[dim_to_split]))
   if DEBUG >= 3: print(f"split {divisor}: {x.shape} -> {splitted.shape} -> {reduce.shape}")
   # reduce original axes, then split
-  return splitted.r(*reduce.arg).contiguous().r(reduce.arg[0], (len(reduce.shape),)).reshape(reduce.shape)
+  return splitted._rop(*reduce.arg).contiguous()._rop(reduce.arg[0], (len(reduce.shape),)).reshape(reduce.shape)
 
 mop_cleanup = PatternMatcher([
   # merge adjacent RESHAPES
