@@ -128,6 +128,14 @@ def custom_handwritten(A:UOp, arch:str) -> UOp:
   sink = UOp.sink(A.base, threads, wg, lds, arg=KernelInfo("custom_handwritten"))
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg="AMD"), UOp(Ops.LINEAR, src=tuple([UOp(Ops.INS, arg=x) for x in insts]))))
 
+def custom_data_deps(A:UOp, arch:str):
+  k = Kernel(arch)
+  k.emit(s_endpgm())
+  insts = k.finalize()
+  lds = UOp(Ops.DEFINE_LOCAL, dtypes.uint8.ptr(size=512, addrspace=AddrSpace.LOCAL), (), 'lds')
+  sink = UOp.sink(A.base, lds, arg=KernelInfo("custom_data_deps"))
+  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg="AMD"), UOp(Ops.LINEAR, src=tuple([UOp(Ops.INS, arg=x) for x in insts]))))
+
 @unittest.skipUnless(Device.DEFAULT == "AMD", "requires AMD device")
 class TestCustomKernel(unittest.TestCase):
   def setUp(self): self.arch = TARGET_TO_ARCH[Device["AMD"].arch]
@@ -165,6 +173,12 @@ class TestCustomKernel(unittest.TestCase):
     if self.arch != "rdna4": self.skipTest("only tested on rdna4")
     a = Tensor.empty(1024, dtype=dtypes.int32).contiguous().realize()
     a = Tensor.custom_kernel(a, fxn=functools.partial(custom_handwritten, arch=self.arch))[0]
+    a.realize()
+
+  def test_data_deps(self):
+    if self.arch != "rdna3": self.skipTest("only tested on rdna3")
+    a = Tensor.empty(1).realize()
+    a = Tensor.custom_kernel(a, fxn=functools.partial(custom_data_deps, arch=self.arch))[0]
     a.realize()
 
 if __name__ == "__main__":
