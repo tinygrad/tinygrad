@@ -1,8 +1,8 @@
 # https://arxiv.org/pdf/2112.10752.pdf
 # https://github.com/ekagra-ranjan/huggingface-blog/blob/main/stable_diffusion.md
-import os, tempfile
+import tempfile
 from pathlib import Path
-import argparse, time, contextlib
+import argparse, time
 from collections import namedtuple
 from typing import Dict, Any
 
@@ -16,20 +16,6 @@ from extra.models import unet, clip
 from extra.models.unet import UNetModel
 from examples.mlperf.initializers import AutocastLinear, AutocastConv2d, AutocastGroupNorm, AutocastLayerNorm, zero_module, attn_f32_softmax, gelu_erf
 from extra.bench_log import BenchEvent, WallTimeEvent
-
-@contextlib.contextmanager
-def _empty_fakeweights_init():
-  # Fakeweights only need shapes to exist, so skip expensive random init graphs.
-  orig_uniform = Tensor.__dict__["uniform"]
-  orig_glorot_uniform = Tensor.__dict__["glorot_uniform"]
-  orig_kaiming_uniform = Tensor.__dict__["kaiming_uniform"]
-  def _empty_init(*shape, device=None, dtype=None, requires_grad=None, **kwargs):
-    return Tensor.empty(*shape, device=device, dtype=dtype, requires_grad=requires_grad)
-  Tensor.uniform, Tensor.glorot_uniform, Tensor.kaiming_uniform = staticmethod(_empty_init), staticmethod(_empty_init), staticmethod(_empty_init)
-  try:
-    yield
-  finally:
-    Tensor.uniform, Tensor.glorot_uniform, Tensor.kaiming_uniform = orig_uniform, orig_glorot_uniform, orig_kaiming_uniform
 
 class AttnBlock:
   def __init__(self, in_channels):
@@ -95,14 +81,14 @@ class Decoder:
     x = self.mid(x)
 
     for l in self.up[::-1]:
-      if getenv("DEBUG"): print("decode", x.shape)
+      print("decode", x.shape)
       for b in l['block']: x = b(x)
       if 'upsample' in l:
         # https://pytorch.org/docs/stable/generated/torch.nn.functional.interpolate.html ?
         bs,c,py,px = x.shape
         x = x.reshape(bs, c, py, 1, px, 1).expand(bs, c, py, 2, px, 2).reshape(bs, c, py*2, px*2)
         x = l['upsample']['conv'](x)
-      if Device.DEFAULT != "NULL": x.realize()
+      x.realize()
 
     return self.conv_out(self.norm_out(x).swish())
 
@@ -127,7 +113,7 @@ class Encoder:
     x = self.conv_in(x)
 
     for l in self.down:
-      if getenv("DEBUG"): print("encode", x.shape)
+      print("encode", x.shape)
       for b in l['block']: x = b(x)
       if 'downsample' in l: x = l['downsample']['conv'](x)
 
@@ -145,7 +131,7 @@ class AutoencoderKL:
     latent = self.encoder(x)
     latent = self.quant_conv(latent)
     latent = latent[:, 0:4]  # only the means
-    if getenv("DEBUG"): print("latent", latent.shape)
+    print("latent", latent.shape)
     latent = self.post_quant_conv(latent)
     return self.decoder(latent)
 
@@ -174,8 +160,7 @@ mlperf_params: Dict[str,Any] = {"adm_in_ch": None, "in_ch": 4, "out_ch": 4, "mod
                                 "num_groups":16, "st_norm_eps":1e-6}
 
 class StableDiffusion:
-  def __init__(self, version:str|None=None, pretrained:str|None=None, null_fakeweights:bool=False):
-    self.null_fakeweights = null_fakeweights
+  def __init__(self, version:str|None=None, pretrained:str|None=None):
     self.alphas_cumprod = get_alphas_cumprod()
     if version != "v2-mlperf-train":
       self.first_stage_model = AutoencoderKL() # only needed for decoding generated latents to images; not needed in mlperf training from preprocessed moments
@@ -226,10 +211,6 @@ class StableDiffusion:
     return x_prev, pred_x0
 
   def get_model_output(self, unconditional_context, context, latent, timestep, unconditional_guidance_scale):
-    if self.null_fakeweights:
-      # NULL+fakeweights only need the UNet graph shape to exist, so avoid duplicating work for CFG.
-      return self.model.diffusion_model(latent, timestep, context)
-
     # put into diffuser
     latents = self.model.diffusion_model(latent.expand(2, *latent.shape[1:]), timestep, unconditional_context.cat(context, dim=0))
     unconditional_latent, latent = latents[0:1], latents[1:2]
@@ -252,10 +233,7 @@ class StableDiffusion:
     #e_t_next = get_model_output(x_prev)
     #e_t_prime = (e_t + e_t_next) / 2
     #x_prev, pred_x0 = get_x_prev_and_pred_x0(latent, e_t_prime, index)
-    return x_prev
-
-def _is_null_fakeweights(args) -> bool:
-  return args.fakeweights and Device.DEFAULT == "NULL"
+    return x_prev.realize()
 
 # ** ldm.models.autoencoder.AutoencoderKL (done!)
 # 3x512x512 <--> 4x64x64 (16384)
@@ -286,12 +264,9 @@ if __name__ == "__main__":
   parser.add_argument('--guidance', type=float, default=7.5, help="Prompt strength")
   parser.add_argument('--fakeweights', action='store_true', help="Skip loading checkpoints and use fake weights")
   args = parser.parse_args()
-  null_fakeweights = _is_null_fakeweights(args)
-  if null_fakeweights: os.environ["NULL_FASTPATH"] = "1"
 
   profile_marker("create model")
-  with _empty_fakeweights_init() if args.fakeweights else contextlib.nullcontext():
-    model = StableDiffusion(null_fakeweights=null_fakeweights)
+  model = StableDiffusion()
 
   profile_marker("load in weights")
   with WallTimeEvent(BenchEvent.LOAD_WEIGHTS):
@@ -306,8 +281,7 @@ if __name__ == "__main__":
         if k.startswith("model"):
           v.replace(v.cast(dtypes.float16))
 
-    if not args.fakeweights:
-      Tensor.realize(*get_state_dict(model).values())
+    Tensor.realize(*get_state_dict(model).values())
 
   profile_marker("run clip (conditional)")
   tokenizer = Tokenizer.ClipTokenizer()
@@ -332,7 +306,8 @@ if __name__ == "__main__":
   if args.seed is not None: Tensor.manual_seed(args.seed)
   latent = Tensor.randn(1,4,64,64)
 
-  run = TinyJit(lambda model, *x: model(*x).realize(), prune=True, capture_first=null_fakeweights)
+  @TinyJit
+  def run(model, *x): return model(*x).realize()
 
   # this is diffusion
   step_times = []

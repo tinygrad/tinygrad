@@ -58,22 +58,6 @@ class TestJit(unittest.TestCase):
     add.reset()
     _simple_test(add, N=20)
 
-  def test_simple_jit_capture_first(self):
-    add = TinyJit(lambda a, b: (a+b).realize(), capture_first=True)
-
-    a = Tensor.randn(10, 10)
-    b = Tensor.randn(10, 10)
-    c = add(a, b)
-    np.testing.assert_allclose(c.numpy(), a.numpy()+b.numpy(), atol=1e-4, rtol=1e-5)
-    assert_jit_cache_len(add, 1)
-
-    a = Tensor.randn(20, 20)
-    b = Tensor.randn(20, 20)
-    add.reset()
-    c = add(a, b)
-    np.testing.assert_allclose(c.numpy(), a.numpy()+b.numpy(), atol=1e-4, rtol=1e-5)
-    assert_jit_cache_len(add, 1)
-
   def test_simple_jit_norealize(self):
     @TinyJit
     def add(a, b): return (a+b)

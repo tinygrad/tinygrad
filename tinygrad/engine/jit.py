@@ -276,19 +276,18 @@ def _prepare_jit_inputs(args, kwargs):
   return input_buffers, var_vals, names, expected_input_info
 
 class TinyJit(Generic[ReturnType]):
-  def __init__(self, fxn:Callable[..., ReturnType]|None, captured:CapturedJit|None=None, prune=False, capture_first=False):
+  def __init__(self, fxn:Callable[..., ReturnType]|None, captured:CapturedJit|None=None, prune=False):
     assert fxn or captured, "need either a function or a CapturedJit"
     self.fxn = fxn
     self.captured: CapturedJit|None = captured
-    self.capture_first = capture_first
-    self.cnt: int = 2 if self.fxn is None else (1 if capture_first else 0)
+    self.cnt: int = 2 if self.fxn is None else 0
     self.prune = prune
 
   def add_linear(self, linear:UOp, var_vals:dict[str, int]): self._linears.append(linear)
 
   def reset(self):
     assert self.fxn is not None, "can't reset without function"
-    self.cnt = 1 if self.capture_first else 0
+    self.cnt = 0
     self.captured = None
 
   def __reduce__(self):
@@ -338,10 +337,8 @@ class TinyJit(Generic[ReturnType]):
         del onetime_linear
 
       held_bufs = set(buffers) | {t.uop.buf_uop for t in get_parameters(ret) if t.uop.buf_uop.op is Ops.BUFFER}
-      planned_linear = memory_plan_rewrite(big_linear, held_bufs)
       with Context(BEAM=getenv("JITBEAM", BEAM.value)):
-        schedule = linear_to_schedule(planned_linear)
-        jit_cache = [ei.lower() for ei in schedule]
+        jit_cache = [ei.lower() for ei in linear_to_schedule(memory_plan_rewrite(big_linear, held_bufs))]
       del big_linear
 
       # track inputs that are views of buffers
