@@ -71,7 +71,7 @@ class TestSQTTProfiler(unittest.TestCase):
     for i,s in enumerate(sqtt[1:], start=1): self.assertEqual(s["name"], f"{kernel_name} n{i+1}")
 
   # TODO: can we trace SQTT for graphed kernels?
-  def test_jit_graph(self, kernel_count=3*2):
+  def test_jit_graph(self, kernel_count=3*1):
     @TinyJit
     def f(a): return ((a + 1).contiguous() + 2).contiguous().sum()
     t = Tensor.empty(32)

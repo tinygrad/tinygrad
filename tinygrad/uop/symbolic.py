@@ -81,6 +81,7 @@ symbolic_simple = propagate_invalid + PatternMatcher([
   (UPat.var("x") // UPat.var("x"), lambda x: x.const_like(1)), # x//x -> 1
   (UPat.var("x") // 1, lambda x: x),   # x//1 -> x
   (UPat.var("x") // -1, lambda x: -x), # x//-1 -> -x
+  ((UPat.var("x") ^ UPat.var("y")) ^ UPat.var("y"), lambda x,y: x), # (x^y)^y -> x
   ((UPat.var() % UPat.var("y")).named("base") % UPat.var("y"), lambda base,y: base),  # (x%y)%y = -> x%y (rewritten with base for speed)
   # variations of (x%c)+(x//c)*c = x
   (UPat(Ops.ADD, dtype=dtypes.weakint, name="x"), fold_add_divmod_recombine),
@@ -150,7 +151,7 @@ symbolic_simple = propagate_invalid + PatternMatcher([
 def lt_folding(x:UOp, c:int) -> UOp|None:
   p, np = partition(x.split_uop(Ops.ADD), lambda u: u.const_factor() == 1)
   if np and (d:=math.gcd(*[u.const_factor() for u in np], c)) > 1 and 0 <= sum(u.vmin for u in p) and sum(u.vmax for u in p) < d:
-    return unwrap(UOp.sum(*np).divides(d))<(c//d)
+    return unwrap(UOp.usum(*np).divides(d))<(c//d)
   return None
 
 def canonicalize_simplex(X:UOp) -> UOp|None:
@@ -164,7 +165,7 @@ def canonicalize_simplex(X:UOp) -> UOp|None:
       u = u.src[0]
     if not (u.op in GroupOp.Irreducible and u.vmin >= 0): return None
     ret.append(u)
-  return UOp.sum(*ret) if changed else None
+  return UOp.usum(*ret) if changed else None
 
 def gep_through_wmma(gep:UOp, wmma:UOp) -> UOp|None:
   out_sz = prod(x[1] for x in wmma.arg[6][-1])
@@ -353,9 +354,9 @@ def simplify_valid(valid:UOp) -> UOp|None:
   valids = list(valid.split_uop(Ops.AND))
   valids = sorted(valids, key=lambda v: _valid_priority(v, valids))
   for stmt in dedup(valids):
-    if ret: stmt = uop_given_valid(UOp.prod(*ret), stmt)
+    if ret: stmt = uop_given_valid(UOp.uprod(*ret), stmt)
     ret.append(stmt)
-  return UOp.prod(*ret) if ret != valids else None
+  return UOp.uprod(*ret) if ret != valids else None
 
 # ******** phase 3 is the complete symbolic ********
 
@@ -372,7 +373,7 @@ def reduce_mul_chain(r:UOp) -> UOp|None:
 
 def drop_and_clauses(cond:UOp, x:UOp, i:UOp) -> UOp|None:
   keep, drop = partition(cond.split_uop(Ops.AND), lambda c: any(r in x.ranges for r in c.ranges))
-  return UOp.const(dtypes.bool, True).prod(*keep).where(x, i) if drop else None
+  return UOp.const(dtypes.bool, True).uprod(*keep).where(x, i) if drop else None
 pm_drop_and_clauses = PatternMatcher([(invalid_gate, drop_and_clauses)])
 
 # move conditions from where to load's valid, drop clauses already in load
@@ -386,7 +387,7 @@ def where_on_load(cond:UOp, buf:UOp, idx:UOp, or_cast:UOp) -> UOp|None:
   moved, keep = partition([c for c in where_clauses if c not in in_load], can_move)
   if len(keep) == len(where_clauses): return None
   idx = buf.index(idx.get_idx().valid(functools.reduce(operator.and_, moved, load_valid)))
-  return UOp.const(dtypes.bool, True).prod(*keep).where(idx.cast(or_cast.dtype) if or_cast.op is Ops.CAST else idx, 0)
+  return UOp.const(dtypes.bool, True).uprod(*keep).where(idx.cast(or_cast.dtype) if or_cast.op is Ops.CAST else idx, 0)
 
 # where after gated load becomes alt value, TODO: this is sort of duplicated with rules in devectorizer
 pm_move_where_on_load = PatternMatcher([

@@ -85,7 +85,7 @@ def create_bufferize_and_index_based_on_ranges(ctx:IndexingContext, x:UOp):
 
 def convert_pad_to_where_to_keep_behavior_local(ctx:IndexingContext, x:UOp):
   if x not in ctx.range_map: return None
-  valid: UOp = UOp.const(dtypes.bool, True).prod(*[r.get_valid() for r in ctx.range_map[x][0]])
+  valid: UOp = UOp.const(dtypes.bool, True).uprod(*[r.get_valid() for r in ctx.range_map[x][0]])
   ret = valid.where(x.src[0], UOp.const(x.dtype, 0))
   ctx.range_map[ret] = ctx.range_map[x]
   return ret
@@ -118,7 +118,7 @@ def _apply_reshape(in_shape:tuple[sint,...], out_shape:tuple[sint, ...], urngs:U
   for s,src in list(zip(out_shape, urngs.src))[::-1]:
     axes_in.append(acc*src)
     acc *= s
-  combined_axes = UOp.const(dtypes.weakint, 0).sum(*axes_in)
+  combined_axes = UOp.const(dtypes.weakint, 0).usum(*axes_in)
   axes_out:list[UOp] = []
   for s in in_shape[::-1]:
     axes_out.append(combined_axes % s)
@@ -211,7 +211,7 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
         # we compare the ranges without their valids
         if all_all_same or (PCONTIG and all_same(local_rngs)):
           # the new valid is the OR of all the children valids
-          minimum_valid = UOp.const(dtypes.bool, False).sum(*valids)
+          minimum_valid = UOp.const(dtypes.bool, False).usum(*valids)
           _out_rngs.append(graph_rewrite(minimum_valid.where(local_rngs[0], UOp.invalid()), symbolic, name="minimum_valid"))
         else:
           _out_rngs.append(rctx.new_range(x.shape[i]))
