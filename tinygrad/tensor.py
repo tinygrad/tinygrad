@@ -2394,50 +2394,11 @@ class Tensor(OpMixin):
     return x.conv2d(w.flatten(end_dim=1), groups=groups, bias=bias, dilation=dilation, padding=padding)
 
   def dot(self, w:Tensor, dtype:DTypeLike|None=None) -> Tensor:
-
-    """
-    Performs dot product between two tensors.
-    If `w` is 1-D, it's a sum product over the last axis of `self` and `w`.
-    If `w` is N-D with N>=2, it's a sum product over the last axis of `self` and the second-to-last axis of `w`.
-
-    You can pass in the optional `dtype` keyword argument to control the data type of the accumulation.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    a = Tensor([1, 2, 3])
-    b = Tensor([1, 1, 0])
-    print(a.dot(b).numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    a = Tensor([[1, 2], [3, 4]])
-    b = Tensor([[5, 6], [7, 8]])
-    print(a.dot(b).numpy())
-    ```
-    """
     if IMAGE: return self.image_dot(w, dtype)
     if ASM_GEMM:
       from extra.gemm.cdna_asm_gemm import can_use_asm_gemm, asm_gemm
       if can_use_asm_gemm(self, w): return asm_gemm(self, w)
-    x, dx, dw = self, self.ndim, w.ndim
-    if not (dx > 0 and dw > 0): raise RuntimeError(f"both tensors need to be at least 1D, got {dx}D and {dw}D")
-    if x.shape[-1] != w.shape[axis_w:=-min(w.ndim,2)]: raise RuntimeError(f"cannot dot {x.shape} and {w.shape}")
-    x = x.reshape(*x.shape[0:-1], *[1]*min(dx-1, dw-1, 1), x.shape[-1])
-    w = w.reshape(*w.shape[0:-2], *[1]*min(dx-1, dw-1, 1), *w.shape[axis_w:]).transpose(-1, axis_w)
-    return (x*w).sum(-1, dtype=dtype).cast(least_upper_dtype(x.dtype, w.dtype) if dtype is None else dtype)
-
-  def matmul(self, x:Tensor, reverse=False, dtype:DTypeLike|None=None) -> Tensor:
-    """
-    Performs matrix multiplication between two tensors.
-
-    You can pass in the `reverse` keyword argument to control the order of the matrix multiplication.
-    You can pass in the optional `dtype` keyword argument to control the data type of the accumulation.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    a = Tensor([[1, 2], [3, 4]])
-    b = Tensor([[5, 6], [7, 8]])
-    print(a.matmul(b).numpy())
-    ```
-    """
-    return x.dot(self, dtype=dtype) if reverse else self.dot(x, dtype=dtype)
+    return super().dot(w, dtype=dtype)
 
   def _cumalu(self, axis:int, op:Ops, _include_initial=False) -> Tensor:
     assert self.shape[axis] != 0 and op in (Ops.ADD, Ops.MAX, Ops.MUL)
@@ -2960,12 +2921,7 @@ class Tensor(OpMixin):
   def __floordiv__(self, x): return self.div(x, rounding_mode="floor")
   def __rfloordiv__(self, x): return self.div(x, rounding_mode="floor", reverse=True)
 
-  def __matmul__(self, x) -> Tensor: return self.matmul(x)
-
-  def __rmatmul__(self, x) -> Tensor: return self.matmul(x, True)
-
   def __ifloordiv__(self, x) -> Tensor: return self.assign(self.__floordiv__(x))
-  def __imatmul__(self, x) -> Tensor: return self.assign(self.matmul(x))
 
   # unlike Tensors, UOps are immutable, so these don't go in mixin
   def __iadd__(self, x) -> Tensor: return self.assign(self.add(x)) # type: ignore[misc]
@@ -2978,6 +2934,7 @@ class Tensor(OpMixin):
   def __ixor__(self, x) -> Tensor: return self.assign(self.bitwise_xor(x)) # type: ignore[misc]
   def __ilshift__(self, x) -> Tensor: return self.assign(self.lshift(x)) # type: ignore[misc]
   def __irshift__(self, x) -> Tensor: return self.assign(self.rshift(x)) # type: ignore[misc]
+  def __imatmul__(self, x) -> Tensor: return self.assign(self.matmul(x)) # type: ignore[misc]
 
   def __eq__(self, x) -> Tensor: return self.eq(x)                      # type: ignore[override]
 
