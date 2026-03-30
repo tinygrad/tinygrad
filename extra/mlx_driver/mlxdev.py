@@ -28,10 +28,12 @@ def ifc_set(buf, bit_off, width, value):
 
 @functools.cache
 def ifc_fields(ifc_struct): return {name: (off, ctypes.sizeof(typ)) for name, typ, off in ifc_struct._real_fields_ if not name.startswith('reserved')}
+
 def ifc_subfield(ifc_struct, field_name):
   for name, typ, off in ifc_struct._real_fields_:
     if name == field_name: return typ, ifc_fields(ifc_struct)[field_name][0]
   raise KeyError(f"no field '{field_name}' in {ifc_struct}")
+
 def fill_ifc(buf, ifc_struct, base=0, **kw):
   fields = ifc_fields(ifc_struct)
   for name, val in kw.items():
@@ -39,8 +41,8 @@ def fill_ifc(buf, ifc_struct, base=0, **kw):
       sub_struct, sub_off = ifc_subfield(ifc_struct, name)
       fill_ifc(buf, sub_struct, base=base + sub_off, **val)
     else: ifc_set(buf, base + fields[name][0], fields[name][1], val)
-def read_ifc(buf, ifc_struct, field, base=0): return ifc_get(buf, base + (f:=ifc_fields(ifc_struct)[field])[0], f[1])
-def ifc_decode(buf, ifc_struct, base=0): return {name: ifc_get(buf, base + off, w) for name, (off, w) in ifc_fields(ifc_struct).items()}
+
+def ifc_decode(buf, ifc_struct, base=0):return {name: ifc_get(buf, base + off, width) for name, (off, width) in ifc_fields(ifc_struct).items()}
 
 class MLXCmdQueue:
   def __init__(self, dev):
