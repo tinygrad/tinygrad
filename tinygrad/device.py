@@ -40,11 +40,11 @@ class _Device:
     for device in ALL_DEVICES:
       with contextlib.suppress(Exception): yield self[device].device
   @property
-  def DEFAULT(self) -> str: return DEV.value.upper() if DEV else self._default_fallback
+  def DEFAULT(self) -> str: return DEV.value.upper() if DEV else self._select_device
   @DEFAULT.setter
   def DEFAULT(self, v): raise AttributeError(f'setting Device.DEFAULT is deprecated, use "with Context(DEV={v!r})" or "DEV.value = {v!r}"')
   @functools.cached_property
-  def _default_fallback(self) -> str:
+  def _select_device(self) -> str:
     assert (dev:=next((d for d in self._devices if d not in ["DISK", "TINYFS", "NPY"] and getenv(d) == 1), None)) is None, \
       f"{dev}=1 is deprecated, use DEV={dev} instead"
     try:
