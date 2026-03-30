@@ -161,4 +161,7 @@ def __getattr__(nm):
                                        [f"{macossdk}/System/Library/Frameworks/CoreFoundation.framework/Headers/CF{s}.h" for s in ["String", "Data"]],
                                        args=["-isysroot", macossdk])
     case "llvm_qcom": return load("llvm_qcom", "'llvm-qcom'", [root/"extra/tinydreno.h"])
+    case "mlx5": return load("mlx5", None, [root/"extra/mlx_driver/mlx5.h", root/"extra/mlx_driver/mlx5_ifc.h"],
+                             args=["-Du8=unsigned char", "-Du16=unsigned short", "-Du32=unsigned int", "-Du64=unsigned long long",
+                                   "-D__be16=unsigned short", "-D__be32=unsigned int", "-D__be64=unsigned long long"])
     case _: raise AttributeError(f"no such autogen: {nm}")
