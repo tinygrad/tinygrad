@@ -1,11 +1,11 @@
 from typing import Self
 from tinygrad.mixin.elementwise import ElementwiseMixin
-from tinygrad.mixin.movement import MovementMixin
+from tinygrad.mixin.reduce import ReduceMixin
 from tinygrad.uop.ops import _broadcast_shape
 from tinygrad.dtype import least_upper_dtype
 
 
-class OpMixin(ElementwiseMixin, MovementMixin):
+class OpMixin(ElementwiseMixin, ReduceMixin):
   def _broadcasted(self, y, reverse=False) -> tuple[Self, Self]:
     if not isinstance(y, type(self)): y = self.ufix(y)
     x, y = (self, y) if not reverse else (y, self)
