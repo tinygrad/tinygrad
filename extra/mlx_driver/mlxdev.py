@@ -270,4 +270,5 @@ if __name__ == "__main__":
     print(json.dumps({"target_addr": target_paddrs[0], "rkey": dev.mkey}), flush=True)
     input()
     data = bytes(target_mem[i] for i in range(64))
-    print(f"RECEIVED: {data.hex(' ')}\nAS TEXT: {data.rstrip(b'\\x00').decode('ascii', errors='replace')}", flush=True)
+    as_text = data.rstrip(b'\x00').decode('ascii', errors='replace')
+    print(f"RECEIVED: {data.hex(' ')}\nAS TEXT: {as_text}", flush=True)

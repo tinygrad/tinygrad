@@ -7,6 +7,7 @@ nv_src = {"nv_570": "https://github.com/NVIDIA/open-gpu-kernel-modules/archive/8
 ffmpeg_src = "https://ffmpeg.org/releases/ffmpeg-8.0.1.tar.gz"
 rocr_src = "https://github.com/ROCm/rocm-systems/archive/refs/tags/rocm-7.1.1.tar.gz"
 linux_headers_deb = "https://snapshot.debian.org/archive/debian/20260207T145350Z/pool/main/l/linux/linux-libc-dev_6.18.9-1_all.deb"
+linux_headers_kern_deb = "https://snapshot.debian.org/archive/debian/20260207T145350Z/pool/main/l/linux/linux-headers-6.18.9+deb14-common_6.18.9-1_all.deb"
 liburing_src = "https://raw.githubusercontent.com/axboe/liburing/refs/tags/liburing-2.14/src/include/liburing.h"
 macossdk = "/var/db/xcode_select_link/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk"
 
@@ -161,7 +162,11 @@ def __getattr__(nm):
                                        [f"{macossdk}/System/Library/Frameworks/CoreFoundation.framework/Headers/CF{s}.h" for s in ["String", "Data"]],
                                        args=["-isysroot", macossdk])
     case "llvm_qcom": return load("llvm_qcom", "'llvm-qcom'", [root/"extra/tinydreno.h"])
-    case "mlx5": return load("mlx5", None, [root/"extra/mlx_driver/mlx5.h", root/"extra/mlx_driver/mlx5_ifc.h"],
-                             args=["-Du8=unsigned char", "-Du16=unsigned short", "-Du32=unsigned int", "-Du64=unsigned long long",
-                                   "-D__be16=unsigned short", "-D__be32=unsigned int", "-D__be64=unsigned long long"])
+    case "mlx5":
+      kh = "{}/usr/src/linux-headers-6.18.9+deb14-common/include/linux/mlx5"
+      return load("mlx5", None, [root/"extra/mlx_driver/mlx5.h", f"{kh}/mlx5_ifc.h"], srcs=linux_headers_kern_deb,
+                  args=["-Du8=unsigned char", "-Du16=unsigned short", "-Du32=unsigned int", "-Du64=unsigned long long",
+                        "-D__be16=unsigned short", "-D__be32=unsigned int", "-D__be64=unsigned long long", f"-I{kh}"],
+                  preprocess=lambda path: subprocess.run(f"ar x {linux_headers_kern_deb.split('/')[-1]} && tar xf data.tar.xz",
+                                                         cwd=path, shell=True, check=True))
     case _: raise AttributeError(f"no such autogen: {nm}")
