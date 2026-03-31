@@ -2631,7 +2631,7 @@ def custom_hk_fp8_gemm(C:UOp, A:UOp, B:UOp, dname:str) -> UOp:
   # A is (batch, M, K), B is (N, K) transposed
   M, K = A.shape[0]*A.shape[1], A.shape[2]
   N, K2 = B.shape[(1 if B.ndim == 3 else 0):]
-  assert K == K2
+  assert K == K2, f"{A.shape} {B.shape}"
   block_size = 256
   threads = UOp.special(64 * 8, "lidx0")
   workgroups = UOp.special((M // block_size) * (N // block_size), "gidx0")
@@ -2738,7 +2738,7 @@ def asm_gemm(a:Tensor, b:Tensor) -> Tensor:
   renderer = Device[a.device[0] if is_multi else a.device].renderer
   dname, arch = renderer.device, getattr(renderer, "arch", "")
   if arch.startswith("gfx950") and getenv("USE_ASM", 1):
-    if a.dtype == dtypes.fp8e4m3: gemm_fxn, b = custom_hk_fp8_gemm, b.T
+    if a.dtype == dtypes.fp8e4m3: gemm_fxn, b = custom_hk_fp8_gemm, b.T.contiguous()
     else: gemm_fxn = custom_asm_gemm
     out = Tensor.custom_kernel(out, a, b, fxn=functools.partial(gemm_fxn, dname=dname), grad_fxn=custom_gemm_bw)[0]
   else:
