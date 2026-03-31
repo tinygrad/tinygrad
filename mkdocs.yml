@@ -29,6 +29,7 @@ nav:
       - developer/runtime.md
       - HCQ: developer/hcq.md
       - AM Driver: developer/am.md
+      - tinygpu: developer/tinygpu.md
   - tinybox: tinybox.md
 #- tinygrad: reference/
 
