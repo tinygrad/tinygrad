@@ -30,6 +30,9 @@ def argfix(*x):
 # https://stackoverflow.com/questions/3382352/equivalent-of-numpy-argsort-in-basic-python
 def argsort(x): return type(x)(sorted(range(len(x)), key=x.__getitem__))
 def all_same(items:Sequence): return all(x == items[0] for x in items)  # works for empty input
+def base_device(device:str | tuple[str, ...]) -> str:
+  if isinstance(device, tuple): device = device[0]
+  return device.split(":")[0]
 def all_int(t: Sequence[Any]) -> TypeGuard[tuple[int, ...]]: return all(isinstance(s, int) for s in t)
 def colored(st, color:str|None, background=False): # replace the termcolor library
   colors = ['black', 'red', 'green', 'yellow', 'blue', 'magenta', 'cyan', 'white']

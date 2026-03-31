@@ -2,7 +2,7 @@ from __future__ import annotations
 import math, functools
 from tinygrad.tensor import Tensor
 from tinygrad.dtype import dtypes
-from tinygrad.helpers import prod, make_tuple, flatten, USE_ATOMICS
+from tinygrad.helpers import prod, make_tuple, flatten, USE_ATOMICS, base_device
 from tinygrad.nn import optim, state, datasets  # noqa: F401
 
 class BatchNorm:
@@ -327,8 +327,7 @@ def _embedding_bwd(grad_emb:UOp, call:UOp) -> tuple:
   grad_weight_uop = grad_weight_uop.custom_kernel(fxn=_zero_kernel)[0]
 
   # TODO: do we have a universal helper for this?
-  device = call.device.split(":")[0] if not isinstance(call.device, tuple) else call.device[0].split(":")[0]
-
+  device = base_device(call.device)
   # this is the real atomic kernel
   def _embedding_bwd_kernel(grad_weight:UOp, grad_emb:UOp, idx:UOp) -> UOp:
     idx_flat, grad_emb_flat = idx.flatten(), grad_emb.reshape((idx.size, grad_weight.shape[-1]))
