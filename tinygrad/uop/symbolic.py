@@ -9,6 +9,12 @@ from tinygrad.uop.divandmod import div_and_mod_symbolic
 
 # ******** phase 1 of symbolic used to live in ops, it's the most generic folding rules ********
 
+def _has_mul_factor(expr:UOp, x:UOp) -> bool:
+  """Check if x appears as a multiplicative factor in expr (so expr=0 when x=0)."""
+  if expr is x: return True
+  if expr.op is Ops.MUL: return _has_mul_factor(expr.src[0], x) or _has_mul_factor(expr.src[1], x)
+  return False
+
 def simplify_pow(x:UOp, c:UOp) -> UOp|None:
   if c.arg < 0: return x.reciprocal().pow(-c)
   if c.arg == 0: return x.const_like(1)
@@ -129,6 +135,15 @@ symbolic_simple = propagate_invalid + PatternMatcher([
   (UPat.var('x').cast(name="a").cast(name="b"), lambda x,a,b: x if x.dtype == b.dtype and can_lossless_cast(b.dtype, a.dtype) else None),
   (UPat.var("x").cast(dtypes.bool), lambda x: x != 0),
   # ** pow **
+  # (-x)**even -> x**even
+  ((-UPat.var("x")).alu(Ops.POW, UPat.cvar("c", vec=False)),
+   lambda x, c: x.pow(c) if int(c.arg) == c.arg and c.arg % 2 == 0 and c.arg > 0 else None),
+  # pow(where(c, t, f), even) -> where(c, pow(t, even), pow(f, even))
+  (UPat.var("c").where(UPat.var("t"), UPat.var("f")).alu(Ops.POW, UPat.cvar("e", vec=False)),
+   lambda c, t, f, e: c.where(t.pow(e), f.pow(e)) if int(e.arg) == e.arg and e.arg % 2 == 0 and e.arg > 0 else None),
+  # pow(a * where(c, t, f), even) -> where(c, pow(a*t, even), pow(a*f, even))
+  ((UPat.var("a") * UPat.var("c").where(UPat.var("t"), UPat.var("f"))).alu(Ops.POW, UPat.cvar("e", vec=False)),
+   lambda a, c, t, f, e: c.where((a*t).pow(e), (a*f).pow(e)) if int(e.arg) == e.arg and e.arg % 2 == 0 and e.arg > 0 else None),
   (UPat.var("x").alu(Ops.POW, UPat.cvar("c", vec=False)), simplify_pow),
   # positive const ** x
   (UPat.cvar("c", vec=False).alu(Ops.POW, UPat.var("x")), lambda c,x: c if c.arg == 1 else (x*math.log2(c.arg)).exp2() if c.arg > 0 else None),
@@ -144,6 +159,9 @@ symbolic_simple = propagate_invalid + PatternMatcher([
   (UPat.cvar("gate", vec=False).where(UPat.var("c0"), UPat.var("c1")), lambda gate, c0, c1: c0 if gate.arg else c1),
   # a.where(b.where(c, d), d) -> (a & b).where(c, d)
   (UPat.var("a").where(UPat.var("b").where(UPat.var("c"), UPat.var("d")), UPat.var("d")), lambda a,b,c,d: (a&b).where(c,d)),
+  # where(x!=0, expr, 0) -> expr when x is a multiplicative factor of expr (so expr=0 when x=0)
+  (UPat(Ops.CMPNE, src=(UPat.var("x"), UPat.cvar(arg=0))).where(UPat.var("expr"), UPat.cvar(arg=0)),
+   lambda x, expr: expr if _has_mul_factor(expr, x) else None),
 ])
 
 # ******** phase 2 builds on phase 1, it includes the old "symbolic", rules that match deeper ********
