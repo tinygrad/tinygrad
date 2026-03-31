@@ -849,7 +849,7 @@ class TestSymbolic(unittest.TestCase):
 
   def test_where_removal(self):
     cond = Variable("a", 0, 3) < 2
-    u1, u0 = cond.ufix(1), cond.ufix(0)
+    u1, u0 = cond.const_like(1), cond.const_like(0)
     self.helper_test_variable(cond, 0, 1, "(a<2)")
     self.helper_test_variable(cond.where(u1, u0), 0, 1, "(a<2)")
     self.helper_test_variable(cond.where(u1, u0).where(u1, u0), 0, 1, "(a<2)")

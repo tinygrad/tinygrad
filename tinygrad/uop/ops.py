@@ -451,6 +451,9 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
   def const_like(self, b:ConstLike):
     # constants can optionally have a DEVICE source
     return UOp.const(self.dtype.base, b, device=self._device, shape=self._shape)
+  def ufix(self, x):
+    if isinstance(x, UOp): return x
+    return UOp.const(self._resolve_const_dtype(x).base, x, device=self._device, shape=self._shape)
   def broadcast(self, count:int):
     assert self.dtype.vcount == 1
     if count == 1: return self

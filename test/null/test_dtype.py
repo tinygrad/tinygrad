@@ -1,5 +1,6 @@
 import unittest, pickle
 from tinygrad.tensor import Tensor
+from tinygrad.uop.ops import UOp
 from tinygrad.dtype import dtypes, DType, ImageDType, PtrDType, to_dtype, Invalid, InvalidType
 
 class TestImageDType(unittest.TestCase):
@@ -57,7 +58,19 @@ class TestCastConvenienceMethod(unittest.TestCase):
       self.assertEqual(t.float().dtype, dtypes.float)
       self.assertEqual(t.double().dtype, dtypes.double)
 
+class TestScalarDtypePromotion(unittest.TestCase):
+  def test_int_plus_float(self):
+    self.assertEqual((UOp.const(dtypes.int, 1) + 1.5).dtype, dtypes.float)
+    self.assertEqual((Tensor([1], dtype=dtypes.int) + 1.5).dtype, dtypes.float)
+  def test_bool_plus_float(self):
+    self.assertEqual((UOp.const(dtypes.bool, True) + 1.5).dtype, dtypes.float)
+    self.assertEqual((Tensor([True]) + 1.5).dtype, dtypes.float)
+  def test_bool_plus_int(self):
+    self.assertEqual((UOp.const(dtypes.bool, True) + 2).dtype, dtypes.int)
+    self.assertEqual((Tensor([True]) + 2).dtype, dtypes.int)
+
 class TestDtypeTolist(unittest.TestCase):
+  # TODO: this should not be in null/
   def test_bfloat16(self):
     self.assertEqual(Tensor([-60000, 1.5, 3.1, 60000], device="PYTHON", dtype=dtypes.bfloat16).tolist(), [-59904.0, 1.5, 3.09375, 59904.0])
   def test_fp8(self):

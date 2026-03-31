@@ -1,5 +1,5 @@
 from typing import Self
-from tinygrad.dtype import DType, dtypes
+from tinygrad.dtype import DType, ConstType, InvalidType, dtypes
 
 class DTypeMixin:
   @property
@@ -89,6 +89,11 @@ class DTypeMixin:
     ```
     """
     return self.cast(dtypes.bool)
+
+  def _resolve_const_dtype(self, x:ConstType) -> DType:
+    """Resolve the dtype for a scalar constant `x` when paired with self in a binary op."""
+    if dtypes.is_float(self.dtype) or (dtypes.is_int(self.dtype) and isinstance(x, (int, InvalidType))): return self.dtype
+    return dtypes.from_py(x)
 
   def bfloat16(self) -> Self: return self.cast(dtypes.bfloat16)
   def double(self) -> Self: return self.cast(dtypes.double)
