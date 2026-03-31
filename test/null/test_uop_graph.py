@@ -453,6 +453,28 @@ class TestUOpGraph(unittest.TestCase):
       assert u.op is not Ops.WHERE
       if u.op is Ops.LOAD and u.src[0].src[0].op is Ops.PARAM: assert u.src[1].arg == 5
 
+  def test_where_on_casted_gated_load_extra_cond(self):
+    ridx0 = UOp.range(100, 0)
+    d0 = UOp(Ops.PARAM, dtypes.float.ptr(), (), 0)
+    ld = d0.index(ridx0.valid(ridx0<50))
+    w = ((ridx0<50) & (ridx0>30)).where(ld, UOp.const(dtypes.float, 0)).cast(dtypes.half)
+    # prevent ridx0 from being shrunk
+    red = UOp(Ops.REDUCE, dtypes.long, (ridx0.cast(dtypes.long), ridx0), Ops.ADD)
+    uops = to_uops_list([w, red])
+    for u in uops:
+      assert u.op is not Ops.WHERE
+
+  def test_where_on_casted_gated_load_extra_cond_swapped(self):
+    ridx0 = UOp.range(100, 0)
+    d0 = UOp(Ops.PARAM, dtypes.float.ptr(), (), 0)
+    ld = d0.index(ridx0.valid(ridx0<50))
+    w = ((ridx0<50) & (ridx0>30)).where(UOp.const(dtypes.float, 0), ld).cast(dtypes.half)
+    # prevent ridx0 from being shrunk
+    red = UOp(Ops.REDUCE, dtypes.long, (ridx0.cast(dtypes.long), ridx0), Ops.ADD)
+    uops = to_uops_list([w, red])
+    for u in uops:
+      assert u.op is not Ops.WHERE
+
   def test_where_in_store_becomes_gate(self):
     ridx0 = UOp.range(100, 0)
     d0 = UOp(Ops.PARAM, dtypes.long.ptr(), (), 0)

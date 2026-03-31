@@ -28,6 +28,14 @@ class AluSrc(Enum):
   VALU = 2
   VALU_SALU = 3
 
+# construct other SIMD instruction operation types, name becomes OTHER_{category}_{cycles}
+def add_other_simd(cls:type[Enum], ranges:list[tuple[str, int, int, int]]) -> None:
+  for category, start, end, base_cycle in ranges:
+    for value in range(start, end + 1):
+      cls._value2member_map_[value] = obj = object.__new__(cls)
+      obj._value_ = value
+      obj._name_ = f"OTHER_{category}_{value - start + base_cycle}"
+
 class InstOp(Enum):
   """SQTT instruction operation types for RDNA3 (gfx1100).
 
@@ -80,26 +88,11 @@ class InstOp(Enum):
   LDS_WR_4 = 0x2d
   LDS_WR_5 = 0x2e
 
-  # Memory ops on other SIMD (0x5x range)
-  OTHER_LDS_1 = 0x50
-  OTHER_LDS_2 = 0x51
-  OTHER_LDS_3 = 0x52
-  OTHER_LDS_5 = 0x54
-  OTHER_FLAT_2 = 0x55
-  OTHER_FLAT_3 = 0x56
-  OTHER_FLAT_4 = 0x57
-  OTHER_FLAT_5 = 0x58
-  OTHER_FLAT_6 = 0x59
-  OTHER_VMEM_1 = 0x5a             # saddr=SGPR, all sizes
-  OTHER_VMEM_2 = 0x5b             # saddr=NULL or saddr=SGPR store 32
-  OTHER_VMEM_3 = 0x5c             # saddr=SGPR 64 or saddr=NULL 32
-  OTHER_VMEM_4 = 0x5d             # saddr=SGPR 96 or saddr=NULL 64
-  OTHER_VMEM_5 = 0x5e             # saddr=SGPR 128 or saddr=NULL 96
-  OTHER_VMEM_6 = 0x5f             # saddr=NULL, 128-bit
-
   # EXEC-modifying ops (0x7x range)
   SALU_WR_EXEC = 0x72     # s_*_saveexec_b32/b64
   VALU1_WR_EXEC = 0x73    # v_cmpx_*
+# Memory ops on other SIMD (0x5x range)
+add_other_simd(InstOp, [("LDS", 0x50, 0x54, 1), ("FLAT", 0x55, 0x59, 2), ("VMEM", 0x5a, 0x66, 1)])
 
 class InstOpRDNA4(Enum):
   """SQTT instruction operation types for RDNA4 (gfx1200). Different encoding from RDNA3."""
@@ -146,16 +139,6 @@ class InstOpRDNA4(Enum):
   BUF_WR_4 = 0x34
   BUF_WR_5 = 0x35
   BUF_WR_6 = 0x36
-  OTHER_LDS_1 = 0x50
-  OTHER_LDS_2 = 0x51
-  OTHER_LDS_3 = 0x52
-  OTHER_LDS_4 = 0x53
-  OTHER_LDS_5 = 0x54
-  OTHER_FLAT_2 = 0x55
-  OTHER_FLAT_3 = 0x56
-  OTHER_FLAT_4 = 0x57
-  OTHER_FLAT_5 = 0x58
-  OTHER_FLAT_6 = 0x59
   LDS_DIR_LOAD = 0x6e
   LDS_PARAM_LOAD = 0x6f
   SALU_WR_EXEC = 0x72
@@ -175,8 +158,7 @@ class InstOpRDNA4(Enum):
   VALU_SCL_TRANS = 0x99
   SALU_2 = 0x9b
   SALU_5 = 0x9c
-  OTHER_VMEM = 0xbc  # 0xbc-0xdd: vmem_other_simd
-for _i in range(34): InstOpRDNA4._value2member_map_[0xbc + _i] = InstOpRDNA4.OTHER_VMEM
+add_other_simd(InstOpRDNA4, [("LDS", 0x50, 0x54, 1), ("FLAT", 0x55, 0x59, 2), ("VMEM", 0xbc, 0xdd, 1)])
 
 class InstOpCDNA(Enum):
   SMEM_RD = 0
@@ -675,18 +657,15 @@ def map_insts(data:bytes, lib:bytes, target:str) -> Iterator[tuple[PacketType, I
     elif isinstance(p, WAVEEND):
       pc = wave_pc.pop(p.wave)
       yield (p, InstructionInfo(pc, p.wave, s_endpgm()))
-    # skip OTHER_ instructions, they don't belong to this unit
-    elif isinstance(p, (INST, INST_RDNA4)) and p.op.name.startswith("OTHER_"): pass
     elif isinstance(p, IMMEDIATE_MASK):
       # immediate mask may yield multiple times per packet
       for wave in range(16):
         if p.mask & (1 << wave):
           inst = pc_map[pc:=wave_pc[wave]]
-          # can this assert be more strict?
-          assert type(inst).__name__ == "SOPP", f"IMMEDIATE_MASK packet must map to SOPP, got {inst}"
           wave_pc[wave] += inst.size()
           yield (p, InstructionInfo(pc, wave, inst))
-    elif isinstance(p, (VALUINST, INST, INST_RDNA4, IMMEDIATE)):
+    # map INST events on this SIMD to the program counter, we know the waves
+    elif isinstance(p, (VALUINST, INST, INST_RDNA4, IMMEDIATE)) and not (isinstance(p, (INST, INST_RDNA4)) and p.op.name.startswith("OTHER_")):
       inst = pc_map[pc:=wave_pc[p.wave]]
       # s_delay_alu, s_wait_alu and s_barrier_wait instructions are skipped
       while (inst_op:=getattr(inst, 'op_name', '')) in {"S_DELAY_ALU", "S_WAIT_ALU", "S_BARRIER_WAIT"}:
@@ -702,7 +681,7 @@ def map_insts(data:bytes, lib:bytes, target:str) -> Iterator[tuple[PacketType, I
       else:
         wave_pc[p.wave] += inst.size()
       yield (p, InstructionInfo(pc, p.wave, inst))
-    # for all other packets (VMEMEXEC, ALUEXEC, etc.), yield with None
+    # for all other packets (VMEMEXEC, ALUEXEC, OTHER_ INST, etc.), yield with None
     else: yield (p, None)
 
 # ═══════════════════════════════════════════════════════════════════════════════

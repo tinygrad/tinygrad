@@ -153,15 +153,19 @@ class FlatTransformer:
     logits = self.norm(h) @ self.output[0].T
     return logits
 
-# TODO: this shouldn't be needed, but it prevents a copy of the grads. CAT can help
-def apply_grad(old_grad:UOp, new_grad:UOp) -> list[UOp]:
-  if new_grad.op == Ops.ADD:
-    return apply_grad(old_grad, new_grad.src[0])+apply_grad(old_grad, new_grad.src[1])
-  elif new_grad.op == Ops.PAD:
-    grad_shrink = tuple([(p[0], s+p[0]) for s,p in zip(new_grad.src[0].shape, new_grad.marg)])
-    return apply_grad(old_grad.shrink(grad_shrink), new_grad.src[0])
-  else:
-    return [old_grad.store(old_grad + new_grad)]
+def _get_pads(uop:UOp) -> list[UOp]:
+  if uop.op == Ops.ADD: return _get_pads(uop.src[0]) + _get_pads(uop.src[1])
+  return [uop]
+
+def apply_grad(grad_buf:Tensor, new_grad:UOp):
+  pads = _get_pads(new_grad)
+  if len(pads) <= 1:
+    store = grad_buf.uop.store(grad_buf.uop + new_grad)
+    grad_buf.uop = grad_buf.uop.after(store)
+    return
+  sorted_pads = sorted(pads, key=lambda p: p.marg[0][0] if p.op == Ops.PAD else 0)
+  inners = [Tensor(p.src[0] if p.op == Ops.PAD else p, device=grad_buf.device) for p in sorted_pads]
+  grad_buf.assign(grad_buf + inners[0].cat(*inners[1:], dim=0))
 
 if __name__ == "__main__":
   config = {}
@@ -203,7 +207,7 @@ if __name__ == "__main__":
     with Timing("python forward: "): loss = model(tokens[:, :-1]).sparse_categorical_crossentropy(tokens[:, 1:])
     with Timing("python backward: "):
       for t,g in zip(grads, loss.gradient(*grads)):
-        grads[t] = Tensor(grads[t].uop.after(UOp.group(*apply_grad(grads[t].uop, g.uop))), device=t.device)
+        apply_grad(grads[t], g.uop)
     with Timing("run step: "): loss.realize(*grads.values())
 
   for i in range(6):

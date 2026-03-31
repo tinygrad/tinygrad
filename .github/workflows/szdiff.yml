@@ -66,9 +66,7 @@ jobs:
           PR="$GITHUB_WORKSPACE/pr"
           pip install tabulate $BASE
           cp "$BASE/sz.py" .
-          echo "loc_content<<EOF" >> "$GITHUB_ENV"
-          python sz.py "$BASE" "$PR" >> "$GITHUB_ENV"
-          echo "EOF" >> "$GITHUB_ENV"
+          python sz.py "$BASE" "$PR" > loc_content.txt
       - name: Comment Code Line Diff
         continue-on-error: false
         uses: marocchino/sticky-pull-request-comment@v3
@@ -77,7 +75,7 @@ jobs:
           ignore_empty: true
           skip_unchanged: true
           recreate: true
-          message: ${{ env.loc_content }}
+          path: loc_content.txt
 
   rebase:
     name: Core Library Line Difference

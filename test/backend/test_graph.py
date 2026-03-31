@@ -82,7 +82,7 @@ def helper_test_graphs(graph_impl, graphs, runs=RUN_CNT):
   ground_truth_np = [np.frombuffer(x, _to_np_dtype(bufs[i].dtype)) for i,x in enumerate(ground_thruth_bufs)]
 
   # Build graphs
-  gr_ji = [ExecItem(UOp(Ops.NOOP), [], prg=graph_impl(graph, [], {})) for graph in graphs]
+  gr_ji = [ExecItem(UOp(Ops.NOOP), [], prg=graph_impl(None, None, graph)) for graph in graphs]
 
   for _ in range(runs):
     test_bufs = helper_run_jit(gr_ji, bufs, out_buffers)
