@@ -109,7 +109,7 @@ def main(args) -> None:
         if ansistrip(e["name"]) == args.item:
           ptm = colored(time_to_str(et, w=9), "yellow" if et > 0.01 else None)
           name = e["name"] + (" " * (46 - ansilen(e["name"])))
-          print(f"{name} {ptm}/{et*1e3:9.2f}ms  " + e.get("fmt", "").replace("\n", " | ") + "  ")
+          print(f"{format_colored(name)} {ptm}/{et*1e3:9.2f}ms  " + e.get("fmt", "").replace("\n", " | ") + "  ")
       else:
         t, c = agg.get(e["name"], (0.0, 0))
         agg[e["name"]] = (t+et, c+1)
@@ -117,7 +117,7 @@ def main(args) -> None:
     if agg and total > 0:
       from tabulate import tabulate
       items = sorted(agg.items(), key=lambda kv:kv[1][0], reverse=True)
-      table = [[name, time_to_str(t, w=9), c, f"{(t/total*100.0):.2f}%"] for name,(t,c) in items]
+      table = [[format_colored(name), time_to_str(t, w=9), c, f"{(t/total*100.0):.2f}%"] for name,(t,c) in items]
       print(tabulate(table, headers=["name", "total", "count", "pct"], tablefmt="github"))
     return None
 
@@ -137,7 +137,8 @@ def main(args) -> None:
         if m.get("diff"):
           loc = pathlib.Path(m["upat"][0][0])
           print(f"Rewrite at {loc.parent.name}/{loc.name}:{m['upat'][0][1]}\n{m['upat'][1]}")
-          for line in m["diff"]: print(colored(line, "red" if line.startswith("-") else "green" if line.startswith("+") else None))
+          for line in m["diff"]:
+            print(line if args.no_color else colored(line, "red" if line.startswith("-") else "green" if line.startswith("+") else None))
     if data.get("src") is not None: print(data["src"])
 
 def get_arg_parser() -> argparse.ArgumentParser:
