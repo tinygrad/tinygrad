@@ -1,6 +1,6 @@
 from __future__ import annotations
-import sys, argparse, typing, types, re, unicodedata, json, uuid, time, functools, itertools
-from dataclasses import dataclass, replace as dc_replace
+import sys, argparse, typing, re, unicodedata, json, uuid, time, functools, itertools
+from dataclasses import dataclass, replace
 from tinygrad import Tensor, nn, UOp, TinyJit, getenv, function
 from tinygrad.uop.ops import resolve
 from tinygrad.helpers import partition, DEBUG, Timing, GlobalCounters, stderr_log, colored, Context
@@ -138,7 +138,7 @@ class FFNBlock:
         self.ffn_gate_shexp = nn.Linear(config.dim, config.shared_expert_dim, bias=False)
         self.ffn_up_shexp = nn.Linear(config.dim, config.shared_expert_dim, bias=False)
         self.ffn_down_shexp = nn.Linear(config.shared_expert_dim, config.dim, bias=False)
-        self.ffn_gate_inp_shexp = types.SimpleNamespace(weight=Tensor.zeros(config.dim))
+        self.ffn_gate_inp_shexp = {"weight": Tensor.zeros(config.dim)}
     else:
       self.ffn_gate    = nn.Linear(config.dim, config.hidden_dim, bias=False)
       self.ffn_up      = nn.Linear(config.dim, config.hidden_dim, bias=False)
@@ -157,7 +157,7 @@ class FFNBlock:
     x_down = self.ffn_down_exps(sel, self.ffn_gate_exps(sel, x).silu() * self.ffn_up_exps(sel, x))  # (B, T, k, D)
     out = (x_down * probs.unsqueeze(-1)).sum(axis=2)  # (B, T, D)
     if hasattr(self, 'ffn_gate_shexp'):
-      shared_gate = (h_norm * self.ffn_gate_inp_shexp.weight).sum(axis=-1, keepdim=True).sigmoid()
+      shared_gate = (h_norm * self.ffn_gate_inp_shexp["weight"]).sum(axis=-1, keepdim=True).sigmoid()
       out = out + self.ffn_down_shexp(self.ffn_gate_shexp(h_norm).silu().contiguous() * self.ffn_up_shexp(h_norm)) * shared_gate
     return h + out
 
@@ -233,8 +233,8 @@ class GatedDeltaNetBlock(FFNBlock):
     self.conv_channels, self.q_dim = ssm.inner_size + 2*ssm.group_count*ssm.state_size, ssm.state_size*ssm.group_count
     self.attn_qkv, self.attn_gate = nn.Linear(config.dim, self.conv_channels, bias=False), nn.Linear(config.dim, ssm.inner_size, bias=False)
     self.ssm_alpha, self.ssm_beta = nn.Linear(config.dim, self.num_v_heads, bias=False), nn.Linear(config.dim, self.num_v_heads, bias=False)
-    self.ssm_conv1d = types.SimpleNamespace(weight=Tensor.zeros(self.conv_channels, self.ssm_conv_kernel))
-    self.ssm_dt = types.SimpleNamespace(bias=Tensor.zeros(self.num_v_heads))
+    self.ssm_conv1d = {"weight": Tensor.zeros(self.conv_channels, self.ssm_conv_kernel)}
+    self.ssm_dt = {"bias": Tensor.zeros(self.num_v_heads)}
     self.ssm_a = Tensor.zeros(self.num_v_heads)
     self.ssm_norm, self.ssm_out = nn.RMSNorm(self.head_v_dim, config.norm_eps), nn.Linear(ssm.inner_size, config.dim, bias=False)
 
@@ -243,13 +243,13 @@ class GatedDeltaNetBlock(FFNBlock):
     x_norm = self.attn_norm(x).half()
     out_gate = self.attn_gate(x_norm).reshape(B, 1, self.num_v_heads, self.head_v_dim)
     beta = self.ssm_beta(x_norm).sigmoid().reshape(B, self.num_v_heads, 1, 1)
-    alpha = ((self.ssm_alpha(x_norm).float() + self.ssm_dt.bias).softplus() * self.ssm_a).reshape(B, self.num_v_heads, 1, 1).exp()
+    alpha = ((self.ssm_alpha(x_norm).float() + self.ssm_dt["bias"]).softplus() * self.ssm_a).reshape(B, self.num_v_heads, 1, 1).exp()
     conv_flat = (self.ssm_conv_kernel - 1) * self.conv_channels
     ssm_flat = self.num_v_heads * self.head_v_dim * self.head_v_dim
     conv_state = self.delta_cache[:, :conv_flat].reshape(B, self.ssm_conv_kernel - 1, self.conv_channels)
     recurrent_state = self.delta_cache[:, conv_flat:conv_flat + ssm_flat].reshape(B, self.num_v_heads, self.head_v_dim, self.head_v_dim)
     conv_window = conv_state.cat(self.attn_qkv(x_norm), dim=1)
-    conv_out = (conv_window * self.ssm_conv1d.weight.T.unsqueeze(0)).sum(1).silu()
+    conv_out = (conv_window * self.ssm_conv1d["weight"].T.unsqueeze(0)).sum(1).silu()
     q, k, v = conv_out.split([self.q_dim, self.q_dim, self.conv_channels - 2*self.q_dim], dim=-1)
     q, k = q.reshape(B, self.num_k_heads, self.head_k_dim).normalize(dim=-1), k.reshape(B, self.num_k_heads, self.head_k_dim).normalize(dim=-1)
     v = v.reshape(B, self.num_v_heads, self.head_v_dim)
@@ -275,7 +275,7 @@ class GatedDeltaNetBlock(FFNBlock):
 
 class Transformer:
   def __init__(self, config:TransformerConfig):
-    attn_config = config if not config.ssm else dc_replace(config, qk_norm=config.head_dim)
+    attn_config = config if not config.ssm else replace(config, qk_norm=config.head_dim)
     self.blk = [GatedDeltaNetBlock(config, config.ssm) if config.ssm and (i+1) % config.full_attention_interval != 0 else
                 TransformerBlock(attn_config) for i in range(config.num_blocks)]
     self.token_embd  = nn.Embedding(config.vocab_size, config.dim)
@@ -296,6 +296,7 @@ class Transformer:
     return (logits / temperature.maximum(1e-12) - (Tensor.rand_like(logits).maximum(1e-12).log().neg()).log()).argmax(-1, keepdim=True)
 
   def __call__(self, tokens:Tensor, start_pos:int|UOp, temperature:Tensor) -> Tensor:
+    if self.has_ssm: tokens = tokens.contiguous()
     return (self.prefill_jit if resolve(tokens.shape[1] != 1) else self.rollout_jit)(tokens, start_pos, temperature)
 
   @staticmethod
@@ -347,6 +348,7 @@ class Transformer:
     return sum(1 for _ in itertools.takewhile(lambda ab: ab[0] == ab[1], zip(tokens[:-1], self._cached_tokens)))
 
   def generate(self, tokens:list[int], chunk_size:int=32, temperature:float=0.0):
+    if self.has_ssm: chunk_size = 1
     v_start_pos = UOp.variable("start_pos", 0, self.max_context-1)
     v_toks = UOp.variable("toks", 1, chunk_size)
     # TODO: use UOp.variable for temperature once float variables are supported
@@ -362,10 +364,8 @@ class Transformer:
     out, prompt_len = None, len(tokens)
     while len(tokens) < self.max_context:
       sp, nt = v_start_pos.bind(start_pos), v_toks.bind(min(chunk_size, len(tokens) - start_pos))
-      if start_pos < prompt_len or out is None:
-        out = self(t[:, sp:sp+nt] if not self.has_ssm else Tensor([tokens[start_pos]]).reshape(1, 1), sp, temp).realize()
-      else: out = self(out, sp, temp).realize()
-      start_pos += (1 if self.has_ssm else nt.val)
+      out = self(t[:, sp:sp+nt] if start_pos < prompt_len or out is None else out, sp, temp).realize()
+      start_pos += nt.val
       # chunked prefill: keep processing until all prompt tokens are consumed
       if start_pos < len(tokens): continue
       tokens.append(int(out.item()))
