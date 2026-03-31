@@ -287,12 +287,7 @@ class Compiled:
   def _select_renderer(self) -> Renderer:
     assert (rn:=next((self._renderer_name(r) for r in self.renderers if getenv(f"{self.device}_{self._renderer_name(r)}")), None)) is None, \
       f"{self.device}_{rn}=1 is deprecated, use DEV={self.device}:{rn} or {self.device}_CC={rn} instead"
-    rn = DEV.renderer if DEV.device == self.device or not DEV.device else ""
-    # TODO: remove this once DEV supports secondary targets
-    if (cv:=ContextVar._cache.get(f"{self.device}_CC", None)) is not None and cv.value:
-      assert not rn, f"renderer set in DEV and {self.device}_CC"
-      rn = cv.value.upper()
-    renderers = [r for r in self.renderers if self._renderer_name(r) == rn] if rn else self.renderers
+    renderers = [r for r in self.renderers if self._renderer_name(r) == rn] if (rn:=DEV.target(self.device).renderer) else self.renderers
     return select_first_inited(renderers, f"No renderer for {self.device} is available", self.cached_renderer)
 
   def synchronize(self):
@@ -316,7 +311,7 @@ class Compiled:
 # TODO: move this to each Device
 # this only tracks if the dtype is natively supported, it may be supported in the frontend using decomps
 def is_dtype_supported(dtype:DType, device:str|None=None, arch:str|None=None) -> bool:
-  target = DEV.value if device is None else Target(device, "" if (cv:=ContextVar._cache.get(f"{device}_CC", None)) is None else cv.value.upper())
+  target = DEV.target(device) if device is not None else DEV.value
   if dtype == dtypes.bfloat16:
     match target.device:
       case "METAL": return not CI or BENCHMARKS

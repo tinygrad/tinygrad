@@ -4,7 +4,7 @@ START_TIME = time.perf_counter()
 import os, functools, platform, re, contextlib, operator, hashlib, pickle, sqlite3, tempfile, pathlib, string, ctypes, sys, gzip, getpass, gc
 from collections import defaultdict
 import subprocess, shutil, math, types, copyreg, inspect, importlib, decimal, itertools
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import ClassVar, Iterable, Any, TypeVar, Callable, Sequence, TypeGuard, Iterator, Generic, Generator, cast, overload
 
 T = TypeVar("T")
@@ -192,6 +192,14 @@ class _DEV(ContextVar):
   @value.setter
   def value(self, v:str|Target): self._value = v if isinstance(v, Target) else Target.parse(v)
   def __getattr__(self, k): return getattr(self.value, k)
+  # get target for device string
+  def target(self, dev:str) -> Target:
+    t = self.value if self.device == dev or not self.device else Target(device=dev)
+    # TODO: remove this once DEV supports secondary targets
+    if (cv:=ContextVar._cache.get(f"{dev}_CC", None)) is not None and cv.value:
+      assert not t.renderer, f"renderer set in DEV and {dev}_CC"
+      return replace(t, renderer=cv.value.upper())
+    return t
 
 DEV, DEBUG, BEAM, NOOPT = _DEV("DEV", ""), ContextVar("DEBUG", 0), ContextVar("BEAM", 0), ContextVar("NOOPT", 0)
 IMAGE, FLOAT16, OPENPILOT_HACKS = ContextVar("IMAGE", 0), ContextVar("FLOAT16", 0), ContextVar("OPENPILOT_HACKS", 0)
