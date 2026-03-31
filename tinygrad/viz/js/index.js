@@ -199,12 +199,8 @@ function formatCycles(cycles) {
 
 const formatUnit = (d, unit="") => d3.format(".3~s")(d)+unit;
 
-const WAVE_COLORS = {VALU:"#ffffc0", SALU:"#cef263", LOAD:"#ffc0c0", STORE:"#4fa3cc", IMMEDIATE:"#f3b44a", BARRIER:"#d00000", JUMP:"#ffb703",
-  JUMP_NO:"#fb8500", MESSAGE:"#90dbf4", VMEM:"#b2b7c9", LDS:"#9fb4a6", WAVERDY:"#1a2a2a"};
 const waveColor = (op) => {
-  const cat = op.includes("VALU") || op === "VINTERP" ? "VALU" : op.includes("SALU") ? "SALU" : op.includes("VMEM") ? "VMEM"
-            : op.includes("LOAD") || op === "SMEM" ? "LOAD" : op.includes("STORE") ? "STORE" : op;
-  let ret = WAVE_COLORS[cat] ?? "#ffffff";
+  let ret = data.waveColors.find(([pattern]) => op.includes(pattern))?.[1] ?? "#ffffff";
   if (op.includes("OTHER_") || op.includes("_ALT")) { ret = darkenHex(ret, 75) }
   if (op.includes("LDS_")) { ret = darkenHex(ret, 25) }
   return ret
@@ -248,6 +244,11 @@ function tabulate(rows) {
 
 var data, focusedDevice, focusedShape, formatTime, canvasZoom, zoomLevel = d3.zoomIdentity;
 
+const canvasDims = () => {
+  const sideRect = rect("#device-list");
+  return [Math.round(document.querySelector("#profiler").clientWidth-sideRect.width), Math.round(sideRect.height)];
+}
+
 function selectShape(key) {
   if (key == null) return {};
   const [t, idx] = key.split("-");
@@ -256,7 +257,7 @@ function selectShape(key) {
 }
 
 // scaling function for time to pixels
-const timelineScale = () => d3.scaleLinear().domain([data.first, data.dur]).range([0, document.getElementById("timeline").clientWidth])
+const timelineScale = () => d3.scaleLinear().domain([data.first, data.dur]).range([0, canvasDims()[0]]);
 
 function timeAtCycle(clk) {
   if (clk < data.instSt || clk > data.instEt || data.tracks.get("Shader Clock") == null) return "-";
@@ -302,6 +303,8 @@ function setFocus(key) {
     const link = e?.arg.link ?? data.links.get(key);
     data.link = link == null ? null : [key, link];
     focusedShape = key; d3.select("#timeline").call(canvasZoom.transform, zoomLevel);
+    const tooltip = document.getElementById("tooltip");
+    if (tooltip.dataset.key !== key) tooltip.style.display = "none";
   }
   const { eventType, e } = selectShape(key);
   if (metadata.querySelector(".info") == null) d3.select(metadata).html("").append("div").classed("info", true);
@@ -394,6 +397,7 @@ async function renderProfiler(path, opts) {
   const dur = u32(), tracePeak = u64(), indexLen = u32(), layoutsLen = u32(); data.dur = dur;
   const textDecoder = new TextDecoder("utf-8");
   const { strings, dtypeSize, markers, ...extData } = JSON.parse(textDecoder.decode(new Uint8Array(buf, offset, indexLen))); offset += indexLen;
+  for (const [k,v] of Object.entries(extData)) data[k] = v;
   // place devices on the y axis and set vertical positions
   const [tickSize, padding, baseOffset] = [5, 8, markers.length ? 14 : 0];
   const secondaryTick = opts.unit == "clk" ? timeAtCycle : null;
@@ -567,7 +571,7 @@ async function renderProfiler(path, opts) {
     }
   }
   for (const m of markers) m.label = m.name.split(/(\s+)/).map(st => ({ st, color:m.color, width:ctx.measureText(st).width }));
-  if (extData.pcMap != null) data.pcMap = extData.pcMap; setFocus(focusedShape);
+  if (data.pcMap != null) setFocus(focusedShape);
   // secondary axis mapping
   let instRange = null;
   for (const [k, { shapes }] of data.tracks) if (!k.includes("Clock") && path.includes("pkts")) {
@@ -596,7 +600,7 @@ async function renderProfiler(path, opts) {
     const canvasWidth = canvas.clientWidth;
     ctx.clearRect(0, 0, canvasWidth, canvas.clientHeight);
     // rescale to match current zoom
-    const xscale = d3.scaleLinear().domain([data.first, dur]).range([0, canvasWidth]);
+    const xscale = timelineScale();
     const visibleX = xscale.range().map(zoomLevel.invertX, zoomLevel).map(xscale.invert, xscale);
     const st = visibleX[0], et = visibleX[1];
     xscale.domain([st, et]);
@@ -704,9 +708,7 @@ async function renderProfiler(path, opts) {
   }
 
   function resize() {
-    const profiler = document.querySelector("#profiler");
-    const sideRect = rect("#device-list");
-    const width = profiler.clientWidth-(sideRect.width+padding), height = Math.round(sideRect.height);
+    const [width, height] = canvasDims();
     if (canvas.width === width*dpr && canvas.height === height*dpr) return;
     canvas.width = width*dpr;
     canvas.height = height*dpr;
@@ -756,6 +758,7 @@ async function renderProfiler(path, opts) {
       tooltip.style.display = "block";
       tooltip.style.left = (e.pageX+10)+"px";
       tooltip.style.top = (e.pageY)+"px";
+      tooltip.dataset.key = foundRect.key ?? "";
     } else tooltip.style.display = "none";
   });
   canvas.addEventListener("mouseleave", () => document.getElementById("tooltip").style.display = "none");

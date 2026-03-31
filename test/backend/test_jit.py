@@ -73,6 +73,13 @@ class TestJit(unittest.TestCase):
     def add(a, b): return {"billy": a+b}
     _simple_test(add, extract=lambda x: x["billy"])
 
+  def test_jit_input_view(self):
+    @TinyJit
+    def f(x): return (x[2:5].contiguous() + 1).realize()
+    for i in range(5):
+      x = (Tensor.arange(10).float() + i * 10).contiguous().realize()
+      np.testing.assert_allclose(f(x).numpy(), x.numpy()[2:5] + 1)
+
   def test_jit_multiple_outputs(self):
     @TinyJit
     def f(a, b): return (a+b).realize(), (a-b).realize(), (a*b).realize()
@@ -570,7 +577,7 @@ class TestJitPrune(unittest.TestCase):
       a = Tensor.rand(16).realize()
       out = w2_noprune(a)
       np.testing.assert_allclose(out.tolist(), [x*2+y for x,y in zip(weights.tolist(), a.tolist())])
-    assert len(w2_noprune.captured.jit_cache) == 2
+    assert_jit_cache_len(w2_noprune, 2)
 
     for _ in range(3):
       a = Tensor.rand(16).realize()

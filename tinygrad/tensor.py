@@ -1087,6 +1087,7 @@ class Tensor(OpMixin):
   # ***** movement low level ops *****
 
   def _mop(self, op:Ops, arg) -> Tensor: return self._apply_uop(UOp._mop, extra_args=(op,), arg=arg)
+  def _rop(self, op:Ops, axis:tuple[int, ...]) -> Tensor: return self._apply_uop(UOp._rop, op=op, axis=axis)
 
   def _pad_constant(self, pX:tuple[tuple[sint, sint], ...], value:float) -> Tensor:
     # shrink first for negative pads, then pad with only non-negative values
@@ -1616,90 +1617,6 @@ class Tensor(OpMixin):
     return mask.where(value, self)
 
   # ***** reduce ops *****
-
-  def _reduce(self, op:Ops, axis:int|Sequence[int]|None=None, keepdim=False) -> Tensor:
-    axis = tuple(self._resolve_dim(x) for x in (range(self.ndim) if axis is None else make_tuple(axis, 1)))
-    if self.ndim == 0: axis = ()
-    ret = self._apply_uop(UOp.r, op=op, axis=axis)
-    return ret if keepdim else ret.reshape(tuple(s for i,s in enumerate(self.shape) if i not in axis))
-
-  def sum(self, axis:int|Sequence[int]|None=None, keepdim=False, dtype:DTypeLike|None=None) -> Tensor:
-    """
-    Returns the sum of the elements of the tensor along the specified axis or axes.
-
-    You can pass in `axis` and `keepdim` keyword arguments to control the axis along
-    which the maximum is computed and whether the reduced dimensions are retained.
-
-    You can pass in `dtype` keyword argument to control the data type of the accumulation.
-    If not specified, the accumulation data type is chosen based on the input tensor's data type.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor.arange(6).reshape(2, 3)
-    print(t.numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.sum().numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.sum(axis=0).numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.sum(axis=1).numpy())
-    ```
-    """
-    ret = self.cast(sum_acc_dtype(self.dtype) if dtype is None else dtype)._reduce(Ops.ADD, axis, keepdim)
-    return ret.cast(self.dtype) if dtype is None and self.dtype in (dtypes.float16, dtypes.bfloat16, *dtypes.fp8s) else ret
-
-  def prod(self, axis:int|Sequence[int]|None=None, keepdim=False, dtype:DTypeLike|None=None) -> Tensor:
-    """
-    Returns the product of the elements of the tensor along the specified axis or axes.
-
-    You can pass in `axis` and `keepdim` keyword arguments to control the axis along
-    which the maximum is computed and whether the reduced dimensions are retained.
-
-    You can pass in `dtype` keyword argument to control the data type of the accumulation.
-    If not specified, the accumulation data type is chosen based on the input tensor's data type.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor([-1, -2, -3, 1, 2, 3]).reshape(2, 3)
-    print(t.numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.prod().numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.prod(axis=0).numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.prod(axis=1).numpy())
-    ```
-    """
-    return self.cast(dtype if dtype is not None else self.dtype)._reduce(Ops.MUL, axis, keepdim)
-
-  def max(self, axis:int|Sequence[int]|None=None, keepdim=False) -> Tensor:
-    """
-    Returns the maximum value of the tensor along the specified axis or axes.
-
-    You can pass in `axis` and `keepdim` keyword arguments to control the axis along
-    which the maximum is computed and whether the reduced dimensions are retained.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor([[1, 0, 2], [5, 4, 3]])
-    print(t.numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.max().numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.max(axis=0).numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.max(axis=1, keepdim=True).numpy())
-    ```
-    """
-    return self._reduce(Ops.MAX, axis, keepdim)
-
-  def _inverse(self) -> Tensor: return -self if self.is_floating_point() else ~self
 
   def min(self, axis:int|Sequence[int]|None=None, keepdim=False) -> Tensor:
     """
@@ -2477,50 +2394,11 @@ class Tensor(OpMixin):
     return x.conv2d(w.flatten(end_dim=1), groups=groups, bias=bias, dilation=dilation, padding=padding)
 
   def dot(self, w:Tensor, dtype:DTypeLike|None=None) -> Tensor:
-
-    """
-    Performs dot product between two tensors.
-    If `w` is 1-D, it's a sum product over the last axis of `self` and `w`.
-    If `w` is N-D with N>=2, it's a sum product over the last axis of `self` and the second-to-last axis of `w`.
-
-    You can pass in the optional `dtype` keyword argument to control the data type of the accumulation.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    a = Tensor([1, 2, 3])
-    b = Tensor([1, 1, 0])
-    print(a.dot(b).numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    a = Tensor([[1, 2], [3, 4]])
-    b = Tensor([[5, 6], [7, 8]])
-    print(a.dot(b).numpy())
-    ```
-    """
     if IMAGE: return self.image_dot(w, dtype)
     if ASM_GEMM:
       from extra.gemm.cdna_asm_gemm import can_use_asm_gemm, asm_gemm
       if can_use_asm_gemm(self, w): return asm_gemm(self, w)
-    x, dx, dw = self, self.ndim, w.ndim
-    if not (dx > 0 and dw > 0): raise RuntimeError(f"both tensors need to be at least 1D, got {dx}D and {dw}D")
-    if x.shape[-1] != w.shape[axis_w:=-min(w.ndim,2)]: raise RuntimeError(f"cannot dot {x.shape} and {w.shape}")
-    x = x.reshape(*x.shape[0:-1], *[1]*min(dx-1, dw-1, 1), x.shape[-1])
-    w = w.reshape(*w.shape[0:-2], *[1]*min(dx-1, dw-1, 1), *w.shape[axis_w:]).transpose(-1, axis_w)
-    return (x*w).sum(-1, dtype=dtype).cast(least_upper_dtype(x.dtype, w.dtype) if dtype is None else dtype)
-
-  def matmul(self, x:Tensor, reverse=False, dtype:DTypeLike|None=None) -> Tensor:
-    """
-    Performs matrix multiplication between two tensors.
-
-    You can pass in the `reverse` keyword argument to control the order of the matrix multiplication.
-    You can pass in the optional `dtype` keyword argument to control the data type of the accumulation.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    a = Tensor([[1, 2], [3, 4]])
-    b = Tensor([[5, 6], [7, 8]])
-    print(a.matmul(b).numpy())
-    ```
-    """
-    return x.dot(self, dtype=dtype) if reverse else self.dot(x, dtype=dtype)
+    return super().dot(w, dtype=dtype)
 
   def _cumalu(self, axis:int, op:Ops, _include_initial=False) -> Tensor:
     assert self.shape[axis] != 0 and op in (Ops.ADD, Ops.MAX, Ops.MUL)
@@ -2942,27 +2820,6 @@ class Tensor(OpMixin):
     dtype = self.dtype if dtypes.is_float(self.dtype) or (dtypes.is_int(self.dtype) and isinstance(x, (int, InvalidType))) else None
     return Tensor(x, self.device, dtype, requires_grad=False)
 
-  def sub(self, x:Tensor|ConstType, reverse=False) -> Tensor:
-    """
-    Subtracts `x` from `self`.
-    Equivalent to `self - x`.
-    Supports broadcasting to a common shape, type promotion, and integer, float, boolean inputs.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    Tensor.manual_seed(42)
-    t = Tensor.randn(4)
-    print(t.numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.sub(20).numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.sub(Tensor([[2.0], [3.5]])).numpy())
-    ```
-    """
-    a, b = self._broadcasted(x, reverse)
-    return a + (-b)
-
   def div(self, x:Tensor|ConstType|UOp, reverse=False, rounding_mode:Literal["trunc", "floor"]|None=None) -> Tensor:
     """
     Divides `self` by `x`.
@@ -3034,43 +2891,6 @@ class Tensor(OpMixin):
     assert dtypes.is_unsigned(self.dtype) and isinstance(x, int) and x >= 0 and not reverse, f"not supported {self.dtype=} {x=}"
     return self.idiv(2 ** x, reverse)
 
-  def pow(self, x:Tensor|ConstType, reverse=False) -> Tensor:
-    """
-    Computes power of `self` with `x`.
-    Equivalent to `self ** x`.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-1, 2, 3]).pow(2.0).numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-1, 2, 3]).pow(Tensor([-1.5, 0.5, 1.5])).numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print((2.0 ** Tensor([-1, 2, 3])).numpy())
-    ```
-    """
-    base, exponent = self._broadcasted(x, reverse=reverse)
-    # TODO: int pow
-    if not base.is_floating_point() and not (isinstance(x, int) and x >= 0): raise RuntimeError("base needs to be float")
-
-    ret = base._apply_uop(UOp.pow, exponent)
-    # NOTE: pow(int, float) -> int
-    return ret.round().cast(self.dtype) if not reverse and not dtypes.is_float(self.dtype) and dtypes.is_float(exponent.dtype) else ret
-
-  def minimum(self, x:Tensor|ConstType) -> Tensor:
-    """
-    Computes element-wise minimum of `self` and `x`.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-1, 2, 3]).minimum(1).numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-1, 2, 3]).minimum(Tensor([-4, -2, 9])).numpy())
-    ```
-    """
-    t, x = self._broadcasted(x)
-    return t._inverse().maximum(x._inverse())._inverse()
-
   def where(self:Tensor, x:Tensor|ConstType|sint, y:Tensor|ConstType|sint) -> Tensor:
     """
     Returns a tensor of elements selected from either `x` or `y`, depending on `self`.
@@ -3095,47 +2915,26 @@ class Tensor(OpMixin):
     out_shape = _broadcast_shape(self.shape, x.shape)
     return self.cast(dtypes.bool)._broadcast_to(out_shape)._apply_uop(UOp.where, x._broadcast_to(out_shape), y._broadcast_to(out_shape))
 
-  def copysign(self, other) -> Tensor:
-    """
-    Returns a tensor of with the magnitude of `self` and the sign of `other`, elementwise.
-    """
-    # NOTE: torch always return in float, we return based on the broadcasting rule.
-    other = self._broadcasted(other)[1]
-    return self.abs() * ((other < 0) | (other.reciprocal() < 0)).where(-1, 1)
-
-  def logaddexp(self, other) -> Tensor:
-    """
-    Calculates (self.exp()+other.exp()).log(), elementwise.
-    """
-    m = self.maximum(other)
-    return ((self-m).exp() + (self._broadcasted(other)[1]-m).exp()).log() + m
-
   # ***** op wrappers *****
 
   # TODO: combine with UOps __floordiv__
   def __floordiv__(self, x): return self.div(x, rounding_mode="floor")
   def __rfloordiv__(self, x): return self.div(x, rounding_mode="floor", reverse=True)
 
-  def __pow__(self, x) -> Tensor: return self.pow(x)
-  def __matmul__(self, x) -> Tensor: return self.matmul(x)
-
-  def __rpow__(self, x) -> Tensor: return self.pow(x, True)
-  def __rmatmul__(self, x) -> Tensor: return self.matmul(x, True)
-
   def __ifloordiv__(self, x) -> Tensor: return self.assign(self.__floordiv__(x))
-  def __ipow__(self, x) -> Tensor: return self.assign(self.pow(x))
-  def __imatmul__(self, x) -> Tensor: return self.assign(self.matmul(x))
 
   # unlike Tensors, UOps are immutable, so these don't go in mixin
   def __iadd__(self, x) -> Tensor: return self.assign(self.add(x)) # type: ignore[misc]
   def __isub__(self, x) -> Tensor: return self.assign(self.sub(x)) # type: ignore[misc]
   def __imul__(self, x) -> Tensor: return self.assign(self.mul(x)) # type: ignore[misc]
   def __itruediv__(self, x) -> Tensor: return self.assign(self.div(x)) # type: ignore[misc]
+  def __ipow__(self, x) -> Tensor: return self.assign(self.pow(x)) # type: ignore[misc]
   def __iand__(self, x) -> Tensor: return self.assign(self.bitwise_and(x)) # type: ignore[misc]
   def __ior__(self, x) -> Tensor: return self.assign(self.bitwise_or(x)) # type: ignore[misc]
   def __ixor__(self, x) -> Tensor: return self.assign(self.bitwise_xor(x)) # type: ignore[misc]
   def __ilshift__(self, x) -> Tensor: return self.assign(self.lshift(x)) # type: ignore[misc]
   def __irshift__(self, x) -> Tensor: return self.assign(self.rshift(x)) # type: ignore[misc]
+  def __imatmul__(self, x) -> Tensor: return self.assign(self.matmul(x)) # type: ignore[misc]
 
   def __eq__(self, x) -> Tensor: return self.eq(x)                      # type: ignore[override]
 
