@@ -660,22 +660,21 @@ class TestSchedule(unittest.TestCase):
     t = Tensor([1.0, 2.0, 3.0]) ** 8
     self.assertEqual(self._alu_from_tensor(t), [Ops.MUL, Ops.MUL, Ops.MUL])
 
-  def test_any_is_no_alu(self):
+  def test_any_has_no_alu(self):
     t = Tensor([True, False, True]).any()
     self.assertEqual(self._alu_from_tensor(t), [])
 
-  # TODO: all() should be no ALU ops, like any(). currently it's ~(~x).max() which adds two CMPNEs
-  def test_all_is_two_cmpne(self):
+  def test_all_has_no_alu(self):
     t = Tensor([True, False, True]).all()
-    self.assertEqual(self._alu_from_tensor(t), [Ops.CMPNE, Ops.CMPNE])
+    self.assertEqual(self._alu_from_tensor(t), [])
 
   # TODO: min() should be no ALU ops, like max(). currently it's _inverse().max()._inverse() which adds two negations
-  def test_min_float_is_two_mul(self):
+  def test_min_float_has_two_mul(self):
     t = Tensor([1.0, 2.0, 3.0]).min()
     self.assertEqual(self._alu_from_tensor(t), [Ops.MUL, Ops.MUL])
 
   # TODO: min() should be no ALU ops, like max(). currently it's _inverse().max()._inverse() which adds two negations
-  def test_min_int_is_two_xor(self):
+  def test_min_int_has_two_xor(self):
     t = Tensor([1, 2, 3]).min()
     self.assertEqual(self._alu_from_tensor(t), [Ops.XOR, Ops.XOR])
 
