@@ -91,7 +91,18 @@ def _bf8_to_f32(v: UOp) -> UOp:
 def _f32_to_fp8(v: UOp) -> UOp:
   return f2f((v.bitcast(dtypes.float32) if v.dtype != dtypes.float32 else v).bitcast(dtypes.uint32), dtypes.float32, dtypes.fp8e4m3)
 def _f32_to_bf8(v: UOp) -> UOp:
-  return f2f((v.bitcast(dtypes.float32) if v.dtype != dtypes.float32 else v).bitcast(dtypes.uint32), dtypes.float32, dtypes.fp8e5m2)
+  # fp8e5m2 has inf (byte 0x7C) and nan (bytes 0x7D-0x7F) — preserve them before f2f clamps
+  fv = v.bitcast(dtypes.float32) if v.dtype != dtypes.float32 else v
+  bits = fv.bitcast(dtypes.uint32)
+  sign = (bits >> _u32(31)) & _u32(1)
+  exp_bits = bits & _u32(0x7F800000)
+  mant_bits = bits & _u32(0x007FFFFF)
+  is_inf = exp_bits.eq(_u32(0x7F800000)) & mant_bits.eq(_u32(0))
+  is_nan = exp_bits.eq(_u32(0x7F800000)) & mant_bits.ne(_u32(0))
+  normal = f2f(bits, dtypes.float32, dtypes.fp8e5m2)
+  inf_byte = (sign * _u32(128) + _u32(0x7C)).cast(normal.dtype)
+  nan_byte = (sign * _u32(128) + _u32(0x7F)).cast(normal.dtype)
+  return is_inf.where(inf_byte, is_nan.where(nan_byte, normal))
 def _f32_to_bf16(v: UOp) -> UOp:
   """Convert f32 to bf16 with round-to-nearest-even. BF16 is the upper 16 bits of F32 with rounding."""
   bits = (v.bitcast(dtypes.float32) if v.dtype != dtypes.float32 else v).bitcast(dtypes.uint32)

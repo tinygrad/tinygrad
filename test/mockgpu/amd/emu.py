@@ -703,13 +703,8 @@ class _Ctx:
     for dest, val in assigns:
       # VGPR bit-slice assignment: VGPR[lane][reg][hi:lo] = (vgpr_idx, rhs_val, hi, lo[, cond]) -> read-modify-write
       if dest.startswith('VGPR[') and re.search(r'\[\d+:\d+\]', dest):
-        # VGPR bit-slice: (vgpr_idx, rhs_val, hi_bit, lo_bit) - hi/lo are UOp constants
-        hi_bit, lo_bit = int(val[2].arg), int(val[3].arg)
-        width = hi_bit - lo_bit + 1
-        old = self.vgpr.index(val[0].cast(dtypes.int), ptr=True).load()
-        new_val = _set_bits(old, _val_to_bits(val[1]), width, lo_bit).cast(dtypes.uint32)
-        active = _lane_active(exec_mask, lane)
-        raw_stores.append(('vgpr_direct', self.vgpr.index(val[0].cast(dtypes.int), active).store(new_val)))
+        # Collect for deferred merge (multiple conditional bit-slice writes to same VGPR)
+        raw_stores.append(('vgpr_bitslice', val))
         continue
       if 'D0' in dest and '[laneId]' in dest:
         old_vcc = self.rmask(_c(VCC_LO.offset))
@@ -759,6 +754,25 @@ class _Ctx:
         mask = UOp.const(dtypes.uint32, ((1 << width) - 1) << lo_bit)
         result = (result & (mask ^ UOp.const(dtypes.uint32, 0xFFFFFFFF))) | (val_bits << UOp.const(dtypes.uint32, lo_bit))
       lane_stores.append(self.wvgpr_dyn(vdst_reg, lane, result, exec_mask))
+    # Merge conditional VGPR bit-slice writes (e.g. from if/else branches writing different bit ranges of same VGPR)
+    vgpr_bitslice_stores = [s for t, s in raw_stores if t == 'vgpr_bitslice']
+    if vgpr_bitslice_stores:
+      from collections import defaultdict
+      by_idx: dict = defaultdict(list)
+      for val in vgpr_bitslice_stores:
+        idx_key = val[0]  # vgpr_idx UOp
+        by_idx[id(idx_key)].append((idx_key, val))
+      for _, entries in by_idx.items():
+        vgpr_idx = entries[0][0]
+        result = self.vgpr.index(vgpr_idx.cast(dtypes.int), ptr=True).load()
+        for _, val in entries:
+          hi_bit, lo_bit = int(val[2].arg), int(val[3].arg)
+          width = hi_bit - lo_bit + 1
+          new_val = _set_bits(result, _val_to_bits(val[1]), width, lo_bit).cast(dtypes.uint32)
+          cond = val[4] if len(val) > 4 else None
+          result = cond.where(new_val, result) if cond is not None else new_val
+        active = _lane_active(exec_mask, lane)
+        lane_stores.append(self.vgpr.index(vgpr_idx.cast(dtypes.int), active).store(result))
     # VCC/EXEC mask writes must be computed BEFORE VGPR stores to avoid reading modified VGPRs.
     # When vdst overlaps with src operands (e.g. v_add_co_u32 v[0], vcc, s[8], v[0]), the carry
     # computation reads the original source values only if its range loop runs before the VGPR write loop.
