@@ -269,7 +269,8 @@ class Compiled:
   profile_events:list[ProfileEvent] = [ProfileDeviceEvent("CPU")] # NOTE: CPU is the default device.
 
   def __init__(self, device:str, allocator:Allocator, renderers:list[type[Renderer]|functools.partial], runtime, graph=None):
-    self.device, self.allocator, self.runtime, self.graph, self.renderers = device, allocator, runtime, graph, renderers
+    from tinygrad.renderer import Renderer
+    self.device, self.allocator, self.runtime, self.graph, self.renderers = device, allocator, runtime, graph, renderers or [Renderer]
     self.cached_renderer:dict[Any, Renderer] = {}
 
   @property
