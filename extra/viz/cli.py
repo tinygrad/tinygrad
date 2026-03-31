@@ -141,7 +141,7 @@ def main(args) -> None:
     if data.get("src") is not None: print(data["src"])
 
 def get_arg_parser() -> argparse.ArgumentParser:
-  parser = argparse.ArgumentParser()
+  parser = argparse.ArgumentParser(add_help=False)
   g_mode = parser.add_argument_group("mode")
   g_mode.add_argument("--profile", action="store_true", help="View profile")
   g_mode.add_argument("--rewrites", action="store_true", help="View graph rewrites")
@@ -153,6 +153,7 @@ def get_arg_parser() -> argparse.ArgumentParser:
                       default=pathlib.Path(temp("profile.pkl", append_user=True)))
   g_opts.add_argument("--rewrites-path", type=pathlib.Path, metavar="PATH", help="Path to rewrites.pkl (optional file, default: latest rewrites)",
                       default=pathlib.Path(temp("rewrites.pkl", append_user=True)))
+  g_opts.add_argument("-h", "--help", action="help", help="show this help message and exit")
   return parser
 
 if __name__ == "__main__":
