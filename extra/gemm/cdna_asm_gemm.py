@@ -1,5 +1,5 @@
 import atexit, functools, pathlib
-from tinygrad import Tensor, Device, dtypes
+from tinygrad import Tensor, Device, dtypes, Context
 from tinygrad.dtype import AddrSpace
 from tinygrad.uop.ops import UOp, Ops, KernelInfo, AxisType
 from tinygrad.renderer import Estimates
@@ -2695,18 +2695,42 @@ def custom_uop_gemm(C:UOp, A:UOp, B:UOp) -> UOp:
 
 # ** backward gemm, might use the asm gemm
 
+FP8_MAX = 448.0
+def quantize_fp8(x:Tensor):
+  """Quantize tensor to FP8 with dynamic scaling to preserve precision."""
+  scale = FP8_MAX / (x.float().abs().max().detach() + 1e-8)
+  x_scaled = x.float() * scale
+  return x_scaled.cast(dtypes.fp8e4m3), scale.float().reciprocal()
+
 def custom_gemm_bw(gradient:UOp, kernel:UOp, rhs_transposed=False):
   out, a, b = kernel.src[1:]
   assert all_same([gradient.device, a.device, b.device, out.device])
   a_t, b_t, g_t = Tensor(a, device=a.device), Tensor(b, device=a.device), Tensor(gradient, device=a.device)
   # TODO: this needs to be cleaned up and done properly, the batch dim of grad and a multi need to align
   g_t = g_t[:a.shape[0]]
-  if rhs_transposed:
-    grad_a = (g_t @ b_t).uop
-    grad_b = (g_t.permute(2, 0, 1).reshape(g_t.shape[2], -1) @ a_t.reshape(-1, a_t.shape[-1])).uop
+  # For rhs_transposed=True: kernel stores b_input.T (shape N,K), forward computes a @ b_input
+  # b_t = stored = b_input.T, so b_input = b_t.T
+  # grad_a = g @ b_input.T = g @ b_t (since b_t = b_input.T)
+  # grad_b_input = a.T @ g (shape K,N), but we return grad for stored b_t, so grad_b_t = grad_b_input.T = (a.T @ g).T
+  if a.dtype.base == dtypes.fp8e4m3:
+    g_t_fp8, g_scale = quantize_fp8(g_t)
+    # FP8 backward matmuls must use asm_gemm (bf16 accum) to match forward's accumulation behavior
+    with Context(ASM_GEMM=1):
+      if rhs_transposed:
+        # grad_a = g @ b_t where b_t = stored with shape (N, K), result (batch, M, K)
+        grad_a = ((g_t_fp8 @ b_t) * g_scale).cast(a.dtype.base).uop
+        # grad_b_t = (a.T @ g).T = g.T @ a with shape (N, batch*M) @ (batch*M, K) = (N, K)
+        grad_b = ((g_t_fp8.reshape(-1, g_t.shape[-1]).T @ a_t.reshape(-1, a_t.shape[-1])) * g_scale).cast(b.dtype.base).uop
+      else:
+        grad_a = ((g_t_fp8 @ b_t.T) * g_scale).cast(a.dtype.base).uop
+        grad_b = ((a_t.permute(2, 0, 1).reshape(a_t.shape[2], -1) @ g_t_fp8.reshape(-1, g_t.shape[-1])) * g_scale).cast(b.dtype.base).uop
   else:
-    grad_a = (g_t @ b_t.T).uop
-    grad_b = (a_t.permute(2, 0, 1).reshape(a_t.shape[2], -1) @ g_t.reshape(-1, g_t.shape[-1])).uop
+    if rhs_transposed:
+      grad_a = (g_t @ b_t).cast(a.dtype.base).uop
+      grad_b = (g_t.reshape(-1, g_t.shape[-1]).T @ a_t.reshape(-1, a_t.shape[-1])).cast(b.dtype.base).uop
+    else:
+      grad_a = (g_t @ b_t.T).cast(a.dtype.base).uop
+      grad_b = (a_t.permute(2, 0, 1).reshape(a_t.shape[2], -1) @ g_t.reshape(-1, g_t.shape[-1])).cast(b.dtype.base).uop
   return (None, grad_a, grad_b)
 
 # ** main gemm function
