@@ -143,9 +143,9 @@ def main(args) -> None:
 def get_arg_parser() -> argparse.ArgumentParser:
   parser = argparse.ArgumentParser(add_help=False)
   g_mode = parser.add_argument_group("mode")
-  g_mode.add_argument("--profile", action="store_true", help="View profile")
-  g_mode.add_argument("--rewrites", action="store_true", help="View graph rewrites")
-  g_opts = parser.add_argument_group("options")
+  g_mode.add_argument("-p", "--profile", action="store_true", help="View profile")
+  g_mode.add_argument("-r", "--rewrites", action="store_true", help="View graph rewrites")
+  g_opts = parser.add_argument_group("optional args")
   g_opts.add_argument("-s", "--src", type=str, default=None, metavar="NAME", help="Select a data source (default: list all sources)")
   g_opts.add_argument("-i", "--item", type=str, default=None, metavar="NAME", help="Select an item within the source (default: list all items)")
   g_opts.add_argument("--no-color", action="store_true", help="Turn off colored names")
