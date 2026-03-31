@@ -16,8 +16,10 @@ Plug the supported GPU into your Mac over USB4/Thunderbolt.
 
 ### 2. Initiate the driver install
 
+> **Note:** If tinygrad is cloned but not installed, run commands with `PYTHONPATH=.`
+
 ```bash
-PYTHONPATH=. sh extra/setup_tinygpu_osx.sh
+curl -fsSL https://raw.githubusercontent.com/tinygrad/tinygrad/master/extra/setup_tinygpu_osx.sh | sh
 ```
 
 This downloads TinyGPU.app and triggers a system prompt to install the driver extension.
