@@ -1,7 +1,7 @@
 import unittest
 from tinygrad import Tensor, Device, dtypes, Context
 from tinygrad.device import is_dtype_supported
-from tinygrad.helpers import getenv
+from tinygrad.helpers import getenv, system
 from extra.gemm.cdna_asm_gemm import asm_gemm
 from test.helpers import needs_second_gpu
 
@@ -181,6 +181,14 @@ class TestGemmLlama(unittest.TestCase):
   def test_llama3_out1(self): verify_asm_gemm(1, 8192, 128256, 4096, dtype=self.dtype)
   def test_llama3_out2(self): verify_asm_gemm(1, 8192, 4096, 128256, dtype=self.dtype)
   def test_llama3_out3(self): verify_asm_gemm(1, 4096, 128256, 8192, dtype=self.dtype)
+
+def has_hipcc():
+  try: system("hipcc --version")
+  except Exception: return False
+  return True
+
+@unittest.skipUnless(has_hipcc(), "FP8 gemm requires hipcc to compile")
+class TestGemmLlamaFP8(TestGemmLlama): dtype = dtypes.fp8e4m3
 
 class TestMagicGu(unittest.TestCase):
   def test_magicgu_matches_old(self):
