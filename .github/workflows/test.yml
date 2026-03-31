@@ -726,7 +726,7 @@ jobs:
     runs-on: ubuntu-22.04
     timeout-minutes: 15
     env:
-      DEV: AMD${{ matrix.backend == 'amdllvm' && ':LLVM' }}
+      DEV: AMD${{ matrix.backend == 'amdllvm' && ':LLVM' || '' }}
       MOCKGPU: 1
       MOCKGPU_ARCH: ${{ matrix.arch }}
       SKIP_SLOW_TEST: 1
@@ -1013,7 +1013,7 @@ jobs:
           python-version: '3.12'
       - name: Set env
         shell: bash
-        run: printf "DEV=NULL\nNULL_ALLOW_COPYOUT=1\n${{ matrix.backend == 'ir3' && 'NULL_IR3=1' || matrix.backend == 'nak' && 'NULL_NAK=1' }}" >> $GITHUB_ENV
+        run: printf "NULL_ALLOW_COPYOUT=1\n${{ matrix.backend == 'ir3' && 'DEV=NULL:IR3' || matrix.backend == 'nak' && 'DEV=NULL:NAK' }}" >> $GITHUB_ENV
       - name: Run test_ops
         shell: bash
         run: |
@@ -1036,7 +1036,7 @@ jobs:
           python-version: '3.12'
       - name: Set env
         shell: bash
-        run: printf "DEV=NULL\nNULL_ALLOW_COPYOUT=1\nNULL_QCOMCL=1" >> $GITHUB_ENV
+        run: printf "DEV=NULL:QCOMCL\nNULL_ALLOW_COPYOUT=1" >> $GITHUB_ENV
       - name: Run test_ops
         shell: bash
         run: |
