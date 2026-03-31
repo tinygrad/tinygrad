@@ -660,6 +660,22 @@ class TestSchedule(unittest.TestCase):
     t = Tensor([1.0, 2.0, 3.0]) ** 8
     self.assertEqual(self._alu_from_tensor(t), [Ops.MUL, Ops.MUL, Ops.MUL])
 
+  def test_abs_pow_2_is_x_pow_2(self):
+    t = Tensor([1.0, 2.0, 3.0]).abs() ** 2
+    self.assertEqual(self._alu_from_tensor(t), [Ops.MUL])
+
+  def test_abs_pow_2_int_is_x_pow_2(self):
+    t = Tensor([1, 2, 3]).abs() ** 2
+    self.assertEqual(self._alu_from_tensor(t), [Ops.MUL])
+
+  def test_abs_pow_4_is_x_pow_4(self):
+    t = Tensor([1.0, 2.0, 3.0]).abs() ** 4
+    self.assertEqual(self._alu_from_tensor(t), [Ops.MUL, Ops.MUL])
+
+  def test_abs_pow_3_not_simplified(self):
+    t = Tensor([1.0, 2.0, 3.0]).abs() ** 3
+    self.assertIn(Ops.WHERE, self._alu_from_tensor(t))
+
   @unittest.skip("const folding is removed")
   def test_pow_const_tensor_to_zero(self):
     x = Tensor([1,2,3,4])
