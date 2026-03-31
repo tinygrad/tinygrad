@@ -1,4 +1,4 @@
-from typing import Self
+from typing import Self, Sequence
 from tinygrad.mixin.elementwise import ElementwiseMixin
 from tinygrad.mixin.reduce import ReduceMixin
 from tinygrad.uop.ops import _broadcast_shape
@@ -59,3 +59,27 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
 
   def __matmul__(self, x:Self) -> Self: return self.matmul(x)
   def __rmatmul__(self, x:Self) -> Self: return self.matmul(x, True)
+
+  def min(self, axis:int|Sequence[int]|None=None, keepdim=False) -> Self:
+    """
+    Returns the minimum value of the tensor along the specified axis or axes.
+
+    You can pass in `axis` and `keepdim` keyword arguments to control the axis along
+    which the minimum is computed and whether the reduced dimensions are retained.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([[1, 0, 2], [5, 4, 3]])
+    print(t.numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.min().numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.min(axis=0).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.min(axis=1, keepdim=True).numpy())
+    ```
+    """
+    return self._inverse().max(axis=axis, keepdim=keepdim)._inverse()
+

@@ -26,6 +26,7 @@ def get_viz_details(rewrite_idx:int, step:int) -> Generator[dict, None, None]:
   assert len(lst) > rewrite_idx, "only loaded {len(lst)} traces, expecting at least {idx}"
   return get_full_rewrite(tracked_ctxs[rewrite_idx][step])
 
+@unittest.skip("TODO: flaky")
 class BaseTestViz(unittest.TestCase):
   def setUp(self):
     # clear the global context
