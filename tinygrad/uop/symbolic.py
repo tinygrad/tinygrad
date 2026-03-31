@@ -238,6 +238,7 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
   # ALU/variable min==max -> CONST
   (UPat({Ops.CMPLT, Ops.CMPNE, Ops.IDIV, Ops.MOD, Ops.DEFINE_VAR, Ops.SPECIAL}, name="x"),
    lambda x: x.const_like(x.vmin) if x.vmin == x.vmax else None),
+  (UPat(Ops.BIND, src=(UPat(Ops.CONST), UPat(Ops.CONST)), name="x"), lambda x: x.src[1] if x.src[0].arg == x.src[1].arg else None),
   (UPat(Ops.RANGE, src=(UPat(Ops.CONST,)), name="x"), lambda x: x.const_like(x.vmin) if x.vmin == x.vmax else None),
   # max folding
   (UPat.maximum(UPat.var("x"), UPat.var("y")), lambda x,y: x if x.vmin >= y.vmax else y if x.vmax <= y.vmin else None),
