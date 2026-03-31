@@ -2720,6 +2720,7 @@ def asm_gemm(a:Tensor, b:Tensor) -> Tensor:
     a = a.reshape(a.shape[0]*a.shape[1], a.shape[2])
   squeeze = a.ndim == 2
   if squeeze: a = a.unsqueeze(0)
+  out_dtype = dtypes.bfloat16 if a.dtype == dtypes.fp8e4m3 else a.dtype
 
   batch, M, K = a.shape
   N = b.shape[1]
@@ -2730,14 +2731,14 @@ def asm_gemm(a:Tensor, b:Tensor) -> Tensor:
 
   if is_multi:
     if n_sharded:
-      out = Tensor(Tensor.invalid(batch, M, N//len(a.device), dtype=a.dtype, device=a.device).uop.multi(2), device=a.device)
+      out = Tensor(Tensor.invalid(batch, M, N//len(a.device), dtype=out_dtype, device=a.device).uop.multi(2), device=a.device)
     elif m_sharded:
-      out = Tensor(Tensor.invalid(batch, M, N, dtype=a.dtype, device=a.device).uop.multi(1), device=a.device)
+      out = Tensor(Tensor.invalid(batch, M, N, dtype=out_dtype, device=a.device).uop.multi(1), device=a.device)
     else:
-      out = Tensor(Tensor.invalid(batch//len(a.device) if a.uop.axis==0 else batch, M, N, dtype=a.dtype, device=a.device).uop.multi(0),
+      out = Tensor(Tensor.invalid(batch//len(a.device) if a.uop.axis==0 else batch, M, N, dtype=out_dtype, device=a.device).uop.multi(0),
                    device=a.device)
   else:
-    out = Tensor.invalid(batch, M, N, dtype=a.dtype, device=a.device)
+    out = Tensor.invalid(batch, M, N, dtype=out_dtype, device=a.device)
 
   renderer = Device[a.device[0] if is_multi else a.device].renderer
   dname, arch = renderer.device, getattr(renderer, "arch", "")
