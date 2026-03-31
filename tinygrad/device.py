@@ -287,7 +287,7 @@ class Compiled:
   def _select_renderer(self) -> Renderer:
     assert (rn:=next((self._renderer_name(r) for r in self.renderers if getenv(f"{self.device}_{self._renderer_name(r)}")), None)) is None, \
       f"{self.device}_{rn}=1 is deprecated, use DEV={self.device}:{rn} or {self.device}_CC={rn} instead"
-    rn = DEV.renderer if DEV.device == self.device else ""
+    rn = DEV.renderer if DEV.device == self.device or not DEV.device else ""
     # TODO: remove this once DEV supports secondary targets
     if (cv:=ContextVar._cache.get(f"{self.device}_CC", None)) is not None and cv.value:
       assert not rn, f"renderer set in DEV and {self.device}_CC"
