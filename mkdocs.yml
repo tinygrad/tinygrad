@@ -21,7 +21,7 @@ nav:
     - Environment Variables: env_vars.md
     - Runtime:
       - runtime.md
-      - egpu for mac: developer/tinygpu.md
+      - egpu for mac: tinygpu.md
   - Developer:
     - Intro: developer/developer.md
     - Layout: developer/layout.md
