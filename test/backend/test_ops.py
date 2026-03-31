@@ -918,6 +918,12 @@ class TestOps(unittest.TestCase):
     for v in [-1., -0., 0., 1., math.inf, -math.inf, math.nan, -math.nan]:
       # abs(nan) gradient is undefined: torch=0, tinygrad=1, jax=-1
       helper_test_op(None, torch.abs, Tensor.abs, vals=[[v]], forward_only=math.isnan(v))
+  def test_abs_pow_even(self):
+    helper_test_op(None, lambda x: torch.abs(x)**2, lambda x: x.abs()**2, vals=[[-5., -1., -0., 0., 1., 5.]], forward_only=True)
+    helper_test_op(None, lambda x: torch.abs(x)**4, lambda x: x.abs()**4, vals=[[-5., -1., -0., 0., 1., 5.]], forward_only=True)
+    helper_test_op(None, lambda x: torch.abs(x)**2, lambda x: x.abs()**2, vals=[[-5, -1, 0, 1, 5]], forward_only=True, atol=0)
+  def test_abs_pow_odd(self):
+    helper_test_op(None, lambda x: torch.abs(x)**3, lambda x: x.abs()**3, vals=[[-5., -1., -0., 0., 1., 5.]], forward_only=True)
 
   def test_log(self):
     helper_test_op([(45,65)], torch.log, Tensor.log)
