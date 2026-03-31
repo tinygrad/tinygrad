@@ -178,7 +178,7 @@ class ContextVar(Generic[T]):
 
 @dataclass(frozen=True)
 class Target:
-  device: str
+  device: str = ""
   renderer: str = ""
 
   @staticmethod
@@ -186,6 +186,7 @@ class Target:
   def __repr__(self) -> str: return self.device + (":" + self.renderer if self.renderer else "")
 
 class _DEV(ContextVar):
+  _value = Target()
   @property
   def value(self) -> Target: return self._value
   @value.setter
