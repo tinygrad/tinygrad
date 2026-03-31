@@ -199,7 +199,7 @@ class _DEV(ContextVar):
     if (cv:=ContextVar._cache.get(f"{dev}_CC", None)) is not None and cv.value:
       assert not t.renderer, f"renderer set in DEV and {dev}_CC"
       return replace(t, renderer=cv.value.upper())
-    return t
+    return replace(t, device=dev)
 
 DEV, DEBUG, BEAM, NOOPT = _DEV("DEV", ""), ContextVar("DEBUG", 0), ContextVar("BEAM", 0), ContextVar("NOOPT", 0)
 IMAGE, FLOAT16, OPENPILOT_HACKS = ContextVar("IMAGE", 0), ContextVar("FLOAT16", 0), ContextVar("OPENPILOT_HACKS", 0)

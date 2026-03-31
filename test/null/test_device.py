@@ -114,6 +114,13 @@ class TestDevVar(unittest.TestCase):
         self.assertEqual(DEV.value, t)
         self.assertEqual(str(DEV.value), d)
 
+  def test_target(self):
+    with Context(DEV="CPU"): self.assertEqual(DEV.target("CPU"), Target("CPU"))
+    with Context(DEV="CPU:LLVM"): self.assertEqual(DEV.target("CPU"), Target("CPU", "LLVM"))
+    with Context(DEV=":LLVM"): self.assertEqual(DEV.target("CPU"), Target("CPU", "LLVM"))
+    with Context(DEV="AMD:LLVM"): self.assertEqual(DEV.target("CPU"), Target("CPU"))
+    with Context(DEV=""): self.assertEqual(DEV.target("CPU"), Target("CPU"))
+
 class MockCompiler(Compiler):
   def __init__(self, key): super().__init__(key)
   def compile(self, src) -> bytes: return src.encode()
