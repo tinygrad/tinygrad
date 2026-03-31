@@ -62,14 +62,14 @@ def main(args) -> None:
     viz.load_amd_counters(viz.ctxs, events)
     profile["layout"].update([(f'{c["name"]} {s["name"]}', s["data"]) for c in viz.ctxs if c["name"].startswith("SQTT") for s in c["steps"]
                               if s["name"].startswith("PKTS")])
-    if args.source is None:
+    if args.src is None:
       for k in profile["layout"]:
         print(f"  {format_colored(k)}")
       return None
 
     # ** SQTT printer
-    data = get(profile["layout"], args.source)
-    if "SQTT" in args.source:
+    data = get(profile["layout"], args.src)
+    if "SQTT" in args.src:
       # modern terminals support 24-bit color
       def hex_colored(st:str, color:str) -> str: return f"\x1b[38;2;{int(color[1:3],16)};{int(color[3:5],16)};{int(color[5:7],16)}m{st}\x1b[0m"
       print(f"{'Clk':<12} {'Unit':<20} {'Op':<22} {'Dur':<4} {'Delay':<4} {'Info'}")
@@ -123,10 +123,10 @@ def main(args) -> None:
 
   # ** Graph rewrites printer
   rewrites = {c["name"]:{s["name"]:s for s in c["steps"]} for c in viz.ctxs if c.get("steps")}
-  if args.source is None:
+  if args.src is None:
     for k in rewrites: print(f"  {format_colored(k)}")
     return None
-  steps = get(rewrites, args.source)
+  steps = get(rewrites, args.src)
   if args.item is None:
     for k,v in steps.items(): print(" "*v["depth"]+k+(f" - {v['match_count']}" if v.get('match_count', 0) else ''))
   else:
@@ -143,16 +143,16 @@ def main(args) -> None:
 def get_arg_parser() -> argparse.ArgumentParser:
   parser = argparse.ArgumentParser()
   g_mode = parser.add_argument_group("mode")
-  g_mode.add_argument("--profile", action="store_true", help="View profile trace")
-  g_mode.add_argument("--rewrites", action="store_true", help="View rewrites trace")
-  g_common = parser.add_argument_group("common options")
-  g_common.add_argument("-s", "--source", type=str, default=None, metavar="NAME", help="Select a data source (default: list sources)")
-  g_common.add_argument("-i", "--item", type=str, default=None, metavar="NAME", help="Select an item within the source (default: list items)")
-  g_common.add_argument("--no-color", action="store_true", help="Disable colored output")
-  parser.add_argument("--profile-path", type=pathlib.Path, metavar="PATH", help="Path to profile (optional file, default: latest profile)",
-                        default=pathlib.Path(temp("profile.pkl", append_user=True)))
-  parser.add_argument("--rewrites-path", type=pathlib.Path, metavar="PATH", help="Path to rewrites (optional file, default: latest rewrites)",
-                        default=pathlib.Path(temp("rewrites.pkl", append_user=True)))
+  g_mode.add_argument("--profile", action="store_true", help="View profile")
+  g_mode.add_argument("--rewrites", action="store_true", help="View graph rewrites")
+  g_opts = parser.add_argument_group("options")
+  g_opts.add_argument("-s", "--src", type=str, default=None, metavar="NAME", help="Select a data source (default: list all sources)")
+  g_opts.add_argument("-i", "--item", type=str, default=None, metavar="NAME", help="Select an item within the source (default: list all items)")
+  g_opts.add_argument("--no-color", action="store_true", help="Turn off colored names")
+  g_opts.add_argument("--profile-path", type=pathlib.Path, metavar="PATH", help="Path to profile.pkl (optional file, default: latest profile)",
+                      default=pathlib.Path(temp("profile.pkl", append_user=True)))
+  g_opts.add_argument("--rewrites-path", type=pathlib.Path, metavar="PATH", help="Path to rewrites.pkl (optional file, default: latest rewrites)",
+                      default=pathlib.Path(temp("rewrites.pkl", append_user=True)))
   return parser
 
 if __name__ == "__main__":
