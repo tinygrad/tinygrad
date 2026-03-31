@@ -398,7 +398,7 @@ class MovementMixin:
     ```
     """
     if self.ndim != 1: raise ValueError(f"expect input to be 1-D, getting {self.ndim}-D")
-    return self.unsqueeze(-1).pad_to((None, 1+(n:=self.shape[0]))).flatten().shrink(((0,n*n),)).reshape(n,n)
+    return self.unsqueeze(-1).pad_to((None, 1+(n:=self.shape[0]))).flatten().shrink_to((n*n,)).reshape(n,n)
 
   def diagonal(self, offset:int=0, dim1:int=0, dim2:int=1) -> Self:
     """
@@ -421,10 +421,8 @@ class MovementMixin:
     if offset >= 0: x = x.shrink(tuple(None for _ in x.shape[:-1]) + ((offset, x.shape[-1]),))
     else: x = x.shrink(tuple(None for _ in x.shape[:-2]) + ((-offset, x.shape[-2]), None))
     if (d := min(int(x.shape[-2]), int(x.shape[-1]))) <= 0: return x.reshape(*x.shape[:-2], 0)
-    batch = x.shape[:-2]
-    x = x.shrink(tuple(None for _ in batch) + ((0, d), (0, d)))
-    x = x.flatten(-2).pad_to(tuple(None for _ in batch) + (d*(d+1),)).reshape(*batch, d, d+1)
-    return x.shrink(tuple(None for _ in batch) + (None, (0, 1))).reshape(*batch, d)
+    nones, x = tuple(None for _ in x.shape[:-2]), x.shrink_to(tuple(None for _ in x.shape[:-2]) + (d, d))
+    return x.flatten(-2).pad_to(nones+(d*(d+1),)).unflatten(-1, (d, d+1)).shrink_to(nones+(None, 1)).squeeze(-1)
 
   def roll(self, shifts:int|tuple[int, ...], dims:int|tuple[int, ...]|None=None) -> Self:
     """
@@ -443,9 +441,7 @@ class MovementMixin:
     dims, shifts = tuple(self._resolve_dim(d) for d in make_tuple(dims, 1)), make_tuple(shifts, 1)
     if len(dims) != len(shifts): raise RuntimeError(f"{len(dims)=} != {len(shifts)=}")
     shrink_arg: list[tuple[sint, sint]|None] = [None] * self.ndim
-    for dim, shift in zip(dims, shifts):
-      delta = self.shape[dim] - shift % self.shape[dim]
-      shrink_arg[dim] = (delta, delta + self.shape[dim])
+    for d, s in zip(dims, shifts): shrink_arg[d] = (delta:=self.shape[d]-s%self.shape[d], delta+self.shape[d])
     return self.repeat(*tuple(2 if i in dims else 1 for i in range(self.ndim))).shrink(tuple(shrink_arg))
 
   # *** movement ops with expand ***
