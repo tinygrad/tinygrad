@@ -184,7 +184,7 @@ class TestGemmLlama(unittest.TestCase):
 
 def has_hipcc():
   try: system("hipcc --version")
-  except RuntimeError: return False
+  except Exception: return False
   return True
 
 @unittest.skipUnless(has_hipcc(), "FP8 gemm requires hipcc to compile")
