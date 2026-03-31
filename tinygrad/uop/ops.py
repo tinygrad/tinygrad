@@ -454,6 +454,14 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
   def ufix(self, x):
     if isinstance(x, UOp): return x
     return UOp.const(self._resolve_const_dtype(x).base, x, device=self._device, shape=self._shape)
+  def _binop(self, op, x, reverse):
+    if isinstance(x, UOp): return x.alu(op, self) if reverse else self.alu(op, x)
+    x = self.ufix(x)
+    lhs, rhs = (x, self) if reverse else (self, x)
+    if lhs.dtype != rhs.dtype:
+      out_dtype = least_upper_dtype(lhs.dtype, rhs.dtype)
+      lhs, rhs = lhs.cast(out_dtype), rhs.cast(out_dtype)
+    return lhs.alu(op, rhs)
   def broadcast(self, count:int):
     assert self.dtype.vcount == 1
     if count == 1: return self
