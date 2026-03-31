@@ -182,6 +182,8 @@ class TestGemmLlama(unittest.TestCase):
   def test_llama3_out2(self): verify_asm_gemm(1, 8192, 4096, 128256, dtype=self.dtype)
   def test_llama3_out3(self): verify_asm_gemm(1, 4096, 128256, 8192, dtype=self.dtype)
 
+class TestGemmLlamaFP8(TestGemmLlama): dtype = dtypes.fp8e4m3
+
 class TestMagicGu(unittest.TestCase):
   def test_magicgu_matches_old(self):
     from extra.gemm.cdna_asm_gemm import _magicgu_mulhi, TILE_M, TILE_N, TILE_K
