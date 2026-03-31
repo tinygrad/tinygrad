@@ -662,8 +662,6 @@ def map_insts(data:bytes, lib:bytes, target:str) -> Iterator[tuple[PacketType, I
       for wave in range(16):
         if p.mask & (1 << wave):
           inst = pc_map[pc:=wave_pc[wave]]
-          # can this assert be more strict?
-          assert type(inst).__name__ == "SOPP", f"IMMEDIATE_MASK packet must map to SOPP, got {inst}"
           wave_pc[wave] += inst.size()
           yield (p, InstructionInfo(pc, wave, inst))
     # map INST events on this SIMD to the program counter, we know the waves

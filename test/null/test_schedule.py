@@ -660,6 +660,24 @@ class TestSchedule(unittest.TestCase):
     t = Tensor([1.0, 2.0, 3.0]) ** 8
     self.assertEqual(self._alu_from_tensor(t), [Ops.MUL, Ops.MUL, Ops.MUL])
 
+  def test_any_has_no_alu(self):
+    t = Tensor([True, False, True]).any()
+    self.assertEqual(self._alu_from_tensor(t), [])
+
+  def test_all_has_no_alu(self):
+    t = Tensor([True, False, True]).all()
+    self.assertEqual(self._alu_from_tensor(t), [])
+
+  # TODO: min() should be no ALU ops, like max(). currently it's _inverse().max()._inverse() which adds two negations
+  def test_min_float_has_two_mul(self):
+    t = Tensor([1.0, 2.0, 3.0]).min()
+    self.assertEqual(self._alu_from_tensor(t), [Ops.MUL, Ops.MUL])
+
+  # TODO: min() should be no ALU ops, like max(). currently it's _inverse().max()._inverse() which adds two negations
+  def test_min_int_has_two_xor(self):
+    t = Tensor([1, 2, 3]).min()
+    self.assertEqual(self._alu_from_tensor(t), [Ops.XOR, Ops.XOR])
+
   @unittest.skip("const folding is removed")
   def test_pow_const_tensor_to_zero(self):
     x = Tensor([1,2,3,4])

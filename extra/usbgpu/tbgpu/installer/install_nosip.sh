@@ -25,7 +25,7 @@ cd "$(dirname "$0")"
 xcodebuild clean build CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO -alltargets -configuration Debug build
 
 APP_PATH="./build/Debug/TinyGPU.app"
-DEXT_PATH="$APP_PATH/Contents/Library/SystemExtensions/org.tinygrad.tinygpu.edriver.dext"
+DEXT_PATH="$APP_PATH/Contents/Library/SystemExtensions/org.tinygrad.tinygpu.driver2.dext"
 
 # Ad-hoc sign with dev entitlements (matches any GPU)
 codesign --sign - --entitlements ./TinyGPUDriverExtension/TinyGPUDriver.NoSIP.entitlements --force --timestamp --verbose "$DEXT_PATH"

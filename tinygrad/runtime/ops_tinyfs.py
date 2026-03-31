@@ -10,7 +10,7 @@ TINYFS_TIMEOUT = getenv("TINYFS_TIMEOUT", 60)
 class TinyFSDevice(Compiled):
   def __init__(self, device:str):
     self.op = device[len("tinyfs:"):].upper()
-    super().__init__(device, TinyFSAllocator(self), None, None, None)
+    super().__init__(device, TinyFSAllocator(self), [], None, None)
 
     self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     self.sock.connect((TINYFS_ENDPOINT.rsplit(":", 1)[0], int(TINYFS_ENDPOINT.rsplit(":", 1)[1])))
