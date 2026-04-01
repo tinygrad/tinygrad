@@ -61,7 +61,7 @@ def main(args) -> None:
     profile = decode_profile(profile_bytes)
     viz.load_amd_counters(viz.ctxs, events)
     profile["layout"].update([(f'{c["name"]} {s["name"]}', s["data"]) for c in viz.ctxs if c["name"].startswith("SQTT") for s in c["steps"]
-                              if s["name"].startswith("PKTS")])
+                              if "PKTS" in s["name"]])
     if args.src is None:
       for k in profile["layout"]:
         print(f"  {format_colored(k)}")
@@ -88,7 +88,7 @@ def main(args) -> None:
         op_str = hex_colored(op_name, color) if color and not args.no_color else op_name
         phase, delay = None, 0
         idx = next(pkt_idxs.setdefault(e.device, itertools.count()))
-        if e.device.startswith("WAVE") or e.device == "OTHER":
+        if e.device.startswith("WAVE") or e.device == "OTHER_SIMD":
           inst = f"0x{(pc:=int(info.replace('PC:', ''))):05x} {pc_map[pc]}" if info else f"{'':7} {op_name}"
           dispatch_to_inst[f"{e.device}-{idx}"] = (inst, int(e.st))
           phase = "DISPATCH"
