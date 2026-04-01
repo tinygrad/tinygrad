@@ -700,16 +700,13 @@ class _Ctx:
 
     raw_stores: list = []
     vcc_val, exec_val = None, None
+    vgpr_bitslice_pending: dict[int, list[tuple]] = {}  # conditional VGPR bit-slice writes to merge
     for dest, val in assigns:
-      # VGPR bit-slice assignment: VGPR[lane][reg][hi:lo] = (vgpr_idx, rhs_val, hi, lo[, cond]) -> read-modify-write
+      # VGPR bit-slice: collect conditionals to merge (both if/else branches write same reg with different slices)
       if dest.startswith('VGPR[') and re.search(r'\[\d+:\d+\]', dest):
-        # VGPR bit-slice: (vgpr_idx, rhs_val, hi_bit, lo_bit) - hi/lo are UOp constants
         hi_bit, lo_bit = int(val[2].arg), int(val[3].arg)
-        width = hi_bit - lo_bit + 1
-        old = self.vgpr.index(val[0].cast(dtypes.int), ptr=True).load()
-        new_val = _set_bits(old, _val_to_bits(val[1]), width, lo_bit).cast(dtypes.uint32)
-        active = _lane_active(exec_mask, lane)
-        raw_stores.append(('vgpr_direct', self.vgpr.index(val[0].cast(dtypes.int), active).store(new_val)))
+        cond = val[4] if len(val) > 4 else None
+        vgpr_bitslice_pending.setdefault(id(val[0]), []).append((hi_bit, lo_bit, val[0], val[1], cond))
         continue
       if 'D0' in dest and '[laneId]' in dest:
         old_vcc = self.rmask(_c(VCC_LO.offset))
@@ -749,6 +746,18 @@ class _Ctx:
       elif dest.startswith('VCC'): vcc_val = val
       elif dest.startswith('EXEC'): exec_val = val
       elif dest.startswith('SCC'): raw_stores.append(('scc', self.wsgpr_dyn(_c(SCC.offset), _to_u32(val))))
+
+    # merge conditional bit-slice writes: read old value once, apply each slice under its condition, write once
+    for _, slices in vgpr_bitslice_pending.items():
+      vgpr_idx = slices[0][2]
+      old = self.vgpr.index(vgpr_idx.cast(dtypes.int), ptr=True).load()
+      result = old
+      for hi_bit, lo_bit, _, rhs, cond in slices:
+        width = hi_bit - lo_bit + 1
+        candidate = _set_bits(old, _val_to_bits(rhs), width, lo_bit).cast(dtypes.uint32)
+        result = cond.where(candidate, result) if cond is not None else candidate
+      active = _lane_active(exec_mask, lane)
+      raw_stores.append(('vgpr_direct', self.vgpr.index(vgpr_idx.cast(dtypes.int), active).store(result)))
 
     lane_stores = [s for t, s in raw_stores if t in ('vgpr', 'vgpr_s0', 'vgpr_direct')]
     stores, scalar_stores = [], [s for t, s in raw_stores if t == 'scc']

@@ -89,9 +89,22 @@ def _bf8_to_f32(v: UOp) -> UOp:
   return is_sub.where(sub_f32.bitcast(dtypes.float32), normal)
 
 def _f32_to_fp8(v: UOp) -> UOp:
-  return f2f((v.bitcast(dtypes.float32) if v.dtype != dtypes.float32 else v).bitcast(dtypes.uint32), dtypes.float32, dtypes.fp8e4m3)
+  fv = v.bitcast(dtypes.float32) if v.dtype != dtypes.float32 else v
+  bits = fv.bitcast(dtypes.uint32)
+  normal = f2f(bits, dtypes.float32, dtypes.fp8e4m3)
+  # E4M3 has no inf representation, inf/nan -> NaN (FP16_OVFL=0)
+  sign_byte = ((bits >> _u32(24)) & _u32(0x80)).cast(normal.dtype)
+  nan_val = UOp.const(normal.dtype, 0x7F)
+  is_nan, is_inf = _isnan(fv), (bits & _u32(0x7FFFFFFF)).eq(_u32(0x7F800000))
+  return is_nan.where(nan_val, is_inf.where(nan_val | sign_byte, normal))
 def _f32_to_bf8(v: UOp) -> UOp:
-  return f2f((v.bitcast(dtypes.float32) if v.dtype != dtypes.float32 else v).bitcast(dtypes.uint32), dtypes.float32, dtypes.fp8e5m2)
+  fv = v.bitcast(dtypes.float32) if v.dtype != dtypes.float32 else v
+  bits = fv.bitcast(dtypes.uint32)
+  normal = f2f(bits, dtypes.float32, dtypes.fp8e5m2)
+  # E5M2 has inf (0x7C), preserve inf/nan (FP16_OVFL=0)
+  sign_byte = ((bits >> _u32(24)) & _u32(0x80)).cast(normal.dtype)
+  is_nan, is_inf = _isnan(fv), (bits & _u32(0x7FFFFFFF)).eq(_u32(0x7F800000))
+  return is_nan.where(UOp.const(normal.dtype, 0x7F) | sign_byte, is_inf.where(UOp.const(normal.dtype, 0x7C) | sign_byte, normal))
 def _f32_to_bf16(v: UOp) -> UOp:
   """Convert f32 to bf16 with round-to-nearest-even. BF16 is the upper 16 bits of F32 with rounding."""
   bits = (v.bitcast(dtypes.float32) if v.dtype != dtypes.float32 else v).bitcast(dtypes.uint32)
