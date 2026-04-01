@@ -1,11 +1,11 @@
-from typing import Iterator
+from typing import Iterator, Sequence
 import functools, itertools
 from dataclasses import dataclass, field
 from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, graph_rewrite, sint, AxisType, profile_matches
 from tinygrad.uop.ops import consumer_map_from_toposort, gate_kernel_sink
 from tinygrad.uop.symbolic import symbolic, pm_simplify_valid, pm_drop_and_clauses
-from tinygrad.helpers import argsort, all_same, cpu_profile, PCONTIG, colored
+from tinygrad.helpers import argsort, all_same, cpu_profile, PCONTIG, colored, prod
 
 ALWAYS_CONTIGUOUS: set[Ops] = {Ops.CONTIGUOUS, Ops.AFTER, Ops.COPY, Ops.BUFFER, Ops.BUFFER_VIEW,
                      Ops.CONST, Ops.BIND, Ops.DEVICE, Ops.MSELECT, Ops.MSTACK, Ops.PARAM,
@@ -138,6 +138,73 @@ def _reshape_movement_template(in_shape:tuple[sint, ...], out_shape:tuple[sint, 
   prngs = tuple(UOp.range(s, i, AxisType.PLACEHOLDER) for i,s in enumerate(out_shape))
   return prngs, _apply_reshape(in_shape, out_shape, UOp.sink(*prngs).simplify())
 
+def _substitute_template(template:UOp, mapping:dict[UOp, UOp]) -> tuple[UOp, ...]:
+  replaced: dict[UOp, UOp] = {}
+  stack: list[tuple[UOp, bool]] = [(template, False)]
+  while stack:
+    node, visited = stack.pop()
+    if node in replaced: continue
+    if (mapped:=mapping.get(node)) is not None:
+      replaced[node] = mapped
+      continue
+    if visited:
+      new_src = tuple(replaced[s] for s in node.src)
+      replaced[node] = node if new_src == node.src else UOp(node.op, node.dtype, new_src, node.arg, node.tag)
+    else:
+      stack.append((node, True))
+      for s in reversed(node.src):
+        if s not in replaced: stack.append((s, False))
+  return replaced[template].src
+
+def _shape_eq(a:sint, b:sint) -> bool:
+  return (isinstance(a, int) and isinstance(b, int) and a == b) or a is b
+
+def _shape_is_one(s:sint) -> bool:
+  return isinstance(s, int) and s == 1
+
+def _reshape_insert_remove_ones(in_shape:tuple[sint, ...], out_shape:tuple[sint, ...], rngs:tuple[UOp, ...]) -> tuple[UOp, ...]|None:
+  if tuple(s for s in in_shape if not _shape_is_one(s)) != tuple(s for s in out_shape if not _shape_is_one(s)): return None
+  out_rngs = iter(r for r,s in zip(rngs, out_shape) if not _shape_is_one(s))
+  return tuple(next(out_rngs) if not _shape_is_one(s) else UOp.const(dtypes.weakint, 0) for s in in_shape)
+
+def _reshape_linearize(out_shape:tuple[int, ...], rngs:tuple[UOp, ...]) -> UOp:
+  acc: UOp = UOp.const(dtypes.weakint, 0)
+  stride = 1
+  for s,r in zip(out_shape[::-1], rngs[::-1]):
+    acc = r if stride == 1 and acc.arg == 0 else r*stride + acc if stride != 1 else r + acc
+    stride *= s
+  return acc
+
+def _reshape_unlinearize(in_shape:tuple[int, ...], rng:UOp) -> tuple[UOp, ...]:
+  ret: list[UOp] = []
+  curr = rng
+  for i,s in enumerate(in_shape[::-1]):
+    if i == len(in_shape)-1: ret.append(curr)
+    else:
+      ret.append(curr % s)
+      curr //= s
+  return tuple(ret[::-1])
+
+@functools.cache
+def _reshape_fastpath_template(in_shape:tuple[sint, ...], out_shape:tuple[sint, ...]) -> tuple[tuple[UOp, ...], UOp]|None:
+  rngs = tuple(UOp.range(s, i, AxisType.PLACEHOLDER) for i,s in enumerate(out_shape))
+  prefix = 0
+  while prefix < len(in_shape) and prefix < len(out_shape) and _shape_eq(in_shape[prefix], out_shape[prefix]): prefix += 1
+  suffix = 0
+  while suffix < len(in_shape)-prefix and suffix < len(out_shape)-prefix and _shape_eq(in_shape[-1-suffix], out_shape[-1-suffix]): suffix += 1
+
+  mid_in = in_shape[prefix:len(in_shape)-suffix if suffix else len(in_shape)]
+  mid_out = out_shape[prefix:len(out_shape)-suffix if suffix else len(out_shape)]
+  mid_rngs = rngs[prefix:len(rngs)-suffix if suffix else len(rngs)]
+
+  if (fast_mid := _reshape_insert_remove_ones(mid_in, mid_out, mid_rngs)) is not None:
+    return rngs, UOp.sink(*(rngs[:prefix] + fast_mid + (rngs[len(rngs)-suffix:] if suffix else ())))
+  if len(mid_in) == 1 and isinstance(mid_in[0], int) and all(isinstance(s, int) for s in mid_out) and prod(mid_out) == mid_in[0]:
+    return rngs, UOp.sink(*(rngs[:prefix] + (_reshape_linearize(tuple(mid_out), mid_rngs),) + (rngs[len(rngs)-suffix:] if suffix else ())))
+  if len(mid_out) == 1 and isinstance(mid_out[0], int) and all(isinstance(s, int) for s in mid_in) and prod(mid_in) == mid_out[0]:
+    return rngs, UOp.sink(*(rngs[:prefix] + _reshape_unlinearize(tuple(mid_in), mid_rngs[0]) + (rngs[len(rngs)-suffix:] if suffix else ())))
+  return None
+
 # this is the definition of the movement ops
 @functools.cache
 def apply_movement_op(op:Ops, in_shape:tuple[sint,...], arg:tuple, rngs:tuple[UOp, ...]) -> tuple[UOp, ...]:
@@ -148,16 +215,17 @@ def apply_movement_op(op:Ops, in_shape:tuple[sint,...], arg:tuple, rngs:tuple[UO
     case Ops.EXPAND:  rngs = tuple(a if in_sh == out_sh else a.const_like(0) for a,in_sh,out_sh in zip(rngs, in_shape, arg))
     case Ops.PAD:
       prngs, pad_template = _pad_movement_template(in_shape, arg)
-      rngs = pad_template.src if all(a is b for a,b in zip(rngs, prngs)) else pad_template.substitute(dict(zip(prngs, rngs))).src
+      rngs = pad_template.src if all(a is b for a,b in zip(rngs, prngs)) else _substitute_template(pad_template, dict(zip(prngs, rngs)))
     case Ops.RESHAPE:
-      prngs, reshape_template = _reshape_movement_template(in_shape, arg)
-      rngs = reshape_template.src if all(a is b for a,b in zip(rngs, prngs)) else reshape_template.substitute(dict(zip(prngs, rngs))).src
+      if (fast_template:=_reshape_fastpath_template(in_shape, arg)) is not None: prngs, reshape_template = fast_template
+      else: prngs, reshape_template = _reshape_movement_template(in_shape, arg)
+      rngs = reshape_template.src if all(a is b for a,b in zip(rngs, prngs)) else _substitute_template(reshape_template, dict(zip(prngs, rngs)))
     case _: raise RuntimeError(f"{op} is not a MovementOp")
   return rngs
 
-def merge_ending_ranges(consumers:dict[UOp, None], ending_ranges:dict[UOp, list[UOp]]) -> list[UOp]:
+def merge_ending_ranges(consumers:Sequence[UOp], ending_ranges:dict[UOp, list[UOp]]) -> list[UOp]:
   if len(consumers) == 0: return []
-  if len(consumers) == 1: return list(ending_ranges.get(next(iter(consumers)), ()))
+  if len(consumers) == 1: return list(ending_ranges.get(consumers[0], ()))
   merged: list[UOp] = []
   for u in consumers: merged.extend(ending_ranges.get(u, ()))
   return merged

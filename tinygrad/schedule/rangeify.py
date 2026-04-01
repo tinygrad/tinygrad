@@ -1,8 +1,9 @@
 from dataclasses import dataclass, field, replace
+from typing import Callable
 import functools, itertools
 from tinygrad.dtype import dtypes, PtrDType, AddrSpace, Invalid
-from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, _substitute, KernelInfo
-from tinygrad.uop.ops import graph_rewrite, sint, AxisType, BottomUpGate, profile_matches, should_resolve_call, identity_element
+from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, _substitute, _substitute_fast, KernelInfo
+from tinygrad.uop.ops import graph_rewrite, sint, AxisType, profile_matches, should_resolve_call, identity_element
 from tinygrad.uop.symbolic import symbolic
 from tinygrad.helpers import prod, all_same, getenv, dedup, all_int, DEBUG, SPLIT_REDUCEOP, DEBUG_RANGEIFY, VIZ, MAX_KERNEL_BUFFERS
 from tinygrad.helpers import PCONTIG, FLOAT16, OPENPILOT_HACKS, argsort, partition, get_single_element
@@ -58,15 +59,16 @@ def found_after(ctx:dict[UOp, UOp], after:UOp, src:UOp):
 
 @functools.cache
 def _move_index_through_movement_cached(r:UOp, idx:UOp):
-  if r.src[0]._shape is None or len(idx.src[1:]) != len(r.shape): return None
-  rngs = idx.src[1:]
+  base, rngs = r.src[0], idx.src[1:]
+  if base._shape is None or len(rngs) != len(r.shape): return None
+  base_shape, marg = base.shape, r.marg
   match r.op:
-    case Ops.SHRINK:  new_rngs = tuple(a if ss == 0 else a+ss for a,(ss,_) in zip(rngs, r.marg))
-    case Ops.PERMUTE: new_rngs = tuple(rngs[p] for p in argsort(r.marg))
-    case Ops.FLIP:    new_rngs = tuple(((s-1)-a) if f else a for a,s,f in zip(rngs, r.src[0].shape, r.marg))
-    case Ops.EXPAND:  new_rngs = tuple(a if in_sh == out_sh else a.const_like(0) for a,in_sh,out_sh in zip(rngs, r.src[0].shape, r.marg))
-    case _:           new_rngs = apply_movement_op(r.op, r.src[0].shape, r.marg, rngs)
-  return idx.replace(src=(r.src[0],)+new_rngs)
+    case Ops.SHRINK:  new_rngs = tuple(a if ss == 0 else a+ss for a,(ss,_) in zip(rngs, marg))
+    case Ops.PERMUTE: new_rngs = tuple(rngs[p] for p in argsort(marg))
+    case Ops.FLIP:    new_rngs = tuple(((s-1)-a) if f else a for a,s,f in zip(rngs, base_shape, marg))
+    case Ops.EXPAND:  new_rngs = tuple(a if in_sh == out_sh else a.const_like(0) for a,in_sh,out_sh in zip(rngs, base_shape, marg))
+    case _:           new_rngs = apply_movement_op(r.op, base_shape, marg, rngs)
+  return idx.replace(src=(base,)+new_rngs)
 
 def move_index_through_movement(r:UOp, idx:UOp): return _move_index_through_movement_cached(r, idx)
 
@@ -227,7 +229,7 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
   (UPat(Ops.REDUCE_AXIS, name="reduce", src=(UPat.var("x"),)),
    lambda reduce,x: reduce.const_like(identity_element(reduce.arg[0], reduce.dtype)) if x.size == 0 and reduce.size != 0 else None),
   # handle size 0
-  (UPat(GroupOp.All-{Ops.SINK}, name="x"), lambda x: x.const_like(0).rtag(x.tag) if x._shape is not None and x.size == 0 else None),
+  (UPat(GroupOp.All-{Ops.SINK}, name="x"), lambda x: x.const_like(0).rtag(x.tag) if (shape:=x._shape) is not None and prod(int(s.vmax) if isinstance(s, UOp) else s for s in shape) == 0 else None),
 ])
 
 # *****************
@@ -238,27 +240,43 @@ ALWAYS_RUN_OPS = {Ops.CONTIGUOUS, Ops.COPY, Ops.NOOP}
 # you don't know in the first pass if axes are going to die, this happens if there's an EXPAND to the left
 def cleanup_dead_axes(b:UOp):
   # don't optimize ALWAYS_RUN_OPS or AFTER (AFTER is a buffer identity — ranges define consumer access, not computation)
-  if b.src[0].op in ALWAYS_RUN_OPS or b.src[0].op is Ops.AFTER: return None
+  base = b.src[0]
+  if base.op in ALWAYS_RUN_OPS or base.op is Ops.AFTER: return None
 
   new_rng = []
   hit = False
   reshape: list[sint] = []
+  base_ranges = base.ranges
   for s,rng in zip(b.shape, b.src[1:]):
     # skip for symbolic. TODO: fix this
     if rng.op is Ops.RANGE and rng.src[0].op is not Ops.CONST: return None
     # CONSTs are already dead axes
-    if rng.op is Ops.CONST or (rng.op is Ops.RANGE and rng not in b.src[0].ranges):
+    if rng.op is Ops.CONST or (rng.op is Ops.RANGE and rng not in base_ranges):
       reshape.append(1)
       hit = True
     else:
       reshape.append(s)
       new_rng.append(rng)
   if hit:
-    return b.replace(src=b.src[0:1]+tuple(new_rng)).reshape(tuple(reshape)).expand(b.shape)
+    return b.replace(src=(base,)+tuple(new_rng)).reshape(tuple(reshape)).expand(b.shape)
 
-def gate_substitute(ctx, b:UOp) -> None:
-  if not any(r in b.ranges for r in ctx.keys()): raise BottomUpGate()
-pm_gate_substitute = PatternMatcher([(UPat(GroupOp.All, name="b"), gate_substitute)], compiled=False)
+def _ranges_gated_substitute(src:UOp, replaced:dict[UOp, UOp]) -> UOp:
+  keys = tuple(replaced)
+  if len(keys) == 1:
+    key = keys[0]
+    return _substitute_fast(src, replaced, gate=lambda b: key in b.ranges)
+  return _substitute_fast(src, replaced, gate=lambda b: any(r in b.ranges for r in keys))
+
+def _walk_graph(root:UOp, visit:Callable[[UOp], bool], enter_calls=True) -> None:
+  stack = [root]
+  seen: set[UOp] = set()
+  while stack:
+    node = stack.pop()
+    if node in seen: continue
+    seen.add(node)
+    if not visit(node): continue
+    for s in reversed(node.src if enter_calls or node.op is not Ops.CALL else node.src[1:]): stack.append(s)
+
 # if a buffer is being stored just for permutes or something, remove it
 # we want to reexpress the indexes of idx2 in terms of the implied b1
 def remove_bufferize(src:UOp, buf:UOp, idx:UOp):
@@ -285,7 +303,7 @@ def remove_bufferize(src:UOp, buf:UOp, idx:UOp):
       indexes.append(x)
     if x.op is Ops.REDUCE: reduces.append(x)
     return True
-  src.toposort(gate=red_gate)
+  _walk_graph(src, red_gate)
   del red_gate
   accessed_buffers_list = list(accessed_buffers)
 
@@ -298,7 +316,7 @@ def remove_bufferize(src:UOp, buf:UOp, idx:UOp):
     nonlocal buffer_in_reduce
     if x.op in {Ops.PARAM, Ops.BUFFERIZE}: buffer_in_reduce = True
     return not buffer_in_reduce
-  UOp.sink(*[x.src[0] for x in reduces]).toposort(gate=buf_gate)
+  _walk_graph(UOp.sink(*[x.src[0] for x in reduces]), buf_gate)
   del buf_gate
   if buffer_in_reduce:
     if PCONTIG > 2:
@@ -313,7 +331,7 @@ def remove_bufferize(src:UOp, buf:UOp, idx:UOp):
       if not len(is_subs):
         return None
       if len(is_pcontig):
-        ret = src.substitute(dict(is_subs), extra_pm=pm_gate_substitute)
+        ret = _ranges_gated_substitute(src, dict(is_subs))
         return ret.bufferize(*[x[0] for x in is_pcontig], arg=BufferizeOpts(None, AddrSpace.LOCAL)).index(*[x[1] for x in is_pcontig])
     else:
       return None
@@ -322,7 +340,7 @@ def remove_bufferize(src:UOp, buf:UOp, idx:UOp):
   # this is the ranges replaced
   # NOTE: if buf src is a const, we don't replace it. if idx is Invalid (dead load), don't replace it either
   replaced = {k:v for k,v in zip(buf.src[1:], idx.src[1:]) if k.op is not Ops.CONST and not (v.op is Ops.CONST and v.arg is Invalid)}
-  return src.substitute(replaced, extra_pm=pm_gate_substitute)
+  return _ranges_gated_substitute(src, replaced)
 
 def remove_noop_bufferize(idx,b2):
   if idx.src[1:] != b2.src[1:] or idx.src[0].op is Ops.BUFFER_VIEW: return None
@@ -511,7 +529,12 @@ def renumber_range(ctx:LocalAddBufferContext, r:UOp):
   return ret
 
 def find_bufs(x:UOp):
-  idxs = [s for s in x.toposort(gate=lambda x: x.op is not Ops.AFTER) if s.op is Ops.INDEX]
+  idxs: list[UOp] = []
+  def idx_gate(node:UOp):
+    if node.op is Ops.AFTER: return False
+    if node.op is Ops.INDEX: idxs.append(node)
+    return True
+  _walk_graph(x, idx_gate)
   read_from: dict[UOp, Ops] = {}
   if any((buf:=idx.buf_uop).op in {Ops.BUFFER, Ops.PARAM} and read_from.setdefault(buf, op:=idx.src[0].op) is not op for idx in idxs):
     raise RuntimeError(f"cycle detected while indexing {buf}")
@@ -608,13 +631,13 @@ def get_kernel_graph(sink:UOp) -> UOp:
   if VIZ: graph_rewrite(tsink, PatternMatcher([]), name="View Rangeify")
 
   # bufferize -> store
-  lunique_start: int = max([-1]+[x.arg for x in tsink.toposort() if x.op is Ops.LUNIQUE]) + 1
+  lunique_start: int = max((x.arg for x in tsink.toposort() if x.op is Ops.LUNIQUE), default=-1) + 1
   tsink = graph_rewrite(tsink, pm_add_buffers+pm_add_range_tags, ctx=itertools.count(lunique_start), bottom_up=True, name="bufferize to store")
 
-  tsink_after_buffers_topo = tsink.toposort()
-  split_candidate_topo = tsink.toposort(enter_calls=False)
+  tsink_after_buffers_topo = tuple(tsink.toposort())
+  # split_kernels runs after bufferize_to_store, before any CALL nodes are created, so a single full topo covers both uses here.
   has_split_candidates = any((u.op is Ops.END and not u.ranges) or (u.op is Ops.STORE and not u.ranges and u.src[0]._shape is None)
-                             for u in split_candidate_topo)
+                             for u in tsink_after_buffers_topo)
   if has_split_candidates: tsink = graph_rewrite(tsink, split_kernels, bottom_up=True, name="split kernels")
 
   # WAR deps: if kernel U reads buffer S, and S is also written by another kernel, S's write must wait for U to finish

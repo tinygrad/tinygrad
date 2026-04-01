@@ -1,7 +1,8 @@
 import unittest, math
 from tinygrad import dtypes
 from tinygrad.helpers import all_same, Context
-from tinygrad.uop.ops import GroupOp, UOp, Ops, exec_alu, PatternMatcher, TrackedPatternMatcher, UPat
+import tinygrad.uop.ops as ops
+from tinygrad.uop.ops import GroupOp, UOp, Ops, exec_alu, PatternMatcher, TrackedPatternMatcher, UPat, _substitute_fast
 from tinygrad.codegen import full_rewrite_to_sink
 from hypothesis import given, strategies as strat
 
@@ -289,6 +290,78 @@ class TestSubstitute(unittest.TestCase):
     ret = substitute(ret, {a:b})
     # the srcs are rewritten but we keep tag
     self.assertIs(ret, (b+4).replace(tag=1))
+
+  def test_uop_substitute_replacement_graph(self):
+    a = UOp.variable('a', 0, 10)
+    b = UOp.variable('b', 0, 10)
+    c = UOp.variable('c', 0, 10)
+    d = UOp.variable('d', 0, 10)
+    ret = (a + 4).substitute({a:b+c, b:d})
+    self.assertIs(ret, (d+c)+4)
+
+  def test_uop_substitute_rebuilt_node_hits_mapping(self):
+    a = UOp.variable('a', 0, 10)
+    b = UOp.variable('b', 0, 10)
+    c = UOp.variable('c', 0, 10)
+    ret = (a + 4).substitute({a:b, b+4:c})
+    self.assertIs(ret, c)
+
+  def test_substitute_fast_with_gate(self):
+    a = UOp.variable('a', 0, 10)
+    b = UOp.variable('b', 0, 10)
+    c = UOp.variable('c', 0, 10)
+    left, right = a + 1, c + 2
+    ret = _substitute_fast(left + right, {a:b}, gate=lambda node: a in node.toposort())
+    self.assertIs(ret, (b + 1) + right)
+
+  def test_simplify_uses_cache_when_untracked(self):
+    a = UOp.variable('a', 0, 10)
+    expr = a + 0
+    calls = 0
+    orig = ops.graph_rewrite
+    def wrap(*args, **kwargs):
+      nonlocal calls
+      calls += 1
+      return orig(*args, **kwargs)
+    ops.graph_rewrite = wrap
+    try:
+      self.assertIs(expr.simplify(), a)
+      first_calls = calls
+      self.assertGreater(first_calls, 0)
+      self.assertIs(expr.simplify(), a)
+      self.assertEqual(calls, first_calls)
+      self.assertIs(expr.simplify(tracked=True), a)
+      self.assertGreater(calls, first_calls)
+    finally:
+      ops.graph_rewrite = orig
+
+  def test_backward_slice_matches_toposort(self):
+    a = UOp.variable('a', 0, 10)
+    b = UOp.variable('b', 0, 10)
+    c = UOp.variable('c', 0, 10)
+    root = ((a + b) * (a + c)).sin()
+    expected = root.toposort()
+    expected.pop(root)
+    self.assertEqual(set(root.backward_slice), set(expected))
+
+  def test_contains_in_backward_slice_with_self_matches_toposort(self):
+    a = UOp.variable('a', 0, 10)
+    b = UOp.variable('b', 0, 10)
+    c = UOp.variable('c', 0, 10)
+    left = a + b
+    root = (left * (a + c)).sin()
+    self.assertTrue(root.contains_in_backward_slice_with_self(root))
+    self.assertTrue(root.contains_in_backward_slice_with_self(left))
+    self.assertTrue(root.contains_in_backward_slice_with_self(c))
+    self.assertFalse(left.contains_in_backward_slice_with_self(c))
+
+  def test_op_in_backward_slice_with_self_matches_toposort(self):
+    a = UOp.variable('a', 0, 10)
+    b = UOp.variable('b', 0, 10)
+    root = (a + b).sin()
+    self.assertTrue(root.op_in_backward_slice_with_self(Ops.SIN))
+    self.assertTrue(root.op_in_backward_slice_with_self(Ops.ADD))
+    self.assertFalse(a.op_in_backward_slice_with_self(Ops.ADD))
 
 matchers = strat.sampled_from([PatternMatcher, TrackedPatternMatcher])
 

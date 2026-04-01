@@ -55,12 +55,13 @@ class MovementMixin:
     return dim + total if dim < 0 else dim
 
   def _broadcast_to(self, new_shape: tuple[sint, ...]) -> Self:
-    if self.shape == new_shape:
+    shape = self.shape
+    if shape == new_shape:
       return self
-    if self.ndim > len(new_shape):
-      raise ValueError(f"cannot broadcast tensor to fewer dimensions. shape={self.shape} to {new_shape=}")
+    if len(shape) > len(new_shape):
+      raise ValueError(f"cannot broadcast tensor to fewer dimensions. shape={shape} to {new_shape=}")
     # first unsqueeze left with 1s https://data-apis.org/array-api/latest/API_specification/broadcasting.html
-    shape, _ = _align_left(self.shape, new_shape)
+    shape, _ = _align_left(shape, new_shape)
     # for each dimension, check either dim is 1, or it does not change
     if not all(s == ns or s == 1 for s, ns in zip(shape, new_shape)):
       raise ValueError(f"cannot broadcast {self.shape} to {new_shape=}")
@@ -94,16 +95,18 @@ class MovementMixin:
     ```
     """
     # resolve None and args
-    new_shape = tuple([s if s is not None else self.shape[i] for i, s in enumerate(argfix(shape, *args))])
+    self_shape = self.shape
+    new_shape = tuple([s if s is not None else self_shape[i] for i, s in enumerate(argfix(shape, *args))])
     # resolve -1
     if (c := new_shape.count(-1)) > 1:
       raise RuntimeError(f"only one dimension can be inferred using -1, getting {new_shape}")
     if c:
-      new_shape = tuple([-prod(self.shape) // prod(new_shape) if s == -1 else s for s in new_shape])
-    if prod(self.shape) != prod(new_shape):
-      raise ValueError(f"size mismatch, can't reshape ({self.shape}) -> ({new_shape})")
+      new_shape = tuple([-prod(self_shape) // prod(new_shape) if s == -1 else s for s in new_shape])
+    if prod(self_shape) != prod(new_shape):
+      raise ValueError(f"size mismatch, can't reshape ({self_shape}) -> ({new_shape})")
+    if new_shape == self_shape: return self
     ret = self._mop(Ops.RESHAPE, arg=new_shape)
-    return self if ret.shape == self.shape else ret
+    return self if ret.shape == self_shape else ret
 
   def shrink(self, arg: tuple[tuple[sint, sint] | None, ...]) -> Self:
     """
@@ -122,10 +125,13 @@ class MovementMixin:
     print(t.shrink((((0, 2), (0, 2)))).numpy())
     ```
     """
-    if self.ndim != len(arg):
-      raise ValueError(f"{self.ndim=} != {len(arg)=}")
-    ret = self._mop(Ops.SHRINK, arg=[x if x is not None else (0, s) for x, s in zip(arg, self.shape)])
-    return self if ret.shape == self.shape else ret
+    self_shape = self.shape
+    if len(self_shape) != len(arg):
+      raise ValueError(f"{len(self_shape)=} != {len(arg)=}")
+    shrink_arg = tuple(x if x is not None else (0, s) for x, s in zip(arg, self_shape))
+    if all(x == (0, s) for x, s in zip(shrink_arg, self_shape)): return self
+    ret = self._mop(Ops.SHRINK, arg=shrink_arg)
+    return self if ret.shape == self_shape else ret
 
   def permute(self, order, *args) -> Self:
     """
@@ -141,10 +147,11 @@ class MovementMixin:
     print(t.permute(2, 0, 1).shape)
     ```
     """
+    ndim = self.ndim
     order_arg = tuple(self._resolve_dim(x) for x in argfix(order, *args))
-    if sorted(order_arg) != list(range(self.ndim)):
+    if sorted(order_arg) != list(range(ndim)):
       raise RuntimeError(f"order is not a valid permutation, getting {order_arg}")
-    return self._mop(Ops.PERMUTE, arg=order_arg) if order_arg != tuple(range(self.ndim)) else self
+    return self._mop(Ops.PERMUTE, arg=order_arg) if order_arg != tuple(range(ndim)) else self
 
   def flip(self, axis, *args) -> Self:
     """
@@ -162,11 +169,12 @@ class MovementMixin:
     print(t.flip((0, 1)).numpy())
     ```
     """
+    ndim = self.ndim
     axis_arg = tuple(self._resolve_dim(x) for x in argfix(axis, *args))
-    assert all(not isinstance(x, bool) and x >= 0 and x < self.ndim for x in axis_arg), f"flip args must be axis ints {axis_arg}"
+    assert all(not isinstance(x, bool) and x >= 0 and x < ndim for x in axis_arg), f"flip args must be axis ints {axis_arg}"
     if len(axis_arg) != len(dedup(axis_arg)):
       raise RuntimeError(f"dim can appear at most once, getting {axis_arg}")
-    flip_arg = tuple([i in axis_arg for i in range(len(self.shape))])
+    flip_arg = tuple([i in axis_arg for i in range(ndim)])
     return self._mop(Ops.FLIP, arg=flip_arg) if any(flip_arg) else self
 
   # **** high level ****

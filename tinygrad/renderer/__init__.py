@@ -9,6 +9,17 @@ from tinygrad.codegen.opt.tc import TensorCore
 from tinygrad.codegen.opt import Opt
 from tinygrad.device import Compiler
 
+def _walk_graph_to_set(root:UOp, out:set[UOp], gate:Callable[[UOp], bool]|None=None, enter_calls=True) -> None:
+  stack = [root]
+  seen: set[UOp] = set()
+  while stack:
+    node = stack.pop()
+    if node in seen: continue
+    seen.add(node)
+    if gate is not None and not gate(node): continue
+    out.add(node)
+    for s in reversed(node.src if enter_calls or node.op is not Ops.CALL else node.src[1:]): stack.append(s)
+
 @dataclass(frozen=True)
 class Estimates:
   # number of FLOPS used in the Kernel
@@ -32,11 +43,11 @@ class Estimates:
       for u in uops:
         if u.op in {Ops.LOAD, Ops.STORE}:
           # if u.src[0] is INDEX, we have to include the buffer since it might be an AFTER
-          dont_count = dont_count.union((UOp.sink(*u.src[0].src[1:]) if u.src[0].op is Ops.INDEX else u.src[0]).toposort(range_gate))
+          _walk_graph_to_set((UOp.sink(*u.src[0].src[1:]) if u.src[0].op is Ops.INDEX else u.src[0]), dont_count, range_gate)
           # TODO: is this correct? this all needs to be cleaned up
-          if len(u.src) > 2: dont_count = dont_count.union(u.src[2].toposort())
+          if len(u.src) > 2: _walk_graph_to_set(u.src[2], dont_count)
         elif u.op is Ops.IF:
-          dont_count = dont_count.union(u.src[0].toposort())
+          _walk_graph_to_set(u.src[0], dont_count)
     for u in uops:
       if u.op in {Ops.LOAD, Ops.STORE}:
         buf = u

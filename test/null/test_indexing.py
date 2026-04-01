@@ -3,6 +3,10 @@
 import unittest
 
 from tinygrad import Tensor
+from tinygrad.codegen.simplify import flatten_range
+from tinygrad.dtype import dtypes
+from tinygrad.uop.ops import UOp, Ops, AxisType
+from tinygrad.schedule.indexing import apply_movement_op
 
 class TestIndexing(unittest.TestCase):
   def test_single_int(self):
@@ -95,6 +99,47 @@ class TestNumpy(unittest.TestCase):
     a = Tensor.zeros(5, 5)
     self.assertRaises(IndexError, a.__getitem__, ([0, 1], [0, 1, 2]))
     self.assertRaises(IndexError, a.contiguous().__setitem__, ([0, 1], [0, 1, 2]), 0)
+
+class TestRangeifyMovementFastpaths(unittest.TestCase):
+  def test_flatten_range_preserves_range_order(self):
+    r0, r1, r2 = UOp.range(4, 0, AxisType.LOOP), UOp.range(5, 1, AxisType.LOOP), UOp.range(6, 2, AxisType.LOOP)
+    body = UOp.const(dtypes.int, 0)
+    ret = flatten_range(body.end((r0 + r1).simplify(), (r1 + r2).simplify()))
+    self.assertIsNotNone(ret)
+    self.assertEqual(ret.src[1:], (r0, r1, r2))
+
+  def test_reshape_remove_insert_ones(self):
+    r0, r1 = UOp.range(77, 0, AxisType.LOOP), UOp.range(768, 1, AxisType.LOOP)
+    z = UOp.const(dtypes.weakint, 0)
+
+    removed = apply_movement_op(Ops.RESHAPE, (77, 768), (1, 77, 768), (z, r0, r1))
+    self.assertEqual(removed, (r0, r1))
+
+    inserted = apply_movement_op(Ops.RESHAPE, (1, 77, 768, 1), (1, 77, 768), (z, r0, r1))
+    self.assertEqual(inserted, (z, r0, r1, z))
+
+  def test_reshape_single_dim_split(self):
+    r0, r1 = UOp.range(77, 0, AxisType.LOOP), UOp.range(768, 1, AxisType.LOOP)
+    ret = apply_movement_op(Ops.RESHAPE, (59136,), (77, 768), (r0, r1))
+    self.assertEqual(len(ret), 1)
+    self.assertEqual(ret[0].render(), (r0*768 + r1).render())
+
+  def test_reshape_single_dim_split_with_shared_prefix(self):
+    z, r0, r1 = UOp.const(dtypes.weakint, 0), UOp.range(77, 0, AxisType.LOOP), UOp.range(768, 1, AxisType.LOOP)
+    r2, r3 = UOp.range(12, 2, AxisType.LOOP), UOp.range(64, 3, AxisType.LOOP)
+
+    split = apply_movement_op(Ops.RESHAPE, (1, 77, 768), (1, 77, 12, 64), (z, r0, r2, r3))
+    self.assertEqual(len(split), 3)
+    self.assertEqual(split[0], z)
+    self.assertEqual(split[1], r0)
+    self.assertEqual(split[2].render(), (r2*64 + r3).render())
+
+    merged = apply_movement_op(Ops.RESHAPE, (1, 77, 12, 64), (1, 77, 768), (z, r0, r1))
+    self.assertEqual(len(merged), 4)
+    self.assertEqual(merged[0], z)
+    self.assertEqual(merged[1], r0)
+    self.assertEqual(merged[2].render(), (r1//64).render())
+    self.assertEqual(merged[3].render(), (r1%64).render())
 
 if __name__ == '__main__':
   unittest.main()

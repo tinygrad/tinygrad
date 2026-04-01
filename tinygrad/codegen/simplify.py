@@ -9,8 +9,18 @@ def flatten_range(r:UOp) -> UOp|None:
   off = range_start[r.op]
   rngs = r.src[off:]
   if not len(rngs): return None
-  new_rngs = [x for x in UOp.sink(*rngs).toposort() if x.op is Ops.RANGE]
+  new_rngs = tuple(UOp.sink(*rngs).ranges)
   return r.replace(src=r.src[:off]+tuple(new_rngs))
+
+def _walk_ranged_graph(root:UOp, rng:UOp) -> dict[UOp, None]:
+  included: dict[UOp, None] = {}
+  stack = [root]
+  while stack:
+    node = stack.pop()
+    if node in included or rng not in node.ranges: continue
+    included[node] = None
+    stack.extend(reversed(node.src))
+  return included
 
 pm_flatten_range = PatternMatcher([
   # real ranges only
@@ -77,7 +87,7 @@ pm_split_ranges = PatternMatcher([
 
 # **** reduce simplification ****
 
-def no_range(u:UOp) -> bool: return not any(x.op is Ops.RANGE for x in u.backward_slice_with_self)
+def no_range(u:UOp) -> bool: return not u.op_in_backward_slice_with_self(Ops.RANGE)
 
 def reduce_unparented(red:UOp) -> UOp|None:
   if red.arg not in {Ops.ADD, Ops.MAX, Ops.MUL}: return None
@@ -133,7 +143,7 @@ pm_reduce_load_collapse = pm_reduce_collapse + PatternMatcher([
 
 def reduce_collapse(red:UOp, u:UOp, pm:PatternMatcher=pm_reduce_collapse) -> UOp|None:
   for r in red.src[1:]:
-    included = u.toposort(gate=lambda x: r in x.ranges)
+    included = _walk_ranged_graph(u, r)
     if any(x.op in {Ops.STORE, Ops.REDUCE} for x in included): return None
     replaces: dict[UOp, UOp] = {}
     for u in included:
@@ -153,7 +163,7 @@ pm_reduce_simplify = pm_reduce_unparented + PatternMatcher([
   (UPat(Ops.REDUCE, src=(UPat.var("u"),), allow_any_len=True, arg=Ops.ADD, name="red"), reduce_collapse),
 ])
 # remove REDUCE on load, comes from indexing a tensor with another tensor
-def no_load(u:UOp) -> bool: return not any(x.op is Ops.INDEX for x in u.backward_slice_with_self)
+def no_load(u:UOp) -> bool: return not u.op_in_backward_slice_with_self(Ops.INDEX)
 pm_load_collapse = PatternMatcher([
   (UPat(Ops.REDUCE, arg=Ops.ADD, src=(UPat.var("u"), UPat()), name="red"), reduce_load_collapse),
   # we want to make sure we dont do math on a loaded index since that can cause overflow, this undoes the rule in pm_reduce_load_collapse
