@@ -319,11 +319,9 @@ class ElementwiseMixin(DTypeMixin):
     return ((self-m).exp() + (self._broadcasted(other)[1]-m).exp()).log() + m
 
   def where(self, x: Self | ConstType, y: Self | ConstType) -> Self:
-    if isinstance(x, type(self)):
-      return self.alu(Ops.WHERE, x, x.ufix(y))
-    if isinstance(y, type(self)):
-      return self.alu(Ops.WHERE, y.ufix(x), y)
-    raise RuntimeError("where needs at least one UOp arg")
+    ref: Self = x if isinstance(x, type(self)) else y if isinstance(y, type(self)) else \
+      self.cast(least_upper_dtype(dtypes.from_py(x), dtypes.from_py(y)))
+    return self.alu(Ops.WHERE, ref.ufix(x), ref.ufix(y))
 
   def threefry(self, seed: Self) -> Self:
     return self.alu(Ops.THREEFRY, seed)
