@@ -27,7 +27,7 @@ def run_asm_gemm(a_shape, b_shape, dtype=dtypes.float16, a_shard=None, b_shard=N
   Tensor.realize(tst, a.grad, b.grad)
 
   a_ref, b_ref = a_rand.clone().requires_grad_(), b_rand.clone().requires_grad_()
-  # do reference gemm in bf16 for fp8, adjusting atol for quantization step size
+  # do reference gemm in bf16 for fp8, adjusting atol for quantization effects
   if a_ref.dtype == FP8_DTYPE:
     a_ref = a_ref.cast(dtypes.bfloat16)
     b_ref = b_ref.cast(dtypes.bfloat16)
@@ -42,9 +42,6 @@ def run_asm_gemm(a_shape, b_shape, dtype=dtypes.float16, a_shard=None, b_shard=N
   atol, rtol = (2e-1, 1e-2) if dtype == dtypes.bfloat16 else (16, 1e-2) if dtype == FP8_DTYPE else (1e-2, 1e-3)
   with Context(DEBUG=0):
     assert tst.allclose(ref, atol=atol, rtol=rtol), "forward mismatch"
-    import numpy as np
-    np.testing.assert_allclose(a.grad.numpy(), a_ref.grad.numpy(), atol=atol, rtol=rtol)
-    np.testing.assert_allclose(b.grad.numpy(), b_ref.grad.numpy(), atol=atol, rtol=rtol)
     assert a.grad.allclose(a_ref.grad, atol=atol, rtol=rtol), "grad_a mismatch"
     assert b.grad.allclose(b_ref.grad, atol=atol, rtol=rtol), "grad_b mismatch"
 

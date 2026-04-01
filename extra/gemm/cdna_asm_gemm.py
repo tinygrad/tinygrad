@@ -2656,7 +2656,7 @@ atexit.register(_asm_gemm_report)
 
 def can_use_asm_gemm(a:Tensor, b:Tensor) -> bool:
   if a.dtype != b.dtype: return todo(f"dtypes must match {a.dtype} != {b.dtype}")
-  if a.dtype not in {dtypes.bfloat16, dtypes.float16, dtypes.fp8e4m3}: return todo(f"only bfloat16/float16/fp8, got {a.dtype}")
+  if a.dtype not in {dtypes.bfloat16, dtypes.float16, FP8_DTYPE}: return todo(f"only bfloat16/float16/fp8, got {a.dtype}")
   batch, M, K = (1, *a.shape) if a.ndim == 2 else a.shape
   N = b.shape[1]
   if isinstance(a.device, tuple):
@@ -2702,8 +2702,8 @@ def custom_gemm_bw(gradient:UOp, kernel:UOp):
   a_t, b_t, g_t = Tensor(a, device=a.device), Tensor(b, device=a.device), Tensor(gradient, device=a.device)
   # TODO: this needs to be cleaned up and done properly, the batch dim of grad and a multi need to align
   g_t = g_t[:a.shape[0]]
-  # the FP8 gemm computes A @ B.T, so b_t is transposed; gradients stay in bf16 like the forward output
-  if a.dtype.base == dtypes.fp8e4m3:
+  # the FP8 gemm computes A @ B.T, gradients stay in bf16 like the forward output
+  if a.dtype.base == FP8_DTYPE:
     g_t_fp8, g_scale = quantize_fp8(g_t)
     grad_a = ((g_t_fp8 @ b_t) * g_scale).cast(dtypes.bfloat16).uop
     grad_b = ((g_t_fp8.reshape(-1, g_t.shape[-1]).T @ a_t.reshape(-1, a_t.shape[-1])) * g_scale).cast(dtypes.bfloat16).uop
@@ -2723,7 +2723,7 @@ def asm_gemm(a:Tensor, b:Tensor) -> Tensor:
     a = a.reshape(a.shape[0]*a.shape[1], a.shape[2])
   squeeze = a.ndim == 2
   if squeeze: a = a.unsqueeze(0)
-  out_dtype = dtypes.bfloat16 if a.dtype == dtypes.fp8e4m3 else a.dtype
+  out_dtype = dtypes.bfloat16 if a.dtype == FP8_DTYPE else a.dtype
 
   batch, M, K = a.shape
   N = b.shape[1]
@@ -2747,7 +2747,7 @@ def asm_gemm(a:Tensor, b:Tensor) -> Tensor:
   dname, arch = renderer.device, getattr(renderer, "arch", "")
   if arch.startswith("gfx950") and getenv("USE_ASM", 1):
     # the FP8 gemm computes a @ b.T
-    if a.dtype == dtypes.fp8e4m3:
+    if a.dtype == FP8_DTYPE:
       out = Tensor.custom_kernel(out, a, b.T, fxn=functools.partial(custom_hk_fp8_gemm, dname=dname), grad_fxn=custom_gemm_bw)[0]
     else:
       out = Tensor.custom_kernel(out, a, b, fxn=functools.partial(custom_asm_gemm, dname=dname), grad_fxn=custom_gemm_bw)[0]
