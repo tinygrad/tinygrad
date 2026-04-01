@@ -105,7 +105,7 @@ class DiskAllocator(Allocator):
       for off in range(0, total_copy_size, seg_len):
         while (copy_batch := _get_free_buf()) is None: pass
         read_size = min(seg_len, total_copy_size - off)
-        self._copyout(local_buf[:read_size], DiskBuffer(src.device, read_size, fd_offset + off))
+        self._copyout(local_buf[:read_size].cast('B'), DiskBuffer(src.device, read_size, fd_offset + off))
         copy_batch[0].view(size=read_size)[:] = local_buf[:read_size]
         real_copy_size = min(read_size - minor_offset, size - copied_in)
         yield (copy_batch, copied_in, minor_offset, real_copy_size)
