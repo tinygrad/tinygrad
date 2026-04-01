@@ -620,7 +620,7 @@ class NVDevice(HCQCompiled[NVSignal]):
 
     renderers:list[type[Renderer]|functools.partial] = [
       functools.partial(CUDARenderer, self.arch), functools.partial(PTXRenderer, self.arch, device="NV"),
-      functools.partial(NVCCRenderer, self.arch), functools.partial(NAKRenderer, self.arch, self.max_warps_per_sm)
+      functools.partial(NVCCRenderer, self.arch), functools.partial(NAKRenderer, self.arch)
     ]
     super().__init__(device, NVAllocator(self), renderers, functools.partial(NVProgram, self), NVSignal, NVComputeQueue, NVCopyQueue)
 
