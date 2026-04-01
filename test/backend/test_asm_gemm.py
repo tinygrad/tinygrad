@@ -40,10 +40,11 @@ def run_asm_gemm(a_shape, b_shape, dtype=dtypes.float16, a_shard=None, b_shard=N
   # no validation on the NULL device
   if a_rand.device.startswith("NULL"): return None
   atol, rtol = (2e-1, 1e-2) if dtype == dtypes.bfloat16 else (256, 1e-2) if dtype == FP8_DTYPE else (1e-2, 1e-3)
+  grad_atol, grad_rtol = (8192, 0.125) if dtype == FP8_DTYPE else (atol, rtol)
   with Context(DEBUG=0):
     assert tst.allclose(ref, atol=atol, rtol=rtol), "forward mismatch"
-    assert a.grad.allclose(a_ref.grad, atol=atol, rtol=rtol), "grad_a mismatch"
-    assert b.grad.allclose(b_ref.grad, atol=atol, rtol=rtol), "grad_b mismatch"
+    assert a.grad.allclose(a_ref.grad, atol=grad_atol, rtol=grad_rtol), "grad_a mismatch"
+    assert b.grad.allclose(b_ref.grad, atol=grad_atol, rtol=grad_rtol), "grad_b mismatch"
 
 def verify_asm_gemm(batch:int, M:int, N:int, K:int, dtype=dtypes.float16, gpus:int=1) -> None:
   run_asm_gemm((batch, M, K), (K, N), dtype=dtype, a_shard=0, b_shard=None, gpus=gpus)

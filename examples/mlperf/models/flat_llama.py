@@ -160,12 +160,12 @@ def _get_pads(uop:UOp) -> list[UOp]:
 def apply_grad(grad_buf:Tensor, new_grad:UOp):
   pads = _get_pads(new_grad)
   if len(pads) <= 1:
-    store = grad_buf.uop.store(grad_buf.uop + new_grad)
+    store = grad_buf.uop.store((grad_buf.uop + new_grad).cast(grad_buf.dtype))
     grad_buf.uop = grad_buf.uop.after(store)
     return
   sorted_pads = sorted(pads, key=lambda p: p.marg[0][0] if p.op == Ops.PAD else 0)
   inners = [Tensor(p.src[0] if p.op == Ops.PAD else p, device=grad_buf.device) for p in sorted_pads]
-  grad_buf.assign(grad_buf + inners[0].cat(*inners[1:], dim=0))
+  grad_buf.assign((grad_buf + inners[0].cat(*inners[1:], dim=0)).cast(grad_buf.dtype))
 
 if __name__ == "__main__":
   config = {}
