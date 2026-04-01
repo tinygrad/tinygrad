@@ -61,7 +61,7 @@ def block_128x128_gemm(c:UOp, a:UOp, b:UOp) -> UOp:
 
   # accumulator (unified: both paths use (TM, TN) with scalar dtypes.float)
   acc = UOp.placeholder((TM, TN), dtypes.float, slot=2, addrspace=AddrSpace.REG)
-  acc = acc.after(acc.store(UOp.const(dtypes.float, 0).reshape((1,)*len(acc.shape)).expand(acc.shape)))
+  acc = acc.after(acc.store(acc.zeros_like()))
 
   if use_wmma:
     k = UOp.range(BLOCK_K // WMMA_K, 101, AxisType.REDUCE)

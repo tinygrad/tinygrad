@@ -4,14 +4,12 @@ from tinygrad.uop import Ops
 from tinygrad.dtype import dtypes, ConstType, least_upper_dtype, least_upper_float
 from tinygrad.helpers import polyN
 from tinygrad.mixin.dtype import DTypeMixin
+from tinygrad.mixin.creation import CreationMixin
 
 
-class ElementwiseMixin(DTypeMixin):
+class ElementwiseMixin(DTypeMixin, CreationMixin):
   # required to implement
   def alu(self, op: Ops, *src: Self) -> Self:
-    raise NotImplementedError
-
-  def const_like(self, b: ConstType) -> Self:
     raise NotImplementedError
 
   def _broadcasted(self, y: Self | ConstType, reverse: bool = False) -> tuple[Self, Self]:
