@@ -369,7 +369,7 @@ class Transformer:
       # chunked prefill: keep processing until all prompt tokens are consumed
       if start_pos < len(tokens): continue
       tokens.append(int(out.item()))
-      self._cached_tokens = tokens[:]
+      self._cached_tokens = tokens[:-1]
       yield tokens[-1]
 
 models = {

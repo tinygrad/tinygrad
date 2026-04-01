@@ -10,7 +10,7 @@ from tinygrad.device import Compiled, BufferSpec
 from tinygrad.renderer import Renderer
 from tinygrad.helpers import getenv, mv_address, round_up, data64, data64_le, prod, OSX, hi32, lo32, PROFILE, ContextVar, VIZ, ProfileEvent
 from tinygrad.renderer.ptx import PTXRenderer
-from tinygrad.renderer.cstyle import CUDARenderer
+from tinygrad.renderer.cstyle import CUDARenderer, NVCCRenderer
 from tinygrad.runtime.autogen import nv_570, nv_580, mesa
 from tinygrad.runtime.support.elf import elf_loader
 from tinygrad.runtime.support.nv.nvdev import NVDev, NVMemoryManager
@@ -620,7 +620,7 @@ class NVDevice(HCQCompiled[NVSignal]):
 
     renderers:list[type[Renderer]|functools.partial] = [
       functools.partial(CUDARenderer, self.arch), functools.partial(PTXRenderer, self.arch, device="NV"),
-      functools.partial(NAKRenderer, self.arch, self.max_warps_per_sm), functools.partial(CUDARenderer, self.arch, use_nvcc=True)
+      functools.partial(NVCCRenderer, self.arch), functools.partial(NAKRenderer, self.arch, self.max_warps_per_sm)
     ]
     super().__init__(device, NVAllocator(self), renderers, functools.partial(NVProgram, self), NVSignal, NVComputeQueue, NVCopyQueue)
 

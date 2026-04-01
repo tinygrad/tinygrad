@@ -28,6 +28,13 @@ The columns of this list are are: Variable, Possible Value(s) and Description.
 
 These control the behavior of core tinygrad even when used as a library.
 
+### DEV variable
+
+The `DEV` variable deserves special note due to its more nuanced syntax.
+`DEV` is used to specify the target device and target renderer for said device, separated by colons.
+Specifying the renderer is optional, omitting a preference will cause tinygrad to automatically select a renderer from those
+available on the system. Some example values for `DEV` are: `AMD`, `AMD:LLVM`, `NV:PTX`, etc.
+
 Variable | Possible Value(s) | Description
 ---|---|---
 DEBUG               | [1-7]      | enable debugging output (operations, timings, speed, generated code and more)

@@ -91,3 +91,47 @@ class ReduceMixin(DTypeMixin, MovementMixin):
     ```
     """
     return self._reduce(Ops.MAX, axis, keepdim)
+
+  def any(self, axis:int|Sequence[int]|None=None, keepdim=False) -> Self:
+    """
+    Tests if any element evaluates to `True` along the specified axis or axes.
+
+    You can pass in `axis` and `keepdim` keyword arguments to control the reduce axis and whether the reduced dimensions are retained.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([[True, True], [True, False], [False, False]])
+    print(t.numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.any().numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.any(axis=0).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.any(axis=1, keepdim=True).numpy())
+    ```
+    """
+    return self.bool().max(axis, keepdim)
+
+  def all(self, axis:int|Sequence[int]|None=None, keepdim=False) -> Self:
+    """
+    Tests if all element evaluates to `True` along the specified axis or axes.
+
+    You can pass in `axis` and `keepdim` keyword arguments to control the reduce axis and whether the reduced dimensions are retained.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([[True, True], [True, False], [False, False]])
+    print(t.numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.all().numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.all(axis=0).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.all(axis=1, keepdim=True).numpy())
+    ```
+    """
+    return self.bool().prod(axis, keepdim)
