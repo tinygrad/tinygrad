@@ -164,11 +164,11 @@ class NIRRenderer(Renderer):
     (UPat(Ops.ENDIF, name="x"), lambda ctx,x: (lambda _: mesa.nir_def())(mesa.nir_pop_if(ctx.b, ctx.r[x.src[0]])))
   ])
 
-  def __reduce__(self): return self.__class__, self.args
+  def __reduce__(self): return self.__class__, (self.arch,)
 
-  def __init__(self, *args):
-    self.compiler = fromimport("tinygrad.runtime.support.compiler_mesa", self.__class__.__name__.replace("Renderer", "Compiler"))(*args)
-    self.args = args
+  def __init__(self, arch:str):
+    self.arch = arch
+    self.compiler = fromimport("tinygrad.runtime.support.compiler_mesa", self.__class__.__name__.replace("Renderer", "Compiler"))(arch)
     if hasattr(self.compiler, "nir_options"): self.nir_options = self.compiler.nir_options
     mesa.glsl_type_singleton_init_or_ref()
 
