@@ -1,5 +1,5 @@
 import atexit, functools, pathlib
-from tinygrad import Tensor, Device, dtypes, Context
+from tinygrad import Tensor, Device, dtypes
 from tinygrad.dtype import AddrSpace
 from tinygrad.uop.ops import UOp, Ops, KernelInfo, AxisType
 from tinygrad.renderer import Estimates
