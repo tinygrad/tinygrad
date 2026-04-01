@@ -41,5 +41,5 @@ class NullDevice(Compiled):
       case _: raise RuntimeError(f"can't EMULATE device: {EMULATE.value}")
     # adreno 630, 5090
     renderers:list[type[Renderer]|functools.partial] = [renderer, functools.partial(QCOMCLRenderer, 0x6030001),
-                                                        functools.partial(IR3Renderer, 0x6030001), functools.partial(NAKRenderer, "sm_120", 48)]
+                                                        functools.partial(IR3Renderer, "a630"), functools.partial(NAKRenderer, "sm_120")]
     super().__init__(device, NullAllocator(self), renderers, functools.partial(NullProgram, device), NullGraph)
