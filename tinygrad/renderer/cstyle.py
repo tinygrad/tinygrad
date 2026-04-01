@@ -475,17 +475,18 @@ class AMDHIPRenderer(CStyleLanguage):
 
   @staticmethod
   def get_tensor_cores(arch):
-    return {"gfx942": tc.amd_cdna3, "gfx950": tc.amd_cdna4, "gfx1200": tc.amd_rdna4, "gfx1201": tc.amd_rdna4}.get(arch.split(":")[0], tc.amd_rdna3)
+    return {"gfx942": tc.amd_cdna3, "gfx950": tc.amd_cdna4, "gfx1200": tc.amd_rdna4, "gfx1201": tc.amd_rdna4}.get(arch, tc.amd_rdna3)
   @staticmethod
   def is_cdna(arch): return arch.split(":")[0] in {"gfx942", "gfx950"}
   @staticmethod
   def is_cdna4(arch): return arch.split(":")[0] == "gfx950"
-  def __init__(self, arch:str): # gfx942 => MI300, gfx1100 => RX 7900, gfx1201 => RX 9700
+  def __init__(self, target:Target): # gfx942 => MI300, gfx1100 => RX 7900, gfx1201 => RX 9700
+    super().__init__(target)
     from tinygrad.runtime.support.compiler_amd import HIPCompiler
-    self.arch, self.compiler = arch, HIPCompiler(arch)
-    self.tensor_cores = self.get_tensor_cores(arch)
-    if not self.is_cdna4(self.arch): self.extra_matcher += pm_manual_bf16_cast + extra_pm
-    if self.is_cdna(self.arch):
+    self.compiler = HIPCompiler(target.arch)
+    self.tensor_cores = self.get_tensor_cores(target.arch)
+    if not self.is_cdna4(target.arch): self.extra_matcher += pm_manual_bf16_cast + extra_pm
+    if self.is_cdna(target.arch):
       self.string_rewrite = PatternMatcher([
         (UPat(Ops.WMMA, name="x"), lambda ctx,x: f"__{x.arg[0]}({ctx[x.src[0]]}, {ctx[x.src[1]]}, {ctx[x.src[2]]},"
           f" {fp8_index(x.src[0].dtype)}, {fp8_index(x.src[0].dtype)}, 0, 0, 0, 0)" if x.arg[1][2] == 128 else None),
@@ -495,7 +496,6 @@ class AMDHIPRenderer(CStyleLanguage):
         (UPat(Ops.CAST, dtypes.float, (UPat.var("y", dtypes.fp8s),), name="x",),
           lambda ctx,x,y: f"__builtin_amdgcn_cvt_f32_{('fp8', 'bf8')[fp8_index(y.dtype)]}((unsigned int){ctx[x.src[0]]}, 0)"),
       ]) + base_rewrite
-  def __reduce__(self): return self.__class__, (self.arch,)
 
   # https://clang.llvm.org/docs/AttributeReference.html#amdgpu-flat-work-group-size
   # NOTE: this makes hlb_cifar10 twice as fast, there may be more gains in tweaking these parameters
@@ -565,10 +565,10 @@ class AMDHIPRenderer(CStyleLanguage):
 
 class HIPRenderer(AMDHIPRenderer): device = "HIP"
 class AMDHIPCCRenderer(AMDHIPRenderer):
-  def __init__(self, arch:str):
+  def __init__(self, target:Target):
+    super().__init__(target)
     from tinygrad.runtime.support.compiler_amd import HIPCCCompiler
-    super().__init__(arch)
-    self.compiler = HIPCCCompiler(arch)
+    self.compiler = HIPCCCompiler(target.arch)
 
 class QCOMCLRenderer(OpenCLRenderer):
   device = "QCOM"

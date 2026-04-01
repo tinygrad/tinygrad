@@ -261,6 +261,7 @@ exit: %packed = phi i32 [%packed_bf8, %do_bf8], [%packed_fp8, %do_fp8]\n  %trunc
                   f'"amdgpu-flat-work-group-size"="1,{requiredMaxThreadsPerBlock}"', '"no-trapping-math"="true"']
     return 'attributes #0 = { ' + ' '.join(attributes) + ' }'
   def __init__(self, target:Target):
+    super().__init__(target)
     from tinygrad.runtime.support.compiler_amd import AMDLLVMCompiler
     self.compiler = AMDLLVMCompiler(target.arch)
     self.tensor_cores = AMDHIPRenderer.get_tensor_cores(target.arch)
