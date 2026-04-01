@@ -1282,7 +1282,7 @@ def train_bert():
         previous_step = i
 
 def train_llama3():
-  from examples.mlperf.models.flat_llama import FlatTransformer, apply_grad
+  from examples.mlperf.models.flat_llama import FlatTransformer, apply_grad, FP8_DTYPE
   from examples.llama3 import MODEL_PARAMS
   from examples.mlperf.lr_schedulers import CosineAnnealingLRWithWarmup
   from examples.mlperf.optim import GradAccClipAdamW
@@ -1416,9 +1416,10 @@ def train_llama3():
   optim = GradAccClipAdamW(params, lr=0.0, b1=opt_adamw_beta_1, b2=opt_adamw_beta_2,
                            eps=opt_adamw_epsilon, weight_decay=opt_adamw_weight_decay, grad_acc=grad_acc, device=optim_device)
 
-  # init grads
+  # init grads (fp8 weight grads are fp8e5m2 per spec)
   for p in optim.params:
-    p.grad = Tensor.zeros_like(p).contiguous()
+    grad_dtype = dtypes.fp8e5m2 if p.dtype == FP8_DTYPE else p.dtype
+    p.grad = Tensor.zeros(p.shape, dtype=grad_dtype, device=p.device).contiguous()
   grads = [p.grad for p in optim.params]
 
   scheduler = CosineAnnealingLRWithWarmup(optim, opt_base_learning_rate, opt_end_learning_rate, opt_learning_rate_warmup_steps, opt_learning_rate_decay_steps)

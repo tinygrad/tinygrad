@@ -73,8 +73,8 @@ class FlatTransformer:
     # output
     self.norm = nn.RMSNorm(dim, norm_eps)
     self.tok_embeddings = nn.Embedding(vocab_size, dim)
-    self.tok_embeddings.weight = Tensor.normal(vocab_size, dim, mean=0.0, std=0.02)
-    self.output = Tensor.normal(1, vocab_size, dim, mean=0.0, std=0.02)
+    self.tok_embeddings.weight = Tensor.normal(vocab_size, dim, mean=0.0, std=0.02, dtype=FP8_DTYPE if FP8 else dtypes.bfloat16)
+    self.output = Tensor.normal(1, vocab_size, dim, mean=0.0, std=0.02, dtype=FP8_DTYPE if FP8 else dtypes.bfloat16)
     self.freqs_cis = precompute_freqs_cis(dim // n_heads, max_context * 2, rope_theta).contiguous().requires_grad_(False)
 
   def lin_per_layer(self, in_features:int, out_features:int, std:float=0.02):
@@ -159,13 +159,15 @@ def _get_pads(uop:UOp) -> list[UOp]:
 
 def apply_grad(grad_buf:Tensor, new_grad:UOp):
   pads = _get_pads(new_grad)
+  # cast new_grad to match grad_buf dtype (e.g. fp8e4m3 -> fp8e5m2)
+  if new_grad.dtype != grad_buf.dtype: new_grad = new_grad.cast(grad_buf.dtype)
   if len(pads) <= 1:
-    store = grad_buf.uop.store((grad_buf.uop + new_grad).cast(grad_buf.dtype))
+    store = grad_buf.uop.store(grad_buf.uop + new_grad)
     grad_buf.uop = grad_buf.uop.after(store)
     return
   sorted_pads = sorted(pads, key=lambda p: p.marg[0][0] if p.op == Ops.PAD else 0)
-  inners = [Tensor(p.src[0] if p.op == Ops.PAD else p, device=grad_buf.device) for p in sorted_pads]
-  grad_buf.assign((grad_buf + inners[0].cat(*inners[1:], dim=0)).cast(grad_buf.dtype))
+  inners = [Tensor(p.src[0] if p.op == Ops.PAD else p, device=grad_buf.device).cast(grad_buf.dtype) for p in sorted_pads]
+  grad_buf.assign(grad_buf + inners[0].cat(*inners[1:], dim=0))
 
 if __name__ == "__main__":
   config = {}
@@ -186,8 +188,9 @@ if __name__ == "__main__":
   if (MP := getenv("MP", 1)) > 1:
     model.shard(tuple(f"{Device.DEFAULT}:{i}" for i in range(MP)), mp=True)
 
-  # preallocate all the grad buffers and zero them out
-  grads = {x:Tensor.zeros_like(x).contiguous() for x in state.values() if x.requires_grad is None}
+  # preallocate all the grad buffers and zero them out (fp8 weight grads are fp8e5m2 per spec)
+  grads = {x:Tensor.zeros(x.shape, dtype=dtypes.fp8e5m2 if x.dtype == FP8_DTYPE else x.dtype, device=x.device).contiguous()
+           for x in state.values() if x.requires_grad is None}
 
   # print model size
   sz = 0
