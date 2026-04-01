@@ -798,7 +798,7 @@ class Tensor(OpMixin):
     stacked = UOp.mstack(*[fxn(self.uop.shard_shape, *args, device=d, dtype=dtype, **kwargs).uop for d in self.device])
     return Tensor(stacked.multi(self.uop.axis))
 
-  def full_like(self, fill_value:PyConst, **kwargs) -> Tensor:
+  def full_like(self, fill_value:ConstType, **kwargs) -> Tensor:
     """
     Creates a tensor with the same shape as `self`, filled with the given value.
     If `dtype` is not specified, the dtype of `self` is used.
