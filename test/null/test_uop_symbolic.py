@@ -1024,6 +1024,12 @@ class TestSymbolicVariables(unittest.TestCase):
     assert (a * a).variables() == [a]
     assert (a//4 + a//6).variables() == [a]
 
+  def test_variable_min_eq_max_bind_folds(self):
+    b = Variable("x", 1, 1).bind(1)
+    s = b.simplify()
+    self.assertEqual(s.op, Ops.CONST)
+    self.assertEqual(s.arg, 1)
+
 class TestSymInfer(unittest.TestCase):
   def test_sym_infer(self):
     a = Variable("a", 0, 10)
