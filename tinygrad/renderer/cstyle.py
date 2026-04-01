@@ -1,9 +1,9 @@
 from typing import Literal, Callable, cast
-import os, math, sys, struct
+import math, sys, struct
 from collections import defaultdict, Counter
 from tinygrad.codegen.opt import tc
 from tinygrad.uop.ops import GroupOp, Ops, UOp, PatternMatcher, UPat, range_str, axis_letters
-from tinygrad.helpers import strip_parens, getenv, prod, dedup, AMX, CPU_COUNT
+from tinygrad.helpers import strip_parens, getenv, prod, dedup, Target, AMX, CPU_COUNT
 from tinygrad.dtype import ImageDType, dtypes, DType, PtrDType, AddrSpace, truncate, float_to_bf16
 from tinygrad.renderer import Renderer
 from tinygrad.codegen.late.devectorizer import no_vectorized_alu
@@ -278,7 +278,7 @@ class ClangRenderer(CStyleLanguage):
     return defines + "\n" + self._render_body(function_name, kernel, bufs, uops, prefix) + "\n" + self._render_entry(function_name, bufs)
 
 class ClangJITRenderer(ClangRenderer):
-  def __init__(self):
+  def __init__(self, target:Target):
     from tinygrad.runtime.support.compiler_cpu import ClangJITCompiler
     self.compiler = ClangJITCompiler()
 
@@ -344,9 +344,9 @@ class IntelRenderer(OpenCLRenderer):
 class MetalRenderer(CStyleLanguage):
   device = "METAL"
   shared_max = 32768
-  def __init__(self):
+  def __init__(self, target:Target):
     from tinygrad.runtime.ops_metal import MetalCompiler
-    self.compiler, self.tensor_cores = MetalCompiler(), tc.metal if hasattr(os, 'uname') and os.uname().machine == "arm64" else []
+    self.compiler, self.tensor_cores = MetalCompiler(), tc.metal if target.arch == "arm64" else []
 
   # language options
   kernel_typedef = "kernel void"

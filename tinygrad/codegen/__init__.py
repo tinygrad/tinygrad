@@ -1,12 +1,11 @@
 from typing import cast
 from dataclasses import replace
 import itertools
-from tinygrad.helpers import DISABLE_FAST_IDIV, DEVECTORIZE, TRANSCENDENTAL, SPEC, DEBUG, VIZ, IMAGE, TracingKey, Context
+from tinygrad.helpers import DISABLE_FAST_IDIV, DEVECTORIZE, TRANSCENDENTAL, SPEC, DEBUG, VIZ, IMAGE, TracingKey, Context, Target, panic
 from tinygrad.uop.ops import PatternMatcher, graph_rewrite, UOp, pm_lower_index_dtype, Ops, UPat, track_rewrites, KernelInfo, pyrender
 from tinygrad.uop.spec import type_verify, program_spec, kernel_spec
 from tinygrad.renderer import Renderer, ProgramSpec, Estimates
 from tinygrad.dtype import dtypes
-from tinygrad.helpers import panic
 from tinygrad.codegen.opt import Opt
 
 # import all pattern matchers here
@@ -23,7 +22,7 @@ from tinygrad.codegen.late.linearizer import CFGContext, pm_split_ends, pm_add_c
 from tinygrad.renderer.amd.elf import do_assemble_amd
 
 def full_rewrite_to_sink(sink:UOp, ren:Renderer|None=None, optimize:bool=True) -> UOp:
-  if ren is None: ren = Renderer()
+  if ren is None: ren = Renderer(Target())
 
   if VIZ: graph_rewrite(sink, PatternMatcher([]), name="View Base AST")
   if DEBUG >= 5: print(pyrender(sink))

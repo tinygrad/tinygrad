@@ -378,9 +378,8 @@ class QCOMDevice(HCQCompiled):
     if PROFILE and self.gpu_id[:2] < (7, 3):
       System.write_sysfs("/sys/class/kgsl/kgsl-3d0/idle_timer", value="4000000000", msg="Failed to disable suspend mode", expected="4294967276")
 
-    super().__init__(device, QCOMAllocator(self),
-                     [functools.partial(QCOMCLRenderer, info.chip_id), functools.partial(IR3Renderer, "a%d%d%d" % self.gpu_id)],
-                     functools.partial(QCOMProgram, self), QCOMSignal, functools.partial(QCOMComputeQueue, self), None)
+    super().__init__(device, QCOMAllocator(self), [QCOMCLRenderer, IR3Renderer], functools.partial(QCOMProgram, self), QCOMSignal,
+                     functools.partial(QCOMComputeQueue, self), arch="a%d%d%d" % self.gpu_id)
 
   def _gpu_alloc(self, size:int, flags:int=0, uncached=False, fill_zeroes=False) -> HCQBuffer:
     flags |= flag("KGSL_MEMALIGN", alignment_hint:=12) | kgsl.KGSL_MEMFLAGS_USE_CPU_MAP

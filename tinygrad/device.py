@@ -4,8 +4,8 @@ from collections import defaultdict
 from typing import Any, Generic, TypeVar, Iterator, Generator, TYPE_CHECKING
 import importlib, inspect, functools, pathlib, os, platform, contextlib, sys, re, atexit, pickle, decimal
 from tinygrad.helpers import BENCHMARKS, CI, OSX, LRU, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, flat_mv, PROFILE, temp, colored
-from tinygrad.helpers import Context, CCACHE, ALLOW_DEVICE_USAGE, MAX_BUFFER_SIZE, cpu_events, ProfileEvent, ProfilePointEvent, unwrap_class_type
-from tinygrad.helpers import suppress_finalizing, select_first_inited, DEV, VIZ, EMULATE, EMULATED_DTYPES, IMAGE, FLOAT16, TracingKey, size_to_str
+from tinygrad.helpers import Context, CCACHE, ALLOW_DEVICE_USAGE, MAX_BUFFER_SIZE, cpu_events, ProfileEvent, ProfilePointEvent, suppress_finalizing
+from tinygrad.helpers import select_first_inited, DEV, VIZ, EMULATE, EMULATED_DTYPES, IMAGE, FLOAT16, TracingKey, size_to_str
 from tinygrad.dtype import DType, PtrDType, dtypes, _to_np_dtype
 if TYPE_CHECKING: from tinygrad.renderer import Renderer
 
@@ -267,9 +267,10 @@ class Compiler:
 class Compiled:
   profile_events:list[ProfileEvent] = [ProfileDeviceEvent("CPU")] # NOTE: CPU is the default device.
 
-  def __init__(self, device:str, allocator:Allocator, renderers:list[type[Renderer]|functools.partial], runtime, graph=None):
+  def __init__(self, device:str, allocator:Allocator, renderers:list[type[Renderer]], runtime, graph=None, arch=None):
     from tinygrad.renderer import Renderer
     self.device, self.allocator, self.runtime, self.graph, self.renderers = device, allocator, runtime, graph, renderers or [Renderer]
+    self.arch = arch
     self.cached_renderer:dict[Any, Renderer] = {}
 
   @property
@@ -280,15 +281,16 @@ class Compiled:
     if (ret:=self.renderer.compiler) is None: raise RuntimeError(f"no compiler for {self.device}")
     return ret
 
-  def _renderer_name(self, r:type[Renderer]|functools.partial) -> str:
-    return unwrap_class_type(r).__name__.upper().removesuffix("RENDERER").removeprefix(devname:=self.device.split(':')[0].upper()) or devname
+  def _renderer_name(self, r:type[Renderer]) -> str:
+    return r.__name__.upper().removesuffix("RENDERER").removeprefix(devname:=self.device.split(':')[0].upper()) or devname
 
   def _select_renderer(self) -> Renderer:
     assert (rn:=next((self._renderer_name(r) for r in self.renderers if getenv(f"{self.device}_{self._renderer_name(r)}")), None)) is None, \
       f"{self.device}_{rn}=1 is deprecated, use DEV={self.device}:{rn} or {self.device}_CC={rn} instead"
-    renderers = [r for r in self.renderers if self._renderer_name(r) == rn] if (rn:=DEV.target(self.device).renderer) else self.renderers
-    assert renderers, f"No renderer for {self.device} " + (f"matches request {rn!r}" if rn else "is available")
-    return select_first_inited(renderers, f"No renderer for {self.device} is available", self.cached_renderer)
+    t = DEV.target(self.device, **({"arch":self.arch} if self.arch else {}))
+    renderers = [r for r in self.renderers if self._renderer_name(r) == t.renderer] if t.renderer else self.renderers
+    assert renderers, f"No renderer for {self.device} " + (f"matches request {t.renderer!r}" if t.renderer else "is available")
+    return select_first_inited([functools.partial(r, t) for r in renderers], f"No renderer for {self.device} is available", self.cached_renderer)
 
   def synchronize(self):
     """

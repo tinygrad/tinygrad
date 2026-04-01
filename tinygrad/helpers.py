@@ -128,9 +128,7 @@ def select_first_inited(candidates:Sequence[Callable[...,T]|Sequence[Callable[..
       if cache is not None: cache[typ] = x
       return x
     except Exception as e: excs.append(e)
-  raise ExceptionGroup(err_msg, excs)
-
-def unwrap_class_type(cls_t): return cls_t.func if isinstance(cls_t, functools.partial) else cls_t
+  raise excs[0] if len(excs) == 1 else ExceptionGroup(err_msg, excs)
 
 def pluralize(st:str, cnt:int): return f"{cnt} {st}"+('' if cnt == 1 else 's')
 
@@ -180,10 +178,16 @@ class ContextVar(Generic[T]):
 class Target:
   device: str = ""
   renderer: str = ""
+  arch: str = ""
 
   @staticmethod
-  def parse(s:str) -> Target: return Target(*(x.upper() for x in s.split(':')))
+  def parse(s:str) -> Target:
+    parts = [x.upper() if i < 2 else x for i,x in enumerate(s.split(':'))]
+    assert len(parts) <= 3, f"too many colons in target string: {s!r}"
+    return Target(*parts)
   def __repr__(self) -> str: return self.device + (":" + self.renderer if self.renderer else "")
+  # replaces if not already set
+  def replacedefault(self, **kwargs) -> Target: return replace(self, **{k:v for k,v in kwargs.items() if not getattr(self, k)})
 
 class _DEV(ContextVar):
   _value = Target()
@@ -192,9 +196,9 @@ class _DEV(ContextVar):
   @value.setter
   def value(self, v:str|Target): self._value = v if isinstance(v, Target) else Target.parse(v)
   def __getattr__(self, k): return getattr(self.value, k)
-  # get target for device string
-  def target(self, dev:str) -> Target:
-    t = self.value if self.device == dev or not self.device else Target(device=dev)
+  # get target for device string, kwargs are passed if not already specified DEV
+  def target(self, dev:str, **kwargs) -> Target:
+    t = self.value.replacedefault(**kwargs) if self.device == dev or not self.device else Target(device=dev, **kwargs)
     # TODO: remove this once DEV supports secondary targets
     if (cv:=ContextVar._cache.get(f"{dev}_CC", None)) is not None and cv.value:
       assert not t.renderer, f"renderer set in DEV and {dev}_CC"
