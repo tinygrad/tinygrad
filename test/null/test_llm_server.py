@@ -43,6 +43,10 @@ class TestLLMServer(unittest.TestCase):
     cls.server.shutdown()
     cls.server.server_close()
 
+  def setUp(self):
+    self.mock_model._cached_msg_count = 0
+    self.mock_model._cached_tokens = []
+
   def test_chat_completion_stream(self):
     stream = self.client.chat.completions.create(
       model="test",

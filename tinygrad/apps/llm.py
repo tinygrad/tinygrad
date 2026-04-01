@@ -284,6 +284,7 @@ class Transformer:
     self.max_context = config.max_context
     self.has_ssm = config.ssm is not None
     self._cached_tokens: list[int] = []
+    self._cached_msg_count: int = 0
     # we specialize the JIT for prefill and rollout
     self.prefill_jit = TinyJit(self.forward)
     self.rollout_jit = TinyJit(self.forward)
@@ -428,8 +429,6 @@ CHAT_HTML = b'''<!DOCTYPE html><html><head><title>tinygrad chat</title><style>
   }
 </script></body></html>'''
 
-conv_cache: dict = {"n_msgs": 0, "ids": []}
-
 class Handler(HTTPRequestHandler):
   def log_request(self, code='-', size='-'): pass
   def do_GET(self):
@@ -465,8 +464,8 @@ class Handler(HTTPRequestHandler):
     if DEBUG >= 1: print(json.dumps(body, indent=2))
     if self.path == "/v1/chat/completions":
       # extract tokens, last assistant message is treated as prefill
-      n = conv_cache["n_msgs"] + 1 if conv_cache["ids"] and len(body["messages"]) > conv_cache["n_msgs"] else 0
-      ids: list[int] = conv_cache["ids"][:] if n else ([bos_id] if bos_id is not None else [])
+      n = model._cached_msg_count + 1 if model._cached_msg_count and len(body["messages"]) > model._cached_msg_count else 0
+      ids: list[int] = model._cached_tokens[:] if n else [bos_id] if bos_id is not None else []
       for i, msg in enumerate(body["messages"][n:], n):
         ids += tok.role(msg["role"])
         content = msg["content"]
@@ -492,7 +491,7 @@ class Handler(HTTPRequestHandler):
           if c["choices"] and c["choices"][0].get("finish_reason"): finish_reason = c["choices"][0]["finish_reason"]
         self.send_data(json.dumps({**c, "object":"chat.completion",
           "choices":[{"index":0, "message":{"role":"assistant","content":"".join(out)}, "finish_reason":finish_reason}]}).encode())
-      conv_cache.update(n_msgs=len(body["messages"]), ids=model._cached_tokens[:])
+      model._cached_msg_count = len(body["messages"])
     else:
       raise RuntimeError(f"unhandled path {self.path}")
 

@@ -97,6 +97,7 @@ class TestTransformerGenerate(unittest.TestCase):
         gen = model.generate(tokens, chunk_size=chunk_size)
         for _ in range(3): next(gen)
       model._cached_tokens = []
+      model._cached_msg_count = 0
       return is_prefill
 
     # 8 tokens, chunk_size=4 -> 2 prefill chunks
