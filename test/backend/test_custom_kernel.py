@@ -1,6 +1,6 @@
 import unittest
 from tinygrad import Tensor, UOp
-from tinygrad.dtype import AddrSpace
+from tinygrad.dtype import AddrSpace, dtypes
 from tinygrad.uop.ops import KernelInfo, AxisType
 
 # **** kernels ****
@@ -339,7 +339,6 @@ class TestUOpReduce(unittest.TestCase):
     for i in range(3): self.assertAlmostEqual(result[i], ref[i])
 
   def test_uop_sum_dtype(self):
-    from tinygrad.dtype import dtypes
     a = Tensor([1.0, 2, 3], dtype=dtypes.float16)
     result = Tensor(a.uop.sum(axis=0, dtype=dtypes.float32))
     self.assertEqual(result.dtype, dtypes.float)
@@ -357,6 +356,15 @@ class TestUOpReduce(unittest.TestCase):
     a = Tensor([[1, 5, 3], [4, 2, 6]]).float()
     result = Tensor(a.uop.max(axis=0)).numpy()
     assert result[0] == 4 and result[1] == 5 and result[2] == 6
+
+class TestUOpWhere(unittest.TestCase):
+  def test_uop_where_both_const(self):
+    cond = Tensor([True, False, True])
+    result = Tensor(cond.uop.where(1, 0))
+    self.assertEqual(result.tolist(), [1, 0, 1])
+
+    result = Tensor(cond.uop.where(1.5, 0))
+    self.assertEqual(result.tolist(), [1.5, 0, 1.5])
 
 if __name__ == '__main__':
   unittest.main()

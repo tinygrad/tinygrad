@@ -115,7 +115,7 @@ def get_contraction(old_shape:tuple[T, ...], new_shape:tuple[T, ...]) -> list[li
 def suppress_finalizing(func):
   def wrapper(*args, **kwargs):
     try: return func(*args, **kwargs)
-    except (RuntimeError, AttributeError, TypeError, ImportError):
+    except (RuntimeError, AttributeError, TypeError, ImportError, OSError):
       if not getattr(sys, 'is_finalizing', lambda: True)(): raise # re-raise if not finalizing
   return wrapper
 
