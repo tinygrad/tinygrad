@@ -1416,7 +1416,7 @@ def train_llama3():
   optim = GradAccClipAdamW(params, lr=0.0, b1=opt_adamw_beta_1, b2=opt_adamw_beta_2,
                            eps=opt_adamw_epsilon, weight_decay=opt_adamw_weight_decay, grad_acc=grad_acc, device=optim_device)
 
-  # init grads (fp8 weight grads are fp8e5m2 per spec)
+  # init grads
   for p in optim.params:
     grad_dtype = dtypes.fp8e5m2 if p.dtype == FP8_DTYPE else p.dtype
     p.grad = Tensor.zeros(p.shape, dtype=grad_dtype, device=p.device).contiguous()

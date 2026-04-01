@@ -159,8 +159,7 @@ def _get_pads(uop:UOp) -> list[UOp]:
 
 def apply_grad(grad_buf:Tensor, new_grad:UOp):
   pads = _get_pads(new_grad)
-  # cast new_grad to match grad_buf dtype (e.g. fp8e4m3 -> fp8e5m2)
-  if new_grad.dtype != grad_buf.dtype: new_grad = new_grad.cast(grad_buf.dtype)
+  new_grad = new_grad.cast(grad_buf.dtype)
   if len(pads) <= 1:
     store = grad_buf.uop.store(grad_buf.uop + new_grad)
     grad_buf.uop = grad_buf.uop.after(store)
@@ -188,7 +187,7 @@ if __name__ == "__main__":
   if (MP := getenv("MP", 1)) > 1:
     model.shard(tuple(f"{Device.DEFAULT}:{i}" for i in range(MP)), mp=True)
 
-  # preallocate all the grad buffers and zero them out (fp8 weight grads are fp8e5m2 per spec)
+  # preallocate all the grad buffers and zero them out (fp8 weight grads are bf8)
   grads = {x:Tensor.zeros(x.shape, dtype=dtypes.fp8e5m2 if x.dtype == FP8_DTYPE else x.dtype, device=x.device).contiguous()
            for x in state.values() if x.requires_grad is None}
 
