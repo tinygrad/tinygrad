@@ -93,20 +93,30 @@ pm_mops = PatternMatcher([
 # *****************
 # 0. do some cleanup rewrites, mostly copied from the old stuff
 
+@functools.lru_cache(None)
+def _path_to_base_state(src:UOp, base:UOp, allow_shrink:bool) -> tuple[bool, bool]:
+  if src.op is Ops.CONTIGUOUS: return False, False
+  if src is base: return True, False
+  reaches_base = has_unsafe = False
+  for child in src.src:
+    child_reaches_base, child_has_unsafe = _path_to_base_state(child, base, allow_shrink)
+    if not child_reaches_base: continue
+    reaches_base = True
+    if child_has_unsafe: return True, True
+  if not reaches_base: return False, False
+  if src.op in {Ops.PERMUTE, Ops.FLIP} or (allow_shrink and src.op is Ops.SHRINK): has_unsafe = True
+  return True, has_unsafe
+
 def fix_store_after_hazard(after:UOp, target:UOp, src:UOp):
   # PERMUTE and FLIP reorder indices, SHRINK can have overlapping regions when dest is also shrunk
-  unsafe = {Ops.PERMUTE, Ops.FLIP} | ({Ops.SHRINK} if target.op_in_backward_slice_with_self(Ops.SHRINK) else set())
-  base = target.base
-  reaches_base: dict[UOp, bool] = {}
-  for s in src.toposort(gate=lambda s: s.op is not Ops.CONTIGUOUS):
-    reaches_base[s] = s is base or any(reaches_base.get(c) for c in s.src)
-    if reaches_base[s] and s.op in unsafe: return after.replace(src=(after.src[0], target.store(src.contiguous())))
+  if _path_to_base_state(src, target.base, target.op_in_backward_slice_with_self(Ops.SHRINK))[1]:
+    return after.replace(src=(after.src[0], target.store(src.contiguous())))
 
 def normalize_store_after_target_chain(after:UOp, target:UOp, src:UOp):
   root_target = target
   while root_target.op is Ops.AFTER: root_target = root_target.src[0]
   # when RHS depends on the previous assign result, break with contiguous
-  if target in src.toposort(): src = src.contiguous()
+  if src.contains_in_backward_slice_with_self(target): src = src.contiguous()
   return after.replace(src=(root_target, root_target.store(src)))
 
 def split_reduceop(reduce:UOp, x:UOp):

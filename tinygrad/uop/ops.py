@@ -157,10 +157,11 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     res.pop(self)
     return res
 
-  @property
+  @functools.cached_property
   def backward_slice_with_self(self:UOp) -> dict[UOp, None]: return {self:None, **self.backward_slice}
+  def contains_in_backward_slice_with_self(self, x:UOp) -> bool: return self is x or x in self.backward_slice
+
   def op_in_backward_slice_with_self(self, *ops:Ops) -> bool:
-    # Check self first, then iterate backward_slice (avoids creating intermediate dict)
     return self.op in ops or any(x.op in ops for x in self.backward_slice)
 
   def toposort(self, gate:Callable|None=None, enter_calls=True) -> dict[UOp, None]:
