@@ -95,11 +95,12 @@ class DiskAllocator(Allocator):
     else:
       dest[:] = src._buf()
 
-  def _copyout_sharded(self, src:DiskBuffer, size:int, _get_free_buf:Callable, seg_len:int) -> Generator[tuple[int, int, int, int], None, None]:
+  def _copyout_sharded(self, src:DiskBuffer, size:int, _get_free_buf:Callable, seg_len:int,
+                       use_ioring:bool=True) -> Generator[tuple[int, int, int, int], None, None]:
     fd_offset = src.offset - (minor_offset := src.offset % mmap.PAGESIZE)
     processed_reqs_cnt, copied_in, next_read_offset, total_copy_size = 0, 0, 0, round_up(size + minor_offset, mmap.PAGESIZE)
 
-    if not hasattr(DiskDevice, 'io_uring'):
+    if not hasattr(DiskDevice, 'io_uring') or not use_ioring:
       local_buf = memoryview(bytearray(seg_len))
       for off in range(0, total_copy_size, seg_len):
         while (copy_batch := _get_free_buf()) is None: pass

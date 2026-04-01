@@ -550,7 +550,8 @@ class HCQAllocator(HCQAllocatorBase, Generic[HCQDeviceType]):
     assert self.dev.hw_copy_queue_t is not None
     with hcq_profile(self.dev, queue_type=self.dev.hw_copy_queue_t, desc=TracingKey(f"DISK -> {self.dev.device}", ret=size), enabled=PROFILE,
                      dev_suff="SDMA:0"):
-      for (batch_info, dst_off, src_off, copy_size) in src.device.allocator._copyout_sharded(src, size, _get_temp_buf, seg_len=self.b[0].size):
+      for (batch_info, dst_off, src_off, copy_size) in src.device.allocator._copyout_sharded(src, size, _get_temp_buf, seg_len=self.b[0].size,
+                                                                                             use_ioring=type(self.b[0].cpu_view()) is MMIOInterface):
         self.dev.hw_copy_queue_t().wait(self.dev.timeline_signal, self.dev.timeline_value - 1) \
                                   .copy(dest.va_addr + dst_off, self.b[batch_info[1]].va_addr + src_off, copy_size) \
                                   .signal(self.dev.timeline_signal, self.dev.next_timeline()).submit(self.dev)
