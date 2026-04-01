@@ -39,7 +39,7 @@ def run_asm_gemm(a_shape, b_shape, dtype=dtypes.float16, a_shard=None, b_shard=N
 
   # no validation on the NULL device
   if a_rand.device.startswith("NULL"): return None
-  atol, rtol = (2e-1, 1e-2) if dtype == dtypes.bfloat16 else (16, 1e-2) if dtype == FP8_DTYPE else (1e-2, 1e-3)
+  atol, rtol = (2e-1, 1e-2) if dtype == dtypes.bfloat16 else (256, 1e-2) if dtype == FP8_DTYPE else (1e-2, 1e-3)
   with Context(DEBUG=0):
     assert tst.allclose(ref, atol=atol, rtol=rtol), "forward mismatch"
     assert a.grad.allclose(a_ref.grad, atol=atol, rtol=rtol), "grad_a mismatch"
@@ -139,8 +139,8 @@ class TestGemmLlama(unittest.TestCase):
     z = x @ y
     z.sum().backward()
     Tensor.realize(z, x.grad, y.grad)
-    # FP8 forward output is bf16, gradients also stay in bf16 to preserve precision
-    grad_dtype = dtypes.bfloat16 if self.dtype == FP8_DTYPE else self.dtype
+    # FP8 forward output is bf16, gradients use fp8e5m2 (aka bf8)
+    grad_dtype = dtypes.fp8e5m2 if self.dtype == FP8_DTYPE else self.dtype
     assert z.dtype == dtypes.bfloat16
     assert x.grad.dtype == y.grad.dtype == grad_dtype
 

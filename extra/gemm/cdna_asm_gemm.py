@@ -2702,11 +2702,11 @@ def custom_gemm_bw(gradient:UOp, kernel:UOp):
   a_t, b_t, g_t = Tensor(a, device=a.device), Tensor(b, device=a.device), Tensor(gradient, device=a.device)
   # TODO: this needs to be cleaned up and done properly, the batch dim of grad and a multi need to align
   g_t = g_t[:a.shape[0]]
-  # the FP8 gemm computes A @ B.T, gradients stay in bf16 like the forward output
+  # the FP8 gemm computes A @ B.T, grads use fp8e5m2 (larger range than e4m3)
   if a.dtype.base == FP8_DTYPE:
     g_t_fp8, g_scale = quantize_fp8(g_t)
-    grad_a = ((g_t_fp8 @ b_t) * g_scale).cast(dtypes.bfloat16).uop
-    grad_b = ((g_t_fp8.reshape(-1, g_t.shape[-1]).T @ a_t.reshape(-1, a_t.shape[-1])) * g_scale).cast(dtypes.bfloat16).uop
+    grad_a = ((g_t_fp8 @ b_t) * g_scale).cast(dtypes.fp8e5m2).uop
+    grad_b = ((g_t_fp8.reshape(-1, g_t.shape[-1]).T @ a_t.reshape(-1, a_t.shape[-1])) * g_scale).cast(dtypes.fp8e5m2).uop
   else:
     grad_a = (g_t @ b_t.T).cast(a.dtype.base).uop
     grad_b = (a_t.permute(2, 0, 1).reshape(a_t.shape[2], -1) @ g_t.reshape(-1, g_t.shape[-1])).cast(b.dtype.base).uop
