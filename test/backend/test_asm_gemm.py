@@ -142,8 +142,10 @@ class TestGemmLlama(unittest.TestCase):
     z = x @ y
     z.sum().backward()
     Tensor.realize(z, x.grad, y.grad)
+    # FP8 forward output is bf16, gradients also stay in bf16 to preserve precision
+    grad_dtype = dtypes.bfloat16 if self.dtype == FP8_DTYPE else self.dtype
     assert z.dtype == dtypes.bfloat16
-    assert x.grad.dtype == y.grad.dtype == self.dtype
+    assert x.grad.dtype == y.grad.dtype == grad_dtype
 
   def test_simple(self): verify_asm_gemm(1, N:=getenv("N", 4096), N, N, dtype=self.dtype)
   def test_gemm(self): verify_asm_gemm(1, 8192, 4096, 14336, dtype=self.dtype)
