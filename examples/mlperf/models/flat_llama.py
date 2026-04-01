@@ -150,7 +150,7 @@ class FlatTransformer:
       h = self.run_layer(h, freqs_cis,
                          self.attention_norm[i], self.wo[i],
                          self.ffn_norm[i], self.w1[i], self.w2[i], self.w3[i], **attn_kwargs)
-    logits = self.norm(h).contiguous_backward() @ self.output[0].T
+    logits = matmul(self.norm(h).contiguous().contiguous_backward(), self.output[0]).contiguous_backward()
     return logits
 
 def _get_pads(uop:UOp) -> list[UOp]:
