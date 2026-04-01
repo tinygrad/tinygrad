@@ -2702,6 +2702,7 @@ def custom_gemm_bw(gradient:UOp, kernel:UOp):
   a_t, b_t, g_t = Tensor(a, device=a.device), Tensor(b, device=a.device), Tensor(gradient, device=a.device)
   # TODO: this needs to be cleaned up and done properly, the batch dim of grad and a multi need to align
   g_t = g_t[:a.shape[0]]
+  # the FP8 gemm computes A @ B.T
   if a.dtype.base == dtypes.fp8e4m3:
     g_t_fp8, g_scale = quantize_fp8(g_t)
     grad_a = ((g_t_fp8 @ b_t) * g_scale).cast(a.dtype.base).uop
