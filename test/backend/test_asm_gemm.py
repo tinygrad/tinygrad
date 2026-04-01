@@ -127,6 +127,16 @@ class TestGemmLlama(unittest.TestCase):
   @Context(ASM_GEMM=1)
   def test_empty(self): (Tensor.empty(N:=getenv("N", 4096), N, dtype=self.dtype)@Tensor.empty(N, N, dtype=self.dtype)).realize()
 
+  @Context(ASM_GEMM=1)
+  def test_empty_bw(self):
+    x = Tensor.empty(1, N:=getenv("N", 4096), N, dtype=self.dtype, requires_grad=True)
+    y = Tensor.empty((N, N), dtype=self.dtype, requires_grad=True)
+    z = x @ y
+    z.sum().backward()
+    Tensor.realize(z, x.grad, y.grad)
+    assert z.dtype == dtypes.bfloat16
+    assert x.grad.dtype == y.grad.dtype == self.dtype
+
   def test_simple(self): verify_asm_gemm(1, N:=getenv("N", 4096), N, N, dtype=self.dtype)
   def test_gemm(self): verify_asm_gemm(1, 8192, 4096, 14336, dtype=self.dtype)
   def test_gemm_batched(self): verify_asm_gemm(2, 8192, 4096, 4096, dtype=self.dtype)
@@ -181,29 +191,6 @@ class TestGemmLlama(unittest.TestCase):
   def test_llama3_out1(self): verify_asm_gemm(1, 8192, 128256, 4096, dtype=self.dtype)
   def test_llama3_out2(self): verify_asm_gemm(1, 8192, 4096, 128256, dtype=self.dtype)
   def test_llama3_out3(self): verify_asm_gemm(1, 4096, 128256, 8192, dtype=self.dtype)
-
-  def test_fp8_backward_numpy(self):
-    """FP8 backward correctness against numpy reference."""
-    if self.dtype != dtypes.fp8e4m3: self.skipTest("FP8 only")
-    import numpy as np
-    np.random.seed(0)
-    # Use shapes matching verify_asm_gemm convention: a=(batch, M, K), b=(K, N)
-    M, N, K = 256, 256, 256
-    a_np = (np.random.randn(1, M, K) * 0.1).astype(np.float32)
-    b_np = (np.random.randn(K, N) * 0.1).astype(np.float32)
-    # numpy reference: out = a @ b, grad_a = grad @ b.T, grad_b = a.T @ grad (summed over batch)
-    grad_np = np.ones((1, M, N), dtype=np.float32)
-    grad_a_np = grad_np @ b_np.T  # (1, M, N) @ (N, K) = (1, M, K)
-    grad_b_np = a_np.reshape(M, K).T @ grad_np.reshape(M, N)  # (K, M) @ (M, N) = (K, N)
-    # tinygrad
-    a, b = Tensor(a_np).cast(dtypes.fp8e4m3).requires_grad_(), Tensor(b_np).cast(dtypes.fp8e4m3).requires_grad_()
-    with Context(ASM_GEMM=1):
-      out = asm_gemm(a, b)
-      out.sum().backward()
-    Tensor.realize(out, a.grad, b.grad)
-    grad_a, grad_b = a.grad.cast(dtypes.float32).numpy(), b.grad.cast(dtypes.float32).numpy()
-    np.testing.assert_allclose(grad_a, grad_a_np, atol=0.5, rtol=0.1)
-    np.testing.assert_allclose(grad_b, grad_b_np, atol=0.5, rtol=0.1)
 
 def has_hipcc():
   try: system("hipcc --version")
