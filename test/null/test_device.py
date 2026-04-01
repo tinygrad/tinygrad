@@ -24,6 +24,11 @@ class TestDevice(unittest.TestCase):
     with self.assertRaises(ModuleNotFoundError):
       Device["TYPO"]
 
+  @unittest.skipIf(Device.DEFAULT != "CPU", "only run on CPU")
+  def test_nonexistent_renderer(self):
+    with self.assertRaisesRegex(AssertionError, "No renderer"):
+      with Context(DEV="CPU:TYPO"): Device[Device.DEFAULT].renderer
+
   def test_lowercase_canonicalizes(self):
     device = Device.DEFAULT
     with Context(DEV=device.lower()):
