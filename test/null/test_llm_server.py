@@ -7,6 +7,7 @@ class TestLLMServer(unittest.TestCase):
   @classmethod
   def setUpClass(cls):
     cls.mock_tok = Mock()
+    cls.mock_tok.prompt = "You are helpful."
     cls.mock_tok.role = Mock(return_value=[100, 101])
     cls.mock_tok.encode = Mock(return_value=[200, 201, 202])
     cls.mock_tok.decode = Mock(return_value="Hello")
@@ -185,7 +186,7 @@ class TestLLMServer(unittest.TestCase):
     self.mock_tok.end_turn.reset_mock()
     self.client.chat.completions.create(
       model="test", messages=[
-        {"role": "system", "content": "You are helpful."},
+        # system is injected into messages, so we dont need to insert it here
         {"role": "user", "content": "Hello"},
         {"role": "assistant", "content": "Sure"},
         {"role": "user", "content": "Continue"}
