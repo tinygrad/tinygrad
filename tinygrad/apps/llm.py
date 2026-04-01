@@ -25,6 +25,7 @@ class SimpleTokenizer:
     self._special_tokens = special_tokens
     self._tok2bytes = {tid: tok for tok, tid in self._normal_tokens.items()} | {tid: tok.encode() for tok, tid in self._special_tokens.items()}
     self.preset = preset
+    self.prompt = ""
 
   @staticmethod
   def from_gguf_kv(kv:dict):
@@ -361,6 +362,8 @@ class Handler(HTTPRequestHandler):
     if self.path == "/v1/chat/completions":
       # extract tokens, last assistant message is treated as prefill
       ids: list[int] = [bos_id] if bos_id is not None else []
+      if tok.prompt and body["messages"][0]["role"] != "system":
+        body["messages"] = [{"role": "system", "content": tok.prompt}] + body["messages"]
       for i, msg in enumerate(body["messages"]):
         ids += tok.role(msg["role"])
         content = msg["content"]
@@ -393,6 +396,7 @@ if __name__ == "__main__":
   parser = argparse.ArgumentParser()
   parser.add_argument("--model", "-m", default=list(models.keys())[0], help=f"Model choice ({', '.join(models.keys())}) or path to a local GGUF file")
   parser.add_argument("--max_context", type=int, default=4096, help="Max Context Length")
+  parser.add_argument("--prompt", nargs='?', type=str, default="", help="Add a system prompt, strings only")
   parser.add_argument("--serve", nargs='?', type=int, const=11434, metavar="PORT", help="Run OpenAI compatible API (optional port, default 11434)")
   parser.add_argument("--benchmark", nargs='?', type=int, const=20, metavar="COUNT", help="Benchmark tok/s (optional count, default 20)")
   args = parser.parse_args()
@@ -409,6 +413,7 @@ if __name__ == "__main__":
   gc.collect()
 
   tok = SimpleTokenizer.from_gguf_kv(kv)
+  tok.prompt = args.prompt
   bos_id: int|None = kv.get('tokenizer.ggml.bos_token_id') if kv.get('tokenizer.ggml.add_bos_token', True) else None
   eos_id: int = kv['tokenizer.ggml.eos_token_id']
 
@@ -431,6 +436,7 @@ if __name__ == "__main__":
 
   # interactive chat
   ids: list[int] = [bos_id] if bos_id is not None else []
+  if tok.prompt: ids += tok.role("system") + tok.encode(tok.prompt) + tok.end_turn(eos_id)
   while 1:
     try:
       ids += tok.role("user") + tok.encode(input('>>> ')) + tok.end_turn(eos_id) + tok.role("assistant")

@@ -185,16 +185,17 @@ class TestLLMServer(unittest.TestCase):
     self.mock_tok.end_turn.reset_mock()
     self.client.chat.completions.create(
       model="test", messages=[
+        {"role": "system", "content": "You are helpful."},
         {"role": "user", "content": "Hello"},
         {"role": "assistant", "content": "Sure"},
         {"role": "user", "content": "Continue"}
       ], stream=False
     )
-    # all messages get end_turn, plus an extra role("assistant") at the end
-    # roles: user, assistant, user, assistant(generation prompt) = 4 role calls
-    # end_turns: user, assistant, user = 3 end_turn calls (one per message)
-    self.assertEqual(self.mock_tok.end_turn.call_count, 3)
-    self.assertEqual(self.mock_tok.role.call_count, 4)
+    # system, user, assistant, user all get end_turn, plus an extra role("assistant") at the end
+    # roles: system, user, assistant, user, assistant(generation prompt) = 5 role calls
+    # end_turns: system, user, assistant, user = 4 end_turn calls (one per message)
+    self.assertEqual(self.mock_tok.end_turn.call_count, 4)
+    self.assertEqual(self.mock_tok.role.call_count, 5)
 
   def test_models_endpoint(self):
     import requests as req
