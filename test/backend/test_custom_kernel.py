@@ -339,7 +339,6 @@ class TestUOpReduce(unittest.TestCase):
     for i in range(3): self.assertAlmostEqual(result[i], ref[i])
 
   def test_uop_sum_dtype(self):
-    from tinygrad.dtype import dtypes
     a = Tensor([1.0, 2, 3], dtype=dtypes.float16)
     result = Tensor(a.uop.sum(axis=0, dtype=dtypes.float32))
     self.assertEqual(result.dtype, dtypes.float)
