@@ -4,7 +4,7 @@ START_TIME = time.perf_counter()
 import os, functools, platform, re, contextlib, operator, hashlib, pickle, sqlite3, tempfile, pathlib, string, ctypes, sys, gzip, getpass, gc
 from collections import defaultdict
 import subprocess, shutil, math, types, copyreg, inspect, importlib, decimal, itertools
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import ClassVar, Iterable, Any, TypeVar, Callable, Sequence, TypeGuard, Iterator, Generic, Generator, cast, overload
 
 T = TypeVar("T")
@@ -115,7 +115,7 @@ def get_contraction(old_shape:tuple[T, ...], new_shape:tuple[T, ...]) -> list[li
 def suppress_finalizing(func):
   def wrapper(*args, **kwargs):
     try: return func(*args, **kwargs)
-    except (RuntimeError, AttributeError, TypeError, ImportError):
+    except (RuntimeError, AttributeError, TypeError, ImportError, OSError):
       if not getattr(sys, 'is_finalizing', lambda: True)(): raise # re-raise if not finalizing
   return wrapper
 
@@ -176,7 +176,32 @@ class ContextVar(Generic[T]):
     assert isinstance(self.value, str)
     return [getattr(obj, x) if obj else x for x in self.value.split(',') if x]
 
-DEV, DEBUG, BEAM, NOOPT = ContextVar("DEV", ""), ContextVar("DEBUG", 0), ContextVar("BEAM", 0), ContextVar("NOOPT", 0)
+@dataclass(frozen=True)
+class Target:
+  device: str = ""
+  renderer: str = ""
+
+  @staticmethod
+  def parse(s:str) -> Target: return Target(*(x.upper() for x in s.split(':')))
+  def __repr__(self) -> str: return self.device + (":" + self.renderer if self.renderer else "")
+
+class _DEV(ContextVar):
+  _value = Target()
+  @property
+  def value(self) -> Target: return self._value
+  @value.setter
+  def value(self, v:str|Target): self._value = v if isinstance(v, Target) else Target.parse(v)
+  def __getattr__(self, k): return getattr(self.value, k)
+  # get target for device string
+  def target(self, dev:str) -> Target:
+    t = self.value if self.device == dev or not self.device else Target(device=dev)
+    # TODO: remove this once DEV supports secondary targets
+    if (cv:=ContextVar._cache.get(f"{dev}_CC", None)) is not None and cv.value:
+      assert not t.renderer, f"renderer set in DEV and {dev}_CC"
+      return replace(t, renderer=cv.value.upper())
+    return replace(t, device=dev)
+
+DEV, DEBUG, BEAM, NOOPT = _DEV("DEV", ""), ContextVar("DEBUG", 0), ContextVar("BEAM", 0), ContextVar("NOOPT", 0)
 IMAGE, FLOAT16, OPENPILOT_HACKS = ContextVar("IMAGE", 0), ContextVar("FLOAT16", 0), ContextVar("OPENPILOT_HACKS", 0)
 JIT, JIT_BATCH_SIZE = ContextVar("JIT", 2 if OSX and ARCH_X86 else 1), ContextVar("JIT_BATCH_SIZE", 32)
 WINO, CAPTURING, TRACEMETA = ContextVar("WINO", 0), ContextVar("CAPTURING", 1), ContextVar("TRACEMETA", 1)
@@ -193,13 +218,9 @@ EMULATE, EMULATED_DTYPES = ContextVar("EMULATE", ""), ContextVar("EMULATED_DTYPE
 CAPTURE_PROCESS_REPLAY = ContextVar("CAPTURE_PROCESS_REPLAY", 0)
 CPU_COUNT = ContextVar("CPU_COUNT", max(1, len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else (os.cpu_count() or 1)))
 # Compilers
-CPU_CC, CPU_LLVM, CPU_LVP = ContextVar("CPU_CC", ""), ContextVar("CPU_LLVM", 0), ContextVar("CPU_LVP", 0)
-NV_CC, NV_PTX, NV_NAK, NV_NVCC = ContextVar("NV_CC", ""), ContextVar("NV_PTX", 0), ContextVar("NV_NAK", 0), ContextVar("NV_NVCC", 0)
-CUDA_CC, CUDA_PTX, CUDA_NVCC = ContextVar("CUDA_CC", ""), ContextVar("CUDA_PTX", 0), ContextVar("CUDA_NVCC", 0)
-NULL_QCOMCL, NULL_IR3, NULL_NAK = ContextVar("NULL_QCOMCL", 0), ContextVar("NULL_IR3", 0), ContextVar("NULL_NAK", 0)
+CPU_CC, NV_CC, CUDA_CC, NULL_CC = ContextVar("CPU_CC", ""), ContextVar("NV_CC", ""), ContextVar("CUDA_CC", ""), ContextVar("NULL_CC", "")
 NULL_ALLOW_COPYOUT = ContextVar("NULL_ALLOW_COPYOUT", 0)
-AMD_CC, AMD_LLVM, AMD_HIPCC  = ContextVar("AMD_CC", ""), ContextVar("AMD_LLVM", 0), ContextVar("AMD_HIPCC", 0)
-QCOM_CC, QCOM_IR3 = ContextVar("QCOM_CC", ""), ContextVar("QCOM_IR3", 0)
+AMD_CC, QCOM_CC = ContextVar("AMD_CC", ""), ContextVar("QCOM_CC", "")
 # VIZ implies PROFILE, but you can run PROFILE without VIZ
 VIZ = ContextVar("VIZ", 0)
 PROFILE = ContextVar("PROFILE", abs(VIZ.value))
