@@ -4,6 +4,7 @@ from tinygrad.device import is_dtype_supported
 from tinygrad.helpers import getenv, system
 from extra.gemm.cdna_asm_gemm import asm_gemm
 from test.helpers import needs_second_gpu
+from examples.mlperf.models.flat_llama import FP8_DTYPE
 
 # On non CDNA4 it will only validate the Tensor.custom_kernel integration
 # Use DEV=NULL EMULATE=AMD_CDNA4 to also test the assembly
@@ -26,6 +27,10 @@ def run_asm_gemm(a_shape, b_shape, dtype=dtypes.float16, a_shard=None, b_shard=N
   Tensor.realize(tst, a.grad, b.grad)
 
   a_ref, b_ref = a_rand.clone().requires_grad_(), b_rand.clone().requires_grad_()
+  # do reference gemm in bf16 for fp8, adjusting atol for quantization step size
+  if a_ref.dtype == FP8_DTYPE:
+    a_ref = a_ref.cast(dtypes.bfloat16)
+    b_ref = b_ref.cast(dtypes.bfloat16)
   if multi: a_ref, b_ref = a_ref.shard(devs, axis=a_shard), b_ref.shard(devs, axis=b_shard)
   with Context(ASM_GEMM=0):
     ref = asm_gemm(a_ref, b_ref)
@@ -34,9 +39,12 @@ def run_asm_gemm(a_shape, b_shape, dtype=dtypes.float16, a_shard=None, b_shard=N
 
   # no validation on the NULL device
   if a_rand.device.startswith("NULL"): return None
-  atol, rtol = (2e-1, 1e-2) if dtype == dtypes.bfloat16 else (1e-2, 1e-3)
+  atol, rtol = (2e-1, 1e-2) if dtype == dtypes.bfloat16 else (16, 1e-2) if dtype == FP8_DTYPE else (1e-2, 1e-3)
   with Context(DEBUG=0):
     assert tst.allclose(ref, atol=atol, rtol=rtol), "forward mismatch"
+    import numpy as np
+    np.testing.assert_allclose(a.grad.numpy(), a_ref.grad.numpy(), atol=atol, rtol=rtol)
+    np.testing.assert_allclose(b.grad.numpy(), b_ref.grad.numpy(), atol=atol, rtol=rtol)
     assert a.grad.allclose(a_ref.grad, atol=atol, rtol=rtol), "grad_a mismatch"
     assert b.grad.allclose(b_ref.grad, atol=atol, rtol=rtol), "grad_b mismatch"
 

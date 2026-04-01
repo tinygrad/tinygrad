@@ -6,7 +6,7 @@ from tinygrad.renderer import Estimates
 from tinygrad.helpers import getenv, all_same, DEBUG
 from tinygrad.runtime.support.compiler_amd import HIPCCCompiler
 from tinygrad.runtime.autogen.amd.cdna.ins import *
-from examples.mlperf.models.flat_llama import quantize_fp8
+from examples.mlperf.models.flat_llama import quantize_fp8, FP8_DTYPE
 
 # ** CDNA4 assembly gemm
 
