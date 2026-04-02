@@ -7,8 +7,8 @@ from test.helpers import needs_second_gpu
 from examples.mlperf.models.flat_llama import FP8_DTYPE
 
 # On non CDNA4 it will only validate the Tensor.custom_kernel integration
-# Use DEV=NULL EMULATE=AMD_CDNA4 to also test the assembly
-def is_cdna4(): return getattr(Device[Device.DEFAULT].renderer, "arch", "").startswith("gfx950")
+# Use DEV=NULL:AMDHIP:gfx950 to also test the assembly
+def is_cdna4(): return Device[Device.DEFAULT].renderer.target.arch == "gfx950"
 
 def run_asm_gemm(a_shape, b_shape, dtype=dtypes.float16, a_shard=None, b_shard=None, gpus:int=1) -> None:
   Tensor.manual_seed(0)

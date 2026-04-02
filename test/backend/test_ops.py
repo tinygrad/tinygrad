@@ -2,7 +2,7 @@ import time, math, unittest, functools, platform, warnings
 import numpy as np
 from typing import List, Callable
 import torch
-from tinygrad.helpers import getenv, CI, DEBUG, DEV, EMULATE, IMAGE, Context
+from tinygrad.helpers import getenv, CI, DEBUG, DEV, IMAGE, Context
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.tensor import _to_np_dtype
 from tinygrad.device import is_dtype_supported
@@ -18,7 +18,7 @@ warnings.filterwarnings("ignore", message="Non-empty compiler output encountered
 
 FORWARD_ONLY = getenv("FORWARD_ONLY", 0)
 PRINT_TENSORS = getenv("PRINT_TENSORS", 0)
-COMPILE_ONLY = Device.DEFAULT == "NULL" and not EMULATE
+COMPILE_ONLY = Device.DEFAULT == "NULL"
 
 def slow_test(test_func):
   return unittest.skipIf(getenv("SKIP_SLOW_TEST"), "Skipping slow test")(test_func)

@@ -1,7 +1,7 @@
 import unittest
 import numpy as np
 from tinygrad import Tensor, GlobalCounters, dtypes, nn, Device, Variable
-from tinygrad.helpers import Context, getenv, EMULATE
+from tinygrad.helpers import Context, getenv, DEV
 from tinygrad.engine.realize import run_schedule
 from tinygrad.engine.realize import CompiledRunner, get_program
 from tinygrad.engine.schedule import ExecItem
@@ -216,7 +216,7 @@ class TestIndexing(unittest.TestCase):
     loss.backward()
     np.testing.assert_allclose(emb.weight.grad.numpy(), expected_grad, rtol=1e-5, atol=1e-5)
 
-  @unittest.skipUnless(Device.DEFAULT == "AMD" or (Device.DEFAULT == "NULL" and EMULATE.value.startswith("AMD")), "tests AMD bf16 cast overhead")
+  @unittest.skipUnless(Device.DEFAULT == "AMD" or (Device.DEFAULT == "NULL" and DEV.arch.startswith("gfx")), "tests AMD bf16 cast overhead")
   def base_test_llama_8b_rope_backward(self, dtype):
     from extra.models.llama import precompute_freqs_cis, apply_rotary_emb
     bs, seqlen, dim, n_heads = 1, 512, 256, 4
