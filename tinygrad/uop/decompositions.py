@@ -440,7 +440,7 @@ def get_transcendental_patterns(ops:tuple[Ops, ...], force_transcendental:bool) 
 
 powers_of_two: dict[int, int] = {2**i:i for i in range(64)}
 @functools.cache
-def get_late_rewrite_patterns(ops:tuple[Ops, ...], device:str, disable_fast_idiv:bool) -> PatternMatcher:
+def get_late_rewrite_patterns(ops:tuple[Ops, ...], disable_fast_idiv:bool) -> PatternMatcher:
   pat: list[tuple[UPat, Callable]] = []
   # no real hardware supports THREEFRY, but NullRenderer does
   if Ops.THREEFRY not in ops: pat.append((UPat(Ops.THREEFRY, dtype=dtypes.uint64, src=(UPat.var("x"), UPat.var("key"))), threefry2x32))
