@@ -29,7 +29,7 @@ def run_asm_gemm(a_shape, b_shape, dtype=dtypes.float16, a_shard=None, b_shard=N
   a_ref, b_ref = a_rand.clone().requires_grad_(), b_rand.clone().requires_grad_()
   if multi: a_ref, b_ref = a_ref.shard(devs, axis=a_shard), b_ref.shard(devs, axis=b_shard)
   with Context(ASM_GEMM=0):
-    ref = a_ref @ b_ref
+    ref = asm_gemm(a_ref, b_ref)
     ref.sum().backward()
   Tensor.realize(ref, a_ref.grad, b_ref.grad)
 

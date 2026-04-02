@@ -2696,13 +2696,14 @@ def custom_uop_gemm(C:UOp, A:UOp, B:UOp) -> UOp:
 
 # ** backward gemm, might use the asm gemm
 
-def custom_gemm_bw(gradient:UOp, kernel:UOp, rhs_transposed=False):
+def custom_gemm_bw(gradient:UOp, kernel:UOp):
   out, a, b = kernel.src[1:]
   assert all_same([gradient.device, a.device, b.device, out.device])
   a_t, b_t, g_t = Tensor(a, device=a.device), Tensor(b, device=a.device), Tensor(gradient, device=a.device)
   # TODO: this needs to be cleaned up and done properly, the batch dim of grad and a multi need to align
   g_t = g_t[:a.shape[0]]
-  if rhs_transposed:
+  if a.dtype.base == FP8_DTYPE:
+    # fp8 gemm computes a@b.T
     grad_a = (g_t @ b_t).uop
     grad_b = (g_t.permute(2, 0, 1).reshape(g_t.shape[2], -1) @ a_t.reshape(-1, a_t.shape[-1])).uop
   else:
@@ -2744,10 +2745,9 @@ def asm_gemm(a:Tensor, b:Tensor) -> Tensor:
   renderer = Device[a.device[0] if is_multi else a.device].renderer
   dname, arch = renderer.device, getattr(renderer, "arch", "")
   if arch.startswith("gfx950") and getenv("USE_ASM", 1):
-    # the FP8 gemm computes a @ b.T
+    # fp8 gemm computes a@b.T
     if a.dtype == FP8_DTYPE:
-      out = Tensor.custom_kernel(out, a, b.T, fxn=functools.partial(custom_hk_fp8_gemm, dname=dname),
-                                 grad_fxn=functools.partial(custom_gemm_bw, rhs_transposed=True))[0]
+      out = Tensor.custom_kernel(out, a, b.T, fxn=functools.partial(custom_hk_fp8_gemm, dname=dname), grad_fxn=custom_gemm_bw)[0]
     else:
       out = Tensor.custom_kernel(out, a, b, fxn=functools.partial(custom_asm_gemm, dname=dname), grad_fxn=custom_gemm_bw)[0]
   else:
