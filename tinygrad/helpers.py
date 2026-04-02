@@ -4,7 +4,7 @@ START_TIME = time.perf_counter()
 import os, functools, platform, re, contextlib, operator, hashlib, pickle, sqlite3, tempfile, pathlib, string, ctypes, sys, gzip, getpass, gc
 from collections import defaultdict
 import subprocess, shutil, math, types, copyreg, inspect, importlib, decimal, itertools
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field, replace, asdict
 from typing import ClassVar, Iterable, Any, TypeVar, Callable, Sequence, TypeGuard, Iterator, Generic, Generator, cast, overload
 
 T = TypeVar("T")
@@ -185,7 +185,7 @@ class Target:
     parts = [x.upper() if i < 2 else x for i,x in enumerate(s.split(':'))]
     assert len(parts) <= 3, f"too many colons in target string: {s!r}"
     return Target(*parts)
-  def __repr__(self) -> str: return self.device + (":" + self.renderer if self.renderer else "")
+  def __repr__(self) -> str: return re.sub(":*$", "", ":".join(asdict(self).values()))
   # replaces if not already set
   def replacedefault(self, **kwargs) -> Target: return replace(self, **{k:v for k,v in kwargs.items() if not getattr(self, k)})
 
