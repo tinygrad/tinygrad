@@ -115,15 +115,22 @@ class recursive_property(property):
     nm, fxn = self.nm, self.fxn
     if (ret:=x.__dict__.get(nm, _RECURSIVE_MISS)) is not _RECURSIVE_MISS: return ret
     stack: list[tuple[UOp, bool]] = [(x, False)]
+    queued = {x}
     while stack:
       node, visited = stack.pop()
       node_dict = node.__dict__
-      if node_dict.get(nm, _RECURSIVE_MISS) is not _RECURSIVE_MISS: continue
-      if visited: node_dict[nm] = fxn(node)
+      if node_dict.get(nm, _RECURSIVE_MISS) is not _RECURSIVE_MISS:
+        queued.discard(node)
+        continue
+      if visited:
+        queued.discard(node)
+        node_dict[nm] = fxn(node)
       else:
         stack.append((node, True))
         for s in reversed(node.src):
-          if s.__dict__.get(nm, _RECURSIVE_MISS) is _RECURSIVE_MISS: stack.append((s, False))
+          if s.__dict__.get(nm, _RECURSIVE_MISS) is _RECURSIVE_MISS and s not in queued:
+            stack.append((s, False))
+            queued.add(s)
     return x.__dict__[nm]
 
 # we import this late so we can use resolve/smax in mixins
@@ -263,9 +270,9 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
         # non pointer index doesn't have a shape
         if not isinstance(self.dtype, PtrDType): return None
         # fully indexed doesn't have a shape. TODO: remove this
-        if self.src[0]._shape is None or len(self.src[1:]) == len(self.src[0].shape): return None
+        if (src0_shape:=self.src[0]._shape) is None or len(self.src)-1 == len(src0_shape): return None
         # pointer index
-        return self.src[0].shape[len(self.src[1:]):]
+        return src0_shape[len(self.src)-1:]
 
       # some ops init the shape
       case Ops.CONST | Ops.VCONST | Ops.DEFINE_VAR | Ops.BIND: return ()
@@ -307,29 +314,30 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
       # TODO: WMMA is used for both axis WMMA and op WMMA. fix this and remove this hack. tested by BERT on AMD LLVM
       if ps is None and self.op is Ops.WMMA: return None
       if ps is None: raise RuntimeError(f"movement op {self.op} requires shape")
+      marg = self.arg if self.arg is not None else self.marg
       match self.op:
         case Ops.RESHAPE:
-          if not all(x >= 0 for x in self.marg): raise ValueError(f"shape can't contain negative numbers {self.marg}")
-          if prod(ps) != prod(self.marg): raise ValueError(f"bad reshape: {ps} -> {self.marg}")
-          return self.marg
+          if not all(x >= 0 for x in marg): raise ValueError(f"shape can't contain negative numbers {marg}")
+          if prod(ps) != prod(marg): raise ValueError(f"bad reshape: {ps} -> {marg}")
+          return marg
         case Ops.EXPAND:
-          if len(ps) != len(self.marg) or not all(s==ns or (s==1 and ns>=0) for s,ns in zip(ps, self.marg)):
-            raise ValueError(f"bad expand: {ps} -> {self.marg}")
-          return self.marg
+          if len(ps) != len(marg) or not all(s==ns or (s==1 and ns>=0) for s,ns in zip(ps, marg)):
+            raise ValueError(f"bad expand: {ps} -> {marg}")
+          return marg
         case Ops.PERMUTE:
-          if sorted(self.marg) != list(range(len(ps))): raise ValueError(f"invalid permutation {self.marg} of len {len(ps)}")
-          return tuple(ps[i] for i in self.marg)
+          if sorted(marg) != list(range(len(ps))): raise ValueError(f"invalid permutation {marg} of len {len(ps)}")
+          return tuple(ps[i] for i in marg)
         case Ops.PAD:
           # TODO: why do i need resolve here?
-          if len(ps) != len(self.marg) or not all(resolve(b>=0) and resolve(e>=0) for b,e in self.marg): raise ValueError(f"invalid pad {self.marg}")
-          return tuple(ssimplify(s+b+e) for s,(b,e) in zip(ps, self.marg))
+          if len(ps) != len(marg) or not all(resolve(b>=0) and resolve(e>=0) for b,e in marg): raise ValueError(f"invalid pad {marg}")
+          return tuple(ssimplify(s+b+e) for s,(b,e) in zip(ps, marg))
         case Ops.SHRINK:
           # TODO: why do i need resolve here?
-          if len(ps) != len(self.marg) or not all(resolve(0<=b) and resolve(b<=e) and resolve(e<=s) for s,(b,e) in zip(ps, self.marg)):
-            raise ValueError(f"invalid shrink {self.marg} for {ps}")
-          return tuple(ssimplify(e-s) for s,e in self.marg)
+          if len(ps) != len(marg) or not all(resolve(0<=b) and resolve(b<=e) and resolve(e<=s) for s,(b,e) in zip(ps, marg)):
+            raise ValueError(f"invalid shrink {marg} for {ps}")
+          return tuple(ssimplify(e-s) for s,e in marg)
         case Ops.FLIP:
-          if len(ps) != len(self.marg) or not all(isinstance(x, bool) for x in self.marg): raise ValueError(f"bad flip on {ps}, {self.marg}")
+          if len(ps) != len(marg) or not all(isinstance(x, bool) for x in marg): raise ValueError(f"bad flip on {ps}, {marg}")
           return ps
         case Ops.MULTI: return tuple(s*len(self.device) if a == self.axis else s for a,s in enumerate(ps))
         case Ops.REDUCE_AXIS | Ops.WMMA:
@@ -387,7 +395,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
   # determine what ranges this is in
   @recursive_property
   def _ranges(self) -> dict[UOp, None]:
-    ret: dict[UOp, None] = {}
+    ret: dict[UOp, None] = {self:None} if self.op is Ops.RANGE else {}
     for s in self.src: ret.update(s.ranges)
     for er in self.ended_ranges:
       if er.op is Ops.RANGE:
@@ -403,7 +411,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
   def ranges(self) -> dict[UOp, None]:
     ret = self.__dict__.get("_RECURSIVE_PROPERTY__ranges", _RECURSIVE_MISS)
     if ret is _RECURSIVE_MISS: ret = self._ranges
-    return ({self:None} | ret) if self.op is Ops.RANGE else ret
+    return ret
 
   # *** uop evaluation ***
 
@@ -658,6 +666,9 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
 
   @functools.cached_property
   def marg(self):
+    if self.arg is not None:
+      match self.op:
+        case Ops.RESHAPE | Ops.EXPAND | Ops.PAD | Ops.SHRINK | Ops.PERMUTE | Ops.FLIP: return self.arg
     match self.op:
       case Ops.RESHAPE | Ops.EXPAND: return tuple(self.src[1].sgep(i) for i in range(self.src[1].dtype.count))
       case Ops.PAD | Ops.SHRINK: return tuple((self.src[1].sgep(i), self.src[2].sgep(i)) for i in range(self.src[1].dtype.count))
@@ -665,9 +676,10 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
       case _: raise RuntimeError(f"{self.op} is not a MovementOp")
 
   def _mop(self, op:Ops, arg, same_shape_noop:bool=False) -> UOp:
+    self_shape = self.shape if same_shape_noop or (op in {Ops.SHRINK, Ops.PAD, Ops.EXPAND} and len(arg) == 0) else None
     # early NOOP
     if op in {Ops.SHRINK, Ops.PAD, Ops.EXPAND} and len(arg) == 0:
-      assert len(self.shape) == 0, "0 len arg only valid on zero length shape"
+      assert self_shape is not None and len(self_shape) == 0, "0 len arg only valid on zero length shape"
       return self
     match op:
       case Ops.RESHAPE | Ops.EXPAND: src_args = [arg]
@@ -679,7 +691,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     elif all(all_int(x) for x in src_args): ret = UOp(op, self.dtype, (self,)+tuple(usrcs), arg)
     else: ret = UOp(op, self.dtype, (self,)+UOp.sink(*usrcs).simplify().src)
     # for all movement ops, we check shape property to validity check the movement op
-    if ret.shape == self.shape and same_shape_noop: return self
+    if same_shape_noop and ret.shape == self_shape: return self
     return ret
 
   # in these four, if the shape doesn't change we can return self

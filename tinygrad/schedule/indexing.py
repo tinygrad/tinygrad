@@ -57,16 +57,19 @@ class IndexingContext:
 
 def create_bufferize_and_index_based_on_ranges(ctx:IndexingContext, x:UOp):
   if x.op in {Ops.BUFFERIZE, Ops.INDEX}: return None
+  x_range_map = ctx.range_map.get(x)
+  x_input_ranges = x_range_map[0] if x_range_map is not None else None
   new_srcs = []
   for s in x.src:
     new_src = s
     if s.op in {Ops.PARAM, Ops.BUFFER_VIEW, Ops.MSTACK, Ops.MSELECT} or \
        (s.op is Ops.AFTER and not any(c.op in {Ops.STORE, Ops.END} for c in s.src[1:])):
-      if x in ctx.range_map: new_src = new_src.index(*ctx.range_map[x][0])
+      if x_input_ranges is not None: new_src = new_src.index(*x_input_ranges)
     elif s in ctx.realize_map:
       realized_ranges = ctx.realize_map[s]
       assert isinstance(realized_ranges, list), "realize map must contain range list"
-      closed_ranges = tuple([r for i,r in enumerate(ctx.range_map[s][1]) if i in realized_ranges])
+      s_output_ranges = ctx.range_map[s][1]
+      closed_ranges = tuple(r for i,r in enumerate(s_output_ranges) if i in realized_ranges)
       if s.op is Ops.STORE:
         # add the ends if this is a store
         new_src = s.end(*[r for r in closed_ranges if r.op is Ops.RANGE])
@@ -78,7 +81,7 @@ def create_bufferize_and_index_based_on_ranges(ctx:IndexingContext, x:UOp):
         opts = BufferizeOpts(device=s.device, removable=removable) if len(ctx.range_map[s][1]) == len(realized_ranges) else \
                BufferizeOpts(device=s.device, addrspace=AddrSpace.LOCAL, removable=removable)
         new_src = UOp(Ops.BUFFERIZE, s.dtype, src=(new_src,)+closed_ranges, arg=opts)
-        if x in ctx.range_map: new_src = new_src.index(*[r for i,r in enumerate(ctx.range_map[x][0]) if i in realized_ranges])
+        if x_input_ranges is not None: new_src = new_src.index(*(r for i,r in enumerate(x_input_ranges) if i in realized_ranges))
     new_srcs.append(new_src)
   # NOTE: do we need this?
   return x.replace(src=tns) if x.src != (tns:=tuple(new_srcs)) else None
@@ -203,6 +206,9 @@ def _reshape_fastpath_template(in_shape:tuple[sint, ...], out_shape:tuple[sint, 
     return rngs, UOp.sink(*(rngs[:prefix] + (_reshape_linearize(tuple(mid_out), mid_rngs),) + (rngs[len(rngs)-suffix:] if suffix else ())))
   if len(mid_out) == 1 and isinstance(mid_out[0], int) and all(isinstance(s, int) for s in mid_in) and prod(mid_in) == mid_out[0]:
     return rngs, UOp.sink(*(rngs[:prefix] + _reshape_unlinearize(tuple(mid_in), mid_rngs[0]) + (rngs[len(rngs)-suffix:] if suffix else ())))
+  if all(isinstance(s, int) for s in mid_in) and all(isinstance(s, int) for s in mid_out) and (mid_prod:=prod(mid_in)) != 0 and mid_prod == prod(mid_out):
+    linear = _reshape_linearize(tuple(mid_out), mid_rngs)
+    return rngs, UOp.sink(*(rngs[:prefix] + _reshape_unlinearize(tuple(mid_in), linear) + (rngs[len(rngs)-suffix:] if suffix else ())))
   return None
 
 # this is the definition of the movement ops

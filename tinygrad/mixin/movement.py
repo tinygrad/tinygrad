@@ -55,16 +55,16 @@ class MovementMixin:
     return dim + total if dim < 0 else dim
 
   def _broadcast_to(self, new_shape: tuple[sint, ...]) -> Self:
-    shape = self.shape
-    if shape == new_shape:
+    orig_shape = self.shape
+    if orig_shape == new_shape:
       return self
-    if len(shape) > len(new_shape):
-      raise ValueError(f"cannot broadcast tensor to fewer dimensions. shape={shape} to {new_shape=}")
+    if len(orig_shape) > len(new_shape):
+      raise ValueError(f"cannot broadcast tensor to fewer dimensions. shape={orig_shape} to {new_shape=}")
     # first unsqueeze left with 1s https://data-apis.org/array-api/latest/API_specification/broadcasting.html
-    shape, _ = _align_left(shape, new_shape)
+    shape = (1,) * (len(new_shape) - len(orig_shape)) + orig_shape
     # for each dimension, check either dim is 1, or it does not change
     if not all(s == ns or s == 1 for s, ns in zip(shape, new_shape)):
-      raise ValueError(f"cannot broadcast {self.shape} to {new_shape=}")
+      raise ValueError(f"cannot broadcast {orig_shape} to {new_shape=}")
     reshaped = self.reshape(shape)
     ret = reshaped._mop(Ops.EXPAND, arg=new_shape)
     return reshaped if ret.shape == reshaped.shape else ret
@@ -96,15 +96,17 @@ class MovementMixin:
     """
     # resolve None and args
     self_shape = self.shape
-    new_shape = tuple([s if s is not None else self_shape[i] for i, s in enumerate(argfix(shape, *args))])
+    new_shape = tuple(s if s is not None else self_shape[i] for i, s in enumerate(argfix(shape, *args)))
+    if new_shape == self_shape: return self
     # resolve -1
     if (c := new_shape.count(-1)) > 1:
       raise RuntimeError(f"only one dimension can be inferred using -1, getting {new_shape}")
+    self_numel = prod(self_shape)
     if c:
-      new_shape = tuple([-prod(self_shape) // prod(new_shape) if s == -1 else s for s in new_shape])
-    if prod(self_shape) != prod(new_shape):
+      known_numel = prod(s for s in new_shape if s != -1)
+      new_shape = tuple(self_numel // known_numel if s == -1 else s for s in new_shape)
+    if self_numel != prod(new_shape):
       raise ValueError(f"size mismatch, can't reshape ({self_shape}) -> ({new_shape})")
-    if new_shape == self_shape: return self
     ret = self._mop(Ops.RESHAPE, arg=new_shape)
     return self if ret.shape == self_shape else ret
 

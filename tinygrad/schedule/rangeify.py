@@ -229,7 +229,8 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
   (UPat(Ops.REDUCE_AXIS, name="reduce", src=(UPat.var("x"),)),
    lambda reduce,x: reduce.const_like(identity_element(reduce.arg[0], reduce.dtype)) if x.size == 0 and reduce.size != 0 else None),
   # handle size 0
-  (UPat(GroupOp.All-{Ops.SINK}, name="x"), lambda x: x.const_like(0).rtag(x.tag) if (shape:=x._shape) is not None and prod(int(s.vmax) if isinstance(s, UOp) else s for s in shape) == 0 else None),
+  (UPat(GroupOp.All-{Ops.SINK}, name="x"), lambda x: x.const_like(0).rtag(x.tag) if (shape:=x._shape) is not None and
+    any((int(s.vmax) if isinstance(s, UOp) else s) == 0 for s in shape) else None),
 ])
 
 # *****************
@@ -247,7 +248,8 @@ def cleanup_dead_axes(b:UOp):
   hit = False
   reshape: list[sint] = []
   base_ranges = base.ranges
-  for s,rng in zip(b.shape, b.src[1:]):
+  shape, rngs = b.shape, b.src[1:]
+  for s,rng in zip(shape, rngs):
     # skip for symbolic. TODO: fix this
     if rng.op is Ops.RANGE and rng.src[0].op is not Ops.CONST: return None
     # CONSTs are already dead axes
@@ -258,7 +260,7 @@ def cleanup_dead_axes(b:UOp):
       reshape.append(s)
       new_rng.append(rng)
   if hit:
-    return b.replace(src=(base,)+tuple(new_rng)).reshape(tuple(reshape)).expand(b.shape)
+    return b.replace(src=(base,)+tuple(new_rng)).reshape(tuple(reshape)).expand(shape)
 
 def _ranges_gated_substitute(src:UOp, replaced:dict[UOp, UOp]) -> UOp:
   keys = tuple(replaced)
@@ -645,11 +647,12 @@ def get_kernel_graph(sink:UOp) -> UOp:
   kernel_assign: dict[UOp, UOp] = {u.buf_uop:u for u in afters}
   assign_rep: dict[UOp, UOp] = {}
   for u in afters:
+    current_kernel = kernel_assign[u.buf_uop]
     for s in u.src[1].src:
       # TODO: this is probably broken for MSELECT/MSTACK
       if s.op not in {Ops.BUFFER, Ops.PARAM} or s is u.buf_uop or (a:=kernel_assign.get(s)) is None: continue
       if a.src[1] is u.src[1]: continue  # same kernel (multi-output custom kernels)
-      if any(x.op is Ops.AFTER and x.buf_uop is s for x in kernel_assign[u.buf_uop].backward_slice):
+      if current_kernel.contains_in_backward_slice_with_self(a):
         raise RuntimeError(f"cycle detected in assign graph, buffers {s} and {u.buf_uop} have circular dependency")
       assign_rep[a] = kernel_assign[s] = a.replace(src=a.src+(u,))
   if assign_rep: tsink = graph_rewrite(tsink, _substitute, ctx=assign_rep, bottom_up=True, name="fix_assign")
