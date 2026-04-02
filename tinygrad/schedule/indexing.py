@@ -230,12 +230,13 @@ def apply_movement_op(op:Ops, in_shape:tuple[sint,...], arg:tuple, rngs:tuple[UO
     case Ops.FLIP:    rngs = tuple(((s-1)-a) if f else a for a,s,f in zip(rngs, in_shape, arg))
     case Ops.EXPAND:  rngs = tuple(a if in_sh == out_sh else a.const_like(0) for a,in_sh,out_sh in zip(rngs, in_shape, arg))
     case Ops.PAD:
-      prngs, pad_template = _pad_movement_template(in_shape, arg)
-      rngs = pad_template.src if all(a is b for a,b in zip(rngs, prngs)) else _substitute_template(pad_template, dict(zip(prngs, rngs)))
+      # Keep PAD semantics aligned with the historical path: template caching here can leak PLACEHOLDER ranges.
+      rngs = tuple(r if (s == 0 and e == 0) else graph_rewrite((r >= s) & (r < (sh+s)),
+        symbolic+pm_simplify_valid, name="pad").where(r-s, UOp.invalid()) for r,sh,(s,e) in zip(rngs, in_shape, arg))
     case Ops.RESHAPE:
-      if (fast_template:=_reshape_fastpath_template(in_shape, arg)) is not None: prngs, reshape_template = fast_template
-      else: prngs, reshape_template = _reshape_movement_template(in_shape, arg)
-      rngs = reshape_template.src if all(a is b for a,b in zip(rngs, prngs)) else _substitute_template(reshape_template, dict(zip(prngs, rngs)))
+      sink = UOp.sink(*rngs).simplify() # NOTE: this applies any commutative flips to the rngs early
+      sub_array = {r:UOp.range(r.src[0], i, AxisType.PLACEHOLDER) for i,r in enumerate(sink.ranges)}
+      rngs = _apply_reshape(in_shape, arg, sink.substitute(sub_array)).substitute({v:k for k,v in sub_array.items()}).src
     case _: raise RuntimeError(f"{op} is not a MovementOp")
   return rngs
 
