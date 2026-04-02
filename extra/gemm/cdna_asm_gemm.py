@@ -2742,8 +2742,8 @@ def asm_gemm(a:Tensor, b:Tensor) -> Tensor:
   else:
     out = Tensor.invalid(batch, M, N, dtype=out_dtype, device=a.device)
 
-  renderer = Device[a.device[0] if is_multi else a.device].renderer
-  dname, arch = renderer.device, getattr(renderer, "arch", "")
+  renderer = Device[dname:=(a.device[0] if is_multi else a.device)].renderer
+  dname, arch = dname.split(":")[0], getattr(renderer, "arch", "")
   if arch.startswith("gfx950") and getenv("USE_ASM", 1):
     # fp8 gemm computes a@b.T
     if a.dtype == FP8_DTYPE:
