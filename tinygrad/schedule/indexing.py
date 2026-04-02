@@ -210,7 +210,10 @@ def _reshape_fastpath_template(in_shape:tuple[sint, ...], out_shape:tuple[sint, 
   if len(mid_out) == 1 and isinstance(mid_out[0], int) and all(isinstance(s, int) for s in mid_in) and prod(mid_in) == mid_out[0]:
     mid_in_int = cast(tuple[int, ...], mid_in)
     return rngs, UOp.sink(*(prefix_rngs + _reshape_unlinearize(mid_in_int, mid_rngs[0]) + suffix_rngs))
-  if all(isinstance(s, int) for s in mid_in) and all(isinstance(s, int) for s in mid_out) and (mid_prod:=prod(mid_in)) != 0 and mid_prod == prod(mid_out):
+  if (all(isinstance(s, int) for s in mid_in) and
+      all(isinstance(s, int) for s in mid_out) and
+      (mid_prod:=prod(mid_in)) != 0 and
+      mid_prod == prod(mid_out)):
     mid_in_int = cast(tuple[int, ...], mid_in)
     mid_out_int = cast(tuple[int, ...], mid_out)
     linear = _reshape_linearize(mid_out_int, mid_rngs)
