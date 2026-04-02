@@ -30,8 +30,8 @@ def quantize_fp8(x:Tensor):
   x_clamped = x_scaled + (x_scaled.detach().clamp(-FP8_MAX, FP8_MAX) - x_scaled.detach())  # STE
   return x_clamped.cast(FP8_DTYPE), scale.float().reciprocal()
 
-def matmul(x:Tensor, w:Tensor) -> Tensor:
-  if not FP8: return x @ w.T
+def matmul(x:Tensor, w:Tensor, fp8=FP8) -> Tensor:
+  if not fp8: return x @ w.T
   # weights are already FP8, just quantize activations
   x_fp8, x_scale = quantize_fp8(x)
   return x_fp8.dot(w.T, dtype=dtypes.float) * x_scale

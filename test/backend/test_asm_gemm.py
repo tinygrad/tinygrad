@@ -42,6 +42,12 @@ def run_asm_gemm(a_shape, b_shape, dtype=dtypes.float16, a_shard=None, b_shard=N
   atol, rtol = (2e-1, 1e-2) if dtype == dtypes.bfloat16 else (256, 1e-2) if dtype == FP8_DTYPE else (1e-2, 1e-3)
   grad_atol, grad_rtol = (16895, 0.125) if dtype == FP8_DTYPE else (atol, rtol)
   with Context(DEBUG=0):
+    # enable for debugging, slow for larger gemms
+    if getenv("USE_NPY"):
+      import numpy as np
+      np.testing.assert_allclose(tst.numpy(), ref.numpy(), atol=atol, rtol=rtol)
+      np.testing.assert_allclose(a.grad.numpy(), a_ref.grad.numpy(), atol=grad_atol, rtol=grad_rtol)
+      np.testing.assert_allclose(b.grad.numpy(), b_ref.grad.numpy(), atol=grad_atol, rtol=grad_rtol)
     assert tst.allclose(ref, atol=atol, rtol=rtol), "forward mismatch"
     assert a.grad.allclose(a_ref.grad, atol=grad_atol, rtol=grad_rtol), "grad_a mismatch"
     assert b.grad.allclose(b_ref.grad, atol=grad_atol, rtol=grad_rtol), "grad_b mismatch"

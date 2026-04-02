@@ -6,7 +6,7 @@ from tinygrad.renderer import Estimates
 from tinygrad.helpers import getenv, all_same, DEBUG
 from tinygrad.runtime.support.compiler_amd import HIPCCCompiler
 from tinygrad.runtime.autogen.amd.cdna.ins import *
-from examples.mlperf.models.flat_llama import FP8_DTYPE, FP8_GRAD_DTYPE, quantize_fp8
+from examples.mlperf.models.flat_llama import FP8_DTYPE, FP8_GRAD_DTYPE, matmul
 
 # ** CDNA4 assembly gemm
 
@@ -2704,12 +2704,11 @@ def custom_gemm_bw(gradient:UOp, kernel:UOp):
   g_t = g_t[:a.shape[0]]
   if a.dtype.base == FP8_DTYPE:
     # fp8 gemm computes a@b.T
-    g_t_fp8, g_scale = quantize_fp8(g_t)
-    grad_a = ((g_t_fp8 @ b_t) * g_scale).cast(FP8_GRAD_DTYPE).uop
-    grad_b = ((g_t_fp8.reshape(-1, g_t.shape[-1]).T @ a_t.reshape(-1, a_t.shape[-1])) * g_scale).cast(FP8_GRAD_DTYPE).uop
+    grad_a = matmul(g_t, b_t.T, fp8=True).uop
+    grad_b = matmul(g_t.reshape(-1, g_t.shape[-1]).T, a_t.reshape(-1, a_t.shape[-1]).T, fp8=True).uop
   else:
-    grad_a = (g_t @ b_t.T).cast(a.dtype.base).uop
-    grad_b = (a_t.permute(2, 0, 1).reshape(a_t.shape[2], -1) @ g_t.reshape(-1, g_t.shape[-1])).cast(b.dtype.base).uop
+    grad_a = (g_t @ b_t.T).uop
+    grad_b = (a_t.permute(2, 0, 1).reshape(a_t.shape[2], -1) @ g_t.reshape(-1, g_t.shape[-1])).uop
   return (None, grad_a, grad_b)
 
 # ** main gemm function
