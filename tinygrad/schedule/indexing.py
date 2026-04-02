@@ -214,7 +214,8 @@ def _reshape_fastpath_template(in_shape:tuple[sint, ...], out_shape:tuple[sint, 
     mid_in_int = cast(tuple[int, ...], mid_in)
     mid_out_int = cast(tuple[int, ...], mid_out)
     linear = _reshape_linearize(mid_out_int, mid_rngs)
-    return rngs, UOp.sink(*(prefix_rngs + _reshape_unlinearize(mid_in_int, linear) + suffix_rngs))
+    mid_unlinearized = _reshape_unlinearize(mid_in_int, linear)
+    return rngs, UOp.sink(*(prefix_rngs + mid_unlinearized + suffix_rngs))
   return None
 
 # this is the definition of the movement ops
