@@ -4,6 +4,7 @@ from tinygrad.device import is_dtype_supported
 from tinygrad.helpers import getenv, system
 from extra.gemm.cdna_asm_gemm import asm_gemm
 from test.helpers import needs_second_gpu
+from examples.mlperf.models.flat_llama import FP8_DTYPE
 
 # On non CDNA4 it will only validate the Tensor.custom_kernel integration
 # Use DEV=NULL EMULATE=AMD_CDNA4 to also test the assembly
@@ -188,7 +189,7 @@ def has_hipcc():
   return True
 
 @unittest.skipUnless(has_hipcc(), "FP8 gemm requires hipcc to compile")
-class TestGemmLlamaFP8(TestGemmLlama): dtype = dtypes.fp8e4m3
+class TestGemmLlamaFP8(TestGemmLlama): dtype = FP8_DTYPE
 
 class TestMagicGu(unittest.TestCase):
   def test_magicgu_matches_old(self):
