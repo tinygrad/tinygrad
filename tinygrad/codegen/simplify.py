@@ -9,18 +9,8 @@ def flatten_range(r:UOp) -> UOp|None:
   off = range_start[r.op]
   rngs = r.src[off:]
   if not len(rngs): return None
-  new_rngs = tuple(UOp.sink(*rngs).ranges)
+  new_rngs = [x for x in UOp.sink(*rngs).toposort() if x.op is Ops.RANGE]
   return r.replace(src=r.src[:off]+tuple(new_rngs))
-
-def _walk_ranged_graph(root:UOp, rng:UOp) -> dict[UOp, None]:
-  included: dict[UOp, None] = {}
-  stack = [root]
-  while stack:
-    node = stack.pop()
-    if node in included or rng not in node.ranges: continue
-    included[node] = None
-    stack.extend(reversed(node.src))
-  return included
 
 pm_flatten_range = PatternMatcher([
   # real ranges only
@@ -138,7 +128,7 @@ pm_reduce_load_collapse = pm_reduce_collapse + PatternMatcher([
 
 def reduce_collapse(red:UOp, u:UOp, pm:PatternMatcher=pm_reduce_collapse) -> UOp|None:
   for r in red.src[1:]:
-    included = _walk_ranged_graph(u, r)
+    included = u.toposort(gate=lambda x: r in x.ranges)
     if any(x.op in {Ops.STORE, Ops.REDUCE} for x in included): return None
     replaces: dict[UOp, UOp] = {}
     for u in included:

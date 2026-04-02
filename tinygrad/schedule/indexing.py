@@ -1,4 +1,4 @@
-from typing import Iterator, Sequence
+from typing import Iterator, Sequence, cast
 import functools, itertools
 from dataclasses import dataclass, field
 from tinygrad.dtype import dtypes, AddrSpace
@@ -199,16 +199,22 @@ def _reshape_fastpath_template(in_shape:tuple[sint, ...], out_shape:tuple[sint, 
   mid_in = in_shape[prefix:len(in_shape)-suffix if suffix else len(in_shape)]
   mid_out = out_shape[prefix:len(out_shape)-suffix if suffix else len(out_shape)]
   mid_rngs = rngs[prefix:len(rngs)-suffix if suffix else len(rngs)]
+  prefix_rngs = rngs[:prefix]
+  suffix_rngs = rngs[len(rngs)-suffix:] if suffix else ()
 
   if (fast_mid := _reshape_insert_remove_ones(mid_in, mid_out, mid_rngs)) is not None:
-    return rngs, UOp.sink(*(rngs[:prefix] + fast_mid + (rngs[len(rngs)-suffix:] if suffix else ())))
+    return rngs, UOp.sink(*(prefix_rngs + fast_mid + suffix_rngs))
   if len(mid_in) == 1 and isinstance(mid_in[0], int) and all(isinstance(s, int) for s in mid_out) and prod(mid_out) == mid_in[0]:
-    return rngs, UOp.sink(*(rngs[:prefix] + (_reshape_linearize(tuple(mid_out), mid_rngs),) + (rngs[len(rngs)-suffix:] if suffix else ())))
+    mid_out_int = cast(tuple[int, ...], mid_out)
+    return rngs, UOp.sink(*(prefix_rngs + (_reshape_linearize(mid_out_int, mid_rngs),) + suffix_rngs))
   if len(mid_out) == 1 and isinstance(mid_out[0], int) and all(isinstance(s, int) for s in mid_in) and prod(mid_in) == mid_out[0]:
-    return rngs, UOp.sink(*(rngs[:prefix] + _reshape_unlinearize(tuple(mid_in), mid_rngs[0]) + (rngs[len(rngs)-suffix:] if suffix else ())))
+    mid_in_int = cast(tuple[int, ...], mid_in)
+    return rngs, UOp.sink(*(prefix_rngs + _reshape_unlinearize(mid_in_int, mid_rngs[0]) + suffix_rngs))
   if all(isinstance(s, int) for s in mid_in) and all(isinstance(s, int) for s in mid_out) and (mid_prod:=prod(mid_in)) != 0 and mid_prod == prod(mid_out):
-    linear = _reshape_linearize(tuple(mid_out), mid_rngs)
-    return rngs, UOp.sink(*(rngs[:prefix] + _reshape_unlinearize(tuple(mid_in), linear) + (rngs[len(rngs)-suffix:] if suffix else ())))
+    mid_in_int = cast(tuple[int, ...], mid_in)
+    mid_out_int = cast(tuple[int, ...], mid_out)
+    linear = _reshape_linearize(mid_out_int, mid_rngs)
+    return rngs, UOp.sink(*(prefix_rngs + _reshape_unlinearize(mid_in_int, linear) + suffix_rngs))
   return None
 
 # this is the definition of the movement ops

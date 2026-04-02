@@ -636,14 +636,10 @@ def get_kernel_graph(sink:UOp) -> UOp:
   lunique_start: int = max((x.arg for x in tsink.toposort() if x.op is Ops.LUNIQUE), default=-1) + 1
   tsink = graph_rewrite(tsink, pm_add_buffers+pm_add_range_tags, ctx=itertools.count(lunique_start), bottom_up=True, name="bufferize to store")
 
-  tsink_after_buffers_topo = tuple(tsink.toposort())
-  # split_kernels runs after bufferize_to_store, before any CALL nodes are created, so a single full topo covers both uses here.
-  has_split_candidates = any((u.op is Ops.END and not u.ranges) or (u.op is Ops.STORE and not u.ranges and u.src[0]._shape is None)
-                             for u in tsink_after_buffers_topo)
-  if has_split_candidates: tsink = graph_rewrite(tsink, split_kernels, bottom_up=True, name="split kernels")
+  tsink = graph_rewrite(tsink, split_kernels, bottom_up=True, name="split kernels")
 
   # WAR deps: if kernel U reads buffer S, and S is also written by another kernel, S's write must wait for U to finish
-  afters = [u for u in (tsink_after_buffers_topo if not has_split_candidates else tsink.toposort()) if u.op is Ops.AFTER]
+  afters = [u for u in tsink.toposort() if u.op is Ops.AFTER]
   kernel_assign: dict[UOp, UOp] = {u.buf_uop:u for u in afters}
   assign_rep: dict[UOp, UOp] = {}
   for u in afters:

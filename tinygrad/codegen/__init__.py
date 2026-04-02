@@ -149,19 +149,7 @@ pm_to_program = PatternMatcher([
   (UPat(Ops.PROGRAM, src=(UPat(), UPat(Ops.DEVICE), UPat(Ops.LINEAR, name="lin")), name="prg"), do_render),
   (UPat(Ops.PROGRAM, src=(UPat(), UPat(Ops.DEVICE), UPat(Ops.LINEAR), UPat(Ops.SOURCE, name="source")), name="prg"), do_compile),
 ])
-
-def get_null_program(ast:UOp, renderer:Renderer) -> ProgramSpec:
-  if ast.op is Ops.PROGRAM:
-    prg = ast.replace(src=(ast.src[0], UOp(Ops.DEVICE, arg=renderer.device), *ast.src[2:]))
-  elif ast.op is Ops.SINK:
-    prg = UOp(Ops.PROGRAM, src=(ast, UOp(Ops.DEVICE, arg=renderer.device)))
-  else:
-    raise RuntimeError(f"can't call get_null_program on {ast.op}")
-
-  if len(prg.src) < 3: prg = prg.replace(src=prg.src + (UOp(Ops.LINEAR, src=()),))
-  if len(prg.src) < 4: prg = prg.replace(src=prg.src + (UOp(Ops.SOURCE, arg=""),))
-  if len(prg.src) < 5: prg = prg.replace(src=prg.src + (UOp(Ops.BINARY, arg=b""),))
-  return ProgramSpec.from_uop(prg)
+pm_to_null_program = PatternMatcher(pm_to_program.patterns[:2])
 
 @Context(ALLOW_DEVICE_USAGE=0)
 @track_rewrites(name=lambda ast,renderer,ret,**kwargs: TracingKey(ret.name, (ret.function_name, ast), ret=renderer), replay=True)
@@ -177,9 +165,6 @@ def get_program(ast:UOp, renderer:Renderer, opts:list[Opt]|None=None) -> Program
     The ProgramSpec of the program.
   """
 
-  if renderer.device == "NULL":
-    return get_null_program(ast, renderer)
-
   if ast.op is Ops.PROGRAM: prg = ast
   elif ast.op is Ops.SINK:
     # rewrite to prg
@@ -193,7 +178,14 @@ def get_program(ast:UOp, renderer:Renderer, opts:list[Opt]|None=None) -> Program
   else:
     raise RuntimeError(f"can't call get_program on {ast.op}")
 
-  prg = graph_rewrite(prg, pm_to_program, ctx=renderer, name="linearize/render")
+  if renderer.device == "NULL":
+    if prg.src[1].arg != renderer.device:
+      prg = prg.replace(src=(prg.src[0], UOp(Ops.DEVICE, arg=renderer.device), *prg.src[2:]))
+    prg = graph_rewrite(prg, pm_to_null_program, ctx=renderer, name="linearize/null")
+    if len(prg.src) < 4: prg = prg.replace(src=prg.src + (UOp(Ops.SOURCE, arg=""),))
+    if len(prg.src) < 5: prg = prg.replace(src=prg.src + (UOp(Ops.BINARY, arg=b""),))
+  else:
+    prg = graph_rewrite(prg, pm_to_program, ctx=renderer, name="linearize/render")
   if VIZ: graph_rewrite(prg, PatternMatcher([]), name="View Program")
 
   # create the ProgramSpec
