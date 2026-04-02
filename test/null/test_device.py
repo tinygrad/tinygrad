@@ -3,7 +3,7 @@ import unittest, os, subprocess
 from unittest.mock import patch
 from tinygrad import Tensor
 from tinygrad.device import Device, Compiler, enumerate_devices_str
-from tinygrad.helpers import diskcache_get, diskcache_put, getenv, Context, WIN, CI, OSX
+from tinygrad.helpers import diskcache_get, diskcache_put, getenv, Context, Target, WIN, CI, OSX, DEV
 from tinygrad.runtime.support.c import DLL
 
 class TestDevice(unittest.TestCase):
@@ -24,11 +24,31 @@ class TestDevice(unittest.TestCase):
     with self.assertRaises(ModuleNotFoundError):
       Device["TYPO"]
 
+  @unittest.skipIf(Device.DEFAULT != "CPU", "only run on CPU")
+  def test_nonexistent_renderer(self):
+    with self.assertRaisesRegex(AssertionError, "No renderer"):
+      with Context(DEV="CPU:TYPO"): Device[Device.DEFAULT].renderer
+
   def test_lowercase_canonicalizes(self):
     device = Device.DEFAULT
-    Device.DEFAULT = device.lower()
-    self.assertEqual(Device.canonicalize(None), device)
-    Device.DEFAULT = device
+    with Context(DEV=device.lower()):
+      self.assertEqual(Device.canonicalize(None), device)
+
+  def test_set_device_default_raises(self):
+    with self.assertRaisesRegex(AttributeError, "setting Device.DEFAULT is deprecated"):
+      Device.DEFAULT = "CPU"
+
+  def test_old_device_env_raises(self):
+    result = subprocess.run(['python3', '-c', 'from tinygrad import Device; Device.DEFAULT'],
+                            env={**os.environ, "CPU": "1", "DEV": ""}, capture_output=True)
+    self.assertNotEqual(result.returncode, 0)
+    self.assertIn(b"deprecated", result.stderr)
+
+  def test_old_renderer_env_raises(self):
+    result = subprocess.run(['python3', '-c', 'from tinygrad import Device; Device[Device.DEFAULT].renderer'],
+                            env={**os.environ, "DEV": "CPU", "CPU_LLVM": "1"}, capture_output=True)
+    self.assertNotEqual(result.returncode, 0)
+    self.assertIn(b"deprecated", result.stderr)
 
   @unittest.skipIf(WIN and CI, "skipping windows test") # TODO: subprocess causes memory violation?
   def test_env_overwrite_default_compiler(self):
@@ -39,13 +59,11 @@ class TestDevice(unittest.TestCase):
 
       imports = "from tinygrad import Device; from tinygrad.runtime.support.compiler_cpu import CPULLVMCompiler, ClangJITCompiler"
       subprocess.run([f'python3 -c "{imports}; assert isinstance(Device[Device.DEFAULT].compiler, CPULLVMCompiler)"'],
-                        shell=True, check=True, env={**os.environ, "DEV": "CPU", "CPU_LLVM": "1"})
+                        shell=True, check=True, env={**os.environ, "DEV": "CPU:LLVM"})
       subprocess.run([f'python3 -c "{imports}; assert isinstance(Device[Device.DEFAULT].compiler, ClangJITCompiler)"'],
-                        shell=True, check=True, env={**os.environ, "DEV": "CPU", "CPU_LLVM": "0"})
-      subprocess.run([f'python3 -c "{imports}; assert isinstance(Device[Device.DEFAULT].compiler, CPULLVMCompiler)"'],
-                        shell=True, check=True, env={**os.environ, "DEV": "CPU", "CPU_CC": "LLVM"})
+                        shell=True, check=True, env={**os.environ, "DEV": "CPU"})
       subprocess.run([f'python3 -c "{imports}; assert isinstance(Device[Device.DEFAULT].compiler, ClangJITCompiler)"'],
-                        shell=True, check=True, env={**os.environ, "DEV": "CPU", "CPU_CC": "CLANGJIT"})
+                        shell=True, check=True, env={**os.environ, "DEV": "CPU:CLANGJIT"})
     elif Device.DEFAULT == "AMD":
       from tinygrad.runtime.support.compiler_amd import HIPCompiler, AMDLLVMCompiler
       try: _, _ = HIPCompiler(Device[Device.DEFAULT].arch), AMDLLVMCompiler(Device[Device.DEFAULT].arch)
@@ -53,27 +71,25 @@ class TestDevice(unittest.TestCase):
 
       imports = "from tinygrad import Device; from tinygrad.runtime.support.compiler_amd import HIPCompiler, AMDLLVMCompiler"
       subprocess.run([f'python3 -c "{imports}; assert isinstance(Device[Device.DEFAULT].compiler, AMDLLVMCompiler)"'],
-                        shell=True, check=True, env={**os.environ, "DEV": "AMD", "AMD_LLVM": "1"})
+                        shell=True, check=True, env={**os.environ, "DEV": "AMD:LLVM"})
       subprocess.run([f'python3 -c "{imports}; assert isinstance(Device[Device.DEFAULT].compiler, HIPCompiler)"'],
-                        shell=True, check=True, env={**os.environ, "DEV": "AMD", "AMD_LLVM": "0"})
-      subprocess.run([f'python3 -c "{imports}; assert isinstance(Device[Device.DEFAULT].compiler, AMDLLVMCompiler)"'],
-                        shell=True, check=True, env={**os.environ, "DEV": "AMD", "AMD_CC": "LLVM"})
+                        shell=True, check=True, env={**os.environ, "DEV": "AMD"})
       subprocess.run([f'python3 -c "{imports}; assert isinstance(Device[Device.DEFAULT].compiler, HIPCompiler)"'],
-                        shell=True, check=True, env={**os.environ, "DEV": "AMD", "AMD_CC": "HIP"})
+                        shell=True, check=True, env={**os.environ, "DEV": "AMD:HIP"})
     else: self.skipTest("only run on CPU/AMD")
 
-  @unittest.skipIf((WIN and CI) or (not Device.DEFAULT == "CPU"), "skipping windows test")
+  @unittest.skipIf(WIN and CI, "skipping windows test")
   def test_env_online(self):
     from tinygrad.runtime.support.compiler_cpu import CPULLVMCompiler, ClangJITCompiler
     try: _, _ = CPULLVMCompiler(), ClangJITCompiler()
     except Exception as e: self.skipTest(f"skipping compiler test: not all compilers: {e}")
 
-    with Context(CPU_LLVM=1):
+    with Context(DEV="CPU:LLVM"):
       inst = Device["CPU"].compiler
       self.assertIsInstance(Device["CPU"].compiler, CPULLVMCompiler)
-    with Context(CPU_LLVM=0):
+    with Context(DEV="CPU"):
       self.assertIsInstance(Device["CPU"].compiler, ClangJITCompiler)
-    with Context(CPU_LLVM=1):
+    with Context(DEV="CPU:LLVM"):
       self.assertIsInstance(Device["CPU"].compiler, CPULLVMCompiler)
       assert inst is Device["CPU"].compiler  # cached
 
@@ -85,9 +101,30 @@ class TestDevice(unittest.TestCase):
     except Exception as e: self.skipTest(f"skipping: LLVM not available: {e}")
 
     dev = Device["CPU"]
-    dev.cached_pair.clear()
+    dev.cached_renderer.clear()
     with patch("tinygrad.renderer.cstyle.ClangJITRenderer.__init__", side_effect=RuntimeError("broken")):
       self.assertIsInstance(dev.renderer.compiler, CPULLVMCompiler)
+
+  def test_dev_contextvar(self):
+    orig_dev = Device.DEFAULT
+    with Context(DEV="CPU"): self.assertEqual(Tensor.empty(1).device, "CPU")
+    with Context(DEV="NULL"): self.assertEqual(Tensor.empty(1).device, "NULL")
+    self.assertEqual(Tensor.empty(1).device, orig_dev)
+
+class TestDevVar(unittest.TestCase):
+  def test_parse(self):
+    for d, t in [("AMD", Target(device="AMD", renderer="")), ("AMD:LLVM", Target(device="AMD", renderer="LLVM")),
+                 (":LLVM", Target(device="", renderer="LLVM"))]:
+      with Context(DEV=d):
+        self.assertEqual(DEV.value, t)
+        self.assertEqual(str(DEV.value), d)
+
+  def test_target(self):
+    with Context(DEV="CPU"): self.assertEqual(DEV.target("CPU"), Target("CPU"))
+    with Context(DEV="CPU:LLVM"): self.assertEqual(DEV.target("CPU"), Target("CPU", "LLVM"))
+    with Context(DEV=":LLVM"): self.assertEqual(DEV.target("CPU"), Target("CPU", "LLVM"))
+    with Context(DEV="AMD:LLVM"): self.assertEqual(DEV.target("CPU"), Target("CPU"))
+    with Context(DEV=""): self.assertEqual(DEV.target("CPU"), Target("CPU"))
 
 class MockCompiler(Compiler):
   def __init__(self, key): super().__init__(key)

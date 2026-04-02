@@ -21,6 +21,7 @@ class TestLLMServer(unittest.TestCase):
 
     import tinygrad.apps.llm as llm_module
     llm_module.model = cls.mock_model
+    llm_module.model_name = "test-model"
     llm_module.tok = cls.mock_tok
     llm_module.bos_id = cls.bos_id
     llm_module.eos_id = cls.eos_id
@@ -133,6 +134,77 @@ class TestLLMServer(unittest.TestCase):
     self.assertIsNotNone(resp.usage)
     self.assertIsNotNone(resp.usage.prompt_tokens)
     self.assertIsNotNone(resp.usage.completion_tokens)
+
+  def test_max_tokens_streaming(self):
+    self.mock_model.generate = Mock(side_effect=lambda ids, **kwargs: iter([300, 301, 302, 303, 999]))
+    stream = self.client.chat.completions.create(
+      model="test", messages=[{"role": "user", "content": "Hello"}], stream=True, max_tokens=2
+    )
+    chunks = list(stream)
+    content_chunks = [c for c in chunks if c.choices and c.choices[0].delta.content]
+    self.assertEqual(len(content_chunks), 2)
+    self.assertEqual(chunks[-1].choices[0].finish_reason, "length")
+
+  def test_max_tokens_non_streaming(self):
+    self.mock_model.generate = Mock(side_effect=lambda ids, **kwargs: iter([300, 301, 302, 303, 999]))
+    resp = self.client.chat.completions.create(
+      model="test", messages=[{"role": "user", "content": "Hello"}], stream=False, max_tokens=2
+    )
+    self.assertEqual(resp.choices[0].finish_reason, "length")
+    self.assertEqual(resp.usage.completion_tokens, 2)
+
+  def test_assistant_prefill(self):
+    """Last assistant message should be treated as prefill (not a completed turn)."""
+    self.mock_model.generate = Mock(side_effect=lambda ids, **kwargs: iter([300, 999]))
+    captured_ids = []
+    orig_generate = self.mock_model.generate.side_effect
+    def capture_generate(ids, **kwargs):
+      captured_ids.extend(ids)
+      return orig_generate(ids, **kwargs)
+    self.mock_model.generate = Mock(side_effect=capture_generate)
+
+    resp = self.client.chat.completions.create(
+      model="test", messages=[
+        {"role": "user", "content": "Hello"},
+        {"role": "assistant", "content": "Sure"}
+      ], stream=False
+    )
+    # prefill tokens should be in ids: role("assistant") + encode("Sure") but NO end_turn after it
+    # and NO extra role("assistant") appended
+    role_tokens = self.mock_tok.role.call_args_list
+    # last role() call should be for "assistant" (the prefill message), not an extra one
+    self.assertEqual(role_tokens[-1], unittest.mock.call("assistant"))
+    # end_turn should be called once less than role() — the prefill assistant msg doesn't get end_turn
+    self.assertEqual(self.mock_tok.end_turn.call_count, self.mock_tok.role.call_count - 1)
+    self.assertIsNotNone(resp.choices[0].message.content)
+
+  def test_assistant_prefill_not_last(self):
+    """Assistant message that's NOT last should be a normal completed turn."""
+    self.mock_model.generate = Mock(side_effect=lambda ids, **kwargs: iter([300, 999]))
+    self.mock_tok.role.reset_mock()
+    self.mock_tok.end_turn.reset_mock()
+    self.client.chat.completions.create(
+      model="test", messages=[
+        {"role": "user", "content": "Hello"},
+        {"role": "assistant", "content": "Sure"},
+        {"role": "user", "content": "Continue"}
+      ], stream=False
+    )
+    # all messages get end_turn, plus an extra role("assistant") at the end
+    # roles: user, assistant, user, assistant(generation prompt) = 4 role calls
+    # end_turns: user, assistant, user = 3 end_turn calls (one per message)
+    self.assertEqual(self.mock_tok.end_turn.call_count, 3)
+    self.assertEqual(self.mock_tok.role.call_count, 4)
+
+  def test_models_endpoint(self):
+    import requests as req
+    resp = req.get(f"http://127.0.0.1:{self.port}/v1/models")
+    self.assertEqual(resp.status_code, 200)
+    data = resp.json()
+    self.assertEqual(data["object"], "list")
+    self.assertEqual(len(data["data"]), 1)
+    self.assertEqual(data["data"][0]["id"], "test-model")
+    self.assertEqual(data["data"][0]["object"], "model")
 
 if __name__ == '__main__':
   unittest.main()

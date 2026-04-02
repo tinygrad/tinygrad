@@ -4,14 +4,15 @@ from tinygrad.uop import Ops
 from tinygrad.dtype import dtypes, ConstType, least_upper_dtype, least_upper_float
 from tinygrad.helpers import polyN
 from tinygrad.mixin.dtype import DTypeMixin
+from tinygrad.mixin.creation import CreationMixin
 
 
-class ElementwiseMixin(DTypeMixin):
+class ElementwiseMixin(DTypeMixin, CreationMixin):
   # required to implement
   def alu(self, op: Ops, *src: Self) -> Self:
     raise NotImplementedError
 
-  def const_like(self, b: ConstType) -> Self:
+  def _broadcasted(self, y: Self | ConstType, reverse: bool = False) -> tuple[Self, Self]:
     raise NotImplementedError
 
   # great functions you get!
@@ -22,7 +23,14 @@ class ElementwiseMixin(DTypeMixin):
     return self.ufix(x).alu(op, self) if reverse else self.alu(op, self.ufix(x))
 
   def logical_not(self) -> Self:
-    return self.ne(True)
+    """
+    Computes the logical NOT of the tensor element-wise.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([False, True]).logical_not().numpy())
+    ```
+    """
+    return self.cast(dtypes.bool).ne(True)
 
   def neg(self) -> Self:
     """
@@ -56,6 +64,27 @@ class ElementwiseMixin(DTypeMixin):
     ```
     """
     return self._binop(Ops.ADD, x, reverse)
+
+  def sub(self, x: Self | ConstType, reverse: bool = False) -> Self:
+    """
+    Subtracts `x` from `self`.
+    Equivalent to `self - x`.
+    Supports broadcasting to a common shape, type promotion, and integer, float, boolean inputs.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    Tensor.manual_seed(42)
+    t = Tensor.randn(4)
+    print(t.numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.sub(20).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.sub(Tensor([[2.0], [3.5]])).numpy())
+    ```
+    """
+    a, b = self._broadcasted(x, reverse)
+    return a + (-b)
 
   def mul(self, x: Self | ConstType, reverse: bool = False) -> Self:
     """
@@ -138,9 +167,6 @@ class ElementwiseMixin(DTypeMixin):
 
   def mod(self, x: Self | ConstType, reverse: bool = False) -> Self:
     return self._binop(Ops.MOD, x, reverse)
-
-  def sub(self, x: Self | ConstType, reverse: bool = False) -> Self:
-    return self.ufix(x).alu(Ops.ADD, -self) if reverse else self.alu(Ops.ADD, -self.ufix(x))
 
   def div(self, x: Self | ConstType, reverse: bool = False) -> Self:
     return (self.ufix(x) * self.alu(Ops.RECIPROCAL)) if reverse else (self * self.ufix(x).alu(Ops.RECIPROCAL))
@@ -259,15 +285,41 @@ class ElementwiseMixin(DTypeMixin):
     """
     return self._binop(Ops.MAX, x, False)
 
+  def _inverse(self) -> Self: return -self if self.is_floating_point() else ~self
+
   def minimum(self, x: Self | ConstType) -> Self:
-    return -(-self).maximum(-self.ufix(x))
+    """
+    Computes element-wise minimum of `self` and `x`.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([-1, 2, 3]).minimum(1).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([-1, 2, 3]).minimum(Tensor([-4, -2, 9])).numpy())
+    ```
+    """
+    t, x = self._broadcasted(x)
+    return t._inverse().maximum(x._inverse())._inverse()
+
+  def copysign(self, other: Self | ConstType) -> Self:
+    """
+    Returns a tensor of with the magnitude of `self` and the sign of `other`, elementwise.
+    """
+    # NOTE: torch always return in float, we return based on the broadcasting rule.
+    other = self._broadcasted(other)[1]
+    return self.abs() * ((other < 0) | (other.reciprocal() < 0)).where(-1, 1)
+
+  def logaddexp(self, other: Self | ConstType) -> Self:
+    """
+    Calculates (self.exp()+other.exp()).log(), elementwise.
+    """
+    m = self.maximum(other)
+    return ((self-m).exp() + (self._broadcasted(other)[1]-m).exp()).log() + m
 
   def where(self, x: Self | ConstType, y: Self | ConstType) -> Self:
-    if isinstance(x, type(self)):
-      return self.alu(Ops.WHERE, x, x.ufix(y))
-    if isinstance(y, type(self)):
-      return self.alu(Ops.WHERE, y.ufix(x), y)
-    raise RuntimeError("where needs at least one UOp arg")
+    ref: Self = x if isinstance(x, type(self)) else y if isinstance(y, type(self)) else \
+      self.cast(least_upper_dtype(dtypes.from_py(x), dtypes.from_py(y)))
+    return self.alu(Ops.WHERE, ref.ufix(x), ref.ufix(y))
 
   def threefry(self, seed: Self) -> Self:
     return self.alu(Ops.THREEFRY, seed)
@@ -364,11 +416,34 @@ class ElementwiseMixin(DTypeMixin):
     """
     return self._ensure_float().alu(Ops.EXP2)
 
-  def pow(self, x: Self | ConstType) -> Self:
-    return self.alu(Ops.POW, self.ufix(x))
+  def pow(self, x: Self | ConstType, reverse: bool = False) -> Self:
+    """
+    Computes power of `self` with `x`.
+    Equivalent to `self ** x`.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([-1, 2, 3]).pow(2.0).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([-1, 2, 3]).pow(Tensor([-1.5, 0.5, 1.5])).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print((2.0 ** Tensor([-1, 2, 3])).numpy())
+    ```
+    """
+    base, exponent = self._broadcasted(x, reverse=reverse)
+    # TODO: int pow
+    if not base.is_floating_point() and not isinstance(x, ElementwiseMixin) and not (isinstance(x, int) and x >= 0):
+      raise RuntimeError("base needs to be float")
+    ret = base.alu(Ops.POW, exponent)
+    # NOTE: pow(int, float) -> int
+    return ret.round().cast(self.dtype) if not reverse and not dtypes.is_float(self.dtype) and dtypes.is_float(exponent.dtype) else ret
 
   def __pow__(self, x: Self | ConstType) -> Self:
     return self.pow(x)
+
+  def __rpow__(self, x: Self | ConstType) -> Self:
+    return self.pow(x, True)
 
   def square(self) -> Self:
     """
@@ -427,6 +502,26 @@ class ElementwiseMixin(DTypeMixin):
     ```
     """
     return (self.isinf() | self.isnan()).logical_not()
+
+  def isclose(self, other, rtol:float=1e-05, atol:float=1e-08, equal_nan=False) -> Self:
+    """
+    Returns a new tensor with element-wise comparison of closeness to `other` within a tolerance.
+
+    The `rtol` and `atol` keyword arguments control the relative and absolute tolerance of the comparison.
+
+    By default, two `NaN` values are not close to each other. If `equal_nan` is `True`, two `NaN` values are considered close.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([1e-7, 1e-8, 1e-9, float('nan')]).isclose(Tensor([0.0, 0.0, 0.0, float('nan')])).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([float('nan')]).isclose(Tensor([float('nan')]), equal_nan=True).numpy())
+    ```
+    """
+    is_finite_close = self.isfinite() & other.isfinite() & ((self - other).abs() <= atol + rtol * other.abs())
+    is_infinite_close = (self.isinf() | other.isinf()) & (self == other)
+    is_nan_close = (self.isnan() & other.isnan()) & equal_nan
+    return is_finite_close | is_infinite_close | is_nan_close
 
   def ceil(self) -> Self:
     """

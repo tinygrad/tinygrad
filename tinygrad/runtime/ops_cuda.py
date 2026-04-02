@@ -1,8 +1,9 @@
 from __future__ import annotations
 import ctypes, functools
-from tinygrad.helpers import DEBUG, getenv, mv_address, suppress_finalizing, CUDA_CC, CUDA_PTX, CUDA_NVCC
-from tinygrad.device import Compiled, BufferSpec, LRUAllocator, CompilerSet
-from tinygrad.renderer.cstyle import CUDARenderer
+from tinygrad.helpers import DEBUG, getenv, mv_address, suppress_finalizing
+from tinygrad.device import Compiled, BufferSpec, LRUAllocator
+from tinygrad.renderer import Renderer
+from tinygrad.renderer.cstyle import CUDARenderer, NVCCRenderer
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.runtime.autogen import cuda
 from tinygrad.runtime.support.compiler_cuda import pretty_ptx
@@ -118,10 +119,10 @@ class CUDADevice(Compiled):
     CUDADevice.devices.append(self)
 
     from tinygrad.runtime.graph.cuda import CUDAGraph
-    compilers = CompilerSet([(functools.partial(CUDARenderer, self.arch, device="CUDA"), None),
-                             (functools.partial(PTXRenderer, self.arch, device="CUDA"), CUDA_PTX),
-                             (functools.partial(CUDARenderer, self.arch, device="CUDA", use_nvcc=True), CUDA_NVCC)], ctrl_var=CUDA_CC)
-    super().__init__(device, CUDAAllocator(self), compilers, functools.partial(CUDAProgram, self), None if MOCKGPU else CUDAGraph)
+    renderers:list[type[Renderer]|functools.partial] = [functools.partial(CUDARenderer, self.arch, device="CUDA"),
+                                                        functools.partial(PTXRenderer, self.arch, device="CUDA"),
+                                                        functools.partial(NVCCRenderer, self.arch, device="CUDA")]
+    super().__init__(device, CUDAAllocator(self), renderers, functools.partial(CUDAProgram, self), None if MOCKGPU else CUDAGraph)
 
   def synchronize(self):
     check(cuda.cuCtxSetCurrent(self.context))

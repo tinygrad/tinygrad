@@ -149,6 +149,9 @@ class TestSymbolic(unittest.TestCase):
   def test_xor_0(self):
     self.helper_test_variable(Variable("a", 0, 8, dtypes.int) ^ 0, 0, 8, "a", test_z3=False)
 
+  def test_xor_self_inverse(self):
+    self.helper_test_variable((Variable("a", 0, 8, dtypes.int) ^ 5) ^ 5, 0, 8, "a", test_z3=False)
+
   def test_add_1(self):
     self.helper_test_variable(Variable("a", 0, 8)+1, 1, 9, "(a+1)")
 
@@ -1020,6 +1023,12 @@ class TestSymbolicVariables(unittest.TestCase):
     a = Variable("a", 0, 10)
     assert (a * a).variables() == [a]
     assert (a//4 + a//6).variables() == [a]
+
+  def test_variable_min_eq_max_bind_folds(self):
+    b = Variable("x", 1, 1).bind(1)
+    s = b.simplify()
+    self.assertEqual(s.op, Ops.CONST)
+    self.assertEqual(s.arg, 1)
 
 class TestSymInfer(unittest.TestCase):
   def test_sym_infer(self):

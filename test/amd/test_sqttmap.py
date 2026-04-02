@@ -1,8 +1,8 @@
 # test to compare every packet with the rocprof decoder
-import unittest, pickle
+import unittest, pickle, contextlib, io
 from typing import Iterator
 from pathlib import Path
-from tinygrad.helpers import DEBUG, getenv, temp
+from tinygrad.helpers import DEBUG, getenv, temp, ansistrip
 from tinygrad.renderer.amd.sqtt import print_packets, map_insts
 from tinygrad.runtime.autogen.amd.rdna3.ins import s_endpgm
 from tinygrad.viz.serve import sqtt_timeline
@@ -10,6 +10,13 @@ from test.amd.disasm import disasm
 
 import tinygrad
 EXAMPLES_DIR = Path(tinygrad.__file__).parent.parent / "extra/sqtt/examples"
+
+def run_cli(*cli_args) -> str:
+  from extra.viz.cli import main, get_arg_parser
+  args = get_arg_parser().parse_args(cli_args)
+  with contextlib.redirect_stdout(buf:=io.StringIO()):
+    main(args)
+  return buf.getvalue().strip()
 
 def rocprof_inst_traces_match(sqtt, prg, target):
   from tinygrad.viz.serve import amd_decode
@@ -79,7 +86,7 @@ class TestSQTTMapBase(unittest.TestCase):
         if (p:=kern_events.get(event.kern)) is None: continue
         with self.subTest(example=name, kern=event.kern):
           # skip if there's no SQTT frequency data
-          if not (timeline:=sqtt_timeline(event.blob, p.lib, target)[0]): continue
+          if not (timeline:=list(sqtt_timeline(event.blob, p.lib, target))): continue
           if not (frequency:=[e.key for e in timeline if type(e).__name__ == "ProfilePointEvent" and e.name == "freq_hz"]): continue
           mean = sum(frequency) / len(frequency)
           variance = sum((v - mean) ** 2 for v in frequency) / len(frequency)
@@ -94,6 +101,8 @@ class TestSQTTMapBase(unittest.TestCase):
               # sopk/immediates don't get ALU/MEM EXEC
               if e.name.display_name not in {"IMMEDIATE", "IMMEDIATE_MASK", "JUMP", "JUMP_NO", "MESSAGE", "BARRIER", "BARRIER_SIGNAL",
                                              "WAVEEND", "WAVERDY"}: insts += 1
+            # OTHER_ is its own stream, it's the INST from other SIMDs that share the same EXEC.
+            elif e.device.startswith("OTHER"): continue
             else: raise Exception(f"timeline row must be INST or EXEC, got {e.device}")
           self.assertEqual(execs, insts)
 
@@ -101,12 +110,24 @@ class TestSQTTMapBase(unittest.TestCase):
     for name, (events, kern_events, target) in self.examples.items():
       for event in events:
         wave_barriers = {}
-        for e in sqtt_timeline(event.blob, kern_events[event.kern].lib, target)[0]:
+        for e in sqtt_timeline(event.blob, kern_events[event.kern].lib, target):
           if type(e).__name__ == "ProfileRangeEvent" and e.name.display_name == "BARRIER": wave_barriers.setdefault(e.device, []).append(e)
         if not wave_barriers: continue
         for row, events in wave_barriers.items():
           for e in events:
             assert e.en-e.st > 1, f"all barriers must have a duration greater than 1, got {e}"
+
+  def test_sqtt_cli(self):
+    for pkl_path in sorted((EXAMPLES_DIR/self.target).glob("*.pkl")):
+      out = run_cli("--profile", "--profile-path", str(pkl_path))
+      sqtt_traces = [l.strip() for l in out.split("\n") if "SQTT" in l]
+      for name in sqtt_traces:
+        out = run_cli("--profile", "--profile-path", str(pkl_path), "-s", ansistrip(name))
+        lines = out.split("\n")
+        self.assertIn("Clk", lines[0])
+        for r in lines[2:]:
+          parts = r.split()
+          self.assertTrue(parts[0].isdigit(), f"expected clock timestamp, got {parts[0]}")
 
 class TestSQTTMapRDNA3(TestSQTTMapBase): target = "gfx1100"
 
