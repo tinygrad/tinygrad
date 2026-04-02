@@ -1015,7 +1015,7 @@ jobs:
           python-version: '3.12'
       - name: Set env
         shell: bash
-        run: printf "NULL_ALLOW_COPYOUT=1\n${{ matrix.backend == 'ir3' && 'DEV=NULL:IR3' || matrix.backend == 'nak' && 'DEV=NULL:NAK' }}" >> $GITHUB_ENV
+        run: printf "NULL_ALLOW_COPYOUT=1\n${{ matrix.backend == 'ir3' && 'DEV=NULL:IR3:a630' || matrix.backend == 'nak' && 'DEV=NULL:NAK:sm_120' }}" >> $GITHUB_ENV
       - name: Run test_ops
         shell: bash
         run: |
@@ -1038,7 +1038,7 @@ jobs:
           python-version: '3.12'
       - name: Set env
         shell: bash
-        run: printf "DEV=NULL:QCOMCL\nNULL_ALLOW_COPYOUT=1" >> $GITHUB_ENV
+        run: printf "DEV=NULL:QCOMCL:a630\nNULL_ALLOW_COPYOUT=1" >> $GITHUB_ENV
       - name: Run test_ops
         shell: bash
         run: |
