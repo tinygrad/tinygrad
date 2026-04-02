@@ -392,13 +392,13 @@ class CUDARenderer(CStyleLanguage):
   local_max = (1024, 1024, 64)
   shared_max = 49152
 
-  def __init__(self, arch:str, device:str="NV", use_nvcc=False):
+  def __init__(self, target:Target, use_nvcc=False):
+    super().__init__(target)
     from tinygrad.runtime.support.compiler_cuda import NVRTCCompiler, NVCCCompiler
     from tinygrad.runtime.support.hcq import MOCKGPU
-    self.device, self.arch = device, arch
-    self.compiler = (NVCCCompiler if use_nvcc else NVRTCCompiler)(arch, ptx=bool(MOCKGPU) or device == "CUDA", cache_key=device.lower())
+    dev, arch = target.device, target.arch
+    self.compiler = (NVCCCompiler if use_nvcc else NVRTCCompiler)(arch, ptx=bool(MOCKGPU) or dev == "CUDA", cache_key=dev.lower())
     self.tensor_cores = tc.cuda_sm89 if (ver:=int(arch[3:])) >= 89 else tc.cuda_sm80 if ver >= 80 else tc.cuda_sm75 if ver >= 75 else []
-  def __reduce__(self): return self.__class__, (self.arch, self.device)
 
   # language options
   # https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html
@@ -461,7 +461,7 @@ class CUDARenderer(CStyleLanguage):
     return super().render_kernel(function_name, kernel, bufs, uops, prefix=prefix)
 
 class NVCCRenderer(CUDARenderer):
-  def __init__(self, arch:str, device:str="NV"): super().__init__(arch, device, use_nvcc=True)
+  def __init__(self, target:Target): super().__init__(target, use_nvcc=True)
 
 def fp8_index(dtype: DType): return (dtypes.fp8e4m3, dtypes.fp8e5m2).index(dtype.scalar())
 def _ocml(op): return lambda x,dtype: f"__ocml_{op}_f{ {dtypes.half:16, dtypes.double:64}.get(dtype, 32)}({x})"
@@ -536,7 +536,7 @@ class AMDHIPRenderer(CStyleLanguage):
     ocml = [(f"__ocml_{ocml_ops[op][0]}_f{dt.bitsize}", dt.name, dt.name, ocml_ops[op][1])
       for op, dt in dedup((u.op, u.dtype.scalar()) for u in uops) if op in ocml_ops and dt in (dtypes.half, dtypes.float, dtypes.double)]
     if any(dt.scalar() == dtypes.bfloat16 for dt in used_dtypes):
-      prefix.append(f"typedef {'__bf16' if self.is_cdna4(self.arch) else 'unsigned short'} hip_bfloat16;")
+      prefix.append(f"typedef {'__bf16' if self.is_cdna4(self.target.arch) else 'unsigned short'} hip_bfloat16;")
     if any(dt.scalar() == dtypes.half for dt in used_dtypes): prefix.append("#define half _Float16")
     if any(dt.scalar() in dtypes.fp8s for dt in used_dtypes):
       prefix += ["typedef unsigned char hip_bf8;", "typedef unsigned char hip_fp8;"]
@@ -547,7 +547,7 @@ class AMDHIPRenderer(CStyleLanguage):
     prefix += [self.render_vector_prefix(dt) for dt in used_dtypes if dt.count > 1]
 
     for name, (N, M, K), dtype_in, dtype_out, _, _, _, _ in wmma_args(uops): # TODO: handle TCs f32_bf16 and bf16_bf16 w/ wrapper
-      if self.is_cdna(self.arch):
+      if self.is_cdna(self.target.arch):
         if (N, M, K) == (16, 16, 16): type_map[dtypes.bfloat16] = 'bf16_1k'
         elif (N, M, K) == (16, 16, 32): type_map = {**type_map, dtypes.bfloat16: "_bf16", dtypes.half: "_f16"}
         elif (N, M, K) == (16, 16, 128): type_map = {**type_map, dtypes.fp8e4m3: "_f8f6f4", dtypes.fp8e5m2: "_f8f6f4"}
