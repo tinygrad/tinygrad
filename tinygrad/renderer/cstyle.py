@@ -400,7 +400,7 @@ class CUDARenderer(CStyleLanguage):
     from tinygrad.runtime.support.hcq import MOCKGPU
     dev, arch = target.device, target.arch
     self.compiler = (NVCCCompiler if use_nvcc else NVRTCCompiler)(arch, ptx=bool(MOCKGPU) or dev == "CUDA", cache_key=dev.lower())
-    self.tensor_cores = tc.cuda_sm89 if (ver:=int(arch[3:])) >= 89 else tc.cuda_sm80 if ver >= 80 else tc.cuda_sm75 if ver >= 75 else []
+    self.tensor_cores = tc.get_cuda(arch)
 
   # language options
   # https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html
@@ -476,9 +476,6 @@ class AMDHIPRenderer(CStyleLanguage):
   global_prod_max = (0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF)
 
   @staticmethod
-  def get_tensor_cores(arch):
-    return {"gfx942": tc.amd_cdna3, "gfx950": tc.amd_cdna4, "gfx1200": tc.amd_rdna4, "gfx1201": tc.amd_rdna4}.get(arch, tc.amd_rdna3)
-  @staticmethod
   def is_cdna(arch): return arch.split(":")[0] in {"gfx942", "gfx950"}
   @staticmethod
   def is_cdna4(arch): return arch.split(":")[0] == "gfx950"
@@ -486,7 +483,7 @@ class AMDHIPRenderer(CStyleLanguage):
     super().__init__(target)
     from tinygrad.runtime.support.compiler_amd import HIPCompiler
     self.compiler = HIPCompiler(target.arch)
-    self.tensor_cores = self.get_tensor_cores(target.arch)
+    self.tensor_cores = tc.get_amd(target.arch)
     if not self.is_cdna4(target.arch): self.extra_matcher += pm_manual_bf16_cast + extra_pm
     if self.is_cdna(target.arch):
       self.string_rewrite = PatternMatcher([
