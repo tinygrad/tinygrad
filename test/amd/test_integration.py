@@ -79,7 +79,6 @@ class TestTinygradIntegration(unittest.TestCase):
     from tinygrad import Tensor
     from tinygrad.codegen import get_program
     from tinygrad.renderer.llvmir import AMDLLVMRenderer
-    from tinygrad.runtime.support.compiler_amd import AMDLLVMCompiler
     from tinygrad.runtime.support.elf import elf_loader
     from tinygrad.uop.ops import Ops
 
@@ -87,9 +86,9 @@ class TestTinygradIntegration(unittest.TestCase):
     schedule = result.schedule()
     sink_items = [si for si in schedule if si.ast.op == Ops.SINK]
     assert len(sink_items) > 0, "No SINK in schedule"
-    renderer = AMDLLVMRenderer('gfx1100')
+    renderer = AMDLLVMRenderer(Target(arch='gfx1100'))
     prg = get_program(sink_items[0].ast, renderer)
-    lib = AMDLLVMCompiler('gfx1100').compile(prg.src)
+    lib = renderer.compiler.compile(prg.src)
     return next(s.content for s in elf_loader(lib)[1] if s.name == ".text")
 
   def test_simple_add_kernel(self):
