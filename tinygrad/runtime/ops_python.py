@@ -6,11 +6,12 @@ from typing import Any, TYPE_CHECKING
 import pickle, base64, itertools, time, sys, functools
 from dataclasses import replace
 from tinygrad.dtype import DType, dtypes, ImageDType, PtrDType, truncate, storage_fmt_for_dtype, to_storage_scalar, from_storage_scalar
-from tinygrad.helpers import all_same, getenv, flatten, get_single_element, Target, EMULATE
+from tinygrad.helpers import all_same, getenv, flatten, get_single_element, Target
 from tinygrad.device import Compiled, Compiler, Allocator
 from tinygrad.codegen.opt import tc
 from tinygrad.uop.ops import exec_alu, python_alu, Ops, UOp, GroupOp, bitcast
 from tinygrad.renderer import Renderer
+from tinygrad.renderer.cstyle import AMDHIPRenderer
 
 def _load(m, i, dtype: DType):
   if i is None: return 0.0
@@ -213,7 +214,7 @@ class PythonRenderer(Renderer):
     elif target.arch == "INTEL": self.target, self.suffix, self.tensor_cores = replace(target, device="INTEL"), "INTEL", tc.intel
     elif target.arch == "AMX": self.target, self.tensor_cores = replace(target, device="CPU"), tc.amx
     elif target.arch.startswith("gfx"): self.target, self.tensor_cores = replace(target, device="AMD"), AMDHIPRenderer.get_tensor_cores(target.arch)
-    elif target.arch.startswitch("sm"):
+    elif target.arch.startswith("sm"):
       self.target = replace(target, device="CUDA")
       self.tensor_cores = tc.cuda_sm89 if (ver:=int(target.arch[3:])) >= 89 else tc.cuda_sm80 if ver >= 80 else tc.cuda_sm75 if ver >= 75 else []
     elif target.arch == "": self.target = target
