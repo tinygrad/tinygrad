@@ -159,6 +159,9 @@ def _substitute_template(template:UOp, mapping:dict[UOp, UOp]) -> tuple[UOp, ...
         if s not in replaced: stack.append((s, False))
   return replaced[template].src
 
+def _has_placeholder_ranges(rngs:tuple[UOp, ...]) -> bool:
+  return any(r.op is Ops.RANGE and r.arg[-1] == AxisType.PLACEHOLDER for rng in rngs for r in rng.ranges)
+
 def _shape_eq(a:sint, b:sint) -> bool:
   return (isinstance(a, int) and isinstance(b, int) and a == b) or a is b
 
@@ -221,6 +224,18 @@ def _reshape_fastpath_template(in_shape:tuple[sint, ...], out_shape:tuple[sint, 
     return rngs, UOp.sink(*(prefix_rngs + mid_unlinearized + suffix_rngs))
   return None
 
+def _try_cached_reshape(in_shape:tuple[sint, ...], out_shape:tuple[sint, ...], rngs:tuple[UOp, ...]) -> tuple[UOp, ...]|None:
+  template = _reshape_fastpath_template(in_shape, out_shape)
+  if template is None: template = _reshape_movement_template(in_shape, out_shape)
+  prngs, sink = template
+  cached_rngs = cast(tuple[UOp, ...], _substitute_template(sink, dict(zip(prngs, rngs))))
+  return None if _has_placeholder_ranges(cached_rngs) else cached_rngs
+
+def _try_cached_pad(in_shape:tuple[sint, ...], arg:tuple, rngs:tuple[UOp, ...]) -> tuple[UOp, ...]|None:
+  prngs, sink = _pad_movement_template(in_shape, arg)
+  cached_rngs = cast(tuple[UOp, ...], _substitute_template(sink, dict(zip(prngs, rngs))))
+  return None if _has_placeholder_ranges(cached_rngs) else cached_rngs
+
 # this is the definition of the movement ops
 @functools.cache
 def apply_movement_op(op:Ops, in_shape:tuple[sint,...], arg:tuple, rngs:tuple[UOp, ...]) -> tuple[UOp, ...]:
@@ -230,13 +245,18 @@ def apply_movement_op(op:Ops, in_shape:tuple[sint,...], arg:tuple, rngs:tuple[UO
     case Ops.FLIP:    rngs = tuple(((s-1)-a) if f else a for a,s,f in zip(rngs, in_shape, arg))
     case Ops.EXPAND:  rngs = tuple(a if in_sh == out_sh else a.const_like(0) for a,in_sh,out_sh in zip(rngs, in_shape, arg))
     case Ops.PAD:
-      # Keep PAD semantics aligned with the historical path: template caching here can leak PLACEHOLDER ranges.
-      rngs = tuple(r if (s == 0 and e == 0) else graph_rewrite((r >= s) & (r < (sh+s)),
-        symbolic+pm_simplify_valid, name="pad").where(r-s, UOp.invalid()) for r,sh,(s,e) in zip(rngs, in_shape, arg))
+      if (cached_rngs := _try_cached_pad(in_shape, arg, rngs)) is not None:
+        rngs = cached_rngs
+      else:
+        rngs = tuple(r if (s == 0 and e == 0) else graph_rewrite((r >= s) & (r < (sh+s)),
+          symbolic+pm_simplify_valid, name="pad").where(r-s, UOp.invalid()) for r,sh,(s,e) in zip(rngs, in_shape, arg))
     case Ops.RESHAPE:
-      sink = UOp.sink(*rngs).simplify() # NOTE: this applies any commutative flips to the rngs early
-      sub_array = {r:UOp.range(r.src[0], i, AxisType.PLACEHOLDER) for i,r in enumerate(sink.ranges)}
-      rngs = _apply_reshape(in_shape, arg, sink.substitute(sub_array)).substitute({v:k for k,v in sub_array.items()}).src
+      if (cached_rngs := _try_cached_reshape(in_shape, arg, rngs)) is not None:
+        rngs = cached_rngs
+      else:
+        sink = UOp.sink(*rngs).simplify() # NOTE: this applies any commutative flips to the rngs early
+        sub_array = {r:UOp.range(r.src[0], i, AxisType.PLACEHOLDER) for i,r in enumerate(sink.ranges)}
+        rngs = _apply_reshape(in_shape, arg, sink.substitute(sub_array)).substitute({v:k for k,v in sub_array.items()}).src
     case _: raise RuntimeError(f"{op} is not a MovementOp")
   return rngs
 

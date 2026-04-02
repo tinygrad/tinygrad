@@ -593,6 +593,14 @@ class Tensor(OpMixin):
     return counts0.cat(counts1)
 
   @staticmethod
+  def _null_empty_random(*shape, device:str|None=None, dtype:DTypeLike|None=None, requires_grad:bool|None=None) -> Tensor|None:
+    if isinstance(dev:=canonicalize_device(device), str) and dev.startswith("NULL"):
+      ret = Tensor.empty(*shape, device=dev, dtype=dtype or dtypes.default_float, requires_grad=requires_grad)
+      cast(Buffer, ret.uop.base.buffer).ensure_allocated()
+      return ret
+    return None
+
+  @staticmethod
   def rand(*shape, device:str|None=None, dtype:DTypeLike|None=None, contiguous:bool=True, **kwargs) -> Tensor:
     """
     Creates a tensor with the given shape, filled with random values from a uniform distribution over the interval `[0, 1)`.
@@ -611,6 +619,9 @@ class Tensor(OpMixin):
     if not all_int(shape:=argfix(*shape)) or not all(s >= 0 for s in shape): raise ValueError(f"invalid input {shape=}")
     if device is not None and not isinstance(device, str): raise ValueError(f"rand only supports single device, got {device=}")
     device = cast(str, canonicalize_device(device))
+
+    if (ret := Tensor._null_empty_random(*shape, device=device, dtype=dt, requires_grad=kwargs.get("requires_grad"))) is not None:
+      return ret.contiguous() if contiguous else ret
 
     # if shape has 0, return zero tensor
     if (numel := prod(shape)) == 0: return Tensor.zeros(shape, device=device, dtype=dt, **kwargs)
@@ -890,6 +901,7 @@ class Tensor(OpMixin):
     print(Tensor.randn(2, 3).numpy())
     ```
     """
+    if (ret := Tensor._null_empty_random(*shape, device=kwargs.get("device"), dtype=dtype, requires_grad=requires_grad)) is not None: return ret
     return Tensor.empty(*shape, **kwargs).randn_like(dtype=dtype, requires_grad=requires_grad)
 
   @staticmethod
@@ -939,6 +951,7 @@ class Tensor(OpMixin):
     print(Tensor.uniform(2, 3, low=2, high=10).numpy())
     ```
     """
+    if (ret := Tensor._null_empty_random(*shape, device=kwargs.get("device"), dtype=dtype, requires_grad=requires_grad)) is not None: return ret
     return (((high-low) * Tensor.rand(*shape, **kwargs)).cast(dtype or dtypes.default_float) + low).requires_grad_(requires_grad)
 
   @staticmethod

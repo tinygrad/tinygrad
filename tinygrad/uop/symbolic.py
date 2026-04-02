@@ -305,6 +305,7 @@ def parse_valid(v:UOp) -> tuple[UOp, bool, int]|None:
     # NOTE: v.src[1].op can be Ops.VCONST
   return None
 
+@functools.lru_cache(None)
 def uop_given_valid(valid:UOp, uop:UOp, try_simplex=True) -> UOp:
   # return simplified uop (might be the same as input)
 
