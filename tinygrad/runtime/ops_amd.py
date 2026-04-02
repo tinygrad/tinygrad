@@ -16,7 +16,7 @@ from tinygrad.runtime.autogen.am import am
 from tinygrad.runtime.support.elf import elf_loader
 from tinygrad.runtime.support.am.amdev import AMDev, AMMemoryManager
 from tinygrad.runtime.support.amd import AMDReg, AMDIP, import_module, import_soc, import_ip_offsets, import_pmc
-from tinygrad.runtime.support.system import System, PCIIfaceBase, PCIAllocationMeta, USBPCIDevice, MAP_FIXED, MAP_NORESERVE
+from tinygrad.runtime.support.system import System, PCIIfaceBase, PCIAllocationMeta, USBPCIDevice, USB2PCIDevice, MAP_FIXED, MAP_NORESERVE
 from tinygrad.runtime.support.memory import AddrSpace
 if getenv("IOCTL"): import extra.hip_gpu_driver.hip_ioctl  # noqa: F401 # pylint: disable=unused-import
 
@@ -914,13 +914,48 @@ class USBIface(PCIIface):
 
   def sleep(self, timeout): pass
 
+class USB2Iface(PCIIface):
+  def __init__(self, dev, dev_id): # pylint: disable=super-init-not-called
+    self.dev, self.pci_dev, self.vram_bar = dev, USB2PCIDevice(dev.__class__.__name__[:2], f"usb2:{dev_id}"), 0
+    self.dev_impl = AMDev(self.pci_dev)
+    self._compute_props()
+    self.pci_dev.usb2._pci_cacheable += [self.pci_dev.bar_info(2)] # doorbell region is cacheable
+
+    # Copy buffers in VRAM with PCIe bar views (no SRAM staging — we write directly via streaming bulk)
+    self.copy_bufs = [self._vram_copy_buf(0x80000)]
+    # sys_buf for small host-side allocations (ring pointers, signals, etc.) — use XDATA-accessible region
+    self.sys_buf, self.sys_next_off = self._dma_region(ctrl_addr=0xa000, sys_addr=0x820000, size=0x1000), 0x800
+
+  def _vram_copy_buf(self, size):
+    mapping = self.dev_impl.mm.valloc(size, uncached=True)
+    paddr = mapping.paddrs[0][0]
+    barview = self.pci_dev.map_bar(bar=self.vram_bar, off=paddr, size=size)
+    return HCQBuffer(mapping.va_addr, size, meta=PCIAllocationMeta(mapping, has_cpu_mapping=False), view=barview, owner=self.dev)
+
+  def _dma_region(self, ctrl_addr, sys_addr, size):
+    region = self.dev_impl.mm.map_range(vaddr:=self.dev_impl.mm.alloc_vaddr(size=size), size, [(sys_addr, size)], aspace=AddrSpace.SYS, uncached=True)
+    return HCQBuffer(vaddr, size, meta=PCIAllocationMeta(region, has_cpu_mapping=False), view=self.pci_dev.dma_view(ctrl_addr, size), owner=self.dev)
+
+  def alloc(self, size:int, host=False, uncached=False, cpu_access=False, contiguous=False, force_devmem=False, **kwargs) -> HCQBuffer:
+    if (host or (uncached and cpu_access)) and self.sys_next_off + size < self.sys_buf.size:
+      self.sys_next_off += size
+      return self.sys_buf.offset(self.sys_next_off - size, size)
+    return super().alloc(size, host=host, uncached=uncached, cpu_access=cpu_access, contiguous=contiguous, force_devmem=True, **kwargs)
+
+  def create_queue(self, queue_type, ring, gart, rptr, wptr, eop_buffer=None, cwsr_buffer=None, ctl_stack_size=0, ctx_save_restore_size=0,
+                   xcc_id=0, idx=0):
+    if queue_type == kfd.KFD_IOC_QUEUE_TYPE_COMPUTE: self.pci_dev.usb2._pci_cacheable += [(ring.cpu_view().addr, ring.size)]
+    return super().create_queue(queue_type, ring, gart, rptr, wptr, eop_buffer, cwsr_buffer, ctl_stack_size, ctx_save_restore_size, xcc_id, idx)
+
+  def sleep(self, timeout): pass
+
 class AMDDevice(HCQCompiled):
-  def is_am(self) -> bool: return isinstance(self.iface, (PCIIface, USBIface))
-  def is_usb(self) -> bool: return isinstance(self.iface, USBIface)
+  def is_am(self) -> bool: return isinstance(self.iface, (PCIIface, USBIface, USB2Iface))
+  def is_usb(self) -> bool: return isinstance(self.iface, (USBIface, USB2Iface))
 
   def __init__(self, device:str=""):
     self.device_id = int(device.split(":")[1]) if ":" in device else 0
-    self.iface = self._select_iface(KFDIface, PCIIface, USBIface)
+    self.iface = self._select_iface(KFDIface, PCIIface, USBIface, USB2Iface)
     self.target:tuple[int, ...] = ((trgt:=self.iface.props['gfx_target_version']) // 10000, (trgt // 100) % 100, trgt % 100)
     self.arch = "gfx%d%x%x" % self.target
     if self.target < (9,4,2) or self.target >= (13,0,0): raise RuntimeError(f"Unsupported arch: {self.arch}")

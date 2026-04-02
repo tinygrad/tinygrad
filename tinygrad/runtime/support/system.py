@@ -4,7 +4,7 @@ from tinygrad.helpers import round_up, getenv, OSX, temp, ceildiv, unwrap, fetch
 from tinygrad.runtime.autogen import libc, pci, vfio, iokit, corefoundation
 from tinygrad.runtime.support.hcq import FileIOInterface, MMIOInterface, HCQBuffer, hcq_filter_visible_devices
 from tinygrad.runtime.support.memory import VirtMapping, AddrSpace, BumpAllocator
-from tinygrad.runtime.support.usb import ASM24Controller, USBMMIOInterface
+from tinygrad.runtime.support.usb import ASM24Controller, USBMMIOInterface, USB2Controller, USB2MMIOInterface
 
 MAP_FIXED, MAP_FIXED_NOREPLACE = 0x10, 0x100000
 MAP_LOCKED, MAP_POPULATE, MAP_NORESERVE = 0 if OSX else 0x2000, getattr(mmap, "MAP_POPULATE", 0 if OSX else 0x008000), 0x400
@@ -132,6 +132,9 @@ class _System:
     usb.pcie_cfg_req(pci.PCI_COMMAND, bus=gpu_bus, dev=0, fn=0, value=pci.PCI_COMMAND_IO | pci.PCI_COMMAND_MEMORY | pci.PCI_COMMAND_MASTER, size=1)
     return bars
 
+  def pci_setup_usb2_bars(self, usb:USB2Controller, gpu_bus:int, mem_base:int, pref_mem_base:int) -> dict[int, tuple[int, int]]:
+    return self.pci_setup_usb_bars(usb, gpu_bus, mem_base, pref_mem_base)  # type: ignore  # USB2Controller has same pcie_cfg_req interface
+
   def flock_acquire(self, name:str) -> int:
     import fcntl # to support windows
 
@@ -227,6 +230,25 @@ class USBPCIDevice(PCIDevice):
   def bar_info(self, bar_idx:int) -> tuple[int, int]: return self._bar_info[bar_idx]  # type: ignore[override]
   def map_bar(self, bar, off=0, addr=0, size=None, fmt='B'):
     return USBMMIOInterface(self.usb, self.bar_info(bar)[0] + off, size or self.bar_info(bar)[1], fmt)
+  def resize_bar(self, bar_idx:int): pass # already resized
+
+class USB2PCIDevice(PCIDevice):
+  def __init__(self, devpref:str, pcibus:str):
+    self.lock_fd = System.flock_acquire(f"{devpref.lower()}_{pcibus.lower()}.lock")
+    self.usb2 = USB2Controller()
+    self.pcibus, self._bar_info = pcibus, System.pci_setup_usb2_bars(self.usb2, gpu_bus=4, mem_base=0x10000000, pref_mem_base=(32 << 30))
+    self.sram = BumpAllocator(size=0x80000, wrap=False)
+
+  def dma_view(self, ctrl_addr, size): return USB2MMIOInterface(self.usb2, ctrl_addr, size, fmt='B', pcimem=False)
+  def alloc_sysmem(self, size:int, vaddr:int=0, contiguous:bool=False) -> tuple[MMIOInterface, list[int]]:
+    return self.dma_view(0xf000 + (off:=self.sram.alloc(size)), size), [0x200000 + off]
+
+  def read_config(self, offset:int, size:int): return self.usb2.pcie_cfg_req(offset, bus=4, dev=0, fn=0, size=size)
+  def write_config(self, offset:int, value:int, size:int): self.usb2.pcie_cfg_req(offset, bus=4, dev=0, fn=0, value=value, size=size)
+
+  def bar_info(self, bar_idx:int) -> tuple[int, int]: return self._bar_info[bar_idx]  # type: ignore[override]
+  def map_bar(self, bar, off=0, addr=0, size=None, fmt='B'):
+    return USB2MMIOInterface(self.usb2, self.bar_info(bar)[0] + off, size or self.bar_info(bar)[1], fmt)
   def resize_bar(self, bar_idx:int): pass # already resized
 
 @dataclasses.dataclass

@@ -35,10 +35,12 @@ class USB3:
       all_eps = (self.ep_data_out, self.ep_data_in, self.ep_stat_in, self.ep_cmd_out)
       for ep in all_eps: libusb.libusb_clear_halt(self.handle, ep)
 
-      # Allocate streams
+      # Allocate streams (falls back to no-stream UAS on USB 2.0)
       stream_eps = (ctypes.c_uint8 * 3)(self.ep_data_out, self.ep_data_in, self.ep_stat_in)
-      if (rc:=libusb.libusb_alloc_streams(self.handle, self.max_streams * len(stream_eps), stream_eps, len(stream_eps))) < 0:
-        raise RuntimeError(f"alloc_streams failed: {rc}")
+      rc = libusb.libusb_alloc_streams(self.handle, self.max_streams * len(stream_eps), stream_eps, len(stream_eps))
+      self.use_streams = rc >= 0
+      if not self.use_streams: self.max_streams = 1
+      self._uas_tag = 0
 
       # Base cmd
       cmd_template = bytes([0x01, 0x00, 0x00, 0x01, *([0] * 12), 0xE4, 0x24, 0x00, 0xB2, 0x1A, 0x00, 0x00, 0x00, *([0] * 8)])
@@ -127,7 +129,38 @@ class USB3:
         sig, rtag, residue, status = struct.unpack("<IIIB", self._bulk_in(self.ep_data_in, 13, timeout=2000))
         assert sig == 0x53425355, f"Bad CSW signature 0x{sig:08X}, expected 0x53425355"
         assert rtag == self._tag, f"CSW tag mismatch: got {rtag}, expected {self._tag}"
-        assert status == 0, f"SCSI command failed, CSW status=0x{status:02X}, residue={residue}"
+        if status != 0 and cdb[0] != 0x8A: assert status == 0, f"SCSI command failed, CSW status=0x{status:02X}, residue={residue}"
+      elif not self.use_streams:
+        # UAS without streams: serialize cmd -> data -> status, unique tag per command
+        slot = 0
+        self.buf_cmd[slot][16:16+len(cdb)] = list(cdb)
+        self._uas_tag = (self._uas_tag % 255) + 1  # UAS tag must be unique and non-zero
+        self.buf_cmd[slot][3] = self._uas_tag
+
+        # 1. Send command IU
+        self._bulk_out(self.ep_cmd_out, bytes(self.buf_cmd[slot]))
+
+        # 2. Data phase + status
+        if rlen:
+          if rlen > len(self.buf_data_in[slot]): self.buf_data_in[slot] = (ctypes.c_uint8 * round_up(rlen, 0x1000))()
+          results.append(self._bulk_in(self.ep_data_in, rlen))
+          _stat = self._bulk_in(self.ep_stat_in, 64)
+        elif send_data is not None:
+          for _retry in range(10):
+            _rtt = self._bulk_in(self.ep_stat_in, 64)  # Ready-to-Transfer IU or early completion
+            if _rtt[0] == 0x07: break  # RTT: device ready for data
+            # Device sent Sense/Response instead of RTT, re-send command
+            self._uas_tag = (self._uas_tag % 255) + 1
+            self.buf_cmd[slot][3] = self._uas_tag
+            self._bulk_out(self.ep_cmd_out, bytes(self.buf_cmd[slot]))
+          else: raise RuntimeError("UAS: failed to get Ready-to-Transfer after 10 retries")
+          self._bulk_out(self.ep_data_out, send_data)
+          _stat = self._bulk_in(self.ep_stat_in, 64)
+          results.append(None)
+        else:
+          # No data phase - just read status
+          _stat = self._bulk_in(self.ep_stat_in, 64)
+          results.append(None)
       else:
         # allocate slot and stream. stream is 1-based
         slot, stream = idx % self.max_streams, (idx % self.max_streams) + 1
@@ -209,10 +242,13 @@ class ASM24Controller:
   def write(self, base_addr:int, data:bytes, ignore_cache:bool=True): return self.exec_ops([WriteOp(base_addr, data, ignore_cache)])
 
   def scsi_write(self, buf:bytes, lba:int=0):
-    if len(buf) > 0x4000: buf += b'\x00' * (round_up(len(buf), 0x10000) - len(buf))
+    #chunk = 0x2000 if not self.usb.use_streams else 0x10000
+    chunk = 512
+    if len(buf) > 0x4000: buf += b'\x00' * (round_up(len(buf), chunk) - len(buf))
 
-    for i in range(0, len(buf), 0x10000):
-      self.exec_ops([ScsiWriteOp(buf[i:i+0x10000], lba), WriteOp(0x171, b'\xff\xff\xff', ignore_cache=True)])
+    for i in range(0, len(buf), chunk):
+      self.exec_ops([WriteOp(0x7ef, b'\x00', ignore_cache=True)]) # re-arm SCSI write path
+      self.exec_ops([ScsiWriteOp(buf[i:i+chunk], lba), WriteOp(0x171, b'\xff\xff\xff', ignore_cache=True)])
       self.exec_ops([WriteOp(0xce6e, b'\x00\x00', ignore_cache=True)])
 
     if len(buf) > 0x4000:
@@ -325,3 +361,170 @@ class USBMMIOInterface(MMIOInterface):
     self.usb.pcie_mem_write(self.addr+off, [int.from_bytes(data[i:i+acc_sz], "little") for i in range(0, len(data), acc_sz)], acc_sz)
 
 if getenv("MOCKGPU"): from test.mockgpu.usb import MockUSB3 as USB3  # type: ignore  # noqa: F811
+
+# =============================================================================
+# USB2 controller — uses 0xF0 vendor command with streaming bulk for PCIe access
+# =============================================================================
+
+MWR64, MRD64, CFGRD0, CFGRD1, CFGWR0, CFGWR1 = 0x60, 0x20, 0x04, 0x05, 0x44, 0x45
+EP_OUT, EP_IN = 0x02, 0x81
+READ_CHUNK = 16  # dwords per bulk IN chunk
+
+class USB2Controller:
+  def __init__(self):
+    self.ctx = ctypes.POINTER(libusb.struct_libusb_context)()
+    if libusb.libusb_init(ctypes.byref(self.ctx)): raise RuntimeError("libusb_init failed")
+    self.handle = libusb.libusb_open_device_with_vid_pid(self.ctx, 0xADD1, 0x0001)
+    if not self.handle: raise RuntimeError("USB2 device ADD1:0001 not found")
+    if libusb.libusb_kernel_driver_active(self.handle, 0): libusb.libusb_detach_kernel_driver(self.handle, 0)
+    if libusb.libusb_set_configuration(self.handle, 1): raise RuntimeError("set_configuration failed")
+    if libusb.libusb_claim_interface(self.handle, 0): raise RuntimeError("claim_interface failed")
+    self._pci_cacheable: list[tuple[int, int]] = []
+    self._pci_cache: dict[int, int|None] = {}
+
+  # -- low-level xdata access (0xE4/0xE5) --
+  def xdata_read(self, addr, size=1):
+    buf = (ctypes.c_ubyte * size)()
+    ret = libusb.libusb_control_transfer(self.handle, 0xC0, 0xE4, addr, 0, buf, size, 1000)
+    assert ret >= 0, f"E4 read 0x{addr:04X} failed: {ret}"
+    return bytes(buf[:ret])
+
+  def xdata_write(self, addr, val):
+    ret = libusb.libusb_control_transfer(self.handle, 0x40, 0xE5, addr, val, None, 0, 1000)
+    assert ret >= 0, f"E5 write 0x{addr:04X}=0x{val:02X} failed: {ret}"
+
+  def read(self, base_addr, length):
+    return self.xdata_read(base_addr, length)
+
+  def write(self, base_addr, data, ignore_cache=True):
+    for i, b in enumerate(data): self.xdata_write(base_addr + i, b)
+
+  # -- 0xF0 single TLP --
+  def _f0_out(self, fmt_type, be, mode, count, addr_lo, addr_hi, value_be):
+    wval = fmt_type | (be << 8)
+    widx = (mode & 0x03) | ((count & 0x3F) << 2)
+    payload = struct.pack('<II', addr_lo, addr_hi) + struct.pack('>I', value_be)
+    buf = (ctypes.c_ubyte * 12)(*payload)
+    ret = libusb.libusb_control_transfer(self.handle, 0x40, 0xF0, wval, widx, buf, 12, 5000)
+    assert ret >= 0, f"F0 OUT failed: {ret}"
+
+  def _f0_in(self):
+    buf = (ctypes.c_ubyte * 8)()
+    ret = libusb.libusb_control_transfer(self.handle, 0xC0, 0xF0, 0, 0, buf, 8, 5000)
+    assert ret >= 0, f"F0 IN failed: {ret}"
+    return bytes(buf)
+
+  def _is_pci_cacheable(self, addr): return any(x <= addr <= x + sz for x, sz in self._pci_cacheable)
+
+  def pcie_request(self, fmt_type, address, value=None, size=4, retries=10):
+    if fmt_type == 0x60 and size == 4 and self._is_pci_cacheable(address) and self._pci_cache.get(address) == value: return None
+    if DEBUG >= 5: print("usb2 pcie_request", hex(fmt_type), hex(address), value, size)
+    self._pci_cache[address] = value if size == 4 and fmt_type == 0x60 else None
+
+    masked, offset = address & 0xFFFFFFFC, address & 0x3
+    be = ((1 << size) - 1) << offset
+    shifted = ((value << (8 * offset)) & 0xFFFFFFFF) if value is not None else 0
+    self._f0_out(fmt_type, be, 0, 0, masked & 0xFFFFFFFF, address >> 32, shifted)
+    is_write = ((fmt_type & 0xDF) == 0x40) or ((fmt_type & 0xB8) == 0x30)
+    if is_write: return None
+    result = self._f0_in()
+    fw_status = result[7]
+    if fw_status == 0x01:
+      if retries > 0: return self.pcie_request(fmt_type, address, value, size, retries - 1)
+      raise RuntimeError(f"Unsupported Request at 0x{address:08X}")
+    if fw_status == 0xFF: raise TimeoutError(f"PCIe completion timeout at 0x{address:08X}")
+    raw = struct.unpack('>I', result[0:4])[0]
+    return (raw >> (8 * offset)) & ((1 << (8 * size)) - 1)
+
+  def pcie_cfg_req(self, byte_addr, bus=1, dev=0, fn=0, value=None, size=4):
+    fmt = (CFGWR1 if value is not None else CFGRD1) if bus > 0 else (CFGWR0 if value is not None else CFGRD0)
+    address = (bus << 24) | (dev << 19) | (fn << 16) | (byte_addr & 0xFFF)
+    return self.pcie_request(fmt, address, value, size)
+
+  def pcie_mem_req(self, address, value=None, size=4):
+    return self.pcie_request(MWR64 if value is not None else MRD64, address, value, size)
+
+  # -- streaming bulk (mode 1=write, mode 2=read) --
+  def _dma_setup(self, addr, mode, count=0):
+    fmt = {0: 0, 1: MWR64, 2: MRD64}[mode]
+    self._f0_out(fmt, 0x0F, mode, count, addr & 0xFFFFFFFF, addr >> 32, 0)
+
+  def stream_write(self, addr, data):
+    """Streaming write to PCIe address via bulk OUT."""
+    import time
+    self._dma_setup(addr, 1)
+    buf = (ctypes.c_ubyte * len(data)).from_buffer_copy(data)
+    transferred = ctypes.c_int()
+    ret = libusb.libusb_bulk_transfer(self.handle, EP_OUT, buf, len(data), ctypes.byref(transferred), 30000)
+    assert ret == 0, f"bulk write failed: {ret}"
+    time.sleep(0.001)
+
+  def stream_read(self, addr, nbytes, chunk=READ_CHUNK):
+    """Streaming read from PCIe address via bulk IN."""
+    self._dma_setup(addr, 2, chunk)
+    chunk_bytes = chunk * 4
+    resp = (ctypes.c_ubyte * chunk_bytes)()
+    result = bytearray()
+    transferred = ctypes.c_int()
+    while len(result) < nbytes:
+      ret = libusb.libusb_bulk_transfer(self.handle, EP_IN, resp, chunk_bytes, ctypes.byref(transferred), 5000)
+      assert ret == 0, f"bulk read failed: {ret}"
+      result.extend(bytes(resp[:transferred.value]))
+    return bytes(result[:nbytes])
+
+class USB2MMIOInterface(MMIOInterface):
+  def __init__(self, usb:USB2Controller, addr:int, size:int, fmt='B', pcimem=True):
+    self.usb, self.addr, self.nbytes, self.fmt, self.pcimem = usb, addr, size, fmt, pcimem
+    self.el_sz = struct.calcsize(fmt)
+
+  def __getitem__(self, index): return self._access(index)
+  def __setitem__(self, index, val): self._access(index, val)
+
+  def view(self, offset=0, size=None, fmt=None):
+    return USB2MMIOInterface(self.usb, self.addr + offset, size or (self.nbytes - offset), fmt=fmt or self.fmt, pcimem=self.pcimem)
+
+  def _access(self, index, val=None):
+    if isinstance(index, slice):
+      start, stop = (index.start or 0) * self.el_sz, (index.stop or len(self)) * self.el_sz
+      return self._acc_range(start, stop - start, val)
+    return self._acc_one(index * self.el_sz, self.el_sz, val) if self.pcimem else self._acc_range(index * self.el_sz, self.el_sz, val)
+
+  def _acc_one(self, off, sz, val=None):
+    """Single dword access via single TLP."""
+    upper = 0 if sz < 8 else self.usb.pcie_mem_req(self.addr + off + 4, val if val is None else (val >> 32), 4)
+    lower = self.usb.pcie_mem_req(self.addr + off, val if val is None else val & 0xffffffff, min(sz, 4))
+    if val is None: return lower | (upper << 32)
+
+  def _acc_range(self, off, sz, data=None):
+    """Range access — uses streaming bulk for large PCIe transfers, single TLP for small/non-PCIe."""
+    if data is None:  # read
+      if not self.pcimem:
+        raw = self.usb.xdata_read(self.addr + off, sz)
+        return int.from_bytes(raw, "little") if sz == self.el_sz else raw
+      if sz >= 64:  # streaming read for large transfers
+        raw = self.usb.stream_read(self.addr + off, sz)
+        # Convert from big-endian dwords to host byte order
+        arr = array.array('I')
+        arr.frombytes(raw[:len(raw) - len(raw) % 4])
+        arr.byteswap()
+        return bytes(arr)
+      # small read: use single TLPs
+      acc_sz = 4 if sz % 4 == 0 else (2 if sz % 2 == 0 else 1)
+      return bytes(array.array('I' if acc_sz == 4 else ('H' if acc_sz == 2 else 'B'),
+                               [self._acc_one(off + i * acc_sz, acc_sz) for i in range(sz // acc_sz)]))
+    # write
+    data = struct.pack(self.fmt, data) if isinstance(data, int) else bytes(data)
+    if not self.pcimem:
+      for i, b in enumerate(data): self.usb.xdata_write(self.addr + off + i, b)
+      return
+    if len(data) >= 64:  # streaming write for large transfers
+      # Convert from host byte order to big-endian dwords
+      arr = array.array('I')
+      arr.frombytes(data + b'\x00' * ((-len(data)) % 4))
+      arr.byteswap()
+      self.usb.stream_write(self.addr + off, arr.tobytes()[:len(data)])
+      return
+    # small write: use single TLPs
+    acc_sz = 4 if len(data) % 4 == 0 else (2 if len(data) % 2 == 0 else 1)
+    for i in range(0, len(data), acc_sz):
+      self.usb.pcie_mem_req(self.addr + off + i, int.from_bytes(data[i:i+acc_sz], "little"), acc_sz)
