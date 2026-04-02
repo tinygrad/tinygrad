@@ -4,6 +4,7 @@
 # this is the (living) definition of uops
 from typing import Any, TYPE_CHECKING
 import pickle, base64, itertools, time, sys, functools
+from dataclasses import replace
 from tinygrad.dtype import DType, dtypes, ImageDType, PtrDType, truncate, storage_fmt_for_dtype, to_storage_scalar, from_storage_scalar
 from tinygrad.helpers import all_same, getenv, flatten, get_single_element, EMULATE
 from tinygrad.device import Compiled, Compiler, Allocator
@@ -205,19 +206,18 @@ class PythonRenderer(Renderer):
   code_for_op = python_alu
   compiler = PythonCompiler()
 
-  def __init__(self):
-    match EMULATE.value:
-      case "METAL": self.device, self.tensor_cores = "METAL", tc.metal
-      case "AMD": self.device, self.tensor_cores = "AMD", tc.amd_rdna3
-      case "AMD_MFMA": self.device, self.tensor_cores = "AMD", tc.amd_cdna4
-      case "AMD_RDNA4": self.device, self.tensor_cores = "AMD", tc.amd_rdna4
-      case "CUDA": self.device, self.tensor_cores = "CUDA", tc.cuda_sm80
-      case "CUDA_SM75": self.device, self.tensor_cores = "CUDA", tc.cuda_sm75
-      case "CUDA_SM89": self.device, self.tensor_cores = "CUDA", tc.cuda_sm89
-      case "INTEL": self.device, self.suffix, self.tensor_cores = "INTEL", "INTEL", tc.intel
-      case "AMX": self.device, self.tensor_cores = "CPU", tc.amx
-      case "": pass
-      case _: raise RuntimeError(f"can't EMULATE device: {EMULATE.value}")
+  def __init__(self, target:Target):
+    assert (emu:=getenv("EMULATE", "")) == "", ("EMULATE is deprecated, use DEV=PYTHON::" +
+      {"AMD":"gfx1100", "AMD_RDNA4":"gfx1201", "AMD_MFMA":"gfx950", "CUDA":"sm_80", "CUDA_SM75":"sm_75", "CUDA_SM89":"sm_89"}.get(emu, emu))
+    if target.arch == "METAL": self.target, self.tensor_cores = replace(target, device="METAL"), tc.metal
+    elif target.arch == "INTEL": self.target, self.suffix, self.tensor_cores = replace(target, device="INTEL"), "INTEL", tc.intel
+    elif target.arch == "AMX": self.target, self.tensor_cores = replace(target, device="CPU"), tc.amx
+    elif target.arch.startswith("gfx"): self.target, self.tensor_cores = replace(target, device="AMD"), AMDHIPRenderer.get_tensor_cores(target.arch)
+    elif target.arch.startswitch("sm"):
+      self.target = replace(target, device="CUDA")
+      self.tensor_cores = tc.cuda_sm89 if (ver:=int(target.arch[3:])) >= 89 else tc.cuda_sm80 if ver >= 80 else tc.cuda_sm75 if ver >= 75 else []
+    elif target.arch == "": self.target = target
+    else: raise RuntimeError(f"unsupported arch: {target.arch}")
 
   def render(self, uops:list[UOp]) -> str:
     # the value of SPECIAL comes from local/global_size, not form its source
