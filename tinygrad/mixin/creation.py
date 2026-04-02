@@ -13,6 +13,8 @@ class CreationMixin:
     """
     Creates a tensor with the same shape as `self`, filled with zeros.
 
+    You can pass in `dtype` and `device` keyword arguments to control the data type and device of the tensor.
+
     ```python exec="true" source="above" session="tensor" result="python"
     t = Tensor.ones(2, 3)
     print(Tensor.zeros_like(t).numpy())
@@ -23,6 +25,8 @@ class CreationMixin:
   def ones_like(self, **kwargs) -> Self:
     """
     Creates a tensor with the same shape as `self`, filled with ones.
+
+    You can pass in `dtype` and `device` keyword arguments to control the data type and device of the tensor.
 
     ```python exec="true" source="above" session="tensor" result="python"
     t = Tensor.zeros(2, 3)
