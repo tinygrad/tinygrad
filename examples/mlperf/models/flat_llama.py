@@ -21,6 +21,7 @@ FP8 = getenv("FP8", 0)
 WQKV = getenv("WQKV", 0)
 
 FP8_DTYPE = dtypes.fp8e4m3
+FP8_GRAD_DTYPE = dtypes.fp8e5m2
 FP8_MAX = 448.0
 
 def quantize_fp8(x:Tensor):
@@ -187,8 +188,8 @@ if __name__ == "__main__":
   if (MP := getenv("MP", 1)) > 1:
     model.shard(tuple(f"{Device.DEFAULT}:{i}" for i in range(MP)), mp=True)
 
-  # preallocate all the grad buffers and zero them out (fp8 weight grads are bf8)
-  grads = {x:Tensor.zeros(x.shape, dtype=dtypes.fp8e5m2 if x.dtype == FP8_DTYPE else x.dtype, device=x.device).contiguous()
+  # preallocate all the grad buffers and zero them out
+  grads = {x:Tensor.zeros(x.shape, dtype=FP8_GRAD_DTYPE if x.dtype == FP8_DTYPE else x.dtype, device=x.device).contiguous()
            for x in state.values() if x.requires_grad is None}
 
   # print model size
