@@ -442,7 +442,7 @@ THREADS = 128
 def test_matmul():
   print(f"Device arch: {DEV.arch}")
 
-  insts = build_kernel(N, dev.arch)
+  insts = build_kernel(N, DEV.arch)
 
   rng = np.random.default_rng(42)
   a = Tensor(rng.random((N, N), dtype=np.float32) - 0.5)
