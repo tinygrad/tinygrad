@@ -6,7 +6,7 @@ from typing import Any, TYPE_CHECKING
 import pickle, base64, itertools, time, sys, functools
 from dataclasses import replace
 from tinygrad.dtype import DType, dtypes, ImageDType, PtrDType, truncate, storage_fmt_for_dtype, to_storage_scalar, from_storage_scalar
-from tinygrad.helpers import all_same, getenv, flatten, get_single_element, EMULATE
+from tinygrad.helpers import all_same, getenv, flatten, get_single_element, Target, EMULATE
 from tinygrad.device import Compiled, Compiler, Allocator
 from tinygrad.codegen.opt import tc
 from tinygrad.uop.ops import exec_alu, python_alu, Ops, UOp, GroupOp, bitcast
