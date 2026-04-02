@@ -2704,8 +2704,8 @@ def custom_gemm_bw(gradient:UOp, kernel:UOp):
   g_t = g_t[:a.shape[0]]
   if a.dtype.base == FP8_DTYPE:
     # fp8 gemm computes a@b.T
-    grad_a = matmul(g_t, b_t.T, fp8=True).uop
-    grad_b = matmul(g_t.reshape(-1, g_t.shape[-1]).T, a_t.reshape(-1, a_t.shape[-1]).T, fp8=True).uop
+    grad_a = matmul(g_t, b_t.T, fp8=True).cast(FP8_GRAD_DTYPE).uop
+    grad_b = matmul(g_t.reshape(-1, g_t.shape[-1]).T, a_t.reshape(-1, a_t.shape[-1]).T, fp8=True).cast(FP8_GRAD_DTYPE).uop
   else:
     grad_a = (g_t @ b_t.T).uop
     grad_b = (a_t.permute(2, 0, 1).reshape(a_t.shape[2], -1) @ g_t.reshape(-1, g_t.shape[-1])).uop
