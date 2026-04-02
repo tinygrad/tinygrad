@@ -6,7 +6,7 @@ from tinygrad.renderer import Estimates
 from tinygrad.helpers import getenv, all_same, DEBUG
 from tinygrad.runtime.support.compiler_amd import HIPCCCompiler
 from tinygrad.runtime.autogen.amd.cdna.ins import *
-from examples.mlperf.models.flat_llama import quantize_fp8, FP8_DTYPE
+from examples.mlperf.models.flat_llama import FP8_DTYPE, quantize_fp8
 
 # ** CDNA4 assembly gemm
 
@@ -2702,8 +2702,8 @@ def custom_gemm_bw(gradient:UOp, kernel:UOp):
   a_t, b_t, g_t = Tensor(a, device=a.device), Tensor(b, device=a.device), Tensor(gradient, device=a.device)
   # TODO: this needs to be cleaned up and done properly, the batch dim of grad and a multi need to align
   g_t = g_t[:a.shape[0]]
-  # the FP8 gemm computes A @ B.T, grads use fp8e5m2 (aka bf8)
   if a.dtype.base == FP8_DTYPE:
+    # fp8 gemm computes a@b.T
     g_t_fp8, g_scale = quantize_fp8(g_t)
     grad_a = ((g_t_fp8 @ b_t) * g_scale).cast(dtypes.fp8e5m2).uop
     grad_b = ((g_t_fp8.reshape(-1, g_t.shape[-1]).T @ a_t.reshape(-1, a_t.shape[-1])) * g_scale).cast(dtypes.fp8e5m2).uop
@@ -2746,7 +2746,7 @@ def asm_gemm(a:Tensor, b:Tensor) -> Tensor:
   renderer = Device[dname:=(a.device[0] if is_multi else a.device)].renderer
   dname, arch = dname.split(":")[0], getattr(renderer, "arch", "")
   if arch.startswith("gfx950") and getenv("USE_ASM", 1):
-    # the FP8 gemm computes a @ b.T
+    # fp8 gemm computes a@b.T
     if a.dtype == FP8_DTYPE:
       out = Tensor.custom_kernel(out, a, b.T, fxn=functools.partial(custom_hk_fp8_gemm, dname=dname), grad_fxn=custom_gemm_bw)[0]
     else:

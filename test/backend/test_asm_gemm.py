@@ -206,7 +206,7 @@ def has_hipcc():
   return True
 
 @unittest.skipUnless(has_hipcc(), "FP8 gemm requires hipcc to compile")
-class TestGemmLlamaFP8(TestGemmLlama): dtype = dtypes.fp8e4m3
+class TestGemmLlamaFP8(TestGemmLlama): dtype = FP8_DTYPE
 
 class TestMagicGu(unittest.TestCase):
   def test_magicgu_matches_old(self):
