@@ -279,6 +279,7 @@ class ClangRenderer(CStyleLanguage):
 
 class ClangJITRenderer(ClangRenderer):
   def __init__(self, target:Target):
+    super().__init__(target)
     from tinygrad.runtime.support.compiler_cpu import ClangJITCompiler
     self.compiler = ClangJITCompiler()
 
@@ -345,6 +346,7 @@ class MetalRenderer(CStyleLanguage):
   device = "METAL"
   shared_max = 32768
   def __init__(self, target:Target):
+    super().__init__(target)
     from tinygrad.runtime.ops_metal import MetalCompiler
     self.compiler, self.tensor_cores = MetalCompiler(), tc.metal if target.arch == "arm64" else []
 
@@ -573,8 +575,7 @@ class AMDHIPCCRenderer(AMDHIPRenderer):
 class QCOMCLRenderer(OpenCLRenderer):
   device = "QCOM"
 
-  def __init__(self, chip_id):
+  def __init__(self, target:Target):
+    super().__init__(target)
     from tinygrad.runtime.support.compiler_qcom import QCOMCompiler
     self.chip_id, self.compiler = chip_id, QCOMCompiler(chip_id)
-
-  def __reduce__(self): return self.__class__, (self.chip_id,)
