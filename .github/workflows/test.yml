@@ -722,15 +722,14 @@ jobs:
       fail-fast: false
       matrix:
         backend: [amd, amdllvm]
-        arch: [rdna3, rdna4, cdna4]
+        arch: [gfx1100, gfx1201, gfx950]
 
     name: Linux (${{ matrix.backend }} ${{ matrix.arch }})
     runs-on: ubuntu-22.04
     timeout-minutes: 15
     env:
-      DEV: AMD${{ matrix.backend == 'amdllvm' && ':LLVM' || '' }}
+      DEV: AMD:${{ matrix.backend == 'amdllvm' && 'LLVM' || '' }}:${{ matrix.arch }}
       MOCKGPU: 1
-      MOCKGPU_ARCH: ${{ matrix.arch }}
       SKIP_SLOW_TEST: 1
     steps:
       - name: Checkout Code
