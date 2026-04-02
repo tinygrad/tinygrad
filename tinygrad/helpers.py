@@ -119,16 +119,16 @@ def suppress_finalizing(func):
       if not getattr(sys, 'is_finalizing', lambda: True)(): raise # re-raise if not finalizing
   return wrapper
 
-def select_first_inited(candidates:Sequence[Callable[...,T]|Sequence[Callable[...,T]|None]], err_msg:str, cache:dict|None=None):
+def select_first_inited(candidates:Sequence[Callable[...,T]], err_msg:str, cache:dict|None=None):
   excs = []
   for typ in candidates:
     if cache is not None and typ in cache: return cache[typ]
     try:
-      x = tuple([cast(Callable, t)() if t is not None else None for t in typ]) if isinstance(typ, Sequence) else cast(Callable, typ)()
+      x = typ()
       if cache is not None: cache[typ] = x
       return x
     except Exception as e: excs.append(e)
-  raise ExceptionGroup(err_msg, excs)
+  raise excs[0] if len(excs) == 1 else ExceptionGroup(err_msg, excs)
 
 def unwrap_class_type(cls_t): return cls_t.func if isinstance(cls_t, functools.partial) else cls_t
 
