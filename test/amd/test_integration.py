@@ -77,6 +77,7 @@ class TestTinygradIntegration(unittest.TestCase):
 
   def _get_kernel_code(self, op_fn) -> bytes:
     from tinygrad import Tensor
+    from tinygrad.helpers import Target
     from tinygrad.codegen import get_program
     from tinygrad.renderer.llvmir import AMDLLVMRenderer
     from tinygrad.runtime.support.elf import elf_loader
