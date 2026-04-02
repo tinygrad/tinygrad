@@ -6,7 +6,7 @@ from extra.models.llama import TransformerBlock, precompute_freqs_cis
 BS = getenv("BS", 1)
 SEQLEN = getenv("SEQLEN", 128)
 
-# DEFAULT_FLOAT=bfloat16 SEQLEN=8192 ASM_GEMM=1 HK_FLASH_ATTENTION=1 DEV=NULL:AMDHIP:gfx950 DEBUG=2 VIZ=1 PYTHONPATH="."
+# DEFAULT_FLOAT=bfloat16 SEQLEN=8192 ASM_GEMM=1 HK_FLASH_ATTENTION=1 DEV=NULL:HIP:gfx950 DEBUG=2 VIZ=1 PYTHONPATH="."
 # python test/external/external_test_llama3_layer.py
 
 if __name__ == "__main__":

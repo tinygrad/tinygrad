@@ -202,7 +202,6 @@ class PythonCompiler(Compiler):
   def compile(self, src:str) -> bytes: return base64.b64decode(src)
 
 class PythonRenderer(Renderer):
-  device = "PYTHON"
   code_for_op = python_alu
   compiler = PythonCompiler()
 

@@ -680,7 +680,7 @@ class TestCfg(unittest.TestCase):
       gidx = UOp.special(1, "gidx0")
       sink = UOp.sink(out.base, lidx, gidx, arg=KernelInfo(name=name))
       return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg="NULL"), UOp(Ops.LINEAR, src=tuple([UOp(Ops.INS, arg=x) for x in insts]))))
-    with Context(DEV=f"NULL:AMDHIP:{self.arch}"):
+    with Context(DEV=f"NULL:HIP:{self.arch}"):
       out = Tensor.custom_kernel(Tensor.empty(1), fxn=fxn)[0]
       prg = out.schedule()[-1].lower().prg.p
       return amdgpu_cfg(prg.lib, self.arch)

@@ -7,7 +7,6 @@ from tinygrad.uop.ops import Ops
 from tinygrad.helpers import cpu_profile, getenv, NULL_ALLOW_COPYOUT
 
 class NullRenderer(CStyleLanguage):
-  device = "NULL"
   has_local = False
   float4 = "float4"
   barrier = "// BARRIER"
@@ -33,7 +32,7 @@ class NullGraph(MultiGraphRunner):
 class NullDevice(Compiled):
   def __init__(self, device:str):
     assert (emu:=getenv("EMULATE", "")) == "", \
-      "EMULATE is deprecated, use DEV=NULL:AMDHIP:"+{"AMD":"gfx1100", "AMD_RDNA4":"gfx1201", "AMD_CDNA4":"gfx950"}.get(emu, "<arch>")
+      "EMULATE is deprecated, use DEV=NULL:HIP:"+{"AMD":"gfx1100", "AMD_RDNA4":"gfx1201", "AMD_CDNA4":"gfx950"}.get(emu, "<arch>")
     renderers = [NullRenderer] + [r for m in [cstyle, nir, ptx, llvmir, wgsl] for r in m.__dict__.values()
                                   if inspect.isclass(r) and issubclass(r, Renderer)]
     super().__init__(device, NullAllocator(self), renderers, functools.partial(NullProgram, device), NullGraph)

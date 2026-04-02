@@ -218,7 +218,6 @@ class CStyleLanguage(Renderer):
   def render(self, uops:list[UOp]) -> str: return self.render_kernel(*self._render(uops), uops)
 
 class ClangRenderer(CStyleLanguage):
-  device = "CPU"
   float4 = "(float4)"
   float4_style = ('{', '}')
   gep_arr_threshold = 0
@@ -284,7 +283,6 @@ class ClangJITRenderer(ClangRenderer):
     self.compiler = ClangJITCompiler()
 
 class OpenCLRenderer(CStyleLanguage):
-  device = "CL"
   has_aux = True
 
   # language options
@@ -326,7 +324,7 @@ class OpenCLRenderer(CStyleLanguage):
     return tuple(tuple(a) for a in arg_dtypes),
 
 class IntelRenderer(OpenCLRenderer):
-  device, suffix, kernel_typedef = "CL", "INTEL", "__attribute__((intel_reqd_sub_group_size(8)))\n" + "__kernel void"
+  suffix, kernel_typedef = "INTEL", "__attribute__((intel_reqd_sub_group_size(8)))\n" + "__kernel void"
   tensor_cores = tc.intel
 
   string_rewrite = PatternMatcher([
@@ -343,7 +341,6 @@ class IntelRenderer(OpenCLRenderer):
     return super().render_kernel(function_name, kernel, bufs, uops, prefix or None)
 
 class MetalRenderer(CStyleLanguage):
-  device = "METAL"
   shared_max = 32768
   def __init__(self, target:Target):
     super().__init__(target)
@@ -468,8 +465,7 @@ class NVCCRenderer(CUDARenderer):
 def fp8_index(dtype: DType): return (dtypes.fp8e4m3, dtypes.fp8e5m2).index(dtype.scalar())
 def _ocml(op): return lambda x,dtype: f"__ocml_{op}_f{ {dtypes.half:16, dtypes.double:64}.get(dtype, 32)}({x})"
 
-class AMDHIPRenderer(CStyleLanguage):
-  device = "AMD"
+class HIPRenderer(CStyleLanguage):
   shared_max = 65536
   # NOTE: this is only really needed on gfx12, even though gfx11 reports the same limitation
   global_max = (2147483647, 65535, 65535)
@@ -562,16 +558,13 @@ class AMDHIPRenderer(CStyleLanguage):
   for (int n = 0; n < 8; n++) { d[n] = c_frag[n*2]; } return d;\n}""")
     return super().render_kernel(function_name, kernel, bufs, uops, prefix)
 
-class HIPRenderer(AMDHIPRenderer): device = "HIP"
-class AMDHIPCCRenderer(AMDHIPRenderer):
+class HIPCCRenderer(HIPRenderer):
   def __init__(self, target:Target):
     super().__init__(target)
     from tinygrad.runtime.support.compiler_amd import HIPCCCompiler
     self.compiler = HIPCCCompiler(target.arch)
 
 class QCOMCLRenderer(OpenCLRenderer):
-  device = "QCOM"
-
   def __init__(self, target:Target):
     super().__init__(target)
     from tinygrad.runtime.support.compiler_qcom import QCOMCompiler
