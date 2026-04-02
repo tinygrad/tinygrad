@@ -290,7 +290,7 @@ class Compiled:
     t = DEV.target(self.device, **({"arch":self.arch} if self.arch else {}))
     renderers = [r for r in self.renderers if self._renderer_name(r) == t.renderer] if t.renderer else self.renderers
     assert renderers, f"No renderer for {self.device} " + (f"matches request {t.renderer!r}" if t.renderer else "is available")
-    return select_first_inited([functools.partial(r, t) for r in renderers], f"No renderer for {self.device} is available", self.cached_renderer)
+    return select_first_inited(renderers, f"No renderer for {self.device} is available", self.cached_renderer, target=t)
 
   def synchronize(self):
     """
