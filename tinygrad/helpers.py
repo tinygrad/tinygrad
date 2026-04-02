@@ -218,7 +218,7 @@ VALIDATE_WITH_CPU, DISABLE_FAST_IDIV = ContextVar("VALIDATE_WITH_CPU", 0), Conte
 CORRECT_DIVMOD_FOLDING, FUSE_OPTIM = ContextVar("CORRECT_DIVMOD_FOLDING", 0), ContextVar("FUSE_OPTIM", 0)
 ALLOW_DEVICE_USAGE, MAX_BUFFER_SIZE = ContextVar("ALLOW_DEVICE_USAGE", 1), ContextVar("MAX_BUFFER_SIZE", 0)
 MAX_KERNEL_BUFFERS = ContextVar("MAX_KERNEL_BUFFERS", 0)
-EMULATE, EMULATED_DTYPES = ContextVar("EMULATE", ""), ContextVar("EMULATED_DTYPES", "")
+EMULATED_DTYPES = ContextVar("EMULATED_DTYPES", "")
 CAPTURE_PROCESS_REPLAY = ContextVar("CAPTURE_PROCESS_REPLAY", 0)
 CPU_COUNT = ContextVar("CPU_COUNT", max(1, len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else (os.cpu_count() or 1)))
 # Compilers
