@@ -287,7 +287,7 @@ class Compiled:
   def _select_renderer(self) -> Renderer:
     assert (rn:=next((self._renderer_name(r) for r in self.renderers if getenv(f"{self.device}_{self._renderer_name(r)}")), None)) is None, \
       f"{self.device}_{rn}=1 is deprecated, use DEV={self.device}:{rn} or {self.device}_CC={rn} instead"
-    t = DEV.target(self.device, **({"arch":self.arch} if self.arch else {}))
+    t = DEV.target(self.device.split(':')[0], **({"arch":self.arch} if self.arch else {}))
     renderers = [r for r in self.renderers if self._renderer_name(r) == t.renderer] if t.renderer else self.renderers
     assert renderers, f"No renderer for {self.device} " + (f"matches request {t.renderer!r}" if t.renderer else "is available")
     return select_first_inited(renderers, f"No renderer for {self.device} is available", self.cached_renderer, target=t)
