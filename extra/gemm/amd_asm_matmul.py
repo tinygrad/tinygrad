@@ -11,7 +11,7 @@
 import numpy as np
 from tinygrad import Tensor, Device, Context, GlobalCounters
 from tinygrad.uop.ops import UOp, Ops, KernelInfo
-from tinygrad.helpers import getenv, colored
+from tinygrad.helpers import getenv, colored, DEV
 from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.engine.realize import Estimates
 from tinygrad.renderer.amd.dsl import s, v, VCC_LO, NULL
@@ -440,10 +440,9 @@ BLOCK_M, BLOCK_N = 128, 128
 THREADS = 128
 
 def test_matmul():
-  dev = Device[Device.DEFAULT]
-  print(f"Device arch: {dev.renderer.arch}")
+  print(f"Device arch: {DEV.arch}")
 
-  insts = build_kernel(N, dev.renderer.arch)
+  insts = build_kernel(N, dev.arch)
 
   rng = np.random.default_rng(42)
   a = Tensor(rng.random((N, N), dtype=np.float32) - 0.5)
