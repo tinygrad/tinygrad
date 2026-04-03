@@ -149,13 +149,13 @@ class HWQueue(Generic[SignalType, HCQDeviceType, ProgramType, ArgsStateType]):
 
   # *** commands for copy queues ***
 
-  def copy(self, dest:sint, src:sint, copy_size:int):
+  def copy(self, dest:HCQBuffer, src:HCQBuffer, copy_size:int):
     """
     Enqueues a copy command to transfer data. Only on copy queues.
 
     Args:
-      dest: The destination of the copy
-      src: The source of the copy
+      dest: The destination buffer of the copy
+      src: The source buffer of the copy
       copy_size: The size of data to copy
     """
 
@@ -535,7 +535,7 @@ class HCQAllocator(HCQAllocatorBase, Generic[HCQDeviceType]):
         lsize = min(self.b[self.b_next].size, src.nbytes - i)
         self.b[self.b_next].cpu_view().view(size=lsize, fmt='B')[:] = src.cast('B')[i:i+lsize]
         self.dev.hw_copy_queue_t().wait(self.dev.timeline_signal, self.dev.timeline_value - 1) \
-                                  .copy(dest.va_addr+i, self.b[self.b_next].va_addr, lsize) \
+                                  .copy(dest.offset(i), self.b[self.b_next], lsize) \
                                   .signal(self.dev.timeline_signal, self.dev.next_timeline()).submit(self.dev)
         self.b_timeline[self.b_next] = self.dev.timeline_value - 1
 
@@ -553,7 +553,7 @@ class HCQAllocator(HCQAllocatorBase, Generic[HCQDeviceType]):
       for (batch_info, dst_off, src_off, copy_size) in src.device.allocator._copyout_sharded(src, size, _get_temp_buf, seg_len=self.b[0].size,
                                                                                              use_ioring=type(self.b[0].cpu_view()) is MMIOInterface):
         self.dev.hw_copy_queue_t().wait(self.dev.timeline_signal, self.dev.timeline_value - 1) \
-                                  .copy(dest.va_addr + dst_off, self.b[batch_info[1]].va_addr + src_off, copy_size) \
+                                  .copy(dest.offset(dst_off), self.b[batch_info[1]].offset(src_off), copy_size) \
                                   .signal(self.dev.timeline_signal, self.dev.next_timeline()).submit(self.dev)
         self.b_timeline[batch_info[1]] = self.dev.timeline_value - 1
 
@@ -567,7 +567,7 @@ class HCQAllocator(HCQAllocatorBase, Generic[HCQDeviceType]):
                      dev_suff="SDMA:0"):
       for i in range(0, dest.nbytes, cp_size:=(self.max_copyout_size or self.b[0].size)):
         self.dev.hw_copy_queue_t().wait(self.dev.timeline_signal, self.dev.timeline_value - 1) \
-                                  .copy(self.b[0].va_addr, src.va_addr+i, lsize:=min(cp_size, dest.nbytes-i)) \
+                                  .copy(self.b[0], src.offset(i), lsize:=min(cp_size, dest.nbytes-i)) \
                                   .signal(self.dev.timeline_signal, self.dev.next_timeline()).submit(self.dev)
         self.dev.timeline_signal.wait(self.dev.timeline_value - 1)
         dest.cast('B')[i:i+lsize] = self.b[0].cpu_view().view(size=lsize, fmt='B')[:]
@@ -580,7 +580,7 @@ class HCQAllocator(HCQAllocatorBase, Generic[HCQDeviceType]):
                      dev_suff="SDMA:0"):
       src_dev.hw_copy_queue_t().wait(src_dev.timeline_signal, src_dev.timeline_value - 1) \
                                .wait(dest_dev.timeline_signal, dest_dev.timeline_value - 1) \
-                               .copy(dest.va_addr, src.va_addr, sz) \
+                               .copy(dest, src, sz) \
                                .signal(src_dev.timeline_signal, src_dev.next_timeline()).submit(src_dev)
 
     if src_dev != dest_dev:

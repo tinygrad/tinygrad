@@ -170,7 +170,7 @@ class HCQGraph(MultiGraphRunner):
         for bufid, src in enumerate(cast(list[Buffer], ji.bufs)):
           if (inprep_idx:=self.input_replace.get((j, bufid))) is not None: self.input_replace_map[enqueue_dev].add(inprep_idx)
           else: cast(HCQAllocator, enqueue_dev.allocator).map(self.hcq_bufs[j][bufid])
-        enqueue_queue.copy(self.hcq_bufs[j][0].va_addr, self.hcq_bufs[j][1].va_addr, dest.nbytes)
+        enqueue_queue.copy(self.hcq_bufs[j][0], self.hcq_bufs[j][1], dest.nbytes)
         self.copy_to_devs[cast(HCQCompiled, Device[dest.device])].add(cast(HCQCompiled, Device[src.device]))
 
       # Encode finish profile timestamp (if needed).
